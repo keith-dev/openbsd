@@ -1,7 +1,8 @@
-/*	$OpenBSD: makemap.c,v 1.11 2009/02/22 11:44:29 form Exp $	*/
+/*	$OpenBSD: makemap.c,v 1.18 2009/05/30 23:53:41 gilles Exp $	*/
 
 /*
  * Copyright (c) 2008 Gilles Chehade <gilles@openbsd.org>
+ * Copyright (c) 2008-2009 Jacek Masiulaniec <jacekm@dobremiasto.net>
  *
  * Permission to use, copy, modify, and distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -74,7 +75,7 @@ purge_config(struct smtpd *env, u_int8_t what)
 }
 
 int
-ssl_load_certfile(struct smtpd *env, const char *name)
+ssl_load_certfile(struct smtpd *env, const char *name, u_int8_t flags)
 {
 	return (0);
 }
@@ -82,10 +83,11 @@ ssl_load_certfile(struct smtpd *env, const char *name)
 int
 main(int argc, char *argv[])
 {
-	char	 dbname[MAXPATHLEN];
-	char	*opts;
-	char	*conf;
-	int	 ch;
+	struct stat	 sb;
+	char		 dbname[MAXPATHLEN];
+	char		*opts;
+	char		*conf;
+	int		 ch;
 
 	log_init(1);
 
@@ -133,6 +135,9 @@ main(int argc, char *argv[])
 	if (oflag == NULL && asprintf(&oflag, "%s.db", source) == -1)
 		err(1, "asprintf");
 
+	if (stat(source, &sb) == -1)
+		err(1, "stat: %s", source);
+
 	if (! bsnprintf(dbname, sizeof(dbname), "%s.XXXXXXXXXXX", oflag))
 		errx(1, "path too long");
 	if (mkstemp(dbname) == -1)
@@ -144,16 +149,17 @@ main(int argc, char *argv[])
 		goto bad;
 	}
 
+	if (fchmod(db->fd(db), sb.st_mode) == -1 ||
+	    fchown(db->fd(db), sb.st_uid, sb.st_gid) == -1) {
+		warn("couldn't carry ownership and perms to %s", dbname);
+		goto bad;
+	}
+
 	if (! parse_map(source))
 		goto bad;
 
 	if (db->close(db) == -1) {
 		warn("dbclose: %s", dbname);
-		goto bad;
-	}
-
-	if (chmod(dbname, 0644) == -1) {
-		warn("chmod: %s", dbname);
 		goto bad;
 	}
 
@@ -243,6 +249,7 @@ parse_entry(char *line, size_t len, size_t lineno)
 			goto bad;
 		break;
 	case T_ALIASES:
+		lowercase(key.data, key.data, strlen(key.data) + 1);
 		if (! make_aliases(&val, valp))
 			goto bad;
 		break;
@@ -266,20 +273,11 @@ bad:
 int
 make_plain(DBT *val, char *text)
 {
-	struct alias	*a;
+	val->data = strdup(text);
+	if (val->data == NULL)
+		err(1, "malloc");
 
-	a = calloc(1, sizeof(struct alias));
-	if (a == NULL)
-		err(1, "calloc");
-
-	a->type = ALIAS_TEXT;
-	val->data = a;
-	val->size = strlcpy(a->u.text, text, sizeof(a->u.text));
-
-	if (val->size >= sizeof(a->u.text)) {
-		free(a);
-		return 0;
-	}
+	val->size = strlen(text) + 1;
 
 	return (val->size);
 }

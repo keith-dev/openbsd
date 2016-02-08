@@ -1,4 +1,4 @@
-/*	$OpenBSD: spamd.c,v 1.104 2008/07/11 15:05:59 reyk Exp $	*/
+/*	$OpenBSD: spamd.c,v 1.106 2009/05/20 20:37:43 thib Exp $	*/
 
 /*
  * Copyright (c) 2002-2007 Bob Beck.  All rights reserved.
@@ -1063,7 +1063,7 @@ main(int argc, char *argv[])
 	if (maxblack > maxfiles)
 		maxblack = maxfiles;
 	while ((ch =
-	    getopt(argc, argv, "45l:c:B:p:bdG:h:r:s:S:M:n:vw:y:Y:")) != -1) {
+	    getopt(argc, argv, "45l:c:B:p:bdG:h:s:S:M:n:vw:y:Y:")) != -1) {
 		switch (ch) {
 		case '4':
 			nreply = "450";
@@ -1116,8 +1116,8 @@ main(int argc, char *argv[])
 				errx(1, "-h arg too long");
 			break;
 		case 's':
-			i = atoi(optarg);
-			if (i < 0 || i > 10)
+			i = strtonum(optarg, 0, 10, &errstr);			
+			if (errstr)
 				usage();
 			stutter = i;
 			break;
@@ -1228,9 +1228,8 @@ main(int argc, char *argv[])
 			err(1, "sync init");
 	}
 
-	pw = getpwnam("_spamd");
-	if (!pw)
-		pw = getpwnam("nobody");
+	if ((pw = getpwnam("_spamd")) == NULL)
+		errx(1, "no such user _spamd");
 
 	if (debug == 0) {
 		if (daemon(1, 1) == -1)

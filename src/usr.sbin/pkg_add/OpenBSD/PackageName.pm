@@ -1,5 +1,5 @@
 # ex:ts=8 sw=4:
-# $OpenBSD: PackageName.pm,v 1.32 2008/10/20 10:25:16 espie Exp $
+# $OpenBSD: PackageName.pm,v 1.35 2009/06/10 14:40:03 espie Exp $
 #
 # Copyright (c) 2003-2007 Marc Espie <espie@openbsd.org>
 #
@@ -81,46 +81,6 @@ sub is_stem
 	} else {
 		return 1;
 	}
-}
-
-sub splitp
-{
-	my $_ = shift;
-
-	if (/^(.*\-\d[^-]*)p(\d+)(.*)$/o) {
-		return ($1.$3, $2);
-	} else {
-		return ($_,-1);
-	}
-}
-
-sub rebuildp
-{
-	my ($pkg, $p) = @_;
-	if ($p == -1) {
-		return $pkg;
-	}
-	if ($pkg =~ m/^(.*?)(\-\d[^-v]*)(.*)$/o) {
-		return "$1$2p$p$3";
-	} else {
-		return $pkg."p".$p;
-	}
-}
-
-sub keep_most_recent
-{
-	my $h = {};
-	for my $pkgname (@_) {
-		my ($p, $v) = splitp($pkgname);
-		if (!defined $h->{$p} || $h->{$p} < $v) {
-			$h->{$p} = $v;
-		}
-	}
-	my @list = ();
-	while (my ($p, $v) = each %$h) {
-		push(@list, rebuildp($p, $v));
-	}
-	return @list;
 }
 
 sub compile_stemlist
@@ -231,6 +191,12 @@ sub to_string
 	return $string;
 }
 
+sub pnum_compare
+{
+	my ($a, $b) = @_;
+	return $a->{pnum} <=> $b->{pnum}
+}
+
 sub compare
 {
 	my ($a, $b) = @_;
@@ -240,13 +206,13 @@ sub compare
 	}
 	# Simple case: only p number differs
 	if ($a->{string} eq $b->{string}) {
-		return $a->{pnum} <=> $b->{pnum}
+		return $a->pnum_compare($b);
 	} 
 	# Try a diff in dewey numbers first
 	for (my $i = 0; ; $i++) {
 		if (!defined $a->{deweys}->[$i]) {
 			if (!defined $b->{deweys}->[$i]) {
-				return 0;
+				last;
 			} else {
 				return -1;
 			}
@@ -295,6 +261,46 @@ sub dewey_compare
 	return $a cmp $b;
 }
 
+package OpenBSD::PackageName::versionspec;
+our @ISA = qw(OpenBSD::PackageName::version);
+
+sub from_string
+{
+	my ($class, $s) = @_;
+	my ($op, $version) = ('=', $s);
+	if ($s =~ m/^(\>\=|\>|\<\=|\<|\=)(.*)$/) {
+		($op, $version) = ($1, $2);
+	}
+	my $self = $class->SUPER::from_string($version);
+	$self->{op} = $op;
+	return $self;
+}
+
+sub pnum_compare
+{
+	my ($spec, $b) = @_;
+	if ($spec->{pnum} == -1) {
+		return 0;
+	} else {
+		return $spec->SUPER::pnum_compare($b);
+	}
+}
+
+sub match
+{
+	my ($self, $b) = @_;
+	
+	my $op = $self->{op};
+
+	my $compare = - $self->compare($b);
+	return 0 if $op eq '<' && $compare >= 0;
+	return 0 if $op eq '<=' && $compare > 0;
+	return 0 if $op eq '>' && $compare <= 0;
+	return 0 if $op eq '>=' && $compare < 0;
+	return 0 if $op eq '=' && $compare != 0;
+	return 1;
+}
+
 package OpenBSD::PackageName::Stem;
 sub to_string
 {
@@ -309,16 +315,23 @@ sub to_pattern
 }
 
 package OpenBSD::PackageName::Name;
+sub flavor_string
+{
+	my $o = shift;
+	return join('-', sort keys %{$o->{flavors}});
+}
+
 sub to_string
 {
 	my $o = shift;
-	return join('-', $o->{stem}, $o->{version}->to_string, sort keys %{$o->{flavors}});
+	return join('-', $o->{stem}, $o->{version}->to_string, 
+	    $o->flavor_string);
 }
 
 sub to_pattern
 {
 	my $o = shift;
-	return join('-', $o->{stem}, '*', sort keys %{$o->{flavors}});
+	return join('-', $o->{stem}, '*', $o->flavor_string);
 }
 
 1;

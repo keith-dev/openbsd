@@ -1,4 +1,4 @@
-/*	$OpenBSD: ospf6ctl.c,v 1.24 2009/01/30 22:23:30 stsp Exp $ */
+/*	$OpenBSD: ospf6ctl.c,v 1.27 2009/06/06 09:02:46 eric Exp $ */
 
 /*
  * Copyright (c) 2005 Claudio Jeker <claudio@openbsd.org>
@@ -79,13 +79,6 @@ usage(void)
 	exit(1);
 }
 
-/* dummy function so that ospf6ctl does not need libevent */
-void
-imsg_event_add(struct imsgbuf *i)
-{
-	/* nothing */
-}
-
 int
 main(int argc, char *argv[])
 {
@@ -113,7 +106,7 @@ main(int argc, char *argv[])
 
 	if ((ibuf = malloc(sizeof(struct imsgbuf))) == NULL)
 		err(1, NULL);
-	imsg_init(ibuf, ctl_sock, NULL);
+	imsg_init(ibuf, ctl_sock);
 	done = 0;
 
 	/* process user request */
@@ -123,7 +116,7 @@ main(int argc, char *argv[])
 		/* not reached */
 	case SHOW:
 	case SHOW_SUM:
-		imsg_compose(ibuf, IMSG_CTL_SHOW_SUM, 0, 0, NULL, 0);
+		imsg_compose(ibuf, IMSG_CTL_SHOW_SUM, 0, 0, -1, NULL, 0);
 		break;
 	case SHOW_IFACE:
 		printf("%-11s %-29s %-6s %-10s %-10s %-8s\n",
@@ -136,7 +129,7 @@ main(int argc, char *argv[])
 			if (ifidx == 0)
 				errx(1, "no such interface %s", res->ifname);
 		}
-		imsg_compose(ibuf, IMSG_CTL_SHOW_INTERFACE, 0, 0,
+		imsg_compose(ibuf, IMSG_CTL_SHOW_INTERFACE, 0, 0, -1,
 		    &ifidx, sizeof(ifidx));
 		break;
 	case SHOW_NBR:
@@ -144,52 +137,52 @@ main(int argc, char *argv[])
 		    "State", "DeadTime", "Iface","Uptime");
 		/*FALLTHROUGH*/
 	case SHOW_NBR_DTAIL:
-		imsg_compose(ibuf, IMSG_CTL_SHOW_NBR, 0, 0, NULL, 0);
+		imsg_compose(ibuf, IMSG_CTL_SHOW_NBR, 0, 0, -1, NULL, 0);
 		break;
 	case SHOW_DB:
-		imsg_compose(ibuf, IMSG_CTL_SHOW_DATABASE, 0, 0, NULL, 0);
+		imsg_compose(ibuf, IMSG_CTL_SHOW_DATABASE, 0, 0, -1, NULL, 0);
 		break;
 	case SHOW_DBBYAREA:
-		imsg_compose(ibuf, IMSG_CTL_SHOW_DATABASE, 0, 0,
+		imsg_compose(ibuf, IMSG_CTL_SHOW_DATABASE, 0, 0, -1,
 		    &res->addr, sizeof(res->addr));
 		break;
 	case SHOW_DBEXT:
-		imsg_compose(ibuf, IMSG_CTL_SHOW_DB_EXT, 0, 0, NULL, 0);
+		imsg_compose(ibuf, IMSG_CTL_SHOW_DB_EXT, 0, 0, -1, NULL, 0);
 		break;
 	case SHOW_DBLINK:
-		imsg_compose(ibuf, IMSG_CTL_SHOW_DB_LINK, 0, 0, NULL, 0);
+		imsg_compose(ibuf, IMSG_CTL_SHOW_DB_LINK, 0, 0, -1, NULL, 0);
 		break;
 	case SHOW_DBNET:
-		imsg_compose(ibuf, IMSG_CTL_SHOW_DB_NET, 0, 0, NULL, 0);
+		imsg_compose(ibuf, IMSG_CTL_SHOW_DB_NET, 0, 0, -1, NULL, 0);
 		break;
 	case SHOW_DBRTR:
-		imsg_compose(ibuf, IMSG_CTL_SHOW_DB_RTR, 0, 0, NULL, 0);
+		imsg_compose(ibuf, IMSG_CTL_SHOW_DB_RTR, 0, 0, -1, NULL, 0);
 		break;
 	case SHOW_DBINTRA:
-		imsg_compose(ibuf, IMSG_CTL_SHOW_DB_INTRA, 0, 0, NULL, 0);
+		imsg_compose(ibuf, IMSG_CTL_SHOW_DB_INTRA, 0, 0, -1, NULL, 0);
 		break;
 	case SHOW_DBSELF:
-		imsg_compose(ibuf, IMSG_CTL_SHOW_DB_SELF, 0, 0, NULL, 0);
+		imsg_compose(ibuf, IMSG_CTL_SHOW_DB_SELF, 0, 0, -1, NULL, 0);
 		break;
 	case SHOW_DBSUM:
-		imsg_compose(ibuf, IMSG_CTL_SHOW_DB_SUM, 0, 0, NULL, 0);
+		imsg_compose(ibuf, IMSG_CTL_SHOW_DB_SUM, 0, 0, -1, NULL, 0);
 		break;
 	case SHOW_DBASBR:
-		imsg_compose(ibuf, IMSG_CTL_SHOW_DB_ASBR, 0, 0, NULL, 0);
+		imsg_compose(ibuf, IMSG_CTL_SHOW_DB_ASBR, 0, 0, -1, NULL, 0);
 		break;
 	case SHOW_RIB:
 		printf("%-20s %-17s %-12s %-9s %-7s %-8s\n", "Destination",
 		    "Nexthop", "Path Type", "Type", "Cost", "Uptime");
 		/*FALLTHROUGH*/
 	case SHOW_RIB_DTAIL:
-		imsg_compose(ibuf, IMSG_CTL_SHOW_RIB, 0, 0, NULL, 0);
+		imsg_compose(ibuf, IMSG_CTL_SHOW_RIB, 0, 0, -1, NULL, 0);
 		break;
 	case SHOW_FIB:
 		if (IN6_IS_ADDR_UNSPECIFIED(&res->addr))
-			imsg_compose(ibuf, IMSG_CTL_KROUTE, 0, 0,
+			imsg_compose(ibuf, IMSG_CTL_KROUTE, 0, 0, -1,
 			    &res->flags, sizeof(res->flags));
 		else
-			imsg_compose(ibuf, IMSG_CTL_KROUTE_ADDR, 0, 0,
+			imsg_compose(ibuf, IMSG_CTL_KROUTE_ADDR, 0, 0, -1,
 			    &res->addr, sizeof(res->addr));
 		show_fib_head();
 		break;
@@ -197,17 +190,17 @@ main(int argc, char *argv[])
 		errx(1, "fib couple|decouple");
 		break;
 	case FIB_COUPLE:
-		imsg_compose(ibuf, IMSG_CTL_FIB_COUPLE, 0, 0, NULL, 0);
+		imsg_compose(ibuf, IMSG_CTL_FIB_COUPLE, 0, 0, -1, NULL, 0);
 		printf("couple request sent.\n");
 		done = 1;
 		break;
 	case FIB_DECOUPLE:
-		imsg_compose(ibuf, IMSG_CTL_FIB_DECOUPLE, 0, 0, NULL, 0);
+		imsg_compose(ibuf, IMSG_CTL_FIB_DECOUPLE, 0, 0, -1, NULL, 0);
 		printf("decouple request sent.\n");
 		done = 1;
 		break;
 	case RELOAD:
-		imsg_compose(ibuf, IMSG_CTL_RELOAD, 0, 0, NULL, 0);
+		imsg_compose(ibuf, IMSG_CTL_RELOAD, 0, 0, -1, NULL, 0);
 		printf("reload request sent.\n");
 		done = 1;
 		break;
@@ -704,6 +697,7 @@ show_db_msg_detail(struct imsg *imsg)
 	struct iface		*iface;
 	struct lsa		*lsa;
 	struct lsa_rtr_link	*rtr_link;
+	struct lsa_net_link	*net_link;
 	struct lsa_prefix	*prefix;
 	struct lsa_asext	*asext;
 	u_int16_t		 i, nlinks, off;
@@ -774,14 +768,16 @@ show_db_msg_detail(struct imsg *imsg)
 		printf("Options: %s\n",
 		    print_ospf_options(LSA_24_GETLO(ntohl(lsa->data.net.opts))));
 
-		nlinks = (ntohs(lsa->hdr.len) - sizeof(struct lsa_hdr)
-		    - sizeof(u_int32_t)) / sizeof(struct lsa_net_link);
-		off = sizeof(lsa->hdr) + sizeof(u_int32_t);
+		nlinks = (ntohs(lsa->hdr.len) - sizeof(struct lsa_hdr) -
+		    sizeof(struct lsa_net)) / sizeof(struct lsa_net_link);
+		net_link = (struct lsa_net_link *)((char *)lsa +
+		    sizeof(lsa->hdr) + sizeof(lsa->data.net));
 		printf("Number of Routers: %d\n", nlinks);
 
 		for (i = 0; i < nlinks; i++) {
-			addr.s_addr = lsa->data.net.att_rtr[i];
+			addr.s_addr = net_link->att_rtr;
 			printf("    Attached Router: %s\n", inet_ntoa(addr));
+			net_link++;
 		}
 
 		printf("\n");
@@ -806,11 +802,12 @@ show_db_msg_detail(struct imsg *imsg)
 		for (i = 0; i < nlinks; i++) {
 			rtr_link = (struct lsa_rtr_link *)((char *)lsa + off);
 
-			printf("    Link connected to: %s\n",
+			printf("    Link (Interface ID %s) connected to: %s\n",
+			    log_id(rtr_link->iface_id),
 			    print_rtr_link_type(rtr_link->type));
 
 			addr.s_addr = rtr_link->nbr_rtr_id;
-			data.s_addr = rtr_link->iface_id;
+			data.s_addr = rtr_link->nbr_iface_id;
 
 			switch (rtr_link->type) {
 			case LINK_TYPE_POINTTOPOINT:

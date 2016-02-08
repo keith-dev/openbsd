@@ -1,4 +1,4 @@
-/*	$OpenBSD: init_main.c,v 1.157 2009/02/13 19:58:27 deraadt Exp $	*/
+/*	$OpenBSD: init_main.c,v 1.159 2009/04/19 17:53:38 deraadt Exp $	*/
 /*	$NetBSD: init_main.c,v 1.84.4.1 1996/06/02 09:08:06 mrg Exp $	*/
 
 /*
@@ -39,6 +39,7 @@
  */
 
 #include <sys/param.h>
+#include <sys/core.h>
 #include <sys/filedesc.h>
 #include <sys/file.h>
 #include <sys/errno.h>
@@ -124,6 +125,7 @@ struct	vnode *rootvp, *swapdev_vp;
 int	boothowto;
 struct	timeval boottime;
 int	ncpus =  1;
+int	ncpusfound = 1;			/* number of cpus we find */
 __volatile int start_init_exec;		/* semaphore for start_init() */
 
 #if !defined(NO_PROPOLICE)
@@ -163,6 +165,7 @@ struct emul emul_native = {
 	copyargs,
 	setregs,
 	NULL,
+	coredump_trad,
 	sigcode,
 	esigcode,
 	EMUL_ENABLED | EMUL_NATIVE,

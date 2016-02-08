@@ -1,4 +1,4 @@
-.\"	$OpenBSD: sysmerge.8,v 1.14 2009/02/17 16:48:11 ajacoutot Exp $
+.\"	$OpenBSD: sysmerge.8,v 1.26 2009/06/05 06:27:52 jmc Exp $
 .\"
 .\" Copyright (c) 2008 Antoine Jacoutot <ajacoutot@openbsd.org>
 .\"
@@ -14,7 +14,7 @@
 .\" ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
 .\" OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 .\"
-.Dd $Mdocdate: February 17 2009 $
+.Dd $Mdocdate: June 5 2009 $
 .Dt SYSMERGE 8
 .Os
 .Sh NAME
@@ -22,9 +22,11 @@
 .Nd update system configuration files
 .Sh SYNOPSIS
 .Nm
+.Bk -words
 .Op Fl ab
 .Op Fl s Ar src \*(Ba etcXX.tgz
 .Op Fl x Ar xetcXX.tgz
+.Ek
 .Sh DESCRIPTION
 .Nm
 is a
@@ -78,30 +80,6 @@ and
 .Pa xetcXX.tgz
 when upgrading from binary sets.
 .Pp
-When run in
-.Em automatic
-mode
-.Pq Fl a
-.Nm
-will skip files with identical CVS Id and install missing ones.
-In
-.Em manual
-mode (the default unless
-.Fl a
-is specified),
-.Nm
-will perform a strict comparison of files.
-.Pa /etc/fbtab ,
-.Pa /etc/login.conf ,
-.Pa /etc/sysctl.conf ,
-and
-.Pa /etc/ttys
-are created using helper scripts and will
-.Sy always
-be strictly compared even in
-.Fl a
-mode.
-.Pp
 .Nm
 will work through the fileset,
 offering the chance to merge any differences using ${MERGE_CMD}.
@@ -111,6 +89,49 @@ Files may also be left to deal with at a later date.
 Should any problems occur,
 such as a failure to upgrade a file,
 the user will be notified and have to deal with the issue by hand.
+.Pp
+.Nm
+will finish by running
+.Xr mtree 8
+to make sure the directory structure has correct permissions.
+.Pp
+The options are as follows:
+.Bl -tag -width Ds
+.It Fl a
+Automatic mode.
+.Nm
+only compares files whose reference sources have changed since the last run
+and attempts to automatically upgrade them to the newest version,
+provided that they have no local changes.
+It automatically installs missing files and binaries,
+and updates files differing only by CVS Id.
+.Pp
+Files whose reference sources have matching CVS Id are skipped from comparison.
+.Pa /etc/fbtab ,
+.Pa /etc/login.conf ,
+.Pa /etc/sysctl.conf ,
+and
+.Pa /etc/ttys
+are created using helper scripts and are
+.Sy always
+compared.
+.It Fl b
+Batch mode.
+.Nm
+runs non-interactively,
+saving differing files for later manual processing.
+.It Fl s Ar src \*(Ba etcXX.tgz
+Specify a path to an
+.Ox
+top src directory or an etcXX.tgz tarball.
+A tarball path specified as an FTP or HTTP URL will be passed
+to ${FETCH_CMD}.
+.It Fl x Ar xetcXX.tgz
+Specify a path to an
+xetcXX.tgz tarball.
+A tarball path specified as an FTP or HTTP URL will be passed
+to ${FETCH_CMD}.
+.El
 .Pp
 Files and directories can be excluded from comparison
 by listing them in the file
@@ -134,40 +155,12 @@ and
 will always differ because they include their build date and directories.
 A special test was added to handle this
 and they are offered for comparison only if they really differ.
-.Pp
-.Nm
-will finish by running
-.Xr mtree 8
-to make sure the directory structure has correct permissions.
-.Pp
-The options are as follows:
-.Bl -tag -width Ds
-.It Fl a
-Automatic mode.
-If this option is specified,
-.Nm
-will automatically install missing files and disable strict file
-comparison when possible (using CVS Ids).
-.It Fl b
-Batch mode.
-If this option is specified,
-.Nm
-will run unattended (non-interactively), saving differing files for
-later manual processing.
-.It Fl s Ar src \*(Ba etcXX.tgz
-Specify a path to an
-.Ox
-top src directory or an etcXX.tgz tarball.
-A tarball path specified as an FTP or HTTP URL will be passed
-to ${FETCH_CMD}.
-.It Fl x Ar xetcXX.tgz
-Specify a path to an
-xetcXX.tgz tarball.
-A tarball path specified as an FTP or HTTP URL will be passed
-to ${FETCH_CMD}.
-.El
 .Sh ENVIRONMENT
 .Bl -tag -width "DESTDIRXXX"
+.It Ev DBDIR
+Directory in which checksum files are stored.
+If unset, this defaults to
+.Pa /var/db/sysmerge .
 .It Ev DESTDIR
 Directory in which to merge and install files.
 If unset, this defaults to
@@ -199,6 +192,11 @@ output file to create, the second argument is the currently installed
 file and the third argument is the reference file.
 If unset, this defaults to
 .Dq sdiff -as -w ${SWIDTH} -o .
+.It Ev REPORT
+Log summary which may contain information for further, manual,
+updating.
+Defaults to
+.Pa ${WRKDIR}/sysmerge.log .
 .It Ev TMPDIR
 Directory in which the work directory is created.
 If unset, this defaults to
@@ -213,6 +211,8 @@ The
 and
 .Sy backup
 directories are created relative to this.
+.It ${WRKDIR}/sysmerge.log
+Default log file.
 .It /etc/sysmerge.ignore
 Files and directories to ignore from comparison.
 .El
@@ -223,6 +223,7 @@ Files and directories to ignore from comparison.
 .Xr more 1 ,
 .Xr sdiff 1 ,
 .Xr MAKEDEV 8 ,
+.Xr makemap 8 ,
 .Xr mtree 8 ,
 .Xr newaliases 8 ,
 .Xr pwd_mkdb 8

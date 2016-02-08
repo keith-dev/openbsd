@@ -1,6 +1,6 @@
 define(MACHINE,sparc64)dnl
 vers(__file__,
-	{-$OpenBSD: MAKEDEV.md,v 1.51 2009/02/06 21:17:15 grange Exp $-},
+	{-$OpenBSD: MAKEDEV.md,v 1.54 2009/06/03 14:45:40 jj Exp $-},
 etc.MACHINE)dnl
 dnl
 dnl Copyright (c) 2001-2006 Todd T. Fries <todd@OpenBSD.org>
@@ -39,6 +39,10 @@ _mkdev(s64_czs, cua[a-z], {-u=${i#cua*}
 	*) echo unknown cua device $i ;;
 	esac
 	M cua$u c major_s64_czs_c Add($n, 128) 660 dialer uucp-})dnl
+__devitem(vcc, ttyV*, virtual console concentrator,vcctty)dnl
+_mkdev(vcc, ttyV[0-9a-zA-Z], {-U=${i#ttyV*}
+	o=$(alph2d $U)
+	M ttyV$U c major_vcc_c $o 600-})dnl
 dnl
 __devitem(uperf, uperf, Performance counters)dnl
 _mkdev(uperf, uperf, {-M uperf c major_uperf_c 0 664-})dnl
@@ -65,6 +69,7 @@ _DEV(s64_czs, 12)
 _DEV(s64_tzs, 12)
 _DEV(spif, 108)
 _DEV(tth, 77)
+_DEV(vcc, 127)
 _TITLE(pty)
 _DEV(ptm, 123)
 _DEV(pty, 21)
@@ -111,7 +116,7 @@ _DEV(tun, 111)
 _DEV(uk, 60)
 _DEV(uperf, 25)
 _DEV(vi, 44)
-_DEV(xfs, 51)
+_DEV(nnpfs, 51)
 dnl
 divert(__mddivert)dnl
 dnl
@@ -122,6 +127,7 @@ ramdisk)
 
 _std(2, 3, 76, 16)
 	M openprom	c 70 0 640 kmem
+	M mdesc		c 70 1 640 kmem
 	;;
 dnl
 dnl *** sparc64 specific targets
@@ -136,7 +142,7 @@ twrget(wscons, wscons, ttyJ, cfg, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, a, b)dnl
 target(all, ccd, 0, 1, 2, 3)dnl
 target(all, ch, 0)dnl
 target(all, ss, 0, 1)dnl
-target(all, xfs, 0)dnl
+target(all, nnpfs, 0)dnl
 twrget(all, flo, fd, 0, 0B, 0C, 0D, 0E, 0F, 0G, 0H)dnl
 twrget(all, flo, fd, 1, 1B, 1C, 1D, 1E, 1F, 1G, 1H)dnl
 target(all, pty, 0)dnl
@@ -151,3 +157,4 @@ target(all, vnd, 0, 1, 2, 3)dnl
 target(all, bpp, 0)dnl
 twrget(all, s64_tzs, tty, a, b, c, d)dnl
 twrget(all, s64_czs, cua, a, b, c, d)dnl
+twrget(all, vcc, ttyV, 0, 1, 2, 3)dnl

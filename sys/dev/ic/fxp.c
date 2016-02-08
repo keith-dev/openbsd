@@ -1,4 +1,4 @@
-/*	$OpenBSD: fxp.c,v 1.94 2008/11/28 02:44:17 brad Exp $	*/
+/*	$OpenBSD: fxp.c,v 1.96 2009/06/06 02:49:39 naddy Exp $	*/
 /*	$NetBSD: if_fxp.c,v 1.2 1997/06/05 02:01:55 thorpej Exp $	*/
 
 /*
@@ -1052,6 +1052,32 @@ fxp_stats_update(void *arg)
 	timeout_add_sec(&sc->stats_update_to, 1);
 }
 
+int
+fxp_detach(struct fxp_softc *sc)
+{
+	struct ifnet *ifp = &sc->sc_arpcom.ac_if;
+
+	/* Unhook our tick handler. */
+	timeout_del(&sc->stats_update_to);
+
+	/* Detach any PHYs we might have. */
+	if (LIST_FIRST(&sc->sc_mii.mii_phys) != NULL)
+		mii_detach(&sc->sc_mii, MII_PHY_ANY, MII_OFFSET_ANY);
+
+	/* Delete any remaining media. */
+	ifmedia_delete_instance(&sc->sc_mii.mii_media, IFM_INST_ANY);
+
+	ether_ifdetach(ifp);
+	if_detach(ifp);
+
+	if (sc->sc_sdhook != NULL)
+		shutdownhook_disestablish(sc->sc_sdhook);
+	if (sc->sc_powerhook != NULL)
+		powerhook_disestablish(sc->sc_powerhook);
+
+	return (0);
+}
+
 /*
  * Stop the interface. Cancels the statistics updater and resets
  * the interface.
@@ -1645,16 +1671,15 @@ fxp_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 		break;
 
 	case SIOCSIFFLAGS:
-		/*
-		 * If interface is marked up and not running, then start it.
-		 * If it is marked down and running, stop it.
-		 * XXX If it's up then re-initialize it. This is so flags
-		 * such as IFF_PROMISC are handled.
-		 */
-		if (ifp->if_flags & IFF_UP)
-			fxp_init(sc);
-		else if (ifp->if_flags & IFF_RUNNING)
-			fxp_stop(sc, 1);
+		if (ifp->if_flags & IFF_UP) {
+			if (ifp->if_flags & IFF_RUNNING)
+				error = ENETRESET;
+			else
+				fxp_init(sc);
+		} else {
+			if (ifp->if_flags & IFF_RUNNING)
+				fxp_stop(sc, 1);
+		}
 		break;
 
 	case SIOCSIFMEDIA:

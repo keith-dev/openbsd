@@ -1,4 +1,4 @@
-/*	$OpenBSD: store.c,v 1.14 2009/02/23 00:51:32 chl Exp $	*/
+/*	$OpenBSD: store.c,v 1.19 2009/06/05 21:55:40 jacekm Exp $	*/
 
 /*
  * Copyright (c) 2008 Gilles Chehade <gilles@openbsd.org>
@@ -85,61 +85,6 @@ file_copy(FILE *dest, FILE *src, enum action_type type)
 }
 
 int
-store_write_header(struct batch *batchp, struct message *messagep, FILE *fp,
-    int finalize)
-{
-	time_t tm;
-	char timebuf[26];	/* current time	 */
-	char ctimebuf[26];	/* creation time */
-	void *p;
-	char addrbuf[INET6_ADDRSTRLEN];
-
-	tm = time(NULL);
-	ctime_r(&tm, timebuf);
-	timebuf[strcspn(timebuf, "\n")] = '\0';
-
-	tm = time(&messagep->creation);
-	ctime_r(&tm, ctimebuf);
-	ctimebuf[strcspn(ctimebuf, "\n")] = '\0';
-
-	if (messagep->session_ss.ss_family == PF_INET) {
-		struct sockaddr_in *ssin = (struct sockaddr_in *)&messagep->session_ss;
-		p = &ssin->sin_addr.s_addr;
-	}
-	if (messagep->session_ss.ss_family == PF_INET6) {
-		struct sockaddr_in6 *ssin6 = (struct sockaddr_in6 *)&messagep->session_ss;
-		p = &ssin6->sin6_addr.s6_addr;
-	}
-
-	bzero(addrbuf, sizeof (addrbuf));
-	inet_ntop(messagep->session_ss.ss_family, p, addrbuf, sizeof (addrbuf));
-
-	if (batchp->type & T_DAEMON_BATCH) {
-		if (fprintf(fp, "From %s@%s %s\n", "MAILER-DAEMON",
-			batchp->env->sc_hostname, timebuf) == -1) {
-			return 0;
-		}
-	}
-	else {
-		if (fprintf(fp, "From %s@%s %s\n",
-			messagep->sender.user, messagep->sender.domain, timebuf) == -1)
-			return 0;
-	}
-	
-	if (fprintf(fp, "Received: from %s (%s [%s%s])\n"
-	    "\tby %s with ESMTP id %s\n"
-	    "\tfor <%s@%s>; %s\n%s",
-	    messagep->session_helo, messagep->session_hostname,
-	    messagep->session_ss.ss_family == PF_INET ? "" : "IPv6:", addrbuf,
-	    batchp->env->sc_hostname, messagep->message_id,
-	    messagep->sender.user, messagep->sender.domain, ctimebuf,
-	    finalize ? "\n" : "") == -1) {
-		return 0;
-	}
-	return 1;
-}
-
-int
 store_write_daemon(struct batch *batchp, struct message *messagep)
 {
 	u_int32_t i;
@@ -147,15 +92,12 @@ store_write_daemon(struct batch *batchp, struct message *messagep)
 	FILE *mboxfp;
 	FILE *messagefp;
 
-	mboxfp = fdopen(messagep->mboxfd, "a");
+	mboxfp = fdopen(batchp->sessionp->mboxfd, "a");
 	if (mboxfp == NULL)
 		return 0;
 
-	messagefp = fdopen(messagep->messagefd, "r");
+	messagefp = fdopen(batchp->sessionp->messagefd, "r");
 	if (messagefp == NULL)
-		goto bad;
-
-	if (! store_write_header(batchp, messagep, mboxfp, 1))
 		goto bad;
 
 	if (fprintf(mboxfp, "Hi !\n\n"
@@ -243,15 +185,12 @@ store_write_message(struct batch *batchp, struct message *messagep)
 	FILE *mboxfp;
 	FILE *messagefp;
 
-	mboxfp = fdopen(messagep->mboxfd, "a");
+	mboxfp = fdopen(batchp->sessionp->mboxfd, "a");
 	if (mboxfp == NULL)
 		return 0;
 
-	messagefp = fdopen(messagep->messagefd, "r");
+	messagefp = fdopen(batchp->sessionp->messagefd, "r");
 	if (messagefp == NULL)
-		goto bad;
-
-	if (! store_write_header(batchp, messagep, mboxfp, 0))
 		goto bad;
 
 	if (! file_copy(mboxfp, messagefp, messagep->recipient.rule.r_action))
@@ -279,12 +218,12 @@ store_message(struct batch *batchp, struct message *messagep,
 {
 	struct stat sb;
 
-	if (fstat(messagep->mboxfd, &sb) == -1)
+	if (fstat(batchp->sessionp->mboxfd, &sb) == -1)
 		return 0;
 
 	if (! writer(batchp, messagep)) {
 		if (S_ISREG(sb.st_mode)) {
-			ftruncate(messagep->mboxfd, sb.st_size);
+			ftruncate(batchp->sessionp->mboxfd, sb.st_size);
 			return 0;
 		}
 		return 0;

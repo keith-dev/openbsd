@@ -1,4 +1,4 @@
-/*	$OpenBSD: sdmmc_io.c,v 1.12 2008/12/02 23:49:54 deraadt Exp $	*/
+/*	$OpenBSD: sdmmc_io.c,v 1.14 2009/06/29 19:42:09 mk Exp $	*/
 
 /*
  * Copyright (c) 2006 Uwe Stuehler <uwe@openbsd.org>
@@ -71,6 +71,8 @@ sdmmc_io_enable(struct sdmmc_softc *sc)
 	u_int32_t host_ocr;
 	u_int32_t card_ocr;
 
+	SDMMC_ASSERT_LOCKED(sc);
+
 	/* Set host mode to SD "combo" card. */
 	SET(sc->sc_flags, SMF_SD_MODE|SMF_IO_MODE|SMF_MEM_MODE);
 
@@ -133,6 +135,8 @@ sdmmc_io_scan(struct sdmmc_softc *sc)
 	struct sdmmc_function *sf0, *sf;
 	int i;
 
+	SDMMC_ASSERT_LOCKED(sc);
+
 	sf0 = sdmmc_function_alloc(sc);
 	sf0->number = 0;
 	if (sdmmc_set_relative_addr(sc, sf0) != 0) {
@@ -166,6 +170,8 @@ sdmmc_io_scan(struct sdmmc_softc *sc)
 int
 sdmmc_io_init(struct sdmmc_softc *sc, struct sdmmc_function *sf)
 {
+	SDMMC_ASSERT_LOCKED(sc);
+
 	if (sf->number == 0) {
 		sdmmc_io_write_1(sf, SD_IO_CCCR_BUS_WIDTH,
 		    CCCR_BUS_WIDTH_1);
@@ -254,6 +260,8 @@ sdmmc_io_attach(struct sdmmc_softc *sc)
 	struct sdmmc_function *sf;
 	struct sdmmc_attach_args saa;
 
+	SDMMC_ASSERT_LOCKED(sc);
+
 	SIMPLEQ_FOREACH(sf, &sc->sf_head, sf_list) {
 		if (sf->number < 1)
 			continue;
@@ -324,6 +332,8 @@ void
 sdmmc_io_detach(struct sdmmc_softc *sc)
 {
 	struct sdmmc_function *sf;
+
+	SDMMC_ASSERT_LOCKED(sc);
 
 	SIMPLEQ_FOREACH(sf, &sc->sf_head, sf_list) {
 		if (sf->child != NULL) {
@@ -534,7 +544,7 @@ sdmmc_io_send_op_cond(struct sdmmc_softc *sc, u_int32_t ocr, u_int32_t *ocrp)
 	int error;
 	int i;
 
-	SDMMC_LOCK(sc);
+	SDMMC_ASSERT_LOCKED(sc);
 
 	/*
 	 * If we change the OCR value, retry the command until the OCR
@@ -559,7 +569,6 @@ sdmmc_io_send_op_cond(struct sdmmc_softc *sc, u_int32_t ocr, u_int32_t *ocrp)
 	if (error == 0 && ocrp != NULL)
 		*ocrp = MMC_R4(cmd.c_resp);
 
-	SDMMC_UNLOCK(sc);
 	return error;
 }
 
@@ -607,6 +616,7 @@ sdmmc_intr_establish(struct device *sdmmc, int (*fun)(void *),
 	struct sdmmc_softc *sc = (struct sdmmc_softc *)sdmmc;
 	struct sdmmc_intr_handler *ih;
 	int s;
+	size_t namesz;
 
 	if (sc->sct->card_intr_mask == NULL)
 		return NULL;
@@ -615,12 +625,13 @@ sdmmc_intr_establish(struct device *sdmmc, int (*fun)(void *),
 	if (ih == NULL)
 		return NULL;
 
-	ih->ih_name = malloc(strlen(name), M_DEVBUF, M_WAITOK | M_CANFAIL);
+	namesz = strlen(name) + 1;
+	ih->ih_name = malloc(namesz, M_DEVBUF, M_WAITOK | M_CANFAIL);
 	if (ih->ih_name == NULL) {
 		free(ih, M_DEVBUF);
 		return NULL;
 	}
-	strlcpy(ih->ih_name, name, strlen(name));
+	strlcpy(ih->ih_name, name, namesz);
 	ih->ih_softc = sc;
 	ih->ih_fun = fun;
 	ih->ih_arg = arg;

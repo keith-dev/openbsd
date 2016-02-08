@@ -29,7 +29,7 @@
 .\" OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
 .\" SUCH DAMAGE.
 .\"
-.\"     $OpenBSD: arlad.8,v 1.9 2004/01/20 08:51:28 hin Exp $
+.\"     $OpenBSD: arlad.8,v 1.11 2009/06/07 18:10:21 jmc Exp $
 .\"	$arla: arlad.8,v 1.18 2003/06/06 12:53:56 hin Exp $
 .\"
 .Dd September 5, 1998
@@ -102,7 +102,7 @@ What to write in the log (default: none).
 .Fl -device= Ns Ar string
 .Xc
 The XFS device to use
-.Po default: Pa /dev/xfs0
+.Po default: Pa /dev/nnpfs0
 .Pc .
 .It Xo
 .Fl -connected-mode= Ns Ar string
@@ -191,7 +191,7 @@ default cache directory
 .Xr SuidCells 5 ,
 .Xr ThisCell 5 ,
 .Xr mount_mfs 8 ,
-.Xr mount_xfs 8 ,
+.Xr mount_nnpfs 8 ,
 .Xr rc.conf 8 ,
 .Xr vos 8
 .Sh BUGS

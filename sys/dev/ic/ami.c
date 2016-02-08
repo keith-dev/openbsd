@@ -1,4 +1,4 @@
-/*	$OpenBSD: ami.c,v 1.192 2009/02/16 21:19:06 miod Exp $	*/
+/*	$OpenBSD: ami.c,v 1.195 2009/06/11 15:48:10 chl Exp $	*/
 
 /*
  * Copyright (c) 2001 Michael Shalayeff
@@ -1957,7 +1957,7 @@ ami_mgmt(struct ami_softc *sc, u_int8_t opcode, u_int8_t par1, u_int8_t par2,
 		while (sc->sc_drained != 1)
 			if (tsleep(sc, PRIBIO, "ami_mgmt_drain", hz * 60) ==
 			    EWOULDBLOCK) {
-				printf("%s: drain io timeout\n");
+				printf("%s: drain io timeout\n", DEVNAME(sc));
 				ccb->ccb_flags |= AMI_CCB_F_ERR;
 				goto restartio;
 			}
@@ -2473,7 +2473,7 @@ int
 ami_ioctl_setstate(struct ami_softc *sc, struct bioc_setstate *bs)
 {
 	struct scsi_inquiry_data inqbuf;
-	int func, off, error;
+	int func, error;
 
 	switch (bs->bs_status) {
 	case BIOC_SSONLINE:
@@ -2485,8 +2485,6 @@ ami_ioctl_setstate(struct ami_softc *sc, struct bioc_setstate *bs)
 		break;
 
 	case BIOC_SSHOTSPARE:
-		off = bs->bs_channel * AMI_MAX_TARGET + bs->bs_target;
-
 		if (ami_drv_inq(sc, bs->bs_channel, bs->bs_target, 0,
 		    &inqbuf))
 			return (EINVAL);
@@ -2512,7 +2510,7 @@ int
 ami_create_sensors(struct ami_softc *sc)
 {
 	struct device *dev;
-	struct scsibus_softc *ssc;
+	struct scsibus_softc *ssc = NULL;
 	int i;
 
 	TAILQ_FOREACH(dev, &alldevs, dv_list) {

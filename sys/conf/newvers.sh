@@ -1,6 +1,6 @@
 #!/bin/sh -
 #
-#	$OpenBSD: newvers.sh,v 1.94 2009/02/26 17:55:17 deraadt Exp $
+#	$OpenBSD: newvers.sh,v 1.99 2009/07/01 15:10:25 deraadt Exp $
 #	$NetBSD: newvers.sh,v 1.17.2.1 1995/10/12 05:17:11 jtc Exp $
 #
 # Copyright (c) 1984, 1986, 1990, 1993
@@ -51,8 +51,6 @@ id=`basename ${d}`
 #	share/mk/sys.mk
 #		OSMAJOR
 #		OSMINOR
-#	distrib/miniroot/install.sub
-#		VERSION
 #	etc/root/root.mail
 #		VERSION and other bits
 #	sys/arch/macppc/stand/tbxidata/bsd.tbxi
@@ -64,7 +62,7 @@ id=`basename ${d}`
 #	A month or so before release, select STATUS "-beta"
 
 ost="OpenBSD"
-osr="4.5"
+osr="4.6"
 
 cat >vers.c <<eof
 #define STATUS ""			/* release */

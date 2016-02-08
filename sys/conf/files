@@ -1,4 +1,4 @@
-#	$OpenBSD: files,v 1.454 2009/01/29 15:12:28 pyr Exp $
+#	$OpenBSD: files,v 1.467 2009/06/17 01:30:30 thib Exp $
 #	$NetBSD: files,v 1.87 1996/05/19 17:17:50 jonathan Exp $
 
 #	@(#)files.newconf	7.5 (Berkeley) 5/10/93
@@ -455,6 +455,7 @@ attach	softraid at root
 file	dev/softraid.c			softraid	needs-flag
 file	dev/softraid_raid0.c		softraid
 file	dev/softraid_raid1.c		softraid
+file	dev/softraid_raidp.c		softraid
 file	dev/softraid_crypto.c		softraid & crypto
 file	dev/softraid_aoe.c		softraid & ether & aoe
 
@@ -468,6 +469,7 @@ file	dev/ramdisk.c			rd needs-flag
 pseudo-device pty: tty
 pseudo-device nmea: tty
 pseudo-device msts: tty
+pseudo-device endrun: tty
 
 pseudo-device loop: ifnet
 pseudo-device sl: ifnet
@@ -709,6 +711,7 @@ file kern/tty_conf.c
 file kern/tty_pty.c			pty			needs-count
 file kern/tty_nmea.c			nmea			needs-flag
 file kern/tty_msts.c			msts			needs-flag
+file kern/tty_endrun.c			endrun			needs-flag
 file kern/tty_subr.c
 file kern/tty_tty.c
 file kern/uipc_domain.c
@@ -938,20 +941,20 @@ file ufs/ext2fs/ext2fs_readwrite.c	ext2fs
 file ufs/ext2fs/ext2fs_subr.c		ext2fs
 file ufs/ext2fs/ext2fs_vfsops.c		ext2fs
 file ufs/ext2fs/ext2fs_vnops.c		ext2fs
-file xfs/xfs_common-bsd.c		xfs
-file xfs/xfs_deb.c			xfs
-file xfs/xfs_dev-bsd.c			xfs
-file xfs/xfs_dev-common.c		xfs
-file xfs/xfs_message.c			xfs
-file xfs/xfs_node.c			xfs
-file xfs/xfs_node-bsd.c			xfs
-file xfs/xfs_syscalls-common.c		xfs
-file xfs/xfs_vfsops-bsd.c		xfs
-file xfs/xfs_vfsops-common.c		xfs
-file xfs/xfs_vfsops-openbsd.c		xfs
-file xfs/xfs_vnodeops-bsd.c		xfs
-file xfs/xfs_vnodeops-common.c		xfs
-file xfs/xfs_syscalls-dummy.c		!xfs
+file nnpfs/nnpfs_common-bsd.c		nnpfs
+file nnpfs/nnpfs_deb.c			nnpfs
+file nnpfs/nnpfs_dev-bsd.c		nnpfs
+file nnpfs/nnpfs_dev-common.c		nnpfs
+file nnpfs/nnpfs_message.c		nnpfs
+file nnpfs/nnpfs_node.c			nnpfs
+file nnpfs/nnpfs_node-bsd.c		nnpfs
+file nnpfs/nnpfs_syscalls-common.c	nnpfs
+file nnpfs/nnpfs_vfsops-bsd.c		nnpfs
+file nnpfs/nnpfs_vfsops-common.c	nnpfs
+file nnpfs/nnpfs_vfsops-openbsd.c	nnpfs
+file nnpfs/nnpfs_vnodeops-bsd.c		nnpfs
+file nnpfs/nnpfs_vnodeops-common.c	nnpfs
+file nnpfs/nnpfs_syscalls-dummy.c	!nnpfs
 file uvm/uvm_amap.c
 file uvm/uvm_anon.c
 file uvm/uvm_aobj.c
@@ -1037,6 +1040,10 @@ file compat/common/tty_43.c		!small_kernel
 file compat/common/uipc_syscalls_43.c	!small_kernel
 file compat/common/vfs_syscalls_43.c	!small_kernel
 file compat/common/vm_43.c		!small_kernel
+
+# libx86emu
+file dev/x86emu/x86emu.c		x86emu
+file dev/x86emu/x86emu_util.c		x86emu
 
 # libkern MI components
 file lib/libkern/mcount.c		gprof

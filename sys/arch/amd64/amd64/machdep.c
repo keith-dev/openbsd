@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.88 2009/02/15 02:03:40 marco Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.96 2009/06/15 17:01:25 beck Exp $	*/
 /*	$NetBSD: machdep.c,v 1.3 2003/05/07 22:58:18 fvdl Exp $	*/
 
 /*-
@@ -126,6 +126,7 @@
 #ifdef DDB
 #include <machine/db_machdep.h>
 #include <ddb/db_extern.h>
+extern int db_console;
 #endif
 
 #include "isa.h"
@@ -146,6 +147,13 @@
 
 /* the following is used externally (sysctl_hw) */
 char machine[] = MACHINE;
+
+/*
+ * switchto vectors
+ */
+void (*cpu_idle_leave_fcn)(void) = NULL;
+void (*cpu_idle_cycle_fcn)(void) = NULL;
+void (*cpu_idle_enter_fcn)(void) = NULL;
 
 /* the following is used externally for concurrent handlers */
 int setperf_prio = 0;
@@ -1170,6 +1178,7 @@ cpu_init_extents(void)
 {
 	extern struct extent *iomem_ex;
 	static int already_done;
+	int i;
 
 	/* We get called for each CPU, only first should do this */
 	if (already_done)
@@ -1177,20 +1186,16 @@ cpu_init_extents(void)
 
 	/*
 	 * Allocate the physical addresses used by RAM from the iomem
-	 * extent map.  This is done before the addresses are
-	 * page rounded just to make sure we get them all.
+	 * extent map.
 	 */
-	if (extent_alloc_region(iomem_ex, 0, KBTOB(biosbasemem),
-	    EX_NOWAIT)) {
-		/* XXX What should we do? */
-		printf("WARNING: CAN'T ALLOCATE BASE MEMORY FROM "
-		    "IOMEM EXTENT MAP!\n");
-	}
-	if (extent_alloc_region(iomem_ex, IOM_END, KBTOB(biosextmem),
-	    EX_NOWAIT)) {
-		/* XXX What should we do? */
-		printf("WARNING: CAN'T ALLOCATE EXTENDED MEMORY FROM "
-		    "IOMEM EXTENT MAP!\n");
+	for (i = 0; i < mem_cluster_cnt; i++) {
+		if (extent_alloc_region(iomem_ex, mem_clusters[i].start,
+		    mem_clusters[i].size, EX_NOWAIT)) {
+			/* XXX What should we do? */
+			printf("WARNING: CAN'T ALLOCATE RAM (%lx-%lx)"
+			    " FROM IOMEM EXTENT MAP!\n", mem_clusters[i].start,
+			    mem_clusters[i].start + mem_clusters[i].size - 1);
+		}
 	}
 
 	already_done = 1;
@@ -1238,7 +1243,6 @@ extern vector IDTVEC(osyscall);
 extern vector IDTVEC(oosyscall);
 extern vector *IDTVEC(exceptions)[];
 
-/* Tweakable by config(8) */
 int bigmem = 0;
 
 void
@@ -1366,6 +1370,8 @@ init_x86_64(paddr_t first_avail)
 		/* Nuke page zero */
 		if (s1 < avail_start) {
 			s1 = avail_start;
+			if (s1 > e1)
+				continue;
 		}
 
 		/* Crop to fit below 4GB for now */
@@ -1834,6 +1840,7 @@ void
 getbootinfo(char *bootinfo, int bootinfo_size)
 {
 	bootarg32_t *q;
+	bios_ddb_t *bios_ddb;
 
 #undef BOOTINFO_DEBUG
 #ifdef BOOTINFO_DEBUG
@@ -1911,6 +1918,13 @@ getbootinfo(char *bootinfo, int bootinfo_size)
 			break;
 		case BOOTARG_BOOTMAC:
 			bios_bootmac = (bios_bootmac_t *)q->ba_arg;
+			break;
+
+		case BOOTARG_DDB:
+			bios_ddb = (bios_ddb_t *)q->ba_arg;
+#ifdef DDB
+			db_console = bios_ddb->db_console;
+#endif
 			break;
 
 		default:

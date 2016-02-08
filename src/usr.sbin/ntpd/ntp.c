@@ -1,4 +1,4 @@
-/*	$OpenBSD: ntp.c,v 1.110 2009/01/26 11:51:50 henning Exp $ */
+/*	$OpenBSD: ntp.c,v 1.114 2009/06/11 17:36:53 henning Exp $ */
 
 /*
  * Copyright (c) 2003, 2004 Henning Brauer <henning@openbsd.org>
@@ -527,8 +527,10 @@ priv_adjfreq(double offset)
 {
 	double curtime, freq;
 
-	if (!conf->status.synced)
+	if (!conf->status.synced){
+		conf->freq.samples = 0;
 		return;
+	}
 
 	conf->freq.samples++;
 
@@ -557,7 +559,8 @@ priv_adjfreq(double offset)
 	else if (freq < -MAX_FREQUENCY_ADJUST)
 		freq = -MAX_FREQUENCY_ADJUST;
 
-	imsg_compose(ibuf_main, IMSG_ADJFREQ, 0, 0, &freq, sizeof(freq));
+	imsg_compose(ibuf_main, IMSG_ADJFREQ, 0, 0, -1, &freq, sizeof(freq));
+	conf->filters |= FILTER_ADJFREQ;
 	conf->freq.xy = 0.0;
 	conf->freq.x = 0.0;
 	conf->freq.y = 0.0;
@@ -627,7 +630,7 @@ priv_adjtime(void)
 	}
 	conf->status.leap = offsets[i]->status.leap;
 
-	imsg_compose(ibuf_main, IMSG_ADJTIME, 0, 0,
+	imsg_compose(ibuf_main, IMSG_ADJTIME, 0, 0, -1,
 	    &offset_median, sizeof(offset_median));
 
 	priv_adjfreq(offset_median);
@@ -674,7 +677,8 @@ offset_compare(const void *aa, const void *bb)
 void
 priv_settime(double offset)
 {
-	imsg_compose(ibuf_main, IMSG_SETTIME, 0, 0, &offset, sizeof(offset));
+	imsg_compose(ibuf_main, IMSG_SETTIME, 0, 0, -1,
+	    &offset, sizeof(offset));
 	conf->settime = 0;
 }
 
@@ -684,7 +688,7 @@ priv_host_dns(char *name, u_int32_t peerid)
 	u_int16_t	dlen;
 
 	dlen = strlen(name) + 1;
-	imsg_compose(ibuf_dns, IMSG_HOST_DNS, peerid, 0, name, dlen);
+	imsg_compose(ibuf_dns, IMSG_HOST_DNS, peerid, 0, -1, name, dlen);
 }
 
 void

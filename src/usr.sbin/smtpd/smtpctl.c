@@ -1,4 +1,4 @@
-/*	$OpenBSD: smtpctl.c,v 1.15 2009/02/24 12:07:47 gilles Exp $	*/
+/*	$OpenBSD: smtpctl.c,v 1.31 2009/06/06 04:14:21 pyr Exp $	*/
 
 /*
  * Copyright (c) 2006 Pierre-Yves Ritschard <pyr@openbsd.org>
@@ -45,7 +45,6 @@
 __dead void	usage(void);
 int		show_command_output(struct imsg*);
 int		show_stats_output(struct imsg *);
-int		enqueue(int, char **);
 
 /*
 struct imsgname {
@@ -76,17 +75,11 @@ usage(void)
 	extern char *__progname;
 
 	if (sendmail)
-		fprintf(stderr, "usage: %s [-i] rcpt [...]]\n", __progname);
+		fprintf(stderr, "usage: %s [-tv] [-f from] [-F name] to ..\n",
+		    __progname);
 	else
-		fprintf(stderr, "usage: %s <command> [arg [...]]\n", __progname);
+		fprintf(stderr, "usage: %s command [argument ...]\n", __progname);
 	exit(1);
-}
-
-/* dummy function so that smtpctl does not need libevent */
-void
-imsg_event_add(struct imsgbuf *i)
-{
-	/* nothing */
 }
 
 int
@@ -102,7 +95,7 @@ main(int argc, char *argv[])
 	/* parse options */
 	if (strcmp(__progname, "sendmail") == 0 || strcmp(__progname, "send-mail") == 0)
 		sendmail = 1;
-	else {
+	else if (strcmp(__progname, "smtpctl") == 0) {
 		/* check for root privileges */
 		if (geteuid())
 			errx(1, "need root privileges");
@@ -122,7 +115,8 @@ main(int argc, char *argv[])
 			goto connected;
 		}
 		return 0;
-	}
+	} else
+		errx(1, "unsupported mode");
 
 connected:
 	/* connect to relayd control socket */
@@ -132,12 +126,15 @@ connected:
 	bzero(&sun, sizeof(sun));
 	sun.sun_family = AF_UNIX;
 	strlcpy(sun.sun_path, SMTPD_SOCKET, sizeof(sun.sun_path));
-	if (connect(ctl_sock, (struct sockaddr *)&sun, sizeof(sun)) == -1)
+	if (connect(ctl_sock, (struct sockaddr *)&sun, sizeof(sun)) == -1) {
+		if (sendmail)
+			return enqueue_offline(argc, argv);
 		err(1, "connect: %s", SMTPD_SOCKET);
+	}
 
 	if ((ibuf = calloc(1, sizeof(struct imsgbuf))) == NULL)
 		err(1, NULL);
-	imsg_init(ibuf, ctl_sock, NULL);
+	imsg_init(ibuf, ctl_sock);
 
 	if (sendmail)
 		return enqueue(argc, argv);
@@ -166,7 +163,7 @@ connected:
 		imsg_compose(ibuf, IMSG_MDA_RESUME, 0, 0, -1, NULL, 0);
 		break;
 	case RESUME_MTA:
-		imsg_compose(ibuf, IMSG_MDA_RESUME, 0, 0, -1, NULL, 0);
+		imsg_compose(ibuf, IMSG_MTA_RESUME, 0, 0, -1, NULL, 0);
 		break;
 	case RESUME_SMTP:
 		imsg_compose(ibuf, IMSG_SMTP_RESUME, 0, 0, -1, NULL, 0);
@@ -257,46 +254,49 @@ show_command_output(struct imsg *imsg)
 int
 show_stats_output(struct imsg *imsg)
 {
-	static int	 	left = 4;
-	static struct s_parent	s_parent;
-	static struct s_queue	s_queue;
-	static struct s_runner	s_runner;
-	static struct s_smtp	s_smtp;
+	struct stats	*stats;
 
-	switch (imsg->hdr.type) {
-	case IMSG_PARENT_STATS:
-		s_parent = *(struct s_parent *)imsg->data;
-		break;
-	case IMSG_QUEUE_STATS:
-		s_queue = *(struct s_queue *)imsg->data;
-		break;
-	case IMSG_RUNNER_STATS:
-		s_runner = *(struct s_runner *)imsg->data;
-		break;
-	case IMSG_SMTP_STATS:
-		s_smtp = *(struct s_smtp *)imsg->data;
-		break;
-	default:
+	if (imsg->hdr.type != IMSG_STATS)
 		errx(1, "show_stats_output: bad hdr type (%d)", imsg->hdr.type);
-	}
+	
+	if (IMSG_DATA_SIZE(imsg) != sizeof(*stats))
+		errx(1, "show_stats_output: bad data size");
 
-	left--;
-	if (left > 0)
-		return (0);
+	stats = imsg->data;
 
-	printf("parent.uptime=%d\n", time(NULL) - s_parent.start);
+	printf("mta.sessions=%zd\n", stats->smtp.sessions);
+	printf("mta.sessions.active=%zd\n", stats->mta.sessions_active);
 
-	printf("queue.inserts=%zd\n", s_queue.inserts);
+	printf("parent.uptime=%d\n", time(NULL) - stats->parent.start);
 
-	printf("runner.active=%zd\n", s_runner.active);
+	printf("queue.inserts.local=%zd\n", stats->queue.inserts_local);
+	printf("queue.inserts.remote=%zd\n", stats->queue.inserts_remote);
 
-	printf("smtp.sessions=%zd\n", s_smtp.sessions);
-	printf("smtp.sessions.aborted=%zd\n", s_smtp.aborted);
-	printf("smtp.sessions.active=%zd\n", s_smtp.sessions_active);
-	printf("smtp.sessions.ssmtp=%zd\n", s_smtp.ssmtp);
-	printf("smtp.sessions.ssmtp.active=%zd\n", s_smtp.ssmtp_active);
-	printf("smtp.sessions.starttls=%zd\n", s_smtp.starttls);
-	printf("smtp.sessions.starttls.active=%zd\n", s_smtp.starttls_active);
+	printf("runner.active=%zd\n", stats->runner.active);
+
+	printf("smtp.errors.delays=%zd\n", stats->smtp.delays);
+	printf("smtp.errors.linetoolong=%zd\n", stats->smtp.linetoolong);
+	printf("smtp.errors.read_eof=%zd\n", stats->smtp.read_eof);
+	printf("smtp.errors.read_system=%zd\n", stats->smtp.read_error);
+	printf("smtp.errors.read_timeout=%zd\n", stats->smtp.read_timeout);
+	printf("smtp.errors.tempfail=%zd\n", stats->smtp.tempfail);
+	printf("smtp.errors.toofast=%zd\n", stats->smtp.toofast);
+	printf("smtp.errors.write_eof=%zd\n", stats->smtp.write_eof);
+	printf("smtp.errors.write_system=%zd\n", stats->smtp.write_error);
+	printf("smtp.errors.write_timeout=%zd\n", stats->smtp.write_timeout);
+
+	printf("smtp.sessions=%zd\n", stats->smtp.sessions);
+	printf("smtp.sessions.aborted=%zd\n", stats->smtp.read_eof +
+	    stats->smtp.read_error + stats->smtp.write_eof +
+	    stats->smtp.write_error);
+	printf("smtp.sessions.active=%zd\n", stats->smtp.sessions_active);
+	printf("smtp.sessions.timeout=%zd\n", stats->smtp.read_timeout +
+	    stats->smtp.write_timeout);
+	printf("smtp.sessions.smtps=%zd\n", stats->smtp.smtps);
+	printf("smtp.sessions.smtps.active=%zd\n", stats->smtp.smtps_active);
+	printf("smtp.sessions.starttls=%zd\n", stats->smtp.starttls);
+	printf("smtp.sessions.starttls.active=%zd\n",
+	    stats->smtp.starttls_active);
 
 	return (1);
 }

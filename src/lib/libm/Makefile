@@ -1,4 +1,4 @@
-#  $OpenBSD: Makefile,v 1.62 2008/12/12 19:30:17 martynas Exp $
+#  $OpenBSD: Makefile,v 1.66 2009/04/19 16:48:02 martynas Exp $
 #  $NetBSD: Makefile,v 1.28 1995/11/20 22:06:19 jtc Exp $
 #
 #  @(#)Makefile 5.1beta 93/09/24 
@@ -42,6 +42,7 @@ ARCH_SRCS = e_acos.S e_asin.S e_atan2.S e_exp.S e_fmod.S e_log.S e_log10.S \
 	    s_atan.S s_atanf.S s_ceil.S s_ceilf.S s_copysign.S s_copysignf.S \
 	    s_cos.S s_cosf.S s_floor.S s_floorf.S \
 	    s_ilogb.S s_ilogbf.S s_log1p.S s_log1pf.S s_logb.S s_logbf.S \
+	    s_llrint.S s_llrintf.S s_lrint.S s_lrintf.S \
 	    s_rint.S s_rintf.S s_scalbn.S s_scalbnf.S s_significand.S \
 	    s_significandf.S s_sin.S s_sinf.S s_tan.S s_tanf.S
 .elif (${MACHINE_ARCH} == "m68k")
@@ -54,6 +55,9 @@ ARCH_SRCS = e_acos.S e_asin.S e_atanh.S e_cosh.S e_exp.S e_log.S e_log10.S \
 .PATH:	${.CURDIR}/arch/hppa
 ARCH_SRCS = e_sqrt.c e_sqrtf.c e_remainder.c e_remainderf.c \
 	    s_ceil.c s_ceilf.c s_floor.c s_floorf.c s_rint.c s_rintf.c
+.elif (${MACHINE_ARCH} == "sh")
+.PATH:	${.CURDIR}/arch/sh
+ARCH_SRCS = e_sqrt.c e_sqrtf.c s_fabsf.c
 .elif (${MACHINE_ARCH} == "vax")
 .PATH:	${.CURDIR}/arch/vax
 NOIEEE_ARCH = n_argred.S n_infnan.S n_sqrt.S
@@ -90,7 +94,7 @@ COMMON_SRCS = b_exp__D.c b_log__D.c b_tgamma.c \
 	s_ctanhf.c s_erf.c s_erff.c s_exp2.c s_exp2f.c s_expm1.c s_expm1f.c \
 	s_fabsf.c s_fdim.c s_fmax.c s_fmaxf.c s_fmin.c s_fminf.c \
 	s_floor.c s_floorf.c s_frexpf.c s_ilogb.c s_ilogbf.c \
-	s_ldexpf.c s_log1p.c \
+	s_log1p.c \
 	s_log1pf.c s_logb.c s_logbf.c s_llrint.c s_llrintf.c s_lrint.c \
 	s_lrintf.c s_modff.c s_nan.c \
 	s_nextafter.c s_nextafterf.c s_remquo.c s_remquof.c s_rint.c \
@@ -117,11 +121,11 @@ NOIEEE_SRCS = n_acosh.c n_argred.c n_asincos.c n_asinh.c n_atan.c \
 	n_erf.c n_exp.c n_exp__E.c n_expm1.c n_fdim.c n_floor.c \
 	n_fmax.c n_fmaxf.c n_fmin.c n_fminf.c n_fmod.c n_hypot.c \
 	n_infnan.c n_j0.c n_j1.c n_jn.c n_lgamma.c n_log.c n_log10.c \
-	n_log1p.c n_log__L.c n_pow.c n_round.c n_sincos.c n_sinh.c \
+	n_log1p.c n_log__L.c n_nan.c n_pow.c n_round.c n_sincos.c n_sinh.c \
 	n_sqrt.c n_support.c n_tan.c n_tanh.c n_tgamma.c
 
 # OpenBSD's C library supplies these functions:
-#COMMON_SRCS+=	s_fabs.c s_frexp.c s_ldexp.c s_modf.c
+#COMMON_SRCS+=	s_fabs.c s_frexp.c s_modf.c
 
 .if (${MACHINE_ARCH} == "vax")
 SRCS=	${NOIEEE_SRCS} ${NOIEEE_ARCH}

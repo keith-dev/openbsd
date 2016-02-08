@@ -1,4 +1,4 @@
-/*	$OpenBSD: control.c,v 1.22 2009/02/25 17:09:55 claudio Exp $ */
+/*	$OpenBSD: control.c,v 1.27 2009/06/06 07:31:26 eric Exp $ */
 
 /*
  * Copyright (c) 2003, 2004 Henning Brauer <henning@openbsd.org>
@@ -41,7 +41,7 @@ struct ctl_conn	*control_connbypid(pid_t);
 void		 control_close(int);
 
 int
-control_init(void)
+control_init(char *path)
 {
 	struct sockaddr_un	 sun;
 	int			 fd;
@@ -54,28 +54,28 @@ control_init(void)
 
 	bzero(&sun, sizeof(sun));
 	sun.sun_family = AF_UNIX;
-	strlcpy(sun.sun_path, OSPFD_SOCKET, sizeof(sun.sun_path));
+	strlcpy(sun.sun_path, path, sizeof(sun.sun_path));
 
-	if (unlink(OSPFD_SOCKET) == -1)
+	if (unlink(path) == -1)
 		if (errno != ENOENT) {
-			log_warn("control_init: unlink %s", OSPFD_SOCKET);
+			log_warn("control_init: unlink %s", path);
 			close(fd);
 			return (-1);
 		}
 
 	old_umask = umask(S_IXUSR|S_IXGRP|S_IWOTH|S_IROTH|S_IXOTH);
 	if (bind(fd, (struct sockaddr *)&sun, sizeof(sun)) == -1) {
-		log_warn("control_init: bind: %s", OSPFD_SOCKET);
+		log_warn("control_init: bind: %s", path);
 		close(fd);
 		umask(old_umask);
 		return (-1);
 	}
 	umask(old_umask);
 
-	if (chmod(OSPFD_SOCKET, S_IRUSR|S_IWUSR|S_IRGRP|S_IWGRP) == -1) {
+	if (chmod(path, S_IRUSR|S_IWUSR|S_IRGRP|S_IWGRP) == -1) {
 		log_warn("control_init: chmod");
 		close(fd);
-		(void)unlink(OSPFD_SOCKET);
+		(void)unlink(path);
 		return (-1);
 	}
 
@@ -102,10 +102,10 @@ control_listen(void)
 }
 
 void
-control_cleanup(void)
+control_cleanup(char *path)
 {
-
-	unlink(OSPFD_SOCKET);
+	if (path)
+		unlink(path);
 }
 
 /* ARGSUSED */
@@ -133,11 +133,12 @@ control_accept(int listenfd, short event, void *bula)
 		return;
 	}
 
-	imsg_init(&c->ibuf, connfd, control_dispatch_imsg);
-	c->ibuf.events = EV_READ;
-	event_set(&c->ibuf.ev, c->ibuf.fd, c->ibuf.events,
-	    c->ibuf.handler, &c->ibuf);
-	event_add(&c->ibuf.ev, NULL);
+	imsg_init(&c->iev.ibuf, connfd);
+	c->iev.handler = control_dispatch_imsg;
+	c->iev.events = EV_READ;
+	event_set(&c->iev.ev, c->iev.ibuf.fd, c->iev.events,
+	    c->iev.handler, &c->iev);
+	event_add(&c->iev.ev, NULL);
 
 	TAILQ_INSERT_TAIL(&ctl_conns, c, entry);
 }
@@ -147,7 +148,7 @@ control_connbyfd(int fd)
 {
 	struct ctl_conn	*c;
 
-	for (c = TAILQ_FIRST(&ctl_conns); c != NULL && c->ibuf.fd != fd;
+	for (c = TAILQ_FIRST(&ctl_conns); c != NULL && c->iev.ibuf.fd != fd;
 	    c = TAILQ_NEXT(c, entry))
 		;	/* nothing */
 
@@ -159,7 +160,7 @@ control_connbypid(pid_t pid)
 {
 	struct ctl_conn	*c;
 
-	for (c = TAILQ_FIRST(&ctl_conns); c != NULL && c->ibuf.pid != pid;
+	for (c = TAILQ_FIRST(&ctl_conns); c != NULL && c->iev.ibuf.pid != pid;
 	    c = TAILQ_NEXT(c, entry))
 		;	/* nothing */
 
@@ -176,11 +177,11 @@ control_close(int fd)
 		return;
 	}
 
-	msgbuf_clear(&c->ibuf.w);
+	msgbuf_clear(&c->iev.ibuf.w);
 	TAILQ_REMOVE(&ctl_conns, c, entry);
 
-	event_del(&c->ibuf.ev);
-	close(c->ibuf.fd);
+	event_del(&c->iev.ev);
+	close(c->iev.ibuf.fd);
 	free(c);
 }
 
@@ -198,26 +199,21 @@ control_dispatch_imsg(int fd, short event, void *bula)
 		return;
 	}
 
-	switch (event) {
-	case EV_READ:
-		if ((n = imsg_read(&c->ibuf)) == -1 || n == 0) {
+	if (event & EV_READ) {
+		if ((n = imsg_read(&c->iev.ibuf)) == -1 || n == 0) {
 			control_close(fd);
 			return;
 		}
-		break;
-	case EV_WRITE:
-		if (msgbuf_write(&c->ibuf.w) < 0) {
+	}
+	if (event & EV_WRITE) {
+		if (msgbuf_write(&c->iev.ibuf.w) == -1) {
 			control_close(fd);
 			return;
 		}
-		imsg_event_add(&c->ibuf);
-		return;
-	default:
-		fatalx("unknown event");
 	}
 
 	for (;;) {
-		if ((n = imsg_get(&c->ibuf, &imsg)) == -1) {
+		if ((n = imsg_get(&c->iev.ibuf, &imsg)) == -1) {
 			control_close(fd);
 			return;
 		}
@@ -231,13 +227,13 @@ control_dispatch_imsg(int fd, short event, void *bula)
 			ospfe_fib_update(imsg.hdr.type);
 			/* FALLTHROUGH */
 		case IMSG_CTL_RELOAD:
-			c->ibuf.pid = imsg.hdr.pid;
+			c->iev.ibuf.pid = imsg.hdr.pid;
 			ospfe_imsg_compose_parent(imsg.hdr.type, 0, NULL, 0);
 			break;
 		case IMSG_CTL_KROUTE:
 		case IMSG_CTL_KROUTE_ADDR:
 		case IMSG_CTL_IFINFO:
-			c->ibuf.pid = imsg.hdr.pid;
+			c->iev.ibuf.pid = imsg.hdr.pid;
 			ospfe_imsg_compose_parent(imsg.hdr.type,
 			    imsg.hdr.pid, imsg.data,
 			    imsg.hdr.len - IMSG_HEADER_SIZE);
@@ -247,8 +243,8 @@ control_dispatch_imsg(int fd, short event, void *bula)
 			    sizeof(ifidx)) {
 				memcpy(&ifidx, imsg.data, sizeof(ifidx));
 				ospfe_iface_ctl(c, ifidx);
-				imsg_compose(&c->ibuf, IMSG_CTL_END, 0,
-				    0, NULL, 0);
+				imsg_compose_event(&c->iev, IMSG_CTL_END, 0,
+				    0, -1, NULL, 0);
 			}
 			break;
 		case IMSG_CTL_SHOW_DATABASE:
@@ -260,7 +256,7 @@ control_dispatch_imsg(int fd, short event, void *bula)
 		case IMSG_CTL_SHOW_DB_ASBR:
 		case IMSG_CTL_SHOW_RIB:
 		case IMSG_CTL_SHOW_SUM:
-			c->ibuf.pid = imsg.hdr.pid;
+			c->iev.ibuf.pid = imsg.hdr.pid;
 			ospfe_imsg_compose_rde(imsg.hdr.type, 0, imsg.hdr.pid,
 			    imsg.data, imsg.hdr.len - IMSG_HEADER_SIZE);
 			break;
@@ -275,7 +271,7 @@ control_dispatch_imsg(int fd, short event, void *bula)
 		imsg_free(&imsg);
 	}
 
-	imsg_event_add(&c->ibuf);
+	imsg_event_add(&c->iev);
 }
 
 int
@@ -286,8 +282,8 @@ control_imsg_relay(struct imsg *imsg)
 	if ((c = control_connbypid(imsg->hdr.pid)) == NULL)
 		return (0);
 
-	return (imsg_compose(&c->ibuf, imsg->hdr.type, 0, imsg->hdr.pid,
-	    imsg->data, imsg->hdr.len - IMSG_HEADER_SIZE));
+	return (imsg_compose_event(&c->iev, imsg->hdr.type, 0, imsg->hdr.pid,
+	    -1, imsg->data, imsg->hdr.len - IMSG_HEADER_SIZE));
 }
 
 void

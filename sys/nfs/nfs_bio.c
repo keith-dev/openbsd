@@ -1,4 +1,4 @@
-/*	$OpenBSD: nfs_bio.c,v 1.57 2009/01/24 23:30:42 thib Exp $	*/
+/*	$OpenBSD: nfs_bio.c,v 1.59 2009/06/23 08:08:50 jasper Exp $	*/
 /*	$NetBSD: nfs_bio.c,v 1.25.4.2 1996/07/08 20:47:04 jtc Exp $	*/
 
 /*
@@ -578,12 +578,9 @@ nfs_doio(bp, p)
 	uiop->uio_procp = p;
 
 	/*
-	 * Historically, paging was done with physio, but no more...
+	 * Historically, paging was done with physio, but no more.
 	 */
 	if (bp->b_flags & B_PHYS) {
-	    /*
-	     * ...though reading /dev/drum still gets us here.
-	     */
 	    io.iov_len = uiop->uio_resid = bp->b_bcount;
 	    /* mapping was done by vmapbuf() */
 	    io.iov_base = bp->b_data;
@@ -591,15 +588,11 @@ nfs_doio(bp, p)
 	    if (bp->b_flags & B_READ) {
 		uiop->uio_rw = UIO_READ;
 		nfsstats.read_physios++;
-		bcstats.pendingreads++;
-		bcstats.numreads++;
 		error = nfs_readrpc(vp, uiop);
 	    } else {
 		iomode = NFSV3WRITE_DATASYNC;
 		uiop->uio_rw = UIO_WRITE;
 		nfsstats.write_physios++;
-		bcstats.pendingwrites++;
-		bcstats.numwrites++; 
 		error = nfs_writerpc(vp, uiop, &iomode, &must_commit);
 	    }
 	    if (error) {

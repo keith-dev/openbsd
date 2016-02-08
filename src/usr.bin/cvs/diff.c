@@ -1,4 +1,4 @@
-/*	$OpenBSD: diff.c,v 1.145 2009/02/21 14:50:53 joris Exp $	*/
+/*	$OpenBSD: diff.c,v 1.155 2009/06/07 08:39:13 ray Exp $	*/
 /*
  * Copyright (c) 2008 Tobias Stoeckmann <tobias@openbsd.org>
  * Copyright (c) 2006 Joris Vink <joris@openbsd.org>
@@ -32,6 +32,7 @@
 
 void	cvs_diff_local(struct cvs_file *);
 
+static int	 dflags = 0;
 static int	 Nflag = 0;
 static int	 force_head = 0;
 static char	*koptstr;
@@ -46,9 +47,9 @@ struct cvs_cmd cvs_cmd_diff = {
 	CVS_OP_DIFF, CVS_USE_WDIR, "diff",
 	{ "di", "dif" },
 	"Show differences between revisions",
-	"[-cilNnpRu] [[-D date] [-r rev] [-D date2 | -r rev2]] "
+	"[-abcdilNnpRuw] [[-D date] [-r rev] [-D date2 | -r rev2]] "
 	"[-k mode] [file ...]",
-	"cfD:ik:lNnpr:Ru",
+	"abcfdD:ik:lNnpr:Ruw",
 	NULL,
 	cvs_diff
 };
@@ -78,9 +79,21 @@ cvs_diff(int argc, char **argv)
 	while ((ch = getopt(argc, argv, cvs_cmdop == CVS_OP_DIFF ?
 	    cvs_cmd_diff.cmd_opts : cvs_cmd_rdiff.cmd_opts)) != -1) {
 		switch (ch) {
+		case 'a':
+			strlcat(diffargs, " -a", sizeof(diffargs));
+			dflags |= D_FORCEASCII;
+			break;
+		case 'b':
+			strlcat(diffargs, " -b", sizeof(diffargs));
+			dflags |= D_FOLDBLANKS;
+			break;
 		case 'c':
 			strlcat(diffargs, " -c", sizeof(diffargs));
 			diff_format = D_CONTEXT;
+			break;
+		case 'd':
+			strlcat(diffargs, " -d", sizeof(diffargs));
+			dflags |= D_MINIMAL;
 			break;
 		case 'D':
 			if (date1 == -1 && rev1 == NULL) {
@@ -99,7 +112,7 @@ cvs_diff(int argc, char **argv)
 			break;
 		case 'i':
 			strlcat(diffargs, " -i", sizeof(diffargs));
-			diff_iflag = 1;
+			dflags |= D_IGNORECASE;
 			break;
 		case 'k':
 			koptstr = optarg;
@@ -125,7 +138,7 @@ cvs_diff(int argc, char **argv)
 			break;
 		case 'p':
 			strlcat(diffargs, " -p", sizeof(diffargs));
-			diff_pflag = 1;
+			dflags |= D_PROTOTYPE;
 			break;
 		case 'R':
 			flags |= CR_RECURSE_DIRS;
@@ -140,6 +153,10 @@ cvs_diff(int argc, char **argv)
 				    " be specified");
 			}
 			break;
+		case 't':
+			strlcat(diffargs, " -t", sizeof(diffargs));
+			dflags |= D_EXPANDTABS;
+			break;
 		case 'u':
 			strlcat(diffargs, " -u", sizeof(diffargs));
 			diff_format = D_UNIFIED;
@@ -147,6 +164,10 @@ cvs_diff(int argc, char **argv)
 		case 'V':
 			fatal("the -V option is obsolete "
 			    "and should not be used");
+		case 'w':
+			strlcat(diffargs, " -w", sizeof(diffargs));
+			dflags |= D_IGNOREBLANKS;
+			break;
 		default:
 			fatal("%s", cvs_cmdop == CVS_OP_DIFF ?
 			    cvs_cmd_diff.cmd_synopsis :
@@ -203,7 +224,7 @@ cvs_diff(int argc, char **argv)
 		if (Nflag == 1)
 			cvs_client_send_request("Argument -N");
 
-		if (diff_pflag == 1)
+		if (dflags & D_PROTOTYPE)
 			cvs_client_send_request("Argument -p");
 
 		if (rev1 != NULL)
@@ -266,7 +287,7 @@ cvs_diff_local(struct cvs_file *cf)
 
 	if (cf->file_type == CVS_DIR) {
 		if (verbosity > 1)
-			cvs_log(LP_NOTICE, "Diffing inside %s", cf->file_path);
+			cvs_log(LP_ERR, "Diffing inside %s", cf->file_path);
 		return;
 	}
 
@@ -306,8 +327,7 @@ cvs_diff_local(struct cvs_file *cf)
 			break;
 		default:
 			if (!(cf->file_flags & FILE_ON_DISK)) {
-				cvs_log(LP_ERR, "cannot find %s",
-					    cf->file_path);
+				cvs_printf("? %s\n", cf->file_path);
 				return;
 			}
 
@@ -411,9 +431,11 @@ cvs_diff_local(struct cvs_file *cf)
 
 	switch (cvs_cmdop) {
 	case CVS_OP_DIFF:
-		if (cf->file_status == FILE_UPTODATE && diff_rev1 != NULL &&
-		    rcsnum_cmp(diff_rev1, cf->file_rcsrev, 0) == 0)
-			goto cleanup;
+		if (cf->file_status == FILE_UPTODATE) {
+			if (diff_rev2 == NULL &&
+			    !rcsnum_cmp(diff_rev1, cf->file_rcsrev, 0))
+				goto cleanup;
+		}
 		break;
 	case CVS_OP_RDIFF:
 		if (diff_rev1 == NULL && diff_rev2 == NULL)
@@ -459,17 +481,29 @@ cvs_diff_local(struct cvs_file *cf)
 	} else if (cvs_cmdop == CVS_OP_DIFF &&
 	    (cf->file_flags & FILE_ON_DISK) &&
 	    cf->file_ent->ce_status != CVS_ENT_REMOVED) {
-		if (fstat(cf->fd, &st) == -1)
-			fatal("fstat failed %s", strerror(errno));
-		b1 = cvs_buf_load_fd(cf->fd);
-
-		tv2[0].tv_sec = st.st_mtime;
-		tv2[0].tv_usec = 0;
-		tv2[1] = tv2[0];
-
 		(void)xasprintf(&p2, "%s/diff2.XXXXXXXXXX", cvs_tmpdir);
-		fd2 = cvs_buf_write_stmp(b1, p2, tv2);
-		cvs_buf_free(b1);
+		if (cvs_server_active == 1 && cf->fd == -1) {
+			tv2[0].tv_sec = rcs_rev_getdate(cf->file_rcs,
+			    cf->file_ent->ce_rev);
+			tv2[0].tv_usec = 0;
+			tv2[1] = tv2[0];
+
+			fd2 = rcs_rev_write_stmp(cf->file_rcs,
+			    cf->file_ent->ce_rev, p2, 0);
+			if (futimes(fd2, tv2) == -1)
+				fatal("cvs_diff_local: futimes failed");
+		} else {
+			if (fstat(cf->fd, &st) == -1)
+				fatal("fstat failed %s", strerror(errno));
+			b1 = cvs_buf_load_fd(cf->fd);
+
+			tv2[0].tv_sec = st.st_mtime;
+			tv2[0].tv_usec = 0;
+			tv2[1] = tv2[0];
+
+			fd2 = cvs_buf_write_stmp(b1, p2, tv2);
+			cvs_buf_free(b1);
+		}
 	}
 
 	switch (cvs_cmdop) {
@@ -532,9 +566,9 @@ cvs_diff_local(struct cvs_file *cf)
 			fatal("cannot open %s", CVS_PATH_DEVNULL);
 	}
 
-	if (cvs_diffreg(p1 != NULL ? cf->file_path : CVS_PATH_DEVNULL,
-	    p2 != NULL ? cf->file_path : CVS_PATH_DEVNULL, fd1, fd2, NULL)
-	    == D_ERROR)
+	if (diffreg(p1 != NULL ? cf->file_path : CVS_PATH_DEVNULL,
+	    p2 != NULL ? cf->file_path : CVS_PATH_DEVNULL, fd1, fd2, NULL,
+	    dflags) == D_ERROR)
 		fatal("cvs_diff_local: failed to get RCS patch");
 
 	close(fd1);

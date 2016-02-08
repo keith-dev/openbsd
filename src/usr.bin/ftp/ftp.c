@@ -1,4 +1,4 @@
-/*	$OpenBSD: ftp.c,v 1.73 2008/07/08 21:07:57 martynas Exp $	*/
+/*	$OpenBSD: ftp.c,v 1.79 2009/06/06 23:14:44 martynas Exp $	*/
 /*	$NetBSD: ftp.c,v 1.27 1997/08/18 10:20:23 lukem Exp $	*/
 
 /*
@@ -58,10 +58,6 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  */
-
-#if !defined(lint) && !defined(SMALL)
-static const char rcsid[] = "$OpenBSD: ftp.c,v 1.73 2008/07/08 21:07:57 martynas Exp $";
-#endif /* not lint and not SMALL */
 
 #include <sys/types.h>
 #include <sys/stat.h>
@@ -193,7 +189,7 @@ hookup(char *host, char *port)
 		}
 		if (error) {
 			/* this "if" clause is to prevent print warning twice */
-			if (res->ai_next) {
+			if (verbose && res->ai_next) {
 				if (getnameinfo(res->ai_addr, res->ai_addrlen,
 				    hbuf, sizeof(hbuf), NULL, 0,
 				    NI_NUMERICHOST) != 0)
@@ -365,6 +361,12 @@ may_receive_noop_ack()
 {
 	int i;
 
+	if (cout == NULL) {
+		/* Lost connection;  so just pretend we're fine. */
+		current_nop_pos = full_noops_sent = 0;
+		return;
+	}
+
 	/* finish sending last incomplete noop */
 	if (current_nop_pos != 0) {
 		fputs(&(noop[current_nop_pos]), cout);
@@ -522,6 +524,7 @@ getreply(int expecteof)
 	}
 }
 
+#ifndef SMALL
 jmp_buf	sendabort;
 
 /* ARGSUSED */
@@ -702,7 +705,7 @@ sendrequest(const char *cmd, const char *local, const char *remote,
 	dout = dataconn(lmode);
 	if (dout == NULL)
 		goto abort;
-	progressmeter(-1);
+	progressmeter(-1, remote);
 	may_reset_noop_timeout();
 	oldintp = signal(SIGPIPE, SIG_IGN);
 	switch (curtype) {
@@ -783,7 +786,7 @@ sendrequest(const char *cmd, const char *local, const char *remote,
 		}
 		break;
 	}
-	progressmeter(1);
+	progressmeter(1, NULL);
 	progress = oprogress;
 	if (closefunc != NULL)
 		(*closefunc)(fin);
@@ -820,6 +823,7 @@ abort:
 	if (bytes > 0)
 		ptransfer(0);
 }
+#endif /* !SMALL */
 
 jmp_buf	recvabort;
 
@@ -1018,7 +1022,7 @@ recvrequest(const char *cmd, const char * volatile local, const char *remote,
 			progress = 0;
 		preserve = 0;
 	}
-	progressmeter(-1);
+	progressmeter(-1, remote);
 	may_reset_noop_timeout();
 	switch (curtype) {
 
@@ -1160,7 +1164,7 @@ break2:
 			warnx("local: %s: %s", local, strerror(serrno));
 		break;
 	}
-	progressmeter(1);
+	progressmeter(1, NULL);
 	progress = oprogress;
 	preserve = opreserve;
 	if (closefunc != NULL)
@@ -1192,9 +1196,7 @@ break2:
 	return;
 
 abort:
-
-/* abort using RFC959 recommended IP,SYNC sequence */
-
+	/* abort using RFC959 recommended IP,SYNC sequence */
 	progress = oprogress;
 	preserve = opreserve;
 	if (oldintp)
@@ -1970,20 +1972,40 @@ gunique(const char *local)
 	return (new);
 }
 
+jmp_buf forceabort;
+ 
+/* ARGSUSED */
+void
+abortforce(int signo)
+{
+	fputs("Forced abort.  The connection will be closed.\n", ttyout);
+	(void)fflush(ttyout);
+
+	if (cout) {
+		(void)fclose(cout);
+	}
+	cout = NULL;
+
+	longjmp(forceabort, 1);
+}
+
 void
 abort_remote(FILE *din)
 {
 	char buf[BUFSIZ];
 	int nfnd;
 	struct pollfd pfd[2];
+	sig_t oldintr;
 
-	if (cout == NULL) {
+	if (cout == NULL || setjmp(forceabort)) {
 		warnx("Lost control connection for abort.");
 		if (ptabflg)
 			code = -1;
 		lostpeer();
 		return;
 	}
+
+	oldintr = signal(SIGINT, abortforce);
 
 	/*
 	 * send IAC in urgent mode instead of DM because 4.3BSD places oob mark
@@ -2018,4 +2040,5 @@ abort_remote(FILE *din)
 		(void)getreply(0);
 	}
 	(void)getreply(0);
+	(void)signal(SIGINT, oldintr);
 }

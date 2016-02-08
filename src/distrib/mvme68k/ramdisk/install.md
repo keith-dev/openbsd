@@ -1,4 +1,4 @@
-#       $OpenBSD: install.md,v 1.31 2008/06/26 05:42:04 ray Exp $
+#       $OpenBSD: install.md,v 1.39 2009/06/04 00:44:47 krw Exp $
 # Copyright (c) 1996 The NetBSD Foundation, Inc.
 # All rights reserved.
 #
@@ -32,19 +32,41 @@
 #
 
 MDTERM=vt100
-ARCH=ARCH
 
 md_installboot() {
-	echo "Installing boot block..."
 	cp /mnt/usr/mdec/bootsd /mnt/boot
-	/mnt/usr/mdec/installboot -v /mnt/boot /mnt/usr/mdec/bootxx /dev/r${1}a
+	/mnt/usr/mdec/installboot /mnt/boot /mnt/usr/mdec/bootxx /dev/r${1}a
 }
 
 md_prep_disklabel() {
-	local _disk=$1
+	local _disk=$1 _f _op
 
 	disklabel -W $_disk >/dev/null 2>&1
-	disklabel -f /tmp/fstab.$_disk -E $_disk
+	_f=/tmp/fstab.$_disk
+	if [[ $_disk == $ROOTDISK ]]; then
+		while :; do
+			echo "The auto-allocated layout for $_disk is:"
+			disklabel -h -A $_disk | egrep "^#  |^  [a-p]:"
+			ask "Use (A)uto layout, (E)dit auto layout, or create (C)ustom layout?" a
+			case $resp in
+			a*|A*)	_op=-w ; AUTOROOT=y ;;
+			e*|E*)	_op=-E ;;
+			c*|C*)	break ;;
+			*)	continue ;;
+			esac
+			disklabel -f $_f $_op -A $_disk
+			return
+		done
+	fi
+	cat <<__EOT
+You will now create a OpenBSD disklabel on the disk.  The disklabel defines
+how OpenBSD splits up the disk into OpenBSD partitions in which filesystems
+and swap space are created.  You must provide each filesystem's mountpoint
+in this program.
+
+__EOT
+
+	disklabel -f $_f -E $_disk
 }
 
 md_congrats() {

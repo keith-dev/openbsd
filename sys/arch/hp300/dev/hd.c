@@ -1,4 +1,4 @@
-/*	$OpenBSD: hd.c,v 1.55 2009/01/25 14:29:29 miod Exp $	*/
+/*	$OpenBSD: hd.c,v 1.57 2009/06/13 21:35:58 miod Exp $	*/
 /*	$NetBSD: rd.c,v 1.33 1997/07/10 18:14:08 kleink Exp $	*/
 
 /*
@@ -54,6 +54,7 @@
 #include <sys/fcntl.h>
 #include <sys/ioctl.h>
 #include <sys/kernel.h>
+#include <sys/malloc.h>
 #include <sys/proc.h>
 #include <sys/stat.h>
 #include <sys/syslog.h>
@@ -1137,6 +1138,7 @@ hdioctl(dev, cmd, data, flag, p)
 	struct proc *p;
 {
 	int unit = DISKUNIT(dev);
+	struct disklabel *lp;
 	struct hd_softc *sc;
 	int error = 0;
 
@@ -1145,6 +1147,13 @@ hdioctl(dev, cmd, data, flag, p)
 		return (ENXIO);
 
 	switch (cmd) {
+	case DIOCRLDINFO:
+		lp = malloc(sizeof(*lp), M_TEMP, M_WAITOK);
+		hdgetdisklabel(dev, sc, lp, 0);
+		*(sc->sc_dkdev.dk_label) = *lp;
+		free(lp, M_TEMP);
+		return 0;
+
 	case DIOCGPDINFO:
 		hdgetdisklabel(dev, sc, (struct disklabel *)data, 1);
 		goto exit;

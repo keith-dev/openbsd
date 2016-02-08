@@ -1,4 +1,4 @@
-/*	$OpenBSD: pf_lb.c,v 1.3 2009/02/18 20:06:23 henning Exp $ */
+/*	$OpenBSD: pf_lb.c,v 1.5 2009/06/24 13:27:34 sthen Exp $ */
 
 /*
  * Copyright (c) 2001 Daniel Hartmeier
@@ -262,9 +262,12 @@ pf_get_sport(sa_family_t af, u_int8_t proto, struct pf_rule *r,
 	if (pf_map_addr(af, r, saddr, naddr, &init_addr, sn))
 		return (1);
 
-	if (proto == IPPROTO_ICMP) {
-		low = 1;
-		high = 65535;
+	if (proto == IPPROTO_ICMP || proto == IPPROTO_ICMPV6) {
+		if (dport == ICMP6_ECHO_REQUEST || dport == ICMP_ECHO) {
+			low = 1;
+			high = 65535;
+		} else
+			return (0);	/* Don't try to modify non-echo ICMP */
 	}
 
 	do {
@@ -509,7 +512,7 @@ pf_map_addr(sa_family_t af, struct pf_rule *r, struct pf_addr *saddr,
 	if (*sn != NULL)
 		PF_ACPY(&(*sn)->raddr, naddr, af);
 
-	if (pf_status.debug >= PF_DEBUG_MISC &&
+	if (pf_status.debug >= PF_DEBUG_NOISY &&
 	    (rpool->opts & PF_POOL_TYPEMASK) != PF_POOL_NONE) {
 		printf("pf_map_addr: selected address ");
 		pf_print_host(naddr, 0, af);

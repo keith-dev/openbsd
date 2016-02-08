@@ -1,6 +1,7 @@
-#	$OpenBSD: dot.profile,v 1.8 2008/08/03 14:18:00 krw Exp $
+#	$OpenBSD: dot.profile,v 1.13 2009/06/12 03:30:00 deraadt Exp $
 #	$NetBSD: dot.profile,v 1.1 1995/12/18 22:54:43 pk Exp $
 #
+# Copyright (c) 2009 Kenneth R. Westerback
 # Copyright (c) 1995 Jason R. Thorpe
 # Copyright (c) 1994 Christopher G. Demetriou
 # All rights reserved.
@@ -31,13 +32,19 @@
 # THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #
 
+export VNAME=$(sysctl -n kern.osrelease)
+export VERSION="${VNAME%.*}${VNAME#*.}"
+export ARCH=$(sysctl -n hw.machine)
+export OBSD="OpenBSD/$ARCH $VNAME"
+
 export PATH=/sbin:/bin:/usr/bin:/usr/sbin:/
 umask 022
 # emacs-style command line editing
 set -o emacs
 
-# Extract rootdisk from last 'root on wd0a swap on wd0b dump on wd0b' line.
-set -- `dmesg | sed -n '/^root on /h;${g;p;}'`
+# Extract rootdisk from last 'root on ...' line. e.g.
+# 	root on wd0a swap on wd0b dump on wd0b
+set -- $(dmesg | sed -n '/^root on /h;${g;p;}')
 rootdisk=$3
 
 if [ "X${DONEPROFILE}" = "X" ]; then
@@ -50,19 +57,31 @@ if [ "X${DONEPROFILE}" = "X" ]; then
 	stty newcrt werase ^W intr ^C kill ^U erase ^? status ^T
 
 	# Installing or upgrading?
-	_forceloop=""
-	while [ "X$_forceloop" = "X" ]; do
-		echo -n '(I)nstall'
-		[ -f upgrade ] && echo -n ', (U)pgrade'
-		echo -n ' or (S)hell? '
-		read _forceloop
-		case "$_forceloop" in
-		i*|I*)	/install
+	cat <<__EOT
+
+Welcome to the $OBSD installation program.
+__EOT
+	while :; do
+		read REPLY?'(I)nstall, (U)pgrade or (S)hell? '
+		case $REPLY in
+		i*|I*)	echo "\nCool! Let's get to it.\n"
+			/install && break
 			;;
-		u*|U*)	/upgrade
+		u*|U*)	cat <<__EOT
+
+NOTE: Once your system has been upgraded, you must manually merge any
+changes to files in the 'etc' set into the files already on your system.
+sysmerge(8) can help.
+
+__EOT
+			/upgrade && break
 			;;
-		s*|S*)	;;
-		*)	_forceloop=""
+		s*|S*)	break
+			;;
+		!)	echo "Type 'exit' to return to install."
+			ksh
+			;;
+		!*)	eval "${REPLY#?}"
 			;;
 		esac
 	done

@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_exit.c,v 1.82 2008/12/16 07:57:28 guenther Exp $	*/
+/*	$OpenBSD: kern_exit.c,v 1.85 2009/06/24 13:03:20 kurt Exp $	*/
 /*	$NetBSD: kern_exit.c,v 1.39 1996/04/22 01:38:25 christos Exp $	*/
 
 /*
@@ -60,9 +60,6 @@
 #include <sys/ktrace.h>
 #include <sys/pool.h>
 #include <sys/mutex.h>
-#ifdef SYSVSHM
-#include <sys/shm.h>
-#endif
 #ifdef SYSVSEM
 #include <sys/sem.h>
 #endif
@@ -183,7 +180,8 @@ exit1(struct proc *p, int rv, int flags)
 	fdfree(p);
 
 #ifdef SYSVSEM
-	semexit(p);
+	if ((p->p_flag & P_THREAD) == 0)
+		semexit(p->p_p);
 #endif
 	if (SESS_LEADER(p)) {
 		struct session *sp = p->p_session;
@@ -306,10 +304,6 @@ exit1(struct proc *p, int rv, int flags)
 			wakeup(pp);
 	}
 
-	if (p->p_exitsig != 0)
-		psignal(p->p_pptr, P_EXITSIG(p));
-	wakeup(p->p_pptr);
-
 	/*
 	 * Release the process's signal state.
 	 */
@@ -400,14 +394,6 @@ reaper(void)
 		KERNEL_PROC_LOCK(curproc);
 
 		/*
-		 * Give machine-dependent code a chance to free any
-		 * resources it couldn't free while still running on
-		 * that process's context.  This must be done before
-		 * uvm_exit(), in case these resources are in the PCB.
-		 */
-		cpu_wait(p);
-
-		/*
 		 * Free the VM resources we're still holding on to.
 		 * We must do this from a valid thread because doing
 		 * so may block.
@@ -418,8 +404,9 @@ reaper(void)
 		if ((p->p_flag & P_NOZOMBIE) == 0) {
 			p->p_stat = SZOMB;
 
+			if (P_EXITSIG(p) != 0)
+				psignal(p->p_pptr, P_EXITSIG(p));
 			/* Wake up the parent so it can get exit status. */
-			psignal(p->p_pptr, SIGCHLD);
 			wakeup(p->p_pptr);
 		} else {
 			/* Noone will wait for us. Just zap the process now */

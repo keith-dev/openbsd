@@ -1,4 +1,4 @@
-/*	$OpenBSD: relayd.h,v 1.113 2008/12/05 16:37:56 reyk Exp $	*/
+/*	$OpenBSD: relayd.h,v 1.126 2009/06/06 18:31:42 pyr Exp $	*/
 
 /*
  * Copyright (c) 2006, 2007 Pierre-Yves Ritschard <pyr@openbsd.org>
@@ -19,6 +19,8 @@
  */
 
 #include <sys/tree.h>
+
+#include <imsg.h>
 
 #define CONF_FILE		"/etc/relayd.conf"
 #define RELAYD_SOCKET		"/var/run/relayd.sock"
@@ -47,7 +49,6 @@
 #define RELAY_MAXLOOKUPLEVELS	5
 
 #define SMALL_READ_BUF_SIZE	1024
-#define READ_BUF_SIZE		65535
 #define ICMP_BUF_SIZE		64
 
 #define PURGE_TABLES		0x01
@@ -70,114 +71,6 @@ struct shuffle {
 	int		 isindex;
 };
 
-/* buffer */
-struct buf {
-	TAILQ_ENTRY(buf)	 entry;
-	u_char			*buf;
-	size_t			 size;
-	size_t			 max;
-	size_t			 wpos;
-	size_t			 rpos;
-	int			 fd;
-};
-
-struct msgbuf {
-	TAILQ_HEAD(, buf)	 bufs;
-	u_int32_t		 queued;
-	int			 fd;
-};
-
-#define IMSG_HEADER_SIZE	sizeof(struct imsg_hdr)
-#define MAX_IMSGSIZE		8192
-
-struct buf_read {
-	u_char			 buf[READ_BUF_SIZE];
-	u_char			*rptr;
-	size_t			 wpos;
-};
-
-struct imsg_fd {
-	TAILQ_ENTRY(imsg_fd)	entry;
-	int			fd;
-};
-
-struct imsgbuf {
-	TAILQ_HEAD(, imsg_fd)	 fds;
-	struct buf_read		 r;
-	struct msgbuf		 w;
-	struct event		 ev;
-	void			(*handler)(int, short, void *);
-	int			 fd;
-	pid_t			 pid;
-	short			 events;
-};
-
-enum imsg_type {
-	IMSG_NONE,
-	IMSG_CTL_OK,		/* answer to relayctl requests */
-	IMSG_CTL_FAIL,
-	IMSG_CTL_END,
-	IMSG_CTL_RDR,
-	IMSG_CTL_TABLE,
-	IMSG_CTL_HOST,
-	IMSG_CTL_RELAY,
-	IMSG_CTL_SESSION,
-	IMSG_CTL_TABLE_CHANGED,
-	IMSG_CTL_PULL_RULESET,
-	IMSG_CTL_PUSH_RULESET,
-	IMSG_CTL_SHOW_SUM,	/* relayctl requests */
-	IMSG_CTL_RDR_ENABLE,
-	IMSG_CTL_RDR_DISABLE,
-	IMSG_CTL_TABLE_ENABLE,
-	IMSG_CTL_TABLE_DISABLE,
-	IMSG_CTL_HOST_ENABLE,
-	IMSG_CTL_HOST_DISABLE,
-	IMSG_CTL_SHUTDOWN,
-	IMSG_CTL_RELOAD,
-	IMSG_CTL_POLL,
-	IMSG_CTL_NOTIFY,
-	IMSG_CTL_RDR_STATS,
-	IMSG_CTL_RELAY_STATS,
-	IMSG_RDR_ENABLE,	/* notifies from pfe to hce */
-	IMSG_RDR_DISABLE,
-	IMSG_TABLE_ENABLE,
-	IMSG_TABLE_DISABLE,
-	IMSG_HOST_ENABLE,
-	IMSG_HOST_DISABLE,
-	IMSG_HOST_STATUS,	/* notifies from hce to pfe */
-	IMSG_SYNC,
-	IMSG_NATLOOK,
-	IMSG_DEMOTE,
-	IMSG_STATISTICS,
-	IMSG_RECONF,		/* reconfiguration notifies */
-	IMSG_RECONF_TABLE,
-	IMSG_RECONF_SENDBUF,
-	IMSG_RECONF_HOST,
-	IMSG_RECONF_RDR,
-	IMSG_RECONF_VIRT,
-	IMSG_RECONF_PROTO,
-	IMSG_RECONF_REQUEST_TREE,
-	IMSG_RECONF_RESPONSE_TREE,
-	IMSG_RECONF_PNODE_KEY,
-	IMSG_RECONF_PNODE_VAL,
-	IMSG_RECONF_RELAY,
-	IMSG_RECONF_END,
-	IMSG_SCRIPT,
-	IMSG_SNMPSOCK,
-	IMSG_BINDANY
-};
-
-struct imsg_hdr {
-	u_int16_t	 type;
-	u_int16_t	 len;
-	u_int32_t	 peerid;
-	pid_t		 pid;
-};
-
-struct imsg {
-	struct imsg_hdr	 hdr;
-	void		*data;
-};
 
 typedef u_int32_t objid_t;
 
@@ -224,7 +117,6 @@ struct ctl_tcp_event {
 	int			(*validate_read)(struct ctl_tcp_event *);
 	int			(*validate_close)(struct ctl_tcp_event *);
 	SSL			*ssl;
-	char			 rbuf[SMALL_READ_BUF_SIZE];
 };
 
 enum httpmethod {
@@ -317,6 +209,7 @@ struct portrange {
 
 struct address {
 	struct sockaddr_storage	 ss;
+	int			 ipproto;
 	struct portrange	 port;
 	char			 ifname[IFNAMSIZ];
 	TAILQ_ENTRY(address)	 entry;
@@ -344,6 +237,7 @@ TAILQ_HEAD(addresslist, address);
 #define F_TRAP			0x00040000
 #define F_NEEDPF		0x00080000
 #define F_PORT			0x00100000
+#define F_SSLCLIENT		0x00200000
 
 enum forwardmode {
 	FWD_NORMAL		= 0,
@@ -600,6 +494,7 @@ struct protocol {
 	u_int8_t		 tcpipminttl;
 	u_int8_t		 sslflags;
 	char			 sslciphers[768];
+	char			*sslca;
 	char			 name[MAX_NAME_SIZE];
 	int			 cache;
 	enum prototype		 type;
@@ -663,6 +558,8 @@ struct relay {
 	off_t			 rl_ssl_cert_len;
 	char			*rl_ssl_key;
 	off_t			 rl_ssl_key_len;
+	char			*rl_ssl_ca;
+	off_t			 rl_ssl_ca_len;
 
 	struct ctl_stats	 rl_stats[RELAY_MAXPROC + 1];
 
@@ -738,18 +635,81 @@ enum blockmodes {
 	BM_NONBLOCK
 };
 
+struct imsgev {
+	struct imsgbuf		 ibuf;
+	void			(*handler)(int, short, void *);
+	struct event		 ev;
+	void			*data;
+	short			 events;
+};
+
 struct ctl_conn {
 	TAILQ_ENTRY(ctl_conn)	 entry;
 	u_int8_t		 flags;
 #define CTL_CONN_NOTIFY		 0x01
-	struct imsgbuf		 ibuf;
+	struct imsgev	 	 iev;
 
 };
 TAILQ_HEAD(ctl_connlist, ctl_conn);
 
+enum imsg_type {
+	IMSG_NONE,
+	IMSG_CTL_OK,		/* answer to relayctl requests */
+	IMSG_CTL_FAIL,
+	IMSG_CTL_END,
+	IMSG_CTL_RDR,
+	IMSG_CTL_TABLE,
+	IMSG_CTL_HOST,
+	IMSG_CTL_RELAY,
+	IMSG_CTL_SESSION,
+	IMSG_CTL_TABLE_CHANGED,
+	IMSG_CTL_PULL_RULESET,
+	IMSG_CTL_PUSH_RULESET,
+	IMSG_CTL_SHOW_SUM,	/* relayctl requests */
+	IMSG_CTL_RDR_ENABLE,
+	IMSG_CTL_RDR_DISABLE,
+	IMSG_CTL_TABLE_ENABLE,
+	IMSG_CTL_TABLE_DISABLE,
+	IMSG_CTL_HOST_ENABLE,
+	IMSG_CTL_HOST_DISABLE,
+	IMSG_CTL_SHUTDOWN,
+	IMSG_CTL_RELOAD,
+	IMSG_CTL_POLL,
+	IMSG_CTL_NOTIFY,
+	IMSG_CTL_RDR_STATS,
+	IMSG_CTL_RELAY_STATS,
+	IMSG_RDR_ENABLE,	/* notifies from pfe to hce */
+	IMSG_RDR_DISABLE,
+	IMSG_TABLE_ENABLE,
+	IMSG_TABLE_DISABLE,
+	IMSG_HOST_ENABLE,
+	IMSG_HOST_DISABLE,
+	IMSG_HOST_STATUS,	/* notifies from hce to pfe */
+	IMSG_SYNC,
+	IMSG_NATLOOK,
+	IMSG_DEMOTE,
+	IMSG_STATISTICS,
+	IMSG_RECONF,		/* reconfiguration notifies */
+	IMSG_RECONF_TABLE,
+	IMSG_RECONF_SENDBUF,
+	IMSG_RECONF_HOST,
+	IMSG_RECONF_RDR,
+	IMSG_RECONF_VIRT,
+	IMSG_RECONF_PROTO,
+	IMSG_RECONF_REQUEST_TREE,
+	IMSG_RECONF_RESPONSE_TREE,
+	IMSG_RECONF_PNODE_KEY,
+	IMSG_RECONF_PNODE_VAL,
+	IMSG_RECONF_RELAY,
+	IMSG_RECONF_END,
+	IMSG_SCRIPT,
+	IMSG_SNMPSOCK,
+	IMSG_BINDANY
+};
+
 /* control.c */
 int	control_init(void);
-int	control_listen(struct relayd *, struct imsgbuf *, struct imsgbuf *);
+int	control_listen(struct relayd *, struct imsgev *, struct imsgev *);
 void    control_accept(int, short, void *);
 void    control_dispatch_imsg(int, short, void *);
 void	control_imsg_forward(struct imsg *);
@@ -764,13 +724,6 @@ struct relayd	*parse_config(const char *, int);
 int		 cmdline_symset(char *);
 
 /* log.c */
-void	log_init(int);
-void	log_warn(const char *, ...);
-void	log_warnx(const char *, ...);
-void	log_info(const char *, ...);
-void	log_debug(const char *, ...);
-__dead void fatal(const char *);
-__dead void fatalx(const char *);
 const char *host_error(enum host_error);
 const char *host_status(enum host_status);
 const char *table_check(enum table_check);
@@ -778,35 +731,6 @@ const char *print_availability(u_long, u_long);
 const char *print_host(struct sockaddr_storage *, char *, size_t);
 const char *print_time(struct timeval *, struct timeval *, char *, size_t);
 const char *print_httperror(u_int);
-
-/* buffer.c */
-struct buf	*buf_open(size_t);
-struct buf	*buf_dynamic(size_t, size_t);
-int		 buf_add(struct buf *, void *, size_t);
-void		*buf_reserve(struct buf *, size_t);
-int		 buf_close(struct msgbuf *, struct buf *);
-void		 buf_free(struct buf *);
-void		 msgbuf_init(struct msgbuf *);
-void		 msgbuf_clear(struct msgbuf *);
-int		 msgbuf_write(struct msgbuf *);
-
-/* imsg.c */
-void	 imsg_init(struct imsgbuf *, int, void (*)(int, short, void *));
-ssize_t	 imsg_read(struct imsgbuf *);
-ssize_t	 imsg_get(struct imsgbuf *, struct imsg *);
-int	 imsg_compose(struct imsgbuf *, enum imsg_type, u_int32_t, pid_t,
-	    int, void *, u_int16_t);
-int	 imsg_composev(struct imsgbuf *, enum imsg_type, u_int32_t,
-	    pid_t, int, const struct iovec *, int);
-struct buf *imsg_create(struct imsgbuf *, enum imsg_type, u_int32_t, pid_t,
-	    u_int16_t);
-int	 imsg_add(struct buf *, void *, u_int16_t);
-int	 imsg_close(struct imsgbuf *, struct buf *);
-void	 imsg_free(struct imsg *);
-void	 imsg_event_add(struct imsgbuf *); /* needs to be provided externally */
-int	 imsg_get_fd(struct imsgbuf *);
-int	 imsg_flush(struct imsgbuf *);
-void	 imsg_clear(struct imsgbuf *);
 
 /* pfe.c */
 pid_t	 pfe(struct relayd *, int [2], int [2], int [RELAY_MAXPROC][2],
@@ -883,6 +807,7 @@ void	 ssl_error(const char *, const char *);
 /* ssl_privsep.c */
 int	 ssl_ctx_use_private_key(SSL_CTX *, char *, off_t);
 int	 ssl_ctx_use_certificate_chain(SSL_CTX *, char *, off_t);
+int	 ssl_ctx_load_verify_memory(SSL_CTX *, char *, off_t);
 
 /* relayd.c */
 struct host	*host_find(struct relayd *, objid_t);
@@ -913,6 +838,9 @@ int		 protonode_load(enum direction, struct protocol *,
 		    struct protonode *, const char *);
 int		 map6to4(struct sockaddr_storage *);
 int		 map4to6(struct sockaddr_storage *, struct sockaddr_storage *);
+void		 imsg_event_add(struct imsgev *);
+int	 	 imsg_compose_event(struct imsgev *, u_int16_t, u_int32_t,
+		    pid_t, int, void *, u_int16_t);
 
 /* carp.c */
 int	 carp_demote_init(char *, int);
@@ -928,11 +856,19 @@ void		 pn_unref(u_int16_t);
 void		 pn_ref(u_int16_t);
 
 /* snmp.c */
-void	 snmp_init(struct relayd *, struct imsgbuf *);
-int	 snmp_sendsock(struct imsgbuf *);
+void	 snmp_init(struct relayd *, struct imsgev *);
+int	 snmp_sendsock(struct imsgev *);
 void	 snmp_hosttrap(struct table *, struct host *);
 
 /* shuffle.c */
 void		shuffle_init(struct shuffle *);
 u_int16_t	shuffle_generate16(struct shuffle *);
 
+/* log.c */
+void	log_init(int);
+void	log_warn(const char *, ...);
+void	log_warnx(const char *, ...);
+void	log_info(const char *, ...);
+void	log_debug(const char *, ...);
+__dead void fatal(const char *);
+__dead void fatalx(const char *);

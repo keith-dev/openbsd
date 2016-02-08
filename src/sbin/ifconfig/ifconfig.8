@@ -1,4 +1,4 @@
-.\"	$OpenBSD: ifconfig.8,v 1.177 2009/02/16 08:14:24 jmc Exp $
+.\"	$OpenBSD: ifconfig.8,v 1.183 2009/06/23 18:48:07 jmc Exp $
 .\"	$NetBSD: ifconfig.8,v 1.11 1996/01/04 21:27:29 pk Exp $
 .\"     $FreeBSD: ifconfig.8,v 1.16 1998/02/01 07:03:29 steve Exp $
 .\"
@@ -31,7 +31,7 @@
 .\"
 .\"     @(#)ifconfig.8	8.4 (Berkeley) 6/1/94
 .\"
-.Dd $Mdocdate: February 16 2009 $
+.Dd $Mdocdate: June 23 2009 $
 .Dt IFCONFIG 8
 .Os
 .Sh NAME
@@ -252,6 +252,14 @@ interface group.
 .It Cm -group Ar group-name
 Remove the interface from the given
 .Dq group .
+.It Fl inet6
+Disable
+.Xr inet6 4
+on the given interface and remove all configured
+.Xr inet6 4
+addresses, including the link-local ones.
+To turn it on again, assign any inet6 address or run
+.Xr rtsol 8 .
 .It Cm instance Ar minst
 Set the media instance to
 .Ar minst .
@@ -388,6 +396,12 @@ AppleTalk uses this scheme instead of
 netmasks though
 .Ox
 implements it internally as a set of netmasks.
+.It Cm rdomain Ar route-id
+Attach the interface to the routing table with the specified
+.Ar route-id .
+Interfaces in different routing domains are separated and can not directly
+pass traffic between each other.
+By default all interfaces belong to routing table 0.
 .It Cm rtlabel Ar route-label
 (inet)
 Attach
@@ -925,6 +939,7 @@ Unset the source address.
 .Nm ifconfig
 .Bk -words
 .Ar pfsync-interface
+.Op Oo Fl Oc Cm defer
 .Op Cm maxupd Ar n
 .Op Oo Fl Oc Cm syncdev Ar iface
 .Op Oo Fl Oc Cm syncpeer Ar peer_address
@@ -932,6 +947,15 @@ Unset the source address.
 .Pp
 The options are as follows:
 .Bl -tag -width Ds
+.It Cm defer
+Defer transmission of the first packet in a state until a peer has
+acknowledged that the associated state has been inserted.
+See
+.Xr pfsync 4
+for more information.
+.It Fl defer
+Do not defer the first packet in a state.
+This is the default.
 .It Cm maxupd Ar n
 If the driver is a
 .Xr pfsync 4

@@ -1,5 +1,5 @@
 # ex:ts=8 sw=4:
-# $OpenBSD: PackingList.pm,v 1.85 2008/10/20 10:25:16 espie Exp $
+# $OpenBSD: PackingList.pm,v 1.90 2009/07/03 17:02:02 naddy Exp $
 #
 # Copyright (c) 2003-2007 Marc Espie <espie@openbsd.org>
 #
@@ -43,6 +43,13 @@ sub set_cwd
 
 	$p = File::Spec->canonpath($p);
 	$self->{cwd} = \$p;
+}
+
+package OpenBSD::PackingList::hashpath;
+sub match
+{
+	my ($h, $plist) = @_;
+	return $h->{$plist->{extrainfo}->{subdir}};
 }
 
 package OpenBSD::PackingList;
@@ -352,7 +359,7 @@ sub set_pkgname
 {
 	my ($self, $name) = @_;
 	if (defined $self->{name}) {
-		$self->{name}->{name} = $name;
+		$self->{name}->set_name($name);
 	} else {
 		OpenBSD::PackingElement::Name->add($self, $name);
 	}
@@ -361,7 +368,11 @@ sub set_pkgname
 sub pkgname
 {
 	my $self = shift;
-	return $self->{name}->{name};
+	if (defined $self->{name}) {
+		return $self->{name}->name;
+	} else {
+		return undef;
+	}
 }
 
 sub localbase
@@ -369,7 +380,7 @@ sub localbase
 	my $self = shift;
 
 	if (defined $self->{localbase}) {
-		return $self->{localbase}->{name};
+		return $self->{localbase}->name;
 	} else {
 		return '/usr/local';
 	}
@@ -377,11 +388,37 @@ sub localbase
 
 sub is_signed
 {
-	return 0;
+	my $self = shift;
+	return defined $self->{'digital-signature'};
+}
+
+sub pkgpath
+{
+	my $self = shift;
+	if (!defined $self->{_hashpath}) {
+		my $h = $self->{_hashpath} = 
+		    bless {}, "OpenBSD::PackingList::hashpath";
+		if (defined $self->{extrainfo}) {
+			$h->{$self->{extrainfo}->{subdir}} = 1;
+		}
+		if (defined $self->{pkgpath}) {
+			for my $i (@{$self->{pkgpath}}) {
+				$h->{$i->name} = 1;
+			}
+		}
+	}
+	return $self->{_hashpath};
+}
+
+sub match_pkgpath
+{
+	my ($self, $plist2) = @_;
+	return $self->pkgpath->match($plist2) || 
+	    $plist2->pkgpath->match($self);
 }
 
 our @unique_categories =
-    (qw(name no-default-conflict manual-installation extrainfo localbase arch));
+    (qw(name digital-signature no-default-conflict manual-installation extrainfo localbase arch));
 
 our @list_categories =
     (qw(conflict pkgpath incompatibility updateset depend 

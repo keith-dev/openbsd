@@ -1,4 +1,4 @@
-/*	$OpenBSD: lsupdate.c,v 1.35 2009/01/31 11:44:49 claudio Exp $ */
+/*	$OpenBSD: lsupdate.c,v 1.38 2009/06/06 07:31:26 eric Exp $ */
 
 /*
  * Copyright (c) 2005 Claudio Jeker <claudio@openbsd.org>
@@ -33,10 +33,11 @@
 #include "rde.h"
 
 extern struct ospfd_conf	*oeconf;
-extern struct imsgbuf		*ibuf_rde;
+extern struct imsgev		*iev_rde;
 
 struct buf *prepare_ls_update(struct iface *);
-int	add_ls_update(struct buf *, struct iface *, void *, int, u_int16_t);
+int	add_ls_update(struct buf *, struct iface *, void *, u_int16_t,
+	    u_int16_t);
 int	send_ls_update(struct buf *, struct iface *, struct in_addr, u_int32_t);
 
 void	ls_retrans_list_insert(struct nbr *, struct lsa_entry *);
@@ -170,13 +171,13 @@ fail:
 }
 
 int
-add_ls_update(struct buf *buf, struct iface *iface, void *data, int len,
+add_ls_update(struct buf *buf, struct iface *iface, void *data, u_int16_t len,
     u_int16_t older)
 {
 	void		*lsage;
 	u_int16_t	 age;
 
-	if (buf_left(buf) < MD5_DIGEST_LENGTH)
+	if (buf_left(buf) < (size_t)len + MD5_DIGEST_LENGTH)
 		return (0);
 
 	lsage = buf_reserve(buf, 0);
@@ -269,8 +270,8 @@ recv_ls_update(struct nbr *nbr, char *buf, u_int16_t len)
 				    "neighbor ID %s", inet_ntoa(nbr->id));
 				return;
 			}
-			imsg_compose(ibuf_rde, IMSG_LS_UPD, nbr->peerid, 0,
-			    buf, ntohs(lsa.len));
+			imsg_compose_event(iev_rde, IMSG_LS_UPD, nbr->peerid, 0,
+			    -1, buf, ntohs(lsa.len));
 			buf += ntohs(lsa.len);
 			len -= ntohs(lsa.len);
 		}
@@ -600,4 +601,3 @@ lsa_cache_look(struct lsa_hdr *lsa_hdr)
 
 	return (NULL);
 }
-

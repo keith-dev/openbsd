@@ -1,4 +1,4 @@
-/*	$OpenBSD: route.c,v 1.104 2009/02/27 13:15:40 claudio Exp $	*/
+/*	$OpenBSD: route.c,v 1.109 2009/06/05 00:05:22 claudio Exp $	*/
 /*	$NetBSD: route.c,v 1.14 1996/02/13 22:00:46 christos Exp $	*/
 
 /*
@@ -251,7 +251,7 @@ rtable_exists(u_int id)	/* verify table with that ID exists */
 	if (id > rtbl_id_max)
 		return (0);
 
-	if (rt_tables[id] == NULL)	/* should not happen */
+	if (rt_tables[id] == NULL)
 		return (0);
 
 	return (1);
@@ -450,7 +450,7 @@ ifafree(struct ifaddr *ifa)
 void
 rtredirect(struct sockaddr *dst, struct sockaddr *gateway,
     struct sockaddr *netmask, int flags, struct sockaddr *src,
-    struct rtentry **rtp)
+    struct rtentry **rtp, u_int rdomain)
 {
 	struct rtentry		*rt;
 	int			 error = 0;
@@ -459,15 +459,15 @@ rtredirect(struct sockaddr *dst, struct sockaddr *gateway,
 	struct ifaddr		*ifa;
 	struct ifnet		*ifp = NULL;
 
-	splassert(IPL_SOFTNET);
+	splsoftassert(IPL_SOFTNET);
 
 	/* verify the gateway is directly reachable */
-	if ((ifa = ifa_ifwithnet(gateway)) == NULL) {
+	if ((ifa = ifa_ifwithnet(gateway, rdomain)) == NULL) {
 		error = ENETUNREACH;
 		goto out;
 	}
 	ifp = ifa->ifa_ifp;
-	rt = rtalloc1(dst, 0, 0);
+	rt = rtalloc1(dst, 0, rdomain);
 	/*
 	 * If the redirect isn't from our current router for this dst,
 	 * it's either old or wrong.  If it redirects us to ourselves,
@@ -480,7 +480,7 @@ rtredirect(struct sockaddr *dst, struct sockaddr *gateway,
 	if (!(flags & RTF_DONE) && rt &&
 	     (!equal(src, rt->rt_gateway) || rt->rt_ifa != ifa))
 		error = EINVAL;
-	else if (ifa_ifwithaddr(gateway) != NULL)
+	else if (ifa_ifwithaddr(gateway, rdomain) != NULL)
 		error = EHOSTUNREACH;
 	if (error)
 		goto done;
@@ -513,7 +513,8 @@ create:
 			info.rti_ifa = ifa;
 			info.rti_flags = flags;
 			rt = NULL;
-			error = rtrequest1(RTM_ADD, &info, RTP_DEFAULT, &rt, 0);
+			error = rtrequest1(RTM_ADD, &info, RTP_DEFAULT, &rt,
+			    rdomain);
 			if (rt != NULL)
 				flags = rt->rt_flags;
 			stat = &rtstat.rts_dynamic;
@@ -525,7 +526,7 @@ create:
 			rt->rt_flags |= RTF_MODIFIED;
 			flags |= RTF_MODIFIED;
 			stat = &rtstat.rts_newgateway;
-			rt_setgate(rt, rt_key(rt), gateway, 0);
+			rt_setgate(rt, rt_key(rt), gateway, rdomain);
 		}
 	} else
 		error = EHOSTUNREACH;
@@ -546,7 +547,7 @@ out:
 	info.rti_info[RTAX_GATEWAY] = gateway;
 	info.rti_info[RTAX_NETMASK] = netmask;
 	info.rti_info[RTAX_AUTHOR] = src;
-	rt_missmsg(RTM_REDIRECT, &info, flags, ifp, error, 0);
+	rt_missmsg(RTM_REDIRECT, &info, flags, ifp, error, rdomain);
 }
 
 /*
@@ -614,7 +615,8 @@ rtioctl(u_long req, caddr_t data, struct proc *p)
 }
 
 struct ifaddr *
-ifa_ifwithroute(int flags, struct sockaddr *dst, struct sockaddr *gateway)
+ifa_ifwithroute(int flags, struct sockaddr *dst, struct sockaddr *gateway,
+    u_int rdomain)
 {
 	struct ifaddr	*ifa;
 
@@ -639,21 +641,21 @@ ifa_ifwithroute(int flags, struct sockaddr *dst, struct sockaddr *gateway)
 		 */
 		ifa = NULL;
 		if (flags & RTF_HOST)
-			ifa = ifa_ifwithdstaddr(dst);
+			ifa = ifa_ifwithdstaddr(dst, rdomain);
 		if (ifa == NULL)
-			ifa = ifa_ifwithaddr(gateway);
+			ifa = ifa_ifwithaddr(gateway, rdomain);
 	} else {
 		/*
 		 * If we are adding a route to a remote net
 		 * or host, the gateway may still be on the
 		 * other end of a pt to pt link.
 		 */
-		ifa = ifa_ifwithdstaddr(gateway);
+		ifa = ifa_ifwithdstaddr(gateway, rdomain);
 	}
 	if (ifa == NULL)
-		ifa = ifa_ifwithnet(gateway);
+		ifa = ifa_ifwithnet(gateway, rdomain);
 	if (ifa == NULL) {
-		struct rtentry	*rt = rtalloc1(gateway, 0, 0);
+		struct rtentry	*rt = rtalloc1(gateway, 0, rdomain);
 		if (rt == NULL)
 			return (NULL);
 		rt->rt_refcnt--;
@@ -676,7 +678,7 @@ ifa_ifwithroute(int flags, struct sockaddr *dst, struct sockaddr *gateway)
 #define ROUNDUP(a) (a>0 ? (1 + (((a) - 1) | (sizeof(long) - 1))) : sizeof(long))
 
 int
-rt_getifa(struct rt_addrinfo *info)
+rt_getifa(struct rt_addrinfo *info, u_int rdom)
 {
 	struct ifaddr	*ifa;
 	int		 error = 0;
@@ -687,12 +689,12 @@ rt_getifa(struct rt_addrinfo *info)
 	 */
 	if (info->rti_ifp == NULL && info->rti_info[RTAX_IFP] != NULL
 	    && info->rti_info[RTAX_IFP]->sa_family == AF_LINK &&
-	    (ifa = ifa_ifwithnet((struct sockaddr *)info->rti_info[RTAX_IFP]))
-	    != NULL)
+	    (ifa = ifa_ifwithnet((struct sockaddr *)info->rti_info[RTAX_IFP],
+	    rdom)) != NULL)
 		info->rti_ifp = ifa->ifa_ifp;
 
 	if (info->rti_ifa == NULL && info->rti_info[RTAX_IFA] != NULL)
-		info->rti_ifa = ifa_ifwithaddr(info->rti_info[RTAX_IFA]);
+		info->rti_ifa = ifa_ifwithaddr(info->rti_info[RTAX_IFA], rdom);
 
 	if (info->rti_ifa == NULL) {
 		struct sockaddr	*sa;
@@ -707,10 +709,11 @@ rt_getifa(struct rt_addrinfo *info)
 		    info->rti_info[RTAX_GATEWAY] != NULL)
 			info->rti_ifa = ifa_ifwithroute(info->rti_flags,
 			    info->rti_info[RTAX_DST],
-			    info->rti_info[RTAX_GATEWAY]);
+			    info->rti_info[RTAX_GATEWAY],
+			    rdom);
 		else if (sa != NULL)
 			info->rti_ifa = ifa_ifwithroute(info->rti_flags,
-			    sa, sa);
+			    sa, sa, rdom);
 	}
 	if ((ifa = info->rti_ifa) != NULL) {
 		if (info->rti_ifp == NULL)
@@ -730,7 +733,7 @@ rtrequest1(int req, struct rt_addrinfo *info, u_int8_t prio,
 	struct radix_node_head	*rnh;
 	struct ifaddr		*ifa;
 	struct sockaddr		*ndst;
-	struct sockaddr_rtlabel	*sa_rl;
+	struct sockaddr_rtlabel	*sa_rl, sa_rl2;
 #ifdef MPLS
 	struct sockaddr_mpls	*sa_mpls;
 #endif
@@ -815,10 +818,13 @@ rtrequest1(int req, struct rt_addrinfo *info, u_int8_t prio,
 		info->rti_info[RTAX_GATEWAY] = rt->rt_gateway;
 		if ((info->rti_info[RTAX_NETMASK] = rt->rt_genmask) == NULL)
 			info->rti_flags |= RTF_HOST;
+		info->rti_info[RTAX_LABEL] =
+		    rtlabel_id2sa(rt->rt_labelid, &sa_rl2);
 		goto makeroute;
 
 	case RTM_ADD:
-		if (info->rti_ifa == 0 && (error = rt_getifa(info)))
+		if (info->rti_ifa == 0 && (error = rt_getifa(info,
+		    /* XXX wrong because only rdomains allowed */ tableid)))
 			senderr(error);
 		ifa = info->rti_ifa;
 makeroute:
@@ -832,7 +838,6 @@ makeroute:
 		if (prio == 0)
 			prio = ifa->ifa_ifp->if_priority + RTP_STATIC;
 		rt->rt_priority = prio;	/* init routing priority */
-#if 0
 		if ((LINK_STATE_IS_UP(ifa->ifa_ifp->if_link_state) ||
 		    ifa->ifa_ifp->if_link_state == LINK_STATE_UNKNOWN) &&
 		    ifa->ifa_ifp->if_flags & IFF_UP)
@@ -841,7 +846,6 @@ makeroute:
 			rt->rt_flags &= ~RTF_UP;
 			rt->rt_priority |= RTP_DOWN;
 		}
-#endif
 		LIST_INIT(&rt->rt_timer);
 		if (rt_setgate(rt, info->rti_info[RTAX_DST],
 		    info->rti_info[RTAX_GATEWAY], tableid)) {
@@ -1057,7 +1061,7 @@ rtinit(struct ifaddr *ifa, int cmd, int flags)
 	int			 error;
 	struct rt_addrinfo	 info;
 	struct sockaddr_rtlabel	 sa_rl;
-	const char		*label;
+	u_short			 rtableid = ifa->ifa_ifp->if_rdomain;
 
 	dst = flags & RTF_HOST ? ifa->ifa_dstaddr : ifa->ifa_addr;
 	if (cmd == RTM_DELETE) {
@@ -1069,7 +1073,7 @@ rtinit(struct ifaddr *ifa, int cmd, int flags)
 			rt_maskedcopy(dst, deldst, ifa->ifa_netmask);
 			dst = deldst;
 		}
-		if ((rt = rtalloc1(dst, 0, 0)) != NULL) {
+		if ((rt = rtalloc1(dst, 0, rtableid)) != NULL) {
 			rt->rt_refcnt--;
 			if (rt->rt_ifa != ifa) {
 				if (m != NULL)
@@ -1085,14 +1089,8 @@ rtinit(struct ifaddr *ifa, int cmd, int flags)
 	info.rti_info[RTAX_DST] = dst;
 	if (cmd == RTM_ADD)
 		info.rti_info[RTAX_GATEWAY] = ifa->ifa_addr;
-	if (ifa->ifa_ifp->if_rtlabelid &&
-	    (label = rtlabel_id2name(ifa->ifa_ifp->if_rtlabelid)) != NULL) {
-		bzero(&sa_rl, sizeof(sa_rl));
-		sa_rl.sr_len = sizeof(sa_rl);
-		sa_rl.sr_family = AF_UNSPEC;
-		strlcpy(sa_rl.sr_label, label, sizeof(sa_rl.sr_label));
-		info.rti_info[RTAX_LABEL] = (struct sockaddr *)&sa_rl;
-	}
+	info.rti_info[RTAX_LABEL] =
+	    rtlabel_id2sa(ifa->ifa_ifp->if_rtlabelid, &sa_rl);
 
 	/*
 	 * XXX here, it seems that we are assuming that ifa_netmask is NULL
@@ -1101,7 +1099,7 @@ rtinit(struct ifaddr *ifa, int cmd, int flags)
 	 * change it to meet bsdi4 behavior.
 	 */
 	info.rti_info[RTAX_NETMASK] = ifa->ifa_netmask;
-	error = rtrequest1(cmd, &info, RTP_CONNECTED, &nrt, 0);
+	error = rtrequest1(cmd, &info, RTP_CONNECTED, &nrt, rtableid);
 	if (cmd == RTM_DELETE && error == 0 && (rt = nrt) != NULL) {
 		rt_newaddrmsg(cmd, ifa, error, nrt);
 		if (rt->rt_refcnt <= 0) {
@@ -1296,11 +1294,13 @@ rt_timer_add(struct rtentry *rt, void (*func)(struct rtentry *,
 struct radix_node_head *
 rt_gettable(sa_family_t af, u_int id)
 {
+	if (id > rtbl_id_max)
+		return (NULL);
 	return (rt_tables[id] ? rt_tables[id][af2rtafidx[af]] : NULL);
 }
 
 struct radix_node *
-rt_lookup(struct sockaddr *dst, struct sockaddr *mask, int tableid)
+rt_lookup(struct sockaddr *dst, struct sockaddr *mask, u_int tableid)
 {
 	struct radix_node_head	*rnh;
 
@@ -1398,6 +1398,22 @@ rtlabel_id2name(u_int16_t id)
 	return (NULL);
 }
 
+struct sockaddr *
+rtlabel_id2sa(u_int16_t labelid, struct sockaddr_rtlabel *sa_rl)
+{
+	const char	*label;
+
+	if (labelid == 0 || (label = rtlabel_id2name(labelid)) == NULL)
+		return (NULL);
+
+	bzero(sa_rl, sizeof(*sa_rl));
+	sa_rl->sr_len = sizeof(*sa_rl);
+	sa_rl->sr_family = AF_UNSPEC;
+	strlcpy(sa_rl->sr_label, label, sizeof(sa_rl->sr_label));
+
+	return ((struct sockaddr *)sa_rl);
+}
+
 void
 rtlabel_unref(u_int16_t id)
 {
@@ -1422,13 +1438,17 @@ void
 rt_if_remove(struct ifnet *ifp)
 {
 	int			 i;
+	u_int			 tid;
 	struct radix_node_head	*rnh;
 
-	for (i = 1; i <= AF_MAX; i++)
-		if ((rnh = rt_gettable(i, 0)) != NULL)
-			while ((*rnh->rnh_walktree)(rnh,
-			    rt_if_remove_rtdelete, ifp) == EAGAIN)
-				;	/* nothing */
+	for (tid = 0; tid <= rtbl_id_max; tid++) {
+		for (i = 1; i <= AF_MAX; i++) {
+			if ((rnh = rt_gettable(i, tid)) != NULL)
+				while ((*rnh->rnh_walktree)(rnh,
+				    rt_if_remove_rtdelete, ifp) == EAGAIN)
+					;	/* nothing */
+		}
+	}
 }
 
 /*
@@ -1446,7 +1466,7 @@ rt_if_remove_rtdelete(struct radix_node *rn, void *vifp)
 	if (rt->rt_ifp == ifp) {
 		int	cloning = (rt->rt_flags & RTF_CLONING);
 
-		if (rtdeletemsg(rt, 0) == 0 && cloning)
+		if (rtdeletemsg(rt, ifp->if_rdomain /* XXX wrong */) == 0 && cloning)
 			return (EAGAIN);
 	}
 

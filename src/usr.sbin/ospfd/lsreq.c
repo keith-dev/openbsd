@@ -1,4 +1,4 @@
-/*	$OpenBSD: lsreq.c,v 1.16 2009/01/31 11:44:49 claudio Exp $ */
+/*	$OpenBSD: lsreq.c,v 1.18 2009/06/06 07:31:26 eric Exp $ */
 
 /*
  * Copyright (c) 2004, 2005 Esben Norby <norby@openbsd.org>
@@ -27,7 +27,7 @@
 #include "log.h"
 #include "ospfe.h"
 
-extern struct imsgbuf		*ibuf_rde;
+extern struct imsgev		*iev_rde;
 
 /* link state request packet handling */
 int
@@ -107,7 +107,8 @@ recv_ls_req(struct nbr *nbr, char *buf, u_int16_t len)
 	case NBR_STA_XCHNG:
 	case NBR_STA_LOAD:
 	case NBR_STA_FULL:
-		imsg_compose(ibuf_rde, IMSG_LS_REQ, nbr->peerid, 0, buf, len);
+		imsg_compose_event(iev_rde, IMSG_LS_REQ, nbr->peerid,
+		    0, -1, buf, len);
 		break;
 	default:
 		fatalx("recv_ls_req: unknown neighbor state");

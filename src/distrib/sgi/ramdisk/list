@@ -1,4 +1,4 @@
-#	$OpenBSD: list,v 1.16 2009/02/19 23:43:54 krw Exp $
+#	$OpenBSD: list,v 1.24 2009/06/02 06:17:47 todd Exp $
 
 SRCDIRS distrib/special
 SRCDIRS bin sbin usr.bin usr.sbin
@@ -22,6 +22,8 @@ LINK	instbin					bin/mt bin/eject
 LINK	instbin					bin/mv
 LINK	instbin					bin/pax bin/tar bin/cpio
 LINK	instbin					bin/rm
+LINK	instbin					bin/sha256
+LINK	instbin					bin/sleep
 LINK	instbin					bin/stty
 LINK	instbin					bin/sync
 LINK	instbin					sbin/dhclient
@@ -49,7 +51,7 @@ LINK	instbin					usr/bin/grep usr/bin/fgrep usr/bin/egrep
 LINK	instbin					usr/bin/gzip usr/bin/gunzip usr/bin/gzcat
 LINK	instbin					usr/bin/less usr/bin/more
 LINK	instbin					usr/bin/sed
-LINK	instbin					usr/bin/disknames
+LINK	instbin					sbin/sysctl
 LINK	instbin					sbin/bioctl
 
 # copy the MAKEDEV script and make some devices
@@ -57,7 +59,11 @@ SCRIPT	${DESTDIR}/dev/MAKEDEV			dev/MAKEDEV
 SPECIAL	cd dev; sh MAKEDEV ramdisk
 
 # we need the contents of /usr/mdec
-COPY	${DESTDIR}/usr/mdec/boot		usr/mdec/boot
+COPY	${DESTDIR}/usr/mdec/boot32		usr/mdec/boot32
+SYMLINK	/usr/mdec/boot32			usr/mdec/boot-IP32
+COPY	${DESTDIR}/usr/mdec/boot64		usr/mdec/boot64
+SYMLINK	/usr/mdec/boot64			usr/mdec/boot-IP27
+SYMLINK	/usr/mdec/boot64			usr/mdec/boot-IP30
 COPY	${DESTDIR}/usr/mdec/sgivol		usr/mdec/sgivol
 
 # various files that we need in /etc for the install
@@ -75,7 +81,7 @@ TERMCAP	vt100,vt220,dumb			usr/share/misc/termcap
 #COPY	${DESTDIR}/etc/firmware/tigon2		etc/firmware/tigon2
 
 # dhcp things
-COPY	${DESTDIR}/sbin/dhclient-script		sbin/dhclient-script
+SCRIPT	${DESTDIR}/sbin/dhclient-script		sbin/dhclient-script
 
 # and the installation tools
 SCRIPT	${CURDIR}/../../miniroot/dot.profile	.profile
@@ -84,3 +90,6 @@ SCRIPT	${CURDIR}/../../miniroot/upgrade.sh	upgrade
 SCRIPT	${CURDIR}/../../miniroot/install.sh	install
 SCRIPT	${CURDIR}/../../miniroot/install.sub	install.sub
 SPECIAL	chmod 755 install upgrade sbin/dhclient-script
+
+HASH	var/hash	bsd.IP27 bsd.IP30 bsd.IP32
+TZ

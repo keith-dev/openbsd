@@ -1,4 +1,4 @@
-#	$OpenBSD: install.md,v 1.12 2009/03/01 06:27:28 jsing Exp $
+#	$OpenBSD: install.md,v 1.20 2009/06/04 00:44:47 krw Exp $
 #
 #
 # Copyright (c) 1996 The NetBSD Foundation, Inc.
@@ -32,16 +32,26 @@
 # machine dependent section of installation/upgrade script.
 #
 
-ARCH=ARCH
+IPARCH=`sysctl -n hw.model`
+
+MDSETS="bsd.${IPARCH} bsd.rd.${IPARCH}"
+DEFAULTSETS=${MDSETS}
+SANESETS="bsd.${IPARCH}"
 
 md_installboot() {
+	cd /mnt
+	if [[ -f bsd.${IPARCH} ]]; then
+		mv bsd.${IPARCH} bsd
+	fi
+	if [[ -f bsd.rd.${IPARCH} ]]; then
+		mv bsd.rd.${IPARCH} bsd.rd
+	fi
 }
 
 md_prep_disklabel()
 {
-	local _disk
+	local _disk=$1 _f _op
 
-	_disk=$1
 	echo
 	echo "Checking SGI Volume Header:"
 	/usr/mdec/sgivol -q $_disk >/dev/null 2>/dev/null
@@ -113,7 +123,7 @@ __EOT
 	esac
 
 	echo "Installing boot loader in volume header."
-	/usr/mdec/sgivol -w boot /usr/mdec/boot $_disk
+	/usr/mdec/sgivol -w boot /usr/mdec/boot-`sysctl -n hw.model` $_disk
 	case $? in
 	0)
 		;;
@@ -121,6 +131,24 @@ __EOT
 		echo "WARNING: Boot install failed. Booting from disk will not be possible"
 		;;
 	esac
+
+	disklabel -W $_disk >/dev/null 2>&1
+	_f=/tmp/fstab.$_disk
+	if [[ $_disk == $ROOTDISK ]]; then
+		while :; do
+			echo "The auto-allocated layout for $_disk is:"
+			disklabel -h -A $_disk | egrep "^#  |^  [a-p]:"
+			ask "Use (A)uto layout, (E)dit auto layout, or create (C)ustom layout?" a
+			case $resp in
+			a*|A*)	_op=-w ; AUTOROOT=y ;;
+			e*|E*)	_op=-E ;;
+			c*|C*)	break ;;
+			*)	continue ;;
+			esac
+			disklabel -f $_f $_op -A $_disk
+			return
+		done
+	fi
 
 	cat <<__EOT
 
@@ -139,7 +167,6 @@ boot loader will not be able to locate and load the kernel.
 Do not change any parameters except the partition layout and the label name.
 
 __EOT
-	disklabel -W $_disk
 	disklabel -c -f /tmp/fstab.$_disk -E $_disk
 }
 

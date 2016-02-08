@@ -1,4 +1,4 @@
-/*	$OpenBSD: ospf6d.c,v 1.11 2008/12/28 22:05:04 sobrado Exp $ */
+/*	$OpenBSD: ospf6d.c,v 1.15 2009/06/06 09:02:46 eric Exp $ */
 
 /*
  * Copyright (c) 2005 Claudio Jeker <claudio@openbsd.org>
@@ -67,8 +67,8 @@ int	pipe_parent2rde[2];
 int	pipe_ospfe2rde[2];
 
 struct ospfd_conf	*ospfd_conf = NULL;
-struct imsgbuf		*ibuf_ospfe;
-struct imsgbuf		*ibuf_rde;
+struct imsgev		*iev_ospfe;
+struct imsgev		*iev_rde;
 char			*conffile;
 
 pid_t			 ospfe_pid = 0;
@@ -260,22 +260,24 @@ main(int argc, char *argv[])
 	close(pipe_ospfe2rde[0]);
 	close(pipe_ospfe2rde[1]);
 
-	if ((ibuf_ospfe = malloc(sizeof(struct imsgbuf))) == NULL ||
-	    (ibuf_rde = malloc(sizeof(struct imsgbuf))) == NULL)
+	if ((iev_ospfe = malloc(sizeof(struct imsgev))) == NULL ||
+	    (iev_rde = malloc(sizeof(struct imsgev))) == NULL)
 		fatal(NULL);
-	imsg_init(ibuf_ospfe, pipe_parent2ospfe[0], main_dispatch_ospfe);
-	imsg_init(ibuf_rde, pipe_parent2rde[0], main_dispatch_rde);
+	imsg_init(&iev_ospfe->ibuf, pipe_parent2ospfe[0]);
+	iev_ospfe->handler = main_dispatch_ospfe;
+	imsg_init(&iev_rde->ibuf, pipe_parent2rde[0]);
+	iev_rde->handler = main_dispatch_rde;
 
 	/* setup event handler */
-	ibuf_ospfe->events = EV_READ;
-	event_set(&ibuf_ospfe->ev, ibuf_ospfe->fd, ibuf_ospfe->events,
-	    ibuf_ospfe->handler, ibuf_ospfe);
-	event_add(&ibuf_ospfe->ev, NULL);
+	iev_ospfe->events = EV_READ;
+	event_set(&iev_ospfe->ev, iev_ospfe->ibuf.fd, iev_ospfe->events,
+	    iev_ospfe->handler, iev_ospfe);
+	event_add(&iev_ospfe->ev, NULL);
 
-	ibuf_rde->events = EV_READ;
-	event_set(&ibuf_rde->ev, ibuf_rde->fd, ibuf_rde->events,
-	    ibuf_rde->handler, ibuf_rde);
-	event_add(&ibuf_rde->ev, NULL);
+	iev_rde->events = EV_READ;
+	event_set(&iev_rde->ev, iev_rde->ibuf.fd, iev_rde->events,
+	    iev_rde->handler, iev_rde);
+	event_add(&iev_rde->ev, NULL);
 
 	if (kr_init(!(ospfd_conf->flags & OSPFD_FLAG_NO_FIB_UPDATE)) == -1)
 		fatalx("kr_init failed");
@@ -311,10 +313,10 @@ ospfd_shutdown(void)
 			fatal("wait");
 	} while (pid != -1 || (pid == -1 && errno == EINTR));
 
-	msgbuf_clear(&ibuf_ospfe->w);
-	free(ibuf_ospfe);
-	msgbuf_clear(&ibuf_rde->w);
-	free(ibuf_rde);
+	msgbuf_clear(&iev_ospfe->ibuf.w);
+	free(iev_ospfe);
+	msgbuf_clear(&iev_rde->ibuf.w);
+	free(iev_rde);
 	free(ospfd_conf);
 
 	log_info("terminating");
@@ -346,26 +348,22 @@ check_child(pid_t pid, const char *pname)
 void
 main_dispatch_ospfe(int fd, short event, void *bula)
 {
-	struct imsgbuf		*ibuf = bula;
+	struct imsgev		*iev = bula;
+	struct imsgbuf		*ibuf = &iev->ibuf;
 	struct imsg		 imsg;
 	struct demote_msg	 dmsg;
 	ssize_t			 n;
 	int			 shut = 0;
 
-	switch (event) {
-	case EV_READ:
+	if (event & EV_READ) {
 		if ((n = imsg_read(ibuf)) == -1)
 			fatal("imsg_read error");
 		if (n == 0)	/* connection closed */
 			shut = 1;
-		break;
-	case EV_WRITE:
+	}
+	if (event & EV_WRITE) {
 		if (msgbuf_write(&ibuf->w) == -1)
 			fatal("msgbuf_write");
-		imsg_event_add(ibuf);
-		return;
-	default:
-		fatalx("unknown event");
 	}
 
 	for (;;) {
@@ -406,10 +404,10 @@ main_dispatch_ospfe(int fd, short event, void *bula)
 		imsg_free(&imsg);
 	}
 	if (!shut)
-		imsg_event_add(ibuf);
+		imsg_event_add(iev);
 	else {
 		/* this pipe is dead, so remove the event handler */
-		event_del(&ibuf->ev);
+		event_del(&iev->ev);
 		event_loopexit(NULL);
 	}
 }
@@ -418,25 +416,21 @@ main_dispatch_ospfe(int fd, short event, void *bula)
 void
 main_dispatch_rde(int fd, short event, void *bula)
 {
-	struct imsgbuf  *ibuf = bula;
+	struct imsgev	*iev = bula;
+	struct imsgbuf	*ibuf = &iev->ibuf;
 	struct imsg	 imsg;
 	ssize_t		 n;
 	int		 shut = 0;
 
-	switch (event) {
-	case EV_READ:
+	if (event & EV_READ) {
 		if ((n = imsg_read(ibuf)) == -1)
 			fatal("imsg_read error");
 		if (n == 0)	/* connection closed */
 			shut = 1;
-		break;
-	case EV_WRITE:
+	}
+	if (event & EV_WRITE) {
 		if (msgbuf_write(&ibuf->w) == -1)
 			fatal("msgbuf_write");
-		imsg_event_add(ibuf);
-		return;
-	default:
-		fatalx("unknown event");
 	}
 
 	for (;;) {
@@ -465,10 +459,10 @@ main_dispatch_rde(int fd, short event, void *bula)
 		imsg_free(&imsg);
 	}
 	if (!shut)
-		imsg_event_add(ibuf);
+		imsg_event_add(iev);
 	else {
 		/* this pipe is dead, so remove the event handler */
-		event_del(&ibuf->ev);
+		event_del(&iev->ev);
 		event_loopexit(NULL);
 	}
 }
@@ -476,26 +470,37 @@ main_dispatch_rde(int fd, short event, void *bula)
 void
 main_imsg_compose_ospfe(int type, pid_t pid, void *data, u_int16_t datalen)
 {
-	imsg_compose(ibuf_ospfe, type, 0, pid, data, datalen);
+	imsg_compose_event(iev_ospfe, type, 0, pid, -1, data, datalen);
 }
 
 void
 main_imsg_compose_rde(int type, pid_t pid, void *data, u_int16_t datalen)
 {
-	imsg_compose(ibuf_rde, type, 0, pid, data, datalen);
+	imsg_compose_event(iev_rde, type, 0, pid, -1, data, datalen);
 }
 
-/* this needs to be added here so that ospfctl can be used without libevent */
 void
-imsg_event_add(struct imsgbuf *ibuf)
+imsg_event_add(struct imsgev *iev)
 {
-	ibuf->events = EV_READ;
-	if (ibuf->w.queued)
-		ibuf->events |= EV_WRITE;
+	iev->events = EV_READ;
+	if (iev->ibuf.w.queued)
+		iev->events |= EV_WRITE;
 
-	event_del(&ibuf->ev);
-	event_set(&ibuf->ev, ibuf->fd, ibuf->events, ibuf->handler, ibuf);
-	event_add(&ibuf->ev, NULL);
+	event_del(&iev->ev);
+	event_set(&iev->ev, iev->ibuf.fd, iev->events, iev->handler, iev);
+	event_add(&iev->ev, NULL);
+}
+
+int
+imsg_compose_event(struct imsgev *iev, u_int16_t type, u_int32_t peerid,
+    pid_t pid, int fd, void *data, u_int16_t datalen)
+{
+	int	ret;
+
+	if ((ret = imsg_compose(&iev->ibuf, type, peerid,
+	    pid, fd, data, datalen)) != -1)
+		imsg_event_add(iev);
+	return (ret);
 }
 
 int
@@ -600,9 +605,9 @@ ospf_reload(void)
 int
 ospf_sendboth(enum imsg_type type, void *buf, u_int16_t len)
 {
-	if (imsg_compose(ibuf_ospfe, type, 0, 0, buf, len) == -1)
+	if (imsg_compose_event(iev_ospfe, type, 0, 0, -1, buf, len) == -1)
 		return (-1);
-	if (imsg_compose(ibuf_rde, type, 0, 0, buf, len) == -1)
+	if (imsg_compose_event(iev_rde, type, 0, 0, -1, buf, len) == -1)
 		return (-1);
 	return (0);
 }
@@ -713,7 +718,7 @@ merge_interfaces(struct area *a, struct area *xa)
 	for (i = LIST_FIRST(&a->iface_list); i != NULL; i = ni) {
 		ni = LIST_NEXT(i, entry);
 		if (iface_lookup(xa, i) == NULL) {
-			log_debug("merge_config: proc %d area %s removing "
+			log_debug("merge_interfaces: proc %d area %s removing "
 			    "interface %s", ospfd_process, inet_ntoa(a->id),
 			    i->name);
 			if (ospfd_process == PROC_OSPF_ENGINE)
@@ -727,7 +732,7 @@ merge_interfaces(struct area *a, struct area *xa)
 		ni = LIST_NEXT(xi, entry);
 		if ((i = iface_lookup(a, xi)) == NULL) {
 			/* new interface but delay initialisation */
-			log_debug("merge_config: proc %d area %s adding "
+			log_debug("merge_interfaces: proc %d area %s adding "
 			    "interface %s", ospfd_process, inet_ntoa(a->id),
 			    xi->name);
 			LIST_REMOVE(xi, entry);
@@ -736,8 +741,8 @@ merge_interfaces(struct area *a, struct area *xa)
 				xi->state = IF_STA_NEW;
 			continue;
 		}
-		log_debug("merge_config: proc %d area %s merging interface %s",
-		    ospfd_process, inet_ntoa(a->id), i->name);
+		log_debug("merge_interfaces: proc %d area %s merging "
+		    "interface %s", ospfd_process, inet_ntoa(a->id), i->name);
 		i->addr = xi->addr;
 		i->dst = xi->dst;
 		i->abr_id = xi->abr_id;

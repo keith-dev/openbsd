@@ -1,4 +1,4 @@
-/*	$OpenBSD: intr.h,v 1.38 2008/11/21 17:35:52 deraadt Exp $ */
+/*	$OpenBSD: intr.h,v 1.41 2009/06/09 01:12:38 deraadt Exp $ */
 
 /*
  * Copyright (c) 1997 Per Fogelstrom, Opsycon AB and RTMX Inc, USA.
@@ -77,6 +77,7 @@ extern int imask[IPL_NUM];
 
 /* SPL asserts */
 #define	splassert(wantipl)	/* nothing */
+#define	splsoftassert(wantipl)	/* nothing */
 
 #define	set_sint(p)	atomic_setbits_int(&curcpu()->ci_ipending, p)
 

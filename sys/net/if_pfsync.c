@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_pfsync.c,v 1.112 2009/02/26 07:29:46 dlg Exp $	*/
+/*	$OpenBSD: if_pfsync.c,v 1.127 2009/06/17 04:24:02 dlg Exp $	*/
 
 /*
  * Copyright (c) 2002 Michael Shalayeff
@@ -89,16 +89,13 @@
 #define PFSYNC_MINPKT ( \
 	sizeof(struct ip) + \
 	sizeof(struct pfsync_header) + \
-	sizeof(struct pfsync_subheader) + \
-	sizeof(struct pfsync_eof))
+	sizeof(struct pfsync_subheader))
 
 struct pfsync_pkt {
 	struct ip *ip;
 	struct in_addr src;
 	u_int8_t flags;
 };
-
-int	pfsync_input_hmac(struct mbuf *, int);
 
 int	pfsync_upd_tcp(struct pf_state *, struct pfsync_state_peer *,
 	    struct pfsync_state_peer *);
@@ -134,16 +131,16 @@ int	(*pfsync_acts[])(struct pfsync_pkt *, struct mbuf *, int, int) = {
 };
 
 struct pfsync_q {
-	int		(*write)(struct pf_state *, struct mbuf *, int);
+	void		(*write)(struct pf_state *, void *);
 	size_t		len;
 	u_int8_t	action;
 };
 
 /* we have one of these for every PFSYNC_S_ */
-int	pfsync_out_state(struct pf_state *, struct mbuf *, int);
-int	pfsync_out_iack(struct pf_state *, struct mbuf *, int);
-int	pfsync_out_upd_c(struct pf_state *, struct mbuf *, int);
-int	pfsync_out_del(struct pf_state *, struct mbuf *, int);
+void	pfsync_out_state(struct pf_state *, void *);
+void	pfsync_out_iack(struct pf_state *, void *);
+void	pfsync_out_upd_c(struct pf_state *, void *);
+void	pfsync_out_del(struct pf_state *, void *);
 
 struct pfsync_q pfsync_qs[] = {
 	{ pfsync_out_state, sizeof(struct pfsync_state),   PFSYNC_ACT_INS },
@@ -173,7 +170,7 @@ TAILQ_HEAD(pfsync_deferrals, pfsync_deferral);
 #define PFSYNC_PLSIZE	MAX(sizeof(struct pfsync_upd_req_item), \
 			    sizeof(struct pfsync_deferral))
 
-int	pfsync_out_tdb(struct tdb *, struct mbuf *, int);
+void	pfsync_out_tdb(struct tdb *, void *);
 
 struct pfsync_softc {
 	struct ifnet		 sc_if;
@@ -193,6 +190,7 @@ struct pfsync_softc {
 
 	struct pfsync_upd_reqs	 sc_upd_req_list;
 
+	int			 sc_defer;
 	struct pfsync_deferrals	 sc_deferrals;
 	u_int			 sc_deferred;
 
@@ -361,11 +359,8 @@ struct mbuf *
 pfsync_if_dequeue(struct ifnet *ifp)
 {
 	struct mbuf *m;
-	int s;
 
-	s = splnet();
 	IF_DEQUEUE(&ifp->if_snd, m);
-	splx(s);
 
 	return (m);
 }
@@ -377,11 +372,14 @@ void
 pfsyncstart(struct ifnet *ifp)
 {
 	struct mbuf *m;
+	int s;
 
+	s = splnet();
 	while ((m = pfsync_if_dequeue(ifp)) != NULL) {
 		IF_DROP(&ifp->if_snd);
 		m_freem(m);
 	}
+	splx(s);
 }
 
 int
@@ -566,7 +564,7 @@ pfsync_state_import(struct pfsync_state *sp, u_int8_t flags)
 	st->anchor.ptr = NULL;
 	st->rt_kif = NULL;
 
-	st->pfsync_time = time_second;
+	st->pfsync_time = time_uptime;
 	st->sync_state = PFSYNC_S_NONE;
 
 	/* XXX when we have nat_rule/anchors, use STATE_INC_COUNTERS */
@@ -622,13 +620,14 @@ pfsync_input(struct mbuf *m, ...)
 	struct pfsync_header *ph;
 	struct pfsync_subheader subh;
 
-	int offset;
+	int offset, len;
 	int rv;
 
 	pfsyncstats.pfsyncs_ipackets++;
 
 	/* verify that we have a sync interface configured */
-	if (!sc || !sc->sc_sync_if || !pf_status.running)
+	if (sc == NULL || !ISSET(sc->sc_if.if_flags, IFF_RUNNING) ||
+	    sc->sc_sync_if == NULL || !pf_status.running)
 		goto done;
 
 	/* verify that the packet came in on the right interface */
@@ -666,13 +665,11 @@ pfsync_input(struct mbuf *m, ...)
 		pfsyncstats.pfsyncs_badver++;
 		goto done;
 	}
-
-#if 0
-	if (pfsync_input_hmac(m, offset) != 0) {
-		/* XXX stats */
+	len = ntohs(ph->len) + offset;
+	if (m->m_pkthdr.len < len) {
+		pfsyncstats.pfsyncs_badlen++;
 		goto done;
 	}
-#endif
 
 	/* Cheaper to grab this now than having to mess with mbufs later */
 	pkt.ip = ip;
@@ -683,7 +680,7 @@ pfsync_input(struct mbuf *m, ...)
 		pkt.flags |= PFSYNC_SI_CKSUM;
 
 	offset += sizeof(*ph);
-	for (;;) {
+	while (offset <= len - sizeof(subh)) {
 		m_copydata(m, offset, sizeof(subh), (caddr_t)&subh);
 		offset += sizeof(subh);
 
@@ -841,46 +838,40 @@ pfsync_in_iack(struct pfsync_pkt *pkt, struct mbuf *m, int offset, int count)
 			pfsync_deferred(st, 0);
 	}
 	splx(s);
-	/*
-	 * XXX this is not yet implemented, but we know the size of the
-	 * message so we can skip it.
-	 */
 
-	return (count * sizeof(struct pfsync_ins_ack));
+	return (len);
 }
 
 int
 pfsync_upd_tcp(struct pf_state *st, struct pfsync_state_peer *src,
     struct pfsync_state_peer *dst)
 {
-	int sfail = 0;
+	int sync = 0;
 
 	/*
 	 * The state should never go backwards except
 	 * for syn-proxy states.  Neither should the
 	 * sequence window slide backwards.
 	 */
-	if (st->src.state > src->state &&
+	if ((st->src.state > src->state &&
 	    (st->src.state < PF_TCPS_PROXY_SRC ||
-	    src->state >= PF_TCPS_PROXY_SRC))
-		sfail = 1;
-	else if (SEQ_GT(st->src.seqlo, ntohl(src->seqlo)))
-		sfail = 3;
-	else if (st->dst.state > dst->state) {
-		/* There might still be useful
-		 * information about the src state here,
-		 * so import that part of the update,
-		 * then "fail" so we send the updated
-		 * state back to the peer who is missing
-		 * our what we know. */
-		pf_state_peer_ntoh(src, &st->src);
-		/* XXX do anything with timeouts? */
-		sfail = 7;
-	} else if (st->dst.state >= TCPS_SYN_SENT &&
-	    SEQ_GT(st->dst.seqlo, ntohl(dst->seqlo)))
-		sfail = 4;
+	    src->state >= PF_TCPS_PROXY_SRC)) ||
 
-	return (sfail);
+	    (st->src.state == src->state &&
+	    SEQ_GT(st->src.seqlo, ntohl(src->seqlo))))
+		sync++;
+	else
+		pf_state_peer_ntoh(src, &st->src);
+
+	if ((st->dst.state > dst->state) ||
+
+	    (st->dst.state >= TCPS_SYN_SENT &&
+	    SEQ_GT(st->dst.seqlo, ntohl(dst->seqlo))))
+		sync++;
+	else
+		pf_state_peer_ntoh(dst, &st->dst);
+
+	return (sync);
 }
 
 int
@@ -888,9 +879,8 @@ pfsync_in_upd(struct pfsync_pkt *pkt, struct mbuf *m, int offset, int count)
 {
 	struct pfsync_state *sa, *sp;
 	struct pf_state_cmp id_key;
-	struct pf_state_key *sk;
 	struct pf_state *st;
-	int sfail;
+	int sync;
 
 	struct mbuf *mp;
 	int len = count * sizeof(*sp);
@@ -934,41 +924,40 @@ pfsync_in_upd(struct pfsync_pkt *pkt, struct mbuf *m, int offset, int count)
 		if (ISSET(st->state_flags, PFSTATE_ACK))
 			pfsync_deferred(st, 1);
 
-		sk = st->key[PF_SK_WIRE];	/* XXX right one? */
-		sfail = 0;
-		if (sk->proto == IPPROTO_TCP)
-			sfail = pfsync_upd_tcp(st, &sp->src, &sp->dst);
+		if (st->key[PF_SK_WIRE]->proto == IPPROTO_TCP)
+			sync = pfsync_upd_tcp(st, &sp->src, &sp->dst);
 		else {
+			sync = 0;
+
 			/*
 			 * Non-TCP protocol state machine always go
 			 * forwards
 			 */
 			if (st->src.state > sp->src.state)
-				sfail = 5;
-			else if (st->dst.state > sp->dst.state)
-				sfail = 6;
+				sync++;
+			else
+				pf_state_peer_ntoh(&sp->src, &st->src);
+
+			if (st->dst.state > sp->dst.state)
+				sync++;
+			else
+				pf_state_peer_ntoh(&sp->dst, &st->dst);
 		}
 
-		if (sfail) {
-			if (pf_status.debug >= PF_DEBUG_MISC) {
-				printf("pfsync: %s stale update (%d)"
-				    " id: %016llx creatorid: %08x\n",
-				    (sfail < 7 ?  "ignoring" : "partial"),
-				    sfail, betoh64(st->id),
-				    ntohl(st->creatorid));
-			}
+		if (sync < 2) {
+			pfsync_alloc_scrub_memory(&sp->dst, &st->dst);
+			pf_state_peer_ntoh(&sp->dst, &st->dst);
+			st->expire = ntohl(sp->expire) + time_second;
+			st->timeout = sp->timeout;
+		}
+		st->pfsync_time = time_uptime;
+
+		if (sync) {
 			pfsyncstats.pfsyncs_stale++;
 
 			pfsync_update_state(st);
 			schednetisr(NETISR_PFSYNC);
-			continue;
 		}
-		pfsync_alloc_scrub_memory(&sp->dst, &st->dst);
-		pf_state_peer_ntoh(&sp->src, &st->src);
-		pf_state_peer_ntoh(&sp->dst, &st->dst);
-		st->expire = ntohl(sp->expire) + time_second;
-		st->timeout = sp->timeout;
-		st->pfsync_time = time_second;
 	}
 	splx(s);
 
@@ -979,12 +968,11 @@ int
 pfsync_in_upd_c(struct pfsync_pkt *pkt, struct mbuf *m, int offset, int count)
 {
 	struct pfsync_upd_c *ua, *up;
-	struct pf_state_key *sk;
 	struct pf_state_cmp id_key;
 	struct pf_state *st;
 
 	int len = count * sizeof(*up);
-	int sfail;
+	int sync;
 
 	struct mbuf *mp;
 	int offp, i;
@@ -1027,40 +1015,38 @@ pfsync_in_upd_c(struct pfsync_pkt *pkt, struct mbuf *m, int offset, int count)
 		if (ISSET(st->state_flags, PFSTATE_ACK))
 			pfsync_deferred(st, 1);
 
-		sk = st->key[PF_SK_WIRE]; /* XXX right one? */
-		sfail = 0;
-		if (sk->proto == IPPROTO_TCP)
-			sfail = pfsync_upd_tcp(st, &up->src, &up->dst);
+		if (st->key[PF_SK_WIRE]->proto == IPPROTO_TCP)
+			sync = pfsync_upd_tcp(st, &up->src, &up->dst);
 		else {
+			sync = 0;
 			/*
-			 * Non-TCP protocol state machine always go forwards
+			 * Non-TCP protocol state machine always go
+			 * forwards
 			 */
 			if (st->src.state > up->src.state)
-				sfail = 5;
-			else if (st->dst.state > up->dst.state)
-				sfail = 6;
-		}
+				sync++;
+			else
+				pf_state_peer_ntoh(&up->src, &st->src);
 
-		if (sfail) {
-			if (pf_status.debug >= PF_DEBUG_MISC) {
-				printf("pfsync: ignoring stale update "
-				    "(%d) id: %016llx "
-				    "creatorid: %08x\n", sfail,
-				    betoh64(st->id),
-				    ntohl(st->creatorid));
-			}
+			if (st->dst.state > up->dst.state)
+				sync++;
+			else
+				pf_state_peer_ntoh(&up->dst, &st->dst);
+		}
+		if (sync < 2) {
+			pfsync_alloc_scrub_memory(&up->dst, &st->dst);
+			pf_state_peer_ntoh(&up->dst, &st->dst);
+			st->expire = ntohl(up->expire) + time_second;
+			st->timeout = up->timeout;
+		}
+		st->pfsync_time = time_uptime;
+
+		if (sync) {
 			pfsyncstats.pfsyncs_stale++;
 
 			pfsync_update_state(st);
 			schednetisr(NETISR_PFSYNC);
-			continue;
 		}
-		pfsync_alloc_scrub_memory(&up->dst, &st->dst);
-		pf_state_peer_ntoh(&up->src, &st->src);
-		pf_state_peer_ntoh(&up->dst, &st->dst);
-		st->expire = ntohl(up->expire) + time_second;
-		st->timeout = up->timeout;
-		st->pfsync_time = time_second;
 	}
 	splx(s);
 
@@ -1208,11 +1194,10 @@ pfsync_in_bus(struct pfsync_pkt *pkt, struct mbuf *m, int offset, int count)
 
 	switch (bus->status) {
 	case PFSYNC_BUS_START:
-		timeout_add_sec(&sc->sc_bulkfail_tmo, 5); /* XXX magic */
-#if XXX
+		timeout_add(&sc->sc_bulkfail_tmo, 4 * hz +
 		    pf_pool_limits[PF_LIMIT_STATES].limit /
-		    (PFSYNC_BULKPACKETS * sc->sc_maxcount));
-#endif
+		    ((sc->sc_if.if_mtu - PFSYNC_MINPKT) /
+		    sizeof(struct pfsync_state)));
 		if (pf_status.debug >= PF_DEBUG_MISC)
 			printf("pfsync: received bulk update start\n");
 		break;
@@ -1318,8 +1303,8 @@ int
 pfsync_in_eof(struct pfsync_pkt *pkt, struct mbuf *m, int offset, int count)
 {
 	/* check if we are at the right place in the packet */
-	if (offset != m->m_pkthdr.len - sizeof(struct pfsync_eof))
-		pfsyncstats.pfsyncs_badact++;
+	if (offset != m->m_pkthdr.len)
+		pfsyncstats.pfsyncs_badlen++;
 
 	/* we're done. free and let the caller return */
 	m_freem(m);
@@ -1363,22 +1348,33 @@ pfsyncioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 	case SIOCSIFDSTADDR:
 #endif
 	case SIOCSIFFLAGS:
+		s = splnet();
 		if (ifp->if_flags & IFF_UP)
 			ifp->if_flags |= IFF_RUNNING;
-		else
+		else {
 			ifp->if_flags &= ~IFF_RUNNING;
+
+			/* drop everything */
+			timeout_del(&sc->sc_tmo);
+			pfsync_drop(sc);
+
+			/* cancel bulk update */
+			timeout_del(&sc->sc_bulk_tmo);
+			sc->sc_bulk_next = NULL;
+			sc->sc_bulk_last = NULL;
+		}
+		splx(s);
 		break;
 	case SIOCSIFMTU:
+		s = splnet();
 		if (ifr->ifr_mtu <= PFSYNC_MINPKT)
 			return (EINVAL);
 		if (ifr->ifr_mtu > MCLBYTES) /* XXX could be bigger */
 			ifr->ifr_mtu = MCLBYTES;
-		if (ifr->ifr_mtu < ifp->if_mtu) {
-			s = splnet();
+		if (ifr->ifr_mtu < ifp->if_mtu)
 			pfsync_sendout();
-			splx(s);
-		}
 		ifp->if_mtu = ifr->ifr_mtu;
+		splx(s);
 		break;
 	case SIOCGETPFSYNC:
 		bzero(&pfsyncr, sizeof(pfsyncr));
@@ -1388,6 +1384,7 @@ pfsyncioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		}
 		pfsyncr.pfsyncr_syncpeer = sc->sc_sync_peer;
 		pfsyncr.pfsyncr_maxupdates = sc->sc_maxupdates;
+		pfsyncr.pfsyncr_defer = sc->sc_defer;
 		return (copyout(&pfsyncr, ifr->ifr_data, sizeof(pfsyncr)));
 
 	case SIOCSETPFSYNC:
@@ -1396,15 +1393,21 @@ pfsyncioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		if ((error = copyin(ifr->ifr_data, &pfsyncr, sizeof(pfsyncr))))
 			return (error);
 
+		s = splnet();
+
 		if (pfsyncr.pfsyncr_syncpeer.s_addr == 0)
 			sc->sc_sync_peer.s_addr = INADDR_PFSYNC_GROUP;
 		else
 			sc->sc_sync_peer.s_addr =
 			    pfsyncr.pfsyncr_syncpeer.s_addr;
 
-		if (pfsyncr.pfsyncr_maxupdates > 255)
+		if (pfsyncr.pfsyncr_maxupdates > 255) {
+			splx(s);
 			return (EINVAL);
+		}
 		sc->sc_maxupdates = pfsyncr.pfsyncr_maxupdates;
+
+		sc->sc_defer = pfsyncr.pfsyncr_defer;
 
 		if (pfsyncr.pfsyncr_syncdev[0] == 0) {
 			sc->sc_sync_if = NULL;
@@ -1413,13 +1416,15 @@ pfsyncioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 				    --imo->imo_num_memberships]);
 				imo->imo_multicast_ifp = NULL;
 			}
+			splx(s);
 			break;
 		}
 
-		if ((sifp = ifunit(pfsyncr.pfsyncr_syncdev)) == NULL)
+		if ((sifp = ifunit(pfsyncr.pfsyncr_syncdev)) == NULL) {
+			splx(s);
 			return (EINVAL);
+		}
 
-		s = splnet();
 		if (sifp->if_mtu < sc->sc_if.if_mtu ||
 		    (sc->sc_sync_if != NULL &&
 		    sifp->if_mtu < sc->sc_sync_if->if_mtu) ||
@@ -1478,7 +1483,10 @@ pfsyncioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 			pfsync_sync_ok = 0;
 			if (pf_status.debug >= PF_DEBUG_MISC)
 				printf("pfsync: requesting bulk update\n");
-			timeout_add_sec(&sc->sc_bulkfail_tmo, 5);
+			timeout_add(&sc->sc_bulkfail_tmo, 4 * hz +
+			    pf_pool_limits[PF_LIMIT_STATES].limit /
+			    ((sc->sc_if.if_mtu - PFSYNC_MINPKT) /
+			    sizeof(struct pfsync_state)));
 			pfsync_request_update(0, 0);
 		}
 		splx(s);
@@ -1492,32 +1500,27 @@ pfsyncioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 	return (0);
 }
 
-int
-pfsync_out_state(struct pf_state *st, struct mbuf *m, int offset)
+void
+pfsync_out_state(struct pf_state *st, void *buf)
 {
-	struct pfsync_state *sp = (struct pfsync_state *)(m->m_data + offset);
+	struct pfsync_state *sp = buf;
 
 	pfsync_state_export(sp, st);
-
-	return (sizeof(*sp));
 }
 
-int
-pfsync_out_iack(struct pf_state *st, struct mbuf *m, int offset)
+void
+pfsync_out_iack(struct pf_state *st, void *buf)
 {
-	struct pfsync_ins_ack *iack =
-	    (struct pfsync_ins_ack *)(m->m_data + offset);
+	struct pfsync_ins_ack *iack = buf;
 
 	iack->id = st->id;
 	iack->creatorid = st->creatorid;
-
-	return (sizeof(*iack));
 }
 
-int
-pfsync_out_upd_c(struct pf_state *st, struct mbuf *m, int offset)
+void
+pfsync_out_upd_c(struct pf_state *st, void *buf)
 {
-	struct pfsync_upd_c *up = (struct pfsync_upd_c *)(m->m_data + offset);
+	struct pfsync_upd_c *up = buf;
 
 	up->id = st->id;
 	pf_state_peer_hton(&st->src, &up->src);
@@ -1532,21 +1535,17 @@ pfsync_out_upd_c(struct pf_state *st, struct mbuf *m, int offset)
 	up->timeout = st->timeout;
 
 	bzero(up->_pad, sizeof(up->_pad)); /* XXX */
-
-	return (sizeof(*up));
 }
 
-int
-pfsync_out_del(struct pf_state *st, struct mbuf *m, int offset)
+void
+pfsync_out_del(struct pf_state *st, void *buf)
 {
-	struct pfsync_del_c *dp = (struct pfsync_del_c *)(m->m_data + offset);
+	struct pfsync_del_c *dp = buf;
 
 	dp->id = st->id;
 	dp->creatorid = st->creatorid;
 
 	SET(st->state_flags, PFSTATE_NOSYNC);
-
-	return (sizeof(*dp));
 }
 
 void
@@ -1605,15 +1604,14 @@ pfsync_sendout(void)
 	int offset;
 	int q, count = 0;
 
-	splassert(IPL_NET);
-
 	if (sc == NULL || sc->sc_len == PFSYNC_MINPKT)
 		return;
 
+	if (!ISSET(sc->sc_if.if_flags, IFF_RUNNING) ||
 #if NBPFILTER > 0
-	if (ifp->if_bpf == NULL && sc->sc_sync_if == NULL) {
+	    (ifp->if_bpf == NULL && sc->sc_sync_if == NULL)) {
 #else
-	if (sc->sc_sync_if == NULL) {
+	    sc->sc_sync_if == NULL) {
 #endif
 		pfsync_drop(sc);
 		return;
@@ -1670,8 +1668,9 @@ pfsync_sendout(void)
 #ifdef PFSYNC_DEBUG
 			KASSERT(st->sync_state == q);
 #endif
+			pfsync_qs[q].write(st, m->m_data + offset);
+			offset += pfsync_qs[q].len;
 
-			offset += pfsync_qs[q].write(st, m, offset);
 			st->sync_state = PFSYNC_S_NONE;
 			count++;
 		}
@@ -1718,7 +1717,8 @@ pfsync_sendout(void)
 
 		count = 0;
 		TAILQ_FOREACH(t, &sc->sc_tdb_q, tdb_sync_entry) {
-			offset += pfsync_out_tdb(t, m, offset);
+			pfsync_out_tdb(t, m->m_data + offset);
+			offset += sizeof(struct pfsync_tdb);
 			CLR(t->tdb_flags, TDBF_PFSYNC);
 
 			count++;
@@ -1736,8 +1736,6 @@ pfsync_sendout(void)
 	bzero(subh, sizeof(*subh));
 	subh->action = PFSYNC_ACT_EOF;
 	subh->count = htons(1);
-
-	/* XXX write checksum in EOF here */
 
 	/* we're done, let's put it on the wire */
 #if NBPFILTER > 0
@@ -1773,7 +1771,7 @@ pfsync_insert_state(struct pf_state *st)
 {
 	struct pfsync_softc *sc = pfsyncif;
 
-	splassert(IPL_SOFTNET);
+	splsoftassert(IPL_SOFTNET);
 
 	if (ISSET(st->rule.ptr->rule_flag, PFRULE_NOSYNC) ||
 	    st->key[PF_SK_WIRE]->proto == IPPROTO_PFSYNC) {
@@ -1781,7 +1779,8 @@ pfsync_insert_state(struct pf_state *st)
 		return;
 	}
 
-	if (sc == NULL || ISSET(st->state_flags, PFSTATE_NOSYNC))
+	if (sc == NULL || !ISSET(sc->sc_if.if_flags, IFF_RUNNING) ||
+	    ISSET(st->state_flags, PFSTATE_NOSYNC))
 		return;
 
 #ifdef PFSYNC_DEBUG
@@ -1793,10 +1792,7 @@ pfsync_insert_state(struct pf_state *st)
 
 	pfsync_q_ins(st, PFSYNC_S_INS);
 
-	if (ISSET(st->state_flags, PFSTATE_ACK))
-		schednetisr(NETISR_PFSYNC);
-	else
-		st->sync_updates = 0;
+	st->sync_updates = 0;
 }
 
 int defer = 10;
@@ -1804,12 +1800,13 @@ int defer = 10;
 int
 pfsync_defer(struct pf_state *st, struct mbuf *m)
 {
-	return (0);
-#ifdef notyet
 	struct pfsync_softc *sc = pfsyncif;
 	struct pfsync_deferral *pd;
 
-	splassert(IPL_SOFTNET);
+	splsoftassert(IPL_SOFTNET);
+
+	if (!sc->sc_defer)
+		return (0);
 
 	if (sc->sc_deferred >= 128)
 		pfsync_undefer(TAILQ_FIRST(&sc->sc_deferrals), 0);
@@ -1829,17 +1826,17 @@ pfsync_defer(struct pf_state *st, struct mbuf *m)
 	timeout_set(&pd->pd_tmo, pfsync_defer_tmo, pd);
 	timeout_add(&pd->pd_tmo, defer);
 
+	schednetisr(NETISR_PFSYNC);
+
 	return (1);
-#endif
 }
 
 void
 pfsync_undefer(struct pfsync_deferral *pd, int drop)
 {
 	struct pfsync_softc *sc = pfsyncif;
-	int s;
 
-	splassert(IPL_SOFTNET);
+	splsoftassert(IPL_SOFTNET);
 
 	TAILQ_REMOVE(&sc->sc_deferrals, pd, pd_entry);
 	sc->sc_deferred--;
@@ -1849,10 +1846,8 @@ pfsync_undefer(struct pfsync_deferral *pd, int drop)
 	if (drop)
 		m_freem(pd->pd_m);
 	else {
-		s = splnet();
 		ip_output(pd->pd_m, (void *)NULL, (void *)NULL, 0,
 		    (void *)NULL, (void *)NULL);
-		splx(s);
 	}
 
 	pool_put(&sc->sc_pool, pd);
@@ -1892,9 +1887,9 @@ pfsync_update_state(struct pf_state *st)
 	struct pfsync_softc *sc = pfsyncif;
 	int sync = 0;
 
-	splassert(IPL_SOFTNET);
+	splsoftassert(IPL_SOFTNET);
 
-	if (sc == NULL)
+	if (sc == NULL || !ISSET(sc->sc_if.if_flags, IFF_RUNNING))
 		return;
 
 	if (ISSET(st->state_flags, PFSTATE_ACK))
@@ -1914,9 +1909,11 @@ pfsync_update_state(struct pf_state *st)
 	case PFSYNC_S_INS:
 		/* we're already handling it */
 
-		st->sync_updates++;
-		if (st->sync_updates >= sc->sc_maxupdates)
-			sync = 1;
+		if (st->key[PF_SK_WIRE]->proto == IPPROTO_TCP) {
+			st->sync_updates++;
+			if (st->sync_updates >= sc->sc_maxupdates)
+				sync = 1;
+		}
 		break;
 
 	case PFSYNC_S_IACK:
@@ -1931,7 +1928,7 @@ pfsync_update_state(struct pf_state *st)
 		    st->sync_state);
 	}
 
-	if (sync || (time_second - st->pfsync_time) < 2) {
+	if (sync || (time_uptime - st->pfsync_time) < 2) {
 		pfsync_upds++;
 		schednetisr(NETISR_PFSYNC);
 	}
@@ -1943,7 +1940,6 @@ pfsync_request_update(u_int32_t creatorid, u_int64_t id)
 	struct pfsync_softc *sc = pfsyncif;
 	struct pfsync_upd_req_item *item;
 	size_t nlen = sizeof(struct pfsync_upd_req);
-	int s;
 
 	/*
 	 * this code does nothing to prevent multiple update requests for the
@@ -1963,9 +1959,7 @@ pfsync_request_update(u_int32_t creatorid, u_int64_t id)
 		nlen += sizeof(struct pfsync_subheader);
 
 	if (sc->sc_len + nlen > sc->sc_if.if_mtu) {
-		s = splnet();
 		pfsync_sendout();
-		splx(s);
 
 		nlen = sizeof(struct pfsync_subheader) +
 		    sizeof(struct pfsync_upd_req);
@@ -2017,9 +2011,9 @@ pfsync_delete_state(struct pf_state *st)
 {
 	struct pfsync_softc *sc = pfsyncif;
 
-	splassert(IPL_SOFTNET);
+	splsoftassert(IPL_SOFTNET);
 
-	if (sc == NULL)
+	if (sc == NULL || !ISSET(sc->sc_if.if_flags, IFF_RUNNING))
 		return;
 
 	if (ISSET(st->state_flags, PFSTATE_ACK))
@@ -2058,16 +2052,15 @@ pfsync_delete_state(struct pf_state *st)
 void
 pfsync_clear_states(u_int32_t creatorid, const char *ifname)
 {
+	struct pfsync_softc *sc = pfsyncif;
 	struct {
 		struct pfsync_subheader subh;
 		struct pfsync_clr clr;
 	} __packed r;
 
-	struct pfsync_softc *sc = pfsyncif;
+	splsoftassert(IPL_SOFTNET);
 
-	splassert(IPL_SOFTNET);
-
-	if (sc == NULL)
+	if (sc == NULL || !ISSET(sc->sc_if.if_flags, IFF_RUNNING))
 		return;
 
 	bzero(&r, sizeof(r));
@@ -2086,7 +2079,6 @@ pfsync_q_ins(struct pf_state *st, int q)
 {
 	struct pfsync_softc *sc = pfsyncif;
 	size_t nlen = pfsync_qs[q].len;
-	int s;
 
 	KASSERT(st->sync_state == PFSYNC_S_NONE);
 
@@ -2098,9 +2090,7 @@ pfsync_q_ins(struct pf_state *st, int q)
 		nlen += sizeof(struct pfsync_subheader);
 
 	if (sc->sc_len + nlen > sc->sc_if.if_mtu) {
-		s = splnet();
 		pfsync_sendout();
-		splx(s);
 
 		nlen = sizeof(struct pfsync_subheader) + pfsync_qs[q].len;
 	}
@@ -2131,7 +2121,6 @@ pfsync_update_tdb(struct tdb *t, int output)
 {
 	struct pfsync_softc *sc = pfsyncif;
 	size_t nlen = sizeof(struct pfsync_tdb);
-	int s;
 
 	if (sc == NULL)
 		return;
@@ -2141,9 +2130,7 @@ pfsync_update_tdb(struct tdb *t, int output)
 			nlen += sizeof(struct pfsync_subheader);
 
 		if (sc->sc_len + nlen > sc->sc_if.if_mtu) {
-			s = splnet();
 			pfsync_sendout();
-			splx(s);
 
 			nlen = sizeof(struct pfsync_subheader) +
 			    sizeof(struct pfsync_tdb);
@@ -2180,10 +2167,10 @@ pfsync_delete_tdb(struct tdb *t)
 		sc->sc_len -= sizeof(struct pfsync_subheader);
 }
 
-int
-pfsync_out_tdb(struct tdb *t, struct mbuf *m, int offset)
+void
+pfsync_out_tdb(struct tdb *t, void *buf)
 {
-	struct pfsync_tdb *ut = (struct pfsync_tdb *)(m->m_data + offset);
+	struct pfsync_tdb *ut = buf;
 
 	bzero(ut, sizeof(*ut));
 	ut->spi = t->tdb_spi;
@@ -2210,8 +2197,6 @@ pfsync_out_tdb(struct tdb *t, struct mbuf *m, int offset)
 	    RPL_INCR : 0));
 	ut->cur_bytes = htobe64(t->tdb_cur_bytes);
 	ut->sproto = t->tdb_sproto;
-
-	return (sizeof(*ut));
 }
 
 void
@@ -2229,19 +2214,22 @@ pfsync_bulk_start(void)
 		printf("pfsync: received bulk update request\n");
 
 	pfsync_bulk_status(PFSYNC_BUS_START);
-	pfsync_bulk_update(sc);
+	timeout_add(&sc->sc_bulk_tmo, 0);
 }
 
 void
 pfsync_bulk_update(void *arg)
 {
 	struct pfsync_softc *sc = arg;
-	struct pf_state *st = sc->sc_bulk_next;
+	struct pf_state *st;
 	int i = 0;
 	int s;
 
 	s = splsoftnet();
-	do {
+
+	st = sc->sc_bulk_next;
+
+	while (st != sc->sc_bulk_last) {
 		if (st->sync_state == PFSYNC_S_NONE &&
 		    st->timeout < PFTM_MAX &&
 		    st->pfsync_time <= sc->sc_ureq_received) {
@@ -2258,7 +2246,7 @@ pfsync_bulk_update(void *arg)
 			timeout_add(&sc->sc_bulk_tmo, 1);
 			goto out;
 		}
-	} while (st != sc->sc_bulk_last);
+	}
 
 	/* we're done */
 	sc->sc_bulk_next = NULL;
@@ -2318,20 +2306,14 @@ void
 pfsync_send_plus(void *plus, size_t pluslen)
 {
 	struct pfsync_softc *sc = pfsyncif;
-	int s;
 
-	if (sc->sc_len + pluslen > sc->sc_if.if_mtu) {
-		s = splnet();
+	if (sc->sc_len + pluslen > sc->sc_if.if_mtu)
 		pfsync_sendout();
-		splx(s);
-	}
 
 	sc->sc_plus = plus;
 	sc->sc_len += (sc->sc_pluslen = pluslen);
 
-	s = splnet();
 	pfsync_sendout();
-	splx(s);
 }
 
 int
@@ -2362,17 +2344,12 @@ pfsync_state_in_use(struct pf_state *st)
 	return (1);
 }
 
-u_int pfsync_ints;
-u_int pfsync_tmos;
-
 void
 pfsync_timeout(void *arg)
 {
 	int s;
 
-	pfsync_tmos++;
-
-	s = splnet();
+	s = splsoftnet();
 	pfsync_sendout();
 	splx(s);
 }
@@ -2381,13 +2358,7 @@ pfsync_timeout(void *arg)
 void
 pfsyncintr(void)
 {
-	int s;
-
-	pfsync_ints++;
-
-	s = splnet();
 	pfsync_sendout();
-	splx(s);
 }
 
 int

@@ -1,22 +1,23 @@
-#	$OpenBSD: Makefile,v 1.478 2009/02/25 03:05:32 kevlo Exp $
+#	$OpenBSD: Makefile,v 1.484 2009/06/29 19:16:38 deraadt Exp $
 
 MAN=	aac.4 ac97.4 acphy.4 \
 	acpi.4 acpiac.4 acpiasus.4 acpibat.4 acpibtn.4 acpicpu.4 acpidock.4 \
-	acpiec.4 acpihpet.4 acpimadt.4 acpiprt.4 acpithinkpad.4 acpitimer.4 \
+	acpiec.4 acpihpet.4 acpimadt.4 acpiprt.4 acpipwrres.4 \
+	acpithinkpad.4 acpitimer.4 acpivideo.4 acpivout.4 \
 	acpitz.4 acx.4 adc.4 addcom.4 adl.4 admcts.4 admlc.4 admtemp.4 \
 	admtm.4 admtmp.4 admtt.4 adt.4 adtfsm.4 adv.4 age.4 ale.4 agp.4 \
 	aha.4 ahb.4 ahc.4 ahci.4 \
-	ahd.4 aic.4 akbd.4 alipm.4 amdiic.4 amdpm.4 ami.4 amphy.4 ams.4 \
-	an.4 andl.4 aps.4 arc.4 aria.4 art.4 \
+	ahd.4 aic.4 akbd.4 alipm.4 amas.4 amdiic.4 amdpm.4 ami.4 amphy.4 \
+	ams.4 an.4 andl.4 aps.4 arc.4 aria.4 art.4 \
 	asbtm.4 ast.4 atalk.4 atapiscsi.4 atphy.4 ath.4 atu.4 atw.4 audio.4 \
 	aue.4 auacer.4 auich.4 autri.4 auixp.4 auvia.4 axe.4 az.4 azalia.4 \
-	bce.4 bge.4 bha.4 bio.4 bktr.4 bluetooth.4 bmtphy.4 bnx.4 boca.4 \
-	bpf.4 brgphy.4 bridge.4 btkbd.4 btms.4 btsco.4 bwi.4 \
+	bce.4 berkwdt.4 bge.4 bha.4 bio.4 bktr.4 bluetooth.4 bmtphy.4 bnx.4 \
+	boca.4 bpf.4 brgphy.4 bridge.4 btkbd.4 btms.4 btsco.4 bwi.4 \
 	cac.4 cas.4 cardbus.4 carp.4 ccd.4 cd.4 cdce.4 cdcef.4 che.4 cfxga.4 \
 	ch.4 ciphy.4 ciss.4 clcs.4 clct.4 cmpci.4 cnw.4 \
 	com.4 crypto.4 cue.4 cy.4 cz.4 dc.4 dcphy.4 ddb.4 de.4 dpt.4 \
 	drm.4 eap.4 ec.4 eephy.4 ef.4 eg.4 ehci.4 eisa.4 el.4 em.4 \
-	emu.4 enc.4 envy.4 ep.4 epic.4 esa.4 \
+	emu.4 enc.4 endrun.4 envy.4 ep.4 epic.4 esa.4 \
 	eso.4 ess.4 et.4 etphy.4 ex.4 exphy.4 \
 	faith.4 fd.4 fdc.4 fins.4 fintek.4 fms.4 fpa.4 fxp.4 gdt.4 \
 	gentbi.4 gem.4 gif.4 \
@@ -33,7 +34,8 @@ MAN=	aac.4 ac97.4 acphy.4 \
 	moscom.4 mos.4 mpe.4 mpi.4 mpu.4 msk.4 msts.4 mtd.4 mtdphy.4 \
 	multicast.4 mtio.4 myx.4 ne.4 neo.4 netintro.4 nfe.4 nge.4 nmea.4 \
 	noct.4 nofn.4 nsclpcsio.4 nsgphy.4 nsphy.4 nsphyter.4 null.4 nviic.4 \
-	ohci.4 opl.4 options.4 onewire.4 oosiop.4 osiop.4 owid.4 owsbm.4 \
+	ohci.4 opl.4 options.4 onewire.4 oosiop.4 osiop.4 otus.4 \
+	owid.4 owsbm.4 \
 	owtemp.4 pcagpio.4 pcaled.4 pcdisplay.4 pchb.4 pci.4 pcib.4 pcfadc.4 \
 	pcfiic.4 pciide.4 pckbc.4 pckbd.4 pcmcia.4 pcn.4 pcppi.4 pcscp.4 \
 	pf.4 pflog.4 pflow.4 pfsync.4 pgt.4 piixpm.4 pim.4 \
@@ -49,7 +51,7 @@ MAN=	aac.4 ac97.4 acphy.4 \
 	stp.4 sv.4 systrace.4 tcic.4 tcp.4 termios.4 tht.4 ti.4 tl.4 \
 	tlphy.4 thmc.4 tqphy.4 trm.4 trunk.4 tsl.4 tty.4 tun.4 twe.4 txp.4 \
 	txphy.4 uaudio.4 uark.4 uath.4 uberry.4 ubsa.4 ubsec.4 ubt.4 \
-	ucom.4 uchcom.4 ucycom.4 udav.4 udcf.4 udfu.4 udp.4 udsbr.4 \
+	ucom.4 uchcom.4 ucycom.4 udav.4 udcf.4 udfu.4 udl.4 udp.4 udsbr.4 \
 	ueagle.4 uftdi.4 ugen.4 uhci.4 uhid.4 uhidev.4 uipaq.4 uk.4 ukbd.4 \
 	ukphy.4 ulpt.4 umass.4 umbg.4 umct.4 umidi.4 umodem.4 ums.4 umsm.4 \
 	unix.4 uow.4 upgt.4 upl.4 uplcom.4 ural.4 urio.4 url.4 urlphy.4 \

@@ -1,8 +1,9 @@
-/*	$OpenBSD: queue_shared.c,v 1.14 2009/02/24 12:07:47 gilles Exp $	*/
+/*	$OpenBSD: queue_shared.c,v 1.18 2009/05/10 11:29:40 jacekm Exp $	*/
 
 /*
  * Copyright (c) 2008 Gilles Chehade <gilles@openbsd.org>
  * Copyright (c) 2008 Pierre-Yves Ritschard <pyr@openbsd.org>
+ * Copyright (c) 2008-2009 Jacek Masiulaniec <jacekm@dobremiasto.net>
  *
  * Permission to use, copy, modify, and distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -373,7 +374,8 @@ queue_message_update(struct message *messagep)
 	messagep->retry++;
 
 	if (messagep->status & S_MESSAGE_PERMFAILURE) {
-		if (messagep->type & T_DAEMON_MESSAGE)
+		if (messagep->type & T_DAEMON_MESSAGE ||
+		    (messagep->sender.user[0] == '\0' && messagep->sender.domain[0] == '\0'))
 			queue_remove_envelope(messagep);
 		else {
 			messagep->id = queue_generate_id();
@@ -430,7 +432,7 @@ queue_update_envelope(struct message *messagep)
 	char dest[MAXPATHLEN];
 	FILE *fp;
 
-	if (! bsnprintf(temp, sizeof(temp), "%s/envelope.tmp", PATH_INCOMING))
+	if (! bsnprintf(temp, sizeof(temp), "%s/envelope.tmp", PATH_QUEUE))
 		fatalx("queue_update_envelope");
 
 	if (! bsnprintf(dest, sizeof(dest), "%s/%d/%s%s/%s", PATH_QUEUE,
@@ -559,7 +561,10 @@ qwalk(struct qwalk *q, char *filepath)
 	struct dirent	*dp;
 
 again:
+	errno = 0;
 	dp = readdir(q->dirs[q->level]);
+	if (errno)
+		fatal("qwalk: readdir");
 	if (dp == NULL) {
 		closedir(q->dirs[q->level]);
 		q->dirs[q->level] = NULL;

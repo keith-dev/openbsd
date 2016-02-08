@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_sk.c,v 1.150 2008/11/28 02:44:18 brad Exp $	*/
+/*	$OpenBSD: if_sk.c,v 1.152 2009/07/08 20:18:05 sthen Exp $	*/
 
 /*
  * Copyright (c) 1997, 1998, 1999, 2000

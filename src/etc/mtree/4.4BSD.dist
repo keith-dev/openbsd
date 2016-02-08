@@ -1,4 +1,4 @@
-#	$OpenBSD: 4.4BSD.dist,v 1.195 2008/12/23 18:33:36 reyk Exp $
+#	$OpenBSD: 4.4BSD.dist,v 1.198 2009/06/30 15:23:51 robert Exp $
 
 /set type=dir uname=root gname=wheel mode=0755
 # .
@@ -364,6 +364,11 @@ lpr
 # ./libexec/sendmail
 sendmail	type=dir uname=root gname=wheel mode=0755
 # ./libexec/sendmail
+..
+
+# ./libexec/smtpd
+smtpd		type=dir uname=root gname=wheel mode=0755
+# ./libexec/smtpd
 ..
 
 # ./usr/libexec
@@ -2580,6 +2585,11 @@ pkg
 # ./var/db/pkg
 ..
 
+# ./var/db/sysmerge
+sysmerge
+# ./var/db/sysmerge
+..
+
 # ./var/db
 ..
 
@@ -2736,6 +2746,11 @@ output		gname=daemon mode=0775
 # ./var/spool/output
 ..
 
+# ./var/spool/smtpd
+smtpd		type=dir uname=root gname=wheel mode=0711
+# ./var/spool/smtpd
+..
+
 # ./var/spool/sockets
 #sockets	mode=777
 # ./var/spool/sockets
@@ -2768,6 +2783,12 @@ vi.recover	 mode=01777
 
 # ./www
 www type=dir uname=root gname=daemon mode=755
+
+# ./www/dev
+dev type=dir uname=root gname=daemon mode=755
+
+# ./www
+..
 
 # ./www/icons
 icons  type=dir uname=root gname=daemon mode=755

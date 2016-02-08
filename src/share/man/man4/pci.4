@@ -1,4 +1,4 @@
-.\"	$OpenBSD: pci.4,v 1.267 2009/02/25 03:05:32 kevlo Exp $
+.\"	$OpenBSD: pci.4,v 1.272 2009/05/17 22:08:32 miod Exp $
 .\"	$NetBSD: pci.4,v 1.29 2000/04/01 00:32:23 tsarna Exp $
 .\"
 .\" Copyright (c) 2000 Theo de Raadt.  All rights reserved.
@@ -31,7 +31,7 @@
 .\" (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
 .\" THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 .\"
-.Dd $Mdocdate: February 25 2009 $
+.Dd $Mdocdate: May 17 2009 $
 .Dt PCI 4
 .Os
 .Sh NAME
@@ -65,6 +65,7 @@
 .Pp
 .Cd "# sgi"
 .Cd "pci* at macepcibr?"
+.Cd "pci* at xbridge?"
 .Pp
 .Cd "# sparc64"
 .Cd "pci* at psycho?"
@@ -132,7 +133,7 @@ Silicon Image 3124/3132/3531 SATA controller
 .Ss RAID and cache controllers
 .Bl -tag -width 10n -offset ind -compact
 .It Xr aac 4
-Adaptec SATA/SCSI RAID controller
+Adaptec SAS/SATA/SCSI RAID controller
 .It Xr ami 4
 American Megatrends Inc. MegaRAID PATA/SATA/SCSI RAID controller
 .It Xr arc 4
@@ -389,6 +390,8 @@ Gemtek PCI FM radio device
 .El
 .Ss Hardware Sensors
 .Bl -tag -width 10n -offset ind -compact
+.It Xr berkwdt 4
+Berkshire Products watchdog timer device
 .It Xr elansc 4
 AMD Elan SC520 System Controller with watchdog timer and GPIO
 .It Xr geodesc 4
@@ -410,6 +413,8 @@ ICS PCI-WDT500/501 watchdog timer device
 .Bl -tag -width "piixpcib(4)" -offset ind -compact
 .It Xr alipm 4
 Acer Labs M7101 SMBus controller
+.It Xr amas 4
+AMD memory address map
 .It Xr amdiic 4
 AMD-8111 SMBus controller
 .It Xr amdpcib 4

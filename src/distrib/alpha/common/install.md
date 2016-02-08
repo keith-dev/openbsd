@@ -1,4 +1,4 @@
-#       $OpenBSD: install.md,v 1.24 2008/06/26 05:42:03 ray Exp $
+#       $OpenBSD: install.md,v 1.31 2009/06/04 00:44:46 krw Exp $
 #
 # Copyright (c) 1996 The NetBSD Foundation, Inc.
 # All rights reserved.
@@ -32,7 +32,6 @@
 #
 
 MDXAPERTURE=1
-ARCH=ARCH
 
 md_installboot() {
 	local _rawdev=/dev/r${1}c
@@ -40,20 +39,42 @@ md_installboot() {
 	# use extracted mdec if it exists (may be newer)
 	if [ -d /mnt/usr/mdec ]; then
 		cp /mnt/usr/mdec/boot /mnt/boot
-		/mnt/usr/mdec/installboot -v /mnt/boot /mnt/usr/mdec/bootxx $_rawdev
+		/mnt/usr/mdec/installboot /mnt/boot /mnt/usr/mdec/bootxx $_rawdev
 	elif [ -d /usr/mdec ]; then
 		cp /usr/mdec/boot /mnt/boot
-		/usr/mdec/installboot -v /mnt/boot /usr/mdec/bootxx $_rawdev
-	else
-		echo No boot block prototypes found, you must run installboot manually.
+		/usr/mdec/installboot /mnt/boot /usr/mdec/bootxx $_rawdev
 	fi
 }
 
 md_prep_disklabel() {
-	local _disk=$1
+	local _disk=$1 _f _op
 
 	disklabel -W $_disk >/dev/null 2>&1
-	disklabel -f /tmp/fstab.$_disk -E $_disk
+	_f=/tmp/fstab.$_disk
+	if [[ $_disk == $ROOTDISK ]]; then
+		while :; do
+			echo "The auto-allocated layout for $_disk is:"
+			disklabel -h -A $_disk | egrep "^#  |^  [a-p]:"
+			ask "Use (A)uto layout, (E)dit auto layout, or create (C)ustom layout?" a
+			case $resp in
+			a*|A*)	_op=-w ; AUTOROOT=y ;;
+			e*|E*)	_op=-E ;;
+			c*|C*)	break ;;
+			*)	continue ;;
+			esac
+			disklabel -f $_f $_op -A $_disk
+			return
+		done
+	fi
+	cat <<__EOT
+You will now create a OpenBSD disklabel on the disk.  The disklabel defines
+how OpenBSD splits up the disk into OpenBSD partitions in which filesystems
+and swap space are created.  You must provide each filesystem's mountpoint
+in this program.
+
+__EOT
+
+	disklabel -f $_f -E $_disk
 }
 
 md_congrats() {

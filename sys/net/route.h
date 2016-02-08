@@ -1,4 +1,4 @@
-/*	$OpenBSD: route.h,v 1.59 2009/02/03 16:42:54 michele Exp $	*/
+/*	$OpenBSD: route.h,v 1.63 2009/06/05 00:05:22 claudio Exp $	*/
 /*	$NetBSD: route.h,v 1.9 1996/02/13 22:00:49 christos Exp $	*/
 
 /*
@@ -301,7 +301,7 @@ struct rt_omsghdr {
 #define ROUTE_MSGFILTER	1	/* bitmask to specifiy which types should be
 				   sent to the client. */
 
-#define ROUTE_SETFILTER(x, m)	(x) |= (1 << (m))
+#define ROUTE_FILTER(m)	(1 << (m))
 
 struct rt_addrinfo {
 	int	rti_addrs;
@@ -351,11 +351,10 @@ struct sockaddr_rtlabel {
 	char		sr_label[RTLABEL_LEN];
 };
 
-#define	RT_TABLEID_MAX	255
-
 #ifdef _KERNEL
 const char	*rtlabel_id2name(u_int16_t);
 u_int16_t	 rtlabel_name2id(char *);
+struct sockaddr	*rtlabel_id2sa(u_int16_t, struct sockaddr_rtlabel *);
 void		 rtlabel_unref(u_int16_t);
 
 #define	RTFREE(rt) do {							\
@@ -415,12 +414,12 @@ void	 rtalloc_noclone(struct route *, int);
 struct rtentry *
 	 rtalloc2(struct sockaddr *, int, int);
 void	 rtfree(struct rtentry *);
-int	 rt_getifa(struct rt_addrinfo *);
+int	 rt_getifa(struct rt_addrinfo *, u_int);
 int	 rtinit(struct ifaddr *, int, int);
 int	 rtioctl(u_long, caddr_t, struct proc *);
 void	 rtredirect(struct sockaddr *, struct sockaddr *,
 			 struct sockaddr *, int, struct sockaddr *,
-			 struct rtentry **);
+			 struct rtentry **, u_int);
 int	 rtrequest1(int, struct rt_addrinfo *, u_int8_t, struct rtentry **,
 	     u_int);
 void	 rt_if_remove(struct ifnet *);
@@ -430,6 +429,6 @@ void	 rt_if_track(struct ifnet *);
 int	 rtdeletemsg(struct rtentry *, u_int);
 
 struct radix_node_head	*rt_gettable(sa_family_t, u_int);
-struct radix_node	*rt_lookup(struct sockaddr *, struct sockaddr *, int);
+struct radix_node	*rt_lookup(struct sockaddr *, struct sockaddr *, u_int);
 #endif /* _KERNEL */
 #endif /* _NET_ROUTE_H_ */

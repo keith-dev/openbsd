@@ -128,11 +128,11 @@
 ./sbin/mount_mfs
 ./sbin/mount_msdos
 ./sbin/mount_nfs
+./sbin/mount_nnpfs
 ./sbin/mount_portal
 ./sbin/mount_procfs
 ./sbin/mount_udf
 ./sbin/mount_vnd
-./sbin/mount_xfs
 ./sbin/mountd
 ./sbin/ncheck
 ./sbin/ncheck_ffs
@@ -456,7 +456,6 @@
 ./usr/bin/su
 ./usr/bin/sudo
 ./usr/bin/sudoedit
-./usr/bin/sup
 ./usr/bin/systat
 ./usr/bin/tail
 ./usr/bin/talk
@@ -473,6 +472,7 @@
 ./usr/bin/tic
 ./usr/bin/time
 ./usr/bin/tip
+./usr/bin/tmux
 ./usr/bin/tn3270
 ./usr/bin/top
 ./usr/bin/touch
@@ -514,7 +514,6 @@
 ./usr/bin/who
 ./usr/bin/whoami
 ./usr/bin/whois
-./usr/bin/window
 ./usr/bin/write
 ./usr/bin/x99token
 ./usr/bin/xargs
@@ -945,6 +944,7 @@
 ./usr/libdata/perl5/OpenBSD/Ustar.pm
 ./usr/libdata/perl5/OpenBSD/Vstat.pm
 ./usr/libdata/perl5/OpenBSD/md5.pm
+./usr/libdata/perl5/OpenBSD/x509.pm
 ./usr/libdata/perl5/Package
 ./usr/libdata/perl5/Package/Constants.pm
 ./usr/libdata/perl5/Params
@@ -1897,10 +1897,13 @@
 ./usr/libexec/rpc.sprayd
 ./usr/libexec/rshd
 ./usr/libexec/sendmail
+./usr/libexec/sendmail/makemap
 ./usr/libexec/sendmail/sendmail
 ./usr/libexec/sftp-server
 ./usr/libexec/sm.bin
 ./usr/libexec/smrsh
+./usr/libexec/smtpd
+./usr/libexec/smtpd/makemap
 ./usr/libexec/spamd
 ./usr/libexec/spamd-setup
 ./usr/libexec/spamlogd
@@ -2082,6 +2085,8 @@
 ./usr/sbin/sensorsd
 ./usr/sbin/sliplogin
 ./usr/sbin/slstats
+./usr/sbin/smtpctl
+./usr/sbin/smtpd
 ./usr/sbin/snkadm
 ./usr/sbin/snkinit
 ./usr/sbin/snmpctl
@@ -2092,8 +2097,6 @@
 ./usr/sbin/stdethers
 ./usr/sbin/stdhosts
 ./usr/sbin/suexec
-./usr/sbin/supfilesrv
-./usr/sbin/supscan
 ./usr/sbin/sysctl
 ./usr/sbin/syslogc
 ./usr/sbin/syslogd
@@ -4716,6 +4719,7 @@
 ./var/db
 ./var/db/ns
 ./var/db/pkg
+./var/db/sysmerge
 ./var/empty
 ./var/empty/dev
 ./var/games
@@ -4743,6 +4747,7 @@
 ./var/spool/lock
 ./var/spool/mqueue
 ./var/spool/output
+./var/spool/smtpd
 ./var/spool/uucp
 ./var/spool/uucppublic
 ./var/tmp
@@ -4757,6 +4762,7 @@
 ./var/www/conf
 ./var/www/conf/modules
 ./var/www/conf/modules.sample
+./var/www/dev
 ./var/www/htdocs
 ./var/www/icons
 ./var/www/icons/small

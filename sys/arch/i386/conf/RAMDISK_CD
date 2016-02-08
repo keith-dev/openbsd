@@ -1,4 +1,4 @@
-#	$OpenBSD: RAMDISK_CD,v 1.167 2009/02/25 03:08:25 kevlo Exp $
+#	$OpenBSD: RAMDISK_CD,v 1.170 2009/04/28 17:10:24 deraadt Exp $
 
 machine		i386		# architecture, used by config; REQUIRED
 
@@ -149,6 +149,7 @@ rum*	at uhub?		# Ralink RT2501USB/RT2601USB
 run*	at uhub?		# Ralink RT2700U/RT2800U/RT3000U
 zyd*	at uhub?		# Zydas ZD1211/ZD1211B
 upgt*	at uhub?		# Conexant/Intersil PrismGT SoftMAC USB
+urtw*	at uhub?		# RealTek 8187
 
 npx0	at isa? port 0xf0 irq 13	# math coprocessor
 isadma0	at isa?
@@ -353,6 +354,7 @@ mskc*	at pci?				# Marvell Yukon-2
 msk*	at mskc?			#  each port of above
 em*	at pci?				# Intel Pro/1000 ethernet
 ixgb*	at pci?				# Intel Pro/10Gb ethernet
+ix*	at pci?				# Intel 82598EB 10Gb ethernet
 txp*	at pci?				# 3com 3CR990
 nge*	at pci?				# NS DP83820/DP83821 GigE
 re*	at pci?				# Realtek 8169/8169S/8110S
@@ -434,6 +436,7 @@ ukphy*	at mii?				# "unknown" PHYs
 pseudo-device	loop	1		# network loopback
 #pseudo-device	sl	1		# CSLIP
 #pseudo-device	ppp	1		# PPP
+pseudo-device	vlan			# IEEE 802.1Q VLAN 
 pseudo-device	bpfilter 1		# packet filter
 pseudo-device	rd	1		# ramdisk
 pseudo-device	ccd	4		# concatenated disk devices

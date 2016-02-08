@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2003-2008 Todd C. Miller <Todd.Miller@courtesan.com>
+ * Copyright (c) 2003-2009 Todd C. Miller <Todd.Miller@courtesan.com>
  *
  * This code is derived from software contributed by Aaron Spangler.
  *
@@ -82,7 +82,7 @@
 #include "lbuf.h"
 
 #ifndef lint
-__unused static const char rcsid[] = "$Sudo: ldap.c,v 1.100 2008/04/23 12:30:07 millert Exp $";
+__unused static const char rcsid[] = "$Sudo: ldap.c,v 1.108 2009/05/29 13:43:12 millert Exp $";
 #endif /* lint */
 
 #ifndef LDAP_OPT_SUCCESS
@@ -386,10 +386,32 @@ sudo_ldap_init(ldp, host, port)
 	    ldap_conf.tls_keyfile ? ldap_conf.tls_keyfile : "NULL"), 2);
 	rc = ldapssl_clientauth_init(ldap_conf.tls_certfile, NULL,
 	    ldap_conf.tls_keyfile != NULL, ldap_conf.tls_keyfile, NULL);
+	/*
+	 * Mozilla-derived SDKs have a bug starting with version 5.0
+	 * where the path can no longer be a file name and must be a dir.
+	 */
 	if (rc != LDAP_SUCCESS) {
-	    warningx("unable to initialize SSL cert and key db: %s",
-		ldapssl_err2string(rc));
-	    goto done;
+	    char *cp;
+	    if (ldap_conf.tls_certfile) {
+		cp = strrchr(ldap_conf.tls_certfile, '/');
+		if (cp != NULL && strncmp(cp + 1, "cert", 4) == 0)
+		    *cp = '\0';
+	    }
+	    if (ldap_conf.tls_keyfile) {
+		cp = strrchr(ldap_conf.tls_keyfile, '/');
+		if (cp != NULL && strncmp(cp + 1, "key", 3) == 0)
+		    *cp = '\0';
+	    }
+	    DPRINTF(("ldapssl_clientauth_init(%s, %s)",
+		ldap_conf.tls_certfile ? ldap_conf.tls_certfile : "NULL",
+		ldap_conf.tls_keyfile ? ldap_conf.tls_keyfile : "NULL"), 2);
+	    rc = ldapssl_clientauth_init(ldap_conf.tls_certfile, NULL,
+		ldap_conf.tls_keyfile != NULL, ldap_conf.tls_keyfile, NULL);
+	    if (rc != LDAP_SUCCESS) {
+		warningx("unable to initialize SSL cert and key db: %s",
+		    ldapssl_err2string(rc));
+		goto done;
+	    }
 	}
 
 	DPRINTF(("ldapssl_init(%s, %d, 1)", host, port), 2);
@@ -1128,7 +1150,7 @@ sudo_ldap_display_defaults(nss, pw, lbuf)
 	return(-1);
 
     rc = ldap_search_ext_s(ld, ldap_conf.base, LDAP_SCOPE_SUBTREE,
-	"cn=defaults", NULL, 0, NULL, NULL, NULL, -1, &result);
+	"cn=defaults", NULL, 0, NULL, NULL, NULL, 0, &result);
     if (rc == LDAP_SUCCESS && (entry = ldap_first_entry(ld, result))) {
 	bv = ldap_get_values_len(ld, entry, "sudoOption");
 	if (bv != NULL) {
@@ -1358,7 +1380,7 @@ sudo_ldap_display_privs(nss, pw, lbuf)
 	filt = do_netgr ? estrdup("sudoUser=+*") : sudo_ldap_build_pass1(pw);
 	DPRINTF(("ldap search '%s'", filt), 1);
 	rc = ldap_search_ext_s(ld, ldap_conf.base, LDAP_SCOPE_SUBTREE, filt,
-	    NULL, 0, NULL, NULL, NULL, -1, &result);
+	    NULL, 0, NULL, NULL, NULL, 0, &result);
 	efree(filt);
 	if (rc != LDAP_SUCCESS)
 	    continue;	/* no entries for this pass */
@@ -1412,7 +1434,7 @@ sudo_ldap_display_cmnd(nss, pw)
 	filt = do_netgr ? estrdup("sudoUser=+*") : sudo_ldap_build_pass1(pw);
 	DPRINTF(("ldap search '%s'", filt), 1);
 	rc = ldap_search_ext_s(ld, ldap_conf.base, LDAP_SCOPE_SUBTREE, filt,
-	    NULL, 0, NULL, NULL, NULL, -1, &result);
+	    NULL, 0, NULL, NULL, NULL, 0, &result);
 	efree(filt);
 	if (rc != LDAP_SUCCESS)
 	    continue;	/* no entries for this pass */
@@ -1583,7 +1605,7 @@ sudo_ldap_bind_s(ld)
 		DPRINTF(("gss_krb5_ccache_name() failed: %d", status), 1);
 	    }
 #else
-	    sudo_setenv("KRB5CCNAME", ldap_conf.krb5_ccname, TRUE);
+	    setenv("KRB5CCNAME", ldap_conf.krb5_ccname, TRUE);
 #endif
 	}
 	rc = ldap_sasl_interactive_bind_s(ld, ldap_conf.binddn, "GSSAPI",
@@ -1594,9 +1616,9 @@ sudo_ldap_bind_s(ld)
 		    DPRINTF(("gss_krb5_ccache_name() failed: %d", status), 1);
 #else
 	    if (old_ccname != NULL)
-		sudo_setenv("KRB5CCNAME", old_ccname, TRUE);
+		setenv("KRB5CCNAME", old_ccname, TRUE);
 	    else
-		sudo_unsetenv("KRB5CCNAME");
+		unsetenv("KRB5CCNAME");
 #endif
 	}
 	if (rc != LDAP_SUCCESS) {
@@ -1651,7 +1673,7 @@ sudo_ldap_open(nss)
     /* Prevent reading of user ldaprc and system defaults. */
     if (getenv("LDAPNOINIT") == NULL) {
 	ldapnoinit = TRUE;
-	sudo_setenv("LDAPNOINIT", "1", TRUE);
+	setenv("LDAPNOINIT", "1", TRUE);
     }
 
     /* Connect to LDAP server */
@@ -1668,23 +1690,34 @@ sudo_ldap_open(nss)
     }
 
     if (ldapnoinit)
-	sudo_unsetenv("LDAPNOINIT");
+	unsetenv("LDAPNOINIT");
 
     /* Set LDAP options */
     if (sudo_ldap_set_options(ld) < 0)
 	return(-1);
 
     if (ldap_conf.ssl_mode == SUDO_LDAP_STARTTLS) {
-#ifdef HAVE_LDAP_START_TLS_S
+#if defined(HAVE_LDAP_START_TLS_S)
 	rc = ldap_start_tls_s(ld, NULL, NULL);
 	if (rc != LDAP_SUCCESS) {
 	    warningx("ldap_start_tls_s(): %s", ldap_err2string(rc));
 	    return(-1);
 	}
 	DPRINTF(("ldap_start_tls_s() ok"), 1);
+#elif defined(HAVE_LDAP_SSL_CLIENT_INIT) && defined(HAVE_LDAP_START_TLS_S_NP)
+	if (ldap_ssl_client_init(NULL, NULL, 0, &rc) != LDAP_SUCCESS) {
+	    warningx("ldap_ssl_client_init(): %s", ldap_err2string(rc));
+	    return(-1);
+	}
+	rc = ldap_start_tls_s_np(ld, NULL);
+	if (rc != LDAP_SUCCESS) {
+	    warningx("ldap_start_tls_s_np(): %s", ldap_err2string(rc));
+	    return(-1);
+	}
+	DPRINTF(("ldap_start_tls_s_np() ok"), 1);
 #else
-	warningx("start_tls specified but LDAP libs do not support ldap_start_tls_s()");
-#endif /* HAVE_LDAP_START_TLS_S */
+	warningx("start_tls specified but LDAP libs do not support ldap_start_tls_s() or ldap_start_tls_s_np()");
+#endif /* !HAVE_LDAP_START_TLS_S && !HAVE_LDAP_START_TLS_S_NP */
     }
 
     /* Actually connect */
@@ -1707,7 +1740,7 @@ sudo_ldap_setdefs(nss)
 	return(-1);
 
     rc = ldap_search_ext_s(ld, ldap_conf.base, LDAP_SCOPE_SUBTREE,
-	"cn=defaults", NULL, 0, NULL, NULL, NULL, -1, &result);
+	"cn=defaults", NULL, 0, NULL, NULL, NULL, 0, &result);
     if (rc == 0 && (entry = ldap_first_entry(ld, result))) {
 	DPRINTF(("found:%s", ldap_get_dn(ld, entry)), 1);
 	sudo_ldap_parse_options(ld, entry);
@@ -1748,7 +1781,7 @@ sudo_ldap_lookup(nss, ret, pwflag)
 	for (matched = 0, do_netgr = 0; !matched && do_netgr < 2; do_netgr++) {
 	    filt = do_netgr ? estrdup("sudoUser=+*") : sudo_ldap_build_pass1(pw);
 	    rc = ldap_search_ext_s(ld, ldap_conf.base, LDAP_SCOPE_SUBTREE, filt,
-		NULL, 0, NULL, NULL, NULL, -1, &result);
+		NULL, 0, NULL, NULL, NULL, 0, &result);
 	    efree(filt);
 	    if (rc != LDAP_SUCCESS)
 		continue;
@@ -1819,7 +1852,7 @@ sudo_ldap_lookup(nss, ret, pwflag)
 	filt = do_netgr ? estrdup("sudoUser=+*") : sudo_ldap_build_pass1(pw);
 	DPRINTF(("ldap search '%s'", filt), 1);
 	rc = ldap_search_ext_s(ld, ldap_conf.base, LDAP_SCOPE_SUBTREE, filt,
-	    NULL, 0, NULL, NULL, NULL, -1, &result);
+	    NULL, 0, NULL, NULL, NULL, 0, &result);
 	if (rc != LDAP_SUCCESS)
 	    DPRINTF(("nothing found for '%s'", filt), 1);
 	efree(filt);

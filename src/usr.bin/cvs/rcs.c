@@ -1,4 +1,4 @@
-/*	$OpenBSD: rcs.c,v 1.286 2009/02/21 19:46:40 tobias Exp $	*/
+/*	$OpenBSD: rcs.c,v 1.291 2009/06/07 08:39:13 ray Exp $	*/
 /*
  * Copyright (c) 2004 Jean-Francois Brousseau <jfb@openbsd.org>
  * All rights reserved.
@@ -80,8 +80,6 @@
 
 /* opaque parse data */
 struct rcs_pdata {
-	u_int	rp_lines;
-
 	char	*rp_buf;
 	size_t	 rp_blen;
 	char	*rp_bufend;
@@ -614,12 +612,14 @@ rcs_branch_new(RCSFILE *file, RCSNUM *rev)
 			if (!rcsnum_cmp(sym->rs_num, brev, 0))
 				break;
 
-		if (sym != NULL) {
-			if (rcsnum_inc(brev) == NULL ||
-			    rcsnum_inc(brev) == NULL)
-				return (NULL);
-		} else
+		if (sym == NULL)
 			break;
+
+		if (rcsnum_inc(brev) == NULL ||
+		    rcsnum_inc(brev) == NULL) {
+			rcsnum_free(brev);
+			return (NULL);
+		}
 	}
 
 	return (brev);
@@ -1360,8 +1360,8 @@ rcs_rev_remove(RCSFILE *rf, RCSNUM *rev)
 		fd2 = rcs_rev_write_stmp(rf, prevrdp->rd_num, path_tmp2, 0);
 
 		diff_format = D_RCSDIFF;
-		if (cvs_diffreg(path_tmp1, path_tmp2,
-		    fd1, fd2, newdiff) == D_ERROR)
+		if (diffreg(path_tmp1, path_tmp2,
+		    fd1, fd2, newdiff, D_FORCEASCII) == D_ERROR)
 			fatal("rcs_diffreg failed");
 
 		close(fd1);
@@ -1650,7 +1650,6 @@ rcs_parse_init(RCSFILE *rfp)
 
 	pdp = xcalloc(1, sizeof(*pdp));
 
-	pdp->rp_lines = 0;
 	pdp->rp_pttype = RCS_TOK_ERR;
 
 	if ((pdp->rp_file = fdopen(rfp->fd, "r")) == NULL)
@@ -2328,8 +2327,6 @@ rcs_gettok(RCSFILE *rfp)
 	/* XXX we must skip backspace too for compatibility, should we? */
 	do {
 		ch = getc(pdp->rp_file);
-		if (ch == '\n')
-			pdp->rp_lines++;
 	} while (isspace(ch));
 
 	if (ch == EOF) {
@@ -2384,8 +2381,7 @@ rcs_gettok(RCSFILE *rfp)
 					ungetc(ch, pdp->rp_file);
 					break;
 				}
-			} else if (ch == '\n')
-				pdp->rp_lines++;
+			}
 
 			*(bp++) = ch;
 			pdp->rp_tlen++;
@@ -3538,11 +3534,11 @@ rcs_translate_tag(const char *revstr, RCSFILE *rfp)
 	int follow;
 	time_t deltatime;
 	char branch[CVS_REV_BUFSZ];
-	RCSNUM *brev, *frev, *rev, *rrev;
+	RCSNUM *brev, *frev, *rev;
 	struct rcs_delta *rdp, *trdp;
 	time_t cdate;
 
-	brev = frev = rrev = NULL;
+	brev = frev = NULL;
 
 	if (revstr == NULL) {
 		if (rfp->rf_branch != NULL) {
@@ -3565,7 +3561,7 @@ rcs_translate_tag(const char *revstr, RCSFILE *rfp)
 	else {
 		frev = rcs_sym_getrev(rfp, revstr);
 		if (frev == NULL)
-			frev = rrev = rcsnum_parse(revstr);
+			frev = rcsnum_parse(revstr);
 
 		brev = rcsnum_alloc();
 		rcsnum_cpy(rev, brev, rev->rn_len - 1);
@@ -3577,8 +3573,6 @@ rcs_translate_tag(const char *revstr, RCSFILE *rfp)
 			follow = 0;
 
 		rcsnum_free(brev);
-		if (rrev != NULL)
-			rcsnum_free(rrev);
 	}
 
 	if (cvs_specified_date != -1)
@@ -3607,12 +3601,10 @@ rcs_translate_tag(const char *revstr, RCSFILE *rfp)
 		return (rev);
 	}
 
-	if (frev != NULL)
-		rcsnum_tostr(frev, branch, sizeof(branch));
-
 	if (frev != NULL) {
 		brev = rcsnum_revtobr(frev);
 		brev->rn_len = rev->rn_len - 1;
+		rcsnum_free(frev);
 	}
 
 	rcsnum_free(rev);

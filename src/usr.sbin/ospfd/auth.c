@@ -1,4 +1,4 @@
-/*	$OpenBSD: auth.c,v 1.14 2008/07/24 18:46:59 claudio Exp $ */
+/*	$OpenBSD: auth.c,v 1.17 2009/06/06 07:31:26 eric Exp $ */
 
 /*
  * Copyright (c) 2004, 2005 Esben Norby <norby@openbsd.org>
@@ -148,18 +148,18 @@ auth_gen(struct buf *buf, struct iface *iface)
 		fatalx("auth_gen: buf_seek failed");
 
 	/* update length */
-	if (buf->wpos > USHRT_MAX)
+	if (buf_size(buf) > USHRT_MAX)
 		fatalx("auth_gen: resulting ospf packet too big");
-	ospf_hdr->len = htons((u_int16_t)buf->wpos);
+	ospf_hdr->len = htons(buf_size(buf));
 	/* clear auth_key field */
 	bzero(ospf_hdr->auth_key.simple, sizeof(ospf_hdr->auth_key.simple));
 
 	switch (iface->auth_type) {
 	case AUTH_NONE:
-		ospf_hdr->chksum = in_cksum(buf->buf, buf->wpos);
+		ospf_hdr->chksum = in_cksum(buf->buf, buf_size(buf));
 		break;
 	case AUTH_SIMPLE:
-		ospf_hdr->chksum = in_cksum(buf->buf, buf->wpos);
+		ospf_hdr->chksum = in_cksum(buf->buf, buf_size(buf));
 
 		strncpy(ospf_hdr->auth_key.simple, iface->auth_key,
 		    sizeof(ospf_hdr->auth_key.simple));
@@ -184,7 +184,7 @@ auth_gen(struct buf *buf, struct iface *iface)
 
 		/* calculate MD5 digest */
 		MD5Init(&hash);
-		MD5Update(&hash, buf->buf, buf->wpos);
+		MD5Update(&hash, buf->buf, buf_size(buf));
 		MD5Update(&hash, digest, MD5_DIGEST_LENGTH);
 		MD5Final(digest, &hash);
 
@@ -259,12 +259,12 @@ md_list_find(struct auth_md_head *head, u_int8_t keyid)
 }
 
 int
-md_list_send(struct auth_md_head *head, struct imsgbuf *to)
+md_list_send(struct auth_md_head *head, struct imsgev *to)
 {
 	struct auth_md	*m;
 
 	TAILQ_FOREACH(m, head, entry)
-		if (imsg_compose(to, IMSG_RECONF_AUTHMD, 0, 0, m,
+		if (imsg_compose_event(to, IMSG_RECONF_AUTHMD, 0, 0, -1, m, 
 		    sizeof(*m)) == -1)
 			return (-1);
 

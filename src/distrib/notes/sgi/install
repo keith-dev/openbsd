@@ -1,4 +1,4 @@
-dnl	$OpenBSD: install,v 1.14 2008/08/25 17:21:56 jsing Exp $
+dnl	$OpenBSD: install,v 1.17 2009/05/30 05:00:37 miod Exp $
 OpenBSDInstallPrelude
 
 There are several ways to install OpenBSD onto a disk. The easiest way
@@ -14,18 +14,24 @@ dhcpd(8) manual page on your server should provide detailed information
 on how to set up the server.
 
 The bootp or dhcp server needs to know the ethernet address of the
-system. This address can be found by using the ``printenv'' command
-in the Maintenance Console, looking for the ``eaddr'' variable.
+system. On O2 systems, this address can be found by using the ``printenv''
+command in the Maintenance Console, looking for the ``eaddr'' variable.
+On other systems, this address is ususally written on a factory sticker
+on the back of the machine.
 
-The server should also provide a tftp location, where the bsd.rd file
-should be available.
+The server should also provide a tftp location, where the proper bsd.rd
+file should be available.
 
 Once the server is set up, boot with the following command in the
 Maintenance Console:
 
-> bootp()/bsd.rd
+> bootp()/bsd.rd.IP32
+
+(replacing `IP32' by the family name suitable for your machine).
 
 Booting from CD-ROM installation media:
+
+(Note: this boot method only works on IP32 systems at the moment).
 
 From the System Maintenance Menu, select '2' (or click on the
 appropriate icon if in graphics console) to Install System Software.
@@ -53,17 +59,11 @@ OpenBSDInstallPart2
 	diskless setup isn't correct, or you may have a hardware or
 	configuration problem.
 
-OpenBSDBootMsgs(,"sd0")
-
-	You will next be asked for your terminal type.  If you are
-	installing from a non-serial console, the default of "vt220"
-	is correct.  If you are installing from a serial console
-	you should choose the terminal type from amongst those listed.
-	(If your terminal type is xterm, just use vt220.)
-
-OpenBSDInstallPart3
+OpenBSDInstallPart3(,"sd0")
 
 OpenBSDInstallPart4
+
+OpenBSDInstallPart5
 
 	No partitions should overlap with the SGI Volume Header, which by
 	default will use the first 3134 sectors. Additionally, the 'a'
@@ -72,27 +72,21 @@ OpenBSDInstallPart4
 	used, the 'a' partition should be located at offset 3135. If the 'a'
 	partition is not located immediately after the Volume Header the boot
 	loader will not be able to locate and load the kernel.
+dnl XXX Note that this is a #$%@ boot blocks limitation which should be fixed
+dnl XXX by reading the real label in the boot blocks.
 
-OpenBSDInstallPart5(sd0)
+OpenBSDInstallPart6({:-CD-ROM, NFS -:})
 
-OpenBSDInstallNet({:-CD-ROM, NFS -:})
-
-OpenBSDFTPInstall
-
-OpenBSDHTTPInstall
-
-OpenBSDTAPEInstall
+OpenBSDURLInstall
 
 OpenBSDCDROMInstall
 
 OpenBSDNFSInstall
 
-OpenBSDCommonFS(NFS)
+OpenBSDCommonInstall
 
-OpenBSDCommonURL
+OpenBSDTAPEInstall
 
 OpenBSDInstallWrapup
-
-OpenBSDInstallWrapupPart2
 
 OpenBSDCongratulations

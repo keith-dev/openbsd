@@ -1,4 +1,4 @@
-/*	$OpenBSD: util.c,v 1.56 2009/01/27 22:04:36 martynas Exp $	*/
+/*	$OpenBSD: util.c,v 1.63 2009/05/10 16:31:17 deraadt Exp $	*/
 /*	$NetBSD: util.c,v 1.12 1997/08/18 10:20:27 lukem Exp $	*/
 
 /*-
@@ -63,10 +63,6 @@
  * SUCH DAMAGE.
  */
 
-#if !defined(lint) && !defined(SMALL)
-static const char rcsid[] = "$OpenBSD: util.c,v 1.56 2009/01/27 22:04:36 martynas Exp $";
-#endif /* not lint and not SMALL */
-
 /*
  * FTP User Program -- Misc support routines
  */
@@ -110,6 +106,7 @@ setpeer(int argc, char *argv[])
 		code = -1;
 		return;
 	}
+#ifndef SMALL
 	if (argc < 2)
 		(void)another(&argc, &argv, "to");
 	if (argc < 2 || argc > 3) {
@@ -117,6 +114,7 @@ setpeer(int argc, char *argv[])
 		code = -1;
 		return;
 	}
+#endif /* !SMALL */
 	if (gatemode)
 		port = gateport;
 	else
@@ -310,7 +308,7 @@ tryagain:
 	}
 	if ((n != COMPLETE) ||
 	    (!aflag && acctname != NULL && command("ACCT %s", acctname) != COMPLETE)) {
-		warnx("Login failed.");
+		warnx("Login %s failed.", user);
 		if (retry || !anonftp)
 			return (0);
 		else
@@ -320,6 +318,7 @@ tryagain:
 	if (proxy)
 		return (1);
 	connected = -1;
+#ifndef SMALL
 	for (n = 0; n < macnum; ++n) {
 		if (!strcmp("init", macros[n].mac_name)) {
 			(void)strlcpy(line, "$init", sizeof line);
@@ -328,6 +327,7 @@ tryagain:
 			break;
 		}
 	}
+#endif /* SMALL */
 	return (1);
 }
 
@@ -337,6 +337,7 @@ tryagain:
  *
  * Returns false if no new arguments have been added.
  */
+#ifndef SMALL
 int
 another(int *pargc, char ***pargv, const char *prompt)
 {
@@ -361,6 +362,7 @@ another(int *pargc, char ***pargv, const char *prompt)
 	*pargv = margv;
 	return (ret);
 }
+#endif /* !SMALL */
 
 /*
  * glob files given in argv[] from the remote server.
@@ -412,7 +414,7 @@ remglob2(char *argv[], int doswitch, char **errbuf, FILE **ftemp, char *type)
 			temp[len++] = '/';
 		(void)strlcpy(&temp[len], TMPFILE, sizeof temp - len);
 		if ((fd = mkstemp(temp)) < 0) {
-			warn("unable to create temporary file %s", temp);
+			warn("unable to create temporary file: %s", temp);
 			return (NULL);
 		}
 		close(fd);
@@ -480,6 +482,7 @@ remglob(char *argv[], int doswitch, char **errbuf)
 	return remglob2(argv, doswitch, errbuf, &ftemp, NULL);
 }
 
+#ifndef SMALL
 int
 confirm(const char *cmd, const char *file)
 {
@@ -532,6 +535,7 @@ quit:
 	}
 	return (1);
 }
+#endif /* !SMALL */
 
 /*
  * Glob a local file name specification with
@@ -733,7 +737,7 @@ updateprogressmeter(int signo)
 
 	/* update progressmeter if foreground process or in -m mode */
 	if (foregroundproc() || progress == -1)
-		progressmeter(0);
+		progressmeter(0, NULL);
 	errno = save_errno;
 }
 
@@ -750,7 +754,7 @@ updateprogressmeter(int signo)
 static struct timeval start;
 
 void
-progressmeter(int flag)
+progressmeter(int flag, const char *filename)
 {
 	/*
 	 * List of order of magnitude prefixes.
@@ -760,10 +764,11 @@ progressmeter(int flag)
 
 	static struct timeval lastupdate;
 	static off_t lastsize;
+	static char *title = NULL;
 	struct timeval now, td, wait;
 	off_t cursize, abbrevsize;
 	double elapsed;
-	int ratio, barlength, i, remaining;
+	int ratio, barlength, i, remaining, overhead = 30;
 	char buf[512];
 
 	if (flag == -1) {
@@ -782,9 +787,29 @@ progressmeter(int flag)
 		ratio = 100;
 	ratio = MAX(ratio, 0);
 	ratio = MIN(ratio, 100);
-	snprintf(buf, sizeof(buf), "\r%3d%% ", ratio);
+	if (!verbose && flag == -1) {
+		filename = basename(filename);
+		if (filename != NULL)
+			title = strdup(filename);
+	}
+	if (!verbose && title != NULL) {
+		int l = strlen(title);
+		char *dotdot = "";
 
-	barlength = ttywidth - 30;
+		if (l < 12)
+			l = 12;
+		else if (l > 25) {
+			l = 22;
+			dotdot = "...";
+			overhead += 3;
+		}
+		snprintf(buf, sizeof(buf), "\r%-*.*s%s %3d%% ", l, l, title,
+		    dotdot, ratio);
+		overhead += l + 1;
+	} else
+		snprintf(buf, sizeof(buf), "\r%3d%% ", ratio);
+
+	barlength = ttywidth - overhead;
 	if (barlength > 0) {
 		i = barlength * ratio / 100;
 		snprintf(buf + strlen(buf), sizeof(buf) - strlen(buf),
@@ -862,6 +887,10 @@ progressmeter(int flag)
 	} else if (flag == 1) {
 		alarmtimer(0);
 		(void)putc('\n', ttyout);
+		if (title != NULL) {
+			free(title);
+			title = NULL;
+		}
 	}
 	fflush(ttyout);
 }
@@ -914,6 +943,7 @@ ptransfer(int siginfo)
 /*
  * List words in stringlist, vertically arranged
  */
+#ifndef SMALL
 void
 list_vertical(StringList *sl)
 {
@@ -951,6 +981,7 @@ list_vertical(StringList *sl)
 		}
 	}
 }
+#endif /* !SMALL */
 
 /*
  * Update the global ttywidth value, using TIOCGWINSZ.
@@ -1021,3 +1052,4 @@ controlediting(void)
 	}
 }
 #endif /* !SMALL */
+

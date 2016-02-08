@@ -1,4 +1,4 @@
-/*	$OpenBSD: config.c,v 1.5 2009/02/16 12:10:25 jacekm Exp $	*/
+/*	$OpenBSD: config.c,v 1.8 2009/06/06 04:14:21 pyr Exp $	*/
 
 /*
  * Copyright (c) 2008 Pierre-Yves Ritschard <pyr@openbsd.org>
@@ -63,11 +63,12 @@ purge_config(struct smtpd *env, u_int8_t what)
 	struct ssl	*s;
 
 	if (what & PURGE_LISTENERS) {
-		while ((l = TAILQ_FIRST(&env->sc_listeners)) != NULL) {
-			TAILQ_REMOVE(&env->sc_listeners, l, entry);
+		while ((l = TAILQ_FIRST(env->sc_listeners)) != NULL) {
+			TAILQ_REMOVE(env->sc_listeners, l, entry);
 			free(l);
 		}
-		TAILQ_INIT(&env->sc_listeners);
+		free(env->sc_listeners);
+		env->sc_listeners = NULL;
 	}
 	if (what & PURGE_MAPS) {
 		while ((m = TAILQ_FIRST(env->sc_maps)) != NULL) {
@@ -93,18 +94,19 @@ purge_config(struct smtpd *env, u_int8_t what)
 		env->sc_rules = NULL;
 	}
 	if (what & PURGE_SSL) {
-		while ((s = SPLAY_ROOT(&env->sc_ssl)) != NULL) {
-			SPLAY_REMOVE(ssltree, &env->sc_ssl, s);
+		while ((s = SPLAY_ROOT(env->sc_ssl)) != NULL) {
+			SPLAY_REMOVE(ssltree, env->sc_ssl, s);
 			free(s->ssl_cert);
 			free(s->ssl_key);
 			free(s);
 		}
-		SPLAY_INIT(&env->sc_ssl);
+		free(env->sc_ssl);
+		env->sc_ssl = NULL;
 	}
 }
 
 void
-init_peers(struct smtpd *env)
+init_pipes(struct smtpd *env)
 {
 	int	 i;
 	int	 j;
@@ -201,23 +203,23 @@ config_peers(struct smtpd *env, struct peer *p, u_int peercount)
 		if (dst == smtpd_process)
 			fatal("config_peers: cannot peer with oneself");
 		
-		if ((env->sc_ibufs[dst] = calloc(env->sc_instances[dst],
-		    sizeof(struct imsgbuf))) == NULL)
+		if ((env->sc_ievs[dst] = calloc(env->sc_instances[dst],
+		    sizeof(struct imsgev))) == NULL)
 			fatal("config_peers");
 
 		for (count = 0; count < env->sc_instances[dst]; count++) {
-			imsg_init(&(env->sc_ibufs[dst][count]),
-			    env->sc_pipes[src][dst][count], p[i].cb);
+			imsg_init(&(env->sc_ievs[dst][count].ibuf),
+			    env->sc_pipes[src][dst][count]);
+			env->sc_ievs[dst][count].handler =  p[i].cb;
+			env->sc_ievs[dst][count].events = EV_READ;
+			env->sc_ievs[dst][count].data = env;
 
-			env->sc_ibufs[dst][count].events = EV_READ;
-			env->sc_ibufs[dst][count].data = env;
-
-			event_set(&(env->sc_ibufs[dst][count].ev),
-			    env->sc_ibufs[dst][count].fd,
-			    env->sc_ibufs[dst][count].events,
-			    env->sc_ibufs[dst][count].handler,
-			    env->sc_ibufs[dst][count].data);
-			event_add(&(env->sc_ibufs[dst][count].ev), NULL);
+			event_set(&(env->sc_ievs[dst][count].ev),
+			    env->sc_ievs[dst][count].ibuf.fd,
+			    env->sc_ievs[dst][count].events,
+			    env->sc_ievs[dst][count].handler,
+			    env->sc_ievs[dst][count].data);
+			event_add(&(env->sc_ievs[dst][count].ev), NULL);
 		}
 	}
 }

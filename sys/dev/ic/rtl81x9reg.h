@@ -1,4 +1,4 @@
-/*	$OpenBSD: rtl81x9reg.h,v 1.60 2009/02/12 11:55:29 martynas Exp $	*/
+/*	$OpenBSD: rtl81x9reg.h,v 1.63 2009/07/03 16:55:27 deraadt Exp $	*/
 
 /*
  * Copyright (c) 1997, 1998
@@ -163,7 +163,9 @@
 #define RL_HWREV_8169_8110SB	0x10000000
 #define RL_HWREV_8169_8110SCd	0x18000000
 #define RL_HWREV_8102EL		0x24800000
+#define RL_HWREV_8103E		0x24C00000
 #define RL_HWREV_8168D		0x28000000
+#define RL_HWREV_8168DP		0x28800000
 #define RL_HWREV_8168_SPIN1	0x30000000
 #define RL_HWREV_8100E_SPIN1	0x30800000
 #define RL_HWREV_8101E		0x34000000
@@ -805,7 +807,6 @@ struct rl_softc {
 	int			rl_txthresh;
 	struct rl_chain_data	rl_cdata;
 	struct timeout		sc_tick_tmo;
-	int			if_flags;
 
 	struct rl_list_data	rl_ldata;
 	struct mbuf		*rl_head;
@@ -996,3 +997,4 @@ struct rl_softc {
 extern int rl_attach(struct rl_softc *);
 extern int rl_intr(void *);
 extern void rl_setmulti(struct rl_softc *);
+int rl_detach(struct rl_softc *);

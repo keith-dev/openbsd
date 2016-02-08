@@ -1,4 +1,4 @@
-/*	$OpenBSD: re.c,v 1.104 2009/02/12 11:55:29 martynas Exp $	*/
+/*	$OpenBSD: re.c,v 1.108 2009/07/03 16:55:27 deraadt Exp $	*/
 /*	$FreeBSD: if_re.c,v 1.31 2004/09/04 07:54:05 ru Exp $	*/
 /*
  * Copyright (c) 1997, 1998-2003
@@ -222,6 +222,7 @@ static const struct re_revision {
 	{ RL_HWREV_8101E,	"RTL8101E" },
 	{ RL_HWREV_8102E,	"RTL8102E" },
 	{ RL_HWREV_8102EL,	"RTL8102EL" },
+	{ RL_HWREV_8103E,       "RTL8103E" },
 	{ RL_HWREV_8110S,	"RTL8110S" },
 	{ RL_HWREV_8139CPLUS,	"RTL8139C+" },
 	{ RL_HWREV_8168_SPIN1,	"RTL8168 1" },
@@ -231,6 +232,7 @@ static const struct re_revision {
 	{ RL_HWREV_8168C_SPIN2,	"RTL8168C/8111C" },
 	{ RL_HWREV_8168CP,	"RTL8168CP/8111CP" },
 	{ RL_HWREV_8168D,	"RTL8168D/8111D" },
+	{ RL_HWREV_8168DP,      "RTL8168DP" },
 	{ RL_HWREV_8169,	"RTL8169" },
 	{ RL_HWREV_8169_8110SB,	"RTL8169/8110SB" },
 	{ RL_HWREV_8169_8110SBL, "RTL8169SBL" },
@@ -516,44 +518,46 @@ re_iff(struct rl_softc *sc)
 {
 	struct ifnet		*ifp = &sc->sc_arpcom.ac_if;
 	int			h = 0;
-	u_int32_t		hashes[2] = { 0, 0 };
+	u_int32_t		hashes[2];
 	u_int32_t		rxfilt;
-	int			mcnt = 0;
 	struct arpcom		*ac = &sc->sc_arpcom;
 	struct ether_multi	*enm;
 	struct ether_multistep	step;
 
 	rxfilt = CSR_READ_4(sc, RL_RXCFG);
-	rxfilt &= ~(RL_RXCFG_RX_ALLPHYS | RL_RXCFG_RX_MULTI);
+	rxfilt &= ~(RL_RXCFG_RX_ALLPHYS | RL_RXCFG_RX_BROAD |
+	    RL_RXCFG_RX_INDIV | RL_RXCFG_RX_MULTI);
 	ifp->if_flags &= ~IFF_ALLMULTI;
 
-	if (ifp->if_flags & IFF_PROMISC ||
-	    ac->ac_multirangecnt > 0) {
-		ifp ->if_flags |= IFF_ALLMULTI;
+	/*
+	 * Always accept frames destined to our station address.
+	 * Always accept broadcast frames.
+	 */
+	rxfilt |= RL_RXCFG_RX_INDIV | RL_RXCFG_RX_BROAD;
+
+	if (ifp->if_flags & IFF_PROMISC || ac->ac_multirangecnt > 0) {
+		ifp->if_flags |= IFF_ALLMULTI;
 		rxfilt |= RL_RXCFG_RX_MULTI;
 		if (ifp->if_flags & IFF_PROMISC)
 			rxfilt |= RL_RXCFG_RX_ALLPHYS;
 		hashes[0] = hashes[1] = 0xFFFFFFFF;
 	} else {
-		/* first, zot all the existing hash bits */
-		CSR_WRITE_4(sc, RL_MAR0, 0);
-		CSR_WRITE_4(sc, RL_MAR4, 0);
+		rxfilt |= RL_RXCFG_RX_MULTI;
+		/* Program new filter. */
+		bzero(hashes, sizeof(hashes));
 
-		/* now program new ones */
 		ETHER_FIRST_MULTI(step, ac, enm);
 		while (enm != NULL) {
 			h = ether_crc32_be(enm->enm_addrlo,
 			    ETHER_ADDR_LEN) >> 26;
+
 			if (h < 32)
 				hashes[0] |= (1 << h);
 			else
 				hashes[1] |= (1 << (h - 32));
-			mcnt++;
+
 			ETHER_NEXT_MULTI(step, enm);
 		}
-
-		if (mcnt)
-			rxfilt |= RL_RXCFG_RX_MULTI;
 	}
 
 	/*
@@ -817,6 +821,7 @@ re_attach(struct rl_softc *sc, const char *intrstr)
 		break;
 	case RL_HWREV_8102E:
 	case RL_HWREV_8102EL:
+	case RL_HWREV_8103E:
 		sc->rl_flags |= RL_FLAG_NOJUMBO | RL_FLAG_INVMAR |
 		    RL_FLAG_PHYWAKE | RL_FLAG_PAR | RL_FLAG_DESCV2 |
 		    RL_FLAG_MACSTAT;
@@ -831,6 +836,7 @@ re_attach(struct rl_softc *sc, const char *intrstr)
 	case RL_HWREV_8168C_SPIN2:
 	case RL_HWREV_8168CP:
 	case RL_HWREV_8168D:
+	case RL_HWREV_8168DP:
 		sc->rl_flags |= RL_FLAG_INVMAR | RL_FLAG_PHYWAKE |
 		    RL_FLAG_PAR | RL_FLAG_DESCV2 | RL_FLAG_MACSTAT |
 		    RL_FLAG_HWIM;
@@ -1443,16 +1449,16 @@ re_rxeof(struct rl_softc *sc)
 
 		if (sc->rl_flags & RL_FLAG_DESCV2) {
 			/* Check IP header checksum */
-			if ((rxstat & RL_RDESC_STAT_PROTOID) &&
-			    !(rxstat & RL_RDESC_STAT_IPSUMBAD) &&
-			    (rxvlan & RL_RDESC_IPV4))
+			if ((rxvlan & RL_RDESC_IPV4) &&
+			    !(rxstat & RL_RDESC_STAT_IPSUMBAD))
 				m->m_pkthdr.csum_flags |= M_IPV4_CSUM_IN_OK;
 
 			/* Check TCP/UDP checksum */
-			if (((rxstat & RL_RDESC_STAT_TCP) &&
+			if ((rxvlan & (RL_RDESC_IPV4|RL_RDESC_IPV6)) &&
+			    (((rxstat & RL_RDESC_STAT_TCP) &&
 			    !(rxstat & RL_RDESC_STAT_TCPSUMBAD)) ||
 			    ((rxstat & RL_RDESC_STAT_UDP) &&
-			    !(rxstat & RL_RDESC_STAT_UDPSUMBAD)))
+			    !(rxstat & RL_RDESC_STAT_UDPSUMBAD))))
 				m->m_pkthdr.csum_flags |= M_TCP_CSUM_IN_OK |
 				    M_UDP_CSUM_IN_OK;
 		} else {
@@ -1922,7 +1928,6 @@ int
 re_init(struct ifnet *ifp)
 {
 	struct rl_softc *sc = ifp->if_softc;
-	u_int32_t	rxcfg = 0;
 	u_int16_t	cfg;
 	int		s;
 	union {
@@ -2008,20 +2013,6 @@ re_init(struct ifnet *ifp)
 	CSR_WRITE_1(sc, RL_EARLY_TX_THRESH, 16);
 
 	CSR_WRITE_4(sc, RL_RXCFG, RL_RXCFG_CONFIG);
-
-	/* Set the individual bit to receive frames for this host only. */
-	rxcfg = CSR_READ_4(sc, RL_RXCFG);
-	rxcfg |= RL_RXCFG_RX_INDIV;
-
-	/*
-	 * Set capture broadcast bit to capture broadcast frames.
-	 */
-	if (ifp->if_flags & IFF_BROADCAST)
-		rxcfg |= RL_RXCFG_RX_BROAD;
-	else
-		rxcfg &= ~RL_RXCFG_RX_BROAD;
-
-	CSR_WRITE_4(sc, RL_RXCFG, rxcfg);
 
 	/* Program promiscuous mode and multicast filters. */
 	re_iff(sc);
@@ -2119,14 +2110,13 @@ re_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 	case SIOCSIFFLAGS:
 		if (ifp->if_flags & IFF_UP) {
 			if (ifp->if_flags & IFF_RUNNING)
-				re_iff(sc);
+				error = ENETRESET;
 			else
 				re_init(ifp);
 		} else {
 			if (ifp->if_flags & IFF_RUNNING)
 				re_stop(ifp, 1);
 		}
-		sc->if_flags = ifp->if_flags;
 		break;
 	case SIOCGIFMEDIA:
 	case SIOCSIFMEDIA:
@@ -2293,7 +2283,7 @@ re_config_imtype(struct rl_softc *sc, int imtype)
 	switch (imtype) {
 	case RL_IMTYPE_HW:
 		KASSERT(sc->rl_flags & RL_FLAG_HWIM);
-		/* FALL THROUGH */
+		/* FALLTHROUGH */
 	case RL_IMTYPE_NONE:
 		sc->rl_intrs = RL_INTRS_CPLUS;
 		sc->rl_rx_ack = RL_ISR_RX_OK | RL_ISR_FIFO_OFLOW |

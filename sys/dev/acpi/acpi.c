@@ -1,4 +1,4 @@
-/* $OpenBSD: acpi.c,v 1.132 2009/02/21 13:09:20 marco Exp $ */
+/* $OpenBSD: acpi.c,v 1.140 2009/06/03 07:13:48 pirofti Exp $ */
 /*
  * Copyright (c) 2005 Thorsten Lockert <tholo@sigmasoft.com>
  * Copyright (c) 2005 Jordan Hargrave <jordan@openbsd.org>
@@ -39,6 +39,9 @@
 #include <dev/acpi/acpidev.h>
 #include <dev/acpi/dsdt.h>
 
+#include <dev/pci/pciidereg.h>
+#include <dev/pci/pciidevar.h>
+
 #include <machine/apmvar.h>
 #define APMUNIT(dev)	(minor(dev)&0xf0)
 #define APMDEV(dev)	(minor(dev)&0x0f)
@@ -51,6 +54,7 @@ int acpi_debug = 16;
 int acpi_enabled;
 int acpi_poll_enabled;
 int acpi_hasprocfvs;
+int acpi_thinkpad_enabled;
 
 #define ACPIEN_RETRIES 15
 
@@ -81,6 +85,27 @@ void	acpi_load_dsdt(paddr_t, struct acpi_q **);
 void	acpi_init_states(struct acpi_softc *);
 void	acpi_init_gpes(struct acpi_softc *);
 void	acpi_init_pm(struct acpi_softc *);
+
+void	acpi_dev_sort(void);
+void	acpi_dev_free(void);
+
+int acpi_foundide(struct aml_node *node, void *arg);
+int acpiide_notify(struct aml_node *, int, void *);
+
+void  wdcattach(struct channel_softc *);
+int   wdcdetach(struct channel_softc *, int);
+
+struct idechnl
+{
+	struct acpi_softc *sc;
+	int64_t 	addr;
+	int64_t 	chnl;
+	int64_t 	sta;
+};
+
+int is_ejectable_bay(struct aml_node *node);
+int is_ata(struct aml_node *node);
+int is_ejectable(struct aml_node *node);
 
 #ifdef ACPI_SLEEP_ENABLED
 void acpi_sleep_walk(struct acpi_softc *, int);
@@ -272,13 +297,7 @@ int
 acpi_inidev(struct aml_node *node, void *arg)
 {
 	struct acpi_softc	*sc = (struct acpi_softc *)arg;
-	struct aml_value	res;
-	int st = 0;
-
-	/* Default value */
-	st = STA_PRESENT|STA_ENABLED;
-	st |= STA_SHOW_UI|STA_DEV_OK;
-	st |= STA_BATTERY;
+	int64_t st;
 
 	/*
 	 * Per the ACPI spec 6.5.1, only run _INI when device is there or
@@ -287,9 +306,8 @@ acpi_inidev(struct aml_node *node, void *arg)
 	 */
 
 	/* Evaluate _STA to decide _INI fate and walk fate */
-	if (!aml_evalname(sc, node->parent, "_STA", 0, NULL, &res))
-		st = (int)aml_val2int(&res);
-	aml_freevalue(&res);
+	if (aml_evalinteger(sc, node->parent, "_STA", 0, NULL, &st))
+		st = STA_PRESENT | STA_ENABLED | STA_DEV_OK | 0x1000;
 
 	/* Evaluate _INI if we are present */
 	if (st & STA_PRESENT)
@@ -313,20 +331,13 @@ acpi_foundprt(struct aml_node *node, void *arg)
 	struct acpi_softc	*sc = (struct acpi_softc *)arg;
 	struct device		*self = (struct device *)arg;
 	struct acpi_attach_args	aaa;
-	struct aml_value	res;
-	int st = 0;
+	int64_t st = 0;
 
 	dnprintf(10, "found prt entry: %s\n", node->parent->name);
 
-	/* Default value */
-	st = STA_PRESENT|STA_ENABLED;
-	st |= STA_SHOW_UI|STA_DEV_OK;
-	st |= STA_BATTERY;
-
 	/* Evaluate _STA to decide _PRT fate and walk fate */
-	if (!aml_evalname(sc, node->parent, "_STA", 0, NULL, &res))
-		st = (int)aml_val2int(&res);
-	aml_freevalue(&res);
+	if (aml_evalinteger(sc, node->parent, "_STA", 0, NULL, &st))
+		st = STA_PRESENT | STA_ENABLED | STA_DEV_OK | 0x1000;
 
 	if (st & STA_PRESENT) {
 		memset(&aaa, 0, sizeof(aaa));
@@ -348,6 +359,114 @@ acpi_foundprt(struct aml_node *node, void *arg)
 
 	/* Default just continue search */
 	return 0;
+}
+
+int
+is_ata(struct aml_node *node)
+{
+	return (aml_searchname(node, "_GTM") != NULL ||
+	    aml_searchname(node, "_GTF") != NULL ||
+	    aml_searchname(node, "_STM") != NULL ||
+	    aml_searchname(node, "_SDD") != NULL);
+}
+
+int
+is_ejectable(struct aml_node *node)
+{
+	return (aml_searchname(node, "_EJ0") != NULL);
+}
+
+int
+is_ejectable_bay(struct aml_node *node)
+{
+	return ((is_ata(node) || is_ata(node->parent)) && is_ejectable(node));
+}
+
+int
+acpiide_notify(struct aml_node *node, int ntype, void *arg)
+{
+	struct idechnl 		*ide = arg;
+	struct acpi_softc 	*sc = ide->sc;
+	struct pciide_softc 	*wsc;
+	struct device 		*dev;
+	int 			b,d,f;
+	int64_t 		sta;
+
+	if (aml_evalinteger(sc, node, "_STA", 0, NULL, &sta) != 0)
+		return (0);
+
+	dnprintf(10, "IDE notify! %s %d status:%llx\n", aml_nodename(node), 
+	    ntype, sta);
+
+	/* Walk device list looking for IDE device match */
+	TAILQ_FOREACH(dev, &alldevs, dv_list) {
+		if (strncmp(dev->dv_xname, "pciide", 6))
+			continue;
+
+		wsc = (struct pciide_softc *)dev;
+		pci_decompose_tag(NULL, wsc->sc_tag, &b, &d, &f);
+		if (b != ACPI_PCI_BUS(ide->addr) ||
+		    d != ACPI_PCI_DEV(ide->addr) ||
+		    f != ACPI_PCI_FN(ide->addr))
+			continue;
+		dnprintf(10, "Found pciide: %s %x.%x.%x channel:%llx\n",
+		    dev->dv_xname, b,d,f, ide->chnl);
+
+		if (sta == 0 && ide->sta)
+			wdcdetach(
+			    &wsc->pciide_channels[ide->chnl].wdc_channel, 0);
+		else if (sta && !ide->sta)
+			wdcattach(
+			    &wsc->pciide_channels[ide->chnl].wdc_channel);
+		ide->sta = sta;
+	}
+	return (0);
+}
+
+int
+acpi_foundide(struct aml_node *node, void *arg)
+{
+	struct acpi_softc 	*sc = arg;
+	struct aml_node 	*pp;
+	struct idechnl 		*ide;
+	union amlpci_t 		pi;
+	int 			lvl;
+
+	/* Check if this is an ejectable bay */
+	if (!is_ejectable_bay(node))
+		return (0);
+
+	ide = malloc(sizeof(struct idechnl), M_DEVBUF, M_NOWAIT | M_ZERO);
+	ide->sc = sc;
+
+	/* GTM/GTF can be at 2/3 levels:  pciX.ideX.channelX[.driveX] */
+	lvl = 0;
+	for (pp=node->parent; pp; pp=pp->parent) {
+		lvl++;
+		if (aml_searchname(pp, "_HID"))
+			break;
+	}
+
+	/* Get PCI address and channel */
+	if (lvl == 3) {
+		aml_evalinteger(sc, node->parent, "_ADR", 0, NULL, 
+		    &ide->chnl);
+		aml_rdpciaddr(node->parent->parent, &pi);
+		ide->addr = pi.addr;
+	} else if (lvl == 4) {
+		aml_evalinteger(sc, node->parent->parent, "_ADR", 0, NULL, 
+		    &ide->chnl);
+		aml_rdpciaddr(node->parent->parent->parent, &pi);
+		ide->addr = pi.addr;
+	}
+	dnprintf(10, "%s %llx channel:%llx\n", 
+	    aml_nodename(node), ide->addr, ide->chnl);
+
+	aml_evalinteger(sc, node, "_STA", 0, NULL, &ide->sta);
+	dnprintf(10, "Got Initial STA: %llx\n", ide->sta);
+
+	aml_register_notify(node, "acpiide", acpiide_notify, ide, 0);
+	return (0);
 }
 
 int
@@ -596,11 +715,15 @@ acpi_attach(struct device *parent, struct device *self, void *aux)
 	/* attach battery, power supply and button devices */
 	aml_find_node(&aml_root, "_HID", acpi_foundhid, sc);
 
+	/* Attach IDE bay */
+	aml_walknodes(&aml_root, AML_WALK_PRE, acpi_foundide, sc);
+
 	/* attach docks */
 	aml_find_node(&aml_root, "_DCK", acpi_founddock, sc);
 
-	/* attach video */
-	aml_find_node(&aml_root, "_DOS", acpi_foundvideo, sc);
+	/* attach video only if this is not a stinkpad */
+	if (!acpi_thinkpad_enabled)
+		aml_find_node(&aml_root, "_DOS", acpi_foundvideo, sc);
 
 	/* create list of devices we want to query when APM come in */
 	SLIST_INIT(&sc->sc_ac);
@@ -813,6 +936,7 @@ acpiclose(dev_t dev, int flag, int mode, struct proc *p)
 	if (!acpi_cd.cd_ndevs || APMUNIT(dev) != 0 ||
 	    !(sc = acpi_cd.cd_devs[APMUNIT(dev)]))
 		return (ENXIO);
+
 	switch (APMDEV(dev)) {
 	case APMDEV_CTL:
 	case APMDEV_NORMAL:
@@ -847,10 +971,12 @@ acpiioctl(dev_t dev, u_long cmd, caddr_t data, int flag, struct proc *p)
 	/* fake APM */
 	switch (cmd) {
 #ifdef ACPI_SLEEP_ENABLED
+	case APM_IOC_STANDBY_REQ:
+	case APM_IOC_SUSPEND_REQ:
 	case APM_IOC_SUSPEND:
 	case APM_IOC_STANDBY:
 		workq_add_task(NULL, 0, (workq_fn)acpi_sleep_state,
-		acpi_softc, (void *)ACPI_STATE_S3);
+		    acpi_softc, (void *)ACPI_STATE_S3);
 		break;
 #endif /* ACPI_SLEEP_ENABLED */
 	case APM_IOC_GETPOWER:
@@ -1353,6 +1479,9 @@ acpi_add_device(struct aml_node *node, void *arg)
 	case AML_OBJTYPE_THERMZONE:
 		aaa.aaa_name = "acpitz";
 		break;
+	case AML_OBJTYPE_POWERRSRC:
+		aaa.aaa_name = "acpipwrres";
+		break;
 	default:
 		return 0;
 	}
@@ -1781,7 +1910,7 @@ acpi_resume(struct acpi_softc *sc)
 	env.v_integer = sc->sc_state;
 
 	if (sc->sc_bfs)
-		if (aml_evalnode(sc, sc->sc_pts, 1, &env, NULL) != 0) {
+		if (aml_evalnode(sc, sc->sc_bfs, 1, &env, NULL) != 0) {
 			dnprintf(10, "%s evaluating method _BFS failed.\n",
 			    DEVNAME(sc));
 		}
@@ -1877,6 +2006,7 @@ acpi_powerdown(void)
 	 * In case acpi_prepare_sleep fails, we shouldn't try to enter
 	 * the sleep state. It might cost us the battery.
 	 */
+	acpi_sleep_walk(acpi_softc, ACPI_STATE_S5);
 	if (acpi_prepare_sleep_state(acpi_softc, ACPI_STATE_S5) == 0)
 		acpi_enter_sleep_state(acpi_softc, ACPI_STATE_S5);
 }
@@ -2111,8 +2241,10 @@ acpi_foundhid(struct aml_node *node, void *arg)
 		aaa.aaa_name = "acpibtn";
 	else if (!strcmp(dev, ACPI_DEV_ASUS))
 		aaa.aaa_name = "acpiasus";
-	else if (!strcmp(dev, ACPI_DEV_THINKPAD))
+	else if (!strcmp(dev, ACPI_DEV_THINKPAD)) {
 		aaa.aaa_name = "acpithinkpad";
+		acpi_thinkpad_enabled = 1;
+	}
 
 	if (aaa.aaa_name)
 		config_found(self, &aaa, acpi_print);
@@ -2158,5 +2290,50 @@ acpi_foundvideo(struct aml_node *node, void *arg)
 	config_found(self, &aaa, acpi_print);
 
 	return (0);
+}
+
+TAILQ_HEAD(acpi_dv_hn, acpi_dev_rank) acpi_dv_h;
+void
+acpi_dev_sort(void)
+{
+	struct device		*dev, *idev;
+	struct acpi_dev_rank	*rentry, *ientry;
+	int			rank;
+
+	TAILQ_INIT(&acpi_dv_h);
+
+	TAILQ_FOREACH(dev, &alldevs, dv_list) {
+		for (rank = -1, idev = dev; idev != NULL;
+		    idev = idev->dv_parent, rank++)
+			;	/* nothing */
+
+		rentry = malloc(sizeof(*rentry), M_DEVBUF, M_WAITOK | M_ZERO);
+		rentry->rank = rank;
+		rentry->dev = dev;
+
+		if (TAILQ_FIRST(&acpi_dv_h) == NULL)
+			TAILQ_INSERT_HEAD(&acpi_dv_h, rentry, link);
+		TAILQ_FOREACH_REVERSE(ientry, &acpi_dv_h, acpi_dv_hn, link) {
+			if (rentry->rank > ientry->rank) {
+				TAILQ_INSERT_AFTER(&acpi_dv_h, ientry, rentry, 
+				    link);
+				break;
+			}
+		}
+	}
+}
+
+void
+acpi_dev_free(void)
+{
+	struct acpi_dev_rank	*dvr;
+
+	while ((dvr = TAILQ_FIRST(&acpi_dv_h)) != NULL) {
+		TAILQ_REMOVE(&acpi_dv_h, dvr, link);
+		if (dvr != NULL) {
+			free(dvr, M_DEVBUF);
+			dvr = NULL;
+		}
+	}
 }
 #endif /* SMALL_KERNEL */

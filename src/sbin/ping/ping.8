@@ -1,4 +1,4 @@
-.\"	$OpenBSD: ping.8,v 1.36 2008/05/07 11:57:20 claudio Exp $
+.\"	$OpenBSD: ping.8,v 1.41 2009/06/05 06:47:12 jmc Exp $
 .\"	$NetBSD: ping.8,v 1.10 1995/12/31 04:55:35 ghudson Exp $
 .\"
 .\" Copyright (c) 1985, 1991, 1993
@@ -30,7 +30,7 @@
 .\"
 .\"     @(#)ping.8	8.2 (Berkeley) 12/11/93
 .\"
-.Dd $Mdocdate: May 7 2008 $
+.Dd $Mdocdate: June 5 2009 $
 .Dt PING 8
 .Os
 .Sh NAME
@@ -39,7 +39,7 @@
 .Sh SYNOPSIS
 .Nm ping
 .Bk -words
-.Op Fl DdfLnqRrv
+.Op Fl DdEefLnqRrv
 .Op Fl c Ar count
 .Op Fl I Ar ifaddr
 .Op Fl i Ar wait
@@ -48,6 +48,7 @@
 .Op Fl s Ar packetsize
 .Op Fl T Ar tos
 .Op Fl t Ar ttl
+.Op Fl V Ar rdomain
 .Op Fl w Ar maxwait
 .Ar host
 .Ek
@@ -82,6 +83,18 @@ bit.
 Set the
 .Dv SO_DEBUG
 option on the socket being used.
+.It Fl E
+Emit an audible beep (by sending an ASCII BEL character to the
+standard error output) when no packet is received before the next
+packet is transmitted.
+To cater for round-trip times that are longer than the interval between
+transmissions, further missing packets cause a bell only if the maximum
+number of unreceived packets has increased.
+This option is disabled for flood pings.
+.It Fl e
+Emit an audible beep (by sending an ASCII BEL character to the
+standard error output) after each non-duplicate response is received.
+This option is disabled for flood pings.
 .It Fl f
 Flood ping.
 Outputs packets as fast as they come back or one hundred times per second,
@@ -177,6 +190,9 @@ header data are included in
 Use the specified type of service.
 .It Fl t Ar ttl
 Use the specified time-to-live.
+.It Fl V Ar rdomain
+Set the routing domain.
+The default is 0.
 .It Fl v
 Verbose output.
 ICMP packets other than

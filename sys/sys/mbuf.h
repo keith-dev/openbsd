@@ -1,4 +1,4 @@
-/*	$OpenBSD: mbuf.h,v 1.121 2009/01/27 09:17:51 dlg Exp $	*/
+/*	$OpenBSD: mbuf.h,v 1.123 2009/06/05 00:05:22 claudio Exp $	*/
 /*	$NetBSD: mbuf.h,v 1.19 1996/02/09 18:25:14 christos Exp $	*/
 
 /*
@@ -78,8 +78,8 @@ struct m_hdr {
 struct pkthdr_pf {
 	void		*hdr;		/* saved hdr pos in mbuf, for ECN */
 	void		*statekey;	/* pf stackside statekey */
-	u_int		 rtableid;	/* alternate routing table id */
 	u_int32_t	 qid;		/* queue id */
+	u_int		 rtableid;	/* alternate routing table id */
 	u_int16_t	 tag;		/* tag id */
 	u_int8_t	 flags;
 	u_int8_t	 routed;
@@ -98,6 +98,7 @@ struct	pkthdr {
 	int			 len;		/* total packet length */
 	u_int16_t		 csum_flags;	/* checksum flags */
 	u_int16_t		 ether_vtag;	/* Ethernet 802.1p+Q vlan tag */
+	u_int			 rdomain;	/* routing domain id */
 	struct pkthdr_pf	 pf;
 };
 
@@ -360,15 +361,8 @@ struct mbuf {
  * If how is M_DONTWAIT and allocation fails, the original mbuf chain
  * is freed and m is set to NULL.
  */
-#define	M_PREPEND(m, plen, how) do {					\
-	if (M_LEADINGSPACE(m) >= (plen)) {				\
-		(m)->m_data -= (plen);					\
-		(m)->m_len += (plen);					\
-	} else								\
-		(m) = m_prepend((m), (plen), (how));			\
-	if ((m) && (m)->m_flags & M_PKTHDR)				\
-		(m)->m_pkthdr.len += (plen);				\
-} while (/* CONSTCOND */ 0)
+#define	M_PREPEND(m, plen, how) \
+		(m) = m_prepend((m), (plen), (how))
 
 /* length to m_copy to copy all */
 #define	M_COPYALL	1000000000

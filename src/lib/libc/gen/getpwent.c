@@ -1,4 +1,4 @@
-/*	$OpenBSD: getpwent.c,v 1.38 2008/07/23 19:36:47 deraadt Exp $ */
+/*	$OpenBSD: getpwent.c,v 1.40 2009/06/03 16:02:44 schwarze Exp $ */
 /*
  * Copyright (c) 2008 Theo de Raadt
  * Copyright (c) 1988, 1993
@@ -48,6 +48,7 @@
 #include <rpcsvc/yp.h>
 #include <rpcsvc/ypclnt.h>
 #include "ypinternal.h"
+#include "ypexclude.h"
 #endif
 #include "thread_private.h"
 
@@ -72,11 +73,6 @@ static struct passwd *_pwhashbyuid(uid_t uid, char *buf,
 #ifdef YP
 static char	*__ypdomain;
 
-struct _ypexclude {
-	const char *name;
-	struct _ypexclude *next;
-};
-
 /* Following are used only by setpwent(), getpwent(), and endpwent() */
 enum _ypmode { YPMODE_NONE, YPMODE_FULL, YPMODE_USER, YPMODE_NETGRP };
 static enum	_ypmode __ypmode;
@@ -90,9 +86,6 @@ static struct _ypexclude *__ypexhead;
 
 static int __has_yppw();
 static int __has_ypmaster(void);
-static int __ypexclude_add(struct _ypexclude **, const char *);
-static int __ypexclude_is(struct _ypexclude **, const char *);
-static void __ypexclude_free(struct _ypexclude **);
 static void __ypproto_set(struct passwd *, long *, int, int *);
 static int __ypparse(struct passwd *pw, char *s, int);
 
@@ -106,56 +99,6 @@ static struct passwd *__yppwlookup(int, char *, uid_t, struct passwd *,
 	(__has_ypmaster() ? "master.passwd.byname" : "passwd.byname")
 #define PASSWD_BYUID \
 	(__has_ypmaster() ? "master.passwd.byuid" : "passwd.byuid")
-
-/*
- * Using DB for this just wastes too damn much memory.
- */
-static int
-__ypexclude_add(struct _ypexclude **headp, const char *name)
-{
-	struct _ypexclude *new;
-
-	if (name[0] == '\0')	/* skip */
-		return (0);
-
-	new = (struct _ypexclude *)malloc(sizeof(struct _ypexclude));
-	if (new == NULL)
-		return (1);
-	new->name = strdup(name);
-	if (new->name == NULL) {
-		free(new);
-		return (1);
-	}
-
-	new->next = *headp;
-	*headp = new;
-	return (0);
-}
-
-static int
-__ypexclude_is(struct _ypexclude **headp, const char *name)
-{
-	struct _ypexclude *curr;
-
-	for (curr = *headp; curr; curr = curr->next) {
-		if (strcmp(curr->name, name) == 0)
-			return (1);	/* excluded */
-	}
-	return (0);
-}
-
-static void
-__ypexclude_free(struct _ypexclude **headp)
-{
-	struct _ypexclude *curr, *next;
-
-	for (curr = *headp; curr; curr = next) {
-		next = curr->next;
-		free((void *)curr->name);
-		free(curr);
-	}
-	*headp = NULL;
-}
 
 static void
 __ypproto_set(struct passwd *pw, long *buf, int flags, int *yp_pw_flagsp)
@@ -577,20 +520,12 @@ static struct passwd *
 __yppwlookup(int lookup, char *name, uid_t uid, struct passwd *pw,
     char *buf, size_t buflen, int *flagsp)
 {
-	char bf[1 + _PW_NAME_LEN], *ypcurrent = NULL, *map;
+	char bf[1 + _PW_NAME_LEN], *ypcurrent = NULL, *map = NULL;
 	int yp_pw_flags = 0, ypcurrentlen, r, s = -1, pw_keynum;
 	static long yppbuf[_PW_BUF_LEN / sizeof(long)];
 	struct _ypexclude *ypexhead = NULL;
 	const char *host, *user, *dom;
 	DBT key;
-
-	if (lookup == LOOKUP_BYNAME) {
-		map = PASSWD_BYNAME;
-		name = strdup(name);
-	} else {
-		map = PASSWD_BYUID;
-		asprintf(&name, "%u", uid);
-	}
 
 	for (pw_keynum = 1; pw_keynum; pw_keynum++) {
 		bf[0] = _PW_KEYBYNUM;
@@ -606,6 +541,15 @@ __yppwlookup(int lookup, char *name, uid_t uid, struct passwd *pw,
 					continue;
 			}
 			__ypproto_set(pw, yppbuf, *flagsp, &yp_pw_flags);
+			if (!map) {
+				if (lookup == LOOKUP_BYNAME) {
+					map = PASSWD_BYNAME;
+					name = strdup(name);
+				} else {
+					map = PASSWD_BYUID;
+					asprintf(&name, "%u", uid);
+				}
+			}
 
 			switch (pw->pw_name[1]) {
 			case '\0':
@@ -715,7 +659,8 @@ done:
 	if (ypcurrent)
 		free(ypcurrent);
 	ypcurrent = NULL;
-	free(name);
+	if (map)
+		free(name);
 	return (pw);
 }
 #endif /* YP */

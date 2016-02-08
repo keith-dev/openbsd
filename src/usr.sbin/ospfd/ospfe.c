@@ -1,4 +1,4 @@
-/*	$OpenBSD: ospfe.c,v 1.62 2009/01/07 21:16:36 claudio Exp $ */
+/*	$OpenBSD: ospfe.c,v 1.69 2009/06/06 07:31:26 eric Exp $ */
 
 /*
  * Copyright (c) 2005 Claudio Jeker <claudio@openbsd.org>
@@ -49,8 +49,8 @@ void		 orig_rtr_lsa_all(struct area *);
 struct iface	*find_vlink(struct abr_rtr *);
 
 struct ospfd_conf	*oeconf = NULL, *nconf;
-struct imsgbuf		*ibuf_main;
-struct imsgbuf		*ibuf_rde;
+struct imsgev		*iev_main;
+struct imsgev		*iev_rde;
 int			 oe_nofib;
 
 /* ARGSUSED */
@@ -89,7 +89,7 @@ ospfe(struct ospfd_conf *xconf, int pipe_parent2ospfe[2], int pipe_ospfe2rde[2],
 	}
 
 	/* create ospfd control socket outside chroot */
-	if (control_init() == -1)
+	if (control_init(xconf->csock) == -1)
 		fatalx("control socket setup failed");
 
 	/* create the raw ip socket */
@@ -144,22 +144,24 @@ ospfe(struct ospfd_conf *xconf, int pipe_parent2ospfe[2], int pipe_ospfe2rde[2],
 	close(pipe_parent2rde[0]);
 	close(pipe_parent2rde[1]);
 
-	if ((ibuf_rde = malloc(sizeof(struct imsgbuf))) == NULL ||
-	    (ibuf_main = malloc(sizeof(struct imsgbuf))) == NULL)
+	if ((iev_rde = malloc(sizeof(struct imsgev))) == NULL ||
+	    (iev_main = malloc(sizeof(struct imsgev))) == NULL)
 		fatal(NULL);
-	imsg_init(ibuf_rde, pipe_ospfe2rde[0], ospfe_dispatch_rde);
-	imsg_init(ibuf_main, pipe_parent2ospfe[1], ospfe_dispatch_main);
+	imsg_init(&iev_rde->ibuf, pipe_ospfe2rde[0]);
+	iev_rde->handler = ospfe_dispatch_rde;
+	imsg_init(&iev_main->ibuf, pipe_parent2ospfe[1]);
+	iev_main->handler = ospfe_dispatch_main;
 
 	/* setup event handler */
-	ibuf_rde->events = EV_READ;
-	event_set(&ibuf_rde->ev, ibuf_rde->fd, ibuf_rde->events,
-	    ibuf_rde->handler, ibuf_rde);
-	event_add(&ibuf_rde->ev, NULL);
+	iev_rde->events = EV_READ;
+	event_set(&iev_rde->ev, iev_rde->ibuf.fd, iev_rde->events,
+	    iev_rde->handler, iev_rde);
+	event_add(&iev_rde->ev, NULL);
 
-	ibuf_main->events = EV_READ;
-	event_set(&ibuf_main->ev, ibuf_main->fd, ibuf_main->events,
-	    ibuf_main->handler, ibuf_main);
-	event_add(&ibuf_main->ev, NULL);
+	iev_main->events = EV_READ;
+	event_set(&iev_main->ev, iev_main->ibuf.fd, iev_main->events,
+	    iev_main->handler, iev_main);
+	event_add(&iev_main->ev, NULL);
 
 	event_set(&oeconf->ev, oeconf->ospf_socket, EV_READ|EV_PERSIST,
 	    recv_packet, oeconf);
@@ -224,12 +226,12 @@ ospfe_shutdown(void)
 	close(oeconf->ospf_socket);
 
 	/* clean up */
-	msgbuf_write(&ibuf_rde->w);
-	msgbuf_clear(&ibuf_rde->w);
-	free(ibuf_rde);
-	msgbuf_write(&ibuf_main->w);
-	msgbuf_clear(&ibuf_main->w);
-	free(ibuf_main);
+	msgbuf_write(&iev_rde->ibuf.w);
+	msgbuf_clear(&iev_rde->ibuf.w);
+	free(iev_rde);
+	msgbuf_write(&iev_main->ibuf.w);
+	msgbuf_clear(&iev_main->ibuf.w);
+	free(iev_main);
 	free(oeconf);
 	free(pkt_ptr);
 
@@ -241,14 +243,14 @@ ospfe_shutdown(void)
 int
 ospfe_imsg_compose_parent(int type, pid_t pid, void *data, u_int16_t datalen)
 {
-	return (imsg_compose(ibuf_main, type, 0, pid, data, datalen));
+	return (imsg_compose_event(iev_main, type, 0, pid, -1, data, datalen));
 }
 
 int
 ospfe_imsg_compose_rde(int type, u_int32_t peerid, pid_t pid,
     void *data, u_int16_t datalen)
 {
-	return (imsg_compose(ibuf_rde, type, peerid, pid, data, datalen));
+	return (imsg_compose_event(iev_rde, type, peerid, pid, -1, data, datalen));
 }
 
 /* ARGSUSED */
@@ -258,27 +260,25 @@ ospfe_dispatch_main(int fd, short event, void *bula)
 	static struct area	*narea;
 	static struct iface	*niface;
 	struct imsg	 imsg;
-	struct imsgbuf  *ibuf = bula;
+	struct imsgev	*iev = bula;
+	struct imsgbuf	*ibuf;
 	struct area	*area = NULL;
 	struct iface	*iface = NULL;
 	struct kif	*kif;
 	struct auth_md	 md;
 	int		 n, link_ok, stub_changed, shut = 0;
 
-	switch (event) {
-	case EV_READ:
+	ibuf = &iev->ibuf;
+
+	if (event & EV_READ) {
 		if ((n = imsg_read(ibuf)) == -1)
 			fatal("imsg_read error");
 		if (n == 0)	/* connection closed */
 			shut = 1;
-		break;
-	case EV_WRITE:
+	}
+	if (event & EV_WRITE) {
 		if (msgbuf_write(&ibuf->w) == -1)
 			fatal("msgbuf_write");
-		imsg_event_add(ibuf);
-		return;
-	default:
-		fatalx("unknown event");
 	}
 
 	for (;;) {
@@ -386,10 +386,10 @@ ospfe_dispatch_main(int fd, short event, void *bula)
 		imsg_free(&imsg);
 	}
 	if (!shut)
-		imsg_event_add(ibuf);
+		imsg_event_add(iev);
 	else {
 		/* this pipe is dead, so remove the event handler */
-		event_del(&ibuf->ev);
+		event_del(&iev->ev);
 		event_loopexit(NULL);
 	}
 }
@@ -399,7 +399,8 @@ void
 ospfe_dispatch_rde(int fd, short event, void *bula)
 {
 	struct lsa_hdr		 lsa_hdr;
-	struct imsgbuf		*ibuf = bula;
+	struct imsgev		*iev = bula;
+	struct imsgbuf		*ibuf;
 	struct nbr		*nbr;
 	struct lsa_hdr		*lhp;
 	struct lsa_ref		*ref;
@@ -411,20 +412,17 @@ ospfe_dispatch_rde(int fd, short event, void *bula)
 	int			 n, noack = 0, shut = 0;
 	u_int16_t		 l, age;
 
-	switch (event) {
-	case EV_READ:
+	ibuf = &iev->ibuf;
+
+	if (event & EV_READ) {
 		if ((n = imsg_read(ibuf)) == -1)
 			fatal("imsg_read error");
 		if (n == 0)	/* connection closed */
 			shut = 1;
-		break;
-	case EV_WRITE:
+	}
+	if (event & EV_WRITE) {
 		if (msgbuf_write(&ibuf->w) == -1)
 			fatal("msgbuf_write");
-		imsg_event_add(ibuf);
-		return;
-	default:
-		fatalx("unknown event");
 	}
 
 	for (;;) {
@@ -679,10 +677,10 @@ ospfe_dispatch_rde(int fd, short event, void *bula)
 		imsg_free(&imsg);
 	}
 	if (!shut)
-		imsg_event_add(ibuf);
+		imsg_event_add(iev);
 	else {
 		/* this pipe is dead, so remove the event handler */
-		event_del(&ibuf->ev);
+		event_del(&iev->ev);
 		event_loopexit(NULL);
 	}
 }
@@ -939,7 +937,7 @@ orig_rtr_lsa(struct area *area)
 	if (oeconf->border)
 		lsa_rtr.flags |= OSPF_RTR_B;
 	/* TODO set V flag if a active virtual link ends here and the
-	 * area is the tranist area for this link. */
+	 * area is the transit area for this link. */
 	if (virtual)
 		lsa_rtr.flags |= OSPF_RTR_V;
 
@@ -955,17 +953,17 @@ orig_rtr_lsa(struct area *area)
 	lsa_hdr.ls_id = oeconf->rtr_id.s_addr;
 	lsa_hdr.adv_rtr = oeconf->rtr_id.s_addr;
 	lsa_hdr.seq_num = htonl(INIT_SEQ_NUM);
-	lsa_hdr.len = htons(buf->wpos);
+	lsa_hdr.len = htons(buf_size(buf));
 	lsa_hdr.ls_chksum = 0;		/* updated later */
 	memcpy(buf_seek(buf, 0, sizeof(lsa_hdr)), &lsa_hdr, sizeof(lsa_hdr));
 
-	chksum = htons(iso_cksum(buf->buf, buf->wpos, LS_CKSUM_OFFSET));
+	chksum = htons(iso_cksum(buf->buf, buf_size(buf), LS_CKSUM_OFFSET));
 	memcpy(buf_seek(buf, LS_CKSUM_OFFSET, sizeof(chksum)),
 	    &chksum, sizeof(chksum));
 
 	if (self)
-		imsg_compose(ibuf_rde, IMSG_LS_UPD, self->peerid, 0,
-		    buf->buf, buf->wpos);
+		imsg_compose_event(iev_rde, IMSG_LS_UPD, self->peerid, 0,
+		    -1, buf->buf, buf_size(buf));
 	else
 		log_warnx("orig_rtr_lsa: empty area %s",
 		    inet_ntoa(area->id));
@@ -1003,7 +1001,7 @@ orig_net_lsa(struct iface *iface)
 		}
 
 	if (num_rtr == 1) {
-		/* non transit net therefor no need to generate a net lsa */
+		/* non transit net therefore no need to generate a net lsa */
 		buf_free(buf);
 		return;
 	}
@@ -1019,16 +1017,16 @@ orig_net_lsa(struct iface *iface)
 	lsa_hdr.ls_id = iface->addr.s_addr;
 	lsa_hdr.adv_rtr = oeconf->rtr_id.s_addr;
 	lsa_hdr.seq_num = htonl(INIT_SEQ_NUM);
-	lsa_hdr.len = htons(buf->wpos);
+	lsa_hdr.len = htons(buf_size(buf));
 	lsa_hdr.ls_chksum = 0;		/* updated later */
 	memcpy(buf_seek(buf, 0, sizeof(lsa_hdr)), &lsa_hdr, sizeof(lsa_hdr));
 
-	chksum = htons(iso_cksum(buf->buf, buf->wpos, LS_CKSUM_OFFSET));
+	chksum = htons(iso_cksum(buf->buf, buf_size(buf), LS_CKSUM_OFFSET));
 	memcpy(buf_seek(buf, LS_CKSUM_OFFSET, sizeof(chksum)),
 	    &chksum, sizeof(chksum));
 
-	imsg_compose(ibuf_rde, IMSG_LS_UPD, iface->self->peerid, 0,
-	    buf->buf, buf->wpos);
+	imsg_compose_event(iev_rde, IMSG_LS_UPD, iface->self->peerid, 0,
+	    -1, buf->buf, buf_size(buf));
 
 	buf_free(buf);
 }
@@ -1063,8 +1061,8 @@ ospfe_iface_ctl(struct ctl_conn *c, unsigned int idx)
 		LIST_FOREACH(iface, &area->iface_list, entry)
 			if (idx == 0 || idx == iface->ifindex) {
 				ictl = if_to_ctl(iface);
-				imsg_compose(&c->ibuf, IMSG_CTL_SHOW_INTERFACE,
-				    0, 0, ictl, sizeof(struct ctl_iface));
+				imsg_compose_event(&c->iev, IMSG_CTL_SHOW_INTERFACE,
+				    0, 0, -1, ictl, sizeof(struct ctl_iface));
 			}
 }
 
@@ -1081,13 +1079,13 @@ ospfe_nbr_ctl(struct ctl_conn *c)
 			LIST_FOREACH(nbr, &iface->nbr_list, entry) {
 				if (iface->self != nbr) {
 					nctl = nbr_to_ctl(nbr);
-					imsg_compose(&c->ibuf,
-					    IMSG_CTL_SHOW_NBR, 0, 0, nctl,
+					imsg_compose_event(&c->iev,
+					    IMSG_CTL_SHOW_NBR, 0, 0, -1, nctl,
 					    sizeof(struct ctl_nbr));
 				}
 			}
 
-	imsg_compose(&c->ibuf, IMSG_CTL_END, 0, 0, NULL, 0);
+	imsg_compose_event(&c->iev, IMSG_CTL_END, 0, 0, -1, NULL, 0);
 }
 
 void

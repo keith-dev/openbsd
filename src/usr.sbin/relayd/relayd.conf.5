@@ -1,4 +1,4 @@
-.\"	$OpenBSD: relayd.conf.5,v 1.100 2009/02/16 19:46:12 jmc Exp $
+.\"	$OpenBSD: relayd.conf.5,v 1.107 2009/06/02 20:22:30 jmc Exp $
 .\"
 .\" Copyright (c) 2006, 2007 Reyk Floeter <reyk@openbsd.org>
 .\" Copyright (c) 2006, 2007 Pierre-Yves Ritschard <pyr@openbsd.org>
@@ -15,7 +15,7 @@
 .\" ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
 .\" OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 .\"
-.Dd $Mdocdate: February 16 2009 $
+.Dd $Mdocdate: June 2 2009 $
 .Dt RELAYD.CONF 5
 .Os
 .Sh NAME
@@ -35,6 +35,9 @@ configuration file.
 .It Sy Global Configuration
 Global settings for
 .Xr relayd 8 .
+Do note that the config file allows global settings to be added after
+defining tables in the config file, but those tables will use the
+built-in defaults instead of the global settings below them.
 .It Sy Tables
 Table definitions describe a list of hosts,
 in a similar fashion to
@@ -99,8 +102,7 @@ table \*(Ltwebhosts\*(Gt {
 .Ed
 .Sh GLOBAL CONFIGURATION
 Here are the settings that can be set globally:
-.Pp
-.Bl -tag -width Ds -compact
+.Bl -tag -width Ds
 .It Ic demote Ar group
 Enable the global
 .Xr carp 4
@@ -112,13 +114,9 @@ see the
 .Ic group
 keyword in
 .Xr ifconfig 8 .
-.Pp
-.It Xo
-.Ic interval Ar number
-.Xc
+.It Ic interval Ar number
 Set the interval in seconds at which the hosts will be checked.
 The default interval is 10 seconds.
-.Pp
 .It Xo
 .Ic log
 .Pq Ic updates Ns \&| Ns Ic all
@@ -137,7 +135,6 @@ The host state can be
 or
 .Ar unknown
 (the host is disabled or has not been checked yet).
-.Pp
 .It Ic prefork Ar number
 When using relays, run the specified number of processes to handle
 relayed connections.
@@ -146,7 +143,6 @@ to a relay.
 .Xr relayd 8
 runs 5 relay processes by default and every process will handle
 all configured relays.
-.Pp
 .It Ic send trap
 Send an SNMP trap when the state of a host changes.
 .Xr relayd 8
@@ -156,10 +152,7 @@ and request it send a trap to the registered trap receivers;
 see
 .Xr snmpd.conf 5
 for more information about the configuration.
-.Pp
-.It Xo
-.Ic timeout Ar number
-.Xc
+.It Ic timeout Ar number
 Set the global timeout in milliseconds for checks.
 This can be overridden by the timeout value in the table definitions.
 The default interval is 200 milliseconds and it must not exceed the
@@ -167,6 +160,7 @@ global interval.
 Please note that the default value is optimized for checks within the
 same collision domain \(en use a higher timeout, such as 1000 milliseconds,
 for checks of hosts in other subnets.
+If this option is to be set, it should be placed before overrides in tables.
 .El
 .Sh TABLES
 Tables are used to group a set of hosts as the target for redirections
@@ -306,7 +300,7 @@ This method will automatically use ICMP or ICMPV6 depending on the
 address family of each host.
 .It Ic check script Ar path
 Execute an external program to check the host state.
-The program will be executed for each host by specifing the hostname
+The program will be executed for each host by specifying the hostname
 on the command line:
 .Bd -literal -offset indent
 /usr/local/bin/checkload.pl front-www1.private.example.com
@@ -373,7 +367,7 @@ TCP as the transport.
 This will override the global timeout, which is 200 milliseconds by default.
 .El
 .Pp
-The following options will set the scheduling algoritm to select a
+The following options will set the scheduling algorithm to select a
 host from the specified table:
 .Bl -tag -width Ds
 .It Ic mode hash
@@ -430,7 +424,9 @@ This directive can be specified twice \(en the second entry will be used
 as the backup table if all hosts in the main table are down.
 At least one entry for the main table is mandatory.
 .It Xo
-.Ic listen on Ar address Ic port Ar port
+.Ic listen on Ar address
+.Op ip-proto
+.Ic port Ar port
 .Op Ic interface Ar name
 .Xc
 Specify an
@@ -446,6 +442,14 @@ The
 argument can optionally specify a port range instead of a single port;
 the format is
 .Ar min-port : Ns Ar max-port .
+The optional argument
+.Ar ip-proto
+can be used to specify an IP protocol like
+.Ar tcp
+or
+.Ar udp ;
+it defaults to
+.Ar tcp .
 The rdr rule can be optionally restricted to a given interface name.
 .It Xo
 .Ic route to
@@ -500,7 +504,9 @@ configuration directives are described below:
 Start the relay but immediately close any accepted connections.
 .It Xo
 .Op Ic transparent
-.Ic forward to
+.Ic forward
+.Op Ic with ssl
+.Ic to
 .Ar address
 .Op Ic port Ar port
 .Ar options ...
@@ -515,6 +521,13 @@ Use the
 .Ic transparent
 keyword to enable fully-transparent mode; the source address of the
 client will be retained in this case.
+.Pp
+The
+.Ic with ssl
+directive enables client-side SSL mode to connect to the remote host.
+Verification of server certificates can be enabled by setting the
+.Ic ca file
+option in the protocol section.
 .Pp
 The following options may be specified for forward directives:
 .Pp
@@ -917,7 +930,7 @@ See
 .Ic expect file Ar path
 for more information.
 .It Ic return error Op Ar option
-Return an error reponse to the client if an internal operation or the
+Return an error response to the client if an internal operation or the
 forward connection to the client failed.
 By default, the connection will be silently dropped.
 The effect of this option depends on the protocol: HTTP will send an
@@ -936,6 +949,13 @@ Set the SSL options and session settings.
 This is only used if SSL is enabled in the relay.
 Valid options are:
 .Bl -tag -width Ds
+.It Ic ca file Ar path
+This option enables CA verification in SSL client mode.
+The daemon will load the CA (Certificate Authority) certificates from
+the specified path to verify the server certificates.
+.Ox
+provides a default CA bundle in
+.Pa /etc/ssl/cert.pem .
 .It Ic ciphers Ar string
 Set the string defining the SSL cipher suite.
 If not specified, the default value
@@ -1027,9 +1047,12 @@ Service name database.
 Location of the relay SSL server certificates, where
 .Ar address
 is the configured IP address of the relay.
+.It Pa /etc/ssl/cert.pem
+Default location of the CA bundle that can be used with
+.Xr relayd 8 .
 .El
 .Sh EXAMPLES
-This configuration file would create a service
+This configuration file would create a redirection service
 .Dq www
 which load balances four hosts
 and falls back to one host containing a
@@ -1054,6 +1077,17 @@ redirect "www" {
 	forward to \*(Ltphphosts\*(Gt port 8080 timeout 300 \e
 		check http "/" digest "630aa3c2f..."
 	forward to \*(Ltsorryhost\*(Gt port 8080 timeout 300 check icmp
+}
+.Ed
+.Pp
+It is possible to specify multiple listen directives with different IP
+protocols in a single redirection configuration:
+.Bd -literal -offset indent
+redirect "dns" {
+	listen on dns.example.com tcp port 53
+	listen on dns.example.com udp port 53
+
+	forward to \*(Ltdnshosts\*(Gt port 53 check tcp
 }
 .Ed
 .Pp
@@ -1131,3 +1165,9 @@ program was written by
 .An Pierre-Yves Ritschard Aq pyr@openbsd.org
 and
 .An Reyk Floeter Aq reyk@openbsd.org .
+.Sh CAVEATS
+.Xr relayd 8
+Verification of SSL server certificates is based on a static CA bundle
+and
+.Xr relayd 8
+currently does not support CRLs (Certificate Revocation Lists).

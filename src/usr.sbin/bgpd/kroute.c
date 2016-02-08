@@ -1,4 +1,4 @@
-/*	$OpenBSD: kroute.c,v 1.165 2009/02/11 20:07:04 claudio Exp $ */
+/*	$OpenBSD: kroute.c,v 1.169 2009/06/25 15:54:22 claudio Exp $ */
 
 /*
  * Copyright (c) 2003, 2004 Henning Brauer <henning@openbsd.org>
@@ -1771,15 +1771,6 @@ mask2prefixlen6(struct sockaddr_in6 *sa_in6)
 	return (l);
 }
 
-in_addr_t
-prefixlen2mask(u_int8_t prefixlen)
-{
-	if (prefixlen == 0)
-		return (0);
-
-	return (0xffffffff << (32 - prefixlen));
-}
-
 struct in6_addr *
 prefixlen2mask6(u_int8_t prefixlen)
 {
@@ -1794,23 +1785,6 @@ prefixlen2mask6(u_int8_t prefixlen)
 		mask.s6_addr[prefixlen / 8] = 0xff00 >> i;
 
 	return (&mask);
-}
-
-void
-inet6applymask(struct in6_addr *dest, const struct in6_addr *src, int prefixlen)
-{
-	struct in6_addr	mask;
-	int		i;
-
-	bzero(&mask, sizeof(mask));
-	for (i = 0; i < prefixlen / 8; i++)
-		mask.s6_addr[i] = 0xff;
-	i = prefixlen % 8;
-	if (i)
-		mask.s6_addr[prefixlen / 8] = 0xff00 >> i;
-
-	for (i = 0; i < 16; i++)
-		dest->s6_addr[i] = src->s6_addr[i] & mask.s6_addr[i];
 }
 
 #define	ROUNDUP(a)	\
@@ -2210,7 +2184,9 @@ fetchtable(u_int rtableid, int connected_only)
 	lim = buf + len;
 	for (next = buf; next < lim; next += rtm->rtm_msglen) {
 		rtm = (struct rt_msghdr *)next;
-		sa = (struct sockaddr *)(rtm + 1);
+		if (rtm->rtm_version != RTM_VERSION)
+			continue;
+		sa = (struct sockaddr *)(next + rtm->rtm_hdrlen);
 		get_rtaddrs(rtm->rtm_addrs, sa, rti_info);
 
 		if ((sa = rti_info[RTAX_DST]) == NULL)
@@ -2435,12 +2411,14 @@ dispatch_rtmsg(void)
 	lim = buf + n;
 	for (next = buf; next < lim; next += rtm->rtm_msglen) {
 		rtm = (struct rt_msghdr *)next;
+		if (rtm->rtm_version != RTM_VERSION)
+			continue;
 
 		switch (rtm->rtm_type) {
 		case RTM_ADD:
 		case RTM_CHANGE:
 		case RTM_DELETE:
-			sa = (struct sockaddr *)(rtm + 1);
+			sa = (struct sockaddr *)(next + rtm->rtm_hdrlen);
 			get_rtaddrs(rtm->rtm_addrs, sa, rti_info);
 
 			if (rtm->rtm_pid == kr_state.pid) /* cause by us */
@@ -2573,7 +2551,7 @@ dispatch_rtmsg_addr(struct rt_msghdr *rtm, struct sockaddr *rti_info[RTAX_MAX],
 				if ((kr = kroute_matchgw(kr, sa_in)) == NULL) {
 					log_warnx("dispatch_rtmsg[delete] "
 					    "mpath route not found");
-					return (-1);
+					return (0);
 				}
 
 			if (kroute_remove(kr) == -1)
@@ -2592,8 +2570,8 @@ dispatch_rtmsg_addr(struct rt_msghdr *rtm, struct sockaddr *rti_info[RTAX_MAX],
 				if ((kr6 = kroute6_matchgw(kr6, sa_in6)) ==
 				    NULL) {
 					log_warnx("dispatch_rtmsg[delete] "
-					    "mpath route not found");
-					return (-1);
+					    "IPv6 mpath route not found");
+					return (0);
 				}
 
 			if (kroute6_remove(kr6) == -1)

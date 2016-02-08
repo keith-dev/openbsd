@@ -1,4 +1,4 @@
-/*	$OpenBSD: ruserpass.c,v 1.26 2008/06/25 21:15:19 martynas Exp $	*/
+/*	$OpenBSD: ruserpass.c,v 1.28 2009/05/05 19:35:30 martynas Exp $	*/
 /*	$NetBSD: ruserpass.c,v 1.14 1997/07/20 09:46:01 lukem Exp $	*/
 
 /*
@@ -31,13 +31,6 @@
  */
 
 #ifndef SMALL
-#ifndef lint
-#if 0
-static char sccsid[] = "@(#)ruserpass.c	8.4 (Berkeley) 4/27/95";
-#else
-static const char rcsid[] = "$OpenBSD: ruserpass.c,v 1.26 2008/06/25 21:15:19 martynas Exp $";
-#endif
-#endif /* not lint */
 
 #include <sys/types.h>
 #include <sys/stat.h>
@@ -319,4 +312,6 @@ token(void)
 			return (t->tval);
 	return (ID);
 }
+
 #endif /* !SMALL */
+

@@ -1,4 +1,4 @@
-/*	$OpenBSD: extern.h,v 1.8 2009/01/11 19:44:57 miod Exp $	*/
+/*	$OpenBSD: extern.h,v 1.17 2009/06/04 21:13:03 deraadt Exp $	*/
 
 /*
  * Copyright (c) 2003 Theo de Raadt <deraadt@openbsd.org>
@@ -16,25 +16,24 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
+#define MEG(x)	((x) * 1024LL * (1024 / 512))
+#define GIG(x)  (MEG(x) * 1024LL)
+
 u_short	dkcksum(struct disklabel *);
 int	checklabel(struct disklabel *);
+char	canonical_unit(struct disklabel *, char);
 double	scale(u_int64_t, char, struct disklabel *);
-void	display(FILE *, struct disklabel *, char **, char, int);
-void	display_partition(FILE *, struct disklabel *, char **, int, char);
+void	display(FILE *, struct disklabel *, char, int);
+void	display_partition(FILE *, struct disklabel *, int, char);
 
-struct disklabel *readlabel(int);
+void	readlabel(int);
 struct disklabel *makebootarea(char *, struct disklabel *, int);
-int	editor(struct disklabel *, int, char *, char *);
+int	editor(struct disklabel *, int);
 
 int	writelabel(int, char *, struct disklabel *);
-extern  char bootarea[], *specname;
+extern  char bootarea[], *specname, *fstabfile;
+extern	char *mountpoints[MAXPARTITIONS];
+extern  int aflag, dflag;
 extern  int donothing;
-extern  int dflag;
-
-#ifdef DOSLABEL
-extern  struct dos_partition *dosdp;    /* DOS partition, if found */
-#endif
-#ifdef DPMELABEL
-extern	int dpme_label;			/* nonzero if DPME table */
-extern	uint32_t dpme_obsd_start, dpme_obsd_size; /* OpenBSD DPME boundaries */
-#endif
+extern	int verbose;
+extern	char print_unit;

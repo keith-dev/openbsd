@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.149 2009/01/29 16:47:25 claudio Exp $
+#	$OpenBSD: Makefile,v 1.153 2009/05/11 19:49:25 jmc Exp $
 #	$NetBSD: Makefile,v 1.4 1996/01/09 03:23:01 thorpej Exp $
 
 #	Makefile for section 9 (kernel function and variable) manual pages.
@@ -203,10 +203,10 @@ MLINKS+=mbuf.9 m_copym2.9 mbuf.9 m_copym.9 mbuf.9 m_free.9 mbuf.9 MFREE.9 \
 	mbuf.9 m_inject.9 mbuf.9 m_getptr.9 mbuf.9 m_adj.9 mbuf.9 m_copyback.9 \
 	mbuf.9 m_freem.9 mbuf.9 m_reclaim.9 mbuf.9 m_copydata.9 \
 	mbuf.9 m_cat.9 mbuf.9 m_devget.9 mbuf.9 m_zero.9 mbuf.9 m_apply.9 \
-	mbuf.9 MEXTALLOC.9 mbuf.9 MCLGET.9 mbuf.9 MCLGETI.9 \
+	mbuf.9 MCLGET.9 mbuf.9 MCLGETI.9  \
 	mbuf.9 MEXTADD.9 mbuf.9 M_ALIGN.9 mbuf.9 MH_ALIGN.9 \
 	mbuf.9 M_READONLY.9 mbuf.9 M_LEADINGSPACE.9 \
-	mbuf.9 M_TRAILINGSPACE.9 mbuf.9 MCHTYPE.9 mbuf.9 mtod.9
+	mbuf.9 M_TRAILINGSPACE.9 mbuf.9 mtod.9
 MLINKS+=mbuf_tags.9 m_tag_get.9 mbuf_tags.9 m_tag_find.9 \
 	mbuf_tags.9 m_tag_prepend.9 mbuf_tags.9 m_tag_delete.9 \
 	mbuf_tags.9 m_tag_copy.9 mbuf_tags.9 m_tag_delete_chain.9 \
@@ -295,7 +295,9 @@ MLINKS+=timeout.9 timeout_add.9 timeout.9 timeout_set.9 \
 	timeout.9 timeout_initialized.9 timeout.9 untimeout.9 \
 	timeout.9 timeout_triggered.9 timeout.9 timeout_add_tv.9 \
 	timeout.9 timeout_add_ts.9 timeout.9 timeout_add_bt.9 \
-	timeout.9 timeout_add_sec.9 timeout.9 timeout_add_usec.9 \
+	timeout.9 timeout_add_sec.9 \
+	timeout.9 timeout_add_msec.9 \
+	timeout.9 timeout_add_usec.9 \
 	timeout.9 timeout_add_nsec.9
 MLINKS+=tsleep.9 wakeup.9 tsleep.9 msleep.9
 MLINKS+=uiomove.9 uio.9

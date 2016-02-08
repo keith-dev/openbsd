@@ -1,4 +1,4 @@
-/*	$OpenBSD: sendbug.c,v 1.60 2009/01/28 20:43:24 ray Exp $	*/
+/*	$OpenBSD: sendbug.c,v 1.62 2009/06/07 15:36:45 ray Exp $	*/
 
 /*
  * Written by Ray Lai <ray@cyth.net>.
@@ -28,10 +28,14 @@
 
 #define _PATH_DMESG "/var/run/dmesg.boot"
 #define DMESG_START "OpenBSD "
+#define BEGIN64 "begin-base64 "
+#define END64 "===="
 
 int	checkfile(const char *);
+void	debase(void);
 void	dmesg(FILE *);
 int	editit(const char *);
+void	hwdump(FILE *);
 void	init(void);
 int	matchline(const char *, const char *, size_t);
 int	prompt(void);
@@ -52,7 +56,8 @@ const char *comment[] = {
 
 struct passwd *pw;
 char os[BUFSIZ], rel[BUFSIZ], mach[BUFSIZ], details[BUFSIZ];
-char *fullname, *tmppath;
+const char *tmpdir;
+char *tmppath;
 int Dflag, Pflag, wantcleanup;
 
 __dead void
@@ -60,7 +65,7 @@ usage(void)
 {
 	extern char *__progname;
 
-	fprintf(stderr, "usage: %s [-DPV]\n", __progname);
+	fprintf(stderr, "usage: %s [-DEPV]\n", __progname);
 	exit(1);
 }
 
@@ -76,17 +81,19 @@ int
 main(int argc, char *argv[])
 {
 	int ch, c, fd, ret = 1;
-	const char *tmpdir;
 	struct stat sb;
 	char *pr_form;
 	time_t mtime;
 	FILE *fp;
 
-	while ((ch = getopt(argc, argv, "DPV")) != -1)
+	while ((ch = getopt(argc, argv, "DEPV")) != -1)
 		switch (ch) {
 		case 'D':
 			Dflag = 1;
 			break;
+		case 'E':
+			debase();
+			exit(0);
 		case 'P':
 			Pflag = 1;
 			break;
@@ -196,10 +203,6 @@ dmesg(FILE *fp)
 		return;
 	}
 
-	fputs("\n"
-	    "SENDBUG: dmesg is attached.\n"
-	    "SENDBUG: Feel free to delete or use the -D flag if it contains "
-	    "sensitive information.\n", fp);
 	/* Find last dmesg. */
 	for (;;) {
 		off_t o;
@@ -340,46 +343,12 @@ sendmail(const char *pathname)
 void
 init(void)
 {
-	size_t amp, len, gecoslen, namelen;
+	size_t len;
 	int sysname[2];
-	char ch, *cp;
+	char *cp;
 
 	if ((pw = getpwuid(getuid())) == NULL)
 		err(1, "getpwuid");
-	namelen = strlen(pw->pw_name);
-
-	/* Count number of '&'. */
-	for (amp = 0, cp = pw->pw_gecos; *cp && *cp != ','; ++cp)
-		if (*cp == '&')
-			++amp;
-
-	/* Truncate gecos to full name. */
-	gecoslen = cp - pw->pw_gecos;
-	pw->pw_gecos[gecoslen] = '\0';
-
-	/* Expanded str = orig str - '&' chars + concatenated logins. */
-	len = gecoslen - amp + (amp * namelen) + 1;
-	if ((fullname = malloc(len)) == NULL)
-		err(1, "malloc");
-
-	/* Upper case first char of login. */
-	ch = pw->pw_name[0];
-	pw->pw_name[0] = toupper((unsigned char)pw->pw_name[0]);
-
-	cp = pw->pw_gecos;
-	fullname[0] = '\0';
-	while (cp != NULL) {
-		char *token;
-
-		token = strsep(&cp, "&");
-		if (token != pw->pw_gecos &&
-		    strlcat(fullname, pw->pw_name, len) >= len)
-			errx(1, "truncated string");
-		if (strlcat(fullname, token, len) >= len)
-			errx(1, "truncated string");
-	}
-	/* Restore case of first char of login. */
-	pw->pw_name[0] = ch;
 
 	sysname[0] = CTL_KERN;
 	sysname[1] = KERN_OSTYPE;
@@ -577,6 +546,84 @@ template(FILE *fp)
 	fprintf(fp, ">Fix:\n");
 	fprintf(fp, "\t%s\n", comment[4]);
 
-	if (!Dflag)
+	if (!Dflag) {
+		int root;
+
+		fprintf(fp, "\n");
+		root = !geteuid();
+		if (!root)
+			fprintf(fp, "SENDBUG: Run sendbug as root "
+			    "if this is an ACPI report!\n");
+		fprintf(fp, "SENDBUG: dmesg%s attached.\n"
+		    "SENDBUG: Feel free to delete or use the -D flag if it "
+		    "contains sensitive information.\n",
+		    root ? ", pcidump, and acpidump are" : " is");
+		fputs("\ndmesg:\n", fp);
 		dmesg(fp);
+		if (root)
+			hwdump(fp);
+	}
+}
+
+void
+hwdump(FILE *ofp)
+{
+	char buf[BUFSIZ];
+	FILE *ifp;
+	char *cmd, *acpidir;
+	size_t len;
+
+	if (gethostname(buf, sizeof(buf)) == -1)
+		err(1, "gethostname");
+	buf[strcspn(buf, ".")] = '\0';
+
+	if (asprintf(&acpidir, "%s%sp.XXXXXXXXXX", tmpdir,
+	    tmpdir[strlen(tmpdir) - 1] == '/' ? "" : "/") == -1)
+		err(1, "asprintf");
+	if (mkdtemp(acpidir) == NULL)
+		err(1, "mkdtemp");
+
+	if (asprintf(&cmd, "echo \"\\npcidump:\"; pcidump -xxv; "
+	    "echo \"\\nacpidump:\"; cd %s && acpidump -o %s; "
+	    "for i in *; do b64encode $i $i; done; rm -rf %s",
+	    acpidir, buf, acpidir) == -1)
+		err(1, "asprintf");
+
+	if ((ifp = popen(cmd, "r")) != NULL) {
+		while (!feof(ifp)) {
+			len = fread(buf, 1, sizeof buf, ifp);
+			if (len == 0)
+				break;
+			if (fwrite(buf, 1, len, ofp) != len)
+				break;
+		}
+		pclose(ofp);
+	}
+	free(cmd);
+}
+
+void
+debase(void)
+{
+	char buf[BUFSIZ];
+	FILE *fp = NULL;
+	size_t len;
+
+	while (fgets(buf, sizeof(buf), stdin) != NULL) {
+		len = strlen(buf);
+		if (!strncmp(buf, BEGIN64, sizeof(BEGIN64) - 1)) {
+			if (fp)
+				errx(1, "double begin");
+			fp = popen("b64decode", "w");
+			if (!fp)
+				errx(1, "popen b64decode");
+		}
+		if (fp && fwrite(buf, 1, len, fp) != len)
+			errx(1, "pipe error");
+		if (!strncmp(buf, END64, sizeof(END64) - 1)) {
+			if (pclose(fp) == -1)
+				errx(1, "pclose b64decode");
+			fp = NULL;
+		}
+	}
 }

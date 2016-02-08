@@ -1,4 +1,4 @@
-/*	$OpenBSD: commands.c,v 1.49 2006/01/14 21:21:46 otto Exp $	*/
+/*	$OpenBSD: commands.c,v 1.51 2009/06/05 00:20:46 claudio Exp $	*/
 /*	$NetBSD: commands.c,v 1.14 1996/03/24 22:03:48 jtk Exp $	*/
 
 /*
@@ -38,7 +38,6 @@ int tos = -1;
 #endif	/* defined(IPPROTO_IP) && defined(IP_TOS) */
 
 char	*hostname;
-static char _hostname[MAXHOSTNAMELEN];
 
 typedef int (*intrtn_t)(int, char**);
 static int call(intrtn_t, ...);
@@ -2396,6 +2395,12 @@ tn(argc, argv)
 	net = socket(res->ai_family, res->ai_socktype, res->ai_protocol);
 	if (net < 0)
 	    continue;
+
+	if (rdomain) {
+		if (setsockopt(net, IPPROTO_IP, SO_RDOMAIN, &rdomain,
+		    sizeof(rdomain)) == -1)
+			perror("setsockopt (SO_RDOMAIN)");
+	}
 
 	if (aliasp) {
 	    struct addrinfo ahints, *ares;

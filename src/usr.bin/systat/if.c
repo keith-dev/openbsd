@@ -1,4 +1,4 @@
-/*	$OpenBSD: if.c,v 1.12 2008/06/12 22:26:01 canacar Exp $ */
+/*	$OpenBSD: if.c,v 1.15 2009/06/26 06:39:47 jasper Exp $ */
 /*
  * Copyright (c) 2004 Markus Friedl <markus@openbsd.org>
  *
@@ -14,6 +14,7 @@
  * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
+
 #include <sys/param.h>
 #include <sys/types.h>
 #include <sys/socket.h>
@@ -21,9 +22,12 @@
 #include <net/if.h>
 #include <net/if_dl.h>
 #include <net/route.h>
+#include <sys/sockio.h>
+#include <sys/ioctl.h>
 
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 #include "systat.h"
 
@@ -43,6 +47,7 @@ struct ifcount {
 
 struct ifstat {
 	char		ifs_name[IFNAMSIZ];	/* interface name */
+	char		ifs_description[IFDESCRSIZE];
 	struct ifcount	ifs_cur;
 	struct ifcount	ifs_old;
 	struct ifcount	ifs_now;
@@ -64,7 +69,7 @@ static void showtotal(void);
 /* Define fields */
 field_def fields_if[] = {
 	{"IFACE", 8, 16, 1, FLD_ALIGN_LEFT, -1, 0, 0, 0},
-	{"STATE", 10, 16, 1, FLD_ALIGN_LEFT, -1, 0, 0, 0},
+	{"STATE", 4, 6, 1, FLD_ALIGN_LEFT, -1, 0, 0, 0},
 	{"IPKTS", 5, 8, 1, FLD_ALIGN_RIGHT, -1, 0, 0, 0},
 	{"IBYTES", 5, 8, 1, FLD_ALIGN_RIGHT, -1, 0, 0, 0},
 	{"IERRS", 5, 8, 1, FLD_ALIGN_RIGHT, -1, 0, 0, 0},
@@ -72,6 +77,7 @@ field_def fields_if[] = {
 	{"OBYTES", 5, 8, 1, FLD_ALIGN_RIGHT, -1, 0, 0, 0},
 	{"OERRS", 5, 8, 1, FLD_ALIGN_RIGHT, -1, 0, 0, 0},
 	{"COLLS", 5, 8, 1, FLD_ALIGN_RIGHT, -1, 0, 0, 0},
+	{"DESC", 14, 64, 1, FLD_ALIGN_LEFT, -1, 0, 0, 0},
 };
 
 
@@ -86,13 +92,14 @@ field_def fields_if[] = {
 #define FLD_IF_OBYTES	FIELD_ADDR(6)
 #define FLD_IF_OERRS	FIELD_ADDR(7)
 #define FLD_IF_COLLS	FIELD_ADDR(8)
+#define FLD_IF_DESC	FIELD_ADDR(9)
 
 
 /* Define views */
 field_def *view_if_0[] = {
-	FLD_IF_IFACE, FLD_IF_STATE, FLD_IF_IPKTS, FLD_IF_IBYTES,
-	FLD_IF_IERRS, FLD_IF_OPKTS, FLD_IF_OBYTES, FLD_IF_OERRS,
-	FLD_IF_COLLS, NULL
+	FLD_IF_IFACE, FLD_IF_STATE, FLD_IF_DESC, FLD_IF_IPKTS,
+	FLD_IF_IBYTES, FLD_IF_IERRS, FLD_IF_OPKTS, FLD_IF_OBYTES,
+	FLD_IF_OERRS, FLD_IF_COLLS, NULL
 };
 
 /* Define view managers */
@@ -191,6 +198,7 @@ fetchifstat(void)
 	struct sockaddr *info[RTAX_MAX];
 	struct sockaddr_dl *sdl;
 	char *buf, *next, *lim;
+	static int s = -1;
 	int mib[6];
 	size_t need;
 
@@ -216,8 +224,9 @@ fetchifstat(void)
 	lim = buf + need;
 	for (next = buf; next < lim; next += ifm.ifm_msglen) {
 		bcopy(next, &ifm, sizeof ifm);
-		if (ifm.ifm_type != RTM_IFINFO ||
-		   !(ifm.ifm_addrs & RTA_IFP))
+		if (ifm.ifm_version != RTM_VERSION ||
+		    ifm.ifm_type != RTM_IFINFO ||
+		    !(ifm.ifm_addrs & RTA_IFP))
 			continue;
 		if (ifm.ifm_index >= nifs) {
 			if ((newstats = realloc(ifstats, (ifm.ifm_index + 4)
@@ -233,12 +242,31 @@ fetchifstat(void)
 			rt_getaddrinfo(
 			    (struct sockaddr *)((struct if_msghdr *)next + 1),
 			    ifm.ifm_addrs, info);
-			if ((sdl = (struct sockaddr_dl *)info[RTAX_IFP])) {
-				if (sdl->sdl_family == AF_LINK &&
-				    sdl->sdl_nlen > 0) {
-					bcopy(sdl->sdl_data, ifs->ifs_name,
-					    sdl->sdl_nlen);
-					ifs->ifs_name[sdl->sdl_nlen] = '\0';
+			sdl = (struct sockaddr_dl *)info[RTAX_IFP];
+
+			if (sdl && sdl->sdl_family == AF_LINK &&
+			    sdl->sdl_nlen > 0) {
+				struct ifreq ifrdesc;
+				char ifdescr[IFDESCRSIZE];
+				int s;
+
+				bcopy(sdl->sdl_data, ifs->ifs_name,
+				      sdl->sdl_nlen);
+				ifs->ifs_name[sdl->sdl_nlen] = '\0';
+
+				/* Get the interface description */
+				memset(&ifrdesc, 0, sizeof(ifrdesc));
+				strlcpy(ifrdesc.ifr_name, ifs->ifs_name,
+					sizeof(ifrdesc.ifr_name));
+				ifrdesc.ifr_data = (caddr_t)&ifdescr;
+
+				s = socket(AF_INET, SOCK_DGRAM, 0);
+				if (s != -1) {
+					if (ioctl(s, SIOCGIFDESCR, &ifrdesc) == 0)
+						strlcpy(ifs->ifs_description,
+						    ifrdesc.ifr_data,
+						    sizeof(ifs->ifs_description));
+					close(s);
 				}
 			}
 			if (ifs->ifs_name[0] == '\0')
@@ -280,6 +308,8 @@ showifstat(struct ifstat *ifs)
 	}
 
 	print_fld_tb(FLD_IF_STATE);
+
+	print_fld_str(FLD_IF_DESC, ifs->ifs_description);
 
 	print_fld_size(FLD_IF_IBYTES, ifs->ifs_cur.ifc_ib);
 	print_fld_size(FLD_IF_IPKTS, ifs->ifs_cur.ifc_ip);

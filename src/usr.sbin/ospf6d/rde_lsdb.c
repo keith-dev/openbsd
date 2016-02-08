@@ -1,4 +1,4 @@
-/*	$OpenBSD: rde_lsdb.c,v 1.18 2009/02/12 16:54:31 stsp Exp $ */
+/*	$OpenBSD: rde_lsdb.c,v 1.26 2009/03/29 19:18:20 stsp Exp $ */
 
 /*
  * Copyright (c) 2004, 2005 Claudio Jeker <claudio@openbsd.org>
@@ -343,57 +343,38 @@ lsa_intra_a_pref_check(struct lsa *lsa, u_int16_t len)
 }
 
 int
-lsa_self(struct rde_nbr *nbr, struct lsa *new, struct vertex *v)
+lsa_self(struct lsa *lsa)
 {
-	struct lsa	*dummy;
-#if 0
-	struct iface	*iface;
-#endif
+	return rde_router_id() == lsa->hdr.adv_rtr;
+}
 
-	if (nbr->self)
-		return (0);
-
-	if (rde_router_id() == new->hdr.adv_rtr)
-		goto self;
-
-#if 0
-	/* TODO: Do we need something like this for *-prefix-LSAs? */
-	if (ntohs(new->hdr.type) == LSA_TYPE_NETWORK)
-		LIST_FOREACH(iface, &nbr->area->iface_list, entry)
-			if (iface->addr.s_addr == new->hdr.ls_id)
-				goto self;
-#endif
-
-	return (0);
-self:
-	if (v == NULL) {
-		/*
-		 * LSA is no longer announced, remove by premature aging.
-		 * The problem is that new may not be altered so a copy
-		 * needs to be added to the LSA DB first.
-		 */
-		if ((dummy = malloc(ntohs(new->hdr.len))) == NULL)
-			fatal("lsa_self");
-		memcpy(dummy, new, ntohs(new->hdr.len));
-		dummy->hdr.age = htons(MAX_AGE);
-		/*
-		 * The clue is that by using the remote nbr as originator
-		 * the dummy LSA will be reflooded via the default timeout
-		 * handler.
-		 */
-		(void)lsa_add(rde_nbr_self(nbr->area), dummy);
-		return (1);
-	}
+void
+lsa_flush(struct rde_nbr *nbr, struct lsa *lsa)
+{
+	struct lsa	*copy;
 
 	/*
-	 * LSA is still originated, just reflood it. But we need to create
-	 * a new instance by setting the LSA sequence number equal to the
-	 * one of new and calling lsa_refresh(). Flooding will be done by the
-	 * caller.
+	 * The LSA may not be altered because the caller may still
+	 * use it, so a copy needs to be added to the LSDB.
+	 * The copy will be reflooded via the default timeout handler.
+	 */
+	if ((copy = malloc(ntohs(lsa->hdr.len))) == NULL)
+		fatal("lsa_flush");
+	memcpy(copy, lsa, ntohs(lsa->hdr.len));
+	copy->hdr.age = htons(MAX_AGE);
+	(void)lsa_add(rde_nbr_self(nbr->area), copy);
+}
+
+void
+lsa_reflood(struct vertex *v, struct lsa *new)
+{
+	/*
+	 * We only need to create a new instance by setting the LSA
+	 * sequence number equal to the one of 'new' and calling
+	 * lsa_refresh(). Actual flooding will be done by the caller.
 	 */
 	v->lsa->hdr.seq_num = new->hdr.seq_num;
 	lsa_refresh(v);
-	return (1);
 }
 
 int
@@ -507,26 +488,35 @@ struct vertex *
 lsa_find(struct iface *iface, u_int16_t type, u_int32_t ls_id,
     u_int32_t adv_rtr)
 {
-	struct vertex	 key;
-	struct vertex	*v;
 	struct lsa_tree	*tree;
 
-	key.ls_id = ntohl(ls_id);
-	key.adv_rtr = ntohl(adv_rtr);
-	key.type = ntohs(type);
-
-	if (LSA_IS_SCOPE_AS(key.type))
+	if (LSA_IS_SCOPE_AS(ntohs(type)))
 		tree = &asext_tree;
-	else if (LSA_IS_SCOPE_AREA(key.type)) {
+	else if (LSA_IS_SCOPE_AREA(ntohs(type))) {
 		struct area	*area;
 
 		if ((area = area_find(rdeconf, iface->area_id)) == NULL)
 			fatalx("interface lost area");
 		tree = &area->lsa_tree;
-	} else if (LSA_IS_SCOPE_LLOCAL(key.type))
+	} else if (LSA_IS_SCOPE_LLOCAL(ntohs(type)))
 		tree = &iface->lsa_tree;
 	else
 		fatalx("unknown scope type");
+
+	return lsa_find_tree(tree, type, ls_id, adv_rtr);
+
+}
+
+struct vertex *
+lsa_find_tree(struct lsa_tree *tree, u_int16_t type, u_int32_t ls_id,
+    u_int32_t adv_rtr)
+{
+	struct vertex	 key;
+	struct vertex	*v;
+
+	key.ls_id = ntohl(ls_id);
+	key.adv_rtr = ntohl(adv_rtr);
+	key.type = ntohs(type);
 
 	v = RB_FIND(lsa_tree, tree, &key);
 
@@ -541,24 +531,36 @@ lsa_find(struct iface *iface, u_int16_t type, u_int32_t ls_id,
 }
 
 struct vertex *
-lsa_find_net(struct area *area, u_int32_t ls_id)
+lsa_find_rtr(struct area *area, u_int32_t rtr_id)
 {
-	struct lsa_tree	*tree = &area->lsa_tree;
 	struct vertex	*v;
+	struct vertex	*r;
 
+	/* A router can originate multiple router LSAs,
+	 * differentiated by link state ID. Our job is
+	 * to find among those the LSA with the lowest
+	 * link state ID, because this is where the options
+	 * field and router-type bits come from. */
+
+	r = NULL;
 	/* XXX speed me up */
-	RB_FOREACH(v, lsa_tree, tree) {
-		if (v->lsa->hdr.type == LSA_TYPE_NETWORK &&
-		    v->lsa->hdr.ls_id == ls_id) {
-			/* LSA that are deleted are not findable */
-			if (v->deleted)
-				return (NULL);
-			lsa_age(v);
-			return (v);
+	RB_FOREACH(v, lsa_tree, &area->lsa_tree) {
+		if (v->deleted)
+			continue;
+
+		if (v->type == LSA_TYPE_ROUTER &&
+		    v->adv_rtr == ntohl(rtr_id)) {
+			if (r == NULL)
+				r = v;
+			else if (v->ls_id < r->ls_id)
+				r = v;
 		}
 	}
 
-	return (NULL);
+	if (r)
+		lsa_age(r);
+
+	return (r);
 }
 
 u_int16_t
@@ -566,11 +568,11 @@ lsa_num_links(struct vertex *v)
 {
 	switch (v->type) {
 	case LSA_TYPE_ROUTER:
-		return ((ntohs(v->lsa->hdr.len) - sizeof(struct lsa_hdr)
-		    - sizeof(u_int32_t)) / sizeof(struct lsa_rtr_link));
+		return ((ntohs(v->lsa->hdr.len) - sizeof(struct lsa_hdr) -
+		    sizeof(struct lsa_rtr)) / sizeof(struct lsa_rtr_link));
 	case LSA_TYPE_NETWORK:
-		return ((ntohs(v->lsa->hdr.len) - sizeof(struct lsa_hdr)
-		    - sizeof(u_int32_t)) / sizeof(struct lsa_net_link));
+		return ((ntohs(v->lsa->hdr.len) - sizeof(struct lsa_hdr) -
+		    sizeof(struct lsa_net)) / sizeof(struct lsa_net_link));
 	default:
 		fatalx("lsa_num_links: invalid LSA type");
 	}

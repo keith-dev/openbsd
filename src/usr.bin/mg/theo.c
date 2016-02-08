@@ -1,4 +1,4 @@
-/*	$OpenBSD: theo.c,v 1.106 2008/12/23 07:46:04 claudio Exp $	*/
+/*	$OpenBSD: theo.c,v 1.109 2009/06/04 23:39:37 kjell Exp $	*/
 /*
  * Copyright (c) 2002 Artur Grabowski <art@openbsd.org>
  * All rights reserved.
@@ -67,7 +67,7 @@ theo(int f, int n)
 	bp->b_modes[1] = name_mode("theo");
 	bp->b_nmodes = 1;
 
-	if ((wp = popbuf(bp)) == NULL)
+	if ((wp = popbuf(bp, WNONE)) == NULL)
 		return (FALSE);
 
 	curbp = bp;
@@ -150,7 +150,9 @@ static const char *talk[] = {
 	"kettenis supported a new machine in my basement and all I got to do was fix a 1 character typo in his html page commit.",
 	"industry told us a lesson: when you're an asshole, they mail you hardware",
 	"I was joking, really.  I think I am funny :-)",
-	"the kernel is a harsh mistress"
+	"the kernel is a harsh mistress",
+	"Have I ever been subtle? If my approach ever becomes subtle, shoot me.",
+	"the acpi stabs you in the back.  the acpi stabs you in the back. you die ..."
 };
 
 static const int ntalk = sizeof(talk)/sizeof(talk[0]);

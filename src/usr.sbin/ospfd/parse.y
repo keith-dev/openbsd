@@ -1,4 +1,4 @@
-/*	$OpenBSD: parse.y,v 1.65 2009/01/26 23:03:28 claudio Exp $ */
+/*	$OpenBSD: parse.y,v 1.67 2009/06/05 04:12:52 claudio Exp $ */
 
 /*
  * Copyright (c) 2004, 2005 Esben Norby <norby@openbsd.org>
@@ -115,7 +115,7 @@ typedef struct {
 
 %}
 
-%token	AREA INTERFACE ROUTERID FIBUPDATE REDISTRIBUTE RTLABEL
+%token	AREA INTERFACE ROUTERID FIBUPDATE REDISTRIBUTE RTLABEL RDOMAIN
 %token	RFC1583COMPAT STUB ROUTER SPFDELAY SPFHOLDTIME EXTTAG
 %token	AUTHKEY AUTHTYPE AUTHMD AUTHMDKEYID
 %token	METRIC PASSIVE
@@ -198,6 +198,13 @@ conf_main	: ROUTERID STRING {
 			}
 			rtlabel_tag(rtlabel_name2id($2), $4);
 			free($2);
+		}
+		| RDOMAIN NUMBER {
+			if ($2 < 0 || $2 > RT_TABLEID_MAX) {
+				yyerror("invalid rdomain");
+				YYERROR;
+			}
+			conf->rdomain = $2;
 		}
 		| RFC1583COMPAT yesno {
 			conf->rfc1583compat = $2;
@@ -671,6 +678,7 @@ lookup(char *s)
 		{"metric",		METRIC},
 		{"no",			NO},
 		{"passive",		PASSIVE},
+		{"rdomain",		RDOMAIN},
 		{"redistribute",	REDISTRIBUTE},
 		{"retransmit-interval",	RETRANSMITINTERVAL},
 		{"rfc1583compat",	RFC1583COMPAT},
@@ -962,9 +970,13 @@ pushfile(const char *name, int secret)
 {
 	struct file	*nfile;
 
-	if ((nfile = calloc(1, sizeof(struct file))) == NULL ||
-	    (nfile->name = strdup(name)) == NULL) {
+	if ((nfile = calloc(1, sizeof(struct file))) == NULL) {
 		log_warn("malloc");
+		return (NULL);
+	}
+	if ((nfile->name = strdup(name)) == NULL) {
+		log_warn("malloc");
+		free(nfile);
 		return (NULL);
 	}
 	if ((nfile->stream = fopen(nfile->name, "r")) == NULL) {

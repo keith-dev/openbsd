@@ -1,4 +1,4 @@
-/*	$OpenBSD: subr_pool.c,v 1.78 2009/02/17 07:53:55 deraadt Exp $	*/
+/*	$OpenBSD: subr_pool.c,v 1.85 2009/06/24 11:23:33 deraadt Exp $	*/
 /*	$NetBSD: subr_pool.c,v 1.61 2001/09/26 07:14:56 chs Exp $	*/
 
 /*-
@@ -56,6 +56,7 @@
  * the allocated pages themselves (for small pool items) or taken from
  * an internal pool of page headers (`phpool').
  */
+/* #define POOL_DEBUG */
 
 /* List of all pools */
 TAILQ_HEAD(,pool) pool_head = TAILQ_HEAD_INITIALIZER(pool_head);
@@ -333,6 +334,11 @@ pool_init(struct pool *pp, size_t size, u_int align, u_int ioff, int flags,
 	if (pool_serial == 0)
 		panic("pool_init: too much uptime");
 
+        /* constructor, destructor, and arg */
+	pp->pr_ctor = NULL;
+	pp->pr_dtor = NULL;
+	pp->pr_arg = NULL;
+
 	/*
 	 * Decide whether to put the page header off page to avoid
 	 * wasting too large a part of the page. Off-page page headers
@@ -444,20 +450,32 @@ pool_get(struct pool *pp, int flags)
 {
 	void *v;
 
+#ifdef DIAGNOSTIC
+	if ((flags & PR_WAITOK) != 0)
+		splassert(IPL_NONE);
+#endif /* DIAGNOSTIC */
+
 	mtx_enter(&pp->pr_mtx);
 	v = pool_do_get(pp, flags);
 	mtx_leave(&pp->pr_mtx);
-	if (v && pp->pr_ctor && pp->pr_ctor(pp->pr_arg, v, flags)) {
-		mtx_enter(&pp->pr_mtx);
-		pool_do_put(pp, v);
-		mtx_leave(&pp->pr_mtx);
-		v = NULL;
-	}
-	if (v) {
-		pp->pr_nget++;
+	if (v == NULL)
+		return (v);
+
+	if (pp->pr_ctor) {
+		if (flags & PR_ZERO)
+			panic("pool_get: PR_ZERO when ctor set");
+		if (pp->pr_ctor(pp->pr_arg, v, flags)) {
+			mtx_enter(&pp->pr_mtx);
+			pool_do_put(pp, v);
+			mtx_leave(&pp->pr_mtx);
+			v = NULL;
+		}
+	} else {
 		if (flags & PR_ZERO)
 			memset(v, 0, pp->pr_size);
 	}
+	if (v != NULL)
+		pp->pr_nget++;
 	return (v);
 }
 
@@ -468,16 +486,9 @@ pool_do_get(struct pool *pp, int flags)
 	struct pool_item_header *ph;
 	void *v;
 	int slowdown = 0;
-#ifdef POOL_DEBUG
+#if defined(DIAGNOSTIC) && defined(POOL_DEBUG)
 	int i, *ip;
 #endif
-
-#ifdef DIAGNOSTIC
-	if ((flags & PR_WAITOK) != 0)
-		splassert(IPL_NONE);
-	if (pp->pr_ipl != -1)
-		splassert(pp->pr_ipl);
-#endif /* DIAGNOSTIC */
 
 #ifdef MALLOC_DEBUG
 	if (pp->pr_roflags & PR_DEBUG) {
@@ -680,7 +691,7 @@ pool_do_put(struct pool *pp, void *v)
 {
 	struct pool_item *pi = v;
 	struct pool_item_header *ph;
-#ifdef POOL_DEBUG
+#if defined(DIAGNOSTIC) && defined(POOL_DEBUG)
 	int i, *ip;
 #endif
 
@@ -822,7 +833,7 @@ pool_prime_page(struct pool *pp, caddr_t storage, struct pool_item_header *ph)
 	unsigned int align = pp->pr_align;
 	unsigned int ioff = pp->pr_itemoffset;
 	int n;
-#ifdef POOL_DEBUG
+#if defined(DIAGNOSTIC) && defined(POOL_DEBUG)
 	int i, *ip;
 #endif
 
@@ -1207,7 +1218,7 @@ pool_chk_page(struct pool *pp, const char *label, struct pool_item_header *ph)
 	struct pool_item *pi;
 	caddr_t page;
 	int n;
-#ifdef POOL_DEBUG
+#if defined(DIAGNOSTIC) && defined(POOL_DEBUG)
 	int i, *ip;
 #endif
 

@@ -1,3 +1,586 @@
+2009-06-30 08:41  millert
+
+	* sudoers.cat, sudoers.man.in, sudoers.pod: Add missing single
+	  quotes around a colon in Runas_Spec definition.  From Elias
+	  Benali.
+
+2009-06-29 09:36  millert
+
+	* redblack.c: In rbrepair, re-color the root or the first non-block
+	  node we find to be black.  Re-coloring the root is probably not
+	  needed but won't hurt.
+
+2009-06-29 09:35  millert
+
+	* sudo.cat, sudoers.cat, sudo.man.in, sudoers.man.in: regen
+
+2009-06-26 16:40  millert
+
+	* redblack.c: When repairing the tree, don't touch the root node.
+
+2009-06-25 08:44  millert
+
+	* set_perms.c: Protect call to setegid in runas_setup with #ifdef
+	  HAVE_SETEUID.  Reported by Josef Schmid.
+
+2009-06-23 14:29  millert
+
+	* sudoers.pod: Document that we accept env_pam-style environment
+	  files
+
+2009-06-23 14:24  millert
+
+	* env.c: Adapt to accept pam_env-style /etc/environment which
+	  allows shell-style lines such as: export EDITOR="/usr/bin/vi"
+
+2009-06-23 12:22  millert
+
+	* sudoers.pod: Make it clear that env_delete only works when
+	  !env_reset.  From Loïc Minier
+
+2009-06-15 17:19  millert
+
+	* sudo.pod, sudoers.pod: Add non-unix group bits, adapted from
+	  Quest
+
+2009-06-15 17:18  millert
+
+	* Makefile.in: build the .cat page in the current working dir, not
+	  the src dir
+
+2009-06-15 09:10  millert
+
+	* env.c: Return EINVAL in setenv() if var is NULL or the empty
+	  string to match glibc behavior.
+
+2009-06-13 16:52  millert
+
+	* configure, configure.in: Use AS_HELP_STRING for AC_ARG_WITH and
+	  AC_ARG_ENABLE
+
+2009-06-11 16:29  millert
+
+	* sudo.cat, sudo.man.in, sudoers.cat, sudoers.ldap.cat,
+	  sudoers.ldap.man.in, sudoers.man.in, visudo.cat, visudo.man.in:
+	  regen
+
+2009-06-09 10:08  millert
+
+	* INSTALL: Document --with-libvas and --with-libvas-rpath
+
+2009-05-29 09:43  millert
+
+	* ldap.c, sudoers.ldap.pod: For netscape-derived LDAP SDKs the cert
+	  and key paths may be a directory or a file.  However, version 5.0
+	  of the SDK only seems to support using a directory.  If
+	  ldapssl_clientauth_init fails and the cert or key paths look like
+	  they could be files, strip off the last path element and try
+	  again.
+
+2009-05-29 09:40  millert
+
+	* Makefile.in: Add non-Unix group .o to COMMON_OBJS and substitute
+	  in path to flex.
+
+2009-05-26 20:49  millert
+
+	* configure, configure.in, match.c, sudo.c, vasgroups.c: Update
+	  non-Unix group support from Quest, as reworked by me.
+
+2009-05-26 20:47  millert
+
+	* toke.c: regen
+
+2009-05-26 20:46  millert
+
+	* toke.l: Add support for escaped hex chars in names, e.g. \x20 for
+	  space.
+
+2009-05-25 08:02  millert
+
+	* LICENSE, Makefile.in, aclocal.m4, alias.c, check.c, env.c,
+	  fileops.c, glob.c, gram.y, interfaces.c, lbuf.c, ldap.c,
+	  logging.c, logging.h, match.c, parse.c, parse.h, pathnames.h.in,
+	  pwutil.c, set_perms.c, sudo.c, sudo.h, sudo.pod, sudo_nss.c,
+	  sudo_nss.h, sudo_usage.h.in, sudoers.ldap.pod, sudoers.pod,
+	  testsudoers.c, tgetpass.c, toke.l, visudo.c, auth/aix_auth.c,
+	  auth/pam.c, auth/sudo_auth.c, auth/sudo_auth.h: Update copyright
+	  years.
+
+2009-05-24 08:33  millert
+
+	* interfaces.c, lbuf.c: Minor fixes for Minix-3
+
+2009-05-22 06:37  millert
+
+	* set_perms.c: Handle getgroups() returning 0.	Also add missing
+	  check for HAVE_GETGROUPS.
+
+2009-05-19 17:24  millert
+
+	* Makefile.in, config.h.in, configure, configure.in, sudo.c,
+	  version.h, visudo.c: Replace version.h with PACKAGE_VERSION set
+	  via AC_INIT in configure.
+
+2009-05-18 06:33  millert
+
+	* set_perms.c: Remove group setting code in setusercontext case, we
+	  will do it ourselves later on in runas_setup.  Set the gid after
+	  initgroups/setgroups is called, since on Mac OS X it seems to
+	  change the egid.
+
+2009-05-17 18:19  millert
+
+	* LICENSE, Makefile.in, config.h.in, match.c, nonunix.h, sudo.c,
+	  vasgroups.c: Initial bits of non-unix group support using Quest
+	  Authentication Services
+
+2009-05-17 16:52  millert
+
+	* toke.c, toke.l: Accept %:foo as a non-Unix group
+
+2009-05-17 16:22  millert
+
+	* toke.c, toke.l: Allow user/group to be double quoted in the case
+	  of non-Unix groups which contain spaces.
+
+2009-05-11 12:47  millert
+
+	* match.c: Don't allow the user to specify the default runas user
+	  if their sudoers entry only allows them to run as a group.
+
+2009-05-10 07:59  millert
+
+	* sudo.c: Must call audit_success before we change uids.
+
+2009-05-10 07:52  millert
+
+	* logging.c, set_perms.c, sudo.h, testsudoers.c: Add option for
+	  set_perm to not exit on failure and use this in the logging
+	  routines.
+
+2009-05-10 07:33  millert
+
+	* parse.c: In -l mode, if the user is only allowed to run as a
+	  group, display the user's name, not root's before the allowed
+	  group.
+
+2009-05-09 21:00  millert
+
+	* sudo.c: Fix -g mode, broken by rev 1.503 which had the side
+	  effect of setting the runas user to root unilaterally.
+
+2009-05-08 16:19  millert
+
+	* fileops.c: When unlocking a file with fcntl, use F_SETLK, not
+	  F_SETLKW.
+
+2009-05-08 13:07  millert
+
+	* pwutil.c: Only cache by the method we fetched for pwd and grp
+	  lookups.  Previously we cached both by namd and id but this can
+	  cause problems for entries that share the same id.  Also add more
+	  info in the error message in case the insert fails (which should
+	  now be impossible).
+
+2009-04-30 15:04  millert
+
+	* sudoers.pod: Add a clarification from Nick Sieger
+
+2009-04-25 12:49  millert
+
+	* env.c: Inline the setting of the environment string.
+
+2009-04-24 14:53  millert
+
+	* env.c: setenv(3) in Linux treats a NUL value as the empty string
+	  setenv(3) in BSD doesn't return an error if the name has '=' in
+	  it, it just treats the '=' as end of string.
+
+2009-04-22 16:32  millert
+
+	* toke.c, toke.l: Not all systems have d_namlen
+
+2009-04-20 13:53  millert
+
+	* sudoers.pod: Fix up some pod2html issues.
+
+2009-04-19 14:09  millert
+
+	* interfaces.c: Check for NULL ifa_addr and ifa_netmask.  Adapted
+	  from a diff from Quest Software.
+
+2009-04-19 09:01  millert
+
+	* sudoers.pod: Ignore files ending in '~' in sudo.d (emacs backup
+	  files)
+
+2009-04-19 08:56  millert
+
+	* toke.c, toke.l: Ignore files ending in '~' in sudo.d (emacs
+	  backup files)
+
+2009-04-18 19:37  millert
+
+	* sudoers.cat, sudoers.man.in, sudoers.pod, toke.c, toke.l: For
+	  #includedir, ignore any file containing a dot
+
+2009-04-18 19:25  millert
+
+	* Makefile.in, version.h: Bump version
+
+2009-04-18 19:25  millert
+
+	* gram.c, gram.y, parse.c, parse.h, sudo.c, sudo.h, sudoers.cat,
+	  sudoers.man.in, sudoers.pod, testsudoers.c, toke.c, toke.l,
+	  visudo.c: Implement #includedir directive.  Files in an
+	  includedir are not edited by visudo unless they contain a syntax
+	  error.
+
+2009-04-18 12:06  millert
+
+	* ChangeLog: sync
+
+2009-04-18 10:27  millert
+
+	* WHATSNEW: Forgot umask_override
+
+2009-04-18 09:25  millert
+
+	* ChangeLog, TODO: sync
+
+2009-04-16 08:22  millert
+
+	* visudo.c: Rewind stream if we fdopen sudoers since it may not be
+	  at the beginning.  Set the keepopen flag on already-open files
+	  too so the lexer doesn't close them out from under us.
+
+2009-04-16 08:18  millert
+
+	* visudo.c: Print the proper file name when there is a parse error
+	  in an include file.
+
+2009-04-11 07:45  millert
+
+	* WHATSNEW: Sync
+
+2009-04-10 16:59  millert
+
+	* configure, configure.in: Fix a warning when --without-ldap is
+	  specified.
+
+2009-04-05 12:25  millert
+
+	* alias.c, parse.h, visudo.c: Store aliases that we remove during
+	  check_aliases in a freelist and free them at the end so we don't
+	  leak memory.
+
+2009-03-28 09:30  millert
+
+	* visudo.c: Check aliases in -c mode too.
+
+2009-03-28 09:09  millert
+
+	* alias.c, parse.h, visudo.c: Make alias_remove return the alias
+	  struct instead of freeing it directly.  Fixes a use after free in
+	  alias_remove_recursive, the only consumer.
+
+2009-03-28 09:07  millert
+
+	* alias.c, match.c, parse.c, parse.h, visudo.c: Rename find_alias
+	  -> alias_find for consistency.
+
+2009-03-27 19:29  millert
+
+	* visudo.c: When checking for unused aliases, recurse if the alias
+	  points to another alias.
+
+2009-03-16 12:11  millert
+
+	* ldap.c: Back out rev 1.105 for now.  Real ldapux_client.conf
+	  support will be done later after some refactoring.
+
+2009-03-14 12:02  millert
+
+	* ldap.c: Treat ldap_hostport the same as "host" for ldapux.
+
+2009-03-13 21:04  millert
+
+	* configure, configure.in: Only check for
+	  ldap_sasl_interactive_bind_s if we can find sasl.h.  Fixes
+	  compilation with ldapux.
+
+2009-03-11 20:03  millert
+
+	* fileops.c: fix char subscript
+
+2009-03-11 19:19  millert
+
+	* Makefile.in: remove errant carriage returns
+
+2009-03-11 19:01  millert
+
+	* audit.c, env.c: fix K&R compilation
+
+2009-03-11 12:12  millert
+
+	* sudo.man.in, sudo.cat, sudoers.cat, sudoers.ldap.cat,
+	  sudoers.ldap.man.in, sudoers.man.in, visudo.cat, visudo.man.in:
+	  regen
+
+2009-03-10 17:34  millert
+
+	* config.h.in: Add missing HAVE_BSM_AUDIT
+
+2009-03-10 17:21  millert
+
+	* WHATSNEW: Add 1.7.1 features
+
+2009-03-10 17:10  millert
+
+	* INSTALL: Mention --with-netsvc
+
+2009-03-10 17:08  millert
+
+	* sudoers.ldap.pod: Document netsvc.conf support
+
+2009-03-10 16:44  millert
+
+	* configure, configure.in, pathnames.h.in, sudo.c, sudo_nss.c,
+	  sudo_nss.h: Add support for AIX netsvc.conf (like nsswitch.conf).
+
+2009-03-08 16:57  millert
+
+	* configure, config.h.in, configure.in, env.c: Add
+	  --enable-env-debug flag to enable environment sanity checks.
+
+2009-03-08 11:51  millert
+
+	* sudoers.ldap.pod, sudoers.pod: Work around some pod2html issue.
+
+2009-03-07 17:10  millert
+
+	* env.c: Only sync environ for putenv, setenv, and unsetenv.  We
+	  need to make sure that sudo_putenv and sudo_setenv only modify
+	  env.envp, not environ.
+
+2009-03-02 14:19  millert
+
+	* env.c: Really fix UNSETENV_VOID
+
+2009-03-02 14:18  millert
+
+	* env.c: Fix unsetenv when UNSETENV_VOID
+
+2009-03-02 08:00  millert
+
+	* aclocal.m4, configure: Fix SUDO_FUNC_PUTENV_CONST
+
+2009-03-02 07:36  millert
+
+	* ldap.c: tivoli-based ldap does not have ldapssl_err2string
+
+2009-03-02 07:30  millert
+
+	* configure: regen
+
+2009-03-01 16:20  millert
+
+	* config.h.in, configure, configure.in, ldap.c: Add support for
+	  Tivoli-based LDAP start TLS as seen in AIX.  Untested.
+
+2009-03-01 08:52  millert
+
+	* env.c: Add sanity checks for setenv/unsetenv
+
+2009-02-28 20:17  millert
+
+	* Makefile.in: Include bsm_audit.h in the tarball
+
+2009-02-28 20:00  millert
+
+	* Makefile.in, version.h: bump version for sudo 1.7.1
+
+2009-02-28 19:58  millert
+
+	* aclocal.m4, config.h.in, configure, configure.in, env.c, ldap.c,
+	  sudo.h, auth/aix_auth.c: Replace sudo_setenv/sudo_unsetenv with
+	  calls to setenv/unsetenv and provide our own
+	  setenv/unsetenv/putenv that operates on own env pointer.  Make
+	  sync_env() inline in setenv/unsetenv/putenv functions.
+
+2009-02-25 07:33  millert
+
+	* sudo.c: Make "sudoedit -h" work as expected
+
+2009-02-25 07:21  millert
+
+	* auth/pam.c: Make sure def_prompt is always defined.  This is a
+	  workaround for pam configs that prompt for a password in the
+	  session but don't have an auth line.	A better fix is to expand
+	  the sudo prompt earlier and set def_prompt to that when
+	  initializing.
+
+2009-02-25 06:17  millert
+
+	* sudo.pod: Mention that the helper for -A may be graphical.
+
+2009-02-25 06:16  millert
+
+	* TROUBLESHOOTING: Document what happens if there is no tty.
+
+2009-02-25 06:05  millert
+
+	* sudo.c: cosmetic changes
+
+2009-02-25 05:47  millert
+
+	* term.c: Fix term_restore
+
+2009-02-24 20:23  millert
+
+	* sudo.c: Fix "sudo -k" with no other args
+
+2009-02-24 08:04  millert
+
+	* check.c, sudo.c, sudo.pod, sudo_usage.h.in: Allow the -k flag to
+	  be specified in conjunction with a command or another option that
+	  may require authentication.
+
+2009-02-23 09:18  millert
+
+	* configure, configure.in: Remove unneeded AC_CANONICAL_TARGET;
+	  from Diego E. 'Flameeyes'
+
+2009-02-23 09:15  millert
+
+	* Makefile.in: Parallel make fix.  From Diego E. 'Flameeyes'
+
+2009-02-21 17:03  millert
+
+	* def_data.c, def_data.h, def_data.in, sudo.c, sudoers.pod:
+	  Implement umask_override
+
+2009-02-21 16:51  millert
+
+	* toke.c: regen
+
+2009-02-21 16:49  millert
+
+	* sudoers.pod, toke.l, visudo.c: Implement %h escape in sudoers
+	  include filenames.
+
+2009-02-21 08:43  millert
+
+	* audit.c: Need to include compat.h
+
+2009-02-21 08:37  millert
+
+	* Makefile.in, audit.c, bsm_audit.c, bsm_audit.h, logging.h,
+	  sudo.c: Make audit_success and audit_failure generic functions in
+	  preparation for integrating linux audit support.
+
+2009-02-21 08:06  millert
+
+	* term.c: remove duplicate include
+
+2009-02-20 16:13  millert
+
+	* bsm_audit.c: Add missing include
+
+2009-02-20 15:55  millert
+
+	* sudo.c: May need to update the runas user after parsing
+	  command-based defaults.
+
+2009-02-18 10:53  millert
+
+	* glob.c: Add missing pair of braces introduced with character
+	  class support.
+
+2009-02-15 15:53  millert
+
+	* def_data.c, def_data.h, def_data.in, sudoers.pod, tgetpass.c:
+	  Rename pwstars to pwfeedback
+
+2009-02-10 20:25  millert
+
+	* bsm_audit.c, bsm_audit.h: Add const to make MacOS happy.
+
+2009-02-10 20:18  millert
+
+	* Makefile.in, bsm_audit.c, bsm_audit.h, configure, configure.in,
+	  sudo.c, auth/sudo_auth.c: Add bsm audit support from Christian
+	  S.J. Peron
+
+2009-02-10 19:58  millert
+
+	* term.c: This is new code, no DARPA notice.
+
+2009-02-10 14:04  millert
+
+	* def_data.c, def_data.h, def_data.in, match.c, sudoers.pod: Rename
+	  simple_glob -> fast_glob
+
+2009-02-10 09:39  millert
+
+	* match.c: g/c unused var
+
+2009-02-10 08:09  millert
+
+	* def_data.c, def_data.h, def_data.in, match.c, sudoers.pod: Add
+	  simple_glob option to use fnmatch() instead of glob().  This is
+	  useful when you need to specify patterns that reference network
+	  file systems.
+
+2009-02-10 07:58  millert
+
+	* tgetpass.c: add term_* proto
+
+2009-02-10 07:51  millert
+
+	* sudoers.pod: mention glob()
+
+2009-02-09 07:59  millert
+
+	* tgetpass.c: Delete any pwstars we wrote after the user hits
+	  return.  That way there is no record on screen as to the user's
+	  password length.
+
+2009-02-08 10:27  millert
+
+	* term.c: Move terminal setting bits from tgetpass.c to term.c
+
+2009-02-07 19:50  millert
+
+	* Makefile.in, def_data.c, def_data.h, def_data.in, sudoers.pod,
+	  tgetpass.c: Add pwstars sudoers option that causes sudo to print
+	  a star every time the user presses a key.
+
+2009-02-03 10:10  millert
+
+	* Makefile.in: Fix up F<> brokenness for visudo.man.in and
+	  sudoers.ldap.man.in.
+
+2009-01-27 11:54  millert
+
+	* ldap.c: For ldap_search_ext_s() the sizelimit param should be 0,
+	  not -1, to indicate no limit.  From Mark Janssen.
+
+2009-01-17 17:36  millert
+
+	* toke.c, toke.l: Comments that begin with #- should not be parsed
+	  as uids.
+
+2009-01-08 19:13  millert
+
+	* sudo.c: Do not try to set the close on exec flag if we didn't
+	  actually open sudoers.
+
+2008-12-19 12:40  millert
+
+	* ChangeLog: regen
+
 2008-12-14 17:40  millert
 
 	* TODO: sync
@@ -4506,7 +5089,7 @@
 2004-10-01 10:58  millert
 
 	* sample.pam, sample.sudoers, sample.syslog.conf, sudoers: Add
-	  $Sudo: ChangeLog,v 1.19 2008/12/19 17:40:39 millert Exp $ tags.
+	  $Sudo$ tags.
 
 2004-10-01 10:47  millert
 

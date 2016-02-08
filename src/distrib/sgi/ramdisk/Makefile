@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.7 2008/12/02 03:20:58 deraadt Exp $
+#	$OpenBSD: Makefile,v 1.11 2009/05/30 04:01:29 miod Exp $
 
 REV=		${OSrev}
 
@@ -33,21 +33,47 @@ all ${IMAGE}:
 	@false
 .else
 
-all:	${BSD_RD}
+all:	${BSD_RD}.IP27 ${BSD_RD}.IP30 ${BSD_RD}.IP32
 
-${BSD_RD}: ${CBIN} ${IMAGE} bsd rdsetroot
-	cp bsd bsd.rd
-	${.OBJDIR}/rdsetroot ${BSD_RD} ${IMAGE}
+${BSD_RD}.IP27: ${CBIN} ${IMAGE} bsd.IP27 rdsetroot
+	cp bsd.IP27 ${BSD_RD}.IP27
+	${.OBJDIR}/rdsetroot ${BSD_RD}.IP27 ${IMAGE}
+
+${BSD_RD}.IP30: ${CBIN} ${IMAGE} bsd.IP30 rdsetroot
+	cp bsd.IP30 ${BSD_RD}.IP30
+	${.OBJDIR}/rdsetroot ${BSD_RD}.IP30 ${IMAGE}
+
+${BSD_RD}.IP32: ${CBIN} ${IMAGE} bsd.IP32 rdsetroot
+	cp bsd.IP32 ${BSD_RD}.IP32
+	${.OBJDIR}/rdsetroot ${BSD_RD}.IP32 ${IMAGE}
 
 ${IMAGE}: rd_setup do_files rd_teardown
 
 .endif
 
-bsd:
-	cd ${.TOP}/../../sys/arch/sgi/conf && config RAMDISK
-	cd ${.TOP}/../../sys/arch/sgi/compile/RAMDISK && \
-	    ${MAKE} clean && ${MAKE}
-	cp ${.TOP}/../../sys/arch/sgi/compile/RAMDISK/bsd bsd
+bsd.IP27:
+.ifndef NOBUILD
+	cd ${.TOP}/../../sys/arch/sgi/conf && config RAMDISK-IP27
+	cd ${.TOP}/../../sys/arch/sgi/compile/RAMDISK-IP27 && \
+	    ${MAKE} clean && ${MAKE} depend && ${MAKE}
+.endif
+	cp ${.TOP}/../../sys/arch/sgi/compile/RAMDISK-IP27/bsd bsd.IP27
+
+bsd.IP30:
+.ifndef NOBUILD
+	cd ${.TOP}/../../sys/arch/sgi/conf && config RAMDISK-IP30
+	cd ${.TOP}/../../sys/arch/sgi/compile/RAMDISK-IP30 && \
+	    ${MAKE} clean && ${MAKE} depend && ${MAKE}
+.endif
+	cp ${.TOP}/../../sys/arch/sgi/compile/RAMDISK-IP30/bsd bsd.IP30
+
+bsd.IP32:
+.ifndef NOBUILD
+	cd ${.TOP}/../../sys/arch/sgi/conf && config RAMDISK-IP32
+	cd ${.TOP}/../../sys/arch/sgi/compile/RAMDISK-IP32 && \
+	    ${MAKE} clean && ${MAKE} depend && ${MAKE}
+.endif
+	cp ${.TOP}/../../sys/arch/sgi/compile/RAMDISK-IP32/bsd bsd.IP32
 
 rd_setup: 
 	dd if=/dev/zero of=${IMAGE} bs=512 count=${NBLKS}
@@ -71,9 +97,6 @@ unconfig:
 
 .PRECIOUS:	${IMAGE}
 
-install:
-	cp ${BSD_RD} ${DESTDIR}/snapshot/
-
 ${CBIN}.mk ${CBIN}.cache ${CBIN}.c: ${CRUNCHCONF}
 	crunchgen -M -E -D ${.CURDIR}/../../.. -L ${DESTDIR}/usr/lib ${.ALLSRC}
 
@@ -87,15 +110,20 @@ do_files:
 	mtree -def ${MTREE} -p ${MOUNT_POINT}/ -u
 	TOPDIR=${TOP} CURDIR=${.CURDIR} OBJDIR=${.OBJDIR} \
 	    REV=${REV} TARGDIR=${MOUNT_POINT} UTILS=${UTILS} \
-	    sh ${TOP}/../miniroot/runlist.sh ${LISTS}
+	    RELEASEDIR=${RELEASEDIR} sh ${UTILS}/runlist.sh ${LISTS}
 	rm ${MOUNT_POINT}/${CBIN}
 
 clean cleandir:
 	/bin/rm -f *.core ${IMAGE} ${CBIN} ${CBIN}.mk ${CBIN}.cache \
-	*.o *.lo *.c bsd ${BSD_RD} rdsetroot
+	    bsd.IP27 ${BSD_RD}.IP27 \
+	    bsd.IP30 ${BSD_RD}.IP30 \
+	    bsd.IP32 ${BSD_RD}.IP32 \
+	    *.o *.lo *.c rdsetroot
 
-beforeinstall:
-	cp ${BSD.RD} ${DESTDIR}/snapshot
+.ifdef RELEASEDIR
+install:
+	cp ${BSD_RD}.IP27 ${BSD_RD}.IP30 ${BSD_RD}.IP32 ${RELEASEDIR}
+.endif
 
 .include <bsd.obj.mk>
 .include <bsd.subdir.mk>

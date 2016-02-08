@@ -1,4 +1,4 @@
-.\"	$OpenBSD: umsm.4,v 1.46 2009/02/24 13:35:55 yuo Exp $
+.\"	$OpenBSD: umsm.4,v 1.49 2009/05/12 04:31:16 yuo Exp $
 .\"
 .\" Copyright (c) 2006 Jonathan Gray <jsg@openbsd.org>
 .\"
@@ -14,7 +14,7 @@
 .\" ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
 .\" OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 .\"
-.Dd $Mdocdate: February 24 2009 $
+.Dd $Mdocdate: May 12 2009 $
 .Dt UMSM 4
 .Os
 .Sh NAME
@@ -41,8 +41,11 @@ driver:
 .It Li "AnyDATA ADU-500A" Ta Ta USB
 .It Li "AnyDATA ADU-E100H" Ta Ta USB
 .It Li "AnyDATA A2502" Ta Ta USB
-.It Li "Emobile D01HW" Ta Ta USB
-.It Li "Emobile D02HW" Ta Ta USB
+.It Li "Emobile D01HW (Huawei OEM)" Ta Ta USB
+.It Li "Emobile D02HW (Huawei OEM)" Ta Ta USB
+.It Li "Emobile D12HW (Huawei OEM)" Ta Ta USB
+.It Li "Emobile D22HW (Huawei OEM)" Ta Ta USB
+.It Li "Emobile D21LC (longcheer OEM)" Ta Ta USB
 .It Li "Huawei Mobile E160g" Ta Ta USB
 .It Li "Huawei Mobile E172" Ta Ta USB
 .It Li "Huawei Mobile E220" Ta Ta USB
@@ -67,6 +70,7 @@ driver:
 .It Li "Sierra Wireless MC8775" Ta Ta PCI Express Mini Card
 .It Li "Sierra Wireless AirCard 580" Ta Ta CardBus
 .It Li "Sierra Wireless AirCard 875" Ta Ta CardBus
+.It Li "Sierra Wireless AirCard 881U" Ta Ta USB
 .It Li "Vodafone Mobile Connect 3G" Ta Ta CardBus
 .El
 .Pp
@@ -95,7 +99,6 @@ Devices suspected of being compatible are:
 .It Li "Sierra Wireless AirCard 880U" Ta Ta USB
 .It Li "Sierra Wireless AirCard 881" Ta CardBus
 .It Li "Sierra Wireless AirCard 881E" Ta ExpressCard
-.It Li "Sierra Wireless AirCard 881U" Ta Ta USB
 .It Li "Sierra Wireless AirCard 885U" Ta Ta USB
 .It Li "Sierra Wireless C597" Ta Ta USB
 .It Li "Sierra Wireless EM5625" Ta Ta USB

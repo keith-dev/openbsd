@@ -1,4 +1,4 @@
-/*	$OpenBSD: parse.y,v 1.21 2008/12/17 14:19:39 michele Exp $ */
+/*	$OpenBSD: parse.y,v 1.24 2009/03/31 21:03:49 tobias Exp $ */
 
 /*
  * Copyright (c) 2006 Michele Marchetto <mydecay@openbeer.it>
@@ -164,7 +164,7 @@ conf_main	: SPLIT_HORIZON STRING {
 			else if (!strcmp($2, "poisoned"))
 				conf->options |= OPT_SPLIT_POISONED;
 			else {
-				yyerror("unknon split horizon type");
+				yyerror("unknown split horizon type");
 				free($2);
 				YYERROR;
 			}
@@ -185,35 +185,29 @@ conf_main	: SPLIT_HORIZON STRING {
 		| no REDISTRIBUTE STRING {
 			struct redistribute	*r;
 
-			if (!strcmp($3, "default")) {
-				if (!$1)
-					conf->redistribute |=
-					    REDISTRIBUTE_DEFAULT;
-				else
-					conf->redistribute &=
-					    ~REDISTRIBUTE_DEFAULT;
-			} else {
-				if ((r = calloc(1, sizeof(*r))) == NULL)
-					fatal(NULL);
-				if (!strcmp($3, "static"))
-					r->type = REDIST_STATIC;
-				else if (!strcmp($3, "connected"))
-					r->type = REDIST_CONNECTED;
-				else if (host($3, &r->addr, &r->mask))
-					r->type = REDIST_ADDR;
-				else {
-					yyerror("unknown redistribute type");
-					free($3);
-					free(r);
-					YYERROR;
-				}
-
-				if ($1)
-					r->type |= REDIST_NO;
-
-				SIMPLEQ_INSERT_TAIL(&conf->redist_list, r,
-				    entry);
+			if ((r = calloc(1, sizeof(*r))) == NULL)
+				fatal(NULL);
+			if (!strcmp($3, "static"))
+				r->type = REDIST_STATIC;
+			else if (!strcmp($3, "connected"))
+				r->type = REDIST_CONNECTED;
+			else if (!strcmp($3, "default"))
+				r->type = REDIST_DEFAULT;
+			else if (host($3, &r->addr, &r->mask))
+				r->type = REDIST_ADDR;
+			else {
+				yyerror("unknown redistribute type");
+				free($3);
+				free(r);
+				YYERROR;
 			}
+
+			if ($1)
+				r->type |= REDIST_NO;
+
+			SIMPLEQ_INSERT_TAIL(&conf->redist_list, r,
+			    entry);
+
 			conf->redistribute |= REDISTRIBUTE_ON;
 			free($3);
 		}
@@ -690,9 +684,13 @@ pushfile(const char *name, int secret)
 {
 	struct file	*nfile;
 
-	if ((nfile = calloc(1, sizeof(struct file))) == NULL ||
-	    (nfile->name = strdup(name)) == NULL) {
+	if ((nfile = calloc(1, sizeof(struct file))) == NULL) {
 		log_warn("malloc");
+		return (NULL);
+	}
+	if ((nfile->name = strdup(name)) == NULL) {
+		log_warn("malloc");
+		free(nfile);
 		return (NULL);
 	}
 	if ((nfile->stream = fopen(nfile->name, "r")) == NULL) {

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1999-2005, 2007-2008 Todd C. Miller <Todd.Miller@courtesan.com>
+ * Copyright (c) 1999-2005, 2007-2009 Todd C. Miller <Todd.Miller@courtesan.com>
  *
  * Permission to use, copy, modify, and distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -73,12 +73,12 @@
 #endif
 
 #ifndef lint
-__unused static const char rcsid[] = "$Sudo: pam.c,v 1.66 2008/12/09 23:48:19 millert Exp $";
+__unused static const char rcsid[] = "$Sudo: pam.c,v 1.68 2009/05/25 12:02:42 millert Exp $";
 #endif /* lint */
 
 static int sudo_conv __P((int, PAM_CONST struct pam_message **,
 			  struct pam_response **, void *));
-static char *def_prompt;
+static char *def_prompt = "Password:";
 static int gotintr;
 
 #ifndef PAM_DATA_SILENT

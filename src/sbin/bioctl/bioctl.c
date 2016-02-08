@@ -1,4 +1,4 @@
-/* $OpenBSD: bioctl.c,v 1.78 2009/02/22 07:46:55 jmc Exp $       */
+/* $OpenBSD: bioctl.c,v 1.80 2009/06/18 08:05:51 halex Exp $       */
 
 /*
  * Copyright (c) 2004, 2005 Marco Peereboom
@@ -699,6 +699,10 @@ bio_createraid(u_int16_t level, char *dev_list)
 	case 1:
 		min_disks = 2;
 		break;
+	case 4:
+	case 5:
+		min_disks = 3;
+		break;
 	case 'C':
 		min_disks = 1;
 		break;
@@ -714,8 +718,7 @@ bio_createraid(u_int16_t level, char *dev_list)
 
 	/* for crypto raid we only allow one single chunk */
 	if (level == 'C' && no_dev != min_disks)
-		errx(1, "not exactly one disks");
-		
+		errx(1, "not exactly one partition");
 
 	memset(&create, 0, sizeof(create));
 	create.bc_cookie = bl.bl_cookie;

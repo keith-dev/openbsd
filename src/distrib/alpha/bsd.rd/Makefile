@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.13 2008/12/02 03:20:57 deraadt Exp $
+#	$OpenBSD: Makefile,v 1.15 2009/04/17 03:58:54 deraadt Exp $
 
 TOP=		${.CURDIR}/..
 
@@ -51,7 +51,7 @@ bsd.rd_unz: bsd ${IMAGE} ${RDSETROOT}
 bsd:
 	cd ${.CURDIR}/../../../sys/arch/alpha/conf && config ${RAMDISK}
 	cd ${.CURDIR}/../../../sys/arch/alpha/compile/${RAMDISK} && \
-	    ${MAKE} depend && ${MAKE} clean && COPTS=-Os ${MAKE}
+	    ${MAKE} clean && ${MAKE} depend && COPTS=-Os ${MAKE}
 	cp ${.CURDIR}/../../../sys/arch/alpha/compile/${RAMDISK}/bsd bsd
 
 ${IMAGE}:	do_prep do_mount do_files do_umount
@@ -80,5 +80,7 @@ unconfig:
 	-umount ${MOUNT_POINT}
 	-vnconfig -u ${VND}
 
+.ifdef RELEASEDIR
 beforeinstall:
-	cp bsd.rd ${DESTDIR}/snapshot
+	cp bsd.rd ${RELEASEDIR}
+.endif

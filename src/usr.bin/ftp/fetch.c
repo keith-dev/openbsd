@@ -1,4 +1,4 @@
-/*	$OpenBSD: fetch.c,v 1.83 2008/10/16 23:15:53 martynas Exp $	*/
+/*	$OpenBSD: fetch.c,v 1.91 2009/06/29 09:58:40 halex Exp $	*/
 /*	$NetBSD: fetch.c,v 1.14 1997/08/18 10:20:20 lukem Exp $	*/
 
 /*-
@@ -29,10 +29,6 @@
  * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  * POSSIBILITY OF SUCH DAMAGE.
  */
-
-#if !defined(lint) && !defined(SMALL)
-static const char rcsid[] = "$OpenBSD: fetch.c,v 1.83 2008/10/16 23:15:53 martynas Exp $";
-#endif /* not lint and not SMALL */
 
 /*
  * FTP User Program -- Command line file retrieval
@@ -72,6 +68,7 @@ static const char rcsid[] = "$OpenBSD: fetch.c,v 1.83 2008/10/16 23:15:53 martyn
 #endif /* !SMALL */
 
 #include "ftp_var.h"
+#include "cmds.h"
 
 static int	url_get(const char *, const char *, const char *);
 void		aborthttp(int);
@@ -304,7 +301,7 @@ url_get(const char *origline, const char *proxyenv, const char *outfile)
 
 		bytes = 0;
 		hashbytes = mark;
-		progressmeter(-1);
+		progressmeter(-1, path);
 
 		if ((buf = malloc(4096)) == NULL)
 			errx(1, "Can't allocate memory for transfer buffer");
@@ -339,7 +336,7 @@ url_get(const char *origline, const char *proxyenv, const char *outfile)
 			warn("Reading from file");
 			goto cleanup_url_get;
 		}
-		progressmeter(1);
+		progressmeter(1, NULL);
 		if (verbose)
 			fputs("Successfully retrieved file.\n", ttyout);
 		(void)signal(SIGINT, oldintr);
@@ -494,9 +491,19 @@ again:
 			    path, buf ? buf : "", HTTP_USER_AGENT);
 
 	} else {
+#ifndef SMALL
+		if (resume) {
+			struct stat stbuf;
+
+			if (stat(savefile, &stbuf) == 0)
+				restart_point = stbuf.st_size;
+			else
+				restart_point = 0;
+		}
+#endif /* !SMALL */
 		ftp_printf(fin, ssl, "GET /%s %s\r\nHost: ", path,
 #ifndef SMALL
-			resume ? "HTTP/1.1" :
+			restart_point ? "HTTP/1.1" :
 #endif /* !SMALL */
 			"HTTP/1.0");
 		if (strchr(host, ':')) {
@@ -524,21 +531,9 @@ again:
 #ifndef SMALL
 		if (port && strcmp(port, (ishttpsurl ? "443" : "80")) != 0)
 			ftp_printf(fin, ssl, ":%s", port);
-		if (resume) {
-			int ret;
-			struct stat stbuf;
-
-			ret = stat(savefile, &stbuf);
-			if (ret < 0) {
-				if (verbose)
-					fprintf(ttyout, "\n");
-				warn("Can't open %s", savefile);
-				goto cleanup_url_get;
-			}
-			restart_point = stbuf.st_size;
+		if (restart_point)
 			ftp_printf(fin, ssl, "\r\nRange: bytes=%lld-",
 				(long long)restart_point);
-		}
 #else /* !SMALL */
 		if (port && strcmp(port, "80") != 0)
 			ftp_printf(fin, ssl, ":%s", port);
@@ -588,8 +583,8 @@ again:
 	case 200:	/* OK */
 #ifndef SMALL
 	case 206:	/* Partial Content */
-		break;
 #endif /* !SMALL */
+		break;
 	case 301:	/* Moved Permanently */
 	case 302:	/* Found */
 	case 303:	/* See Other */
@@ -640,7 +635,7 @@ again:
 			if (errstr != NULL)
 				goto improper;
 #ifndef SMALL
-			if (resume)
+			if (restart_point)
 				filesize += restart_point;
 #endif /* !SMALL */
 #define LOCATION "Location: "
@@ -690,7 +685,7 @@ again:
 
 	bytes = 0;
 	hashbytes = mark;
-	progressmeter(-1);
+	progressmeter(-1, path);
 
 	free(buf);
 
@@ -728,7 +723,7 @@ again:
 		warn("Reading from socket");
 		goto cleanup_url_get;
 	}
-	progressmeter(1);
+	progressmeter(1, NULL);
 	if (
 #ifndef SMALL
 		!resume &&
@@ -1012,12 +1007,17 @@ bad_ftp_url:
 			xargc = 3;
 		}
 		oautologin = autologin;
-		if (username != NULL)
+		if (username == NULL)
+			anonftp = 1;
+		else {
+			anonftp = 0;
 			autologin = 0;
+		}
 		setpeer(xargc, xargv);
 		autologin = oautologin;
-		if ((connected == 0) ||
-		    ((connected == 1) && !ftp_login(host, username, pass))) {
+		if (connected == 0 ||
+		    (connected == 1 && autologin && (username == NULL ||
+		    !ftp_login(host, username, pass)))) {
 			warnx("Can't connect or login to host `%s'", host);
 			rval = argpos + 1;
 			continue;
@@ -1049,7 +1049,12 @@ bad_ftp_url:
 		}
 
 		if (EMPTYSTRING(file)) {
+#ifndef SMALL
 			rval = -1;
+#else /* !SMALL */
+			recvrequest("NLST", "-", NULL, "w", 0, 0);
+			rval = 0;
+#endif /* !SMALL */
 			continue;
 		}
 

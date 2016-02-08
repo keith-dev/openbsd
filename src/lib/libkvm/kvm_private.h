@@ -1,4 +1,4 @@
-/*	$OpenBSD: kvm_private.h,v 1.11 2006/03/31 03:59:40 deraadt Exp $ */
+/*	$OpenBSD: kvm_private.h,v 1.15 2009/06/24 13:04:24 millert Exp $ */
 /*	$NetBSD: kvm_private.h,v 1.7 1996/05/05 04:32:15 gwr Exp $	*/
 
 /*-
@@ -52,6 +52,7 @@ struct __kvm {
 	int	nlfd;		/* namelist file (e.g., /vmunix) */
 	struct kinfo_proc *procbase;
 	struct kinfo_proc2 *procbase2;
+	struct kinfo_file *filebase;
 	int	nbpg;		/* page size */
 	char	*swapspc;	/* (dynamic) storage for swapped pages */
 	char	*argspc, *argbuf; /* (dynamic) storage for argv strings */
@@ -85,6 +86,9 @@ struct __kvm {
 #define ISALIVE(kd) ((kd)->alive)
 };
 
+#define KREAD(kd, addr, obj) \
+	(kvm_read(kd, addr, (void *)(obj), sizeof(*obj)) != sizeof(*obj))
+
 /*
  * Functions used internally by kvm, but across kvm modules.
  */
@@ -100,3 +104,6 @@ void	*_kvm_realloc(kvm_t *kd, void *, size_t);
 void	 _kvm_syserr(kvm_t *kd, const char *program, const char *fmt, ...);
 ssize_t	 _kvm_pread(kvm_t *, int, void *, size_t, off_t);
 ssize_t	 _kvm_pwrite(kvm_t *, int, const void *, size_t, off_t);
+int	 _kvm_stat_cd9660(kvm_t *, struct kinfo_file2 *, struct vnode *);
+int	 _kvm_stat_udf(kvm_t *, struct kinfo_file2 *, struct vnode *);
+int	 _kvm_stat_ntfs(kvm_t *, struct kinfo_file2 *, struct vnode *);

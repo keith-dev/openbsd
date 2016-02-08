@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.12 2008/12/02 03:20:57 deraadt Exp $
+#	$OpenBSD: Makefile,v 1.14 2009/04/17 03:58:54 deraadt Exp $
 
 TOP=		${.CURDIR}/..
 
@@ -53,7 +53,7 @@ ${IMAGE}: rd_setup do_files rd_teardown
 bsd:
 	cd ${TOP}/../../sys/arch/mvmeppc/conf && config RAMDISK
 	cd ${TOP}/../../sys/arch/mvmeppc/compile/RAMDISK && \
-	    ${MAKE} clean && ${MAKE}
+	    ${MAKE} clean && ${MAKE} depend && ${MAKE}
 	cp ${TOP}/../../sys/arch/mvmeppc/compile/RAMDISK/bsd bsd
 
 rd_setup:
@@ -78,9 +78,6 @@ unconfig:
 
 .PRECIOUS:	${IMAGE}
 
-install:
-	cp ${BSD_RD} cd${REV}.fs ${DESTDIR}/snapshot/
-
 ${CBIN}.mk ${CBIN}.cache ${CBIN}.c: ${CBIN}.conf
 	crunchgen -E -D ${.CURDIR}/../../.. -L ${DESTDIR}/usr/lib ${.ALLSRC}
 
@@ -91,7 +88,7 @@ do_files:
 	mtree -def ${MTREE} -p ${MOUNT_POINT}/ -u
 	TOPDIR=${TOP} CURDIR=${.CURDIR} OBJDIR=${.OBJDIR} \
 	    REV=${REV} TARGDIR=${MOUNT_POINT} UTILS=${UTILS} \
-	    sh ${TOP}/runlist.sh ${LISTS}
+	    RELEASEDIR=${RELEASEDIR} sh ${UTILS}/runlist.sh ${LISTS}
 	rm ${MOUNT_POINT}/${CBIN}
 
 clean cleandir:
@@ -99,8 +96,10 @@ clean cleandir:
 	*.o *.lo *.c bsd ${BSD_RD} \
 	rdsetroot
 
-beforeinstall:
-	cp ${BSD.RD} cd${REV}.fs ${DESTDIR}/snapshot
+.ifdef RELEASEDIR
+install:
+	cp ${BSD.RD} cd${REV}.fs ${RELEASEDIR}
+.endif
 
 .include <bsd.obj.mk>
 .include <bsd.subdir.mk>

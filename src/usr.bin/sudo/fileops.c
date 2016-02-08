@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1999-2005, 2007 Todd C. Miller <Todd.Miller@courtesan.com>
+ * Copyright (c) 1999-2005,2007,2009 Todd C. Miller <Todd.Miller@courtesan.com>
  *
  * Permission to use, copy, modify, and distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -54,7 +54,7 @@
 #endif
 
 #ifndef lint
-__unused static const char rcsid[] = "$Sudo: fileops.c,v 1.16 2008/11/09 14:13:12 millert Exp $";
+__unused static const char rcsid[] = "$Sudo: fileops.c,v 1.19 2009/05/25 12:02:41 millert Exp $";
 #endif /* lint */
 
 /*
@@ -144,7 +144,7 @@ lock_file(fd, lockit)
     lock.l_pid = getpid();
     lock.l_type = (lockit == SUDO_UNLOCK) ? F_UNLCK : F_WRLCK;
     lock.l_whence = SEEK_SET;
-    func = (lockit == SUDO_TLOCK) ? F_SETLK : F_SETLKW;
+    func = (lockit == SUDO_LOCK) ? F_SETLKW : F_SETLK;
 
     return(fcntl(fd, func, &lock) == 0);
 #else
@@ -172,7 +172,7 @@ sudo_parseln(fp)
 
 	/* Trim leading and trailing whitespace/newline */
 	len = strlen(buf);
-	while (len > 0 && isspace(buf[len - 1]))
+	while (len > 0 && isspace((unsigned char)buf[len - 1]))
 	    buf[--len] = '\0';
 	for (cp = buf; isblank(*cp); cp++)
 	    continue;

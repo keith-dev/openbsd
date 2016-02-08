@@ -1,4 +1,4 @@
-/*	$OpenBSD: mta.c,v 1.31 2009/02/22 19:07:33 chl Exp $	*/
+/*	$OpenBSD: mta.c,v 1.61 2009/06/20 07:46:13 jacekm Exp $	*/
 
 /*
  * Copyright (c) 2008 Pierre-Yves Ritschard <pyr@openbsd.org>
@@ -44,9 +44,9 @@ void		mta_sig_handler(int, short, void *);
 void		mta_dispatch_parent(int, short, void *);
 void		mta_dispatch_queue(int, short, void *);
 void		mta_dispatch_runner(int, short, void *);
+void		mta_dispatch_lka(int, short, void *);
 void		mta_setup_events(struct smtpd *);
 void		mta_disable_events(struct smtpd *);
-void		mta_timeout(int, short, void *);
 void		mta_write(int, short, void *);
 int		mta_connect(struct session *);
 void		mta_read_handler(struct bufferevent *, void *);
@@ -54,7 +54,7 @@ void		mta_write_handler(struct bufferevent *, void *);
 void		mta_error_handler(struct bufferevent *, short, void *);
 int		mta_reply_handler(struct bufferevent *, void *);
 void		mta_batch_update_queue(struct batch *);
-void		mta_expand_mxarray(struct session *);
+void		mta_mxlookup(struct smtpd *, struct session *, char *, struct rule *);
 void		ssl_client_init(struct session *);
 
 void
@@ -74,95 +74,247 @@ void
 mta_dispatch_parent(int sig, short event, void *p)
 {
 	struct smtpd		*env = p;
+	struct imsgev		*iev;
 	struct imsgbuf		*ibuf;
 	struct imsg		 imsg;
 	ssize_t			 n;
 
-	ibuf = env->sc_ibufs[PROC_PARENT];
-	switch (event) {
-	case EV_READ:
+	iev = env->sc_ievs[PROC_PARENT];
+	ibuf = &iev->ibuf;
+
+	if (event & EV_READ) {
 		if ((n = imsg_read(ibuf)) == -1)
 			fatal("imsg_read_error");
 		if (n == 0) {
 			/* this pipe is dead, so remove the event handler */
-			event_del(&ibuf->ev);
+			event_del(&iev->ev);
 			event_loopexit(NULL);
 			return;
 		}
-		break;
-	case EV_WRITE:
+	}
+
+	if (event & EV_WRITE) {
 		if (msgbuf_write(&ibuf->w) == -1)
 			fatal("msgbuf_write");
-		imsg_event_add(ibuf);
-		return;
-	default:
-		fatalx("unknown event");
 	}
 
 	for (;;) {
 		if ((n = imsg_get(ibuf, &imsg)) == -1)
-			fatal("parent_dispatch_mta: imsg_read error");
+			fatalx("mta_dispatch_parent: imsg_get error");
 		if (n == 0)
 			break;
 
 		switch (imsg.hdr.type) {
-		default:
-			log_debug("parent_dispatch_mta: unexpected imsg %d",
-			    imsg.hdr.type);
+		case IMSG_CONF_START:
+			if (env->sc_flags & SMTPD_CONFIGURING)
+				break;
+			env->sc_flags |= SMTPD_CONFIGURING;
+
+			if ((env->sc_ssl = calloc(1, sizeof(*env->sc_ssl))) == NULL)
+				fatal("mta_dispatch_parent: calloc");
 			break;
+		case IMSG_CONF_SSL: {
+			struct ssl	*s;
+			struct ssl	*x_ssl;
+
+			if (!(env->sc_flags & SMTPD_CONFIGURING))
+				break;
+
+			if ((s = calloc(1, sizeof(*s))) == NULL)
+				fatal(NULL);
+			x_ssl = imsg.data;
+			(void)strlcpy(s->ssl_name, x_ssl->ssl_name,
+			    sizeof(s->ssl_name));
+			s->ssl_cert_len = x_ssl->ssl_cert_len;
+			if ((s->ssl_cert =
+			    strdup((char *)imsg.data + sizeof(*s))) == NULL)
+				fatal(NULL);
+			s->ssl_key_len = x_ssl->ssl_key_len;
+			if ((s->ssl_key = strdup((char *)imsg.data +
+			    (sizeof(*s) + s->ssl_cert_len))) == NULL)
+				fatal(NULL);
+
+			SPLAY_INSERT(ssltree, env->sc_ssl, s);
+			break;
+		}
+		case IMSG_CONF_END:
+			if (!(env->sc_flags & SMTPD_CONFIGURING))
+				break;
+			env->sc_flags &= ~SMTPD_CONFIGURING;
+			break;
+		default:
+			log_warnx("mta_dispatch_parent: got imsg %d",
+			    imsg.hdr.type);
+			fatalx("mta_dispatch_parent: unexpected imsg");
 		}
 		imsg_free(&imsg);
 	}
-	imsg_event_add(ibuf);
+	imsg_event_add(iev);
+}
+
+void
+mta_dispatch_lka(int sig, short event, void *p)
+{
+	struct smtpd		*env = p;
+	struct imsgev		*iev;
+	struct imsgbuf		*ibuf;
+	struct imsg		 imsg;
+	ssize_t			 n;
+
+	iev = env->sc_ievs[PROC_LKA];
+	ibuf = &iev->ibuf;
+
+	if (event & EV_READ) {
+		if ((n = imsg_read(ibuf)) == -1)
+			fatal("imsg_read_error");
+		if (n == 0) {
+			/* this pipe is dead, so remove the event handler */
+			event_del(&iev->ev);
+			event_loopexit(NULL);
+			return;
+		}
+	}
+
+	if (event & EV_WRITE) {
+		if (msgbuf_write(&ibuf->w) == -1)
+			fatal("msgbuf_write");
+	}
+
+	for (;;) {
+		if ((n = imsg_get(ibuf, &imsg)) == -1)
+			fatalx("mta_dispatch_lka: imsg_get error");
+		if (n == 0)
+			break;
+
+		switch (imsg.hdr.type) {
+		case IMSG_DNS_A: {
+			struct session key;
+			struct dns *reply = imsg.data;
+			struct session *s;
+			struct mxhost *mxhost;
+
+			IMSG_SIZE_CHECK(reply);
+
+			key.s_id = reply->id;
+
+			s = SPLAY_FIND(sessiontree, &env->sc_sessions, &key);
+			if (s == NULL)
+				fatal("mta_dispatch_lka: session is gone");
+
+			mxhost = calloc(1, sizeof(struct mxhost));
+			if (mxhost == NULL)
+				fatal("mta_dispatch_lka: calloc");
+
+			mxhost->ss = reply->ss;
+
+ 			TAILQ_INSERT_TAIL(&s->mxhosts, mxhost, entry);
+
+			break;
+		}
+
+		case IMSG_DNS_A_END: {
+			struct session key;
+			struct dns *reply = imsg.data;
+			struct session *s;
+			int ret;
+
+			IMSG_SIZE_CHECK(reply);
+
+			key.s_id = reply->id;
+
+			s = SPLAY_FIND(sessiontree, &env->sc_sessions, &key);
+			if (s == NULL)
+				fatal("smtp_dispatch_parent: session is gone");
+
+			do {
+				ret = mta_connect(s);
+			} while (ret == 0);
+
+			if (ret < 0) {
+				mta_batch_update_queue(s->batch);
+				session_destroy(s);
+			}
+
+			break;
+		}
+
+		case IMSG_LKA_SECRET: {
+			struct secret	*reply = imsg.data;
+			struct session	 key, *s;
+
+			IMSG_SIZE_CHECK(reply);
+
+			key.s_id = reply->id;
+
+			s = SPLAY_FIND(sessiontree, &env->sc_sessions, &key);
+			if (s == NULL)
+				fatal("smtp_dispatch_parent: session is gone");
+
+			strlcpy(s->credentials, reply->secret,
+			    sizeof(s->credentials));
+
+			mta_mxlookup(env, s, s->batch->hostname,
+			    &s->batch->rule);
+			break;
+		}
+
+		default:
+			log_warnx("mta_dispatch_parent: got imsg %d",
+			    imsg.hdr.type);
+			fatalx("mta_dispatch_lka: unexpected imsg");
+		}
+		imsg_free(&imsg);
+	}
+	imsg_event_add(iev);
 }
 
 void
 mta_dispatch_queue(int sig, short event, void *p)
 {
 	struct smtpd		*env = p;
+	struct imsgev		*iev;
 	struct imsgbuf		*ibuf;
 	struct imsg		 imsg;
 	ssize_t			 n;
 
-	ibuf = env->sc_ibufs[PROC_QUEUE];
-	switch (event) {
-	case EV_READ:
+	iev = env->sc_ievs[PROC_QUEUE];
+	ibuf = &iev->ibuf;
+
+	if (event & EV_READ) {
 		if ((n = imsg_read(ibuf)) == -1)
 			fatal("imsg_read_error");
 		if (n == 0) {
 			/* this pipe is dead, so remove the event handler */
-			event_del(&ibuf->ev);
+			event_del(&iev->ev);
 			event_loopexit(NULL);
 			return;
 		}
-		break;
-	case EV_WRITE:
+	}
+
+	if (event & EV_WRITE) {
 		if (msgbuf_write(&ibuf->w) == -1)
 			fatal("msgbuf_write");
-		imsg_event_add(ibuf);
-		return;
-	default:
-		fatalx("unknown event");
 	}
 
 	for (;;) {
 		if ((n = imsg_get(ibuf, &imsg)) == -1)
-			fatal("parent_dispatch_mta: imsg_read error");
+			fatalx("mta_dispatch_queue: imsg_get error");
 		if (n == 0)
 			break;
 
 		switch (imsg.hdr.type) {
 		case IMSG_QUEUE_MESSAGE_FD: {
-			struct batch	*batchp;
+			struct batch	*batchp = imsg.data;
 			struct session	*sessionp;
 			int fd;
 
-			if ((fd = imsg_get_fd(ibuf, &imsg)) == -1) {
+			IMSG_SIZE_CHECK(batchp);
+
+			if ((fd = imsg.fd) == -1) {
 				/* NEEDS_FIX - unsure yet how it must be handled */
-				fatalx("mta_dispatch_queue: imsg_get_fd");
+				fatalx("mta_dispatch_queue: imsg.fd == -1");
 			}
 
-			batchp = (struct batch *)imsg.data;
 			batchp = batch_by_id(env, batchp->id);
 			sessionp = batchp->sessionp;
 
@@ -174,54 +326,56 @@ mta_dispatch_queue(int sig, short event, void *p)
 			break;
 		}
 		default:
-			log_debug("parent_dispatch_mta: unexpected imsg %d",
+			log_warnx("mta_dispatch_queue: got imsg %d",
 			    imsg.hdr.type);
-			break;
+			fatalx("mta_dispatch_queue: unexpected imsg");
 		}
 		imsg_free(&imsg);
 	}
-	imsg_event_add(ibuf);
+	imsg_event_add(iev);
 }
 
 void
 mta_dispatch_runner(int sig, short event, void *p)
 {
 	struct smtpd		*env = p;
+	struct imsgev		*iev;
 	struct imsgbuf		*ibuf;
 	struct imsg		 imsg;
 	ssize_t			 n;
 
-	ibuf = env->sc_ibufs[PROC_RUNNER];
-	switch (event) {
-	case EV_READ:
+	iev = env->sc_ievs[PROC_RUNNER];
+	ibuf = &iev->ibuf;
+
+	if (event & EV_READ) {
 		if ((n = imsg_read(ibuf)) == -1)
 			fatal("imsg_read_error");
 		if (n == 0) {
 			/* this pipe is dead, so remove the event handler */
-			event_del(&ibuf->ev);
+			event_del(&iev->ev);
 			event_loopexit(NULL);
 			return;
 		}
-		break;
-	case EV_WRITE:
+	}
+
+	if (event & EV_WRITE) {
 		if (msgbuf_write(&ibuf->w) == -1)
 			fatal("msgbuf_write");
-		imsg_event_add(ibuf);
-		return;
-	default:
-		fatalx("unknown event");
 	}
 
 	for (;;) {
 		if ((n = imsg_get(ibuf, &imsg)) == -1)
-			fatal("mta_dispatch_runner: imsg_read error");
+			fatalx("mta_dispatch_runner: imsg_get error");
 		if (n == 0)
 			break;
 
 		switch (imsg.hdr.type) {
 		case IMSG_BATCH_CREATE: {
-			struct session *s;
+			struct batch *request = imsg.data;
 			struct batch *batchp;
+			struct session *s;
+
+			IMSG_SIZE_CHECK(request);
 
 			/* create a client session */
 			if ((s = calloc(1, sizeof(*s))) == NULL)
@@ -229,6 +383,7 @@ mta_dispatch_runner(int sig, short event, void *p)
 			s->s_state = S_INIT;
 			s->s_env = env;
 			s->s_id = queue_generate_id();
+			TAILQ_INIT(&s->mxhosts);
 			SPLAY_INSERT(sessiontree, &s->s_env->sc_sessions, s);
 
 			/* create the batch for this session */
@@ -236,11 +391,8 @@ mta_dispatch_runner(int sig, short event, void *p)
 			if (batchp == NULL)
 				fatal("mta_dispatch_runner: calloc");
 
-			*batchp = *(struct batch *)imsg.data;
-			batchp->session_id = s->s_id;
-			batchp->mx_off = 0;
+			*batchp = *request;
 			batchp->env = env;
-			batchp->flags = 0;
 			batchp->sessionp = s;
 
 			s->batch = batchp;
@@ -248,62 +400,73 @@ mta_dispatch_runner(int sig, short event, void *p)
 			TAILQ_INIT(&batchp->messages);
 			SPLAY_INSERT(batchtree, &env->batch_queue, batchp);
 
+			env->stats->mta.sessions++;
+			env->stats->mta.sessions_active++;
+
 			break;
 		}
 		case IMSG_BATCH_APPEND: {
-			struct batch	*batchp;
+			struct message	*append = imsg.data;
 			struct message	*messagep;
+			struct batch	*batchp;
+
+			IMSG_SIZE_CHECK(append);
 
 			messagep = calloc(1, sizeof (struct message));
 			if (messagep == NULL)
 				fatal("mta_dispatch_runner: calloc");
 
-			*messagep = *(struct message *)imsg.data;
+			*messagep = *append;
 
 			batchp = batch_by_id(env, messagep->batch_id);
 			if (batchp == NULL)
 				fatalx("mta_dispatch_runner: internal inconsistency.");
 
-			batchp->session_ss = messagep->session_ss;
-			strlcpy(batchp->session_hostname,
-			    messagep->session_hostname,
-			    sizeof(batchp->session_hostname));
-			strlcpy(batchp->session_helo, messagep->session_helo,
-			    sizeof(batchp->session_helo));
-
  			TAILQ_INSERT_TAIL(&batchp->messages, messagep, entry);
-
 			break;
 		}
 		case IMSG_BATCH_CLOSE: {
-			struct batch		*batchp;
+			struct batch		*batchp = imsg.data;
 			struct session		*s;
 
-			batchp = (struct batch *)imsg.data;
+			IMSG_SIZE_CHECK(batchp);
+
 			batchp = batch_by_id(env, batchp->id);
 			if (batchp == NULL)
 				fatalx("mta_dispatch_runner: internal inconsistency.");
 
-			batchp->flags |= F_BATCH_COMPLETE;
+			/* assume temporary failure by default, safest choice */
+			batchp->status = S_BATCH_TEMPFAILURE;
 
 			log_debug("batch ready, we can initiate a session");
 
 			s = batchp->sessionp;
 
-			mta_expand_mxarray(s);
-			while (! mta_connect(s))
-				if (s->mx_off == s->mx_cnt)
-					break;
+			if (batchp->rule.r_value.relayhost.flags & F_AUTH) {
+				struct secret	query;
+
+				bzero(&query, sizeof(query));
+				query.id = s->s_id;
+				strlcpy(query.host,
+				    batchp->rule.r_value.relayhost.hostname,
+				    sizeof(query.host));
+
+				imsg_compose_event(env->sc_ievs[PROC_LKA],
+				    IMSG_LKA_SECRET, 0, 0, -1, &query,
+				    sizeof(query));
+			} else
+				mta_mxlookup(env, s, batchp->hostname,
+				    &batchp->rule);
 			break;
 		}
 		default:
-			log_debug("mta_dispatch_runner: unexpected imsg %d",
+			log_warnx("mta_dispatch_runner: got imsg %d",
 			    imsg.hdr.type);
-			break;
+			fatalx("mta_dispatch_runner: unexpected imsg");
 		}
 		imsg_free(&imsg);
 	}
-	imsg_event_add(ibuf);
+	imsg_event_add(iev);
 }
 
 void
@@ -316,29 +479,11 @@ mta_shutdown(void)
 void
 mta_setup_events(struct smtpd *env)
 {
-	struct timeval	 tv;
-
-	evtimer_set(&env->sc_ev, mta_timeout, env);
-	tv.tv_sec = 3;
-	tv.tv_usec = 0;
-	evtimer_add(&env->sc_ev, &tv);
 }
 
 void
 mta_disable_events(struct smtpd *env)
 {
-	evtimer_del(&env->sc_ev);
-}
-
-void
-mta_timeout(int fd, short event, void *p)
-{
-	struct smtpd		*env = p;
-	struct timeval		 tv;
-
-	tv.tv_sec = 3;
-	tv.tv_usec = 0;
-	evtimer_add(&env->sc_ev, &tv);
 }
 
 pid_t
@@ -351,8 +496,10 @@ mta(struct smtpd *env)
 	struct event	 ev_sigterm;
 
 	struct peer peers[] = {
+		{ PROC_PARENT,	mta_dispatch_parent },
 		{ PROC_QUEUE,	mta_dispatch_queue },
-		{ PROC_RUNNER,	mta_dispatch_runner }
+		{ PROC_RUNNER,	mta_dispatch_runner },
+		{ PROC_LKA,	mta_dispatch_lka }
 	};
 
 	switch (pid = fork()) {
@@ -377,8 +524,8 @@ mta(struct smtpd *env)
 #warning disabling privilege revocation and chroot in DEBUG MODE
 #endif
 
-	setproctitle("mail transfer agent");
 	smtpd_process = PROC_MTA;
+	setproctitle("%s", env->sc_title[smtpd_process]);
 
 #ifndef DEBUG
 	if (setgroups(1, &pw->pw_gid) ||
@@ -396,8 +543,8 @@ mta(struct smtpd *env)
 	signal(SIGPIPE, SIG_IGN);
 	signal(SIGHUP, SIG_IGN);
 
-	config_pipes(env, peers, 2);
-	config_peers(env, peers, 2);
+	config_pipes(env, peers, nitems(peers));
+	config_peers(env, peers, nitems(peers));
 
 	SPLAY_INIT(&env->batch_queue);
 
@@ -408,49 +555,64 @@ mta(struct smtpd *env)
 	return (0);
 }
 
+void
+mta_mxlookup(struct smtpd *env, struct session *sessionp, char *hostname, struct rule *rule)
+{
+	int	 port;
+
+	switch (rule->r_value.relayhost.flags & F_SSL) {
+	case F_SMTPS:
+		port = 465;
+		break;
+	case F_SSL:
+		port = 465;
+		rule->r_value.relayhost.flags &= ~F_STARTTLS;
+		break;
+	default:
+		port = 25;
+	}
+	
+	if (rule->r_value.relayhost.port)
+		port = ntohs(rule->r_value.relayhost.port);
+
+	if (rule->r_action == A_RELAYVIA)
+		dns_query_mx(env, rule->r_value.relayhost.hostname, port,
+		    sessionp->s_id);
+	else
+		dns_query_mx(env, hostname, port, sessionp->s_id);
+}
+
 /* shamelessly ripped usr.sbin/relayd/check_tcp.c ;) */
 int
-mta_connect(struct session* sessionp)
+mta_connect(struct session *sessionp)
 {
 	int s;
 	int type;
 	struct linger lng;
-	struct sockaddr_in ssin;
-	struct sockaddr_in6 ssin6;
+	struct mxhost *mxhost;
 
-	if ((s = socket(sessionp->mxarray[sessionp->mx_off].ss.ss_family, SOCK_STREAM, 0)) == -1) {
+	sessionp->s_fd = -1;
+
+	mxhost = TAILQ_FIRST(&sessionp->mxhosts);
+	if (mxhost == NULL)
+		return -1;
+
+	if ((s = socket(mxhost->ss.ss_family, SOCK_STREAM, 0)) == -1)
 		goto bad;
-	}
 
 	bzero(&lng, sizeof(lng));
-	if (setsockopt(s, SOL_SOCKET, SO_LINGER, &lng, sizeof (lng)) == -1) {
+	if (setsockopt(s, SOL_SOCKET, SO_LINGER, &lng, sizeof (lng)) == -1)
 		goto bad;
-	}
 
 	type = 1;
-	if (setsockopt(s, SOL_SOCKET, SO_REUSEPORT, &type, sizeof (type)) == -1) {
+	if (setsockopt(s, SOL_SOCKET, SO_REUSEPORT, &type, sizeof (type)) == -1)
 		goto bad;
-	}
 
 	session_socket_blockmode(s, BM_NONBLOCK);
 
-	if (sessionp->mxarray[sessionp->mx_off].ss.ss_family == PF_INET) {
-		ssin = *(struct sockaddr_in *)&sessionp->mxarray[sessionp->mx_off].ss;
-		if (connect(s, (struct sockaddr *)&ssin, sizeof(struct sockaddr_in)) == -1) {
-			if (errno != EINPROGRESS) {
-				goto bad;
-			}
-		}
-	}
-
-	if (sessionp->mxarray[sessionp->mx_off].ss.ss_family == PF_INET6) {
-		ssin6 = *(struct sockaddr_in6 *)&sessionp->mxarray[sessionp->mx_off].ss;
-		if (connect(s, (struct sockaddr *)&ssin6, sizeof(struct sockaddr_in6)) == -1) {
-			if (errno != EINPROGRESS) {
-				goto bad;
-			}
-		}
-	}
+	if (connect(s, (struct sockaddr *)&mxhost->ss, mxhost->ss.ss_len) == -1)
+		if (errno != EINPROGRESS)
+			goto bad;
 
 	sessionp->s_tv.tv_sec = SMTPD_CONNECT_TIMEOUT;
 	sessionp->s_tv.tv_usec = 0;
@@ -461,7 +623,10 @@ mta_connect(struct session* sessionp)
 	return 1;
 
 bad:
-	sessionp->mx_off++;
+	if (mxhost) {
+		TAILQ_REMOVE(&sessionp->mxhosts, mxhost, entry);
+		free(mxhost);
+	}
 	close(s);
 	return 0;
 }
@@ -471,11 +636,20 @@ mta_write(int s, short event, void *arg)
 {
 	struct session *sessionp = arg;
 	struct batch *batchp = sessionp->batch;
+	struct mxhost *mxhost;
 	int ret;
 
+	mxhost = TAILQ_FIRST(&sessionp->mxhosts);
+
 	if (event == EV_TIMEOUT) {
-		sessionp->mx_off++;
+
+		if (mxhost) {
+			TAILQ_REMOVE(&sessionp->mxhosts, mxhost, entry);
+			free(mxhost);
+		}
 		close(s);
+		sessionp->s_fd = -1;
+
 		if (sessionp->s_bev) {
 			bufferevent_free(sessionp->s_bev);
 			sessionp->s_bev = NULL;
@@ -483,16 +657,15 @@ mta_write(int s, short event, void *arg)
 		strlcpy(batchp->errorline, "connection timed-out.",
 		    sizeof(batchp->errorline));
 
-		ret = 0;
-		while (sessionp->mx_off < sessionp->mx_cnt &&
-		    (ret = mta_connect(sessionp)) == 0) {
-			continue;
-		}
-		if (ret)
-			return;
+		do {
+			ret = mta_connect(sessionp);
+		} while (ret == 0);
 
-		mta_batch_update_queue(batchp);
-		session_destroy(sessionp);
+		if (ret < 0) {
+			mta_batch_update_queue(batchp);
+			session_destroy(sessionp);
+		}
+
 		return;
 	}
 
@@ -505,7 +678,8 @@ mta_write(int s, short event, void *arg)
 		return;
 	}
 
-	if (sessionp->mxarray[sessionp->mx_off].flags & F_SSMTP) {
+	if (sessionp->batch->rule.r_value.relayhost.flags & F_SMTPS) {
+		log_debug("mta_write: initializing ssl");
 		ssl_client_init(sessionp);
 		return;
 	}
@@ -545,7 +719,7 @@ mta_reply_handler(struct bufferevent *bev, void *arg)
 	code = strtonum(codebuf, 0, UINT16_MAX, &errstr);
 	if (errstr || code < 100) {
 		/* Server sent invalid line, protocol error */
-		batchp->status |= S_BATCH_PERMFAILURE;
+		batchp->status = S_BATCH_PERMFAILURE;
 		strlcpy(batchp->errorline, line, sizeof(batchp->errorline));
 		mta_batch_update_queue(batchp);
 		session_destroy(sessionp);
@@ -555,12 +729,16 @@ mta_reply_handler(struct bufferevent *bev, void *arg)
 	if (line[3] == '-') {
 		if (strcasecmp(&line[4], "STARTTLS") == 0)
 			sessionp->s_flags |= F_PEERHASTLS;
+		else if (strncasecmp(&line[4], "AUTH ", 5) == 0 ||
+		    strncasecmp(&line[4], "AUTH-", 5) == 0)
+			sessionp->s_flags |= F_PEERHASAUTH;
 		return 1;
 	}
 
 	switch (code) {
 	case 250:
 		if (sessionp->s_state == S_DONE) {
+			batchp->status = S_BATCH_ACCEPTED;
 			mta_batch_update_queue(batchp);
 			session_destroy(sessionp);
 			return 0;
@@ -575,10 +753,32 @@ mta_reply_handler(struct bufferevent *bev, void *arg)
 		}
 
 		if (sessionp->s_state == S_GREETED &&
+		    (sessionp->s_flags & F_PEERHASAUTH) &&
+		    (sessionp->s_flags & F_SECURE) &&
+		    (sessionp->batch->rule.r_value.relayhost.flags & F_AUTH) &&
+		    (sessionp->credentials[0] != '\0')) {
+			log_debug("AUTH PLAIN %s", sessionp->credentials);
+			session_respond(sessionp, "AUTH PLAIN %s",
+			    sessionp->credentials);
+			sessionp->s_state = S_AUTH_INIT;
+			return 0;
+		}
+
+		if (sessionp->s_state == S_GREETED &&
 		    !(sessionp->s_flags & F_PEERHASTLS) &&
-		    sessionp->mxarray[sessionp->mx_off].flags & F_STARTTLS) {
+		    (sessionp->batch->rule.r_value.relayhost.flags&F_STARTTLS)){
 			/* PERM - we want TLS but it is not advertised */
-			batchp->status |= S_BATCH_PERMFAILURE;
+			batchp->status = S_BATCH_PERMFAILURE;
+			mta_batch_update_queue(batchp);
+			session_destroy(sessionp);
+			return 0;
+		}
+
+		if (sessionp->s_state == S_GREETED &&
+		    !(sessionp->s_flags & F_PEERHASAUTH) &&
+		    (sessionp->batch->rule.r_value.relayhost.flags & F_AUTH)) {
+			/* PERM - we want AUTH but it is not advertised */
+			batchp->status = S_BATCH_PERMFAILURE;
 			mta_batch_update_queue(batchp);
 			session_destroy(sessionp);
 			return 0;
@@ -598,10 +798,16 @@ mta_reply_handler(struct bufferevent *bev, void *arg)
 		sessionp->s_state = S_GREETED;
 		return 1;
 
+	case 235:
+		if (sessionp->s_state == S_AUTH_INIT) {
+			sessionp->s_flags |= F_AUTHENTICATED;
+			sessionp->s_state = S_GREETED;
+			break;
+		}
+		return 0;
 	case 421:
 	case 450:
 	case 451:
-		batchp->status |= S_BATCH_TEMPFAILURE;
 		strlcpy(batchp->errorline, line, sizeof(batchp->errorline));
 		mta_batch_update_queue(batchp);
 		session_destroy(sessionp);
@@ -626,20 +832,24 @@ mta_reply_handler(struct bufferevent *bev, void *arg)
 
 	case 221:
 		if (sessionp->s_state == S_DONE) {
+			batchp->status = S_BATCH_ACCEPTED;
 			mta_batch_update_queue(batchp);
 			session_destroy(sessionp);
 			return 0;
 		}
 
+	case 535:
+		/* Authentication failed*/
+	case 554:
+		/* Relaying denied */
 	case 552:
 	case 553:
 		flags |= F_ISPROTOERROR;
 	default:
 		/* Server sent code we know nothing about, error */
 		if (!(flags & F_ISPROTOERROR))
-			log_debug("Ouch, SMTP session returned unhandled %d status.", code);
+			log_warn("SMTP session returned unknown status %d.", code);
 
-		batchp->status |= S_BATCH_PERMFAILURE;
 		strlcpy(batchp->errorline, line, sizeof(batchp->errorline));
 		mta_batch_update_queue(batchp);
 		session_destroy(sessionp);
@@ -717,14 +927,14 @@ mta_reply_handler(struct bufferevent *bev, void *arg)
 						break;
 				}
 				if (messagep == NULL) {
-					batchp->status |= S_BATCH_PERMFAILURE;
+					batchp->status = S_BATCH_PERMFAILURE;
 					mta_batch_update_queue(batchp);
 					session_destroy(sessionp);
 					return 0;
 				}
 			}
 
-			imsg_compose(env->sc_ibufs[PROC_QUEUE], IMSG_QUEUE_MESSAGE_FD,
+			imsg_compose_event(env->sc_ievs[PROC_QUEUE], IMSG_QUEUE_MESSAGE_FD,
 			    0, 0, -1, batchp, sizeof(*batchp));
 			bufferevent_disable(sessionp->s_bev, EV_READ);
 		}
@@ -732,16 +942,12 @@ mta_reply_handler(struct bufferevent *bev, void *arg)
 	}
 
 	case S_DATA: {
-		session_respond(sessionp, "Received: from %s (%s [%s])",
-		    batchp->session_helo, batchp->session_hostname,
-		    ss_to_text(&batchp->session_ss));
-
-		session_respond(sessionp, "\tby %s with ESMTP id %s",
-		    batchp->env->sc_hostname, batchp->message_id);
-
 		if (sessionp->s_flags & F_SECURE) {
-			session_respond(sessionp, "X-OpenSMTPD-Cipher: %s",
-			    SSL_get_cipher(sessionp->s_ssl));
+			log_info("%s: version=%s cipher=%s bits=%d",
+			batchp->message_id,
+			SSL_get_cipher_version(sessionp->s_ssl),
+			SSL_get_cipher_name(sessionp->s_ssl),
+			SSL_get_cipher_bits(sessionp->s_ssl, NULL));
 		}
 
 		TAILQ_FOREACH(messagep, &batchp->messages, entry) {
@@ -757,7 +963,7 @@ mta_reply_handler(struct bufferevent *bev, void *arg)
 			session_respond(sessionp, "just a notification to let you know that an error has occured.");
 			session_respond(sessionp, "%s", "");
 
-			if (batchp->status & S_BATCH_PERMFAILURE) {
+			if (batchp->status == S_BATCH_PERMFAILURE) {
 				session_respond(sessionp, "You ran into a PERMANENT FAILURE, which means that the e-mail can't");
 				session_respond(sessionp, "be delivered to the remote host no matter how much I'll try.");
 				session_respond(sessionp, "%s", "");
@@ -766,7 +972,7 @@ mta_reply_handler(struct bufferevent *bev, void *arg)
 				session_respond(sessionp, "%s", "");
 			}
 
-			if (batchp->status & S_BATCH_TEMPFAILURE) {
+			if (batchp->status == S_BATCH_TEMPFAILURE) {
 				session_respond(sessionp, "You ran into a TEMPORARY FAILURE, which means that the e-mail can't");
 				session_respond(sessionp, "be delivered right now, but could be deliberable at a later time. I");
 				session_respond(sessionp, "will attempt until it succeeds for the next four days, then let you");
@@ -899,16 +1105,25 @@ mta_batch_update_queue(struct batch *batchp)
 
 	while ((messagep = TAILQ_FIRST(&batchp->messages)) != NULL) {
 
-		if (batchp->status & S_BATCH_PERMFAILURE) {
+		if (batchp->status == S_BATCH_PERMFAILURE) {
 			messagep->status |= S_MESSAGE_PERMFAILURE;
 		}
-
-		if (batchp->status & S_BATCH_TEMPFAILURE) {
+		
+		if (batchp->status == S_BATCH_TEMPFAILURE) {
 			if (messagep->status != S_MESSAGE_PERMFAILURE)
 				messagep->status |= S_MESSAGE_TEMPFAILURE;
 		}
 
-		imsg_compose(env->sc_ibufs[PROC_QUEUE],
+		if ((messagep->status & S_MESSAGE_TEMPFAILURE) == 0 &&
+		    (messagep->status & S_MESSAGE_PERMFAILURE) == 0) {
+			log_info("%s: to=<%s@%s>, delay=%d, stat=Sent",
+			    messagep->message_uid,
+			    messagep->recipient.user,
+			    messagep->recipient.domain,
+			    time(NULL) - messagep->creation);
+		}
+
+		imsg_compose_event(env->sc_ievs[PROC_QUEUE],
 		    IMSG_QUEUE_MESSAGE_UPDATE, 0, 0, -1, messagep,
 		    sizeof(struct message));
 		TAILQ_REMOVE(&batchp->messages, messagep, entry);
@@ -921,119 +1136,5 @@ mta_batch_update_queue(struct batch *batchp)
 		fclose(batchp->messagefp);
 
 	free(batchp);
-}
 
-void
-mta_expand_mxarray(struct session *sessionp)
-{
-	int i;
-	int j;
-	u_int16_t	port;
-	struct mxhost		mxhost;
-	struct sockaddr_in	*ssin;
-	struct sockaddr_in6	*ssin6;
-	struct batch *batchp = sessionp->batch;
-
-	/* First pass, we compute the length of the final mxarray */
-	for (i = 0; i < batchp->mx_cnt; ++i) {
-		mxhost = batchp->mxarray[i];
-
-		if (mxhost.ss.ss_family == AF_INET) {
-			ssin = (struct sockaddr_in *)&mxhost.ss;
-			port = ntohs(ssin->sin_port);
-		}
-		else if (mxhost.ss.ss_family == AF_INET6) {
-			ssin6 = (struct sockaddr_in6 *)&mxhost.ss;
-			port = ntohs(ssin6->sin6_port);
-		}
-
-		if (port) {
-			++sessionp->mx_cnt;
-			continue;
-		}
-
-		switch (mxhost.flags & F_SSL) {
-		case F_SSL:
-			sessionp->mx_cnt += 2;
-			break;
-		case F_SSMTP:
-		case F_STARTTLS:
-		default:
-			++sessionp->mx_cnt;
-		}
-	}
-
-	/* Second pass, we actually fill the array */
-	sessionp->mxarray = calloc(sessionp->mx_cnt, sizeof(struct mxhost));
-	if (sessionp->mxarray == NULL)
-		fatal("calloc");
-
-	for (i = j = 0; i < batchp->mx_cnt; ++i) {
-		mxhost = batchp->mxarray[i];
-
-		if (mxhost.ss.ss_family == AF_INET) {
-			ssin = (struct sockaddr_in *)&mxhost.ss;
-			port = ntohs(ssin->sin_port);
-		}
-		else if (mxhost.ss.ss_family == AF_INET6) {
-			ssin6 = (struct sockaddr_in6 *)&mxhost.ss;
-			port = ntohs(ssin6->sin6_port);
-		}
-
-		if (port) {
-			sessionp->mxarray[j++] = mxhost;
-			continue;
-		}
-
-		switch (mxhost.flags & F_SSL) {
-		case F_SSL: {
-			u_int8_t flags = mxhost.flags;
-
-			if (mxhost.ss.ss_family == AF_INET) {
-				ssin->sin_port = htons(465);
-				mxhost.ss = *(struct sockaddr_storage *)ssin;
-			}
-			else if (mxhost.ss.ss_family == AF_INET6) {
-				ssin6->sin6_port = htons(465);
-				mxhost.ss = *(struct sockaddr_storage *)ssin6;
-			}
-			mxhost.flags = flags & ~F_STARTTLS;
-			sessionp->mxarray[j++] = mxhost;
-
-			if (mxhost.ss.ss_family == AF_INET) {
-				ssin->sin_port = htons(25);
-				mxhost.ss = *(struct sockaddr_storage *)ssin;
-			}
-			else if (mxhost.ss.ss_family == AF_INET6) {
-				ssin6->sin6_port = htons(25);
-				mxhost.ss = *(struct sockaddr_storage *)ssin6;
-			}
-			mxhost.flags = flags & ~F_SSMTP;
-			sessionp->mxarray[j++] = mxhost;
-			break;
-		}
-		case F_SSMTP:
-			if (mxhost.ss.ss_family == AF_INET) {
-				ssin->sin_port = htons(465);
-				mxhost.ss = *(struct sockaddr_storage *)ssin;
-			}
-			else if (mxhost.ss.ss_family == AF_INET6) {
-				ssin6->sin6_port = htons(465);
-				mxhost.ss = *(struct sockaddr_storage *)ssin6;
-			}
-			sessionp->mxarray[j++] = mxhost;
-			break;
-		case F_STARTTLS:
-		default:
-			if (mxhost.ss.ss_family == AF_INET) {
-				ssin->sin_port = htons(25);
-				mxhost.ss = *(struct sockaddr_storage *)ssin;
-			}
-			else if (mxhost.ss.ss_family == AF_INET6) {
-				ssin6->sin6_port = htons(25);
-				mxhost.ss = *(struct sockaddr_storage *)ssin6;
-			}
-			sessionp->mxarray[j++] = mxhost;
-		}
-	}
 }

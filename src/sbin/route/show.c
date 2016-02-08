@@ -1,4 +1,4 @@
-/*	$OpenBSD: show.c,v 1.76 2009/02/03 16:44:15 michele Exp $	*/
+/*	$OpenBSD: show.c,v 1.80 2009/06/27 11:35:57 michele Exp $	*/
 /*	$NetBSD: show.c,v 1.1 1996/11/15 18:01:41 gwr Exp $	*/
 
 /*
@@ -100,6 +100,7 @@ static const struct bits bits[] = {
 	{ RTF_CLONED,	'c' },
 	{ RTF_JUMBO,	'J' },
 	{ RTF_MPATH,	'P' },
+	{ RTF_MPLS,	'T' },
 	{ 0 }
 };
 
@@ -278,7 +279,7 @@ void
 p_rtentry(struct rt_msghdr *rtm)
 {
 	static int	 old_af = -1;
-	struct sockaddr	*sa = (struct sockaddr *)(rtm + 1);
+	struct sockaddr	*sa = (struct sockaddr *)((char *)rtm + rtm->rtm_hdrlen);
 	struct sockaddr	*mask, *rti_info[RTAX_MAX];
 	char		 ifbuf[IF_NAMESIZE];
 
@@ -314,7 +315,7 @@ p_rtentry(struct rt_msghdr *rtm)
 	else
 		printf("%5s ", "-");
 	putchar((rtm->rtm_rmx.rmx_locks & RTV_MTU) ? 'L' : ' ');
-	printf("  %2d %.16s", rtm->rtm_priority & RTP_MASK,
+	printf("  %2d %.16s", rtm->rtm_priority,
 	    if_indextoname(rtm->rtm_index, ifbuf));
 	putchar('\n');
 }
@@ -550,7 +551,7 @@ p_sockaddr_mpls(struct sockaddr *in, struct sockaddr *out, int flags, int width)
 	if (in->sa_family != AF_MPLS)
 		return;
 
-	if (flags & MPLS_OP_POP)
+	if (flags & MPLS_OP_POP || flags == MPLS_OP_LOCAL)
 		cp = label_print(in, NULL);
 	else
 		cp = label_print(in, out);
@@ -885,6 +886,8 @@ char *
 label_print_op(u_int32_t type)
 {
 	switch (type & (MPLS_OP_PUSH | MPLS_OP_POP | MPLS_OP_SWAP)) {
+	case MPLS_OP_LOCAL:
+		return ("LOCAL");
 	case MPLS_OP_POP:
 		return ("POP");
 	case MPLS_OP_SWAP:

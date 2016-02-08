@@ -1,4 +1,4 @@
-#	$OpenBSD: list,v 1.28 2009/02/19 23:43:54 krw Exp $
+#	$OpenBSD: list,v 1.32 2009/05/06 01:30:39 deraadt Exp $
 #	$NetBSD: list,v 1.4.4.1 1996/06/20 20:30:26 pk Exp $
 
 SRCDIRS distrib/special
@@ -23,6 +23,8 @@ LINK	instbin					bin/mt bin/eject
 LINK	instbin					bin/mv
 LINK	instbin					bin/pax bin/tar bin/cpio
 LINK	instbin					bin/rm
+LINK	instbin					bin/sha256
+LINK	instbin					bin/sleep
 LINK	instbin					bin/stty
 LINK	instbin					bin/sync
 LINK	instbin					sbin/dhclient
@@ -50,7 +52,7 @@ LINK	instbin					usr/bin/grep usr/bin/egrep usr/bin/fgrep
 LINK	instbin					usr/bin/gzip usr/bin/gunzip usr/bin/gzcat
 LINK	instbin					usr/bin/less usr/bin/more
 LINK	instbin					usr/bin/sed
-LINK	instbin					usr/bin/disknames
+LINK	instbin					sbin/sysctl
 
 SCRIPT	${DESTDIR}/dev/MAKEDEV			dev/MAKEDEV
 SPECIAL	cd dev; sh MAKEDEV ramdisk
@@ -80,3 +82,6 @@ COPY	${DESTDIR}/etc/firmware/ral-rt2561	etc/firmware/ral-rt2561
 COPY	${DESTDIR}/etc/firmware/ral-rt2561s	etc/firmware/ral-rt2561s
 COPY	${DESTDIR}/etc/firmware/ral-rt2661	etc/firmware/ral-rt2661
 COPY	${DESTDIR}/etc/firmware/rum-rt2573	etc/firmware/rum-rt2573
+
+HASH	var/hash
+TZ

@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.10 2008/12/02 03:20:57 deraadt Exp $
+#	$OpenBSD: Makefile,v 1.12 2009/04/17 03:58:54 deraadt Exp $
 
 REV=	${OSrev}
 
@@ -52,7 +52,7 @@ bsd:
 
 rd_setup:
 	dd if=/dev/zero of=${IMAGE} bs=512 count=${NBLKS}
-	vnconfig -v -c ${VND} ${IMAGE}
+	vnconfig -v -c -t ${DISKTYPE} ${VND} ${IMAGE}
 	disklabel -w ${VND} ${DISKTYPE}
 	newfs ${NEWFSARGS} ${VND_RDEV}
 	fsck ${VND_RDEV}
@@ -72,8 +72,10 @@ unconfig:
 
 .PRECIOUS:	${IMAGE}
 
+.ifdef RELEASEDIR
 install:
-	cp ${BSD_RD} ${DESTDIR}/snapshot/
+	cp ${BSD_RD} ${RELEASEDIR}
+.endif
 
 ${CBIN}.mk ${CBIN}.cache ${CBIN}.c: ${CRUNCHCONF}
 	crunchgen -E -D ${.CURDIR}/../../.. -L ${DESTDIR}/usr/lib ${.ALLSRC}
@@ -88,7 +90,7 @@ do_files:
 	cat ${MTREE} | mtree -de -p ${MOUNT_POINT}/ -u
 	TOPDIR=${TOP} CURDIR=${.CURDIR} OBJDIR=${.OBJDIR} \
 	    REV=${REV} TARGDIR=${MOUNT_POINT} UTILS=${UTILS} \
-	    sh ${TOP}/../miniroot/runlist.sh ${LISTS}
+	    RELEASEDIR=${RELEASEDIR} sh ${UTILS}/runlist.sh ${LISTS}
 	rm ${MOUNT_POINT}/${CBIN}
 
 clean cleandir:
@@ -96,9 +98,6 @@ clean cleandir:
 	    *.o *.lo *.c bsd ${BSD_RD} rdsetroot
 	rm -f instbin.conf
 	rm -rf cd-dir
-
-beforeinstall:
-	cp ${BSD.RD} ${DESTDIR}/snapshot
 
 .include <bsd.obj.mk>
 .include <bsd.subdir.mk>

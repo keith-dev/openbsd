@@ -1,4 +1,4 @@
-/*	$OpenBSD: ospfd.c,v 1.60 2009/01/07 21:16:36 claudio Exp $ */
+/*	$OpenBSD: ospfd.c,v 1.70 2009/06/06 07:31:26 eric Exp $ */
 
 /*
  * Copyright (c) 2005 Claudio Jeker <claudio@openbsd.org>
@@ -55,8 +55,6 @@ int		check_child(pid_t, const char *);
 void	main_dispatch_ospfe(int, short, void *);
 void	main_dispatch_rde(int, short, void *);
 
-void	ospf_redistribute_default(int);
-
 int	ospf_reload(void);
 int	ospf_sendboth(enum imsg_type, void *, u_int16_t);
 int	merge_interfaces(struct area *, struct area *);
@@ -67,8 +65,8 @@ int	pipe_parent2rde[2];
 int	pipe_ospfe2rde[2];
 
 struct ospfd_conf	*ospfd_conf = NULL;
-struct imsgbuf		*ibuf_ospfe;
-struct imsgbuf		*ibuf_rde;
+struct imsgev		*iev_ospfe;
+struct imsgev		*iev_rde;
 char			*conffile;
 
 pid_t			 ospfe_pid = 0;
@@ -118,7 +116,8 @@ usage(void)
 {
 	extern char *__progname;
 
-	fprintf(stderr, "usage: %s [-cdnv] [-D macro=value] [-f file]\n",
+	fprintf(stderr, "usage: %s [-cdnv] [-D macro=value]"
+	    " [-f file] [-s socket]\n",
 	    __progname);
 	exit(1);
 }
@@ -133,13 +132,15 @@ main(int argc, char *argv[])
 	int			 ipforwarding;
 	int			 mib[4];
 	size_t			 len;
+	char			*sockname;
 
 	conffile = CONF_FILE;
 	ospfd_process = PROC_MAIN;
+	sockname = OSPFD_SOCKET;
 
 	log_init(1);	/* log to stderr until daemonized */
 
-	while ((ch = getopt(argc, argv, "cdD:f:nv")) != -1) {
+	while ((ch = getopt(argc, argv, "cdD:f:ns:v")) != -1) {
 		switch (ch) {
 		case 'c':
 			opts |= OSPFD_OPT_FORCE_DEMOTE;
@@ -157,6 +158,9 @@ main(int argc, char *argv[])
 			break;
 		case 'n':
 			opts |= OSPFD_OPT_NOACTION;
+			break;
+		case 's':
+			sockname = optarg;
 			break;
 		case 'v':
 			if (opts & OSPFD_OPT_VERBOSE)
@@ -198,6 +202,7 @@ main(int argc, char *argv[])
 		kr_shutdown();
 		exit(1);
 	}
+	ospfd_conf->csock = sockname;
 
 	if (ospfd_conf->opts & OSPFD_OPT_NOACTION) {
 		if (ospfd_conf->opts & OSPFD_OPT_VERBOSE)
@@ -265,24 +270,27 @@ main(int argc, char *argv[])
 	close(pipe_ospfe2rde[0]);
 	close(pipe_ospfe2rde[1]);
 
-	if ((ibuf_ospfe = malloc(sizeof(struct imsgbuf))) == NULL ||
-	    (ibuf_rde = malloc(sizeof(struct imsgbuf))) == NULL)
+	if ((iev_ospfe = malloc(sizeof(struct imsgev))) == NULL ||
+	    (iev_rde = malloc(sizeof(struct imsgev))) == NULL)
 		fatal(NULL);
-	imsg_init(ibuf_ospfe, pipe_parent2ospfe[0], main_dispatch_ospfe);
-	imsg_init(ibuf_rde, pipe_parent2rde[0], main_dispatch_rde);
+	imsg_init(&iev_ospfe->ibuf, pipe_parent2ospfe[0]);
+	iev_ospfe->handler = main_dispatch_ospfe;
+	imsg_init(&iev_rde->ibuf, pipe_parent2rde[0]);
+	iev_rde->handler = main_dispatch_rde;
 
 	/* setup event handler */
-	ibuf_ospfe->events = EV_READ;
-	event_set(&ibuf_ospfe->ev, ibuf_ospfe->fd, ibuf_ospfe->events,
-	    ibuf_ospfe->handler, ibuf_ospfe);
-	event_add(&ibuf_ospfe->ev, NULL);
+	iev_ospfe->events = EV_READ;
+	event_set(&iev_ospfe->ev, iev_ospfe->ibuf.fd, iev_ospfe->events,
+	    iev_ospfe->handler, iev_ospfe);
+	event_add(&iev_ospfe->ev, NULL);
 
-	ibuf_rde->events = EV_READ;
-	event_set(&ibuf_rde->ev, ibuf_rde->fd, ibuf_rde->events,
-	    ibuf_rde->handler, ibuf_rde);
-	event_add(&ibuf_rde->ev, NULL);
+	iev_rde->events = EV_READ;
+	event_set(&iev_rde->ev, iev_rde->ibuf.fd, iev_rde->events,
+	    iev_rde->handler, iev_rde);
+	event_add(&iev_rde->ev, NULL);
 
-	if (kr_init(!(ospfd_conf->flags & OSPFD_FLAG_NO_FIB_UPDATE)) == -1)
+	if (kr_init(!(ospfd_conf->flags & OSPFD_FLAG_NO_FIB_UPDATE),
+	    ospfd_conf->rdomain) == -1)
 		fatalx("kr_init failed");
 
 	/* remove unneded stuff from config */
@@ -290,9 +298,6 @@ main(int argc, char *argv[])
 		LIST_REMOVE(a, entry);
 		area_del(a);
 	}
-
-	/* redistribute default */
-	ospf_redistribute_default(IMSG_NETWORK_ADD);
 
 	event_dispatch();
 
@@ -312,7 +317,7 @@ ospfd_shutdown(void)
 	if (rde_pid)
 		kill(rde_pid, SIGTERM);
 
-	control_cleanup();
+	control_cleanup(ospfd_conf->csock);
 	kr_shutdown();
 	carp_demote_shutdown();
 
@@ -322,10 +327,10 @@ ospfd_shutdown(void)
 			fatal("wait");
 	} while (pid != -1 || (pid == -1 && errno == EINTR));
 
-	msgbuf_clear(&ibuf_ospfe->w);
-	free(ibuf_ospfe);
-	msgbuf_clear(&ibuf_rde->w);
-	free(ibuf_rde);
+	msgbuf_clear(&iev_ospfe->ibuf.w);
+	free(iev_ospfe);
+	msgbuf_clear(&iev_rde->ibuf.w);
+	free(iev_rde);
 	free(ospfd_conf);
 
 	log_info("terminating");
@@ -357,26 +362,24 @@ check_child(pid_t pid, const char *pname)
 void
 main_dispatch_ospfe(int fd, short event, void *bula)
 {
-	struct imsgbuf		*ibuf = bula;
+	struct imsgev		*iev = bula;
+	struct imsgbuf		*ibuf;
 	struct imsg		 imsg;
 	struct demote_msg	 dmsg;
 	ssize_t			 n;
 	int			 shut = 0;
 
-	switch (event) {
-	case EV_READ:
+	ibuf = &iev->ibuf;
+
+	if (event & EV_READ) {
 		if ((n = imsg_read(ibuf)) == -1)
 			fatal("imsg_read error");
 		if (n == 0)	/* connection closed */
 			shut = 1;
-		break;
-	case EV_WRITE:
+	}
+	if (event & EV_WRITE) {
 		if (msgbuf_write(&ibuf->w) == -1)
 			fatal("msgbuf_write");
-		imsg_event_add(ibuf);
-		return;
-	default:
-		fatalx("unknown event");
 	}
 
 	for (;;) {
@@ -425,10 +428,10 @@ main_dispatch_ospfe(int fd, short event, void *bula)
 		imsg_free(&imsg);
 	}
 	if (!shut)
-		imsg_event_add(ibuf);
+		imsg_event_add(iev);
 	else {
 		/* this pipe is dead, so remove the event handler */
-		event_del(&ibuf->ev);
+		event_del(&iev->ev);
 		event_loopexit(NULL);
 	}
 }
@@ -437,25 +440,23 @@ main_dispatch_ospfe(int fd, short event, void *bula)
 void
 main_dispatch_rde(int fd, short event, void *bula)
 {
-	struct imsgbuf  *ibuf = bula;
+	struct imsgev	*iev = bula;
+	struct imsgbuf  *ibuf;
 	struct imsg	 imsg;
 	ssize_t		 n;
 	int		 count, shut = 0;
 
-	switch (event) {
-	case EV_READ:
+	ibuf = &iev->ibuf;
+
+	if (event & EV_READ) {
 		if ((n = imsg_read(ibuf)) == -1)
 			fatal("imsg_read error");
 		if (n == 0)	/* connection closed */
 			shut = 1;
-		break;
-	case EV_WRITE:
+	}
+	if (event & EV_WRITE) {
 		if (msgbuf_write(&ibuf->w) == -1)
 			fatal("msgbuf_write");
-		imsg_event_add(ibuf);
-		return;
-	default:
-		fatalx("unknown event");
 	}
 
 	for (;;) {
@@ -486,10 +487,10 @@ main_dispatch_rde(int fd, short event, void *bula)
 		imsg_free(&imsg);
 	}
 	if (!shut)
-		imsg_event_add(ibuf);
+		imsg_event_add(iev);
 	else {
 		/* this pipe is dead, so remove the event handler */
-		event_del(&ibuf->ev);
+		event_del(&iev->ev);
 		event_loopexit(NULL);
 	}
 }
@@ -497,36 +498,48 @@ main_dispatch_rde(int fd, short event, void *bula)
 void
 main_imsg_compose_ospfe(int type, pid_t pid, void *data, u_int16_t datalen)
 {
-	imsg_compose(ibuf_ospfe, type, 0, pid, data, datalen);
+	imsg_compose_event(iev_ospfe, type, 0, pid, -1, data, datalen);
 }
 
 void
 main_imsg_compose_rde(int type, pid_t pid, void *data, u_int16_t datalen)
 {
-	imsg_compose(ibuf_rde, type, 0, pid, data, datalen);
+	imsg_compose_event(iev_rde, type, 0, pid, -1, data, datalen);
 }
 
-/* this needs to be added here so that ospfctl can be used without libevent */
 void
-imsg_event_add(struct imsgbuf *ibuf)
+imsg_event_add(struct imsgev *iev)
 {
-	ibuf->events = EV_READ;
-	if (ibuf->w.queued)
-		ibuf->events |= EV_WRITE;
+	iev->events = EV_READ;
+	if (iev->ibuf.w.queued)
+		iev->events |= EV_WRITE;
 
-	event_del(&ibuf->ev);
-	event_set(&ibuf->ev, ibuf->fd, ibuf->events, ibuf->handler, ibuf);
-	event_add(&ibuf->ev, NULL);
+	event_del(&iev->ev);
+	event_set(&iev->ev, iev->ibuf.fd, iev->events, iev->handler, iev);
+	event_add(&iev->ev, NULL);
+}
+
+int
+imsg_compose_event(struct imsgev *iev, u_int16_t type, u_int32_t peerid,
+    pid_t pid, int fd, void *data, u_int16_t datalen)
+{
+	int	ret;
+
+	if ((ret = imsg_compose(&iev->ibuf, type, peerid,
+	    pid, fd, data, datalen)) != -1)
+		imsg_event_add(iev);
+	return (ret);
 }
 
 int
 ospf_redistribute(struct kroute *kr, u_int32_t *metric)
 {
 	struct redistribute	*r;
+	u_int8_t		 is_default = 0;
 
-	/* only allow 0.0.0.0/0 via REDISTRIBUTE_DEFAULT */
+	/* only allow 0.0.0.0/0 via REDIST_DEFAULT */
 	if (kr->prefix.s_addr == INADDR_ANY && kr->prefixlen == 0)
-		return (0);
+		is_default = 1;
 
 	SIMPLEQ_FOREACH(r, &ospfd_conf->redist_list, entry) {
 		switch (r->type & ~REDIST_NO) {
@@ -542,6 +555,8 @@ ospf_redistribute(struct kroute *kr, u_int32_t *metric)
 			 * so that link local addresses can be redistributed
 			 * via a rtlabel.
 			 */
+			if (is_default)
+				continue;
 			if (kr->flags & F_DYNAMIC)
 				continue;
 			if (kr->flags & F_STATIC) {
@@ -550,6 +565,8 @@ ospf_redistribute(struct kroute *kr, u_int32_t *metric)
 			}
 			break;
 		case REDIST_CONNECTED:
+			if (is_default)
+				continue;
 			if (kr->flags & F_DYNAMIC)
 				continue;
 			if (kr->flags & F_CONNECTED) {
@@ -560,6 +577,16 @@ ospf_redistribute(struct kroute *kr, u_int32_t *metric)
 		case REDIST_ADDR:
 			if (kr->flags & F_DYNAMIC)
 				continue;
+
+			if (r->addr.s_addr == INADDR_ANY &&
+			    r->mask.s_addr == INADDR_ANY) {
+				if (is_default) {
+					*metric = r->metric;
+					return (r->type & REDIST_NO? 0 : 1);
+				} else
+					return (0);
+			}
+
 			if ((kr->prefix.s_addr & r->mask.s_addr) ==
 			    (r->addr.s_addr & r->mask.s_addr) &&
 			    kr->prefixlen >= mask2prefixlen(r->mask.s_addr)) {
@@ -568,31 +595,15 @@ ospf_redistribute(struct kroute *kr, u_int32_t *metric)
 			}
 			break;
 		case REDIST_DEFAULT:
-			/* nothing to be done here */
+			if (is_default) {
+				*metric = r->metric;
+				return (r->type & REDIST_NO ? 0 : 1);
+			}
 			break;
 		}
 	}
 
 	return (0);
-}
-
-void
-ospf_redistribute_default(int type)
-{
-	struct rroute		 rr;
-	struct redistribute	*r;
-
-	SIMPLEQ_FOREACH(r, &ospfd_conf->redist_list, entry) {
-		if (r->type != REDIST_DEFAULT)
-			continue;
-		if (r->type == (REDIST_DEFAULT | REDIST_NO))
-			return;
-
-		bzero(&rr, sizeof(rr));
-		rr.metric = r->metric;
-		main_imsg_compose_rde(type, 0, &rr, sizeof(struct rroute));
-		return;
-	}
 }
 
 int
@@ -625,7 +636,7 @@ ospf_reload(void)
 				return (-1);
 			if (iface->auth_type == AUTH_CRYPT)
 				if (md_list_send(&iface->auth_md_list,
-				    ibuf_ospfe) == -1)
+				    iev_ospfe) == -1)
 					return (-1);
 		}
 	}
@@ -642,9 +653,9 @@ ospf_reload(void)
 int
 ospf_sendboth(enum imsg_type type, void *buf, u_int16_t len)
 {
-	if (imsg_compose(ibuf_ospfe, type, 0, 0, buf, len) == -1)
+	if (imsg_compose_event(iev_ospfe, type, 0, 0, -1, buf, len) == -1)
 		return (-1);
-	if (imsg_compose(ibuf_rde, type, 0, 0, buf, len) == -1)
+	if (imsg_compose_event(iev_rde, type, 0, 0, -1, buf, len) == -1)
 		return (-1);
 	return (0);
 }
@@ -792,7 +803,7 @@ merge_interfaces(struct area *a, struct area *xa)
 	for (i = LIST_FIRST(&a->iface_list); i != NULL; i = ni) {
 		ni = LIST_NEXT(i, entry);
 		if (iface_lookup(xa, i) == NULL) {
-			log_debug("merge_config: proc %d area %s removing "
+			log_debug("merge_interfaces: proc %d area %s removing "
 			    "interface %s", ospfd_process, inet_ntoa(a->id),
 			    i->name);
 			if (ospfd_process == PROC_OSPF_ENGINE)
@@ -806,7 +817,7 @@ merge_interfaces(struct area *a, struct area *xa)
 		ni = LIST_NEXT(xi, entry);
 		if ((i = iface_lookup(a, xi)) == NULL) {
 			/* new interface but delay initialisation */
-			log_debug("merge_config: proc %d area %s adding "
+			log_debug("merge_interfaces: proc %d area %s adding "
 			    "interface %s", ospfd_process, inet_ntoa(a->id),
 			    xi->name);
 			LIST_REMOVE(xi, entry);
@@ -816,8 +827,8 @@ merge_interfaces(struct area *a, struct area *xa)
 				xi->state = IF_STA_NEW;
 			continue;
 		}
-		log_debug("merge_config: proc %d area %s merging interface %s",
-		    ospfd_process, inet_ntoa(a->id), i->name);
+		log_debug("merge_interfaces: proc %d area %s merging "
+		    "interface %s", ospfd_process, inet_ntoa(a->id), i->name);
 		i->addr = xi->addr;
 		i->dst = xi->dst;
 		i->mask = xi->mask;

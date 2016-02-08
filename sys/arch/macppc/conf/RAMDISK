@@ -1,4 +1,4 @@
-#	$OpenBSD: RAMDISK,v 1.85 2009/02/10 19:06:40 damien Exp $
+#	$OpenBSD: RAMDISK,v 1.89 2009/06/24 11:38:40 deraadt Exp $
 #
 # PPC GENERIC config file
 #
@@ -26,6 +26,7 @@ option		MSDOSFS		# MS-DOS file system
 option		INET		# IP + ICMP + TCP + UDP
 option		INET6		# IPv6 (needs INET)
 option		DDB		# kernel debugger
+option		CRYPTO		# Cryptographic framework
 
 config		bsd	root on rd0a swap on rd0b
 
@@ -62,7 +63,6 @@ pcscp*		at pci?		# AMD Am53c974 PCscsi-PCI SCSI
 isp*		at pci?		# Qlogic ISP [12]0x0 SCSI/FibreChannel
 mpi*		at pci?		# LSI Logic MPT-Fusion Message Passing Interface
 arc*		at pci?		# Areca RAID Controllers
-option		ISP_COMPILE_FW
 pciide*		at pci?
 kauaiata*	at pci?		# Apple ATA 100
 wdc*		at kauaiata?
@@ -195,6 +195,7 @@ udav*		at uhub?		# Davicom DM9601 based Ethernet
 mos*		at uhub?		# MOSCHIP MCS7730/7830 10/100 Ethernet
 ural*		at uhub?		# Ralink RT2500
 rum*		at uhub?		# Ralink RT2501USB/RT2601USB
+zyd*		at uhub?		# Zydas ZD1211
 url*		at uhub?		# Realtek RTL8150L based adapters
 wi*		at uhub?		# WaveLAN IEEE 802.11DS
 #uscanner*	at uhub?		# USB Scanner driver
@@ -230,6 +231,7 @@ cd*		at scsibus?
 
 pseudo-device	loop	1	# network loopback
 pseudo-device	bpfilter 1	# packet filter
+pseudo-device	vlan		# IEEE 802.1Q VLAN 
 pseudo-device	rd	1	# ram disk
 pseudo-device	wsmux	2	# mouse & keyboard multiplexor
 pseudo-device	bio	1	# ioctl multiplexing device

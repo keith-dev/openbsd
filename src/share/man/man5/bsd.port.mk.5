@@ -1,4 +1,4 @@
-.\" $OpenBSD: bsd.port.mk.5,v 1.226 2009/01/24 11:41:26 espie Exp $
+.\" $OpenBSD: bsd.port.mk.5,v 1.232 2009/07/02 17:45:38 jakemsr Exp $
 .\"
 .\" Copyright (c) 2000-2008 Marc Espie
 .\"
@@ -24,7 +24,7 @@
 .\" (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
 .\" THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 .\"
-.Dd $Mdocdate: January 24 2009 $
+.Dd $Mdocdate: July 2 2009 $
 .Dt BSD.PORT.MK 5
 .Os
 .Sh NAME
@@ -804,7 +804,7 @@ See also
 .Ev COPTS ,
 .Ev CDIAGFLAGS .
 .It Ev CHECK_LIB_DEPENDS
-Use settings.
+User settings.
 If set to
 .Sq Yes ,
 every package build will verify that shared libraries are correctly
@@ -1265,7 +1265,7 @@ List of all files that need to be retrieved by
 .Ar fetch-all ,
 with
 .Ev DIST_SUBDIR
-prepende and with master site selection extension removed.
+prepended and with master site selection extension removed.
 Read-only.
 See also
 .Ev CHECKSUMFILES .
@@ -1596,7 +1596,9 @@ Empty by default.
 .It Ev REGRESS_IS_INTERACTIVE
 Set to
 .Sq Yes
-if port needs human interaction to run its tests.
+if port needs human interaction to run its tests, or set to
+.Sq X11
+if the tests need an active X11 display to work.
 .It Ev REGRESS_LOG
 Command used to log the results of regression tests to REGRESS_LOGFILE.
 .It Ev REGRESS_LOGFILE
@@ -1914,7 +1916,8 @@ Subdirectory of ${WRKDIR} where port normally installs (see
 .Ar fake
 target).
 .It Ev WRKOBJDIR
-If non empty, used as a base for the actual port working directory.
+Used as a base for the actual port working directory (default:
+${PORTSDIR}/obj).
 The real working directory ${WRKDIR} is created there.
 Can be set on a per-${PKGPATH} basis.
 For instance, setting WRKOBJDIR_www/mozilla=/tmp/obj
@@ -2434,9 +2437,11 @@ FLAVORS and MULTI_PACKAGES.
 The current MULTI_PACKAGES mechanism was introduced after
 .Ox 4.0 .
 .Pp
-If a port can be compiled with several options, set FLAVORS to the list of
-possible options in the Makefile.
-When building the port, set
+If a port can be compiled with several options, these options
+should be turned into FLAVORS.
+The port maintainer will set FLAVORS to be the list of possible options in
+the Makefile.
+When building the port, the package builder will set
 .Li "FLAVOR='option1 option2...'"
 to build a specific flavor of the port.
 The Makefile should test the value of FLAVOR as follows:
@@ -2452,12 +2457,13 @@ FLAVOR?=
 .Pp
 .Pa bsd.port.mk
 takes care of a few details, such as generating a distinct work directory for
-each flavor, or adding a dash separated list of options to the package
-name.
-The order in which FLAVOR is specified does not matter: the generated list,
-called the canonical package extension, matches the ordering of FLAVORS.
-Also, it is an error to specify an option in FLAVOR that does not appear
-in FLAVORS.
+each flavor, or creating a FULLPKGNAME by adding a dash separated list of
+flavors to the base package name.
+The order in which FLAVOR is specified does not matter: this dash separated
+list will be reordered to match the ordering of FLAVORS.
+.Pp
+It is an error to specify an option in FLAVOR that does not appear in FLAVORS,
+to prevent misspellings.
 .Pp
 In recursive package building, flavors can be specified as a comma
 separated list after the package directory, e.g., SUBDIR+=vim,no_x11.

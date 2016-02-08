@@ -1,4 +1,4 @@
-#	$OpenBSD: install.md,v 1.35 2009/01/15 17:53:57 todd Exp $
+#	$OpenBSD: install.md,v 1.45 2009/06/24 11:26:40 krw Exp $
 #
 #
 # Copyright (c) 1996 The NetBSD Foundation, Inc.
@@ -33,137 +33,186 @@
 #
 
 MDXAPERTURE=2
-ARCH=ARCH
+NCPU=$(sysctl -n hw.ncpufound)
+
+((NCPU > 1)) && { DEFAULTSETS="bsd bsd.rd bsd.mp" ; SANESETS="bsd bsd.mp" ; }
 
 md_installboot() {
 	local _disk=$1
 
-	[[ $disklabeltype == MBR ]] || return
+	cd /mnt
+	if [[ -f bsd.mp ]] && ((NCPU > 1)); then
+		echo "Multiprocessor machine; using bsd.mp instead of bsd."
+		mv bsd bsd.sp 2>/dev/null
+		mv bsd.mp bsd
+	fi
 
-	echo -n "Copying 'ofwboot' to the boot partition (${_disk}i)..."
+	[[ $PARTTABLE == MBR ]] || return
+
 	if mount -t msdos /dev/${_disk}i /mnt2 ; then
 		if cp /usr/mdec/ofwboot /mnt2; then
 			umount /mnt2
-			echo "done."
 			return
 		fi
 	fi
 
-	echo "FAILED.\nYou will not be able to boot OpenBSD from $_disk."
+	echo "Failed to install bootblocks."
+	echo "You will not be able to boot OpenBSD from $_disk."
 	exit
 }
 
-md_prep_disk() {
-	local _disk=$1 _resp
-	typeset -l _resp
+md_has_hfs () {
+	pdisk -l /dev/$1c 2>&1 | grep -q "^Partition map "
+}
 
-	cat <<__EOT
-
-$_disk must be partitioned using an HFS or an MBR partition table.
-
-HFS partition tables are created with MacOS. Existing partitions in the HFS
-partition table can be modified by OpenBSD for use by OpenBSD.
-
-MBR partition tables are created with OpenBSD. MacOS *cannot* be booted from a
-disk partitioned with an MBR partition table.
-
-__EOT
-
-	while :; do
-		ask "Use HFS or MBR partition table?" HFS
-		_resp=$resp
-		case $_resp in
-		m|mbr)	export disklabeltype=MBR
-			md_prep_MBR $_disk || continue
-			disklabel $_disk 2>/dev/null | grep -q "^  i:" || \
-				disklabel -w -d $_disk
-			newfs -t msdos ${_disk}i
-			break
-			;;
-		h|hfs)	export disklabeltype=HFS
-			md_prep_HFS $_disk
-			break
-			;;
-		esac
-	done
+md_has_hfs_openbsd () {
+	pdisk -l /dev/$1c 2>&1 | grep -q " OpenBSD OpenBSD "
 }
 
 md_prep_MBR() {
-	local _disk=$1
+	local _disk=$1 _q _d
 
-	if [[ -n $(disklabel -c $_disk 2>/dev/null | grep ' HFS ') ]]; then
+	if md_has_hfs $_disk; then
 		cat <<__EOT
 
 WARNING: putting an MBR partition table on $_disk will DESTROY the existing HFS
-         partitions and HFS partition table.
+         partitions and HFS partition table:
+$(pdisk -l /dev/${_disk}c)
 
 __EOT
 		ask_yn "Are you *sure* you want an MBR partition table on $_disk?"
-		[[ $resp == n ]] && exit
+		[[ $resp == n ]] && return 1
 	fi
 
-	ask_yn "Use *all* of $_disk for OpenBSD?"
-	if [[ $resp == y ]]; then
-		echo -n "Creating Master Boot Record (MBR)..."
-		fdisk -e $_disk  >/dev/null 2>&1 <<__EOT
+	while :; do
+		_d=whole
+		if fdisk $_disk | grep -q 'Signature: 0xAA55'; then
+			fdisk $_disk
+			if fdisk $_disk | grep -q '^..: A6 '; then
+				_q=", use the (O)penBSD area,"
+				_d=OpenBSD
+			fi
+		else
+			echo "MBR has invalid signature; not showing it."
+		fi
+		ask "Use (W)hole disk$_q or (E)dit the MBR?" "$_d"
+		case $resp in
+		w*|W*)
+			echo -n "Creating a 1MB DOS partition and an OpenBSD partition for rest of $_disk..."
+			fdisk -e $_disk <<__EOT >/dev/null
 reinit
 update
 write
 quit
 __EOT
-		echo "done."
-	else
-		fdisk $_disk ; fdisk -e $_disk
-		fdisk $_disk | grep -q "^..: 06 " || \
-			{ echo "No DOS (id 06) partition" ; return 1 ; }
-		fdisk $_disk | grep -q "^..: A6 " || \
-			{ echo "No OpenBSD (id A6) partition" ; return 1 ; }
-	fi
+			echo "done."
+			break ;;
+		e*|E*)
+			# Manually configure the MBR.
+			cat <<__EOT
 
-	return 0
+You will now create one MBR partition to contain your OpenBSD data
+and one MBR partition to contain the program that Open Firmware uses
+to boot OpenBSD. Neither partition will overlap any other partition.
+
+The OpenBSD MBR partition will have an id of 'A6' and the boot MBR
+partition will have an id of '06' (DOS). The boot partition will be
+at least 1MB and be marked as the *only* active partition.
+
+$(fdisk $_disk)
+__EOT
+			fdisk -e $_disk
+			fdisk $_disk | grep -q '^..: 06 ' || \
+				{ echo "\nNo DOS (id 06) partition!\n" ; continue ; }
+			fdisk $_disk | grep -q '^\*.: 06 ' || \
+				{ echo "\nNo active DOS partition!\n" ; continue ; }
+			fdisk $_disk | grep -q "^..: A6 " || \
+				{ echo "\nNo OpenBSD (id A6) partition!\n" ; continue ; }
+			break ;;
+		o*|O*)	break ;;
+		esac
+	done
+
+	disklabel $_disk 2>/dev/null | grep -q "^  i:" || disklabel -w -d $_disk
+	newfs -t msdos ${_disk}i
 }
 
 md_prep_HFS() {
-	local _disk=$1
+	local _disk=$1 _d _q
+	
+	while :; do
+		_q=
+		_d=Modify
+		md_has_hfs_openbsd $_disk && \
+			{ _q="Use the (O)penBSD partition, " ; _d=OpenBSD ; }
+		pdisk -l /dev/${_disk}c
+		ask "$_q(M)odify a partition or (A)bort?" "$_d"
+		case $resp in
+		a*|A*)	return 1 ;;
+		o*|O*)	return 0 ;;
+		m*|M*)	pdisk /dev/${_disk}c
+			md_has_hfs_openbsd $_disk && break
+			echo "\nNo 'OpenBSD'-type partition named 'OpenBSD'!"
+		esac
+	done
 
-	cat <<__EOT
-
-You must modify an existing partition to be of type "OpenBSD" and have the name
-"OpenBSD". If the partition does not exist you must create it with the Apple
-MacOS tools before attempting to install OpenBSD.
-
-__EOT
-
-	pdisk /dev/${_disk}c
+	return 0;
 }
 
 md_prep_disklabel() {
-	local _disk=$1 _q
+	local _disk=$1 _f _op
 
-	md_prep_disk $_disk
-
-	case $disklabeltype in
-	HFS)	;;
-	MBR)	cat <<__EOT
-
-You *MUST* setup the OpenBSD disklabel to include the MSDOS-formatted boot
-partition as the 'i' partition. If the 'i' partition is missing or not the
-MSDOS-formatted boot partition, then the 'ofwboot' file required to boot
-OpenBSD cannot be installed.
-
-__EOT
-		;;
-	*)	echo "Disk label type ('$disklabeltype') is not 'HFS' or 'MBR'."
-		exit
-		;;
-	esac
+	PARTTABLE=
+	while [[ -z $PARTTABLE ]]; do
+		resp=MBR
+		md_has_hfs $_disk && ask "Use HFS or MBR partition table?" HFS
+		case $resp in
+		m|mbr|M|MBR)
+			md_prep_MBR $_disk || continue
+			PARTTABLE=MBR
+			;;
+		h|hfs|H|HFS)
+			md_prep_HFS $_disk || continue
+			PARTTABLE=HFS
+			;;
+		esac
+	done
 
 	disklabel -W $_disk >/dev/null 2>&1
-	disklabel -c -f /tmp/fstab.$_disk -E $_disk
+	_f=/tmp/fstab.$_disk
+	if [[ $_disk == $ROOTDISK ]]; then
+		while :; do
+			echo "The auto-allocated layout for $_disk is:"
+			disklabel -h -A $_disk | egrep "^#  |^  [a-p]:"
+			ask "Use (A)uto layout, (E)dit auto layout, or create (C)ustom layout?" a
+			case $resp in
+			a*|A*)	_op=-w ; AUTOROOT=y ;;
+			e*|E*)	_op=-E ;;
+			c*|C*)	break ;;
+			*)	continue ;;
+			esac
+			disklabel -f $_f $_op -A $_disk
+			return
+		done
+	fi
+
+	cat <<__EOT
+
+You will now create an OpenBSD disklabel inside the OpenBSD $PARTTABLE
+partition. The disklabel defines how OpenBSD splits up the $PARTTABLE partition
+into OpenBSD partitions in which filesystems and swap space are created.
+You must provide each filesystem's mountpoint in this program.
+
+The offsets used in the disklabel are ABSOLUTE, i.e. relative to the
+start of the disk, NOT the start of the OpenBSD $PARTTABLE partition.
+
+__EOT
+
+	disklabel -f $_f -E $_disk
 }
 
 md_congrats() {
-	if [[ $disklabeltype == HFS ]]; then
+	if [[ $PARTTABLE == HFS ]]; then
 		cat <<__EOT
 
 To boot OpenBSD, the 'ofwboot' program must be present in the first HFS

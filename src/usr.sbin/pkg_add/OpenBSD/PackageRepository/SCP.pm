@@ -1,5 +1,5 @@
 # ex:ts=8 sw=4:
-# $OpenBSD: SCP.pm,v 1.17 2008/06/27 10:57:27 espie Exp $
+# $OpenBSD: SCP.pm,v 1.19 2009/06/06 10:13:29 espie Exp $
 #
 # Copyright (c) 2003-2006 Marc Espie <espie@openbsd.org>
 #
@@ -45,7 +45,7 @@ sub initiate
 	$self->{cmdfh} = $wrfh;
 	$self->{getfh} = $rdfh;
 	$wrfh->autoflush(1);
-	local $_;
+	my $_;
 
 	while(<DATA>) {
 		# compress script a bit
@@ -54,6 +54,7 @@ sub initiate
 		next if m/^$/o;
 		print $wrfh $_;
 	}
+	seek(DATA, 0, 0);
 }
 	
 	
@@ -72,7 +73,7 @@ sub grab_object
 	my $getfh = $self->{getfh};
 
 	print $cmdfh "ABORT\n";
-	local $_;
+	my $_;
 	while (<$getfh>) {
 		last if m/^ABORTED/o;
 	}
@@ -132,7 +133,7 @@ sub list
 		my $path = $self->{path};
 		my $l = [];
 		print $cmdfh "LIST $path\n";
-		local $_;
+		my $_;
 		$_ = <$getfh>;
 		if (!defined $_) {
 			die "Could not initiate SSH session\n";

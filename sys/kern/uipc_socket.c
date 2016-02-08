@@ -1,4 +1,4 @@
-/*	$OpenBSD: uipc_socket.c,v 1.75 2009/02/22 07:47:22 otto Exp $	*/
+/*	$OpenBSD: uipc_socket.c,v 1.77 2009/06/05 00:05:21 claudio Exp $	*/
 /*	$NetBSD: uipc_socket.c,v 1.21 1996/02/04 02:17:52 christos Exp $	*/
 
 /*
@@ -46,6 +46,7 @@
 #include <sys/socketvar.h>
 #include <sys/signalvar.h>
 #include <sys/resourcevar.h>
+#include <net/route.h>
 #include <sys/pool.h>
 
 void 	filt_sordetach(struct knote *kn);
@@ -175,7 +176,7 @@ solisten(struct socket *so, int backlog)
 void
 sofree(struct socket *so)
 {
-	splassert(IPL_SOFTNET);
+	splsoftassert(IPL_SOFTNET);
 
 	if (so->so_pcb || (so->so_state & SS_NOFDREF) == 0)
 		return;
@@ -258,7 +259,7 @@ discard:
 int
 soabort(struct socket *so)
 {
-	splassert(IPL_SOFTNET);
+	splsoftassert(IPL_SOFTNET);
 
 	return (*so->so_proto->pr_usrreq)(so, PRU_ABORT, NULL, NULL, NULL,
 	   curproc);
@@ -986,6 +987,7 @@ sosetopt(struct socket *so, int level, int optname, struct mbuf *m0)
 	} else {
 		switch (optname) {
 		case SO_BINDANY:
+		case SO_RDOMAIN:
 			if ((error = suser(curproc, 0)) != 0)	/* XXX */
 				goto bad;
 			break;

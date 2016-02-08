@@ -1,4 +1,4 @@
-/*	$OpenBSD: aucat.c,v 1.58 2009/02/06 08:26:34 ratchov Exp $	*/
+/*	$OpenBSD: aucat.c,v 1.60 2009/04/27 18:09:34 ratchov Exp $	*/
 /*
  * Copyright (c) 2008 Alexandre Ratchov <alex@caoua.org>
  *
@@ -113,7 +113,7 @@ usage(void)
 	extern char *__progname;
 
 	fprintf(stderr,
-	    "usage: %s [-lnu] [-b nsamples] [-C min:max] [-c min:max] [-e enc] "
+	    "usage: %s [-lnu] [-b nframes] [-C min:max] [-c min:max] [-e enc] "
 	    "[-f device]\n"
 	    "\t[-h fmt] [-i file] [-m mode] [-o file] [-r rate] [-s socket]\n"
 	    "\t[-v volume] [-x policy]\n",
@@ -476,7 +476,7 @@ main(int argc, char **argv)
 	 */
 	if (l_flag && SLIST_EMPTY(&sfiles)) {
 		farg_add(&sfiles, &dopar, &dipar,
-		    MIDI_MAXCTL, HDR_RAW, XRUN_IGNORE, DEFAULT_SOCKET);
+		    volctl, HDR_RAW, XRUN_IGNORE, DEFAULT_SOCKET);
 	}
 
 	if (!u_flag) {

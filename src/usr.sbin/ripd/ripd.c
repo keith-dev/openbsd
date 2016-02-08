@@ -1,4 +1,4 @@
-/*	$OpenBSD: ripd.c,v 1.11 2008/12/17 14:19:39 michele Exp $ */
+/*	$OpenBSD: ripd.c,v 1.16 2009/06/06 08:20:55 eric Exp $ */
 
 /*
  * Copyright (c) 2006 Michele Marchetto <mydecay@openbeer.it>
@@ -54,15 +54,14 @@ void			 main_sig_handler(int, short, void *);
 void			 ripd_shutdown(void);
 void			 main_dispatch_ripe(int, short, void *);
 void			 main_dispatch_rde(int, short, void *);
-void			 ripd_redistribute_default(int);
 
 int			 pipe_parent2ripe[2];
 int			 pipe_parent2rde[2];
 int			 pipe_ripe2rde[2];
 
 struct ripd_conf	*conf = NULL;
-struct imsgbuf		*ibuf_ripe;
-struct imsgbuf		*ibuf_rde;
+struct imsgev		*iev_ripe;
+struct imsgev		*iev_rde;
 
 pid_t			 ripe_pid = 0;
 pid_t			 rde_pid = 0;
@@ -247,28 +246,27 @@ main(int argc, char *argv[])
 	close(pipe_ripe2rde[0]);
 	close(pipe_ripe2rde[1]);
 
-	if ((ibuf_ripe = malloc(sizeof(struct imsgbuf))) == NULL ||
-	    (ibuf_rde = malloc(sizeof(struct imsgbuf))) == NULL)
+	if ((iev_ripe = malloc(sizeof(struct imsgev))) == NULL ||
+	    (iev_rde = malloc(sizeof(struct imsgev))) == NULL)
 		fatal(NULL);
-	imsg_init(ibuf_ripe, pipe_parent2ripe[0], main_dispatch_ripe);
-	imsg_init(ibuf_rde, pipe_parent2rde[0], main_dispatch_rde);
+	imsg_init(&iev_ripe->ibuf, pipe_parent2ripe[0]);
+	iev_ripe->handler = main_dispatch_ripe;
+	imsg_init(&iev_rde->ibuf, pipe_parent2rde[0]);
+	iev_rde->handler = main_dispatch_rde;
 
 	/* setup event handler */
-	ibuf_ripe->events = EV_READ;
-	event_set(&ibuf_ripe->ev, ibuf_ripe->fd, ibuf_ripe->events,
-	    ibuf_ripe->handler, ibuf_ripe);
-	event_add(&ibuf_ripe->ev, NULL);
+	iev_ripe->events = EV_READ;
+	event_set(&iev_ripe->ev, iev_ripe->ibuf.fd, iev_ripe->events,
+	    iev_ripe->handler, iev_ripe);
+	event_add(&iev_ripe->ev, NULL);
 
-	ibuf_rde->events = EV_READ;
-	event_set(&ibuf_rde->ev, ibuf_rde->fd, ibuf_rde->events,
-	    ibuf_rde->handler, ibuf_rde);
-	event_add(&ibuf_rde->ev, NULL);
+	iev_rde->events = EV_READ;
+	event_set(&iev_rde->ev, iev_rde->ibuf.fd, iev_rde->events,
+	    iev_rde->handler, iev_rde);
+	event_add(&iev_rde->ev, NULL);
 
 	if (kr_init(!(conf->flags & RIPD_FLAG_NO_FIB_UPDATE)) == -1)
 		fatalx("kr_init failed");
-
-	/* redistribute default */
-	ripd_redistribute_default(IMSG_NETWORK_ADD);
 
 	event_dispatch();
 
@@ -303,10 +301,10 @@ ripd_shutdown(void)
 			fatal("wait");
 	} while (pid != -1 || (pid == -1 && errno == EINTR));
 
-	msgbuf_clear(&ibuf_ripe->w);
-	free(ibuf_ripe);
-	msgbuf_clear(&ibuf_rde->w);
-	free(ibuf_rde);
+	msgbuf_clear(&iev_ripe->ibuf.w);
+	free(iev_ripe);
+	msgbuf_clear(&iev_rde->ibuf.w);
+	free(iev_rde);
 	free(conf);
 
 	log_info("terminating");
@@ -338,26 +336,22 @@ check_child(pid_t pid, const char *pname)
 void
 main_dispatch_ripe(int fd, short event, void *bula)
 {
-	struct imsgbuf		*ibuf = bula;
+	struct imsgev		*iev = bula;
+	struct imsgbuf		*ibuf = &iev->ibuf;
 	struct imsg	 	 imsg;
 	struct demote_msg	 dmsg;
 	ssize_t		 	 n;
 	int		 	 shut = 0;
 
-	switch (event) {
-	case EV_READ:
+	if (event & EV_READ) {
 		if ((n = imsg_read(ibuf)) == -1)
 			fatal("imsg_read error");
 		if (n == 0)	/* connection closed */
 			shut = 1;
-		break;
-	case EV_WRITE:
+	}
+	if (event & EV_WRITE) {
 		if (msgbuf_write(&ibuf->w) == -1)
 			fatal("msgbuf_write");
-		imsg_event_add(ibuf);
-		return;
-	default:
-		fatalx("unknown event");
 	}
 
 	for (;;) {
@@ -403,10 +397,10 @@ main_dispatch_ripe(int fd, short event, void *bula)
 		imsg_free(&imsg);
 	}
 	if (!shut)
-		imsg_event_add(ibuf);
+		imsg_event_add(iev);
 	else {
 		/* this pipe is dead, so remove the event handler */  
-		event_del(&ibuf->ev);
+		event_del(&iev->ev);
 		event_loopexit(NULL);
 	}
 }
@@ -415,25 +409,21 @@ main_dispatch_ripe(int fd, short event, void *bula)
 void
 main_dispatch_rde(int fd, short event, void *bula)
 {
-	struct imsgbuf	*ibuf = bula;
+	struct imsgev	*iev = bula;
+	struct imsgbuf	*ibuf = &iev->ibuf;
 	struct imsg	 imsg;
 	ssize_t		 n;
 	int		 shut = 0;
 
-	switch (event) {
-	case EV_READ:
+	if (event & EV_READ) {
 		if ((n = imsg_read(ibuf)) == -1)
 			fatal("imsg_read error");
 		if (n == 0)	/* connection closed */
 			shut = 1;
-		break;
-	case EV_WRITE:
+	}
+	if (event & EV_WRITE) {
 		if (msgbuf_write(&ibuf->w) == -1)
 			fatal("msgbuf_write");
-		imsg_event_add(ibuf);
-		return;
-	default:
-		fatalx("unknown event");
 	}
 
 	for (;;) {
@@ -462,10 +452,10 @@ main_dispatch_rde(int fd, short event, void *bula)
 		imsg_free(&imsg);
 	}
 	if (!shut)
-		imsg_event_add(ibuf);
+		imsg_event_add(iev);
 	else {
 		/* this pipe is dead, so remove the event handler */  
-		event_del(&ibuf->ev);
+		event_del(&iev->ev);
 		event_loopexit(NULL);
 	}
 }
@@ -473,26 +463,27 @@ main_dispatch_rde(int fd, short event, void *bula)
 void
 main_imsg_compose_ripe(int type, pid_t pid, void *data, u_int16_t datalen)
 {
-	imsg_compose(ibuf_ripe, type, 0, pid, data, datalen);
+	imsg_compose_event(iev_ripe, type, 0, pid, -1, data, datalen);
 }
 
 void
 main_imsg_compose_rde(int type, pid_t pid, void *data, u_int16_t datalen)
 {
-	imsg_compose(ibuf_rde, type, 0, pid, data, datalen);
+	imsg_compose_event(iev_rde, type, 0, pid, -1, data, datalen);
 }
 
 int
 rip_redistribute(struct kroute *kr)
 {
 	struct redistribute	*r;
+	u_int8_t		 is_default = 0;
 
 	if (kr->flags & F_RIPD_INSERTED)
 		return (1);
 
-	/* only allow 0.0.0.0/0 via REDISTRIBUTE_DEFAULT */
+	/* only allow 0.0.0.0/0 via REDIST_DEFAULT */
 	if (kr->prefix.s_addr == INADDR_ANY && kr->netmask.s_addr == INADDR_ANY)
-		return (0);
+		is_default = 1;
 
 	SIMPLEQ_FOREACH(r, &conf->redist_list, entry) {
 		switch (r->type & ~REDIST_NO) {
@@ -506,12 +497,16 @@ rip_redistribute(struct kroute *kr)
 			 * so that link local addresses can be redistributed
 			 * via a rtlabel.
 			 */
+			if (is_default)
+				continue;
 			if (kr->flags & F_DYNAMIC)
 				continue;
 			if (kr->flags & F_STATIC)
 				return (r->type & REDIST_NO ? 0 : 1);
 			break;
 		case REDIST_CONNECTED:
+			if (is_default)
+				continue;
 			if (kr->flags & F_DYNAMIC)
 				continue;
 			if (kr->flags & F_CONNECTED)
@@ -520,10 +515,23 @@ rip_redistribute(struct kroute *kr)
 		case REDIST_ADDR:
 			if (kr->flags & F_DYNAMIC)
 				continue;
+
+			if (r->addr.s_addr == INADDR_ANY &&
+			    r->mask.s_addr == INADDR_ANY) {
+				if (is_default)
+					return (r->type & REDIST_NO? 0 : 1);
+				else
+					return (0);
+			}
+
 			if ((kr->prefix.s_addr & r->mask.s_addr) ==
 			    (r->addr.s_addr & r->mask.s_addr) &&
 			    (kr->netmask.s_addr & r->mask.s_addr) ==
 			    r->mask.s_addr)
+				return (r->type & REDIST_NO? 0 : 1);
+			break;
+		case REDIST_DEFAULT:
+			if (is_default)
 				return (r->type & REDIST_NO? 0 : 1);
 			break;
 		}
@@ -533,27 +541,30 @@ rip_redistribute(struct kroute *kr)
 }
 
 void
-ripd_redistribute_default(int type)
+imsg_event_add(struct imsgev *iev)
 {
-	struct kroute	kr;
-
-	if (!(conf->redistribute & REDISTRIBUTE_DEFAULT))
-		return;
-
-	bzero(&kr, sizeof(kr));
-	kr.metric = 1;	/* default metric */
-	main_imsg_compose_rde(type, 0, &kr, sizeof(struct kroute));
+        if (iev->handler == NULL) {
+                imsg_flush(&iev->ibuf);
+                return;
+        }
+        
+        iev->events = EV_READ;
+        if (iev->ibuf.w.queued)
+                iev->events |= EV_WRITE;
+                        
+        event_del(&iev->ev);
+        event_set(&iev->ev, iev->ibuf.fd, iev->events, iev->handler, iev);
+        event_add(&iev->ev, NULL);   
 }
-
-/* this needs to be added here so that ripctl can be used without libevent */
-void
-imsg_event_add(struct imsgbuf *ibuf)
+                         
+int
+imsg_compose_event(struct imsgev *iev, u_int16_t type,
+    u_int32_t peerid, pid_t pid, int fd, void *data, u_int16_t datalen)
 {
-	ibuf->events = EV_READ;
-	if (ibuf->w.queued)
-		ibuf->events |= EV_WRITE;
-
-	event_del(&ibuf->ev);
-	event_set(&ibuf->ev, ibuf->fd, ibuf->events, ibuf->handler, ibuf);
-	event_add(&ibuf->ev, NULL);
+        int     ret;
+                            
+        if ((ret = imsg_compose(&iev->ibuf, type, peerid,
+            pid, fd, data, datalen)) != -1)
+                imsg_event_add(iev);
+        return (ret);
 }

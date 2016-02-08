@@ -1,4 +1,4 @@
-/*	$OpenBSD: umsm.c,v 1.44 2009/02/24 13:23:03 yuo Exp $	*/
+/*	$OpenBSD: umsm.c,v 1.47 2009/05/24 08:30:32 sthen Exp $	*/
 
 /*
  * Copyright (c) 2008 Yojiro UO <yuo@nui.org>
@@ -52,6 +52,7 @@ int     umsmdebug = 0;
 #define UMSMBUFSZ	4096
 #define	UMSM_INTR_INTERVAL	100	/* ms */
 #define E220_MODE_CHANGE_REQUEST 0x2
+#define TRUINSTALL_CHANGEMODE_REQUEST 0x0b
 
 int umsm_match(struct device *, void *, void *); 
 void umsm_attach(struct device *, struct device *, void *); 
@@ -86,6 +87,7 @@ struct umsm_softc {
 };
 
 usbd_status umsm_huawei_changemode(usbd_device_handle);
+usbd_status umsm_truinstall_changemode(usbd_device_handle);
 usbd_status umsm_umass_changemode(struct umsm_softc *);
 
 struct ucom_methods umsm_methods = {
@@ -105,9 +107,11 @@ struct umsm_type {
 /* device type */
 #define	DEV_NORMAL	0x0000
 #define	DEV_HUAWEI	0x0001
+#define DEV_TRUINSTALL	0x0002
 #define	DEV_UMASS1	0x0010
 #define	DEV_UMASS2	0x0020
-#define DEV_UMASS	(DEV_UMASS1 | DEV_UMASS2)
+#define	DEV_UMASS3	0x0040
+#define DEV_UMASS	(DEV_UMASS1 | DEV_UMASS2 | DEV_UMASS3)
 };
  
 static const struct umsm_type umsm_devs[] = {
@@ -123,6 +127,11 @@ static const struct umsm_type umsm_devs[] = {
 	{{ USB_VENDOR_HUAWEI,	USB_PRODUCT_HUAWEI_E220 }, DEV_HUAWEI},
 	{{ USB_VENDOR_HUAWEI,	USB_PRODUCT_HUAWEI_E510 }, DEV_HUAWEI},
 	{{ USB_VENDOR_HUAWEI,	USB_PRODUCT_HUAWEI_E618 }, DEV_HUAWEI},
+	
+	{{ USB_VENDOR_HYUNDAI,	USB_PRODUCT_HYUNDAI_UM175 }, 0},
+	
+	{{ USB_VENDOR_LONGCHEER, USB_PRODUCT_LONGCHEER_D21LCMASS }, DEV_UMASS3},
+	{{ USB_VENDOR_LONGCHEER, USB_PRODUCT_LONGCHEER_D21LC }, 0},
 
 	{{ USB_VENDOR_KYOCERA2,	USB_PRODUCT_KYOCERA2_KPC650 }, 0},
 
@@ -186,7 +195,7 @@ static const struct umsm_type umsm_devs[] = {
 	{{ USB_VENDOR_SIERRA, USB_PRODUCT_SIERRA_AC880U }, 0},
 	{{ USB_VENDOR_SIERRA, USB_PRODUCT_SIERRA_AC881U }, 0},
 	{{ USB_VENDOR_SIERRA, USB_PRODUCT_SIERRA_AC885U }, 0},
-	{{ USB_VENDOR_SIERRA, USB_PRODUCT_SIERRA_TRUINSTALL }, DEV_UMASS1},
+	{{ USB_VENDOR_SIERRA, USB_PRODUCT_SIERRA_TRUINSTALL }, DEV_TRUINSTALL},
 
 	{{ USB_VENDOR_HP, USB_PRODUCT_HP_HS2300 }, 0},
 
@@ -237,9 +246,11 @@ umsm_match(struct device *parent, void *match, void *aux)
 					return UMATCH_VENDOR_IFACESUBCLASS;
 				else
 					return UMATCH_NONE;
-			} else if (flag & DEV_UMASS)
+			} else if (flag & DEV_UMASS) {
 				return UMATCH_VENDOR_IFACESUBCLASS;
-			else
+			} else if (flag & DEV_TRUINSTALL) {
+				return UMATCH_VENDOR_IFACESUBCLASS;
+			} else
 				return UMATCH_NONE;
 		} else
 			return UMATCH_VENDOR_IFACESUBCLASS;
@@ -277,6 +288,11 @@ umsm_attach(struct device *parent, struct device *self, void *aux)
 		if ((sc->sc_flag & DEV_HUAWEI) && uaa->ifaceno == 0) {
                         umsm_huawei_changemode(uaa->device);
 			printf("%s: umass only mode. need to reattach\n", 
+				sc->sc_dev.dv_xname);
+		} else if ((sc->sc_flag & DEV_TRUINSTALL) &&
+			    uaa->ifaceno == 0) {
+			umsm_truinstall_changemode(uaa->device);
+			printf("%s: truinstall mode. need to reattach\n", 
 				sc->sc_dev.dv_xname);
 		} else if ((sc->sc_flag & DEV_UMASS) && uaa->ifaceno == 0) {
 			umsm_umass_changemode(sc);
@@ -568,6 +584,24 @@ umsm_huawei_changemode(usbd_device_handle dev)
 }
 
 usbd_status
+umsm_truinstall_changemode(usbd_device_handle dev)
+{
+	usb_device_request_t req;
+	usbd_status err;
+	req.bmRequestType = UT_WRITE_VENDOR_DEVICE;
+	req.bRequest = TRUINSTALL_CHANGEMODE_REQUEST;
+	USETW(req.wValue, 0x1);
+	USETW(req.wIndex, 0);
+	USETW(req.wLength, 0);
+
+	err = usbd_do_request(dev, &req, 0);
+	if (err) 
+		return (EIO);
+
+	return (0);
+}
+
+usbd_status
 umsm_umass_changemode(struct umsm_softc *sc) 
 {
 #define UMASS_CMD_REZERO_UNIT	0x01
@@ -588,17 +622,29 @@ umsm_umass_changemode(struct umsm_softc *sc)
 	cbw.bCBWLUN   = 0;
 	cbw.bCDBLength= 6; 
 	bzero(cbw.CBWCDB, sizeof(cbw.CBWCDB));
-	cbw.CBWCDB[0] = UMASS_CMD_REZERO_UNIT;
-	cbw.CBWCDB[1] = 0x0;	/* target LUN: 0 */
 
 	switch (sc->sc_flag) {
 	case DEV_UMASS1:
 		USETDW(cbw.dCBWDataTransferLength, 0x0); 
 		cbw.bCBWFlags = CBWFLAGS_OUT;
+		cbw.CBWCDB[0] = UMASS_CMD_REZERO_UNIT;
+		cbw.CBWCDB[1] = 0x0;	/* target LUN: 0 */
 		break;
 	case DEV_UMASS2:
 		USETDW(cbw.dCBWDataTransferLength, 0x1); 
 		cbw.bCBWFlags = CBWFLAGS_IN;
+		cbw.CBWCDB[0] = UMASS_CMD_REZERO_UNIT;
+		cbw.CBWCDB[1] = 0x0;	/* target LUN: 0 */
+		break;
+	case DEV_UMASS3: /* longcheer */
+		USETDW(cbw.dCBWDataTransferLength, 0x80); 
+		cbw.bCBWFlags = CBWFLAGS_IN;
+		cbw.CBWCDB[0] = 0x06;
+		cbw.CBWCDB[1] = 0xf5;
+		cbw.CBWCDB[2] = 0x04;
+		cbw.CBWCDB[3] = 0x02;
+		cbw.CBWCDB[4] = 0x52;
+		cbw.CBWCDB[5] = 0x70;
 		break;
 	default:
 		DPRINTF(("%s: unknown device type.\n", sc->sc_dev.dv_xname));

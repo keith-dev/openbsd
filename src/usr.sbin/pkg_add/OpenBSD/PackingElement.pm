@@ -1,5 +1,5 @@
 # ex:ts=8 sw=4:
-# $OpenBSD: PackingElement.pm,v 1.152 2008/10/28 09:51:58 espie Exp $
+# $OpenBSD: PackingElement.pm,v 1.156 2009/04/19 14:58:32 espie Exp $
 #
 # Copyright (c) 2003-2007 Marc Espie <espie@openbsd.org>
 #
@@ -130,10 +130,21 @@ sub fullstring
 	}
 }
 
-sub stringize
+sub name
 {
 	my $self = shift;
 	return $self->{name};
+}
+
+sub set_name
+{
+	my ($self, $v) = @_;
+	$self->{name} = $v;
+}
+sub stringize
+{
+	my $self = shift;
+	return $self->name;
 }
 
 sub IsFile() { 0 }
@@ -176,10 +187,10 @@ sub compute_fullname
 	my ($self, $state, $absolute_okay) = @_;
 
 	$self->{cwd} = $state->{cwd};
-	$self->{name} = File::Spec->canonpath($self->{name});
-	if ($self->{name} =~ m|^/|) {
+	$self->set_name(File::Spec->canonpath($self->name));
+	if ($self->name =~ m|^/|) {
 		unless ($absolute_okay) {
-			die "Absolute name forbidden: ", $self->{name};
+			die "Absolute name forbidden: ", $self->name;
 		}
 	}
 }
@@ -187,7 +198,7 @@ sub compute_fullname
 sub fullname
 {
 	my $self = $_[0];
-	my $fullname = $self->{name};
+	my $fullname = $self->name;
 	if ($fullname !~ m|^/|o && $self->cwd ne '.') {
 		$fullname = $self->cwd."/".$fullname;
 	}
@@ -306,7 +317,7 @@ our @ISA=qw(OpenBSD::PackingElement::Meta);
 sub signature
 {
 	my ($self, $hash) = @_;
-	$hash->{$self->{name}} = 1;
+	$hash->{$self->name} = 1;
 }
 
 # Abstract class for all file-like elements
@@ -374,6 +385,31 @@ sub make_hardlink
 {
 	my ($self, $linkname) = @_;
 	$self->{link} = $linkname;
+}
+
+sub may_check_digest
+{
+	my ($self, $file, $state) = @_;
+	if ($state->{check_digest}) {
+		$self->check_digest($file, $state);
+	}
+}
+
+sub check_digest
+{
+	my ($self, $file, $state) = @_;
+	return if $self->{link} or $self->{symlink};
+	if (!defined $self->{d}) {
+		$state->fatal($self->fullname, " does not have a signature");
+	}
+	my $d = $self->compute_digest($file->{destdir}.$file->name);
+	if (!$d->equals($self->{d})) {
+		$state->fatal("checksum for ", $self->fullname, 
+		    " does not match");
+	}
+	if ($state->{very_verbose}) {
+		print "Checksum match for ", $self->fullname, "\n";
+	}
 }
 
 sub IsFile() { 1 }
@@ -466,13 +502,13 @@ sub register_manpage
 sub is_source
 {
 	my $self = shift;
-	return $self->{name} =~ m/man\/man[^\/]+\/[^\/]+\.[\dln][^\/]?$/o;
+	return $self->name =~ m/man\/man[^\/]+\/[^\/]+\.[\dln][^\/]?$/o;
 }
 
 sub source_to_dest
 {
 	my $self = shift;
-	my $v = $self->{name};
+	my $v = $self->name;
 	$v =~ s/(man\/)man([^\/]+\/[^\/]+)\.[\dln][^\/]?$/$1cat$2.0/;
 	return $v;
 }
@@ -764,6 +800,11 @@ our @ISA=qw(OpenBSD::PackingElement::UniqueOption);
 
 sub category() { 'manual-installation' }
 
+# XXX don't incorporate this in signatures.
+sub write_no_sig()
+{
+}
+
 package OpenBSD::PackingElement::SystemPackage;
 our @ISA=qw(OpenBSD::PackingElement::UniqueOption);
 
@@ -931,7 +972,7 @@ sub check
 {
 	my $self = shift;
 	my ($name, $passwd, $uid, $gid, $quota, $class, $gcos, $dir, $shell, 
-	    $expire) = getpwnam($self->{name});
+	    $expire) = getpwnam($self->name);
 	return unless defined $name;
 	if ($self->{uid} =~ m/^\!(.*)$/o) {
 		return 0 unless $uid == $1;
@@ -985,7 +1026,7 @@ sub new
 sub check
 {
 	my $self = shift;
-	my ($name, $passwd, $gid, $members) = getgrnam($self->{name});
+	my ($name, $passwd, $gid, $members) = getgrnam($self->name);
 	return unless defined $name;
 	if ($self->{gid} =~ m/^\!(.*)$/o) {
 		return 0 unless $gid == $1;
@@ -1011,7 +1052,7 @@ __PACKAGE__->register_with_factory;
 sub destate
 {
 	my ($self, $state) = @_;
-	$state->set_cwd($self->{name});
+	$state->set_cwd($self->name);
 }
 
 package OpenBSD::PackingElement::EndFake;
@@ -1039,10 +1080,10 @@ sub destate
 {
 	my ($self, $state) = @_;
 
-	if ($self->{name} eq '') {
+	if ($self->name eq '') {
 		undef $state->{owner};
 	} else {
-		$state->{owner} = $self->{name};
+		$state->{owner} = $self->name;
 	}
 }
 
@@ -1056,10 +1097,10 @@ sub destate
 {
 	my ($self, $state) = @_;
 
-	if ($self->{name} eq '') {
+	if ($self->name eq '') {
 		undef $state->{group};
 	} else {
-		$state->{group} = $self->{name};
+		$state->{group} = $self->name;
 	}
 }
 
@@ -1073,10 +1114,10 @@ sub destate
 {
 	my ($self, $state) = @_;
 
-	if ($self->{name} eq '') {
+	if ($self->name eq '') {
 		undef $state->{mode};
 	} else {
-		$state->{mode} = $self->{name};
+		$state->{mode} = $self->name;
 	}
 }
 
@@ -1111,7 +1152,7 @@ our @ISA=qw(OpenBSD::PackingElement::Action);
 sub expand
 {
 	my ($self, $state) = @_;
-	my $_ = $self->{name};
+	my $_ = $self->name;
 	if (m/\%F/o) {
 		die "Bad expand" unless defined $state->{lastfile};
 		s/\%F/$state->{lastfile}->{name}/g;
@@ -1159,7 +1200,7 @@ our @ISA=qw(OpenBSD::PackingElement::Exec);
 sub keyword() { "exec-always" }
 __PACKAGE__->register_with_factory;
 
-package OpenBSD::PackingElement::ExecInstall;
+package OpenBSD::PackingElement::ExecAdd;
 our @ISA=qw(OpenBSD::PackingElement::Exec);
 
 sub keyword() { "exec-add" }
@@ -1218,7 +1259,7 @@ sub destate
 sub stringize
 {
 	my $self = shift;
-	return $self->{name}."/";
+	return $self->name."/";
 }
 
 sub write
@@ -1574,6 +1615,7 @@ package OpenBSD::PackingElement::DigitalSignature;
 our @ISA=qw(OpenBSD::PackingElement::Unique);
 sub keyword() { 'digital-signature' }
 __PACKAGE__->register_with_factory;
+sub category() { "digital-signature" }
 
 # parse to and from a subset of iso8601
 #
@@ -1616,6 +1658,12 @@ sub new
 		$class;
 }
 
+sub new_x509
+{
+	my ($class) = @_;
+	bless { key => 'x509', timestamp => time, b64sig => '' }, $class;
+}
+ 
 
 sub stringize
 {
@@ -1628,7 +1676,7 @@ sub write_no_sig
 {
 	my ($self, $fh) = @_;
 	print $fh "\@", $self->keyword, " ", $self->{key}, ":", 
-	    $self->{timestamp}, "\n";
+	    time_to_iso8601($self->{timestamp}), "\n";
 }
 
 package OpenBSD::PackingElement::Old;

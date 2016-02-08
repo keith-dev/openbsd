@@ -1,4 +1,4 @@
-/*	$OpenBSD: relay.c,v 1.107 2008/09/29 15:50:56 reyk Exp $	*/
+/*	$OpenBSD: relay.c,v 1.116 2009/06/07 05:56:25 eric Exp $	*/
 
 /*
  * Copyright (c) 2006, 2007, 2008 Reyk Floeter <reyk@openbsd.org>
@@ -103,8 +103,10 @@ void		 relay_close_http(struct session *, u_int, const char *,
 		    u_int16_t);
 
 SSL_CTX		*relay_ssl_ctx_create(struct relay *);
-void		 relay_ssl_transaction(struct session *);
+void		 relay_ssl_transaction(struct session *,
+		    struct ctl_relay_event *);
 void		 relay_ssl_accept(int, short, void *);
+void		 relay_ssl_connect(int, short, void *);
 void		 relay_ssl_connected(struct ctl_relay_event *);
 void		 relay_ssl_readcb(int, short, void *);
 void		 relay_ssl_writecb(int, short, void *);
@@ -131,8 +133,8 @@ volatile sig_atomic_t relay_sessions;
 objid_t relay_conid;
 
 static struct relayd		*env = NULL;
-struct imsgbuf			*ibuf_pfe;
-struct imsgbuf			*ibuf_main;
+struct imsgev			*iev_pfe;
+struct imsgev			*iev_main;
 int				 proc_id;
 
 void
@@ -232,22 +234,23 @@ relay(struct relayd *x_env, int pipe_parent2pfe[2], int pipe_parent2hce[2],
 	close(pipe_parent2relay[proc_id][1]);
 	close(pipe_pfe2relay[proc_id][1]);
 
-	if ((ibuf_pfe = calloc(1, sizeof(struct imsgbuf))) == NULL ||
-	    (ibuf_main = calloc(1, sizeof(struct imsgbuf))) == NULL)
+	if ((iev_pfe = calloc(1, sizeof(struct imsgev))) == NULL ||
+	    (iev_main = calloc(1, sizeof(struct imsgev))) == NULL)
 		fatal("relay");
-	imsg_init(ibuf_main, pipe_parent2relay[proc_id][0],
-	    relay_dispatch_parent);
-	imsg_init(ibuf_pfe, pipe_pfe2relay[proc_id][0], relay_dispatch_pfe);
+	imsg_init(&iev_pfe->ibuf, pipe_pfe2relay[proc_id][0]);
+	imsg_init(&iev_main->ibuf, pipe_parent2relay[proc_id][0]);
+	iev_pfe->handler = relay_dispatch_pfe;
+	iev_main->handler = relay_dispatch_parent;
 
-	ibuf_pfe->events = EV_READ;
-	event_set(&ibuf_pfe->ev, ibuf_pfe->fd, ibuf_pfe->events,
-	    ibuf_pfe->handler, ibuf_pfe);
-	event_add(&ibuf_pfe->ev, NULL);
+	iev_pfe->events = EV_READ;
+	event_set(&iev_pfe->ev, iev_pfe->ibuf.fd, iev_pfe->events,
+	    iev_pfe->handler, iev_pfe);
+	event_add(&iev_pfe->ev, NULL);
 
-	ibuf_main->events = EV_READ;
-	event_set(&ibuf_main->ev, ibuf_main->fd, ibuf_main->events,
-	    ibuf_main->handler, ibuf_main);
-	event_add(&ibuf_main->ev, NULL);
+	iev_main->events = EV_READ;
+	event_set(&iev_main->ev, iev_main->ibuf.fd, iev_main->events,
+	    iev_main->handler, iev_main);
+	event_add(&iev_main->ev, NULL);
 
 	relay_launch();
 
@@ -408,7 +411,7 @@ relay_privinit(void)
 	struct relay	*rlay;
 	extern int	 debug;
 
-	if (env->sc_flags & F_SSL)
+	if (env->sc_flags & (F_SSL|F_SSLCLIENT))
 		ssl_init(env);
 
 	TAILQ_FOREACH(rlay, env->sc_relays, rl_entry) {
@@ -460,7 +463,7 @@ relay_init(void)
 		fatal("relay_init: failed to set resource limit");
 
 	TAILQ_FOREACH(rlay, env->sc_relays, rl_entry) {
-		if ((rlay->rl_conf.flags & F_SSL) &&
+		if ((rlay->rl_conf.flags & (F_SSL|F_SSLCLIENT)) &&
 		    (rlay->rl_ssl_ctx = relay_ssl_ctx_create(rlay)) == NULL)
 			fatal("relay_init: failed to create SSL context");
 
@@ -554,7 +557,7 @@ relay_statistics(int fd, short events, void *arg)
 
 		crs.id = rlay->rl_conf.id;
 		crs.proc = proc_id;
-		imsg_compose(ibuf_pfe, IMSG_STATISTICS, 0, 0, -1,
+		imsg_compose_event(iev_pfe, IMSG_STATISTICS, 0, 0, -1,
 		    &crs, sizeof(crs));
 
 		for (con = SPLAY_ROOT(&rlay->rl_sessions);
@@ -749,9 +752,15 @@ relay_connected(int fd, short sig, void *arg)
 	evbuffercb		 outrd = relay_read;
 	evbuffercb		 outwr = relay_write;
 	struct bufferevent	*bev;
+	struct ctl_relay_event	*out = &con->se_out;
 
 	if (sig == EV_TIMEOUT) {
 		relay_close_http(con, 504, "connect timeout", 0);
+		return;
+	}
+
+	if ((rlay->rl_conf.flags & F_SSLCLIENT) && (out->ssl == NULL)) {
+		relay_ssl_transaction(con, out);
 		return;
 	}
 
@@ -791,8 +800,12 @@ relay_connected(int fd, short sig, void *arg)
 	bev->output = con->se_out.output;
 	if (bev->output == NULL)
 		fatal("relay_connected: invalid output buffer");
-
 	con->se_out.bev = bev;
+
+	/* Initialize the SSL wrapper */
+	if ((rlay->rl_conf.flags & F_SSLCLIENT) && (out->ssl != NULL))
+		relay_ssl_connected(out);
+
 	bufferevent_settimeout(bev,
 	    rlay->rl_conf.timeout.tv_sec, rlay->rl_conf.timeout.tv_sec);
 	bufferevent_enable(bev, EV_READ|EV_WRITE);
@@ -1354,7 +1367,7 @@ relay_read_http(struct bufferevent *bev, void *arg)
 		}
 		if (*pk.value == ':') {
 			*pk.value++ = '\0';
-			pk.value++;
+			pk.value += strspn(pk.value, " \t\r\n");
 			header = 1;
 		} else {
 			*pk.value++ = '\0';
@@ -2030,7 +2043,7 @@ relay_accept(int fd, short sig, void *arg)
 			return;
 		}
 
-		imsg_compose(ibuf_pfe, IMSG_NATLOOK, 0, 0, -1, cnl,
+		imsg_compose_event(iev_pfe, IMSG_NATLOOK, 0, 0, -1, cnl,
 		    sizeof(*cnl));
 
 		/* Schedule timeout */
@@ -2179,7 +2192,7 @@ relay_session(struct session *con)
 	}
 
 	if ((rlay->rl_conf.flags & F_SSL) && (in->ssl == NULL)) {
-		relay_ssl_transaction(con);
+		relay_ssl_transaction(con, in);
 		return;
 	}
 
@@ -2208,7 +2221,8 @@ relay_bindanyreq(struct session *con, in_port_t port, int proto)
 	bnd.bnd_port = port;
 	bnd.bnd_proto = proto;
 	bcopy(&con->se_in.ss, &bnd.bnd_ss, sizeof(bnd.bnd_ss));
-	imsg_compose(ibuf_main, IMSG_BINDANY, 0, 0, -1, &bnd, sizeof(bnd));
+	imsg_compose_event(iev_main, IMSG_BINDANY,
+	    0, 0, -1, &bnd, sizeof(bnd));
 
 	/* Schedule timeout */
 	evtimer_set(&con->se_ev, relay_bindany, con);
@@ -2366,7 +2380,7 @@ relay_close(struct session *con, const char *msg)
 
 	if (con->se_cnl != NULL) {
 #if 0
-		imsg_compose(ibuf_pfe, IMSG_KILLSTATES, 0, 0, -1,
+		imsg_compose_event(iev_pfe, IMSG_KILLSTATES, 0, 0, -1,
 		    cnl, sizeof(*cnl));
 #endif
 		free(con->se_cnl);
@@ -2379,6 +2393,7 @@ relay_close(struct session *con, const char *msg)
 void
 relay_dispatch_pfe(int fd, short event, void *ptr)
 {
+	struct imsgev		*iev;
 	struct imsgbuf		*ibuf;
 	struct imsg		 imsg;
 	ssize_t			 n;
@@ -2391,25 +2406,23 @@ relay_dispatch_pfe(int fd, short event, void *ptr)
 	struct ctl_status	 st;
 	objid_t			 id;
 
-	ibuf = ptr;
-	switch (event) {
-	case EV_READ:
+	iev = ptr;
+	ibuf = &iev->ibuf;
+
+	if (event & EV_READ) {
 		if ((n = imsg_read(ibuf)) == -1)
 			fatal("relay_dispatch_pfe: imsg_read_error");
 		if (n == 0) {
 			/* this pipe is dead, so remove the event handler */
-			event_del(&ibuf->ev);
+			event_del(&iev->ev);
 			event_loopexit(NULL);
 			return;
 		}
-		break;
-	case EV_WRITE:
+	}
+
+	if (event & EV_WRITE) {
 		if (msgbuf_write(&ibuf->w) == -1)
 			fatal("relay_dispatch_pfe: msgbuf_write");
-		imsg_event_add(ibuf);
-		return;
-	default:
-		fatalx("relay_dispatch_pfe: unknown event");
 	}
 
 	for (;;) {
@@ -2489,9 +2502,11 @@ relay_dispatch_pfe(int fd, short event, void *ptr)
 			TAILQ_FOREACH(rlay, env->sc_relays, rl_entry)
 				SPLAY_FOREACH(con, session_tree,
 				    &rlay->rl_sessions)
-					imsg_compose(ibuf, IMSG_CTL_SESSION,
+					imsg_compose_event(iev,
+					    IMSG_CTL_SESSION,
 					    0, 0, -1, con, sizeof(*con));
-			imsg_compose(ibuf, IMSG_CTL_END, 0, 0, -1, NULL, 0);
+			imsg_compose_event(iev, IMSG_CTL_END,
+			    0, 0, -1, NULL, 0);
 			break;
 		default:
 			log_debug("relay_dispatch_msg: unexpected imsg %d",
@@ -2500,38 +2515,37 @@ relay_dispatch_pfe(int fd, short event, void *ptr)
 		}
 		imsg_free(&imsg);
 	}
-	imsg_event_add(ibuf);
+	imsg_event_add(iev);
 }
 
 void
 relay_dispatch_parent(int fd, short event, void * ptr)
 {
 	struct session		*con;
+	struct imsgev		*iev;
 	struct imsgbuf		*ibuf;
 	struct imsg		 imsg;
 	ssize_t			 n;
 	struct timeval		 tv;
 	objid_t			 id;
 
-	ibuf = ptr;
-	switch (event) {
-	case EV_READ:
+	iev = ptr;
+	ibuf = &iev->ibuf;
+
+	if (event & EV_READ) {
 		if ((n = imsg_read(ibuf)) == -1)
 			fatal("relay_dispatch_parent: imsg_read error");
 		if (n == 0) {
 			/* this pipe is dead, so remove the event handler */
-			event_del(&ibuf->ev);
+			event_del(&iev->ev);
 			event_loopexit(NULL);
 			return;
 		}
-		break;
-	case EV_WRITE:
+	}
+
+	if (event & EV_WRITE) {
 		if (msgbuf_write(&ibuf->w) == -1)
 			fatal("relay_dispatch_parent: msgbuf_write");
-		imsg_event_add(ibuf);
-		return;
-	default:
-		fatalx("relay_dispatch_parent: unknown event");
 	}
 
 	for (;;) {
@@ -2550,7 +2564,7 @@ relay_dispatch_parent(int fd, short event, void * ptr)
 			}
 
 			/* Will validate the result later */
-			con->se_bnds = imsg_get_fd(ibuf);
+			con->se_bnds = imsg.fd;
 
 			evtimer_del(&con->se_ev);
 			evtimer_set(&con->se_ev, relay_bindany, con);
@@ -2564,7 +2578,7 @@ relay_dispatch_parent(int fd, short event, void * ptr)
 		}
 		imsg_free(&imsg);
 	}
-	imsg_event_add(ibuf);
+	imsg_event_add(iev);
 }
 
 SSL_CTX *
@@ -2603,6 +2617,18 @@ relay_ssl_ctx_create(struct relay *rlay)
 	if (!SSL_CTX_set_cipher_list(ctx, proto->sslciphers))
 		goto err;
 
+	/* Verify the server certificate if we have a CA chain */
+	if ((rlay->rl_conf.flags & F_SSLCLIENT) &&
+	    (rlay->rl_ssl_ca != NULL)) {
+		if (!ssl_ctx_load_verify_memory(ctx,
+		    rlay->rl_ssl_ca, rlay->rl_ssl_ca_len))
+			goto err;
+		SSL_CTX_set_verify(ctx, SSL_VERIFY_PEER, NULL);
+	}
+
+	if ((rlay->rl_conf.flags & F_SSL) == 0)
+		return (ctx);
+
 	log_debug("relay_ssl_ctx_create: loading certificate");
 	if (!ssl_ctx_use_certificate_chain(ctx,
 	    rlay->rl_ssl_cert, rlay->rl_ssl_cert_len))
@@ -2630,31 +2656,49 @@ relay_ssl_ctx_create(struct relay *rlay)
 }
 
 void
-relay_ssl_transaction(struct session *con)
+relay_ssl_transaction(struct session *con, struct ctl_relay_event *cre)
 {
 	struct relay	*rlay = (struct relay *)con->se_relay;
 	SSL		*ssl;
+	SSL_METHOD	*method;
+	void		(*cb)(int, short, void *);
+	u_int		 flags = EV_TIMEOUT;
 
 	ssl = SSL_new(rlay->rl_ssl_ctx);
 	if (ssl == NULL)
 		goto err;
 
-	if (!SSL_set_ssl_method(ssl, SSLv23_server_method()))
-		goto err;
-	if (!SSL_set_fd(ssl, con->se_in.s))
-		goto err;
-	SSL_set_accept_state(ssl);
+	if (cre->dir == RELAY_DIR_REQUEST) {
+		cb = relay_ssl_accept;
+		method = SSLv23_server_method();
+		flags |= EV_READ;
+	} else {
+		cb = relay_ssl_connect;
+		method = SSLv23_client_method();
+		flags |= EV_WRITE;
+	}
 
-	con->se_in.ssl = ssl;
+	if (!SSL_set_ssl_method(ssl, method))
+		goto err;
+	if (!SSL_set_fd(ssl, cre->s))
+		goto err;
 
-	event_again(&con->se_ev, con->se_in.s, EV_TIMEOUT|EV_READ,
-	    relay_ssl_accept, &con->se_tv_start, &env->sc_timeout, con);
+	if (cre->dir == RELAY_DIR_REQUEST)
+		SSL_set_accept_state(ssl);
+	else
+		SSL_set_connect_state(ssl);
+
+	cre->ssl = ssl;
+
+	event_again(&con->se_ev, cre->s, EV_TIMEOUT|flags,
+	    cb, &con->se_tv_start, &env->sc_timeout, con);
 	return;
 
  err:
 	if (ssl != NULL)
 		SSL_free(ssl);
 	ssl_error(rlay->rl_conf.name, "relay_ssl_transaction");
+	relay_close(con, "session ssl failed");
 }
 
 void
@@ -2713,6 +2757,64 @@ retry:
 	DPRINTF("relay_ssl_accept: session %d: scheduling on %s", con->se_id,
 	    (retry_flag == EV_READ) ? "EV_READ" : "EV_WRITE");
 	event_again(&con->se_ev, fd, EV_TIMEOUT|retry_flag, relay_ssl_accept,
+	    &con->se_tv_start, &env->sc_timeout, con);
+}
+
+void
+relay_ssl_connect(int fd, short event, void *arg)
+{
+	struct session	*con = (struct session *)arg;
+	struct relay	*rlay = (struct relay *)con->se_relay;
+	int		 ret;
+	int		 ssl_err;
+	int		 retry_flag;
+
+	if (event == EV_TIMEOUT) {
+		relay_close(con, "SSL connect timeout");
+		return;
+	}
+
+	retry_flag = ssl_err = 0;
+
+	ret = SSL_connect(con->se_out.ssl);
+	if (ret <= 0) {
+		ssl_err = SSL_get_error(con->se_out.ssl, ret);
+
+		switch (ssl_err) {
+		case SSL_ERROR_WANT_READ:
+			retry_flag = EV_READ;
+			goto retry;
+		case SSL_ERROR_WANT_WRITE:
+			retry_flag = EV_WRITE;
+			goto retry;
+		case SSL_ERROR_ZERO_RETURN:
+		case SSL_ERROR_SYSCALL:
+			if (ret == 0) {
+				relay_close(con, "closed");
+				return;
+			}
+			/* FALLTHROUGH */
+		default:
+			ssl_error(rlay->rl_conf.name, "relay_ssl_connect");
+			relay_close(con, "SSL connect error");
+			return;
+		}
+	}
+
+#ifdef DEBUG
+	log_info("relay %s, session %d connected (%d active)",
+	    rlay->rl_conf.name, con->se_id, relay_sessions);
+#else
+	log_debug("relay %s, session %d connected (%d active)",
+	    rlay->rl_conf.name, con->se_id, relay_sessions);
+#endif
+	relay_connected(fd, EV_WRITE, con);
+	return;
+
+retry:
+	DPRINTF("relay_ssl_connect: session %d: scheduling on %s", con->se_id,
+	    (retry_flag == EV_READ) ? "EV_READ" : "EV_WRITE");
+	event_again(&con->se_ev, fd, EV_TIMEOUT|retry_flag, relay_ssl_connect,
 	    &con->se_tv_start, &env->sc_timeout, con);
 }
 
@@ -3022,8 +3124,16 @@ relay_load_file(const char *name, off_t *len)
 int
 relay_load_certfiles(struct relay *rlay)
 {
+	struct protocol *proto = rlay->rl_proto;
 	char	 certfile[PATH_MAX];
 	char	 hbuf[sizeof("ffff:ffff:ffff:ffff:ffff:ffff:255.255.255.255")];
+
+	if ((rlay->rl_conf.flags & F_SSLCLIENT) && (proto->sslca != NULL)) {
+		if ((rlay->rl_ssl_ca = relay_load_file(proto->sslca,
+		    &rlay->rl_ssl_ca_len)) == NULL)
+			return (-1);
+		log_debug("relay_load_certfiles: using ca %s", proto->sslca);
+	}
 
 	if ((rlay->rl_conf.flags & F_SSL) == 0)
 		return (0);
@@ -3037,7 +3147,7 @@ relay_load_certfiles(struct relay *rlay)
 	if ((rlay->rl_ssl_cert = relay_load_file(certfile,
 	    &rlay->rl_ssl_cert_len)) == NULL)
 		return (-1);
-	log_debug("relay_load_certfile: using certificate %s", certfile);
+	log_debug("relay_load_certfiles: using certificate %s", certfile);
 
 	if (snprintf(certfile, sizeof(certfile),
 	    "/etc/ssl/private/%s.key", hbuf) == -1)
@@ -3045,7 +3155,7 @@ relay_load_certfiles(struct relay *rlay)
 	if ((rlay->rl_ssl_key = relay_load_file(certfile,
 	    &rlay->rl_ssl_key_len)) == NULL)
 		return (-1);
-	log_debug("relay_load_certfile: using private key %s", certfile);
+	log_debug("relay_load_certfiles: using private key %s", certfile);
 
 	return (0);
 }

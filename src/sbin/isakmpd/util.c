@@ -1,4 +1,4 @@
-/* $OpenBSD: util.c,v 1.63 2006/11/24 13:52:14 reyk Exp $	 */
+/* $OpenBSD: util.c,v 1.65 2009/06/25 15:40:55 claudio Exp $	 */
 /* $EOM: util.c,v 1.23 2000/11/23 12:22:08 niklas Exp $	 */
 
 /*
@@ -277,7 +277,7 @@ text2sockaddr(char *address, char *port, struct sockaddr **sa, sa_family_t af,
 			rtm->rtm_seq = seq = arc4random();
 
 			/* default destination */
-			sa2 = (struct sockaddr *)(rtm + 1);
+			sa2 = (struct sockaddr *)((char *)rtm + rtm->rtm_hdrlen);
 			switch (af) {
 			case AF_INET: {
 				sin = (struct sockaddr_in *)sa2;
@@ -310,6 +310,8 @@ text2sockaddr(char *address, char *port, struct sockaddr **sa, sa_family_t af,
 					close(fd);
 					return -1;
 				}
+				if (rtm->rtm_version != RTM_VERSION)
+					continue;
 
 				if (rtm->rtm_type == RTM_GET &&
 				    rtm->rtm_pid == pid &&

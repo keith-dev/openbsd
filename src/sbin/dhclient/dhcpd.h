@@ -1,4 +1,4 @@
-/*	$OpenBSD: dhcpd.h,v 1.67 2008/05/26 03:11:48 deraadt Exp $	*/
+/*	$OpenBSD: dhcpd.h,v 1.69 2009/06/06 04:02:42 krw Exp $	*/
 
 /*
  * Copyright (c) 2004 Henning Brauer <henning@openbsd.org>
@@ -51,6 +51,7 @@
 #include <net/route.h>
 
 #include <netinet/in.h>
+#include <netinet/if_ether.h>
 #include <arpa/inet.h>
 
 #include <ctype.h>
@@ -219,7 +220,9 @@ extern int warnings_occurred;
 void error(char *, ...) __attribute__ ((__format__ (__printf__, 1, 2)));
 int warning(char *, ...) __attribute__ ((__format__ (__printf__, 1, 2)));
 int note(char *, ...) __attribute__ ((__format__ (__printf__, 1, 2)));
+#ifdef DEBUG
 int debug(char *, ...) __attribute__ ((__format__ (__printf__, 1, 2)));
+#endif
 int parse_warn(char *, ...) __attribute__ ((__format__ (__printf__, 1, 2)));
 
 /* conflex.c */

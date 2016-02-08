@@ -1,4 +1,4 @@
-/*	$OpenBSD: ftp_var.h,v 1.27 2008/07/08 21:07:57 martynas Exp $	*/
+/*	$OpenBSD: ftp_var.h,v 1.29 2009/05/05 19:35:30 martynas Exp $	*/
 /*	$NetBSD: ftp_var.h,v 1.18 1997/08/18 10:20:25 lukem Exp $	*/
 
 /*
@@ -79,6 +79,7 @@ int fclose(FILE *);
 
 #include "stringlist.h"
 #include "extern.h"
+#include "small.h"
 
 #define HASHBYTES	1024
 #define FTPBUFLEN	MAXPATHLEN + 200
@@ -187,7 +188,9 @@ char	line[FTPBUFLEN];	/* input line buffer */
 char	*stringbase;		/* current scan point in line buffer */
 char	argbuf[FTPBUFLEN];	/* argument storage buffer */
 char	*argbase;		/* current storage point in arg buffer */
+#ifndef SMALL
 StringList *marg_sl;		/* stringlist containing margv */
+#endif /* !SMALL */
 int	margc;			/* count of arguments on input line */
 #define margv (marg_sl->sl_str)	/* args parsed from input line */
 int     cpend;                  /* flag: if != 0, then pending server reply */
@@ -216,8 +219,10 @@ struct macel {
 	char *mac_end;		/* end of macro in macbuf */
 };
 
+#ifndef SMALL
 int macnum;			/* number of defined macros */
 struct macel macros[16];
 char macbuf[4096];
+#endif /* !SMALL */
 
 FILE	*ttyout;		/* stdout or stderr, depending on interactive */

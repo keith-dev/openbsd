@@ -1,4 +1,4 @@
-/*	$OpenBSD: session.c,v 1.284 2008/09/11 14:49:58 henning Exp $ */
+/*	$OpenBSD: session.c,v 1.293 2009/06/07 05:56:24 eric Exp $ */
 
 /*
  * Copyright (c) 2003, 2004, 2005 Henning Brauer <henning@openbsd.org>
@@ -177,8 +177,8 @@ setup_listeners(u_int *la_cnt)
 pid_t
 session_main(struct bgpd_config *config, struct peer *cpeers,
     struct network_head *net_l, struct filter_head *rules,
-    struct mrt_head *m_l, int pipe_m2s[2], int pipe_s2r[2], int pipe_m2r[2],
-    int pipe_s2rctl[2])
+    struct mrt_head *m_l, struct rib_names *rib_l, int pipe_m2s[2],
+    int pipe_s2r[2], int pipe_m2r[2], int pipe_s2rctl[2])
 {
 	int			 nfds, timeout;
 	unsigned int		 i, j, idx_peers, idx_listeners, idx_mrts;
@@ -195,6 +195,7 @@ session_main(struct bgpd_config *config, struct peer *cpeers,
 	struct pollfd		*pfd = NULL;
 	struct ctl_conn		*ctl_conn;
 	struct listen_addr	*la;
+	struct rde_rib		*rr;
 	void			*newp;
 	short			 events;
 
@@ -283,6 +284,11 @@ session_main(struct bgpd_config *config, struct peer *cpeers,
 		LIST_REMOVE(m, entry);
 		free(m);
 	}
+	/* rib names not used in the SE */
+	while ((rr = SIMPLEQ_FIRST(&ribnames))) {
+		SIMPLEQ_REMOVE_HEAD(&ribnames, entry);
+		free(rr);
+	}
 
 	while (session_quit == 0) {
 		/* check for peers to be initialized or deleted */
@@ -341,7 +347,7 @@ session_main(struct bgpd_config *config, struct peer *cpeers,
 
 		mrt_cnt = 0;
 		LIST_FOREACH(m, &mrthead, entry)
-			if (m->queued)
+			if (m->wbuf.queued)
 				mrt_cnt++;
 
 		if (mrt_cnt > mrt_l_elms) {
@@ -469,8 +475,8 @@ session_main(struct bgpd_config *config, struct peer *cpeers,
 		idx_peers = i;
 
 		LIST_FOREACH(m, &mrthead, entry)
-			if (m->queued) {
-				pfd[i].fd = m->fd;
+			if (m->wbuf.queued) {
+				pfd[i].fd = m->wbuf.fd;
 				pfd[i].events = POLLOUT;
 				mrt_l[i - idx_peers] = m;
 				i++;
@@ -589,6 +595,8 @@ init_conf(struct bgpd_config *c)
 {
 	if (!c->holdtime)
 		c->holdtime = INTERVAL_HOLD;
+	if (!c->connectretry)
+		c->connectretry = INTERVAL_CONNECTRETRY;
 }
 
 void
@@ -663,7 +671,7 @@ bgp_fsm(struct peer *peer, enum session_events event)
 			} else {
 				change_state(peer, STATE_CONNECT, event);
 				timer_set(peer, Timer_ConnectRetry,
-				    INTERVAL_CONNECTRETRY);
+				    conf->connectretry);
 				session_connect(peer);
 			}
 			peer->passive = 0;
@@ -688,13 +696,13 @@ bgp_fsm(struct peer *peer, enum session_events event)
 			break;
 		case EVNT_CON_OPENFAIL:
 			timer_set(peer, Timer_ConnectRetry,
-			    INTERVAL_CONNECTRETRY);
+			    conf->connectretry);
 			session_close_connection(peer);
 			change_state(peer, STATE_ACTIVE, event);
 			break;
 		case EVNT_TIMER_CONNRETRY:
 			timer_set(peer, Timer_ConnectRetry,
-			    INTERVAL_CONNECTRETRY);
+			    conf->connectretry);
 			session_connect(peer);
 			break;
 		default:
@@ -717,7 +725,7 @@ bgp_fsm(struct peer *peer, enum session_events event)
 			break;
 		case EVNT_CON_OPENFAIL:
 			timer_set(peer, Timer_ConnectRetry,
-			    INTERVAL_CONNECTRETRY);
+			    conf->connectretry);
 			session_close_connection(peer);
 			change_state(peer, STATE_ACTIVE, event);
 			break;
@@ -744,7 +752,7 @@ bgp_fsm(struct peer *peer, enum session_events event)
 		case EVNT_CON_CLOSED:
 			session_close_connection(peer);
 			timer_set(peer, Timer_ConnectRetry,
-			    INTERVAL_CONNECTRETRY);
+			    conf->connectretry);
 			change_state(peer, STATE_ACTIVE, event);
 			break;
 		case EVNT_CON_FATAL:
@@ -959,13 +967,12 @@ change_state(struct peer *peer, enum session_state state,
 
 	log_statechange(peer, state, event);
 	LIST_FOREACH(mrt, &mrthead, entry) {
-		if (mrt->type != MRT_ALL_IN && mrt->type != MRT_ALL_OUT)
+		if (!(mrt->type == MRT_ALL_IN || mrt->type == MRT_ALL_OUT))
 			continue;
 		if ((mrt->peer_id == 0 && mrt->group_id == 0) ||
-		    mrt->peer_id == peer->conf.id ||
-		    mrt->group_id == peer->conf.groupid)
-			mrt_dump_state(mrt, peer->state, state,
-			    peer, conf);
+		    mrt->peer_id == peer->conf.id || (mrt->group_id != 0 &&
+		    mrt->group_id == peer->conf.groupid))
+			mrt_dump_state(mrt, peer->state, state, peer);
 	}
 	peer->prev_state = peer->state;
 	peer->state = state;
@@ -1253,8 +1260,6 @@ session_capa_add(struct peer *p, struct buf *opb, u_int8_t capa_code,
 	op_type = OPT_PARAM_CAPABILITIES;
 	op_len = sizeof(capa_code) + sizeof(capa_len) + capa_len;
 	tot_len = sizeof(op_type) + sizeof(op_len) + op_len;
-	if (buf_grow(opb, tot_len) == NULL)
-		return (1);
 	errs += buf_add(opb, &op_type, sizeof(op_type));
 	errs += buf_add(opb, &op_len, sizeof(op_len));
 	errs += buf_add(opb, &capa_code, sizeof(capa_code));
@@ -1315,22 +1320,16 @@ session_sendmsg(struct bgp_msg *msg, struct peer *p)
 	struct mrt		*mrt;
 
 	LIST_FOREACH(mrt, &mrthead, entry) {
-		if (mrt->type != MRT_ALL_OUT &&
-		    msg->type == UPDATE && mrt->type != MRT_UPDATE_OUT)
+		if (!(mrt->type == MRT_ALL_OUT || (msg->type == UPDATE &&
+		    mrt->type == MRT_UPDATE_OUT)))
 			continue;
 		if ((mrt->peer_id == 0 && mrt->group_id == 0) ||
-		    mrt->peer_id == p->conf.id ||
-		    mrt->group_id == p->conf.groupid)
-			mrt_dump_bgp_msg(mrt, msg->buf->buf, msg->len, p, conf);
+		    mrt->peer_id == p->conf.id || (mrt->group_id == 0 &&
+		    mrt->group_id == p->conf.groupid))
+			mrt_dump_bgp_msg(mrt, msg->buf->buf, msg->len, p);
 	}
 
-	if (buf_close(&p->wbuf, msg->buf) == -1) {
-		log_peer_warn(&p->conf, "session_sendmsg buf_close");
-		buf_free(msg->buf);
-		free(msg);
-		return (-1);
-	}
-
+	buf_close(&p->wbuf, msg->buf);
 	free(msg);
 	return (0);
 }
@@ -1346,7 +1345,7 @@ session_open(struct peer *p)
 	u_int			 errs = 0;
 
 
-	if ((opb = buf_open(0)) == NULL) {
+	if ((opb = buf_dynamic(0, MAX_PKTSIZE - MSGSIZE_OPEN_MIN)) == NULL) {
 		bgp_fsm(p, EVNT_CON_FATAL);
 		return;
 	}
@@ -1392,10 +1391,7 @@ session_open(struct peer *p)
 	}
 
 	msg.version = 4;
-	if (conf->as > USHRT_MAX)
-		msg.myas = htons(conf->short_as);
-	else
-		msg.myas = htons(conf->as);
+	msg.myas = htons(conf->short_as);
 	if (p->conf.holdtime)
 		msg.holdtime = htons(p->conf.holdtime);
 	else
@@ -1807,13 +1803,13 @@ parse_header(struct peer *peer, u_char *data, u_int16_t *len, u_int8_t *type)
 		return (-1);
 	}
 	LIST_FOREACH(mrt, &mrthead, entry) {
-		if (mrt->type != MRT_ALL_IN && (mrt->type != MRT_UPDATE_IN ||
-		    *type != UPDATE))
+		if (!(mrt->type == MRT_ALL_IN || (*type == UPDATE &&
+		    mrt->type == MRT_UPDATE_IN)))
 			continue;
 		if ((mrt->peer_id == 0 && mrt->group_id == 0) ||
-		    mrt->peer_id == peer->conf.id ||
-		    mrt->group_id == peer->conf.groupid)
-			mrt_dump_bgp_msg(mrt, data, *len, peer, conf);
+		    mrt->peer_id == peer->conf.id || (mrt->group_id != 0 &&
+		    mrt->group_id == peer->conf.groupid))
+			mrt_dump_bgp_msg(mrt, data, *len, peer);
 	}
 	return (0);
 }
@@ -2314,7 +2310,7 @@ session_dispatch_imsg(struct imsgbuf *ibuf, int idx, u_int *listener_cnt)
 					fatalx("king bula sez: "
 					    "expected REINIT");
 
-				if ((nla->fd = imsg_get_fd(ibuf)) == -1)
+				if ((nla->fd = imsg.fd) == -1)
 					log_warnx("expected to receive fd for "
 					    "%s but didn't receive any",
 					    log_sockaddr((struct sockaddr *)
@@ -2425,7 +2421,7 @@ session_dispatch_imsg(struct imsgbuf *ibuf, int idx, u_int *listener_cnt)
 			}
 
 			memcpy(&xmrt, imsg.data, sizeof(struct mrt));
-			if ((xmrt.fd = imsg_get_fd(ibuf)) == -1)
+			if ((xmrt.wbuf.fd = imsg.fd) == -1)
 				log_warnx("expected to receive fd for mrt dump "
 				    "but didn't receive any");
 
@@ -2436,12 +2432,12 @@ session_dispatch_imsg(struct imsgbuf *ibuf, int idx, u_int *listener_cnt)
 				if (mrt == NULL)
 					fatal("session_dispatch_imsg");
 				memcpy(mrt, &xmrt, sizeof(struct mrt));
-				TAILQ_INIT(&mrt->bufs);
+				TAILQ_INIT(&mrt->wbuf.bufs);
 				LIST_INSERT_HEAD(&mrthead, mrt, entry);
 			} else {
 				/* old dump reopened */
-				close(mrt->fd);
-				mrt->fd = xmrt.fd;
+				close(mrt->wbuf.fd);
+				mrt->wbuf.fd = xmrt.wbuf.fd;
 			}
 			break;
 		case IMSG_MRT_CLOSE:

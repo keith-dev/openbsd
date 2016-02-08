@@ -1,4 +1,4 @@
-/*	$OpenBSD: ripd.h,v 1.11 2008/12/17 14:19:39 michele Exp $ */
+/*	$OpenBSD: ripd.h,v 1.15 2009/06/06 18:31:42 pyr Exp $ */
 
 /*
  * Copyright (c) 2004 Esben Norby <norby@openbsd.org>
@@ -28,6 +28,8 @@
 #include <netinet/in.h>
 #include <event.h>
 
+#include <imsg.h>
+
 #define	CONF_FILE		"/etc/ripd.conf"
 #define	RIPD_SOCKET		"/var/run/ripd.sock"
 #define	RIPD_USER		"_ripd"
@@ -41,7 +43,6 @@
 
 #define	NBR_TIMEOUT		180
 
-#define	READ_BUF_SIZE		65535
 #define RT_BUF_SIZE		16384
 #define MAX_RTSOCK_BUF		128 * 1024
 
@@ -56,49 +57,14 @@
 #define	F_DYNAMIC		0x0040
 #define	F_OSPFD_INSERTED	0x0080
 #define	F_REDISTRIBUTED		0x0100
+#define	F_REJECT		0x0200
+#define	F_BLACKHOLE		0x0400
 
 #define REDISTRIBUTE_ON		0x01
-#define REDISTRIBUTE_DEFAULT	0x02
 
 #define	OPT_SPLIT_HORIZON	0x01
 #define	OPT_SPLIT_POISONED	0x02
 #define	OPT_TRIGGERED_UPDATES	0x04
-
-/* buffer */
-struct buf {
-	TAILQ_ENTRY(buf)	 entry;
-	u_char			*buf;
-	size_t			 size;
-	size_t			 max;
-	size_t			 wpos;
-	size_t			 rpos;
-};
-
-struct msgbuf {
-	TAILQ_HEAD(, buf)	 bufs;
-	u_int32_t		 queued;
-	int			 fd;
-};
-
-#define IMSG_HEADER_SIZE	sizeof(struct imsg_hdr)
-#define MAX_IMSGSIZE		8192
-
-struct buf_read {
-	u_char			 buf[READ_BUF_SIZE];
-	u_char			*rptr;
-	size_t			 wpos;
-};
-
-struct imsgbuf {
-	TAILQ_HEAD(, imsg_fd)	fds;
-	struct buf_read		r;
-	struct msgbuf		w;
-	struct event		ev;
-	void			(*handler)(int, short, void *);
-	int			fd;
-	pid_t			pid;
-	short			events;
-};
 
 enum imsg_type {
 	IMSG_NONE,
@@ -132,21 +98,12 @@ enum imsg_type {
 	IMSG_DEMOTE
 };
 
-struct imsg_hdr {
-	enum imsg_type	type;
-	u_int16_t	len;
-	u_int32_t	peerid;
-	pid_t		pid;
-};
-
-struct imsg {
-	struct imsg_hdr	 hdr;
-	void		*data;
-};
-
-struct imsg_fd {
-	TAILQ_ENTRY(imsg_fd)	entry;
-	int			fd;
+struct imsgev {
+	struct imsgbuf		 ibuf;
+	void			(*handler)(int, short, void *);
+	struct event		 ev;
+	void			*data;
+	short			 events;
 };
 
 /* interface states */
@@ -256,7 +213,8 @@ enum {
 #define	REDIST_STATIC		0x02
 #define	REDIST_LABEL		0x04
 #define	REDIST_ADDR		0x08
-#define	REDIST_NO		0x10
+#define	REDIST_DEFAULT		0x10
+#define	REDIST_NO		0x20
 
 struct redistribute {
 	SIMPLEQ_ENTRY(redistribute)	entry;
@@ -372,41 +330,19 @@ u_int8_t	 mask2prefixlen(in_addr_t);
 void		 main_imsg_compose_ripe(int, pid_t, void *, u_int16_t);
 void		 main_imsg_compose_rde(int, pid_t, void *, u_int16_t);
 int		 rip_redistribute(struct kroute *);
+void		 imsg_event_add(struct imsgev *);
+int	 	 imsg_compose_event(struct imsgev *, u_int16_t, u_int32_t,
+		    pid_t, int, void *, u_int16_t);
 
 /* parse.y */
 struct ripd_conf	*parse_config(char *, int);
 int			 cmdline_symset(char *);
-
-/* buffer.c */
-struct buf	*buf_open(size_t);
-struct buf	*buf_dynamic(size_t, size_t);
-int		 buf_add(struct buf *, void *, size_t);
-void		*buf_reserve(struct buf *, size_t);
-void		*buf_seek(struct buf *, size_t, size_t);
-int		 buf_close(struct msgbuf *, struct buf *);
-void		 buf_free(struct buf *);
-void		 msgbuf_init(struct msgbuf *);
-void		 msgbuf_clear(struct msgbuf *);
-int		 msgbuf_write(struct msgbuf *);
 
 /* carp.c */
 int		 carp_demote_init(char *, int);
 void		 carp_demote_shutdown(void);
 int		 carp_demote_get(char *);
 int		 carp_demote_set(char *, int);
-
-/* imsg.c */
-void		 imsg_init(struct imsgbuf *, int, void (*)(int, short, void *));
-ssize_t		 imsg_read(struct imsgbuf *);
-ssize_t		 imsg_get(struct imsgbuf *, struct imsg *);
-int		 imsg_compose(struct imsgbuf *, enum imsg_type, u_int32_t,
-		    pid_t, void *, u_int16_t);
-struct buf	*imsg_create(struct imsgbuf *, enum imsg_type, u_int32_t, pid_t,
-		    u_int16_t);
-int		 imsg_add(struct buf *, void *, u_int16_t);
-int		 imsg_close(struct imsgbuf *, struct buf *);
-void		 imsg_free(struct imsg *);
-void		 imsg_event_add(struct imsgbuf *);
 
 /* printconf.c */
 void		 print_config(struct ripd_conf *);

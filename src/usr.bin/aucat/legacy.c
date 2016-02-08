@@ -1,4 +1,4 @@
-/*	$OpenBSD: legacy.c,v 1.4 2008/11/08 10:40:52 ratchov Exp $	*/
+/*	$OpenBSD: legacy.c,v 1.6 2009/04/22 10:57:33 ratchov Exp $	*/
 /*
  * Copyright (c) 1997 Kenneth Stailey.  All rights reserved.
  *
@@ -28,9 +28,7 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include <sys/types.h>
-#include <sys/ioctl.h>
-#include <sys/audioio.h>
+#include <sndio.h>
 
 #include <stdlib.h>
 #include <fcntl.h>
@@ -39,7 +37,6 @@
 #include <err.h>
 
 #include "wav.h"
-
 
 /* headerless data files.  played at /dev/audio's defaults.
  */
@@ -57,86 +54,20 @@
 #define FMT_WAV	2
 
 
-/*
- * Convert sun device parameters to struct aparams
- */
-int
-sun_infotopar(struct audio_prinfo *ai, struct aparams *par)
-{
-	par->rate = ai->sample_rate;
-	par->bps = ai->precision / 8;
-	par->bits = ai->precision;
-	par->cmax = par->cmin + ai->channels - 1;
-	if (par->cmax > NCHAN_MAX - 1) {
-		warnx("%u:%u: channel range out of bounds",
-		    par->cmin, par->cmax);
-		return 0;
-	}
-	par->msb = 1;
-	switch (ai->encoding) {
-	case AUDIO_ENCODING_SLINEAR_LE:
-		par->le = 1;
-		par->sig = 1;
-		break;
-	case AUDIO_ENCODING_SLINEAR_BE:
-		par->le = 0;
-		par->sig = 1;
-		break;
-	case AUDIO_ENCODING_ULINEAR_LE:
-		par->le = 1;
-		par->sig = 0;
-		break;
-	case AUDIO_ENCODING_ULINEAR_BE:
-		par->le = 0;
-		par->sig = 0;
-		break;
-	case AUDIO_ENCODING_SLINEAR:
-		par->le = NATIVE_LE;
-		par->sig = 1;
-		break;
-	case AUDIO_ENCODING_ULINEAR:
-		par->le = NATIVE_LE;
-		par->sig = 0;
-		break;
-	default:
-		warnx("only linear encodings are supported for audio devices");
-		return 0;
-	}
-	return 1;
-}
-
-/*
- * Convert struct aparams to sun device parameters.
- */
-void
-sun_partoinfo(struct audio_prinfo *ai, struct aparams *par)
-{
-	ai->sample_rate = par->rate;
-	ai->precision = par->bps * 8;
-	ai->channels = par->cmax - par->cmin + 1;
-	if (par->le && par->sig) {
-		ai->encoding = AUDIO_ENCODING_SLINEAR_LE;
-	} else if (!par->le && par->sig) {
-		ai->encoding = AUDIO_ENCODING_SLINEAR_BE;
-	} else if (par->le && !par->sig) {
-		ai->encoding = AUDIO_ENCODING_ULINEAR_LE;
-	} else {
-		ai->encoding = AUDIO_ENCODING_ULINEAR_BE;
-	}
-}
-
 int
 legacy_play(char *dev, char *aufile)
 {
-	struct audio_prinfo ai;
-	struct audio_info info;
-	struct aparams par;
+	struct sio_hdl *hdl;
+	struct sio_par spar, par;
+	struct aparams apar;
 	ssize_t rd;
 	off_t datasz;
 	char buf[5120];
-	int afd, fd, fmt = FMT_RAW;
-	u_int32_t pos = 0;
+	size_t readsz;
+	int fd, fmt = FMT_RAW;
+	u_int32_t pos = 0, snd_fmt = 1, rate = 8000, chan = 1;
 	char magic[4];
+	short *map;
 
 	if ((fd = open(aufile, O_RDONLY)) < 0) {
 		warn("cannot open %s", aufile);
@@ -151,8 +82,17 @@ legacy_play(char *dev, char *aufile)
 		fmt = FMT_AU;
 		if (read(fd, &pos, sizeof(pos)) == sizeof(pos))
 			pos = ntohl(pos);
+		/* data size */
+		if (lseek(fd, 4, SEEK_CUR) == -1)
+			warn("lseek hdr");
+		if (read(fd, &snd_fmt, sizeof(snd_fmt)) == sizeof(snd_fmt))
+			snd_fmt = ntohl(snd_fmt);
+		if (read(fd, &rate, sizeof(rate)) == sizeof(rate))
+			rate = ntohl(rate);
+		if (read(fd, &chan, sizeof(chan)) == sizeof(chan))
+			chan = ntohl(chan);
 	} else if (!strncmp(magic, "RIFF", 4) &&
-		    wav_readhdr(fd, &par, &datasz)) {
+		    wav_readhdr(fd, &apar, &datasz, &map)) {
 			fmt = FMT_WAV;
 	}
 
@@ -162,37 +102,39 @@ legacy_play(char *dev, char *aufile)
 	if (fmt == FMT_RAW || fmt == FMT_AU)
 		if (lseek(fd, (off_t)pos, SEEK_SET) == -1)
 			warn("lseek");
-	if (dev == NULL) {
-		dev = getenv("AUDIODEVICE");
-		if (dev == NULL)
-			dev = "/dev/audio";
-	}
-	if ((afd = open(dev, O_WRONLY)) < 0) {
-		warn("can't open %s", dev);
+
+	if ((hdl = sio_open(dev, SIO_PLAY, 0)) < 0) {
+		warnx("can't get sndio handle");
 		return(1);
 	}
 
-	AUDIO_INITINFO(&info);
-	ai = info.play;
-
+	sio_initpar(&par);
 	switch(fmt) {
 	case FMT_WAV:
-		sun_partoinfo(&ai, &par);
+		par.rate = apar.rate;
+		par.pchan = apar.cmax - apar.cmin + 1;
+		par.sig = apar.sig;
+		par.bits = apar.bits;
+		par.le = apar.le;
 		break;
 	case FMT_AU:
-		ai.encoding = AUDIO_ENCODING_ULAW;
-		ai.precision = 8;
-		ai.sample_rate = 8000;
-		ai.channels = 1;
+		par.rate = rate;
+		par.pchan = chan;
+		par.sig = 1;
+		par.bits = 16;
+		par.le = 1;
+		map = wav_ulawmap;
+		if (snd_fmt == 27)
+			map = wav_alawmap;
 		break;
 	case FMT_RAW:
 	default:
 		break;
 	}
+	spar = par;
 
-	info.play = ai;
-	if (ioctl(afd, AUDIO_SETINFO, &info) < 0) {
-		warn("%s", dev);
+	if (!sio_setpar(hdl, &par) || !sio_getpar(hdl, &par)) {
+		warnx("can't set audio parameters");
 		/* only WAV could fail in previous aucat versions (unless
 		 * the parameters returned by AUDIO_GETINFO would fail,
 		 * which is unlikely)
@@ -205,26 +147,37 @@ legacy_play(char *dev, char *aufile)
 	 * description of set_params.  for compatability with previous
 	 * aucat versions, continue running if something doesn't match.
 	 */
-	(void) ioctl(afd, AUDIO_GETINFO, &info);
-	if (info.play.encoding != ai.encoding ||
-	    info.play.precision != ai.precision ||
-	    info.play.channels != ai.channels ||
+	if (par.bits != spar.bits ||
+	    par.sig != par.sig ||
+	    par.le != spar.le ||
+	    par.pchan != spar.pchan ||
 	    /* devices may return a very close rate, such as 44099 when
 	     * 44100 was requested.  the difference is inaudible.  allow
 	     * 2% deviation as an example of how to cope.
 	     */
-	    (info.play.sample_rate > ai.sample_rate * 1.02 ||
-	    info.play.sample_rate < ai.sample_rate * 0.98)) {
-		warnx("format not supported by %s", dev);
+	    (par.rate > spar.rate * 1.02 || par.rate < spar.rate * 0.98)) {
+		warnx("format not supported");
+	}
+	if (!sio_start(hdl)) {
+		warnx("could not start sndio");
+		exit(1);
 	}
 
-	while ((rd = read(fd, buf, sizeof(buf))) > 0)
-		if (write(afd, buf, rd) != rd)
-			warn("write");
+	readsz = sizeof(buf);
+	if (map)
+		readsz /= 2;
+	while ((rd = read(fd, buf, readsz)) > 0) {
+		if (map) {
+			wav_conv(buf, rd, map);
+			rd *= 2;
+		}
+		if (sio_write(hdl, buf, rd) != rd)
+			warnx("sio_write: short write");
+	}
 	if (rd == -1)
 		warn("read");
 
-	(void) close(afd);
+	sio_close(hdl);
 	(void) close(fd);
 
 	return(0);

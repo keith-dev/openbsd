@@ -1,4 +1,4 @@
-/*	$OpenBSD: autoconf.c,v 1.101 2009/02/19 11:12:42 kettenis Exp $	*/
+/*	$OpenBSD: autoconf.c,v 1.106 2009/05/31 21:23:28 kettenis Exp $	*/
 /*	$NetBSD: autoconf.c,v 1.51 2001/07/24 19:32:11 eeh Exp $ */
 
 /*
@@ -68,6 +68,7 @@
 #include <machine/bus.h>
 #include <machine/autoconf.h>
 #include <machine/hypervisor.h>
+#include <machine/mdesc.h>
 #include <machine/openfirm.h>
 #include <machine/sparc64.h>
 #include <machine/cpu.h>
@@ -115,7 +116,7 @@ static	void mainbus_attach(struct device *, struct device *, void *);
 int	get_ncpus(void);
 
 struct device *booted_device;
-struct	bootpath bootpath[8];
+struct	bootpath bootpath[16];
 int	nbootpath;
 int	bootnode;
 static	void bootpath_build(void);
@@ -214,7 +215,6 @@ str2hex(char *str, long *vp)
 int
 get_ncpus(void)
 {
-#ifdef MULTIPROCESSOR
 	int node, child, stack[4], depth, ncpus;
 	char buf[32];
 
@@ -227,7 +227,7 @@ get_ncpus(void)
 
 		if (node == 0 || node == -1) {
 			if (--depth < 0)
-				return (ncpus);
+				goto done;
 			
 			stack[depth] = OF_peer(stack[depth]);
 			continue;
@@ -244,7 +244,10 @@ get_ncpus(void)
 			stack[depth] = OF_peer(stack[depth]);
 	}
 
-	return (0);
+done:
+	ncpusfound = ncpus;
+#ifdef MULTIPROCESSOR
+	return (ncpus);
 #else
 	return (1);
 #endif
@@ -612,6 +615,11 @@ bootpath_store(storep, bp)
 void
 cpu_configure()
 {
+#ifdef SUN4V
+	if (CPU_ISSUN4V)
+		mdesc_init();
+#endif
+
 	/* build the bootpath */
 	bootpath_build();
 
@@ -661,8 +669,6 @@ sun4v_soft_state_init(void)
 
 	if (prom_set_sun4v_api_version(HSVC_GROUP_SOFT_STATE, 1, 0, &minor))
 		return;
-
-	prom_printf("minor %lld\r\n", minor);
 
 	prom_sun4v_soft_state_supported();
 	sun4v_soft_state_initialized = 1;
@@ -854,6 +860,8 @@ extern bus_space_tag_t mainbus_space_tag;
 			hw_vendor = "Fujitsu";
 		if (strncmp(buf, "TAD,", 4) == 0)
 			hw_vendor = "Tadpole";
+		if (strncmp(buf, "NATE,", 5) == 0)
+			hw_vendor = "Naturetech";
 
 		/*
 		 * The Momentum Leopard-V advertises itself as

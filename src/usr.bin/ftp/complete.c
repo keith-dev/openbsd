@@ -1,4 +1,4 @@
-/*	$OpenBSD: complete.c,v 1.21 2008/07/08 21:07:57 martynas Exp $	*/
+/*	$OpenBSD: complete.c,v 1.23 2009/05/05 19:35:30 martynas Exp $	*/
 /*	$NetBSD: complete.c,v 1.10 1997/08/18 10:20:18 lukem Exp $	*/
 
 /*-
@@ -31,9 +31,6 @@
  */
 
 #ifndef SMALL
-#ifndef lint
-static const char rcsid[] = "$OpenBSD: complete.c,v 1.21 2008/07/08 21:07:57 martynas Exp $";
-#endif /* not lint */
 
 /*
  * FTP user program - command and file completion routines
@@ -234,10 +231,8 @@ complete_remote(char *word, int list)
 
 		mflag = 1;
 		emesg = NULL;
-#ifndef SMALL
 		if (debug)
 			(void)putc('\n', ttyout);
-#endif /* !SMALL */
 		while ((cp = remglob(dummyargv, 0, &emesg)) != NULL) {
 			char *tcp;
 
@@ -353,3 +348,4 @@ complete(EditLine *el, int ch)
 }
 
 #endif /* !SMALL */
+

@@ -1,4 +1,4 @@
-/*	$OpenBSD: mutex.S,v 1.5 2008/11/21 17:35:52 deraadt Exp $	*/
+/*	$OpenBSD: mutex.S,v 1.9 2009/06/09 01:12:38 deraadt Exp $	*/
 
 /*
  * Copyright (c) 2007 Dale Rahn

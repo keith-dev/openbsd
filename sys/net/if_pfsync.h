@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_pfsync.h,v 1.36 2009/02/16 00:31:25 dlg Exp $	*/
+/*	$OpenBSD: if_pfsync.h,v 1.38 2009/06/14 00:16:50 dlg Exp $	*/
 
 /*
  * Copyright (c) 2001 Michael Shalayeff
@@ -100,8 +100,6 @@
  * | ...			|
  * +----------------------------+
  * | EOF pfsync_subheader	|
- * +----------------------------+
- * | HMAC			|
  * +============================+
  */
 
@@ -161,7 +159,8 @@ struct pfsync_upd_c {
 	u_int32_t			creatorid;
 	u_int32_t			expire;
 	u_int8_t			timeout;
-	u_int8_t			_pad[3];
+	u_int8_t			state_flags;
+	u_int8_t			_pad[2];
 } __packed;
 
 /*
@@ -265,7 +264,7 @@ struct pfsyncreq {
 	char		 pfsyncr_syncdev[IFNAMSIZ];
 	struct in_addr	 pfsyncr_syncpeer;
 	int		 pfsyncr_maxupdates;
-	int		 pfsyncr_authlevel;
+	int		 pfsyncr_defer;
 };
 
 #ifdef _KERNEL

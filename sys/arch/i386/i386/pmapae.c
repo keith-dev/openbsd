@@ -1,4 +1,4 @@
-/*	$OpenBSD: pmapae.c,v 1.15 2009/01/27 22:14:13 miod Exp $	*/
+/*	$OpenBSD: pmapae.c,v 1.19 2009/06/16 16:42:41 ariane Exp $	*/
 
 /*
  * Copyright (c) 2006 Michael Shalayeff

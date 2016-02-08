@@ -1,4 +1,4 @@
-/*	$OpenBSD: nfs_serv.c,v 1.63 2009/01/27 23:40:14 blambert Exp $	*/
+/*	$OpenBSD: nfs_serv.c,v 1.75 2009/06/06 23:40:30 blambert Exp $	*/
 /*     $NetBSD: nfs_serv.c,v 1.34 1997/05/12 23:37:12 fvdl Exp $       */
 
 /*
@@ -233,7 +233,9 @@ nfsrv_setattr(nfsd, slp, procp, mrq)
 	VATTR_NULL(&va);
 	if (v3) {
 		va.va_vaflags |= VA_UTIMES_NULL;
-		nfsm_srvsattr(&va);
+		error = nfsm_srvsattr(&md, &va, mrep, &dpos);
+		if (error)
+			goto nfsmout;
 		nfsm_dissect(tl, u_int32_t *, NFSX_UNSIGNED);
 		gcheck = fxdr_unsigned(int, *tl);
 		if (gcheck) {
@@ -389,7 +391,7 @@ nfsrv_lookup(nfsd, slp, procp, mrq)
 		nfsm_srvpostop_attr(nfsd, dirattr_ret, &dirattr, &mb);
 		return (0);
 	}
-	nfsm_srvfhtom(fhp, v3);
+	nfsm_srvfhtom(&mb, fhp, v3);
 	if (v3) {
 		nfsm_srvpostop_attr(nfsd, 0, &va, &mb);
 		nfsm_srvpostop_attr(nfsd, dirattr_ret, &dirattr, &mb);
@@ -550,11 +552,9 @@ nfsrv_read(nfsd, slp, procp, mrq)
 	}
 
 	error = nfsrv_fhtovp(fhp, 1, &vp, cred, slp, nam, &rdonly);
-	if (error) {
-		nfsm_reply(2 * NFSX_UNSIGNED);
-		nfsm_srvpostop_attr(nfsd, 1, NULL, &mb);
-		return (0);
-	}
+	if (error)
+		goto bad;
+
 	if (vp->v_type != VREG) {
 		if (v3)
 			error = EINVAL;
@@ -568,12 +568,9 @@ nfsrv_read(nfsd, slp, procp, mrq)
 	getret = VOP_GETATTR(vp, &va, cred, procp);
 	if (!error)
 		error = getret;
-	if (error) {
-		vput(vp);
-		nfsm_reply(NFSX_POSTOPATTR(v3));
-		nfsm_srvpostop_attr(nfsd, getret, &va, &mb);
-		return (0);
-	}
+	if (error)
+		goto vbad;
+
 	if (off >= va.va_size)
 		cnt = 0;
 	else if ((off + reqlen) > va.va_size)
@@ -606,7 +603,8 @@ nfsrv_read(nfsd, slp, procp, mrq)
 			}
 			if (left > 0) {
 				MGET(m, M_WAIT, MT_DATA);
-				MCLGET(m, M_WAIT);
+				if (left >= MINCLSIZE)
+					MCLGET(m, M_WAIT);
 				m->m_len = 0;
 				m2->m_next = m;
 				m2 = m;
@@ -643,10 +641,7 @@ nfsrv_read(nfsd, slp, procp, mrq)
 			if (!error)
 				error = getret;
 			m_freem(mreq);
-			vput(vp);
-			nfsm_reply(NFSX_POSTOPATTR(v3));
-			nfsm_srvpostop_attr(nfsd, getret, &va, &mb);
-			return (0);
+			goto vbad;
 		}
 	} else
 		uiop->uio_resid = 0;
@@ -667,6 +662,13 @@ nfsrv_read(nfsd, slp, procp, mrq)
 	*tl = txdr_unsigned(cnt);
 nfsmout:
 	return(error);
+
+vbad:
+	vput(vp);
+bad:
+	nfsm_reply(0);
+	nfsm_srvpostop_attr(nfsd, getret, &va, &mb);
+	return (0);
 }
 
 /*
@@ -754,16 +756,11 @@ nfsrv_write(nfsd, slp, procp, mrq)
 	}
 	if (len > NFS_MAXDATA || len < 0 || i < len) {
 		error = EIO;
-		nfsm_reply(2 * NFSX_UNSIGNED);
-		nfsm_srvwcc(nfsd, forat_ret, &forat, aftat_ret, &va, &mb);
-		return (0);
+		goto bad;
 	}
 	error = nfsrv_fhtovp(fhp, 1, &vp, cred, slp, nam, &rdonly);
-	if (error) {
-		nfsm_reply(2 * NFSX_UNSIGNED);
-		nfsm_srvwcc(nfsd, forat_ret, &forat, aftat_ret, &va, &mb);
-		return (0);
-	}
+	if (error)
+		goto bad;
 	if (v3)
 		forat_ret = VOP_GETATTR(vp, &forat, cred, procp);
 	if (vp->v_type != VREG) {
@@ -771,16 +768,11 @@ nfsrv_write(nfsd, slp, procp, mrq)
 			error = EINVAL;
 		else
 			error = (vp->v_type == VDIR) ? EISDIR : EACCES;
+		goto vbad;
 	}
-	if (!error) {
-		error = nfsrv_access(vp, VWRITE, cred, rdonly, procp, 1);
-	}
-	if (error) {
-		vput(vp);
-		nfsm_reply(NFSX_WCCDATA(v3));
-		nfsm_srvwcc(nfsd, forat_ret, &forat, aftat_ret, &va, &mb);
-		return (0);
-	}
+	error = nfsrv_access(vp, VWRITE, cred, rdonly, procp, 1);
+	if (error)
+		goto vbad;
 
 	if (len > 0) {
 	    ivp = malloc(cnt * sizeof(struct iovec), M_TEMP, M_WAITOK);
@@ -796,19 +788,12 @@ nfsrv_write(nfsd, slp, procp, mrq)
 		mp = mp->m_next;
 	    }
 
-	    /*
-	     * XXX
-	     * The IO_METASYNC flag indicates that all metadata (and not just
-	     * enough to ensure data integrity) mus be written to stable storage
-	     * synchronously.
-	     * (IO_METASYNC is not yet implemented in 4.4BSD-Lite.)
-	     */
 	    if (stable == NFSV3WRITE_UNSTABLE)
 		ioflags = IO_NODELOCKED;
 	    else if (stable == NFSV3WRITE_DATASYNC)
 		ioflags = (IO_SYNC | IO_NODELOCKED);
 	    else
-		ioflags = (IO_METASYNC | IO_SYNC | IO_NODELOCKED);
+		ioflags = (IO_SYNC | IO_NODELOCKED);
 	    uiop->uio_resid = len;
 	    uiop->uio_rw = UIO_WRITE;
 	    uiop->uio_segflg = UIO_SYSSPACE;
@@ -847,6 +832,13 @@ nfsrv_write(nfsd, slp, procp, mrq)
 	}
 nfsmout:
 	return(error);
+
+vbad:
+	vput(vp);
+bad:
+	nfsm_reply(0);
+	nfsm_srvwcc(nfsd, forat_ret, &forat, aftat_ret, &va, &mb);
+	return (0);
 }
 
 /*
@@ -1045,7 +1037,7 @@ loop1:
 		else if (nfsd->nd_stable == NFSV3WRITE_DATASYNC)
 		    ioflags = (IO_SYNC | IO_NODELOCKED);
 		else
-		    ioflags = (IO_METASYNC | IO_SYNC | IO_NODELOCKED);
+		    ioflags = (IO_SYNC | IO_NODELOCKED);
 		uiop->uio_rw = UIO_WRITE;
 		uiop->uio_segflg = UIO_SYSSPACE;
 		uiop->uio_procp = (struct proc *)0;
@@ -1175,7 +1167,7 @@ nfsrvw_coalesce(struct nfsrv_descript *owp, struct nfsrv_descript *nfsd)
         int overlap;
         struct mbuf *mp;
 
-	splassert(IPL_SOFTCLOCK);
+	splsoftassert(IPL_SOFTCLOCK);
 
         LIST_REMOVE(nfsd, nd_hash);
         LIST_REMOVE(nfsd, nd_tq);
@@ -1283,7 +1275,9 @@ nfsrv_create(nfsd, slp, procp, mrq)
 				break;
 			}
 		case NFSV3CREATE_UNCHECKED:
-			nfsm_srvsattr(&va);
+			error = nfsm_srvsattr(&md, &va, mrep, &dpos);
+			if (error)
+				goto nfsmout;
 			break;
 		case NFSV3CREATE_EXCLUSIVE:
 			nfsm_dissect(cp, caddr_t, NFSX_V3CREATEVERF);
@@ -1432,7 +1426,7 @@ nfsrv_create(nfsd, slp, procp, mrq)
 		nfsm_srvwcc(nfsd, dirfor_ret, &dirfor, diraft_ret, &diraft,
 		    &mb);
 	} else {
-		nfsm_srvfhtom(fhp, v3);
+		nfsm_srvfhtom(&mb, fhp, v3);
 		fp = nfsm_build(&mb, NFSX_V2FATTR);
 		nfsm_srvfattr(nfsd, &va, fp);
 	}
@@ -1510,7 +1504,9 @@ nfsrv_mknod(nfsd, slp, procp, mrq)
 		goto out;
 	}
 	VATTR_NULL(&va);
-	nfsm_srvsattr(&va);
+	error = nfsm_srvsattr(&md, &va, mrep, &dpos);
+	if (error)
+		goto nfsmout;
 	if (vtyp == VCHR || vtyp == VBLK) {
 		nfsm_dissect(tl, u_int32_t *, 2 * NFSX_UNSIGNED);
 		major = fxdr_unsigned(u_int32_t, *tl++);
@@ -2007,7 +2003,9 @@ nfsrv_symlink(nfsd, slp, procp, mrq)
 		goto out;
 	VATTR_NULL(&va);
 	if (v3)
-		nfsm_srvsattr(&va);
+		error = nfsm_srvsattr(&md, &va, mrep, &dpos);
+		if (error)
+			goto nfsmout;
 	nfsm_strsiz(len2, NFS_MAXPATHLEN);
 	pathcp = malloc(len2 + 1, M_TEMP, M_WAITOK);
 	iv.iov_base = pathcp;
@@ -2150,7 +2148,9 @@ nfsrv_mkdir(nfsd, slp, procp, mrq)
 	}
 	VATTR_NULL(&va);
 	if (v3) {
-		nfsm_srvsattr(&va);
+		error = nfsm_srvsattr(&md, &va, mrep, &dpos);
+		if (error)
+			goto nfsmout;
 	} else {
 		nfsm_dissect(tl, u_int32_t *, NFSX_UNSIGNED);
 		va.va_mode = nfstov_mode(*tl++);
@@ -2191,7 +2191,7 @@ out:
 		nfsm_srvwcc(nfsd, dirfor_ret, &dirfor, diraft_ret, &diraft,
 		    &mb);
 	} else {
-		nfsm_srvfhtom(fhp, v3);
+		nfsm_srvfhtom(&mb, fhp, v3);
 		fp = nfsm_build(&mb, NFSX_V2FATTR);
 		nfsm_srvfattr(nfsd, &va, fp);
 	}
@@ -3118,14 +3118,17 @@ nfsrv_noop(nfsd, slp, procp, mrq)
 
 /*
  * Perform access checking for vnodes obtained from file handles that would
- * refer to files already opened by a Unix client. You cannot just use
- * vn_writechk() and VOP_ACCESS() for two reasons.
- * 1 - You must check for exported rdonly as well as MNT_RDONLY for the write case
+ * refer to files already opened by a Unix client.
+ * You cannot just use vn_writechk() and VOP_ACCESS() for two reasons:
+ * 1 - You must check for exported rdonly as well as MNT_RDONLY for the
+ *     write case
  * 2 - The owner is to be given access irrespective of mode bits for some
  *     operations, so that processes that chmod after opening a file don't
  *     break. I don't like this because it opens a security hole, but since
  *     the nfs server opens a security hole the size of a barn door anyhow,
- *     what the heck.
+ *     what the heck. A notable exception to this rule is when VOP_ACCESS()
+ *     returns EPERM (e.g. when a file is immutable) which is always an
+ *     error.
  */
 int
 nfsrv_access(vp, flags, cred, rdonly, p, override)
@@ -3169,7 +3172,7 @@ nfsrv_access(vp, flags, cred, rdonly, p, override)
 	 * Allow certain operations for the owner (reads and writes
 	 * on files that are already open).
 	 */
-	if (override && (error == EPERM || error == EACCES) &&
+	if (override && error == EACCES &&
 	    VOP_GETATTR(vp, &vattr, cred, p) == 0 &&
 	    cred->cr_uid == vattr.va_uid)
 		error = 0;

@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.171 2009/02/14 18:51:03 kettenis Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.173 2009/06/15 17:01:25 beck Exp $	*/
 
 /*
  * Copyright (c) 1999-2003 Michael Shalayeff

@@ -1,4 +1,4 @@
-#	$OpenBSD: GENERIC,v 1.233 2009/02/10 18:35:44 damien Exp $
+#	$OpenBSD: GENERIC,v 1.241 2009/07/05 17:13:25 kettenis Exp $
 #
 # For further information on compiling OpenBSD kernels, see the config(8)
 # man page.
@@ -111,7 +111,6 @@ scsibus* at ahc?
 siop*	at pci?			# NCR 538XX SCSI controllers
 scsibus* at siop?
 isp*	at pci?			# Qlogic ISP [12]0x0 SCSI/FibreChannel
-option ISP_COMPILE_FW=1
 pcscp*	at pci?			# AMD 53c974 PCscsi-PCI SCSI
 scsibus* at pcscp?
 mpi*	at pci?			# LSI Logic Fusion MPT Message Passing Interface
@@ -230,6 +229,7 @@ ural*	at uhub?		# Ralink RT2500USB
 uath*	at uhub?		# Atheros AR5005UG/AR5005UX
 rum*	at uhub?		# Ralink RT2501USB/RT2601USB
 run*	at uhub?		# Ralink RT2700U/RT2800U/RT3000U
+zyd*	at uhub?		# Zydas ZD1211
 url*	at uhub?		# Realtek RTL8150L based adapters
 wi*	at uhub?		# WaveLAN IEEE 802.11DS
 urio*	at uhub?		# Diamond Multimedia Rio 500
@@ -283,6 +283,8 @@ sabtty* at sab?
 com*	at ebus?
 comkbd*	at ebus?
 wskbd* at comkbd? mux 1
+comms*	at ebus?
+wsmouse* at comms? mux 0
 
 # Z8530 based serial ports
 zs*	at sbus?
@@ -290,6 +292,8 @@ zs*	at fhc?
 zstty*	at zs?
 zskbd*	at zs?
 wskbd*	at zskbd? mux 1
+zsms*	at zs?
+wsmouse* at zsms? mux 0
 
 # i8042 based serial ports (PS/2 ports)
 pckbc*	at ebus?			# controller
@@ -340,6 +344,8 @@ vrng0	at vbus?
 vdsk*	at cbus?
 scsibus* at vdsk?
 vnet*	at cbus?
+vcc*	at cbus?
+vcctty*	at vcc?
 
 ## Lance Ethernet - AMD7990
 le*		at sbus?
@@ -387,9 +393,7 @@ wd*	at wdc? flags 0x0000
 dma*	at sbus?				# SBus
 esp*	at dma?					# SBus
 esp*	at sbus?
-
 isp*	at sbus?
-option ISP_COMPILE_1000_FW=1
 
 # SCSI bus layer.  SCSI devices attach to the SCSI bus, which attaches
 # to the underlying hardware controller.
@@ -473,10 +477,18 @@ wsdisplay*	at cgtwelve?
 creator*	at mainbus0		# Creator3D/Elite3D framebuffers
 creator*	at upa0
 wsdisplay*	at creator?
+gfxp*		at pci?			# PGX32 framebuffer
+wsdisplay*	at gfxp?
 ifb*		at pci?			# Expert3D/XVR-500 framebuffers
 wsdisplay*	at ifb?
+machfb*		at pci?			# PGX/PGX64 framebuffers
+wsdisplay*	at machfb?
 mgx*		at sbus?		# SMS MGX/MGXPlus framebuffer
 wsdisplay*	at mgx?
+radeonfb*	at pci?			# XVR-100 framebuffer
+wsdisplay*	at radeonfb?
+raptor*		at pci?			# Raptor framebuffer
+wsdisplay*	at raptor?
 rfx*		at sbus?		# RasterFlex framebuffer series
 wsdisplay*	at rfx?
 tvtwo*		at sbus?		# Parallax XVideo/PowerVideo framebuffer

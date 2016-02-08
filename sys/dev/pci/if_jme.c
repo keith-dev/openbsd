@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_jme.c,v 1.17 2009/02/25 13:10:38 jsg Exp $	*/
+/*	$OpenBSD: if_jme.c,v 1.19 2009/06/05 06:05:06 naddy Exp $	*/
 /*-
  * Copyright (c) 2008, Pyun YongHyeon <yongari@FreeBSD.org>
  * All rights reserved.
@@ -506,12 +506,12 @@ jme_attach(struct device *parent, struct device *self, void *aux)
 	memtype = pci_mapreg_type(pa->pa_pc, pa->pa_tag, JME_PCIR_BAR);
 	if (pci_mapreg_map(pa, JME_PCIR_BAR, memtype, 0, &sc->jme_mem_bt,
 	    &sc->jme_mem_bh, NULL, &sc->jme_mem_size, 0)) {
-		printf(": could not map mem space\n");
+		printf(": can't map mem space\n");
 		return;
 	}
 
 	if (pci_intr_map(pa, &ih) != 0) {
-		printf(": could not map interrupt\n");
+		printf(": can't map interrupt\n");
 		return;
 	}
 
@@ -1689,9 +1689,11 @@ jme_rxpkt(struct jme_softc *sc)
 			m->m_data += JME_RX_PAD_BYTES;
 
 			/* Set checksum information. */
-			if (flags & JME_RD_IPV4) {
-				if (flags & JME_RD_IPCSUM)
-					m->m_pkthdr.csum_flags |= M_IPV4_CSUM_IN_OK;
+			if (flags & (JME_RD_IPV4|JME_RD_IPV6)) {
+				if ((flags & JME_RD_IPV4) &&
+				    (flags & JME_RD_IPCSUM))
+					m->m_pkthdr.csum_flags |=
+					    M_IPV4_CSUM_IN_OK;
 				if ((flags & JME_RD_MORE_FRAG) == 0 &&
 				    ((flags & (JME_RD_TCP | JME_RD_TCPCSUM)) ==
 				     (JME_RD_TCP | JME_RD_TCPCSUM) ||

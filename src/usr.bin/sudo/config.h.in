@@ -32,6 +32,9 @@
 /* A colon-separated list of pathnames to be used as the editor for visudo. */
 #undef EDITOR
 
+/* Define to enable environment debugging. */
+#undef ENV_DEBUG
+
 /* Define to 1 if you want visudo to honor the EDITOR and VISUAL env
    variables. */
 #undef ENV_EDITOR
@@ -70,6 +73,9 @@
 /* Define to 1 if you use BSD authentication. */
 #undef HAVE_BSD_AUTH_H
 
+/* Define to 1 to enable BSM auditing. */
+#undef HAVE_BSM_AUDIT
+
 /* Define to 1 if you have the `closefrom' function. */
 #undef HAVE_CLOSEFROM
 
@@ -91,6 +97,9 @@
 
 /* Define to 1 if you have the `dispcrypt' function. */
 #undef HAVE_DISPCRYPT
+
+/* Define to 1 if you have the <dlfcn.h> header file. */
+#undef HAVE_DLFCN_H
 
 /* Define to 1 if your glob.h defines the GLOB_BRACE and GLOB_TILDE flags. */
 #undef HAVE_EXTENDED_GLOB
@@ -243,11 +252,17 @@
 /* Define to 1 if you have the `ldap_search_ext_s' function. */
 #undef HAVE_LDAP_SEARCH_EXT_S
 
+/* Define to 1 if you have the `ldap_ssl_client_init' function. */
+#undef HAVE_LDAP_SSL_CLIENT_INIT
+
 /* Define to 1 if you have the <ldap_ssl.h> header file. */
 #undef HAVE_LDAP_SSL_H
 
 /* Define to 1 if you have the `ldap_start_tls_s' function. */
 #undef HAVE_LDAP_START_TLS_S
+
+/* Define to 1 if you have the `ldap_start_tls_s_np' function. */
+#undef HAVE_LDAP_START_TLS_S_NP
 
 /* Define to 1 if you have the `ldap_str2dn' function. */
 #undef HAVE_LDAP_STR2DN
@@ -332,6 +347,9 @@
 
 /* Define to 1 to enable SELinux RBAC support. */
 #undef HAVE_SELINUX
+
+/* Define to 1 if you have the `setenv' function. */
+#undef HAVE_SETENV
 
 /* Define to 1 if you have the `seteuid' function. */
 #undef HAVE_SETEUID
@@ -460,6 +478,9 @@
 /* Define to 1 if you have the <unistd.h> header file. */
 #undef HAVE_UNISTD_H
 
+/* Define to 1 if you have the `unsetenv' function. */
+#undef HAVE_UNSETENV
+
 /* Define to 1 if you have the `utimes' function. */
 #undef HAVE_UTIMES
 
@@ -492,6 +513,9 @@
 
 /* The message given when a bad password is entered. */
 #undef INCORRECT_PASSWORD
+
+/* The name of libvas.so */
+#undef LIBVAS_SO
 
 /* The syslog facility sudo will use. */
 #undef LOGFAC
@@ -534,6 +558,21 @@
 /* Define to 1 if root should not be allowed to use sudo. */
 #undef NO_ROOT_SUDO
 
+/* Define to the address where bug reports for this package should be sent. */
+#undef PACKAGE_BUGREPORT
+
+/* Define to the full name of this package. */
+#undef PACKAGE_NAME
+
+/* Define to the full name and version of this package. */
+#undef PACKAGE_STRING
+
+/* Define to the one symbol short name of this package. */
+#undef PACKAGE_TARNAME
+
+/* Define to the version of this package. */
+#undef PACKAGE_VERSION
+
 /* The default password prompt. */
 #undef PASSPROMPT
 
@@ -549,6 +588,9 @@
 
 /* The syslog priority sudo will use for successful attempts. */
 #undef PRI_SUCCESS
+
+/* Define to 1 if the `putenv' has a const argument.  */
+#undef PUTENV_CONST
 
 /* Define as the return type of signal handlers (`int' or `void'). */
 #undef RETSIGTYPE
@@ -601,6 +643,9 @@
 /* The number of tries a user gets to enter their password. */
 #undef TRIES_FOR_PASSWORD
 
+/* Define to 1 if the `unsetenv' function returns void instead of `int'. */
+#undef UNSETENV_VOID
+
 /* Define to 1 if you want to insult the user for entering an incorrect
    password. */
 #undef USE_INSULTS
@@ -610,6 +655,9 @@
 
 /* Define to 1 if you want a different ticket file for each tty. */
 #undef USE_TTY_TICKETS
+
+/* Define to 1 if using a non-unix group lookup implementation. */
+#undef USING_NONUNIX_GROUPS
 
 /* Define to avoid using the passwd/shadow file for authentication. */
 #undef WITHOUT_PASSWD

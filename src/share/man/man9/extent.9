@@ -1,4 +1,4 @@
-.\"	$OpenBSD: extent.9,v 1.12 2008/06/26 05:42:08 ray Exp $
+.\"	$OpenBSD: extent.9,v 1.14 2009/04/19 15:26:52 kettenis Exp $
 .\"	$NetBSD: extent.9,v 1.15 1999/03/16 00:40:47 garbled Exp $
 .\"
 .\" Copyright (c) 1996, 1998 The NetBSD Foundation, Inc.
@@ -28,7 +28,7 @@
 .\" ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 .\" POSSIBILITY OF SUCH DAMAGE.
 .\"
-.Dd $Mdocdate: June 26 2008 $
+.Dd $Mdocdate: April 19 2009 $
 .Dt EXTENT 9
 .Os
 .Sh NAME
@@ -98,6 +98,12 @@ is set, internal coalescing of regions is disabled,
 and only entire regions may be freed within the extent map, so that
 .Fn extent_free
 will never have to allocate a region descriptor.
+If the flag
+.Dv EX_FILLED
+is set, the entire space managed by the extent map will be allocated
+upon creation of the extent map, such that selected regions may be
+made available through calls to
+.Fn extent_free .
 .Pp
 Some applications may want to use an extent map but
 can't use
@@ -125,6 +131,11 @@ flag
 may be passed to extent requests to indicate that a fixed extent
 map may be extended using a call to
 .Fn malloc .
+Note that passing the flag
+.Dv EX_FILLED
+to
+.Fn extent_create
+will consume a region descriptor upon creation of the extent map.
 .Pp
 The caller should pass the flag
 .Dv EX_WAITOK
@@ -234,12 +245,18 @@ beginning at
 .Fa start
 with the size
 .Fa size .
+If the caller specifies the
+.Dv EX_CONFLICTOK
+flag, the allocation will succeed even if part of the requested region
+has already been allocated.
 The caller may specify that it is okay to wait for the indicated
 region to be free by setting the flag
 .Dv EX_WAITSPACE .
-If
+If neither
 .Dv EX_WAITSPACE
-is not set, the allocation will fail if the request can not be
+nor
+.Dv EX_CONFLICTOK
+is set, the allocation will fail if the request can not be
 satisfied without sleeping.
 .Pp
 .Fn extent_free

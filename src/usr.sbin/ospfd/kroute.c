@@ -1,4 +1,4 @@
-/*	$OpenBSD: kroute.c,v 1.67 2009/01/16 20:50:13 gollo Exp $ */
+/*	$OpenBSD: kroute.c,v 1.71 2009/06/05 22:40:24 chris Exp $ */
 
 /*
  * Copyright (c) 2004 Esben Norby <norby@openbsd.org>
@@ -46,6 +46,7 @@ struct {
 	int			fib_sync;
 	int			fd;
 	struct event		ev;
+	u_int			rdomain;
 } kr_state;
 
 struct kroute_node {
@@ -120,12 +121,13 @@ kif_init(void)
 }
 
 int
-kr_init(int fs)
+kr_init(int fs, u_int rdomain)
 {
 	int		opt = 0, rcvbuf, default_rcvbuf;
 	socklen_t	optlen;
 
 	kr_state.fib_sync = fs;
+	kr_state.rdomain = rdomain;
 
 	if ((kr_state.fd = socket(AF_ROUTE, SOCK_RAW, 0)) == -1) {
 		log_warn("kr_init: socket");
@@ -467,12 +469,14 @@ kr_redist_eval(struct kroute *kr, struct rroute *rr)
 	    (a >> IN_CLASSA_NSHIFT) == IN_LOOPBACKNET)
 		goto dont_redistribute;
 	/*
-	 * Consider networks with nexthop loopback as not redistributable.
+	 * Consider networks with nexthop loopback as not redistributable
+	 * unless it is a reject or blackhole route.
 	 */
-	if (kr->nexthop.s_addr == htonl(INADDR_LOOPBACK))
+	if (kr->nexthop.s_addr == htonl(INADDR_LOOPBACK) &&
+	    !(kr->flags & (F_BLACKHOLE|F_REJECT)))
 		goto dont_redistribute;
 
-	/* Should we redistrubute this route? */
+	/* Should we redistribute this route? */
 	if (!ospf_redistribute(kr, &metric))
 		goto dont_redistribute;
 
@@ -1040,6 +1044,7 @@ send_rtmsg(int fd, int action, struct kroute *kroute)
 	hdr.rtm_version = RTM_VERSION;
 	hdr.rtm_type = action;
 	hdr.rtm_priority = RTP_OSPF;
+	hdr.rtm_tableid = kr_state.rdomain;	/* rtableid */
 	if (action == RTM_CHANGE)
 		hdr.rtm_fmask = RTF_REJECT|RTF_BLACKHOLE;
 	else
@@ -1153,7 +1158,7 @@ fetchtable(void)
 	mib[3] = AF_INET;
 	mib[4] = NET_RT_DUMP;
 	mib[5] = 0;
-	mib[6] = 0;	/* rtableid */
+	mib[6] = kr_state.rdomain;	/* rtableid */
 
 	if (sysctl(mib, 7, NULL, &len, NULL, 0) == -1) {
 		log_warn("sysctl");
@@ -1174,7 +1179,7 @@ fetchtable(void)
 		rtm = (struct rt_msghdr *)next;
 		if (rtm->rtm_version != RTM_VERSION)
 			continue;
-		sa = (struct sockaddr *)(rtm + 1);
+		sa = (struct sockaddr *)(next + rtm->rtm_hdrlen);
 		get_rtaddrs(rtm->rtm_addrs, sa, rti_info);
 
 		if ((sa = rti_info[RTAX_DST]) == NULL)
@@ -1199,6 +1204,10 @@ fetchtable(void)
 			sa_in = (struct sockaddr_in *)rti_info[RTAX_NETMASK];
 			if (rtm->rtm_flags & RTF_STATIC)
 				kr->r.flags |= F_STATIC;
+			if (rtm->rtm_flags & RTF_BLACKHOLE)
+				kr->r.flags |= F_BLACKHOLE;
+			if (rtm->rtm_flags & RTF_REJECT)
+				kr->r.flags |= F_REJECT;
 			if (rtm->rtm_flags & RTF_DYNAMIC)
 				kr->r.flags |= F_DYNAMIC;
 			if (sa_in != NULL) {
@@ -1355,10 +1364,10 @@ dispatch_rtmsg(void)
 
 		if (rtm->rtm_type == RTM_ADD || rtm->rtm_type == RTM_CHANGE ||
 		    rtm->rtm_type == RTM_DELETE) {
-			sa = (struct sockaddr *)(rtm + 1);
+			sa = (struct sockaddr *)(next + rtm->rtm_hdrlen);
 			get_rtaddrs(rtm->rtm_addrs, sa, rti_info);
 
-			if (rtm->rtm_tableid != 0)
+			if (rtm->rtm_tableid != kr_state.rdomain)
 				continue;
 
 			if (rtm->rtm_pid == kr_state.pid) /* caused by us */
@@ -1393,6 +1402,10 @@ dispatch_rtmsg(void)
 					    prefixlen_classful(prefix.s_addr);
 				if (rtm->rtm_flags & RTF_STATIC)
 					flags |= F_STATIC;
+				if (rtm->rtm_flags & RTF_BLACKHOLE)
+					flags |= F_BLACKHOLE;
+				if (rtm->rtm_flags & RTF_REJECT)
+					flags |= F_REJECT;
 				if (rtm->rtm_flags & RTF_DYNAMIC)
 					flags |= F_DYNAMIC;
 				break;

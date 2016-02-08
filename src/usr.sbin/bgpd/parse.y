@@ -1,4 +1,4 @@
-/*	$OpenBSD: parse.y,v 1.219 2009/02/16 18:08:32 sthen Exp $ */
+/*	$OpenBSD: parse.y,v 1.231 2009/06/06 01:10:29 claudio Exp $ */
 
 /*
  * Copyright (c) 2002, 2003, 2004 Henning Brauer <henning@openbsd.org>
@@ -39,6 +39,7 @@
 #include "bgpd.h"
 #include "mrt.h"
 #include "session.h"
+#include "rde.h"
 
 TAILQ_HEAD(files, file)		 files = TAILQ_HEAD_INITIALIZER(files);
 static struct file {
@@ -110,7 +111,10 @@ struct filter_match_l {
 struct peer	*alloc_peer(void);
 struct peer	*new_peer(void);
 struct peer	*new_group(void);
-int		 add_mrtconfig(enum mrt_type, char *, time_t, struct peer *);
+int		 add_mrtconfig(enum mrt_type, char *, time_t, struct peer *,
+		    char *);
+int		 add_rib(char *, u_int16_t);
+int		 find_rib(char *);
 int		 get_id(struct peer *);
 int		 expand_rule(struct filter_rule *, struct filter_peers_l *,
 		    struct filter_match_l *, struct filter_set_head *);
@@ -155,10 +159,10 @@ typedef struct {
 %}
 
 %token	AS ROUTERID HOLDTIME YMIN LISTEN ON FIBUPDATE RTABLE
-%token	RDE EVALUATE IGNORE COMPARE
+%token	RDE RIB EVALUATE IGNORE COMPARE
 %token	GROUP NEIGHBOR NETWORK
 %token	REMOTEAS DESCR LOCALADDR MULTIHOP PASSIVE MAXPREFIX RESTART
-%token	ANNOUNCE DEMOTE
+%token	ANNOUNCE DEMOTE CONNECTRETRY
 %token	ENFORCE NEIGHBORAS CAPABILITIES REFLECTOR DEPEND DOWN SOFTRECONFIG
 %token	DUMP IN OUT
 %token	LOG ROUTECOLL TRANSPARENT
@@ -178,7 +182,7 @@ typedef struct {
 %token	<v.number>		NUMBER
 %type	<v.number>		asnumber as4number optnumber yesno inout
 %type	<v.number>		espah family restart
-%type	<v.string>		string
+%type	<v.string>		string filter_rib
 %type	<v.addr>		address
 %type	<v.prefix>		prefix addrspec
 %type	<v.u8>			action quick direction delete
@@ -207,8 +211,8 @@ grammar		: /* empty */
 		;
 
 asnumber	: NUMBER			{
-			if ($1 < 0 || $1 >= USHRT_MAX) {
-				yyerror("AS too big: max %u", USHRT_MAX - 1);
+			if ($1 < 0 || $1 >= ASNUM_MAX) {
+				yyerror("AS too big: max %u", ASNUM_MAX - 1);
 				YYERROR;
 			}
 		}
@@ -381,6 +385,24 @@ conf_main	: AS as4number		{
 			else
 				conf->flags &= ~BGPD_FLAG_NO_EVALUATE;
 		}
+		| RDE RIB STRING {
+			if (add_rib($3, F_RIB_NOFIB)) {
+				free($3);
+				YYERROR;
+			}
+			free($3);
+		}
+		| RDE RIB STRING yesno EVALUATE {
+			if ($4) {
+				free($3);
+				YYERROR;
+			}
+			if (!add_rib($3, F_RIB_NOEVALUATE)) {
+				free($3);
+				YYERROR;
+			}
+			free($3);
+		}
 		| TRANSPARENT yesno	{
 			if ($2 == 1)
 				conf->flags |= BGPD_FLAG_DECISION_TRANS_AS;
@@ -469,11 +491,41 @@ conf_main	: AS as4number		{
 				YYERROR;
 			}
 			free($2);
-			if (add_mrtconfig(action, $3, $4, NULL) == -1) {
+			if (add_mrtconfig(action, $3, $4, NULL, NULL) == -1) {
 				free($3);
 				YYERROR;
 			}
 			free($3);
+		}
+		| DUMP RIB STRING STRING STRING optnumber		{
+			int action;
+
+			if ($6 < 0 || $6 > UINT_MAX) {
+				yyerror("bad timeout");
+				free($3);
+				free($4);
+				free($5);
+				YYERROR;
+			}
+			if (!strcmp($4, "table"))
+				action = MRT_TABLE_DUMP;
+			else if (!strcmp($4, "table-mp"))
+				action = MRT_TABLE_DUMP_MP;
+			else {
+				yyerror("unknown mrt dump type");
+				free($3);
+				free($4);
+				free($5);
+				YYERROR;
+			}
+			free($4);
+			if (add_mrtconfig(action, $5, $6, NULL, $3) == -1) {
+				free($3);
+				free($5);
+				YYERROR;
+			}
+			free($3);
+			free($5);
 		}
 		| mrtdump
 		| RDE STRING EVALUATE		{
@@ -529,6 +581,13 @@ conf_main	: AS as4number		{
 			}
 			conf->rtableid = $2;
 		}
+		| CONNECTRETRY NUMBER {
+			if ($2 > USHRT_MAX || $2 < 1) {
+				yyerror("invalid connect-retry");
+				YYERROR;
+			}
+			conf->connectretry = $2;
+		}
 		;
 
 mrtdump		: DUMP STRING inout STRING optnumber	{
@@ -550,7 +609,8 @@ mrtdump		: DUMP STRING inout STRING optnumber	{
 				free($4);
 				YYERROR;
 			}
-			if (add_mrtconfig(action, $4, $5, curpeer) == -1) {
+			if (add_mrtconfig(action, $4, $5, curpeer, NULL) ==
+			    -1) {
 				free($2);
 				free($4);
 				YYERROR;
@@ -758,6 +818,22 @@ peeropts	: REMOTEAS as4number	{
 		}
 		| DOWN		{
 			curpeer->conf.down = 1;
+		}
+		| RIB STRING	{
+			if (!find_rib($2)) {
+				yyerror("rib \"%s\" does not exist.", $2);
+				free($2);
+				YYERROR;
+			}
+			if (strlcpy(curpeer->conf.rib, $2,
+			    sizeof(curpeer->conf.rib)) >=
+			    sizeof(curpeer->conf.rib)) {
+				yyerror("rib name \"%s\" too long: max %u",
+				   $2, sizeof(curpeer->conf.rib) - 1);
+				free($2);
+				YYERROR;
+			}
+			free($2);
 		}
 		| HOLDTIME NUMBER	{
 			if ($2 < MIN_HOLDTIME || $2 > USHRT_MAX) {
@@ -1058,6 +1134,12 @@ peeropts	: REMOTEAS as4number	{
 			else
 				curpeer->conf.softreconfig_out = $3;
 		}
+		| TRANSPARENT yesno	{
+			if ($2 == 1)
+				curpeer->conf.flags |= PEERFLAG_TRANS_AS;
+			else
+				curpeer->conf.flags &= ~PEERFLAG_TRANS_AS;
+		}
 		;
 
 restart		: /* nada */		{ $$ = 0; }
@@ -1115,16 +1197,37 @@ encspec		: /* nada */	{
 		}
 		;
 
-filterrule	: action quick direction filter_peer_h filter_match_h filter_set
+filterrule	: action quick filter_rib direction filter_peer_h filter_match_h filter_set
 		{
 			struct filter_rule	 r;
 
 			bzero(&r, sizeof(r));
 			r.action = $1;
 			r.quick = $2;
-			r.dir = $3;
-
-			if (expand_rule(&r, $4, &$5, $6) == -1)
+			r.dir = $4;
+			if ($3) {
+				if (r.dir != DIR_IN) {
+					yyerror("rib only allowed on \"from\" "
+					    "rules.");
+					free($3);
+					YYERROR;
+				}
+				if (!find_rib($3)) {
+					yyerror("rib \"%s\" does not exist.",
+					    $3);
+					free($3);
+					YYERROR;
+				}
+				if (strlcpy(r.rib, $3, sizeof(r.rib)) >=
+				    sizeof(r.rib)) {
+					yyerror("rib name \"%s\" too long: "
+					    "max %u", $3, sizeof(r.rib) - 1);
+					free($3);
+					YYERROR;
+				}
+				free($3);
+			}
+			if (expand_rule(&r, $5, &$6, $7) == -1)
 				YYERROR;
 		}
 		;
@@ -1141,6 +1244,9 @@ quick		: /* empty */	{ $$ = 0; }
 direction	: FROM		{ $$ = DIR_IN; }
 		| TO		{ $$ = DIR_OUT; }
 		;
+
+filter_rib	: /* empty */	{ $$ = NULL; }
+		| RIB STRING	{ $$ = $2; }
 
 filter_peer_h	: filter_peer
 		| '{' filter_peer_l '}'		{ $$ = $2; }
@@ -1771,6 +1877,7 @@ lookup(char *s)
 		{ "capabilities",	CAPABILITIES},
 		{ "community",		COMMUNITY},
 		{ "compare",		COMPARE},
+		{ "connect-retry",	CONNECTRETRY},
 		{ "connected",		CONNECTED},
 		{ "delete",		DELETE},
 		{ "demote",		DEMOTE},
@@ -1826,6 +1933,7 @@ lookup(char *s)
 		{ "reject",		REJECT},
 		{ "remote-as",		REMOTEAS},
 		{ "restart",		RESTART},
+		{ "rib",		RIB},
 		{ "route-collector",	ROUTECOLL},
 		{ "route-reflector",	REFLECTOR},
 		{ "router-id",		ROUTERID},
@@ -2120,9 +2228,13 @@ pushfile(const char *name, int secret)
 {
 	struct file	*nfile;
 
-	if ((nfile = calloc(1, sizeof(struct file))) == NULL ||
-	    (nfile->name = strdup(name)) == NULL) {
+	if ((nfile = calloc(1, sizeof(struct file))) == NULL) {
 		log_warn("malloc");
+		return (NULL);
+	}
+	if ((nfile->name = strdup(name)) == NULL) {
+		log_warn("malloc");
+		free(nfile);
 		return (NULL);
 	}
 	if ((nfile->stream = fopen(nfile->name, "r")) == NULL) {
@@ -2208,6 +2320,9 @@ parse_config(char *filename, struct bgpd_config *xconf,
 	TAILQ_INIT(netconf);
 	/* init the empty filter list for later */
 	TAILQ_INIT(xfilter_l);
+
+	add_rib("Adj-RIB-In", F_RIB_NOEVALUATE);
+	add_rib("Loc-RIB", 0);
 
 	yyparse();
 	errors = file->errors;
@@ -2454,6 +2569,8 @@ alloc_peer(void)
 	p->conf.capabilities.refresh = 1;
 	p->conf.capabilities.restart = 0;
 	p->conf.capabilities.as4byte = 0;
+	p->conf.local_as = conf->as;
+	p->conf.local_short_as = conf->short_as;
 	p->conf.softreconfig_in = 1;
 	p->conf.softreconfig_out = 1;
 
@@ -2476,9 +2593,12 @@ new_peer(void)
 		    sizeof(p->conf.descr)) >= sizeof(p->conf.descr))
 			fatalx("new_peer descr strlcpy");
 		p->conf.groupid = curgroup->conf.id;
+		p->conf.local_as = curgroup->conf.local_as;
+		p->conf.local_short_as = curgroup->conf.local_short_as;
 	}
 	p->next = NULL;
-
+	if (conf->flags & BGPD_FLAG_DECISION_TRANS_AS)
+		p->conf.flags |= PEERFLAG_TRANS_AS;
 	return (p);
 }
 
@@ -2489,11 +2609,15 @@ new_group(void)
 }
 
 int
-add_mrtconfig(enum mrt_type type, char *name, time_t timeout, struct peer *p)
+add_mrtconfig(enum mrt_type type, char *name, time_t timeout, struct peer *p,
+    char *rib)
 {
 	struct mrt	*m, *n;
 
 	LIST_FOREACH(m, mrtconf, entry) {
+		if ((rib && strcmp(rib, m->rib)) ||
+		    (!rib && *m->rib))
+			continue;
 		if (p == NULL) {
 			if (m->peer_id != 0 || m->group_id != 0)
 				continue;
@@ -2529,9 +2653,59 @@ add_mrtconfig(enum mrt_type type, char *name, time_t timeout, struct peer *p)
 			n->group_id = 0;
 		}
 	}
+	if (rib) {
+		if (!find_rib(rib)) {
+			yyerror("rib \"%s\" does not exist.", rib);
+			free(n);
+			return (-1);
+		}
+		if (strlcpy(n->rib, rib, sizeof(n->rib)) >=
+		    sizeof(n->rib)) {
+			yyerror("rib name \"%s\" too long: max %u",
+			    name, sizeof(n->rib) - 1);
+			free(n);
+			return (-1);
+		}
+	}
 
 	LIST_INSERT_HEAD(mrtconf, n, entry);
 
+	return (0);
+}
+
+int
+add_rib(char *name, u_int16_t flags)
+{
+	struct rde_rib	*rr;
+
+	if (find_rib(name)) {
+		yyerror("rib \"%s\" allready exists.", name);
+		return (-1);
+	}
+
+	if ((rr = calloc(1, sizeof(*rr))) == NULL) {
+		log_warn("add_rib");
+		return (-1);
+	}
+	if (strlcpy(rr->name, name, sizeof(rr->name)) >= sizeof(rr->name)) {
+		yyerror("rib name \"%s\" too long: max %u",
+		   name, sizeof(rr->name) - 1);
+		return (-1);
+	}
+	rr->flags |= flags;
+	SIMPLEQ_INSERT_TAIL(&ribnames, rr, entry);
+	return (0);
+}
+
+int
+find_rib(char *name)
+{
+	struct rde_rib	*rr;
+
+	SIMPLEQ_FOREACH(rr, &ribnames, entry) {
+		if (!strcmp(rr->name, name))
+			return (1);
+	}
 	return (0);
 }
 

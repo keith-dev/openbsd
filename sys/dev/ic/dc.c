@@ -1,4 +1,4 @@
-/*	$OpenBSD: dc.c,v 1.108 2009/01/11 16:54:59 blambert Exp $	*/
+/*	$OpenBSD: dc.c,v 1.111 2009/06/26 19:11:17 deraadt Exp $	*/
 
 /*
  * Copyright (c) 1997, 1998, 1999
@@ -1651,6 +1651,18 @@ dc_attach(struct dc_softc *sc)
 		    &sc->sc_arpcom.ac_enaddr, ETHER_ADDR_LEN);
 		break;
 	case DC_TYPE_XIRCOM:
+		/* Some newer units have the MAC at offset 8 */
+		dc_read_eeprom(sc, (caddr_t)&sc->sc_arpcom.ac_enaddr, 8, 3, 0);
+
+		if (sc->sc_arpcom.ac_enaddr[0] == 0x00 &&
+		    sc->sc_arpcom.ac_enaddr[1] == 0x10 &&
+		    sc->sc_arpcom.ac_enaddr[2] == 0xa4)
+			break;
+		if (sc->sc_arpcom.ac_enaddr[0] == 0x00 &&
+		    sc->sc_arpcom.ac_enaddr[1] == 0x80 &&
+		    sc->sc_arpcom.ac_enaddr[2] == 0xc7)
+			break;
+		dc_read_eeprom(sc, (caddr_t)&sc->sc_arpcom.ac_enaddr, 3, 3, 0);
 		break;
 	default:
 		dc_read_eeprom(sc, (caddr_t)&sc->sc_arpcom.ac_enaddr,
@@ -3140,6 +3152,30 @@ dc_power(int why, void *arg)
 			dc_init(sc);
 	}
 	splx(s);
+}
+
+int
+dc_detach(struct dc_softc *sc)
+{
+	struct ifnet *ifp = &sc->sc_arpcom.ac_if;
+
+	if (LIST_FIRST(&sc->sc_mii.mii_phys) != NULL)
+		mii_detach(&sc->sc_mii, MII_PHY_ANY, MII_OFFSET_ANY);
+
+	if (sc->dc_srom)
+		free(sc->dc_srom, M_DEVBUF);
+
+	timeout_del(&sc->dc_tick_tmo);
+
+	ether_ifdetach(ifp);
+	if_detach(ifp);
+
+	if (sc->sc_dhook != NULL)
+		shutdownhook_disestablish(sc->sc_dhook);
+	if (sc->sc_pwrhook != NULL)
+		powerhook_disestablish(sc->sc_pwrhook);
+
+	return (0);
 }
 
 struct cfdriver dc_cd = {

@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.148 2008/10/27 00:26:33 ratchov Exp $
+#	$OpenBSD: Makefile,v 1.152 2009/06/24 13:04:24 millert Exp $
 #	$NetBSD: Makefile,v 1.59 1996/05/15 21:36:43 jtc Exp $
 
 #	@(#)Makefile	5.45.1.1 (Berkeley) 5/6/91
@@ -19,8 +19,9 @@ FILES=	a.out.h ar.h assert.h bitstring.h blf.h bm.h bsd_auth.h cast.h \
 	md5.h memory.h mpool.h ndbm.h netdb.h netgroup.h nlist.h nl_types.h \
 	ohash.h paths.h poll.h pwd.h ranlib.h re_comp.h \
 	readpassphrase.h regex.h resolv.h rmd160.h search.h setjmp.h \
-	sgtty.h sha1.h sha2.h skipjack.h signal.h stab.h stdbool.h stddef.h \
-	stdio.h stdlib.h string.h strings.h struct.h sysexits.h tar.h \
+	sgtty.h sha1.h sha2.h skipjack.h signal.h sndio.h stab.h \
+	stdbool.h stddef.h stdio.h stdlib.h \
+	string.h strings.h struct.h sysexits.h tar.h \
 	time.h ttyent.h tzfile.h unistd.h utime.h utmp.h vis.h \
 	wchar.h wctype.h
 
@@ -34,15 +35,14 @@ MFILES=	float.h frame.h
 LFILES=	fcntl.h syslog.h termios.h stdarg.h stdint.h varargs.h
 
 DIRS=	arpa protocols rpc rpcsvc
-LDIRS=	altq crypto ddb dev isofs miscfs net netatalk netinet netinet6 \
-	netmpls netnatm net80211 netbt nfs scsi sys ufs uvm xfs
+LDIRS=	altq crypto ddb dev isofs miscfs msdosfs net netatalk netinet netinet6 \
+	netmpls netnatm net80211 netbt nfs nnpfs ntfs scsi sys ufs uvm
 
 # Directories with an includes target
 RDIRS=	../lib/libpthread ../lib/libcompat ../lib/libcurses \
 	../lib/libform ../lib/libssl ../lib/libmenu \
 	../lib/libocurses ../lib/libossaudio ../lib/libpanel ../lib/librpcsvc \
-	../lib/libsndio ../lib/libskey ../lib/libsectok \
-	../lib/libedit ../lib/libexpat \
+	../lib/libskey ../lib/libsectok ../lib/libedit ../lib/libexpat \
 	../lib/libpcap ../lib/libutil ../lib/libusbhid ../lib/libwrap \
 	../lib/libz ../lib/libkeynote ../lib/libevent ../usr.bin/lex \
 	../gnu/lib/libreadline ../gnu/usr.sbin/sendmail/libmilter \

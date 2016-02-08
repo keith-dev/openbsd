@@ -1,4 +1,4 @@
-/*	$OpenBSD: pfe_filter.c,v 1.36 2008/12/08 10:59:44 reyk Exp $	*/
+/*	$OpenBSD: pfe_filter.c,v 1.38 2009/04/24 14:20:24 reyk Exp $	*/
 
 /*
  * Copyright (c) 2006 Pierre-Yves Ritschard <pyr@openbsd.org>
@@ -129,15 +129,17 @@ init_tables(struct relayd *env)
 }
 
 void
-kill_tables(struct relayd *env) {
+kill_tables(struct relayd *env)
+{
 	struct pfioc_table	 io;
 	struct rdr		*rdr;
+	int			 cnt = 0;
 
 	if (!(env->sc_flags & F_NEEDPF))
 		return;
 
-	memset(&io, 0, sizeof(io));
 	TAILQ_FOREACH(rdr, env->sc_rdrs, entry) {
+		memset(&io, 0, sizeof(io));
 		if (strlcpy(io.pfrio_table.pfrt_anchor, RELAYD_ANCHOR "/",
 		    sizeof(io.pfrio_table.pfrt_anchor)) >= PF_ANCHOR_NAME_SIZE)
 			goto toolong;
@@ -145,9 +147,10 @@ kill_tables(struct relayd *env) {
 		    sizeof(io.pfrio_table.pfrt_anchor)) >= PF_ANCHOR_NAME_SIZE)
 			goto toolong;
 		if (ioctl(env->sc_pf->dev, DIOCRCLRTABLES, &io) == -1)
-			fatal("kill_tables: ioctl faile: ioctl failed");
+			fatal("kill_tables: ioctl failed");
+		cnt += io.pfrio_ndel;
 	}
-	log_debug("kill_tables: deleted %d tables", io.pfrio_ndel);
+	log_debug("kill_tables: deleted %d tables", cnt);
 	return;
 
  toolong:
@@ -422,21 +425,23 @@ sync_ruleset(struct relayd *env, struct rdr *rdr, int enable)
 			/* NOTREACHED */
 		}
 
-		rio.rule.timeout[PFTM_TCP_ESTABLISHED] =
-		    rdr->conf.timeout.tv_sec;
 		rio.ticket = env->sc_pf->pfte[rs].ticket;
 		if (ioctl(env->sc_pf->dev, DIOCBEGINADDRS, &pio) == -1)
 			fatal("sync_ruleset: cannot initialise address pool");
 
 		rio.pool_ticket = pio.ticket;
 		rio.rule.af = address->ss.ss_family;
-		rio.rule.proto = IPPROTO_TCP;
+		rio.rule.proto = address->ipproto;
 		rio.rule.src.addr.type = PF_ADDR_ADDRMASK;
 		rio.rule.dst.addr.type = PF_ADDR_ADDRMASK;
 		rio.rule.dst.port_op = address->port.op;
 		rio.rule.dst.port[0] = address->port.val[0];
 		rio.rule.dst.port[1] = address->port.val[1];
 		rio.rule.rtableid = -1; /* stay in the main routing table */
+
+		if (rio.rule.proto == IPPROTO_TCP)
+			rio.rule.timeout[PFTM_TCP_ESTABLISHED] =
+			    rdr->conf.timeout.tv_sec;
 
 		if (strlen(rdr->conf.tag))
 			(void)strlcpy(rio.rule.tagname, rdr->conf.tag,

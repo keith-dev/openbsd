@@ -1,4 +1,4 @@
-/*	$OpenBSD: uipc_mbuf.c,v 1.118 2009/02/09 21:36:10 claudio Exp $	*/
+/*	$OpenBSD: uipc_mbuf.c,v 1.122 2009/06/22 10:51:06 thib Exp $	*/
 /*	$NetBSD: uipc_mbuf.c,v 1.15.4.1 1996/06/13 17:11:44 cgd Exp $	*/
 
 /*
@@ -224,6 +224,7 @@ m_gethdr(int nowait, int type)
 		m->m_data = m->m_pktdat;
 		m->m_flags = M_PKTHDR;
 		m->m_pkthdr.rcvif = NULL;
+		m->m_pkthdr.rdomain = 0;
 		SLIST_INIT(&m->m_pkthdr.tags);
 		m->m_pkthdr.csum_flags = 0;
 		m->m_pkthdr.ether_vtag = 0;
@@ -247,6 +248,7 @@ m_inithdr(struct mbuf *m)
 	m->m_data = m->m_pktdat;
 	m->m_flags = M_PKTHDR;
 	m->m_pkthdr.rcvif = NULL;
+	m->m_pkthdr.rdomain = 0;
 	SLIST_INIT(&m->m_pkthdr.tags);
 	m->m_pkthdr.csum_flags = 0;
 	m->m_pkthdr.ether_vtag = 0;
@@ -393,7 +395,7 @@ m_clget(struct mbuf *m, int how, struct ifnet *ifp, u_int pktlen)
 	pi = m_clpool(pktlen);
 #ifdef DIAGNOSTIC
 	if (pi == -1)
-		panic("m_clget: request for %d sized cluster", pktlen);
+		panic("m_clget: request for %u byte cluster", pktlen);
 #endif
 
 	if (ifp != NULL && m_cldrop(ifp, pi))
@@ -540,9 +542,7 @@ m_defrag(struct mbuf *m, int how)
  */
 
 /*
- * Lesser-used path for M_PREPEND:
- * allocate new mbuf to prepend to chain,
- * copy junk along.
+ * Ensure len bytes of contiguous space at the beginning of the mbuf chain
  */
 struct mbuf *
 m_prepend(struct mbuf *m, int len, int how)
@@ -552,17 +552,24 @@ m_prepend(struct mbuf *m, int len, int how)
 	if (len > MHLEN)
 		panic("mbuf prepend length too big");
 
-	MGET(mn, how, m->m_type);
-	if (mn == NULL) {
-		m_freem(m);
-		return (NULL);
+	if (M_LEADINGSPACE(m) >= len) {
+		m->m_data -= len;
+		m->m_len += len;
+	} else {
+		MGET(mn, how, m->m_type);
+		if (mn == NULL) {
+			m_freem(m);
+			return (NULL);
+		}
+		if (m->m_flags & M_PKTHDR)
+			M_MOVE_PKTHDR(mn, m);
+		mn->m_next = m;
+		m = mn;
+		MH_ALIGN(m, len);
+		m->m_len = len;
 	}
 	if (m->m_flags & M_PKTHDR)
-		M_MOVE_PKTHDR(mn, m);
-	mn->m_next = m;
-	m = mn;
-	MH_ALIGN(m, len);
-	m->m_len = len;
+		m->m_pkthdr.len += len;
 	return (m);
 }
 

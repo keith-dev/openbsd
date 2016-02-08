@@ -1,4 +1,4 @@
-.\"	$OpenBSD: aucat.1,v 1.47 2009/02/27 17:35:33 ratchov Exp $
+.\"	$OpenBSD: aucat.1,v 1.53 2009/05/09 09:50:40 ratchov Exp $
 .\"
 .\" Copyright (c) 2006 Alexandre Ratchov <alex@caoua.org>
 .\"
@@ -14,7 +14,7 @@
 .\" ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
 .\" OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 .\"
-.Dd $Mdocdate: February 27 2009 $
+.Dd $Mdocdate: May 9 2009 $
 .Dt AUCAT 1
 .Os
 .Sh NAME
@@ -24,7 +24,7 @@
 .Nm aucat
 .Bk -words
 .Op Fl lnu
-.Op Fl b Ar nsamples
+.Op Fl b Ar nframes
 .Op Fl C Ar min : Ns Ar max
 .Op Fl c Ar min : Ns Ar max
 .Op Fl e Ar enc
@@ -44,7 +44,8 @@ The
 utility can record one input stream
 and store it on multiple destination files,
 doing the necessary conversions on the fly.
-It can play, convert, and mix multiple input files simultaneously.
+It can play, convert, and mix multiple input files simultaneously,
+and can also act as an audio server.
 .Nm
 also has a legacy mode that works like previous versions of
 .Nm ,
@@ -52,10 +53,11 @@ which does not convert on the fly and supports playback of .au files.
 .Pp
 The options are as follows:
 .Bl -tag -width Ds
-.It Fl b Ar nsamples
+.It Fl b Ar nframes
 The buffer size in frames.
-This is the number of samples that will be buffered before being played
-and controls the playback latency.
+A frame consists of one sample for each channel in the stream.
+This is the number of frames that will be buffered before being played
+and thus controls the playback latency.
 .It Xo
 .Fl C Ar min : Ns Ar max ,
 .Fl c Ar min : Ns Ar max
@@ -68,9 +70,9 @@ The default is signed, 16-bit, native byte order.
 .It Fl f Ar device
 The
 .Xr audio 4
-device to use for playing and/or recording.
-The default is
-.Pa /dev/audio .
+device or
+.Nm
+socket to use for playing and/or recording.
 .It Fl h Ar fmt
 File format of the playback or record stream (see below).
 The default is auto.
@@ -210,19 +212,14 @@ is applied to
 .Pp
 If no audio device
 .Pq Fl f
-is specified but
-.Fl u
-is given anyway,
-any
-.Fl Ccer
-options specified before
-.Fl ios
-options are applied both to the corresponding file
-and the default audio device;
-if they are specified after
-.Fl ios
-options,
-they will be applied only to the default audio device.
+is specified,
+settings are applied as if
+the default device is specified as the last argument.
+If no sockets
+.Pq Fl s
+are specified
+settings are applied as if
+the default socket is specified as the last argument.
 .Pp
 File formats are specified using the
 .Fl h
@@ -334,9 +331,9 @@ require a low latency audio setup.
 To reduce the probability of buffer underruns or overruns,
 the
 .Xr renice 8
-command can be used to give higher priority to
+command can be used to give a higher priority to the
 .Nm
-process to.
+process.
 Superuser privileges are required.
 For example:
 .Bd -literal -offset indent
@@ -360,12 +357,10 @@ reads files sequentially, and writes them to the specified device.
 If a Sun .au header is detected it is skipped over and not copied to
 the audio device.
 .Nm
-will attempt to play data from Sun .au files as monaural 8-bit ulaw
-samples with a sampling frequency of 8000 Hz.
-However,
-.Nm
-will not fail if the audio device cannot be configured for these
-parameters.
+will attempt to parse the format, number of channels and sample rate
+from Sun .au file headers.
+However, only alaw and ulaw formats are supported for .au files.
+Other formats will be interpreted as ulaw.
 If a Microsoft .wav header (RIFF) is detected it is interpreted
 to select the right audio encoding for playback and the data chunk of the
 file is copied to the audio device.
@@ -378,7 +373,13 @@ will exit with an error.
 The debug level:
 may be a value between 0 and 4.
 .It Ev AUDIODEVICE
-The audio device to use.
+Name of the
+.Nm
+socket to connect to, or path to the
+.Xr audio 4
+device to use if the
+.Fl f
+option is not specified.
 .El
 .Sh EXAMPLES
 The following will mix and play two stereo streams,

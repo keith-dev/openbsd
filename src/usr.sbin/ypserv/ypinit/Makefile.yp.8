@@ -1,4 +1,4 @@
-.\"	$OpenBSD: Makefile.yp.8,v 1.1 2008/10/22 20:31:20 jmc Exp $
+.\"	$OpenBSD: Makefile.yp.8,v 1.3 2009/04/12 21:03:28 schwarze Exp $
 .\"
 .\" Copyright (c) 2008 Ingo Schwarze <schwarze@usta.de>
 .\"
@@ -14,7 +14,7 @@
 .\" ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
 .\" OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 .\"
-.Dd $Mdocdate: October 22 2008 $
+.Dd $Mdocdate: April 12 2009 $
 .Dt MAKEFILE.YP 8
 .Os
 .Sh NAME
@@ -114,6 +114,20 @@ If the
 variable is changed to be empty, the encrypted passwords are replaced by
 asterisks
 .Pq Ql \&* .
+This
+.Dq secure
+mode is compatible with
+.Ox
+and
+.Fx
+clients.
+.Pp
+The
+.Dv MINUID
+and
+.Dv MAXUID
+variables restrict the range of user IDs included into the four passwd maps.
+By default, system users are not included.
 .It Ic netgroup
 Generates the
 .Pa netgroup ,
@@ -138,6 +152,13 @@ maps from
 .Xr group 5
 for use by
 .Xr getgrent 3 .
+.Pp
+The
+.Dv MINGID
+and
+.Dv MAXGID
+variables restrict the range of group IDs included into both group maps.
+By default, system groups are not included.
 .It Ic netid
 Generates the
 .Pa netid.byname

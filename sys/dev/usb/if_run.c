@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_run.c,v 1.8 2009/02/10 17:10:50 damien Exp $	*/
+/*	$OpenBSD: if_run.c,v 1.29 2009/06/17 16:04:29 damien Exp $	*/
 
 /*-
  * Copyright (c) 2008,2009 Damien Bergamini <damien.bergamini@free.fr>
@@ -78,89 +78,133 @@ int run_debug = 0;
 #define DPRINTFN(n, x)
 #endif
 
-/*
- * PLEASE keep this list sorted as is; this is to ease the sync with the
- * Ralink Linux driver.  If you want to add new entries, add them at the
- * end of the list.
- */
 #define USB_ID(v, p)	{ USB_VENDOR_##v, USB_PRODUCT_##v##_##p }
 static const struct usb_devno run_devs[] = {
-	/* Entries from the Ralink Linux driver. */
-	/* AUTOMATICALLY GENERATED, DO NOT EDIT BY HAND. */
-	USB_ID(RALINK,			RT2770),
-	USB_ID(RALINK,			RT2870),
-	USB_ID(RALINK,			RT3070),
-	USB_ID(RALINK,			RT3071),
-	USB_ID(RALINK,			RT3072),
-	USB_ID(ASUS,			RT2870_1),
-	USB_ID(ASUS,			RT2870_2),
-	USB_ID(ASUS,			RT2870_3),
-	USB_ID(SITECOMEU,		RT2870_1),
-	USB_ID(SITECOMEU,		RT2870_2),
-	USB_ID(SITECOMEU,		RT2870_3),
-	USB_ID(SITECOMEU,		RT3070),
-	USB_ID(SITECOMEU,		RT2870_4),
-	USB_ID(SITECOMEU,		RT2770),
-	USB_ID(CONCEPTRONIC2,		RT2870_1),
-	USB_ID(CONCEPTRONIC2,		RT2870_6),
-	USB_ID(PLANEX2,			RT2870),
-	USB_ID(PLANEX2,			RT3070),
-	USB_ID(DLINK2,			RT2870_1),
-	USB_ID(DLINK2,			RT2870_2),
-	USB_ID(DLINK,			RT2870),
-	USB_ID(DLINK,			RT3072),
-	USB_ID(CONCEPTRONIC2,		RT2870_2),
-	USB_ID(CONCEPTRONIC2,		RT2870_8),
-	USB_ID(BELKIN,			RT2870_1),
-	USB_ID(CONCEPTRONIC2,		RT2870_3),
-	USB_ID(CONCEPTRONIC2,		RT2870_5),
-	USB_ID(COREGA,			RT2870_1),
-	USB_ID(COREGA,			RT2870_2),
-	USB_ID(COREGA,			RT2870_3),
-	USB_ID(AMIT,			RT2870_1),
-	USB_ID(GIGABYTE,		RT2870_1),
-	USB_ID(GIGABYTE,		GNWB32L),
-	USB_ID(SPARKLAN,		RT2870_1),
-	USB_ID(ACCTON,			RT2870_1),
-	USB_ID(ACCTON,			RT2870_4),
-	USB_ID(ACCTON,			RT2870_5),
-	USB_ID(ACCTON,			RT2770),
-	USB_ID(ACCTON,			RT2870_3),
-	USB_ID(ACCTON,			RT3070),
-	USB_ID(ZCOM,			RT2870_1),
-	USB_ID(ZYXEL,			RT2870_1),
-	USB_ID(ZCOM,			RT2870_2),
-	USB_ID(SENAO,			RT2870_1),
-	USB_ID(SENAO,			RT2870_2),
-	USB_ID(SENAO,			RT3070),
-	USB_ID(PHILIPS,			RT2870),
-	USB_ID(CONCEPTRONIC2,		RT2870_4),
-	USB_ID(AZUREWAVE,		RT2870_1),
-	USB_ID(AZUREWAVE,		RT3070),
-	USB_ID(ACCTON,			RT2870_2),
-	USB_ID(AMIT2,			RT2870),
-	USB_ID(HAWKING,			RT2870_1),
-	USB_ID(HAWKING,			RT2870_2),
-	USB_ID(CYBERTAN,		RT2870),
-	USB_ID(UMEDIA,			RT2870_1),
-	USB_ID(BELKIN,			RT2870_2),
-	USB_ID(ABOCOM2,			RT2870_1),
-	USB_ID(CONCEPTRONIC2,		RT2870_7),
-	USB_ID(SAMSUNG2,		RT2870_1),
-	USB_ID(ABOCOM,			RT3070),
-	USB_ID(ABOCOM,			RT3071),
-	USB_ID(ABOCOM,			RT3072),
-	USB_ID(EDIMAX,			RT2870_1),
-	USB_ID(ZINWELL,			RT2870_1),
-	USB_ID(ZINWELL,			RT2870_2),
-	USB_ID(QUANTA,			RT3070),
-	USB_ID(LOGITEC,			RT2870_1),
-	USB_ID(LOGITEC,			RT2870_2),
-	USB_ID(LOGITEC,			RT2870_3),
-	USB_ID(AIRTIES,			RT3070),
-
-	/* Entries not in the Ralink Linux driver. */
-	USB_ID(LINKSYS4,		WUSB600N)
+	USB_ID(ABOCOM,		RT2770),
+	USB_ID(ABOCOM,		RT2870),
+	USB_ID(ABOCOM,		RT3070),
+	USB_ID(ABOCOM,		RT3071),
+	USB_ID(ABOCOM,		RT3072),
+	USB_ID(ABOCOM2,		RT2870_1),
+	USB_ID(ACCTON,		RT2770),
+	USB_ID(ACCTON,		RT2870_1),
+	USB_ID(ACCTON,		RT2870_2),
+	USB_ID(ACCTON,		RT2870_3),
+	USB_ID(ACCTON,		RT2870_4),
+	USB_ID(ACCTON,		RT2870_5),
+	USB_ID(ACCTON,		RT3070),
+	USB_ID(AIRTIES,		RT3070),
+	USB_ID(AMIGO,		RT2870_1),
+	USB_ID(AMIGO,		RT2870_2),
+	USB_ID(AMIT,		CGWLUSB2GNR),
+	USB_ID(AMIT,		RT2870_1),
+	USB_ID(AMIT2,		RT2870),
+	USB_ID(ASUS,		RT2870_1),
+	USB_ID(ASUS,		RT2870_2),
+	USB_ID(ASUS,		RT2870_3),
+	USB_ID(ASUS,		RT2870_4),
+	USB_ID(ASUS,		RT2870_5),
+	USB_ID(ASUS2,		USBN11),
+	USB_ID(AZUREWAVE,	RT2870_1),
+	USB_ID(AZUREWAVE,	RT2870_2),
+	USB_ID(AZUREWAVE,	RT3070),
+	USB_ID(BELKIN,		F5D8053V3),
+	USB_ID(BELKIN,		F5D8055),
+	USB_ID(BELKIN,		F6D4050V1),
+	USB_ID(BELKIN,		RT2870_1),
+	USB_ID(BELKIN,		RT2870_2),
+	USB_ID(CONCEPTRONIC2,	RT2870_1),
+	USB_ID(CONCEPTRONIC2,	RT2870_2),
+	USB_ID(CONCEPTRONIC2,	RT2870_3),
+	USB_ID(CONCEPTRONIC2,	RT2870_4),
+	USB_ID(CONCEPTRONIC2,	RT2870_5),
+	USB_ID(CONCEPTRONIC2,	RT2870_6),
+	USB_ID(CONCEPTRONIC2,	RT2870_7),
+	USB_ID(CONCEPTRONIC2,	RT2870_8),
+	USB_ID(CONCEPTRONIC2,	VIGORN61),
+	USB_ID(COREGA,		CGWLUSB300GNM),
+	USB_ID(COREGA,		RT2870_1),
+	USB_ID(COREGA,		RT2870_2),
+	USB_ID(COREGA,		RT2870_3),
+	USB_ID(CYBERTAN,	RT2870),
+	USB_ID(DLINK,		RT2870),
+	USB_ID(DLINK,		RT3072),
+	USB_ID(DLINK2,		DWA130),
+	USB_ID(DLINK2,		RT2870_1),
+	USB_ID(DLINK2,		RT2870_2),
+	USB_ID(DLINK2,		RT3070_1),
+	USB_ID(DLINK2,		RT3070_2),
+	USB_ID(DLINK2,		RT3070_3),
+	USB_ID(DLINK2,		RT3072),
+	USB_ID(EDIMAX,		EW7717),
+	USB_ID(EDIMAX,		EW7718),
+	USB_ID(EDIMAX,		RT2870_1),
+	USB_ID(ENCORE,		RT3070),
+	USB_ID(GIGABYTE,	GNWB31N),
+	USB_ID(GIGABYTE,	GNWB32L),
+	USB_ID(GIGABYTE,	RT2870_1),
+	USB_ID(GUILLEMOT,	HWNU300),
+	USB_ID(HAWKING,		HWUN2),
+	USB_ID(HAWKING,		RT2870_1),
+	USB_ID(HAWKING,		RT2870_2),
+	USB_ID(HAWKING,		RT3070),
+	USB_ID(IODATA,		RT3072),
+	USB_ID(LINKSYS4,	WUSB100),
+	USB_ID(LINKSYS4,	WUSB600N),
+	USB_ID(LOGITEC,		RT2870_1),
+	USB_ID(LOGITEC,		RT2870_2),
+	USB_ID(LOGITEC,		RT2870_3),
+	USB_ID(MELCO,		WLIUCAG300N),
+	USB_ID(MELCO,		WLIUCG300N),
+	USB_ID(MELCO,		WLIUCGN),
+	USB_ID(MSI,		RT3070),
+	USB_ID(PEGATRON,	RT2870),
+	USB_ID(PEGATRON,	RT3070),
+	USB_ID(PEGATRON,	RT3070_2),
+	USB_ID(PHILIPS,		RT2870),
+	USB_ID(PLANEX2,		GWUS300MINIS),
+	USB_ID(PLANEX2,		GWUSMICRON),
+	USB_ID(PLANEX2,		RT2870),
+	USB_ID(PLANEX2,		RT3070),
+	USB_ID(QCOM,		RT2870),
+	USB_ID(QUANTA,		RT3070),
+	USB_ID(RALINK,		RT2070),
+	USB_ID(RALINK,		RT2770),
+	USB_ID(RALINK,		RT2870),
+	USB_ID(RALINK,		RT3070),
+	USB_ID(RALINK,		RT3071),
+	USB_ID(RALINK,		RT3072),
+	USB_ID(SAMSUNG2,	RT2870_1),
+	USB_ID(SENAO,		RT2870_1),
+	USB_ID(SENAO,		RT2870_2),
+	USB_ID(SENAO,		RT2870_3),
+	USB_ID(SENAO,		RT2870_4),
+	USB_ID(SENAO,		RT3070),
+	USB_ID(SENAO,		RT3071),
+	USB_ID(SENAO,		RT3072),
+	USB_ID(SITECOMEU,	RT2770),
+	USB_ID(SITECOMEU,	RT2870_1),
+	USB_ID(SITECOMEU,	RT2870_2),
+	USB_ID(SITECOMEU,	RT2870_3),
+	USB_ID(SITECOMEU,	RT2870_4),
+	USB_ID(SITECOMEU,	RT3070),
+	USB_ID(SITECOMEU,	RT3070_2),
+	USB_ID(SITECOMEU,	RT3070_3),
+	USB_ID(SITECOMEU,	RT3070_4),
+	USB_ID(SITECOMEU,	RT3072),
+	USB_ID(SITECOMEU,	WL608),
+	USB_ID(SPARKLAN,	RT2870_1),
+	USB_ID(SPARKLAN,	RT3070),
+	USB_ID(SWEEX2,		LW303),
+	USB_ID(SWEEX2,		LW313),
+	USB_ID(UMEDIA,		RT2870_1),
+	USB_ID(ZCOM,		RT2870_1),
+	USB_ID(ZCOM,		RT2870_2),
+	USB_ID(ZINWELL,		RT2870_1),
+	USB_ID(ZINWELL,		RT2870_2),
+	USB_ID(ZINWELL,		RT3070),
+	USB_ID(ZINWELL,		RT3072),
+	USB_ID(ZYXEL,		RT2870_1)
 };
 
 int		run_match(struct device *, void *, void *);
@@ -327,6 +371,8 @@ run_attach(struct device *parent, struct device *self, void *aux)
 	/*
 	 * Find all bulk endpoints.  There are 7 bulk endpoints: 1 for RX
 	 * and 6 for TX (4 EDCAs + HCCA + Prio).
+	 * Update 03-14-2009:  some devices like the Planex GW-US300MiniS
+	 * seem to have only 4 TX bulk endpoints (Fukaumi Naoki).
 	 */
 	nrx = ntx = 0;
 	id = usbd_get_interface_descriptor(sc->sc_iface);
@@ -338,15 +384,13 @@ run_attach(struct device *parent, struct device *self, void *aux)
 		if (UE_GET_DIR(ed->bEndpointAddress) == UE_DIR_IN) {
 			sc->rxq.pipe_no = ed->bEndpointAddress;
 			nrx++;
-		} else if (ntx < 6) {
+		} else if (ntx < 4) {
 			sc->txq[ntx].pipe_no = ed->bEndpointAddress;
-			sc->txq[ntx].pktsize =
-			    UE_GET_SIZE(UGETW(ed->wMaxPacketSize));
 			ntx++;
 		}
 	}
 	/* make sure we've got them all */
-	if (nrx < 1 || ntx < 6) {
+	if (nrx < 1 || ntx < 4) {
 		printf("%s: missing endpoint\n", sc->sc_dev.dv_xname);
 		return;
 	}
@@ -479,7 +523,7 @@ run_detach(struct device *self, int flags)
 		if_detach(ifp);
 	}
 
-	for (qid = 0; qid < 6; qid++)
+	for (qid = 0; qid < 4; qid++)
 		run_free_tx_ring(sc, qid);
 	run_free_rx_ring(sc);
 
@@ -598,33 +642,35 @@ int
 run_load_microcode(struct run_softc *sc)
 {
 	usb_device_request_t req;
-	u_char *ucode, *base;
+	const char *fwname;
+	u_char *ucode;
 	size_t size;
 	uint32_t tmp;
 	int ntries, error;
 
-	if ((error = loadfirmware("run-rt2870", &ucode, &size)) != 0) {
+	/* RT3071/RT3072 use a different firmware */
+	if ((sc->mac_rev >> 16) != 0x2860 &&
+	    (sc->mac_rev >> 16) != 0x2872 &&
+	    (sc->mac_rev >> 16) != 0x3070)
+		fwname = "run-rt3071";
+	else
+		fwname = "run-rt2870";
+
+	if ((error = loadfirmware(fwname, &ucode, &size)) != 0) {
 		printf("%s: failed loadfirmware of file %s (error %d)\n",
-		    sc->sc_dev.dv_xname, "run-rt2870", error);
+		    sc->sc_dev.dv_xname, fwname, error);
 		return error;
 	}
-	if (size != 8192) {
-		printf("%s: invalid firmware size (should be 8KB)\n",
+	if (size != 4096) {
+		printf("%s: invalid firmware size (should be 4KB)\n",
 		    sc->sc_dev.dv_xname);
 		free(ucode, M_DEVBUF);
 		return EINVAL;
 	}
 
-	base = ucode;
-	/* RT3071/RT3072 use a different firmware */
-	if ((sc->mac_rev >> 16) != 0x2860 &&
-	    (sc->mac_rev >> 16) != 0x2872 &&
-	    (sc->mac_rev >> 16) != 0x3070)
-		base += 4096;
-
 	run_read(sc, RT2860_ASIC_VER_ID, &tmp);
 	/* write microcode image */
-	run_write_region_1(sc, RT2870_FW_BASE, base, 4096);
+	run_write_region_1(sc, RT2870_FW_BASE, ucode, size);
 	free(ucode, M_DEVBUF);
 	run_write(sc, RT2860_H2M_MAILBOX_CID, 0xffffffff);
 	run_write(sc, RT2860_H2M_MAILBOX_STATUS, 0xffffffff);
@@ -778,7 +824,7 @@ run_efuse_read_2(struct run_softc *sc, uint16_t addr, uint16_t *val)
 	 * DATA2: 7 6 5 4
 	 * DATA3: 3 2 1 0
 	 */
-	tmp &= ~RT3070_EFSROM_MODE_MASK;
+	tmp &= ~(RT3070_EFSROM_MODE_MASK | RT3070_EFSROM_AIN_MASK);
 	tmp |= (addr & ~0xf) << RT3070_EFSROM_AIN_SHIFT | RT3070_EFSROM_KICK;
 	run_write(sc, RT3070_EFUSE_CTRL, tmp);
 	for (ntries = 0; ntries < 100; ntries++) {
@@ -1012,6 +1058,7 @@ run_get_rf(int rev)
 	case RT3070_RF_2020:	return "RT2020";
 	case RT3070_RF_3021:	return "RT3021";
 	case RT3070_RF_3022:	return "RT3022";
+	case RT3070_RF_3052:	return "RT3052";
 	}
 	return "unknown";
 }
@@ -1029,11 +1076,12 @@ run_read_eeprom(struct run_softc *sc)
 	sc->sc_srom_read = run_eeprom_read_2;
 	if ((sc->mac_rev & 0xfff00000) >= 0x30700000) {
 		run_read(sc, RT3070_EFUSE_CTRL, &tmp);
+		DPRINTF(("EFUSE_CTRL=0x%08x\n", tmp));
 		if (tmp & RT3070_SEL_EFUSE)
 			sc->sc_srom_read = run_efuse_read_2;
 	}
 
-	/* read SROM version */
+	/* read ROM version */
 	run_srom_read(sc, RT2860_EEPROM_VERSION, &val);
 	DPRINTF(("EEPROM rev=%d, FAE=%d\n", val & 0xff, val >> 8));
 
@@ -1743,13 +1791,13 @@ run_rx_frame(struct run_softc *sc, uint8_t *buf, int dmalen)
 		rxi.rxi_flags |= IEEE80211_RXI_HWDEC;
 	}
 
-	if (rxd->flags & RT2860_RX_L2PAD) {
+	if (flags & RT2860_RX_L2PAD) {
 		u_int hdrlen = ieee80211_get_hdrlen(wh);
 		ovbcopy(wh, (caddr_t)wh + 2, hdrlen);
 		wh = (struct ieee80211_frame *)((caddr_t)wh + 2);
 	}
 
-	/* could use m_devget buf net80211 wants contig mgmt frames */
+	/* could use m_devget but net80211 wants contig mgmt frames */
 	MGETHDR(m, M_DONTWAIT, MT_DATA);
 	if (__predict_false(m == NULL)) {
 		ifp->if_ierrors++;
@@ -1855,7 +1903,6 @@ run_rxeof(usbd_xfer_handle xfer, usbd_private_handle priv, usbd_status status)
 	}
 
 	/* HW can aggregate multiple 802.11 frames in a single USB xfer */
-	/* NB: can't happen yet because we disable USB RX aggregation */
 	buf = data->buf;
 	while (xferlen > 8) {
 		dmalen = letoh32(*(uint32_t *)buf) & 0xffff;
@@ -2020,8 +2067,6 @@ run_tx(struct run_softc *sc, struct mbuf *m, struct ieee80211_node *ni)
 	ieee80211_release_node(ic, ni);
 
 	xferlen += sizeof (*txd) + 4;
-	if ((xferlen % ring->pktsize) == 0)
-		xferlen += 4;
 
 	usbd_setup_xfer(data->xfer, ring->pipeh, data, data->buf, xferlen,
 	    USBD_FORCE_SHORT_XFER | USBD_NO_COPY, RUN_TX_TIMEOUT, run_txeof);
@@ -2487,7 +2532,7 @@ run_set_macaddr(struct run_softc *sc, const uint8_t *addr)
 	run_write(sc, RT2860_MAC_ADDR_DW0,
 	    addr[0] | addr[1] << 8 | addr[2] << 16 | addr[3] << 24);
 	run_write(sc, RT2860_MAC_ADDR_DW1,
-	    addr[4] | addr[5] << 8);
+	    addr[4] | addr[5] << 8 | 0xff << 16);
 }
 
 void
@@ -2757,12 +2802,9 @@ run_txrx_enable(struct run_softc *sc)
 	tmp |= RT2860_RX_DMA_EN | RT2860_TX_DMA_EN | RT2860_TX_WB_DDONE;
 	run_write(sc, RT2860_WPDMA_GLO_CFG, tmp);
 
-	tmp = RT2860_USB_TX_EN | RT2860_USB_RX_EN;
-#ifdef notyet
-	/* enable bulk aggregation */
-	tmp |= RT2860_USB_RX_AGG_EN | 0x80 << RT2860_USB_RX_AGG_TO_SHIFT |
-	    ((RUN_MAX_RXSZ / 1024) - 3) << RT2860_USB_RX_AGG_LMT_SHIFT;
-#endif
+	/* enable Rx bulk aggregation (set timeout and limit) */
+	tmp = RT2860_USB_TX_EN | RT2860_USB_RX_EN | RT2860_USB_RX_AGG_EN |
+	    RT2860_USB_RX_AGG_TO(128) | RT2860_USB_RX_AGG_LMT(2);
 	run_write(sc, RT2860_USB_DMA_CFG, tmp);
 
 	/* set Rx filter */
@@ -2813,8 +2855,8 @@ run_init(struct ifnet *ifp)
 	/* init host command ring */
 	sc->cmdq.cur = sc->cmdq.next = sc->cmdq.queued = 0;
 
-	/* init Tx rings (4 EDCAs + HCCA + Prio) */
-	for (qid = 0; qid < 6; qid++) {
+	/* init Tx rings (4 EDCAs) */
+	for (qid = 0; qid < 4; qid++) {
 		if ((error = run_alloc_tx_ring(sc, qid)) != 0)
 			goto fail;
 	}
@@ -3045,7 +3087,7 @@ run_stop(struct ifnet *ifp, int disable)
 
 	/* reset Tx and Rx rings */
 	sc->qfullmsk = 0;
-	for (qid = 0; qid < 6; qid++)
+	for (qid = 0; qid < 4; qid++)
 		run_free_tx_ring(sc, qid);
 	run_free_rx_ring(sc);
 }

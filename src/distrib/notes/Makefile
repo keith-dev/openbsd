@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.31 2008/05/15 21:01:14 miod Exp $
+#	$OpenBSD: Makefile,v 1.33 2009/05/12 21:06:48 miod Exp $
 
 NOPROG=
 NOMAN=
@@ -11,7 +11,7 @@ TARG=	INSTALL.$M
 SRC=	$(.CURDIR)/INSTALL
 DEP=	$(SRC) $(.CURDIR)/mirrors $(.CURDIR)/$M/whatis $(.CURDIR)/$M/contents \
 	$(.CURDIR)/$M/hardware $(.CURDIR)/$M/xfer $(.CURDIR)/$M/prep \
-	$(.CURDIR)/$M/install $(.CURDIR)/$M/upgrade \
+	$(.CURDIR)/$M/install $(.CURDIR)/$M/upgrade ${.CURDIR}/$M/features \
 	$(.CURDIR)/packages $(.CURDIR)/m4.common
 
 all:	$(TARG)
@@ -27,11 +27,13 @@ $(TARG): $(DEP)
 	m4 -DOSREV=$(OSREV) -DOSrev=$(OSrev) -DINCLUDE=$(.CURDIR)/$M \
 	-DMACHINE=$M -Uunix $(SRC) > $@
 
-beforeinstall:
-	cp ${TARG} ${DESTDIR}/snapshot/
-
 .else
 all:
+.endif
+
+.ifdef RELEASEDIR
+beforeinstall:
+	cp ${TARG} ${RELEASEDIR}
 .endif
 
 clean:

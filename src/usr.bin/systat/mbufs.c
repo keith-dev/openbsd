@@ -1,4 +1,4 @@
-/*	$OpenBSD: mbufs.c,v 1.22 2009/01/27 09:18:37 dlg Exp $ */
+/*	$OpenBSD: mbufs.c,v 1.24 2009/04/20 20:30:41 chl Exp $ */
 /*
  * Copyright (c) 2008 Can Erkin Acar <canacar@openbsd.org>
  *
@@ -51,8 +51,7 @@ struct if_info {
 void print_mb(void);
 int read_mb(void);
 int select_mb(void);
-static void
-showmbuf(struct if_info *, int);
+static void showmbuf(struct if_info *, int, int);
 
 
 /* Define fields */
@@ -146,7 +145,7 @@ initmembufs(void)
 			continue;
 
 		if (mclpool_count == MCLPOOLS) {
-			warnx("mbufs: Too many mcl* pools", i);
+			warnx("mbufs: Too many mcl* pools");
 			break;
 		}
 
@@ -300,11 +299,13 @@ print_mb(void)
 {
 	int i, p, n, count = 0;
 
-	showmbuf(interfaces, -1);
+	showmbuf(interfaces, -1, 1);
 
 	for (n = i = 0; i < num_ifs; i++) {
 		struct if_info *ifi = &interfaces[i];
 		int pcnt = count;
+		int showif = i;
+
 		if (maxprint > 0 && count >= maxprint)
 			return;
 
@@ -313,7 +314,8 @@ print_mb(void)
 			if (mp->mcl_alive == 0)
 				continue;
 			if (n++ >= dispstart) {
-				showmbuf(ifi, p);
+				showmbuf(ifi, p, showif);
+				showif = 0;
 				count++;
 			}
 		}
@@ -321,7 +323,7 @@ print_mb(void)
 		if (i && pcnt == count) {
 			/* only print the first line */
 			if (n++ >= dispstart) {
-				showmbuf(ifi, -1);
+				showmbuf(ifi, -1, 1);
 				count++;
 			}
 		}
@@ -332,21 +334,16 @@ print_mb(void)
 
 
 static void
-showmbuf(struct if_info *ifi, int p)
+showmbuf(struct if_info *ifi, int p, int showif)
 {
-	int i;
-
-	if (p == -1 || (p == 0 && ifi != interfaces)) {
+	if (showif)
 		print_fld_str(FLD_MB_IFACE, ifi->name);
-	}
 
 	if (p == -1 && ifi == interfaces) {
 		print_fld_size(FLD_MB_MSIZE, mbpool.pr_size);
 		print_fld_size(FLD_MB_MALIVE, mbpool.pr_nget - mbpool.pr_nput);
 		print_fld_size(FLD_MB_MHWM, mbpool.pr_hiwat);
 	}
-
-
 
 #if NOTYET
 	print_fld_uint(FLD_MB_RXDELAY, ifi->data.ifi_rxdelay);
@@ -370,5 +367,3 @@ showmbuf(struct if_info *ifi, int p)
 
 	end_line();
 }
-
-

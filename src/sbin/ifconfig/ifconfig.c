@@ -1,4 +1,4 @@
-/*	$OpenBSD: ifconfig.c,v 1.214 2009/02/16 20:04:12 canacar Exp $	*/
+/*	$OpenBSD: ifconfig.c,v 1.220 2009/06/19 14:05:32 henning Exp $	*/
 /*	$NetBSD: ifconfig.c,v 1.40 1997/10/01 02:19:43 enami Exp $	*/
 
 /*
@@ -121,6 +121,7 @@ struct  netrange	at_nr;		/* AppleTalk net range */
 char	name[IFNAMSIZ];
 int	flags, setaddr, setipdst, doalias;
 u_long	metric, mtu;
+int	rdomainid;
 int	clearaddr, s;
 int	newaddr = 0;
 int	af = AF_INET;
@@ -142,6 +143,7 @@ void	setifrtlabel(const char *, int);
 void	setiflladdr(const char *, int);
 void	setifdstaddr(const char *, int);
 void	setifflags(const char *, int);
+void	setifxflags(const char *, int);
 void	setifbroadaddr(const char *, int);
 void	setifdesc(const char *, int);
 void	unsetifdesc(const char *, int);
@@ -211,6 +213,7 @@ void	setpfsync_maxupd(const char *, int);
 void	unsetpfsync_syncdev(const char *, int);
 void	setpfsync_syncpeer(const char *, int);
 void	unsetpfsync_syncpeer(const char *, int);
+void	setpfsync_defer(const char *, int);
 void	pfsync_status(void);
 void	setpppoe_dev(const char *,int);
 void	setpppoe_svc(const char *,int);
@@ -232,6 +235,7 @@ void	unsettrunkport(const char *, int);
 void	settrunkproto(const char *, int);
 void	trunk_status(void);
 void	setpriority(const char *, int);
+void	setinstance(const char *, int);
 int	main(int, char *[]);
 int	prefix(void *val, int);
 
@@ -334,10 +338,12 @@ const struct	cmd {
 	{ "range",	NEXTARG,	0,		setatrange },
 	{ "phase",	NEXTARG,	0,		setatphase },
 	{ "mplslabel",	NEXTARG,	0,		setmpelabel },
+#endif /* SMALL */
 	{ "vlan",	NEXTARG,	0,		setvlantag },
 	{ "vlanprio",	NEXTARG,	0,		setvlanprio },
 	{ "vlandev",	NEXTARG,	0,		setvlandev },
 	{ "-vlandev",	1,		0,		unsetvlandev },
+#ifndef SMALL
 	{ "advbase",	NEXTARG,	0,		setcarp_advbase },
 	{ "advskew",	NEXTARG,	0,		setcarp_advskew },
 	{ "carppeer",	NEXTARG,	0,		setcarppeer },
@@ -356,6 +362,8 @@ const struct	cmd {
 	{ "syncpeer",	NEXTARG,	0,		setpfsync_syncpeer },
 	{ "-syncpeer",	1,		0,		unsetpfsync_syncpeer },
 	{ "maxupd",	NEXTARG,	0,		setpfsync_maxupd },
+	{ "defer",	1,		0,		setpfsync_defer },
+	{ "-defer",	0,		0,		setpfsync_defer },
 	/* giftunnel is for backward compat */
 	{ "giftunnel",  NEXTARG2,	0,		NULL, settunnel } ,
 	{ "tunnel",	NEXTARG2,	0,		NULL, settunnel } ,
@@ -381,6 +389,7 @@ const struct	cmd {
 	{ "-peerflag",	NEXTARG,	0,		unsetsppppeerflag },
 	{ "nwflag",	NEXTARG,	0,		setifnwflag },
 	{ "-nwflag",	NEXTARG,	0,		unsetifnwflag },
+	{ "rdomain",	NEXTARG,	0,		setinstance },
 #endif /* SMALL */
 #if 0
 	/* XXX `create' special-cased below */
@@ -409,6 +418,7 @@ const struct	cmd {
 	{ "-flowsrc",	1,		0,		unsetpflow_sender },
 	{ "flowdst", 	NEXTARG,	0,		setpflow_receiver },
 	{ "-flowdst", 1,		0,		unsetpflow_receiver },
+	{ "-inet6",	IFXF_NOINET6,	0,		setifxflags } ,
 #endif
 	{ NULL, /*src*/	0,		0,		setifaddr },
 	{ NULL, /*dst*/	0,		0,		setifdstaddr },
@@ -499,6 +509,7 @@ main(int argc, char *argv[])
 	int Cflag = 0;
 	int gflag = 0;
 	int i;
+	int noprint = 0;
 
 	/* If no args at all, print all interfaces.  */
 	if (argc < 2) {
@@ -587,6 +598,10 @@ main(int argc, char *argv[])
 		create = (argc > 0) && strcmp(argv[0], "destroy") != 0;
 		(void)getinfo(&ifr, create);
 	}
+#ifdef INET6
+	if (argc != 0 && af == AF_INET6)
+		setifxflags("inet6", -IFXF_NOINET6);
+#endif
 	while (argc > 0) {
 		const struct cmd *p;
 
@@ -642,7 +657,7 @@ nextarg:
 		argc--, argv++;
 	}
 
-	if (argc == 0 && actions == 0) {
+	if (argc == 0 && actions == 0 && !noprint) {
 		printif(ifr.ifr_name, 1);
 		exit(0);
 	}
@@ -728,7 +743,10 @@ getinfo(struct ifreq *ifr, int create)
 		mtu = 0;
 	else
 		mtu = ifr->ifr_mtu;
-
+	if (ioctl(s, SIOCGIFRTABLEID, (caddr_t)ifr) < 0)
+		rdomainid = 0;
+	else
+		rdomainid = ifr->ifr_rdomainid;
 	return (0);
 }
 
@@ -1109,6 +1127,29 @@ setifflags(const char *vname, int value)
 	my_ifr.ifr_flags = flags;
 	if (ioctl(s, SIOCSIFFLAGS, (caddr_t)&my_ifr) < 0)
 		err(1, "SIOCSIFFLAGS");
+}
+
+/* ARGSUSED */
+void
+setifxflags(const char *vname, int value)
+{
+	struct ifreq my_ifr;
+
+	bcopy((char *)&ifr, (char *)&my_ifr, sizeof(struct ifreq));
+
+	if (ioctl(s, SIOCGIFXFLAGS, (caddr_t)&my_ifr) < 0)
+		warn("SIOCGIFXFLAGS");
+	(void) strlcpy(my_ifr.ifr_name, name, sizeof(my_ifr.ifr_name));
+	flags = my_ifr.ifr_flags;
+
+	if (value < 0) {
+		value = -value;
+		flags &= ~value;
+	} else
+		flags |= value;
+	my_ifr.ifr_flags = flags;
+	if (ioctl(s, SIOCSIFXFLAGS, (caddr_t)&my_ifr) < 0)
+		warn("SIOCSIFXFLAGS");
 }
 
 #ifdef INET6
@@ -2584,6 +2625,8 @@ status(int link, struct sockaddr_dl *sdl)
 
 	printf("%s: ", name);
 	printb("flags", flags, IFFBITS);
+	if (rdomainid)
+		printf(" rdomain %i", rdomainid);
 	if (metric)
 		printf(" metric %lu", metric);
 	if (mtu)
@@ -2605,7 +2648,9 @@ status(int link, struct sockaddr_dl *sdl)
 	if (ioctl(s, SIOCGIFPRIORITY, &ifrdesc) == 0)
 		printf("\tpriority: %d\n", ifrdesc.ifr_metric);
 
+#endif
 	vlan_status();
+#ifndef SMALL
 	carp_status();
 	pfsync_status();
 	pppoe_status();
@@ -3112,6 +3157,7 @@ setmpelabel(const char *val, int d)
 	if (ioctl(s, SIOCSETLABEL, (caddr_t)&ifr) == -1)
 		warn("SIOCSETLABEL");
 }
+#endif /* SMALL */
 
 static int __tag = 0;
 static int __have_tag = 0;
@@ -3238,6 +3284,7 @@ unsetvlandev(const char *val, int d)
 		err(1, "SIOCSETVLAN");
 }
 
+#ifndef SMALL
 static const char *carp_states[] = { CARP_STATES };
 static const char *carp_bal_modes[] = { CARP_BAL_MODES };
 
@@ -3677,6 +3724,22 @@ setpfsync_maxupd(const char *val, int d)
 }
 
 void
+setpfsync_defer(const char *val, int d)
+{
+	struct pfsyncreq preq;
+
+	memset((char *)&preq, 0, sizeof(struct pfsyncreq));
+	ifr.ifr_data = (caddr_t)&preq;
+
+	if (ioctl(s, SIOCGETPFSYNC, (caddr_t)&ifr) == -1)
+		err(1, "SIOCGETPFSYNC");
+
+	preq.pfsyncr_defer = d;
+	if (ioctl(s, SIOCSETPFSYNC, (caddr_t)&ifr) == -1)
+		err(1, "SIOCSETPFSYNC");
+}
+
+void
 pfsync_status(void)
 {
 	struct pfsyncreq preq;
@@ -3692,7 +3755,8 @@ pfsync_status(void)
 		if (preq.pfsyncr_syncpeer.s_addr != htonl(INADDR_PFSYNC_GROUP))
 			printf("syncpeer: %s ",
 			    inet_ntoa(preq.pfsyncr_syncpeer));
-		printf("maxupd: %d\n", preq.pfsyncr_maxupdates);
+		printf("maxupd: %d ", preq.pfsyncr_maxupdates);
+		printf("defer: %s\n", preq.pfsyncr_defer ? "on" : "off");
 	}
 }
 
@@ -4607,3 +4671,20 @@ setiflladdr(const char *addr, int param)
 		warn("SIOCSIFLLADDR");
 }
 
+#ifndef SMALL
+void
+setinstance(const char *id, int param)
+{
+	const char *errmsg = NULL;
+	int rdomainid;
+
+	rdomainid = strtonum(id, 0, 128, &errmsg);
+	if (errmsg)
+		errx(1, "rdomain %s: %s", id, errmsg);
+
+	strlcpy(ifr.ifr_name, name, sizeof(ifr.ifr_name));
+	ifr.ifr_rdomainid = rdomainid;
+	if (ioctl(s, SIOCSIFRTABLEID, (caddr_t)&ifr) < 0)
+		warn("SIOCSIFRTABLEID");
+}
+#endif

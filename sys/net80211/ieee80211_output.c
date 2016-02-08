@@ -1,4 +1,4 @@
-/*	$OpenBSD: ieee80211_output.c,v 1.83 2009/01/28 18:55:18 damien Exp $	*/
+/*	$OpenBSD: ieee80211_output.c,v 1.87 2009/05/24 07:46:04 damien Exp $	*/
 /*	$NetBSD: ieee80211_output.c,v 1.13 2004/05/31 11:02:55 dyoung Exp $	*/
 
 /*-
@@ -116,6 +116,7 @@ int
 ieee80211_output(struct ifnet *ifp, struct mbuf *m, struct sockaddr *dst,
     struct rtentry *rt)
 {
+	struct ieee80211_frame *wh;
 	struct m_tag *mtag;
 	int s, len, error = 0;
 	u_short mflags;
@@ -129,11 +130,23 @@ ieee80211_output(struct ifnet *ifp, struct mbuf *m, struct sockaddr *dst,
 
 	/* Try to get the DLT from a mbuf tag */
 	if ((mtag = m_tag_find(m, PACKET_TAG_DLT, NULL)) != NULL) {
+		struct ieee80211com *ic = (void *)ifp;
 		u_int dlt = *(u_int *)(mtag + 1);
 
 		/* Fallback to ethernet for non-802.11 linktypes */
 		if (!(dlt == DLT_IEEE802_11 || dlt == DLT_IEEE802_11_RADIO))
 			goto fallback;
+
+		if (m->m_pkthdr.len < sizeof(struct ieee80211_frame_min))
+			return (EINVAL);
+		wh = mtod(m, struct ieee80211_frame *);
+		if ((wh->i_fc[0] & IEEE80211_FC0_VERSION_MASK) !=
+		    IEEE80211_FC0_VERSION_0)
+			return (EINVAL);
+		if (!(ic->ic_caps & IEEE80211_C_RAWCTL) &&
+		    (wh->i_fc[0] & IEEE80211_FC0_TYPE_MASK) ==
+		    IEEE80211_FC0_TYPE_CTL)
+			return (EINVAL);
 
 		/*
 		 * Queue message on interface without adding any
@@ -495,14 +508,6 @@ ieee80211_encap(struct ifnet *ifp, struct mbuf *m, struct ieee80211_node **pni)
 			goto fallback;
 
 		wh = mtod(m, struct ieee80211_frame *);
-
-		if (m->m_pkthdr.len < sizeof(struct ieee80211_frame_min))
-			goto bad;
-
-		if ((wh->i_fc[0] & IEEE80211_FC0_VERSION_MASK) !=
-		    IEEE80211_FC0_VERSION_0)
-			goto bad;
-
 		switch (wh->i_fc[1] & IEEE80211_FC1_DIR_MASK) {
 		case IEEE80211_FC1_DIR_NODS:
 		case IEEE80211_FC1_DIR_FROMDS:
@@ -1313,8 +1318,7 @@ ieee80211_get_assoc_req(struct ieee80211com *ic, struct ieee80211_node *ni,
 	if ((ic->ic_flags & IEEE80211_F_SHPREAMBLE) &&
 	    IEEE80211_IS_CHAN_2GHZ(ni->ni_chan))
 		capinfo |= IEEE80211_CAPINFO_SHORT_PREAMBLE;
-	if ((ni->ni_capinfo & IEEE80211_CAPINFO_SHORT_SLOTTIME) &&
-	    (ic->ic_flags & IEEE80211_F_SHSLOT))
+	if (ic->ic_caps & IEEE80211_C_SHSLOT)
 		capinfo |= IEEE80211_CAPINFO_SHORT_SLOTTIME;
 	LE_WRITE_2(frm, capinfo); frm += 2;
 	LE_WRITE_2(frm, ic->ic_lintval); frm += 2;
@@ -1554,14 +1558,16 @@ ieee80211_get_sa_query(struct ieee80211com *ic, struct ieee80211_node *ni,
 	struct mbuf *m;
 	u_int8_t *frm;
 
-	m = ieee80211_getmgmt(M_DONTWAIT, MT_DATA, 18);
+	m = ieee80211_getmgmt(M_DONTWAIT, MT_DATA, 4);
 	if (m == NULL)
 		return NULL;
 
 	frm = mtod(m, u_int8_t *);
 	*frm++ = IEEE80211_CATEG_SA_QUERY;
 	*frm++ = action;	/* ACTION_SA_QUERY_REQ/RESP */
-	memcpy(frm, ni->ni_sa_query_trid, 16);
+	LE_WRITE_2(frm, ni->ni_sa_query_trid); frm += 2;
+
+	m->m_pkthdr.len = m->m_len = frm - mtod(m, u_int8_t *);
 
 	return m;
 }

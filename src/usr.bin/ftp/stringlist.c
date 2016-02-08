@@ -1,4 +1,4 @@
-/*	$OpenBSD: stringlist.c,v 1.8 2007/09/02 15:19:32 deraadt Exp $	*/
+/*	$OpenBSD: stringlist.c,v 1.10 2009/05/05 19:35:30 martynas Exp $	*/
 /*	$NetBSD: stringlist.c,v 1.2 1997/01/17 07:26:20 lukem Exp $	*/
 
 /*
@@ -32,9 +32,7 @@
  * SUCH DAMAGE.
  */
 
-#if defined(LIBC_SCCS) && !defined(lint) && !defined(SMALL)
-static const char rcsid[] = "$OpenBSD: stringlist.c,v 1.8 2007/09/02 15:19:32 deraadt Exp $";
-#endif /* LIBC_SCCS and not lint and not SMALL */
+#ifndef SMALL
 
 #include <stdio.h>
 #include <string.h>
@@ -98,3 +96,6 @@ sl_free(StringList *sl, int all)
 	}
 	free(sl);
 }
+
+#endif /* !SMALL */
+

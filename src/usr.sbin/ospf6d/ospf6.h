@@ -1,4 +1,4 @@
-/*	$OpenBSD: ospf6.h,v 1.13 2008/12/30 22:29:54 claudio Exp $ */
+/*	$OpenBSD: ospf6.h,v 1.15 2009/04/09 19:00:40 stsp Exp $ */
 
 /*
  * Copyright (c) 2004, 2005, 2007 Esben Norby <norby@openbsd.org>
@@ -228,7 +228,6 @@ struct lsa_rtr_link {
 
 struct lsa_net {
 	u_int32_t		opts;	/* 24bits options */
-	u_int32_t		att_rtr[1];
 };
 
 struct lsa_net_link {
@@ -263,7 +262,7 @@ struct lsa_link {
 struct lsa_intra_prefix {
 	u_int16_t		numprefix;
 	u_int16_t		ref_type;
-	u_int32_t		ref_lsid;
+	u_int32_t		ref_ls_id;
 	u_int32_t		ref_adv_rtr;
 	/* + numprefix * lsa_prefix */
 };

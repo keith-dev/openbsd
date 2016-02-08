@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.5 2009/02/17 23:46:03 jacekm Exp $
+#	$OpenBSD: Makefile,v 1.7 2009/03/23 15:14:54 deraadt Exp $
 
 .PATH:		${.CURDIR}/..
 
@@ -7,7 +7,7 @@ BINOWN=	root
 
 BINMODE?=555
 
-BINDIR=	/usr/bin
+BINDIR=	/usr/libexec/smtpd
 MAN=	makemap.8 newaliases.8
 
 CFLAGS+=	-g3 -ggdb -I${.CURDIR}/..
@@ -16,8 +16,7 @@ CFLAGS+=	-Wmissing-declarations
 CFLAGS+=	-Wshadow -Wpointer-arith -Wcast-qual
 CFLAGS+=	-Wsign-compare -Wbounded
 
-LINKS=	${BINDIR}/makemap ${BINDIR}/newaliases
-
 SRCS=	parse.y makemap.c aliases.c map.c log.c util.c
-LDFLAGS=	-lutil
+DPADD+= ${LIBUTIL}
+LDADD+= -lutil
 .include <bsd.prog.mk>

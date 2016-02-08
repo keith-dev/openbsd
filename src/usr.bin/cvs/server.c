@@ -1,4 +1,4 @@
-/*	$OpenBSD: server.c,v 1.93 2009/02/21 13:39:01 joris Exp $	*/
+/*	$OpenBSD: server.c,v 1.99 2009/04/18 16:26:01 joris Exp $	*/
 /*
  * Copyright (c) 2006 Joris Vink <joris@openbsd.org>
  *
@@ -40,11 +40,13 @@ struct cvs_resp cvs_responses[] = {
 	{ "Updated",		0,	cvs_client_updated, RESP_NEEDED },
 	{ "Merged",		0,	cvs_client_merged, RESP_NEEDED },
 	{ "Removed",		0,	cvs_client_removed, RESP_NEEDED },
-	{ "Remove-entry",	0,	cvs_client_remove_entry, RESP_NEEDED },
-	{ "Set-static-directory",	0,	cvs_client_set_static_directory, RESP_NEEDED },
-	{ "Clear-static-directory",	0,	cvs_client_clear_static_directory, RESP_NEEDED },
-	{ "Set-sticky",		0,	cvs_client_set_sticky, RESP_NEEDED },
-	{ "Clear-sticky",	0,	cvs_client_clear_sticky, RESP_NEEDED },
+	{ "Remove-entry",	0,	cvs_client_remove_entry, 0 },
+	{ "Set-static-directory",	0,
+	    cvs_client_set_static_directory, 0 },
+	{ "Clear-static-directory",	0,
+	    cvs_client_clear_static_directory, 0 },
+	{ "Set-sticky",		0,	cvs_client_set_sticky, 0 },
+	{ "Clear-sticky",	0,	cvs_client_clear_sticky, 0 },
 
 	/* unsupported responses until told otherwise */
 	{ "New-entry",			0,	NULL, 0 },
@@ -465,6 +467,18 @@ cvs_server_unchanged(char *data)
 void
 cvs_server_questionable(char *data)
 {
+	CVSENTRIES *entlist;
+	char entry[CVS_ENT_MAXLINELEN];
+
+	if (data == NULL)
+		fatal("Questionable request with no data attached");
+
+	(void)xsnprintf(entry, sizeof(entry), "/%s/%c///", data,
+	    CVS_SERVER_QUESTIONABLE);
+
+	entlist = cvs_ent_open(server_currentdir);
+	cvs_ent_add(entlist, entry);
+
 	/* sorry, we have to use TMP_DIR */
 	disable_fast_checkout = 1;
 }
@@ -779,12 +793,7 @@ cvs_server_set_sticky(const char *dir, const char *tag)
 	char repo[MAXPATHLEN];
 
 	cvs_get_repository_path(dir, repo, MAXPATHLEN);
-	if (module_repo_root != NULL) {
-		(void)xsnprintf(fpath, MAXPATHLEN, "%s/%s/%s",
-		    current_cvsroot->cr_dir, module_repo_root, repo);
-	} else {
-		(void)xsnprintf(fpath, MAXPATHLEN, "%s/", repo);
-	}
+	(void)xsnprintf(fpath, MAXPATHLEN, "%s/", repo);
 
 	cvs_server_send_response("Set-sticky %s/", dir);
 	cvs_remote_output(fpath);
@@ -798,13 +807,28 @@ cvs_server_clear_sticky(char *dir)
 	char repo[MAXPATHLEN];
 
 	cvs_get_repository_path(dir, repo, MAXPATHLEN);
-	if (module_repo_root != NULL) {
-		(void)xsnprintf(fpath, MAXPATHLEN, "%s/%s/%s",
-		    current_cvsroot->cr_dir, module_repo_root, repo);
-	} else {
-		(void)xsnprintf(fpath, MAXPATHLEN, "%s/", repo);
-	}
+	(void)xsnprintf(fpath, MAXPATHLEN, "%s/", repo);
 
 	cvs_server_send_response("Clear-sticky %s//", dir);
 	cvs_remote_output(fpath);
+}
+
+void
+cvs_server_exp_modules(char *module)
+{
+	struct module_checkout *mo;
+	struct cvs_filelist *fl;
+
+	if (server_argc != 2)
+		fatal("expand-modules with no arguments");
+
+	mo = cvs_module_lookup(server_argv[1]);
+
+	RB_FOREACH(fl, cvs_flisthead, &(mo->mc_modules))
+		cvs_server_send_response("Module-expansion %s", fl->file_path);
+	cvs_server_send_response("ok");
+
+	server_argc--;
+	xfree(server_argv[1]);
+	server_argv[1] = NULL;
 }

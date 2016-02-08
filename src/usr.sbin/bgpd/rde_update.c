@@ -1,4 +1,4 @@
-/*	$OpenBSD: rde_update.c,v 1.64 2009/01/13 21:35:16 sthen Exp $ */
+/*	$OpenBSD: rde_update.c,v 1.68 2009/06/06 01:10:29 claudio Exp $ */
 
 /*
  * Copyright (c) 2004 Claudio Jeker <claudio@openbsd.org>
@@ -404,9 +404,9 @@ up_generate_updates(struct filter_head *rules, struct rde_peer *peer,
 			return;
 
 		pt_getaddr(old->prefix, &addr);
-		if (rde_filter(NULL, rules, peer, old->aspath, &addr,
-		    old->prefix->prefixlen, old->aspath->peer, DIR_OUT) ==
-		    ACTION_DENY)
+		if (rde_filter(peer->ribid, NULL, rules, peer, old->aspath,
+		    &addr, old->prefix->prefixlen, old->aspath->peer,
+		    DIR_OUT) == ACTION_DENY)
 			return;
 
 		/* withdraw prefix */
@@ -423,9 +423,9 @@ up_generate_updates(struct filter_head *rules, struct rde_peer *peer,
 		}
 
 		pt_getaddr(new->prefix, &addr);
-		if (rde_filter(&asp, rules, peer, new->aspath, &addr,
-		    new->prefix->prefixlen, new->aspath->peer, DIR_OUT) ==
-		    ACTION_DENY) {
+		if (rde_filter(peer->ribid, &asp, rules, peer, new->aspath,
+		    &addr, new->prefix->prefixlen, new->aspath->peer,
+		    DIR_OUT) == ACTION_DENY) {
 			path_put(asp);
 			up_generate_updates(rules, peer, NULL, old);
 			return;
@@ -473,8 +473,8 @@ up_generate_default(struct filter_head *rules, struct rde_peer *peer,
 	bzero(&addr, sizeof(addr));
 	addr.af = af;
 
-	if (rde_filter(&fasp, rules, peer, asp, &addr, 0, NULL, DIR_OUT) ==
-	    ACTION_DENY) {
+	if (rde_filter(peer->ribid, &fasp, rules, peer, asp, &addr, 0, NULL,
+	    DIR_OUT) == ACTION_DENY) {
 		path_put(fasp);
 		path_put(asp);
 		return;
@@ -629,7 +629,7 @@ up_generate_attr(struct rde_peer *peer, struct update_attr *upa,
 
 	/* aspath */
 	if (!peer->conf.ebgp ||
-	    rde_decisionflags() & BGPD_FLAG_DECISION_TRANS_AS)
+	    peer->conf.flags & PEERFLAG_TRANS_AS)
 		pdata = aspath_prepend(a->aspath, rde_local_as(), 0, &plen);
 	else
 		pdata = aspath_prepend(a->aspath, rde_local_as(), 1, &plen);
@@ -762,7 +762,7 @@ up_generate_attr(struct rde_peer *peer, struct update_attr *upa,
 	/* NEW to OLD conversion when going sending stuff to a 2byte AS peer */
 	if (neednewpath) {
 		if (!peer->conf.ebgp ||
-		    rde_decisionflags() & BGPD_FLAG_DECISION_TRANS_AS)
+		    peer->conf.flags & PEERFLAG_TRANS_AS)
 			pdata = aspath_prepend(a->aspath, rde_local_as(), 0,
 			    &plen);
 		else
@@ -917,13 +917,7 @@ up_dump_mp_unreach(u_char *buf, u_int16_t *len, struct rde_peer *peer)
 		return (NULL);
 
 	datalen += 3;	/* afi + safi */
-	if (datalen > 255) {
-		attrlen += 2 + datalen;
-		flags |= ATTR_EXTLEN;
-	} else {
-		attrlen += 1 + datalen;
-		buf++;
-	}
+
 	/* prepend header, need to do it reverse */
 	/* safi & afi */
 	buf[--wpos] = SAFI_UNICAST;
@@ -933,11 +927,15 @@ up_dump_mp_unreach(u_char *buf, u_int16_t *len, struct rde_peer *peer)
 
 	/* attribute length */
 	if (datalen > 255) {
+		attrlen += 2 + datalen;
+		flags |= ATTR_EXTLEN;
 		wpos -= sizeof(u_int16_t);
 		tmp = htons(datalen);
 		memcpy(buf + wpos, &tmp, sizeof(u_int16_t));
-	} else
+	} else {
+		attrlen += 1 + datalen;
 		buf[--wpos] = (u_char)datalen;
+	}
 
 	/* mp attribute */
 	buf[--wpos] = (u_char)ATTR_MP_UNREACH_NLRI;
@@ -958,7 +956,7 @@ up_dump_mp_unreach(u_char *buf, u_int16_t *len, struct rde_peer *peer)
 	/* total length includes the two 2-bytes length fields. */
 	*len = attrlen + 2 * sizeof(u_int16_t);
 
-	return (buf);
+	return (buf + wpos);
 }
 
 u_char *

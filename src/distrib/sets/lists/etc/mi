@@ -54,6 +54,7 @@
 ./etc/mail/mailertable.db
 ./etc/mail/relay-domains
 ./etc/mail/sendmail.cf
+./etc/mail/smtpd.conf
 ./etc/mail/spamd.conf
 ./etc/mail/submit.cf
 ./etc/mail/trusted-users
@@ -105,6 +106,7 @@
 ./etc/sensorsd.conf
 ./etc/services
 ./etc/shells
+./etc/skel/.Xdefaults
 ./etc/skel/.cshrc
 ./etc/skel/.login
 ./etc/skel/.mailrc
@@ -127,6 +129,7 @@
 ./etc/systrace/usr_sbin_named
 ./etc/ttys
 ./etc/weekly
+./root/.Xdefaults
 ./root/.cshrc
 ./root/.klogin
 ./root/.login

@@ -1,65 +1,94 @@
-/*	$OpenBSD: mktemp.c,v 1.25 2009/02/17 22:53:43 deraadt Exp $ */
+/*	$OpenBSD: mktemp.c,v 1.27 2009/03/20 16:05:11 millert Exp $ */
 /*
- * Copyright (c) 1987, 1993
- *	The Regents of the University of California.  All rights reserved.
+ * Copyright (c) 1996-1998, 2008 Theo de Raadt
+ * Copyright (c) 1997, 2008-2009 Todd C. Miller
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in the
- *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
- *    may be used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ * Permission to use, copy, modify, and distribute this software for any
+ * purpose with or without fee is hereby granted, provided that the above
+ * copyright notice and this permission notice appear in all copies.
  *
- * THIS SOFTWARE IS PROVIDED BY THE REGENTS AND CONTRIBUTORS ``AS IS'' AND
- * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
- * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
- * ARE DISCLAIMED.  IN NO EVENT SHALL THE REGENTS OR CONTRIBUTORS BE LIABLE
- * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
- * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
- * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
- * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
- * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
- * SUCH DAMAGE.
+ * THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+ * WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+ * MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+ * ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+ * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+ * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
+ * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
 #include <sys/types.h>
 #include <sys/stat.h>
-#include <fcntl.h>
 #include <errno.h>
+#include <fcntl.h>
+#include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
 #include <unistd.h>
 
-static int _gettemp(char *, int *, int, int);
+#define MKTEMP_NAME	0
+#define MKTEMP_FILE	1
+#define MKTEMP_DIR	2
 
-int
-mkstemps(char *path, int slen)
+#define TEMPCHARS	"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
+#define NUM_CHARS	(sizeof(TEMPCHARS) - 1)
+
+static int
+mktemp_internal(char *path, int slen, int mode)
 {
+	char *start, *cp, *ep;
+	const char *tempchars = TEMPCHARS;
+	unsigned int r, tries;
+	struct stat sb;
+	size_t len;
 	int fd;
 
-	return (_gettemp(path, &fd, 0, slen) ? fd : -1);
-}
+	if (*path == '\0') {
+		errno = EINVAL;
+		return(-1);
+	}
 
-int
-mkstemp(char *path)
-{
-	int fd;
+	len = strlen(path);
+	if (len == 0 || slen >= len) {
+		errno = EINVAL;
+		return(-1);
+	}
+	ep = path + len - slen;
 
-	return (_gettemp(path, &fd, 0, 0) ? fd : -1);
-}
+	tries = 1;
+	for (start = ep; start >= path && *--start == 'X';) {
+		if (tries < INT_MAX / NUM_CHARS)
+			tries *= NUM_CHARS;
+	}
+	tries *= 2;
+	start++;
 
-char *
-mkdtemp(char *path)
-{
-	return(_gettemp(path, (int *)NULL, 1, 0) ? path : (char *)NULL);
+	do {
+		for (cp = start; cp != ep; cp++) {
+			r = arc4random_uniform(NUM_CHARS);
+			*cp = tempchars[r];
+		}
+
+		switch (mode) {
+		case MKTEMP_NAME:
+			if (lstat(path, &sb) != 0)
+				return(errno == ENOENT ? 0 : -1);
+			break;
+		case MKTEMP_FILE:
+			fd = open(path, O_CREAT|O_EXCL|O_RDWR, S_IRUSR|S_IWUSR);
+			if (fd != -1 || errno != EEXIST)
+				return(fd);
+			break;
+		case MKTEMP_DIR:
+			if (mkdir(path, S_IRUSR|S_IWUSR|S_IXUSR) == 0)
+				return(0);
+			if (errno != EEXIST)
+				return(-1);
+			break;
+		}
+	} while (--tries);
+	return(-1);
 }
 
 char *_mktemp(char *);
@@ -67,7 +96,9 @@ char *_mktemp(char *);
 char *
 _mktemp(char *path)
 {
-	return(_gettemp(path, (int *)NULL, 0, 0) ? path : (char *)NULL);
+	if (mktemp_internal(path, 0, MKTEMP_NAME) == -1)
+		return(NULL);
+	return(path);
 }
 
 __warn_references(mktemp,
@@ -79,55 +110,23 @@ mktemp(char *path)
 	return(_mktemp(path));
 }
 
-
-static int
-_gettemp(char *path, int *doopen, int domkdir, int slen)
+int
+mkstemp(char *path)
 {
-	char *start, *cp, *ep;
-	struct stat sbuf;
-	size_t len;
-	int r;
+	return(mktemp_internal(path, 0, MKTEMP_FILE));
+}
 
-	if (doopen && domkdir) {
-		errno = EINVAL;
-		return(0);
-	}
+int
+mkstemps(char *path, int slen)
+{
+	return(mktemp_internal(path, slen, MKTEMP_FILE));
+}
 
-	len = strlen(path);
-	if (len == 0 || slen >= len) {
-		errno = EINVAL;
-		return(0);
-	}
-	ep = path + len - slen;
+char *
+mkdtemp(char *path)
+{
+	int error;
 
-	for (start = ep - 1; start != path; start--)
-		if (*start != 'X') {
-			start++;
-			break;
-		}
-
-	for (;;) {
-		for (cp = start; cp != ep; cp++) {
-			r = arc4random_uniform(26 + 26);
-			if (r < 26)
-				*cp = r + 'A';
-			else
-				*cp = (r - 26) + 'a';
-		}
-
-		if (doopen) {
-			if ((*doopen =
-			    open(path, O_CREAT|O_EXCL|O_RDWR, 0600)) >= 0)
-				return(1);
-			if (errno != EEXIST)
-				return(0);
-		} else if (domkdir) {
-			if (mkdir(path, 0700) == 0)
-				return(1);
-			if (errno != EEXIST)
-				return(0);
-		} else if (lstat(path, &sbuf))
-			return(errno == ENOENT ? 1 : 0);
-	}
-	/*NOTREACHED*/
+	error = mktemp_internal(path, 0, MKTEMP_DIR);
+	return(error ? NULL : path);
 }
