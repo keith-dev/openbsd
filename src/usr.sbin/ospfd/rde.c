@@ -1,4 +1,4 @@
-/*	$OpenBSD: rde.c,v 1.81 2009/06/06 07:31:26 eric Exp $ */
+/*	$OpenBSD: rde.c,v 1.84 2009/11/11 07:59:10 claudio Exp $ */
 
 /*
  * Copyright (c) 2004, 2005 Claudio Jeker <claudio@openbsd.org>
@@ -56,6 +56,7 @@ int		 rde_req_list_exists(struct rde_nbr *, struct lsa_hdr *);
 void		 rde_req_list_del(struct rde_nbr *, struct lsa_hdr *);
 void		 rde_req_list_free(struct rde_nbr *);
 
+struct iface	*rde_asext_lookup(u_int32_t, int);
 struct lsa	*rde_asext_get(struct rroute *);
 struct lsa	*rde_asext_put(struct rroute *);
 
@@ -239,7 +240,7 @@ rde_dispatch_imsg(int fd, short event, void *bula)
 	char			*buf;
 	ssize_t			 n;
 	time_t			 now;
-	int			 r, state, self, error, shut = 0;
+	int			 r, state, self, error, shut = 0, verbose;
 	u_int16_t		 l;
 
 	ibuf = &iev->ibuf;
@@ -437,9 +438,6 @@ rde_dispatch_imsg(int fd, short event, void *bula)
 				if (self)
 					free(lsa);
 			} else if (r < 0) {
-				/* lsa no longer needed */
-				free(lsa);
-
 				/*
 				 * point 6 of "The Flooding Procedure"
 				 * We are violating the RFC here because
@@ -451,8 +449,12 @@ rde_dispatch_imsg(int fd, short event, void *bula)
 				if (rde_req_list_exists(nbr, &lsa->hdr)) {
 					imsg_compose_event(iev_ospfe, IMSG_LS_BADREQ,
 					    imsg.hdr.peerid, 0, -1, NULL, 0);
+					free(lsa);
 					break;
 				}
+
+				/* lsa no longer needed */
+				free(lsa);
 
 				/* new LSA older than DB */
 				if (ntohl(db_hdr->seq_num) == MAX_SEQ_NUM &&
@@ -560,6 +562,11 @@ rde_dispatch_imsg(int fd, short event, void *bula)
 				rde_send_summary_area(area, imsg.hdr.pid);
 			imsg_compose_event(iev_ospfe, IMSG_CTL_END, 0, imsg.hdr.pid,
 			    -1, NULL, 0);
+			break;
+		case IMSG_CTL_LOG_VERBOSE:
+			/* already checked by ospfe */
+			memcpy(&verbose, imsg.data, sizeof(verbose));
+			log_verbose(verbose);
 			break;
 		default:
 			log_debug("rde_dispatch_imsg: unexpected imsg %d",
@@ -1033,24 +1040,32 @@ rde_req_list_free(struct rde_nbr *nbr)
 /*
  * as-external LSA handling
  */
-struct lsa *
-rde_asext_get(struct rroute *rr)
+struct iface *
+rde_asext_lookup(u_int32_t prefix, int plen)
 {
 	struct area	*area;
 	struct iface	*iface;
 
-	LIST_FOREACH(area, &rdeconf->area_list, entry)
+	LIST_FOREACH(area, &rdeconf->area_list, entry) {
 		LIST_FOREACH(iface, &area->iface_list, entry) {
 			if ((iface->addr.s_addr & iface->mask.s_addr) ==
-			    rr->kr.prefix.s_addr && iface->mask.s_addr ==
-			    prefixlen2mask(rr->kr.prefixlen)) {
-				/* already announced as (stub) net LSA */
-				log_debug("rde_asext_get: %s/%d is net LSA",
-				    inet_ntoa(rr->kr.prefix), rr->kr.prefixlen);
-				return (NULL);
-			}
+			    (prefix & iface->mask.s_addr) && (plen == -1 ||
+			    iface->mask.s_addr == prefixlen2mask(plen)))
+				return (iface);
 		}
+	}
+	return (NULL);
+}
 
+struct lsa *
+rde_asext_get(struct rroute *rr)
+{
+	if (rde_asext_lookup(rr->kr.prefix.s_addr, rr->kr.prefixlen)) {
+		/* already announced as (stub) net LSA */
+		log_debug("rde_asext_get: %s/%d is net LSA",
+		    inet_ntoa(rr->kr.prefix), rr->kr.prefixlen);
+		return (NULL);
+	}
 	/* update of seqnum is done by lsa_merge */
 	return (orig_asext_lsa(rr, DEFAULT_AGE));
 }
@@ -1138,6 +1153,7 @@ struct lsa *
 orig_asext_lsa(struct rroute *rr, u_int16_t age)
 {
 	struct lsa	*lsa;
+	struct iface	*iface;
 	u_int16_t	 len;
 
 	len = sizeof(struct lsa_hdr) + sizeof(struct lsa_asext);
@@ -1166,12 +1182,22 @@ orig_asext_lsa(struct rroute *rr, u_int16_t age)
 
 	/*
 	 * nexthop -- on connected routes we are the nexthop,
-	 * on all other cases we announce the true nexthop.
-	 * XXX this is wrong as the true nexthop may be outside
-	 * of the ospf cloud and so unreachable. For now we force
-	 * all traffic to be directed to us.
+	 * in other cases we may announce the true nexthop if the
+	 * nexthop is reachable via an OSPF enabled interface but only
+	 * broadcast & NBMA interfaces are considered in that case.
+	 * It does not make sense to announce the nexthop of a point-to-point
+	 * link since the traffic has to go through this box anyway.
+	 * Some implementations actually check that there are multiple
+	 * neighbors on the particular segment, we skip that check.
 	 */
-	lsa->data.asext.fw_addr = 0;
+	iface = rde_asext_lookup(rr->kr.nexthop.s_addr, -1);
+	if (rr->kr.flags & F_CONNECTED)
+		lsa->data.asext.fw_addr = 0;
+	else if (iface && (iface->type == IF_TYPE_BROADCAST ||
+	    iface->type == IF_TYPE_NBMA))
+		lsa->data.asext.fw_addr = rr->kr.nexthop.s_addr;
+	else
+		lsa->data.asext.fw_addr = 0;
 
 	lsa->data.asext.metric = htonl(rr->metric);
 	lsa->data.asext.ext_tag = htonl(rr->kr.ext_tag);

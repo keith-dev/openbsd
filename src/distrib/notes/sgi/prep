@@ -1,4 +1,4 @@
-dnl	$OpenBSD: prep,v 1.13 2009/05/30 05:00:37 miod Exp $
+dnl	$OpenBSD: prep,v 1.19 2010/03/16 17:23:09 miod Exp $
 Before you install your system, you should identify your system family and
 familiarize yourself with the ARCBios setup and how to run programs from
 the Command monitor prompt.
@@ -21,10 +21,10 @@ Identifying your system:
 	O2, O2+
 
     IP35 family:
-	Origin 300, Origin 3000, Onyx 300
-dnl	Origin 350, Onyx 350, Onyx 4
+dnl	Origin 300, Origin 3000, Onyx 300
+	Origin 350, Onyx 350, Onyx 4
 	Fuel
-dnl	Tezro
+	Tezro
 
     You should use the kernels (bsd and bsd.rd) with the IP suffix
     matching your family number, except for IP35 systems which use
@@ -53,27 +53,74 @@ Switching from serial to graphics console and vice versa:
     and change the ``console'' environment variable, and power-cycle
     the machine.
 
-    > setenv console d
+    >> setenv console d
 
-    will select 9600 8N1, no flow control, serial console on the first
-    serial port (labeled ``(1)''), while
+    will select 8N1, no flow control, serial console on the first serial
+    port (labeled ``(1)''), while
 
-    > setenv console g
+    >> setenv console g
 
     will select the graphics console.
 
-    Only IP32 family systems are supported with a graphis console
-    under OpenBSD at the moment. On all other non-headless systems,
-    you need to change the console to serial.
+    The speed of the serial console is controlled by the ``dbaud'' environment
+    variable, and defaults to 9600 bps if this variable is not set.
+
+    Not all graphics options are currently supported by OpenBSD. If your
+    system is configured for graphics console but the kernel does not
+    support your frame buffer, it will fallback to serial console on the
+    first serial port.
+
+    As of OpenBSD OSREV, supported graphics console devices are:
+    - the onboard frame buffer on IP32 systems (gbe)
+    - ImpactSR (Mardigras) frame buffer on IP30 (I-Series and E-Series)
+      (impact)
+    - VPro family frame buffers on IP27, IP30 and IP35 systems (odyssey)
+
+    And the following graphics devices are not supported yet:
+    - Infinite Reality (Kona) frame buffer on IP27/IP35 Onyx systems
+    - Voyager (Ultimate Vision) frame buffer on IP35 Onyx 4 systems
+
+Switching from L1 console to serial console and vice versa:
+
+    IP35 systems without a graphics console can have the PROM console output
+    either on the L1 console serial port, or the regular serial port. 
+
+    The `console' command at the PROM prompt, can select between them:
+
+    >> console sc
+
+    will switch to the L1 serial port, while
+
+    >> console ioc3
+
+    or
+
+    >> console ioc4
+
+    will select the regular serial port, depending on the I/O board type.
+
+    On Fuel systems, there is no external L1 serial port, so `console sc'
+    should never be used on these machines.
+
+    Origin 300 and 3000 families can switch between `sc' and `ioc3', while
+    Origin 350 and 3500 families can switch between `sc' and `ioc4'.
+
+    The OpenBSD kernel only supports serial console on the regular serial
+    ports; if your PROM console is on the L1 port, the kernel console will
+    nevertheless pick the first IOC3 or IOC4 serial port.
 
 Setting the environment:
 
     When setting up the system to boot from disk, the ``OSLoader''
     environment variable will need to be changed.
 
-    Its default value is ``sash'', which is IRIX' standalone
+    Its default value is ``sash'' or ``sash64'', which is IRIX's standalone
     shell and loader. Set it to ``boot'', the OpenBSD boot loader.
 
-    Also, by default it tries to boot a kernel named ``/unix''. To
-    make it boot OpenBSD, set ``OSLoadFilename'' to ``/bsd''.
+    The kernel image loaded by default is specified in the ``OSLoadFilename''
+    variable, which defaults to ``/unix''.  To boot OpenBSD, set it to
+    ``/bsd''.
+
+    To enable automatic booting of OpenBSD once the machine has passed its
+    diagnostic tests, change the value of ``AutoLoad'' to ``Yes''.
 

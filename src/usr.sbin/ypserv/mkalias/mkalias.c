@@ -1,4 +1,4 @@
-/*	$OpenBSD: mkalias.c,v 1.21 2007/09/04 14:37:53 fgsch Exp $ */
+/*	$OpenBSD: mkalias.c,v 1.23 2009/10/27 23:59:58 deraadt Exp $ */
 
 /*
  * Copyright (c) 1997 Mats O Jansson <moj@stacken.kth.se>
@@ -25,10 +25,6 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  */
-
-#ifndef lint
-static const char rcsid[] = "$OpenBSD: mkalias.c,v 1.21 2007/09/04 14:37:53 fgsch Exp $";
-#endif
 
 #include <ctype.h>
 #include <fcntl.h>
@@ -132,7 +128,7 @@ static void
 usage(void)
 {
 	fprintf(stderr,
-	    "usage: mkalias [-v] [-e|-E [-d] [-u]] [-n] input [output]\n");
+	    "usage: mkalias [-nv] [-E | -e [-du]] input [output]\n");
 	exit(1);
 }
 

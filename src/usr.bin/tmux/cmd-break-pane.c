@@ -1,4 +1,4 @@
-/* $OpenBSD: cmd-break-pane.c,v 1.1 2009/06/01 22:58:49 nicm Exp $ */
+/* $OpenBSD: cmd-break-pane.c,v 1.9 2009/12/03 22:50:10 nicm Exp $ */
 
 /*
  * Copyright (c) 2009 Nicholas Marriott <nicm@users.sourceforge.net>
@@ -30,41 +30,31 @@ int	cmd_break_pane_exec(struct cmd *, struct cmd_ctx *);
 
 const struct cmd_entry cmd_break_pane_entry = {
 	"break-pane", "breakp",
-	CMD_PANE_WINDOW_USAGE " [-d]",
-	CMD_DFLAG,
-	cmd_pane_init,
-	cmd_pane_parse,
+	CMD_TARGET_PANE_USAGE " [-d]",
+	0, "d",
+	cmd_target_init,
+	cmd_target_parse,
 	cmd_break_pane_exec,
-       	cmd_pane_send,
-	cmd_pane_recv,
-	cmd_pane_free,
-	cmd_pane_print
+	cmd_target_free,
+	cmd_target_print
 };
 
 int
 cmd_break_pane_exec(struct cmd *self, struct cmd_ctx *ctx)
 {
-	struct cmd_pane_data	*data = self->data;
+	struct cmd_target_data	*data = self->data;
 	struct winlink		*wl;
 	struct session		*s;
 	struct window_pane	*wp;
 	struct window		*w;
 	char			*cause;
+	int			 base_idx;
 
-	if ((wl = cmd_find_window(ctx, data->target, &s)) == NULL)
+	if ((wl = cmd_find_pane(ctx, data->target, &s, &wp)) == NULL)
 		return (-1);
-	if (data->pane == -1)
-		wp = wl->window->active;
-	else {
-		wp = window_pane_at_index(wl->window, data->pane);
-		if (wp == NULL) {
-			ctx->error(ctx, "no pane: %d", data->pane);
-			return (-1);
-		}
-	}
 
 	if (window_count_panes(wl->window) == 1) {
-		ctx->error(ctx, "can't break pane: %d", data->pane);
+		ctx->error(ctx, "can't break with only one pane");
 		return (-1);
 	}
 
@@ -74,19 +64,21 @@ cmd_break_pane_exec(struct cmd *self, struct cmd_ctx *ctx)
 		if (wl->window->active == NULL)
 			wl->window->active = TAILQ_NEXT(wp, entry);
 	}
- 	layout_refresh(wl->window, 0);
+	layout_close_pane(wp);
 
- 	w = wp->window = window_create1(s->sx, s->sy);
- 	TAILQ_INSERT_HEAD(&w->panes, wp, entry);
- 	w->active = wp;
- 	w->name = default_window_name(w);
+	w = wp->window = window_create1(s->sx, s->sy);
+	TAILQ_INSERT_HEAD(&w->panes, wp, entry);
+	w->active = wp;
+	w->name = default_window_name(w);
+	layout_init(w);
 
- 	wl = session_attach(s, w, -1, &cause); /* can't fail */
- 	if (!(data->flags & CMD_DFLAG))
- 		session_select(s, wl->idx);
- 	layout_refresh(w, 0);
+	base_idx = options_get_number(&s->options, "base-index");
+	wl = session_attach(s, w, -1 - base_idx, &cause); /* can't fail */
+	if (!cmd_check_flag(data->chflags, 'd'))
+		session_select(s, wl->idx);
 
 	server_redraw_session(s);
+	server_status_session_group(s);
 
 	return (0);
 }

@@ -1,7 +1,7 @@
 # ex:ts=8 sw=4:
-# $OpenBSD: PackingList.pm,v 1.90 2009/07/03 17:02:02 naddy Exp $
+# $OpenBSD: PackingList.pm,v 1.101 2010/01/10 11:31:08 espie Exp $
 #
-# Copyright (c) 2003-2007 Marc Espie <espie@openbsd.org>
+# Copyright (c) 2003-2010 Marc Espie <espie@openbsd.org>
 #
 # Permission to use, copy, modify, and distribute this software for any
 # purpose with or without fee is hereby granted, provided that the above
@@ -49,7 +49,9 @@ package OpenBSD::PackingList::hashpath;
 sub match
 {
 	my ($h, $plist) = @_;
-	return $h->{$plist->{extrainfo}->{subdir}};
+	return
+	    defined $plist->fullpkgpath && 
+	    $h->{$plist->fullpkgpath};
 }
 
 package OpenBSD::PackingList;
@@ -97,6 +99,16 @@ sub infodir
 {
 	my $self = shift;
 	return ${$self->{infodir}};
+}
+
+sub conflict_list
+{
+	require OpenBSD::PkgCfl;
+
+	my $self = shift;
+	
+	$self->{conflict_list} //= OpenBSD::PkgCfl->make_conflict_list($self);
+	return $self->{conflict_list};
 }
 
 sub read
@@ -224,7 +236,7 @@ sub UpdateInfoOnly
 		# XXX optimization
 		if (m/^\@arch\b/o) {
 			while (<$fh>) {
-			    if (m/^\@(?:depend|wantlib|pkgpath)\b/o) {
+			    if (m/^\@(?:depend|wantlib|conflict|option|pkgpath|url)\b/o) {
 				    &$cont($_);
 			    } elsif (m/^\@(?:groups|users|cwd)\b/o) {
 				    last;
@@ -232,7 +244,15 @@ sub UpdateInfoOnly
 			}
 			return;
 		}
-		next unless m/^\@(?:name\b|depend\b|wantlib\b|pkgpath\b|comment\s+subdir\=|arch\b)/o;
+		# if alwaysupdate, all info is sig
+		if (m/^\@option\s+always-update\b/o) {
+		    &$cont($_);
+		    while (<$fh>) {
+			    &$cont($_);
+		    }
+		    return;
+		}
+		next unless m/^\@(?:name\b|depend\b|wantlib\b|conflict|\b|option\b|pkgpath\b|comment\s+subdir\=|arch\b|url\b)/o;
 		&$cont($_);
 	}
 }
@@ -392,14 +412,23 @@ sub is_signed
 	return defined $self->{'digital-signature'};
 }
 
+sub fullpkgpath
+{
+	my $self = shift;
+	if (defined $self->{extrainfo} && $self->{extrainfo}->{subdir} ne '') {
+		return $self->{extrainfo}->{subdir};
+	} else {
+		return undef;
+	}
+}
 sub pkgpath
 {
 	my $self = shift;
 	if (!defined $self->{_hashpath}) {
 		my $h = $self->{_hashpath} = 
 		    bless {}, "OpenBSD::PackingList::hashpath";
-		if (defined $self->{extrainfo}) {
-			$h->{$self->{extrainfo}->{subdir}} = 1;
+		if (defined $self->fullpkgpath) {
+			$h->{$self->fullpkgpath} = 1;
 		}
 		if (defined $self->{pkgpath}) {
 			for my $i (@{$self->{pkgpath}}) {
@@ -418,7 +447,7 @@ sub match_pkgpath
 }
 
 our @unique_categories =
-    (qw(name digital-signature no-default-conflict manual-installation extrainfo localbase arch));
+    (qw(name url digital-signature no-default-conflict manual-installation always-update explicit-update extrainfo localbase arch));
 
 our @list_categories =
     (qw(conflict pkgpath incompatibility updateset depend 
@@ -509,14 +538,6 @@ sub to_installation
 }
 
 
-sub signature
-{
-	my $self = shift;
-	my $k = {};
-	$self->visit('signature', $k);
-	return join(',', $self->pkgname, sort keys %$k);
-}
-
 sub forget
 {
 }
@@ -542,6 +563,14 @@ sub AUTOLOAD
 	} else {
 		die "Can't call $sub on ", __PACKAGE__;
 	}
+}
+
+sub signature
+{
+	my $self = shift;
+
+	require OpenBSD::Signature;
+	return OpenBSD::Signature->from_plist($self);
 }
 
 1;

@@ -1,4 +1,4 @@
-/*	$OpenBSD: ospfe.c,v 1.69 2009/06/06 07:31:26 eric Exp $ */
+/*	$OpenBSD: ospfe.c,v 1.74 2010/02/16 18:27:11 claudio Exp $ */
 
 /*
  * Copyright (c) 2005 Claudio Jeker <claudio@openbsd.org>
@@ -104,7 +104,7 @@ ospfe(struct ospfd_conf *xconf, int pipe_parent2ospfe[2], int pipe_ospfe2rde[2],
 		fatal("if_set_ip_hdrincl");
 	if (if_set_recvif(xconf->ospf_socket, 1) == -1)
 		fatal("if_set_recvif");
-	if_set_recvbuf(xconf->ospf_socket);
+	if_set_sockbuf(xconf->ospf_socket);
 
 	oeconf = xconf;
 	if (oeconf->flags & OSPFD_FLAG_NO_FIB_UPDATE)
@@ -259,6 +259,7 @@ ospfe_dispatch_main(int fd, short event, void *bula)
 {
 	static struct area	*narea;
 	static struct iface	*niface;
+	struct ifaddrdel	*ifc;
 	struct imsg	 imsg;
 	struct imsgev	*iev = bula;
 	struct imsgbuf	*ibuf;
@@ -320,6 +321,26 @@ ospfe_dispatch_main(int fd, short event, void *bula)
 							    " down",
 							    iface->name);
 						}
+					}
+				}
+			}
+			break;
+		case IMSG_IFADDRDEL:
+			if (imsg.hdr.len != IMSG_HEADER_SIZE +
+			    sizeof(struct ifaddrdel))
+				fatalx("IFINFO imsg with wrong len");
+			ifc = imsg.data;
+
+			LIST_FOREACH(area, &oeconf->area_list, entry) {
+				LIST_FOREACH(iface, &area->iface_list, entry) {
+					if (ifc->ifindex == iface->ifindex &&
+					    ifc->addr.s_addr ==
+					    iface->addr.s_addr) {
+						if_fsm(iface, IF_EVT_DOWN);
+						log_warnx("interface %s:%s "
+						    "gone", iface->name,
+						    inet_ntoa(iface->addr));
+						break;
 					}
 				}
 			}
@@ -779,7 +800,7 @@ orig_rtr_lsa(struct area *area)
 				/* RFC 3137: stub router support */
 				if (oeconf->flags & OSPFD_FLAG_STUB_ROUTER ||
 				    oe_nofib)
-					rtr_link.metric = 0xffff;
+					rtr_link.metric = MAX_METRIC;
 				else
 					rtr_link.metric = htons(iface->metric);
 				num_links++;
@@ -827,12 +848,21 @@ orig_rtr_lsa(struct area *area)
 				}
 			}
 
-			if ((iface->flags & IFF_UP) == 0 ||
-			    iface->linkstate == LINK_STATE_DOWN ||
-			    (!LINK_STATE_IS_UP(iface->linkstate) &&
-			    iface->media_type == IFT_CARP))
+			/*
+			 * do not add a stub net LSA for interfaces that are:
+			 *  - down
+			 *  - have a linkstate which is down and are not carp
+			 *  - have a linkstate unknown and are carp
+			 * carp uses linkstate down for backup and unknown
+			 * in cases where a major fubar happend.
+			 */
+			if (!(iface->flags & IFF_UP) ||
+			    (iface->media_type != IFT_CARP &&
+			    !(LINK_STATE_IS_UP(iface->linkstate) ||
+			    iface->linkstate == LINK_STATE_UNKNOWN)) ||
+			    (iface->media_type == IFT_CARP &&
+			    iface->linkstate == LINK_STATE_UNKNOWN))
 				continue;
-
 			log_debug("orig_rtr_lsa: stub net, "
 			    "interface %s", iface->name);
 
@@ -840,7 +870,21 @@ orig_rtr_lsa(struct area *area)
 			    iface->addr.s_addr & iface->mask.s_addr;
 			rtr_link.data = iface->mask.s_addr;
 			rtr_link.type = LINK_TYPE_STUB_NET;
-			break;
+
+			rtr_link.num_tos = 0;
+			/*
+			 * backup carp interfaces are anounced with high metric
+			 * for faster failover.
+			 */
+			if (iface->media_type == IFT_CARP &&
+			    iface->linkstate == LINK_STATE_DOWN)
+				rtr_link.metric = MAX_METRIC;
+			else
+				rtr_link.metric = htons(iface->metric);
+			num_links++;
+			if (buf_add(buf, &rtr_link, sizeof(rtr_link)))
+				fatalx("orig_rtr_lsa: buf_add failed");
+			continue;
 		case IF_TYPE_VIRTUALLINK:
 			LIST_FOREACH(nbr, &iface->nbr_list, entry) {
 				if (nbr != iface->self &&
@@ -854,7 +898,7 @@ orig_rtr_lsa(struct area *area)
 				/* RFC 3137: stub router support */
 				if (oeconf->flags & OSPFD_FLAG_STUB_ROUTER ||
 				    oe_nofib)
-					rtr_link.metric = 0xffff;
+					rtr_link.metric = MAX_METRIC;
 				else
 					rtr_link.metric = htons(iface->metric);
 				num_links++;
@@ -890,7 +934,7 @@ orig_rtr_lsa(struct area *area)
 					/* RFC 3137: stub router support */
 					if (oe_nofib || oeconf->flags &
 					    OSPFD_FLAG_STUB_ROUTER)
-						rtr_link.metric = 0xffff;
+						rtr_link.metric = MAX_METRIC;
 					else
 						rtr_link.metric =
 						    htons(iface->metric);
@@ -910,7 +954,7 @@ orig_rtr_lsa(struct area *area)
 		/* RFC 3137: stub router support */
 		if ((oeconf->flags & OSPFD_FLAG_STUB_ROUTER || oe_nofib) &&
 		    rtr_link.type != LINK_TYPE_STUB_NET)
-			rtr_link.metric = 0xffff;
+			rtr_link.metric = MAX_METRIC;
 		else
 			rtr_link.metric = htons(iface->metric);
 		num_links++;
@@ -1099,7 +1143,7 @@ ospfe_demote_area(struct area *area, int active)
 
 	bzero(&dmsg, sizeof(dmsg));
 	strlcpy(dmsg.demote_group, area->demote_group,
-	sizeof(dmsg.demote_group));
+	    sizeof(dmsg.demote_group));
 	dmsg.level = area->demote_level;
 	if (active)
 		dmsg.level = -dmsg.level;
@@ -1123,6 +1167,9 @@ ospfe_demote_iface(struct iface *iface, int active)
 		dmsg.level = -1;
 	else
 		dmsg.level = 1;
+
+	log_warnx("ospfe_demote_iface: group %s level %d", dmsg.demote_group,
+		dmsg.level);
 
 	ospfe_imsg_compose_parent(IMSG_DEMOTE, 0, &dmsg, sizeof(dmsg));
 }

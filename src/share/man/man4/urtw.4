@@ -1,4 +1,4 @@
-.\" $OpenBSD: urtw.4,v 1.6 2009/06/07 10:01:44 jmc Exp $
+.\" $OpenBSD: urtw.4,v 1.14 2010/03/01 09:28:20 sobrado Exp $
 .\"
 .\" Copyright (c) 2008 Weongyo Jeong <weongyo@FreeBSD.org>
 .\"
@@ -14,7 +14,7 @@
 .\" ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
 .\" OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 .\"
-.Dd $Mdocdate: June 7 2009 $
+.Dd $Mdocdate: March 1 2010 $
 .Os
 .Dt URTW 4
 .Sh NAME
@@ -38,15 +38,6 @@ Also known as
 mode, this is used when associating with an access point, through
 which all traffic passes.
 This mode is the default.
-.It IBSS mode
-Also known as
-.Em IEEE ad-hoc
-mode or
-.Em peer-to-peer
-mode.
-This is the standardized method of operating without an access point.
-Stations associate with a service set.
-However, actual connections between stations are peer-to-peer.
 .It monitor mode
 In this mode the driver is able to receive packets without
 associating with an access point.
@@ -58,7 +49,7 @@ or to scan for access points.
 The
 .Nm
 driver can be configured to use
-Wireless Equivalent Privacy (WEP) or
+Wired Equivalent Privacy (WEP) or
 Wi-Fi Protected Access (WPA-PSK and WPA2-PSK).
 WPA is the de facto encryption standard for wireless networks.
 It is strongly recommended that WEP
@@ -80,12 +71,17 @@ or on boot with
 The following adapters should work:
 .Pp
 .Bl -tag -width Ds -offset indent -compact
+.It Alfa AWUS036H
+.It ASUS P5B Deluxe
 .It Belkin F5D7050E
+.It Linksys WUSB54GC v2
 .It Netgear WG111v2
 .It Netgear WG111v3
 .It Shuttle XPC Accessory PN20
-.It Sitecom WL-168
+.It Sitecom WL-168 v1
+.It Sitecom WL-168 v4
 .It Surecom EP-9001-g rev 2A
+.It TRENDnet TEW-424UB V3.xR
 .El
 .Sh EXAMPLES
 The following
@@ -96,14 +92,6 @@ using WEP key
 channel 11, obtaining an IP address using DHCP:
 .Bd -literal -offset indent
 dhcp NONE NONE NONE nwkey 0x1deadbeef1 chan 11
-.Ed
-.Pp
-The following
-.Xr hostname.if 5
-example creates a host-based access point on boot:
-.Bd -literal -offset indent
-inet 192.168.1.1 255.255.255.0 NONE media autoselect \e
-	mediaopt hostap nwid my_net chan 11
 .Ed
 .Pp
 Configure urtw0 to join network
@@ -137,7 +125,7 @@ Join an existing BSS network,
 .Xr ifconfig 8 ,
 .Xr wpa-psk 8
 .Pp
-RealTek Semiconductor:
+Realtek Semiconductor:
 .Pa http://www.realtek.com.tw/
 .Sh HISTORY
 The

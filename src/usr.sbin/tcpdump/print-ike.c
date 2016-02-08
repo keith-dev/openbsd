@@ -1,4 +1,4 @@
-/*	$OpenBSD: print-ike.c,v 1.31 2008/12/18 16:18:49 hshoexer Exp $	*/
+/*	$OpenBSD: print-ike.c,v 1.34 2010/01/20 15:19:25 sthen Exp $	*/
 
 /*
  * Copyright (c) 1990, 1991, 1992, 1993, 1994, 1995, 1996, 1997, 1998, 1999
@@ -26,11 +26,6 @@
  *         Tatu Ylonen <ylo@ssh.fi> and Timo J. Rinne <tri@ssh.fi>
  *         in co-operation with SSH Communications Security, Espoo, Finland
  */
-
-#ifndef lint
-static const char rcsid[] =
-    "@(#) $Id: print-ike.c,v 1.31 2008/12/18 16:18:49 hshoexer Exp $ (XXX)";
-#endif
 
 #include <sys/param.h>
 #include <sys/time.h>
@@ -860,7 +855,9 @@ ike_pl_print (u_int8_t type, u_int8_t *buf, u_int8_t doi)
 		    plprivtypes[type - PAYLOAD_PRIVATE_MIN], this_len);
 
 	if ((type < PAYLOAD_RESERVED_MIN &&
-	    this_len < min_payload_lengths[type]) || this_len == 0)
+	    (type < sizeof(min_payload_lengths)/sizeof(min_payload_lengths[0]) &&
+	    this_len < min_payload_lengths[type])) ||
+	    this_len == 0)
 		goto pltrunc;
 
 	if ((type > PAYLOAD_PRIVATE_MIN && type < PAYLOAD_PRIVATE_MAX &&
@@ -926,9 +923,18 @@ ike_pl_print (u_int8_t type, u_int8_t *buf, u_int8_t doi)
 	case PAYLOAD_SEQ:
 	case PAYLOAD_POP:
 	case PAYLOAD_NAT_D:
+		break;
+
 	case PAYLOAD_NAT_OA:
+		/* RFC3947 NAT-OA uses a subset of the ID payload */
+		ipsec_id_print(buf, this_len, doi);
+		break;
+
 	case PAYLOAD_NAT_D_DRAFT:
+		break;
+
 	case PAYLOAD_NAT_OA_DRAFT:
+		ipsec_id_print(buf, this_len, doi);
 		break;
 
 	default:

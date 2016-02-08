@@ -1,4 +1,4 @@
-/*	$OpenBSD: pfctl_parser.h,v 1.88 2009/04/06 12:05:55 henning Exp $ */
+/*	$OpenBSD: pfctl_parser.h,v 1.92 2010/01/18 23:52:46 mcbride Exp $ */
 
 /*
  * Copyright (c) 2001 Daniel Hartmeier
@@ -79,7 +79,6 @@ struct pfctl {
 	int tdirty;			/* kernel dirty */
 #define PFCTL_ANCHOR_STACK_DEPTH 64
 	struct pf_anchor *astack[PFCTL_ANCHOR_STACK_DEPTH];
-	struct pfioc_pooladdr paddr;
 	struct pfioc_altq *paltq;
 	struct pfioc_queue *pqueue;
 	struct pfr_buffer *trans;
@@ -123,6 +122,7 @@ struct node_host {
 	struct node_host	*next;
 	struct node_host	*tail;
 };
+void	freehostlist(struct node_host *);
 
 struct node_os {
 	char			*os;
@@ -191,10 +191,13 @@ TAILQ_HEAD(pf_opt_queue, pf_opt_rule);
 
 int	pfctl_rules(int, char *, int, int, char *, struct pfr_buffer *);
 int	pfctl_optimize_ruleset(struct pfctl *, struct pf_ruleset *);
+int     pf_opt_create_table(struct pfctl *, struct pf_opt_tbl *);
+int     add_opt_table(struct pfctl *, struct pf_opt_tbl **, sa_family_t,
+            struct pf_rule_addr *, char *);
 
 int	pfctl_add_rule(struct pfctl *, struct pf_rule *, const char *);
 int	pfctl_add_altq(struct pfctl *, struct pf_altq *);
-int	pfctl_add_pool(struct pfctl *, struct pf_pool *, sa_family_t);
+int	pfctl_add_pool(struct pfctl *, struct pf_pool *, sa_family_t, int);
 void	pfctl_move_pool(struct pf_pool *, struct pf_pool *);
 void	pfctl_clear_pool(struct pf_pool *);
 
@@ -211,7 +214,7 @@ int	parse_config(char *, struct pfctl *);
 int	parse_flags(char *);
 int	pfctl_load_anchors(int, struct pfctl *, struct pfr_buffer *);
 
-void	print_pool(struct pf_pool *, u_int16_t, u_int16_t, sa_family_t, int);
+void	print_pool(struct pf_pool *, u_int16_t, u_int16_t, sa_family_t, int, int);
 void	print_src_node(struct pf_src_node *, int);
 void	print_rule(struct pf_rule *, const char *, int);
 void	print_tabledef(const char *, int, int, struct node_tinithead *);
@@ -253,6 +256,9 @@ const struct icmptypeent *geticmptypebynumber(u_int8_t, u_int8_t);
 const struct icmptypeent *geticmptypebyname(char *, u_int8_t);
 const struct icmpcodeent *geticmpcodebynumber(u_int8_t, u_int8_t, u_int8_t);
 const struct icmpcodeent *geticmpcodebyname(u_long, char *, u_int8_t);
+
+int			  string_to_loglevel(const char *);
+const char		 *loglevel_to_string(int);
 
 struct pf_timeout {
 	const char	*name;

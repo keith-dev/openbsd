@@ -1,4 +1,4 @@
-/*	$OpenBSD: fileno.c,v 1.5 2005/08/08 08:05:36 espie Exp $ */
+/*	$OpenBSD: fileno.c,v 1.8 2009/11/09 00:18:27 kurt Exp $ */
 /*-
  * Copyright (c) 1990, 1993
  *	The Regents of the University of California.  All rights reserved.
@@ -32,6 +32,7 @@
  */
 
 #include <stdio.h>
+#include "local.h"
 
 /*
  * A subroutine version of the macro fileno.
@@ -41,5 +42,10 @@
 int
 fileno(FILE *fp)
 {
-	return (__sfileno(fp));
+	int     ret;
+
+	FLOCKFILE(fp);
+	ret = __sfileno(fp);
+	FUNLOCKFILE(fp);
+	return (ret);
 }

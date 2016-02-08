@@ -1,4 +1,4 @@
-#	$OpenBSD: install.md,v 1.20 2009/06/04 00:44:47 krw Exp $
+#	$OpenBSD: install.md,v 1.22 2010/02/13 14:02:58 miod Exp $
 #
 #
 # Copyright (c) 1996 The NetBSD Foundation, Inc.
@@ -32,19 +32,35 @@
 # machine dependent section of installation/upgrade script.
 #
 
-IPARCH=`sysctl -n hw.model`
+IPARCH=$(sysctl -n hw.model)
+NCPU=$(sysctl -n hw.ncpufound)
 
 MDSETS="bsd.${IPARCH} bsd.rd.${IPARCH}"
-DEFAULTSETS=${MDSETS}
 SANESETS="bsd.${IPARCH}"
+# Since we do not provide bsd.mp on IP27 yet, do not add bsd.mp.IP27 to the
+# sets, as this will cause a warning in sane_install()
+if ((NCPU > 1)) && ((IPARCH == 30)); then
+	MDSETS="${MDSETS} bsd.mp.${IPARCH}"
+	SANESETS="${SANESETS} bsd.mp.${IPARCH}"
+fi
+DEFAULTSETS=${MDSETS}
 
 md_installboot() {
 	cd /mnt
 	if [[ -f bsd.${IPARCH} ]]; then
 		mv bsd.${IPARCH} bsd
 	fi
+	if [[ -f bsd.mp.${IPARCH} ]]; then
+		mv bsd.mp.${IPARCH} bsd.mp
+	fi
 	if [[ -f bsd.rd.${IPARCH} ]]; then
 		mv bsd.rd.${IPARCH} bsd.rd
+	fi
+
+	if [[ -f bsd.mp ]] && ((NCPU > 1)); then
+		echo "Multiprocessor machine; using bsd.mp instead of bsd."
+		mv bsd bsd.sp 2>/dev/null
+		mv bsd.mp bsd
 	fi
 }
 

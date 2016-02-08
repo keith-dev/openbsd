@@ -1,4 +1,4 @@
-/*	$OpenBSD: getaddrinfo.c,v 1.69 2009/06/04 21:38:29 pyr Exp $	*/
+/*	$OpenBSD: getaddrinfo.c,v 1.71 2009/11/18 07:43:22 guenther Exp $	*/
 /*	$KAME: getaddrinfo.c,v 1.31 2000/08/31 17:36:43 itojun Exp $	*/
 
 /*
@@ -827,10 +827,8 @@ get_port(struct addrinfo *ai, const char *servname, int matchonly)
 		return EAI_SERVICE;
 	case SOCK_DGRAM:
 	case SOCK_STREAM:
-		allownumeric = 1;
-		break;
 	case ANY:
-		allownumeric = 0;
+		allownumeric = 1;
 		break;
 	default:
 		return EAI_SOCKTYPE;
@@ -1064,6 +1062,7 @@ getanswer(const querybuf *answer, int anslen, const char *qname, int qtype,
 				continue;
 			}
 		} else if (type != qtype) {
+#ifndef NO_LOG_BAD_DNS_RESPONSES
 			if (type != T_KEY && type != T_SIG) {
 				struct syslog_data sdata = SYSLOG_DATA_INIT;
 
@@ -1072,6 +1071,7 @@ getanswer(const querybuf *answer, int anslen, const char *qname, int qtype,
 				       qname, p_class(C_IN), p_type(qtype),
 				       p_type(type));
 			}
+#endif /* NO_LOG_BAD_DNS_RESPONSES */
 			cp += n;
 			continue;		/* XXX - had_error++ ? */
 		}

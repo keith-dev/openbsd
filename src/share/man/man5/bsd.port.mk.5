@@ -1,4 +1,4 @@
-.\" $OpenBSD: bsd.port.mk.5,v 1.232 2009/07/02 17:45:38 jakemsr Exp $
+.\" $OpenBSD: bsd.port.mk.5,v 1.239 2010/02/26 19:27:09 espie Exp $
 .\"
 .\" Copyright (c) 2000-2008 Marc Espie
 .\"
@@ -24,7 +24,7 @@
 .\" (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
 .\" THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 .\"
-.Dd $Mdocdate: July 2 2009 $
+.Dd $Mdocdate: February 26 2010 $
 .Dt BSD.PORT.MK 5
 .Os
 .Sh NAME
@@ -454,6 +454,9 @@ completion of the
 stage, and thus is quicker than
 .Ar lib-depends-check ,
 unless you already have all binary packages.
+.It Ar prepare
+Prepare a port for building, by checking and installing all required
+dependencies.
 .It Ar print-package-signature
 Print the package signature, in the same format used for
 .Xr pkg_info 1
@@ -698,7 +701,8 @@ to simplify bulk-package builds.
 .It Ev BROKEN
 Define only for broken ports, set to reason the port is broken.
 See also
-.Ev NO_IGNORE .
+.Ev NO_IGNORE ,
+.Ev TRY_BROKEN .
 .It Ev BSD_INSTALL_{PROGRAM,SCRIPT,DATA,MAN}[_DIR]
 Macros passed to make and configure invocations.
 Set based on corresponding INSTALL_* variables.
@@ -882,6 +886,10 @@ Add
 to enable
 .Xr perl 1
 .Xr Module::Build 3p
+or
+.Sq modinst
+for
+.Xr Module::Install 3p
 style.
 If
 .Sq gnu ,
@@ -997,6 +1005,10 @@ Optional subdirectory of ${DISTDIR} where the current port's distribution
 files and patchfiles will be located.
 See target
 .Ar fetch .
+.It Ev DPB
+Set by the distributed ports builder to only get the information it needs
+from
+.Ar dump-vars .
 .It Ev ECHO_MSG
 User settings.
 Used to display
@@ -1152,11 +1164,16 @@ Defaults to gmake.
 .It Ev HOMEPAGE
 Set to a link to the homepage of the software, if applicable.
 .It Ev IGNORE
-The port is ignored and ${IGNORE} is printed if defined.
-Usually set to the reason the port is ignored.
+Usually set to the reasons for which the port is ignored.
+If non-empty, most common targets that do something (e.g.,
+.Ar fetch ,
+.Ar build ,
+.Ar install ...)
+will be ignored.
 See also
 .Ev BATCH ,
 .Ev BROKEN ,
+.Ev IGNORE_IS_FATAL ,
 .Ev IGNORE_SILENT ,
 .Ev INTERACTIVE ,
 .Ev IS_INTERACTIVE ,
@@ -1164,6 +1181,10 @@ See also
 .Ev NO_IGNORE ,
 .Ev ONLY_FOR_ARCHS ,
 .Ev USE_X11 .
+.It Ev IGNORE_IS_FATAL
+If set to
+.Sq Yes ,
+ignored ports will become fatal errors.
 .It Ev IGNORE_SILENT
 If set to
 .Sq Yes ,
@@ -1805,6 +1826,15 @@ dependency mechanisms will assume the database of installed packages is
 correct.
 See also
 .Ev BULK .
+.It Ev TRY_BROKEN
+User settings.
+If set to
+.Sq Yes ,
+don't set
+.Ev IGNORE
+for
+.Ev BROKEN
+ports, so that we will attempt to build them.
 .It Ev UNLOCK_CMD
 User settings.
 If set, expands to a command that will release a lock.
@@ -1917,11 +1947,13 @@ Subdirectory of ${WRKDIR} where port normally installs (see
 target).
 .It Ev WRKOBJDIR
 Used as a base for the actual port working directory (default:
-${PORTSDIR}/obj).
+${PORTSDIR}/pobj).
 The real working directory ${WRKDIR} is created there.
 Can be set on a per-${PKGPATH} basis.
 For instance, setting WRKOBJDIR_www/mozilla=/tmp/obj
 will affect only the mozilla port.
+If explicitly unset (WRKOBJDIR=), the working directory is
+created within the port directory.
 .It Ev X11BASE
 Where X11 has been installed (default: /usr/X11R6).
 .It Ev XMKMF
@@ -2299,6 +2331,10 @@ instead.
 The framework will automatically detect the presence of
 .Pa .tar.bz2
 files to extract.
+See also
+.Ev BZIP2 , EXTRACT_CASES ,
+and
+.Ev EXTRACT_SUFX .
 .It Ev USE_IMAKE
 Use
 .Ev CONFIGURE_STYLE
@@ -2307,6 +2343,10 @@ instead.
 The framework will automatically detect the presence of
 .Pa .zip
 files to extract.
+See also
+.Ev ZIP , EXTRACT_CASES ,
+and
+.Ev EXTRACT_SUFX .
 .It Ev VARNAME
 Use make show=name instead of make show VARNAME=name.
 .It Ev WRKPKG

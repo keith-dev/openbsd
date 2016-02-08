@@ -1,4 +1,4 @@
-/*	$OpenBSD: parse.y,v 1.38 2009/06/05 23:04:51 jacekm Exp $	*/
+/*	$OpenBSD: parse.y,v 1.51 2010/02/26 15:06:39 gilles Exp $	*/
 
 /*
  * Copyright (c) 2008 Gilles Chehade <gilles@openbsd.org>
@@ -85,19 +85,19 @@ char		*symget(const char *);
 struct smtpd		*conf = NULL;
 static int		 errors = 0;
 
-objid_t			 last_map_id = 0;
+objid_t			 last_map_id = 1;
 struct map		*map = NULL;
 struct rule		*rule = NULL;
 struct mapel_list	*contents = NULL;
 
 struct listener	*host_v4(const char *, in_port_t);
 struct listener	*host_v6(const char *, in_port_t);
-int		 host_dns(const char *, const char *, struct listenerlist *,
-		    int, in_port_t, u_int8_t);
-int		 host(const char *, const char *, struct listenerlist *,
-		    int, in_port_t, u_int8_t);
-int		 interface(const char *, const char *, struct listenerlist *,
-		    int, in_port_t, u_int8_t);
+int		 host_dns(const char *, const char *, const char *,
+		    struct listenerlist *, int, in_port_t, u_int8_t);
+int		 host(const char *, const char *, const char *,
+		    struct listenerlist *, int, in_port_t, u_int8_t);
+int		 interface(const char *, const char *, const char *,
+		    struct listenerlist *, int, in_port_t, u_int8_t);
 void		 set_localaddrs(void);
 
 typedef struct {
@@ -119,7 +119,7 @@ typedef struct {
 %token	DNS DB TFILE EXTERNAL DOMAIN CONFIG SOURCE
 %token  RELAY VIA DELIVER TO MAILDIR MBOX HOSTNAME
 %token	ACCEPT REJECT INCLUDE NETWORK ERROR MDA FROM FOR
-%token	ARROW ENABLE AUTH TLS LOCAL
+%token	ARROW ENABLE AUTH TLS LOCAL VIRTUAL USER TAG ALIAS
 %token	<v.string>	STRING
 %token  <v.number>	NUMBER
 %type	<v.map>		map
@@ -127,7 +127,7 @@ typedef struct {
 %type	<v.cond>	condition
 %type	<v.tv>		interval
 %type	<v.object>	mapref
-%type	<v.string>	certname
+%type	<v.string>	certname user tag on alias
 
 %%
 
@@ -232,15 +232,29 @@ auth		: ENABLE AUTH  			{ $$ = 1; }
 		| /* empty */			{ $$ = 0; }
 		;
 
+tag		: TAG STRING			{
+       			if (strlen($2) >= MAX_TAG_SIZE) {
+       				yyerror("tag name too long");
+				free($2);
+				YYERROR;
+			}
+
+			$$ = $2;
+		}
+		| /* empty */			{ $$ = NULL; }
+		;
+
 main		: QUEUE INTERVAL interval	{
 			conf->sc_qintval = $3;
 		}
-		| LISTEN ON STRING port ssl certname auth {
+		| LISTEN ON STRING port ssl certname auth tag {
 			char		*cert;
+			char		*tag;
 			u_int8_t	 flags;
 
 			if ($5 == F_SSL) {
 				yyerror("syntax error");
+				free($8);
 				free($6);
 				free($3);
 				YYERROR;
@@ -248,6 +262,7 @@ main		: QUEUE INTERVAL interval	{
 
 			if ($5 == 0 && ($6 != NULL || $7)) {
 				yyerror("error: must specify tls or smtps");
+				free($8);
 				free($6);
 				free($3);
 				YYERROR;
@@ -266,28 +281,30 @@ main		: QUEUE INTERVAL interval	{
 			if ($7)
 				flags |= F_AUTH;
 
-			if (ssl_load_certfile(conf, cert, F_SCERT) < 0) {
-				log_warnx("warning: could not load cert: %s, "
-				    "no SSL/TLS/AUTH support", cert);
-				if ($5) {
-					yyerror("cannot load certificate: %s",
-					    cert);
-					free($6);
-					free($3);
-					YYERROR;
-				}
+			if ($5 && ssl_load_certfile(conf, cert, F_SCERT) < 0) {
+				yyerror("cannot load certificate: %s", cert);
+				free($8);
+				free($6);
+				free($3);
+				YYERROR;
 			}
 
-			if (! interface($3, cert, conf->sc_listeners,
+			tag = $3;
+			if ($8 != NULL)
+				tag = $8;
+
+			if (! interface($3, tag, cert, conf->sc_listeners,
 				MAX_LISTEN, $4, flags)) {
-				if (host($3, cert, conf->sc_listeners,
+				if (host($3, tag, cert, conf->sc_listeners,
 					MAX_LISTEN, $4, flags) <= 0) {
 					yyerror("invalid virtual ip or interface: %s", $3);
+					free($8);
 					free($6);
 					free($3);
 					YYERROR;
 				}
 			}
+			free($8);
 			free($6);
 			free($3);
 		}
@@ -368,15 +385,6 @@ map		: MAP STRING			{
 				map = NULL;
 				YYERROR;
 			}
-			if (strcmp(map->m_name, "aliases") == 0 ||
-			    strcmp(map->m_name, "virtual") == 0) {
-				if (map->m_src != S_DB) {
-					yyerror("map source must be db");
-					free(map);
-					map = NULL;
-					YYERROR;
-				}
-			}
 			TAILQ_INSERT_TAIL(conf->sc_maps, map, m_entry);
 			map = NULL;
 		}
@@ -428,7 +436,7 @@ stringel	: STRING			{
 				if (bits != -1) {
 					ssin.sin_family = AF_INET;
 					me->me_key.med_addr.bits = bits;
-					me->me_key.med_addr.ss = *(struct sockaddr_storage *)&ssin;
+					memcpy(&me->me_key.med_addr.ss, &ssin, sizeof(ssin));
 					me->me_key.med_addr.ss.ss_len = sizeof(struct sockaddr_in);
 				}
 				else {
@@ -438,7 +446,7 @@ stringel	: STRING			{
 						err(1, "inet_net_pton");
 					ssin6.sin6_family = AF_INET6;
 					me->me_key.med_addr.bits = bits;
-					me->me_key.med_addr.ss = *(struct sockaddr_storage *)&ssin6;
+					memcpy(&me->me_key.med_addr.ss, &ssin6, sizeof(ssin6));
 					me->me_key.med_addr.ss.ss_len = sizeof(struct sockaddr_in6);
 				}
 			}
@@ -446,14 +454,14 @@ stringel	: STRING			{
 				/* IP address ? */
 				if (inet_pton(AF_INET, $1, &ssin.sin_addr) == 1) {
 					ssin.sin_family = AF_INET;
-					me->me_key.med_addr.bits = 0;
-					me->me_key.med_addr.ss = *(struct sockaddr_storage *)&ssin;
+					me->me_key.med_addr.bits = 32;
+					memcpy(&me->me_key.med_addr.ss, &ssin, sizeof(ssin));
 					me->me_key.med_addr.ss.ss_len = sizeof(struct sockaddr_in);
 				}
 				else if (inet_pton(AF_INET6, $1, &ssin6.sin6_addr) == 1) {
 					ssin6.sin6_family = AF_INET6;
-					me->me_key.med_addr.bits = 0;
-					me->me_key.med_addr.ss = *(struct sockaddr_storage *)&ssin6;
+					me->me_key.med_addr.bits = 128;
+					memcpy(&me->me_key.med_addr.ss, &ssin6, sizeof(ssin6));
 					me->me_key.med_addr.ss.ss_len = sizeof(struct sockaddr_in6);
 				}
 				else {
@@ -497,6 +505,7 @@ mapref		: STRING			{
 				fatal("snprintf");
 			m->m_flags |= F_DYNAMIC|F_USED;
 			m->m_type = T_SINGLE;
+			m->m_src = S_NONE;
 
 			TAILQ_INIT(&m->m_contents);
 
@@ -511,7 +520,7 @@ mapref		: STRING			{
 				if (bits != -1) {
 					ssin.sin_family = AF_INET;
 					me->me_key.med_addr.bits = bits;
-					me->me_key.med_addr.ss = *(struct sockaddr_storage *)&ssin;
+					memcpy(&me->me_key.med_addr.ss, &ssin, sizeof(ssin));
 					me->me_key.med_addr.ss.ss_len = sizeof(struct sockaddr_in);
 				}
 				else {
@@ -521,7 +530,7 @@ mapref		: STRING			{
 						err(1, "inet_net_pton");
 					ssin6.sin6_family = AF_INET6;
 					me->me_key.med_addr.bits = bits;
-					me->me_key.med_addr.ss = *(struct sockaddr_storage *)&ssin6;
+					memcpy(&me->me_key.med_addr.ss, &ssin6, sizeof(ssin6));
 					me->me_key.med_addr.ss.ss_len = sizeof(struct sockaddr_in6);
 				}
 			}
@@ -529,14 +538,14 @@ mapref		: STRING			{
 				/* IP address ? */
 				if (inet_pton(AF_INET, $1, &ssin.sin_addr) == 1) {
 					ssin.sin_family = AF_INET;
-					me->me_key.med_addr.bits = 0;
-					me->me_key.med_addr.ss = *(struct sockaddr_storage *)&ssin;
+					me->me_key.med_addr.bits = 32;
+					memcpy(&me->me_key.med_addr.ss, &ssin, sizeof(ssin));
 					me->me_key.med_addr.ss.ss_len = sizeof(struct sockaddr_in);
 				}
 				else if (inet_pton(AF_INET6, $1, &ssin6.sin6_addr) == 1) {
 					ssin6.sin6_family = AF_INET6;
-					me->me_key.med_addr.bits = 0;
-					me->me_key.med_addr.ss = *(struct sockaddr_storage *)&ssin6;
+					me->me_key.med_addr.bits = 128;
+					memcpy(&me->me_key.med_addr.ss, &ssin6, sizeof(ssin6));
 					me->me_key.med_addr.ss.ss_len = sizeof(struct sockaddr_in6);
 				}
 				else {
@@ -628,6 +637,10 @@ decision	: ACCEPT			{ $$ = 1; }
 		| REJECT			{ $$ = 0; }
 		;
 
+alias		: ALIAS STRING			{ $$ = $2; }
+		| /* empty */			{ $$ = NULL; }
+		;
+
 condition	: NETWORK mapref		{
 			struct cond	*c;
 
@@ -637,8 +650,18 @@ condition	: NETWORK mapref		{
 			c->c_map = $2;
 			$$ = c;
 		}
-		| DOMAIN mapref			{
+		| DOMAIN mapref	alias		{
 			struct cond	*c;
+			struct map	*m;
+
+			if ($3) {
+				if ((m = map_findbyname(conf, $3)) == NULL) {
+					yyerror("no such map: %s", $3);
+					free($3);
+					YYERROR;
+				}
+				rule->r_amap = m->m_id;
+			}
 
 			if ((c = calloc(1, sizeof *c)) == NULL)
 				fatal("out of memory");
@@ -646,10 +669,37 @@ condition	: NETWORK mapref		{
 			c->c_map = $2;
 			$$ = c;
 		}
-		| LOCAL {
+		| VIRTUAL STRING		{
+			struct cond	*c;
+			struct map	*m;
+
+			if ((m = map_findbyname(conf, $2)) == NULL) {
+				yyerror("no such map: %s", $2);
+				free($2);
+				YYERROR;
+			}
+			free($2);
+			m->m_flags |= F_USED;
+
+			if ((c = calloc(1, sizeof *c)) == NULL)
+				fatal("out of memory");
+			c->c_type = C_VDOM;
+			c->c_map = m->m_id;
+			$$ = c;
+		}
+		| LOCAL alias {
 			struct cond	*c;
 			struct map	*m;
 			struct mapel	*me;
+
+			if ($2) {
+				if ((m = map_findbyname(conf, $2)) == NULL) {
+					yyerror("no such map: %s", $2);
+					free($2);
+					YYERROR;
+				}
+				rule->r_amap = m->m_id;
+			}
 
 			if ((m = calloc(1, sizeof(*m))) == NULL)
 				fatal("out of memory");
@@ -719,14 +769,30 @@ conditions	: condition				{
 		| '{' condition_list '}'
 		;
 
-action		: DELIVER TO MAILDIR		{
+user		: USER STRING		{
+			struct passwd *pw;
+
+			pw = getpwnam($2);
+			if (pw == NULL) {
+				yyerror("user '%s' does not exist.", $2);
+				free($2);
+				YYERROR;
+			}
+			$$ = $2;
+		}
+		| /* empty */		{ $$ = NULL; }
+		;
+
+action		: DELIVER TO MAILDIR user		{
+			rule->r_user = $4;
 			rule->r_action = A_MAILDIR;
 			if (strlcpy(rule->r_value.path, "~/Maildir",
 			    sizeof(rule->r_value.path)) >=
 			    sizeof(rule->r_value.path))
 				fatal("pathname too long");
 		}
-		| DELIVER TO MAILDIR STRING	{
+		| DELIVER TO MAILDIR STRING user	{
+			rule->r_user = $5;
 			rule->r_action = A_MAILDIR;
 			if (strlcpy(rule->r_value.path, $4,
 			    sizeof(rule->r_value.path)) >=
@@ -734,14 +800,15 @@ action		: DELIVER TO MAILDIR		{
 				fatal("pathname too long");
 			free($4);
 		}
-		| DELIVER TO MBOX		{
+		| DELIVER TO MBOX			{
 			rule->r_action = A_MBOX;
 			if (strlcpy(rule->r_value.path, _PATH_MAILDIR "/%u",
 			    sizeof(rule->r_value.path))
 			    >= sizeof(rule->r_value.path))
 				fatal("pathname too long");
 		}
-		| DELIVER TO MDA STRING		{
+		| DELIVER TO MDA STRING user		{
+			rule->r_user = $5;
 			rule->r_action = A_EXT;
 			if (strlcpy(rule->r_value.command, $4,
 			    sizeof(rule->r_value.command))
@@ -819,7 +886,7 @@ from		: FROM mapref			{
 
 			if ((me = calloc(1, sizeof(*me))) == NULL)
 				fatal("out of memory");
-			me->me_key.med_addr.bits = 32;
+			me->me_key.med_addr.bits = 0;
 			me->me_key.med_addr.ss.ss_len = sizeof(struct sockaddr_in);
 			ssin = (struct sockaddr_in *)&me->me_key.med_addr.ss;
 			ssin->sin_family = AF_INET;
@@ -832,7 +899,7 @@ from		: FROM mapref			{
 
 			if ((me = calloc(1, sizeof(*me))) == NULL)
 				fatal("out of memory");
-			me->me_key.med_addr.bits = 128;
+			me->me_key.med_addr.bits = 0;
 			me->me_key.med_addr.ss.ss_len = sizeof(struct sockaddr_in6);
 			ssin6 = (struct sockaddr_in6 *)&me->me_key.med_addr.ss;
 			ssin6->sin6_family = AF_INET6;
@@ -854,17 +921,33 @@ from		: FROM mapref			{
 		}
 		;
 
-rule		: decision from			{
+on		: ON STRING	{
+       			if (strlen($2) >= MAX_TAG_SIZE) {
+       				yyerror("interface, address or tag name too long");
+				free($2);
+				YYERROR;
+			}
+
+			$$ = $2;
+		}
+		| /* empty */	{ $$ = NULL; }
+
+rule		: decision on from			{
 			struct rule	*r;
 
 			if ((r = calloc(1, sizeof(*r))) == NULL)
 				fatal("out of memory");
 			rule = r;
-			rule->r_sources = map_find(conf, $2);
+			rule->r_sources = map_find(conf, $3);
+
+			if ($2)
+				(void)strlcpy(rule->r_tag, $2, sizeof(rule->r_tag));
+			free($2);
+
 			TAILQ_INIT(&rule->r_conditions);
 			TAILQ_INIT(&rule->r_options);
 
-		} FOR conditions action	{
+		} FOR conditions action	tag {
 			TAILQ_INSERT_TAIL(conf->sc_rules, rule, r_entry);
 		}
 		;
@@ -901,6 +984,7 @@ lookup(char *s)
 	/* this has to be sorted always */
 	static const struct keywords keywords[] = {
 		{ "accept",		ACCEPT },
+		{ "alias",		ALIAS },
 		{ "all",		ALL },
 		{ "auth",		AUTH },
 		{ "certificate",	CERTIFICATE },
@@ -935,10 +1019,13 @@ lookup(char *s)
 		{ "smtps",		SMTPS },
 		{ "source",		SOURCE },
 		{ "ssl",		SSL },
+		{ "tag",		TAG },
 		{ "tls",		TLS },
 		{ "to",			TO },
 		{ "type",		TYPE },
+		{ "user",		USER },
 		{ "via",		VIA },
+		{ "virtual",		VIRTUAL },
 	};
 	const struct keywords	*p;
 
@@ -1272,25 +1359,25 @@ parse_config(struct smtpd *x_conf, const char *filename, int opts)
 	bzero(conf, sizeof(*conf));
 	if ((conf->sc_maps = calloc(1, sizeof(*conf->sc_maps))) == NULL) {
 		log_warn("cannot allocate memory");
-		return 0;
+		return (-1);
 	}
 	if ((conf->sc_rules = calloc(1, sizeof(*conf->sc_rules))) == NULL) {
 		log_warn("cannot allocate memory");
 		free(conf->sc_maps);
-		return 0;
+		return (-1);
 	}
 	if ((conf->sc_listeners = calloc(1, sizeof(*conf->sc_listeners))) == NULL) {
 		log_warn("cannot allocate memory");
 		free(conf->sc_maps);
 		free(conf->sc_rules);
-		return 0;
+		return (-1);
 	}
 	if ((conf->sc_ssl = calloc(1, sizeof(*conf->sc_ssl))) == NULL) {
 		log_warn("cannot allocate memory");
 		free(conf->sc_maps);
 		free(conf->sc_rules);
 		free(conf->sc_listeners);
-		return 0;
+		return (-1);
 	}
 	if ((m = calloc(1, sizeof(*m))) == NULL) {
 		log_warn("cannot allocate memory");
@@ -1298,11 +1385,11 @@ parse_config(struct smtpd *x_conf, const char *filename, int opts)
 		free(conf->sc_rules);
 		free(conf->sc_listeners);
 		free(conf->sc_ssl);
-		return 0;
+		return (-1);
 	}
 
 	errors = 0;
-	last_map_id = 0;
+	last_map_id = 1;
 
 	map = NULL;
 	rule = NULL;
@@ -1319,6 +1406,7 @@ parse_config(struct smtpd *x_conf, const char *filename, int opts)
 
 	if ((file = pushfile(filename, 0)) == NULL) {
 		purge_config(conf, PURGE_EVERYTHING);
+		free(m);
 		return (-1);
 	}
 	topfile = file;
@@ -1498,8 +1586,8 @@ host_v6(const char *s, in_port_t port)
 }
 
 int
-host_dns(const char *s, const char *cert, struct listenerlist *al, int max, in_port_t port,
-    u_int8_t flags)
+host_dns(const char *s, const char *tag, const char *cert,
+    struct listenerlist *al, int max, in_port_t port, u_int8_t flags)
 {
 	struct addrinfo		 hints, *res0, *res;
 	int			 error, cnt = 0;
@@ -1533,6 +1621,8 @@ host_dns(const char *s, const char *cert, struct listenerlist *al, int max, in_p
 		h->ssl_cert_name[0] = '\0';
 		if (cert != NULL)
 			(void)strlcpy(h->ssl_cert_name, cert, sizeof(h->ssl_cert_name));
+		if (tag != NULL)
+			(void)strlcpy(h->tag, tag, sizeof(h->tag));
 
 		if (res->ai_family == AF_INET) {
 			sain = (struct sockaddr_in *)&h->ss;
@@ -1560,8 +1650,8 @@ host_dns(const char *s, const char *cert, struct listenerlist *al, int max, in_p
 }
 
 int
-host(const char *s, const char *cert, struct listenerlist *al, int max, in_port_t port,
-    u_int8_t flags)
+host(const char *s, const char *tag, const char *cert, struct listenerlist *al,
+    int max, in_port_t port, u_int8_t flags)
 {
 	struct listener *h;
 
@@ -1578,18 +1668,19 @@ host(const char *s, const char *cert, struct listenerlist *al, int max, in_port_
 		h->ssl_cert_name[0] = '\0';
 		if (cert != NULL)
 			(void)strlcpy(h->ssl_cert_name, cert, sizeof(h->ssl_cert_name));
-
+		if (tag != NULL)
+			(void)strlcpy(h->tag, tag, sizeof(h->tag));
 
 		TAILQ_INSERT_HEAD(al, h, entry);
 		return (1);
 	}
 
-	return (host_dns(s, cert, al, max, port, flags));
+	return (host_dns(s, tag, cert, al, max, port, flags));
 }
 
 int
-interface(const char *s, const char *cert, struct listenerlist *al, int max, in_port_t port,
-    u_int8_t flags)
+interface(const char *s, const char *tag, const char *cert,
+    struct listenerlist *al, int max, in_port_t port, u_int8_t flags)
 {
 	struct ifaddrs *ifap, *p;
 	struct sockaddr_in	*sain;
@@ -1604,49 +1695,41 @@ interface(const char *s, const char *cert, struct listenerlist *al, int max, in_
 		if (strcmp(s, p->ifa_name) != 0)
 			continue;
 
+		if ((h = calloc(1, sizeof(*h))) == NULL)
+			fatal(NULL);
+
 		switch (p->ifa_addr->sa_family) {
 		case AF_INET:
-			if ((h = calloc(1, sizeof(*h))) == NULL)
-				fatal(NULL);
 			sain = (struct sockaddr_in *)&h->ss;
 			*sain = *(struct sockaddr_in *)p->ifa_addr;
 			sain->sin_len = sizeof(struct sockaddr_in);
 			sain->sin_port = port;
-
-			h->fd = -1;
-			h->port = port;
-			h->flags = flags;
-			h->ssl = NULL;
-			h->ssl_cert_name[0] = '\0';
-			if (cert != NULL)
-				(void)strlcpy(h->ssl_cert_name, cert, sizeof(h->ssl_cert_name));
-
-			ret = 1;
-			TAILQ_INSERT_HEAD(al, h, entry);
-
 			break;
 
 		case AF_INET6:
-			if ((h = calloc(1, sizeof(*h))) == NULL)
-				fatal(NULL);
 			sin6 = (struct sockaddr_in6 *)&h->ss;
 			*sin6 = *(struct sockaddr_in6 *)p->ifa_addr;
 			sin6->sin6_len = sizeof(struct sockaddr_in6);
 			sin6->sin6_port = port;
-
-			h->fd = -1;
-			h->port = port;
-			h->flags = flags;
-			h->ssl = NULL;
-			h->ssl_cert_name[0] = '\0';
-			if (cert != NULL)
-				(void)strlcpy(h->ssl_cert_name, cert, sizeof(h->ssl_cert_name));
-
-			ret = 1;
-			TAILQ_INSERT_HEAD(al, h, entry);
-
 			break;
+
+		default:
+			free(h);
+			continue;
 		}
+
+		h->fd = -1;
+		h->port = port;
+		h->flags = flags;
+		h->ssl = NULL;
+		h->ssl_cert_name[0] = '\0';
+		if (cert != NULL)
+			(void)strlcpy(h->ssl_cert_name, cert, sizeof(h->ssl_cert_name));
+		if (tag != NULL)
+			(void)strlcpy(h->tag, tag, sizeof(h->tag));
+
+		ret = 1;
+		TAILQ_INSERT_HEAD(al, h, entry);
 	}
 
 	freeifaddrs(ifap);
@@ -1678,7 +1761,7 @@ set_localaddrs(void)
 
 			if ((me = calloc(1, sizeof(*me))) == NULL)
 				fatal("out of memory");
-			me->me_key.med_addr.bits = 0;
+			me->me_key.med_addr.bits = 32;
 			me->me_key.med_addr.ss = *(struct sockaddr_storage *)sain;
 			TAILQ_INSERT_TAIL(&m->m_contents, me, me_entry);
 
@@ -1691,7 +1774,7 @@ set_localaddrs(void)
 
 			if ((me = calloc(1, sizeof(*me))) == NULL)
 				fatal("out of memory");
-			me->me_key.med_addr.bits = 0;
+			me->me_key.med_addr.bits = 128;
 			me->me_key.med_addr.ss = *(struct sockaddr_storage *)sin6;
 			TAILQ_INSERT_TAIL(&m->m_contents, me, me_entry);
 

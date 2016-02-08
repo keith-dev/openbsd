@@ -1,4 +1,4 @@
-/*	$OpenBSD: queue.c,v 1.68 2009/06/06 04:14:21 pyr Exp $	*/
+/*	$OpenBSD: queue.c,v 1.77 2010/01/03 14:37:37 chl Exp $	*/
 
 /*
  * Copyright (c) 2008 Gilles Chehade <gilles@openbsd.org>
@@ -39,6 +39,7 @@
 
 __dead void	queue_shutdown(void);
 void		queue_sig_handler(int, short, void *);
+void		queue_dispatch_parent(int, short, void *);
 void		queue_dispatch_control(int, short, void *);
 void		queue_dispatch_smtp(int, short, void *);
 void		queue_dispatch_mda(int, short, void *);
@@ -56,6 +57,9 @@ int		queue_remove_layout_envelope(char *, struct message *);
 int		queue_commit_layout_message(char *, struct message *);
 int		queue_open_layout_messagefile(char *, struct message *);
 
+void		queue_submit_envelope(struct smtpd *, struct message *);
+void	        queue_commit_envelopes(struct smtpd *, struct message*);
+
 void
 queue_sig_handler(int sig, short event, void *p)
 {
@@ -67,6 +71,59 @@ queue_sig_handler(int sig, short event, void *p)
 	default:
 		fatalx("queue_sig_handler: unexpected signal");
 	}
+}
+
+void
+queue_dispatch_parent(int sig, short event, void *p)
+{
+	struct smtpd		*env = p;
+	struct imsgev		*iev;
+	struct imsgbuf		*ibuf;
+	struct imsg		 imsg;
+	ssize_t			 n;
+
+	iev = env->sc_ievs[PROC_PARENT];
+	ibuf = &iev->ibuf;
+
+	if (event & EV_READ) {
+		if ((n = imsg_read(ibuf)) == -1)
+			fatal("imsg_read_error");
+		if (n == 0) {
+			/* this pipe is dead, so remove the event handler */
+			event_del(&iev->ev);
+			event_loopexit(NULL);
+			return;
+		}
+	}
+
+	if (event & EV_WRITE) {
+		if (msgbuf_write(&ibuf->w) == -1)
+			fatal("msgbuf_write");
+	}
+
+	for (;;) {
+		if ((n = imsg_get(ibuf, &imsg)) == -1)
+			fatal("queue_dispatch_parent: imsg_get error");
+		if (n == 0)
+			break;
+
+		switch (imsg.hdr.type) {
+		case IMSG_CTL_VERBOSE: {
+			int verbose;
+
+			IMSG_SIZE_CHECK(&verbose);
+
+			memcpy(&verbose, imsg.data, sizeof(verbose));
+			log_verbose(verbose);
+			break;
+		}
+		default:
+			log_warnx("got imsg %d", imsg.hdr.type);
+			fatalx("queue_dispatch_parent: unexpected imsg");
+		}
+		imsg_free(&imsg);
+	}
+	imsg_event_add(iev);
 }
 
 void
@@ -99,7 +156,7 @@ queue_dispatch_control(int sig, short event, void *p)
 
 	for (;;) {
 		if ((n = imsg_get(ibuf, &imsg)) == -1)
-			fatalx("queue_dispatch_control: imsg_get error");
+			fatal("queue_dispatch_control: imsg_get error");
 		if (n == 0)
 			break;
 
@@ -144,7 +201,7 @@ queue_dispatch_smtp(int sig, short event, void *p)
 
 	for (;;) {
 		if ((n = imsg_get(ibuf, &imsg)) == -1)
-			fatalx("queue_dispatch_smtp: imsg_get error");
+			fatal("queue_dispatch_smtp: imsg_get error");
 		if (n == 0)
 			break;
 
@@ -280,7 +337,7 @@ queue_dispatch_mda(int sig, short event, void *p)
 
 	for (;;) {
 		if ((n = imsg_get(ibuf, &imsg)) == -1)
-			fatalx("queue_dispatch_mda: imsg_get error");
+			fatal("queue_dispatch_mda: imsg_get error");
 		if (n == 0)
 			break;
 
@@ -331,7 +388,7 @@ queue_dispatch_mta(int sig, short event, void *p)
 
 	for (;;) {
 		if ((n = imsg_get(ibuf, &imsg)) == -1)
-			fatalx("queue_dispatch_mta: imsg_get error");
+			fatal("queue_dispatch_mta: imsg_get error");
 		if (n == 0)
 			break;
 
@@ -394,7 +451,7 @@ queue_dispatch_lka(int sig, short event, void *p)
 
 	for (;;) {
 		if ((n = imsg_get(ibuf, &imsg)) == -1)
-			fatalx("queue_dispatch_lka: imsg_get error");
+			fatal("queue_dispatch_lka: imsg_get error");
 		if (n == 0)
 			break;
 
@@ -407,11 +464,11 @@ queue_dispatch_lka(int sig, short event, void *p)
 
 			IMSG_SIZE_CHECK(messagep);
 
-			messagep->id = queue_generate_id();
+			messagep->id = generate_uid();
 			ss.id = messagep->session_id;
 
-			if (IS_MAILBOX(messagep->recipient.rule.r_action) ||
-			    IS_EXT(messagep->recipient.rule.r_action))
+			if (IS_MAILBOX(messagep->recipient) ||
+			    IS_EXT(messagep->recipient))
 				messagep->type = T_MDA_MESSAGE;
 			else
 				messagep->type = T_MTA_MESSAGE;
@@ -486,7 +543,7 @@ queue_dispatch_runner(int sig, short event, void *p)
 
 	for (;;) {
 		if ((n = imsg_get(ibuf, &imsg)) == -1)
-			fatalx("queue_dispatch_runner: imsg_get error");
+			fatal("queue_dispatch_runner: imsg_get error");
 		if (n == 0)
 			break;
 
@@ -503,7 +560,7 @@ queue_dispatch_runner(int sig, short event, void *p)
 void
 queue_shutdown(void)
 {
-	log_info("queue handler");
+	log_info("queue handler exiting");
 	_exit(0);
 }
 
@@ -527,6 +584,7 @@ queue(struct smtpd *env)
 	struct event	 ev_sigterm;
 
 	struct peer peers[] = {
+		{ PROC_PARENT,	queue_dispatch_parent },
 		{ PROC_CONTROL,	queue_dispatch_control },
 		{ PROC_SMTP,	queue_dispatch_smtp },
 		{ PROC_MDA,	queue_dispatch_mda },
@@ -576,6 +634,15 @@ queue(struct smtpd *env)
 	signal(SIGPIPE, SIG_IGN);
 	signal(SIGHUP, SIG_IGN);
 
+	/*
+	 * queue opens fds for four purposes: smtp, mta, mda, and bounces.
+	 * Therefore, use all available fd space and set the maxconn (=max
+	 * session count for mta and mda) to a quarter of this value.
+	 */
+	fdlimit(1.0);
+	if ((env->sc_maxconn = availdesc() / 4) < 1)
+		fatalx("runner: fd starvation");
+
 	config_pipes(env, peers, nitems(peers));
 	config_peers(env, peers, nitems(peers));
 
@@ -589,22 +656,6 @@ queue(struct smtpd *env)
 	return (0);
 }
 
-int
-queue_remove_batch_message(struct smtpd *env, struct batch *batchp, struct message *messagep)
-{
-	TAILQ_REMOVE(&batchp->messages, messagep, entry);
-	bzero(messagep, sizeof(struct message));
-	free(messagep);
-
-	if (TAILQ_FIRST(&batchp->messages) == NULL) {
-		SPLAY_REMOVE(batchtree, &env->batch_queue, batchp);
-		bzero(batchp, sizeof(struct batch));
-		free(batchp);
-		return 1;
-	}
-	return 0;
-}
-
 struct batch *
 batch_by_id(struct smtpd *env, u_int64_t id)
 {
@@ -614,28 +665,6 @@ batch_by_id(struct smtpd *env, u_int64_t id)
 	return SPLAY_FIND(batchtree, &env->batch_queue, &lookup);
 }
 
-
-struct message *
-message_by_id(struct smtpd *env, struct batch *batchp, u_int64_t id)
-{
-	struct message *messagep;
-
-	if (batchp != NULL) {
-		TAILQ_FOREACH(messagep, &batchp->messages, entry) {
-			if (messagep->id == id)
-				break;
-		}
-		return messagep;
-	}
-
-	SPLAY_FOREACH(batchp, batchtree, &env->batch_queue) {
-		TAILQ_FOREACH(messagep, &batchp->messages, entry) {
-			if (messagep->id == id)
-				return messagep;
-		}
-	}
-	return NULL;
-}
 
 void
 queue_purge(char *queuepath)
@@ -649,4 +678,20 @@ queue_purge(char *queuepath)
 		queue_delete_layout_message(queuepath, basename(path));
 
 	qwalk_close(q);
+}
+
+void
+queue_submit_envelope(struct smtpd *env, struct message *message)
+{
+	imsg_compose_event(env->sc_ievs[PROC_QUEUE],
+	    IMSG_QUEUE_SUBMIT_ENVELOPE, 0, 0, -1,
+	    message, sizeof(struct message));
+}
+
+void
+queue_commit_envelopes(struct smtpd *env, struct message *message)
+{
+	imsg_compose_event(env->sc_ievs[PROC_QUEUE],
+	    IMSG_QUEUE_COMMIT_ENVELOPES, 0, 0, -1,
+	    message, sizeof(struct message));
 }

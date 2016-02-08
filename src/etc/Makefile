@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.278 2009/05/24 10:45:21 ajacoutot Exp $
+#	$OpenBSD: Makefile,v 1.286 2010/02/22 15:15:54 claudio Exp $
 
 TZDIR=		/usr/share/zoneinfo
 LOCALTIME=	Canada/Mountain
@@ -82,6 +82,7 @@ distribution-etc-root-var: distrib-dirs
 	${INSTALL} -c -o root -g wheel -m 600 ospf6d.conf ${DESTDIR}/etc
 	${INSTALL} -c -o root -g wheel -m 600 ripd.conf ${DESTDIR}/etc
 	${INSTALL} -c -o root -g wheel -m 600 dvmrpd.conf ${DESTDIR}/etc
+	${INSTALL} -c -o root -g wheel -m 600 ldpd.conf ${DESTDIR}/etc
 	${INSTALL} -c -o root -g wheel -m 600 pf.conf ${DESTDIR}/etc
 	${INSTALL} -c -o root -g operator -m 644 chio.conf ${DESTDIR}/etc
 	${INSTALL} -c -o root -g wheel -m 600 hostapd.conf ${DESTDIR}/etc
@@ -254,6 +255,12 @@ distribution-etc-root-var: distrib-dirs
 distribution:
 	exec ${SUDO} ${MAKE} distribution-etc-root-var
 	cd .. && exec ${SUDO} ${MAKE} install
+	touch ${DESTDIR}/var/db/sysmerge/etcsum
+	TMPSUM=`mktemp /tmp/_etcsum.XXXXXXXXXX` || exit 1; \
+	sort ../distrib/sets/lists/etc/{mi,md.${MACHINE}} > $${TMPSUM}; \
+	cd ${DESTDIR} && \
+		xargs cksum < $${TMPSUM} > ${DESTDIR}/var/db/sysmerge/etcsum; \
+	rm -f $${TMPSUM}
 
 distrib-dirs:
 	if [ ! -d ${DESTDIR}/. ]; then \
@@ -291,7 +298,7 @@ distrib:
 DHSIZE=1024 1536 2048 3072 4096
 update-moduli:
 	( \
-		echo -n '#    $Open'; echo 'BSD$'; \
+		echo -n '#    $$Open'; echo 'BSD$$'; \
 		echo '# Time Type Tests Tries Size Generator Modulus'; \
 		( for i in ${DHSIZE}; do \
 			ssh-keygen -b $$i -G /dev/stdout; \
@@ -303,9 +310,9 @@ update-moduli:
 	release allarchs kernels release-sets m4
 
 SUBDIR+= etc.alpha etc.amd64 etc.armish etc.aviion etc.hp300 etc.hppa
-SUBDIR+= etc.hppa64 etc.i386 etc.landisk etc.luna88k etc.mac68k etc.macppc
-SUBDIR+= etc.mvme68k etc.mvme88k etc.sgi etc.socppc etc.sparc etc.sparc64
-SUBDIR+= etc.vax etc.zaurus
+SUBDIR+= etc.hppa64 etc.i386 etc.landisk etc.loongson etc.luna88k 
+SUBDIR+= etc.mac68k etc.macppc etc.mvme68k etc.mvme88k etc.palm 
+SUBDIR+= etc.sgi etc.socppc etc.sparc etc.sparc64 etc.vax etc.zaurus
 
 .include <bsd.subdir.mk>
 .include <bsd.prog.mk>

@@ -1,7 +1,7 @@
 # ex:ts=8 sw=4:
-# $OpenBSD: PackingElement.pm,v 1.156 2009/04/19 14:58:32 espie Exp $
+# $OpenBSD: PackingElement.pm,v 1.173 2010/01/19 14:26:24 espie Exp $
 #
-# Copyright (c) 2003-2007 Marc Espie <espie@openbsd.org>
+# Copyright (c) 2003-2010 Marc Espie <espie@openbsd.org>
 #
 # Permission to use, copy, modify, and distribute this software for any
 # purpose with or without fee is hereby granted, provided that the above
@@ -17,6 +17,7 @@
 
 use strict;
 use warnings;
+
 use OpenBSD::PackageInfo;
 use OpenBSD::Paths;
 
@@ -151,7 +152,6 @@ sub IsFile() { 0 }
 
 sub NoDuplicateNames() { 0 }
 
-sub signature {}
 
 sub copy_shallow_if
 {
@@ -314,12 +314,6 @@ sub category
 package OpenBSD::PackingElement::Depend;
 our @ISA=qw(OpenBSD::PackingElement::Meta);
 
-sub signature
-{
-	my ($self, $hash) = @_;
-	$hash->{$self->name} = 1;
-}
-
 # Abstract class for all file-like elements
 package OpenBSD::PackingElement::FileBase;
 our @ISA=qw(OpenBSD::PackingElement::FileObject);
@@ -400,15 +394,16 @@ sub check_digest
 	my ($self, $file, $state) = @_;
 	return if $self->{link} or $self->{symlink};
 	if (!defined $self->{d}) {
-		$state->fatal($self->fullname, " does not have a signature");
+		$state->log->fatal($self->fullname, 
+		    " does not have a signature");
 	}
 	my $d = $self->compute_digest($file->{destdir}.$file->name);
 	if (!$d->equals($self->{d})) {
-		$state->fatal("checksum for ", $self->fullname, 
+		$state->log->fatal("checksum for ", $self->fullname, 
 		    " does not match");
 	}
-	if ($state->{very_verbose}) {
-		print "Checksum match for ", $self->fullname, "\n";
+	if ($state->verbose >= 3) {
+		$state->say("Checksum match for ", $self->fullname);
 	}
 }
 
@@ -535,7 +530,7 @@ sub format
 	open my $oldout, '>&STDOUT';
 	open STDOUT, '>', "$base/$out" or die "Can't write to $base/$out";
 	system(OpenBSD::Paths->groff,
-	    '-Tascii', '-mandoc', '-Wall', '-mtty-char', @extra, $fname);
+	    '-Tascii', '-mandoc', '-Wall', '-mtty-char', @extra, '--', $fname);
 	open STDOUT, '>&', $oldout;
 }
 
@@ -770,6 +765,10 @@ sub new
 		return OpenBSD::PackingElement::ManualInstallation->new;
 	} elsif ($args eq 'system-package') {
 		return OpenBSD::PackingElement::SystemPackage->new;
+	} elsif ($args eq 'always-update') {
+		return OpenBSD::PackingElement::AlwaysUpdate->new;
+	} elsif ($args eq 'explicit-update') {
+		return OpenBSD::PackingElement::ExplicitUpdate->new;
 	} else {
 		die "Unknown option: $args";
 	}
@@ -810,6 +809,21 @@ our @ISA=qw(OpenBSD::PackingElement::UniqueOption);
 
 sub category() { 'system-package' }
 
+package OpenBSD::PackingElement::AlwaysUpdate;
+our @ISA=qw(OpenBSD::PackingElement::UniqueOption);
+
+sub category()
+{
+	'always-update';
+}
+
+package OpenBSD::PackingElement::ExplicitUpdate;
+our @ISA=qw(OpenBSD::PackingElement::UniqueOption);
+
+sub category()
+{
+	'explicit-update';
+}
 # The special elements that don't end in the right place
 package OpenBSD::PackingElement::ExtraInfo;
 our @ISA=qw(OpenBSD::PackingElement::Unique OpenBSD::PackingElement::Comment);
@@ -859,6 +873,18 @@ sub keyword() { "localbase" }
 __PACKAGE__->register_with_factory;
 sub category() { "localbase" }
 
+package OpenBSD::PackingElement::Url;
+our @ISA=qw(OpenBSD::PackingElement::Unique);
+
+sub keyword() { "url" }
+__PACKAGE__->register_with_factory;
+sub category() { "url" }
+
+# XXX don't incorporate this in signatures.
+sub write_no_sig()
+{
+}
+
 package OpenBSD::PackingElement::Conflict;
 our @ISA=qw(OpenBSD::PackingElement::Meta);
 
@@ -868,6 +894,7 @@ sub category() { "conflict" }
 
 package OpenBSD::PackingElement::Dependency;
 our @ISA=qw(OpenBSD::PackingElement::Depend);
+use OpenBSD::Error;
 
 sub keyword() { "depend" }
 __PACKAGE__->register_with_factory;
@@ -888,16 +915,14 @@ sub stringize
 	    (qw(pkgpath pattern def)));
 }
 
-sub spec
-{
+OpenBSD::Auto::cache(spec,
+    sub {
+	require OpenBSD::Search;
+
 	my $self = shift;
-	if (!defined $self->{spec}) {
-		require OpenBSD::Search;
-		$self->{spec} = OpenBSD::Search::PkgSpec->new($self->{pattern});
-		$self->{spec}->add_pkgpath_hint($self->{pkgpath});
-	}
-	return $self->{spec};
-}
+	return OpenBSD::Search::PkgSpec->new($self->{pattern})
+	    ->add_pkgpath_hint($self->{pkgpath});
+    });
 
 package OpenBSD::PackingElement::Wantlib;
 our @ISA=qw(OpenBSD::PackingElement::Depend);
@@ -926,6 +951,13 @@ sub add_digest
 	&OpenBSD::PackingElement::FileBase::add_digest;
 }
 
+OpenBSD::Auto::cache(spec,
+    sub {
+    	my $self = shift;
+
+    	require OpenBSD::LibSpec;
+	return OpenBSD::LibSpec->from_string($self->name);
+    });
 package OpenBSD::PackingElement::PkgPath;
 our @ISA=qw(OpenBSD::PackingElement::Meta);
 
@@ -1183,8 +1215,9 @@ sub run
 	my ($self, $state) = @_;
 
 	OpenBSD::PackingElement::Lib::ensure_ldconfig($state);
-	print $self->keyword, " ", $self->{expanded}, "\n" if $state->{beverbose};
-	$state->system(OpenBSD::Paths->sh, '-c', $self->{expanded}) 
+	$state->say($self->keyword, " ", $self->{expanded}) 
+	    if $state->verbose >= 2;
+	$state->log->system(OpenBSD::Paths->sh, '-c', $self->{expanded}) 
 	    unless $state->{not};
 }
 
@@ -1350,9 +1383,9 @@ sub run_if_exists
 	require OpenBSD::Error;
 
 	if (-x $cmd) {
-		OpenBSD::Error::VSystem($state->{very_verbose}, $cmd, @l);
+		$state->vsystem($cmd, @l);
 	} else {
-		OpenBSD::Error::Warn("$cmd not found\n");
+		$state->errsay("$cmd not found");
 	}
 }
 
@@ -1364,14 +1397,15 @@ sub finish_fontdirs
 		require OpenBSD::Error;
 
 		map { update_fontalias($_) } @l unless $state->{not};
-		print "You may wish to update your font path for ", join(' ', @l), "\n";
+		$state->say("You may wish to update your font path for ", 
+		    join(' ', @l));
 		return if $state->{not};
-		run_if_exists($state, OpenBSD::Paths->mkfontscale, @l);
-		run_if_exists($state, OpenBSD::Paths->mkfontdir, @l);
+		run_if_exists($state, OpenBSD::Paths->mkfontscale, '--', @l);
+		run_if_exists($state, OpenBSD::Paths->mkfontdir, '--', @l);
 
 		map { restore_fontdir($_) } @l;
 
-		run_if_exists($state, OpenBSD::Paths->fc_cache, @l);
+		run_if_exists($state, OpenBSD::Paths->fc_cache, '--', @l);
 	}
 }
 
@@ -1489,21 +1523,21 @@ sub run
 {
 	my ($self, $state, @args) = @_;
 
-	my $not = $state->{not};
 	my $pkgname = $state->{pkgname};
 	my $name = $self->fullname;
 
 	return if $state->{dont_run_scripts};
 
 	OpenBSD::PackingElement::Lib::ensure_ldconfig($state);
-	print $self->beautify, " script: $name $pkgname ", join(' ', @args), "\n" if $state->{beverbose};
-	return if $not;
+	$state->say($self->beautify, " script: $name $pkgname ", 
+	    join(' ', @args)) if $state->verbose >= 2;
+	return if $state->{not};
 	chmod 0755, $name;
-	return if $state->system($name, $pkgname, @args) == 0;
+	return if $state->log->system($name, $pkgname, @args) == 0;
 	if ($state->{defines}->{scripts}) {
-		$state->warn($self->beautify, " script failed\n");
+		$state->log->warn($self->beautify, " script failed\n");
 	} else {
-		$state->fatal($self->beautify." script failed");
+		$state->log->fatal($self->beautify." script failed");
 	}
 }
 
@@ -1544,10 +1578,10 @@ sub prepare
 		while (<$src>) {
 			next if m/^\+\-+\s*$/o;
 			s/^[+-] //o;
-			$state->print($_);
+			$state->log($_);
 		} 
 	} else {
-		Warn "Can't open $fname: $!\n";
+		$state->errsay("Can't open $fname: $!");
     	}
 }
 
@@ -1583,11 +1617,12 @@ sub stringize($)
 	return join(',', @{$self->{arches}});
 }
 
+my ($machine_arch, $arch);
+
 sub check
 {
 	my ($self, $forced_arch) = @_;
 
-	my ($machine_arch, $arch);
 	for my $ok (@{$self->{arches}}) {
 		return 1 if $ok eq '*';
 		if (defined $forced_arch) {

@@ -1,4 +1,4 @@
-/*	$OpenBSD: sun.c,v 1.17 2009/05/15 13:16:58 ratchov Exp $	*/
+/*	$OpenBSD: sun.c,v 1.27 2010/02/10 23:03:53 ratchov Exp $	*/
 /*
  * Copyright (c) 2008 Alexandre Ratchov <alex@caoua.org>
  *
@@ -30,9 +30,10 @@
 #include <sys/ioctl.h>
 #include <sys/audioio.h>
 #include <sys/stat.h>
-#include <limits.h>
+
 #include <errno.h>
 #include <fcntl.h>
+#include <limits.h>
 #include <poll.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -60,7 +61,7 @@ static int sun_setpar(struct sio_hdl *, struct sio_par *);
 static int sun_getpar(struct sio_hdl *, struct sio_par *);
 static int sun_getcap(struct sio_hdl *, struct sio_cap *);
 static size_t sun_read(struct sio_hdl *, void *, size_t);
-static size_t sun_write(struct sio_hdl *, void *, size_t);
+static size_t sun_write(struct sio_hdl *, const void *, size_t);
 static int sun_pollfd(struct sio_hdl *, struct pollfd *, int);
 static int sun_revents(struct sio_hdl *, struct pollfd *);
 static int sun_setvol(struct sio_hdl *, unsigned);
@@ -127,18 +128,21 @@ sun_infotoenc(struct sun_hdl *hdl, struct audio_prinfo *ai, struct sio_par *par)
  * convert sio_par encoding to sun encoding
  */
 static void
-sun_enctoinfo(struct sun_hdl *hdl, struct audio_prinfo *ai, struct sio_par *par)
+sun_enctoinfo(struct sun_hdl *hdl, unsigned *renc, struct sio_par *par)
 {
-	if (par->le && par->sig) {
-		ai->encoding = AUDIO_ENCODING_SLINEAR_LE;
+	if (par->le == ~0U && par->sig == ~0U) {
+		*renc = ~0U;
+	} else if (par->le == ~0U || par->sig == ~0U) {
+		*renc = AUDIO_ENCODING_SLINEAR;
+	} else if (par->le && par->sig) {
+		*renc = AUDIO_ENCODING_SLINEAR_LE;
 	} else if (!par->le && par->sig) {
-		ai->encoding = AUDIO_ENCODING_SLINEAR_BE;
+		*renc = AUDIO_ENCODING_SLINEAR_BE;
 	} else if (par->le && !par->sig) {
-		ai->encoding = AUDIO_ENCODING_ULINEAR_LE;
+		*renc = AUDIO_ENCODING_ULINEAR_LE;
 	} else {
-		ai->encoding = AUDIO_ENCODING_ULINEAR_BE;
+		*renc = AUDIO_ENCODING_ULINEAR_BE;
 	}
-	ai->precision = par->bits;
 }
 
 /*
@@ -266,8 +270,8 @@ sun_getcap(struct sio_hdl *sh, struct sio_cap *cap)
 			continue;
 		}
 		cap->enc[nenc].bits = ae.precision;
-		cap->enc[nenc].bps = ae.precision / 8;
-		cap->enc[nenc].msb = 0;
+		cap->enc[nenc].bps = SIO_BPS(ae.precision);
+		cap->enc[nenc].msb = 1;
 		enc_map |= (1 << nenc);
 		nenc++;
 	}
@@ -342,20 +346,19 @@ sun_setvol(struct sio_hdl *sh, unsigned vol)
 }
 
 struct sio_hdl *
-sio_open_sun(char *path, unsigned mode, int nbio)
+sio_open_sun(const char *str, unsigned mode, int nbio)
 {
 	int fd, flags, fullduplex;
 	struct sun_hdl *hdl;
-	struct audio_info aui;
 	struct sio_par par;
+	char path[PATH_MAX];
 
 	hdl = malloc(sizeof(struct sun_hdl));
 	if (hdl == NULL)
 		return NULL;
 	sio_create(&hdl->sio, &sun_ops, mode, nbio);
 
-	if (path == NULL)
-		path = SIO_SUN_PATH;
+	snprintf(path, sizeof(path), "/dev/audio%s", str);
 	if (mode == (SIO_PLAY | SIO_REC))
 		flags = O_RDWR;
 	else 
@@ -385,17 +388,17 @@ sio_open_sun(char *path, unsigned mode, int nbio)
 		}
 	}
 	hdl->fd = fd;
-	AUDIO_INITINFO(&aui);
-	if (hdl->sio.mode & SIO_PLAY)
-		aui.play.encoding = AUDIO_ENCODING_SLINEAR;
-	if (hdl->sio.mode & SIO_REC)
-		aui.record.encoding = AUDIO_ENCODING_SLINEAR;
-	if (ioctl(hdl->fd, AUDIO_SETINFO, &aui) < 0) {
-		DPERROR("sio_open_sun: setinfo");
-		goto bad_close;
-	}
+
+	/*
+	 * Default parameters may not be compatible with libsndio (eg. mulaw
+	 * encodings, different playback and recording parameters, etc...), so
+	 * set parameters to a random value. If the requested parameters are
+	 * not supported by the device, then sio_setpar() will pick supported
+	 * ones.
+	 */
 	sio_initpar(&par);
 	par.rate = 48000;
+	par.le = SIO_LE_NATIVE;
 	par.sig = 1;
 	par.bits = 16;
 	par.appbufsz = 1200;
@@ -519,25 +522,76 @@ sun_setpar(struct sio_hdl *sh, struct sio_par *par)
 	struct audio_info aui;
 	unsigned i, infr, ibpf, onfr, obpf;
 	unsigned bufsz, round;
+	unsigned rate, prec, enc;
 
 	/*
-	 * first, set encoding, rate and channels
+	 * try to set parameters until the device accepts
+	 * a common encoding and rate for play and record
 	 */
-	AUDIO_INITINFO(&aui);
-	if (hdl->sio.mode & SIO_PLAY) {
-		aui.play.sample_rate = par->rate;
-		aui.play.channels = par->pchan;
-		sun_enctoinfo(hdl, &aui.play, par);
-	}
-	if (hdl->sio.mode & SIO_REC) {
-		aui.record.sample_rate = par->rate;
-		aui.record.channels = par->rchan;
-		sun_enctoinfo(hdl, &aui.record, par);
-	}
-	if (ioctl(hdl->fd, AUDIO_SETINFO, &aui) < 0 && errno != EINVAL) {
-		DPERROR("sun_setpar: setinfo");
-		hdl->sio.eof = 1;
-		return 0;
+	rate = par->rate;
+	prec = par->bits;
+	sun_enctoinfo(hdl, &enc, par);
+	for (i = 0;; i++) {
+		if (i == NRETRIES) {
+			DPRINTF("sun_setpar: couldn't set parameters\n");
+			hdl->sio.eof = 1;
+			return 0;
+		}
+		AUDIO_INITINFO(&aui);
+		if (hdl->sio.mode & SIO_PLAY) {
+			aui.play.sample_rate = rate;
+			aui.play.precision = prec;
+			aui.play.encoding = enc;
+			aui.play.channels = par->pchan;
+		}
+		if (hdl->sio.mode & SIO_REC) {
+			aui.record.sample_rate = rate;
+			aui.record.precision = prec;
+			aui.record.encoding = enc;
+			aui.record.channels = par->rchan;
+		}
+		DPRINTF("sun_setpar: %i: trying pars = %u/%u/%u\n",
+		    i, rate, prec, enc);
+		if (ioctl(hdl->fd, AUDIO_SETINFO, &aui) < 0 && errno != EINVAL) {
+			DPERROR("sun_setpar: setinfo(pars)");
+			hdl->sio.eof = 1;
+			return 0;
+		}
+		if (ioctl(hdl->fd, AUDIO_GETINFO, &aui) < 0) {
+			DPERROR("sun_setpar: getinfo(pars)");
+			hdl->sio.eof = 1;
+			return 0;
+		}
+		enc = (hdl->sio.mode & SIO_REC) ?
+		    aui.record.encoding : aui.play.encoding;
+		switch (enc) {
+		case AUDIO_ENCODING_SLINEAR_LE:
+		case AUDIO_ENCODING_SLINEAR_BE:
+		case AUDIO_ENCODING_ULINEAR_LE:
+		case AUDIO_ENCODING_ULINEAR_BE:
+		case AUDIO_ENCODING_SLINEAR:
+		case AUDIO_ENCODING_ULINEAR:
+			break;
+		default:
+			DPRINTF("sun_setpar: couldn't set linear encoding\n");
+			hdl->sio.eof = 1;
+			return 0;
+		}
+		if (hdl->sio.mode != (SIO_REC | SIO_PLAY))
+			break;
+		if (aui.play.sample_rate == aui.record.sample_rate &&
+		    aui.play.precision == aui.record.precision &&
+		    aui.play.encoding == aui.record.encoding)
+			break;
+		if (i < NRETRIES / 2) {
+			rate = aui.play.sample_rate;
+			prec = aui.play.precision;
+			enc = aui.play.encoding;
+		} else {
+			rate = aui.record.sample_rate;
+			prec = aui.record.precision;
+			enc = aui.record.encoding;
+		}
 	}
 
 	/*
@@ -546,11 +600,11 @@ sun_setpar(struct sio_hdl *sh, struct sio_par *par)
 	 */ 
 	bufsz = par->appbufsz;
 	round = par->round;
-	if (bufsz != (unsigned)~0) {
-		if (round == (unsigned)~0)
+	if (bufsz != ~0U) {
+		if (round == ~0U)
 			round = (bufsz + 1) / 2;
-	} else if (round != (unsigned)~0) {
-		if (bufsz == (unsigned)~0)
+	} else if (round != ~0U) {
+		if (bufsz == ~0U)
 			bufsz = round * 2;
 	} else
 		return 1;
@@ -564,9 +618,9 @@ sun_setpar(struct sio_hdl *sh, struct sio_par *par)
 		return 0;
 	}
 	ibpf = (hdl->sio.mode & SIO_REC) ?
-	    aui.record.channels * aui.record.precision / 8 : 1;
+	    aui.record.channels * SIO_BPS(aui.record.precision) : 1;
 	obpf = (hdl->sio.mode & SIO_PLAY) ?
-	    aui.play.channels * aui.play.precision / 8 : 1;
+	    aui.play.channels * SIO_BPS(aui.play.precision) : 1;
 
 	DPRINTF("sun_setpar: bpf = (%u, %u)\n", ibpf, obpf);
 
@@ -594,7 +648,7 @@ sun_setpar(struct sio_hdl *sh, struct sio_par *par)
 		}
 		infr = aui.record.block_size / ibpf;
 		onfr = aui.play.block_size / obpf;
-		DPRINTF("sun_setpar: %i: trying rond = %u -> (%u, %u)\n",
+		DPRINTF("sun_setpar: %i: trying round = %u -> (%u, %u)\n",
 		    i, round, infr, onfr);
 
 		/*
@@ -734,12 +788,12 @@ sun_autostart(struct sun_hdl *hdl)
 }
 
 static size_t
-sun_write(struct sio_hdl *sh, void *buf, size_t len)
+sun_write(struct sio_hdl *sh, const void *buf, size_t len)
 {
 #define ZERO_NMAX 0x1000
 	static char zero[ZERO_NMAX];
 	struct sun_hdl *hdl = (struct sun_hdl *)sh;
-	unsigned char *data = buf;
+	const unsigned char *data = buf;
 	ssize_t n, todo;
 
 	while (hdl->offset < 0) {
@@ -831,7 +885,7 @@ sun_revents(struct sio_hdl *sh, struct pollfd *pfd)
 		}
 		hdl->odelta += (ao.samples - hdl->obytes) / hdl->obpf;
 		hdl->obytes = ao.samples;
-		if (hdl->odelta != 0) {
+		if (hdl->odelta > 0) {
 			sio_onmove_cb(&hdl->sio, hdl->odelta);
 			hdl->odelta = 0;
 		}
@@ -844,7 +898,7 @@ sun_revents(struct sio_hdl *sh, struct pollfd *pfd)
 		}
 		hdl->idelta += (ao.samples - hdl->ibytes) / hdl->ibpf;
 		hdl->ibytes = ao.samples;
-		if (hdl->idelta != 0) {
+		if (hdl->idelta > 0) {
 			sio_onmove_cb(&hdl->sio, hdl->idelta);
 			hdl->idelta = 0;
 		}

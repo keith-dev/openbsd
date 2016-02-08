@@ -1,4 +1,4 @@
-/*	$OpenBSD: sginode.c,v 1.11 2009/07/06 22:46:43 miod Exp $	*/
+/*	$OpenBSD: sginode.c,v 1.17 2010/03/07 13:42:17 miod Exp $	*/
 /*
  * Copyright (c) 2008, 2009 Miodrag Vallat.
  *
@@ -53,8 +53,7 @@
 
 #include <machine/mnode.h>
 #include <sgi/xbow/hub.h>
-
-int nextcpu = 0;
+#include <sgi/xbow/xbow.h>
 
 void	kl_add_memory_ip27(int16_t, int16_t *, unsigned int);
 void	kl_add_memory_ip35(int16_t, int16_t *, unsigned int);
@@ -70,6 +69,7 @@ int	kl_first_pass_comp(klinfo_t *, void *);
 
 int	kl_n_mode = 0;
 u_int	kl_n_shift = 32;
+klinfo_t *kl_glass_console = NULL;
 
 void
 kl_init(int ip35)
@@ -104,18 +104,8 @@ kl_scan_config(int nasid)
 	kl_scan_node(nasid, KLBRD_ANY, kl_first_pass_board, NULL);
 }
 
-void
-kl_scan_done()
-{
-	if (nextcpu > MAX_CPUS) {
-		bios_printf("%u processors found, increase MAX_CPUS\n",
-		    nextcpu);
-	}
-	ncpusfound = nextcpu;
-}
-
 /*
- * Callback routine for the initial enumration (boards).
+ * Callback routine for the initial enumeration (boards).
  */
 int
 kl_first_pass_board(lboard_t *boardinfo, void *arg)
@@ -137,9 +127,9 @@ kl_first_pass_board(lboard_t *boardinfo, void *arg)
 int
 kl_first_pass_comp(klinfo_t *comp, void *arg)
 {
-	struct cpuinfo *cpu;
 	klcpu_t *cpucomp;
 	klmembnk_m_t *memcomp_m;
+	arc_config64_t *arc;
 #ifdef DEBUG
 	klhub_t *hubcomp;
 	klmembnk_n_t *memcomp_n;
@@ -147,29 +137,30 @@ kl_first_pass_comp(klinfo_t *comp, void *arg)
 	int i;
 #endif
 
+	arc = (arc_config64_t *)comp->arcs_compt;
 	switch (comp->struct_type) {
 	case KLSTRUCT_CPU:
 		cpucomp = (klcpu_t *)comp;
-		DB_PRF(("\tcpu type %x/%x %dMhz cache %dMB speed %dMhz\n",
+		DB_PRF(("\tcpu type %x/%x %dMHz cache %dMB speed %dMHz\n",
 		    cpucomp->cpu_prid, cpucomp->cpu_fpirr, cpucomp->cpu_speed,
 		    cpucomp->cpu_scachesz, cpucomp->cpu_scachespeed));
 
-		if (nextcpu < MAX_CPUS) {
-			cpu = &sys_config.cpu[nextcpu];
-			cpu->clock = cpucomp->cpu_speed * 1000000;
-			cpu->type = (cpucomp->cpu_prid >> 8) & 0xff;
-			cpu->vers_maj = (cpucomp->cpu_prid >> 4) & 0x0f;
-			cpu->vers_min = cpucomp->cpu_prid & 0x0f;
+		/*
+		 * XXX this assumes the first cpu encountered is the boot
+		 * XXX cpu.
+		 */
+		if (bootcpu_hwinfo.clock == 0) {
+			bootcpu_hwinfo.c0prid = cpucomp->cpu_prid;
 #if 0
-			cpu->fptype = (cpucomp->cpu_fpirr >> 8) & 0xff;
+			bootcpu_hwinfo.c1prid = cpucomp->cpu_fpirr;
 #else
-			cpu->fptype = cpu->type;
+			bootcpu_hwinfo.c1prid = cpucomp->cpu_prid;
 #endif
-			cpu->fpvers_maj = (cpucomp->cpu_fpirr >> 4) & 0x0f;
-			cpu->fpvers_min = cpucomp->cpu_fpirr & 0x0f;
-			cpu->tlbsize = 64;
-		}
-		nextcpu++;
+			bootcpu_hwinfo.clock = cpucomp->cpu_speed * 1000000;
+			bootcpu_hwinfo.tlbsize = 64;
+			bootcpu_hwinfo.type = (cpucomp->cpu_prid >> 8) & 0xff;
+		} else
+			ncpusfound++;
 		break;
 
 	case KLSTRUCT_MEMBNK:
@@ -198,12 +189,33 @@ kl_first_pass_comp(klinfo_t *comp, void *arg)
 		}
 #endif
 
-		if (sys_config.system_type == SGI_O200)
+		if (sys_config.system_type == SGI_IP27)
 			kl_add_memory_ip27(comp->nasid, memcomp_m->membnk_bnksz,
 			    kl_n_mode ? MD_MEM_BANKS_N : MD_MEM_BANKS_M);
 		else
 			kl_add_memory_ip35(comp->nasid, memcomp_m->membnk_bnksz,
 			    kl_n_mode ? MD_MEM_BANKS_N : MD_MEM_BANKS_M);
+		break;
+
+	case KLSTRUCT_GFX:
+		DB_PRF(("\tgraphics widget %d\n", comp->widid));
+		/*
+		 * We rely upon the PROM setting up a fake ARCBios component
+		 * for the graphics console, if there is one.
+		 * Of course, the ARCBios structure is only available as long
+		 * as we do not tear down the PROM TLB, which is why we check
+		 * for this as early as possible and remember the console
+		 * component (KL struct are not short-lived).
+		 */
+		if (arc != NULL &&
+		    arc->class != 0 && arc->type == arc_DisplayController &&
+		    ISSET(arc->flags, ARCBIOS_DEVFLAGS_CONSOLE_OUTPUT)) {
+			DB_PRF(("\t(console device)\n"));
+			/* paranoia */
+			if (comp->widid >= WIDGET_MIN &&
+			    comp->widid <= WIDGET_MAX)
+				kl_glass_console = comp;
+		}
 		break;
 
 #ifdef DEBUG
@@ -234,6 +246,17 @@ kl_first_pass_comp(klinfo_t *comp, void *arg)
 		break;
 #endif
 	}
+#ifdef DEBUG
+	if (arc != NULL) {
+		DB_PRF(("\tARCBios component: class %d type %d flags %02x key 0x%lx",
+		    arc->class, arc->type, arc->flags, arc->key));
+		if (arc->id_len != 0)
+			DB_PRF((" %.*s\n",
+			    (int)arc->id_len, (const char *)arc->id));
+		else
+			DB_PRF((" (no name)\n"));
+	}
+#endif
 	return 0;
 }
 
@@ -293,14 +316,14 @@ kl_scan_board(lboard_t *boardinfo, uint type, int (*cb)(klinfo_t *, void *),
 }
 
 /*
- * Return the virtual address of the console device.
+ * Return the console device information.
  */
-vaddr_t
-kl_get_console_base()
+console_t *
+kl_get_console()
 {
 	kl_config_hdr_t *cfghdr = IP27_KLCONFIG_HDR(0);
 
-	return (vaddr_t)cfghdr->cons_info.uart_base;
+	return &cfghdr->cons_info;
 }
 
 /*
@@ -313,9 +336,8 @@ void
 kl_add_memory_ip27(int16_t nasid, int16_t *sizes, unsigned int cnt)
 {
 	paddr_t basepa;
-	uint32_t fp, lp, np;
-	unsigned int seg, descno, nmeg;
-	struct phys_mem_desc *md;
+	uint64_t fp, lp, np;
+	unsigned int seg, nmeg;
 
 	/*
 	 * On IP27, access to each DIMM is interleaved, which cause it to
@@ -325,13 +347,6 @@ kl_add_memory_ip27(int16_t nasid, int16_t *sizes, unsigned int cnt)
 	 */
 	basepa = (paddr_t)nasid << kl_n_shift;
 	while (cnt-- != 0) {
-		/*
-		 * XXX Temporary until there is a way to cope with
-		 * XXX xbridge ATE shortage.
-		 */
-		if (basepa >= (2UL << 30))
-			return;
-
 		nmeg = *sizes++;
 		for (seg = 0; seg < 4; basepa += (1 << 27), seg++) {
 			if (nmeg <= 128)
@@ -361,63 +376,27 @@ kl_add_memory_ip27(int16_t nasid, int16_t *sizes, unsigned int cnt)
 			}
 
 			/*
-			 * Walk the existing segment list to find if we
-			 * are adjacent to an existing segment, or the
-			 * next free segment to use if not (unless doing
-			 * this would cross the 2GB boundary we need for
-			 * 32 bit DMA memory).
-			 *
-			 * Note that since we do not know in which order
-			 * we'll find our nodes, we have to check for
-			 * both boundaries, despite adding a given node's
-			 * memory in increasing pa order.
+			 * XXX Temporary until there is a way to cope with
+			 * XXX xbridge ATE shortage.
 			 */
-			for (descno = 0, md = mem_layout; descno < MAXMEMSEGS;
-			    descno++, md++) {
-				if (md->mem_first_page == 0)
-					break;
-
-				/*
-				 * Do not try to merge segments if they are
-				 * not covering the same node.
-				 */
-				if ((ptoa(md->mem_first_page) >> kl_n_shift) !=
-				    nasid)
-					continue;
-
-				if (md->mem_first_page == lp &&
-				    lp != atop(2UL << 30)) {
-					md->mem_first_page = fp;
-					physmem += np;
-					md = NULL;
-					break;
-				}
-
-				if (md->mem_last_page == fp &&
-				    fp != atop(2UL << 30)) {
-					md->mem_last_page = lp;
-					physmem += np;
-					md = NULL;
-					break;
-				}
-			}
-			if (descno != MAXMEMSEGS && md != NULL) {
-				md->mem_first_page = fp;
-				md->mem_last_page = lp;
-				md->mem_freelist = lp <= atop(2UL << 30) ?
-				    VM_FREELIST_DMA32 : VM_FREELIST_DEFAULT;
-				physmem += np;
-				md = NULL;
+			if (fp >= atop(2UL << 30)) {
+#if 0
+				physmem += lp - fp;
+#endif
+				continue;
 			}
 
-			if (md != NULL) {
+			if (memrange_register(fp, lp,
+			    ~(atop(1UL << kl_n_shift) - 1),
+			    lp <= atop(2UL << 30) ?
+			      VM_FREELIST_DEFAULT : VM_FREELIST_DMA32) != 0) {
 				/*
 				 * We could hijack the smallest segment here.
 				 * But is it really worth doing?
 				 */
 				bios_printf("%u MB of memory could not be "
 				    "managed, increase MAXMEMSEGS\n",
-				    atop(np) >> 20);
+				    ptoa(np) >> 20);
 			}
 		}
 	}
@@ -428,8 +407,6 @@ kl_add_memory_ip35(int16_t nasid, int16_t *sizes, unsigned int cnt)
 {
 	paddr_t basepa;
 	uint32_t fp, lp, np;
-	unsigned int descno;
-	struct phys_mem_desc *md;
 
 	/*
 	 * On IP35, the smallest memory DIMMs are 256MB, and the
@@ -438,13 +415,6 @@ kl_add_memory_ip35(int16_t nasid, int16_t *sizes, unsigned int cnt)
 
 	basepa = (paddr_t)nasid << kl_n_shift;
 	while (cnt-- != 0) {
-		/*
-		 * XXX Temporary until there is a way to cope with
-		 * XXX xbridge ATE shortage.
-		 */
-		if (basepa >= (2UL << 30))
-			return;
-
 		np = *sizes++;
 		if (np != 0) {
 			DB_PRF(("IP35 memory from %p to %p (%u MB)\n",
@@ -467,63 +437,27 @@ kl_add_memory_ip35(int16_t nasid, int16_t *sizes, unsigned int cnt)
 			}
 
 			/*
-			 * Walk the existing segment list to find if we
-			 * are adjacent to an existing segment, or the
-			 * next free segment to use if not (unless doing
-			 * this would cross the 2GB boundary we need for
-			 * 32 bit DMA memory).
-			 *
-			 * Note that since we do not know in which order
-			 * we'll find our nodes, we have to check for
-			 * both boundaries, despite adding a given node's
-			 * memory in increasing pa order.
+			 * XXX Temporary until there is a way to cope with
+			 * XXX xbridge ATE shortage.
 			 */
-			for (descno = 0, md = mem_layout; descno < MAXMEMSEGS;
-			    descno++, md++) {
-				if (md->mem_first_page == 0)
-					break;
-
-				/*
-				 * Do not try to merge segments if they are
-				 * not covering the same node.
-				 */
-				if ((ptoa(md->mem_first_page) >> kl_n_shift) !=
-				    nasid)
-					continue;
-
-				if (md->mem_first_page == lp &&
-				    lp != atop(2UL << 30)) {
-					md->mem_first_page = fp;
-					physmem += np;
-					md = NULL;
-					break;
-				}
-
-				if (md->mem_last_page == fp &&
-				    fp != atop(2UL << 30)) {
-					md->mem_last_page = lp;
-					physmem += np;
-					md = NULL;
-					break;
-				}
-			}
-			if (descno != MAXMEMSEGS && md != NULL) {
-				md->mem_first_page = fp;
-				md->mem_last_page = lp;
-				md->mem_freelist = lp <= atop(2UL << 30) ?
-				    VM_FREELIST_DMA32 : VM_FREELIST_DEFAULT;
-				physmem += np;
-				md = NULL;
+			if (fp >= atop(2UL << 30)) {
+#if 0
+				physmem += lp - fp;
+#endif
+				continue;
 			}
 
-			if (md != NULL) {
+			if (memrange_register(fp, lp,
+			    ~(atop(1UL << kl_n_shift) - 1),
+			    lp <= atop(2UL << 30) ?
+			      VM_FREELIST_DEFAULT : VM_FREELIST_DMA32) != 0) {
 				/*
 				 * We could hijack the smallest segment here.
 				 * But is it really worth doing?
 				 */
 				bios_printf("%u MB of memory could not be "
 				    "managed, increase MAXMEMSEGS\n",
-				    atop(np) >> 20);
+				    ptoa(np) >> 20);
 			}
 		}
 		basepa += 1UL << 30;	/* 1 GB */

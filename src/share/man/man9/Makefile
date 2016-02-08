@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.153 2009/05/11 19:49:25 jmc Exp $
+#	$OpenBSD: Makefile,v 1.156 2009/09/08 06:01:41 deraadt Exp $
 #	$NetBSD: Makefile,v 1.4 1996/01/09 03:23:01 thorpej Exp $
 
 #	Makefile for section 9 (kernel function and variable) manual pages.
@@ -101,7 +101,8 @@ MLINKS+=bus_space.9 bus_space_alloc.9 bus_space.9 bus_space_barrier.9 \
 	bus_space.9 bus_space_write_raw_region_8.9
 MLINKS+=copy.9 copyin.9 copy.9 copyout.9 copy.9 copystr.9 \
 	copy.9 copyinstr.9 copy.9 copyoutstr.9
-MLINKS+=crypto.9 crypto_register.9 \
+MLINKS+=crypto.9 crypto_get_driverid.9 \
+	crypto.9 crypto_register.9 \
 	crypto.9 crypto_kregister.9 \
 	crypto.9 crypto_unregister.9 \
 	crypto.9 crypto_done.9 \
@@ -113,7 +114,7 @@ MLINKS+=crypto.9 crypto_register.9 \
 	crypto.9 crypto_getreq.9 \
 	crypto.9 crypto_freereq.9
 MLINKS+=mi_switch.9 cpu_switchto.9
-MLINKS+=disk.9 disk_init.9 disk.9 disk_attach.9 disk.9 disk_detatch.9 \
+MLINKS+=disk.9 disk_init.9 disk.9 disk_attach.9 disk.9 disk_detach.9 \
 	disk.9 disk_busy.9 disk.9 disk_unbusy.9
 MLINKS+=disklabel.9 readdisklabel.9 disklabel.9 writedisklabel.9 \
 	disklabel.9 setdisklabel.9 disklabel.9 bounds_check_with_label.9
@@ -220,6 +221,7 @@ MLINKS+=microtime.9 getmicrotime.9 microtime.9 microuptime.9 \
 	microtime.9 binuptime.9
 MLINKS+=mountroothook_establish.9 mountroothook_disestablish.9
 MLINKS+=mutex.9 mtx_init.9 mutex.9 mtx_enter.9 mutex.9 mtx_leave.9
+MLINKS+=mutex.9 mtx_enter_try.9
 MLINKS+=namei.9 lookup.9 namei.9 relookup.9 namei.9 NDINIT.9
 MLINKS+=pci_conf_read.9 pci_conf_write.9 pci_conf_read.9 pci_make_tag.9 \
 	pci_conf_read.9 pci_decompose_tag.9
@@ -349,6 +351,7 @@ MLINKS+=VOP_LOOKUP.9 VOP_ABORTOP.9 VOP_LOOKUP.9 VOP_ACCESS.9 \
 	VOP_LOOKUP.9 VOP_STRATEGY.9 VOP_LOOKUP.9 VOP_SYMLINK.9 \
 	VOP_LOOKUP.9 VOP_UNLOCK.9 VOP_LOOKUP.9 VOP_WRITE.9
 MLINKS+=workq_add_task.9 workq_create.9 \
+	workq_add_task.9 workq_queue_task.9 \
 	workq_add_task.9 workq_destroy.9
 
 .include <bsd.prog.mk>

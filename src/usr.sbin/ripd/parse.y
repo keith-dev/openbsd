@@ -1,4 +1,4 @@
-/*	$OpenBSD: parse.y,v 1.24 2009/03/31 21:03:49 tobias Exp $ */
+/*	$OpenBSD: parse.y,v 1.27 2009/09/26 18:24:58 michele Exp $ */
 
 /*
  * Copyright (c) 2006 Michele Marchetto <mydecay@openbeer.it>
@@ -101,7 +101,7 @@ typedef struct {
 
 %}
 
-%token	SPLIT_HORIZON TRIGGERED_UPDATES FIBUPDATE REDISTRIBUTE
+%token	SPLIT_HORIZON TRIGGERED_UPDATES FIBUPDATE REDISTRIBUTE RDOMAIN
 %token	AUTHKEY AUTHTYPE AUTHMD AUTHMDKEYID
 %token	INTERFACE RTLABEL
 %token	COST PASSIVE
@@ -159,7 +159,7 @@ conf_main	: SPLIT_HORIZON STRING {
 			    OPT_SPLIT_POISONED);
 			if (!strcmp($2, "none"))
 				/* nothing */ ;
-			else if (!strcmp($2, "default"))
+			else if (!strcmp($2, "simple"))
 				conf->options |= OPT_SPLIT_HORIZON;
 			else if (!strcmp($2, "poisoned"))
 				conf->options |= OPT_SPLIT_POISONED;
@@ -175,6 +175,13 @@ conf_main	: SPLIT_HORIZON STRING {
 				conf->options |= OPT_TRIGGERED_UPDATES;
 			else
 				conf->options &= ~OPT_TRIGGERED_UPDATES;
+		}
+		| RDOMAIN NUMBER {
+			if ($2 < 0 || $2 > RT_TABLEID_MAX) {
+				yyerror("invalid rdomain");
+				YYERROR;
+			}
+			conf->rdomain = $2;
 		}
 		| FIBUPDATE yesno {
 			if ($2 == 0)
@@ -342,7 +349,7 @@ interfaceopts_l	: interfaceopts_l interfaceoptsl nl
 		| interfaceoptsl optnl
 		;
 
-interfaceoptsl	: PASSIVE  		{ iface->passive = 1; }
+interfaceoptsl	: PASSIVE		{ iface->passive = 1; }
 		| DEMOTE STRING		{
 			if (strlcpy(iface->demote_group, $2,
 			    sizeof(iface->demote_group)) >=
@@ -403,6 +410,7 @@ lookup(char *s)
 	    {"interface",		INTERFACE},
 	    {"no",			NO},
 	    {"passive",			PASSIVE},
+	    {"rdomain",			RDOMAIN},
 	    {"redistribute",		REDISTRIBUTE},
 	    {"rtlabel",			RTLABEL},
 	    {"split-horizon",		SPLIT_HORIZON},
@@ -740,6 +748,7 @@ parse_config(char *filename, int opts)
 	defs->cost = DEFAULT_COST;
 	defs->auth_type = AUTH_NONE;
 	conf->opts = opts;
+	conf->options = OPT_SPLIT_POISONED;
 	SIMPLEQ_INIT(&conf->redist_list);
 
 	if ((file = pushfile(filename, !(conf->opts & RIPD_OPT_NOACTION))) == NULL) {

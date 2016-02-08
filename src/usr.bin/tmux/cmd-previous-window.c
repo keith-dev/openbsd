@@ -1,4 +1,4 @@
-/* $OpenBSD: cmd-previous-window.c,v 1.2 2009/06/03 15:58:40 nicm Exp $ */
+/* $OpenBSD: cmd-previous-window.c,v 1.6 2009/11/13 19:53:29 nicm Exp $ */
 
 /*
  * Copyright (c) 2007 Nicholas Marriott <nicm@users.sourceforge.net>
@@ -30,12 +30,10 @@ int	cmd_previous_window_exec(struct cmd *, struct cmd_ctx *);
 const struct cmd_entry cmd_previous_window_entry = {
 	"previous-window", "prev",
 	"[-a] " CMD_TARGET_SESSION_USAGE,
-	CMD_AFLAG,
+	0, "a",
 	cmd_previous_window_init,
 	cmd_target_parse,
 	cmd_previous_window_exec,
-	cmd_target_send,
-	cmd_target_recv,
 	cmd_target_free,
 	cmd_target_print
 };
@@ -48,8 +46,8 @@ cmd_previous_window_init(struct cmd *self, int key)
 	cmd_target_init(self, key);
 	data = self->data;
 
-	if (key == KEYC_ADDESC('p'))
-		data->flags |= CMD_AFLAG;
+	if (key == ('p' | KEYC_ESCAPE))
+		cmd_set_flag(&data->chflags, 'a');
 }
 
 int
@@ -63,7 +61,7 @@ cmd_previous_window_exec(struct cmd *self, struct cmd_ctx *ctx)
 		return (-1);
 
 	activity = 0;
-	if (data->flags & CMD_AFLAG)
+	if (cmd_check_flag(data->chflags, 'a'))
 		activity = 1;
 
 	if (session_previous(s, activity) == 0)

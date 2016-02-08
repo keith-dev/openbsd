@@ -1,4 +1,4 @@
-/*	$OpenBSD: options.c,v 1.70 2008/06/11 00:49:08 pvalchev Exp $	*/
+/*	$OpenBSD: options.c,v 1.73 2009/11/13 17:22:13 deraadt Exp $	*/
 /*	$NetBSD: options.c,v 1.6 1996/03/26 23:54:18 mrg Exp $	*/
 
 /*-
@@ -33,14 +33,6 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  */
-
-#ifndef lint
-#if 0
-static const char sccsid[] = "@(#)options.c	8.2 (Berkeley) 4/18/94";
-#else
-static const char rcsid[] = "$OpenBSD: options.c,v 1.70 2008/06/11 00:49:08 pvalchev Exp $";
-#endif
-#endif /* not lint */
 
 #include <sys/types.h>
 #include <sys/time.h>
@@ -769,14 +761,20 @@ tar_options(int argc, char **argv)
 			break;
 		case 'I':
 			if (++nincfiles > incfiles_max) {
-				incfiles_max = nincfiles + 3;
-				incfiles = realloc(incfiles,
-				    sizeof(*incfiles) * incfiles_max);
-				if (incfiles == NULL) {
+				size_t n = nincfiles + 3;
+				struct incfile *p;
+
+				p = realloc(incfiles,
+				    sizeof(*incfiles) * n);
+				if (p == NULL) {
+					free(incfiles);
+					incfiles = NULL;
 					paxwarn(0, "Unable to allocate space "
 					    "for option list");
 					exit(1);
 				}
+				incfiles = p;
+				incfiles_max = n;
 			}
 			incfiles[nincfiles - 1].file = optarg;
 			incfiles[nincfiles - 1].dir = chdname;
@@ -1415,6 +1413,7 @@ opt_add(const char *str)
 			free(dstr);
 			return(-1);
 		}
+		dstr = NULL;	/* parts of string going onto the OPLIST */
 		*pt++ = '\0';
 		opt->name = frpt;
 		opt->value = pt;
@@ -1430,6 +1429,7 @@ opt_add(const char *str)
 		optail->fow = opt;
 		optail = opt;
 	}
+	free(dstr);
 	return(0);
 }
 

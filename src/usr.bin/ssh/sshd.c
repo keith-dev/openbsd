@@ -1,4 +1,4 @@
-/* $OpenBSD: sshd.c,v 1.367 2009/05/28 16:50:16 andreas Exp $ */
+/* $OpenBSD: sshd.c,v 1.374 2010/03/07 11:57:13 dtucker Exp $ */
 /*
  * Author: Tatu Ylonen <ylo@cs.hut.fi>
  * Copyright (c) 1995 Tatu Ylonen <ylo@cs.hut.fi>, Espoo, Finland
@@ -188,6 +188,7 @@ struct {
 	Key	*server_key;		/* ephemeral server key */
 	Key	*ssh1_host_key;		/* ssh1 host key */
 	Key	**host_keys;		/* all private host keys */
+	Key	**host_certificates;	/* all public host certificates */
 	int	have_ssh1_key;
 	int	have_ssh2_key;
 	u_char	ssh1_cookie[SSH_SESSION_KEY_LENGTH];
@@ -289,6 +290,7 @@ sighup_restart(void)
 	close_listen_socks();
 	close_startup_pipes();
 	alarm(0);  /* alarm timer persists across exec */
+	signal(SIGHUP, SIG_IGN); /* will be restored after exec */
 	execv(saved_argv[0], saved_argv);
 	logit("RESTART FAILED: av[0]='%.100s', error: %.100s.", saved_argv[0],
 	    strerror(errno));
@@ -524,6 +526,10 @@ destroy_sensitive_data(void)
 			key_free(sensitive_data.host_keys[i]);
 			sensitive_data.host_keys[i] = NULL;
 		}
+		if (sensitive_data.host_certificates[i]) {
+			key_free(sensitive_data.host_certificates[i]);
+			sensitive_data.host_certificates[i] = NULL;
+		}
 	}
 	sensitive_data.ssh1_host_key = NULL;
 	memset(sensitive_data.ssh1_cookie, 0, SSH_SESSION_KEY_LENGTH);
@@ -550,6 +556,7 @@ demote_sensitive_data(void)
 			if (tmp->type == KEY_RSA1)
 				sensitive_data.ssh1_host_key = tmp;
 		}
+		/* Certs do not need demotion */
 	}
 
 	/* We do not clear ssh1_host key and cookie.  XXX - Okay Niels? */
@@ -699,15 +706,29 @@ list_hostkey_types(void)
 	const char *p;
 	char *ret;
 	int i;
+	Key *key;
 
 	buffer_init(&b);
 	for (i = 0; i < options.num_host_key_files; i++) {
-		Key *key = sensitive_data.host_keys[i];
+		key = sensitive_data.host_keys[i];
 		if (key == NULL)
 			continue;
 		switch (key->type) {
 		case KEY_RSA:
 		case KEY_DSA:
+			if (buffer_len(&b) > 0)
+				buffer_append(&b, ",", 1);
+			p = key_ssh_name(key);
+			buffer_append(&b, p, strlen(p));
+			break;
+		}
+		/* If the private key has a cert peer, then list that too */
+		key = sensitive_data.host_certificates[i];
+		if (key == NULL)
+			continue;
+		switch (key->type) {
+		case KEY_RSA_CERT:
+		case KEY_DSA_CERT:
 			if (buffer_len(&b) > 0)
 				buffer_append(&b, ",", 1);
 			p = key_ssh_name(key);
@@ -722,17 +743,34 @@ list_hostkey_types(void)
 	return ret;
 }
 
-Key *
-get_hostkey_by_type(int type)
+static Key *
+get_hostkey_by_type(int type, int need_private)
 {
 	int i;
+	Key *key;
 
 	for (i = 0; i < options.num_host_key_files; i++) {
-		Key *key = sensitive_data.host_keys[i];
+		if (type == KEY_RSA_CERT || type == KEY_DSA_CERT)
+			key = sensitive_data.host_certificates[i];
+		else
+			key = sensitive_data.host_keys[i];
 		if (key != NULL && key->type == type)
-			return key;
+			return need_private ?
+			    sensitive_data.host_keys[i] : key;
 	}
 	return NULL;
+}
+
+Key *
+get_hostkey_public_by_type(int type)
+{
+	return get_hostkey_by_type(type, 0);
+}
+
+Key *
+get_hostkey_private_by_type(int type)
+{
+	return get_hostkey_by_type(type, 1);
 }
 
 Key *
@@ -749,8 +787,13 @@ get_hostkey_index(Key *key)
 	int i;
 
 	for (i = 0; i < options.num_host_key_files; i++) {
-		if (key == sensitive_data.host_keys[i])
-			return (i);
+		if (key_is_cert(key)) {
+			if (key == sensitive_data.host_certificates[i])
+				return (i);
+		} else {
+			if (key == sensitive_data.host_keys[i])
+				return (i);
+		}
 	}
 	return (-1);
 }
@@ -789,9 +832,9 @@ usage(void)
 	fprintf(stderr, "%s, %s\n",
 	    SSH_VERSION, SSLeay_version(SSLEAY_VERSION));
 	fprintf(stderr,
-"usage: sshd [-46DdeiqTt] [-b bits] [-C connection_spec] [-f config_file]\n"
-"            [-g login_grace_time] [-h host_key_file] [-k key_gen_time]\n"
-"            [-o option] [-p port] [-u len]\n"
+"usage: sshd [-46DdeiqTt] [-b bits] [-C connection_spec] [-c host_cert_file]\n"
+"            [-f config_file] [-g login_grace_time] [-h host_key_file]\n"
+"            [-k key_gen_time] [-o option] [-p port] [-u len]\n"
 	);
 	exit(1);
 }
@@ -1200,7 +1243,7 @@ main(int ac, char **av)
 {
 	extern char *optarg;
 	extern int optind;
-	int opt, i, on = 1;
+	int opt, i, j, on = 1;
 	int sock_in = -1, sock_out = -1, newsock = -1;
 	const char *remote_ip;
 	char *test_user = NULL, *test_host = NULL, *test_addr = NULL;
@@ -1233,6 +1276,14 @@ main(int ac, char **av)
 			break;
 		case 'f':
 			config_file_name = optarg;
+			break;
+		case 'c':
+			if (options.num_host_cert_files >= MAX_HOSTCERTS) {
+				fprintf(stderr, "too many host certificates.\n");
+				exit(1);
+			}
+			options.host_cert_files[options.num_host_cert_files++] =
+			   derelativise_path(optarg);
 			break;
 		case 'd':
 			if (debug_flag == 0) {
@@ -1296,7 +1347,8 @@ main(int ac, char **av)
 				fprintf(stderr, "too many host keys.\n");
 				exit(1);
 			}
-			options.host_key_files[options.num_host_key_files++] = optarg;
+			options.host_key_files[options.num_host_key_files++] = 
+			   derelativise_path(optarg);
 			break;
 		case 't':
 			test_flag = 1;
@@ -1451,6 +1503,46 @@ main(int ac, char **av)
 		exit(1);
 	}
 
+	/*
+	 * Load certificates. They are stored in an array at identical
+	 * indices to the public keys that they relate to.
+	 */
+	sensitive_data.host_certificates = xcalloc(options.num_host_key_files,
+	    sizeof(Key *));
+	for (i = 0; i < options.num_host_key_files; i++)
+		sensitive_data.host_certificates[i] = NULL;
+
+	for (i = 0; i < options.num_host_cert_files; i++) {
+		key = key_load_public(options.host_cert_files[i], NULL);
+		if (key == NULL) {
+			error("Could not load host certificate: %s",
+			    options.host_cert_files[i]);
+			continue;
+		}
+		if (!key_is_cert(key)) {
+			error("Certificate file is not a certificate: %s",
+			    options.host_cert_files[i]);
+			key_free(key);
+			continue;
+		}
+		/* Find matching private key */
+		for (j = 0; j < options.num_host_key_files; j++) {
+			if (key_equal_public(key,
+			    sensitive_data.host_keys[j])) {
+				sensitive_data.host_certificates[j] = key;
+				break;
+			}
+		}
+		if (j >= options.num_host_key_files) {
+			error("No matching private key for certificate: %s",
+			    options.host_cert_files[i]);
+			key_free(key);
+			continue;
+		}
+		sensitive_data.host_certificates[j] = key;
+		debug("host certificate: #%d type %d %s", j, key->type,
+		    key_type(key));
+	}
 	/* Check certain values for sanity. */
 	if (options.protocol & SSH_PROTO_1) {
 		if (options.server_key_bits < 512 ||
@@ -1638,6 +1730,10 @@ main(int ac, char **av)
 		    sock_in, sock_out, newsock, startup_pipe, config_s[0]);
 	}
 
+	/* Executed child processes don't need these. */
+	fcntl(sock_out, F_SETFD, FD_CLOEXEC);
+	fcntl(sock_in, F_SETFD, FD_CLOEXEC);
+
 	/*
 	 * Disable the key regeneration alarm.  We will not regenerate the
 	 * key since we are no longer in a position to give it to anyone. We
@@ -1727,6 +1823,7 @@ main(int ac, char **av)
 
 	/* prepare buffer to collect messages to display to user after login */
 	buffer_init(&loginmsg);
+	auth_debug_reset();
 
 	if (use_privsep)
 		if (privsep_preauth(authctxt) == 1)
@@ -2055,7 +2152,8 @@ do_ssh2_kex(void)
 	kex->server = 1;
 	kex->client_version_string=client_version_string;
 	kex->server_version_string=server_version_string;
-	kex->load_host_key=&get_hostkey_by_type;
+	kex->load_host_public_key=&get_hostkey_public_by_type;
+	kex->load_host_private_key=&get_hostkey_private_by_type;
 	kex->host_key_index=&get_hostkey_index;
 
 	xxx_kex = kex;

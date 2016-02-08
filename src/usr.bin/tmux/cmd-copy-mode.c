@@ -1,4 +1,4 @@
-/* $OpenBSD: cmd-copy-mode.c,v 1.2 2009/06/29 07:11:20 nicm Exp $ */
+/* $OpenBSD: cmd-copy-mode.c,v 1.9 2010/01/02 22:50:02 nicm Exp $ */
 
 /*
  * Copyright (c) 2007 Nicholas Marriott <nicm@users.sourceforge.net>
@@ -24,34 +24,46 @@
  * Enter copy mode.
  */
 
+void	cmd_copy_mode_init(struct cmd *, int);
 int	cmd_copy_mode_exec(struct cmd *, struct cmd_ctx *);
 
 const struct cmd_entry cmd_copy_mode_entry = {
 	"copy-mode", NULL,
-	CMD_TARGET_WINDOW_USAGE,
-	CMD_UFLAG,
-	cmd_target_init,
+	"[-u] " CMD_TARGET_PANE_USAGE,
+	0, "u",
+	cmd_copy_mode_init,
 	cmd_target_parse,
 	cmd_copy_mode_exec,
-	cmd_target_send,
-	cmd_target_recv,
 	cmd_target_free,
-	NULL
+	cmd_target_print
 };
+
+void
+cmd_copy_mode_init(struct cmd *self, int key)
+{
+	struct cmd_target_data	*data;
+
+	cmd_target_init(self, key);
+	data = self->data;
+
+	switch (key) {
+	case KEYC_PPAGE:
+		cmd_set_flag(&data->chflags, 'u');
+		break;
+	}
+}
 
 int
 cmd_copy_mode_exec(struct cmd *self, struct cmd_ctx *ctx)
 {
 	struct cmd_target_data	*data = self->data;
-	struct winlink		*wl;
 	struct window_pane	*wp;
 
-	if ((wl = cmd_find_window(ctx, data->target, NULL)) == NULL)
+	if (cmd_find_pane(ctx, data->target, NULL, &wp) == NULL)
 		return (-1);
-	wp = wl->window->active;
 
 	window_pane_set_mode(wp, &window_copy_mode);
-	if (wp->mode == &window_copy_mode && data->flags & CMD_UFLAG)
+	if (wp->mode == &window_copy_mode && cmd_check_flag(data->chflags, 'u'))
 		window_copy_pageup(wp);
 
 	return (0);

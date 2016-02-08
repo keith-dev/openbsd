@@ -1,4 +1,4 @@
-/*	$OpenBSD: dhcp.c,v 1.27 2008/07/21 16:51:18 millert Exp $ */
+/*	$OpenBSD: dhcp.c,v 1.30 2010/01/02 04:21:16 krw Exp $ */
 
 /*
  * Copyright (c) 1995, 1996, 1997, 1998, 1999
@@ -579,7 +579,7 @@ nak_lease(struct packet *packet, struct iaddr *cip)
 	i = DHO_DHCP_PARAMETER_REQUEST_LIST;
 	if (packet->options[i].data) {
 		packet->options[i].len = 0;
-		dfree(packet->options[i].data, "nak_lease");
+		free(packet->options[i].data);
 		packet->options[i].data = NULL;
 	}
 
@@ -951,7 +951,7 @@ ack_lease(struct packet *packet, struct lease *lease, unsigned int offer,
 	/* Save the parameter request list if there is one. */
 	i = DHO_DHCP_PARAMETER_REQUEST_LIST;
 	if (packet->options[i].data) {
-		state->prl = dmalloc(packet->options[i].len, "ack_lease: prl");
+		state->prl = calloc(1, packet->options[i].len);
 		if (!state->prl)
 			warning("no memory for parameter request list");
 		else {
@@ -1141,6 +1141,19 @@ ack_lease(struct packet *packet, struct lease *lease, unsigned int offer,
 		state->options[i]->value = lease->ip_addr.iabuf;
 		state->options[i]->len = lease->ip_addr.len;
 		state->options[i]->buf_size = lease->ip_addr.len;
+		state->options[i]->timeout = -1;
+		state->options[i]->tree = NULL;
+	}
+
+	/* Echo back the relay agent information, if present */
+	i = DHO_RELAY_AGENT_INFORMATION;
+	if (state->giaddr.s_addr && !state->options[i] &&
+	    packet->options[i].data && packet->options[i].len) {
+		state->options[i] = new_tree_cache("relay-agent-information");
+		state->options[i]->flags = TC_TEMPORARY;
+		state->options[i]->value = packet->options[i].data;
+		state->options[i]->len = packet->options[i].len;
+		state->options[i]->buf_size = packet->options[i].len;
 		state->options[i]->timeout = -1;
 		state->options[i]->tree = NULL;
 	}

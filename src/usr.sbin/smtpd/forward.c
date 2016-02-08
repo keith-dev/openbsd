@@ -1,4 +1,4 @@
-/*	$OpenBSD: forward.c,v 1.13 2009/03/03 23:23:52 gilles Exp $	*/
+/*	$OpenBSD: forward.c,v 1.20 2009/11/09 23:54:08 gilles Exp $	*/
 
 /*
  * Copyright (c) 2008 Gilles Chehade <gilles@openbsd.org>
@@ -35,15 +35,15 @@
 #include "smtpd.h"
 
 int
-forwards_get(int fd, struct aliaseslist *aliases)
+forwards_get(int fd, struct expandtree *expandtree)
 {
 	FILE *fp;
 	struct alias alias;
-	struct alias *aliasp;
 	char *buf, *lbuf, *p, *cp;
 	size_t len;
 	size_t nbaliases = 0;
 	int quoted;
+	struct expand_node expnode;
 
 	fp = fdopen(fd, "r");
 	if (fp == NULL)
@@ -70,7 +70,7 @@ forwards_get(int fd, struct aliaseslist *aliases)
 		cp = buf;
 		do {
 			/* skip whitespace */
-			while (isspace(*cp))
+			while (isspace((int)*cp))
 				cp++;
 
 			/* parse line */
@@ -84,23 +84,20 @@ forwards_get(int fd, struct aliaseslist *aliases)
 			buf = cp;
 			cp = p;
 
-			log_debug("\tforward: %s", buf);
 			if (! alias_parse(&alias, buf)) {
 				log_debug("bad entry in ~/.forward");
 				continue;
 			}
 
-			if (alias.type == ALIAS_INCLUDE) {
+			if (alias.type == EXPAND_INCLUDE) {
 				log_debug(
 				    "includes are forbidden in ~/.forward");
 				continue;
 			}
 
-			aliasp = calloc(1, sizeof(struct alias));
-			if (aliasp == NULL)
-				fatal("calloc");
-			*aliasp = alias;
-			TAILQ_INSERT_HEAD(aliases, aliasp, entry);
+			bzero(&expnode, sizeof(struct expand_node));
+			alias_to_expand_node(&expnode, &alias);
+			expandtree_increment_node(expandtree, &expnode);
 			nbaliases++;
 		} while (*cp != '\0');
 	}

@@ -1,10 +1,11 @@
-#	$OpenBSD: list,v 1.7 2009/06/02 06:17:47 todd Exp $
+#	$OpenBSD: list,v 1.9 2010/02/17 19:54:55 kettenis Exp $
 
 SRCDIRS distrib/special
 SRCDIRS bin sbin usr.bin usr.sbin
 
 # copy the crunched binary, link to it, and kill it
 COPY	${OBJDIR}/instbin			instbin
+LINK	instbin					bin/arch
 LINK	instbin					bin/cat
 LINK	instbin					bin/chmod bin/chgrp sbin/chown
 LINK	instbin					bin/cp
@@ -59,6 +60,10 @@ LINK	instbin					sbin/sysctl
 # copy the MAKEDEV script and make some devices
 SCRIPT	${DESTDIR}/dev/MAKEDEV			dev/MAKEDEV
 SPECIAL	cd dev; sh MAKEDEV ramdisk
+
+# we need the contents of /usr/mdec
+COPY	${DESTDIR}/usr/mdec/boot.elf		usr/mdec/boot.elf
+COPY	${DESTDIR}/usr/mdec/mbr			usr/mdec/mbr
 
 # various files that we need in /etc for the install
 COPY	${DESTDIR}/etc/group			etc/group

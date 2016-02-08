@@ -1,4 +1,4 @@
-/*	$OpenBSD: v_ex.c,v 1.8 2006/03/20 01:00:36 pvalchev Exp $	*/
+/*	$OpenBSD: v_ex.c,v 1.10 2009/11/14 17:44:53 jsg Exp $	*/
 
 /*-
  * Copyright (c) 1992, 1993, 1994
@@ -10,10 +10,6 @@
  */
 
 #include "config.h"
-
-#ifndef lint
-static const char sccsid[] = "@(#)v_ex.c	10.42 (Berkeley) 6/28/96";
-#endif /* not lint */
 
 #include <sys/types.h>
 #include <sys/queue.h>
@@ -210,8 +206,10 @@ v_switch(sp, vp)
 	}
 
 	/* If autowrite is set, write out the file. */
-	if (file_m1(sp, 0, FS_ALL))
+	if (file_m1(sp, 0, FS_ALL)) {
+		free(name);
 		return (1);
+	}
 
 	ex_cinit(&cmd, C_EDIT, 0, OOBLNO, OOBLNO, 0, ap);
 	ex_cadd(&cmd, &a, name, strlen(name));

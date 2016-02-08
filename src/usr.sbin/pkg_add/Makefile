@@ -1,4 +1,4 @@
-# $OpenBSD: Makefile,v 1.52 2009/04/14 17:53:58 espie Exp $
+# $OpenBSD: Makefile,v 1.59 2010/01/19 14:26:24 espie Exp $
 
 .include <bsd.own.mk>
 
@@ -12,15 +12,20 @@ POD2MAN=/usr/bin/pod2man
 
 PACKAGES= \
     OpenBSD/Add.pm \
+    OpenBSD/AddDelete.pm \
     OpenBSD/ArcCheck.pm \
     OpenBSD/CollisionReport.pm \
     OpenBSD/Delete.pm \
     OpenBSD/Dependencies.pm \
     OpenBSD/Error.pm \
+    OpenBSD/ForwardDependencies.pm \
     OpenBSD/Getopt.pm \
+    OpenBSD/Handle.pm \
     OpenBSD/IdCache.pm \
     OpenBSD/Interactive.pm \
+    OpenBSD/LibSpec.pm \
     OpenBSD/Mtree.pm \
+    OpenBSD/OldLibs.pm \
     OpenBSD/PackageInfo.pm \
     OpenBSD/PackageLocation.pm \
     OpenBSD/PackageLocator.pm \
@@ -40,10 +45,12 @@ PACKAGES= \
     OpenBSD/Replace.pm \
     OpenBSD/RequiredBy.pm \
     OpenBSD/Search.pm \
+    OpenBSD/Signature.pm \
     OpenBSD/SharedItems.pm \
     OpenBSD/SharedLibs.pm \
     OpenBSD/Subst.pm \
     OpenBSD/Temp.pm \
+    OpenBSD/Tracker.pm \
     OpenBSD/Update.pm \
     OpenBSD/UpdateSet.pm \
     OpenBSD/Ustar.pm \

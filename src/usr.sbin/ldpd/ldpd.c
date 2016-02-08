@@ -1,4 +1,4 @@
-/*	$OpenBSD: ldpd.c,v 1.2 2009/06/06 08:09:43 pyr Exp $ */
+/*	$OpenBSD: ldpd.c,v 1.7 2010/03/03 10:17:05 claudio Exp $ */
 
 /*
  * Copyright (c) 2005 Claudio Jeker <claudio@openbsd.org>
@@ -119,7 +119,7 @@ usage(void)
 {
 	extern char *__progname;
 
-	fprintf(stderr, "usage: %s [-cdnv] [-D macro=value] [-f file]\n",
+	fprintf(stderr, "usage: %s [-dnv] [-D macro=value] [-f file]\n",
 	    __progname);
 	exit(1);
 }
@@ -139,7 +139,7 @@ main(int argc, char *argv[])
 
 	log_init(1);	/* log to stderr until daemonized */
 
-	while ((ch = getopt(argc, argv, "cdD:f:nv")) != -1) {
+	while ((ch = getopt(argc, argv, "dD:f:nv")) != -1) {
 		switch (ch) {
 		case 'd':
 			debug = 1;
@@ -159,8 +159,8 @@ main(int argc, char *argv[])
 			if (opts & LDPD_OPT_VERBOSE)
 				opts |= LDPD_OPT_VERBOSE2;
 			opts |= LDPD_OPT_VERBOSE;
+			log_verbose(1);
 			break;
-
 		default:
 			usage();
 			/* NOTREACHED */
@@ -356,7 +356,7 @@ main_dispatch_ldpe(int fd, short event, void *bula)
 	struct imsgbuf		*ibuf = &iev->ibuf;
 	struct imsg		 imsg;
 	ssize_t			 n;
-	int			 shut = 0;
+	int			 shut = 0, verbose;
 
 	if (event & EV_READ) {
 		if ((n = imsg_read(ibuf)) == -1)
@@ -403,6 +403,11 @@ main_dispatch_ldpe(int fd, short event, void *bula)
 			else
 				log_warnx("IFINFO request with wrong len");
 			break;
+		case IMSG_CTL_LOG_VERBOSE:
+			/* already checked by ldpe */
+			memcpy(&verbose, imsg.data, sizeof(verbose));
+			log_verbose(verbose);
+			break;
 		default:
 			log_debug("main_dispatch_ldpe: error handling imsg %d",
 			    imsg.hdr.type);
@@ -427,7 +432,7 @@ main_dispatch_lde(int fd, short event, void *bula)
 	struct imsgbuf *ibuf = &iev->ibuf;
 	struct imsg	 imsg;
 	ssize_t		 n;
-	int		 count, shut = 0;
+	int		 shut = 0;
 
 	if (event & EV_READ) {
 		if ((n = imsg_read(ibuf)) == -1)
@@ -449,16 +454,23 @@ main_dispatch_lde(int fd, short event, void *bula)
 
 		switch (imsg.hdr.type) {
 		case IMSG_KLABEL_INSERT:
+			if (imsg.hdr.len - IMSG_HEADER_SIZE !=
+			    sizeof(struct kroute))
+				fatalx("invalid size of IMSG_KLABEL_INSERT");
 			kroute_insert_label(imsg.data);
 			break;
 		case IMSG_KLABEL_CHANGE:
-			count = (imsg.hdr.len - IMSG_HEADER_SIZE) /
-			    sizeof(struct kroute);
-			if (kr_change(imsg.data, count))
+			if (imsg.hdr.len - IMSG_HEADER_SIZE !=
+			    sizeof(struct kroute))
+				fatalx("invalid size of IMSG_KLABEL_CHANGE");
+			if (kr_change(imsg.data))
 				log_warn("main_dispatch_lde: error changing "
 				    "route");
 			break;
 		case IMSG_KLABEL_DELETE:
+			if (imsg.hdr.len - IMSG_HEADER_SIZE !=
+			    sizeof(struct kroute))
+				fatalx("invalid size of IMSG_KLABEL_DELETE");
 			if (kr_delete(imsg.data))
 				log_warn("main_dispatch_lde: error deleting "
 				    "route");
@@ -513,6 +525,37 @@ imsg_compose_event(struct imsgev *iev, u_int16_t type,
 	    pid, fd, data, datalen)) != -1)
 		imsg_event_add(iev);
 	return (ret);
+}
+
+void
+evbuf_enqueue(struct evbuf *eb, struct buf *buf)
+{
+	buf_close(&eb->wbuf, buf);
+	evbuf_event_add(eb);
+}
+
+void
+evbuf_event_add(struct evbuf *eb)
+{
+	if (eb->wbuf.queued)
+		event_add(&eb->ev, NULL);
+}
+
+void
+evbuf_init(struct evbuf *eb, int fd, void (*handler)(int, short, void *),
+    void *arg)
+{
+	msgbuf_init(&eb->wbuf);
+	eb->wbuf.fd = fd;
+	event_set(&eb->ev, eb->wbuf.fd, EV_WRITE, handler, arg);
+}
+
+void
+evbuf_clear(struct evbuf *eb)
+{
+	event_del(&eb->ev);
+	msgbuf_clear(&eb->wbuf);
+	eb->wbuf.fd = -1;
 }
 
 /*

@@ -1,4 +1,4 @@
-/*	$OpenBSD: control.c,v 1.27 2009/06/06 07:31:26 eric Exp $ */
+/*	$OpenBSD: control.c,v 1.32 2010/02/21 20:53:20 michele Exp $ */
 
 /*
  * Copyright (c) 2003, 2004 Henning Brauer <henning@openbsd.org>
@@ -33,8 +33,6 @@
 #include "control.h"
 
 #define	CONTROL_BACKLOG	5
-
-int control_imsg_relay(struct imsg *imsg);
 
 struct ctl_conn	*control_connbyfd(int);
 struct ctl_conn	*control_connbypid(pid_t);
@@ -121,7 +119,7 @@ control_accept(int listenfd, short event, void *bula)
 	if ((connfd = accept(listenfd,
 	    (struct sockaddr *)&sun, &len)) == -1) {
 		if (errno != EWOULDBLOCK && errno != EINTR)
-			log_warn("control_accept");
+			log_warn("control_accept: accept");
 		return;
 	}
 
@@ -193,6 +191,7 @@ control_dispatch_imsg(int fd, short event, void *bula)
 	struct imsg	 imsg;
 	ssize_t		 n;
 	unsigned int	 ifidx;
+	int		 verbose;
 
 	if ((c = control_connbyfd(fd)) == NULL) {
 		log_warn("control_dispatch_imsg: fd %d: not found", fd);
@@ -226,6 +225,7 @@ control_dispatch_imsg(int fd, short event, void *bula)
 		case IMSG_CTL_FIB_DECOUPLE:
 			ospfe_fib_update(imsg.hdr.type);
 			/* FALLTHROUGH */
+		case IMSG_CTL_FIB_RELOAD:
 		case IMSG_CTL_RELOAD:
 			c->iev.ibuf.pid = imsg.hdr.pid;
 			ospfe_imsg_compose_parent(imsg.hdr.type, 0, NULL, 0);
@@ -234,9 +234,8 @@ control_dispatch_imsg(int fd, short event, void *bula)
 		case IMSG_CTL_KROUTE_ADDR:
 		case IMSG_CTL_IFINFO:
 			c->iev.ibuf.pid = imsg.hdr.pid;
-			ospfe_imsg_compose_parent(imsg.hdr.type,
-			    imsg.hdr.pid, imsg.data,
-			    imsg.hdr.len - IMSG_HEADER_SIZE);
+			ospfe_imsg_compose_parent(imsg.hdr.type, imsg.hdr.pid,
+			    imsg.data, imsg.hdr.len - IMSG_HEADER_SIZE);
 			break;
 		case IMSG_CTL_SHOW_INTERFACE:
 			if (imsg.hdr.len == IMSG_HEADER_SIZE +
@@ -263,6 +262,20 @@ control_dispatch_imsg(int fd, short event, void *bula)
 		case IMSG_CTL_SHOW_NBR:
 			ospfe_nbr_ctl(c);
 			break;
+		case IMSG_CTL_LOG_VERBOSE:
+			if (imsg.hdr.len != IMSG_HEADER_SIZE +
+			    sizeof(verbose))
+				break;
+
+			/* forward to other processes */
+			ospfe_imsg_compose_parent(imsg.hdr.type, imsg.hdr.pid,
+			    imsg.data, imsg.hdr.len - IMSG_HEADER_SIZE);
+			ospfe_imsg_compose_rde(imsg.hdr.type, 0, imsg.hdr.pid,
+			    imsg.data, imsg.hdr.len - IMSG_HEADER_SIZE);
+
+			memcpy(&verbose, imsg.data, sizeof(verbose));
+			log_verbose(verbose);
+			break;		
 		default:
 			log_debug("control_dispatch_imsg: "
 			    "error handling imsg %d", imsg.hdr.type);

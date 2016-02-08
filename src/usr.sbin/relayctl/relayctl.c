@@ -1,4 +1,4 @@
-/*	$OpenBSD: relayctl.c,v 1.37 2009/06/05 23:39:51 pyr Exp $	*/
+/*	$OpenBSD: relayctl.c,v 1.41 2010/01/11 06:40:14 jsg Exp $	*/
 
 /*
  * Copyright (c) 2006 Pierre-Yves Ritschard <pyr@openbsd.org>
@@ -83,6 +83,7 @@ struct imsgname imsgunknown = {
 };
 
 struct imsgbuf	*ibuf;
+int error = 0;
 
 __dead void
 usage(void)
@@ -101,7 +102,7 @@ main(int argc, char *argv[])
 	struct imsg		 imsg;
 	int			 ctl_sock;
 	int			 done = 0;
-	int			 n;
+	int			 n, verbose = 0;
 
 	/* parse options */
 	if ((res = parse(argc - 1, argv + 1)) == NULL)
@@ -139,6 +140,7 @@ main(int argc, char *argv[])
 	case SHOW_HOSTS:
 	case SHOW_RDRS:
 	case SHOW_RELAYS:
+	case SHOW_ROUTERS:
 		imsg_compose(ibuf, IMSG_CTL_SHOW_SUM, 0, 0, -1, NULL, 0);
 		printf("%-4s\t%-8s\t%-24s\t%-7s\tStatus\n",
 		    "Id", "Type", "Name", "Avlblty");
@@ -182,6 +184,15 @@ main(int argc, char *argv[])
 	case MONITOR:
 		imsg_compose(ibuf, IMSG_CTL_NOTIFY, 0, 0, -1, NULL, 0);
 		break;
+	case LOG_VERBOSE:
+		verbose = 2;
+		/* FALLTHROUGH */
+	case LOG_BRIEF:
+		imsg_compose(ibuf, IMSG_CTL_LOG_VERBOSE, 0, 0, -1,
+		    &verbose, sizeof(verbose));
+		printf("logging request sent.\n");
+		done = 1;
+		break;
 	}
 
 	while (ibuf->w.queued)
@@ -204,6 +215,7 @@ main(int argc, char *argv[])
 			case SHOW_HOSTS:
 			case SHOW_RDRS:
 			case SHOW_RELAYS:
+			case SHOW_ROUTERS:
 				done = show_summary_msg(&imsg, res->action);
 				break;
 			case SHOW_SESSIONS:
@@ -221,6 +233,8 @@ main(int argc, char *argv[])
 				done = show_command_output(&imsg);
 				break;
 			case NONE:
+			case LOG_VERBOSE:
+			case LOG_BRIEF:
 				break;
 			case MONITOR:
 				done = monitor(&imsg);
@@ -232,7 +246,7 @@ main(int argc, char *argv[])
 	close(ctl_sock);
 	free(ibuf);
 
-	return (0);
+	return (error ? 1 : 0);
 }
 
 struct imsgname *
@@ -306,12 +320,14 @@ show_summary_msg(struct imsg *imsg, int type)
 	struct table		*table;
 	struct host		*host;
 	struct relay		*rlay;
+	struct router		*rt;
+	struct netroute		*nr;
 	struct ctl_stats	 stats[RELAY_MAXPROC];
 	char			 name[MAXHOSTNAMELEN];
 
 	switch (imsg->hdr.type) {
 	case IMSG_CTL_RDR:
-		if (type == SHOW_HOSTS || type == SHOW_RELAYS)
+		if (!(type == SHOW_SUM || type == SHOW_RDRS))
 			break;
 		rdr = imsg->data;
 		printf("%-4u\t%-8s\t%-24s\t%-7s\t%s\n",
@@ -319,7 +335,7 @@ show_summary_msg(struct imsg *imsg, int type)
 		    print_rdr_status(rdr->conf.flags));
 		break;
 	case IMSG_CTL_TABLE:
-		if (type == SHOW_RELAYS || type == SHOW_RDRS)
+		if (!(type == SHOW_SUM || type == SHOW_HOSTS))
 			break;
 		table = imsg->data;
 		printf("%-4u\t%-8s\t%-24s\t%-7s\t%s\n",
@@ -327,7 +343,7 @@ show_summary_msg(struct imsg *imsg, int type)
 		    print_table_status(table->up, table->conf.flags));
 		break;
 	case IMSG_CTL_HOST:
-		if (type == SHOW_RELAYS || type == SHOW_RDRS)
+		if (!(type == SHOW_SUM || type == SHOW_HOSTS))
 			break;
 		host = imsg->data;
 		if (host->conf.parentid)
@@ -350,7 +366,7 @@ show_summary_msg(struct imsg *imsg, int type)
 		}
 		break;
 	case IMSG_CTL_RELAY:
-		if (type == SHOW_HOSTS || type == SHOW_RDRS)
+		if (!(type == SHOW_SUM || type == SHOW_RELAYS))
 			break;
 		rlay = imsg->data;
 		printf("%-4u\t%-8s\t%-24s\t%-7s\t%s\n",
@@ -370,6 +386,28 @@ show_summary_msg(struct imsg *imsg, int type)
 		bcopy(imsg->data, &stats, sizeof(stats));
 		print_statistics(stats);
 		break;
+	case IMSG_CTL_ROUTER:
+		if (!(type == SHOW_SUM || type == SHOW_ROUTERS))
+			break;
+		rt = imsg->data;
+		printf("%-4u\t%-8s\t%-24s\t%-7s\t%s\n",
+		    rt->rt_conf.id, "router", rt->rt_conf.name, "",
+		    print_relay_status(rt->rt_conf.flags));
+		if (type != SHOW_ROUTERS)
+			break;
+		if (rt->rt_conf.rtable)
+			printf("\t%8s\trtable: %d\n", "", rt->rt_conf.rtable);
+		if (strlen(rt->rt_conf.label))
+			printf("\t%8s\trtlabel: %s\n", "", rt->rt_conf.label);
+		break;
+	case IMSG_CTL_NETROUTE:
+		if (type != SHOW_ROUTERS)
+			break;
+		nr = imsg->data;
+		(void)print_host(&nr->nr_conf.ss, name, sizeof(name));
+		printf("\t%8s\troute: %s/%d\n",
+		    "", name, nr->nr_conf.prefixlen);
+		break;
 	case IMSG_CTL_END:
 		return (1);
 	default:
@@ -382,7 +420,7 @@ show_summary_msg(struct imsg *imsg, int type)
 int
 show_session_msg(struct imsg *imsg)
 {
-	struct session		*con;
+	struct rsession		*con;
 	char			 a[128], b[128];
 	struct timeval		 tv_now;
 
@@ -424,6 +462,7 @@ show_command_output(struct imsg *imsg)
 		break;
 	case IMSG_CTL_FAIL:
 		printf("command failed\n");
+		error++;
 		break;
 	default:
 		errx(1, "wrong message in summary: %u", imsg->hdr.type);

@@ -1,4 +1,4 @@
-.\"	$OpenBSD: ti.4,v 1.31 2008/10/28 06:27:28 brad Exp $
+.\"	$OpenBSD: ti.4,v 1.38 2009/12/13 23:16:12 sthen Exp $
 .\"
 .\" Copyright (c) 1997, 1998, 1999
 .\"	Bill Paul <wpaul@ctr.columbia.edu>. All rights reserved.
@@ -32,7 +32,7 @@
 .\"
 .\"	$FreeBSD: src/share/man/man4/ti.4,v 1.11 2000/08/10 19:47:32 billf Exp $
 .\"
-.Dd $Mdocdate: October 28 2008 $
+.Dd $Mdocdate: December 13 2009 $
 .Dt TI 4
 .Os
 .Sh NAME
@@ -40,54 +40,49 @@
 .Nd Alteon Networks Tigon I and II Gigabit Ethernet device
 .Sh SYNOPSIS
 .Cd "ti* at pci?"
+.Cd "ti* at sbus?"
 .Sh DESCRIPTION
 The
 .Nm
-driver provides support for PCI Gigabit Ethernet adapters based on
-the Alteon Networks Tigon Gigabit Ethernet controller chip.
+driver provides support for Gigabit Ethernet adapters based on the
+Alteon Networks Tigon Gigabit Ethernet controller chip, including
+the following:
+.Pp
+.Bl -bullet -compact -offset indent
+.It
+3Com 3C985-SX Gigabit Ethernet (1000baseSX)
+.It
+3Com 3C985B-SX Gigabit Ethernet (1000baseSX)
+.It
+Alteon AceNIC V Gigabit Ethernet (1000baseSX)
+.It
+Alteon AceNIC V Gigabit Ethernet (1000baseT)
+.It
+Digital EtherWORKS 1000SX PCI Gigabit Ethernet (1000baseSX)
+.It
+Farallon PN9000SX Gigabit Ethernet (1000baseSX)
+.It
+Netgear GA620 Gigabit Ethernet (1000baseSX)
+.It
+Netgear GA620T Gigabit Ethernet (1000baseT)
+.It
+Silicon Graphics Gigabit Ethernet (1000baseSX)
+.It
+Silicon Graphics Gigabit Ethernet (1000baseT)
+.It
+Sun Vector Gigabit Ethernet (1000baseSX)
+.El
+.Pp
 The Tigon contains an embedded R4000 CPU, Gigabit MAC, dual DMA channels and
 a PCI interface unit.
 The Tigon II contains two R4000 CPUs and other refinements.
 Either chip can be used in either a 32-bit or 64-bit PCI slot.
 Communication with the chip is achieved via PCI shared memory and
 bus master DMA.
+SBus cards are also available and use a special bridge chip.
 The Tigon I and II support hardware multicast address filtering,
 VLAN tag insertion and stripping, and Jumbo frame sizes up to
 9000 bytes.
-Note that the Tigon I chipset is no longer in active production: all new
-adapters should come equipped with Tigon II chipsets.
-.Pp
-There are several PCI boards available from both Alteon and other
-vendors that use the Tigon chipset under OEM contract.
-The
-.Nm
-driver has been tested with the following Tigon-based adapters:
-.Pp
-.Bl -bullet -compact -offset indent
-.It
-The Alteon AceNIC V Gigabit Ethernet adapter (1000baseSX)
-.It
-The Alteon AceNIC V Gigabit Ethernet adapter (1000baseT)
-.It
-The 3Com 3C985-SX Gigabit Ethernet adapter (Tigon 1)
-.It
-The 3Com 3C985B-SX Gigabit Ethernet adapter (Tigon 2)
-.It
-The Netgear GA620 Gigabit Ethernet adapter (1000baseSX)
-.It
-The Netgear GA620T Gigabit Ethernet adapter (1000baseT)
-.El
-.Pp
-The following should also be supported but have not yet been tested:
-.Pp
-.Bl -bullet -compact -offset indent
-.It
-The Digital EtherWORKS 1000SX PCI Gigabit Adapter
-.It
-Silicon Graphics PCI Gigabit Ethernet adapter
-.It
-Farallon PN9000SX Gigabit Ethernet adapter
-.El
 .Pp
 While the Tigon chipset supports 10, 100 and 1000Mbps speeds, support for
 10 and 100Mbps speeds is only available on boards with the proper
@@ -160,9 +155,6 @@ when the device is attached:
 .It Pa /etc/firmware/tigon1
 .It Pa /etc/firmware/tigon2
 .El
-.Pp
-These firmware files are not free, and hence not included, because
-the vendor no longer exists to grant rights to the firmware files.
 .Sh DIAGNOSTICS
 .Bl -diag
 .It "ti%d: couldn't map memory"
@@ -203,6 +195,7 @@ the network connection (cable).
 .Xr intro 4 ,
 .Xr netintro 4 ,
 .Xr pci 4 ,
+.Xr sbus 4 ,
 .Xr hostname.if 5 ,
 .Xr ifconfig 8
 .Sh HISTORY
@@ -213,8 +206,13 @@ device driver first appeared in
 .Ox
 support first appeared in
 .Ox 2.6 .
+SBus support was added in
+.Ox 4.7 .
 .Sh AUTHORS
+.An -nosplit
 The
 .Nm
 driver was written by
 .An Bill Paul Aq wpaul@bsdi.com .
+SBus support was added by
+.An Mark Kettenis Aq kettenis@openbsd.org .

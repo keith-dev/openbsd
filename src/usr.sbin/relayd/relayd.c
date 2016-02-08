@@ -1,4 +1,4 @@
-/*	$OpenBSD: relayd.c,v 1.89 2009/06/05 23:39:51 pyr Exp $	*/
+/*	$OpenBSD: relayd.c,v 1.96 2010/02/17 14:39:30 jsg Exp $	*/
 
 /*
  * Copyright (c) 2007, 2008 Reyk Floeter <reyk@openbsd.org>
@@ -270,7 +270,9 @@ main(int argc, char *argv[])
 	imsg_init(&iev_pfe->ibuf, pipe_parent2pfe[0]);
 	imsg_init(&iev_hce->ibuf, pipe_parent2hce[0]);
 	iev_pfe->handler = main_dispatch_pfe;
+	iev_pfe->data = env;
 	iev_hce->handler = main_dispatch_hce;
+	iev_hce->data = env;
 
 	for (c = 0; c < env->sc_prefork_relay; c++) {
 		iev = &iev_relay[c];
@@ -295,8 +297,12 @@ main(int argc, char *argv[])
 	if (env->sc_flags & F_DEMOTE)
 		carp_demote_reset(env->sc_demote_group, 0);
 
+	init_routes(env);
+
 	event_dispatch();
 
+	main_shutdown(env);
+	/* NOTREACHED */
 	return (0);
 }
 
@@ -471,7 +477,7 @@ purge_config(struct relayd *env, u_int8_t what)
 	struct address		*virt;
 	struct protocol		*proto;
 	struct relay		*rlay;
-	struct session		*sess;
+	struct rsession		*sess;
 
 	if (what & PURGE_TABLES && env->sc_tables != NULL) {
 		while ((table = TAILQ_FIRST(env->sc_tables)) != NULL)
@@ -611,9 +617,13 @@ main_dispatch_pfe(int fd, short event, void *ptr)
 	struct imsg		 imsg;
 	ssize_t			 n;
 	struct ctl_demote	 demote;
+	struct ctl_netroute	 crt;
+	struct relayd		*env;
+	int			 verbose;
 
 	iev = ptr;
 	ibuf = &iev->ibuf;
+	env = (struct relayd *)iev->data;
 
 	if (event & EV_READ) {
 		if ((n = imsg_read(ibuf)) == -1)
@@ -646,11 +656,23 @@ main_dispatch_pfe(int fd, short event, void *ptr)
 			memcpy(&demote, imsg.data, sizeof(demote));
 			carp_demote_set(demote.group, demote.level);
 			break;
+		case IMSG_RTMSG:
+			if (imsg.hdr.len - IMSG_HEADER_SIZE !=
+			    sizeof(crt))
+				fatalx("main_dispatch_pfe: "
+				    "invalid size of rtmsg request");
+			memcpy(&crt, imsg.data, sizeof(crt));
+			pfe_route(env, &crt);
+			break;
 		case IMSG_CTL_RELOAD:
 			/*
 			 * so far we only get here if no L7 (relay) is done.
 			 */
 			reconfigure();
+			break;
+		case IMSG_CTL_LOG_VERBOSE:
+			memcpy(&verbose, imsg.data, sizeof(verbose));
+			log_verbose(verbose);
 			break;
 		default:
 			log_debug("main_dispatch_pfe: unexpected imsg %d",
@@ -836,16 +858,27 @@ relay_find(struct relayd *env, objid_t id)
 	return (NULL);
 }
 
-struct session *
+struct rsession *
 session_find(struct relayd *env, objid_t id)
 {
 	struct relay		*rlay;
-	struct session		*con;
+	struct rsession		*con;
 
 	TAILQ_FOREACH(rlay, env->sc_relays, rl_entry)
 		SPLAY_FOREACH(con, session_tree, &rlay->rl_sessions)
 			if (con->se_id == id)
 				return (con);
+	return (NULL);
+}
+
+struct netroute *
+route_find(struct relayd *env, objid_t id)
+{
+	struct netroute	*nr;
+
+	TAILQ_FOREACH(nr, env->sc_routes, nr_route)
+		if (nr->nr_conf.id == id)
+			return (nr);
 	return (NULL);
 }
 
@@ -923,6 +956,18 @@ relay_findbyname(struct relayd *env, const char *name)
 	return (NULL);
 }
 
+struct relay *
+relay_findbyaddr(struct relayd *env, struct relay_config *rc)
+{
+	struct relay	*rlay;
+
+	TAILQ_FOREACH(rlay, env->sc_relays, rl_entry)
+		if (bcmp(&rlay->rl_conf.ss, &rc->ss, sizeof(rc->ss)) == 0 &&
+		    rlay->rl_conf.port == rc->port)
+			return (rlay);
+	return (NULL);
+}
+
 void
 event_again(struct event *ev, int fd, short event,
     void (*fn)(int, short, void *),
@@ -941,6 +986,7 @@ event_again(struct event *ev, int fd, short event,
 	if (timercmp(&tv_next, &tv, >))
 		bcopy(&tv_next, &tv, sizeof(tv));
 
+	event_del(ev);
 	event_set(ev, fd, event, fn, arg);
 	event_add(ev, &tv);
 }
@@ -1094,6 +1140,7 @@ protonode_header(enum direction dir, struct protocol *proto,
 	}
 	pn->key = strdup(pk->key);
 	if (pn->key == NULL) {
+		free(pn);
 		log_warn("out of memory");
 		return (NULL);
 	}

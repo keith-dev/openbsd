@@ -1,4 +1,4 @@
-/* 	$OpenBSD: isp_openbsd.c,v 1.38 2009/07/01 20:55:57 kettenis Exp $ */
+/* 	$OpenBSD: isp_openbsd.c,v 1.41 2010/01/04 02:23:10 krw Exp $ */
 /*
  * Platform (OpenBSD) dependent common attachment code for QLogic adapters.
  *
@@ -113,6 +113,8 @@ isp_attach(struct ispsoftc *isp)
 	if (IS_FC(isp)) {
 		lptr->adapter_buswidth = MAX_FC_TARG;
 		lptr->adapter_target = MAX_FC_TARG; /* i.e. ignore. */
+		lptr->node_wwn = ISP_NODEWWN(isp);
+		lptr->port_wwn = ISP_PORTWWN(isp);
 	} else {
 		sdparam *sdp = isp->isp_param;
 		lptr->adapter_buswidth = MAX_TARGETS;
@@ -299,20 +301,24 @@ ispcmd(XS_T *xs)
 
 	timeout_set(&xs->stimeout, isp_wdog, xs);
 
+	ISP_LOCK(isp);
+
 	if (XS_LUN(xs) >= isp->isp_maxluns) {
 		xs->error = XS_SELTIMEOUT;
+		scsi_done(xs);
+		ISP_UNLOCK(isp);
 		return (COMPLETE);
 	}
 
-	ISP_LOCK(isp);
 	if (isp->isp_state < ISP_RUNSTATE) {
 		ISP_DISABLE_INTS(isp);
 		isp_init(isp);
 		if (isp->isp_state != ISP_INITSTATE) {
 			ISP_ENABLE_INTS(isp);
-			ISP_UNLOCK(isp);
 			XS_SETERR(xs, HBA_BOTCH);
-			return (CMD_COMPLETE);
+			scsi_done(xs);
+			ISP_UNLOCK(isp);
+			return (COMPLETE);
 		}
 		isp->isp_state = ISP_RUNSTATE;
 		ISP_ENABLE_INTS(isp);
@@ -324,7 +330,7 @@ ispcmd(XS_T *xs)
 	if (isp->isp_osinfo.blocked) {
 		if (xs->flags & SCSI_POLL) {
 			ISP_UNLOCK(isp);
-			return (TRY_AGAIN_LATER);
+			return (NO_CCB);
 		}
 		if (isp->isp_osinfo.blocked == 2) {
 			isp_restart(isp);
@@ -397,12 +403,12 @@ isp_polled_cmd(struct ispsoftc *isp, XS_T *xs)
 		break;
 	case CMD_RQLATER:
 	case CMD_EAGAIN:
-		result = TRY_AGAIN_LATER;
+		result = NO_CCB;
 		break;
 	case CMD_COMPLETE:
+		scsi_done(xs);
 		result = COMPLETE;
 		break;
-		
 	}
 
 	if (result != SUCCESSFULLY_QUEUED) {
@@ -440,8 +446,8 @@ isp_polled_cmd(struct ispsoftc *isp, XS_T *xs)
 			XS_SETERR(xs, HBA_BOTCH);
 		}
 	}
-	result = COMPLETE;
-	return (result);
+
+	return (COMPLETE);
 }
 
 void

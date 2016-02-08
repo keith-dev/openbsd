@@ -1,4 +1,4 @@
-/*	$OpenBSD: if.c,v 1.15 2009/06/26 06:39:47 jasper Exp $ */
+/*	$OpenBSD: if.c,v 1.17 2009/11/23 01:51:41 canacar Exp $ */
 /*
  * Copyright (c) 2004 Markus Friedl <markus@openbsd.org>
  *
@@ -33,24 +33,13 @@
 
 static  enum state { BOOT, TIME, RUN } state = TIME;
 
-struct ifcount {
-	u_int64_t	ifc_ib;			/* input bytes */
-	u_int64_t	ifc_ip;			/* input packets */
-	u_int64_t	ifc_ie;			/* input errors */
-	u_int64_t	ifc_ob;			/* output bytes */
-	u_int64_t	ifc_op;			/* output packets */
-	u_int64_t	ifc_oe;			/* output errors */
-	u_int64_t	ifc_co;			/* collisions */
-	int		ifc_flags;		/* up / down */
-	int		ifc_state;		/* link state */
-} sum;
-
 struct ifstat {
 	char		ifs_name[IFNAMSIZ];	/* interface name */
 	char		ifs_description[IFDESCRSIZE];
 	struct ifcount	ifs_cur;
 	struct ifcount	ifs_old;
 	struct ifcount	ifs_now;
+	char		ifs_flag;
 } *ifstats;
 
 static	int nifs = 0;
@@ -61,7 +50,7 @@ int read_if(void);
 int select_if(void);
 int if_keyboard_callback(int);
 
-static void fetchifstat(void);
+void fetchifstat(void);
 static void showifstat(struct ifstat *);
 static void showtotal(void);
 
@@ -190,7 +179,7 @@ print_if(void)
 }
 
 
-static void
+void
 fetchifstat(void)
 {
 	struct ifstat *newstats, *ifs;
@@ -199,7 +188,7 @@ fetchifstat(void)
 	struct sockaddr_dl *sdl;
 	char *buf, *next, *lim;
 	static int s = -1;
-	int mib[6];
+	int mib[6], i;
 	size_t need;
 
 	mib[0] = CTL_NET;
@@ -282,7 +271,18 @@ fetchifstat(void)
 		UPDATE(ifc_co, ifm_data.ifi_collisions);
 		ifs->ifs_cur.ifc_flags = ifm.ifm_flags;
 		ifs->ifs_cur.ifc_state = ifm.ifm_data.ifi_link_state;
+		ifs->ifs_flag++;
 	}
+
+	/* remove unreferenced interfaces */
+	for (i = 0; i < nifs; i++) {
+		ifs = &ifstats[i];
+		if (ifs->ifs_flag)
+			ifs->ifs_flag = 0;
+		else
+			ifs->ifs_name[0] = '\0';
+	}
+
 	free(buf);
 }
 

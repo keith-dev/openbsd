@@ -1,5 +1,5 @@
 # ex:ts=8 sw=4:
-# $OpenBSD: Ustar.pm,v 1.51 2009/04/19 14:58:32 espie Exp $
+# $OpenBSD: Ustar.pm,v 1.54 2009/12/17 11:57:02 espie Exp $
 #
 # Copyright (c) 2002-2007 Marc Espie <espie@openbsd.org>
 #
@@ -19,6 +19,7 @@
 
 use strict;
 use warnings;
+
 package OpenBSD::Ustar;
 
 use constant {
@@ -526,7 +527,7 @@ sub create
 	my $self = shift;
 	$self->make_basedir($self->name);
 	system(OpenBSD::Paths->mknod, 
-	    '-m', $self->{mode}, $self->{destdir}.$self->name, 
+	    '-m', $self->{mode}, '--', $self->{destdir}.$self->name, 
 	    $self->devicetype, $self->{major}, $self->{minor});
 	$self->set_modes;
 }
@@ -628,7 +629,7 @@ sub new
 
 sub create
 {
-	my $self = shift;
+	my ($self, $callback) = @_;
 	$self->make_basedir($self->name);
 	my $buffer;
 	my $out = OpenBSD::CompactWriter->new($self->{destdir}.$self->name);
@@ -653,6 +654,9 @@ sub create
 		}
 			
 		$toread -= $actual;
+		if ($toread > 0 && defined $callback) {
+			&$callback($self->{size} - $toread);
+		}
 	}
 	$out->close or die "Error closing $self->{destdir}", $self->name, 
 	    ": $!";

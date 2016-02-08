@@ -1,4 +1,4 @@
-#	$OpenBSD: install.sub,v 1.592 2009/07/09 23:45:20 deraadt Exp $
+#	$OpenBSD: install.sub,v 1.600 2010/03/09 23:34:09 deraadt Exp $
 #	$NetBSD: install.sub,v 1.5.2.8 1996/09/02 23:25:02 pk Exp $
 #
 # Copyright (c) 1997-2009 Todd Miller, Theo de Raadt, Ken Westerback
@@ -884,7 +884,7 @@ enable_network() {
 
 	# Set the address for the loopback interface. Bringing the
 	# interface up, automatically invokes the IPv6 address ::1.
-	ifconfig lo0 inet 127.0.0.1
+	ifconfig lo0 inet 127.0.0.1/8
 
 	# configure all of the non-loopback interfaces which we know about.
 	# refer to hostname.if(5)
@@ -972,6 +972,7 @@ enable_network() {
 					cmd="$cmd $bcaddr"
 					;;
 				*)	cmd="$cmd $mask $bcaddr"
+					;;
 				esac
 				cmd="$cmd $ext1 $ext2$rtcmd" rtcmd=
 				;;
@@ -1016,6 +1017,10 @@ install_files() {
 	for _f in $THESETS; do
 		isin $_f $_files || continue;
 		_sets=$(addel $_f $_sets)
+		if [[ -z $DISPLAY && ! -d /mnt/etc/X11 ]]; then
+			# No displays and X isn't installed ==> skip X sets
+			isin ${_f%${VERSION}.tgz} xbase xetc xshare xfont xserv && continue
+		fi
 		isin $_f $DEFAULTSETS "site$VERSION-$(hostname -s).tgz" && \
 			_get_sets=$(addel $_f $_get_sets)
 	done
@@ -1218,6 +1223,7 @@ install_url() {
 			break
 			;;
 		*)	echo "'$resp' is not a valid hostname."
+			;;
 		esac
 	done
 
@@ -1300,7 +1306,7 @@ install_mounted_fs() {
 		echo "The directory '$resp' does not exist."
 	done
 
-	install_files "file://$_dir" "$(ls -l $_dir)"
+	install_files "file://$_dir" "$(ls $_dir/)"
 }
 
 install_cdrom() {
@@ -1416,19 +1422,18 @@ set_timezone() {
 	[[ $_zonefile = /var/tzlist && -z $TZ ]] && return
 
 	while :; do
-		_zonepath=""
-
 		ask "What timezone are you in? ('?' for list)" "$TZ"
-
-		if [[ $resp = "?" ]]; then
-			grep -v /. $_zonefile | showcols
-			continue
-		fi
-		_zonepath=$_zonepath$resp
+		_zonepath=${resp%%*(/)}
+		case $_zonepath in
+		"")	continue ;;
+		"?")	grep -v /. $_zonefile | showcols
+			continue ;;
+		esac
 
 		while isin $_zonepath/ $(cat $_zonefile); do
 			ask "What sub-timezone of '$_zonepath' are you in? ('?' for list)"
 			_zsed=$(echo $_zonepath/ | sed 's,/,\\/,g')
+			resp=${resp%%*(/)}
 			case $resp in
 			"")	;;
 			"?")	sed -n "/^$_zsed/{s/$_zsed//;/\/./!p;}" $_zonefile | showcols ;;
@@ -1865,8 +1870,8 @@ dmesg | sed -ne '/^OpenBSD /h;/^OpenBSD /!H;${g;p;}' >/var/run/dmesg.boot
 # Are we in a real release, or a snapshot?  If this is a snapshot
 # install media, default us to a snapshot directory.
 FTPSETDIR=$SETDIR
-CURRENT=$(scan_dmesg "/^OpenBSD $VNAME\([^ ]*\).*$/s//\1/p")
-[[ -n $CURRENT ]] && FTPSETDIR=snapshots/$ARCH
+set -- $(scan_dmesg "/^OpenBSD $VNAME\([^ ]*\).*$/s//\1/p")
+[[ $1 == -!(stable) ]] && FTPSETDIR=snapshots/$ARCH
 
 # Scan /var/run/dmesg.boot for interesting devices.
 MTDEVS=$(scan_dmesg "${MDMTDEVS:-/^[cms]t[0-9][0-9]* /s/ .*//p}")
@@ -1890,10 +1895,6 @@ THESETS="bsd bsd.rd bsd.mp $MDSETS"
 for _set in base etc misc comp man game xbase xetc xshare xfont xserv site ; do
 	[[ $MODE == upgrade && ( $_set == etc || $_set == xetc ) ]] && continue
 	THESETS="$THESETS ${_set}${VERSION}.tgz"
-	if [[ -z $DISPLAY ]]; then
-		# If we have no displays, skip the X sets
-		isin $_set xbase xetc xshare xfont xserv site && continue
-	fi
 	isin $_set site && continue
 	DEFAULTSETS="$DEFAULTSETS ${_set}${VERSION}.tgz"
 done
@@ -1912,8 +1913,7 @@ export EDITOR COLUMNS
 
 # umount all filesystems, just in case we are re-running install or upgrade.
 cd /
-[[ -f /etc/fstab ]] && umount -af 1>/dev/null 2>&1
-umount /mnt 1>/dev/null 2>&1
+umount -af 1>/dev/null 2>&1
 
 cat <<__EOT
 At any prompt except password prompts you can escape to a shell by
@@ -1952,10 +1952,11 @@ if [[ $MODE == install ]]; then
 fi
 
 # Get ROOTDISK, ROOTDEV and SWAPDEV.
-[[ -n $(get_dkdevs) ]] || { echo "No disks found." ; exit ; }
-
-ask_which "disk" "is the root disk" '$(get_dkdevs)'
-[[ $resp == done ]] && exit
+while :; do
+	ask_which "disk" "is the root disk" '$(get_dkdevs | sed s,^$,none, )'
+	[[ $resp == done ]] && exit
+	[[ $resp != none ]] && break
+done
 makedev $resp || exit
 
 ROOTDISK=$resp

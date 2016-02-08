@@ -1,4 +1,4 @@
-/*	$OpenBSD: hack.end.c,v 1.9 2003/07/06 02:07:45 avsm Exp $	*/
+/*	$OpenBSD: hack.end.c,v 1.11 2009/12/10 23:53:07 beck Exp $	*/
 
 /*
  * Copyright (c) 1985, Stichting Centrum voor Wiskunde en Informatica,
@@ -60,10 +60,6 @@
  * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
-
-#ifndef lint
-static const char rcsid[] = "$OpenBSD: hack.end.c,v 1.9 2003/07/06 02:07:45 avsm Exp $";
-#endif /* not lint */
 
 #include <ctype.h>
 #include <stdio.h>
@@ -352,7 +348,7 @@ topten()
 	tprev = 0;
 	/* rank0: -1 undefined, 0 not_on_list, n n_th on list */
 	for(rank = 1; ; ) {
-	  if(fscanf(rfile, "%6s %d %d %d %d %d %ld %c%c %[^,],%[^\n]",
+	  if(fscanf(rfile, "%6s %d %d %d %d %d %ld %c%c %8[^,],%40[^\n]",
 		t1->date, &t1->uid,
 		&t1->level, &t1->maxlvl,
 		&t1->hp, &t1->maxhp, &t1->points,
@@ -671,7 +667,7 @@ prscore(int argc, char **argv)
 
 	t1 = tt_head = newttentry();
 	for(rank = 1; ; rank++) {
-	  if(fscanf(rfile, "%6s %d %d %d %d %d %ld %c%c %[^,],%[^\n]",
+	  if(fscanf(rfile, "%6s %d %d %d %d %d %ld %c%c %8[^,],%40[^\n]",
 		t1->date, &t1->uid,
 		&t1->level, &t1->maxlvl,
 		&t1->hp, &t1->maxhp, &t1->points,

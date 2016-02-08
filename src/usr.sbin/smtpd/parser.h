@@ -1,4 +1,4 @@
-/*	$OpenBSD: parser.h,v 1.7 2009/02/24 12:07:47 gilles Exp $	*/
+/*	$OpenBSD: parser.h,v 1.10 2010/01/10 16:42:35 gilles Exp $	*/
 
 /*
  * Copyright (c) 2006 Pierre-Yves Ritschard <pyr@openbsd.org>
@@ -22,6 +22,9 @@ enum actions {
 	RELOAD,
 	MONITOR,
 	SCHEDULE,
+	REMOVE,
+	LOG_VERBOSE,
+	LOG_BRIEF,
 	SHOW_QUEUE,
 	SHOW_RUNQUEUE,
 	SHOW_STATS,
@@ -40,5 +43,5 @@ struct parse_result {
 };
 
 struct parse_result	*parse(int, char *[]);
-const struct token      *match_token(const char *, const struct token []);
-void                     show_valid_args(const struct token []);
+const struct token      *match_token(const char *, const struct token *);
+void                     show_valid_args(const struct token *);

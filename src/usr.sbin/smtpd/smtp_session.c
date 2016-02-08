@@ -1,4 +1,4 @@
-/*	$OpenBSD: smtp_session.c,v 1.107 2009/06/06 04:14:21 pyr Exp $	*/
+/*	$OpenBSD: smtp_session.c,v 1.128 2009/12/31 15:37:55 gilles Exp $	*/
 
 /*
  * Copyright (c) 2008 Gilles Chehade <gilles@openbsd.org>
@@ -27,19 +27,18 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 
-#include <ssl/ssl.h>
+#include <openssl/ssl.h>
 
 #include <ctype.h>
 #include <errno.h>
 #include <event.h>
 #include <pwd.h>
 #include <regex.h>
+#include <resolv.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-
-#include <keynote.h>
 
 #include "smtpd.h"
 
@@ -66,15 +65,16 @@ void		 session_rfc4954_auth_plain(struct session *, char *);
 void		 session_rfc4954_auth_login(struct session *, char *);
 
 void		 session_read(struct bufferevent *, void *);
-void		 session_read_data(struct session *, char *, size_t);
+void		 session_read_data(struct session *, char *);
 void		 session_write(struct bufferevent *, void *);
 void		 session_error(struct bufferevent *, short event, void *);
-void		 session_command(struct session *, char *, size_t);
-char		*session_readline(struct session *, size_t *);
+void		 session_command(struct session *, char *);
+char		*session_readline(struct session *);
 void		 session_respond_delayed(int, short, void *);
 int		 session_set_path(struct path *, char *);
 void		 session_imsg(struct session *, enum smtp_proc_type,
 		     enum imsg_type, u_int32_t, pid_t, int, void *, u_int16_t);
+char		*evbuffer_readln_crlf(struct evbuffer *);
 
 struct session_cmd {
 	char	 *name;
@@ -154,6 +154,11 @@ session_rfc4954_auth_handler(struct session *s, char *args)
 		return 1;
 	}
 
+	if (s->s_state != S_HELO) {
+		session_respond(s, "503 Session already in progress");
+		return 1;
+	}
+
 	if (args == NULL) {
 		session_respond(s, "501 No parameters given");
 		return 1;
@@ -195,7 +200,7 @@ session_rfc4954_auth_plain(struct session *s, char *arg)
 
 	case S_AUTH_INIT:
 		/* String is not NUL terminated, leave room. */
-		if ((len = kn_decode_base64(arg, buf, sizeof(buf) - 1)) == -1)
+		if ((len = __b64_pton(arg, (unsigned char *)buf, sizeof(buf) - 1)) == -1)
 			goto abort;
 		/* buf is a byte string, NUL terminate. */
 		buf[len] = '\0';
@@ -248,7 +253,7 @@ session_rfc4954_auth_login(struct session *s, char *arg)
 
 	case S_AUTH_USERNAME:
 		bzero(a->user, sizeof(a->user));
-		if (kn_decode_base64(arg, a->user, sizeof(a->user) - 1) == -1)
+		if (__b64_pton(arg, (unsigned char *)a->user, sizeof(a->user) - 1) == -1)
 			goto abort;
 
 		s->s_state = S_AUTH_PASSWORD;
@@ -257,7 +262,7 @@ session_rfc4954_auth_login(struct session *s, char *arg)
 
 	case S_AUTH_PASSWORD:
 		bzero(a->pass, sizeof(a->pass));
-		if (kn_decode_base64(arg, a->pass, sizeof(a->pass) - 1) == -1)
+		if (__b64_pton(arg, (unsigned char *)a->pass, sizeof(a->pass) - 1) == -1)
 			goto abort;
 
 		s->s_state = S_AUTH_FINALIZE;
@@ -288,23 +293,31 @@ session_rfc1652_mail_handler(struct session *s, char *args)
 		return 1;
 	}
 
-	body = strrchr(args, ' ');
-	if (body != NULL) {
+	for (body = strrchr(args, ' '); body != NULL;
+		body = strrchr(args, ' ')) {
 		*body++ = '\0';
 
-		if (strcasecmp("body=7bit", body) == 0) {
-			s->s_flags &= ~F_8BITMIME;
+		if (strncasecmp(body, "AUTH=", 5) == 0) {
+			log_debug("AUTH in MAIL FROM command, skipping");
+			continue;		
 		}
 
-		else if (strcasecmp("body=8bitmime", body) != 0) {
-			session_respond(s, "503 Invalid BODY");
-			return 1;
-		}
+		if (strncasecmp(body, "BODY=", 5) == 0) {
+			log_debug("BODY in MAIL FROM command");
 
-		return session_rfc5321_mail_handler(s, args);
+			if (strncasecmp("body=7bit", body, 9) == 0) {
+				s->s_flags &= ~F_8BITMIME;
+				continue;
+			}
+
+			else if (strncasecmp("body=8bitmime", body, 13) != 0) {
+				session_respond(s, "503 Invalid BODY");
+				return 1;
+			}
+		}
 	}
-
-	return 0;
+	
+	return session_rfc5321_mail_handler(s, args);
 }
 
 int
@@ -512,18 +525,21 @@ session_rfc5321_help_handler(struct session *s, char *args)
 }
 
 void
-session_command(struct session *s, char *cmd, size_t nr)
+session_command(struct session *s, char *cmd)
 {
 	char		*ep, *args;
 	unsigned int	 i;
 
-	if (nr > SMTP_CMDLINE_MAX) {
-		session_respond(s, "500 Line too long");
-		return;
-	}
-
-	if ((ep = strchr(cmd, ':')) == NULL)
+	/*
+	 * unlike other commands, "mail from" and "rcpt to" contain a
+	 * space in the command name.
+	 */
+	if (strncasecmp("mail from:", cmd, 10) == 0 ||
+	    strncasecmp("rcpt to:", cmd, 8) == 0)
+		ep = strchr(cmd, ':');
+	else
 		ep = strchr(cmd, ' ');
+
 	if (ep != NULL) {
 		*ep = '\0';
 		args = ++ep;
@@ -646,7 +662,8 @@ session_pickup(struct session *s, struct submit_status *ss)
 				s->s_state = S_MAIL;
 			else
 				s->s_state = S_RCPT;
-			session_respond(s, "%d Recipient rejected", ss->code);
+			session_respond(s, "%d Recipient rejected: %s@%s", ss->code,
+			    s->s_msg.session_rcpt.user, s->s_msg.session_rcpt.domain);
 			return;
 		}
 
@@ -687,10 +704,11 @@ session_pickup(struct session *s, struct submit_status *ss)
 	case S_DONE:
 		session_respond(s, "250 %s Message accepted for delivery",
 		    s->s_msg.message_id);
-		log_info("%s: from=<%s@%s>, size=%ld, nrcpts=%zd, proto=%s, "
+		log_info("%s: from=<%s%s%s>, size=%ld, nrcpts=%zd, proto=%s, "
 		    "relay=%s [%s]",
 		    s->s_msg.message_id,
 		    s->s_msg.sender.user,
+		    s->s_msg.sender.user[0] == '\0' ? "" : "@",
 		    s->s_msg.sender.domain,
 		    s->s_datalen,
 		    s->rcptcount,
@@ -747,10 +765,9 @@ session_read(struct bufferevent *bev, void *p)
 {
 	struct session	*s = p;
 	char		*line;
-	size_t		 nr;
 
 	for (;;) {
-		line = session_readline(s, &nr);
+		line = session_readline(s);
 		if (line == NULL)
 			return;
 
@@ -774,11 +791,11 @@ session_read(struct bufferevent *bev, void *p)
 		case S_RCPT:
 			if (s->s_msg.status & S_MESSAGE_TEMPFAILURE)
 				goto tempfail;
-			session_command(s, line, nr);
+			session_command(s, line);
 			break;
 
 		case S_DATACONTENT:
-			session_read_data(s, line, nr);
+			session_read_data(s, line);
 			break;
 
 		default:
@@ -797,7 +814,7 @@ tempfail:
 }
 
 void
-session_read_data(struct session *s, char *line, size_t nread)
+session_read_data(struct session *s, char *line)
 {
 	size_t len;
 	size_t i;
@@ -828,11 +845,6 @@ session_read_data(struct session *s, char *line, size_t nread)
 	if (s->s_msg.status & (S_MESSAGE_PERMFAILURE|S_MESSAGE_TEMPFAILURE))
 		return;
 
-	if (nread > SMTP_TEXTLINE_MAX) {
-		s->s_msg.status |= S_MESSAGE_PERMFAILURE;
-		return;
-	}
-
 	/* "If the first character is a period and there are other characters
 	 *  on the line, the first character is deleted." [4.5.2]
 	 */
@@ -841,8 +853,7 @@ session_read_data(struct session *s, char *line, size_t nread)
 
 	len = strlen(line);
 
-	if (fwrite(line, len, 1, s->datafp) != 1 ||
-	    fwrite("\n", 1, 1, s->datafp) != 1) {
+	if (fprintf(s->datafp, "%s\n", line) != (int)len + 1) {
 		s->s_msg.status |= S_MESSAGE_TEMPFAILURE;
 		return;
 	}
@@ -850,11 +861,7 @@ session_read_data(struct session *s, char *line, size_t nread)
 	if (! (s->s_flags & F_8BITMIME)) {
 		for (i = 0; i < len; ++i)
 			if (line[i] & 0x80)
-				break;
-		if (i != len) {
-			s->s_msg.status |= S_MESSAGE_PERMFAILURE;
-			return;
-		}
+				line[i] = line[i] & 0x7f;
 	}
 }
 
@@ -945,6 +952,8 @@ session_error(struct bufferevent *bev, short event, void *p)
 void
 session_destroy(struct session *s)
 {
+	size_t resume;
+
 	log_debug("session_destroy: killing client: %p", s);
 
 	if (s->s_flags & F_WRITEONLY)
@@ -966,24 +975,13 @@ session_destroy(struct session *s)
 	if (s->s_fd != -1 && close(s->s_fd) == -1)
 		fatal("session_destroy: close");
 
-	switch (smtpd_process) {
-	case PROC_MTA:
-		s->s_env->stats->mta.sessions_active--;
-		break;
-	case PROC_SMTP:
-		s->s_env->stats->smtp.sessions_active--;
-		if (s->s_env->stats->smtp.sessions_active < s->s_env->sc_maxconn &&
-		    !(s->s_msg.flags & F_MESSAGE_ENQUEUED)) {
-			/*
-			 * if our session_destroy occurs because of a configuration
-			 * reload, our listener no longer exist and s->s_l is NULL.
-			 */
-			if (s->s_l != NULL)
-				event_add(&s->s_l->ev, NULL);
-		}
-		break;
-	default:
-		fatalx("session_destroy: cannot be called from this process");
+	s->s_env->stats->smtp.sessions_active--;
+
+	/* resume when session count decreases to 95% */
+	resume = s->s_env->sc_maxconn * 95 / 100;
+	if (s->s_env->stats->smtp.sessions_active == resume) {
+		log_warnx("re-enabling incoming connections");
+		smtp_resume(s->s_env);
 	}
 
 	SPLAY_REMOVE(sessiontree, &s->s_env->sc_sessions, s);
@@ -992,27 +990,35 @@ session_destroy(struct session *s)
 }
 
 char *
-session_readline(struct session *s, size_t *nr)
+session_readline(struct session *s)
 {
 	char	*line, *line2;
+	size_t	 nr;
 
-	*nr = EVBUFFER_LENGTH(s->s_bev->input);
-	line = evbuffer_readline(s->s_bev->input);
+	nr = EVBUFFER_LENGTH(s->s_bev->input);
+	line = evbuffer_readln_crlf(s->s_bev->input);
 	if (line == NULL) {
-		if (EVBUFFER_LENGTH(s->s_bev->input) > SMTP_ANYLINE_MAX) {
+		if (EVBUFFER_LENGTH(s->s_bev->input) > SMTP_LINE_MAX) {
 			session_respond(s, "500 Line too long");
 			s->s_env->stats->smtp.linetoolong++;
 			s->s_flags |= F_QUIT;
 		}
 		return NULL;
 	}
-	*nr -= EVBUFFER_LENGTH(s->s_bev->input);
+	nr -= EVBUFFER_LENGTH(s->s_bev->input);
 
 	if (s->s_flags & F_WRITEONLY)
 		fatalx("session_readline: corrupt session");
+
+	if (nr > SMTP_LINE_MAX) {
+		session_respond(s, "500 Line too long");
+		s->s_env->stats->smtp.linetoolong++;
+		s->s_flags |= F_QUIT;
+		return NULL;
+	}
 	
 	if ((s->s_state != S_DATACONTENT || strcmp(line, ".") == 0) &&
-	    (line2 = evbuffer_readline(s->s_bev->input)) != NULL) {
+	    (line2 = evbuffer_readln_crlf(s->s_bev->input)) != NULL) {
 		session_respond(s, "500 Pipelining unsupported");
 		s->s_env->stats->smtp.toofast++;
 		s->s_flags |= F_QUIT;
@@ -1067,12 +1073,23 @@ session_respond(struct session *s, char *fmt, ...)
 		fatal("session_respond: evbuffer_add_vprintf failed");
 	va_end(ap);
 
-	if (smtpd_process == PROC_MTA) {
-		bufferevent_enable(s->s_bev, EV_WRITE);
-		return;
-	}
-
 	bufferevent_disable(s->s_bev, EV_READ);
+
+	/*
+	 * Log failures.  Might be annoying in the long term, but it is a good
+	 * development aid for now.
+	 */
+	switch (EVBUFFER_DATA(EVBUFFER_OUTPUT(s->s_bev))[n]) {
+	case '5':
+	case '4':
+		log_info("%s: from=<%s@%s>, relay=%s [%s], stat=LocalError (%.*s)",
+		    s->s_msg.message_id[0] ? s->s_msg.message_id : "(none)",
+		    s->s_msg.sender.user, s->s_msg.sender.domain,
+		    s->s_hostname, ss_to_text(&s->s_ss),
+		    (int)EVBUFFER_LENGTH(EVBUFFER_OUTPUT(s->s_bev)) - n - 2,
+		    EVBUFFER_DATA(EVBUFFER_OUTPUT(s->s_bev)));
+		break;
+	}
 
 	/* Detect multi-line response. */
 	if (EVBUFFER_LENGTH(EVBUFFER_OUTPUT(s->s_bev)) - n < 4)
@@ -1144,5 +1161,38 @@ session_imsg(struct session *s, enum smtp_proc_type proc, enum imsg_type type,
 	imsg_compose_event(s->s_env->sc_ievs[proc], type, peerid, pid, fd, data,
 	    datalen);
 }
+
+char *
+evbuffer_readln_crlf(struct evbuffer *buffer)
+{
+        u_char *data = EVBUFFER_DATA(buffer);
+        size_t len = EVBUFFER_LENGTH(buffer);
+        char *line;
+        unsigned int i, j;
+
+        for (i = 0; i < len; ++i) {
+                if (data[i] == '\n')
+                        break;
+        }
+
+        if (i == len)
+                return NULL;
+
+        j = i;
+        if (i != 0 && data[i - 1] == '\r')
+                --j;
+
+        line = calloc(j + 1, 1);
+        if (line == NULL)
+                fatal("calloc");
+
+        if (j != 0)
+                memcpy(line, data, j);
+
+	evbuffer_drain(buffer, i + 1);
+
+        return (line);
+}
+
 
 SPLAY_GENERATE(sessiontree, session, s_nodes, session_cmp);

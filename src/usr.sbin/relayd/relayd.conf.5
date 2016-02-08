@@ -1,4 +1,4 @@
-.\"	$OpenBSD: relayd.conf.5,v 1.107 2009/06/02 20:22:30 jmc Exp $
+.\"	$OpenBSD: relayd.conf.5,v 1.112 2009/09/01 13:43:36 reyk Exp $
 .\"
 .\" Copyright (c) 2006, 2007 Reyk Floeter <reyk@openbsd.org>
 .\" Copyright (c) 2006, 2007 Pierre-Yves Ritschard <pyr@openbsd.org>
@@ -15,7 +15,7 @@
 .\" ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
 .\" OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 .\"
-.Dd $Mdocdate: June 2 2009 $
+.Dd $Mdocdate: September 1 2009 $
 .Dt RELAYD.CONF 5
 .Os
 .Sh NAME
@@ -43,24 +43,32 @@ Table definitions describe a list of hosts,
 in a similar fashion to
 .Xr pf 4
 tables.
-They are used for relay and redirection target selection with the
-described options and health checking on the host they contain.
+They are used for relay, redirection, and router target selection with
+the described options and health checking on the host they contain.
 .It Sy Redirections
 Redirections are translated to
 .Xr pf 4
-rdr rules for stateful forwarding to a target host from a
+rdr-to rules for stateful forwarding to a target host from a
 health-checked table on layer 3.
 .It Sy Relays
 Relays allow application layer load balancing, SSL acceleration, and
 general purpose TCP proxying on layer 7.
 .It Sy Protocols
 Protocols are predefined protocol handlers and settings for relays.
+.It Sy Routers
+Routers are used to insert routes with health-checked gateways for
+(WAN) link balancing.
 .El
 .Pp
 Within the sections,
 a host
 .Ar address
-can be specified by IPv4 address, IPv6 address, or DNS hostname.
+can be specified by IPv4 address, IPv6 address, interface name,
+or DNS hostname.
+If the address is an interface name,
+.Xr relayd 8
+will look up the first IPv4 address and any other IPv4 and IPv6
+addresses of the specified network interface.
 A
 .Ar port
 can be specified by number or name.
@@ -179,13 +187,8 @@ Each table must contain at least one host;
 multiple hosts are separated by newline, comma, or whitespace.
 Host entries may be defined with the following attributes:
 .Bl -tag -width retry
-.It Ic retry Ar number
-The optional retry option adds a tolerance for failed host checks;
-the check will be retried for
-.Ar number
-more times before setting the host state to down.
-If this table is used by a relay, it will also specify the number of
-retries for outgoing connection attempts.
+.It Ic ip ttl Ar number
+Change the default time-to-live value in the IP headers for host checks.
 .It Ic parent Ar number
 The optional parent option inherits the state from a parent
 host with the specified identifier.
@@ -197,6 +200,13 @@ starting with 1; it can be shown with the
 .Xr relayctl 8
 .Ic show summary
 commands.
+.It Ic retry Ar number
+The optional retry option adds a tolerance for failed host checks;
+the check will be retried for
+.Ar number
+more times before setting the host state to down.
+If this table is used by a relay, it will also specify the number of
+retries for outgoing connection attempts.
 .El
 .Pp
 For example:
@@ -392,7 +402,7 @@ This mode is supported by redirections and relays.
 .Sh REDIRECTIONS
 Redirections represent a
 .Xr pf 4
-rdr rule.
+rdr-to rule.
 They are used for stateful redirections to the hosts in the specified
 tables.
 .Xr pf 4
@@ -450,7 +460,7 @@ or
 .Ar udp ;
 it defaults to
 .Ar tcp .
-The rdr rule can be optionally restricted to a given interface name.
+The rule can be optionally restricted to a given interface name.
 .It Xo
 .Ic route to
 .Aq Ar table
@@ -460,7 +470,9 @@ The rdr rule can be optionally restricted to a given interface name.
 Like the
 .Ic forward to
 directive, but directly routes the packets to the target host without
-modifying the target address.
+modifying the target address using a
+.Xr pf 4
+route-to rule.
 This can be used for
 .Dq direct server return
 to force the target host to respond via a different gateway.
@@ -472,14 +484,14 @@ Specify the inactivity timeout in seconds for established redirections.
 The default timeout is 600 seconds (10 minutes).
 .It Ic sticky-address
 This has the same effect as specifying sticky-address
-for an rdr rule in
+for an rdr-to rule in
 .Xr pf.conf 5 .
 It will ensure that multiple connections from the same source are
 mapped to the same redirection address.
 .It Ic tag Ar name
 Automatically tag packets passing through the
 .Xr pf 4
-rdr rule with the name supplied.
+rdr-to rule with the name supplied.
 This allows simpler filter rules.
 .El
 .Sh RELAYS
@@ -573,9 +585,7 @@ section above for information about table options.
 .Ic nat lookup
 .Ar options ...
 .Xc
-When redirecting connections with an
-.Ar rdr
-rule in
+When redirecting connections with an rdr-to rule in
 .Xr pf.conf 5
 to a relay listening on localhost, this directive will
 look up the real destination address of the intended target host,
@@ -1013,7 +1023,7 @@ with a TTL lower than the specified value.
 This can be used to implement the
 .Ar Generalized TTL Security Mechanism (GTSM)
 according to RFC 3682.
-.It Ic ip ttl
+.It Ic ip ttl Ar number
 Change the default time-to-live value in the IP headers.
 .It Xo
 .Op Ic no
@@ -1032,6 +1042,64 @@ Set the socket-level buffer size for input and output for this
 connection.
 This will affect the TCP window size.
 .El
+.El
+.Sh ROUTERS
+Routers represent routing table entries in the kernel forwarding
+database, see
+.Xr route 4 ,
+and a table of associated gateways.
+They are used to dynamically insert or remove routes with gateways
+based on their availability and health-check results.
+A router can include multiple network statements and a single forward
+statement with a table of one or more gateways.
+All entries in a single router directive must match the same address
+family, either IPv4 or IPv6.
+.Pp
+The kernel supports multipath routing when multiple gateways exist to
+the same destination address.
+The multipath routing behaviour can be changed globally using the
+.Xr sysctl 8
+variables
+.Va net.inet.ip.multipath
+and
+.Va net.inet6.ip6.multipath .
+With the default setting of 0,
+the first route selected will be used for subsequent packets to that
+destination regardless of source.
+Setting it to 1 will enable load balancing based on the packet source
+address across gateways; multiple routes with the same priority are
+used equally.
+The kernel will also check the link state of the related network
+interface and try a different route if it is not active.
+.Pp
+The configuration directives that are valid in the
+.Ic routers
+context are described below:
+.Bl -tag -width Ds
+.It Xo
+.Ic forward to
+.Aq Ar table
+.Ic port Ar number
+.Ar options ...
+.Xc
+Specify the table of target gateways to be used; see the
+.Sx TABLES
+section above for information about table options.
+This entry is mandatory and must be specified once.
+.It Xo
+.Ic route
+.Ar address Ns Li / Ns Ar prefix
+.Xc
+Specify the network address and prefix length of a route destination
+that is reachable via the active gateways.
+This entry must be specified at least once in a router directive.
+.It Ic rtable Ar id
+Add the routes to the kernel routing table with the specified
+.Ar id .
+.It Ic rtlabel Ar label
+Add the routes with the specified
+.Ar label
+to the kernel routing table.
 .El
 .Sh FILES
 .Bl -tag -width "/etc/ssl/private/address.keyXX" -compact
@@ -1139,6 +1207,16 @@ relay "sshforward" {
         listen on www.example.com port 2222
 	protocol "myssh"
 	forward to shell.example.com port 22
+}
+.Ed
+.Pp
+The next simple router configuration example can be used to run
+redundant, health-checked WAN links:
+.Bd -literal -offset indent
+table \*(Ltgateways\*(Gt { $gw1 ip ttl 1, $gw2 ip ttl 1 }
+router "uplinks" {
+	route 0.0.0.0/0
+	forward to \*(Ltgateways\*(Gt check icmp
 }
 .Ed
 .Sh SEE ALSO

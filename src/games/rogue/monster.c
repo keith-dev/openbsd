@@ -1,4 +1,4 @@
-/*	$OpenBSD: monster.c,v 1.8 2006/03/08 09:44:35 otto Exp $	*/
+/*	$OpenBSD: monster.c,v 1.10 2009/11/12 21:57:46 dms Exp $	*/
 /*	$NetBSD: monster.c,v 1.3 1995/04/22 10:27:45 cgd Exp $	*/
 
 /*
@@ -32,14 +32,6 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  */
-
-#ifndef lint
-#if 0
-static char sccsid[] = "@(#)monster.c	8.1 (Berkeley) 5/31/93";
-#else
-static const char rcsid[] = "$OpenBSD: monster.c,v 1.8 2006/03/08 09:44:35 otto Exp $";
-#endif
-#endif /* not lint */
 
 /*
  * monster.c
@@ -680,7 +672,7 @@ create_monster(void)
 
 	for (i = 0; i < 9; i++) {
 		rand_around(i, &row, &col);
-		if (((row == rogue.row) && (col = rogue.col)) ||
+		if (((row == rogue.row) && (col == rogue.col)) ||
 				(row < MIN_ROW) || (row > (DROWS-2)) ||
 				(col < 0) || (col > (DCOLS-1))) {
 			continue;

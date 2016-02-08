@@ -1,4 +1,4 @@
-/* $OpenBSD: screen.c,v 1.5 2009/06/24 22:51:47 nicm Exp $ */
+/* $OpenBSD: screen.c,v 1.14 2010/02/06 17:35:01 nicm Exp $ */
 
 /*
  * Copyright (c) 2007 Nicholas Marriott <nicm@users.sourceforge.net>
@@ -51,10 +51,10 @@ screen_reinit(struct screen *s)
 	s->rlower = screen_size_y(s) - 1;
 
 	s->mode = MODE_CURSOR;
-	
+
 	screen_reset_tabs(s);
 
-	grid_clear_lines(s->grid, s->grid->hsize, s->grid->sy - 1);
+	grid_clear_lines(s->grid, s->grid->hsize, s->grid->sy);
 
 	screen_clear_selection(s);
 }
@@ -63,6 +63,8 @@ screen_reinit(struct screen *s)
 void
 screen_free(struct screen *s)
 {
+	if (s->tabs != NULL)
+		xfree(s->tabs);
 	xfree(s->title);
 	grid_destroy(s->grid);
 }
@@ -122,44 +124,19 @@ void
 screen_resize_x(struct screen *s, u_int sx)
 {
 	struct grid		*gd = s->grid;
-	const struct grid_cell	*gc;
-	const struct grid_utf8	*gu;
-	u_int			 xx, yy;
 
 	if (sx == 0)
 		fatalx("zero size");
 
-	/* If getting larger, not much to do. */
-	if (sx > screen_size_x(s)) {
-		gd->sx = sx;
-		return;
-	}
-
-	/* If getting smaller, nuke any data in lines over the new size. */
-	for (yy = gd->hsize; yy < gd->hsize + screen_size_y(s); yy++) {
-		/*
-		 * If the character after the last is wide or padding, remove
-		 * it and any leading padding.
-		 */
-		gc = &grid_default_cell;
-		for (xx = sx; xx > 0; xx--) {
-			gc = grid_peek_cell(gd, xx - 1, yy);
-			if (!(gc->flags & GRID_FLAG_PADDING))
-				break;
-			grid_set_cell(gd, xx - 1, yy, &grid_default_cell);
-		}
-		if (xx > 0 && xx != sx && gc->flags & GRID_FLAG_UTF8) {
-			gu = grid_peek_utf8(gd, xx - 1, yy);
-			if (gu->width > 1) {
-				grid_set_cell(
-				    gd, xx - 1, yy, &grid_default_cell);
-			}
-		}
-
-		/* Reduce the line size. */
-		grid_reduce_line(gd, yy, sx);
-	}
-
+	/*
+	 * Treat resizing horizontally simply: just ensure the cursor is
+	 * on-screen and change the size. Don't bother to truncate any lines -
+	 * then the data should be accessible if the size is then incrased.
+	 *
+	 * The only potential wrinkle is if UTF-8 double-width characters are
+	 * left in the last column, but UTF-8 terminals should deal with this
+	 * sanely.
+	 */
 	if (s->cx >= sx)
 		s->cx = sx - 1;
 	gd->sx = sx;
@@ -175,12 +152,12 @@ screen_resize_y(struct screen *s, u_int sy)
 		fatalx("zero size");
 	oldy = screen_size_y(s);
 
-	/* 
+	/*
 	 * When resizing:
 	 *
 	 * If the height is decreasing, delete lines from the bottom until
 	 * hitting the cursor, then push lines from the top into the history.
-	 * 
+	 *
 	 * When increasing, pull as many lines as possible from the history to
 	 * the top, then fill the remaining with blanks at the bottom.
 	 */
@@ -199,40 +176,48 @@ screen_resize_y(struct screen *s, u_int sy)
 		needed -= available;
 
 		/*
-		 * Now just increase the history size to take over the lines
-		 * which are left. XXX Should apply history limit?
+		 * Now just increase the history size, if possible, to take
+		 * over the lines which are left. If history is off, delete
+		 * lines from the top.
+		 *
+		 * XXX Should apply history limit?
 		 */
-		gd->hsize += needed;
+		available = s->cy;
+		if (gd->flags & GRID_HISTORY)
+			gd->hsize += needed;
+		else if (needed > 0 && available > 0) {
+			if (available > needed)
+				available = needed;
+			grid_view_delete_lines(gd, 0, available);
+		}
 		s->cy -= needed;
- 	}
+	}
 
 	/* Resize line arrays. */
-	gd->size = xrealloc(gd->size, gd->hsize + sy, sizeof *gd->size);
-	gd->data = xrealloc(gd->data, gd->hsize + sy, sizeof *gd->data);
-	gd->usize = xrealloc(gd->usize, gd->hsize + sy, sizeof *gd->usize);
-	gd->udata = xrealloc(gd->udata, gd->hsize + sy, sizeof *gd->udata);
+	gd->linedata = xrealloc(
+	    gd->linedata, gd->hsize + sy, sizeof *gd->linedata);
 
 	/* Size increasing. */
 	if (sy > oldy) {
 		needed = sy - oldy;
 
-		/* Try to pull as much as possible out of the history. */
+		/*
+		 * Try to pull as much as possible out of the history, if is
+		 * is enabled.
+		 */
 		available = gd->hsize;
-		if (available > 0) {
+		if (gd->flags & GRID_HISTORY && available > 0) {
 			if (available > needed)
 				available = needed;
 			gd->hsize -= available;
 			s->cy += available;
-		}
+		} else
+			available = 0;
 		needed -= available;
 
 		/* Then fill the rest in with blanks. */
-		for (i = gd->hsize + sy - needed; i < gd->hsize + sy; i++) {
-			gd->size[i] = 0;
-			gd->data[i] = NULL;
-			gd->usize[i] = 0;
-			gd->udata[i] = NULL;
-		}
+		for (i = gd->hsize + sy - needed; i < gd->hsize + sy; i++)
+			memset(&gd->linedata[i], 0, sizeof gd->linedata[i]);
 	}
 
 	/* Set the new size, and reset the scroll region. */
@@ -243,21 +228,17 @@ screen_resize_y(struct screen *s, u_int sy)
 
 /* Set selection. */
 void
-screen_set_selection(struct screen *s,
-    u_int sx, u_int sy, u_int ex, u_int ey, struct grid_cell *gc)
+screen_set_selection(struct screen *s, u_int sx, u_int sy,
+    u_int ex, u_int ey, u_int rectflag, struct grid_cell *gc)
 {
 	struct screen_sel	*sel = &s->sel;
 
 	memcpy(&sel->cell, gc, sizeof sel->cell);
-
 	sel->flag = 1;
-	if (ey < sy || (sy == ey && ex < sx)) {
-		sel->sx = ex; sel->sy = ey;
-		sel->ex = sx; sel->ey = sy;
-	} else {
-		sel->sx = sx; sel->sy = sy;
-		sel->ex = ex; sel->ey = ey;
-	}
+	sel->rectflag = rectflag;
+
+	sel->sx = sx; sel->sy = sy;
+	sel->ex = ex; sel->ey = ey;
 }
 
 /* Clear selection. */
@@ -275,16 +256,81 @@ screen_check_selection(struct screen *s, u_int px, u_int py)
 {
 	struct screen_sel	*sel = &s->sel;
 
-	if (!sel->flag || py < sel->sy || py > sel->ey)
+	if (!sel->flag)
 		return (0);
 
-	if (py == sel->sy && py == sel->ey) {
-		if (px < sel->sx || px > sel->ex)
-			return (0);
-		return (1);
+	if (sel->rectflag) {
+		if (sel->sy < sel->ey) {
+			/* start line < end line -- downward selection. */
+			if (py < sel->sy || py > sel->ey)
+				return (0);
+		} else if (sel->sy > sel->ey) {
+			/* start line > end line -- upward selection. */
+			if (py > sel->sy || py < sel->ey)
+				return (0);
+		} else {
+			/* starting line == ending line. */
+			if (py != sel->sy)
+				return (0);
+		}
+
+		/*
+		 * Need to include the selection start row, but not the cursor
+		 * row, which means the selection changes depending on which
+		 * one is on the left.
+		 */
+		if (sel->ex < sel->sx) {
+			/* Cursor (ex) is on the left. */
+			if (px <= sel->ex)
+				return (0);
+
+			if (px > sel->sx)
+				return (0);
+		} else {
+			/* Selection start (sx) is on the left. */
+			if (px < sel->sx)
+				return (0);
+
+			if (px >= sel->ex)
+				return (0);
+		}
+	} else {
+		/*
+		 * Like emacs, keep the top-left-most character, and drop the
+		 * bottom-right-most, regardless of copy direction.
+		 */
+		if (sel->sy < sel->ey) {
+			/* starting line < ending line -- downward selection. */
+			if (py < sel->sy || py > sel->ey)
+				return (0);
+
+			if ((py == sel->sy && px < sel->sx)
+			    || (py == sel->ey && px > sel->ex))
+				return (0);
+		} else if (sel->sy > sel->ey) {
+			/* starting line > ending line -- upward selection. */
+			if (py > sel->sy || py < sel->ey)
+				return (0);
+
+			if ((py == sel->sy && px >= sel->sx)
+			    || (py == sel->ey && px < sel->ex))
+				return (0);
+		} else {
+			/* starting line == ending line. */
+			if (py != sel->sy)
+				return (0);
+
+			if (sel->ex < sel->sx) {
+				/* cursor (ex) is on the left */
+				if (px > sel->sx || px < sel->ex)
+					return (0);
+			} else {
+				/* selection start (sx) is on the left */
+				if (px < sel->sx || px > sel->ex)
+					return (0);
+			}
+		}
 	}
 
-	if ((py == sel->sy && px < sel->sx) || (py == sel->ey && px > sel->ex))
-		return (0);
 	return (1);
 }

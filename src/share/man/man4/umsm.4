@@ -1,4 +1,4 @@
-.\"	$OpenBSD: umsm.4,v 1.49 2009/05/12 04:31:16 yuo Exp $
+.\"	$OpenBSD: umsm.4,v 1.56 2009/12/27 21:35:13 jsg Exp $
 .\"
 .\" Copyright (c) 2006 Jonathan Gray <jsg@openbsd.org>
 .\"
@@ -14,7 +14,7 @@
 .\" ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
 .\" OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 .\"
-.Dd $Mdocdate: May 12 2009 $
+.Dd $Mdocdate: December 27 2009 $
 .Dt UMSM 4
 .Os
 .Sh NAME
@@ -38,6 +38,8 @@ driver:
 .Bl -column "Device                " "Bus" -compact -offset 6n
 .It Em "Device		Bus"
 .It Li "AirPrime PC5220" Ta Ta CardBus
+.It Li "Alcatel One Touch X060" Ta Ta USB
+.It Li "Alcatel One Touch X200" Ta Ta USB
 .It Li "AnyDATA ADU-500A" Ta Ta USB
 .It Li "AnyDATA ADU-E100H" Ta Ta USB
 .It Li "AnyDATA A2502" Ta Ta USB
@@ -45,9 +47,14 @@ driver:
 .It Li "Emobile D02HW (Huawei OEM)" Ta Ta USB
 .It Li "Emobile D12HW (Huawei OEM)" Ta Ta USB
 .It Li "Emobile D22HW (Huawei OEM)" Ta Ta USB
+.It Li "Emobile H12HW (Huawei OEM)" Ta Ta USB
 .It Li "Emobile D21LC (longcheer OEM)" Ta Ta USB
+.It Li "Huawei Mobile E156G" Ta Ta USB
+.It Li "Huawei Mobile E160E" Ta Ta USB
+.It Li "Huawei Mobile E161" Ta Ta USB
 .It Li "Huawei Mobile E160g" Ta Ta USB
 .It Li "Huawei Mobile E172" Ta Ta USB
+.It Li "Huawei Mobile E180" Ta Ta USB
 .It Li "Huawei Mobile E220" Ta Ta USB
 .It Li "Huawei Mobile E510" Ta Ta USB
 .It Li "Huawei Mobile Connect E169g" Ta Ta USB
@@ -66,11 +73,14 @@ driver:
 .It Li "Option GlobeTrotter GT Max" Ta Ta CardBus
 .It Li "Option GlobeTrotter HSDPA" Ta Ta USB
 .It Li "Option GlobeTrotter HSDPA ICON225" Ta Ta USB
+.It Li "Option GlobeTrotter HSUPA 380E" Ta Ta PCI Express Mini Card
 .It Li "Sierra Wireless MC8755" Ta Ta PCI Express Mini Card
 .It Li "Sierra Wireless MC8775" Ta Ta PCI Express Mini Card
 .It Li "Sierra Wireless AirCard 580" Ta Ta CardBus
 .It Li "Sierra Wireless AirCard 875" Ta Ta CardBus
+.It Li "Sierra Wireless AirCard 881" Ta CardBus
 .It Li "Sierra Wireless AirCard 881U" Ta Ta USB
+.It Li "Softbank C01SW (Sierra OEM)" Ta Ta USB
 .It Li "Vodafone Mobile Connect 3G" Ta Ta CardBus
 .El
 .Pp
@@ -97,7 +107,6 @@ Devices suspected of being compatible are:
 .It Li "Sierra Wireless AirCard 880" Ta CardBus
 .It Li "Sierra Wireless AirCard 880E" Ta ExpressCard
 .It Li "Sierra Wireless AirCard 880U" Ta Ta USB
-.It Li "Sierra Wireless AirCard 881" Ta CardBus
 .It Li "Sierra Wireless AirCard 881E" Ta ExpressCard
 .It Li "Sierra Wireless AirCard 885U" Ta Ta USB
 .It Li "Sierra Wireless C597" Ta Ta USB
@@ -116,7 +125,7 @@ for PPP connections.
 For example, the Huawei E220 has two serial ports,
 but only the first port can be used to make connections;
 the second one is for management.
-The Option GlobeTrotter HSDPA modem has three serial ports,
+The Option GlobeTrotter HSDPA/HSUPA modems have three serial ports,
 but only the last port can be used to make PPP connections.
 .Sh EXAMPLES
 An example

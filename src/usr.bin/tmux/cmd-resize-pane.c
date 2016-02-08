@@ -1,4 +1,4 @@
-/* $OpenBSD: cmd-resize-pane.c,v 1.1 2009/06/01 22:58:49 nicm Exp $ */
+/* $OpenBSD: cmd-resize-pane.c,v 1.8 2009/12/03 22:50:10 nicm Exp $ */
 
 /*
  * Copyright (c) 2009 Nicholas Marriott <nicm@users.sourceforge.net>
@@ -31,32 +31,46 @@ int	cmd_resize_pane_exec(struct cmd *, struct cmd_ctx *);
 
 const struct cmd_entry cmd_resize_pane_entry = {
 	"resize-pane", "resizep",
-	CMD_PANE_WINDOW_USAGE "[-DU] [adjustment]",
-	CMD_ARG01|CMD_BIGUFLAG|CMD_BIGDFLAG,
+	"[-DLRU] " CMD_TARGET_PANE_USAGE " [adjustment]",
+	CMD_ARG01, "DLRU",
 	cmd_resize_pane_init,
-	cmd_pane_parse,
+	cmd_target_parse,
 	cmd_resize_pane_exec,
-       	cmd_pane_send,
-	cmd_pane_recv,
-	cmd_pane_free,
-	cmd_pane_print
+	cmd_target_free,
+	cmd_target_print
 };
 
 void
 cmd_resize_pane_init(struct cmd *self, int key)
 {
-	struct cmd_pane_data	*data;
+	struct cmd_target_data	*data;
 
-	cmd_pane_init(self, key);
+	cmd_target_init(self, key);
 	data = self->data;
 
-	if (key == KEYC_ADDCTL(KEYC_DOWN))
-		data->flags |= CMD_BIGDFLAG;
+	if (key == (KEYC_UP | KEYC_CTRL))
+		cmd_set_flag(&data->chflags, 'U');
+	if (key == (KEYC_DOWN | KEYC_CTRL))
+		cmd_set_flag(&data->chflags, 'D');
+	if (key == (KEYC_LEFT | KEYC_CTRL))
+		cmd_set_flag(&data->chflags, 'L');
+	if (key == (KEYC_RIGHT | KEYC_CTRL))
+		cmd_set_flag(&data->chflags, 'R');
 
-	if (key == KEYC_ADDESC(KEYC_UP))
+	if (key == (KEYC_UP | KEYC_ESCAPE)) {
+		cmd_set_flag(&data->chflags, 'U');
 		data->arg = xstrdup("5");
-	if (key == KEYC_ADDESC(KEYC_DOWN)) {
-		data->flags |= CMD_BIGDFLAG;
+	}
+	if (key == (KEYC_DOWN | KEYC_ESCAPE)) {
+		cmd_set_flag(&data->chflags, 'D');
+		data->arg = xstrdup("5");
+	}
+	if (key == (KEYC_LEFT | KEYC_ESCAPE)) {
+		cmd_set_flag(&data->chflags, 'L');
+		data->arg = xstrdup("5");
+	}
+	if (key == (KEYC_RIGHT | KEYC_ESCAPE)) {
+		cmd_set_flag(&data->chflags, 'R');
 		data->arg = xstrdup("5");
 	}
 }
@@ -64,23 +78,14 @@ cmd_resize_pane_init(struct cmd *self, int key)
 int
 cmd_resize_pane_exec(struct cmd *self, struct cmd_ctx *ctx)
 {
-	struct cmd_pane_data	*data = self->data;
+	struct cmd_target_data	*data = self->data;
 	struct winlink		*wl;
 	const char	       	*errstr;
 	struct window_pane	*wp;
 	u_int			 adjust;
 
-	if ((wl = cmd_find_window(ctx, data->target, NULL)) == NULL)
+	if ((wl = cmd_find_pane(ctx, data->target, NULL, &wp)) == NULL)
 		return (-1);
-	if (data->pane == -1)
-		wp = wl->window->active;
-	else {
-		wp = window_pane_at_index(wl->window, data->pane);
-		if (wp == NULL) {
-			ctx->error(ctx, "no pane: %d", data->pane);
-			return (-1);
-		}
-	}
 
 	if (data->arg == NULL)
 		adjust = 1;
@@ -92,13 +97,14 @@ cmd_resize_pane_exec(struct cmd *self, struct cmd_ctx *ctx)
 		}
 	}
 
-	if (!(data->flags & CMD_BIGDFLAG))
-		adjust = -adjust;
-	if (layout_resize(wp, adjust) != 0) {
-		ctx->error(ctx, "layout %s "
-		    "does not support resizing", layout_name(wp->window));
-		return (-1);
-	}
+	if (cmd_check_flag(data->chflags, 'L'))
+		layout_resize_pane(wp, LAYOUT_LEFTRIGHT, -adjust);
+	else if (cmd_check_flag(data->chflags, 'R'))
+		layout_resize_pane(wp, LAYOUT_LEFTRIGHT, adjust);
+	else if (cmd_check_flag(data->chflags, 'U'))
+		layout_resize_pane(wp, LAYOUT_TOPBOTTOM, -adjust);
+	else if (cmd_check_flag(data->chflags, 'D'))
+		layout_resize_pane(wp, LAYOUT_TOPBOTTOM, adjust);
 	server_redraw_window(wl->window);
 
 	return (0);

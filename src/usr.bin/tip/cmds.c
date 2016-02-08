@@ -1,4 +1,4 @@
-/*	$OpenBSD: cmds.c,v 1.27 2007/05/15 19:42:05 moritz Exp $	*/
+/*	$OpenBSD: cmds.c,v 1.32 2010/02/07 20:16:47 nicm Exp $	*/
 /*	$NetBSD: cmds.c,v 1.7 1997/02/11 09:24:03 mrg Exp $	*/
 
 /*
@@ -29,13 +29,6 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  */
-
-#ifndef lint
-#if 0
-static char sccsid[] = "@(#)cmds.c	8.1 (Berkeley) 6/6/93";
-#endif
-static const char rcsid[] = "$OpenBSD: cmds.c,v 1.27 2007/05/15 19:42:05 moritz Exp $";
-#endif /* not lint */
 
 #include "tip.h"
 #include "pathnames.h"
@@ -150,8 +143,8 @@ transfer(char *buf, int fd, char *eofchars)
 
 	parwrite(FD, buf, size(buf));
 	quit = 0;
-	kill(tipout_pid, SIGIOT);
-	read(repdes[0], (char *)&ccc, 1);  /* Wait until read process stops */
+	write(tipout_fd, "W", 1);
+	read(tipout_fd, (char *)&ccc, 1);  /* Wait until read process stops */
 
 	/*
 	 * finish command
@@ -196,7 +189,7 @@ transfer(char *buf, int fd, char *eofchars)
 	if (boolean(value(VERBOSE)))
 		prtime(" lines transferred in ", time(0)-start);
 	tcsetattr(0, TCSAFLUSH, &term);
-	write(fildes[1], (char *)&ccc, 1);
+	write(tipout_fd, (char *)&ccc, 1);
 	signal(SIGINT, f);
 	close(fd);
 }
@@ -304,11 +297,11 @@ transmit(FILE *fp, char *eofchars, char *command)
 	time_t start_t, stop_t;
 	sig_t f;
 
-	kill(tipout_pid, SIGIOT);	/* put TIPOUT into a wait state */
+	write(tipout_fd, "W", 1);	/* put TIPOUT into a wait state */
 	stop = 0;
 	f = signal(SIGINT, stopsnd);
 	tcsetattr(0, TCSAFLUSH, &defchars);
-	read(repdes[0], (char *)&ccc, 1);
+	read(tipout_fd, (char *)&ccc, 1);
 	if (command != NULL) {
 		for (pc = command; *pc; pc++)
 			send(*pc);
@@ -385,7 +378,7 @@ out:
 		else
 			prtime(" lines transferred in ", stop_t-start_t);
 	}
-	write(fildes[1], (char *)&ccc, 1);
+	write(tipout_fd, (char *)&ccc, 1);
 	tcsetattr(0, TCSAFLUSH, &term);
 }
 
@@ -460,8 +453,12 @@ tryagain:
 void
 timeout(int signo)
 {
+	int saved_errno = errno;
+
 	signal(SIGALRM, timeout);
 	timedout = 1;
+
+	errno = saved_errno;
 }
 
 /*
@@ -479,11 +476,11 @@ pipeout(int c)
 	putchar(c);
 	if (prompt("Local command? ", buf, sizeof(buf)))
 		return;
-	kill(tipout_pid, SIGIOT);	/* put TIPOUT into a wait state */
+	write(tipout_fd, "W", 1);	/* put TIPOUT into a wait state */
 	signal(SIGINT, SIG_IGN);
 	signal(SIGQUIT, SIG_IGN);
 	tcsetattr(0, TCSAFLUSH, &defchars);
-	read(repdes[0], (char *)&ccc, 1);
+	read(tipout_fd, (char *)&ccc, 1);
 	/*
 	 * Set up file descriptors in the child and
 	 *  let it go...
@@ -508,7 +505,7 @@ pipeout(int c)
 	}
 	if (boolean(value(VERBOSE)))
 		prtime("away for ", time(0)-start);
-	write(fildes[1], (char *)&ccc, 1);
+	write(tipout_fd, (char *)&ccc, 1);
 	tcsetattr(0, TCSAFLUSH, &term);
 	signal(SIGINT, SIG_DFL);
 	signal(SIGQUIT, SIG_DFL);
@@ -532,11 +529,11 @@ consh(int c)
 	putchar(c);
 	if (prompt("Local command? ", buf, sizeof(buf)))
 		return;
-	kill(tipout_pid, SIGIOT);	/* put TIPOUT into a wait state */
+	write(tipout_fd, "W", 1);	/* put TIPOUT into a wait state */
 	signal(SIGINT, SIG_IGN);
 	signal(SIGQUIT, SIG_IGN);
 	tcsetattr(0, TCSAFLUSH, &defchars);
-	read(repdes[0], (char *)&ccc, 1);
+	read(tipout_fd, (char *)&ccc, 1);
 	/*
 	 * Set up file descriptors in the child and
 	 *  let it go...
@@ -559,7 +556,7 @@ consh(int c)
 	}
 	if (boolean(value(VERBOSE)))
 		prtime("away for ", time(0)-start);
-	write(fildes[1], (char *)&ccc, 1);
+	write(tipout_fd, (char *)&ccc, 1);
 	tcsetattr(0, TCSAFLUSH, &term);
 	signal(SIGINT, SIG_DFL);
 	signal(SIGQUIT, SIG_DFL);
@@ -595,7 +592,6 @@ shell(int c)
 			cp = value(SHELL);
 		else
 			cp++;
-		shell_uid();
 		execl(value(SHELL), cp, (char *)NULL);
 		printf("\r\ncan't execl!\r\n");
 		exit(1);
@@ -614,14 +610,14 @@ setscript(void)
 	/*
 	 * enable TIPOUT side for dialogue
 	 */
-	kill(tipout_pid, SIGEMT);
+	write(tipout_fd, "S", 1);
 	if (boolean(value(SCRIPT)))
-		write(fildes[1], value(RECORD), size(value(RECORD)));
-	write(fildes[1], "\n", 1);
+		write(tipout_fd, value(RECORD), size(value(RECORD)));
+	write(tipout_fd, "\n", 1);
 	/*
 	 * wait for TIPOUT to finish
 	 */
-	read(repdes[0], &c, 1);
+	read(tipout_fd, &c, 1);
 	if (c == 'n')
 		printf("can't create %s\r\n", value(RECORD));
 }
@@ -657,7 +653,6 @@ tipabort(char *msg)
 	if (msg != NULL)
 		printf("\r\n%s", msg);
 	printf("\r\n[EOT]\r\n");
-	daemon_uid();
 	(void)uu_unlock(uucplock);
 	unraw();
 	exit(0);
@@ -694,7 +689,6 @@ execute(char *s)
 		cp = value(SHELL);
 	else
 		cp++;
-	shell_uid();
 	execl(value(SHELL), cp, "-c", s, (char *)NULL);
 }
 
@@ -751,7 +745,7 @@ variable(int c)
 	vlex(buf);
 	if (vtable[BEAUTIFY].v_access&CHANGED) {
 		vtable[BEAUTIFY].v_access &= ~CHANGED;
-		kill(tipout_pid, SIGSYS);
+		write(tipout_fd, "B", 1);
 	}
 	if (vtable[SCRIPT].v_access&CHANGED) {
 		vtable[SCRIPT].v_access &= ~CHANGED;
@@ -932,7 +926,6 @@ expand(char name[])
 		dup(pivec[1]);
 		close(pivec[1]);
 		close(2);
-		shell_uid();
 		execl(Shell, Shell, "-c", cmdbuf, (char *)NULL);
 		_exit(1);
 	}

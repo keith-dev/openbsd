@@ -1,4 +1,4 @@
-/*	$OpenBSD: ospfd.c,v 1.70 2009/06/06 07:31:26 eric Exp $ */
+/*	$OpenBSD: ospfd.c,v 1.73 2010/02/19 10:35:52 dlg Exp $ */
 
 /*
  * Copyright (c) 2005 Claudio Jeker <claudio@openbsd.org>
@@ -166,8 +166,8 @@ main(int argc, char *argv[])
 			if (opts & OSPFD_OPT_VERBOSE)
 				opts |= OSPFD_OPT_VERBOSE2;
 			opts |= OSPFD_OPT_VERBOSE;
+			log_verbose(1);
 			break;
-
 		default:
 			usage();
 			/* NOTREACHED */
@@ -367,7 +367,7 @@ main_dispatch_ospfe(int fd, short event, void *bula)
 	struct imsg		 imsg;
 	struct demote_msg	 dmsg;
 	ssize_t			 n;
-	int			 shut = 0;
+	int			 shut = 0, verbose;
 
 	ibuf = &iev->ibuf;
 
@@ -402,6 +402,9 @@ main_dispatch_ospfe(int fd, short event, void *bula)
 		case IMSG_CTL_FIB_DECOUPLE:
 			kr_fib_decouple();
 			break;
+		case IMSG_CTL_FIB_RELOAD:
+			kr_fib_reload();
+			break;
 		case IMSG_CTL_KROUTE:
 		case IMSG_CTL_KROUTE_ADDR:
 			kr_show_route(&imsg);
@@ -419,6 +422,11 @@ main_dispatch_ospfe(int fd, short event, void *bula)
 				fatalx("invalid size of OE request");
 			memcpy(&dmsg, imsg.data, sizeof(dmsg));
 			carp_demote_set(dmsg.demote_group, dmsg.level);
+			break;
+		case IMSG_CTL_LOG_VERBOSE:
+			/* already checked by ospfe */
+			memcpy(&verbose, imsg.data, sizeof(verbose));
+			log_verbose(verbose);
 			break;
 		default:
 			log_debug("main_dispatch_ospfe: error handling imsg %d",
@@ -829,9 +837,7 @@ merge_interfaces(struct area *a, struct area *xa)
 		}
 		log_debug("merge_interfaces: proc %d area %s merging "
 		    "interface %s", ospfd_process, inet_ntoa(a->id), i->name);
-		i->addr = xi->addr;
 		i->dst = xi->dst;
-		i->mask = xi->mask;
 		i->abr_id = xi->abr_id;
 		i->baudrate = xi->baudrate;
 		i->dead_interval = xi->dead_interval;
@@ -843,6 +849,8 @@ merge_interfaces(struct area *a, struct area *xa)
 			dirty = 1;
 		i->metric = xi->metric;
 		i->priority = xi->priority;
+		if (i->self)
+			i->self->priority = i->priority;
 		i->flags = xi->flags; /* needed? */
 		i->type = xi->type; /* needed? */
 		i->media_type = xi->media_type; /* needed? */
@@ -871,7 +879,9 @@ iface_lookup(struct area *area, struct iface *iface)
 	struct iface	*i;
 
 	LIST_FOREACH(i, &area->iface_list, entry)
-		if (i->ifindex == iface->ifindex)
+		if (i->ifindex == iface->ifindex &&
+		    i->addr.s_addr == iface->addr.s_addr &&
+		    i->mask.s_addr == iface->mask.s_addr)
 			return (i);
 	return (NULL);
 }

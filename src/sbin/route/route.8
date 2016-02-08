@@ -1,4 +1,4 @@
-.\"	$OpenBSD: route.8,v 1.59 2009/06/25 10:22:54 michele Exp $
+.\"	$OpenBSD: route.8,v 1.64 2009/12/20 15:35:13 deraadt Exp $
 .\"	$NetBSD: route.8,v 1.6 1995/03/18 15:00:13 cgd Exp $
 .\"
 .\" Copyright (c) 1983, 1991, 1993
@@ -30,7 +30,7 @@
 .\"
 .\"	@(#)route.8	8.3 (Berkeley) 3/19/94
 .\"
-.Dd $Mdocdate: June 25 2009 $
+.Dd $Mdocdate: December 20 2009 $
 .Dt ROUTE 8
 .Os
 .Sh NAME
@@ -97,53 +97,27 @@ instead of a real routing socket to test route manipulation.
 .Pp
 The
 .Nm
-utility provides several commands:
+utility provides the following simple commands:
 .Pp
-.Bl -tag -width Fl -compact
-.It Cm add
-Add a route.
-.It Cm change
-Change aspects of a route (such as its gateway).
-.It Cm delete
-Delete a specific route.
-.It Cm flush
-Remove all routes.
-.It Cm get
-Lookup and display the route for a destination.
-.It Cm monitor
-Continuously report any changes to the routing information base,
-routing lookup misses, or suspected network partitionings.
-.It Cm show
-Print out the route table similar to "netstat -r" (see
-.Xr netstat 1 ) .
-.El
-.Pp
-The
-.Cm get
-command has the syntax:
-.Bd -filled -offset indent
-.Nm route Op Fl nv
-.Cm get
-.Op Ar modifiers
-.Ar address
-.Ed
-.Pp
-The
-.Cm flush
-command has the syntax:
-.Bd -filled -offset indent
-.Nm route Op Fl dnqtv
+.Bl -tag -width Fl
+.It Xo
+.Nm route
+.Op Fl T Ar tableid
+.Cm exec
+.Op Ar command ...
+.Xc
+Execute a command forcing the process and its children into the
+routing domain as specified with the
+.Fl T Ar tableid
+option.
+.It Xo
+.Nm route
+.Op Fl nqv
+.Op Fl T Ar tableid
 .Cm flush
 .Op Ar modifiers
-.Ed
-.Pp
-If the
-.Cm flush
-command is specified,
-.Nm
-will
-.Dq flush
-the routing tables of all gateway entries.
+.Xc
+Delete all gateway entries from the routing table.
 When the address family is specified by any one of the
 .Ar family
 modifiers (listed below), only routes having destinations with addresses
@@ -154,15 +128,27 @@ by using the
 or
 .Fl priority
 modifiers.
-.Pp
-The
-.Cm monitor
-command has the syntax:
-.Bd -filled -offset indent
-.Nm route Op Fl \&dn
+.It Xo
+.Nm route
+.Op Fl nv
+.Op Fl T Ar tableid
+.Cm get
+.Op Ar modifiers
+.Ar address
+.Xc
+Extract a routing entry from the kernel.
+If
+.Fl gateway
+is specified, only routes whose gateway are in the
+same address family as the destination are shown.
+.It Xo
+.Nm
+.Op Fl n
 .Cm monitor
 .Op Ar modifiers
-.Ed
+.Xc
+Continuously report any changes to the routing information base,
+routing lookup misses, or suspected network partitionings.
 .Pp
 When the address family is specified by any one of the
 .Ar family
@@ -172,39 +158,57 @@ If the
 .Fl iface
 modifier is used only interface specific messages (link state changes)
 are shown.
-.Pp
-The
-.Cm show
-command has the syntax:
-.Bd -filled -offset indent
-.Nm route Op Fl n
+.It Xo
+.Nm route
+.Op Fl nv
+.Op Fl T Ar tableid
 .Cm show
 .Op Ar family
 .Op Fl gateway
-.Ed
+.Xc
+Print out the route table similar to "netstat -r" (see
+.Xr netstat 1 ) .
 .Pp
 If
 .Fl gateway
 is specified, only routes whose gateway are in the
 same address family as the destination are shown.
+.El
 .Pp
-The other commands have the syntax:
-.Bd -filled -offset indent
-.Nm route Op Fl dnqtv
-.Ar command
+The other commands relating to adding, changing, or deleting routes
+have the syntax:
+.Pp
+.Bl -tag -width Fl -compact
+.It Xo
+.Nm route
+.Op Fl dnqtv
+.Op Fl T Ar tableid
+.Cm add
 .Op Ar modifiers
-.Ar destination gateway Op Ar netmask
-.Ed
+.Ar destination gateway
+.Xc
+.It Xo
+.Nm route
+.Op Fl dnqtv
+.Op Fl T Ar tableid
+.Cm change
+.Op Ar modifiers
+.Ar destination gateway
+.Xc
+.It Xo
+.Nm route
+.Op Fl dnqtv
+.Op Fl T Ar tableid
+.Cm delete
+.Op Ar modifiers
+.Ar destination gateway
+.Xc
+.El
 .Pp
 .Ar destination
-is the destination host or network,
+is the destination host or network;
 .Ar gateway
-is the next-hop intermediary via which packets should be routed,
-and
-.Ar netmask
-behaves the same as the argument to the
-.Fl netmask
-modifier and is described below.
+is the next-hop intermediary via which packets should be routed.
 Routes to a particular host may be distinguished from those to
 a network by interpreting the Internet address specified as the
 .Ar destination
@@ -238,10 +242,6 @@ it is the symbolic name of a network.
 If
 .Ar destination
 is a valid IP address or host name, it is presumed to be a route to a host.
-.Pp
-If none of the above apply,
-.Nm
-prints an error message and exits.
 .Pp
 For example,
 .Li 192.168.1.1
@@ -426,7 +426,7 @@ the route, the
 .Fl ifp
 or
 .Fl ifa
-modifiers may be used to determine the interface or interface address.
+modifiers may be used to determine the interface name or interface address.
 .Pp
 The optional
 .Fl genmask

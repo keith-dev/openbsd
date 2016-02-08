@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_ix.h,v 1.7 2009/06/28 22:20:20 jsg Exp $	*/
+/*	$OpenBSD: if_ix.h,v 1.9 2010/02/23 18:43:15 jsg Exp $	*/
 
 /******************************************************************************
 
@@ -237,7 +237,6 @@ struct ix_softc {
 	struct ixgbe_hw	hw;
 	struct ixgbe_osdep	 osdep;
 	void			*powerhook;
-	void			*shutdownhook;
 
 	struct resource	*pci_mem;
 	struct resource	*msix_mem;
@@ -260,6 +259,7 @@ struct ix_softc {
 	struct mutex	core_mtx;
 
 	/* Legacy Fast Intr handling */
+	int		sfp_probe;
 	workq_fn	link_task;
 
 	/* Info about the board itself */

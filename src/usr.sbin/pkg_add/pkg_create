@@ -1,8 +1,8 @@
 #! /usr/bin/perl
 # ex:ts=8 sw=4:
-# $OpenBSD: pkg_create,v 1.122 2009/06/10 15:44:05 espie Exp $
+# $OpenBSD: pkg_create,v 1.135 2010/02/28 10:08:48 espie Exp $
 #
-# Copyright (c) 2003-2007 Marc Espie <espie@openbsd.org>
+# Copyright (c) 2003-2010 Marc Espie <espie@openbsd.org>
 #
 # Permission to use, copy, modify, and distribute this software for any
 # purpose with or without fee is hereby granted, provided that the above
@@ -18,6 +18,7 @@
 
 use strict;
 use warnings;
+
 use OpenBSD::PackingList;
 use OpenBSD::PackageInfo;
 use OpenBSD::Getopt;
@@ -31,6 +32,55 @@ use File::Basename;
 
 # Extra stuff needed to archive files
 package OpenBSD::PackingElement;
+
+sub count
+{
+	my ($self, $total) = @_;
+	$$total++;
+}
+
+sub size
+{
+	my ($self, $totsize) = @_;
+	if (defined $self->{size}) {
+		$$totsize += $self->{size};
+	}
+}
+sub mark_count
+{
+	my ($self, $progress, $done, $count) = @_;
+	$$done++;
+	$progress->show($$done, $count);
+}
+
+sub mark_progress
+{
+	my ($self, $progress, $done, $totsize) = @_;
+	return unless defined $self->{size};
+	$$done += $self->{size};
+	$progress->show($$done, $totsize);
+}
+
+sub verify_checksum_and_progress
+{
+	my ($self, $base, $stash, $progress, $done, $count) = @_;
+	$self->verify_checksum($base, $stash);
+	$self->mark_count($progress, $done, $count);
+}
+
+sub makesum_plist_and_progress
+{
+	my ($self, $p2, $base, $stash, $progress, $done, $count) = @_;
+	$self->makesum_plist($p2, $base, $stash);
+	$self->mark_count($progress, $done, $count);
+}
+
+sub create_package_and_progress
+{
+	my ($self, $arc, $base, $verbose, $progress, $done, $tot) = @_;
+	$self->mark_progress($progress, $done, $tot);
+	$self->create_package($arc, $base, $verbose);
+}
 
 sub create_package 
 {
@@ -298,6 +348,47 @@ sub makesum_plist
 	}
 }
 
+package OpenBSD::PackingElement::Depend;
+sub avert_duplicates_and_other_checks
+{
+	my ($self, $allfiles) = @_;
+	if (!$self->spec->is_valid) {
+		print STDERR "Error in packing-list: invalid \@", 
+		    $self->keyword, " ", $self->stringize, "\n";
+		$main::errors++;
+	}
+	$self->SUPER::avert_duplicates_and_other_checks($allfiles);
+}
+
+package OpenBSD::PackingElement::Dependency;
+sub avert_duplicates_and_other_checks
+{
+	my ($self, $allfiles) = @_;
+
+	my @issues = OpenBSD::PackageName->from_string($self->{def})->has_issues;
+	if (@issues > 0) {
+		print STDERR "Error in packing-list: invalid \@", 
+		    $self->keyword, " ", $self->stringize, "\n";
+		print STDERR "$self->{def}: ", join(' ', @issues), "\n";
+		$main::errors++;
+	}
+
+	$self->SUPER::avert_duplicates_and_other_checks($allfiles);
+}
+
+package OpenBSD::PackingElement::Name;
+sub avert_duplicates_and_other_checks
+{
+	my ($self, $allfiles) = @_;
+
+	my @issues = OpenBSD::PackageName->from_string($self->name)->has_issues;
+	if (@issues > 0) {
+		print STDERR "Bad packagename ", $self->name, ":", 
+		    join(' ', @issues), "\n";
+		$main::errors++;
+	}
+}
+
 # put together file and filename, in order to handle fragments simply
 package MyFile;
 sub new
@@ -327,14 +418,24 @@ sub close
 	close($self->{fh});
 }
 
+package OpenBSD::StubProgress;
+sub show {}
+
+sub set_header {}
+
+sub clear {}
+
 package main;
+
+my $progress;
+
 
 my $subst = OpenBSD::Subst->new;
 
-our ($opt_p, $opt_f, $opt_c, $opt_d, $opt_v, $opt_i, $opt_k,
-	$opt_S, $opt_s, $opt_O, $opt_A, $opt_L,
+our ($opt_p, $opt_f, $opt_d, $opt_v,
+	$opt_s, $opt_A, $opt_L,
 	$opt_M, $opt_U, $opt_P, $opt_W, $opt_n,
-	$opt_B, $opt_q, $opt_Q);
+	$opt_B, $opt_q, $opt_Q, $opt_x);
 
 sub deduce_name
 {
@@ -375,8 +476,7 @@ sub read_fragments
 		while(my $file = pop @$stack) {
 			GETLINE:
 			while ($_ = $file->readline) {
-				if (m/^(\!)?\%\%(.*)\%\%$/o) {
-					my ($not, $frag) = ($1, $2);
+				if (my ($not, $frag) = m/^(\!)?\%\%(.*)\%\%$/) {
 					my $def = $frag;
 					if ($frag eq 'SHARED') {
 						$def = 'SHARED_LIBS';
@@ -420,7 +520,7 @@ sub add_special_file
 
 sub add_description
 {
-	my ($plist, $name, $opt_c, $opt_d) = @_;
+	my ($plist, $name, $opt_d) = @_;
 	my $o = OpenBSD::PackingElement::FDESC->add($plist, $name);
 	my $comment = $subst->value('COMMENT');
 	if (defined $comment) {
@@ -430,7 +530,7 @@ sub add_description
 			print STDERR ' 'x60, "^"x (length($comment)-60), "\n";
 			exit 1;
 		}
-	} elsif (!defined $opt_c) {
+	} else {
 		Usage "Comment required";
 	}
 	if (!defined $opt_d) {
@@ -440,12 +540,6 @@ sub add_description
 	    open(my $fh, '>', $o->fullname) or die "Can't write to DESC: $!";
 	    if (defined $comment) {
 	    	print $fh $subst->do($comment), "\n";
-	    } else {
-		if ($opt_c =~ /^\-(.*)$/o) {
-		    print $fh $1, "\n";
-		} else {
-		    $subst->copy_fh($opt_c, $fh);
-		}
 	    }
 	    if ($opt_d =~ /^\-(.*)$/o) {
 		print $fh $1, "\n";
@@ -453,7 +547,11 @@ sub add_description
 		$subst->copy_fh($opt_d, $fh);
 	    }
 	    if (defined $comment) {
-	    	print $fh "\n", $subst->do('Maintainer: ${MAINTAINER}'), "\n";
+		if ($subst->empty('MAINTAINER')) {
+			Warn "no MAINTAINER\n";
+		} else {
+			print $fh "\n", $subst->do('Maintainer: ${MAINTAINER}'), "\n";
+		}
 		if (!$subst->empty('HOMEPAGE')) {
 			print $fh "\n", $subst->do('WWW: ${HOMEPAGE}'), "\n";
 		}
@@ -472,14 +570,14 @@ my ($cert, $privkey);
 
 
 set_usage(
-'pkg_create [-nQqv] [-A arches] [-B pkg-destdir] [-D name=value]',
-'[-i iscript] [-k dscript] [-L localbase] [-M displayfile]',
-'[-P pkg-dependency] [-p prefix] [-s x509 -s cert -s priv] [-S pkg-destdir]',
-'[-U undisplayfile] [-W wantedlib] -c desc -d desc -f packinglist pkg-name');
+'pkg_create [-nQqvx] [-A arches] [-B pkg-destdir] [-D name[=value]]',
+'[-L localbase] [-M displayfile] [-P pkg-dependency]',
+'[-s x509 -s cert -s priv] [-U undisplayfile] [-W wantedlib]',
+'-d desc -D COMMENT=value -f packinglist -p prefix pkg-name');
 
 my $plist = new OpenBSD::PackingList;
 try { 
-	getopts('p:f:c:d:vi:k:M:U:S:hs:OA:L:B:D:P:W:nqQ', 
+	getopts('p:f:d:vM:U:hs:A:L:B:D:P:W:nqQx', 
 	{'D' => 
 		sub { 
 			$subst->parse_option(shift);
@@ -505,6 +603,13 @@ try {
 	Usage($_);
 };
 
+if ($opt_x) {
+	$progress = bless {}, "OpenBSD::StubProgress";
+} else {
+	require OpenBSD::ProgressMeter;
+	$progress = OpenBSD::ProgressMeter->new;
+}
+
 if (@ARGV == 0) {
 	$regen_package = 1;
 } elsif (@ARGV != 1) {
@@ -523,10 +628,6 @@ if (@signature_params > 0) {
 	}
 	$cert = $signature_params[1];
 	$privkey = $signature_params[2];
-}
-
-if (defined $opt_O) {
-	Usage "Option O is no longer supported";
 }
 
 if (defined $opt_Q) {
@@ -584,19 +685,11 @@ if ($regen_package) {
 	}
 	exit(0);
 } else {
-	if (defined $opt_i) {
-		print STDERR "Warning: INSTALL scripts are deprecated\n";
-	}
-	if (defined $opt_k) {
-		print STDERR "Warning: DEINSTALL scripts are deprecated\n";
-	}
 	print "Creating package $ARGV[0]\n" if !(defined $opt_q) && $opt_v;
 	if (!$opt_q) {
 		$plist->set_infodir(OpenBSD::Temp->dir);
 	}
-	add_description($plist, DESC, $opt_c, $opt_d);
-	add_special_file($plist, INSTALL, $opt_i);
-	add_special_file($plist, DEINSTALL, $opt_k);
+	add_description($plist, DESC, $opt_d);
 	add_special_file($plist, DISPLAY, $opt_M);
 	add_special_file($plist, UNDISPLAY, $opt_U);
 	if (defined $opt_p) {
@@ -625,14 +718,21 @@ if ($regen_package) {
 		$plist->set_pkgname($pkgname);
 	}
 	my $fullpkgpath = $subst->value('FULLPKGPATH');
-	my $cdrom = $subst->value('PERMIT_PACKAGE_CDROM');
-	my $ftp = $subst->value('PERMIT_PACKAGE_FTP');
-	if (defined $fullpkgpath && defined $cdrom && defined $ftp) {
+	my $cdrom = $subst->value('PERMIT_PACKAGE_CDROM') || 
+	    $subst->value('CDROM');;
+	my $ftp = $subst->value('PERMIT_PACKAGE_FTP') ||
+	    $subst->value('FTP');
+	if (defined $fullpkgpath || defined $cdrom || defined $ftp) {
+		$fullpkgpath //= '';
+		$cdrom //= 'no';
+		$ftp //= 'no';
 		$cdrom = 'yes' if $cdrom =~ m/^yes$/io;
 		$ftp = 'yes' if $ftp =~ m/^yes$/io;
 
 		OpenBSD::PackingElement::ExtraInfo->add($plist, 
 		    $fullpkgpath, $cdrom, $ftp);
+	} else {
+		Warn "Package without FULLPKGPATH\n";
 	}
 	for my $contentsfile (@contents) {
 		read_fragments($plist, $contentsfile) or 
@@ -644,23 +744,32 @@ if ($regen_package) {
 my $base = '/';
 if (defined $opt_B) {
 	$base = $opt_B;
-} elsif (defined $opt_S) {
-	print STDERR "Warning: -S is deprecated, use -B instead\n";
-	$base = $opt_S;
 } elsif (defined $ENV{'PKG_PREFIX'}) {
 	$base = $ENV{'PKG_PREFIX'};
 }
 
 
 unless (defined $opt_q && defined $opt_n) {
+	my ($count, $done) = (0, 0);
+	my $cont = 0;
+	$plist->count(\$count);
+	if (!$progress->set_header("checksumming")) {
+		$| = 1;
+		print "Checksumming...";
+		$cont = 1;
+	}
+	$progress->show(0, $count);
 	if ($regen_package) {
-		$plist->verify_checksum($base, {});
+		$plist->verify_checksum_and_progress($base, {}, $progress, \$done, $count);
 	} else {
 		my $p2 = OpenBSD::PackingList->new;
-		$plist->makesum_plist($p2, $base, {});
+		$plist->makesum_plist_and_progress($p2, $base, {}, $progress, \$done, $count);
 		$p2->set_infodir($plist->infodir);
 		$plist = $p2;
 	}
+	if ($cont) {
+		print "\n";
+    	}
 }
 
 if (!defined $plist->{name}) {
@@ -684,15 +793,17 @@ if ($plist->{deprecated}) {
 
 $plist->avert_duplicates_and_other_checks({});
 
-if ($errors) {
+if ($errors && $subst->empty('REGRESSION_TESTING')) {
 	exit 1;
 }
+$errors = 0;
 
 if (defined $cert) {
 	my $sig = OpenBSD::PackingElement::DigitalSignature->new_x509;
 	$sig->add_object($plist);
 	require OpenBSD::x509;
 	$sig->{b64sig} = OpenBSD::x509::compute_signature($plist, $cert, $privkey);
+	$plist->save if $regen_package;
 }
 	
 my $wname;
@@ -720,10 +831,14 @@ if ($opt_n) {
 	local $SIG{'HUP'} = $h;
 	local $SIG{'KILL'} = $h;
 	local $SIG{'TERM'} = $h;
-	open(my $fh, "|-", OpenBSD::Paths->gzip, "-o", $wname);
+	open(my $fh, "|-", OpenBSD::Paths->gzip, "-f", "-o", $wname);
 	my $wrarc = OpenBSD::Ustar->new($fh, $plist->infodir);
 
-	$plist->create_package($wrarc, $base, $opt_v);
+	$progress->set_header("archiving");
+	my ($done, $totsize) = (0, 0);
+	$plist->size(\$totsize);
+	$plist->create_package_and_progress($wrarc, $base, $opt_v, $progress, \$done, $totsize);
+	$progress->clear;
 	$wrarc->close;
 	if ($errors) {
 		unlink($wname);

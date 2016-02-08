@@ -1,4 +1,4 @@
-/*	$OpenBSD: pfctl_optimize.c,v 1.18 2008/05/07 06:23:30 markus Exp $ */
+/*	$OpenBSD: pfctl_optimize.c,v 1.24 2010/01/12 03:20:51 mcbride Exp $ */
 
 /*
  * Copyright (c) 2004 Mike Frantzen <frantzen@openbsd.org>
@@ -134,8 +134,10 @@ struct pf_rule_field {
     PF_RULE_FIELD(return_ttl,		BREAK),
     PF_RULE_FIELD(overload_tblname,	BREAK),
     PF_RULE_FIELD(flush,		BREAK),
-    PF_RULE_FIELD(rpool,		BREAK),
+    PF_RULE_FIELD(rdr,			BREAK),
+    PF_RULE_FIELD(nat,			BREAK),
     PF_RULE_FIELD(logif,		BREAK),
+    PF_RULE_FIELD(route,		BREAK),
 
     /*
      * Any fields not listed in this structure act as BREAK fields
@@ -195,8 +197,7 @@ struct pf_rule_field {
     PF_RULE_FIELD(match_tag,		DC),
     PF_RULE_FIELD(overload_tbl,		DC),
 
-    /* These fields should never be set in a PASS/BLOCK rule */
-    PF_RULE_FIELD(natpass,		NEVER),
+    /* These fields should never be set in a PASS/BLOCK rule XXX fix*/
     PF_RULE_FIELD(max_mss,		NEVER),
     PF_RULE_FIELD(min_ttl,		NEVER),
     PF_RULE_FIELD(set_tos,		NEVER),
@@ -204,8 +205,6 @@ struct pf_rule_field {
 
 
 
-int	add_opt_table(struct pfctl *, struct pf_opt_tbl **, sa_family_t,
-	    struct pf_rule_addr *);
 int	addrs_combineable(struct pf_rule_addr *, struct pf_rule_addr *);
 int	addrs_equal(struct pf_rule_addr *, struct pf_rule_addr *);
 int	block_feedback(struct pfctl *, struct superblock *);
@@ -217,7 +216,6 @@ void	exclude_supersets(struct pf_rule *, struct pf_rule *);
 int	interface_group(const char *);
 int	load_feedback_profile(struct pfctl *, struct superblocks *);
 int	optimize_superblock(struct pfctl *, struct superblock *);
-int	pf_opt_create_table(struct pfctl *, struct pf_opt_tbl *);
 void	remove_from_skipsteps(struct skiplist *, struct superblock *,
 	    struct pf_opt_rule *, struct pf_skip_step *);
 int	remove_identical_rules(struct pfctl *, struct superblock *);
@@ -271,29 +269,19 @@ pfctl_optimize_ruleset(struct pfctl *pf, struct pf_ruleset *rs)
 	skip_init();
 	TAILQ_INIT(&opt_queue);
 
-	old_rules = rs->rules[PF_RULESET_FILTER].active.ptr;
-	rs->rules[PF_RULESET_FILTER].active.ptr =
-	    rs->rules[PF_RULESET_FILTER].inactive.ptr;
-	rs->rules[PF_RULESET_FILTER].inactive.ptr = old_rules;
+	old_rules = rs->rules.active.ptr;
+	rs->rules.active.ptr = rs->rules.inactive.ptr;
+	rs->rules.inactive.ptr = old_rules;
 
 	/*
 	 * XXX expanding the pf_opt_rule format throughout pfctl might allow
 	 * us to avoid all this copying.
 	 */
-	while ((r = TAILQ_FIRST(rs->rules[PF_RULESET_FILTER].inactive.ptr))
-	    != NULL) {
-		TAILQ_REMOVE(rs->rules[PF_RULESET_FILTER].inactive.ptr, r,
-		    entries);
+	while ((r = TAILQ_FIRST(rs->rules.inactive.ptr)) != NULL) {
+		TAILQ_REMOVE(rs->rules.inactive.ptr, r, entries);
 		if ((por = calloc(1, sizeof(*por))) == NULL)
 			err(1, "calloc");
 		memcpy(&por->por_rule, r, sizeof(*r));
-		if (TAILQ_FIRST(&r->rpool.list) != NULL) {
-			TAILQ_INIT(&por->por_rule.rpool.list);
-			pfctl_move_pool(&r->rpool, &por->por_rule.rpool);
-		} else
-			bzero(&por->por_rule.rpool,
-			    sizeof(por->por_rule.rpool));
-
 
 		TAILQ_INSERT_TAIL(&opt_queue, por, por_entry);
 	}
@@ -322,11 +310,7 @@ pfctl_optimize_ruleset(struct pfctl *pf, struct pf_ruleset *rs)
 			if ((r = calloc(1, sizeof(*r))) == NULL)
 				err(1, "calloc");
 			memcpy(r, &por->por_rule, sizeof(*r));
-			TAILQ_INIT(&r->rpool.list);
-			pfctl_move_pool(&por->por_rule.rpool, &r->rpool);
-			TAILQ_INSERT_TAIL(
-			    rs->rules[PF_RULESET_FILTER].active.ptr,
-			    r, entries);
+			TAILQ_INSERT_TAIL(rs->rules.active.ptr, r, entries);
 			free(por);
 		}
 		free(block);
@@ -514,10 +498,10 @@ combine_rules(struct pfctl *pf, struct superblock *block)
 				    p1->por_rule.nr, p2->por_rule.nr);
 				if (p1->por_dst_tbl == NULL &&
 				    add_opt_table(pf, &p1->por_dst_tbl,
-				    p1->por_rule.af, &p1->por_rule.dst))
+				    p1->por_rule.af, &p1->por_rule.dst, NULL))
 					return (1);
 				if (add_opt_table(pf, &p1->por_dst_tbl,
-				    p1->por_rule.af, &p2->por_rule.dst))
+				    p1->por_rule.af, &p2->por_rule.dst, NULL))
 					return (1);
 				p2->por_dst_tbl = p1->por_dst_tbl;
 				if (p1->por_dst_tbl->pt_rulecount >=
@@ -536,10 +520,10 @@ combine_rules(struct pfctl *pf, struct superblock *block)
 				    p1->por_rule.nr, p2->por_rule.nr);
 				if (p1->por_src_tbl == NULL &&
 				    add_opt_table(pf, &p1->por_src_tbl,
-				    p1->por_rule.af, &p1->por_rule.src))
+				    p1->por_rule.af, &p1->por_rule.src, NULL))
 					return (1);
 				if (add_opt_table(pf, &p1->por_src_tbl,
-				    p1->por_rule.af, &p2->por_rule.src))
+				    p1->por_rule.af, &p2->por_rule.src, NULL))
 					return (1);
 				p2->por_src_tbl = p1->por_src_tbl;
 				if (p1->por_src_tbl->pt_rulecount >=
@@ -556,6 +540,7 @@ combine_rules(struct pfctl *pf, struct superblock *block)
 	/*
 	 * Then we make a final pass to create a valid table name and
 	 * insert the name into the rules.
+	 * Convert translation/routing mapping pools to tables as well.
 	 */
 	for (p1 = TAILQ_FIRST(&block->sb_rules); p1; p1 = por_next) {
 		por_next = TAILQ_NEXT(p1, por_entry);
@@ -903,14 +888,12 @@ load_feedback_profile(struct pfctl *pf, struct superblocks *superblocks)
 		pr.nr = nr;
 		if (ioctl(pf->dev, DIOCGETRULE, &pr)) {
 			warn("DIOCGETRULES");
+			free(por);
 			return (1);
 		}
 		memcpy(&por->por_rule, &pr.rule, sizeof(por->por_rule));
 		rs = pf_find_or_create_ruleset(pr.anchor_call);
 		por->por_rule.anchor = rs->anchor;
-		if (TAILQ_EMPTY(&por->por_rule.rpool.list))
-			memset(&por->por_rule.rpool, 0,
-			    sizeof(por->por_rule.rpool));
 		TAILQ_INSERT_TAIL(&queue, por, por_entry);
 
 		/* XXX pfctl_get_pool(pf->dev, &pr.rule.rpool, nr, pr.ticket,
@@ -1214,7 +1197,7 @@ skip_init(void)
  */
 int
 add_opt_table(struct pfctl *pf, struct pf_opt_tbl **tbl, sa_family_t af,
-    struct pf_rule_addr *addr)
+    struct pf_rule_addr *addr, char *ifname)
 {
 #ifdef OPT_DEBUG
 	char buf[128];
@@ -1239,6 +1222,7 @@ add_opt_table(struct pfctl *pf, struct pf_opt_tbl **tbl, sa_family_t af,
 	memset(&node_host, 0, sizeof(node_host));
 	node_host.af = af;
 	node_host.addr = addr->addr;
+	node_host.ifname = ifname;
 
 #ifdef OPT_DEBUG
 	DEBUG("<%s> adding %s/%d", (*tbl)->pt_name, inet_ntop(af,
@@ -1312,7 +1296,6 @@ again:
 		}
 	}
 	tablenum++;
-
 
 	if (pfctl_define_table(tbl->pt_name, PFR_TFLAG_CONST, 1,
 	    pf->astack[0]->name, tbl->pt_buf, pf->astack[0]->ruleset.tticket)) {

@@ -1,4 +1,4 @@
-/*	$OpenBSD: move.c,v 1.10 2003/06/03 03:01:40 millert Exp $	*/
+/*	$OpenBSD: move.c,v 1.12 2009/12/10 23:53:05 beck Exp $	*/
 /*	$NetBSD: move.c,v 1.4 1995/03/24 05:01:57 cgd Exp $	*/
 
 /*
@@ -29,14 +29,6 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  */
-
-#ifndef lint
-#if 0
-static char sccsid[] = "@(#)move.c	8.1 (Berkeley) 5/31/93";
-#else
-static char rcsid[] = "$OpenBSD: move.c,v 1.10 2003/06/03 03:01:40 millert Exp $";
-#endif
-#endif /* not lint */
 
 #ifdef DEBUG
 #include <sys/param.h>
@@ -138,11 +130,11 @@ acc:
 	else
 		for (i = 1; i < HAND_SZ; i++)
 			if (pp->hand[i] == C_INIT) {
-				for (j = 0; pp->hand[j] == C_INIT; j++)
-					if (j >= HAND_SZ) {
-						j = 0;
-						break;
-					}
+				for (j = 0; (j < HAND_SZ) &&
+					 (pp->hand[j] == C_INIT); j++)
+					;	
+				if (j == HAND_SZ)
+					j = 0;
 				pp->hand[i] = pp->hand[j];
 				pp->hand[j] = C_INIT;
 			}

@@ -1,7 +1,7 @@
-#	$OpenBSD: Makefile.inc,v 1.44 2007/06/05 18:04:46 henning Exp $
+#	$OpenBSD: Makefile.inc,v 1.47 2010/02/03 20:49:00 miod Exp $
 
 # net sources
-.PATH: ${LIBCSRCDIR}/arch/${MACHINE_ARCH}/net ${LIBCSRCDIR}/net
+.PATH: ${LIBCSRCDIR}/arch/${MACHINE_CPU}/net ${LIBCSRCDIR}/net
 
 CFLAGS+=-DRESOLVSORT
 
@@ -13,7 +13,7 @@ SRCS+=	base64.c freeaddrinfo.c gai_strerror.c getaddrinfo.c gethostnamadr.c \
 	inet_lnaof.c inet_makeaddr.c inet_neta.c inet_netof.c inet_network.c \
 	inet_net_ntop.c inet_net_pton.c inet_ntoa.c inet_ntop.c inet_pton.c \
 	linkaddr.c net_addrcmp.c nsap_addr.c \
-	rcmd.c rresvport.c recv.c res_comp.c res_data.c res_debug.c \
+	rcmd.c ruserok.c rresvport.c recv.c res_comp.c res_data.c res_debug.c \
 	res_debug_syms.c \
 	res_init.c res_mkquery.c res_query.c res_random.c res_send.c send.c \
 	sethostent.c ethers.c rcmdsh.c
@@ -25,7 +25,7 @@ SRCS+=	ip6opt.c rthdr.c vars6.c
 # m-d Makefile.inc must include sources for:
 #	htonl() htons() ntohl() ntohs()
 
-.include "${LIBCSRCDIR}/arch/${MACHINE_ARCH}/net/Makefile.inc"
+.include "${LIBCSRCDIR}/arch/${MACHINE_CPU}/net/Makefile.inc"
 
 MAN+=	byteorder.3 ethers.3 gai_strerror.3 getaddrinfo.3 gethostbyname.3 \
 	getifaddrs.3 getnameinfo.3 getnetent.3 getprotoent.3 \
@@ -60,8 +60,8 @@ MLINKS+=getprotoent.3 endprotoent.3 getprotoent.3 getprotobyname.3 \
 MLINKS+=getservent.3 endservent.3 getservent.3 getservbyname.3 \
 	getservent.3 getservbyport.3 getservent.3 setservent.3 \
 	getservent.3 getservent_r.3 getservent.3 getservbyname_r.3 \
-	getservent.3 getservbyport_r.3 setservent.3 setservent_r.3 \
-	setservent.3 endservent_r.3
+	getservent.3 getservbyport_r.3 getservent.3 setservent_r.3 \
+	getservent.3 endservent_r.3
 MLINKS+= if_indextoname.3 if_nametoindex.3 if_indextoname.3 if_nameindex.3 \
 	if_indextoname.3 if_freenameindex.3
 MLINKS+=inet.3 addr.3 inet.3 inet_addr.3 inet.3 inet_aton.3 \

@@ -1,4 +1,4 @@
-/*	$OpenBSD: editor.c,v 1.219 2009/06/26 14:25:36 deraadt Exp $	*/
+/*	$OpenBSD: editor.c,v 1.225 2009/12/24 10:06:35 sobrado Exp $	*/
 
 /*
  * Copyright (c) 1997-2000 Todd C. Miller <Todd.Miller@courtesan.com>
@@ -15,10 +15,6 @@
  * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
-
-#ifndef lint
-static char rcsid[] = "$OpenBSD: editor.c,v 1.219 2009/06/26 14:25:36 deraadt Exp $";
-#endif /* not lint */
 
 #include <sys/types.h>
 #include <sys/param.h>
@@ -77,12 +73,12 @@ const struct space_allocation alloc_big[] = {
 	{   MEG(80),       MEG(256),   5, "swap"	},
 	{  MEG(120),         GIG(4),   8, "/tmp"	},
 	{   MEG(80),         GIG(4),  13, "/var"	},
-	{  MEG(600),         GIG(2),   2, "/usr"	},
+	{  MEG(900),         GIG(2),   5, "/usr"	},
 	{  MEG(512),         GIG(1),   3, "/usr/X11R6"	},
 	{    GIG(2),         GIG(6),   5, "/usr/local"	},
 	{    GIG(1),         GIG(2),   3, "/usr/src"	},
 	{    GIG(1),         GIG(2),   3, "/usr/obj"	},
-	{    GIG(1),       GIG(300),  53, "/home"	}
+	{    GIG(1),       GIG(300),  50, "/home"	}
 	/* Anything beyond this leave for the user to decide */
 };
 
@@ -117,7 +113,6 @@ const struct {
 };
 
 void	edit_parms(struct disklabel *);
-void	editor_allocspace(struct disklabel *);
 void	editor_add(struct disklabel *, char *);
 void	editor_change(struct disklabel *, char *);
 u_int64_t editor_countfree(struct disklabel *);
@@ -137,7 +132,6 @@ struct diskchunk *free_chunks(struct disklabel *);
 void	mpcopy(char **, char **);
 int	micmp(const void *, const void *);
 int	mpequal(char **, char **);
-void	mpsave(struct disklabel *);
 int	get_bsize(struct disklabel *, int);
 int	get_fsize(struct disklabel *, int);
 int	get_fstype(struct disklabel *, int);
@@ -162,13 +156,13 @@ int
 editor(struct disklabel *lp, int f)
 {
 	struct disklabel origlabel, lastlabel, tmplabel, label = *lp;
-	struct disklabel *disk_geop;
+	struct disklabel *disk_geop = NULL;
 	struct partition *pp;
 	FILE *fp;
 	char buf[BUFSIZ], *cmd, *arg;
 	char **omountpoints = NULL;
 	char **origmountpoints = NULL, **tmpmountpoints = NULL;
-	int i;
+	int i, error = 0;
 
 	/* Alloc and init mount point info */
 	if (!(omountpoints = calloc(MAXPARTITIONS, sizeof(char *))) ||
@@ -341,7 +335,7 @@ editor(struct disklabel *lp, int f)
 		case 'q':
 			if (donothing) {
 				puts("In no change mode, not writing label.");
-				return(0);
+				goto done;
 			}
 			/* Save mountpoint info if there is any. */
 			mpsave(&label);
@@ -356,7 +350,7 @@ editor(struct disklabel *lp, int f)
 			if (!dflag && !aflag &&
 			    memcmp(lp, &label, sizeof(label)) == 0) {
 				puts("No label changes.");
-				return(0);
+				goto done;
 			}
 			do {
 				arg = getstring("Write new label?",
@@ -366,11 +360,12 @@ editor(struct disklabel *lp, int f)
 			if (arg && tolower(*arg) == 'y') {
 				if (writelabel(f, bootarea, &label) == 0) {
 					*lp = label;
-					return(0);
+					goto done;
 				}
 				warnx("unable to write label");
 			}
-			return(1);
+			error = 1;
+			goto done;
 			/* NOTREACHED */
 			break;
 
@@ -455,7 +450,7 @@ editor(struct disklabel *lp, int f)
 			break;
 
 		case 'x':
-			return(0);
+			goto done;
 			break;
 
 		case 'z':
@@ -480,6 +475,13 @@ editor(struct disklabel *lp, int f)
 			mpcopy(omountpoints, tmpmountpoints);
 		}
 	}
+done:
+	free(omountpoints);
+	free(origmountpoints);
+	free(tmpmountpoints);
+	if (disk_geop)
+		free(disk_geop);
+	return(error);
 }
 
 int64_t
@@ -713,7 +715,7 @@ editor_add(struct disklabel *lp, char *p)
 
 	/*
 	 * Increase d_npartitions if necessary. Ensure all new partitions are
-	 * zero'ed to avoid inadvertant overlaps.
+	 * zero'ed to avoid inadvertent overlaps.
 	 */
 	for(; lp->d_npartitions <= partno; lp->d_npartitions++)
 		memset(&lp->d_partitions[lp->d_npartitions], 0, sizeof(*pp));
@@ -1687,7 +1689,7 @@ editor_help(char *arg)
 "The 'n' command is used to set the mount point for a partition (ie: name it).\n"
 "It takes as an optional argument the partition letter to name.  If you do\n"
 "not specify a partition letter, you will be prompted for one.  This option\n"
-"is only valid if disklabel was invoked with the -F flag.\n");
+"is only valid if disklabel was invoked with the -f flag.\n");
 		break;
 	case 'r':
 		puts(

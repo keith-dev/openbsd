@@ -1,4 +1,4 @@
-/*	$OpenBSD: print-ip6.c,v 1.10 2007/10/04 18:38:29 canacar Exp $	*/
+/*	$OpenBSD: print-ip6.c,v 1.12 2009/11/27 13:14:35 bluhm Exp $	*/
 
 /*
  * Copyright (c) 1988, 1989, 1990, 1991, 1992, 1993, 1994
@@ -20,11 +20,6 @@
  * WARRANTIES, INCLUDING, WITHOUT LIMITATION, THE IMPLIED WARRANTIES OF
  * MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE.
  */
-
-#ifndef lint
-static const char rcsid[] =
-    "@(#) /master/usr.sbin/tcpdump/tcpdump/print-ip.c,v 2.1 1995/02/03 18:14:45 polk Exp (LBL)";
-#endif
 
 #ifdef INET6
 
@@ -119,9 +114,13 @@ ip6_print(register const u_char *bp, register int length)
 	while (cp + hlen < snapend) {
 		cp += hlen;
 
+#ifndef IPPROTO_IPV4
+#define IPPROTO_IPV4	4
+#endif
 		if (cp == (u_char *)(ip6 + 1) &&
 		    nh != IPPROTO_TCP && nh != IPPROTO_UDP &&
-		    nh != IPPROTO_ESP && nh != IPPROTO_AH) {
+		    nh != IPPROTO_ESP && nh != IPPROTO_AH &&
+		    (vflag || (nh != IPPROTO_IPV4 && nh != IPPROTO_IPV6))) {
 			(void)printf("%s > %s: ", ip6addr_string(&ip6->ip6_src),
 				     ip6addr_string(&ip6->ip6_dst));
 		}
@@ -176,12 +175,13 @@ ip6_print(register const u_char *bp, register int length)
 			goto end;
 		case IPPROTO_IPV6:
 			ip6_print(cp, len);
+			if (! vflag)
+				printf(" (encap)");
 			goto end;
-#ifndef IPPROTO_IPV4
-#define IPPROTO_IPV4	4
-#endif
 		case IPPROTO_IPV4:
 			ip_print(cp, len);
+			if (! vflag)
+				printf(" (encap)");
 			goto end;
 		case IPPROTO_NONE:
 			(void)printf("no next header");

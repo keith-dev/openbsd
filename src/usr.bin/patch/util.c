@@ -1,4 +1,4 @@
-/*	$OpenBSD: util.c,v 1.32 2006/03/11 19:41:30 otto Exp $	*/
+/*	$OpenBSD: util.c,v 1.34 2010/01/08 13:27:59 oga Exp $	*/
 
 /*
  * patch - a program to apply diffs to original files
@@ -25,10 +25,6 @@
  * -C option added in 1998, original code by Marc Espie, based on FreeBSD
  * behaviour
  */
-
-#ifndef lint
-static const char rcsid[] = "$OpenBSD: util.c,v 1.32 2006/03/11 19:41:30 otto Exp $";
-#endif /* not lint */
 
 #include <sys/param.h>
 #include <sys/stat.h>
@@ -314,8 +310,10 @@ makedirs(const char *filename, bool striplast)
 
 	if (striplast) {
 		char	*s = strrchr(tmpbuf, '/');
-		if (s == NULL)
+		if (s == NULL) {
+			free(tmpbuf);
 			return;	/* nothing to be done */
+		}
 		*s = '\0';
 	}
 	if (mkpath(tmpbuf) != 0)

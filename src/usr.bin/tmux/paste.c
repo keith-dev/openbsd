@@ -1,4 +1,4 @@
-/* $OpenBSD: paste.c,v 1.2 2009/07/02 16:15:43 nicm Exp $ */
+/* $OpenBSD: paste.c,v 1.8 2009/12/03 22:50:10 nicm Exp $ */
 
 /*
  * Copyright (c) 2007 Nicholas Marriott <nicm@users.sourceforge.net>
@@ -23,6 +23,11 @@
 
 #include "tmux.h"
 
+/*
+ * Stack of paste buffers. Note that paste buffer data is not necessarily a C
+ * string!
+ */
+
 void
 paste_init_stack(struct paste_stack *ps)
 {
@@ -36,6 +41,7 @@ paste_free_stack(struct paste_stack *ps)
 		;
 }
 
+/* Return each item of the stack in turn. */
 struct paste_buffer *
 paste_walk_stack(struct paste_stack *ps, uint *idx)
 {
@@ -46,6 +52,7 @@ paste_walk_stack(struct paste_stack *ps, uint *idx)
 	return (pb);
 }
 
+/* Get the top item on the stack. */
 struct paste_buffer *
 paste_get_top(struct paste_stack *ps)
 {
@@ -54,6 +61,7 @@ paste_get_top(struct paste_stack *ps)
 	return (ARRAY_FIRST(ps));
 }
 
+/* Get an item by its index. */
 struct paste_buffer *
 paste_get_index(struct paste_stack *ps, u_int idx)
 {
@@ -62,6 +70,7 @@ paste_get_index(struct paste_stack *ps, u_int idx)
 	return (ARRAY_ITEM(ps, idx));
 }
 
+/* Free the top item on the stack. */
 int
 paste_free_top(struct paste_stack *ps)
 {
@@ -79,6 +88,7 @@ paste_free_top(struct paste_stack *ps)
 	return (0);
 }
 
+/* Free an item by index. */
 int
 paste_free_index(struct paste_stack *ps, u_int idx)
 {
@@ -96,29 +106,44 @@ paste_free_index(struct paste_stack *ps, u_int idx)
 	return (0);
 }
 
+/*
+ * Add an item onto the top of the stack, freeing the bottom if at limit. Note
+ * that the caller is responsible for allocating data.
+ */
 void
-paste_add(struct paste_stack *ps, char *data, u_int limit)
+paste_add(struct paste_stack *ps, char *data, size_t size, u_int limit)
 {
 	struct paste_buffer	*pb;
 
-	if (*data == '\0')
+	if (size == 0)
 		return;
 
-	while (ARRAY_LENGTH(ps) >= limit)
+	while (ARRAY_LENGTH(ps) >= limit) {
+		pb = ARRAY_LAST(ps);
+		xfree(pb->data);
+		xfree(pb);
 		ARRAY_TRUNC(ps, 1);
+	}
 
 	pb = xmalloc(sizeof *pb);
 	ARRAY_INSERT(ps, 0, pb);
 
 	pb->data = data;
-	if (gettimeofday(&pb->tv, NULL) != 0)
-		fatal("gettimeofday");
+	pb->size = size;
 }
 
+
+/*
+ * Replace an item on the stack. Note that the caller is responsible for
+ * allocating data.
+ */
 int
-paste_replace(struct paste_stack *ps, u_int idx, char *data)
+paste_replace(struct paste_stack *ps, u_int idx, char *data, size_t size)
 {
 	struct paste_buffer	*pb;
+
+	if (size == 0)
+		return (0);
 
 	if (idx >= ARRAY_LENGTH(ps))
 		return (-1);
@@ -127,8 +152,7 @@ paste_replace(struct paste_stack *ps, u_int idx, char *data)
 	xfree(pb->data);
 
 	pb->data = data;
-	if (gettimeofday(&pb->tv, NULL) != 0)
-		fatal("gettimeofday");
+	pb->size = size;
 
 	return (0);
 }

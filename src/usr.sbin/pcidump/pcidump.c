@@ -1,4 +1,4 @@
-/*	$OpenBSD: pcidump.c,v 1.19 2009/06/07 21:48:16 sobrado Exp $	*/
+/*	$OpenBSD: pcidump.c,v 1.22 2010/03/01 19:00:47 kettenis Exp $	*/
 
 /*
  * Copyright (c) 2006, 2007 David Gwynne <loki@animata.net>
@@ -16,20 +16,22 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
-#include <stdio.h>
-#include <stdlib.h>
-#include <unistd.h>
-#include <fcntl.h>
-#include <string.h>
-#include <errno.h>
-#include <err.h>
-
 #include <sys/ioctl.h>
 #include <sys/param.h>
 #include <sys/pciio.h>
+
 #include <dev/pci/pcireg.h>
 #include <dev/pci/pcidevs.h>
 #include <dev/pci/pcidevs_data.h>
+
+#include <err.h>
+#include <errno.h>
+#include <fcntl.h>
+#include <paths.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
 
 #define PCIDEV	"/dev/pci"
 
@@ -42,6 +44,8 @@ const char *str2busdevfunc(const char *, int *, int *, int *);
 int pci_nfuncs(int, int);
 int pci_read(int, int, int, u_int32_t, u_int32_t *);
 void dump_caplist(int, int, int, u_int8_t);
+int dump_rom(int, int, int);
+int dump_vga_bios(void);
 
 __dead void
 usage(void)
@@ -49,12 +53,14 @@ usage(void)
 	extern char *__progname;
 
 	fprintf(stderr,
-	    "usage: %s [-v] [-x | -xx] [-d pcidev] [bus:dev:func]\n",
-	    __progname);
+	    "usage: %s [-v] [-x | -xx] [-d pcidev] [bus:dev:func]\n"
+	    "       %s -r file [-d pcidev] bus:dev:func\n",
+	    __progname, __progname);
 	exit(1);
 }
 
 int pcifd;
+int romfd;
 int verbose = 0;
 int hex = 0;
 
@@ -86,13 +92,18 @@ main(int argc, char *argv[])
 	int nfuncs;
 	int bus, dev, func;
 	char pcidev[MAXPATHLEN] = PCIDEV;
+	char *romfile = NULL;
 	const char *errstr;
 	int c, error = 0, dumpall = 1, domid = 0;
 
-	while ((c = getopt(argc, argv, "d:vx")) != -1) {
+	while ((c = getopt(argc, argv, "d:r:vx")) != -1) {
 		switch (c) {
 		case 'd':
 			strlcpy(pcidev, optarg, sizeof(pcidev));
+			dumpall = 0;
+			break;
+		case 'r':
+			romfile = optarg;
 			dumpall = 0;
 			break;
 		case 'v':
@@ -108,8 +119,14 @@ main(int argc, char *argv[])
 	argc -= optind;
 	argv += optind;
 
-	if (argc > 1)
+	if (argc > 1 || (romfile && argc != 1))
 		usage();
+
+	if (romfile) {
+		romfd = open(romfile, O_WRONLY|O_CREAT|O_TRUNC, 0777);
+		if (romfd == -1)
+			err(1, "%s", romfile);
+	}
 
 	if (argc == 1)
 		dumpall = 0;
@@ -118,7 +135,6 @@ main(int argc, char *argv[])
 		pcifd = open(pcidev, O_RDONLY, 0777);
 		if (pcifd == -1)
 			err(1, "%s", pcidev);
-		printf("Domain %s:\n", pcidev);
 	} else {
 		for (;;) {
 			snprintf(pcidev, 16, "/dev/pci%d", domid++);
@@ -144,12 +160,15 @@ main(int argc, char *argv[])
 		nfuncs = pci_nfuncs(bus, dev);
 		if (nfuncs == -1 || func > nfuncs)
 			error = ENXIO;
+		else if (romfile)
+			error = dump_rom(bus, dev, func);
 		else
 			error = probe(bus, dev, func);
 
 		if (error != 0)
 			errx(1, "\"%s\": %s", argv[0], strerror(error));
 	} else {
+		printf("Domain %s:\n", pcidev);
 		scanpcidomain();
 	}
 
@@ -589,4 +608,68 @@ pci_read(int bus, int dev, int func, u_int32_t reg, u_int32_t *val)
 	*val = io.pi_data;
 
 	return (0);
+}
+
+int
+dump_rom(int bus, int dev, int func)
+{
+	struct pci_rom rom;
+	u_int32_t cr, addr;
+
+	if (pci_read(bus, dev, func, PCI_ROM_REG, &addr) != 0 ||
+	    pci_read(bus, dev, func, PCI_CLASS_REG, &cr) != 0)
+		return (errno);
+
+	if (addr == 0 && PCI_CLASS(cr) == PCI_CLASS_DISPLAY &&
+	    PCI_SUBCLASS(cr) == PCI_SUBCLASS_DISPLAY_VGA)
+		return dump_vga_bios();
+
+	bzero(&rom, sizeof(rom));
+	rom.pr_sel.pc_bus = bus;
+	rom.pr_sel.pc_dev = dev;
+	rom.pr_sel.pc_func = func;
+	if (ioctl(pcifd, PCIOCGETROMLEN, &rom))
+		return (errno);
+
+	rom.pr_rom = malloc(rom.pr_romlen);
+	if (rom.pr_rom == NULL)
+		return (ENOMEM);
+
+	if (ioctl(pcifd, PCIOCGETROM, &rom))
+		return (errno);
+
+	if (write(romfd, rom.pr_rom, rom.pr_romlen) == -1)
+		return (errno);
+
+	return (0);
+}
+
+#define VGA_BIOS_ADDR	0xc0000
+#define VGA_BIOS_LEN	0x10000
+
+int
+dump_vga_bios(void)
+{
+#if defined(__amd64__) || defined(__i386__)
+	void *bios;
+	int fd;
+
+	fd = open(_PATH_MEM, O_RDONLY, 0777);
+	if (fd == -1)
+		err(1, "%s", _PATH_MEM);
+
+	bios = malloc(VGA_BIOS_LEN);
+	if (bios == NULL)
+		return (ENOMEM);
+
+	if (pread(fd, bios, VGA_BIOS_LEN, VGA_BIOS_ADDR) == -1)
+		err(1, "%s", _PATH_MEM);
+
+	if (write(romfd, bios, VGA_BIOS_LEN) == -1)
+		return (errno);
+
+	return (0);
+#else
+	return (ENODEV);
+#endif
 }

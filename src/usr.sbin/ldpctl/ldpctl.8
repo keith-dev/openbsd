@@ -1,4 +1,4 @@
-.\"	$OpenBSD: ldpctl.8,v 1.1 2009/06/01 20:59:45 michele Exp $
+.\"	$OpenBSD: ldpctl.8,v 1.4 2009/11/03 08:09:15 jmc Exp $
 .\"
 .\" Copyright (c) 2009 Michele Marchetto <michele@openbsd.org>
 .\" Copyright (c) 2004, 2005 Esben Norby <norby@openbsd.org>
@@ -15,7 +15,7 @@
 .\" ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
 .\" OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 .\"
-.Dd $Mdocdate: June 1 2009 $
+.Dd $Mdocdate: November 3 2009 $
 .Dt LDPCTL 8
 .Os
 .Sh NAME
@@ -40,6 +40,10 @@ the kernel routing table.
 .It Cm lfib decouple
 Remove the learned routes from the Label Forwarding Information Base a.k.a.
 the kernel routing table.
+.It Cm log brief
+Disable verbose debug logging.
+.It Cm log verbose
+Enable verbose debug logging.
 .It Cm show lfib Op Ar destination | filter
 Show the Label Forwarding Information Base.
 .Ar destination
@@ -70,7 +74,8 @@ Show the Label Information Base.
 .Sh FILES
 .Bl -tag -width "/var/run/ldpd.sockXX" -compact
 .It /var/run/ldpd.sock
-Unix-domain socket used for communication with
+.Ux Ns -domain
+socket used for communication with
 .Xr ldpd 8 .
 .El
 .Sh SEE ALSO

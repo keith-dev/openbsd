@@ -1,4 +1,4 @@
-/*	$OpenBSD: function.c,v 1.31 2005/06/15 14:19:45 millert Exp $	*/
+/*	$OpenBSD: function.c,v 1.35 2009/12/09 13:59:43 millert Exp $	*/
 
 /*-
  * Copyright (c) 1990, 1993
@@ -31,11 +31,6 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  */
-
-#ifndef lint
-/*static char sccsid[] = "from: @(#)function.c	8.1 (Berkeley) 6/6/93";*/
-static char rcsid[] = "$OpenBSD: function.c,v 1.31 2005/06/15 14:19:45 millert Exp $";
-#endif /* not lint */
 
 #include <sys/param.h>
 #include <sys/ucred.h>
@@ -403,6 +398,10 @@ c_exec(char *unused, char ***argvp, int isok)
 	PLAN *new;			/* node returned */
 	int cnt;
 	char **argv, **ap, *p;
+
+	/* make sure the current directory is readable */
+	if (dotfd == -1)
+		errx(1, "%s: cannot open \".\"", isok ? "-ok" : "-exec");
 
 	isoutput = 1;
     
@@ -833,9 +832,12 @@ PLAN *
 c_maxdepth(char *arg, char ***ignored, int unused)
 {
 	PLAN *new;
+	const char *errstr = NULL;
 
 	new = palloc(N_MAXDEPTH, f_maxdepth);
-	new->max_data = atoi(arg);
+	new->max_data = strtonum(arg, 0, FTS_MAXLEVEL, &errstr);
+	if (errstr)
+		errx(1, "%s: maxdepth value %s", arg, errstr);
 	return (new);
 }
 

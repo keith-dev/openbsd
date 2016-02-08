@@ -1,4 +1,4 @@
-/*	$Id: mdoc.h,v 1.7 2009/06/23 23:02:54 schwarze Exp $ */
+/*	$Id: mdoc.h,v 1.18 2010/03/02 00:38:59 schwarze Exp $ */
 /*
  * Copyright (c) 2008, 2009 Kristaps Dzonsons <kristaps@kth.se>
  *
@@ -16,8 +16,6 @@
  */
 #ifndef MDOC_H
 #define MDOC_H
-
-#include <time.h>
 
 /*
  * This library implements a validating scanner/parser for ``mdoc'' roff
@@ -147,7 +145,11 @@
 #define	MDOC_En	 	 115
 #define	MDOC_Dx	 	 116
 #define	MDOC__Q	 	 117
-#define	MDOC_MAX	 118
+#define MDOC_br		 118
+#define MDOC_sp		 119
+#define MDOC__U		 120
+#define MDOC_eos	 121
+#define MDOC_MAX	 122
 
 /* What follows is a list of ALL possible macro arguments. */
 
@@ -177,13 +179,8 @@
 #define	MDOC_Emphasis	 23
 #define	MDOC_Symbolic	 24
 #define	MDOC_Nested	 25
-#define	MDOC_ARG_MAX	 26
-
-/* Warnings are either syntax or groff-compatibility. */
-enum	mdoc_warn {
-	WARN_SYNTAX,
-	WARN_COMPAT
-};
+#define	MDOC_Centred	 26
+#define	MDOC_ARG_MAX	 27
 
 /* Type of a syntax node. */
 enum	mdoc_type {
@@ -204,8 +201,9 @@ enum	mdoc_sec {
 	SEC_SYNOPSIS,
 	SEC_DESCRIPTION,
 	SEC_IMPLEMENTATION,
+	SEC_EXIT_STATUS,
 	SEC_RETURN_VALUES,
-	SEC_ENVIRONMENT,
+	SEC_ENVIRONMENT, 
 	SEC_FILES,
 	SEC_EXAMPLES,
 	SEC_DIAGNOSTICS,
@@ -217,6 +215,7 @@ enum	mdoc_sec {
 	SEC_AUTHORS,
 	SEC_CAVEATS,
 	SEC_BUGS,
+	SEC_SECURITY,
 	SEC_CUSTOM		/* User-defined. */
 };
 
@@ -262,11 +261,11 @@ struct	mdoc_node {
 	enum mdoc_type	  type;
 	enum mdoc_sec	  sec;
 
-	/* FIXME: union/struct this with #defines. */
 	struct mdoc_arg	 *args; 	/* BLOCK/ELEM */
 	struct mdoc_node *head;		/* BLOCK */
 	struct mdoc_node *body;		/* BLOCK */
 	struct mdoc_node *tail;		/* BLOCK */
+	struct mdoc_node *pending;	/* BLOCK */
 	char		 *string;	/* TEXT */
 };
 
@@ -276,11 +275,10 @@ struct	mdoc_node {
 #define	MDOC_IGN_CHARS	 (1 << 3) /* Ignore disallowed chars. */
 
 /* Call-backs for parse messages. */
-/* FIXME: unify somehow with man_cb. */
+
 struct	mdoc_cb {
 	int	(*mdoc_err)(void *, int, int, const char *);
-	int	(*mdoc_warn)(void *, int, int, 
-			enum mdoc_warn, const char *);
+	int	(*mdoc_warn)(void *, int, int, const char *);
 };
 
 /* See mdoc.3 for documentation. */
@@ -296,15 +294,11 @@ struct	mdoc;
 
 void	 	  mdoc_free(struct mdoc *);
 struct	mdoc	 *mdoc_alloc(void *, int, const struct mdoc_cb *);
-int		  mdoc_reset(struct mdoc *);
+void		  mdoc_reset(struct mdoc *);
 int	 	  mdoc_parseln(struct mdoc *, int, char *buf);
 const struct mdoc_node *mdoc_node(const struct mdoc *);
 const struct mdoc_meta *mdoc_meta(const struct mdoc *);
 int		  mdoc_endparse(struct mdoc *);
-
-const char	 *mdoc_a2att(const char *);
-const char	 *mdoc_a2lib(const char *);
-const char	 *mdoc_a2st(const char *);
 
 __END_DECLS
 

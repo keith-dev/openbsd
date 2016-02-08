@@ -1,4 +1,4 @@
-/* $OpenBSD: window-choose.c,v 1.2 2009/06/24 23:00:31 nicm Exp $ */
+/* $OpenBSD: window-choose.c,v 1.15 2010/02/01 22:15:51 nicm Exp $ */
 
 /*
  * Copyright (c) 2009 Nicholas Marriott <nicm@users.sourceforge.net>
@@ -27,11 +27,11 @@ void	window_choose_free(struct window_pane *);
 void	window_choose_resize(struct window_pane *, u_int, u_int);
 void	window_choose_key(struct window_pane *, struct client *, int);
 void	window_choose_mouse(
-    	    struct window_pane *, struct client *, u_char, u_char, u_char);
+	    struct window_pane *, struct client *, struct mouse_event *);
 
 void	window_choose_redraw_screen(struct window_pane *);
 void	window_choose_write_line(
-    	    struct window_pane *, struct screen_write_ctx *, u_int);
+	    struct window_pane *, struct screen_write_ctx *, u_int);
 
 void	window_choose_scroll_up(struct window_pane *);
 void	window_choose_scroll_down(struct window_pane *);
@@ -59,9 +59,13 @@ struct window_choose_mode_data {
 	u_int			top;
 	u_int			selected;
 
-	void 			(*callback)(void *, int);
+	void 			(*callbackfn)(void *, int);
+	void			(*freefn)(void *);
 	void		       *data;
 };
+
+int	window_choose_key_index(struct window_choose_mode_data *, u_int);
+int	window_choose_index_key(struct window_choose_mode_data *, int);
 
 void
 window_choose_vadd(struct window_pane *wp, int idx, const char *fmt, va_list ap)
@@ -86,8 +90,8 @@ window_choose_add(struct window_pane *wp, int idx, const char *fmt, ...)
 }
 
 void
-window_choose_ready(struct window_pane *wp,
-    u_int cur, void (*callback)(void *, int), void *cdata)
+window_choose_ready(struct window_pane *wp, u_int cur,
+    void (*callbackfn)(void *, int), void (*freefn)(void *), void *cdata)
 {
 	struct window_choose_mode_data	*data = wp->modedata;
 	struct screen			*s = &data->screen;
@@ -96,7 +100,8 @@ window_choose_ready(struct window_pane *wp,
 	if (data->selected > screen_size_y(s) - 1)
 		data->top = ARRAY_LENGTH(&data->list) - screen_size_y(s);
 
-	data->callback = callback;
+	data->callbackfn = callbackfn;
+	data->freefn = freefn;
 	data->data = cdata;
 
 	window_choose_redraw_screen(wp);
@@ -107,20 +112,28 @@ window_choose_init(struct window_pane *wp)
 {
 	struct window_choose_mode_data	*data;
 	struct screen			*s;
+	int				 keys;
 
 	wp->modedata = data = xmalloc(sizeof *data);
-	data->callback = NULL;
+
+	data->callbackfn = NULL;
+	data->freefn = NULL;
+	data->data = NULL;
+
 	ARRAY_INIT(&data->list);
 	data->top = 0;
 
 	s = &data->screen;
 	screen_init(s, screen_size_x(&wp->base), screen_size_y(&wp->base), 0);
 	s->mode &= ~MODE_CURSOR;
-	s->mode |= MODE_MOUSE;
+	if (options_get_number(&wp->window->options, "mode-mouse"))
+		s->mode |= MODE_MOUSE;
 
-	mode_key_init(&data->mdata,
-	    options_get_number(&wp->window->options, "mode-keys"),
-	    MODEKEY_CHOOSEMODE);
+	keys = options_get_number(&wp->window->options, "mode-keys");
+	if (keys == MODEKEY_EMACS)
+		mode_key_init(&data->mdata, &mode_key_tree_emacs_choice);
+	else
+		mode_key_init(&data->mdata, &mode_key_tree_vi_choice);
 
 	return (s);
 }
@@ -131,7 +144,8 @@ window_choose_free(struct window_pane *wp)
 	struct window_choose_mode_data	*data = wp->modedata;
 	u_int				 i;
 
- 	mode_key_free(&data->mdata);
+	if (data->freefn != NULL && data->data != NULL)
+		data->freefn(data->data);
 
 	for (i = 0; i < ARRAY_LENGTH(&data->list); i++)
 		xfree(ARRAY_ITEM(&data->list, i).name);
@@ -155,6 +169,7 @@ window_choose_resize(struct window_pane *wp, u_int sx, u_int sy)
 	window_choose_redraw_screen(wp);
 }
 
+/* ARGSUSED */
 void
 window_choose_key(struct window_pane *wp, unused struct client *c, int key)
 {
@@ -162,21 +177,22 @@ window_choose_key(struct window_pane *wp, unused struct client *c, int key)
 	struct screen			*s = &data->screen;
 	struct screen_write_ctx		 ctx;
 	struct window_choose_mode_item	*item;
-	u_int				 items;
+	u_int		       		 items;
+	int				 idx;
 
 	items = ARRAY_LENGTH(&data->list);
 
 	switch (mode_key_lookup(&data->mdata, key)) {
-	case MODEKEYCMD_QUIT:
-		data->callback(data->data, -1);
+	case MODEKEYCHOICE_CANCEL:
+		data->callbackfn(data->data, -1);
 		window_pane_reset_mode(wp);
 		break;
-	case MODEKEYCMD_CHOOSE:
+	case MODEKEYCHOICE_CHOOSE:
 		item = &ARRAY_ITEM(&data->list, data->selected);
-		data->callback(data->data, item->idx);
+		data->callbackfn(data->data, item->idx);
 		window_pane_reset_mode(wp);
 		break;
-	case MODEKEYCMD_UP:
+	case MODEKEYCHOICE_UP:
 		if (items == 0)
 			break;
 		if (data->selected == 0) {
@@ -198,7 +214,7 @@ window_choose_key(struct window_pane *wp, unused struct client *c, int key)
 			screen_write_stop(&ctx);
 		}
 		break;
-	case MODEKEYCMD_DOWN:
+	case MODEKEYCHOICE_DOWN:
 		if (items == 0)
 			break;
 		if (data->selected == items - 1) {
@@ -208,18 +224,44 @@ window_choose_key(struct window_pane *wp, unused struct client *c, int key)
 			break;
 		}
 		data->selected++;
-		if (data->selected >= data->top + screen_size_y(&data->screen))
-			window_choose_scroll_down(wp);
-		else {
+
+		if (data->selected < data->top + screen_size_y(s)) {
 			screen_write_start(&ctx, wp, NULL);
 			window_choose_write_line(
 			    wp, &ctx, data->selected - data->top);
 			window_choose_write_line(
 			    wp, &ctx, data->selected - 1 - data->top);
 			screen_write_stop(&ctx);
-		}
+		} else
+			window_choose_scroll_down(wp);
 		break;
-	case MODEKEYCMD_PREVIOUSPAGE:
+	case MODEKEYCHOICE_SCROLLUP:
+		if (items == 0 || data->top == 0)
+			break;
+		if (data->selected == data->top + screen_size_y(s) - 1) {
+			data->selected--;
+			window_choose_scroll_up(wp);
+			screen_write_start(&ctx, wp, NULL);
+			window_choose_write_line(
+			    wp, &ctx, screen_size_y(s) - 1);
+			screen_write_stop(&ctx);
+		} else
+			window_choose_scroll_up(wp);
+		break;
+	case MODEKEYCHOICE_SCROLLDOWN:
+		if (items == 0 ||
+		    data->top + screen_size_y(&data->screen) >= items)
+			break;
+		if (data->selected == data->top) {
+			data->selected++;
+			window_choose_scroll_down(wp);
+			screen_write_start(&ctx, wp, NULL);
+			window_choose_write_line(wp, &ctx, 0);
+			screen_write_stop(&ctx);
+		} else
+			window_choose_scroll_down(wp);
+		break;
+	case MODEKEYCHOICE_PAGEUP:
 		if (data->selected < screen_size_y(s)) {
 			data->selected = 0;
 			data->top = 0;
@@ -230,9 +272,9 @@ window_choose_key(struct window_pane *wp, unused struct client *c, int key)
 			else
 				data->top -= screen_size_y(s);
 		}
- 		window_choose_redraw_screen(wp);
+		window_choose_redraw_screen(wp);
 		break;
-	case MODEKEYCMD_NEXTPAGE:
+	case MODEKEYCHOICE_PAGEDOWN:
 		data->selected += screen_size_y(s);
 		if (data->selected > items - 1)
 			data->selected = items - 1;
@@ -247,33 +289,42 @@ window_choose_key(struct window_pane *wp, unused struct client *c, int key)
 		window_choose_redraw_screen(wp);
 		break;
 	default:
+		idx = window_choose_index_key(data, key);
+		if (idx < 0 || (u_int) idx >= ARRAY_LENGTH(&data->list))
+			break;
+		data->selected = idx;
+
+		item = &ARRAY_ITEM(&data->list, data->selected);
+		data->callbackfn(data->data, item->idx);
+		window_pane_reset_mode(wp);
 		break;
 	}
 }
 
+/* ARGSUSED */
 void
-window_choose_mouse(struct window_pane *wp,
-    unused struct client *c, u_char b, u_char x, u_char y)
+window_choose_mouse(
+    struct window_pane *wp, unused struct client *c, struct mouse_event *m)
 {
 	struct window_choose_mode_data	*data = wp->modedata;
 	struct screen			*s = &data->screen;
 	struct window_choose_mode_item	*item;
 	u_int				 idx;
 
-	if ((b & 3) == 3)
+	if ((m->b & 3) == 3)
 		return;
-	if (x >= screen_size_x(s))
+	if (m->x >= screen_size_x(s))
 		return;
-	if (y >= screen_size_y(s))
+	if (m->y >= screen_size_y(s))
 		return;
 
-	idx = data->top + y;
+	idx = data->top + m->y;
 	if (idx >= ARRAY_LENGTH(&data->list))
 		return;
 	data->selected = idx;
 
 	item = &ARRAY_ITEM(&data->list, data->selected);
-	data->callback(data->data, item->idx);
+	data->callbackfn(data->data, item->idx);
 	window_pane_reset_mode(wp);
 }
 
@@ -283,29 +334,73 @@ window_choose_write_line(
 {
 	struct window_choose_mode_data	*data = wp->modedata;
 	struct window_choose_mode_item	*item;
+	struct options			*oo = &wp->window->options;
 	struct screen			*s = &data->screen;
 	struct grid_cell		 gc;
- 	int				 utf8flag;
+	int				 utf8flag, key;
 
-	if (data->callback == NULL)
+	if (data->callbackfn == NULL)
 		fatalx("called before callback assigned");
 
 	utf8flag = options_get_number(&wp->window->options, "utf8");
 	memcpy(&gc, &grid_default_cell, sizeof gc);
 	if (data->selected == data->top + py) {
-		gc.fg = options_get_number(&wp->window->options, "mode-bg");
-		gc.bg = options_get_number(&wp->window->options, "mode-fg");
-		gc.attr |= options_get_number(&wp->window->options, "mode-attr");
+		colour_set_fg(&gc, options_get_number(oo, "mode-fg"));
+		colour_set_bg(&gc, options_get_number(oo, "mode-bg"));
+		gc.attr |= options_get_number(oo, "mode-attr");
 	}
 
 	screen_write_cursormove(ctx, 0, py);
 	if (data->top + py  < ARRAY_LENGTH(&data->list)) {
 		item = &ARRAY_ITEM(&data->list, data->top + py);
-		screen_write_nputs(
-		    ctx, screen_size_x(s) - 1, &gc, utf8flag, "%s", item->name);
+		key = window_choose_key_index(data, data->top + py);
+		if (key != -1) {
+			screen_write_nputs(ctx, screen_size_x(s) - 1,
+			    &gc, utf8flag, "(%c) %s", key, item->name);
+		} else {
+			screen_write_nputs(ctx, screen_size_x(s) - 1,
+			    &gc, utf8flag, "    %s", item->name);
+		}
+
 	}
 	while (s->cx < screen_size_x(s))
 		screen_write_putc(ctx, &gc, ' ');
+}
+
+int
+window_choose_key_index(struct window_choose_mode_data *data, u_int idx)
+{
+	static const char	keys[] = "0123456789abcdefghijklmnopqrstuvwxyz";
+	const char	       *ptr;
+	int			mkey;
+
+	for (ptr = keys; *ptr != '\0'; ptr++) {
+		mkey = mode_key_lookup(&data->mdata, *ptr);
+		if (mkey != MODEKEY_NONE && mkey != MODEKEY_OTHER)
+			continue;
+		if (idx-- == 0)
+			return (*ptr);
+	}
+	return (-1);
+}
+
+int
+window_choose_index_key(struct window_choose_mode_data *data, int key)
+{
+	static const char	keys[] = "0123456789abcdefghijklmnopqrstuvwxyz";
+	const char	       *ptr;
+	int			mkey;
+	u_int			idx = 0;
+
+	for (ptr = keys; *ptr != '\0'; ptr++) {
+		mkey = mode_key_lookup(&data->mdata, *ptr);
+		if (mkey != MODEKEY_NONE && mkey != MODEKEY_OTHER)
+			continue;
+		if (key == *ptr)
+			return (idx);
+		idx++;
+	}
+	return (-1);
 }
 
 void

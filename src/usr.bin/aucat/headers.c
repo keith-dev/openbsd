@@ -1,4 +1,4 @@
-/*	$OpenBSD: headers.c,v 1.6 2009/04/22 10:57:33 ratchov Exp $	*/
+/*	$OpenBSD: headers.c,v 1.10 2010/01/10 21:47:41 ratchov Exp $	*/
 /*
  * Copyright (c) 2008 Alexandre Ratchov <alex@caoua.org>
  *
@@ -23,12 +23,12 @@
 #include <string.h>
 #include <unistd.h>
 
-#include "conf.h"
 #include "aparams.h"
+#include "conf.h"
 #include "wav.h"
 
 /*
- * encoding IDs used in .wav headers
+ * Encoding IDs used in .wav headers.
  */
 #define WAV_ENC_PCM	1
 #define WAV_ENC_ALAW	6
@@ -98,12 +98,12 @@ wav_readfmt(int fd, unsigned csize, struct aparams *par, short **map)
 		return 0;
 	}
 	rate = letoh32(fmt.rate);
-	if (rate < RATE_MIN || rate >= RATE_MAX) {
+	if (rate < RATE_MIN || rate > RATE_MAX) {
 		warnx("%u: bad sample rate", rate);
 		return 0;
 	}
 	bits = letoh16(fmt.bits);
-	if (bits == 0 || bits >= 32) {
+	if (bits == 0 || bits > 32) {
 		warnx("%u: bad number of bits", bits);
 		return 0;
 	}
@@ -125,13 +125,6 @@ wav_readfmt(int fd, unsigned csize, struct aparams *par, short **map)
 	par->msb = 1;
 	par->cmax = cmax;
 	par->rate = rate;
-#ifdef DEBUG
-	if (debug_level > 0) {
-		fprintf(stderr, "wav_readfmt: using ");
-		aparams_print(par);
-		fprintf(stderr, "\n");
-	}
-#endif
 	return 1;
 }
 
@@ -148,7 +141,7 @@ wav_readhdr(int fd, struct aparams *par, off_t *datasz, short **map)
 		return 0;
 	}
 	if (read(fd, &riff, sizeof(riff)) != sizeof(riff)) {
-		warn("riff_read: header");
+		warn("wav_readhdr: header");
 		return 0;
 	}
 	if (memcmp(&riff.magic, &wav_id_riff, 4) != 0 ||
@@ -159,7 +152,7 @@ wav_readhdr(int fd, struct aparams *par, off_t *datasz, short **map)
 	rsize = letoh32(riff.size);
 	while (pos + sizeof(struct wavchunk) <= rsize) {
 		if (read(fd, &chunk, sizeof(chunk)) != sizeof(chunk)) {
-			warn("riff_read: chunk");
+			warn("wav_readhdr: chunk");
 			return 0;
 		}
 		csize = letoh32(chunk.size);
@@ -171,7 +164,10 @@ wav_readhdr(int fd, struct aparams *par, off_t *datasz, short **map)
 			*datasz = csize;
 			break;
 		} else {
-			DPRINTF("unknown chunk: <%.4s>\n", chunk.id);
+#ifdef DEBUG
+			if (debug_level >= 1) 
+				warnx("ignoring chuck <%.4s>\n", chunk.id);
+#endif
 		}
 
 		/*
@@ -213,7 +209,7 @@ wav_writehdr(int fd, struct aparams *par)
 		datasz = 0;
 
 	/*
-	 * check that encoding is supported by .wav file format
+	 * Check that encoding is supported by .wav file format.
 	 */
 	if (par->bits > 8 && !par->le) {
 		warnx("samples must be little endian");
@@ -224,7 +220,8 @@ wav_writehdr(int fd, struct aparams *par)
 		return 0;
 	}
 	if ((par->bits <= 8 && par->sig) || (par->bits > 8 && !par->sig)) {
-		warnx("samples with more (less) than 8 bits must be signed (unsigned)");
+		warnx("samples with more (less) than 8 bits must be signed "
+		    "(unsigned)");
 		return 0;
 	}
 	if (8 * par->bps != par->bits && !par->msb) {

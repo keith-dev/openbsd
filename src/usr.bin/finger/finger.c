@@ -1,4 +1,4 @@
-/*	$OpenBSD: finger.c,v 1.16 2004/03/15 02:50:29 tedu Exp $	*/
+/*	$OpenBSD: finger.c,v 1.18 2009/11/12 15:33:21 nicm Exp $	*/
 
 /*
  * Copyright (c) 1989 The Regents of the University of California.
@@ -41,17 +41,6 @@
  *    - short day names (`Tue' printed instead of `Jun 21' if the
  *	login time is < 6 days.
  */
-
-#ifndef lint
-static const char copyright[] =
-"@(#) Copyright (c) 1989 The Regents of the University of California.\n\
- All rights reserved.\n";
-#endif /* not lint */
-
-#ifndef lint
-/*static char sccsid[] = "from: @(#)finger.c	5.22 (Berkeley) 6/29/90";*/
-static const char rcsid[] = "$OpenBSD: finger.c,v 1.16 2004/03/15 02:50:29 tedu Exp $";
-#endif /* not lint */
 
 /*
  * Finger prints out information about users.  It is not portable since
@@ -256,6 +245,7 @@ net:	for (pn = nethead; pn; pn = pn->next) {
 			putchar('\n');
 	}
 
+	free(used);
 	if (entries == 0)
 		return;
 

@@ -1,4 +1,4 @@
-/*	$OpenBSD: rde.c,v 1.20 2009/06/06 07:52:04 pyr Exp $ */
+/*	$OpenBSD: rde.c,v 1.22 2009/11/02 20:31:50 claudio Exp $ */
 
 /*
  * Copyright (c) 2004, 2005 Claudio Jeker <claudio@openbsd.org>
@@ -198,7 +198,7 @@ rde_dispatch_imsg(int fd, short event, void *bula)
 	struct imsg		 imsg;
 	struct route_report	 rr;
 	struct nbr_msg		 nm;
-	int			 i, connected = 0;
+	int			 i, connected = 0, verbose;
 	ssize_t			 n;
 	struct iface		*iface;
 
@@ -303,14 +303,20 @@ rde_dispatch_imsg(int fd, short event, void *bula)
 				fatalx("invalid size of OE request");
 
 			memcpy(&nm, imsg.data, sizeof(nm));
-			srt_expire_nbr(nm.address, nm.ifindex);
 
+			srt_expire_nbr(nm.address, nm.ifindex);
 			break;
 		case IMSG_RECV_PRUNE:
 			if (imsg.hdr.len - IMSG_HEADER_SIZE != sizeof(p))
 				fatalx("invalid size of OE request");
 			memcpy(&p, imsg.data, sizeof(p));
 
+			mfc_recv_prune(&p);
+			break;
+		case IMSG_CTL_LOG_VERBOSE:
+			/* already checked by dvmrpe */
+			memcpy(&verbose, imsg.data, sizeof(verbose));
+			log_verbose(verbose);
 			break;
 		default:
 			log_debug("rde_dispatch_msg: unexpected imsg %d",

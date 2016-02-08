@@ -1,4 +1,4 @@
-.\"	$OpenBSD: systat.1,v 1.80 2009/06/23 18:52:16 jmc Exp $
+.\"	$OpenBSD: systat.1,v 1.85 2010/03/13 06:35:40 jmc Exp $
 .\"	$NetBSD: systat.1,v 1.6 1996/05/10 23:16:39 thorpej Exp $
 .\"
 .\" Copyright (c) 1985, 1990, 1993
@@ -30,7 +30,7 @@
 .\"
 .\"	@(#)systat.1	8.2 (Berkeley) 12/30/93
 .\"
-.Dd $Mdocdate: June 23 2009 $
+.Dd $Mdocdate: March 13 2010 $
 .Dt SYSTAT 1
 .Os
 .Sh NAME
@@ -38,7 +38,7 @@
 .Nd display system statistics
 .Sh SYNOPSIS
 .Nm systat
-.Op Fl abin
+.Op Fl abiNn
 .Op Fl d Ar count
 .Op Fl s Ar delay
 .Op Fl w Ar width
@@ -96,8 +96,14 @@ Exit after
 screen updates.
 .It Fl i
 Interactive mode.
+.It Fl N
+Resolve network addresses to names.
+This is the opposite of the
+.Fl n
+option.
 .It Fl n
 Do not try to reverse map IP addresses.
+This is the default.
 .It Fl s Ar delay
 Specifies the screen refresh time interval in seconds.
 This option is overridden by the final
@@ -174,7 +180,7 @@ Reverse the selected ordering if supported by the view.
 .It Ic ^A \*(Ba Aq Ic Home
 Jump to the beginning of the current view.
 .It Ic ^B \*(Ba Aq Ic right arrow
-Select previous view.
+Select the previous view.
 .It Ic ^E \*(Ba Aq Ic End
 Jump to the end of the current view.
 .It Ic ^F \*(Ba Aq Ic left arrow
@@ -334,11 +340,11 @@ with each shown symbolically, when possible.
 .\".El
 .It Ic nfsclient
 Display statistics about NFS client activity.
-Output ressembles
+Output resembles
 .Cm nfsstat Fl c .
 .It Ic nfsserver
 Display statistics about NFS server activity.
-Output ressembles
+Output resembles
 .Cm nfsstat Fl s .
 .It Ic pf
 Display filter information about
@@ -410,7 +416,7 @@ Areas known to the kernel but not in use are shown as not available.
 .It Ic vmstat
 Take over the entire display and show a (rather crowded) compendium
 of statistics related to virtual memory usage, process scheduling,
-device interrupts, system name translation caching, disk I/O etc.
+device interrupts, system name translation caching, disk I/O, etc.
 This view is the default.
 .Pp
 The upper left quadrant of the screen shows the number
@@ -466,7 +472,7 @@ and Faults
 .Pq Dq Flt
 which have occurred during the last refresh interval.
 .Pp
-Below the CPU Usage graph are statistics on name translations.
+Below the CPU usage graph are statistics on name translations.
 It lists the number of names translated in the previous interval,
 the number and percentage of the translations that were
 handled by the system wide name translation cache, and
@@ -499,6 +505,9 @@ over the time interval.
 The rest of the column breaks down the total on a device
 by device basis.
 Only devices that have interrupted at least once since boot time are shown.
+.Pp
+Below the Interrupts display is a summary of
+total number of input packets and output packets for all interfaces.
 .Pp
 Below the SWAPPING display and slightly to the left of the Interrupts
 display is a list of virtual memory statistics.
@@ -599,7 +608,7 @@ configuration.
 Port names.
 .El
 .Sh SEE ALSO
-.Xt fstat 1 ,
+.Xr fstat 1 ,
 .Xr kill 1 ,
 .Xr netstat 1 ,
 .Xr nfsstat 1 ,

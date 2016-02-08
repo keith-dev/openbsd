@@ -1,4 +1,4 @@
-/*	$OpenBSD: apprentice.c,v 1.26 2009/04/24 18:54:34 chl Exp $ */
+/*	$OpenBSD: apprentice.c,v 1.29 2009/11/11 16:21:51 jsg Exp $ */
 /*
  * Copyright (c) Ian F. Darwin 1986-1995.
  * Software written by Ian F. Darwin and others;
@@ -30,6 +30,10 @@
  * apprentice - make one pass through /etc/magic, learning its secrets.
  */
 
+#include <sys/param.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+
 #include "file.h"
 #include "magic.h"
 #include "patchlevel.h"
@@ -41,17 +45,10 @@
 #include <assert.h>
 #include <ctype.h>
 #include <fcntl.h>
-#include <sys/stat.h>
-#include <sys/param.h>
 #ifdef QUICK
 #include <sys/mman.h>
 #endif
-#include <sys/types.h>
 #include <dirent.h>
-
-#ifndef	lint
-FILE_RCSID("@(#)$Id: apprentice.c,v 1.26 2009/04/24 18:54:34 chl Exp $")
-#endif	/* lint */
 
 #define	EATAB {while (isascii((unsigned char) *l) && \
 		      isspace((unsigned char) *l))  ++l;}
@@ -2087,7 +2084,7 @@ swap4(uint32_t sv)
 private uint64_t
 swap8(uint64_t sv)
 {
-	uint32_t rv;
+	uint64_t rv;
 	uint8_t *s = (uint8_t *)(void *)&sv; 
 	uint8_t *d = (uint8_t *)(void *)&rv; 
 #if 0

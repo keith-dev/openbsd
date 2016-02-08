@@ -1,5 +1,5 @@
 # ex:ts=8 sw=4:
-# $OpenBSD: Add.pm,v 1.88 2009/04/20 08:29:02 espie Exp $
+# $OpenBSD: Add.pm,v 1.104 2010/01/14 19:35:55 espie Exp $
 #
 # Copyright (c) 2003-2007 Marc Espie <espie@openbsd.org>
 #
@@ -14,6 +14,7 @@
 # WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
 # ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
 # OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+
 use strict;
 use warnings;
 
@@ -34,12 +35,12 @@ sub manpages_index
 	while (my ($k, $v) = each %{$state->{mandirs}}) {
 		my @l = map { $destdir.$_ } @$v;
 		if ($state->{not}) {
-			print "Merging manpages in $destdir$k: ", join(@l), "\n" if $state->{verbose};
+			$state->say("Merging manpages in $destdir$k: ", join(@l)) if $state->verbose >= 2;
 		} else {
 			try { 
 				OpenBSD::Makewhatis::merge($destdir.$k, \@l); 
 			} catchall {
-				print STDERR "Error in makewhatis: $_\n";
+				$state->errsay("Error in makewhatis: $_");
 			};
 		}
 	}
@@ -81,8 +82,9 @@ sub record_partial_installation
 	    my $lastname = $last->realname($state);
 	    $last->{d} = $last->compute_digest($lastname, $old);
 	    if (!$old->equals($last->{d})) {
-		print "Adjusting ", $old->keyword, " for $lastname from ",
-		    $old->stringize, " to ", $last->{d}->stringize, "\n";
+		$state->say("Adjusting ", $old->keyword, 
+		    " for $lastname from ", $old->stringize, 
+		    " to ", $last->{d}->stringize);
 	    }
 	}
 	register_installation($n);
@@ -101,6 +103,7 @@ sub perform_installation
 		$handle->{partial} = {};
 	}
 	$state->{partial} = $handle->{partial};
+	$state->progress->show(0, $totsize);
 	$handle->{plist}->install_and_progress($state, \$donesize, $totsize);
 	$handle->{location}->finish_and_close;
 }
@@ -149,8 +152,8 @@ sub tweak_plist_status
 sub tag_user_packages
 {
 	for my $set (@_) {
-		for my $handle ($set->newer) {
-			$user_tagged->{$handle->{pkgname}} = 1;
+		for my $n ($set->newer_names) {
+			$user_tagged->{OpenBSD::PackageName::url2pkgname($n)} = 1;
 		}
 	}
 }
@@ -168,6 +171,10 @@ sub prepare_for_addition
 sub install_and_progress
 {
 	my ($self, $state, $donesize, $totsize) = @_;
+	$state->{callback} = sub {
+		my $done = shift;
+		$state->progress->show($$donesize + $done, $totsize);
+	};
 	unless ($state->{do_faked} && $state->{end_faked}) {
 		$self->install($state);
 	}
@@ -230,11 +237,11 @@ sub prepare_for_addition
 	my ($self, $state, $pkgname) = @_;
 
 	if ($state->{cdrom_only} && $self->{cdrom} ne 'yes') {
-	    Warn "Package $pkgname is not for cdrom.\n";
+	    $state->errsay("Package $pkgname is not for cdrom.");
 	    $state->{problems}++;
 	}
 	if ($state->{ftp_only} && $self->{ftp} ne 'yes') {
-	    Warn "Package $pkgname is not for ftp.\n";
+	    $state->errsay("Package $pkgname is not for ftp.");
 	    $state->{problems}++;
 	}
 }
@@ -264,8 +271,8 @@ sub prepare_for_addition
 	my $ok = $self->check;
 	if (defined $ok) {
 		if ($ok == 0) {
-			Warn $self->type, " ",  $self->name, 
-			    " does not match\n";
+			$state->errsay($self->type, " ",  $self->name, 
+			    " does not match");
 			$state->{problems}++;
 		}
 	}
@@ -277,13 +284,13 @@ sub install
 	my ($self, $state) = @_;
 	$self->SUPER::install($state);
 	my $auth = $self->name;
-	print "adding ", $self->type, " $auth\n" if $state->{verbose};
+	$state->say("adding ", $self->type, " ", $auth) if $state->verbose >= 2;
 	return if $state->{not};
 	return if defined $self->{okay};
 	my $l=[];
-	push(@$l, "-v") if $state->{very_verbose};
+	push(@$l, "-v") if $state->verbose >= 2;
 	$self->build_args($l);
-	VSystem($state->{very_verbose}, $self->command,, @$l, $auth);
+	$state->vsystem($self->command,, @$l, '--', $auth);
 }
 
 package OpenBSD::PackingElement::NewUser;
@@ -323,7 +330,7 @@ sub install
 
 	my $name = $self->name;
 	$self->SUPER::install($state);
-	open(my $pipe, '-|', OpenBSD::Paths->sysctl, '-n', $name);
+	open(my $pipe, '-|', OpenBSD::Paths->sysctl, '-n', '--', $name);
 	my $actual = <$pipe>;
 	chomp $actual;
 	if ($self->{mode} eq '=' && $actual eq $self->{value}) {
@@ -333,13 +340,10 @@ sub install
 		return;
 	}
 	if ($state->{not}) {
-		print "sysctl -w $name != ".
-		    $self->{value}, "\n";
+		$state->say("sysctl -w $name != ".  $self->{value}) if $state->verbose >= 2;
 		return;
 	}
-	VSystem($state->{very_verbose}, 
-	    OpenBSD::Paths->sysctl, 
-	    $name.'='.$self->{value});
+	$state->vsystem(OpenBSD::Paths->sysctl, '--', $name.'='.$self->{value});
 }
 			
 package OpenBSD::PackingElement::DirBase;
@@ -360,18 +364,15 @@ sub prepare_for_addition
 	my ($self, $state, $pkgname) = @_;
 	my $fname = $state->{destdir}.$self->fullname;
 	# check for collisions with existing stuff
-	if (OpenBSD::Vstat::vexists($fname)) {
+	if ($state->vstat->exists($fname)) {
 		push(@{$state->{colliding}}, $self);
 		$state->{problems}++;
 		return;
 	}
-	my $s = OpenBSD::Vstat::add($fname, $self->{size}, \$pkgname);
+	my $s = $state->vstat->add($fname, $self->{size}, $pkgname);
 	return unless defined $s;
-	if ($s->{ro}) {
+	if ($s->ro) {
 		$s->report_ro($state, $fname);
-	}
-	if ($state->{defines}->{kitchensink} && $state->{not}) {
-		return;
 	}
 	if ($s->avail < 0) {
 		$s->report_overflow($state, $fname);
@@ -387,7 +388,7 @@ sub install
 
 	if ($state->{replacing}) {
 		if ($state->{not}) {
-			print "moving tempfile -> $destdir$fullname\n" if $state->{very_verbose};
+			$state->say("moving tempfile -> $destdir$fullname") if $state->verbose >= 5;
 			return;
 		}
 		File::Path::mkpath(dirname($destdir.$fullname));
@@ -398,18 +399,18 @@ sub install
 		} else {
 			rename($self->{tempname}, $destdir.$fullname) or 
 			    Fatal "Can't move ", $self->{tempname}, " to $fullname: $!";
-			print "moving ", $self->{tempname}, " -> $destdir$fullname\n" if $state->{very_verbose};
+			$state->say("moving ", $self->{tempname}, " -> $destdir$fullname") if $state->verbose >= 5;
 			undef $self->{tempname};
 		}
 	} else {
 		my $file = $self->prepare_to_extract($state);
 
-		print "extracting $destdir$fullname\n" if $state->{very_verbose};
+		$state->say("extracting $destdir$fullname") if $state->verbose >= 5;
 		if ($state->{not}) {
 			$state->{archive}->skip;
 			return;
 		} else {
-			$file->create;
+			$file->create($state->{callback});
 			$self->may_check_digest($file, $state);
 
 		}
@@ -479,21 +480,20 @@ sub prepare_for_addition
 {
 	my ($self, $state, $pkgname) = @_;
 	if (!defined $self->{copyfrom}) {
-		Fatal "\@sample element does not reference a valid file\n";
+		$state->errsay("\@sample element ",$self->fullname, 
+		    " does not reference a valid file");
+		$state->{problems}++;
 	}
 	my $fname = $state->{destdir}.$self->fullname;
 	# If file already exists, we won't change it
-	if (OpenBSD::Vstat::vexists($fname)) {
+	if ($state->vstat->exists($fname)) {
 		return;
 	}
 	my $size = $self->{copyfrom}->{size};
-	my $s = OpenBSD::Vstat::add($fname, $size, \$pkgname);
+	my $s = $state->vstat->add($fname, $size, $pkgname);
 	return unless defined $s;
-	if ($s->{ro}) {
+	if ($s->ro) {
 		$s->report_ro($state, $fname);
-	}
-	if ($state->{defines}->{kitchensink} && $state->{not}) {
-		return;
 	}
 	if ($s->avail < 0) {
 		$s->report_overflow($state, $fname);
@@ -510,30 +510,30 @@ sub install
 	my $orig = $self->{copyfrom};
 	my $origname = $destdir.$orig->fullname;
 	if (-e $filename) {
-		if ($state->{verbose}) {
-		    print "The existing file $filename has NOT been changed\n";
+		if ($state->verbose) {
+		    $state->say("The existing file $filename has NOT been changed");
 		    if (defined $orig->{d}) {
 
 			# XXX assume this would be the same type of file
 			my $d = $self->compute_digest($filename, $orig->{d});
 			if ($d->equals($orig->{d})) {
-			    print "(but it seems to match the sample file $origname)\n";
+			    $state->say("(but it seems to match the sample file $origname)");
 			} else {
-			    print "It does NOT match the sample file $origname\n";
-			    print "You may wish to update it manually\n";
+			    $state->say("It does NOT match the sample file $origname");
+			    $state->say("You may wish to update it manually");
 			}
 		    }
 		}
 	} else {
 		if ($state->{not}) {
-			print "The file $filename would be installed from $origname\n";
+			$state->say("The file $filename would be installed from $origname") if $state->verbose >= 2;
 		} else {
 			if (!copy($origname, $filename)) {
-				Warn "File $filename could not be installed:\n\t$!\n";
+				$state->errsay("File $filename could not be installed:\n\t$!");
 			}
 			$self->set_modes($filename);
-			if ($state->{verbose}) {
-			    print "installed $filename from $origname\n";
+			if ($state->verbose >= 2) {
+			    $state->say("installed $filename from $origname");
 			}
 		}
 	}
@@ -552,7 +552,7 @@ sub install
 {
 	my ($self, $state) = @_;
 	$self->SUPER::install($state);
-	$state->print("You may wish to add ", $self->fullname, " to /etc/man.conf\n");
+	$state->log("You may wish to add ", $self->fullname, " to /etc/man.conf\n");
 }
 
 package OpenBSD::PackingElement::Manpage;
@@ -574,9 +574,8 @@ sub install
 	$self->SUPER::install($state);
 	return if $state->{not};
 	my $fullname = $state->{destdir}.$self->fullname;
-	VSystem($state->{very_verbose}, 
-	    OpenBSD::Paths->install_info,
-	    "--info-dir=".dirname($fullname), $fullname);
+	$state->vsystem(OpenBSD::Paths->install_info,
+	    "--info-dir=".dirname($fullname), '--', $fullname);
 }
 
 package OpenBSD::PackingElement::Shell;
@@ -598,8 +597,8 @@ sub install
 	open(my $shells2, '>>', $destdir.OpenBSD::Paths->shells) or return;
 	print $shells2 $fullname, "\n";
 	close $shells2;
-	print "Shell $fullname appended to $destdir",
-	    OpenBSD::Paths->shells, "\n";
+	$state->say("Shell $fullname appended to $destdir",
+	    OpenBSD::Paths->shells) if $state->verbose;
 }
 
 package OpenBSD::PackingElement::Dir;
@@ -610,7 +609,7 @@ sub install
 	my $fullname = $self->fullname;
 	my $destdir = $state->{destdir};
 
-	print "new directory ", $destdir, $fullname, "\n" if $state->{very_verbose};
+	$state->say("new directory ", $destdir, $fullname) if $state->verbose >= 5;
 	return if $state->{not};
 	File::Path::mkpath($destdir.$fullname);
 	$self->set_modes($destdir.$fullname);
@@ -670,21 +669,18 @@ sub prepare_for_addition
 		$size = (stat $cname)[7];
 	}
 	if ($self->exec_on_add) {
-		my $s2 = OpenBSD::Vstat::filestat($cname);
-		if (defined $s2 && $s2->{noexec}) {
+		my $s2 = $state->vstat->stat($cname);
+		if (defined $s2 && $s2->noexec) {
 			$s2->report_noexec($state, $cname);
 		}
 	}
-	my $s = OpenBSD::Vstat::add($fname, $self->{size}, \$pkgname);
+	my $s = $state->vstat->add($fname, $self->{size}, $pkgname);
 	return unless defined $s;
-	if ($s->{ro}) {
+	if ($s->ro) {
 		$s->report_ro($state, $fname);
 	}
-	if ($s->{noexec} && $self->exec_on_delete) {
+	if ($s->noexec && $self->exec_on_delete) {
 		$s->report_noexec($state, $fname);
-	}
-	if ($state->{defines}->{kitchensink} && $state->{not}) {
-		return;
 	}
 	if ($s->avail < 0) {
 		$s->report_overflow($state, $fname);

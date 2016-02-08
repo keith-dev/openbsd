@@ -1,4 +1,4 @@
-/*	$Id: tree.c,v 1.2 2009/06/14 23:00:57 schwarze Exp $ */
+/*	$Id: tree.c,v 1.6 2009/12/22 23:58:00 schwarze Exp $ */
 /*
  * Copyright (c) 2008, 2009 Kristaps Dzonsons <kristaps@kth.se>
  *
@@ -15,34 +15,33 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 #include <assert.h>
-#include <err.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <time.h>
 
 #include "mdoc.h"
 #include "man.h"
+#include "main.h"
 
 static	void	print_mdoc(const struct mdoc_node *, int);
 static	void	print_man(const struct man_node *, int);
 
 
 /* ARGSUSED */
-int
+void
 tree_mdoc(void *arg, const struct mdoc *mdoc)
 {
 
 	print_mdoc(mdoc_node(mdoc), 0);
-	return(1);
 }
 
 
 /* ARGSUSED */
-int
+void
 tree_man(void *arg, const struct man *man)
 {
 
 	print_man(man_node(man), 0);
-	return(1);
 }
 
 
@@ -163,6 +162,15 @@ print_man(const struct man_node *n, int indent)
 	case (MAN_TEXT):
 		t = "text";
 		break;
+	case (MAN_BLOCK):
+		t = "block";
+		break;
+	case (MAN_HEAD):
+		t = "block-head";
+		break;
+	case (MAN_BODY):
+		t = "block-body";
+		break;
 	default:
 		abort();
 		/* NOTREACHED */
@@ -173,6 +181,12 @@ print_man(const struct man_node *n, int indent)
 		p = n->string;
 		break;
 	case (MAN_ELEM):
+		/* FALLTHROUGH */
+	case (MAN_BLOCK):
+		/* FALLTHROUGH */
+	case (MAN_HEAD):
+		/* FALLTHROUGH */
+	case (MAN_BODY):
 		p = man_macronames[n->tok];
 		break;
 	case (MAN_ROOT):

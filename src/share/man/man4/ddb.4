@@ -1,4 +1,4 @@
-.\"	$OpenBSD: ddb.4,v 1.58 2009/02/22 15:10:41 jsing Exp $
+.\"	$OpenBSD: ddb.4,v 1.67 2010/02/03 00:41:00 jsing Exp $
 .\"	$NetBSD: ddb.4,v 1.5 1994/11/30 16:22:09 jtc Exp $
 .\"
 .\" Mach Operating System
@@ -25,7 +25,7 @@
 .\" any improvements or extensions that they make and grant Carnegie Mellon
 .\" the rights to redistribute these changes.
 .\"
-.Dd $Mdocdate: February 22 2009 $
+.Dd $Mdocdate: February 3 2010 $
 .Dt DDB 4
 .Os
 .Sh NAME
@@ -47,7 +47,6 @@ is set to 1.
 It may be invoked from the console when the sysctl
 .Va ddb.console
 is set to 1, using any of the following methods:
-.Pp
 .Bl -dash -offset 3n
 .It
 Using the key sequence
@@ -96,6 +95,7 @@ the current location is called
 The
 .Ic examine ,
 .Ic search ,
+.Ic show struct ,
 and
 .Ic write
 commands update
@@ -205,7 +205,7 @@ List the available commands.
 .It Xo
 .Oo Ic e Oc Ns
 .Ic x Ns Op Ic amine
-.Op Cm /bhlaAxzodurcsmiI
+.Op Cm /bhlqaAxzodurcsmiI
 .Op Ar addr Ns
 .Op Ic \&, Ns Ar count
 .Xc
@@ -603,6 +603,9 @@ Displays various things, depending on
 .Ar what :
 .Bl -tag -width 4n
 .\" --------------------
+.It Ic show bcstats
+Prints the buffer cache statistics.
+.\" --------------------
 .It Ic show breaks
 Prints a list of all breakpoints that have been set with the
 .Ic break
@@ -666,6 +669,34 @@ and also all
 on all those vnodes.
 .\" --------------------
 .It Xo
+.Ic show nfsnode
+.Op Cm /f
+.Ar addr
+.Xc
+Prints the
+.Li struct nfsnode
+at
+.Ar addr .
+If the
+.Cm /f
+modifier is specified prints out additional
+information as well.
+.\" --------------------
+.It Xo
+.Ic show nfsreq
+.Op Cm /f
+.Ar addr
+.Xc
+Prints the
+.Li struct nfsreq
+at
+.Ar addr .
+If the
+.Cm /f
+modifier is specified prints out additional
+information as well.
+.\" --------------------
+.It Xo
 .Ic show object
 .Op Cm /f
 .Ar addr
@@ -677,6 +708,17 @@ at
 If the
 .Cm /f
 modifier is specified the complete object is printed.
+.\" --------------------
+.It Xo
+.Ic show offset
+.Ar offset
+.Xc
+Prints a list of the known kernel structure fields which occur at the given
+.Ar offset
+from the beginning of the struct, as well as their size.
+The
+.Cm option DDB_STRUCT
+is required for this command to be available.
 .\" --------------------
 .It Xo
 .Ic show page
@@ -733,6 +775,21 @@ Note: The
 modifier is not supported on every machine, in which case
 incorrect information may be displayed.
 .\" --------------------
+.It Xo
+.Ic show struct
+.Ar name
+.Op addr
+.Xc
+Prints the content of the memory at
+.Ar addr
+as a struct
+.Ar name .
+Nested structures and bit fields are not printed.
+Character arrays are printed as bytes.
+The
+.Cm option DDB_STRUCT
+is required for this command to be available.
+.\" --------------------
 .It Ic show uvmexp
 Displays a selection of uvm counters and statistics.
 .\" --------------------
@@ -753,20 +810,6 @@ modifier is specified prints out all
 .Cm show buf )
 currently attached to this
 .Li vnode .
-.\" --------------------
-.It Xo
-.Ic show nfsreq
-.Op Cm /f
-.Ar addr
-.Xc
-Prints the
-.Li struct nfsreq
-at
-.Ar addr.
-If the
-.Cm /f
-modifier is specified prints out additional
-information as well.
 .\" --------------------
 .It Ic show watches
 Displays all watchpoints set with the
@@ -798,6 +841,17 @@ Shows each process' PID, command, system call emulation,
 wait channel address, and wait channel message.
 .El
 .\" --------------------
+.It Ic show all bufs Op Cm /f
+Display information about all buffers in the system.
+.Pp
+.Bl -tag -width foo -compact
+.It Cm /f
+For each buffer, print a more detailed output.
+See the
+.Ic show buf
+command for more information.
+.El
+.\" --------------------
 .It Ic show all callout
 Display the contents of the callout table.
 .\" --------------------
@@ -823,10 +877,40 @@ These addresses can be used in the
 command.
 .El
 .\" --------------------
-.It Ic show all nfsreq
-Display a list of pointers to all outstanding nfs requests.
+.It Ic show all nfsnodes Op Cm /f
+Display information about all nfsnodes in the system.
 .Pp
+.Bl -tag -width foo -compact
+.It Cm /f
+For each nfsnode, print a more detailed output.
+See the
+.Ic show nfsnode
+command for more information.
 .El
+.\" --------------------
+.It Ic show all nfsreqs Op Cm /f
+Display information for all outstanding NFS requests.
+.Pp
+.Bl -tag -width foo -compact
+.It Cm /f
+For each NFS requests, print a more detailed output.
+See the
+.Ic show nfsreq
+command for more information.
+.El
+.\" --------------------
+.It Ic show all vnodes Op Cm /f
+Display information about all vnodes in the system.
+.Pp
+.Bl -tag -width foo -compact
+.It Cm /f
+For each vnode, print a more detailed output.
+See the
+.Ic show vnode
+command for more information.
+.El
+.El
+.\" --------------------
 .It Ic callout
 A synonym for the
 .Ic show all callout

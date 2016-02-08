@@ -1,4 +1,4 @@
-vers(a, {-$OpenBSD: MAKEDEV.common,v 1.43 2009/06/03 14:45:39 jj Exp $-})dnl
+vers(a, {-$OpenBSD: MAKEDEV.common,v 1.46 2009/09/23 15:39:56 miod Exp $-})dnl
 dnl
 dnl Copyright (c) 2001-2006 Todd T. Fries <todd@OpenBSD.org>
 dnl
@@ -350,14 +350,18 @@ _mkdev({-wsdisp-}, tty[C-J]*, {-U=${i##tty[C-J]}
 	*) echo bad unit $U for $i; exit 1;;
 	esac-})dnl
 __devitem(wskbd, wskbd*, wscons keyboards)dnl
-_mkdev(wskbd, wskbd*, {-M wskbd$U c major_wskbd_c $U 600-})dnl
+dnl XXX wskbd[0-9]* instead of wskbd* in case this appears before
+dnl XXX ``wsmux|wsmouse|wskbd'' in the final MAKEDEV.
+_mkdev(wskbd, wskbd[0-9]*, {-M wskbd$U c major_wskbd_c $U 600-})dnl
 __devitem(wsmux, wsmux, wscons keyboard/mouse mux devices)dnl
 _mkdev(wsmux, wsmux|wsmouse|wskbd, {-M wsmouse c major_wsmux_c 0 600
 	M wskbd c major_wsmux_c 1 600-})dnl
 __devitem(pcons, console, PROM console)dnl
 __devtitle(point, Pointing devices)dnl
 __devitem(wsmouse, wsmouse*, wscons mice)dnl
-_mkdev(wsmouse, wsmouse*, {-M wsmouse$U c major_wsmouse_c $U 600-})dnl
+dnl XXX wsmouse[0-9]* instead of wsmouse* in case this appears before
+dnl XXX ``wsmux|wsmouse|wskbd'' in the final MAKEDEV.
+_mkdev(wsmouse, wsmouse[0-9]*, {-M wsmouse$U c major_wsmouse_c $U 600-})dnl
 __devtitle(pty, Pseudo terminals)dnl
 __devitem(ptm, ptm, pty master device)dnl
 _mkdev(ptm, ptm, {-M ptm c major_ptm_c 0 666-})dnl
@@ -481,7 +485,7 @@ __devitem(asc, asc*, ASC Audio device)dnl
 _mkdev(asc, asc*, {-M asc$U major_asc_c 0-})dnl
 __devitem(bio, bio, {-ioctl tunnel pseudo-device-})dnl
 _mkdev(bio, bio, {-M bio c major_bio_c 0 600-})dnl
-__devitem(music, music*, MIDI devices,midi)dnl
+__devitem(music, music*, MIDI sequencer,music)dnl
 _mkdev(music, music*, {-M music$U     c major_music_c $U
 	M sequencer$U c major_music_c Add($U, 128)
 	MKlist[${#MKlist[*]}]=";[ -e music ] || ln -s music$U music"
@@ -555,7 +559,9 @@ _mkdev(spif, spif*, {-case $U in
 __devitem(bpp, bpp*, Parallel port)dnl
 _mkdev(bpp, {-bpp*-}, {-M bpp$U c major_bpp_c $U 600-}, 600)dnl
 __devitem(nnpfs, nnpfs*, NNPFS filesystem node, mount_nnpfs 8)dnl
+__devitem(vscsi, vscsi*, Virtual SCSI controller, vscsi 8)dnl
 _mcdev(nnpfs, nnpfs*, nnpfs, {-major_nnpfs_c-}, 600)dnl
+_mcdev(vscsi, vscsi*, vscsi, {-major_vscsi_c-}, 600)dnl
 __devitem(rmidi, rmidi*, Raw MIDI devices,midi)dnl
 _mcdev(rmidi, rmidi*, rmidi, {-major_rmidi_c-}, 666)dnl
 __devtitle(plat, Platform-specific devices)dnl

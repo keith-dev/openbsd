@@ -1,4 +1,4 @@
-.\"	$OpenBSD: sysctl.8,v 1.149 2009/06/03 21:49:05 beck Exp $
+.\"	$OpenBSD: sysctl.8,v 1.154 2010/02/27 20:47:10 schwarze Exp $
 .\"	$NetBSD: sysctl.8,v 1.4 1995/09/30 07:12:49 thorpej Exp $
 .\"
 .\" Copyright (c) 1993
@@ -30,7 +30,7 @@
 .\"
 .\"	@(#)sysctl.8	8.2 (Berkeley) 5/9/95
 .\"
-.Dd $Mdocdate: June 3 2009 $
+.Dd $Mdocdate: February 27 2010 $
 .Dt SYSCTL 8
 .Os
 .Sh NAME
@@ -110,7 +110,9 @@ The changeable column indicates whether a process with appropriate
 privilege can change the value.
 .Pp
 Note:
-not all of the variables are relevant to all architectures.
+not all of the variables are relevant to all architectures,
+and a few require a kernel compiled with non-standard
+.Xr options 4 .
 .Bl -column net.inet.ip.ipsec-expire-acquirexxxx integerxxx
 .It Sy Name	Type	Changeable
 .It kern.ostype	string	no
@@ -210,6 +212,8 @@ not all of the variables are relevant to all architectures.
 .It vm.maxslp	integer	no
 .It vm.uspace	integer	no
 .It fs.posix.setuid	integer	yes
+.It net.inet.divert.recvspace	integer	yes
+.It net.inet.divert.sendspace	integer	yes
 .It net.inet.ip.forwarding	integer	yes
 .It net.inet.ip.redirect	integer	yes
 .It net.inet.ip.ttl	integer	yes
@@ -337,6 +341,7 @@ not all of the variables are relevant to all architectures.
 .It hw.version	string	no
 .It hw.serialno	string	no
 .It hw.uuid	string	no
+.It hw.ncpufound	integer	no
 .It machdep.console_device	dev_t	no
 .It machdep.unaligned_print	integer	yes
 .It machdep.unaligned_fix	integer	yes
@@ -406,15 +411,7 @@ not all of the variables are relevant to all architectures.
 .Pp
 The
 .Nm
-program can get or set debugging variables
-that have been identified for its display.
-This information can be obtained by using the command:
-.Pp
-.Dl $ sysctl debug
-.Pp
-In addition,
-.Nm
-can extract information about the filesystems that have been compiled
+program can extract information about the filesystems that have been compiled
 into the running system.
 This information can be obtained by using the command:
 .Pp
@@ -444,6 +441,8 @@ definitions for third level virtual memory identifiers
 .It Aq Pa netinet/in.h
 definitions for third level IPv4/v6 identifiers and
 fourth level IPv4/v6 identifiers
+.It Aq Pa netinet/ip_divert.h
+definitions for fourth level divert identifiers
 .It Aq Pa netinet/icmp_var.h
 definitions for fourth level ICMP identifiers
 .It Aq Pa netinet6/icmp6.h
@@ -524,6 +523,7 @@ the maximum number of shared memory segments:
 .Ed
 .Sh SEE ALSO
 .Xr sysctl 3 ,
+.Xr options 4 ,
 .Xr sysctl.conf 5
 .Sh HISTORY
 .Nm

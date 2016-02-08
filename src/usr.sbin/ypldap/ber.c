@@ -1,4 +1,4 @@
-/*	$OpenBSD: ber.c,v 1.2 2009/06/04 18:03:07 jsg Exp $ */
+/*	$OpenBSD: ber.c,v 1.5 2010/02/24 14:09:45 jmc Exp $ */
 
 /*
  * Copyright (c) 2007 Reyk Floeter <reyk@vantronix.net>
@@ -415,13 +415,11 @@ ber_oid2ber(struct ber_oid *o, u_int8_t *buf, size_t len)
 int
 ber_string2oid(const char *oidstr, struct ber_oid *o)
 {
-	size_t			 len;
 	char			*sp, *p, str[BUFSIZ];
 	const char		*errstr;
 
 	if (strlcpy(str, oidstr, sizeof(str)) >= sizeof(str))
 		return (-1);
-	len = strlen(str);
 	bzero(o, sizeof(*o));
 
 	/* Parse OID strings in the common forms n.n.n, n_n_n_n, or n-n-n */
@@ -702,7 +700,7 @@ ber_scanf_elements(struct ber_element *ber, char *fmt, ...)
 			if (ber->be_encoding != BER_TYPE_SEQUENCE &&
 			    ber->be_encoding != BER_TYPE_SET)
 				goto fail;
-			if (ber->be_sub == NULL || level >= _MAX_SEQ)
+			if (ber->be_sub == NULL || level >= _MAX_SEQ-1)
 				goto fail;
 			parent[++level] = ber;
 			ber = ber->be_sub;
@@ -740,10 +738,7 @@ ber_scanf_elements(struct ber_element *ber, char *fmt, ...)
  *	root	fully populated element tree
  *
  * returns:
- *	0	on success
- *
- * returns:
- *	0	on success
+ *      >=0     number of bytes written
  *	-1	on failure and sets errno
  */
 int
@@ -867,7 +862,7 @@ static int
 ber_dump_element(struct ber *ber, struct ber_element *root)
 {
 	unsigned long long l;
-	int i, pos;
+	int i;
 	uint8_t u;
 
 	ber_dump_header(ber, root);
@@ -876,7 +871,6 @@ ber_dump_element(struct ber *ber, struct ber_element *root)
 	case BER_TYPE_BOOLEAN:
 	case BER_TYPE_INTEGER:
 	case BER_TYPE_ENUMERATED:
-		pos = (root->be_numeric > 0);
 		l = (unsigned long long)root->be_numeric;
 		for (i = root->be_len; i > 0; i--) {
 			u = (l >> ((i - 1) * 8)) & 0xff;

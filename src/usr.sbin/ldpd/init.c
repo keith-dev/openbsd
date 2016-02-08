@@ -1,4 +1,4 @@
-/*	$OpenBSD: init.c,v 1.2 2009/06/05 22:34:45 michele Exp $ */
+/*	$OpenBSD: init.c,v 1.4 2010/02/25 17:40:46 claudio Exp $ */
 
 /*
  * Copyright (c) 2009 Michele Marchetto <michele@openbsd.org>
@@ -39,14 +39,14 @@
 
 int	gen_init_prms_tlv(struct buf *, struct nbr *, u_int16_t);
 
-int
+void
 send_init(struct nbr *nbr)
 {
 	struct buf		*buf;
 	u_int16_t		 size;
 
 	if (nbr->iface->passive)
-		return (0);
+		return;
 
 	log_debug("send_init: neighbor ID %s", inet_ntoa(nbr->id));
 
@@ -65,10 +65,7 @@ send_init(struct nbr *nbr)
 
 	gen_init_prms_tlv(buf, nbr, size);
 
-	bufferevent_write(nbr->bev, buf->buf, buf->wpos);
-	buf_free(buf);
-
-	return (0);
+	evbuf_enqueue(&nbr->wbuf, buf);
 }
 
 int

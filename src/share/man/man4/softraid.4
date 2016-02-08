@@ -1,4 +1,4 @@
-.\"	$OpenBSD: softraid.4,v 1.23 2009/06/23 18:49:10 jmc Exp $
+.\"	$OpenBSD: softraid.4,v 1.27 2009/12/08 14:12:05 jmc Exp $
 .\"
 .\" Copyright (c) 2007 Todd T. Fries   <todd@OpenBSD.org>
 .\" Copyright (c) 2007 Marco Peereboom <marco@OpenBSD.org>
@@ -15,12 +15,12 @@
 .\" ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
 .\" OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 .\"
-.Dd $Mdocdate: June 23 2009 $
+.Dd $Mdocdate: December 8 2009 $
 .Dt SOFTRAID 4
 .Os
 .Sh NAME
 .Nm softraid
-.Nd Software RAID
+.Nd software RAID
 .Sh SYNOPSIS
 .Cd "softraid0 at root"
 .Cd "scsibus*  at softraid?"
@@ -80,13 +80,17 @@ Unlike traditional RAID 1,
 .Nm
 supports the use of more than two chunks in a RAID 1 setup.
 .It RAID 4
-A striping discipline with a fixed parity chunk.
+A striping discipline with a
+.Em fixed parity
+chunk.
 It stripes data across chunks and provides parity to prevent data loss of
 a single chunk failure.
 Read performance is increased,
 though write performance is limited by the parity chunk.
 .It RAID 5
-A striping discipline with floating parity across all chunks.
+A striping discipline with
+.Em floating parity
+across all chunks.
 It stripes data across chunks and provides parity to prevent data loss of
 a single chunk failure.
 Read performance is increased;
@@ -145,6 +149,7 @@ See
 .Xr bioctl 8
 for more information on configuration of RAID sets.
 .Sh SEE ALSO
+.Xr bio 4 ,
 .Xr bioctl 8 ,
 .Xr disklabel 8 ,
 .Xr fdisk 8 ,
@@ -158,8 +163,6 @@ driver first appeared in
 .An Marco Peereboom .
 .Sh CAVEATS
 The driver relies on underlying hardware to properly fail chunks.
-Currently RAID 1 support does not have the ability to recover a
-failed chunk.
 .Pp
 The RAID 1 discipline does not initialize the mirror upon creation.
 This is by design because all sectors that are read are written first.

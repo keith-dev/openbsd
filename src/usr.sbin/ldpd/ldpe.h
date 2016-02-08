@@ -1,4 +1,4 @@
-/*	$OpenBSD: ldpe.h,v 1.2 2009/06/05 22:34:45 michele Exp $ */
+/*	$OpenBSD: ldpe.h,v 1.6 2010/02/25 17:40:46 claudio Exp $ */
 
 /*
  * Copyright (c) 2004, 2005, 2008 Esben Norby <norby@openbsd.org>
@@ -38,7 +38,8 @@ struct mapping_entry {
 
 struct nbr {
 	LIST_ENTRY(nbr)		 entry, hash;
-	struct bufferevent	*bev;
+	struct evbuf		 wbuf;
+	struct event		 rev;
 	struct event		 inactivity_timer;
 	struct event		 keepalive_timer;
 	struct event		 keepalive_timeout;
@@ -50,17 +51,16 @@ struct nbr {
 	struct mapping_head	 release_list;
 	struct mapping_head	 abortreq_list;
 
-	int			 fd;
-
 	struct in_addr		 addr;
 	struct in_addr		 id;
 
+	struct buf_read		*rbuf;
 	struct iface		*iface;
 
 	time_t			 uptime;
-
 	u_int32_t		 peerid;	/* unique ID in DB */
 
+	int			 fd;
 	int			 state;
 
 	u_int16_t		 lspace;
@@ -80,35 +80,36 @@ int	 send_hello(struct iface *);
 void	 recv_hello(struct iface *,  struct in_addr, char *, u_int16_t);
 
 /* init.c */
-int	 send_init(struct nbr *);
+void	 send_init(struct nbr *);
 int	 recv_init(struct nbr *, char *, u_int16_t);
 
 /* keepalive.c */
-int	 send_keepalive(struct nbr *);
+void	 send_keepalive(struct nbr *);
 int	 recv_keepalive(struct nbr *, char *, u_int16_t);
 
 /* notification.c */
-int	 send_notification(u_int32_t, struct iface *, int, u_int32_t,
+void	 send_notification(u_int32_t, struct iface *, int, u_int32_t,
 	    u_int32_t);
-int	 send_notification_nbr(struct nbr *, u_int32_t, u_int32_t, u_int32_t);
+void	 send_notification_nbr(struct nbr *, u_int32_t, u_int32_t, u_int32_t);
 int	 recv_notification(struct nbr *, char *, u_int16_t);
 
 /* address.c */
-int	 send_address(struct nbr *, struct iface *);
+void	 send_address(struct nbr *, struct iface *);
 int	 recv_address(struct nbr *, char *, u_int16_t);
-int	 send_address_withdraw(struct nbr *, struct iface *);
+void	 send_address_withdraw(struct nbr *, struct iface *);
 int	 recv_address_withdraw(struct nbr *, char *, u_int16_t);
 
 /* labelmapping.c */
-int	 send_labelmapping(struct nbr *);
+#define PREFIX_SIZE(x)	(((x) + 7) / 8)
+void	 send_labelmapping(struct nbr *);
 int	 recv_labelmapping(struct nbr *, char *, u_int16_t);
-int	 send_labelrequest(struct nbr *);
+void	 send_labelrequest(struct nbr *);
 int	 recv_labelrequest(struct nbr *, char *, u_int16_t);
-int	 send_labelwithdraw(struct nbr *);
+void	 send_labelwithdraw(struct nbr *);
 int	 recv_labelwithdraw(struct nbr *, char *, u_int16_t);
-int	 send_labelrelease(struct nbr *);
+void	 send_labelrelease(struct nbr *);
 int	 recv_labelrelease(struct nbr *, char *, u_int16_t);
-int	 send_labelabortreq(struct nbr *);
+void	 send_labelabortreq(struct nbr *);
 int	 recv_labelabortreq(struct nbr *, char *, u_int16_t);
 
 /* ldpe.c */
@@ -131,7 +132,6 @@ void		 if_del(struct iface *);
 void		 if_init(struct ldpd_conf *, struct iface *);
 
 int		 if_act_start(struct iface *);
-int		 if_act_elect(struct iface *);
 int		 if_act_reset(struct iface *);
 
 struct ctl_iface	*if_to_ctl(struct iface *);
@@ -176,16 +176,7 @@ void	 nbr_stop_idtimer(struct nbr *);
 void	 nbr_reset_idtimer(struct nbr *);
 int	 nbr_pending_idtimer(struct nbr *);
 
-int	 nbr_act_reset_itimer(struct nbr *);
-int	 nbr_act_start_itimer(struct nbr *);
-int	 nbr_act_reset_ktimer(struct nbr *);
-int	 nbr_act_start_ktimer(struct nbr *);
-int	 nbr_act_reset_ktimeout(struct nbr *);
-int	 nbr_act_start_ktimeout(struct nbr *);
-int	 nbr_act_reset_idtimer(struct nbr *);
-int	 nbr_act_start_idtimer(struct nbr *);
 int	 nbr_act_session_establish(struct nbr *, int);
-int	 nbr_close_connection(struct nbr *);
 
 void			 nbr_mapping_add(struct nbr *, struct mapping_head *,
 			    struct map *);
@@ -203,10 +194,10 @@ int	 gen_ldp_hdr(struct buf *, struct iface *, u_int16_t);
 int	 gen_msg_tlv(struct buf *, u_int32_t, u_int16_t);
 int	 send_packet(struct iface *, void *, size_t, struct sockaddr_in *);
 void	 disc_recv_packet(int, short, void *);
-void	 session_recv_packet(int, short, void *);
+void	 session_accept(int, short, void *);
 
-void	 session_read(struct bufferevent *, void *);
-void	 session_error(struct bufferevent *, short, void *);
+void	 session_read(int, short, void *);
+void	 session_write(int, short, void *);
 void	 session_close(struct nbr *);
 void	 session_shutdown(struct nbr *, u_int32_t, u_int32_t, u_int32_t);
 

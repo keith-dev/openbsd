@@ -1,4 +1,4 @@
-.\"	$OpenBSD: xbridge.4,v 1.1 2009/05/17 22:08:34 miod Exp $
+.\"	$OpenBSD: xbridge.4,v 1.5 2009/10/26 18:38:09 miod Exp $
 .\"
 .\" Copyright (c) 2009 Miodrag Vallat.
 .\"
@@ -14,7 +14,7 @@
 .\" ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
 .\" OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 .\"
-.Dd $Mdocdate: May 17 2009 $
+.Dd $Mdocdate: October 26 2009 $
 .Dt XBRIDGE 4 sgi
 .Os
 .Sh NAME
@@ -22,19 +22,24 @@
 .Nd XIO-PCI bridge
 .Sh SYNOPSIS
 .Cd "xbridge* at xbow?"
-.Cd "pci* at xbridge?"
+.Cd "xbpci* at xbridge?"
+.Cd "pci* at xbpci?"
 .Sh DESCRIPTION
 The
 .Nm
-driver provides support for the XIO-PCI bridge commonly found on Octane
-and Origin family systems.
+driver provides support for the XIO-PCI and XIO-PCI-X bridges commonly found
+on Octane and Origin family systems.
 .Pp
 All these systems feature at least one
 .Nm
 device to which the on-board devices are connected.
 .Pp
 .Nm
-devices support up to 8 different PCI devices.
+devices support up to 8 different PCI devices, or two distinct
+buses of 4 PCI-X devices.
+Each PCI or PCI-X device is attached to a logical
+.Nm xbpci
+device.
 .Sh SEE ALSO
 .Xr intro 4 ,
 .Xr pci 4 ,
@@ -44,6 +49,8 @@ The
 .Nm
 driver first appeared in
 .Ox 4.4 .
+Support for the PCI-X bridges was added in
+.Ox 4.7 .
 .\" .Sh AUTHORS
 .\" The
 .\" .Nm

@@ -1,4 +1,4 @@
-/*	$OpenBSD: smtpctl.c,v 1.31 2009/06/06 04:14:21 pyr Exp $	*/
+/*	$OpenBSD: smtpctl.c,v 1.46 2010/01/10 16:42:35 gilles Exp $	*/
 
 /*
  * Copyright (c) 2006 Pierre-Yves Ritschard <pyr@openbsd.org>
@@ -24,6 +24,7 @@
 #include <sys/queue.h>
 #include <sys/tree.h>
 #include <sys/un.h>
+#include <sys/param.h>
 
 #include <net/if.h>
 #include <net/if_media.h>
@@ -36,6 +37,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include <unistd.h>
 #include <event.h>
 
@@ -45,23 +47,6 @@
 __dead void	usage(void);
 int		show_command_output(struct imsg*);
 int		show_stats_output(struct imsg *);
-
-/*
-struct imsgname {
-	int type;
-	char *name;
-	void (*func)(struct imsg *);
-};
-
-struct imsgname imsgs[] = {
-	{ IMSG_CTL_SHUTDOWN,		"stop",			NULL },
-	{ IMSG_CONF_RELOAD,		"reload",		NULL },
-	{ 0,				NULL,			NULL }
-};
-struct imsgname imsgunknown = {
-	-1,				"<unknown>",		NULL
-};
-*/
 
 int proctype;
 struct imsgbuf	*ibuf;
@@ -90,12 +75,17 @@ main(int argc, char *argv[])
 	struct imsg		imsg;
 	int			ctl_sock;
 	int			done = 0;
-	int			n;
+	int			n, verbose = 0;
 
 	/* parse options */
 	if (strcmp(__progname, "sendmail") == 0 || strcmp(__progname, "send-mail") == 0)
 		sendmail = 1;
-	else if (strcmp(__progname, "smtpctl") == 0) {
+	else if (strcmp(__progname, "mailq") == 0) {
+		if (geteuid())
+			errx(1, "need root privileges");
+		show_queue(PATH_QUEUE, 0);
+		return 0;
+	} else if (strcmp(__progname, "smtpctl") == 0) {
 		/* check for root privileges */
 		if (geteuid())
 			errx(1, "need root privileges");
@@ -119,7 +109,7 @@ main(int argc, char *argv[])
 		errx(1, "unsupported mode");
 
 connected:
-	/* connect to relayd control socket */
+	/* connect to smtpd control socket */
 	if ((ctl_sock = socket(AF_UNIX, SOCK_STREAM, 0)) == -1)
 		err(1, "socket");
 
@@ -147,9 +137,11 @@ connected:
 	case SHUTDOWN:
 		imsg_compose(ibuf, IMSG_CTL_SHUTDOWN, 0, 0, -1, NULL, 0);
 		break;
+/*
 	case RELOAD:
 		imsg_compose(ibuf, IMSG_CONF_RELOAD, 0, 0, -1, NULL, 0);
 		break;
+ */
 	case PAUSE_MDA:
 		imsg_compose(ibuf, IMSG_MDA_PAUSE, 0, 0, -1, NULL, 0);
 		break;
@@ -180,8 +172,26 @@ connected:
 		imsg_compose(ibuf, IMSG_RUNNER_SCHEDULE, 0, 0, -1, &s, sizeof (s));
 		break;
 	}
+	case REMOVE: {
+		struct remove s;
+
+		s.fd = -1;
+		bzero(s.mid, sizeof (s.mid));
+		strlcpy(s.mid, res->data, sizeof (s.mid));
+		imsg_compose(ibuf, IMSG_RUNNER_REMOVE, 0, 0, -1, &s, sizeof (s));
+		break;
+	}
 	case MONITOR:
 		/* XXX */
+		break;
+	case LOG_VERBOSE:
+		verbose = 1;
+		/* FALLTHROUGH */
+	case LOG_BRIEF:
+		imsg_compose(ibuf, IMSG_CTL_VERBOSE, 0, 0, -1, &verbose,
+		    sizeof(verbose));
+		printf("logging request sent.\n");
+		done = 1;
 		break;
 	default:
 		err(1, "unknown request (%d)", res->action);
@@ -203,15 +213,18 @@ connected:
 			if (n == 0)
 				break;
 			switch(res->action) {
-			case RELOAD:
+/*			case RELOAD:*/
 			case SHUTDOWN:
 			case SCHEDULE:
+			case REMOVE:
 			case PAUSE_MDA:
 			case PAUSE_MTA:
 			case PAUSE_SMTP:
 			case RESUME_MDA:
 			case RESUME_MTA:
 			case RESUME_SMTP:
+			case LOG_VERBOSE:
+			case LOG_BRIEF:
 				done = show_command_output(&imsg);
 				break;
 			case SHOW_STATS:
@@ -264,7 +277,13 @@ show_stats_output(struct imsg *imsg)
 
 	stats = imsg->data;
 
-	printf("mta.sessions=%zd\n", stats->smtp.sessions);
+	printf("control.sessions=%zd\n", stats->control.sessions);
+	printf("control.sessions_active=%zd\n", stats->control.sessions_active);
+
+	printf("mda.sessions=%zd\n", stats->mda.sessions);
+	printf("mda.sessions.active=%zd\n", stats->mda.sessions_active);
+
+	printf("mta.sessions=%zd\n", stats->mta.sessions);
 	printf("mta.sessions.active=%zd\n", stats->mta.sessions_active);
 
 	printf("parent.uptime=%d\n", time(NULL) - stats->parent.start);
@@ -273,6 +292,8 @@ show_stats_output(struct imsg *imsg)
 	printf("queue.inserts.remote=%zd\n", stats->queue.inserts_remote);
 
 	printf("runner.active=%zd\n", stats->runner.active);
+	printf("runner.bounces=%zd\n", stats->runner.bounces);
+	printf("runner.bounces.active=%zd\n", stats->runner.bounces_active);
 
 	printf("smtp.errors.delays=%zd\n", stats->smtp.delays);
 	printf("smtp.errors.linetoolong=%zd\n", stats->smtp.linetoolong);

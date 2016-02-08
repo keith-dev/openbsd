@@ -1,4 +1,4 @@
-/* $OpenBSD: bioctl.c,v 1.80 2009/06/18 08:05:51 halex Exp $       */
+/* $OpenBSD: bioctl.c,v 1.91 2010/01/08 16:38:22 halex Exp $       */
 
 /*
  * Copyright (c) 2004, 2005 Marco Peereboom
@@ -36,6 +36,8 @@
 #include <scsi/scsi_all.h>
 #include <dev/biovar.h>
 #include <dev/softraidvar.h>
+#include <sys/types.h>
+#include <sys/stat.h>
 
 #include <errno.h>
 #include <err.h>
@@ -63,10 +65,10 @@ const char 		*str2locator(const char *, struct locator *);
 void			cleanup(void);
 int			bio_parse_devlist(char *, dev_t *);
 void			bio_kdf_derive(struct sr_crypto_kdfinfo *,
-			    struct sr_crypto_kdf_pbkdf2 *);
+			    struct sr_crypto_kdf_pbkdf2 *, char *, int);
 void			bio_kdf_generate(struct sr_crypto_kdfinfo *);
 void			derive_key_pkcs(int, u_int8_t *, size_t, u_int8_t *,
-			    size_t, int);
+			    size_t, char *, int);
 
 void			bio_inq(char *);
 void			bio_alarm(char *);
@@ -74,8 +76,9 @@ int			bio_getvolbyname(char *);
 void			bio_setstate(char *, int, char *);
 void			bio_setblink(char *, char *, int);
 void			bio_blink(char *, int, int);
-void			bio_createraid(u_int16_t, char *);
+void			bio_createraid(u_int16_t, char *, char *);
 void			bio_deleteraid(char *);
+void			bio_changepass(char *);
 u_int32_t		bio_createflags(char *);
 char			*bio_vis(char *);
 void			bio_diskinq(char *);
@@ -85,6 +88,7 @@ int			human;
 int			verbose;
 u_int32_t		cflags = 0;
 int			rflag = 8192;
+char			*password;
 
 struct bio_locate	bl;
 
@@ -97,14 +101,17 @@ main(int argc, char *argv[])
 	char			*bioc_dev = NULL, *sd_dev = NULL;
 	char			*realname = NULL, *al_arg = NULL;
 	char			*bl_arg = NULL, *dev_list = NULL;
+	char			*key_disk = NULL;
 	const char		*errstr;
-	int			ch, rv, blink = 0, diskinq = 0, ss_func = 0;
+	int			ch, rv, blink = 0, changepass = 0, diskinq = 0;
+	int			ss_func = 0;
 	u_int16_t		cr_level = 0;
 
 	if (argc < 2)
 		usage();
 
-	while ((ch = getopt(argc, argv, "a:b:C:c:dH:hil:qr:R:vu:")) != -1) {
+	while ((ch = getopt(argc, argv, "a:b:C:c:dH:hik:l:Pp:qr:R:vu:")) !=
+	    -1) {
 		switch (ch) {
 		case 'a': /* alarm */
 			func |= BIOC_ALARM;
@@ -145,9 +152,19 @@ main(int argc, char *argv[])
 		case 'i': /* inquiry */
 			func |= BIOC_INQ;
 			break;
+		case 'k': /* Key disk. */
+			key_disk = optarg;
+			break;
 		case 'l': /* device list */
 			func |= BIOC_DEVLIST;
 			dev_list = optarg;
+			break;
+		case 'P':
+			/* Change passphrase. */
+			changepass = 1;
+			break;
+		case 'p':
+			password = optarg;
 			break;
 		case 'r':
 			rflag = strtonum(optarg, 1000, 1<<30, &errstr);
@@ -175,7 +192,7 @@ main(int argc, char *argv[])
 	argc -= optind;
 	argv += optind;
 
-	if (argc != 1)
+	if (argc != 1 || (changepass && func != 0))
 		usage();
 
 	if (func == 0)
@@ -203,10 +220,12 @@ main(int argc, char *argv[])
 		if (devh == -1)
 			err(1, "Can't open %s", sd_dev);
 	} else
-		errx(1, "need -d or -f parameter");
+		errx(1, "need device");
 
 	if (diskinq) {
 		bio_diskinq(sd_dev);
+	} else if (changepass && sd_dev != NULL) {
+		bio_changepass(sd_dev);
 	} else if (func & BIOC_INQ) {
 		bio_inq(sd_dev);
 	} else if (func == BIOC_ALARM) {
@@ -224,7 +243,7 @@ main(int argc, char *argv[])
 			errx(1, "need -l parameter");
 		if (sd_dev)
 			errx(1, "can't use sd device");
-		bio_createraid(cr_level, dev_list);
+		bio_createraid(cr_level, dev_list, key_disk);
 	}
 
 	return (0);
@@ -242,11 +261,10 @@ usage(void)
 		"[-R device | channel:target[.lun]\n"
 		"\t[-u channel:target[.lun]] "
 		"device\n"
-                "       %s [-dhiqv] "
-                "[-C flag[,flag,...]] [-c raidlevel]\n"
-                "\t[-l special[,special,...]] "
-                "[-R device | channel:target[.lun]\n"
-                "\t[-r rounds] "
+                "       %s [-dhiPqv] "
+                "[-C flag[,flag,...]] [-c raidlevel] [-k keydisk]\n"
+                "\t[-l special[,special,...]] [-p passfile]\n"
+                "\t[-R device | channel:target[.lun] [-r rounds] "
 		"device\n", __progname, __progname);
 	
 	exit(1);
@@ -432,7 +450,9 @@ bio_inq(char *name)
 				snprintf(volname, sizeof volname, "    %3u",
 				    bd.bd_diskid);
 
-			if (human)
+			if (bv.bv_level == 'C' && bd.bd_size == 0)
+				snprintf(size, sizeof size, "%14s", "key disk");
+			else if (human)
 				fmt_scaled(bd.bd_size, size);
 			else
 				snprintf(size, sizeof size, "%14llu",
@@ -562,10 +582,12 @@ bio_setstate(char *arg, int status, char *devicename)
 	bs.bs_cookie = bl.bl_cookie;
 	bs.bs_status = status;
 
-	/* make sure user supplied a sd device */
-	bs.bs_volid = bio_getvolbyname(devicename);
-	if (bs.bs_volid == -1)
-		errx(1, "invalid device %s", devicename);
+	if (status != BIOC_SSHOTSPARE) {
+		/* make sure user supplied a sd device */
+		bs.bs_volid = bio_getvolbyname(devicename);
+		if (bs.bs_volid == -1)
+			errx(1, "invalid device %s", devicename);
+	}
 
 	rv = ioctl(devh, BIOCSETSTATE, &bs);
 	if (rv == -1)
@@ -597,7 +619,7 @@ bio_setblink(char *name, char *arg, int blink)
 	if (rv == 0)
 		return;
 
-	/* if the blink didnt work, try to find something that will */
+	/* if the blink didn't work, try to find something that will */
 
 	memset(&bi, 0, sizeof(bi));
 	bi.bi_cookie = bl.bl_cookie;
@@ -673,11 +695,12 @@ bio_blink(char *enclosure, int target, int blinktype)
 }
 
 void
-bio_createraid(u_int16_t level, char *dev_list)
+bio_createraid(u_int16_t level, char *dev_list, char *key_disk)
 {
 	struct bioc_createraid	create;
 	struct sr_crypto_kdfinfo kdfinfo;
 	struct sr_crypto_kdf_pbkdf2 kdfhint;
+	struct stat		sb;
 	int			rv, no_dev;
 	dev_t			*dt;
 	u_int16_t		min_disks = 0;
@@ -726,10 +749,14 @@ bio_createraid(u_int16_t level, char *dev_list)
 	create.bc_dev_list_len = no_dev * sizeof(dev_t);
 	create.bc_dev_list = dt;
 	create.bc_flags = BIOC_SCDEVT | cflags;
+	create.bc_key_disk = NODEV;
 
-	if (level == 'C') {
+	if (level == 'C' && key_disk == NULL) {
+
 		memset(&kdfinfo, 0, sizeof(kdfinfo));
 		memset(&kdfhint, 0, sizeof(kdfhint));
+
+		create.bc_flags |= BIOC_SCNOAUTOASSEMBLE;
 
 		create.bc_opaque = &kdfhint;
 		create.bc_opaque_size = sizeof(kdfhint);
@@ -740,17 +767,33 @@ bio_createraid(u_int16_t level, char *dev_list)
 			err(1, "ioctl");
 
 		if (create.bc_opaque_status == BIOC_SOINOUT_OK) {
-			bio_kdf_derive(&kdfinfo, &kdfhint);
+			bio_kdf_derive(&kdfinfo, &kdfhint, "Passphrase: ", 0);
 			memset(&kdfhint, 0, sizeof(kdfhint));
 		} else  {
 			bio_kdf_generate(&kdfinfo);
-			/* no auto assembling */
-			create.bc_flags |= BIOC_SCNOAUTOASSEMBLE;
 		}
 
 		create.bc_opaque = &kdfinfo;
 		create.bc_opaque_size = sizeof(kdfinfo);
 		create.bc_opaque_flags = BIOC_SOIN;
+
+	} else if (level == 'C' && key_disk != NULL) {
+
+		if (stat(key_disk, &sb) == -1)
+			err(1, "could not stat %s", key_disk);
+		create.bc_key_disk = sb.st_rdev;
+
+		memset(&kdfinfo, 0, sizeof(kdfinfo));
+
+		kdfinfo.genkdf.len = sizeof(kdfinfo.genkdf);
+		kdfinfo.genkdf.type = SR_CRYPTOKDFT_KEYDISK;
+		kdfinfo.len = sizeof(kdfinfo);
+		kdfinfo.flags = SR_CRYPTOKDF_HINT;
+
+		create.bc_opaque = &kdfinfo;
+		create.bc_opaque_size = sizeof(kdfinfo);
+		create.bc_opaque_flags = BIOC_SOIN;
+
 	}
 
 	rv = ioctl(devh, BIOCCREATERAID, &create);
@@ -767,7 +810,7 @@ bio_createraid(u_int16_t level, char *dev_list)
 
 void
 bio_kdf_derive(struct sr_crypto_kdfinfo *kdfinfo, struct sr_crypto_kdf_pbkdf2
-    *kdfhint)
+    *kdfhint, char* prompt, int verify)
 {
 	if (!kdfinfo)
 		errx(1, "invalid KDF info");
@@ -786,7 +829,7 @@ bio_kdf_derive(struct sr_crypto_kdfinfo *kdfinfo, struct sr_crypto_kdf_pbkdf2
 
 	derive_key_pkcs(kdfhint->rounds,
 	    kdfinfo->maskkey, sizeof(kdfinfo->maskkey),
-	    kdfhint->salt, sizeof(kdfhint->salt), 0);
+	    kdfhint->salt, sizeof(kdfhint->salt), prompt, verify);
 }
 
 void
@@ -799,14 +842,15 @@ bio_kdf_generate(struct sr_crypto_kdfinfo *kdfinfo)
 	kdfinfo->pbkdf2.type = SR_CRYPTOKDFT_PBKDF2;
 	kdfinfo->pbkdf2.rounds = rflag;
 	kdfinfo->len = sizeof(*kdfinfo);
-	kdfinfo->flags = (SR_CRYPTOKDF_KEY | SR_CRYPTOKDF_HINT);
+	kdfinfo->flags = SR_CRYPTOKDF_KEY | SR_CRYPTOKDF_HINT;
 
 	/* generate salt */
 	arc4random_buf(kdfinfo->pbkdf2.salt, sizeof(kdfinfo->pbkdf2.salt));
 
 	derive_key_pkcs(kdfinfo->pbkdf2.rounds,
 	    kdfinfo->maskkey, sizeof(kdfinfo->maskkey),
-	    kdfinfo->pbkdf2.salt, sizeof(kdfinfo->pbkdf2.salt), 1);
+	    kdfinfo->pbkdf2.salt, sizeof(kdfinfo->pbkdf2.salt),
+	    "New passphrase: ", 1);
 }
 
 int
@@ -897,6 +941,58 @@ bio_deleteraid(char *dev)
 		errx(1, "delete volume %s failed", dev);
 }
 
+void
+bio_changepass(char *dev)
+{
+	struct bioc_discipline bd;
+	struct sr_crypto_kdfpair kdfpair;
+	struct sr_crypto_kdfinfo kdfinfo1, kdfinfo2;
+	struct sr_crypto_kdf_pbkdf2 kdfhint;
+	int rv;
+
+	memset(&bd, 0, sizeof(bd));
+	memset(&kdfhint, 0, sizeof(kdfhint));
+	memset(&kdfinfo1, 0, sizeof(kdfinfo1));
+	memset(&kdfinfo2, 0, sizeof(kdfinfo2));
+
+	/* XXX use dev_t instead of string. */
+	strlcpy(bd.bd_dev, dev, sizeof(bd.bd_dev));
+	bd.bd_cmd = SR_IOCTL_GET_KDFHINT;
+	bd.bd_size = sizeof(kdfhint);
+	bd.bd_data = &kdfhint;
+
+	if (ioctl(devh, BIOCDISCIPLINE, &bd))
+		errx(1, "%s: failed to get KDF hint", dev);
+
+	/* Current passphrase. */
+	bio_kdf_derive(&kdfinfo1, &kdfhint, "Old passphrase: ", 0);
+
+	/* New passphrase. */
+	bio_kdf_derive(&kdfinfo2, &kdfhint, "New passphrase: ", 1);
+
+	kdfpair.kdfinfo1 = &kdfinfo1;
+	kdfpair.kdfsize1 = sizeof(kdfinfo1);
+	kdfpair.kdfinfo2 = &kdfinfo2;
+	kdfpair.kdfsize2 = sizeof(kdfinfo2);
+
+	bd.bd_cmd = SR_IOCTL_CHANGE_PASSPHRASE;
+	bd.bd_size = sizeof(kdfpair);
+	bd.bd_data = &kdfpair;
+
+	rv = ioctl(devh, BIOCDISCIPLINE, &bd);
+
+	memset(&kdfhint, 0, sizeof(kdfhint));
+	memset(&kdfinfo1, 0, sizeof(kdfinfo1));
+	memset(&kdfinfo2, 0, sizeof(kdfinfo2));
+
+	if (rv) {
+		if (errno == EPERM)
+			errx(1, "%s: incorrect passphrase", dev);
+		else
+			errx(1, "%s: failed to change passphrase", dev);
+	}
+}
+
 #define BIOCTL_VIS_NBUF		4
 #define BIOCTL_VIS_BUFLEN	80
 
@@ -929,21 +1025,49 @@ bio_diskinq(char *sd_dev)
 
 void
 derive_key_pkcs(int rounds, u_int8_t *key, size_t keysz, u_int8_t *salt,
-    size_t saltsz, int verify)
+    size_t saltsz, char *prompt, int verify)
 {
-	char		 passphrase[1024], verifybuf[1024];
+	FILE		*f;
+	size_t		pl;
+	struct stat	sb;
+	char		passphrase[1024], verifybuf[1024];
 
 	if (!key)
 		errx(1, "Invalid key");
 	if (!salt)
 		errx(1, "Invalid salt");
 	if (rounds < 1000)
-		errx(1, "Too less rounds: %d", rounds);
+		errx(1, "Too few rounds: %d", rounds);
 
 	/* get passphrase */
-	if (readpassphrase("Passphrase: ", passphrase, sizeof(passphrase),
-	    RPP_REQUIRE_TTY) == NULL)
-		errx(1, "unable to read passphrase");
+	if (password && verify)
+		errx(1, "can't specify passphrase file during initial "
+		    "creation of crypto volume");
+	if (password) {
+		if ((f = fopen(password, "r")) == NULL)
+			err(1, "invalid passphrase file");
+
+		if (fstat(fileno(f), &sb) == -1)
+			err(1, "can't stat passphrase file");
+		if (sb.st_uid != 0)
+			errx(1, "passphrase file must be owned by root");
+		if ((sb.st_mode & ~S_IFMT) != (S_IRUSR | S_IWUSR))
+			errx(1, "passphrase file has the wrong permissions");
+
+		if (fgets(passphrase, sizeof(passphrase), f) == NULL)
+			err(1, "can't read passphrase file");
+		pl = strlen(passphrase);
+		if (pl > 0 && passphrase[pl - 1] == '\n')
+			passphrase[pl - 1] = '\0';
+		else
+			errx(1, "invalid passphrase length");
+
+		fclose(f);
+	} else {
+		if (readpassphrase(prompt, passphrase, sizeof(passphrase),
+		    RPP_REQUIRE_TTY) == NULL)
+			errx(1, "unable to read passphrase");
+	}
 
 	if (verify) {
 		/* request user to re-type it */

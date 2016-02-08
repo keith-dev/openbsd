@@ -1,5 +1,6 @@
-dnl	$OpenBSD: hardware,v 1.7 2009/05/30 23:56:05 miod Exp $
+dnl	$OpenBSD: hardware,v 1.12 2010/03/07 21:26:22 miod Exp $
 OpenBSD/MACHINE OSREV runs on the following machines:
+
 	IP27 class machines:
 		Origin 200, Onyx 2
 		Origin 2000
@@ -12,14 +13,22 @@ OpenBSD/MACHINE OSREV runs on the following machines:
 		(both R50000/RM52xx/RM70000 and R10000/R12000 configurations
 		 are supported)
 	IP35 class machines:
-		Origin 300, Origin 3000, Onyx 300
-dnl		Origin 350, Onyx 350, Onyx 4
+dnl		Origin 300, Origin 3000, Onyx 300
+		Origin 350, Onyx 350, Onyx 4
 		Fuel
-dnl		Tezro
+		Tezro
 
 Supported devices {:-include-:}:
 - Ethernet Adapters
         built-in O2 Mace Ethernet Controller (mec)
+	IOC3 Ethernet Controller (built-in on IP27, IP30 and some IP35) (iec)
+	Broadcom BCM570x (a.k.a. Tigon3) based PCI adapters (bge) including:
+		3Com 3c996-SX
+		3Com 3c996B-T
+		HP ProLiant NC7770 PCI-X Gigabit NIC
+		Netgear GA302T
+		SysKonnect SK-9D21
+		SysKonnect SK-9D41
         Intel/DEC 21443 "Tulip" clones (dc)
 	3Com EtherLink III and Fast EtherLink III Ethernet (ep)
         Intel i8255x-based (fxp) including:
@@ -35,7 +44,7 @@ Supported devices {:-include-:}:
 	3Com EtherLink XL and Fast EtherLink XL (xl)
 - SCSI Host Adapters
         O2 built-in Adaptec AIC-7880 (ahc)
-	IP27/IP30/IP32 built-in QLogic ISP (isp)
+	IP27/IP30/IP32/IP35 built-in QLogic ISP (isp)
         LSI Logic Fusion-MPT Message Passing Interface (mpi)
         53C8xx-based SCSI (siop)
 - RS-232 devices
@@ -56,13 +65,21 @@ Supported devices {:-include-:}:
         O2 Moosehead A/V Board audio (mavb)
 - Video Devices
         O2 built-in Graphics Back End framebuffer (gbe)
+	ImpactSR frame buffer (impact) found on some Octane systems.
+	VPro frame buffer (odyssey) found on Fuel, Tezro, Octane 2, as well
+	  as on some late Octane systems.
 - Input Devices
         O2 built-in PS/2 Controller (mkbc)
+	Octane/Origin/Fuel/Tezro built-in PS/2 Controller (iockbc)
                 PS/2 mice (pms)
                 PS/2 keyboards (pckbd)
 	USB keyboard and mice (already listed above)
 - Miscellaneous Devices
-	``soft'' power button as available on SGI O2 (power)
+	``soft'' power button as available on SGI O2 and Octane (power)
 
 If your hardware is not listed above, there is currently no support for it
 in this release.
+
+In particular, some IP35 systems are not supported yet (Origin 300,
+Origin 3000, Onyx 300), and multiprocessor kernels are only supported
+on IP30 (Octane) systems at the moment.

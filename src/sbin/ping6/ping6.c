@@ -1,4 +1,4 @@
-/*	$OpenBSD: ping6.c,v 1.74 2009/05/31 17:33:39 ckuethe Exp $	*/
+/*	$OpenBSD: ping6.c,v 1.78 2010/02/21 19:00:11 deraadt Exp $	*/
 /*	$KAME: ping6.c,v 1.163 2002/10/25 02:19:06 itojun Exp $	*/
 
 /*
@@ -63,16 +63,6 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  */
-
-#ifndef lint
-static char copyright[] =
-"@(#) Copyright (c) 1989, 1993\n\
-	The Regents of the University of California.  All rights reserved.\n";
-#endif /* not lint */
-
-#ifndef lint
-static char sccsid[] = "@(#)ping.c	8.1 (Berkeley) 6/5/93";
-#endif /* not lint */
 
 /*
  * Using the InterNet Control Message Protocol (ICMP) "ECHO" facility,
@@ -402,7 +392,7 @@ main(int argc, char *argv[])
 			    (long)((intval - interval.tv_sec) * 1000000);
 			if (interval.tv_sec < 0)
 				errx(1, "illegal timing interval %s", optarg);
-			/* less than 1/hz does not make sense */
+			/* less than 1/Hz does not make sense */
 			if (interval.tv_sec == 0 && interval.tv_usec < 10000) {
 				warnx("too small interval, raised to 0.01");
 				interval.tv_usec = 10000;
@@ -559,7 +549,7 @@ main(int argc, char *argv[])
 		ghints.ai_socktype = SOCK_RAW;
 		ghints.ai_protocol = IPPROTO_ICMPV6;
 
-		error = getaddrinfo(gateway, NULL, &hints, &gres);
+		error = getaddrinfo(gateway, NULL, &ghints, &gres);
 		if (error) {
 			errx(1, "getaddrinfo for the gateway %s: %s",
 			     gateway, gai_strerror(error));
@@ -576,7 +566,7 @@ main(int argc, char *argv[])
 	}
 
 	/*
-	 * let the kerel pass extension headers of incoming packets,
+	 * let the kernel pass extension headers of incoming packets,
 	 * for privileged socket options
 	 */
 	if ((options & F_VERBOSE) != 0) {
@@ -674,7 +664,7 @@ main(int argc, char *argv[])
     }
 #endif /*ICMP6_FILTER*/
 
-	/* let the kerel pass extension headers of incoming packets */
+	/* let the kernel pass extension headers of incoming packets */
 	if ((options & F_VERBOSE) != 0) {
 		int opton = 1;
 

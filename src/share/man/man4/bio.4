@@ -1,4 +1,4 @@
-.\"	$OpenBSD: bio.4,v 1.24 2009/02/09 20:39:56 grange Exp $
+.\"	$OpenBSD: bio.4,v 1.27 2010/03/12 05:58:08 jmc Exp $
 .\"
 .\" Copyright (c) 2002 Niklas Hallqvist
 .\" Copyright (c) 2006 Marco Peereboom
@@ -27,7 +27,7 @@
 .\" ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 .\" POSSIBILITY OF SUCH DAMAGE.
 .\"
-.Dd $Mdocdate: February 9 2009 $
+.Dd $Mdocdate: March 12 2010 $
 .Dt BIO 4
 .Os
 .Sh NAME
@@ -61,7 +61,7 @@ The following device drivers register with
 .Nm
 for volume management:
 .Pp
-.Bl -tag -width ciss(4)XX -offset indent -compact
+.Bl -tag -width softraid(4)XX -offset indent -compact
 .It Xr ami 4
 American Megatrends Inc. MegaRAID PATA/SATA/SCSI RAID controller
 .It Xr arc 4
@@ -74,6 +74,10 @@ Compaq Smart ARRAY 5/6 SAS/SATA/SCSI RAID controller
 IBM SATA/SCSI ServeRAID controller
 .It Xr mfi 4
 LSI Logic & Dell MegaRAID SAS RAID controller
+.It Xr mpi 4
+LSI Logic Fusion-MPT Message Passing Interface
+.It Xr softraid 4
+Software RAID
 .El
 .Pp
 The following device drivers register with
@@ -88,7 +92,7 @@ SCSI Enclosure Services
 .El
 .Pp
 The following ioctl calls apply to the
-.Nm bio
+.Nm
 device:
 .Bl -tag -width BIOCCAPABILITIES
 .It Dv BIOCLOCATE
@@ -115,11 +119,28 @@ Note:  These options might not be supported on all hardware.
 Blink an LED of the specified physical disk.
 Supported blink states are: blink LED, unblink LED and blink alarm LED.
 .Pp
-Note:  This option is only supported if the disk is governed by ses(4) or
-safte(4) and the hardware supports hardware blinking.
+Note:  This option is only supported if the disk is governed by
+.Xr ses 4
+or
+.Xr safte 4
+and the hardware supports hardware blinking.
 .It Dv BIOCSETSTATE
 Alter the state of specified physical disk.
 Supported states are: create hot-spare, online disk and offline disk.
+.El
+.Pp
+The following ioctl calls apply to the
+.Nm
+device only when talking to a
+.Xr softraid 4
+device:
+.Bl -tag -width BIOCCREATERAID
+.It Dv BIOCCREATERAID
+Create new array.
+.It Dv BIOCDELETERAID
+Remove array, optionally erasing RAID metadata.
+.It Dv BIOCDISCIPLINE
+Dispatch a discipline specific ioctl.
 .El
 .Sh FILES
 .Bl -tag -width /dev/bio -compact
@@ -128,6 +149,7 @@ ioctl tunnel device
 .El
 .Sh SEE ALSO
 .Xr ioctl 2 ,
+.Xr softraid 4 ,
 .Xr bioctl 8
 .Sh HISTORY
 The

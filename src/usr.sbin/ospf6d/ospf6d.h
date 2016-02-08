@@ -1,4 +1,4 @@
-/*	$OpenBSD: ospf6d.h,v 1.16 2009/06/06 18:31:42 pyr Exp $ */
+/*	$OpenBSD: ospf6d.h,v 1.19 2009/12/22 19:32:36 claudio Exp $ */
 
 /*
  * Copyright (c) 2004, 2007 Esben Norby <norby@openbsd.org>
@@ -94,6 +94,7 @@ enum imsg_type {
 	IMSG_CTL_KROUTE,
 	IMSG_CTL_KROUTE_ADDR,
 	IMSG_CTL_END,
+	IMSG_CTL_LOG_VERBOSE,
 	IMSG_KROUTE_CHANGE,
 	IMSG_KROUTE_DELETE,
 	IMSG_KROUTE_GET,
@@ -374,9 +375,10 @@ struct ospfd_conf {
 struct kroute {
 	struct in6_addr	prefix;
 	struct in6_addr	nexthop;
+	u_int32_t	ext_tag;
+	unsigned int	scope;		/* scope of nexthop */
 	u_int16_t	flags;
 	u_int16_t	rtlabel;
-	u_int32_t	ext_tag;
 	u_short		ifindex;
 	u_int8_t	prefixlen;
 };
@@ -457,6 +459,7 @@ struct ctl_rt {
 	time_t			 uptime;
 	u_int32_t		 cost;
 	u_int32_t		 cost2;
+	unsigned int		 ifindex;	/* scope of nexthop */
 	enum path_type		 p_type;
 	enum dst_type		 d_type;
 	u_int8_t		 flags;

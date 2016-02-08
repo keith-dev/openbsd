@@ -1,4 +1,4 @@
-/*	$OpenBSD: sort.c,v 1.36 2007/08/22 06:56:40 jmc Exp $	*/
+/*	$OpenBSD: sort.c,v 1.39 2009/12/22 19:47:02 schwarze Exp $	*/
 
 /*-
  * Copyright (c) 1993
@@ -31,20 +31,6 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  */
-
-#ifndef lint
-static char copyright[] =
-"@(#) Copyright (c) 1993\n\
-	The Regents of the University of California.  All rights reserved.\n";
-#endif /* not lint */
-
-#ifndef lint
-#if 0
-static char sccsid[] = "@(#)sort.c	8.1 (Berkeley) 6/6/93";
-#else
-static char rcsid[] = "$OpenBSD: sort.c,v 1.36 2007/08/22 06:56:40 jmc Exp $";
-#endif
-#endif /* not lint */
 
 /*
  * Sort sorts a file using an optional user-defined key.
@@ -107,7 +93,7 @@ main(int argc, char *argv[])
 {
 	int (*get)(int, union f_handle, int, RECHEADER *, u_char *, struct field *);
 	int ch, i, stdinflag = 0, tmp = 0;
-	char nfields = 0, cflag = 0, mflag = 0;
+	char nfields = 0, cflag = 0, c_warn = 0, mflag = 0;
 	char *outfile, *outpath = 0;
 	struct field *fldtab, *ftpos;
 	union f_handle filelist;
@@ -125,7 +111,7 @@ main(int argc, char *argv[])
 	fixit(&argc, argv);
 	if (!issetugid() && (outfile = getenv("TMPDIR")))
 		tmpdir = outfile;
-	while ((ch = getopt(argc, argv, "bcdfik:mHno:rR:t:T:uy:zs")) != -1) {
+	while ((ch = getopt(argc, argv, "bCcdfik:mHno:rR:t:T:uy:zs")) != -1) {
 		switch (ch) {
 		case 'b': fldtab->flags |= BI | BT;
 			break;
@@ -173,8 +159,13 @@ main(int argc, char *argv[])
 		case 'u':
 			UNIQUE = 1;
 			break;
+		case 'C':
+			cflag = 1;
+			c_warn = 0;
+			break;
 		case 'c':
 			cflag = 1;
+			c_warn = 1;
 			break;
 		case 'm':
 			mflag = 1;
@@ -202,7 +193,8 @@ main(int argc, char *argv[])
 	}
 
 	if (cflag && argc > optind+1)
-		errx(2, "too many input files for -c option");
+		errx(2, "too many input files for the -%c option",
+		    c_warn ? 'c' : 'C');
 
 	if (argc - 2 > optind && !strcmp(argv[argc-2], "-o")) {
 		outpath = argv[argc-1];
@@ -263,7 +255,7 @@ main(int argc, char *argv[])
 	}
 
 	if (cflag) {
-		order(filelist, get, fldtab);
+		order(filelist, get, fldtab, c_warn);
 		/* NOT REACHED */
 	}
 
@@ -273,7 +265,7 @@ main(int argc, char *argv[])
 		outfile = outpath = toutpath;
 	} else if (!(ch = access(outpath, 0)) &&
 	    strncmp(_PATH_DEV, outpath, 5)) {
-		struct sigaction act;
+		struct sigaction oact, act;
 		int sigtable[] = {SIGHUP, SIGINT, SIGPIPE, SIGXCPU, SIGXFSZ,
 		    SIGVTALRM, SIGPROF, 0};
 		int outfd;
@@ -298,7 +290,10 @@ main(int argc, char *argv[])
 		act.sa_flags = SA_RESTART;
 		act.sa_handler = onsig;
 		for (i = 0; sigtable[i]; ++i)	/* always unlink toutpath */
-			sigaction(sigtable[i], &act, 0);
+			if (sigaction(sigtable[i], NULL, &oact) < 0 ||
+			    oact.sa_handler != SIG_IGN &&
+			    sigaction(sigtable[i], &act, NULL) < 0)
+				err(2, "sigaction");
 	} else
 		outfile = outpath;
 	if (outfp == NULL && (outfp = fopen(outfile, "w")) == NULL)
@@ -343,7 +338,7 @@ usage(char *msg)
 
 	if (msg != NULL)
 		warnx("%s", msg);
-	(void)fprintf(stderr, "usage: %s [-bcdfHimnrsuz] "
+	(void)fprintf(stderr, "usage: %s [-bCcdfHimnrsuz] "
 	    "[-k field1[,field2]] [-o output] [-R char]\n"
 	    "\t[-T dir] [-t char] [file ...]\n", __progname);
 	exit(2);

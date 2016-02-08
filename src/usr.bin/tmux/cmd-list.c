@@ -1,4 +1,4 @@
-/* $OpenBSD: cmd-list.c,v 1.1 2009/06/01 22:58:49 nicm Exp $ */
+/* $OpenBSD: cmd-list.c,v 1.3 2010/01/30 19:08:47 nicm Exp $ */
 
 /*
  * Copyright (c) 2009 Nicholas Marriott <nicm@users.sourceforge.net>
@@ -77,48 +77,32 @@ int
 cmd_list_exec(struct cmd_list *cmdlist, struct cmd_ctx *ctx)
 {
 	struct cmd	*cmd;
-	int		 n;
+	int		 n, retval;
 
+	retval = 0;
 	TAILQ_FOREACH(cmd, cmdlist, qentry) {
-		if ((n = cmd_exec(cmd, ctx)) != 0)
-			return (n);
+		if ((n = cmd_exec(cmd, ctx)) == -1)
+			return (-1);
+
+		/*
+		 * A 1 return value means the command client is being attached
+		 * (sent MSG_READY).
+		 */
+		if (n == 1) {
+			retval = 1;
+
+			/*
+			 * The command client has been attached, so mangle the
+			 * context to treat any following commands as if they
+			 * were called from inside.
+			 */
+			if (ctx->curclient == NULL) {
+				ctx->curclient = ctx->cmdclient;
+				ctx->cmdclient = NULL;
+			}
+		}
 	}
-	return (0);
-}
-
-void
-cmd_list_send(struct cmd_list *cmdlist, struct buffer *b)
-{
-	struct cmd	*cmd;
-	u_int		 n;
-
-	n = 0;
-	TAILQ_FOREACH(cmd, cmdlist, qentry)
-	    	n++;
-
-	buffer_write(b, &n, sizeof n);
-	TAILQ_FOREACH(cmd, cmdlist, qentry)
-	    	cmd_send(cmd, b);
-}
-
-struct cmd_list *
-cmd_list_recv(struct buffer *b)
-{
-	struct cmd_list	*cmdlist;
-	struct cmd	*cmd;
-	u_int		 n;
-
-	buffer_read(b, &n, sizeof n);
-
-	cmdlist = xmalloc(sizeof *cmdlist);
-	TAILQ_INIT(cmdlist);
-
-	while (n-- > 0) {
-		cmd = cmd_recv(b);
-		TAILQ_INSERT_TAIL(cmdlist, cmd, qentry);
-	}
-
-	return (cmdlist);
+	return (retval);
 }
 
 void

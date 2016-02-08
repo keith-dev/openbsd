@@ -1,4 +1,4 @@
-/*	$OpenBSD: ex_args.c,v 1.6 2006/04/22 03:09:15 ray Exp $	*/
+/*	$OpenBSD: ex_args.c,v 1.9 2009/11/15 04:32:31 deraadt Exp $	*/
 
 /*-
  * Copyright (c) 1991, 1993, 1994
@@ -10,10 +10,6 @@
  */
 
 #include "config.h"
-
-#ifndef lint
-static const char sccsid[] = "@(#)ex_args.c	10.16 (Berkeley) 7/13/96";
-#endif /* not lint */
 
 #include <sys/types.h>
 #include <sys/queue.h>
@@ -314,14 +310,20 @@ ex_buildargv(sp, cmdp, name)
 		return (NULL);
 
 	if (cmdp == NULL) {
-		if ((*ap = v_strdup(sp, name, strlen(name))) == NULL)
+		if ((*ap = v_strdup(sp, name, strlen(name))) == NULL) {
+			free(s_argv);
 			return (NULL);
+		}
 		++ap;
 	} else
 		for (argv = cmdp->argv; argv[0]->len != 0; ++ap, ++argv)
 			if ((*ap =
-			    v_strdup(sp, argv[0]->bp, argv[0]->len)) == NULL)
+			    v_strdup(sp, argv[0]->bp, argv[0]->len)) == NULL) {
+				while (--ap >= s_argv)
+					free(*ap);
+				free(s_argv);
 				return (NULL);
+			}
 	*ap = NULL;
 	return (s_argv);
 }

@@ -1,4 +1,4 @@
-/*	$OpenBSD: uthread_fork.c,v 1.19 2008/04/04 19:30:41 kurt Exp $	*/
+/*	$OpenBSD: uthread_fork.c,v 1.21 2009/12/06 17:54:59 kurt Exp $	*/
 /*
  * Copyright (c) 1995-1998 John Birrell <jb@cimlogic.com.au>
  * All rights reserved.
@@ -184,6 +184,9 @@ _dofork(int vfork)
 			/* Re-init the threads mutex queue: */
 			TAILQ_INIT(&curthread->mutexq);
 
+			/* single threaded now */
+			__isthreaded = 0;
+
 			/* No spinlocks yet: */
 			_spinblock_count = 0;
 
@@ -200,7 +203,6 @@ _dofork(int vfork)
 			for (i = 0; i < _thread_max_fdtsize; i++) {
 				if (_thread_fd_table[i] != NULL) {
 					/* Initialise the file locks: */
-					_SPINLOCK_INIT(&_thread_fd_table[i]->lock);
 					_thread_fd_table[i]->r_owner = NULL;
 					_thread_fd_table[i]->w_owner = NULL;
 					_thread_fd_table[i]->r_fname = NULL;
@@ -209,8 +211,7 @@ _dofork(int vfork)
 					_thread_fd_table[i]->w_lineno = 0;
 					_thread_fd_table[i]->r_lockcount = 0;
 					_thread_fd_table[i]->w_lockcount = 0;
-					if (_thread_fd_table[i]->status_flags != NULL)
-						_SPINLOCK_INIT(&_thread_fd_table[i]->status_flags->lock);
+
 					/*
 					 * If a fd was in the process of closing
 					 * then finish closing it.

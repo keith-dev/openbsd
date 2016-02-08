@@ -1,4 +1,4 @@
-/*	$OpenBSD: ifconfig.c,v 1.220 2009/06/19 14:05:32 henning Exp $	*/
+/*	$OpenBSD: ifconfig.c,v 1.228 2010/01/10 03:58:14 guenther Exp $	*/
 /*	$NetBSD: ifconfig.c,v 1.40 1997/10/01 02:19:43 enami Exp $	*/
 
 /*
@@ -104,6 +104,8 @@
 #include <unistd.h>
 #include <ifaddrs.h>
 
+#include "brconfig.h"
+
 struct	ifreq		ifr, ridreq;
 struct	in_aliasreq	in_addreq;
 #ifdef INET6
@@ -171,6 +173,7 @@ void	setatrange(const char *, int);
 void	setatphase(const char *, int);
 void	settunnel(const char *, const char *);
 void	deletetunnel(const char *, int);
+void	settunnelinst(const char *, int);
 #ifdef INET6
 void	setia6flags(const char *, int);
 void	setia6pltime(const char *, int);
@@ -234,7 +237,7 @@ void	settrunkport(const char *, int);
 void	unsettrunkport(const char *, int);
 void	settrunkproto(const char *, int);
 void	trunk_status(void);
-void	setpriority(const char *, int);
+void	setifpriority(const char *, int);
 void	setinstance(const char *, int);
 int	main(int, char *[]);
 int	prefix(void *val, int);
@@ -322,7 +325,11 @@ const struct	cmd {
 	{ "broadcast",	NEXTARG,	0,		setifbroadaddr },
 	{ "ipdst",	NEXTARG,	0,		setifipdst },
 	{ "prefixlen",  NEXTARG,	0,		setifprefixlen},
-	{ "priority",	NEXTARG,	0,		setpriority },
+	{ "priority",	NEXTARG,	0,		setifpriority },
+	{ "vlan",	NEXTARG,	0,		setvlantag },
+	{ "vlanprio",	NEXTARG,	0,		setvlanprio },
+	{ "vlandev",	NEXTARG,	0,		setvlandev },
+	{ "-vlandev",	1,		0,		unsetvlandev },
 #ifdef INET6
 	{ "anycast",	IN6_IFF_ANYCAST,	0,	setia6flags },
 	{ "-anycast",	-IN6_IFF_ANYCAST,	0,	setia6flags },
@@ -338,12 +345,6 @@ const struct	cmd {
 	{ "range",	NEXTARG,	0,		setatrange },
 	{ "phase",	NEXTARG,	0,		setatphase },
 	{ "mplslabel",	NEXTARG,	0,		setmpelabel },
-#endif /* SMALL */
-	{ "vlan",	NEXTARG,	0,		setvlantag },
-	{ "vlanprio",	NEXTARG,	0,		setvlanprio },
-	{ "vlandev",	NEXTARG,	0,		setvlandev },
-	{ "-vlandev",	1,		0,		unsetvlandev },
-#ifndef SMALL
 	{ "advbase",	NEXTARG,	0,		setcarp_advbase },
 	{ "advskew",	NEXTARG,	0,		setcarp_advskew },
 	{ "carppeer",	NEXTARG,	0,		setcarppeer },
@@ -368,6 +369,7 @@ const struct	cmd {
 	{ "giftunnel",  NEXTARG2,	0,		NULL, settunnel } ,
 	{ "tunnel",	NEXTARG2,	0,		NULL, settunnel } ,
 	{ "deletetunnel",  0,		0,		deletetunnel } ,
+	{ "tunneldomain", NEXTARG,	0,		settunnelinst } ,
 	{ "pppoedev",	NEXTARG,	0,		setpppoe_dev },
 	{ "pppoesvc",	NEXTARG,	0,		setpppoe_svc },
 	{ "-pppoesvc",	1,		0,		setpppoe_svc },
@@ -390,6 +392,54 @@ const struct	cmd {
 	{ "nwflag",	NEXTARG,	0,		setifnwflag },
 	{ "-nwflag",	NEXTARG,	0,		unsetifnwflag },
 	{ "rdomain",	NEXTARG,	0,		setinstance },
+	{ "flowsrc",	NEXTARG,	0,		setpflow_sender },
+	{ "-flowsrc",	1,		0,		unsetpflow_sender },
+	{ "flowdst", 	NEXTARG,	0,		setpflow_receiver },
+	{ "-flowdst", 1,		0,		unsetpflow_receiver },
+	{ "-inet6",	IFXF_NOINET6,	0,		setifxflags } ,
+	{ "add",	NEXTARG,	0,		bridge_add },
+	{ "del",	NEXTARG,	0,		bridge_delete },
+	{ "addspan",	NEXTARG,	0,		bridge_addspan },
+	{ "delspan",	NEXTARG, 	0,		bridge_delspan },
+	{ "discover",	NEXTARG,	0,		setdiscover },
+	{ "-discover",	NEXTARG,	0,		unsetdiscover },
+	{ "blocknonip", NEXTARG,	0,		setblocknonip },
+	{ "-blocknonip",NEXTARG,	0,		unsetblocknonip },
+	{ "learn",	NEXTARG,	0,		setlearn },
+	{ "-learn",	NEXTARG,	0,		unsetlearn },
+	{ "stp",	NEXTARG,	0,		setstp },
+	{ "-stp",	NEXTARG,	0,		unsetstp },
+	{ "edge",	NEXTARG,	0,		setedge },
+	{ "-edge",	NEXTARG,	0,		unsetedge },
+	{ "autoedge",	NEXTARG,	0,		setautoedge },
+	{ "-autoedge",	NEXTARG,	0,		unsetautoedge },
+	{ "ptp",	NEXTARG,	0,		setptp },
+	{ "-ptp",	NEXTARG,	0,		unsetptp },
+	{ "autoptp",	NEXTARG,	0,		setautoptp },
+	{ "-autoptp",	NEXTARG,	0,		unsetautoptp },
+	{ "flush",	0,		0,		bridge_flush },
+	{ "flushall",	0,		0,		bridge_flushall },
+	{ "static",	NEXTARG2,	0,		NULL, bridge_addaddr },
+	{ "deladdr",	NEXTARG,	0,		bridge_deladdr },
+	{ "maxaddr",	NEXTARG,	0,		bridge_maxaddr },
+	{ "addr",	0,		0,		bridge_addrs },
+	{ "hellotime",	NEXTARG,	0,		bridge_hellotime },
+	{ "fwddelay",	NEXTARG,	0,		bridge_fwddelay },
+	{ "maxage",	NEXTARG,	0,		bridge_maxage },
+	{ "proto",	NEXTARG,	0,		bridge_proto },
+	{ "ifpriority",	NEXTARG2,	0,		NULL, bridge_ifprio },
+	{ "ifcost",	NEXTARG2,	0,		NULL, bridge_ifcost },
+	{ "-ifcost",	NEXTARG,	0,		bridge_noifcost },
+	{ "timeout",	NEXTARG,	0,		bridge_timeout },
+	{ "holdcnt",	NEXTARG,	0,		bridge_holdcnt },
+	{ "spanpriority", NEXTARG,	0,		bridge_priority },
+#if 0
+	/* XXX `rule` special-cased below */
+	{ "rule",	0,		0,		bridge_rule },
+#endif
+	{ "rules",	NEXTARG,	0,		bridge_rules },
+	{ "rulefile",	NEXTARG,	0,		bridge_rulefile },
+	{ "flushrule",	NEXTARG,	0,		bridge_flushrule },
 #endif /* SMALL */
 #if 0
 	/* XXX `create' special-cased below */
@@ -413,13 +463,6 @@ const struct	cmd {
 	{ "descr",	NEXTARG,	0,		setifdesc },
 	{ "-description", 1,		0,		unsetifdesc },
 	{ "-descr",	1,		0,		unsetifdesc },
-#ifndef SMALL
-	{ "flowsrc",	NEXTARG,	0,		setpflow_sender },
-	{ "-flowsrc",	1,		0,		unsetpflow_sender },
-	{ "flowdst", 	NEXTARG,	0,		setpflow_receiver },
-	{ "-flowdst", 1,		0,		unsetpflow_receiver },
-	{ "-inet6",	IFXF_NOINET6,	0,		setifxflags } ,
-#endif
 	{ NULL, /*src*/	0,		0,		setifaddr },
 	{ NULL, /*dst*/	0,		0,		setifdstaddr },
 	{ NULL, /*illegal*/0,		0,		NULL },
@@ -513,7 +556,8 @@ main(int argc, char *argv[])
 
 	/* If no args at all, print all interfaces.  */
 	if (argc < 2) {
-		printif(NULL, ifaliases);
+		aflag = 1;
+		printif(NULL, 0);
 		exit(0);
 	}
 	argc--, argv++;
@@ -608,6 +652,12 @@ main(int argc, char *argv[])
 		for (p = cmds; p->c_name; p++)
 			if (strcmp(*argv, p->c_name) == 0)
 				break;
+#ifndef SMALL
+		if (strcmp(*argv, "rule") == 0) {
+			argc--, argv++;
+			return bridge_rule(argc, argv, -1);
+		}
+#endif
 		if (p->c_name == 0 && setaddr)
 			for (i = setaddr; i > 0; i--) {
 				p++;
@@ -658,7 +708,7 @@ nextarg:
 	}
 
 	if (argc == 0 && actions == 0 && !noprint) {
-		printif(ifr.ifr_name, 1);
+		printif(ifr.ifr_name, aflag ? ifaliases : 1);
 		exit(0);
 	}
 
@@ -739,7 +789,11 @@ getinfo(struct ifreq *ifr, int create)
 		metric = 0;
 	else
 		metric = ifr->ifr_metric;
+#ifdef SMALL
 	if (ioctl(s, SIOCGIFMTU, (caddr_t)ifr) < 0)
+#else
+	if (is_bridge(name) || ioctl(s, SIOCGIFMTU, (caddr_t)ifr) < 0)
+#endif
 		mtu = 0;
 	else
 		mtu = ifr->ifr_mtu;
@@ -1279,8 +1333,10 @@ setifgroup(const char *group_name, int dummy)
 
 	if (strlcpy(ifgr.ifgr_group, group_name, IFNAMSIZ) >= IFNAMSIZ)
 		errx(1, "setifgroup: group name too long");
-	if (ioctl(s, SIOCAIFGROUP, (caddr_t)&ifgr) == -1)
-		err(1," SIOCAIFGROUP");
+	if (ioctl(s, SIOCAIFGROUP, (caddr_t)&ifgr) == -1) {
+		if (errno != EEXIST)
+			err(1," SIOCAIFGROUP");
+	}
 }
 
 /* ARGSUSED */
@@ -1658,6 +1714,7 @@ void
 setifchan(const char *val, int d)
 {
 	struct ieee80211chanreq channel;
+	const char *errstr;
 	int chan;
 
 	if (val == NULL) {
@@ -1669,9 +1726,9 @@ setifchan(const char *val, int d)
 	if (d != 0)
 		chan = IEEE80211_CHAN_ANY;
 	else {
-		chan = atoi(val);
-		if (chan < 1 || chan > 256) {
-			warnx("invalid channel: %s", val);
+		chan = strtonum(val, 1, 256, &errstr);
+		if (errstr) {
+			warnx("invalid channel %s: %s", val, errstr);
 			return;
 		}
 	}
@@ -2561,10 +2618,6 @@ print_media_word(int ifmw, int print_type, int as_syntax)
 		printf(" instance %d", IFM_INST(ifmw));
 }
 
-#define	IFFBITS \
-"\020\1UP\2BROADCAST\3DEBUG\4LOOPBACK\5POINTOPOINT\6NOTRAILERS\7RUNNING\10NOARP\
-\11PROMISC\12ALLMULTI\13OACTIVE\14SIMPLEX\15LINK0\16LINK1\17LINK2\20MULTICAST"
-
 /* ARGSUSED */
 static void
 phys_status(int force)
@@ -2601,8 +2654,13 @@ phys_status(int force)
 	    pdstaddr, sizeof(pdstaddr), 0, 0, niflag) != 0)
 		strlcpy(pdstaddr, "<error>", sizeof(pdstaddr));
 
-	printf("\tphysical address inet%s %s --> %s\n", ver,
+	printf("\tphysical address inet%s %s --> %s", ver,
 	    psrcaddr, pdstaddr);
+
+	if (ioctl(s, SIOCGLIFPHYRTABLEID, (caddr_t)&ifr) == 0 &&
+	    (rdomainid != 0 || ifr.ifr_rdomainid != 0))
+		printf(" rdomain %d", ifr.ifr_rdomainid);
+	printf("\n");
 }
 
 const int ifm_status_valid_list[] = IFM_STATUS_VALID_LIST;
@@ -2645,9 +2703,8 @@ status(int link, struct sockaddr_dl *sdl)
 		printf("\tdescription: %s\n", ifrdesc.ifr_data);
 
 #ifndef SMALL
-	if (ioctl(s, SIOCGIFPRIORITY, &ifrdesc) == 0)
+	if (!is_bridge(name) && ioctl(s, SIOCGIFPRIORITY, &ifrdesc) == 0)
 		printf("\tpriority: %d\n", ifrdesc.ifr_metric);
-
 #endif
 	vlan_status();
 #ifndef SMALL
@@ -2759,6 +2816,9 @@ status(int link, struct sockaddr_dl *sdl)
 	}
 
 	phys_status(0);
+#ifndef SMALL
+	bridge_status();
+#endif
 }
 
 /* ARGSUSED */
@@ -3010,6 +3070,22 @@ deletetunnel(const char *ignored, int alsoignored)
 {
 	if (ioctl(s, SIOCDIFPHYADDR, &ifr) < 0)
 		warn("SIOCDIFPHYADDR");
+}
+
+void
+settunnelinst(const char *id, int param)
+{
+	const char *errmsg = NULL;
+	int rdomainid;
+
+	rdomainid = strtonum(id, 0, 128, &errmsg);
+	if (errmsg)
+		errx(1, "rdomain %s: %s", id, errmsg);
+
+	strlcpy(ifr.ifr_name, name, sizeof(ifr.ifr_name));
+	ifr.ifr_rdomainid = rdomainid;
+	if (ioctl(s, SIOCSLIFPHYRTABLEID, (caddr_t)&ifr) < 0)
+		warn("SIOCSLIFPHYRTABLEID");
 }
 
 void
@@ -3567,7 +3643,8 @@ setcarp_nodes(const char *val, int d)
 	str = strtok(optlist, ",");
 	for (i = 0; str != NULL; i++) {
 		u_int vhid, advskew;
-		if (i > CARP_MAXNODES)
+
+		if (i >= CARP_MAXNODES)
 			errx(1, "too many carp nodes");
 		if (sscanf(str, "%u:%u", &vhid, &advskew) != 2) {
 			errx(1, "non parsable arg: %s", str);
@@ -4318,7 +4395,7 @@ trunk_status(void)
 #endif /* SMALL */
 
 void
-setpriority(const char *id, int param)
+setifpriority(const char *id, int param)
 {
 #ifndef SMALL
 	const char *errmsg = NULL;

@@ -1,4 +1,4 @@
-/*	$OpenBSD: parse.y,v 1.1 2009/06/01 20:59:45 michele Exp $ */
+/*	$OpenBSD: parse.y,v 1.3 2010/02/18 15:25:28 michele Exp $ */
 
 /*
  * Copyright (c) 2004, 2005, 2008 Esben Norby <norby@openbsd.org>
@@ -641,9 +641,13 @@ pushfile(const char *name, int secret)
 {
 	struct file	*nfile;
 
-	if ((nfile = calloc(1, sizeof(struct file))) == NULL ||
-	    (nfile->name = strdup(name)) == NULL) {
+	if ((nfile = calloc(1, sizeof(struct file))) == NULL) {
 		log_warn("malloc");
+		return (NULL);
+	}
+	if ((nfile->name = strdup(name)) == NULL) {
+		log_warn("strdup");
+		free(nfile);
 		return (NULL);
 	}
 	if ((nfile->stream = fopen(nfile->name, "r")) == NULL) {
@@ -693,7 +697,8 @@ parse_config(char *filename, int opts)
 	defs->holdtime = DEFAULT_HOLDTIME;
 	defs->keepalive = DEFAULT_KEEPALIVE;
 	defs->hello_interval = DEFAULT_HELLO_INTERVAL;
-	defs->mode = (MODE_DIST_INDEPENDENT | MODE_RET_LIBERAL |
+
+	conf->mode = (MODE_DIST_INDEPENDENT | MODE_RET_LIBERAL |
 	    MODE_ADV_UNSOLICITED);
 
 	if ((file = pushfile(filename, !(conf->opts & LDPD_OPT_NOACTION))) == NULL) {

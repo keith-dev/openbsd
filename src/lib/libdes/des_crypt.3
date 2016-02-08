@@ -87,7 +87,7 @@ int verify;
 char *str;
 des_cblock *key;
 .PP
-.B int des_string_to_2keys(str,key1,key2)
+.B int des_string_to_2key(str,key1,key2)
 char *str;
 des_cblock *key1,*key2;
 .PP
@@ -495,7 +495,7 @@ data is encrypted.
 is used to specify the encryption mode to use with
 .I des_enc_read
 and
-.I des_end_write.
+.I des_enc_write.
 If set to
 .I DES_PCBC_MODE
 (the default), des_pcbc_encrypt is used.

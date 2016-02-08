@@ -1,4 +1,4 @@
-/*	$OpenBSD: ldpctl.c,v 1.2 2009/06/13 16:47:32 michele Exp $
+/*	$OpenBSD: ldpctl.c,v 1.8 2010/03/03 10:18:35 claudio Exp $
  *
  * Copyright (c) 2009 Michele Marchetto <michele@openbsd.org>
  * Copyright (c) 2005 Claudio Jeker <claudio@openbsd.org>
@@ -71,7 +71,7 @@ main(int argc, char *argv[])
 	struct imsg		 imsg;
 	unsigned int		 ifidx = 0;
 	int			 ctl_sock;
-	int			 done = 0;
+	int			 done = 0, verbose = 0;
 	int			 n;
 
 	/* parse options */
@@ -112,13 +112,13 @@ main(int argc, char *argv[])
 		    &ifidx, sizeof(ifidx));
 		break;
 	case SHOW_NBR:
-		printf("%-15s %-15s %-15s %-9s %-10s\n", "ID",
+		printf("%-15s %-18s %-15s %-9s %-10s\n", "ID",
 		    "State", "Address", "Iface", "Uptime");
 		imsg_compose(ibuf, IMSG_CTL_SHOW_NBR, 0, 0, -1, NULL, 0);
 		break;
 	case SHOW_LIB:
-		printf("%-20s %-17s %-17s %s\n", "Destination",
-		    "Nexthop", "Local Label", "Remote Label");
+		printf("%-20s %-17s %-14s %-14s %-10s\n", "Destination",
+		    "Nexthop", "Local Label", "Remote Label", "In Use");
 		imsg_compose(ibuf, IMSG_CTL_SHOW_LIB, 0, 0, -1, NULL, 0);
 		break;
 	case SHOW_LFIB:
@@ -149,6 +149,15 @@ main(int argc, char *argv[])
 	case LFIB_DECOUPLE:
 		imsg_compose(ibuf, IMSG_CTL_LFIB_DECOUPLE, 0, 0, -1, NULL, 0);
 		printf("decouple request sent.\n");
+		done = 1;
+		break;
+	case LOG_VERBOSE:
+		verbose = 1;
+		/* FALLTHROUGH */
+	case LOG_BRIEF:
+		imsg_compose(ibuf, IMSG_CTL_LOG_VERBOSE, 0, 0, -1,
+		    &verbose, sizeof(verbose));
+		printf("logging request sent.\n");
 		done = 1;
 		break;
 	case RELOAD:
@@ -194,6 +203,8 @@ main(int argc, char *argv[])
 			case LFIB:
 			case LFIB_COUPLE:
 			case LFIB_DECOUPLE:
+			case LOG_VERBOSE:
+			case LOG_BRIEF:
 			case RELOAD:
 				break;
 			}
@@ -289,8 +300,8 @@ show_interface_msg(struct imsg *imsg)
 			err(1, NULL);
 		printf("%-11s %-18s %-10s %-10s %-8s\n",
 		    iface->name, netid, if_state_name(iface->state),
-		    get_linkstate(get_ifms_type(iface->mediatype),
-		    iface->linkstate), iface->uptime == 0 ? "00:00:00" :
+		    get_linkstate(iface->mediatype, iface->linkstate),
+		    iface->uptime == 0 ? "00:00:00" :
 		    fmt_timeframe_core(iface->uptime));
 		free(netid);
 		break;
@@ -308,7 +319,7 @@ int
 show_lib_msg(struct imsg *imsg)
 {
 	struct ctl_rt	*rt;
-	char		*dstnet;
+	char		*dstnet, *remote;
 
 	switch (imsg->hdr.type) {
 	case IMSG_CTL_SHOW_LIB:
@@ -317,10 +328,19 @@ show_lib_msg(struct imsg *imsg)
 		    rt->prefixlen) == -1)
 			err(1, NULL);
 
-		printf("%-20s %-17s %-17u %u\n", dstnet,
+		if (rt->connected || !rt->in_use) {
+			if (asprintf(&remote, "-") == -1)
+				err(1, NULL);
+		} else {
+			if (asprintf(&remote, "%u", (ntohl(rt->remote_label) >> MPLS_LABEL_OFFSET)) == -1)
+				err(1, NULL);
+		}
+
+		printf("%-20s %-17s %-14u %-14s %s\n", dstnet,
 		    inet_ntoa(rt->nexthop),
 		    (ntohl(rt->local_label) >> MPLS_LABEL_OFFSET),
-		    (ntohl(rt->remote_label) >> MPLS_LABEL_OFFSET));
+		    remote, rt->in_use ? "yes" : "no");
+		free(remote);
 		free(dstnet);
 
 		break;
@@ -346,7 +366,7 @@ show_nbr_msg(struct imsg *imsg)
 		if (asprintf(&state, "%s/%s", nbr_state_name(nbr->nbr_state),
 		    if_state_name(nbr->iface_state)) == -1)
 			err(1, NULL);
-		printf("%-15s %-16s", inet_ntoa(nbr->id),
+		printf("%-15s %-19s", inet_ntoa(nbr->id),
 		    state);
 		printf("%-15s %-10s", inet_ntoa(nbr->addr), nbr->name);
 		printf("%-15s\n", nbr->uptime == 0 ? "-" :
@@ -409,13 +429,13 @@ show_lfib_msg(struct imsg *imsg)
 		else if (k->flags & F_CONNECTED)
 			printf("link#%-13u", k->ifindex);
 
-		if (k->local_label) {
+		if (k->local_label != NO_LABEL) {
 			printf("%-18u", (ntohl(k->local_label) >>
 			    MPLS_LABEL_OFFSET));
 		} else
 			printf("-                 ");
 
-		if (k->remote_label) {
+		if (k->remote_label != NO_LABEL) {
 			printf("%u", (ntohl(k->remote_label) >>
 			    MPLS_LABEL_OFFSET));
 		} else
@@ -452,28 +472,11 @@ show_lfib_interface_msg(struct imsg *imsg)
 		k = imsg->data;
 		printf("%-15s", k->ifname);
 		printf("%-15s", k->flags & IFF_UP ? "UP" : "");
-		switch (k->media_type) {
-		case IFT_ETHER:
-			ifms_type = IFM_ETHER;
-			break;
-		case IFT_FDDI:
-			ifms_type = IFM_FDDI;
-			break;
-		case IFT_CARP:
-			ifms_type = IFM_CARP;
-			break;
-		default:
-			ifms_type = 0;
-			break;
-		}
-
+		ifms_type = get_ifms_type(k->media_type);
 		if (ifms_type)
-			printf("%s, %s", get_media_descr(ifms_type),
-			    get_linkstate(ifms_type, k->link_state));
-		else if (k->link_state == LINK_STATE_UNKNOWN)
-			printf("unknown");
-		else
-			printf("link state %u", k->link_state);
+			printf("%s, ", get_media_descr(ifms_type));
+
+		printf("%s", get_linkstate(k->media_type, k->link_state));
 
 		if (k->link_state != LINK_STATE_DOWN && k->baudrate > 0) {
 			printf(", ");
@@ -491,9 +494,8 @@ show_lfib_interface_msg(struct imsg *imsg)
 	return (0);
 }
 
-const int	ifm_status_valid_list[] = IFM_STATUS_VALID_LIST;
-const struct ifmedia_status_description
-		ifm_status_descriptions[] = IFM_STATUS_DESCRIPTIONS;
+const struct if_status_description
+		if_status_descriptions[] = LINK_STATE_DESCRIPTIONS;
 const struct ifmedia_description
 		ifm_type_descriptions[] = IFM_TYPE_DESCRIPTIONS;
 
@@ -512,23 +514,15 @@ get_media_descr(int media_type)
 const char *
 get_linkstate(int media_type, int link_state)
 {
-	const struct ifmedia_status_description	*p;
-	int					 i;
+	const struct if_status_description *p;
+	static char buf[8];
 
-	if (link_state == LINK_STATE_UNKNOWN)
-		return ("unknown");
-
-	for (i = 0; ifm_status_valid_list[i] != 0; i++)
-		for (p = ifm_status_descriptions; p->ifms_valid != 0; p++) {
-			if (p->ifms_type != media_type ||
-			    p->ifms_valid != ifm_status_valid_list[i])
-				continue;
-			if (LINK_STATE_IS_UP(link_state))
-				return (p->ifms_string[1]);
-			return (p->ifms_string[0]);
-		}
-
-	return ("unknown link state");
+	for (p = if_status_descriptions; p->ifs_string != NULL; p++) {
+		if (LINK_STATE_DESC_MATCH(p, media_type, link_state))
+			return (p->ifs_string);
+	}
+	snprintf(buf, sizeof(buf), "[#%d]", link_state);
+	return (buf);
 }
 
 void

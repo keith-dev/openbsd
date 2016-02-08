@@ -1,4 +1,4 @@
-/*	$Id: mdoc_macro.c,v 1.4 2009/06/18 23:34:53 schwarze Exp $ */
+/*	$Id: mdoc_macro.c,v 1.31 2010/03/02 00:38:59 schwarze Exp $ */
 /*
  * Copyright (c) 2008, 2009 Kristaps Dzonsons <kristaps@kth.se>
  *
@@ -19,27 +19,15 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
+#include <time.h>
 
 #include "libmdoc.h"
-
-enum	mwarn {
-	WIGNE,
-	WIMPBRK,
-	WMACPARM,
-	WOBS
-};
-
-enum	merr {
-	EOPEN,
-	EQUOT,
-	ENOCTX,
-	ENOPARMS
-};
 
 #define	REWIND_REWIND	(1 << 0)
 #define	REWIND_NOHALT	(1 << 1)
 #define	REWIND_HALT	(1 << 2)
 
+static	int	  ctx_synopsis(MACRO_PROT_ARGS);
 static	int	  obsolete(MACRO_PROT_ARGS);
 static	int	  blk_part_exp(MACRO_PROT_ARGS);
 static	int	  in_line_eoln(MACRO_PROT_ARGS);
@@ -55,19 +43,15 @@ static	int	  rew_dohalt(int, enum mdoc_type,
 static	int	  rew_alt(int);
 static	int	  rew_dobreak(int, const struct mdoc_node *);
 static	int	  rew_elem(struct mdoc *, int);
-static	int	  rew_impblock(struct mdoc *, int, int, int);
-static	int	  rew_expblock(struct mdoc *, int, int, int);
-static	int	  rew_subblock(enum mdoc_type, 
-			struct mdoc *, int, int, int);
-static	int	  rew_last(struct mdoc *, struct mdoc_node *);
+static	int	  rew_sub(enum mdoc_type, struct mdoc *, 
+			int, int, int);
+static	int	  rew_last(struct mdoc *, 
+			const struct mdoc_node *);
 static	int	  append_delims(struct mdoc *, int, int *, char *);
-static	int	  lookup(struct mdoc *, int, int, int, const char *);
-static	int	  pwarn(struct mdoc *, int, int, enum mwarn);
-static	int	  perr(struct mdoc *, int, int, enum merr);
+static	int	  lookup(int, const char *);
+static	int	  lookup_raw(const char *);
 static	int	  swarn(struct mdoc *, enum mdoc_type, int, int, 
 			const struct mdoc_node *);
-
-#define	nerr(m, n, t) perr((m), (n)->line, (n)->pos, (t))
 
 /* Central table of library: who gets parsed how. */
 
@@ -78,7 +62,7 @@ const	struct mdoc_macro __mdoc_macros[MDOC_MAX] = {
 	{ in_line_eoln, MDOC_PROLOGUE }, /* Os */
 	{ blk_full, 0 }, /* Sh */
 	{ blk_full, 0 }, /* Ss */ 
-	{ in_line, 0 }, /* Pp */ 
+	{ in_line_eoln, 0 }, /* Pp */ 
 	{ blk_part_imp, MDOC_PARSED }, /* D1 */
 	{ blk_part_imp, MDOC_PARSED }, /* Dl */
 	{ blk_full, MDOC_EXPLICIT }, /* Bd */
@@ -89,7 +73,7 @@ const	struct mdoc_macro __mdoc_macros[MDOC_MAX] = {
 	{ in_line, MDOC_CALLABLE | MDOC_PARSED }, /* Ad */ 
 	{ in_line, MDOC_CALLABLE | MDOC_PARSED }, /* An */
 	{ in_line, MDOC_CALLABLE | MDOC_PARSED }, /* Ar */
-	{ in_line_eoln, MDOC_CALLABLE }, /* Cd */
+	{ in_line, MDOC_CALLABLE | MDOC_PARSED }, /* Cd */
 	{ in_line, MDOC_CALLABLE | MDOC_PARSED }, /* Cm */
 	{ in_line, MDOC_CALLABLE | MDOC_PARSED }, /* Dv */ 
 	{ in_line, MDOC_CALLABLE | MDOC_PARSED }, /* Er */ 
@@ -101,9 +85,9 @@ const	struct mdoc_macro __mdoc_macros[MDOC_MAX] = {
 	{ in_line, MDOC_CALLABLE | MDOC_PARSED }, /* Fn */ 
 	{ in_line, MDOC_CALLABLE | MDOC_PARSED }, /* Ft */ 
 	{ in_line, MDOC_CALLABLE | MDOC_PARSED }, /* Ic */ 
-	{ in_line_eoln, 0 }, /* In */  /* FIXME: historic usage! */
+	{ in_line_argn, MDOC_CALLABLE | MDOC_PARSED }, /* In */
 	{ in_line, MDOC_CALLABLE | MDOC_PARSED }, /* Li */
-	{ in_line_eoln, 0 }, /* Nd */ 
+	{ blk_full, 0 }, /* Nd */ 
 	{ in_line, MDOC_CALLABLE | MDOC_PARSED }, /* Nm */ 
 	{ blk_part_imp, MDOC_CALLABLE | MDOC_PARSED }, /* Op */
 	{ obsolete, 0 }, /* Ot */
@@ -111,8 +95,8 @@ const	struct mdoc_macro __mdoc_macros[MDOC_MAX] = {
 	{ in_line_eoln, 0 }, /* Rv */
 	{ in_line_argn, MDOC_CALLABLE | MDOC_PARSED }, /* St */ 
 	{ in_line, MDOC_CALLABLE | MDOC_PARSED }, /* Va */
-	{ in_line, MDOC_CALLABLE | MDOC_PARSED }, /* Vt */ 
-	{ in_line, MDOC_CALLABLE | MDOC_PARSED }, /* Xr */
+	{ ctx_synopsis, MDOC_CALLABLE | MDOC_PARSED }, /* Vt */ 
+	{ in_line_argn, MDOC_CALLABLE | MDOC_PARSED }, /* Xr */
 	{ in_line_eoln, 0 }, /* %A */
 	{ in_line_eoln, 0 }, /* %B */
 	{ in_line_eoln, 0 }, /* %D */
@@ -179,7 +163,7 @@ const	struct mdoc_macro __mdoc_macros[MDOC_MAX] = {
 	{ obsolete, 0 }, /* Fr */
 	{ in_line_eoln, 0 }, /* Ud */
 	{ in_line_eoln, 0 }, /* Lb */
-	{ in_line, 0 }, /* Lp */ 
+	{ in_line_eoln, 0 }, /* Lp */ 
 	{ in_line, MDOC_CALLABLE | MDOC_PARSED }, /* Lk */ 
 	{ in_line, MDOC_CALLABLE | MDOC_PARSED }, /* Mt */ 
 	{ blk_part_imp, MDOC_CALLABLE | MDOC_PARSED }, /* Brq */
@@ -190,59 +174,13 @@ const	struct mdoc_macro __mdoc_macros[MDOC_MAX] = {
 	{ obsolete, 0 }, /* En */
 	{ in_line_argn, MDOC_CALLABLE | MDOC_PARSED }, /* Dx */
 	{ in_line_eoln, 0 }, /* %Q */
+	{ in_line_eoln, 0 }, /* br */
+	{ in_line_eoln, 0 }, /* sp */
+	{ in_line_eoln, 0 }, /* %U */
+	{ NULL, 0 }, /* eos */
 };
 
 const	struct mdoc_macro * const mdoc_macros = __mdoc_macros;
-
-
-static int
-perr(struct mdoc *mdoc, int line, int pos, enum merr type)
-{
-	char		*p;
-
-	p = NULL;
-	switch (type) {
-	case (EOPEN):
-		p = "explicit scope still open on exit";
-		break;
-	case (EQUOT):
-		p = "unterminated quotation";
-		break;
-	case (ENOCTX):
-		p = "closure has no prior context";
-		break;
-	case (ENOPARMS):
-		p = "unexpect line arguments";
-		break;
-	}
-	assert(p);
-	return(mdoc_perr(mdoc, line, pos, p));
-}
-
-
-static int
-pwarn(struct mdoc *mdoc, int line, int pos, enum mwarn type)
-{
-	char		*p;
-
-	p = NULL;
-	switch (type) {
-	case (WIGNE):
-		p = "ignoring empty element";
-		break;
-	case (WIMPBRK):
-		p = "crufty end-of-line scope violation";
-		break;
-	case (WMACPARM):
-		p = "macro-like parameter";
-		break;
-	case (WOBS):
-		p = "macro marked obsolete";
-		break;
-	}
-	assert(p);
-	return(mdoc_pwarn(mdoc, line, pos, WARN_SYNTAX, p));
-}
 
 
 static int
@@ -283,10 +221,10 @@ swarn(struct mdoc *mdoc, enum mdoc_type type,
 	}
 
 	if ( ! (MDOC_IGN_SCOPE & mdoc->pflags))
-		return(mdoc_perr(mdoc, line, pos, 
+		return(mdoc_verr(mdoc, line, pos, 
 				"%s scope breaks %s scope of %s", 
 				tt, t, n));
-	return(mdoc_pwarn(mdoc, line, pos, WARN_SYNTAX,
+	return(mdoc_vwarn(mdoc, line, pos, 
 				"%s scope breaks %s scope of %s", 
 				tt, t, n));
 }
@@ -298,44 +236,60 @@ swarn(struct mdoc *mdoc, enum mdoc_type type,
  * are errors.
  */
 int
-mdoc_macroend(struct mdoc *mdoc)
+mdoc_macroend(struct mdoc *m)
 {
 	struct mdoc_node *n;
 
 	/* Scan for open explicit scopes. */
 
-	n = MDOC_VALID & mdoc->last->flags ?
-		mdoc->last->parent : mdoc->last;
+	n = MDOC_VALID & m->last->flags ?  m->last->parent : m->last;
 
 	for ( ; n; n = n->parent) {
 		if (MDOC_BLOCK != n->type)
 			continue;
 		if ( ! (MDOC_EXPLICIT & mdoc_macros[n->tok].flags))
 			continue;
-		return(nerr(mdoc, n, EOPEN));
+		return(mdoc_nerr(m, n, EOPEN));
 	}
 
-	return(rew_last(mdoc, mdoc->first));
+	/* Rewind to the first. */
+
+	return(rew_last(m, m->first));
 }
 
+
+/*
+ * Look up a macro from within a subsequent context.
+ */
 static int
-lookup(struct mdoc *mdoc, int line, int pos, int from, const char *p)
+lookup(int from, const char *p)
+{
+	/* FIXME: make -diag lists be un-PARSED. */
+
+	if ( ! (MDOC_PARSED & mdoc_macros[from].flags))
+		return(MDOC_MAX);
+	return(lookup_raw(p));
+}
+
+
+/*
+ * Lookup a macro following the initial line macro.
+ */
+static int
+lookup_raw(const char *p)
 {
 	int		 res;
 
-	res = mdoc_hash_find(mdoc->htab, p);
-	if (MDOC_PARSED & mdoc_macros[from].flags)
+	if (MDOC_MAX == (res = mdoc_hash_find(p)))
+		return(MDOC_MAX);
+	if (MDOC_CALLABLE & mdoc_macros[res].flags)
 		return(res);
-	if (MDOC_MAX == res)
-		return(res);
-	if ( ! pwarn(mdoc, line, pos, WMACPARM))
-		return(-1);
 	return(MDOC_MAX);
 }
 
 
 static int
-rew_last(struct mdoc *mdoc, struct mdoc_node *to)
+rew_last(struct mdoc *mdoc, const struct mdoc_node *to)
 {
 
 	assert(to);
@@ -357,6 +311,10 @@ rew_last(struct mdoc *mdoc, struct mdoc_node *to)
 }
 
 
+/*
+ * Return the opening macro of a closing one, e.g., `Ec' has `Eo' as its
+ * matching pair.
+ */
 static int
 rew_alt(int tok)
 {
@@ -438,7 +396,8 @@ rew_dohalt(int tok, enum mdoc_type type, const struct mdoc_node *p)
 	case (MDOC_Qq):
 		/* FALLTHROUGH */
 	case (MDOC_Sq):
-		assert(MDOC_HEAD != type);
+		/* FALLTHROUGH */
+	case (MDOC_Vt):
 		assert(MDOC_TAIL != type);
 		if (type == p->type && tok == p->tok)
 			return(REWIND_REWIND);
@@ -454,6 +413,8 @@ rew_dohalt(int tok, enum mdoc_type type, const struct mdoc_node *p)
 		if (type == p->type && tok == p->tok)
 			return(REWIND_REWIND);
 		break;
+	case (MDOC_Nd):
+		/* FALLTHROUGH */
 	case (MDOC_Ss):
 		assert(MDOC_TAIL != type);
 		if (type == p->type && tok == p->tok)
@@ -495,7 +456,6 @@ rew_dohalt(int tok, enum mdoc_type type, const struct mdoc_node *p)
 		if (type == p->type && tok == p->tok)
 			return(REWIND_REWIND);
 		break;
-
 	/* Multi-line explicit scope close. */
 	case (MDOC_Ac):
 		/* FALLTHROUGH */
@@ -559,9 +519,13 @@ rew_dobreak(int tok, const struct mdoc_node *p)
 	switch (tok) {
 	case (MDOC_It):
 		return(MDOC_It == p->tok);
+	case (MDOC_Nd):
+		return(MDOC_Nd == p->tok);
 	case (MDOC_Ss):
 		return(MDOC_Ss == p->tok);
 	case (MDOC_Sh):
+		if (MDOC_Nd == p->tok)
+			return(1);
 		if (MDOC_Ss == p->tok)
 			return(1);
 		return(MDOC_Sh == p->tok);
@@ -603,75 +567,46 @@ rew_elem(struct mdoc *mdoc, int tok)
 
 
 static int
-rew_subblock(enum mdoc_type type, struct mdoc *mdoc, 
+rew_sub(enum mdoc_type t, struct mdoc *m, 
 		int tok, int line, int ppos)
 {
 	struct mdoc_node *n;
 	int		  c;
 
 	/* LINTED */
-	for (n = mdoc->last; n; n = n->parent) {
-		c = rew_dohalt(tok, type, n);
-		if (REWIND_HALT == c)
-			return(1);
+	for (n = m->last; n; n = n->parent) {
+		c = rew_dohalt(tok, t, n);
+		if (REWIND_HALT == c) {
+			if (MDOC_BLOCK != t)
+				return(1);
+			if ( ! (MDOC_EXPLICIT & mdoc_macros[tok].flags))
+				return(1);
+			return(mdoc_perr(m, line, ppos, ENOCTX));
+		}
 		if (REWIND_REWIND == c)
 			break;
 		else if (rew_dobreak(tok, n))
 			continue;
-		if ( ! swarn(mdoc, type, line, ppos, n))
+		if ( ! swarn(m, t, line, ppos, n))
 			return(0);
 	}
 
 	assert(n);
-	return(rew_last(mdoc, n));
-}
+	if ( ! rew_last(m, n))
+		return(0);
 
-
-static int
-rew_expblock(struct mdoc *mdoc, int tok, int line, int ppos)
-{
-	struct mdoc_node *n;
-	int		  c;
-
-	/* LINTED */
-	for (n = mdoc->last; n; n = n->parent) {
-		c = rew_dohalt(tok, MDOC_BLOCK, n);
-		if (REWIND_HALT == c)
-			return(perr(mdoc, line, ppos, ENOCTX));
-		if (REWIND_REWIND == c)
-			break;
-		else if (rew_dobreak(tok, n))
-			continue;
-		if ( ! swarn(mdoc, MDOC_BLOCK, line, ppos, n))
+	/*
+	 * The current block extends an enclosing block beyond a line break.
+	 * Now that the current block ends, close the enclosing block, too.
+	 */
+	if ((n = n->pending) != NULL) {
+		assert(MDOC_HEAD == n->type);
+		if ( ! rew_last(m, n))
+			return(0);
+		if ( ! mdoc_body_alloc(m, n->line, n->pos, n->tok))
 			return(0);
 	}
-
-	assert(n);
-	return(rew_last(mdoc, n));
-}
-
-
-static int
-rew_impblock(struct mdoc *mdoc, int tok, int line, int ppos)
-{
-	struct mdoc_node *n;
-	int		  c;
-
-	/* LINTED */
-	for (n = mdoc->last; n; n = n->parent) {
-		c = rew_dohalt(tok, MDOC_BLOCK, n);
-		if (REWIND_HALT == c)
-			return(1);
-		else if (REWIND_REWIND == c)
-			break;
-		else if (rew_dobreak(tok, n))
-			continue;
-		if ( ! swarn(mdoc, MDOC_BLOCK, line, ppos, n))
-			return(0);
-	}
-
-	assert(n);
-	return(rew_last(mdoc, n));
+	return(1);
 }
 
 
@@ -686,7 +621,7 @@ append_delims(struct mdoc *mdoc, int line, int *pos, char *buf)
 
 	for (;;) {
 		lastarg = *pos;
-		c = mdoc_args(mdoc, line, pos, buf, 0, &p);
+		c = mdoc_zargs(mdoc, line, pos, buf, ARGS_NOWARN, &p);
 		assert(ARGS_PHRASE != c);
 
 		if (ARGS_ERROR == c)
@@ -696,7 +631,6 @@ append_delims(struct mdoc *mdoc, int line, int *pos, char *buf)
 		assert(mdoc_isdelim(p));
 		if ( ! mdoc_word_alloc(mdoc, line, lastarg, p))
 			return(0);
-		mdoc->next = MDOC_NEXT_SIBLING;
 	}
 
 	return(1);
@@ -722,35 +656,32 @@ blk_exp_close(MACRO_PROT_ARGS)
 	}
 
 	if ( ! (MDOC_CALLABLE & mdoc_macros[tok].flags)) {
-		if (0 == buf[*pos]) {
-			if ( ! rew_subblock(MDOC_BODY, mdoc, 
-						tok, line, ppos))
+		if (buf[*pos]) 
+			if ( ! mdoc_pwarn(m, line, ppos, ENOLINE))
 				return(0);
-			return(rew_expblock(mdoc, tok, line, ppos));
-		}
-		return(perr(mdoc, line, ppos, ENOPARMS));
+
+		if ( ! rew_sub(MDOC_BODY, m, tok, line, ppos))
+			return(0);
+		return(rew_sub(MDOC_BLOCK, m, tok, line, ppos));
 	}
 
-	if ( ! rew_subblock(MDOC_BODY, mdoc, tok, line, ppos))
+	if ( ! rew_sub(MDOC_BODY, m, tok, line, ppos))
 		return(0);
 
-	if (maxargs > 0) {
-		if ( ! mdoc_tail_alloc(mdoc, line, 
-					ppos, rew_alt(tok)))
+	if (maxargs > 0) 
+		if ( ! mdoc_tail_alloc(m, line, ppos, rew_alt(tok)))
 			return(0);
-		mdoc->next = MDOC_NEXT_CHILD;
-	}
 
-	for (lastarg = ppos, flushed = j = 0; ; j++) {
+	for (flushed = j = 0; ; j++) {
 		lastarg = *pos;
 
 		if (j == maxargs && ! flushed) {
-			if ( ! rew_expblock(mdoc, tok, line, ppos))
+			if ( ! rew_sub(MDOC_BLOCK, m, tok, line, ppos))
 				return(0);
 			flushed = 1;
 		}
 
-		c = mdoc_args(mdoc, line, pos, buf, tok, &p);
+		c = mdoc_args(m, line, pos, buf, tok, &p);
 
 		if (ARGS_ERROR == c)
 			return(0);
@@ -759,37 +690,30 @@ blk_exp_close(MACRO_PROT_ARGS)
 		if (ARGS_EOLN == c)
 			break;
 
-		if (-1 == (c = lookup(mdoc, line, lastarg, tok, p)))
-			return(0);
-		else if (MDOC_MAX != c) {
+		if (MDOC_MAX != (c = lookup(tok, p))) {
 			if ( ! flushed) {
-				if ( ! rew_expblock(mdoc, tok, 
-							line, ppos))
+				if ( ! rew_sub(MDOC_BLOCK, m, tok, line, ppos))
 					return(0);
 				flushed = 1;
 			}
-			if ( ! mdoc_macro(mdoc, c, line, lastarg, pos, buf))
+			if ( ! mdoc_macro(m, c, line, lastarg, pos, buf))
 				return(0);
 			break;
 		} 
 
-		if ( ! mdoc_word_alloc(mdoc, line, lastarg, p))
+		if ( ! mdoc_word_alloc(m, line, lastarg, p))
 			return(0);
-		mdoc->next = MDOC_NEXT_SIBLING;
 	}
 
-	if ( ! flushed && ! rew_expblock(mdoc, tok, line, ppos))
+	if ( ! flushed && ! rew_sub(MDOC_BLOCK, m, tok, line, ppos))
 		return(0);
 
 	if (ppos > 1)
 		return(1);
-	return(append_delims(mdoc, line, pos, buf));
+	return(append_delims(m, line, pos, buf));
 }
 
 
-/*
- * In-line macros where reserved words cause scope close-reopen.
- */
 static int
 in_line(MACRO_PROT_ARGS)
 {
@@ -802,17 +726,17 @@ in_line(MACRO_PROT_ARGS)
 	 * usually because of reserved words) to squeak by.
 	 */
 	switch (tok) {
-	case (MDOC_Lp):
+	case (MDOC_An):
 		/* FALLTHROUGH */
-	case (MDOC_Pp):
-		/* FALLTHROUGH */
-	case (MDOC_Nm):
+	case (MDOC_Ar):
 		/* FALLTHROUGH */
 	case (MDOC_Fl):
 		/* FALLTHROUGH */
 	case (MDOC_Lk):
 		/* FALLTHROUGH */
-	case (MDOC_Ar):
+	case (MDOC_Nm):
+		/* FALLTHROUGH */
+	case (MDOC_Pa):
 		nc = 1;
 		break;
 	default:
@@ -820,9 +744,9 @@ in_line(MACRO_PROT_ARGS)
 		break;
 	}
 
-	for (la = ppos, arg = NULL;; ) {
+	for (arg = NULL;; ) {
 		la = *pos;
-		c = mdoc_argv(mdoc, line, tok, &arg, pos, buf);
+		c = mdoc_argv(m, line, tok, &arg, pos, buf);
 
 		if (ARGV_WORD == c) {
 			*pos = la;
@@ -839,7 +763,7 @@ in_line(MACRO_PROT_ARGS)
 
 	for (cnt = 0, lastpunct = 1;; ) {
 		la = *pos;
-		w = mdoc_args(mdoc, line, pos, buf, tok, &p);
+		w = mdoc_args(m, line, pos, buf, tok, &p);
 
 		if (ARGS_ERROR == w)
 			return(0);
@@ -850,8 +774,7 @@ in_line(MACRO_PROT_ARGS)
 
 		/* Quoted words shouldn't be looked-up. */
 
-		c = ARGS_QWORD == w ? MDOC_MAX :
-			lookup(mdoc, line, la, tok, p);
+		c = ARGS_QWORD == w ? MDOC_MAX : lookup(tok, p);
 
 		/* 
 		 * In this case, we've located a submacro and must
@@ -860,28 +783,26 @@ in_line(MACRO_PROT_ARGS)
 		 * or raise a warning.
 		 */
 
-		if (MDOC_MAX != c && -1 != c) {
-			if (0 == lastpunct && ! rew_elem(mdoc, tok))
+		if (MDOC_MAX != c) {
+			if (0 == lastpunct && ! rew_elem(m, tok))
 				return(0);
 			if (nc && 0 == cnt) {
-				if ( ! mdoc_elem_alloc(mdoc, line, ppos, 
-							tok, arg))
+				if ( ! mdoc_elem_alloc(m, line, ppos, tok, arg))
 					return(0);
-				if ( ! rew_last(mdoc, mdoc->last))
+				if ( ! rew_last(m, m->last))
 					return(0);
 			} else if ( ! nc && 0 == cnt) {
 				mdoc_argv_free(arg);
-				if ( ! pwarn(mdoc, line, ppos, WIGNE))
+				if ( ! mdoc_pwarn(m, line, ppos, EIGNE))
 					return(0);
 			}
-			c = mdoc_macro(mdoc, c, line, la, pos, buf);
+			c = mdoc_macro(m, c, line, la, pos, buf);
 			if (0 == c)
 				return(0);
 			if (ppos > 1)
 				return(1);
-			return(append_delims(mdoc, line, pos, buf));
-		} else if (-1 == c)
-			return(0);
+			return(append_delims(m, line, pos, buf));
+		} 
 
 		/* 
 		 * Non-quote-enclosed punctuation.  Set up our scope, if
@@ -892,25 +813,33 @@ in_line(MACRO_PROT_ARGS)
 		d = mdoc_isdelim(p);
 
 		if (ARGS_QWORD != w && d) {
-			if (0 == lastpunct && ! rew_elem(mdoc, tok))
+			if (0 == lastpunct && ! rew_elem(m, tok))
 				return(0);
 			lastpunct = 1;
 		} else if (lastpunct) {
-			c = mdoc_elem_alloc(mdoc, line, ppos, tok, arg);
-			if (0 == c)
+			if ( ! mdoc_elem_alloc(m, line, ppos, tok, arg))
 				return(0);
-			mdoc->next = MDOC_NEXT_CHILD;
 			lastpunct = 0;
 		}
 
 		if ( ! d)
 			cnt++;
-		if ( ! mdoc_word_alloc(mdoc, line, la, p))
+		if ( ! mdoc_word_alloc(m, line, la, p))
 			return(0);
-		mdoc->next = MDOC_NEXT_SIBLING;
+
+		/*
+		 * `Fl' macros have their scope re-opened with each new
+		 * word so that the `-' can be added to each one without
+		 * having to parse out spaces.
+		 */
+		if (0 == lastpunct && MDOC_Fl == tok) {
+			if ( ! rew_elem(m, tok))
+				return(0);
+			lastpunct = 1;
+		}
 	}
 
-	if (0 == lastpunct && ! rew_elem(mdoc, tok))
+	if (0 == lastpunct && ! rew_elem(m, tok))
 		return(0);
 
 	/*
@@ -920,44 +849,56 @@ in_line(MACRO_PROT_ARGS)
 	 *
 	 */
 	if (nc && 0 == cnt) {
-		c = mdoc_elem_alloc(mdoc, line, ppos, tok, arg);
-		if (0 == c)
+		if ( ! mdoc_elem_alloc(m, line, ppos, tok, arg))
 			return(0);
-		if ( ! rew_last(mdoc, mdoc->last))
+		if ( ! rew_last(m, m->last))
 			return(0);
 	} else if ( ! nc && 0 == cnt) {
 		mdoc_argv_free(arg);
-		if ( ! pwarn(mdoc, line, ppos, WIGNE))
+		if ( ! mdoc_pwarn(m, line, ppos, EIGNE))
 			return(0);
 	}
 
 	if (ppos > 1)
 		return(1);
-	return(append_delims(mdoc, line, pos, buf));
+	return(append_delims(m, line, pos, buf));
 }
 
 
-/*
- * Block full-explicit and full-implicit.
- */
 static int
 blk_full(MACRO_PROT_ARGS)
 {
-	int		  c, lastarg, reopen;
+	int		  c, lastarg, reopen, dohead;
 	struct mdoc_arg	 *arg;
+	struct mdoc_node *head, *n;
 	char		 *p;
 
+	/* 
+	 * Whether to process a block-head section.  If this is
+	 * non-zero, then a head will be opened for all line arguments.
+	 * If not, then the head will always be empty and only a body
+	 * will be opened, which will stay open at the eoln.
+	 */
+
+	switch (tok) {
+	case (MDOC_Nd):
+		dohead = 0;
+		break;
+	default:
+		dohead = 1;
+		break;
+	}
+
 	if ( ! (MDOC_EXPLICIT & mdoc_macros[tok].flags)) {
-		if ( ! rew_subblock(MDOC_BODY, mdoc, 
-					tok, line, ppos))
+		if ( ! rew_sub(MDOC_BODY, m, tok, line, ppos))
 			return(0);
-		if ( ! rew_impblock(mdoc, tok, line, ppos))
+		if ( ! rew_sub(MDOC_BLOCK, m, tok, line, ppos))
 			return(0);
 	}
 
 	for (arg = NULL;; ) {
 		lastarg = *pos;
-		c = mdoc_argv(mdoc, line, tok, &arg, pos, buf);
+		c = mdoc_argv(m, line, tok, &arg, pos, buf);
 
 		if (ARGV_WORD == c) {
 			*pos = lastarg;
@@ -973,111 +914,123 @@ blk_full(MACRO_PROT_ARGS)
 		return(0);
 	}
 
-	if ( ! mdoc_block_alloc(mdoc, line, ppos, tok, arg))
+	if ( ! mdoc_block_alloc(m, line, ppos, tok, arg))
 		return(0);
-	mdoc->next = MDOC_NEXT_CHILD;
+	if ( ! mdoc_head_alloc(m, line, ppos, tok))
+		return(0);
+	head = m->last;
 
 	if (0 == buf[*pos]) {
-		if ( ! mdoc_head_alloc(mdoc, line, ppos, tok))
+		if ( ! rew_sub(MDOC_HEAD, m, tok, line, ppos))
 			return(0);
-		if ( ! rew_subblock(MDOC_HEAD, mdoc, 
-					tok, line, ppos))
+		if ( ! mdoc_body_alloc(m, line, ppos, tok))
 			return(0);
-		if ( ! mdoc_body_alloc(mdoc, line, ppos, tok))
-			return(0);
-		mdoc->next = MDOC_NEXT_CHILD;
 		return(1);
 	}
 
-	if ( ! mdoc_head_alloc(mdoc, line, ppos, tok))
-		return(0);
-	mdoc->next = MDOC_NEXT_CHILD;
+	/* Immediately close out head and enter body, if applicable. */
+
+	if (0 == dohead) {
+		if ( ! rew_sub(MDOC_HEAD, m, tok, line, ppos))
+			return(0);
+		if ( ! mdoc_body_alloc(m, line, ppos, tok))
+			return(0);
+	} 
 
 	for (reopen = 0;; ) {
 		lastarg = *pos;
-		c = mdoc_args(mdoc, line, pos, buf, tok, &p);
+		c = mdoc_args(m, line, pos, buf, tok, &p);
 
 		if (ARGS_ERROR == c)
 			return(0);
 		if (ARGS_EOLN == c)
 			break;
 		if (ARGS_PHRASE == c) {
-			if (reopen && ! mdoc_head_alloc
-					(mdoc, line, ppos, tok))
+			assert(dohead);
+			if (reopen && ! mdoc_head_alloc(m, line, ppos, tok))
 				return(0);
-			mdoc->next = MDOC_NEXT_CHILD;
+			head = m->last;
 			/*
 			 * Phrases are self-contained macro phrases used
 			 * in the columnar output of a macro. They need
 			 * special handling.
 			 */
-			if ( ! phrase(mdoc, line, lastarg, buf))
+			if ( ! phrase(m, line, lastarg, buf))
 				return(0);
-			if ( ! rew_subblock(MDOC_HEAD, mdoc, 
-						tok, line, ppos))
+			if ( ! rew_sub(MDOC_HEAD, m, tok, line, ppos))
 				return(0);
 
 			reopen = 1;
 			continue;
 		}
 
-		if (-1 == (c = lookup(mdoc, line, lastarg, tok, p)))
-			return(0);
-
-		if (MDOC_MAX == c) {
-			if ( ! mdoc_word_alloc(mdoc, line, lastarg, p))
+		if (MDOC_MAX == (c = lookup(tok, p))) {
+			if ( ! mdoc_word_alloc(m, line, lastarg, p))
 				return(0);
-			mdoc->next = MDOC_NEXT_SIBLING;
 			continue;
 		} 
 
-		if ( ! mdoc_macro(mdoc, c, line, lastarg, pos, buf))
+		if ( ! mdoc_macro(m, c, line, lastarg, pos, buf))
 			return(0);
 		break;
 	}
 	
-	if (1 == ppos && ! append_delims(mdoc, line, pos, buf))
-		return(0);
-	if ( ! rew_subblock(MDOC_HEAD, mdoc, tok, line, ppos))
+	if (1 == ppos && ! append_delims(m, line, pos, buf))
 		return(0);
 
-	if ( ! mdoc_body_alloc(mdoc, line, ppos, tok))
+	/* If the body's already open, then just return. */
+	if (0 == dohead) 
+		return(1);
+
+	/*
+	 * If there is an open sub-block requiring explicit close-out,
+	 * postpone switching the current block from head to body
+	 * until the rew_sub() call closing out that sub-block.
+	 */
+	for (n = m->last; n && n != head; n = n->parent) {
+		if (MDOC_BLOCK == n->type &&
+		    MDOC_EXPLICIT & mdoc_macros[n->tok].flags) {
+			n->pending = head;
+			return(1);
+		}
+	}
+
+	if ( ! rew_sub(MDOC_HEAD, m, tok, line, ppos))
 		return(0);
-	mdoc->next = MDOC_NEXT_CHILD;
+	if ( ! mdoc_body_alloc(m, line, ppos, tok))
+		return(0);
 
 	return(1);
 }
 
 
-/*
- * Block partial-imnplicit scope.
- */
 static int
 blk_part_imp(MACRO_PROT_ARGS)
 {
-	int		  lastarg, c;
+	int		  la, c;
 	char		 *p;
 	struct mdoc_node *blk, *body, *n;
 
-	if ( ! mdoc_block_alloc(mdoc, line, ppos, tok, NULL))
+	/* If applicable, close out prior scopes. */
+
+	if ( ! mdoc_block_alloc(m, line, ppos, tok, NULL))
 		return(0);
-	mdoc->next = MDOC_NEXT_CHILD;
-	blk = mdoc->last;
-
-	if ( ! mdoc_head_alloc(mdoc, line, ppos, tok))
+	/* Saved for later close-out. */
+	blk = m->last;
+	if ( ! mdoc_head_alloc(m, line, ppos, tok))
 		return(0);
-	mdoc->next = MDOC_NEXT_SIBLING;
-
-	if ( ! mdoc_body_alloc(mdoc, line, ppos, tok))
+	if ( ! rew_sub(MDOC_HEAD, m, tok, line, ppos))
 		return(0);
-	mdoc->next = MDOC_NEXT_CHILD;
-	body = mdoc->last;
+	if ( ! mdoc_body_alloc(m, line, ppos, tok))
+		return(0);
+	/* Saved for later close-out. */
+	body = m->last;
 
-	/* XXX - no known argument macros. */
+	/* Body argument processing. */
 
-	for (lastarg = ppos;; ) {
-		lastarg = *pos;
-		c = mdoc_args(mdoc, line, pos, buf, tok, &p);
+	for (;;) {
+		la = *pos;
+		c = mdoc_args(m, line, pos, buf, tok, &p);
 		assert(ARGS_PHRASE != c);
 
 		if (ARGS_ERROR == c)
@@ -1087,61 +1040,52 @@ blk_part_imp(MACRO_PROT_ARGS)
 		if (ARGS_EOLN == c)
 			break;
 
-		if (-1 == (c = lookup(mdoc, line, lastarg, tok, p)))
-			return(0);
-		else if (MDOC_MAX == c) {
-			if ( ! mdoc_word_alloc(mdoc, line, lastarg, p))
+		if (MDOC_MAX == (c = lookup(tok, p))) {
+			if ( ! mdoc_word_alloc(m, line, la, p))
 				return(0);
-			mdoc->next = MDOC_NEXT_SIBLING;
 			continue;
 		} 
 
-		if ( ! mdoc_macro(mdoc, c, line, lastarg, pos, buf))
+		if ( ! mdoc_macro(m, c, line, la, pos, buf))
 			return(0);
 		break;
 	}
 
-	/*
-	 * Since we know what our context is, we can rewind directly to
-	 * it.  This allows us to accomodate for our scope being
-	 * violated by another token.
+	/* 
+	 * If we can't rewind to our body, then our scope has already
+	 * been closed by another macro (like `Oc' closing `Op').  This
+	 * is ugly behaviour nodding its head to OpenBSD's overwhelming
+	 * crufty use of `Op' breakage--XXX, deprecate in time.
 	 */
-
-	for (n = mdoc->last; n; n = n->parent)
+	for (n = m->last; n; n = n->parent)
 		if (body == n)
 			break;
-
-	if (NULL == n && ! pwarn(mdoc, body->line, body->pos, WIMPBRK))
-			return(0);
-
-	if (n && ! rew_last(mdoc, body))
+	if (NULL == n && ! mdoc_nwarn(m, body, EIMPBRK))
+		return(0);
+	if (n && ! rew_last(m, body))
 		return(0);
 
-	if (1 == ppos && ! append_delims(mdoc, line, pos, buf))
+	/* Standard appending of delimiters. */
+
+	if (1 == ppos && ! append_delims(m, line, pos, buf))
 		return(0);
 
-	if (n && ! rew_last(mdoc, blk))
+	/* Rewind scope, if applicable. */
+
+	if (n && ! rew_last(m, blk))
 		return(0);
 
 	return(1);
 }
 
 
-/*
- * Block partial-explicit macros.
- */
 static int
 blk_part_exp(MACRO_PROT_ARGS)
 {
-	int		  lastarg, flushed, j, c, maxargs;
+	int		  la, flushed, j, c, maxargs;
 	char		 *p;
 
-	lastarg = ppos;
-	flushed = 0;
-
-	/*
-	 * Number of arguments (head arguments).  Only `Eo' has these,
-	 */
+	/* Number of head arguments.  Only `Eo' has these, */
 
 	switch (tok) {
 	case (MDOC_Eo):
@@ -1152,37 +1096,44 @@ blk_part_exp(MACRO_PROT_ARGS)
 		break;
 	}
 
-	if ( ! mdoc_block_alloc(mdoc, line, ppos, tok, NULL))
+	/* Begin the block scope. */
+
+	if ( ! mdoc_block_alloc(m, line, ppos, tok, NULL))
 		return(0); 
-	mdoc->next = MDOC_NEXT_CHILD;
+
+	/* 
+	 * If no head arguments, open and then close out a head, noting
+	 * that we've flushed our terms.  `flushed' means that we've
+	 * flushed out the head and the body is open.
+	 */
 
 	if (0 == maxargs) {
-		if ( ! mdoc_head_alloc(mdoc, line, ppos, tok))
+		if ( ! mdoc_head_alloc(m, line, ppos, tok))
 			return(0);
-		if ( ! rew_subblock(MDOC_HEAD, mdoc, 
-					tok, line, ppos))
+		if ( ! rew_sub(MDOC_HEAD, m, tok, line, ppos))
 			return(0);
-		if ( ! mdoc_body_alloc(mdoc, line, ppos, tok))
+		if ( ! mdoc_body_alloc(m, line, ppos, tok))
 			return(0);
 		flushed = 1;
-	} else if ( ! mdoc_head_alloc(mdoc, line, ppos, tok))
-		return(0);
+	} else {
+		if ( ! mdoc_head_alloc(m, line, ppos, tok))
+			return(0);
+		flushed = 0;
+	}
 
-	mdoc->next = MDOC_NEXT_CHILD;
+	/* Process the head/head+body line arguments. */
 
 	for (j = 0; ; j++) {
-		lastarg = *pos;
+		la = *pos;
 		if (j == maxargs && ! flushed) {
-			if ( ! rew_subblock(MDOC_HEAD, mdoc, 
-						tok, line, ppos))
+			if ( ! rew_sub(MDOC_HEAD, m, tok, line, ppos))
 				return(0);
 			flushed = 1;
-			if ( ! mdoc_body_alloc(mdoc, line, ppos, tok))
+			if ( ! mdoc_body_alloc(m, line, ppos, tok))
 				return(0);
-			mdoc->next = MDOC_NEXT_CHILD;
 		}
 
-		c = mdoc_args(mdoc, line, pos, buf, tok, &p);
+		c = mdoc_args(m, line, pos, buf, tok, &p);
 		assert(ARGS_PHRASE != c);
 
 		if (ARGS_ERROR == c)
@@ -1192,70 +1143,56 @@ blk_part_exp(MACRO_PROT_ARGS)
 		if (ARGS_EOLN == c)
 			break;
 
-		if (-1 == (c = lookup(mdoc, line, lastarg, tok, p)))
-			return(0);
-		else if (MDOC_MAX != c) {
+		if (MDOC_MAX != (c = lookup(tok, p))) {
 			if ( ! flushed) {
-				if ( ! rew_subblock(MDOC_HEAD, mdoc, 
-							tok, line, ppos))
+				if ( ! rew_sub(MDOC_HEAD, m, tok, line, ppos))
 					return(0);
 				flushed = 1;
-				if ( ! mdoc_body_alloc(mdoc, line, 
-							ppos, tok))
+				if ( ! mdoc_body_alloc(m, line, ppos, tok))
 					return(0);
-				mdoc->next = MDOC_NEXT_CHILD;
 			}
-			if ( ! mdoc_macro(mdoc, c, line, lastarg, 
-						pos, buf))
+			if ( ! mdoc_macro(m, c, line, la, pos, buf))
 				return(0);
 			break;
 		}
 
-		if ( ! flushed && mdoc_isdelim(p)) {
-			if ( ! rew_subblock(MDOC_HEAD, mdoc, 
-						tok, line, ppos))
+		if ( ! flushed && mdoc_isdelim(p) > 1) {
+			if ( ! rew_sub(MDOC_HEAD, m, tok, line, ppos))
 				return(0);
 			flushed = 1;
-			if ( ! mdoc_body_alloc(mdoc, line, ppos, tok))
+			if ( ! mdoc_body_alloc(m, line, ppos, tok))
 				return(0);
-			mdoc->next = MDOC_NEXT_CHILD;
 		}
 	
-		if ( ! mdoc_word_alloc(mdoc, line, lastarg, p))
+		if ( ! mdoc_word_alloc(m, line, la, p))
 			return(0);
-		mdoc->next = MDOC_NEXT_SIBLING;
 	}
 
+	/* Close the head and open the body, if applicable. */
+
 	if ( ! flushed) {
-		if ( ! rew_subblock(MDOC_HEAD, mdoc, tok, line, ppos))
+		if ( ! rew_sub(MDOC_HEAD, m, tok, line, ppos))
 			return(0);
-		if ( ! mdoc_body_alloc(mdoc, line, ppos, tok))
+		if ( ! mdoc_body_alloc(m, line, ppos, tok))
 			return(0);
-		mdoc->next = MDOC_NEXT_CHILD;
 	}
+
+	/* Standard appending of delimiters. */
 
 	if (ppos > 1)
 		return(1);
-	return(append_delims(mdoc, line, pos, buf));
+	return(append_delims(m, line, pos, buf));
 }
 
 
-/*
- * In-line macros where reserved words signal closure of the macro.
- * Macros also have a fixed number of arguments.
- */
 static int
 in_line_argn(MACRO_PROT_ARGS)
 {
-	int		  lastarg, flushed, j, c, maxargs;
+	int		  la, flushed, j, c, maxargs;
 	struct mdoc_arg	 *arg;
 	char		 *p;
 
-	
-	/* 
-	 * Fixed maximum arguments per macro.  Some of these have none
-	 * and close as soon as the invocation is parsed.
-	 */
+	/* Fixed maximum arguments per macro, if applicable. */
 
 	switch (tok) {
 	case (MDOC_Ap):
@@ -1267,17 +1204,22 @@ in_line_argn(MACRO_PROT_ARGS)
 	case (MDOC_Ux):
 		maxargs = 0;
 		break;
+	case (MDOC_Xr):
+		maxargs = 2;
+		break;
 	default:
 		maxargs = 1;
 		break;
 	}
 
-	for (lastarg = ppos, arg = NULL;; ) {
-		lastarg = *pos;
-		c = mdoc_argv(mdoc, line, tok, &arg, pos, buf);
+	/* Macro argument processing. */
+
+	for (arg = NULL;; ) {
+		la = *pos;
+		c = mdoc_argv(m, line, tok, &arg, pos, buf);
 
 		if (ARGV_WORD == c) {
-			*pos = lastarg;
+			*pos = la;
 			break;
 		} 
 
@@ -1290,20 +1232,23 @@ in_line_argn(MACRO_PROT_ARGS)
 		return(0);
 	}
 
-	if ( ! mdoc_elem_alloc(mdoc, line, ppos, tok, arg))
+	/* Open the element scope. */
+
+	if ( ! mdoc_elem_alloc(m, line, ppos, tok, arg))
 		return(0);
-	mdoc->next = MDOC_NEXT_CHILD;
+
+	/* Process element arguments. */
 
 	for (flushed = j = 0; ; j++) {
-		lastarg = *pos;
+		la = *pos;
 
 		if (j == maxargs && ! flushed) {
-			if ( ! rew_elem(mdoc, tok))
+			if ( ! rew_elem(m, tok))
 				return(0);
 			flushed = 1;
 		}
 
-		c = mdoc_args(mdoc, line, pos, buf, tok, &p);
+		c = mdoc_args(m, line, pos, buf, tok, &p);
 
 		if (ARGS_ERROR == c)
 			return(0);
@@ -1312,42 +1257,50 @@ in_line_argn(MACRO_PROT_ARGS)
 		if (ARGS_EOLN == c)
 			break;
 
-		if (-1 == (c = lookup(mdoc, line, lastarg, tok, p)))
-			return(0);
-		else if (MDOC_MAX != c) {
-			if ( ! flushed && ! rew_elem(mdoc, tok))
+		if (MDOC_MAX != (c = lookup(tok, p))) {
+			if ( ! flushed && ! rew_elem(m, tok))
 				return(0);
 			flushed = 1;
-			if ( ! mdoc_macro(mdoc, c, line, lastarg, pos, buf))
+			if ( ! mdoc_macro(m, c, line, la, pos, buf))
 				return(0);
 			break;
 		}
 
 		if ( ! (MDOC_IGNDELIM & mdoc_macros[tok].flags) &&
 				! flushed && mdoc_isdelim(p)) {
-			if ( ! rew_elem(mdoc, tok))
+			if ( ! rew_elem(m, tok))
 				return(0);
 			flushed = 1;
 		}
-	
-		if ( ! mdoc_word_alloc(mdoc, line, lastarg, p))
+
+		/* 
+		 * XXX: this is a hack to work around groff's ugliness
+		 * as regards `Xr' and extraneous arguments.  It should
+		 * ideally be deprecated behaviour, but because this is
+		 * code is no here, it's unlikely to be removed.
+		 */
+		if (MDOC_Xr == tok && j == maxargs) {
+			if ( ! mdoc_elem_alloc(m, line, ppos, MDOC_Ns, NULL))
+				return(0);
+			if ( ! rew_elem(m, MDOC_Ns))
+				return(0);
+		}
+
+		if ( ! mdoc_word_alloc(m, line, la, p))
 			return(0);
-		mdoc->next = MDOC_NEXT_SIBLING;
 	}
 
-	if ( ! flushed && ! rew_elem(mdoc, tok))
+	/* Close out and append delimiters. */
+
+	if ( ! flushed && ! rew_elem(m, tok))
 		return(0);
 
 	if (ppos > 1)
 		return(1);
-	return(append_delims(mdoc, line, pos, buf));
+	return(append_delims(m, line, pos, buf));
 }
 
 
-/*
- * In-line macro that spans an entire line.  May be callable, but has no
- * subsequent parsed arguments.
- */
 static int
 in_line_eoln(MACRO_PROT_ARGS)
 {
@@ -1357,11 +1310,11 @@ in_line_eoln(MACRO_PROT_ARGS)
 
 	assert( ! (MDOC_PARSED & mdoc_macros[tok].flags));
 
-	arg = NULL;
+	/* Parse macro arguments. */
 
-	for (;;) {
+	for (arg = NULL; ; ) {
 		la = *pos;
-		c = mdoc_argv(mdoc, line, tok, &arg, pos, buf);
+		c = mdoc_argv(m, line, tok, &arg, pos, buf);
 
 		if (ARGV_WORD == c) {
 			*pos = la;
@@ -1376,36 +1329,60 @@ in_line_eoln(MACRO_PROT_ARGS)
 		return(0);
 	}
 
-	if ( ! mdoc_elem_alloc(mdoc, line, ppos, tok, arg))
+	/* Open element scope. */
+
+	if ( ! mdoc_elem_alloc(m, line, ppos, tok, arg))
 		return(0);
 
-	mdoc->next = MDOC_NEXT_CHILD;
+	/* Parse argument terms. */
 
 	for (;;) {
 		la = *pos;
-		w = mdoc_args(mdoc, line, pos, buf, tok, &p);
+		w = mdoc_args(m, line, pos, buf, tok, &p);
 
 		if (ARGS_ERROR == w)
 			return(0);
 		if (ARGS_EOLN == w)
 			break;
 
-		c = ARGS_QWORD == w ? MDOC_MAX :
-			lookup(mdoc, line, la, tok, p);
+		c = ARGS_QWORD == w ? MDOC_MAX : lookup(tok, p);
 
-		if (MDOC_MAX != c && -1 != c) {
-			if ( ! rew_elem(mdoc, tok))
+		if (MDOC_MAX != c) {
+			if ( ! rew_elem(m, tok))
 				return(0);
-			return(mdoc_macro(mdoc, c, line, la, pos, buf));
-		} else if (-1 == c)
-			return(0);
+			return(mdoc_macro(m, c, line, la, pos, buf));
+		} 
 
-		if ( ! mdoc_word_alloc(mdoc, line, la, p))
+		if ( ! mdoc_word_alloc(m, line, la, p))
 			return(0);
-		mdoc->next = MDOC_NEXT_SIBLING;
 	}
 
-	return(rew_elem(mdoc, tok));
+	/* Close out (no delimiters). */
+
+	return(rew_elem(m, tok));
+}
+
+
+/* ARGSUSED */
+static int
+ctx_synopsis(MACRO_PROT_ARGS)
+{
+
+	/* If we're not in the SYNOPSIS, go straight to in-line. */
+	if (SEC_SYNOPSIS != m->lastsec)
+		return(in_line(m, tok, line, ppos, pos, buf));
+
+	/* If we're a nested call, same place. */
+	if (ppos > 1)
+		return(in_line(m, tok, line, ppos, pos, buf));
+
+	/*
+	 * XXX: this will open a block scope; however, if later we end
+	 * up formatting the block scope, then child nodes will inherit
+	 * the formatting.  Be careful.
+	 */
+
+	return(blk_part_imp(m, tok, line, ppos, pos, buf));
 }
 
 
@@ -1414,82 +1391,45 @@ static int
 obsolete(MACRO_PROT_ARGS)
 {
 
-	return(pwarn(mdoc, line, ppos, WOBS));
+	return(mdoc_pwarn(m, line, ppos, EOBS));
 }
 
 
+/*
+ * Phrases occur within `Bl -column' entries, separated by `Ta' or tabs.
+ * They're unusual because they're basically free-form text until a
+ * macro is encountered.
+ */
 static int
-phrase(struct mdoc *mdoc, int line, int ppos, char *buf)
+phrase(struct mdoc *m, int line, int ppos, char *buf)
 {
-	int		 i, la, c, quoted;
+	int		  c, w, la, pos;
+	char		 *p;
 
-	/*
-	 * Parse over words in a phrase.  We have to handle this
-	 * specially because we assume no calling context -- in normal
-	 * circumstances, we switch argument parsing based on whether
-	 * the parent macro accepts quotes, tabs, etc.  Here, anything
-	 * goes.
-	 */
+	for (pos = ppos; ; ) {
+		la = pos;
 
-	for (i = ppos; buf[i]; ) {
-		assert(' ' != buf[i]);
-		la = i;
-		quoted = 0;
+		/* Note: no calling context! */
+		w = mdoc_zargs(m, line, &pos, buf, 0, &p);
 
-		/* 
-		 * Read to next token.  If quoted (check not escaped),
-		 * scan ahead to next unescaped quote.  If not quoted or
-		 * escape-quoted, then scan ahead to next space.
-		 */
+		if (ARGS_ERROR == w)
+			return(0);
+		if (ARGS_EOLN == w)
+			break;
 
-		if ((i && '\"' == buf[i] && '\\' != buf[i - 1]) || 
-				(0 == i && '\"' == buf[i])) {
-			for (la = ++i; buf[i]; i++) 
-				if ('\"' != buf[i])
-					continue;
-				else if ('\\' != buf[i - 1])
-					break;
-			if (0 == buf[i]) 
-				return(perr(mdoc, line, la, EQUOT));
-			quoted = 1;
-		} else
-			for ( ; buf[i]; i++)
-				if (i && ' ' == buf[i]) {
-					if ('\\' != buf[i - 1])
-						break;
-				} else if (' ' == buf[i])
-					break;
-
-		/* If not end-of-line, terminate argument. */
-
-		if (buf[i])
-			buf[i++] = 0;
-
-		/* Read to next argument. */
-
-		for ( ; buf[i] && ' ' == buf[i]; i++)
-			/* Spin. */ ;
-
-		/* 
-		 * If we're a non-quoted string, try to look up the
-		 * value as a macro and execute it, if found.
-		 */
-
-		c = quoted ? MDOC_MAX :
-			mdoc_hash_find(mdoc->htab, &buf[la]);
+		c = ARGS_QWORD == w ? MDOC_MAX : lookup_raw(p);
 
 		if (MDOC_MAX != c) {
-			if ( ! mdoc_macro(mdoc, c, line, la, &i, buf))
+			if ( ! mdoc_macro(m, c, line, la, &pos, buf))
 				return(0);
-			return(append_delims(mdoc, line, &i, buf));
-		}
+			return(append_delims(m, line, &pos, buf));
+		} 
 
-		/* A regular word or quoted string. */
-
-		if ( ! mdoc_word_alloc(mdoc, line, la, &buf[la]))
+		if ( ! mdoc_word_alloc(m, line, la, p))
 			return(0);
-		mdoc->next = MDOC_NEXT_SIBLING;
 	}
 
 	return(1);
 }
+
+

@@ -1,4 +1,4 @@
-/*	$OpenBSD: lde.c,v 1.3 2009/06/06 08:09:43 pyr Exp $ */
+/*	$OpenBSD: lde.c,v 1.10 2010/03/03 10:17:05 claudio Exp $ */
 
 /*
  * Copyright (c) 2004, 2005 Claudio Jeker <claudio@openbsd.org>
@@ -201,7 +201,7 @@ lde_dispatch_imsg(int fd, short event, void *bula)
 	struct in_addr		 addr;
 	ssize_t			 n;
 	time_t			 now;
-	int			 state, shut = 0;
+	int			 state, shut = 0, verbose;
 
 	if (event & EV_READ) {
 		if ((n = imsg_read(ibuf)) == -1)
@@ -242,7 +242,7 @@ lde_dispatch_imsg(int fd, short event, void *bula)
 			rt_snap(imsg.hdr.peerid);
 
 			lde_imsg_compose_ldpe(IMSG_MAPPING_ADD_END,
-			    imsg.hdr.peerid, 0, 0, 0);
+			    imsg.hdr.peerid, 0, NULL, 0);
 
 			break;
 		case IMSG_LABEL_REQUEST:
@@ -327,6 +327,11 @@ lde_dispatch_imsg(int fd, short event, void *bula)
 			imsg_compose_event(iev_ldpe, IMSG_CTL_END, 0,
 			    imsg.hdr.pid, -1, NULL, 0);
 			break;
+		case IMSG_CTL_LOG_VERBOSE:
+			/* already checked by ldpe */
+			memcpy(&verbose, imsg.data, sizeof(verbose));
+			log_verbose(verbose);
+			break;
 		default:
 			log_debug("lde_dispatch_imsg: unexpected imsg %d",
 			    imsg.hdr.type);
@@ -349,7 +354,6 @@ lde_dispatch_parent(int fd, short event, void *bula)
 {
 	struct imsg		 imsg;
 	struct kroute		 kr;
-	struct rroute		 rr;
 	struct imsgev		*iev = bula;
 	struct imsgbuf		*ibuf = &iev->ibuf;
 	ssize_t			 n;
@@ -374,26 +378,6 @@ lde_dispatch_parent(int fd, short event, void *bula)
 
 		switch (imsg.hdr.type) {
 		case IMSG_NETWORK_ADD:
-			if (imsg.hdr.len != IMSG_HEADER_SIZE + sizeof(rr)) {
-				log_warnx("lde_dispatch_parent: "
-				    "wrong imsg len");
-				break;
-			}
-			memcpy(&rr, imsg.data, sizeof(rr));
-
-			lde_insert(&rr.kr);
-
-			break;
-		case IMSG_NETWORK_DEL:
-			if (imsg.hdr.len != IMSG_HEADER_SIZE + sizeof(rr)) {
-				log_warnx("lde_dispatch_parent: "
-				    "wrong imsg len");
-				break;
-			}
-			memcpy(&rr, imsg.data, sizeof(rr));
-
-			break;
-		case IMSG_KROUTE_GET:
 			if (imsg.hdr.len != IMSG_HEADER_SIZE + sizeof(kr)) {
 				log_warnx("lde_dispatch_parent: "
 				    "wrong imsg len");
@@ -401,14 +385,17 @@ lde_dispatch_parent(int fd, short event, void *bula)
 			}
 			memcpy(&kr, imsg.data, sizeof(kr));
 
-/*			if ((rn = rt_find(kr.prefix.s_addr, kr.prefixlen,
-			    DT_NET)) != NULL)
-				lde_send_change_kroute(rn);
-			else*/
-				/* should not happen */
-				imsg_compose_event(iev_main,
-				    IMSG_KLABEL_DELETE, 0,
-				    0, -1, &kr, sizeof(kr));
+			lde_kernel_insert(&kr);
+			break;
+		case IMSG_NETWORK_DEL:
+			if (imsg.hdr.len != IMSG_HEADER_SIZE + sizeof(kr)) {
+				log_warnx("lde_dispatch_parent: "
+				    "wrong imsg len");
+				break;
+			}
+			memcpy(&kr, imsg.data, sizeof(kr));
+
+			lde_kernel_remove(&kr);
 			break;
 		case IMSG_RECONF_CONF:
 			if ((nconf = malloc(sizeof(struct ldpd_conf))) ==
@@ -496,7 +483,7 @@ void
 lde_send_labelrequest(u_int32_t peerid, struct map *map)
 {
 	imsg_compose_event(iev_ldpe, IMSG_REQUEST_ADD, peerid, 0,
-	     -1, map, sizeof(map));
+	     -1, map, sizeof(*map));
 	imsg_compose_event(iev_ldpe, IMSG_REQUEST_ADD_END, peerid, 0,
 	     -1, NULL, 0);
 }
@@ -505,7 +492,7 @@ void
 lde_send_labelmapping(u_int32_t peerid, struct map *map)
 {
 	imsg_compose_event(iev_ldpe, IMSG_MAPPING_ADD, peerid, 0,
-	     -1, map, sizeof(map));
+	     -1, map, sizeof(*map));
 	imsg_compose_event(iev_ldpe, IMSG_MAPPING_ADD_END, peerid, 0,
 	     -1, NULL, 0);
 }
@@ -514,7 +501,7 @@ void
 lde_send_labelrelease(u_int32_t peerid, struct map *map)
 {
 	imsg_compose_event(iev_ldpe, IMSG_RELEASE_ADD, peerid, 0,
-	    -1, map, sizeof(map));
+	    -1, map, sizeof(*map));
 	imsg_compose_event(iev_ldpe, IMSG_RELEASE_ADD_END, peerid, 0,
 	    -1, NULL, 0);
 }
@@ -617,6 +604,7 @@ lde_nbr_new(u_int32_t peerid, struct lde_nbr *new)
 	TAILQ_INIT(&nbr->req_list);
 	TAILQ_INIT(&nbr->sent_map_list);
 	TAILQ_INIT(&nbr->recv_map_list);
+	TAILQ_INIT(&nbr->labels_list);
 
 	head = LDE_NBR_HASH(peerid);
 	LIST_INSERT_HEAD(head, nbr, hash);
@@ -629,6 +617,23 @@ lde_nbr_new(u_int32_t peerid, struct lde_nbr *new)
 	}
 
 	return (nbr);
+}
+
+void
+lde_nbr_del(struct lde_nbr *nbr)
+{
+	if (nbr == NULL)
+		return;
+
+	lde_req_list_free(nbr);
+	lde_map_list_free(nbr);
+	lde_address_list_free(nbr);
+	lde_label_list_free(nbr);
+
+	LIST_REMOVE(nbr, hash);
+	LIST_REMOVE(nbr, entry);
+
+	free(nbr);
 }
 
 int
@@ -718,22 +723,6 @@ lde_map_list_free(struct lde_nbr *nbr)
 		TAILQ_REMOVE(&nbr->sent_map_list, map, entry);
 		free(map);
 	}
-}
-
-void
-lde_nbr_del(struct lde_nbr *nbr)
-{
-	if (nbr == NULL)
-		return;
-
-	lde_req_list_free(nbr);
-	lde_map_list_free(nbr);
-	lde_address_list_free(nbr);
-
-	LIST_REMOVE(nbr, hash);
-	LIST_REMOVE(nbr, entry);
-
-	free(nbr);
 }
 
 struct lde_nbr *

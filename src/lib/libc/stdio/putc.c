@@ -1,4 +1,4 @@
-/*	$OpenBSD: putc.c,v 1.7 2005/08/08 08:05:36 espie Exp $ */
+/*	$OpenBSD: putc.c,v 1.12 2009/11/21 10:11:54 guenther Exp $ */
 /*-
  * Copyright (c) 1990, 1993
  *	The Regents of the University of California.  All rights reserved.
@@ -47,6 +47,7 @@ putc_unlocked(int c, FILE *fp)
 		errno = EBADF;
 		return (EOF);
 	}
+	_SET_ORIENTATION(fp, -1);
 	return (__sputc(c, fp));
 }
 
@@ -60,8 +61,8 @@ putc(int c, FILE *fp)
 {
 	int ret;
 
-	flockfile(fp);
+	FLOCKFILE(fp);
 	ret = putc_unlocked(c, fp);
-	funlockfile(fp);
+	FUNLOCKFILE(fp);
 	return (ret);
 }

@@ -1,4 +1,4 @@
-/*	$OpenBSD: mt.c,v 1.29 2006/06/14 02:14:25 krw Exp $	*/
+/*	$OpenBSD: mt.c,v 1.33 2009/11/09 06:42:59 deraadt Exp $	*/
 /*	$NetBSD: mt.c,v 1.14.2.1 1996/05/27 15:12:11 mrg Exp $	*/
 
 /*
@@ -29,20 +29,6 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  */
-
-#ifndef lint
-static char copyright[] =
-"@(#) Copyright (c) 1980, 1993\n\
-	The Regents of the University of California.  All rights reserved.\n";
-#endif /* not lint */
-
-#ifndef lint
-#if 0
-static char sccsid[] = "@(#)mt.c	8.2 (Berkeley) 6/6/93";
-#else
-static char rcsid[] = "$OpenBSD: mt.c,v 1.29 2006/06/14 02:14:25 krw Exp $";
-#endif
-#endif /* not lint */
 
 /*
  * mt --
@@ -99,6 +85,49 @@ void usage(void);
 
 char	*host = NULL;	/* remote host (if any) */
 
+int
+_rmtopendev(char *path, int oflags, int dflags, char **realpath)
+{
+#ifdef RMT
+	if (host)
+		return rmtopen(path, oflags);
+#endif
+	return opendev(path, oflags, dflags, realpath);
+}
+
+int
+_rmtmtioctop(int fd, struct mtop *com)
+{
+#ifdef RMT
+	if (host)
+		return rmtioctl(com->mt_op, com->mt_count);
+#endif
+	return ioctl(fd, MTIOCTOP, com);
+}
+
+struct mtget *
+_rmtstatus(int fd)
+{
+	static struct mtget mt_status;
+
+#ifdef RMT
+	if (host)
+		return rmtstatus();
+#endif
+	if (ioctl(fd, MTIOCGET, &mt_status) < 0)
+		err(2, "ioctl MTIOCGET");
+	return &mt_status;
+}
+
+void
+_rmtclose(void)
+{
+#ifdef RMT
+	if (host)
+		rmtclose();
+#endif
+}
+
 char	*progname;
 int	eject = 0;
 
@@ -106,10 +135,10 @@ int
 main(int argc, char *argv[])
 {
 	struct commands *comp;
-	struct mtget mt_status;
 	struct mtop mt_com;
-	int ch, len, mtfd, flags, insert = 0;
+	int ch, mtfd, flags, insert = 0;
 	char *p, *tape, *realtape, *opts;
+	size_t len;
 
 	if ((progname = strrchr(argv[0], '/')))
 		progname++;
@@ -155,11 +184,15 @@ main(int argc, char *argv[])
 		usage();
 
 	if (strchr(tape, ':')) {
+#ifdef RMT
 		host = tape;
 		tape = strchr(host, ':');
 		*tape++ = '\0';
 		if (rmthost(host) == 0)
 			exit(X_ABORT);
+#else
+		err(1, "no remote support");
+#endif
 	}
 
 	if (eject) {
@@ -178,8 +211,7 @@ main(int argc, char *argv[])
 	}
 
 	flags = comp->c_ronly ? O_RDONLY : O_WRONLY | O_CREAT;
-	if ((mtfd = host ? rmtopen(tape, flags) : opendev(tape, flags,
-	    OPENDEV_PART, &realtape)) < 0) {
+	if ((mtfd = _rmtopendev(tape, flags, OPENDEV_PART, &realtape)) < 0) {
 		if (errno != 0)
 			warn("%s", host ? tape : realtape);
 		exit(2);
@@ -193,25 +225,17 @@ main(int argc, char *argv[])
 		}
 		else
 			mt_com.mt_count = 1;
-		if ((host ? rmtioctl(mt_com.mt_op, mt_com.mt_count) :
-		    ioctl(mtfd, MTIOCTOP, &mt_com)) < 0) {
+		if (_rmtmtioctop(mtfd, &mt_com) < 0) {
 			if (eject)
 				err(2, "%s", tape);
 			else
 				err(2, "%s: %s", tape, comp->c_name);
 		}
 	} else {
-		if (host)
-			status(rmtstatus());
-		else {
-			if (ioctl(mtfd, MTIOCGET, &mt_status) < 0)
-				err(2, "ioctl MTIOCGET");
-			status(&mt_status);
-		}
+		status(_rmtstatus(mtfd));
 	}
 
-	if (host)
-		rmtclose();
+	_rmtclose();
 
 	exit(X_FINOK);
 	/* NOTREACHED */

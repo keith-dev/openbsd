@@ -1,7 +1,7 @@
 # ex:ts=8 sw=4:
-# $OpenBSD: Installed.pm,v 1.14 2009/04/19 15:18:23 espie Exp $
+# $OpenBSD: Installed.pm,v 1.21 2010/03/06 11:55:31 espie Exp $
 #
-# Copyright (c) 2007 Marc Espie <espie@openbsd.org>
+# Copyright (c) 2007-2010 Marc Espie <espie@openbsd.org>
 #
 # Permission to use, copy, modify, and distribute this software for any
 # purpose with or without fee is hereby granted, provided that the above
@@ -26,15 +26,43 @@ use warnings;
 
 package OpenBSD::PackageRepositoryBase;
 
-sub match
+sub parse_url
 {
-	my ($self, $search, @filters) = @_;
-	my @l = $search->match($self);
-	while (my $filter = (shift @filters)) {
-		last if @l == 0; # don't bother filtering empty list
-		@l = $filter->filter(@l);
+	my ($class, $r) = @_;
+
+	my $path;
+
+	if ($$r =~ m/^(.*?)\:(.*)/) {
+		$path = $1;
+		$$r = $2;
+	} else {
+		$path = $$r;
+		$$r = '';
 	}
-	return @l;
+		
+	$path .= '/' unless $path =~ m/\/$/;
+	bless { path => $path }, $class;
+}
+
+sub parse_fullurl
+{
+	my ($class, $_) = @_;
+
+	$class->strip_urlscheme($_) or return undef;
+	return $class->parse_url($_);
+}
+
+sub strip_urlscheme
+{
+	my ($class, $r) = @_;
+	if ($$r =~ m/^(.*?)\:(.*)$/) {
+		my $scheme = lc($1);
+		if ($scheme eq $class->urlscheme) {
+			$$r = $2;
+			return 1;
+	    	}
+	}
+	return 0;
 }
 
 sub match_locations

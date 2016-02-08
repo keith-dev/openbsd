@@ -1,6 +1,6 @@
-.\"	$Id: man.3,v 1.2 2009/06/14 23:00:57 schwarze Exp $
+.\"	$Id: man.3,v 1.7 2010/02/18 02:11:26 schwarze Exp $
 .\"
-.\" Copyright (c) 2009 Kristaps Dzonsons <kristaps@kth.se>
+.\" Copyright (c) 2009-2010 Kristaps Dzonsons <kristaps@bsd.lv>
 .\"
 .\" Permission to use, copy, modify, and distribute this software for any
 .\" purpose with or without fee is hereby granted, provided that the above
@@ -14,7 +14,7 @@
 .\" ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
 .\" OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 .\"
-.Dd $Mdocdate: June 14 2009 $
+.Dd $Mdocdate: February 18 2010 $
 .Dt MAN 3
 .Os
 .\" SECTION
@@ -29,7 +29,7 @@
 .Nd man macro compiler library
 .\" SECTION
 .Sh SYNOPSIS
-.Fd #include <man.h>
+.In man.h
 .Vt extern const char * const * man_macronames;
 .Ft "struct man *"
 .Fn man_alloc "void *data" "int pflags" "const struct man_cb *cb"
@@ -40,16 +40,16 @@
 .Ft int
 .Fn man_parseln "struct man *man" "int line" "char *buf"
 .Ft "const struct man_node *"
-.Fn man_node "struct man *man"
+.Fn man_node "const struct man *man"
 .Ft "const struct man_meta *"
-.Fn man_meta "struct man *man"
+.Fn man_meta "const struct man *man"
 .Ft int
 .Fn man_endparse "struct man *man"
 .\" SECTION
 .Sh DESCRIPTION
 The
 .Nm man
-library parses lines of 
+library parses lines of
 .Xr man 7
 input (and
 .Em only
@@ -58,12 +58,12 @@ man) into an abstract syntax tree (AST).
 .Pp
 In general, applications initiate a parsing sequence with
 .Fn man_alloc ,
-parse each line in a document with 
+parse each line in a document with
 .Fn man_parseln ,
 close the parsing session with
 .Fn man_endparse ,
 operate over the syntax tree returned by
-.Fn man_node 
+.Fn man_node
 and
 .Fn man_meta ,
 then free all allocated memory with
@@ -76,13 +76,13 @@ sequence.  See the
 section for a full example.
 .\" PARAGRAPH
 .Pp
-This section further defines the 
+This section further defines the
 .Sx Types ,
-.Sx Functions 
+.Sx Functions
 and
 .Sx Variables
 available to programmers.  Following that, the
-.Sx Abstract Syntax Tree 
+.Sx Abstract Syntax Tree
 section documents the output tree.
 .\" SUBSECTION
 .Ss Types
@@ -91,7 +91,7 @@ Both functions (see
 and variables (see
 .Sx Variables )
 may use the following types:
-.Bl -ohang -offset "XXXX"
+.Bl -ohang
 .\" LIST-ITEM
 .It Vt struct man
 An opaque type defined in
@@ -105,21 +105,21 @@ A set of message callbacks defined in
 .It Vt struct man_node
 A parsed node.  Defined in
 .Pa man.h .
-See 
+See
 .Sx Abstract Syntax Tree
 for details.
 .El
 .\" SUBSECTION
 .Ss Functions
 Function descriptions follow:
-.Bl -ohang -offset "XXXX"
+.Bl -ohang
 .\" LIST-ITEM
 .It Fn man_alloc
 Allocates a parsing structure.  The
 .Fa data
 pointer is passed to callbacks in
-.Fa cb , 
-which are documented further in the header file.  
+.Fa cb ,
+which are documented further in the header file.
 The
 .Fa pflags
 arguments are defined in
@@ -128,7 +128,7 @@ Returns NULL on failure.  If non-NULL, the pointer must be freed with
 .Fn man_free .
 .\" LIST-ITEM
 .It Fn man_reset
-Reset the parser for another parse routine.  After its use, 
+Reset the parser for another parse routine.  After its use,
 .Fn man_parseln
 behaves as if invoked for the first time.
 .\" LIST-ITEM
@@ -138,26 +138,26 @@ invocation.
 .\" LIST-ITEM
 .It Fn man_parseln
 Parse a nil-terminated line of input.  This line should not contain the
-trailing newline.  Returns 0 on failure, 1 on success.  The input buffer 
+trailing newline.  Returns 0 on failure, 1 on success.  The input buffer
 .Fa buf
 is modified by this function.
 .\" LIST-ITEM
 .It Fn man_endparse
-Signals that the parse is complete.  Note that if 
+Signals that the parse is complete.  Note that if
 .Fn man_endparse
 is called subsequent to
 .Fn man_node ,
 the resulting tree is incomplete.  Returns 0 on failure, 1 on success.
 .\" LIST-ITEM
 .It Fn man_node
-Returns the first node of the parse.  Note that if 
+Returns the first node of the parse.  Note that if
 .Fn man_parseln
 or
 .Fn man_endparse
 return 0, the tree will be incomplete.
 .It Fn man_meta
 Returns the document's parsed meta-data.  If this information has not
-yet been supplied or 
+yet been supplied or
 .Fn man_parseln
 or
 .Fn man_endparse
@@ -166,14 +166,14 @@ return 0, the data will be incomplete.
 .\" SUBSECTION
 .Ss Variables
 The following variables are also defined:
-.Bl -ohang -offset "XXXX"
+.Bl -ohang
 .\" LIST-ITEM
 .It Va man_macronames
 An array of string-ified token names.
 .El
 .\" SUBSECTION
 .Ss Abstract Syntax Tree
-The 
+The
 .Nm
 functions produce an abstract syntax tree (AST) describing input in a
 regular form.  It may be reviewed at any time with
@@ -181,19 +181,19 @@ regular form.  It may be reviewed at any time with
 however, if called before
 .Fn man_endparse ,
 or after
-.Fn man_endparse 
+.Fn man_endparse
 or
 .Fn man_parseln
-fail, it may be incomplete.  
+fail, it may be incomplete.
 .\" PARAGRAPH
 .Pp
 This AST is governed by the ontological
 rules dictated in
 .Xr man 7
-and derives its terminology accordingly.  
+and derives its terminology accordingly.
 .\" PARAGRAPH
 .Pp
-The AST is composed of 
+The AST is composed of
 .Vt struct man_node
 nodes with element, root and text types as declared
 by the
@@ -206,21 +206,27 @@ and
 fields), its position in the tree (the
 .Va parent ,
 .Va child ,
-.Va next 
+.Va next
 and
-.Va prev 
+.Va prev
 fields) and some type-specific data.
 .\" PARAGRAPH
 .Pp
 The tree itself is arranged according to the following normal form,
 where capitalised non-terminals represent nodes.
 .Pp
-.Bl -tag -width "ELEMENTXX" -compact -offset "XXXX"
+.Bl -tag -width "ELEMENTXX" -compact
 .\" LIST-ITEM
 .It ROOT
 \(<- mnode+
 .It mnode
-\(<- ELEMENT | TEXT
+\(<- ELEMENT | TEXT | BLOCK
+.It BLOCK
+\(<- HEAD BODY
+.It HEAD
+\(<- mnode*
+.It BODY
+\(<- mnode*
 .It ELEMENT
 \(<- ELEMENT | TEXT*
 .It TEXT
@@ -234,13 +240,10 @@ next-lint scope as documented in
 .\" SECTION
 .Sh EXAMPLES
 The following example reads lines from stdin and parses them, operating
-on the finished parse tree with 
+on the finished parse tree with
 .Fn parsed .
-Note that, if the last line of the file isn't newline-terminated, this
-will truncate the file's last character (see 
-.Xr fgetln 3 ) .
-Further, this example does not error-check nor free memory upon failure.
-.Bd -literal -offset "XXXX"
+This example does not error-check nor free memory upon failure.
+.Bd -literal -offset indent
 struct man *man;
 struct man_node *node;
 char *buf;
@@ -249,18 +252,23 @@ int line;
 
 line = 1;
 man = man_alloc(NULL, 0, NULL);
+buf = NULL;
+alloc_len = 0;
 
-while ((buf = fgetln(fp, &len))) {
-	buf[len - 1] = '\\0';
-	if ( ! man_parseln(man, line, buf))
-		errx(1, "man_parseln");
-	line++;
+while ((len = getline(&buf, &alloc_len, stdin)) >= 0) {
+    if (len && buflen[len - 1] = '\en')
+        buf[len - 1] = '\e0';
+    if ( ! man_parseln(man, line, buf))
+        errx(1, "man_parseln");
+    line++;
 }
 
+free(buf);
+
 if ( ! man_endparse(man))
-	errx(1, "man_endparse");
+    errx(1, "man_endparse");
 if (NULL == (node = man_node(man)))
-	errx(1, "man_node");
+    errx(1, "man_node");
 
 parsed(man, node);
 man_free(man);
@@ -273,5 +281,5 @@ man_free(man);
 .Sh AUTHORS
 The
 .Nm
-utility was written by 
-.An Kristaps Dzonsons Aq kristaps@kth.se .
+utility was written by
+.An Kristaps Dzonsons Aq kristaps@bsd.lv .

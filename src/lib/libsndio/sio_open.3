@@ -1,4 +1,4 @@
-.\" $OpenBSD: sio_open.3,v 1.19 2009/05/15 11:07:41 ratchov Exp $
+.\" $OpenBSD: sio_open.3,v 1.22 2009/12/30 08:27:12 ratchov Exp $
 .\"
 .\" Copyright (c) 2007 Alexandre Ratchov <alex@caoua.org>
 .\"
@@ -14,7 +14,7 @@
 .\" ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
 .\" OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 .\"
-.Dd $Mdocdate: May 15 2009 $
+.Dd $Mdocdate: December 30 2009 $
 .Dt SIO_OPEN 3
 .Os
 .Sh NAME
@@ -39,7 +39,7 @@
 .Sh SYNOPSIS
 .Fd #include <sndio.h>
 .Ft "struct sio_hdl *"
-.Fn "sio_open" "char *name" "unsigned mode" "int nbio_flag"
+.Fn "sio_open" "const char *name" "unsigned mode" "int nbio_flag"
 .Ft "void"
 .Fn "sio_close" "struct sio_hdl *hdl"
 .Ft "int"
@@ -55,7 +55,7 @@
 .Ft "size_t"
 .Fn "sio_read" "struct sio_hdl *hdl" "void *addr" "size_t nbytes"
 .Ft "size_t"
-.Fn "sio_write" "struct sio_hdl *hdl" "void *addr" "size_t nbytes"
+.Fn "sio_write" "struct sio_hdl *hdl" "const void *addr" "size_t nbytes"
 .Ft "void"
 .Fn "sio_onmove" "struct sio_hdl *hdl" "void (*cb)(void *arg, int delta)" "void *arg"
 .Ft "int"
@@ -104,11 +104,8 @@ If that fails, it then tries to use the
 hardware device.
 The
 .Ar name
-parameter gives the name of the
-.Xr aucat 1
-socket or the path of the
-.Xr audio 4
-device.
+parameter gives the device string discussed in
+.Xr sndio 7 .
 In most cases it should be set to NULL to allow
 the user to select it using the
 .Ev AUDIODEVICE
@@ -145,6 +142,9 @@ function closes the stream and frees all allocated resources
 associated with the
 .Nm libsndio
 handle.
+If the stream is not stopped it will be stopped first as if
+.Fn sio_stop
+is called.
 .Ss Negotiating audio parameters
 Audio streams always use linear interleaved encoding.
 A frame consists of one sample for each channel in the stream.
@@ -424,6 +424,9 @@ Samples in the play buffers are not discarded, and will continue to
 be played after
 .Fn sio_stop
 returns.
+If samples to play are queued but playback hasn't started yet
+then playback is forced immediately; the stream will actually stop
+once the buffer is drained.
 .Ss Playing and recording
 When record mode is selected, the
 .Fn sio_read
@@ -541,6 +544,9 @@ The
 argument contains the number of frames the hardware moved in the stream
 since the last call of
 .Va cb .
+When the stream starts, the callback is invoked with a zero
+.Va delta
+argument.
 The value of the
 .Va arg
 pointer is passed to the callback and can contain anything.
@@ -553,9 +559,6 @@ is called) and adding to the current position
 every time
 .Fn cb
 is called.
-Note that at the beginning the current position might be
-negative indicating that the stream is being buffered,
-but has not reached the hardware yet.
 .Ss Measuring the latency and buffers usage
 The playback latency is the delay it will take for the
 frame just written to become audible, expressed in number of frames.
@@ -570,18 +573,14 @@ There's a phase during which
 .Fn sio_write
 only queues data;
 once there's enough data, actual playback starts.
-During this phase the current position is negative and
-the latency might be longer than
-.Va bufsz .
+During this phase talking about latency is meaningless.
 .Pp
 In any cases, at most
 .Va bufsz
 frames are buffered.
 This value takes into account all buffers,
 including device, kernel and socket buffers.
-During the buffering phase, the number of frames stored
-is equal to the number of frames written.
-Once playback is started, it is equal to the number of frames
+The number of frames stored is equal to the number of frames
 written minus the current position.
 .Pp
 The recording latency is obtained similarly, by subtracting
@@ -728,18 +727,18 @@ functions return the number of bytes transferred.
 .Sh ENVIRONMENT
 .Bl -tag -width "AUDIODEVICEXXX" -compact
 .It Ev AUDIODEVICE
-Name of the
-.Xr aucat 1
-socket to connect to, or path to the
-.Xr audio 4
-device to use.
+Device to use if
+.Fn sio_open
+is called with a NULL
+.Va name
+argument.
 .It Ev SIO_DEBUG
 The debug level:
 may be a value between 0 and 2.
 .El
 .Sh FILES
-.Bl -tag -width "/tmp/aucat-<uid>/default" -compact
-.It Pa /tmp/aucat-<uid>/default
+.Bl -tag -width "/tmp/aucat-<uid>/softaudio0" -compact
+.It Pa /tmp/aucat-<uid>/softaudio0
 Default path to
 .Xr aucat 1
 socket to connect to.
@@ -754,6 +753,7 @@ device to use.
 .Sh SEE ALSO
 .Xr aucat 1 ,
 .Xr audio 4 ,
+.Xr sndio 7 ,
 .Xr audio 9
 .Sh BUGS
 The
@@ -772,11 +772,9 @@ The
 server doesn't implement flow control (for performance reasons).
 If the application doesn't consume recorded data fast enough then
 .Dq "control messages"
-are delayed (or lost) and consequently
-overruns and underruns stay unnoticed by the application in the
-.Va SIO_SYNC
-mode (overruns and underruns are handled on the server side, so
-synchronization is never lost).
+are delayed and consequently
+.Va sio_onmove
+callback or volume changes may be delayed.
 .Pp
 The
 .Fn sio_open ,

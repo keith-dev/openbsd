@@ -1,4 +1,4 @@
-/*	$OpenBSD: api_bsd.c,v 1.5 2003/11/15 00:26:36 tedu Exp $	*/
+/*	$OpenBSD: api_bsd.c,v 1.7 2009/12/10 17:39:32 deraadt Exp $	*/
 
 /*-
  * Copyright (c) 1988 The Regents of the University of California.
@@ -28,11 +28,6 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  */
-
-#ifndef lint
-/*static char sccsid[] = "from: @(#)api_bsd.c	4.2 (Berkeley) 4/26/91";*/
-static char rcsid[] = "$OpenBSD: api_bsd.c,v 1.5 2003/11/15 00:26:36 tedu Exp $";
-#endif /* not lint */
 
 #if	defined(unix)
 
@@ -126,7 +121,7 @@ char	*string;		/* if non-zero, where to connect to */
 	perror("fopen");
 	return -1;
     }
-    if (fscanf(keyfile, "%s\n", inkey) != 1) {
+    if (fscanf(keyfile, "100%s\n", inkey) != 1) {
 	perror("fscanf");
 	return -1;
     }

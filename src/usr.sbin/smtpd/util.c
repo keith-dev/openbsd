@@ -1,4 +1,4 @@
-/*	$OpenBSD: util.c,v 1.22 2009/06/01 18:24:01 deraadt Exp $	*/
+/*	$OpenBSD: util.c,v 1.32 2009/12/23 17:16:03 jacekm Exp $	*/
 
 /*
  * Copyright (c) 2000,2001 Markus Friedl.  All rights reserved.
@@ -24,13 +24,17 @@
 #include <sys/tree.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
+#include <sys/resource.h>
 
 #include <ctype.h>
+#include <err.h>
 #include <errno.h>
 #include <event.h>
+#include <fcntl.h>
 #include <libgen.h>
 #include <netdb.h>
 #include <pwd.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -84,12 +88,12 @@ hostname_match(char *hostname, char *pattern)
 			while (*pattern == '*')
 				pattern++;
 			while (*hostname != '\0' &&
-			    tolower(*hostname) != tolower(*pattern))
+			    tolower((int)*hostname) != tolower((int)*pattern))
 				hostname++;
 			continue;
 		}
 
-		if (tolower(*pattern) != tolower(*hostname))
+		if (tolower((int)*pattern) != tolower((int)*hostname))
 			return 0;
 		pattern++;
 		hostname++;
@@ -135,7 +139,7 @@ recipient_to_path(struct path *path, char *recipient)
 int
 valid_localpart(char *s)
 {
-#define IS_ATEXT(c)     (isalnum(c) || strchr("!#$%&'*+-/=?^_`{|}~", (c)))
+#define IS_ATEXT(c)     (isalnum((int)(c)) || strchr("!#$%&'*+-/=?^_`{|}~", (c)))
 nextatom:
         if (! IS_ATEXT(*s) || *s == '\0')
                 return 0;
@@ -157,12 +161,12 @@ int
 valid_domainpart(char *s)
 {
 nextsub:
-        if (!isalnum(*s))
+        if (!isalnum((int)*s))
                 return 0;
         while (*(++s) != '\0') {
                 if (*s == '.')
                         break;
-                if (isalnum(*s) || *s == '-')
+                if (isalnum((int)*s) || *s == '-')
                         continue;
                 return 0;
         }
@@ -237,7 +241,7 @@ valid_message_uid(char *muid)
 		return 0;
 
 	for (cnt = 0; *muid != '\0'; ++cnt, ++muid)
-		if (! isdigit(*muid))
+		if (! isdigit((int)*muid))
 			return 0;
 
 	return (cnt != 0);
@@ -274,7 +278,7 @@ time_to_text(time_t when)
  * Check file for security. Based on usr.bin/ssh/auth.c.
  */
 int
-secure_file(int fd, char *path, struct passwd *pw)
+secure_file(int fd, char *path, struct passwd *pw, int mayread)
 {
 	char		 buf[MAXPATHLEN];
 	char		 homedir[MAXPATHLEN];
@@ -291,7 +295,7 @@ secure_file(int fd, char *path, struct passwd *pw)
 	if (fstat(fd, &st) < 0 ||
 	    !S_ISREG(st.st_mode) ||
 	    (st.st_uid != 0 && st.st_uid != pw->pw_uid) ||
-	    (st.st_mode & 066) != 0)
+	    (st.st_mode & (mayread ? 022 : 066)) != 0)
 		return 0;
 
 	/* For each component of the canonical path, walking upwards. */
@@ -361,7 +365,155 @@ lowercase(char *buf, char *s, size_t len)
 		fatalx("lowercase: truncation");
 
 	while (*buf != '\0') {
-		*buf = tolower(*buf);
+		*buf = tolower((int)*buf);
 		buf++;
 	}
+}
+
+void
+message_set_errormsg(struct message *messagep, char *fmt, ...)
+{
+	int ret;
+	va_list ap;
+
+	va_start(ap, fmt);
+
+	ret = vsnprintf(messagep->session_errorline, MAX_LINE_SIZE, fmt, ap);
+	if (ret >= MAX_LINE_SIZE)
+		strlcpy(messagep->session_errorline + (MAX_LINE_SIZE - 4), "...", 4);
+
+	/* this should not happen */
+	if (ret == -1)
+		err(1, "vsnprintf");
+
+	va_end(ap);
+}
+
+char *
+message_get_errormsg(struct message *messagep)
+{
+	return messagep->session_errorline;
+}
+
+void
+sa_set_port(struct sockaddr *sa, int port)
+{
+	char hbuf[NI_MAXHOST], sbuf[NI_MAXSERV];
+	struct addrinfo hints, *res;
+	int error;
+
+	error = getnameinfo(sa, sa->sa_len, hbuf, sizeof(hbuf), NULL, 0, NI_NUMERICHOST);
+	if (error)
+		fatalx("sa_set_port: getnameinfo failed");
+
+	memset(&hints, 0, sizeof(hints));
+	hints.ai_family = PF_UNSPEC;
+	hints.ai_socktype = SOCK_STREAM;
+	hints.ai_flags = AI_NUMERICHOST|AI_NUMERICSERV;
+
+	snprintf(sbuf, sizeof(sbuf), "%d", port);
+
+	error = getaddrinfo(hbuf, sbuf, &hints, &res);
+	if (error)
+		fatalx("sa_set_port: getaddrinfo failed");
+
+	memcpy(sa, res->ai_addr, res->ai_addrlen);
+	freeaddrinfo(res);
+}
+
+struct path *
+path_dup(struct path *path)
+{
+	struct path *pathp;
+
+	pathp = calloc(sizeof(struct path), 1);
+	if (pathp == NULL)
+		fatal("calloc");
+
+	*pathp = *path;
+
+	return pathp;
+}
+
+u_int64_t
+generate_uid(void)
+{
+	u_int64_t	id;
+	struct timeval	tp;
+
+	if (gettimeofday(&tp, NULL) == -1)
+		fatal("generate_uid: time");
+
+	id = (u_int32_t)tp.tv_sec;
+	id <<= 32;
+	id |= (u_int32_t)tp.tv_usec;
+	usleep(1);
+
+	return (id);
+}
+
+void
+fdlimit(double percent)
+{
+	struct rlimit rl;
+
+	if (percent < 0 || percent > 1)
+		fatalx("fdlimit: parameter out of range");
+	if (getrlimit(RLIMIT_NOFILE, &rl) == -1)
+		fatal("fdlimit: getrlimit");
+	rl.rlim_cur = percent * rl.rlim_max;
+	if (setrlimit(RLIMIT_NOFILE, &rl) == -1)
+		fatal("fdlimit: setrlimit");
+}
+
+int
+availdesc(void)
+{
+	int avail;
+
+	avail = getdtablesize();
+	avail -= 3;		/* stdin, stdout, stderr */
+	avail -= PROC_COUNT;	/* imsg channels */
+	avail -= 5;		/* safety buffer */
+
+	return (avail);
+}
+
+void
+session_socket_blockmode(int fd, enum blockmodes bm)
+{
+	int	flags;
+
+	if ((flags = fcntl(fd, F_GETFL, 0)) == -1)
+		fatal("fcntl F_GETFL");
+
+	if (bm == BM_NONBLOCK)
+		flags |= O_NONBLOCK;
+	else
+		flags &= ~O_NONBLOCK;
+
+	if ((flags = fcntl(fd, F_SETFL, flags)) == -1)
+		fatal("fcntl F_SETFL");
+}
+
+void
+session_socket_no_linger(int fd)
+{
+	struct linger	 lng;
+
+	bzero(&lng, sizeof(lng));
+	if (setsockopt(fd, SOL_SOCKET, SO_LINGER, &lng, sizeof(lng)) == -1)
+		fatal("session_socket_no_linger");
+}
+
+int
+session_socket_error(int fd)
+{
+	int	 error, len;
+
+	len = sizeof(error);
+	if (getsockopt(fd, SOL_SOCKET, SO_ERROR, &error, &len) == -1)
+		fatal("session_socket_error: getsockopt");
+
+	return (error);
 }

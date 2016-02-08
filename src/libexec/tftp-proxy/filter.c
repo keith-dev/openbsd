@@ -1,4 +1,4 @@
-/*	$OpenBSD: filter.c,v 1.2 2007/06/23 15:51:21 jcs Exp $ */
+/*	$OpenBSD: filter.c,v 1.8 2010/01/13 01:08:14 claudio Exp $ */
 
 /*
  * Copyright (c) 2004, 2005 Camiel Dobbelaar, <cd@sentia.nl>
@@ -44,17 +44,16 @@
 
 enum { TRANS_FILTER = 0, TRANS_NAT, TRANS_RDR, TRANS_SIZE };
 
-int prepare_rule(u_int32_t, int, struct sockaddr *, struct sockaddr *,
+int prepare_rule(u_int32_t, struct sockaddr *, struct sockaddr *,
     u_int16_t, u_int8_t);
 int server_lookup4(struct sockaddr_in *, struct sockaddr_in *,
     struct sockaddr_in *, u_int8_t);
 int server_lookup6(struct sockaddr_in6 *, struct sockaddr_in6 *,
     struct sockaddr_in6 *, u_int8_t);
 
-static struct pfioc_pooladdr	pfp;
 static struct pfioc_rule	pfr;
 static struct pfioc_trans	pft;
-static struct pfioc_trans_e	pfte[TRANS_SIZE];
+static struct pfioc_trans_e	pfte;
 static int dev, rule_log;
 static char *qname;
 
@@ -67,44 +66,10 @@ add_filter(u_int32_t id, u_int8_t dir, struct sockaddr *src,
 		return (-1);
 	}
 
-	if (prepare_rule(id, PF_RULESET_FILTER, src, dst, d_port, proto) == -1)
+	if (prepare_rule(id, src, dst, d_port, proto) == -1)
 		return (-1);
 
 	pfr.rule.direction = dir;
-	if (ioctl(dev, DIOCADDRULE, &pfr) == -1)
-		return (-1);
-
-	return (0);
-}
-
-int
-add_nat(u_int32_t id, struct sockaddr *src, struct sockaddr *dst,
-    u_int16_t d_port, struct sockaddr *nat, u_int16_t nat_range_low,
-    u_int16_t nat_range_high, u_int8_t proto)
-{
-	if (!src || !dst || !d_port || !nat || !nat_range_low || !proto ||
-	    (src->sa_family != nat->sa_family)) {
-		errno = EINVAL;
-		return (-1);
-	}
-
-	if (prepare_rule(id, PF_RULESET_NAT, src, dst, d_port, proto) == -1)
-		return (-1);
-
-	if (nat->sa_family == AF_INET) {
-		memcpy(&pfp.addr.addr.v.a.addr.v4,
-		    &satosin(nat)->sin_addr.s_addr, 4);
-		memset(&pfp.addr.addr.v.a.mask.addr8, 255, 4);
-	} else {
-		memcpy(&pfp.addr.addr.v.a.addr.v6,
-		    &satosin6(nat)->sin6_addr.s6_addr, 16);
-		memset(&pfp.addr.addr.v.a.mask.addr8, 255, 16);
-	}
-	if (ioctl(dev, DIOCADDADDR, &pfp) == -1)
-		return (-1);
-
-	pfr.rule.rpool.proxy_port[0] = nat_range_low;
-	pfr.rule.rpool.proxy_port[1] = nat_range_high;
 	if (ioctl(dev, DIOCADDRULE, &pfr) == -1)
 		return (-1);
 
@@ -121,22 +86,21 @@ add_rdr(u_int32_t id, struct sockaddr *src, struct sockaddr *dst,
 		return (-1);
 	}
 
-	if (prepare_rule(id, PF_RULESET_RDR, src, dst, d_port, proto) == -1)
+	if (prepare_rule(id, src, dst, d_port, proto) == -1)
 		return (-1);
 
+	pfr.rule.rdr.addr.type = PF_ADDR_ADDRMASK;
 	if (rdr->sa_family == AF_INET) {
-		memcpy(&pfp.addr.addr.v.a.addr.v4,
+		memcpy(&pfr.rule.rdr.addr.v.a.addr.v4,
 		    &satosin(rdr)->sin_addr.s_addr, 4);
-		memset(&pfp.addr.addr.v.a.mask.addr8, 255, 4);
+		memset(&pfr.rule.rdr.addr.v.a.mask.addr8, 255, 4);
 	} else {
-		memcpy(&pfp.addr.addr.v.a.addr.v6,
+		memcpy(&pfr.rule.rdr.addr.v.a.addr.v6,
 		    &satosin6(rdr)->sin6_addr.s6_addr, 16);
-		memset(&pfp.addr.addr.v.a.mask.addr8, 255, 16);
+		memset(&pfr.rule.rdr.addr.v.a.mask.addr8, 255, 16);
 	}
-	if (ioctl(dev, DIOCADDADDR, &pfp) == -1)
-		return (-1);
 
-	pfr.rule.rpool.proxy_port[0] = rdr_port;
+	pfr.rule.rdr.proxy_port[0] = rdr_port;
 	if (ioctl(dev, DIOCADDRULE, &pfr) == -1)
 		return (-1);
 
@@ -192,33 +156,17 @@ int
 prepare_commit(u_int32_t id)
 {
 	char an[PF_ANCHOR_NAME_SIZE];
-	int i;
 
 	memset(&pft, 0, sizeof pft);
-	pft.size = TRANS_SIZE;
-	pft.esize = sizeof pfte[0];
-	pft.array = pfte;
+	memset(&pfte, 0, sizeof pfte);
+	pft.size = 1;
+	pft.esize = sizeof pfte;
+	pft.array = &pfte;
 
 	snprintf(an, PF_ANCHOR_NAME_SIZE, "%s/%d.%d", FTP_PROXY_ANCHOR,
 	    getpid(), id);
-	for (i = 0; i < TRANS_SIZE; i++) {
-		memset(&pfte[i], 0, sizeof pfte[0]);
-		strlcpy(pfte[i].anchor, an, PF_ANCHOR_NAME_SIZE);
-		switch (i) {
-		case TRANS_FILTER:
-			pfte[i].rs_num = PF_RULESET_FILTER;
-			break;
-		case TRANS_NAT:
-			pfte[i].rs_num = PF_RULESET_NAT;
-			break;
-		case TRANS_RDR:
-			pfte[i].rs_num = PF_RULESET_RDR;
-			break;
-		default:
-			errno = EINVAL;
-			return (-1);
-		}
-	}
+	strlcpy(pfte.anchor, an, PF_ANCHOR_NAME_SIZE);
+	pfte.type = PF_TRANS_RULESET;
 
 	if (ioctl(dev, DIOCXBEGIN, &pft) == -1)
 		return (-1);
@@ -227,7 +175,7 @@ prepare_commit(u_int32_t id)
 }
 	
 int
-prepare_rule(u_int32_t id, int rs_num, struct sockaddr *src,
+prepare_rule(u_int32_t id, struct sockaddr *src,
     struct sockaddr *dst, u_int16_t d_port, u_int8_t proto)
 {
 	char an[PF_ANCHOR_NAME_SIZE];
@@ -238,36 +186,21 @@ prepare_rule(u_int32_t id, int rs_num, struct sockaddr *src,
 		return (-1);
 	}
 
-	memset(&pfp, 0, sizeof pfp);
 	memset(&pfr, 0, sizeof pfr);
 	snprintf(an, PF_ANCHOR_NAME_SIZE, "%s/%d.%d", FTP_PROXY_ANCHOR,
 	    getpid(), id);
-	strlcpy(pfp.anchor, an, PF_ANCHOR_NAME_SIZE);
 	strlcpy(pfr.anchor, an, PF_ANCHOR_NAME_SIZE);
 
-	switch (rs_num) {
-	case PF_RULESET_FILTER:
-		pfr.ticket = pfte[TRANS_FILTER].ticket;
-		break;
-	case PF_RULESET_NAT:
-		pfr.ticket = pfte[TRANS_NAT].ticket;
-		break;
-	case PF_RULESET_RDR:
-		pfr.ticket = pfte[TRANS_RDR].ticket;
-		break;
-	default:
-		errno = EINVAL;
-		return (-1);
-	}
-	if (ioctl(dev, DIOCBEGINADDRS, &pfp) == -1)
-		return (-1);
-	pfr.pool_ticket = pfp.ticket;
+	pfr.ticket = pfte.ticket;
 
 	/* Generic for all rule types. */
 	pfr.rule.af = src->sa_family;
 	pfr.rule.proto = proto;
 	pfr.rule.src.addr.type = PF_ADDR_ADDRMASK;
 	pfr.rule.dst.addr.type = PF_ADDR_ADDRMASK;
+	pfr.rule.rdr.addr.type = PF_ADDR_NONE;
+	pfr.rule.nat.addr.type = PF_ADDR_NONE;
+
 	if (src->sa_family == AF_INET) {
 		memcpy(&pfr.rule.src.addr.v.a.addr.v4,
 		    &satosin(src)->sin_addr.s_addr, 4);
@@ -285,41 +218,16 @@ prepare_rule(u_int32_t id, int rs_num, struct sockaddr *src,
 	}
 	pfr.rule.dst.port_op = PF_OP_EQ;
 	pfr.rule.dst.port[0] = htons(d_port);
-
-	switch (rs_num) {
-	case PF_RULESET_FILTER:
-		/*
-		 * pass quick [log] inet[6] proto tcp \
-		 *     from $src to $dst port = $d_port flags S/SAFR keep state
-		 *     (max 1) [queue qname]
-		 */
-		pfr.rule.action = PF_PASS;
-		pfr.rule.quick = 1;
-		pfr.rule.log = rule_log;
-		pfr.rule.keep_state = 1;
-		pfr.rule.flags = (proto == IPPROTO_TCP ? TH_SYN : 0);
-		pfr.rule.flagset = (proto == IPPROTO_TCP ?
-		    (TH_SYN|TH_ACK|TH_FIN|TH_RST) : 0);
-		pfr.rule.max_states = 1;
-		if (qname != NULL)
-			strlcpy(pfr.rule.qname, qname, sizeof pfr.rule.qname);
-		break;
-	case PF_RULESET_NAT:
-		/*
-		 * nat inet[6] proto tcp from $src to $dst port $d_port -> $nat
-		 */
-		pfr.rule.action = PF_NAT;
-		break;
-	case PF_RULESET_RDR:
-		/*
-		 * rdr inet[6] proto tcp from $src to $dst port $d_port -> $rdr
-		 */
-		pfr.rule.action = PF_RDR;
-		break;
-	default:
-		errno = EINVAL;
-		return (-1);
-	}
+	pfr.rule.action = PF_PASS;
+	pfr.rule.quick = 1;
+	pfr.rule.log = rule_log;
+	pfr.rule.keep_state = 1;
+	pfr.rule.flags = (proto == IPPROTO_TCP ? TH_SYN : 0);
+	pfr.rule.flagset = (proto == IPPROTO_TCP ?
+	    (TH_SYN|TH_ACK|TH_FIN|TH_RST) : 0);
+	pfr.rule.max_states = 1;
+	if (qname != NULL)
+		strlcpy(pfr.rule.qname, qname, sizeof pfr.rule.qname);
 
 	return (0);
 }

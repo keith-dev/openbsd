@@ -1,4 +1,4 @@
-/*	$OpenBSD: control.c,v 1.35 2009/06/07 05:56:25 eric Exp $	*/
+/*	$OpenBSD: control.c,v 1.46 2010/01/10 16:42:35 gilles Exp $	*/
 
 /*
  * Copyright (c) 2008 Pierre-Yves Ritschard <pyr@openbsd.org>
@@ -47,11 +47,11 @@ struct {
 
 __dead void	 control_shutdown(void);
 int		 control_init(void);
-int		 control_listen(struct smtpd *);
+void		 control_listen(struct smtpd *);
 void		 control_cleanup(void);
 void		 control_accept(int, short, void *);
 struct ctl_conn	*control_connbyfd(int);
-void		 control_close(int);
+void		 control_close(struct smtpd *, int);
 void		 control_sig_handler(int, short, void *);
 void		 control_dispatch_ext(int, short, void *);
 void		 control_dispatch_lka(int, short, void *);
@@ -111,10 +111,14 @@ control(struct smtpd *env)
 	if ((fd = socket(AF_UNIX, SOCK_STREAM, 0)) == -1)
 		fatal("control: socket");
 
+	bzero(&sun, sizeof(sun));
 	sun.sun_family = AF_UNIX;
 	if (strlcpy(sun.sun_path, SMTPD_SOCKET,
 	    sizeof(sun.sun_path)) >= sizeof(sun.sun_path))
 		fatal("control: socket name too long");
+
+	if (connect(fd, (struct sockaddr *)&sun, sizeof(sun)) == 0)
+		fatalx("control socket already listening");
 
 	if (unlink(SMTPD_SOCKET) == -1)
 		if (errno != ENOENT)
@@ -181,19 +185,22 @@ control_shutdown(void)
 	_exit(0);
 }
 
-int
+void
 control_listen(struct smtpd *env)
 {
-	if (listen(control_state.fd, CONTROL_BACKLOG) == -1) {
-		log_warn("control_listen: listen");
-		return (-1);
-	}
+	int avail = availdesc();
 
-	event_set(&control_state.ev, control_state.fd, EV_READ | EV_PERSIST,
+	if (listen(control_state.fd, CONTROL_BACKLOG) == -1)
+		fatal("control_listen");
+	avail--;
+
+	event_set(&control_state.ev, control_state.fd, EV_READ|EV_PERSIST,
 	    control_accept, env);
 	event_add(&control_state.ev, NULL);
 
-	return (0);
+	/* guarantee 2 fds to each accepted client */
+	if ((env->sc_maxconn = avail / 2) < 1)
+		fatalx("control_listen: fd starvation");
 }
 
 void
@@ -213,21 +220,16 @@ control_accept(int listenfd, short event, void *arg)
 	struct smtpd		*env = arg;
 
 	len = sizeof(sun);
-	if ((connfd = accept(listenfd,
-	    (struct sockaddr *)&sun, &len)) == -1) {
-		if (errno != EWOULDBLOCK && errno != EINTR)
-			log_warn("control_accept");
-		return;
+	if ((connfd = accept(listenfd, (struct sockaddr *)&sun, &len)) == -1) {
+		if (errno == EINTR || errno == ECONNABORTED)
+			return;
+		fatal("control_accept: accept");
 	}
 
 	session_socket_blockmode(connfd, BM_NONBLOCK);
 
-	if ((c = calloc(1, sizeof(struct ctl_conn))) == NULL) {
-		close(connfd);
-		log_warn("control_accept");
-		return;
-	}
-
+	if ((c = calloc(1, sizeof(*c))) == NULL)
+		fatal(NULL);
 	imsg_init(&c->iev.ibuf, connfd);
 	c->iev.handler = control_dispatch_ext;
 	c->iev.events = EV_READ;
@@ -235,8 +237,15 @@ control_accept(int listenfd, short event, void *arg)
 	event_set(&c->iev.ev, c->iev.ibuf.fd, c->iev.events,
 	    c->iev.handler, env);
 	event_add(&c->iev.ev, NULL);
-
 	TAILQ_INSERT_TAIL(&ctl_conns, c, entry);
+
+	env->stats->control.sessions++;
+	env->stats->control.sessions_active++;
+
+	if (env->stats->control.sessions_active >= env->sc_maxconn) {
+		log_warnx("ctl client limit hit, disabling new connections");
+		event_del(&control_state.ev);
+	}
 }
 
 struct ctl_conn *
@@ -252,7 +261,7 @@ control_connbyfd(int fd)
 }
 
 void
-control_close(int fd)
+control_close(struct smtpd *env, int fd)
 {
 	struct ctl_conn	*c;
 
@@ -260,13 +269,19 @@ control_close(int fd)
 		log_warn("control_close: fd %d: not found", fd);
 		return;
 	}
-
-	msgbuf_clear(&c->iev.ibuf.w);
 	TAILQ_REMOVE(&ctl_conns, c, entry);
-
 	event_del(&c->iev.ev);
-	close(c->iev.ibuf.fd);
+	imsg_clear(&c->iev.ibuf);
+	close(fd);
 	free(c);
+
+	env->stats->control.sessions_active--;
+
+	if (!event_pending(&control_state.ev, EV_READ, NULL) &&
+	    env->stats->control.sessions_active < env->sc_maxconn) {
+		log_warnx("re-enabling ctl connections");
+		event_add(&control_state.ev, NULL);
+	}
 }
 
 /* ARGSUSED */
@@ -290,21 +305,21 @@ control_dispatch_ext(int fd, short event, void *arg)
 
 	if (event & EV_READ) {
 		if ((n = imsg_read(&c->iev.ibuf)) == -1 || n == 0) {
-			control_close(fd);
+			control_close(env, fd);
 			return;
 		}
 	}
 
 	if (event & EV_WRITE) {
 		if (msgbuf_write(&c->iev.ibuf.w) < 0) {
-			control_close(fd);
+			control_close(env, fd);
 			return;
 		}
 	}
 
 	for (;;) {
 		if ((n = imsg_get(&c->iev.ibuf, &imsg)) == -1) {
-			control_close(fd);
+			control_close(env, fd);
 			return;
 		}
 
@@ -320,7 +335,7 @@ control_dispatch_ext(int fd, short event, void *arg)
 				break;
 			}
 			imsg_compose_event(env->sc_ievs[PROC_SMTP],
-			    IMSG_SMTP_ENQUEUE, 0, 0, -1, &fd, sizeof(fd));
+			    IMSG_SMTP_ENQUEUE, fd, 0, -1, &euid, sizeof(euid));
 			break;
 		case IMSG_STATS:
 			if (euid)
@@ -348,6 +363,28 @@ control_dispatch_ext(int fd, short event, void *arg)
 			imsg_compose_event(env->sc_ievs[PROC_RUNNER], IMSG_RUNNER_SCHEDULE, 0, 0, -1, s, sizeof(*s));
 			break;
 		}
+
+		case IMSG_RUNNER_REMOVE: {
+			struct remove *s = imsg.data;
+
+			if (euid)
+				goto badcred;
+	
+			if (IMSG_DATA_SIZE(&imsg) != sizeof(*s))
+				goto badcred;
+
+			s->fd = fd;
+
+			if (! valid_message_id(s->mid) && ! valid_message_uid(s->mid)) {
+				imsg_compose_event(&c->iev, IMSG_CTL_FAIL, 0, 0, -1,
+				    NULL, 0);
+				break;
+			}
+
+			imsg_compose_event(env->sc_ievs[PROC_RUNNER], IMSG_RUNNER_REMOVE, 0, 0, -1, s, sizeof(*s));
+			break;
+		}
+/*
 		case IMSG_CONF_RELOAD: {
 			struct reload r;
 
@@ -367,6 +404,7 @@ control_dispatch_ext(int fd, short event, void *arg)
 			imsg_compose_event(env->sc_ievs[PROC_PARENT], IMSG_CONF_RELOAD, 0, 0, -1, &r, sizeof(r));
 			break;
 		}
+*/
 		case IMSG_CTL_SHUTDOWN:
 			/* NEEDS_FIX */
 			log_debug("received shutdown request");
@@ -382,6 +420,22 @@ control_dispatch_ext(int fd, short event, void *arg)
 			env->sc_flags |= SMTPD_EXITING;
 			imsg_compose_event(&c->iev, IMSG_CTL_OK, 0, 0, -1, NULL, 0);
 			break;
+		case IMSG_CTL_VERBOSE: {
+			int verbose;
+
+			if (euid)
+				goto badcred;
+
+			if (IMSG_DATA_SIZE(&imsg) != sizeof(verbose))
+				goto badcred;
+
+			memcpy(&verbose, imsg.data, sizeof(verbose));
+			log_verbose(verbose);
+			imsg_compose_event(env->sc_ievs[PROC_PARENT], IMSG_CTL_VERBOSE,
+			    0, 0, -1, &verbose, sizeof(verbose));
+			imsg_compose_event(&c->iev, IMSG_CTL_OK, 0, 0, -1, NULL, 0);
+			break;
+		}
 		case IMSG_MDA_PAUSE:
 			if (euid)
 				goto badcred;
@@ -434,7 +488,7 @@ control_dispatch_ext(int fd, short event, void *arg)
 				break;
 			}
 			env->sc_flags &= ~SMTPD_MDA_PAUSED;
-			imsg_compose_event(env->sc_ievs[PROC_RUNNER], IMSG_MTA_RESUME,
+			imsg_compose_event(env->sc_ievs[PROC_RUNNER], IMSG_MDA_RESUME,
 			    0, 0, -1, NULL, 0);
 			imsg_compose_event(&c->iev, IMSG_CTL_OK, 0, 0, -1, NULL, 0);
 			break;
@@ -512,7 +566,7 @@ control_dispatch_parent(int sig, short event, void *p)
 
 	for (;;) {
 		if ((n = imsg_get(ibuf, &imsg)) == -1)
-			fatalx("control_dispatch_parent: imsg_get error");
+			fatal("control_dispatch_parent: imsg_get error");
 		if (n == 0)
 			break;
 
@@ -575,7 +629,7 @@ control_dispatch_lka(int sig, short event, void *p)
 
 	for (;;) {
 		if ((n = imsg_get(ibuf, &imsg)) == -1)
-			fatalx("control_dispatch_lka: imsg_get error");
+			fatal("control_dispatch_lka: imsg_get error");
 		if (n == 0)
 			break;
 
@@ -620,7 +674,7 @@ control_dispatch_mfa(int sig, short event, void *p)
 
 	for (;;) {
 		if ((n = imsg_get(ibuf, &imsg)) == -1)
-			fatalx("control_dispatch_mfa: imsg_get error");
+			fatal("control_dispatch_mfa: imsg_get error");
 		if (n == 0)
 			break;
 
@@ -665,7 +719,7 @@ control_dispatch_queue(int sig, short event, void *p)
 
 	for (;;) {
 		if ((n = imsg_get(ibuf, &imsg)) == -1)
-			fatalx("control_dispatch_queue: imsg_get error");
+			fatal("control_dispatch_queue: imsg_get error");
 		if (n == 0)
 			break;
 
@@ -710,13 +764,31 @@ control_dispatch_runner(int sig, short event, void *p)
 
 	for (;;) {
 		if ((n = imsg_get(ibuf, &imsg)) == -1)
-			fatalx("control_dispatch_runner: imsg_get error");
+			fatal("control_dispatch_runner: imsg_get error");
 		if (n == 0)
 			break;
 
 		switch (imsg.hdr.type) {
 		case IMSG_RUNNER_SCHEDULE: {
 			struct sched	*s = imsg.data;
+			struct ctl_conn	*c;
+
+			IMSG_SIZE_CHECK(s);
+
+			if ((c = control_connbyfd(s->fd)) == NULL) {
+				log_warn("control_dispatch_runner: fd %d not found", s->fd);
+				imsg_free(&imsg);
+				return;
+			}
+
+			if (s->ret)
+				imsg_compose_event(&c->iev, IMSG_CTL_OK, 0, 0, -1, NULL, 0);
+			else
+				imsg_compose_event(&c->iev, IMSG_CTL_FAIL, 0, 0, -1, NULL, 0);
+			break;
+		}
+		case IMSG_RUNNER_REMOVE: {
+			struct remove	*s = imsg.data;
 			struct ctl_conn	*c;
 
 			IMSG_SIZE_CHECK(s);
@@ -773,19 +845,16 @@ control_dispatch_smtp(int sig, short event, void *p)
 
 	for (;;) {
 		if ((n = imsg_get(ibuf, &imsg)) == -1)
-			fatalx("control_dispatch_smtp: imsg_get error");
+			fatal("control_dispatch_smtp: imsg_get error");
 		if (n == 0)
 			break;
 
 		switch (imsg.hdr.type) {
 		case IMSG_SMTP_ENQUEUE: {
-			int		*fd = imsg.data;
 			struct ctl_conn	*c;
 			int		client_fd;
 
-			IMSG_SIZE_CHECK(fd);
-
-			client_fd = *fd;
+			client_fd = imsg.hdr.peerid;
 
 			if ((c = control_connbyfd(client_fd)) == NULL) {
 				log_warn("control_dispatch_smtp: fd %d not found", client_fd);
@@ -805,21 +874,4 @@ control_dispatch_smtp(int sig, short event, void *p)
 		imsg_free(&imsg);
 	}
 	imsg_event_add(iev);
-}
-
-void
-session_socket_blockmode(int fd, enum blockmodes bm)
-{
-	int	flags;
-
-	if ((flags = fcntl(fd, F_GETFL, 0)) == -1)
-		fatal("fcntl F_GETFL");
-
-	if (bm == BM_NONBLOCK)
-		flags |= O_NONBLOCK;
-	else
-		flags &= ~O_NONBLOCK;
-
-	if ((flags = fcntl(fd, F_SETFL, flags)) == -1)
-		fatal("fcntl F_SETFL");
 }

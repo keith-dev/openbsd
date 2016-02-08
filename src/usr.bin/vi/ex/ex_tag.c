@@ -1,4 +1,4 @@
-/*	$OpenBSD: ex_tag.c,v 1.13 2006/03/11 06:58:00 ray Exp $	*/
+/*	$OpenBSD: ex_tag.c,v 1.15 2009/11/14 17:44:53 jsg Exp $	*/
 
 /*-
  * Copyright (c) 1992, 1993, 1994
@@ -13,10 +13,6 @@
  */
 
 #include "config.h"
-
-#ifndef lint
-static const char sccsid[] = "@(#)ex_tag.c	10.36 (Berkeley) 9/15/96";
-#endif /* not lint */
 
 #include <sys/param.h>
 #include <sys/types.h>		/* XXX: param.h may not have included types.h */
@@ -699,8 +695,10 @@ tagf_copy(sp, otfp, tfpp)
 	*tfp = *otfp;
 
 	/* XXX: Allocate as part of the TAGF structure!!! */
-	if ((tfp->name = strdup(otfp->name)) == NULL)
+	if ((tfp->name = strdup(otfp->name)) == NULL) {
+		free(tfp);
 		return (1);
+	}
 
 	*tfpp = tfp;
 	return (0);

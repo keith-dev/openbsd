@@ -1,7 +1,7 @@
 # ex:ts=8 sw=4:
-# $OpenBSD: Error.pm,v 1.16 2008/10/21 21:06:19 espie Exp $
+# $OpenBSD: Error.pm,v 1.23 2010/01/19 14:58:53 espie Exp $
 #
-# Copyright (c) 2004 Marc Espie <espie@openbsd.org>
+# Copyright (c) 2004-2010 Marc Espie <espie@openbsd.org>
 #
 # Permission to use, copy, modify, and distribute this software for any
 # purpose with or without fee is hereby granted, provided that the above
@@ -13,12 +13,55 @@
 # ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
 # WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
 # ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
-#
 
 use strict;
 use warnings;
 
+package OpenBSD::Auto;
+sub cache(*&)
+{
+	my ($sym, $code) = @_;
+	my $callpkg = caller;
+	my $actual = sub {
+		my $self = shift;
+		return $self->{$sym} //= &$code($self);
+	};
+	no strict 'refs';
+	*{$callpkg."::$sym"} = $actual;
+}
+
+package OpenBSD::Handler;
+
+my $list = [];
+
+sub register
+{
+	my ($class, $code) = @_;
+	push(@$list, $code);
+}
+
+my $handler = sub {
+	my $sig = shift;
+	for my $c (@$list) {
+		&$c($sig);
+	}
+	$SIG{$sig} = 'DEFAULT';
+	kill $sig, $$;
+};
+
+sub reset 
+{
+	$SIG{'INT'} = $handler;
+	$SIG{'QUIT'} = $handler;
+	$SIG{'HUP'} = $handler;
+	$SIG{'KILL'} = $handler;
+	$SIG{'TERM'} = $handler;
+}
+
+__PACKAGE__->reset;
+
 package OpenBSD::Error;
+require Exporter;
 our @ISA=qw(Exporter);
 our @EXPORT=qw(System VSystem Copy Unlink Fatal Warn Usage set_usage 
     try throw catch catchall rethrow);
@@ -27,7 +70,7 @@ our ($FileName, $Line, $FullMessage);
 
 my @signal_name = ();
 
-sub Carp::croak;
+use Carp;
 
 sub fillup_names
 {
@@ -136,8 +179,7 @@ sub Unlink
 
 sub Fatal
 {
-	require Carp;
-	Carp::croak "Expected: @_";
+	croak @_;
 }
 
 sub Warn
@@ -169,12 +211,10 @@ sub warn
 sub fatal
 {
 	my $self = shift;
-	require Carp;
 	if (defined $self->{pkgname}) {
-		Carp::croak("Expected: ", $self->{pkgname}, ':', @_);
-	} else {
-		Carp::croak("Expected: ", @_);
-	}
+		unshift @_, $self->{pkgname}, ':';
+	} 
+	croak @_;
 }
 
 sub print
@@ -193,23 +233,24 @@ sub delayed_output
 			print @$msgs;
 		}
 	}
+	$self->{messages} = {};
 }
 
 sub system
 {
-	my $state = shift;
+	my $self = shift;
 	if (open(my $grab, "-|", @_)) {
 		my $_;
 		while (<$grab>) {
-			$state->print($_);
+			$self->print($_);
 		}
 		if (!close $grab) {
-		    $state->print("system(", join(", ", @_), ") failed: $! ", 
+		    $self->print("system(", join(", ", @_), ") failed: $! ", 
 		    	child_error(), "\n");
 		}
 		return $?;
 	} else {
-		    $state->print("system(", join(", ", @_), 
+		    $self->print("system(", join(", ", @_), 
 		    	") was not run: $!", child_error(), "\n");
 	}
 }
@@ -239,13 +280,13 @@ sub dienow
 {
 	my ($error, $handler) = @_;
 	if ($error) {
-		if ($error =~ m/^(Expected:\s+)?(.*?)(?:\s+at\s+(.*)\s+line\s+(\d+)\.?)?$/o) {
-			local $_ = $2;
-			$FileName = $3;
-			$Line = $4;
+		if ($error =~ m/^(.*?)(?:\s+at\s+(.*)\s+line\s+(\d+)\.?)?$/o) {
+			local $_ = $1;
+			$FileName = $2;
+			$Line = $3;
 			$FullMessage = $error;
 
-			$handler->exec($error, $1, $2, $3, $4);
+			$handler->exec($error, '', $1, $2, $3);
 		} else {
 			die "Fatal error: can't parse $error";
 		}
@@ -261,8 +302,7 @@ sub try(&@)
 
 sub throw 
 {
-	require Carp;
-	Carp::croak "Expected: @_";
+	croak @_;
 
 }
 

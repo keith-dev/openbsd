@@ -1,4 +1,4 @@
-/*	$OpenBSD: ospfctl.c,v 1.48 2009/06/06 07:31:26 eric Exp $ */
+/*	$OpenBSD: ospfctl.c,v 1.53 2010/02/19 10:35:52 dlg Exp $ */
 
 /*
  * Copyright (c) 2005 Claudio Jeker <claudio@openbsd.org>
@@ -90,7 +90,7 @@ main(int argc, char *argv[])
 	unsigned int		 ifidx = 0;
 	int			 ctl_sock;
 	int			 done = 0;
-	int			 n;
+	int			 n, verbose = 0;
 	int			 ch;
 	char			*sockname;
 
@@ -220,6 +220,20 @@ main(int argc, char *argv[])
 		printf("decouple request sent.\n");
 		done = 1;
 		break;
+	case FIB_RELOAD:
+		imsg_compose(ibuf, IMSG_CTL_FIB_RELOAD, 0, 0, -1, NULL, 0);
+		printf("reload request sent.\n");
+		done = 1;
+		break;
+	case LOG_VERBOSE:
+		verbose = 1;
+		/* FALLTHROUGH */
+	case LOG_BRIEF:
+		imsg_compose(ibuf, IMSG_CTL_LOG_VERBOSE, 0, 0, -1,
+		    &verbose, sizeof(verbose));
+		printf("logging request sent.\n");
+		done = 1;
+		break;
 	case RELOAD:
 		imsg_compose(ibuf, IMSG_CTL_RELOAD, 0, 0, -1, NULL, 0);
 		printf("reload request sent.\n");
@@ -287,6 +301,9 @@ main(int argc, char *argv[])
 			case FIB:
 			case FIB_COUPLE:
 			case FIB_DECOUPLE:
+			case FIB_RELOAD:
+			case LOG_VERBOSE:
+			case LOG_BRIEF:
 			case RELOAD:
 				break;
 			}
@@ -316,8 +333,8 @@ show_summary_msg(struct imsg *imsg)
 		else
 			printf("disabled\n");
 
-		printf("SPF delay is %d sec(s), hold time between two SPFs "
-		    "is %d sec(s)\n", sum->spf_delay, sum->spf_hold_time);
+		printf("SPF delay is %d msec(s), hold time between two SPFs "
+		    "is %d msec(s)\n", sum->spf_delay, sum->spf_hold_time);
 		printf("Number of external LSA(s) %d\n", sum->num_ext_lsa);
 		printf("Number of areas attached to this router: %d\n",
 		    sum->num_area);
@@ -375,10 +392,10 @@ show_interface_msg(struct imsg *imsg)
 			err(1, NULL);
 		printf("%-11s %-18s %-6s %-10s %-10s %s %3d %3d\n",
 		    iface->name, netid, if_state_name(iface->state),
-		    iface->hello_timer < 0 ? "-" :
-		    fmt_timeframe_core(iface->hello_timer),
-		    get_linkstate(get_ifms_type(iface->mediatype),
-		    iface->linkstate), fmt_timeframe_core(iface->uptime),
+		    iface->hello_timer.tv_sec < 0 ? "-" :
+		    fmt_timeframe_core(iface->hello_timer.tv_sec),
+		    get_linkstate(iface->mediatype, iface->linkstate),
+		    fmt_timeframe_core(iface->uptime),
 		    iface->nbr_cnt, iface->adj_cnt);
 		free(netid);
 		break;
@@ -408,8 +425,7 @@ show_interface_detail_msg(struct imsg *imsg)
 		    mask2prefixlen(iface->mask.s_addr));
 		printf("Area %s\n", inet_ntoa(iface->area));
 		printf("  Linkstate %s\n",
-		    get_linkstate(get_ifms_type(iface->mediatype),
-		    iface->linkstate));
+		    get_linkstate(iface->mediatype, iface->linkstate));
 		printf("  Router ID %s, network type %s, cost: %d\n",
 		    inet_ntoa(iface->rtr_id),
 		    if_type_name(iface->type), iface->metric);
@@ -422,17 +438,26 @@ show_interface_detail_msg(struct imsg *imsg)
 		printf("  Backup Designated Router (ID) %s, ",
 		    inet_ntoa(iface->bdr_id));
 		printf("interface address %s\n", inet_ntoa(iface->bdr_addr));
-		printf("  Timer intervals configured, "
-		    "hello %d, dead %d, wait %d, retransmit %d\n",
-		     iface->hello_interval, iface->dead_interval,
-		     iface->dead_interval, iface->rxmt_interval);
+		if (iface->dead_interval == FAST_RTR_DEAD_TIME) {
+			printf("  Timer intervals configured, "
+			    "hello %d msec, dead %d, wait %d, retransmit %d\n",
+			     iface->fast_hello_interval, iface->dead_interval,
+			     iface->dead_interval, iface->rxmt_interval);
+
+		} else {
+			printf("  Timer intervals configured, "
+			    "hello %d, dead %d, wait %d, retransmit %d\n",
+			     iface->hello_interval, iface->dead_interval,
+			     iface->dead_interval, iface->rxmt_interval);
+		}
 		if (iface->passive)
 			printf("    Passive interface (No Hellos)\n");
-		else if (iface->hello_timer < 0)
+		else if (iface->hello_timer.tv_sec < 0)
 			printf("    Hello timer not running\n");
 		else
-			printf("    Hello timer due in %s\n",
-			    fmt_timeframe_core(iface->hello_timer));
+			printf("    Hello timer due in %s+%ldmsec\n",
+			    fmt_timeframe_core(iface->hello_timer.tv_sec),
+			    iface->hello_timer.tv_usec / 1000);
 		printf("    Uptime %s\n", fmt_timeframe_core(iface->uptime));
 		printf("  Neighbor count is %d, adjacent neighbor count is "
 		    "%d\n", iface->nbr_cnt, iface->adj_cnt);
@@ -1177,9 +1202,8 @@ show_interface_head(void)
 	    "Link state");
 }
 
-const int	ifm_status_valid_list[] = IFM_STATUS_VALID_LIST;
-const struct ifmedia_status_description
-		ifm_status_descriptions[] = IFM_STATUS_DESCRIPTIONS;
+const struct if_status_description
+		if_status_descriptions[] = LINK_STATE_DESCRIPTIONS;
 const struct ifmedia_description
 		ifm_type_descriptions[] = IFM_TYPE_DESCRIPTIONS;
 
@@ -1198,23 +1222,15 @@ get_media_descr(int media_type)
 const char *
 get_linkstate(int media_type, int link_state)
 {
-	const struct ifmedia_status_description	*p;
-	int					 i;
+	const struct if_status_description *p;
+	static char buf[8];
 
-	if (link_state == LINK_STATE_UNKNOWN)
-		return ("unknown");
-
-	for (i = 0; ifm_status_valid_list[i] != 0; i++)
-		for (p = ifm_status_descriptions; p->ifms_valid != 0; p++) {
-			if (p->ifms_type != media_type ||
-			    p->ifms_valid != ifm_status_valid_list[i])
-				continue;
-			if (LINK_STATE_IS_UP(link_state))
-				return (p->ifms_string[1]);
-			return (p->ifms_string[0]);
-		}
-
-	return ("unknown");
+	for (p = if_status_descriptions; p->ifs_string != NULL; p++) {
+		if (LINK_STATE_DESC_MATCH(p, media_type, link_state))
+			return (p->ifs_string);
+	}
+	snprintf(buf, sizeof(buf), "[#%d]", link_state);
+	return (buf);
 }
 
 void
@@ -1241,28 +1257,11 @@ show_fib_interface_msg(struct imsg *imsg)
 		k = imsg->data;
 		printf("%-15s", k->ifname);
 		printf("%-15s", k->flags & IFF_UP ? "UP" : "");
-		switch (k->media_type) {
-		case IFT_ETHER:
-			ifms_type = IFM_ETHER;
-			break;
-		case IFT_FDDI:
-			ifms_type = IFM_FDDI;
-			break;
-		case IFT_CARP:
-			ifms_type = IFM_CARP;
-			break;
-		default:
-			ifms_type = 0;
-			break;
-		}
-
+		ifms_type = get_ifms_type(k->media_type);
 		if (ifms_type)
-			printf("%s, %s", get_media_descr(ifms_type),
-			    get_linkstate(ifms_type, k->link_state));
-		else if (k->link_state == LINK_STATE_UNKNOWN)
-			printf("unknown");
-		else
-			printf("link state %u", k->link_state);
+			printf("%s, ", get_media_descr(ifms_type));
+
+		printf("%s", get_linkstate(k->media_type, k->link_state));
 
 		if (k->link_state != LINK_STATE_DOWN && k->baudrate > 0) {
 			printf(", ");

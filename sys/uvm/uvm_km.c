@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvm_km.c,v 1.73 2009/06/17 00:13:59 oga Exp $	*/
+/*	$OpenBSD: uvm_km.c,v 1.76 2010/02/12 01:35:14 tedu Exp $	*/
 /*	$NetBSD: uvm_km.c,v 1.42 2001/01/14 02:10:01 thorpej Exp $	*/
 
 /* 
@@ -276,8 +276,12 @@ uvm_km_pgremove(struct uvm_object *uobj, vaddr_t start, vaddr_t end)
 		    pp->pg_flags & PG_BUSY, 0, 0);
 
 		if (pp->pg_flags & PG_BUSY) {
-			/* owner must check for this when done */
-			atomic_setbits_int(&pp->pg_flags, PG_RELEASED);
+			atomic_setbits_int(&pp->pg_flags, PG_WANTED);
+			UVM_UNLOCK_AND_WAIT(pp, &uobj->vmobjlock, 0,
+			    "km_pgrm", 0);
+			simple_lock(&uobj->vmobjlock);
+			curoff -= PAGE_SIZE; /* loop back to us */
+			continue;
 		} else {
 			/* free the swap slot... */
 			uao_dropswap(uobj, curoff >> PAGE_SHIFT);
@@ -458,7 +462,7 @@ uvm_km_free_wakeup(struct vm_map *map, vaddr_t addr, vsize_t size)
 
 	vm_map_lock(map);
 	uvm_unmap_remove(map, trunc_page(addr), round_page(addr+size), 
-			 &dead_entries, NULL);
+	     &dead_entries, NULL, FALSE);
 	wakeup(map);
 	vm_map_unlock(map);
 
@@ -511,21 +515,6 @@ uvm_km_alloc1(struct vm_map *map, vsize_t size, vsize_t align, boolean_t zeroit)
 	loopva = kva;
 	while (size) {
 		simple_lock(&uvm.kernel_object->vmobjlock);
-		pg = uvm_pagelookup(uvm.kernel_object, offset);
-
-		/*
-		 * if we found a page in an unallocated region, it must be
-		 * released
-		 */
-		if (pg) {
-			if ((pg->pg_flags & PG_RELEASED) == 0)
-				panic("uvm_km_alloc1: non-released page");
-			atomic_setbits_int(&pg->pg_flags, PG_WANTED);
-			UVM_UNLOCK_AND_WAIT(pg, &uvm.kernel_object->vmobjlock,
-			    FALSE, "km_alloc", 0);
-			continue;   /* retry */
-		}
-		
 		/* allocate ram */
 		pg = uvm_pagealloc(uvm.kernel_object, offset, NULL, 0);
 		if (pg) {
@@ -582,11 +571,17 @@ uvm_km_alloc1(struct vm_map *map, vsize_t size, vsize_t align, boolean_t zeroit)
 vaddr_t
 uvm_km_valloc(struct vm_map *map, vsize_t size)
 {
-	return(uvm_km_valloc_align(map, size, 0));
+	return(uvm_km_valloc_align(map, size, 0, 0));
 }
 
 vaddr_t
-uvm_km_valloc_align(struct vm_map *map, vsize_t size, vsize_t align)
+uvm_km_valloc_try(struct vm_map *map, vsize_t size)
+{
+	return(uvm_km_valloc_align(map, size, 0, UVM_FLAG_TRYLOCK));
+}
+
+vaddr_t
+uvm_km_valloc_align(struct vm_map *map, vsize_t size, vsize_t align, int flags)
 {
 	vaddr_t kva;
 	UVMHIST_FUNC("uvm_km_valloc"); UVMHIST_CALLED(maphist);
@@ -603,7 +598,7 @@ uvm_km_valloc_align(struct vm_map *map, vsize_t size, vsize_t align)
 
 	if (__predict_false(uvm_map(map, &kva, size, uvm.kernel_object,
 	    UVM_UNKNOWN_OFFSET, align, UVM_MAPFLAG(UVM_PROT_ALL, UVM_PROT_ALL,
-	    UVM_INH_NONE, UVM_ADV_RANDOM, 0)) != 0)) {
+	    UVM_INH_NONE, UVM_ADV_RANDOM, flags)) != 0)) {
 		UVMHIST_LOG(maphist, "<- done (no VM)", 0,0,0,0);
 		return(0);
 	}

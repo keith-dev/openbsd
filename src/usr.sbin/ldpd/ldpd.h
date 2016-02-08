@@ -1,4 +1,4 @@
-/*	$OpenBSD: ldpd.h,v 1.4 2009/06/06 18:31:42 pyr Exp $ */
+/*	$OpenBSD: ldpd.h,v 1.11 2010/03/03 10:17:05 claudio Exp $ */
 
 /*
  * Copyright (c) 2009 Michele Marchetto <michele@openbsd.org>
@@ -50,12 +50,18 @@
 
 #define	F_LDPD_INSERTED		0x0001
 #define	F_KERNEL		0x0002
-#define	F_BGPD_INSERTED		0x0004
-#define	F_CONNECTED		0x0008
-#define	F_DOWN			0x0010
-#define	F_STATIC		0x0020
-#define	F_DYNAMIC		0x0040
+#define	F_CONNECTED		0x0004
+#define	F_STATIC		0x0008
+#define	F_DYNAMIC		0x0010
+#define	F_DOWN			0x0020
+#define	F_REJECT		0x0040
+#define	F_BLACKHOLE		0x0080
 #define	F_REDISTRIBUTED		0x0100
+
+struct evbuf {
+	struct msgbuf		wbuf;
+	struct event		ev;
+};
 
 struct imsgev {
 	struct imsgbuf		 ibuf;
@@ -77,10 +83,10 @@ enum imsg_type {
 	IMSG_CTL_KROUTE_ADDR,
 	IMSG_CTL_IFINFO,
 	IMSG_CTL_END,
+	IMSG_CTL_LOG_VERBOSE,
 	IMSG_KLABEL_INSERT,
 	IMSG_KLABEL_CHANGE,
 	IMSG_KLABEL_DELETE,
-	IMSG_KROUTE_GET,
 	IMSG_IFINFO,
 	IMSG_LABEL_MAPPING,
 	IMSG_LABEL_MAPPING_FULL,
@@ -268,11 +274,7 @@ struct kroute {
 	u_int32_t	ext_tag;
 	u_short		ifindex;
 	u_int8_t	prefixlen;
-};
-
-struct rroute {
-	struct kroute	kr;
-	u_int32_t	metric;
+	u_int8_t	priority;
 };
 
 struct kif_addr {
@@ -359,10 +361,12 @@ struct ctl_rt {
 	struct in_addr		 lspace;
 	struct in_addr		 adv_rtr;
 	time_t			 uptime;
-	u_int8_t		 flags;
-	u_int8_t		 prefixlen;
 	u_int32_t		 local_label;
 	u_int32_t		 remote_label;
+	u_int8_t		 flags;
+	u_int8_t		 prefixlen;
+	u_int8_t		 connected;
+	u_int8_t		 in_use;
 };
 
 struct ctl_sum {
@@ -396,7 +400,7 @@ u_int16_t	 iso_cksum(void *, u_int16_t, u_int16_t);
 /* kroute.c */
 int		 kif_init(void);
 int		 kr_init(int);
-int		 kr_change(struct kroute *, int);
+int		 kr_change(struct kroute *);
 int		 kr_delete(struct kroute *);
 void		 kr_shutdown(void);
 void		 kr_lfib_couple(void);
@@ -431,7 +435,10 @@ void	merge_config(struct ldpd_conf *, struct ldpd_conf *);
 int	imsg_compose_event(struct imsgev *, u_int16_t, u_int32_t, pid_t,
 	    int, void *, u_int16_t);
 void	imsg_event_add(struct imsgev *);
-
+void	evbuf_enqueue(struct evbuf *, struct buf *);
+void	evbuf_event_add(struct evbuf *);
+void	evbuf_init(struct evbuf *, int, void (*)(int, short, void *), void *);
+void	evbuf_clear(struct evbuf *);
 
 /* printconf.c */
 void	print_config(struct ldpd_conf *);

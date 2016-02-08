@@ -1,4 +1,4 @@
-/*	$OpenBSD: kvm_file2.c,v 1.9 2009/06/24 13:04:24 millert Exp $	*/
+/*	$OpenBSD: kvm_file2.c,v 1.14 2010/01/10 03:37:50 guenther Exp $	*/
 
 /*
  * Copyright (c) 2009 Todd C. Miller <Todd.Miller@courtesan.com>
@@ -44,10 +44,6 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  */
-
-#if defined(LIBC_SCCS) && !defined(lint)
-static char *rcsid = "$OpenBSD: kvm_file2.c,v 1.9 2009/06/24 13:04:24 millert Exp $";
-#endif /* LIBC_SCCS and not lint */
 
 /*
  * Extended file list interface for kvm.  pstat, fstat and netstat are
@@ -159,7 +155,7 @@ kvm_getfile2(kvm_t *kd, int op, int arg, size_t esize, int *cnt)
 		if (rv == -1) {
 			if (kd->vmfd != -1)
 				goto deadway;
-			_kvm_syserr(kd, kd->program, "kvm_getfiles");
+			_kvm_syserr(kd, kd->program, "kvm_getfile2");
 			return (NULL);
 		}
 		kd->filebase = _kvm_malloc(kd, size);
@@ -170,7 +166,7 @@ kvm_getfile2(kvm_t *kd, int op, int arg, size_t esize, int *cnt)
 		mib[5] = size / esize;
 		rv = sysctl(mib, 6, kd->filebase, &size, NULL, 0);
 		if (rv == -1) {
-			_kvm_syserr(kd, kd->program, "kvm_getfiles");
+			_kvm_syserr(kd, kd->program, "kvm_getfile2");
 			return (NULL);
 		}
 		*cnt = size / esize;
@@ -356,6 +352,17 @@ kvm_deadfile2_byid(kvm_t *kd, int op, int arg, size_t esize, int *cnt)
 		}
 		proc.p_fd = &filed;
 
+		if (proc.p_textvp) {
+			if (buflen < sizeof(struct kinfo_file2))
+				goto done;
+			kf = (struct kinfo_file2 *)where;
+			where += sizeof(struct kinfo_file2);
+			buflen -= sizeof(struct kinfo_file2);
+			n++;
+			if (fill_file2(kd, kf, NULL, proc.p_textvp, &proc,
+			    KERN_FILE_TEXT) == -1)
+				return (NULL);
+		}
 		if (filed.fd_cdir) {
 			if (buflen < sizeof(struct kinfo_file2))
 				goto done;
@@ -420,8 +427,6 @@ done:
 	*cnt = n;
 	return (kf);
 }
-
-#define PTRTOINT64(_x)	((u_int64_t)(u_long)(_x))
 
 static int
 fill_file2(kvm_t *kd, struct kinfo_file2 *kf, struct file *fp, struct vnode *vp,
@@ -525,6 +530,8 @@ fill_file2(kvm_t *kd, struct kinfo_file2 *kf, struct file *fp, struct vnode *vp,
 			return (-1);
 		}
 		kf->so_family = domain.dom_family;
+		if (!sock.so_pcb)
+			break;
 		switch (kf->so_family) {
 		case AF_INET: {
 			struct inpcb inpcb;

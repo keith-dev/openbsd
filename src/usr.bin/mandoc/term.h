@@ -1,4 +1,4 @@
-/*	$Id: term.h,v 1.3 2009/06/15 01:07:46 schwarze Exp $ */
+/*	$Id: term.h,v 1.13 2009/12/24 02:08:14 schwarze Exp $ */
 /*
  * Copyright (c) 2008, 2009 Kristaps Dzonsons <kristaps@kth.se>
  *
@@ -17,17 +17,16 @@
 #ifndef TERM_H
 #define TERM_H
 
-/* FIXME - clean up tabs. */
-
-#define	INDENT		  5
-#define	HALFINDENT	  3
-
 __BEGIN_DECLS
 
 enum	termenc {
-	TERMENC_ASCII,
-	TERMENC_LATIN1,		/* Not implemented. */
-	TERMENC_UTF8		/* Not implemented. */
+	TERMENC_ASCII
+};
+
+enum	termfont {
+	TERMFONT_NONE = 0,
+	TERMFONT_BOLD,
+	TERMFONT_UNDER
 };
 
 struct	termp {
@@ -37,29 +36,40 @@ struct	termp {
 	size_t		  offset;	/* Margin offest. */
 	size_t		  col;		/* Bytes in buf. */
 	int		  flags;
-#define	TERMP_NOSPACE	 (1 << 0)	/* No space before words. */
-#define	TERMP_NOLPAD	 (1 << 1)	/* No leftpad before flush. */
-#define	TERMP_NOBREAK	 (1 << 2)	/* No break after flush. */
-#define	TERMP_LITERAL	 (1 << 3)	/* Literal words. */
-#define	TERMP_IGNDELIM	 (1 << 4)	/* Delims like regulars. */
-#define	TERMP_NONOSPACE	 (1 << 5)	/* No space (no autounset). */
-#define	TERMP_NONOBREAK	 (1 << 7)	/* Don't newln NOBREAK. */
-#define	TERMP_STYLE	  0x0300	/* Style mask. */
-#define	TERMP_BOLD	 (1 << 8)	/* Styles... */
-#define	TERMP_UNDER	 (1 << 9)
+#define	TERMP_NOSPACE	 (1 << 2)	/* No space before words. */
+#define	TERMP_NOLPAD	 (1 << 3)	/* See term_flushln(). */
+#define	TERMP_NOBREAK	 (1 << 4)	/* See term_flushln(). */
+#define	TERMP_IGNDELIM	 (1 << 6)	/* Delims like regulars. */
+#define	TERMP_NONOSPACE	 (1 << 7)	/* No space (no autounset). */
+#define	TERMP_DANGLE	 (1 << 8)	/* See term_flushln(). */
+#define	TERMP_HANG	 (1 << 9)	/* See term_flushln(). */
+#define	TERMP_TWOSPACE	 (1 << 10)	/* See term_flushln(). */
+#define	TERMP_NOSPLIT	 (1 << 11)	/* See termp_an_pre/post(). */
+#define	TERMP_SPLIT	 (1 << 12)	/* See termp_an_pre/post(). */
+#define	TERMP_ANPREC	 (1 << 13)	/* See termp_an_pre(). */
 	char		 *buf;		/* Output buffer. */
 	enum termenc	  enc;		/* Type of encoding. */
 	void		 *symtab;	/* Encoded-symbol table. */
+	enum termfont	  fontl;	/* Last font set. */
+	enum termfont	  fontq[10];	/* Symmetric fonts. */
+	int		  fonti;	/* Index of font stack. */
 };
-
-void		 *term_ascii2htab(void);
-const char	 *term_a2ascii(void *, const char *, size_t, size_t *);
-void		  term_asciifree(void *);
 
 void		  term_newln(struct termp *);
 void		  term_vspace(struct termp *);
 void		  term_word(struct termp *, const char *);
 void		  term_flushln(struct termp *);
+
+size_t		  term_hspan(const struct roffsu *);
+size_t		  term_vspan(const struct roffsu *);
+
+enum termfont	  term_fonttop(struct termp *);
+const void	 *term_fontq(struct termp *);
+void		  term_fontpush(struct termp *, enum termfont);
+void		  term_fontpop(struct termp *);
+void		  term_fontpopq(struct termp *, const void *);
+void		  term_fontrepl(struct termp *, enum termfont);
+void		  term_fontlast(struct termp *);
 
 __END_DECLS
 

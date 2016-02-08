@@ -1,4 +1,4 @@
-/*	$OpenBSD: fread.c,v 1.6 2005/08/08 08:05:36 espie Exp $ */
+/*	$OpenBSD: fread.c,v 1.11 2009/11/21 09:53:44 guenther Exp $ */
 /*-
  * Copyright (c) 1990, 1993
  *	The Regents of the University of California.  All rights reserved.
@@ -44,12 +44,12 @@ fread(void *buf, size_t size, size_t count, FILE *fp)
 	size_t total;
 
 	/*
-	 * The ANSI standard requires a return value of 0 for a count
-	 * or a size of 0.  Peculiarily, it imposes no such requirements
-	 * on fwrite; it only requires fread to be broken.
+	 * ANSI and SUSv2 require a return value of 0 if size or count are 0.
 	 */
 	if ((resid = count * size) == 0)
 		return (0);
+	FLOCKFILE(fp);
+	_SET_ORIENTATION(fp, -1);
 	if (fp->_r < 0)
 		fp->_r = 0;
 	total = resid;
@@ -62,11 +62,13 @@ fread(void *buf, size_t size, size_t count, FILE *fp)
 		resid -= r;
 		if (__srefill(fp)) {
 			/* no more input: return partial result */
+			FUNLOCKFILE(fp);
 			return ((total - resid) / size);
 		}
 	}
 	(void)memcpy((void *)p, (void *)fp->_p, resid);
 	fp->_r -= resid;
 	fp->_p += resid;
+	FUNLOCKFILE(fp);
 	return (count);
 }

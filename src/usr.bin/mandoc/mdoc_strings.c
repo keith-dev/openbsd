@@ -1,4 +1,4 @@
-/*	$Id: mdoc_strings.c,v 1.7 2009/06/21 20:21:09 schwarze Exp $ */
+/*	$Id: mdoc_strings.c,v 1.13 2010/03/02 00:13:57 schwarze Exp $ */
 /*
  * Copyright (c) 2008 Kristaps Dzonsons <kristaps@kth.se>
  *
@@ -17,10 +17,10 @@
 #include <sys/types.h>
 
 #include <assert.h>
-#include <ctype.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
+#include <time.h>
 
 #include "libmdoc.h"
 
@@ -31,7 +31,7 @@ struct mdoc_secname {
 	enum mdoc_sec	 sec;	/* Corresponding section. */
 };
 
-#define	SECNAME_MAX	(18)
+#define	SECNAME_MAX	(20)
 
 static	const struct mdoc_secname secnames[SECNAME_MAX] = {
 	{ "NAME", SEC_NAME },
@@ -39,6 +39,7 @@ static	const struct mdoc_secname secnames[SECNAME_MAX] = {
 	{ "SYNOPSIS", SEC_SYNOPSIS },
 	{ "DESCRIPTION", SEC_DESCRIPTION },
 	{ "IMPLEMENTATION NOTES", SEC_IMPLEMENTATION },
+	{ "EXIT STATUS", SEC_EXIT_STATUS },
 	{ "RETURN VALUES", SEC_RETURN_VALUES },
 	{ "ENVIRONMENT", SEC_ENVIRONMENT },
 	{ "FILES", SEC_FILES },
@@ -52,83 +53,8 @@ static	const struct mdoc_secname secnames[SECNAME_MAX] = {
 	{ "AUTHORS", SEC_AUTHORS },
 	{ "CAVEATS", SEC_CAVEATS },
 	{ "BUGS", SEC_BUGS },
+	{ "SECURITY CONSIDERATIONS", SEC_SECURITY }
 };
-
-
-size_t
-mdoc_isescape(const char *p)
-{
-	size_t		 c;
-	
-	if ('\\' != *p++)
-		return(0);
-
-	switch (*p) {
-	case ('\\'):
-		/* FALLTHROUGH */
-	case ('\''):
-		/* FALLTHROUGH */
-	case ('`'):
-		/* FALLTHROUGH */
-	case ('q'):
-		/* FALLTHROUGH */
-	case ('-'):
-		/* FALLTHROUGH */
-	case ('~'):
-		/* FALLTHROUGH */
-	case ('^'):
-		/* FALLTHROUGH */
-	case ('%'):
-		/* FALLTHROUGH */
-	case ('0'):
-		/* FALLTHROUGH */
-	case (' '):
-		/* FALLTHROUGH */
-	case ('|'):
-		/* FALLTHROUGH */
-	case ('&'):
-		/* FALLTHROUGH */
-	case ('.'):
-		/* FALLTHROUGH */
-	case (':'):
-		/* FALLTHROUGH */
-	case ('e'):
-		return(2);
-	case ('*'):
-		if (0 == *++p || ! isgraph((u_char)*p))
-			return(0);
-		switch (*p) {
-		case ('('):
-			if (0 == *++p || ! isgraph((u_char)*p))
-				return(0);
-			return(4);
-		case ('['):
-			for (c = 3, p++; *p && ']' != *p; p++, c++)
-				if ( ! isgraph((u_char)*p))
-					break;
-			return(*p == ']' ? c : 0);
-		default:
-			break;
-		}
-		return(3);
-	case ('('):
-		if (0 == *++p || ! isgraph((u_char)*p))
-			return(0);
-		if (0 == *++p || ! isgraph((u_char)*p))
-			return(0);
-		return(4);
-	case ('['):
-		break;
-	default:
-		return(0);
-	}
-
-	for (c = 3, p++; *p && ']' != *p; p++, c++)
-		if ( ! isgraph((u_char)*p))
-			break;
-
-	return(*p == ']' ? c : 0);
-}
 
 
 int
@@ -138,6 +64,10 @@ mdoc_iscdelim(char p)
 	switch (p) {
 	case('|'):
 		/* FALLTHROUGH */
+	case('('):
+		/* FALLTHROUGH */
+	case('['):
+		return(1);
 	case('.'):
 		/* FALLTHROUGH */
 	case(','):
@@ -150,18 +80,10 @@ mdoc_iscdelim(char p)
 		/* FALLTHROUGH */
 	case('!'):
 		/* FALLTHROUGH */
-	case('('):
-		/* FALLTHROUGH */
 	case(')'):
 		/* FALLTHROUGH */
-	case('['):
-		/* FALLTHROUGH */
 	case(']'):
-		/* FALLTHROUGH */
-	case('{'):
-		/* FALLTHROUGH */
-	case('}'):
-		return(1);
+		return(2);
 	default:
 		break;
 	}
@@ -195,28 +117,7 @@ mdoc_atosec(const char *p)
 }
 
 
-time_t
-mdoc_atotime(const char *p)
-{
-	struct tm	 tm;
-	char		*pp;
-
-	bzero(&tm, sizeof(struct tm));
-
-	if (0 == strcmp(p, "$" "Mdocdate$"))
-		return(time(NULL));
-	if ((pp = strptime(p, "$" "Mdocdate: %b %d %Y $", &tm)) && 0 == *pp)
-		return(mktime(&tm));
-	/* XXX - this matches "June 1999", which is wrong. */
-	if ((pp = strptime(p, "%b %d %Y", &tm)) && 0 == *pp)
-		return(mktime(&tm));
-	if ((pp = strptime(p, "%b %d, %Y", &tm)) && 0 == *pp)
-		return(mktime(&tm));
-
-	return(0);
-}
-
-
+/* FIXME: move this into an editable .in file. */
 size_t
 mdoc_macro2len(int macro)
 {

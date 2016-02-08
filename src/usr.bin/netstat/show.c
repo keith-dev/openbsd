@@ -1,4 +1,4 @@
-/*	$OpenBSD: show.c,v 1.25 2009/06/27 11:35:57 michele Exp $	*/
+/*	$OpenBSD: show.c,v 1.29 2010/01/14 00:02:08 claudio Exp $	*/
 /*	$NetBSD: show.c,v 1.1 1996/11/15 18:01:41 gwr Exp $	*/
 
 /*
@@ -554,7 +554,7 @@ static char domain[MAXHOSTNAMELEN];
 void
 p_sockaddr_mpls(struct sockaddr *in, struct sockaddr *out, int flags, int width)
 {
-	char *cp;
+	char buf[MAXHOSTNAMELEN], *cp;
 
 	if (in->sa_family != AF_MPLS)
 		return;
@@ -564,10 +564,10 @@ p_sockaddr_mpls(struct sockaddr *in, struct sockaddr *out, int flags, int width)
 	else
 		cp = label_print(in, out);
 
-	snprintf(cp, MAXHOSTNAMELEN, "%s %s", cp,
+	snprintf(buf, MAXHOSTNAMELEN, "%s %s", cp,
 	    label_print_op(flags));
 
-	printf("%-*s ", width, cp);
+	printf("%-*s ", width, buf);
 }
 
 void
@@ -710,7 +710,7 @@ netname4(in_addr_t in, in_addr_t mask)
 		if ((np = getnetbyaddr(in, AF_INET)) != NULL)
 			cp = np->n_name;
 	}
-	if (in == INADDR_ANY)
+	if (in == INADDR_ANY && mask == INADDR_ANY)
 		cp = "default";
 	mbits = mask ? 33 - ffs(mask) : 0;
 	if (cp)
@@ -834,6 +834,7 @@ netname(struct sockaddr *sa, struct sockaddr *mask)
 
 	case AF_INET:
 		return netname4(((struct sockaddr_in *)sa)->sin_addr.s_addr,
+		    mask->sa_len == 0 ? 0 :
 		    ((struct sockaddr_in *)mask)->sin_addr.s_addr);
 	case AF_INET6:
 		return netname6((struct sockaddr_in6 *)sa,
@@ -971,6 +972,7 @@ index_pfk(struct sadb_msg *msg, void **headers)
 			break;
 		case SADB_X_EXT_FLOW_TYPE:
 			headers[SADB_X_EXT_FLOW_TYPE] = (void *)ext;
+			break;
 		default:
 			/* Ignore. */
 			break;

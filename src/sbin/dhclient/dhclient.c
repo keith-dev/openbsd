@@ -1,4 +1,4 @@
-/*	$OpenBSD: dhclient.c,v 1.130 2009/06/12 20:07:35 stevesk Exp $	*/
+/*	$OpenBSD: dhclient.c,v 1.132 2009/11/12 14:18:45 jsg Exp $	*/
 
 /*
  * Copyright 2004 Henning Brauer <henning@openbsd.org>
@@ -803,10 +803,7 @@ dhcpoffer(struct iaddr client_addr, struct option_data *options)
 
 	/* If this is the lease we asked for, put it at the head of the
 	   list, and don't mess with the arp request timeout. */
-	if (lease->address.len == client->requested_address.len &&
-	    !memcmp(lease->address.iabuf,
-	    client->requested_address.iabuf,
-	    client->requested_address.len)) {
+	if (addr_eq(lease->address, client->requested_address)) {
 		lease->next = client->offered_leases;
 		client->offered_leases = lease;
 	} else {
@@ -1668,7 +1665,7 @@ supersede:
 				case ACTION_PREPEND:
 					len = config->defaults[i].len +
 					    lease->options[i].len;
-					if (len > sizeof(dbuf)) {
+					if (len >= sizeof(dbuf)) {
 						warning("no space to %s %s",
 						    "prepend option",
 						    dhcp_options[i].name);
@@ -1687,7 +1684,7 @@ supersede:
 				case ACTION_APPEND:
 					len = config->defaults[i].len +
 					    lease->options[i].len;
-					if (len > sizeof(dbuf)) {
+					if (len >= sizeof(dbuf)) {
 						warning("no space to %s %s",
 						    "append option",
 						    dhcp_options[i].name);

@@ -1,4 +1,4 @@
-/*	$OpenBSD: address.c,v 1.2 2009/06/05 22:34:45 michele Exp $ */
+/*	$OpenBSD: address.c,v 1.4 2010/02/25 17:40:46 claudio Exp $ */
 
 /*
  * Copyright (c) 2009 Michele Marchetto <michele@openbsd.org>
@@ -41,7 +41,7 @@ extern struct ldpd_conf        *leconf;
 
 void	gen_address_list_tlv(struct buf *, struct iface *, u_int16_t);
 
-int
+void
 send_address(struct nbr *nbr, struct iface *iface)
 {
 	struct buf	*buf;
@@ -49,7 +49,7 @@ send_address(struct nbr *nbr, struct iface *iface)
 	u_int16_t	 size, iface_count = 0;
 
 	if (nbr->iface->passive)
-		return (0);
+		return;
 
 	log_debug("send_address: neighbor ID %s", inet_ntoa(nbr->id));
 
@@ -77,10 +77,7 @@ send_address(struct nbr *nbr, struct iface *iface)
 
 	gen_address_list_tlv(buf, iface, size);
 
-	bufferevent_write(nbr->bev, buf->buf, buf->wpos);
-	buf_free(buf);
-
-	return (0);
+	evbuf_enqueue(&nbr->wbuf, buf);
 }
 
 int
@@ -167,14 +164,14 @@ gen_address_list_tlv(struct buf *buf, struct iface *iface, u_int16_t size)
 		buf_add(buf, &iface->addr, sizeof(iface->addr));
 }
 
-int
+void
 send_address_withdraw(struct nbr *nbr, struct iface *iface)
 {
 	struct buf	*buf;
 	u_int16_t	 size;
 
 	if (nbr->iface->passive)
-		return (0);
+		return;
 
 	log_debug("send_address_withdraw: neighbor ID %s", inet_ntoa(nbr->id));
 
@@ -194,10 +191,7 @@ send_address_withdraw(struct nbr *nbr, struct iface *iface)
 
 	gen_address_list_tlv(buf, iface, size);
 
-	bufferevent_write(nbr->bev, buf->buf, buf->wpos);
-	buf_free(buf);
-
-	return (0);
+	evbuf_enqueue(&nbr->wbuf, buf);
 }
 
 int

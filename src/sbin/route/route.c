@@ -1,4 +1,4 @@
-/*	$OpenBSD: route.c,v 1.135 2009/06/27 11:35:57 michele Exp $	*/
+/*	$OpenBSD: route.c,v 1.141 2009/12/01 16:21:46 reyk Exp $	*/
 /*	$NetBSD: route.c,v 1.16 1996/04/15 18:27:05 cgd Exp $	*/
 
 /*
@@ -60,9 +60,8 @@
 #include "keywords.h"
 #include "show.h"
 
-const int ifm_status_valid_list[] = IFM_STATUS_VALID_LIST;
-const struct ifmedia_status_description
-	ifm_status_descriptions[] = IFM_STATUS_DESCRIPTIONS;
+const struct if_status_description
+			if_status_descriptions[] = LINK_STATE_DESCRIPTIONS;
 
 union	sockunion {
 	struct sockaddr		sa;
@@ -110,7 +109,8 @@ void	 set_metric(char *, int);
 void	 inet_makenetandmask(u_int32_t, struct sockaddr_in *, int);
 void	 interfaces(void);
 void	 getlabel(char *);
-void	 gettable(const char *);
+int	 gettable(const char *);
+int	 rdomain(int, int, char **);
 
 __dead void
 usage(char *cp)
@@ -123,7 +123,7 @@ usage(char *cp)
 	    "usage: %s [-dnqtv] [-T tableid] command [[modifiers] args]\n",
 	    __progname);
 	fprintf(stderr,
-	    "commands: add, change, delete, flush, get, monitor, show\n");
+	    "commands: add, change, delete, exec, flush, get, monitor, show\n");
 	exit(1);
 }
 
@@ -136,6 +136,8 @@ main(int argc, char **argv)
 {
 	int ch;
 	int rval = 0;
+	int rtableid = 1;
+	int kw;
 
 	if (argc < 2)
 		usage(NULL);
@@ -155,7 +157,7 @@ main(int argc, char **argv)
 			tflag = 1;
 			break;
 		case 'T':
-			gettable(optarg);
+			rtableid = gettable(optarg);
 			break;
 		case 'd':
 			debugonly = 1;
@@ -171,16 +173,27 @@ main(int argc, char **argv)
 	uid = geteuid();
 	if (*argv == NULL)
 		usage(NULL);
-	if (keyword(*argv) == K_MONITOR)
-		monitor(argc, argv);
 
-	if (tflag)
-		s = open(_PATH_DEVNULL, O_WRONLY);
-	else
-		s = socket(PF_ROUTE, SOCK_RAW, 0);
-	if (s == -1)
-		err(1, "socket");
-	switch (keyword(*argv)) {
+	kw = keyword(*argv);
+	switch (kw) {
+	case K_EXEC:
+		break;
+	case K_MONITOR:
+		monitor(argc, argv);
+		break;
+	default:
+		if (tflag)
+			s = open(_PATH_DEVNULL, O_WRONLY);
+		else
+			s = socket(PF_ROUTE, SOCK_RAW, 0);
+		if (s == -1)
+			err(1, "socket");
+		break;
+	}
+	switch (kw) {
+	case K_EXEC:
+		rval = rdomain(rtableid, argc - 1, argv + 1);
+		break;
 	case K_GET:
 		uid = 0;
 		/* FALLTHROUGH */
@@ -341,6 +354,7 @@ set_metric(char *value, int key)
 {
 	int flag = 0;
 	u_int noval, *valp = &noval;
+	const char *errstr;
 
 	switch (key) {
 	case K_MTU:
@@ -367,7 +381,9 @@ set_metric(char *value, int key)
 		rt_metrics.rmx_locks |= flag;
 	if (locking)
 		locking = 0;
-	*valp = atoi(value);
+	*valp = strtonum(value, 0, UINT_MAX, &errstr);
+	if (errstr)
+		errx(1, "set_metric: %s is %s", value, errstr);
 }
 
 int
@@ -577,28 +593,8 @@ newroute(int argc, char **argv)
 			} else if ((rtm_addrs & RTA_GATEWAY) == 0) {
 				gateway = *argv;
 				getaddr(RTA_GATEWAY, *argv, &hp);
-			} else {
-				int hops = atoi(*argv);
-
-				if (hops == 0) {
-				    if (!qflag && strcmp(*argv, "0") == 0)
-					printf("%s,%s",
-					    "old usage of trailing 0",
-					    "assuming route to if\n");
-				    else
-					usage(NULL);
-				    iflag = 1;
-				    continue;
-				} else if (hops > 0 && hops < 10) {
-				    if (!qflag) {
-					printf("old usage of trailing digit, ");
-					printf("assuming route via gateway\n");
-				    }
-				    iflag = 0;
-				    continue;
-				}
-				getaddr(RTA_NETMASK, *argv, NULL);
-			}
+			} else
+				usage(NULL);
 		}
 	}
 	if (forcehost)
@@ -939,7 +935,8 @@ getmplslabel(char *s, int in)
 int
 prefixlen(char *s)
 {
-	int len = atoi(s), q, r;
+	const char *errstr;
+	int len, q, r;
 	int max;
 
 	switch (af) {
@@ -955,8 +952,9 @@ prefixlen(char *s)
 	}
 
 	rtm_addrs |= RTA_NETMASK;
-	if (len < 0 || len > max)
-		errx(1, "%s: bad value", s);
+	len = strtonum(s, 0, max, &errstr);
+	if (errstr)
+		errx(1, "prefixlen %s is %s", s, errstr);
 
 	q = len >> 3;
 	r = len & 7;
@@ -1213,42 +1211,15 @@ char addrnames[] =
 const char *
 get_linkstate(int mt, int link_state)
 {
-	const struct ifmedia_status_description *p;
-	int i, media_type;
+	const struct if_status_description *p;
+	static char buf[8];
 
-	switch (mt) {
-	case IFT_ETHER:
-		media_type = IFM_ETHER;
-		break;
-	case IFT_FDDI:
-		media_type = IFM_FDDI;
-		break;
-	case IFT_CARP:
-		media_type = IFM_CARP;
-		break;
-	case IFT_IEEE80211:
-		media_type = IFM_IEEE80211;
-		break;
-	default:
-		media_type = 0;
-		break;
+	for (p = if_status_descriptions; p->ifs_string != NULL; p++) {
+		if (LINK_STATE_DESC_MATCH(p, mt, link_state))
+			return (p->ifs_string);
 	}
-
-	if (link_state == LINK_STATE_UNKNOWN)
-		return ("unknown");
-
-	for (i = 0; ifm_status_valid_list[i] != 0; i++) {
-		for (p = ifm_status_descriptions; p->ifms_valid != 0; p++) {
-			if (p->ifms_type != media_type ||
-			    p->ifms_valid != ifm_status_valid_list[i])
-				continue;
-			if (LINK_STATE_IS_UP(link_state))
-				return (p->ifms_string[1]);
-			return (p->ifms_string[0]);
-		}
-	}
-
-	return ("unknown");
+	snprintf(buf, sizeof(buf), "[#%d]", link_state);
+	return buf;
 }
 
 void
@@ -1271,7 +1242,7 @@ print_rtmsg(struct rt_msghdr *rtm, int msglen)
 	case RTM_IFINFO:
 		ifm = (struct if_msghdr *)rtm;
 		(void) printf("if# %d, ", ifm->ifm_index);
-		if (!nflag && if_indextoname(ifm->ifm_index, ifname) != NULL)
+		if (if_indextoname(ifm->ifm_index, ifname) != NULL)
 			printf("name: %s, ", ifname);
 		printf("link: %s, flags:",
 		    get_linkstate(ifm->ifm_data.ifi_type,
@@ -1309,6 +1280,16 @@ print_rtmsg(struct rt_msghdr *rtm, int msglen)
 		    rtm->rtm_tableid, (long)rtm->rtm_pid, rtm->rtm_seq,
 		    rtm->rtm_errno);
 		bprintf(stdout, rtm->rtm_flags, routeflags);
+		if (verbose) {
+#define lock(f)	((rtm->rtm_rmx.rmx_locks & __CONCAT(RTV_,f)) ? 'L' : ' ')
+			if (rtm->rtm_rmx.rmx_expire)
+				rtm->rtm_rmx.rmx_expire -= time(NULL);
+			printf("\nuse: %8llu   mtu: %8u%c   expire: %8d%c",
+			    rtm->rtm_rmx.rmx_pksent,
+			    rtm->rtm_rmx.rmx_mtu, lock(MTU),
+			    rtm->rtm_rmx.rmx_expire, lock(EXPIRE));
+#undef lock
+		}
 		pmsg_common(rtm);
 	}
 }
@@ -1418,8 +1399,6 @@ print_getmsg(struct rt_msghdr *rtm, int msglen)
 		printf("      label: %s\n", sa_rl->sr_label);
 
 #define lock(f)	((rtm->rtm_rmx.rmx_locks & __CONCAT(RTV_,f)) ? 'L' : ' ')
-#define msec(u)	(((u) + 500) / 1000)		/* usec to msec */
-
 	printf("%s\n", "     use       mtu    expire");
 	printf("%8llu  ", rtm->rtm_rmx.rmx_pksent);
 	printf("%8u%c ", rtm->rtm_rmx.rmx_mtu, lock(MTU));
@@ -1427,7 +1406,6 @@ print_getmsg(struct rt_msghdr *rtm, int msglen)
 		rtm->rtm_rmx.rmx_expire -= time(NULL);
 	printf("%8d%c\n", rtm->rtm_rmx.rmx_expire, lock(EXPIRE));
 #undef lock
-#undef msec
 #define	RTA_IGN	(RTA_DST|RTA_GATEWAY|RTA_NETMASK|RTA_IFP|RTA_IFA|RTA_BRD)
 	if (verbose)
 		pmsg_common(rtm);
@@ -1615,7 +1593,7 @@ getlabel(char *name)
 	rtm_addrs |= RTA_LABEL;
 }
 
-void
+int
 gettable(const char *s)
 {
 	const char	*errstr;
@@ -1623,4 +1601,16 @@ gettable(const char *s)
 	tableid = strtonum(s, 0, RT_TABLEID_MAX, &errstr);
 	if (errstr)
 		errx(1, "invalid table id: %s", errstr);
+	return (tableid);
+}
+
+int
+rdomain(int rtableid, int argc, char **argv)
+{
+	if (!argc)
+		usage(NULL);
+	if (setrdomain(rtableid) == -1)
+		err(1, "setrdomain");
+	execvp(*argv, argv);
+	return (errno == ENOENT ? 127 : 126);
 }

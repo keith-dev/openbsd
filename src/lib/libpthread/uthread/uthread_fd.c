@@ -1,4 +1,4 @@
-/*	$OpenBSD: uthread_fd.c,v 1.31 2008/10/02 23:27:24 deraadt Exp $	*/
+/*	$OpenBSD: uthread_fd.c,v 1.33 2010/01/03 23:05:35 fgsch Exp $	*/
 /*
  * Copyright (c) 1995-1998 John Birrell <jb@cimlogic.com.au>
  * All rights reserved.
@@ -33,17 +33,52 @@
  * $FreeBSD: uthread_fd.c,v 1.13 1999/08/28 00:03:31 peter Exp $
  *
  */
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <sys/socket.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/stat.h>
 #ifdef _THREAD_SAFE
 #include <pthread.h>
 #include "pthread_private.h"
 
 /* Static variables: */
-static	spinlock_t	fd_table_lock	= _SPINLOCK_INITIALIZER;
+
+static struct fd_table_entry	*_thread_fd_entries;
+static struct fs_flags		*_thread_fd_flags;
+
+static SLIST_HEAD(, fd_table_entry)	_thread_fd_entries_head;
+static SLIST_HEAD(, fs_flags)		_thread_fd_flags_head;
+
+int
+_thread_fd_init_mem(void)
+{
+	int fd;
+
+	_thread_fd_entries = calloc((size_t)_thread_max_fdtsize,
+				  sizeof(struct fd_table_entry));
+	if (_thread_fd_entries == NULL)
+		return (-1);
+
+	_thread_fd_flags = calloc((size_t)_thread_max_fdtsize,
+				  sizeof(struct fs_flags));
+	if (_thread_fd_flags == NULL) {
+		free(_thread_fd_entries);
+		_thread_fd_entries = NULL;
+		return (-1);
+	}
+
+	/* add pre-allocated entries to freelists */
+	for (fd = 0; fd < _thread_max_fdtsize; fd++)
+	{
+		SLIST_INSERT_HEAD(&_thread_fd_entries_head, &_thread_fd_entries[fd], fe);
+		SLIST_INSERT_HEAD(&_thread_fd_flags_head, &_thread_fd_flags[fd], fe);
+        }
+
+	return (0);
+}
 
 /*
  * Build a new fd entry and return it.
@@ -53,12 +88,22 @@ _thread_fs_flags_entry(void)
 {
 	struct fs_flags *entry;
 
-	entry = (struct fs_flags *) malloc(sizeof(struct fs_flags));
+        _thread_kern_sig_defer();
+        entry = SLIST_FIRST(&_thread_fd_flags_head);
 	if (entry != NULL) {
+		SLIST_REMOVE_HEAD(&_thread_fd_flags_head, fe);
 		memset(entry, 0, sizeof *entry);
-		_SPINLOCK_INIT(&entry->lock);
 	}
+        _thread_kern_sig_undefer();
 	return entry;
+}
+
+static void
+_thread_fs_flags_free(struct fs_flags *entry)
+{
+        _thread_kern_sig_defer();
+	SLIST_INSERT_HEAD(&_thread_fd_flags_head, entry, fe);
+        _thread_kern_sig_undefer();
 }
 
 /*
@@ -108,10 +153,10 @@ _thread_fs_flags_replace(int fd, struct fs_flags *new_status_flags)
 	int flags;
 	int saved_errno;
 
+        _thread_kern_sig_defer();
 	if (entry->status_flags != new_status_flags) {
 		if (entry->status_flags != NULL) {
 			old_status_flags = entry->status_flags;
-			_SPINLOCK(&old_status_flags->lock);
 			old_status_flags->refcnt -= 1;
 			if (old_status_flags->refcnt <= 0) {
 				/*
@@ -152,19 +197,17 @@ _thread_fs_flags_replace(int fd, struct fs_flags *new_status_flags)
 					/* Clear the nonblocking file descriptor flag: */
 					_thread_sys_fcntl(fd, F_SETFL, flags & ~O_NONBLOCK);
 				}
-				free(old_status_flags);
+				_thread_fs_flags_free(old_status_flags);
 				errno = saved_errno;
-			} else
-				_SPINUNLOCK(&old_status_flags->lock);
+			}
 		}
 		/* replace with new status flags */
 		if (new_status_flags != NULL) {
-			_SPINLOCK(&new_status_flags->lock);
 			new_status_flags->refcnt += 1;
-			_SPINUNLOCK(&new_status_flags->lock);
 		}
 		entry->status_flags = new_status_flags;
 	}
+        _thread_kern_sig_undefer();
 }
 
 /*
@@ -175,16 +218,26 @@ _thread_fd_entry(void)
 {
 	struct fd_table_entry *entry;
 
-	entry = (struct fd_table_entry *) malloc(sizeof(struct fd_table_entry));
+        _thread_kern_sig_defer();
+        entry = SLIST_FIRST(&_thread_fd_entries_head);
 	if (entry != NULL) {
+		SLIST_REMOVE_HEAD(&_thread_fd_entries_head, fe);
 		memset(entry, 0, sizeof *entry);
-		_SPINLOCK_INIT(&entry->lock);
 		TAILQ_INIT(&entry->r_queue);
 		TAILQ_INIT(&entry->w_queue);
 		entry->state = FD_ENTRY_CLOSED;
 		entry->init_mode = FD_INIT_UNKNOWN;
 	}
+        _thread_kern_sig_undefer();
 	return entry;
+}
+
+static void
+_thread_fs_entry_free(struct fd_table_entry *entry)
+{
+        _thread_kern_sig_defer();
+	SLIST_INSERT_HEAD(&_thread_fd_entries_head, entry, fe);
+        _thread_kern_sig_undefer();
 }
 
 /*
@@ -202,6 +255,8 @@ _thread_fd_init(void)
 	int *flags;
 	struct fd_table_entry *entry1, *entry2;
 	struct fs_flags *status_flags;
+
+        _thread_fd_init_mem();
 
 	saved_errno = errno;
 	flags = calloc((size_t)_thread_init_fdtsize, sizeof *flags);
@@ -221,7 +276,7 @@ _thread_fd_init(void)
 	 * so the entries would never be cleaned.
 	 */
 
-	_SPINLOCK(&fd_table_lock);
+        _thread_kern_sig_defer();
 	for (fd = 0; fd < _thread_init_fdtsize; fd += 1) {
 		if (flags[fd] == -1)
 			continue;
@@ -256,14 +311,14 @@ _thread_fd_init(void)
 				_thread_fd_table[fd] = entry1;
 				flags[fd] |= O_NONBLOCK;
 			} else {
-				free(entry1);
-				free(status_flags);
+				_thread_fs_entry_free(entry1);
+				_thread_fs_flags_free(status_flags);
 			}
 		} else {
 			PANIC("Cannot allocate memory for flags table");
 		}
 	}
-	_SPINUNLOCK(&fd_table_lock);
+        _thread_kern_sig_undefer();
 
 	/* lastly, restore the file flags.   Flags for files that we
 	   know to be duped have been modified so set the non-blocking'
@@ -309,8 +364,8 @@ _thread_fd_table_init(int fd, enum fd_entry_mode init_mode, struct fs_flags *sta
 			/* use _thread_fd_entry errno */
 			ret = -1;
 		} else {
-			/* Lock the file descriptor table: */
-			_SPINLOCK(&fd_table_lock);
+			/* Protect the file descriptor table: */
+        		_thread_kern_sig_defer();
 
 			/*
 			 * Check if another thread allocated the
@@ -325,21 +380,21 @@ _thread_fd_table_init(int fd, enum fd_entry_mode init_mode, struct fs_flags *sta
 				entry = NULL;
 			}
 
-			/* Unlock the file descriptor table: */
-			_SPINUNLOCK(&fd_table_lock);
+			/* Unprotect the file descriptor table: */
+        		_thread_kern_sig_undefer();
 
 			/*
 			 * If another thread initialized the table entry
 			 * throw the new entry away.
 			 */
 			if (entry != NULL)
-				free(entry);
+				_thread_fs_entry_free(entry);
 		}
 	}
 
 	if (ret == 0) {
 		entry = _thread_fd_table[fd];
-		_SPINLOCK(&entry->lock);
+       		_thread_kern_sig_defer();
 		switch (init_mode) {
 		case FD_INIT_UNKNOWN:
 			/*
@@ -374,7 +429,7 @@ _thread_fd_table_init(int fd, enum fd_entry_mode init_mode, struct fs_flags *sta
 				}
 				/* if flags init failed free new flags */
 				if (new_status_flags != NULL)
-					free(new_status_flags);
+					_thread_fs_flags_free(new_status_flags);
 			}
 			break;
 		case FD_INIT_NEW:
@@ -401,7 +456,7 @@ _thread_fd_table_init(int fd, enum fd_entry_mode init_mode, struct fs_flags *sta
 				}
 				/* if flags init failed free new flags */
 				if (new_status_flags != NULL)
-					free(new_status_flags);
+					_thread_fs_flags_free(new_status_flags);
 			}
 			break;
 		case FD_INIT_BLOCKING:
@@ -433,7 +488,7 @@ _thread_fd_table_init(int fd, enum fd_entry_mode init_mode, struct fs_flags *sta
 				}
 				/* if flags init failed free new flags */
 				if (new_status_flags != NULL)
-					free(new_status_flags);
+					_thread_fs_flags_free(new_status_flags);
 			} else if (entry->state == FD_ENTRY_OPEN &&
 			    entry->init_mode == FD_INIT_UNKNOWN) {
 				entry->status_flags->flags &= ~O_NONBLOCK;
@@ -471,7 +526,7 @@ _thread_fd_table_init(int fd, enum fd_entry_mode init_mode, struct fs_flags *sta
 			entry->init_mode = init_mode;
 			break;
 		}
-		_SPINUNLOCK(&entry->lock);
+       		_thread_kern_sig_undefer();
 	}
 
 	/* Return the completion status: */
@@ -511,13 +566,6 @@ _thread_fd_unlock(int fd, int lock_type)
 		 * access by the signal handler:
 		 */
 		_thread_kern_sig_defer();
-
-		/*
-		 * Lock the file descriptor table entry to prevent
-		 * other threads for clashing with the current
-		 * thread's accesses:
-		 */
-		_SPINLOCK(&entry->lock);
 
 		/* Check if the running thread owns the read lock: */
 		if (entry->r_owner == thread &&
@@ -592,9 +640,6 @@ _thread_fd_unlock(int fd, int lock_type)
 			}
 		}
 
-		/* Unlock the file descriptor table entry: */
-		_SPINUNLOCK(&entry->lock);
-
 		/*
 		 * Undefer and handle pending signals, yielding if
 		 * necessary:
@@ -622,11 +667,11 @@ _thread_fd_lock(int fd, int lock_type, struct timespec * timeout)
 		entry = _thread_fd_table[fd];
 
 		/*
-		 * Lock the file descriptor table entry to prevent
+		 * Protect the file descriptor table entry to prevent
 		 * other threads for clashing with the current
 		 * thread's accesses:
 		 */
-		_SPINLOCK(&entry->lock);
+		_thread_kern_sig_defer();
 
 		/* reject all new locks on entries that are closing */
 		if (entry->state == FD_ENTRY_CLOSING) {
@@ -672,16 +717,16 @@ _thread_fd_lock(int fd, int lock_type, struct timespec * timeout)
 					_thread_kern_set_timeout(timeout);
 
 					/*
-					 * Unlock the file descriptor
+					 * Unprotect the file descriptor
 					 * table entry:
 					 */
-					_SPINUNLOCK(&entry->lock);
+					_thread_kern_sig_undefer();
 
 					/*
 					 * Schedule this thread to wait on
 					 * the read lock. It will only be
 					 * woken when it becomes the next in
-					 * the   queue and is granted access
+					 * the queue and is granted access
 					 * to the lock by the thread that is
 					 * unlocking the file descriptor.
 					 */
@@ -690,10 +735,10 @@ _thread_fd_lock(int fd, int lock_type, struct timespec * timeout)
 								 __LINE__);
 
 					/*
-					 * Lock the file descriptor
+					 * Protect the file descriptor
 					 * table entry again:
 					 */
-					_SPINLOCK(&entry->lock);
+					_thread_kern_sig_defer();
 
 				} else {
 					/*
@@ -747,10 +792,10 @@ _thread_fd_lock(int fd, int lock_type, struct timespec * timeout)
 					_thread_kern_set_timeout(timeout);
 
 					/*
-					 * Unlock the file descriptor
+					 * Unprotect the file descriptor
 					 * table entry:
 					 */
-					_SPINUNLOCK(&entry->lock);
+					_thread_kern_sig_undefer();
 
 					/*
 					 * Schedule this thread to wait on
@@ -765,10 +810,10 @@ _thread_fd_lock(int fd, int lock_type, struct timespec * timeout)
 								 __LINE__);
 
 					/*
-					 * Lock the file descriptor
+					 * Unprotect the file descriptor
 					 * table entry again:
 					 */
-					_SPINLOCK(&entry->lock);
+					_thread_kern_sig_defer();
 				} else {
 					/*
 					 * The running thread now owns the
@@ -788,12 +833,38 @@ _thread_fd_lock(int fd, int lock_type, struct timespec * timeout)
 			entry->w_lockcount++;
 		}
 
-		/* Unlock the file descriptor table entry: */
-		_SPINUNLOCK(&entry->lock);
+		/* Unprotect the file descriptor table entry: */
+		_thread_kern_sig_undefer();
 	}
 
 	/* Return the completion status: */
 	return (ret);
+}
+
+struct timespec *
+_thread_fd_timeout(int fd, int which)
+{
+	struct timeval tv;
+	socklen_t len;
+	int saved_errno;
+	
+	/* Avoid calling getsockopt if fd is not a socket. */
+	if (!(_thread_fd_table[fd]->status_flags->flags & _FD_NOTSOCK)) {
+		len = sizeof(tv);
+		saved_errno = errno;
+		if (_thread_sys_getsockopt(fd, SOL_SOCKET, which ?
+		    SO_SNDTIMEO : SO_RCVTIMEO, &tv, &len) == 0) {
+			if (timerisset(&tv)) {
+				static struct timespec ts;
+				TIMEVAL_TO_TIMESPEC(&tv, &ts);
+				return (&ts);
+			}
+		} else if (errno == ENOTSOCK)
+			_thread_fd_table[fd]->status_flags->flags |=
+			    _FD_NOTSOCK;
+		errno = saved_errno;
+	}
+	return (NULL);
 }
 
 #endif

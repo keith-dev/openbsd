@@ -1,4 +1,4 @@
-/*	$OpenBSD: rde.c,v 1.31 2009/06/06 09:02:46 eric Exp $ */
+/*	$OpenBSD: rde.c,v 1.37 2010/03/01 08:58:48 claudio Exp $ */
 
 /*
  * Copyright (c) 2004, 2005 Claudio Jeker <claudio@openbsd.org>
@@ -60,6 +60,7 @@ void		 rde_req_list_free(struct rde_nbr *);
 struct lsa	*rde_asext_get(struct rroute *);
 struct lsa	*rde_asext_put(struct rroute *);
 
+int		 comp_asext(struct lsa *, struct lsa *);
 struct lsa	*orig_asext_lsa(struct rroute *, u_int16_t);
 struct lsa	*orig_sum_lsa(struct rt_node *, struct area *, u_int8_t, int);
 struct lsa	*orig_intra_lsa_net(struct iface *, struct vertex *);
@@ -256,7 +257,7 @@ rde_dispatch_imsg(int fd, short event, void *bula)
 	char			*buf;
 	ssize_t			 n;
 	time_t			 now;
-	int			 r, state, self, shut = 0;
+	int			 r, state, self, shut = 0, verbose;
 	u_int16_t		 l;
 
 	if (event & EV_READ) {
@@ -358,7 +359,7 @@ rde_dispatch_imsg(int fd, short event, void *bula)
 				    "packet", imsg.hdr.peerid);
 
 			imsg_compose_event(iev_ospfe, IMSG_DD_END,
-			    imsg.hdr.peerid, -1, 0, NULL, 0);
+			    imsg.hdr.peerid, 0, -1, NULL, 0);
 			break;
 		case IMSG_LS_REQ:
 			nbr = rde_nbr_find(imsg.hdr.peerid);
@@ -574,7 +575,7 @@ rde_dispatch_imsg(int fd, short event, void *bula)
 			LIST_FOREACH(area, &rdeconf->area_list, entry)
 				rde_send_summary_area(area, imsg.hdr.pid);
 			imsg_compose_event(iev_ospfe, IMSG_CTL_END, 0,
-			    imsg.hdr.pid, 1, NULL, 0);
+			    imsg.hdr.pid, -1, NULL, 0);
 			break;
 		case IMSG_IFINFO:
 			if (imsg.hdr.len != IMSG_HEADER_SIZE +
@@ -596,6 +597,11 @@ rde_dispatch_imsg(int fd, short event, void *bula)
 					fatalx("interface lost area");
 				orig_intra_area_prefix_lsas(area);
 			}
+			break;
+		case IMSG_CTL_LOG_VERBOSE:
+			/* already checked by ospfe */
+			memcpy(&verbose, imsg.data, sizeof(verbose));
+			log_verbose(verbose);
 			break;
 		default:
 			log_debug("rde_dispatch_imsg: unexpected imsg %d",
@@ -807,6 +813,9 @@ rde_send_change_kroute(struct rt_node *r)
 	bzero(&kr, sizeof(kr));
 	kr.prefix = r->prefix;
 	kr.nexthop = rn->nexthop;
+	if (IN6_IS_ADDR_LINKLOCAL(&rn->nexthop) ||
+	    IN6_IS_ADDR_MC_LINKLOCAL(&rn->nexthop))
+		kr.scope = rn->ifindex;
 	kr.prefixlen = r->prefixlen;
 	kr.ext_tag = r->ext_tag;
 
@@ -1102,22 +1111,31 @@ rde_req_list_free(struct rde_nbr *nbr)
 struct lsa *
 rde_asext_get(struct rroute *rr)
 {
-#if 0
-	struct area	*area;
-	struct iface	*iface;
-XXX
+	struct area		*area;
+	struct iface		*iface;
+	struct iface_addr	*ia;
+	struct in6_addr		 addr;
+
 	LIST_FOREACH(area, &rdeconf->area_list, entry)
-		LIST_FOREACH(iface, &area->iface_list, entry) {
-			if ((iface->addr.s_addr & iface->mask.s_addr) ==
-			    rr->kr.prefix.s_addr && iface->mask.s_addr ==
-			    prefixlen2mask(rr->kr.prefixlen)) {
-				/* already announced as (stub) net LSA */
-				log_debug("rde_asext_get: %s/%d is net LSA",
-				    inet_ntoa(rr->kr.prefix), rr->kr.prefixlen);
-				return (NULL);
+		LIST_FOREACH(iface, &area->iface_list, entry)
+			TAILQ_FOREACH(ia, &iface->ifa_list, entry) {
+				if (IN6_IS_ADDR_LINKLOCAL(&ia->addr))
+					continue;
+
+				inet6applymask(&addr, &ia->addr,
+				    rr->kr.prefixlen);
+				if (!memcmp(&addr, &rr->kr.prefix,
+				    sizeof(addr)) && rr->kr.prefixlen ==
+				    ia->prefixlen) {
+					/* already announced as Prefix LSA */
+					log_debug("rde_asext_get: %s/%d is "
+					    "part of prefix LSA",
+					    log_in6addr(&rr->kr.prefix),
+					    rr->kr.prefixlen);
+					return (NULL);
+				}
 			}
-		}
-#endif
+
 	/* update of seqnum is done by lsa_merge */
 	return (orig_asext_lsa(rr, DEFAULT_AGE));
 }
@@ -1385,6 +1403,8 @@ link_lsa_from_full_nbr(struct lsa *lsa, struct iface *iface)
 struct lsa *
 orig_intra_lsa_rtr(struct area *area, struct vertex *old)
 {
+	char			lsa_prefix_buf[sizeof(struct lsa_prefix)
+				    + sizeof(struct in6_addr)];
 	struct lsa		*lsa;
 	struct lsa_prefix	*lsa_prefix;
 	struct in6_addr		*prefix;
@@ -1427,16 +1447,13 @@ orig_intra_lsa_rtr(struct area *area, struct vertex *old)
 				continue;
 		}
 
-		if ((lsa_prefix = calloc(sizeof(*lsa_prefix)
-		    + sizeof(struct in6_addr), 1)) == NULL)
-			fatal("orig_intra_lsa_rtr");
+		lsa_prefix = (struct lsa_prefix *)lsa_prefix_buf;
 
 		TAILQ_FOREACH(ia, &iface->ifa_list, entry) {
 			if (IN6_IS_ADDR_LINKLOCAL(&ia->addr))
 				continue;
 			
-			bzero(lsa_prefix, sizeof(*lsa_prefix)
-			    + sizeof(struct in6_addr));
+			bzero(lsa_prefix_buf, sizeof(lsa_prefix_buf));
 
 			if (iface->type == IF_TYPE_POINTOMULTIPOINT ||
 			    iface->state & IF_STA_LOOPBACK) {
@@ -1455,8 +1472,6 @@ orig_intra_lsa_rtr(struct area *area, struct vertex *old)
 			append_prefix_lsa(&lsa, &len, lsa_prefix);
 			numprefix++;
 		}
-
-		free(lsa_prefix);
 
 		/* TOD: Add prefixes of directly attached hosts, too */
 		/* TOD: Add prefixes for virtual links */
@@ -1509,14 +1524,39 @@ orig_intra_area_prefix_lsas(struct area *area)
 		lsa_merge(rde_nbr_self(area), lsa, old);
 }
 
+int
+comp_asext(struct lsa *a, struct lsa *b)
+{
+	/* compare prefixes, if they are equal or not */
+	if (a->data.asext.prefix.prefixlen != b->data.asext.prefix.prefixlen)
+		return (-1);
+	return (memcmp(
+	    (char *)a + sizeof(struct lsa_hdr) + sizeof(struct lsa_asext),
+	    (char *)b + sizeof(struct lsa_hdr) + sizeof(struct lsa_asext),
+	    LSA_PREFIXSIZE(a->data.asext.prefix.prefixlen)));
+}
+
 struct lsa *
 orig_asext_lsa(struct rroute *rr, u_int16_t age)
 {
-#if 0 /* XXX a lot todo */
 	struct lsa	*lsa;
-	u_int16_t	 len;
+	u_int32_t	 ext_tag;
+	u_int16_t	 len, ext_off = 0;
 
-	len = sizeof(struct lsa_hdr) + sizeof(struct lsa_asext);
+	len = sizeof(struct lsa_hdr) + sizeof(struct lsa_asext) +
+	    LSA_PREFIXSIZE(rr->kr.prefixlen);
+
+	/*
+	 * nexthop -- on connected routes we are the nexthop,
+	 * on all other cases we should announce the true nexthop
+	 * unless that nexthop is outside of the ospf cloud.
+	 * XXX for now we don't do this.
+	 */
+
+	if (rr->kr.ext_tag) {
+		ext_off = len;
+		len += sizeof(ext_tag);
+	}
 	if ((lsa = calloc(1, len)) == NULL)
 		fatal("orig_asext_lsa");
 
@@ -1525,39 +1565,29 @@ orig_asext_lsa(struct rroute *rr, u_int16_t age)
 
 	/* LSA header */
 	lsa->hdr.age = htons(age);
-	lsa->hdr.type = LSA_TYPE_EXTERNAL;
+	lsa->hdr.type = htons(LSA_TYPE_EXTERNAL);
 	lsa->hdr.adv_rtr = rdeconf->rtr_id.s_addr;
 	lsa->hdr.seq_num = htonl(INIT_SEQ_NUM);
 	lsa->hdr.len = htons(len);
 
-	/* prefix and mask */
-	/*
-	 * TODO ls_id must be unique, for overlapping routes this may
-	 * not be true. In this case a hack needs to be done to
-	 * make the ls_id unique.
-	 */
-	lsa->hdr.ls_id = rr->kr.prefix.s_addr;
-	lsa->data.asext.mask = prefixlen2mask(rr->kr.prefixlen);
-
-	/*
-	 * nexthop -- on connected routes we are the nexthop,
-	 * on all other cases we announce the true nexthop.
-	 * XXX this is wrong as the true nexthop may be outside
-	 * of the ospf cloud and so unreachable. For now we force
-	 * all traffic to be directed to us.
-	 */
-	lsa->data.asext.fw_addr = 0;
-
 	lsa->data.asext.metric = htonl(rr->metric);
-	lsa->data.asext.ext_tag = htonl(rr->kr.ext_tag);
+	lsa->data.asext.prefix.prefixlen = rr->kr.prefixlen;
+	memcpy((char *)lsa + sizeof(struct lsa_hdr) + sizeof(struct lsa_asext),
+	    &rr->kr.prefix, LSA_PREFIXSIZE(rr->kr.prefixlen));
 
+	if (rr->kr.ext_tag) {
+		lsa->data.asext.prefix.options |= LSA_ASEXT_T_FLAG;
+		ext_tag = htonl(rr->kr.ext_tag);
+		memcpy((char *)lsa + ext_off, &ext_tag, sizeof(ext_tag));
+	}
+
+	lsa->hdr.ls_id = lsa_find_lsid(&asext_tree, lsa->hdr.type,
+	    lsa->hdr.adv_rtr, comp_asext, lsa);
 	lsa->hdr.ls_chksum = 0;
 	lsa->hdr.ls_chksum =
 	    htons(iso_cksum(lsa, len, LS_CKSUM_OFFSET));
 
 	return (lsa);
-#endif
-	return NULL;
 }
 
 struct lsa *

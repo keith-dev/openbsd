@@ -1,4 +1,4 @@
-/* $OpenBSD: cfg.c,v 1.2 2009/06/25 06:00:45 nicm Exp $ */
+/* $OpenBSD: cfg.c,v 1.10 2010/02/06 23:22:27 nicm Exp $ */
 
 /*
  * Copyright (c) 2008 Nicholas Marriott <nicm@users.sourceforge.net>
@@ -33,13 +33,17 @@
 void printflike2 cfg_print(struct cmd_ctx *, const char *, ...);
 void printflike2 cfg_error(struct cmd_ctx *, const char *, ...);
 
-char	 *cfg_cause;
+char	 	       *cfg_cause;
+int     	 	cfg_finished;
+struct causelist	cfg_causes = ARRAY_INITIALIZER;
 
+/* ARGSUSED */
 void printflike2
 cfg_print(unused struct cmd_ctx *ctx, unused const char *fmt, ...)
 {
 }
 
+/* ARGSUSED */
 void printflike2
 cfg_error(unused struct cmd_ctx *ctx, const char *fmt, ...)
 {
@@ -50,29 +54,36 @@ cfg_error(unused struct cmd_ctx *ctx, const char *fmt, ...)
 	va_end(ap);
 }
 
-int
-load_cfg(const char *path, char **cause)
+void printflike2
+cfg_add_cause(struct causelist *causes, const char *fmt, ...)
 {
-	FILE   	        *f;
+	char	*cause;
+	va_list	 ap;
+
+	va_start(ap, fmt);
+	xvasprintf(&cause, fmt, ap);
+	va_end(ap);
+
+	ARRAY_ADD(causes, cause);
+}
+
+/*
+ * Load configuration file. Returns -1 for an error with a list of messages in
+ * causes. Note that causes and ncauses must be initialised by the caller!
+ */
+int
+load_cfg(const char *path, struct cmd_ctx *ctxin, struct causelist *causes)
+{
+	FILE		*f;
 	u_int		 n;
-	struct stat	 sb;
-	char	        *buf, *line, *ptr;
+	char		*buf, *line, *cause;
 	size_t		 len;
 	struct cmd_list	*cmdlist;
 	struct cmd_ctx	 ctx;
 
-	if (stat(path, &sb) != 0) {
-		xasprintf(cause, "%s: %s", path, strerror(errno));
-		return (-1);
-	}
-	if (!S_ISREG(sb.st_mode)) {
-		xasprintf(cause, "%s: not a regular file", path);
-		return (-1);
-	}
-
 	if ((f = fopen(path, "rb")) == NULL) {
-		xasprintf(cause, "%s: %s", path, strerror(errno));
-		return (1);
+		cfg_add_cause(causes, "%s: %s", path, strerror(errno));
+		return (-1);
 	}
 	n = 0;
 
@@ -88,44 +99,45 @@ load_cfg(const char *path, char **cause)
 		}
 		n++;
 
-		if (cmd_string_parse(buf, &cmdlist, cause) != 0) {
-			if (*cause == NULL)
+		if (cmd_string_parse(buf, &cmdlist, &cause) != 0) {
+			if (cause == NULL)
 				continue;
-			goto error;
+			cfg_add_cause(causes, "%s: %u: %s", path, n, cause);
+			xfree(cause);
+			continue;
 		}
 		if (cmdlist == NULL)
 			continue;
 		cfg_cause = NULL;
 
-		ctx.msgdata = NULL;
-		ctx.cursession = NULL;
-		ctx.curclient = NULL;
+		if (ctxin == NULL) {
+			ctx.msgdata = NULL;
+			ctx.curclient = NULL;
+			ctx.cmdclient = NULL;
+		} else {
+			ctx.msgdata = ctxin->msgdata;
+			ctx.curclient = ctxin->curclient;
+			ctx.cmdclient = ctxin->cmdclient;
+		}
 
 		ctx.error = cfg_error;
 		ctx.print = cfg_print;
 		ctx.info = cfg_print;
 
-		ctx.cmdclient = NULL;
-
 		cfg_cause = NULL;
 		cmd_list_exec(cmdlist, &ctx);
 		cmd_list_free(cmdlist);
 		if (cfg_cause != NULL) {
-			*cause = cfg_cause;
-			goto error;
+			cfg_add_cause(causes, "%s: %d: %s", path, n, cfg_cause);
+			xfree(cfg_cause);
+			continue;
 		}
 	}
 	if (line != NULL)
 		xfree(line);
 	fclose(f);
 
+	if (ARRAY_LENGTH(causes) != 0)
+		return (-1);
 	return (0);
-
-error:
-	fclose(f);
-
-	xasprintf(&ptr, "%s: %s at line %u", path, *cause, n);
-	xfree(*cause);
-	*cause = ptr;
-	return (1);
 }

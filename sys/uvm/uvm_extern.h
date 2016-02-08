@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvm_extern.h,v 1.81 2009/06/16 23:54:58 oga Exp $	*/
+/*	$OpenBSD: uvm_extern.h,v 1.83 2010/02/12 01:35:14 tedu Exp $	*/
 /*	$NetBSD: uvm_extern.h,v 1.57 2001/03/09 01:02:12 chs Exp $	*/
 
 /*
@@ -491,7 +491,6 @@ void			uvm_fork(struct proc *, struct proc *, boolean_t,
 void			uvm_exit(struct proc *);
 void			uvm_init_limits(struct proc *);
 boolean_t		uvm_kernacc(caddr_t, size_t, int);
-__dead void		uvm_scheduler(void);
 
 int			uvm_vslock(struct proc *, caddr_t, size_t,
 			    vm_prot_t);
@@ -518,8 +517,9 @@ struct vm_map		*uvm_km_suballoc(vm_map_t, vaddr_t *,
 				vaddr_t *, vsize_t, int,
 				boolean_t, vm_map_t);
 vaddr_t			uvm_km_valloc(vm_map_t, vsize_t);
-vaddr_t			uvm_km_valloc_align(vm_map_t, vsize_t, vsize_t);
+vaddr_t			uvm_km_valloc_try(vm_map_t, vsize_t);
 vaddr_t			uvm_km_valloc_wait(vm_map_t, vsize_t);
+vaddr_t			uvm_km_valloc_align(struct vm_map *, vsize_t, vsize_t, int);
 vaddr_t			uvm_km_valloc_prefer_wait(vm_map_t, vsize_t,
 					voff_t);
 void			*uvm_km_getpage(boolean_t, int *);

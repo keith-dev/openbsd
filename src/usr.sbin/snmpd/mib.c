@@ -1,4 +1,4 @@
-/*	$OpenBSD: mib.c,v 1.30 2008/12/23 08:06:10 reyk Exp $	*/
+/*	$OpenBSD: mib.c,v 1.34 2010/01/11 11:15:03 deraadt Exp $	*/
 
 /*
  * Copyright (c) 2007, 2008 Reyk Floeter <reyk@vantronix.net>
@@ -723,7 +723,7 @@ kinfo_proc(u_int32_t idx, struct kinfo_proc2 **kinfo)
 		nkp = count;
 	}
 
-	klist = malloc(count * sizeof(*klist));
+	klist = calloc(count, sizeof(*klist));
 	if (klist == NULL)
 		return (-1);
 
@@ -881,11 +881,12 @@ mib_ifget(u_int idx)
 		if (kif == NULL)
 			return (NULL);
 	}
+	idx = kif->if_index;
 
 	/* Update interface information */
-	kr_updateif(kif->if_index);
-	if ((kif = kr_getif(kif->if_index)) == NULL) {
-		log_debug("mib_ifxtable: interface disappeared?");
+	kr_updateif(idx);
+	if ((kif = kr_getif(idx)) == NULL) {
+		log_debug("mib_ifxtable: interface %d disappeared?", idx);
 		return (NULL);
 	}
 
@@ -1232,7 +1233,7 @@ static struct oid openbsd_mib[] = {
 	{ MIB(memMIBObjects),		OID_MIB },
 	{ MIB(memMIBVersion),		OID_RD, mps_getint, NULL, NULL,
 	    OIDVER_OPENBSD_MEM },
-	{ MIB(memIfName), 		OID_TRD, mib_memiftable },
+	{ MIB(memIfName),		OID_TRD, mib_memiftable },
 	{ MIB(memIfLiveLocks),		OID_TRD, mib_memiftable },
 	{ MIBEND }
 };
@@ -1269,14 +1270,14 @@ mib_sensors(struct oid *oid, struct ber_oid *o, struct ber_element **elm)
 	struct sensor		 sensor;
 	size_t			 slen = sizeof(sensor);
 	int			 mib[] = { CTL_HW, HW_SENSORS, 0, 0, 0 };
-	int			 i, c, j, k;
+	int			 i, j, k;
 	u_int32_t		 idx = 0, n;
 	char			*s;
 
 	/* Get and verify the current row index */
 	idx = o->bo_id[OIDIDX_sensorEntry];
 
-	for (i = c = 0, n = 1; i < MAXSENSORDEVICES; i++) {
+	for (i = 0, n = 1; i < MAXSENSORDEVICES; i++) {
 		mib[2] = i;
 		if (sysctl(mib, 3, &sensordev, &len, NULL, 0) == -1) {
 			if (errno != ENOENT)
@@ -1366,6 +1367,7 @@ mib_sensorvalue(struct sensor *s)
 		break;
 	case SENSOR_VOLTS_DC:
 	case SENSOR_VOLTS_AC:
+	case SENSOR_WATTS:
 	case SENSOR_AMPS:
 	case SENSOR_WATTHOUR:
 	case SENSOR_AMPHOUR:

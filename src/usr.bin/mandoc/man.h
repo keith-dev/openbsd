@@ -1,4 +1,4 @@
-/*	$Id: man.h,v 1.4 2009/06/23 22:31:26 schwarze Exp $ */
+/*	$Id: man.h,v 1.13 2010/03/02 01:00:39 schwarze Exp $ */
 /*
  * Copyright (c) 2009 Kristaps Dzonsons <kristaps@kth.se>
  *
@@ -42,12 +42,27 @@
 #define	MAN_RI		 20
 #define	MAN_na		 21
 #define	MAN_i		 22
-#define	MAN_MAX	 	 23
+#define	MAN_sp		 23
+#define	MAN_nf		 24
+#define	MAN_fi		 25
+#define	MAN_r		 26
+#define	MAN_RE		 27
+#define	MAN_RS		 28
+#define	MAN_DT		 29
+#define	MAN_UC		 30
+#define	MAN_PD		 31
+#define	MAN_Sp		 32
+#define	MAN_Vb		 33
+#define	MAN_Ve		 34
+#define	MAN_MAX	 	 35
 
 enum	man_type {
 	MAN_TEXT,
 	MAN_ELEM,
-	MAN_ROOT
+	MAN_ROOT,
+	MAN_BLOCK,
+	MAN_HEAD,
+	MAN_BODY
 };
 
 struct	man_meta {
@@ -72,10 +87,13 @@ struct	man_node {
 #define	MAN_ACTED	(1 << 1)
 	enum man_type	 type;
 	char		*string;
+	struct man_node	*head;
+	struct man_node	*body;
 };
 
 #define	MAN_IGN_MACRO	 (1 << 0)
 #define	MAN_IGN_CHARS	 (1 << 1)
+#define	MAN_IGN_ESCAPE	 (1 << 2)
 
 extern	const char *const *man_macronames;
 
@@ -90,10 +108,9 @@ struct	man;
 
 void	 	  man_free(struct man *);
 struct	man	 *man_alloc(void *, int, const struct man_cb *);
-int		  man_reset(struct man *);
+void		  man_reset(struct man *);
 int	 	  man_parseln(struct man *, int, char *buf);
 int		  man_endparse(struct man *);
-int		  man_valid_post(struct man *);
 
 const struct man_node *man_node(const struct man *);
 const struct man_meta *man_meta(const struct man *);

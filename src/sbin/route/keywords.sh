@@ -1,5 +1,5 @@
 #!/bin/sh
-# $OpenBSD: keywords.sh,v 1.22 2008/05/07 06:06:25 claudio Exp $
+# $OpenBSD: keywords.sh,v 1.24 2009/12/01 16:16:46 reyk Exp $
 # $NetBSD: keywords.sh,v 1.2 1996/11/15 18:57:21 gwr Exp $
 # @(#)keywords	8.2 (Berkeley) 3/19/94
 #
@@ -16,6 +16,7 @@ cloning
 delete
 dst
 encap
+exec
 expire
 flush
 gateway
@@ -39,6 +40,7 @@ lockrest
 monitor
 mpath
 mpls
+mplslabel
 mtu
 net
 netmask

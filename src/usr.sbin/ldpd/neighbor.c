@@ -1,4 +1,4 @@
-/*	$OpenBSD: neighbor.c,v 1.2 2009/06/05 22:34:45 michele Exp $ */
+/*	$OpenBSD: neighbor.c,v 1.11 2010/02/25 17:40:46 claudio Exp $ */
 
 /*
  * Copyright (c) 2009 Michele Marchetto <michele@openbsd.org>
@@ -110,6 +110,7 @@ const char * const nbr_action_names[] = {
 int
 nbr_fsm(struct nbr *nbr, enum nbr_event event)
 {
+	struct timeval	now;
 	int		old_state;
 	int		new_state = 0;
 	int		i, ret = 0;
@@ -134,23 +135,24 @@ nbr_fsm(struct nbr *nbr, enum nbr_event event)
 		return (0);
 	}
 
+	ret = 0;
+
 	switch (nbr_fsm_tbl[i].action) {
 	case NBR_ACT_RST_ITIMER:
-		ret = nbr_act_reset_itimer(nbr);
+		nbr_reset_itimer(nbr);
 		break;
 	case NBR_ACT_STRT_ITIMER:
-		ret = nbr_act_start_itimer(nbr);
+		nbr_start_itimer(nbr);
 		break;
 	case NBR_ACT_RST_KTIMEOUT:
-		ret = nbr_act_reset_ktimeout(nbr);
+		nbr_reset_ktimeout(nbr);
 		break;
 	case NBR_ACT_RST_KTIMER:
-		ret = nbr_act_reset_ktimer(nbr);
+		nbr_reset_ktimer(nbr);
 		break;
 	case NBR_ACT_STRT_KTIMER:
-		/* XXX */
-		ret = nbr_act_start_ktimer(nbr);
-		nbr_act_start_ktimeout(nbr);
+		nbr_start_ktimer(nbr);
+		nbr_start_ktimeout(nbr);
 		send_address(nbr, NULL);
 		nbr_send_labelmappings(nbr);
 		break;
@@ -158,21 +160,19 @@ nbr_fsm(struct nbr *nbr, enum nbr_event event)
 		ret = nbr_act_session_establish(nbr, 0);
 		break;
 	case NBR_ACT_INIT_SEND:
-		/* XXX */
+		send_init(nbr);
 		send_keepalive(nbr);
-		ret = send_init(nbr);
 		break;
 	case NBR_ACT_KEEPALIVE_SEND:
-		/* XXX */
-		ret = nbr_act_start_ktimer(nbr);
-		nbr_act_start_ktimeout(nbr);
+		nbr_start_ktimer(nbr);
+		nbr_start_ktimeout(nbr);
 		send_keepalive(nbr);
 		send_address(nbr, NULL);
 		nbr_send_labelmappings(nbr);
 		break;
 	case NBR_ACT_CLOSE_SESSION:
 		session_close(nbr);
-		ret = nbr_act_start_idtimer(nbr);
+		nbr_start_idtimer(nbr);
 		break;
 	case NBR_ACT_NOTHING:
 		/* do nothing */
@@ -196,6 +196,11 @@ nbr_fsm(struct nbr *nbr, enum nbr_event event)
 		    nbr_action_names[nbr_fsm_tbl[i].action],
 		    inet_ntoa(nbr->id), nbr_state_name(old_state),
 		    nbr_state_name(nbr->state));
+
+		if (nbr->state == NBR_STA_OPER) {
+			gettimeofday(&now, NULL);
+			nbr->uptime = now.tv_sec;
+		}
 	}
 
 	return (ret);
@@ -204,8 +209,6 @@ nbr_fsm(struct nbr *nbr, enum nbr_event event)
 void
 nbr_init(u_int32_t hashsize)
 {
-	struct nbr_head	*head;
-	struct nbr	*nbr;
 	u_int32_t        hs, i;
 
 	for (hs = 1; hs < hashsize; hs <<= 1)
@@ -218,22 +221,6 @@ nbr_init(u_int32_t hashsize)
 		LIST_INIT(&nbrtable.hashtbl[i]);
 
 	nbrtable.hashmask = hs - 1;
-
-	/* allocate a dummy neighbor used for self originated AS ext routes */
-	if ((nbr = calloc(1, sizeof(*nbr))) == NULL)
-		fatal("nbr_init");
-
-	nbr->id.s_addr = ldpe_router_id();
-	nbr->state = NBR_STA_DOWN;
-	nbr->peerid = NBR_IDSELF;
-	head = NBR_HASH(nbr->peerid);
-	LIST_INSERT_HEAD(head, nbr, hash);
-
-	TAILQ_INIT(&nbr->mapping_list);
-	TAILQ_INIT(&nbr->withdraw_list);
-	TAILQ_INIT(&nbr->request_list);
-	TAILQ_INIT(&nbr->release_list);
-	TAILQ_INIT(&nbr->abortreq_list);
 }
 
 struct nbr *
@@ -245,6 +232,10 @@ nbr_new(u_int32_t nbr_id, u_int16_t lspace, struct iface *iface, int self)
 
 	if ((nbr = calloc(1, sizeof(*nbr))) == NULL)
 		fatal("nbr_new");
+
+	if (!self)
+		if ((nbr->rbuf = calloc(1, sizeof(struct buf_read))) == NULL)
+			fatal("nbr_new");
 
 	nbr->state = NBR_STA_DOWN;
 	nbr->id.s_addr = nbr_id;
@@ -265,6 +256,12 @@ nbr_new(u_int32_t nbr_id, u_int16_t lspace, struct iface *iface, int self)
 		nbr->addr.s_addr = iface->addr.s_addr;
 		nbr->priority = iface->priority;
 	}
+
+	TAILQ_INIT(&nbr->mapping_list);
+	TAILQ_INIT(&nbr->withdraw_list);
+	TAILQ_INIT(&nbr->request_list);
+	TAILQ_INIT(&nbr->release_list);
+	TAILQ_INIT(&nbr->abortreq_list);
 
 	/* set event structures */
 	evtimer_set(&nbr->inactivity_timer, nbr_itimer, nbr);
@@ -288,6 +285,8 @@ nbr_del(struct nbr *nbr)
 {
 	ldpe_imsg_compose_lde(IMSG_NEIGHBOR_DOWN, nbr->peerid, 0, NULL, 0);
 
+	session_close(nbr);
+
 	if (evtimer_pending(&nbr->inactivity_timer, NULL))
 		evtimer_del(&nbr->inactivity_timer);
 	if (evtimer_pending(&nbr->keepalive_timer, NULL))
@@ -302,6 +301,7 @@ nbr_del(struct nbr *nbr)
 	LIST_REMOVE(nbr, entry);
 	LIST_REMOVE(nbr, hash);
 
+	free(nbr->rbuf);
 	free(nbr);
 }
 
@@ -400,9 +400,6 @@ nbr_ktimer(int fd, short event, void *arg)
 {
 	struct nbr	*nbr = arg;
 	struct timeval	 tv;
-
-	log_debug("nbr_ktimer: neighbor ID %s peerid %lu", inet_ntoa(nbr->id),
-	    nbr->peerid);
 
 	send_keepalive(nbr);
 
@@ -545,106 +542,31 @@ nbr_reset_idtimer(struct nbr *nbr)
 	if (evtimer_add(&nbr->initdelay_timer, &tv) == -1)
 		fatal("nbr_reset_idtimer");
 }
-/* actions */
-int
-nbr_act_reset_itimer(struct nbr *nbr)
-{
-	nbr_reset_itimer(nbr);
-
-	return (0);
-}
-
-int
-nbr_act_start_itimer(struct nbr *nbr)
-{
-	nbr_start_itimer(nbr);
-
-	return (0);
-}
-
-int
-nbr_act_reset_ktimer(struct nbr *nbr)
-{
-	nbr_reset_ktimer(nbr);
-
-	return (0);
-}
-
-int
-nbr_act_start_ktimer(struct nbr *nbr)
-{
-	nbr_start_ktimer(nbr);
-
-	return (0);
-}
-
-int
-nbr_act_reset_ktimeout(struct nbr *nbr)
-{
-	nbr_reset_ktimeout(nbr);
-
-	return (0);
-}
-
-int
-nbr_act_start_ktimeout(struct nbr *nbr)
-{
-	nbr_start_ktimeout(nbr);
-
-	return (0);
-}
-
-int
-nbr_act_reset_idtimer(struct nbr *nbr)
-{
-	nbr_reset_idtimer(nbr);
-
-	return (0);
-}
-
-int
-nbr_act_start_idtimer(struct nbr *nbr)
-{
-	if (nbr->addr.s_addr < nbr->iface->addr.s_addr)
-		nbr_start_idtimer(nbr);
-
-	return (0);
-}
 
 int
 nbr_establish_connection(struct nbr *nbr)
 {
 	struct sockaddr_in	in;
-	int			st;
 
+	bzero(&in, sizeof(in));
 	in.sin_family = AF_INET;
 	in.sin_port = htons(LDP_PORT);
 	in.sin_addr.s_addr = nbr->addr.s_addr;
 
 	nbr->fd = socket(AF_INET, SOCK_STREAM, 0);
-	if (nbr->fd < 0) {
+	if (nbr->fd == -1) {
 		log_debug("nbr_establish_connection: error while "
 		    "creating socket");
 		return (-1);
 	}
 
-	st = connect(nbr->fd, (struct sockaddr *)&in, sizeof(in));
-	if (st < 0 ) {
+	if (connect(nbr->fd, (struct sockaddr *)&in, sizeof(in)) == -1) {
 		log_debug("nbr_establish_connection: error while "
 		    "connecting to %s", inet_ntoa(nbr->addr));
-		nbr_act_start_idtimer(nbr);
+		nbr_start_idtimer(nbr);
+		close(nbr->fd);
 		return (-1);
 	}
-
-	return (0);
-}
-
-int
-nbr_close_connection(struct nbr *nbr)
-{
-	bufferevent_disable(nbr->bev, EV_READ|EV_WRITE);
-	bufferevent_free(nbr->bev);
-	close(nbr->fd);
 
 	return (0);
 }
@@ -652,17 +574,14 @@ nbr_close_connection(struct nbr *nbr)
 int
 nbr_act_session_establish(struct nbr *nbr, int active)
 {
-	evbuffercb	readfn = session_read;
-	everrorcb	errorfn = session_error;
-
 	if (active) {
 		if (nbr_establish_connection(nbr) < 0)
 			return (-1);
 	}
 
-	nbr->bev = bufferevent_new(nbr->fd, readfn, NULL, errorfn, nbr);
-	bufferevent_settimeout(nbr->bev, 0, 0);
-	bufferevent_enable(nbr->bev, EV_READ|EV_WRITE);
+	evbuf_init(&nbr->wbuf, nbr->fd, session_write, nbr);
+	event_set(&nbr->rev, nbr->fd, EV_READ | EV_PERSIST, session_read, nbr);
+	event_add(&nbr->rev, NULL);
 
 	if (active) {
 		send_init(nbr);
@@ -678,7 +597,7 @@ nbr_send_labelmappings(struct nbr *nbr)
 {
 	if (leconf->mode & MODE_ADV_UNSOLICITED) {
 		ldpe_imsg_compose_lde(IMSG_LABEL_MAPPING_FULL, nbr->peerid, 0,
-		    0, 0);
+		    NULL, 0);
 	}
 }
 
@@ -695,7 +614,7 @@ nbr_mapping_add(struct nbr *nbr, struct mapping_head *mh, struct map *map)
 	me->prefixlen = map->prefixlen;
 	me->label = map->label;
 
-	TAILQ_INSERT_HEAD(mh, me, entry);
+	TAILQ_INSERT_TAIL(mh, me, entry);
 }
 
 struct mapping_entry *
@@ -747,6 +666,7 @@ nbr_to_ctl(struct nbr *nbr)
 	memcpy(&nctl.addr, &nbr->addr, sizeof(nctl.addr));
 
 	nctl.nbr_state = nbr->state;
+	nctl.iface_state = nbr->iface->state;
 
 	gettimeofday(&now, NULL);
 	if (evtimer_pending(&nbr->inactivity_timer, &tv)) {
@@ -757,11 +677,11 @@ nbr_to_ctl(struct nbr *nbr)
 			nctl.dead_timer = res.tv_sec;
 	} else
 		nctl.dead_timer = 0;
-/*
-	if (nbr->state == NBR_STA_FULL) {
+
+	if (nbr->state == NBR_STA_OPER) {
 		nctl.uptime = now.tv_sec - nbr->uptime;
 	} else
 		nctl.uptime = 0;
-*/
+
 	return (&nctl);
 }

@@ -1,4 +1,4 @@
-/*	$OpenBSD: ripd.c,v 1.16 2009/06/06 08:20:55 eric Exp $ */
+/*	$OpenBSD: ripd.c,v 1.20 2010/02/08 00:26:51 guenther Exp $ */
 
 /*
  * Copyright (c) 2006 Michele Marchetto <mydecay@openbeer.it>
@@ -138,7 +138,7 @@ main(int argc, char *argv[])
 		case 'd':
 			debug = 1;
 			break;
-                case 'D':
+		case 'D':
 			if (cmdline_symset(optarg) < 0)
 				log_warnx("could not parse macro definition %s",
 				    optarg);
@@ -232,7 +232,7 @@ main(int argc, char *argv[])
 	/* setup signal handler */
 	signal_set(&ev_sigint, SIGINT, main_sig_handler, NULL);
 	signal_set(&ev_sigterm, SIGTERM, main_sig_handler, NULL);
-	signal_set(&ev_sigchld, SIGINT, main_sig_handler, NULL);
+	signal_set(&ev_sigchld, SIGCHLD, main_sig_handler, NULL);
 	signal_set(&ev_sighup, SIGHUP, main_sig_handler, NULL);
 	signal_add(&ev_sigint, NULL);
 	signal_add(&ev_sigterm, NULL);
@@ -265,7 +265,8 @@ main(int argc, char *argv[])
 	    iev_rde->handler, iev_rde);
 	event_add(&iev_rde->ev, NULL);
 
-	if (kr_init(!(conf->flags & RIPD_FLAG_NO_FIB_UPDATE)) == -1)
+	if (kr_init(!(conf->flags & RIPD_FLAG_NO_FIB_UPDATE),
+	    conf->rdomain) == -1)
 		fatalx("kr_init failed");
 
 	event_dispatch();
@@ -338,10 +339,10 @@ main_dispatch_ripe(int fd, short event, void *bula)
 {
 	struct imsgev		*iev = bula;
 	struct imsgbuf		*ibuf = &iev->ibuf;
-	struct imsg	 	 imsg;
+	struct imsg		 imsg;
 	struct demote_msg	 dmsg;
-	ssize_t		 	 n;
-	int		 	 shut = 0;
+	ssize_t			 n;
+	int			 shut = 0, verbose;
 
 	if (event & EV_READ) {
 		if ((n = imsg_read(ibuf)) == -1)
@@ -388,6 +389,11 @@ main_dispatch_ripe(int fd, short event, void *bula)
 				fatalx("invalid size of OE request");
 			memcpy(&dmsg, imsg.data, sizeof(dmsg));
 			carp_demote_set(dmsg.demote_group, dmsg.level);
+			break;
+		case IMSG_CTL_LOG_VERBOSE:
+			/* already checked by ripe */
+			memcpy(&verbose, imsg.data, sizeof(verbose));
+			log_verbose(verbose);
 			break;
 		default:
 			log_debug("main_dispatch_ripe: error handling imsg %d",
@@ -543,28 +549,28 @@ rip_redistribute(struct kroute *kr)
 void
 imsg_event_add(struct imsgev *iev)
 {
-        if (iev->handler == NULL) {
-                imsg_flush(&iev->ibuf);
-                return;
-        }
-        
-        iev->events = EV_READ;
-        if (iev->ibuf.w.queued)
-                iev->events |= EV_WRITE;
-                        
-        event_del(&iev->ev);
-        event_set(&iev->ev, iev->ibuf.fd, iev->events, iev->handler, iev);
-        event_add(&iev->ev, NULL);   
+	if (iev->handler == NULL) {
+		imsg_flush(&iev->ibuf);
+		return;
+	}
+
+	iev->events = EV_READ;
+	if (iev->ibuf.w.queued)
+		iev->events |= EV_WRITE;
+
+	event_del(&iev->ev);
+	event_set(&iev->ev, iev->ibuf.fd, iev->events, iev->handler, iev);
+	event_add(&iev->ev, NULL);
 }
-                         
+
 int
 imsg_compose_event(struct imsgev *iev, u_int16_t type,
     u_int32_t peerid, pid_t pid, int fd, void *data, u_int16_t datalen)
 {
-        int     ret;
-                            
-        if ((ret = imsg_compose(&iev->ibuf, type, peerid,
-            pid, fd, data, datalen)) != -1)
-                imsg_event_add(iev);
-        return (ret);
+	int	ret;
+
+	if ((ret = imsg_compose(&iev->ibuf, type, peerid,
+	    pid, fd, data, datalen)) != -1)
+		imsg_event_add(iev);
+	return (ret);
 }

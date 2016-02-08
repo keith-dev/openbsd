@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.96 2009/06/15 17:01:25 beck Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.105 2010/03/08 03:40:50 jolan Exp $	*/
 /*	$NetBSD: machdep.c,v 1.3 2003/05/07 22:58:18 fvdl Exp $	*/
 
 /*-
@@ -86,10 +86,6 @@
 #include <sys/core.h>
 #include <sys/kcore.h>
 #include <sys/syscallargs.h>
-
-#ifdef SYSVMSG
-#include <sys/msg.h>
-#endif
 
 #ifdef KGDB
 #include <sys/kgdb.h>
@@ -255,8 +251,6 @@ u_int32_t	bios_cksumlen;
 phys_ram_seg_t mem_clusters[VM_PHYSSEG_MAX];
 int	mem_cluster_cnt;
 
-vaddr_t	allocsys(vaddr_t);
-void	setup_buffers(void);
 int	cpu_dump(void);
 int	cpu_dumpsize(void);
 u_long	cpu_dump_mempagecnt(void);
@@ -302,8 +296,6 @@ int allowaperture = 0;
 void
 cpu_startup(void)
 {
-	vaddr_t v;
-	vsize_t sz;
 	vaddr_t minaddr, maxaddr;
 
 	msgbuf_vaddr = PMAP_DIRECT_MAP(msgbuf_paddr);
@@ -313,18 +305,6 @@ cpu_startup(void)
 
 	printf("real mem = %lu (%luMB)\n", ptoa((psize_t)physmem),
 	    ptoa((psize_t)physmem)/1024/1024);
-
-	/*
-	 * Find out how much space we need, allocate it,
-	 * and then give everything true virtual addresses.
-	 */
-	sz = allocsys(0);
-	if ((v = uvm_km_zalloc(kernel_map, round_page(sz))) == 0)
-		panic("startup: no room for tables");
-	if (allocsys(v) - v != sz)
-		panic("startup: table size inconsistency");
-
-	setup_buffers();
 
 	/*
 	 * Allocate a submap for exec arguments.  This map effectively
@@ -362,49 +342,6 @@ cpu_startup(void)
 
 	/* Safe for i/o port / memory space allocation to use malloc now. */
 	x86_bus_space_mallocok();
-}
-
-/*
- * Allocate space for system data structures.  We are given
- * a starting virtual address and we return a final virtual
- * address; along the way we set each data structure pointer.
- *
- * We call allocsys() with 0 to find out how much space we want,
- * allocate that much and fill it with zeroes, and then call
- * allocsys() again with the correct base virtual address.
- */
-vaddr_t
-allocsys(vaddr_t v)
-{
-
-#define	valloc(name, type, num) \
-	    v = (vaddr_t)(((name) = (type *)v) + (num))
-
-#ifdef SYSVMSG
-	valloc(msgpool, char, msginfo.msgmax);
-	valloc(msgmaps, struct msgmap, msginfo.msgseg);
-	valloc(msghdrs, struct msg, msginfo.msgtql);
-	valloc(msqids, struct msqid_ds, msginfo.msgmni);
-#endif
-
-	return v;
-}
-
-void
-setup_buffers()
-{
-	/*
-	 * Determine how many buffers to allocate.
-	 * We allocate bufcachepercent% of memory for buffer space.
-	 */
-	if (bufpages == 0)
-		bufpages = physmem * bufcachepercent / 100;
-
-	/* Restrict to at most 25% filled kvm */
-	if (bufpages >
-	    (VM_MAX_KERNEL_ADDRESS-VM_MIN_KERNEL_ADDRESS) / PAGE_SIZE / 4) 
-		bufpages = (VM_MAX_KERNEL_ADDRESS-VM_MIN_KERNEL_ADDRESS) /
-		    PAGE_SIZE / 4;
 }
 
 /*
@@ -529,6 +466,7 @@ int
 cpu_sysctl(int *name, u_int namelen, void *oldp, size_t *oldlenp, void *newp,
     size_t newlen, struct proc *p)
 {
+	extern int amd64_has_xcrypt;
 	dev_t consdev;
 	dev_t dev;
 
@@ -576,6 +514,8 @@ cpu_sysctl(int *name, u_int namelen, void *oldp, size_t *oldlenp, void *newp,
 #else
 		return (sysctl_rdint(oldp, oldlenp, newp, 0));
 #endif
+	case CPU_XCRYPT:
+		return (sysctl_rdint(oldp, oldlenp, newp, amd64_has_xcrypt));
 	default:
 		return (EOPNOTSUPP);
 	}
@@ -1202,7 +1142,7 @@ cpu_init_extents(void)
 }
 
 #if defined(MULTIPROCESSOR) || \
-    (NACPI > 0 && defined(ACPI_SLEEP_ENABLED) && !defined(SMALL_KERNEL))
+    (NACPI > 0 && !defined(SMALL_KERNEL))
 void
 map_tramps(void) {
 	struct pmap *kmp = pmap_kernel();
@@ -1227,11 +1167,9 @@ map_tramps(void) {
 #endif /* MULTIPROCESSOR */
 
 
-#ifdef ACPI_SLEEP_ENABLED
 	pmap_kenter_pa((vaddr_t)ACPI_TRAMPOLINE, /* virtual */
 	    (paddr_t)ACPI_TRAMPOLINE,	/* physical */
 	    VM_PROT_ALL);		/* protection */
-#endif /* ACPI_SLEEP_ENABLED */
 }
 #endif
 
@@ -1326,10 +1264,10 @@ init_x86_64(paddr_t first_avail)
 		avail_start = MP_TRAMPOLINE + PAGE_SIZE;
 #endif
 
-#ifdef ACPI_SLEEP_ENABLED
+#if (NACPI > 0 && !defined(SMALL_KERNEL))
 	if (avail_start < ACPI_TRAMPOLINE + PAGE_SIZE)
 		avail_start = ACPI_TRAMPOLINE + PAGE_SIZE;
-#endif /* ACPI_SLEEP_ENABLED */
+#endif
 
 	/* Let us know if we're supporting > 4GB ram load */
 	if (bigmem)
@@ -1523,7 +1461,7 @@ init_x86_64(paddr_t first_avail)
 	    VM_PROT_READ|VM_PROT_WRITE);
 
 #if defined(MULTIPROCESSOR) || \
-    (NACPI > 0 && defined(ACPI_SLEEP_ENABLED) && !defined(SMALL_KERNEL))
+    (NACPI > 0 && !defined(SMALL_KERNEL))
 	map_tramps();
 #endif
 

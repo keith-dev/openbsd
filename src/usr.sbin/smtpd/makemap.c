@@ -1,4 +1,4 @@
-/*	$OpenBSD: makemap.c,v 1.18 2009/05/30 23:53:41 gilles Exp $	*/
+/*	$OpenBSD: makemap.c,v 1.24 2009/11/08 23:08:56 gilles Exp $	*/
 
 /*
  * Copyright (c) 2008 Gilles Chehade <gilles@openbsd.org>
@@ -45,6 +45,8 @@ extern char *__progname;
 __dead void	usage(void);
 int		parse_map(char *);
 int		parse_entry(char *, size_t, size_t);
+int		parse_mapentry(char *, size_t, size_t);
+int		parse_setentry(char *, size_t, size_t);
 int		make_plain(DBT *, char *);
 int		make_aliases(DBT *, char *);
 
@@ -62,7 +64,8 @@ enum program {
 
 enum output_type {
 	T_PLAIN,
-	T_ALIASES
+	T_ALIASES,
+	T_SET
 } type;
 
 /*
@@ -109,6 +112,8 @@ main(int argc, char *argv[])
 		case 't':
 			if (strcmp(optarg, "aliases") == 0)
 				type = T_ALIASES;
+			else if (strcmp(optarg, "set") == 0)
+				type = T_SET;
 			else
 				errx(1, "unsupported type '%s'", optarg);
 			break;
@@ -186,7 +191,7 @@ parse_map(char *filename)
 	char	*line;
 	size_t	 len;
 	size_t	 lineno = 0;
-	char	 delim[] = { '\\', '\\', '#' };
+	char	 delim[] = { '\\', 0, 0 };
 
 	fp = fopen(filename, "r");
 	if (fp == NULL) {
@@ -219,15 +224,31 @@ parse_map(char *filename)
 int
 parse_entry(char *line, size_t len, size_t lineno)
 {
+	switch (type) {
+	case T_PLAIN:
+	case T_ALIASES:
+		return parse_mapentry(line, len, lineno);
+	case T_SET:
+		return parse_setentry(line, len, lineno);
+	}
+	return 0;
+}
+
+int
+parse_mapentry(char *line, size_t len, size_t lineno)
+{
 	DBT	 key;
 	DBT	 val;
+	DBT	 domkey;
+	DBT	 domval;
 	char	*keyp;
 	char	*valp;
+	char	*domp;
 
 	keyp = line;
-	while (isspace(*keyp))
+	while (isspace((int)*keyp))
 		keyp++;
-	if (*keyp == '\0')
+	if (*keyp == '\0' || *keyp == '#')
 		return 1;
 
 	valp = keyp;
@@ -243,22 +264,36 @@ parse_entry(char *line, size_t len, size_t lineno)
 		return 0;
 	}
 
-	switch (type) {
-	case T_PLAIN:
+	if (type == T_PLAIN) {
 		if (! make_plain(&val, valp))
 			goto bad;
-		break;
-	case T_ALIASES:
+	}
+	else if (type == T_ALIASES) {
 		lowercase(key.data, key.data, strlen(key.data) + 1);
 		if (! make_aliases(&val, valp))
 			goto bad;
-		break;
 	}
 
 	if (db->put(db, &key, &val, 0) == -1) {
 		warn("dbput");
 		return 0;
 	}
+
+	/* add key for domain */
+	if ((domp = strrchr(key.data, '@')) != NULL) {
+		domkey.data = domp + 1;
+		domkey.size = strlen(domkey.data) + 1;
+
+		domval.data  = "<empty>";
+		domval.size = strlen(domval.data) + 1;
+
+		if (db->put(db, &domkey, &domval, 0) == -1) {
+			warn("dbput");
+			return 0;
+		}
+	}
+	
+
 	dbputs++;
 
 	free(val.data);
@@ -268,6 +303,40 @@ parse_entry(char *line, size_t len, size_t lineno)
 bad:
 	warnx("%s:%zd: invalid entry", source, lineno);
 	return 0;
+}
+
+int
+parse_setentry(char *line, size_t len, size_t lineno)
+{
+	DBT	 key;
+	DBT	 val;
+	char	*keyp;
+
+	keyp = line;
+	while (isspace((int)*keyp))
+		keyp++;
+	if (*keyp == '\0' || *keyp == '#')
+		return 1;
+
+	val.data  = "<set>";
+	val.size = strlen(val.data) + 1;
+
+	/* Check for dups. */
+	key.data = keyp;
+	key.size = strlen(keyp) + 1;
+	if (db->get(db, &key, &val, 0) == 0) {
+		warnx("%s:%zd: duplicate entry for %s", source, lineno, keyp);
+		return 0;
+	}
+
+	if (db->put(db, &key, &val, 0) == -1) {
+		warn("dbput");
+		return 0;
+	}	
+
+	dbputs++;
+
+	return 1;
 }
 
 int
@@ -285,23 +354,23 @@ make_plain(DBT *val, char *text)
 int
 make_aliases(DBT *val, char *text)
 {
-	struct alias	 a;
-	char		*subrcpt;
-	char		*endp;
+	struct alias	a;
+	char	       	*subrcpt;
+	char	       	*endp;
 
 	val->data = NULL;
 	val->size = 0;
 
 	while ((subrcpt = strsep(&text, ",")) != NULL) {
 		/* subrcpt: strip initial whitespace. */
-		while (isspace(*subrcpt))
+		while (isspace((int)*subrcpt))
 			++subrcpt;
 		if (*subrcpt == '\0')
 			goto error;
 
 		/* subrcpt: strip trailing whitespace. */
 		endp = subrcpt + strlen(subrcpt) - 1;
-		while (subrcpt < endp && isspace(*endp))
+		while (subrcpt < endp && isspace((int)*endp))
 			*endp-- = '\0';
 
 		if (! alias_parse(&a, subrcpt))
@@ -354,7 +423,7 @@ usage(void)
 	if (mode == P_NEWALIASES)
 		fprintf(stderr, "usage: %s [-f file]\n", __progname);
 	else
-		fprintf(stderr, "usage: %s [-t type] [-o dbfile] file\n",
+		fprintf(stderr, "usage: %s [-o dbfile] [-t type] file\n",
 		    __progname);
 	exit(1);
 }

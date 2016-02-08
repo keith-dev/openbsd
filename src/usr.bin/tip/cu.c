@@ -1,4 +1,4 @@
-/*	$OpenBSD: cu.c,v 1.23 2007/11/26 09:28:34 martynas Exp $	*/
+/*	$OpenBSD: cu.c,v 1.25 2009/12/12 18:14:00 nicm Exp $	*/
 /*	$NetBSD: cu.c,v 1.5 1997/02/11 09:24:05 mrg Exp $	*/
 
 /*
@@ -29,13 +29,6 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  */
-
-#ifndef lint
-#if 0
-static char sccsid[] = "@(#)cu.c	8.1 (Berkeley) 6/6/93";
-#endif
-static const char rcsid[] = "$OpenBSD: cu.c,v 1.23 2007/11/26 09:28:34 martynas Exp $";
-#endif /* not lint */
 
 #include <err.h>
 #include <paths.h>
@@ -172,7 +165,6 @@ getopt:
 	}
 	setbuf(stdout, NULL);
 	loginit();
-	user_uid();
 	vinit();
 	switch (parity) {
 	case -1:
@@ -189,20 +181,17 @@ getopt:
 	if (HW && ttysetup(BR)) {
 		fprintf(stderr, "%s: unsupported speed %ld\n",
 		    __progname, BR);
-		daemon_uid();
 		(void)uu_unlock(uucplock);
 		exit(3);
 	}
 	if (con()) {
 		printf("Connect failed\n");
-		daemon_uid();
 		(void)uu_unlock(uucplock);
 		exit(1);
 	}
 	if (!HW && ttysetup(BR)) {
 		fprintf(stderr, "%s: unsupported speed %ld\n",
 		    __progname, BR);
-		daemon_uid();
 		(void)uu_unlock(uucplock);
 		exit(3);
 	}

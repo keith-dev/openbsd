@@ -1,4 +1,4 @@
-/*	$OpenBSD: mopa.out.c,v 1.8 2006/04/29 16:26:56 maja Exp $ */
+/*	$OpenBSD: mopa.out.c,v 1.10 2009/10/27 23:59:52 deraadt Exp $ */
 
 /* mopa.out - Convert a Unix format kernel into something that
  * can be transferred via MOP.
@@ -47,10 +47,6 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef lint
-static const char rcsid[] = "$OpenBSD: mopa.out.c,v 1.8 2006/04/29 16:26:56 maja Exp $";
-#endif
-
 #include "os.h"
 #include "common/common.h"
 #include "common/mopdef.h"
@@ -85,7 +81,7 @@ main (int argc, char **argv)
 #endif	
 
 	if (argc != 3) {
-		fprintf (stderr, "usage: %s kernel-in sys-out\n", argv[0]);
+		fprintf (stderr, "usage: %s infile outfile\n", argv[0]);
 		return (1);
 	}
 	

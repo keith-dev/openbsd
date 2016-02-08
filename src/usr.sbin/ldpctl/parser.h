@@ -1,4 +1,4 @@
-/*	$OpenBSD: parser.h,v 1.1 2009/06/01 20:59:45 michele Exp $ */
+/*	$OpenBSD: parser.h,v 1.3 2010/01/13 11:33:12 jsg Exp $ */
 
 /*
  * Copyright (c) 2009 Michele Marchetto <michele@openbsd.org>
@@ -30,6 +30,8 @@ enum actions {
 	LFIB,
 	LFIB_COUPLE,
 	LFIB_DECOUPLE,
+	LOG_VERBOSE,
+	LOG_BRIEF,
 	SHOW,
 	SHOW_IFACE,
 	SHOW_NBR,
@@ -48,8 +50,8 @@ struct parse_result {
 };
 
 struct parse_result	*parse(int, char *[]);
-const struct token	*match_token(const char *, const struct token []);
-void			 show_valid_args(const struct token []);
+const struct token	*match_token(const char *, const struct token *);
+void			 show_valid_args(const struct token *);
 int			 parse_addr(const char *, struct in_addr *);
 int			 parse_prefix(const char *, struct in_addr *,
 			     u_int8_t *);

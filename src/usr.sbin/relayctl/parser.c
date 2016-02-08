@@ -1,4 +1,4 @@
-/*	$OpenBSD: parser.c,v 1.20 2007/12/20 20:15:43 reyk Exp $	*/
+/*	$OpenBSD: parser.c,v 1.23 2010/01/11 06:40:14 jsg Exp $	*/
 
 /*
  * Copyright (c) 2006 Pierre-Yves Ritschard <pyr@openbsd.org>
@@ -64,6 +64,7 @@ static const struct token t_host[];
 static const struct token t_rdr_id[];
 static const struct token t_table_id[];
 static const struct token t_host_id[];
+static const struct token t_log[];
 
 static const struct token t_main[] = {
 	{KEYWORD,	"monitor",	MONITOR,	NULL},
@@ -74,6 +75,7 @@ static const struct token t_main[] = {
 	{KEYWORD,	"redirect",	NONE,		t_rdr},
 	{KEYWORD,	"table",	NONE,		t_table},
 	{KEYWORD,	"host",		NONE,		t_host},
+	{KEYWORD,	"log",		NONE,		t_log},
 	{ENDTOKEN,	"",		NONE,		NULL}
 };
 
@@ -82,6 +84,7 @@ static const struct token t_show[] = {
 	{KEYWORD,	"hosts",	SHOW_HOSTS,	NULL},
 	{KEYWORD,	"redirects",	SHOW_RDRS,	NULL},
 	{KEYWORD,	"relays",	SHOW_RELAYS,	NULL},
+	{KEYWORD,	"routers",	SHOW_ROUTERS,	NULL},
 	{KEYWORD,	"sessions",	SHOW_SESSIONS,	NULL},
 	{ENDTOKEN,	"",		NONE,		NULL}
 };
@@ -122,6 +125,12 @@ static const struct token t_host_id[] = {
 	{ENDTOKEN,	"",		NONE,		NULL}
 };
 
+static const struct token t_log[] = {
+	{KEYWORD,	"verbose",	LOG_VERBOSE, 	NULL},
+	{KEYWORD,	"brief",	LOG_BRIEF, 	NULL},
+	{ENDTOKEN, 	"",		NONE,		NULL}
+};
+
 static struct parse_result	res;
 
 struct parse_result *
@@ -157,7 +166,7 @@ parse(int argc, char *argv[])
 }
 
 const struct token *
-match_token(const char *word, const struct token table[])
+match_token(const char *word, const struct token *table)
 {
 	u_int			 i, match;
 	const struct token	*t = NULL;
@@ -234,7 +243,7 @@ match_token(const char *word, const struct token table[])
 }
 
 void
-show_valid_args(const struct token table[])
+show_valid_args(const struct token *table)
 {
 	int	i;
 

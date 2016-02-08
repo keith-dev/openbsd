@@ -1,4 +1,4 @@
-.\" $OpenBSD: bgpd.conf.5,v 1.94 2009/06/07 00:31:22 claudio Exp $
+.\" $OpenBSD: bgpd.conf.5,v 1.104 2010/03/05 15:25:00 claudio Exp $
 .\"
 .\" Copyright (c) 2004 Claudio Jeker <claudio@openbsd.org>
 .\" Copyright (c) 2003, 2004 Henning Brauer <henning@openbsd.org>
@@ -16,7 +16,7 @@
 .\" ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
 .\" OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 .\"
-.Dd $Mdocdate: June 7 2009 $
+.Dd $Mdocdate: March 5 2010 $
 .Dt BGPD.CONF 5
 .Os
 .Sh NAME
@@ -93,7 +93,7 @@ Set the local
 .Em autonomous system
 number to
 .Ar as-number .
-If the first AS number is a 4-byte AS it is possible to specifiy a secondary
+If the first AS number is a 4-byte AS it is possible to specify a secondary
 2-byte AS number which is used for neighbors which do not support 4-byte AS
 numbers.
 The default for the secondary AS is 23456.
@@ -313,7 +313,7 @@ is only compared between peers belonging to the same AS.
 .Ic rib Ar name
 .Op Ic no Ic evaluate
 .Xc
-Creat an additional RIB named
+Create an additional RIB named
 .Ar name .
 It is possible to disable the decision process per RIB with the
 .Ic no Ic evaluate
@@ -321,7 +321,7 @@ flag.
 .Ic Adj-RIB-In
 and
 .Ic Loc-RIB
-are created automaticaly and used as default.
+are created automatically and used as default.
 .Pp
 .It Xo
 .Ic rde
@@ -483,6 +483,17 @@ Only routes for that address family and subsequent address family will be
 announced and processed.
 .Pp
 .It Xo
+.Ic announce as-4byte
+.Pq Ic yes Ns \&| Ns Ic no
+.Xc
+If set to
+.Ic no ,
+the 4-byte AS capability is not announced and so native 4-byte AS support is
+disabled.
+The default is
+.Ic yes .
+.Pp
+.It Xo
 .Ic announce capabilities
 .Pq Ic yes Ns \&| Ns Ic no
 .Xc
@@ -492,6 +503,29 @@ capability negotiation is disabled during the establishment of the session.
 This can be helpful to connect to old or broken BGP implementations.
 The default is
 .Ic yes .
+.Pp
+.It Xo
+.Ic announce refresh
+.Pq Ic yes Ns \&| Ns Ic no
+.Xc
+If set to
+.Ic no ,
+the route refresh capability is not announced.
+The default is
+.Ic yes .
+.Pp
+.It Xo
+.Ic announce restart
+.Pq Ic yes Ns \&| Ns Ic no
+.Xc
+If set to
+.Ic yes ,
+the graceful restart capability is announced.
+Currently only the End-of-RIB marker is supported and announced by the
+.Ic restart
+capability.
+The default is
+.Ic no .
 .Pp
 .It Ic demote Ar group
 Increase the
@@ -504,7 +538,7 @@ The demotion counter will be increased as soon as
 .Xr bgpd 8
 starts and decreased
 60 seconds after the session went to state
-.Em ESTABLISHED.
+.Em ESTABLISHED .
 For neighbors added at runtime, the demotion counter is only increased after
 the session has been
 .Em ESTABLISHED
@@ -698,7 +732,7 @@ Do not attempt to actively open a TCP connection to the neighbor system.
 .It Ic remote-as Ar as-number
 Set the AS number of the remote system.
 .Pp
-.It rib .Ar name
+.It Ic rib Ar name
 Bind the neighbor to the specified RIB.
 .Pp
 .It Ic route-reflector Op Ar address
@@ -917,6 +951,31 @@ may be set to
 which is expanded to the current neighbor remote AS number.
 .Pp
 .It Xo
+.Ic ext-community
+.Ar subtype Ar as-number Ns Li : Ns Ar local
+.Xc
+.It Xo
+.Ic ext-community
+.Ar subtype Ar IP Ns Li : Ns Ar local
+.Xc
+.It Xo
+.Ic ext-community
+.Ar subtype Ar numvalue
+.Xc
+This rule applies only to
+.Em UPDATES
+where the
+.Em extended community
+path attribute is present and matches.
+Extended Communities are specified by a
+.Ar subtype
+and normally two values, a globally unique part (e.g. the AS number) and a
+local part.
+See also the
+.Sx ATTRIBUTE SET
+section for further information about the encoding.
+.Pp
+.It Xo
 .Pq Ic from Ns \&| Ns Ic to
 .Ar peer
 .Xc
@@ -1028,6 +1087,12 @@ matches a rule which has the
 option set, this rule is considered the last matching rule, and evaluation
 of subsequent rules is skipped.
 .Pp
+.It Ic rib Ar name
+Apply rule only to the specified RIB.
+This only applies for received updates, so not for rules using the
+.Ar to peer
+parameter.
+.Pp
 .It Ic set Ar attribute ...
 All matching rules can set the
 .Em AS path attributes
@@ -1079,6 +1144,48 @@ Alternately, well-known communities may be specified by name:
 or
 .Ic NO_PEER .
 .Pp
+.It Xo
+.Ic ext-community Op Ar delete
+.Ar subtype Ar as-number Ns Li : Ns Ar local
+.Xc
+.It Xo
+.Ic ext-community Op Ar delete
+.Ar subtype Ar IP Ns Li : Ns Ar local
+.Xc
+.It Xo
+.Ic ext-community Op Ar delete
+.Ar subtype Ar numvalue
+.Xc
+Set or delete the
+.Em Extended Community
+AS path attribute.
+Extended Communities are specified by a
+.Ar subtype
+and normally two values, a globally unique part (e.g. the AS number) and a
+local part.
+The type is selected depending on the encoding of the global part.
+Two-octet AS Specific Extended Communities and Four-octet AS Specific Extended
+Communities are encoded as
+.Ar as-number Ns Li : Ns Ar local .
+Four-octet encoding is used if the
+.Ar as-number
+is bigger then 65535 or if the AS_DOT encoding is used.
+IPv4 Address Specific Extended Communities are encoded as
+.Ar IP Ns Li : Ns Ar local .
+Opaque Extended Communities are encoded with a single numeric value.
+Currently the following subtypes are supported:
+.Bd -literal -offset indent
+rt       Route Target
+soo      Source of Origin
+odi      OSPF Domain Identifier
+ort      OSPF Route Type
+ori      OSPF Router ID
+bdc      BGP Data Collection
+.Ed
+.Pp
+Not all type and subtype value pairs are allowed by IANA and the parser
+will ensure that no invalid combination is created.
+.Pp
 .It Ic localpref Ar number
 Set the
 .Em LOCAL_PREF
@@ -1106,6 +1213,20 @@ will be adjusted by adding or subtracting
 .Ar number ;
 otherwise it will be set to
 .Ar number .
+.Pp
+.It Xo
+.Ic origin
+.Sm off
+.Po Ic igp \*(Ba
+.Ic egp \*(Ba
+.Ic incomplete Pc
+.Sm on
+.Xc
+Set the
+.Em ORIGIN
+AS path attribute to mark the source of this
+route as being injected from an igp protocol, an egp protocol
+or being an aggregated route.
 .Pp
 .It Xo
 .Ic nexthop

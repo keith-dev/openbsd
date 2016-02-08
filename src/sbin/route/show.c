@@ -1,4 +1,4 @@
-/*	$OpenBSD: show.c,v 1.80 2009/06/27 11:35:57 michele Exp $	*/
+/*	$OpenBSD: show.c,v 1.83 2010/01/13 23:49:06 claudio Exp $	*/
 /*	$NetBSD: show.c,v 1.1 1996/11/15 18:01:41 gwr Exp $	*/
 
 /*
@@ -546,7 +546,7 @@ static char domain[MAXHOSTNAMELEN];
 void
 p_sockaddr_mpls(struct sockaddr *in, struct sockaddr *out, int flags, int width)
 {
-	char *cp;
+	char buf[MAXHOSTNAMELEN], *cp;
 
 	if (in->sa_family != AF_MPLS)
 		return;
@@ -556,10 +556,10 @@ p_sockaddr_mpls(struct sockaddr *in, struct sockaddr *out, int flags, int width)
 	else
 		cp = label_print(in, out);
 
-	snprintf(cp, MAXHOSTNAMELEN, "%s %s", cp,
+	snprintf(buf, MAXHOSTNAMELEN, "%s %s", cp,
 	    label_print_op(flags));
 
-	printf("%-*s ", width, cp);
+	printf("%-*s ", width, buf);
 }
 
 void
@@ -698,12 +698,12 @@ netname4(in_addr_t in, struct sockaddr_in *maskp)
 	int mbits;
 
 	in = ntohl(in);
-	mask = maskp ? ntohl(maskp->sin_addr.s_addr) : 0;
+	mask = maskp && maskp->sin_len != 0 ? ntohl(maskp->sin_addr.s_addr) : 0;
 	if (!nflag && in != INADDR_ANY) {
 		if ((np = getnetbyaddr(in, AF_INET)) != NULL)
 			cp = np->n_name;
 	}
-	if (in == INADDR_ANY)
+	if (in == INADDR_ANY && mask == INADDR_ANY)
 		cp = "default";
 	mbits = mask ? 33 - ffs(mask) : 0;
 	if (cp)

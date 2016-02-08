@@ -1,4 +1,4 @@
-/*	$OpenBSD: cmd.c,v 1.16 2009/06/03 21:42:16 beck Exp $ */
+/*	$OpenBSD: cmd.c,v 1.18 2009/12/10 22:07:19 kettenis Exp $ */
 
 /*
  * Copyright (c) 1999-2001 Mats O Jansson.  All rights reserved.
@@ -23,10 +23,6 @@
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
-
-#ifndef LINT
-static char rcsid[] = "$OpenBSD: cmd.c,v 1.16 2009/06/03 21:42:16 beck Exp $";
-#endif
 
 #include <sys/types.h>
 #include <sys/device.h>
@@ -63,8 +59,6 @@ cmd_table_t cmd_table[] = {
 	{"bufcachepercent", Xbufcachepct, "[number]",
 	 "Show/change BUFCACHEPERCENT"},
 	{"nkmempg", Xnkmempg,	"[number]",	"Show/change NKMEMPAGES"},
-	{"shmseg", Xshmseg,	"[number]",	"Show/change SHMSEG"},
-	{"shmmaxpgs", Xshmmaxpgs,"[number]",	"Show/change SHMMAXPGS"},
 	{NULL,     NULL,	NULL,		NULL}
 };
 
@@ -317,19 +311,5 @@ int
 Xnkmempg(cmd_t *cmd)
 {
 	int_variable_adjust(cmd, I_NKMEMPG, "nkmempages");
-	return (CMD_CONT);
-}
-
-int
-Xshmseg(cmd_t *cmd)
-{
-	int_variable_adjust(cmd, I_SHMSEG, "shmseg");
-	return (CMD_CONT);
-}
-
-int
-Xshmmaxpgs(cmd_t *cmd)
-{
-	int_variable_adjust(cmd, I_SHMMAXPGS, "shmmaxpgs");
 	return (CMD_CONT);
 }

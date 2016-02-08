@@ -1,4 +1,4 @@
-/*	$OpenBSD: sysctl.c,v 1.161 2009/06/07 03:07:19 millert Exp $	*/
+/*	$OpenBSD: sysctl.c,v 1.167 2009/11/05 20:50:14 michele Exp $	*/
 /*	$NetBSD: sysctl.c,v 1.9 1995/09/30 07:12:50 thorpej Exp $	*/
 
 /*
@@ -29,20 +29,6 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  */
-
-#ifndef lint
-static const char copyright[] =
-"@(#) Copyright (c) 1993\n\
-	The Regents of the University of California.  All rights reserved.\n";
-#endif /* not lint */
-
-#ifndef lint
-#if 0
-static const char sccsid[] = "@(#)sysctl.c	8.5 (Berkeley) 5/9/95";
-#else
-static const char rcsid[] = "$OpenBSD: sysctl.c,v 1.161 2009/06/07 03:07:19 millert Exp $";
-#endif
-#endif /* not lint */
 
 #include <sys/param.h>
 #include <sys/gmon.h>
@@ -82,6 +68,7 @@ static const char rcsid[] = "$OpenBSD: sysctl.c,v 1.161 2009/06/07 03:07:19 mill
 #include <netinet/ip_gre.h>
 #include <netinet/ip_ipcomp.h>
 #include <netinet/ip_carp.h>
+#include <netinet/ip_divert.h>
 
 #include <net/pfvar.h>
 #include <net/if_pfsync.h>
@@ -91,6 +78,7 @@ static const char rcsid[] = "$OpenBSD: sysctl.c,v 1.161 2009/06/07 03:07:19 mill
 #include <netinet/icmp6.h>
 #include <netinet6/ip6_var.h>
 #include <netinet6/pim6_var.h>
+#include <netinet6/ip6_divert.h>
 #endif
 
 #include <netmpls/mpls.h>
@@ -549,7 +537,8 @@ parse(char *string, int flags)
 			    (mib[2] == IPPROTO_IPCOMP && mib[3] == IPCOMPCTL_STATS) ||
 			    (mib[2] == IPPROTO_ICMP && mib[3] == ICMPCTL_STATS) ||
 			    (mib[2] == IPPROTO_CARP && mib[3] == CARPCTL_STATS) ||
-			    (mib[2] == IPPROTO_PFSYNC && mib[3] == PFSYNCCTL_STATS)) {
+			    (mib[2] == IPPROTO_PFSYNC && mib[3] == PFSYNCCTL_STATS) ||
+			    (mib[2] == IPPROTO_DIVERT && mib[3] == DIVERTCTL_STATS)) {
 				if (flags == 0)
 					return;
 				warnx("use netstat to view %s information",
@@ -574,7 +563,8 @@ parse(char *string, int flags)
 			if (len < 0)
 				return;
 
-			if ((mib[2] == IPPROTO_PIM && mib[3] == PIM6CTL_STATS)) {
+			if ((mib[2] == IPPROTO_PIM && mib[3] == PIM6CTL_STATS) ||
+			    (mib[2] == IPPROTO_DIVERT && mib[3] == DIVERT6CTL_STATS)) {
 				if (flags == 0)
 					return;
 				warnx("use netstat to view %s information",
@@ -1322,6 +1312,7 @@ struct ctlname mobileipname[] = MOBILEIPCTL_NAMES;
 struct ctlname ipcompname[] = IPCOMPCTL_NAMES;
 struct ctlname carpname[] = CARPCTL_NAMES;
 struct ctlname pfsyncname[] = PFSYNCCTL_NAMES;
+struct ctlname divertname[] = DIVERTCTL_NAMES;
 struct ctlname bpfname[] = CTL_NET_BPF_NAMES;
 struct ctlname ifqname[] = CTL_IFQ_NAMES;
 struct list inetlist = { inetname, IPPROTO_MAXID };
@@ -1576,6 +1567,15 @@ struct list inetvars[] = {
 	{ 0, 0 },
 	{ 0, 0 },
 	{ pfsyncname, PFSYNCCTL_MAXID },
+	{ 0, 0 },
+	{ 0, 0 },
+	{ 0, 0 },
+	{ 0, 0 },
+	{ 0, 0 },
+	{ 0, 0 },
+	{ 0, 0 },
+	{ 0, 0 },
+	{ divertname, DIVERTCTL_MAXID },
 };
 struct list bpflist = { bpfname, NET_BPF_MAXID };
 struct list ifqlist = { ifqname, IFQCTL_MAXID };
@@ -1968,6 +1968,7 @@ struct ctlname inet6name[] = CTL_IPV6PROTO_NAMES;
 struct ctlname ip6name[] = IPV6CTL_NAMES;
 struct ctlname icmp6name[] = ICMPV6CTL_NAMES;
 struct ctlname pim6name[] = PIM6CTL_NAMES;
+struct ctlname divert6name[] = DIVERT6CTL_NAMES;
 struct list inet6list = { inet6name, IPV6PROTO_MAXID };
 struct list inet6vars[] = {
 /*0*/	{ 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 },
@@ -2006,6 +2007,49 @@ struct list inet6vars[] = {
 	{ 0, 0 },
 	{ 0, 0 },
 	{ pim6name, PIM6CTL_MAXID },	/* pim6 */
+	{ 0, 0 },
+	{ 0, 0 },
+	{ 0, 0 },
+	{ 0, 0 },
+	{ 0, 0 },
+	{ 0, 0 },
+/*110*/	{ 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 },
+	{ 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 },
+/*120*/	{ 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 },
+	{ 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 },
+/*130*/	{ 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 },
+	{ 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 },
+/*140*/	{ 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 },
+	{ 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 },
+/*150*/	{ 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 },
+	{ 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 },
+/*160*/	{ 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 },
+	{ 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 },
+/*170*/	{ 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 },
+	{ 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 },
+/*180*/	{ 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 },
+	{ 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 },
+/*190*/	{ 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 },
+	{ 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 },
+/*200*/	{ 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 },
+	{ 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 },
+/*210*/	{ 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 },
+	{ 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 },
+/*220*/	{ 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 },
+	{ 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 },
+/*230*/	{ 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 },
+	{ 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 },
+/*240*/	{ 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 },
+	{ 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 },
+/*250*/	{ 0, 0 },
+	{ 0, 0 },
+	{ 0, 0 },
+	{ 0, 0 },
+	{ 0, 0 },
+	{ 0, 0 },
+	{ 0, 0 },
+	{ 0, 0 },
+	{ divert6name, DIVERT6CTL_MAXID },
 };
 
 /*
@@ -2355,6 +2399,9 @@ print_sensor(struct sensor *s)
 			break;
 		case SENSOR_VOLTS_DC:
 			printf("%.2f VDC", s->value / 1000000.0);
+			break;
+		case SENSOR_WATTS:
+			printf("%.2f W", s->value / 1000000.0);
 			break;
 		case SENSOR_AMPS:
 			printf("%.2f A", s->value / 1000000.0);

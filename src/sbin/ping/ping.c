@@ -1,4 +1,4 @@
-/*	$OpenBSD: ping.c,v 1.83 2009/06/05 00:11:26 claudio Exp $	*/
+/*	$OpenBSD: ping.c,v 1.86 2009/12/24 10:06:35 sobrado Exp $	*/
 /*	$NetBSD: ping.c,v 1.20 1995/08/11 22:37:58 cgd Exp $	*/
 
 /*
@@ -32,20 +32,6 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  */
-
-#ifndef lint
-static const char copyright[] =
-"@(#) Copyright (c) 1989, 1993\n\
-	The Regents of the University of California.  All rights reserved.\n";
-#endif /* not lint */
-
-#ifndef lint
-#if 0
-static char sccsid[] = "@(#)ping.c	8.1 (Berkeley) 6/5/93";
-#else
-static const char rcsid[] = "$OpenBSD: ping.c,v 1.83 2009/06/05 00:11:26 claudio Exp $";
-#endif
-#endif /* not lint */
 
 /*
  *			P I N G . C
@@ -767,16 +753,19 @@ pr_pack(char *buf, int cc, struct sockaddr_in *from)
 			if (dupflag)
 				(void)printf(" (DUP!)");
 			/* check the data */
+			if (cc - 8 < datalen)
+				(void)printf(" (TRUNC!)");
 			cp = (u_char *)&icp->icmp_data[sizeof(struct tvi)];
 			dp = &outpack[8 + sizeof(struct tvi)];
-			for (i = 8 + sizeof(struct tvi); i < datalen;
+			for (i = 8 + sizeof(struct tvi); i < cc && i < datalen;
 			    ++i, ++cp, ++dp) {
 				if (*cp != *dp) {
 					(void)printf("\nwrong data byte #%d "
 					    "should be 0x%x but was 0x%x",
-					    i, *dp, *cp);
+					    i - 8, *dp, *cp);
 					cp = (u_char *)&icp->icmp_data[0];
-					for (i = 8; i < datalen; ++i, ++cp) {
+					for (i = 8; i < cc && i < datalen;
+					     ++i, ++cp) {
 						if ((i % 32) == 8)
 							(void)printf("\n\t");
 						(void)printf("%x ", *cp);
@@ -1096,7 +1085,7 @@ pr_icmph(struct icmp *icp)
 			(void)printf("Destination Net Unreachable for TOS\n");
 			break;
 		case ICMP_UNREACH_TOSHOST:
-			(void)printf("Desination Host Unreachable for TOS\n");
+			(void)printf("Destination Host Unreachable for TOS\n");
 			break;
 		case ICMP_UNREACH_FILTER_PROHIB:
 			(void)printf("Route administratively prohibited\n");

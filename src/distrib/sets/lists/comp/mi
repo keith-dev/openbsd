@@ -207,7 +207,13 @@
 ./usr/include/dev/ic/ar5211var.h
 ./usr/include/dev/ic/ar5212reg.h
 ./usr/include/dev/ic/ar5212var.h
+./usr/include/dev/ic/ar5416reg.h
 ./usr/include/dev/ic/ar5xxx.h
+./usr/include/dev/ic/ar9280reg.h
+./usr/include/dev/ic/ar9285reg.h
+./usr/include/dev/ic/ar9287reg.h
+./usr/include/dev/ic/athnreg.h
+./usr/include/dev/ic/athnvar.h
 ./usr/include/dev/ic/athvar.h
 ./usr/include/dev/ic/atwreg.h
 ./usr/include/dev/ic/atwvar.h
@@ -295,6 +301,7 @@
 ./usr/include/dev/ic/lptvar.h
 ./usr/include/dev/ic/lsi64854reg.h
 ./usr/include/dev/ic/lsi64854var.h
+./usr/include/dev/ic/m41t8xreg.h
 ./usr/include/dev/ic/malo.h
 ./usr/include/dev/ic/max2820reg.h
 ./usr/include/dev/ic/mc146818reg.h
@@ -371,6 +378,8 @@
 ./usr/include/dev/ic/tcic2reg.h
 ./usr/include/dev/ic/tcic2var.h
 ./usr/include/dev/ic/tea5757.h
+./usr/include/dev/ic/tireg.h
+./usr/include/dev/ic/tivar.h
 ./usr/include/dev/ic/trm.h
 ./usr/include/dev/ic/twereg.h
 ./usr/include/dev/ic/twevar.h
@@ -378,6 +387,9 @@
 ./usr/include/dev/ic/uhavar.h
 ./usr/include/dev/ic/vgareg.h
 ./usr/include/dev/ic/vgavar.h
+./usr/include/dev/ic/w83l518d_sdmmc.h
+./usr/include/dev/ic/w83l518dreg.h
+./usr/include/dev/ic/w83l518dvar.h
 ./usr/include/dev/ic/wdcevent.h
 ./usr/include/dev/ic/wdcreg.h
 ./usr/include/dev/ic/wdcvar.h
@@ -540,11 +552,14 @@
 ./usr/include/dev/pci/esovar.h
 ./usr/include/dev/pci/fmsreg.h
 ./usr/include/dev/pci/fmsvar.h
+./usr/include/dev/pci/gcu.h
+./usr/include/dev/pci/gcu_reg.h
 ./usr/include/dev/pci/hifn7751reg.h
 ./usr/include/dev/pci/hifn7751var.h
 ./usr/include/dev/pci/i82365_pcivar.h
 ./usr/include/dev/pci/ichreg.h
 ./usr/include/dev/pci/if_agereg.h
+./usr/include/dev/pci/if_alcreg.h
 ./usr/include/dev/pci/if_alereg.h
 ./usr/include/dev/pci/if_art.h
 ./usr/include/dev/pci/if_bcereg.h
@@ -556,6 +571,7 @@
 ./usr/include/dev/pci/if_em.h
 ./usr/include/dev/pci/if_em_hw.h
 ./usr/include/dev/pci/if_em_osdep.h
+./usr/include/dev/pci/if_em_soc.h
 ./usr/include/dev/pci/if_etreg.h
 ./usr/include/dev/pci/if_ipwreg.h
 ./usr/include/dev/pci/if_ipwvar.h
@@ -589,8 +605,6 @@
 ./usr/include/dev/pci/if_skvar.h
 ./usr/include/dev/pci/if_stereg.h
 ./usr/include/dev/pci/if_stgereg.h
-./usr/include/dev/pci/if_tireg.h
-./usr/include/dev/pci/if_tivar.h
 ./usr/include/dev/pci/if_tlreg.h
 ./usr/include/dev/pci/if_txpreg.h
 ./usr/include/dev/pci/if_vgereg.h
@@ -831,6 +845,7 @@
 ./usr/include/dev/usb/if_udavreg.h
 ./usr/include/dev/usb/if_upgtvar.h
 ./usr/include/dev/usb/if_urlreg.h
+./usr/include/dev/usb/if_urndisreg.h
 ./usr/include/dev/usb/if_urtwreg.h
 ./usr/include/dev/usb/if_wi_usb.h
 ./usr/include/dev/usb/if_zydreg.h
@@ -839,6 +854,7 @@
 ./usr/include/dev/usb/uaudioreg.h
 ./usr/include/dev/usb/ucomvar.h
 ./usr/include/dev/usb/udl.h
+./usr/include/dev/usb/udlio.h
 ./usr/include/dev/usb/ueaglereg.h
 ./usr/include/dev/usb/ueaglevar.h
 ./usr/include/dev/usb/uftdireg.h
@@ -876,6 +892,13 @@
 ./usr/include/dev/vesa/vesabiosvar.h
 ./usr/include/dev/vesa/vesafbvar.h
 ./usr/include/dev/video_if.h
+./usr/include/dev/videomode
+./usr/include/dev/videomode/ediddevs.h
+./usr/include/dev/videomode/ediddevs_data.h
+./usr/include/dev/videomode/edidreg.h
+./usr/include/dev/videomode/edidvar.h
+./usr/include/dev/videomode/vesagtf.h
+./usr/include/dev/videomode/videomode.h
 ./usr/include/dev/videovar.h
 ./usr/include/dev/vmtvar.h
 ./usr/include/dev/vndioctl.h
@@ -1090,7 +1113,6 @@
 ./usr/include/net/if_pppvar.h
 ./usr/include/net/if_slvar.h
 ./usr/include/net/if_sppp.h
-./usr/include/net/if_stripvar.h
 ./usr/include/net/if_trunk.h
 ./usr/include/net/if_tun.h
 ./usr/include/net/if_types.h
@@ -1099,6 +1121,8 @@
 ./usr/include/net/netisr_dispatch.h
 ./usr/include/net/pfkeyv2.h
 ./usr/include/net/pfvar.h
+./usr/include/net/pipex.h
+./usr/include/net/pipex_local.h
 ./usr/include/net/ppp-comp.h
 ./usr/include/net/ppp_defs.h
 ./usr/include/net/radix.h
@@ -1155,6 +1179,7 @@
 ./usr/include/netinet/ip6.h
 ./usr/include/netinet/ip_ah.h
 ./usr/include/netinet/ip_carp.h
+./usr/include/netinet/ip_divert.h
 ./usr/include/netinet/ip_ecn.h
 ./usr/include/netinet/ip_esp.h
 ./usr/include/netinet/ip_ether.h
@@ -1181,6 +1206,7 @@
 ./usr/include/netinet6/in6_gif.h
 ./usr/include/netinet6/in6_ifattach.h
 ./usr/include/netinet6/in6_var.h
+./usr/include/netinet6/ip6_divert.h
 ./usr/include/netinet6/ip6_mroute.h
 ./usr/include/netinet6/ip6_var.h
 ./usr/include/netinet6/ip6protosw.h
@@ -1884,6 +1910,7 @@
 ./usr/share/man/cat1/unprotoize.0
 ./usr/share/man/cat1/xstr.0
 ./usr/share/man/cat1/yacc.0
+./usr/share/man/cat2/EV_SET.0
 ./usr/share/man/cat2/S_ISBLK.0
 ./usr/share/man/cat2/S_ISCHR.0
 ./usr/share/man/cat2/S_ISDIR.0
@@ -1978,6 +2005,7 @@
 ./usr/share/man/cat2/getpid.0
 ./usr/share/man/cat2/getppid.0
 ./usr/share/man/cat2/getpriority.0
+./usr/share/man/cat2/getrdomain.0
 ./usr/share/man/cat2/getresgid.0
 ./usr/share/man/cat2/getresuid.0
 ./usr/share/man/cat2/getrlimit.0
@@ -2066,6 +2094,7 @@
 ./usr/share/man/cat2/setpgid.0
 ./usr/share/man/cat2/setpgrp.0
 ./usr/share/man/cat2/setpriority.0
+./usr/share/man/cat2/setrdomain.0
 ./usr/share/man/cat2/setregid.0
 ./usr/share/man/cat2/setresgid.0
 ./usr/share/man/cat2/setresuid.0
@@ -3310,6 +3339,8 @@
 ./usr/share/man/cat3/bitstring.0
 ./usr/share/man/cat3/bkgd.0
 ./usr/share/man/cat3/bkgdset.0
+./usr/share/man/cat3/bkgrnd.0
+./usr/share/man/cat3/bkgrndset.0
 ./usr/share/man/cat3/blf_cbc_decrypt.0
 ./usr/share/man/cat3/blf_cbc_encrypt.0
 ./usr/share/man/cat3/blf_dec.0
@@ -3354,8 +3385,10 @@
 ./usr/share/man/cat3/bn_sub_words.0
 ./usr/share/man/cat3/bn_wexpand.0
 ./usr/share/man/cat3/border.0
+./usr/share/man/cat3/border_set.0
 ./usr/share/man/cat3/bottom_panel.0
 ./usr/share/man/cat3/box.0
+./usr/share/man/cat3/box_set.0
 ./usr/share/man/cat3/bsd_auth.0
 ./usr/share/man/cat3/bsearch.0
 ./usr/share/man/cat3/bstring.0
@@ -3466,7 +3499,9 @@
 ./usr/share/man/cat3/curs_attr.0
 ./usr/share/man/cat3/curs_beep.0
 ./usr/share/man/cat3/curs_bkgd.0
+./usr/share/man/cat3/curs_bkgrnd.0
 ./usr/share/man/cat3/curs_border.0
+./usr/share/man/cat3/curs_border_set.0
 ./usr/share/man/cat3/curs_clear.0
 ./usr/share/man/cat3/curs_color.0
 ./usr/share/man/cat3/curs_delch.0
@@ -3483,8 +3518,10 @@
 ./usr/share/man/cat3/curs_insstr.0
 ./usr/share/man/cat3/curs_instr.0
 ./usr/share/man/cat3/curs_kernel.0
+./usr/share/man/cat3/curs_legacy.0
 ./usr/share/man/cat3/curs_mouse.0
 ./usr/share/man/cat3/curs_move.0
+./usr/share/man/cat3/curs_opaque.0
 ./usr/share/man/cat3/curs_outopts.0
 ./usr/share/man/cat3/curs_overlay.0
 ./usr/share/man/cat3/curs_pad.0
@@ -3752,6 +3789,9 @@
 ./usr/share/man/cat3/fabsl.0
 ./usr/share/man/cat3/fclose.0
 ./usr/share/man/cat3/fcvt.0
+./usr/share/man/cat3/fdim.0
+./usr/share/man/cat3/fdimf.0
+./usr/share/man/cat3/fdiml.0
 ./usr/share/man/cat3/fdopen.0
 ./usr/share/man/cat3/feof.0
 ./usr/share/man/cat3/ferror.0
@@ -3792,6 +3832,12 @@
 ./usr/share/man/cat3/floor.0
 ./usr/share/man/cat3/floorf.0
 ./usr/share/man/cat3/flushinp.0
+./usr/share/man/cat3/fmax.0
+./usr/share/man/cat3/fmaxf.0
+./usr/share/man/cat3/fmaxl.0
+./usr/share/man/cat3/fmin.0
+./usr/share/man/cat3/fminf.0
+./usr/share/man/cat3/fminl.0
 ./usr/share/man/cat3/fmod.0
 ./usr/share/man/cat3/fmodf.0
 ./usr/share/man/cat3/fmt_scaled.0
@@ -3887,8 +3933,11 @@
 ./usr/share/man/cat3/get_myaddress.0
 ./usr/share/man/cat3/getaddrinfo.0
 ./usr/share/man/cat3/getarg.0
+./usr/share/man/cat3/getbegx.0
+./usr/share/man/cat3/getbegy.0
 ./usr/share/man/cat3/getbegyx.0
 ./usr/share/man/cat3/getbkgd.0
+./usr/share/man/cat3/getbkgrnd.0
 ./usr/share/man/cat3/getbsize.0
 ./usr/share/man/cat3/getc.0
 ./usr/share/man/cat3/getc_unlocked.0
@@ -3896,6 +3945,8 @@
 ./usr/share/man/cat3/getch.0
 ./usr/share/man/cat3/getchar.0
 ./usr/share/man/cat3/getchar_unlocked.0
+./usr/share/man/cat3/getcurx.0
+./usr/share/man/cat3/getcury.0
 ./usr/share/man/cat3/getcwd.0
 ./usr/share/man/cat3/getdiskbyname.0
 ./usr/share/man/cat3/getdomainname.0
@@ -3919,6 +3970,8 @@
 ./usr/share/man/cat3/getifaddrs.0
 ./usr/share/man/cat3/getloadavg.0
 ./usr/share/man/cat3/getmaxpartitions.0
+./usr/share/man/cat3/getmaxx.0
+./usr/share/man/cat3/getmaxy.0
 ./usr/share/man/cat3/getmaxyx.0
 ./usr/share/man/cat3/getmntinfo.0
 ./usr/share/man/cat3/getmode.0
@@ -3933,6 +3986,8 @@
 ./usr/share/man/cat3/getopt_long.0
 ./usr/share/man/cat3/getopt_long_only.0
 ./usr/share/man/cat3/getpagesize.0
+./usr/share/man/cat3/getparx.0
+./usr/share/man/cat3/getpary.0
 ./usr/share/man/cat3/getparyx.0
 ./usr/share/man/cat3/getpass.0
 ./usr/share/man/cat3/getprotobyname.0
@@ -4072,6 +4127,7 @@
 ./usr/share/man/cat3/history_end.0
 ./usr/share/man/cat3/history_init.0
 ./usr/share/man/cat3/hline.0
+./usr/share/man/cat3/hline_set.0
 ./usr/share/man/cat3/hosts_access.0
 ./usr/share/man/cat3/hosts_ctl.0
 ./usr/share/man/cat3/hsearch.0
@@ -4116,8 +4172,6 @@
 ./usr/share/man/cat3/i2d_X509_fp.0
 ./usr/share/man/cat3/idcok.0
 ./usr/share/man/cat3/idlok.0
-./usr/share/man/cat3/ieee.0
-./usr/share/man/cat3/ieeef.0
 ./usr/share/man/cat3/if_freenameindex.0
 ./usr/share/man/cat3/if_indextoname.0
 ./usr/share/man/cat3/if_nameindex.0
@@ -4203,7 +4257,17 @@
 ./usr/share/man/cat3/intro.0
 ./usr/share/man/cat3/iruserok.0
 ./usr/share/man/cat3/iruserok_sa.0
+./usr/share/man/cat3/is_cleared.0
+./usr/share/man/cat3/is_idcok.0
+./usr/share/man/cat3/is_idlok.0
+./usr/share/man/cat3/is_immedok.0
+./usr/share/man/cat3/is_keypad.0
+./usr/share/man/cat3/is_leaveok.0
 ./usr/share/man/cat3/is_linetouched.0
+./usr/share/man/cat3/is_nodelay.0
+./usr/share/man/cat3/is_notimeout.0
+./usr/share/man/cat3/is_scrollok.0
+./usr/share/man/cat3/is_syncok.0
 ./usr/share/man/cat3/is_wintouched.0
 ./usr/share/man/cat3/isalnum.0
 ./usr/share/man/cat3/isalpha.0
@@ -4279,6 +4343,7 @@
 ./usr/share/man/cat3/kafs_settoken.0
 ./usr/share/man/cat3/kafs_settoken5.0
 ./usr/share/man/cat3/kafs_settoken_rxkad.0
+./usr/share/man/cat3/key_defined.0
 ./usr/share/man/cat3/keybound.0
 ./usr/share/man/cat3/keycrunch.0
 ./usr/share/man/cat3/keyname.0
@@ -4431,6 +4496,7 @@
 ./usr/share/man/cat3/krb5_checksum_is_collision_proof.0
 ./usr/share/man/cat3/krb5_checksum_is_keyed.0
 ./usr/share/man/cat3/krb5_checksumsize.0
+./usr/share/man/cat3/krb5_cksumtype_valid.0
 ./usr/share/man/cat3/krb5_clear_error_string.0
 ./usr/share/man/cat3/krb5_closelog.0
 ./usr/share/man/cat3/krb5_compare_creds.0
@@ -4460,12 +4526,13 @@
 ./usr/share/man/cat3/krb5_config_vget_next.0
 ./usr/share/man/cat3/krb5_config_vget_string.0
 ./usr/share/man/cat3/krb5_config_vget_string_default.0
-./usr/share/man/cat3/krb5_config_vget_stringsq.0
+./usr/share/man/cat3/krb5_config_vget_strings.0
 ./usr/share/man/cat3/krb5_config_vget_time.0
 ./usr/share/man/cat3/krb5_config_vget_time_default.0
 ./usr/share/man/cat3/krb5_context.0
 ./usr/share/man/cat3/krb5_copy_address.0
 ./usr/share/man/cat3/krb5_copy_addresses.0
+./usr/share/man/cat3/krb5_copy_checksum.0
 ./usr/share/man/cat3/krb5_copy_creds.0
 ./usr/share/man/cat3/krb5_copy_creds_contents.0
 ./usr/share/man/cat3/krb5_copy_data.0
@@ -4575,7 +4642,7 @@
 ./usr/share/man/cat3/krb5_get_init_creds_opt_set_paq_request.0
 ./usr/share/man/cat3/krb5_get_init_creds_opt_set_preauth_list.0
 ./usr/share/man/cat3/krb5_get_init_creds_opt_set_proxiable.0
-./usr/share/man/cat3/krb5_get_init_creds_opt_set_rewew_life.0
+./usr/share/man/cat3/krb5_get_init_creds_opt_set_renew_life.0
 ./usr/share/man/cat3/krb5_get_init_creds_opt_set_salt.0
 ./usr/share/man/cat3/krb5_get_init_creds_opt_set_tkt_life.0
 ./usr/share/man/cat3/krb5_get_init_creds_password.0
@@ -4855,6 +4922,8 @@
 ./usr/share/man/cat3/log10f.0
 ./usr/share/man/cat3/log1p.0
 ./usr/share/man/cat3/log1pf.0
+./usr/share/man/cat3/log2.0
+./usr/share/man/cat3/log2f.0
 ./usr/share/man/cat3/logb.0
 ./usr/share/man/cat3/logbf.0
 ./usr/share/man/cat3/logbl.0
@@ -4933,6 +5002,14 @@
 ./usr/share/man/cat3/menu_win.0
 ./usr/share/man/cat3/mergesort.0
 ./usr/share/man/cat3/meta.0
+./usr/share/man/cat3/mio_close.0
+./usr/share/man/cat3/mio_eof.0
+./usr/share/man/cat3/mio_nfds.0
+./usr/share/man/cat3/mio_open.0
+./usr/share/man/cat3/mio_pollfd.0
+./usr/share/man/cat3/mio_read.0
+./usr/share/man/cat3/mio_revents.0
+./usr/share/man/cat3/mio_write.0
 ./usr/share/man/cat3/mitem_current.0
 ./usr/share/man/cat3/mitem_name.0
 ./usr/share/man/cat3/mitem_new.0
@@ -4980,6 +5057,7 @@
 ./usr/share/man/cat3/mvgetnstr.0
 ./usr/share/man/cat3/mvgetstr.0
 ./usr/share/man/cat3/mvhline.0
+./usr/share/man/cat3/mvhline_set.0
 ./usr/share/man/cat3/mvinch.0
 ./usr/share/man/cat3/mvinchnstr.0
 ./usr/share/man/cat3/mvinchstr.0
@@ -4991,6 +5069,7 @@
 ./usr/share/man/cat3/mvprintw.0
 ./usr/share/man/cat3/mvscanw.0
 ./usr/share/man/cat3/mvvline.0
+./usr/share/man/cat3/mvvline_set.0
 ./usr/share/man/cat3/mvwaddch.0
 ./usr/share/man/cat3/mvwaddchnstr.0
 ./usr/share/man/cat3/mvwaddchstr.0
@@ -5002,6 +5081,7 @@
 ./usr/share/man/cat3/mvwgetnstr.0
 ./usr/share/man/cat3/mvwgetstr.0
 ./usr/share/man/cat3/mvwhline.0
+./usr/share/man/cat3/mvwhline_set.0
 ./usr/share/man/cat3/mvwin.0
 ./usr/share/man/cat3/mvwinch.0
 ./usr/share/man/cat3/mvwinchnstr.0
@@ -5014,6 +5094,7 @@
 ./usr/share/man/cat3/mvwprintw.0
 ./usr/share/man/cat3/mvwscanw.0
 ./usr/share/man/cat3/mvwvline.0
+./usr/share/man/cat3/mvwvline_set.0
 ./usr/share/man/cat3/nan.0
 ./usr/share/man/cat3/nanf.0
 ./usr/share/man/cat3/nanl.0
@@ -5052,6 +5133,7 @@
 ./usr/share/man/cat3/ntohl.0
 ./usr/share/man/cat3/ntohs.0
 ./usr/share/man/cat3/ocurses.0
+./usr/share/man/cat3/offsetof.0
 ./usr/share/man/cat3/ohash_create_entry.0
 ./usr/share/man/cat3/ohash_delete.0
 ./usr/share/man/cat3/ohash_entries.0
@@ -5097,6 +5179,7 @@
 ./usr/share/man/cat3/pcap_dump.0
 ./usr/share/man/cat3/pcap_dump_close.0
 ./usr/share/man/cat3/pcap_dump_file.0
+./usr/share/man/cat3/pcap_dump_flush.0
 ./usr/share/man/cat3/pcap_dump_fopen.0
 ./usr/share/man/cat3/pcap_dump_ftell.0
 ./usr/share/man/cat3/pcap_dump_open.0
@@ -5354,6 +5437,9 @@
 ./usr/share/man/cat3/savetty.0
 ./usr/share/man/cat3/scalb.0
 ./usr/share/man/cat3/scalbf.0
+./usr/share/man/cat3/scalbln.0
+./usr/share/man/cat3/scalblnf.0
+./usr/share/man/cat3/scalblnl.0
 ./usr/share/man/cat3/scalbn.0
 ./usr/share/man/cat3/scalbnf.0
 ./usr/share/man/cat3/scalbnl.0
@@ -5801,6 +5887,7 @@
 ./usr/share/man/cat3/vidputs.0
 ./usr/share/man/cat3/vis.0
 ./usr/share/man/cat3/vline.0
+./usr/share/man/cat3/vline_set.0
 ./usr/share/man/cat3/vprintf.0
 ./usr/share/man/cat3/vscanf.0
 ./usr/share/man/cat3/vsnprintf.0
@@ -5830,7 +5917,10 @@
 ./usr/share/man/cat3/wattrset.0
 ./usr/share/man/cat3/wbkgd.0
 ./usr/share/man/cat3/wbkgdset.0
+./usr/share/man/cat3/wbkgrnd.0
+./usr/share/man/cat3/wbkgrndset.0
 ./usr/share/man/cat3/wborder.0
+./usr/share/man/cat3/wborder_set.0
 ./usr/share/man/cat3/wchgat.0
 ./usr/share/man/cat3/wclear.0
 ./usr/share/man/cat3/wclrtobot.0
@@ -5874,10 +5964,14 @@
 ./usr/share/man/cat3/wechochar.0
 ./usr/share/man/cat3/wenclose.0
 ./usr/share/man/cat3/werase.0
+./usr/share/man/cat3/wgetbkgrnd.0
 ./usr/share/man/cat3/wgetch.0
 ./usr/share/man/cat3/wgetnstr.0
+./usr/share/man/cat3/wgetparent.0
+./usr/share/man/cat3/wgetscrreg.0
 ./usr/share/man/cat3/wgetstr.0
 ./usr/share/man/cat3/whline.0
+./usr/share/man/cat3/whline_set.0
 ./usr/share/man/cat3/winch.0
 ./usr/share/man/cat3/winchnstr.0
 ./usr/share/man/cat3/winchstr.0
@@ -5910,6 +6004,7 @@
 ./usr/share/man/cat3/wtimeout.0
 ./usr/share/man/cat3/wtouchln.0
 ./usr/share/man/cat3/wvline.0
+./usr/share/man/cat3/wvline_set.0
 ./usr/share/man/cat3/x509.0
 ./usr/share/man/cat3/xdr.0
 ./usr/share/man/cat3/xdr_accepted_reply.0
@@ -6179,6 +6274,7 @@
 ./usr/share/man/cat9/crypto_done.0
 ./usr/share/man/cat9/crypto_freereq.0
 ./usr/share/man/cat9/crypto_freesession.0
+./usr/share/man/cat9/crypto_get_driverid.0
 ./usr/share/man/cat9/crypto_getreq.0
 ./usr/share/man/cat9/crypto_kdispatch.0
 ./usr/share/man/cat9/crypto_kdone.0
@@ -6192,7 +6288,7 @@
 ./usr/share/man/cat9/disk.0
 ./usr/share/man/cat9/disk_attach.0
 ./usr/share/man/cat9/disk_busy.0
-./usr/share/man/cat9/disk_detatch.0
+./usr/share/man/cat9/disk_detach.0
 ./usr/share/man/cat9/disk_init.0
 ./usr/share/man/cat9/disk_unbusy.0
 ./usr/share/man/cat9/disklabel.0
@@ -6382,6 +6478,7 @@
 ./usr/share/man/cat9/mountroothook_establish.0
 ./usr/share/man/cat9/mtod.0
 ./usr/share/man/cat9/mtx_enter.0
+./usr/share/man/cat9/mtx_enter_try.0
 ./usr/share/man/cat9/mtx_init.0
 ./usr/share/man/cat9/mtx_leave.0
 ./usr/share/man/cat9/mutex.0
@@ -6653,6 +6750,7 @@
 ./usr/share/man/cat9/workq_add_task.0
 ./usr/share/man/cat9/workq_create.0
 ./usr/share/man/cat9/workq_destroy.0
+./usr/share/man/cat9/workq_queue_task.0
 ./usr/share/man/cat9/writedisklabel.0
 ./usr/share/misc/getopt
 ./usr/share/misc/gprof.callg

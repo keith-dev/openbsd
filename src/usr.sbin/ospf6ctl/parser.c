@@ -1,4 +1,4 @@
-/*	$OpenBSD: parser.c,v 1.6 2009/01/28 22:51:26 stsp Exp $ */
+/*	$OpenBSD: parser.c,v 1.8 2010/01/13 11:33:12 jsg Exp $ */
 
 /*
  * Copyright (c) 2004 Esben Norby <norby@openbsd.org>
@@ -59,11 +59,13 @@ static const struct token t_show_area[];
 static const struct token t_show_nbr[];
 static const struct token t_show_rib[];
 static const struct token t_show_fib[];
+static const struct token t_log[];
 
 static const struct token t_main[] = {
 	{KEYWORD,	"reload",	RELOAD,		NULL},
 	{KEYWORD,	"fib",		FIB,		t_fib},
 	{KEYWORD,	"show",		SHOW,		t_show},
+	{KEYWORD,	"log",		NONE,		t_log},
 	{ENDTOKEN,	"",		NONE,		NULL}
 };
 
@@ -131,6 +133,12 @@ static const struct token t_show_fib[] = {
 	{ENDTOKEN,	"",		NONE,			NULL}
 };
 
+static const struct token t_log[] = {
+	{KEYWORD,	"verbose",	LOG_VERBOSE,		NULL},
+	{KEYWORD,	"brief",	LOG_BRIEF,		NULL},
+	{ENDTOKEN,	"",		NONE,			NULL}
+};
+
 static struct parse_result	res;
 
 struct parse_result *
@@ -166,7 +174,7 @@ parse(int argc, char *argv[])
 }
 
 const struct token *
-match_token(const char *word, const struct token table[])
+match_token(const char *word, const struct token *table)
 {
 	u_int			 i, match;
 	const struct token	*t = NULL;
@@ -246,7 +254,7 @@ match_token(const char *word, const struct token table[])
 }
 
 void
-show_valid_args(const struct token table[])
+show_valid_args(const struct token *table)
 {
 	int	i;
 

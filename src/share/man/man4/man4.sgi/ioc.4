@@ -1,4 +1,4 @@
-.\"	$OpenBSD: ioc.4,v 1.2 2009/05/18 06:55:33 jmc Exp $
+.\"	$OpenBSD: ioc.4,v 1.7 2009/11/16 20:13:13 miod Exp $
 .\"
 .\" Copyright (c) 2009 Miodrag Vallat.
 .\"
@@ -14,20 +14,20 @@
 .\" ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
 .\" OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 .\"
-.Dd $Mdocdate: May 18 2009 $
+.Dd $Mdocdate: November 16 2009 $
 .Dt IOC 4 sgi
 .Os
 .Sh NAME
 .Nm ioc
-.Nd generic workstation I/O device
+.Nd IOC3 generic workstation I/O device
 .Sh SYNOPSIS
 .Cd "ioc* at pci?"
-.Cd "com0 at ioc? base 0x00020178"
-.Cd "com1 at ioc? base 0x00020170"
+.Cd "com0 at ioc? base 0x20178"
+.Cd "com1 at ioc? base 0x20170"
 .Cd "dsrtc0 at ioc?"
+.Cd "iec* at ioc?"
+.Cd "iockbc* at ioc?"
 .Cd "onewire* at ioc?"
-.\" .Cd "ef* at ioc? base 0x000000f0"
-.\" .Cd "iockbc* at ioc?"
 .Sh DESCRIPTION
 The
 .Nm
@@ -35,19 +35,16 @@ driver provides support for the various SGI IOC3 flavours on Octane and Origin
 family systems.
 .Pp
 Depending on their particular configuration, the IOC3 boards may provide:
-.Bl -bullet -compact -offset indent
-.It
-Two
-.Xr com 4
-serial ports.
-.It
-A
-.Xr dsrtc 4
-time-of-day chip.
-.It
-A 10/100 Mbit/s Ethernet interface.
-.It
-A PS/2 keyboard and mouse interface.
+.Pp
+.Bl -tag -width 10n -offset ind -compact
+.It Xr com 4
+Two serial ports.
+.It Xr dsrtc 4
+Time-of-day chip.
+.It Xr iec 4
+10/100 Mbit/s Ethernet interface.
+.It Xr iockbc 4
+PS/2 keyboard and mouse interface.
 .El
 .Pp
 In order to tell these configurations apart, all IOC3 boards, except those
@@ -62,9 +59,9 @@ interfaces.
 .Sh SEE ALSO
 .Xr com 4 ,
 .Xr dsrtc 4 ,
-.\" .Xr ef 4 ,
+.Xr iec 4 ,
 .Xr intro 4 ,
-.\" .Xr iockbc 4 ,
+.Xr iockbc 4 ,
 .Xr onewire 4 ,
 .Xr owmac 4 ,
 .Xr owserial 4 ,

@@ -1,4 +1,4 @@
-/*	$OpenBSD: main.c,v 1.23 2007/05/10 09:00:18 jmc Exp $	*/
+/*	$OpenBSD: main.c,v 1.26 2009/12/20 16:15:26 schwarze Exp $	*/
 
 /*-
  * Copyright (c) 1990, 1993
@@ -29,11 +29,6 @@
  * SUCH DAMAGE.
  */
 
-#ifndef lint
-/*static char sccsid[] = "@(#)main.c	8.1 (Berkeley) 6/6/93";*/
-static char rcsid[] = "$OpenBSD: main.c,v 1.23 2007/05/10 09:00:18 jmc Exp $";
-#endif /* not lint */
-
 #include <sys/types.h>
 #include <sys/stat.h>
 
@@ -50,7 +45,7 @@ static char rcsid[] = "$OpenBSD: main.c,v 1.23 2007/05/10 09:00:18 jmc Exp $";
 #include "find.h"
 
 time_t now;			/* time find was run */
-int dotfd;			/* starting directory */
+int dotfd;			/* starting directory; may be -1 */
 int ftsoptions;			/* options for the fts_open(3) call */
 int isdepth;			/* do directories on post-order visit */
 int isoutput;			/* user specified output operator */
@@ -80,6 +75,8 @@ main(int argc, char *argv[])
 		switch(ch) {
 		case 'H':
 			ftsoptions |= FTS_COMFOLLOW;
+			ftsoptions |= FTS_PHYSICAL;
+			ftsoptions &= ~FTS_LOGICAL;
 			break;
 		case 'd':
 			isdepth = 1;
@@ -89,6 +86,7 @@ main(int argc, char *argv[])
 			break;
 		case 'h':
 		case 'L':
+			ftsoptions &= ~FTS_COMFOLLOW;
 			ftsoptions &= ~FTS_PHYSICAL;
 			ftsoptions |= FTS_LOGICAL;
 			break;
@@ -126,8 +124,7 @@ main(int argc, char *argv[])
 		err(1, NULL);
 	paths = paths2;
 
-	if ((dotfd = open(".", O_RDONLY, 0)) < 0)
-		err(1, ".:");
+	dotfd = open(".", O_RDONLY, 0);
 
 	find_execute(find_formplan(argv), paths);
 	exit(0);

@@ -1,4 +1,4 @@
-/*	$OpenBSD: snscore.c,v 1.6 2006/03/27 00:10:15 tedu Exp $	*/
+/*	$OpenBSD: snscore.c,v 1.10 2009/11/13 19:54:09 jsg Exp $	*/
 /*	$NetBSD: snscore.c,v 1.5 1995/04/24 12:25:43 cgd Exp $	*/
 
 /*
@@ -29,20 +29,6 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  */
-
-#ifndef lint
-static char copyright[] =
-"@(#) Copyright (c) 1980, 1993\n\
-	The Regents of the University of California.  All rights reserved.\n";
-#endif /* not lint */
-
-#ifndef lint
-#if 0
-static char sccsid[] = "@(#)snscore.c	8.1 (Berkeley) 7/19/93";
-#else
-static char rcsid[] = "$OpenBSD: snscore.c,v 1.6 2006/03/27 00:10:15 tedu Exp $";
-#endif
-#endif /* not lint */
 
 #include <sys/types.h>
 #include <err.h>
@@ -121,7 +107,8 @@ snscore(int fd, int topn)
 	j = 1;
 	for (i = 0; i < noplayers; i++) {
 		printf("%d:\t$%d\t%s\n", j, players[i].scores, players[i].name);
-		if (players[i].scores > players[i + 1].scores)
+		if (i < noplayers - 1 &&
+		    players[i].scores > players[i + 1].scores)
 			j = i + 2;
 	}
 	if (noplayers == 0)

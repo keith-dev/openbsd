@@ -1,4 +1,4 @@
-/*	$OpenBSD: bs.c,v 1.20 2003/06/11 08:47:44 pjanzen Exp $	*/
+/*	$OpenBSD: bs.c,v 1.23 2009/11/14 02:20:43 guenther Exp $	*/
 /*
  * Copyright (c) 1986, Bruce Holloway
  * All rights reserved.
@@ -38,10 +38,6 @@
  * v2.1 with ncurses mouse support, September 1995
  * v2.2 with bugfixes and strategical improvements, March 1998.
  */
-
-#ifndef lint
-static const char rcsid[] = "$OpenBSD: bs.c,v 1.20 2003/06/11 08:47:44 pjanzen Exp $";
-#endif
 
 /* #define _POSIX_SOURCE  */  /* ( random() ) */
 
@@ -1284,63 +1280,49 @@ int playagain(void)
 
 void usage()
 {
-	(void) fprintf(stderr, "Usage: bs [-s | -b] [-c]\n");
+	(void) fprintf(stderr, "usage: bs [-b | -s] [-c]\n");
 	(void) fprintf(stderr, "\tWhere the options are:\n");
-	(void) fprintf(stderr, "\t-s : play a salvo game\n");
 	(void) fprintf(stderr, "\t-b : play a blitz game\n");
+	(void) fprintf(stderr, "\t-s : play a salvo game\n");
 	(void) fprintf(stderr, "\t-c : ships may be adjacent\n");
 	exit(1);
 }
 
 static void do_options(int c, char *op[])
 {
-    int i;
+    int ch;
 
-    if (c > 1)
-    {
-	for (i=1; i<c; i++)
-	{
-	    switch(op[i][0])
+    while ((ch = getopt(c, op, "bchs")) != -1) {
+	switch (ch) {
+	case 'b':
+	    blitz = 1;
+	    if (salvo == 1)
 	    {
-	    default:
-	    case '?':
-		(void) usage();
-		break;
-	    case '-':
-		switch(op[i][1])
-		{
-		case 'b':
-		    blitz = 1;
-		    if (salvo == 1)
-		    {
-			(void) fprintf(stderr,
-				"Bad Arg: -b and -s are mutually exclusive\n");
-			exit(1);
-		    }
-		    break;
-		case 's':
-		    salvo = 1;
-		    if (blitz == 1)
-		    {
-			(void) fprintf(stderr,
-				"Bad Arg: -s and -b are mutually exclusive\n");
-			exit(1);
-		    }
-		    break;
-		case 'c':
-		    closepack = 1;
-		    break;
-		case 'h':
-		    (void) usage();
-		    break;
-		default:
-		    (void) fprintf(stderr,
-			    "Bad arg: type \"%s -h\" for usage message\n", op[0]);
-		    exit(1);
-		}
+		(void) fprintf(stderr,
+			"Bad Arg: -b and -s are mutually exclusive\n");
+		exit(1);
 	    }
+	    break;
+	case 's':
+	    salvo = 1;
+	    if (blitz == 1)
+	    {
+		(void) fprintf(stderr,
+			"Bad Arg: -s and -b are mutually exclusive\n");
+		exit(1);
+	    }
+	    break;
+	case 'c':
+	    closepack = 1;
+	    break;
+	case 'h':
+	default:
+	    (void) usage();
+	    exit(1);
 	}
     }
+    if (op[optind] != NULL)
+	(void) usage();
 }
 
 static int scount(int who)

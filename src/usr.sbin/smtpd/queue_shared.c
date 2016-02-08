@@ -1,4 +1,4 @@
-/*	$OpenBSD: queue_shared.c,v 1.18 2009/05/10 11:29:40 jacekm Exp $	*/
+/*	$OpenBSD: queue_shared.c,v 1.27 2009/12/14 18:16:01 jacekm Exp $	*/
 
 /*
  * Copyright (c) 2008 Gilles Chehade <gilles@openbsd.org>
@@ -266,6 +266,80 @@ enqueue_open_messagefile(struct message *message)
 	return queue_open_layout_messagefile(PATH_ENQUEUE, message);
 }
 
+int
+bounce_create_layout(char *msgid, struct message *message)
+{
+	char	msgpath[MAXPATHLEN];
+	char	lnkpath[MAXPATHLEN];
+
+	if (! queue_create_layout_message(PATH_BOUNCE, msgid))
+		return 0;
+
+	if (! bsnprintf(msgpath, sizeof(msgpath), "%s/%d/%s/message",
+		PATH_QUEUE, queue_hash(message->message_id),
+		message->message_id))
+		return 0;
+
+	if (! bsnprintf(lnkpath, sizeof(lnkpath), "%s/%s/message",
+		PATH_BOUNCE, msgid))
+		return 0;
+
+	if (link(msgpath, lnkpath) == -1)
+		fatal("link");
+
+	return 1;
+}
+
+void
+bounce_delete_message(char *msgid)
+{
+	queue_delete_layout_message(PATH_BOUNCE, msgid);
+}
+
+int
+bounce_record_envelope(struct message *message)
+{
+	message->lasttry = 0;
+	message->retry = 0;
+	return queue_record_layout_envelope(PATH_BOUNCE, message);
+}
+
+int
+bounce_remove_envelope(struct message *message)
+{
+	return queue_remove_layout_envelope(PATH_BOUNCE, message);
+}
+
+int
+bounce_commit_message(struct message *message)
+{
+	return queue_commit_layout_message(PATH_BOUNCE, message);
+}
+
+int
+bounce_record_message(struct message *messagep)
+{
+	char	msgid[MAX_ID_SIZE];
+	struct message mbounce;
+
+	if (messagep->type == T_BOUNCE_MESSAGE) {
+		log_debug("mailer daemons loop detected !");
+		return 0;
+	}
+
+	mbounce = *messagep;
+	mbounce.type = T_BOUNCE_MESSAGE;
+	mbounce.status &= ~S_MESSAGE_PERMFAILURE;
+
+	if (! bounce_create_layout(msgid, messagep))
+		return 0;
+
+	strlcpy(mbounce.message_id, msgid, sizeof(mbounce.message_id));
+	if (! bounce_record_envelope(&mbounce))
+		return 0;
+
+	return bounce_commit_message(&mbounce);
+}
 
 int
 queue_create_incoming_layout(char *msgid)
@@ -374,18 +448,10 @@ queue_message_update(struct message *messagep)
 	messagep->retry++;
 
 	if (messagep->status & S_MESSAGE_PERMFAILURE) {
-		if (messagep->type & T_DAEMON_MESSAGE ||
-		    (messagep->sender.user[0] == '\0' && messagep->sender.domain[0] == '\0'))
-			queue_remove_envelope(messagep);
-		else {
-			messagep->id = queue_generate_id();
-			messagep->type |= T_DAEMON_MESSAGE;
-			messagep->status &= ~S_MESSAGE_PERMFAILURE;
-			messagep->lasttry = 0;
-			messagep->retry = 0;
-			messagep->creation = time(NULL);
-			queue_update_envelope(messagep);
-		}
+		if (messagep->type != T_BOUNCE_MESSAGE &&
+		    messagep->sender.user[0] != '\0')
+			bounce_record_message(messagep);
+		queue_remove_envelope(messagep);
 		return;
 	}
 
@@ -431,6 +497,10 @@ queue_update_envelope(struct message *messagep)
 	char temp[MAXPATHLEN];
 	char dest[MAXPATHLEN];
 	FILE *fp;
+	u_int64_t batch_id;
+
+	batch_id = messagep->batch_id;
+	messagep->batch_id = 0;
 
 	if (! bsnprintf(temp, sizeof(temp), "%s/envelope.tmp", PATH_QUEUE))
 		fatalx("queue_update_envelope");
@@ -460,6 +530,7 @@ queue_update_envelope(struct message *messagep)
 		fatal("queue_update_envelope: rename");
 	}
 
+	messagep->batch_id = batch_id;
 	return 1;
 
 tempfail:
@@ -468,6 +539,7 @@ tempfail:
 	if (fp)
 		fclose(fp);
 
+	messagep->batch_id = batch_id;
 	return 0;
 }
 
@@ -497,23 +569,6 @@ queue_load_envelope(struct message *messagep, char *evpid)
 	fclose(fp);
 
 	return 1;
-}
-
-u_int64_t
-queue_generate_id(void)
-{
-	u_int64_t	id;
-	struct timeval	tp;
-
-	if (gettimeofday(&tp, NULL) == -1)
-		fatal("queue_generate_id: time");
-
-	id = (u_int32_t)tp.tv_sec;
-	id <<= 32;
-	id |= (u_int32_t)tp.tv_usec;
-	usleep(1);
-
-	return (id);
 }
 
 u_int16_t
@@ -701,6 +756,8 @@ display_envelope(struct message *envelope, int flags)
 		errx(1, "%s: unexpected status 0x%04x", envelope->message_uid,
 		    envelope->status);
 
+	getflag(&envelope->flags, F_MESSAGE_BOUNCE, "BOUNCE",
+	    status, sizeof(status));
 	getflag(&envelope->flags, F_MESSAGE_AUTHENTICATED, "AUTH",
 	    status, sizeof(status));
 	getflag(&envelope->flags, F_MESSAGE_PROCESSING, "PROCESSING",
@@ -708,6 +765,8 @@ display_envelope(struct message *envelope, int flags)
 	getflag(&envelope->flags, F_MESSAGE_SCHEDULED, "SCHEDULED",
 	    status, sizeof(status));
 	getflag(&envelope->flags, F_MESSAGE_ENQUEUED, "ENQUEUED",
+	    status, sizeof(status));
+	getflag(&envelope->flags, F_MESSAGE_FORCESCHEDULE, "SCHEDULED_MANUAL",
 	    status, sizeof(status));
 
 	if (envelope->flags)
@@ -726,23 +785,25 @@ display_envelope(struct message *envelope, int flags)
 	case T_MTA_MESSAGE:
 		printf("MTA");
 		break;
-	case T_MDA_MESSAGE|T_DAEMON_MESSAGE:
-		printf("MDA-DAEMON");
-		break;
-	case T_MTA_MESSAGE|T_DAEMON_MESSAGE:
-		printf("MTA-DAEMON");
+	case T_BOUNCE_MESSAGE:
+		printf("BOUNCE");
 		break;
 	default:
 		printf("UNKNOWN");
 	}
 	
-	printf("|%s|%s|%s@%s|%s@%s|%d|%u\n",
+	printf("|%s|%s|%s@%s|%s@%s|%d|%u",
 	    envelope->message_uid,
 	    status,
 	    envelope->sender.user, envelope->sender.domain,
 	    envelope->recipient.user, envelope->recipient.domain,
 	    envelope->lasttry,
 	    envelope->retry);
+	
+	if (envelope->session_errorline[0] != '\0')
+		printf("|%s", envelope->session_errorline);
+
+	printf("\n");
 }
 
 void

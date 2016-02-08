@@ -1,4 +1,4 @@
-/*	$OpenBSD: newfs_msdos.c,v 1.17 2007/09/28 09:57:01 jmc Exp $	*/
+/*	$OpenBSD: newfs_msdos.c,v 1.19 2009/10/27 23:59:33 deraadt Exp $	*/
 
 /*
  * Copyright (c) 1998 Robert Nordier
@@ -26,11 +26,6 @@
  * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN
  * IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
-
-#ifndef lint
-static const char rcsid[] =
-  "$FreeBSD: src/sbin/newfs_msdos/newfs_msdos.c,v 1.9 1999/08/28 00:13:52 peter Exp $";
-#endif /* not lint */
 
 #include <sys/param.h>
 #include <sys/stat.h>
@@ -347,6 +342,8 @@ main(int argc, char *argv[])
 	err(1, "%s", fname);
     if (!opt_N)
 	check_mounted(fname, sb.st_mode);
+    if (S_ISBLK(sb.st_mode))
+	errx(1, "%s: block device", fname);
     if (!S_ISCHR(sb.st_mode))
 	warnx("warning: %s is not a character device", fname);
     memset(&bpb, 0, sizeof(bpb));

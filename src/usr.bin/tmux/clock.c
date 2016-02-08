@@ -1,4 +1,4 @@
-/* $OpenBSD: clock.c,v 1.1 2009/06/01 22:58:49 nicm Exp $ */
+/* $OpenBSD: clock.c,v 1.6 2009/12/03 22:50:09 nicm Exp $ */
 
 /*
  * Copyright (c) 2009 Nicholas Marriott <nicm@users.sourceforge.net>
@@ -97,7 +97,7 @@ const char clock_table[14][5][5] = {
 };
 
 void
-clock_draw(struct screen_write_ctx *ctx, u_int colour, int style)
+clock_draw(struct screen_write_ctx *ctx, int colour, int style)
 {
 	struct screen		*s = ctx->s;
 	struct grid_cell	 gc;
@@ -112,8 +112,6 @@ clock_draw(struct screen_write_ctx *ctx, u_int colour, int style)
 		strftime(tim, sizeof tim, "%H:%M", localtime(&t));
 
 	screen_write_clearscreen(ctx);
-	memcpy(&gc, &grid_default_cell, sizeof gc);
-	gc.fg = colour;
 
 	if (screen_size_x(s) < 6 * strlen(tim) || screen_size_y(s) < 6) {
 		if (screen_size_x(s) >= strlen(tim) && screen_size_y(s) != 0) {
@@ -121,7 +119,8 @@ clock_draw(struct screen_write_ctx *ctx, u_int colour, int style)
 			y = screen_size_y(s) / 2;
 			screen_write_cursormove(ctx, x, y);
 
-			gc.fg = colour;
+			memcpy(&gc, &grid_default_cell, sizeof gc);
+			colour_set_fg(&gc, colour);
 			screen_write_puts(ctx, &gc, "%s", tim);
 		}
 		return;
@@ -130,16 +129,18 @@ clock_draw(struct screen_write_ctx *ctx, u_int colour, int style)
 	x = (screen_size_x(s) / 2) - 3 * strlen(tim);
 	y = (screen_size_y(s) / 2) - 3;
 
+	memcpy(&gc, &grid_default_cell, sizeof gc);
+	colour_set_bg(&gc, colour);
 	for (ptr = tim; *ptr != '\0'; ptr++) {
 		if (*ptr >= '0' && *ptr <= '9')
 			idx = *ptr - '0';
- 		else if (*ptr == ':')
+		else if (*ptr == ':')
 			idx = 10;
- 		else if (*ptr == 'A')
+		else if (*ptr == 'A')
 			idx = 11;
- 		else if (*ptr == 'P')
+		else if (*ptr == 'P')
 			idx = 12;
- 		else if (*ptr == 'M')
+		else if (*ptr == 'M')
 			idx = 13;
 		else {
 			x += 6;
@@ -147,13 +148,10 @@ clock_draw(struct screen_write_ctx *ctx, u_int colour, int style)
 		}
 
 		for (j = 0; j < 5; j++) {
-			screen_write_cursormove(ctx, x, y + j);
 			for (i = 0; i < 5; i++) {
+				screen_write_cursormove(ctx, x + i, y + j);
 				if (clock_table[idx][j][i])
-					gc.attr |= GRID_ATTR_REVERSE;
-				else
-					gc.attr &= ~GRID_ATTR_REVERSE;
-				screen_write_putc(ctx, &gc, ' ');
+					screen_write_putc(ctx, &gc, ' ');
 			}
 		}
 		x += 6;

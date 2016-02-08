@@ -1,4 +1,4 @@
-/*	$OpenBSD: log.c,v 1.4 2009/03/29 19:07:56 stsp Exp $ */
+/*	$OpenBSD: log.c,v 1.6 2009/12/22 17:45:47 claudio Exp $ */
 
 /*
  * Copyright (c) 2006 Claudio Jeker <claudio@openbsd.org>
@@ -41,6 +41,7 @@ static const char * const procnames[] = {
 };
 
 int	debug;
+int	verbose;
 
 void	 logit(int, const char *, ...);
 
@@ -50,11 +51,18 @@ log_init(int n_debug)
 	extern char	*__progname;
 
 	debug = n_debug;
+	verbose = n_debug;
 
 	if (!debug)
 		openlog(__progname, LOG_PID | LOG_NDELAY, LOG_DAEMON);
 
 	tzset();
+}
+
+void
+log_verbose(int v)
+{
+	verbose = v;
 }
 
 void
@@ -135,7 +143,7 @@ log_debug(const char *emsg, ...)
 {
 	va_list	 ap;
 
-	if (debug) {
+	if (verbose) {
 		va_start(ap, emsg);
 		vlog(LOG_DEBUG, emsg, ap);
 		va_end(ap);
@@ -187,6 +195,25 @@ log_in6addr(const struct in6_addr *addr)
 		sa_in6.sin6_scope_id = ntohs(tmp16);
 		sa_in6.sin6_addr.s6_addr[2] = 0;
 		sa_in6.sin6_addr.s6_addr[3] = 0;
+	}
+
+	return (log_sockaddr(&sa_in6));
+}
+
+const char *
+log_in6addr_scope(const struct in6_addr *addr, unsigned int ifindex)
+{
+	struct sockaddr_in6	sa_in6;
+
+	bzero(&sa_in6, sizeof(sa_in6));
+	sa_in6.sin6_len = sizeof(sa_in6);
+	sa_in6.sin6_family = AF_INET6;
+	memcpy(&sa_in6.sin6_addr, addr, sizeof(sa_in6.sin6_addr));
+
+	/* XXX thanks, IPv6 & KAME, for this ugliness... */
+	if (IN6_IS_ADDR_LINKLOCAL(&sa_in6.sin6_addr) ||
+	    IN6_IS_ADDR_MC_LINKLOCAL(&sa_in6.sin6_addr)) {
+		sa_in6.sin6_scope_id = ifindex;
 	}
 
 	return (log_sockaddr(&sa_in6));

@@ -1,4 +1,4 @@
-/* $OpenBSD: key-string.c,v 1.1 2009/06/01 22:58:49 nicm Exp $ */
+/* $OpenBSD: key-string.c,v 1.13 2010/01/14 21:53:40 nicm Exp $ */
 
 /*
  * Copyright (c) 2007 Nicholas Marriott <nicm@users.sourceforge.net>
@@ -57,6 +57,10 @@ struct {
 	{ "PPage",	KEYC_PPAGE },
 	{ "Tab",	'\011' },
 	{ "BTab",	KEYC_BTAB },
+	{ "Space",	' ' },
+	{ "BSpace",	KEYC_BSPACE },
+	{ "Enter",	'\r' },
+	{ "Escape",	'\033' },
 
 	/* Arrow keys. */
 	{ "Up",		KEYC_UP },
@@ -65,24 +69,25 @@ struct {
 	{ "Right",	KEYC_RIGHT },
 
 	/* Numeric keypad. */
-	{ "KP/", 	KEYC_KP0_1 },
-	{ "KP*",	KEYC_KP0_2 },
-	{ "KP-",	KEYC_KP0_3 },
-	{ "KP7",	KEYC_KP1_0 },
-	{ "KP8",	KEYC_KP1_1 },
-	{ "KP9",	KEYC_KP1_2 },
-	{ "KP+",	KEYC_KP1_3 },
-	{ "KP4",	KEYC_KP2_0 },
-	{ "KP5",	KEYC_KP2_1 },
-	{ "KP6",	KEYC_KP2_2 },
-	{ "KP1",	KEYC_KP3_0 },
-	{ "KP2",	KEYC_KP3_1 },
-	{ "KP3",	KEYC_KP3_2 },
-	{ "KPEnter",	KEYC_KP3_3 },
-	{ "KP0",	KEYC_KP4_0 },
-	{ "KP.",	KEYC_KP4_2 },
+	{ "KP/", 	KEYC_KP_SLASH },
+	{ "KP*",	KEYC_KP_STAR },
+	{ "KP-",	KEYC_KP_MINUS },
+	{ "KP7",	KEYC_KP_SEVEN },
+	{ "KP8",	KEYC_KP_EIGHT },
+	{ "KP9",	KEYC_KP_NINE },
+	{ "KP+",	KEYC_KP_PLUS },
+	{ "KP4",	KEYC_KP_FOUR },
+	{ "KP5",	KEYC_KP_FIVE },
+	{ "KP6",	KEYC_KP_SIX },
+	{ "KP1",	KEYC_KP_ONE },
+	{ "KP2",	KEYC_KP_TWO },
+	{ "KP3",	KEYC_KP_THREE },
+	{ "KPEnter",	KEYC_KP_ENTER },
+	{ "KP0",	KEYC_KP_ZERO },
+	{ "KP.",	KEYC_KP_PERIOD },
 };
 
+/* Find key string in table. */
 int
 key_string_search_table(const char *string)
 {
@@ -95,58 +100,99 @@ key_string_search_table(const char *string)
 	return (KEYC_NONE);
 }
 
+/* Lookup a string and convert to a key value, handling C-/M-/S- prefix. */
 int
 key_string_lookup_string(const char *string)
 {
 	int	      	 key;
-	const u_char	*ptr;
+	const char	*ptr;
 
 	if (string[0] == '\0')
 		return (KEYC_NONE);
 	if (string[1] == '\0')
-		return (string[0]);
+		return ((u_char) string[0]);
 
 	ptr = NULL;
-	if (string[0] == 'C' && string[1] == '-')
+	if ((string[0] == 'C' || string[0] == 'c') && string[1] == '-')
 		ptr = string + 2;
 	else if (string[0] == '^')
 		ptr = string + 1;
 	if (ptr != NULL) {
 		if (ptr[0] == '\0')
 			return (KEYC_NONE);
-		if (ptr[1] == '\0') {
-			if (ptr[0] == 32)
-				return (0);
-			if (ptr[0] >= 64 && ptr[0] <= 95)
-				return (ptr[0] - 64);
-			if (ptr[0] >= 97 && ptr[0] <= 122)
-				return (ptr[0] - 96);
-			return (KEYC_NONE);
-		}
+		/*
+		 * Lookup as a named key. If a function key (>= KEYC_BASE),
+		 * return it with the ctrl modifier, otherwise fallthrough with
+		 * the key value from the table (eg for C-Space). If not a
+		 * named key, check for single character keys and try that.
+		 */
 		key = key_string_search_table(ptr);
-		if (key != KEYC_NONE)
-			return (KEYC_ADDCTL(key));
+		if (key != KEYC_NONE) {
+			if (key >= KEYC_BASE)
+				return (key | KEYC_CTRL);
+		} else {
+			if (ptr[1] != '\0')
+				return (KEYC_NONE);
+			key = (u_char) ptr[0];
+		}
+
+		/*
+		 * Figure out if the single character in key is a valid ctrl
+		 * key.
+		 */
+		if (key == 32)
+			return (0);
+		if (key == 63)
+			return (KEYC_BSPACE);
+		if (key >= 64 && key <= 95)
+			return (key - 64);
+		if (key >= 97 && key <= 122)
+			return (key - 96);
 		return (KEYC_NONE);
 	}
 
-	if (string[0] == 'M' && string[1] == '-') {
+	if ((string[0] == 'M' || string[0] == 'm') && string[1] == '-') {
 		ptr = string + 2;
 		if (ptr[0] == '\0')
 			return (KEYC_NONE);
-		if (ptr[1] == '\0') {
-			if (ptr[0] < 32 || ptr[0] > 127)
-				return (KEYC_NONE);
-			return (KEYC_ADDESC(ptr[0]));
-		}
 		key = key_string_lookup_string(ptr);
-		if (key != KEYC_NONE)
-			return (KEYC_ADDESC(key));
+		if (key != KEYC_NONE) {
+			if (key >= KEYC_BASE)
+				return (key | KEYC_ESCAPE);
+		} else {
+			if (ptr[1] == '\0')
+				return (KEYC_NONE);
+			key = (u_char) ptr[0];
+		}
+
+		if (key >= 32 && key <= 127)
+			return (key | KEYC_ESCAPE);
+		return (KEYC_NONE);
+	}
+
+	if ((string[0] == 'S' || string[0] == 's') && string[1] == '-') {
+		ptr = string + 2;
+		if (ptr[0] == '\0')
+			return (KEYC_NONE);
+		key = key_string_lookup_string(ptr);
+		if (key != KEYC_NONE) {
+			if (key >= KEYC_BASE)
+				return (key | KEYC_SHIFT);
+		} else {
+			if (ptr[1] == '\0')
+				return (KEYC_NONE);
+			key = (u_char) ptr[0];
+		}
+
+		if (key >= 32 && key <= 127)
+			return (key | KEYC_SHIFT);
 		return (KEYC_NONE);
 	}
 
 	return (key_string_search_table(string));
 }
 
+/* Convert a key code into string format, with prefix if necessary. */
 const char *
 key_string_lookup_key(int key)
 {
@@ -157,27 +203,32 @@ key_string_lookup_key(int key)
 	if (key == 127)
 		return (NULL);
 
-	if (KEYC_ISESC(key)) {
-		if ((s = key_string_lookup_key(KEYC_REMOVEESC(key))) == NULL)
+	if (key & KEYC_ESCAPE) {
+		if ((s = key_string_lookup_key(key & ~KEYC_ESCAPE)) == NULL)
 			return (NULL);
 		xsnprintf(tmp2, sizeof tmp2, "M-%s", s);
 		return (tmp2);
 	}
-	if (KEYC_ISCTL(key)) {
-		if ((s = key_string_lookup_key(KEYC_REMOVECTL(key))) == NULL)
+	if (key & KEYC_CTRL) {
+		if ((s = key_string_lookup_key(key & ~KEYC_CTRL)) == NULL)
 			return (NULL);
 		xsnprintf(tmp2, sizeof tmp2, "C-%s", s);
 		return (tmp2);
 	}
-	if (KEYC_ISSFT(key)) {
-		if ((s = key_string_lookup_key(KEYC_REMOVESFT(key))) == NULL)
+	if (key & KEYC_SHIFT) {
+		if ((s = key_string_lookup_key(key & ~KEYC_SHIFT)) == NULL)
 			return (NULL);
 		xsnprintf(tmp2, sizeof tmp2, "S-%s", s);
 		return (tmp2);
 	}
 
+	for (i = 0; i < nitems(key_string_table); i++) {
+		if (key == key_string_table[i].key)
+			return (key_string_table[i].string);
+	}
+
 	if (key >= 32 && key <= 255) {
-		tmp[0] = key;
+		tmp[0] = (char) key;
 		tmp[1] = '\0';
 		return (tmp);
 	}
@@ -190,9 +241,5 @@ key_string_lookup_key(int key)
 		return (tmp);
 	}
 
-	for (i = 0; i < nitems(key_string_table); i++) {
-		if (key == key_string_table[i].key)
-			return (key_string_table[i].string);
-	}
 	return (NULL);
 }

@@ -1,4 +1,4 @@
-/*	$OpenBSD: mouse.c,v 1.7 2008/06/26 05:42:06 ray Exp $	*/
+/*	$OpenBSD: mouse.c,v 1.9 2009/11/24 16:28:50 matthieu Exp $	*/
 /*	$NetBSD: mouse.c,v 1.3 1999/11/15 13:47:30 ad Exp $ */
 
 /*-
@@ -42,7 +42,7 @@ static int resolution;
 static int samplerate;
 static int rawmode;
 
-struct wsmouse_calibcoords wmcoords; 
+struct wsmouse_calibcoords wmcoords, wmcoords_save; 
 
 struct field mouse_field_tab[] = {
     { "resolution",		&resolution,	FMT_UINT,	FLG_WRONLY },
@@ -81,23 +81,19 @@ mouse_get_values(const char *pre, int fd)
 	}	
 }
 
-void
+int
 mouse_put_values(const char *pre, int fd)
 {
 	if (field_by_value(mouse_field_tab, &resolution)->flags & FLG_SET) {
-		if (ioctl(fd, WSMOUSEIO_SRES, &resolution) < 0)
+		if (ioctl(fd, WSMOUSEIO_SRES, &resolution) < 0) {
 			warn("WSMOUSEIO_SRES");
-		else {
-			pr_field(pre, field_by_value(mouse_field_tab,
-			    &resolution), " -> ");
+			return 1;
 		}
 	}
 	if (field_by_value(mouse_field_tab, &samplerate)->flags & FLG_SET) {
-		if (ioctl(fd, WSMOUSEIO_SRATE, &samplerate) < 0)
+		if (ioctl(fd, WSMOUSEIO_SRATE, &samplerate) < 0) {
 			warn("WSMOUSEIO_SRATE");
-		else {
-			pr_field(pre, field_by_value(mouse_field_tab,
-			    &samplerate), " -> ");
+			return 1;
 		}
 	}
 	if (field_by_value(mouse_field_tab, &rawmode)->flags & FLG_SET) { 
@@ -106,23 +102,30 @@ mouse_put_values(const char *pre, int fd)
 			if (errno == ENOTTY) {
 				field_by_value(mouse_field_tab,
 				    &rawmode)->flags |= FLG_DEAD;
-			} else
+			} else {
 				warn("WSMOUSEIO_SCALIBCOORDS");
-		} else {
-			pr_field(pre, field_by_value(mouse_field_tab,
-			    &rawmode), " -> ");
+				return 1;
+			}
 		}
 	}
 	if (field_by_value(mouse_field_tab, &wmcoords)->flags & FLG_SET) {
+		if (ioctl(fd, WSMOUSEIO_GCALIBCOORDS, &wmcoords_save) < 0) 
+			if (errno == ENOTTY)
+				field_by_value(mouse_field_tab,
+				    &wmcoords)->flags |= FLG_DEAD;
+			else
+				warn("WSMOUSEIO_GCALIBCOORDS");
+		wmcoords.samplelen = wmcoords_save.samplelen;
 		if (ioctl(fd, WSMOUSEIO_SCALIBCOORDS, &wmcoords) < 0) {
 			if (errno == ENOTTY) {
 				field_by_value(mouse_field_tab,
 				    &wmcoords)->flags |= FLG_DEAD;
-			} else
+			} else {
 				warn("WSMOUSEIO_SCALIBCOORDS");
-		} else {
-			pr_field(pre, field_by_value(mouse_field_tab,
-			    &wmcoords), " -> ");
+				return 1;
+			}
 		}
 	}
+
+	return 0;
 }

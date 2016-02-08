@@ -34,6 +34,7 @@
 ./etc/inetd.conf
 ./etc/ipsec.conf
 ./etc/ksh.kshrc
+./etc/ldpd.conf
 ./etc/localtime
 ./etc/locate.rc
 ./etc/login.conf
@@ -140,6 +141,7 @@
 ./var/cron/log
 ./var/cron/tabs/root
 ./var/db/locate.database
+./var/db/sysmerge/etcsum
 ./var/games/tetris.scores
 ./var/log/authlog
 ./var/log/daemon

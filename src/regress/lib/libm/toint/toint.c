@@ -1,4 +1,4 @@
-/*	$OpenBSD: toint.c,v 1.5 2004/04/02 20:37:42 mickey Exp $	*/
+/*	$OpenBSD: toint.c,v 1.7 2010/02/06 18:53:19 otto Exp $	*/
 
 /*	Written by Michael Shalayeff, 2003, Public domain.	*/
 
@@ -28,6 +28,12 @@ toint(double d)
 	return (int)(d + 1);
 }
 
+long long
+toll(double d)
+{
+	return (long long)d;
+}
+
 int
 main(int argc, char *argv[])
 {
@@ -42,11 +48,8 @@ main(int argc, char *argv[])
 	if (toint(8.6) != 9)
 		exit(1);
 
-	i = toint(INT_MAX);
-	if (i != INT_MIN) {
-		printf("%d != %d\n", i, INT_MIN);
+	if (toll(2.3456e+17) != 234560000000000000LL)
 		exit(1);
-	}
 
 	exit(0);
 }

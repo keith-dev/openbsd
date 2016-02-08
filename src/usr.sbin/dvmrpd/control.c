@@ -1,4 +1,4 @@
-/*	$OpenBSD: control.c,v 1.8 2009/06/06 07:52:04 pyr Exp $ */
+/*	$OpenBSD: control.c,v 1.12 2010/02/21 20:53:20 michele Exp $ */
 
 /*
  * Copyright (c) 2003, 2004 Henning Brauer <henning@openbsd.org>
@@ -34,8 +34,6 @@
 #include "control.h"
 
 #define	CONTROL_BACKLOG	5
-
-int control_imsg_relay(struct imsg *imsg);
 
 struct ctl_conn	*control_connbyfd(int);
 struct ctl_conn	*control_connbypid(pid_t);
@@ -121,7 +119,7 @@ control_accept(int listenfd, short event, void *bula)
 	if ((connfd = accept(listenfd,
 	    (struct sockaddr *)&sun, &len)) == -1) {
 		if (errno != EWOULDBLOCK && errno != EINTR)
-			log_warn("control_accept");
+			log_warn("control_accept: accept");
 		return;
 	}
 
@@ -193,6 +191,7 @@ control_dispatch_imsg(int fd, short event, void *bula)
 	struct imsg	 imsg;
 	int		 n;
 	unsigned int	 ifidx;
+	int		 verbose;
 
 	if ((c = control_connbyfd(fd)) == NULL) {
 		log_warn("control_dispatch_imsg: fd %d: not found", fd);
@@ -255,6 +254,20 @@ control_dispatch_imsg(int fd, short event, void *bula)
 			dvmrpe_imsg_compose_rde(imsg.hdr.type, 0, imsg.hdr.pid,
 			    imsg.data, imsg.hdr.len - IMSG_HEADER_SIZE);
 			break;
+		case IMSG_CTL_LOG_VERBOSE:
+			if (imsg.hdr.len != IMSG_HEADER_SIZE +
+			    sizeof(verbose))
+				break;
+
+			/* forward to other processes */
+			dvmrpe_imsg_compose_parent(imsg.hdr.type, imsg.hdr.pid,
+			    imsg.data, imsg.hdr.len - IMSG_HEADER_SIZE);
+			dvmrpe_imsg_compose_rde(imsg.hdr.type, 0, imsg.hdr.pid,
+			    imsg.data, imsg.hdr.len - IMSG_HEADER_SIZE);
+
+			memcpy(&verbose, imsg.data, sizeof(verbose));
+			log_verbose(verbose);
+			break;		
 		default:
 			log_debug("control_dispatch_imsg: "
 			    "error handling imsg %d", imsg.hdr.type);

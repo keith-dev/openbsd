@@ -1,4 +1,4 @@
-/*	$OpenBSD: options.c,v 1.13 2006/03/11 07:04:53 ray Exp $	*/
+/*	$OpenBSD: options.c,v 1.15 2009/11/22 17:12:40 nicm Exp $	*/
 
 /*-
  * Copyright (c) 1991, 1993, 1994
@@ -10,10 +10,6 @@
  */
 
 #include "config.h"
-
-#ifndef lint
-static const char sccsid[] = "@(#)options.c	10.51 (Berkeley) 10/14/96";
-#endif /* not lint */
 
 #include <sys/types.h>
 #include <sys/queue.h>
@@ -81,7 +77,7 @@ OPTLIST const optlist[] = {
 /* O_FILEC	  4.4BSD */
 	{"filec",	NULL,		OPT_STR,	0},
 /* O_FLASH	    HPUX */
-	{"flash",	NULL,		OPT_1BOOL,	0},
+	{"flash",	NULL,		OPT_0BOOL,	0},
 /* O_HARDTABS	    4BSD */
 	{"hardtabs",	NULL,		OPT_NUM,	0},
 /* O_ICLOWER	  4.4BSD */

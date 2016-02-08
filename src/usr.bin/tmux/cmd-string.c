@@ -1,4 +1,4 @@
-/* $OpenBSD: cmd-string.c,v 1.2 2009/06/05 07:18:37 nicm Exp $ */
+/* $OpenBSD: cmd-string.c,v 1.14 2010/02/19 17:14:23 nicm Exp $ */
 
 /*
  * Copyright (c) 2008 Nicholas Marriott <nicm@users.sourceforge.net>
@@ -19,9 +19,11 @@
 #include <sys/types.h>
 
 #include <errno.h>
+#include <pwd.h>
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
+#include <unistd.h>
 
 #include "tmux.h"
 
@@ -30,20 +32,23 @@
  */
 
 int	cmd_string_getc(const char *, size_t *);
-void	cmd_string_ungetc(const char *, size_t *);
+void	cmd_string_ungetc(size_t *);
 char   *cmd_string_string(const char *, size_t *, char, int);
 char   *cmd_string_variable(const char *, size_t *);
+char   *cmd_string_expand_tilde(const char *, size_t *);
 
 int
 cmd_string_getc(const char *s, size_t *p)
 {
-	if (s[*p] == '\0')
+	const u_char	*ucs = s;
+
+	if (ucs[*p] == '\0')
 		return (EOF);
-	return (s[(*p)++]);
+	return (ucs[(*p)++]);
 }
 
 void
-cmd_string_ungetc(unused const char *s, size_t *p)
+cmd_string_ungetc(size_t *p)
 {
 	(*p)--;
 }
@@ -56,28 +61,16 @@ int
 cmd_string_parse(const char *s, struct cmd_list **cmdlist, char **cause)
 {
 	size_t		p;
-	int		ch, argc, rval, have_arg;
-	char	      **argv, *buf, *t, *u;
+	int		ch, i, argc, rval;
+	char	      **argv, *buf, *t;
+	const char     *whitespace, *equals;
 	size_t		len;
-
-	if ((t = strchr(s, ' ')) == NULL && (t = strchr(s, '\t')) == NULL)
-		t = strchr(s, '\0');
-	if ((u = strchr(s, '=')) != NULL && u < t) {
-		if (putenv(xstrdup(s)) != 0) {
-			xasprintf(cause, "assignment failed: %s", s);
-			return (-1);
-		}
-		*cmdlist = NULL;
-		return (0);
-	}
 
 	argv = NULL;
 	argc = 0;
 
 	buf = NULL;
 	len = 0;
-
-	have_arg = 0;
 
 	*cause = NULL;
 
@@ -95,8 +88,6 @@ cmd_string_parse(const char *s, struct cmd_list **cmdlist, char **cause)
 			strlcpy(buf + len, t, strlen(t) + 1);
 			len += strlen(t);
 			xfree(t);
-
-			have_arg = 1;
 			break;
 		case '"':
 			if ((t = cmd_string_string(s, &p, '"', 1)) == NULL)
@@ -105,8 +96,6 @@ cmd_string_parse(const char *s, struct cmd_list **cmdlist, char **cause)
 			strlcpy(buf + len, t, strlen(t) + 1);
 			len += strlen(t);
 			xfree(t);
-
-			have_arg = 1;
 			break;
 		case '$':
 			if ((t = cmd_string_variable(s, &p)) == NULL)
@@ -114,8 +103,7 @@ cmd_string_parse(const char *s, struct cmd_list **cmdlist, char **cause)
 			buf = xrealloc(buf, 1, len + strlen(t) + 1);
 			strlcpy(buf + len, t, strlen(t) + 1);
 			len += strlen(t);
-
-			have_arg = 1;
+			xfree(t);
 			break;
 		case '#':
 			/* Comment: discard rest of line. */
@@ -125,7 +113,7 @@ cmd_string_parse(const char *s, struct cmd_list **cmdlist, char **cause)
 		case EOF:
 		case ' ':
 		case '\t':
- 			if (have_arg) {
+			if (buf != NULL) {
 				buf = xrealloc(buf, 1, len + 1);
 				buf[len] = '\0';
 
@@ -134,12 +122,20 @@ cmd_string_parse(const char *s, struct cmd_list **cmdlist, char **cause)
 
 				buf = NULL;
 				len = 0;
-
-				have_arg = 0;
 			}
 
 			if (ch != EOF)
 				break;
+
+			while (argc != 0) {
+				equals = strchr(argv[0], '=');
+				whitespace = argv[0] + strcspn(argv[0], " \t");
+				if (equals == NULL || equals > whitespace)
+					break;
+				environ_put(&global_environ, argv[0]);
+				argc--;
+				memmove(argv, argv + 1, argc * (sizeof *argv));
+			}
 			if (argc == 0)
 				goto out;
 
@@ -147,20 +143,25 @@ cmd_string_parse(const char *s, struct cmd_list **cmdlist, char **cause)
 			if (*cmdlist == NULL)
 				goto out;
 
-			do
-				xfree(argv[argc - 1]);
-			while (--argc > 0);
-
 			rval = 0;
 			goto out;
+		case '~':
+			if (buf == NULL) {
+				if ((t = cmd_string_expand_tilde(s, &p)) == NULL)
+					goto error;
+				buf = xrealloc(buf, 1, len + strlen(t) + 1);
+				strlcpy(buf + len, t, strlen(t) + 1);
+				len += strlen(t);
+				xfree(t);
+				break;
+			}
+			/* FALLTHROUGH */
 		default:
 			if (len >= SIZE_MAX - 2)
 				goto error;
 
 			buf = xrealloc(buf, 1, len + 1);
 			buf[len++] = ch;
-
-			have_arg = 1;
 			break;
 		}
 	}
@@ -172,10 +173,11 @@ out:
 	if (buf != NULL)
 		xfree(buf);
 
-	while (--argc >= 0)
-		xfree(argv[argc]);
-	if (argv != NULL)
+	if (argv != NULL) {
+		for (i = 0; i < argc; i++)
+			xfree(argv[i]);
 		xfree(argv);
+	}
 
 	return (rval);
 }
@@ -187,30 +189,33 @@ cmd_string_string(const char *s, size_t *p, char endch, int esc)
 	char   *buf, *t;
 	size_t	len;
 
-        buf = NULL;
+	buf = NULL;
 	len = 0;
 
-        while ((ch = cmd_string_getc(s, p)) != endch) {
-                switch (ch) {
+	while ((ch = cmd_string_getc(s, p)) != endch) {
+		switch (ch) {
 		case EOF:
 			goto error;
-                case '\\':
+		case '\\':
 			if (!esc)
 				break;
-                        switch (ch = cmd_string_getc(s, p)) {
+			switch (ch = cmd_string_getc(s, p)) {
 			case EOF:
 				goto error;
-                        case 'r':
-                                ch = '\r';
-                                break;
-                        case 'n':
-                                ch = '\n';
-                                break;
-                        case 't':
-                                ch = '\t';
-                                break;
-                        }
-                        break;
+			case 'e':
+				ch = '\033';
+				break;
+			case 'r':
+				ch = '\r';
+				break;
+			case 'n':
+				ch = '\n';
+				break;
+			case 't':
+				ch = '\t';
+				break;
+			}
+			break;
 		case '$':
 			if (!esc)
 				break;
@@ -219,14 +224,15 @@ cmd_string_string(const char *s, size_t *p, char endch, int esc)
 			buf = xrealloc(buf, 1, len + strlen(t) + 1);
 			strlcpy(buf + len, t, strlen(t) + 1);
 			len += strlen(t);
+			xfree(t);
 			continue;
-                }
+		}
 
 		if (len >= SIZE_MAX - 2)
 			goto error;
 		buf = xrealloc(buf, 1, len + 1);
-                buf[len++] = ch;
-        }
+		buf[len++] = ch;
+	}
 
 	buf = xrealloc(buf, 1, len + 1);
 	buf[len] = '\0';
@@ -251,7 +257,7 @@ cmd_string_variable(const char *s, size_t *p)
 	((ch) >= 'a' && (ch) <= 'z') || ((ch) >= 'A' && (ch) <= 'Z') || \
 	((ch) >= '0' && (ch) <= '9'))
 
-        buf = NULL;
+	buf = NULL;
 	len = 0;
 
 	fch = EOF;
@@ -290,7 +296,7 @@ cmd_string_variable(const char *s, size_t *p)
 	if (fch == '{' && ch != '}')
 		goto error;
 	if (ch != EOF && fch != '{')
-		cmd_string_ungetc(s, p); /* ch */
+		cmd_string_ungetc(p); /* ch */
 
 	buf = xrealloc(buf, 1, len + 1);
 	buf[len] = '\0';
@@ -306,4 +312,31 @@ error:
 	if (buf != NULL)
 		xfree(buf);
 	return (NULL);
+}
+
+char *
+cmd_string_expand_tilde(const char *s, size_t *p)
+{
+	struct passwd	*pw;
+	char		*home, *path, *username;
+
+	home = NULL;
+	if (cmd_string_getc(s, p) == '/') {
+		if ((home = getenv("HOME")) == NULL || *home == '\0') {
+			if ((pw = getpwuid(getuid())) != NULL)
+				home = pw->pw_dir;
+		}
+	} else {
+		cmd_string_ungetc(p);
+		if ((username = cmd_string_string(s, p, '/', 0)) == NULL)
+			return (NULL);
+		if ((pw = getpwnam(username)) != NULL)
+			home = pw->pw_dir;
+		xfree(username);
+	}
+	if (home == NULL)
+		return (NULL);
+
+	xasprintf(&path, "%s/", home);
+	return (path);
 }
