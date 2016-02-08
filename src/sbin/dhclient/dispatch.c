@@ -1,4 +1,4 @@
-/*	$OpenBSD: dispatch.c,v 1.45 2009/11/26 23:14:29 krw Exp $	*/
+/*	$OpenBSD: dispatch.c,v 1.48 2010/07/03 04:44:51 guenther Exp $	*/
 
 /*
  * Copyright 2004 Henning Brauer <henning@openbsd.org>
@@ -134,6 +134,11 @@ another:
 		if (!ifi->linkstat)
 			interfaces_invalidated = 0;
 
+		if (ifi->rdomain != get_rdomain(ifi->name))
+			error("Interface %s:"
+			    " rdomain changed out from under us",
+			    ifi->name);
+
 		if (timeouts) {
 			struct timeout *t;
 
@@ -250,33 +255,6 @@ interface_link_forceup(char *ifname)
 	}
 	close(sock);
 	return (1);
-}
-
-void
-interface_link_forcedown(char *ifname)
-{
-	struct ifreq ifr;
-	int sock;
-
-	if ((sock = socket(AF_INET, SOCK_DGRAM, 0)) == -1)
-		error("Can't create socket");
-
-	memset(&ifr, 0, sizeof(ifr));
-	strlcpy(ifr.ifr_name, ifname, sizeof(ifr.ifr_name));
-	if (ioctl(sock, SIOCGIFFLAGS, (caddr_t)&ifr) == -1) {
-		close(sock);
-		return;
-	}
-
-	if ((ifr.ifr_flags & IFF_UP) == IFF_UP) {
-		ifr.ifr_flags &= ~IFF_UP;
-		if (ioctl(sock, SIOCSIFFLAGS, (caddr_t)&ifr) == -1) {
-			close(sock);
-			return;
-		}
-	}
-
-	close(sock);
 }
 
 int
@@ -447,4 +425,22 @@ interface_link_status(char *ifname)
 			return (0);
 	}
 	return (1);
+}
+
+int
+get_rdomain(char *name)
+{
+	int rv = 0, s;
+	struct  ifreq ifr;
+
+	if ((s = socket(AF_INET, SOCK_DGRAM, 0)) == -1)
+	    error("get_rdomain socket: %m");
+
+	bzero(&ifr, sizeof(ifr));
+	strlcpy(ifr.ifr_name, name, sizeof(ifr.ifr_name));
+	if (ioctl(s, SIOCGIFRDOMAIN, (caddr_t)&ifr) != -1)
+	    rv = ifr.ifr_rdomainid;
+
+	close(s);
+	return rv;
 }

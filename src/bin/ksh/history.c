@@ -1,4 +1,4 @@
-/*	$OpenBSD: history.c,v 1.37 2009/07/02 16:29:15 martynas Exp $	*/
+/*	$OpenBSD: history.c,v 1.39 2010/05/19 17:36:08 jasper Exp $	*/
 
 /*
  * command history
@@ -226,7 +226,7 @@ c_fc(char **wp)
 		Source *sold = source;
 		int ret;
 
-		ret = command(editor ? editor : "${FCEDIT:-/bin/ed} $_");
+		ret = command(editor ? editor : "${FCEDIT:-/bin/ed} $_", 0);
 		source = sold;
 		if (ret)
 			return ret;
@@ -295,7 +295,7 @@ hist_execute(char *cmd)
 	 */
 	/* XXX: source should not get trashed by this.. */
 	sold = source;
-	ret = command(cmd);
+	ret = command(cmd, 0);
 	source = sold;
 	return ret;
 }
@@ -397,7 +397,7 @@ hist_get_newest(int allow_cur)
 	return histptr - 1;
 }
 
-/* Return a pointer to the newest command in the history */
+/* Return a pointer to the oldest command in the history */
 static char **
 hist_get_oldest(void)
 {

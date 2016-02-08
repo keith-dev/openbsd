@@ -1,6 +1,6 @@
 define(MACHINE,hppa64)dnl
 vers(__file__,
-	{-$OpenBSD: MAKEDEV.md,v 1.16 2009/08/13 15:12:36 deraadt Exp $-},
+	{-$OpenBSD: MAKEDEV.md,v 1.19 2010/07/03 03:59:15 krw Exp $-},
 etc.MACHINE)dnl
 dnl
 dnl Copyright (c) 2001-2006 Todd T. Fries <todd@OpenBSD.org>
@@ -62,19 +62,19 @@ _DEV(pci, 31)
 _DEV(pdc, 22)
 _DEV(pf, 21)
 _DEV(rnd, 20)
-_DEV(ss, 14)
 _DEV(systrace, 34)
 _DEV(tun, 18)
 _DEV(uk, 15)
 _DEV(vi, 33)
 _DEV(nnpfs, 32)
 _DEV(vscsi, 46)
+_DEV(diskmap,47)
 dnl
 divert(__mddivert)dnl
 dnl
 ramdisk)
 	_recurse std fd st0 st1 sd0 sd1 sd2 sd3 rd0
-	_recurse pty0 bpf0 bpf1 tun0 tun1 lkm bio
+	_recurse pty0 bpf0 bpf1 tun0 tun1 lkm bio diskmap
 	;;
 
 _std(1, 2, 25, 6)
@@ -84,9 +84,9 @@ dnl
 dnl *** hppa64 specific devices
 dnl
 target(all, ch, 0)dnl
-target(all, ss, 0, 1)dnl
 target(all, nnpfs, 0)dnl
 target(all, vscsi, 0)dnl
+target(all, diskmap)dnl
 twrget(all, flo, fd, 0, 0B, 0C, 0D, 0E, 0F, 0G, 0H)dnl
 twrget(all, flo, fd, 1, 1B, 1C, 1D, 1E, 1F, 1G, 1H)dnl
 target(all, pty, 0)dnl

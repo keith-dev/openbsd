@@ -1,4 +1,4 @@
-/*	$OpenBSD: sock.c,v 1.39 2010/01/15 22:17:44 ratchov Exp $	*/
+/*	$OpenBSD: sock.c,v 1.50 2010/06/05 16:00:52 ratchov Exp $	*/
 /*
  * Copyright (c) 2008 Alexandre Ratchov <alex@caoua.org>
  *
@@ -14,13 +14,10 @@
  * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
-/*
- * TODO:
- *
- *	change f->bufsz to contain only socket-side buffer,
- *	because it's less error prone
- */
 
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <unistd.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -36,16 +33,17 @@
 #include "dbg.h"
 #endif
 
-int sock_attach(struct sock *, int);
+void sock_attach(struct sock *, int);
 int sock_read(struct sock *);
 int sock_write(struct sock *);
 int sock_execmsg(struct sock *);
 void sock_reset(struct sock *);
+void sock_close(struct file *);
 
 struct fileops sock_ops = {
 	"sock",
 	sizeof(struct sock),
-       	pipe_close,
+       	sock_close,
 	pipe_read,
 	pipe_write,
 	NULL, /* start */
@@ -59,13 +57,15 @@ struct fileops sock_ops = {
 void
 sock_dbg(struct sock *f)
 {
-	static char *pstates[] = { "hel", "ini", "sta", "run", "mid" };
+	static char *pstates[] = { "hel", "ini", "sta", "rdy", "run", "mid" };
 	static char *rstates[] = { "rdat", "rmsg", "rret" };
 	static char *wstates[] = { "widl", "wmsg", "wdat" };
+	struct aproc *midi;
 
-	if (f->slot >= 0 && dev_midi) {
-		dbg_puts(dev_midi->u.ctl.slot[f->slot].name);
-		dbg_putu(dev_midi->u.ctl.slot[f->slot].unit);
+	midi = f->dev ? f->dev->midi : NULL;
+	if (f->slot >= 0 && APROC_OK(midi)) {
+		dbg_puts(midi->u.ctl.slot[f->slot].name);
+		dbg_putu(midi->u.ctl.slot[f->slot].unit);
 	} else
 		dbg_puts(f->pipe.file.name);
 	dbg_puts("/");
@@ -79,11 +79,33 @@ sock_dbg(struct sock *f)
 
 void sock_setvol(void *, unsigned);
 void sock_startreq(void *);
+void sock_stopreq(void *);
+void sock_quitreq(void *);
+void sock_locreq(void *, unsigned);
 
 struct ctl_ops ctl_sockops = {
 	sock_setvol,
-	sock_startreq
+	sock_startreq,
+	sock_stopreq,
+	sock_locreq,
+	sock_quitreq
 };
+
+unsigned sock_sesrefs = 0;	/* connections to the session */
+uid_t sock_sesuid;		/* owner of the session */
+
+void
+sock_close(struct file *arg)
+{
+	struct sock *f = (struct sock *)arg;
+
+	sock_sesrefs--;
+	pipe_close(&f->pipe.file);
+	if (f->dev) {
+		dev_unref(f->dev);
+		f->dev = NULL;
+	}
+}
 
 void
 rsock_done(struct aproc *p)
@@ -96,7 +118,7 @@ rsock_done(struct aproc *p)
 	f->pipe.file.rproc = NULL;
 	if (f->pipe.file.wproc) {
 		if (f->slot >= 0)
-			ctl_slotdel(dev_midi, f->slot);
+			ctl_slotdel(f->dev->midi, f->slot);
 		aproc_del(f->pipe.file.wproc);
 		file_del(&f->pipe.file);
 	}
@@ -111,7 +133,7 @@ rsock_in(struct aproc *p, struct abuf *ibuf_dummy)
 
 	if (!sock_read(f))
 		return 0;
-	obuf = LIST_FIRST(&p->obuflist);
+	obuf = LIST_FIRST(&p->outs);
 	if (obuf && f->pstate >= SOCK_RUN) {
 		if (!abuf_flush(obuf))
 			return 0;
@@ -158,7 +180,7 @@ rsock_opos(struct aproc *p, struct abuf *obuf, int delta)
 {
 	struct sock *f = (struct sock *)p->u.io.file;
 
-	if (f->mode & AMSG_REC)
+	if (f->mode & AMSG_RECMASK)
 		return;
 
 	f->delta += delta;
@@ -201,7 +223,7 @@ wsock_done(struct aproc *p)
 	f->pipe.file.wproc = NULL;
 	if (f->pipe.file.rproc) {
 		if (f->slot >= 0)
-			ctl_slotdel(dev_midi, f->slot);
+			ctl_slotdel(f->dev->midi, f->slot);
 		aproc_del(f->pipe.file.rproc);
 		file_del(&f->pipe.file);
 	}
@@ -228,7 +250,7 @@ wsock_in(struct aproc *p, struct abuf *ibuf)
 int
 wsock_out(struct aproc *p, struct abuf *obuf_dummy)
 {
-	struct abuf *ibuf = LIST_FIRST(&p->ibuflist);
+	struct abuf *ibuf = LIST_FIRST(&p->ins);
 	struct sock *f = (struct sock *)p->u.io.file;
 
 	if (ibuf) {
@@ -257,7 +279,7 @@ wsock_ipos(struct aproc *p, struct abuf *obuf, int delta)
 {
 	struct sock *f = (struct sock *)p->u.io.file;
 
-	if (!(f->mode & AMSG_REC))
+	if (!(f->mode & AMSG_RECMASK))
 		return;
 
 	f->delta += delta;
@@ -298,35 +320,55 @@ sock_new(struct fileops *ops, int fd)
 {
 	struct aproc *rproc, *wproc;
 	struct sock *f;
+	uid_t uid, gid;
+
+	/*
+	 * ensure that all connections belong to the same user,
+	 * for privacy reasons.
+	 *
+	 * XXX: is there a portable way of doing this ?
+	 */
+	if (getpeereid(fd, &uid, &gid) < 0) {
+		close(fd);
+		return NULL;
+	}
+	if (sock_sesrefs == 0) {
+		/* start a new session */
+		sock_sesuid = uid;
+	} else if (uid != sock_sesuid) {
+		/* session owned by another user, drop connection */
+		close(fd);
+		return NULL;
+	}
+	sock_sesrefs++;
 
 	f = (struct sock *)pipe_new(ops, fd, "sock");
-	if (f == NULL)
+	if (f == NULL) {
+		close(fd);
 		return NULL;
+	}
 	f->pstate = SOCK_HELLO;
 	f->mode = 0;
-	f->opt = opt_byname("default");
-	if (f->opt) {
-		if (dev_sub)
-			f->wpar = f->opt->wpar;
-		if (dev_mix)
-			f->rpar = f->opt->rpar;
-	}
+	f->opt = NULL;
+	f->dev = NULL;
 	f->xrun = AMSG_IGNORE;
-	f->bufsz = dev_bufsz;
-	f->round = dev_round;
 	f->delta = 0;
 	f->tickpending = 0;
+	f->startpos = 0;
+	f->startpending = 0;
 	f->vol = f->lastvol = MIDI_MAXCTL;
 	f->slot = -1;
 
 	wproc = aproc_new(&wsock_ops, f->pipe.file.name);
 	wproc->u.io.file = &f->pipe.file;
+	wproc->u.io.partial = 0;
 	f->pipe.file.wproc = wproc;
 	f->wstate = SOCK_WIDLE;
 	f->wtodo = 0xdeadbeef;
 
 	rproc = aproc_new(&rsock_ops, f->pipe.file.name);
 	rproc->u.io.file = &f->pipe.file;
+	rproc->u.io.partial = 0;
 	f->pipe.file.rproc = rproc;
 	f->rstate = SOCK_RMSG;
 	f->rtodo = sizeof(struct amsg);
@@ -348,15 +390,16 @@ sock_freebuf(struct sock *f)
 		dbg_puts(": freeing buffers\n");
 	}
 #endif
-	wbuf = LIST_FIRST(&f->pipe.file.wproc->ibuflist);
-	rbuf = LIST_FIRST(&f->pipe.file.rproc->obuflist);
+	wbuf = LIST_FIRST(&f->pipe.file.wproc->ins);
+	rbuf = LIST_FIRST(&f->pipe.file.rproc->outs);
 	if (rbuf || wbuf)
-		ctl_slotstop(dev_midi, f->slot);
+		ctl_slotstop(f->dev->midi, f->slot);
 	if (rbuf)
 		abuf_eof(rbuf);
 	if (wbuf)
 		abuf_hup(wbuf);
 	f->tickpending = 0;
+	f->startpending = 0;
 }
 
 /*
@@ -366,29 +409,46 @@ void
 sock_allocbuf(struct sock *f)
 {
 	struct abuf *rbuf = NULL, *wbuf = NULL;
+	unsigned bufsz;
 
+	bufsz = f->bufsz + f->dev->bufsz / f->dev->round * f->round;
+	f->pstate = SOCK_START;
 	if (f->mode & AMSG_PLAY) {
-		rbuf = abuf_new(f->bufsz, &f->rpar);
+		rbuf = abuf_new(bufsz, &f->rpar);
 		aproc_setout(f->pipe.file.rproc, rbuf);
+		if (!ABUF_WOK(rbuf) || (f->pipe.file.state & FILE_EOF))
+			f->pstate = SOCK_READY;
+		f->rmax = bufsz * aparams_bpf(&f->rpar);
 	}
-	if (f->mode & AMSG_REC) {
-		wbuf = abuf_new(f->bufsz, &f->wpar);
+	if (f->mode & AMSG_RECMASK) {
+		wbuf = abuf_new(bufsz, &f->wpar);
 		aproc_setin(f->pipe.file.wproc, wbuf);
-		f->walign = dev_round * wbuf->bpf;
+		f->walign = f->round;
+		f->wmax = 0;
 	}
 	f->delta = 0;
+	f->startpos = 0;
 	f->tickpending = 0;
+	f->startpending = 0;
 #ifdef DEBUG
 	if (debug_level >= 3) {
 		sock_dbg(f);
 		dbg_puts(": allocating ");
 		dbg_putu(f->bufsz);
-		dbg_puts(" fr buffers\n");
+		dbg_puts("/");
+		dbg_putu(bufsz);
+		dbg_puts(" fr buffers, rmax = ");
+		dbg_putu(f->rmax);
+		dbg_puts("\n");
 	}
 #endif
-	f->pstate = SOCK_START;
-	if (!(f->mode & AMSG_PLAY) && ctl_slotstart(dev_midi, f->slot))
-		(void)sock_attach(f, 0);
+	if (f->mode & AMSG_PLAY) {
+		f->pstate = SOCK_START;
+	} else {
+		f->pstate = SOCK_READY;
+		if (ctl_slotstart(f->dev->midi, f->slot))
+			(void)sock_attach(f, 0);
+	}
 }
 
 /*
@@ -401,7 +461,7 @@ sock_setvol(void *arg, unsigned vol)
 	struct abuf *rbuf;
 
 	f->vol = vol;
-	rbuf = LIST_FIRST(&f->pipe.file.rproc->obuflist);
+	rbuf = LIST_FIRST(&f->pipe.file.rproc->outs);
 	if (!rbuf) {
 #ifdef DEBUG
 		if (debug_level >= 3) {
@@ -411,7 +471,7 @@ sock_setvol(void *arg, unsigned vol)
 #endif
 		return;
 	}
-	dev_setvol(rbuf, MIDI_TO_ADATA(vol));
+	dev_setvol(f->dev, rbuf, MIDI_TO_ADATA(vol));
 }
 
 /*
@@ -423,9 +483,9 @@ sock_startreq(void *arg)
 	struct sock *f = (struct sock *)arg;
 
 #ifdef DEBUG
-	if (f->pstate != SOCK_START) {
+	if (f->pstate != SOCK_READY) {
 		sock_dbg(f);
-		dbg_puts(": not in START state\n");
+		dbg_puts(": not in READY state\n");
 		dbg_panic();
 	}
 #endif
@@ -433,40 +493,106 @@ sock_startreq(void *arg)
 }
 
 /*
- * Attach play and/or record buffers to dev_mix and/or dev_sub.
+ * Callback invoked by MMC stop
  */
-int
+void
+sock_stopreq(void *arg)
+{
+#ifdef DEBUG
+	struct sock *f = (struct sock *)arg;
+
+	if (debug_level >= 3) {
+		sock_dbg(f);
+		dbg_puts(": ignored STOP signal\n");
+	}
+#endif
+}
+
+/*
+ * Callback invoked by MMC relocate, ignored
+ */
+void
+sock_locreq(void *arg, unsigned mmcpos)
+{
+#ifdef DEBUG
+	struct sock *f = (struct sock *)arg;
+
+	if (debug_level >= 3) {
+		sock_dbg(f);
+		dbg_puts(": ignored RELOCATE signal\n");
+	}
+#endif
+}
+
+/*
+ * Callback invoked when slot is gone
+ */
+void
+sock_quitreq(void *arg)
+{
+	struct sock *f = (struct sock *)arg;
+
+#ifdef DEBUG
+	if (debug_level >= 3) {
+		sock_dbg(f);
+		dbg_puts(": slot gone\n");
+	}
+#endif
+	file_close(&f->pipe.file);
+}
+
+/*
+ * Attach play and/or record buffers to dev->mix and/or dev->sub.
+ */
+void
 sock_attach(struct sock *f, int force)
 {
 	struct abuf *rbuf, *wbuf;
 
-	rbuf = LIST_FIRST(&f->pipe.file.rproc->obuflist);
-	wbuf = LIST_FIRST(&f->pipe.file.wproc->ibuflist);
+	rbuf = LIST_FIRST(&f->pipe.file.rproc->outs);
+	wbuf = LIST_FIRST(&f->pipe.file.wproc->ins);
 
 	/*
 	 * If in SOCK_START state, dont attach until
 	 * the buffer isn't completely filled.
 	 */
 	if (!force && rbuf && ABUF_WOK(rbuf))
-		return 0;
+		return;
 
+	/*
+	 * start the device (dev_getpos() and dev_attach() must
+	 * be called on a started device
+	 */
+	dev_wakeup(f->dev);
+
+	/*
+	 * get the current position, the origin is when
+	 * the first sample is played/recorded
+	 */
+	f->startpos = dev_getpos(f->dev) * (int)f->round / (int)f->dev->round;
+	f->startpending = 1;
+	f->pstate = SOCK_RUN;
 #ifdef DEBUG
 	if (debug_level >= 3) {
 		sock_dbg(f);
-		dbg_puts(": attaching to device\n");
+		dbg_puts(": attaching at ");
+		dbg_puti(f->startpos);
+		dbg_puts("\n");
 	}
 #endif
-	f->pstate = SOCK_RUN;
-
 	/*
-	 * Attach them to the device.
+	 * We dont check whether the device is dying,
+	 * because dev_xxx() functions are supposed to
+	 * work (i.e., not to crash)
 	 */
-	dev_attach(f->pipe.file.name,
-	    (f->mode & AMSG_PLAY) ? rbuf : NULL, &f->rpar, f->xrun,
-	    (f->mode & AMSG_REC)  ? wbuf : NULL, &f->wpar, f->xrun,
-	    f->opt->maxweight);
+	dev_attach(f->dev, f->pipe.file.name, f->mode,
+	    rbuf, &f->rpar,
+	    f->opt->join ? f->opt->rpar.cmax - f->opt->rpar.cmin + 1 : 0,
+	    wbuf, &f->wpar, 
+	    f->opt->join ? f->opt->wpar.cmax - f->opt->wpar.cmin + 1 : 0,
+	    f->xrun, f->opt->maxweight);
 	if (f->mode & AMSG_PLAY)
-		dev_setvol(rbuf, MIDI_TO_ADATA(f->vol));
+		dev_setvol(f->dev, rbuf, MIDI_TO_ADATA(f->vol));
 
 	/*
 	 * Send the initial position, if needed.
@@ -475,7 +601,6 @@ sock_attach(struct sock *f, int force)
 		if (!sock_write(f))
 			break;
 	}
-	return 1;
 }
 
 void
@@ -483,7 +608,8 @@ sock_reset(struct sock *f)
 {
 	switch (f->pstate) {
 	case SOCK_START:
-		if (ctl_slotstart(dev_midi, f->slot)) {
+	case SOCK_READY:
+		if (ctl_slotstart(f->dev->midi, f->slot)) {
 			(void)sock_attach(f, 1);
 			f->pstate = SOCK_RUN;
 		}
@@ -584,8 +710,7 @@ sock_rdata(struct sock *f)
 {
 	struct aproc *p;
 	struct abuf *obuf;
-	unsigned char *data;
-	unsigned count, n;
+	unsigned n;
 
 #ifdef DEBUG
 	if (f->pstate != SOCK_MIDI && f->rtodo == 0) {
@@ -595,20 +720,23 @@ sock_rdata(struct sock *f)
 	}
 #endif
 	p = f->pipe.file.rproc;
-	obuf = LIST_FIRST(&p->obuflist);
+	obuf = LIST_FIRST(&p->outs);
 	if (obuf == NULL)
 		return 0;
-	if (ABUF_FULL(obuf) || !(f->pipe.file.state & FILE_ROK))
+	if (!ABUF_WOK(obuf) || !(f->pipe.file.state & FILE_ROK))
 		return 0;
-	data = abuf_wgetblk(obuf, &count, 0);
-	if (f->pstate != SOCK_MIDI && count > f->rtodo)
-		count = f->rtodo;
-	n = file_read(&f->pipe.file, data, count);
-	if (n == 0)
-		return 0;
-	abuf_wcommit(obuf, n);
-	if (f->pstate != SOCK_MIDI)
+	if (f->pstate == SOCK_MIDI) {
+		if (!rfile_do(p, obuf->len, NULL))
+			return 0;
+	} else {
+		if (!rfile_do(p, f->rtodo, &n))
+			return 0;
 		f->rtodo -= n;
+		if (f->pstate == SOCK_START) {
+			if (!ABUF_WOK(obuf) || (f->pipe.file.state & FILE_EOF))
+				f->pstate = SOCK_READY;
+		}
+	}
 	return 1;
 }
 
@@ -621,10 +749,7 @@ sock_wdata(struct sock *f)
 {
 	struct aproc *p;
 	struct abuf *ibuf;
-	unsigned char *data;
-	unsigned count, n;
-#define ZERO_MAX 0x1000
-	static unsigned char zero[ZERO_MAX];
+	unsigned n;
 
 #ifdef DEBUG
 	if (f->pstate != SOCK_MIDI && f->wtodo == 0) {
@@ -636,33 +761,23 @@ sock_wdata(struct sock *f)
 	if (!(f->pipe.file.state & FILE_WOK))
 		return 0;
 	p = f->pipe.file.wproc;
-	ibuf = LIST_FIRST(&p->ibuflist);
-	if (ibuf) {
-		if (ABUF_EMPTY(ibuf))
+	ibuf = LIST_FIRST(&p->ins);
+#ifdef DEBUG
+	if (f->pstate != SOCK_MIDI && ibuf == NULL) {
+		sock_dbg(f);
+		dbg_puts(": attempted to write on detached buffer\n");
+		dbg_panic();
+	}
+#endif
+	if (ibuf == NULL)
+		return 0;
+	if (!ABUF_ROK(ibuf))
+		return 0;
+	if (f->pstate == SOCK_MIDI) {
+		if (!wfile_do(p, ibuf->len, NULL))
 			return 0;
-		data = abuf_rgetblk(ibuf, &count, 0);
-		if (f->pstate != SOCK_MIDI && count > f->wtodo)
-			count = f->wtodo;
-		n = file_write(&f->pipe.file, data, count);
-		if (n == 0)
-			return 0;
-		abuf_rdiscard(ibuf, n);
-		if (f->pstate != SOCK_MIDI)
-			f->wtodo -= n;
 	} else {
-		if (f->pstate == SOCK_MIDI)
-			return 0; 
-		/*
-		 * There's no dev_detach() routine yet,
-		 * so now we abruptly destroy the buffer.
-		 * Until we implement dev_detach, complete
-		 * the packet with zeros...
-		 */
-		count = ZERO_MAX;
-		if (count > f->wtodo)
-			count = f->wtodo;
-		n = file_write(&f->pipe.file, zero, count);
-		if (n == 0)
+		if (!wfile_do(p, f->wtodo, &n))
 			return 0;
 		f->wtodo -= n;
 	}
@@ -720,7 +835,7 @@ sock_setpar(struct sock *f)
 		f->rpar.le = f->wpar.le = p->le ? 1 : 0;
 	if (AMSG_ISSET(p->msb))
 		f->rpar.msb = f->wpar.msb = p->msb ? 1 : 0;
-	if (AMSG_ISSET(p->rchan) && (f->mode & AMSG_REC)) {
+	if (AMSG_ISSET(p->rchan) && (f->mode & AMSG_RECMASK)) {
 		if (p->rchan < 1)
 			p->rchan = 1;
 		if (p->rchan > NCHAN_MAX)
@@ -765,10 +880,10 @@ sock_setpar(struct sock *f)
 			p->rate = RATE_MIN;
 		if (p->rate > RATE_MAX)
 			p->rate = RATE_MAX;
-		f->round = dev_roundof(p->rate);
+		f->round = dev_roundof(f->dev, p->rate);
 		f->rpar.rate = f->wpar.rate = p->rate;
 		if (!AMSG_ISSET(p->appbufsz)) {
-			p->appbufsz = dev_bufsz / dev_round * f->round;
+			p->appbufsz = f->dev->bufsz / f->dev->round * f->round;
 #ifdef DEBUG
 			if (debug_level >= 3) {
 				sock_dbg(f);
@@ -815,28 +930,10 @@ sock_setpar(struct sock *f)
 		}
 #endif
 	}
-	if (AMSG_ISSET(p->bufsz)) {
-		/*
-		 * XXX: bufsz will become read-only, but for now
-		 *      allow old library to properly work
-		 */
-#ifdef DEBUG
-		if (debug_level >= 1) {
-			sock_dbg(f);
-			dbg_puts(": legacy client using ");
-			dbg_putx(p->bufsz);
-			dbg_puts("fr total buffer size\n");
-		}
-#endif
-		min = (dev_bufsz / dev_round) * f->round;
-		if (p->bufsz < min)
-			p->bufsz = min;
-		p->appbufsz = p->bufsz - min;
-	}
 	if (AMSG_ISSET(p->appbufsz)) {
 		rate = (f->mode & AMSG_PLAY) ? f->rpar.rate : f->wpar.rate;
-		min = 2;
-		max = 2 + rate / dev_round;
+		min = 1;
+		max = 1 + rate / f->dev->round;
 		min *= f->round;
 		max *= f->round;
 		p->appbufsz += f->round - 1;
@@ -857,9 +954,9 @@ sock_setpar(struct sock *f)
 	}
 #ifdef DEBUG
 	if (debug_level >= 2) {
-		if (f->slot >= -1 && dev_midi) {
-			dbg_puts(dev_midi->u.ctl.slot[f->slot].name);
-			dbg_putu(dev_midi->u.ctl.slot[f->slot].unit);
+		if (APROC_OK(f->dev->midi)) {
+			dbg_puts(f->dev->midi->u.ctl.slot[f->slot].name);
+			dbg_putu(f->dev->midi->u.ctl.slot[f->slot].unit);
 		} else
 			dbg_puts(f->pipe.file.name);
 		dbg_puts(": buffer size = ");
@@ -868,7 +965,7 @@ sock_setpar(struct sock *f)
 			dbg_puts(", play = ");
 			aparams_dbg(&f->rpar);
 		}
-		if (f->mode & AMSG_REC) {
+		if (f->mode & AMSG_RECMASK) {
 			dbg_puts(", rec:");
 			aparams_dbg(&f->wpar);
 		}
@@ -894,7 +991,7 @@ sock_midiattach(struct sock *f, unsigned mode)
 		wbuf = abuf_new(MIDI_BUFSZ, &aparams_none);
 		aproc_setin(f->pipe.file.wproc, wbuf);
 	}
-	dev_midiattach(rbuf, wbuf);
+	dev_midiattach(f->dev, rbuf, wbuf);
 }
 
 int
@@ -925,10 +1022,14 @@ sock_hello(struct sock *f)
 #endif
 		return 0;
 	}
-	/*
-	 * XXX : dev_midi can no longer be NULL, right ?
-	 */
-	if (dev_midi && (p->proto & (AMSG_MIDIIN | AMSG_MIDIOUT))) {
+	f->opt = opt_byname(p->opt);
+	if (f->opt == NULL)
+		return 0;
+	if (!dev_ref(f->opt->dev))
+		return 0;
+	f->dev = f->opt->dev;
+
+	if (APROC_OK(f->dev->midi) && (p->proto & (AMSG_MIDIIN | AMSG_MIDIOUT))) {
 		if (p->proto & ~(AMSG_MIDIIN | AMSG_MIDIOUT)) {
 #ifdef DEBUG
 			if (debug_level >= 1) {
@@ -945,15 +1046,14 @@ sock_hello(struct sock *f)
 		sock_midiattach(f, p->proto);
 		return 1;
 	}
-	f->opt = opt_byname(p->opt);
-	if (f->opt == NULL)
-		return 0;
-	if (dev_sub)
+	if (f->opt->mode & MODE_RECMASK)
 		f->wpar = f->opt->wpar;
-	if (dev_mix)
+	if (f->opt->mode & MODE_PLAY)
 		f->rpar = f->opt->rpar;
 	if (f->opt->mmc)
 		f->xrun = AMSG_SYNC;
+	f->bufsz = f->dev->bufsz;
+	f->round = f->dev->round;
 	if ((p->proto & ~(AMSG_PLAY | AMSG_REC)) != 0 ||
 	    (p->proto &  (AMSG_PLAY | AMSG_REC)) == 0) {
 #ifdef DEBUG
@@ -968,7 +1068,7 @@ sock_hello(struct sock *f)
 	}
 	f->mode = 0;
 	if (p->proto & AMSG_PLAY) {
-		if (!dev_mix) {
+		if (!APROC_OK(f->dev->mix) || !(f->opt->mode & MODE_PLAY)) {
 #ifdef DEBUG
 			if (debug_level >= 1) {
 				sock_dbg(f);
@@ -980,7 +1080,8 @@ sock_hello(struct sock *f)
 		f->mode |= AMSG_PLAY;
 	}
 	if (p->proto & AMSG_REC) {
-		if (!dev_sub) {
+		if (!(APROC_OK(f->dev->sub)    && (f->opt->mode & MODE_REC)) &&
+		    !(APROC_OK(f->dev->submon) && (f->opt->mode & MODE_MON))) {
 #ifdef DEBUG
 			if (debug_level >= 1) {
 				sock_dbg(f);
@@ -989,10 +1090,10 @@ sock_hello(struct sock *f)
 #endif
 			return 0;
 		}
-		f->mode |= AMSG_REC;
+		f->mode |= (f->opt->mode & MODE_MON) ? AMSG_MON : AMSG_REC;
 	}
-	if (dev_midi) {
-		f->slot = ctl_slotnew(dev_midi,
+	if (APROC_OK(f->dev->midi)) {
+		f->slot = ctl_slotnew(f->dev->midi,
 		     p->who, &ctl_sockops, f,
 		     f->opt->mmc);
 		if (f->slot < 0) {
@@ -1017,6 +1118,7 @@ int
 sock_execmsg(struct sock *f)
 {
 	struct amsg *m = &f->rmsg;
+	struct abuf *obuf;
 
 	switch (m->cmd) {
 	case AMSG_DATA:
@@ -1026,7 +1128,8 @@ sock_execmsg(struct sock *f)
 			dbg_puts(": DATA message\n");
 		}
 #endif
-		if (f->pstate != SOCK_RUN && f->pstate != SOCK_START) {
+		if (f->pstate != SOCK_RUN && f->pstate != SOCK_START &&
+		    f->pstate != SOCK_READY) {
 #ifdef DEBUG
 			if (debug_level >= 1) {
 				sock_dbg(f);
@@ -1046,8 +1149,8 @@ sock_execmsg(struct sock *f)
 			aproc_del(f->pipe.file.rproc);
 			return 0;
 		}
-		if (f->pstate == SOCK_START &&
-		    ABUF_FULL(LIST_FIRST(&f->pipe.file.rproc->obuflist))) {
+		obuf = LIST_FIRST(&f->pipe.file.rproc->outs);
+		if (f->pstate == SOCK_START && !ABUF_WOK(obuf)) {
 #ifdef DEBUG
 			if (debug_level >= 1) {
 				sock_dbg(f);
@@ -1057,8 +1160,31 @@ sock_execmsg(struct sock *f)
 			aproc_del(f->pipe.file.rproc);
 			return 0;
 		}
+		if (m->u.data.size % obuf->bpf != 0) {
+#ifdef DEBUG
+			if (debug_level >= 1) {
+				sock_dbg(f);
+				dbg_puts(": unaligned data chunk\n");
+			}
+#endif
+			aproc_del(f->pipe.file.rproc);
+			return 0;
+		}
 		f->rstate = SOCK_RDATA;
-		f->rtodo = m->u.data.size;
+		f->rtodo = m->u.data.size / obuf->bpf;
+#ifdef DEBUG
+		if (f->rtodo > f->rmax && debug_level >= 2) {
+			sock_dbg(f);
+			dbg_puts(": received past current position, rtodo = ");
+			dbg_putu(f->rtodo);
+			dbg_puts(", rmax = ");
+			dbg_putu(f->rmax);
+			dbg_puts("\n");
+			aproc_del(f->pipe.file.rproc);
+			return 0;
+		}
+#endif
+		f->rmax -= f->rtodo;
 		if (f->rtodo == 0) {
 #ifdef DEBUG
 			if (debug_level >= 1) {
@@ -1098,7 +1224,8 @@ sock_execmsg(struct sock *f)
 			dbg_puts(": STOP message\n");
 		}
 #endif
-		if (f->pstate != SOCK_RUN && f->pstate != SOCK_START) {
+		if (f->pstate != SOCK_RUN &&
+		    f->pstate != SOCK_START && f->pstate != SOCK_READY) {
 #ifdef DEBUG
 			if (debug_level >= 1) {
 				sock_dbg(f);
@@ -1107,11 +1234,18 @@ sock_execmsg(struct sock *f)
 #endif
 			aproc_del(f->pipe.file.rproc);
 			return 0;
+		/*
+		 * XXX: device could have desappeared at this point,
+		 * see how this is fixed in wav.c
+		 */
 		}
-		if (f->pstate == SOCK_START &&
-		    ctl_slotstart(dev_midi, f->slot))
+		if ((f->pstate == SOCK_START || f->pstate == SOCK_READY) &&
+		    ctl_slotstart(f->dev->midi, f->slot))
 			(void)sock_attach(f, 1);
-		sock_freebuf(f);
+		if (f->wstate != SOCK_WDATA || f->wtodo == 0)
+			sock_freebuf(f);
+		else
+			f->pstate = SOCK_STOP;
 		AMSG_INIT(m);
 		m->cmd = AMSG_ACK;
 		f->rstate = SOCK_RRET;
@@ -1161,17 +1295,27 @@ sock_execmsg(struct sock *f)
 		AMSG_INIT(m);
 		m->cmd = AMSG_GETPAR;
 		m->u.par.legacy_mode = f->mode;
-		m->u.par.bits = f->rpar.bits;
-		m->u.par.bps = f->rpar.bps;
-		m->u.par.sig = f->rpar.sig;
-		m->u.par.le = f->rpar.le;
-		m->u.par.msb = f->rpar.msb;
-		m->u.par.rate = f->rpar.rate;
-		m->u.par.rchan = f->wpar.cmax - f->wpar.cmin + 1;
-		m->u.par.pchan = f->rpar.cmax - f->rpar.cmin + 1;
+		if (f->mode & AMSG_PLAY) {
+			m->u.par.bits = f->rpar.bits;
+			m->u.par.bps = f->rpar.bps;
+			m->u.par.sig = f->rpar.sig;
+			m->u.par.le = f->rpar.le;
+			m->u.par.msb = f->rpar.msb;
+			m->u.par.rate = f->rpar.rate;
+			m->u.par.pchan = f->rpar.cmax - f->rpar.cmin + 1;
+		}
+		if (f->mode & AMSG_RECMASK) {
+			m->u.par.bits = f->wpar.bits;
+			m->u.par.bps = f->wpar.bps;
+			m->u.par.sig = f->wpar.sig;
+			m->u.par.le = f->wpar.le;
+			m->u.par.msb = f->wpar.msb;
+			m->u.par.rate = f->wpar.rate;
+			m->u.par.rchan = f->wpar.cmax - f->wpar.cmin + 1;
+		}
 		m->u.par.appbufsz = f->bufsz;
 		m->u.par.bufsz =
-		    f->bufsz + (dev_bufsz / dev_round) * f->round;
+		    f->bufsz + (f->dev->bufsz / f->dev->round) * f->round;
 		m->u.par.round = f->round;
 		f->rstate = SOCK_RRET;
 		f->rtodo = sizeof(struct amsg);
@@ -1195,10 +1339,10 @@ sock_execmsg(struct sock *f)
 		}
 		AMSG_INIT(m);
 		m->cmd = AMSG_GETCAP;
-		m->u.cap.rate = dev_rate;
-		m->u.cap.pchan = dev_mix ?
+		m->u.cap.rate = f->dev->rate;
+		m->u.cap.pchan = (f->opt->mode & MODE_PLAY) ?
 		    (f->opt->rpar.cmax - f->opt->rpar.cmin + 1) : 0;
-		m->u.cap.rchan = dev_sub ?
+		m->u.cap.rchan = (f->opt->mode & (MODE_PLAY | MODE_REC)) ?
 		    (f->opt->wpar.cmax - f->opt->wpar.cmin + 1) : 0;
 		m->u.cap.bits = sizeof(short) * 8;
 		m->u.cap.bps = sizeof(short);
@@ -1212,8 +1356,8 @@ sock_execmsg(struct sock *f)
 			dbg_puts(": SETVOL message\n");
 		}
 #endif
-		if (f->pstate != SOCK_RUN &&
-		    f->pstate != SOCK_START && f->pstate != SOCK_INIT) {
+		if (f->pstate != SOCK_RUN && f->pstate != SOCK_START &&
+		    f->pstate != SOCK_INIT && f->pstate != SOCK_READY) {
 #ifdef DEBUG
 			if (debug_level >= 1) {
 				sock_dbg(f);
@@ -1235,7 +1379,7 @@ sock_execmsg(struct sock *f)
 		}
 		sock_setvol(f, m->u.vol.ctl);
 		if (f->slot >= 0)
-			ctl_slotvol(dev_midi, f->slot, m->u.vol.ctl);
+			ctl_slotvol(f->dev->midi, f->slot, m->u.vol.ctl);
 		f->rtodo = sizeof(struct amsg);
 		f->rstate = SOCK_RMSG;
 		break;
@@ -1321,7 +1465,7 @@ sock_buildmsg(struct sock *f)
 {
 	struct aproc *p;
 	struct abuf *ibuf;
-	unsigned size;
+	unsigned size, max;
 
 	if (f->pstate == SOCK_MIDI) {
 #ifdef DEBUG
@@ -1336,17 +1480,41 @@ sock_buildmsg(struct sock *f)
 	}
 
 	/*
+	 * Send initial position
+	 */
+	if (f->startpending) {
+#ifdef DEBUG
+		if (debug_level >= 4) {
+			sock_dbg(f);
+			dbg_puts(": building POS message, pos = ");
+			dbg_puti(f->startpos);
+			dbg_puts("\n");
+		}
+#endif
+		AMSG_INIT(&f->wmsg);
+		f->wmsg.cmd = AMSG_POS;
+		f->wmsg.u.ts.delta = f->startpos;
+		f->rmax += f->startpos;
+		f->wtodo = sizeof(struct amsg);
+		f->wstate = SOCK_WMSG;
+		f->startpending = 0;
+		return 1;
+	}
+
+	/*
 	 * If pos changed, build a MOVE message.
 	 */
 	if (f->tickpending) {
 #ifdef DEBUG
 		if (debug_level >= 4) {
 			sock_dbg(f);
-			dbg_puts(": building POS message, delta = ");
+			dbg_puts(": building MOVE message, delta = ");
 			dbg_puti(f->delta);
 			dbg_puts("\n");
 		}
 #endif
+		f->wmax += f->delta;
+		f->rmax += f->delta;
 		AMSG_INIT(&f->wmsg);
 		f->wmsg.cmd = AMSG_MOVE;
 		f->wmsg.u.ts.delta = f->delta;
@@ -1382,19 +1550,35 @@ sock_buildmsg(struct sock *f)
 	 * If data available, build a DATA message.
 	 */
 	p = f->pipe.file.wproc;
-	ibuf = LIST_FIRST(&p->ibuflist);
+	ibuf = LIST_FIRST(&p->ins);
 	if (ibuf && ABUF_ROK(ibuf)) {
-		size = ibuf->used - (ibuf->used % ibuf->bpf);
-		if (size > AMSG_DATAMAX)
-			size = AMSG_DATAMAX - (AMSG_DATAMAX % ibuf->bpf);
+#ifdef DEBUG
+		if (ibuf->used > f->wmax && debug_level >= 3) {
+			sock_dbg(f);
+			dbg_puts(": attempt to send past current position: used = ");
+			dbg_putu(ibuf->used);
+			dbg_puts(" wmax = ");
+			dbg_putu(f->wmax);
+			dbg_puts("\n");
+		}
+#endif
+		max = AMSG_DATAMAX / ibuf->bpf;
+		size = ibuf->used;
 		if (size > f->walign)
 			size = f->walign;
+		if (size > f->wmax)
+			size = f->wmax;
+		if (size > max)
+			size = max;
+		if (size == 0)
+			return 0;
 		f->walign -= size;
+		f->wmax -= size;
 		if (f->walign == 0)
-			f->walign = dev_round * ibuf->bpf;
+			f->walign = f->round;
 		AMSG_INIT(&f->wmsg);
 		f->wmsg.cmd = AMSG_DATA;
-		f->wmsg.u.data.size = size;
+		f->wmsg.u.data.size = size * ibuf->bpf;
 		f->wtodo = sizeof(struct amsg);
 		f->wstate = SOCK_WMSG;
 		return 1;
@@ -1440,9 +1624,11 @@ sock_read(struct sock *f)
 			f->rtodo = sizeof(struct amsg);
 		}
 		/*
-		 * XXX: have to way that the buffer is full before starting
+		 * XXX: sock_attach() may not start if there's not enough
+		 *	samples queues, if so ctl_slotstart() will trigger
+		 *	other streams, but this one won't start.
 		 */
-		if (f->pstate == SOCK_START && ctl_slotstart(dev_midi, f->slot))
+		if (f->pstate == SOCK_READY && ctl_slotstart(f->dev->midi, f->slot))
 			(void)sock_attach(f, 0);
 		break;
 	case SOCK_RRET:
@@ -1525,8 +1711,12 @@ sock_write(struct sock *f)
 			f->wtodo = 0xdeadbeef;
 			break;
 		}
+		/*
+		 * XXX: why not set f->wtodo in sock_wmsg() ?
+		 */
 		f->wstate = SOCK_WDATA;
-		f->wtodo = f->wmsg.u.data.size;
+		f->wtodo = f->wmsg.u.data.size /
+		    LIST_FIRST(&f->pipe.file.wproc->ins)->bpf;
 		/* PASSTHROUGH */
 	case SOCK_WDATA:
 		if (!sock_wdata(f))
@@ -1535,6 +1725,8 @@ sock_write(struct sock *f)
 			break;
 		f->wstate = SOCK_WIDLE;
 		f->wtodo = 0xdeadbeef;
+		if (f->pstate == SOCK_STOP)
+			sock_freebuf(f);
 		/* PASSTHROUGH */
 	case SOCK_WIDLE:
 		if (!sock_return(f))

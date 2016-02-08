@@ -1,4 +1,4 @@
-/*	$OpenBSD: pciide.c,v 1.306 2009/11/21 14:34:20 jsg Exp $	*/
+/*	$OpenBSD: pciide.c,v 1.318 2010/08/06 05:34:29 deraadt Exp $	*/
 /*	$NetBSD: pciide.c,v 1.127 2001/08/03 01:31:08 tsutsui Exp $	*/
 
 /*
@@ -12,12 +12,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by Manuel Bouyer.
- * 4. Neither the name of the University nor the names of its contributors
- *    may be used to endorse or promote products derived from this software
- *    without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
@@ -1265,13 +1259,16 @@ const struct pciide_vendor_desc pciide_vendors[] = {
 int	pciide_match(struct device *, void *, void *);
 void	pciide_attach(struct device *, struct device *, void *);
 int	pciide_detach(struct device *, int);
+int	pciide_activate(struct device *, int);
 
 struct cfattach pciide_pci_ca = {
-	sizeof(struct pciide_softc), pciide_match, pciide_attach, pciide_detach,
+	sizeof(struct pciide_softc), pciide_match, pciide_attach,
+	pciide_detach, pciide_activate
 };
 
 struct cfattach pciide_jmb_ca = {
-	sizeof(struct pciide_softc), pciide_match, pciide_attach, pciide_detach,
+	sizeof(struct pciide_softc), pciide_match, pciide_attach,
+	pciide_detach, pciide_activate
 };
 
 struct cfdriver pciide_cd = {
@@ -1400,6 +1397,107 @@ pciide_detach(struct device *self, int flags)
 		sc->chip_unmap(sc, flags);
 
 	return 0;
+}
+
+int
+pciide_activate(struct device *self, int act)
+{
+	int rv = 0;
+	struct pciide_softc *sc = (struct pciide_softc *)self;
+	int i;
+
+	switch (act) {
+	case DVACT_SUSPEND:
+		rv = config_activate_children(self, act);
+
+		for (i = 0; i < nitems(sc->sc_save); i++)
+			sc->sc_save[i] = pci_conf_read(sc->sc_pc,
+			    sc->sc_tag, PCI_MAPREG_END + 0x18 + (i * 4));
+
+		if (sc->sc_pp->chip_map == sch_chip_map) {
+			sc->sc_save2[0] = pci_conf_read(sc->sc_pc,
+			    sc->sc_tag, SCH_D0TIM);
+			sc->sc_save2[1] = pci_conf_read(sc->sc_pc,
+			    sc->sc_tag, SCH_D1TIM);
+		} else if (sc->sc_pp->chip_map == piixsata_chip_map) {
+			sc->sc_save2[0] = pciide_pci_read(sc->sc_pc,
+			    sc->sc_tag, ICH5_SATA_MAP);
+			sc->sc_save2[1] = pciide_pci_read(sc->sc_pc,
+			    sc->sc_tag, ICH5_SATA_PI);
+			sc->sc_save2[2] = pciide_pci_read(sc->sc_pc,
+			    sc->sc_tag, ICH_SATA_PCS);
+		} else if (sc->sc_pp->chip_map == sii3112_chip_map) {
+			sc->sc_save[0] = pci_conf_read(sc->sc_pc,
+			    sc->sc_tag, SII3112_SCS_CMD);
+			sc->sc_save[1] = pci_conf_read(sc->sc_pc,
+			    sc->sc_tag, SII3112_PCI_CFGCTL);
+		} else if (sc->sc_pp->chip_map == ite_chip_map) {
+			sc->sc_save2[0] = pci_conf_read(sc->sc_pc,
+			    sc->sc_tag, IT_TIM(0));
+		} else if (sc->sc_pp->chip_map == nforce_chip_map) {
+			sc->sc_save2[0] = pci_conf_read(sc->sc_pc,
+			    sc->sc_tag, NFORCE_PIODMATIM);
+			sc->sc_save2[1] = pci_conf_read(sc->sc_pc,
+			    sc->sc_tag, NFORCE_PIOTIM);
+			sc->sc_save2[2] = pci_conf_read(sc->sc_pc,
+			    sc->sc_tag, NFORCE_UDMATIM);
+		}
+		break;
+	case DVACT_RESUME:
+		for (i = 0; i < nitems(sc->sc_save); i++)
+			pci_conf_write(sc->sc_pc, sc->sc_tag,
+			    PCI_MAPREG_END + 0x18 + (i * 4),
+			    sc->sc_save[i]);
+
+		if (sc->sc_pp->chip_map == default_chip_map ||
+		    sc->sc_pp->chip_map == sata_chip_map ||
+		    sc->sc_pp->chip_map == piix_chip_map ||
+		    sc->sc_pp->chip_map == phison_chip_map ||
+		    sc->sc_pp->chip_map == ixp_chip_map ||
+		    sc->sc_pp->chip_map == acard_chip_map ||
+		    sc->sc_pp->chip_map == default_chip_map ||
+		    sc->sc_pp->chip_map == apollo_chip_map ||
+		    sc->sc_pp->chip_map == sis_chip_map) {
+			/* nothing to restore -- uses only 0x40 - 0x56 */
+		} else if (sc->sc_pp->chip_map == sch_chip_map) {
+			pci_conf_write(sc->sc_pc, sc->sc_tag,
+			    SCH_D0TIM, sc->sc_save2[0]);
+			pci_conf_write(sc->sc_pc, sc->sc_tag,
+			    SCH_D1TIM, sc->sc_save2[1]);
+		} else if (sc->sc_pp->chip_map == piixsata_chip_map) {
+			pciide_pci_write(sc->sc_pc, sc->sc_tag,
+			    ICH5_SATA_MAP, sc->sc_save2[0]);
+			pciide_pci_write(sc->sc_pc, sc->sc_tag,
+			    ICH5_SATA_PI, sc->sc_save2[1]);
+			pciide_pci_write(sc->sc_pc, sc->sc_tag,
+			    ICH_SATA_PCS, sc->sc_save2[2]);
+		} else if (sc->sc_pp->chip_map == sii3112_chip_map) {
+			pci_conf_write(sc->sc_pc, sc->sc_tag,
+			    SII3112_SCS_CMD, sc->sc_save[0]);
+			delay(50 * 1000);
+			pci_conf_write(sc->sc_pc, sc->sc_tag,
+			    SII3112_PCI_CFGCTL, sc->sc_save[1]);
+			delay(50 * 1000);
+		} else if (sc->sc_pp->chip_map == ite_chip_map) {
+			pci_conf_write(sc->sc_pc, sc->sc_tag,
+			    IT_TIM(0), sc->sc_save2[0]);
+		} else if (sc->sc_pp->chip_map == nforce_chip_map) {
+			pci_conf_write(sc->sc_pc, sc->sc_tag,
+			    NFORCE_PIODMATIM, sc->sc_save2[0]);
+			pci_conf_write(sc->sc_pc, sc->sc_tag,
+			    NFORCE_PIOTIM, sc->sc_save2[1]);
+			pci_conf_write(sc->sc_pc, sc->sc_tag,
+			    NFORCE_UDMATIM, sc->sc_save2[2]);
+		} else {
+			printf("%s: restore for unknown chip map %x\n",
+			    sc->sc_wdcdev.sc_dev.dv_xname,
+			    sc->sc_pp->ide_product);
+		}
+
+		rv = config_activate_children(self, act);
+		break;
+	}
+	return (rv);
 }
 
 int
@@ -8553,7 +8651,7 @@ jmicron_chip_map(struct pciide_softc *sc, struct pci_attach_args *pa)
 	}
 	WDCDEBUG_PRINT(("%s: new conf register 0x%x\n",
 	    sc->sc_wdcdev.sc_dev.dv_xname, conf), DEBUG_PROBE);
-	pci_conf_write(sc->sc_pc, sc->sc_tag, NFORCE_CONF, conf);
+	pci_conf_write(sc->sc_pc, sc->sc_tag, JMICRON_CONF, conf);
 }
 
 void
@@ -8637,7 +8735,6 @@ phison_chip_map(struct pciide_softc *sc, struct pci_attach_args *pa)
 	int channel;
 	pcireg_t interface = PCI_INTERFACE(pa->pa_class);
 	bus_size_t cmdsize, ctlsize;
-	u_int32_t conf;
 
 	sc->chip_unmap = default_chip_unmap;
 
@@ -8678,9 +8775,6 @@ phison_chip_map(struct pciide_softc *sc, struct pci_attach_args *pa)
 
 		sc->sc_wdcdev.set_modes(&cp->wdc_channel);
 	}
-	WDCDEBUG_PRINT(("%s: new conf register 0x%x\n",
-	    sc->sc_wdcdev.sc_dev.dv_xname, conf), DEBUG_PROBE);
-	pci_conf_write(sc->sc_pc, sc->sc_tag, NFORCE_CONF, conf);
 }
 
 void

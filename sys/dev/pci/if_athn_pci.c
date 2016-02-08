@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_athn_pci.c,v 1.5 2010/02/02 17:16:47 damien Exp $	*/
+/*	$OpenBSD: if_athn_pci.c,v 1.8 2010/08/04 19:49:49 damien Exp $	*/
 
 /*-
  * Copyright (c) 2009 Damien Bergamini <damien.bergamini@free.fr>
@@ -31,6 +31,7 @@
 #include <sys/malloc.h>
 #include <sys/timeout.h>
 #include <sys/device.h>
+#include <sys/workq.h>
 
 #include <machine/bus.h>
 #include <machine/intr.h>
@@ -66,18 +67,22 @@ struct athn_pci_softc {
 	void			*sc_ih;
 	bus_size_t		sc_mapsize;
 	int			sc_cap_off;
+	struct workq_task	sc_resume_wqt;
 };
 
 int	athn_pci_match(struct device *, void *, void *);
 void	athn_pci_attach(struct device *, struct device *, void *);
 int	athn_pci_detach(struct device *, int);
+int	athn_pci_activate(struct device *, int);
+void	athn_pci_resume(void *, void *);
 void	athn_pci_disable_aspm(struct athn_softc *);
 
 struct cfattach athn_pci_ca = {
 	sizeof (struct athn_pci_softc),
 	athn_pci_match,
 	athn_pci_attach,
-	athn_pci_detach
+	athn_pci_detach,
+	athn_pci_activate
 };
 
 static const struct pci_matchid athn_pci_devices[] = {
@@ -89,7 +94,8 @@ static const struct pci_matchid athn_pci_devices[] = {
 	{ PCI_VENDOR_ATHEROS, PCI_PRODUCT_ATHEROS_AR9285 },
 	{ PCI_VENDOR_ATHEROS, PCI_PRODUCT_ATHEROS_AR2427 },
 	{ PCI_VENDOR_ATHEROS, PCI_PRODUCT_ATHEROS_AR9227 },
-	{ PCI_VENDOR_ATHEROS, PCI_PRODUCT_ATHEROS_AR9287 }
+	{ PCI_VENDOR_ATHEROS, PCI_PRODUCT_ATHEROS_AR9287 },
+	{ PCI_VENDOR_ATHEROS, PCI_PRODUCT_ATHEROS_AR9300 }
 };
 
 int
@@ -191,6 +197,37 @@ athn_pci_detach(struct device *self, int flags)
 		bus_space_unmap(sc->sc_st, sc->sc_sh, psc->sc_mapsize);
 
 	return (0);
+}
+
+int
+athn_pci_activate(struct device *self, int act)
+{
+	struct athn_pci_softc *psc = (struct athn_pci_softc *)self;
+	struct athn_softc *sc = &psc->sc_sc;
+
+	switch (act) {
+	case DVACT_SUSPEND:
+		athn_suspend(sc);
+		break;
+	case DVACT_RESUME:
+		workq_queue_task(NULL, &psc->sc_resume_wqt, 0,
+		    athn_pci_resume, psc, NULL);
+		break;
+	}
+
+	return (0);
+}
+
+void
+athn_pci_resume(void *arg1, void *arg2)
+{
+	struct athn_pci_softc *psc = arg1;
+	struct athn_softc *sc = &psc->sc_sc;
+	int s;
+
+	s = splnet();
+	athn_resume(sc);
+	splx(s);
 }
 
 void

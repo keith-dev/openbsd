@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_xxx.c,v 1.15 2010/01/09 02:44:17 kettenis Exp $	*/
+/*	$OpenBSD: kern_xxx.c,v 1.18 2010/07/28 16:15:25 deraadt Exp $	*/
 /*	$NetBSD: kern_xxx.c,v 1.32 1996/04/22 01:38:41 christos Exp $	*/
 
 /*
@@ -51,13 +51,16 @@ sys_reboot(struct proc *p, void *v, register_t *retval)
 	struct sys_reboot_args /* {
 		syscallarg(int) opt;
 	} */ *uap = v;
+#ifdef MULTIPROCESSOR
 	CPU_INFO_ITERATOR cii;
 	struct cpu_info *ci;
+#endif
 	int error;
 
 	if ((error = suser(p, 0)) != 0)
 		return (error);
 
+#ifdef MULTIPROCESSOR
 	/*
 	 * Make sure this thread only runs on the primary cpu.
 	 */
@@ -68,28 +71,8 @@ sys_reboot(struct proc *p, void *v, register_t *retval)
 		}
 	}
 
-	/*
-	 * Make sure we stop the secondary CPUs.
-	 */
-	CPU_INFO_FOREACH(cii, ci) {
-		struct schedstate_percpu *spc = &ci->ci_schedstate;
-
-		if (CPU_IS_PRIMARY(ci))
-			continue;
-		atomic_setbits_int(&spc->spc_schedflags, SPCF_SHOULDHALT);
-	}
-	CPU_INFO_FOREACH(cii, ci) {
-		struct schedstate_percpu *spc = &ci->ci_schedstate;
-		struct sleep_state sls;
-
-		if (CPU_IS_PRIMARY(ci))
-			continue;
-		while ((spc->spc_schedflags & SPCF_HALTED) == 0) {
-			sleep_setup(&sls, spc, PZERO, "schedstate");
-			sleep_finish(&sls,
-			    (spc->spc_schedflags & SPCF_HALTED) == 0);
-		}
-	}
+	sched_stop_secondary_cpus();
+#endif
 
 	if_downall();
 

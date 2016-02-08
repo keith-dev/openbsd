@@ -1,4 +1,4 @@
-/*	$OpenBSD: apic.c,v 1.8 2009/08/22 02:54:50 mk Exp $	*/
+/*	$OpenBSD: apic.c,v 1.11 2010/08/07 03:50:01 krw Exp $	*/
 
 /*
  * Copyright (c) 2005 Michael Shalayeff
@@ -77,6 +77,10 @@ u_int32_t apic_get_int_ent0(struct elroy_softc *, int);
 void	apic_dump(struct elroy_softc *);
 #endif
 
+void		apic_write(volatile struct elroy_regs *r, u_int32_t reg,
+		    u_int32_t val);
+u_int32_t	apic_read(volatile struct elroy_regs *r, u_int32_t reg);
+
 void
 apic_write(volatile struct elroy_regs *r, u_int32_t reg, u_int32_t val)
 {
@@ -106,7 +110,7 @@ apic_attach(struct elroy_softc *sc)
 	sc->sc_irq = malloc(sc->sc_nints * sizeof(int), M_DEVBUF,
 	    M_NOWAIT | M_ZERO);
 	if (sc->sc_irq == NULL)
-		panic("apic_attach: cannot allocate irq table\n");
+		panic("apic_attach: cannot allocate irq table");
 
 	apic_get_int_tbl(sc);
 
@@ -228,6 +232,7 @@ apic_intr(void *v)
 	struct apic_iv *iv = v;
 	struct elroy_softc *sc = iv->sc;
 	volatile struct elroy_regs *r = sc->sc_regs;
+	pci_intr_handle_t ih = iv->ih;
 	int claimed = 0;
 
 	while (iv) {
@@ -242,7 +247,7 @@ apic_intr(void *v)
 
 	/* Signal EOI. */
 	elroy_write32(&r->apic_eoi,
-	    htole32((31 - APIC_INT_IRQ(iv->ih)) & APIC_ENT0_VEC));
+	    htole32((31 - APIC_INT_IRQ(ih)) & APIC_ENT0_VEC));
 
 	return (claimed);
 }

@@ -1,4 +1,4 @@
-.\" $OpenBSD: otus.4,v 1.10 2009/11/17 18:07:09 damien Exp $
+.\" $OpenBSD: otus.4,v 1.13 2010/04/29 09:20:17 jmc Exp $
 .\"
 .\" Copyright (c) 2009 Damien Bergamini <damien.bergamini@free.fr>
 .\"
@@ -14,9 +14,9 @@
 .\" ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
 .\" OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 .\"
-.Dd $Mdocdate: November 17 2009 $
-.Os
+.Dd $Mdocdate: April 29 2010 $
 .Dt OTUS 4
+.Os
 .Sh NAME
 .Nm otus
 .Nd Atheros USB IEEE 802.11a/g/n wireless network device
@@ -81,8 +81,9 @@ is restricted.
 A prepackaged version of the firmware, designed to be used with
 .Xr pkg_add 1 ,
 can be found at:
-.Pp
-.Pa http://damien.bergamini.free.fr/packages/openbsd/otus-firmware-1.0.tgz
+.Bd -literal -offset 3n
+http://damien.bergamini.free.fr/packages/openbsd/otus-firmware-1.0.tgz
+.Ed
 .Sh HARDWARE
 The following adapters should work:
 .Pp
@@ -94,6 +95,7 @@ The following adapters should work:
 .It D-Link DWA-160 rev A1
 .It D-Link DWA-160 rev A2
 .It IO-Data WN-GDN/US2
+.It NEC Aterm WL300NU-G
 .It Netgear WNDA3100
 .It Netgear WN111 v2
 .It Planex GW-US300

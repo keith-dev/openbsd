@@ -1,4 +1,4 @@
-/*	$OpenBSD: ieee80211_proto.c,v 1.41 2009/11/21 18:09:31 damien Exp $	*/
+/*	$OpenBSD: ieee80211_proto.c,v 1.44 2010/08/07 03:50:02 krw Exp $	*/
 /*	$NetBSD: ieee80211_proto.c,v 1.8 2004/04/30 23:58:20 dyoung Exp $	*/
 
 /*-
@@ -430,10 +430,11 @@ ieee80211_node_gtk_rekey(void *arg, struct ieee80211_node *ni)
 		return;
 
 	/* initiate a group key handshake with STA */
-	if (ieee80211_send_group_msg1(ic, ni) == 0) {
-		ni->ni_flags |= IEEE80211_NODE_REKEY;
+	ni->ni_flags |= IEEE80211_NODE_REKEY;
+	if (ieee80211_send_group_msg1(ic, ni) != 0)
+		ni->ni_flags &= ~IEEE80211_NODE_REKEY;
+	else
 		ic->ic_rsn_keydonesta++;
-	}
 }
 
 /*
@@ -780,10 +781,16 @@ ieee80211_newstate(struct ieee80211com *ic, enum ieee80211_state nstate,
 		ieee80211_set_link_state(ic, LINK_STATE_DOWN);
 	switch (nstate) {
 	case IEEE80211_S_INIT:
+		/*
+		 * If mgt = -1, driver is already partway down, so do
+		 * not send management frames.
+		 */
 		switch (ostate) {
 		case IEEE80211_S_INIT:
 			break;
 		case IEEE80211_S_RUN:
+			if (mgt == -1)
+				goto justcleanup;
 			switch (ic->ic_opmode) {
 			case IEEE80211_M_STA:
 				IEEE80211_SEND_MGMT(ic, ni,
@@ -808,6 +815,8 @@ ieee80211_newstate(struct ieee80211com *ic, enum ieee80211_state nstate,
 			}
 			/* FALLTHROUGH */
 		case IEEE80211_S_ASSOC:
+			if (mgt == -1)
+				goto justcleanup;
 			switch (ic->ic_opmode) {
 			case IEEE80211_M_STA:
 				IEEE80211_SEND_MGMT(ic, ni,
@@ -831,6 +840,7 @@ ieee80211_newstate(struct ieee80211com *ic, enum ieee80211_state nstate,
 			/* FALLTHROUGH */
 		case IEEE80211_S_AUTH:
 		case IEEE80211_S_SCAN:
+justcleanup:
 #ifndef IEEE80211_STA_ONLY
 			if (ic->ic_opmode == IEEE80211_M_HOSTAP)
 				timeout_del(&ic->ic_rsn_timeout);
@@ -957,7 +967,7 @@ ieee80211_newstate(struct ieee80211com *ic, enum ieee80211_state nstate,
 		case IEEE80211_S_SCAN:		/* adhoc/hostap mode */
 		case IEEE80211_S_ASSOC:		/* infra mode */
 			if (ni->ni_txrate >= ni->ni_rates.rs_nrates)
-				panic("%s: bogus xmit rate %u setup\n",
+				panic("%s: bogus xmit rate %u setup",
 				    __func__, ni->ni_txrate);
 			if (ifp->if_flags & IFF_DEBUG) {
 				printf("%s: %s with %s ssid ",

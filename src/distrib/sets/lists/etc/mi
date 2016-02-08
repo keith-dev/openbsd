@@ -31,9 +31,18 @@
 ./etc/hosts.lpd
 ./etc/hotplug
 ./etc/ifstated.conf
+./etc/iked.conf
+./etc/iked/pubkeys/fqdn
+./etc/iked/pubkeys/ipv4
+./etc/iked/pubkeys/ipv6
+./etc/iked/pubkeys/ufqdn
 ./etc/inetd.conf
 ./etc/ipsec.conf
 ./etc/ksh.kshrc
+./etc/ldap/core.schema
+./etc/ldap/inetorgperson.schema
+./etc/ldap/nis.schema
+./etc/ldapd.conf
 ./etc/ldpd.conf
 ./etc/localtime
 ./etc/locate.rc
@@ -68,10 +77,6 @@
 ./etc/monthly
 ./etc/motd
 ./etc/mrouted.conf
-./etc/mtree/4.4BSD.dist
-./etc/mtree/BSD.local.dist
-./etc/mtree/BSD.x11.dist
-./etc/mtree/special
 ./etc/myname
 ./etc/netstart
 ./etc/networks
@@ -82,7 +87,6 @@
 ./etc/passwd
 ./etc/pf.conf
 ./etc/pf.os
-./etc/phones
 ./etc/portal.conf
 ./etc/ppp/chap-secrets
 ./etc/ppp/options

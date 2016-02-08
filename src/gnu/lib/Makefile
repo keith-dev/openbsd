@@ -1,13 +1,17 @@
-#	$OpenBSD: Makefile,v 1.12 2005/04/28 21:30:13 espie Exp $
+#	$OpenBSD: Makefile,v 1.15 2010/05/25 00:24:58 espie Exp $
 
 .include <bsd.own.mk>
-USE_GCC3?=No
 
 .if make(obj)
-SUBDIR+=libiberty libobjc libstdc++ ../egcs libreadline libf2c
+SUBDIR+=libiberty libobjc libstdc++ ../egcs libreadline \
+libstdc++-v3 libsupc++-v3 ../usr.bin/cc/libobjc
 .else
-.  if ${USE_GCC3:L} == "yes"
-SUBDIR+=libiberty libobjc libstdc++ libreadline libf2c
+.  if ${COMPILER_VERSION:L} == "gcc3"
+SUBDIR+=libiberty libobjc libstdc++ libreadline
+.  elif ${COMPILER_VERSION:L} == "gcc4"
+# XXX make sure we build libobjc & libstdc++-v3 from gcc4
+SUBDIR+=libiberty libreadline ../usr.bin/cc/libobjc
+SUBDIR+=libstdc++-v3 libsupc++-v3
 .  else
 SUBDIR+=libiberty libobjc ../egcs libreadline 
 .  endif

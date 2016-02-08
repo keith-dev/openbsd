@@ -1,4 +1,4 @@
-/*	$OpenBSD: mio_thru.c,v 1.6 2009/10/22 22:26:49 ratchov Exp $	*/
+/*	$OpenBSD: mio_thru.c,v 1.10 2010/07/21 23:00:16 ratchov Exp $	*/
 /*
  * Copyright (c) 2008 Alexandre Ratchov <alex@caoua.org>
  *
@@ -55,25 +55,39 @@ struct mio_hdl *
 thru_open(const char *str, char *sock, unsigned mode, int nbio)
 {
 	extern char *__progname;
+	char unit[4], *sep, *opt;
 	struct amsg msg;
 	int s, n, todo;
 	unsigned char *data;
 	struct thru_hdl *hdl;
-	struct sockaddr_un ca;	
+	struct sockaddr_un ca;
 	socklen_t len = sizeof(struct sockaddr_un);
 	uid_t uid;
 
+	sep = strchr(str, '.');
+	if (sep == NULL) {
+		opt = "default";
+		strlcpy(unit, str, sizeof(unit));
+	} else {
+		opt = sep + 1;
+		if (sep - str >= sizeof(unit)) {
+			DPRINTF("thru_open: %s: too long\n", str);
+			return NULL;
+		}
+		strlcpy(unit, str, opt - str);
+	}
+	DPRINTF("thru_open: trying %s -> %s.%s\n", str, unit, opt);
 	uid = geteuid();
 	if (strchr(str, '/') != NULL)
 		return NULL;
 	snprintf(ca.sun_path, sizeof(ca.sun_path),
-	    "/tmp/aucat-%u/%s%s", uid, sock, str);
+	    "/tmp/aucat-%u/%s%s", uid, sock, unit);
 	ca.sun_family = AF_UNIX;
 
 	hdl = malloc(sizeof(struct thru_hdl));
 	if (hdl == NULL)
 		return NULL;
-	mio_create(&hdl->mio, &thru_ops, mode, nbio);	
+	mio_create(&hdl->mio, &thru_ops, mode, nbio);
 
 	s = socket(AF_UNIX, SOCK_STREAM, 0);
 	if (s < 0)
@@ -82,8 +96,17 @@ thru_open(const char *str, char *sock, unsigned mode, int nbio)
 		if (errno == EINTR)
 			continue;
 		DPERROR("thru_open: connect");
-		goto bad_connect;
-	}
+		/* try shared server */
+		snprintf(ca.sun_path, sizeof(ca.sun_path),
+		    "/tmp/aucat/%s%s", sock, unit);
+		while (connect(s, (struct sockaddr *)&ca, len) < 0) {
+			if (errno == EINTR)
+				continue;
+			DPERROR("thru_open: connect");
+			goto bad_connect;
+		}
+		break;
+ 	}
 	if (fcntl(s, F_SETFD, FD_CLOEXEC) < 0) {
 		DPERROR("FD_CLOEXEC");
 		goto bad_connect;
@@ -101,7 +124,7 @@ thru_open(const char *str, char *sock, unsigned mode, int nbio)
 		msg.u.hello.proto |= AMSG_MIDIIN;
 	if (mode & MIO_OUT)
 		msg.u.hello.proto |= AMSG_MIDIOUT;
-	strlcpy(msg.u.hello.opt, "default", sizeof(msg.u.hello.opt));
+	strlcpy(msg.u.hello.opt, opt, sizeof(msg.u.hello.opt));
 	strlcpy(msg.u.hello.who, __progname, sizeof(msg.u.hello.who));
 	n = write(s, &msg, sizeof(struct amsg));
 	if (n < 0) {
@@ -203,7 +226,6 @@ thru_write(struct mio_hdl *sh, const void *buf, size_t len)
 		if (errno != EAGAIN) {
 			DPERROR("thru_write: write");
 			hdl->mio.eof = 1;
-			return 0;
 		}
  		return 0;
 	}
@@ -216,7 +238,7 @@ thru_pollfd(struct mio_hdl *sh, struct pollfd *pfd, int events)
 	struct thru_hdl *hdl = (struct thru_hdl *)sh;
 
 	pfd->fd = hdl->fd;
-	pfd->events = events;	
+	pfd->events = events;
 	return 1;
 }
 

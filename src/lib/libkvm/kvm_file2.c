@@ -1,4 +1,4 @@
-/*	$OpenBSD: kvm_file2.c,v 1.14 2010/01/10 03:37:50 guenther Exp $	*/
+/*	$OpenBSD: kvm_file2.c,v 1.16 2010/07/17 19:27:07 guenther Exp $	*/
 
 /*
  * Copyright (c) 2009 Todd C. Miller <Todd.Miller@courtesan.com>
@@ -90,9 +90,7 @@
 #include <nnpfs/nnpfs_node.h>
 
 #include <msdosfs/bpb.h>
-#define _KERNEL
 #include <msdosfs/denode.h>
-#undef _KERNEL
 #include <msdosfs/msdosfsmount.h>
 
 #include <miscfs/specfs/specdev.h>
@@ -172,6 +170,11 @@ kvm_getfile2(kvm_t *kd, int op, int arg, size_t esize, int *cnt)
 		*cnt = size / esize;
 		return ((struct kinfo_file2 *)kd->filebase);
 	} else {
+		if (esize > sizeof(struct kinfo_file2)) {
+			_kvm_syserr(kd, kd->program,
+			    "kvm_getfile2: unknown fields requested: libkvm out of date?");
+			return (NULL);
+		}
 	    deadway:
 		switch (op) {
 		case KERN_FILE_BYFILE:

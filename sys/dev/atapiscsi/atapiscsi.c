@@ -1,4 +1,4 @@
-/*      $OpenBSD: atapiscsi.c,v 1.87 2010/01/11 00:00:53 krw Exp $     */
+/*      $OpenBSD: atapiscsi.c,v 1.94 2010/08/04 19:43:52 deraadt Exp $     */
 
 /*
  * This code is derived from code with the copyright below.
@@ -15,12 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by Manuel Bouyer.
- * 4. Neither the name of the University nor the names of its contributors
- *    may be used to endorse or promote products derived from this software
- *    without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE REGENTS AND CONTRIBUTORS ``AS IS'' AND
  * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
@@ -150,6 +144,7 @@ struct atapiscsi_xfer;
 
 int	atapiscsi_match(struct device *, void *, void *);
 void	atapiscsi_attach(struct device *, struct device *, void *);
+int	atapiscsi_activate(struct device *, int);
 int	atapiscsi_detach(struct device *, int);
 int     atapi_to_scsi_sense(struct scsi_xfer *, u_int8_t);
 
@@ -165,9 +160,8 @@ struct atapiscsi_softc {
 };
 
 void  wdc_atapi_minphys(struct buf *bp, struct scsi_link *sl);
-int   wdc_atapi_ioctl(struct scsi_link *,
-	u_long, caddr_t, int, struct proc *);
-int   wdc_atapi_send_cmd(struct scsi_xfer *sc_xfer);
+int   wdc_atapi_ioctl(struct scsi_link *, u_long, caddr_t, int);
+void  wdc_atapi_send_cmd(struct scsi_xfer *sc_xfer);
 
 static struct scsi_adapter atapiscsi_switch =
 {
@@ -178,20 +172,12 @@ static struct scsi_adapter atapiscsi_switch =
 	wdc_atapi_ioctl
 };
 
-static struct scsi_device atapiscsi_dev =
-{
-	NULL,
-	NULL,
-	NULL,
-	NULL,
-};
-
 /* Inital version shares bus_link structure so it can easily
    be "attached to current" wdc driver */
 
 struct cfattach atapiscsi_ca = {
 	sizeof(struct atapiscsi_softc), atapiscsi_match, atapiscsi_attach,
-	    atapiscsi_detach
+	    atapiscsi_detach, atapiscsi_activate
 };
 
 struct cfdriver atapiscsi_cd = {
@@ -250,7 +236,6 @@ atapiscsi_attach(parent, self, aux)
 	as->sc_adapterlink.adapter_target = 7;
 	as->sc_adapterlink.adapter_buswidth = 2;
 	as->sc_adapterlink.adapter = &atapiscsi_switch;
-	as->sc_adapterlink.device = &atapiscsi_dev;
 	as->sc_adapterlink.luns = 1;
 	as->sc_adapterlink.openings = 1;
 	as->sc_adapterlink.flags = SDEV_ATAPI;
@@ -294,7 +279,7 @@ atapiscsi_attach(parent, self, aux)
 
 	if (child != NULL) {
 		struct scsibus_softc *scsi = (struct scsibus_softc *)child;
-		struct scsi_link *link = scsi->sc_link[0][0];
+		struct scsi_link *link = scsi_get_link(scsi, 0, 0);
 
 		if (link) {
 			strlcpy(drvp->drive_name,
@@ -312,6 +297,32 @@ atapiscsi_attach(parent, self, aux)
 }
 
 int
+atapiscsi_activate(struct device *self, int act)
+{
+	struct atapiscsi_softc *as = (void *)self;
+ 	struct channel_softc *chp = as->chp;
+	struct ata_drive_datas *drvp = &chp->ch_drive[as->drive];
+
+	switch (act) {
+	case DVACT_SUSPEND:
+		break;
+	case DVACT_RESUME:
+		/*
+		 * Do two resets separated by a small delay. The
+		 * first wakes the controller, the second resets
+		 * the channel
+		 */
+		wdc_disable_intr(chp);
+		wdc_reset_channel(drvp);
+		delay(10000);
+		wdc_reset_channel(drvp);
+		wdc_enable_intr(chp);
+		break;
+	}
+	return (0);
+}
+
+int
 atapiscsi_detach(dev, flags)
 	struct device *dev;
 	int flags;
@@ -319,7 +330,7 @@ atapiscsi_detach(dev, flags)
 	return (config_detach_children(dev, flags));
 }
 
-int
+void
 wdc_atapi_send_cmd(sc_xfer)
 	struct scsi_xfer *sc_xfer;
 {
@@ -335,16 +346,16 @@ wdc_atapi_send_cmd(sc_xfer)
 
 	if (sc_xfer->sc_link->target != 0) {
 		sc_xfer->error = XS_DRIVER_STUFFUP;
-		s = splbio();
 		scsi_done(sc_xfer);
-		splx(s);
-		return (COMPLETE);
+		return;
 	}
 
 	xfer = wdc_get_xfer(sc_xfer->flags & SCSI_NOSLEEP
 	    ? WDC_NOSLEEP : WDC_CANSLEEP);
 	if (xfer == NULL) {
-		return (NO_CCB);
+		sc_xfer->error = XS_NO_CCB;
+		scsi_done(sc_xfer);
+		return;
 	}
 	if (sc_xfer->flags & SCSI_POLL)
 		xfer->c_flags |= C_POLL;
@@ -426,11 +437,6 @@ wdc_atapi_send_cmd(sc_xfer)
 
 	wdc_exec_xfer(chp, xfer);
 	splx(s);
-
-	if (xfer->c_flags & C_POLL)
-		return (COMPLETE);
-	else
-		return (SUCCESSFULLY_QUEUED);
 }
 
 void
@@ -442,12 +448,11 @@ wdc_atapi_minphys (struct buf *bp, struct scsi_link *sl)
 }
 
 int
-wdc_atapi_ioctl (sc_link, cmd, addr, flag, p)
+wdc_atapi_ioctl (sc_link, cmd, addr, flag)
 	struct   scsi_link *sc_link;
 	u_long   cmd;
 	caddr_t  addr;
 	int      flag;
-	struct proc *p;
 {
 	struct atapiscsi_softc *as = sc_link->adapter_softc;
 	struct channel_softc *chp = as->chp;
@@ -456,7 +461,7 @@ wdc_atapi_ioctl (sc_link, cmd, addr, flag, p)
 	if (sc_link->target != 0)
 		return ENOTTY;
 
-	return (wdc_ioctl(drvp, cmd, addr, flag, p));
+	return (wdc_ioctl(drvp, cmd, addr, flag, curproc));
 }
 
 
@@ -1564,7 +1569,6 @@ wdc_atapi_done(chp, xfer, timeout, ret)
 	struct atapi_return_args *ret;
 {
 	struct scsi_xfer *sc_xfer = xfer->cmd;
-	int s;
 
 	WDCDEBUG_PRINT(("wdc_atapi_done %s:%d:%d: flags 0x%x error 0x%x\n",
 	    chp->wdc->sc_dev.dv_xname, chp->channel, xfer->drive,
@@ -1574,9 +1578,7 @@ wdc_atapi_done(chp, xfer, timeout, ret)
 	if (xfer->c_flags & C_POLL)
 		wdc_enable_intr(chp);
 
-	s = splbio();
 	scsi_done(sc_xfer);
-	splx(s);
 
 	xfer->next = NULL;
 	return;

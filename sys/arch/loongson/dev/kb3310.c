@@ -1,4 +1,4 @@
-/*	$OpenBSD: kb3310.c,v 1.9 2010/03/02 17:49:38 otto Exp $	*/
+/*	$OpenBSD: kb3310.c,v 1.11 2010/07/31 16:04:46 miod Exp $	*/
 /*
  * Copyright (c) 2010 Otto Moerbeek <otto@drijf.net>
  *
@@ -22,18 +22,20 @@
 #include <sys/sensors.h>
 #include <sys/timeout.h>
 
+#include <mips64/archtype.h>
 #include <machine/apmvar.h>
+#include <machine/autoconf.h>
 #include <machine/bus.h>
 #include <dev/isa/isavar.h>
 
 #include "apm.h"
 #include "pckbd.h"
-#include "ukbd.h"
+#include "hidkbd.h"
 
-#if NPCKBD > 0 || NUKBD > 0
+#if NPCKBD > 0 || NHIDKBD > 0
 #include <dev/ic/pckbcvar.h>
 #include <dev/pckbc/pckbdvar.h>
-#include <dev/usb/ukbdvar.h>
+#include <dev/usb/hidkbdvar.h>
 #endif
 
 struct cfdriver ykbec_cd = {
@@ -74,7 +76,7 @@ struct ykbec_softc {
 	bus_space_handle_t	sc_ioh;
 	struct ksensor		sc_sensor[YKBEC_NSENSORS];
 	struct ksensordev	sc_sensordev;
-#if NPCKBD > 0 || NUKBD > 0
+#if NPCKBD > 0 || NHIDKBD > 0
 	struct timeout		sc_bell_tmo;
 #endif
 };
@@ -113,6 +115,9 @@ ykbec_match(struct device *parent, void *match, void *aux)
 {
 	struct isa_attach_args *ia = aux;
 	bus_space_handle_t ioh;
+
+	if (sys_platform->system_type != LOONGSON_YEELOONG)
+		return (0);
 
 	if ((ia->ia_iobase != IOBASEUNK && ia->ia_iobase != IO_YKBEC) ||
 	    /* (ia->ia_iosize != 0 && ia->ia_iosize != IO_YKBECSIZE) || XXX isa.c */
@@ -173,13 +178,13 @@ ykbec_attach(struct device *parent, struct device *self, void *aux)
 	ykbec_refresh(sc);
 	apm_setinfohook(ykbec_apminfo);
 #endif
-#if NPCKBD > 0 || NUKBD > 0
+#if NPCKBD > 0 || NHIDKBD > 0
 	timeout_set(&sc->sc_bell_tmo, ykbec_bell_stop, sc);
 #if NPCKBD > 0
 	pckbd_hookup_bell(ykbec_bell, sc);
 #endif
-#if NUKBD > 0
-	ukbd_hookup_bell(ykbec_bell, sc);
+#if NHIDKBD > 0
+	hidkbd_hookup_bell(ykbec_bell, sc);
 #endif
 #endif
 }
@@ -397,7 +402,7 @@ ykbec_apminfo(struct apm_power_info *info)
 }
 #endif
 
-#if NPCKBD > 0 || NUKBD > 0
+#if NPCKBD > 0 || NHIDKBD > 0
 void
 ykbec_bell(void *arg, u_int pitch, u_int period, u_int volume, int poll)
 {

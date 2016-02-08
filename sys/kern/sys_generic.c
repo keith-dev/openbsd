@@ -1,4 +1,4 @@
-/*	$OpenBSD: sys_generic.c,v 1.67 2009/11/09 17:53:39 nicm Exp $	*/
+/*	$OpenBSD: sys_generic.c,v 1.70 2010/07/26 01:56:27 guenther Exp $	*/
 /*	$NetBSD: sys_generic.c,v 1.24 1996/03/29 00:25:32 cgd Exp $	*/
 
 /*
@@ -63,7 +63,6 @@
 #include <uvm/uvm_extern.h>
 
 int selscan(struct proc *, fd_set *, fd_set *, int, int, register_t *);
-int seltrue(dev_t, int, struct proc *);
 void pollscan(struct proc *, struct pollfd *, u_int, register_t *);
 int pollout(struct pollfd *, struct pollfd *, u_int);
 
@@ -396,7 +395,7 @@ sys_ioctl(struct proc *p, void *v, register_t *retval)
 	caddr_t data, memp;
 	int tmp;
 #define STK_PARAMS	128
-	char stkbuf[STK_PARAMS];
+	u_long stkbuf[STK_PARAMS / sizeof(u_long)];
 
 	fdp = p->p_fd;
 	if ((fp = fd_getfile(fdp, SCARG(uap, fd))) == NULL)
@@ -427,7 +426,7 @@ sys_ioctl(struct proc *p, void *v, register_t *retval)
 		memp = (caddr_t)malloc((u_long)size, M_IOCTLOPS, M_WAITOK);
 		data = memp;
 	} else
-		data = stkbuf;
+		data = (caddr_t)stkbuf;
 	if (com&IOC_IN) {
 		if (size) {
 			error = copyin(SCARG(uap, data), data, (u_int)size);
@@ -477,12 +476,12 @@ sys_ioctl(struct proc *p, void *v, register_t *retval)
 		if (tmp <= 0) {
 			tmp = -tmp;
 		} else {
-			struct proc *p1 = pfind(tmp);
-			if (p1 == 0) {
+			struct process *pr = prfind(tmp);
+			if (pr == NULL) {
 				error = ESRCH;
 				break;
 			}
-			tmp = p1->p_pgrp->pg_id;
+			tmp = pr->ps_pgrp->pg_id;
 		}
 		error = (*fp->f_ops->fo_ioctl)
 			(fp, TIOCSPGRP, (caddr_t)&tmp, p);
@@ -678,6 +677,13 @@ seltrue(dev_t dev, int events, struct proc *p)
 {
 
 	return (events & (POLLIN | POLLOUT | POLLRDNORM | POLLWRNORM));
+}
+
+int
+selfalse(dev_t dev, int events, struct proc *p)
+{
+
+	return (0);
 }
 
 /*

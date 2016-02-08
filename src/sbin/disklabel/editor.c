@@ -1,4 +1,4 @@
-/*	$OpenBSD: editor.c,v 1.225 2009/12/24 10:06:35 sobrado Exp $	*/
+/*	$OpenBSD: editor.c,v 1.242 2010/08/09 17:31:45 deraadt Exp $	*/
 
 /*
  * Copyright (c) 1997-2000 Todd C. Miller <Todd.Miller@courtesan.com>
@@ -20,6 +20,7 @@
 #include <sys/param.h>
 #include <sys/stat.h>
 #include <sys/ioctl.h>
+#include <sys/dkio.h>
 #include <sys/sysctl.h>
 #define	DKTYPENAMES
 #include <sys/disklabel.h>
@@ -75,10 +76,10 @@ const struct space_allocation alloc_big[] = {
 	{   MEG(80),         GIG(4),  13, "/var"	},
 	{  MEG(900),         GIG(2),   5, "/usr"	},
 	{  MEG(512),         GIG(1),   3, "/usr/X11R6"	},
-	{    GIG(2),         GIG(6),   5, "/usr/local"	},
+	{    GIG(2),        GIG(10),  10, "/usr/local"	},
 	{    GIG(1),         GIG(2),   3, "/usr/src"	},
 	{    GIG(1),         GIG(2),   3, "/usr/obj"	},
-	{    GIG(1),       GIG(300),  50, "/home"	}
+	{    GIG(1),       GIG(300),  45, "/home"	}
 	/* Anything beyond this leave for the user to decide */
 };
 
@@ -113,11 +114,12 @@ const struct {
 };
 
 void	edit_parms(struct disklabel *);
+void	editor_resize(struct disklabel *, char *);
 void	editor_add(struct disklabel *, char *);
 void	editor_change(struct disklabel *, char *);
 u_int64_t editor_countfree(struct disklabel *);
 void	editor_delete(struct disklabel *, char *);
-void	editor_help(char *);
+void	editor_help(void);
 void	editor_modify(struct disklabel *, char *);
 void	editor_name(struct disklabel *, char *);
 char	*getstring(char *, char *, char *);
@@ -128,6 +130,7 @@ struct partition **sort_partitions(struct disklabel *);
 void	getdisktype(struct disklabel *, char *, char *);
 void	find_bounds(struct disklabel *);
 void	set_bounds(struct disklabel *);
+void	set_uid(struct disklabel *);
 struct diskchunk *free_chunks(struct disklabel *);
 void	mpcopy(char **, char **);
 int	micmp(const void *, const void *);
@@ -148,6 +151,7 @@ void	display_edit(struct disklabel *, char, u_int64_t);
 static u_int64_t starting_sector;
 static u_int64_t ending_sector;
 static int expert;
+static int overlap;
 
 /*
  * Simple partition editor.
@@ -210,10 +214,6 @@ editor(struct disklabel *lp, int f)
 	if (label.d_sbsize == 0)
 		label.d_sbsize = SBSIZE;
 
-	/* Interleave must be >= 1 */
-	if (label.d_interleave == 0)
-		label.d_interleave = 1;
-
 	/* Save the (U|u)ndo labels and mountpoints. */
 	mpcopy(origmountpoints, mountpoints);
 	origlabel = label;
@@ -245,7 +245,7 @@ editor(struct disklabel *lp, int f)
 		switch (*cmd) {
 		case '?':
 		case 'h':
-			editor_help(arg ? arg : "");
+			editor_help();
 			break;
 
 		case 'A':
@@ -288,6 +288,10 @@ editor(struct disklabel *lp, int f)
 
 		case 'g':
 			set_geometry(&label, disk_geop, lp, arg);
+			break;
+
+		case 'i':
+			set_uid(&label);
 			break;
 
 		case 'm':
@@ -367,6 +371,14 @@ editor(struct disklabel *lp, int f)
 			error = 1;
 			goto done;
 			/* NOTREACHED */
+			break;
+
+		case 'R':
+			if (aflag && !overlap)
+				editor_resize(&label, arg);
+			else
+				fputs("Resize only implemented for auto "
+				    "allocated labels\n", stderr);
 			break;
 
 		case 'r': {
@@ -509,13 +521,29 @@ editor_allocspace(struct disklabel *lp_org)
 	struct diskchunk *chunks;
 	daddr64_t secs, chunkstart, chunksize, cylsecs, totsecs, xtrasecs;
 	char **partmp;
-	int i, j, lastalloc, index = 0;
+	int i, j, lastalloc, index = 0, fragsize, partno;
 	int64_t physmem;
-
-	physmem = getphysmem() / lp_org->d_secsize;
 
 	/* How big is the OpenBSD portion of the disk?  */
 	find_bounds(lp_org);
+
+	overlap = 0;
+	for (i = 0;  i < MAXPARTITIONS; i++) {
+		daddr64_t psz, pstart, pend;
+
+		pp = &lp_org->d_partitions[i];
+		psz = DL_GETPSIZE(pp);
+		pstart = DL_GETPOFFSET(pp);
+		pend = pstart + psz;
+		if (i != RAW_PART && psz != 0 &&
+		    ((pstart >= starting_sector && pstart <= ending_sector) ||
+		    (pend > starting_sector && pend < ending_sector))) {
+			overlap = 1;
+			break;
+		}
+	}
+
+	physmem = getphysmem() / lp_org->d_secsize;
 
 	cylsecs = lp_org->d_secpercyl;
 again:
@@ -561,6 +589,7 @@ again:
 				break;
 		if (j == MAXPARTITIONS)
 			return;
+		partno = j;
 		pp = &lp->d_partitions[j];
 		partmp = &mountpoints[j];
 		ap = &alloc[i];
@@ -627,18 +656,24 @@ cylinderalign:
 		/* Everything seems ok so configure the partition. */
 		DL_SETPSIZE(pp, secs);
 		DL_SETPOFFSET(pp, chunkstart);
+		fragsize = 2048;
+		if (secs * lp->d_secsize > 128ULL * 1024 * 1024 * 1024)
+			fragsize *= 2;
+		if (secs * lp->d_secsize > 512ULL * 1024 * 1024 * 1024)
+			fragsize *= 2;
 #if defined (__sparc__) && !defined(__sparc64__)
 		/* can't boot from > 8k boot blocks */
 		pp->p_fragblock =
-		    DISKLABELV1_FFS_FRAGBLOCK(i == 0 ? 1024 : 2048, 8);
+		    DISKLABELV1_FFS_FRAGBLOCK(i == 0 ? 1024 : fragsize, 8);
 #else
-		pp->p_fragblock = DISKLABELV1_FFS_FRAGBLOCK(2048, 8);
+		pp->p_fragblock = DISKLABELV1_FFS_FRAGBLOCK(fragsize, 8);
 #endif
 		pp->p_cpg = 1;
 		if (ap->mp[0] != '/')
 			pp->p_fstype = FS_SWAP;
 		else {
 			pp->p_fstype = FS_BSDFFS;
+			get_bsize(lp, partno);
 			free(*partmp);
 			if ((*partmp = strdup(ap->mp)) == NULL)
 				errx(4, "out of memory");
@@ -650,6 +685,109 @@ cylinderalign:
 }
 
 /*
+ * Resize a partition, moving all subsequent partitions
+ */
+void
+editor_resize(struct disklabel *lp, char *p)
+{
+	struct disklabel label;
+	struct partition *pp, *prev;
+	daddr64_t secs, sz, off;
+#ifdef SUN_CYLCHECK
+	daddr64_t cylsecs;
+#endif
+	int partno, i;
+
+	label = *lp;
+
+	/* Change which partition? */
+	if (p == NULL) {
+		p = getstring("partition to resize",
+		    "The letter of the partition to name, a - p.", NULL);
+	}
+	if (p == NULL) {
+		fputs("Command aborted\n", stderr);
+		return;
+	}
+	partno = p[0] - 'a';
+        if (partno < 0 || partno == RAW_PART || partno >= lp->d_npartitions) {
+		fprintf(stderr, "Partition must be between 'a' and '%c' "
+		    "(excluding 'c').\n", 'a' + lp->d_npartitions - 1);
+		return;
+	}
+
+	pp = &label.d_partitions[partno];
+	sz = DL_GETPSIZE(pp);
+	if (sz == 0) {
+		fputs("No such partition\n", stderr);
+		return;
+	}
+	if (pp->p_fstype != FS_BSDFFS && pp->p_fstype != FS_SWAP) {
+		fputs("Cannot resize spoofed partition\n", stderr);
+		return;
+	}
+	secs = getuint(lp, "grow (+) or shrink (-) (with unit)",
+	    "amount to grow (+) or shrink (-) partition including unit",
+	    0, editor_countfree(lp), 0, DO_CONVERSIONS);
+
+	if (secs == 0 || secs == -1) {
+		fputs("Command aborted\n", stderr);
+		return;
+	}
+
+#ifdef SUN_CYLCHECK
+	cylsecs = lp->d_secpercyl;
+	if (secs > 0)
+		secs = ((secs + cylsecs - 1) / cylsecs) * cylsecs;
+	else
+		secs = ((secs - cylsecs + 1) / cylsecs) * cylsecs;
+#endif
+	if (DL_GETPOFFSET(pp) + sz + secs > ending_sector) {
+		fputs("Amount too big\n", stderr);
+		return;
+	}
+	if (sz + secs < 0) {
+		fputs("Amount too small\n", stderr);
+		return;
+	}
+
+	DL_SETPSIZE(pp, sz + secs);
+
+	/*
+	 * Pack partitions above the resized partition, leaving unused
+	 * partions alone.
+	 */
+	prev = pp;
+	for (i = partno + 1; i < MAXPARTITIONS; i++) {
+		if (i == RAW_PART)
+			continue;
+		pp = &label.d_partitions[i];
+		if (pp->p_fstype != FS_BSDFFS && pp->p_fstype != FS_SWAP)
+			continue;
+		sz = DL_GETPSIZE(pp);
+		if (sz == 0)
+			continue;
+
+		off = DL_GETPOFFSET(prev) + DL_GETPSIZE(prev);
+
+		if (off < ending_sector) {
+			DL_SETPOFFSET(pp, off);
+			if (off + DL_GETPSIZE(pp) > ending_sector) {
+				DL_SETPSIZE(pp, ending_sector - off);
+				fprintf(stderr,
+				    "Partition %c shrunk to make room\n",
+				    i + 'a');
+			}
+		} else {
+			fputs("No room left for all partitions\n", stderr);
+			return;
+		}
+		prev = pp;
+	}
+	*lp = label;
+}
+
+/*
  * Add a new partition.
  */
 void
@@ -658,7 +796,7 @@ editor_add(struct disklabel *lp, char *p)
 	struct partition *pp;
 	struct diskchunk *chunks;
 	char buf[2];
-	int i, partno;
+	int i, partno, fragsize;
 	u_int64_t freesectors, new_offset, new_size;
 
 	freesectors = editor_countfree(lp);
@@ -739,23 +877,29 @@ editor_add(struct disklabel *lp, char *p)
 	DL_SETPSIZE(pp, new_size);
 	DL_SETPOFFSET(pp, new_offset);
 	pp->p_fstype = partno == 1 ? FS_SWAP : FS_BSDFFS;
-#if defined (__sparc__) && !defined(__sparc64__)
-	/* can't boot from > 8k boot blocks */
-	pp->p_fragblock =
-	    DISKLABELV1_FFS_FRAGBLOCK(partno == 0 ? 1024 : 2048, 8);
-#else
-	pp->p_fragblock = DISKLABELV1_FFS_FRAGBLOCK(2048, 8);
-#endif
 	pp->p_cpg = 1;
 
 	if (get_offset(lp, partno) == 0 &&
-	    get_size(lp, partno) == 0   &&
-	    get_fstype(lp, partno) == 0 &&
-	    get_mp(lp, partno) == 0 &&
-	    get_fsize(lp, partno) == 0  &&
-	    get_bsize(lp, partno) == 0)
-		return;
-
+	    get_size(lp, partno) == 0) {
+		fragsize = 2048;
+		new_size = DL_GETPSIZE(pp) * lp->d_secsize;
+		if (new_size > 128ULL * 1024 * 1024 * 1024)
+			fragsize *= 2;
+		if (new_size > 512ULL * 1024 * 1024 * 1024)
+			fragsize *= 2;
+#if defined (__sparc__) && !defined(__sparc64__)
+		/* can't boot from > 8k boot blocks */
+		pp->p_fragblock =
+		    DISKLABELV1_FFS_FRAGBLOCK(partno == 0 ? 1024 : fragsize, 8);
+#else
+		pp->p_fragblock = DISKLABELV1_FFS_FRAGBLOCK(fragsize, 8);
+#endif
+		if (get_fstype(lp, partno) == 0 &&
+		    get_mp(lp, partno) == 0 &&
+		    get_fsize(lp, partno) == 0  &&
+		    get_bsize(lp, partno) == 0)
+			return;
+	}
 	/* Bailed out at some point, so effectively delete the partition. */
 	DL_SETPSIZE(pp, 0);
 }
@@ -1318,38 +1462,6 @@ edit_parms(struct disklabel *lp)
 	if (ending_sector > ui)
 		ending_sector = ui;
 	DL_SETDSIZE(lp, ui);
-
-	/* rpm */
-	for (;;) {
-		ui = getuint(lp, "rpm",
-		  "The rotational speed of the disk in revolutions per minute.",
-		  lp->d_rpm, lp->d_rpm, 0, 0);
-		if (ui == ULLONG_MAX - 1) {
-			fputs("Command aborted\n", stderr);
-			*lp = oldlabel;		/* undo damage */
-			return;
-		} else if (ui == ULLONG_MAX)
-			fputs("Invalid entry\n", stderr);
-		else
-			break;
-	}
-	lp->d_rpm = ui;
-
-	/* interleave */
-	for (;;) {
-		ui = getuint(lp, "interleave",
-		  "The physical sector interleave, set when formatting.  Almost always 1.",
-		  lp->d_interleave, lp->d_interleave, 0, 0);
-		if (ui == ULLONG_MAX - 1) {
-			fputs("Command aborted\n", stderr);
-			*lp = oldlabel;		/* undo damage */
-			return;
-		} else if (ui == ULLONG_MAX || ui == 0)
-			fputs("Invalid entry\n", stderr);
-		else
-			break;
-	}
-	lp->d_interleave = ui;
 }
 
 struct partition **
@@ -1493,6 +1605,33 @@ set_bounds(struct disklabel *lp)
 }
 
 /*
+ * Allow user to interactively change disklabel UID.
+ */
+void
+set_uid(struct disklabel *lp)
+{
+	u_int uid[8];
+	char *s;
+	int i;
+
+	printf("The disklabel UID is currently: ");
+	uid_print(stdout, lp);
+	printf("\n");
+
+	do {
+		s = getstring("uid", "The disklabel UID, given as a 16 "
+		    "character hexadecimal string.", NULL);
+		if (s == NULL || strlen(s) == 0) {
+			fputs("Command aborted\n", stderr);
+			return;
+		}
+		i = uid_parse(lp, s);
+		if (i != 0)
+			fputs("Invalid UID entered.\n", stderr);
+	} while (i != 0);
+}
+
+/*
  * Return a list of the "chunks" of free space available
  */
 struct diskchunk *
@@ -1590,162 +1729,20 @@ editor_countfree(struct disklabel *lp)
 }
 
 void
-editor_help(char *arg)
+editor_help(void)
 {
-
-	/* XXX - put these strings in a table instead? */
-	switch (*arg) {
-	case 'p':
-		puts(
-"The 'p' command prints the current partitions.  By default, it prints size\n"
-"and offset in sectors (a sector is usually 512 bytes).  The 'p' command\n"
-"takes an optional units argument.  Possible values are 'b' for bytes, 'c'\n"
-"for cylinders, 'k' for kilobytes, 'm' for megabytes, and 'g' for gigabytes.\n");
-		break;
-	case 'l':
+	puts("Available commands:");
 	puts(
-"The 'l' command prints the header of the disk label.  By default, it prints\n"
-"size and offset in sectors (a sector is usually 512 bytes).  The 'p' command\n"
-"takes an optional units argument.  Possible values are 'b' for bytes, 'c'\n"
-"for cylinders, 'k' for kilobytes, 'm' for megabytes, and 'g' for gigabytes.\n");
-		break;
-	case 'M':
-		puts(
-"The 'M' command pipes the entire OpenBSD manual page for disk label through\n"
-"the pager specified by the PAGER environment variable or 'less' if PAGER is\n"
-"not set.  It is especially useful during install when the normal system\n"
-"manual is not available.\n");
-		break;
-	case 'e':
-		puts(
-"The 'e' command is used to edit the disk drive parameters.  These include\n"
-"the number of sectors/track, tracks/cylinder, sectors/cylinder, number of\n"
-"cylinders on the disk , total sectors on the disk, rpm, interleave, disk\n"
-"type, and a descriptive label string.  You should not change these unless\n"
-"you know what you are doing\n");
-		break;
-	case 'a':
-		puts(
-"The 'a' command adds new partitions to the disk.  It takes as an optional\n"
-"argument the partition letter to add.  If you do not specify a partition\n"
-"letter, you will be prompted for it; the next available letter will be the\n"
-"default answer\n");
-		break;
-	case 'b':
-		puts(
-"The 'b' command is used to change the boundaries of the OpenBSD portion of\n"
-"the disk.  This is only useful on disks with an fdisk partition.  By default,\n"
-"on a disk with an fdisk partition, the boundaries are set to be the first\n"
-"and last sectors of the OpenBSD fdisk partition.  You should only change\n"
-"these if your fdisk partition table is incorrect or you have a disk larger\n"
-"than 8gig, since 8gig is the maximum size an fdisk partition can be.  You\n"
-"may enter '*' at the 'Size' prompt to indicate the entire size of the disk\n"
-"(minus the starting sector).  Use this option with care; if you extend the\n"
-"boundaries such that they overlap with another operating system you will\n"
-"corrupt the other operating system's data.\n");
-		break;
-	case 'c':
-		puts(
-"The 'c' command is used to change the size of an existing partition.  It\n"
-"takes as an optional argument the partition letter to change.  If you do not\n"
-"specify a partition letter, you will be prompted for one.  You may add a '+'\n"
-"or '-' prefix to the new size to increase or decrease the existing value\n"
-"instead of entering an absolute value.  You may also use a suffix to indicate\n"
-"the units the values is in terms of.  Possible suffixes are 'b' for bytes,\n"
-"'c' for cylinders, 'k' for kilobytes, 'm' for megabytes, 'g' for gigabytes or\n"
-"no suffix for sectors (usually 512 bytes).  You may also enter '*' to change\n"
-"the size to be the total number of free sectors remaining.\n");
-		break;
-	case 'D':
-		puts(
-"The 'D' command will set the disk label to the default values as reported\n"
-"by the disk itself.  This similates the case where there is no disk label.\n");
-		break;
-	case 'd':
-		puts(
-"The 'd' command is used to delete an existing partition.  It takes as an\n"
-"optional argument the partition letter to change.  If you do not specify a\n"
-"partition letter, you will be prompted for one.  You may not delete the ``c''\n"
-"partition as 'c' must always exist and by default is marked as 'unused' (so\n"
-"it does not take up any space).\n");
-		break;
-	case 'g':
-		puts(
-"The 'g' command is used select which disk geometry to use, the disk or a\n"
-"user geometry.  It takes as an optional argument ``d'' or ``u''.  If \n"
-"you do not specify the type as an argument, you will be prompted for it.\n");
-		break;
-	case 'm':
-		puts(
-"The 'm' command is used to modify an existing partition.  It takes as an\n"
-"optional argument the partition letter to change.  If you do not specify a\n"
-"partition letter, you will be prompted for one.  This option allows the user\n"
-"to change the filesystem type, starting offset, partition size, block fragment\n"
-"size, block size, and cylinders per group for the specified partition (not all\n"
-"parameters are configurable for non-BSD partitions).\n");
-		break;
-	case 'n':
-		puts(
-"The 'n' command is used to set the mount point for a partition (ie: name it).\n"
-"It takes as an optional argument the partition letter to name.  If you do\n"
-"not specify a partition letter, you will be prompted for one.  This option\n"
-"is only valid if disklabel was invoked with the -f flag.\n");
-		break;
-	case 'r':
-		puts(
-"The 'r' command is used to recalculate and display details about\n"
-"the available free space.\n");
-		break;
-	case 'u':
-		puts(
-"The 'u' command will undo (or redo) the last change.  Entering 'u' once will\n"
-"undo your last change.  Entering it again will restore the change.\n");
-		break;
-	case 's':
-		puts(
-"The 's' command is used to save a copy of the label to a file in ascii format\n"
-"(suitable for loading via disklabel's [-R] option).  It takes as an optional\n"
-"argument the filename to save the label to.  If you do not specify a filename,\n"
-"you will be prompted for one.\n");
-		break;
-	case 'w':
-		puts(
-"The 'w' command will write the current label to disk.  This option will\n"
-"commit any changes to the on-disk label.\n");
-		break;
-	case 'q':
-		puts(
-"The 'q' command quits the label editor.  If any changes have been made you\n"
-"will be asked whether or not to save the changes to the on-disk label.\n");
-		break;
-	case 'X':
-		puts(
-"The 'X' command toggles disklabel in to/out of 'expert mode'.  By default,\n"
-"some settings are reserved for experts only (such as the block and fragment\n"
-"size on ffs partitions).\n");
-		break;
-	case 'x':
-		puts(
-"The 'x' command exits the label editor without saving any changes to the\n"
-"on-disk label.\n");
-		break;
-	case 'z':
-		puts(
-"The 'z' command zeroes out the existing partition table, leaving only the 'c'\n"
-"partition.  The drive parameters are not changed.\n");
-		break;
-	default:
-		puts("Available commands:");
-		puts(
-"  ? [cmd]  - show help                  n [part] - set mount point\n"
+"  ? | h    - show help                  n [part] - set mount point\n"
 "  A        - auto partition all space   p [unit] - print partitions\n"
 "  a [part] - add partition              q        - quit & save changes\n"
-"  b        - set OpenBSD boundaries     s [path] - save label to file\n"
+"  b        - set OpenBSD boundaries     R [part] - resize a partition\n"
 "  c [part] - change partition size      r        - display free space\n"
-"  D        - reset label to default     U        - undo all changes\n"
-"  d [part] - delete partition           u        - undo last change\n"
-"  e        - edit drive parameters      w        - write label to disk\n"
-"  g [d|u]  - [d]isk or [u]ser geometry  X        - toggle expert mode\n"
+"  D        - reset label to default     s [path] - save label to file\n"
+"  d [part] - delete partition           U        - undo all changes\n"
+"  e        - edit drive parameters      u        - undo last change\n"
+"  g [d|u]  - [d]isk or [u]ser geometry  w        - write label to disk\n"
+"  i        - modify disklabel UID       X        - toggle expert mode\n"
 "  l [unit] - print disk label header    x        - exit & lose changes\n"
 "  M        - disklabel(8) man page      z        - delete all partitions\n"
 "  m [part] - modify partition\n"
@@ -1754,8 +1751,7 @@ editor_help(char *arg)
 "\t'b' (bytes), 'k' (kilobytes), 'm' (megabytes), 'g' (gigabytes)\n"
 "\t'c' (cylinders), '%' (% of total disk), '&' (% of free space).\n"
 "Values in non-sector units are truncated to the nearest cylinder boundary.");
-		break;
-	}
+
 }
 
 void
@@ -1969,17 +1965,19 @@ get_fsize(struct disklabel *lp, int partno)
 int
 get_bsize(struct disklabel *lp, int partno)
 {
-	u_int64_t ui, bsize, frag, fsize;
+	u_int64_t adj, ui, bsize, frag, fsize;
 	struct partition *pp = &lp->d_partitions[partno];
 
-	if (!expert || pp->p_fstype != FS_BSDFFS)
+	if (pp->p_fstype != FS_BSDFFS)
 		return (0);
 
 	/* Avoid dividing by zero... */
 	if (pp->p_fragblock == 0)
 		return(1);
 
-	bsize = DISKLABELV1_FFS_BSIZE(pp->p_fragblock);
+	if (!expert)
+		goto align;
+
 	fsize = DISKLABELV1_FFS_FSIZE(pp->p_fragblock);
 	frag = DISKLABELV1_FFS_FRAG(pp->p_fragblock);
 
@@ -2009,6 +2007,24 @@ get_bsize(struct disklabel *lp, int partno)
 			break;
 	}
 	pp->p_fragblock = DISKLABELV1_FFS_FRAGBLOCK(ui / frag, frag);
+
+align:
+#ifndef SUN_CYLCHECK
+	bsize = (DISKLABELV1_FFS_FRAG(pp->p_fragblock) *
+	    DISKLABELV1_FFS_FSIZE(pp->p_fragblock)) / lp->d_secsize;
+	if (DL_GETPOFFSET(pp) != starting_sector) {
+		/* Can't change offset of first partition. */
+		adj = bsize - (DL_GETPOFFSET(pp) % bsize);
+		if (adj != 0 && adj != bsize) {
+			DL_SETPOFFSET(pp, DL_GETPOFFSET(pp) + adj);
+			DL_SETPSIZE(pp, DL_GETPSIZE(pp) - adj);
+		}
+	}
+	/* Always align end. */
+	adj = (DL_GETPOFFSET(pp) + DL_GETPSIZE(pp)) % bsize;
+	if (adj > 0)
+		DL_SETPSIZE(pp, DL_GETPSIZE(pp) - adj);
+#endif
 	return(0);
 }
 
@@ -2210,7 +2226,7 @@ max_partition_size(struct disklabel *lp, int partno)
 {
 	struct partition *pp = &lp->d_partitions[partno];
 	struct diskchunk *chunks;
-	u_int64_t maxsize, offset;
+	u_int64_t maxsize = 0, offset;
 	int fstype, i;
 
 	fstype = pp->p_fstype;

@@ -1,4 +1,4 @@
-/*	$OpenBSD: resolve.h,v 1.57 2008/05/05 02:29:02 kurt Exp $ */
+/*	$OpenBSD: resolve.h,v 1.60 2010/07/01 19:25:44 drahn Exp $ */
 
 /*
  * Copyright (c) 1998 Per Fogelstrom, Opsycon AB
@@ -32,6 +32,7 @@
 #include <sys/queue.h>
 #include <link.h>
 #include <dlfcn.h>
+#include <signal.h>
 
 struct load_list {
 	struct load_list *next;
@@ -141,14 +142,16 @@ struct elf_object {
 	/* for object confirmation */
 	dev_t	dev;
 	ino_t inode;
+
+	/* last symbol lookup on this object, to avoid mutiple searches */
+	int lastlookup_head;
+	int lastlookup;
 };
 
 struct dep_node {
 	TAILQ_ENTRY(dep_node) next_sib;
 	elf_object_t *data;
 };
-
-void _dl_rt_resolve(void);
 
 void _dl_add_object(elf_object_t *object);
 elf_object_t *_dl_finalize_object(const char *objname, Elf_Dyn *dynp,
@@ -202,8 +205,9 @@ int _dl_load_dep_libs(elf_object_t *object, int flags, int booting);
 int _dl_rtld(elf_object_t *object);
 void _dl_call_init(elf_object_t *object);
 void _dl_link_child(elf_object_t *dep, elf_object_t *p);
-void _dl_link_grpsym(elf_object_t *object);
+void _dl_link_grpsym(elf_object_t *object, int checklist);
 void _dl_cache_grpsym_list(elf_object_t *object);
+void _dl_cache_grpsym_list_setup(elf_object_t *object);
 void _dl_link_grpref(elf_object_t *load_group, elf_object_t *load_object);
 void _dl_link_dlopen(elf_object_t *dep);
 void _dl_unlink_dlopen(elf_object_t *dep);
@@ -223,7 +227,7 @@ void	_dl_load_list_free(struct load_list *load_list);
 void	_dl_thread_kern_go(void);
 void	_dl_thread_kern_stop(void);
 
-void	_dl_thread_bind_lock(int);
+void	_dl_thread_bind_lock(int, sigset_t *);
 
 extern elf_object_t *_dl_objects;
 extern elf_object_t *_dl_last_object;
@@ -275,5 +279,9 @@ extern int _dl_symcachestat_lookups;
 TAILQ_HEAD(dlochld, dep_node);
 extern struct dlochld _dlopened_child_list;
 
+/* variables used to avoid duplicate node checking */
+uint32_t _dl_searchnum;
+uint32_t _dl_skipnum;
+void _dl_newsymsearch(void);
 
 #endif /* _RESOLVE_H_ */

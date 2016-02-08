@@ -1,4 +1,4 @@
-/* $OpenBSD: server-client.c,v 1.30 2010/02/06 22:55:31 nicm Exp $ */
+/* $OpenBSD: server-client.c,v 1.37 2010/07/28 22:15:15 nicm Exp $ */
 
 /*
  * Copyright (c) 2009 Nicholas Marriott <nicm@users.sourceforge.net>
@@ -29,9 +29,13 @@
 
 void	server_client_handle_key(int, struct mouse_event *, void *);
 void	server_client_repeat_timer(int, short, void *);
+void	server_client_check_exit(struct client *);
 void	server_client_check_redraw(struct client *);
 void	server_client_set_title(struct client *);
 void	server_client_reset_state(struct client *);
+void	server_client_in_callback(struct bufferevent *, short, void *);
+void	server_client_out_callback(struct bufferevent *, short, void *);
+void	server_client_err_callback(struct bufferevent *, short, void *);
 
 int	server_client_msg_dispatch(struct client *);
 void	server_client_msg_command(struct client *, struct msg_command_data *);
@@ -68,6 +72,10 @@ server_client_create(int fd)
 	memcpy(&c->activity_time, &c->creation_time, sizeof c->activity_time);
 
 	ARRAY_INIT(&c->prompt_hdata);
+
+	c->stdin_event = NULL;
+	c->stdout_event = NULL;
+	c->stderr_event = NULL;
 
 	c->tty.fd = -1;
 	c->title = NULL;
@@ -117,6 +125,19 @@ server_client_lost(struct client *c)
 	 */
 	if (c->flags & CLIENT_TERMINAL)
 		tty_free(&c->tty);
+
+	if (c->stdin_fd != -1)
+		close(c->stdin_fd);
+	if (c->stdin_event != NULL)
+		bufferevent_free(c->stdin_event);
+	if (c->stdout_fd != -1)
+		close(c->stdout_fd);
+	if (c->stdout_event != NULL)
+		bufferevent_free(c->stdout_event);
+	if (c->stderr_fd != -1)
+		close(c->stderr_fd);
+	if (c->stderr_event != NULL)
+		bufferevent_free(c->stderr_event);
 
 	screen_free(&c->status);
 	job_tree_free(&c->status_jobs);
@@ -300,7 +321,7 @@ server_client_handle_key(int key, struct mouse_event *mouse, void *data)
 			server_redraw_window_borders(w);
 			wp = w->active;
 		}
-		window_pane_mouse(wp, c, mouse);
+		window_pane_mouse(wp, c->session, mouse);
 		return;
 	}
 
@@ -322,7 +343,7 @@ server_client_handle_key(int key, struct mouse_event *mouse, void *data)
 			/* Try as a non-prefix key binding. */
 			if ((bd = key_bindings_lookup(key)) == NULL) {
 				if (!(c->flags & CLIENT_READONLY))
-					window_pane_key(wp, c, key);
+					window_pane_key(wp, c->session, key);
 			} else
 				key_bindings_dispatch(bd, c);
 		}
@@ -338,7 +359,7 @@ server_client_handle_key(int key, struct mouse_event *mouse, void *data)
 			if (isprefix)
 				c->flags |= CLIENT_PREFIX;
 			else if (!(c->flags & CLIENT_READONLY))
-				window_pane_key(wp, c, key);
+				window_pane_key(wp, c->session, key);
 		}
 		return;
 	}
@@ -349,7 +370,7 @@ server_client_handle_key(int key, struct mouse_event *mouse, void *data)
 		if (isprefix)
 			c->flags |= CLIENT_PREFIX;
 		else if (!(c->flags & CLIENT_READONLY))
-			window_pane_key(wp, c, key);
+			window_pane_key(wp, c->session, key);
 		return;
 	}
 
@@ -379,11 +400,14 @@ server_client_loop(void)
 
 	for (i = 0; i < ARRAY_LENGTH(&clients); i++) {
 		c = ARRAY_ITEM(&clients, i);
-		if (c == NULL || c->session == NULL)
+		if (c == NULL)
 			continue;
 
-		server_client_check_redraw(c);
-		server_client_reset_state(c);
+		server_client_check_exit(c);
+		if (c->session != NULL) {
+			server_client_check_redraw(c);
+			server_client_reset_state(c);
+		}
 	}
 
 	/*
@@ -444,6 +468,28 @@ server_client_repeat_timer(unused int fd, unused short events, void *data)
 
 	if (c->flags & CLIENT_REPEAT)
 		c->flags &= ~(CLIENT_PREFIX|CLIENT_REPEAT);
+}
+
+/* Check if client should be exited. */
+void
+server_client_check_exit(struct client *c)
+{
+	struct msg_exit_data	exitdata;
+
+	if (!(c->flags & CLIENT_EXIT))
+		return;
+
+	if (c->stdout_fd != -1 && c->stdout_event != NULL &&
+	    EVBUFFER_LENGTH(c->stdout_event->output) != 0)
+		return;
+	if (c->stderr_fd != -1 && c->stderr_event != NULL &&
+	    EVBUFFER_LENGTH(c->stderr_event->output) != 0)
+		return;
+
+	exitdata.retcode = c->retcode;
+	server_write_client(c, MSG_EXIT, &exitdata, sizeof exitdata);
+
+	c->flags &= ~CLIENT_EXIT;
 }
 
 /* Check for client redraws. */
@@ -512,6 +558,52 @@ server_client_set_title(struct client *c)
 	xfree(title);
 }
 
+/*
+ * Error callback for client stdin. Caller must increase reference count when
+ * enabling event!
+ */
+void
+server_client_in_callback(
+    unused struct bufferevent *bufev, unused short what, void *data)
+{
+	struct client	*c = data;
+
+	c->references--;
+	if (c->flags & CLIENT_DEAD)
+		return;
+
+	bufferevent_disable(c->stdin_event, EV_READ|EV_WRITE);
+	close(c->stdin_fd);
+	c->stdin_fd = -1;
+
+	if (c->stdin_callback != NULL)
+		c->stdin_callback(c, c->stdin_data);
+}
+
+/* Error callback for client stdout. */
+void
+server_client_out_callback(
+    unused struct bufferevent *bufev, unused short what, unused void *data)
+{
+	struct client	*c = data;
+
+	bufferevent_disable(c->stdout_event, EV_READ|EV_WRITE);
+	close(c->stdout_fd);
+	c->stdout_fd = -1;
+}
+
+/* Error callback for client stderr. */
+void
+server_client_err_callback(
+    unused struct bufferevent *bufev, unused short what, unused void *data)
+{
+	struct client	*c = data;
+
+	bufferevent_disable(c->stderr_event, EV_READ|EV_WRITE);
+	close(c->stderr_fd);
+	c->stderr_fd = -1;
+}
+
 /* Dispatch message from client. */
 int
 server_client_msg_dispatch(struct client *c)
@@ -521,6 +613,7 @@ server_client_msg_dispatch(struct client *c)
 	struct msg_identify_data identifydata;
 	struct msg_environ_data	 environdata;
 	ssize_t			 n, datalen;
+	int			 mode;
 
 	if ((n = imsg_read(&c->ibuf)) == -1 || n == 0)
 		return (-1);
@@ -555,15 +648,63 @@ server_client_msg_dispatch(struct client *c)
 				fatalx("MSG_IDENTIFY missing fd");
 			memcpy(&identifydata, imsg.data, sizeof identifydata);
 
+			c->stdin_fd = dup(imsg.fd);
+			if (c->stdin_fd == -1)
+				fatal("dup failed");
+			c->stdin_event = bufferevent_new(c->stdin_fd,
+			    NULL, NULL, server_client_in_callback, c);
+			if (c->stdin_event == NULL)
+				fatalx("failed to create stdin event");
+
+			if ((mode = fcntl(imsg.fd, F_GETFL)) != -1)
+				fcntl(imsg.fd, F_SETFL, mode|O_NONBLOCK);
+			if (fcntl(imsg.fd, F_SETFD, FD_CLOEXEC) == -1)
+				fatal("fcntl failed");
+
 			server_client_msg_identify(c, &identifydata, imsg.fd);
+			break;
+		case MSG_STDOUT:
+			if (datalen != 0)
+				fatalx("bad MSG_STDOUT size");
+			if (imsg.fd == -1)
+				fatalx("MSG_STDOUT missing fd");
+
+			c->stdout_fd = imsg.fd;
+			c->stdout_event = bufferevent_new(c->stdout_fd,
+			    NULL, NULL, server_client_out_callback, c);
+			if (c->stdout_event == NULL)
+				fatalx("failed to create stdout event");
+
+			if ((mode = fcntl(c->stdout_fd, F_GETFL)) != -1)
+				fcntl(c->stdout_fd, F_SETFL, mode|O_NONBLOCK);
+			if (fcntl(c->stdout_fd, F_SETFD, FD_CLOEXEC) == -1)
+				fatal("fcntl failed");
+			break;
+		case MSG_STDERR:
+			if (datalen != 0)
+				fatalx("bad MSG_STDERR size");
+			if (imsg.fd == -1)
+				fatalx("MSG_STDERR missing fd");
+
+			c->stderr_fd = imsg.fd;
+			c->stderr_event = bufferevent_new(c->stderr_fd,
+			    NULL, NULL, server_client_err_callback, c);
+			if (c->stderr_event == NULL)
+				fatalx("failed to create stderr event");
+
+			if ((mode = fcntl(c->stderr_fd, F_GETFL)) != -1)
+				fcntl(c->stderr_fd, F_SETFL, mode|O_NONBLOCK);
+			if (fcntl(c->stderr_fd, F_SETFD, FD_CLOEXEC) == -1)
+				fatal("fcntl failed");
 			break;
 		case MSG_RESIZE:
 			if (datalen != 0)
 				fatalx("bad MSG_RESIZE size");
 
-			tty_resize(&c->tty);
-			recalculate_sizes();
-			server_redraw_client(c);
+			if (tty_resize(&c->tty)) {
+				recalculate_sizes();
+				server_redraw_client(c);
+			}
 			break;
 		case MSG_EXITING:
 			if (datalen != 0)
@@ -621,45 +762,43 @@ server_client_msg_dispatch(struct client *c)
 void printflike2
 server_client_msg_error(struct cmd_ctx *ctx, const char *fmt, ...)
 {
-	struct msg_print_data	data;
-	va_list			ap;
+	va_list	ap;
 
 	va_start(ap, fmt);
-	xvsnprintf(data.msg, sizeof data.msg, fmt, ap);
+	evbuffer_add_vprintf(ctx->cmdclient->stderr_event->output, fmt, ap);
 	va_end(ap);
 
-	server_write_client(ctx->cmdclient, MSG_ERROR, &data, sizeof data);
+	bufferevent_write(ctx->cmdclient->stderr_event, "\n", 1);
+	ctx->cmdclient->retcode = 1;
 }
 
 /* Callback to send print message to client. */
 void printflike2
 server_client_msg_print(struct cmd_ctx *ctx, const char *fmt, ...)
 {
-	struct msg_print_data	data;
-	va_list			ap;
+	va_list	ap;
 
 	va_start(ap, fmt);
-	xvsnprintf(data.msg, sizeof data.msg, fmt, ap);
+	evbuffer_add_vprintf(ctx->cmdclient->stdout_event->output, fmt, ap);
 	va_end(ap);
 
-	server_write_client(ctx->cmdclient, MSG_PRINT, &data, sizeof data);
+	bufferevent_write(ctx->cmdclient->stdout_event, "\n", 1);
 }
 
 /* Callback to send print message to client, if not quiet. */
 void printflike2
 server_client_msg_info(struct cmd_ctx *ctx, const char *fmt, ...)
 {
-	struct msg_print_data	data;
-	va_list			ap;
+	va_list	ap;
 
 	if (options_get_number(&global_options, "quiet"))
 		return;
 
 	va_start(ap, fmt);
-	xvsnprintf(data.msg, sizeof data.msg, fmt, ap);
+	evbuffer_add_vprintf(ctx->cmdclient->stdout_event->output, fmt, ap);
 	va_end(ap);
 
-	server_write_client(ctx->cmdclient, MSG_PRINT, &data, sizeof data);
+	bufferevent_write(ctx->cmdclient->stdout_event, "\n", 1);
 }
 
 /* Handle command message. */
@@ -701,14 +840,14 @@ server_client_msg_command(struct client *c, struct msg_command_data *data)
 	cmd_free_argv(argc, argv);
 
 	if (cmd_list_exec(cmdlist, &ctx) != 1)
-		server_write_client(c, MSG_EXIT, NULL, 0);
+		c->flags |= CLIENT_EXIT;
 	cmd_list_free(cmdlist);
 	return;
 
 error:
 	if (cmdlist != NULL)
 		cmd_list_free(cmdlist);
-	server_write_client(c, MSG_EXIT, NULL, 0);
+	c->flags |= CLIENT_EXIT;
 }
 
 /* Handle identify message. */
@@ -716,13 +855,19 @@ void
 server_client_msg_identify(
     struct client *c, struct msg_identify_data *data, int fd)
 {
+	int	tty_fd;
+
 	c->cwd = NULL;
 	data->cwd[(sizeof data->cwd) - 1] = '\0';
 	if (*data->cwd != '\0')
 		c->cwd = xstrdup(data->cwd);
 
+	if (!isatty(fd))
+	    return;
+	if ((tty_fd = dup(fd)) == -1)
+		fatal("dup failed");
 	data->term[(sizeof data->term) - 1] = '\0';
-	tty_init(&c->tty, fd, data->term);
+	tty_init(&c->tty, tty_fd, data->term);
 	if (data->flags & IDENTIFY_UTF8)
 		c->tty.flags |= TTY_UTF8;
 	if (data->flags & IDENTIFY_256COLOURS)

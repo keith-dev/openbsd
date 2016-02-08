@@ -1,4 +1,4 @@
-/*	$OpenBSD: mio_rmidi.c,v 1.5 2009/08/01 08:32:23 ratchov Exp $	*/
+/*	$OpenBSD: mio_rmidi.c,v 1.7 2010/07/21 23:00:16 ratchov Exp $	*/
 /*
  * Copyright (c) 2008 Alexandre Ratchov <alex@caoua.org>
  *
@@ -65,7 +65,7 @@ mio_open_rmidi(const char *str, unsigned mode, int nbio)
 	snprintf(path, sizeof(path), "/dev/rmidi%s", str);
 	if (mode == (MIO_OUT | MIO_IN))
 		flags = O_RDWR;
-	else 
+	else
 		flags = (mode & MIO_OUT) ? O_WRONLY : O_RDONLY;
 	if (nbio)
 		flags |= O_NONBLOCK;
@@ -136,7 +136,6 @@ rmidi_write(struct mio_hdl *sh, const void *buf, size_t len)
 		if (errno != EAGAIN) {
 			DPERROR("rmidi_write: write");
 			hdl->mio.eof = 1;
-			return 0;
 		}
  		return 0;
 	}
@@ -149,7 +148,7 @@ rmidi_pollfd(struct mio_hdl *sh, struct pollfd *pfd, int events)
 	struct rmidi_hdl *hdl = (struct rmidi_hdl *)sh;
 
 	pfd->fd = hdl->fd;
-	pfd->events = events;	
+	pfd->events = events;
 	return 1;
 }
 

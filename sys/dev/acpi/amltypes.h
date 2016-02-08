@@ -1,4 +1,4 @@
-/* $OpenBSD: amltypes.h,v 1.33 2009/07/17 21:44:48 jordan Exp $ */
+/* $OpenBSD: amltypes.h,v 1.38 2010/07/21 19:35:15 deraadt Exp $ */
 /*
  * Copyright (c) 2005 Jordan Hargrave <jordan@openbsd.org>
  *
@@ -313,7 +313,7 @@ struct aml_value {
 			int               synclvl;
 			int               savelvl;
 			int               count;
-		  	char              ownername[5];
+			char              ownername[5];
 			struct aml_scope *owner;
 			struct aml_waitq_head    waiters;
 		} Vmutex;
@@ -347,21 +347,32 @@ struct aml_value {
 #define aml_pkglen(v)		((v)->length)
 #define aml_pkgval(v,i)		(&(v)->v_package[(i)])
 
+struct acpi_pci {
+	TAILQ_ENTRY(acpi_pci)		next;
+
+	struct aml_node			*node;
+	struct device			*device;
+
+	int				sub;
+	int				seg;
+	int				bus;
+	int				dev;
+	int				fun;
+};
+
 struct aml_node {
 	struct aml_node *parent;
-	struct aml_node *child;
-	struct aml_node *sibling;
+
+	SIMPLEQ_HEAD(,aml_node)	son;
+	SIMPLEQ_ENTRY(aml_node)	sib;
 
 	char		name[5];
 	u_int16_t	opcode;
 	u_int8_t	*start;
 	u_int8_t	*end;
-  //	const char	*name;
-  //	const char	*mnem;
 
 	struct aml_value *value;
-
-	int		depth;
+	struct acpi_pci  *pci;
 };
 
 #define aml_bitmask(n)		(1L << ((n) & 0x7))

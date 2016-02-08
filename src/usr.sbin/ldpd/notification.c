@@ -1,4 +1,4 @@
-/*	$OpenBSD: notification.c,v 1.3 2010/02/20 21:28:39 michele Exp $ */
+/*	$OpenBSD: notification.c,v 1.7 2010/05/26 13:56:08 nicm Exp $ */
 
 /*
  * Copyright (c) 2009 Michele Marchetto <michele@openbsd.org>
@@ -37,28 +37,29 @@
 #include "log.h"
 #include "ldpe.h"
 
-int	gen_status_tlv(struct buf *, u_int32_t, u_int32_t, u_int32_t);
+int	gen_status_tlv(struct ibuf *, u_int32_t, u_int32_t, u_int32_t);
 
 void
 send_notification_nbr(struct nbr *nbr, u_int32_t status, u_int32_t msgid,
     u_int32_t type)
 {
+	struct ibuf	*buf;
+
 	if (nbr->iface->passive)
 		return;
 
-	log_debug("send_notification: neighbor ID %s", inet_ntoa(nbr->id));
-
-	send_notification(status, nbr->iface, nbr->fd, msgid, type);
+	buf = send_notification(status, nbr->iface, msgid, type);
+	evbuf_enqueue(&nbr->wbuf, buf);
 }
 
-void
-send_notification(u_int32_t status, struct iface *iface, int fd,
-    u_int32_t msgid, u_int32_t type)
+struct ibuf *
+send_notification(u_int32_t status, struct iface *iface, u_int32_t msgid,
+    u_int32_t type)
 {
-	struct buf	*buf;
+	struct ibuf	*buf;
 	u_int16_t	 size;
 
-	if ((buf = buf_open(LDP_MAX_LEN)) == NULL)
+	if ((buf = ibuf_open(LDP_MAX_LEN)) == NULL)
 		fatal("send_notification");
 
 	size = LDP_HDR_SIZE + sizeof(struct ldp_msg) + STATUS_SIZE;
@@ -73,8 +74,7 @@ send_notification(u_int32_t status, struct iface *iface, int fd,
 
 	gen_status_tlv(buf, status, msgid, type);
 
-	write(fd, buf->buf, buf->wpos);
-	buf_free(buf);
+	return (buf);
 }
 
 int
@@ -103,6 +103,15 @@ recv_notification(struct nbr *nbr, char *buf, u_int16_t len)
 		return (-1);
 	}
 
+	if (st->status_code & htonl(STATUS_FATAL))
+		log_warnx("recieved notification from neighbor %s: %s",
+		    inet_ntoa(nbr->id),
+		    notification_name(ntohl(st->status_code)));
+	else
+		log_debug("recieved non-fatal notification from neighbor "
+		    "%s: %s", inet_ntoa(nbr->id),
+		    notification_name(ntohl(st->status_code)));
+
 	if (st->status_code & htonl(STATUS_FATAL)) {
 		nbr_fsm(nbr, NBR_EVT_CLOSE_SESSION);
 		return (-1);
@@ -112,7 +121,7 @@ recv_notification(struct nbr *nbr, char *buf, u_int16_t len)
 }
 
 int
-gen_status_tlv(struct buf *buf, u_int32_t status, u_int32_t msgid,
+gen_status_tlv(struct ibuf *buf, u_int32_t status, u_int32_t msgid,
     u_int32_t type)
 {
 	struct status_tlv	st;
@@ -126,5 +135,5 @@ gen_status_tlv(struct buf *buf, u_int32_t status, u_int32_t msgid,
 	st.msg_id = msgid;
 	st.msg_type = type;
 
-	return (buf_add(buf, &st, STATUS_SIZE));
+	return (ibuf_add(buf, &st, STATUS_SIZE));
 }

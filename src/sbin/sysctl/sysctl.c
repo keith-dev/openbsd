@@ -1,4 +1,4 @@
-/*	$OpenBSD: sysctl.c,v 1.167 2009/11/05 20:50:14 michele Exp $	*/
+/*	$OpenBSD: sysctl.c,v 1.172 2010/04/21 19:40:59 deraadt Exp $	*/
 /*	$NetBSD: sysctl.c,v 1.9 1995/09/30 07:12:50 thorpej Exp $	*/
 
 /*
@@ -2244,10 +2244,14 @@ sysctl_sensors(char *string, char **bufpp, int mib[], int flags, int *typep)
 		char buf[SYSCTL_BUFSIZ];
 
 		/* scan all sensor devices */
-		for (dev = 0; dev < MAXSENSORDEVICES; dev++) {
+		for (dev = 0; ; dev++) {
 			mib[2] = dev;
-			if (sysctl(mib, 3, &snsrdev, &sdlen, NULL, 0) == -1)
-				continue;
+			if (sysctl(mib, 3, &snsrdev, &sdlen, NULL, 0) == -1) {
+				if (errno == ENXIO)
+					continue;
+				if (errno == ENOENT)
+					break;
+			}
 			snprintf(buf, sizeof(buf), "%s.%s",
 			    string, snsrdev.xname);
 			print_sensordev(buf, mib, 3, &snsrdev);
@@ -2265,10 +2269,14 @@ sysctl_sensors(char *string, char **bufpp, int mib[], int flags, int *typep)
 		return (-1);
 	}
 	/* convert sensor device string to an integer */
-	for (dev = 0; dev < MAXSENSORDEVICES; dev++) {
+	for (dev = 0; ; dev++) {
 		mib[2] = dev;
-		if (sysctl(mib, 3, &snsrdev, &sdlen, NULL, 0) == -1)
-			continue;
+		if (sysctl(mib, 3, &snsrdev, &sdlen, NULL, 0) == -1) {
+			if (errno == ENXIO)
+				continue;
+			if (errno == ENOENT)
+				break;
+		}
 		if (strcmp(devname, snsrdev.xname) == 0)
 			break;
 	}
@@ -2464,6 +2472,15 @@ print_sensor(struct sensor *s)
 			break;
 		case SENSOR_TIMEDELTA:
 			printf("%.6f secs", s->value / 1000000000.0);
+			break;
+		case SENSOR_HUMIDITY:
+			printf("%.2f%%", s->value / 1000.0);
+			break;
+		case SENSOR_FREQ:
+			printf("%lld Hz", s->value);
+			break;
+		case SENSOR_ANGLE:
+			printf("%3.4f degrees", s->value / 1000000.0);
 			break;
 		default:
 			printf("unknown");

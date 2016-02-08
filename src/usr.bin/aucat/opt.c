@@ -1,4 +1,4 @@
-/*	$OpenBSD: opt.c,v 1.4 2010/01/10 21:47:41 ratchov Exp $	*/
+/*	$OpenBSD: opt.c,v 1.10 2010/07/06 01:12:45 ratchov Exp $	*/
 /*
  * Copyright (c) 2008 Alexandre Ratchov <alex@caoua.org>
  *
@@ -18,6 +18,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "dev.h"
 #include "conf.h"
 #include "opt.h"
 #ifdef DEBUG
@@ -27,8 +28,8 @@
 struct optlist opt_list = SLIST_HEAD_INITIALIZER(&opt_list);
 
 void
-opt_new(char *name,
-    struct aparams *wpar, struct aparams *rpar, int maxweight, int mmc)
+opt_new(char *name, struct dev *d, struct aparams *wpar, struct aparams *rpar,
+    int maxweight, int mmc, int join, unsigned mode)
 {
 	struct opt *o;
 	unsigned len;
@@ -48,27 +49,55 @@ opt_new(char *name,
 			exit(1);
 		}
 	}
+	SLIST_FOREACH(o, &opt_list, entry) {
+		if (strcmp(name, o->name) == 0) {
+			fprintf(stderr, "%s: already defined\n", name);
+			exit(1);
+		}
+	}
 	o = malloc(sizeof(struct opt));
 	if (o == NULL) {
 		perror("opt_new: malloc");
 		exit(1);
 	}
 	memcpy(o->name, name, len + 1);
-	o->wpar = *wpar;
-	o->rpar = *rpar;
+	if (mode & MODE_RECMASK)
+		o->wpar = (mode & MODE_MON) ? *rpar : *wpar;
+	if (mode & MODE_PLAY)
+		o->rpar = *rpar;
 	o->maxweight = maxweight;
 	o->mmc = mmc;
+	o->join = join;
+	o->mode = mode;
+	o->dev = d;
 #ifdef DEBUG
 	if (debug_level >= 2) {
 		dbg_puts(o->name);
-		dbg_puts(": rec ");
-		aparams_dbg(&o->wpar);
-		dbg_puts(", play ");
-		aparams_dbg(&o->rpar);
-		dbg_puts(", vol ");
-		dbg_putu(o->maxweight);
+		dbg_puts("@");
+		dbg_puts(o->dev->path);
+		dbg_puts(":");
+		if (mode & MODE_REC) {
+			dbg_puts(" rec=");
+			dbg_putu(o->wpar.cmin);
+			dbg_puts(":");
+			dbg_putu(o->wpar.cmax);
+		}
+		if (mode & MODE_PLAY) {
+			dbg_puts(" play=");
+			dbg_putu(o->rpar.cmin);
+			dbg_puts(":");
+			dbg_putu(o->rpar.cmax);
+			dbg_puts(" vol=");
+			dbg_putu(o->maxweight);
+		}
+		if (mode & MODE_MON) {
+			dbg_puts(" mon=");
+			dbg_putu(o->wpar.cmin);
+			dbg_puts(":");
+			dbg_putu(o->wpar.cmax);
+		}
 		if (o->mmc)
-			dbg_puts(", mmc");
+			dbg_puts(" mmc");
 		dbg_puts("\n");
 	}
 #endif

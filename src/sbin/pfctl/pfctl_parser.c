@@ -1,4 +1,4 @@
-/*	$OpenBSD: pfctl_parser.c,v 1.262 2010/01/18 23:52:46 mcbride Exp $ */
+/*	$OpenBSD: pfctl_parser.c,v 1.269 2010/07/13 13:11:57 sthen Exp $ */
 
 /*
  * Copyright (c) 2001 Daniel Hartmeier
@@ -206,6 +206,8 @@ const struct pf_timeout pf_timeouts[] = {
 	{ "src.track",		PFTM_SRC_NODE },
 	{ NULL,			0 }
 };
+
+enum { PF_POOL_ROUTE, PF_POOL_NAT, PF_POOL_RDR };
 
 const struct icmptypeent *
 geticmptypebynumber(u_int8_t type, sa_family_t af)
@@ -451,7 +453,7 @@ print_pool(struct pf_pool *pool, u_int16_t p1, u_int16_t p2,
 	} else
 		print_addr(&pool->addr, af, verbose);
 	switch (id) {
-	case PF_NAT:
+	case PF_POOL_NAT:
 		if ((p1 != PF_NAT_PROXY_PORT_LOW ||
 		    p2 != PF_NAT_PROXY_PORT_HIGH) && (p1 != 0 || p2 != 0)) {
 			if (p1 == p2)
@@ -460,7 +462,7 @@ print_pool(struct pf_pool *pool, u_int16_t p1, u_int16_t p2,
 				printf(" port %u:%u", p1, p2);
 		}
 		break;
-	case PF_RDR:
+	case PF_POOL_RDR:
 		if (p1) {
 			printf(" port %u", p1);
 			if (p2 && (p2 != p1))
@@ -490,7 +492,7 @@ print_pool(struct pf_pool *pool, u_int16_t p1, u_int16_t p2,
 	}
 	if (pool->opts & PF_POOL_STICKYADDR)
 		printf(" sticky-address");
-	if (id == PF_NAT && p1 == 0 && p2 == 0)
+	if (id == PF_POOL_NAT && p1 == 0 && p2 == 0)
 		printf(" static-port");
 }
 
@@ -528,6 +530,7 @@ print_status(struct pf_status *s, int opts)
 	printf("%-44s", statline);
 	asprintf(&debug, "Debug: %s", loglevel_to_string(s->debug));
 	printf("%15s\n\n", debug);
+	free(debug);
 
 	if (opts & PF_OPT_VERBOSE) {
 		printf("Hostid:   0x%08x\n", ntohl(s->hostid));
@@ -677,15 +680,17 @@ print_rule(struct pf_rule *r, const char *anchor_call, int verbose)
 	    "anchor", "nat-anchor", "nat-anchor", "binat-anchor",
 	    "binat-anchor", "rdr-anchor", "rdr-anchor" };
 	int	i, opts;
+	char	*p;
 
 	if (verbose)
 		printf("@%d ", r->nr);
 	if (r->action > PF_MATCH)
 		printf("action(%d)", r->action);
 	else if (anchor_call[0]) {
-		if (anchor_call[0] == '_') {
+		p = strrchr(anchor_call, '/');
+		if (p ? p[1] == '_' : anchor_call[0] == '_')
 			printf("%s", anchortypes[r->action]);
-		} else
+		else
 			printf("%s \"%s\"", anchortypes[r->action],
 			    anchor_call);
 	} else
@@ -855,6 +860,8 @@ print_rule(struct pf_rule *r, const char *anchor_call, int verbose)
 	if (r->rule_flag & PFRULE_IFBOUND)
 		opts = 1;
 	if (r->rule_flag & PFRULE_STATESLOPPY)
+		opts = 1;
+	if (r->rule_flag & PFRULE_PFLOW)
 		opts = 1;
 	for (i = 0; !opts && i < PFTM_MAX; ++i)
 		if (r->timeout[i])
@@ -1033,12 +1040,12 @@ print_rule(struct pf_rule *r, const char *anchor_call, int verbose)
 	if (!anchor_call[0] && r->nat.addr.type != PF_ADDR_NONE) {
 		printf (" nat-to ");
 		print_pool(&r->nat, r->nat.proxy_port[0],
-		    r->nat.proxy_port[1], r->af, PF_NAT, verbose);
+		    r->nat.proxy_port[1], r->af, PF_POOL_NAT, verbose);
 	}
-	if (!r->rt && !anchor_call[0] && r->rdr.addr.type != PF_ADDR_NONE) {
+	if (!anchor_call[0] && r->rdr.addr.type != PF_ADDR_NONE) {
 		printf (" rdr-to ");
 		print_pool(&r->rdr, r->rdr.proxy_port[0],
-		    r->rdr.proxy_port[1], r->af, PF_RDR, verbose);
+		    r->rdr.proxy_port[1], r->af, PF_POOL_RDR, verbose);
 	}
 	if (r->rt) {
 		if (r->rt == PF_ROUTETO)
@@ -1051,7 +1058,7 @@ print_rule(struct pf_rule *r, const char *anchor_call, int verbose)
 			printf(" fastroute");
 		if (r->rt != PF_FASTROUTE) {
 			printf(" ");
-			print_pool(&r->route, 0, 0, r->af, PF_PASS, verbose);
+			print_pool(&r->route, 0, 0, r->af, PF_POOL_ROUTE, verbose);
 		}
 	}
 }
@@ -1447,8 +1454,9 @@ host(const char *s)
 			err(1, "host: strdup");
 		mask = strtol(p+1, &q, 0);
 		if (!q || *q || mask > 128 || q == (p+1)) {
-			free(r);
 			fprintf(stderr, "invalid netmask '%s'\n", p);
+			free(r);
+			free(ps);
 			return (NULL);
 		}
 		p[0] = '\0';

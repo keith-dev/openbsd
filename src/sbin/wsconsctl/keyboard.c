@@ -1,4 +1,4 @@
-/*	$OpenBSD: keyboard.c,v 1.7 2009/07/15 20:32:28 martynas Exp $	*/
+/*	$OpenBSD: keyboard.c,v 1.9 2010/07/01 16:47:58 maja Exp $	*/
 /*	$NetBSD: keyboard.c 1.1 1998/12/28 14:01:17 hannken Exp $ */
 
 /*-
@@ -35,6 +35,9 @@
 #include <dev/wscons/wsksymdef.h>
 #include <dev/wscons/wsconsio.h>
 #include <err.h>
+#include <errno.h>
+#include <fcntl.h>
+#include <stdio.h>
 #include "wsconsctl.h"
 
 static int kbtype;
@@ -98,6 +101,9 @@ keyboard_get_values(const char *pre, int fd)
 		kbmap.maplen = KS_NUMKEYCODES;
 		if (ioctl(fd, WSKBDIO_GETMAP, &kbmap) < 0)
 			warn("WSKBDIO_GETMAP");
+		if (ioctl(fd, WSKBDIO_GETENCODING, &kbdencoding) < 0)
+			warn("WSKBDIO_GETENCODING");
+		ksymenc(kbdencoding);
 	}
 
 	repeat.which = 0;
@@ -199,4 +205,20 @@ keyboard_put_values(const char *pre, int fd)
 	}
 
 	return 0;
+}
+
+int
+keyboard_next_device(int *index)
+{
+	char devname[20];
+	int fd;
+
+	snprintf(devname, sizeof(devname), "/dev/wskbd%d", *index);
+
+	if ((fd = open(devname, O_WRONLY)) < 0 &&
+	    (fd = open(devname, O_RDONLY)) < 0) {
+		if (errno != ENXIO)
+			*index = -1;
+	}
+	return(fd);
 }

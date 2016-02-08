@@ -1,6 +1,6 @@
-/*	$Id: html.c,v 1.6 2010/02/18 02:11:25 schwarze Exp $ */
+/*	$Id: html.c,v 1.14 2010/07/31 21:43:07 schwarze Exp $ */
 /*
- * Copyright (c) 2008, 2009 Kristaps Dzonsons <kristaps@kth.se>
+ * Copyright (c) 2008, 2009, 2010 Kristaps Dzonsons <kristaps@bsd.lv>
  *
  * Permission to use, copy, modify, and distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -25,12 +25,11 @@
 #include <string.h>
 #include <unistd.h>
 
+#include "mandoc.h"
 #include "out.h"
 #include "chars.h"
 #include "html.h"
 #include "main.h"
-
-#define	UNCONST(a)	((void *)(uintptr_t)(const void *)(a))
 
 struct	htmldata {
 	const char	 *name;
@@ -50,7 +49,7 @@ static	const struct htmldata htmltags[TAG_MAX] = {
 	{"h1",		0}, /* TAG_H1 */
 	{"h2",		0}, /* TAG_H2 */
 	{"span",	0}, /* TAG_SPAN */
-	{"link",	HTML_CLRLINE | HTML_NOSTACK}, /* TAG_LINK */
+	{"link",	HTML_CLRLINE | HTML_NOSTACK | HTML_AUTOCLOSE}, /* TAG_LINK */
 	{"br",		HTML_CLRLINE | HTML_NOSTACK | HTML_AUTOCLOSE}, /* TAG_BR */
 	{"a",		0}, /* TAG_A */
 	{"table",	HTML_CLRLINE}, /* TAG_TABLE */
@@ -85,8 +84,8 @@ static	const char	*const htmlattrs[ATTR_MAX] = {
 	"summary",
 };
 
-
-static	void		  print_spec(struct html *, const char *, size_t);
+static	void		  print_spec(struct html *, enum roffdeco,
+				const char *, size_t);
 static	void		  print_res(struct html *, const char *, size_t);
 static	void		  print_ctag(struct html *, enum htmltag);
 static	void		  print_doctype(struct html *);
@@ -213,30 +212,41 @@ print_gen_head(struct html *h)
 
 
 static void
-print_spec(struct html *h, const char *p, size_t len)
+print_spec(struct html *h, enum roffdeco d, const char *p, size_t len)
 {
+	int		 cp;
 	const char	*rhs;
 	size_t		 sz;
 
-	rhs = chars_a2ascii(h->symtab, p, len, &sz);
-
-	if (NULL == rhs) 
+	if ((cp = chars_spec2cp(h->symtab, p, len)) > 0) {
+		printf("&#%d;", cp);
 		return;
-	fwrite(rhs, 1, sz, stdout);
+	} else if (-1 == cp && DECO_SSPECIAL == d) {
+		fwrite(p, 1, len, stdout);
+		return;
+	} else if (-1 == cp)
+		return;
+
+	if (NULL != (rhs = chars_spec2str(h->symtab, p, len, &sz)))
+		fwrite(rhs, 1, sz, stdout);
 }
 
 
 static void
 print_res(struct html *h, const char *p, size_t len)
 {
+	int		 cp;
 	const char	*rhs;
 	size_t		 sz;
 
-	rhs = chars_a2res(h->symtab, p, len, &sz);
-
-	if (NULL == rhs)
+	if ((cp = chars_res2cp(h->symtab, p, len)) > 0) {
+		printf("&#%d;", cp);
 		return;
-	fwrite(rhs, 1, sz, stdout);
+	} else if (-1 == cp)
+		return;
+
+	if (NULL != (rhs = chars_res2str(h->symtab, p, len, &sz)))
+		fwrite(rhs, 1, sz, stdout);
 }
 
 
@@ -293,11 +303,12 @@ print_encode(struct html *h, const char *p, int norecurse)
 	int		 len, nospace;
 	const char	*seq;
 	enum roffdeco	 deco;
+	static const char rejs[6] = { '\\', '<', '>', '&', ASCII_HYPH, '\0' };
 
 	nospace = 0;
 
 	for (; *p; p++) {
-		sz = strcspn(p, "\\<>&");
+		sz = strcspn(p, rejs);
 
 		fwrite(p, 1, sz, stdout);
 		p += /* LINTED */
@@ -312,6 +323,15 @@ print_encode(struct html *h, const char *p, int norecurse)
 		} else if ('&' == *p) {
 			printf("&amp;");
 			continue;
+		} else if (ASCII_HYPH == *p) {
+			/*
+			 * Note: "soft hyphens" aren't graphically
+			 * displayed when not breaking the text; we want
+			 * them to be displayed.
+			 */
+			/*printf("&#173;");*/
+			putchar('-');
+			continue;
 		} else if ('\0' == *p)
 			break;
 
@@ -322,8 +342,10 @@ print_encode(struct html *h, const char *p, int norecurse)
 		case (DECO_RESERVED):
 			print_res(h, seq, sz);
 			break;
+		case (DECO_SSPECIAL):
+			/* FALLTHROUGH */
 		case (DECO_SPECIAL):
-			print_spec(h, seq, sz);
+			print_spec(h, deco, seq, sz);
 			break;
 		case (DECO_PREVIOUS):
 			/* FALLTHROUGH */
@@ -381,8 +403,20 @@ print_otag(struct html *h, enum htmltag tag,
 		t = NULL;
 
 	if ( ! (HTML_NOSPACE & h->flags))
-		if ( ! (HTML_CLRLINE & htmltags[tag].flags))
-			putchar(' ');
+		if ( ! (HTML_CLRLINE & htmltags[tag].flags)) {
+			/* Manage keeps! */
+			if ( ! (HTML_KEEP & h->flags)) {
+				if (HTML_PREKEEP & h->flags)
+					h->flags |= HTML_KEEP;
+				putchar(' ');
+			} else
+				printf("&#160;");
+		}
+
+	if ( ! (h->flags & HTML_NONOSPACE))
+		h->flags &= ~HTML_NOSPACE;
+	else
+		h->flags |= HTML_NOSPACE;
 
 	/* Print out the tag name and attributes. */
 
@@ -440,21 +474,9 @@ print_gen_decls(struct html *h)
 static void
 print_xmltype(struct html *h)
 {
-	const char	*decl;
 
-	switch (h->type) {
-	case (HTML_XHTML_1_0_STRICT):
-		decl = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>";
-		break;
-	default:
-		decl = NULL;
-		break;
-	}
-
-	if (NULL == decl)
-		return;
-
-	printf("%s\n", decl);
+	if (HTML_XHTML_1_0_STRICT == h->type)
+		printf("<?xml version=\"1.0\" encoding=\"UTF-8\"?>");
 }
 
 
@@ -484,11 +506,11 @@ print_doctype(struct html *h)
 
 
 void
-print_text(struct html *h, const char *p)
+print_text(struct html *h, const char *word)
 {
 
-	if (*p && 0 == *(p + 1))
-		switch (*p) {
+	if (word[0] && '\0' == word[1])
+		switch (word[0]) {
 		case('.'):
 			/* FALLTHROUGH */
 		case(','):
@@ -504,8 +526,6 @@ print_text(struct html *h, const char *p)
 		case(')'):
 			/* FALLTHROUGH */
 		case(']'):
-			/* FALLTHROUGH */
-		case('}'):
 			if ( ! (HTML_IGNDELIM & h->flags))
 				h->flags |= HTML_NOSPACE;
 			break;
@@ -513,20 +533,30 @@ print_text(struct html *h, const char *p)
 			break;
 		}
 
-	if ( ! (h->flags & HTML_NOSPACE))
-		putchar(' ');
+	if ( ! (HTML_NOSPACE & h->flags)) {
+		/* Manage keeps! */
+		if ( ! (HTML_KEEP & h->flags)) {
+			if (HTML_PREKEEP & h->flags)
+				h->flags |= HTML_KEEP;
+			putchar(' ');
+		} else
+			printf("&#160;");
+	}
 
-	assert(p);
-	if ( ! print_encode(h, p, 0))
-		h->flags &= ~HTML_NOSPACE;
+	assert(word);
+	if ( ! print_encode(h, word, 0))
+		if ( ! (h->flags & HTML_NONOSPACE))
+			h->flags &= ~HTML_NOSPACE;
 
-	if (*p && 0 == *(p + 1))
-		switch (*p) {
+	/* 
+	 * Note that we don't process the pipe: the parser sees it as
+	 * punctuation, but we don't in terms of typography.
+	 */
+	if (word[0] && '\0' == word[1])
+		switch (word[0]) {
 		case('('):
 			/* FALLTHROUGH */
 		case('['):
-			/* FALLTHROUGH */
-		case('{'):
 			h->flags |= HTML_NOSPACE;
 			break;
 		default:
@@ -718,11 +748,11 @@ bufcat_su(struct html *h, const char *p, const struct roffsu *su)
 		break;
 	}
 
-	if (su->pt)
-		buffmt(h, "%s: %f%s;", p, v, u);
-	else
-		/* LINTED */
-		buffmt(h, "%s: %d%s;", p, (int)v, u);
+	/* 
+	 * XXX: the CSS spec isn't clear as to which types accept
+	 * integer or real numbers, so we just make them all decimals.
+	 */
+	buffmt(h, "%s: %.2f%s;", p, v, u);
 }
 
 

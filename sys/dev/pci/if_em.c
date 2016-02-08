@@ -31,7 +31,7 @@ POSSIBILITY OF SUCH DAMAGE.
 
 ***************************************************************************/
 
-/* $OpenBSD: if_em.c,v 1.235 2010/03/16 22:48:43 kettenis Exp $ */
+/* $OpenBSD: if_em.c,v 1.244 2010/08/08 12:53:16 kettenis Exp $ */
 /* $FreeBSD: if_em.c,v 1.46 2004/09/29 18:28:28 mlaier Exp $ */
 
 #include <dev/pci/if_em.h>
@@ -118,14 +118,24 @@ const struct pci_matchid em_devices[] = {
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82573L_PL_2 },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82573V_PM },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82574L },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82574LA },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82575EB_COPPER },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82575EB_SERDES },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82575GB_QUAD_CPR },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82575GB_QP_PM },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82576 },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82576_FIBER },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82576_SERDES },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82576_QUAD_COPPER },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82576_QUAD_CU_ET2 },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82576_NS },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82576_NS_SERDES },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82576_SERDES_QUAD },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82577LC },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82577LM },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82578DC },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82578DM },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_ICH8_82567V_3 },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_ICH8_IFE },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_ICH8_IFE_G },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_ICH8_IFE_GT },
@@ -392,6 +402,9 @@ em_attach(struct device *parent, struct device *self, void *aux)
 		case em_80003es2lan:
 			/* Limit Jumbo Frame size */
 			sc->hw.max_frame_size = 9234;
+			break;
+		case em_pchlan:
+			sc->hw.max_frame_size = 4096;
 			break;
 		case em_82542_rev2_0:
 		case em_82542_rev2_1:
@@ -755,6 +768,7 @@ em_init(void *arg)
 		break;
 	case em_ich9lan:
 	case em_ich10lan:
+	case em_pchlan:
 		pba = E1000_PBA_10K;
 		break;
 	default:
@@ -1532,6 +1546,9 @@ em_identify_hardware(struct em_softc *sc)
 	if (em_set_mac_type(&sc->hw))
 		printf("%s: Unknown MAC Type\n", sc->sc_dv.dv_xname);
 
+	if (sc->hw.mac_type == em_pchlan)
+		sc->hw.revision_id = PCI_PRODUCT(pa->pa_id) & 0x0f;
+
 	if (sc->hw.mac_type == em_82541 ||
 	    sc->hw.mac_type == em_82541_rev_2 ||
 	    sc->hw.mac_type == em_82547 ||
@@ -1587,7 +1604,8 @@ em_allocate_pci_resources(struct em_softc *sc)
 	/* for ICH8 and family we need to find the flash memory */
 	if (sc->hw.mac_type == em_ich8lan ||
 	    sc->hw.mac_type == em_ich9lan ||
-	    sc->hw.mac_type == em_ich10lan) {
+	    sc->hw.mac_type == em_ich10lan ||
+	    sc->hw.mac_type == em_pchlan) {
 		val = pci_conf_read(pa->pa_pc, pa->pa_tag, EM_FLASH);
 		if (PCI_MAPREG_TYPE(val) != PCI_MAPREG_TYPE_MEM) {
 			printf(": flash is not mem space\n");
@@ -1629,12 +1647,11 @@ em_allocate_pci_resources(struct em_softc *sc)
 	 * can confuse the system
 	 */
 	if(sc->hw.mac_type == em_icp_xxxx) {
-		uint8_t offset;
+		int offset;
 		pcireg_t val;
 		
 		if (!pci_get_capability(sc->osdep.em_pa.pa_pc, 
-		    sc->osdep.em_pa.pa_tag, PCI_CAP_ID_ST, (int*) &offset, 
-		    &val)) {
+		    sc->osdep.em_pa.pa_tag, PCI_CAP_ID_ST, &offset, &val)) {
 			return (0);
 		}
 		offset += PCI_ST_SMIA_OFFSET;
@@ -1797,7 +1814,8 @@ em_setup_interface(struct em_softc *sc)
 	ifp->if_capabilities = IFCAP_VLAN_MTU;
 
 #if NVLAN > 0
-	ifp->if_capabilities |= IFCAP_VLAN_HWTAGGING;
+	if (sc->hw.mac_type != em_82575)
+		ifp->if_capabilities |= IFCAP_VLAN_HWTAGGING;
 #endif
 
 #ifdef EM_CSUM_OFFLOAD
@@ -1876,11 +1894,12 @@ em_activate(struct device *self, int act)
 
 	switch (act) {
 	case DVACT_SUSPEND:
+		if (ifp->if_flags & IFF_RUNNING)
+			em_stop(sc, 0);
 		/* We have no children atm, but we will soon */
 		rv = config_activate_children(self, act);
 		break;
 	case DVACT_RESUME:
-		em_stop(sc, 0);
 		rv = config_activate_children(self, act);
 		if (ifp->if_flags & IFF_UP)
 			em_init(sc);

@@ -1,4 +1,4 @@
-/*	$OpenBSD: abuf.c,v 1.18 2010/01/11 13:06:32 ratchov Exp $	*/
+/*	$OpenBSD: abuf.c,v 1.22 2010/06/04 06:15:28 ratchov Exp $	*/
 /*
  * Copyright (c) 2008 Alexandre Ratchov <alex@caoua.org>
  *
@@ -105,12 +105,9 @@ abuf_new(unsigned nfr, struct aparams *par)
 	/*
 	 * fill fifo pointers
 	 */
-	buf->len = len;
+	buf->len = nfr;
 	buf->used = 0;
 	buf->start = 0;
-	buf->abspos = 0;
-	buf->silence = 0;
-	buf->drop = 0;
 	buf->rproc = NULL;
 	buf->wproc = NULL;
 	buf->duplex = NULL;
@@ -161,9 +158,6 @@ abuf_clear(struct abuf *buf)
 #endif
 	buf->used = 0;
 	buf->start = 0;
-	buf->abspos = 0;
-	buf->silence = 0;
-	buf->drop = 0;
 }
 
 /*
@@ -191,7 +185,7 @@ abuf_rgetblk(struct abuf *buf, unsigned *rsize, unsigned ofs)
 	if (count > used)
 		count = used;
 	*rsize = count;
-	return (unsigned char *)buf + sizeof(struct abuf) + start;
+	return (unsigned char *)buf + sizeof(struct abuf) + start * buf->bpf;
 }
 
 /*
@@ -208,12 +202,17 @@ abuf_rdiscard(struct abuf *buf, unsigned count)
 		dbg_puts("\n");
 		dbg_panic();
 	}
+	if (debug_level >= 4) {
+		abuf_dbg(buf);
+		dbg_puts(": discard(");
+		dbg_putu(count);
+		dbg_puts(")\n");
+	}
 #endif
 	buf->used -= count;
 	buf->start += count;
 	if (buf->start >= buf->len)
 		buf->start -= buf->len;
-	buf->abspos += count;
 }
 
 /*
@@ -229,6 +228,12 @@ abuf_wcommit(struct abuf *buf, unsigned count)
 		dbg_putu(count);
 		dbg_puts("\n");
 		dbg_panic();
+	}
+	if (debug_level >= 4) {
+		abuf_dbg(buf);
+		dbg_puts(": commit(");
+		dbg_putu(count);
+		dbg_puts(")\n");
 	}
 #endif
 	buf->used += count;
@@ -260,7 +265,7 @@ abuf_wgetblk(struct abuf *buf, unsigned *rsize, unsigned ofs)
 	if (count > avail)
 			count = avail;
 	*rsize = count;
-	return (unsigned char *)buf + sizeof(struct abuf) + end;
+	return (unsigned char *)buf + sizeof(struct abuf) + end * buf->bpf;
 }
 
 /*
@@ -271,47 +276,17 @@ int
 abuf_flush_do(struct abuf *buf)
 {
 	struct aproc *p;
-	unsigned count;
 
-	if (buf->drop > 0) {
-		count = buf->drop;
-		if (count > buf->used)
-			count = buf->used;
-		if (count == 0) {
+	p = buf->rproc;
+	if (!p)
+		return 0;
 #ifdef DEBUG
-			if (debug_level >= 4) {
-				abuf_dbg(buf);
-				dbg_puts(": flush: no data to drop\n");
-			}
-#endif
-			return 0;
-		}
-		abuf_rdiscard(buf, count);
-		buf->drop -= count;
-#ifdef DEBUG
-		if (debug_level >= 4) {
-			abuf_dbg(buf);
-			dbg_puts(": flush: dropped ");
-			dbg_putu(count);
-			dbg_puts(", to drop = ");
-			dbg_putu(buf->drop);
-			dbg_puts("\n");
-		}
-#endif
-	} else {
-		p = buf->rproc;
-		if (!p)
-			return 0;
-#ifdef DEBUG
-		if (debug_level >= 4) {
-			aproc_dbg(p);
-			dbg_puts(": in\n");
-		}
-#endif
-		if (!p->ops->in(p, buf))
-			return 0;
+	if (debug_level >= 4) {
+		aproc_dbg(p);
+		dbg_puts(": in\n");
 	}
-	return 1;
+#endif
+	return p->ops->in(p, buf);
 }
 
 /*
@@ -322,51 +297,17 @@ int
 abuf_fill_do(struct abuf *buf)
 {
 	struct aproc *p;
-	unsigned char *data;
-	unsigned count;
 
-	if (buf->silence > 0) {
-		data = abuf_wgetblk(buf, &count, 0);
-		if (count >= buf->silence)
-			count = buf->silence;
-		if (count == 0) {
+	p = buf->wproc;
+	if (!p)
+		return 0;
 #ifdef DEBUG
-			if (debug_level >= 4) {
-				abuf_dbg(buf);
-				dbg_puts(": fill: no space for silence\n");
-			}
-#endif
-			return 0;
-		}
-		memset(data, 0, count);
-		abuf_wcommit(buf, count);
-		buf->silence -= count;
-#ifdef DEBUG
-		if (debug_level >= 4) {
-			abuf_dbg(buf);
-			dbg_puts(": fill: inerted ");
-			dbg_putu(count);
-			dbg_puts(", remaining silence = ");
-			dbg_putu(buf->silence);
-			dbg_puts("\n");
-		}
-#endif
-		p = buf->wproc;
-	} else {
-		p = buf->wproc;
-		if (!p)
-			return 0;
-#ifdef DEBUG
-		if (debug_level >= 4) {
-			aproc_dbg(p);
-			dbg_puts(": out\n");
-		}
-#endif
-		if (!p->ops->out(p, buf)) {
-			return 0;
-		}
+	if (debug_level >= 4) {
+		aproc_dbg(p);
+		dbg_puts(": out\n");
 	}
-	return 1;
+#endif
+	return p->ops->out(p, buf);
 }
 
 /*

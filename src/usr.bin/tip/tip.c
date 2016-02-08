@@ -1,4 +1,4 @@
-/*	$OpenBSD: tip.c,v 1.38 2009/12/12 18:26:23 nicm Exp $	*/
+/*	$OpenBSD: tip.c,v 1.53 2010/07/03 03:33:12 nicm Exp $	*/
 /*	$NetBSD: tip.c,v 1.13 1997/04/20 00:03:05 mellon Exp $	*/
 
 /*
@@ -34,17 +34,15 @@
  * tip - UNIX link to other systems
  *  tip [-v] [-speed] system-name
  * or
- *  cu phone-number [-s speed] [-l line] [-a acu]
+ *  cu phone-number [-s speed] [-l line]
  */
 
 #include <sys/types.h>
 #include <sys/socket.h>
 
-#include "tip.h"
-#include "pathnames.h"
+#include <util.h>
 
-int	disc = TTYDISC;		/* tip normally runs this way */
-char	PNbuf[256];			/* This limits the size of a number */
+#include "tip.h"
 
 static void	intprompt(int);
 static void	tipin(void);
@@ -53,13 +51,15 @@ static int	escape(void);
 int
 main(int argc, char *argv[])
 {
-	char *sys = NULL, sbuf[12], *p;
+	char *sys = NULL;
 	int i, pair[2];
 
-	/* XXX preserve previous braindamaged behavior */
-	setboolean(value(DC), TRUE);
+	vinit();
 
-	if (equal(__progname, "cu")) {
+	/* XXX preserve previous braindamaged behavior */
+	vsetnum(DC, 1);
+
+	if (strcmp(__progname, "cu") == 0) {
 		cumode = 1;
 		cumain(argc, argv);
 		goto cucommon;
@@ -89,7 +89,7 @@ main(int argc, char *argv[])
 
 		case '0': case '1': case '2': case '3': case '4':
 		case '5': case '6': case '7': case '8': case '9':
-			BR = atoi(&argv[1][1]);
+			vsetnum(BAUDRATE, atoi(&argv[1][1]));
 			break;
 
 		default:
@@ -99,77 +99,26 @@ main(int argc, char *argv[])
 		}
 	}
 
-	if (sys == NULL)
-		goto notnumber;
-	if (isalpha(*sys))
-		goto notnumber;
-	/*
-	 * System name is really a phone number...
-	 * Copy the number then stomp on the original (in case the number
-	 *	is private, we don't want 'ps' or 'w' to find it).
-	 */
-	if (strlen(sys) > sizeof PNbuf - 1) {
-		fprintf(stderr, "%s: phone number too long (max = %d bytes)\n",
-			__progname, (int)sizeof(PNbuf) - 1);
-		exit(1);
-	}
-	strlcpy(PNbuf, sys, sizeof PNbuf - 1);
-	for (p = sys; *p; p++)
-		*p = '\0';
-	PN = PNbuf;
-	(void)snprintf(sbuf, sizeof(sbuf), "tip%ld", BR);
-	sys = sbuf;
-
-notnumber:
 	(void)signal(SIGINT, cleanup);
 	(void)signal(SIGQUIT, cleanup);
 	(void)signal(SIGHUP, cleanup);
 	(void)signal(SIGTERM, cleanup);
 	(void)signal(SIGCHLD, SIG_DFL);
 
-	if ((i = hunt(sys)) == 0) {
-		printf("all ports busy\n");
-		exit(3);
-	}
-	if (i == -1) {
-		printf("link down\n");
-		(void)uu_unlock(uucplock);
-		exit(3);
-	}
+	FD = hunt(sys);
 	setbuf(stdout, NULL);
-	loginit();
 
-	/*
-	 * Kludge, their's no easy way to get the initialization
-	 *   in the right order, so force it here
-	 */
-	if ((PH = getenv("PHONES")) == NULL)
-		PH = _PATH_PHONES;
-	vinit();				/* init variables */
+	loginit();
 	setparity("none");			/* set the parity table */
 
-	/*
-	 * Hardwired connections require the
-	 *  line speed set before they make any transmissions
-	 *  (this is particularly true of things like a DF03-AC)
-	 */
-	if (HW && ttysetup(number(value(BAUDRATE)))) {
-		fprintf(stderr, "%s: bad baud rate %ld\n", __progname,
-		    number(value(BAUDRATE)));
+	if (ttysetup(vgetnum(BAUDRATE))) {
+		fprintf(stderr, "%s: bad baud rate %d\n", __progname,
+		    vgetnum(BAUDRATE));
 		(void)uu_unlock(uucplock);
 		exit(3);
 	}
-	if ((p = con())) {
-		printf("\07%s\n[EOT]\n", p);
-		(void)uu_unlock(uucplock);
-		exit(1);
-	}
-	if (!HW && ttysetup(number(value(BAUDRATE)))) {
-		fprintf(stderr, "%s: bad baud rate %ld\n", __progname,
-		    number(value(BAUDRATE)));
-		(void)uu_unlock(uucplock);
-		exit(3);
-	}
+	con();
+
 cucommon:
 	/*
 	 * From here down the code is shared with
@@ -203,10 +152,10 @@ cucommon:
 
 	(void)signal(SIGALRM, timeout);
 
-	if (value(LINEDISC) != TTYDISC) {
-		int ld = (int)value(LINEDISC);
+	if (vgetnum(LINEDISC) != TTYDISC) {
+		int ld = (int)vgetnum(LINEDISC);
 		ioctl(FD, TIOCSETD, &ld);
-	}		
+	}
 
 	if (socketpair(AF_UNIX, SOCK_STREAM, PF_UNSPEC, pair) != 0) {
 		(void)uu_unlock(uucplock);
@@ -237,6 +186,14 @@ cucommon:
 	}
 	/*NOTREACHED*/
 	exit(0);
+}
+
+void
+con(void)
+{
+	if (vgetstr(CONNECT) != NULL)
+		parwrite(FD, vgetstr(CONNECT), size(vgetstr(CONNECT)));
+	logent(vgetstr(HOST), vgetstr(DEVICE), "call completed");
 }
 
 void
@@ -333,7 +290,7 @@ tipin(void)
 	 *   send a SIGEMT before tipout has a chance to set up catching
 	 *   it; so wait a second, then setscript()
 	 */
-	if (boolean(value(SCRIPT))) {
+	if (vgetnum(SCRIPT)) {
 		sleep(1);
 		setscript();
 	}
@@ -341,29 +298,29 @@ tipin(void)
 	while (1) {
 		gch = getchar()&STRIP_PAR;
 		/* XXX does not check for EOF */
-		if ((gch == character(value(ESCAPE))) && bol) {
+		if (gch == vgetnum(ESCAPE) && bol) {
 			if (!noesc) {
 				if (!(gch = escape()))
 					continue;
 			}
-		} else if (!cumode && gch == character(value(RAISECHAR))) {
-			setboolean(value(RAISE), !boolean(value(RAISE)));
+		} else if (!cumode && gch == vgetnum(RAISECHAR)) {
+			vsetnum(RAISE, !vgetnum(RAISE));
 			continue;
 		} else if (gch == '\r') {
 			bol = 1;
 			ch = gch;
 			parwrite(FD, &ch, 1);
-			if (boolean(value(HALFDUPLEX)))
+			if (vgetnum(HALFDUPLEX))
 				printf("\r\n");
 			continue;
-		} else if (!cumode && gch == character(value(FORCE)))
-			gch = getchar()&STRIP_PAR;
-		bol = any(gch, value(EOL));
-		if (boolean(value(RAISE)) && islower(gch))
+		} else if (!cumode && gch == vgetnum(FORCE))
+			gch = getchar() & STRIP_PAR;
+		bol = any(gch, vgetstr(EOL));
+		if (vgetnum(RAISE) && islower(gch))
 			gch = toupper(gch);
 		ch = gch;
 		parwrite(FD, &ch, 1);
-		if (boolean(value(HALFDUPLEX)))
+		if (vgetnum(HALFDUPLEX))
 			printf("%c", ch);
 	}
 }
@@ -379,7 +336,7 @@ escape(void)
 {
 	int gch;
 	esctable_t *p;
-	char c = character(value(ESCAPE));
+	char c = vgetnum(ESCAPE);
 
 	gch = (getchar()&STRIP_PAR);
 	/* XXX does not check for EOF */
@@ -466,7 +423,7 @@ help(int c)
 
 	printf("%c\r\n", c);
 	for (p = etable; p->e_char; p++) {
-		printf("%2s", ctrl(character(value(ESCAPE))));
+		printf("%2s", ctrl(vgetnum(ESCAPE)));
 		printf("%-2s     %s\r\n", ctrl(p->e_char), p->e_help);
 	}
 }
@@ -484,16 +441,16 @@ ttysetup(int speed)
 	cfsetspeed(&cntrl, speed);
 	cntrl.c_cflag &= ~(CSIZE|PARENB);
 	cntrl.c_cflag |= CS8;
-	if (boolean(value(DC)))
+	if (vgetnum(DC))
 		cntrl.c_cflag |= CLOCAL;
-	if (boolean(value(HARDWAREFLOW)))
+	if (vgetnum(HARDWAREFLOW))
 		cntrl.c_cflag |= CRTSCTS;
 	cntrl.c_iflag &= ~(ISTRIP|ICRNL);
 	cntrl.c_oflag &= ~OPOST;
 	cntrl.c_lflag &= ~(ICANON|ISIG|IEXTEN|ECHO);
 	cntrl.c_cc[VMIN] = 1;
 	cntrl.c_cc[VTIME] = 0;
-	if (boolean(value(TAND)))
+	if (vgetnum(TAND))
 		cntrl.c_iflag |= IXOFF;
 	return (tcsetattr(FD, TCSAFLUSH, &cntrl));
 }
@@ -521,6 +478,7 @@ parwrite(int fd, char *buf, size_t n)
 		if (errno == EIO)
 			tipabort("Lost carrier.");
 		/* this is questionable */
+		abort();;//
 		perror("write");
 	}
 }
@@ -535,10 +493,10 @@ setparity(char *defparity)
 	char *parity;
 	extern const unsigned char evenpartab[];
 
-	if (value(PARITY) == NULL)
-		value(PARITY) = defparity;
-	parity = value(PARITY);
-	if (equal(parity, "none")) {
+	if (vgetstr(PARITY) == NULL)
+		vsetstr(PARITY, defparity);
+	parity = vgetstr(PARITY);
+	if (strcmp(parity, "none") == 0) {
 		bits8 = 1;
 		return;
 	}
@@ -546,13 +504,13 @@ setparity(char *defparity)
 	flip = 0;
 	clr = 0377;
 	set = 0;
-	if (equal(parity, "odd"))
+	if (strcmp(parity, "odd") == 0)
 		flip = 0200;			/* reverse bit 7 */
-	else if (equal(parity, "zero"))
+	else if (strcmp(parity, "zero") == 0)
 		clr = 0177;			/* turn off bit 7 */
-	else if (equal(parity, "one"))
+	else if (strcmp(parity, "one") == 0)
 		set = 0200;			/* turn on bit 7 */
-	else if (!equal(parity, "even")) {
+	else if (strcmp(parity, "even") != 0) {
 		(void) fprintf(stderr, "%s: unknown parity value\r\n", parity);
 		(void) fflush(stderr);
 	}

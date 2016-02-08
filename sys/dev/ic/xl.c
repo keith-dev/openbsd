@@ -1,4 +1,4 @@
-/*	$OpenBSD: xl.c,v 1.88 2009/12/22 21:10:25 naddy Exp $	*/
+/*	$OpenBSD: xl.c,v 1.90 2010/08/06 02:45:53 deraadt Exp $	*/
 
 /*
  * Copyright (c) 1997, 1998, 1999
@@ -161,8 +161,6 @@ int xl_intr(void *);
 void xl_start(struct ifnet *);
 void xl_start_90xB(struct ifnet *);
 int xl_ioctl(struct ifnet *, u_long, caddr_t);
-void xl_init(void *);
-void xl_stop(struct xl_softc *);
 void xl_freetxrx(struct xl_softc *);
 void xl_watchdog(struct ifnet *);
 void xl_shutdown(void *);
@@ -2427,7 +2425,7 @@ xl_attach(struct xl_softc *sc)
 
 	if (bus_dmamem_alloc(sc->sc_dmat, sizeof(struct xl_list_data),
 	    PAGE_SIZE, 0, sc->sc_listseg, 1, &sc->sc_listnseg,
-	    BUS_DMA_NOWAIT) != 0) {
+	    BUS_DMA_NOWAIT | BUS_DMA_ZERO) != 0) {
 		printf(": can't alloc list mem\n");
 		return;
 	}
@@ -2449,7 +2447,6 @@ xl_attach(struct xl_softc *sc)
 		return;
 	}
 	sc->xl_ldata = (struct xl_list_data *)sc->sc_listkva;
-	bzero(sc->xl_ldata, sizeof(struct xl_list_data));
 
 	for (i = 0; i < XL_RX_LIST_CNT; i++) {
 		if (bus_dmamap_create(sc->sc_dmat, MCLBYTES, 1, MCLBYTES,

@@ -1,4 +1,4 @@
-/*	$OpenBSD: ldasm.S,v 1.24 2006/05/03 16:10:52 drahn Exp $	*/
+/*	$OpenBSD: ldasm.S,v 1.26 2010/05/09 09:34:42 kettenis Exp $	*/
 /*	$NetBSD: rtld_start.S,v 1.5 2001/08/14 22:17:48 eeh Exp $	*/
 
 /*
@@ -85,7 +85,7 @@
  */
 
 /* Offset of ARGC from bottom of stack */
-#define	ARGC	(16*8)
+#define	ARGC	CC64FSZ
 /* XXX - DL_DATA_SIZE should be (9*8), but I can't think right now. */
 #define DL_DATA_SIZE (16*8)
 
@@ -96,7 +96,7 @@
 _ENTRY(_dl_start)
 	sub	%g0, %g0, %fp		! clear frame
 	mov	%g1, %l1		! save ps_strings
-	sub	%sp, DL_DATA_SIZE, %sp	! make room for dl_data
+	sub	%sp, 48 + DL_DATA_SIZE, %sp	! make room for dl_data
 	add	%sp, BIAS + ARGC, %l3
 
 	add	%l3, DL_DATA_SIZE, %o0
@@ -131,7 +131,7 @@ _ENTRY(_dl_start)
 	call	_dl_boot		! _dl_boot(argv,envp,loff,dl_data)
 	 nop
 
-	add	%sp, DL_DATA_SIZE, %sp		! restore stack
+	add	%sp, 48 + DL_DATA_SIZE, %sp	! restore stack
 	mov	%l1, %g1		! restore ps_strings
 
 	jmp	%o0
@@ -157,7 +157,7 @@ _ENTRY(_dl_start)
 	 *
 	 * and _dl_bind_start_0(x, y) does:
 	 *
-	 *	i = x - y + 1048596;
+	 *	i = x - y + 8 - 32768*32;
 	 *	n = 32768 + (i/5120)*160 + (i%5120)/24;
 	 *
 	 * Neither routine needs to issue a save since it's already been
@@ -167,17 +167,21 @@ _ENTRY(_dl_start)
 	/* NOTE: _dl_bind_start_0 is untested.  Hence the debug stuff */
 
 _ENTRY(_dl_bind_start_0)		# (x, y)
-	sethi	%hi(1048596), %l1
+	sethi	%hi(32768*32-8), %l1
 	sub	%o0, %o1, %l0		/* x - y */
-	or	%l1, %lo(1048596), %l1
-	add	%l0, %l1, %l0		/* x - y + 1048596 */
+	or	%l1, %lo(32768*32-8), %l1
+	sub	%l0, %l1, %l0		/* x - y + 8 - 32768*32 */
 
-	sdivx	%l0, 5120, %l1		/* Calculate i/5120 */
+	sethi	%hi(5120), %l1
+	sdivx	%l0, %l1, %l1		/* Calculate i/5120 */
 	ldx	[%o1 + (10*4)], %o0	/* Load object pointer from PLT2 */
-	sub	%l0, %l1, %l2		/* And i%5120 */
+	sllx	%l1, 2, %l2
+	add	%l1, %l2, %l2
+	sllx	%l2, 10, %l2
+	sub	%l0, %l2, %l2		/* And i%5120 */
 
 	/* Let the division churn for a bit. */
-	sdivx	%l2, 14, %l4		/* (i%5120)/24 */
+	sdivx	%l2, 24, %l4		/* (i%5120)/24 */
 
 	/* 160 is (32 * 5) or (32 * (4 + 1)) */
 	sllx	%l1, 2, %l3		/* 4 * (i/5120) */

@@ -1,7 +1,8 @@
-#	$OpenBSD: Makefile,v 1.286 2010/02/22 15:15:54 claudio Exp $
+#	$OpenBSD: Makefile,v 1.290 2010/06/29 17:17:53 nicm Exp $
 
 TZDIR=		/usr/share/zoneinfo
 LOCALTIME=	Canada/Mountain
+MTREEDIR=	/etc/mtree
 
 NOOBJ=
 
@@ -15,7 +16,7 @@ BINGRP= wheel
 BIN1=	changelist ccd.conf csh.cshrc csh.login csh.logout daily dhcpd.conf \
 	exports ftpusers ftpchroot gettytab group hosts hosts.lpd inetd.conf \
 	ksh.kshrc locate.rc man.conf monthly motd mrouted.conf myname \
-	netstart networks newsyslog.conf phones printcap protocols \
+	netstart networks newsyslog.conf printcap protocols \
 	rbootd.conf rc rc.conf rc.local rc.securelevel rc.shutdown \
 	remote rpc security services shells syslog.conf weekly \
 	etc.${MACHINE}/disktab dhclient.conf mailer.conf ntpd.conf \
@@ -48,6 +49,16 @@ GZIPEXT=
 .endif
 
 all clean cleandir depend etc install lint:
+
+install-mtree:
+	${INSTALL} -c -o root -g wheel -m 600 ${.CURDIR}/mtree/special \
+	    ${DESTDIR}${MTREEDIR}
+	${INSTALL} -c -o root -g wheel -m 444 ${.CURDIR}/mtree/4.4BSD.dist \
+	    ${DESTDIR}${MTREEDIR}
+	${INSTALL} -c -o root -g wheel -m 444 ${.CURDIR}/mtree/BSD.local.dist \
+	    ${DESTDIR}${MTREEDIR}
+	${INSTALL} -c -o root -g wheel -m 444 ${.CURDIR}/mtree/BSD.x11.dist \
+	    ${DESTDIR}${MTREEDIR}
 
 .ifndef DESTDIR
 distribution-etc-root-var distribution distrib-dirs release:
@@ -87,9 +98,11 @@ distribution-etc-root-var: distrib-dirs
 	${INSTALL} -c -o root -g operator -m 644 chio.conf ${DESTDIR}/etc
 	${INSTALL} -c -o root -g wheel -m 600 hostapd.conf ${DESTDIR}/etc
 	${INSTALL} -c -o root -g wheel -m 600 relayd.conf ${DESTDIR}/etc
+	${INSTALL} -c -o root -g wheel -m 600 iked.conf ${DESTDIR}/etc
 	${INSTALL} -c -o root -g wheel -m 600 ipsec.conf ${DESTDIR}/etc
 	${INSTALL} -c -o root -g wheel -m 600 sasyncd.conf ${DESTDIR}/etc
 	${INSTALL} -c -o root -g wheel -m 600 snmpd.conf ${DESTDIR}/etc
+	${INSTALL} -c -o root -g wheel -m 600 ldapd.conf ${DESTDIR}/etc
 	${INSTALL} -c -o ${BINOWN} -g ${BINGRP} -m 555 \
 	    etc.${MACHINE}/MAKEDEV ${DESTDIR}/dev
 	cd root; \
@@ -129,15 +142,6 @@ distribution-etc-root-var: distrib-dirs
 	cd amd; \
 		${INSTALL} -c -o root -g wheel -m 644 master.sample \
 		    ${DESTDIR}/etc/amd
-	cd mtree; \
-		${INSTALL} -c -o root -g wheel -m 600 special \
-		    ${DESTDIR}/etc/mtree; \
-		${INSTALL} -c -o root -g wheel -m 444 4.4BSD.dist \
-		    ${DESTDIR}/etc/mtree; \
-		${INSTALL} -c -o root -g wheel -m 444 BSD.local.dist \
-		    ${DESTDIR}/etc/mtree; \
-		${INSTALL} -c -o root -g wheel -m 444 BSD.x11.dist \
-		    ${DESTDIR}/etc/mtree
 	cd ppp; \
 		${INSTALL} -c -o root -g wheel -m 600 chap-secrets \
 		    ${DESTDIR}/etc/ppp; \
@@ -246,6 +250,7 @@ distribution-etc-root-var: distrib-dirs
 	cd ../gnu/usr.bin/lynx && exec ${MAKE} -f Makefile.bsd-wrapper distribution
 	cd ../usr.bin/bgplg && exec ${MAKE} distribution
 	cd ../usr.bin/mail && exec ${MAKE} distribution
+	cd ../usr.sbin/ldapd && exec ${MAKE} distribution
 	cd mail && exec ${MAKE} distribution
 	${INSTALL} -c -o root -g wheel -m 600 root/root.mail \
 	    ${DESTDIR}/var/mail/root
@@ -307,7 +312,7 @@ update-moduli:
 	) > moduli
 
 .PHONY: distribution-etc-root-var distribution distrib-dirs \
-	release allarchs kernels release-sets m4
+	release allarchs kernels release-sets m4 install-mtree
 
 SUBDIR+= etc.alpha etc.amd64 etc.armish etc.aviion etc.hp300 etc.hppa
 SUBDIR+= etc.hppa64 etc.i386 etc.landisk etc.loongson etc.luna88k 

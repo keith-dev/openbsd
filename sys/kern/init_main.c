@@ -1,4 +1,4 @@
-/*	$OpenBSD: init_main.c,v 1.166 2010/01/12 04:06:26 deraadt Exp $	*/
+/*	$OpenBSD: init_main.c,v 1.170 2010/07/26 01:56:27 guenther Exp $	*/
 /*	$NetBSD: init_main.c,v 1.84.4.1 1996/06/02 09:08:06 mrg Exp $	*/
 
 /*
@@ -184,6 +184,7 @@ int
 main(void *framep)
 {
 	struct proc *p;
+	struct process *pr;
 	struct pdevinit *pdev;
 	struct timeval rtv;
 	quad_t lim;
@@ -216,6 +217,7 @@ main(void *framep)
 	printf("%s\n", copyright);
 
 	KERNEL_LOCK_INIT();
+	SCHED_LOCK_INIT();
 
 	uvm_init();
 	disk_init();		/* must come before autoconfiguration */
@@ -262,21 +264,21 @@ main(void *framep)
 	TAILQ_INIT(&process0.ps_threads);
 	TAILQ_INSERT_TAIL(&process0.ps_threads, p, p_thr_link);
 	process0.ps_refcnt = 1;
-	p->p_p = &process0;
+	p->p_p = pr = &process0;
 
-	/* Set the default routing domain. */
-	process0.ps_rdomain = 0;
+	/* Set the default routing table/domain. */
+	process0.ps_rtableid = 0;
 
 	LIST_INSERT_HEAD(&allproc, p, p_list);
-	p->p_pgrp = &pgrp0;
+	pr->ps_pgrp = &pgrp0;
 	LIST_INSERT_HEAD(PIDHASH(0), p, p_hash);
 	LIST_INSERT_HEAD(PGRPHASH(0), &pgrp0, pg_hash);
 	LIST_INIT(&pgrp0.pg_members);
-	LIST_INSERT_HEAD(&pgrp0.pg_members, p, p_pglist);
+	LIST_INSERT_HEAD(&pgrp0.pg_members, pr, ps_pglist);
 
 	pgrp0.pg_session = &session0;
 	session0.s_count = 1;
-	session0.s_leader = p;
+	session0.s_leader = pr;
 
 	atomic_setbits_int(&p->p_flag, P_SYSTEM | P_NOCLDWAIT);
 	p->p_stat = SONPROC;
@@ -289,7 +291,6 @@ main(void *framep)
 	timeout_set(&p->p_realit_to, realitexpire, p);
 
 	/* Create credentials. */
-	cred0.p_refcnt = 1;
 	p->p_cred = &cred0;
 	p->p_ucred = crget();
 	p->p_ucred->cr_ngroups = 1;	/* group 0 */
@@ -303,7 +304,7 @@ main(void *framep)
 	p->p_fd = fdinit(NULL);
 
 	/* Create the limits structures. */
-	p->p_p->ps_limit = &limit0;
+	pr->ps_limit = &limit0;
 	for (i = 0; i < nitems(p->p_rlimit); i++)
 		limit0.pl_rlimit[i].rlim_cur =
 		    limit0.pl_rlimit[i].rlim_max = RLIM_INFINITY;

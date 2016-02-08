@@ -33,10 +33,10 @@
 ./bin/rksh
 ./bin/rm
 ./bin/rmail
-./bin/rmd160
 ./bin/rmdir
 ./bin/sh
 ./bin/sha1
+./bin/sha256
 ./bin/sleep
 ./bin/stty
 ./bin/sum
@@ -52,6 +52,12 @@
 ./etc/amd
 ./etc/disklabels
 ./etc/firmware
+./etc/iked
+./etc/iked/ca
+./etc/iked/certs
+./etc/iked/crls
+./etc/iked/private
+./etc/iked/pubkeys
 ./etc/isakmpd
 ./etc/isakmpd/ca
 ./etc/isakmpd/certs
@@ -66,9 +72,15 @@
 ./etc/kerberosV
 ./etc/kerberosV/README
 ./etc/kerberosV/krb5.conf.example
+./etc/ldap
+./etc/ldap/certs
 ./etc/magic
 ./etc/mail
 ./etc/mtree
+./etc/mtree/4.4BSD.dist
+./etc/mtree/BSD.local.dist
+./etc/mtree/BSD.x11.dist
+./etc/mtree/special
 ./etc/ppp
 ./etc/ppp/chatscript.sample
 ./etc/ppp/options.sample
@@ -110,6 +122,7 @@
 ./sbin/growfs
 ./sbin/halt
 ./sbin/ifconfig
+./sbin/iked
 ./sbin/init
 ./sbin/ipsecctl
 ./sbin/isakmpd
@@ -338,6 +351,7 @@
 ./usr/bin/make
 ./usr/bin/makeinfo
 ./usr/bin/man
+./usr/bin/mandoc
 ./usr/bin/merge
 ./usr/bin/mesg
 ./usr/bin/mg
@@ -364,7 +378,6 @@
 ./usr/bin/nroff
 ./usr/bin/od
 ./usr/bin/oldrdist
-./usr/bin/opencvs
 ./usr/bin/otp-md4
 ./usr/bin/otp-md5
 ./usr/bin/otp-rmd160
@@ -939,6 +952,7 @@
 ./usr/libdata/perl5/Object/Accessor.pm
 ./usr/libdata/perl5/OpenBSD
 ./usr/libdata/perl5/OpenBSD/Add.pm
+./usr/libdata/perl5/OpenBSD/AddCreateDelete.pm
 ./usr/libdata/perl5/OpenBSD/AddDelete.pm
 ./usr/libdata/perl5/OpenBSD/ArcCheck.pm
 ./usr/libdata/perl5/OpenBSD/CollisionReport.pm
@@ -950,7 +964,10 @@
 ./usr/libdata/perl5/OpenBSD/Handle.pm
 ./usr/libdata/perl5/OpenBSD/IdCache.pm
 ./usr/libdata/perl5/OpenBSD/Interactive.pm
+./usr/libdata/perl5/OpenBSD/LibSpec
 ./usr/libdata/perl5/OpenBSD/LibSpec.pm
+./usr/libdata/perl5/OpenBSD/LibSpec/Build.pm
+./usr/libdata/perl5/OpenBSD/Log.pm
 ./usr/libdata/perl5/OpenBSD/Makewhatis
 ./usr/libdata/perl5/OpenBSD/Makewhatis.pm
 ./usr/libdata/perl5/OpenBSD/Makewhatis/Check.pm
@@ -973,16 +990,24 @@
 ./usr/libdata/perl5/OpenBSD/PackingElement.pm
 ./usr/libdata/perl5/OpenBSD/PackingList.pm
 ./usr/libdata/perl5/OpenBSD/Paths.pm
+./usr/libdata/perl5/OpenBSD/PkgAdd.pm
 ./usr/libdata/perl5/OpenBSD/PkgCfl.pm
+./usr/libdata/perl5/OpenBSD/PkgCheck.pm
 ./usr/libdata/perl5/OpenBSD/PkgConfig.pm
+./usr/libdata/perl5/OpenBSD/PkgCreate.pm
+./usr/libdata/perl5/OpenBSD/PkgDelete.pm
+./usr/libdata/perl5/OpenBSD/PkgInfo.pm
 ./usr/libdata/perl5/OpenBSD/PkgSpec.pm
+./usr/libdata/perl5/OpenBSD/ProgressMeter
 ./usr/libdata/perl5/OpenBSD/ProgressMeter.pm
+./usr/libdata/perl5/OpenBSD/ProgressMeter/Term.pm
 ./usr/libdata/perl5/OpenBSD/Replace.pm
 ./usr/libdata/perl5/OpenBSD/RequiredBy.pm
 ./usr/libdata/perl5/OpenBSD/Search.pm
 ./usr/libdata/perl5/OpenBSD/SharedItems.pm
 ./usr/libdata/perl5/OpenBSD/SharedLibs.pm
 ./usr/libdata/perl5/OpenBSD/Signature.pm
+./usr/libdata/perl5/OpenBSD/State.pm
 ./usr/libdata/perl5/OpenBSD/Subst.pm
 ./usr/libdata/perl5/OpenBSD/Temp.pm
 ./usr/libdata/perl5/OpenBSD/Tracker.pm
@@ -2143,12 +2168,15 @@
 ./usr/sbin/hostapd
 ./usr/sbin/httpd
 ./usr/sbin/ifstated
+./usr/sbin/ikectl
 ./usr/sbin/inetd
 ./usr/sbin/iostat
 ./usr/sbin/kadmin
 ./usr/sbin/kstash
 ./usr/sbin/ktutil
 ./usr/sbin/kvm_mkdb
+./usr/sbin/ldapctl
+./usr/sbin/ldapd
 ./usr/sbin/ldpctl
 ./usr/sbin/ldpd
 ./usr/sbin/logresolve
@@ -2188,6 +2216,7 @@
 ./usr/sbin/pac
 ./usr/sbin/pkg
 ./usr/sbin/pkg_add
+./usr/sbin/pkg_check
 ./usr/sbin/pkg_create
 ./usr/sbin/pkg_delete
 ./usr/sbin/pkg_info
@@ -2641,6 +2670,7 @@
 ./usr/share/locale/en_US.ISO8859-15
 ./usr/share/locale/en_US.ISO8859-15/LC_CTYPE
 ./usr/share/locale/en_US.UTF-8
+./usr/share/locale/en_US.UTF-8/LC_CTYPE
 ./usr/share/locale/es_ES.ISO8859-1
 ./usr/share/locale/es_ES.ISO8859-1/LC_CTYPE
 ./usr/share/locale/es_ES.ISO8859-15
@@ -3181,6 +3211,7 @@
 ./usr/share/zoneinfo/America/Atikokan
 ./usr/share/zoneinfo/America/Atka
 ./usr/share/zoneinfo/America/Bahia
+./usr/share/zoneinfo/America/Bahia_Banderas
 ./usr/share/zoneinfo/America/Barbados
 ./usr/share/zoneinfo/America/Belem
 ./usr/share/zoneinfo/America/Belize
@@ -3322,6 +3353,7 @@
 ./usr/share/zoneinfo/Antarctica/Casey
 ./usr/share/zoneinfo/Antarctica/Davis
 ./usr/share/zoneinfo/Antarctica/DumontDUrville
+./usr/share/zoneinfo/Antarctica/Macquarie
 ./usr/share/zoneinfo/Antarctica/Mawson
 ./usr/share/zoneinfo/Antarctica/McMurdo
 ./usr/share/zoneinfo/Antarctica/Palmer
@@ -3630,6 +3662,7 @@
 ./usr/share/zoneinfo/Pacific/Apia
 ./usr/share/zoneinfo/Pacific/Auckland
 ./usr/share/zoneinfo/Pacific/Chatham
+./usr/share/zoneinfo/Pacific/Chuuk
 ./usr/share/zoneinfo/Pacific/Easter
 ./usr/share/zoneinfo/Pacific/Efate
 ./usr/share/zoneinfo/Pacific/Enderbury
@@ -3655,6 +3688,7 @@
 ./usr/share/zoneinfo/Pacific/Pago_Pago
 ./usr/share/zoneinfo/Pacific/Palau
 ./usr/share/zoneinfo/Pacific/Pitcairn
+./usr/share/zoneinfo/Pacific/Pohnpei
 ./usr/share/zoneinfo/Pacific/Ponape
 ./usr/share/zoneinfo/Pacific/Port_Moresby
 ./usr/share/zoneinfo/Pacific/Rarotonga
@@ -3773,6 +3807,7 @@
 ./usr/share/zoneinfo/posix/America/Atikokan
 ./usr/share/zoneinfo/posix/America/Atka
 ./usr/share/zoneinfo/posix/America/Bahia
+./usr/share/zoneinfo/posix/America/Bahia_Banderas
 ./usr/share/zoneinfo/posix/America/Barbados
 ./usr/share/zoneinfo/posix/America/Belem
 ./usr/share/zoneinfo/posix/America/Belize
@@ -3914,6 +3949,7 @@
 ./usr/share/zoneinfo/posix/Antarctica/Casey
 ./usr/share/zoneinfo/posix/Antarctica/Davis
 ./usr/share/zoneinfo/posix/Antarctica/DumontDUrville
+./usr/share/zoneinfo/posix/Antarctica/Macquarie
 ./usr/share/zoneinfo/posix/Antarctica/Mawson
 ./usr/share/zoneinfo/posix/Antarctica/McMurdo
 ./usr/share/zoneinfo/posix/Antarctica/Palmer
@@ -4222,6 +4258,7 @@
 ./usr/share/zoneinfo/posix/Pacific/Apia
 ./usr/share/zoneinfo/posix/Pacific/Auckland
 ./usr/share/zoneinfo/posix/Pacific/Chatham
+./usr/share/zoneinfo/posix/Pacific/Chuuk
 ./usr/share/zoneinfo/posix/Pacific/Easter
 ./usr/share/zoneinfo/posix/Pacific/Efate
 ./usr/share/zoneinfo/posix/Pacific/Enderbury
@@ -4247,6 +4284,7 @@
 ./usr/share/zoneinfo/posix/Pacific/Pago_Pago
 ./usr/share/zoneinfo/posix/Pacific/Palau
 ./usr/share/zoneinfo/posix/Pacific/Pitcairn
+./usr/share/zoneinfo/posix/Pacific/Pohnpei
 ./usr/share/zoneinfo/posix/Pacific/Ponape
 ./usr/share/zoneinfo/posix/Pacific/Port_Moresby
 ./usr/share/zoneinfo/posix/Pacific/Rarotonga
@@ -4366,6 +4404,7 @@
 ./usr/share/zoneinfo/right/America/Atikokan
 ./usr/share/zoneinfo/right/America/Atka
 ./usr/share/zoneinfo/right/America/Bahia
+./usr/share/zoneinfo/right/America/Bahia_Banderas
 ./usr/share/zoneinfo/right/America/Barbados
 ./usr/share/zoneinfo/right/America/Belem
 ./usr/share/zoneinfo/right/America/Belize
@@ -4507,6 +4546,7 @@
 ./usr/share/zoneinfo/right/Antarctica/Casey
 ./usr/share/zoneinfo/right/Antarctica/Davis
 ./usr/share/zoneinfo/right/Antarctica/DumontDUrville
+./usr/share/zoneinfo/right/Antarctica/Macquarie
 ./usr/share/zoneinfo/right/Antarctica/Mawson
 ./usr/share/zoneinfo/right/Antarctica/McMurdo
 ./usr/share/zoneinfo/right/Antarctica/Palmer
@@ -4815,6 +4855,7 @@
 ./usr/share/zoneinfo/right/Pacific/Apia
 ./usr/share/zoneinfo/right/Pacific/Auckland
 ./usr/share/zoneinfo/right/Pacific/Chatham
+./usr/share/zoneinfo/right/Pacific/Chuuk
 ./usr/share/zoneinfo/right/Pacific/Easter
 ./usr/share/zoneinfo/right/Pacific/Efate
 ./usr/share/zoneinfo/right/Pacific/Enderbury
@@ -4840,6 +4881,7 @@
 ./usr/share/zoneinfo/right/Pacific/Pago_Pago
 ./usr/share/zoneinfo/right/Pacific/Palau
 ./usr/share/zoneinfo/right/Pacific/Pitcairn
+./usr/share/zoneinfo/right/Pacific/Pohnpei
 ./usr/share/zoneinfo/right/Pacific/Ponape
 ./usr/share/zoneinfo/right/Pacific/Port_Moresby
 ./usr/share/zoneinfo/right/Pacific/Rarotonga
@@ -4891,6 +4933,7 @@
 ./var/cron/atjobs
 ./var/cron/tabs
 ./var/db
+./var/db/ldap
 ./var/db/ns
 ./var/db/pkg
 ./var/db/sysmerge
@@ -4930,7 +4973,9 @@
 ./var/www/bin
 ./var/www/bin/bgpctl
 ./var/www/bin/ping
+./var/www/bin/ping6
 ./var/www/bin/traceroute
+./var/www/bin/traceroute6
 ./var/www/cgi-bin
 ./var/www/cgi-bin/bgplg
 ./var/www/conf

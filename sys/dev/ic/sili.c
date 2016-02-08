@@ -1,4 +1,4 @@
-/*	$OpenBSD: sili.c,v 1.44 2009/12/07 09:37:33 dlg Exp $ */
+/*	$OpenBSD: sili.c,v 1.46 2010/08/05 20:21:36 kettenis Exp $ */
 
 /*
  * Copyright (c) 2007 David Gwynne <dlg@openbsd.org>
@@ -221,6 +221,19 @@ sili_detach(struct sili_softc *sc, int flags)
 		sili_ports_free(sc);
 
 	return (0);
+}
+
+void
+sili_resume(struct sili_softc *sc)
+{
+	int i;
+
+	/* bounce the controller */
+	sili_write(sc, SILI_REG_GC, SILI_REG_GC_GR);
+	sili_write(sc, SILI_REG_GC, 0x0);
+
+	for (i = 0; i < sc->sc_nports; i++)
+		sili_ata_probe(sc, i);
 }
 
 u_int32_t
@@ -584,7 +597,7 @@ sili_dmamem_alloc(struct sili_softc *sc, bus_size_t size, bus_size_t align)
 		goto sdmfree;
 
 	if (bus_dmamem_alloc(sc->sc_dmat, size, align, 0, &sdm->sdm_seg,
-	    1, &nsegs, BUS_DMA_NOWAIT) != 0)
+	    1, &nsegs, BUS_DMA_NOWAIT | BUS_DMA_ZERO) != 0)
 		goto destroy;
 
 	if (bus_dmamem_map(sc->sc_dmat, &sdm->sdm_seg, nsegs, size,
@@ -594,8 +607,6 @@ sili_dmamem_alloc(struct sili_softc *sc, bus_size_t size, bus_size_t align)
 	if (bus_dmamap_load(sc->sc_dmat, sdm->sdm_map, sdm->sdm_kva, size,
 	    NULL, BUS_DMA_NOWAIT) != 0)
 		goto unmap;
-
-	bzero(sdm->sdm_kva, size);
 
 	return (sdm);
 

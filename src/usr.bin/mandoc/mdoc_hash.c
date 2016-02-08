@@ -1,6 +1,6 @@
-/*	$Id: mdoc_hash.c,v 1.7 2010/03/02 00:38:59 schwarze Exp $ */
+/*	$Id: mdoc_hash.c,v 1.11 2010/07/31 23:42:04 schwarze Exp $ */
 /*
- * Copyright (c) 2008, 2009 Kristaps Dzonsons <kristaps@kth.se>
+ * Copyright (c) 2008, 2009 Kristaps Dzonsons <kristaps@bsd.lv>
  *
  * Permission to use, copy, modify, and distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -23,6 +23,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "mandoc.h"
 #include "libmdoc.h"
 
 static	u_char		 table[27 * 13];
@@ -39,7 +40,7 @@ mdoc_hash_init(void)
 
 	memset(table, UCHAR_MAX, sizeof(table));
 
-	for (i = 0; i < MDOC_MAX; i++) {
+	for (i = 0; i < (int)MDOC_MAX; i++) {
 		p = mdoc_macronames[i];
 
 		if (isalpha((u_char)p[1]))
@@ -57,7 +58,7 @@ mdoc_hash_init(void)
 	}
 }
 
-int
+enum mdoct
 mdoc_hash_find(const char *p)
 {
 	int		  major, i, j;
@@ -81,7 +82,7 @@ mdoc_hash_find(const char *p)
 		if (UCHAR_MAX == (i = table[major + j]))
 			break;
 		if (0 == strcmp(p, mdoc_macronames[i]))
-			return(i);
+			return((enum mdoct)i);
 	}
 
 	return(MDOC_MAX);

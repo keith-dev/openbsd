@@ -96,7 +96,7 @@ DEFS = @OSDEFS@ -D_PATH_SUDOERS=\"$(sudoersdir)/sudoers\" -DSUDOERS_UID=$(sudoer
 
 #### End of system configuration section. ####
 
-SHELL = /bin/sh
+SHELL = @SHELL@
 
 PROGS = @PROGS@
 
@@ -457,11 +457,9 @@ realclean: distclean
 cleandir: realclean
 
 dist:
-	rm -f ../sudo-$(VERSION).tar.gz
-	( cd .. ; TF="/tmp/sudo.dist$$$$" ; rm -f $$TF ; for i in $(DISTFILES) ; \
-	  do echo sudo-$(VERSION)/$$i >> $$TF ; done ; \
-	  tar Ocf sudo-$(VERSION).tar \
-	  `cat $$TF` && gzip --best sudo-$(VERSION).tar && rm -f $$TF)
+	pax -w -x ustar -s '/^/sudo-$(VERSION)\//' -f ../sudo-$(VERSION).tar \
+		$(DISTFILES)
+	gzip -9f ../sudo-$(VERSION).tar
 	ls -l ../sudo-$(VERSION).tar.gz
 
 bindist:

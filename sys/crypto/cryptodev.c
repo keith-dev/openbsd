@@ -1,4 +1,4 @@
-/*	$OpenBSD: cryptodev.c,v 1.70 2009/02/17 19:16:26 deraadt Exp $	*/
+/*	$OpenBSD: cryptodev.c,v 1.73 2010/07/21 18:44:01 deraadt Exp $	*/
 
 /*
  * Copyright (c) 2001 Theo de Raadt
@@ -34,7 +34,6 @@
 #include <sys/systm.h>
 #include <sys/malloc.h>
 #include <sys/mbuf.h>
-#include <sys/sysctl.h>
 #include <sys/file.h>
 #include <sys/filedesc.h>
 #include <sys/errno.h>
@@ -327,7 +326,7 @@ cryptodev_op(struct csession *cse, struct crypt_op *cop, struct proc *p)
 	cse->uio.uio_iov = cse->iovec;
 	bzero(&cse->iovec, sizeof(cse->iovec));
 	cse->uio.uio_iov[0].iov_len = cop->len;
-	cse->uio.uio_iov[0].iov_base = malloc(cop->len, M_XDATA, M_WAITOK);
+	cse->uio.uio_iov[0].iov_base = malloc(cop->len, M_XDATA, M_WAITOK); /* XXX dma accessible */
 	cse->uio.uio_resid = cse->uio.uio_iov[0].iov_len;
 
 	/* number of requests, not logical and */
@@ -652,18 +651,6 @@ cryptoclose(dev_t dev, int flag, int mode, struct proc *p)
 }
 
 int
-cryptoread(dev_t dev, struct uio *uio, int ioflag)
-{
-	return (EIO);
-}
-
-int
-cryptowrite(dev_t dev, struct uio *uio, int ioflag)
-{
-	return (EIO);
-}
-
-int
 cryptoioctl(dev_t dev, u_long cmd, caddr_t data, int flag, struct proc *p)
 {
 	struct file *f;
@@ -693,12 +680,6 @@ cryptoioctl(dev_t dev, u_long cmd, caddr_t data, int flag, struct proc *p)
 		break;
 	}
 	return (error);
-}
-
-int
-cryptopoll(dev_t dev, int events, struct proc *p)
-{
-	return (seltrue(dev, events, p));
 }
 
 struct csession *

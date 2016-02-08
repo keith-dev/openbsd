@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_wpi.c,v 1.99 2009/11/17 20:35:51 damien Exp $	*/
+/*	$OpenBSD: if_wpi.c,v 1.104 2010/08/03 18:26:25 kettenis Exp $	*/
 
 /*-
  * Copyright (c) 2006-2008
@@ -25,7 +25,6 @@
 
 #include <sys/param.h>
 #include <sys/sockio.h>
-#include <sys/sysctl.h>
 #include <sys/mbuf.h>
 #include <sys/kernel.h>
 #include <sys/socket.h>
@@ -33,6 +32,7 @@
 #include <sys/malloc.h>
 #include <sys/conf.h>
 #include <sys/device.h>
+#include <sys/workq.h>
 
 #include <machine/bus.h>
 #include <machine/endian.h>
@@ -75,6 +75,8 @@ void		wpi_attach(struct device *, struct device *, void *);
 void		wpi_radiotap_attach(struct wpi_softc *);
 #endif
 int		wpi_detach(struct device *, int);
+int		wpi_activate(struct device *, int);
+void		wpi_resume(void *, void *);
 void		wpi_power(int, void *);
 int		wpi_nic_lock(struct wpi_softc *);
 int		wpi_read_prom_data(struct wpi_softc *, uint32_t, void *, int);
@@ -162,7 +164,8 @@ struct cfdriver wpi_cd = {
 };
 
 struct cfattach wpi_ca = {
-	sizeof (struct wpi_softc), wpi_match, wpi_attach, wpi_detach
+	sizeof (struct wpi_softc), wpi_match, wpi_attach, wpi_detach,
+	wpi_activate
 };
 
 int
@@ -388,16 +391,44 @@ wpi_detach(struct device *self, int flags)
 	return 0;
 }
 
+int
+wpi_activate(struct device *self, int act)
+{
+	struct wpi_softc *sc = (struct wpi_softc *)self;
+	struct ifnet *ifp = &sc->sc_ic.ic_if;
+
+	switch (act) {
+	case DVACT_SUSPEND:
+		if (ifp->if_flags & IFF_RUNNING)
+			wpi_stop(ifp, 0);
+		break;
+	case DVACT_RESUME:
+		workq_queue_task(NULL, &sc->sc_resume_wqt, 0,
+		    wpi_resume, sc, NULL);
+		break;
+	}
+
+	return (0);
+}
+
+void
+wpi_resume(void *arg1, void *arg2)
+{
+	wpi_power(PWR_RESUME, arg1);
+}
+
 void
 wpi_power(int why, void *arg)
 {
 	struct wpi_softc *sc = arg;
-	struct ifnet *ifp;
+	struct ifnet *ifp = &sc->sc_ic.ic_if;
 	pcireg_t reg;
 	int s;
 
-	if (why != PWR_RESUME)
+	if (why != PWR_RESUME) {
+		wpi_stop(ifp, 0);
 		return;
+	}
 
 	/* Clear device-specific "PCI retry timeout" register (41h). */
 	reg = pci_conf_read(sc->sc_pct, sc->sc_pcitag, 0x40);
@@ -405,12 +436,12 @@ wpi_power(int why, void *arg)
 	pci_conf_write(sc->sc_pct, sc->sc_pcitag, 0x40, reg);
 
 	s = splnet();
-	ifp = &sc->sc_ic.ic_if;
-	if (ifp->if_flags & IFF_UP) {
-		ifp->if_init(ifp);
-		if (ifp->if_flags & IFF_RUNNING)
-			ifp->if_start(ifp);
-	}
+	sc->sc_flags |= WPI_FLAG_BUSY;
+
+	if (ifp->if_flags & IFF_UP)
+		wpi_init(ifp);
+
+	sc->sc_flags &= ~WPI_FLAG_BUSY;
 	splx(s);
 }
 
@@ -1964,6 +1995,15 @@ wpi_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 	int s, error = 0;
 
 	s = splnet();
+	/*
+	 * Prevent processes from entering this function while another
+	 * process is tsleep'ing in it.
+	 */
+	if (sc->sc_flags & WPI_FLAG_BUSY) {
+		splx(s);
+		return EBUSY;
+	}
+	sc->sc_flags |= WPI_FLAG_BUSY;
 
 	switch (cmd) {
 	case SIOCSIFADDR:
@@ -2023,6 +2063,7 @@ wpi_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		}
 	}
 
+	sc->sc_flags &= ~WPI_FLAG_BUSY;
 	splx(s);
 	return error;
 }

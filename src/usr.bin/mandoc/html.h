@@ -1,6 +1,6 @@
-/*	$Id: html.h,v 1.5 2010/02/18 02:11:26 schwarze Exp $ */
+/*	$Id: html.h,v 1.8 2010/07/25 18:05:54 schwarze Exp $ */
 /*
- * Copyright (c) 2008, 2009 Kristaps Dzonsons <kristaps@kth.se>
+ * Copyright (c) 2008, 2009, 2010 Kristaps Dzonsons <kristaps@bsd.lv>
  *
  * Permission to use, copy, modify, and distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -90,18 +90,17 @@ struct	htmlpair {
 	const char	 *val;
 };
 
-#define	PAIR_CLASS_INIT(p, v) \
-	do { (p)->key = ATTR_CLASS; \
-	(p)->val = (v); } while (/* CONSTCOND */ 0)
-#define	PAIR_HREF_INIT(p, v) \
-	do { (p)->key = ATTR_HREF; \
-	(p)->val = (v); } while (/* CONSTCOND */ 0)
-#define	PAIR_STYLE_INIT(p, h) \
-	do { (p)->key = ATTR_STYLE; \
-	(p)->val = (h)->buf; } while (/* CONSTCOND */ 0)
-#define	PAIR_SUMMARY_INIT(p, v) \
-	do { (p)->key = ATTR_SUMMARY; \
-	(p)->val = (v); } while (/* CONSTCOND */ 0)
+#define	PAIR_INIT(p, t, v) \
+	do { \
+		(p)->key = (t); \
+		(p)->val = (v); \
+	} while (/* CONSTCOND */ 0)
+
+#define	PAIR_ID_INIT(p, v)	PAIR_INIT(p, ATTR_ID, v)
+#define	PAIR_CLASS_INIT(p, v)	PAIR_INIT(p, ATTR_CLASS, v)
+#define	PAIR_HREF_INIT(p, v)	PAIR_INIT(p, ATTR_HREF, v)
+#define	PAIR_STYLE_INIT(p, h)	PAIR_INIT(p, ATTR_STYLE, (h)->buf)
+#define	PAIR_SUMMARY_INIT(p, v)	PAIR_INIT(p, ATTR_SUMMARY, v)
 
 enum	htmltype {
 	HTML_HTML_4_01_STRICT,
@@ -111,7 +110,10 @@ enum	htmltype {
 struct	html {
 	int		  flags;
 #define	HTML_NOSPACE	 (1 << 0)
-#define	HTML_IGNDELIM	 (1 << 2)
+#define	HTML_IGNDELIM	 (1 << 1)
+#define	HTML_KEEP	 (1 << 2)
+#define	HTML_PREKEEP	 (1 << 3)
+#define	HTML_NONOSPACE	 (1 << 4)
 	struct tagq	  tags;
 	struct ordq	  ords;
 	void		 *symtab;

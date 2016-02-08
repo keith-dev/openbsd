@@ -1,14 +1,14 @@
-#	$OpenBSD: Makefile,v 1.504 2010/03/01 23:35:56 mk Exp $
+#	$OpenBSD: Makefile,v 1.513 2010/07/31 08:33:20 ratchov Exp $
 
 MAN=	aac.4 ac97.4 acphy.4 \
 	acpi.4 acpiac.4 acpiasus.4 acpibat.4 acpibtn.4 acpicpu.4 acpidock.4 \
 	acpiec.4 acpihpet.4 acpimadt.4 acpiprt.4 acpipwrres.4 \
-	acpithinkpad.4 acpitimer.4 acpivideo.4 acpivout.4 \
+	acpisony.4 acpithinkpad.4 acpitimer.4 acpivideo.4 acpivout.4 \
 	acpitz.4 acx.4 adc.4 addcom.4 adl.4 admcts.4 admlc.4 admtemp.4 \
 	admtm.4 admtmp.4 admtt.4 adt.4 adtfsm.4 adv.4 age.4 alc.4 ale.4 agp.4 \
 	aha.4 ahb.4 ahc.4 ahci.4 ahd.4 aibs.4 aic.4 \
 	akbd.4 alipm.4 amas.4 amdiic.4 amdpm.4 ami.4 amphy.4 \
-	ams.4 an.4 andl.4 aps.4 arc.4 aria.4 art.4 \
+	ams.4 an.4 andl.4 aps.4 arc.4 art.4 \
 	asbtm.4 ast.4 atalk.4 atapiscsi.4 atphy.4 ath.4 athn.4 atu.4 atw.4 \
 	auacer.4 audio.4 \
 	aue.4 auglx.4 auich.4 auixp.4 autri.4 auvia.4 axe.4 az.4 azalia.4 \
@@ -27,7 +27,7 @@ MAN=	aac.4 ac97.4 acphy.4 \
 	ichiic.4 ichwdt.4 icmp.4 icmp6.4 icsphy.4 ifmedia.4 \
 	iha.4 iic.4 inet.4 inet6.4 inphy.4 iop.4 iophy.4 ioprbs.4 \
 	iopsp.4 ip.4 ip6.4 ipcomp.4 ipgphy.4 ipmi.4 ips.4 ipsec.4 ipw.4 \
-	isa.4 isagpio.4 isapnp.4 isp.4 it.4 iwi.4 iwn.4 ix.4 ixgb.4 \
+	isa.4 isagpio.4 isapnp.4 isp.4 it.4 itherm.4 iwi.4 iwn.4 ix.4 ixgb.4 \
 	jmb.4 jme.4 jmphy.4 \
 	kate.4 km.4 ksyms.4 kue.4 lc.4 lge.4 lii.4 lisa.4 lkm.4 lm.4 \
 	lmc.4 lmenv.4 lmn.4 lmtemp.4 lo.4 lofn.4 lpt.4 lxtphy.4 luphy.4 \
@@ -36,8 +36,8 @@ MAN=	aac.4 ac97.4 acphy.4 \
 	mtdphy.4 multicast.4 mtio.4 myx.4 \
 	ne.4 neo.4 netintro.4 nfe.4 nge.4 nmea.4 \
 	noct.4 nofn.4 nsclpcsio.4 nsgphy.4 nsphy.4 nsphyter.4 null.4 nviic.4 \
-	ohci.4 opl.4 options.4 onewire.4 oosiop.4 osiop.4 otus.4 \
-	owid.4 owsbm.4 \
+	ohci.4 options.4 onewire.4 oosiop.4 osiop.4 otus.4 \
+	owid.4 owctr.4 owsbm.4 \
 	owtemp.4 pcagpio.4 pcaled.4 pcdisplay.4 pchb.4 pci.4 pcib.4 pcfadc.4 \
 	pcfiic.4 pciide.4 pckbc.4 pckbd.4 pcmcia.4 pcn.4 pcppi.4 pcscp.4 \
 	pf.4 pflog.4 pflow.4 pfsync.4 pgt.4 piixpm.4 pim.4 \
@@ -46,19 +46,19 @@ MAN=	aac.4 ac97.4 acphy.4 \
 	rl.4 rlphy.4 route.4 rt.4 rum.4 run.4 \
 	rtfps.4 rtii.4 rtw.4 safe.4 safte.4 san.4 sbt.4 sbus.4 schsio.4 \
 	scsi.4 sd.4 \
-	sdmmc.4 sdhc.4 ses.4 \
+	sdmmc.4 sdhc.4 se.4 ses.4 \
 	sequencer.4 sf.4 sf2r.4 sfr.4 sili.4 siop.4 sis.4 sk.4 sl.4 sli.4 \
 	sm.4 softraid.4 spdmem.4 sdtemp.4 speaker.4 sppp.4 sqphy.4 \
-	ss.4 st.4 ste.4 stge.4 sti.4 \
+	st.4 ste.4 stge.4 sti.4 \
 	stp.4 sv.4 systrace.4 tcic.4 tcp.4 termios.4 tht.4 ti.4 tl.4 \
 	tlphy.4 thmc.4 tqphy.4 trm.4 trunk.4 tsl.4 tty.4 tun.4 twe.4 txp.4 \
 	txphy.4 uaudio.4 uark.4 uath.4 uberry.4 ubsa.4 ubsec.4 ubt.4 \
 	ucom.4 uchcom.4 ucycom.4 udav.4 udcf.4 udfu.4 udl.4 udp.4 udsbr.4 \
-	ueagle.4 uftdi.4 ugen.4 uhci.4 uhid.4 uhidev.4 uhts.4 \
+	ueagle.4 uftdi.4 ugen.4 uguru.4 uhci.4 uhid.4 uhidev.4 uhts.4 \
 	uipaq.4 uk.4 ukbd.4 \
 	ukphy.4 ulpt.4 umass.4 umbg.4 umct.4 umidi.4 umodem.4 ums.4 umsm.4 \
 	unix.4 uow.4 upgt.4 upl.4 uplcom.4 ural.4 urio.4 url.4 urlphy.4 \
-   	urndis.4 urtw.4 usb.4  usbf.4 uscanner.4 uslcom.4 usscanner.4 uthum.4 \
+   	urndis.4 urtw.4 usb.4  usbf.4 uscanner.4 uslcom.4 uthum.4 \
 	uticom.4 utrh.4 uts.4 uvideo.4 uvisor.4 uvscom.4 uyap.4 uyurex.4 \
 	vether.4 vga.4 vgafb.4 vge.4 \
 	viaenv.4 viapm.4 viasio.4 vic.4 video.4 vlan.4 vmt.4 vnd.4 vr.4 \
@@ -89,6 +89,7 @@ MLINKS+=speaker.4 spkr.4
 MLINKS+=tht.4 thtc.4
 MLINKS+=tty.4 cua.4
 MLINKS+=usb.4 uhub.4
+MLINKS+=vlan.4 svlan.4
 MLINKS+=vnd.4 svnd.4
 
 # man4.hppa64

@@ -1,4 +1,4 @@
-/*	$OpenBSD: ldpctl.c,v 1.8 2010/03/03 10:18:35 claudio Exp $
+/*	$OpenBSD: ldpctl.c,v 1.11 2010/07/08 09:42:32 claudio Exp $
  *
  * Copyright (c) 2009 Michele Marchetto <michele@openbsd.org>
  * Copyright (c) 2005 Claudio Jeker <claudio@openbsd.org>
@@ -327,19 +327,23 @@ show_lib_msg(struct imsg *imsg)
 		if (asprintf(&dstnet, "%s/%d", inet_ntoa(rt->prefix),
 		    rt->prefixlen) == -1)
 			err(1, NULL);
-
-		if (rt->connected || !rt->in_use) {
+		if (!rt->in_use) {
 			if (asprintf(&remote, "-") == -1)
 				err(1, NULL);
+		} else if (rt->connected || rt->remote_label == NO_LABEL) {
+			if (asprintf(&remote, "Untagged") == -1)
+				err(1, NULL);
+		} else if (rt->remote_label == MPLS_LABEL_IMPLNULL) {
+			if (asprintf(&remote, "Pop tag") == -1)
+				err(1, NULL);
 		} else {
-			if (asprintf(&remote, "%u", (ntohl(rt->remote_label) >> MPLS_LABEL_OFFSET)) == -1)
+			if (asprintf(&remote, "%u", rt->remote_label) == -1)
 				err(1, NULL);
 		}
 
 		printf("%-20s %-17s %-14u %-14s %s\n", dstnet,
-		    inet_ntoa(rt->nexthop),
-		    (ntohl(rt->local_label) >> MPLS_LABEL_OFFSET),
-		    remote, rt->in_use ? "yes" : "no");
+		    inet_ntoa(rt->nexthop), rt->local_label, remote,
+		    rt->in_use ? "yes" : "no");
 		free(remote);
 		free(dstnet);
 
@@ -386,9 +390,9 @@ show_nbr_msg(struct imsg *imsg)
 void
 show_lfib_head(void)
 {
-	printf("flags: * = valid, C = Connected, S = Static\n");
-	printf("%-6s %-20s %-17s %-17s %s\n", "Flags", "Destination", "Nexthop",
-	    "Local Label", "Remote Label");
+	printf("Flags: C = Connected, S = Static\n");
+	printf(" %-4s %-20s %-17s %-17s %s\n", "Prio", "Destination",
+	    "Nexthop", "Local Label", "Remote Label");
 }
 
 int
@@ -403,21 +407,14 @@ show_lfib_msg(struct imsg *imsg)
 			errx(1, "wrong imsg len");
 		k = imsg->data;
 
-		if (k->flags & F_DOWN)
-			printf(" ");
-		else
-			printf("*");
-
-		if (!(k->flags & F_KERNEL))
-			printf("R");
-		else if (k->flags & F_CONNECTED)
+		if (k->flags & F_CONNECTED)
 			printf("C");
 		else if (k->flags & F_STATIC)
 			printf("S");
 		else
 			printf(" ");
 
-		printf("     ");
+		printf(" %3d ", k->priority);
 		if (asprintf(&p, "%s/%u", inet_ntoa(k->prefix),
 		    k->prefixlen) == -1)
 			err(1, NULL);
@@ -429,17 +426,20 @@ show_lfib_msg(struct imsg *imsg)
 		else if (k->flags & F_CONNECTED)
 			printf("link#%-13u", k->ifindex);
 
-		if (k->local_label != NO_LABEL) {
-			printf("%-18u", (ntohl(k->local_label) >>
-			    MPLS_LABEL_OFFSET));
+		if (k->local_label == NO_LABEL) {
+			printf("%-18s", "-");
+		} else if (k->local_label == MPLS_LABEL_IMPLNULL) {
+			printf("%-18s", "imp-null");
 		} else
-			printf("-                 ");
+			printf("%-18u", k->local_label);
 
-		if (k->remote_label != NO_LABEL) {
-			printf("%u", (ntohl(k->remote_label) >>
-			    MPLS_LABEL_OFFSET));
-		} else
+		if (k->remote_label == NO_LABEL) {
 			printf("-");
+		} else if (k->remote_label == MPLS_LABEL_IMPLNULL) {
+			printf("Pop");
+		} else {
+			printf("%u", k->remote_label);
+		}
 
 		printf("\n");
 

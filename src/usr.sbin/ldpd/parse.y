@@ -1,4 +1,4 @@
-/*	$OpenBSD: parse.y,v 1.3 2010/02/18 15:25:28 michele Exp $ */
+/*	$OpenBSD: parse.y,v 1.6 2010/08/03 18:42:40 henning Exp $ */
 
 /*
  * Copyright (c) 2004, 2005, 2008 Esben Norby <norby@openbsd.org>
@@ -107,7 +107,7 @@ typedef struct {
 
 %}
 
-%token	LSPACE INTERFACE ROUTERID LFIBUPDATE RTLABEL
+%token	LSPACE INTERFACE ROUTERID LFIBUPDATE
 %token	HOLDTIME HELLOINTERVAL KEEPALIVE
 %token	DISTRIBUTION RETENTION ADVERTISEMENT
 %token	EXTTAG PASSIVE
@@ -212,15 +212,6 @@ conf_main	: ROUTERID STRING {
 				YYERROR;
 			}
 		}
-		| RTLABEL STRING EXTTAG NUMBER {
-			if ($4 < 0 || $4 > UINT_MAX) {
-				yyerror("invalid external route tag");
-				free($2);
-				YYERROR;
-			}
-			rtlabel_tag(rtlabel_name2id($2), $4);
-			free($2);
-		}
 		| defaults
 		;
 defaults	: HOLDTIME NUMBER {
@@ -311,6 +302,7 @@ interface	: INTERFACE STRING	{
 
 interface_block	: '{' optnl interfaceopts_l '}'
 		| '{' optnl '}'
+		| /* nothing */
 		;
 
 interfaceopts_l	: interfaceopts_l interfaceoptsl nl
@@ -365,7 +357,6 @@ lookup(char *s)
 		{"passive",		PASSIVE},
 		{"retention",		RETENTION},
 		{"router-id",		ROUTERID},
-		{"rtlabel",		RTLABEL},
 		{"yes",			YES}
 	};
 	const struct keywords	*p;
@@ -530,9 +521,10 @@ top:
 					return (0);
 				if (next == quotec || c == ' ' || c == '\t')
 					c = next;
-				else if (next == '\n')
+				else if (next == '\n') {
+					file->lineno++;
 					continue;
-				else
+				} else
 					lungetc(next);
 			} else if (c == quotec) {
 				*p = '\0';

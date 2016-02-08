@@ -1,4 +1,4 @@
-/*	$OpenBSD: rt2560.c,v 1.46 2009/11/01 12:08:36 damien Exp $  */
+/*	$OpenBSD: rt2560.c,v 1.49 2010/08/04 19:48:33 damien Exp $  */
 
 /*-
  * Copyright (c) 2005, 2006
@@ -26,7 +26,6 @@
 
 #include <sys/param.h>
 #include <sys/sockio.h>
-#include <sys/sysctl.h>
 #include <sys/mbuf.h>
 #include <sys/kernel.h>
 #include <sys/socket.h>
@@ -335,6 +334,24 @@ rt2560_detach(void *xsc)
 	return 0;
 }
 
+void
+rt2560_suspend(void *xsc)
+{
+	struct rt2560_softc *sc = xsc;
+	struct ifnet *ifp = &sc->sc_ic.ic_if;
+
+	if (ifp->if_flags & IFF_RUNNING)
+		rt2560_stop(ifp, 0);
+}
+
+void
+rt2560_resume(void *xsc)
+{
+	struct rt2560_softc *sc = xsc;
+
+	rt2560_power(PWR_RESUME, sc);
+}
+
 int
 rt2560_alloc_tx_ring(struct rt2560_softc *sc, struct rt2560_tx_ring *ring,
     int count)
@@ -355,7 +372,7 @@ rt2560_alloc_tx_ring(struct rt2560_softc *sc, struct rt2560_tx_ring *ring,
 	}
 
 	error = bus_dmamem_alloc(sc->sc_dmat, count * RT2560_TX_DESC_SIZE,
-	    PAGE_SIZE, 0, &ring->seg, 1, &nsegs, BUS_DMA_NOWAIT);
+	    PAGE_SIZE, 0, &ring->seg, 1, &nsegs, BUS_DMA_NOWAIT | BUS_DMA_ZERO);
 	if (error != 0) {
 		printf("%s: could not allocate DMA memory\n",
 		    sc->sc_dev.dv_xname);
@@ -379,7 +396,6 @@ rt2560_alloc_tx_ring(struct rt2560_softc *sc, struct rt2560_tx_ring *ring,
 		goto fail;
 	}
 
-	memset(ring->desc, 0, count * RT2560_TX_DESC_SIZE);
 	ring->physaddr = ring->map->dm_segs->ds_addr;
 
 	ring->data = malloc(count * sizeof (struct rt2560_tx_data), M_DEVBUF,
@@ -500,7 +516,7 @@ rt2560_alloc_rx_ring(struct rt2560_softc *sc, struct rt2560_rx_ring *ring,
 	}
 
 	error = bus_dmamem_alloc(sc->sc_dmat, count * RT2560_RX_DESC_SIZE,
-	    PAGE_SIZE, 0, &ring->seg, 1, &nsegs, BUS_DMA_NOWAIT);
+	    PAGE_SIZE, 0, &ring->seg, 1, &nsegs, BUS_DMA_NOWAIT | BUS_DMA_ZERO);
 	if (error != 0) {
 		printf("%s: could not allocate DMA memory\n",
 		    sc->sc_dev.dv_xname);
@@ -524,7 +540,6 @@ rt2560_alloc_rx_ring(struct rt2560_softc *sc, struct rt2560_rx_ring *ring,
 		goto fail;
 	}
 
-	memset(ring->desc, 0, count * RT2560_RX_DESC_SIZE);
 	ring->physaddr = ring->map->dm_segs->ds_addr;
 
 	ring->data = malloc(count * sizeof (struct rt2560_rx_data), M_DEVBUF,
@@ -2720,13 +2735,11 @@ rt2560_power(int why, void *arg)
 	struct ifnet *ifp = &sc->sc_ic.ic_if;
 	int s;
 
-	DPRINTF(("%s: rt2560_power(%d)\n", sc->sc_dev.dv_xname, why));
-
 	s = splnet();
 	switch (why) {
 	case PWR_SUSPEND:
 	case PWR_STANDBY:
-		rt2560_stop(ifp, 1);
+		rt2560_stop(ifp, 0);
 		if (sc->sc_power != NULL)
 			(*sc->sc_power)(sc, why);
 		break;
@@ -2735,8 +2748,6 @@ rt2560_power(int why, void *arg)
 			rt2560_init(ifp);
 			if (sc->sc_power != NULL)
 				(*sc->sc_power)(sc, why);
-			if (ifp->if_flags & IFF_RUNNING)
-				rt2560_start(ifp);
 		}
 		break;
 	}

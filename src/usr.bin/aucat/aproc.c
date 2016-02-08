@@ -1,4 +1,4 @@
-/*	$OpenBSD: aproc.c,v 1.48 2010/01/17 19:17:23 ratchov Exp $	*/
+/*	$OpenBSD: aproc.c,v 1.59 2010/05/07 07:15:50 ratchov Exp $	*/
 /*
  * Copyright (c) 2008 Alexandre Ratchov <alex@caoua.org>
  *
@@ -47,6 +47,18 @@
 #ifdef DEBUG
 #include "dbg.h"
 #endif
+
+/*
+ * Same as ABUF_ROK(), but consider that a buffer is 
+ * readable if there's silence pending to be inserted
+ */
+#define MIX_ROK(buf) (ABUF_ROK(buf) || (buf)->r.mix.drop < 0)
+
+/*
+ * Same as ABUF_WOK(), but consider that a buffer is 
+ * writeable if there are samples to drop
+ */
+#define SUB_WOK(buf) (ABUF_WOK(buf) || (buf)->w.sub.silence < 0)
 
 #ifdef DEBUG
 void
@@ -147,8 +159,8 @@ aproc_new(struct aproc_ops *ops, char *name)
 	p = malloc(sizeof(struct aproc));
 	if (p == NULL)
 		err(1, name);
-	LIST_INIT(&p->ibuflist);
-	LIST_INIT(&p->obuflist);
+	LIST_INIT(&p->ins);
+	LIST_INIT(&p->outs);
 	p->name = name;
 	p->ops = ops;
 	p->refs = 0;
@@ -177,12 +189,12 @@ aproc_del(struct aproc *p)
 #endif
 			p->ops->done(p);
 		}
-		while (!LIST_EMPTY(&p->ibuflist)) {
-			i = LIST_FIRST(&p->ibuflist);
+		while (!LIST_EMPTY(&p->ins)) {
+			i = LIST_FIRST(&p->ins);
 			abuf_hup(i);
 		}
-		while (!LIST_EMPTY(&p->obuflist)) {
-			i = LIST_FIRST(&p->obuflist);
+		while (!LIST_EMPTY(&p->outs)) {
+			i = LIST_FIRST(&p->outs);
 			abuf_eof(i);
 		}
 		p->flags |= APROC_ZOMB;
@@ -209,7 +221,7 @@ aproc_del(struct aproc *p)
 void
 aproc_setin(struct aproc *p, struct abuf *ibuf)
 {
-	LIST_INSERT_HEAD(&p->ibuflist, ibuf, ient);
+	LIST_INSERT_HEAD(&p->ins, ibuf, ient);
 	ibuf->rproc = p;
 	if (p->ops->newin)
 		p->ops->newin(p, ibuf);
@@ -218,7 +230,7 @@ aproc_setin(struct aproc *p, struct abuf *ibuf)
 void
 aproc_setout(struct aproc *p, struct abuf *obuf)
 {
-	LIST_INSERT_HEAD(&p->obuflist, obuf, oent);
+	LIST_INSERT_HEAD(&p->outs, obuf, oent);
 	obuf->wproc = p;
 	if (p->ops->newout)
 		p->ops->newout(p, obuf);
@@ -229,7 +241,7 @@ aproc_ipos(struct aproc *p, struct abuf *ibuf, int delta)
 {
 	struct abuf *obuf;
 
-	LIST_FOREACH(obuf, &p->obuflist, oent) {
+	LIST_FOREACH(obuf, &p->outs, oent) {
 		abuf_ipos(obuf, delta);
 	}
 }
@@ -239,7 +251,7 @@ aproc_opos(struct aproc *p, struct abuf *obuf, int delta)
 {
 	struct abuf *ibuf;
 
-	LIST_FOREACH(ibuf, &p->ibuflist, ient) {
+	LIST_FOREACH(ibuf, &p->ins, ient) {
 		abuf_opos(ibuf, delta);
 	}
 }
@@ -249,11 +261,11 @@ aproc_inuse(struct aproc *p)
 {
 	struct abuf *i;
 
-	LIST_FOREACH(i, &p->ibuflist, ient) {
+	LIST_FOREACH(i, &p->ins, ient) {
 		if (i->inuse)
 			return 1;
 	}
-	LIST_FOREACH(i, &p->obuflist, oent) {
+	LIST_FOREACH(i, &p->outs, oent) {
 		if (i->inuse)
 			return 1;
 	}
@@ -267,7 +279,7 @@ aproc_depend(struct aproc *p, struct aproc *dep)
 
 	if (p == dep)
 		return 1;
-	LIST_FOREACH(i, &p->ibuflist, ient) {
+	LIST_FOREACH(i, &p->ins, ient) {
 		if (i->wproc && aproc_depend(i->wproc, dep))
 			return 1;
 	}
@@ -275,20 +287,40 @@ aproc_depend(struct aproc *p, struct aproc *dep)
 }
 
 int
-rfile_in(struct aproc *p, struct abuf *ibuf_dummy)
+rfile_do(struct aproc *p, unsigned todo, unsigned *done)
 {
-	struct abuf *obuf = LIST_FIRST(&p->obuflist);
+	struct abuf *obuf = LIST_FIRST(&p->outs);
 	struct file *f = p->u.io.file;
 	unsigned char *data;
-	unsigned count;
+	unsigned n, count, off;
 
-	if (ABUF_FULL(obuf) || !(f->state & FILE_ROK))
-		return 0;
+	off = p->u.io.partial;
 	data = abuf_wgetblk(obuf, &count, 0);
-	count = file_read(f, data, count);
-	if (count == 0)
+	if (count > todo)
+		count = todo;
+	n = file_read(f, data + off, count * obuf->bpf - off);
+	if (n == 0)
 		return 0;
-	abuf_wcommit(obuf, count);
+	n += off;
+	p->u.io.partial = n % obuf->bpf;
+	count = n / obuf->bpf;
+	if (count > 0)
+		abuf_wcommit(obuf, count);
+	if (done)
+		*done = count;
+	return 1;
+}
+
+int
+rfile_in(struct aproc *p, struct abuf *ibuf_dummy)
+{
+	struct abuf *obuf = LIST_FIRST(&p->outs);
+	struct file *f = p->u.io.file;
+
+	if (!ABUF_WOK(obuf) || !(f->state & FILE_ROK))
+		return 0;
+	if (!rfile_do(p, obuf->len, NULL))
+		return 0;
 	if (!abuf_flush(obuf))
 		return 0;
 	return 1;
@@ -298,18 +330,13 @@ int
 rfile_out(struct aproc *p, struct abuf *obuf)
 {
 	struct file *f = p->u.io.file;
-	unsigned char *data;
-	unsigned count;
 
 	if (f->state & FILE_RINUSE)
 		return 0;
-	if (ABUF_FULL(obuf) || !(f->state & FILE_ROK))
+	if (!ABUF_WOK(obuf) || !(f->state & FILE_ROK))
 		return 0;
-	data = abuf_wgetblk(obuf, &count, 0);
-	count = file_read(f, data, count);
-	if (count == 0)
+	if (!rfile_do(p, obuf->len, NULL))
 		return 0;
-	abuf_wcommit(obuf, count);
 	return 1;
 }
 
@@ -322,18 +349,31 @@ rfile_done(struct aproc *p)
 	if (f == NULL)
 		return;
 	/*
+	 * disconnect from file structure
+	 */
+	f->rproc = NULL;
+	p->u.io.file = NULL;
+
+	/*
 	 * all buffers must be detached before deleting f->wproc,
 	 * because otherwise it could trigger this code again
 	 */
-	obuf = LIST_FIRST(&p->obuflist);
+	obuf = LIST_FIRST(&p->outs);
 	if (obuf)
 		abuf_eof(obuf);
 	if (f->wproc) {
-		f->rproc = NULL;
 		aproc_del(f->wproc);
 	} else
 		file_del(f);
-	p->u.io.file = NULL;
+
+#ifdef DEBUG
+	if (debug_level >= 2 && p->u.io.partial > 0) {
+		aproc_dbg(p);
+		dbg_puts(": ");
+		dbg_putu(p->u.io.partial);
+		dbg_puts(" bytes lost in partial read\n");
+	}
+#endif
 }
 
 void
@@ -368,6 +408,7 @@ rfile_new(struct file *f)
 
 	p = aproc_new(&rfile_ops, f->name);
 	p->u.io.file = f;
+	p->u.io.partial = 0;
 	f->rproc = p;
 	return p;
 }
@@ -381,60 +422,82 @@ wfile_done(struct aproc *p)
 	if (f == NULL)
 		return;
 	/*
+	 * disconnect from file structure
+	 */
+	f->wproc = NULL;
+	p->u.io.file = NULL;
+
+	/*
 	 * all buffers must be detached before deleting f->rproc,
 	 * because otherwise it could trigger this code again
 	 */
-	ibuf = LIST_FIRST(&p->ibuflist);
+	ibuf = LIST_FIRST(&p->ins);
 	if (ibuf)
 		abuf_hup(ibuf);
 	if (f->rproc) {
-		f->wproc = NULL;
 		aproc_del(f->rproc);
 	} else
 		file_del(f);
-	p->u.io.file = NULL;
+#ifdef DEBUG
+	if (debug_level >= 2 && p->u.io.partial > 0) {
+		aproc_dbg(p);
+		dbg_puts(": ");
+		dbg_putu(p->u.io.partial);
+		dbg_puts(" bytes lost in partial write\n");
+	}
+#endif
 }
 
+int
+wfile_do(struct aproc *p, unsigned todo, unsigned *done)
+{
+	struct abuf *ibuf = LIST_FIRST(&p->ins);
+	struct file *f = p->u.io.file;
+	unsigned char *data;
+	unsigned n, count, off;
+
+	off = p->u.io.partial;
+	data = abuf_rgetblk(ibuf, &count, 0);
+	if (count > todo)
+		count = todo;
+	n = file_write(f, data + off, count * ibuf->bpf - off);
+	if (n == 0)
+		return 0;
+	n += off;
+	p->u.io.partial = n % ibuf->bpf;
+	count = n / ibuf->bpf;
+	if (count > 0)
+		abuf_rdiscard(ibuf, count);
+	if (done)
+		*done = count;
+	return 1;
+}
 int
 wfile_in(struct aproc *p, struct abuf *ibuf)
 {
 	struct file *f = p->u.io.file;
-	unsigned char *data;
-	unsigned count;
 
 	if (f->state & FILE_WINUSE)
 		return 0;
-	if (ABUF_EMPTY(ibuf) || !(f->state & FILE_WOK))
+	if (!ABUF_ROK(ibuf) || !(f->state & FILE_WOK))
 		return 0;
-	data = abuf_rgetblk(ibuf, &count, 0);
-	count = file_write(f, data, count);
-	if (count == 0)
+	if (!wfile_do(p, ibuf->len, NULL))
 		return 0;
-	abuf_rdiscard(ibuf, count);
 	return 1;
 }
 
 int
 wfile_out(struct aproc *p, struct abuf *obuf_dummy)
 {
-	struct abuf *ibuf = LIST_FIRST(&p->ibuflist);
+	struct abuf *ibuf = LIST_FIRST(&p->ins);
 	struct file *f = p->u.io.file;
-	unsigned char *data;
-	unsigned count;
 
 	if (!abuf_fill(ibuf))
 		return 0;
-	if (ABUF_EMPTY(ibuf) || !(f->state & FILE_WOK))
+	if (!ABUF_ROK(ibuf) || !(f->state & FILE_WOK))
 		return 0;
-	data = abuf_rgetblk(ibuf, &count, 0);
-	if (count == 0) {
-		/* XXX: this can't happen, right ? */
+	if (!wfile_do(p, ibuf->len, NULL))
 		return 0;
-	}
-	count = file_write(f, data, count);
-	if (count == 0)
-		return 0;
-	abuf_rdiscard(ibuf, count);
 	return 1;
 }
 
@@ -470,45 +533,89 @@ wfile_new(struct file *f)
 
 	p = aproc_new(&wfile_ops, f->name);
 	p->u.io.file = f;
+	p->u.io.partial = 0;
 	f->wproc = p;
 	return p;
 }
 
 /*
- * Append the given amount of silence (or less if there's not enough
- * space), and crank mixitodo accordingly.
+ * Drop as much as possible samples from the reader end,
+ * negative values mean ``insert silence''.
  */
 void
-mix_bzero(struct abuf *obuf, unsigned zcount)
+mix_drop(struct abuf *buf, int extra)
+{
+	unsigned count;
+
+	buf->r.mix.drop += extra;
+	while (buf->r.mix.drop > 0) {
+		count = buf->r.mix.drop;
+		if (count > buf->used)
+			count = buf->used;
+		if (count == 0) {
+#ifdef DEBUG
+			if (debug_level >= 4) {
+				abuf_dbg(buf);
+				dbg_puts(": drop: no data\n");
+			}
+#endif
+			return;
+		}
+		abuf_rdiscard(buf, count);
+		buf->r.mix.drop -= count;
+#ifdef DEBUG
+		if (debug_level >= 4) {
+			abuf_dbg(buf);
+			dbg_puts(": dropped ");
+			dbg_putu(count);
+			dbg_puts(", to drop = ");
+			dbg_putu(buf->r.mix.drop);
+			dbg_puts("\n");
+		}
+#endif
+	}
+}
+
+/*
+ * Append the necessary amount of silence, in a way
+ * obuf->w.mix.todo doesn't exceed the given value
+ */
+void
+mix_bzero(struct abuf *obuf, unsigned maxtodo)
 {
 	short *odata;
-	unsigned ocount;
+	unsigned ocount, todo;
 
+	if (obuf->w.mix.todo >= maxtodo)
+		return;
+	todo = maxtodo - obuf->w.mix.todo;
+	odata = (short *)abuf_wgetblk(obuf, &ocount, obuf->w.mix.todo);
+	if (ocount > todo)
+		ocount = todo;
+	if (ocount == 0)
+		return;
+	memset(odata, 0, ocount * obuf->bpf);
+	obuf->w.mix.todo += ocount;
 #ifdef DEBUG
 	if (debug_level >= 4) {
 		abuf_dbg(obuf);
 		dbg_puts(": bzero(");
-		dbg_putu(zcount);
+		dbg_putu(obuf->w.mix.todo);
 		dbg_puts(")\n");
 	}
 #endif
-	odata = (short *)abuf_wgetblk(obuf, &ocount, obuf->w.mix.todo);
-	ocount -= ocount % obuf->bpf;
-	if (ocount > zcount)
-		ocount = zcount;
-	memset(odata, 0, ocount);
-	obuf->w.mix.todo += ocount;
 }
 
 /*
  * Mix an input block over an output block.
  */
-void
+unsigned
 mix_badd(struct abuf *ibuf, struct abuf *obuf)
 {
 	short *idata, *odata;
-	unsigned i, j, icnt, onext, ostart;
-	unsigned scount, icount, ocount, zcount;
+	unsigned cmin, cmax;
+	unsigned i, j, cc, istart, inext, onext, ostart;
+	unsigned scount, icount, ocount;
 	int vol;
 
 #ifdef DEBUG
@@ -518,70 +625,85 @@ mix_badd(struct abuf *ibuf, struct abuf *obuf)
 		dbg_putu(ibuf->r.mix.done);
 		dbg_puts("/");
 		dbg_putu(obuf->w.mix.todo);
+		dbg_puts(", drop = ");
+		dbg_puti(ibuf->r.mix.drop);
 		dbg_puts("\n");
 	}
 #endif
 	/*
+	 * Insert silence for xrun correction
+	 */
+	while (ibuf->r.mix.drop < 0) {
+		icount = -ibuf->r.mix.drop;
+		mix_bzero(obuf, ibuf->r.mix.done + icount);
+		ocount = obuf->w.mix.todo - ibuf->r.mix.done;
+		if (ocount == 0)
+			return 0;
+		scount = (icount < ocount) ? icount : ocount;
+		ibuf->r.mix.done += scount;
+		ibuf->r.mix.drop += scount;
+	}
+
+	/*
 	 * Calculate the maximum we can read.
 	 */
 	idata = (short *)abuf_rgetblk(ibuf, &icount, 0);
-	icount /= ibuf->bpf;
 	if (icount == 0)
-		return;
-
-	/*
-	 * Zero-fill if necessary.
-	 */
-	zcount = ibuf->r.mix.done + icount * obuf->bpf;
-	if (zcount > obuf->w.mix.todo)
-		mix_bzero(obuf, zcount - obuf->w.mix.todo);
+		return 0;
 
 	/*
 	 * Calculate the maximum we can write.
 	 */
 	odata = (short *)abuf_wgetblk(obuf, &ocount, ibuf->r.mix.done);
-	ocount /= obuf->bpf;
 	if (ocount == 0)
-		return;
+		return 0;
+
+	scount = (icount < ocount) ? icount : ocount;
+	mix_bzero(obuf, scount + ibuf->r.mix.done);
 
 	vol = (ibuf->r.mix.weight * ibuf->r.mix.vol) >> ADATA_SHIFT;
-	ostart = ibuf->cmin - obuf->cmin;
-	onext = obuf->cmax - ibuf->cmax + ostart;
-	icnt = ibuf->cmax - ibuf->cmin + 1;
+	cmin = obuf->cmin > ibuf->cmin ? obuf->cmin : ibuf->cmin;
+	cmax = obuf->cmax < ibuf->cmax ? obuf->cmax : ibuf->cmax;
+	ostart = cmin - obuf->cmin;
+	istart = cmin - ibuf->cmin;
+	onext = obuf->cmax - cmax + ostart;
+	inext = ibuf->cmax - cmax + istart;
+	cc = cmax - cmin + 1;
 	odata += ostart;
-	scount = (icount < ocount) ? icount : ocount;
+	idata += istart;
 	for (i = scount; i > 0; i--) {
-		for (j = icnt; j > 0; j--) {
+		for (j = cc; j > 0; j--) {
 			*odata += (*idata * vol) >> ADATA_SHIFT;
 			idata++;
 			odata++;
 		}
 		odata += onext;
+		idata += inext;
 	}
-	abuf_rdiscard(ibuf, scount * ibuf->bpf);
-	ibuf->r.mix.done += scount * obuf->bpf;
+	abuf_rdiscard(ibuf, scount);
+	ibuf->r.mix.done += scount;
 
 #ifdef DEBUG
 	if (debug_level >= 4) {
 		abuf_dbg(ibuf);
 		dbg_puts(": badd: done = ");
-		dbg_putu(scount);
-		dbg_puts(", todo = ");
 		dbg_putu(ibuf->r.mix.done);
 		dbg_puts("/");
 		dbg_putu(obuf->w.mix.todo);
 		dbg_puts("\n");
 	}
 #endif
+	return scount;
 }
 
 /*
  * Handle buffer underrun, return 0 if stream died.
  */
 int
-mix_xrun(struct abuf *i, struct abuf *obuf)
+mix_xrun(struct aproc *p, struct abuf *i)
 {
-	unsigned fdrop;
+	struct abuf *obuf = LIST_FIRST(&p->outs);
+	unsigned fdrop, remain;
 
 	if (i->r.mix.done > 0)
 		return 1;
@@ -589,22 +711,34 @@ mix_xrun(struct abuf *i, struct abuf *obuf)
 		abuf_hup(i);
 		return 0;
 	}
-	mix_bzero(obuf, obuf->len);
-	fdrop = obuf->w.mix.todo / obuf->bpf;
+	fdrop = obuf->w.mix.todo;
 #ifdef DEBUG
 	if (debug_level >= 3) {
 		abuf_dbg(i);
 		dbg_puts(": underrun, dropping ");
 		dbg_putu(fdrop);
 		dbg_puts(" + ");
-		dbg_putu(i->drop / i->bpf);
+		dbg_putu(i->r.mix.drop);
 		dbg_puts("\n");
 	}
 #endif
-	i->r.mix.done += fdrop * obuf->bpf;
+	i->r.mix.done += fdrop;
 	if (i->r.mix.xrun == XRUN_SYNC)
-		i->drop += fdrop * i->bpf;
+		mix_drop(i, fdrop);
 	else {
+		remain = fdrop % p->u.mix.round;
+		if (remain)
+			remain = p->u.mix.round - remain;
+		mix_drop(i, -(int)remain);
+		fdrop += remain;
+#ifdef DEBUG
+		if (debug_level >= 3) {
+			abuf_dbg(i);
+			dbg_puts(": underrun, adding ");
+			dbg_putu(remain);
+			dbg_puts("\n");
+		}
+#endif
 		abuf_opos(i, -(int)fdrop);
 		if (i->duplex) {
 #ifdef DEBUG
@@ -613,7 +747,7 @@ mix_xrun(struct abuf *i, struct abuf *obuf)
 				dbg_puts(": full-duplex resync\n");
 			}
 #endif
-			i->duplex->drop += fdrop * i->duplex->bpf;
+			sub_silence(i->duplex, -(int)fdrop);
 			abuf_ipos(i->duplex, -(int)fdrop);
 		}
 	}
@@ -623,8 +757,10 @@ mix_xrun(struct abuf *i, struct abuf *obuf)
 int
 mix_in(struct aproc *p, struct abuf *ibuf)
 {
-	struct abuf *i, *inext, *obuf = LIST_FIRST(&p->obuflist);
+	struct abuf *i, *inext, *obuf = LIST_FIRST(&p->outs);
 	unsigned odone;
+	unsigned maxwrite;
+	unsigned scount;
 
 #ifdef DEBUG
 	if (debug_level >= 4) {
@@ -640,27 +776,48 @@ mix_in(struct aproc *p, struct abuf *ibuf)
 		dbg_puts("\n");
 	}
 #endif
-	if (!ABUF_ROK(ibuf))
+	if (!MIX_ROK(ibuf))
 		return 0;
+	scount = 0;
 	odone = obuf->len;
-	for (i = LIST_FIRST(&p->ibuflist); i != NULL; i = inext) {
+	for (i = LIST_FIRST(&p->ins); i != NULL; i = inext) {
 		inext = LIST_NEXT(i, ient);
-		if (!abuf_fill(i))
+		if (i->r.mix.drop >= 0 && !abuf_fill(i))
 			continue; /* eof */
-		mix_badd(i, obuf);
+		mix_drop(i, 0);
+		scount += mix_badd(i, obuf);
 		if (odone > i->r.mix.done)
 			odone = i->r.mix.done;
 	}
-	if (LIST_EMPTY(&p->ibuflist) || odone == 0)
+	if (LIST_EMPTY(&p->ins) || scount == 0)
 		return 0;
-	p->u.mix.lat += odone / obuf->bpf;
-	LIST_FOREACH(i, &p->ibuflist, ient) {
-		i->r.mix.done -= odone;
+#ifdef DEBUG
+	if (debug_level >= 4) {
+		aproc_dbg(p);
+		dbg_puts(": maxwrite = ");
+		dbg_putu(p->u.mix.maxlat);
+		dbg_puts(" - ");
+		dbg_putu(p->u.mix.lat);
+		dbg_puts(" = ");
+		dbg_putu(p->u.mix.maxlat - p->u.mix.lat);
+		dbg_puts("\n");
 	}
-	abuf_wcommit(obuf, odone);
-	obuf->w.mix.todo -= odone;
-	if (!abuf_flush(obuf))
-		return 0; /* hup */
+#endif
+	maxwrite = p->u.mix.maxlat - p->u.mix.lat;
+	if (maxwrite > 0) {
+		if (odone > maxwrite)
+			odone = maxwrite;
+		p->u.mix.lat += odone;
+		LIST_FOREACH(i, &p->ins, ient) {
+			i->r.mix.done -= odone;
+		}
+		abuf_wcommit(obuf, odone);
+		obuf->w.mix.todo -= odone;
+		if (APROC_OK(p->u.mix.mon))
+			mon_snoop(p->u.mix.mon, obuf, obuf->used - odone, odone);
+		if (!abuf_flush(obuf))
+			return 0; /* hup */
+	}
 	return 1;
 }
 
@@ -669,6 +826,8 @@ mix_out(struct aproc *p, struct abuf *obuf)
 {
 	struct abuf *i, *inext;
 	unsigned odone;
+	unsigned maxwrite;
+	unsigned scount;
 
 #ifdef DEBUG
 	if (debug_level >= 4) {
@@ -686,47 +845,73 @@ mix_out(struct aproc *p, struct abuf *obuf)
 #endif
 	if (!ABUF_WOK(obuf))
 		return 0;
+#ifdef DEBUG
+	if (debug_level >= 4) {
+		aproc_dbg(p);
+		dbg_puts(": maxwrite = ");
+		dbg_putu(p->u.mix.maxlat);
+		dbg_puts(" - ");
+		dbg_putu(p->u.mix.lat);
+		dbg_puts(" = ");
+		dbg_putu(p->u.mix.maxlat - p->u.mix.lat);
+		dbg_puts("\n");
+	}
+#endif
+	maxwrite = p->u.mix.maxlat - p->u.mix.lat;
+	if (maxwrite > obuf->w.mix.todo) {
+		if ((p->flags & (APROC_QUIT | APROC_DROP)) == APROC_DROP)
+			mix_bzero(obuf, maxwrite);
+	}
+	scount = 0;
 	odone = obuf->len;
-	for (i = LIST_FIRST(&p->ibuflist); i != NULL; i = inext) {
+	for (i = LIST_FIRST(&p->ins); i != NULL; i = inext) {
 		inext = LIST_NEXT(i, ient);
-		if (!abuf_fill(i))
+		if (i->r.mix.drop >= 0 && !abuf_fill(i))
 			continue; /* eof */
-		if (!ABUF_ROK(i)) {
+		mix_drop(i, 0);
+		if (maxwrite > 0 && !MIX_ROK(i)) {
 			if (p->flags & APROC_DROP) {
-				if (!mix_xrun(i, obuf))
+				if (!mix_xrun(p, i))
 					continue;
 			}
 		} else
-			mix_badd(i, obuf);
+			scount += mix_badd(i, obuf);
 		if (odone > i->r.mix.done)
 			odone = i->r.mix.done;
 	}
-	if (LIST_EMPTY(&p->ibuflist)) {
+	if (LIST_EMPTY(&p->ins) && obuf->w.mix.todo == 0) {
 		if (p->flags & APROC_QUIT) {
 			aproc_del(p);
 			return 0;
 		}
 		if (!(p->flags & APROC_DROP))
 			return 0;
-		mix_bzero(obuf, obuf->len);
+	}
+	if (odone > obuf->w.mix.todo)
 		odone = obuf->w.mix.todo;
-		p->u.mix.idle += odone / obuf->bpf;
+	if (odone > maxwrite)
+		odone = maxwrite;
+	if (odone > 0) {
+		p->u.mix.lat += odone;
+		LIST_FOREACH(i, &p->ins, ient) {
+			i->r.mix.done -= odone;
+		}
+		abuf_wcommit(obuf, odone);
+		obuf->w.mix.todo -= odone;
+		if (APROC_OK(p->u.mix.mon))
+			mon_snoop(p->u.mix.mon, obuf, obuf->used - odone, odone);
 	}
-	if (odone == 0)
+	if (LIST_EMPTY(&p->ins))
+		p->u.mix.idle += odone;
+	if (scount == 0)
 		return 0;
-	p->u.mix.lat += odone / obuf->bpf;
-	LIST_FOREACH(i, &p->ibuflist, ient) {
-		i->r.mix.done -= odone;
-	}
-	abuf_wcommit(obuf, odone);
-	obuf->w.mix.todo -= odone;
 	return 1;
 }
 
 void
 mix_eof(struct aproc *p, struct abuf *ibuf)
 {
-	struct abuf *i, *obuf = LIST_FIRST(&p->obuflist);
+	struct abuf *i, *inext, *obuf = LIST_FIRST(&p->outs);
 	unsigned odone;
 
 	mix_setmaster(p);
@@ -742,8 +927,11 @@ mix_eof(struct aproc *p, struct abuf *ibuf)
 		 * Find a blocked input.
 		 */
 		odone = obuf->len;
-		LIST_FOREACH(i, &p->ibuflist, ient) {
-			if (ABUF_ROK(i) && i->r.mix.done < obuf->w.mix.todo) {
+		for (i = LIST_FIRST(&p->ins); i != NULL; i = inext) {
+			inext = LIST_NEXT(i, ient);
+			if (!abuf_fill(i))
+				continue;
+			if (MIX_ROK(i) && i->r.mix.done < obuf->w.mix.todo) {
 				abuf_run(i);
 				return;
 			}
@@ -753,7 +941,7 @@ mix_eof(struct aproc *p, struct abuf *ibuf)
 		/*
 		 * No blocked inputs. Check if output is blocked.
 		 */
-		if (LIST_EMPTY(&p->ibuflist) || odone == obuf->w.mix.todo)
+		if (LIST_EMPTY(&p->ins) || odone == obuf->w.mix.todo)
 			abuf_run(obuf);
 	}
 }
@@ -767,20 +955,13 @@ mix_hup(struct aproc *p, struct abuf *obuf)
 void
 mix_newin(struct aproc *p, struct abuf *ibuf)
 {
-#ifdef DEBUG
-	struct abuf *obuf = LIST_FIRST(&p->obuflist);
-
-	if (!obuf || ibuf->cmin < obuf->cmin || ibuf->cmax > obuf->cmax) {
-		dbg_puts("newin: channel ranges mismatch\n");
-		dbg_panic();
-	}
-#endif
 	p->u.mix.idle = 0;
 	ibuf->r.mix.done = 0;
 	ibuf->r.mix.vol = ADATA_UNIT;
 	ibuf->r.mix.weight = ADATA_UNIT;
 	ibuf->r.mix.maxweight = ADATA_UNIT;
 	ibuf->r.mix.xrun = XRUN_IGNORE;
+	ibuf->r.mix.drop = 0;
 }
 
 void
@@ -790,8 +971,8 @@ mix_newout(struct aproc *p, struct abuf *obuf)
 	if (debug_level >= 3) {
 		aproc_dbg(p);
 		dbg_puts(": newin, will use ");
-		dbg_putu(obuf->len / obuf->bpf);
-		dbg_puts(" fr\n");
+		dbg_putu(obuf->len);
+		dbg_puts("\n");
 	}
 #endif
 	obuf->w.mix.todo = 0;
@@ -800,6 +981,7 @@ mix_newout(struct aproc *p, struct abuf *obuf)
 void
 mix_opos(struct aproc *p, struct abuf *obuf, int delta)
 {
+	p->u.mix.lat -= delta;
 #ifdef DEBUG
 	if (debug_level >= 4) {
 		aproc_dbg(p);
@@ -807,13 +989,14 @@ mix_opos(struct aproc *p, struct abuf *obuf, int delta)
 		dbg_puti(p->u.mix.lat);
 		dbg_puts("/");
 		dbg_puti(p->u.mix.maxlat);
-		dbg_puts(" fr\n");
+		dbg_puts("\n");
 	}
 #endif
-	p->u.mix.lat -= delta;
-	if (p->u.mix.ctl)
+	if (APROC_OK(p->u.mix.ctl))
 		ctl_ontick(p->u.mix.ctl, delta);
 	aproc_opos(p, obuf, delta);
+	if (APROC_OK(p->u.mix.mon))
+		p->u.mix.mon->ops->ipos(p->u.mix.mon, NULL, delta);
 }
 
 struct aproc_ops mix_ops = {
@@ -830,15 +1013,17 @@ struct aproc_ops mix_ops = {
 };
 
 struct aproc *
-mix_new(char *name, int maxlat, struct aproc *ctl)
+mix_new(char *name, int maxlat, unsigned round)
 {
 	struct aproc *p;
 
 	p = aproc_new(&mix_ops, name);
 	p->u.mix.idle = 0;
 	p->u.mix.lat = 0;
+	p->u.mix.round = round;
 	p->u.mix.maxlat = maxlat;
-	p->u.mix.ctl = ctl;
+	p->u.mix.ctl = NULL;
+	p->u.mix.mon = NULL;
 	return p;
 }
 
@@ -859,7 +1044,7 @@ mix_setmaster(struct aproc *p)
 	 * share their volume
 	 */
 	n = 0;
-	LIST_FOREACH(i, &p->ibuflist, ient) {
+	LIST_FOREACH(i, &p->ins, ient) {
 		j = LIST_NEXT(i, ient);
 		for (;;) {
 			if (j == NULL) {
@@ -871,7 +1056,7 @@ mix_setmaster(struct aproc *p)
 			j = LIST_NEXT(j, ient);
 		}
 	}
-	LIST_FOREACH(i, &p->ibuflist, ient) {
+	LIST_FOREACH(i, &p->ins, ient) {
 		weight = ADATA_UNIT / n;
 		if (weight > i->r.mix.maxweight)
 			weight = i->r.mix.maxweight;
@@ -892,7 +1077,7 @@ mix_setmaster(struct aproc *p)
 void
 mix_clear(struct aproc *p)
 {
-	struct abuf *obuf = LIST_FIRST(&p->obuflist);
+	struct abuf *obuf = LIST_FIRST(&p->outs);
 
 	p->u.mix.lat = 0;
 	obuf->w.mix.todo = 0;
@@ -901,22 +1086,24 @@ mix_clear(struct aproc *p)
 void
 mix_prime(struct aproc *p)
 {
-	struct abuf *obuf = LIST_FIRST(&p->obuflist);
+	struct abuf *obuf = LIST_FIRST(&p->outs);
 	unsigned todo, count;
 
 	for (;;) {
 		if (!ABUF_WOK(obuf))
 			break;
-		todo = (p->u.mix.maxlat - p->u.mix.lat) * obuf->bpf;
-		if (todo == 0)
-			break;
-		mix_bzero(obuf, obuf->len);
+		todo = p->u.mix.maxlat - p->u.mix.lat;
+		mix_bzero(obuf, todo);
 		count = obuf->w.mix.todo;
 		if (count > todo)
 			count = todo;
+		if (count == 0)
+			break;
 		obuf->w.mix.todo -= count;
-		p->u.mix.lat += count / obuf->bpf;
+		p->u.mix.lat += count;
 		abuf_wcommit(obuf, count);
+		if (APROC_OK(p->u.mix.mon))
+			mon_snoop(p->u.mix.mon, obuf, 0, count);
 		abuf_flush(obuf);
 	}
 #ifdef DEBUG
@@ -932,44 +1119,121 @@ mix_prime(struct aproc *p)
 }
 
 /*
+ * Gracefully terminate the mixer: raise the APROC_QUIT flag
+ * and let the rest of the code do the job. If there are neither
+ * inputs nor uncommited data, then terminate right away
+ */
+void
+mix_quit(struct aproc *p)
+{
+	struct abuf *obuf = LIST_FIRST(&p->outs);
+
+	p->flags |= APROC_QUIT;
+
+	/*
+	 * eof the last input will trigger aproc_del()
+	 */
+	if (!LIST_EMPTY(&p->ins) || obuf->w.mix.todo > 0)
+		return;
+	aproc_del(p);	
+}
+
+/*
+ * Append as much as possible silence on the writer end
+ */
+void
+sub_silence(struct abuf *buf, int extra)
+{
+	unsigned char *data;
+	unsigned count;
+
+	buf->w.sub.silence += extra;
+	if (buf->w.sub.silence > 0) {
+		data = abuf_wgetblk(buf, &count, 0);
+		if (count >= buf->w.sub.silence)
+			count = buf->w.sub.silence;
+		if (count == 0) {
+#ifdef DEBUG
+			if (debug_level >= 4) {
+				abuf_dbg(buf);
+				dbg_puts(": no space for silence\n");
+			}
+#endif
+			return;
+		}
+		memset(data, 0, count * buf->bpf);
+		abuf_wcommit(buf, count);
+		buf->w.sub.silence -= count;
+#ifdef DEBUG
+		if (debug_level >= 4) {
+			abuf_dbg(buf);
+			dbg_puts(": appended ");
+			dbg_putu(count);
+			dbg_puts(", remaining silence = ");
+			dbg_putu(buf->w.sub.silence);
+			dbg_puts("\n");
+		}
+#endif
+	}
+}
+
+/*
  * Copy data from ibuf to obuf.
  */
 void
 sub_bcopy(struct abuf *ibuf, struct abuf *obuf)
 {
 	short *idata, *odata;
-	unsigned i, j, ocnt, inext, istart;
+	unsigned cmin, cmax;
+	unsigned i, j, cc, istart, inext, onext, ostart;
 	unsigned icount, ocount, scount;
 
+	/*
+	 * Drop samples for xrun correction
+	 */
+	if (obuf->w.sub.silence < 0) {
+		scount = -obuf->w.sub.silence;
+		if (scount > ibuf->used)
+			scount = ibuf->used;
+		obuf->w.sub.done += scount;
+		obuf->w.sub.silence += scount;
+	}
+
 	idata = (short *)abuf_rgetblk(ibuf, &icount, obuf->w.sub.done);
-	icount /= ibuf->bpf;
 	if (icount == 0)
 		return;
 	odata = (short *)abuf_wgetblk(obuf, &ocount, 0);
-	ocount /= obuf->bpf;
 	if (ocount == 0)
 		return;
-	istart = obuf->cmin - ibuf->cmin;
-	inext = ibuf->cmax - obuf->cmax + istart;
-	ocnt = obuf->cmax - obuf->cmin + 1;
-	scount = (icount < ocount) ? icount : ocount;
+	cmin = obuf->cmin > ibuf->cmin ? obuf->cmin : ibuf->cmin;
+	cmax = obuf->cmax < ibuf->cmax ? obuf->cmax : ibuf->cmax;
+	ostart = cmin - obuf->cmin;
+	istart = cmin - ibuf->cmin;
+	onext = obuf->cmax - cmax;
+	inext = ibuf->cmax - cmax + istart;
+	cc = cmax - cmin + 1;
 	idata += istart;
+	scount = (icount < ocount) ? icount : ocount;
 	for (i = scount; i > 0; i--) {
-		for (j = ocnt; j > 0; j--) {
+		for (j = ostart; j > 0; j--)
+			*odata++ = 0x1111;
+		for (j = cc; j > 0; j--) {
 			*odata = *idata;
 			odata++;
 			idata++;
 		}
+		for (j = onext; j > 0; j--)
+			*odata++ = 0x2222;
 		idata += inext;
 	}
-	abuf_wcommit(obuf, scount * obuf->bpf);
-	obuf->w.sub.done += scount * ibuf->bpf;
+	abuf_wcommit(obuf, scount);
+	obuf->w.sub.done += scount;
 #ifdef DEBUG
 	if (debug_level >= 4) {
 		abuf_dbg(obuf);
 		dbg_puts(": bcopy ");
 		dbg_putu(scount);
-		dbg_puts(" fr\n");
+		dbg_puts("\n");
 	}
 #endif
 }
@@ -978,9 +1242,10 @@ sub_bcopy(struct abuf *ibuf, struct abuf *obuf)
  * Handle buffer overruns. Return 0 if the stream died.
  */
 int
-sub_xrun(struct abuf *ibuf, struct abuf *i)
+sub_xrun(struct aproc *p, struct abuf *i)
 {
-	unsigned fdrop;
+	struct abuf *ibuf = LIST_FIRST(&p->ins);
+	unsigned fdrop, remain;
 
 	if (i->w.sub.done > 0)
 		return 1;
@@ -988,20 +1253,35 @@ sub_xrun(struct abuf *ibuf, struct abuf *i)
 		abuf_eof(i);
 		return 0;
 	}
-	fdrop = ibuf->used / ibuf->bpf;
+	fdrop = ibuf->used;
 #ifdef DEBUG
 	if (debug_level >= 3) {
 		abuf_dbg(i);
 		dbg_puts(": overrun, silence ");
 		dbg_putu(fdrop);
 		dbg_puts(" + ");
-		dbg_putu(i->silence / i->bpf);
+		dbg_putu(i->w.sub.silence);
 		dbg_puts("\n");
 	}
 #endif
+	i->w.sub.done += fdrop;
 	if (i->w.sub.xrun == XRUN_SYNC)
-		i->silence += fdrop * i->bpf;
+		sub_silence(i, fdrop);
 	else {
+		remain = fdrop % p->u.sub.round;
+		if (remain)
+			remain = p->u.sub.round - remain;
+		sub_silence(i, -(int)remain);
+		fdrop += remain;
+#ifdef DEBUG
+		if (debug_level >= 3) {
+			abuf_dbg(i);
+			dbg_puts(": overrun, adding ");
+			dbg_putu(remain);
+			dbg_puts("\n");
+		}
+#endif
+
 		abuf_ipos(i, -(int)fdrop);
 		if (i->duplex) {
 #ifdef DEBUG
@@ -1010,11 +1290,10 @@ sub_xrun(struct abuf *ibuf, struct abuf *i)
 				dbg_puts(": full-duplex resync\n");
 			}
 #endif
-			i->duplex->silence += fdrop * i->duplex->bpf;
+			mix_drop(i->duplex, -(int)fdrop);
 			abuf_opos(i->duplex, -(int)fdrop);
 		}
 	}
-	i->w.sub.done += fdrop * ibuf->bpf;
 	return 1;
 }
 
@@ -1027,11 +1306,12 @@ sub_in(struct aproc *p, struct abuf *ibuf)
 	if (!ABUF_ROK(ibuf))
 		return 0;
 	idone = ibuf->len;
-	for (i = LIST_FIRST(&p->obuflist); i != NULL; i = inext) {
+	for (i = LIST_FIRST(&p->outs); i != NULL; i = inext) {
 		inext = LIST_NEXT(i, oent);
-		if (!ABUF_WOK(i)) {
+		sub_silence(i, 0);
+		if (!SUB_WOK(i)) {
 			if (p->flags & APROC_DROP) {
-				if (!sub_xrun(ibuf, i))
+				if (!sub_xrun(p, i))
 					continue;
 			}
 		} else
@@ -1041,7 +1321,7 @@ sub_in(struct aproc *p, struct abuf *ibuf)
 		if (!abuf_flush(i))
 			continue;
 	}
-	if (LIST_EMPTY(&p->obuflist)) {
+	if (LIST_EMPTY(&p->outs)) {
 		if (p->flags & APROC_QUIT) {
 			aproc_del(p);
 			return 0;
@@ -1049,45 +1329,48 @@ sub_in(struct aproc *p, struct abuf *ibuf)
 		if (!(p->flags & APROC_DROP))
 			return 0;
 		idone = ibuf->used;
-		p->u.sub.idle += idone / ibuf->bpf;
+		p->u.sub.idle += idone;
 	}
 	if (idone == 0)
 		return 0;
-	LIST_FOREACH(i, &p->obuflist, oent) {
+	LIST_FOREACH(i, &p->outs, oent) {
 		i->w.sub.done -= idone;
 	}
 	abuf_rdiscard(ibuf, idone);
-	p->u.sub.lat -= idone / ibuf->bpf;
+	abuf_opos(ibuf, idone);
+	p->u.sub.lat -= idone;
 	return 1;
 }
 
 int
 sub_out(struct aproc *p, struct abuf *obuf)
 {
-	struct abuf *ibuf = LIST_FIRST(&p->ibuflist);
+	struct abuf *ibuf = LIST_FIRST(&p->ins);
 	struct abuf *i, *inext;
 	unsigned idone;
 
-	if (!ABUF_WOK(obuf))
+	if (!SUB_WOK(obuf))
 		return 0;
 	if (!abuf_fill(ibuf))
 		return 0; /* eof */
 	idone = ibuf->len;
-	for (i = LIST_FIRST(&p->obuflist); i != NULL; i = inext) {
+	for (i = LIST_FIRST(&p->outs); i != NULL; i = inext) {
 		inext = LIST_NEXT(i, oent);
+		sub_silence(i, 0);
 		sub_bcopy(ibuf, i);
 		if (idone > i->w.sub.done)
 			idone = i->w.sub.done;
 		if (!abuf_flush(i))
 			continue;
 	}
-	if (LIST_EMPTY(&p->obuflist) || idone == 0)
+	if (LIST_EMPTY(&p->outs) || idone == 0)
 		return 0;
-	LIST_FOREACH(i, &p->obuflist, oent) {
+	LIST_FOREACH(i, &p->outs, oent) {
 		i->w.sub.done -= idone;
 	}
 	abuf_rdiscard(ibuf, idone);
-	p->u.sub.lat -= idone / ibuf->bpf;
+	abuf_opos(ibuf, idone);
+	p->u.sub.lat -= idone;
 	return 1;
 }
 
@@ -1100,7 +1383,7 @@ sub_eof(struct aproc *p, struct abuf *ibuf)
 void
 sub_hup(struct aproc *p, struct abuf *obuf)
 {
-	struct abuf *i, *ibuf = LIST_FIRST(&p->ibuflist);
+	struct abuf *i, *inext, *ibuf = LIST_FIRST(&p->ins);
 	unsigned idone;
 
 	if (!aproc_inuse(p)) {
@@ -1114,8 +1397,11 @@ sub_hup(struct aproc *p, struct abuf *obuf)
 		 * Find a blocked output.
 		 */
 		idone = ibuf->len;
-		LIST_FOREACH(i, &p->obuflist, oent) {
-			if (ABUF_WOK(i) && i->w.sub.done < ibuf->used) {
+		for (i = LIST_FIRST(&p->outs); i != NULL; i = inext) {
+			inext = LIST_NEXT(i, oent);
+			if (!abuf_flush(i))
+				continue;
+			if (SUB_WOK(i) && i->w.sub.done < ibuf->used) {
 				abuf_run(i);
 				return;
 			}
@@ -1125,7 +1411,7 @@ sub_hup(struct aproc *p, struct abuf *obuf)
 		/*
 		 * No blocked outputs. Check if input is blocked.
 		 */
-		if (LIST_EMPTY(&p->obuflist) || idone == ibuf->used)
+		if (LIST_EMPTY(&p->outs) || idone == ibuf->used)
 			abuf_run(ibuf);
 	}
 }
@@ -1133,17 +1419,10 @@ sub_hup(struct aproc *p, struct abuf *obuf)
 void
 sub_newout(struct aproc *p, struct abuf *obuf)
 {
-#ifdef DEBUG
-	struct abuf *ibuf = LIST_FIRST(&p->ibuflist);
-
-	if (!ibuf || obuf->cmin < ibuf->cmin || obuf->cmax > ibuf->cmax) {
-		dbg_puts("newout: channel ranges mismatch\n");
-		dbg_panic();
-	}
-#endif
 	p->u.sub.idle = 0;
 	obuf->w.sub.done = 0;
 	obuf->w.sub.xrun = XRUN_IGNORE;
+	obuf->w.sub.silence = 0;
 }
 
 void
@@ -1157,10 +1436,10 @@ sub_ipos(struct aproc *p, struct abuf *ibuf, int delta)
 		dbg_puti(p->u.sub.lat);
 		dbg_puts("/");
 		dbg_puti(p->u.sub.maxlat);
-		dbg_puts(" fr\n");
+		dbg_puts("\n");
 	}
 #endif
-	if (p->u.sub.ctl)
+	if (APROC_OK(p->u.sub.ctl))
 		ctl_ontick(p->u.sub.ctl, delta);
 	aproc_ipos(p, ibuf, delta);
 }
@@ -1179,22 +1458,23 @@ struct aproc_ops sub_ops = {
 };
 
 struct aproc *
-sub_new(char *name, int maxlat, struct aproc *ctl)
+sub_new(char *name, int maxlat, unsigned round)
 {
 	struct aproc *p;
 
 	p = aproc_new(&sub_ops, name);
 	p->u.sub.idle = 0;
 	p->u.sub.lat = 0;
+	p->u.sub.round = round;
 	p->u.sub.maxlat = maxlat;
-	p->u.sub.ctl = ctl;
+	p->u.sub.ctl = NULL;
 	return p;
 }
 
 void
 sub_clear(struct aproc *p)
 {
-	p->u.mix.lat = 0;
+	p->u.sub.lat = 0;
 }
 
 /*
@@ -1221,12 +1501,10 @@ resamp_bcopy(struct aproc *p, struct abuf *ibuf, struct abuf *obuf)
 	 * Calculate max frames readable at once from the input buffer.
 	 */
 	idata = (short *)abuf_rgetblk(ibuf, &icount, 0);
-	ifr = icount / ibuf->bpf;
-	icount = ifr * ibuf->bpf;
+	ifr = icount;
 
 	odata = (short *)abuf_wgetblk(obuf, &ocount, 0);
-	ofr = ocount / obuf->bpf;
-	ocount = ofr * obuf->bpf;
+	ofr = ocount;
 
 	/*
 	 * Partially copy structures into local variables, to avoid
@@ -1258,6 +1536,8 @@ resamp_bcopy(struct aproc *p, struct abuf *ibuf, struct abuf *obuf)
 #endif
 	for (;;) {
 		if (diff < 0) {
+			if (ifr == 0)
+				break;
 			ctx_start ^= 1;
 			ctx = ctxbuf + ctx_start;
 			for (c = inch; c > 0; c--) {
@@ -1265,9 +1545,10 @@ resamp_bcopy(struct aproc *p, struct abuf *ibuf, struct abuf *obuf)
 				ctx += RESAMP_NCTX;
 			}
 			diff += oblksz;
-			if (--ifr == 0)
+			ifr--;
+		} else if (diff > 0) {
+			if (ofr == 0)
 				break;
-		} else {
 			ctx = ctxbuf;
 			for (c = onch; c > 0; c--) {
 				s1 = ctx[ctx_start];
@@ -1276,8 +1557,25 @@ resamp_bcopy(struct aproc *p, struct abuf *ibuf, struct abuf *obuf)
 				*odata++ = s1 + (s2 - s1) * diff / (int)oblksz;
 			}
 			diff -= iblksz;
-			if (--ofr == 0)
+			ofr--;
+		} else {
+			if (ifr == 0 || ofr == 0)
 				break;
+			ctx = ctxbuf + ctx_start;
+			for (c = onch; c > 0; c--) {
+				*odata++ = *ctx;
+				ctx += RESAMP_NCTX;
+			}
+			ctx_start ^= 1;
+			ctx = ctxbuf + ctx_start;
+			for (c = inch; c > 0; c--) {
+				*ctx = *idata++;
+				ctx += RESAMP_NCTX;
+			}
+			diff -= iblksz;
+			diff += oblksz;
+			ifr--;
+			ofr--;
 		}
 	}
 	p->u.resamp.diff = diff;
@@ -1297,8 +1595,8 @@ resamp_bcopy(struct aproc *p, struct abuf *ibuf, struct abuf *obuf)
 	/*
 	 * Update FIFO pointers.
 	 */
-	icount -= ifr * ibuf->bpf;
-	ocount -= ofr * obuf->bpf;
+	icount -= ifr;
+	ocount -= ofr;
 	abuf_rdiscard(ibuf, icount);
 	abuf_wcommit(obuf, ocount);
 }
@@ -1306,7 +1604,7 @@ resamp_bcopy(struct aproc *p, struct abuf *ibuf, struct abuf *obuf)
 int
 resamp_in(struct aproc *p, struct abuf *ibuf)
 {
-	struct abuf *obuf = LIST_FIRST(&p->obuflist);
+	struct abuf *obuf = LIST_FIRST(&p->outs);
 
 	if (!ABUF_WOK(obuf) || !ABUF_ROK(ibuf))
 		return 0;
@@ -1319,7 +1617,7 @@ resamp_in(struct aproc *p, struct abuf *ibuf)
 int
 resamp_out(struct aproc *p, struct abuf *obuf)
 {
-	struct abuf *ibuf = LIST_FIRST(&p->ibuflist);
+	struct abuf *ibuf = LIST_FIRST(&p->ins);
 
 	if (!abuf_fill(ibuf))
 		return 0;
@@ -1344,7 +1642,7 @@ resamp_hup(struct aproc *p, struct abuf *obuf)
 void
 resamp_ipos(struct aproc *p, struct abuf *ibuf, int delta)
 {
-	struct abuf *obuf = LIST_FIRST(&p->obuflist);
+	struct abuf *obuf = LIST_FIRST(&p->outs);
 	long long ipos;
 	
 	ipos = (long long)delta * p->u.resamp.oblksz + p->u.resamp.idelta;
@@ -1355,7 +1653,7 @@ resamp_ipos(struct aproc *p, struct abuf *ibuf, int delta)
 void
 resamp_opos(struct aproc *p, struct abuf *obuf, int delta)
 {
-	struct abuf *ibuf = LIST_FIRST(&p->ibuflist);
+	struct abuf *ibuf = LIST_FIRST(&p->ins);
 	long long opos;
 
 	opos = (long long)delta * p->u.resamp.iblksz + p->u.resamp.odelta;
@@ -1408,135 +1706,6 @@ resamp_new(char *name, unsigned iblksz, unsigned oblksz)
  * Convert one block.
  */
 void
-cmap_bcopy(struct aproc *p, struct abuf *ibuf, struct abuf *obuf)
-{
-	unsigned inch;
-	short *idata;
-	unsigned onch;
-	short *odata;
-	short *ctx, *ictx, *octx;
-	unsigned c, f, scount, icount, ocount;
-
-	/*
-	 * Calculate max frames readable at once from the input buffer.
-	 */
-	idata = (short *)abuf_rgetblk(ibuf, &icount, 0);
-	icount /= ibuf->bpf;
-	if (icount == 0)
-		return;
-	odata = (short *)abuf_wgetblk(obuf, &ocount, 0);
-	ocount /= obuf->bpf;
-	if (ocount == 0)
-		return;
-	scount = icount < ocount ? icount : ocount;
-	inch = ibuf->cmax - ibuf->cmin + 1;
-	onch = obuf->cmax - obuf->cmin + 1;
-	ictx = p->u.cmap.ctx + ibuf->cmin;
-	octx = p->u.cmap.ctx + obuf->cmin;
-
-	for (f = scount; f > 0; f--) {
-		ctx = ictx;
-		for (c = inch; c > 0; c--) {
-			*ctx = *idata;
-			idata++;
-			ctx++;
-		}
-		ctx = octx;
-		for (c = onch; c > 0; c--) {
-			*odata = *ctx;
-			odata++;
-			ctx++;
-		}
-	}
-#ifdef DEBUG
-	if (debug_level >= 4) {
-		aproc_dbg(p);
-		dbg_puts(": bcopy ");
-		dbg_putu(scount);
-		dbg_puts(" fr\n");
-	}
-#endif
-	abuf_rdiscard(ibuf, scount * ibuf->bpf);
-	abuf_wcommit(obuf, scount * obuf->bpf);
-}
-
-int
-cmap_in(struct aproc *p, struct abuf *ibuf)
-{
-	struct abuf *obuf = LIST_FIRST(&p->obuflist);
-
-	if (!ABUF_WOK(obuf) || !ABUF_ROK(ibuf))
-		return 0;
-	cmap_bcopy(p, ibuf, obuf);
-	if (!abuf_flush(obuf))
-		return 0;
-	return 1;
-}
-
-int
-cmap_out(struct aproc *p, struct abuf *obuf)
-{
-	struct abuf *ibuf = LIST_FIRST(&p->ibuflist);
-
-	if (!abuf_fill(ibuf))
-		return 0;
-	if (!ABUF_WOK(obuf) || !ABUF_ROK(ibuf))
-		return 0;
-	cmap_bcopy(p, ibuf, obuf);
-	return 1;
-}
-
-void
-cmap_eof(struct aproc *p, struct abuf *ibuf)
-{
-	aproc_del(p);
-}
-
-void
-cmap_hup(struct aproc *p, struct abuf *obuf)
-{
-	aproc_del(p);
-}
-
-struct aproc_ops cmap_ops = {
-	"cmap",
-	cmap_in,
-	cmap_out,
-	cmap_eof,
-	cmap_hup,
-	NULL,
-	NULL,
-	aproc_ipos,
-	aproc_opos,
-	NULL
-};
-
-struct aproc *
-cmap_new(char *name, struct aparams *ipar, struct aparams *opar)
-{
-	struct aproc *p;
-	unsigned i;
-
-	p = aproc_new(&cmap_ops, name);
-	for (i = 0; i < NCHAN_MAX; i++)
-		p->u.cmap.ctx[i] = 0;
-#ifdef DEBUG
-	if (debug_level >= 3) {
-		aproc_dbg(p);
-		dbg_puts(": new ");
-		aparams_dbg(ipar);
-		dbg_puts(" -> ");
-		aparams_dbg(opar);
-		dbg_puts("\n");
-	}
-#endif
-	return p;
-}
-
-/*
- * Convert one block.
- */
-void
 enc_bcopy(struct aproc *p, struct abuf *ibuf, struct abuf *obuf)
 {
 	unsigned nch, scount, icount, ocount;
@@ -1555,11 +1724,9 @@ enc_bcopy(struct aproc *p, struct abuf *ibuf, struct abuf *obuf)
 	 * Calculate max frames readable at once from the input buffer.
 	 */
 	idata = (short *)abuf_rgetblk(ibuf, &icount, 0);
-	icount /= ibuf->bpf;
 	if (icount == 0)
 		return;
 	odata = abuf_wgetblk(obuf, &ocount, 0);
-	ocount /= obuf->bpf;
 	if (ocount == 0)
 		return;
 	scount = (icount < ocount) ? icount : ocount;
@@ -1569,7 +1736,7 @@ enc_bcopy(struct aproc *p, struct abuf *ibuf, struct abuf *obuf)
 		aproc_dbg(p);
 		dbg_puts(": bcopy ");
 		dbg_putu(scount);
-		dbg_puts(" fr * ");
+		dbg_puts(" fr / ");
 		dbg_putu(nch);
 		dbg_puts(" ch\n");
 	}
@@ -1605,14 +1772,14 @@ enc_bcopy(struct aproc *p, struct abuf *ibuf, struct abuf *obuf)
 	/*
 	 * Update FIFO pointers.
 	 */
-	abuf_rdiscard(ibuf, scount * ibuf->bpf);
-	abuf_wcommit(obuf, scount * obuf->bpf);
+	abuf_rdiscard(ibuf, scount);
+	abuf_wcommit(obuf, scount);
 }
 
 int
 enc_in(struct aproc *p, struct abuf *ibuf)
 {
-	struct abuf *obuf = LIST_FIRST(&p->obuflist);
+	struct abuf *obuf = LIST_FIRST(&p->outs);
 
 	if (!ABUF_WOK(obuf) || !ABUF_ROK(ibuf))
 		return 0;
@@ -1625,7 +1792,7 @@ enc_in(struct aproc *p, struct abuf *ibuf)
 int
 enc_out(struct aproc *p, struct abuf *obuf)
 {
-	struct abuf *ibuf = LIST_FIRST(&p->ibuflist);
+	struct abuf *ibuf = LIST_FIRST(&p->ins);
 
 	if (!abuf_fill(ibuf))
 		return 0;
@@ -1715,11 +1882,9 @@ dec_bcopy(struct aproc *p, struct abuf *ibuf, struct abuf *obuf)
 	 * Calculate max frames readable at once from the input buffer.
 	 */
 	idata = abuf_rgetblk(ibuf, &icount, 0);
-	icount /= ibuf->bpf;
 	if (icount == 0)
 		return;
 	odata = (short *)abuf_wgetblk(obuf, &ocount, 0);
-	ocount /= obuf->bpf;
 	if (ocount == 0)
 		return;
 	scount = (icount < ocount) ? icount : ocount;
@@ -1729,7 +1894,7 @@ dec_bcopy(struct aproc *p, struct abuf *ibuf, struct abuf *obuf)
 		aproc_dbg(p);
 		dbg_puts(": bcopy ");
 		dbg_putu(scount);
-		dbg_puts(" fr * ");
+		dbg_puts(" fr / ");
 		dbg_putu(nch);
 		dbg_puts(" ch\n");
 	}
@@ -1765,14 +1930,14 @@ dec_bcopy(struct aproc *p, struct abuf *ibuf, struct abuf *obuf)
 	/*
 	 * Update FIFO pointers.
 	 */
-	abuf_rdiscard(ibuf, scount * ibuf->bpf);
-	abuf_wcommit(obuf, scount * obuf->bpf);
+	abuf_rdiscard(ibuf, scount);
+	abuf_wcommit(obuf, scount);
 }
 
 int
 dec_in(struct aproc *p, struct abuf *ibuf)
 {
-	struct abuf *obuf = LIST_FIRST(&p->obuflist);
+	struct abuf *obuf = LIST_FIRST(&p->outs);
 
 	if (!ABUF_WOK(obuf) || !ABUF_ROK(ibuf))
 		return 0;
@@ -1785,7 +1950,7 @@ dec_in(struct aproc *p, struct abuf *ibuf)
 int
 dec_out(struct aproc *p, struct abuf *obuf)
 {
-	struct abuf *ibuf = LIST_FIRST(&p->ibuflist);
+	struct abuf *ibuf = LIST_FIRST(&p->ins);
 
 	if (!abuf_fill(ibuf))
 		return 0;
@@ -1848,6 +2013,316 @@ dec_new(char *name, struct aparams *par)
 		dbg_puts(": new ");
 		aparams_dbg(par);
 		dbg_puts("\n");
+	}
+#endif
+	return p;
+}
+
+/*
+ * Convert one block.
+ */
+void
+join_bcopy(struct aproc *p, struct abuf *ibuf, struct abuf *obuf)
+{
+	unsigned h, hops;
+	unsigned inch, inext;
+	short *idata;
+	unsigned onch, onext;
+	short *odata;
+	int scale;
+	unsigned c, f, scount, icount, ocount;
+
+	/*
+	 * Calculate max frames readable at once from the input buffer.
+	 */
+	idata = (short *)abuf_rgetblk(ibuf, &icount, 0);
+	if (icount == 0)
+		return;
+	odata = (short *)abuf_wgetblk(obuf, &ocount, 0);
+	if (ocount == 0)
+		return;
+	scount = icount < ocount ? icount : ocount;
+	inch = ibuf->cmax - ibuf->cmin + 1;
+	onch = obuf->cmax - obuf->cmin + 1;
+	if (2 * inch <= onch) {
+		hops = onch / inch;
+		inext = inch * hops;
+		onext = onch - inext;
+		for (f = scount; f > 0; f--) {
+			h = hops;
+			for (;;) {
+				for (c = inch; c > 0; c--)
+					*odata++ = *idata++;
+				if (--h == 0)
+					break;
+				idata -= inch;
+			}
+			for (c = onext; c > 0; c--)
+				*odata++ = 0;
+		}
+	} else if (inch >= 2 * onch) {
+		hops = inch / onch;
+		inext = inch - onch * hops;
+		scale = ADATA_UNIT / hops;
+		inch -= onch + inext;
+		hops--;
+		for (f = scount; f > 0; f--) {
+			for (c = onch; c > 0; c--)
+				*odata++ = (*idata++ * scale)
+				    >> ADATA_SHIFT;
+			for (h = hops; h > 0; h--) {
+				odata -= onch;
+				for (c = onch; c > 0; c--)
+					*odata++ += (*idata++ * scale)
+					    >> ADATA_SHIFT;
+			}
+			idata += inext;
+		}
+	} else {
+#ifdef DEBUG
+		aproc_dbg(p);
+		dbg_puts(": nothing to do\n");
+		dbg_panic();
+#endif
+	}
+#ifdef DEBUG
+	if (debug_level >= 4) {
+		aproc_dbg(p);
+		dbg_puts(": bcopy ");
+		dbg_putu(scount);
+		dbg_puts(" fr\n");
+	}
+#endif
+	abuf_rdiscard(ibuf, scount);
+	abuf_wcommit(obuf, scount);
+}
+
+int
+join_in(struct aproc *p, struct abuf *ibuf)
+{
+	struct abuf *obuf = LIST_FIRST(&p->outs);
+
+	if (!ABUF_WOK(obuf) || !ABUF_ROK(ibuf))
+		return 0;
+	join_bcopy(p, ibuf, obuf);
+	if (!abuf_flush(obuf))
+		return 0;
+	return 1;
+}
+
+int
+join_out(struct aproc *p, struct abuf *obuf)
+{
+	struct abuf *ibuf = LIST_FIRST(&p->ins);
+
+	if (!abuf_fill(ibuf))
+		return 0;
+	if (!ABUF_WOK(obuf) || !ABUF_ROK(ibuf))
+		return 0;
+	join_bcopy(p, ibuf, obuf);
+	return 1;
+}
+
+void
+join_eof(struct aproc *p, struct abuf *ibuf)
+{
+	aproc_del(p);
+}
+
+void
+join_hup(struct aproc *p, struct abuf *obuf)
+{
+	aproc_del(p);
+}
+
+struct aproc_ops join_ops = {
+	"join",
+	join_in,
+	join_out,
+	join_eof,
+	join_hup,
+	NULL,
+	NULL,
+	aproc_ipos,
+	aproc_opos,
+	NULL
+};
+
+struct aproc *
+join_new(char *name)
+{
+	struct aproc *p;
+
+	p = aproc_new(&join_ops, name);
+#ifdef DEBUG
+	if (debug_level >= 3) {
+		aproc_dbg(p);
+		dbg_puts("\n");
+	}
+#endif
+	return p;
+}
+
+/*
+ * Commit and flush part of the output buffer
+ */
+void
+mon_flush(struct aproc *p)
+{
+	struct abuf *obuf = LIST_FIRST(&p->outs);
+	unsigned count;
+
+#ifdef DEBUG
+	if (debug_level >= 4) {
+		aproc_dbg(p);
+		dbg_puts(": delta = ");
+		dbg_puti(p->u.mon.delta);
+		dbg_puts("/");
+		dbg_putu(p->u.mon.bufsz);
+		dbg_puts(" pending = ");
+		dbg_puti(p->u.mon.pending);
+		dbg_puts("\n");
+	}
+#endif
+	if (p->u.mon.delta <= 0 || p->u.mon.pending == 0)
+		return;
+	count = p->u.mon.delta;
+	if (count > p->u.mon.pending)
+		count = p->u.mon.pending;
+	abuf_wcommit(obuf, count);
+	p->u.mon.pending -= count;
+	p->u.mon.delta -= count;
+	abuf_flush(obuf);
+}
+
+/*
+ * Copy one block.
+ */
+void
+mon_snoop(struct aproc *p, struct abuf *ibuf, unsigned pos, unsigned todo)
+{
+	struct abuf *obuf = LIST_FIRST(&p->outs);
+	unsigned scount, icount, ocount;
+	short *idata, *odata;
+
+#ifdef DEBUG
+	if (debug_level >= 4) {
+		aproc_dbg(p);
+		dbg_puts(": snoop ");
+		dbg_putu(pos);
+		dbg_puts("..");
+		dbg_putu(todo);
+		dbg_puts("\n");
+	}
+#endif
+	if (!abuf_flush(obuf))
+		return;
+
+	while (todo > 0) {
+		/*
+		 * Calculate max frames readable at once from the input buffer.
+		 */
+		idata = (short *)abuf_rgetblk(ibuf, &icount, pos);
+		odata = (short *)abuf_wgetblk(obuf, &ocount, p->u.mon.pending);
+		scount = (icount < ocount) ? icount : ocount;
+#ifdef DEBUG
+		if (debug_level >= 4) {
+			aproc_dbg(p);
+			dbg_puts(": snooping ");
+			dbg_putu(scount);
+			dbg_puts(" fr\n");
+		}
+		if (scount == 0) {
+			dbg_puts("monitor xrun, not allowed\n");
+			dbg_panic();
+		}
+#endif
+		memcpy(odata, idata, scount * obuf->bpf);
+		p->u.mon.pending += scount;
+		todo -= scount;
+		pos += scount;
+	}
+	mon_flush(p);
+}
+
+int
+mon_in(struct aproc *p, struct abuf *ibuf)
+{
+#ifdef DEBUG
+	dbg_puts("monitor can't have inputs to read\n");
+	dbg_panic();
+#endif
+	return 0;
+}
+
+/*
+ * put the monitor into ``empty'' state
+ */
+void
+mon_clear(struct aproc *p)
+{
+	p->u.mon.pending = 0;
+	p->u.mon.delta = 0;
+}
+
+int
+mon_out(struct aproc *p, struct abuf *obuf)
+{
+	/*
+	 * can't trigger monitored stream to produce data
+	 */
+	return 0;
+}
+
+void
+mon_eof(struct aproc *p, struct abuf *ibuf)
+{
+#ifdef DEBUG
+	dbg_puts("monitor can't have inputs to eof\n");
+	dbg_panic();
+#endif
+}
+
+void
+mon_hup(struct aproc *p, struct abuf *obuf)
+{
+	aproc_del(p);
+}
+
+void
+mon_ipos(struct aproc *p, struct abuf *ibuf, int delta)
+{
+	aproc_ipos(p, ibuf, delta);
+	p->u.mon.delta += delta;
+	mon_flush(p);
+}
+
+struct aproc_ops mon_ops = {
+	"mon",
+	mon_in,
+	mon_out,
+	mon_eof,
+	mon_hup,
+	NULL,
+	NULL,
+	mon_ipos,
+	aproc_opos,
+	NULL
+};
+
+struct aproc *
+mon_new(char *name, unsigned bufsz)
+{
+	struct aproc *p;
+
+	p = aproc_new(&mon_ops, name);
+	p->u.mon.pending = 0;
+	p->u.mon.delta = 0;
+	p->u.mon.bufsz = bufsz;
+#ifdef DEBUG
+	if (debug_level >= 3) {
+		aproc_dbg(p);
+		dbg_puts(": new\n");
 	}
 #endif
 	return p;

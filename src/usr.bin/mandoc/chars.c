@@ -1,6 +1,6 @@
-/*	$Id: chars.c,v 1.5 2010/02/18 02:11:25 schwarze Exp $ */
+/*	$Id: chars.c,v 1.10 2010/07/31 21:43:07 schwarze Exp $ */
 /*
- * Copyright (c) 2009 Kristaps Dzonsons <kristaps@kth.se>
+ * Copyright (c) 2009, 2010 Kristaps Dzonsons <kristaps@bsd.lv>
  *
  * Permission to use, copy, modify, and distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -19,6 +19,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "mandoc.h"
 #include "chars.h"
 
 #define	PRINT_HI	 126
@@ -28,24 +29,21 @@ struct	ln {
 	struct ln	 *next;
 	const char	 *code;
 	const char	 *ascii;
-	const char	 *html;
-	size_t		  codesz;
-	size_t		  asciisz;
-	size_t		  htmlsz;
+	int		  unicode;
 	int		  type;
 #define	CHARS_CHAR	 (1 << 0)
 #define	CHARS_STRING	 (1 << 1)
 #define CHARS_BOTH	 (CHARS_CHAR | CHARS_STRING)
 };
 
-#define	LINES_MAX	  350
+#define	LINES_MAX	  370
 
-#define CHAR(w, x, y, z, a, b) \
-	{ NULL, (w), (y), (a), (x), (z), (b), CHARS_CHAR },
-#define STRING(w, x, y, z, a, b) \
-	{ NULL, (w), (y), (a), (x), (z), (b), CHARS_STRING },
-#define BOTH(w, x, y, z, a, b) \
-	{ NULL, (w), (y), (a), (x), (z), (b), CHARS_BOTH },
+#define CHAR(in, ch, code) \
+	{ NULL, (in), (ch), (code), CHARS_CHAR },
+#define STRING(in, ch, code) \
+	{ NULL, (in), (ch), (code), CHARS_STRING },
+#define BOTH(in, ch, code) \
+	{ NULL, (in), (ch), (code), CHARS_BOTH },
 
 #define	CHAR_TBL_START	  static struct ln lines[LINES_MAX] = {
 #define	CHAR_TBL_END	  };
@@ -59,8 +57,7 @@ struct	tbl {
 
 static	inline int	  match(const struct ln *,
 				const char *, size_t, int);
-static	const char	 *find(struct tbl *, const char *, 
-				size_t, size_t *, int);
+static	const struct ln	 *find(struct tbl *, const char *, size_t, int);
 
 
 void
@@ -121,31 +118,80 @@ chars_init(enum chars type)
 }
 
 
-const char *
-chars_a2ascii(void *arg, const char *p, size_t sz, size_t *rsz)
+/* 
+ * Special character to Unicode codepoint.
+ */
+int
+chars_spec2cp(void *arg, const char *p, size_t sz)
 {
+	const struct ln	*ln;
 
-	return(find((struct tbl *)arg, p, sz, rsz, CHARS_CHAR));
+	ln = find((struct tbl *)arg, p, sz, CHARS_CHAR);
+	if (NULL == ln)
+		return(-1);
+	return(ln->unicode);
 }
 
 
-const char *
-chars_a2res(void *arg, const char *p, size_t sz, size_t *rsz)
+/* 
+ * Reserved word to Unicode codepoint.
+ */
+int
+chars_res2cp(void *arg, const char *p, size_t sz)
 {
+	const struct ln	*ln;
 
-	return(find((struct tbl *)arg, p, sz, rsz, CHARS_STRING));
+	ln = find((struct tbl *)arg, p, sz, CHARS_STRING);
+	if (NULL == ln)
+		return(-1);
+	return(ln->unicode);
 }
 
 
-static const char *
-find(struct tbl *tab, const char *p, size_t sz, size_t *rsz, int type)
+/* 
+ * Special character to string array.
+ */
+const char *
+chars_spec2str(void *arg, const char *p, size_t sz, size_t *rsz)
+{
+	const struct ln	*ln;
+
+	ln = find((struct tbl *)arg, p, sz, CHARS_CHAR);
+	if (NULL == ln)
+		return(NULL);
+
+	*rsz = strlen(ln->ascii);
+	return(ln->ascii);
+}
+
+
+/* 
+ * Reserved word to string array.
+ */
+const char *
+chars_res2str(void *arg, const char *p, size_t sz, size_t *rsz)
+{
+	const struct ln	*ln;
+
+	ln = find((struct tbl *)arg, p, sz, CHARS_STRING);
+	if (NULL == ln)
+		return(NULL);
+
+	*rsz = strlen(ln->ascii);
+	return(ln->ascii);
+}
+
+
+static const struct ln *
+find(struct tbl *tab, const char *p, size_t sz, int type)
 {
 	struct ln	 *pp, *prev;
 	struct ln	**htab;
 	int		  hash;
 
 	assert(p);
-	assert(sz > 0);
+	if (0 == sz)
+		return(NULL);
 
 	if (p[0] < PRINT_LO || p[0] > PRINT_HI)
 		return(NULL);
@@ -174,12 +220,7 @@ find(struct tbl *tab, const char *p, size_t sz, size_t *rsz, int type)
 			htab[hash] = pp;
 		}
 
-		if (CHARS_HTML == tab->type) {
-			*rsz = pp->htmlsz;
-			return(pp->html);
-		}
-		*rsz = pp->asciisz;
-		return(pp->ascii);
+		return(pp);
 	}
 
 	return(NULL);
@@ -192,7 +233,7 @@ match(const struct ln *ln, const char *p, size_t sz, int type)
 
 	if ( ! (ln->type & type))
 		return(0);
-	if (ln->codesz != sz)
+	if (strncmp(ln->code, p, sz))
 		return(0);
-	return(0 == strncmp(ln->code, p, sz));
+	return('\0' == ln->code[(int)sz]);
 }

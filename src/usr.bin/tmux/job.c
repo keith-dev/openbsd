@@ -1,4 +1,4 @@
-/* $OpenBSD: job.c,v 1.15 2010/02/24 19:13:38 nicm Exp $ */
+/* $OpenBSD: job.c,v 1.19 2010/05/04 17:28:16 nicm Exp $ */
 
 /*
  * Copyright (c) 2009 Nicholas Marriott <nicm@users.sourceforge.net>
@@ -149,8 +149,9 @@ job_run(struct job *job)
 	case -1:
 		return (-1);
 	case 0:		/* child */
-		server_signal_clear();
-		/* XXX environ? */
+		clear_signals();
+
+		environ_push(&global_environ);
 
 		if (dup2(out[1], STDOUT_FILENO) == -1)
 			fatal("dup2 failed");

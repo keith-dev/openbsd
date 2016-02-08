@@ -1,4 +1,4 @@
-/*	$OpenBSD: nfsd.c,v 1.29 2009/10/27 23:59:33 deraadt Exp $	*/
+/*	$OpenBSD: nfsd.c,v 1.31 2010/04/17 16:27:49 krw Exp $	*/
 /*	$NetBSD: nfsd.c,v 1.19 1996/02/18 23:18:56 mycroft Exp $	*/
 
 /*
@@ -111,6 +111,9 @@ main(int argc, char *argv[])
 	const char *errstr = NULL;
 	socklen_t len;
 
+	/* Start by writing to both console and log. */
+	openlog("nfsd", LOG_PID | LOG_PERROR, LOG_DAEMON);
+
 	if (argc == 1)
 		udpflag = 1;
 	while ((ch = getopt(argc, argv, "n:rtu")) != -1)
@@ -118,9 +121,8 @@ main(int argc, char *argv[])
 		case 'n':
 			nfsdcnt = strtonum(optarg, 1, MAXNFSDCNT, &errstr);
 			if (errstr) {
-				warnx("nfsd count %s %s; reset to %d",
-				    optarg, errstr, DEFNFSDCNT);
-				nfsdcnt = DEFNFSDCNT;
+				syslog(LOG_ERR, "nfsd count is %s: %s", errstr, optarg);
+				return(1);
 			}
 			break;
 		case 'r':
@@ -147,9 +149,8 @@ main(int argc, char *argv[])
 	if (argc == 1) {
 		nfsdcnt = strtonum(argv[0], 1, MAXNFSDCNT, &errstr);
 		if (errstr) {
-			warnx("nfsd count %s %s; reset to %d",
-			    argv[0], errstr, DEFNFSDCNT);
-			nfsdcnt = DEFNFSDCNT;
+			syslog(LOG_ERR, "nfsd count is %s: %s", errstr, optarg);
+			return(1);
 		}
 	}
 
@@ -165,14 +166,21 @@ main(int argc, char *argv[])
 	if (reregister) {
 		if (udpflag &&
 		    (!pmap_set(RPCPROG_NFS, 2, IPPROTO_UDP, NFS_PORT) ||
-		     !pmap_set(RPCPROG_NFS, 3, IPPROTO_UDP, NFS_PORT)))
-			err(1, "can't register with portmap for UDP.");
+		     !pmap_set(RPCPROG_NFS, 3, IPPROTO_UDP, NFS_PORT))) {
+			syslog(LOG_ERR, "can't register with portmap for UDP (%m).");
+			return (1);
+		}
 		if (tcpflag &&
 		    (!pmap_set(RPCPROG_NFS, 2, IPPROTO_TCP, NFS_PORT) ||
-		     !pmap_set(RPCPROG_NFS, 3, IPPROTO_TCP, NFS_PORT)))
-			err(1, "can't register with portmap for TCP.");
+		     !pmap_set(RPCPROG_NFS, 3, IPPROTO_TCP, NFS_PORT))) {
+			syslog(LOG_ERR, "can't register with portmap for TCP (%m).");
+			return (1);
+		}
 		return (0);
 	}
+
+	/* Cut back to writing to log only. */
+	closelog();
 	openlog("nfsd", LOG_PID, LOG_DAEMON);
 
 	for (i = 0; i < nfsdcnt; i++) {

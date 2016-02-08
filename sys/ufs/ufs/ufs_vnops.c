@@ -1,4 +1,4 @@
-/*	$OpenBSD: ufs_vnops.c,v 1.90 2009/06/04 21:10:47 thib Exp $	*/
+/*	$OpenBSD: ufs_vnops.c,v 1.92 2010/08/02 02:03:21 matthew Exp $	*/
 /*	$NetBSD: ufs_vnops.c,v 1.18 1996/05/11 18:28:04 mycroft Exp $	*/
 
 /*
@@ -71,8 +71,8 @@
 #endif
 #include <ufs/ext2fs/ext2fs_extern.h>
 
-static int ufs_chmod(struct vnode *, int, struct ucred *, struct proc *);
-static int ufs_chown(struct vnode *, uid_t, gid_t, struct ucred *, struct proc *);
+int ufs_chmod(struct vnode *, int, struct ucred *, struct proc *);
+int ufs_chown(struct vnode *, uid_t, gid_t, struct ucred *, struct proc *);
 int filt_ufsread(struct knote *, long);
 int filt_ufswrite(struct knote *, long);
 int filt_ufsvnode(struct knote *, long);
@@ -411,7 +411,7 @@ ufs_setattr(void *v)
  * Change the mode on a file.
  * Inode must be locked before calling.
  */
-static int
+int
 ufs_chmod(struct vnode *vp, int mode, struct ucred *cred, struct proc *p)
 {
 	struct inode *ip = VTOI(vp);
@@ -438,7 +438,7 @@ ufs_chmod(struct vnode *vp, int mode, struct ucred *cred, struct proc *p)
  * Perform chown operation on inode ip;
  * inode must be locked prior to call.
  */
-static int
+int
 ufs_chown(struct vnode *vp, uid_t uid, gid_t gid, struct ucred *cred,
     struct proc *p)
 {
@@ -1491,8 +1491,7 @@ ufs_readlink(void *v)
 	isize = DIP(ip, size);
 	if (isize < vp->v_mount->mnt_maxsymlinklen ||
 	    (vp->v_mount->mnt_maxsymlinklen == 0 && DIP(ip, blocks) == 0)) {
-		uiomove((char *)SHORTLINK(ip), isize, ap->a_uio);
-		return (0);
+		return (uiomove((char *)SHORTLINK(ip), isize, ap->a_uio));
 	}
 	return (VOP_READ(vp, ap->a_uio, 0, ap->a_cred));
 }

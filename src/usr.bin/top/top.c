@@ -1,4 +1,4 @@
-/*	$OpenBSD: top.c,v 1.69 2010/01/29 00:36:09 tedu Exp $	*/
+/*	$OpenBSD: top.c,v 1.75 2010/04/24 22:02:14 deraadt Exp $	*/
 
 /*
  *  Top users/processes display for Unix
@@ -231,7 +231,9 @@ parseargs(int ac, char **av)
 			break;
 
 		case 'g':	/* grep command name */
-			ps.command = strdup(optarg);
+			free(ps.command);
+			if ((ps.command = strdup(optarg)) == NULL)
+				err(1, NULL);
 			break;
 
 		default:
@@ -407,6 +409,24 @@ restart:
 	 *		indicates infinity (by being -1)
 	 */
 	while ((displays == -1) || (displays-- > 0)) {
+		if (winchflag) {
+			/*
+			 * reascertain the screen
+			 * dimensions
+			 */
+			get_screensize();
+			resizeterm(screen_length, screen_width + 1);
+
+			/* tell display to resize */
+			max_topn = display_resize();
+
+			/* reset the signal handler */
+			(void) signal(SIGWINCH, sigwinch);
+
+			reset_display();
+			winchflag = 0;
+		}
+
 		/* get the current stats */
 		get_system_info(&system_info);
 
@@ -514,7 +534,7 @@ restart:
 int
 rundisplay(void)
 {
-	static char tempbuf[50];
+	static char tempbuf[TEMPBUFSIZE];
 	sigset_t mask;
 	char ch, *iptr;
 	int change, i;
@@ -564,24 +584,6 @@ rundisplay(void)
 		reinit_screen();
 		reset_display();
 		tstopflag = 0;
-		return 1;
-	}
-	if (winchflag) {
-		/*
-		 * reascertain the screen
-		 * dimensions
-		 */
-		get_screensize();
-		resizeterm(screen_length, screen_width + 1);
-
-		/* tell display to resize */
-		max_topn = display_resize();
-
-		/* reset the signal handler */
-		(void) signal(SIGWINCH, sigwinch);
-
-		reset_display();
-		winchflag = 0;
 		return 1;
 	}
 	/*
@@ -666,9 +668,7 @@ rundisplay(void)
 			    "Number of processes to show: ");
 
 			if (readline(tempbuf, 8) > 0) {
-				char *ptr;
-				ptr = tempbuf;
-				if ((i = atoiwi(ptr)) != Invalid) {
+				if ((i = atoiwi(tempbuf)) != Invalid) {
 					if (i > max_topn) {
 						new_message(MT_standout |
 						    MT_delayed,
@@ -701,7 +701,7 @@ rundisplay(void)
 				char *endp;
 				double newdelay = strtod(tempbuf, &endp);
 
-				if (newdelay >= 0 && newdelay < 1000000 &&
+				if (newdelay >= 0 && newdelay <= 1000000 &&
 				    *endp == '\0') {
 					delay = newdelay;
 				} else {
@@ -722,9 +722,7 @@ rundisplay(void)
 			    itoa(displays));
 
 			if (readline(tempbuf, 10) > 0) {
-				char *ptr;
-				ptr = tempbuf;				
-				if ((i = atoiwi(ptr)) != Invalid) {
+				if ((i = atoiwi(tempbuf)) != Invalid) {
 					if (i == 0)
 						quit(0);
 					displays = i;
@@ -865,7 +863,9 @@ rundisplay(void)
 				    tempbuf[1] == '\0')
 					ps.command = NULL;
 				else
-					ps.command = strdup(tempbuf);
+					if ((ps.command = strdup(tempbuf)) ==
+					    NULL)
+						err(1, NULL);
 				putr();
 			} else
 				clear_message();

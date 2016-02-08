@@ -1,4 +1,4 @@
-#	$OpenBSD: install.sub,v 1.600 2010/03/09 23:34:09 deraadt Exp $
+#	$OpenBSD: install.sub,v 1.617 2010/08/08 21:06:06 krw Exp $
 #	$NetBSD: install.sub,v 1.5.2.8 1996/09/02 23:25:02 pk Exp $
 #
 # Copyright (c) 1997-2009 Todd Miller, Theo de Raadt, Ken Westerback
@@ -159,7 +159,6 @@ mount_mnt2() {
 			'$(disklabel '$_dev' 2>/dev/null | grep "^  [a-p]: " |
 			egrep -v "swap|unused" |
 			sed '\''s/^  \(.\): .*/\1/'\'')'
-			
 		[[ $resp == done ]] && return 1
 	fi
 
@@ -495,7 +494,7 @@ makedev() {
 		return 1
 	fi
 
-	(cd /dev ; sh MAKEDEV $_dev || return 1 ; cd - >/dev/null)
+	(cd /dev && sh MAKEDEV $_dev) >/dev/null 2>&1
 }
 
 # Create an entry in the hosts file. If an entry with the
@@ -600,7 +599,7 @@ configure_ifs() {
 			if [[ -z $_vi ]]; then
 				_vi=0
 				while (( (_vi += 1) < 4096 )); do
-					! isin "$_vi" $_tags && break	
+					! isin "$_vi" $_tags && break
 				done
 			fi
 			_ifdevs=$(get_ifdevs)
@@ -997,8 +996,6 @@ enable_network() {
 		route -qn add -host -inet6 default $_gw && break
 	done
 
-	# Use loopback, not the wire.
-	route -qn add -host `hostname` 127.0.0.1 >/dev/null
 	route -qn add -net 127 127.0.0.1 -reject >/dev/null
 }
 
@@ -1148,15 +1145,23 @@ startftplist() {
 	# If no networks are configured, we do not need the ftplist file
 	(( nifs < 1 )) && return
 
-	# ftp.openbsd.org == 129.128.5.191 and will remain at
-	# that address for the foreseeable future.
-	ftp $FTPOPTS -a -o - "http://129.128.5.191/cgi-bin/ftplist.cgi?path=$FTPSETDIR" \
-		2>/tmp/ftplisterr > $SERVERLISTALL & ftppid=$!
+	# Make sure the ftp subshell gets its own process group
+	set -m
+	(
+		# ftp.openbsd.org == 129.128.5.191 and will remain at
+		# that address for the foreseeable future.
+		ftp $FTPOPTS -a -o - "http://129.128.5.191/cgi-bin/ftplist.cgi?path=$FTPSETDIR" \
+			2>/tmp/ftplisterr > $SERVERLISTALL
+
+		# Remember finish time for adjusting the received timestamp
+		echo -n $SECONDS >$SERVERLISTSEC
+	) & ftppid=$!
+	set +m
 
 	# If the ftp process takes more than 12 seconds, kill it
 	# XXX We are relying on the pid space not randomly biting us --
 	# XXX ftp could terminate early, and the pid could be reused
-	(sleep 12; kill -INT $ftppid >/dev/null 2>&1) &
+	(sleep 12; kill -INT -$ftppid >/dev/null 2>&1) &
 }
 
 # Wait for the ftp process to finish, or be killed after the timeout
@@ -1173,13 +1178,22 @@ waitftplist() {
 	[[ -n $_dot ]] && echo					# XXX
 }
 
+# If possible, print the timestamp received from the ftplist.cgi output,
+# adjusted with the time elapsed since it was received
+ftp_time() {
+	local _ftplist_sec=$(cat $SERVERLISTSEC 2>&-)
+	local _time=$(sed '/^TIME=\([0-9]*\)$/!d;s//\1/;q' $SERVERLISTALL 2>&-)
+	[[ -n $_ftplist_sec && -n $_time ]] &&
+		echo $((_time + SECONDS - _ftplist_sec))
+}
+
 # Get several parameters from the user, and xfer
 # files from the server.
 # $1 = url type (ftp or http)
 # Note:	_ftp_server_ip, _ftp_server_dir, _ftp_server_login,
 #	and FTPOPTS must be global.
 install_url() {
-	local _url_type=$1 _file_list _url_base _oifs _prompt _passwd
+	local _url_type=$1 _file_list _url_base _oifs _prompt _passwd _mirror
 	local _server_ip_var=_${_url_type}_server_ip \
 		_server_dir_var=_${_url_type}_server_dir
 
@@ -1231,13 +1245,14 @@ install_url() {
 	# name. This means the last install from a mirror will not keep
 	# the specific directory info. But an install from a local
 	# server *will* remember the specific directory info.
-	set -- $(eval grep -s "^\$$_server_ip_var" $SERVERLIST | sed '$!d') 
+	set -- $(eval grep -s "^\$$_server_ip_var" $SERVERLIST | sed '$!d')
 	resp=${1#*/}
 	# If there is no directory specified, don't use the server name!
 	[[ $resp == "$1" ]] && resp=
 	if (( $# > 1 )); then
 		# It's a mirror, since it has location info.
 		resp=$resp/$FTPSETDIR
+		_mirror=yes
 	fi
 
 	ask_until "Server directory?" "${resp:-pub/OpenBSD/$FTPSETDIR}"
@@ -1290,6 +1305,15 @@ install_url() {
 
 	# Remember where we installed from
 	eval installedfrom=$_url_type://\$$_server_ip_var/\$$_server_dir_var
+
+	# Bake a package path if we installed from a mirror
+	if [[ -n $_mirror ]]; then
+		package_path=$(print -r -- "$installedfrom" |
+			sed -E "/\/(snapshots|[0-9]\.[0-9])\/($ARCH)\/*$/!d
+				s!!/\1/packages/$(arch -s)/!;q")
+	else
+		package_path=
+	fi
 }
 
 install_mounted_fs() {
@@ -1478,14 +1502,14 @@ install_sets() {
 	[[ -s $SERVERLISTALL ]] && \
 		_d=$(sed -ne '/^method=/s/method=//p' $SERVERLISTALL)
 
-	ifconfig netboot >/dev/null 2>&1 && : ${_d:=ftp}
+	ifconfig netboot >/dev/null 2>&1 && : ${_d:=http}
 	[[ -n $(get_cddevs) ]] && { _locs="cd $_locs" ; : ${_d:=cd} ; }
 	[[ -x /sbin/mount_nfs ]] && _locs="$_locs nfs"
 	[[ -n $MTDEVS && -x /bin/mt ]] && _locs="$_locs tape"
-	: ${_d:=ftp}
+	: ${_d:=http}
 
 	if ! isin "$_d" $_locs; then
-		for a in ftp http cd nfs tape disk; do 
+		for a in http ftp cd nfs tape disk; do
 			isin $a $_locs && _d=$a && break
 		done
 	fi
@@ -1578,7 +1602,7 @@ mount_fs() {
 		_msg=$(mount -v -t $_fstype $_async -o $_opt $_dev $_mp)
 		_err=$?
 		echo $_msg | sed -e 's/, ctime=[^,)]*//'
-		if ! $_e ; then
+		if [ $_err != 0 ]; then
 			# In addition to the error message displayed by mount ...
 			cat <<__EOT
 
@@ -1808,6 +1832,13 @@ finish_up() {
 		cp /tmp/sysctl.conf /mnt/etc/sysctl.conf
 	fi
 
+	# Create or update pkg.conf with the new package path, if any
+	if [[ -n $package_path ]]; then
+		grep -v '^[ 	]*installpath[ 	]*=' /mnt/etc/pkg.conf 2>&- > /tmp/pkgconf
+		print -r -- "installpath = $package_path" >> /tmp/pkgconf
+		cp /tmp/pkgconf /mnt/etc/pkg.conf
+	fi
+
 	echo -n "Making all device nodes..."
 	(cd /mnt/dev
 	sh MAKEDEV all
@@ -1852,11 +1883,13 @@ __EOT
 
 ROOTDISK=
 ROOTDEV=
+package_path=
 
 SETDIR="$VNAME/$ARCH"
 FTPDIR="pub/OpenBSD/$VNAME"
 FTPOPTS="-V"
 SERVERLISTALL=/tmp/serverlistall
+SERVERLISTSEC=/tmp/serverlistsec
 SERVERLIST=/tmp/serverlist
 
 # Do not limit ourselves during installs or upgrades.

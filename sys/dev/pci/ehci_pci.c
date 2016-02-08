@@ -1,4 +1,4 @@
-/*	$OpenBSD: ehci_pci.c,v 1.18 2009/07/24 03:18:58 deraadt Exp $ */
+/*	$OpenBSD: ehci_pci.c,v 1.21 2010/08/08 04:19:24 deraadt Exp $ */
 /*	$NetBSD: ehci_pci.c,v 1.15 2004/04/23 21:13:06 itojun Exp $	*/
 
 /*
@@ -35,7 +35,7 @@
 #include <sys/kernel.h>
 #include <sys/rwlock.h>
 #include <sys/device.h>
-#include <sys/proc.h>
+#include <sys/timeout.h>
 #include <sys/queue.h>
 
 #include <machine/bus.h>
@@ -74,13 +74,14 @@ int ehci_sb700_match(struct pci_attach_args *pa);
 int	ehci_pci_match(struct device *, void *, void *);
 void	ehci_pci_attach(struct device *, struct device *, void *);
 int	ehci_pci_detach(struct device *, int);
+int	ehci_pci_activate(struct device *, int);
 void	ehci_pci_givecontroller(struct ehci_pci_softc *);
-void	ehci_pci_takecontroller(struct ehci_pci_softc *);
+void	ehci_pci_takecontroller(struct ehci_pci_softc *, int);
 void	ehci_pci_shutdown(void *);
 
 struct cfattach ehci_pci_ca = {
 	sizeof(struct ehci_pci_softc), ehci_pci_match, ehci_pci_attach,
-	ehci_pci_detach, ehci_activate
+	ehci_pci_detach, ehci_pci_activate
 };
 
 int
@@ -207,7 +208,7 @@ ehci_pci_attach(struct device *parent, struct device *self, void *aux)
 	if (sc->sc.sc_id_vendor == PCI_VENDOR_VIATECH)
 		sc->sc.sc_flags |= EHCIF_DROPPED_INTR_WORKAROUND;
 
-	ehci_pci_takecontroller(sc);
+	ehci_pci_takecontroller(sc, 0);
 	r = ehci_init(&sc->sc);
 	if (r != USBD_NORMAL_COMPLETION) {
 		printf("%s: init failed, error=%d\n", devname, r);
@@ -226,6 +227,21 @@ ehci_pci_attach(struct device *parent, struct device *self, void *aux)
 unmap_ret:
 	bus_space_unmap(sc->sc.iot, sc->sc.ioh, sc->sc.sc_size);
 	splx(s);
+}
+
+int
+ehci_pci_activate(struct device *self, int act)
+{
+	struct ehci_pci_softc *sc = (struct ehci_pci_softc *)self;
+
+	/* On resume, take ownership from the BIOS */
+	switch (act) {
+	case DVACT_RESUME:
+		ehci_pci_takecontroller(sc, 1);
+		break;
+	}
+
+	return ehci_activate(self, act);
 }
 
 int
@@ -269,7 +285,7 @@ ehci_pci_givecontroller(struct ehci_pci_softc *sc)
 #endif
 
 void
-ehci_pci_takecontroller(struct ehci_pci_softc *sc)
+ehci_pci_takecontroller(struct ehci_pci_softc *sc, int silent)
 {
 	u_int32_t cparams, eec, legsup;
 	int eecp, i;
@@ -294,7 +310,7 @@ ehci_pci_takecontroller(struct ehci_pci_softc *sc)
 					break;
 				DELAY(1000);
 			}
-			if (legsup & EHCI_LEGSUP_BIOSOWNED)
+			if (silent == 00 && (legsup & EHCI_LEGSUP_BIOSOWNED))
 				printf("%s: timed out waiting for BIOS\n",
 				    sc->sc.sc_bus.bdev.dv_xname);
 		}

@@ -1,4 +1,4 @@
-/*	$OpenBSD: pchb.c,v 1.80 2010/02/09 19:36:05 kettenis Exp $ */
+/*	$OpenBSD: pchb.c,v 1.83 2010/08/07 06:10:06 deraadt Exp $ */
 /*	$NetBSD: pchb.c,v 1.65 2007/08/15 02:26:13 markd Exp $	*/
 
 /*
@@ -102,8 +102,10 @@
 #define AMD64HT_LDT1_TYPE	0xb8
 #define AMD64HT_LDT2_BUS	0xd4
 #define AMD64HT_LDT2_TYPE	0xd8
+#define AMD64HT_LDT3_BUS	0xf4
+#define AMD64HT_LDT3_TYPE	0xf8
 
-#define AMD64HT_NUM_LDT		3
+#define AMD64HT_NUM_LDT		4
 
 #define AMD64HT_LDT_TYPE_MASK		0x0000001f
 #define  AMD64HT_LDT_INIT_COMPLETE	0x00000002
@@ -118,6 +120,7 @@ struct pchb_softc {
 	bus_space_handle_t sc_bh;
 
 	/* rng stuff */
+	int sc_rng_active;
 	int sc_rng_ax;
 	int sc_rng_i;
 	struct timeout sc_rng_to;
@@ -125,10 +128,11 @@ struct pchb_softc {
 
 int	pchbmatch(struct device *, void *, void *);
 void	pchbattach(struct device *, struct device *, void *);
+int	pchbactivate(struct device *, int);
 
 struct cfattach pchb_ca = {
 	sizeof(struct pchb_softc), pchbmatch, pchbattach, NULL,
-	config_activate_children
+	pchbactivate
 };
 
 struct cfdriver pchb_cd = {
@@ -343,6 +347,7 @@ pchbattach(struct device *parent, struct device *self, void *aux)
 			timeout_set(&sc->sc_rng_to, pchb_rnd, sc);
 			sc->sc_rng_i = 4;
 			pchb_rnd(sc);
+			sc->sc_rng_active = 1;
 			break;
 		}
 		printf("\n");
@@ -365,7 +370,8 @@ pchbattach(struct device *parent, struct device *self, void *aux)
 			bir = pci_conf_read(pa->pa_pc,
 			    pa->pa_tag, PPB_REG_BUSINFO);
 			pbnum = PPB_BUSINFO_PRIMARY(bir);
-			doattach = 1;
+			if (pbnum > 0)
+				doattach = 1;
 
 			/* Switch back to host bridge mode. */
 			bcreg |= 0x00000004; /* XXX Magic */
@@ -408,6 +414,29 @@ pchbattach(struct device *parent, struct device *self, void *aux)
 	pba.pba_pc = pa->pa_pc;
 	config_found(self, &pba, pchb_print);
 }
+
+int
+pchbactivate(struct device *self, int act)
+{
+	struct pchb_softc *sc = (struct pchb_softc *)self;
+
+	switch (act) {
+	case DVACT_SUSPEND:
+		config_activate_children(self, act);
+		break;
+	case DVACT_RESUME:
+		/* re-enable RNG, if we have it */
+		if (sc->sc_rng_active)
+			bus_space_write_1(sc->sc_bt, sc->sc_bh,
+			    I82802_RNG_HWST,
+			    bus_space_read_1(sc->sc_bt, sc->sc_bh,
+			    I82802_RNG_HWST) | I82802_RNG_HWST_ENABLE);
+		config_activate_children(self, act);
+		break;
+	}
+	return (0);
+}
+
 
 int
 pchb_print(void *aux, const char *pnp)

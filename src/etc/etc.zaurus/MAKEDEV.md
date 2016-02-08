@@ -1,6 +1,6 @@
 define(MACHINE,zaurus)dnl
 vers(__file__,
-	{-$OpenBSD: MAKEDEV.md,v 1.22 2009/08/13 15:12:36 deraadt Exp $-},
+	{-$OpenBSD: MAKEDEV.md,v 1.26 2010/07/03 03:59:16 krw Exp $-},
 etc.MACHINE)dnl
 dnl
 dnl Copyright (c) 2001-2004 Todd T. Fries <todd@OpenBSD.org>
@@ -83,18 +83,19 @@ _DEV(rmidi, 57)
 _DEV(rnd, 40)
 _DEV(tun, 33)
 _DEV(uk, 28)
-_DEV(ss, 29)
 _DEV(systrace, 50)
 _DEV(tuner, 75)
 _DEV(vi, 38)
 _DEV(nnpfs, 51)
 _DEV(vscsi, 100)
+_DEV(bthub, 101)
+_DEV(diskmap, 102)
 dnl
 divert(__mddivert)dnl
 dnl
 ramdisk)
 	_recurse std bpf0 wd0 wd1 sd0 tty00 rd0 wsmouse
-	_recurse st0 ttyC0 wskbd0 apm bio
+	_recurse st0 ttyC0 wskbd0 apm bio diskmap
 	;;
 
 _std(1, 2, 8, 6)
@@ -103,9 +104,9 @@ dnl
 dnl *** zaurus specific targets
 dnl
 target(all, ch, 0)dnl
-target(all, ss, 0, 1)dnl
 target(all, nnpfs, 0)dnl
 target(all, vscsi, 0)dnl
+target(all, diskmap)dnl
 target(all, bio)dnl
 twrget(all, flo, fd, 0, 0B, 0C, 0D, 0E, 0F, 0G, 0H)dnl
 twrget(all, flo, fd, 1, 1B, 1C, 1D, 1E, 1F, 1G, 1H)dnl
@@ -119,3 +120,4 @@ target(all, sd, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9)dnl
 target(all, vnd, 0, 1, 2, 3)dnl
 target(all, ccd, 0, 1, 2, 3)dnl
 target(all, ttyC, 0, 1)dnl
+target(all, bthub, 0, 1, 2)dnl

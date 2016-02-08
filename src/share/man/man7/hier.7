@@ -1,4 +1,4 @@
-.\"	$OpenBSD: hier.7,v 1.77 2010/02/11 13:26:33 jmc Exp $
+.\"	$OpenBSD: hier.7,v 1.85 2010/07/05 22:26:20 tedu Exp $
 .\"	$NetBSD: hier.7,v 1.7 1994/11/30 19:07:10 jtc Exp $
 .\"
 .\" Copyright (c) 1990, 1993
@@ -30,7 +30,7 @@
 .\"
 .\"	@(#)hier.7	8.1 (Berkeley) 6/5/93
 .\"
-.Dd $Mdocdate: February 11 2010 $
+.Dd $Mdocdate: July 5 2010 $
 .Dt HIER 7
 .Os
 .Sh NAME
@@ -79,16 +79,10 @@ emulation is in effect (see
 .Xr sysctl 8
 and the system compat pages:
 .Xr compat_aout 8 ,
-.Xr compat_bsdos 8 ,
 .Xr compat_freebsd 8 ,
-.Xr compat_hpux 8 ,
-.Xr compat_ibcs2 8 ,
 .Xr compat_linux 8 ,
-.Xr compat_osf1 8 ,
-.Xr compat_sunos 8 ,
-.Xr compat_svr4 8 ,
 and
-.Xr compat_ultrix 8 ) .
+.Xr compat_svr4 8 ) .
 .It /etc/
 System configuration files and scripts.
 .Pp
@@ -116,6 +110,9 @@ Configuration files for X11 window system fonts.
 .It hotplug/
 Scripts for the hotplug daemon,
 .Xr hotplugd 8 .
+.It iked/
+Configuration files for
+.Xr iked 8 .
 .It isakmpd/
 Configuration files for
 .Xr isakmpd 8 .
@@ -197,15 +194,12 @@ X11 archive libraries.
 .Pp
 .Bl -tag -width "pkgconfig/" -compact
 .It X11/
-Default configuration files for X11 and companion applications (see
-.Xr xdm 1 ,
-.Xr xkb 1 ,
-.Xr twm 1 ) .
+Default configuration files for X11 and companion applications.
 .It modules/
 Various libraries and drivers for the X11 window system.
 .It pkgconfig/
 Package metadata for
-.Xr pkgconfig 1 .
+.Xr pkg-config 1 .
 .It xorg/
 Data files used by the X server.
 .El

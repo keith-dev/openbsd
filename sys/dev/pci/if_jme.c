@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_jme.c,v 1.21 2010/01/07 12:26:06 sthen Exp $	*/
+/*	$OpenBSD: if_jme.c,v 1.23 2010/08/07 03:50:02 krw Exp $	*/
 /*-
  * Copyright (c) 2008, Pyun YongHyeon <yongari@FreeBSD.org>
  * All rights reserved.
@@ -748,7 +748,7 @@ jme_dma_alloc(struct jme_softc *sc)
 	/* Allocate DMA'able memory for RX ring */
 	error = bus_dmamem_alloc(sc->sc_dmat, JME_RX_RING_SIZE, ETHER_ALIGN, 0,
 	    &sc->jme_rdata.jme_rx_ring_seg, 1, &nsegs,
-	    BUS_DMA_WAITOK);
+	    BUS_DMA_WAITOK | BUS_DMA_ZERO);
 /* XXX zero */
 	if (error) {
 		printf("%s: could not allocate DMA'able memory for Rx ring.\n",
@@ -761,8 +761,6 @@ jme_dma_alloc(struct jme_softc *sc)
 	    BUS_DMA_NOWAIT);
 	if (error)
 		return (ENOBUFS);
-
-	bzero(sc->jme_rdata.jme_rx_ring, JME_RX_RING_SIZE);
 
 	/* Load the DMA map for Rx ring. */
 	error = bus_dmamap_load(sc->sc_dmat,
@@ -1074,7 +1072,7 @@ jme_encap(struct jme_softc *sc, struct mbuf **m_head)
 	if (maxsegs > JME_MAXTXSEGS)
 		maxsegs = JME_MAXTXSEGS;
 	if (maxsegs < (sc->jme_txd_spare - 1))
-		panic("%s: not enough segments %d\n", sc->sc_dev.dv_xname,
+		panic("%s: not enough segments %d", sc->sc_dev.dv_xname,
 		    maxsegs);
 
 	error = bus_dmamap_load_mbuf(sc->sc_dmat, txd->tx_dmamap,
@@ -1503,7 +1501,7 @@ jme_txeof(struct jme_softc *sc)
 		txd = &sc->jme_cdata.jme_txdesc[cons];
 
 		if (txd->tx_m == NULL)
-			panic("%s: freeing NULL mbuf!\n", sc->sc_dev.dv_xname);
+			panic("%s: freeing NULL mbuf!", sc->sc_dev.dv_xname);
 
 		status = letoh32(txd->tx_desc->flags);
 		if ((status & JME_TD_OWN) == JME_TD_OWN)
@@ -1538,7 +1536,7 @@ jme_txeof(struct jme_softc *sc)
 		txd->tx_m = NULL;
 		sc->jme_cdata.jme_tx_cnt -= txd->tx_ndesc;
 		if (sc->jme_cdata.jme_tx_cnt < 0)
-			panic("%s: Active Tx desc counter was garbled\n",
+			panic("%s: Active Tx desc counter was garbled",
 			    sc->sc_dev.dv_xname);
 		txd->tx_ndesc = 0;
 	}

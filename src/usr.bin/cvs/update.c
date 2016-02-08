@@ -1,4 +1,4 @@
-/*	$OpenBSD: update.c,v 1.160 2009/03/24 17:03:32 joris Exp $	*/
+/*	$OpenBSD: update.c,v 1.163 2010/07/30 21:47:18 ray Exp $	*/
 /*
  * Copyright (c) 2006 Joris Vink <joris@openbsd.org>
  *
@@ -78,7 +78,8 @@ cvs_update(int argc, char **argv)
 			break;
 		case 'D':
 			dateflag = optarg;
-			cvs_specified_date = cvs_date_parse(dateflag);
+			if ((cvs_specified_date = date_parse(dateflag)) == -1)
+				fatal("invalid date: %s", dateflag);
 			reset_tag = 0;
 			break;
 		case 'd':
@@ -429,9 +430,16 @@ cvs_update_local(struct cvs_file *cf)
 		    cf->file_ent->ce_tag != NULL)))
 			flags = CO_SETSTICKY;
 
-		cvs_checkout_file(cf, cf->file_rcsrev, tag, flags);
-		cvs_printf("U %s\n", cf->file_path);
-		cvs_history_add(CVS_HISTORY_UPDATE_CO, cf, NULL);
+		if (cf->file_flags & FILE_ON_DISK && (cf->file_ent == NULL ||
+		    cf->file_ent->ce_type == CVS_ENT_NONE)) {
+			cvs_log(LP_ERR, "move away %s; it is in the way",
+			    cf->file_path);
+			cvs_printf("C %s\n", cf->file_path);
+		} else {
+			cvs_checkout_file(cf, cf->file_rcsrev, tag, flags);
+			cvs_printf("U %s\n", cf->file_path);
+			cvs_history_add(CVS_HISTORY_UPDATE_CO, cf, NULL);
+		}
 		break;
 	case FILE_MERGE:
 		d3rev1 = cf->file_ent->ce_rev;
@@ -522,8 +530,8 @@ update_has_conflict_markers(struct cvs_file *cf)
 	BUF *bp;
 	int conflict;
 	char *content;
-	struct cvs_line *lp;
-	struct cvs_lines *lines;
+	struct rcs_line *lp;
+	struct rcs_lines *lines;
 	size_t len;
 
 	cvs_log(LP_TRACE, "update_has_conflict_markers(%s)", cf->file_path);
@@ -531,11 +539,11 @@ update_has_conflict_markers(struct cvs_file *cf)
 	if (!(cf->file_flags & FILE_ON_DISK) || cf->file_ent == NULL)
 		return (0);
 
-	bp = cvs_buf_load_fd(cf->fd);
+	bp = buf_load_fd(cf->fd);
 
-	cvs_buf_putc(bp, '\0');
-	len = cvs_buf_len(bp);
-	content = cvs_buf_release(bp);
+	buf_putc(bp, '\0');
+	len = buf_len(bp);
+	content = buf_release(bp);
 	if ((lines = cvs_splitlines(content, len)) == NULL)
 		fatal("update_has_conflict_markers: failed to split lines");
 
@@ -585,7 +593,10 @@ update_join_file(struct cvs_file *cf)
 
 	if ((p = strchr(jrev2, ':')) != NULL) {
 		(*p++) = '\0';
-		cvs_specified_date = cvs_date_parse(p);
+		if ((cvs_specified_date = date_parse(p)) == -1) {
+			cvs_printf("invalid date: %s", p);
+			goto out;
+		}
 	}
 
 	rev2 = rcs_translate_tag(jrev2, cf->file_rcs);
@@ -594,7 +605,10 @@ update_join_file(struct cvs_file *cf)
 	if (jrev1 != NULL) {
 		if ((p = strchr(jrev1, ':')) != NULL) {
 			(*p++) = '\0';
-			cvs_specified_date = cvs_date_parse(p);
+			if ((cvs_specified_date = date_parse(p)) == -1) {
+				cvs_printf("invalid date: %s", p);
+				goto out;
+			}
 		}
 
 		rev1 = rcs_translate_tag(jrev1, cf->file_rcs);

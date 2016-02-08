@@ -1,4 +1,4 @@
-.\" $OpenBSD: bsd.port.mk.5,v 1.239 2010/02/26 19:27:09 espie Exp $
+.\" $OpenBSD: bsd.port.mk.5,v 1.260 2010/08/08 12:37:59 jmc Exp $
 .\"
 .\" Copyright (c) 2000-2008 Marc Espie
 .\"
@@ -24,7 +24,7 @@
 .\" (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
 .\" THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 .\"
-.Dd $Mdocdate: February 26 2010 $
+.Dd $Mdocdate: August 8 2010 $
 .Dt BSD.PORT.MK 5
 .Os
 .Sh NAME
@@ -378,6 +378,9 @@ for each package in the
 .Ev MULTI_PACKAGES
 list.
 If the repository already contains up-to-date packages, they are not rebuilt.
+If PLIST_DB is set, the resulting packaging information is compared
+with existing stuff, and saved if new, with loud complaints if it changed
+without a REVISION bump.
 Arch-independent packages are created in ${PACKAGE_REPOSITORY}/no-arch,
 and copied into ${PACKAGE_REPOSITORY}/${MACHINE_ARCH}/all as needed.
 If ${PERMIT_PACKAGE_FTP} is set to
@@ -471,6 +474,10 @@ In contrast with
 .Ar print-plist ,
 the package contents only consists of files, all tagged with category
 markers such as @file.
+See
+.Xr pkg_create 1 .
+.It Ar print-plist-libs
+Generate and print the list of static and dynamic libraries present in the port.
 See
 .Xr pkg_create 1 .
 .It Ar print-plist-with-depends
@@ -664,6 +671,12 @@ Target used to build software.
 Default is
 .Sq all .
 Can be set to empty, to yield a package's default target.
+.It Ev APM_ARCHS
+Set to the list of
+.Xr apm 4
+architectures.
+Use with
+.Ev ONLY_FOR_ARCHS .
 .It Ev ARCH
 Current machine architecture.
 Read-only.
@@ -703,6 +716,14 @@ Define only for broken ports, set to reason the port is broken.
 See also
 .Ev NO_IGNORE ,
 .Ev TRY_BROKEN .
+.It Ev BROKEN-<arch>
+Define only for ports broken on a given architecture.
+Distinct from
+.Ev ONLY_FOR_ARCHS
+and
+.Ev NOT_FOR_ARCHS ,
+which are used to mark ports for which support for some architectures
+does not exist at all, or is completely obsolete.
 .It Ev BSD_INSTALL_{PROGRAM,SCRIPT,DATA,MAN}[_DIR]
 Macros passed to make and configure invocations.
 Set based on corresponding INSTALL_* variables.
@@ -843,7 +864,7 @@ by setting CLEANDEPENDS_${PKGPATH}.
 Short, one line description of the port, used for the package, and in the
 INDEX.
 .It Ev COMMENT-foo
-Same as COMMENT but used for sub package foo in a multi-package setup.
+Same as COMMENT but used for sub package -foo in a multi-package setup.
 .It Ev COMMENT-vanilla
 Same as COMMENT but used for a flavored package, if the non-flavored comment
 is inappropriate.
@@ -908,7 +929,10 @@ Add
 if port is an older autoconf port that does not recognize --sysconfdir.
 Add
 .Sq autoconf
-if autoconf needs to be rerun first.
+if autoconf needs to be rerun first,
+but set
+.Sq no-autoheader
+to prevent autoheader from running.
 Add
 .Sq automake
 if automake may need to be rerun.
@@ -923,6 +947,11 @@ If
 .Sq simple ,
 there is a configure script, but it does not fit the normal GNU configure
 conventions.
+.Pp
+Extensions may be defined by specific MODULES.
+See
+.Xr port-modules 5
+for details.
 .It Ev COPTS
 User settings.
 Supplementary options appended to ${CFLAGS} for building.
@@ -1023,6 +1052,16 @@ to see
 .Ev REORDER_DEPENDENCIES
 actions.
 Silent by default.
+.It Ev EPOCH
+Epoch number of the current package.
+Defaults to empty (no need for numbering changes), then
+numbering starts at 0.
+Gets automatically incorporated into
+.Ev FULLPKGNAME
+as
+.Sq v${EPOCH}
+to form a full package-name conforming to
+.Xr packages-specs 7 .
 .It Ev ERRORS
 List of errors found while parsing the port's Makefile.
 Display the errors before making any target, and if any error starts with
@@ -1155,9 +1194,21 @@ Read-only.
 .It Ev FULLPKGNAME
 Full name of the created package, taking flavors into account.
 Defaults to ${PKGNAME}${FLAVOR_EXT}.
+See also
+.Ev EPOCH
+and
+.Ev REVISION .
 .It Ev FULLPKGPATH
 Path to the current port's directory, relative to ${PORTSDIR},
 including flavors and subpackages.
+.It Ev GCC2_ARCHS , GCC3_ARCHS , GCC4_ARCHS
+Set to the list of architectures using gcc 2.95.3, gcc 3.3.5, or gcc 4.2.1.
+Read-only.
+Use with
+.Ev NOT_FOR_ARCHS
+or
+.Ev ONLY_FOR_ARCHS
+to limit ports to architectures where they compile.
 .It Ev GMAKE
 Location of the GNU make binary, if needed.
 Defaults to gmake.
@@ -1215,21 +1266,27 @@ to package installation time.
 .It Ev LIB_DEPENDS
 Libraries this port depends upon.
 Each item has the form
-.Sq lib_specs:[pkgspec]:directory[,-subpackage][,flavor ...][:target] .
-Similar to BUILD_DEPENDS, except for
-.Sq lib_specs ,
-which is a comma-separated list of
-.Sq lib_spec
-of the form:
-.Sq libname.[version.[subversion]] .
-See
-.Xr library-specs 7
-for more details.
+.Sq [legacy]:[pkgspec]:directory[,-subpackage][,flavor ...] .
+Similar to
+.Ev BUILD_DEPENDS
+and
+.Ev RUN_DEPENDS ,
+but with specific rules:
+.Ev LIB_DEPENDS
+always turn into
+.Ev BUILD_DEPENDS .
 .Pp
 On architectures that use dynamic libraries,
 .Ev LIB_DEPENDS
 is also used as a run-time dependency, and recorded in the package as
-such.
+such, if any of the libraries mentioned in
+.Ev WANTLIB
+is a shared library that originates within the dependant port.
+.Pp
+See
+.Xr library-specs 7
+for more details.
+.Pp
 .It Ev LIBTOOL
 Location of the libtool binary for ports that set
 .Ev USE_LIBTOOL
@@ -1242,17 +1299,24 @@ to ${LIBTOOL} ${LIBTOOL_FLAGS}.
 where other ports have already been installed (default: /usr/local)
 .It Ev LOCKDIR
 User settings.
+Defaults to
+.Pa /tmp/portslocks .
 If set, points to a directory common for all instances of concurrent ports
 builds.
 .It Ev LOCK_CMD
-User settings.
-If set, expands to a command that will acquire a lock.
-This lock will reside in
-.Pa ${LOCKDIR} .
+Expands to a command that will acquire a lock.
 See also
 .Xr ports 7 .
+.It Ev LOCK_VERBOSE
+User settings.
+Defaults to
+.Sq No .
+Set to
+.Sq Yes
+to show every acquire/release lock operation.
 .It Ev LP64_ARCHS
 Set to the list of 64-bit architectures.
+Read-only.
 Use with
 .Ev NOT_FOR_ARCHS .
 .It Ev MAINTAINER
@@ -1399,11 +1463,7 @@ Port does not build with systrace enabled build targets.
 List of architectures on which this port builds.
 Can hold both processor-specific information (e.g., m68k), and more
 specific model information (e.g., hp300).
-.It Ev OPSYS
-Always
-.Ox .
-Read-only.
-.It Ev OPSYS_VER
+.It Ev OSREV
 Revision number of
 .Ox .
 Read-only.
@@ -1518,15 +1578,31 @@ PERMIT_* lines in the Makefile should be preceded with a comment explaining
 details about licensing and patents issues the port may have.
 Porters must be very thorough in their checks.
 In case of doubt, ask.
+.It Ev PKG_ADD
+Path to
+.Xr pkg_add 1
+command, with possible options.
 .It Ev PKG_ARCH
 Comma-separated list of architectures on which this package may install.
 Defaults to ${MACHINE_ARCH},${ARCH}.
 Use * to mean any arch.
+.It Ev PKG_CREATE
+Path to
+.Xr pkg_create 1
+command, with possible options.
 .It Ev PKG_DBDIR
 Path to package installation records.
 Defaults to
 .Pa /var/db/pkg .
 User settings.
+.It Ev PKG_DELETE
+Path to
+.Xr pkg_delete 1
+command, with possible options.
+.It Ev PKG_INFO
+Path to
+.Xr pkg_info 1
+command, with possible options.
 .It Ev PORTHOME
 Setting of env variable
 .Ev HOME
@@ -1555,6 +1631,12 @@ This does not take flavors into account.
 See
 .Ev FULLPKGNAME
 for that.
+Specific revisions and epoch changes should be
+handled by
+.Ev REVISION
+and
+.Ev EPOCH
+instead.
 .It Ev PKGNAMES
 Read-only.
 List of all package names generated by the port, with
@@ -1573,9 +1655,14 @@ Path to the current port's directory, relative to ${PORTSDIR}.
 Read-only.
 .It Ev PLIST_DB
 User settings.
-Directory used to save generated packing-lists, for further processing,
-such as looking for unregistered conflicts.
-Defaults to empty.
+Directory used to save generated packing-lists, as persistent information.
+Packing-lists are processed by a script, register-plist, which complains
+when packing-lists change without a REVISION bump.
+This directory is never cleaned during normal operation.
+.Sq make clean=plist
+should only ever be used during debugging by port maintainers.
+Defaults to
+.Pa ${PORTSDIR}/plist/${MACHINE_ARCH} .
 .It Ev PREFERRED_CIPHERS
 List of cryptographic ciphers to use, in order of preference.
 Default is
@@ -1586,6 +1673,14 @@ Base directory for the current port installation.
 Usually ${LOCALBASE}, though some ports may elect a location under
 .Pa /var ,
 and some multi-package ports may install under several locations.
+.It Ev PROGRESS_METER
+User-settings.
+Defaults to
+.Sq Yes .
+Forces commands like
+.Xr ftp 1 ,
+.Xr pkg_create 1 ...
+to use their progress-meter even in the absence of a terminal.
 .It Ev PSEUDO_FLAVORS
 Extra list of flavors that do not register in package names, but are still
 used to control build logic, and e.g., working directory names.
@@ -1660,6 +1755,16 @@ See
 .It Ev REPORT_PROBLEM_LOGFILE
 See
 .Xr ports 7 .
+.It Ev REVISION
+Revision number of the current package.
+Defaults to empty (very first package), then
+numbering starts at 0.
+Gets automatically incorporated into
+.Ev FULLPKGNAME
+as
+.Sq p${REVISION}
+to form a full package-name conforming to
+.Xr packages-specs 7 .
 .It Ev RUN_DEPENDS
 Specification of ports this port needs installed to be functional.
 Same format as BUILD_DEPENDS.
@@ -1714,6 +1819,9 @@ if port can only be built on architectures with shared libraries.
 .It Ev SKIPDIR
 See
 .Xr ports 7 .
+.It Ev STARTAFTER
+See
+.Xr ports 7 .
 .It Ev STARTDIR
 See
 .Xr ports 7 .
@@ -1741,6 +1849,16 @@ to
 .Pa ${PREFIX} ,
 for instance.
 Read-only.
+.Pp
+.Ev SUBST_CMD
+can be used like
+.Xr install 1 :
+.Dl ${SUBST_CMD} Oo Fl g Ar group Oc Oo Fl m Ar mode Oc Oo Fl o Ar owner Oc file...
+to set file
+.Ar owner ,
+.Ar group
+and/or
+.Ar mode .
 .It Ev SUBST_VARS
 Make variables whose values get substituted to create the actual package
 information.
@@ -1895,6 +2013,9 @@ with the default process limits.
 .It Ev WANTLIB
 Extra list of library specifications that a package will need.
 May include system and X11 libraries.
+See
+.Xr library-specs 7
+for more details.
 .Pp
 As a special extension,
 .Ev WANTLIB
@@ -1933,6 +2054,9 @@ During ports building,
 .Pa ${WRKDIR}/bin
 is put at the front of the
 .Ev PATH .
+.It Ev WRKDIR_LINKNAME
+Name of a symbolic link to create within the port directory which will
+point to the port's ${WRKDIR}.
 .It Ev WRKDIST
 Subdirectory of ${WRKDIR} in which the distribution files normally unpacks.
 Base for all patches (default: ${WRKDIR}/${DISTNAME}).
@@ -2237,6 +2361,14 @@ creates the whole
 hierarchy under ${WRKOBJDIR}, so
 .Ev OBJMACHINE
 is no longer useful.
+.It Ev OPSYS
+The operating system.
+This ports tree is only used on
+.Ox .
+.It Ev OPSYS_VER
+Use
+.Ev OSREV
+instead.
 .It Ev PACKAGES
 Base location for packages built, renamed
 .Ev PKGREPOSITORYBASE .
@@ -2267,6 +2399,9 @@ becomes
 PATCHFILES=foo.diff.gz:0
 MASTER_SITES0=ftp://ftp.zoinx.org/pub/
 .Ed
+.It Ev PKG_CMD
+replaced by
+.Ev PKG_CREATE .
 .It Ev PKGREPOSITORY
 Old user settings.
 See
@@ -2309,7 +2444,7 @@ focuses on
 .Ev PERMIT_PACKAGE_{FTP,CDROM}
 instead.
 .It Ev SED_PLIST
-old pipeline for creating packing-lists at the ports level.
+Old pipeline for creating packing-lists at the ports level.
 Necessary functionality has been integrated directly into
 .Xr pkg_create 1 .
 .It Ev SCRIPTDIR
@@ -2548,10 +2683,14 @@ The following variables are subpackage dependent:
 .Ev PERMIT_PACKAGE_CDROM ,
 .Ev PKGNAME ,
 .Ev FULLPKGNAME ,
+.Ev REVISION ,
+.Ev EPOCH ,
 .Ev FULLPKGPATH ,
 .Ev RUN_DEPENDS ,
 .Ev WANTLIB ,
 .Ev LIB_DEPENDS ,
+.Ev ONLY_FOR_ARCHS ,
+.Ev NOT_FOR_ARCHS ,
 .Ev PREFIX ,
 .Ev CATEGORIES ,
 .Ev MESSAGE ,
@@ -2619,6 +2758,19 @@ and invoking
 is the same as invoking
 subupdate
 for all subpackages.
+.Pp
+.Ev ONLY_FOR_ARCHS
+and
+.Ev NOT_FOR_ARCHS
+interact with
+.Ev MULTI_PACKAGES .
+The infrastructure will automatically filter subpackages
+that are not suitable for the current architecture.
+Thus,
+.Ev MULTI_PACKAGES
+should list all subpackages,
+even things not buildable on the current architecture,
+for indexing purposes.
 .Sh THE GENERATION OF PACKAGE INFORMATION
 Starting after
 .Ox 4.1

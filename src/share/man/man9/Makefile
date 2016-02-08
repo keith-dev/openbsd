@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.156 2009/09/08 06:01:41 deraadt Exp $
+#	$OpenBSD: Makefile,v 1.158 2010/08/07 20:30:21 oga Exp $
 #	$NetBSD: Makefile,v 1.4 1996/01/09 03:23:01 thorpej Exp $
 
 #	Makefile for section 9 (kernel function and variable) manual pages.
@@ -220,7 +220,8 @@ MLINKS+=microtime.9 getmicrotime.9 microtime.9 microuptime.9 \
 	microtime.9 getnanouptime.9 microtime.9 bintime.9 \
 	microtime.9 binuptime.9
 MLINKS+=mountroothook_establish.9 mountroothook_disestablish.9
-MLINKS+=mutex.9 mtx_init.9 mutex.9 mtx_enter.9 mutex.9 mtx_leave.9
+MLINKS+=mutex.9 mtx_init.9 mutex.9 mtx_enter.9 mutex.9 mtx_leave.9 \
+	mutex.9 MUTEX_ASSERT_LOCKED.9 mutex.9 MUTEX_ASSERT_UNLOCKED.9
 MLINKS+=mutex.9 mtx_enter_try.9
 MLINKS+=namei.9 lookup.9 namei.9 relookup.9 namei.9 NDINIT.9
 MLINKS+=pci_conf_read.9 pci_conf_write.9 pci_conf_read.9 pci_make_tag.9 \
@@ -265,7 +266,9 @@ MLINKS+=rssadapt.9 ieee80211_rssadapt_choose.9 \
 	rssadapt.9 ieee80211_rssadapt_updatestats.9
 MLINKS+=rwlock.9 rw_init.9 rwlock.9 rw_enter.9 rwlock.9 rw_exit.9 \
 	rwlock.9 rw_enter_read.9 rwlock.9 rw_enter_write.9 \
-	rwlock.9 rw_exit_read.9 rwlock.9 rw_exit_write.9 
+	rwlock.9 rw_exit_read.9 rwlock.9 rw_exit_write.9 \
+	rwlock.9 rw_assert_wrlock.9 rwlock.9 rw_assert_rdlock.9 \
+	rwlock.9 rw_assert_unlocked.9
 	
 MLINKS+=sensor_attach.9 sensordev_install.9 \
 	sensor_attach.9 sensordev_deinstall.9 \

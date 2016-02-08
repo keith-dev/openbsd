@@ -1,5 +1,5 @@
 #!/bin/sh -
-#	$OpenBSD: sedtest.sh,v 1.1 2008/10/10 14:33:34 millert Exp $
+#	$OpenBSD: sedtest.sh,v 1.5 2010/07/03 02:34:36 phessler Exp $
 #
 # Copyright (c) 1992 Diomidis Spinellis.
 # Copyright (c) 1992, 1993
@@ -44,6 +44,7 @@ main()
 	TESTLOG=${2-sed.out}
 	DICT=${3-/usr/share/dict/words}
 
+	ulimit -n 256
 	rm -f lines1 lines2
 	i=1
 	while [ $i -lt 15 ]; do
@@ -407,6 +408,18 @@ u2/g' lines1
 	mark '8.15' ; $SED -e '1N;2y/\n/X/' lines1
 	mark '8.16'
 	echo 'eeefff' | $SED -e 'p' -e 's/e/X/p' -e ':x' -e 's//Y/p' -e '/f/bx'
+	echo '[ as an s delimiter and its escapes'
+	mark '8.17' ; $SED -e 's[_[X[' lines1
+# This is a matter of interpretation
+# POSIX 1003.1, 2004 says "Within the BRE and the replacement,
+# the BRE delimiter itself can be used as a *literal* character
+# if it is preceded by a backslash
+	mark '8.18' ; sed 's/l/[/' lines1 | $SED -e 's[\[.[X['
+	mark '8.19' ; sed 's/l/[/' lines1 | $SED -e 's[\[.[X\[['
+	echo '\ in y command'
+	mark '8.20'
+	printf 'a\\b(c\n' |
+	$SED 'y%ABCDEFGHIJKLMNOPQRSTUVWXYZ, /\\()"%abcdefghijklmnopqrstuvwxyz,------%'
 }
 
 test_error()

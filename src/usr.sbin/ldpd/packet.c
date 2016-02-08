@@ -1,4 +1,4 @@
-/*	$OpenBSD: packet.c,v 1.4 2010/02/25 17:40:46 claudio Exp $ */
+/*	$OpenBSD: packet.c,v 1.12 2010/05/26 13:56:08 nicm Exp $ */
 
 /*
  * Copyright (c) 2009 Michele Marchetto <michele@openbsd.org>
@@ -43,12 +43,12 @@ int		 ldp_hdr_sanity_check(struct ldp_hdr *, u_int16_t,
 		    const struct iface *);
 struct iface	*find_iface(struct ldpd_conf *, unsigned int, struct in_addr);
 struct iface	*session_find_iface(struct ldpd_conf *, struct in_addr);
-ssize_t		 session_get_pdu(struct buf_read *, char **);
+ssize_t		 session_get_pdu(struct ibuf_read *, char **);
 
 static int	 msgcnt = 0;
 
 int
-gen_ldp_hdr(struct buf *buf, struct iface *iface, u_int16_t size)
+gen_ldp_hdr(struct ibuf *buf, struct iface *iface, u_int16_t size)
 {
 	struct ldp_hdr	ldp_hdr;
 
@@ -62,11 +62,11 @@ gen_ldp_hdr(struct buf *buf, struct iface *iface, u_int16_t size)
 	ldp_hdr.lsr_id = ldpe_router_id();
 	ldp_hdr.lspace_id = iface->lspace_id;
 
-	return (buf_add(buf, &ldp_hdr, LDP_HDR_SIZE));
+	return (ibuf_add(buf, &ldp_hdr, LDP_HDR_SIZE));
 }
 
 int
-gen_msg_tlv(struct buf *buf, u_int32_t type, u_int16_t size)
+gen_msg_tlv(struct ibuf *buf, u_int32_t type, u_int16_t size)
 {
 	struct ldp_msg	msg;
 
@@ -78,7 +78,7 @@ gen_msg_tlv(struct buf *buf, u_int32_t type, u_int16_t size)
 	msg.length = htons(size);
 	msg.msgid = htonl(++msgcnt);
 
-	return (buf_add(buf, &msg, sizeof(msg)));
+	return (ibuf_add(buf, &msg, sizeof(msg)));
 }
 
 /* send and receive packets */
@@ -131,7 +131,7 @@ disc_recv_packet(int fd, short event, void *bula)
 	/* setup buffer */
 	bzero(&msg, sizeof(msg));
 	iov.iov_base = buf = pkt_ptr;
-	iov.iov_len = READ_BUF_SIZE;
+	iov.iov_len = IBUF_READ_SIZE;
 	msg.msg_name = &src;
 	msg.msg_namelen = sizeof(src);
 	msg.msg_iov = &iov;
@@ -210,22 +210,12 @@ ldp_hdr_sanity_check(struct ldp_hdr *ldp_hdr, u_int16_t len,
 {
 	struct in_addr		 addr;
 
-	if (iface->type != IF_TYPE_VIRTUALLINK) {
-		if (ldp_hdr->lspace_id != iface->lspace_id) {
-			addr.s_addr = ldp_hdr->lspace_id;
-			log_debug("ldp_hdr_sanity_check: invalid label space "
-			    "ID %s, interface %s", inet_ntoa(addr),
-			    iface->name);
-			return (-1);
-		}
-	} else {
-		if (ldp_hdr->lspace_id != 0) {
-			addr.s_addr = ldp_hdr->lspace_id;
-			log_debug("ldp_hdr_sanity_check: invalid label space "
-			    "ID %s, interface %s", inet_ntoa(addr),
-			    iface->name);
-			return (-1);
-		}
+	if (ldp_hdr->lspace_id != iface->lspace_id) {
+		addr.s_addr = ldp_hdr->lspace_id;
+		log_debug("ldp_hdr_sanity_check: invalid label space "
+		    "ID %s, interface %s", inet_ntoa(addr),
+		    iface->name);
+		return (-1);
 	}
 
 	return (ntohs(ldp_hdr->length));
@@ -239,11 +229,6 @@ find_iface(struct ldpd_conf *xconf, unsigned int ifindex, struct in_addr src)
 	/* returned interface needs to be active */
 	LIST_FOREACH(iface, &xconf->iface_list, entry) {
 		switch (iface->type) {
-		case IF_TYPE_VIRTUALLINK:
-			if ((src.s_addr == iface->dst.s_addr) &&
-			    !iface->passive)
-				return (iface);
-			break;
 		case IF_TYPE_POINTOPOINT:
 			if (ifindex == iface->ifindex &&
 			    iface->dst.s_addr == src.s_addr &&
@@ -283,22 +268,22 @@ session_accept(int fd, short event, void *bula)
 		return;
 	}
 
-	if (fcntl(newfd, F_SETFL, O_NONBLOCK) == -1) {
-		log_debug("sess_recv_packet: unable to set non blocking flag");
-		return;
-	}
+	session_socket_blockmode(newfd, BM_NONBLOCK);
 
 	if ((iface = session_find_iface(xconf, src.sin_addr)) == NULL) {
 		log_debug("sess_recv_packet: cannot find a matching interface");
+		close(newfd);
 		return;
 	}
 
-	/* XXX */
 	nbr = nbr_find_ip(iface, src.sin_addr.s_addr);
 	if (nbr == NULL) {
+		struct ibuf	*buf;
 		/* If there is no neighbor matching there is no
-		   Hello adjacency: send notification */
-		send_notification(S_NO_HELLO, iface, newfd, 0, 0);
+		   Hello adjacency: try to send notification */
+		buf = send_notification(S_NO_HELLO, iface, 0, 0);
+		write(newfd, buf->buf, buf->wpos);
+		ibuf_free(buf);
 		close(newfd);
 		return;
 	}
@@ -327,7 +312,6 @@ session_read(int fd, short event, void *arg)
 	if ((n = read(fd, nbr->rbuf->buf + nbr->rbuf->wpos,
 	    sizeof(nbr->rbuf->buf) - nbr->rbuf->wpos)) == -1) {
 		if (errno != EINTR && errno != EAGAIN) {
-			/* XXX find better error */
 			session_shutdown(nbr, S_SHUTDOWN, 0, 0);
 			return;
 		}
@@ -336,14 +320,14 @@ session_read(int fd, short event, void *arg)
 	}
 	if (n == 0) {
 		/* connection closed */
-		event_del(&nbr->rev);
 		session_shutdown(nbr, S_SHUTDOWN, 0, 0);
 		return;
 	}
 	nbr->rbuf->wpos += n;
 
 	while ((len = session_get_pdu(nbr->rbuf, &buf)) > 0) {
-		ldp_hdr = (struct ldp_hdr *)pdu = buf;
+		pdu = buf;
+		ldp_hdr = (struct ldp_hdr *)pdu;
 		if (ntohs(ldp_hdr->version) != LDP_VERSION) {
 			session_shutdown(nbr, S_BAD_PROTO_VER, 0, 0);
 			free(buf);
@@ -451,8 +435,13 @@ void
 session_shutdown(struct nbr *nbr, u_int32_t status, u_int32_t msgid,
     u_int32_t type)
 {
+	log_debug("session_shutdown: nbr ID %s, status %x",
+	    inet_ntoa(nbr->id), status);
+
 	send_notification_nbr(nbr, status, msgid, type);
-	send_notification_nbr(nbr, S_SHUTDOWN, msgid, type);
+
+	/* try to flush write buffer, if it fails tough shit */
+	msgbuf_write(&nbr->wbuf.wbuf);
 
 	nbr_fsm(nbr, NBR_EVT_CLOSE_SESSION);
 }
@@ -464,6 +453,7 @@ session_close(struct nbr *nbr)
 	    inet_ntoa(nbr->id));
 
 	evbuf_clear(&nbr->wbuf);
+	event_del(&nbr->rev);
 
 	if (evtimer_pending(&nbr->keepalive_timer, NULL))
 		evtimer_del(&nbr->keepalive_timer);
@@ -481,11 +471,6 @@ session_find_iface(struct ldpd_conf *xconf, struct in_addr src)
 	/* returned interface needs to be active */
 	LIST_FOREACH(iface, &xconf->iface_list, entry) {
 		switch (iface->type) {
-		case IF_TYPE_VIRTUALLINK:
-			if ((src.s_addr == iface->dst.s_addr) &&
-			    !iface->passive)
-				return (iface);
-			break;
 		case IF_TYPE_POINTOPOINT:
 			if (iface->dst.s_addr == src.s_addr &&
 			    !iface->passive)
@@ -504,7 +489,7 @@ session_find_iface(struct ldpd_conf *xconf, struct in_addr src)
 }
 
 ssize_t
-session_get_pdu(struct buf_read *r, char **b)
+session_get_pdu(struct ibuf_read *r, char **b)
 {
 	struct ldp_hdr	l;
 	size_t		av, dlen, left;

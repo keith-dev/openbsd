@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_sis.c,v 1.97 2009/08/13 14:24:47 jasper Exp $ */
+/*	$OpenBSD: if_sis.c,v 1.99 2010/08/06 05:24:16 deraadt Exp $ */
 /*
  * Copyright (c) 1997, 1998, 1999
  *	Bill Paul <wpaul@ctr.columbia.edu>.  All rights reserved.
@@ -104,9 +104,11 @@
 
 int sis_probe(struct device *, void *, void *);
 void sis_attach(struct device *, struct device *, void *);
+int sis_activate(struct device *, int);
 
 struct cfattach sis_ca = {
-	sizeof(struct sis_softc), sis_probe, sis_attach
+	sizeof(struct sis_softc), sis_probe, sis_attach, NULL,
+	sis_activate
 };
 
 struct cfdriver sis_cd = {
@@ -1062,7 +1064,7 @@ sis_attach(struct device *parent, struct device *self, void *aux)
 
 	if (bus_dmamem_alloc(sc->sc_dmat, sizeof(struct sis_list_data),
 	    PAGE_SIZE, 0, sc->sc_listseg, 1, &sc->sc_listnseg,
-	    BUS_DMA_NOWAIT) != 0) {
+	    BUS_DMA_NOWAIT | BUS_DMA_ZERO) != 0) {
 		printf(": can't alloc list mem\n");
 		goto fail_2;
 	}
@@ -1084,7 +1086,6 @@ sis_attach(struct device *parent, struct device *self, void *aux)
 		goto fail_2;
 	}
 	sc->sis_ldata = (struct sis_list_data *)sc->sc_listkva;
-	bzero(sc->sis_ldata, sizeof(struct sis_list_data));
 
 	for (i = 0; i < SIS_RX_LIST_CNT; i++) {
 		if (bus_dmamap_create(sc->sc_dmat, MCLBYTES, 1, MCLBYTES, 0,
@@ -1150,6 +1151,27 @@ fail_2:
 
 fail_1:
 	bus_space_unmap(sc->sis_btag, sc->sis_bhandle, size);
+}
+
+int
+sis_activate(struct device *self, int act)
+{
+	struct sis_softc *sc = (struct sis_softc *)self;
+	struct ifnet *ifp = &sc->arpcom.ac_if;
+
+	switch (act) {
+	case DVACT_SUSPEND:
+		if (ifp->if_flags & IFF_RUNNING)
+			sis_stop(sc);
+		config_activate_children(self, act);
+		break;
+	case DVACT_RESUME:
+		config_activate_children(self, act);
+		if (ifp->if_flags & IFF_UP)
+			sis_init(sc);
+		break;
+	}
+	return (0);
 }
 
 /*

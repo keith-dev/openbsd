@@ -1,4 +1,4 @@
-/*	$OpenBSD: kroute.c,v 1.78 2010/02/23 10:59:31 dlg Exp $ */
+/*	$OpenBSD: kroute.c,v 1.87 2010/07/14 01:00:32 dlg Exp $ */
 
 /*
  * Copyright (c) 2004 Esben Norby <norby@openbsd.org>
@@ -134,7 +134,7 @@ kr_init(int fs, u_int rdomain)
 	kr_state.fib_sync = fs;
 	kr_state.rdomain = rdomain;
 
-	if ((kr_state.fd = socket(AF_ROUTE, SOCK_RAW, 0)) == -1) {
+	if ((kr_state.fd = socket(AF_ROUTE, SOCK_RAW, AF_INET)) == -1) {
 		log_warn("kr_init: socket");
 		return (-1);
 	}
@@ -361,9 +361,11 @@ kr_fib_reload(void)
 {
 	struct kroute_node	*krn, *kr, *kn;
 
+	log_info("reloading interface list and routing table");
+
 	kr_state.fib_serial++;
 
-	if (fetchifs(0) != 0 || fetchtable() != 0)
+	if (fetchifs(0) == -1 || fetchtable() == -1)
 		return;
 
 	for (kr = RB_MIN(kroute_tree, &krt); kr != NULL; kr = krn) {
@@ -392,7 +394,8 @@ void
 kr_dispatch_msg(int fd, short event, void *bula)
 {
 	/* XXX this is stupid */
-	dispatch_rtmsg();
+	if (dispatch_rtmsg() == -1)
+		event_loopexit(NULL);
 }
 
 void
@@ -641,7 +644,7 @@ kroute_find(in_addr_t prefix, u_int8_t prefixlen, u_int8_t prio)
 		while (tmp) {
 			if (kroute_compare(&s, tmp) == 0)
 				kn = tmp;
-			else 
+			else
 				break;
 			tmp = RB_PREV(kroute_tree, &krt, kn);
 		}
@@ -664,7 +667,6 @@ kroute_matchgw(struct kroute_node *kr, struct in_addr nh)
 
 	return (NULL);
 }
-
 
 int
 kroute_insert(struct kroute_node *kr)
@@ -908,7 +910,7 @@ protect_lo(void)
 		log_warn("protect_lo");
 		return (-1);
 	}
-	kr->r.prefix.s_addr = htonl(INADDR_LOOPBACK);
+	kr->r.prefix.s_addr = htonl(INADDR_LOOPBACK & IN_CLASSA_NET);
 	kr->r.prefixlen = 8;
 	kr->r.flags = F_KERNEL|F_CONNECTED;
 
@@ -1178,8 +1180,7 @@ send_rtmsg(int fd, int action, struct kroute *kroute)
 
 retry:
 	if (writev(fd, iov, iovcnt) == -1) {
-		switch (errno) {
-		case ESRCH:
+		if (errno == ESRCH) {
 			if (hdr.rtm_type == RTM_CHANGE) {
 				hdr.rtm_type = RTM_ADD;
 				goto retry;
@@ -1188,20 +1189,11 @@ retry:
 				    inet_ntoa(kroute->prefix),
 				    kroute->prefixlen);
 				return (0);
-			} else {
-				log_warnx("send_rtmsg: action %u, "
-				    "prefix %s/%u: %s", hdr.rtm_type,
-				    inet_ntoa(kroute->prefix),
-				    kroute->prefixlen, strerror(errno));
-				return (0);
 			}
-			break;
-		default:
-			log_warnx("send_rtmsg: action %u, prefix %s/%u: %s",
-			    hdr.rtm_type, inet_ntoa(kroute->prefix),
-			    kroute->prefixlen, strerror(errno));
-			return (0);
 		}
+		log_warn("send_rtmsg: action %u, prefix %s/%u", hdr.rtm_type,
+		    inet_ntoa(kroute->prefix), kroute->prefixlen);
+		return (0);
 	}
 
 	return (0);
@@ -1210,11 +1202,10 @@ retry:
 int
 fetchtable(void)
 {
-	char			*buf;
 	size_t			 len;
 	int			 mib[7];
-
-	int			 rv = 0;
+	char			*buf;
+	int			 rv;
 
 	mib[0] = CTL_NET;
 	mib[1] = AF_ROUTE;
@@ -1330,6 +1321,9 @@ rtmsg_process(char *buf, int len)
 		mpath = 0;
 		prio = 0;
 
+		sa = (struct sockaddr *)(next + rtm->rtm_hdrlen);
+		get_rtaddrs(rtm->rtm_addrs, sa, rti_info);
+
 		switch (rtm->rtm_type) {
 		case RTM_ADD:
 		case RTM_GET:
@@ -1341,8 +1335,8 @@ rtmsg_process(char *buf, int len)
 			mpath = 0;
 			prio = 0;
 
-			sa = (struct sockaddr *)(next + rtm->rtm_hdrlen);
-			get_rtaddrs(rtm->rtm_addrs, sa, rti_info);
+			if (rtm->rtm_errno)		/* failed attempts... */
+				continue;
 
 			if (rtm->rtm_tableid != kr_state.rdomain)
 				continue;
@@ -1353,12 +1347,8 @@ rtmsg_process(char *buf, int len)
 			if (rtm->rtm_flags & RTF_LLINFO)	/* arp cache */
 				continue;
 
-			if (rtm->rtm_errno)		/* failed attempts... */
-				continue;
-#ifdef RTF_MPATH
 			if (rtm->rtm_flags & RTF_MPATH)
 				mpath = 1;
-#endif
 			prio = rtm->rtm_priority;
 			flags = (prio == RTP_OSPF) ?
 			    F_OSPFD_INSERTED : F_KERNEL;
@@ -1457,8 +1447,7 @@ add:
 				if ((kr = calloc(1,
 				    sizeof(struct kroute_node))) == NULL) {
 					log_warn("dispatch calloc");
-					rv = -1;
-					break;
+					return (-1);
 				}
 
 				kr->r.prefix.s_addr = prefix.s_addr;
@@ -1475,7 +1464,7 @@ add:
 					    RTM_DELETE, &kr->r);
 					free(kr);
 					if (rv == -1)
-						break;
+						return (-1);
 				} else {
 					if ((label = (struct sockaddr_rtlabel *)
 					    rti_info[RTAX_LABEL]) != NULL) {
@@ -1510,8 +1499,6 @@ add:
 			break;
 		case RTM_IFINFO:
 			memcpy(&ifm, next, sizeof(ifm));
-			sa = (struct sockaddr *)(next + rtm->rtm_hdrlen);
-			get_rtaddrs(ifm.ifm_addrs, sa, rti_info);
 			if_change(ifm.ifm_index, ifm.ifm_flags, &ifm.ifm_data,
 			    (struct sockaddr_dl *)rti_info[RTAX_IFP]);
 			break;
@@ -1520,8 +1507,6 @@ add:
 			if ((ifam->ifam_addrs & (RTA_NETMASK | RTA_IFA |
 			    RTA_BRD)) == 0)
 				break;
-			sa = (struct sockaddr *)(ifam + 1);
-			get_rtaddrs(ifam->ifam_addrs, sa, rti_info);
 
 			if_newaddr(ifam->ifam_index,
 			    (struct sockaddr_in *)rti_info[RTAX_IFA],
@@ -1533,8 +1518,6 @@ add:
 			if ((ifam->ifam_addrs & (RTA_NETMASK | RTA_IFA |
 			    RTA_BRD)) == 0)
 				break;
-			sa = (struct sockaddr *)(ifam + 1);
-			get_rtaddrs(ifam->ifam_addrs, sa, rti_info);
 
 			if_deladdr(ifam->ifam_index,
 			    (struct sockaddr_in *)rti_info[RTAX_IFA],
@@ -1543,6 +1526,13 @@ add:
 			break;
 		case RTM_IFANNOUNCE:
 			if_announce(next);
+			break;
+		case RTM_DESYNC:
+			/*
+			 * We lost some routing packets. Force a reload of
+			 * the kernel route/interface information.
+			 */
+			kr_fib_reload();
 			break;
 		default:
 			/* ignore for now */

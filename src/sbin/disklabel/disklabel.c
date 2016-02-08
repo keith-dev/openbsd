@@ -1,4 +1,4 @@
-/*	$OpenBSD: disklabel.c,v 1.160 2009/10/27 23:59:32 deraadt Exp $	*/
+/*	$OpenBSD: disklabel.c,v 1.170 2010/08/08 05:24:46 tedu Exp $	*/
 
 /*
  * Copyright (c) 1987, 1993
@@ -34,6 +34,7 @@
 
 #include <sys/param.h>
 #include <sys/ioctl.h>
+#include <sys/dkio.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
 #define DKTYPENAMES
@@ -114,6 +115,8 @@ int	getasciilabel(FILE *, struct disklabel *);
 int	cmplabel(struct disklabel *, struct disklabel *);
 void	usage(void);
 u_int64_t getnum(char *, u_int64_t, u_int64_t, const char **);
+void	uid_print(FILE *, struct disklabel *);
+int	uid_parse(struct disklabel *, char *);
 
 int
 main(int argc, char *argv[])
@@ -185,10 +188,12 @@ main(int argc, char *argv[])
 			op = WRITE;
 			break;
 		case 'p':
-			if (strchr("bckmgt", optarg[0]) == NULL ||
-			    optarg[1] != '\0')
-				usage();
-			print_unit = optarg[0];
+			if (strchr("bckmgtBCKMGT", optarg[0]) == NULL ||
+			    optarg[1] != '\0') {
+				fprintf(stderr, "Valid units are bckmgt\n");
+				exit(1);
+			}
+			print_unit = tolower(optarg[0]);
 			break;
 		case 'n':
 			donothing++;
@@ -262,14 +267,17 @@ main(int argc, char *argv[])
 	case RESTORE:
 		if (argc < 2 || argc > 3)
 			usage();
+		readlabel(f);
 #if NUMBOOT > 0
 		if (installboot && argc == 3)
 			makelabel(argv[2], NULL, &lab);
 #endif
 		lp = makebootarea(bootarea, &lab, f);
+		*lp = lab;
 		if (!(t = fopen(argv[1], "r")))
 			err(4, "%s", argv[1]);
 		error = getasciilabel(t, lp);
+		bzero(lp->d_uid, sizeof(lp->d_uid));
 		if (error == 0)
 			error = writelabel(f, bootarea, lp);
 		fclose(t);
@@ -359,7 +367,6 @@ writelabel(int f, char *boot, struct disklabel *lp)
 {
 #if NUMBOOT > 0
 	int writeable;
-	off_t sectoffset = 0;
 #endif
 
 #if NUMBOOT > 0
@@ -386,12 +393,8 @@ writelabel(int f, char *boot, struct disklabel *lp)
 				return (1);
 			}
 		}
-		if (verbose)
-			printf("writing label to block %lld (0x%qx)\n",
-			    (long long)sectoffset/DEV_BSIZE,
-			    (long long)sectoffset/DEV_BSIZE);
 		if (!donothing) {
-			if (lseek(f, sectoffset, SEEK_SET) < 0) {
+			if (lseek(f, 0, SEEK_SET) < 0) {
 				perror("lseek");
 				return (1);
 			}
@@ -482,7 +485,7 @@ readlabel(int f)
 	if (cflag && ioctl(f, DIOCRLDINFO) < 0)
 		err(4, "ioctl DIOCRLDINFO");
 
-	if (dflag | aflag) {
+	if ((op == RESTORE) || dflag || aflag) {
 		if (ioctl(f, DIOCGPDINFO, &lab) < 0)
 			err(4, "ioctl DIOCGPDINFO");
 	} else {
@@ -616,14 +619,6 @@ makedisktab(FILE *f, struct disklabel *lp)
 	(void)fprintf(f, "sc#%u:", lp->d_secpercyl);
 	(void)fprintf(f, "su#%llu:", DL_GETDSIZE(lp));
 
-	if (lp->d_rpm != 3600) {
-		(void)fprintf(f, "%srm#%hu:", did, lp->d_rpm);
-		did = "";
-	}
-	if (lp->d_interleave != 1) {
-		(void)fprintf(f, "%sil#%hu:", did, lp->d_interleave);
-		did = "";
-	}
 	/*
 	 * XXX We do not print have disktab information yet for
 	 * XXX DL_GETBSTART DL_GETBEND
@@ -777,8 +772,13 @@ display(FILE *f, struct disklabel *lp, char unit, int all)
 		fprintf(f, "type: %s\n", dktypenames[lp->d_type]);
 	else
 		fprintf(f, "type: %d\n", lp->d_type);
-	fprintf(f, "disk: %.*s\n", (int)sizeof(lp->d_typename), lp->d_typename);
-	fprintf(f, "label: %.*s\n", (int)sizeof(lp->d_packname), lp->d_packname);
+	fprintf(f, "disk: %.*s\n", (int)sizeof(lp->d_typename),
+	    lp->d_typename);
+	fprintf(f, "label: %.*s\n", (int)sizeof(lp->d_packname),
+	    lp->d_packname);
+	fprintf(f, "uid: ");
+	uid_print(f, lp);
+	fprintf(f, "\n");
 	fprintf(f, "flags:");
 	if (lp->d_flags & D_BADSECT)
 		fprintf(f, " badsect");
@@ -798,8 +798,6 @@ display(FILE *f, struct disklabel *lp, char unit, int all)
 		    d, unit);
 	fprintf(f, "\n");
 
-	fprintf(f, "rpm: %hu\n", lp->d_rpm);
-	fprintf(f, "interleave: %hu\n", lp->d_interleave);
 	fprintf(f, "boundstart: %llu\n", DL_GETBSTART(lp));
 	fprintf(f, "boundend: %llu\n", DL_GETBEND(lp));
 	fprintf(f, "drivedata: ");
@@ -979,6 +977,45 @@ getnum(char *nptr, u_int64_t min, u_int64_t max, const char **errstr)
 	return (ret);
 }
 
+void
+uid_print(FILE *f, struct disklabel *lp)
+{
+	char hex[] = "0123456789abcdef";
+	int i;
+
+	for (i = 0; i < sizeof(lp->d_uid); i++)
+		fprintf(f, "%c%c", hex[(lp->d_uid[i] >> 4) & 0xf],
+		    hex[lp->d_uid[i] & 0xf]);
+}
+
+int
+uid_parse(struct disklabel *lp, char *s)
+{
+	u_char uid[8];
+	char c;
+	int i;
+
+	if (strlen(s) != 16)
+		return -1;
+
+	for (i = 0; i < 16; i++) {
+		c = s[i];
+		if (c >= '0' && c <= '9')
+			c -= '0';
+		else if (c >= 'a' && c <= 'f')
+			c -= ('a' - 10);
+		else if (c >= 'A' && c <= 'F')
+			c -= ('A' - 10);
+		else
+			return -1;
+		uid[i / 2] <<= 4;
+		uid[i / 2] |= c & 0xf;
+	}
+
+	memcpy(lp->d_uid, &uid, sizeof(lp->d_uid));
+	return 0;
+}
+
 /*
  * Read an ascii label in from FILE f,
  * in the same format as that put out by display(),
@@ -1078,6 +1115,13 @@ getasciilabel(FILE *f, struct disklabel *lp)
 			strncpy(lp->d_packname, tp, sizeof (lp->d_packname));
 			continue;
 		}
+		if (!strcmp(cp, "uid")) {
+			if (uid_parse(lp, tp) != 0) {
+				warnx("line %d: bad %s: %s", lineno, cp, tp);
+				errors++;
+			}
+			continue;
+		}
 		if (!strcmp(cp, "bytes/sector")) {
 			v = GETNUM(lp->d_secsize, tp, 1, &errstr);
 			if (errstr || (v % 512) != 0) {
@@ -1133,48 +1177,22 @@ getasciilabel(FILE *f, struct disklabel *lp)
 			}
 			continue;
 		}
-		if (!strcmp(cp, "rpm")) {
-			v = GETNUM(lp->d_rpm, tp, 1, &errstr);
-			if (errstr) {
-				warnx("line %d: bad %s: %s", lineno, cp, tp);
-				errors++;
-			} else
-				lp->d_rpm = v;
+
+		/* Ignore fields that are no longer in the disklabel. */
+		if (!strcmp(cp, "rpm") ||
+		    !strcmp(cp, "interleave") ||
+		    !strcmp(cp, "trackskew") ||
+		    !strcmp(cp, "cylinderskew") ||
+		    !strcmp(cp, "headswitch") ||
+		    !strcmp(cp, "track-to-track seek"))
 			continue;
-		}
-		if (!strcmp(cp, "interleave")) {
-			v = GETNUM(lp->d_interleave, tp, 1, &errstr);
-			if (errstr) {
-				warnx("line %d: bad %s: %s", lineno, cp, tp);
-				errors++;
-			} else
-				lp->d_interleave = v;
+
+		/* Ignore fields that are forcibly set when label is read. */
+		if (!strcmp(cp, "total sectors") ||
+		    !strcmp(cp, "boundstart") ||
+		    !strcmp(cp, "boundend"))
 			continue;
-		}
-		if (!strcmp(cp, "trackskew")) {
-			/* ignore */
-			continue;
-		}
-		if (!strcmp(cp, "cylinderskew")) {
-			/* ignore */
-			continue;
-		}
-		if (!strcmp(cp, "headswitch")) {
-			/* ignore */
-			continue;
-		}
-		if (!strcmp(cp, "track-to-track seek")) {
-			/* ignore */
-			continue;
-		}
-		if (!strcmp(cp, "boundstart")) {
-			/* ignore */
-			continue;
-		}
-		if (!strcmp(cp, "boundend")) {
-			/* ignore */
-			continue;
-		}
+
 		if ('a' <= *cp && *cp <= 'z' && cp[1] == '\0') {
 			unsigned int part = *cp - 'a';
 
@@ -1299,8 +1317,6 @@ checklabel(struct disklabel *lp)
 		warnx("cylinders/unit %d", lp->d_ncylinders);
 		errors++;
 	}
-	if (lp->d_rpm == 0)
-		warnx("warning, revolutions/minute %d", lp->d_rpm);
 	if (lp->d_secpercyl == 0)
 		lp->d_secpercyl = lp->d_nsectors * lp->d_ntracks;
 	if (DL_GETDSIZE(lp) == 0)

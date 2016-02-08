@@ -1,4 +1,4 @@
-/*	$OpenBSD: parse.y,v 1.146 2009/08/04 15:05:50 jsing Exp $	*/
+/*	$OpenBSD: parse.y,v 1.148 2010/08/03 18:42:40 henning Exp $	*/
 
 /*
  * Copyright (c) 2002, 2003, 2004 Henning Brauer <henning@openbsd.org>
@@ -1132,9 +1132,10 @@ top:
 					return (0);
 				if (next == quotec || c == ' ' || c == '\t')
 					c = next;
-				else if (next == '\n')
+				else if (next == '\n') {
+					file->lineno++;
 					continue;
-				else
+				} else
 					lungetc(next);
 			} else if (c == quotec) {
 				*p = '\0';
@@ -1801,7 +1802,7 @@ ifa_exists(const char *ifa_name)
 	if (iftab == NULL)
 		ifa_load();
 
-	/* check wether this is a group */
+	/* check whether this is a group */
 	if ((s = socket(AF_INET, SOCK_DGRAM, 0)) == -1)
 		err(1, "ifa_exists: socket");
 	bzero(&ifgr, sizeof(ifgr));

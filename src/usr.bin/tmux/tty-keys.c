@@ -1,4 +1,4 @@
-/* $OpenBSD: tty-keys.c,v 1.29 2009/12/17 17:39:56 nicm Exp $ */
+/* $OpenBSD: tty-keys.c,v 1.31 2010/05/31 19:51:29 nicm Exp $ */
 
 /*
  * Copyright (c) 2007 Nicholas Marriott <nicm@users.sourceforge.net>
@@ -408,7 +408,7 @@ tty_keys_find1(struct tty_key *tk, const char *buf, size_t len, size_t *size)
 		(*size)++;
 
 		/* At the end of the string, return the current node. */
-		if (len == 0)
+		if (len == 0 || (tk->next == NULL && tk->key != KEYC_NONE))
 			return (tk);
 
 		/* Move into the next tree for the following character. */
@@ -612,7 +612,8 @@ tty_keys_mouse(const char *buf, size_t len, size_t *size, struct mouse_event *m)
 		return (1);
 	*size = 6;
 
-	log_debug("mouse input is: %.6s", buf);
+	log_debug(
+	    "mouse input: %.6s (%hhu,%hhu/%hhu)", buf, buf[4], buf[5], buf[3]);
 
 	m->b = buf[3];
 	m->x = buf[4];

@@ -1,4 +1,4 @@
-/*	$OpenBSD: vnd.c,v 1.95 2009/08/24 08:51:18 jasper Exp $	*/
+/*	$OpenBSD: vnd.c,v 1.100 2010/07/22 14:34:06 thib Exp $	*/
 /*	$NetBSD: vnd.c,v 1.26 1996/03/30 23:06:11 christos Exp $	*/
 
 /*
@@ -57,7 +57,6 @@
  * file, the protection of the mapped file is ignored (effectively,
  * by using root credentials in all transactions).
  *
- * NOTE 3: Doesn't interact with leases, should it?
  */
 
 #include <sys/param.h>
@@ -79,6 +78,7 @@
 #include <sys/rwlock.h>
 #include <sys/uio.h>
 #include <sys/conf.h>
+#include <sys/dkio.h>
 
 #include <crypto/blf.h>
 
@@ -316,8 +316,6 @@ vndgetdisklabel(dev_t dev, struct vnd_softc *sc, struct disklabel *lp,
 	lp->d_type = DTYPE_VND;
 	strncpy(lp->d_packname, "fictitious", sizeof(lp->d_packname));
 	DL_SETDSIZE(lp, sc->sc_size);
-	lp->d_rpm = 3600;
-	lp->d_interleave = 1;
 	lp->d_flags = 0;
 	lp->d_version = 1;
 
@@ -571,6 +569,7 @@ vndstrategy(struct buf *bp)
 		nbp->vb_buf.b_validoff = bp->b_validoff;
 		nbp->vb_buf.b_validend = bp->b_validend;
 		LIST_INIT(&nbp->vb_buf.b_dep);
+		nbp->vb_buf.b_bq = NULL;
 
 		/* save a reference to the old buffer */
 		nbp->vb_obp = bp;
@@ -661,24 +660,29 @@ vndiodone(struct buf *bp)
 		DNPRINTF(VDB_IO, "vndiodone: vbp %p error %d\n", vbp,
 		    vbp->vb_buf.b_error);
 
-		pbp->b_flags |= B_ERROR;
-		/* XXX does this matter here? */
-		(&vbp->vb_buf)->b_flags |= B_RAW;
-		pbp->b_error = biowait(&vbp->vb_buf);
+		pbp->b_flags |= (B_ERROR|B_INVAL);
+		pbp->b_error = vbp->vb_buf.b_error;
+		pbp->b_iodone = NULL;
+		biodone(pbp);
+		goto out;
 	}
+
 	pbp->b_resid -= vbp->vb_buf.b_bcount;
+
+	if (pbp->b_resid == 0) {
+		DNPRINTF(VDB_IO, "vndiodone: pbp %p iodone\n", pbp);
+		biodone(pbp);
+	}
+
+out:
 	putvndbuf(vbp);
+
 	if (vnd->sc_tab.b_active) {
 		disk_unbusy(&vnd->sc_dk, (pbp->b_bcount - pbp->b_resid),
 		    (pbp->b_flags & B_READ));
 		if (!vnd->sc_tab.b_actf)
 			vnd->sc_tab.b_active--;
 	}
-	if (pbp->b_resid == 0) {
-		DNPRINTF(VDB_IO, "vndiodone: pbp %p iodone\n", pbp);
-		biodone(pbp);
-	}
-
 }
 
 /* ARGSUSED */

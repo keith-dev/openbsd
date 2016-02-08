@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_bge.c,v 1.291 2010/01/10 00:07:40 naddy Exp $	*/
+/*	$OpenBSD: if_bge.c,v 1.298 2010/08/07 03:50:02 krw Exp $	*/
 
 /*
  * Copyright (c) 2001 Wind River Systems
@@ -832,7 +832,7 @@ bge_newbuf_jumbo(struct bge_softc *sc, int i)
 		r->bge_bd.bge_len = dmap->dm_segs[0].ds_len;
 		break;
 	default:
-		panic("%s: %d segments\n", __func__, dmap->dm_nsegs);
+		panic("%s: %d segments", __func__, dmap->dm_nsegs);
 	}
 
 	bus_dmamap_sync(sc->bge_dmatag, sc->bge_ring_map,
@@ -1352,9 +1352,12 @@ bge_blockinit(struct bge_softc *sc)
 
 	/* Configure mbuf pool watermarks */
 	/* new Broadcom docs strongly recommend these: */
-	if (BGE_IS_5705_PLUS(sc) &&
-	    BGE_ASICREV(sc->bge_chipid) != BGE_ASICREV_BCM5717 &&
-	    BGE_ASICREV(sc->bge_chipid) != BGE_ASICREV_BCM57765) {
+	if (BGE_ASICREV(sc->bge_chipid) == BGE_ASICREV_BCM5717 ||
+	    BGE_ASICREV(sc->bge_chipid) == BGE_ASICREV_BCM57765) {
+		CSR_WRITE_4(sc, BGE_BMAN_MBUFPOOL_READDMA_LOWAT, 0x0);
+		CSR_WRITE_4(sc, BGE_BMAN_MBUFPOOL_MACRX_LOWAT, 0x2a);
+		CSR_WRITE_4(sc, BGE_BMAN_MBUFPOOL_HIWAT, 0xa0);
+	} else if (BGE_IS_5705_PLUS(sc)) {
 		CSR_WRITE_4(sc, BGE_BMAN_MBUFPOOL_READDMA_LOWAT, 0x0);
 
 		if (BGE_ASICREV(sc->bge_chipid) == BGE_ASICREV_BCM5906) {
@@ -1660,10 +1663,16 @@ bge_blockinit(struct bge_softc *sc)
 	if (BGE_IS_5755_PLUS(sc))
 		val |= BGE_WDMAMODE_STATUS_TAG_FIX;
 
+	if (BGE_ASICREV(sc->bge_chipid) == BGE_ASICREV_BCM5785)
+		val |= BGE_WDMAMODE_BURST_ALL_DATA;
+
 	/* Turn on write DMA state machine */
 	CSR_WRITE_4(sc, BGE_WDMA_MODE, val);
 
 	val = BGE_RDMAMODE_ENABLE|BGE_RDMAMODE_ALL_ATTNS;
+
+	if (BGE_ASICREV(sc->bge_chipid) == BGE_ASICREV_BCM5717)
+		val |= BGE_RDMAMODE_MULT_DMA_RD_DIS;
 
 	if (BGE_ASICREV(sc->bge_chipid) == BGE_ASICREV_BCM5784 ||
 	    BGE_ASICREV(sc->bge_chipid) == BGE_ASICREV_BCM5785 ||
@@ -1875,18 +1884,16 @@ bge_attach(struct device *parent, struct device *self, void *aux)
 		printf("%s (0x%x)", br->br_name, sc->bge_chipid);
 
 	/*
-	 * PCI Express check.
+	 * PCI Express or PCI-X controller check.
 	 */
 	if (pci_get_capability(pa->pa_pc, pa->pa_tag, PCI_CAP_PCIEXPRESS,
-	    NULL, NULL) != 0)
+	    NULL, NULL) != 0) {
 		sc->bge_flags |= BGE_PCIE;
-
-	/*
-	 * PCI-X check.
-	 */
-	if ((pci_conf_read(pa->pa_pc, pa->pa_tag, BGE_PCI_PCISTATE) &
-	    BGE_PCISTATE_PCI_BUSMODE) == 0)
-		sc->bge_flags |= BGE_PCIX;
+	} else {
+		if ((pci_conf_read(pa->pa_pc, pa->pa_tag, BGE_PCI_PCISTATE) &
+		    BGE_PCISTATE_PCI_BUSMODE) == 0)
+			sc->bge_flags |= BGE_PCIX;
+	}
 
 	/*
 	 * SEEPROM check.
@@ -2118,10 +2125,12 @@ bge_attach(struct device *parent, struct device *self, void *aux)
 	sc->bge_tx_max_coal_bds = 400;
 
 	/* 5705 limits RX return ring to 512 entries. */
-	if (BGE_IS_5705_PLUS(sc))
-		sc->bge_return_ring_cnt = BGE_RETURN_RING_CNT_5705;
-	else
+	if (BGE_IS_5700_FAMILY(sc) ||
+	    BGE_ASICREV(sc->bge_chipid) == BGE_ASICREV_BCM5717 ||
+	    BGE_ASICREV(sc->bge_chipid) == BGE_ASICREV_BCM57765)
 		sc->bge_return_ring_cnt = BGE_RETURN_RING_CNT;
+	else
+		sc->bge_return_ring_cnt = BGE_RETURN_RING_CNT_5705;
 
 	/* Set up ifnet structure */
 	ifp = &sc->arpcom.ac_if;
@@ -2190,7 +2199,8 @@ bge_attach(struct device *parent, struct device *self, void *aux)
 	/* The SysKonnect SK-9D41 is a 1000baseSX card. */
 	if (PCI_PRODUCT(subid) == SK_SUBSYSID_9D41 ||
 	    (hwcfg & BGE_HWCFG_MEDIA) == BGE_MEDIA_FIBER) {
-		if (BGE_IS_5714_FAMILY(sc))
+		if (BGE_IS_5714_FAMILY(sc) ||
+		    BGE_ASICREV(sc->bge_chipid) == BGE_ASICREV_BCM5717)
 		    sc->bge_flags |= BGE_PHY_FIBER_MII;
 		else
 		    sc->bge_flags |= BGE_PHY_FIBER_TBI;
@@ -2281,8 +2291,13 @@ fail_1:
 int
 bge_activate(struct device *self, int act)
 {
-	switch(act) {
+	struct bge_softc *sc = (struct bge_softc *)self;
+	struct ifnet *ifp = &sc->arpcom.ac_if;
+
+	switch (act) {
 	case DVACT_SUSPEND:
+		if (ifp->if_flags & IFF_RUNNING)
+			bge_stop(sc);
 		break;
 	case DVACT_RESUME:
 		bge_power(PWR_RESUME, self);
@@ -3043,11 +3058,8 @@ doit:
 	    BUS_DMA_NOWAIT))
 		return (ENOBUFS);
 
-	/*
-	 * Sanity check: avoid coming within 16 descriptors
-	 * of the end of the ring.
-	 */
-	if (dmamap->dm_nsegs > (BGE_TX_RING_CNT - sc->bge_txcnt - 16))
+	/* Check if we have enough free send BDs. */
+	if (sc->bge_txcnt + dmamap->dm_nsegs >= BGE_TX_RING_CNT)
 		goto fail_unload;
 
 	for (i = 0; i < dmamap->dm_nsegs; i++) {
@@ -3101,9 +3113,9 @@ void
 bge_start(struct ifnet *ifp)
 {
 	struct bge_softc *sc;
-	struct mbuf *m_head = NULL;
+	struct mbuf *m_head;
 	u_int32_t prodidx;
-	int pkts = 0;
+	int pkts;
 
 	sc = ifp->if_softc;
 
@@ -3111,12 +3123,15 @@ bge_start(struct ifnet *ifp)
 		return;
 	if (!BGE_STS_BIT(sc, BGE_STS_LINK))
 		return;
-	if (IFQ_IS_EMPTY(&ifp->if_snd))
-		return;
 
 	prodidx = sc->bge_tx_prodidx;
 
-	while (sc->bge_cdata.bge_tx_chain[prodidx] == NULL) {
+	for (pkts = 0; !IFQ_IS_EMPTY(&ifp->if_snd);) {
+		if (sc->bge_txcnt > BGE_TX_RING_CNT - 16) {
+			ifp->if_flags |= IFF_OACTIVE;
+			break;
+		}
+
 		IFQ_POLL(&ifp->if_snd, m_head);
 		if (m_head == NULL)
 			break;
@@ -3725,9 +3740,7 @@ bge_power(int why, void *xsc)
 
 	if (why == PWR_RESUME) {
 		ifp = &sc->arpcom.ac_if;
-		if (ifp->if_flags & IFF_UP) {
+		if (ifp->if_flags & IFF_UP)
 			bge_init(xsc);
-			bge_start(ifp);
-		}
 	}
 }

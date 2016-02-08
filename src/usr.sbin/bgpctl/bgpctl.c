@@ -1,4 +1,4 @@
-/*	$OpenBSD: bgpctl.c,v 1.157 2010/03/08 17:02:19 claudio Exp $ */
+/*	$OpenBSD: bgpctl.c,v 1.160 2010/05/26 13:56:07 nicm Exp $ */
 
 /*
  * Copyright (c) 2003 Henning Brauer <henning@openbsd.org>
@@ -56,6 +56,7 @@ void		 print_timer(const char *, time_t);
 static char	*fmt_timeframe(time_t t);
 static char	*fmt_timeframe_core(time_t t);
 void		 show_fib_head(void);
+void		 show_fib_tables_head(void);
 void		 show_network_head(void);
 void		 show_fib_flags(u_int16_t);
 int		 show_fib_msg(struct imsg *);
@@ -167,12 +168,13 @@ main(int argc, char *argv[])
 		break;
 	case SHOW_FIB:
 		if (!res->addr.aid) {
-			struct buf	*msg;
+			struct ibuf	*msg;
 			sa_family_t	 af;
 
 			af = aid2af(res->aid);
-			if ((msg = imsg_create(ibuf, IMSG_CTL_KROUTE, 0, 0,
-			    sizeof(res->flags) + sizeof(af))) == NULL)
+			if ((msg = imsg_create(ibuf, IMSG_CTL_KROUTE,
+			    res->rtableid, 0, sizeof(res->flags) +
+			    sizeof(af))) == NULL)
 				errx(1, "imsg_create failure");
 			if (imsg_add(msg, &res->flags, sizeof(res->flags)) ==
 			    -1 ||
@@ -180,12 +182,17 @@ main(int argc, char *argv[])
 				errx(1, "imsg_add failure");
 			imsg_close(ibuf, msg);
 		} else
-			imsg_compose(ibuf, IMSG_CTL_KROUTE_ADDR, 0, 0, -1,
-			    &res->addr, sizeof(res->addr));
+			imsg_compose(ibuf, IMSG_CTL_KROUTE_ADDR, res->rtableid,
+			    0, -1, &res->addr, sizeof(res->addr));
 		show_fib_head();
 		break;
+	case SHOW_FIB_TABLES:
+		imsg_compose(ibuf, IMSG_CTL_SHOW_FIB_TABLES, 0, 0, -1, NULL, 0);
+		show_fib_tables_head();
+		break;
 	case SHOW_NEXTHOP:
-		imsg_compose(ibuf, IMSG_CTL_SHOW_NEXTHOP, 0, 0, -1, NULL, 0);
+		imsg_compose(ibuf, IMSG_CTL_SHOW_NEXTHOP, res->rtableid, 0, -1,
+		    NULL, 0);
 		show_nexthop_head();
 		break;
 	case SHOW_INTERFACE:
@@ -241,12 +248,14 @@ main(int argc, char *argv[])
 		errx(1, "action==FIB");
 		break;
 	case FIB_COUPLE:
-		imsg_compose(ibuf, IMSG_CTL_FIB_COUPLE, 0, 0, -1, NULL, 0);
+		imsg_compose(ibuf, IMSG_CTL_FIB_COUPLE, res->rtableid, 0, -1,
+		    NULL, 0);
 		printf("couple request sent.\n");
 		done = 1;
 		break;
 	case FIB_DECOUPLE:
-		imsg_compose(ibuf, IMSG_CTL_FIB_DECOUPLE, 0, 0, -1, NULL, 0);
+		imsg_compose(ibuf, IMSG_CTL_FIB_DECOUPLE, res->rtableid, 0, -1,
+		    NULL, 0);
 		printf("decouple request sent.\n");
 		done = 1;
 		break;
@@ -342,6 +351,8 @@ main(int argc, char *argv[])
 				done = show_summary_terse_msg(&imsg, nodescr);
 				break;
 			case SHOW_FIB:
+			case SHOW_FIB_TABLES:
+			case NETWORK_SHOW:
 				done = show_fib_msg(&imsg);
 				break;
 			case SHOW_NEXTHOP:
@@ -368,9 +379,6 @@ main(int argc, char *argv[])
 				break;
 			case SHOW_RIB_MEM:
 				done = show_rib_memory_msg(&imsg);
-				break;
-			case NETWORK_SHOW:
-				done = show_fib_msg(&imsg);
 				break;
 			case NEIGHBOR:
 			case NEIGHBOR_UP:
@@ -761,6 +769,12 @@ show_fib_head(void)
 }
 
 void
+show_fib_tables_head(void)
+{
+	printf("%-5s %-20s %-8s\n", "Table", "Description", "State");
+}
+
+void
 show_network_head(void)
 {
 	printf("flags: S = Static\n");
@@ -804,56 +818,44 @@ show_fib_flags(u_int16_t flags)
 int
 show_fib_msg(struct imsg *imsg)
 {
-	struct kroute		*k;
-	struct kroute6		*k6;
+	struct kroute_full	*kf;
+	struct ktable		*kt;
 	char			*p;
 
 	switch (imsg->hdr.type) {
 	case IMSG_CTL_KROUTE:
 	case IMSG_CTL_SHOW_NETWORK:
-		if (imsg->hdr.len < IMSG_HEADER_SIZE + sizeof(struct kroute))
+		if (imsg->hdr.len < IMSG_HEADER_SIZE + sizeof(*kf))
 			errx(1, "wrong imsg len");
-		k = imsg->data;
+		kf = imsg->data;
 
-		show_fib_flags(k->flags);
+		show_fib_flags(kf->flags);
 
-		if (asprintf(&p, "%s/%u", inet_ntoa(k->prefix), k->prefixlen) ==
-		    -1)
+		if (asprintf(&p, "%s/%u", log_addr(&kf->prefix),
+		    kf->prefixlen) == -1)
 			err(1, NULL);
-		printf("%4i %-20s ", k->priority, p);
+		printf("%4i %-20s ", kf->priority, p);
 		free(p);
 
-		if (k->nexthop.s_addr)
-			printf("%s", inet_ntoa(k->nexthop));
-		else if (k->flags & F_CONNECTED)
-			printf("link#%u", k->ifindex);
+		if (kf->flags & F_CONNECTED)
+			printf("link#%u", kf->ifindex);
+		else
+			printf("%s", log_addr(&kf->nexthop));
 		printf("\n");
 
 		break;
-	case IMSG_CTL_KROUTE6:
-	case IMSG_CTL_SHOW_NETWORK6:
-		if (imsg->hdr.len < IMSG_HEADER_SIZE + sizeof(struct kroute6))
+	case IMSG_CTL_SHOW_FIB_TABLES:
+		if (imsg->hdr.len < IMSG_HEADER_SIZE + sizeof(*kt))
 			errx(1, "wrong imsg len");
-		k6 = imsg->data;
+		kt = imsg->data;
 
-		show_fib_flags(k6->flags);
-
-		if (asprintf(&p, "%s/%u", log_in6addr(&k6->prefix),
-		    k6->prefixlen) == -1)
-			err(1, NULL);
-		printf("%4i %-20s ", k6->priority, p);
-		free(p);
-
-		if (!IN6_IS_ADDR_UNSPECIFIED(&k6->nexthop))
-			printf("%s", log_in6addr(&k6->nexthop));
-		else if (k6->flags & F_CONNECTED)
-			printf("link#%u", k6->ifindex);
-		printf("\n");
+		printf("%5i %-20s %-8s%s\n", kt->rtableid, kt->descr,
+		    kt->fib_sync ? "coupled" : "decoupled",
+		    kt->fib_sync != kt->fib_conf ? "*" : "");
 
 		break;
 	case IMSG_CTL_END:
 		return (1);
-		break;
 	default:
 		break;
 	}
@@ -1094,26 +1096,26 @@ print_flags(u_int8_t flags, int sum)
 	char	*p = flagstr;
 
 	if (sum) {
-		if (flags & F_RIB_ANNOUNCE)
+		if (flags & F_PREF_ANNOUNCE)
 			*p++ = 'A';
-		if (flags & F_RIB_INTERNAL)
+		if (flags & F_PREF_INTERNAL)
 			*p++ = 'I';
-		if (flags & F_RIB_ELIGIBLE)
+		if (flags & F_PREF_ELIGIBLE)
 			*p++ = '*';
-		if (flags & F_RIB_ACTIVE)
+		if (flags & F_PREF_ACTIVE)
 			*p++ = '>';
 		*p = '\0';
 		printf("%-5s ", flagstr);
 	} else {
-		if (flags & F_RIB_INTERNAL)
+		if (flags & F_PREF_INTERNAL)
 			printf("internal");
 		else
 			printf("external");
-		if (flags & F_RIB_ELIGIBLE)
+		if (flags & F_PREF_ELIGIBLE)
 			printf(", valid");
-		if (flags & F_RIB_ACTIVE)
+		if (flags & F_PREF_ACTIVE)
 			printf(", best");
-		if (flags & F_RIB_ANNOUNCE)
+		if (flags & F_PREF_ANNOUNCE)
 			printf(", announced");
 	}
 }

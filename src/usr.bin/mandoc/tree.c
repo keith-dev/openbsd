@@ -1,6 +1,6 @@
-/*	$Id: tree.c,v 1.6 2009/12/22 23:58:00 schwarze Exp $ */
+/*	$Id: tree.c,v 1.10 2010/07/13 01:09:13 schwarze Exp $ */
 /*
- * Copyright (c) 2008, 2009 Kristaps Dzonsons <kristaps@kth.se>
+ * Copyright (c) 2008, 2009 Kristaps Dzonsons <kristaps@bsd.lv>
  *
  * Permission to use, copy, modify, and distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -19,6 +19,7 @@
 #include <stdlib.h>
 #include <time.h>
 
+#include "mandoc.h"
 #include "mdoc.h"
 #include "man.h"
 #include "main.h"
@@ -69,7 +70,10 @@ print_mdoc(const struct mdoc_node *n, int indent)
 		t = "block-head";
 		break;
 	case (MDOC_BODY):
-		t = "block-body";
+		if (n->end)
+			t = "body-end";
+		else
+			t = "block-body";
 		break;
 	case (MDOC_TAIL):
 		t = "block-tail";

@@ -497,15 +497,14 @@ decode_options (unsigned int argc, const char **argv)
       flag_schedule_insns_after_reload = 1;
 #endif
       flag_regmove = 1;
-      flag_strict_overflow = 1;
 #if !defined(OPENBSD_NATIVE) && !defined(OPENBSD_CROSS)
+      flag_strict_overflow = 1;
       flag_delete_null_pointer_checks = 1;
 #endif
       flag_reorder_blocks = 1;
       flag_reorder_functions = 1;
       flag_tree_store_ccp = 1;
       flag_tree_store_copy_prop = 1;
-      flag_tree_vrp = 1;
 
       if (!optimize_size)
 	{

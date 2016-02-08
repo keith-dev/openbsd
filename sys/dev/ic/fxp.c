@@ -1,4 +1,4 @@
-/*	$OpenBSD: fxp.c,v 1.100 2009/10/15 17:54:54 deraadt Exp $	*/
+/*	$OpenBSD: fxp.c,v 1.102 2010/08/06 14:11:42 deraadt Exp $	*/
 /*	$NetBSD: if_fxp.c,v 1.2 1997/06/05 02:01:55 thorpej Exp $	*/
 
 /*
@@ -147,9 +147,7 @@ void fxp_mediastatus(struct ifnet *, struct ifmediareq *);
 void fxp_scb_wait(struct fxp_softc *);
 void fxp_start(struct ifnet *);
 int fxp_ioctl(struct ifnet *, u_long, caddr_t);
-void fxp_init(void *);
 void fxp_load_ucode(struct fxp_softc *);
-void fxp_stop(struct fxp_softc *, int, int);
 void fxp_watchdog(struct ifnet *);
 int fxp_add_rfabuf(struct fxp_softc *, struct mbuf *);
 int fxp_mdi_read(struct device *, int, int);
@@ -338,7 +336,8 @@ fxp_attach(struct fxp_softc *sc, const char *intrstr)
 	DELAY(10);
 
 	if (bus_dmamem_alloc(sc->sc_dmat, sizeof(struct fxp_ctrl),
-	    PAGE_SIZE, 0, &sc->sc_cb_seg, 1, &sc->sc_cb_nseg, BUS_DMA_NOWAIT))
+	    PAGE_SIZE, 0, &sc->sc_cb_seg, 1, &sc->sc_cb_nseg,
+	    BUS_DMA_NOWAIT | BUS_DMA_ZERO))
 		goto fail;
 	if (bus_dmamem_map(sc->sc_dmat, &sc->sc_cb_seg, sc->sc_cb_nseg,
 	    sizeof(struct fxp_ctrl), (caddr_t *)&sc->sc_ctrl,
@@ -375,7 +374,6 @@ fxp_attach(struct fxp_softc *sc, const char *intrstr)
 		sc->txs[i].tx_off = offsetof(struct fxp_ctrl, tx_cb[i]);
 		sc->txs[i].tx_next = &sc->txs[(i + 1) & FXP_TXCB_MASK];
 	}
-	bzero(sc->sc_ctrl, sizeof(struct fxp_ctrl));
 
 	/*
 	 * Pre-allocate some receive buffers.

@@ -1,4 +1,4 @@
-/*	$OpenBSD: disk.c,v 1.29 2009/02/08 18:03:18 krw Exp $	*/
+/*	$OpenBSD: disk.c,v 1.31 2010/06/30 22:53:41 krw Exp $	*/
 
 /*
  * Copyright (c) 1997, 2001 Tobias Weingartner
@@ -32,12 +32,15 @@
 #include <unistd.h>
 #include <sys/fcntl.h>
 #include <sys/ioctl.h>
+#include <sys/dkio.h>
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <sys/disklabel.h>
 #include <sys/param.h>
 #include "disk.h"
 #include "misc.h"
+
+struct disklabel dl;
 
 DISK_metrics *DISK_getlabelmetrics(char *name);
 
@@ -66,7 +69,6 @@ DISK_metrics *
 DISK_getlabelmetrics(char *name)
 {
 	DISK_metrics *lm = NULL;
-	struct disklabel dl;
 	int fd;
 
 	/* Get label metrics */

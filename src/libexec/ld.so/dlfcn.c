@@ -1,4 +1,4 @@
-/*	$OpenBSD: dlfcn.c,v 1.80 2008/06/13 23:14:47 kurt Exp $ */
+/*	$OpenBSD: dlfcn.c,v 1.82 2010/07/01 19:25:44 drahn Exp $ */
 
 /*
  * Copyright (c) 1998 Per Fogelstrom, Opsycon AB
@@ -85,7 +85,7 @@ dlopen(const char *libname, int flags)
 		/* if opened but grpsym_list has not been created */
 		if (OBJECT_DLREF_CNT(object) == 1) {
 			/* add first object manually */
-			_dl_link_grpsym(object);
+			_dl_link_grpsym(object, 1);
 			_dl_cache_grpsym_list(object);
 		}
 		goto loaded;
@@ -516,10 +516,18 @@ _dl_show_objects(void)
 }
 
 void
-_dl_thread_bind_lock(int what)
+_dl_thread_bind_lock(int what, sigset_t *omask)
 {
+	if (! what) {
+		sigset_t nmask;
+
+		sigfillset(&nmask);
+		_dl_sigprocmask(SIG_BLOCK, &nmask, omask);
+	}
 	if (_dl_bind_lock_f != NULL)
 		(*_dl_bind_lock_f)(what);
+	if (what)
+		_dl_sigprocmask(SIG_SETMASK, omask, NULL);
 }
 
 void

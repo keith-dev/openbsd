@@ -1,4 +1,4 @@
-#	$OpenBSD: GENERIC,v 1.195 2010/03/03 20:57:28 mk Exp $g
+#	$OpenBSD: GENERIC,v 1.199 2010/08/02 14:13:23 deraadt Exp $g
 #
 # For further information on compiling OpenBSD kernels, see the config(8)
 # man page.
@@ -154,6 +154,7 @@ wi*		at macobio?	# airport
 macgpio*	at macobio?	# GPIO, PMU interrupt router.
 macgpio*	at macgpio?	# GPIO, PMU interrupt router.
 sysbutton*	at macgpio?	# Xserve system id button.
+pgs*		at macgpio?	# Programmer Switch.
 akbd*		at adb?		# ADB keyboard
 wskbd*		at akbd? mux 1
 ams*		at adb?		# ADB mouse
@@ -277,8 +278,6 @@ url*	at uhub?		# Realtek RTL8150L based adapters
 wi*	at uhub?		# WaveLAN IEEE 802.11DS
 urio*	at uhub?		# Diamond Multimedia Rio 500
 uscanner* at uhub?		# USB Scanners
-usscanner* at uhub?		# USB SCSI scanners, e.g., HP5300
-scsibus* at usscanner?
 #uyap*	at uhub?		# Y@P firmware loader
 udsbr*	at uhub?		# D-Link DSB-R100 radio
 radio*	at udsbr?		# USB radio
@@ -370,19 +369,13 @@ audio*		at uaudio?
 audio*		at aoa?
 audio*		at daca?
 
-# OPL[23] FM synthesizers
-opl*		at cmpci?
-opl*		at eso?
-
 # MIDI support
 midi*		at eap?
-midi*		at opl?
 
 sd*		at scsibus?
 st*		at scsibus?
 cd*		at scsibus?
 ch*		at scsibus?
-ss*		at scsibus?
 safte*		at scsibus?
 ses*		at scsibus?
 uk*		at scsibus?
@@ -392,6 +385,7 @@ option ONEWIREVERBOSE
 owid*	at onewire?		# ID
 owsbm*	at onewire?		# Smart Battery Monitor
 owtemp* at onewire?		# Temperature
+owctr*	at onewire?			# Counter device
 
 pseudo-device	hotplug	1	# devices hot plugging
 pseudo-device	wsmux	2	# mouse & keyboard multiplexor

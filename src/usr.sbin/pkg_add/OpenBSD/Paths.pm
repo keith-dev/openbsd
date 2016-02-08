@@ -1,5 +1,5 @@
 # ex:ts=8 sw=4:
-# $OpenBSD: Paths.pm,v 1.8 2010/02/28 10:06:46 espie Exp $
+# $OpenBSD: Paths.pm,v 1.15 2010/06/30 10:51:04 espie Exp $
 #
 # Copyright (c) 2007 Marc Espie <espie@openbsd.org>
 #
@@ -32,10 +32,11 @@ sub groupadd() { '/usr/sbin/groupadd' }
 sub sysctl() { '/sbin/sysctl' }
 sub openssl() { '/usr/sbin/openssl' }
 sub pkgca() { '/etc/ssl/pkgca.pem' }
+sub pkg_add() { '/usr/sbin/pkg_add' }
 sub chmod() { '/bin/chmod' }	# external command is used for symbolic modes.
 sub gzip() { '/usr/bin/gzip' }
 sub ftp() { $ENV{'FETCH_CMD'} || '/usr/bin/ftp' }
-sub groff() { '/usr/bin/groff' }
+sub groff() { '/usr/local/bin/groff' }
 sub sh() { '/bin/sh' }
 sub arch() { '/usr/bin/arch' }
 sub uname() { '/usr/bin/uname' }
@@ -50,6 +51,7 @@ sub mklocatedb() { '/usr/libexec/locate.mklocatedb' }
 sub hostname() { '/bin/hostname' }
 sub sudo() { '/usr/bin/sudo' }
 sub du() { '/usr/bin/du' }
+sub diff() { '/usr/bin/diff' }
 
 # Various paths
 sub shells() { '/etc/shells' }
@@ -60,6 +62,7 @@ sub portsdir() { '/usr/ports' }
 
 sub library_dirs() { ("/usr", "/usr/X11R6") }
 sub master_keys() { ("/etc/master_key") }
+sub pkgconf() { "/etc/pkg.conf" }
 
 sub font_cruft() { ("fonts.alias", "fonts.dir", "fonts.cache-1", "fonts.scale") }
 sub man_cruft() { ("whatis.db") }

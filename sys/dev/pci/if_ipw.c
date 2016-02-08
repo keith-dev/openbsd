@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_ipw.c,v 1.85 2009/03/29 21:53:52 sthen Exp $	*/
+/*	$OpenBSD: if_ipw.c,v 1.88 2010/08/03 18:26:25 kettenis Exp $	*/
 
 /*-
  * Copyright (c) 2004-2008
@@ -25,7 +25,6 @@
 
 #include <sys/param.h>
 #include <sys/sockio.h>
-#include <sys/sysctl.h>
 #include <sys/workq.h>
 #include <sys/mbuf.h>
 #include <sys/kernel.h>
@@ -65,6 +64,8 @@
 
 int		ipw_match(struct device *, void *, void *);
 void		ipw_attach(struct device *, struct device *, void *);
+int		ipw_activate(struct device *, int);
+void		ipw_resume(void *, void *);
 void		ipw_power(int, void *);
 int		ipw_dma_alloc(struct ipw_softc *);
 void		ipw_release(struct ipw_softc *);
@@ -133,7 +134,8 @@ int ipw_debug = 0;
 #endif
 
 struct cfattach ipw_ca = {
-	sizeof (struct ipw_softc), ipw_match, ipw_attach
+	sizeof (struct ipw_softc), ipw_match, ipw_attach, NULL,
+	ipw_activate
 };
 
 int
@@ -292,27 +294,58 @@ ipw_attach(struct device *parent, struct device *self, void *aux)
 #endif
 }
 
+int
+ipw_activate(struct device *self, int act)
+{
+	struct ipw_softc *sc = (struct ipw_softc *)self;
+	struct ifnet *ifp = &sc->sc_ic.ic_if;
+
+	switch (act) {
+	case DVACT_SUSPEND:
+		if (ifp->if_flags & IFF_RUNNING)
+			ipw_stop(ifp, 0);
+		break;
+	case DVACT_RESUME:
+		workq_queue_task(NULL, &sc->sc_resume_wqt, 0,
+		    ipw_resume, sc, NULL);
+		break;
+	}
+
+	return (0);
+}
+
+void
+ipw_resume(void *arg1, void *arg2)
+{
+	ipw_power(PWR_RESUME, arg1);
+}
+
 void
 ipw_power(int why, void *arg)
 {
 	struct ipw_softc *sc = arg;
-	struct ifnet *ifp;
+	struct ifnet *ifp = &sc->sc_ic.ic_if;
 	pcireg_t data;
+	int s;
 
-	if (why != PWR_RESUME)
+	if (why != PWR_RESUME) {
+		ipw_stop(ifp, 0);
 		return;
+	}
 
 	/* clear device specific PCI configuration register 0x41 */
 	data = pci_conf_read(sc->sc_pct, sc->sc_pcitag, 0x40);
 	data &= ~0x0000ff00;
 	pci_conf_write(sc->sc_pct, sc->sc_pcitag, 0x40, data);
 
-	ifp = &sc->sc_ic.ic_if;
-	if (ifp->if_flags & IFF_UP) {
-		ifp->if_init(ifp);
-		if (ifp->if_flags & IFF_RUNNING)
-			ifp->if_start(ifp);
-	}
+	s = splnet();
+	sc->sc_flags |= IPW_FLAG_BUSY;
+
+	if (ifp->if_flags & IFF_UP)
+		ipw_init(ifp);
+
+	sc->sc_flags &= ~IPW_FLAG_BUSY;
+	splx(s);
 }
 
 int
@@ -1362,6 +1395,15 @@ ipw_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 	int s, error = 0;
 
 	s = splnet();
+	/*
+	 * Prevent processes from entering this function while another
+	 * process is tsleep'ing in it.
+	 */
+	if (sc->sc_flags & IPW_FLAG_BUSY) {
+		splx(s);
+		return EBUSY;
+	}
+	sc->sc_flags |= IPW_FLAG_BUSY;
 
 	switch (cmd) {
 	case SIOCSIFADDR:
@@ -1415,6 +1457,7 @@ ipw_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		error = 0;
 	}
 
+	sc->sc_flags &= ~IPW_FLAG_BUSY;
 	splx(s);
 	return error;
 }
@@ -1478,7 +1521,7 @@ ipw_stop_master(struct ipw_softc *sc)
 	tmp = CSR_READ_4(sc, IPW_CSR_RST);
 	CSR_WRITE_4(sc, IPW_CSR_RST, tmp | IPW_RST_PRINCETON_RESET);
 
-	sc->flags &= ~IPW_FLAG_FW_INITED;
+	sc->sc_flags &= ~IPW_FLAG_FW_INITED;
 }
 
 int
@@ -1999,7 +2042,7 @@ ipw_init(struct ifnet *ifp)
 		printf("%s: could not load firmware\n", sc->sc_dev.dv_xname);
 		goto fail2;
 	}
-	sc->flags |= IPW_FLAG_FW_INITED;
+	sc->sc_flags |= IPW_FLAG_FW_INITED;
 	free(fw.data, M_DEVBUF);
 
 	/* retrieve information tables base addresses */

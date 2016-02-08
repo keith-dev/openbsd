@@ -1,4 +1,4 @@
-/*	$OpenBSD: malo.c,v 1.89 2009/07/12 18:24:23 mglocker Exp $ */
+/*	$OpenBSD: malo.c,v 1.91 2010/08/08 16:36:33 deraadt Exp $ */
 
 /*
  * Copyright (c) 2006 Claudio Jeker <claudio@openbsd.org>
@@ -26,6 +26,7 @@
 #include <sys/device.h>
 #include <sys/kernel.h>
 #include <sys/malloc.h>
+#include <sys/workq.h>
 #include <sys/mbuf.h>
 #include <sys/proc.h>
 #include <sys/socket.h>
@@ -248,10 +249,8 @@ int	malo_alloc_tx_ring(struct malo_softc *sc, struct malo_tx_ring *ring,
 	    int count);
 void	malo_reset_tx_ring(struct malo_softc *sc, struct malo_tx_ring *ring);
 void	malo_free_tx_ring(struct malo_softc *sc, struct malo_tx_ring *ring);
-int	malo_init(struct ifnet *ifp);
 int	malo_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data);
 void	malo_start(struct ifnet *ifp);
-void	malo_stop(struct malo_softc *sc);
 void	malo_watchdog(struct ifnet *ifp);
 int	malo_newstate(struct ieee80211com *ic, enum ieee80211_state nstate,
 	    int arg);
@@ -552,7 +551,8 @@ malo_alloc_rx_ring(struct malo_softc *sc, struct malo_rx_ring *ring, int count)
 
 	error = bus_dmamem_alloc(sc->sc_dmat,
 	    count * sizeof(struct malo_rx_desc),
-	    PAGE_SIZE, 0, &ring->seg, 1, &nsegs, BUS_DMA_NOWAIT);
+	    PAGE_SIZE, 0, &ring->seg, 1, &nsegs,
+	    BUS_DMA_NOWAIT | BUS_DMA_ZERO);
 	if (error != 0) {
 		printf("%s: could not allocate DMA memory\n",
 		    sc->sc_dev.dv_xname);
@@ -576,7 +576,6 @@ malo_alloc_rx_ring(struct malo_softc *sc, struct malo_rx_ring *ring, int count)
 		goto fail;
 	}
 
-	bzero(ring->desc, count * sizeof(struct malo_rx_desc));
 	ring->physaddr = ring->map->dm_segs->ds_addr;
 
 	ring->data = malloc(count * sizeof (struct malo_rx_data), M_DEVBUF,
@@ -711,8 +710,8 @@ malo_alloc_tx_ring(struct malo_softc *sc, struct malo_tx_ring *ring,
 	}
 
 	error = bus_dmamem_alloc(sc->sc_dmat,
-	    count * sizeof(struct malo_tx_desc),
-	    PAGE_SIZE, 0, &ring->seg, 1, &nsegs, BUS_DMA_NOWAIT);
+	    count * sizeof(struct malo_tx_desc), PAGE_SIZE, 0,
+	    &ring->seg, 1, &nsegs, BUS_DMA_NOWAIT | BUS_DMA_ZERO);
 	if (error != 0) {
 		printf("%s: could not allocate DMA memory\n",
 		    sc->sc_dev.dv_xname);
@@ -736,7 +735,6 @@ malo_alloc_tx_ring(struct malo_softc *sc, struct malo_tx_ring *ring,
 		goto fail;
 	}
 
-	memset(ring->desc, 0, count * sizeof(struct malo_tx_desc));
 	ring->physaddr = ring->map->dm_segs->ds_addr;
 
 	ring->data = malloc(count * sizeof(struct malo_tx_data), M_DEVBUF,

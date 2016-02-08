@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile.inc,v 1.89 2010/02/03 20:49:00 miod Exp $
+#	$OpenBSD: Makefile.inc,v 1.92 2010/07/03 04:44:51 guenther Exp $
 #	$NetBSD: Makefile.inc,v 1.35 1995/10/16 23:49:07 jtc Exp $
 #	@(#)Makefile.inc	8.1 (Berkeley) 6/17/93
 
@@ -23,6 +23,9 @@ DPSRCS+= Lint_Ovfork.c Lint_brk.c Lint_exect.c Lint_fork.c \
 	Lint_setjmp.c Lint_longjmp.c \
 	Lint_sigsetjmp.c Lint_siglongjmp.c
 
+# glue to offer userland wrappers for some syscalls
+SRCS+=	posix_madvise.c
+
 # glue to provide compatibility between GCC 1.X and 2.X and for compat
 # with old syscall interfaces.
 SRCS+=	ftruncate.c lseek.c mquery.c mmap.c ptrace.c semctl.c truncate.c \
@@ -40,7 +43,7 @@ ASM=	accept.o access.o acct.o adjfreq.o adjtime.o bind.o chdir.o chflags.o \
 	fchflags.o fchmod.o fchown.o fcntl.o fhopen.o fhstat.o fhstatfs.o \
 	flock.o fpathconf.o fstat.o \
 	fstatfs.o fsync.o futimes.o getdirentries.o getegid.o geteuid.o \
-	getfh.o getfsstat.o getgid.o getgroups.o getitimer.o getpeereid.o \
+	getfh.o getfsstat.o getgid.o getgroups.o getitimer.o \
 	getpeername.o \
 	getpgid.o \
 	getpgrp.o getpid.o getppid.o getpriority.o getresgid.o getresuid.o \
@@ -64,7 +67,7 @@ ASM=	accept.o access.o acct.o adjfreq.o adjtime.o bind.o chdir.o chflags.o \
 	utimes.o wait4.o write.o writev.o nnpfspioctl.o __semctl.o \
 	__syscall.o __sysctl.o __getcwd.o sched_yield.o getthrid.o \
 	thrsleep.o thrwakeup.o threxit.o thrsigdivert.o \
-	setrdomain.o getrdomain.o
+	setrtable.o getrtable.o
 
 GASM=	${ASM:.o=.go}
 PASM=	${ASM:.o=.po}
@@ -216,7 +219,7 @@ MAN+=	accept.2 access.2 acct.2 adjfreq.2 adjtime.2 bind.2 brk.2 chdir.2 \
 	dup.2 execve.2 _exit.2 fcntl.2 fhopen.2 \
 	flock.2 fork.2 fsync.2 getdirentries.2 \
 	getfh.2 getfsstat.2 getgid.2 getgroups.2 getitimer.2 getlogin.2 \
-	getpeername.2 getpeereid.2 getpgrp.2 getrdomain.2 \
+	getpeername.2 getpgrp.2 getrtable.2 \
 	getpid.2 getpriority.2 getrlimit.2 getrusage.2 getsid.2 getsockname.2 \
 	getsockopt.2 gettimeofday.2 getuid.2 intro.2 issetugid.2 ioctl.2 \
 	kill.2 kqueue.2 ktrace.2 link.2 \
@@ -259,11 +262,12 @@ MLINKS+=getpid.2 getppid.2
 MLINKS+=getpriority.2 setpriority.2
 MLINKS+=getrlimit.2 setrlimit.2
 MLINKS+=getsockopt.2 setsockopt.2
-MLINKS+=getrdomain.2 setrdomain.2
+MLINKS+=getrtable.2 setrtable.2
 MLINKS+=gettimeofday.2 settimeofday.2
 MLINKS+=getuid.2 geteuid.2
 MLINKS+=kqueue.2 kevent.2 kqueue.2 EV_SET.2
 MLINKS+=intro.2 errno.2
+MLINKS+=madvise.2 posix_madvise.2
 MLINKS+=mlock.2 munlock.2
 MLINKS+=mlockall.2 munlockall.2
 MLINKS+=mount.2 unmount.2

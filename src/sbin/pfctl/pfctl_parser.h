@@ -1,4 +1,4 @@
-/*	$OpenBSD: pfctl_parser.h,v 1.92 2010/01/18 23:52:46 mcbride Exp $ */
+/*	$OpenBSD: pfctl_parser.h,v 1.94 2010/06/25 23:27:47 henning Exp $ */
 
 /*
  * Copyright (c) 2001 Daniel Hartmeier
@@ -47,7 +47,6 @@
 #define PF_OPT_DEBUG		0x0200
 #define PF_OPT_SHOWALL		0x0400
 #define PF_OPT_OPTIMIZE		0x0800
-#define PF_OPT_MERGE		0x2000
 #define PF_OPT_RECURSE		0x4000
 
 #define PF_TH_ALL		0xFF
@@ -72,7 +71,6 @@ struct pfctl {
 	int dev;
 	int opts;
 	int optimize;
-	int loadopt;
 	int asd;			/* anchor stack depth */
 	int bn;				/* brace number */
 	int brace;
@@ -264,12 +262,6 @@ struct pf_timeout {
 	const char	*name;
 	int		 timeout;
 };
-
-#define PFCTL_FLAG_FILTER	0x02
-#define PFCTL_FLAG_NAT		0x04
-#define PFCTL_FLAG_OPTION	0x08
-#define PFCTL_FLAG_ALTQ		0x10
-#define PFCTL_FLAG_TABLE	0x20
 
 extern const struct pf_timeout pf_timeouts[];
 

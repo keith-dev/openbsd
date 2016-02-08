@@ -1,4 +1,4 @@
-/*	$OpenBSD: route.c,v 1.141 2009/12/01 16:21:46 reyk Exp $	*/
+/*	$OpenBSD: route.c,v 1.147 2010/07/14 01:23:04 dlg Exp $	*/
 /*	$NetBSD: route.c,v 1.16 1996/04/15 18:27:05 cgd Exp $	*/
 
 /*
@@ -81,7 +81,7 @@ int	locking, lockrest, debugonly;
 u_long	mpls_flags = MPLS_OP_LOCAL;
 u_long	rtm_inits;
 uid_t	uid;
-u_int	tableid = 0;
+u_int	tableid;
 
 struct rt_metrics	rt_metrics;
 
@@ -109,8 +109,8 @@ void	 set_metric(char *, int);
 void	 inet_makenetandmask(u_int32_t, struct sockaddr_in *, int);
 void	 interfaces(void);
 void	 getlabel(char *);
-int	 gettable(const char *);
-int	 rdomain(int, int, char **);
+void	 gettable(const char *);
+int	 rdomain(int, char **);
 
 __dead void
 usage(char *cp)
@@ -136,7 +136,6 @@ main(int argc, char **argv)
 {
 	int ch;
 	int rval = 0;
-	int rtableid = 1;
 	int kw;
 
 	if (argc < 2)
@@ -157,7 +156,7 @@ main(int argc, char **argv)
 			tflag = 1;
 			break;
 		case 'T':
-			rtableid = gettable(optarg);
+			gettable(optarg);
 			break;
 		case 'd':
 			debugonly = 1;
@@ -192,7 +191,7 @@ main(int argc, char **argv)
 	}
 	switch (kw) {
 	case K_EXEC:
-		rval = rdomain(rtableid, argc - 1, argv + 1);
+		rval = rdomain(argc - 1, argv + 1);
 		break;
 	case K_GET:
 		uid = 0;
@@ -424,6 +423,7 @@ newroute(int argc, char **argv)
 			case K_MPLS:
 				af = AF_MPLS;
 				aflen = sizeof(struct sockaddr_mpls);
+				fmask |= RTF_MPLS;
 				break;
 			case K_MPLSLABEL:
 				if (!--argc)
@@ -433,6 +433,7 @@ newroute(int argc, char **argv)
 					    "-inet or -inet6");
 				getmplslabel(*++argv, 0);
 				mpls_flags = MPLS_OP_PUSH;
+				flags |= RTF_MPLS;
 				break;
 			case K_IN:
 				if (!--argc)
@@ -450,6 +451,7 @@ newroute(int argc, char **argv)
 					errx(1, "-out requires -push, -pop, "
 					    "-swap");
 				getmplslabel(*++argv, 0);
+				flags |= RTF_MPLS;
 				break;
 			case K_POP:
 				if (af != AF_MPLS)
@@ -1194,6 +1196,7 @@ char *msgtypes[] = {
 	"RTM_DELADDR: address being removed from iface",
 	"RTM_IFINFO: iface status change",
 	"RTM_IFANNOUNCE: iface arrival/departure",
+	"RTM_DESYNC: route socket overflow",
 	NULL
 };
 
@@ -1206,7 +1209,7 @@ char ifnetflags[] =
 "\1UP\2BROADCAST\3DEBUG\4LOOPBACK\5PTP\6NOTRAILERS\7RUNNING\010NOARP\011PPROMISC"
 "\012ALLMULTI\013OACTIVE\014SIMPLEX\015LINK0\016LINK1\017LINK2\020MULTICAST";
 char addrnames[] =
-"\1DST\2GATEWAY\3NETMASK\4GENMASK\5IFP\6IFA\7AUTHOR\010BRD\013LABEL";
+"\1DST\2GATEWAY\3NETMASK\4GENMASK\5IFP\6IFA\7AUTHOR\010BRD\011SRC\12SRCMASK\013LABEL";
 
 const char *
 get_linkstate(int mt, int link_state)
@@ -1237,11 +1240,14 @@ print_rtmsg(struct rt_msghdr *rtm, int msglen)
 		    rtm->rtm_version);
 		return;
 	}
-	printf("%s: len %d, ", msgtypes[rtm->rtm_type], rtm->rtm_msglen);
+	printf("%s: len %d", msgtypes[rtm->rtm_type], rtm->rtm_msglen);
 	switch (rtm->rtm_type) {
+	case RTM_DESYNC:
+		printf("\n");
+		break;
 	case RTM_IFINFO:
 		ifm = (struct if_msghdr *)rtm;
-		(void) printf("if# %d, ", ifm->ifm_index);
+		(void) printf(", if# %d, ", ifm->ifm_index);
 		if (if_indextoname(ifm->ifm_index, ifname) != NULL)
 			printf("name: %s, ", ifname);
 		printf("link: %s, flags:",
@@ -1253,13 +1259,13 @@ print_rtmsg(struct rt_msghdr *rtm, int msglen)
 	case RTM_NEWADDR:
 	case RTM_DELADDR:
 		ifam = (struct ifa_msghdr *)rtm;
-		printf("metric %d, flags:", ifam->ifam_metric);
+		printf(", metric %d, flags:", ifam->ifam_metric);
 		bprintf(stdout, ifam->ifam_flags, routeflags);
 		pmsg_addrs((char *)ifam + ifam->ifam_hdrlen, ifam->ifam_addrs);
 		break;
 	case RTM_IFANNOUNCE:
 		ifan = (struct if_announcemsghdr *)rtm;
-		printf("if# %d, name %s, what: ",
+		printf(", if# %d, name %s, what: ",
 		    ifan->ifan_index, ifan->ifan_name);
 		switch (ifan->ifan_what) {
 		case IFAN_ARRIVAL:
@@ -1275,7 +1281,7 @@ print_rtmsg(struct rt_msghdr *rtm, int msglen)
 		printf("\n");
 		break;
 	default:
-		printf("priority %d, ", rtm->rtm_priority);
+		printf(", priority %d, ", rtm->rtm_priority);
 		printf("table %u, pid: %ld, seq %d, errno %d\nflags:",
 		    rtm->rtm_tableid, (long)rtm->rtm_pid, rtm->rtm_seq,
 		    rtm->rtm_errno);
@@ -1325,6 +1331,7 @@ print_getmsg(struct rt_msghdr *rtm, int msglen)
 	struct sockaddr *dst = NULL, *gate = NULL, *mask = NULL, *ifa = NULL;
 	struct sockaddr_dl *ifp = NULL;
 	struct sockaddr_rtlabel *sa_rl = NULL;
+	struct sockaddr *mpls = NULL;
 	struct sockaddr *sa;
 	char *cp;
 	int i;
@@ -1366,6 +1373,9 @@ print_getmsg(struct rt_msghdr *rtm, int msglen)
 					   ((struct sockaddr_dl *)sa)->sdl_nlen)
 						ifp = (struct sockaddr_dl *)sa;
 					break;
+				case RTA_SRC:
+					mpls = sa;
+					break;
 				case RTA_LABEL:
 					sa_rl = (struct sockaddr_rtlabel *)sa;
 					break;
@@ -1390,6 +1400,10 @@ print_getmsg(struct rt_msghdr *rtm, int msglen)
 		    ifp->sdl_nlen, ifp->sdl_data);
 	if (ifa)
 		printf(" if address: %s\n", routename(ifa));
+	if (mpls) {
+		printf(" mpls label: %s %s\n", mpls_op(rtm->rtm_mpls),
+		    routename(mpls));
+	}
 	printf("   priority: %u (%s)\n", rtm->rtm_priority,
 	   priorityname(rtm->rtm_priority)); 
 	printf("      flags: ");
@@ -1593,7 +1607,7 @@ getlabel(char *name)
 	rtm_addrs |= RTA_LABEL;
 }
 
-int
+void
 gettable(const char *s)
 {
 	const char	*errstr;
@@ -1601,16 +1615,16 @@ gettable(const char *s)
 	tableid = strtonum(s, 0, RT_TABLEID_MAX, &errstr);
 	if (errstr)
 		errx(1, "invalid table id: %s", errstr);
-	return (tableid);
 }
 
 int
-rdomain(int rtableid, int argc, char **argv)
+rdomain(int argc, char **argv)
 {
 	if (!argc)
 		usage(NULL);
-	if (setrdomain(rtableid) == -1)
-		err(1, "setrdomain");
+	if (setrtable(tableid) == -1)
+		err(1, "setrtable");
 	execvp(*argv, argv);
+	warn("%s", argv[0]);
 	return (errno == ENOENT ? 127 : 126);
 }

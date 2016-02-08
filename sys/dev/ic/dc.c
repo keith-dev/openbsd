@@ -1,4 +1,4 @@
-/*	$OpenBSD: dc.c,v 1.113 2009/10/15 17:54:54 deraadt Exp $	*/
+/*	$OpenBSD: dc.c,v 1.116 2010/08/05 07:57:04 deraadt Exp $	*/
 
 /*
  * Copyright (c) 1997, 1998, 1999
@@ -144,8 +144,6 @@ void dc_tick(void *);
 void dc_tx_underrun(struct dc_softc *);
 void dc_start(struct ifnet *);
 int dc_ioctl(struct ifnet *, u_long, caddr_t);
-void dc_init(void *);
-void dc_stop(struct dc_softc *, int);
 void dc_watchdog(struct ifnet *);
 int dc_ifmedia_upd(struct ifnet *);
 void dc_ifmedia_sts(struct ifnet *, struct ifmediareq *);
@@ -1672,7 +1670,7 @@ hasmac:
 
 	if (bus_dmamem_alloc(sc->sc_dmat, sizeof(struct dc_list_data),
 	    PAGE_SIZE, 0, sc->sc_listseg, 1, &sc->sc_listnseg,
-	    BUS_DMA_NOWAIT) != 0) {
+	    BUS_DMA_NOWAIT | BUS_DMA_ZERO) != 0) {
 		printf(": can't alloc list mem\n");
 		goto fail;
 	}
@@ -1694,7 +1692,6 @@ hasmac:
 		goto fail;
 	}
 	sc->dc_ldata = (struct dc_list_data *)sc->sc_listkva;
-	bzero(sc->dc_ldata, sizeof(struct dc_list_data));
 
 	for (i = 0; i < DC_RX_LIST_CNT; i++) {
 		if (bus_dmamap_create(sc->sc_dmat, MCLBYTES, 1, MCLBYTES,
@@ -2406,7 +2403,7 @@ dc_tick(void *xsc)
 	}
 
 	if (sc->dc_flags & DC_21143_NWAY && !sc->dc_link)
-		timeout_add(&sc->dc_tick_tmo, hz / 10);
+		timeout_add_msec(&sc->dc_tick_tmo, 100);
 	else
 		timeout_add_sec(&sc->dc_tick_tmo, 1);
 
@@ -2908,7 +2905,7 @@ dc_init(void *xsc)
 		sc->dc_link = 1;
 	else {
 		if (sc->dc_flags & DC_21143_NWAY)
-			timeout_add(&sc->dc_tick_tmo, hz / 10);
+			timeout_add_msec(&sc->dc_tick_tmo, 100);
 		else
 			timeout_add_sec(&sc->dc_tick_tmo, 1);
 	}

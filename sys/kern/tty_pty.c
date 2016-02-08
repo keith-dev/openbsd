@@ -1,4 +1,4 @@
-/*	$OpenBSD: tty_pty.c,v 1.43 2009/11/09 17:53:39 nicm Exp $	*/
+/*	$OpenBSD: tty_pty.c,v 1.51 2010/08/06 00:00:41 miod Exp $	*/
 /*	$NetBSD: tty_pty.c,v 1.33.4.1 1996/06/02 09:08:11 mrg Exp $	*/
 
 /*
@@ -118,11 +118,7 @@ dev_t	pty_getfree(void);
 void	ptmattach(int);
 int	ptmopen(dev_t, int, int, struct proc *);
 int	ptmclose(dev_t, int, int, struct proc *);
-int	ptmread(dev_t, struct uio *, int);
-int	ptmwrite(dev_t, struct uio *, int);
-int	ptmwrite(dev_t, struct uio *, int);
 int	ptmioctl(dev_t, u_long, caddr_t, int, struct proc *p);
-int	ptmpoll(dev_t, int, struct proc *p);
 static int ptm_vn_open(struct nameidata *);
 
 void
@@ -197,7 +193,7 @@ check_pty(int minor)
 	if (!pt_softc[minor]) {
 		pti = malloc(sizeof(struct pt_softc), M_DEVBUF,
 		    M_WAITOK|M_ZERO);
-		pti->pt_tty = ttymalloc();
+		pti->pt_tty = ttymalloc(0);
 		ptydevname(minor, pti);
 		pt_softc[minor] = pti;
 	}
@@ -240,7 +236,7 @@ ptsopen(dev_t dev, int flag, int devtype, struct proc *p)
 
 	pti = pt_softc[minor(dev)];
 	if (!pti->pt_tty) {
-		tp = pti->pt_tty = ttymalloc();
+		tp = pti->pt_tty = ttymalloc(0);
 	} else
 		tp = pti->pt_tty;
 	if ((tp->t_state & TS_ISOPEN) == 0) {
@@ -265,7 +261,7 @@ ptsopen(dev_t dev, int flag, int devtype, struct proc *p)
 		if (error)
 			return (error);
 	}
-	error = (*linesw[tp->t_line].l_open)(dev, tp);
+	error = (*linesw[tp->t_line].l_open)(dev, tp, p);
 	ptcwakeup(tp, FREAD|FWRITE);
 	return (error);
 }
@@ -277,7 +273,7 @@ ptsclose(dev_t dev, int flag, int mode, struct proc *p)
 	struct tty *tp = pti->pt_tty;
 	int error;
 
-	error = (*linesw[tp->t_line].l_close)(tp, flag);
+	error = (*linesw[tp->t_line].l_close)(tp, flag, p);
 	error |= ttyclose(tp);
 	ptcwakeup(tp, FREAD|FWRITE);
 	return (error);
@@ -287,19 +283,20 @@ int
 ptsread(dev_t dev, struct uio *uio, int flag)
 {
 	struct proc *p = curproc;
+	struct process *pr = p->p_p;
 	struct pt_softc *pti = pt_softc[minor(dev)];
 	struct tty *tp = pti->pt_tty;
 	int error = 0;
 
 again:
 	if (pti->pt_flags & PF_REMOTE) {
-		while (isbackground(p, tp)) {
+		while (isbackground(pr, tp)) {
 			if ((p->p_sigignore & sigmask(SIGTTIN)) ||
 			    (p->p_sigmask & sigmask(SIGTTIN)) ||
-			    p->p_pgrp->pg_jobc == 0 ||
+			    pr->ps_pgrp->pg_jobc == 0 ||
 			    p->p_flag & P_PPWAIT)
 				return (EIO);
-			pgsignal(p->p_pgrp, SIGTTIN, 1);
+			pgsignal(pr->ps_pgrp, SIGTTIN, 1);
 			error = ttysleep(tp, &lbolt,
 			    TTIPRI | PCATCH, ttybg, 0);
 			if (error)
@@ -417,7 +414,7 @@ ptcopen(dev_t dev, int flag, int devtype, struct proc *p)
 
 	pti = pt_softc[minor(dev)];
 	if (!pti->pt_tty) {
-		tp = pti->pt_tty = ttymalloc();
+		tp = pti->pt_tty = ttymalloc(0);
 	} else
 		tp = pti->pt_tty;
 	if (tp->t_oproc)
@@ -467,7 +464,9 @@ ptcread(dev_t dev, struct uio *uio, int flag)
 				if (pti->pt_send & TIOCPKT_IOCTL) {
 					cc = MIN(uio->uio_resid,
 						sizeof(tp->t_termios));
-					uiomove(&tp->t_termios, cc, uio);
+					error = uiomove(&tp->t_termios, cc, uio);
+					if (error)
+						return (error);
 				}
 				pti->pt_send = 0;
 				return (0);
@@ -502,13 +501,7 @@ ptcread(dev_t dev, struct uio *uio, int flag)
 			break;
 		error = uiomove(buf, cc, uio);
 	}
-	if (tp->t_outq.c_cc <= tp->t_lowat) {
-		if (tp->t_state&TS_ASLEEP) {
-			tp->t_state &= ~TS_ASLEEP;
-			wakeup(&tp->t_outq);
-		}
-		selwakeup(&tp->t_wsel);
-	}
+	ttwakeupwr(tp);
 	if (bufcc)
 		bzero(buf, bufcc);
 	return (error);
@@ -532,10 +525,10 @@ again:
 	if (pti->pt_flags & PF_REMOTE) {
 		if (tp->t_canq.c_cc)
 			goto block;
-		while (uio->uio_resid > 0 && tp->t_canq.c_cc < TTYHOG - 1) {
+		while (uio->uio_resid > 0 && tp->t_canq.c_cc < TTYHOG(tp) - 1) {
 			if (cc == 0) {
 				cc = MIN(uio->uio_resid, BUFSIZ);
-				cc = min(cc, TTYHOG - 1 - tp->t_canq.c_cc);
+				cc = min(cc, TTYHOG(tp) - 1 - tp->t_canq.c_cc);
 				if (cc > bufcc)
 					bufcc = cc;
 				cp = buf;
@@ -574,7 +567,7 @@ again:
 		}
 		bufcc = cc;
 		while (cc > 0) {
-			if ((tp->t_rawq.c_cc + tp->t_canq.c_cc) >= TTYHOG - 2 &&
+			if ((tp->t_rawq.c_cc + tp->t_canq.c_cc) >= TTYHOG(tp) - 2 &&
 			   (tp->t_canq.c_cc > 0 || !ISSET(tp->t_lflag, ICANON))) {
 				wakeup(&tp->t_rawq);
 				goto block;
@@ -642,7 +635,7 @@ ptcpoll(dev_t dev, int events, struct proc *p)
 	if (events & (POLLOUT | POLLWRNORM)) {
 		if ((pti->pt_flags & PF_REMOTE) ?
 		    (tp->t_canq.c_cc == 0) :
-		    ((tp->t_rawq.c_cc + tp->t_canq.c_cc < TTYHOG - 2) ||
+		    ((tp->t_rawq.c_cc + tp->t_canq.c_cc < TTYHOG(tp) - 2) ||
 		    (tp->t_canq.c_cc == 0 && ISSET(tp->t_lflag, ICANON))))
 			revents |= events & (POLLOUT | POLLWRNORM);
 	}
@@ -718,7 +711,7 @@ filt_ptcwrite(struct knote *kn, long hint)
 		if (ISSET(pti->pt_flags, PF_REMOTE)) {
 			if (tp->t_canq.c_cc == 0)
 				kn->kn_data = tp->t_canq.c_cn;
-		} else if (tp->t_rawq.c_cc + tp->t_canq.c_cc < TTYHOG-2)
+		} else if (tp->t_rawq.c_cc + tp->t_canq.c_cc < TTYHOG(tp)-2)
 			kn->kn_data = tp->t_canq.c_cn -
 			    (tp->t_rawq.c_cc + tp->t_canq.c_cc);
 	}
@@ -807,21 +800,6 @@ ptyioctl(dev_t dev, u_long cmd, caddr_t data, int flag, struct proc *p)
 		switch (cmd) {
 
 		case TIOCGPGRP:
-#ifdef COMPAT_SUNOS
-		    {
-			/*
-			 * I'm not sure about SunOS TIOCGPGRP semantics
-			 * on PTYs, but it's something like this:
-			 */
-			extern struct emul emul_sunos;
-			if (p->p_emul == &emul_sunos) {
-				if (tp->t_pgrp == 0)
-					return (EIO);
-				*(int *)data = tp->t_pgrp->pg_id;
-				return (0);
-			}
-		    }
-#endif
 			/*
 			 * We avoid calling ttioctl on the controller since,
 			 * in that case, tp must be the controlling terminal.
@@ -876,7 +854,15 @@ ptyioctl(dev_t dev, u_long cmd, caddr_t data, int flag, struct proc *p)
 			if ((*(unsigned int *)data == SIGINFO) &&
 			    ((tp->t_lflag&NOKERNINFO) == 0))
 				ttyinfo(tp);
-			return(0);
+			return (0);
+
+		case FIONREAD:
+			/*
+			 * FIONREAD on the master side must return the amount
+			 * in the output queue rather than the input.
+			 */
+			*(int *)data = tp->t_outq.c_cc;
+			return (0);
 		}
 	error = (*linesw[tp->t_line].l_ioctl)(tp, cmd, data, flag, p);
 	if (error < 0)
@@ -1092,18 +1078,6 @@ ptmclose(dev_t dev, int flag, int mode, struct proc *p)
 }
 
 int
-ptmread(dev_t dev, struct uio *uio, int ioflag)
-{
-	return (EIO);
-}
-
-int
-ptmwrite(dev_t dev, struct uio *uio, int ioflag)
-{
-	return (EIO);
-}
-
-int
 ptmioctl(dev_t dev, u_long cmd, caddr_t data, int flag, struct proc *p)
 {
 	dev_t newdev, error;
@@ -1234,10 +1208,4 @@ bad:
 	closef(sfp, p);
 	fdpunlock(fdp);
 	return (error);
-}
-
-int
-ptmpoll(dev_t dev, int events, struct proc *p)
-{
-	return (seltrue(dev, events, p));
 }

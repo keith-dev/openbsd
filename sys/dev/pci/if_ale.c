@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_ale.c,v 1.11 2010/02/27 08:19:47 kevlo Exp $	*/
+/*	$OpenBSD: if_ale.c,v 1.14 2010/07/27 00:03:03 deraadt Exp $	*/
 /*-
  * Copyright (c) 2008, Pyun YongHyeon <yongari@FreeBSD.org>
  * All rights reserved.
@@ -34,7 +34,6 @@
 #include "vlan.h"
 
 #include <sys/param.h>
-#include <sys/proc.h>
 #include <sys/endian.h>
 #include <sys/systm.h>
 #include <sys/types.h>
@@ -82,6 +81,7 @@
 int	ale_match(struct device *, void *, void *);
 void	ale_attach(struct device *, struct device *, void *);
 int	ale_detach(struct device *, int);
+int	ale_activate(struct device *, int);
 
 int	ale_miibus_readreg(struct device *, int, int);
 void	ale_miibus_writereg(struct device *, int, int, int);
@@ -124,7 +124,8 @@ const struct pci_matchid ale_devices[] = {
 };
 
 struct cfattach ale_ca = {
-	sizeof (struct ale_softc), ale_match, ale_attach
+	sizeof (struct ale_softc), ale_match, ale_attach, NULL,
+	ale_activate
 };
 
 struct cfdriver ale_cd = {
@@ -598,6 +599,27 @@ ale_detach(struct device *self, int flags)
 	return (0);
 }
 
+int
+ale_activate(struct device *self, int act)
+{
+	struct ale_softc *sc = (struct ale_softc *)self;
+	struct ifnet *ifp = &sc->sc_arpcom.ac_if;
+	int rv = 0;
+
+	switch (act) {
+	case DVACT_SUSPEND:
+		if (ifp->if_flags & IFF_RUNNING)
+			ale_stop(sc);
+		rv = config_activate_children(self, act);
+		break;
+	case DVACT_RESUME:
+		rv = config_activate_children(self, act);
+		if (ifp->if_flags & IFF_UP)
+			ale_init(ifp);
+		break;
+	}
+	return rv;
+}
 
 int
 ale_dma_alloc(struct ale_softc *sc)
@@ -623,7 +645,7 @@ ale_dma_alloc(struct ale_softc *sc)
 	/* Allocate DMA'able memory for TX ring */
 	error = bus_dmamem_alloc(sc->sc_dmat, ALE_TX_RING_SZ, 
 	    ETHER_ALIGN, 0, &sc->ale_cdata.ale_tx_ring_seg, 1,
-	    &nsegs, BUS_DMA_WAITOK);
+	    &nsegs, BUS_DMA_WAITOK | BUS_DMA_ZERO);
 	if (error) {
 		printf("%s: could not allocate DMA'able memory for Tx ring.\n",
 		    sc->sc_dev.dv_xname);
@@ -635,8 +657,6 @@ ale_dma_alloc(struct ale_softc *sc)
 	    BUS_DMA_NOWAIT);
 	if (error)
 		return (ENOBUFS);
-
-	bzero(sc->ale_cdata.ale_tx_ring, ALE_TX_RING_SZ);
 
 	/* Load the DMA map for Tx ring. */
 	error = bus_dmamap_load(sc->sc_dmat, sc->ale_cdata.ale_tx_ring_map, 
@@ -664,7 +684,7 @@ ale_dma_alloc(struct ale_softc *sc)
 		/* Allocate DMA'able memory for RX pages */
 		error = bus_dmamem_alloc(sc->sc_dmat, sc->ale_pagesize,
 		    ETHER_ALIGN, 0, &sc->ale_cdata.ale_rx_page[i].page_seg,
-		    1, &nsegs, BUS_DMA_WAITOK);
+		    1, &nsegs, BUS_DMA_WAITOK | BUS_DMA_ZERO);
 		if (error) {
 			printf("%s: could not allocate DMA'able memory for "
 			    "Rx ring.\n", sc->sc_dev.dv_xname);
@@ -677,8 +697,6 @@ ale_dma_alloc(struct ale_softc *sc)
 		    BUS_DMA_NOWAIT);
 		if (error)
 			return (ENOBUFS);
-
-		bzero(sc->ale_cdata.ale_rx_page[i].page_addr, sc->ale_pagesize);
 
 		/* Load the DMA map for Rx pages. */
 		error = bus_dmamap_load(sc->sc_dmat,
@@ -706,7 +724,8 @@ ale_dma_alloc(struct ale_softc *sc)
 
 	/* Allocate DMA'able memory for Tx CMB. */
 	error = bus_dmamem_alloc(sc->sc_dmat, ALE_TX_CMB_SZ, ETHER_ALIGN, 0,
-	    &sc->ale_cdata.ale_tx_cmb_seg, 1, &nsegs, BUS_DMA_WAITOK);
+	    &sc->ale_cdata.ale_tx_cmb_seg, 1, &nsegs,
+	    BUS_DMA_WAITOK |BUS_DMA_ZERO);
 
 	if (error) {
 		printf("%s: could not allocate DMA'able memory for Tx CMB.\n",
@@ -719,8 +738,6 @@ ale_dma_alloc(struct ale_softc *sc)
 	    BUS_DMA_NOWAIT);
 	if (error) 
 		return (ENOBUFS);
-
-	bzero(sc->ale_cdata.ale_tx_cmb, ALE_TX_CMB_SZ);
 
 	/* Load the DMA map for Tx CMB. */
 	error = bus_dmamap_load(sc->sc_dmat, sc->ale_cdata.ale_tx_cmb_map, 
@@ -749,7 +766,7 @@ ale_dma_alloc(struct ale_softc *sc)
 		/* Allocate DMA'able memory for Rx CMB */
 		error = bus_dmamem_alloc(sc->sc_dmat, ALE_RX_CMB_SZ,
 		    ETHER_ALIGN, 0, &sc->ale_cdata.ale_rx_page[i].cmb_seg, 1,
-		    &nsegs, BUS_DMA_WAITOK);
+		    &nsegs, BUS_DMA_WAITOK | BUS_DMA_ZERO);
 		if (error) {
 			printf("%s: could not allocate DMA'able memory for "
 			    "Rx CMB\n", sc->sc_dev.dv_xname);
@@ -762,8 +779,6 @@ ale_dma_alloc(struct ale_softc *sc)
 		    BUS_DMA_NOWAIT);
 		if (error)
 			return (ENOBUFS);
-
-		bzero(sc->ale_cdata.ale_rx_page[i].cmb_addr, ALE_RX_CMB_SZ);
 
 		/* Load the DMA map for Rx CMB */
 		error = bus_dmamap_load(sc->sc_dmat,

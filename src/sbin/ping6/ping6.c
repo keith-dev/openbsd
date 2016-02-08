@@ -1,4 +1,4 @@
-/*	$OpenBSD: ping6.c,v 1.78 2010/02/21 19:00:11 deraadt Exp $	*/
+/*	$OpenBSD: ping6.c,v 1.80 2010/06/26 18:30:03 phessler Exp $	*/
 /*	$KAME: ping6.c,v 1.163 2002/10/25 02:19:06 itojun Exp $	*/
 
 /*
@@ -257,6 +257,7 @@ main(int argc, char *argv[])
 	int ch, hold, packlen, preload, optval, ret_ga;
 	u_char *datap, *packet;
 	char *e, *target, *ifname = NULL, *gateway = NULL;
+	const char *errstr;
 	int ip6optlen = 0;
 	struct cmsghdr *scmsgp = NULL;
 #if defined(SO_SNDBUF) && defined(SO_RCVBUF)
@@ -338,10 +339,12 @@ main(int argc, char *argv[])
 #endif
 			break;
 		case 'c':
-			npackets = strtol(optarg, &e, 10);
-			if (npackets <= 0 || *optarg == '\0' || *e != '\0')
+			npackets = (unsigned long)strtonum(optarg, 0,
+			    INT_MAX, &errstr);
+			if (errstr)
 				errx(1,
-				    "illegal number of packets -- %s", optarg);
+				    "number of packets to transmit is %s: %s",
+				    errstr, optarg);
 			break;
 		case 'd':
 			options |= F_SO_DEBUG;
@@ -939,7 +942,7 @@ main(int argc, char *argv[])
 
 			/*
 			 * receive control messages only. Process the
-			 * exceptions (currently the only possiblity is
+			 * exceptions (currently the only possibility is
 			 * a path MTU notification.)
 			 */
 			if ((mtu = get_pathmtu(&m)) > 0) {
@@ -1582,7 +1585,7 @@ pr_ip6opt(void *extbuf)
 		switch (type) {
 		/*
 		 * Note that inet6_opt_next automatically skips any padding
-		 * optins.
+		 * options.
 		 */
 		case IP6OPT_JUMBO:
 			offset = 0;
@@ -1780,7 +1783,7 @@ pr_nodeaddr(struct icmp6_nodeinfo *ni, int nilen)
 
 	/*
 	 * In icmp-name-lookups 05 and later, TTL of each returned address
-	 * is contained in the resposne. We try to detect the version
+	 * is contained in the response. We try to detect the version
 	 * by the length of the data, but note that the detection algorithm
 	 * is incomplete. We assume the latest draft by default.
 	 */

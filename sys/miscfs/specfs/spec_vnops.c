@@ -1,4 +1,4 @@
-/*	$OpenBSD: spec_vnops.c,v 1.56 2009/08/13 15:00:14 jasper Exp $	*/
+/*	$OpenBSD: spec_vnops.c,v 1.58 2010/07/26 01:56:27 guenther Exp $	*/
 /*	$NetBSD: spec_vnops.c,v 1.29 1996/04/22 01:42:38 christos Exp $	*/
 
 /*
@@ -48,6 +48,7 @@
 #include <sys/disklabel.h>
 #include <sys/lockf.h>
 #include <sys/poll.h>
+#include <sys/dkio.h>
 
 #include <miscfs/specfs/specdev.h>
 
@@ -499,9 +500,9 @@ spec_close(void *v)
 		 * plus the session), release the reference from the session.
 		 */
 		if (vcount(vp) == 2 && ap->a_p &&
-		    vp == ap->a_p->p_session->s_ttyvp) {
+		    vp == ap->a_p->p_p->ps_session->s_ttyvp) {
 			vrele(vp);
-			ap->a_p->p_session->s_ttyvp = NULL;
+			ap->a_p->p_p->ps_session->s_ttyvp = NULL;
 		}
 		if (cdevsw[major(dev)].d_flags & D_CLONE)
 			return (spec_close_clone(ap));

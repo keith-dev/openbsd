@@ -1,4 +1,4 @@
-/*	$OpenBSD: neighbor.c,v 1.11 2010/02/25 17:40:46 claudio Exp $ */
+/*	$OpenBSD: neighbor.c,v 1.18 2010/06/30 01:47:11 claudio Exp $ */
 
 /*
  * Copyright (c) 2009 Michele Marchetto <michele@openbsd.org>
@@ -42,6 +42,7 @@
 
 int	nbr_establish_connection(struct nbr *);
 void	nbr_send_labelmappings(struct nbr *);
+int	nbr_act_session_operational(struct nbr *);
 
 LIST_HEAD(nbr_head, nbr);
 
@@ -115,9 +116,6 @@ nbr_fsm(struct nbr *nbr, enum nbr_event event)
 	int		new_state = 0;
 	int		i, ret = 0;
 
-	if (nbr == nbr->iface->self)
-		return (0);
-
 	old_state = nbr->state;
 	for (i = 0; nbr_fsm_tbl[i].state != -1; i++)
 		if ((nbr_fsm_tbl[i].state & old_state) &&
@@ -151,6 +149,7 @@ nbr_fsm(struct nbr *nbr, enum nbr_event event)
 		nbr_reset_ktimer(nbr);
 		break;
 	case NBR_ACT_STRT_KTIMER:
+		nbr_act_session_operational(nbr);
 		nbr_start_ktimer(nbr);
 		nbr_start_ktimeout(nbr);
 		send_address(nbr, NULL);
@@ -164,6 +163,7 @@ nbr_fsm(struct nbr *nbr, enum nbr_event event)
 		send_keepalive(nbr);
 		break;
 	case NBR_ACT_KEEPALIVE_SEND:
+		nbr_act_session_operational(nbr);
 		nbr_start_ktimer(nbr);
 		nbr_start_ktimeout(nbr);
 		send_keepalive(nbr);
@@ -171,6 +171,8 @@ nbr_fsm(struct nbr *nbr, enum nbr_event event)
 		nbr_send_labelmappings(nbr);
 		break;
 	case NBR_ACT_CLOSE_SESSION:
+		ldpe_imsg_compose_lde(IMSG_NEIGHBOR_DOWN, nbr->peerid, 0,
+		    NULL, 0);
 		session_close(nbr);
 		nbr_start_idtimer(nbr);
 		break;
@@ -224,18 +226,15 @@ nbr_init(u_int32_t hashsize)
 }
 
 struct nbr *
-nbr_new(u_int32_t nbr_id, u_int16_t lspace, struct iface *iface, int self)
+nbr_new(u_int32_t nbr_id, u_int16_t lspace, struct iface *iface)
 {
 	struct nbr_head	*head;
 	struct nbr	*nbr;
-	struct lde_nbr	 rn;
 
 	if ((nbr = calloc(1, sizeof(*nbr))) == NULL)
 		fatal("nbr_new");
-
-	if (!self)
-		if ((nbr->rbuf = calloc(1, sizeof(struct buf_read))) == NULL)
-			fatal("nbr_new");
+	if ((nbr->rbuf = calloc(1, sizeof(struct ibuf_read))) == NULL)
+		fatal("nbr_new");
 
 	nbr->state = NBR_STA_DOWN;
 	nbr->id.s_addr = nbr_id;
@@ -252,11 +251,6 @@ nbr_new(u_int32_t nbr_id, u_int16_t lspace, struct iface *iface, int self)
 	nbr->iface = iface;
 	LIST_INSERT_HEAD(&iface->nbr_list, nbr, entry);
 
-	if (self) {
-		nbr->addr.s_addr = iface->addr.s_addr;
-		nbr->priority = iface->priority;
-	}
-
 	TAILQ_INIT(&nbr->mapping_list);
 	TAILQ_INIT(&nbr->withdraw_list);
 	TAILQ_INIT(&nbr->request_list);
@@ -269,22 +263,12 @@ nbr_new(u_int32_t nbr_id, u_int16_t lspace, struct iface *iface, int self)
 	evtimer_set(&nbr->keepalive_timer, nbr_ktimer, nbr);
 	evtimer_set(&nbr->initdelay_timer, nbr_idtimer, nbr);
 
-	bzero(&rn, sizeof(rn));
-	rn.id.s_addr = nbr->id.s_addr;
-	rn.lspace = nbr->lspace;
-	rn.ifindex = nbr->iface->ifindex;
-	rn.self = self;
-	ldpe_imsg_compose_lde(IMSG_NEIGHBOR_UP, nbr->peerid, 0, &rn,
-	    sizeof(rn));
-
 	return (nbr);
 }
 
 void
 nbr_del(struct nbr *nbr)
 {
-	ldpe_imsg_compose_lde(IMSG_NEIGHBOR_DOWN, nbr->peerid, 0, NULL, 0);
-
 	session_close(nbr);
 
 	if (evtimer_pending(&nbr->inactivity_timer, NULL))
@@ -455,7 +439,8 @@ nbr_ktimeout(int fd, short event, void *arg)
 	    nbr->peerid);
 
 	send_notification_nbr(nbr, S_KEEPALIVE_TMR, 0, 0);
-	close(nbr->fd);
+	/* XXX race, send_notification_nbr() has no chance to be sent */
+	session_close(nbr);
 }
 
 void
@@ -592,6 +577,19 @@ nbr_act_session_establish(struct nbr *nbr, int active)
 	return (0);
 }
 
+int
+nbr_act_session_operational(struct nbr *nbr)
+{
+	struct lde_nbr	 rn;
+
+	bzero(&rn, sizeof(rn));
+	rn.id.s_addr = nbr->id.s_addr;
+	rn.lspace = nbr->lspace;
+
+	return (ldpe_imsg_compose_lde(IMSG_NEIGHBOR_UP, nbr->peerid, 0, &rn,
+	    sizeof(rn)));
+}
+
 void
 nbr_send_labelmappings(struct nbr *nbr)
 {
@@ -610,7 +608,7 @@ nbr_mapping_add(struct nbr *nbr, struct mapping_head *mh, struct map *map)
 	if (me == NULL)
 		fatal("nbr_mapping_add");
 
-	me->prefix = map->prefix;
+	me->prefix = map->prefix.s_addr;
 	me->prefixlen = map->prefixlen;
 	me->label = map->label;
 
@@ -623,7 +621,7 @@ nbr_mapping_find(struct nbr *nbr, struct mapping_head *mh, struct map *map)
 	struct mapping_entry	*me = NULL;
 
 	TAILQ_FOREACH(me, mh, entry) {
-		if (me->prefix == map->prefix &&
+		if (me->prefix == map->prefix.s_addr &&
 		    me->prefixlen == map->prefixlen)
 			return (me);
 	}

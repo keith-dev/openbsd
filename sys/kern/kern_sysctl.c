@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_sysctl.c,v 1.180 2010/01/10 03:37:50 guenther Exp $	*/
+/*	$OpenBSD: kern_sysctl.c,v 1.191 2010/07/26 01:56:27 guenther Exp $	*/
 /*	$NetBSD: kern_sysctl.c,v 1.17 1996/05/20 17:49:05 mrg Exp $	*/
 
 /*-
@@ -66,6 +66,7 @@
 #include <sys/pipe.h>
 #include <sys/eventvar.h>
 #include <sys/socketvar.h>
+#include <sys/socket.h>
 #include <sys/domain.h>
 #include <sys/protosw.h>
 #ifdef __HAVE_TIMECOUNTER
@@ -120,6 +121,8 @@ int sysctl_cptime2(int *, u_int, void *, size_t *, void *, size_t);
 int (*cpu_cpuspeed)(int *);
 void (*cpu_setperf)(int);
 int perflevel = 100;
+
+int rthreads_enabled = 0;
 
 /*
  * Lock to avoid too many processes vslocking a large amount of memory
@@ -552,6 +555,9 @@ kern_sysctl(int *name, u_int namelen, void *oldp, size_t *oldlenp, void *newp,
 	case KERN_CPTIME2:
 		return (sysctl_cptime2(name + 1, namelen -1, oldp, oldlenp,
 		    newp, newlen));
+	case KERN_RTHREADS:
+		return (sysctl_int(oldp, oldlenp, newp, newlen,
+		    &rthreads_enabled));
 	case KERN_CACHEPCT: {
 		int opct, pgs;
 		opct = bufcachepercent;
@@ -1184,7 +1190,7 @@ sysctl_file2(int *name, u_int namelen, char *where, size_t *sizep,
 
 	if (namelen > 4)
 		return (ENOTDIR);
-	if (namelen < 4)
+	if (namelen < 4 || name[2] > sizeof(*kf))
 		return (EINVAL);
 
 	buflen = where != NULL ? *sizep : 0;
@@ -1232,9 +1238,9 @@ sysctl_file2(int *name, u_int namelen, char *where, size_t *sizep,
 			break;
 		}
 		LIST_FOREACH(pp, &allproc, p_list) {
-			/* skip system, embryonic and undead processes */
-			if ((pp->p_flag & P_SYSTEM) ||
-			    pp->p_stat == SIDL || pp->p_stat == SZOMB)
+			/* skip system, exiting, embryonic and undead processes */
+			if ((pp->p_flag & P_SYSTEM) || (pp->p_flag & P_WEXIT)
+			    || pp->p_stat == SIDL || pp->p_stat == SZOMB)
 				continue;
 			if (arg > 0 && pp->p_pid != (pid_t)arg) {
 				/* not the pid we are looking for */
@@ -1260,9 +1266,9 @@ sysctl_file2(int *name, u_int namelen, char *where, size_t *sizep,
 		break;
 	case KERN_FILE_BYUID:
 		LIST_FOREACH(pp, &allproc, p_list) {
-			/* skip system, embryonic and undead processes */
-			if ((pp->p_flag & P_SYSTEM) ||
-			    pp->p_stat == SIDL || pp->p_stat == SZOMB)
+			/* skip system, exiting, embryonic and undead processes */
+			if ((pp->p_flag & P_SYSTEM) || (pp->p_flag & P_WEXIT)
+			    || pp->p_stat == SIDL || pp->p_stat == SZOMB)
 				continue;
 			if (arg > 0 && pp->p_ucred->cr_uid != (uid_t)arg) {
 				/* not the uid we are looking for */
@@ -1310,6 +1316,7 @@ sysctl_doproc(int *name, u_int namelen, char *where, size_t *sizep)
 	struct kinfo_proc2 *kproc2 = NULL;
 	struct eproc *eproc = NULL;
 	struct proc *p;
+	struct process *pr;
 	char *dp;
 	int arg, buflen, doingzomb, elem_size, elem_count;
 	int error, needed, type, op;
@@ -1328,7 +1335,8 @@ sysctl_doproc(int *name, u_int namelen, char *where, size_t *sizep)
 		elem_size = elem_count = 0;
 		eproc = malloc(sizeof(struct eproc), M_TEMP, M_WAITOK);
 	} else /* if (type == KERN_PROC2) */ {
-		if (namelen != 5 || name[3] < 0 || name[4] < 0)
+		if (namelen != 5 || name[3] < 0 || name[4] < 0 ||
+		    name[3] > sizeof(*kproc2))
 			return (EINVAL);
 		op = name[1];
 		arg = name[2];
@@ -1345,6 +1353,12 @@ again:
 		 */
 		if (p->p_stat == SIDL)
 			continue;
+
+		/* XXX skip processes in the middle of being zapped */
+		pr = p->p_p;
+		if (pr->ps_pgrp == NULL)
+			continue;
+
 		/*
 		 * TODO - make more efficient (see notes below).
 		 */
@@ -1358,20 +1372,20 @@ again:
 
 		case KERN_PROC_PGRP:
 			/* could do this by traversing pgrp */
-			if (p->p_pgrp->pg_id != (pid_t)arg)
+			if (pr->ps_pgrp->pg_id != (pid_t)arg)
 				continue;
 			break;
 
 		case KERN_PROC_SESSION:
-			if (p->p_session->s_leader == NULL ||
-			    p->p_session->s_leader->p_pid != (pid_t)arg)
+			if (pr->ps_session->s_leader == NULL ||
+			    pr->ps_session->s_leader->ps_pid != (pid_t)arg)
 				continue;
 			break;
 
 		case KERN_PROC_TTY:
-			if ((p->p_flag & P_CONTROLT) == 0 ||
-			    p->p_session->s_ttyp == NULL ||
-			    p->p_session->s_ttyp->t_dev != (dev_t)arg)
+			if ((pr->ps_flags & PS_CONTROLT) == 0 ||
+			    pr->ps_session->s_ttyp == NULL ||
+			    pr->ps_session->s_ttyp->t_dev != (dev_t)arg)
 				continue;
 			break;
 
@@ -1454,8 +1468,6 @@ err:
 	return (error);
 }
 
-#endif	/* SMALL_KERNEL */
-
 /*
  * Fill in an eproc structure for the specified process.
  */
@@ -1465,7 +1477,7 @@ fill_eproc(struct proc *p, struct eproc *ep)
 	struct tty *tp;
 
 	ep->e_paddr = p;
-	ep->e_sess = p->p_pgrp->pg_session;
+	ep->e_sess = p->p_p->ps_pgrp->pg_session;
 	ep->e_pcred = *p->p_cred;
 	ep->e_ucred = *p->p_ucred;
 	if (p->p_stat == SIDL || P_ZOMBIE(p)) {
@@ -1485,13 +1497,13 @@ fill_eproc(struct proc *p, struct eproc *ep)
 		ep->e_pstats = *p->p_stats;
 		ep->e_pstats_valid = 1;
 	}
-	if (p->p_pptr)
-		ep->e_ppid = p->p_pptr->p_pid;
+	if (p->p_p->ps_pptr)
+		ep->e_ppid = p->p_p->ps_pptr->ps_pid;
 	else
 		ep->e_ppid = 0;
-	ep->e_pgid = p->p_pgrp->pg_id;
-	ep->e_jobc = p->p_pgrp->pg_jobc;
-	if ((p->p_flag & P_CONTROLT) &&
+	ep->e_pgid = p->p_p->ps_pgrp->pg_id;
+	ep->e_jobc = p->p_p->ps_pgrp->pg_jobc;
+	if ((p->p_p->ps_flags & PS_CONTROLT) &&
 	     (tp = ep->e_sess->s_ttyp)) {
 		ep->e_tdev = tp->t_dev;
 		ep->e_tpgid = tp->t_pgrp ? tp->t_pgrp->pg_id : NO_PID;
@@ -1499,7 +1511,7 @@ fill_eproc(struct proc *p, struct eproc *ep)
 	} else
 		ep->e_tdev = NODEV;
 	ep->e_flag = ep->e_sess->s_ttyvp ? EPROC_CTTY : 0;
-	if (SESS_LEADER(p))
+	if (SESS_LEADER(p->p_p))
 		ep->e_flag |= EPROC_SLEADER;
 	strncpy(ep->e_wmesg, p->p_wmesg ? p->p_wmesg : "", WMESGLEN);
 	ep->e_wmesg[WMESGLEN] = '\0';
@@ -1513,27 +1525,27 @@ fill_eproc(struct proc *p, struct eproc *ep)
 	ep->e_limit = p->p_p->ps_limit;
 }
 
-#ifndef	SMALL_KERNEL
-
 /*
  * Fill in a kproc2 structure for the specified process.
  */
 void
 fill_kproc2(struct proc *p, struct kinfo_proc2 *ki)
 {
+	struct process *pr = p->p_p;
+	struct session *s = pr->ps_session;
 	struct tty *tp;
 	struct timeval ut, st;
 
-	FILL_KPROC2(ki, strlcpy, p, p->p_p, p->p_cred, p->p_ucred, p->p_pgrp,
-	    p, p->p_session, p->p_vmspace, p->p_p->ps_limit, p->p_stats);
+	FILL_KPROC2(ki, strlcpy, p, pr, p->p_cred, p->p_ucred, pr->ps_pgrp,
+	    p, pr, s, p->p_vmspace, pr->ps_limit, p->p_stats);
 
 	/* stuff that's too painful to generalize into the macros */
-	if (p->p_pptr)
-		ki->p_ppid = p->p_pptr->p_pid;
-	if (p->p_session->s_leader)
-		ki->p_sid = p->p_session->s_leader->p_pid;
+	if (pr->ps_pptr)
+		ki->p_ppid = pr->ps_pptr->ps_pid;
+	if (s->s_leader)
+		ki->p_sid = s->s_leader->ps_pid;
 
-	if ((p->p_flag & P_CONTROLT) && (tp = p->p_session->s_ttyp)) {
+	if ((pr->ps_flags & PS_CONTROLT) && (tp = s->s_ttyp)) {
 		ki->p_tdev = tp->t_dev;
 		ki->p_tpgid = tp->t_pgrp ? tp->t_pgrp->pg_id : -1;
 		ki->p_tsess = PTRTOINT64(tp->t_session);
@@ -1625,7 +1637,7 @@ sysctl_proc_args(int *name, u_int namelen, void *oldp, size_t *oldlenp,
 	iov.iov_len = sizeof(pss);
 	uio.uio_iov = &iov;
 	uio.uio_iovcnt = 1;	
-	uio.uio_offset = (off_t)PS_STRINGS;
+	uio.uio_offset = (off_t)(vaddr_t)PS_STRINGS;
 	uio.uio_resid = sizeof(pss);
 	uio.uio_segflg = UIO_SYSSPACE;
 	uio.uio_rw = UIO_READ;
@@ -1987,9 +1999,9 @@ sysctl_sensors(int *name, u_int namelen, void *oldp, size_t *oldlenp,
 
 	dev = name[0];
 	if (namelen == 1) {
-		ksd = sensordev_get(dev);
-		if (ksd == NULL)
-			return (ENOENT);
+		ret = sensordev_get(dev, &ksd);
+		if (ret)
+			return (ret);
 
 		/* Grab a copy, to clear the kernel pointers */
 		usd = malloc(sizeof(*usd), M_TEMP, M_WAITOK|M_ZERO);
@@ -2008,9 +2020,9 @@ sysctl_sensors(int *name, u_int namelen, void *oldp, size_t *oldlenp,
 	type = name[1];
 	numt = name[2];
 
-	ks = sensor_find(dev, type, numt);
-	if (ks == NULL)
-		return (ENOENT);
+	ret = sensor_find(dev, type, numt, &ks);
+	if (ret)
+		return (ret);
 
 	/* Grab a copy, to clear the kernel pointers */
 	us = malloc(sizeof(*us), M_TEMP, M_WAITOK|M_ZERO);

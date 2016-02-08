@@ -1,4 +1,4 @@
-/*	$OpenBSD: newfs.c,v 1.81 2008/08/08 23:49:53 krw Exp $	*/
+/*	$OpenBSD: newfs.c,v 1.87 2010/07/24 00:28:41 tedu Exp $	*/
 /*	$NetBSD: newfs.c,v 1.20 1996/05/16 07:13:03 thorpej Exp $	*/
 
 /*
@@ -43,6 +43,7 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <sys/ioctl.h>
+#include <sys/dkio.h>
 #include <sys/disklabel.h>
 #include <sys/mount.h>
 #include <sys/resource.h>
@@ -74,6 +75,7 @@ struct mntopt mopts[] = {
 	MOPT_STDOPTS,
 	MOPT_ASYNC,
 	MOPT_UPDATE,
+	MOPT_FORCE,
 	{ NULL },
 };
 
@@ -125,11 +127,9 @@ int	avgfilesize = AVFILESIZ;/* expected average file size */
 int	avgfilesperdir = AFPDIR;/* expected number of files per directory */
 int	mntflags = MNT_ASYNC;	/* flags to be passed to mount */
 int	quiet = 0;		/* quiet flag */
-u_long	memleft;		/* virtual memory available */
 caddr_t	membase;		/* start address of memory based filesystem */
 char	*disktype;
 int	unlabeled;
-char	device[MAXPATHLEN];
 
 extern	char *__progname;
 struct disklabel *getdisklabel(char *, int);
@@ -152,8 +152,8 @@ main(int argc, char *argv[])
 	struct stat st;
 	struct statfs *mp;
 	struct rlimit rl;
-	int fsi = -1, fso, len, n, maxpartitions;
-	char *cp = NULL, *s1, *s2, *special, *opstring;
+	int fsi = -1, oflagset = 0, fso, len, n, maxpartitions;
+	char *cp = NULL, *s1, *s2, *special, *opstring, *realdev;
 #ifdef MFS
 	char mountfromname[BUFSIZ];
 	char *pop = NULL, node[MAXPATHLEN];
@@ -189,6 +189,7 @@ main(int argc, char *argv[])
 			Oflag = strtonum(optarg, 0, 2, &errstr);
 			if (errstr)
 				fatal("%s: invalid ffs version", optarg);
+			oflagset = 1;
 			break;
 		case 'S':
 			sectorsize = strtonum(optarg, 1, INT_MAX, &errstr);
@@ -332,8 +333,6 @@ main(int argc, char *argv[])
 		mfsfakelabel.d_ncylinders = 16;
 		mfsfakelabel.d_secpercyl = 1024;
 		mfsfakelabel.d_secperunit = 16384;
-		mfsfakelabel.d_rpm = 3600;
-		mfsfakelabel.d_interleave = 1;
 		mfsfakelabel.d_npartitions = 1;
 		mfsfakelabel.d_version = 1;
 		DL_SETPSIZE(&mfsfakelabel.d_partitions[0], 16384);
@@ -346,24 +345,13 @@ main(int argc, char *argv[])
 
 		goto havelabel;
 	}
-	cp = strrchr(special, '/');
-	if (cp == NULL) {
-		/*
-		 * No path prefix; try /dev/r%s then /dev/%s.
-		 */
-		(void)snprintf(device, sizeof(device), "%sr%s",
-			       _PATH_DEV, special);
-		if (stat(device, &st) == -1)
-			(void)snprintf(device, sizeof(device), "%s%s",
-				       _PATH_DEV, special);
-		special = device;
-	}
 	if (Nflag) {
 		fso = -1;
 	} else {
-		fso = open(special, O_WRONLY);
+		fso = opendev(special, O_WRONLY, 0, &realdev);
 		if (fso < 0)
 			fatal("%s: %s", special, strerror(errno));
+		special = realdev;
 
 		/* Bail if target special is mounted */
 		n = getmntinfo(&mp, MNT_NOWAIT);
@@ -393,7 +381,7 @@ main(int argc, char *argv[])
 			fatal("%s: unknown disk type", disktype);
 		pp = &lp->d_partitions[1];
 	} else {
-		fsi = open(special, O_RDONLY);
+		fsi = opendev(special, O_RDONLY, 0, NULL);
 		if (fsi < 0)
 			fatal("%s: %s", special, strerror(errno));
 		if (fstat(fsi, &st) < 0)
@@ -406,7 +394,8 @@ main(int argc, char *argv[])
 				    special);
 		}
 		cp = strchr(argv[0], '\0') - 1;
-		if (cp == NULL || ((*cp < 'a' || *cp > ('a' + maxpartitions - 1))
+		if (cp == NULL ||
+		    ((*cp < 'a' || *cp > ('a' + maxpartitions - 1))
 		    && !isdigit(*cp)))
 			fatal("%s: can't figure out file system partition",
 			    argv[0]);
@@ -428,12 +417,15 @@ havelabel:
 	if (fssize > DL_GETPSIZE(pp) && !mfs)
 	       fatal("%s: maximum file system size on the `%c' partition is %lld",
 			argv[0], *cp, DL_GETPSIZE(pp));
+
 	if (sectorsize == 0) {
 		sectorsize = lp->d_secsize;
 		if (sectorsize <= 0)
 			fatal("%s: no default sector size", argv[0]);
 	}
 	fssize *= sectorsize / DEV_BSIZE;
+	if (oflagset == 0 && fssize >= INT_MAX)
+		Oflag = 2;	/* FFS2 */
 	if (fsize == 0) {
 		fsize = DISKLABELV1_FFS_FSIZE(pp->p_fragblock);
 		if (fsize <= 0)

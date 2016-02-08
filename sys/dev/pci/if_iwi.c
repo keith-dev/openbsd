@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_iwi.c,v 1.101 2009/05/11 19:24:57 damien Exp $	*/
+/*	$OpenBSD: if_iwi.c,v 1.105 2010/08/03 18:26:25 kettenis Exp $	*/
 
 /*-
  * Copyright (c) 2004-2008
@@ -25,13 +25,13 @@
 
 #include <sys/param.h>
 #include <sys/sockio.h>
-#include <sys/sysctl.h>
 #include <sys/mbuf.h>
 #include <sys/kernel.h>
 #include <sys/socket.h>
 #include <sys/systm.h>
 #include <sys/conf.h>
 #include <sys/device.h>
+#include <sys/workq.h>
 
 #include <machine/bus.h>
 #include <machine/endian.h>
@@ -74,6 +74,8 @@ const struct pci_matchid iwi_devices[] = {
 
 int		iwi_match(struct device *, void *, void *);
 void		iwi_attach(struct device *, struct device *, void *);
+int		iwi_activate(struct device *, int);
+void		iwi_resume(void *, void *);
 void		iwi_power(int, void *);
 int		iwi_alloc_cmd_ring(struct iwi_softc *, struct iwi_cmd_ring *);
 void		iwi_reset_cmd_ring(struct iwi_softc *, struct iwi_cmd_ring *);
@@ -142,7 +144,8 @@ int iwi_debug = 0;
 #endif
 
 struct cfattach iwi_ca = {
-	sizeof (struct iwi_softc), iwi_match, iwi_attach
+	sizeof (struct iwi_softc), iwi_match, iwi_attach, NULL,
+	iwi_activate
 };
 
 int
@@ -333,16 +336,44 @@ fail:	while (--ac >= 0)
 	iwi_free_cmd_ring(sc, &sc->cmdq);
 }
 
+int
+iwi_activate(struct device *self, int act)
+{
+	struct iwi_softc *sc = (struct iwi_softc *)self;
+	struct ifnet *ifp = &sc->sc_ic.ic_if;
+
+	switch (act) {
+	case DVACT_SUSPEND:
+		if (ifp->if_flags & IFF_RUNNING)
+			iwi_stop(ifp, 0);
+		break;
+	case DVACT_RESUME:
+		workq_queue_task(NULL, &sc->sc_resume_wqt, 0,
+		    iwi_resume, sc, NULL);
+		break;
+	}
+
+	return (0);
+}
+
+void
+iwi_resume(void *arg1, void *arg2)
+{
+	iwi_power(PWR_RESUME, arg1);
+}
+
 void
 iwi_power(int why, void *arg)
 {
 	struct iwi_softc *sc = arg;
-	struct ifnet *ifp;
+	struct ifnet *ifp = &sc->sc_ic.ic_if;
 	pcireg_t data;
 	int s;
 
-	if (why != PWR_RESUME)
+	if (why != PWR_RESUME) {
+		iwi_stop(ifp, 0);
 		return;
+	}
 
 	/* clear device specific PCI configuration register 0x41 */
 	data = pci_conf_read(sc->sc_pct, sc->sc_pcitag, 0x40);
@@ -350,12 +381,12 @@ iwi_power(int why, void *arg)
 	pci_conf_write(sc->sc_pct, sc->sc_pcitag, 0x40, data);
 
 	s = splnet();
-	ifp = &sc->sc_ic.ic_if;
-	if (ifp->if_flags & IFF_UP) {
-		ifp->if_init(ifp);
-		if (ifp->if_flags & IFF_RUNNING)
-			ifp->if_start(ifp);
-	}
+	sc->sc_flags |= IWI_FLAG_BUSY;
+
+	if (ifp->if_flags & IFF_UP)
+		iwi_init(ifp);
+
+	sc->sc_flags &= ~IWI_FLAG_BUSY;
 	splx(s);
 }
 
@@ -379,7 +410,7 @@ iwi_alloc_cmd_ring(struct iwi_softc *sc, struct iwi_cmd_ring *ring)
 
 	error = bus_dmamem_alloc(sc->sc_dmat,
 	    sizeof (struct iwi_cmd_desc) * IWI_CMD_RING_COUNT, PAGE_SIZE, 0,
-	    &ring->seg, 1, &nsegs, BUS_DMA_NOWAIT);
+	    &ring->seg, 1, &nsegs, BUS_DMA_NOWAIT | BUS_DMA_ZERO);
 	if (error != 0) {
 		printf("%s: could not allocate cmd ring DMA memory\n",
 		    sc->sc_dev.dv_xname);
@@ -404,7 +435,6 @@ iwi_alloc_cmd_ring(struct iwi_softc *sc, struct iwi_cmd_ring *ring)
 		goto fail;
 	}
 
-	bzero(ring->desc, sizeof (struct iwi_cmd_desc) * IWI_CMD_RING_COUNT);
 	return 0;
 
 fail:	iwi_free_cmd_ring(sc, ring);
@@ -455,7 +485,7 @@ iwi_alloc_tx_ring(struct iwi_softc *sc, struct iwi_tx_ring *ring, int ac)
 
 	error = bus_dmamem_alloc(sc->sc_dmat,
 	    sizeof (struct iwi_tx_desc) * IWI_TX_RING_COUNT, PAGE_SIZE, 0,
-	    &ring->seg, 1, &nsegs, BUS_DMA_NOWAIT);
+	    &ring->seg, 1, &nsegs, BUS_DMA_NOWAIT | BUS_DMA_ZERO);
 	if (error != 0) {
 		printf("%s: could not allocate tx ring DMA memory\n",
 		    sc->sc_dev.dv_xname);
@@ -479,8 +509,6 @@ iwi_alloc_tx_ring(struct iwi_softc *sc, struct iwi_tx_ring *ring, int ac)
 		    sc->sc_dev.dv_xname);
 		goto fail;
 	}
-
-	bzero(ring->desc, sizeof (struct iwi_tx_desc) * IWI_TX_RING_COUNT);
 
 	for (i = 0; i < IWI_TX_RING_COUNT; i++) {
 		data = &ring->data[i];
@@ -1454,6 +1482,15 @@ iwi_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 	int s, error = 0;
 
 	s = splnet();
+	/*
+	 * Prevent processes from entering this function while another
+	 * process is tsleep'ing in it.
+	 */
+	if (sc->sc_flags & IWI_FLAG_BUSY) {
+		splx(s);
+		return EBUSY;
+	}
+	sc->sc_flags |= IWI_FLAG_BUSY;
 
 	switch (cmd) {
 	case SIOCSIFADDR:
@@ -1507,6 +1544,7 @@ iwi_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		error = 0;
 	}
 
+	sc->sc_flags &= ~IWI_FLAG_BUSY;
 	splx(s);
 	return error;
 }
@@ -1534,7 +1572,7 @@ iwi_stop_master(struct iwi_softc *sc)
 	tmp = CSR_READ_4(sc, IWI_CSR_RST);
 	CSR_WRITE_4(sc, IWI_CSR_RST, tmp | IWI_RST_PRINCETON_RESET);
 
-	sc->flags &= ~IWI_FLAG_FW_INITED;
+	sc->sc_flags &= ~IWI_FLAG_FW_INITED;
 }
 
 int
@@ -2276,7 +2314,7 @@ iwi_init(struct ifnet *ifp)
 	}
 
 	free(data, M_DEVBUF);
-	sc->flags |= IWI_FLAG_FW_INITED;
+	sc->sc_flags |= IWI_FLAG_FW_INITED;
 
 	if ((error = iwi_config(sc)) != 0) {
 		printf("%s: device configuration failed\n",

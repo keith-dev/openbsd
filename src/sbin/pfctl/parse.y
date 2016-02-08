@@ -1,4 +1,4 @@
-/*	$OpenBSD: parse.y,v 1.588 2010/01/13 05:20:10 deraadt Exp $	*/
+/*	$OpenBSD: parse.y,v 1.591 2010/08/03 18:42:40 henning Exp $	*/
 
 /*
  * Copyright (c) 2001 Markus Friedl.  All rights reserved.
@@ -769,7 +769,12 @@ pfa_anchor	: '{'
 			pf->bn++;
 			pf->brace = 1;
 
-			/* create a holding ruleset in the root */
+			/*
+			 * Anchor contents are parsed before the anchor rule
+			 * production completes, so we don't know the real
+			 * location yet. Create a holding ruleset in the root;
+			 * contents will be moved afterwards.
+			 */
 			snprintf(ta, PF_ANCHOR_NAME_SIZE, "_%d", pf->bn);
 			rs = pf_find_or_create_ruleset(ta);
 			if (rs == NULL)
@@ -806,7 +811,14 @@ anchorrule	: ANCHOR anchorname dir quick interface af proto fromto
 
 			memset(&r, 0, sizeof(r));
 			if (pf->astack[pf->asd + 1]) {
-				/* move inline rules into relative location */
+				if ($2 && strchr($2, '/') != NULL) {
+					free($2);
+					yyerror("anchor paths containing '/' "
+				    	    "cannot be used for inline anchors.");
+					YYERROR;
+				}
+
+				/* Move inline rules into relative location. */
 				pf_anchor_setup(&r,
 				    &pf->astack[pf->asd]->ruleset,
 				    $2 ? $2 : pf->alast->name);
@@ -1174,11 +1186,10 @@ tabledef	: TABLE '<' STRING '>' table_opts {
 				free($3);
 				YYERROR;
 			}
-			if (pf->loadopt & PFCTL_FLAG_TABLE)
-				if (process_tabledef($3, &$5)) {
-					free($3);
-					YYERROR;
-				}
+			if (process_tabledef($3, &$5)) {
+				free($3);
+				YYERROR;
+			}
 			free($3);
 			for (ti = SIMPLEQ_FIRST(&$5.init_nodes);
 			    ti != SIMPLEQ_END(&$5.init_nodes); ti = nti) {
@@ -4279,12 +4290,6 @@ expand_altq(struct pf_altq *a, struct node_if *interfaces,
 	struct node_queue_bw	 bw;
 	int			 errs = 0;
 
-	if ((pf->loadopt & PFCTL_FLAG_ALTQ) == 0) {
-		FREE_LIST(struct node_if, interfaces);
-		FREE_LIST(struct node_queue, nqueues);
-		return (0);
-	}
-
 	LOOP_THROUGH(struct node_if, interface, interfaces,
 		memcpy(&pa, a, sizeof(struct pf_altq));
 		if (strlcpy(pa.ifname, interface->ifname,
@@ -4386,11 +4391,6 @@ expand_queue(struct pf_altq *a, struct node_if *interfaces,
 	struct pf_altq		 pa;
 	u_int8_t		 found = 0;
 	u_int8_t		 errs = 0;
-
-	if ((pf->loadopt & PFCTL_FLAG_ALTQ) == 0) {
-		FREE_LIST(struct node_queue, nqueues);
-		return (0);
-	}
 
 	if (queues == NULL) {
 		yyerror("queue %s has no parent", a->qname);
@@ -5309,9 +5309,10 @@ top:
 					return (0);
 				if (next == quotec || c == ' ' || c == '\t')
 					c = next;
-				else if (next == '\n')
+				else if (next == '\n') {
+					file->lineno++;
 					continue;
-				else
+				} else
 					lungetc(next);
 			} else if (c == quotec) {
 				*p = '\0';

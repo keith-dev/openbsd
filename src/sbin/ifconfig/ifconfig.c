@@ -1,4 +1,4 @@
-/*	$OpenBSD: ifconfig.c,v 1.228 2010/01/10 03:58:14 guenther Exp $	*/
+/*	$OpenBSD: ifconfig.c,v 1.239 2010/07/03 04:44:51 guenther Exp $	*/
 /*	$NetBSD: ifconfig.c,v 1.40 1997/10/01 02:19:43 enami Exp $	*/
 
 /*
@@ -121,7 +121,7 @@ struct  netrange	at_nr;		/* AppleTalk net range */
 #endif /* SMALL */
 
 char	name[IFNAMSIZ];
-int	flags, setaddr, setipdst, doalias;
+int	flags, xflags, setaddr, setipdst, doalias;
 u_long	metric, mtu;
 int	rdomainid;
 int	clearaddr, s;
@@ -180,6 +180,8 @@ void	setia6pltime(const char *, int);
 void	setia6vltime(const char *, int);
 void	setia6lifetime(const char *, const char *);
 void	setia6eui64(const char *, int);
+void	setkeepalive(const char *, const char *);
+void	unsetkeepalive(const char *, int);
 #endif /* INET6 */
 void	checkatrange(struct sockaddr_at *);
 void	setmedia(const char *, int);
@@ -338,12 +340,16 @@ const struct	cmd {
 	{ "pltime",	NEXTARG,	0,		setia6pltime },
 	{ "vltime",	NEXTARG,	0,		setia6vltime },
 	{ "eui64",	0,		0,		setia6eui64 },
+	{ "autoconfprivacy",	IFXF_INET6_PRIVACY,	0,	setifxflags },
+	{ "-autoconfprivacy",	-IFXF_INET6_PRIVACY,	0,	setifxflags },
 #endif /*INET6*/
 #ifndef SMALL
 	{ "rtlabel",	NEXTARG,	0,		setifrtlabel },
 	{ "-rtlabel",	-1,		0,		setifrtlabel },
 	{ "range",	NEXTARG,	0,		setatrange },
 	{ "phase",	NEXTARG,	0,		setatphase },
+	{ "mpls",	IFXF_MPLS,	0,		setifxflags },
+	{ "-mpls",	-IFXF_MPLS,	0,		setifxflags },
 	{ "mplslabel",	NEXTARG,	0,		setmpelabel },
 	{ "advbase",	NEXTARG,	0,		setcarp_advbase },
 	{ "advskew",	NEXTARG,	0,		setcarp_advskew },
@@ -397,6 +403,8 @@ const struct	cmd {
 	{ "flowdst", 	NEXTARG,	0,		setpflow_receiver },
 	{ "-flowdst", 1,		0,		unsetpflow_receiver },
 	{ "-inet6",	IFXF_NOINET6,	0,		setifxflags } ,
+	{ "keepalive",	NEXTARG2,	0,		NULL, setkeepalive },
+	{ "-keepalive",	1,		0,		unsetkeepalive },
 	{ "add",	NEXTARG,	0,		bridge_add },
 	{ "del",	NEXTARG,	0,		bridge_delete },
 	{ "addspan",	NEXTARG,	0,		bridge_addspan },
@@ -474,9 +482,9 @@ int	printgroup(char *, int);
 void	printgroupattribs(char *);
 void	setgroupattribs(char *, int, char *[]);
 void	printif(char *, int);
-void	printb(char *, unsigned short, char *);
 void	printb_status(unsigned short, char *);
-void	status(int, struct sockaddr_dl *);
+const char *get_linkstate(int, int);
+void	status(int, struct sockaddr_dl *, int);
 void	usage(int);
 const char *get_string(const char *, const char *, u_int8_t *, int *);
 void	print_string(const u_int8_t *, int);
@@ -784,7 +792,10 @@ getinfo(struct ifreq *ifr, int create)
 		if (ioctl(s, SIOCGIFFLAGS, (caddr_t)ifr) < 0)
 			return (-1);
 	}
-	flags = ifr->ifr_flags;
+	flags = ifr->ifr_flags & 0xffff;
+	if (ioctl(s, SIOCGIFXFLAGS, (caddr_t)ifr) < 0)
+		ifr->ifr_flags = 0;
+	xflags = ifr->ifr_flags;
 	if (ioctl(s, SIOCGIFMETRIC, (caddr_t)ifr) < 0)
 		metric = 0;
 	else
@@ -797,7 +808,7 @@ getinfo(struct ifreq *ifr, int create)
 		mtu = 0;
 	else
 		mtu = ifr->ifr_mtu;
-	if (ioctl(s, SIOCGIFRTABLEID, (caddr_t)ifr) < 0)
+	if (ioctl(s, SIOCGIFRDOMAIN, (caddr_t)ifr) < 0)
 		rdomainid = 0;
 	else
 		rdomainid = ifr->ifr_rdomainid;
@@ -891,6 +902,7 @@ void
 printif(char *ifname, int ifaliases)
 {
 	struct ifaddrs *ifap, *ifa;
+	struct if_data *ifdata;
 	const char *namep;
 	char *oname = NULL;
 	struct ifreq *ifrp;
@@ -947,7 +959,9 @@ printif(char *ifname, int ifaliases)
 			namep = ifa->ifa_name;
 			if (getinfo(ifrp, 0) < 0)
 				continue;
-			status(1, (struct sockaddr_dl *)ifa->ifa_addr);
+			ifdata = ifa->ifa_data;
+			status(1, (struct sockaddr_dl *)ifa->ifa_addr,
+			    ifdata->ifi_link_state);
 			count++;
 			noinet = 1;
 			continue;
@@ -1194,14 +1208,14 @@ setifxflags(const char *vname, int value)
 	if (ioctl(s, SIOCGIFXFLAGS, (caddr_t)&my_ifr) < 0)
 		warn("SIOCGIFXFLAGS");
 	(void) strlcpy(my_ifr.ifr_name, name, sizeof(my_ifr.ifr_name));
-	flags = my_ifr.ifr_flags;
+	xflags = my_ifr.ifr_flags;
 
 	if (value < 0) {
 		value = -value;
-		flags &= ~value;
+		xflags &= ~value;
 	} else
-		flags |= value;
-	my_ifr.ifr_flags = flags;
+		xflags |= value;
+	my_ifr.ifr_flags = xflags;
 	if (ioctl(s, SIOCSIFXFLAGS, (caddr_t)&my_ifr) < 0)
 		warn("SIOCSIFXFLAGS");
 }
@@ -2657,7 +2671,7 @@ phys_status(int force)
 	printf("\tphysical address inet%s %s --> %s", ver,
 	    psrcaddr, pdstaddr);
 
-	if (ioctl(s, SIOCGLIFPHYRTABLEID, (caddr_t)&ifr) == 0 &&
+	if (ioctl(s, SIOCGLIFPHYRTABLE, (caddr_t)&ifr) == 0 &&
 	    (rdomainid != 0 || ifr.ifr_rdomainid != 0))
 		printf(" rdomain %d", ifr.ifr_rdomainid);
 	printf("\n");
@@ -2668,21 +2682,41 @@ const int ifm_status_valid_list[] = IFM_STATUS_VALID_LIST;
 const struct ifmedia_status_description ifm_status_descriptions[] =
 	IFM_STATUS_DESCRIPTIONS;
 
+const struct if_status_description if_status_descriptions[] =
+	LINK_STATE_DESCRIPTIONS;
+
+const char *
+get_linkstate(int mt, int link_state)
+{
+	const struct if_status_description *p;
+	static char buf[8];
+
+	for (p = if_status_descriptions; p->ifs_string != NULL; p++) {
+		if (LINK_STATE_DESC_MATCH(p, mt, link_state))
+			return (p->ifs_string);
+	}
+	snprintf(buf, sizeof(buf), "[#%d]", link_state);
+	return buf;
+}
+
 /*
  * Print the status of the interface.  If an address family was
  * specified, show it and it only; otherwise, show them all.
  */
 void
-status(int link, struct sockaddr_dl *sdl)
+status(int link, struct sockaddr_dl *sdl, int ls)
 {
 	const struct afswtch *p = afp;
 	struct ifmediareq ifmr;
 	struct ifreq ifrdesc;
+#ifndef SMALL
+	struct ifkalivereq ikardesc;
+#endif
 	int *media_list, i;
 	char ifdescr[IFDESCRSIZE];
 
 	printf("%s: ", name);
-	printb("flags", flags, IFFBITS);
+	printb("flags", flags | (xflags << 16), IFFBITS);
 	if (rdomainid)
 		printf(" rdomain %i", rdomainid);
 	if (metric)
@@ -2705,6 +2739,12 @@ status(int link, struct sockaddr_dl *sdl)
 #ifndef SMALL
 	if (!is_bridge(name) && ioctl(s, SIOCGIFPRIORITY, &ifrdesc) == 0)
 		printf("\tpriority: %d\n", ifrdesc.ifr_metric);
+	(void) memset(&ikardesc, 0, sizeof(ikardesc));
+	(void) strlcpy(ikardesc.ikar_name, name, sizeof(ikardesc.ikar_name));
+	if (ioctl(s, SIOCGETKALIVE, &ikardesc) == 0 &&
+	    (ikardesc.ikar_timeo != 0 || ikardesc.ikar_cnt != 0))
+		printf("\tkeepalive: timeout %d count %d\n",
+		    ikardesc.ikar_timeo, ikardesc.ikar_cnt);
 #endif
 	vlan_status();
 #ifndef SMALL
@@ -2726,6 +2766,9 @@ status(int link, struct sockaddr_dl *sdl)
 		/*
 		 * Interface doesn't support SIOC{G,S}IFMEDIA.
 		 */
+		if (ls != LINK_STATE_UNKNOWN)
+			printf("\tstatus: %s\n",
+			    get_linkstate(sdl->sdl_type, ls));
 		goto proto_status;
 	}
 
@@ -2981,6 +3024,8 @@ in6_alias(struct in6_ifreq *creq)
 			printf(" deprecated");
 		if (ifr6.ifr_ifru.ifru_flags6 & IN6_IFF_AUTOCONF)
 			printf(" autoconf");
+		if (ifr6.ifr_ifru.ifru_flags6 & IN6_IFF_PRIVACY)
+			printf(" autoconfprivacy");
 	}
 
 	if (scopeid)
@@ -3084,8 +3129,8 @@ settunnelinst(const char *id, int param)
 
 	strlcpy(ifr.ifr_name, name, sizeof(ifr.ifr_name));
 	ifr.ifr_rdomainid = rdomainid;
-	if (ioctl(s, SIOCSLIFPHYRTABLEID, (caddr_t)&ifr) < 0)
-		warn("SIOCSLIFPHYRTABLEID");
+	if (ioctl(s, SIOCSLIFPHYRTABLE, (caddr_t)&ifr) < 0)
+		warn("SIOCSLIFPHYRTABLE");
 }
 
 void
@@ -3218,6 +3263,7 @@ mpe_status(void)
 	printf("\tmpls label: %d\n", shim.shim_label);
 }
 
+/* ARGSUSED */
 void
 setmpelabel(const char *val, int d)
 {
@@ -4392,6 +4438,38 @@ trunk_status(void)
 	} else if (isport)
 		printf("\ttrunk: trunkdev %s\n", rp.rp_ifname);
 }
+
+void
+setkeepalive(const char *timeout, const char *count)
+{
+	const char *errmsg = NULL;
+	struct ifkalivereq ikar;
+	int t, c;
+
+	t = strtonum(timeout, 1, 3600, &errmsg);
+	if (errmsg)
+		errx(1, "keepalive period %s: %s", timeout, errmsg);
+	c = strtonum(count, 2, 600, &errmsg);
+	if (errmsg)
+		errx(1, "keepalive count %s: %s", count, errmsg);
+
+	strlcpy(ikar.ikar_name, name, sizeof(ikar.ikar_name));
+	ikar.ikar_timeo = t;
+	ikar.ikar_cnt = c;
+	if (ioctl(s, SIOCSETKALIVE, (caddr_t)&ikar) < 0)
+		warn("SIOCSETKALIVE");
+}
+
+void
+unsetkeepalive(const char *val, int d)
+{
+	struct ifkalivereq ikar;
+
+	bzero(&ikar, sizeof(ikar));
+	strlcpy(ikar.ikar_name, name, sizeof(ikar.ikar_name));
+	if (ioctl(s, SIOCSETKALIVE, (caddr_t)&ikar) < 0)
+		warn("SIOCSETKALIVE");
+}
 #endif /* SMALL */
 
 void
@@ -4480,7 +4558,7 @@ in_getprefix(const char *plen, int which)
  * Print a value a la the %b format of the kernel's printf
  */
 void
-printb(char *s, unsigned short v, char *bits)
+printb(char *s, unsigned int v, char *bits)
 {
 	int i, any = 0;
 	char c;
@@ -4608,23 +4686,23 @@ in6_getprefix(const char *plen, int which)
 int
 prefix(void *val, int size)
 {
-	u_char *name = (u_char *)val;
+	u_char *nam = (u_char *)val;
 	int byte, bit, plen = 0;
 
 	for (byte = 0; byte < size; byte++, plen += 8)
-		if (name[byte] != 0xff)
+		if (nam[byte] != 0xff)
 			break;
 	if (byte == size)
 		return (plen);
 	for (bit = 7; bit != 0; bit--, plen++)
-		if (!(name[byte] & (1 << bit)))
+		if (!(nam[byte] & (1 << bit)))
 			break;
 	for (; bit != 0; bit--)
-		if (name[byte] & (1 << bit))
+		if (nam[byte] & (1 << bit))
 			return (0);
 	byte++;
 	for (; byte < size; byte++)
-		if (name[byte])
+		if (nam[byte])
 			return (0);
 	return (plen);
 }
@@ -4730,15 +4808,23 @@ sec2str(time_t total)
 }
 #endif /* INET6 */
 
+/*ARGSUSED*/
 void
 setiflladdr(const char *addr, int param)
 {
-	struct ether_addr *eap;
+	struct ether_addr *eap, eabuf;
 
-	eap = ether_aton(addr);
-	if (eap == NULL) {
-		warnx("malformed link-level address");
-		return;
+	if (!strcmp(addr, "random")) {
+		arc4random_buf(&eabuf, sizeof eabuf);
+		/* Non-multicast and claim it is a hardware address */
+		eabuf.ether_addr_octet[0] &= 0xfc;
+		eap = &eabuf;
+	} else {
+		eap = ether_aton(addr);
+		if (eap == NULL) {
+			warnx("malformed link-level address");
+			return;
+		}
 	}
 	strlcpy(ifr.ifr_name, name, sizeof(ifr.ifr_name));
 	ifr.ifr_addr.sa_len = ETHER_ADDR_LEN;
@@ -4761,7 +4847,7 @@ setinstance(const char *id, int param)
 
 	strlcpy(ifr.ifr_name, name, sizeof(ifr.ifr_name));
 	ifr.ifr_rdomainid = rdomainid;
-	if (ioctl(s, SIOCSIFRTABLEID, (caddr_t)&ifr) < 0)
-		warn("SIOCSIFRTABLEID");
+	if (ioctl(s, SIOCSIFRDOMAIN, (caddr_t)&ifr) < 0)
+		warn("SIOCSIFRDOMAIN");
 }
 #endif
