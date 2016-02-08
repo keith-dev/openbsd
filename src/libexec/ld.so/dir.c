@@ -1,4 +1,4 @@
-/*	$OpenBSD: dir.c,v 1.11 2006/03/24 20:00:35 otto Exp $	*/
+/*	$OpenBSD: dir.c,v 1.13 2007/02/09 14:51:13 drahn Exp $	*/
 /*
  * Copyright (c) 1983, 1993
  *	The Regents of the University of California.  All rights reserved.
@@ -59,7 +59,6 @@ _dl_opendir(const char *name)
 	DIR *dirp;
 	int fd;
 	struct stat sb;
-	int incr;
 
 	if ((fd = _dl_open(name, O_RDONLY | O_NONBLOCK)) < 0)
 		return (NULL);
@@ -73,18 +72,7 @@ _dl_opendir(const char *name)
 		return (NULL);
 	}
 
-	/*
-	 * If the machine's page size is an exact multiple of DIRBLKSIZ,
-	 * use a buffer that is cluster boundary aligned.
-	 * Hopefully this can be a big win someday by allowing page trades
-	 * to user space to be done by getdirentries()
-	 * - not done in ld.so.
-	 */
-	incr = DIRBLKSIZ;
-
-	/* UNION mount support removed */
-
-	dirp->dd_len = incr;
+	dirp->dd_len = _dl_round_page(sb.st_blksize);
 	dirp->dd_buf = _dl_malloc(dirp->dd_len);
 	if (dirp->dd_buf == NULL) {
 		_dl_free(dirp);
@@ -135,11 +123,9 @@ _dl_readdir(DIR *dirp)
 
 	for (;;) {
 		if (dirp->dd_loc >= dirp->dd_size) {
-			if (dirp->dd_flags & __DTF_READALL)
-				return (NULL);
 			dirp->dd_loc = 0;
 		}
-		if (dirp->dd_loc == 0 && !(dirp->dd_flags & __DTF_READALL)) {
+		if (dirp->dd_loc == 0) {
 			dirp->dd_size = _dl_getdirentries(dirp->dd_fd,
 			    dirp->dd_buf, dirp->dd_len, &dirp->dd_seek);
 			if (dirp->dd_size <= 0)

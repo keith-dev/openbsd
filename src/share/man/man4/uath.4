@@ -1,4 +1,4 @@
-.\" $OpenBSD: uath.4,v 1.1 2006/09/16 13:21:23 damien Exp $
+.\" $OpenBSD: uath.4,v 1.7 2006/12/05 22:03:47 damien Exp $
 .\"
 .\" Copyright (c) 2006
 .\"     Damien Bergamini <damien.bergamini@free.fr>
@@ -165,6 +165,9 @@ By default the
 .Nm
 driver uses an empty string.
 Note that network ID is synonymous with Extended Service Set ID (ESSID).
+.It Fl nwid
+Set the network ID to the empty string to allow the interface to connect
+to any available access point.
 .It Cm nwkey Ar key
 Enable WEP encryption using the specified
 .Ar key .
@@ -224,8 +227,11 @@ The following adapters should work:
 .It Li "Netgear WG111T" Ta AR5005UG
 .It Li "Netgear WG111U" Ta AR5005UX
 .It Li "Netgear WPN111" Ta AR5005UG
-.\".It Li "Olitec 000544" Ta AR5005UG
-.It Li "Senao WUB-8004" Ta AR5005UX
+.It Li "Olitec 000544" Ta AR5005UG
+.It Li "PLANET WDL-U357" Ta AR5005UX
+.\".It Li "Senao WUB-8004" Ta AR5005UX
+.It Li "Siemens Gigaset 108" Ta AR5005UG
+.It Li "SMC SMCWUSBT-G" Ta AR5005UG
 .\".It Li "SparkLAN WL-685GS" Ta AR5005UG
 .It Li "SparkLAN WL-785A" Ta AR5005UX
 .It Li "TP-Link TL-WN620G" Ta AR5005UG
@@ -240,7 +246,7 @@ The following adapters should work:
 .El
 .Pp
 An up to date list can be found at
-.Pa http://customerproducts.atheros.com/customerproducts .
+.Pa http://customerproducts.atheros.com/customerproducts/default.asp .
 .Sh EXAMPLES
 The following
 .Xr hostname.if 5
@@ -322,7 +328,7 @@ The
 driver was written by
 .An Damien Bergamini Aq damien@openbsd.org .
 .Sh CAVEATS
-Atheros Communications refuse to release any documentation on their products.
+Atheros Communications refuses to release any documentation for their products.
 Atheros proprietary 108 Mbps mode (aka Super AG mode) is not supported.
 .Pp
 The

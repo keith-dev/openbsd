@@ -1,4 +1,4 @@
-/*	$OpenBSD: init.c,v 1.25 2006/06/16 14:07:42 joris Exp $	*/
+/*	$OpenBSD: init.c,v 1.32 2007/02/22 06:42:09 otto Exp $	*/
 /*
  * Copyright (c) 2004 Jean-Francois Brousseau <jfb@openbsd.org>
  * Copyright (c) 2006 Xavier Santolaria <xsa@openbsd.org>
@@ -25,13 +25,17 @@
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include "includes.h"
+#include <sys/stat.h>
+
+#include <errno.h>
+#include <fcntl.h>
+#include <string.h>
+#include <unistd.h>
 
 #include "cvs.h"
 #include "init.h"
-#include "log.h"
+#include "remote.h"
 
-int	cvs_init(int, char **);
 void	cvs_init_local(void);
 
 static void init_mkdir(const char *, mode_t);
@@ -81,7 +85,11 @@ cvs_init(int argc, char **argv)
 	if (argc > 1)
 		fatal("init does not take any extra arguments");
 
-	if (current_cvsroot->cr_method == CVS_METHOD_LOCAL)
+	if (current_cvsroot->cr_method != CVS_METHOD_LOCAL) {
+		cvs_client_connect_to_server();
+		cvs_client_send_request("init %s", current_cvsroot->cr_dir);
+		cvs_client_get_responses();
+	} else
 		cvs_init_local();
 
 	return (0);
@@ -91,32 +99,26 @@ void
 cvs_init_local(void)
 {
 	u_int i;
-	char *path;
+	char path[MAXPATHLEN];
 
 	cvs_log(LP_TRACE, "cvs_init_local()");
 
 	/* Create repository root directory if it does not already exist */
 	init_mkdir(current_cvsroot->cr_dir, 0777);
 
-	path = xmalloc(MAXPATHLEN);
-
 	for (i = 0; i < INIT_NDIRS; i++) {
-		if (cvs_path_cat(current_cvsroot->cr_dir,
-		    cvsroot_dirs[i], path, MAXPATHLEN) >= MAXPATHLEN)
-			fatal("cvs_init_local: truncation");
+		(void)xsnprintf(path, MAXPATHLEN, "%s/%s",
+		    current_cvsroot->cr_dir, cvsroot_dirs[i]);
 
 		init_mkdir(path, 0777);
 	}
 
 	for (i = 0; i < INIT_NFILES; i++) {
-		if (cvs_path_cat(current_cvsroot->cr_dir,
-		    cvsroot_files[i].cf_path, path, MAXPATHLEN) >= MAXPATHLEN)
-			fatal("cvs_init_local: truncation");
+		(void)xsnprintf(path, MAXPATHLEN, "%s/%s",
+		    current_cvsroot->cr_dir, cvsroot_files[i].cf_path);
 
 		init_mkfile(path, cvsroot_files[i].cf_content);
 	}
-
-	xfree(path);
 }
 
 static void
@@ -140,13 +142,12 @@ init_mkfile(char *path, const char *const *content)
 	BUF *b;
 	size_t len;
 	int fd, openflags, rcsflags;
-	char *d, *rpath;
+	char rpath[MAXPATHLEN];
 	const char *const *p;
 	RCSFILE *file;
 
 	len = 0;
 	fd = -1;
-	d = NULL;
 	openflags = O_WRONLY|O_CREAT|O_EXCL;
 	rcsflags = RCS_RDWR|RCS_CREATE;
 
@@ -178,9 +179,7 @@ init_mkfile(char *path, const char *const *content)
 		goto out;
 	}
 
-	rpath = xstrdup(path);
-	if (strlcat(rpath, RCS_FILE_EXT, MAXPATHLEN) >= MAXPATHLEN)
-		fatal("init_mkfile: truncation");
+	(void)xsnprintf(rpath, MAXPATHLEN, "%s%s", path, RCS_FILE_EXT);
 
 	if ((file = rcs_open(rpath, fd, rcsflags, 0444)) == NULL)
 		fatal("failed to create RCS file for `%s'", path);
@@ -188,21 +187,15 @@ init_mkfile(char *path, const char *const *content)
 	if ((b = cvs_buf_load(path, BUF_AUTOEXT)) == NULL)
 		fatal("init_mkfile: failed to load %s", path);
 
-	cvs_buf_putc(b, '\0');
-	d = cvs_buf_release(b);
-
 	if (rcs_rev_add(file, RCS_HEAD_REV, "initial checkin", -1, NULL) == -1)
 		fatal("init_mkfile: failed to add new revision");
 
-	if (rcs_deltatext_set(file, file->rf_head, d) == -1)
+	/* b buffer is free'd in rcs_deltatext_set */
+	if (rcs_deltatext_set(file, file->rf_head, b) == -1)
 		fatal("init_mkfile: failed to set delta");
 
 	file->rf_flags &= ~RCS_SYNCED;
 	rcs_close(file);
-	xfree(rpath);
 out:
 	(void)close(fd);
-
-	if (d != NULL)
-		xfree(d);
 }

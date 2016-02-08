@@ -1,4 +1,4 @@
-/*	$OpenBSD: client.c,v 1.70 2006/06/07 06:29:03 otto Exp $ */
+/*	$OpenBSD: client.c,v 1.74 2006/10/27 12:22:41 henning Exp $ */
 
 /*
  * Copyright (c) 2003, 2004 Henning Brauer <henning@openbsd.org>
@@ -32,14 +32,14 @@ void	set_deadline(struct ntp_peer *, time_t);
 void
 set_next(struct ntp_peer *p, time_t t)
 {
-	p->next = time(NULL) + t;
+	p->next = getmonotime() + t;
 	p->deadline = 0;
 }
 
 void
 set_deadline(struct ntp_peer *p, time_t t)
 {
-	p->deadline = time(NULL) + t;
+	p->deadline = getmonotime() + t;
 	p->next = 0;
 }
 
@@ -94,8 +94,10 @@ client_addr_init(struct ntp_peer *p)
 int
 client_nextaddr(struct ntp_peer *p)
 {
-	close(p->query->fd);
-	p->query->fd = -1;
+	if (p->query->fd != -1) {
+		close(p->query->fd);
+		p->query->fd = -1;
+	}
 
 	if (p->addr_head.a == NULL) {
 		priv_host_dns(p->addr_head.name, p->id);
@@ -133,7 +135,7 @@ client_query(struct ntp_peer *p)
 			fatal("client_query socket");
 		if (connect(p->query->fd, sa, SA_LEN(sa)) == -1) {
 			if (errno == ECONNREFUSED || errno == ENETUNREACH ||
-			    errno == EHOSTUNREACH) {
+			    errno == EHOSTUNREACH || errno == EADDRNOTAVAIL) {
 				client_nextaddr(p);
 				set_next(p, error_interval());
 				return (-1);
@@ -166,6 +168,7 @@ client_query(struct ntp_peer *p)
 	if (ntp_sendmsg(p->query->fd, NULL, &p->query->msg,
 	    NTP_MSGSIZE_NOAUTH, 0) == -1) {
 		set_next(p, INTERVAL_QUERY_PATHETIC);
+		p->trustlevel = TRUSTLEVEL_PATHETIC;
 		return (-1);
 	}
 
@@ -244,7 +247,7 @@ client_dispatch(struct ntp_peer *p, u_int8_t settime)
 		return (0);
 	}
 	p->reply[p->shift].error = (T2 - T1) - (T3 - T4);
-	p->reply[p->shift].rcvd = time(NULL);
+	p->reply[p->shift].rcvd = getmonotime();
 	p->reply[p->shift].good = 1;
 
 	p->reply[p->shift].status.leap = (msg.status & LIMASK);

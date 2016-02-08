@@ -1,4 +1,4 @@
-/*	$OpenBSD: parser.c,v 1.34 2006/08/23 08:21:11 claudio Exp $ */
+/*	$OpenBSD: parser.c,v 1.40 2007/03/07 11:55:54 henning Exp $ */
 
 /*
  * Copyright (c) 2003, 2004 Henning Brauer <henning@openbsd.org>
@@ -28,6 +28,7 @@
 #include <string.h>
 
 #include "parser.h"
+#include "irrfilter.h"
 
 enum token_type {
 	NOTOKEN,
@@ -62,8 +63,8 @@ static const struct token t_main[];
 static const struct token t_show[];
 static const struct token t_show_summary[];
 static const struct token t_show_fib[];
-static const struct token t_show_rib[]; 
-static const struct token t_show_rib_neigh[]; 
+static const struct token t_show_rib[];
+static const struct token t_show_rib_neigh[];
 static const struct token t_show_neighbor[];
 static const struct token t_show_neighbor_modifiers[];
 static const struct token t_fib[];
@@ -84,6 +85,8 @@ static const struct token t_pftable[];
 static const struct token t_prepnbr[];
 static const struct token t_prepself[];
 static const struct token t_weight[];
+static const struct token t_irrfilter[];
+static const struct token t_irrfilter_opts[];
 
 static const struct token t_main[] = {
 	{ KEYWORD,	"reload",	RELOAD,		NULL},
@@ -91,6 +94,7 @@ static const struct token t_main[] = {
 	{ KEYWORD,	"fib",		FIB,		t_fib},
 	{ KEYWORD,	"neighbor",	NEIGHBOR,	t_neighbor},
 	{ KEYWORD,	"network",	NONE,		t_network},
+	{ KEYWORD,	"irrfilter",	IRRFILTER,	t_irrfilter},
 	{ ENDTOKEN,	"",		NONE,		NULL}
 };
 
@@ -129,6 +133,7 @@ static const struct token t_show_rib[] = {
 	{ ASTYPE,	"as",		AS_ALL,		t_show_as},
 	{ ASTYPE,	"source-as",	AS_SOURCE,	t_show_as},
 	{ ASTYPE,	"transit-as",	AS_TRANSIT,	t_show_as},
+	{ ASTYPE,	"peer-as",	AS_PEER,	t_show_as},
 	{ ASTYPE,	"empty-as",	AS_EMPTY,	t_show_rib},
 	{ FLAG,		"detail",	F_CTL_DETAIL,	t_show_rib},
 	{ FLAG,		"in",		F_CTL_ADJ_IN,	t_show_rib},
@@ -271,6 +276,16 @@ static const struct token t_weight[] = {
 	{ ENDTOKEN,	"",			NONE,	NULL}
 };
 
+static const struct token t_irrfilter[] = {
+	{ ASNUM,	"",		NONE,		t_irrfilter_opts},
+	{ ENDTOKEN,	"",		NONE,		NULL}
+};
+
+static const struct token t_irrfilter_opts[] = {
+	{ NOTOKEN,	"",		NONE,			NULL},
+	{ FLAG,		"importonly",	F_IMPORTONLY,		t_irrfilter_opts},
+	{ ENDTOKEN,	"",		NONE,			NULL}
+};
 
 static struct parse_result	res;
 
@@ -295,7 +310,7 @@ parse(int argc, char *argv[])
 	bzero(&res, sizeof(res));
 	TAILQ_INIT(&res.set);
 
-	while (argc > 0) {
+	while (argc >= 0) {
 		if ((match = match_token(argv[0], table)) == NULL) {
 			fprintf(stderr, "valid commands/args:\n");
 			show_valid_args(table);
@@ -461,9 +476,11 @@ match_token(const char *word, const struct token table[])
 	}
 
 	if (match != 1) {
-		if (match > 1)
+		if (word == NULL)
+			fprintf(stderr, "missing argument:\n");
+		else if (match > 1)
 			fprintf(stderr, "ambiguous argument: %s\n", word);
-		if (match < 1)
+		else if (match < 1)
 			fprintf(stderr, "unknown argument: %s\n", word);
 		return (NULL);
 	}
@@ -578,7 +595,7 @@ parse_prefix(const char *word, struct bgpd_addr *addr, u_int8_t *prefixlen)
 			errx(1, "invalid netmask: %s", errstr);
 
 		if ((ps = malloc(strlen(word) - strlen(p) + 1)) == NULL)
-			err(1, "host: malloc");
+			err(1, "parse_prefix: malloc");
 		strlcpy(ps, word, strlen(word) - strlen(p) + 1);
 
 		if (parse_addr(ps, addr) == 0)
@@ -613,21 +630,17 @@ parse_prefix(const char *word, struct bgpd_addr *addr, u_int8_t *prefixlen)
 int
 parse_asnum(const char *word, u_int16_t *asnum)
 {
-	u_long	 ulval;
-	char	*ep;
+	const char	*errstr;
+	u_int16_t	 uval;
 
 	if (word == NULL)
 		return (0);
 
-	errno = 0;
-	ulval = strtoul(word, &ep, 0);
-	if (word[0] == '\0' || *ep != '\0')
-		return (0);
-	if (errno == ERANGE && ulval == ULONG_MAX)
-		return (0);
-	if (ulval > USHRT_MAX)
-		return (0);
-	*asnum = (u_int16_t)ulval;
+	uval = strtonum(word, 0, USHRT_MAX - 1, &errstr);
+	if (errstr)
+		errx(1, "AS number is %s: %s", errstr, word);
+
+	*asnum = uval;
 	return (1);
 }
 
@@ -635,20 +648,15 @@ int
 parse_number(const char *word, struct parse_result *r, enum token_type type)
 {
 	struct filter_set	*fs;
-	u_long			 ulval;
-	char			*ep;
+	const char		*errstr;
+	u_int			 uval;
 
 	if (word == NULL)
 		return (0);
 
-	errno = 0;
-	ulval = strtoul(word, &ep, 0);
-	if (word[0] == '\0' || *ep != '\0')
-		return (0);
-	if (errno == ERANGE && ulval == ULONG_MAX)
-		return (0);
-	if (ulval > UINT_MAX)
-		return (0);
+	uval = strtonum(word, 0, UINT_MAX, &errstr);
+	if (errstr)
+		errx(1, "number is %s: %s", errstr, word);
 
 	/* number was parseable */
 	if ((fs = calloc(1, sizeof(struct filter_set))) == NULL)
@@ -656,31 +664,31 @@ parse_number(const char *word, struct parse_result *r, enum token_type type)
 	switch (type) {
 	case LOCALPREF:
 		fs->type = ACTION_SET_LOCALPREF;
-		fs->action.metric = ulval;
+		fs->action.metric = uval;
 		break;
 	case MED:
 		fs->type = ACTION_SET_MED;
-		fs->action.metric = ulval;
+		fs->action.metric = uval;
 		break;
 	case PREPNBR:
-		if (ulval > 128) {
+		if (uval > 128) {
 			free(fs);
 			return (0);
 		}
 		fs->type = ACTION_SET_PREPEND_PEER;
-		fs->action.prepend = ulval;
+		fs->action.prepend = uval;
 		break;
 	case PREPSELF:
-		if (ulval > 128) {
+		if (uval > 128) {
 			free(fs);
 			return (0);
 		}
 		fs->type = ACTION_SET_PREPEND_SELF;
-		fs->action.prepend = ulval;
+		fs->action.prepend = uval;
 		break;
 	case WEIGHT:
 		fs->type = ACTION_SET_WEIGHT;
-		fs->action.metric = ulval;
+		fs->action.metric = uval;
 		break;
 	default:
 		errx(1, "king bula sez bad things happen");
@@ -693,22 +701,17 @@ parse_number(const char *word, struct parse_result *r, enum token_type type)
 int
 getcommunity(const char *s)
 {
-	char	*ep;
-	u_long	 ulval;
+	const char	*errstr;
+	u_int16_t	 uval;
 
 	if (strcmp(s, "*") == 0)
 		return (COMMUNITY_ANY);
 
-	errno = 0;
-	ulval = strtoul(s, &ep, 0);
-	if (s[0] == '\0' || *ep != '\0')
-		return (COMMUNITY_ERROR);
-	if (errno == ERANGE && ulval == ULONG_MAX)
-		return (COMMUNITY_ERROR);
-	if (ulval > USHRT_MAX)
-		return (COMMUNITY_ERROR);
+	uval = strtonum(s, 0, USHRT_MAX, &errstr);
+	if (errstr)
+		errx(1, "Community is %s: %s", errstr, s);
 
-	return (ulval);
+	return (uval);
 }
 
 int
@@ -716,8 +719,7 @@ parse_community(const char *word, struct parse_result *r)
 {
 	struct filter_set	*fs;
 	char			*p;
-	int			 i;
-	u_int16_t		 as, type;
+	int			 as, type;
 
 	/* Well-known communities */
 	if (strcasecmp(word, "NO_EXPORT") == 0) {
@@ -744,17 +746,8 @@ parse_community(const char *word, struct parse_result *r)
 	}
 	*p++ = 0;
 
-	if ((i = getcommunity(word)) == COMMUNITY_ERROR) {
-		fprintf(stderr, "\"%s\" is not a number or too big", word);
-		return (0);
-	}
-	as = i;
-
-	if ((i = getcommunity(p)) == COMMUNITY_ERROR) {
-		fprintf(stderr, "\"%s\" is not a number or too big", p);
-		return (0);
-	}
-	type = i;
+	as = getcommunity(word);
+	type = getcommunity(p);
 
 done:
 	if (as == 0 || as == USHRT_MAX) {
@@ -835,4 +828,3 @@ inet6applymask(struct in6_addr *dest, const struct in6_addr *src, int prefixlen)
 	for (i = 0; i < 16; i++)
 		dest->s6_addr[i] = src->s6_addr[i] & mask.s6_addr[i];
 }
-

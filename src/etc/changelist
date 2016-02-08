@@ -1,4 +1,4 @@
-#	$OpenBSD: changelist,v 1.45 2006/06/01 16:43:23 norby Exp $
+#	$OpenBSD: changelist,v 1.52 2007/02/28 01:37:15 david Exp $
 #
 # List of files which the security script backs up and checks
 # for modifications.
@@ -15,6 +15,7 @@
 /etc/bootparams
 /etc/ccd.conf
 /etc/changelist
+/etc/chio.conf
 /etc/crontab
 /etc/csh.cshrc
 /etc/csh.login
@@ -38,6 +39,7 @@
 /etc/gettytab
 /etc/group
 /etc/hostapd.conf
+/etc/hoststated.conf
 /etc/hosts
 /etc/hosts.allow
 /etc/hosts.deny
@@ -47,7 +49,7 @@
 /etc/inetd.conf
 /etc/ipsec.conf
 +/etc/isakmpd/private/local.key
-/etc/isakmpd/private/local.pub
+/etc/isakmpd/local.pub
 /etc/ksh.kshrc
 /etc/locate.rc
 /etc/login.conf
@@ -62,6 +64,7 @@
 /etc/mail/mailertable
 /etc/mail/relay-domains
 /etc/mail/sendmail.cf
+/etc/mail/spamd.conf
 /etc/mail/submit.cf
 /etc/mail/trusted-users
 /etc/mail/virtusertable
@@ -74,6 +77,10 @@
 /etc/monthly.local
 /etc/motd
 /etc/mrouted.conf
+/etc/mtree/4.4BSD.dist
+/etc/mtree/BSD.local.dist
+/etc/mtree/BSD.x11.dist
+/etc/mtree/special
 /etc/mygate
 /etc/myname
 /etc/netgroup
@@ -102,6 +109,8 @@
 /etc/resolv.conf.tail
 +/etc/rndc.key
 /etc/rpc
+/etc/ripd.conf
+/etc/sasyncd.conf
 /etc/security
 /etc/sensorsd.conf
 /etc/services
@@ -109,7 +118,6 @@
 /etc/shosts.equiv
 /etc/slip.hosts
 /etc/slip.login
-/etc/spamd.conf
 /etc/ssh/ssh_config
 +/etc/ssh/ssh_host_dsa_key
 /etc/ssh/ssh_host_dsa_key.pub

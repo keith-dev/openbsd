@@ -1,4 +1,4 @@
-vers(a, {-$OpenBSD: MAKEDEV.common,v 1.29 2006/08/28 21:04:04 tsi Exp $-})dnl
+vers(a, {-$OpenBSD: MAKEDEV.common,v 1.33 2007/03/07 02:51:17 krw Exp $-})dnl
 dnl
 dnl Copyright (c) 2001-2006 Todd T. Fries <todd@OpenBSD.org>
 dnl
@@ -167,7 +167,7 @@ target(all, rmidi, 0, 1, 2, 3, 4, 5, 6, 7)dnl
 target(all, uall)dnl
 target(all, adb)dnl
 target(all, iop, 0, 1)dnl
-target(all, pci)dnl
+target(all, pci, 0, 1, 2, 3)dnl
 twrget(all, wsmouse, wscons)dnl
 twrget(all, grf_mac, grf, 0, 1, 2, 3)dnl
 target(all, par, 0)dnl
@@ -194,7 +194,7 @@ twrget(usb, uscan, uscanner, 0)dnl
 target(usb, uhid, 0, 1, 2, 3)dnl
 target(usb, ulpt, 0, 1)dnl
 target(usb, ugen, 0, 1)dnl
-target(usb, ttyU, 0, 1)dnl
+target(usb, ttyU, 0, 1, 2, 3)dnl
 dnl
 __devitem({-uall-}, uall, All USB devices,usb)dnl
 _mkdev(uall, uall, {-dnl
@@ -285,9 +285,11 @@ _mkdev(flo, fd*,
 	M ${nam}a	b $blk $n 640 operator
 	M ${nam}b	b $blk Add($n, 1) 640 operator
 	M ${nam}c	b $blk Add($n, 2) 640 operator
+	M ${nam}i	b $blk Add($n, 8) 640 operator
 	M r${nam}a	c $chr $n 640 operator
 	M r${nam}b	c $chr Add($n, 1) 640 operator
-	M r${nam}c	c $chr Add($n, 2) 640 operator-}, 664)dnl
+	M r${nam}c	c $chr Add($n, 2) 640 operator
+	M r${nam}i	c $chr Add($n, 8) 640 operator-}, 664)dnl
 __devitem(iop, iop*, I2O controller devices)dnl
 _mcdev(iop, iop*, iop, {-major_iop_c-}, 660)dnl
 __devitem(wd, {-wd*-}, {-quote(winchester)disk drives (ST506{-,-} IDE{-,-} ESDI{-,-} RLL{-,-} ...)-})dnl
@@ -563,8 +565,9 @@ __devitem(bktr, bktr*, Video frame grabbers)dnl
 _mcdev(bktr, bktr*, bktr, {-major_bktr_c-}, 644)dnl
 __devitem(tuner, tuner*, Tuner devices)dnl
 _mkdev(tuner, tuner*, {-M tuner$U c major_bktr_c Add(Mult($U, 2), 16) 644-}, 644)dnl
-__devitem(pci, pci, PCI bus device)dnl
-_mkdev(pci, pci, {-M pci c major_pci_c 0 600-}, 600)dnl
+__devitem(pci, pci*, PCI bus devices)dnl
+_mkdev(pci, pci*, {-M pci$U	c major_pci_c $U 600
+	MKlist[${#MKlist[*]}]=";[ -h pci ] || ln -sf pci0 pci"-})dnl
 __devitem(adb, adb, Apple Desktop bus event interface)dnl
 _mkdev(adb, adb, {-M adb c major_adb_c 0-})dnl
 __devitem(pdc, pdc, PDC device)dnl

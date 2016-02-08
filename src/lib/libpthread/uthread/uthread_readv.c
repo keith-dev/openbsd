@@ -1,4 +1,4 @@
-/*	$OpenBSD: uthread_readv.c,v 1.7 2004/11/30 00:14:51 pat Exp $	*/
+/*	$OpenBSD: uthread_readv.c,v 1.9 2006/10/03 02:59:36 kurt Exp $	*/
 /*
  * Copyright (c) 1995-1998 John Birrell <jb@cimlogic.com.au>
  * All rights reserved.
@@ -55,7 +55,7 @@ readv(int fd, const struct iovec * iov, int iovcnt)
 	/* Lock the file descriptor for read: */
 	if ((ret = _FD_LOCK(fd, FD_READ, NULL)) == 0) {
 		/* Get the read/write mode type: */
-		type = _thread_fd_table[fd]->flags & O_ACCMODE;
+		type = _thread_fd_table[fd]->status_flags->flags & O_ACCMODE;
 
 		/* Check if the file is not open for read: */
 		if (type != O_RDONLY && type != O_RDWR) {
@@ -68,23 +68,29 @@ readv(int fd, const struct iovec * iov, int iovcnt)
 
 		/* Perform a non-blocking readv syscall: */
 		while ((ret = _thread_sys_readv(fd, iov, iovcnt)) < 0) {
-			if ((_thread_fd_table[fd]->flags & O_NONBLOCK) == 0 &&
+			if ((_thread_fd_table[fd]->status_flags->flags & O_NONBLOCK) == 0 &&
 			    (errno == EWOULDBLOCK || errno == EAGAIN)) {
 				curthread->data.fd.fd = fd;
 				_thread_kern_set_timeout(NULL);
 
 				/* Reset the interrupted operation flag: */
 				curthread->interrupted = 0;
+				curthread->closing_fd = 0;
 
 				_thread_kern_sched_state(PS_FDR_WAIT,
 				    __FILE__, __LINE__);
 
 				/*
 				 * Check if the operation was
-				 * interrupted by a signal
+				 * interrupted by a signal or
+				 * a closing fd.
 				 */
 				if (curthread->interrupted) {
 					errno = EINTR;
+					ret = -1;
+					break;
+				} else if (curthread->closing_fd) {
+					errno = EBADF;
 					ret = -1;
 					break;
 				}

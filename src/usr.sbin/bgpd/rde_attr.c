@@ -1,4 +1,4 @@
-/*	$OpenBSD: rde_attr.c,v 1.66 2006/05/27 15:39:56 claudio Exp $ */
+/*	$OpenBSD: rde_attr.c,v 1.70 2007/03/06 16:52:48 henning Exp $ */
 
 /*
  * Copyright (c) 2004 Claudio Jeker <claudio@openbsd.org>
@@ -111,6 +111,7 @@ attr_optadd(struct rde_aspath *asp, u_int8_t flags, u_int8_t type,
 {
 	u_int8_t	 l;
 	struct attr	*a, *t;
+	void		*p;
 
 	/* known optional attributes were validated previously */
 	if ((a = attr_lookup(flags, type, data, len)) == NULL)
@@ -142,10 +143,14 @@ attr_optadd(struct rde_aspath *asp, u_int8_t flags, u_int8_t type,
 	}
 
 	/* no empty slot found, need to realloc */
+	if (asp->others_len == UCHAR_MAX)
+		fatalx("attr_optadd: others_len overflow");
+
 	asp->others_len++;
-	if ((asp->others = realloc(asp->others,
+	if ((p = realloc(asp->others,
 	    asp->others_len * sizeof(struct attr *))) == NULL)
 		fatal("attr_optadd");
+	asp->others = p;
 
 	/* l stores the size of others before resize */
 	asp->others[l] = a;
@@ -666,7 +671,7 @@ int
 aspath_match(struct aspath *a, enum as_spec type, u_int16_t as)
 {
 	u_int8_t	*seg;
-	int		 final;
+	int		 final, first;
 	u_int16_t	 len, seg_size;
 	u_int8_t	 i, seg_type, seg_len;
 
@@ -678,6 +683,7 @@ aspath_match(struct aspath *a, enum as_spec type, u_int16_t as)
 	}
 
 	final = 0;
+	first = 1;
 	seg = a->data;
 	for (len = a->len; len > 0; len -= seg_size, seg += seg_size) {
 		seg_type = seg[0];
@@ -690,9 +696,14 @@ aspath_match(struct aspath *a, enum as_spec type, u_int16_t as)
 			/* not yet in the final segment */
 			continue;
 
-		for (i = 0; i < seg_len; i++)
+		for (i = 0; i < seg_len; i++) {
 			if (as == aspath_extract(seg, i)) {
-				if (final && i + 1 >= seg_len)
+				if (type == AS_PEER) {
+					if (first)
+						return (1);
+					else
+						return (0);
+				} else if (final && i + 1 >= seg_len)
 					/* the final (rightmost) as */
 					if (type == AS_TRANSIT)
 						return (0);
@@ -701,6 +712,8 @@ aspath_match(struct aspath *a, enum as_spec type, u_int16_t as)
 				else if (type != AS_SOURCE)
 					return (1);
 			}
+			first = 0;
+		}
 	}
 	return (0);
 }
@@ -789,7 +802,7 @@ community_delete(struct rde_aspath *asp, int as, int type)
 	if (attr == NULL)
 		/* no attr nothing to do */
 		return;
-	
+
 	p = attr->data;
 	for (l = 0; l < attr->len; l += 4) {
 		eas = *p++;

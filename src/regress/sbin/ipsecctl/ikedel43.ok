@@ -1,7 +1,4 @@
-t IPsec-3ffe::1-3ffe::2
-C rms [peer-3ffe::2]
-C rms [mm-3ffe::2]
-C rms [IPsec-3ffe::1-3ffe::2]
-C rms [qm-3ffe::1-3ffe::2]
-C rms [lid-3ffe::1]
-C rms [rid-3ffe::2]
+t IPsec-3ffe::1:2022-6-3ffe::2:22-6
+C rmv [Phase 2]:Connections=IPsec-3ffe::1:2022-6-3ffe::2:22-6
+C rms [IPsec-3ffe::1:2022-6-3ffe::2:22-6]
+C rms [qm-3ffe::1:2022-6-3ffe::2:22-6]

@@ -1,4 +1,4 @@
-/*	$OpenBSD: buffer.c,v 1.63 2006/07/25 08:27:09 kjell Exp $	*/
+/*	$OpenBSD: buffer.c,v 1.66 2006/11/19 16:51:19 deraadt Exp $	*/
 
 /* This file is in the public domain. */
 
@@ -13,7 +13,7 @@
 #include "kbd.h"		/* needed for modes */
 
 static struct buffer  *makelist(void);
-static struct buffer *bnew(void);
+static struct buffer *bnew(const char *);
 
 /* ARGSUSED */
 int
@@ -477,25 +477,19 @@ bfind(const char *bname, int cflag)
 	if (cflag != TRUE)
 		return (NULL);
 
-	bp = bnew();
-
-	if ((bp->b_bname = strdup(bname)) == NULL) {
-		ewprintf("Can't get %d bytes", strlen(bname) + 1);
-		free(bp);
-		return (NULL);
-	}
+	bp = bnew(bname);
 
 	return (bp);
 }
 
 /*
  * Create a new buffer and put it in the list of
- * all buffers. 
+ * all buffers.
  */
 static struct buffer *
-bnew()
+bnew(const char *bname)
 {
-	struct buffer *bp;
+	struct buffer	*bp;
 	struct line	*lp;
 	int		 i;
 
@@ -533,6 +527,10 @@ bnew()
 	bheadp = bp;
 	bp->b_dotline = bp->b_markline = 1;
 	bp->b_lines = 1;
+	if ((bp->b_bname = strdup(bname)) == NULL) {
+		ewprintf("Can't get %d bytes", strlen(bname) + 1);
+		return (NULL);
+	}
 
 	return (bp);
 }
@@ -615,6 +613,7 @@ showbuffer(struct buffer *bp, struct mgwin *wp, int flags)
 				wp->w_markp = owp->w_markp;
 				wp->w_marko = owp->w_marko;
 				wp->w_dotline = owp->w_dotline;
+				wp->w_markline = owp->w_markline;
 				break;
 			}
 	wp->w_flag |= WFMODE | flags;
@@ -632,7 +631,7 @@ showbuffer(struct buffer *bp, struct mgwin *wp, int flags)
 int
 augbname(char *bn, const char *fn, size_t bs)
 {
-	int 	 count;
+	int	 count;
 	size_t	 remain, len;
 
 	len = strlcpy(bn, basename(fn), bs);

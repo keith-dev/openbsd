@@ -1,4 +1,4 @@
-/*	$OpenBSD: ntp.c,v 1.91 2006/07/01 18:52:46 otto Exp $ */
+/*	$OpenBSD: ntp.c,v 1.98 2007/01/15 08:19:11 otto Exp $ */
 
 /*
  * Copyright (c) 2003, 2004 Henning Brauer <henning@openbsd.org>
@@ -46,7 +46,6 @@ void	ntp_sighdlr(int);
 int	ntp_dispatch_imsg(void);
 void	peer_add(struct ntp_peer *);
 void	peer_remove(struct ntp_peer *);
-int	offset_compare(const void *, const void *);
 
 void
 ntp_sighdlr(int sig)
@@ -166,7 +165,7 @@ ntp_main(int pipe_prnt[2], struct ntpd_conf *nconf)
 	conf->status.precision = a;
 	conf->scale = 1;
 
-	sensor_init(conf);
+	sensor_init();
 
 	log_info("ntp engine ready");
 
@@ -202,7 +201,7 @@ ntp_main(int pipe_prnt[2], struct ntpd_conf *nconf)
 
 		bzero(pfd, sizeof(struct pollfd) * pfd_elms);
 		bzero(idx2peer, sizeof(void *) * idx2peer_elms);
-		nextaction = time(NULL) + 3600;
+		nextaction = getmonotime() + 3600;
 		pfd[PFD_PIPE_MAIN].fd = ibuf_main->fd;
 		pfd[PFD_PIPE_MAIN].events = POLLIN;
 		pfd[PFD_HOTPLUG].fd = hotplugfd;
@@ -218,7 +217,7 @@ ntp_main(int pipe_prnt[2], struct ntpd_conf *nconf)
 		idx_peers = i;
 		sent_cnt = trial_cnt = 0;
 		TAILQ_FOREACH(p, &conf->ntp_peers, entry) {
-			if (p->next > 0 && p->next <= time(NULL)) {
+			if (p->next > 0 && p->next <= getmonotime()) {
 				if (p->state > STATE_DNS_INPROGRESS)
 					trial_cnt++;
 				if (client_query(p) == 0)
@@ -229,7 +228,7 @@ ntp_main(int pipe_prnt[2], struct ntpd_conf *nconf)
 
 			if (p->deadline > 0 && p->deadline < nextaction)
 				nextaction = p->deadline;
-			if (p->deadline > 0 && p->deadline <= time(NULL)) {
+			if (p->deadline > 0 && p->deadline <= getmonotime()) {
 				timeout = error_interval();
 				log_debug("no reply from %s received in time, "
 				    "next query %ds", log_sockaddr(
@@ -243,7 +242,8 @@ ntp_main(int pipe_prnt[2], struct ntpd_conf *nconf)
 				set_next(p, timeout);
 			}
 
-			if (p->state == STATE_QUERY_SENT) {
+			if (p->state == STATE_QUERY_SENT &&
+			    p->query->fd != -1) {
 				pfd[i].fd = p->query->fd;
 				pfd[i].events = POLLIN;
 				idx2peer[i - idx_peers] = p;
@@ -251,12 +251,15 @@ ntp_main(int pipe_prnt[2], struct ntpd_conf *nconf)
 			}
 		}
 
-		if (last_sensor_scan + SENSOR_SCAN_INTERVAL < time(NULL)) {
+		if (last_sensor_scan == 0 ||
+		    last_sensor_scan + SENSOR_SCAN_INTERVAL < getmonotime()) {
 			sensor_scan();
-			last_sensor_scan = time(NULL);
+			last_sensor_scan = getmonotime();
 		}
 		sensors_cnt = 0;
 		TAILQ_FOREACH(s, &conf->ntp_sensors, entry) {
+			if (conf->settime && s->offsets[0].offset)
+				priv_settime(s->offsets[0].offset);
 			sensors_cnt++;
 			if (s->next > 0 && s->next < nextaction)
 				nextaction = s->next;
@@ -270,7 +273,7 @@ ntp_main(int pipe_prnt[2], struct ntpd_conf *nconf)
 		if (ibuf_main->w.queued > 0)
 			pfd[PFD_PIPE_MAIN].events |= POLLOUT;
 
-		timeout = nextaction - time(NULL);
+		timeout = nextaction - getmonotime();
 		if (timeout < 0)
 			timeout = 0;
 
@@ -315,7 +318,7 @@ ntp_main(int pipe_prnt[2], struct ntpd_conf *nconf)
 		for (s = TAILQ_FIRST(&conf->ntp_sensors); s != NULL;
 		    s = next_s) {
 			next_s = TAILQ_NEXT(s, entry);
-			if (s->next <= time(NULL))
+			if (s->next <= getmonotime())
 				sensor_query(s);
 		}
 	}
@@ -560,6 +563,11 @@ priv_adjtime(void)
 		for (i = 0; i < OFFSET_ARRAY_SIZE; i++)
 			p->reply[i].offset -= offset_median;
 		p->update.good = 0;
+	}
+	TAILQ_FOREACH(s, &conf->ntp_sensors, entry) {
+		for (i = 0; i < SENSOR_OFFSETS; i++)
+			s->offsets[i].offset -= offset_median;
+		s->update.offset -= offset_median;
 	}
 
 	return (0);

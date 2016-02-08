@@ -1,4 +1,4 @@
-/*	$OpenBSD: route.c,v 1.100 2006/06/17 17:16:04 pascoe Exp $	*/
+/*	$OpenBSD: route.c,v 1.104 2006/11/28 19:21:15 reyk Exp $	*/
 /*	$NetBSD: route.c,v 1.16 1996/04/15 18:27:05 cgd Exp $	*/
 
 /*
@@ -55,9 +55,14 @@
 #include <string.h>
 #include <paths.h>
 #include <err.h>
+#include <net/if_media.h>
 
 #include "keywords.h"
 #include "show.h"
+
+const int ifm_status_valid_list[] = IFM_STATUS_VALID_LIST;
+const struct ifmedia_status_description
+	ifm_status_descriptions[] = IFM_STATUS_DESCRIPTIONS;
 
 union	sockunion {
 	struct sockaddr		sa;
@@ -112,7 +117,7 @@ usage(char *cp)
 	if (cp)
 		warnx("botched keyword: %s", cp);
 	fprintf(stderr,
-	    "usage: %s [-dnqtv] command [[modifiers] args]\n",
+	    "usage: %s [-dnqtv] [ -T tableid ] command [[modifiers] args]\n",
 	    __progname);
 	fprintf(stderr,
 	    "commands: add, change, delete, flush, get, monitor, show\n");
@@ -756,7 +761,8 @@ getaddr(int which, char *s, struct hostent **hpp)
 		memcpy(&su->sin6, res->ai_addr, sizeof(su->sin6));
 		freeaddrinfo(res);
 		if ((IN6_IS_ADDR_LINKLOCAL(&su->sin6.sin6_addr) ||
-		     IN6_IS_ADDR_MC_LINKLOCAL(&su->sin6.sin6_addr)) &&
+		     IN6_IS_ADDR_MC_LINKLOCAL(&su->sin6.sin6_addr) ||
+		     IN6_IS_ADDR_MC_INTFACELOCAL(&su->sin6.sin6_addr)) &&
 		    su->sin6.sin6_scope_id) {
 			*(u_int16_t *)&su->sin6.sin6_addr.s6_addr[2] =
 				htons(su->sin6.sin6_scope_id);
@@ -1071,13 +1077,56 @@ char ifnetflags[] =
 char addrnames[] =
 "\1DST\2GATEWAY\3NETMASK\4GENMASK\5IFP\6IFA\7AUTHOR\010BRD\13LABEL";
 
+const char *
+get_linkstate(int mt, int link_state)
+{
+	const struct ifmedia_status_description *p;
+	int i, media_type;
+
+	switch (mt) {
+	case IFT_ETHER:
+		media_type = IFM_ETHER;
+		break;
+	case IFT_FDDI:
+		media_type = IFM_FDDI;
+		break;
+	case IFT_ISO88025:
+		media_type = IFM_TOKEN;
+		break;
+	case IFT_CARP:
+		media_type = IFM_CARP;
+		break;
+	case IFT_IEEE80211:
+		media_type = IFM_IEEE80211;
+		break;
+	default:
+		media_type = 0;
+		break;
+	}
+
+	if (link_state == LINK_STATE_UNKNOWN)
+		return ("unknown");
+
+	for (i = 0; ifm_status_valid_list[i] != 0; i++) {
+		for (p = ifm_status_descriptions; p->ifms_valid != 0; p++) {
+			if (p->ifms_type != media_type ||
+			    p->ifms_valid != ifm_status_valid_list[i])
+				continue;
+			if (LINK_STATE_IS_UP(link_state))
+				return (p->ifms_string[1]);
+			return (p->ifms_string[0]);
+		}
+	}
+
+	return ("unknown");
+}
+
 void
 print_rtmsg(struct rt_msghdr *rtm, int msglen)
 {
 	struct if_msghdr *ifm;
 	struct ifa_msghdr *ifam;
 	struct if_announcemsghdr *ifan;
-	const char *state = "unknown";
 	char ifname[IF_NAMESIZE];
 
 	if (verbose == 0)
@@ -1095,15 +1144,9 @@ print_rtmsg(struct rt_msghdr *rtm, int msglen)
 		(void) printf("if# %d, ", ifm->ifm_index);
 		if (!nflag && if_indextoname(ifm->ifm_index, ifname) != NULL)
 			printf("name: %s, ", ifname);
-		switch (ifm->ifm_data.ifi_link_state) {
-		case LINK_STATE_DOWN:
-			state = "down";
-			break;
-		case LINK_STATE_UP:
-			state = "up";
-			break;
-		}
-		printf("link: %s, flags:", state);
+		printf("link: %s, flags:",
+		    get_linkstate(ifm->ifm_data.ifi_type,
+		    ifm->ifm_data.ifi_link_state));
 		bprintf(stdout, ifm->ifm_flags, ifnetflags);
 		pmsg_addrs((char *)(ifm + 1), ifm->ifm_addrs);
 		break;

@@ -1,4 +1,4 @@
-/*	$OpenBSD: ci.c,v 1.186 2006/08/23 20:28:47 joris Exp $	*/
+/*	$OpenBSD: ci.c,v 1.196 2007/03/03 21:07:23 deraadt Exp $	*/
 /*
  * Copyright (c) 2005, 2006 Niall O'Higgins <niallo@openbsd.org>
  * All rights reserved.
@@ -24,7 +24,15 @@
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include "includes.h"
+#include <sys/stat.h>
+
+#include <ctype.h>
+#include <err.h>
+#include <fcntl.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
 
 #include "rcsprog.h"
 #include "diff.h"
@@ -90,7 +98,7 @@ void
 checkin_usage(void)
 {
 	fprintf(stderr,
-	    "usage: ci [-jMNqV] [-d[date]] [-f[rev]] [-I[rev]] [-i[rev]]\n"
+	    "usage: ci [-qV] [-d[date]] [-f[rev]] [-I[rev]] [-i[rev]]\n"
 	    "	  [-j[rev]] [-k[rev]] [-l[rev]] [-M[rev]] [-mmsg]\n"
 	    "	  [-Nsymbol] [-nsymbol] [-r[rev]] [-sstate] [-tstr]\n"
 	    "	  [-u[rev]] [-wusername] [-xsuffixes] [-ztz] file ...\n");
@@ -233,8 +241,13 @@ checkin_main(int argc, char **argv)
 	if ((pb.username = getlogin()) == NULL)
 		err(1, "getlogin");
 
+	/* If -x flag was not given, use default. */
+	if (rcs_suffixes == NULL)
+		rcs_suffixes = RCS_DEFAULT_SUFFIX;
+
 	for (i = 0; i < argc; i++) {
 		pb.filename = argv[i];
+		rcs_strip_suffix(pb.filename);
 
 		if ((workfile_fd = open(pb.filename, O_RDONLY)) == -1)
 			err(1, "%s", pb.filename);
@@ -246,6 +259,7 @@ checkin_main(int argc, char **argv)
 			if (pb.openflags & RCS_CREATE)
 				pb.flags |= NEWFILE;
 			else {
+				/* XXX - Check if errno == ENOENT. */
 				warnx("No existing RCS file");
 				status = 1;
 				(void)close(workfile_fd);
@@ -318,7 +332,7 @@ checkin_main(int argc, char **argv)
  * checkin_diff_file()
  *
  * Generate the diff between the working file and a revision.
- * Returns pointer to a char array on success, NULL on failure.
+ * Returns pointer to a BUF on success, NULL on failure.
  */
 static BUF *
 checkin_diff_file(struct checkin_params *pb)
@@ -358,7 +372,7 @@ checkin_diff_file(struct checkin_params *pb)
 	b2 = NULL;
 
 	diff_format = D_RCSDIFF;
-	if (rcs_diffreg(path1, path2, b3) == D_ERROR)
+	if (rcs_diffreg(path1, path2, b3, 0) == D_ERROR)
 		goto out;
 
 	return (b3);
@@ -476,7 +490,7 @@ checkin_update(struct checkin_params *pb)
 			t_head = gmtime(&head_date);
 			strftime(dbuf2, sizeof(dbuf2), fmt, t_head);
 
-			errx(1, "%s: Date %s preceeds %s in revision %s.",
+			errx(1, "%s: Date %s precedes %s in revision %s.",
 			    pb->file->rf_path, dbuf1, dbuf2,
 			    rcsnum_tostr(pb->frev, numb2, sizeof(numb2)));
 		}
@@ -498,9 +512,19 @@ checkin_update(struct checkin_params *pb)
 	}
 
 	/* If no log message specified, get it interactively. */
-	if (pb->flags & INTERACTIVE)
-		pb->rcs_msg = checkin_getlogmsg(pb->frev, pb->newrev,
-		    pb->flags);
+	if (pb->flags & INTERACTIVE) {
+		if (pb->rcs_msg != NULL) {
+			fprintf(stderr,
+			    "reuse log message of previous file? [yn](y): ");
+			if (rcs_yesno('y') != 'y') {
+				xfree(pb->rcs_msg);
+				pb->rcs_msg = NULL;
+			}
+		}
+		if (pb->rcs_msg == NULL)
+			pb->rcs_msg = checkin_getlogmsg(pb->frev, pb->newrev,
+			    pb->flags);
+	}
 
 	if (rcs_lock_remove(pb->file, pb->username, pb->frev) < 0) {
 		if (rcs_errno != RCS_ERR_NOENT)
@@ -550,8 +574,7 @@ checkin_update(struct checkin_params *pb)
 		err(1, "%s", pb->filename);
 
 	/* Strip all the write bits */
-	pb->file->rf_mode = st.st_mode &
-	    (S_IXUSR|S_IXGRP|S_IXOTH|S_IRUSR|S_IRGRP|S_IROTH);
+	pb->file->rf_mode = st.st_mode & ~(S_IWUSR|S_IWGRP|S_IWOTH);
 
 	(void)close(workfile_fd);
 	(void)unlink(pb->filename);
@@ -565,11 +588,10 @@ checkin_update(struct checkin_params *pb)
 		checkout_rev(pb->file, pb->newrev, pb->filename, pb->flags,
 		    pb->username, pb->author, NULL, NULL);
 
-	if (pb->flags & INTERACTIVE) {
-		xfree(pb->rcs_msg);
+	if ((pb->flags & INTERACTIVE) && (pb->rcs_msg[0] == '\0')) {
+		xfree(pb->rcs_msg);	/* free empty log message */
 		pb->rcs_msg = NULL;
 	}
-
 out:
 	return (0);
 
@@ -621,7 +643,7 @@ checkin_init(struct checkin_params *pb)
 skipdesc:
 
 	/*
-	 * If the user had specified a zero-ending revision number e.g. 4
+	 * If the user had specified a zero-ending revision number e.g. 4.0
 	 * emulate odd GNU behaviour and fetch log message.
 	 */
 	if (fetchlog == 1) {
@@ -663,8 +685,7 @@ skipdesc:
 	}
 
 	/* Attach a symbolic name to this revision if specified. */
-	if (pb->symbol != NULL &&
-	    (checkin_attach_symbol(pb) < 0))
+	if (pb->symbol != NULL && checkin_attach_symbol(pb) < 0)
 		goto fail;
 
 	/* Set the state of this revision if specified. */
@@ -676,8 +697,7 @@ skipdesc:
 		err(1, "%s", pb->filename);
 
 	/* Strip all the write bits */
-	pb->file->rf_mode = st.st_mode &
-	    (S_IXUSR|S_IXGRP|S_IXOTH|S_IRUSR|S_IRGRP|S_IROTH);
+	pb->file->rf_mode = st.st_mode & ~(S_IWUSR|S_IWGRP|S_IWOTH);
 
 	(void)close(workfile_fd);
 	(void)unlink(pb->filename);
@@ -881,7 +901,7 @@ checkin_keywordscan(BUF *data, RCSNUM **rev, time_t *date, char **author,
 		/* XXX - Not binary safe. */
 		rcs_buf_putc(buf, '\0');
 		checkin_parsekeyword(rcs_buf_get(buf), rev, date, author, state);
-loopend:
+loopend:;
 	}
 	if (kwstr == NULL)
 		return (-1);

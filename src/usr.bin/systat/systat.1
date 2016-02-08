@@ -1,4 +1,4 @@
-.\"	$OpenBSD: systat.1,v 1.45 2006/06/29 21:17:27 dlg Exp $
+.\"	$OpenBSD: systat.1,v 1.54 2007/02/23 23:36:36 jmc Exp $
 .\"	$NetBSD: systat.1,v 1.6 1996/05/10 23:16:39 thorpej Exp $
 .\"
 .\" Copyright (c) 1985, 1990, 1993
@@ -98,6 +98,7 @@ argument expects to be one of:
 .Ic pigs ,
 .Ic iostat ,
 .Ic swap ,
+.Ic sensors ,
 .Ic mbufs ,
 .Ic vmstat ,
 .Ic ifstat
@@ -105,6 +106,12 @@ or
 .Ic netstat .
 These displays can also be requested interactively and are described in
 full detail below.
+.Ar display
+may be abbreviated to the minimum unambiguous prefix;
+for example,
+.Dq io
+for
+.Dq iostat .
 .It Ar refresh-interval
 The
 .Ar refresh-interval
@@ -148,6 +155,11 @@ Print the names of the available displays on the command line.
 .It Ic load
 Print the load average over the past 1, 5, and 15 minutes
 on the command line.
+.It Ic quit
+Exit
+.Nm systat .
+(This may be abbreviated to
+.Ic q . )
 .It Ic stop
 Stop refreshing the screen.
 .It Xo
@@ -160,15 +172,109 @@ argument is provided it is interpreted as a refresh interval
 (in seconds).
 Supplying only a number will set the refresh interval to this
 value.
-.It Ic quit
-Exit
-.Nm systat .
-(This may be abbreviated to
-.Ic q . )
 .El
 .Pp
+Again,
+.Ar display
+may be abbreviated to the minimum unambiguous prefix.
 The available displays are:
-.Bl -tag -width Ic
+.Bl -tag -width "netstatXXX"
+.It Ic ifstat
+Display, in the lower window, interface statistics.
+The
+.Dq State
+column has the format
+.Sm off
+.Xo
+.Cm up \*(Ba dn
+.Bq : Cm U \*(Ba D .
+.Xc
+.Sm on
+.Sq up
+and
+.Sq dn
+represent whether the interface is up or down.
+.Sq U
+and
+.Sq D
+represent whether the interface is connected or not;
+in the case of
+.Xr carp 4
+interfaces, whether the interface is in master or backup state, respectively.
+See below for more options.
+.It Ic iostat
+Display, in the lower window, statistics about disk throughput.
+Statistics
+on disk throughput show, for each drive, data transferred in kilobytes,
+number of disk transactions performed, and time spent in disk accesses
+(in milliseconds).
+.It Ic mbufs
+Display, in the lower window, the number of mbufs allocated
+for particular uses, i.e., data, socket structures, etc.
+.It Ic netstat
+Display, in the lower window, network connections.
+By default, network servers awaiting requests are not displayed.
+Each address
+is displayed in the format
+.Dq host.port ,
+with each shown symbolically, when possible.
+It is possible to have addresses displayed numerically,
+limit the display to a set of ports, hosts, and/or protocols
+(the minimum unambiguous prefix may be supplied):
+.Bl -tag -width Ar
+.It Cm all
+Toggle the displaying of server processes awaiting requests (this
+is the equivalent of the
+.Fl a
+flag to
+.Xr netstat 1 ) .
+.It Cm display Op Ar items
+Display information about the connections associated with the
+specified hosts or ports.
+As for
+.Ar ignore ,
+.Ar items
+may be names or numbers.
+.It Cm ignore Op Ar items
+Do not display information about connections associated with
+the specified hosts or ports.
+Hosts and ports may be specified
+by name
+.Pf ( Dq vangogh ,
+.Dq ftp ) ,
+or numerically.
+Host addresses
+use the Internet dot notation
+.Pq Dq 128.32.0.9 .
+Multiple items
+may be specified with a single command by separating them with
+spaces.
+.It Cm names
+Display network addresses symbolically.
+.It Cm numbers
+Display network addresses numerically.
+.It Cm protocol
+Display only network connections using the indicated protocol
+(currently either
+.Dq tcp
+or
+.Dq udp ) .
+.It Cm reset
+Reset the port, host, and protocol matching mechanisms to the default
+(any protocol, port, or host).
+.It Cm show Op Ar ports\&|hosts
+Show, on the command line, the currently selected protocols,
+hosts, and ports.
+Hosts and ports which are being ignored are prefixed with a
+.Ql \&! .
+If
+.Ar ports
+or
+.Ar hosts
+is supplied as an argument to
+.Cm show ,
+then only the requested information will be displayed.
+.El
 .It Ic pigs
 Display, in the lower window, those processes resident in main
 memory and getting the
@@ -178,12 +284,11 @@ processor is scheduled to user processes, the remaining time
 is accounted to the
 .Dq idle
 process.
-.It Ic iostat
-Display, in the lower window, statistics about disk throughput.
-Statistics
-on disk throughput show, for each drive, data transferred in kilobytes,
-number of disk transactions performed, and time spent in disk accesses
-(in milliseconds).
+.It Ic sensors
+Display, in the lower window,
+the current values of available hardware sensors,
+in a format similar to that of
+.Xr sysctl 8 .
 .It Ic swap
 Show information about swap space usage on all the
 swap areas compiled into the kernel.
@@ -196,9 +301,6 @@ the graph shows the percentage of space in use on each partition.
 If there is more than one swap partition in use,
 a total line is also shown.
 Areas known to the kernel but not in use are shown as not available.
-.It Ic mbufs
-Display, in the lower window, the number of mbufs allocated
-for particular uses, i.e., data, socket structures, etc.
 .It Ic vmstat
 Take over the entire display and show a (rather crowded) compendium
 of statistics related to virtual memory usage, process scheduling,
@@ -214,12 +316,12 @@ The first row of the table reports memory usage only among
 active processes, that is, processes that have run in the previous
 twenty seconds.
 The second row reports on memory usage of all processes.
-The first column reports on the number of physical pages
+The first column reports on the amount of physical memory
 claimed by processes.
 The second column reports the same figure for
-virtual pages, that is, the number of pages that would be
-needed if all processes had all of their pages.
-Finally, the last column shows the number of physical pages
+virtual memory, that is, the amount of memory that would be
+needed if all processes were resident at the same time.
+Finally, the last column shows the amount of physical memory
 on the free list.
 .Pp
 Below the memory display is a list of the average number of processes
@@ -344,93 +446,6 @@ value is more interesting when observed over a long
 period, such as from boot time (see the
 .Cm boot
 option below).
-.It Ic ifstat
-Display, in the lower window, interface statistics.
-The
-.Dq State
-column has the format
-.Sm off
-.Xo
-.Cm up \*(Ba dn
-.Bq : Cm U \*(Ba D .
-.Xc
-.Sm on
-.Sq up
-and
-.Sq dn
-represent whether the interface is up or down.
-.Sq U
-and
-.Sq D
-represent whether the interface is connected or not;
-in the case of
-.Xr carp 4
-interfaces, whether the interface is in master or backup state, respectively.
-See below for more options.
-.It Ic netstat
-Display, in the lower window, network connections.
-By default, network servers awaiting requests are not displayed.
-Each address
-is displayed in the format
-.Dq host.port ,
-with each shown symbolically, when possible.
-It is possible to have addresses displayed numerically,
-limit the display to a set of ports, hosts, and/or protocols
-(the minimum unambiguous prefix may be supplied):
-.Bl -tag -width Ar
-.It Cm all
-Toggle the displaying of server processes awaiting requests (this
-is the equivalent of the
-.Fl a
-flag to
-.Xr netstat 1 ) .
-.It Cm numbers
-Display network addresses numerically.
-.It Cm names
-Display network addresses symbolically.
-.It Cm protocol
-Display only network connections using the indicated protocol
-(currently either
-.Dq tcp
-or
-.Dq udp ) .
-.It Cm ignore Op Ar items
-Do not display information about connections associated with
-the specified hosts or ports.
-Hosts and ports may be specified
-by name
-.Pf ( Dq vangogh ,
-.Dq ftp ) ,
-or numerically.
-Host addresses
-use the Internet dot notation
-.Pq Dq 128.32.0.9 .
-Multiple items
-may be specified with a single command by separating them with
-spaces.
-.It Cm display Op Ar items
-Display information about the connections associated with the
-specified hosts or ports.
-As for
-.Ar ignore ,
-.Ar items
-may be names or numbers.
-.It Cm show Op Ar ports\&|hosts
-Show, on the command line, the currently selected protocols,
-hosts, and ports.
-Hosts and ports which are being ignored are prefixed with a
-.Ql \&! .
-If
-.Ar ports
-or
-.Ar hosts
-is supplied as an argument to
-.Cm show ,
-then only the requested information will be displayed.
-.It Cm reset
-Reset the port, host, and protocol matching mechanisms to the default
-(any protocol, port, or host).
-.El
 .El
 .Pp
 The following commands are specific to the
@@ -451,11 +466,6 @@ Display statistics averaged over the refresh interval (the default).
 Reset running statistics to zero.
 .El
 .Pp
-Commands to switch between displays may be abbreviated to the
-minimum unambiguous prefix; for example,
-.Dq io
-for
-.Dq iostat .
 Certain information may be discarded when the screen size is
 insufficient for display.
 For example, on a machine with 10 drives the
@@ -474,11 +484,11 @@ more drives configured than can normally be displayed on the
 screen.
 .Pp
 .Bl -tag -width Tx -compact
-.It Cm ignore Op Ar drives
-Do not display information about the drives indicated.
-Multiple drives may be specified, separated by spaces.
 .It Cm display Op Ar drives
 Display information about the drives indicated.
+Multiple drives may be specified, separated by spaces.
+.It Cm ignore Op Ar drives
+Do not display information about the drives indicated.
 Multiple drives may be specified, separated by spaces.
 .El
 .Sh FILES
@@ -499,6 +509,7 @@ port names
 .Xr iostat 8 ,
 .Xr pstat 8 ,
 .Xr renice 8 ,
+.Xr sysctl 8 ,
 .Xr vmstat 8
 .Sh HISTORY
 The

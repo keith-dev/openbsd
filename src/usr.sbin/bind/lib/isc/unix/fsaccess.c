@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2004  Internet Systems Consortium, Inc. ("ISC")
+ * Copyright (C) 2004, 2006  Internet Systems Consortium, Inc. ("ISC")
  * Copyright (C) 2000, 2001  Internet Software Consortium.
  *
  * Permission to use, copy, modify, and distribute this software for any
@@ -15,7 +15,9 @@
  * PERFORMANCE OF THIS SOFTWARE.
  */
 
-/* $ISC: fsaccess.c,v 1.6.206.1 2004/03/06 08:14:59 marka Exp $ */
+/* $ISC: fsaccess.c,v 1.6.206.3 2006/08/25 05:25:50 marka Exp $ */
+
+#include <config.h>
 
 #include <sys/types.h>
 #include <sys/stat.h>
@@ -40,9 +42,9 @@ isc_fsaccess_set(const char *path, isc_fsaccess_t access) {
 	if (stat(path, &statb) != 0)
 		return (isc__errno2result(errno));
 
-	if ((statb.st_mode & S_IFDIR) != 0)
+	if (S_ISDIR(statb.st_mode))
 		is_dir = ISC_TRUE;
-	else if ((statb.st_mode & S_IFREG) == 0)
+	else if (!S_ISREG(statb.st_mode))
 		return (ISC_R_INVALIDFILE);
 
 	result = check_bad_bits(access, is_dir);

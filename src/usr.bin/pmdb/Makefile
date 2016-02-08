@@ -1,16 +1,16 @@
-#	$OpenBSD: Makefile,v 1.9 2003/12/03 22:28:01 grange Exp $
+#	$OpenBSD: Makefile,v 1.11 2006/11/19 03:34:03 deraadt Exp $
 
 .include <bsd.own.mk>
 
+MAN=pmdb.1
+
 .if (!exists(arch/${MACHINE}/Makefile.inc) && \
     !exists(arch/${MACHINE_ARCH}/Makefile.inc))
-NOMAN=no, man
 NOPROG=no, man
 .else
 
 PROG=pmdb
 SRCS=pmdb.c symbol.c clit.c process.c signal.c break.c core.c
-
 # support for NetBSD
 .if defined(OBJECT_FMT)
 .if ${OBJECT_FMT} == "ELF"

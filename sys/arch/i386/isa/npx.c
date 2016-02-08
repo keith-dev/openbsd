@@ -1,4 +1,4 @@
-/*	$OpenBSD: npx.c,v 1.40 2006/07/25 19:16:51 kettenis Exp $	*/
+/*	$OpenBSD: npx.c,v 1.42 2006/10/18 19:48:32 tom Exp $	*/
 /*	$NetBSD: npx.c,v 1.57 1996/05/12 23:12:24 mycroft Exp $	*/
 
 #if 0
@@ -123,6 +123,7 @@ enum npx_type {
 	NPX_INTERRUPT,
 	NPX_EXCEPTION,
 	NPX_BROKEN,
+	NPX_CPUID,
 };
 
 static	enum npx_type		npx_type;
@@ -193,8 +194,7 @@ asm (".text\n\t"
 	"iret\n\t");
 
 static inline int
-npxprobe1(ia)
-	struct isa_attach_args *ia;
+npxprobe1(struct isa_attach_args *ia)
 {
 	int control;
 	int status;
@@ -269,9 +269,7 @@ npxprobe1(ia)
  * need to use interrupts.  Return 1 if device exists.
  */
 int
-npxprobe(parent, match, aux)
-	struct device *parent;
-	void *match, *aux;
+npxprobe(struct device *parent, void *match, void *aux)
 {
 	struct	isa_attach_args *ia = aux;
 	int	irq;
@@ -280,6 +278,15 @@ npxprobe(parent, match, aux)
 	unsigned save_imen;
 	struct	gate_descriptor save_idt_npxintr;
 	struct	gate_descriptor save_idt_npxtrap;
+
+	if (cpu_feature & CPUID_FPU) {
+		npx_type = NPX_CPUID;
+		i386_fpu_exception = 1;
+		ia->ia_irq = IRQUNK;	/* Don't want the interrupt vector */
+		ia->ia_iosize = 16;
+		ia->ia_msize = 0;
+		return 1;
+	}
 
 	/*
 	 * This routine is now just a wrapper for npxprobe1(), to install
@@ -356,9 +363,7 @@ npxinit(struct cpu_info *ci)
  * Attach routine - announce which it is, and wire into system
  */
 void
-npxattach(parent, self, aux)
-	struct device *parent, *self;
-	void *aux;
+npxattach(struct device *parent, struct device *self, void *aux)
 {
 	struct npx_softc *sc = (void *)self;
 	struct isa_attach_args *ia = aux;
@@ -372,6 +377,10 @@ npxattach(parent, self, aux)
 		break;
 	case NPX_EXCEPTION:
 		printf(": using exception 16\n");
+		break;
+	case NPX_CPUID:
+		printf(": reported by CPUID; using exception 16\n");
+		npx_type = NPX_EXCEPTION;
 		break;
 	case NPX_BROKEN:
 		printf(": error reporting broken; not using\n");
@@ -408,8 +417,7 @@ npxattach(parent, self, aux)
  * IRQ13 exception handling makes exceptions even less precise than usual.
  */
 int
-npxintr(arg)
-	void *arg;
+npxintr(void *arg)
 {
 	struct cpu_info *ci = curcpu();
 	struct proc *p = ci->ci_fpcurproc;

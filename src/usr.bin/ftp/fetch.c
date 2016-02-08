@@ -1,4 +1,4 @@
-/*	$OpenBSD: fetch.c,v 1.68 2006/07/07 12:00:25 ray Exp $	*/
+/*	$OpenBSD: fetch.c,v 1.72 2007/02/08 03:19:12 ray Exp $	*/
 /*	$NetBSD: fetch.c,v 1.14 1997/08/18 10:20:20 lukem Exp $	*/
 
 /*-
@@ -38,7 +38,7 @@
  */
 
 #if !defined(lint) && !defined(SMALL)
-static const char rcsid[] = "$OpenBSD: fetch.c,v 1.68 2006/07/07 12:00:25 ray Exp $";
+static const char rcsid[] = "$OpenBSD: fetch.c,v 1.72 2007/02/08 03:19:12 ray Exp $";
 #endif /* not lint and not SMALL */
 
 /*
@@ -118,7 +118,7 @@ static int	redirect_loop;
 static int
 url_get(const char *origline, const char *proxyenv, const char *outfile)
 {
-	char pbuf[NI_MAXSERV], hbuf[NI_MAXHOST], *cp, *portnum, *path;
+	char pbuf[NI_MAXSERV], hbuf[NI_MAXHOST], *cp, *portnum, *path, ststr[4];
 	char *hosttail, *cause = "unknown", *newline, *host, *port, *buf = NULL;
 	int error, i, isftpurl = 0, isfileurl = 0, isredirect = 0, rval = -1;
 	struct addrinfo hints, *res0, *res;
@@ -136,6 +136,7 @@ url_get(const char *origline, const char *proxyenv, const char *outfile)
 	SSL_CTX *ssl_ctx = NULL;
 #endif
 	SSL *ssl = NULL;
+	int status;
 
 	newline = strdup(origline);
 	if (newline == NULL)
@@ -409,7 +410,7 @@ again:
 		}
 		if (SSL_connect(ssl) <= 0) {
 			ERR_print_errors_fp(ttyout);
-			goto cleanup_url_get;;
+			goto cleanup_url_get;
 		}
 	} else {
 		fin = fdopen(s, "r+");
@@ -486,13 +487,28 @@ again:
 		goto improper;
 	else
 		cp++;
-	if (strncmp(cp, "301", 3) == 0 || strncmp(cp, "302", 3) == 0) {
+
+	strlcpy(ststr, cp, sizeof(ststr));
+	status = strtonum(ststr, 200, 307, &errstr);
+	if (errstr) {
+		warnx("Error retrieving file: %s", cp);
+		goto cleanup_url_get;
+	}
+
+	switch (status) {
+	case 200:	/* OK */
+		break;
+	case 301:	/* Moved Permanently */
+	case 302:	/* Found */
+	case 303:	/* See Other */
+	case 307:	/* Temporary Redirect */
 		isredirect++;
 		if (redirect_loop++ > 10) {
 			warnx("Too many redirections requested");
 			goto cleanup_url_get;
 		}
-	} else if (strncmp(cp, "200", 3)) {
+		break;
+	default:
 		warnx("Error retrieving file: %s", cp);
 		goto cleanup_url_get;
 	}
@@ -1150,6 +1166,7 @@ proxy_connect(int socket, char *host)
 	if (write(socket, connstr, l) != l)
 		err(1, "Could not send connect string");
 	read(socket, &buf, sizeof(buf)); /* only proxy header XXX: error handling? */
+	free(connstr);
 	return(200);
 }
 #endif

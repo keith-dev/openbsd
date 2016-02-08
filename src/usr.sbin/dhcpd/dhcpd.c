@@ -1,4 +1,4 @@
-/*	$OpenBSD: dhcpd.c,v 1.29 2006/06/14 20:19:20 jmc Exp $ */
+/*	$OpenBSD: dhcpd.c,v 1.32 2007/02/17 18:27:38 deraadt Exp $ */
 
 /*
  * Copyright (c) 2004 Henning Brauer <henning@cvs.openbsd.org>
@@ -40,7 +40,8 @@
  */
 
 #include "dhcpd.h"
-#include "pwd.h"
+
+#include <pwd.h>
 
 void usage(void);
 
@@ -72,7 +73,7 @@ main(int argc, char *argv[])
 	openlog(__progname, LOG_NDELAY, DHCPD_LOG_FACILITY);
 	setlogmask(LOG_UPTO(LOG_INFO));
 
-	while ((ch = getopt(argc, argv, "A:C:L:c:dfl:nq")) != -1)
+	while ((ch = getopt(argc, argv, "A:C:L:c:dfl:n")) != -1)
 		switch (ch) {
 		case 'A':
 			abandoned_tab = optarg;
@@ -100,8 +101,6 @@ main(int argc, char *argv[])
 			daemonize = 0;
 			cftest = 1;
 			log_perror = -1;
-			break;
-		case 'q':
 			break;
 		default:
 			usage();
@@ -192,7 +191,7 @@ usage(void)
 	fprintf(stderr, " [-C changed_ip_table]\n");
 	fprintf(stderr, "\t[-c config-file] [-L leased_ip_table]");
 	fprintf(stderr, " [-l lease-file]\n");
-	fprintf(stderr, "\t[-p pf-device] [if0 [...ifN]]\n");
+	fprintf(stderr, "\t[if0 [...ifN]]\n");
 	exit(1);
 }
 

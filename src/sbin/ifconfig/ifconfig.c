@@ -1,4 +1,4 @@
-/*	$OpenBSD: ifconfig.c,v 1.174 2006/08/29 17:22:00 henning Exp $	*/
+/*	$OpenBSD: ifconfig.c,v 1.177 2006/11/15 01:53:00 itojun Exp $	*/
 /*	$NetBSD: ifconfig.c,v 1.40 1997/10/01 02:19:43 enami Exp $	*/
 
 /*
@@ -281,6 +281,7 @@ const struct	cmd {
 	{ "metric",	NEXTARG,	0,		setifmetric },
 	{ "mtu",	NEXTARG,	0,		setifmtu },
 	{ "nwid",	NEXTARG,	0,		setifnwid },
+	{ "-nwid",	-1,		0,		setifnwid },
 	{ "bssid",	NEXTARG,	0,		setifbssid },
 	{ "-bssid",	-1,		0,		setifbssid },
 	{ "nwkey",	NEXTARG,	0,		setifnwkey },
@@ -1307,9 +1308,15 @@ setifnwid(const char *val, int d)
 	struct ieee80211_nwid nwid;
 	int len;
 
-	len = sizeof(nwid.i_nwid);
-	if (get_string(val, NULL, nwid.i_nwid, &len) == NULL)
-		return;
+	if (d != 0) {
+		/* no network id is especially desired */
+		memset(&nwid, 0, sizeof(nwid));
+		len = 0;
+	} else {
+		len = sizeof(nwid.i_nwid);
+		if (get_string(val, NULL, nwid.i_nwid, &len) == NULL)
+			return;
+	}
 	nwid.i_len = len;
 	(void)strlcpy(ifr.ifr_name, name, sizeof(ifr.ifr_name));
 	ifr.ifr_data = (caddr_t)&nwid;
@@ -1387,7 +1394,7 @@ setifnwkey(const char *val, int d)
 				return;
 			}
 		} else {
-			len = sizeof(keybuf[i]);
+			len = sizeof(keybuf[0]);
 			val = get_string(val, NULL, keybuf[0], &len);
 			if (val == NULL)
 				return;
@@ -2471,13 +2478,13 @@ setifprefixlen(const char *addr, int d)
 void
 in6_fillscopeid(struct sockaddr_in6 *sin6)
 {
-#if defined(__KAME__) && defined(KAME_SCOPEID)
+#ifdef __KAME__
 	if (IN6_IS_ADDR_LINKLOCAL(&sin6->sin6_addr)) {
 		sin6->sin6_scope_id =
 			ntohs(*(u_int16_t *)&sin6->sin6_addr.s6_addr[2]);
 		sin6->sin6_addr.s6_addr[2] = sin6->sin6_addr.s6_addr[3] = 0;
 	}
-#endif /* __KAME__ && KAME_SCOPEID */
+#endif /* __KAME__ */
 }
 
 /* XXX not really an alias */
@@ -3805,16 +3812,6 @@ SIN6(in6_addreq.ifra_prefixmask), SIN6(in6_addreq.ifra_dstaddr)};
 void
 in6_getaddr(const char *s, int which)
 {
-#ifndef KAME_SCOPEID
-	struct sockaddr_in6 *sin6 = sin6tab[which];
-
-	sin6->sin6_len = sizeof(*sin6);
-	if (which != MASK)
-		sin6->sin6_family = AF_INET6;
-
-	if (inet_pton(AF_INET6, s, &sin6->sin6_addr) != 1)
-		errx(1, "%s: bad value", s);
-#else /* KAME_SCOPEID */
 	struct sockaddr_in6 *sin6 = sin6tab[which];
 	struct addrinfo hints, *res;
 	int error;
@@ -3838,7 +3835,6 @@ in6_getaddr(const char *s, int which)
 	}
 #endif /* __KAME__ */
 	freeaddrinfo(res);
-#endif /* KAME_SCOPEID */
 }
 
 void

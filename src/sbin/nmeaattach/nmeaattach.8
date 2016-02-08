@@ -1,4 +1,4 @@
-.\"	$OpenBSD: nmeaattach.8,v 1.2 2006/07/09 09:03:19 jmc Exp $
+.\"	$OpenBSD: nmeaattach.8,v 1.5 2006/11/29 00:16:35 mbalmer Exp $
 .\"
 .\" Copyright (c) 2006 Marc Balmer <mbalmer@openbsd.org>
 .\"
@@ -28,8 +28,8 @@
 .Ar device
 .Sh DESCRIPTION
 .Nm
-is used to designate a serial line with an NMEA 0183 device as a source of
-timedelta sensors.
+is used to designate a serial line with a device that outputs NMEA 0183 data as
+a source of timedelta sensors.
 The following operands are supported by
 .Nm nmeaattach :
 .Bl -tag -width Ar
@@ -45,8 +45,9 @@ Specifically, this disables HUPCL.
 Specifies the speed of the connection.
 If not specified, the default of 4800 baud is used.
 .It Fl t Ar cond
-Chooses the condition which will cause the current system
-time to be immediately copied to the terminal timestamp storage.
+Chooses the condition which will cause the current system time to be
+immediately copied to the terminal timestamp storage for subsequent use by
+.Xr nmea 4 .
 Only one can be used.
 .Pp
 .Bl -tag -width DCDXX -offset indent -compact
@@ -65,6 +66,9 @@ If no condition is specified, the
 line discipline will timestamp on receiving the leading
 .Sq $
 character of each GPRMC sentence.
+.Pp
+Configuring the NMEA device to issue a PPS signal is device specific and
+should be done by device specific applications.
 .It Ar device
 Specifies the name of the serial line.
 .Ar device

@@ -1,4 +1,4 @@
-.\"	$OpenBSD: sysctl.3,v 1.159 2006/09/15 20:41:44 otto Exp $
+.\"	$OpenBSD: sysctl.3,v 1.165 2007/02/21 05:55:21 jmc Exp $
 .\"
 .\" Copyright (c) 1993
 .\"	The Regents of the University of California.  All rights reserved.
@@ -321,9 +321,22 @@ The total physical memory, in bytes.
 .It Dv HW_PRODUCT
 The product name of the machine.
 .It Dv HW_SENSORS
-An array of
+Third level comprises an array of
+.Li struct sensorsdev
+structures containing information about devices
+that may attach hardware monitoring sensors.
+.Pp
+Third, fourth and fifth levels together comprise an array of
 .Li struct sensor
-structures containing information from the hardware monitoring sensors.
+structures containing snapshot readings of hardware monitoring sensors.
+In such usage, third level indicates the numerical representation
+of the sensor device name to which the sensor is attached
+(a device's xname and number is matched with the help of
+.Li struct sensorsdev
+structure above),
+fourth level indicates sensor type and
+fifth level is an ordinal sensor number (unique to
+the specified sensor type on the specified sensor device).
 .It Dv HW_SERIALNO
 The serial number of the machine.
 .It Dv HW_SETPERF
@@ -1086,6 +1099,7 @@ The currently defined protocols and names are:
 .It ip	mforwarding	integer	yes
 .It ip	mtudisc	integer	yes
 .It ip	mtudisctimeout	integer	yes
+.It ip	multipath	integer	yes
 .It ip	portfirst	integer	yes
 .It ip	porthifirst	integer	yes
 .It ip	porthilast	integer	yes
@@ -1176,7 +1190,7 @@ See
 for more information.
 .It Li esp.udpencap
 If set to 1, enable processing of UDP encapsulated ESP packets.
-Disabled by default.
+Enabled by default.
 .It Li esp.udpencap_port
 Contains the value of the UDP port that triggers
 decapsulation for incoming UDP encapsulated ESP packets.
@@ -1360,6 +1374,10 @@ Returns the number of seconds in which a route added by the Path MTU
 Discovery engine will time out.
 When the route times out, the Path MTU Discovery engine will attempt
 to probe a larger path MTU.
+.It Li ip.multipath
+This variable enables multipath routing for IPv4 addresses.
+If set to 0, only the first route selected will be used for a given
+destination regardless of how many routes exist in the routing table.
 .It Li ip.portfirst
 Minimum registered port number for TCP/UDP port allocation.
 Registered ports can be used by ordinary user processes
@@ -1551,6 +1569,8 @@ The currently defined protocols and names are:
 .It ip6	maxfragpackets	integer	yes
 .It ip6	maxfrags	integer	yes
 .It ip6	mforwarding	integer	yes
+.It ip6	multicast_mtudisc	integer	yes
+.It ip6	multipath	integer	yes
 .It ip6	redirect	integer	yes
 .It ip6	rr_prune	integer	yes
 .It ip6	use_deprecated	integer	yes
@@ -1733,6 +1753,18 @@ The flag is provided basically for avoiding possible DoS attacks.
 .It Li ip6.mforwarding
 If set to 1, then multicast forwarding is enabled for the host.
 The default is 0.
+.Pp
+.It Li ip6.multicast_mtudisc
+This variable controls generation of ICMPv6 Too Big messages
+when the machine is performing as an IPv6 multicast router.
+If set to 1, an ICMPv6 Too Big message will be generated for multicast packets
+which were too big to be forwarded.
+If set to 0, the ICMPv6 Too Big message will be suppressed.
+.Pp
+.It Li ip6.multipath
+This variable enables multipath routing for IPv6 addresses.
+If set to 0, only the first route selected will be used for a given
+destination regardless of how many routes exist in the routing table.
 .Pp
 .It Li ip6.redirect
 Returns 1 when ICMPv6 redirects may be sent by the node.

@@ -1,4 +1,4 @@
-.\"	$OpenBSD: event.3,v 1.26 2006/03/23 10:51:27 jmc Exp $
+.\"	$OpenBSD: event.3,v 1.28 2006/11/26 15:22:58 brad Exp $
 .\"
 .\" Copyright (c) 2000 Artur Grabowski <art@openbsd.org>
 .\" All rights reserved.
@@ -484,6 +484,8 @@ The argument is specified by the fourth parameter
 A
 .Fa bufferevent struct
 pointer is returned on success, NULL on error.
+Both the read and the write callback may be NULL.
+The error callback has to be always provided.
 .Pp
 Once initialized, the bufferevent structure can be used repeatedly with
 bufferevent_enable() and bufferevent_disable().
@@ -504,10 +506,12 @@ The
 function can be used to write data to the file descriptor.
 The data is appended to the output buffer and written to the descriptor
 automatically as it becomes available for writing.
+.Fn bufferevent_write
+returns 0 on success or \-1 on failure.
 The
 .Fn bufferevent_read
-function is used to read data from the input buffer.
-Both functions return the amount of data written or read.
+function is used to read data from the input buffer,
+returning the amount of data read.
 .Pp
 If multiple bases are in use, bufferevent_base_set() must be called before
 enabling the bufferevent for the first time.

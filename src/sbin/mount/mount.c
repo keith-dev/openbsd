@@ -1,4 +1,4 @@
-/*	$OpenBSD: mount.c,v 1.42 2006/04/08 01:41:32 ray Exp $	*/
+/*	$OpenBSD: mount.c,v 1.44 2006/12/15 03:04:24 krw Exp $	*/
 /*	$NetBSD: mount.c,v 1.24 1995/11/18 03:34:29 cgd Exp $	*/
 
 /*
@@ -40,7 +40,7 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)mount.c	8.19 (Berkeley) 4/19/94";
 #else
-static char rcsid[] = "$OpenBSD: mount.c,v 1.42 2006/04/08 01:41:32 ray Exp $";
+static char rcsid[] = "$OpenBSD: mount.c,v 1.44 2006/12/15 03:04:24 krw Exp $";
 #endif
 #endif /* not lint */
 
@@ -519,6 +519,8 @@ prmount(struct statfs *sf)
 			(void)printf("%s%s", !f++ ? " (" : ", ", "intr");
 		if (nfs_args->flags & NFSMNT_NOCONN)
 			(void)printf("%s%s", !f++ ? " (" : ", ", "noconn");
+		if (nfs_args->flags & NFSMNT_RDIRPLUS)
+			(void)printf("%s%s", !f++ ? " (" : ", ", "rdirplus");
 		if (verbose || nfs_args->wsize != NFS_WSIZE)
 			(void)printf("%s%s=%d", !f++ ? " (" : ", ",
 			    "wsize", nfs_args->wsize);
@@ -582,8 +584,6 @@ prmount(struct statfs *sf)
 			(void)printf("%s%s", !f++ ? " (" : ", ", "long");
 		if (msdosfs_args->flags & MSDOSFSMNT_NOWIN95)
 			(void)printf("%s%s", !f++ ? " (" : ", ", "nowin95");
-		if (msdosfs_args->flags & MSDOSFSMNT_GEMDOSFS)
-			(void)printf("%s%s", !f++ ? " (" : ", ", "gem");
 		if (msdosfs_args->flags & MSDOSFSMNT_ALLOWDIRX)
 			(void)printf("%s%s", !f++ ? " (" : ", ", "direxec");
 	} else if (strcmp(sf->f_fstypename, MOUNT_CD9660) == 0) {

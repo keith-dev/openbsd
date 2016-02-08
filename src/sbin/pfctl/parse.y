@@ -1,4 +1,4 @@
-/*	$OpenBSD: parse.y,v 1.503 2006/08/22 15:55:13 dhartmei Exp $	*/
+/*	$OpenBSD: parse.y,v 1.517 2007/02/03 23:26:40 dhartmei Exp $	*/
 
 /*
  * Copyright (c) 2001 Markus Friedl.  All rights reserved.
@@ -310,6 +310,7 @@ struct sym {
 int	 symset(const char *, const char *, int);
 char	*symget(const char *);
 
+void	 mv_rules(struct pf_ruleset *, struct pf_ruleset *);
 void	 decide_address_family(struct node_host *, sa_family_t *);
 void	 remove_invalid_hosts(struct node_host **, sa_family_t *);
 int	 invalid_redirect(struct node_host *, sa_family_t);
@@ -372,6 +373,7 @@ typedef struct {
 		}			 keep_state;
 		struct {
 			u_int8_t	 log;
+			u_int8_t	 logif;
 			u_int8_t	 quick;
 		}			 logquick;
 		struct {
@@ -412,7 +414,7 @@ typedef struct {
 %token	BITMASK RANDOM SOURCEHASH ROUNDROBIN STATICPORT PROBABILITY
 %token	ALTQ CBQ PRIQ HFSC BANDWIDTH TBRSIZE LINKSHARE REALTIME UPPERLIMIT
 %token	QUEUE PRIORITY QLIMIT RTABLE
-%token	LOAD
+%token	LOAD RULESET_OPTIMIZATION
 %token	STICKYADDRESS MAXSRCSTATES MAXSRCNODES SOURCETRACK GLOBAL RULE
 %token	MAXSRCCONN MAXSRCCONNRATE OVERLOAD FLUSH
 %token	TAGGED TAG IFBOUND FLOATING STATEPOLICY ROUTE
@@ -421,7 +423,7 @@ typedef struct {
 %type	<v.interface>		interface if_list if_item_not if_item
 %type	<v.number>		number icmptype icmp6type uid gid
 %type	<v.number>		tos not yesno
-%type	<v.i>			no dir log logopts logopt af fragcache
+%type	<v.i>			no dir af fragcache optimizer
 %type	<v.i>			sourcetrack flush unaryop statelock
 %type	<v.b>			action nataction natpass scrubaction
 %type	<v.b>			flags flag blockspec
@@ -442,10 +444,10 @@ typedef struct {
 %type	<v.gid>			gids gid_list gid_item
 %type	<v.route>		route
 %type	<v.redirection>		redirection redirpool
-%type	<v.string>		label string tag
+%type	<v.string>		label string tag anchorname
 %type	<v.keep_state>		keep
 %type	<v.state_opt>		state_opt_spec state_opt_list state_opt_item
-%type	<v.logquick>		logquick
+%type	<v.logquick>		logquick quick log logopts logopt
 %type	<v.interface>		antispoof_ifspc antispoof_iflst antispoof_if
 %type	<v.qassign>		qname
 %type	<v.queue>		qassign qassign_list qassign_item
@@ -478,7 +480,34 @@ ruleset		: /* empty */
 		| ruleset varset '\n'
 		| ruleset antispoof '\n'
 		| ruleset tabledef '\n'
+		| '{' fakeanchor '}' '\n';
 		| ruleset error '\n'		{ errors++; }
+		;
+
+/*
+ * apply to previouslys specified rule: must be careful to note
+ * what that is: pf or nat or binat or rdr
+ */
+fakeanchor	: fakeanchor '\n'
+		| fakeanchor anchorrule '\n'
+		| fakeanchor binatrule '\n'
+		| fakeanchor natrule '\n'
+		| fakeanchor pfrule '\n'
+		| fakeanchor error '\n'
+		;
+
+optimizer	: string	{
+			if (!strcmp($1, "none"))
+				$$ = 0;
+			else if (!strcmp($1, "basic"))
+				$$ = PF_OPTIMIZE_BASIC;
+			else if (!strcmp($1, "profile"))
+				$$ = PF_OPTIMIZE_BASIC | PF_OPTIMIZE_PROFILE;
+			else {
+				yyerror("unknown ruleset-optimization %s", $$);
+				YYERROR;
+			}
+		}
 		;
 
 option		: SET OPTIMIZATION STRING		{
@@ -492,6 +521,12 @@ option		: SET OPTIMIZATION STRING		{
 				YYERROR;
 			}
 			free($3);
+		}
+		| SET RULESET_OPTIMIZATION optimizer {
+			if (!(pf->opts & PF_OPT_OPTIMIZE)) {
+				pf->opts |= PF_OPT_OPTIMIZE;
+				pf->optimize = $3;
+			}
 		}
 		| SET TIMEOUT timeout_spec
 		| SET TIMEOUT '{' timeout_list '}'
@@ -541,12 +576,12 @@ option		: SET OPTIMIZATION STRING		{
 		}
 		| SET FINGERPRINTS STRING {
 			if (pf->opts & PF_OPT_VERBOSE)
-				printf("set fingerprints %s\n", $3);
+				printf("set fingerprints \"%s\"\n", $3);
 			if (check_rulestate(PFCTL_STATE_OPTION)) {
 				free($3);
 				YYERROR;
 			}
-			if (!pf->anchor[0]) {
+			if (!pf->anchor->name[0]) {
 				if (pfctl_file_fingerprints(pf->dev,
 				    pf->opts, $3)) {
 					yyerror("error loading "
@@ -608,36 +643,118 @@ varset		: STRING '=' string		{
 		}
 		;
 
-anchorrule	: ANCHOR string	dir interface af proto fromto filter_opts {
+anchorname	: STRING			{ $$ = $1; }
+		| /* empty */			{ $$ = NULL; }
+		;
+
+optnl		: optnl '\n'
+		|
+		;
+
+pfa_anchorlist	: pfrule optnl
+		| anchorrule optnl
+		| pfa_anchorlist pfrule optnl
+		| pfa_anchorlist anchorrule optnl
+		;
+
+pfa_anchor	: '{'
+		{
+			char ta[PF_ANCHOR_NAME_SIZE];
+			struct pf_ruleset *rs;
+
+			/* steping into a brace anchor */
+			pf->asd++;
+			pf->bn++;
+			pf->brace = 1;
+
+			/* create a holding ruleset in the root */
+			snprintf(ta, PF_ANCHOR_NAME_SIZE, "_%d", pf->bn);
+			rs = pf_find_or_create_ruleset(ta);
+			if (rs == NULL)
+				err(1, "pfa_anchor: pf_find_or_create_ruleset");
+			pf->astack[pf->asd] = rs->anchor;
+			pf->anchor = rs->anchor;
+		} '\n' pfa_anchorlist '}'
+		{
+			pf->alast = pf->anchor;
+			pf->asd--;
+			pf->anchor = pf->astack[pf->asd];
+		}
+		| /* empty */
+		;
+
+anchorrule	: ANCHOR anchorname dir quick interface af proto fromto
+		    filter_opts pfa_anchor
+		{
 			struct pf_rule	r;
 
 			if (check_rulestate(PFCTL_STATE_FILTER)) {
+				if ($2)
+					free($2);
+				YYERROR;
+			}
+
+			if ($2 && ($2[0] == '_' || strstr($2, "/_") != NULL)) {
 				free($2);
+				yyerror("anchor names beginning with '_' "
+				    "are reserved for internal use");
 				YYERROR;
 			}
 
 			memset(&r, 0, sizeof(r));
-			r.direction = $3;
-			r.af = $5;
-			r.prob = $8.prob;
-			r.rtableid = $8.rtableid;
+			if (pf->astack[pf->asd + 1]) {
+				/* move inline rules into relative location */
+				pf_anchor_setup(&r,
+				    &pf->astack[pf->asd]->ruleset,
+				    $2 ? $2 : pf->alast->name);
+		
+				if (r.anchor == NULL)
+					err(1, "anchorrule: unable to "
+					    "create ruleset");
 
-			if ($8.match_tag)
-				if (strlcpy(r.match_tagname, $8.match_tag,
+				if (pf->alast != r.anchor) {
+					if (r.anchor->match) {
+						yyerror("inline anchor '%s' "
+						    "already exists",
+						    r.anchor->name);
+						YYERROR;
+					}
+					mv_rules(&pf->alast->ruleset,
+					    &r.anchor->ruleset);
+				}
+				pf_remove_if_empty_ruleset(&pf->alast->ruleset);
+				pf->alast = r.anchor;
+			} else {
+				if (!$2) {
+					yyerror("anchors without explicit "
+					    "rules must specify a name");
+					YYERROR;
+				}
+			}
+			r.direction = $3;
+			r.quick = $4.quick;
+			r.af = $6;
+			r.prob = $9.prob;
+			r.rtableid = $9.rtableid;
+
+			if ($9.match_tag)
+				if (strlcpy(r.match_tagname, $9.match_tag,
 				    PF_TAG_NAME_SIZE) >= PF_TAG_NAME_SIZE) {
 					yyerror("tag too long, max %u chars",
 					    PF_TAG_NAME_SIZE - 1);
 					YYERROR;
 				}
-			r.match_tag_not = $8.match_tag_not;
+			r.match_tag_not = $9.match_tag_not;
 
-			decide_address_family($7.src.host, &r.af);
-			decide_address_family($7.dst.host, &r.af);
+			decide_address_family($8.src.host, &r.af);
+			decide_address_family($8.dst.host, &r.af);
 
-			expand_rule(&r, $4, NULL, $6, $7.src_os,
-			    $7.src.host, $7.src.port, $7.dst.host, $7.dst.port,
-			    0, 0, 0, $2);
+			expand_rule(&r, $5, NULL, $7, $8.src_os,
+			    $8.src.host, $8.src.port, $8.dst.host, $8.dst.port,
+			    0, 0, 0, pf->astack[pf->asd + 1] ?
+			    pf->alast->name : $2);
 			free($2);
+			pf->astack[pf->asd + 1] = NULL;
 		}
 		| NATANCHOR string interface af proto fromto rtable {
 			struct pf_rule	r;
@@ -742,7 +859,8 @@ anchorrule	: ANCHOR string	dir interface af proto fromto filter_opts {
 loadrule	: LOAD ANCHOR string FROM string	{
 			struct loadanchors	*loadanchor;
 
-			if (strlen(pf->anchor) + 1 + strlen($3) >= MAXPATHLEN) {
+			if (strlen(pf->anchor->name) + 1 +
+			    strlen($3) >= MAXPATHLEN) {
 				yyerror("anchorname %s too long, max %u\n",
 				    $3, MAXPATHLEN - 1);
 				free($3);
@@ -754,9 +872,9 @@ loadrule	: LOAD ANCHOR string FROM string	{
 			if ((loadanchor->anchorname = malloc(MAXPATHLEN)) ==
 			    NULL)
 				err(1, "loadrule: malloc");
-			if (pf->anchor[0])
+			if (pf->anchor->name[0])
 				snprintf(loadanchor->anchorname, MAXPATHLEN,
-				    "%s/%s", pf->anchor, $3);
+				    "%s/%s", pf->anchor->name, $3);
 			else
 				strlcpy(loadanchor->anchorname, $3, MAXPATHLEN);
 			if ((loadanchor->filename = strdup($5)) == NULL)
@@ -791,6 +909,7 @@ scrubrule	: scrubaction dir logquick interface af proto fromto scrub_opts
 			r.direction = $2;
 
 			r.log = $3.log;
+			r.logif = $3.logif;
 			if ($3.quick) {
 				yyerror("scrub rules do not support 'quick'");
 				YYERROR;
@@ -928,6 +1047,7 @@ antispoof	: ANTISPOOF logquick antispoof_ifspc af antispoof_opts {
 				r.action = PF_DROP;
 				r.direction = PF_IN;
 				r.log = $2.log;
+				r.logif = $2.logif;
 				r.quick = $2.quick;
 				r.af = $4;
 				if (rule_label(&r, $5.label))
@@ -1564,6 +1684,7 @@ pfrule		: action dir logquick interface route af proto fromto
 			}
 			r.direction = $2;
 			r.log = $3.log;
+			r.logif = $3.logif;
 			r.quick = $3.quick;
 			r.prob = $9.prob;
 			r.rtableid = $9.rtableid;
@@ -1620,6 +1741,12 @@ pfrule		: action dir logquick interface route af proto fromto
 
 			r.tos = $9.tos;
 			r.keep_state = $9.keep.action;
+
+			/* 'keep state' by default on pass rules. */
+			if (!r.keep_state && !r.action &&
+			    !($9.marker & FOM_KEEP))
+				r.keep_state = PF_STATE_NORMAL;
+
 			o = $9.keep.options;
 			while (o) {
 				struct node_state_opt	*p = o;
@@ -1771,6 +1898,14 @@ pfrule		: action dir logquick interface route af proto fromto
 				}
 				o = o->next;
 				free(p);
+			}
+
+			/* 'flags S/SA' by default on stateful rules */
+			if (!r.action && !r.flags && !r.flagset &&
+			    !$9.fragment && !($9.marker & FOM_FLAGS) &&
+			    r.keep_state) {
+				r.flags = parse_flags("S");
+				r.flagset =  parse_flags("SA");
 			}
 			if (!adaptive && r.max_states) {
 				r.timeout[PFTM_ADAPTIVE_START] =
@@ -2088,23 +2223,56 @@ dir		: /* empty */			{ $$ = 0; }
 		| OUT				{ $$ = PF_OUT; }
 		;
 
-logquick	: /* empty */			{ $$.log = 0; $$.quick = 0; }
-		| log				{ $$.log = $1; $$.quick = 0; }
-		| QUICK				{ $$.log = 0; $$.quick = 1; }
-		| log QUICK			{ $$.log = $1; $$.quick = 1; }
-		| QUICK log			{ $$.log = $2; $$.quick = 1; }
+quick		: /* empty */			{ $$.quick = 0; }
+		| QUICK				{ $$.quick = 1; }
 		;
 
-log		: LOG				{ $$ = PF_LOG; }
-		| LOG '(' logopts ')'		{ $$ = PF_LOG | $3; }
+logquick	: /* empty */	{ $$.log = 0; $$.quick = 0; $$.logif = 0; }
+		| log		{ $$ = $1; $$.quick = 0; }
+		| QUICK		{ $$.quick = 1; $$.log = 0; $$.logif = 0; }
+		| log QUICK	{ $$ = $1; $$.quick = 1; }
+		| QUICK log	{ $$ = $2; $$.quick = 1; }
+		;
+
+log		: LOG			{ $$.log = PF_LOG; $$.logif = 0; }
+		| LOG '(' logopts ')'	{
+			$$.log = PF_LOG | $3.log;
+			$$.logif = $3.logif;
+		}
 		;
 
 logopts		: logopt			{ $$ = $1; }
-		| logopts comma logopt		{ $$ = $1 | $3; }
+		| logopts comma logopt		{
+			$$.log = $1.log | $3.log;
+			$$.logif = $3.logif;
+			if ($$.logif == 0)
+				$$.logif = $1.logif;
+		}
+		;
 
-logopt		: ALL				{ $$ = PF_LOG_ALL; }
-		| USER				{ $$ = PF_LOG_SOCKET_LOOKUP; }
-		| GROUP				{ $$ = PF_LOG_SOCKET_LOOKUP; }
+logopt		: ALL		{ $$.log = PF_LOG_ALL; $$.logif = 0; }
+		| USER		{ $$.log = PF_LOG_SOCKET_LOOKUP; $$.logif = 0; }
+		| GROUP		{ $$.log = PF_LOG_SOCKET_LOOKUP; $$.logif = 0; }
+		| TO string	{
+			const char	*errstr;
+			u_int		 i;
+
+			$$.log = 0;
+			if (strncmp($2, "pflog", 5)) {
+				yyerror("%s: should be a pflog interface", $2);
+				free($2);
+				YYERROR;
+			}
+			i = strtonum($2 + 5, 0, 255, &errstr);
+			if (errstr) {
+				yyerror("%s: %s", $2, errstr);
+				free($2);
+				YYERROR;
+			}
+			free($2);
+			$$.logif = i;
+		}
+		;
 
 interface	: /* empty */			{ $$ = NULL; }
 		| ON if_item_not		{ $$ = $2; }
@@ -2718,6 +2886,7 @@ flag		: STRING			{
 
 flags		: FLAGS flag '/' flag	{ $$.b1 = $2.b1; $$.b2 = $4.b1; }
 		| FLAGS '/' flag	{ $$.b1 = 0; $$.b2 = $3.b1; }
+		| FLAGS ANY		{ $$.b1 = 0; $$.b2 = 0; }
 		;
 
 icmpspec	: ICMPTYPE icmp_item		{ $$ = $2; }
@@ -2907,7 +3076,11 @@ statelock	: IFBOUND {
 		}
 		;
 
-keep		: KEEP STATE state_opt_spec	{
+keep		: NO STATE			{
+			$$.action = 0;
+			$$.options = NULL;
+		}
+		| KEEP STATE state_opt_spec	{
 			$$.action = PF_STATE_NORMAL;
 			$$.options = $3;
 		}
@@ -3268,7 +3441,7 @@ redirection	: /* empty */			{ $$ = NULL; }
 
 natpass		: /* empty */	{ $$.b1 = $$.b2 = 0; }
 		| PASS		{ $$.b1 = 1; $$.b2 = 0; }
-		| PASS log	{ $$.b1 = 1; $$.b2 = $2; }
+		| PASS log	{ $$.b1 = 1; $$.b2 = $2.log; $$.w2 = $2.logif; }
 		;
 
 nataction	: no NAT natpass {
@@ -3282,6 +3455,7 @@ nataction	: no NAT natpass {
 				$$.b1 = PF_NAT;
 			$$.b2 = $3.b1;
 			$$.w = $3.b2;
+			$$.w2 = $3.w2;
 		}
 		| no RDR natpass {
 			if ($1 && $3.b1) {
@@ -3294,6 +3468,7 @@ nataction	: no NAT natpass {
 				$$.b1 = PF_RDR;
 			$$.b2 = $3.b1;
 			$$.w = $3.b2;
+			$$.w2 = $3.w2;
 		}
 		;
 
@@ -3310,6 +3485,7 @@ natrule		: nataction interface af proto fromto tag tagged rtable
 			r.action = $1.b1;
 			r.natpass = $1.b2;
 			r.log = $1.w;
+			r.logif = $1.w2;
 			r.af = $3;
 
 			if (!r.af) {
@@ -3479,6 +3655,7 @@ binatrule	: no BINAT natpass interface af proto FROM host TO ipspec tag
 				binat.action = PF_BINAT;
 			binat.natpass = $3.b1;
 			binat.log = $3.b2;
+			binat.logif = $3.w2;
 			binat.af = $5;
 			if (!binat.af && $8 != NULL && $8->af)
 				binat.af = $8->af;
@@ -3968,7 +4145,7 @@ process_tabledef(char *name, struct table_opts *opts)
 		    &opts->init_nodes);
 	if (!(pf->opts & PF_OPT_NOACTION) &&
 	    pfctl_define_table(name, opts->flags, opts->init_addr,
-	    pf->anchor, &ab, pf->tticket)) {
+	    pf->anchor->name, &ab, pf->anchor->ruleset.tticket)) {
 		yyerror("cannot define table %s: %s", name,
 		    pfr_strerror(errno));
 		goto _error;
@@ -4160,7 +4337,7 @@ expand_label_nr(const char *name, char *label, size_t len)
 	char n[11];
 
 	if (strstr(label, name) != NULL) {
-		snprintf(n, sizeof(n), "%u", pf->rule_nr);
+		snprintf(n, sizeof(n), "%u", pf->anchor->match);
 		expand_label_str(label, len, name, n);
 	}
 }
@@ -4590,7 +4767,7 @@ expand_rule(struct pf_rule *r,
 		if (rule_consistent(r, anchor_call[0]) < 0 || error)
 			yyerror("skipping rule due to errors");
 		else {
-			r->nr = pf->rule_nr++;
+			r->nr = pf->astack[pf->asd]->match++;
 			pfctl_add_rule(pf, r, anchor_call);
 			added++;
 		}
@@ -4765,6 +4942,7 @@ lookup(char *s)
 		{ "route-to",		ROUTETO},
 		{ "rtable",		RTABLE},
 		{ "rule",		RULE},
+		{ "ruleset-optimization",	RULESET_OPTIMIZATION},
 		{ "scrub",		SCRUB},
 		{ "set",		SET},
 		{ "skip",		SKIP},
@@ -5120,21 +5298,40 @@ symget(const char *nam)
 }
 
 void
+mv_rules(struct pf_ruleset *src, struct pf_ruleset *dst)
+{
+	int i;
+	struct pf_rule *r;
+
+	for (i = 0; i < PF_RULESET_MAX; ++i) {
+		while ((r = TAILQ_FIRST(src->rules[i].active.ptr))
+		    != NULL) {
+			TAILQ_REMOVE(src->rules[i].active.ptr, r, entries);
+			TAILQ_INSERT_TAIL(dst->rules[i].active.ptr, r, entries);
+			dst->anchor->match++;
+		}
+		src->anchor->match = 0;
+		while ((r = TAILQ_FIRST(src->rules[i].inactive.ptr))
+		    != NULL) {
+			TAILQ_REMOVE(src->rules[i].inactive.ptr, r, entries);
+			TAILQ_INSERT_TAIL(dst->rules[i].inactive.ptr,
+				r, entries);
+		}
+	}
+}
+
+void
 decide_address_family(struct node_host *n, sa_family_t *af)
 {
-	sa_family_t	target_af = 0;
-
-	while (!*af && n != NULL) {
-		if (n->af) {
-			if (target_af == 0)
-				target_af = n->af;
-			if (target_af != n->af)
-				return;
+	if (*af != 0 || n == NULL)
+		return;
+	*af = n->af;
+	while ((n = n->next) != NULL) {
+		if (n->af != *af) {
+			*af = 0;
+			return;
 		}
-		n = n->next;
 	}
-	if (!*af && target_af)
-		*af = target_af;
 }
 
 void
@@ -5275,24 +5472,23 @@ parseicmpspec(char *w, sa_family_t af)
 }
 
 int
-pfctl_load_anchors(int dev, int opts, struct pfr_buffer *trans)
+pfctl_load_anchors(int dev, struct pfctl *pf, struct pfr_buffer *trans)
 {
 	struct loadanchors	*la;
 	FILE			*fin;
 
 	TAILQ_FOREACH(la, &loadanchorshead, entries) {
-		if (opts & PF_OPT_VERBOSE)
+		if (pf->opts & PF_OPT_VERBOSE)
 			fprintf(stderr, "\nLoading anchor %s from %s\n",
 			    la->anchorname, la->filename);
 		if ((fin = pfctl_fopen(la->filename, "r")) == NULL) {
 			warn("%s", la->filename);
 			continue;
 		}
-		if (pfctl_rules(dev, la->filename, fin, opts, la->anchorname,
-		    trans) == -1)
+		if (pfctl_rules(dev, la->filename, fin, pf->opts, pf->optimize,
+		    la->anchorname, trans) == -1)
 			return (-1);
 	}
 
 	return (0);
 }
-

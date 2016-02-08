@@ -1,4 +1,4 @@
-/*	$OpenBSD: status.c,v 1.68 2006/07/07 17:37:17 joris Exp $	*/
+/*	$OpenBSD: status.c,v 1.73 2007/02/22 06:42:09 otto Exp $	*/
 /*
  * Copyright (c) 2006 Joris Vink <joris@openbsd.org>
  * Copyright (c) 2005, 2006 Xavier Santolaria <xsa@openbsd.org>
@@ -16,10 +16,10 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
-#include "includes.h"
+#include <string.h>
+#include <unistd.h>
 
 #include "cvs.h"
-#include "log.h"
 #include "remote.h"
 
 void	cvs_status_local(struct cvs_file *);
@@ -88,6 +88,7 @@ cvs_status(int argc, char **argv)
 		flags |= CR_REPO;
 		cr.fileproc = cvs_status_local;
 	} else {
+		cvs_client_connect_to_server();
 		if (!(flags & CR_RECURSE_DIRS))
 			cvs_client_send_request("Argument -l");
 		if (show_sym)
@@ -115,15 +116,15 @@ cvs_status(int argc, char **argv)
 void
 cvs_status_local(struct cvs_file *cf)
 {
-	int l;
 	size_t len;
+	RCSNUM *head;
 	const char *status;
 	char buf[128], timebuf[32], revbuf[32];
 	struct rcs_sym *sym;
 
 	cvs_log(LP_TRACE, "cvs_status_local(%s)", cf->file_path);
 
-	cvs_file_classify(cf, NULL, 1);
+	cvs_file_classify(cf, NULL);
 
 	if (cf->file_type == CVS_DIR) {
 		if (verbosity > 1)
@@ -141,9 +142,8 @@ cvs_status_local(struct cvs_file *cf)
 	if (cf->file_status == FILE_LOST ||
 	    cf->file_status == FILE_UNKNOWN ||
 	    (cf->file_rcs != NULL && cf->file_rcs->rf_inattic == 1)) {
-		l = snprintf(buf, sizeof(buf), "no file %s\t", cf->file_name);
-		if (l == -1 || l >= (int)sizeof(buf))
-			fatal("cvs_status_local: overflow");
+		(void)xsnprintf(buf, sizeof(buf), "no file %s\t",
+		    cf->file_name);
 	} else
 		if (strlcpy(buf, cf->file_name, sizeof(buf)) >= sizeof(buf))
 			fatal("cvs_status_local: overflow");
@@ -151,10 +151,8 @@ cvs_status_local(struct cvs_file *cf)
 	cvs_printf("File: %-17s\tStatus: %s\n\n", buf, status);
 
 	if (cf->file_ent == NULL) {
-		l = snprintf(buf, sizeof(buf),
+		(void)xsnprintf(buf, sizeof(buf),
 		    "No entry for %s", cf->file_name);
-		if (l == -1 || l >= (int)sizeof(buf))
-			fatal("cvs_status_local: overflow");
 	} else if (cf->file_status == FILE_ADDED) {
 		len = strlcpy(buf, "New file!", sizeof(buf));
 		if (len >= sizeof(buf))
@@ -173,9 +171,7 @@ cvs_status_local(struct cvs_file *cf)
 				fatal("cvs_status_local: truncation");
 		}
 
-		l = snprintf(buf, sizeof(buf), "%s\t%s", revbuf, timebuf);
-		if (l == -1 || l >= (int)sizeof(buf))
-			fatal("cvs_status_local: overflow");
+		(void)xsnprintf(buf, sizeof(buf), "%s\t%s", revbuf, timebuf);
 	}
 
 	cvs_printf("   Working revision:\t%s\n", buf);
@@ -186,12 +182,11 @@ cvs_status_local(struct cvs_file *cf)
 		if (len >= sizeof(buf))
 			fatal("cvs_status_local: truncation");
 	} else {
-		rcsnum_tostr(rcs_head_get(cf->file_rcs),
-		    revbuf, sizeof(revbuf));
-		l = snprintf(buf, sizeof(buf), "%s\t%s", revbuf,
+		head = rcs_head_get(cf->file_rcs);
+		rcsnum_tostr(head, revbuf, sizeof(revbuf));
+		rcsnum_free(head);
+		(void)xsnprintf(buf, sizeof(buf), "%s\t%s", revbuf,
 		    cf->file_rpath);
-		if (l == -1 || l >= (int)sizeof(buf))
-			fatal("cvs_status_local: overflow");
 	}
 
 	cvs_printf("   Repository revision:\t%s\n", buf);

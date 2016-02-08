@@ -1,4 +1,4 @@
-/*	$OpenBSD: pfctl_parser.c,v 1.227 2006/08/08 20:05:54 dhartmei Exp $ */
+/*	$OpenBSD: pfctl_parser.c,v 1.234 2006/10/31 23:46:24 mcbride Exp $ */
 
 /*
  * Copyright (c) 2001 Daniel Hartmeier
@@ -673,10 +673,13 @@ print_rule(struct pf_rule *r, const char *anchor_call, int verbose)
 		printf("@%d ", r->nr);
 	if (r->action > PF_NORDR)
 		printf("action(%d)", r->action);
-	else if (anchor_call[0])
-		printf("%s \"%s\"", anchortypes[r->action],
-		    anchor_call);
-	else {
+	else if (anchor_call[0]) {
+		if (anchor_call[0] == '_') {
+			printf("%s", anchortypes[r->action]);
+		} else
+			printf("%s \"%s\"", anchortypes[r->action],
+			    anchor_call);
+	} else {
 		printf("%s", actiontypes[r->action]);
 		if (r->natpass)
 			printf(" pass");
@@ -733,7 +736,7 @@ print_rule(struct pf_rule *r, const char *anchor_call, int verbose)
 		printf(" out");
 	if (r->log) {
 		printf(" log");
-		if (r->log & ~PF_LOG) {
+		if (r->log & ~PF_LOG || r->logif) {
 			int count = 0;
 
 			printf(" (");
@@ -741,6 +744,9 @@ print_rule(struct pf_rule *r, const char *anchor_call, int verbose)
 				printf("%sall", count++ ? ", " : "");
 			if (r->log & PF_LOG_SOCKET_LOOKUP)
 				printf("%suser", count++ ? ", " : "");
+			if (r->logif)
+				printf("%sto pflog%u", count++ ? ", " : "",
+				    r->logif);
 			printf(")");
 		}
 	}
@@ -793,7 +799,11 @@ print_rule(struct pf_rule *r, const char *anchor_call, int verbose)
 		print_flags(r->flags);
 		printf("/");
 		print_flags(r->flagset);
-	}
+	} else if (r->action == PF_PASS &&
+	    (!r->proto || r->proto == IPPROTO_TCP) &&
+	    !(r->rule_flag & PFRULE_FRAGMENT) &&
+	    !anchor_call[0] && r->keep_state)
+		printf(" flags any");
 	if (r->type) {
 		const struct icmptypeent	*it;
 
@@ -818,7 +828,9 @@ print_rule(struct pf_rule *r, const char *anchor_call, int verbose)
 	}
 	if (r->tos)
 		printf(" tos 0x%2.2x", r->tos);
-	if (r->keep_state == PF_STATE_NORMAL)
+	if (!r->keep_state && r->action == PF_PASS && !anchor_call[0])
+		printf(" no state");
+	else if (r->keep_state == PF_STATE_NORMAL)
 		printf(" keep state");
 	else if (r->keep_state == PF_STATE_MODULATE)
 		printf(" modulate state");
@@ -975,7 +987,6 @@ print_rule(struct pf_rule *r, const char *anchor_call, int verbose)
 		print_pool(&r->rpool, r->rpool.proxy_port[0],
 		    r->rpool.proxy_port[1], r->af, r->action);
 	}
-	printf("\n");
 }
 
 void

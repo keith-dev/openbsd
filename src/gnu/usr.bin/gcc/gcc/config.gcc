@@ -1,3 +1,4 @@
+#	$OpenBSD: config.gcc,v 1.18 2007/01/17 15:06:16 tsi Exp $
 # GCC build-, host- and target-specific configuration file.
 # Copyright (C) 1997, 1998, 1999, 2000, 2001, 2002, 2003 Free Software Foundation, Inc.
 
@@ -592,7 +593,7 @@ alpha*-*-openbsd*)
 	tm_file="${tm_file} exec-stack.h"
 	# default x-alpha is only appropriate for dec-osf.
 	target_cpu_default="MASK_GAS"
-	tmake_file="alpha/t-alpha alpha/t-ieee"
+	tmake_file="${tmake_file} alpha/t-alpha alpha/t-ieee"
 	gas=yes gnu_ld=yes
 	;;
 
@@ -2097,7 +2098,6 @@ powerpc-*-darwin*)
 	;;
 powerpc*-*-freebsd*)
 	tm_file="${tm_file} dbxelf.h elfos.h ${fbsd_tm_file} rs6000/sysv4.h rs6000/freebsd.h"
-	xm_file=rs6000/xm-sysv4.h
 	out_file=rs6000/rs6000.c
 	tmake_file="rs6000/t-ppcos ${tmake_file} rs6000/t-ppccomm"
 	;;
@@ -2412,6 +2412,13 @@ sh-*-netbsdelf* | shl*-*-netbsdelf* | sh5-*-netbsd* | sh5l*-*-netbsd* | \
 		;;
 	esac
 	;;
+sh-*-openbsd*)
+	tm_file="sh/little.h dbxelf.h sh/sh.h elfos.h sh/elf.h ${tm_file}"
+	tmake_file="${tmake_file} sh/t-sh sh/t-elf"
+	# SH3, software floating point
+	target_cpu_default="SH1_BIT|SH2_BIT|SH3_BIT"
+	tmake_file="${tmake_file} sh/t-openbsd"
+	;;
 sh-*-*)
 	tm_file="${tm_file} sh/coff.h"
 	;;
@@ -2455,7 +2462,6 @@ sparc-*-openbsd*)
 sparc64-*-openbsd*)
 	tm_file="sparc/openbsd1-64.h sparc/sparc.h elfos.h svr4.h sparc/sysv4.h openbsd.h ${openbsd_libspec} sparc/openbsd64.h"
 	tm_file="${tm_file} exec-stack.h"
-	xm_file=sparc/xm-sp64.h
 	gas=yes gnu_ld=yes
 	with_cpu=ultrasparc
 	float_format=i128

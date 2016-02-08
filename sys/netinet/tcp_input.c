@@ -1,4 +1,4 @@
-/*	$OpenBSD: tcp_input.c,v 1.196 2006/03/12 18:42:40 markus Exp $	*/
+/*	$OpenBSD: tcp_input.c,v 1.201 2007/02/13 06:39:50 itojun Exp $	*/
 /*	$NetBSD: tcp_input.c,v 1.23 1996/02/13 23:43:44 christos Exp $	*/
 
 /*
@@ -636,6 +636,10 @@ findpcb:
 			goto dropwithreset_ratelim;
 		}
 	}
+
+	/* Check the minimum TTL for socket. */
+	if (inp->inp_ip_minttl && inp->inp_ip_minttl > ip->ip_ttl)
+		goto drop;
 
 	tp = intotcpcb(inp);
 	if (tp == 0)
@@ -1424,7 +1428,8 @@ trimthenstep6:
 	 */
 	if (tiflags & TH_RST) {
 		if (th->th_seq != tp->last_ack_sent &&
-		    th->th_seq != tp->rcv_nxt)
+		    th->th_seq != tp->rcv_nxt &&
+		    th->th_seq != (tp->rcv_nxt + 1))
 			goto drop;
 
 		switch (tp->t_state) {
@@ -1849,7 +1854,7 @@ trimthenstep6:
 		 * since last PMTU update
 		 */
 		if (tp->t_pmtud_mss_acked < acked)
-		    tp->t_pmtud_mss_acked = acked;
+			tp->t_pmtud_mss_acked = acked;
 
 		tp->snd_una = th->th_ack;
 #ifdef TCP_ECN
@@ -4063,8 +4068,10 @@ syn_cache_add(src, dst, th, iphlen, so, m, optp, optlen, oi)
 	sc->sc_win = win;
 	sc->sc_timestamp = tb.ts_recent;
 	if ((tb.t_flags & (TF_REQ_TSTMP|TF_RCVD_TSTMP)) ==
-	    (TF_REQ_TSTMP|TF_RCVD_TSTMP))
+	    (TF_REQ_TSTMP|TF_RCVD_TSTMP)) {
 		sc->sc_flags |= SCF_TIMESTAMP;
+		sc->sc_modulate = arc4random();
+	}
 	if ((tb.t_flags & (TF_RCVD_SCALE|TF_REQ_SCALE)) ==
 	    (TF_RCVD_SCALE|TF_REQ_SCALE)) {
 		sc->sc_requested_s_scale = tb.requested_s_scale;
@@ -4246,7 +4253,6 @@ syn_cache_respond(sc, m)
 		u_int32_t *lp = (u_int32_t *)(optp);
 		/* Form timestamp option as shown in appendix A of RFC 1323. */
 		*lp++ = htonl(TCPOPT_TSTAMP_HDR);
-		sc->sc_modulate = arc4random();
 		*lp++ = htonl(SYN_CACHE_TIMESTAMP(sc));
 		*lp   = htonl(sc->sc_timestamp);
 		optp += TCPOLEN_TSTAMP_APPA;
@@ -4323,6 +4329,9 @@ syn_cache_respond(sc, m)
 #endif
 	}
 
+	/* use IPsec policy and ttl from listening socket, on SYN ACK */
+	inp = sc->sc_tp ? sc->sc_tp->t_inpcb : NULL;
+
 	/*
 	 * Fill in some straggling IP bits.  Note the stack expects
 	 * ip_len to be in host order, for convenience.
@@ -4331,7 +4340,7 @@ syn_cache_respond(sc, m)
 #ifdef INET
 	case AF_INET:
 		ip->ip_len = htons(tlen);
-		ip->ip_ttl = ip_defttl;
+		ip->ip_ttl = inp ? inp->inp_ip.ip_ttl : ip_defttl;
 		/* XXX tos? */
 		break;
 #endif
@@ -4345,9 +4354,6 @@ syn_cache_respond(sc, m)
 		break;
 #endif
 	}
-
-	/* use IPsec policy from listening socket, on SYN ACK */
-	inp = sc->sc_tp ? sc->sc_tp->t_inpcb : NULL;
 
 	switch (sc->sc_src.sa.sa_family) {
 #ifdef INET

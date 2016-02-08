@@ -1,4 +1,4 @@
-/*	$OpenBSD: uthread_write.c,v 1.10 2003/12/22 00:33:42 brad Exp $	*/
+/*	$OpenBSD: uthread_write.c,v 1.12 2006/10/03 02:59:36 kurt Exp $	*/
 /*
  * Copyright (c) 1995-1998 John Birrell <jb@cimlogic.com.au>
  * All rights reserved.
@@ -62,7 +62,7 @@ write(int fd, const void *buf, size_t nbytes)
 	/* Lock the file descriptor for write: */
 	else if ((ret = _FD_LOCK(fd, FD_WRITE, NULL)) == 0) {
 		/* Get the read/write mode type: */
-		type = _thread_fd_table[fd]->flags & O_ACCMODE;
+		type = _thread_fd_table[fd]->status_flags->flags & O_ACCMODE;
 
 		/* Check if the file is not open for write: */
 		if (type != O_WRONLY && type != O_RDWR) {
@@ -73,7 +73,7 @@ write(int fd, const void *buf, size_t nbytes)
 
 		else {
 		/* Check if file operations are to block */
-		blocking = ((_thread_fd_table[fd]->flags & O_NONBLOCK) == 0);
+		blocking = ((_thread_fd_table[fd]->status_flags->flags & O_NONBLOCK) == 0);
 
 		/*
 		 * Loop while no error occurs and until the expected number
@@ -105,6 +105,7 @@ write(int fd, const void *buf, size_t nbytes)
 
 				/* Reset the interrupted operation flag: */
 				curthread->interrupted = 0;
+				curthread->closing_fd = 0;
 
 				_thread_kern_sched_state(PS_FDW_WAIT,
 				    __FILE__, __LINE__);
@@ -113,13 +114,16 @@ write(int fd, const void *buf, size_t nbytes)
 				 * Check if the operation was
 				 * interrupted by a signal
 				 */
-				if (curthread->interrupted) {
+				if (curthread->interrupted || curthread->closing_fd) {
 					if (num > 0) {
 						/* Return partial success: */
 						ret = num;
 					} else {
 						/* Return an error: */
-						errno = EINTR;
+						if (curthread->closing_fd)
+							errno = EBADF;
+						else
+							errno = EINTR;
 						ret = -1;
 					}
 				}

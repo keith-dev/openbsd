@@ -1,4 +1,4 @@
-/*	$OpenBSD: pthread_private.h,v 1.55 2006/01/06 18:53:04 millert Exp $	*/
+/*	$OpenBSD: pthread_private.h,v 1.58 2006/10/03 02:59:36 kurt Exp $	*/
 /*
  * Copyright (c) 1995-1998 John Birrell <jb@cimlogic.com.au>.
  * All rights reserved.
@@ -497,6 +497,35 @@ enum pthread_state {
  */
 
 /*
+ * File status flags struture - shared for dup'ed fd's
+ */
+struct fs_flags {
+	spinlock_t		lock;
+	int			flags;
+	int			refcnt;
+};
+
+/*
+ * fd_table_entry states
+ */
+enum fd_entry_state {
+	FD_ENTRY_OPEN,
+	FD_ENTRY_CLOSING,
+	FD_ENTRY_CLOSED
+};
+
+/*
+ * Defines for _thread_fd_table_init init_mode
+ */
+enum fd_entry_mode {
+	FD_INIT_UNKNOWN,	/* inherited or not created by pthreads wrapper */
+	FD_INIT_NEW,		/* new fd opened by pthreads */
+	FD_INIT_BLOCKING,	/* new user blocking fd opened by pthreads */
+	FD_INIT_DUP,		/* new fd with passed flags */
+	FD_INIT_DUP2,		/* replace status_flags and open */
+};
+
+/*
  * File descriptor table structure.
  */
 struct fd_table_entry {
@@ -517,8 +546,9 @@ struct fd_table_entry {
 	int			w_lineno;	/* Write lock src line no.    */
 	int			r_lockcount;	/* Count for FILE read locks. */
 	int			w_lockcount;	/* Count for FILE write locks.*/
-	int			flags;		/* Flags used in open.        */
-	int			refcnt;		/* how many fds use this entry*/
+	struct fs_flags		*status_flags;	/* Shared file status flags.  */
+	enum fd_entry_state	state;		/* Open, closing, or closed.  */
+	enum fd_entry_mode	init_mode;	/* The mode used for init.    */
 };
 
 struct pthread_poll_data {
@@ -712,6 +742,12 @@ struct pthread {
 	 * interrupted by a signal:
 	 */
 	int		interrupted;
+
+	/*
+	 * Set to TRUE if a blocking operation was
+	 * interrupted by a closing file descriptor.
+	 */
+	int		closing_fd;
 
 	/* Signal number when in state PS_SIGWAIT: */
 	int		signo;
@@ -1122,10 +1158,10 @@ void	_thread_sig_init(void);
 void    _thread_start(void);
 void    _thread_start_sig_handler(void);
 void	_thread_seterrno(pthread_t,int);
+void	_thread_fs_flags_replace(int, struct fs_flags *);
 void	_thread_fd_init(void);
-int     _thread_fd_table_init(int);
-int     _thread_fd_table_dup(int, int);
-void	_thread_fd_table_remove(int);
+int     _thread_fd_table_init(int, enum fd_entry_mode, struct fs_flags *);
+void	_thread_fd_entry_close(int);
 void	_thread_fd_unlock_owned(pthread_t);
 void	_thread_fd_unlock_thread(struct pthread	*, int, int);
 pthread_addr_t _thread_gc(pthread_addr_t);

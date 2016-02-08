@@ -1,4 +1,4 @@
-/*	$OpenBSD: cmd.c,v 1.52 2006/07/07 17:37:17 joris Exp $	*/
+/*	$OpenBSD: cmd.c,v 1.57 2007/02/22 06:42:09 otto Exp $	*/
 /*
  * Copyright (c) 2005 Joris Vink <joris@openbsd.org>
  * All rights reserved.
@@ -23,16 +23,19 @@
  * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
+#include <sys/param.h>
+#include <sys/dirent.h>
 
-#include "includes.h"
+#include <string.h>
 
 #include "cvs.h"
-#include "log.h"
 
 extern char *cvs_rootstr;
 
 struct cvs_cmd *cvs_cdt[] = {
 	&cvs_cmd_add,
+	&cvs_cmd_admin,
+	&cvs_cmd_annotate,
 	&cvs_cmd_commit,
 	&cvs_cmd_checkout,
 	&cvs_cmd_diff,
@@ -41,13 +44,12 @@ struct cvs_cmd *cvs_cdt[] = {
 	&cvs_cmd_init,
 	&cvs_cmd_log,
 	&cvs_cmd_remove,
+	&cvs_cmd_server,
 	&cvs_cmd_status,
 	&cvs_cmd_tag,
 	&cvs_cmd_update,
-	&cvs_cmd_server,
+	&cvs_cmd_version,
 #if 0
-	&cvs_cmd_admin,
-	&cvs_cmd_annotate,
 	&cvs_cmd_checkout,
 	&cvs_cmd_edit,
 	&cvs_cmd_editors,
@@ -62,7 +64,6 @@ struct cvs_cmd *cvs_cdt[] = {
 	&cvs_cmd_rtag,
 	&cvs_cmd_unedit,
 	&cvs_cmd_update,
-	&cvs_cmd_version,
 	&cvs_cmd_watch,
 	&cvs_cmd_watchers,
 #endif
@@ -95,7 +96,7 @@ cvs_findcmd(const char *cmd)
 }
 
 struct cvs_cmd *
-cvs_findcmdbyreq(int reqid)
+cvs_findcmdbyreq(u_int reqid)
 {
 	int i;
 	struct cvs_cmd *cmdp;

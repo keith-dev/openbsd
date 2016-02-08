@@ -1,4 +1,4 @@
-/*	$OpenBSD: ftp-proxy.c,v 1.9 2006/03/25 20:21:42 camield Exp $ */
+/*	$OpenBSD: ftp-proxy.c,v 1.13 2006/12/30 13:24:00 camield Exp $ */
 
 /*
  * Copyright (c) 2004, 2005 Camiel Dobbelaar, <cd@sentia.nl>
@@ -89,7 +89,6 @@ int	client_parse(struct session *s);
 int	client_parse_anon(struct session *s);
 int	client_parse_cmd(struct session *s);
 void	client_read(struct bufferevent *, void *);
-void	client_write(struct bufferevent *, void *);
 int	drop_privs(void);
 void	end_session(struct session *);
 int	exit_daemon(void);
@@ -104,7 +103,6 @@ void	proxy_reply(int, struct sockaddr *, u_int16_t);
 void	server_error(struct bufferevent *, short, void *);
 int	server_parse(struct session *s);
 void	server_read(struct bufferevent *, void *);
-void	server_write(struct bufferevent *, void *);
 const char *sock_ntop(struct sockaddr *);
 void	usage(void);
 
@@ -246,12 +244,6 @@ client_read(struct bufferevent *bufev, void *arg)
 	} while (read == buf_avail);
 }
 
-void
-client_write(struct bufferevent *bufev, void *arg)
-{
-	return;
-}
-
 int
 drop_privs(void)
 {
@@ -278,15 +270,15 @@ end_session(struct session *s)
 
 	logmsg(LOG_INFO, "#%d ending session", s->id);
 
-	if (s->client_bufev)
-		bufferevent_free(s->client_bufev);
-	if (s->server_bufev)
-		bufferevent_free(s->server_bufev);
-
 	if (s->client_fd != -1)
 		close(s->client_fd);
 	if (s->server_fd != -1)
 		close(s->server_fd);
+
+	if (s->client_bufev)
+		bufferevent_free(s->client_bufev);
+	if (s->server_bufev)
+		bufferevent_free(s->server_bufev);
 
 	/* Remove rulesets by commiting empty ones. */
 	err = 0;
@@ -484,8 +476,8 @@ handle_connection(const int listen_fd, short event, void *ev)
 	/*
 	 * Setup buffered events.
 	 */
-	s->client_bufev = bufferevent_new(s->client_fd, &client_read,
-	    &client_write, &client_error, s);
+	s->client_bufev = bufferevent_new(s->client_fd, &client_read, NULL,
+	    &client_error, s);
 	if (s->client_bufev == NULL) {
 		logmsg(LOG_CRIT, "#%d bufferevent_new client failed", s->id);
 		goto fail;
@@ -493,8 +485,8 @@ handle_connection(const int listen_fd, short event, void *ev)
 	bufferevent_settimeout(s->client_bufev, timeout, 0);
 	bufferevent_enable(s->client_bufev, EV_READ | EV_TIMEOUT);
 
-	s->server_bufev = bufferevent_new(s->server_fd, &server_read,
-	    &server_write, &server_error, s);
+	s->server_bufev = bufferevent_new(s->server_fd, &server_read, NULL,
+	    &server_error, s);
 	if (s->server_bufev == NULL) {
 		logmsg(LOG_CRIT, "#%d bufferevent_new server failed", s->id);
 		goto fail;
@@ -581,6 +573,7 @@ main(int argc, char *argv[])
 	struct addrinfo hints, *res;
 	struct event ev, ev_sighup, ev_sigint, ev_sigterm;
 	int ch, error, listenfd, on;
+	const char *errstr;
 
 	/* Defaults. */
 	anonymous_only	= 0;
@@ -617,17 +610,18 @@ main(int argc, char *argv[])
 			listen_ip = optarg;
 			break;
 		case 'D':
-			loglevel = atoi(optarg);
-			if (loglevel < LOG_EMERG || loglevel > LOG_DEBUG)
-				errx(1, "bad loglevel");
+			loglevel = strtonum(optarg, LOG_EMERG, LOG_DEBUG,
+			    &errstr);
+			if (errstr)
+				errx(1, "loglevel %s", errstr);
 			break;
 		case 'd':
 			daemonize = 0;
 			break;
 		case 'm':
-			max_sessions = atoi(optarg);
-			if (max_sessions < 0)
-				errx(1, "bad max sessions");
+			max_sessions = strtonum(optarg, 1, 500, &errstr);
+			if (errstr)
+				errx(1, "max sessions %s", errstr);
 			break;
 		case 'P':
 			fixed_server_port = optarg;
@@ -647,9 +641,9 @@ main(int argc, char *argv[])
 			rfc_mode = 1;
 			break;
 		case 't':
-			timeout = atoi(optarg);
-			if (timeout < 0)
-				errx(1, "bad timeout");
+			timeout = strtonum(optarg, 0, 86400, &errstr);
+			if (errstr)
+				errx(1, "timeout %s", errstr);
 			break;
 		case 'v':
 			verbose++;
@@ -744,6 +738,7 @@ main(int argc, char *argv[])
 	event_init();
 
 	/* Setup signal handler. */
+	signal(SIGPIPE, SIG_IGN);
 	signal_set(&ev_sighup, SIGHUP, handle_signal, NULL);
 	signal_set(&ev_sigint, SIGINT, handle_signal, NULL);
 	signal_set(&ev_sigterm, SIGTERM, handle_signal, NULL);
@@ -1060,12 +1055,6 @@ server_read(struct bufferevent *bufev, void *arg)
 			return;
 		}
 	} while (read == buf_avail);
-}
-
-void
-server_write(struct bufferevent *bufev, void *arg)
-{
-	return;
 }
 
 const char *

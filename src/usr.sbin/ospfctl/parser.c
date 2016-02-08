@@ -1,4 +1,4 @@
-/*	$OpenBSD: parser.c,v 1.11 2006/03/23 18:37:34 norby Exp $ */
+/*	$OpenBSD: parser.c,v 1.14 2007/02/01 13:09:42 claudio Exp $ */
 
 /*
  * Copyright (c) 2004 Esben Norby <norby@openbsd.org>
@@ -60,7 +60,7 @@ static const struct token t_show_rib[];
 static const struct token t_show_fib[];
 
 static const struct token t_main[] = {
-/*	{KEYWORD,	"reload",	RELOAD,		NULL}, */
+	{KEYWORD,	"reload",	RELOAD,		NULL},
 	{KEYWORD,	"fib",		FIB,		t_fib},
 	{KEYWORD,	"show",		SHOW,		t_show},
 	{ENDTOKEN,	"",		NONE,		NULL}
@@ -139,7 +139,7 @@ parse(int argc, char *argv[])
 
 	bzero(&res, sizeof(res));
 
-	while (argc > 0) {
+	while (argc >= 0) {
 		if ((match = match_token(argv[0], table)) == NULL) {
 			fprintf(stderr, "valid commands/args:\n");
 			show_valid_args(table);
@@ -231,9 +231,11 @@ match_token(const char *word, const struct token table[])
 	}
 
 	if (match != 1) {
-		if (match > 1)
+		if (word == NULL)
+			fprintf(stderr, "missing argument:\n");
+		else if (match > 1)
 			fprintf(stderr, "ambiguous argument: %s\n", word);
-		if (match < 1)
+		else if (match < 1)
 			fprintf(stderr, "unknown argument: %s\n", word);
 		return (NULL);
 	}

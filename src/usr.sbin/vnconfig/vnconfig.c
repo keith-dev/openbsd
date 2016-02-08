@@ -1,4 +1,4 @@
-/*	$OpenBSD: vnconfig.c,v 1.18 2006/07/01 07:36:27 jmc Exp $	*/
+/*	$OpenBSD: vnconfig.c,v 1.25 2007/02/23 11:00:02 grunk Exp $	*/
 /*
  * Copyright (c) 1993 University of Utah.
  * Copyright (c) 1990, 1993
@@ -67,94 +67,42 @@ int verbose = 0;
 __dead void usage(void);
 int config(char *, char *, int, char *, size_t);
 int getinfo(const char *);
+char	*get_pkcs_key(char *, char *);
 
 int
 main(int argc, char **argv)
 {
-	int ch, rv, rounds, action = VND_CONFIG;
+	int ch, rv, action = VND_CONFIG;
 	char *key = NULL;
+	char *rounds = NULL;
+	char *saltopt = NULL;
 	size_t keylen = 0;
-	const char *errstr;
+	int opt_c = 0, opt_k = 0;
+	int opt_K = 0, opt_l = 0, opt_u = 0;
 
-	while ((ch = getopt(argc, argv, "cluvK:k")) != -1) {
+	while ((ch = getopt(argc, argv, "ckK:luS:v")) != -1) {
 		switch (ch) {
 		case 'c':
-			action = VND_CONFIG;
+			opt_c = 1;
 			break;
 		case 'l':
-			action = VND_GET;
+			opt_l = 1;
+			break;
+		case 'k':
+			opt_k = 1;
+			break;
+		case 'K':
+			opt_K = 1;
+			rounds = optarg;
+			break;
+		case 'S':
+			saltopt = optarg;
 			break;
 		case 'u':
-			action = VND_UNCONFIG;
+			opt_u = 1;
 			break;
 		case 'v':
 			verbose = 1;
-			break;
-		case 'K':
-		{
-			char keybuf[128];
-			char saltbuf[128];
-			char saltfilebuf[PATH_MAX];
-			char *saltfile;
-
-			rounds = strtonum(optarg, 1000, INT_MAX, &errstr);
-			if (errstr)
-				err(1, "rounds: %s", errstr);
-			key = getpass("Encryption key: ");
-			if (!key || strlen(key) == 0)
-				errx(1, "Need an encryption key");
-			strncpy(keybuf, key, sizeof(keybuf));
-			printf("Salt file: ");
-			fflush(stdout);
-			saltfile = fgets(saltfilebuf, sizeof(saltfilebuf),
-			    stdin);
-			if (!saltfile || saltfile[0] == '\n') {
-				warnx("Skipping salt file, insecure");
-				saltfile = 0;
-			} else {
-				size_t len = strlen(saltfile);
-				if (saltfile[len - 1] == '\n')
-					saltfile[len - 1] = 0;
-			}
-			if (saltfile) {
-				int fd;
-				
-				fd = open(saltfile, O_RDONLY);
-				if (fd == -1) {
-					int *s;
-
-					fprintf(stderr, "Salt file not found, attempting to create one\n");
-					fd = open(saltfile,
-					    O_RDWR|O_CREAT|O_EXCL, 0600);
-					if (fd == -1)
-						err(1, "Unable to create salt file: '%s'", saltfile);
-					for (s = (int *)saltbuf; s <
-					    (int *)(saltbuf + sizeof(saltbuf));
-					    s++)
-						*s = arc4random();
-					if (write(fd, saltbuf, sizeof(saltbuf))
-					    != sizeof(saltbuf))
-						err(1, "Unable to write salt file: '%s'", key);
-					fprintf(stderr, "Salt file created as '%s'\n", saltfile);
-				} else {
-					if (read(fd, saltbuf, sizeof(saltbuf))
-					    != sizeof(saltbuf))
-						err(1, "Unable to read salt file: '%s'", saltfile);
-				}
-				close(fd);
-			} else {
-				memset(saltbuf, 0, sizeof(saltbuf));
-			}
-			if (pkcs5_pbkdf2((u_int8_t**)&key, 128, keybuf,
-			    sizeof(keybuf), saltbuf, sizeof(saltbuf),
-			    rounds, 0))
-				errx(1, "pkcs5_pbkdf2 failed");
-			keylen = 128;
-			break;
-		}
-		case 'k':
-			key = getpass("Encryption key: ");
-			keylen = strlen(key);
 			break;
 		default:
 			usage();
@@ -165,16 +113,105 @@ main(int argc, char **argv)
 	argc -= optind;
 	argv += optind;
 
-	if (action == VND_CONFIG && argc == 2)
+	if (opt_c + opt_l + opt_u > 1)
+		errx(1, "-c, -l and -u are mutually exclusive options");
+
+	if (opt_l)
+		action = VND_GET;
+	else if (opt_u)
+		action = VND_UNCONFIG;
+	else
+		action = VND_CONFIG;	/* default behavior */
+
+	if (saltopt && (!opt_K))
+		errx(1, "-S only makes sense when used with -K");
+
+	if (action == VND_CONFIG && argc == 2) {
+		if (opt_k) {
+			if (opt_K)
+				errx(1, "-k and -K are mutually exclusive");
+			key = getpass("Encryption key: ");
+			if (key == NULL || (keylen = strlen(key)) == 0)
+				errx(1, "Need an encryption key");
+		} else if (opt_K) {
+			key = get_pkcs_key(rounds, saltopt);
+			keylen = 128;
+		}
 		rv = config(argv[0], argv[1], action, key, keylen);
-	else if (action == VND_UNCONFIG && argc == 1)
-		rv = config(argv[0], NULL, action, key, keylen);
+	} else if (action == VND_UNCONFIG && argc == 1)
+		rv = config(argv[0], NULL, action, NULL, 0);
 	else if (action == VND_GET)
 		rv = getinfo(argc ? argv[0] : NULL);
 	else
 		usage();
 
 	exit(rv);
+}
+
+char *
+get_pkcs_key(char *arg, char *saltopt)
+{
+	char		 keybuf[128], saltbuf[128], saltfilebuf[PATH_MAX];
+	char		*saltfile;
+	char		*key = NULL;
+	const char	*errstr;
+	int		 rounds;
+
+	rounds = strtonum(arg, 1000, INT_MAX, &errstr);
+	if (errstr)
+		err(1, "rounds: %s", errstr);
+	key = getpass("Encryption key: ");
+	if (!key || strlen(key) == 0)
+		errx(1, "Need an encryption key");
+	strncpy(keybuf, key, sizeof(keybuf));
+	if (saltopt)
+		saltfile = saltopt;
+	else {
+		printf("Salt file: ");
+		fflush(stdout);
+		saltfile = fgets(saltfilebuf, sizeof(saltfilebuf), stdin);
+	}
+	if (!saltfile || saltfile[0] == '\n') {
+		warnx("Skipping salt file, insecure");
+		saltfile = NULL;
+	} else {
+		size_t len = strlen(saltfile);
+		if (saltfile[len - 1] == '\n')
+			saltfile[len - 1] = 0;
+	}
+	if (saltfile) {
+		int fd;
+
+		fd = open(saltfile, O_RDONLY);
+		if (fd == -1) {
+			int *s;
+
+			fprintf(stderr, "Salt file not found, attempting to create one\n");
+			fd = open(saltfile, O_RDWR|O_CREAT|O_EXCL, 0600);
+			if (fd == -1)
+				err(1, "Unable to create salt file: '%s'",
+				    saltfile);
+			for (s = (int *)saltbuf;
+			    s < (int *)(saltbuf + sizeof(saltbuf)); s++)
+				*s = arc4random();
+			if (write(fd, saltbuf, sizeof(saltbuf))
+			    != sizeof(saltbuf))
+				err(1, "Unable to write salt file: '%s'", saltfile);
+			fprintf(stderr, "Salt file created as '%s'\n", saltfile);
+		} else {
+			if (read(fd, saltbuf, sizeof(saltbuf))
+			    != sizeof(saltbuf))
+				err(1, "Unable to read salt file: '%s'", saltfile);
+		}
+		close(fd);
+	} else {
+		memset(saltbuf, 0, sizeof(saltbuf));
+	}
+	if (pkcs5_pbkdf2((u_int8_t**)&key, 128, keybuf, sizeof(keybuf),
+	    saltbuf, sizeof(saltbuf), rounds, 0))
+		errx(1, "pkcs5_pbkdf2 failed");
+
+	return (key);
 }
 
 int
@@ -226,9 +263,9 @@ config(char *dev, char *file, int action, char *key, size_t keylen)
 	char *rdev;
 	int rv;
 
-	if (opendev(dev, O_RDWR, OPENDEV_PART, &rdev) < 0)
+	if (opendev(dev, O_RDONLY, OPENDEV_PART, &rdev) < 0)
 		err(4, "%s", rdev);
-	f = fopen(rdev, "rw");
+	f = fopen(rdev, "r");
 	if (f == NULL) {
 		warn("%s", rdev);
 		rv = -1;
@@ -274,7 +311,7 @@ usage(void)
 	extern char *__progname;
 
 	(void)fprintf(stderr,
-	    "usage: %s [-ckluv] [-K rounds] rawdev regular_file\n",
+	    "usage: %s [-ckluv] [-K rounds] [-S saltfile] rawdev regular_file\n",
 	    __progname);
 	exit(1);
 }

@@ -1,4 +1,4 @@
-/*	$OpenBSD: pigs.c,v 1.18 2006/03/31 04:10:59 deraadt Exp $	*/
+/*	$OpenBSD: pigs.c,v 1.20 2007/02/25 18:21:24 deraadt Exp $	*/
 /*	$NetBSD: pigs.c,v 1.3 1995/04/29 05:54:50 cgd Exp $	*/
 
 /*-
@@ -34,7 +34,7 @@
 #if 0
 static char sccsid[] = "@(#)pigs.c	8.2 (Berkeley) 9/23/93";
 #endif
-static char rcsid[] = "$OpenBSD: pigs.c,v 1.18 2006/03/31 04:10:59 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: pigs.c,v 1.20 2007/02/25 18:21:24 deraadt Exp $";
 #endif /* not lint */
 
 /*
@@ -73,7 +73,7 @@ static double  lccpu;
 WINDOW *
 openpigs(void)
 {
-	return (subwin(stdscr, LINES-5-1, 0, 5, 0));
+	return (subwin(stdscr, LINES-1-2, 0, 2, 0));
 }
 
 void
@@ -194,7 +194,7 @@ fetchpigs(void)
 	for (i = 0; i < nproc; i++) {
 		pt[i].pt_kp = &kpp[i];
 		pctp = &pt[i].pt_pctcpu;
-		if (kpp->p_swtime == 0 || (kpp->p_flag & P_INMEM) == 0)
+		if (kpp->p_swtime == 0)
 			*pctp = 0;
 		else
 			*pctp = ((double) kpp->p_pctcpu / sysload.fscale) /

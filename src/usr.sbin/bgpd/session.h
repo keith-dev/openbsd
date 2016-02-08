@@ -1,4 +1,4 @@
-/*	$OpenBSD: session.h,v 1.86 2006/08/27 16:11:05 henning Exp $ */
+/*	$OpenBSD: session.h,v 1.90 2007/01/26 17:40:49 claudio Exp $ */
 
 /*
  * Copyright (c) 2003, 2004 Henning Brauer <henning@openbsd.org>
@@ -166,6 +166,13 @@ struct peer {
 		struct capabilities	ann;
 		struct capabilities	peer;
 	}			 capa;
+	struct {
+		struct bgpd_addr	local_addr;
+		u_int32_t		spi_in;
+		u_int32_t		spi_out;
+		enum auth_method	method;
+		u_int8_t		established;
+	} auth;
 	struct sockaddr_storage	 sa_local;
 	struct sockaddr_storage	 sa_remote;
 	struct msgbuf		 wbuf;
@@ -184,7 +191,6 @@ struct peer {
 	enum session_state	 state;
 	enum session_state	 prev_state;
 	u_int16_t		 holdtime;
-	u_int8_t		 auth_established;
 	u_int8_t		 depend_ok;
 	u_int8_t		 demoted;
 	u_int8_t		 passive;
@@ -196,7 +202,7 @@ struct peer	*peers;
 void		 session_socket_blockmode(int, enum blockmodes);
 pid_t		 session_main(struct bgpd_config *, struct peer *,
 		    struct network_head *, struct filter_head *,
-		    struct mrt_head *, int[2], int[2], int[2]);
+		    struct mrt_head *, int[2], int[2], int[2], int[2]);
 void		 bgp_fsm(struct peer *, enum session_events);
 int		 session_neighbor_rrefresh(struct peer *p);
 struct peer	*getpeerbyaddr(struct bgpd_addr *);
@@ -222,7 +228,8 @@ void	 prepare_listeners(struct bgpd_config *);
 
 /* rde.c */
 pid_t	 rde_main(struct bgpd_config *, struct peer *, struct network_head *,
-	    struct filter_head *, struct mrt_head *, int[2], int[2], int[2]);
+	    struct filter_head *, struct mrt_head *, int[2], int[2], int[2],
+	    int[2], int);
 
 /* control.c */
 int	control_init(int, char *);

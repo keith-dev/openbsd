@@ -1,4 +1,4 @@
-/*	$OpenBSD: sensors.c,v 1.21 2006/08/19 16:56:54 henning Exp $ */
+/*	$OpenBSD: sensors.c,v 1.32 2007/01/23 17:44:38 claudio Exp $ */
 
 /*
  * Copyright (c) 2006 Henning Brauer <henning@openbsd.org>
@@ -31,19 +31,17 @@
 
 #include "ntpd.h"
 
-#define SENSORS_MAX		255
+#define MAXDEVNAMLEN		16
 #define	_PATH_DEV_HOTPLUG	"/dev/hotplug"
 
-void	sensor_probe(int);
-void	sensor_add(struct sensor *);
+int	sensor_probe(int, char *, struct sensor *);
+void	sensor_add(int, char *);
 void	sensor_remove(struct ntp_sensor *);
-
-struct ntpd_conf *conf;
+void	sensor_update(struct ntp_sensor *);
 
 void
-sensor_init(struct ntpd_conf *c)
+sensor_init(void)
 {
-	conf = c;
 	TAILQ_INIT(&conf->ntp_sensors);
 }
 
@@ -51,47 +49,63 @@ void
 sensor_scan(void)
 {
 	int		i;
+	char		d[MAXDEVNAMLEN];
+	struct sensor	s;
 
-	for (i = 0; i < SENSORS_MAX; i++)
-		sensor_probe(i);
+	for (i = 0; i < MAXSENSORDEVICES; i++)
+		if (sensor_probe(i, d, &s))
+			sensor_add(i, d);
 }
 
-void
-sensor_probe(int id)
+int
+sensor_probe(int devid, char *dxname, struct sensor *sensor)
 {
-	int		mib[3];
-	size_t		len;
-	struct sensor	sensor;
+	int			mib[5];
+	size_t			slen, sdlen;
+	struct sensordev	sensordev;
 
 	mib[0] = CTL_HW;
 	mib[1] = HW_SENSORS;
-	mib[2] = id;
+	mib[2] = devid;
+	mib[3] = SENSOR_TIMEDELTA;
+	mib[4] = 0;
 
-	len = sizeof(sensor);
-	if (sysctl(mib, 3, &sensor, &len, NULL, 0) == -1) {
+	sdlen = sizeof(sensordev);
+	if (sysctl(mib, 3, &sensordev, &sdlen, NULL, 0) == -1) {
 		if (errno != ENOENT)
 			log_warn("sensor_probe sysctl");
-		return;
+		return (0);
 	}
 
-	if (sensor.type == SENSOR_TIMEDELTA)
-		sensor_add(&sensor);
+	if (sensordev.maxnumt[SENSOR_TIMEDELTA] == 0)
+		return (0);
+
+	strlcpy(dxname, sensordev.xname, MAXDEVNAMLEN);
+
+	slen = sizeof(*sensor);
+	if (sysctl(mib, 5, sensor, &slen, NULL, 0) == -1) {
+		if (errno != ENOENT)
+			log_warn("sensor_probe sysctl");
+		return (0);
+	}
+
+	return (1);
 }
 
 void
-sensor_add(struct sensor *sensor)
+sensor_add(int sensordev, char *dxname)
 {
 	struct ntp_sensor	*s;
 	struct ntp_conf_sensor	*cs;
 
 	/* check wether it is already there */
 	TAILQ_FOREACH(s, &conf->ntp_sensors, entry)
-		if (!strcmp(s->device, sensor->device))
+		if (!strcmp(s->device, dxname))
 			return;
 
 	/* check wether it is requested in the config file */
 	for (cs = TAILQ_FIRST(&conf->ntp_conf_sensors); cs != NULL &&
-	    strcmp(cs->device, sensor->device) && strcmp(cs->device, "*");
+	    strcmp(cs->device, dxname) && strcmp(cs->device, "*");
 	    cs = TAILQ_NEXT(cs, entry))
 		; /* nothing */
 	if (cs == NULL)
@@ -100,11 +114,11 @@ sensor_add(struct sensor *sensor)
 	if ((s = calloc(1, sizeof(*s))) == NULL)
 		fatal("sensor_add calloc");
 
-	s->next = time(NULL);
+	s->next = getmonotime();
 	s->weight = cs->weight;
-	if ((s->device = strdup(sensor->device)) == NULL)
+	if ((s->device = strdup(dxname)) == NULL)
 		fatal("sensor_add strdup");
-	s->sensorid = sensor->num;
+	s->sensordevid = sensordev;
 
 	TAILQ_INSERT_TAIL(&conf->ntp_sensors, s, entry);
 
@@ -122,24 +136,18 @@ sensor_remove(struct ntp_sensor *s)
 void
 sensor_query(struct ntp_sensor *s)
 {
+	char		 dxname[MAXDEVNAMLEN];
 	struct sensor	 sensor;
 	u_int32_t	 refid;
-	int		 mib[3];
-	size_t		 len;
 
-	s->next = time(NULL) + SENSOR_QUERY_INTERVAL;
+	s->next = getmonotime() + SENSOR_QUERY_INTERVAL;
+
+	/* rcvd is walltime here, monotime in client.c. not used elsewhere */
 	if (s->update.rcvd < time(NULL) - SENSOR_DATA_MAXAGE)
 		s->update.good = 0;
 
-	mib[0] = CTL_HW;
-	mib[1] = HW_SENSORS;
-	mib[2] = s->sensorid;
-	len = sizeof(sensor);
-	if (sysctl(mib, 3, &sensor, &len, NULL, 0) == -1) {
-		if (errno == ENOENT)
-			sensor_remove(s);
-		else
-			log_warn("sensor_query sysctl");
+	if (!sensor_probe(s->sensordevid, dxname, &sensor)) {
+		sensor_remove(s);
 		return;
 	}
 
@@ -147,28 +155,69 @@ sensor_query(struct ntp_sensor *s)
 	    sensor.status != SENSOR_S_OK)
 		return;
 
-	if (sensor.type != SENSOR_TIMEDELTA ||
-	    strcmp(sensor.device, s->device)) {
+	if (strcmp(dxname, s->device)) {
 		sensor_remove(s);
 		return;
 	}
 
-	if (sensor.tv.tv_sec == s->update.rcvd)	/* already seen */
+	if (sensor.tv.tv_sec == s->last)	/* already seen */
 		return;
 
+	s->last = sensor.tv.tv_sec;
 	memcpy(&refid, "HARD", sizeof(refid));
-	s->update.offset = 0 - (float)sensor.value / 1000000000.0;
-	s->update.rcvd = sensor.tv.tv_sec;
-	s->update.good = 1;
+	/*
+	 * TD = device time
+	 * TS = system time
+	 * sensor.value = TS - TD in ns
+	 * if value is positive, system time is ahead
+	 */
+	s->offsets[s->shift].offset = (sensor.value / -1e9) - getoffset();
+	s->offsets[s->shift].rcvd = sensor.tv.tv_sec;
+	s->offsets[s->shift].good = 1;
 
-	s->update.status.refid = htonl(refid);
-	s->update.status.stratum = 0;	/* increased when sent out */
-	s->update.status.rootdelay = 0;
-	s->update.status.rootdispersion = 0;
-	s->update.status.reftime = sensor.tv.tv_sec;
-	s->update.status.synced = 1;
+	s->offsets[s->shift].status.refid = htonl(refid);
+	s->offsets[s->shift].status.stratum = 0;	/* increased when sent out */
+	s->offsets[s->shift].status.rootdelay = 0;
+	s->offsets[s->shift].status.rootdispersion = 0;
+	s->offsets[s->shift].status.reftime = sensor.tv.tv_sec;
+	s->offsets[s->shift].status.synced = 1;
 
-	log_debug("sensor %s: offset %f", s->device, s->update.offset);
+	log_debug("sensor %s: offset %f", s->device,
+	    s->offsets[s->shift].offset);
+
+	if (++s->shift >= SENSOR_OFFSETS) {
+		s->shift = 0;
+		sensor_update(s);
+	}
+
+}
+
+void
+sensor_update(struct ntp_sensor *s)
+{
+	struct ntp_offset	**offsets;
+	int			  i;
+
+	if ((offsets = calloc(SENSOR_OFFSETS, sizeof(struct ntp_offset *))) ==
+	    NULL)
+		fatal("calloc sensor_update");
+
+	for (i = 0; i < SENSOR_OFFSETS; i++)
+		offsets[i] = &s->offsets[i];
+
+	qsort(offsets, SENSOR_OFFSETS, sizeof(struct ntp_offset *),
+	    offset_compare);
+
+	i = SENSOR_OFFSETS / 2;
+	memcpy(&s->update, offsets[i], sizeof(s->update));
+	if (SENSOR_OFFSETS % 2 == 0) {
+		s->update.offset =
+		    (offsets[i - 1]->offset + offsets[i]->offset) / 2;
+	}
+	free(offsets);
+
+	log_debug("sensor update %s: offset %f", s->device, s->update.offset);
+	priv_adjtime();
 }
 
 int
@@ -183,10 +232,10 @@ sensor_hotplugfd(void)
 	}
 
 	if ((flags = fcntl(fd, F_GETFL, 0)) == -1)
-		fatal("fnctl F_GETFL");
+		fatal("fcntl F_GETFL");
 	flags |= O_NONBLOCK;
 	if ((flags = fcntl(fd, F_SETFL, flags)) == -1)
-		fatal("fnctl F_SETFL");
+		fatal("fcntl F_SETFL");
 
 	return (fd);
 #else
@@ -209,7 +258,7 @@ sensor_hotplugevent(int fd)
 			switch (he.he_type) {
 			case HOTPLUG_DEVAT:
 				if (he.he_devclass == DV_DULL &&
-				    !strcmp(he.he_devname, "sensor"))
+				    !strcmp(he.he_devname, "sensordev"))
 					sensor_scan();
 				break;
 			default:		/* ignore */

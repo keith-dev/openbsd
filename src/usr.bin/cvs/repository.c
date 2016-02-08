@@ -1,4 +1,4 @@
-/*	$OpenBSD: repository.c,v 1.4 2006/06/14 12:35:09 joris Exp $	*/
+/*	$OpenBSD: repository.c,v 1.12 2007/02/22 06:42:09 otto Exp $	*/
 /*
  * Copyright (c) 2006 Joris Vink <joris@openbsd.org>
  *
@@ -15,27 +15,26 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
-#include "includes.h"
+#include <sys/stat.h>
+
+#include <errno.h>
+#include <fcntl.h>
+#include <pwd.h>
+#include <string.h>
+#include <unistd.h>
 
 #include "cvs.h"
-#include "file.h"
-#include "log.h"
-#include "repository.h"
-#include "worklist.h"
 
 struct cvs_wklhead repo_locks;
 
 void
 cvs_repository_unlock(const char *repo)
 {
-	int l;
 	char fpath[MAXPATHLEN];
 
 	cvs_log(LP_TRACE, "cvs_repository_unlock(%s)", repo);
 
-	l = snprintf(fpath, sizeof(fpath), "%s/%s", repo, CVS_LOCK);
-	if (l == -1 || l >= (int)sizeof(fpath))
-		fatal("cvs_repository_unlock: overflow");
+	(void)xsnprintf(fpath, sizeof(fpath), "%s/%s", repo, CVS_LOCK);
 
 	/* XXX - this ok? */
 	cvs_worklist_run(&repo_locks, cvs_worklist_unlink);
@@ -44,16 +43,17 @@ cvs_repository_unlock(const char *repo)
 void
 cvs_repository_lock(const char *repo)
 {
-	int l, i;
+	int i;
 	struct stat st;
 	char fpath[MAXPATHLEN];
 	struct passwd *pw;
 
+	if (cvs_noexec == 1 || cvs_readonlyfs == 1)
+		return;
+
 	cvs_log(LP_TRACE, "cvs_repository_lock(%s)", repo);
 
-	l = snprintf(fpath, sizeof(fpath), "%s/%s", repo, CVS_LOCK);
-	if (l == -1 || l >= (int)sizeof(fpath))
-		fatal("cvs_repository_lock: overflow");
+	(void)xsnprintf(fpath, sizeof(fpath), "%s/%s", repo, CVS_LOCK);
 
 	for (i = 0; i < CVS_LOCK_TRIES; i++) {
 		if (cvs_quit)
@@ -89,10 +89,11 @@ void
 cvs_repository_getdir(const char *dir, const char *wdir,
 	struct cvs_flisthead *fl, struct cvs_flisthead *dl, int dodirs)
 {
-	int l;
+	int type;
 	DIR *dirp;
+	struct stat st;
 	struct dirent *dp;
-	char *s, fpath[MAXPATHLEN];
+	char *s, fpath[MAXPATHLEN], rpath[MAXPATHLEN];
 
 	if ((dirp = opendir(dir)) == NULL)
 		fatal("cvs_repository_getdir: failed to open '%s'", dir);
@@ -100,30 +101,62 @@ cvs_repository_getdir(const char *dir, const char *wdir,
 	while ((dp = readdir(dirp)) != NULL) {
 		if (!strcmp(dp->d_name, ".") ||
 		    !strcmp(dp->d_name, "..") ||
-		    !strcmp(dp->d_name, "Attic") ||
+		    !strcmp(dp->d_name, CVS_PATH_ATTIC) ||
 		    !strcmp(dp->d_name, CVS_LOCK))
 			continue;
 
 		if (cvs_file_chkign(dp->d_name))
 			continue;
 
-		if (dodirs == 0 && dp->d_type == DT_DIR)
-			continue;
-
-		l = snprintf(fpath, sizeof(fpath), "%s/%s", wdir, dp->d_name);
-		if (l == -1 || l >= (int)sizeof(fpath))
-			fatal("cvs_repository_getdir: overflow");
+		(void)xsnprintf(fpath, MAXPATHLEN, "%s/%s", wdir, dp->d_name);
+		(void)xsnprintf(rpath, MAXPATHLEN, "%s/%s", dir, dp->d_name);
 
 		/*
-		 * Anticipate the file type for sorting, we do not determine
-		 * the final file type until we have the fd floating around.
+		 * nfs and afs will show d_type as DT_UNKNOWN
+		 * for files and/or directories so when we encounter
+		 * this we call lstat() on the path to be sure.
 		 */
-		if (dp->d_type == DT_DIR) {
+		if (dp->d_type == DT_UNKNOWN) {
+			if (lstat(rpath, &st) == -1)
+				fatal("'%s': %s", rpath, strerror(errno));
+
+			switch (st.st_mode & S_IFMT) {
+			case S_IFDIR:
+				type = CVS_DIR;
+				break;
+			case S_IFREG:
+				type = CVS_FILE;
+				break;
+			default:
+				fatal("Unknown file type in repository");
+			}
+		} else {
+			switch (dp->d_type) {
+			case DT_DIR:
+				type = CVS_DIR;
+				break;
+			case DT_REG:
+				type = CVS_FILE;
+				break;
+			default:
+				fatal("Unknown file type in repository");
+			}
+		}
+
+		if (dodirs == 0 && type == CVS_DIR)
+			continue;
+
+		switch (type) {
+		case CVS_DIR:
 			cvs_file_get(fpath, dl);
-		} else if (dp->d_type == DT_REG) {
+			break;
+		case CVS_FILE:
 			if ((s = strrchr(fpath, ',')) != NULL)
 				*s = '\0';
 			cvs_file_get(fpath, fl);
+			break;
+		default:
+			fatal("type %d unknown, shouldn't happen", type);
 		}
 	}
 

@@ -1,4 +1,4 @@
-/*	$OpenBSD: itime.c,v 1.12 2004/11/04 20:10:07 deraadt Exp $	*/
+/*	$OpenBSD: itime.c,v 1.14 2007/03/04 22:37:18 deraadt Exp $	*/
 /*	$NetBSD: itime.c,v 1.4 1997/04/15 01:09:50 lukem Exp $	*/
 
 /*-
@@ -34,21 +34,13 @@
 #if 0
 static char sccsid[] = "@(#)itime.c	8.1 (Berkeley) 6/5/93";
 #else
-static const char rcsid[] = "$OpenBSD: itime.c,v 1.12 2004/11/04 20:10:07 deraadt Exp $";
+static const char rcsid[] = "$OpenBSD: itime.c,v 1.14 2007/03/04 22:37:18 deraadt Exp $";
 #endif
 #endif /* not lint */
 
 #include <sys/param.h>
 #include <sys/time.h>
-#ifdef sunos
-#include <sys/vnode.h>
-
-#include <ufs/fsdir.h>
-#include <ufs/inode.h>
-#include <ufs/fs.h>
-#else
 #include <ufs/ufs/dinode.h>
-#endif
 
 #include <protocols/dumprestore.h>
 
@@ -112,8 +104,10 @@ readdumptimes(FILE *df)
 
 	for (;;) {
 		dtwalk = (struct dumptime *)calloc(1, sizeof(struct dumptime));
-		if (getrecord(df, &(dtwalk->dt_value)) < 0)
+		if (getrecord(df, &(dtwalk->dt_value)) < 0) {
+			free(dtwalk);
 			break;
+		}
 		nddates++;
 		dtwalk->dt_next = dthead;
 		dthead = dtwalk;

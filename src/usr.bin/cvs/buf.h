@@ -1,4 +1,4 @@
-/*	$OpenBSD: buf.h,v 1.18 2006/07/08 09:25:44 ray Exp $	*/
+/*	$OpenBSD: buf.h,v 1.22 2007/02/22 06:42:09 otto Exp $	*/
 /*
  * Copyright (c) 2003 Jean-Francois Brousseau <jfb@openbsd.org>
  * All rights reserved.
@@ -27,6 +27,8 @@
 #ifndef BUF_H
 #define BUF_H
 
+#include <sys/types.h>
+
 /* flags */
 #define BUF_AUTOEXT	1	/* autoextend on append */
 
@@ -36,10 +38,9 @@ BUF		*cvs_buf_alloc(size_t, u_int);
 BUF		*cvs_buf_load(const char *, u_int);
 BUF		*cvs_buf_load_fd(int, u_int);
 void		 cvs_buf_free(BUF *);
-void		*cvs_buf_release(BUF *);
+u_char		*cvs_buf_release(BUF *);
 u_char		 cvs_buf_getc(BUF *, size_t);
 void		 cvs_buf_empty(BUF *);
-ssize_t		 cvs_buf_set(BUF *, const void *, size_t, size_t);
 ssize_t		 cvs_buf_append(BUF *, const void *, size_t);
 ssize_t		 cvs_buf_fappend(BUF *, const char *, ...)
 		     __attribute__((format(printf, 2, 3)));
@@ -47,11 +48,11 @@ void		 cvs_buf_putc(BUF *, int);
 size_t		 cvs_buf_len(BUF *);
 int		 cvs_buf_write_fd(BUF *, int);
 int		 cvs_buf_write(BUF *, const char *, mode_t);
-int		 cvs_buf_differ(BUF *, BUF *);
+int		 cvs_buf_differ(const BUF *, const BUF *);
 void		 cvs_buf_write_stmp(BUF *, char *, struct timeval *);
 
 ssize_t		 cvs_buf_copy(BUF *, size_t, void *, size_t);
-const void	*cvs_buf_peek(BUF *, size_t);
+const u_char	*cvs_buf_peek(BUF *, size_t);
 
 #define cvs_buf_get(b)	cvs_buf_peek(b, 0)
 

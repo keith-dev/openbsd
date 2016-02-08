@@ -1,4 +1,4 @@
-.\"	$OpenBSD: find.1,v 1.50 2005/12/27 12:24:37 jmc Exp $
+.\"	$OpenBSD: find.1,v 1.67 2006/10/11 19:19:37 jmc Exp $
 .\" Copyright (c) 1990, 1993
 .\"	The Regents of the University of California.  All rights reserved.
 .\"
@@ -52,12 +52,23 @@ listed, evaluating an
 (composed of the
 .Dq primaries
 and
-.Dq operands
+.Dq operators
 listed below) in terms
 of each file in the tree.
 In the absence of an expression,
 .Ic -print
 is assumed.
+If an expression is given,
+but none of the primaries
+.Ic -exec ,
+.Ic -ls ,
+.Ic -ok ,
+.Ic -print ,
+or
+.Ic -print0
+are specified, the given expression is effectively replaced by
+.Cm \&( Ar given expression Cm \&)
+.Ic -print .
 .Pp
 The options are as follows:
 .Bl -tag -width Ds
@@ -73,8 +84,9 @@ visits directories in pre-order i.e. before their contents.
 Specifies a file hierarchy for
 .Nm
 to traverse.
-File hierarchies may also be specified as the operands immediately
-following the options.
+File hierarchies may be specified without the
+.Fl f
+option if they are given immediately after any other options.
 .It Fl H
 Causes the file information and file type (see
 .Xr stat 2 )
@@ -161,9 +173,18 @@ information and the time
 was started, rounded up to the next full 24-hour period, is
 .Ar n
 24-hour periods.
+.It Ic -depth
+This primary always evaluates to true.
+The same as specifying the
+.Fl d
+option.
 .It Ic -empty
 True if the current file or directory is empty.
-.It Ic -exec Ar utility Op argument ... ;
+.It Xo
+.Ic -exec Ar utility
+.Op argument ...
+.No ;
+.Xc
 True if the program named
 .Ar utility
 returns a zero value as its exit status.
@@ -178,7 +199,19 @@ arguments it is replaced by the pathname of the current file.
 will be executed from the directory from which
 .Nm
 was executed.
-.It Ic -execdir Ar utility Op argument ... ;
+.Pp
+Since
+.Ar utility
+is executed every time a match is made,
+it is often more efficient to pipe the output of
+.Nm
+to
+.Xr xargs 1 .
+.It Xo
+.Ic -execdir Ar utility
+.Op argument ...
+.No ;
+.Xc
 Identical to the
 .Ic -exec
 primary with the exception that
@@ -190,8 +223,7 @@ The filename substituted for the string
 is not qualified.
 .It Xo
 .Ic -flags
-.Op Fl
-.Ar flags
+.Oo - Oc Ns Ar flags
 .Xc
 The
 .Ar flags
@@ -199,14 +231,17 @@ are comma-separated symbolic file flags (see
 .Xr chflags 1
 for a list of valid flag names).
 If the flags are preceded by a dash
-.Pq Sq \- ,
+.Pq Sq - ,
 this primary evaluates to true if at least all specified
 .Ar flags
 are set in the file's flags.
 If the flags are not preceded by a dash, this primary evaluates to true if the
 flags specified exactly match those of the file.
 .It Ic -follow
-Follow symbolic links.
+This primary always evaluates to true.
+The same as specifying the
+.Fl H
+option.
 .It Ic -fstype Ar type
 True if the file is contained in a file system of type
 .Ar type .
@@ -248,9 +283,9 @@ If the file is a block or character special file, the major and minor numbers
 will be displayed instead of the size in bytes.
 If the file is a symbolic link, the pathname of the linked-to file will be
 displayed preceded by
-.Dq \-> .
+.Dq -\*(Gt .
 The format is identical to that produced by
-.Dq ls \-dgils .
+.Dq ls -dgils .
 .It Ic -maxdepth Ar n
 True if the current search depth is less than or equal to what is specified in
 .Ar n .
@@ -290,7 +325,11 @@ True if the current file has a more recent last modification time than
 True if the file belongs to an unknown group.
 .It Ic -nouser
 True if the file belongs to an unknown user.
-.It Ic \&-ok Ar utility Op argument ... ;
+.It Xo
+.Ic -ok Ar utility
+.Op argument ...
+.No ;
+.Xc
 Identical to the
 .Ic -exec
 primary with the exception that
@@ -303,7 +342,7 @@ If the response is other than
 .Sq y
 the command is not executed and the
 value of the
-.Ic \&ok
+.Ic ok
 expression is false.
 .It Ic -path Ar pattern
 True if the pathname being examined matches
@@ -325,8 +364,7 @@ are treated as normal characters and do not have to be
 matched explicitly.
 .It Xo
 .Ic -perm
-.Op Fl
-.Ar mode
+.Oo - Oc Ns Ar mode
 .Xc
 The
 .Ar mode
@@ -337,21 +375,14 @@ If the mode is symbolic, a starting value of zero is assumed and the
 mode sets or clears permissions without regard to the process's file mode
 creation mask.
 If the mode is octal, only bits 07777
-.Pf ( Dv S_ISUID
-|
-.Dv S_ISGID
-|
-.Dv S_ISTXT
-|
-.Dv S_IRWXU
-|
-.Dv S_IRWXG
-|
-.Dv S_IRWXO )
+.Po
+.Dv S_ISUID \*(Ba S_ISGID \*(Ba S_ISTXT
+.Dv S_IRWXU \*(Ba S_IRWXG \*(Ba S_IRWXO
+.Pc
 of the file's mode bits participate
 in the comparison.
 If the mode is preceded by a dash
-.Pq Sq \- ,
+.Pq Sq - ,
 this primary evaluates to true
 if at least all of the bits in the mode are set in the file's mode bits.
 If the mode is not preceded by a dash, this primary evaluates to
@@ -363,15 +394,6 @@ It prints the pathname of the current file to standard output, followed
 by a newline
 .Pq Ql \en
 character.
-If neither
-.Ic -exec ,
-.Ic -ls ,
-.Ic -ok ,
-nor
-.Ic -print0
-is specified, the given expression shall be effectively replaced by
-.Cm \&( Ns Ar given\& expression Ns Cm \&)
-.Ic -print .
 .It Ic -print0
 This primary always evaluates to true.
 It prints the pathname of the current file to standard output, followed
@@ -426,13 +448,18 @@ If
 is numeric and there is no such user name, then
 .Ar uname
 is treated as a user ID.
+.It Ic -xdev
+This primary always evaluates to true.
+The same as specifying the
+.Fl x
+option.
 .El
 .Pp
 All primaries which take a numeric argument allow the number to be
 preceded by a plus sign
 .Pq Ql +
 or a minus sign
-.Pq Ql \- .
+.Pq Ql - .
 A preceding plus sign means
 .Dq more than n ,
 a preceding minus sign means
@@ -444,11 +471,11 @@ The primaries may be combined using the following operators.
 The operators are listed in order of decreasing precedence.
 .Pp
 .Bl -tag -width "(expression)" -compact
-.It Cm \&( Ns Ar expression Ns Cm \&)
+.It Cm \&( Ar expression Cm \&)
 This evaluates to true if the parenthesized expression evaluates to
 true.
 .Pp
-.It Cm \&! Ns Ar expression
+.It Cm \&! Ar expression
 This is the unary
 .Tn NOT
 operator.
@@ -477,49 +504,39 @@ is true.
 The second expression is not evaluated if the first expression is true.
 .El
 .Pp
-All operands and primaries must be separate arguments to
-.Nm find .
-Primaries which themselves take arguments expect each argument
-to be a separate argument to
-.Nm find .
+Operators, primaries, and arguments to primaries must be separate
+arguments to
+.Nm find ,
+i.e. they should be separated by whitespace.
 .Sh EXAMPLES
-Print out a list of all the files whose names do not end in
+Print out a list of all the files whose names end in
 .Dq \&.c :
 .Pp
-.Dl "$ find / \e! -name '*.c' -print"
-.Pp
-Print out a list of all the files owned by user
-.Dq wnj
-that are newer than the file
-.Dq ttt :
-.Pp
-.Dl "$ find / -newer ttt -user wnj -print"
+.Dl "$ find / -name '*.c'"
 .Pp
 Print out a list of all the files which are not both newer than
 .Dq ttt
 and owned by
 .Dq wnj :
 .Pp
-.Dl "$ find / \e! \e( -newer ttt -user wnj \e) -print"
-.Pp
-Print out a list of all the files that are either owned by
-.Dq wnj
-or
-that are newer than
-.Dq ttt :
-.Pp
-.Dl "$ find / \e( -newer ttt -or -user wnj \e) -print"
+.Dl "$ find / \e! \e( -newer ttt -user wnj \e)"
 .Pp
 Print out a list of all core files on local file systems:
 .Pp
-.Dl "$ find / \e! -fstype local -prune -or -name '*.core' -print"
+.Dl "$ find / \e! -fstype local -prune -or -name '*.core'"
 .Pp
 Find all files in
 .Pa /usr/src
 ending in a dot and single digit, but skip directory
 .Pa /usr/src/gnu :
 .Pp
-.Dl "$ find /usr/src -path /usr/src/gnu -prune -or -name \e*\e.[0-9]"
+.Dl "$ find /usr/src -path /usr/src/gnu -prune -or -name \e*.[0-9]"
+.Pp
+Find and remove all *.jpg files in the current working directory:
+.Pp
+.Dl "$ find . -name \e*.jpg -exec rm {} \e;"
+or
+.Dl "$ find . -name \e*.jpg | xargs rm"
 .Sh SEE ALSO
 .Xr chflags 1 ,
 .Xr chmod 1 ,
@@ -537,30 +554,35 @@ ending in a dot and single digit, but skip directory
 The
 .Nm
 utility syntax is a superset of the syntax specified by the
-.St -p1003.2
+.St -p1003.1-2004
 standard.
 .Pp
-The options and primaries
+The options
+.Op Fl dfhXx
+and primaries
 .Ic -amin ,
+.Ic -anewer ,
 .Ic -cmin ,
+.Ic -cnewer ,
 .Ic -empty ,
+.Ic -execdir ,
+.Ic -flags ,
 .Ic -follow ,
 .Ic -fstype ,
 .Ic -iname ,
 .Ic -inum ,
-.Ic -links ,
 .Ic -ls ,
-.Ic -mmin ,
 .Ic -maxdepth ,
 .Ic -mindepth ,
-.Ic -execdir ,
+.Ic -mmin ,
+.Ic -path ,
 and
 .Ic -print0
 are extensions to
-.St -p1003.2 .
+.St -p1003.1-2004 .
 The
 .Ic -iname
-option was inspired by GNU find.
+primary was inspired by GNU find.
 .Pp
 Historically, the
 .Fl d ,
@@ -576,23 +598,23 @@ These primaries always evaluated to true.
 As they were really global variables that took effect before the traversal
 began, some legal expressions could have unexpected results.
 An example is the expression
-.Dq \-print \-o \-depth .
+.Dq -print -o -depth .
 As
-.Cm \-print
+.Cm -print
 always evaluates to true, the standard order of evaluation
 implies that
-.Cm \-depth
+.Cm -depth
 would never be evaluated.
 This is not the case.
 .Pp
 The operator
 .Cm -or
 was implemented as
-.Cm \-o ,
+.Cm -o ,
 and the operator
 .Cm -and
 was implemented as
-.Cm \-a .
+.Cm -a .
 .Pp
 Historic implementations of the
 .Ic -exec
@@ -632,10 +654,10 @@ names and the
 it is difficult to specify files named
 .Dq -xdev
 or
-.Dq \&! .
+.Sq \&! .
 These problems are handled by the
 .Fl f
 option and the
 .Xr getopt 3
-.Dq \-\-
+.Sq --
 construct.

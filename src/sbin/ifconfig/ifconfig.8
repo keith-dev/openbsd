@@ -1,4 +1,4 @@
-.\"	$OpenBSD: ifconfig.8,v 1.134 2006/08/29 17:22:00 henning Exp $
+.\"	$OpenBSD: ifconfig.8,v 1.139 2006/12/20 09:49:05 jmc Exp $
 .\"	$NetBSD: ifconfig.8,v 1.11 1996/01/04 21:27:29 pk Exp $
 .\"     $FreeBSD: ifconfig.8,v 1.16 1998/02/01 07:03:29 steve Exp $
 .\"
@@ -223,6 +223,7 @@ At least the following devices can be created on demand:
 .Xr gif 4 ,
 .Xr gre 4 ,
 .Xr lo 4 ,
+.Xr pflog 4 ,
 .Xr ppp 4 ,
 .Xr pppoe 4 ,
 .Xr sl 4 ,
@@ -265,14 +266,25 @@ independent
 ruleset (i.e. not one based on the names of NICs) using
 existing (egress, carp, etc.) or user-defined groups.
 .Pp
-Cloned interfaces are members of their interface family group by default.
+Some interfaces belong to specific groups by default:
+.Pp
+.Bl -dash -width Ds -compact
+.It
+Cloned interfaces are members of their interface family group.
 For example, a PPP interface such as
 .Em ppp0
-is a member of the PPP interface family group,
-.Em ppp .
+is a member of the
+.Em ppp
+interface family group.
+.It
 The interface(s) the default route(s) point to are members of the
 .Em egress
 interface group.
+.It
+IEEE 802.11 wireless interfaces are members of the
+.Em wlan
+interface group.
+.El
 .It Cm -group Ar group-name
 Remove the interface from the given
 .Dq group .
@@ -530,7 +542,7 @@ will begin advertising as master.
 .Op Oo Fl Oc Cm bssid Ar bssid
 .Op Oo Fl Oc Cm chan Ar n
 .Op Oo Fl Oc Ns Cm nwflag Ar flag
-.Op Cm nwid Ar id
+.Op Oo Fl Oc Cm nwid Ar id
 .Op Oo Fl Oc Cm nwkey Ar key
 .Op Oo Fl Oc Cm powersave
 .Op Cm powersavesleep Ar duration
@@ -596,6 +608,9 @@ or a series of hexadecimal digits up to 64 digits.
 The empty string allows the interface to connect to any available
 access points.
 Note that network ID is synonymous with Extended Service Set ID (ESSID).
+.It Fl nwid
+Set the network ID to the empty string to allow the interface to connect
+to any available access point.
 .It Cm nwkey Ar key
 Enable WEP encryption for IEEE 802.11-based wireless network interfaces
 using the specified
@@ -988,26 +1003,10 @@ vlan header for packets sent from the vlan interface.
 .El
 .Sh EXAMPLES
 Assign the
-.Xr inet 3
 address of 192.168.1.10 with a network mask of
 255.255.255.0 to interface fxp0:
 .Pp
 .Dl # ifconfig fxp0 inet 192.168.1.10 netmask 255.255.255.0
-.Pp
-Assign the
-.Xr ipx 3
-address of 12625920 specified in decimal to interface fxp0:
-.Pp
-.Dl # ifconfig fxp0 ipx 12625920
-.Pp
-Assign the AppleTalk network 39108 and server node 128 with a network
-range of 39107\-39109 to interface fxp0 on a phase 2 AppleTalk network:
-.Pp
-.Dl # ifconfig fxp0 atalk 39108.128 range 39107-39109 phase 2
-.Pp
-Configure the xl0 interface to use 10baseT:
-.Pp
-.Dl # ifconfig xl0 media 10baseT
 .Pp
 Configure the xl0 interface to use 100baseTX, full duplex:
 .Pp
@@ -1017,16 +1016,6 @@ Label the em0 interface as an uplink:
 .Pp
 .Dl # ifconfig em0 description \&"Uplink to Gigabit Switch 2\&"
 .Pp
-Configure the vlan0 interface for IP address 192.168.254.1, vlan tag 4,
-and vlan parent device fxp0:
-.Pp
-.Dl # ifconfig vlan0 192.168.254.1 vlan 4 vlandev fxp0
-.Pp
-Configure the carp0 interface for IP address 192.168.10.1, virtual host ID 1,
-attached to the vlan0 interface:
-.Pp
-.Dl # ifconfig carp0 vhid 1 carpdev vlan0 192.168.10.1
-.Pp
 Create the gif1 network interface:
 .Pp
 .Dl # ifconfig gif1 create
@@ -1034,42 +1023,21 @@ Create the gif1 network interface:
 Destroy the gif1 network interface:
 .Pp
 .Dl # ifconfig gif1 destroy
-.Pp
-Create and configure the trunk0 interface for IP address 192.168.23.1,
-with the em0 and em1 trunk port interfaces:
-.Pp
-.Dl # ifconfig trunk0 create 192.168.23.1 trunkport em0 trunkport em1
 .Sh DIAGNOSTICS
 Messages indicating the specified interface does not exist, the
 requested address is unknown, or the user is not privileged and
 tried to alter an interface's configuration.
 .Sh SEE ALSO
 .Xr netstat 1 ,
-.Xr inet 3 ,
-.Xr ipx 3 ,
-.Xr arp 4 ,
-.Xr bridge 4 ,
-.Xr carp 4 ,
-.Xr gif 4 ,
-.Xr gre 4 ,
 .Xr ifmedia 4 ,
 .Xr inet 4 ,
-.Xr lo 4 ,
+.Xr intro 4 ,
 .Xr netintro 4 ,
-.Xr pfsync 4 ,
-.Xr ppp 4 ,
-.Xr pppoe 4 ,
-.Xr sl 4 ,
-.Xr sppp 4 ,
-.Xr trunk 4 ,
-.Xr tun 4 ,
-.Xr vlan 4 ,
 .Xr hostname.if 5 ,
 .Xr hosts 5 ,
 .Xr networks 5 ,
-.Xr brconfig 8 ,
 .Xr rc 8 ,
-.Xr routed 8
+.Xr tcpdump 8
 .Sh HISTORY
 The
 .Nm

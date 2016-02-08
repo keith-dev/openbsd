@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile.inc,v 1.78 2006/06/14 19:55:24 otto Exp $
+#	$OpenBSD: Makefile.inc,v 1.80 2006/10/24 04:40:59 tedu Exp $
 #	$NetBSD: Makefile.inc,v 1.35 1995/10/16 23:49:07 jtc Exp $
 #	@(#)Makefile.inc	8.1 (Berkeley) 6/17/93
 
@@ -58,7 +58,8 @@ ASM=	accept.o access.o acct.o adjfreq.o adjtime.o bind.o chdir.o chflags.o \
 	sigaltstack.o socket.o socketpair.o stat.o statfs.o swapctl.o \
 	symlink.o sync.o sysarch.o umask.o unlink.o unmount.o \
 	utimes.o vadvise.o wait4.o write.o writev.o xfspioctl.o __semctl.o \
-	__syscall.o __sysctl.o __getcwd.o
+	__syscall.o __sysctl.o __getcwd.o sched_yield.o getthrid.o \
+	thrsleep.o thrwakeup.o threxit.o thrsigdivert.o
 
 GASM=	${ASM:.o=.go}
 PASM=	${ASM:.o=.po}
@@ -270,6 +271,8 @@ MLINKS+=setresuid.2 getresgid.2 setresuid.2 getresuid.2
 MLINKS+=setresuid.2 setresgid.2
 MLINKS+=shmat.2 shmdt.2
 MLINKS+=stat.2 fstat.2 stat.2 lstat.2
+MLINKS+=stat.2 S_ISBLK.2 stat.2 S_ISCHR.2 stat.2 S_ISDIR.2
+MLINKS+=stat.2 S_ISFIFO.2 stat.2 S_ISLNK.2 stat.2 S_ISREG.2 stat.2 S_ISSOCK.2
 MLINKS+=statfs.2 fstatfs.2
 MLINKS+=syscall.2 __syscall.2
 MLINKS+=truncate.2 ftruncate.2

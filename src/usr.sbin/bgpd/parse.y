@@ -1,4 +1,4 @@
-/*	$OpenBSD: parse.y,v 1.193 2006/08/27 16:11:05 henning Exp $ */
+/*	$OpenBSD: parse.y,v 1.201 2007/03/06 16:52:48 henning Exp $ */
 
 /*
  * Copyright (c) 2002, 2003, 2004 Henning Brauer <henning@openbsd.org>
@@ -50,18 +50,22 @@ static struct filter_head	*groupfilter_l;
 static struct filter_rule	*curpeer_filter[2];
 static struct filter_rule	*curgroup_filter[2];
 static struct listen_addrs	*listen_addrs;
-static FILE			*fin = NULL;
-static int			 lineno = 1;
-static int			 errors = 0;
-static int			 pdebug = 1;
 static u_int32_t		 id;
-char				*infile;
+
+TAILQ_HEAD(files, file)		 files = TAILQ_HEAD_INITIALIZER(files);
+static struct file {
+	TAILQ_ENTRY(file)	 entry;
+	FILE			*stream;
+	char			*name;
+	int			 lineno;
+	int			 errors;
+}				*file;
 
 int	 yyerror(const char *, ...);
 int	 yyparse(void);
 int	 kw_cmp(const void *, const void *);
 int	 lookup(char *);
-int	 lgetc(FILE *);
+int	 lgetc(void);
 int	 lungetc(int);
 int	 findeol(void);
 int	 yylex(void);
@@ -87,6 +91,7 @@ struct filter_match_l {
 	struct filter_as_l	*as_l;
 } fmopts;
 
+struct file	*include_file(const char *);
 struct peer	*alloc_peer(void);
 struct peer	*new_peer(void);
 struct peer	*new_group(void);
@@ -114,7 +119,6 @@ struct sym {
 
 int	 symset(const char *, const char *, int);
 char	*symget(const char *);
-int	 atoul(char *, u_long *);
 int	 getcommunity(char *);
 int	 parsecommunity(char *, int *, int *);
 
@@ -146,7 +150,7 @@ typedef struct {
 
 %}
 
-%token	AS ROUTERID HOLDTIME YMIN LISTEN ON FIBUPDATE
+%token	AS ROUTERID HOLDTIME YMIN LISTEN ON FIBUPDATE RTABLE
 %token	RDE EVALUATE IGNORE COMPARE
 %token	GROUP NEIGHBOR NETWORK
 %token	REMOTEAS DESCR LOCALADDR MULTIHOP PASSIVE MAXPREFIX RESTART
@@ -154,15 +158,15 @@ typedef struct {
 %token	ENFORCE NEIGHBORAS CAPABILITIES REFLECTOR DEPEND DOWN SOFTRECONFIG
 %token	DUMP IN OUT
 %token	LOG ROUTECOLL TRANSPARENT
-%token	TCP MD5SIG PASSWORD KEY
+%token	TCP MD5SIG PASSWORD KEY TTLSECURITY
 %token	ALLOW DENY MATCH
 %token	QUICK
 %token	FROM TO ANY
 %token	CONNECTED STATIC
-%token	PREFIX PREFIXLEN SOURCEAS TRANSITAS COMMUNITY DELETE
+%token	PREFIX PREFIXLEN SOURCEAS TRANSITAS PEERAS COMMUNITY DELETE
 %token	SET LOCALPREF MED METRIC NEXTHOP REJECT BLACKHOLE NOMODIFY SELF
 %token	PREPEND_SELF PREPEND_PEER PFTABLE WEIGHT RTLABEL
-%token	ERROR
+%token	ERROR INCLUDE
 %token	IPSEC ESP AH SPI IKE
 %token	IPV4 IPV6
 %token	QUALIFY VIA
@@ -188,30 +192,33 @@ typedef struct {
 
 grammar		: /* empty */
 		| grammar '\n'
+		| grammar include '\n'
 		| grammar conf_main '\n'
 		| grammar varset '\n'
 		| grammar neighbor '\n'
 		| grammar group '\n'
 		| grammar filterrule '\n'
-		| grammar error '\n'		{ errors++; }
+		| grammar error '\n'		{ file->errors++; }
 		;
 
 number		: STRING			{
-			u_long	ulval;
+			u_int32_t	 uval;
+			const char	*errstr;
 
-			if (atoul($1, &ulval) == -1) {
-				yyerror("\"%s\" is not a number", $1);
+			uval = strtonum($1, 0, UINT_MAX, &errstr);
+			if (errstr) {
+				yyerror("number %s is %s", $1, errstr);
 				free($1);
 				YYERROR;
 			} else
-				$$ = ulval;
+				$$ = uval;
 			free($1);
 		}
 		;
 
 asnumber	: number			{
-			if ($1 > USHRT_MAX) {
-				yyerror("AS too big: max %u", USHRT_MAX);
+			if ($1 >= USHRT_MAX) {
+				yyerror("AS too big: max %u", USHRT_MAX - 1);
 				YYERROR;
 			}
 		}
@@ -245,6 +252,21 @@ varset		: STRING '=' string		{
 				fatal("cannot store variable");
 			free($1);
 			free($3);
+		}
+		;
+
+include		: INCLUDE STRING	{
+			struct file	*nfile;
+
+			if ((nfile = include_file($2)) == NULL) {
+				yyerror("failed to include file %s", $2);
+				free($2);
+				YYERROR;
+			}
+			free($2);
+
+			file = nfile;
+			lungetc('\n');
 		}
 		;
 
@@ -447,6 +469,13 @@ conf_main	: AS asnumber		{
 				YYERROR;
 			}
 			free($4);
+		}
+		| RTABLE number {
+			if ($2 > RT_TABLEID_MAX || $2 < 0) {
+				yyerror("invalid rtable id");
+				YYERROR;
+			}
+			conf->rtableid = $2;
 		}
 		;
 
@@ -852,6 +881,9 @@ peeropts	: REMOTEAS asnumber	{
 				curpeer->conf.auth.auth_keylen_out = keylen;
 			}
 			free($7);
+		}
+		| TTLSECURITY yesno	{
+			curpeer->conf.ttlsec = $2;
 		}
 		| SET filter_set_opt	{
 			struct filter_rule	*r;
@@ -1261,6 +1293,7 @@ prefixlenop	: unaryop number		{
 filter_as_type	: AS		{ $$ = AS_ALL; }
 		| SOURCEAS	{ $$ = AS_SOURCE; }
 		| TRANSITAS	{ $$ = AS_TRANSIT; }
+		| PEERAS	{ $$ = AS_PEER; }
 		;
 
 filter_set	: /* empty */					{ $$ = NULL; }
@@ -1555,9 +1588,9 @@ yyerror(const char *fmt, ...)
 	va_list		 ap;
 	char		*nfmt;
 
-	errors = 1;
+	file->errors++;
 	va_start(ap, fmt);
-	if (asprintf(&nfmt, "%s:%d: %s", infile, yylval.lineno, fmt) == -1)
+	if (asprintf(&nfmt, "%s:%d: %s", file->name, yylval.lineno, fmt) == -1)
 		fatalx("yyerror asprintf");
 	vlog(LOG_CRIT, nfmt, ap);
 	va_end(ap);
@@ -1605,6 +1638,7 @@ lookup(char *s)
 		{ "ignore",		IGNORE},
 		{ "ike",		IKE},
 		{ "in",			IN},
+		{ "include",		INCLUDE},
 		{ "ipsec",		IPSEC},
 		{ "key",		KEY},
 		{ "listen",		LISTEN},
@@ -1627,6 +1661,7 @@ lookup(char *s)
 		{ "out",		OUT},
 		{ "passive",		PASSIVE},
 		{ "password",		PASSWORD},
+		{ "peer-as",		PEERAS},
 		{ "pftable",		PFTABLE},
 		{ "prefix",		PREFIX},
 		{ "prefixlen",		PREFIXLEN},
@@ -1641,6 +1676,7 @@ lookup(char *s)
 		{ "route-collector",	ROUTECOLL},
 		{ "route-reflector",	REFLECTOR},
 		{ "router-id",		ROUTERID},
+		{ "rtable",		RTABLE},
 		{ "rtlabel",		RTLABEL},
 		{ "self",		SELF},
 		{ "set",		SET},
@@ -1652,6 +1688,7 @@ lookup(char *s)
 		{ "to",			TO},
 		{ "transit-as",		TRANSITAS},
 		{ "transparent-as",	TRANSPARENT},
+		{ "ttl-security",	TTLSECURITY},
 		{ "via",		VIA},
 		{ "weight",		WEIGHT}
 	};
@@ -1660,15 +1697,10 @@ lookup(char *s)
 	p = bsearch(s, keywords, sizeof(keywords)/sizeof(keywords[0]),
 	    sizeof(keywords[0]), kw_cmp);
 
-	if (p) {
-		if (pdebug > 1)
-			fprintf(stderr, "%s: %d\n", s, p->k_val);
+	if (p)
 		return (p->k_val);
-	} else {
-		if (pdebug > 1)
-			fprintf(stderr, "string: %s\n", s);
+	else
 		return (STRING);
-	}
 }
 
 #define MAXPUSHBACK	128
@@ -1679,9 +1711,10 @@ char	 pushback_buffer[MAXPUSHBACK];
 int	 pushback_index = 0;
 
 int
-lgetc(FILE *f)
+lgetc(void)
 {
-	int	c, next;
+	int		 c, next;
+	struct file	*prevfile;
 
 	if (parsebuf) {
 		/* Read character from the parsebuffer instead of input. */
@@ -1697,22 +1730,33 @@ lgetc(FILE *f)
 	if (pushback_index)
 		return (pushback_buffer[--pushback_index]);
 
-	while ((c = getc(f)) == '\\') {
-		next = getc(f);
+	while ((c = getc(file->stream)) == '\\') {
+		next = getc(file->stream);
 		if (next != '\n') {
 			c = next;
 			break;
 		}
-		yylval.lineno = lineno;
-		lineno++;
+		yylval.lineno = file->lineno;
+		file->lineno++;
 	}
 	if (c == '\t' || c == ' ') {
 		/* Compress blanks to a single space. */
 		do {
-			c = getc(f);
+			c = getc(file->stream);
 		} while (c == '\t' || c == ' ');
-		ungetc(c, f);
+		ungetc(c, file->stream);
 		c = ' ';
+	}
+
+	while (c == EOF &&
+	    (prevfile = TAILQ_PREV(file, files, entry)) != NULL) {
+		prevfile->errors += file->errors;
+		TAILQ_REMOVE(&files, file, entry);
+		fclose(file->stream);
+		free(file->name);
+		free(file);
+		file = prevfile;
+		c = getc(file->stream);
 	}
 
 	return (c);
@@ -1744,9 +1788,9 @@ findeol(void)
 
 	/* skip to either EOF or the first real EOL */
 	while (1) {
-		c = lgetc(fin);
+		c = lgetc();
 		if (c == '\n') {
-			lineno++;
+			file->lineno++;
 			break;
 		}
 		if (c == EOF)
@@ -1765,16 +1809,16 @@ yylex(void)
 
 top:
 	p = buf;
-	while ((c = lgetc(fin)) == ' ')
+	while ((c = lgetc()) == ' ')
 		; /* nothing */
 
-	yylval.lineno = lineno;
+	yylval.lineno = file->lineno;
 	if (c == '#')
-		while ((c = lgetc(fin)) != '\n' && c != EOF)
+		while ((c = lgetc()) != '\n' && c != EOF)
 			; /* nothing */
 	if (c == '$' && parsebuf == NULL) {
 		while (1) {
-			if ((c = lgetc(fin)) == EOF)
+			if ((c = lgetc()) == EOF)
 				return (0);
 
 			if (p + 1 >= buf + sizeof(buf) - 1) {
@@ -1804,14 +1848,14 @@ top:
 	case '"':
 		endc = c;
 		while (1) {
-			if ((c = lgetc(fin)) == EOF)
+			if ((c = lgetc()) == EOF)
 				return (0);
 			if (c == endc) {
 				*p = '\0';
 				break;
 			}
 			if (c == '\n') {
-				lineno++;
+				file->lineno++;
 				continue;
 			}
 			if (p + 1 >= buf + sizeof(buf) - 1) {
@@ -1839,7 +1883,7 @@ top:
 				yyerror("string too long");
 				return (findeol());
 			}
-		} while ((c = lgetc(fin)) != EOF && (allowed_in_string(c)));
+		} while ((c = lgetc()) != EOF && (allowed_in_string(c)));
 		lungetc(c);
 		*p = '\0';
 		if ((token = lookup(buf)) == STRING)
@@ -1848,12 +1892,39 @@ top:
 		return (token);
 	}
 	if (c == '\n') {
-		yylval.lineno = lineno;
-		lineno++;
+		yylval.lineno = file->lineno;
+		file->lineno++;
 	}
 	if (c == EOF)
 		return (0);
 	return (c);
+}
+
+struct file *
+include_file(const char *name)
+{
+	struct file	*nfile;
+
+	if ((nfile = calloc(1, sizeof(struct file))) == NULL ||
+	    (nfile->name = strdup(name)) == NULL)
+		return (NULL);
+
+	if ((nfile->stream = fopen(nfile->name, "r")) == NULL) {
+		log_warn("%s", nfile->name);
+		return (NULL);
+	}
+
+	if (check_file_secrecy(fileno(nfile->stream), nfile->name)) {
+		fclose(nfile->stream);
+		free(nfile->name);
+		free(nfile);
+		return (NULL);
+	}
+
+	nfile->lineno = 1;
+	TAILQ_INSERT_TAIL(&files, nfile, entry);
+
+	return (nfile);
 }
 
 int
@@ -1866,15 +1937,10 @@ parse_config(char *filename, struct bgpd_config *xconf,
 	struct listen_addr	*la;
 	struct network		*n;
 	struct filter_rule	*r;
+	int			 errors = 0;
 
-	if ((fin = fopen(filename, "r")) == NULL) {
-		warn("%s", filename);
-		return (-1);
-	}
-	infile = filename;
-
-	if (check_file_secrecy(fileno(fin), filename)) {
-		fclose(fin);
+	if ((file = include_file(filename)) == NULL) {
+		log_warnx("cannot open the main config file!");
 		return (-1);
 	}
 
@@ -1900,8 +1966,6 @@ parse_config(char *filename, struct bgpd_config *xconf,
 	peer_l_old = *xpeers;
 	curpeer = NULL;
 	curgroup = NULL;
-	lineno = 1;
-	errors = 0;
 	id = 1;
 	conf->opts = xconf->opts;
 
@@ -1912,8 +1976,7 @@ parse_config(char *filename, struct bgpd_config *xconf,
 	TAILQ_INIT(xfilter_l);
 
 	yyparse();
-
-	fclose(fin);
+	errors = file->errors;
 
 	/* Free macros and check which have not been used. */
 	for (sym = TAILQ_FIRST(&symhead); sym != NULL; sym = next) {
@@ -1996,6 +2059,11 @@ parse_config(char *filename, struct bgpd_config *xconf,
 	free(peerfilter_l);
 	free(groupfilter_l);
 
+	TAILQ_REMOVE(&files, file, entry);
+	fclose(file->stream);
+	free(file->name);
+	free(file);
+
 	return (errors ? -1 : 0);
 }
 
@@ -2074,39 +2142,21 @@ symget(const char *nam)
 }
 
 int
-atoul(char *s, u_long *ulvalp)
-{
-	u_long	 ulval;
-	char	*ep;
-
-	errno = 0;
-	ulval = strtoul(s, &ep, 0);
-	if (s[0] == '\0' || *ep != '\0')
-		return (-1);
-	if (errno == ERANGE && ulval == ULONG_MAX)
-		return (-1);
-	*ulvalp = ulval;
-	return (0);
-}
-
-int
 getcommunity(char *s)
 {
-	u_long	ulval;
+	int		 val;
+	const char	*errstr;
 
 	if (strcmp(s, "*") == 0)
 		return (COMMUNITY_ANY);
 	if (strcmp(s, "neighbor-as") == 0)
 		return (COMMUNITY_NEIGHBOR_AS);
-	if (atoul(s, &ulval) == -1) {
-		yyerror("\"%s\" is not a number", s);
+	val = strtonum(s, 0, USHRT_MAX, &errstr);
+	if (errstr) {
+		yyerror("Community %s is %s (max: %s)", s, errstr, USHRT_MAX);
 		return (COMMUNITY_ERROR);
 	}
-	if (ulval > USHRT_MAX) {
-		yyerror("Community too big: max %u", USHRT_MAX);
-		return (COMMUNITY_ERROR);
-	}
-	return (ulval);
+	return (val);
 }
 
 int

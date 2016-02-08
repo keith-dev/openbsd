@@ -1,4 +1,4 @@
-/*	$OpenBSD: rf_configure.c,v 1.12 2004/07/17 02:14:33 deraadt Exp $	*/
+/*	$OpenBSD: rf_configure.c,v 1.16 2007/02/18 20:16:04 ray Exp $	*/
 /*	$NetBSD: rf_configure.c,v 1.14 2001/02/04 21:05:42 christos Exp $	*/
 
 /*
@@ -168,12 +168,13 @@ rf_MakeConfig(char *configname, RF_Config_t *cfgPtr)
     return(-1);
   }
   rewind(fp);
-  if (rf_search_file_for_start_of("array", buf, 256, fp)) {
+  if (rf_search_file_for_start_of("array", buf, sizeof(buf), fp)) {
     RF_ERRORMSG1("Unable to find start of \"array\" params in config file %s\n",configname);
 		retcode = -1;
 		goto out;
   }
-  rf_get_next_nonblank_line(buf, 256, fp, "Config file error (\"array\" section):  unable to get numRow and numCol\n");
+  rf_get_next_nonblank_line(buf, sizeof(buf), fp,
+      "Config file error (\"array\" section):  unable to get numRow and numCol\n");
 
   /*
          * wackiness with aa, bb, cc to get around size problems on
@@ -193,9 +194,9 @@ rf_MakeConfig(char *configname, RF_Config_t *cfgPtr)
   for (c=0; c<RF_MAXDBGV; c++)
     cfgPtr->debugVars[c][0] = '\0';
   rewind(fp);
-  if (!rf_search_file_for_start_of("debug", buf, 256, fp)) {
+  if (!rf_search_file_for_start_of("debug", buf, sizeof(buf), fp)) {
     for (c=0; c < RF_MAXDBGV; c++) {
-			if (rf_get_next_nonblank_line(buf, 256, fp, NULL))
+			if (rf_get_next_nonblank_line(buf, sizeof(buf), fp, NULL))
 				break;
       cp = rf_find_non_white(buf);
 			if (!strncmp(cp, "START", strlen("START")))
@@ -207,10 +208,10 @@ rf_MakeConfig(char *configname, RF_Config_t *cfgPtr)
   strlcpy(cfgPtr->diskQueueType,"fifo", sizeof(RF_DiskQueueType_t));
   cfgPtr->maxOutstandingDiskReqs = 1;
   /* scan the file for the block related to disk queues */
-  if (rf_search_file_for_start_of("queue",buf,256,fp)) {
+  if (rf_search_file_for_start_of("queue",buf,sizeof(buf),fp)) {
     RF_ERRORMSG2("[No disk queue discipline specified in config file %s.  Using %s.]\n",configname, cfgPtr->diskQueueType);
   } else {
-    if (rf_get_next_nonblank_line(buf, 256, fp, NULL)) {
+    if (rf_get_next_nonblank_line(buf, sizeof(buf), fp, NULL)) {
       RF_ERRORMSG2("[No disk queue discipline specified in config file %s.  Using %s.]\n",configname, cfgPtr->diskQueueType);
     }
   }
@@ -236,7 +237,7 @@ rf_MakeConfig(char *configname, RF_Config_t *cfgPtr)
 
   rewind(fp);
 
-  if (rf_search_file_for_start_of("disks",buf,256,fp)) {
+  if (rf_search_file_for_start_of("disks",buf,sizeof(buf),fp)) {
     RF_ERRORMSG1("Can't find \"disks\" section in config file %s\n",configname);
 		retcode = -1;
 		goto out;
@@ -254,11 +255,11 @@ rf_MakeConfig(char *configname, RF_Config_t *cfgPtr)
 
   /* "spare" section is optional */
   rewind(fp);
-	if (rf_search_file_for_start_of("spare", buf, 256, fp))
+	if (rf_search_file_for_start_of("spare", buf, sizeof(buf), fp))
 		cfgPtr->numSpare = 0;
   for (c = 0; c < cfgPtr->numSpare; c++) {
 		if (rf_get_next_nonblank_line(&cfgPtr->spare_names[c][0],
-		    256, fp, NULL)) {
+		    sizeof(cfgPtr->spare_names[c]), fp, NULL)) {
       RF_ERRORMSG1("Config file error: unable to get device file for spare disk %d\n",c);
 			retcode = -1;
 			goto out;
@@ -267,12 +268,12 @@ rf_MakeConfig(char *configname, RF_Config_t *cfgPtr)
 
   /* scan the file for the block related to layout */
   rewind(fp);
-  if (rf_search_file_for_start_of("layout",buf,256,fp)) {
+  if (rf_search_file_for_start_of("layout",buf,sizeof(buf),fp)) {
     RF_ERRORMSG1("Can't find \"layout\" section in configuration file %s\n",configname);
 		retcode = -1;
 		goto out;
   }
-  if (rf_get_next_nonblank_line(buf, 256, fp, NULL)) {
+  if (rf_get_next_nonblank_line(buf, sizeof(buf), fp, NULL)) {
     RF_ERRORMSG("Config file error (\"layout\" section): unable to find common layout param line\n");
 		retcode = -1;
 		goto out;
@@ -328,20 +329,20 @@ rf_MakeLayoutSpecificDeclustered(FILE *configfp, RF_Config_t *cfgPtr, void *arg)
   distSpare = *((int *)arg);
 
   /* get the block design file name */
-	if (rf_get_next_nonblank_line(buf, 256, configfp,
+	if (rf_get_next_nonblank_line(buf, sizeof(buf), configfp,
 	    "Can't find block design file name in config file\n"))
     return(EINVAL);
   bdfile = rf_find_non_white(buf);
-  if (bdfile[strlen(bdfile)-1] == '\n') {
+  if ((p = strchr(bdfile, '\n')) != NULL) {
     /* strip newline char */
-    bdfile[strlen(bdfile)-1] = '\0';
+    *p = '\0';
   }
   /* open bd file, check validity of configuration */
   if ((fp = fopen(bdfile,"r"))==NULL) {
     RF_ERRORMSG1("RAID: config error: Can't open layout table file %s\n",bdfile);
     return(EINVAL);
   }
-	if (fgets(buf, 256, fp) == NULL) {
+	if (fgets(buf, sizeof(buf), fp) == NULL) {
 		RF_ERRORMSG1("RAID: config error: Can't read layout from layout table file %s\n", bdfile);
 		return (EINVAL);
 	}
@@ -355,13 +356,13 @@ rf_MakeLayoutSpecificDeclustered(FILE *configfp, RF_Config_t *cfgPtr, void *arg)
 	/* set the sparemap directory.  In the in-kernel version, there's a
 	 * daemon that's responsible for finding the sparemaps */
   if (distSpare) {
-		if (rf_get_next_nonblank_line(smbuf, 256, configfp,
+		if (rf_get_next_nonblank_line(smbuf, sizeof(smbuf), configfp,
 		    "Can't find sparemap file name in config file\n"))
       return(EINVAL);
     smname = rf_find_non_white(smbuf);
-    if (smname[strlen(smname)-1] == '\n') {
+    if ((p = strchr(smname, '\n')) != NULL) {
       /* strip newline char */
-      smname[strlen(smname)-1] = '\0';
+      *p = '\0';
     }
 	} else {
     smbuf[0] = '\0';
@@ -458,12 +459,12 @@ rf_search_file_for_start_of(const char *string, char *buf, int len, FILE *fp)
 
 /* reads from file fp into buf until it finds an interesting line */
 int
-rf_get_next_nonblank_line(char *buf, int len ATTRIBUTE_UNUSED, FILE *fp,
+rf_get_next_nonblank_line(char *buf, int len, FILE *fp,
 			  const char *errmsg)
 {
   char *p;
 
-  while (fgets(buf,256,fp) != NULL) {
+  while (fgets(buf,len,fp) != NULL) {
     p = rf_find_non_white(buf);
 		if (*p == '\n' || *p == '\0' || *p == '#')
 			continue;
@@ -493,7 +494,7 @@ rf_ReadSpareTable(RF_SparetWait_t *req, char *fname)
 {
 	int i, j, numFound, linecount, tableNum, tupleNum,
 	    spareDisk, spareBlkOffset;
-  char buf[1024], targString[100], errString[100];
+  char buf[1024], targString[100], errString[100], *p;
   RF_SpareTableEntry_t **table;
   FILE *fp;
 
@@ -519,8 +520,8 @@ rf_ReadSpareTable(RF_SparetWait_t *req, char *fname)
 	if (rf_get_next_nonblank_line(buf, 1024, fp,
 	    "Invalid sparemap file:  can't find header line\n"))
     return(NULL);
-  if (buf[strlen(buf)-1] == '\n')
-    buf[strlen(buf)-1] = '\0';
+  if ((p = strchr(buf, '\n')) != NULL)
+    *p = '\0';
 
 	snprintf(targString, sizeof targString, "fdisk %d\n", req->fcol);
 	snprintf(errString, sizeof errString,

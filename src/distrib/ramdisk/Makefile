@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.26 2004/02/28 04:53:30 jolan Exp $
+#	$OpenBSD: Makefile,v 1.28 2007/02/16 16:56:22 tsi Exp $
 
 REV=		${OSrev}
 
@@ -87,8 +87,6 @@ bsd:
 	cd ${.CURDIR}/../../sys/arch/${MACHINE}/conf && config ${KERNEL}
 	cd ${.CURDIR}/../../sys/arch/${MACHINE}/compile/${KERNEL} && \
 	    make depend && make clean && COPTS=-Os make
-#	cd ${.CURDIR}/../../sys/arch/${MACHINE}/compile/${KERNEL} && \
-#	    make depend && make clean && make
 	cp ${.CURDIR}/../../sys/arch/${MACHINE}/compile/${KERNEL}/bsd bsd
 
 bsd.rd:	bsd ${IMAGE} ${RDSETROOT}
@@ -97,7 +95,7 @@ bsd.rd:	bsd ${IMAGE} ${RDSETROOT}
 	${STRIP} bsd.rd
 
 bsd.gz:	bsd.rd
-	${GZIP} ${GZIPFLAGS} < bsd.rd > bsd.gz
+	${GZIPCMD} ${GZIPFLAGS} < bsd.rd > bsd.gz
 
 ${RDSETROOT}: ${.CURDIR}/../common/${RDSETROOT}.c
 	${HOSTCC} ${HOSTCCFLAGS} -o ${RDSETROOT} ${.CURDIR}/../common/${RDSETROOT}.c

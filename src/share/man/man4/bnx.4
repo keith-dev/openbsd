@@ -1,4 +1,4 @@
-.\"	$OpenBSD: bnx.4,v 1.9 2006/08/30 22:56:05 jmc Exp $
+.\"	$OpenBSD: bnx.4,v 1.14 2007/01/27 12:38:59 krw Exp $
 .\"
 .\"Copyright (c) 2006 Broadcom Corporation
 .\" David Christensen <davidch@broadcom.com>.  All rights reserved.
@@ -58,6 +58,8 @@ HP NC370T PCI-X Multifunction Gigabit server adapter (10/100/1000baseT)
 .It
 HP NC373F PCI Express Multifunction Gigabit server adapter (1000baseSX)
 .It
+HP NC373i PCI Express Multifunction Gigabit embedded server adapter (10/100/1000baseT)
+.It
 HP NC380T PCI Express Dual Port Multifunction Gigabit server adapter (10/100/1000baseT)
 .It
 IBM xSeries 3550 integrated BCM5708 NIC (10/100/1000baseT)
@@ -75,9 +77,10 @@ The following features are supported in the
 driver under
 .Ox :
 .Bd -literal -offset indent
+IPv4 transmit TCP/UDP checksum offload
 IPv4 receive IP/TCP/UDP checksum offload
 Jumbo frames (up to 9022 bytes)
-.\" VLAN tagging
+VLAN tag insertion
 Interrupt coalescing
 10/100/1000Mbps operation in full-duplex mode
 10/100Mbps operation in half-duplex mode
@@ -131,6 +134,13 @@ Force half duplex operation.
 .Pp
 For more information on configuring this device, see
 .Xr ifconfig 8 .
+.Sh FILES
+The adapter needs a firmware file, which is loaded on demand by the
+driver when the device is attached:
+.Pp
+.Bl -tag -width Ds -offset indent -compact
+.It Pa /etc/firmware/bnx
+.El
 .Sh SEE ALSO
 .Xr arp 4 ,
 .Xr brgphy 4 ,

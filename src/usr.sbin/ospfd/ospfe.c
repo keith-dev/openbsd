@@ -1,4 +1,4 @@
-/*	$OpenBSD: ospfe.c,v 1.47 2006/06/02 18:49:55 norby Exp $ */
+/*	$OpenBSD: ospfe.c,v 1.53 2007/02/26 12:16:18 norby Exp $ */
 
 /*
  * Copyright (c) 2005 Claudio Jeker <claudio@openbsd.org>
@@ -48,7 +48,7 @@ void		 ospfe_shutdown(void);
 void		 orig_rtr_lsa_all(struct area *);
 struct iface	*find_vlink(struct abr_rtr *);
 
-struct ospfd_conf	*oeconf = NULL;
+struct ospfd_conf	*oeconf = NULL, *nconf;
 struct imsgbuf		*ibuf_main;
 struct imsgbuf		*ibuf_rde;
 
@@ -71,8 +71,8 @@ pid_t
 ospfe(struct ospfd_conf *xconf, int pipe_parent2ospfe[2], int pipe_ospfe2rde[2],
     int pipe_parent2rde[2])
 {
-	struct area	*area = NULL;
-	struct iface	*iface = NULL;
+	struct area	*area;
+	struct iface	*iface;
 	struct redistribute *r;
 	struct passwd	*pw;
 	struct event	 ev_sigint, ev_sigterm;
@@ -97,16 +97,12 @@ ospfe(struct ospfd_conf *xconf, int pipe_parent2ospfe[2], int pipe_ospfe2rde[2],
 		fatal("error creating raw socket");
 
 	/* set some defaults */
-	if (if_set_mcast_ttl(xconf->ospf_socket,
-	    IP_DEFAULT_MULTICAST_TTL) == -1)
-		fatal("if_set_mcast_ttl");
-
 	if (if_set_mcast_loop(xconf->ospf_socket) == -1)
 		fatal("if_set_mcast_loop");
-
-	if (if_set_tos(xconf->ospf_socket, IPTOS_PREC_INTERNETCONTROL) == -1)
-		fatal("if_set_tos");
-
+	if (if_set_ip_hdrincl(xconf->ospf_socket) == -1)
+		fatal("if_set_ip_hdrincl");
+	if (if_set_recvif(xconf->ospf_socket, 1) == -1)
+		fatal("if_set_recvif");
 	if_set_recvbuf(xconf->ospf_socket);
 
 	oeconf = xconf;
@@ -248,11 +244,14 @@ ospfe_imsg_compose_rde(int type, u_int32_t peerid, pid_t pid,
 void
 ospfe_dispatch_main(int fd, short event, void *bula)
 {
+	static struct area	*narea;
+	static struct iface	*niface;
 	struct imsg	 imsg;
 	struct imsgbuf  *ibuf = bula;
 	struct area	*area = NULL;
 	struct iface	*iface = NULL;
 	struct kif	*kif;
+	struct auth_md	 md;
 	int		 n, link_ok;
 
 	switch (event) {
@@ -284,7 +283,7 @@ ospfe_dispatch_main(int fd, short event, void *bula)
 				fatalx("IFINFO imsg with wrong len");
 			kif = imsg.data;
 			link_ok = (kif->flags & IFF_UP) &&
-			    (kif->link_state == LINK_STATE_UP ||
+			    (LINK_STATE_IS_UP(kif->link_state) ||
 			    (kif->link_state == LINK_STATE_UNKNOWN &&
 			    kif->media_type != IFT_CARP));
 
@@ -313,6 +312,46 @@ ospfe_dispatch_main(int fd, short event, void *bula)
 					}
 				}
 			}
+			break;
+		case IMSG_RECONF_CONF:
+			if ((nconf = malloc(sizeof(struct ospfd_conf))) ==
+			    NULL)
+				fatal(NULL);
+			memcpy(nconf, imsg.data, sizeof(struct ospfd_conf));
+
+			LIST_INIT(&nconf->area_list);
+			LIST_INIT(&nconf->cand_list);
+			break;
+		case IMSG_RECONF_AREA:
+			if ((narea = area_new()) == NULL)
+				fatal(NULL);
+			memcpy(narea, imsg.data, sizeof(struct area));
+
+			LIST_INIT(&narea->iface_list);
+			LIST_INIT(&narea->nbr_list);
+			RB_INIT(&narea->lsa_tree);
+
+			LIST_INSERT_HEAD(&nconf->area_list, narea, entry);
+			break;
+		case IMSG_RECONF_IFACE:
+			if ((niface = malloc(sizeof(struct iface))) == NULL)
+				fatal(NULL);
+			memcpy(niface, imsg.data, sizeof(struct iface));
+
+			LIST_INIT(&niface->nbr_list);
+			TAILQ_INIT(&niface->ls_ack_list);
+			TAILQ_INIT(&niface->auth_md_list);
+
+			niface->area = narea;
+			LIST_INSERT_HEAD(&narea->iface_list, niface, entry);
+			break;
+		case IMSG_RECONF_AUTHMD:
+			memcpy(&md, imsg.data, sizeof(struct auth_md));
+			md_list_add(&niface->auth_md_list, md.keyid, md.key);
+			break;
+		case IMSG_RECONF_END:
+			merge_config(oeconf, nconf);
+			nconf = NULL;
 			break;
 		case IMSG_CTL_KROUTE:
 		case IMSG_CTL_KROUTE_ADDR:
@@ -373,8 +412,7 @@ ospfe_dispatch_rde(int fd, short event, void *bula)
 		case IMSG_DD:
 			nbr = nbr_find_peerid(imsg.hdr.peerid);
 			if (nbr == NULL)
-				fatalx("ospfe_dispatch_rde: "
-				    "neighbor not found");
+				break;
 
 			/* put these on my ls_req_list for retrieval */
 			lhp = lsa_hdr_new();
@@ -384,8 +422,7 @@ ospfe_dispatch_rde(int fd, short event, void *bula)
 		case IMSG_DD_END:
 			nbr = nbr_find_peerid(imsg.hdr.peerid);
 			if (nbr == NULL)
-				fatalx("ospfe_dispatch_rde: "
-				    "neighbor not found");
+				break;
 
 			nbr->dd_pending--;
 			if (nbr->dd_pending == 0 && nbr->state & NBR_STA_LOAD) {
@@ -398,8 +435,7 @@ ospfe_dispatch_rde(int fd, short event, void *bula)
 		case IMSG_DB_SNAPSHOT:
 			nbr = nbr_find_peerid(imsg.hdr.peerid);
 			if (nbr == NULL)
-				fatalx("ospfe_dispatch_rde: "
-				    "neighbor not found");
+				break;
 
 			/* add LSA header to the neighbor db_sum_list */
 			lhp = lsa_hdr_new();
@@ -409,8 +445,7 @@ ospfe_dispatch_rde(int fd, short event, void *bula)
 		case IMSG_DB_END:
 			nbr = nbr_find_peerid(imsg.hdr.peerid);
 			if (nbr == NULL)
-				fatalx("ospfe_dispatch_rde: "
-				    "neighbor not found");
+				break;
 
 			/* snapshot done, start tx of dd packets */
 			nbr_fsm(nbr, NBR_EVT_SNAP_DONE);
@@ -418,8 +453,7 @@ ospfe_dispatch_rde(int fd, short event, void *bula)
 		case IMSG_LS_FLOOD:
 			nbr = nbr_find_peerid(imsg.hdr.peerid);
 			if (nbr == NULL)
-				fatalx("ospfe_dispatch_rde: "
-				    "neighbor not found");
+				break;
 
 			l = imsg.hdr.len - IMSG_HEADER_SIZE;
 			if (l < sizeof(lsa_hdr))
@@ -496,8 +530,7 @@ ospfe_dispatch_rde(int fd, short event, void *bula)
 
 			nbr = nbr_find_peerid(imsg.hdr.peerid);
 			if (nbr == NULL)
-				fatalx("ospfe_dispatch_rde: "
-				    "neighbor not found");
+				break;
 
 			if (nbr->iface->self == nbr)
 				break;
@@ -522,8 +555,7 @@ ospfe_dispatch_rde(int fd, short event, void *bula)
 			 */
 			nbr = nbr_find_peerid(imsg.hdr.peerid);
 			if (nbr == NULL)
-				fatalx("ospfe_dispatch_rde: "
-				    "neighbor not found");
+				break;
 
 			if (nbr->iface->self == nbr)
 				break;
@@ -548,8 +580,7 @@ ospfe_dispatch_rde(int fd, short event, void *bula)
 		case IMSG_LS_BADREQ:
 			nbr = nbr_find_peerid(imsg.hdr.peerid);
 			if (nbr == NULL)
-				fatalx("ospfe_dispatch_rde: "
-				    "neighbor not found");
+				break;
 
 			if (nbr->iface->self == nbr)
 				fatalx("ospfe_dispatch_rde: "
@@ -673,6 +704,7 @@ orig_rtr_lsa(struct area *area)
 			rtr_link.id = iface->addr.s_addr;
 			rtr_link.data = 0xffffffff;
 			rtr_link.type = LINK_TYPE_STUB_NET;
+			rtr_link.metric = htons(iface->metric);
 			num_links++;
 			if (buf_add(buf, &rtr_link, sizeof(rtr_link)))
 				fatalx("orig_rtr_lsa: buf_add failed");
@@ -739,7 +771,7 @@ orig_rtr_lsa(struct area *area)
 
 			if ((iface->flags & IFF_UP) == 0 ||
 			    iface->linkstate == LINK_STATE_DOWN ||
-			    (iface->linkstate != LINK_STATE_UP &&
+			    (!LINK_STATE_IS_UP(iface->linkstate) &&
 			    iface->media_type == IFT_CARP))
 				continue;
 

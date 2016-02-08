@@ -1,4 +1,4 @@
-/*	$OpenBSD: ospfe.h,v 1.31 2006/06/02 18:49:55 norby Exp $ */
+/*	$OpenBSD: ospfe.h,v 1.34 2007/02/01 12:41:03 claudio Exp $ */
 
 /*
  * Copyright (c) 2004, 2005 Esben Norby <norby@openbsd.org>
@@ -100,6 +100,7 @@ int		 auth_gen(struct buf *, struct iface *);
 void		 md_list_add(struct auth_md_head *, u_int8_t, char *);
 void		 md_list_copy(struct auth_md_head *, struct auth_md_head *);
 void		 md_list_clr(struct auth_md_head *);
+int		 md_list_send(struct auth_md_head *, struct imsgbuf *);
 
 /* database.c */
 int	 send_db_description(struct nbr *);
@@ -132,7 +133,7 @@ void		 orig_net_lsa(struct iface *);
 /* interface.c */
 int		 if_fsm(struct iface *, enum iface_event);
 
-struct iface	*if_new(struct kif *);
+struct iface	*if_new(struct kif *, struct kif_addr *);
 void		 if_del(struct iface *);
 void		 if_init(struct ospfd_conf *, struct iface *);
 
@@ -145,10 +146,10 @@ struct ctl_iface	*if_to_ctl(struct iface *);
 int	 if_join_group(struct iface *, struct in_addr *);
 int	 if_leave_group(struct iface *, struct in_addr *);
 int	 if_set_mcast(struct iface *);
-int	 if_set_mcast_ttl(int, u_int8_t);
-int	 if_set_tos(int, int);
+int	 if_set_recvif(int, int);
 void	 if_set_recvbuf(int);
 int	 if_set_mcast_loop(int);
+int	 if_set_ip_hdrincl(int);
 
 /* lsack.c */
 int	 delay_lsa_ack(struct iface *, struct lsa_hdr *);

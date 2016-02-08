@@ -1,4 +1,4 @@
-/*	$OpenBSD: parse.y,v 1.108 2006/06/18 18:18:01 hshoexer Exp $	*/
+/*	$OpenBSD: parse.y,v 1.121 2007/02/26 14:40:09 todd Exp $	*/
 
 /*
  * Copyright (c) 2002, 2003, 2004 Henning Brauer <henning@openbsd.org>
@@ -104,7 +104,7 @@ const struct ipsec_xf groupxfs[] = {
 	{ "modp4096",		GROUPXF_4096,		4096,	0 },
 	{ "grp16",		GROUPXF_4096,		4096,	0 },
 	{ "modp6144",		GROUPXF_6144,		6144,	0 },
-	{ "grp18",		GROUPXF_6144,		6144,	0 },
+	{ "grp17",		GROUPXF_6144,		6144,	0 },
 	{ "modp8192",		GROUPXF_8192,		8192,	0 },
 	{ "grp18",		GROUPXF_8192,		8192,	0 },
 	{ NULL,			0,			0,	0 },
@@ -139,7 +139,7 @@ struct ipsec_key	*parsekeyfile(char *);
 struct ipsec_addr_wrap	*host(const char *);
 struct ipsec_addr_wrap	*host_v6(const char *, int);
 struct ipsec_addr_wrap	*host_v4(const char *, int);
-struct ipsec_addr_wrap	*host_dns(const char *, int, int);
+struct ipsec_addr_wrap	*host_dns(const char *, int);
 struct ipsec_addr_wrap	*host_if(const char *, int);
 void			 ifa_load(void);
 int			 ifa_exists(const char *);
@@ -154,7 +154,10 @@ struct ipsec_auth	*copyipsecauth(const struct ipsec_auth *);
 struct ike_auth		*copyikeauth(const struct ike_auth *);
 struct ipsec_key	*copykey(struct ipsec_key *);
 struct ipsec_addr_wrap	*copyhost(const struct ipsec_addr_wrap *);
+char			*copytag(const char *);
 struct ipsec_rule	*copyrule(struct ipsec_rule *);
+int			 validate_af(struct ipsec_addr_wrap *,
+			    struct ipsec_addr_wrap *);
 int			 validate_sa(u_int32_t, u_int8_t,
 			     struct ipsec_transforms *, struct ipsec_key *,
 			     struct ipsec_key *, u_int8_t);
@@ -169,13 +172,14 @@ struct ipsec_rule	*create_sagroup(struct ipsec_addr_wrap *, u_int8_t,
 struct ipsec_rule	*create_flow(u_int8_t, u_int8_t, struct ipsec_hosts *,
 			     struct ipsec_hosts *, u_int8_t, char *, char *,
 			     u_int8_t);
+void			 expand_any(struct ipsec_addr_wrap *);
 int			 expand_rule(struct ipsec_rule *, u_int8_t, u_int32_t,
 			     struct ipsec_key *, struct ipsec_key *, int);
 struct ipsec_rule	*reverse_rule(struct ipsec_rule *);
 struct ipsec_rule	*create_ike(u_int8_t, struct ipsec_hosts *,
 			     struct ipsec_hosts *, struct ike_mode *,
 			     struct ike_mode *, u_int8_t, u_int8_t, u_int8_t,
-			     char *, char *, struct ike_auth *);
+			     char *, char *, struct ike_auth *, char *);
 int			 add_sagroup(struct ipsec_rule *);
 
 struct ipsec_transforms *ipsec_transforms;
@@ -219,8 +223,7 @@ typedef struct {
 		} keys;
 		struct ipsec_transforms *transforms;
 		struct ipsec_life	*life;
-		struct ike_mode		*mainmode;
-		struct ike_mode		*quickmode;
+		struct ike_mode		*mode;
 	} v;
 	int lineno;
 } YYSTYPE;
@@ -228,9 +231,9 @@ typedef struct {
 %}
 
 %token	FLOW FROM ESP AH IN PEER ON OUT TO SRCID DSTID RSA PSK TCPMD5 SPI
-%token	AUTHKEY ENCKEY FILENAME AUTHXF ENCXF ERROR IKE MAIN QUICK PASSIVE
-%token	ACTIVE ANY IPIP IPCOMP COMPXF TUNNEL TRANSPORT DYNAMIC LIFE
-%token	TYPE DENY BYPASS LOCAL PROTO USE ACQUIRE REQUIRE DONTACQ GROUP PORT
+%token	AUTHKEY ENCKEY FILENAME AUTHXF ENCXF ERROR IKE MAIN QUICK AGGRESSIVE
+%token	PASSIVE ACTIVE ANY IPIP IPCOMP COMPXF TUNNEL TRANSPORT DYNAMIC LIFE
+%token	TYPE DENY BYPASS LOCAL PROTO USE ACQUIRE REQUIRE DONTACQ GROUP PORT TAG
 %token	<v.string>		STRING
 %type	<v.string>		string
 %type	<v.dir>			dir
@@ -254,8 +257,8 @@ typedef struct {
 %type	<v.ikeauth>		ikeauth
 %type	<v.type>		type
 %type	<v.life>		life
-%type	<v.mainmode>		mainmode
-%type	<v.quickmode>		quickmode
+%type	<v.mode>		phase1mode phase2mode
+%type	<v.string>		tag
 %%
 
 grammar		: /* empty */
@@ -297,7 +300,6 @@ tcpmd5rule	: TCPMD5 hosts spispec authkeyspec	{
 			    $3.spiout, NULL, $4.keyout, NULL);
 			if (r == NULL)
 				YYERROR;
-			r->nr = ipsec->rule_nr++;
 
 			if (expand_rule(r, 0, $3.spiin, $4.keyin, NULL, 0))
 				errx(1, "tcpmd5rule: expand_rule");
@@ -312,7 +314,6 @@ sarule		: satype tmode hosts spispec transforms authkeyspec
 			    $7.keyout);
 			if (r == NULL)
 				YYERROR;
-			r->nr = ipsec->rule_nr++;
 
 			if (expand_rule(r, 0, $4.spiin, $6.keyin, $7.keyin, 1))
 				errx(1, "sarule: expand_rule");
@@ -332,15 +333,14 @@ flowrule	: FLOW satype dir proto hosts peers ids type {
 		}
 		;
 
-ikerule		: IKE ikemode satype tmode proto hosts peers mainmode quickmode
-		    ids ikeauth {
+ikerule		: IKE ikemode satype tmode proto hosts peers
+		    phase1mode phase2mode ids ikeauth tag {
 			struct ipsec_rule	*r;
 
 			r = create_ike($5, &$6, &$7, $8, $9, $3, $4, $2,
-			    $10.srcid, $10.dstid, &$11);
+			    $10.srcid, $10.dstid, &$11, $12);
 			if (r == NULL)
 				YYERROR;
-			r->nr = ipsec->rule_nr++;
 
 			if (expand_rule(r, 0, 0, NULL, NULL, 0))
 				errx(1, "ikerule: expand_rule");
@@ -492,21 +492,8 @@ host		: STRING			{
 			ipa = calloc(1, sizeof(struct ipsec_addr_wrap));
 			if (ipa == NULL)
 				err(1, "host: calloc");
-
-			ipa->af = AF_INET;
+			ipa->af = AF_UNSPEC;
 			ipa->netaddress = 1;
-			if ((ipa->name = strdup("0.0.0.0/0")) == NULL)
-				err(1, "host: strdup");
-
-			ipa->next = calloc(1, sizeof(struct ipsec_addr_wrap));
-			if (ipa->next == NULL)
-				err(1, "host: calloc");
-
-			ipa->next->af = AF_INET6;
-			ipa->next->netaddress = 1;
-			if ((ipa->next->name = strdup("::/0")) == NULL)
-				err(1, "host: strdup");
-
 			$$ = ipa;
 		}
 		| '{' host_list '}'		{ $$ = $2; }
@@ -643,41 +630,55 @@ transform	: AUTHXF STRING			{
 		}
 		;
 
-mainmode	: /* empty */			{
-			struct ike_mode		*mm;
+phase1mode	: /* empty */	{
+			struct ike_mode		*p1;
 
-			/* We create just an empty mode */
-			if ((mm = calloc(1, sizeof(struct ike_mode))) == NULL)
-				err(1, "mainmode: calloc");
-			$$ = mm;
+			/* We create just an empty main mode */
+			if ((p1 = calloc(1, sizeof(struct ike_mode))) == NULL)
+				err(1, "phase1mode: calloc");
+			p1->ike_exch = IKE_MM;
+			$$ = p1;
 		}
 		| MAIN transforms life		{
-			struct ike_mode	*mm;
+			struct ike_mode	*p1;
 
-			if ((mm = calloc(1, sizeof(struct ike_mode))) == NULL)
-				err(1, "mainmode: calloc");
-			mm->xfs = $2;
-			mm->life = $3;
-			$$ = mm;
+			if ((p1 = calloc(1, sizeof(struct ike_mode))) == NULL)
+				err(1, "phase1mode: calloc");
+			p1->xfs = $2;
+			p1->life = $3;
+			p1->ike_exch = IKE_MM;
+			$$ = p1;
+		}
+		| AGGRESSIVE transforms life		{
+			struct ike_mode	*p1;
+
+			if ((p1 = calloc(1, sizeof(struct ike_mode))) == NULL)
+				err(1, "phase1mode: calloc");
+			p1->xfs = $2;
+			p1->life = $3;
+			p1->ike_exch = IKE_AM;
+			$$ = p1;
 		}
 		;
 
-quickmode	: /* empty */			{
-			struct ike_mode		*qm;
+phase2mode	: /* empty */	{
+			struct ike_mode		*p2;
 
-			/* We create just an empty mode */
-			if ((qm = calloc(1, sizeof(struct ike_mode))) == NULL)
-				err(1, "quickmode: calloc");
-			$$ = qm;
+			/* We create just an empty quick mode */
+			if ((p2 = calloc(1, sizeof(struct ike_mode))) == NULL)
+				err(1, "phase1mode: calloc");
+			p2->ike_exch = IKE_QM;
+			$$ = p2;
 		}
 		| QUICK transforms life		{
-			struct ike_mode	*qm;
+			struct ike_mode	*p2;
 
-			if ((qm = calloc(1, sizeof(struct ike_mode))) == NULL)
-				err(1, "quickmode: calloc");
-			qm->xfs = $2;
-			qm->life = $3;
-			$$ = qm;
+			if ((p2 = calloc(1, sizeof(struct ike_mode))) == NULL)
+				err(1, "phase1mode: calloc");
+			p2->xfs = $2;
+			p2->life = $3;
+			p2->ike_exch = IKE_QM;
+			$$ = p2;
 		}
 		;
 
@@ -775,6 +776,16 @@ ikeauth		: /* empty */			{
 		}
 		;
 
+tag		: /* empty */
+		{
+			$$ = NULL;
+		}
+		| TAG STRING
+		{
+			$$ = $2;
+		}
+		;
+
 string		: string STRING
 		{
 			if (asprintf(&$$, "%s %s", $1, $2) == -1)
@@ -831,6 +842,7 @@ lookup(char *s)
 	static const struct keywords keywords[] = {
 		{ "acquire",		ACQUIRE },
 		{ "active",		ACTIVE },
+		{ "aggressive",		AGGRESSIVE },
 		{ "ah",			AH },
 		{ "any",		ANY },
 		{ "auth",		AUTHXF },
@@ -866,6 +878,7 @@ lookup(char *s)
 		{ "rsa",		RSA },
 		{ "spi",		SPI },
 		{ "srcid",		SRCID },
+		{ "tag",		TAG },
 		{ "tcpmd5",		TCPMD5 },
 		{ "to",			TO },
 		{ "transport",		TRANSPORT },
@@ -1268,7 +1281,7 @@ struct ipsec_addr_wrap *
 host(const char *s)
 {
 	struct ipsec_addr_wrap	*ipa = NULL;
-	int			 mask, v4mask, cont = 1;
+	int			 mask, cont = 1;
 	char			*p, *q, *ps;
 
 	if ((p = strrchr(s, '/')) != NULL) {
@@ -1279,11 +1292,9 @@ host(const char *s)
 		if ((ps = malloc(strlen(s) - strlen(p) + 1)) == NULL)
 			err(1, "host: calloc");
 		strlcpy(ps, s, strlen(s) - strlen(p) + 1);
-		v4mask = mask;
 	} else {
 		if ((ps = strdup(s)) == NULL)
 			err(1, "host: strdup");
-		v4mask = 32;
 		mask = -1;
 	}
 
@@ -1292,7 +1303,7 @@ host(const char *s)
 		cont = 0;
 
 	/* IPv4 address? */
-	if (cont && (ipa = host_v4(s, v4mask)) != NULL)
+	if (cont && (ipa = host_v4(s, mask == -1 ? 32 : mask)) != NULL)
 		cont = 0;
 
 	/* IPv6 address? */
@@ -1300,7 +1311,7 @@ host(const char *s)
 		cont = 0;
 
 	/* dns lookup */
-	if (cont && (ipa = host_dns(s, v4mask, 0)) != NULL)
+	if (cont && mask == -1 && (ipa = host_dns(s, mask)) != NULL)
 		cont = 0;
 	free(ps);
 
@@ -1315,27 +1326,24 @@ struct ipsec_addr_wrap *
 host_v6(const char *s, int prefixlen)
 {
 	struct ipsec_addr_wrap	*ipa = NULL;
-	struct addrinfo		 hints, *res0, *res;
+	struct addrinfo		 hints, *res;
 	char			 hbuf[NI_MAXHOST];
 
 	bzero(&hints, sizeof(struct addrinfo));
-	hints.ai_family = PF_UNSPEC;
+	hints.ai_family = AF_INET6;
 	hints.ai_socktype = SOCK_STREAM;
 	hints.ai_flags = AI_NUMERICHOST;
-	if (getaddrinfo(s, NULL, &hints, &res0))
+	if (getaddrinfo(s, NULL, &hints, &res))
 		return (NULL);
+	if (res->ai_next)
+		err(1, "host_v6: numeric hostname expanded to multiple item");
 
-	for (res = res0; res; res = res->ai_next) {
-		if (res->ai_family != AF_INET6)
-			continue;
-		break; /* found one */
-	}
 	ipa = calloc(1, sizeof(struct ipsec_addr_wrap));
 	if (ipa == NULL)
-		err(1, "host_addr: calloc");
+		err(1, "host_v6: calloc");
 	ipa->af = res->ai_family;
 	memcpy(&ipa->address.v6,
-	    &((struct sockaddr_in6 *)res->ai_addr)->sin6_addr.s6_addr,
+	    &((struct sockaddr_in6 *)res->ai_addr)->sin6_addr,
 	    sizeof(struct in6_addr));
 	if (prefixlen > 128)
 		prefixlen = 128;
@@ -1354,9 +1362,9 @@ host_v6(const char *s, int prefixlen)
 	} else
 		ipa->name = strdup(hbuf);
 	if (ipa->name == NULL)
-		err(1, "host_dns: strdup");
+		err(1, "host_v6: strdup");
 
-	freeaddrinfo(res0);
+	freeaddrinfo(res);
 
 	return (ipa);
 }
@@ -1397,12 +1405,12 @@ host_v4(const char *s, int mask)
 }
 
 struct ipsec_addr_wrap *
-host_dns(const char *s, int v4mask, int v6mask)
+host_dns(const char *s, int mask)
 {
 	struct ipsec_addr_wrap	*ipa = NULL;
 	struct addrinfo		 hints, *res0, *res;
 	int			 error;
-	int			 bits = 32;
+	char			 hbuf[NI_MAXHOST];
 
 	bzero(&hints, sizeof(struct addrinfo));
 	hints.ai_family = PF_UNSPEC;
@@ -1412,24 +1420,52 @@ host_dns(const char *s, int v4mask, int v6mask)
 		return (NULL);
 
 	for (res = res0; res; res = res->ai_next) {
-		if (res->ai_family != AF_INET)
+		if (res->ai_family != AF_INET && res->ai_family != AF_INET6)
 			continue;
+
 		ipa = calloc(1, sizeof(struct ipsec_addr_wrap));
 		if (ipa == NULL)
 			err(1, "host_dns: calloc");
-		memcpy(&ipa->address.v4,
-		    &((struct sockaddr_in *)res->ai_addr)->sin_addr.s_addr,
-		    sizeof(struct in_addr));
-		ipa->name = strdup(inet_ntoa(ipa->address.v4));
+		switch (res->ai_family) {
+		case AF_INET:
+			memcpy(&ipa->address.v4,
+			    &((struct sockaddr_in *)res->ai_addr)->sin_addr,
+			    sizeof(struct in_addr));
+			break;
+		case AF_INET6:
+			/* XXX we do not support scoped IPv6 address yet */
+			if (((struct sockaddr_in6 *)res->ai_addr)->sin6_scope_id) {
+				free(ipa);
+				continue;
+			}
+			memcpy(&ipa->address.v6,
+			    &((struct sockaddr_in6 *)res->ai_addr)->sin6_addr,
+			    sizeof(struct in6_addr));
+			break;
+		}
+		error = getnameinfo(res->ai_addr, res->ai_addrlen, hbuf,
+		    sizeof(hbuf), NULL, 0, NI_NUMERICHOST);
+		if (error)
+			err(1, "host_dns: getnameinfo");
+		ipa->name = strdup(hbuf);
 		if (ipa->name == NULL)
 			err(1, "host_dns: strdup");
-		ipa->af = AF_INET;
+		ipa->af = res->ai_family;
 		ipa->next = NULL;
 		ipa->tail = ipa;
 
-		set_ipmask(ipa, bits);
-		if (bits != (ipa->af == AF_INET ? 32 : 128))
-			ipa->netaddress = 1;
+		/*
+		 * XXX for now, no netmask support for IPv6.
+		 * but since there's no way to specify address family, once you
+		 * have IPv6 address on a host, you cannot use dns/netmask
+		 * syntax.
+		 */
+		if (ipa->af == AF_INET)
+			set_ipmask(ipa, mask == -1 ? 32 : mask);
+		else
+			if (mask != -1)
+				err(1, "host_dns: cannot apply netmask "
+				    "on non-IPv4 address");
 		break;
 	}
 	freeaddrinfo(res0);
@@ -1459,7 +1495,7 @@ ifa_load(void)
 	struct ipsec_addr_wrap	*n = NULL, *h = NULL;
 
 	if (getifaddrs(&ifap) < 0)
-		err(1, "ifa_load: getiffaddrs");
+		err(1, "ifa_load: getifaddrs");
 
 	for (ifa = ifap; ifa; ifa = ifa->ifa_next) {
 		if (!(ifa->ifa_addr->sa_family == AF_INET ||
@@ -1475,18 +1511,18 @@ ifa_load(void)
 		if (n->af == AF_INET) {
 			n->af = AF_INET;
 			memcpy(&n->address.v4, &((struct sockaddr_in *)
-			    ifa->ifa_addr)->sin_addr.s_addr,
+			    ifa->ifa_addr)->sin_addr,
 			    sizeof(struct in_addr));
 			memcpy(&n->mask.v4, &((struct sockaddr_in *)
-			    ifa->ifa_netmask)->sin_addr.s_addr,
+			    ifa->ifa_netmask)->sin_addr,
 			    sizeof(struct in_addr));
 		} else if (n->af == AF_INET6) {
 			n->af = AF_INET6;
 			memcpy(&n->address.v6, &((struct sockaddr_in6 *)
-			    ifa->ifa_addr)->sin6_addr.s6_addr,
+			    ifa->ifa_addr)->sin6_addr,
 			    sizeof(struct in6_addr));
 			memcpy(&n->mask.v6, &((struct sockaddr_in6 *)
-			    ifa->ifa_netmask)->sin6_addr.s6_addr,
+			    ifa->ifa_netmask)->sin6_addr,
 			    sizeof(struct in6_addr));
 		}
 		if ((n->name = strdup(ifa->ifa_name)) == NULL)
@@ -1607,8 +1643,7 @@ ifa_lookup(const char *ifa_name)
 			break;
 		case AF_INET6:
 			/* route/show.c and bgpd/util.c give KAME credit */
-			if (IN6_IS_ADDR_LINKLOCAL(&n->address.v6) ||
-			    IN6_IS_ADDR_MC_LINKLOCAL(&n->address.v6)) {
+			if (IN6_IS_ADDR_LINKLOCAL(&n->address.v6)) {
 				u_int16_t tmp16;
 				/* for now we can not handle link local,
 				 * therefore bail for now
@@ -1793,10 +1828,23 @@ copyhost(const struct ipsec_addr_wrap *src)
 
 	memcpy(dst, src, sizeof(struct ipsec_addr_wrap));
 
-	if ((dst->name = strdup(src->name)) == NULL)
+	if (src->name != NULL && (dst->name = strdup(src->name)) == NULL)
 		err(1, "copyhost: strdup");
 
 	return dst;
+}
+
+char *
+copytag(const char *src)
+{
+	char *tag;
+
+	if (src == NULL)
+		return (NULL);
+	if ((tag = strdup(src)) == NULL)
+		err(1, "copytag: strdup");
+
+	return (tag);
 }
 
 struct ipsec_rule *
@@ -1814,13 +1862,16 @@ copyrule(struct ipsec_rule *rule)
 	r->auth = copyipsecauth(rule->auth);
 	r->ikeauth = copyikeauth(rule->ikeauth);
 	r->xfs = copytransforms(rule->xfs);
-	r->mmxfs = copytransforms(rule->mmxfs);
-	r->qmxfs = copytransforms(rule->qmxfs);
-	r->mmlife = copylife(rule->mmlife);
-	r->qmlife = copylife(rule->qmlife);
+	r->p1xfs = copytransforms(rule->p1xfs);
+	r->p2xfs = copytransforms(rule->p2xfs);
+	r->p1life = copylife(rule->p1life);
+	r->p2life = copylife(rule->p2life);
 	r->authkey = copykey(rule->authkey);
 	r->enckey = copykey(rule->enckey);
+	r->tag = copytag(rule->tag);
 
+	r->p1ie = rule->p1ie;
+	r->p2ie = rule->p2ie;
 	r->type = rule->type;
 	r->satype = rule->satype;
 	r->proto = rule->proto;
@@ -1835,6 +1886,42 @@ copyrule(struct ipsec_rule *rule)
 
 	return (r);
 }
+
+int
+validate_af(struct ipsec_addr_wrap *src, struct ipsec_addr_wrap *dst)
+{
+	struct ipsec_addr_wrap *ta;
+	u_int8_t src_v4 = 0;
+	u_int8_t dst_v4 = 0;
+	u_int8_t src_v6 = 0;
+	u_int8_t dst_v6 = 0;
+
+	for (ta = src; ta; ta = ta->next) {
+		if (ta->af == AF_INET)
+			src_v4 = 1;
+		if (ta->af == AF_INET6)
+			src_v6 = 1;
+		if (ta->af == AF_UNSPEC)
+			return 0;
+		if (src_v4 && src_v6)
+			break;
+	}
+	for (ta = dst; ta; ta = ta->next) {
+		if (ta->af == AF_INET)
+			dst_v4 = 1;
+		if (ta->af == AF_INET6)
+			dst_v6 = 1;
+		if (ta->af == AF_UNSPEC)
+			return 0;
+		if (dst_v4 && dst_v6)
+			break;
+	}
+	if (src_v4 != dst_v4 && src_v6 != dst_v6)
+		return (1);
+
+	return (0);
+}
+
 
 int
 validate_sa(u_int32_t spi, u_int8_t satype, struct ipsec_transforms *xfs,
@@ -1904,11 +1991,11 @@ validate_sa(u_int32_t spi, u_int8_t satype, struct ipsec_transforms *xfs,
 		return (0);
 	}
 	if (xfs && xfs->authxf) {
-		if (!authkey) {
+		if (!authkey && xfs->authxf != &authxfs[AUTHXF_NONE]) {
 			yyerror("no authentication key specified");
 			return (0);
 		}
-		if (authkey->len != xfs->authxf->keymin) {
+		if (authkey && authkey->len != xfs->authxf->keymin) {
 			yyerror("wrong authentication key length, needs to be "
 			    "%d bits", xfs->authxf->keymin * 8);
 			return (0);
@@ -1945,7 +2032,8 @@ add_sagroup(struct ipsec_rule *r)
 	int			 found = 0;
 
 	TAILQ_FOREACH(rp, &ipsec->group_queue, group_entry) {
-		if (strcmp(rp->dst->name, r->dst->name) == 0) {
+		if ((strcmp(rp->src->name, r->src->name) == 0) &&
+		    (strcmp(rp->dst->name, r->dst->name) == 0)) {
 			found = 1;
 			break;
 		}
@@ -2125,6 +2213,33 @@ errout:
 	return NULL;
 }
 
+void
+expand_any(struct ipsec_addr_wrap *ipa_in)
+{
+	struct ipsec_addr_wrap *oldnext, *ipa;
+
+	for (ipa = ipa_in; ipa; ipa = ipa->next) {
+		if (ipa->af != AF_UNSPEC)
+			continue;
+		oldnext = ipa->next;
+
+		ipa->af = AF_INET;
+		ipa->netaddress = 1;
+		if ((ipa->name = strdup("0.0.0.0/0")) == NULL)
+			err(1, "expand_any: strdup");
+
+		ipa->next = calloc(1, sizeof(struct ipsec_addr_wrap));
+		if (ipa->next == NULL)
+			err(1, "expand_any: calloc");
+		ipa->next->af = AF_INET6;
+		ipa->next->netaddress = 1;
+		if ((ipa->next->name = strdup("::/0")) == NULL)
+			err(1, "expand_any: strdup");
+
+		ipa->next->next = oldnext;
+	}
+}
+
 int
 expand_rule(struct ipsec_rule *rule, u_int8_t direction, u_int32_t spi,
     struct ipsec_key *authkey, struct ipsec_key *enckey, int group)
@@ -2133,6 +2248,13 @@ expand_rule(struct ipsec_rule *rule, u_int8_t direction, u_int32_t spi,
 	struct ipsec_addr_wrap	*src, *dst;
 	int added = 0;
 
+	if (validate_af(rule->src, rule->dst)) {
+		yyerror("source/destination address families do not match");
+		goto errout;
+	}
+	expand_any(rule->src);
+	expand_any(rule->dst);
+	expand_any(rule->peer);
 	for (src = rule->src; src; src = src->next) {
 		for (dst = rule->dst; dst; dst = dst->next) {
 			if (src->af != dst->af)
@@ -2176,6 +2298,7 @@ expand_rule(struct ipsec_rule *rule, u_int8_t direction, u_int32_t spi,
 	}
 	if (!added)
 		yyerror("rule expands to no valid combination");
+ errout:
 	ipsecctl_free_rule(rule);
 	return (0);
 }
@@ -2228,9 +2351,9 @@ reverse_rule(struct ipsec_rule *rule)
 
 struct ipsec_rule *
 create_ike(u_int8_t proto, struct ipsec_hosts *hosts, struct ipsec_hosts *peers,
-    struct ike_mode *mainmode, struct ike_mode *quickmode,
-    u_int8_t satype, u_int8_t tmode, u_int8_t mode, char *srcid, char *dstid,
-    struct ike_auth *authtype)
+    struct ike_mode *phase1mode, struct ike_mode *phase2mode, u_int8_t satype,
+    u_int8_t tmode, u_int8_t mode, char *srcid, char *dstid,
+    struct ike_auth *authtype, char *tag)
 {
 	struct ipsec_rule *r;
 
@@ -2253,17 +2376,17 @@ create_ike(u_int8_t proto, struct ipsec_hosts *hosts, struct ipsec_hosts *peers,
 		hosts->src = NULL;
 		free(hosts->dst);
 		hosts->dst = NULL;
-		if (mainmode) {
-			free(mainmode->xfs);
-			mainmode->xfs = NULL;
-			free(mainmode->life);
-			mainmode->life = NULL;
+		if (phase1mode) {
+			free(phase1mode->xfs);
+			phase1mode->xfs = NULL;
+			free(phase1mode->life);
+			phase1mode->life = NULL;
 		}
-		if (quickmode) {
-			free(quickmode->xfs);
-			quickmode->xfs = NULL;
-			free(quickmode->life);
-			quickmode->life = NULL;
+		if (phase2mode) {
+			free(phase2mode->xfs);
+			phase2mode->xfs = NULL;
+			free(phase2mode->life);
+			phase2mode->life = NULL;
 		}
 		if (srcid)
 			free(srcid);
@@ -2294,14 +2417,21 @@ create_ike(u_int8_t proto, struct ipsec_hosts *hosts, struct ipsec_hosts *peers,
 	r->satype = satype;
 	r->tmode = tmode;
 	r->ikemode = mode;
-	if (mainmode) {
-		r->mmxfs = mainmode->xfs;
-		r->mmlife = mainmode->life;
+	if (phase1mode) {
+		r->p1xfs = phase1mode->xfs;
+		r->p1life = phase1mode->life;
+		r->p1ie = phase1mode->ike_exch;
+	} else {
+		r->p1ie = IKE_MM;
 	}
-	if (quickmode) {
-		r->qmxfs = quickmode->xfs;
-		r->qmlife = quickmode->life;
+	if (phase2mode) {
+		r->p2xfs = phase2mode->xfs;
+		r->p2life = phase2mode->life;
+		r->p2ie = phase2mode->ike_exch;
+	} else {
+		r->p2ie = IKE_QM;
 	}
+
 	r->auth = calloc(1, sizeof(struct ipsec_auth));
 	if (r->auth == NULL)
 		err(1, "create_ike: calloc");
@@ -2313,6 +2443,7 @@ create_ike(u_int8_t proto, struct ipsec_hosts *hosts, struct ipsec_hosts *peers,
 		err(1, "create_ike: calloc");
 	r->ikeauth->type = authtype->type;
 	r->ikeauth->string = authtype->string;
+	r->tag = tag;
 
 	return (r);
 }

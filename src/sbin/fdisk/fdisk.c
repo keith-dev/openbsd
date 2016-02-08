@@ -1,4 +1,4 @@
-/*	$OpenBSD: fdisk.c,v 1.43 2006/07/27 04:53:27 ray Exp $	*/
+/*	$OpenBSD: fdisk.c,v 1.46 2006/11/09 00:01:10 deraadt Exp $	*/
 
 /*
  * Copyright (c) 1997 Tobias Weingartner
@@ -42,18 +42,21 @@ static unsigned char builtin_mbr[] = {
 #include "mbrcode.h"
 };
 
+int	y_flag;
+
 static void
 usage(void)
 {
 	extern char * __progname;
 
 	fprintf(stderr, "usage: %s "
-	    "[-ieu] [-c cylinders -h heads -s sectors] [-f mbrfile] device\n"
+	    "[-ieuy] [-c cylinders -h heads -s sectors] [-f mbrfile] device\n"
 	    "\t-i: initialize disk with virgin MBR\n"
 	    "\t-u: update MBR code, preserve partition table\n"
 	    "\t-e: edit MBRs on disk interactively\n"
 	    "\t-f: specify non-standard MBR template\n"
 	    "\t-chs: specify disk geometry\n"
+	    "\t-y: do not ask questions\n"
 	    "`disk' may be of the forms: sd0 or /dev/rsd0c.\n",
 	    __progname);
 	exit(1);
@@ -68,7 +71,8 @@ main(int argc, char *argv[])
 	int c_arg = 0, h_arg = 0, s_arg = 0;
 	disk_t disk;
 	DISK_metrics *usermetrics;
-#if defined(__amd64__) || defined(__i386__) || defined (__powerpc__)
+#if defined(__amd64__) || defined(__i386__) || defined (__powerpc__) || \
+    defined(__sh__)
 	char *mbrfile = _PATH_MBR;
 #else
 	char *mbrfile = NULL;
@@ -76,7 +80,7 @@ main(int argc, char *argv[])
 	mbr_t mbr;
 	char mbr_buf[DEV_BSIZE];
 
-	while ((ch = getopt(argc, argv, "ieuf:c:h:s:")) != -1) {
+	while ((ch = getopt(argc, argv, "ieuf:c:h:s:y")) != -1) {
 		const char *errstr;
 
 		switch(ch) {
@@ -107,6 +111,9 @@ main(int argc, char *argv[])
 			s_arg = strtonum(optarg, 1, 63, &errstr);
 			if (errstr)
 				errx(1, "Sector argument %s [1..63].", errstr);
+			break;
+		case 'y':
+			y_flag = 1;
 			break;
 		default:
 			usage();

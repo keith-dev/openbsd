@@ -1,4 +1,4 @@
-/*	$OpenBSD: uthread_accept.c,v 1.8 2003/12/23 19:31:05 brad Exp $	*/
+/*	$OpenBSD: uthread_accept.c,v 1.11 2006/10/03 02:59:36 kurt Exp $	*/
 /*
  * Copyright (c) 1995-1998 John Birrell <jb@cimlogic.com.au>
  * All rights reserved.
@@ -46,6 +46,8 @@ accept(int fd, struct sockaddr * name, socklen_t *namelen)
 {
 	struct pthread	*curthread = _get_curthread();
 	int             ret;
+	int		newfd;
+	enum fd_entry_mode init_mode;
 
 	/* This is a cancellation point: */
 	_thread_enter_cancellation_point();
@@ -55,7 +57,7 @@ accept(int fd, struct sockaddr * name, socklen_t *namelen)
 		/* Enter a loop to wait for a connection request: */
 		while ((ret = _thread_sys_accept(fd, name, namelen)) < 0) {
 			/* Check if the socket is to block: */
-			if ((_thread_fd_table[fd]->flags & O_NONBLOCK) == 0 &&
+			if ((_thread_fd_table[fd]->status_flags->flags & O_NONBLOCK) == 0 &&
 			    (errno == EWOULDBLOCK || errno == EAGAIN)) {
 				/* Save the socket file descriptor: */
 				curthread->data.fd.fd = fd;
@@ -65,6 +67,7 @@ accept(int fd, struct sockaddr * name, socklen_t *namelen)
 				/* Set the timeout: */
 				_thread_kern_set_timeout(NULL);
 				curthread->interrupted = 0;
+				curthread->closing_fd = 0;
 
 				/* Schedule the next thread: */
 				_thread_kern_sched_state(PS_FDR_WAIT, __FILE__,
@@ -74,6 +77,11 @@ accept(int fd, struct sockaddr * name, socklen_t *namelen)
 				if (curthread->interrupted) {
 					/* Return an error status: */
 					errno = EINTR;
+					ret = -1;
+					break;
+				} else if (curthread->closing_fd) {
+					/* Return an error status: */
+					errno = EBADF;
 					ret = -1;
 					break;
 				}
@@ -88,17 +96,23 @@ accept(int fd, struct sockaddr * name, socklen_t *namelen)
 
 		/*
 		 * If no errors initialize the file descriptor table
-		 * for the new socket.   Turn on blocking mode in the
-		 * child if it is on in the parent.   This is done
-		 * as _thread_fd_table_init *may* have turned the flag on.
+		 * for the new socket. If the client's view of the
+		 * status_flags for fd is blocking, then force newfd
+		 * to be viewed as blocking too.
 		 */
 		if (ret != -1) {
-			if (_thread_fd_table_init(ret) != 0) {
-				/* Quietly close the socket: */
+			newfd = ret;
+
+			if ((_thread_fd_table[fd]->status_flags->flags & O_NONBLOCK) == 0)
+				init_mode = FD_INIT_BLOCKING;
+			else
+				init_mode = FD_INIT_NEW;
+			if((ret = _thread_fd_table_init(newfd, init_mode, NULL)) != -1)
+				ret = newfd;
+			else {
+				/* quitely close the fd */
 				_thread_sys_close(ret);
-				ret = -1;
-			} else if ((_thread_fd_table[fd]->flags & O_NONBLOCK) == 0)
-				_thread_fd_table[ret]->flags &= ~O_NONBLOCK;
+			}
 		}
 
 		/* Unlock the file descriptor: */

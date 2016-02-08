@@ -1,18 +1,18 @@
-#	$OpenBSD: Makefile,v 1.27 2005/01/13 22:27:13 deraadt Exp $
+#	$OpenBSD: Makefile,v 1.31 2006/11/11 22:21:40 deraadt Exp $
+
+SUBDIR=	special notes
 
 .if	make(obj)
-SUBDIR= special alpha crunch hp300 hppa i386 mac68k macppc mvme68k \
-	mvme88k mvmeppc sparc sparc64 vax amd64 cats sgi zaurus
-.elif	!make(install)
-SUBDIR= special
+SUBDIR+=crunch
+SUBDIR+=alpha amd64 armish cats hp300 hppa i386 landisk mac68k macppc \
+	mvme68k mvme88k mvmeppc sgi sparc sparc64 vax zaurus
+.elif exists(${MACHINE})
+SUBDIR+=${MACHINE}
 .endif
+
 .if	make(clean) || make(cleandir)
 SUBDIR+=crunch
 .endif
-.if exists(${MACHINE})
-SUBDIR+= ${MACHINE}
-.endif
-SUBDIR+= notes
 
 #all: crunch-tools _SUBDIRUSE
 

@@ -1,4 +1,4 @@
-/*	$OpenBSD: cvs.h,v 1.116 2006/07/07 17:37:17 joris Exp $	*/
+/*	$OpenBSD: cvs.h,v 1.134 2007/02/22 06:42:09 otto Exp $	*/
 /*
  * Copyright (c) 2004 Jean-Francois Brousseau <jfb@openbsd.org>
  * All rights reserved.
@@ -27,12 +27,15 @@
 #ifndef CVS_H
 #define CVS_H
 
-#include "rcs.h"
-#include "xmalloc.h"
-#include "util.h"
+#include <signal.h>
+
+#include "config.h"
 #include "file.h"
-#include "repository.h"
+#include "log.h"
 #include "worklist.h"
+#include "repository.h"
+#include "util.h"
+#include "xmalloc.h"
 
 #define CVS_VERSION_MINOR	"0"
 #define CVS_VERSION_MAJOR	"1"
@@ -175,6 +178,8 @@ struct cvs_var {
 	TAILQ_ENTRY(cvs_var) cv_link;
 };
 
+TAILQ_HEAD(, cvs_var) cvs_variables;
+
 #define CVS_ROOT_CONNECTED	0x01
 
 struct cvsroot {
@@ -285,6 +290,7 @@ extern int  cvs_cmdop;
 extern int  cvs_nocase;
 extern int  cvs_noexec;
 extern int  cvs_readonly;
+extern int  cvs_readonlyfs;
 extern int  cvs_error;
 extern int  cvs_server_active;
 
@@ -321,7 +327,7 @@ extern struct cvs_cmd cvs_cmd_watchers;
 
 /* cmd.c */
 struct cvs_cmd	*cvs_findcmd(const char *);
-struct cvs_cmd	*cvs_findcmdbyreq(int);
+struct cvs_cmd	*cvs_findcmdbyreq(u_int);
 
 /* cvs.c */
 int		 cvs_var_set(const char *, const char *);
@@ -342,29 +348,51 @@ void	 	cvs_ent_close(CVSENTRIES *, int);
 void		cvs_ent_free(struct cvs_ent *);
 int		cvs_ent_exists(CVSENTRIES *, const char *);
 void		cvs_parse_tagfile(char *, char **, char **, int *);
-void		cvs_write_tagfile(char *, char *, char *, int);
+void		cvs_write_tagfile(const char *, char *, char *, int);
 
 /* root.c */
 struct cvsroot	*cvsroot_parse(const char *);
 struct cvsroot	*cvsroot_get(const char *);
 void		 cvsroot_remove(struct cvsroot *);
 
+/* logmsg.c */
+char *	cvs_logmsg_read(const char *path);
+char *	cvs_logmsg_create(struct cvs_flisthead *, struct cvs_flisthead *,
+	struct cvs_flisthead *);
+
 /* misc stuff */
 void	cvs_update_local(struct cvs_file *);
 void	cvs_update_enterdir(struct cvs_file *);
 void	cvs_update_leavedir(struct cvs_file *);
-void	cvs_checkout_file(struct cvs_file *, RCSNUM *, BUF *, int);
+void	cvs_checkout_file(struct cvs_file *, RCSNUM *, int);
 int	update_has_conflict_markers(struct cvs_file *);
 
 #define CO_MERGE	0x01
 #define CO_SETSTICKY	0x02
 #define CO_DUMP		0x04
+#define CO_COMMIT	0x08
 
 /* commands */
+int	cvs_add(int, char **);
+int	cvs_admin(int, char **);
+int	cvs_annotate(int, char **);
+int	cvs_checkout(int, char **);
 int	cvs_commit(int, char **);
 int	cvs_diff(int, char **);
-int	cvs_status(int, char **);
-int	cvs_update(int, char **);
+int	cvs_edit(int, char **);
+int	cvs_editors(int, char **);
+int	cvs_export(int, char **);
 int	cvs_getlog(int, char **);
+int	cvs_import(int, char **);
+int	cvs_init(int, char **);
+int	cvs_remove(int, char **);
+int	cvs_status(int, char **);
+int	cvs_tag(int, char **);
+int	cvs_unedit(int, char **);
+int	cvs_update(int, char **);
+int	cvs_version(int, char **);
+int	cvs_watch(int, char **);
+int	cvs_watchers(int, char **);
+
 
 #endif

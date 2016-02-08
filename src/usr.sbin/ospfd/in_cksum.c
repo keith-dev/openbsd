@@ -1,4 +1,4 @@
-/*	$OpenBSD: in_cksum.c,v 1.4 2006/04/25 08:22:14 claudio Exp $	*/
+/*	$OpenBSD: in_cksum.c,v 1.6 2007/01/08 19:37:04 deraadt Exp $	*/
 /*	$NetBSD: in_cksum.c,v 1.3 1995/04/22 13:53:48 cgd Exp $	*/
 
 /*
@@ -17,11 +17,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Lawrence Berkeley Laboratory and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -55,7 +51,7 @@ u_int16_t
 in_cksum(void *p, size_t l)
 {
 	unsigned int sum = 0;
-	int len, oddbyte = 0, v = 0;
+	int len;
 	u_char *cp = p;
 
 	/* ensure that < 2^16 bytes being summed */
@@ -63,28 +59,24 @@ in_cksum(void *p, size_t l)
 		fatalx("in_cksum: packet to big");
 	len = (int)l;
 
-	while (len > 0) {
-		if (oddbyte) {
-			sum += v + *cp++;
-			len--;
+	if (((long)cp & 1) == 0) {
+		while (len > 1) {
+			sum += htons(*(u_short *)cp);
+			cp += 2;
+			len -= 2;
 		}
-		if (((long)cp & 1) == 0) {
-			while ((len -= 2) >= 0) {
-				sum += *(u_short *)cp;
-				cp += 2;
-			}
-		} else {
-			while ((len -= 2) >= 0) {
-				sum += *cp++ << 8;
-				sum += *cp++;
-			}
+	} else {
+		while (len > 1) {
+			sum += *cp++ << 8;
+			sum += *cp++;
+			len -= 2;
 		}
-		if ((oddbyte = len & 1) != 0)
-			v = *cp << 8;
 	}
-	if (oddbyte)
-		sum += v;
+	if (len == 1)
+		sum += *cp << 8;
+
 	sum = (sum >> 16) + (sum & 0xffff); /* add in accumulated carries */
 	sum += sum >> 16;		/* add potential last carry */
+	sum = ntohs(sum);
 	return (0xffff & ~sum);
 }

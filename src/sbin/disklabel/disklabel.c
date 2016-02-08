@@ -1,4 +1,4 @@
-/*	$OpenBSD: disklabel.c,v 1.98 2006/07/01 16:50:33 krw Exp $	*/
+/*	$OpenBSD: disklabel.c,v 1.105 2007/02/24 03:33:27 ray Exp $	*/
 
 /*
  * Copyright (c) 1987, 1993
@@ -39,7 +39,7 @@ static const char copyright[] =
 #endif /* not lint */
 
 #ifndef lint
-static const char rcsid[] = "$OpenBSD: disklabel.c,v 1.98 2006/07/01 16:50:33 krw Exp $";
+static const char rcsid[] = "$OpenBSD: disklabel.c,v 1.105 2007/02/24 03:33:27 ray Exp $";
 #endif /* not lint */
 
 #include <sys/param.h>
@@ -418,10 +418,7 @@ writelabel(int f, char *boot, struct disklabel *lp)
 		 * In this case, partition 'a' had better start at 0,
 		 * otherwise we reject the request as meaningless. -wfj
 		 */
-		if (dosdp && pp->p_size &&
-		    (dosdp->dp_typ == DOSPTYP_OPENBSD ||
-		    dosdp->dp_typ == DOSPTYP_FREEBSD ||
-		    dosdp->dp_typ == DOSPTYP_NETBSD)) {
+		if (dosdp && pp->p_size && (dosdp->dp_typ == DOSPTYP_OPENBSD)) {
 		        sectoffset = (off_t)letoh32(dosdp->dp_start) *
 			    lp->d_secsize;
 		} else {
@@ -624,24 +621,6 @@ readmbr(int f)
 			return (&dp[part]);
 		}
 	}
-	for (part = 0; part < NDOSPART; part++) {
-		if (letoh32(dp[part].dp_size) && dp[part].dp_typ == DOSPTYP_FREEBSD) {
-			fprintf(stderr, "# Inside MBR partition %d: "
-			    "type %02X start %u size %u\n",
-			    part, dp[part].dp_typ,
-			    letoh32(dp[part].dp_start), letoh32(dp[part].dp_size));
-			return (&dp[part]);
-		}
-	}
-	for (part = 0; part < NDOSPART; part++) {
-		if (letoh32(dp[part].dp_size) && dp[part].dp_typ == DOSPTYP_NETBSD) {
-			fprintf(stderr, "# Inside MBR partition %d: "
-			    "type %02X start %u size %u\n",
-			    part, dp[part].dp_typ,
-			    letoh32(dp[part].dp_start), letoh32(dp[part].dp_size));
-			return (&dp[part]);
-		}
-	}
 
 	/*
 	 * If there is no signature and no OpenBSD partition this is probably
@@ -677,9 +656,7 @@ readlabel(int f)
 
 #ifdef DOSLABEL
 		if (dosdp && letoh32(dosdp->dp_size) &&
-		    (dosdp->dp_typ == DOSPTYP_OPENBSD ||
-		    dosdp->dp_typ == DOSPTYP_FREEBSD ||
-		    dosdp->dp_typ == DOSPTYP_NETBSD))
+		    (dosdp->dp_typ == DOSPTYP_OPENBSD))
 			sectoffset = (off_t)letoh32(dosdp->dp_start) *
 			    DEV_BSIZE;
 #endif
@@ -1071,10 +1048,6 @@ display(FILE *f, struct disklabel *lp, char **mp, char unit, int edit,
 	fprintf(f, "label: %.*s\n", (int)sizeof(lp->d_packname), lp->d_packname);
 	if (!edit) {
 		fprintf(f, "flags:");
-		if (lp->d_flags & D_REMOVABLE)
-			fprintf(f, " removable");
-		if (lp->d_flags & D_ECC)
-			fprintf(f, " ecc");
 		if (lp->d_flags & D_BADSECT)
 			fprintf(f, " badsect");
 		putc('\n', f);
@@ -1285,7 +1258,7 @@ getnum(char *nptr, u_int32_t min, u_int32_t max, const char **errstr)
 }
 
 /*
- * Read an ascii label in from fd f,
+ * Read an ascii label in from FILE f,
  * in the same format as that put out by display(),
  * and fill in lp.
  */
@@ -1301,7 +1274,7 @@ getasciilabel(FILE *f, struct disklabel *lp)
 
 	lp->d_bbsize = BBSIZE;				/* XXX */
 	lp->d_sbsize = SBSIZE;				/* XXX */
-	while (fgets(line, sizeof(line) - 1, f)) {
+	while (fgets(line, sizeof(line), f)) {
 		lineno++;
 		if ((cp = strpbrk(line, "#\r\n")))
 			*cp = '\0';
@@ -1336,11 +1309,7 @@ getasciilabel(FILE *f, struct disklabel *lp)
 		if (!strcmp(cp, "flags")) {
 			for (v = 0; (cp = tp) && *cp != '\0';) {
 				tp = word(cp);
-				if (!strcmp(cp, "removable"))
-					v |= D_REMOVABLE;
-				else if (!strcmp(cp, "ecc"))
-					v |= D_ECC;
-				else if (!strcmp(cp, "badsect"))
+				if (!strcmp(cp, "badsect"))
 					v |= D_BADSECT;
 				else {
 					warnx("line %d: bad flag: %s",
@@ -1619,9 +1588,7 @@ checklabel(struct disklabel *lp)
 		lp->d_secperunit = lp->d_secpercyl * lp->d_ncylinders;
 #ifdef i386__notyet
 	if (dosdp && dosdp->dp_size &&
-	    (dosdp->dp_typ == DOSPTYP_OPENBSD ||
-	    dosdp->dp_typ == DOSPTYP_FREEBSD ||
-	    dosdp->dp_typ == DOSPTYP_NETBSD)) {
+	    (dosdp->dp_typ == DOSPTYP_OPENBSD)) {
 		&& lp->d_secperunit > dosdp->dp_start + dosdp->dp_size) {
 		warnx("exceeds DOS partition size");
 		errors++;

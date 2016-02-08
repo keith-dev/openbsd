@@ -1,4 +1,4 @@
-.\"	$OpenBSD: chflags.1,v 1.7 2005/10/15 08:42:14 jmc Exp $
+.\"	$OpenBSD: chflags.1,v 1.9 2007/02/25 09:47:43 jmc Exp $
 .\"	$NetBSD: chflags.1,v 1.4 1995/08/31 22:50:22 jtc Exp $
 .\"
 .\" Copyright (c) 1989, 1990, 1993, 1994
@@ -58,6 +58,12 @@ The
 .Ar flags
 of a file dictate special restrictions beyond those enforced by its
 mode/permissions.
+Only the superuser can change the user flags on block and
+character devices.
+.Pp
+You can use
+.Ic ls -lo
+to see the flags of existing files.
 .Pp
 The options are as follows:
 .Bl -tag -width Ds
@@ -92,15 +98,26 @@ uappnd	set the user append-only flag (owner or superuser only)
 uchg	set the user immutable flag (owner or superuser only)
 .Ed
 .Pp
+The
+.Dq arch
+and
+.Dq opaque
+flags are for compatibility only,
+and currently have no effect.
+.Pp
+A file with the
+.Dq nodump
+flag set will by default only be backed up by
+.Xr dump 8
+during full backups.
+The
+.Fl h
+option of
+.Xr dump 8
+can be used to alter this.
+.Pp
 An immutable file may not be changed, moved, or deleted.
 An append-only file is immutable except that data may be appended to it.
-.Pp
-Putting the letters
-.Dq no
-before a flag name causes the flag to be turned off.
-For example:
-.Pp
-.Dl nouchg	the immutable bit should be cleared
 .Pp
 The
 superuser-settable
@@ -113,6 +130,13 @@ running at security level 0 or \-1
 For more information on setting the system security level,
 see
 .Xr securelevel 7 .
+.Pp
+Putting the letters
+.Dq no
+before a flag name causes the flag to be turned off.
+For example:
+.Pp
+.Dl nouchg	the immutable bit should be cleared
 .Pp
 Symbolic links do not have flags, so unless the
 .Fl H
@@ -132,23 +156,15 @@ option is specified.
 In addition, these options override each other and the
 command's actions are determined by the last one specified.
 .Pp
-Only the superuser can change the user flags on block and
-character devices.
-.Pp
-You can use
-.Ic ls -lo
-to see the flags of existing files.
-.Pp
-The
-.Nm
-utility exits 0 on success or >0 if an error occurred.
+.Ex -std chflags
 .Sh SEE ALSO
 .Xr ls 1 ,
 .Xr chflags 2 ,
 .Xr stat 2 ,
 .Xr fts 3 ,
 .Xr securelevel 7 ,
-.Xr symlink 7
+.Xr symlink 7 ,
+.Xr dump 8
 .Sh HISTORY
 The
 .Nm

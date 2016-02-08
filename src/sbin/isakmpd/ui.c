@@ -1,4 +1,4 @@
-/* $OpenBSD: ui.c,v 1.48 2006/09/01 00:24:06 mpf Exp $	 */
+/* $OpenBSD: ui.c,v 1.52 2006/11/30 11:24:49 markus Exp $	 */
 /* $EOM: ui.c,v 1.43 2000/10/05 09:25:12 niklas Exp $	 */
 
 /*
@@ -84,7 +84,7 @@ ui_init(void)
 
 	/* Don't overwrite a file, i.e '-f /etc/isakmpd/isakmpd.conf'.  */
 	if (lstat(ui_fifo, &st) == 0) {
-		if ((st.st_mode & S_IFMT) == S_IFREG) {
+		if (S_ISREG(st.st_mode)) {
 			errno = EEXIST;
 			log_fatal("ui_init: could not create FIFO \"%s\"",
 			    ui_fifo);
@@ -220,10 +220,12 @@ ui_conn_reinit(void)
 static void
 ui_config(char *cmd)
 {
+	struct conf_list *vlist;
+	struct conf_list_node *vnode;
 	char	 subcmd[81], section[81], tag[81], value[81], tmp[81];
 	char	*v, *nv;
-	int	 trans = 0, items;
-	FILE	*fd;
+	int	 trans = 0, items, skip = 0, ret;
+	FILE	*fp;
 
 	if (sscanf(cmd, "C %80s", subcmd) != 1)
 		goto fail;
@@ -232,11 +234,11 @@ ui_config(char *cmd)
 		if (sscanf(cmd, "C %*s [%80[^]]]:%80s", section, tag) != 2)
 			goto fail;
 		v = conf_get_str(section, tag);
-		fd = ui_open_result();
-		if (fd) {
+		fp = ui_open_result();
+		if (fp) {
 			if (v)
-				fprintf(fd, "%s\n", v);
-			fclose(fd);
+				fprintf(fp, "%s\n", v);
+			fclose(fp);
 		}
 		LOG_DBG((LOG_UI, 30, "ui_config: \"%s\"", cmd));
 		return;
@@ -262,17 +264,69 @@ ui_config(char *cmd)
 		if (!v)
 			conf_set(trans, section, tag, value, 1, 0);
 		else {
-			/* Add the new value to the end of the 'v' list.  */
-			if (asprintf(&nv,
-			    v[strlen(v) - 1] == ',' ? "%s%s" : "%s,%s", v,
-			    value) == -1) {
-				log_error("ui_config: malloc() failed");
-				if (trans)
-					conf_end(trans, 0);
-				return;
+			vlist = conf_get_list(section, tag);
+			if (vlist) {
+				for (vnode = TAILQ_FIRST(&vlist->fields);
+				    vnode;
+				    vnode = TAILQ_NEXT(vnode, link)) {
+					if (strcmp(vnode->field, value) == 0) {
+						skip = 1;
+						break;
+					}
+				}
+				conf_free_list(vlist);
 			}
-			conf_set(trans, section, tag, nv, 1, 0);
-			free(nv);
+			/* Add the new value to the end of the 'v' list.  */
+			if (skip == 0) {
+				if (asprintf(&nv,
+				    v[strlen(v) - 1] == ',' ? "%s%s" : "%s,%s",
+				    v, value) == -1) {
+					log_error("ui_config: malloc() failed");
+					if (trans)
+						conf_end(trans, 0);
+					return;
+				}
+				conf_set(trans, section, tag, nv, 1, 0);
+				free(nv);
+			}
+		}
+		if (strcasecmp(section, "Phase 2") == 0 &&
+		    (strcasecmp(tag, "Connections") == 0 ||
+			strcasecmp(tag, "Passive-connections") == 0))
+			ui_conn_reinit();
+	} else if (strcasecmp(subcmd, "rmv") == 0) {
+		items = sscanf(cmd, "C %*s [%80[^]]]:%80[^=]=%80s %80s",
+		    section, tag, value, tmp);
+		if (!(items == 3 || items == 4))
+			goto fail;
+		vlist = conf_get_list(section, tag);
+		if (vlist) {
+			nv = v = NULL;
+			for (vnode = TAILQ_FIRST(&vlist->fields);
+			    vnode;
+			    vnode = TAILQ_NEXT(vnode, link)) {
+				if (strcmp(vnode->field, value) == 0)
+					continue;
+				ret = v ?
+				    asprintf(&nv, "%s,%s", v, vnode->field) :
+				    asprintf(&nv, "%s", vnode->field);
+				if (v)
+					free(v);
+				if (ret == -1) {
+					log_error("ui_config: malloc() failed");
+					if (trans)
+						conf_end(trans, 0);
+					return;
+				}
+				v = nv;
+			}
+			conf_free_list(vlist);
+			if (nv) {
+				conf_set(trans, section, tag, nv, 1, 0);
+				free(nv);
+			} else {
+				conf_remove(trans, section, tag);
+			}
 		}
 		if (strcasecmp(section, "Phase 2") == 0 &&
 		    (strcasecmp(tag, "Connections") == 0 ||
@@ -410,15 +464,15 @@ ui_report(char *cmd)
 void
 ui_report_sa(char *cmd)
 {
-	/* Skip 'cmd' as arg? */
+	FILE *fp = ui_open_result();
 
-	FILE *fd = ui_open_result();
-	if (!fd)
+	/* Skip 'cmd' as arg? */
+	if (!fp)
 		return;
 
-	sa_report_all(fd);
+	sa_report_all(fp);
 
-	fclose(fd);
+	fclose(fp);
 }
 
 static void
@@ -581,8 +635,9 @@ ui_handler(void)
 static FILE *
 ui_open_result(void)
 {
-	FILE *fd = monitor_fopen(RESULT_FILE, "w");
-	if (!fd)
+	FILE *fp = monitor_fopen(RESULT_FILE, "w");
+
+	if (!fp)
 		log_error("ui_open_result: fopen() failed");
-	return fd;
+	return fp;
 }

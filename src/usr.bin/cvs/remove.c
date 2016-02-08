@@ -1,4 +1,4 @@
-/*	$OpenBSD: remove.c,v 1.54 2006/06/19 05:05:17 joris Exp $	*/
+/*	$OpenBSD: remove.c,v 1.64 2007/02/22 06:42:09 otto Exp $	*/
 /*
  * Copyright (c) 2005, 2006 Xavier Santolaria <xsa@openbsd.org>
  *
@@ -15,15 +15,17 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
-#include "includes.h"
+#include <errno.h>
+#include <string.h>
+#include <unistd.h>
 
 #include "cvs.h"
-#include "log.h"
+#include "remote.h"
 
 extern char *__progname;
 
-int		cvs_remove(int, char **);
 void		cvs_remove_local(struct cvs_file *);
+void		cvs_remove_force(struct cvs_file *);
 
 static int	force_remove = 0;
 static int	removed = 0;
@@ -68,33 +70,70 @@ cvs_remove(int argc, char **argv)
 
 	cr.enterdir = NULL;
 	cr.leavedir = NULL;
-	cr.fileproc = cvs_remove_local;
 	cr.flags = flags;
+
+	cr.fileproc = cvs_remove_force;
+	if (argc > 0)
+		cvs_file_run(argc, argv, &cr);
+	else
+		cvs_file_run(1, &arg, &cr);
+
+	if (current_cvsroot->cr_method != CVS_METHOD_LOCAL) {
+		cvs_client_connect_to_server();
+		cr.fileproc = cvs_client_sendfile;
+
+		if (!(flags & CR_RECURSE_DIRS))
+			cvs_client_send_request("Argument -l");
+	} else {
+		cr.fileproc = cvs_remove_local;
+	}
 
 	if (argc > 0)
 		cvs_file_run(argc, argv, &cr);
 	else
 		cvs_file_run(1, &arg, &cr);
 
-	if (existing != 0) {
-		cvs_log(LP_ERR, "%d file(s) exist, remove them first",
-		    existing);
-	}
+	if (current_cvsroot->cr_method != CVS_METHOD_LOCAL) {
+		cvs_client_send_files(argv, argc);
+		cvs_client_senddir(".");
+		cvs_client_send_request("remove");
+		cvs_client_get_responses();
+	} else {
+		if (existing != 0) {
+			cvs_log(LP_ERR, (existing == 1) ?
+			    "%d file exists; remove it first" :
+			    "%d files exist; remove them first", existing);
+		}
 
-	if (removed != 0) {
-		if (verbosity > 1)
-			cvs_log(LP_NOTICE, "use '%s commit' to remove %s "
-			    "permanently", __progname, (removed > 1) ?
-			    "these files" : "this file");
+		if (removed != 0) {
+			if (verbosity > 0) {
+				cvs_log(LP_NOTICE,
+				    "use '%s commit' to remove %s "
+				    "permanently", __progname, (removed > 1) ?
+				    "these files" : "this file");
+			}
+		}
 	}
 
 	return (0);
 }
 
 void
+cvs_remove_force(struct cvs_file *cf)
+{
+	if (cf->file_type != CVS_DIR) {
+		if (cf->fd != -1 && force_remove == 1 && cvs_noexec == 0) {
+			if (unlink(cf->file_path) == -1)
+				fatal("cvs_remove_force: %s", strerror(errno));
+			(void)close(cf->fd);
+			cf->fd = -1;
+		}
+	}
+}
+
+void
 cvs_remove_local(struct cvs_file *cf)
 {
-	int l;
 	CVSENTRIES *entlist;
 	char *entry, buf[MAXPATHLEN], tbuf[32], rbuf[16];
 
@@ -106,7 +145,7 @@ cvs_remove_local(struct cvs_file *cf)
 		return;
 	}
 
-	cvs_file_classify(cf, NULL, 0);
+	cvs_file_classify(cf, NULL);
 
 	if (cf->file_status == FILE_UNKNOWN) {
 		if (verbosity > 1)
@@ -115,30 +154,21 @@ cvs_remove_local(struct cvs_file *cf)
 		return;
 	}
 
-	if (force_remove == 1) {
-		if (unlink(cf->file_path) == -1)
-			fatal("cvs_remove_local: %s", strerror(errno));
-		(void)close(cf->fd);
-		cf->fd = -1;
-	}
-
 	if (cf->fd != -1) {
 		if (verbosity > 1)
 			cvs_log(LP_ERR, "file `%s' still in working directory",
 			    cf->file_name);
 		existing++;
 	} else {
-		switch(cf->file_status) {
-		case FILE_ADDED:
+		switch (cf->file_status) {
+		case FILE_REMOVE_ENTRY:
 			entlist = cvs_ent_open(cf->file_wd);
 			cvs_ent_remove(entlist, cf->file_name);
 			cvs_ent_close(entlist, ENT_SYNC);
 
-			l = snprintf(buf, sizeof(buf), "%s/%s/%s%s",
+			(void)xsnprintf(buf, sizeof(buf), "%s/%s/%s%s",
 			    cf->file_path, CVS_PATH_CVSDIR, cf->file_name,
 			    CVS_DESCR_FILE_EXT);
-			if (l == -1 || l >= (int)sizeof(buf))
-				fatal("cvs_remove_local: overflow");
 
 			(void)unlink(buf);
 
@@ -148,7 +178,7 @@ cvs_remove_local(struct cvs_file *cf)
 			}
 			return;
 		case FILE_REMOVED:
-			if (verbosity > 1 ) {
+			if (verbosity > 0) {
 				cvs_log(LP_ERR,
 				    "file `%s' already scheduled for removal",
 				    cf->file_name);
@@ -163,18 +193,21 @@ cvs_remove_local(struct cvs_file *cf)
 				tbuf[strlen(tbuf) - 1] = '\0';
 
 			entry = xmalloc(CVS_ENT_MAXLINELEN);
-			l = snprintf(entry, CVS_ENT_MAXLINELEN,
+			(void)xsnprintf(entry, CVS_ENT_MAXLINELEN,
 			     "/%s/-%s/%s//", cf->file_name, rbuf, tbuf);
-			if (l == -1 || l >= CVS_ENT_MAXLINELEN)
-				fatal("cvs_remove_local: overflow");
 
-			entlist = cvs_ent_open(cf->file_wd);
-			cvs_ent_add(entlist, entry);
-			cvs_ent_close(entlist, ENT_SYNC);
+			if (cvs_server_active == 1) {
+				cvs_server_update_entry("Checked-in", cf);
+				cvs_remote_output(entry);
+			} else {
+				entlist = cvs_ent_open(cf->file_wd);
+				cvs_ent_add(entlist, entry);
+				cvs_ent_close(entlist, ENT_SYNC);
+			}
 
 			xfree(entry);
 
-			if (verbosity > 1) {
+			if (verbosity > 0) {
 				cvs_log(LP_NOTICE,
 				    "scheduling file `%s' for removal",
 				    cf->file_name);

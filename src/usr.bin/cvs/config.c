@@ -1,4 +1,4 @@
-/*	$OpenBSD: config.c,v 1.4 2006/06/16 14:07:42 joris Exp $	*/
+/*	$OpenBSD: config.c,v 1.9 2007/02/22 06:42:09 otto Exp $	*/
 /*
  * Copyright (c) 2006 Joris Vink <joris@openbsd.org>
  *
@@ -15,29 +15,30 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
-#include "includes.h"
+#include <sys/param.h>
+#include <sys/dirent.h>
+#include <sys/resource.h>
+
+#include <errno.h>
+#include <stdlib.h>
+#include <string.h>
 
 #include "cvs.h"
 #include "config.h"
-#include "diff.h"
-#include "log.h"
 
 void
 cvs_parse_configfile(void)
 {
-	int i;
 	FILE *fp;
 	size_t len;
 	struct rlimit rl;
 	const char *errstr;
 	char *p, *buf, *lbuf, *opt, *val, fpath[MAXPATHLEN];
 
-	cvs_log(LP_TRACE, "cvs_parse_configfile()");
+	(void)xsnprintf(fpath, sizeof(fpath), "%s/%s",
+	    current_cvsroot->cr_dir, CVS_PATH_CONFIG);
 
-	i = snprintf(fpath, sizeof(fpath), "%s/%s", current_cvsroot->cr_dir,
-	    CVS_PATH_CONFIG);
-	if (i == -1 || i >= (int)sizeof(fpath))
-		fatal("cvs_parse_configfile: overflow");
+	cvs_log(LP_TRACE, "cvs_parse_configfile(%s)", fpath);
 
 	if ((fp = fopen(fpath, "r")) == NULL)
 		fatal("cvs_config_parse: %s: %s",
@@ -49,7 +50,8 @@ cvs_parse_configfile(void)
 			buf[len - 1] = '\0';
 		} else {
 			lbuf = xmalloc(len + 1);
-			strlcpy(lbuf, buf, len);
+			memcpy(lbuf, buf, len);
+			lbuf[len] = '\0';
 			buf = lbuf;
 		}
 

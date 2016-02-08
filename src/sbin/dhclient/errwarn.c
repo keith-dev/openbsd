@@ -1,4 +1,4 @@
-/*	$OpenBSD: errwarn.c,v 1.12 2005/07/09 14:36:15 krw Exp $	*/
+/*	$OpenBSD: errwarn.c,v 1.15 2007/03/02 11:31:17 henning Exp $	*/
 
 /* Errors and warnings... */
 
@@ -210,6 +210,7 @@ parse_warn(char *fmt, ...)
 	    "                                        "
 	    "                                        "; /* 80 spaces */
 	struct iovec iov[6];
+	size_t iovcnt;
 
 	do_percentm(mbuf, sizeof(mbuf), fmt);
 	snprintf(fbuf, sizeof(fbuf), "%s line %d: %s", tlname, lexline, mbuf);
@@ -220,9 +221,8 @@ parse_warn(char *fmt, ...)
 #ifndef DEBUG
 	syslog(LOG_ERR, "%s", mbuf);
 	syslog(LOG_ERR, "%s", token_line);
-	if (lexline < 81)
-		syslog(LOG_ERR,
-		    "%s^", &spaces[sizeof(spaces) - lexchar]);
+	if (lexchar < 81)
+		syslog(LOG_ERR, "%*c", lexchar, '^');
 #endif
 
 	if (log_perror) {
@@ -234,11 +234,15 @@ parse_warn(char *fmt, ...)
 		iov[2].iov_len = strlen(token_line);
 		iov[3].iov_base = "\n";
 		iov[3].iov_len = 1;
-		iov[4].iov_base = spaces;
-		iov[4].iov_len = lexchar - 1;
-		iov[5].iov_base = "\n";
-		iov[5].iov_len = 1;
-		writev(STDERR_FILENO, iov, sizeof(iov)/sizeof(iov[0]));
+		iovcnt = 4;
+		if (lexchar < 81) {
+			iov[4].iov_base = spaces;
+			iov[4].iov_len = lexchar - 1;
+			iov[5].iov_base = "^\n";
+			iov[5].iov_len = 2;
+			iovcnt += 2;
+		}
+		writev(STDERR_FILENO, iov, iovcnt);
 	}
 	warnings_occurred = 1;
 	return (0);

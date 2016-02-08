@@ -1,4 +1,4 @@
-/*	$OpenBSD: rcsnum.c,v 1.39 2006/07/27 03:28:36 ray Exp $	*/
+/*	$OpenBSD: rcsnum.c,v 1.42 2007/02/22 06:42:09 otto Exp $	*/
 /*
  * Copyright (c) 2004 Jean-Francois Brousseau <jfb@openbsd.org>
  * All rights reserved.
@@ -24,11 +24,10 @@
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include "includes.h"
+#include <ctype.h>
+#include <string.h>
 
 #include "cvs.h"
-#include "log.h"
-#include "rcs.h"
 
 static void	 rcsnum_setsize(RCSNUM *, u_int);
 static char	*rcsnum_itoa(u_int16_t, char *, size_t);
@@ -101,23 +100,21 @@ rcsnum_tostr(const RCSNUM *nump, char *buf, size_t blen)
 {
 	u_int i;
 	char tmp[8];
-	size_t len;
 
 	if (nump == NULL || nump->rn_len == 0) {
 		buf[0] = '\0';
 		return (buf);
 	}
 
-	strlcpy(buf, rcsnum_itoa(nump->rn_id[0], buf, blen), blen);
+	if (strlcpy(buf, rcsnum_itoa(nump->rn_id[0], buf, blen), blen) >= blen)
+		fatal("rcsnum_tostr: truncation");
 	for (i = 1; i < nump->rn_len; i++) {
-		len = strlcat(buf, ".", blen);
-		if (len >= blen)
-			fatal("rcsnum_tostr: overflow 1");
+		const char *str;
 
-		len = strlcat(buf,
-		    rcsnum_itoa(nump->rn_id[i], tmp, sizeof(tmp)), blen);
-		if (len >= blen)
-			fatal("rcsnum_tostr: overflow 2");
+		str = rcsnum_itoa(nump->rn_id[i], tmp, sizeof(tmp));
+		if (strlcat(buf, ".", blen) >= blen ||
+		    strlcat(buf, str, blen) >= blen)
+			fatal("rcsnum_tostr: truncation");
 	}
 
 	return (buf);
@@ -152,16 +149,13 @@ void
 rcsnum_cpy(const RCSNUM *nsrc, RCSNUM *ndst, u_int depth)
 {
 	u_int len;
-	void *tmp;
 
 	len = nsrc->rn_len;
 	if (depth != 0 && len > depth)
 		len = depth;
 
-	tmp = xrealloc(ndst->rn_id, len, sizeof(*(nsrc->rn_id)));
-	ndst->rn_id = tmp;
-	ndst->rn_len = len;
-	/* Overflow checked in xrealloc(). */
+	rcsnum_setsize(ndst, len);
+	/* Overflow checked in rcsnum_setsize(). */
 	(void)memcpy(ndst->rn_id, nsrc->rn_id,
 	    len * sizeof(*(nsrc->rn_id)));
 }

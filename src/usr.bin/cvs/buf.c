@@ -1,4 +1,4 @@
-/*	$OpenBSD: buf.c,v 1.55 2006/07/08 09:25:44 ray Exp $	*/
+/*	$OpenBSD: buf.c,v 1.60 2007/02/22 06:42:09 otto Exp $	*/
 /*
  * Copyright (c) 2003 Jean-Francois Brousseau <jfb@openbsd.org>
  * All rights reserved.
@@ -24,30 +24,28 @@
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include "includes.h"
+#include <sys/stat.h>
+
+#include <errno.h>
+#include <fcntl.h>
+#include <string.h>
+#include <unistd.h>
 
 #include "cvs.h"
 #include "buf.h"
-#include "log.h"
-#include "xmalloc.h"
-#include "worklist.h"
 
 #define BUF_INCR	128
 
 struct cvs_buf {
 	u_int	cb_flags;
 
-	/* buffer handle and size */
+	/* buffer handle, buffer size, and data length */
 	u_char	*cb_buf;
 	size_t	 cb_size;
-
-	/* start and length of valid data in buffer */
-	u_char	*cb_cur;
 	size_t	 cb_len;
 };
 
-#define SIZE_LEFT(b)	(b->cb_size - (size_t)(b->cb_cur - b->cb_buf) \
-			    - b->cb_len)
+#define SIZE_LEFT(b)	(b->cb_size - b->cb_len)
 
 static void	cvs_buf_grow(BUF *, size_t);
 
@@ -72,7 +70,6 @@ cvs_buf_alloc(size_t len, u_int flags)
 
 	b->cb_flags = flags;
 	b->cb_size = len;
-	b->cb_cur = b->cb_buf;
 	b->cb_len = 0;
 
 	return (b);
@@ -109,7 +106,7 @@ cvs_buf_load_fd(int fd, u_int flags)
 		fatal("cvs_buf_load_fd: lseek: %s", strerror(errno));
 
 	buf = cvs_buf_alloc(st.st_size, flags);
-	for (bp = buf->cb_cur; ; bp += (size_t)ret) {
+	for (bp = buf->cb_buf; ; bp += (size_t)ret) {
 		len = SIZE_LEFT(buf);
 		ret = read(fd, bp, len);
 		if (ret == -1)
@@ -143,7 +140,7 @@ cvs_buf_free(BUF *b)
  * of the buffer.  Instead, they are returned and should be freed later using
  * free().
  */
-void *
+u_char *
 cvs_buf_release(BUF *b)
 {
 	u_char *tmp;
@@ -162,42 +159,7 @@ void
 cvs_buf_empty(BUF *b)
 {
 	memset(b->cb_buf, 0, b->cb_size);
-	b->cb_cur = b->cb_buf;
 	b->cb_len = 0;
-}
-
-/*
- * cvs_buf_set()
- *
- * Set the contents of the buffer <b> at offset <off> to the first <len>
- * bytes of data found at <src>.  If the buffer was not created with
- * BUF_AUTOEXT, as many bytes as possible will be copied in the buffer.
- */
-ssize_t
-cvs_buf_set(BUF *b, const void *src, size_t len, size_t off)
-{
-	size_t rlen = 0;
-
-	if (b->cb_size < (len + off)) {
-		if ((b->cb_flags & BUF_AUTOEXT)) {
-			cvs_buf_grow(b, len + off - b->cb_size);
-			rlen = len + off;
-		} else {
-			rlen = b->cb_size - off;
-		}
-	} else {
-		rlen = len;
-	}
-
-	b->cb_len = rlen;
-	memcpy((b->cb_buf + off), src, rlen);
-
-	if (b->cb_len == 0) {
-		b->cb_cur = b->cb_buf + off;
-		b->cb_len = rlen;
-	}
-
-	return (rlen);
 }
 
 /*
@@ -210,7 +172,7 @@ cvs_buf_putc(BUF *b, int c)
 {
 	u_char *bp;
 
-	bp = b->cb_cur + b->cb_len;
+	bp = b->cb_buf + b->cb_len;
 	if (bp == (b->cb_buf + b->cb_size)) {
 		/* extend */
 		if (b->cb_flags & BUF_AUTOEXT)
@@ -219,7 +181,7 @@ cvs_buf_putc(BUF *b, int c)
 			fatal("cvs_buf_putc failed");
 
 		/* the buffer might have been moved */
-		bp = b->cb_cur + b->cb_len;
+		bp = b->cb_buf + b->cb_len;
 	}
 	*bp = (u_char)c;
 	b->cb_len++;
@@ -234,7 +196,7 @@ cvs_buf_putc(BUF *b, int c)
 u_char
 cvs_buf_getc(BUF *b, size_t pos)
 {
-	return (b->cb_cur[pos]);
+	return (b->cb_buf[pos]);
 }
 
 /*
@@ -252,7 +214,7 @@ cvs_buf_append(BUF *b, const void *data, size_t len)
 	size_t left, rlen;
 	u_char *bp, *bep;
 
-	bp = b->cb_cur + b->cb_len;
+	bp = b->cb_buf + b->cb_len;
 	bep = b->cb_buf + b->cb_size;
 	left = bep - bp;
 	rlen = len;
@@ -260,7 +222,7 @@ cvs_buf_append(BUF *b, const void *data, size_t len)
 	if (left < len) {
 		if (b->cb_flags & BUF_AUTOEXT) {
 			cvs_buf_grow(b, len - left);
-			bp = b->cb_cur + b->cb_len;
+			bp = b->cb_buf + b->cb_len;
 		} else
 			rlen = bep - bp;
 	}
@@ -318,7 +280,7 @@ cvs_buf_write_fd(BUF *b, int fd)
 	ssize_t ret;
 
 	len = b->cb_len;
-	bp = b->cb_cur;
+	bp = b->cb_buf;
 
 	do {
 		ret = write(fd, bp, len);
@@ -406,15 +368,10 @@ static void
 cvs_buf_grow(BUF *b, size_t len)
 {
 	void *tmp;
-	size_t diff;
 
-	diff = b->cb_cur - b->cb_buf;
 	tmp = xrealloc(b->cb_buf, 1, b->cb_size + len);
 	b->cb_buf = tmp;
 	b->cb_size += len;
-
-	/* readjust pointers in case the buffer moved in memory */
-	b->cb_cur = b->cb_buf + diff;
 }
 
 /*
@@ -443,7 +400,7 @@ cvs_buf_copy(BUF *b, size_t off, void *dst, size_t len)
  *
  * Peek at the contents of the buffer <b> at offset <off>.
  */
-const void *
+const u_char *
 cvs_buf_peek(BUF *b, size_t off)
 {
 	if (off >= b->cb_len)
@@ -453,27 +410,10 @@ cvs_buf_peek(BUF *b, size_t off)
 }
 
 int
-cvs_buf_differ(BUF *b1, BUF *b2)
+cvs_buf_differ(const BUF *b1, const BUF *b2)
 {
-	char *c1, *c2;
-	int l1, l2, len, ret;
-
-	l1 = cvs_buf_len(b1);
-	l2 = cvs_buf_len(b2);
-	len = MIN(l1, l2);
-
-	if (l1 != l2)
+	if (b1->cb_len != b2->cb_len)
 		return (1);
 
-	c1 = cvs_buf_release(b1);
-	c2 = cvs_buf_release(b2);
-
-	ret = memcmp(c1, c2, len);
-
-	if (c1 != NULL)
-		xfree(c1);
-	if (c2 != NULL)
-		xfree(c2);
-
-	return (ret);
+	return (memcmp(b1->cb_buf, b2->cb_buf, b1->cb_len));
 }

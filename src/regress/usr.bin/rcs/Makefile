@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.37 2006/08/29 21:28:45 david Exp $
+#	$OpenBSD: Makefile,v 1.39 2007/02/22 02:42:50 ray Exp $
 
 # Regression tests by Niall O'Higgins <niallo@openbsd.org>.
 # ksh -> Makefile by Ray Lai <ray@cyth.net>.
@@ -388,11 +388,11 @@ test-rcs-oflag: clean
 	@echo "blah6" | ${CI} -q blah.c
 	@${CO} -q -l blah.c
 	@${RCS} -q -o1.3:1.5 blah.c
-	@fgrep -q '1.3' blah.c,v || \
+	@tr '\n' ' ' < blah.c,v | grep -q '[[:space:]]1.3[[:space:]]' || \
 	    case "$$?" in 1) exit 0;; esac && exit 1
-	@fgrep -q '1.4' blah.c,v || \
+	@tr '\n' ' ' < blah.c,v | grep -q '[[:space:]]1.4[[:space:]]' || \
 	    case "$$?" in 1) exit 0;; esac && exit 1
-	@fgrep -q '1.5' blah.c,v || \
+	@tr '\n' ' ' < blah.c,v | grep -q '[[:space:]]1.5[[:space:]]' || \
 	    case "$$?" in 1) exit 0;; esac && exit 1
 	
 test-rcs-lock-unlock: clean
@@ -591,7 +591,7 @@ test-ci-parse-keywords2: clean
 
 # Check for correct EOF handling in rcs parser
 test-co-parse-truncated: clean
-	@sh -c 'ulimit -d 1000 && ${CO} -q test-truncated > truncated.out 2>&1' || \
+	@sh -c 'ulimit -d 5000 && ${CO} -q ${.CURDIR}/test-truncated > truncated.out 2>&1' || \
 	    case "$$?" in 1) exit 0;; esac && exit 1
 	@grep -q 'co: problem parsing deltatexts' truncated.out
 

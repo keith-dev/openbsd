@@ -1,4 +1,4 @@
-.\"     $OpenBSD: lkkbd.4,v 1.7 2006/08/27 17:32:58 miod Exp $
+.\"     $OpenBSD: lkkbd.4,v 1.10 2006/11/27 16:13:15 miod Exp $
 .\"
 .\" Copyright (c) 2003 Jason L. Wright (jason@thought.net)
 .\" All rights reserved.
@@ -48,7 +48,7 @@
 .\" OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
 .\" SUCH DAMAGE.
 .\"
-.Dd August 27, 2006
+.Dd November 27, 2006
 .Dt LKKBD 4 vax
 .Os
 .Sh NAME
@@ -78,12 +78,13 @@ can be chosen from with the kernel option
 at compile time or with the utility
 .Xr wsconsctl 8
 (variable:
-.Dq keyboard.encoding
-) at runtime.
+.Dq keyboard.encoding )
+at runtime.
 Other mappings can be used if the whole keymap is replaced by means of
 .Xr wsconsctl 8 .
 The built-in mappings are at this time:
-.Bl -hang
+.Pp
+.Bl -tag -width Ds -offset indent -compact
 .\" .It KB_BE
 .\" (
 .\" .Dq be
@@ -92,11 +93,10 @@ The built-in mappings are at this time:
 .\" (
 .\" .Dq cf
 .\" ) Canadian French.
-.\" .It KB_DE
-.\" (
-.\" .Dq de
-.\" ) German with
-.\" .Dq dead accents .
+.It KB_DE
+.Pq de
+German with
+.Dq dead accents .
 .\" .It KB_DK
 .\" (
 .\" .Dq dk
@@ -107,9 +107,8 @@ The built-in mappings are at this time:
 .\" .Dq es
 .\" ) Spanish.
 .It KB_FR
-(
-.Dq fr
-) French.
+.Pq fr
+French.
 .\" .It KB_IT
 .\" (
 .\" .Dq it
@@ -119,10 +118,9 @@ The built-in mappings are at this time:
 .\" .Dq no
 .\" ) Norwegian with
 .\" .Dq dead accents .
-.\" .It KB_PT
-.\" (
-.\" .Dq pt
-.\" ) Portuguese.
+.It KB_PT
+.Pq pt
+Portuguese.
 .\" .It KB_SF
 .\" (
 .\" .Dq sf
@@ -143,17 +141,17 @@ The built-in mappings are at this time:
 .\" .Dq uk
 .\" ) British.
 .It KB_US
-(
-.Dq us
-) English / US keyboard mapping (default).
+.Pq us
+English/US keyboard mapping (default).
 .El
 .Pp
 .\" The KB_DE, KB_DK, KB_NO, KB_SF, KB_SG and KB_SV mappings can be used in
-.\" the KB_NODEAD (
-.\" .Dq .nodead
-.\" ) variant.
-.\" This switches off the
-.\" .Dq dead accents .
+The KB_DE mapping can be used in
+the KB_NODEAD
+.Pq .nodead
+variant.
+This switches off the
+.Dq dead accents .
 .Sh EXAMPLES
 To set a French keyboard layout, use
 .Ic wsconsctl -w keyboard.encoding=fr .

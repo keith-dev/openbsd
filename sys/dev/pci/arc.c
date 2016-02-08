@@ -1,4 +1,4 @@
-/*	$OpenBSD: arc.c,v 1.48 2006/08/28 05:36:00 dlg Exp $ */
+/*	$OpenBSD: arc.c,v 1.58 2007/02/20 17:06:23 thib Exp $ */
 
 /*
  * Copyright (c) 2006 David Gwynne <dlg@openbsd.org>
@@ -36,6 +36,7 @@
 #include <scsi/scsi_all.h>
 #include <scsi/scsiconf.h>
 
+#include <sys/sensors.h>
 #if NBIO > 0
 #include <sys/ioctl.h>
 #include <dev/biovar.h>
@@ -231,11 +232,11 @@ struct arc_fw_comminfo {
 
 struct arc_fw_scsiattr {
 	u_int8_t		channel;// channel for SCSI target (0/1)
-        u_int8_t		target;
-        u_int8_t		lun;
-        u_int8_t		tagged;
-        u_int8_t		cache;
-        u_int8_t		speed;
+	u_int8_t		target;
+	u_int8_t		lun;
+	u_int8_t		tagged;
+	u_int8_t		cache;
+	u_int8_t		speed;
 } __packed;
 
 struct arc_fw_raidinfo {
@@ -323,12 +324,12 @@ struct arc_fw_sysinfo {
 	u_int32_t		icache;
 	u_int32_t		dcache;
 	u_int32_t		scache;
-        u_int32_t		memory_size;
-        u_int32_t		memory_speed;
-        u_int32_t		events;
+	u_int32_t		memory_size;
+	u_int32_t		memory_speed;
+	u_int32_t		events;
 
-        u_int8_t		gsiMacAddress[6];
-        u_int8_t		gsiDhcp;
+	u_int8_t		gsiMacAddress[6];
+	u_int8_t		gsiDhcp;
 
 	u_int8_t		alarm;
 	u_int8_t		channel_usage;
@@ -350,6 +351,7 @@ struct arc_fw_sysinfo {
 int			arc_match(struct device *, void *, void *);
 void			arc_attach(struct device *, struct device *, void *);
 int			arc_detach(struct device *, int);
+void			arc_shutdown(void *);
 int			arc_intr(void *);
 
 struct arc_ccb;
@@ -369,6 +371,8 @@ struct arc_softc {
 
 	void			*sc_ih;
 
+	void			*sc_shutdownhook;
+
 	int			sc_req_count;
 
 	struct arc_dmamem	*sc_requests;
@@ -379,6 +383,10 @@ struct arc_softc {
 
 	struct rwlock		sc_lock;
 	volatile int		sc_talking;
+
+	struct sensor		*sc_sensors;
+	struct sensordev	sc_sensordev;
+	int			sc_nsensors;
 };
 #define DEVNAME(_s)		((_s)->sc_dev.dv_xname)
 
@@ -483,6 +491,10 @@ int			arc_bio_alarm_state(struct arc_softc *,
 
 int			arc_bio_getvol(struct arc_softc *, int,
 			    struct arc_fw_volinfo *);
+
+/* sensors */
+void			arc_create_sensors(void *, void *);
+void			arc_refresh_sensors(void *);
 #endif
 
 int
@@ -497,6 +509,7 @@ arc_attach(struct device *parent, struct device *self, void *aux)
 {
 	struct arc_softc		*sc = (struct arc_softc *)self;
 	struct pci_attach_args		*pa = aux;
+	struct scsibus_attach_args	saa;
 	struct device			*child;
 
 	sc->sc_talking = 0;
@@ -517,6 +530,10 @@ arc_attach(struct device *parent, struct device *self, void *aux)
 		return;
 	}
 
+	sc->sc_shutdownhook = shutdownhook_establish(arc_shutdown, sc);
+	if (sc->sc_shutdownhook == NULL)
+		panic("unable to establish arc powerhook");
+
 	sc->sc_link.device = &arc_dev;
 	sc->sc_link.adapter = &arc_switch;
 	sc->sc_link.adapter_softc = sc;
@@ -524,16 +541,28 @@ arc_attach(struct device *parent, struct device *self, void *aux)
 	sc->sc_link.adapter_buswidth = ARC_MAX_TARGET;
 	sc->sc_link.openings = sc->sc_req_count / ARC_MAX_TARGET;
 
-	child = config_found(self, &sc->sc_link, scsiprint);
+	bzero(&saa, sizeof(saa));
+	saa.saa_sc_link = &sc->sc_link;
+
+	child = config_found(self, &saa, scsiprint);
 	sc->sc_scsibus = (struct scsibus_softc *)child;
 
-	/* XXX enable interrupts */
+	/* enable interrupts */
 	arc_write(sc, ARC_REG_INTRMASK,
 	    ~(ARC_REG_INTRMASK_POSTQUEUE|ARC_REG_INTRSTAT_DOORBELL));
 
 #if NBIO > 0
 	if (bio_register(self, arc_bioctl) != 0)
 		panic("%s: bioctl registration failed\n", DEVNAME(sc));
+
+	/*
+	 * you need to talk to the firmware to get volume info. our firmware
+	 * interface relies on being able to sleep, so we need to use a thread
+	 * to do the work.
+	 */
+	if (scsi_task(arc_create_sensors, sc, NULL, 1) != 0)
+		printf("%s: unable to schedule arc_create_sensors as a "
+		    "scsi task", DEVNAME(sc));
 #endif
 
 	return;
@@ -544,6 +573,8 @@ arc_detach(struct device *self, int flags)
 {
 	struct arc_softc		*sc = (struct arc_softc *)self;
 
+	shutdownhook_disestablish(sc->sc_shutdownhook);
+
 	if (arc_msg0(sc, ARC_REG_INB_MSG0_STOP_BGRB) != 0)
 		printf("%s: timeout waiting to stop bg rebuild\n");
 
@@ -551,6 +582,18 @@ arc_detach(struct device *self, int flags)
 		printf("%s: timeout waiting to flush cache\n");
 
 	return (0);
+}
+
+void
+arc_shutdown(void *xsc)
+{
+	struct arc_softc		*sc = xsc;
+
+	if (arc_msg0(sc, ARC_REG_INB_MSG0_STOP_BGRB) != 0)
+		printf("%s: timeout waiting to stop bg rebuild\n");
+
+	if (arc_msg0(sc, ARC_REG_INB_MSG0_FLUSH_CACHE) != 0)
+		printf("%s: timeout waiting to flush cache\n");
 }
 
 int
@@ -565,6 +608,7 @@ arc_intr(void *arg)
 	intrstat = arc_read(sc, ARC_REG_INTRSTAT);
 	if (intrstat == 0x0)
 		return (0);
+	intrstat &= ARC_REG_INTRSTAT_POSTQUEUE | ARC_REG_INTRSTAT_DOORBELL;
 	arc_write(sc, ARC_REG_INTRSTAT, intrstat);
 
 	if (intrstat & ARC_REG_INTRSTAT_DOORBELL) {
@@ -903,8 +947,6 @@ arc_query_firmware(struct arc_softc *sc)
 	scsi_strvis(string, fwinfo.fw_version, sizeof(fwinfo.fw_version));
 	DNPRINTF(ARC_D_INIT, "%s: model: \"%s\"\n", DEVNAME(sc), string);
 
-	/* device map? */
-
 	if (letoh32(fwinfo.request_len) != ARC_MAX_IOCMDLEN) {
 		printf("%s: unexpected request frame size (%d != %d)\n",
 		    DEVNAME(sc), letoh32(fwinfo.request_len), ARC_MAX_IOCMDLEN);
@@ -1010,8 +1052,6 @@ arc_bio_alarm_state(struct arc_softc *sc, struct bioc_alarm *ba)
 	int				error = 0;
 
 	sysinfo = malloc(sizeof(struct arc_fw_sysinfo), M_TEMP, M_WAITOK);
-	if (sysinfo == NULL)
-		return (ENOMEM);
 
 	request = ARC_FW_SYSINFO;
 
@@ -1041,14 +1081,7 @@ arc_bio_inq(struct arc_softc *sc, struct bioc_inq *bi)
 	int				error = 0;
 
 	sysinfo = malloc(sizeof(struct arc_fw_sysinfo), M_TEMP, M_WAITOK);
-	if (sysinfo == NULL)
-		return (ENOMEM);
-
 	volinfo = malloc(sizeof(struct arc_fw_volinfo), M_TEMP, M_WAITOK);
-	if (volinfo == NULL) {
-		free(sysinfo, M_TEMP);
-		return (ENOMEM);
-	}
 
 	arc_lock(sc);
 
@@ -1096,8 +1129,6 @@ arc_bio_getvol(struct arc_softc *sc, int vol, struct arc_fw_volinfo *volinfo)
 	int				maxvols, nvols = 0, i;
 
 	sysinfo = malloc(sizeof(struct arc_fw_sysinfo), M_TEMP, M_WAITOK);
-	if (sysinfo == NULL)
-		return (ENOMEM);
 
 	request[0] = ARC_FW_SYSINFO;
 	error = arc_msgbuf(sc, request, 1, sysinfo,
@@ -1146,8 +1177,6 @@ arc_bio_vol(struct arc_softc *sc, struct bioc_vol *bv)
 	int				error = 0;
 
 	volinfo = malloc(sizeof(struct arc_fw_volinfo), M_TEMP, M_WAITOK);
-	if (volinfo == NULL)
-		return (ENOMEM);
 
 	arc_lock(sc);
 	error = arc_bio_getvol(sc, bv->bv_volid, volinfo);
@@ -1227,21 +1256,8 @@ arc_bio_disk(struct arc_softc *sc, struct bioc_disk *bd)
 	char				rev[17];
 
 	volinfo = malloc(sizeof(struct arc_fw_volinfo), M_TEMP, M_WAITOK);
-	if (volinfo == NULL)
-		return (ENOMEM);
-
 	raidinfo = malloc(sizeof(struct arc_fw_raidinfo), M_TEMP, M_WAITOK);
-	if (raidinfo == NULL) {
-		free(volinfo, M_TEMP);
-		return (ENOMEM);
-	}
-
 	diskinfo = malloc(sizeof(struct arc_fw_diskinfo), M_TEMP, M_WAITOK);
-	if (diskinfo == NULL) {
-		free(raidinfo, M_TEMP);
-		free(volinfo, M_TEMP);
-		return (ENOMEM);
-	}
 
 	arc_lock(sc);
 
@@ -1351,15 +1367,9 @@ arc_msgbuf(struct arc_softc *sc, void *wptr, size_t wbuflen, void *rptr,
 
 	wlen = sizeof(struct arc_fw_bufhdr) + wbuflen + 1; /* 1 for cksum */
 	wbuf = malloc(wlen, M_TEMP, M_WAITOK);
-	if (wbuf == NULL)
-		return (ENOMEM);
 
 	rlen = sizeof(struct arc_fw_bufhdr) + rbuflen + 1; /* 1 for cksum */
 	rbuf = malloc(rlen, M_TEMP, M_WAITOK);
-	if (rbuf == NULL) {
-		free(wbuf, M_TEMP);
-		return (ENOMEM);
-	}
 
 	DNPRINTF(ARC_D_DB, "%s: arc_msgbuf wlen: %d rlen: %d\n", DEVNAME(sc),
 	    wlen, rlen);
@@ -1486,7 +1496,7 @@ arc_unlock(struct arc_softc *sc)
 	s = splbio();
 	sc->sc_talking = 0;
 	arc_write(sc, ARC_REG_INTRMASK,
-	    ~(ARC_REG_INTRMASK_POSTQUEUE|ARC_REG_INTRSTAT_DOORBELL));
+	    ~(ARC_REG_INTRMASK_POSTQUEUE|ARC_REG_INTRMASK_DOORBELL));
 	splx(s);
 	rw_exit_write(&sc->sc_lock);
 }
@@ -1498,10 +1508,107 @@ arc_wait(struct arc_softc *sc)
 
 	s = splbio();
 	arc_write(sc, ARC_REG_INTRMASK,
-	    ~(ARC_REG_INTRMASK_POSTQUEUE|ARC_REG_INTRSTAT_DOORBELL));
+	    ~(ARC_REG_INTRMASK_POSTQUEUE|ARC_REG_INTRMASK_DOORBELL));
 	if (tsleep(sc, PWAIT, "arcdb", hz) == EWOULDBLOCK)
 		arc_write(sc, ARC_REG_INTRMASK, ~ARC_REG_INTRMASK_POSTQUEUE);
 	splx(s);
+}
+
+void
+arc_create_sensors(void *xsc, void *arg)
+{
+	struct arc_softc	*sc = xsc;
+	struct bioc_inq		bi;
+	struct bioc_vol		bv;
+	int			i;
+
+	/*
+	 * XXX * this is bollocks. the firmware has garbage coming out of it
+	 * so we have to wait a bit for it to finish spewing.
+	 */
+	tsleep(sc, PWAIT, "arcspew", 2 * hz);
+
+	bzero(&bi, sizeof(bi));
+	if (arc_bio_inq(sc, &bi) != 0) {
+		printf("%s: unable to query firmware for sensor info\n",
+		    DEVNAME(sc));
+		return;
+	}
+	sc->sc_nsensors = bi.bi_novol;
+
+	sc->sc_sensors = malloc(sizeof(struct sensor) * sc->sc_nsensors,
+	    M_DEVBUF, M_WAITOK);
+	bzero(sc->sc_sensors, sizeof(struct sensor) * sc->sc_nsensors);
+
+	strlcpy(sc->sc_sensordev.xname, DEVNAME(sc),
+	    sizeof(sc->sc_sensordev.xname));
+
+	for (i = 0; i < sc->sc_nsensors; i++) {
+		bzero(&bv, sizeof(bv));
+		bv.bv_volid = i;
+		if (arc_bio_vol(sc, &bv) != 0)
+			goto bad;
+
+		sc->sc_sensors[i].type = SENSOR_DRIVE;
+		sc->sc_sensors[i].status = SENSOR_S_UNKNOWN;
+
+		strlcpy(sc->sc_sensors[i].desc, bv.bv_dev,
+		    sizeof(sc->sc_sensors[i].desc));
+
+		sensor_attach(&sc->sc_sensordev, &sc->sc_sensors[i]);
+	}
+
+	if (sensor_task_register(sc, arc_refresh_sensors, 120) != 0)
+		goto bad;
+
+	sensordev_install(&sc->sc_sensordev);
+
+	return;
+
+bad:
+	free(sc->sc_sensors, M_DEVBUF);
+}
+
+void
+arc_refresh_sensors(void *arg)
+{
+	struct arc_softc	*sc = arg;
+	struct bioc_vol		bv;
+	int			i;
+
+	for (i = 0; i < sc->sc_nsensors; i++) {
+		bzero(&bv, sizeof(bv));
+		bv.bv_volid = i;
+		if (arc_bio_vol(sc, &bv)) {
+			sc->sc_sensors[i].flags = SENSOR_FINVALID;
+			return;
+		}
+
+		switch(bv.bv_status) {
+		case BIOC_SVOFFLINE:
+			sc->sc_sensors[i].value = SENSOR_DRIVE_FAIL;
+			sc->sc_sensors[i].status = SENSOR_S_CRIT;
+			break;
+
+		case BIOC_SVDEGRADED:
+			sc->sc_sensors[i].value = SENSOR_DRIVE_PFAIL;
+			sc->sc_sensors[i].status = SENSOR_S_WARN;
+			break;
+
+		case BIOC_SVSCRUB:
+		case BIOC_SVONLINE:
+			sc->sc_sensors[i].value = SENSOR_DRIVE_ONLINE;
+			sc->sc_sensors[i].status = SENSOR_S_OK;
+			break;
+
+		case BIOC_SVINVALID:
+			/* FALLTRHOUGH */
+		default:
+			sc->sc_sensors[i].value = 0; /* unknown */
+			sc->sc_sensors[i].status = SENSOR_S_UNKNOWN;
+		}
+
+	}
 }
 #endif /* NBIO > 0 */
 
@@ -1663,10 +1770,6 @@ arc_alloc_ccbs(struct arc_softc *sc)
 
 	sc->sc_ccbs = malloc(sizeof(struct arc_ccb) * sc->sc_req_count,
 	    M_DEVBUF, M_WAITOK);
-	if (sc->sc_ccbs == NULL) {
-		printf("%s: unable to allocate ccbs\n", DEVNAME(sc));
-		return (1);
-	}
 	bzero(sc->sc_ccbs, sizeof(struct arc_ccb) * sc->sc_req_count);
 
 	sc->sc_requests = arc_dmamem_alloc(sc,

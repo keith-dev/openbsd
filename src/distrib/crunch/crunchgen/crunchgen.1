@@ -1,4 +1,4 @@
-.\"	$OpenBSD: crunchgen.1,v 1.18 2005/08/04 05:08:15 jmc Exp $
+.\"	$OpenBSD: crunchgen.1,v 1.20 2006/10/15 15:31:06 jmc Exp $
 .\"
 .\"
 .\" Copyright (c) 1994 University of Maryland
@@ -40,6 +40,7 @@
 .Op Fl e Ar exec-file-name
 .Op Fl L Ar lib-dir
 .Op Fl m Ar makefile-name
+.Op Fl O Ar objdir-name
 .Ar conf-file
 .Ek
 .Sh DESCRIPTION
@@ -112,6 +113,13 @@ Set output Makefile name to
 .Ar makefile-name .
 The default name is
 .Dq Ao conf-name Ac Ns \&.mk .
+.It Fl O Ar objdir-name
+Specify an object directory to use.
+It defaults to
+.Dq obj ,
+though for cross building purposes it can be used to specify
+obj.${HOST}.${MACHINE}.
+Normally used with the make variable ${MAKEOBJDIR}.
 .It Fl q
 Quiet operation.
 Status messages are suppressed.

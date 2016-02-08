@@ -1,4 +1,4 @@
-/*	$OpenBSD: entries.c,v 1.61 2006/07/09 01:47:20 joris Exp $	*/
+/*	$OpenBSD: entries.c,v 1.75 2007/02/22 06:42:09 otto Exp $	*/
 /*
  * Copyright (c) 2006 Joris Vink <joris@openbsd.org>
  *
@@ -15,10 +15,11 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
-#include "includes.h"
+#include <errno.h>
+#include <string.h>
+#include <unistd.h>
 
 #include "cvs.h"
-#include "log.h"
 
 #define CVS_ENTRIES_NFIELDS	6
 #define CVS_ENTRIES_DELIM	'/'
@@ -38,13 +39,17 @@ cvs_ent_open(const char *dir)
 	ep = (CVSENTRIES *)xmalloc(sizeof(*ep));
 	memset(ep, 0, sizeof(*ep));
 
-	cvs_path_cat(dir, CVS_PATH_ENTRIES, buf, sizeof(buf));
+	(void)xsnprintf(buf, sizeof(buf), "%s/%s", dir, CVS_PATH_ENTRIES);
+
 	ep->cef_path = xstrdup(buf);
 
-	cvs_path_cat(dir, CVS_PATH_BACKUPENTRIES, buf, sizeof(buf));
+	(void)xsnprintf(buf, sizeof(buf), "%s/%s",
+	    dir, CVS_PATH_BACKUPENTRIES);
+
 	ep->cef_bpath = xstrdup(buf);
 
-	cvs_path_cat(dir, CVS_PATH_LOGENTRIES, buf, sizeof(buf));
+	(void)xsnprintf(buf, sizeof(buf), "%s/%s", dir, CVS_PATH_LOGENTRIES);
+
 	ep->cef_lpath = xstrdup(buf);
 
 	TAILQ_INIT(&(ep->cef_ent));
@@ -69,8 +74,8 @@ cvs_ent_open(const char *dir)
 	if ((fp = fopen(ep->cef_lpath, "r")) != NULL) {
 		while (fgets(buf, sizeof(buf), fp)) {
 			len = strlen(buf);
-			if (len > 0 && buf[strlen(buf) - 1] == '\n')
-				buf[strlen(buf) - 1] = '\0';
+			if (len > 0 && buf[len - 1] == '\n')
+				buf[len - 1] = '\0';
 
 			p = &buf[1];
 
@@ -82,9 +87,12 @@ cvs_ent_open(const char *dir)
 			} else if (buf[0] == 'R') {
 				ent = cvs_ent_parse(p);
 				line = ent_get_line(ep, ent->ce_name);
-				if (line != NULL)
+				if (line != NULL) {
 					TAILQ_REMOVE(&(ep->cef_ent), line,
 					    entries_list);
+					xfree(line->buf);
+					xfree(line);
+				}
 				cvs_ent_free(ent);
 			}
 		}
@@ -99,11 +107,11 @@ struct cvs_ent *
 cvs_ent_parse(const char *entry)
 {
 	int i;
+	struct tm t;
 	struct cvs_ent *ent;
 	char *fields[CVS_ENTRIES_NFIELDS], *buf, *sp, *dp;
 
-	buf = xstrdup(entry);
-	sp = buf;
+	buf = sp = xstrdup(entry);
 	i = 0;
 	do {
 		dp = strchr(sp, CVS_ENTRIES_DELIM);
@@ -116,7 +124,7 @@ cvs_ent_parse(const char *entry)
 	if (i < CVS_ENTRIES_NFIELDS)
 		fatal("missing fields in entry line '%s'", entry);
 
-	ent = (struct cvs_ent *)xmalloc(sizeof(*ent));
+	ent = xmalloc(sizeof(*ent));
 	ent->ce_buf = buf;
 
 	if (*fields[0] == '\0')
@@ -143,12 +151,19 @@ cvs_ent_parse(const char *entry)
 		if ((ent->ce_rev = rcsnum_parse(sp)) == NULL)
 			fatal("failed to parse entry revision '%s'", entry);
 
-		if (strcmp(fields[3], CVS_DATE_DUMMY) == 0 ||
+		if (fields[3][0] == '\0' ||
+		    strcmp(fields[3], CVS_DATE_DUMMY) == 0 ||
 		    strncmp(fields[3], "Initial ", 8) == 0 ||
 		    strncmp(fields[3], "Result of merge", 15) == 0)
 			ent->ce_mtime = CVS_DATE_DMSEC;
-		else
-			ent->ce_mtime = cvs_date_parse(fields[3]);
+		else {
+			if (strptime(fields[3], "%a %b %d %T %Y", &t) == NULL)
+				fatal("'%s' is not a valid date", fields[3]);
+			t.tm_isdst = 0;
+			t.tm_gmtoff = 0;
+			ent->ce_mtime = mktime(&t);
+			ent->ce_mtime += t.tm_gmtoff;
+		}
 	}
 
 	ent->ce_conflict = fields[3];
@@ -204,8 +219,8 @@ cvs_ent_close(CVSENTRIES *ep, int writefile)
 
 	if (writefile) {
 		if ((fp = fopen(ep->cef_bpath, "w")) == NULL)
-			fatal("cvs_ent_close: failed to write %s",
-			    ep->cef_path);
+			fatal("cvs_ent_close: fopen: `%s': %s",
+			    ep->cef_path, strerror(errno));
 	}
 
 	while ((l = TAILQ_FIRST(&(ep->cef_ent))) != NULL) {
@@ -221,11 +236,12 @@ cvs_ent_close(CVSENTRIES *ep, int writefile)
 
 	if (writefile) {
 		fputc('D', fp);
+		fputc('\n', fp);
 		(void)fclose(fp);
 
 		if (rename(ep->cef_bpath, ep->cef_path) == -1)
-			fatal("cvs_ent_close: %s: %s", ep->cef_path,
-			     strerror(errno));
+			fatal("cvs_ent_close: rename: `%s'->`%s': %s",
+			    ep->cef_bpath, ep->cef_path, strerror(errno));
 
 		(void)unlink(ep->cef_lpath);
 	}
@@ -256,7 +272,8 @@ cvs_ent_add(CVSENTRIES *ep, const char *line)
 		cvs_log(LP_TRACE, "cvs_ent_add(%s, %s)", ep->cef_path, line);
 
 	if ((fp = fopen(ep->cef_lpath, "a")) == NULL)
-		fatal("cvs_ent_add: failed to open '%s'", ep->cef_lpath);
+		fatal("cvs_ent_add: fopen: `%s': %s",
+		    ep->cef_lpath, strerror(errno));
 
 	fputc('A', fp);
 	fputs(line, fp);
@@ -283,8 +300,8 @@ cvs_ent_remove(CVSENTRIES *ep, const char *name)
 		return;
 
 	if ((fp = fopen(ep->cef_lpath, "a")) == NULL)
-		fatal("cvs_ent_remove: failed to open '%s'",
-		    ep->cef_lpath);
+		fatal("cvs_ent_remove: fopen: `%s': %s", ep->cef_lpath,
+		    strerror(errno));
 
 	fputc('R', fp);
 	fputs(l->buf, fp);
@@ -338,9 +355,9 @@ void
 cvs_parse_tagfile(char *dir, char **tagp, char **datep, int *nbp)
 {
 	FILE *fp;
-	int linenum;
+	int i, linenum;
 	size_t len;
-	char linebuf[128], *tagpath;
+	char linebuf[128], tagpath[MAXPATHLEN];
 
 	if (tagp != NULL)
 		*tagp = NULL;
@@ -351,16 +368,15 @@ cvs_parse_tagfile(char *dir, char **tagp, char **datep, int *nbp)
 	if (nbp != NULL)
 		*nbp = 0;
 
-	tagpath = xmalloc(MAXPATHLEN);
-
-	if (cvs_path_cat(dir, CVS_PATH_TAG, tagpath, MAXPATHLEN) >= MAXPATHLEN)
-		goto out;
+	i = snprintf(tagpath, MAXPATHLEN, "%s/%s", dir, CVS_PATH_TAG);
+	if (i < 0 || i >= MAXPATHLEN)
+		return;
 
 	if ((fp = fopen(tagpath, "r")) == NULL) {
 		if (errno != ENOENT)
 			cvs_log(LP_NOTICE, "failed to open `%s' : %s", tagpath,
 			    strerror(errno));
-		goto out;
+		return;
         }
 
 	linenum = 0;
@@ -399,23 +415,21 @@ cvs_parse_tagfile(char *dir, char **tagp, char **datep, int *nbp)
 		cvs_log(LP_NOTICE, "failed to read line from `%s'", tagpath);
 
 	(void)fclose(fp);
-out:
-	xfree(tagpath);
 }
 
 void
-cvs_write_tagfile(char *dir, char *tag, char *date, int nb)
+cvs_write_tagfile(const char *dir, char *tag, char *date, int nb)
 {
 	FILE *fp;
-	char *tagpath;
+	char tagpath[MAXPATHLEN];
+	int i;
 
 	if (cvs_noexec == 1)
 		return;
 
-	tagpath = xmalloc(MAXPATHLEN);
-
-	if (cvs_path_cat(dir, CVS_PATH_TAG, tagpath, MAXPATHLEN) >= MAXPATHLEN)
-		goto out;
+	i = snprintf(tagpath, MAXPATHLEN, "%s/%s", dir, CVS_PATH_TAG);
+	if (i < 0 || i >= MAXPATHLEN)
+		return;
 
 	if ((tag != NULL) || (date != NULL)) {
 		if ((fp = fopen(tagpath, "w+")) == NULL) {
@@ -423,7 +437,7 @@ cvs_write_tagfile(char *dir, char *tag, char *date, int nb)
 				cvs_log(LP_NOTICE, "failed to open `%s' : %s",
 				    tagpath, strerror(errno));
 			}
-			goto out;
+			return;
 		}
 		if (tag != NULL) {
 			if (nb != 0)
@@ -436,8 +450,5 @@ cvs_write_tagfile(char *dir, char *tag, char *date, int nb)
 		(void)fclose(fp);
 	} else {
 		(void)cvs_unlink(tagpath);
-		goto out;
 	}
-out:
-	xfree(tagpath);
 }

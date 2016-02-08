@@ -1,4 +1,4 @@
-/*	$OpenBSD: value.c,v 1.14 2006/03/17 22:02:58 moritz Exp $	*/
+/*	$OpenBSD: value.c,v 1.16 2007/02/20 16:59:24 moritz Exp $	*/
 /*	$NetBSD: value.c,v 1.6 1997/02/11 09:24:09 mrg Exp $	*/
 
 /*
@@ -34,7 +34,7 @@
 #if 0
 static char sccsid[] = "@(#)value.c	8.1 (Berkeley) 6/6/93";
 #endif
-static const char rcsid[] = "$OpenBSD: value.c,v 1.14 2006/03/17 22:02:58 moritz Exp $";
+static const char rcsid[] = "$OpenBSD: value.c,v 1.16 2007/02/20 16:59:24 moritz Exp $";
 #endif /* not lint */
 
 #include "tip.h"
@@ -57,6 +57,7 @@ void
 vinit(void)
 {
 	char file[FILENAME_MAX], *cp;
+	int written;
 	value_t *p;
 	FILE *fp;
 
@@ -71,15 +72,15 @@ vinit(void)
 	 * Read the .tiprc file in the HOME directory
 	 *  for sets
 	 */
-	if (strlen(value(HOME)) + sizeof("/.tiprc") > sizeof(file)) {
+	written = snprintf(file, sizeof(file), "%s/.tiprc", value(HOME));
+	if (written < 0 || written >= sizeof(file)) {
 		(void)fprintf(stderr, "Home directory path too long: %s\n",
 		    value(HOME));
 	} else {
-		snprintf(file, sizeof file, "%s/.tiprc", value(HOME));
 		if ((fp = fopen(file, "r")) != NULL) {
 			char *tp;
 
-			while (fgets(file, sizeof(file)-1, fp) != NULL) {
+			while (fgets(file, sizeof(file), fp) != NULL) {
 				if (vflag)
 					printf("set %s", file);
 				if ((tp = strrchr(file, '\n')))

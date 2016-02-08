@@ -1,6 +1,6 @@
-/*	$OpenBSD: cvs.c,v 1.107 2006/07/09 01:57:51 joris Exp $	*/
+/*	$OpenBSD: cvs.c,v 1.118 2007/02/24 20:52:38 otto Exp $	*/
 /*
- * Copyright (c) 2006 Joris Vink <joris@openbsd.org>
+ * Copyright (c) 2006, 2007 Joris Vink <joris@openbsd.org>
  * Copyright (c) 2004 Jean-Francois Brousseau <jfb@openbsd.org>
  * All rights reserved.
  *
@@ -25,12 +25,16 @@
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include "includes.h"
+#include <sys/stat.h>
+
+#include <ctype.h>
+#include <errno.h>
+#include <pwd.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
 
 #include "cvs.h"
-#include "config.h"
-#include "log.h"
-#include "file.h"
 #include "remote.h"
 
 extern char *__progname;
@@ -44,6 +48,7 @@ int	cvs_readrc = 1;		/* read .cvsrc on startup */
 int	cvs_trace = 0;
 int	cvs_nolog = 0;
 int	cvs_readonly = 0;
+int	cvs_readonlyfs = 0;
 int	cvs_nocase = 0;	/* set to 1 to disable filename case sensitivity */
 int	cvs_noexec = 0;	/* set to 1 to disable disk operations (-n option) */
 int	cvs_error = -1;	/* set to the correct error code on failure */
@@ -62,8 +67,6 @@ char	*cvs_msg = NULL;
 char	*cvs_tmpdir = CVS_TMPDIR_DEFAULT;
 
 struct cvsroot *current_cvsroot = NULL;
-
-static TAILQ_HEAD(, cvs_var) cvs_variables;
 
 int		cvs_getopt(int, char **);
 void		usage(void);
@@ -113,7 +116,7 @@ void
 usage(void)
 {
 	fprintf(stderr,
-	    "Usage: %s [-flnQqrtvVw] [-d root] [-e editor] [-s var=val] "
+	    "Usage: %s [-flnQqRrtVvw] [-d root] [-e editor] [-s var=val] "
 	    "[-T tmpdir] [-z level] command [...]\n", __progname);
 }
 
@@ -145,6 +148,11 @@ main(int argc, char **argv)
 
 	if ((envstr = getenv("CVSREAD")) != NULL)
 		cvs_readonly = 1;
+
+	if ((envstr = getenv("CVSREADONLYFS")) != NULL) {
+		cvs_readonlyfs = 1;
+		cvs_nolog = 1;
+	}
 
 	if ((cvs_homedir = getenv("HOME")) == NULL) {
 		if ((pw = getpwuid(getuid())) == NULL)
@@ -248,17 +256,14 @@ main(int argc, char **argv)
 	}
 
 	if (current_cvsroot->cr_method != CVS_METHOD_LOCAL) {
-		if (cvs_server_active == 1)
-			fatal("remote Root while already running as server?");
-
-		cvs_client_connect_to_server();
 		cmdp->cmd(cmd_argc, cmd_argv);
 		cvs_cleanup();
 		return (0);
 	}
 
-	i = snprintf(fpath, sizeof(fpath), "%s/%s", current_cvsroot->cr_dir,
-	    CVS_PATH_ROOT);
+	(void)xsnprintf(fpath, sizeof(fpath), "%s/%s",
+	    current_cvsroot->cr_dir, CVS_PATH_ROOT);
+
 	if (stat(fpath, &st) == -1 && cvs_cmdop != CVS_OP_INIT) {
 		if (errno == ENOENT)
 			fatal("repository '%s' does not exist",
@@ -288,8 +293,9 @@ cvs_getopt(int argc, char **argv)
 {
 	int ret;
 	char *ep;
+	const char *errstr;
 
-	while ((ret = getopt(argc, argv, "b:d:e:fHlnQqrs:T:tvVwz:")) != -1) {
+	while ((ret = getopt(argc, argv, "b:d:e:fHlnQqRrs:T:tvVwz:")) != -1) {
 		switch (ret) {
 		case 'b':
 			/*
@@ -313,6 +319,7 @@ cvs_getopt(int argc, char **argv)
 			break;
 		case 'n':
 			cvs_noexec = 1;
+			cvs_nolog = 1;
 			break;
 		case 'Q':
 			verbosity = 0;
@@ -321,6 +328,10 @@ cvs_getopt(int argc, char **argv)
 			/*
 			 * Be quiet. This is the default in OpenCVS.
 			 */
+			break;
+		case 'R':
+			cvs_readonlyfs = 1;
+			cvs_nolog = 1;
 			break;
 		case 'r':
 			cvs_readonly = 1;
@@ -360,12 +371,9 @@ cvs_getopt(int argc, char **argv)
 			 */
 			break;
 		case 'z':
-			cvs_compress = (int)strtol(optarg, &ep, 10);
-			if (*ep != '\0')
-				fatal("error parsing compression level");
-			if (cvs_compress < 0 || cvs_compress > 9)
-				fatal("gzip compression level must be "
-				    "between 0 and 9");
+			cvs_compress = strtonum(optarg, 0, 9, &errstr);
+			if (errstr != NULL)
+				fatal("cvs_compress: %s", errstr);
 			break;
 		default:
 			usage();
@@ -391,16 +399,16 @@ static void
 cvs_read_rcfile(void)
 {
 	char rcpath[MAXPATHLEN], linebuf[128], *lp, *p;
-	int linenum = 0;
+	int i, linenum;
 	size_t len;
 	struct cvs_cmd *cmdp;
 	FILE *fp;
 
-	if (strlcpy(rcpath, cvs_homedir, sizeof(rcpath)) >= sizeof(rcpath) ||
-	    strlcat(rcpath, "/", sizeof(rcpath)) >= sizeof(rcpath) ||
-	    strlcat(rcpath, CVS_PATH_RC, sizeof(rcpath)) >= sizeof(rcpath)) {
-		errno = ENAMETOOLONG;
-		cvs_log(LP_ERR, "%s", rcpath);
+	linenum = 0;
+
+	i = snprintf(rcpath, MAXPATHLEN, "%s/%s", cvs_homedir, CVS_PATH_RC);
+	if (i < 0 || i >= MAXPATHLEN) {
+		cvs_log(LP_ERRNO, "%s", rcpath);
 		return;
 	}
 
@@ -514,7 +522,7 @@ cvs_var_set(const char *var, const char *val)
 }
 
 /*
- * cvs_var_set()
+ * cvs_var_unset()
  *
  * Remove any entry for the variable <var>.
  * Returns 0 on success, or -1 on failure.

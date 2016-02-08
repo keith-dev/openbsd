@@ -1,4 +1,4 @@
-/*	$OpenBSD: move.c,v 1.7 2003/06/03 03:01:38 millert Exp $	*/
+/*	$OpenBSD: move.c,v 1.9 2006/12/14 10:14:05 martin Exp $	*/
 
 /*
  * Copyright (c) 1980, 1993
@@ -33,7 +33,7 @@
 #if 0
 static char sccsid[] = "@(#)move.c	8.1 (Berkeley) 5/31/93";
 #else
-static char rcsid[] = "$OpenBSD: move.c,v 1.7 2003/06/03 03:01:38 millert Exp $";
+static char rcsid[] = "$OpenBSD: move.c,v 1.9 2006/12/14 10:14:05 martin Exp $";
 #endif
 #endif /* not lint */
 
@@ -77,7 +77,7 @@ domove(okay)
 	int     l = 0;		/* last man */
 
 	bestmove = -9999999.;
-	if (okay) {	 /* see if comp should double */
+	if (okay && dflag != 0) {	 /* see if comp should double */
 		if (gvalue < 64 && dlast != cturn && dblgood()) {
 			addstr(*Colorptr);
 			dble();	/* double */
@@ -335,10 +335,10 @@ pickmove()
 	struct BOARD *next;	/* next move */
 
 #ifdef DEBUG
-	if (trace == NULL)
-		trace = fopen("bgtrace", "w");
-	fprintf(trace, "\nRoll:  %d %d%s\n", D0, D1, race ? " (race)" : "");
-	fflush(trace);
+	if (ftrace == NULL)
+		ftrace = fopen("bgtrace", "w");
+	fprintf(ftrace, "\nRoll:  %d %d%s\n", D0, D1, race ? " (race)" : "");
+	fflush(ftrace);
 #endif
 	do {			/* compare moves */
 		boardcopy(checkq);

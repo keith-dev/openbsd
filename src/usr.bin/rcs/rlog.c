@@ -1,4 +1,4 @@
-/*	$OpenBSD: rlog.c,v 1.55 2006/05/27 05:49:14 ray Exp $	*/
+/*	$OpenBSD: rlog.c,v 1.57 2007/02/27 07:59:13 xsa Exp $	*/
 /*
  * Copyright (c) 2005 Joris Vink <joris@openbsd.org>
  * Copyright (c) 2005, 2006 Xavier Santolaria <xsa@openbsd.org>
@@ -25,7 +25,12 @@
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include "includes.h"
+#include <err.h>
+#include <libgen.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
 
 #include "rcsprog.h"
 #include "diff.h"
@@ -138,7 +143,7 @@ rlog_main(int argc, char **argv)
 	for (i = 0; i < argc; i++) {
 		fd = rcs_choosefile(argv[i], fpath, sizeof(fpath));
 		if (fd < 0) {
-			warnx("%s", fpath);
+			warn("%s", fpath);
 			continue;
 		}
 

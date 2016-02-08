@@ -1,4 +1,4 @@
-.\"	$OpenBSD: ipsec.conf.5,v 1.97 2006/09/15 14:03:35 jmc Exp $
+.\"	$OpenBSD: ipsec.conf.5,v 1.113 2007/03/06 18:26:34 hshoexer Exp $
 .\"
 .\" Copyright (c) 2004 Mathieu Sauve-Frankel  All rights reserved.
 .\"
@@ -50,9 +50,6 @@ are established,
 which detail how the desired protection will be achieved.
 IPsec uses flows
 to determine whether to apply security services to an IP packet or not.
-Flows and SAs can be loaded, viewed, and modified using the
-.Xr ipsecctl 8
-utility.
 .Pp
 Generally speaking
 an automated keying daemon,
@@ -75,20 +72,40 @@ section of
 .Xr isakmpd 8
 for information on the types of authentication available,
 and the procedures for setting them up.
-After that it's simply a case of running the daemon.
-Note that
-.Xr isakmpd 8
-will probably need to be run with at least the
+.Pp
+The keying daemon,
+.Xr isakmpd 8 ,
+can be enabled to run at boot time via the
+.Va isakmpd_flags
+variable in
+.Xr rc.conf.local 8 .
+Note that it will probably need to be run with at least the
 .Fl K
 option, to avoid
 .Xr keynote 4
 policy checking.
+The
+.Nm
+configuration itself is loaded at boot time
+if the variable
+.Va ipsec
+is set to
+.Dv YES
+in
+.Xr rc.conf.local 8 .
+A utility called
+.Xr ipsecctl 8
+is also available to load
+.Nm
+configurations, and can additionally be used
+to view and modify IPsec flows.
 .Pp
 An alternative method of setting up SAs is also possible using
 manual keying.
-Manual keying can be convenient for quick setups and testing.
-These procedures are documented within this page.
-.Pp
+Manual keying is not recommended,
+but can be convenient for quick setups and testing.
+Those procedures are documented within this page.
+.Sh IPSEC.CONF FILE FORMAT
 Lines beginning with
 .Sq #
 and empty lines are regarded as comments,
@@ -138,8 +155,8 @@ is used to set up flows and SAs automatically using
 .Xr isakmpd 8 .
 Some examples of setting up automatic keying:
 .Bd -literal -offset 3n
-# Set up two tunnels:
-# First between the machines 192.168.3.1 and 192.168.3.2
+# Set up a VPN:
+# First between the gateway machines 192.168.3.1 and 192.168.3.2
 # Second between the networks 10.1.1.0/24 and 10.1.2.0/24
 ike esp from 192.168.3.1 to 192.168.3.2
 ike esp from 10.1.1.0/24 to 10.1.2.0/24 peer 192.168.3.2
@@ -257,12 +274,21 @@ is identical to
 .Ar remote ,
 this option is generally not needed.
 .It Xo
-.Ic main auth Ar algorithm
+.Ar mode
+.Ic auth Ar algorithm
 .Ic enc Ar algorithm
 .Ic group Ar group
 .Xc
-These parameters define the cryptographic transforms to be used for
-main mode.
+These parameters define the mode and cryptographic transforms to be
+used for the phase 1 negotiation.
+During phase 1
+the machines authenticate and set up an encrypted channel.
+.Pp
+The mode can be either
+.Ar main ,
+which specifies main mode, or
+.Ar aggressive ,
+which specifies aggressive mode.
 Possible values for
 .Ic auth ,
 .Ic enc ,
@@ -274,6 +300,7 @@ are described below in
 If omitted,
 .Xr ipsecctl 8
 will use the default values
+.Ar main ,
 .Ar hmac-sha1 ,
 .Ar aes ,
 and
@@ -284,7 +311,10 @@ and
 .Ic group Ar group
 .Xc
 These parameters define the cryptographic transforms to be used for
-quick mode.
+the phase 2 negotiation.
+During phase 2
+the actual IPsec negotiations happen.
+.Pp
 Possible values for
 .Ic auth ,
 .Ic enc ,
@@ -337,6 +367,41 @@ for authentication.
 If this option is not specified,
 public key authentication is used (see
 .Xr isakmpd 8 ) .
+.It Ic tag Ar string
+Add a
+.Xr pf 4
+tag to all packets of phase 2 SAs created for this connection.
+This will allow matching packets for this connection by defining
+rules in
+.Xr pf.conf 5
+using the
+.Cm tagged
+keyword.
+.Pp
+The following variables can be used in tags to include information
+from the remote peer on runtime:
+.Pp
+.Bl -tag -width $domain -compact -offset indent
+.It Ar $id
+The remote phase 1 ID.
+It will be expanded to
+.Ar id-type/id-value ,
+e.g.\&
+.Ar fqdn/foo.bar.org .
+.It Ar $domain
+Extract the domain from IDs of type FQDN or UFQDN.
+.El
+.Pp
+For example, if the ID is
+.Ar fqdn/foo.bar.org
+or
+.Ar ufqdn/user@bar.org ,
+.Dq ipsec-$domain
+expands to
+.Dq ipsec-bar.org .
+The variable expansion for the
+.Ar tag
+directive occurs only at runtime, not during configuration file parse time.
 .El
 .Sh PACKET FILTERING
 IPsec traffic appears unencrypted on the
@@ -349,6 +414,34 @@ packet filter,
 The grammar for the packet filter is described in
 .Xr pf.conf 5 .
 .Pp
+The following components are relevant to filtering IPsec traffic:
+.Bl -ohang -offset indent
+.It external interface
+Interface for ISAKMP traffic and encapsulated IPsec traffic.
+.It proto udp port 500
+ISAKMP traffic on the external interface.
+.It proto udp port 4500
+ISAKMP NAT-Traversal traffic on the external interface.
+.It proto ah \*(Ba esp
+Encapsulated IPsec traffic
+on the external interface.
+.It enc0
+Interface for outgoing traffic before it's been encapsulated,
+and incoming traffic after it's been decapsulated.
+State on this interface should be interface bound;
+see
+.Xr enc 4
+for further information.
+.It proto ipencap
+[tunnel mode only]
+IP-in-IP traffic flowing between gateways
+on the enc0 interface.
+.It tagged ipsec-example.org
+Match traffic of phase 2 SAs using the
+.Ic tag
+keyword.
+.El
+.Pp
 If the filtering rules specify to block everything by default,
 the following rule
 would ensure that IPsec traffic never hits the packet filtering engine,
@@ -358,35 +451,67 @@ set skip on enc0
 .Ed
 .Pp
 In the following example, all traffic is blocked by default.
-IPsec traffic from gateways {192.168.3.1, 192.168.3.2} and
+IPsec-related traffic from gateways {192.168.3.1, 192.168.3.2} and
 networks {10.0.1.0/24, 10.0.2.0/24} is permitted.
-The external interface, sk0,
-has to allow the keying daemons to talk to each other.
 .Bd -literal -offset indent
 block on sk0
 block on enc0
 
-pass  in on sk0 proto esp from 192.168.3.2 to 192.168.3.1
-pass out on sk0 proto esp from 192.168.3.1 to 192.168.3.2
 pass  in on sk0 proto udp from 192.168.3.2 to 192.168.3.1 \e
 	port {500, 4500}
 pass out on sk0 proto udp from 192.168.3.1 to 192.168.3.2 \e
 	port {500, 4500}
 
-pass  in on enc0 proto ipencap from 192.168.3.2 to 192.168.3.1
-pass out on enc0 proto ipencap from 192.168.3.1 to 192.168.3.2
-pass  in on enc0 from 10.0.2.0/24 to 10.0.1.0/24
-pass out on enc0 from 10.0.1.0/24 to 10.0.2.0/24
+pass  in on sk0 proto esp from 192.168.3.2 to 192.168.3.1
+pass out on sk0 proto esp from 192.168.3.1 to 192.168.3.2
+
+pass  in on enc0 proto ipencap from 192.168.3.2 to 192.168.3.1 \e
+	keep state (if-bound)
+pass out on enc0 proto ipencap from 192.168.3.1 to 192.168.3.2 \e
+	keep state (if-bound)
+pass  in on enc0 from 10.0.2.0/24 to 10.0.1.0/24 \e
+	keep state (if-bound)
+pass out on enc0 from 10.0.1.0/24 to 10.0.2.0/24 \e
+	keep state (if-bound)
 .Ed
 .Pp
-Connections on enc0 for which state is being kept
-should be interface bound,
-to avoid permitting unencrypted traffic should
-.Xr isakmpd 8
-exit.
-For example:
+.Xr pf 4
+has the ability to filter IPsec-related packets
+based on an arbitrary
+.Em tag
+specified within a ruleset.
+The tag is used as an internal marker
+which can be used to identify the packets later on.
+This could be helpful,
+for example,
+in scenarios where users are connecting in from differing IP addresses,
+or to support queue-based bandwidth control,
+since the enc0 interface does not support it.
+.Pp
+The following
+.Xr pf.conf 5
+fragment uses queues for all IPsec traffic with special
+handling for developers and employees:
 .Bd -literal -offset indent
-pass on enc0 from 192.168.3.1 to any keep state (if-bound)
+altq on sk0 cbq bandwidth 1000Mb \e
+	queue { deflt, developers, employees, ipsec }
+    queue deflt bandwidth 10% priority 0 cbq(default ecn)
+    queue developers bandwidth 75% priority 7 cbq(borrow red)
+    queue employees bandwidth 5% cbq(red)
+    queue ipsec bandwidth 10% cbq(red)
+
+pass out on sk0 proto esp queue ipsec
+
+pass out on sk0 tagged ipsec-developers.bar.org queue developers
+pass out on sk0 tagged ipsec-employees.bar.org queue employees
+.Ed
+.Pp
+The tags will be assigned by the following
+.Nm
+example:
+.Bd -literal -offset indent
+ike esp from 10.1.1.0/24 to 10.1.2.0/24 peer 192.168.3.2 \e
+	tag ipsec-$domain
 .Ed
 .Sh CRYPTO TRANSFORMS
 It is very important that keys are not guessable.
@@ -404,7 +529,7 @@ keyword:
 .Bl -column "authenticationXX" "Key Length" -offset indent -compact
 .It Em Authentication	Key Length
 .It Li hmac-md5 Ta "128 bits"
-.It Li hmac-ripemd160 Ta "160 bits" Ta "[quick mode only]"
+.It Li hmac-ripemd160 Ta "160 bits" Ta "[phase 2 only]"
 .It Li hmac-sha1 Ta "160 bits"
 .It Li hmac-sha2-256 Ta "256 bits"
 .It Li hmac-sha2-384 Ta "384 bits"
@@ -420,10 +545,11 @@ keyword:
 .It Li des Ta "56 bits"
 .It Li 3des Ta "168 bits"
 .It Li aes Ta "128 bits"
-.It Li aesctr Ta "160 bits" Ta "[quick mode only]"
+.It Li aesctr Ta "160 bits" Ta "[phase 2 only]"
 .It Li blowfish Ta "160 bits"
 .It Li cast Ta "128 bits"
 .It Li skipjack Ta "80 bits"
+.It Li null Ta "(none)" Ta "[phase 2 only]"
 .El
 .Pp
 Use of DES or Skipjack as an encryption algorithm is not recommended
@@ -431,9 +557,16 @@ Use of DES or Skipjack as an encryption algorithm is not recommended
 Furthermore, attacks on Skipjack have shown severe weaknesses
 in its structure.
 .Pp
-Note that DES requires 8 bytes to form a 56-bit key and 3DES requires 24 bytes
+DES requires 8 bytes to form a 56-bit key and 3DES requires 24 bytes
 to form its 168-bit key.
 This is because the most significant bit of each byte is used for parity.
+.Pp
+The keysize of AES-CTR is actually 128-bit.
+However as well as the key, a 32-bit nonce has to be supplied.
+Thus 160 bits of key material have to be supplied.
+.Pp
+Using NULL with ESP will only provide authentication.
+This is useful in setups where AH can not be used, e.g. when NAT is involved.
 .Pp
 The following group types are permitted with the
 .Ic group
@@ -441,15 +574,15 @@ keyword:
 .Pp
 .Bl -column "authenticationXX" "Key Length" -offset indent -compact
 .It Em Group	Size
-.It Li modp768  Ta 768
-.It Li modp1024 Ta 1024
-.It Li modp1536 Ta 1536
-.It Li modp2048 Ta 2048
-.It Li modp3072 Ta 3072
-.It Li modp4096 Ta 4096
-.It Li modp6144 Ta 6144
-.It Li modp8192 Ta 8192
-.It Li none Ta 0 Ta [quick mode only]
+.It Li modp768  Ta 768 Ta [DH group 1]
+.It Li modp1024 Ta 1024 Ta [DH group 2]
+.It Li modp1536 Ta 1536 Ta [DH group 5]
+.It Li modp2048 Ta 2048 Ta [DH group 14]
+.It Li modp3072 Ta 3072 Ta [DH group 15]
+.It Li modp4096 Ta 4096 Ta [DH group 16]
+.It Li modp6144 Ta 6144 Ta [DH group 17]
+.It Li modp8192 Ta 8192 Ta [DH group 18]
+.It Li none Ta 0 Ta [phase 2 only]
 .El
 .Sh MANUAL FLOWS
 In this scenario,
@@ -578,7 +711,7 @@ In this scenario,
 .Nm
 is used to set up SAs manually.
 The security parameters for a flow
-are stored in the Security Association Database (SAD).
+are stored in the Security Association Database (SADB).
 An example of setting up an SA:
 .Bd -literal -offset 3n
 # Set up an IPsec SA for flows between 192.168.3.14 and 192.168.3.12

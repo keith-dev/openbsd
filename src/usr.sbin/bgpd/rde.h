@@ -1,4 +1,4 @@
-/*	$OpenBSD: rde.h,v 1.95 2006/05/28 23:24:15 claudio Exp $ */
+/*	$OpenBSD: rde.h,v 1.97 2007/01/26 17:40:49 claudio Exp $ */
 
 /*
  * Copyright (c) 2003, 2004 Claudio Jeker <claudio@openbsd.org> and
@@ -240,6 +240,20 @@ struct pt_entry6 {
 	struct in6_addr			 prefix6;
 };
 
+struct pt_context {
+	union {
+		struct pt_entry		p;
+		struct pt_entry4	p4;
+		struct pt_entry6	p6;
+	}			pu;
+#define ctx_p			pu.p
+#define ctx_p4			pu.p4
+#define ctx_p6			pu.p6
+	/* only count and done should be accessed by callers */
+	unsigned int		count;
+	int			done;
+};
+
 struct prefix {
 	LIST_ENTRY(prefix)		 prefix_l, path_l;
 	struct rde_aspath		*aspath;
@@ -356,8 +370,8 @@ void		 up_generate_default(struct filter_head *, struct rde_peer *,
 int		 up_dump_prefix(u_char *, int, struct uplist_prefix *,
 		     struct rde_peer *);
 int		 up_dump_attrnlri(u_char *, int, struct rde_peer *);
-char		*up_dump_mp_unreach(u_char *, u_int16_t *, struct rde_peer *);
-char		*up_dump_mp_reach(u_char *, u_int16_t *, struct rde_peer *);
+u_char		*up_dump_mp_unreach(u_char *, u_int16_t *, struct rde_peer *);
+u_char		*up_dump_mp_reach(u_char *, u_int16_t *, struct rde_peer *);
 
 /* rde_prefix.c */
 void		 pt_init(void);
@@ -370,6 +384,8 @@ void		 pt_remove(struct pt_entry *);
 struct pt_entry	*pt_lookup(struct bgpd_addr *);
 void		 pt_dump(void (*)(struct pt_entry *, void *), void *,
 		     sa_family_t);
+void		 pt_dump_r(void (*)(struct pt_entry *, void *), void *,
+		     sa_family_t, struct pt_context *);
 
 /* rde_filter.c */
 enum filter_actions rde_filter(struct rde_aspath **, struct filter_head *,

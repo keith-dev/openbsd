@@ -75,10 +75,6 @@ getdiskbyname(const char *name)
 	cgetstr(buf, "b0", &dp->d_boot0);
 	cgetstr(buf, "b1", &dp->d_boot1);
 
-	if (cgetstr(buf, "ty", &cq) > 0 && strcmp(cq, "removable") == 0)
-		dp->d_flags |= D_REMOVABLE;
-	else  if (cq && strcmp(cq, "simulated") == 0)
-		dp->d_flags |= D_RAMDISK;
 	if (cgetcap(buf, "sf", ':') != NULL)
 		dp->d_flags |= D_BADSECT;
 

@@ -1,4 +1,4 @@
-# $OpenBSD: Makefile.cross,v 1.19 2006/06/16 17:43:54 mickey Exp $
+# $OpenBSD: Makefile.cross,v 1.23 2007/02/06 17:17:18 mickey Exp $
 
 cross-tools:	cross-includes cross-binutils cross-gcc cross-lib
 cross-distrib:	cross-tools cross-bin cross-etc-root-var
@@ -15,8 +15,12 @@ TARGET_ARCH=	m68k
 TARGET_ARCH=	m88k
 .elif	(${TARGET} == "sgi")
 TARGET_ARCH=	mips64
+.elif	(${TARGET} == "solbourne")
+TARGET_ARCH=	sparc
 .elif	(${TARGET} == "macppc" || ${TARGET} == "mvmeppc")
 TARGET_ARCH=	powerpc
+.elif	(${TARGET} == "landisk")
+TARGET_ARCH=	sh
 .else
 TARGET_ARCH=	${TARGET}
 .endif
@@ -68,7 +72,9 @@ cross-gcc:	${CROSSGCC}
 
 cross-env:
 	@echo ${CROSSENV} MACHINE=${TARGET} \
-	    MACHINE_ARCH=`cat ${CROSSDIR}/TARGET_ARCH`
+	    MACHINE_ARCH=`cat ${CROSSDIR}/TARGET_ARCH` \
+	    BSDOBJDIR=${CROSSDIR}/usr/obj \
+	    BSDSRCDIR=${.CURDIR} MAKEOBJDIR=obj.${MACHINE}.${TARGET}
 
 ${CROSSDIRS}:
 	@-mkdir -p ${CROSSDIR}
@@ -194,8 +200,7 @@ ${CROSSBINUTILS}:	${CROSSINCLUDES}
 	@touch ${CROSSBINUTILS}
 
 # bsd.own.mk can't do it for us
-.if ${TARGET_ARCH} == "alpha" || \
-    ${TARGET_ARCH} == "m68k" || ${TARGET_ARCH} == "m88k" || \
+.if ${TARGET_ARCH} == "m68k" || ${TARGET_ARCH} == "m88k" || \
     ${TARGET_ARCH} == "sparc" || ${TARGET_ARCH} == "vax"
 TARGET_USE_GCC3=No
 .else

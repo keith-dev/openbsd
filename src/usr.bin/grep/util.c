@@ -1,4 +1,4 @@
-/*	$OpenBSD: util.c,v 1.31 2006/02/09 09:54:47 otto Exp $	*/
+/*	$OpenBSD: util.c,v 1.34 2006/12/26 20:59:23 otto Exp $	*/
 
 /*-
  * Copyright (c) 1999 James Howard and Dag-Erling Coïdan Smørgrav
@@ -86,6 +86,8 @@ grep_tree(char **argv)
 			break;
 		}
 	}
+	if (errno)
+		err(2, "fts_read");
 
 	return c;
 }
@@ -119,6 +121,7 @@ procfile(char *fn)
 	ln.line_no = 0;
 	ln.len = 0;
 	linesqueued = 0;
+	tail = 0;
 	ln.off = -1;
 
 	if (Bflag > 0)
@@ -479,8 +482,9 @@ grep_search(fastgrep_t *fg, unsigned char *data, size_t dataLen, regmatch_t *pma
 			if (grep_cmp(fg->pattern, data + j, fg->patternLen) == -1) {
 				pmatch->rm_so = j;
 				pmatch->rm_eo = j + fg->patternLen;
-				if (!fg->wmatch || wmatch(data, dataLen,
-				    pmatch->rm_so, pmatch->rm_eo)) {
+				if (fg->patternLen == 0 || !fg->wmatch ||
+				    wmatch(data, dataLen, pmatch->rm_so,
+				    pmatch->rm_eo)) {
 					rtrnVal = 0;
 					break;
 				}

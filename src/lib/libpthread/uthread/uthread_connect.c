@@ -1,4 +1,4 @@
-/*	$OpenBSD: uthread_connect.c,v 1.5 2003/12/23 19:31:05 brad Exp $	*/
+/*	$OpenBSD: uthread_connect.c,v 1.7 2006/10/03 02:59:36 kurt Exp $	*/
 /*
  * Copyright (c) 1995-1998 John Birrell <jb@cimlogic.com.au>
  * All rights reserved.
@@ -52,25 +52,43 @@ connect(int fd, const struct sockaddr * name, socklen_t namelen)
 
 	if ((ret = _FD_LOCK(fd, FD_RDWR, NULL)) == 0) {
 		if ((ret = _thread_sys_connect(fd, name, namelen)) < 0) {
-			if (!(_thread_fd_table[fd]->flags & O_NONBLOCK) &&
+			if (!(_thread_fd_table[fd]->status_flags->flags & O_NONBLOCK) &&
 			((errno == EWOULDBLOCK) || (errno == EINPROGRESS) ||
 			 (errno == EALREADY) || (errno == EAGAIN))) {
 				curthread->data.fd.fd = fd;
+
+				/* Reset the interrupted operation flag: */
+				curthread->interrupted = 0;
+				curthread->closing_fd = 0;
 
 				/* Set the timeout: */
 				_thread_kern_set_timeout(NULL);
 				_thread_kern_sched_state(PS_FDW_WAIT, __FILE__, __LINE__);
 
-				tmpnamelen = sizeof(tmpname);
-				/* 0 now lets see if it really worked */
-				if (((ret = _thread_sys_getpeername(fd, &tmpname, &tmpnamelen)) < 0) && (errno == ENOTCONN)) {
+				/*
+				 * Check if the operation was
+				 * interrupted by a signal or
+				 * a closing fd.
+				 */
+				if (curthread->interrupted) {
+					errno = EINTR;
+					ret = -1;
+				} else if (curthread->closing_fd) {
+					errno = EBADF;
+					ret = -1;
+				} else {
+					tmpnamelen = sizeof(tmpname);
+					/* 0 now lets see if it really worked */
+					if (((ret = _thread_sys_getpeername(fd, &tmpname, &tmpnamelen)) < 0) &&
+					    (errno == ENOTCONN)) {
 
-					/*
-					 * Get the error, this function
-					 * should not fail 
-					 */
-					errnolen = sizeof(errno);
-					_thread_sys_getsockopt(fd, SOL_SOCKET, SO_ERROR, &errno, &errnolen);
+						/*
+						 * Get the error, this function
+						 * should not fail 
+						 */
+						errnolen = sizeof(errno);
+						_thread_sys_getsockopt(fd, SOL_SOCKET, SO_ERROR, &errno, &errnolen);
+					}
 				}
 			} else {
 				ret = -1;

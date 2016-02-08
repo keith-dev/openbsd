@@ -1,5 +1,5 @@
-/*	$OpenBSD: route6d.c,v 1.45 2006/06/16 13:51:21 claudio Exp $	*/
-/*	$KAME: route6d.c,v 1.94 2002/10/26 20:08:55 itojun Exp $	*/
+/*	$OpenBSD: route6d.c,v 1.47 2006/12/15 06:16:49 itojun Exp $	*/
+/*	$KAME: route6d.c,v 1.111 2006/10/25 06:38:13 jinmei Exp $	*/
 
 /*
  * Copyright (C) 1995, 1996, 1997, and 1998 WIDE Project.
@@ -31,7 +31,7 @@
  */
 
 #if 0
-static char _rcsid[] = "$OpenBSD: route6d.c,v 1.45 2006/06/16 13:51:21 claudio Exp $";
+static char _rcsid[] = "$OpenBSD: route6d.c,v 1.47 2006/12/15 06:16:49 itojun Exp $";
 #endif
 
 #include <stdio.h>
@@ -47,9 +47,7 @@ static char _rcsid[] = "$OpenBSD: route6d.c,v 1.45 2006/06/16 13:51:21 claudio E
 #include <errno.h>
 #include <err.h>
 #include <util.h>
-#ifdef HAVE_POLL_H
 #include <poll.h>
-#endif
 
 #include <sys/types.h>
 #include <sys/param.h>
@@ -59,9 +57,6 @@ static char _rcsid[] = "$OpenBSD: route6d.c,v 1.45 2006/06/16 13:51:21 claudio E
 #include <sys/sysctl.h>
 #include <sys/uio.h>
 #include <net/if.h>
-#if defined(__FreeBSD__) && __FreeBSD__ >= 3
-#include <net/if_var.h>
-#endif /* __FreeBSD__ >= 3 */
 #define	KERNEL	1
 #define	_KERNEL	1
 #include <net/route.h>
@@ -138,14 +133,7 @@ int	nifc;		/* number of valid ifc's */
 struct	ifc **index2ifc;
 int	nindex2ifc;
 struct	ifc *loopifcp = NULL;	/* pointing to loopback */
-#ifdef HAVE_POLL_H
 struct	pollfd set[2];
-#else
-fd_set	*sockvecp;	/* vector to select() for receiving */
-fd_set	*recvecp;
-int	fdmasks;
-int	maxfd;		/* maximum fd for select() */
-#endif
 int	rtsock;		/* the routing socket */
 int	ripsock;	/* socket to send/receive RIP datagram */
 
@@ -447,12 +435,7 @@ main(int argc, char *argv[])
 			continue;
 		}
 
-#ifdef HAVE_POLL_H
 		switch (poll(set, 2, INFTIM))
-#else
-		memcpy(recvecp, sockvecp, fdmasks);
-		switch (select(maxfd + 1, recvecp, 0, 0, 0))
-#endif
 		{
 		case -1:
 			if (errno != EINTR) {
@@ -463,22 +446,12 @@ main(int argc, char *argv[])
 		case 0:
 			continue;
 		default:
-#ifdef HAVE_POLL_H
-			if (set[0].revents & POLLIN)
-#else
-			if (FD_ISSET(ripsock, recvecp))
-#endif
-			{
+			if (set[0].revents & POLLIN) {
 				sigprocmask(SIG_BLOCK, &mask, &omask);
 				riprecv();
 				sigprocmask(SIG_SETMASK, &omask, NULL);
 			}
-#ifdef HAVE_POLL_H
-			if (set[1].revents & POLLIN)
-#else
-			if (FD_ISSET(rtsock, recvecp))
-#endif
-			{
+			if (set[1].revents & POLLIN) {
 				sigprocmask(SIG_BLOCK, &mask, &omask);
 				rtrecv();
 				sigprocmask(SIG_SETMASK, &omask, NULL);
@@ -632,19 +605,17 @@ init(void)
 	}
 
 	i = 1;
-#ifdef IPV6_RECVPKTINFO
 	if (setsockopt(ripsock, IPPROTO_IPV6, IPV6_RECVPKTINFO, &i,
 	    sizeof(i)) < 0) {
 		fatal("rip IPV6_RECVPKTINFO");
 		/*NOTREACHED*/
 	}
-#else  /* old adv. API */
-	if (setsockopt(ripsock, IPPROTO_IPV6, IPV6_PKTINFO, &i,
-	    sizeof(i)) < 0) {
-		fatal("rip IPV6_PKTINFO");
+
+	if (setsockopt(ripsock, IPPROTO_IPV6, IPV6_RECVHOPLIMIT,
+	    &int1, sizeof(int1)) < 0) {
+		fatal("rip IPV6_RECVHOPLIMIT");
 		/*NOTREACHED*/
 	}
-#endif 
 
 	memset(&hints, 0, sizeof(hints));
 	hints.ai_family = PF_INET6;
@@ -660,48 +631,19 @@ init(void)
 	}
 	memcpy(&ripsin, res->ai_addr, res->ai_addrlen);
 
-#ifdef HAVE_POLL_H
 	set[0].fd = ripsock;
 	set[0].events = POLLIN;
-#else
-	maxfd = ripsock;
-#endif
 
 	if (nflag == 0) {
 		if ((rtsock = socket(PF_ROUTE, SOCK_RAW, 0)) < 0) {
 			fatal("route socket");
 			/*NOTREACHED*/
 		}
-#ifdef HAVE_POLL_H
 		set[1].fd = rtsock;
 		set[1].events = POLLIN;
-#else
-		if (rtsock > maxfd)
-			maxfd = rtsock;
-#endif
-	} else {
-#ifdef HAVE_POLL_H
+	} else
 		set[1].fd = -1;
-#else
-		rtsock = -1;	/*just for safety */
-#endif
-	}
 
-#ifndef HAVE_POLL_H
-	fdmasks = howmany(maxfd + 1, NFDBITS) * sizeof(fd_mask);
-	if ((sockvecp = malloc(fdmasks)) == NULL) {
-		fatal("malloc");
-		/*NOTREACHED*/
-	}
-	if ((recvecp = malloc(fdmasks)) == NULL) {
-		fatal("malloc");
-		/*NOTREACHED*/
-	}
-	memset(sockvecp, 0, fdmasks);
-	FD_SET(ripsock, sockvecp);
-	if (rtsock >= 0)
-		FD_SET(rtsock, sockvecp);
-#endif
 }
 
 #define	RIPSIZE(n) \
@@ -1060,7 +1002,8 @@ riprecv(void)
 	struct cmsghdr *cm;
 	struct iovec iov[2];
 	u_char cmsgbuf[256];
-	struct in6_pktinfo *pi;
+	struct in6_pktinfo *pi = NULL;
+	int *hlimp = NULL;
 	struct iff *iffp;
 	struct in6_addr ia;
 	int ok;
@@ -1085,10 +1028,25 @@ riprecv(void)
 	for (cm = (struct cmsghdr *)CMSG_FIRSTHDR(&m);
 	     cm;
 	     cm = (struct cmsghdr *)CMSG_NXTHDR(&m, cm)) {
-		if (cm->cmsg_level == IPPROTO_IPV6 &&
-		    cm->cmsg_type == IPV6_PKTINFO) {
+		if (cm->cmsg_level != IPPROTO_IPV6)
+			continue;
+		switch (cm->cmsg_type) {
+		case IPV6_PKTINFO:
+			if (cm->cmsg_len != CMSG_LEN(sizeof(*pi))) {
+				trace(1,
+				    "invalid cmsg length for IPV6_PKTINFO\n");
+				return;
+			}
 			pi = (struct in6_pktinfo *)(CMSG_DATA(cm));
 			idx = pi->ipi6_ifindex;
+			break;
+		case IPV6_HOPLIMIT:
+			if (cm->cmsg_len != CMSG_LEN(sizeof(int))) {
+				trace(1,
+				    "invalid cmsg length for IPV6_HOPLIMIT\n");
+				return;
+			}
+			hlimp = (int *)CMSG_DATA(cm);
 			break;
 		}
 	}
@@ -1097,6 +1055,18 @@ riprecv(void)
 
 	if (len < sizeof(struct rip6)) {
 		trace(1, "Packet too short\n");
+		return;
+	}
+
+	if (pi == NULL || hlimp == NULL) {
+		/*
+		 * This can happen when the kernel failed to allocate memory
+		 * for the ancillary data.  Although we might be able to handle
+		 * some cases without this info, those are minor and not so
+		 * important, so it's better to discard the packet for safer
+		 * operation.
+		 */
+		trace(1, "IPv6 packet information cannot be retrieved\n");
 		return;
 	}
 
@@ -1121,10 +1091,42 @@ riprecv(void)
 	} 
 
 	if (!IN6_IS_ADDR_LINKLOCAL(&fsock.sin6_addr)) {
-		trace(1, "Packets from non-ll addr: %s\n",
+		trace(1, "Response from non-ll addr: %s\n", 
 		    inet6_n2p(&fsock.sin6_addr));
 		return;		/* Ignore packets from non-link-local addr */
 	}
+	if (ntohs(fsock.sin6_port) != RIP6_PORT) {
+		trace(1, "Response from non-rip port from %s\n",
+		    inet6_n2p(&fsock.sin6_addr));
+		return;
+	}
+	if (IN6_IS_ADDR_MULTICAST(&pi->ipi6_addr) && *hlimp != 255) {
+		trace(1,
+		    "Response packet with a smaller hop limit (%d) from %s\n",
+		    *hlimp, inet6_n2p(&fsock.sin6_addr));
+		return;
+	}
+	/*
+	 * Further validation: since this program does not send off-link
+	 * requests, an incoming response must always come from an on-link
+	 * node.  Although this is normally ensured by the source address
+	 * check above, it may not 100% be safe because there are router
+	 * implementations that (invalidly) allow a packet with a link-local
+	 * source address to be forwarded to a different link.
+	 * So we also check whether the destination address is a link-local
+	 * address or the hop limit is 255.  Note that RFC2080 does not require
+	 * the specific hop limit for a unicast response, so we cannot assume
+	 * the limitation.
+	 */
+	if (!IN6_IS_ADDR_LINKLOCAL(&pi->ipi6_addr) && *hlimp != 255) {
+		trace(1,
+		    "Response packet possibly from an off-link node: "
+		    "from %s to %s hlim=%d\n",
+		    inet6_n2p(&fsock.sin6_addr), inet6_n2p(&pi->ipi6_addr),
+		    *hlimp);
+		return;
+	}
+
 	idx = IN6_LINKLOCAL_IFINDEX(fsock.sin6_addr);
 	ifcp = (idx < nindex2ifc) ? index2ifc[idx] : NULL;
 	if (!ifcp) {
@@ -2289,12 +2291,6 @@ getifmtu(int ifindex)
 	}
 	ifm = (struct if_msghdr *)buf;
 	mtu = ifm->ifm_data.ifi_mtu;
-#ifdef __FreeBSD__
-	if (ifindex != ifm->ifm_index) {
-		fatal("ifindex does not match with ifm_index");
-		/*NOTREACHED*/
-	}
-#endif
 	free(buf);
 	return mtu;
 }
@@ -2621,11 +2617,7 @@ rt_entry(struct rt_msghdr *rtm, int again)
 
 	/* Check gateway */
 	if (!IN6_IS_ADDR_LINKLOCAL(&rrt->rrt_gw) &&
-	    !IN6_IS_ADDR_LOOPBACK(&rrt->rrt_gw)
-#ifdef __FreeBSD__
-	 && (rrt->rrt_flags & RTF_LOCAL) == 0
-#endif
-	    ) {
+	    !IN6_IS_ADDR_LOOPBACK(&rrt->rrt_gw)) {
 		trace(0, "***** Gateway %s is not a link-local address.\n",
 			inet6_n2p(&rrt->rrt_gw));
 		trace(0, "*****     dest(%s) if(%s) -- Not optimized.\n",

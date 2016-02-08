@@ -1,4 +1,4 @@
-/*	$OpenBSD: rcsprog.c,v 1.132 2006/08/16 07:39:15 ray Exp $	*/
+/*	$OpenBSD: rcsprog.c,v 1.137 2007/02/27 07:59:13 xsa Exp $	*/
 /*
  * Copyright (c) 2005 Jean-Francois Brousseau <jfb@openbsd.org>
  * All rights reserved.
@@ -24,14 +24,20 @@
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include "includes.h"
+#include <sys/stat.h>
+
+#include <err.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
 
 #include "rcsprog.h"
 
 #define RCS_CMD_MAXARG	128
 #define RCSPROG_OPTSTRING	"A:a:b::c:e::ik:Ll::m:Mn:N:o:qt::TUu::Vx::z::"
 
-const char rcs_version[] = "OpenCVS RCS version 3.6";
+const char rcs_version[] = "OpenRCS 4.1";
 
 int	 rcsflags;
 int	 rcs_optind;
@@ -160,7 +166,7 @@ void
 rcs_usage(void)
 {
 	fprintf(stderr,
-	    "usage: rcs [-eIiLqTUV] [-Aoldfile] [-ausers] [-b[rev]]\n"
+	    "usage: rcs [-IiLqTUV] [-Aoldfile] [-ausers] [-b[rev]]\n"
 	    "           [-cstring] [-e[users]] [-kmode] [-l[rev]] [-mrev:msg]\n"
 	    "           [-orev] [-sstate[:rev]] [-tstr] [-u[rev]]\n"
 	    "           [-xsuffixes] file ...\n");
@@ -188,7 +194,7 @@ rcs_main(int argc, char **argv)
 	time_t rcs_mtime = -1;
 
 	kflag = RCS_KWEXP_ERR;
-	lkmode = -1;
+	lkmode = RCS_LOCK_INVAL;
 	fmode =  S_IRUSR|S_IRGRP|S_IROTH;
 	flags = RCS_RDWR|RCS_PARSE_FULLY;
 	lrev = urev = descfile = NULL;
@@ -305,7 +311,7 @@ rcs_main(int argc, char **argv)
 	for (i = 0; i < argc; i++) {
 		fd = rcs_choosefile(argv[i], fpath, sizeof(fpath));
 		if (fd < 0 && !(flags & RCS_CREATE)) {
-			warnx("%s", fpath);
+			warn("%s", fpath);
 			continue;
 		}
 
@@ -372,7 +378,7 @@ rcs_main(int argc, char **argv)
 			ofd = rcs_choosefile(oldfilename, ofpath, sizeof(ofpath));
 			if (ofd < 0) {
 				if (!(flags & RCS_CREATE))
-					warnx("%s", ofpath);
+					warn("%s", ofpath);
 				exit(1);
 			}
 			if ((oldfile = rcs_open(ofpath, ofd, RCS_READ)) == NULL)
@@ -423,7 +429,7 @@ rcs_main(int argc, char **argv)
 
 		rcs_kwexp_set(file, kflag);
 
-		if (lkmode != -1)
+		if (lkmode != RCS_LOCK_INVAL)
 			(void)rcs_lock_setmode(file, lkmode);
 
 		if (rcsflags & RCSPROG_LFLAG) {

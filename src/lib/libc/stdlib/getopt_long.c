@@ -1,4 +1,4 @@
-/*	$OpenBSD: getopt_long.c,v 1.20 2005/10/25 15:49:37 jmc Exp $	*/
+/*	$OpenBSD: getopt_long.c,v 1.22 2006/10/04 21:29:04 jmc Exp $	*/
 /*	$NetBSD: getopt_long.c,v 1.15 2002/01/31 22:43:40 tv Exp $	*/
 
 /*
@@ -35,13 +35,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -457,7 +450,6 @@ start:
 		optarg = NULL;
 		if (*place)			/* no white space */
 			optarg = place;
-		/* XXX: disable test for :: if PC? (GNU doesn't) */
 		else if (oli[1] != ':') {	/* arg not optional */
 			if (++optind >= nargc) {	/* no arg */
 				place = EMSG;
@@ -467,14 +459,6 @@ start:
 				return (BADARG);
 			} else
 				optarg = nargv[optind];
-		} else if (!(flags & FLAG_PERMUTE)) {
-			/*
-			 * If permutation is disabled, we can accept an
-			 * optional arg separated by whitespace so long
-			 * as it does not start with a dash (-).
-			 */
-			if (optind + 1 < nargc && *nargv[optind + 1] != '-')
-				optarg = nargv[++optind];
 		}
 		place = EMSG;
 		++optind;

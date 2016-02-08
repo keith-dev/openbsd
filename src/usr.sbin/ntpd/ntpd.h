@@ -1,4 +1,4 @@
-/*	$OpenBSD: ntpd.h,v 1.76 2006/06/30 16:52:13 deraadt Exp $ */
+/*	$OpenBSD: ntpd.h,v 1.82 2007/03/01 17:50:42 henning Exp $ */
 
 /*
  * Copyright (c) 2003, 2004 Henning Brauer <henning@openbsd.org>
@@ -34,7 +34,7 @@
 #define	CONFFILE	"/etc/ntpd.conf"
 #define DRIFTFILE	"/var/db/ntpd.drift"
 
-#define	READ_BUF_SIZE		4096
+#define	READ_BUF_SIZE		8192
 
 #define	NTPD_OPT_VERBOSE	0x0001
 #define	NTPD_OPT_VERBOSE2	0x0002
@@ -55,6 +55,7 @@
 
 #define	QUERYTIME_MAX		15	/* single query might take n secs max */
 #define	OFFSET_ARRAY_SIZE	8
+#define	SENSOR_OFFSETS		7
 #define	SETTIME_MIN_OFFSET	180	/* min offset for settime at start */
 #define	SETTIME_TIMEOUT		15	/* max seconds to wait with -s */
 #define	LOG_NEGLIGEE		32	/* negligible drift to not log (ms) */
@@ -63,7 +64,7 @@
 
 
 #define	SENSOR_DATA_MAXAGE	(15*60)
-#define	SENSOR_QUERY_INTERVAL	30
+#define	SENSOR_QUERY_INTERVAL	5
 #define	SENSOR_SCAN_INTERVAL	(5*60)
 
 enum client_state {
@@ -134,11 +135,14 @@ struct ntp_peer {
 
 struct ntp_sensor {
 	TAILQ_ENTRY(ntp_sensor)		 entry;
+	struct ntp_offset		 offsets[SENSOR_OFFSETS];
 	struct ntp_offset		 update;
 	time_t				 next;
+	time_t				 last;
 	char				*device;
-	int				 sensorid;
+	int				 sensordevid;
 	u_int8_t			 weight;
+	u_int8_t			 shift;
 };
 
 struct ntp_conf_sensor {
@@ -258,6 +262,8 @@ pid_t	 ntp_main(int[2], struct ntpd_conf *);
 int	 priv_adjtime(void);
 void	 priv_settime(double);
 void	 priv_host_dns(char *, u_int32_t);
+int	 offset_compare(const void *, const void *);
+extern struct ntpd_conf *conf;
 
 /* parse.y */
 int	 parse_config(const char *, struct ntpd_conf *);
@@ -293,6 +299,7 @@ void	set_next(struct ntp_peer *, time_t);
 double			gettime_corrected(void);
 double			getoffset(void);
 double			gettime(void);
+time_t			getmonotime(void);
 void			d_to_tv(double, struct timeval *);
 double			lfp_to_d(struct l_fixedpt);
 struct l_fixedpt	d_to_lfp(double);
@@ -300,7 +307,7 @@ double			sfp_to_d(struct s_fixedpt);
 struct s_fixedpt	d_to_sfp(double);
 
 /* sensors.c */
-void			sensor_init(struct ntpd_conf *);
+void			sensor_init(void);
 void			sensor_scan(void);
 void			sensor_query(struct ntp_sensor *);
 int			sensor_hotplugfd(void);

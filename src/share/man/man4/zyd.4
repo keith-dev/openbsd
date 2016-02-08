@@ -1,4 +1,4 @@
-.\" $OpenBSD: zyd.4,v 1.6 2006/08/30 23:14:30 jmc Exp $
+.\" $OpenBSD: zyd.4,v 1.20 2007/02/09 11:08:36 jmc Exp $
 .\"
 .\" Copyright (c) 1997, 1998, 1999
 .\" Bill Paul <wpaul@ctr.columbia.edu>. All rights reserved.
@@ -35,19 +35,14 @@
 .Os
 .Sh NAME
 .Nm zyd
-.Nd Zydas ZD1211 USB IEEE 802.11b/g wireless network device
+.Nd ZyDAS ZD1211/ZD1211B USB IEEE 802.11b/g wireless network device
 .Sh SYNOPSIS
 .Cd "zyd* at uhub? port ?"
 .Sh DESCRIPTION
 The
 .Nm
 driver provides support for wireless network adapters based around
-the Zydas ZD1211 USB chip.
-.Pp
-The
-.Nm
-driver encapsulates all IP and ARP traffic as 802.11 frames,
-though it can receive either 802.11 or 802.3 frames.
+the ZyDAS ZD1211 and ZD1211B USB chips.
 .Pp
 These are the modes the
 .Nm
@@ -59,19 +54,16 @@ Also known as
 mode, this is used when associating with an access point, through
 which all traffic passes.
 This mode is the default.
-.It IBSS mode
-Also known as
-.Em IEEE ad-hoc
-mode or
-.Em peer-to-peer
-mode.
-This is the standardized method of operating without an access point.
-Stations associate with a service set.
-However, actual connections between stations are peer-to-peer.
+.It monitor mode
+In this mode the driver is able to receive packets without
+associating with an access point.
+This disables the internal receive filter and enables the card to
+capture packets from networks which it wouldn't normally have access to,
+or to scan for access points.
 .El
 .Pp
 .Nm
-supports hardware WEP.
+supports software WEP.
 Wired Equivalent Privacy (WEP) is the de facto encryption standard
 for wireless networks.
 It can be typically configured in one of three modes:
@@ -146,6 +138,9 @@ By default the
 .Nm
 driver uses an empty string.
 Note that network ID is synonymous with Extended Service Set ID (ESSID).
+.It Fl nwid
+Set the network ID to the empty string to allow the interface to connect
+to any available access point.
 .It Cm nwkey Ar key
 Enable WEP encryption using the specified
 .Ar key .
@@ -184,34 +179,50 @@ driver:
 .It 3COM 3CRUSB10075
 .It Acer WLAN-G-US1
 .It Airlink+ AWLL3025
+.It Airlink 101 AWLL3026
 .It AOpen 802.11g WL54
+.It Asus A9T integrated wirless
 .It Asus WL-159g
+.It Belkin F5D7050 v.4000
 .It Billion BiPAC 3011G
+.It Buffalo WLI-U2-KG54L
+.It CC&C WL-2203B
 .It DrayTek Vigor 550
 .It Edimax EW-7317UG
 .It Fiberline Networks WL-43OU
 .It iNexQ UR055g
+.It Linksys WUSBF54G
+.It Longshine LCS-8131G3
+.It MSI US54SE
+.It Philips SNU5600
 .It Planet WL-U356
 .It Planex GW-US54GZL
 .It Planex GW-US54Mini
+.It Safecom SWMULZ-5400
 .It Sagem XG 760A
+.It Sagem XG 76NA
+.It Sandberg Wireless G54 USB
 .It Sitecom WL-113
+.It SMC SMCWUSB-G
 .It Sweex wireless USB 54 Mbps
 .It Tekram/Siemens USB adapter
 .It Telegent TG54USB
 .It Trendnet TEW-424UB
 .It Trendnet TEW-429UB
 .It TwinMOS G240
+.It US Robotics 5423
 .It X-Micro XWL-11GUZX
 .It Yakumo QuickWLAN USB
+.It Zonet ZEW2501
 .It Zyxel ZyAIR G-220
 .El
 .Sh FILES
 The adapter needs some firmware files, which are loaded on demand by the
-driver when the device is attached:
+driver when a device is attached:
 .Pp
 .Bl -tag -width Ds -offset indent -compact
 .It Pa /etc/firmware/zd1211
+.It Pa /etc/firmware/zd1211b
 .El
 .Sh EXAMPLES
 The following
@@ -241,6 +252,28 @@ Join an existing BSS network,
 .Bd -literal -offset indent
 # ifconfig zyd0 192.168.0.2 netmask 0xffffff00 nwid my_net
 .Ed
+.Sh DIAGNOSTICS
+.Bl -diag
+.It "zyd%d: could not read firmware file %s (error=%d)"
+For some reason, the driver was unable to read the firmware file from the
+filesystem.
+The file might be missing or corrupted.
+.It "zyd%d: could not load firmware (error=%d)"
+An error occurred while attempting to upload the firmware to the onboard
+microcontroller unit.
+.It "zyd%d: could not send command (error=%s)"
+An attempt to send a command to the firmware failed.
+.It "zyd%d: sorry, radio %s is not supported yet"
+Support for the specified radio chip is not yet implemented in the driver.
+The device will not attach.
+.It "zyd%d: device version mismatch: 0x%x (only >= 43.30 supported)"
+Early revisions of the ZD1211 chipset are not supported by this driver.
+The device will not attach.
+.It "zyd%d: device timeout"
+A frame dispatched to the hardware for transmission did not complete in time.
+The driver will reset the hardware.
+This should not happen.
+.El
 .Sh SEE ALSO
 .Xr arp 4 ,
 .Xr ifmedia 4 ,
@@ -254,10 +287,13 @@ Join an existing BSS network,
 The
 .Nm
 driver was written by
-.An Florian Stoehr .
+.An Florian Stoehr Aq ich@florian-stoehr.de ,
+.An Damien Bergamini Aq damien@openbsd.org ,
+and
+.An Jonathan Gray Aq jsg@openbsd.org .
 .Sh CAVEATS
 The
 .Nm
 driver does not support a lot of the functionality available in the hardware.
-More work is required to properly support the IBSS, power management,
-and selectable transmission rate features.
+More work is required to properly support the IBSS and power management
+features.

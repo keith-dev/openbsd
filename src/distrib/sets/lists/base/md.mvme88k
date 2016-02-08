@@ -1,10 +1,10 @@
-./usr/lib/gcc-lib/m88k-unknown-openbsd4.0
-./usr/lib/gcc-lib/m88k-unknown-openbsd4.0/2.95.3
-./usr/lib/gcc-lib/m88k-unknown-openbsd4.0/2.95.3/cc1
-./usr/lib/gcc-lib/m88k-unknown-openbsd4.0/2.95.3/collect2
-./usr/lib/gcc-lib/m88k-unknown-openbsd4.0/2.95.3/cpp0
-./usr/lib/gcc-lib/m88k-unknown-openbsd4.0/2.95.3/include
-./usr/lib/gcc-lib/m88k-unknown-openbsd4.0/2.95.3/specs
+./usr/lib/gcc-lib/m88k-unknown-openbsd4.1
+./usr/lib/gcc-lib/m88k-unknown-openbsd4.1/2.95.3
+./usr/lib/gcc-lib/m88k-unknown-openbsd4.1/2.95.3/cc1
+./usr/lib/gcc-lib/m88k-unknown-openbsd4.1/2.95.3/collect2
+./usr/lib/gcc-lib/m88k-unknown-openbsd4.1/2.95.3/cpp0
+./usr/lib/gcc-lib/m88k-unknown-openbsd4.1/2.95.3/include
+./usr/lib/gcc-lib/m88k-unknown-openbsd4.1/2.95.3/specs
 ./usr/libdata/perl5/m88k-openbsd
 ./usr/libdata/perl5/m88k-openbsd/5.8.8
 ./usr/libdata/perl5/m88k-openbsd/5.8.8/.packlist
@@ -590,6 +590,7 @@
 ./usr/libdata/perl5/site_perl/m88k-openbsd/dev/adb/keyboard.ph
 ./usr/libdata/perl5/site_perl/m88k-openbsd/dev/ata
 ./usr/libdata/perl5/site_perl/m88k-openbsd/dev/ata/atareg.ph
+./usr/libdata/perl5/site_perl/m88k-openbsd/dev/ata/atascsi.ph
 ./usr/libdata/perl5/site_perl/m88k-openbsd/dev/ata/atavar.ph
 ./usr/libdata/perl5/site_perl/m88k-openbsd/dev/ata/satareg.ph
 ./usr/libdata/perl5/site_perl/m88k-openbsd/dev/ata/wdvar.ph
@@ -613,6 +614,7 @@
 ./usr/libdata/perl5/site_perl/m88k-openbsd/dev/eisa/eisadevs_data.ph
 ./usr/libdata/perl5/site_perl/m88k-openbsd/dev/eisa/eisareg.ph
 ./usr/libdata/perl5/site_perl/m88k-openbsd/dev/eisa/eisavar.ph
+./usr/libdata/perl5/site_perl/m88k-openbsd/dev/flashvar.ph
 ./usr/libdata/perl5/site_perl/m88k-openbsd/dev/gpio
 ./usr/libdata/perl5/site_perl/m88k-openbsd/dev/gpio/gpiovar.ph
 ./usr/libdata/perl5/site_perl/m88k-openbsd/dev/hil
@@ -648,6 +650,7 @@
 ./usr/libdata/perl5/site_perl/m88k-openbsd/dev/ic/adwlib.ph
 ./usr/libdata/perl5/site_perl/m88k-openbsd/dev/ic/aic6360reg.ph
 ./usr/libdata/perl5/site_perl/m88k-openbsd/dev/ic/aic6360var.ph
+./usr/libdata/perl5/site_perl/m88k-openbsd/dev/ic/aic6915.ph
 ./usr/libdata/perl5/site_perl/m88k-openbsd/dev/ic/aic79xx.ph
 ./usr/libdata/perl5/site_perl/m88k-openbsd/dev/ic/aic79xx_inline.ph
 ./usr/libdata/perl5/site_perl/m88k-openbsd/dev/ic/aic79xx_openbsd.ph
@@ -680,6 +683,8 @@
 ./usr/libdata/perl5/site_perl/m88k-openbsd/dev/ic/awivar.ph
 ./usr/libdata/perl5/site_perl/m88k-openbsd/dev/ic/ax88190reg.ph
 ./usr/libdata/perl5/site_perl/m88k-openbsd/dev/ic/ax88190var.ph
+./usr/libdata/perl5/site_perl/m88k-openbsd/dev/ic/bcwreg.ph
+./usr/libdata/perl5/site_perl/m88k-openbsd/dev/ic/bcwvar.ph
 ./usr/libdata/perl5/site_perl/m88k-openbsd/dev/ic/bhareg.ph
 ./usr/libdata/perl5/site_perl/m88k-openbsd/dev/ic/bhavar.ph
 ./usr/libdata/perl5/site_perl/m88k-openbsd/dev/ic/bt458reg.ph
@@ -757,6 +762,7 @@
 ./usr/libdata/perl5/site_perl/m88k-openbsd/dev/ic/lptvar.ph
 ./usr/libdata/perl5/site_perl/m88k-openbsd/dev/ic/lsi64854reg.ph
 ./usr/libdata/perl5/site_perl/m88k-openbsd/dev/ic/lsi64854var.ph
+./usr/libdata/perl5/site_perl/m88k-openbsd/dev/ic/malo.ph
 ./usr/libdata/perl5/site_perl/m88k-openbsd/dev/ic/max2820reg.ph
 ./usr/libdata/perl5/site_perl/m88k-openbsd/dev/ic/mb86960reg.ph
 ./usr/libdata/perl5/site_perl/m88k-openbsd/dev/ic/mc146818reg.ph
@@ -853,8 +859,6 @@
 ./usr/libdata/perl5/site_perl/m88k-openbsd/dev/isa
 ./usr/libdata/perl5/site_perl/m88k-openbsd/dev/isa/ad1848var.ph
 ./usr/libdata/perl5/site_perl/m88k-openbsd/dev/isa/ahareg.ph
-./usr/libdata/perl5/site_perl/m88k-openbsd/dev/isa/apsreg.ph
-./usr/libdata/perl5/site_perl/m88k-openbsd/dev/isa/apsvar.ph
 ./usr/libdata/perl5/site_perl/m88k-openbsd/dev/isa/ariareg.ph
 ./usr/libdata/perl5/site_perl/m88k-openbsd/dev/isa/cs4231var.ph
 ./usr/libdata/perl5/site_perl/m88k-openbsd/dev/isa/egavar.ph
@@ -989,6 +993,8 @@
 ./usr/libdata/perl5/site_perl/m88k-openbsd/dev/pci/if_bcereg.ph
 ./usr/libdata/perl5/site_perl/m88k-openbsd/dev/pci/if_bgereg.ph
 ./usr/libdata/perl5/site_perl/m88k-openbsd/dev/pci/if_bnxreg.ph
+./usr/libdata/perl5/site_perl/m88k-openbsd/dev/pci/if_casreg.ph
+./usr/libdata/perl5/site_perl/m88k-openbsd/dev/pci/if_casvar.ph
 ./usr/libdata/perl5/site_perl/m88k-openbsd/dev/pci/if_devar.ph
 ./usr/libdata/perl5/site_perl/m88k-openbsd/dev/pci/if_em.ph
 ./usr/libdata/perl5/site_perl/m88k-openbsd/dev/pci/if_em_hw.ph
@@ -1007,14 +1013,12 @@
 ./usr/libdata/perl5/site_perl/m88k-openbsd/dev/pci/if_nfereg.ph
 ./usr/libdata/perl5/site_perl/m88k-openbsd/dev/pci/if_nfevar.ph
 ./usr/libdata/perl5/site_perl/m88k-openbsd/dev/pci/if_ngereg.ph
-./usr/libdata/perl5/site_perl/m88k-openbsd/dev/pci/if_pcnreg.ph
 ./usr/libdata/perl5/site_perl/m88k-openbsd/dev/pci/if_san_common.ph
 ./usr/libdata/perl5/site_perl/m88k-openbsd/dev/pci/if_san_front_end.ph
 ./usr/libdata/perl5/site_perl/m88k-openbsd/dev/pci/if_san_obsd.ph
 ./usr/libdata/perl5/site_perl/m88k-openbsd/dev/pci/if_san_te1.ph
 ./usr/libdata/perl5/site_perl/m88k-openbsd/dev/pci/if_san_xilinx.ph
 ./usr/libdata/perl5/site_perl/m88k-openbsd/dev/pci/if_sandrv.ph
-./usr/libdata/perl5/site_perl/m88k-openbsd/dev/pci/if_sfreg.ph
 ./usr/libdata/perl5/site_perl/m88k-openbsd/dev/pci/if_sisreg.ph
 ./usr/libdata/perl5/site_perl/m88k-openbsd/dev/pci/if_skreg.ph
 ./usr/libdata/perl5/site_perl/m88k-openbsd/dev/pci/if_skvar.ph
@@ -1026,8 +1030,6 @@
 ./usr/libdata/perl5/site_perl/m88k-openbsd/dev/pci/if_txpreg.ph
 ./usr/libdata/perl5/site_perl/m88k-openbsd/dev/pci/if_vgereg.ph
 ./usr/libdata/perl5/site_perl/m88k-openbsd/dev/pci/if_vgevar.ph
-./usr/libdata/perl5/site_perl/m88k-openbsd/dev/pci/if_vicreg.ph
-./usr/libdata/perl5/site_perl/m88k-openbsd/dev/pci/if_vicvar.ph
 ./usr/libdata/perl5/site_perl/m88k-openbsd/dev/pci/if_vrreg.ph
 ./usr/libdata/perl5/site_perl/m88k-openbsd/dev/pci/if_wbreg.ph
 ./usr/libdata/perl5/site_perl/m88k-openbsd/dev/pci/if_wpireg.ph
@@ -1040,7 +1042,6 @@
 ./usr/libdata/perl5/site_perl/m88k-openbsd/dev/pci/ixgb_ids.ph
 ./usr/libdata/perl5/site_perl/m88k-openbsd/dev/pci/lofnreg.ph
 ./usr/libdata/perl5/site_perl/m88k-openbsd/dev/pci/lofnvar.ph
-./usr/libdata/perl5/site_perl/m88k-openbsd/dev/pci/maestro_reg.ph
 ./usr/libdata/perl5/site_perl/m88k-openbsd/dev/pci/musyccreg.ph
 ./usr/libdata/perl5/site_perl/m88k-openbsd/dev/pci/musyccvar.ph
 ./usr/libdata/perl5/site_perl/m88k-openbsd/dev/pci/neoreg.ph
@@ -1192,6 +1193,7 @@
 ./usr/libdata/perl5/site_perl/m88k-openbsd/dev/sbus
 ./usr/libdata/perl5/site_perl/m88k-openbsd/dev/sbus/asioreg.ph
 ./usr/libdata/perl5/site_perl/m88k-openbsd/dev/sbus/bereg.ph
+./usr/libdata/perl5/site_perl/m88k-openbsd/dev/sbus/bppreg.ph
 ./usr/libdata/perl5/site_perl/m88k-openbsd/dev/sbus/cgsixreg.ph
 ./usr/libdata/perl5/site_perl/m88k-openbsd/dev/sbus/cgtwelvereg.ph
 ./usr/libdata/perl5/site_perl/m88k-openbsd/dev/sbus/cs4231var.ph
@@ -1277,6 +1279,7 @@
 ./usr/libdata/perl5/site_perl/m88k-openbsd/dev/usb/umidi_quirks.ph
 ./usr/libdata/perl5/site_perl/m88k-openbsd/dev/usb/umidireg.ph
 ./usr/libdata/perl5/site_perl/m88k-openbsd/dev/usb/umidivar.ph
+./usr/libdata/perl5/site_perl/m88k-openbsd/dev/usb/uowreg.ph
 ./usr/libdata/perl5/site_perl/m88k-openbsd/dev/usb/urio.ph
 ./usr/libdata/perl5/site_perl/m88k-openbsd/dev/usb/usb.ph
 ./usr/libdata/perl5/site_perl/m88k-openbsd/dev/usb/usb_mem.ph
@@ -1288,14 +1291,19 @@
 ./usr/libdata/perl5/site_perl/m88k-openbsd/dev/usb/usbdi.ph
 ./usr/libdata/perl5/site_perl/m88k-openbsd/dev/usb/usbdi_util.ph
 ./usr/libdata/perl5/site_perl/m88k-openbsd/dev/usb/usbdivar.ph
+./usr/libdata/perl5/site_perl/m88k-openbsd/dev/usb/usbf.ph
+./usr/libdata/perl5/site_perl/m88k-openbsd/dev/usb/usbfvar.ph
 ./usr/libdata/perl5/site_perl/m88k-openbsd/dev/usb/usbhid.ph
+./usr/libdata/perl5/site_perl/m88k-openbsd/dev/vesa
+./usr/libdata/perl5/site_perl/m88k-openbsd/dev/vesa/vbe.ph
+./usr/libdata/perl5/site_perl/m88k-openbsd/dev/vesa/vesabiosreg.ph
+./usr/libdata/perl5/site_perl/m88k-openbsd/dev/vesa/vesabiosvar.ph
+./usr/libdata/perl5/site_perl/m88k-openbsd/dev/vesa/vesafbvar.ph
 ./usr/libdata/perl5/site_perl/m88k-openbsd/dev/vndioctl.ph
 ./usr/libdata/perl5/site_perl/m88k-openbsd/dev/wscons
 ./usr/libdata/perl5/site_perl/m88k-openbsd/dev/wscons/ascii.ph
 ./usr/libdata/perl5/site_perl/m88k-openbsd/dev/wscons/unicode.ph
 ./usr/libdata/perl5/site_perl/m88k-openbsd/dev/wscons/wscons_callbacks.ph
-./usr/libdata/perl5/site_perl/m88k-openbsd/dev/wscons/wscons_raster.ph
-./usr/libdata/perl5/site_perl/m88k-openbsd/dev/wscons/wscons_rfont.ph
 ./usr/libdata/perl5/site_perl/m88k-openbsd/dev/wscons/wsconsio.ph
 ./usr/libdata/perl5/site_perl/m88k-openbsd/dev/wscons/wsdisplay_usl_io.ph
 ./usr/libdata/perl5/site_perl/m88k-openbsd/dev/wscons/wsdisplayvar.ph
@@ -1508,6 +1516,7 @@
 ./usr/libdata/perl5/site_perl/m88k-openbsd/m88k/_types.ph
 ./usr/libdata/perl5/site_perl/m88k-openbsd/m88k/asm.ph
 ./usr/libdata/perl5/site_perl/m88k-openbsd/m88k/asm_macro.ph
+./usr/libdata/perl5/site_perl/m88k-openbsd/m88k/atomic.ph
 ./usr/libdata/perl5/site_perl/m88k-openbsd/m88k/cdefs.ph
 ./usr/libdata/perl5/site_perl/m88k-openbsd/m88k/cmmu.ph
 ./usr/libdata/perl5/site_perl/m88k-openbsd/m88k/cpu.ph
@@ -1565,6 +1574,7 @@
 ./usr/libdata/perl5/site_perl/m88k-openbsd/mvme88k/_types.ph
 ./usr/libdata/perl5/site_perl/m88k-openbsd/mvme88k/asm.ph
 ./usr/libdata/perl5/site_perl/m88k-openbsd/mvme88k/asm_macro.ph
+./usr/libdata/perl5/site_perl/m88k-openbsd/mvme88k/atomic.ph
 ./usr/libdata/perl5/site_perl/m88k-openbsd/mvme88k/autoconf.ph
 ./usr/libdata/perl5/site_perl/m88k-openbsd/mvme88k/bug.ph
 ./usr/libdata/perl5/site_perl/m88k-openbsd/mvme88k/bugio.ph
@@ -2105,9 +2115,6 @@
 ./usr/libdata/perl5/site_perl/m88k-openbsd/ufs/ffs/ffs_extern.ph
 ./usr/libdata/perl5/site_perl/m88k-openbsd/ufs/ffs/fs.ph
 ./usr/libdata/perl5/site_perl/m88k-openbsd/ufs/ffs/softdep.ph
-./usr/libdata/perl5/site_perl/m88k-openbsd/ufs/lfs
-./usr/libdata/perl5/site_perl/m88k-openbsd/ufs/lfs/lfs.ph
-./usr/libdata/perl5/site_perl/m88k-openbsd/ufs/lfs/lfs_extern.ph
 ./usr/libdata/perl5/site_perl/m88k-openbsd/ufs/mfs
 ./usr/libdata/perl5/site_perl/m88k-openbsd/ufs/mfs/mfs_extern.ph
 ./usr/libdata/perl5/site_perl/m88k-openbsd/ufs/mfs/mfsnode.ph

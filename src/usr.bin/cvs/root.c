@@ -1,4 +1,4 @@
-/*	$OpenBSD: root.c,v 1.33 2006/06/16 14:07:42 joris Exp $	*/
+/*	$OpenBSD: root.c,v 1.36 2007/02/22 06:42:09 otto Exp $	*/
 /*
  * Copyright (c) 2004 Jean-Francois Brousseau <jfb@openbsd.org>
  * All rights reserved.
@@ -24,10 +24,11 @@
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include "includes.h"
+#include <errno.h>
+#include <stdlib.h>
+#include <string.h>
 
 #include "cvs.h"
-#include "log.h"
 
 extern char *cvs_rootstr;
 
@@ -79,7 +80,7 @@ cvsroot_parse(const char *str)
 	 * at the first position again.
 	 */
 	TAILQ_FOREACH(root, &cvs_rcache, root_cache) {
-		if (strcmp(str, root->cr_str) == 0) {
+		if (root->cr_str != NULL && strcmp(str, root->cr_str) == 0) {
 			TAILQ_REMOVE(&cvs_rcache, root, root_cache);
 			TAILQ_INSERT_HEAD(&cvs_rcache, root, root_cache);
 			root->cr_ref++;
@@ -229,13 +230,7 @@ cvsroot_get(const char *dir)
 	if (cvs_rootstr != NULL)
 		return cvsroot_parse(cvs_rootstr);
 
-	if (strlcpy(rootpath, dir, sizeof(rootpath)) >= sizeof(rootpath) ||
-	    strlcat(rootpath, "/", sizeof(rootpath)) >= sizeof(rootpath) ||
-	    strlcat(rootpath, CVS_PATH_ROOTSPEC,
-	    sizeof(rootpath)) >= sizeof(rootpath)) {
-		errno = ENAMETOOLONG;
-		fatal("cvsroot_get: %s: %s", rootpath, strerror(errno));
-	}
+	(void)xsnprintf(rootpath, MAXPATHLEN, "%s/%s", dir, CVS_PATH_ROOTSPEC);
 
 	if ((fp = fopen(rootpath, "r")) == NULL) {
 		if (errno == ENOENT) {

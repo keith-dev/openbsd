@@ -1,4 +1,4 @@
-/*	$OpenBSD: nmeaattach.c,v 1.2 2006/07/09 09:03:19 jmc Exp $	*/
+/*	$OpenBSD: nmeaattach.c,v 1.7 2007/01/02 22:49:08 mbalmer Exp $	*/
 /*
  * Copyright (c) 1988, 1993
  *	The Regents of the University of California.  All rights reserved.
@@ -32,25 +32,16 @@
  * SUCH DAMAGE.
  */
 
-#include <sys/param.h>
-#include <sys/socket.h>
-#include <sys/types.h>
 #include <sys/ioctl.h>
 #include <sys/ttycom.h>
 
-#include <net/if.h>
-#include <netinet/in.h>
-
 #include <err.h>
-#include <errno.h>
 #include <fcntl.h>
-#include <netdb.h>
 #include <paths.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <syslog.h>
 #include <termios.h>
 #include <unistd.h>
 
@@ -72,6 +63,7 @@ usage(void)
 	    __progname);
 	exit(1);
 }
+
 int
 main(int argc, char *argv[])
 {
@@ -83,7 +75,6 @@ main(int argc, char *argv[])
 	tcflag_t cflag = HUPCL;
 	int ch;
 	sigset_t sigset;
-	int i;
 	int nmeadisc = NMEADISC;
 	int nodaemon = 0;
 
@@ -134,7 +125,7 @@ main(int argc, char *argv[])
 		    "%s%s", _PATH_DEV, dev);
 		dev = devicename;
 	}
-	if ((fd = open(dev, O_RDWR | O_NDELAY)) < 0)
+	if ((fd = open(dev, O_RDWR)) < 0)
 		err(1, "open: %s", dev);
 
 	tty.c_cflag = CREAD | CS8 | cflag;
@@ -164,10 +155,11 @@ main(int argc, char *argv[])
 	for (;;) {
 		sigsuspend(&sigset);
 		if (dying)
-			return (0);
+			return 0;
 	}
 }
 
+/* ARGSUSED */
 void
 coroner(int useless)
 {

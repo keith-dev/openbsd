@@ -1,4 +1,4 @@
-/*	$OpenBSD: ospfd.h,v 1.60 2006/06/28 10:53:39 norby Exp $ */
+/*	$OpenBSD: ospfd.h,v 1.65 2007/02/01 13:02:04 claudio Exp $ */
 
 /*
  * Copyright (c) 2004 Esben Norby <norby@openbsd.org>
@@ -138,7 +138,12 @@ enum imsg_type {
 	IMSG_LS_BADREQ,
 	IMSG_LS_MAXAGE,
 	IMSG_ABR_UP,
-	IMSG_ABR_DOWN
+	IMSG_ABR_DOWN,
+	IMSG_RECONF_CONF,
+	IMSG_RECONF_AREA,
+	IMSG_RECONF_IFACE,
+	IMSG_RECONF_AUTHMD,
+	IMSG_RECONF_END
 };
 
 struct imsg_hdr {
@@ -175,6 +180,7 @@ struct area {
 };
 
 /* interface states */
+#define	IF_STA_NEW		0x00	/* dummy state for reload */
 #define	IF_STA_DOWN		0x01
 #define	IF_STA_LOOPBACK		0x02
 #define	IF_STA_WAITING		0x04
@@ -371,6 +377,7 @@ struct redistribute {
 	SIMPLEQ_ENTRY(redistribute)	entry;
 	struct in_addr			addr;
 	struct in_addr			mask;
+	u_int32_t			metric;
 	u_int16_t			label;
 	u_int16_t			type;
 };
@@ -382,6 +389,7 @@ struct ospfd_conf {
 	LIST_HEAD(, vertex)	cand_list;
 	SIMPLEQ_HEAD(, redistribute) redist_list;
 
+	u_int32_t		defaultmetric;
 	u_int32_t		opts;
 #define OSPFD_OPT_VERBOSE	0x00000001
 #define OSPFD_OPT_VERBOSE2	0x00000002
@@ -406,6 +414,18 @@ struct kroute {
 	u_int16_t	rtlabel;
 	u_short		ifindex;
 	u_int8_t	prefixlen;
+};
+
+struct rroute {
+	struct kroute	kr;
+	u_int32_t	metric;
+};
+
+struct kif_addr {
+	TAILQ_ENTRY(kif_addr)	 entry;
+	struct in_addr		 addr;
+	struct in_addr		 mask;
+	struct in_addr		 dstbrd;
 };
 
 struct kif {
@@ -557,7 +577,8 @@ void		 kr_fib_decouple(void);
 void		 kr_dispatch_msg(int, short, void *);
 void		 kr_show_route(struct imsg *);
 void		 kr_ifinfo(char *, pid_t);
-struct kif	*kif_findname(char *);
+struct kif	*kif_findname(char *, struct in_addr, struct kif_addr **);
+void		 kr_reload(void);
 
 u_int8_t	mask2prefixlen(in_addr_t);
 in_addr_t	prefixlen2mask(u_int8_t);
@@ -578,7 +599,8 @@ void		 rtlabel_unref(u_int16_t);
 /* ospfd.c */
 void	main_imsg_compose_ospfe(int, pid_t, void *, u_int16_t);
 void	main_imsg_compose_rde(int, pid_t, void *, u_int16_t);
-int	ospf_redistribute(struct kroute *kr);
+int	ospf_redistribute(struct kroute *, u_int32_t *);
+void	merge_config(struct ospfd_conf *, struct ospfd_conf *);
 
 /* printconf.c */
 void	print_config(struct ospfd_conf *);

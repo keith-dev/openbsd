@@ -1,4 +1,4 @@
-.\"	$OpenBSD: ahc.4,v 1.33 2005/12/10 22:58:46 martin Exp $
+.\"	$OpenBSD: ahc.4,v 1.35 2006/10/28 10:26:26 jmc Exp $
 .\"	$NetBSD: ahc.4,v 1.1.2.1 1996/08/25 17:22:14 thorpej Exp $
 .\"
 .\" Copyright (c) 1995, 1996
@@ -32,7 +32,7 @@
 .Os
 .Sh NAME
 .Nm ahc
-.Nd Adaptec VL/EISA/PCI SCSI host adapter driver
+.Nd Adaptec VL/EISA/PCI SCSI interface
 .Sh SYNOPSIS
 .Cd "ahc0	at isa?	" Pq VL
 .Cd "ahc*	at eisa?	" Pq EISA
@@ -194,7 +194,7 @@ aic7899     20    PCI/64     80MHz     16Bit    16      2 3 4 5 6 7 8
 .Pp
 .Bl -enum -compact
 .It
-Multiplexed Twin Channel Device - One controller servicing two busses.
+Multiplexed Twin Channel Device - One controller servicing two buses.
 .It
 Multi-function Twin Channel Device - Two controllers on one chip.
 .It

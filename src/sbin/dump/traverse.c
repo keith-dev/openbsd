@@ -1,4 +1,4 @@
-/*	$OpenBSD: traverse.c,v 1.16 2006/04/02 00:48:35 deraadt Exp $	*/
+/*	$OpenBSD: traverse.c,v 1.19 2007/03/06 03:27:14 ray Exp $	*/
 /*	$NetBSD: traverse.c,v 1.17 1997/06/05 11:13:27 lukem Exp $	*/
 
 /*-
@@ -34,24 +34,16 @@
 #if 0
 static char sccsid[] = "@(#)traverse.c	8.2 (Berkeley) 9/23/93";
 #else
-static const char rcsid[] = "$OpenBSD: traverse.c,v 1.16 2006/04/02 00:48:35 deraadt Exp $";
+static const char rcsid[] = "$OpenBSD: traverse.c,v 1.19 2007/03/06 03:27:14 ray Exp $";
 #endif
 #endif /* not lint */
 
 #include <sys/param.h>
 #include <sys/time.h>
 #include <sys/stat.h>
-#ifdef sunos
-#include <sys/vnode.h>
-
-#include <ufs/fs.h>
-#include <ufs/fsdir.h>
-#include <ufs/inode.h>
-#else
 #include <ufs/ffs/fs.h>
 #include <ufs/ufs/dir.h>
 #include <ufs/ufs/dinode.h>
-#endif
 
 #include <protocols/dumprestore.h>
 
@@ -184,11 +176,16 @@ mapfiles(ino_t maxino, off_t *tapesize, char *disk, char * const *dirv)
 			case FTS_NS:
 				msg("Can't fts_read %s: %s\n", entry->fts_path,
 				    strerror(errno));
+				/* FALLTHROUGH */
 			case FTS_DP:		/* already seen dir */
 				continue;
 			}
 			mapfileino(entry->fts_statp->st_ino, tapesize,
 			    &anydirskipped);
+		}
+		if (errno) {
+			msg("fts_read failed: %s\n", strerror(errno));
+			dumpabort(0);
 		}
 		(void)fts_close(dirh);
 
@@ -433,13 +430,13 @@ dumpino(struct ufs1_dinode *dp, ino_t ino)
 			writerec(buf, 0);
 			return;
 		}
-		/* fall through */
+		/* FALLTHROUGH */
 
 	case IFDIR:
 	case IFREG:
 		if (dp->di_size > 0)
 			break;
-		/* fall through */
+		/* FALLTHROUGH */
 
 	case IFIFO:
 	case IFSOCK:

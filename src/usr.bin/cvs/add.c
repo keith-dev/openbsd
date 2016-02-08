@@ -1,4 +1,4 @@
-/*	$OpenBSD: add.c,v 1.60 2006/07/01 12:02:06 reyk Exp $	*/
+/*	$OpenBSD: add.c,v 1.77 2007/02/22 06:42:09 otto Exp $	*/
 /*
  * Copyright (c) 2006 Joris Vink <joris@openbsd.org>
  * Copyright (c) 2005, 2006 Xavier Santolaria <xsa@openbsd.org>
@@ -16,20 +16,26 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
-#include "includes.h"
+#include <sys/stat.h>
+
+#include <errno.h>
+#include <string.h>
+#include <unistd.h>
 
 #include "cvs.h"
-#include "diff.h"
-#include "log.h"
+#include "remote.h"
 
 extern char *__progname;
 
-int	cvs_add(int, char **);
 void	cvs_add_local(struct cvs_file *);
+void	cvs_add_entry(struct cvs_file *);
 
 static void add_directory(struct cvs_file *);
 static void add_file(struct cvs_file *);
 static void add_entry(struct cvs_file *);
+
+static int	 kflag = RCS_KWEXP_DEFAULT;
+static char	 kbuf[8], *koptstr;
 
 char	*logmsg;
 
@@ -37,8 +43,8 @@ struct cvs_cmd cvs_cmd_add = {
 	CVS_OP_ADD, 0, "add",
 	{ "ad", "new" },
 	"Add a new file or directory to the repository",
-	"[-m message] ...",
-	"m:",
+	"[-k mode] [-m message] ...",
+	"k:m:",
 	NULL,
 	cvs_add
 };
@@ -54,6 +60,16 @@ cvs_add(int argc, char **argv)
 
 	while ((ch = getopt(argc, argv, cvs_cmd_add.cmd_opts)) != -1) {
 		switch (ch) {
+		case 'k':
+			koptstr = optarg;
+			kflag = rcs_kflag_get(koptstr);
+			if (RCS_KWEXP_INVAL(kflag)) {
+				cvs_log(LP_ERR,
+				    "invalid RCS keyword expension mode");
+				fatal("%s", cvs_cmd_add.cmd_synopsis);
+			}
+			(void)xsnprintf(kbuf, sizeof(kbuf), "-k%s", koptstr);
+			break;
 		case 'm':
 			logmsg = xstrdup(optarg);
 			break;
@@ -70,11 +86,55 @@ cvs_add(int argc, char **argv)
 
 	cr.enterdir = NULL;
 	cr.leavedir = NULL;
-	cr.fileproc = cvs_add_local;
+
+	if (current_cvsroot->cr_method != CVS_METHOD_LOCAL) {
+		cvs_client_connect_to_server();
+		cr.fileproc = cvs_client_sendfile;
+
+		if (kflag != RCS_KWEXP_DEFAULT)
+			cvs_client_send_request("Argument %s", kbuf);
+
+		if (logmsg != NULL)
+			cvs_client_send_request("Argument -m%s", logmsg);
+	} else {
+		cr.fileproc = cvs_add_local;
+	}
+
 	cr.flags = flags;
 
 	cvs_file_run(argc, argv, &cr);
+
+	if (current_cvsroot->cr_method != CVS_METHOD_LOCAL) {
+		cvs_client_send_files(argv, argc);
+		cvs_client_senddir(".");
+		cvs_client_send_request("add");
+		cvs_client_get_responses();
+
+		if (server_response == SERVER_OK) {
+			cr.fileproc = cvs_add_entry;
+			cvs_file_run(argc, argv, &cr);
+		}
+	}
+
 	return (0);
+}
+
+void
+cvs_add_entry(struct cvs_file *cf)
+{
+	char entry[CVS_ENT_MAXLINELEN];
+	CVSENTRIES *entlist;
+
+	if (cf->file_type == CVS_DIR) {
+		(void)xsnprintf(entry, CVS_ENT_MAXLINELEN,
+		    "D/%s/////", cf->file_name);
+
+		entlist = cvs_ent_open(cf->file_wd);
+		cvs_ent_add(entlist, entry);
+		cvs_ent_close(entlist, ENT_SYNC);
+	} else {
+		add_entry(cf);
+	}
 }
 
 void
@@ -82,7 +142,7 @@ cvs_add_local(struct cvs_file *cf)
 {
 	cvs_log(LP_TRACE, "cvs_add_local(%s)", cf->file_path);
 
-	cvs_file_classify(cf, NULL, 0);
+	cvs_file_classify(cf, NULL);
 
 	/* dont use `cvs add *' */
 	if (strcmp(cf->file_name, ".") == 0 ||
@@ -104,17 +164,15 @@ cvs_add_local(struct cvs_file *cf)
 static void
 add_directory(struct cvs_file *cf)
 {
-	int l, added, nb;
+	int added, nb;
 	struct stat st;
 	CVSENTRIES *entlist;
-	char *date, *entry, msg[1024], *repo, *tag;
+	char *date, entry[MAXPATHLEN], msg[1024], repo[MAXPATHLEN], *tag, *p;
 
 	cvs_log(LP_TRACE, "add_directory(%s)", cf->file_path);
 
-	entry = xmalloc(MAXPATHLEN);
-	l = snprintf(entry, MAXPATHLEN, "%s%s", cf->file_rpath, RCS_FILE_EXT);
-	if (l == -1 || l >= MAXPATHLEN)
-		fatal("cvs_add_local: overflow");
+	(void)xsnprintf(entry, MAXPATHLEN, "%s%s",
+	    cf->file_rpath, RCS_FILE_EXT);
 
 	added = 1;
 	if (stat(entry, &st) != -1) {
@@ -126,10 +184,8 @@ add_directory(struct cvs_file *cf)
 		/* Let's see if we have any per-directory tags first. */
 		cvs_parse_tagfile(cf->file_wd, &tag, &date, &nb);
 
-		l = snprintf(entry, MAXPATHLEN, "%s/%s", cf->file_path,
-		    CVS_PATH_CVSDIR);
-		if (l == -1 || l >= MAXPATHLEN)
-			fatal("add_directory: overflow");
+		(void)xsnprintf(entry, MAXPATHLEN, "%s/%s",
+		    cf->file_path, CVS_PATH_CVSDIR);
 
 		if (stat(entry, &st) != -1) {
 			if (!S_ISDIR(st.st_mode)) {
@@ -146,30 +202,26 @@ add_directory(struct cvs_file *cf)
 				fatal("add_directory: %s: %s", cf->file_path,
 				    strerror(errno));
 
-			repo = xmalloc(MAXPATHLEN);
 			cvs_get_repository_name(cf->file_wd, repo,
 			    MAXPATHLEN);
 
-			l = snprintf(entry, MAXPATHLEN, "%s/%s", repo,
-			    cf->file_name);
+			(void)xsnprintf(entry, MAXPATHLEN, "%s/%s",
+			    repo, cf->file_name);
 
 			cvs_mkadmin(cf->file_path, current_cvsroot->cr_dir,
 			    entry, tag, date, nb);
 
-			xfree(repo);
-			xfree(entry);
-
-			entry = xmalloc(CVS_ENT_MAXLINELEN);
-			l = snprintf(entry, CVS_ENT_MAXLINELEN,
+			p = xmalloc(CVS_ENT_MAXLINELEN);
+			(void)xsnprintf(p, CVS_ENT_MAXLINELEN,
 			    "D/%s/////", cf->file_name);
 			entlist = cvs_ent_open(cf->file_wd);
-			cvs_ent_add(entlist, entry);
+			cvs_ent_add(entlist, p);
 			cvs_ent_close(entlist, ENT_SYNC);
 		}
 	}
 
 	if (added == 1) {
-		snprintf(msg, sizeof(msg),
+		(void)xsnprintf(msg, sizeof(msg),
 		    "Directory %s added to the repository", cf->file_rpath);
 
 		if (tag != NULL) {
@@ -193,20 +245,20 @@ add_directory(struct cvs_file *cf)
 	}
 
 	cf->file_status = FILE_SKIP;
-	xfree(entry);
 }
 
 static void
 add_file(struct cvs_file *cf)
 {
-	BUF *b;
 	int added, stop;
 	char revbuf[16];
 	RCSNUM *head;
 
-	if (cf->file_rcs != NULL)
-		rcsnum_tostr(rcs_head_get(cf->file_rcs),
-		    revbuf, sizeof(revbuf));
+	if (cf->file_rcs != NULL) {
+		head = rcs_head_get(cf->file_rcs);
+		rcsnum_tostr(head, revbuf, sizeof(revbuf));
+		rcsnum_free(head);
+	}
 
 	added = stop = 0;
 	switch (cf->file_status) {
@@ -220,16 +272,14 @@ add_file(struct cvs_file *cf)
 		if (cf->file_rcs == NULL) {
 			cvs_log(LP_NOTICE, "cannot resurrect %s; "
 			    "RCS file removed by second party", cf->file_name);
-		} else {
+		} else if (cf->fd == -1) {
 			add_entry(cf);
 
 			/* Restore the file. */
 			head = rcs_head_get(cf->file_rcs);
-			b = rcs_getrev(cf->file_rcs, head);
-			if (b == NULL)
-				fatal("cvs_add_local: failed to get HEAD");
+			cvs_checkout_file(cf, head, 0);
+			rcsnum_free(head);
 
-			cvs_checkout_file(cf, head, b, 0);
 			cvs_printf("U %s\n", cf->file_path);
 
 			cvs_log(LP_NOTICE, "%s, version %s, resurrected",
@@ -254,11 +304,14 @@ add_file(struct cvs_file *cf)
 			cvs_log(LP_NOTICE, "re-adding file %s "
 			    "(instead of dead revision %s)",
 			    cf->file_path, revbuf);
-		} else {
+			added++;
+		} else if (cf->fd != -1) {
 			cvs_log(LP_NOTICE, "scheduling file '%s' for addition",
 			    cf->file_path);
+			added++;
+		} else {
+			stop = 1;
 		}
-		added++;
 		break;
 	default:
 		break;
@@ -270,10 +323,9 @@ add_file(struct cvs_file *cf)
 	add_entry(cf);
 
 	if (added != 0) {
-		if (verbosity > 1)
-			cvs_log(LP_NOTICE, "use '%s commit' to add %s "
-			    "permanently", __progname,
-			    (added == 1) ? "this file" : "these files");
+		cvs_log(LP_NOTICE, "use '%s commit' to add %s "
+		    "permanently", __progname,
+		    (added == 1) ? "this file" : "these files");
 	}
 }
 
@@ -281,14 +333,11 @@ static void
 add_entry(struct cvs_file *cf)
 {
 	FILE *fp;
-	int l;
-	char *entry, *path, revbuf[16], tbuf[32];
+	char entry[CVS_ENT_MAXLINELEN], path[MAXPATHLEN], revbuf[16], tbuf[32];
 	CVSENTRIES *entlist;
 
 	if (cvs_noexec == 1)
 		return;
-
-	entry = xmalloc(CVS_ENT_MAXLINELEN);
 
 	if (cf->file_status == FILE_REMOVED) {
 		rcsnum_tostr(cf->file_ent->ce_rev, revbuf, sizeof(revbuf));
@@ -298,18 +347,13 @@ add_entry(struct cvs_file *cf)
 			tbuf[strlen(tbuf) - 1] = '\0';
 
 		/* Remove the '-' prefixing the version number. */
-		l = snprintf(entry, CVS_ENT_MAXLINELEN,
-		    "/%s/%s/%s//", cf->file_name, revbuf, tbuf);
-		if (l == -1 || l >= CVS_ENT_MAXLINELEN)
-               		fatal("add_entry: truncation");
+		(void)xsnprintf(entry, CVS_ENT_MAXLINELEN,
+		    "/%s/%s/%s/%s/", cf->file_name, revbuf, tbuf,
+		    cf->file_ent->ce_opts ? cf->file_ent->ce_opts : "");
 	} else {
 		if (logmsg != NULL) {
-			path = xmalloc(MAXPATHLEN);
-
-			l = snprintf(path, MAXPATHLEN, "%s/%s%s",
+			(void)xsnprintf(path, MAXPATHLEN, "%s/%s%s",
 			    CVS_PATH_CVSDIR, cf->file_name, CVS_DESCR_FILE_EXT);
-			if (l == -1 || l >= MAXPATHLEN)
-               			fatal("add_entry: truncation");
 
 			if ((fp = fopen(path, "w+")) == NULL)
 				fatal("add_entry: fopen `%s': %s",
@@ -321,18 +365,14 @@ add_entry(struct cvs_file *cf)
 				    path, strerror(errno));
 			}
 			(void)fclose(fp);
-			xfree(path);
 		}
 
-		l = snprintf(entry, CVS_ENT_MAXLINELEN, "/%s/0/Initial %s//",
-		    cf->file_name, cf->file_name);
-		if (l == -1 || l >= CVS_ENT_MAXLINELEN)
-               		fatal("add_entry: truncation");
+		(void)xsnprintf(entry, CVS_ENT_MAXLINELEN,
+		    "/%s/0/Initial %s/%s/", cf->file_name, cf->file_name,
+		    (kflag != RCS_KWEXP_DEFAULT) ? kbuf : "");
 	}
 
 	entlist = cvs_ent_open(cf->file_wd);
 	cvs_ent_add(entlist, entry);
 	cvs_ent_close(entlist, ENT_SYNC);
-
-	xfree(entry);
 }

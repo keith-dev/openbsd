@@ -1,5 +1,5 @@
 %{
-/*	$OpenBSD: date.y,v 1.13 2006/05/03 14:26:13 ray Exp $	*/
+/*	$OpenBSD: date.y,v 1.16 2007/02/22 06:42:09 otto Exp $	*/
 
 /*
 **  Originally written by Steven M. Bellovin <smb@research.att.com> while
@@ -14,9 +14,11 @@
 /* SUPPRESS 287 on yaccpar_sccsid *//* Unused static variable */
 /* SUPPRESS 288 on yyerrlab *//* Label unused */
 
-#include "includes.h"
+#include <sys/timeb.h>
 
-#include "log.h"
+#include <ctype.h>
+#include <string.h>
+
 #include "cvs.h"
 
 #define YEAR_EPOCH	1970
@@ -71,10 +73,10 @@ static time_t	yyRelMonth;
 static time_t	yyRelSeconds;
 
 
-static int   yyerror   (const char *);
-static int   yylex     (void);
-static int   yyparse   (void);
-static int   lookup    (char *);
+static int	yyerror(const char *);
+static int	yylex(void);
+static int	yyparse(void);
+static int	lookup(char *);
 
 %}
 
@@ -486,17 +488,13 @@ yyerror(const char *s)
 	char *str;
 
 	if (isspace(yyInput[0]) || !isprint(yyInput[0]))
-		(void)xasprintf(&str, "%s: unexpected char 0x%02x in date string",
-		    s, yyInput[0]);
+		(void)xasprintf(&str,
+		    "%s: unexpected char 0x%02x in date string", s, yyInput[0]);
 	else
 		(void)xasprintf(&str, "%s: unexpected %s in date string",
 		    s, yyInput);
 
-#if defined(TEST)
-	printf("%s", str);
-#else
 	cvs_log(LP_ERR, "%s", str);
-#endif
 	xfree(str);
 	return (0);
 }
@@ -633,6 +631,7 @@ RelativeMonth(time_t Start, time_t RelMonth)
 static int
 lookup(char *buff)
 {
+	size_t		len;
 	char		*p, *q;
 	int		i, abbrev;
 	const TABLE	*tp;
@@ -651,12 +650,14 @@ lookup(char *buff)
 		return (tMERIDIAN);
 	}
 
+	len = strlen(buff);
 	/* See if we have an abbreviation for a month. */
-	if (strlen(buff) == 3)
+	if (len == 3)
 		abbrev = 1;
-	else if (strlen(buff) == 4 && buff[3] == '.') {
+	else if (len == 4 && buff[3] == '.') {
 		abbrev = 1;
 		buff[3] = '\0';
+		--len;
 	} else
 		abbrev = 0;
 
@@ -688,15 +689,14 @@ lookup(char *buff)
 		}
 
 	/* Strip off any plural and try the units table again. */
-	i = strlen(buff) - 1;
-	if (buff[i] == 's') {
-		buff[i] = '\0';
+	if (len != 0 && buff[len - 1] == 's') {
+		buff[len - 1] = '\0';
 		for (tp = UnitsTable; tp->name; tp++)
 			if (strcmp(buff, tp->name) == 0) {
 				yylval.Number = tp->value;
 				return (tp->type);
 			}
-		buff[i] = 's';	/* Put back for "this" in OtherTable. */
+		buff[len - 1] = 's';	/* Put back for "this" in OtherTable. */
 	}
 
 	for (tp = OtherTable; tp->name; tp++)
@@ -706,7 +706,7 @@ lookup(char *buff)
 		}
 
 	/* Military timezones. */
-	if (buff[1] == '\0' && isalpha(*buff)) {
+	if (len == 1 && isalpha(*buff)) {
 		for (tp = MilitaryTable; tp->name; tp++)
 			if (strcmp(buff, tp->name) == 0) {
 				yylval.Number = tp->value;

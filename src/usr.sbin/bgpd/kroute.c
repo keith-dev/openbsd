@@ -1,4 +1,4 @@
-/*	$OpenBSD: kroute.c,v 1.147 2006/08/03 22:40:25 claudio Exp $ */
+/*	$OpenBSD: kroute.c,v 1.152 2007/02/22 08:34:18 henning Exp $ */
 
 /*
  * Copyright (c) 2003, 2004 Henning Brauer <henning@openbsd.org>
@@ -39,6 +39,7 @@
 struct {
 	u_int32_t		rtseq;
 	pid_t			pid;
+	u_int			rtableid;
 	int			fib_sync;
 	int			fd;
 } kr_state;
@@ -131,10 +132,10 @@ void		if_announce(void *);
 int		send_rtmsg(int, int, struct kroute *);
 int		send_rt6msg(int, int, struct kroute6 *);
 int		dispatch_rtmsg(void);
-int		fetchtable(void);
+int		fetchtable(u_int, int);
 int		fetchifs(int);
 int		dispatch_rtmsg_addr(struct rt_msghdr *,
-		    struct sockaddr *[RTAX_MAX]);
+		    struct sockaddr *[RTAX_MAX], int);
 
 RB_HEAD(kroute_tree, kroute_node)	krt;
 RB_PROTOTYPE(kroute_tree, kroute_node, entry, kroute_compare)
@@ -157,12 +158,13 @@ RB_GENERATE(kif_tree, kif_node, entry, kif_compare)
  */
 
 int
-kr_init(int fs)
+kr_init(int fs, u_int rtableid)
 {
 	int		opt = 0, rcvbuf, default_rcvbuf;
 	socklen_t	optlen;
 
 	kr_state.fib_sync = fs;
+	kr_state.rtableid = rtableid;
 
 	if ((kr_state.fd = socket(AF_ROUTE, SOCK_RAW, 0)) == -1) {
 		log_warn("kr_init: socket");
@@ -198,8 +200,11 @@ kr_init(int fs)
 	if (fetchifs(0) == -1)
 		return (-1);
 
-	if (fetchtable() == -1)
+	if (fetchtable(kr_state.rtableid, 0) == -1)
 		return (-1);
+	if (kr_state.rtableid != 0)
+		if (fetchtable(0, 1) == -1)
+			return (-1);
 
 	if (protect_lo() == -1)
 		return (-1);
@@ -754,10 +759,10 @@ kr_reload(void)
 	LIST_FOREACH(rn, &redistlist, entry)
 		if (bgpd_redistribute(IMSG_NETWORK_ADD, rn->kr, rn->kr6) == -1)
 			return (-1);
-	
+
 	RB_FOREACH(nh, knexthop_tree, &knt)
 		knexthop_validate(nh);
-	
+
 	return (0);
 }
 
@@ -1742,6 +1747,7 @@ send_rtmsg(int fd, int action, struct kroute *kroute)
 	r.hdr.rtm_msglen = sizeof(r);
 	r.hdr.rtm_version = RTM_VERSION;
 	r.hdr.rtm_type = action;
+	r.hdr.rtm_tableid = kr_state.rtableid;
 	r.hdr.rtm_flags = RTF_PROTO1;
 	if (kroute->flags & F_BLACKHOLE)
 		r.hdr.rtm_flags |= RTF_BLACKHOLE;
@@ -1818,6 +1824,7 @@ send_rt6msg(int fd, int action, struct kroute6 *kroute)
 	r.hdr.rtm_msglen = sizeof(r);
 	r.hdr.rtm_version = RTM_VERSION;
 	r.hdr.rtm_type = action;
+	r.hdr.rtm_tableid = kr_state.rtableid;
 	r.hdr.rtm_flags = RTF_PROTO1;
 	if (kroute->flags & F_BLACKHOLE)
 		r.hdr.rtm_flags |= RTF_BLACKHOLE;
@@ -1877,10 +1884,10 @@ retry:
 }
 
 int
-fetchtable(void)
+fetchtable(u_int rtableid, int connected_only)
 {
 	size_t			 len;
-	int			 mib[6];
+	int			 mib[7];
 	char			*buf, *next, *lim;
 	struct rt_msghdr	*rtm;
 	struct sockaddr		*sa, *gw, *rti_info[RTAX_MAX];
@@ -1895,8 +1902,11 @@ fetchtable(void)
 	mib[3] = 0;
 	mib[4] = NET_RT_DUMP;
 	mib[5] = 0;
+	mib[6] = rtableid;
 
-	if (sysctl(mib, 6, NULL, &len, NULL, 0) == -1) {
+	if (sysctl(mib, 7, NULL, &len, NULL, 0) == -1) {
+		if (rtableid != 0 && errno == EINVAL)	/* table nonexistant */
+			return (0);
 		log_warn("sysctl");
 		return (-1);
 	}
@@ -1904,7 +1914,7 @@ fetchtable(void)
 		log_warn("fetchtable");
 		return (-1);
 	}
-	if (sysctl(mib, 6, buf, &len, NULL, 0) == -1) {
+	if (sysctl(mib, 7, buf, &len, NULL, 0) == -1) {
 		log_warn("sysctl");
 		free(buf);
 		return (-1);
@@ -2022,16 +2032,21 @@ fetchtable(void)
 			if (rtm->rtm_flags & RTF_PROTO1)  {
 				send_rtmsg(kr_state.fd, RTM_DELETE, &kr->r);
 				free(kr);
-			} else
+			} else if (connected_only &&
+			    !(kr->r.flags & F_CONNECTED))
+				free(kr);
+			else
 				kroute_insert(kr);
 		} else if (sa->sa_family == AF_INET6) {
 			if (rtm->rtm_flags & RTF_PROTO1)  {
 				send_rt6msg(kr_state.fd, RTM_DELETE, &kr6->r);
 				free(kr6);
-			} else
+			} else if (connected_only &&
+			    !(kr6->r.flags & F_CONNECTED))
+				free(kr6);
+			else
 				kroute6_insert(kr6);
 		}
-
 	}
 	free(buf);
 	return (0);
@@ -2118,6 +2133,7 @@ dispatch_rtmsg(void)
 	struct rt_msghdr	*rtm;
 	struct if_msghdr	 ifm;
 	struct sockaddr		*sa, *rti_info[RTAX_MAX];
+	int			 connected_only;
 
 	if ((n = read(kr_state.fd, &buf, sizeof(buf))) == -1) {
 		log_warn("dispatch_rtmsg: read error");
@@ -2140,16 +2156,25 @@ dispatch_rtmsg(void)
 			sa = (struct sockaddr *)(rtm + 1);
 			get_rtaddrs(rtm->rtm_addrs, sa, rti_info);
 
-			if (rtm->rtm_pid == kr_state.pid)	/* cause by us */
+			if (rtm->rtm_pid == kr_state.pid) /* cause by us */
 				continue;
 
-			if (rtm->rtm_errno)			/* failed attempts... */
+			if (rtm->rtm_errno)		 /* failed attempts */
 				continue;
 
-			if (rtm->rtm_flags & RTF_LLINFO)	/* arp cache */
+			if (rtm->rtm_flags & RTF_LLINFO) /* arp cache */
 				continue;
 
-			if (dispatch_rtmsg_addr(rtm, rti_info) == -1)
+			connected_only = 0;
+			if (rtm->rtm_tableid != kr_state.rtableid) {
+				if (rtm->rtm_tableid == 0)
+					connected_only = 1;
+				else
+					continue;
+			}
+
+			if (dispatch_rtmsg_addr(rtm, rti_info,
+			    connected_only) == -1)
 				return (-1);
 			break;
 		case RTM_IFINFO:
@@ -2169,7 +2194,8 @@ dispatch_rtmsg(void)
 }
 
 int
-dispatch_rtmsg_addr(struct rt_msghdr *rtm, struct sockaddr *rti_info[RTAX_MAX])
+dispatch_rtmsg_addr(struct rt_msghdr *rtm, struct sockaddr *rti_info[RTAX_MAX],
+    int connected_only)
 {
 	struct sockaddr		*sa;
 	struct sockaddr_in	*sa_in;
@@ -2260,6 +2286,9 @@ dispatch_rtmsg_addr(struct rt_msghdr *rtm, struct sockaddr *rti_info[RTAX_MAX])
 			sa = NULL;
 			break;
 		}
+
+	if (connected_only && !(flags & F_CONNECTED))
+		return (0);
 
 	if (sa == NULL && !(flags & F_CONNECTED)) {
 		log_warnx("dispatch_rtmsg no nexthop for %s/%u",
@@ -2376,4 +2405,3 @@ dispatch_rtmsg_addr(struct rt_msghdr *rtm, struct sockaddr *rti_info[RTAX_MAX])
 
 	return (0);
 }
-

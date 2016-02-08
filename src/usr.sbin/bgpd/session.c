@@ -1,4 +1,4 @@
-/*	$OpenBSD: session.c,v 1.262 2006/08/27 16:57:19 henning Exp $ */
+/*	$OpenBSD: session.c,v 1.270 2007/02/22 08:34:18 henning Exp $ */
 
 /*
  * Copyright (c) 2003, 2004, 2005 Henning Brauer <henning@openbsd.org>
@@ -46,9 +46,10 @@
 
 #define PFD_PIPE_MAIN		0
 #define PFD_PIPE_ROUTE		1
-#define	PFD_SOCK_CTL		2
-#define	PFD_SOCK_RCTL		3
-#define PFD_LISTENERS_START	4
+#define PFD_PIPE_ROUTE_CTL	2
+#define PFD_SOCK_CTL		3
+#define PFD_SOCK_RCTL		4
+#define PFD_LISTENERS_START	5
 
 void	session_sighdlr(int);
 int	setup_listeners(u_int *);
@@ -64,8 +65,8 @@ void	session_accept(int);
 int	session_connect(struct peer *);
 void	session_tcp_established(struct peer *);
 void	session_capa_ann_none(struct peer *);
-u_int8_t	 session_capa_add(struct peer *, struct buf *, u_int8_t,
-		    u_int8_t);
+int	session_capa_add(struct peer *, struct buf *, u_int8_t, u_int8_t,
+	    u_int8_t *);
 int	session_capa_add_mp(struct buf *, u_int16_t, u_int8_t);
 struct bgp_msg	*session_newmsg(enum msg_type, u_int16_t);
 int	session_sendmsg(struct bgp_msg *, struct peer *);
@@ -101,6 +102,7 @@ int			 pending_reconf = 0;
 int			 csock = -1, rcsock = -1;
 u_int			 peer_cnt;
 struct imsgbuf		*ibuf_rde;
+struct imsgbuf		*ibuf_rde_ctl;
 struct imsgbuf		*ibuf_main;
 
 struct mrt_head		 mrthead;
@@ -119,6 +121,7 @@ session_sighdlr(int sig)
 int
 setup_listeners(u_int *la_cnt)
 {
+	int			 ttl = 255;
 	int			 opt;
 	struct listen_addr	*la;
 	u_int			 cnt = 0;
@@ -146,6 +149,13 @@ setup_listeners(u_int *la_cnt)
 				fatal("setsockopt TCP_MD5SIG");
 		}
 
+		/* set ttl to 255 so that ttl-security works */
+		if (la->sa.ss_family == AF_INET && setsockopt(la->fd,
+		    IPPROTO_IP, IP_TTL, &ttl, sizeof(ttl)) == -1) {
+			log_warn("setup_listeners setsockopt TTL");
+			continue;
+		}
+
 		session_socket_blockmode(la->fd, BM_NONBLOCK);
 
 		if (listen(la->fd, MAX_BACKLOG)) {
@@ -167,7 +177,8 @@ setup_listeners(u_int *la_cnt)
 pid_t
 session_main(struct bgpd_config *config, struct peer *cpeers,
     struct network_head *net_l, struct filter_head *rules,
-    struct mrt_head *m_l, int pipe_m2s[2], int pipe_s2r[2], int pipe_m2r[2])
+    struct mrt_head *m_l, int pipe_m2s[2], int pipe_s2r[2], int pipe_m2r[2],
+    int pipe_s2rctl[2])
 {
 	int			 nfds, timeout;
 	unsigned int		 i, j, idx_peers, idx_listeners, idx_mrts;
@@ -176,6 +187,7 @@ session_main(struct bgpd_config *config, struct peer *cpeers,
 	u_int			 pfd_elms = 0, peer_l_elms = 0, mrt_l_elms = 0;
 	u_int			 listener_cnt, ctl_cnt, mrt_cnt;
 	u_int			 new_cnt;
+	u_int32_t		 ctl_queued;
 	struct passwd		*pw;
 	struct peer		*p, **peer_l = NULL, *last, *next;
 	struct network		*net;
@@ -234,13 +246,16 @@ session_main(struct bgpd_config *config, struct peer *cpeers,
 	log_info("session engine ready");
 	close(pipe_m2s[0]);
 	close(pipe_s2r[1]);
+	close(pipe_s2rctl[1]);
 	close(pipe_m2r[0]);
 	close(pipe_m2r[1]);
 	init_conf(conf);
 	if ((ibuf_rde = malloc(sizeof(struct imsgbuf))) == NULL ||
+	    (ibuf_rde_ctl = malloc(sizeof(struct imsgbuf))) == NULL ||
 	    (ibuf_main = malloc(sizeof(struct imsgbuf))) == NULL)
 		fatal(NULL);
 	imsg_init(ibuf_rde, pipe_s2r[0]);
+	imsg_init(ibuf_rde_ctl, pipe_s2rctl[0]);
 	imsg_init(ibuf_main, pipe_m2s[1]);
 	TAILQ_INIT(&ctl_conns);
 	control_listen(csock);
@@ -363,6 +378,18 @@ session_main(struct bgpd_config *config, struct peer *cpeers,
 		pfd[PFD_PIPE_ROUTE].events = POLLIN;
 		if (ibuf_rde->w.queued > 0)
 			pfd[PFD_PIPE_ROUTE].events |= POLLOUT;
+
+		ctl_queued = 0;
+		TAILQ_FOREACH(ctl_conn, &ctl_conns, entry)
+			ctl_queued += ctl_conn->ibuf.w.queued;
+
+		pfd[PFD_PIPE_ROUTE_CTL].fd = ibuf_rde_ctl->fd;
+		if (ctl_queued < SESSION_CTL_QUEUE_MAX)
+			/*
+			 * Do not act as unlimited buffer. Don't read in more
+			 * messages if the ctl sockets are getting full. 
+			 */
+			pfd[PFD_PIPE_ROUTE_CTL].events = POLLIN;
 		pfd[PFD_SOCK_CTL].fd = csock;
 		pfd[PFD_SOCK_CTL].events = POLLIN;
 		pfd[PFD_SOCK_RCTL].fd = rcsock;
@@ -485,6 +512,12 @@ session_main(struct bgpd_config *config, struct peer *cpeers,
 		if (nfds > 0 && pfd[PFD_PIPE_ROUTE].revents & POLLIN) {
 			nfds--;
 			session_dispatch_imsg(ibuf_rde, PFD_PIPE_ROUTE,
+			    &listener_cnt);
+		}
+
+		if (nfds > 0 && pfd[PFD_PIPE_ROUTE_CTL].revents & POLLIN) {
+			nfds--;
+			session_dispatch_imsg(ibuf_rde_ctl, PFD_PIPE_ROUTE_CTL,
 			    &listener_cnt);
 		}
 
@@ -906,7 +939,8 @@ change_state(struct peer *peer, enum session_state state,
 			    peer->IdleHoldTime < MAX_IDLE_HOLD/2)
 				peer->IdleHoldTime *= 2;
 		}
-		if (peer->state == STATE_NONE || peer->state == STATE_ESTABLISHED) {
+		if (peer->state == STATE_NONE ||
+		    peer->state == STATE_ESTABLISHED) {
 			/* initialize capability negotiation structures */
 			memcpy(&peer->capa.ann, &peer->conf.capabilities,
 			    sizeof(peer->capa.ann));
@@ -1104,14 +1138,27 @@ session_setup_socket(struct peer *p)
 	int	nodelay = 1;
 	int	bsize;
 
-	if (p->conf.ebgp && p->conf.remote_addr.af == AF_INET)
-		/* set TTL to foreign router's distance - 1=direct n=multihop */
+	if (p->conf.ebgp && p->conf.remote_addr.af == AF_INET) {
+		/* set TTL to foreign router's distance - 1=direct n=multihop
+		   with ttlsec, we always use 255 */
+		if (p->conf.ttlsec) {
+			ttl = 256 - p->conf.distance;
+			if (setsockopt(p->fd, IPPROTO_IP, IP_MINTTL, &ttl,
+			    sizeof(ttl)) == -1) {
+				log_peer_warn(&p->conf,
+				    "session_setup_socket setsockopt MINTTL");
+				return (-1);
+			}
+			ttl = 255;
+		}
+
 		if (setsockopt(p->fd, IPPROTO_IP, IP_TTL, &ttl,
 		    sizeof(ttl)) == -1) {
 			log_peer_warn(&p->conf,
 			    "session_setup_socket setsockopt TTL");
 			return (-1);
 		}
+	}
 
 	if (p->conf.ebgp && p->conf.remote_addr.af == AF_INET6)
 		/* set hoplimit to foreign router's distance */
@@ -1121,6 +1168,13 @@ session_setup_socket(struct peer *p)
 			    "session_setup_socket setsockopt hoplimit");
 			return (-1);
 		}
+
+	/* if ttlsec is in use, set minttl */
+	if (p->conf.ttlsec) {
+		ttl = 256 - p->conf.distance;
+		setsockopt(p->fd, IPPROTO_IP, IP_MINTTL, &ttl, sizeof(ttl));
+
+	}
 
 	/* set TCP_NODELAY */
 	if (setsockopt(p->fd, IPPROTO_TCP, TCP_NODELAY, &nodelay,
@@ -1160,7 +1214,7 @@ session_socket_blockmode(int fd, enum blockmodes bm)
 	int	flags;
 
 	if ((flags = fcntl(fd, F_GETFL, 0)) == -1)
-		fatal("fnctl F_GETFL");
+		fatal("fcntl F_GETFL");
 
 	if (bm == BM_NONBLOCK)
 		flags |= O_NONBLOCK;
@@ -1168,7 +1222,7 @@ session_socket_blockmode(int fd, enum blockmodes bm)
 		flags &= ~O_NONBLOCK;
 
 	if ((flags = fcntl(fd, F_SETFL, flags)) == -1)
-		fatal("fnctl F_SETFL");
+		fatal("fcntl F_SETFL");
 }
 
 void
@@ -1195,9 +1249,9 @@ session_capa_ann_none(struct peer *peer)
 	peer->capa.ann.restart = 0;
 }
 
-u_int8_t
+int
 session_capa_add(struct peer *p, struct buf *opb, u_int8_t capa_code,
-    u_int8_t capa_len)
+    u_int8_t capa_len, u_int8_t *optparamlen)
 {
 	u_int8_t	op_type, op_len, tot_len, errs = 0;
 
@@ -1205,15 +1259,13 @@ session_capa_add(struct peer *p, struct buf *opb, u_int8_t capa_code,
 	op_len = sizeof(capa_code) + sizeof(capa_len) + capa_len;
 	tot_len = sizeof(op_type) + sizeof(op_len) + op_len;
 	if (buf_grow(opb, tot_len) == NULL)
-		return (0);
+		return (1);
 	errs += buf_add(opb, &op_type, sizeof(op_type));
 	errs += buf_add(opb, &op_len, sizeof(op_len));
 	errs += buf_add(opb, &capa_code, sizeof(capa_code));
 	errs += buf_add(opb, &capa_len, sizeof(capa_len));
-	if (errs)
-		return (0);
-	else
-		return (tot_len);
+	*optparamlen += tot_len;
+	return (errs);
 }
 
 int
@@ -1295,70 +1347,45 @@ session_open(struct peer *p)
 	struct buf		*opb;
 	struct msg_open		 msg;
 	u_int16_t		 len;
-	u_int8_t		 optparamlen = 0, op_len;
+	u_int8_t		 optparamlen = 0;
 	u_int			 errs = 0;
 
 
 	if ((opb = buf_open(0)) == NULL) {
 		bgp_fsm(p, EVNT_CON_FATAL);
 		return;
-	}	
+	}
 
 	/* multiprotocol extensions, RFC 2858 */
 	if (p->capa.ann.mp_v4) {	/* 4 bytes data */
-		if ((op_len = session_capa_add(p, opb, CAPA_MP, 4)) == 0)
-			errs++;
-		else {
-			optparamlen += op_len;
-			errs += session_capa_add_mp(opb, AFI_IPv4,
-			    p->capa.ann.mp_v4);
-		}
+		errs += session_capa_add(p, opb, CAPA_MP, 4, &optparamlen);
+		errs += session_capa_add_mp(opb, AFI_IPv4, p->capa.ann.mp_v4);
 	}
 	if (p->capa.ann.mp_v6) {	/* 4 bytes data */
-		if ((op_len = session_capa_add(p, opb, CAPA_MP, 4)) == 0)
-			errs++;
-		else {
-			optparamlen += op_len;
-			errs += session_capa_add_mp(opb, AFI_IPv6,
-			    p->capa.ann.mp_v6);
-		}
+		errs += session_capa_add(p, opb, CAPA_MP, 4, &optparamlen);
+		errs += session_capa_add_mp(opb, AFI_IPv6, p->capa.ann.mp_v6);
 	}
-
 
 	/* route refresh, RFC 2918 */
-	if (p->capa.ann.refresh) {	/* no data */
-		if ((op_len = session_capa_add(p, opb, CAPA_REFRESH, 0)) == 0)
-			errs++;
-		else
-			optparamlen += op_len;
-	}
+	if (p->capa.ann.refresh)	/* no data */
+		errs += session_capa_add(p, opb, CAPA_REFRESH, 0, &optparamlen);
 
 	/* End-of-RIB marker, draft-ietf-idr-restart */
-	if (p->capa.ann.refresh) {	/* 4 bytes data */
-		if ((op_len = session_capa_add(p, opb, CAPA_RESTART, 4)) == 0)
-			errs++;
-		else {
-			u_char	c[4];
+	if (p->capa.ann.restart) {	/* 4 bytes data */
+		u_char	c[4];
 
-			bzero(&c, 4);
-			c[0] = 0x80;
-			errs += buf_add(opb, &c, 4);
-			optparamlen += op_len;
-		}
-	}		
+		bzero(&c, 4);
+		c[0] = 0x80;
+		errs += session_capa_add(p, opb, CAPA_RESTART, 4, &optparamlen);
+		errs += buf_add(opb, &c, 4);
+	}
 
-	if (errs > 0) {
+	len = MSGSIZE_OPEN_MIN + optparamlen;
+	if (errs || (buf = session_newmsg(OPEN, len)) == NULL) {
 		buf_free(opb);
 		bgp_fsm(p, EVNT_CON_FATAL);
 		return;
 	}
-
-	len = MSGSIZE_OPEN_MIN + optparamlen;
-
-	if ((buf = session_newmsg(OPEN, len)) == NULL) {
-		bgp_fsm(p, EVNT_CON_FATAL);
-		return;
-	}	
 
 	msg.version = 4;
 	msg.myas = htons(conf->as);
@@ -2349,7 +2376,7 @@ session_dispatch_imsg(struct imsgbuf *ibuf, int idx, u_int *listener_cnt)
 				fatalx("IFINFO imsg with wrong len");
 			kif = imsg.data;
 			depend_ok = (kif->flags & IFF_UP) &&
-			    (kif->link_state == LINK_STATE_UP ||
+			    (LINK_STATE_IS_UP(kif->link_state) ||
 			    (kif->link_state == LINK_STATE_UNKNOWN &&
 			    kif->media_type != IFT_CARP));
 
@@ -2423,7 +2450,7 @@ session_dispatch_imsg(struct imsgbuf *ibuf, int idx, u_int *listener_cnt)
 		case IMSG_CTL_SHOW_NETWORK:
 		case IMSG_CTL_SHOW_NETWORK6:
 		case IMSG_CTL_SHOW_NEIGHBOR:
-			if (idx != PFD_PIPE_ROUTE)
+			if (idx != PFD_PIPE_ROUTE_CTL)
 				fatalx("ctl rib request not from RDE");
 			control_imsg_relay(&imsg);
 			break;

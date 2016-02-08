@@ -1,4 +1,4 @@
-/*	$OpenBSD: fileio.c,v 1.77 2006/07/25 08:22:32 kjell Exp $	*/
+/*	$OpenBSD: fileio.c,v 1.80 2006/12/24 01:20:53 kjell Exp $	*/
 
 /* This file is in the public domain. */
 
@@ -139,6 +139,7 @@ ffputbuf(struct buffer *bp)
  * in the supplied buffer. Stop on end of file or end of
  * line.  When FIOEOF is returned, there is a valid line
  * of data without the normally implied \n.
+ * If the line length exceeds nbuf, FIOLONG is returned.
  */
 int
 ffgetline(char *buf, int nbuf, int *nbytes)
@@ -421,7 +422,7 @@ make_file_list(char *buf)
 	char		 prefixx[NFILEN + 1];
 
 	/*
-	 * We need three different strings: 
+	 * We need three different strings:
 
 	 * dir - the name of the directory containing what the user typed.
 	 *  Must be a real unix file name, e.g. no ~user, etc..
@@ -518,7 +519,7 @@ make_file_list(char *buf)
 				continue;
 			if (stat(statname, &statbuf) < 0)
 				continue;
-			if (statbuf.st_mode & S_IFDIR)
+			if (S_ISDIR(statbuf.st_mode))
 				isdir = 1;
 		}
 

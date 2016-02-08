@@ -1,10 +1,8 @@
 t IPsec-0.0.0.0/0-0.0.0.0/0
+C rmv [Phase 2]:Connections=IPsec-0.0.0.0/0-0.0.0.0/0
 C rms [IPsec-0.0.0.0/0-0.0.0.0/0]
 C rms [qm-0.0.0.0/0-0.0.0.0/0]
-C rms [lid-0.0.0.0/0]
-C rms [rid-0.0.0.0/0]
 t IPsec-::/0-::/0
+C rmv [Phase 2]:Connections=IPsec-::/0-::/0
 C rms [IPsec-::/0-::/0]
 C rms [qm-::/0-::/0]
-C rms [lid-::/0]
-C rms [rid-::/0]

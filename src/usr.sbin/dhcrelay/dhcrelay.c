@@ -1,4 +1,4 @@
-/*	$OpenBSD: dhcrelay.c,v 1.26 2005/11/13 20:26:00 deraadt Exp $ */
+/*	$OpenBSD: dhcrelay.c,v 1.29 2007/02/09 16:49:47 stevesk Exp $ */
 
 /*
  * Copyright (c) 2004 Henning Brauer <henning@cvs.openbsd.org>
@@ -110,7 +110,7 @@ main(int argc, char *argv[])
 		else {
 			he = gethostbyname(argv[0]);
 			if (!he)
-				warn("%s: host unknown", argv[0]);
+				warning("%s: host unknown", argv[0]);
 			else
 				iap = ((struct in_addr *)he->h_addr_list[0]);
 		}
@@ -238,7 +238,7 @@ relay(struct interface_info *ip, struct dhcp_packet *packet, int length,
 	/* If giaddr is set on a BOOTREQUEST, ignore it - it's already
 	   been gatewayed. */
 	if (packet->giaddr.s_addr) {
-		note("ignoring BOOTREQUEST with giaddr of %s\n",
+		note("ignoring BOOTREQUEST with giaddr of %s",
 		    inet_ntoa(packet->giaddr));
 		return;
 	}
@@ -317,10 +317,13 @@ got_response(struct protocol *l)
 		 * Ignore ECONNREFUSED as to many dhcp server send a bogus
 		 * icmp unreach for every request.
 		 */
-		warn("recv failed for %s: %m",
+		warning("recv failed for %s: %m",
 		    inet_ntoa(sp->to.sin_addr));
 		return;
 	}
+	if (result == -1 && errno == ECONNREFUSED)
+		return;
+
 	if (result == 0)
 		return;
 

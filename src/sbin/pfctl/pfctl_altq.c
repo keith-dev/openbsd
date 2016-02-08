@@ -1,4 +1,4 @@
-/*	$OpenBSD: pfctl_altq.c,v 1.89 2006/05/14 15:52:11 deraadt Exp $	*/
+/*	$OpenBSD: pfctl_altq.c,v 1.91 2006/11/28 00:08:50 henning Exp $	*/
 
 /*
  * Copyright (c) 2002
@@ -142,7 +142,7 @@ print_altq(const struct pf_altq *a, unsigned level, struct node_queue_bw *bw,
 	struct node_queue_opt *qopts)
 {
 	if (a->qname[0] != 0) {
-		print_queue(a, level, bw, 0, qopts);
+		print_queue(a, level, bw, 1, qopts);
 		return;
 	}
 
@@ -680,8 +680,8 @@ eval_pfqueue_hfsc(struct pfctl *pf, struct pf_altq *pa)
 	}
 
 	if ((opts->rtsc_m1 < opts->rtsc_m2 && opts->rtsc_m1 != 0) ||
-	    (opts->rtsc_m1 < opts->rtsc_m2 && opts->rtsc_m1 != 0) ||
-	    (opts->rtsc_m1 < opts->rtsc_m2 && opts->rtsc_m1 != 0)) {
+	    (opts->lssc_m1 < opts->lssc_m2 && opts->lssc_m1 != 0) ||
+	    (opts->ulsc_m1 < opts->ulsc_m2 && opts->ulsc_m1 != 0)) {
 		warnx("m1 must be zero for convex curve: %s", pa->qname);
 		return (-1);
 	}

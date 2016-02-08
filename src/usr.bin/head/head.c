@@ -1,4 +1,4 @@
-/*	$OpenBSD: head.c,v 1.11 2003/06/10 22:20:47 deraadt Exp $	*/
+/*	$OpenBSD: head.c,v 1.13 2006/10/09 00:24:36 tedu Exp $	*/
 
 /*
  * Copyright (c) 1980, 1987 Regents of the University of California.
@@ -30,14 +30,11 @@
  */
 
 #ifndef lint
-char copyright[] =
+static const char copyright[] =
 "@(#) Copyright (c) 1980, 1987 Regents of the University of California.\n\
  All rights reserved.\n";
-#endif /* not lint */
-
-#ifndef lint
 /*static char sccsid[] = "from: @(#)head.c	5.5 (Berkeley) 6/1/90";*/
-static char rcsid[] = "$OpenBSD: head.c,v 1.11 2003/06/10 22:20:47 deraadt Exp $";
+static const char rcsid[] = "$OpenBSD: head.c,v 1.13 2006/10/09 00:24:36 tedu Exp $";
 #endif /* not lint */
 
 #include <stdio.h>
@@ -62,30 +59,32 @@ main(int argc, char *argv[])
 	long 	cnt;
 	int	ch, firsttime;
 	long	linecnt = 10;
-	char	*inval = NULL, *p = NULL;
+	char	*p = NULL;
 
 	/* handle obsolete -number syntax */
 	if (argc > 1 && argv[1][0] == '-' && isdigit(argv[1][1])) {
-		linecnt = strtol((p = argv[1] + 1), &inval, 10);
-		argc--; argv++;
+		p = argv[1] + 1;
+		argc--;
+		argv++;
 	}
 
-	while ((ch = getopt (argc, argv, "n:")) != -1)
+	while ((ch = getopt(argc, argv, "n:")) != -1) {
 		switch (ch) {
 		case 'n':
-			linecnt = strtol((p = optarg), &inval, 10);
+			p = optarg;
 			break;
 		default:
 			usage();	
 		}
+	}
 	argc -= optind, argv += optind;
 
 	if (p) {
-		if ((linecnt == LONG_MIN || linecnt == LONG_MAX) &&
-		    errno == ERANGE)
-			err(1, "illegal line count -- %s", p);
-		else if (linecnt <= 0 || *inval)
-			errx(1, "illegal line count -- %s", p);
+		const char *errstr;
+
+		linecnt = strtonum(p, 1, LONG_MAX, &errstr);
+		if (errstr)
+			errx(1, "line count %s: %s", errstr, p);
 	}
 
 	/* setlinebuf(stdout); */
@@ -93,8 +92,7 @@ main(int argc, char *argv[])
 		if (!*argv) {
 			if (!firsttime)
 				exit(0);
-		}
-		else {
+		} else {
 			if (!freopen(*argv, "r", stdin)) {
 				warn("%s", *argv++);
 				continue;
@@ -121,4 +119,3 @@ usage(void)
 	fputs("usage: head [-n line_count] [file ...]\n", stderr);
 	exit(1);
 }
-

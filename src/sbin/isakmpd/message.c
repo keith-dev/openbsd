@@ -1,4 +1,4 @@
-/* $OpenBSD: message.c,v 1.120 2006/07/02 13:19:00 hshoexer Exp $	 */
+/* $OpenBSD: message.c,v 1.123 2006/12/05 15:01:00 hshoexer Exp $	 */
 /* $EOM: message.c,v 1.156 2000/10/10 12:36:39 provos Exp $	 */
 
 /*
@@ -176,6 +176,7 @@ message_free(struct message *msg)
 {
 	u_int32_t       i;
 	struct payload *payload;
+	struct post_send *node;
 
 	LOG_DBG((LOG_MESSAGE, 20, "message_free: freeing %p", msg));
 	if (!msg)
@@ -198,10 +199,8 @@ message_free(struct message *msg)
 			}
 		free(msg->payload);
 	}
-	while (TAILQ_FIRST(&msg->post_send) != 0)
-		TAILQ_REMOVE(&msg->post_send, TAILQ_FIRST(&msg->post_send),
-		    link);
-
+	while ((node = TAILQ_FIRST(&msg->post_send)))
+		TAILQ_REMOVE(&msg->post_send, node, link);
 	if (msg->transport) {
 		/* If we are on the send queue, remove us from there.  */
 		if (msg->flags & MSG_IN_TRANSIT)
@@ -222,8 +221,9 @@ message_free(struct message *msg)
  * MSG is the ISAKMP message to be parsed.  NEXT is the type of the first
  * payload to be parsed, and it's pointed to by BUF.  ACCEPTED_PAYLOADS
  * tells what payloads are accepted and FUNC is a pointer to a function
- * to be called for each payload found.  Returns the total length of the
- * parsed payloads.
+ * to be called for each payload found, which is also responsible for
+ * freeing the passed ISAKMP message in the failure case.
+ * Returns the total length of the parsed payloads.
  */
 static int
 message_parse_payloads(struct message *msg, struct payload *p, u_int8_t next,
@@ -345,7 +345,8 @@ message_parse_proposal(struct message *msg, struct payload *p,
 	set	payload_set;
 
 	/* Put the proposal into the proposal bucket.  */
-	message_index_payload(msg, p, payload, buf);
+	if (message_index_payload(msg, p, payload, buf) == -1)
+		return -1;
 
 	ZERO(&payload_set);
 	SET(ISAKMP_PAYLOAD_TRANSFORM, &payload_set);
@@ -364,7 +365,8 @@ message_parse_transform(struct message *msg, struct payload *p,
     u_int8_t payload, u_int8_t *buf)
 {
 	/* Put the transform into the transform bucket.  */
-	message_index_payload(msg, p, payload, buf);
+	if (message_index_payload(msg, p, payload, buf) == -1)
+		return -1;
 
 	LOG_DBG((LOG_MESSAGE, 50, "Transform %d's attributes",
 	    GET_ISAKMP_TRANSFORM_NO(buf)));
@@ -472,6 +474,7 @@ message_validate_payload(struct message *m, struct payload *p, u_int8_t payload)
 	default:
 		break;
 	}
+	message_drop(m, ISAKMP_NOTIFY_INVALID_PAYLOAD_TYPE, 0, 1, 1);
 	return -1;
 }
 
@@ -917,7 +920,7 @@ message_validate_notify(struct message *msg, struct payload *p)
 	    memcmp(p->p + ISAKMP_NOTIFY_SPI_OFF, msg->isakmp_sa->cookies,
 		ISAKMP_HDR_COOKIES_LEN) != 0) {
 		log_print("message_validate_notify: bad cookies");
-		message_drop(msg, ISAKMP_NOTIFY_INVALID_SPI, 0, 1, 0);
+		message_drop(msg, ISAKMP_NOTIFY_INVALID_SPI, 0, 1, 1);
 		return -1;
 	}
 
@@ -1168,8 +1171,10 @@ message_index_payload(struct message *msg, struct payload *p, u_int8_t payload,
 
 	/* Put the payload pointer into the right bucket.  */
 	payload_node = malloc(sizeof *payload_node);
-	if (!payload_node)
+	if (!payload_node) {
+		message_free(msg);
 		return -1;
+	}
 	payload_node->p = buf;
 	payload_node->context = p;
 	payload_node->flags = 0;
@@ -2182,9 +2187,8 @@ retry_transform:
 				 * Remove potentially succeeded choices from
 				 * the SA.
 				 */
-				while (TAILQ_FIRST(&sa->protos))
-					TAILQ_REMOVE(&sa->protos,
-					    TAILQ_FIRST(&sa->protos), link);
+				while ((proto = TAILQ_FIRST(&sa->protos)))
+					TAILQ_REMOVE(&sa->protos, proto, link);
 
 				/*
 				 * Skip to the last transform of this
@@ -2242,10 +2246,10 @@ retry_transform:
 					 * Remove potentially succeeded
 					 * choices from the SA.
 					 */
-					while (TAILQ_FIRST(&sa->protos))
+					while ((proto =
+					    TAILQ_FIRST(&sa->protos)))
 						TAILQ_REMOVE(&sa->protos,
-						    TAILQ_FIRST(&sa->protos),
-						    link);
+						    proto, link);
 					goto retry_transform;
 				}
 			}
@@ -2274,8 +2278,8 @@ cleanup:
 	 * Remove potentially succeeded choices from the SA.
 	 * XXX Do we leak struct protos and related data here?
 	 */
-	while (TAILQ_FIRST(&sa->protos))
-		TAILQ_REMOVE(&sa->protos, TAILQ_FIRST(&sa->protos), link);
+	while ((proto = TAILQ_FIRST(&sa->protos)))
+		TAILQ_REMOVE(&sa->protos, proto, link);
 	return -1;
 }
 

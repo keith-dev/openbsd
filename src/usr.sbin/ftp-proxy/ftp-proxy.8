@@ -1,4 +1,4 @@
-.\"	$OpenBSD: ftp-proxy.8,v 1.5 2006/08/30 06:30:00 camield Exp $
+.\"	$OpenBSD: ftp-proxy.8,v 1.7 2006/12/30 13:01:54 camield Exp $
 .\"
 .\" Copyright (c) 2004, 2005 Camiel Dobbelaar, <cd@sentia.nl>
 .\"
@@ -64,16 +64,16 @@ In case of active mode (PORT or EPRT):
 .Bd -literal -offset 2n
 rdr from $server to $proxy port $port -> $client
 pass quick inet proto tcp \e
-    from $server to $client port $port flags S/SAFR keep state
+    from $server to $client port $port
 .Ed
 .Pp
 In case of passive mode (PASV or EPSV):
 .Bd -literal -offset 2n
 nat from $client to $server port $port -> $proxy
 pass in quick inet proto tcp \e
-    from $client to $server port $port flags S/SAFR keep state
+    from $client to $server port $port
 pass out quick inet proto tcp \e
-    from $proxy to $server port $port flags S/SAFR keep state
+    from $proxy to $server port $port
 .Ed
 .Pp
 The options are as follows:
@@ -105,7 +105,8 @@ The process will stay in the foreground, logging to standard error.
 .It Fl m Ar maxsessions
 Maximum number of concurrent FTP sessions.
 When the proxy reaches this limit, new connections are denied.
-The default is 100.
+The default is 100 sessions.
+The limit can be lowered to a minimum of 1, or raised to a maximum of 500.
 .It Fl P Ar port
 Fixed server port.
 Only used in combination with
@@ -130,7 +131,7 @@ on this RFC property.
 .It Fl t Ar timeout
 Number of seconds that the control connection can be idle, before the
 proxy will disconnect.
-The default is 24 hours.
+The maximum is 86400 seconds, which is also the default.
 Do not set this too low, because the control connection is usually
 idle when large data transfers are taking place.
 .It Fl v
@@ -157,7 +158,7 @@ rdr pass on $int_if proto tcp from $lan to any port 21 -> \e
 In the rule section:
 .Bd -literal -offset 2n
 anchor "ftp-proxy/*"
-pass out proto tcp from $proxy to any port 21 keep state
+pass out proto tcp from $proxy to any port 21
 .Ed
 .Sh SEE ALSO
 .Xr ftp 1 ,

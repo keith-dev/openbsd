@@ -1,4 +1,4 @@
-/*	$OpenBSD: dhcpd.h,v 1.6 2004/05/04 21:23:10 deraadt Exp $	*/
+/*	$OpenBSD: dhcpd.h,v 1.11 2007/01/04 19:12:41 stevesk Exp $	*/
 
 /*
  * Copyright (c) 2004 Henning Brauer <henning@openbsd.org>
@@ -40,12 +40,10 @@
  */
 
 #include <sys/types.h>
-
 #include <sys/socket.h>
 #include <sys/sockio.h>
 #include <sys/stat.h>
 #include <sys/time.h>
-#include <sys/un.h>
 #include <sys/wait.h>
 
 #include <net/if.h>
@@ -62,7 +60,6 @@
 #include <netdb.h>
 #include <paths.h>
 #include <pwd.h>
-#include <unistd.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -131,17 +128,13 @@ struct protocol {
 	void *local;
 };
 
-/* Default path to dhcpd config file. */
 #define	DHCPD_LOG_FACILITY	LOG_DAEMON
-
-#define	MAX_TIME 0x7fffffff
-#define	MIN_TIME 0
 
 /* External definitions... */
 
 /* errwarn.c */
 void error(char *, ...) __attribute__ ((__format__ (__printf__, 1, 2)));
-int warn(char *, ...) __attribute__ ((__format__ (__printf__, 1, 2)));
+int warning(char *, ...) __attribute__ ((__format__ (__printf__, 1, 2)));
 int note(char *, ...) __attribute__ ((__format__ (__printf__, 1, 2)));
 int debug(char *, ...) __attribute__ ((__format__ (__printf__, 1, 2)));
 

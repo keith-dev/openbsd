@@ -1,4 +1,4 @@
-/* $OpenBSD: crunchide.c,v 1.20 2005/12/21 01:40:22 millert Exp $	 */
+/* $OpenBSD: crunchide.c,v 1.22 2007/02/18 23:50:46 ray Exp $	 */
 
 /*
  * Copyright (c) 1994 University of Maryland
@@ -133,7 +133,7 @@ void
 usage(void)
 {
 	fprintf(stderr,
-	    "Usage: %s [-f keep-list-file] [-k keep-symbol] object-file ...\n",
+	    "usage: %s [-f keep-list-file] [-k keep-symbol] object-file ...\n",
 	    pname);
 	exit(1);
 }
@@ -194,7 +194,7 @@ add_file_to_keep_list(char *filename)
 		perror(filename);
 		usage();
 	}
-	while (fgets(symbol, 1024, keepf)) {
+	while (fgets(symbol, sizeof(symbol), keepf)) {
 		len = strlen(symbol);
 		if (len && symbol[len - 1] == '\n')
 			symbol[len - 1] = '\0';

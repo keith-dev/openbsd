@@ -1,4 +1,4 @@
-#	$OpenBSD: rc,v 1.290 2006/09/01 01:18:02 mpf Exp $
+#	$OpenBSD: rc,v 1.301 2007/02/27 16:24:29 beck Exp $
 
 # System startup script run by init on autoboot
 # or after single-user.
@@ -270,12 +270,12 @@ else
 	    > /dev/null 2>&1
 	dd if=/var/db/host.random of=/dev/arandom bs=1024 count=64 \
 	    > /dev/null 2>&1
-fi
 
-# reset seed file, so that if a shutdown-less reboot occurs,
-# the next seed is not a repeat
-dd if=/dev/urandom of=/var/db/host.random bs=1024 count=64 \
-    > /dev/null 2>&1
+	# reset seed file, so that if a shutdown-less reboot occurs,
+	# the next seed is not a repeat
+	dd if=/dev/urandom of=/var/db/host.random bs=1024 count=64 \
+	    > /dev/null 2>&1
+fi
 
 # clean up left-over files
 rm -f /etc/nologin
@@ -301,6 +301,7 @@ fi
 syslogd ${syslogd_flags}
 
 if [ X"${pf}" != X"NO" -a X"${pflogd_flags}" != X"NO" ]; then
+	ifconfig pflog0 create >/dev/null 2>&1
 	if ifconfig pflog0 >/dev/null 2>&1; then
 		ifconfig pflog0 up
 		pflogd ${pflogd_flags}
@@ -495,7 +496,10 @@ if [ $? -eq 0 ]; then
 	rm -f $T
 fi
 
-if [ -f /var/account/acct ]; then
+if [ X"${accounting}" = X"YES" ]; then
+	if [ ! -f /var/account/acct ]; then
+		touch /var/account/acct
+	fi
 	echo 'turning on accounting';	accton /var/account/acct
 fi
 
@@ -544,7 +548,7 @@ if [ ! -f /etc/isakmpd/private/local.key ]; then
 	if /usr/sbin/openssl genrsa -out /etc/isakmpd/private/local.key 1024 \
 	    > /dev/null 2>&1; then
 		chmod 600 /etc/isakmpd/private/local.key
-		openssl rsa -out /etc/isakmpd/private/local.pub \
+		openssl rsa -out /etc/isakmpd/local.pub \
 		    -in /etc/isakmpd/private/local.key -pubout > /dev/null 2>&1
 		echo done.
 	else
@@ -556,6 +560,10 @@ echo -n starting network daemons:
 
 if [ X"${routed_flags}" != X"NO" ]; then
 	echo -n ' routed';		routed $routed_flags
+fi
+
+if [ X"${ripd_flags}" != X"NO" ]; then
+	echo -n ' ripd';		/usr/sbin/ripd $ripd_flags
 fi
 
 if [ X"${mrouted_flags}" != X"NO" ]; then
@@ -572,6 +580,14 @@ fi
 
 if [ X"${bgpd_flags}" != X"NO" ]; then
 	echo -n ' bgpd';		/usr/sbin/bgpd $bgpd_flags
+fi
+
+if [ X"${ifstated_flags}" != X"NO" ]; then
+	echo -n ' ifstated';		ifstated $ifstated_flags
+fi
+
+if [ X"${hoststated_flags}" != X"NO" ]; then
+	echo -n ' hoststated';		/usr/sbin/hoststated $hoststated_flags
 fi
 
 if [ X"${dhcpd_flags}" != X"NO" -a -f /etc/dhcpd.conf ]; then
@@ -652,12 +668,12 @@ if [ X"${sshd_flags}" != X"NO" ]; then
 fi
 
 if [ X"${spamd_flags}" != X"NO" ]; then
-	if [ X"${spamd_grey}" != X"NO" ]; then
-		spamd_flags="${spamd_flags} -g"
+	if [ X"${spamd_black}" != X"NO" ]; then
+		spamd_flags="${spamd_flags} -b"
 	fi
 	echo -n ' spamd';		eval /usr/libexec/spamd ${spamd_flags}
 	/usr/libexec/spamd-setup
-	if [ X"${spamd_grey}" != X"NO" ]; then
+	if [ X"${spamd_black}" = X"NO" ]; then
 		echo -n ' spamlogd'
 		/usr/libexec/spamlogd ${spamlogd_flags}
 	fi
@@ -704,10 +720,6 @@ echo -n standard daemons:
 
 if [ X"${apmd_flags}" != X"NO" -a -x /usr/sbin/apmd ]; then
 	echo -n ' apmd';	/usr/sbin/apmd ${apmd_flags}
-fi
-
-if [ X"${acpid_flags}" != X"NO" -a -x /usr/sbin/acpid ]; then
-	echo -n ' acpid';	/usr/sbin/acpid ${acpid_flags}
 fi
 
 if [ X"${sensorsd_flags}" != X"NO" ]; then

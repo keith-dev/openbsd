@@ -1,6 +1,6 @@
-.\"	$OpenBSD: md5.1,v 1.20 2004/08/24 21:22:25 tom Exp $
+.\"	$OpenBSD: md5.1,v 1.24 2006/11/19 17:09:15 jmc Exp $
 .\"
-.\" Copyright (c) 2003, 2004 Todd C. Miller <Todd.Miller@courtesan.com>
+.\" Copyright (c) 2003, 2004, 2006 Todd C. Miller <Todd.Miller@courtesan.com>
 .\"
 .\" Permission to use, copy, modify, and distribute this software for any
 .\" purpose with or without fee is hereby granted, provided that the above
@@ -26,12 +26,10 @@
 .Nd calculate a message-digest fingerprint (checksum) for a file
 .Sh SYNOPSIS
 .Nm md5
-.Oo
-.Fl p | t | x |
-.Fl c Oo Ar checklist ... Oc |
-.Fl s Ar string |
-.Ar file ...
-.Oc
+.Op Fl pqrtx
+.Op Fl c Op Ar checklist ...
+.Op Fl s Ar string
+.Op Ar
 .Sh DESCRIPTION
 .Nm
 takes as input a message of arbitrary length and produces
@@ -71,6 +69,12 @@ If no file is given, stdin is used.
 Echoes stdin to stdout and appends the
 .Em MD5
 sum to stdout.
+.It Fl q
+Only print the checksum (quiet mode).
+.It Fl r
+Reverse the format of the hash algorithm output, making
+it match the output format used by
+.Xr cksum 1 .
 .It Fl s Ar string
 Prints a checksum of the given
 .Ar string .
@@ -82,6 +86,8 @@ Runs a built-in test script.
 .Pp
 The MD5 sum of each file listed on the command line is printed after the
 options are processed.
+.Pp
+.Ex -std md5
 .Sh SEE ALSO
 .Xr cksum 1 ,
 .Xr rmd160 1 ,
@@ -91,7 +97,7 @@ options are processed.
 .%T The MD5 Message-Digest Algorithm
 .%O RFC 1321
 .Re
-.Sh BUGS
+.Sh CAVEATS
 Since collisions have been found for
 .Em MD5 ,
 the use of

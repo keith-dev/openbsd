@@ -1,5 +1,5 @@
-dnl	$OpenBSD: install,v 1.30 2006/07/09 19:44:59 miod Exp $
-OpenBSDInstallPrelude
+dnl	$OpenBSD: install,v 1.32 2007/03/01 19:24:45 miod Exp $
+OpenBSDInstallPrelude({:-HP-IB disks-:})
 dnl No extra line, this has to stick to the geometry notes paragraph.
 
 The ramdisk kernel may be loaded from the network, from CD-ROM, or other
@@ -89,12 +89,9 @@ OpenBSDInstallPart2
 	spinning cursor has stopped and nothing further has happened,
 	either your boot media is bad, your diskless setup is incorrect,
 	or you may have a hardware or configuration problem.
-	Remember that if your machine is a 425e, you must use a serial
-	console, even if you can initiate the boot process from the
-	graphics console.
 
-
-OpenBSDBootMsgs
+OpenBSDBootMsgs(warn,{:-"sd0" for SCSI drives-:},{:-or "hd0" for HP-IB
+	drives-:})
 
 	You will next be asked for your terminal type.  There are only
 	a few specific terminal types supported.  If you are using a
@@ -103,7 +100,7 @@ OpenBSDBootMsgs
 	or vt100 compatible terminal; nothing else is supported.  (If
 	your terminal type is xterm, just use vt100.)
 	
-OpenBSDInstallPart3({:- or "hd0" for HP-IB/CS80 drives-:})
+OpenBSDInstallPart3
 
 OpenBSDInstallPart4
 

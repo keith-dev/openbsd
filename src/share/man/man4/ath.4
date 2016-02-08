@@ -1,4 +1,4 @@
-.\"	$OpenBSD: ath.4,v 1.32 2006/08/30 23:14:30 jmc Exp $
+.\"	$OpenBSD: ath.4,v 1.36 2006/12/05 22:03:47 damien Exp $
 .\"     $NetBSD: ath.4,v 1.5 2004/07/03 16:58:18 mycroft Exp $
 .\"
 .\" Copyright (c) 2002, 2003 Sam Leffler, Errno Consulting
@@ -236,6 +236,9 @@ By default the
 .Nm
 driver uses an empty string.
 Note that network ID is synonymous with Extended Service Set ID (ESSID).
+.It Fl nwid
+Set the network ID to the empty string to allow the interface to connect
+to any available access point.
 .It Cm nwkey Ar key
 Enable WEP encryption using the specified
 .Ar key .
@@ -335,7 +338,7 @@ Wistron CM9	AR5212	Mini PCI	a/b/g
 .El
 .Pp
 An up to date list can be found at
-.Pa http://customerproducts.atheros.com/customerproducts .
+.Pa http://customerproducts.atheros.com/customerproducts/default.asp .
 .Sh EXAMPLES
 The following
 .Xr hostname.if 5
@@ -483,9 +486,6 @@ who also wrote a free replacement of the binary-only HAL.
 Different regulatory domains may not be able to communicate with each
 other with 802.11a as different regulatory domains do not necessarily
 have overlapping channels.
-.Pp
-Revision A1 of the D-LINK DWL-G520 and DWL-G650 are based on an
-Intersil PrismGT chip and are not supported by this driver.
 .Sh BUGS
 Performance in lossy environments is suboptimal.
 The algorithm used to select the rate for transmitted packets is

@@ -1,4 +1,4 @@
-/*	$OpenBSD: encrypt.c,v 1.23 2006/05/27 23:42:08 moritz Exp $	*/
+/*	$OpenBSD: encrypt.c,v 1.25 2007/03/06 11:16:55 jmc Exp $	*/
 
 /*
  * Copyright (c) 1996, Jason Downs.  All rights reserved.
@@ -58,7 +58,7 @@ usage(void)
 {
 
 	(void)fprintf(stderr,
-	    "usage: %s [-k] [-b rounds] [-c class] [-m] [-s salt] [-p | string]\n",
+	    "usage: %s [-km] [-b rounds] [-c class] [-p | string] [-s salt]\n",
 	    __progname);
 	exit(1);
 }
@@ -67,6 +67,9 @@ char *
 trim(char *line)
 {
 	char *ptr;
+
+	if (line[0] == '\0')
+		return (line);
 
 	for (ptr = &line[strlen(line)-1]; ptr > line; ptr--) {
 		if (!isspace(*ptr))

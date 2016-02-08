@@ -1,4 +1,4 @@
-.\"	$OpenBSD: cksum.1,v 1.5 2005/03/07 23:41:53 jmc Exp $
+.\"	$OpenBSD: cksum.1,v 1.12 2007/02/27 21:41:58 millert Exp $
 .\"
 .\" Copyright (c) 1991, 1993
 .\"	The Regents of the University of California.  All rights reserved.
@@ -42,14 +42,12 @@
 .Sh SYNOPSIS
 .Nm cksum
 .Bk -words
-.Oo
-.Fl p | t | x |
-.Fl c Oo Ar checklist ... Oc |
-.Fl s Ar string |
-.Ar file ...
-.Oc
+.Op Fl pqrtx
 .Op Fl a Ar algorithms
+.Op Fl c Op Ar checklist ...
 .Op Fl o Ar 1 | 2
+.Op Fl s Ar string
+.Op Ar file ...
 .Ek
 .Nm sum
 .Op Ar file ...
@@ -60,23 +58,20 @@ utility writes to the standard output a single line for each input file.
 The format of this line varies with the algorithm being used as follows:
 .Bl -tag -width Ds
 .It cksum
-The output line consists of three whitespace separated fields: a
-.Tn CRC
-checksum, the number of octets in the input,
+The output line consists of three whitespace separated fields:
+a CRC checksum, the number of octets in the input,
 and name of the file or string.
 If no file name is specified, the standard input is used and no file name
 is written.
 .It sum
-The output line consists of three whitespace separated fields: a
-.Tn CRC
-checksum, the number of kilobytes in the input,
+The output line consists of three whitespace separated fields:
+a CRC checksum, the number of kilobytes in the input,
 and name of the file or string.
 If no file name is specified, the standard input is used and no file name
 is written.
 .It sysvsum
-The output line consists of three whitespace separated fields: a
-.Tn CRC
-checksum, the number of 512-byte blocks in the input,
+The output line consists of three whitespace separated fields:
+a CRC checksum, the number of 512-byte blocks in the input,
 and name of the file or string.
 If no file name is specified, the standard input is used and no file name
 is written.
@@ -137,6 +132,11 @@ Use historic algorithms instead of the (superior) default one
 .It Fl p
 Echoes stdin to stdout and appends the
 checksum to stdout.
+.It Fl q
+Only print the checksum (quiet mode).
+.It Fl r
+Reverse the format of the hash algorithm output, making
+it match the checksum output format.
 .It Fl s Ar string
 Prints a checksum of the given
 .Ar string .
@@ -184,24 +184,16 @@ For historic reasons, the block size is 1024 for algorithm 1 and 512
 for algorithm 2.
 Partial blocks are rounded up.
 .Pp
-The default
-.Tn CRC
-used is based on the polynomial used for
-.Tn CRC
-error checking
+The default CRC used is based on the polynomial used for CRC error checking
 in the networking standard
 .St -iso8802-3 .
-The
-.Tn CRC
-checksum encoding is defined by the generating polynomial:
+The CRC checksum encoding is defined by the generating polynomial:
 .Bd -unfilled -offset indent
 G(x) = x^32 + x^26 + x^23 + x^22 + x^16 + x^12 +
      x^11 + x^10 + x^8 + x^7 + x^5 + x^4 + x^2 + x + 1
 .Ed
 .Pp
-Mathematically, the
-.Tn CRC
-value corresponding to a given file is defined by
+Mathematically, the CRC value corresponding to a given file is defined by
 the following procedure:
 .Bd -filled -offset indent
 The
@@ -220,7 +212,7 @@ first.
 The smallest number of octets capable of representing this integer are used.
 .Pp
 M(x) is multiplied by x^32 (i.e., shifted left 32 bits) and divided by
-G(x) using mod 2 division, producing a remainder R(x) of degree <= 31.
+G(x) using mod 2 division, producing a remainder R(x) of degree \*(Lt= 31.
 .Pp
 The coefficients of R(x) are considered to be a 32-bit sequence.
 .Pp
@@ -229,21 +221,19 @@ The bit sequence is complemented and the result is the CRC.
 .Pp
 The other available algorithms are described in their respective
 man pages in section 3 of the manual.
-.Sh DIAGNOSTICS
+.Pp
 The
 .Nm cksum
 and
 .Nm sum
-utilities exit 0 on success or >0 if an error occurred.
+utilities exit 0 on success or \*(Gt0 if an error occurred.
 .Sh SEE ALSO
 .Xr md5 1 ,
 .Xr rmd160 1 ,
 .Xr sha1 1
 .Pp
 The default calculation is identical to that given in pseudo-code
-in the following
-.Tn ACM
-article:
+in the following ACM article:
 .Rs
 .%T "Computation of Cyclic Redundancy Checks Via Table Lookup"
 .%A Dilip V. Sarwate
@@ -265,14 +255,15 @@ The
 .Nm cksum
 utility appeared in
 .Bx 4.4 .
-.Sh WARNING
+.Sh CAVEATS
 Do not use the
 .Ar cksum ,
 .Ar md4 ,
+.Ar md5 ,
 .Ar sum ,
 or
 .Ar sysvsum
-algorithms to detect hostile binary modifications.
-An attacker can trivially produce backdoored daemons which have the same
-checksum as the standard versions.
+algorithms to verify file integrity.
+An attacker can trivially produce modified payload that
+has the same checksum as the original version.
 Use a cryptographic checksum instead.

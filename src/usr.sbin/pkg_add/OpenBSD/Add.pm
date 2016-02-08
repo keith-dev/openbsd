@@ -1,5 +1,5 @@
 # ex:ts=8 sw=4:
-# $OpenBSD: Add.pm,v 1.48 2006/02/16 11:21:58 espie Exp $
+# $OpenBSD: Add.pm,v 1.50 2007/02/24 18:45:11 espie Exp $
 #
 # Copyright (c) 2003-2004 Marc Espie <espie@openbsd.org>
 #
@@ -71,6 +71,9 @@ sub validate_plist($$)
 
 		OpenBSD::CollisionReport::collision_report($colliding, $state);
 	}
+	if (defined $state->{overflow}) {
+		OpenBSD::Vstat::tally();
+	}
 	Fatal "fatal issues in installing $pkgname" if $problems;
 	$totsize = 1 if $totsize == 0;
 	return $totsize;
@@ -140,7 +143,12 @@ sub set_modes
 			$uidcache = OpenBSD::UidCache->new();
 			$gidcache = OpenBSD::GidCache->new();
 		}
-		my ($uid, $gid) = (stat $name)[4,5];
+		my ($uid, $gid);
+		if (-l $name) {
+			($uid, $gid) = (lstat $name)[4,5];
+		} else {
+			($uid, $gid) = (stat $name)[4,5];
+		}
 		if (defined $self->{owner}) {
 			$uid = $uidcache->lookup($self->{owner}, $uid);
 		}
@@ -314,6 +322,7 @@ sub validate
 			Warn "Error: ... more files do not fit on ",
 				$s->{dev}, "\n";
 		}
+		$state->{overflow} = 1;
 		$$problems++;
 	}
 }
@@ -446,6 +455,7 @@ sub validate
 			Warn "Error: ... more files do not fit on ",
 				$s->{dev}, "\n";
 		}
+		$state->{overflow} = 1;
 		$$problems++;
 	}
 }
@@ -618,6 +628,7 @@ sub validate
 	}
 	if ($s->avail() < 0) {
 		Warn "Error: ", $s->{dev}, " is not large enough ($fname)\n";
+		$state->{overflow} = 1;
 		$$problems++;
 	}
 }

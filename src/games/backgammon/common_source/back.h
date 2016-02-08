@@ -1,4 +1,4 @@
-/*	$OpenBSD: back.h,v 1.9 2003/06/03 03:01:38 millert Exp $	*/
+/*	$OpenBSD: back.h,v 1.11 2006/12/14 10:14:05 martin Exp $	*/
 
 /*
  * Copyright (c) 1980, 1993
@@ -51,7 +51,7 @@
 #define CIN_SIZE 40
 
 #ifdef DEBUG
-extern FILE	*trace;
+extern FILE	*ftrace;
 #endif
 
 /*
@@ -83,6 +83,7 @@ extern	int	hflag;		/* flag for cleaning screen */
 extern	int	mflag;		/* backgammon flag */
 extern	int	raflag;		/* 'roll again' flag for recovered game */
 extern	int	rflag;		/* recovered game flag */
+extern	int	dflag;		/* disable doubling flag */
 extern	int	rfl;		/* saved value of rflag */
 extern	int	iroll;		/* special flag for inputting rolls */
 extern	int	board[26];	/* board:  negative values are white,

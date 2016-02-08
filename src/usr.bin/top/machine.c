@@ -1,4 +1,4 @@
-/* $OpenBSD: machine.c,v 1.52 2006/04/29 14:40:44 otto Exp $	 */
+/* $OpenBSD: machine.c,v 1.57 2007/02/04 14:58:45 otto Exp $	 */
 
 /*-
  * Copyright (c) 1994 Thorsten Lockert <tholo@sigmasoft.com>
@@ -41,7 +41,6 @@
 #include <string.h>
 #include <limits.h>
 #include <err.h>
-#include <math.h>
 #include <unistd.h>
 #include <sys/sysctl.h>
 #include <sys/dir.h>
@@ -342,7 +341,7 @@ caddr_t
 get_process_info(struct system_info *si, struct process_select *sel,
     int (*compare) (const void *, const void *))
 {
-	int show_idle, show_system, show_threads, show_uid, show_pid;
+	int show_idle, show_system, show_threads, show_uid, show_pid, show_cmd;
 	int total_procs, active_procs;
 	struct kinfo_proc2 **prefp, *pp;
 
@@ -366,6 +365,7 @@ get_process_info(struct system_info *si, struct process_select *sel,
 	show_threads = sel->threads;
 	show_uid = sel->uid != (uid_t)-1;
 	show_pid = sel->pid != (pid_t)-1;
+	show_cmd = sel->command != NULL;
 
 	/* count up process states and get pointers to interesting procs */
 	total_procs = 0;
@@ -388,7 +388,9 @@ get_process_info(struct system_info *si, struct process_select *sel,
 			    (show_idle || pp->p_pctcpu != 0 ||
 			    pp->p_stat == SRUN) &&
 			    (!show_uid || pp->p_ruid == sel->uid) &&
-			    (!show_pid || pp->p_pid == sel->pid)) {
+			    (!show_pid || pp->p_pid == sel->pid) &&
+			    (!show_cmd || strstr(pp->p_comm,
+				sel->command))) {
 				*prefp++ = pp;
 				active_procs++;
 			}
@@ -475,15 +477,6 @@ format_next_process(caddr_t handle, char *(*get_userid)(uid_t))
 	pp = *(hp->next_proc++);
 	hp->remaining--;
 
-	if ((pp->p_flag & P_INMEM) == 0) {
-		/*
-		 * Print swapped processes as <pname>
-		 */
-		char buf[sizeof(pp->p_comm)];
-
-		(void) strlcpy(buf, pp->p_comm, sizeof(buf));
-		(void) snprintf(pp->p_comm, sizeof(pp->p_comm), "<%s>", buf);
-	}
 	cputime = (pp->p_uticks + pp->p_sticks + pp->p_iticks) / stathz;
 
 	/* calculate the base for cpu percentages */
@@ -494,7 +487,7 @@ format_next_process(caddr_t handle, char *(*get_userid)(uid_t))
 			p_wait = pp->p_wmesg;
 		else {
 			snprintf(waddr, sizeof(waddr), "%llx",
-			    pp->p_wchan & ~KERNBASE);
+			    (unsigned long long)(pp->p_wchan & ~KERNBASE));
 			p_wait = waddr;
 		}
 	} else
@@ -725,8 +718,10 @@ swapmode(int *used, int *total)
 		return 0;
 
 	rnswap = swapctl(SWAP_STATS, swdev, nswap);
-	if (rnswap == -1)
+	if (rnswap == -1) {
+		free(swdev);
 		return 0;
+	}
 
 	/* if rnswap != nswap, then what? */
 

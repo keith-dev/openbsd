@@ -1,4 +1,4 @@
-/*	$OpenBSD: def.h,v 1.96 2006/08/01 22:16:03 jason Exp $	*/
+/*	$OpenBSD: def.h,v 1.99 2007/02/21 23:33:12 deanna Exp $	*/
 
 /* This file is in the public domain. */
 
@@ -43,7 +43,7 @@ typedef int	(*PF)(int, int);	/* generally useful type */
 #define TRUE	1		/* True, yes, good, etc.	 */
 #define ABORT	2		/* Death, ^G, abort, etc.	 */
 
-#define KCLEAR	2		/* clear echo area 		 */
+#define KCLEAR	2		/* clear echo area		 */
 
 /*
  * These flag bits keep track of
@@ -212,7 +212,7 @@ struct mgwin {
 /*
  * Window flags are set by command processors to
  * tell the display system what has happened to the buffer
- * mapped by the window. Setting "WFHARD" is always a safe thing
+ * mapped by the window. Setting "WFFULL" is always a safe thing
  * to do, but it may do more work than is necessary. Always try
  * to set the simplest action that achieves the required update.
  * Because commands set bits in the "w_flag", update will see
@@ -599,12 +599,13 @@ int		 cntnonmatchlines(int, int);
 /* undo.c X */
 void		 free_undo_record(struct undo_rec *);
 int		 undo_dump(int, int);
+int		 undo_enabled(void);
 int		 undo_enable(int);
 void		 undo_add_boundary(void);
 void		 undo_add_modified(void);
 int		 undo_add_insert(struct line *, int, int);
 int		 undo_add_delete(struct line *, int, int);
-void		 undo_no_boundary(int);
+void		 undo_boundary_enable(int);
 int		 undo_add_change(struct line *, int, int);
 int		 undo(int, int);
 

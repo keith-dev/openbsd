@@ -1,7 +1,7 @@
 /*
  * Computer
  *
- * $OpenBSD: calendar.computer,v 1.9 2006/01/16 16:28:59 mickey Exp $
+ * $OpenBSD: calendar.computer,v 1.12 2006/10/13 12:10:20 mickey Exp $
  */
 
 #ifndef _calendar_computer_
@@ -59,8 +59,10 @@
 	Temple Univ., Phila, 1948, for symbolic differentiation on the ENIAC
 07/08	Bell Telephone Co. formed (predecessor of AT&T), 1877
 07/08	CDC incorporated, 1957
+07/09	Unix billennium begins at 01:46:40 UTC, 2001
 08/14	First Unix-based mallet created, 1954
 08/14	IBM PC announced, 1981
+08/17	MD5 collision found by Chinese researchers, 2004
 08/22	CDC 6600 introduced, 1963
 08/23	DEC founded, 1957
 09/15	ACM founded, 1947
@@ -70,7 +72,7 @@
 10/08	First VisiCalc prototype, 1978
 10/12	Univac gives contract for SIMULA compiler to Nygaard and Dahl, 1962
 10/14	British Computer Society founded, 1957
-10/15	First FORTRAN Programmer's Reference Manual published
+10/15	First FORTRAN Programmer's Reference Manual published, 1956
 10/20	Zurich ALGOL report published, 1958
 10/25	DEC announces VAX-11/780, 1978
 11/04	UNIVAC I program predicts Eisenhower victory based on 7% of votes, 1952

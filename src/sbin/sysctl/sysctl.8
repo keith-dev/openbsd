@@ -1,4 +1,4 @@
-.\"	$OpenBSD: sysctl.8,v 1.132 2006/05/29 16:49:42 avsm Exp $
+.\"	$OpenBSD: sysctl.8,v 1.137 2006/12/15 12:28:34 jmc Exp $
 .\"	$NetBSD: sysctl.8,v 1.4 1995/09/30 07:12:49 thorpej Exp $
 .\"
 .\" Copyright (c) 1993
@@ -56,8 +56,8 @@ The state to be retrieved or set is described using a
 .Pq MIB
 style name, described as a dotted set of components.
 .Pp
-When retreiving a variable,
-a subset of the MIB name may be specified to retreive a list of
+When retrieving a variable,
+a subset of the MIB name may be specified to retrieve a list of
 variables in that subset.
 For example, to list all the machdep variables:
 .Pp
@@ -245,6 +245,7 @@ not all of the variables are relevant to all architectures.
 .It net.inet.ip.mtudisctimeout	integer	yes
 .It net.inet.ip.ipsec-comp-alg	string	yes
 .It net.inet.ip.mforwarding	integer	yes
+.It net.inet.ip.multipath	integer	yes
 .It net.inet.icmp.maskrepl	integer	yes
 .It net.inet.icmp.bmcastecho	integer	yes
 .It net.inet.icmp.errppslimit	integer	yes
@@ -303,6 +304,8 @@ not all of the variables are relevant to all architectures.
 .It net.inet6.ip6.v6only	integer	no
 .It net.inet6.ip6.maxfrags	integer	yes
 .It net.inet6.ip6.mforwarding	integer	yes
+.It net.inet6.ip6.multipath	integer	yes
+.It net.inet6.ip6.multicast_mtudisc	integer	yes
 .It net.inet6.icmp6.rediraccept	integer	yes
 .It net.inet6.icmp6.redirtimeout	integer	yes
 .It net.inet6.icmp6.nd6_prune	integer	yes
@@ -512,8 +515,7 @@ It is also possible to add or remove ports from the current list:
 # sysctl net.inet.tcp.baddynamic=-871
 .Ed
 .Pp
-To adjust the number of kernel
-.Nm nfsio
+To adjust the number of kernel nfsio
 threads used to service asynchronous
 I/O requests on an NFS client machine:
 .Pp
@@ -536,6 +538,6 @@ the maximum number of shared memory segments:
 .Xr sysctl 3 ,
 .Xr sysctl.conf 5
 .Sh HISTORY
-.Nm sysctl
+.Nm
 first appeared in
 .Bx 4.4 .

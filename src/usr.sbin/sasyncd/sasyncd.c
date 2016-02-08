@@ -1,4 +1,4 @@
-/*	$OpenBSD: sasyncd.c,v 1.13 2006/09/01 01:13:25 mpf Exp $	*/
+/*	$OpenBSD: sasyncd.c,v 1.17 2007/02/26 04:36:57 ray Exp $	*/
 
 /*
  * Copyright (c) 2005 Håkan Olsson.  All rights reserved.
@@ -79,7 +79,6 @@ sasyncd_run(pid_t ppid)
 
 	signal(SIGINT, sasyncd_stop);
 	signal(SIGTERM, sasyncd_stop);
-	signal(SIGHUP, sasyncd_stop);
 
 	timer_add("carp_undemote", CARP_DEMOTE_MAXTIME,
 	    monitor_carpundemote, NULL);
@@ -130,39 +129,75 @@ sasyncd_run(pid_t ppid)
 	return 0;
 }
 
+__dead static void
+usage(void)
+{
+	extern char *__progname;
+
+	fprintf(stderr, "Usage: %s [-c config-file] [-d] [-v[v]]\n",
+	    __progname);
+	exit(1);
+}
+
 int
 main(int argc, char **argv)
 {
 	extern char	*__progname;
-	int		r;
+	char		*cfgfile = 0;
+	int		 ch;
 
 	if (geteuid() != 0) {
 		/* No point in continuing. */
-		fprintf(stderr, "This daemon needs to be run as root.\n");
+		fprintf(stderr, "%s: This daemon needs to be run as root.\n",
+		    __progname);
 		return 1;
 	}
 
-	/* Init. */
-	closefrom(STDERR_FILENO + 1);
-	for (r = 0; r <= 2; r++)
-		if (fcntl(r, F_GETFL, 0) == -1 && errno == EBADF)
-			(void)open("/dev/null", r ? O_WRONLY : O_RDONLY, 0);
+	memset(&cfgstate, 0, sizeof cfgstate);
 
-	for (r = 1; r < _NSIG; r++)
-		signal(r, SIG_DFL);
+	while ((ch = getopt(argc, argv, "c:dv")) != -1) {
+		switch (ch) {
+		case 'c':
+			if (cfgfile)
+				return 2;
+			cfgfile = optarg;
+			break;
+		case 'd':
+			cfgstate.debug++;
+			break;
+		case 'v':
+			cfgstate.verboselevel++;
+			break;
+		default:
+			usage();
+		}
+	}
+	argc -= optind;
+	argv += optind;
+
+	if (argc > 0)
+		usage();
 
 	log_init(__progname);
 	timer_init();
 
-	r = conf_init(argc, argv);
-	if (r > 1) {
-		fprintf(stderr, "Usage: %s [-c config-file] [-d] [-v[v]]\n",
-		    __progname);
-		fprintf(stderr, "Default configuration file is %s\n",
-		    SASYNCD_CFGFILE);
+	cfgstate.runstate = INIT;
+	LIST_INIT(&cfgstate.peerlist);
+
+	cfgstate.listen_port = SASYNCD_DEFAULT_PORT;
+
+	if (!cfgfile)
+		cfgfile = SASYNCD_CFGFILE;
+
+	if (conf_parse_file(cfgfile) == 0 ) {
+		if (!cfgstate.sharedkey) {
+			fprintf(stderr, "config: "
+			    "no shared key specified, cannot continue");
+			exit(1);
+		}
+	} else {
+		exit(1);
 	}
-	if (r)
-		return 1;
 
 	carp_demote(CARP_INC, 0);
 

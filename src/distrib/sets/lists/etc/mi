@@ -31,6 +31,7 @@
 ./etc/hosts
 ./etc/hosts.equiv
 ./etc/hosts.lpd
+./etc/hoststated.conf
 ./etc/hotplug
 ./etc/ifstated.conf
 ./etc/inetd.conf
@@ -60,6 +61,7 @@
 ./etc/mail/mailertable.db
 ./etc/mail/relay-domains
 ./etc/mail/sendmail.cf
+./etc/mail/spamd.conf
 ./etc/mail/submit.cf
 ./etc/mail/trusted-users
 ./etc/mail/virtusertable
@@ -106,8 +108,10 @@
 ./etc/rc.securelevel
 ./etc/rc.shutdown
 ./etc/remote
+./etc/ripd.conf
 ./etc/rmt
 ./etc/rpc
+./etc/sasyncd.conf
 ./etc/security
 ./etc/sensorsd.conf
 ./etc/services
@@ -118,7 +122,6 @@
 ./etc/skel/.profile
 ./etc/sliphome/slip.hosts
 ./etc/sliphome/slip.login
-./etc/spamd.conf
 ./etc/spwd.db
 ./etc/ssh
 ./etc/ssh/ssh_config
@@ -170,11 +173,17 @@
 ./var/run/utmp
 ./var/www/cgi-bin/printenv
 ./var/www/cgi-bin/test-cgi
+./var/www/conf/bgplg.css
+./var/www/conf/bgplg.foot
+./var/www/conf/bgplg.head
 ./var/www/conf/httpd.conf
 ./var/www/conf/httpd.conf-dist
 ./var/www/conf/magic
 ./var/www/conf/mime.types
 ./var/www/htdocs/apache_pb.gif
+./var/www/htdocs/bgplg
+./var/www/htdocs/bgplg/index.html
+./var/www/htdocs/bgplg/openbgpd.gif
 ./var/www/htdocs/blowfish.jpg
 ./var/www/htdocs/bsd_small.gif
 ./var/www/htdocs/index.html

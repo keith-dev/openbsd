@@ -1,4 +1,4 @@
-/*	$OpenBSD: parse.y,v 1.34 2006/05/31 03:59:51 claudio Exp $ */
+/*	$OpenBSD: parse.y,v 1.43 2007/02/01 13:25:28 claudio Exp $ */
 
 /*
  * Copyright (c) 2004, 2005 Esben Norby <norby@openbsd.org>
@@ -44,7 +44,6 @@ static struct ospfd_conf	*conf;
 static FILE			*fin = NULL;
 static int			 lineno = 1;
 static int			 errors = 0;
-static int			 pdebug = 1;
 char				*infile;
 char				*start_state;
 
@@ -93,9 +92,8 @@ struct sym {
 
 int			 symset(const char *, const char *, int);
 char			*symget(const char *);
-int			 atoul(char *, u_long *);
 struct area		*conf_get_area(struct in_addr);
-struct iface		*conf_get_if(struct kif *);
+struct iface		*conf_get_if(struct kif *, struct kif_addr *);
 
 typedef struct {
 	union {
@@ -113,10 +111,11 @@ typedef struct {
 %token	METRIC PASSIVE
 %token	HELLOINTERVAL TRANSMITDELAY
 %token	RETRANSMITINTERVAL ROUTERDEADTIME ROUTERPRIORITY
+%token	SET TYPE
 %token	YES NO
 %token	ERROR
 %token	<v.string>	STRING
-%type	<v.number>	number yesno no
+%type	<v.number>	number yesno no optlist, optlist_l option
 %type	<v.string>	string
 
 %%
@@ -130,14 +129,16 @@ grammar		: /* empty */
 		;
 
 number		: STRING {
-			u_long	ulval;
+			u_int32_t	 uval;
+			const char	*errstr;
 
-			if (atoul($1, &ulval) == -1) {
-				yyerror("%s is not a number", $1);
+			uval = strtonum($1, 0, UINT_MAX, &errstr);
+			if (errstr) {
+				yyerror("number %s is %s", $1, errstr);
 				free($1);
 				YYERROR;
 			} else
-				$$ = ulval;
+				$$ = uval;
 			free($1);
 		}
 		;
@@ -186,17 +187,17 @@ conf_main	: ROUTERID STRING {
 			else
 				conf->flags &= ~OSPFD_FLAG_NO_FIB_UPDATE;
 		}
-		| no REDISTRIBUTE STRING {
+		| no REDISTRIBUTE STRING optlist {
 			struct redistribute	*r;
 
 			if (!strcmp($3, "default")) {
-				conf->redistribute |= REDISTRIBUTE_DEFAULT;
-				if ($1) {
-					yyerror("cannot use 'no' with "
-					    "redistribute default");
-					free($3);
-					YYERROR;
-				}
+				if (!$1)
+					conf->redistribute |=
+					    REDISTRIBUTE_DEFAULT;
+				else
+					conf->redistribute &=
+					    ~REDISTRIBUTE_DEFAULT;
+				conf->defaultmetric = $4;
 			} else {
 				if ((r = calloc(1, sizeof(*r))) == NULL)
 					fatal(NULL);
@@ -215,15 +216,15 @@ conf_main	: ROUTERID STRING {
 
 				if ($1)
 					r->type |= REDIST_NO;
+				r->metric = $4;
 
 				SIMPLEQ_INSERT_TAIL(&conf->redist_list, r,
 				    entry);
 			}
 			conf->redistribute |= REDISTRIBUTE_ON;
 			free($3);
-
 		}
-		| no REDISTRIBUTE RTLABEL STRING {
+		| no REDISTRIBUTE RTLABEL STRING optlist {
 			struct redistribute	*r;
 
 			if ((r = calloc(1, sizeof(*r))) == NULL)
@@ -232,6 +233,7 @@ conf_main	: ROUTERID STRING {
 			r->label = rtlabel_name2id($4);
 			if ($1)
 				r->type |= REDIST_NO;
+			r->metric = $5;
 			free($4);
 
 			SIMPLEQ_INSERT_TAIL(&conf->redist_list, r, entry);
@@ -259,6 +261,47 @@ conf_main	: ROUTERID STRING {
 			conf->spf_hold_time = $2;
 		}
 		| defaults
+		;
+
+optlist		: /* empty */ 			{ $$ = DEFAULT_REDIST_METRIC; }
+		| SET option			{ $$ = $2; }
+		| SET optnl '{' optnl optlist_l optnl '}'	{ $$ = $5; }
+		;
+
+optlist_l	: optlist_l comma option {
+			if ($1 & LSA_ASEXT_E_FLAG && $3 & LSA_ASEXT_E_FLAG) {
+				yyerror("redistribute type already defined");
+				YYERROR;
+			}
+			if ($1 & LSA_METRIC_MASK && $3 & LSA_METRIC_MASK) {
+				yyerror("redistribute metric already defined");
+				YYERROR;
+			}
+			$$ = $1 | $3;
+		}
+		| option { $$ = $1; }
+		;
+
+option		: METRIC number {
+			if ($2 == 0 || $2 > MAX_METRIC) {
+				yyerror("invalid redistribute metric");
+				YYERROR;
+			}
+			$$ = $2;
+		}
+		| TYPE number {
+			switch ($2) {
+			case 1:
+				$$ = 0;
+				break;
+			case 2:
+				$$ = LSA_ASEXT_E_FLAG;
+				break;
+			default:
+				yyerror("illegal external type %u", $2);
+				YYERROR;
+			}
+		}
 		;
 
 authmd		: AUTHMD number STRING {
@@ -384,6 +427,10 @@ optnl		: '\n' optnl
 nl		: '\n' optnl		/* one newline or more */
 		;
 
+comma		: ','
+		| /*empty*/
+		;
+
 area		: AREA STRING {
 			struct in_addr	id;
 			if (inet_aton($2, &id) == 0) {
@@ -404,29 +451,52 @@ area		: AREA STRING {
 		}
 		;
 
-areaopts_l	: areaopts_l areaoptsl
-		| areaoptsl
+areaopts_l	: areaopts_l areaoptsl nl
+		| areaoptsl optnl
 		;
 
-areaoptsl	: interface nl
-		| defaults nl
+areaoptsl	: interface
+		| defaults
 		;
 
 interface	: INTERFACE STRING	{
-			struct kif *kif;
+			struct kif	*kif;
+			struct kif_addr	*ka = NULL;
+			char		*s;
+			struct in_addr	 addr;
 
-			if ((kif = kif_findname($2)) == NULL) {
+			s = strchr($2, ':');
+			if (s) {
+				*s++ = '\0';
+				if (inet_aton(s, &addr) == 0) {
+					yyerror(
+					    "error parsing interface address");
+					free($2);
+					YYERROR;
+				}
+			} else
+				addr.s_addr = 0;
+
+			if ((kif = kif_findname($2, addr, &ka)) == NULL) {
 				yyerror("unknown interface %s", $2);
 				free($2);
 				YYERROR;
 			}
+			if (ka == NULL) {
+				if (s)
+					yyerror("address %s not configured on "
+					    "interface %s", s, $2);
+				else
+					yyerror("unnumbered interface %s", $2);
+				free($2);
+				YYERROR;
+			}
 			free($2);
-			iface = conf_get_if(kif);
+			iface = conf_get_if(kif, ka);
 			if (iface == NULL)
 				YYERROR;
 			iface->area = area;
-			LIST_INSERT_HEAD(&area->iface_list,
-			    iface, entry);
+			LIST_INSERT_HEAD(&area->iface_list, iface, entry);
 
 			memcpy(&ifacedefs, defs, sizeof(ifacedefs));
 			md_list_copy(&ifacedefs.md_list, &defs->md_list);
@@ -455,12 +525,12 @@ interface_block	: '{' optnl interfaceopts_l '}'
 		|
 		;
 
-interfaceopts_l	: interfaceopts_l interfaceoptsl
-		| interfaceoptsl
+interfaceopts_l	: interfaceopts_l interfaceoptsl nl
+		| interfaceoptsl optnl
 		;
 
-interfaceoptsl	: PASSIVE nl		{ iface->passive = 1; }
-		| defaults nl
+interfaceoptsl	: PASSIVE		{ iface->passive = 1; }
+		| defaults
 		;
 
 %%
@@ -514,9 +584,11 @@ lookup(char *s)
 		{"router-id",		ROUTERID},
 		{"router-priority",	ROUTERPRIORITY},
 		{"rtlabel",		RTLABEL},
+		{"set",			SET},
 		{"spf-delay",		SPFDELAY},
 		{"spf-holdtime",	SPFHOLDTIME},
 		{"transmit-delay",	TRANSMITDELAY},
+		{"type",		TYPE},
 		{"yes",			YES}
 	};
 	const struct keywords	*p;
@@ -524,15 +596,10 @@ lookup(char *s)
 	p = bsearch(s, keywords, sizeof(keywords)/sizeof(keywords[0]),
 	    sizeof(keywords[0]), kw_cmp);
 
-	if (p) {
-		if (pdebug > 1)
-			fprintf(stderr, "%s: %d\n", s, p->k_val);
+	if (p)
 		return (p->k_val);
-	} else {
-		if (pdebug > 1)
-			fprintf(stderr, "string: %s\n", s);
+	else
 		return (STRING);
-	}
 }
 
 #define MAXPUSHBACK	128
@@ -868,22 +935,6 @@ symget(const char *nam)
 	return (NULL);
 }
 
-int
-atoul(char *s, u_long *ulvalp)
-{
-	u_long	 ulval;
-	char	*ep;
-
-	errno = 0;
-	ulval = strtoul(s, &ep, 0);
-	if (s[0] == '\0' || *ep != '\0')
-		return (-1);
-	if (errno == ERANGE && ulval == ULONG_MAX)
-		return (-1);
-	*ulvalp = ulval;
-	return (0);
-}
-
 struct area *
 conf_get_area(struct in_addr id)
 {
@@ -901,20 +952,21 @@ conf_get_area(struct in_addr id)
 }
 
 struct iface *
-conf_get_if(struct kif *kif)
+conf_get_if(struct kif *kif, struct kif_addr *ka)
 {
 	struct area	*a;
 	struct iface	*i;
 
 	LIST_FOREACH(a, &conf->area_list, entry)
 		LIST_FOREACH(i, &a->iface_list, entry)
-			if (i->ifindex == kif->ifindex) {
+			if (i->ifindex == kif->ifindex &&
+			    i->addr.s_addr == ka->addr.s_addr) {
 				yyerror("interface %s already configured",
 				    kif->ifname);
 				return (NULL);
 			}
 
-	i = if_new(kif);
+	i = if_new(kif, ka);
 	i->auth_keyid = 1;
 
 	return (i);
@@ -981,4 +1033,3 @@ host(const char *s, struct in_addr *addr, struct in_addr *mask)
 
 	return (1);
 }
-

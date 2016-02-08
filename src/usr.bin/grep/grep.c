@@ -1,4 +1,4 @@
-/*	$OpenBSD: grep.c,v 1.35 2006/03/07 20:59:56 otto Exp $	*/
+/*	$OpenBSD: grep.c,v 1.38 2007/02/13 21:48:20 kili Exp $	*/
 
 /*-
  * Copyright (c) 1999 James Howard and Dag-Erling Coïdan Smørgrav
@@ -168,7 +168,7 @@ struct option long_options[] =
 static void
 add_pattern(char *pat, size_t len)
 {
-	if (len == 0 || matchall) {
+	if (!xflag && (len == 0 || matchall)) {
 		matchall = 1;
 		return;
 	}
@@ -176,14 +176,14 @@ add_pattern(char *pat, size_t len)
 		pattern_sz *= 2;
 		pattern = grep_realloc(pattern, ++pattern_sz * sizeof(*pattern));
 	}
-	if (pat[len - 1] == '\n')
+	if (len > 0 && pat[len - 1] == '\n')
 		--len;
 	/* pat may not be NUL-terminated */
 	if (wflag && !Fflag) {
 		int bol = 0, eol = 0, extra;
 		if (pat[0] == '^')
 			bol = 1;
-		if (pat[len - 1] == '$')
+		if (len > 0 && pat[len - 1] == '$')
 			eol = 1;
 		extra = Eflag ? 2 : 4;
 		pattern[patterns] = grep_malloc(len + 15 + extra);
@@ -221,23 +221,11 @@ read_patterns(const char *fn)
 	FILE *f;
 	char *line;
 	size_t len;
-	int nl;
 
 	if ((f = fopen(fn, "r")) == NULL)
 		err(2, "%s", fn);
-	nl = 0;
-	while ((line = fgetln(f, &len)) != NULL) {
-		if (*line == '\n') {
-			++nl;
-			continue;
-		}
-		if (nl) {
-			matchall = 1;
-			break;
-		}
-		nl = 0;
-		add_pattern(line, len);
-	}
+	while ((line = fgetln(f, &len)) != NULL)
+		add_pattern(line, *line == '\n' ? 0 : len);
 	if (ferror(f))
 		err(2, "%s", fn);
 	fclose(f);
@@ -246,7 +234,7 @@ read_patterns(const char *fn)
 int
 main(int argc, char *argv[])
 {
-	int c, lastc, prevoptind, newarg, i;
+	int c, lastc, prevoptind, newarg, i, needpattern;
 	struct patfile *patfile, *pf_next;
 	long l;
 	char *ep;
@@ -283,6 +271,7 @@ main(int argc, char *argv[])
 	lastc = '\0';
 	newarg = 1;
 	prevoptind = 1;
+	needpattern = 1;
 	while ((c = getopt_long(argc, argv, optstr,
 				long_options, NULL)) != -1) {
 		switch (c) {
@@ -372,11 +361,13 @@ main(int argc, char *argv[])
 			break;
 		case 'e':
 			add_patterns(optarg);
+			needpattern = 0;
 			break;
 		case 'f':
 			patfile = grep_malloc(sizeof(*patfile));
 			patfile->pf_file = optarg;
 			SLIST_INSERT_HEAD(&patfilelh, patfile, pf_next);
+			needpattern = 0;
 			break;
 		case 'h':
 			oflag = 0;
@@ -448,10 +439,10 @@ main(int argc, char *argv[])
 		free(patfile);
 	}
 
-	if (argc == 0 && patterns == 0)
+	if (argc == 0 && needpattern)
 		usage();
 
-	if (patterns == 0) {
+	if (argc != 0 && needpattern) {
 		add_patterns(*argv);
 		--argc;
 		++argv;

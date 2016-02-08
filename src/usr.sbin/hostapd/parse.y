@@ -1,4 +1,4 @@
-/*	$OpenBSD: parse.y,v 1.24 2006/06/27 18:14:59 reyk Exp $	*/
+/*	$OpenBSD: parse.y,v 1.29 2007/02/09 17:55:49 reyk Exp $	*/
 
 /*
  * Copyright (c) 2004, 2005, 2006 Reyk Floeter <reyk@openbsd.org>
@@ -105,22 +105,23 @@ typedef struct {
 		long			val;
 		u_int16_t		reason;
 		enum hostapd_op		op;
+		struct timeval		timeout;
 	} v;
 	int lineno;
 } YYSTYPE;
 
+struct hostapd_apme *apme;
 struct hostapd_table *table;
 struct hostapd_entry *entry;
 struct hostapd_frame frame, *frame_ptr;
 struct hostapd_ieee80211_frame *frame_ieee80211;
-u_int negative;
 
-#define HOSTAPD_MATCH(_m)	{					\
-	frame.f_flags |= negative ?				\
+#define HOSTAPD_MATCH(_m, _not)	{					\
+	frame.f_flags |= (_not) ?					\
 	    HOSTAPD_FRAME_F_##_m##_N : HOSTAPD_FRAME_F_##_m;		\
 }
-#define HOSTAPD_MATCH_TABLE(_m)	{					\
-	frame.f_flags |= HOSTAPD_FRAME_F_##_m##_TABLE | (negative ?	\
+#define HOSTAPD_MATCH_TABLE(_m, _not)	{				\
+	frame.f_flags |= HOSTAPD_FRAME_F_##_m##_TABLE | ((_not) ?	\
 	    HOSTAPD_FRAME_F_##_m##_N : HOSTAPD_FRAME_F_##_m);		\
 }
 #define HOSTAPD_MATCH_RADIOTAP(_x) {					\
@@ -133,8 +134,8 @@ u_int negative;
 	frame.f_radiotap |= HOSTAPD_RADIOTAP_F(RSSI);			\
 	frame.f_flags |= HOSTAPD_FRAME_F_##_x;				\
 }
-#define HOSTAPD_IAPP_FLAG(_f) {						\
-	if (negative)							\
+#define HOSTAPD_IAPP_FLAG(_f, _not) {					\
+	if (_not)							\
 		hostapd_cfg.c_iapp.i_flags &= ~(HOSTAPD_IAPP_F_##_f);	\
 	else								\
 		hostapd_cfg.c_iapp.i_flags |= (HOSTAPD_IAPP_F_##_f);	\
@@ -150,6 +151,7 @@ u_int negative;
 %token	REASON UNSPECIFIED EXPIRE LEAVE ASSOC TOOMANY NOT AUTHED ASSOCED
 %token	RESERVED RSN REQUIRED INCONSISTENT IE INVALID MIC FAILURE OPEN
 %token	ADDRESS PORT ON NOTIFY TTL INCLUDE ROUTE ROAMING RSSI TXRATE FREQ
+%token	HOPPER DELAY
 %token	<v.string>	STRING
 %token	<v.val>		VALUE
 %type	<v.val>		number
@@ -163,6 +165,8 @@ u_int negative;
 %type	<v.val>		percent
 %type	<v.val>		txrate
 %type	<v.val>		freq
+%type	<v.val>		not
+%type	<v.timeout>	timeout
 
 %%
 
@@ -201,11 +205,22 @@ option		: SET HOSTAP INTERFACE hostapifaces
 			if (!TAILQ_EMPTY(&hostapd_cfg.c_apmes))
 				hostapd_cfg.c_flags |= HOSTAPD_CFG_F_APME;
 		}
+		| SET HOSTAP HOPPER INTERFACE hopperifaces
+		| SET HOSTAP HOPPER DELAY timeout
+		{
+			bcopy(&$5, &hostapd_cfg.c_apme_hopdelay,
+			    sizeof(struct timeval));
+		}
 		| SET HOSTAP MODE hostapmode
 		| SET IAPP INTERFACE STRING passive
 		{
-			strlcpy(hostapd_cfg.c_iapp.i_iface, $4,
-			    sizeof(hostapd_cfg.c_iapp.i_iface));
+			if (strlcpy(hostapd_cfg.c_iapp.i_iface, $4,
+			    sizeof(hostapd_cfg.c_iapp.i_iface)) >=
+			    sizeof(hostapd_cfg.c_iapp.i_iface)) {
+				yyerror("invalid interface %s", $4);
+				free($4);
+				YYERROR;
+			}
 
 			hostapd_cfg.c_flags |= HOSTAPD_CFG_F_IAPP;
 
@@ -298,18 +313,38 @@ hostapiface	: STRING
 		}
 		;
 
-hostapmatch	: /* empty */
-		| ON STRING
+hopperifaces	: '{' optnl hopperifacelist optnl '}'
+		| hopperiface
+		;
+
+hopperifacelist	: hopperiface
+		| hopperifacelist comma hopperiface
+		;
+
+hopperiface	: STRING
 		{
-			if ((frame.f_apme =
-			    hostapd_apme_lookup(&hostapd_cfg, $2)) == NULL) {
-				yyerror("undefined hostap interface");
-				free($2);
+			if ((apme = hostapd_apme_addhopper(&hostapd_cfg,
+			    $1)) == NULL) {
+				yyerror("failed to add hopper %s", $1);
+				free($1);
 				YYERROR;
 			}
-			free($2);
+			free($1);
+		}
+		;
 
-			HOSTAPD_MATCH(APME);
+hostapmatch	: /* empty */
+		| ON not STRING
+		{
+			if ((frame.f_apme =
+			    hostapd_apme_lookup(&hostapd_cfg, $3)) == NULL) {
+				yyerror("undefined hostap interface");
+				free($3);
+				YYERROR;
+			}
+			free($3);
+
+			HOSTAPD_MATCH(APME, $2);
 		}
 		;
 
@@ -328,7 +363,8 @@ event		: HOSTAP HANDLE
 				YYERROR;
 			}
 
-			gettimeofday(&frame.f_last, NULL);
+			if (gettimeofday(&frame.f_last, NULL) == -1)
+				hostapd_fatal("gettimeofday");
 			timeradd(&frame.f_last, &frame.f_limit, &frame.f_then);
 
 			bcopy(&frame, frame_ptr, sizeof(struct hostapd_frame));
@@ -347,19 +383,19 @@ iappsubtypelist	: iappsubtype
 
 iappsubtype	: not ADD NOTIFY
 		{
-			HOSTAPD_IAPP_FLAG(ADD_NOTIFY);
+			HOSTAPD_IAPP_FLAG(ADD_NOTIFY, $1);
 		}
 		| not RADIOTAP
 		{
-			HOSTAPD_IAPP_FLAG(RADIOTAP);
+			HOSTAPD_IAPP_FLAG(RADIOTAP, $1);
 		}
 		| not ROUTE ROAMING
 		{
-			HOSTAPD_IAPP_FLAG(ROAMING_ROUTE);
+			HOSTAPD_IAPP_FLAG(ROAMING_ROUTE, $1);
 		}
 		| not ADDRESS ROAMING
 		{
-			HOSTAPD_IAPP_FLAG(ROAMING_ADDRESS);
+			HOSTAPD_IAPP_FLAG(ROAMING_ADDRESS, $1);
 		}
 		;
 
@@ -469,13 +505,13 @@ frmmatchtype	: /* any */
 		{
 			frame_ieee80211->i_fc[0] |=
 			    IEEE80211_FC0_TYPE_DATA;
-			HOSTAPD_MATCH(TYPE);
+			HOSTAPD_MATCH(TYPE, $2);
 		}
 		| TYPE not MANAGEMENT frmmatchmgmt
 		{
 			frame_ieee80211->i_fc[0] |=
 			    IEEE80211_FC0_TYPE_MGT;
-			HOSTAPD_MATCH(TYPE);
+			HOSTAPD_MATCH(TYPE, $2);
 		}
 		;
 
@@ -483,7 +519,7 @@ frmmatchmgmt	: /* any */
 		| SUBTYPE ANY
 		| SUBTYPE not frmsubtype
 		{
-			HOSTAPD_MATCH(SUBTYPE);
+			HOSTAPD_MATCH(SUBTYPE, $2);
 		}
 		;
 
@@ -663,9 +699,9 @@ frmreason_l	: /* empty */
 
 frmmatchdir	: /* any */
 		| DIR ANY
-		| DIR frmdir
+		| DIR not frmdir
 		{
-			HOSTAPD_MATCH(DIR);
+			HOSTAPD_MATCH(DIR, $2);
 		}
 		;
 
@@ -688,43 +724,46 @@ frmdir		: NO DS
 		;
 
 frmmatchfrom	: /* any */
-		| FROM frmmatchaddr
+		| FROM ANY
+		| FROM not frmmatchaddr
 		{
-			if (($2.flags & HOSTAPD_ACTION_F_OPT_TABLE) == 0) {
-				bcopy($2.lladdr, &frame_ieee80211->i_from,
+			if (($3.flags & HOSTAPD_ACTION_F_OPT_TABLE) == 0) {
+				bcopy($3.lladdr, &frame_ieee80211->i_from,
 				    IEEE80211_ADDR_LEN);
-				HOSTAPD_MATCH(FROM);
+				HOSTAPD_MATCH(FROM, $2);
 			} else {
-				frame.f_from = $2.table;
-				HOSTAPD_MATCH_TABLE(FROM);
+				frame.f_from = $3.table;
+				HOSTAPD_MATCH_TABLE(FROM, $2);
 			}
 		}
 		;
 
 frmmatchto	: /* any */
-		| TO frmmatchaddr
+		| TO ANY
+		| TO not frmmatchaddr
 		{
-			if (($2.flags & HOSTAPD_ACTION_F_OPT_TABLE) == 0) {
-				bcopy($2.lladdr, &frame_ieee80211->i_to,
+			if (($3.flags & HOSTAPD_ACTION_F_OPT_TABLE) == 0) {
+				bcopy($3.lladdr, &frame_ieee80211->i_to,
 				    IEEE80211_ADDR_LEN);
-				HOSTAPD_MATCH(TO);
+				HOSTAPD_MATCH(TO, $2);
 			} else {
-				frame.f_to = $2.table;
-				HOSTAPD_MATCH_TABLE(TO);
+				frame.f_to = $3.table;
+				HOSTAPD_MATCH_TABLE(TO, $2);
 			}
 		}
 		;
 
 frmmatchbssid	: /* any */
-		| BSSID frmmatchaddr
+		| BSSID ANY
+		| BSSID not frmmatchaddr
 		{
-			if (($2.flags & HOSTAPD_ACTION_F_OPT_TABLE) == 0) {
-				bcopy($2.lladdr, &frame_ieee80211->i_bssid,
+			if (($3.flags & HOSTAPD_ACTION_F_OPT_TABLE) == 0) {
+				bcopy($3.lladdr, &frame_ieee80211->i_bssid,
 				    IEEE80211_ADDR_LEN);
-				HOSTAPD_MATCH(BSSID);
+				HOSTAPD_MATCH(BSSID, $2);
 			} else {
-				frame.f_bssid = $2.table;
-				HOSTAPD_MATCH_TABLE(BSSID);
+				frame.f_bssid = $3.table;
+				HOSTAPD_MATCH_TABLE(BSSID, $2);
 			}
 		}
 		;
@@ -765,25 +804,21 @@ frmmatchrtapopt	: RSSI unaryop percent
 		}
 		;
 
-frmmatchaddr	: ANY
-		{
-			$$.flags = 0;
-		}
-		| not table
+frmmatchaddr	: table
 		{
 			if (($$.table =
-			    hostapd_table_lookup(&hostapd_cfg, $2)) == NULL) {
-				yyerror("undefined table <%s>", $2);
-				free($2);
+			    hostapd_table_lookup(&hostapd_cfg, $1)) == NULL) {
+				yyerror("undefined table <%s>", $1);
+				free($1);
 				YYERROR;
 			}
 			$$.flags = HOSTAPD_ACTION_F_OPT_TABLE;
-			free($2);
+			free($1);
 		}
-		| not lladdr
+		| lladdr
 		{
-			bcopy($2.lladdr, $$.lladdr, IEEE80211_ADDR_LEN);
-			$$.flags = HOSTAPD_ACTION_F_OPT_TABLE;
+			bcopy($1.lladdr, $$.lladdr, IEEE80211_ADDR_LEN);
+			$$.flags = HOSTAPD_ACTION_F_OPT_LLADDR;
 		}
 		;
 
@@ -1012,7 +1047,13 @@ randaddr	: RANDOM
 
 number		: STRING
 		{
-			$$ = strtonum($1, 0, LONG_MAX, NULL);
+			const char *errstr;
+			$$ = strtonum($1, 0, LONG_MAX, &errstr);
+			if (errstr) {
+				yyerror("invalid number: %s", $1);
+				free($1);
+				YYERROR;
+			}
 			free($1);
 		}
 		;
@@ -1040,15 +1081,15 @@ optnl		: /* empty */
 
 not		: /* empty */
 		{
-			negative = 0;
+			$$ = 0;
 		}
 		| '!'
 		{
-			negative = 1;
+			$$ = 1;
 		}
 		| NOT
 		{
-			negative = 1;
+			$$ = 1;
 		}
 		;
 
@@ -1146,6 +1187,13 @@ freq		: STRING
 			free($1);
 		}
 		;
+
+timeout		: number
+		{
+			$$.tv_sec = $1 / 1000;
+			$$.tv_usec = ($1 % 1000) * 1000;
+		}
+		;
 %%
 
 /*
@@ -1182,6 +1230,7 @@ lookup(char *token)
 		{ "const",		CONST },
 		{ "data",		DATA },
 		{ "deauth",		DEAUTH },
+		{ "delay",		DELAY },
 		{ "delete",		DELETE },
 		{ "dir",		DIR },
 		{ "disassoc",		DISASSOC },
@@ -1192,6 +1241,7 @@ lookup(char *token)
 		{ "freq",		FREQ },
 		{ "from",		FROM },
 		{ "handle",		HANDLE },
+		{ "hopper",		HOPPER },
 		{ "hostap",		HOSTAP },
 		{ "iapp",		IAPP },
 		{ "ie",			IE },
@@ -1296,7 +1346,8 @@ lgetc(void)
 		do {
 			c = getc(file->stream);
 		} while (c == '\t' || c == ' ');
-		ungetc(c, file->stream);
+		if (ungetc(c, file->stream) == EOF)
+			hostapd_fatal("lgetc: ungetc");
 		c = ' ';
 	}
 
@@ -1508,7 +1559,7 @@ hostapd_parse_symset(char *s)
 	if ((sym = (char *)malloc(len)) == NULL)
 		hostapd_fatal("cmdline_symset: malloc");
 
-	strlcpy(sym, s, len);
+	(void)strlcpy(sym, s, len);
 
 	ret = symset(sym, val + 1, 1);
 
@@ -1584,6 +1635,8 @@ hostapd_parse_file(struct hostapd_config *cfg)
 	cfg->c_iapp.i_multicast.sin_addr.s_addr = INADDR_ANY;
 	cfg->c_iapp.i_flags = HOSTAPD_IAPP_F_DEFAULT;
 	cfg->c_iapp.i_ttl = IP_DEFAULT_MULTICAST_TTL;
+	cfg->c_apme_hopdelay.tv_sec = HOSTAPD_HOPPER_MDELAY / 1000;
+	cfg->c_apme_hopdelay.tv_usec = (HOSTAPD_HOPPER_MDELAY % 1000) * 1000;
 
 	errors = 0;
 

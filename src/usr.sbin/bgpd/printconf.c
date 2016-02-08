@@ -1,4 +1,4 @@
-/*	$OpenBSD: printconf.c,v 1.57 2006/08/04 12:01:48 henning Exp $	*/
+/*	$OpenBSD: printconf.c,v 1.60 2007/03/06 16:52:48 henning Exp $	*/
 
 /*
  * Copyright (c) 2003, 2004 Henning Brauer <henning@openbsd.org>
@@ -241,6 +241,8 @@ print_mainconf(struct bgpd_config *conf)
 		print_set(&conf->staticset6);
 		printf("\n");
 	}
+	if (conf->rtableid)
+		printf("rtable %u\n", conf->rtableid);
 }
 
 void
@@ -338,6 +340,9 @@ print_peer(struct peer_config *p, struct bgpd_config *conf, const char *c)
 		printf("%s\tipsec ah ike\n", c);
 	else if (p->auth.method == AUTH_IPSEC_IKE_ESP)
 		printf("%s\tipsec esp ike\n", c);
+
+	if (p->ttlsec)
+		printf("%s\tttl-security yes\n", c);
 
 	printf("%s\tannounce IPv4 %s\n", c, print_safi(p->capabilities.mp_v4));
 	printf("%s\tannounce IPv6 %s\n", c, print_safi(p->capabilities.mp_v6));
@@ -462,6 +467,8 @@ print_rule(struct peer *peer_l, struct filter_rule *r)
 			printf("source-as %u ", r->match.as.as);
 		else if (r->match.as.type == AS_TRANSIT)
 			printf("transit-as %u ", r->match.as.as);
+		else if (r->match.as.type == AS_PEER)
+			printf("peer-as %u ", r->match.as.as);
 		else
 			printf("unfluffy-as %u ", r->match.as.as);
 	}

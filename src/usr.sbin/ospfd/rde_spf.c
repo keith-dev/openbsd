@@ -1,4 +1,4 @@
-/*	$OpenBSD: rde_spf.c,v 1.55 2006/07/06 13:03:39 claudio Exp $ */
+/*	$OpenBSD: rde_spf.c,v 1.58 2007/01/29 13:23:05 norby Exp $ */
 
 /*
  * Copyright (c) 2005 Esben Norby <norby@openbsd.org>
@@ -53,9 +53,6 @@ spf_calc(struct area *area)
 	int			 i;
 	struct in_addr		 addr;
 
-	log_debug("spf_calc: calculation started, area ID %s",
-	    inet_ntoa(area->id));
-
 	/* clear SPF tree */
 	spf_tree_clr(area);
 	cand_list_clr();
@@ -105,15 +102,11 @@ spf_calc(struct area *area)
 				fatalx("spf_calc: invalid LSA type");
 			}
 
-			if (w == NULL) {
-				log_debug("spf_calc: w = NULL");
+			if (w == NULL)
 				continue;
-			}
 
-			if (w->lsa->hdr.age == MAX_AGE) {
-				log_debug("spf_calc: age = MAX_AGE");
+			if (w->lsa->hdr.age == MAX_AGE)
 				continue;
-			}
 
 			if (!linked(w, v)) {
 				addr.s_addr = htonl(w->ls_id);
@@ -161,7 +154,7 @@ spf_calc(struct area *area)
 	} while (v != NULL);
 
 	/* spf_dump(area); */
-	log_debug("spf_calc: calculation ended, area ID %s",
+	log_debug("spf_calc: area %s calculated",
 	    inet_ntoa(area->id));
 
 	area->num_spf_calc++;
@@ -227,7 +220,7 @@ rt_calc(struct vertex *v, struct area *area, struct ospfd_conf *conf)
 			return;
 
 		/* ignore self-originated stuff */
-		if (v->nbr->self)
+		if (v->self)
 			return;
 
 		/* TODO type 3 area address range check */
@@ -281,7 +274,7 @@ asext_calc(struct vertex *v)
 	switch (v->type) {
 	case LSA_TYPE_EXTERNAL:
 		/* ignore self-originated stuff */
-		if (v->nbr->self)
+		if (v->self)
 			return;
 
 		if ((r = rt_lookup(DT_RTR, htonl(v->adv_rtr))) == NULL)
@@ -485,7 +478,6 @@ spf_timer(int fd, short event, void *arg)
 	case SPF_IDLE:
 		fatalx("spf_timer: invalid state IDLE");
 	case SPF_HOLDQUEUE:
-		log_debug("spf_timer: HOLDQUEUE -> DELAY");
 		conf->spf_state = SPF_DELAY;
 		/* FALLTHROUGH */
 	case SPF_DELAY:
@@ -531,7 +523,6 @@ spf_timer(int fd, short event, void *arg)
 		start_spf_holdtimer(conf);
 		break;
 	case SPF_HOLD:
-		log_debug("spf_timer: state HOLD -> IDLE");
 		conf->spf_state = SPF_IDLE;
 		break;
 	default:
@@ -546,7 +537,6 @@ start_spf_timer(void)
 
 	switch (rdeconf->spf_state) {
 	case SPF_IDLE:
-		log_debug("start_spf_timer: IDLE -> DELAY");
 		timerclear(&tv);
 		tv.tv_sec = rdeconf->spf_delay;
 		rdeconf->spf_state = SPF_DELAY;
@@ -557,7 +547,6 @@ start_spf_timer(void)
 		/* ignore */
 		break;
 	case SPF_HOLD:
-		log_debug("start_spf_timer: HOLD -> HOLDQUEUE");
 		rdeconf->spf_state = SPF_HOLDQUEUE;
 		break;
 	case SPF_HOLDQUEUE:
@@ -585,7 +574,6 @@ start_spf_holdtimer(struct ospfd_conf *conf)
 		timerclear(&tv);
 		tv.tv_sec = conf->spf_hold_time;
 		conf->spf_state = SPF_HOLD;
-		log_debug("spf_start_holdtimer: DELAY -> HOLD");
 		if (evtimer_add(&conf->ev, &tv) == -1)
 			fatal("start_spf_holdtimer");
 		break;

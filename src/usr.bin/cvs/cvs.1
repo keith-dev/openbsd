@@ -1,4 +1,4 @@
-.\"	$OpenBSD: cvs.1,v 1.99 2006/06/28 20:19:05 reyk Exp $
+.\"	$OpenBSD: cvs.1,v 1.103 2007/02/06 15:24:18 jmc Exp $
 .\"
 .\" Copyright (c) 2004 Jean-Francois Brousseau <jfb@openbsd.org>
 .\" Copyright (c) 2004-2006 Xavier Santolaria <xsa@openbsd.org>
@@ -33,7 +33,7 @@
 .Sh SYNOPSIS
 .Nm
 .Bk -words
-.Op Fl flnQqrtvVw
+.Op Fl flnQqRrtVvw
 .Op Fl d Ar root
 .Op Fl e Ar editor
 .Xo
@@ -104,6 +104,11 @@ Only error messages will be displayed.
 .It Fl q
 Be quiet about reporting.
 This is the default.
+.It Fl R
+Permit checkout from a read-only repository.
+See also
+.Ev CVSREADONLYFS ,
+below.
 .It Fl r
 Extract files in read-only mode.
 .It Fl s Ar var Ns = Ns Ar val
@@ -160,8 +165,6 @@ import,
 init,
 kserver,
 log,
-login,
-logout,
 rdiff,
 release,
 remove,
@@ -1063,12 +1066,6 @@ character.
 .Pp
 Aliases:
 .Ic lo .
-.Ss login
-Prompt for a password for an authenticating server.
-.Ss logout
-Remove an entry in
-.Pa .cvspass
-for a remote repository.
 .Ss rdiff
 The
 .Ic rdiff
@@ -1440,7 +1437,7 @@ The
 command is used to merge any of the changes that have occurred on the remote
 repository into the local one where the command was run.
 .Bd -literal -offset indent
-Usage: cvs update [-AdflPpR] [-D date | -r rev] [-I ign]
+Usage: cvs update [-ACdflPpR] [-D date | -r rev] [-I ign]
                   [-j rev] [-k mode] [-W spec] [file ...]
 .Ed
 .Pp
@@ -1451,6 +1448,8 @@ command takes the following options:
 .It Fl A
 Reset any sticky tags, dates, or keyword substitution modes that
 have been set on the tree.
+.It Fl C
+Overwrite locally modified files with clean repository copies.
 .It Fl D Ar date
 Update as of the latest revision no later than
 .Ar date
@@ -1720,6 +1719,11 @@ and
 If set,
 .Nm
 extracts files in read-only mode.
+.It Ev CVSREADONLYFS
+Permit checkout from a read-only repository.
+See also
+.Fl R ,
+above.
 .It Ev CVSROOT
 When set, this variable should contain the string pointing to the root
 directory of the CVS repository.

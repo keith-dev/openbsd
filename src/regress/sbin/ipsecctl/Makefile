@@ -1,5 +1,6 @@
-# $OpenBSD: Makefile,v 1.42 2006/08/29 23:15:01 naddy Exp $
+# $OpenBSD: Makefile,v 1.47 2007/02/19 10:12:45 hshoexer Exp $
 
+# you can update the *.ok files with: make -i | patch
 # TARGETS
 # ipsec: feed ipsecNN.in through ipsecctl and check wether the output matches
 # 	 ipsecNN.ok
@@ -9,16 +10,16 @@
 
 IPSECTESTS=1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24
 IPSECTESTS+=25 26 27 28 29 30 31 32 33 34 35 36 37 38 39 40 41 42 43 44
-IPSECTESTS+=51 52
+IPSECTESTS+=51 52 53
 TCPMD5TESTS=1 2 3
 SATESTS=1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24
 SAFAIL=1 2
 IPSECFAIL=1 2
-IKEFAIL=1 3 4 5 6 7
+IKEFAIL=1 3 4 5 6 7 8 9 10 11 12
 IKETESTS=1 2 3 4 5 6 7 8 9 10 11 12 13 14 15
 IKETESTS+=16 17 18 19 20 21 22 23
 IKETESTS+=29 30 31 32 33 34 35 36 37 38 39 40
-IKETESTS+=41 42 43 46 47 48 49 50 51 52 53 54 55
+IKETESTS+=41 42 43 46 47 48 49 50 51 52 53 54 55 56
 
 IKEDELTESTS=1 2 3 4 5 6 7 8 9 10 11 12 13 14 15
 IKEDELTESTS+=16 17 18 19 20 21 22 23
@@ -42,7 +43,7 @@ TCPMD5_TARGETS+=tcpmd5${n}
 
 tcpmd5${n}:
 	cat ${.CURDIR}/tcpmd5${n}.in | sed -e 's,DIR,${.CURDIR},g' | \
-	    ipsecctl -nv -f - | diff -u ${.CURDIR}/tcpmd5${n}.ok /dev/stdin
+	    ipsecctl -nkv -f - | diff -u ${.CURDIR}/tcpmd5${n}.ok /dev/stdin
 .endfor
 
 .for n in ${SATESTS}
@@ -50,7 +51,7 @@ SA_TARGETS+=sa${n}
 
 sa${n}:
 	cat ${.CURDIR}/sa${n}.in | sed -e 's,DIR,${.CURDIR},g' | \
-	    ipsecctl -nv -f - | diff -u ${.CURDIR}/sa${n}.ok /dev/stdin
+	    ipsecctl -knv -f - | diff -u ${.CURDIR}/sa${n}.ok /dev/stdin
 .endfor
 
 .for n in ${SAFAIL}

@@ -1,4 +1,4 @@
-/*	$OpenBSD: sasyncd.h,v 1.11 2006/09/01 01:13:25 mpf Exp $	*/
+/*	$OpenBSD: sasyncd.h,v 1.14 2007/01/08 15:31:01 markus Exp $	*/
 
 /*
  * Copyright (c) 2005 Håkan Olsson.  All rights reserved.
@@ -50,6 +50,7 @@ struct cfgstate {
 	int		 carp_ifindex;
 
 	char		*sharedkey;
+	int		 sharedkey_len;
 
 	int		 pfkey_socket;
 
@@ -102,7 +103,7 @@ extern int		carp_demoted;
 #define CARP_DEMOTE_MAXTIME	60
 
 /* conf.c */
-int	conf_init(int, char **);
+int		conf_parse_file(char *);
 
 /* carp.c */
 int		carp_init(void);
@@ -112,6 +113,8 @@ void		carp_update_state(enum RUNSTATE);
 void		carp_set_rfd(fd_set *);
 void		carp_read_message(fd_set *);
 const char*	carp_state_name(enum RUNSTATE);
+void		isakmpd_setrun(void);
+
 
 /* log.c */
 /*
@@ -161,9 +164,6 @@ void	timer_init(void);
 void	timer_next_event(struct timeval *);
 void	timer_run(void);
 int	timer_add(char *, u_int32_t, void (*)(void *), void *);
-
-/* carp.c */
-void	isakmpd_setrun(void);
 
 #if defined (GC_DEBUG)
 /* Boehms GC */

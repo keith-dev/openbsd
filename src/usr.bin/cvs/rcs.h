@@ -1,4 +1,4 @@
-/*	$OpenBSD: rcs.h,v 1.69 2006/06/09 14:57:13 xsa Exp $	*/
+/*	$OpenBSD: rcs.h,v 1.75 2007/02/19 11:40:00 otto Exp $	*/
 /*
  * Copyright (c) 2004 Jean-Francois Brousseau <jfb@openbsd.org>
  * All rights reserved.
@@ -26,7 +26,6 @@
 
 #ifndef RCS_H
 #define RCS_H
-
 #include "buf.h"
 
 #define RCS_DIFF_MAXARG		32
@@ -178,7 +177,7 @@ TAILQ_HEAD(rcs_dlist, rcs_delta);
 struct rcs_delta {
 	RCSNUM		*rd_num;
 	RCSNUM		*rd_next;
-	u_int		 rd_flags;
+	int		 rd_flags;
 	struct tm	 rd_date;
 	char		*rd_author;
 	char		*rd_state;
@@ -198,7 +197,7 @@ typedef struct rcs_file {
 	int	 rf_inattic;
 	char	*rf_path;
 	mode_t	 rf_mode;
-	u_int	 rf_flags;
+	int	 rf_flags;
 
 	RCSNUM	*rf_head;
 	RCSNUM	*rf_branch;
@@ -216,6 +215,7 @@ typedef struct rcs_file {
 } RCSFILE;
 
 extern int rcs_errno;
+struct cvs_lines;
 
 RCSFILE			*rcs_open(const char *, int, int, ...);
 void			 rcs_close(RCSFILE *);
@@ -238,7 +238,7 @@ int			 rcs_lock_setmode(RCSFILE *, int);
 int			 rcs_lock_add(RCSFILE *, const char *, RCSNUM *);
 int			 rcs_lock_remove(RCSFILE *, const char *, RCSNUM *);
 BUF			*rcs_getrev(RCSFILE *, RCSNUM *);
-int			 rcs_deltatext_set(RCSFILE *, RCSNUM *, const char *);
+int			 rcs_deltatext_set(RCSFILE *, RCSNUM *, BUF *);
 const char		*rcs_desc_get(RCSFILE *);
 void			 rcs_desc_set(RCSFILE *, const char *);
 const char		*rcs_comment_lookup(const char *);
@@ -258,6 +258,10 @@ int			 rcs_state_check(const char *);
 RCSNUM			*rcs_tag_resolve(RCSFILE *, const char *);
 const char		*rcs_errstr(int);
 void			 rcs_write(RCSFILE *);
+void			 rcs_rev_write_stmp(RCSFILE *,  RCSNUM *, char *, int);
+void			 rcs_rev_write_fd(RCSFILE *, RCSNUM *, int, int);
+struct cvs_lines	*rcs_rev_getlines(RCSFILE *, RCSNUM *);
+BUF			*rcs_rev_getbuf(RCSFILE *, RCSNUM *, int);
 
 int	rcs_kflag_get(const char *);
 void	rcs_kflag_usage(void);
@@ -276,9 +280,6 @@ void	 rcsnum_cpy(const RCSNUM *, RCSNUM *, u_int);
 int	 rcsnum_cmp(RCSNUM *, RCSNUM *, u_int);
 int	 rcsnum_differ(RCSNUM *, RCSNUM *);
 
-/* rcstime.c */
-void	 rcs_set_tz(char *, struct rcs_delta *, struct tm *);
-extern char *timezone_flag;
 extern int rcsnum_flags;
 
 #endif	/* RCS_H */

@@ -1,4 +1,4 @@
-/*	$OpenBSD: remote.c,v 1.4 2006/07/10 01:32:32 joris Exp $	*/
+/*	$OpenBSD: remote.c,v 1.14 2007/02/22 06:42:09 otto Exp $	*/
 /*
  * Copyright (c) 2006 Joris Vink <joris@openbsd.org>
  *
@@ -15,11 +15,15 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
-#include "includes.h"
+#include <sys/stat.h>
+
+#include <errno.h>
+#include <fcntl.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
 
 #include "cvs.h"
-#include "log.h"
-#include "diff.h"
 #include "remote.h"
 
 struct cvs_resp *
@@ -89,54 +93,74 @@ cvs_remote_input(void)
 
 	if (data[len - 1] == '\n') {
 		data[len - 1] = '\0';
+		ldata = xstrdup(data);
 	} else {
 		ldata = xmalloc(len + 1);
-		if (strlcpy(ldata, data, len) >= len)
-			fatal("cvs_remote_input: truncation");
-		data = ldata;
+		memcpy(ldata, data, len);
+		ldata[len] = '\0';
 	}
 
-	ldata = xstrdup(data);
+	if (cvs_server_active == 0 && cvs_client_outlog_fd != -1) {
+		BUF *bp;
+
+		bp = cvs_buf_alloc(strlen(ldata), BUF_AUTOEXT);
+
+		if (cvs_buf_append(bp, ldata, strlen(ldata)) < 0)
+			fatal("cvs_remote_input: cvs_buf_append");
+
+		cvs_buf_putc(bp, '\n');
+
+		if (cvs_buf_write_fd(bp, cvs_client_outlog_fd) < 0)
+			fatal("cvs_remote_input: cvs_buf_write_fd");
+
+		cvs_buf_free(bp);
+	}
+
 	return (ldata);
 }
 
-BUF *
-cvs_remote_receive_file(size_t len)
+void
+cvs_remote_receive_file(int fd, size_t len)
 {
-	BUF *bp;
 	FILE *in;
-	size_t ret;
-	char *data;
+	char data[MAXBSIZE];
+	size_t nread, nwrite, nleft, toread;
 
 	if (cvs_server_active)
 		in = stdin;
 	else
 		in = current_cvsroot->cr_srvout;
 
-	bp = cvs_buf_alloc(len, BUF_AUTOEXT);
+	nleft = len;
 
-	if (len != 0) {
-		data = xmalloc(len);
-		ret = fread(data, sizeof(char), len, in);
-		if (ret != len)
-			fatal("length mismatch, expected %ld, got %ld",
-			    len, ret);
-		cvs_buf_set(bp, data, len, 0);
-		xfree(data);
+	while (nleft > 0) {
+		toread = MIN(nleft, MAXBSIZE);
+
+		nread = fread(data, sizeof(char), toread, in);
+		if (nread == 0)
+			fatal("error receiving file");
+
+		nwrite = write(fd, data, nread);
+		if (nwrite != nread)
+			fatal("failed to write %zu bytes", nread);
+
+		if (cvs_server_active == 0 &&
+		    cvs_client_outlog_fd != -1)
+			(void)write(cvs_client_outlog_fd, data, nread);
+
+		nleft -= nread;
 	}
-
-	return (bp);
 }
 
 void
 cvs_remote_send_file(const char *path)
 {
-	BUF *bp;
-	int l, fd;
-	FILE *out;
-	size_t ret;
+	int fd;
+	FILE *out, *in;
+	size_t ret, rw;
+	off_t total;
 	struct stat st;
-	char buf[16], *fcont;
+	char buf[18], data[MAXBSIZE];
 
 	if (cvs_server_active)
 		out = stdout;
@@ -152,29 +176,34 @@ cvs_remote_send_file(const char *path)
 	cvs_modetostr(st.st_mode, buf, sizeof(buf));
 	cvs_remote_output(buf);
 
-	l = snprintf(buf, sizeof(buf), "%lld", st.st_size);
-	if (l == -1 || l >= (int)sizeof(buf))
-		fatal("cvs_remote_send_file: overflow");
+	(void)xsnprintf(buf, sizeof(buf), "%lld", st.st_size);
 	cvs_remote_output(buf);
 
-	bp = cvs_buf_load_fd(fd, BUF_AUTOEXT);
-	fcont = cvs_buf_release(bp);
+	if ((in = fdopen(fd, "r")) == NULL)
+		fatal("cvs_remote_send_file: fdopen %s", strerror(errno));
 
-	if (fcont != NULL) {
-		ret = fwrite(fcont, sizeof(char), st.st_size, out);
-		if (ret != st.st_size)
-			fatal("tried to write %lld only wrote %ld",
-			    st.st_size, ret);
-		xfree(fcont);
+	total = 0;
+	while ((ret = fread(data, sizeof(char), MAXBSIZE, in)) != 0) {
+		rw = fwrite(data, sizeof(char), ret, out);
+		if (rw != ret)
+			fatal("failed to write %zu bytes", ret);
+
+		if (cvs_server_active == 0 &&
+		    cvs_client_outlog_fd != -1)
+			(void)write(cvs_client_outlog_fd, data, ret);
+
+		total += ret;
 	}
 
-	(void)close(fd);
+	if (total != st.st_size)
+		fatal("length mismatch, %lld vs %lld", total, st.st_size);
+
+	(void)fclose(in);
 }
 
 void
 cvs_remote_classify_file(struct cvs_file *cf)
 {
-	time_t mtime;
 	struct stat st;
 	CVSENTRIES *entlist;
 
@@ -202,13 +231,15 @@ cvs_remote_classify_file(struct cvs_file *cf)
 			fatal("cvs_remote_classify_file(%s): %s", cf->file_path,
 			    strerror(errno));
 
-		mtime = cvs_hack_time(st.st_mtime, 1);
-		if (mtime != cf->file_ent->ce_mtime)
+		if (st.st_mtime != cf->file_ent->ce_mtime)
 			cf->file_status = FILE_MODIFIED;
 		else
 			cf->file_status = FILE_UPTODATE;
 	} else if (cf->fd == -1) {
 		cf->file_status = FILE_UNKNOWN;
 	}
+
+	if (cvs_cmdop == CVS_OP_IMPORT && cf->file_type == CVS_FILE)
+		cf->file_status = FILE_MODIFIED;
 }
 

@@ -1,5 +1,5 @@
 # ex:ts=8 sw=4:
-# $OpenBSD: Dependencies.pm,v 1.4 2005/10/10 11:24:34 espie Exp $
+# $OpenBSD: Dependencies.pm,v 1.6 2007/02/04 12:18:39 espie Exp $
 #
 # Copyright (c) 2005 Marc Espie <espie@openbsd.org>
 #
@@ -94,7 +94,7 @@ sub solve
 		@candidates = ((grep {$_ eq $dep->{def}} @candidates),
 				(sort (grep {$_ ne $dep->{def}} @candidates)));
 		my $choice = 
-		    OpenBSD::Interactive::ask_list('Choose dependency for '.$plist->pkgname().': ',
+		    OpenBSD::Interactive::ask_list('Ambiguous: choose dependency for '.$plist->pkgname().': ',
 			$state->{interactive}, @candidates);
 		push(@deps, $choice);
 		$to_register->{$choice} = 1;
@@ -124,7 +124,7 @@ sub check_lib_spec
 			return $candidate;
 		}
 	}
-	return undef;
+	return;
 }
 
 sub find_old_lib
@@ -139,7 +139,7 @@ sub find_old_lib
 			return "$try($lib)";
 		}
 	}
-	return undef;
+	return;
 }
 
 sub lookup_library

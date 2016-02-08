@@ -1,4 +1,4 @@
-/*	$OpenBSD: vacation.c,v 1.24 2006/08/14 15:49:28 millert Exp $	*/
+/*	$OpenBSD: vacation.c,v 1.28 2007/02/27 15:51:17 deraadt Exp $	*/
 /*	$NetBSD: vacation.c,v 1.7 1995/04/29 05:58:27 cgd Exp $	*/
 
 /*
@@ -40,7 +40,7 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)vacation.c	8.2 (Berkeley) 1/26/94";
 #endif
-static char rcsid[] = "$OpenBSD: vacation.c,v 1.24 2006/08/14 15:49:28 millert Exp $";
+static char rcsid[] = "$OpenBSD: vacation.c,v 1.28 2007/02/27 15:51:17 deraadt Exp $";
 #endif /* not lint */
 
 /*
@@ -206,6 +206,27 @@ readheaders(void)
 	cont = tome = 0;
 	while (fgets(buf, sizeof(buf), stdin) && *buf != '\n')
 		switch (*buf) {
+		case 'A':		/* "Auto-Submitted:" */
+		case 'a':
+			cont = 0;
+			if (strncasecmp(buf, "Auto-Submitted:", 15))
+				break;
+			for (p = buf + 15; *p && isspace(*p); ++p)
+				;
+			/*
+			 * RFC 3834 section 2:
+			 * Automatic responses SHOULD NOT be issued in response
+			 * to any message which contains an Auto-Submitted
+			 * header where the field has any value other than "no".
+			 */
+			if ((p[0] == 'n' || p[0] == 'N') &&
+			    (p[1] == 'o' || p[1] == 'O')) {
+				for (p += 2; *p && isspace(*p); ++p)
+					;
+				if (*p == '\0')
+					break;	/* Auto-Submitted: no */
+			}
+			exit(0);
 		case 'F':		/* "From " */
 		case 'f':
 			cont = 0;
@@ -219,6 +240,16 @@ readheaders(void)
 				if (junkmail())
 					exit(0);
 			}
+			break;
+		case 'L':		/* "List-Id:" */
+		case 'l':
+			cont = 0;
+			/*
+			 * If present (with any value), message is coming from a
+			 * mailing list, cf. RFC2919.
+			 */
+			if (strncasecmp(buf, "List-Id:", 8) == 0)
+				exit(0);
 			break;
 		case 'R':		/* "Return-Path:" */
 		case 'r':
@@ -242,16 +273,10 @@ readheaders(void)
 		case 'P':		/* "Precedence:" */
 		case 'p':
 			cont = 0;
-			if (strncasecmp(buf, "Precedence", 10) ||
-			    (buf[10] != ':' && buf[10] != ' ' &&
-			    buf[10] != '\t'))
+			if (strncasecmp(buf, "Precedence:", 11))
 				break;
-			if (!(p = strchr(buf, ':')))
-				break;
-			while (*++p && isspace(*p))
+			for (p = buf + 11; *p && isspace(*p); ++p)
 				;
-			if (!*p)
-				break;
 			if (!strncasecmp(p, "junk", 4) ||
 			    !strncasecmp(p, "bulk", 4) ||
 			    !strncasecmp(p, "list", 4))

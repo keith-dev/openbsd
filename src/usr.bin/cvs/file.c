@@ -1,4 +1,4 @@
-/*	$OpenBSD: file.c,v 1.162 2006/07/07 17:37:17 joris Exp $	*/
+/*	$OpenBSD: file.c,v 1.189 2007/02/22 06:42:09 otto Exp $	*/
 /*
  * Copyright (c) 2006 Joris Vink <joris@openbsd.org>
  * Copyright (c) 2004 Jean-Francois Brousseau <jfb@openbsd.org>
@@ -25,11 +25,18 @@
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include "includes.h"
+#include <sys/types.h>
+#include <sys/mman.h>
+#include <sys/stat.h>
+
+#include <errno.h>
+#include <fcntl.h>
+#include <fnmatch.h>
+#include <libgen.h>
+#include <string.h>
+#include <unistd.h>
 
 #include "cvs.h"
-#include "file.h"
-#include "log.h"
 
 #define CVS_IGN_STATIC	0x01	/* pattern is static, no need to glob */
 
@@ -66,18 +73,13 @@ static const char *cvs_ign_std[] = {
 struct ignore_head cvs_ign_pats;
 struct ignore_head dir_ign_pats;
 
-static int	cvs_file_cmpname(const char *, const char *);
-
 void
 cvs_file_init(void)
 {
-	int i, l;
+	int i;
 	FILE *ifp;
 	size_t len;
-	char *path, *buf;
-
-	path = xmalloc(MAXPATHLEN);
-	buf = xmalloc(MAXNAMLEN);
+	char path[MAXPATHLEN], buf[MAXNAMLEN];
 
 	TAILQ_INIT(&cvs_ign_pats);
 	TAILQ_INIT(&dir_ign_pats);
@@ -87,9 +89,7 @@ cvs_file_init(void)
 		cvs_file_ignore(cvs_ign_std[i], &cvs_ign_pats);
 
 	/* read the cvsignore file in the user's home directory, if any */
-	l = snprintf(path, MAXPATHLEN, "%s/.cvsignore", cvs_homedir);
-	if (l == -1 || l >= MAXPATHLEN)
-		fatal("overflow in cvs_file_init");
+	(void)xsnprintf(path, MAXPATHLEN, "%s/.cvsignore", cvs_homedir);
 
 	ifp = fopen(path, "r");
 	if (ifp == NULL) {
@@ -101,19 +101,14 @@ cvs_file_init(void)
 			len = strlen(buf);
 			if (len == 0)
 				continue;
+			if (buf[len - 1] == '\n')
+				buf[len - 1] = '\0';
 
-			if (buf[len - 1] != '\n')
-				cvs_log(LP_ERR, "line too long in `%s'", path);
-
-			buf[--len] = '\0';
 			cvs_file_ignore(buf, &cvs_ign_pats);
 		}
 
 		(void)fclose(ifp);
 	}
-
-	xfree(path);
-	xfree(buf);
 }
 
 void
@@ -207,15 +202,10 @@ cvs_file_get(const char *name, struct cvs_flisthead *fl)
 struct cvs_file *
 cvs_file_get_cf(const char *d, const char *f, int fd, int type)
 {
-	int l;
 	struct cvs_file *cf;
-	char *p, *rpath;
+	char *p, rpath[MAXPATHLEN];
 
-	rpath = xmalloc(MAXPATHLEN);
-
-	l = snprintf(rpath, MAXPATHLEN, "%s/%s", d, f);
-	if (l == -1 || l >= MAXPATHLEN)
-		fatal("cvs_file_get_cf: overflow");
+	(void)xsnprintf(rpath, MAXPATHLEN, "%s/%s", d, f);
 
 	for (p = rpath; p[0] == '.' && p[1] == '/';)
 		p += 2;
@@ -232,21 +222,17 @@ cvs_file_get_cf(const char *d, const char *f, int fd, int type)
 	cf->file_status = cf->file_flags = 0;
 	cf->file_ent = NULL;
 
-	xfree(rpath);
 	return (cf);
 }
 
 void
 cvs_file_walklist(struct cvs_flisthead *fl, struct cvs_recursion *cr)
 {
-	int len, fd, type;
+	int fd, type;
 	struct stat st;
 	struct cvs_file *cf;
 	struct cvs_filelist *l, *nxt;
-	char *d, *f, *repo, *fpath;
-
-	fpath = xmalloc(MAXPATHLEN);
-	repo = xmalloc(MAXPATHLEN);
+	char *d, *f, repo[MAXPATHLEN], fpath[MAXPATHLEN];
 
 	for (l = TAILQ_FIRST(fl); l != NULL; l = nxt) {
 		if (cvs_quit)
@@ -286,10 +272,8 @@ cvs_file_walklist(struct cvs_flisthead *fl, struct cvs_recursion *cr)
 			}
 
 			cvs_get_repository_path(d, repo, MAXPATHLEN);
-			len = snprintf(fpath, MAXPATHLEN, "%s/%s",
+			(void)xsnprintf(fpath, MAXPATHLEN, "%s/%s",
 			    repo, f);
-			if (len == -1 || len >= MAXPATHLEN)
-				fatal("cvs_file_walklist: overflow");
 
 			if ((fd = open(fpath, O_RDONLY)) == -1) {
 				strlcat(fpath, RCS_FILE_EXT, MAXPATHLEN);
@@ -336,15 +320,12 @@ next:
 		xfree(l->file_path);
 		xfree(l);
 	}
-
-	xfree(fpath);
-	xfree(repo);
 }
 
 void
 cvs_file_walkdir(struct cvs_file *cf, struct cvs_recursion *cr)
 {
-	int l;
+	int l, type;
 	FILE *fp;
 	int nbytes;
 	size_t len;
@@ -357,7 +338,7 @@ cvs_file_walkdir(struct cvs_file *cf, struct cvs_recursion *cr)
 	struct cvs_ent_line *line;
 	struct cvs_flisthead fl, dl;
 	CVSENTRIES *entlist;
-	char *buf, *ebuf, *cp, *repo, *fpath;
+	char *buf, *ebuf, *cp, repo[MAXPATHLEN], fpath[MAXPATHLEN];
 
 	cvs_log(LP_TRACE, "cvs_file_walkdir(%s)", cf->file_path);
 
@@ -370,34 +351,29 @@ cvs_file_walkdir(struct cvs_file *cf, struct cvs_recursion *cr)
 	if (cf->file_status == FILE_SKIP)
 		return;
 
-	fpath = xmalloc(MAXPATHLEN);
-
 	/*
 	 * If we do not have a admin directory inside here, dont bother,
 	 * unless we are running import.
 	 */
-	l = snprintf(fpath, MAXPATHLEN, "%s/%s", cf->file_path,
+	(void)xsnprintf(fpath, MAXPATHLEN, "%s/%s", cf->file_path,
 	    CVS_PATH_CVSDIR);
-	if (l == -1 || l >= MAXPATHLEN)
-		fatal("cvs_file_walkdir: overflow");
 
 	l = stat(fpath, &st);
 	if (cvs_cmdop != CVS_OP_IMPORT &&
 	    (l == -1 || (l == 0 && !S_ISDIR(st.st_mode)))) {
-		xfree(fpath);
 		return;
 	}
 
 	/*
 	 * check for a local .cvsignore file
 	 */
-	l = snprintf(fpath, MAXPATHLEN, "%s/.cvsignore", cf->file_path);
-	if (l == -1 || l >= MAXPATHLEN)
-		fatal("cvs_file_walkdir: overflow");
+	(void)xsnprintf(fpath, MAXPATHLEN, "%s/.cvsignore", cf->file_path);
 
 	if ((fp = fopen(fpath, "r")) != NULL) {
-		while (fgets(fpath, MAXPATHLEN, fp)) {
+		while (fgets(fpath, MAXPATHLEN, fp) != NULL) {
 			len = strlen(fpath);
+			if (len == 0)
+				continue;
 			if (fpath[len - 1] == '\n')
 				fpath[len - 1] = '\0';
 
@@ -428,7 +404,7 @@ cvs_file_walkdir(struct cvs_file *cf, struct cvs_recursion *cr)
 			if (!strcmp(dp->d_name, ".") ||
 			    !strcmp(dp->d_name, "..") ||
 			    !strcmp(dp->d_name, CVS_PATH_CVSDIR) ||
-			    dp->d_reclen == 0) {
+			    dp->d_fileno == 0) {
 				cp += dp->d_reclen;
 				continue;
 			}
@@ -438,27 +414,70 @@ cvs_file_walkdir(struct cvs_file *cf, struct cvs_recursion *cr)
 				continue;
 			}
 
-			if (!(cr->flags & CR_RECURSE_DIRS) &&
-			    dp->d_type == DT_DIR) {
+			(void)xsnprintf(fpath, MAXPATHLEN, "%s/%s",
+			    cf->file_path, dp->d_name);
+
+			/*
+			 * nfs and afs will show d_type as DT_UNKNOWN
+			 * for files and/or directories so when we encounter
+			 * this we call lstat() on the path to be sure.
+			 */
+			if (dp->d_type == DT_UNKNOWN) {
+				if (lstat(fpath, &st) == -1)
+					fatal("'%s': %s", fpath,
+					    strerror(errno));
+
+				switch (st.st_mode & S_IFMT) {
+				case S_IFDIR:
+					type = CVS_DIR;
+					break;
+				case S_IFREG:
+					type = CVS_FILE;
+					break;
+				default:
+					type = FILE_SKIP;
+					break;
+				}
+			} else {
+				switch (dp->d_type) {
+				case DT_DIR:
+					type = CVS_DIR;
+					break;
+				case DT_REG:
+					type = CVS_FILE;
+					break;
+				default:
+					type = FILE_SKIP;
+					break;
+				}
+			}
+
+			if (type == FILE_SKIP) {
+				if (verbosity > 1) {
+					cvs_log(LP_NOTICE, "ignoring `%s'",
+					    dp->d_name);
+				}
 				cp += dp->d_reclen;
 				continue;
 			}
 
-			l = snprintf(fpath, MAXPATHLEN, "%s/%s",
-			    cf->file_path, dp->d_name);
-			if (l == -1 || l >= MAXPATHLEN)
-				fatal("cvs_file_walkdir: overflow");
+			if (!(cr->flags & CR_RECURSE_DIRS) &&
+			    type == CVS_DIR) {
+				cp += dp->d_reclen;
+				continue;
+			}
 
-			/*
-			 * Anticipate the file type to sort them,
-			 * note that we do not determine the final
-			 * type until we actually have the fd floating
-			 * around.
-			 */
-			if (dp->d_type == DT_DIR)
+			switch (type) {
+			case CVS_DIR:
 				cvs_file_get(fpath, &dl);
-			else if (dp->d_type == DT_REG)
+				break;
+			case CVS_FILE:
 				cvs_file_get(fpath, &fl);
+				break;
+			default:
+				fatal("type %d unknown, shouldn't happen",
+				    type);
+			}
 
 			cp += dp->d_reclen;
 		}
@@ -479,10 +498,8 @@ cvs_file_walkdir(struct cvs_file *cf, struct cvs_recursion *cr)
 	TAILQ_FOREACH(line, &(entlist->cef_ent), entries_list) {
 		ent = cvs_ent_parse(line->buf);
 
-		l = snprintf(fpath, MAXPATHLEN, "%s/%s", cf->file_path,
+		(void)xsnprintf(fpath, MAXPATHLEN, "%s/%s", cf->file_path,
 		    ent->ce_name);
-		if (l == -1 || l >= MAXPATHLEN)
-			fatal("cvs_file_walkdir: overflow");
 
 		if (!(cr->flags & CR_RECURSE_DIRS) &&
 		    ent->ce_type == CVS_ENT_DIR)
@@ -499,7 +516,6 @@ cvs_file_walkdir(struct cvs_file *cf, struct cvs_recursion *cr)
 	cvs_ent_close(entlist, ENT_NOSYNC);
 
 	if (cr->flags & CR_REPO) {
-		repo = xmalloc(MAXPATHLEN);
 		cvs_get_repository_path(cf->file_path, repo, MAXPATHLEN);
 		cvs_repository_lock(repo);
 
@@ -510,15 +526,11 @@ cvs_file_walkdir(struct cvs_file *cf, struct cvs_recursion *cr)
 	cvs_file_walklist(&fl, cr);
 	cvs_file_freelist(&fl);
 
-	if (cr->flags & CR_REPO) {
+	if (cr->flags & CR_REPO)
 		cvs_repository_unlock(repo);
-		xfree(repo);
-	}
 
 	cvs_file_walklist(&dl, cr);
 	cvs_file_freelist(&dl);
-
-	xfree(fpath);
 
 	if (cr->leavedir != NULL)
 		cr->leavedir(cf);
@@ -537,16 +549,15 @@ cvs_file_freelist(struct cvs_flisthead *fl)
 }
 
 void
-cvs_file_classify(struct cvs_file *cf, const char *tag, int loud)
+cvs_file_classify(struct cvs_file *cf, const char *tag)
 {
 	size_t len;
-	time_t mtime;
 	struct stat st;
 	BUF *b1, *b2;
-	int rflags, l, ismodified, rcsdead, verbose;
+	int rflags, ismodified, rcsdead;
 	CVSENTRIES *entlist = NULL;
 	const char *state;
-	char *repo, *rcsfile, r1[16], r2[16];
+	char repo[MAXPATHLEN], rcsfile[MAXPATHLEN], r1[16], r2[16];
 
 	cvs_log(LP_TRACE, "cvs_file_classify(%s)", cf->file_path);
 
@@ -555,16 +566,9 @@ cvs_file_classify(struct cvs_file *cf, const char *tag, int loud)
 		return;
 	}
 
-	verbose = (verbosity > 1 && loud == 1);
-
-	repo = xmalloc(MAXPATHLEN);
-	rcsfile = xmalloc(MAXPATHLEN);
-
 	cvs_get_repository_path(cf->file_wd, repo, MAXPATHLEN);
-	l = snprintf(rcsfile, MAXPATHLEN, "%s/%s",
+	(void)xsnprintf(rcsfile, MAXPATHLEN, "%s/%s",
 	    repo, cf->file_name);
-	if (l == -1 || l >= MAXPATHLEN)
-		fatal("cvs_file_classify: overflow");
 
 	if (cf->file_type == CVS_FILE) {
 		len = strlcat(rcsfile, RCS_FILE_EXT, MAXPATHLEN);
@@ -596,8 +600,6 @@ cvs_file_classify(struct cvs_file *cf, const char *tag, int loud)
 		else
 			cf->file_status = FILE_UNKNOWN;
 
-		xfree(repo);
-		xfree(rcsfile);
 		cvs_ent_close(entlist, ENT_NOSYNC);
 		return;
 	}
@@ -620,10 +622,8 @@ cvs_file_classify(struct cvs_file *cf, const char *tag, int loud)
 			fatal("cvs_file_classify: failed to parse RCS");
 		cf->file_rcs->rf_inattic = 0;
 	} else if (cvs_cmdop != CVS_OP_CHECKOUT) {
-		l = snprintf(rcsfile, MAXPATHLEN, "%s/%s/%s%s",
+		(void)xsnprintf(rcsfile, MAXPATHLEN, "%s/%s/%s%s",
 		    repo, CVS_PATH_ATTIC, cf->file_name, RCS_FILE_EXT);
-		if (l == -1 || l >= MAXPATHLEN)
-			fatal("cvs_file_classify: overflow");
 
 		cf->repo_fd = open(rcsfile, O_RDONLY);
 		if (cf->repo_fd != -1) {
@@ -640,11 +640,13 @@ cvs_file_classify(struct cvs_file *cf, const char *tag, int loud)
 	} else
 		cf->file_rcs = NULL;
 
-	if (tag != NULL && cf->file_rcs != NULL)
-		cf->file_rcsrev = rcs_translate_tag(tag, cf->file_rcs);
-	else if (cf->file_ent != NULL && cf->file_ent->ce_tag != NULL)
-		cf->file_rcsrev = cf->file_ent->ce_rev;
-	else if (cf->file_rcs != NULL)
+	if (tag != NULL && cf->file_rcs != NULL) {
+		if ((cf->file_rcsrev = rcs_translate_tag(tag, cf->file_rcs)) == NULL)
+			fatal("cvs_file_classify: could not translate tag `%s'", tag);
+	} else if (cf->file_ent != NULL && cf->file_ent->ce_tag != NULL) {
+		cf->file_rcsrev = rcsnum_alloc();
+		rcsnum_cpy(cf->file_ent->ce_rev, cf->file_rcsrev, 0);
+	} else if (cf->file_rcs != NULL)
 		cf->file_rcsrev = rcs_head_get(cf->file_rcs);
 	else
 		cf->file_rcsrev = NULL;
@@ -659,30 +661,28 @@ cvs_file_classify(struct cvs_file *cf, const char *tag, int loud)
 		if (fstat(cf->fd, &st) == -1)
 			fatal("cvs_file_classify: %s", strerror(errno));
 
-		mtime = cvs_hack_time(st.st_mtime, 1);
-		if (mtime != cf->file_ent->ce_mtime)
+		if (st.st_mtime != cf->file_ent->ce_mtime)
 			ismodified = 1;
 	}
 
 	if (ismodified == 1 && cf->fd != -1 && cf->file_rcs != NULL) {
-		b1 = rcs_getrev(cf->file_rcs, cf->file_rcsrev);
+		b1 = rcs_rev_getbuf(cf->file_rcs, cf->file_rcsrev, 0);
 		if (b1 == NULL)
 			fatal("failed to get HEAD revision for comparison");
-
-		b1 = rcs_kwexp_buf(b1, cf->file_rcs, cf->file_rcsrev);
 
 		b2 = cvs_buf_load_fd(cf->fd, BUF_AUTOEXT);
 		if (b2 == NULL)
 			fatal("failed to get file content for comparison");
 
-		/* b1 and b2 get released in cvs_buf_differ */
 		if (cvs_buf_differ(b1, b2))
 			ismodified = 1;
 		else
 			ismodified = 0;
+		cvs_buf_free(b1);
+		cvs_buf_free(b2);
 	}
 
-	if (cf->file_rcs != NULL) {
+	if (cf->file_rcs != NULL && cf->file_rcsrev != NULL) {
 		state = rcs_state_get(cf->file_rcs, cf->file_rcsrev);
 		if (state == NULL)
 			fatal("failed to get state for HEAD for %s",
@@ -701,26 +701,16 @@ cvs_file_classify(struct cvs_file *cf, const char *tag, int loud)
 	if (cf->file_ent == NULL) {
 		if (cf->file_rcs == NULL) {
 			if (cf->fd == -1) {
-				if (verbose)
-					cvs_log(LP_NOTICE,
-					    "nothing known about '%s'",
-					    cf->file_path);
-			} else {
-				if (verbose)
-					cvs_log(LP_NOTICE,
-					    "use add to create an entry for %s",
-					    cf->file_path);
+				cvs_log(LP_NOTICE,
+				    "nothing known about '%s'",
+				    cf->file_path);
 			}
 
 			cf->file_status = FILE_UNKNOWN;
 		} else if (rcsdead == 1) {
 			if (cf->fd == -1) {
 				cf->file_status = FILE_UPTODATE;
-			} else {
-				if (verbose)
-					cvs_log(LP_NOTICE,
-					    "use add to create an entry for %s",
-					    cf->file_path);
+			} else if (cvs_cmdop != CVS_OP_ADD) {
 				cf->file_status = FILE_UNKNOWN;
 			}
 		} else {
@@ -728,36 +718,34 @@ cvs_file_classify(struct cvs_file *cf, const char *tag, int loud)
 		}
 	} else if (cf->file_ent->ce_status == CVS_ENT_ADDED) {
 		if (cf->fd == -1) {
-			if (verbose)
+			if (cvs_cmdop != CVS_OP_REMOVE) {
 				cvs_log(LP_NOTICE,
 				    "warning: new-born %s has disappeared",
 				    cf->file_path);
+			}
 			cf->file_status = FILE_REMOVE_ENTRY;
 		} else if (cf->file_rcs == NULL || rcsdead == 1) {
 			cf->file_status = FILE_ADDED;
 		} else {
-			if (verbose)
-				cvs_log(LP_NOTICE,
-				    "conflict: %s already created by others",
-				    cf->file_path);
+			cvs_log(LP_NOTICE,
+			    "conflict: %s already created by others",
+			    cf->file_path);
 			cf->file_status = FILE_CONFLICT;
 		}
 	} else if (cf->file_ent->ce_status == CVS_ENT_REMOVED) {
 		if (cf->fd != -1) {
-			if (verbose)
-				cvs_log(LP_NOTICE,
-				    "%s should be removed but is still there",
-				    cf->file_path);
+			cvs_log(LP_NOTICE,
+			    "%s should be removed but is still there",
+			    cf->file_path);
 			cf->file_status = FILE_REMOVED;
 		} else if (cf->file_rcs == NULL || rcsdead == 1) {
 			cf->file_status = FILE_REMOVE_ENTRY;
 		} else {
 			if (strcmp(r1, r2)) {
-				if (verbose)
-					cvs_log(LP_NOTICE,
-					    "conflict: removed %s was modified"
-					    " by a second party",
-					    cf->file_path);
+				cvs_log(LP_NOTICE,
+				    "conflict: removed %s was modified"
+				    " by a second party",
+				    cf->file_path);
 				cf->file_status = FILE_CONFLICT;
 			} else {
 				cf->file_status = FILE_REMOVED;
@@ -766,39 +754,37 @@ cvs_file_classify(struct cvs_file *cf, const char *tag, int loud)
 	} else if (cf->file_ent->ce_status == CVS_ENT_REG) {
 		if (cf->file_rcs == NULL || rcsdead == 1) {
 			if (cf->fd == -1) {
-				if (verbose)
-					cvs_log(LP_NOTICE,
-					    "warning: %s's entry exists but"
-					    " there is no longer a file"
-					    " in the repository,"
-					    " removing entry",
-					     cf->file_path);
+				cvs_log(LP_NOTICE,
+				    "warning: %s's entry exists but"
+				    " there is no longer a file"
+				    " in the repository,"
+				    " removing entry",
+				     cf->file_path);
 				cf->file_status = FILE_REMOVE_ENTRY;
 			} else {
 				if (ismodified) {
-					if (verbose)
-						cvs_log(LP_NOTICE,
-						    "conflict: %s is no longer "
-						    "in the repository but is "
-						    "locally modified",
-						    cf->file_path);
+					cvs_log(LP_NOTICE,
+					    "conflict: %s is no longer "
+					    "in the repository but is "
+					    "locally modified",
+					    cf->file_path);
 					cf->file_status = FILE_CONFLICT;
 				} else {
-					if (verbose)
-						cvs_log(LP_NOTICE,
-						    "%s is no longer in the "
-						    "repository",
-						    cf->file_path);
+					cvs_log(LP_NOTICE,
+					    "%s is no longer in the "
+					    "repository",
+					    cf->file_path);
 
 					cf->file_status = FILE_UNLINK;
 				}
 			}
 		} else {
 			if (cf->fd == -1) {
-				if (verbose)
+				if (cvs_cmdop != CVS_OP_REMOVE) {
 					cvs_log(LP_NOTICE,
 					    "warning: %s was lost",
 					    cf->file_path);
+				}
 				cf->file_status = FILE_LOST;
 			} else {
 				if (ismodified == 1)
@@ -816,8 +802,6 @@ cvs_file_classify(struct cvs_file *cf, const char *tag, int loud)
 		}
 	}
 
-	xfree(repo);
-	xfree(rcsfile);
 	cvs_ent_close(entlist, ENT_NOSYNC);
 }
 
@@ -828,6 +812,8 @@ cvs_file_free(struct cvs_file *cf)
 	xfree(cf->file_wd);
 	xfree(cf->file_path);
 
+	if (cf->file_rcsrev != NULL)
+		rcsnum_free(cf->file_rcsrev);
 	if (cf->file_rpath != NULL)
 		xfree(cf->file_rpath);
 	if (cf->file_ent != NULL)
@@ -841,9 +827,153 @@ cvs_file_free(struct cvs_file *cf)
 	xfree(cf);
 }
 
-static int
+int
 cvs_file_cmpname(const char *name1, const char *name2)
 {
 	return (cvs_nocase == 0) ? (strcmp(name1, name2)) :
 	    (strcasecmp(name1, name2));
+}
+
+int
+cvs_file_cmp(const char *file1, const char *file2)
+{
+	struct stat stb1, stb2;
+	int fd1, fd2, ret;
+
+	ret = 0;
+
+	if ((fd1 = open(file1, O_RDONLY|O_NOFOLLOW, 0)) == -1)
+		fatal("cvs_file_cmp: open: `%s': %s", file1, strerror(errno));
+	if ((fd2 = open(file2, O_RDONLY|O_NOFOLLOW, 0)) == -1)
+		fatal("cvs_file_cmp: open: `%s': %s", file2, strerror(errno));
+
+	if (fstat(fd1, &stb1) == -1)
+		fatal("cvs_file_cmp: `%s': %s", file1, strerror(errno));
+	if (fstat(fd2, &stb2) == -1)
+		fatal("cvs_file_cmp: `%s': %s", file2, strerror(errno));
+
+	if (stb1.st_size != stb2.st_size ||
+	    (stb1.st_mode & S_IFMT) != (stb2.st_mode & S_IFMT)) {
+		ret = 1;
+		goto out;
+	}
+
+	if (S_ISBLK(stb1.st_mode) || S_ISCHR(stb1.st_mode)) {
+		if (stb1.st_rdev != stb2.st_rdev)
+			ret = 1;
+		goto out;
+	}
+
+	if (S_ISREG(stb1.st_mode)) {
+		void *p1, *p2;
+
+		if (stb1.st_size > (off_t)SIZE_MAX) {
+			ret = 1;
+			goto out;
+		}	
+
+		if ((p1 = mmap(NULL, stb1.st_size, PROT_READ,
+		    MAP_FILE, fd1, (off_t)0)) == MAP_FAILED)
+			fatal("cvs_file_cmp: mmap failed");
+
+		if ((p2 = mmap(NULL, stb1.st_size, PROT_READ,
+		    MAP_FILE, fd2, (off_t)0)) == MAP_FAILED)
+			fatal("cvs_file_cmp: mmap failed");
+
+		madvise(p1, stb1.st_size, MADV_SEQUENTIAL);
+		madvise(p2, stb1.st_size, MADV_SEQUENTIAL);
+
+		ret = memcmp(p1, p2, stb1.st_size);
+
+		(void)munmap(p1, stb1.st_size);
+		(void)munmap(p2, stb1.st_size);
+	}
+
+out:
+	(void)close(fd1);
+	(void)close(fd2);
+
+	return (ret);
+}
+
+int
+cvs_file_copy(const char *from, const char *to)
+{
+	struct stat st;
+	struct timeval tv[2];
+	time_t atime, mtime;
+	int src, dst, ret;
+
+	ret = 0;
+
+	cvs_log(LP_TRACE, "cvs_file_copy(%s,%s)", from, to);
+
+	if (cvs_noexec == 1)
+		return (0);
+
+	if ((src = open(from, O_RDONLY, 0)) == -1)
+		fatal("cvs_file_copy: open: `%s': %s", from, strerror(errno));
+
+	if (fstat(src, &st) == -1)
+		fatal("cvs_file_copy: `%s': %s", from, strerror(errno));
+
+	atime = st.st_atimespec.tv_sec;
+	mtime = st.st_mtimespec.tv_sec;
+
+	if (S_ISREG(st.st_mode)) {
+		size_t sz;
+		ssize_t nw;
+		char *p, *buf;
+		int saved_errno;
+
+		if (st.st_size > (off_t)SIZE_MAX) {
+			ret = -1;
+			goto out;
+		}	
+
+		if ((dst = open(to, O_CREAT|O_TRUNC|O_WRONLY,
+		    st.st_mode & (S_IRWXU|S_IRWXG|S_IRWXO))) == -1)
+			fatal("cvs_file_copy: open `%s': %s",
+			    to, strerror(errno));
+
+		if ((p = mmap(NULL, st.st_size, PROT_READ,
+		    MAP_FILE, src, (off_t)0)) == MAP_FAILED) {
+			saved_errno = errno;
+			(void)unlink(to);
+			fatal("cvs_file_copy: mmap: %s", strerror(saved_errno));
+		}
+
+		madvise(p, st.st_size, MADV_SEQUENTIAL);
+
+		sz = st.st_size;
+		buf = p;
+
+		while (sz > 0) {
+			if ((nw = write(dst, p, sz)) == -1) {
+				saved_errno = errno;
+				(void)unlink(to);
+				fatal("cvs_file_copy: `%s': %s",
+				    from, strerror(saved_errno));
+			}
+			buf += nw;
+			sz -= nw;
+		}
+
+		(void)munmap(p, st.st_size);
+
+		tv[0].tv_sec = atime;
+		tv[1].tv_sec = mtime;
+
+		if (futimes(dst, tv) == -1) {
+			saved_errno = errno;
+			(void)unlink(to);
+			fatal("cvs_file_copy: futimes: %s",
+			    strerror(saved_errno));
+		}
+		(void)close(dst);
+	}
+out:
+	(void)close(src);
+
+	return (ret);
 }

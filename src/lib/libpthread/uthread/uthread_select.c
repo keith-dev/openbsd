@@ -1,4 +1,4 @@
-/*	$OpenBSD: uthread_select.c,v 1.11 2004/01/03 07:35:10 brad Exp $	*/
+/*	$OpenBSD: uthread_select.c,v 1.13 2006/10/25 14:32:04 kurt Exp $	*/
 /*
  * Copyright (c) 1995-1998 John Birrell <jb@cimlogic.com.au>
  * All rights reserved.

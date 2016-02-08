@@ -1,4 +1,4 @@
-/*	$OpenBSD: top.c,v 1.43 2006/03/04 06:58:12 otto Exp $	*/
+/*	$OpenBSD: top.c,v 1.49 2007/02/27 16:27:39 otto Exp $	*/
 
 /*
  *  Top users/processes display for Unix
@@ -128,6 +128,8 @@ char topn_specified = No;
 #define CMD_pid		17
 #define CMD_command	18
 #define CMD_threads	19
+#define CMD_grep	20
+#define CMD_add		21
 
 static void
 usage(void)
@@ -135,7 +137,7 @@ usage(void)
 	extern char *__progname;
 
 	fprintf(stderr,
-	    "usage: %s [-bIinqSTu] [-d count] [-o field] [-p pid] [-s time] [-U username] [number]\n",
+	    "usage: %s [-bCIinqSTu] [-d count] [-g command] [-o field] [-p pid] [-s time]\n\t[-U username] [number]\n",
 	    __progname);
 }
 
@@ -145,8 +147,12 @@ parseargs(int ac, char **av)
 	char *endp;
 	int i;
 
-	while ((i = getopt(ac, av, "STIbinqus:d:p:U:o:")) != -1) {
+	while ((i = getopt(ac, av, "STICbinqus:d:p:U:o:g:")) != -1) {
 		switch (i) {
+		case 'C':
+			show_args = Yes;
+			break;
+
 		case 'u':	/* toggle uid/username display */
 			do_unames = !do_unames;
 			break;
@@ -232,6 +238,10 @@ parseargs(int ac, char **av)
 			order_name = optarg;
 			break;
 
+		case 'g':	/* grep command name */
+			ps.command = strdup(optarg);
+			break;
+
 		default:
 			usage();
 			exit(1);
@@ -241,9 +251,10 @@ parseargs(int ac, char **av)
 	/* get count of top processes to display (if any) */
 	if (optind < ac) {
 		if ((topn = atoiwi(av[optind])) == Invalid) {
-			warnx("warning: process display count should "
-			    "be non-negative -- using default");
+			warnx("warning: process count should "
+			    "be a non-negative number -- using default");
 			warnings++;
+			topn = Infinity;
 		}
 #if Default_TOPN == Infinity
 		else
@@ -518,7 +529,7 @@ rundisplay(void)
 	int change, i;
 	struct pollfd pfd[1];
 	uid_t uid;
-	static char command_chars[] = "\f qh?en#sdkriIuSopCT";
+	static char command_chars[] = "\f qh?en#sdkriIuSopCTg+";
 
 	/*
 	 * assume valid command unless told
@@ -720,10 +731,18 @@ rundisplay(void)
 				double newdelay = strtod(tempbuf2, &endp);
 
 				if (newdelay >= 0 && newdelay < 1000000 &&
-				    *endp == '\0')
+				    *endp == '\0') {
 					delay = newdelay;
-			}
-			clear_message();
+				} else {
+					new_message(MT_standout,
+					    "Delay should be a non-negative number");
+					if (putchar('\r') == EOF)
+						exit(1);
+					no_command = Yes;
+				}
+
+			} else
+				clear_message();
 			break;
 
 		case CMD_displays:	/* change display count */
@@ -864,6 +883,29 @@ rundisplay(void)
 			    ps.threads ? "D" : "Not d");
 			break;
 
+		case CMD_grep:
+			new_message(MT_standout,
+			    "Grep command name: ");
+			if (readline(tempbuf2, sizeof(tempbuf2), No) > 0) {
+				free(ps.command);
+				if (tempbuf2[0] == '+' &&
+				    tempbuf2[1] == '\0')
+					ps.command = NULL;
+				else
+					ps.command = strdup(tempbuf2);
+				if (putchar('\r') == EOF)
+					exit(1);
+			} else
+				clear_message();
+			break;
+
+		case CMD_add:
+			ps.uid = (uid_t)-1;	/* uid */
+			ps.pid = (pid_t)-1; 	/* pid */
+			ps.system = old_system;
+			ps.command = NULL;	/* grep */
+			break;
+		
 		default:
 			new_message(MT_standout, " BAD CASE IN SWITCH!");
 			if (putchar('\r') == EOF)

@@ -1,4 +1,4 @@
-/*	$OpenBSD: report.c,v 1.3 2006/06/17 16:53:33 norby Exp $ */
+/*	$OpenBSD: report.c,v 1.6 2006/12/03 20:14:37 michele Exp $ */
 
 /*
  * Copyright (c) 2005, 2006 Esben Norby <norby@openbsd.org>
@@ -34,7 +34,7 @@
 
 extern struct dvmrpd_conf	*deconf;
 
-void	 rr_list_remove(struct rr_head *, struct route_report *);
+void	 rr_list_remove(struct route_report *);
 
 /* DVMRP report packet handling */
 int
@@ -102,8 +102,6 @@ recv_report(struct nbr *nbr, char *buf, u_int16_t len)
 		 * The most significant part of the mask is always 255.
 		 */
 
-		/* XXX handle special case 0.0.0.0/0 */
-
 		/* read four bytes */
 		memcpy(&netmask, buf, sizeof(netmask));
 		/* ditch one byte, since we only need three */
@@ -111,7 +109,7 @@ recv_report(struct nbr *nbr, char *buf, u_int16_t len)
 		netmask = htonl(netmask);
 
 		/* set the highest byte to 255 */
-		netmask = netmask | htonl(0xff000000);
+		netmask |= htonl(0xff000000);
 		buf += 3;
 		len -= 3;
 
@@ -128,7 +126,8 @@ recv_report(struct nbr *nbr, char *buf, u_int16_t len)
 			 * determine the netid.
 			 */
 			memcpy(&netid, buf, sizeof(netid));
-			netid = netid & netmask;
+			netid &= netmask;
+
 			buf += netid_len;
 			len -= netid_len;
 
@@ -140,8 +139,7 @@ recv_report(struct nbr *nbr, char *buf, u_int16_t len)
 			rr.net.s_addr = netid;
 			rr.mask.s_addr = netmask;
 			rr.nexthop = nbr->id;
-			/* adjusted metric */
-			rr.metric = (metric & METRIC_MASK) + nbr->iface->metric;
+			rr.metric = (metric & METRIC_MASK);
 
 			/* ifindex */
 			rr.ifindex = nbr->iface->ifindex;
@@ -201,7 +199,15 @@ rr_list_add(struct rr_head *rr_list, struct route_report *rr)
 
 	TAILQ_INSERT_TAIL(rr_list, le, entry);
 	le->re = rr;
+	rr->refcount++;
 }
+
+void
+rr_list_remove(struct route_report *rr)
+{
+	if (--rr->refcount == 0)
+		free(rr);
+} 
 
 void
 rr_list_clr(struct rr_head *rr_list)
@@ -210,7 +216,7 @@ rr_list_clr(struct rr_head *rr_list)
 
 	while ((le = TAILQ_FIRST(rr_list)) != NULL) {
 		TAILQ_REMOVE(rr_list, le, entry);
-		free(le->re);
+		rr_list_remove(le->re);	
 		free(le);
 	}
 }
@@ -279,9 +285,8 @@ rr_list_send(struct rr_head *rr_list, struct iface *xiface, struct nbr *nbr)
 
 			buf_add(buf, &metric, sizeof(metric));
 
-			/* XXX rr_list_remove */
 			TAILQ_REMOVE(rr_list, le, entry);
-			/* XXX free(le->re); */
+			rr_list_remove(le->re);
 			free(le);
 		}
 		send_report(iface, addr, buf->buf, buf->wpos);

@@ -1,4 +1,4 @@
-/*	$OpenBSD: bgpd.c,v 1.139 2006/06/19 20:48:36 jmc Exp $ */
+/*	$OpenBSD: bgpd.c,v 1.143 2007/01/26 17:40:48 claudio Exp $ */
 
 /*
  * Copyright (c) 2003, 2004 Henning Brauer <henning@openbsd.org>
@@ -116,6 +116,7 @@ main(int argc, char *argv[])
 	int			 pipe_m2s[2];
 	int			 pipe_m2r[2];
 	int			 pipe_s2r[2];
+	int			 pipe_s2r_c[2];
 
 	conffile = CONFFILE;
 	bgpd_process = PROC_MAIN;
@@ -205,20 +206,24 @@ main(int argc, char *argv[])
 		fatal("socketpair");
 	if (socketpair(AF_UNIX, SOCK_STREAM, PF_UNSPEC, pipe_s2r) == -1)
 		fatal("socketpair");
+	if (socketpair(AF_UNIX, SOCK_STREAM, PF_UNSPEC, pipe_s2r_c) == -1)
+		fatal("socketpair");
 	session_socket_blockmode(pipe_m2s[0], BM_NONBLOCK);
 	session_socket_blockmode(pipe_m2s[1], BM_NONBLOCK);
 	session_socket_blockmode(pipe_m2r[0], BM_NONBLOCK);
 	session_socket_blockmode(pipe_m2r[1], BM_NONBLOCK);
 	session_socket_blockmode(pipe_s2r[0], BM_NONBLOCK);
 	session_socket_blockmode(pipe_s2r[1], BM_NONBLOCK);
+	session_socket_blockmode(pipe_s2r_c[0], BM_NONBLOCK);
+	session_socket_blockmode(pipe_s2r_c[1], BM_NONBLOCK);
 
 	prepare_listeners(&conf);
 
 	/* fork children */
 	rde_pid = rde_main(&conf, peer_l, &net_l, rules_l, &mrt_l,
-	    pipe_m2r, pipe_s2r, pipe_m2s);
+	    pipe_m2r, pipe_s2r, pipe_m2s, pipe_s2r_c, debug);
 	io_pid = session_main(&conf, peer_l, &net_l, rules_l, &mrt_l,
-	    pipe_m2s, pipe_s2r, pipe_m2r);
+	    pipe_m2s, pipe_s2r, pipe_m2r, pipe_s2r_c);
 
 	setproctitle("parent");
 
@@ -228,6 +233,7 @@ main(int argc, char *argv[])
 	signal(SIGHUP, sighdlr);
 	signal(SIGALRM, sighdlr);
 	signal(SIGUSR1, sighdlr);
+	signal(SIGPIPE, SIG_IGN);
 
 	close(pipe_m2s[1]);
 	close(pipe_m2r[1]);
@@ -240,7 +246,8 @@ main(int argc, char *argv[])
 	imsg_init(ibuf_se, pipe_m2s[0]);
 	imsg_init(ibuf_rde, pipe_m2r[0]);
 	mrt_init(ibuf_rde, ibuf_se);
-	if ((rfd = kr_init(!(conf.flags & BGPD_FLAG_NO_FIB_UPDATE))) == -1)
+	if ((rfd = kr_init(!(conf.flags & BGPD_FLAG_NO_FIB_UPDATE),
+	    conf.rtableid)) == -1)
 		quit = 1;
 	if (pftable_clear_all() != 0)
 		quit = 1;

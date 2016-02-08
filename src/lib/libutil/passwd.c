@@ -1,4 +1,4 @@
-/*	$OpenBSD: passwd.c,v 1.47 2006/04/02 02:10:35 deraadt Exp $	*/
+/*	$OpenBSD: passwd.c,v 1.49 2006/12/20 23:07:36 ray Exp $	*/
 
 /*
  * Copyright (c) 1987, 1993, 1994, 1995
@@ -95,8 +95,10 @@ pw_lock(int retries)
 	mode_t old_mode;
 	int save_errno;
 
-	if (!pw_lck)
+	if (!pw_lck) {
+		errno = EINVAL;
 		return (-1);
+	}
 	/* Acquire the lock file.  */
 	old_mode = umask(0);
 	fd = open(pw_lck, O_WRONLY|O_CREAT|O_EXCL, 0600);
@@ -320,7 +322,7 @@ pw_copy(int ffd, int tfd, const struct passwd *pw, const struct passwd *opw)
 		if (done) {
 			(void)fprintf(to, "%s", buf);
 			if (ferror(to))
-				goto err;
+				goto fail;
 			continue;
 		}
 		if (!(p = strchr(buf, ':'))) {
@@ -332,7 +334,7 @@ pw_copy(int ffd, int tfd, const struct passwd *pw, const struct passwd *opw)
 			*p = ':';
 			(void)fprintf(to, "%s", buf);
 			if (ferror(to))
-				goto err;
+				goto fail;
 			continue;
 		}
 		if (opw != NULL) {
@@ -352,7 +354,7 @@ pw_copy(int ffd, int tfd, const struct passwd *pw, const struct passwd *opw)
 		    pw->pw_shell);
 		done = 1;
 		if (ferror(to))
-			goto err;
+			goto fail;
 	}
 	if (!done)
 		(void)fprintf(to, "%s:%s:%d:%d:%s:%d:%d:%s:%s:%s\n",
@@ -361,7 +363,7 @@ pw_copy(int ffd, int tfd, const struct passwd *pw, const struct passwd *opw)
 		    pw->pw_dir, pw->pw_shell);
 
 	if (ferror(to))
-err:
+fail:
 		pw_error(NULL, 0, 1);
 	free(master);
 	(void)fclose(to);
@@ -459,11 +461,11 @@ fmt:		warnx("corrupted entry");
 }
 
 __dead void
-pw_error(const char *name, int err, int eval)
+pw_error(const char *name, int error, int eval)
 {
 	char   *master = pw_file(_PATH_MASTERPASSWD);
 
-	if (err) {
+	if (error) {
 		if (name)
 			warn("%s", name);
 		else

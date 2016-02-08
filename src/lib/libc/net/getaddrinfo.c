@@ -1,4 +1,4 @@
-/*	$OpenBSD: getaddrinfo.c,v 1.56 2006/04/18 02:57:10 ray Exp $	*/
+/*	$OpenBSD: getaddrinfo.c,v 1.61 2007/02/18 19:03:11 ray Exp $	*/
 /*	$KAME: getaddrinfo.c,v 1.31 2000/08/31 17:36:43 itojun Exp $	*/
 
 /*
@@ -613,14 +613,13 @@ explore_null(const struct addrinfo *pai, const char *servname,
 		/* xxx meaningless?
 		 * GET_CANONNAME(cur->ai_next, "anyaddr");
 		 */
-		GET_PORT(cur->ai_next, servname);
 	} else {
 		GET_AI(cur->ai_next, afd, afd->a_loopback);
 		/* xxx meaningless?
 		 * GET_CANONNAME(cur->ai_next, "localhost");
 		 */
-		GET_PORT(cur->ai_next, servname);
 	}
+	GET_PORT(cur->ai_next, servname);
 	cur = cur->ai_next;
 
 	*res = sentinel.ai_next;
@@ -662,46 +661,30 @@ explore_numeric(const struct addrinfo *pai, const char *hostname,
 	switch (afd->a_af) {
 #if 0 /*X/Open spec*/
 	case AF_INET:
-		if (inet_aton(hostname, (struct in_addr *)pton) == 1) {
-			if (pai->ai_family == afd->a_af ||
-			    pai->ai_family == PF_UNSPEC /*?*/) {
-				GET_AI(cur->ai_next, afd, pton);
-				GET_PORT(cur->ai_next, servname);
-				if ((pai->ai_flags & AI_CANONNAME)) {
-					/*
-					 * Set the numeric address itself as
-					 * the canonical name, based on a
-					 * clarification in rfc2553bis-03.
-					 */
-					GET_CANONNAME(cur->ai_next, canonname);
-				}
-				while (cur && cur->ai_next)
-					cur = cur->ai_next;
-			} else
-				ERR(EAI_FAMILY);	/*xxx*/
-		}
+		error = inet_aton(hostname, (struct in_addr *)pton);
 		break;
 #endif
 	default:
-		if (inet_pton(afd->a_af, hostname, pton) == 1) {
-			if (pai->ai_family == afd->a_af ||
-			    pai->ai_family == PF_UNSPEC /*?*/) {
-				GET_AI(cur->ai_next, afd, pton);
-				GET_PORT(cur->ai_next, servname);
-				if ((pai->ai_flags & AI_CANONNAME)) {
-					/*
-					 * Set the numeric address itself as
-					 * the canonical name, based on a
-					 * clarification in rfc2553bis-03.
-					 */
-					GET_CANONNAME(cur->ai_next, canonname);
-				}
-				while (cur && cur->ai_next)
-					cur = cur->ai_next;
-			} else
-				ERR(EAI_FAMILY);	/*xxx*/
-		}
+		error = inet_pton(afd->a_af, hostname, pton);
 		break;
+	}
+	if (error == 1) {
+		if (pai->ai_family == afd->a_af ||
+		    pai->ai_family == PF_UNSPEC /*?*/) {
+			GET_AI(cur->ai_next, afd, pton);
+			GET_PORT(cur->ai_next, servname);
+			if ((pai->ai_flags & AI_CANONNAME)) {
+				/*
+				 * Set the numeric address itself as
+				 * the canonical name, based on a
+				 * clarification in rfc2553bis-03.
+				 */
+				GET_CANONNAME(cur->ai_next, canonname);
+			}
+			while (cur && cur->ai_next)
+				cur = cur->ai_next;
+		} else
+			ERR(EAI_FAMILY);	/*xxx*/
 	}
 
 	*res = sentinel.ai_next;
@@ -826,11 +809,8 @@ static int
 get_port(struct addrinfo *ai, const char *servname, int matchonly)
 {
 	const char *errstr, *proto;
-	struct servent *sp;
 	int port;
 	int allownumeric;
-	/* mutex is defined in getnameinfo.c */
-	extern void *__THREAD_NAME(serv_mutex);
 
 	if (servname == NULL)
 		return 0;
@@ -864,6 +844,9 @@ get_port(struct addrinfo *ai, const char *servname, int matchonly)
 			return EAI_SERVICE;
 		port = htons(port);
 	} else {
+		struct servent sp;
+		struct servent_data sd;
+
 		if (errno == ERANGE)
 			return EAI_SERVICE;
 		if (ai->ai_flags & AI_NUMERICSERV)
@@ -881,12 +864,11 @@ get_port(struct addrinfo *ai, const char *servname, int matchonly)
 			break;
 		}
 
-		_THREAD_PRIVATE_MUTEX_LOCK(serv_mutex);
-		sp = getservbyname(servname, proto);
-		_THREAD_PRIVATE_MUTEX_UNLOCK(serv_mutex);
-		if (sp == NULL)
+		(void)memset(&sd, 0, sizeof(sd));
+		if (getservbyname_r(servname, proto, &sp, &sd) == -1)
 			return EAI_SERVICE;
-		port = sp->s_port;
+		port = sp.s_port;
+		endservent_r(&sd);
 	}
 
 	if (!matchonly) {
@@ -933,7 +915,8 @@ ip6_str2scopeid(char *scope, struct sockaddr_in6 *sin6, u_int32_t *scopeid)
 	if (*scope == '\0')
 		return -1;
 
-	if (IN6_IS_ADDR_LINKLOCAL(a6) || IN6_IS_ADDR_MC_LINKLOCAL(a6)) {
+	if (IN6_IS_ADDR_LINKLOCAL(a6) || IN6_IS_ADDR_MC_LINKLOCAL(a6) ||
+	    IN6_IS_ADDR_MC_INTFACELOCAL(a6)) {
 		/*
 		 * We currently assume a one-to-one mapping between links
 		 * and interfaces, so we simply use interface indices for
@@ -1057,6 +1040,8 @@ getanswer(const querybuf *answer, int anslen, const char *qname, int qtype,
 		}
 		if ((qtype == T_A || qtype == T_AAAA || qtype == T_ANY) &&
 		    type == T_CNAME) {
+			size_t len;
+
 			n = dn_expand(answer->buf, eom, cp, tbuf, sizeof tbuf);
 			if ((n < 0) || !(*name_ok)(tbuf)) {
 				had_error++;
@@ -1064,14 +1049,14 @@ getanswer(const querybuf *answer, int anslen, const char *qname, int qtype,
 			}
 			cp += n;
 			/* Get canonical name. */
-			n = strlen(tbuf) + 1;	/* for the \0 */
-			if (n > ep - bp || n >= MAXHOSTNAMELEN) {
+			len = strlen(tbuf) + 1;	/* for the \0 */
+			if (len > ep - bp || len >= MAXHOSTNAMELEN) {
 				had_error++;
 				continue;
 			}
 			strlcpy(bp, tbuf, ep - bp);
 			canonname = bp;
-			bp += n;
+			bp += len;
 			continue;
 		}
 		if (qtype == T_ANY) {
@@ -1114,11 +1099,8 @@ getanswer(const querybuf *answer, int anslen, const char *qname, int qtype,
 				}
 			}
 			if (!haveanswer) {
-				int nn;
-
 				canonname = bp;
-				nn = strlen(bp) + 1;	/* for the \0 */
-				bp += nn;
+				bp += strlen(bp) + 1;	/* for the \0 */
 			}
 
 			/* don't overwrite pai */

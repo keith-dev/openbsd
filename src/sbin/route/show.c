@@ -1,4 +1,4 @@
-/*	$OpenBSD: show.c,v 1.54 2006/06/16 17:46:43 henning Exp $	*/
+/*	$OpenBSD: show.c,v 1.56 2006/12/29 10:04:36 claudio Exp $	*/
 /*	$NetBSD: show.c,v 1.1 1996/11/15 18:01:41 gwr Exp $	*/
 
 /*
@@ -465,7 +465,8 @@ p_sockaddr(struct sockaddr *sa, struct sockaddr *mask, int flags, int width)
 		 * sin6_scope_id field of SA should be set in the future.
 		 */
 		if (IN6_IS_ADDR_LINKLOCAL(in6) ||
-		    IN6_IS_ADDR_MC_LINKLOCAL(in6)) {
+		    IN6_IS_ADDR_MC_LINKLOCAL(in6) ||
+		    IN6_IS_ADDR_MC_INTFACELOCAL(in6)) {
 			/* XXX: override is ok? */
 			sa6->sin6_scope_id = (u_int32_t)ntohs(*(u_short *)
 			    &in6->s6_addr[2]);
@@ -546,7 +547,8 @@ routename(struct sockaddr *sa)
 		sin6.sin6_family = AF_INET6;
 		if (sa->sa_len == sizeof(struct sockaddr_in6) &&
 		    (IN6_IS_ADDR_LINKLOCAL(&sin6.sin6_addr) ||
-		     IN6_IS_ADDR_MC_LINKLOCAL(&sin6.sin6_addr)) &&
+		     IN6_IS_ADDR_MC_LINKLOCAL(&sin6.sin6_addr) ||
+		     IN6_IS_ADDR_MC_INTFACELOCAL(&sin6.sin6_addr)) &&
 		    sin6.sin6_scope_id == 0) {
 			sin6.sin6_scope_id =
 			    ntohs(*(u_int16_t *)&sin6.sin6_addr.s6_addr[2]);
@@ -675,7 +677,7 @@ netname6(struct sockaddr_in6 *sa6, struct sockaddr_in6 *mask)
 	masklen = 0;
 	if (mask) {
 		lim = mask->sin6_len - offsetof(struct sockaddr_in6, sin6_addr);
-		lim = lim < sizeof(struct in6_addr) ?
+		lim = lim < (int)sizeof(struct in6_addr) ?
 		    lim : sizeof(struct in6_addr);
 		for (p = (u_char *)&mask->sin6_addr, i = 0; i < lim; p++) {
 			if (final && *p) {

@@ -1,4 +1,4 @@
-.\"	$OpenBSD: sk.4,v 1.43 2006/08/30 22:56:05 jmc Exp $
+.\"	$OpenBSD: sk.4,v 1.53 2007/01/13 21:18:14 jmc Exp $
 .\"
 .\" Copyright (c) 1997, 1998, 1999
 .\"	Bill Paul <wpaul@ctr.columbia.edu>. All rights reserved.
@@ -37,23 +37,20 @@
 .Os
 .Sh NAME
 .Nm sk ,
-.Nm skc ,
-.Nm msk ,
-.Nm mskc
-.Nd "SysKonnect XMAC II and Marvell Yukon based Gigabit Ethernet device"
+.Nm skc
+.Nd "SysKonnect XMAC II and Marvell Yukon 10/100/Gigabit Ethernet device"
 .Sh SYNOPSIS
 .Cd "skc* at pci?"
 .Cd "sk* at skc?"
-.Cd "mskc* at pci?"
-.Cd "msk* at mskc?"
 .Cd "brgphy* at mii?"
 .Cd "eephy* at mii?"
 .Cd "xmphy* at mii?"
 .Sh DESCRIPTION
 The
-.Nm sk
-driver provides support for SysKonnect based Gigabit Ethernet adapters
-and Marvell based Gigabit Ethernet adapters, including the following:
+.Nm
+driver provides support for SysKonnect GEnesis and Marvell Yukon
+88E8001, 88E8003 and 88E8010 based Gigabit Ethernet adapters,
+including the following:
 .Pp
 .Bl -bullet -offset indent -compact
 .It
@@ -63,77 +60,33 @@ and Marvell based Gigabit Ethernet adapters, including the following:
 .It
 Belkin F5D5005, copper adapter
 .It
-D-Link DGE-530T, copper adapter
+D-Link DGE-530T A1, copper adapter
+.It
+D-Link DGE-530T B1, copper adapter
 .It
 Linksys EG1032v2, copper adapter
 .It
 Linksys EG1064v2, copper adapter
 .It
-SK-9821 SK-NET GE-T single port, copper adapter
-.It
-SK-9822 SK-NET GE-T dual port, copper adapter
-.It
-SK-9841 SK-NET GE-LX single port, single mode fiber adapter
-.It
-SK-9842 SK-NET GE-LX dual port, single mode fiber adapter
-.It
-SK-9843 SK-NET GE-SX single port, multimode fiber adapter
-.It
-SK-9844 SK-NET GE-SX dual port, multimode fiber adapter
-.It
-SK-9521 V2.0 single port, copper adapter (32-bit)
-.It
-SK-9821 V2.0 single port, copper adapter
-.It
-SK-9843 V2.0 single port, copper adapter
-.It
 SMC 9452TX, copper adapter
-.El
-.Pp
-The
-.Nm msk
-driver provides support for the Marvell Yukon-2 based Gigabit Ethernet
-adapters, including the following:
-.Pp
-.Bl -bullet -offset indent -compact
 .It
-Marvell Yukon 88E8035, copper adapter
+SysKonnect SK-9821 single port, copper adapter
 .It
-Marvell Yukon 88E8036, copper adapter
+SysKonnect SK-9822 dual port, copper adapter
 .It
-Marvell Yukon 88E8038, copper adapter
+SysKonnect SK-9841 single port, single mode fiber adapter
 .It
-Marvell Yukon 88E8050, copper adapter
+SysKonnect SK-9842 dual port, single mode fiber adapter
 .It
-Marvell Yukon 88E8052, copper adapter
+SysKonnect SK-9843 single port, multimode fiber adapter
 .It
-Marvell Yukon 88E8053, copper adapter
+SysKonnect SK-9844 dual port, multimode fiber adapter
 .It
-SK-9E21 1000Base-T single port, copper adapter
+SysKonnect SK-9521 V2.0 single port, copper adapter
 .It
-SK-9E22 1000Base-T dual port, copper adapter
+SysKonnect SK-9821 V2.0 single port, copper adapter
 .It
-SK-9E81 1000Base-SX single port, multimode fiber adapter
-.It
-SK-9E82 1000Base-SX dual port, multimode fiber adapter
-.It
-SK-9E91 1000Base-LX single port, single mode fiber adapter
-.It
-SK-9E92 1000Base-LX dual port, single mode fiber adapter
-.It
-SK-9S21 1000Base-T single port, copper adapter
-.It
-SK-9S22 1000Base-T dual port, copper adapter
-.It
-SK-9S81 1000Base-SX single port, multimode fiber adapter
-.It
-SK-9S82 1000Base-SX dual port, multimode fiber adapter
-.It
-SK-9S91 1000Base-LX single port, single mode fiber adapter
-.It
-SK-9S92 1000Base-LX dual port, single mode fiber adapter
-.It
-SK-9E21D 1000Base-T single port, copper adapter
+SysKonnect SK-9843 V2.0 single port, copper adapter
 .El
 .Pp
 The SysKonnect based adapters consist of two main components: the
@@ -148,16 +101,8 @@ allowing dual-port NIC configurations.
 The Marvell based adapters are a single integrated circuit, but are
 still presented as a separate MAC (sk) and controller ASIC (skc).
 .Pp
-The
-.Nm
-driver configures dual port SysKonnect adapters such that each XMAC
-is treated as a separate logical network interface.
-Both ports can operate independently of each other and can be connected
-to separate networks.
-.Pp
-The XaQti XMAC II supports full and half duplex operation with
-autonegotiation.
-The XMAC also supports a frame size of up to 9000 bytes.
+The GEnesis and Yukon 88E8001, 88E8003 and 88E8010 also support a
+frame size of up to 9000 bytes.
 Support for Jumbo frames is provided via the interface MTU setting.
 Selecting an MTU larger than 1500 bytes with the
 .Xr ifconfig 8
@@ -167,22 +112,60 @@ such as file transfers and data streaming.
 .Pp
 Hardware receive IP checksum offload for IPv4 is supported.
 .Pp
-The following media types and options (as given to
-.Xr ifconfig 8 )
-are supported:
-.Bl -tag -width xxx -offset indent
-.It Cm media No autoselect
+The
+.Nm
+driver supports the following media types:
+.Bl -tag -width 1000baseSX
+.It Cm autoselect
 Enable autoselection of the media type and options.
 The user can manually override
 the autoselected mode by adding media options to the appropriate
 .Xr hostname.if 5
 file.
-.It Cm media No 1000baseSX Cm mediaopt No full-duplex
-Set 1000Mbps (Gigabit Ethernet) operation on fiber and force full-duplex mode.
-.It Cm media No 1000baseSX Cm mediaopt No half-duplex
-Set 1000Mbps (Gigabit Ethernet) operation on fiber and force half-duplex mode.
-.It Cm media No 1000baseT Cm mediaopt No full-duplex
-Set 1000Mbps (Gigabit Ethernet) operation and force full-duplex mode.
+.It Cm 10baseT
+Set 10Mbps operation.
+The
+.Xr ifconfig 8
+.Ic mediaopt
+option can also be used to select either
+.Cm full-duplex
+or
+.Cm half-duplex
+modes.
+.It Cm 100baseTX
+Set 100Mbps (Fast Ethernet) operation.
+The
+.Xr ifconfig 8
+.Ic mediaopt
+option can also be used to select either
+.Cm full-duplex
+or
+.Cm half-duplex
+modes.
+.It Cm 1000baseT
+Set 1000baseT (Gigabit Ethernet) operation over twisted pair.
+Both
+.Cm full-duplex
+and
+.Cm half-duplex
+modes are supported.
+.It Cm 1000baseSX
+Set 1000Mbps (Gigabit Ethernet) operation.
+Both
+.Cm full-duplex
+and
+.Cm half-duplex
+modes are supported.
+.El
+.Pp
+The
+.Nm
+driver supports the following media options:
+.Bl -tag -width full-duplex
+.It Cm full-duplex
+Force full duplex operation.
+.It Cm half-duplex
+Force half duplex operation.
 .El
 .Pp
 For more information on configuring this device, see
@@ -191,19 +174,6 @@ To view a list of media types and options supported by the card, try
 .Ic ifconfig -m <device> .
 For example,
 .Ic ifconfig -m sk0 .
-.Sh DIAGNOSTICS
-.Bl -diag
-.It "sk%d: can't map mem space"
-A fatal initialization error has occurred.
-.It "sk%d: couldn't map interrupt"
-A fatal initialization error has occurred.
-.It "sk%d: no memory for jumbo buffer queue!"
-The driver failed to allocate memory for jumbo frames during
-initialization.
-.It "sk%d: watchdog timeout"
-The device has stopped responding to the network, or there is a problem with
-the network connection (cable).
-.El
 .Sh SEE ALSO
 .Xr arp 4 ,
 .Xr brgphy 4 ,
@@ -232,20 +202,9 @@ and
 .Ox
 support was added in
 .Ox 2.6 .
-.Pp
-The
-.Nm msk
-driver first appeared in
-.Ox 4.0 .
 .Sh AUTHORS
 .An -nosplit
 The
 .Nm
 driver was written by
 .An Bill Paul Aq wpaul@ctr.columbia.edu .
-Support for the Marvell Yukon-2 was added by
-.An Mark Kettenis Aq kettenis@openbsd.org .
-.Sh BUGS
-The
-.Nm msk
-driver does not support hardware receive IP checksum offload yet.

@@ -1,4 +1,4 @@
-/*	$OpenBSD: event.h,v 1.15 2006/03/30 06:32:36 brad Exp $	*/
+/*	$OpenBSD: event.h,v 1.17 2007/02/13 20:08:38 millert Exp $	*/
 
 /*
  * Copyright (c) 2000-2004 Niels Provos <provos@citi.umich.edu>
@@ -42,7 +42,7 @@ extern "C" {
 typedef unsigned char u_char;
 #endif
 
-#define LIBEVENT_VERSION	"1.1a"
+#define LIBEVENT_VERSION	"1.1b"
 
 #define EVLIST_TIMEOUT	0x01
 #define EVLIST_INSERTED	0x02
@@ -243,6 +243,7 @@ struct bufferevent {
 
 struct bufferevent *bufferevent_new(int fd,
     evbuffercb readcb, evbuffercb writecb, everrorcb errorcb, void *cbarg);
+int bufferevent_base_set(struct event_base *base, struct bufferevent *bufev);
 int bufferevent_priority_set(struct bufferevent *bufev, int pri);
 void bufferevent_free(struct bufferevent *bufev);
 int bufferevent_write(struct bufferevent *bufev, void *data, size_t size);

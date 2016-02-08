@@ -1,4 +1,4 @@
-/*	$OpenBSD: spamdb.c,v 1.16 2006/04/12 12:53:04 dhill Exp $	*/
+/*	$OpenBSD: spamdb.c,v 1.22 2007/02/27 16:22:11 otto Exp $	*/
 
 /*
  * Copyright (c) 2004 Bob Beck.  All rights reserved.
@@ -29,6 +29,7 @@
 #include <time.h>
 #include <netdb.h>
 #include <ctype.h>
+#include <errno.h>
 
 #include "grey.h"
 
@@ -37,30 +38,24 @@
 #define TRAPHIT 1
 #define SPAMTRAP 2
 
-int	dblist(const char *);
-int	dbupdate(const char *, char *, int, int);
+int	dblist(DB *);
+int	dbupdate(DB *, char *, int, int);
 
 int
-dbupdate(const char *dbname, char *ip, int add, int type)
+dbupdate(DB *db, char *ip, int add, int type)
 {
-	BTREEINFO	btreeinfo;
 	DBT		dbk, dbd;
-	DB		*db;
 	struct gdata	gd;
 	time_t		now;
 	int		r;
 	struct addrinfo hints, *res;
 
 	now = time(NULL);
-	memset(&btreeinfo, 0, sizeof(btreeinfo));
-	db = dbopen(dbname, O_EXLOCK|O_RDWR, 0600, DB_BTREE, &btreeinfo);
-	if (db == NULL)
-		err(1, "cannot open %s for writing", dbname);
 	memset(&hints, 0, sizeof(hints));
 	hints.ai_family = PF_UNSPEC;
 	hints.ai_socktype = SOCK_DGRAM;	/*dummy*/
 	hints.ai_flags = AI_NUMERICHOST;
-	if (type == TRAPHIT || type == WHITE) {
+	if (add && (type == TRAPHIT || type == WHITE)) {
 		if (getaddrinfo(ip, NULL, &hints, &res) != 0) {
 			warnx("invalid ip address %s", ip);
 			goto bad;
@@ -168,29 +163,19 @@ dbupdate(const char *dbname, char *ip, int add, int type)
 			}
 		}
 	}
-	db->close(db);
-	db = NULL;
 	return (0);
  bad:
-	db->close(db);
-	db = NULL;
 	return (1);
 }
 
 int
-dblist(const char *dbname)
+dblist(DB *db)
 {
-	BTREEINFO	btreeinfo;
 	DBT		dbk, dbd;
-	DB		*db;
 	struct gdata	gd;
 	int		r;
 
 	/* walk db, list in text format */
-	memset(&btreeinfo, 0, sizeof(btreeinfo));
-	db = dbopen(dbname, O_EXLOCK|O_RDONLY, 0600, DB_BTREE, &btreeinfo);
-	if (db == NULL)
-		err(1, "cannot open %s for reading", dbname);
 	memset(&dbk, 0, sizeof(dbk));
 	memset(&dbd, 0, sizeof(dbd));
 	for (r = db->seq(db, &dbk, &dbd, R_FIRST); !r;
@@ -224,22 +209,36 @@ dblist(const char *dbname)
 				break;
 			}
 		} else {
-			char *from, *to;
+			char *helo, *from, *to;
 
 			/* greylist entry */
 			*cp = '\0';
-			from = cp + 1;
-			to = strchr(from, '\n');
-			if (to == NULL) {
+			helo = cp + 1;
+			from = strchr(helo, '\n');
+			if (from == NULL) {
 				warnx("No from part in grey key %s", a);
 				free(a);
 				goto bad;
 			}
-			*to = '\0';
-			to++;
-			printf("GREY|%s|%s|%s|%d|%d|%d|%d|%d\n",
-			    a, from, to, gd.first, gd.pass, gd.expire,
-			    gd.bcount, gd.pcount);
+			*from = '\0';
+			from++;
+			to = strchr(from, '\n');
+			if (to == NULL) {
+				/* probably old format - print it the
+				 * with an empty HELO field instead 
+				 * of erroring out.
+				 */			  
+				printf("GREY|%s|%s|%s|%s|%d|%d|%d|%d|%d\n",
+				    a, "", helo, from, gd.first, gd.pass,
+				    gd.expire, gd.bcount, gd.pcount);
+			
+			} else {
+				*to = '\0';
+				to++;
+				printf("GREY|%s|%s|%s|%s|%d|%d|%d|%d|%d\n",
+				    a, helo, from, to, gd.first, gd.pass,
+				    gd.expire, gd.bcount, gd.pcount);
+			}
 		}
 		free(a);
 	}
@@ -259,7 +258,7 @@ extern char *__progname;
 static int
 usage(void)
 {
-	fprintf(stderr, "usage: %s [-Tt] [-a key] [-d key]\n", __progname);
+	fprintf(stderr, "usage: %s [[-Tt] -a keys] [[-Tt] -d keys]\n", __progname);
 	exit(1);
 	/* NOTREACHED */
 }
@@ -267,18 +266,17 @@ usage(void)
 int
 main(int argc, char **argv)
 {
-	int ch, action = 0, type = WHITE;
-	char *ip = NULL;
+	int i, ch, action = 0, type = WHITE, r = 0;
+	HASHINFO	hashinfo;
+	DB		*db;
 
-	while ((ch = getopt(argc, argv, "a:d:tT")) != -1) {
+	while ((ch = getopt(argc, argv, "adtT")) != -1) {
 		switch (ch) {
 		case 'a':
 			action = 1;
-			ip = optarg;
 			break;
 		case 'd':
 			action = 2;
-			ip = optarg;
 			break;
 		case 't':
 			type = TRAPHIT;
@@ -291,17 +289,38 @@ main(int argc, char **argv)
 			break;
 		}
 	}
+	argc -= optind;
+	argv += optind;
+	if (action == 0 && type != WHITE)
+		usage();
+	
+	memset(&hashinfo, 0, sizeof(hashinfo));
+	db = dbopen(PATH_SPAMD_DB, O_EXLOCK | (action ? O_RDWR : O_RDONLY),
+	    0600, DB_HASH, &hashinfo);
+	if (db == NULL) {
+		if (errno == EFTYPE)	
+			err(1,
+			    "%s is old, run current spamd to convert it",
+			    PATH_SPAMD_DB);
+		else 
+			err(1, "cannot open %s for %s", PATH_SPAMD_DB,
+			    action ? "writing" : "reading");
+	}
 
 	switch (action) {
 	case 0:
-		return dblist(PATH_SPAMD_DB);
+		return dblist(db);
 	case 1:
-		return dbupdate(PATH_SPAMD_DB, ip, 1, type);
+		for (i=0; i<argc; i++)
+			r += dbupdate(db, argv[i], 1, type);
+		break;
 	case 2:
-		return dbupdate(PATH_SPAMD_DB, ip, 0, type);
+		for (i=0; i<argc; i++)
+			r += dbupdate(db, argv[i], 0, type);
+		break;
 	default:
 		errx(-1, "bad action");
 	}
-	/* NOTREACHED */
-	return (0);
+	db->close(db);
+	return (r);
 }

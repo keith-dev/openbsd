@@ -1,4 +1,4 @@
-/*	$OpenBSD: buf.c,v 1.8 2006/08/16 07:39:15 ray Exp $	*/
+/*	$OpenBSD: buf.c,v 1.12 2007/02/27 07:59:13 xsa Exp $	*/
 /*
  * Copyright (c) 2003 Jean-Francois Brousseau <jfb@openbsd.org>
  * All rights reserved.
@@ -24,7 +24,16 @@
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include "includes.h"
+#include <sys/queue.h>
+#include <sys/stat.h>
+
+#include <err.h>
+#include <errno.h>
+#include <fcntl.h>
+#include <stdarg.h>
+#include <stdio.h>
+#include <string.h>
+#include <unistd.h>
 
 #include "buf.h"
 #include "xmalloc.h"
@@ -35,17 +44,13 @@
 struct rcs_buf {
 	u_int	cb_flags;
 
-	/* buffer handle and size */
+	/* buffer handle, buffer size, and data length */
 	u_char	*cb_buf;
 	size_t	 cb_size;
-
-	/* start and length of valid data in buffer */
-	u_char	*cb_cur;
 	size_t	 cb_len;
 };
 
-#define SIZE_LEFT(b)	(b->cb_size - (size_t)(b->cb_cur - b->cb_buf) \
-			    - b->cb_len)
+#define SIZE_LEFT(b)	(b->cb_size - b->cb_len)
 
 static void	rcs_buf_grow(BUF *, size_t);
 
@@ -70,7 +75,6 @@ rcs_buf_alloc(size_t len, u_int flags)
 
 	b->cb_flags = flags;
 	b->cb_size = len;
-	b->cb_cur = b->cb_buf;
 	b->cb_len = 0;
 
 	return (b);
@@ -107,7 +111,7 @@ rcs_buf_load(const char *path, u_int flags)
 		goto out;
 	}
 	buf = rcs_buf_alloc(st.st_size, flags);
-	for (bp = buf->cb_cur; ; bp += (size_t)ret) {
+	for (bp = buf->cb_buf; ; bp += (size_t)ret) {
 		len = SIZE_LEFT(buf);
 		ret = read(fd, bp, len);
 		if (ret == -1) {
@@ -170,7 +174,7 @@ rcs_buf_release(BUF *b)
 /*
  * rcs_buf_get()
  */
-void *
+u_char *
 rcs_buf_get(BUF *b)
 {
 	return (b->cb_buf);
@@ -185,42 +189,7 @@ void
 rcs_buf_empty(BUF *b)
 {
 	memset(b->cb_buf, 0, b->cb_size);
-	b->cb_cur = b->cb_buf;
 	b->cb_len = 0;
-}
-
-/*
- * rcs_buf_set()
- *
- * Set the contents of the buffer <b> at offset <off> to the first <len>
- * bytes of data found at <src>.  If the buffer was not created with
- * BUF_AUTOEXT, as many bytes as possible will be copied in the buffer.
- */
-size_t
-rcs_buf_set(BUF *b, const void *src, size_t len, size_t off)
-{
-	size_t rlen = 0;
-
-	if (b->cb_size < (len + off)) {
-		if ((b->cb_flags & BUF_AUTOEXT)) {
-			rcs_buf_grow(b, len + off - b->cb_size);
-			rlen = len + off;
-		} else {
-			rlen = b->cb_size - off;
-		}
-	} else {
-		rlen = len;
-	}
-
-	b->cb_len = rlen;
-	memcpy((b->cb_buf + off), src, rlen);
-
-	if (b->cb_len == 0) {
-		b->cb_cur = b->cb_buf + off;
-		b->cb_len = rlen;
-	}
-
-	return (rlen);
 }
 
 /*
@@ -233,7 +202,7 @@ rcs_buf_putc(BUF *b, int c)
 {
 	u_char *bp;
 
-	bp = b->cb_cur + b->cb_len;
+	bp = b->cb_buf + b->cb_len;
 	if (bp == (b->cb_buf + b->cb_size)) {
 		/* extend */
 		if (b->cb_flags & BUF_AUTOEXT)
@@ -242,7 +211,7 @@ rcs_buf_putc(BUF *b, int c)
 			errx(1, "rcs_buf_putc failed");
 
 		/* the buffer might have been moved */
-		bp = b->cb_cur + b->cb_len;
+		bp = b->cb_buf + b->cb_len;
 	}
 	*bp = (u_char)c;
 	b->cb_len++;
@@ -257,7 +226,7 @@ rcs_buf_putc(BUF *b, int c)
 u_char
 rcs_buf_getc(BUF *b, size_t pos)
 {
-	return (b->cb_cur[pos]);
+	return (b->cb_buf[pos]);
 }
 
 /*
@@ -275,7 +244,7 @@ rcs_buf_append(BUF *b, const void *data, size_t len)
 	size_t left, rlen;
 	u_char *bp, *bep;
 
-	bp = b->cb_cur + b->cb_len;
+	bp = b->cb_buf + b->cb_len;
 	bep = b->cb_buf + b->cb_size;
 	left = bep - bp;
 	rlen = len;
@@ -283,7 +252,7 @@ rcs_buf_append(BUF *b, const void *data, size_t len)
 	if (left < len) {
 		if (b->cb_flags & BUF_AUTOEXT) {
 			rcs_buf_grow(b, len - left);
-			bp = b->cb_cur + b->cb_len;
+			bp = b->cb_buf + b->cb_len;
 		} else
 			rlen = bep - bp;
 	}
@@ -342,7 +311,7 @@ rcs_buf_write_fd(BUF *b, int fd)
 	ssize_t ret;
 
 	len = b->cb_len;
-	bp = b->cb_cur;
+	bp = b->cb_buf;
 
 	do {
 		ret = write(fd, bp, len);
@@ -425,13 +394,8 @@ static void
 rcs_buf_grow(BUF *b, size_t len)
 {
 	void *tmp;
-	size_t diff;
 
-	diff = b->cb_cur - b->cb_buf;
 	tmp = xrealloc(b->cb_buf, 1, b->cb_size + len);
 	b->cb_buf = tmp;
 	b->cb_size += len;
-
-	/* readjust pointers in case the buffer moved in memory */
-	b->cb_cur = b->cb_buf + diff;
 }

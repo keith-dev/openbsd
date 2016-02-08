@@ -1,4 +1,4 @@
-/*	$OpenBSD: rde_rib.c,v 1.88 2006/06/01 22:29:47 claudio Exp $ */
+/*	$OpenBSD: rde_rib.c,v 1.93 2007/02/22 08:34:18 henning Exp $ */
 
 /*
  * Copyright (c) 2003, 2004 Claudio Jeker <claudio@openbsd.org>
@@ -90,7 +90,6 @@ path_update(struct rde_peer *peer, struct rde_aspath *nasp,
 	struct rde_aspath	*asp;
 	struct prefix		*p, *oldp = NULL;
 
-	
 	if (flags & F_LOCAL) {
 		rde_send_pftable(nasp->pftableid, prefix, prefixlen, 0);
 		rde_send_pftable_commit();
@@ -137,7 +136,7 @@ path_update(struct rde_peer *peer, struct rde_aspath *nasp,
 	}
 
 	/* Do not try to move a prefix that is in the wrong RIB. */
-	if (p != NULL && (p->flags & flags) == 0)
+	if (p == NULL || (p->flags & flags) == 0)
 		p = oldp;
 
 	/*
@@ -227,8 +226,9 @@ path_remove(struct rde_aspath *asp)
 	while ((p = LIST_FIRST(&asp->prefix_h)) != NULL) {
 		/* Commit is done in peer_down() */
 		pt_getaddr(p->prefix, &addr);
-		rde_send_pftable(p->aspath->pftableid,
-		    &addr, p->prefix->prefixlen, 1);
+		if (p->flags & F_LOCAL)
+			rde_send_pftable(p->aspath->pftableid, &addr,
+			    p->prefix->prefixlen, 1);
 
 		prefix_destroy(p);
 	}
@@ -390,6 +390,8 @@ prefix_compare(const struct bgpd_addr *a, const struct bgpd_addr *b,
 			return (aa - ba);
 		return (0);
 	case AF_INET6:
+		if (prefixlen > 128)
+			fatalx("prefix_cmp: bad IPv6 prefixlen");
 		for (i = 0; i < prefixlen / 8; i++)
 			if (a->v6.s6_addr[i] != b->v6.s6_addr[i])
 				return (a->v6.s6_addr[i] - b->v6.s6_addr[i]);
@@ -807,7 +809,7 @@ nexthop_shutdown(void)
 	struct nexthop		*nh, *nnh;
 
 	for (i = 0; i <= nexthoptable.nexthop_hashmask; i++) {
-		for(nh = LIST_FIRST(&nexthoptable.nexthop_hashtbl[i]);
+		for (nh = LIST_FIRST(&nexthoptable.nexthop_hashtbl[i]);
 		    nh != NULL; nh = nnh) {
 			nnh = LIST_NEXT(nh, nexthop_l);
 			nh->state = NEXTHOP_UNREACH;
@@ -940,19 +942,20 @@ nexthop_unlink(struct rde_aspath *asp)
 int
 nexthop_delete(struct nexthop *nh)
 {
+	/* nexthop still used by some other aspath */
+	if (!LIST_EMPTY(&nh->path_h))
+		return (0);
+
 	/* either pinned or in a state where it may not be deleted */
 	if (nh->refcnt > 0 || nh->state == NEXTHOP_LOOKUP)
 		return (0);
 
-	if (LIST_EMPTY(&nh->path_h)) {
-		LIST_REMOVE(nh, nexthop_l);
-		rde_send_nexthop(&nh->exit_nexthop, 0);
+	LIST_REMOVE(nh, nexthop_l);
+	rde_send_nexthop(&nh->exit_nexthop, 0);
 
-		rdemem.nexthop_cnt--;
-		free(nh);
-		return (1);
-	}
-	return (0);
+	rdemem.nexthop_cnt--;
+	free(nh);
+	return (1);
 }
 
 struct nexthop *

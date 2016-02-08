@@ -1,4 +1,4 @@
-/*	$OpenBSD: privsep.c,v 1.20 2006/06/01 22:09:09 reyk Exp $	*/
+/*	$OpenBSD: privsep.c,v 1.22 2007/02/08 11:15:55 reyk Exp $	*/
 
 /*
  * Copyright (c) 2004, 2005 Reyk Floeter <reyk@openbsd.org>
@@ -81,6 +81,7 @@ void
 hostapd_priv_init(struct hostapd_config *cfg)
 {
 	struct hostapd_iapp *iapp = &cfg->c_iapp;
+	struct hostapd_apme *apme;
 	int i, socks[2];
 	struct passwd *pw;
 	struct servent *se;
@@ -128,7 +129,7 @@ hostapd_priv_init(struct hostapd_config *cfg)
 		    setresuid(pw->pw_uid, pw->pw_uid, pw->pw_uid) == -1)
 			hostapd_fatal("can't drop privileges\n");
 
-		close(socks[0]);
+		(void)close(socks[0]);
 		priv_fd = socks[1];
 		return;
 	}
@@ -138,7 +139,7 @@ hostapd_priv_init(struct hostapd_config *cfg)
 	 */
 	cfg->c_flags |= HOSTAPD_CFG_F_PRIV;
 
-	event_init();
+	(void)event_init();
 
 	/* Pass ALRM/TERM/INT/HUP through to child, and accept CHLD */
 	signal(SIGALRM, hostapd_sig_relay);
@@ -147,11 +148,14 @@ hostapd_priv_init(struct hostapd_config *cfg)
 	signal(SIGHUP, hostapd_sig_relay);
 	signal(SIGCHLD, hostapd_sig_chld);
 
-	close(socks[1]);
+	(void)close(socks[1]);
 
 	if (cfg->c_flags & HOSTAPD_CFG_F_APME) {
 		if ((cfg->c_apme_ctl = socket(AF_INET, SOCK_DGRAM, 0)) == -1)
 			hostapd_fatal("unable to open ioctl socket\n");
+		TAILQ_FOREACH(apme, &cfg->c_apmes, a_entries)
+			if (apme->a_chanavail != NULL)
+				hostapd_apme_sethopper(apme, 0);
 	}
 
 	hostapd_roaming_init(cfg);
@@ -160,10 +164,12 @@ hostapd_priv_init(struct hostapd_config *cfg)
 
 	/* Start a new event listener */
 	event_set(&cfg->c_priv_ev, socks[0], EV_READ, hostapd_priv, cfg);
-	event_add(&cfg->c_priv_ev, NULL);
+	if (event_add(&cfg->c_priv_ev, NULL) == -1)
+		hostapd_fatal("failed to add priv event");
 
 	/* Run privileged event loop */
-	event_dispatch();
+	if (event_dispatch() == -1)
+		hostapd_fatal("failed to dispatch priv hostapd");
 
 	/* Executed after the event loop has been terminated */
 	hostapd_cleanup(cfg);
@@ -217,7 +223,7 @@ hostapd_priv(int fd, short sig, void *arg)
 
 		if ((apme = hostapd_priv_getapme(fd, cfg)) == NULL)
 			break;
-		strlcpy(bssid.i_name, apme->a_iface, sizeof(bssid.i_name));
+		(void)strlcpy(bssid.i_name, apme->a_iface, sizeof(bssid.i_name));
 
 		/* Try to get the APME's BSSID */
 		if ((ret = ioctl(cfg->c_apme_ctl,
@@ -239,7 +245,7 @@ hostapd_priv(int fd, short sig, void *arg)
 
 		if ((apme = hostapd_priv_getapme(fd, cfg)) == NULL)
 			break;
-		strlcpy(nr.nr_ifname, apme->a_iface, sizeof(ifr.ifr_name));
+		(void)strlcpy(nr.nr_ifname, apme->a_iface, sizeof(ifr.ifr_name));
 
 		/* Try to get a station from the APME */
 		if ((ret = ioctl(cfg->c_apme_ctl,
@@ -268,7 +274,7 @@ hostapd_priv(int fd, short sig, void *arg)
 
 		if ((apme = hostapd_priv_getapme(fd, cfg)) == NULL)
 			break;
-		strlcpy(nr.nr_ifname, apme->a_iface, sizeof(ifr.ifr_name));
+		(void)strlcpy(nr.nr_ifname, apme->a_iface, sizeof(ifr.ifr_name));
 
 		request = cmd == PRIV_APME_ADDNODE ?
 		    SIOCS80211NODE : SIOCS80211DELNODE;
@@ -307,7 +313,8 @@ hostapd_priv(int fd, short sig, void *arg)
 	default:
 		hostapd_fatal("[priv]: unknown command %d\n", cmd);
 	}
-	event_add(&cfg->c_priv_ev, NULL);
+	if (event_add(&cfg->c_priv_ev, NULL) == -1)
+		hostapd_fatal("failed to schedult priv event");
 
 	return;
 }
@@ -448,7 +455,9 @@ hostapd_sig_relay(int sig)
 	int oerrno = errno;
 
 	if (child_pid != -1)
-		kill(child_pid, sig);
+		if (kill(child_pid, sig) == -1)
+			hostapd_fatal("hostapd_sig_relay: kill(%d, %d)",
+			    child_pid, sig);
 	errno = oerrno;
 }
 
@@ -464,9 +473,8 @@ hostapd_sig_chld(int sig)
 	 * If parent gets a SIGCHLD, it will exit.
 	 */
 
-	if (sig == SIGCHLD) {
-		event_loopexit(&tv);
-	}
+	if (sig == SIGCHLD)
+		(void)event_loopexit(&tv);
 }
 
 /*

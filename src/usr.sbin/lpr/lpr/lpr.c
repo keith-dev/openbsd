@@ -1,4 +1,4 @@
-/*	$OpenBSD: lpr.c,v 1.38 2005/11/12 00:54:15 deraadt Exp $ */
+/*	$OpenBSD: lpr.c,v 1.40 2007/03/06 11:11:53 jmc Exp $ */
 /*	$NetBSD: lpr.c,v 1.19 2000/10/11 20:23:52 is Exp $	*/
 
 /*
@@ -46,7 +46,7 @@ static const char copyright[] =
 #if 0
 static const char sccsid[] = "@(#)lpr.c	8.4 (Berkeley) 4/28/95";
 #else
-static const char rcsid[] = "$OpenBSD: lpr.c,v 1.38 2005/11/12 00:54:15 deraadt Exp $";
+static const char rcsid[] = "$OpenBSD: lpr.c,v 1.40 2007/03/06 11:11:53 jmc Exp $";
 #endif
 #endif /* not lint */
 
@@ -379,7 +379,7 @@ main(int argc, char **argv)
 			char c;
 
 			if (read(tfd, &c, 1) == 1 &&
-			    lseek(tfd, (off_t)0, 0) == 0 &&
+			    lseek(tfd, (off_t)0, SEEK_SET) == 0 &&
 			    write(tfd, &c, 1) != 1) {
 				warn("%s", tfname);
 				tfname[inchar]++;
@@ -701,7 +701,7 @@ mktemps(void)
 	} while (stat(tfname, &stb) == 0 || stat(cfname, &stb) == 0 ||
 	    stat(dfname, &stb) == 0);
 	inchar = strlen(SD) + 3;
-	(void)lseek(fd, (off_t)0, 0);
+	(void)lseek(fd, (off_t)0, SEEK_SET);
 	snprintf(buf, sizeof(buf), "%03d\n", n);
 	(void)write(fd, buf, strlen(buf));
 	(void)close(fd);	/* unlocks as well */
@@ -727,8 +727,9 @@ usage(void)
 	extern char *__progname;
 
 	fprintf(stderr,
-	    "usage: %s [-cdfghlmnpqrstv] [-Pprinter] [-#num] [-C class] "
-	    "[-J job] [-T title]\n           [-U user] [-i [numcols]] "
-	    "[-1234 font] [-wnum] [name ...]\n", __progname);
+	    "usage: %s [-cdfghlmnpqrstv] [-#num] [-1234 font] "
+	    "[-C class] [-i [numcols]]\n"
+	    "\t[-J job] [-Pprinter] [-T title] [-U user] "
+	    "[-wnum] [name ...]\n", __progname);
 	exit(1);
 }

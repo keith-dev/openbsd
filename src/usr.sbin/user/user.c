@@ -1,4 +1,4 @@
-/* $OpenBSD: user.c,v 1.66 2005/12/31 19:20:49 millert Exp $ */
+/* $OpenBSD: user.c,v 1.70 2007/03/02 04:27:11 ray Exp $ */
 /* $NetBSD: user.c,v 1.69 2003/04/14 17:40:07 agc Exp $ */
 
 /*
@@ -45,7 +45,6 @@
 #endif
 #include <paths.h>
 #include <pwd.h>
-#include <regex.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -443,8 +442,11 @@ modify_gid(char *group, char *newent)
 			if (newent == NULL) {
 				continue;
 			} else {
-				cc = strlen(newent);
-				(void) strlcpy(buf, newent, sizeof(buf));
+				cc = strlcpy(buf, newent, sizeof(buf));
+				if (cc >= sizeof(buf)) {
+					warnx("group `%s' entry too long", newent);
+					return (0);
+				}
 			}
 		}
 		if (fwrite(buf, cc, 1, to) != 1) {
@@ -863,15 +865,17 @@ typedef struct passwd_type_t {
 	const char     *type;		/* optional type descriptor */
 	int		desc_length;	/* length of type descriptor */
 	int		length;		/* length of password */
-	const char     *regex;		/* regexp to output the password */
-	int		re_sub;		/* subscript of regexp to use */
 } passwd_type_t;
 
+#define BLF "$2a"
+#define MD5 "$1"
+#define DES ""
+
 static passwd_type_t	passwd_types[] = {
-	{ "$2a",	3,	54,	"\\$[^$]+\\$[^$]+\\$(.*)",	1 },	/* Blowfish */
-	{ "$1",		2,	34,	NULL,				0 },	/* MD5 */
-	{ "",		0,	DES_Len,NULL,				0 },	/* standard DES */
-	{ NULL,		-1,	-1,	NULL,				0 }	/* none - terminate search */
+	{ BLF,	3,	54	},	/* Blowfish */
+	{ MD5,	2,	34	},	/* MD5 */
+	{ DES,	0,	DES_Len	},	/* standard DES */
+	{ NULL,	-1,	-1	}	/* none - terminate search */
 };
 
 /* return non-zero if it's a valid password - check length for cipher type */
@@ -879,20 +883,20 @@ static int
 valid_password_length(char *newpasswd)
 {
 	passwd_type_t  *pwtp;
-	regmatch_t	matchv[10];
-	regex_t		r;
 
 	for (pwtp = passwd_types ; pwtp->desc_length >= 0 ; pwtp++) {
 		if (strncmp(newpasswd, pwtp->type, pwtp->desc_length) == 0) {
-			if (pwtp->regex == NULL) {
+			char *p;
+
+			if (strcmp(pwtp->type, BLF) != 0) {
 				return strlen(newpasswd) == pwtp->length;
 			}
-			(void) regcomp(&r, pwtp->regex, REG_EXTENDED);
-			if (regexec(&r, newpasswd, 10, matchv, 0) == 0) {
-				regfree(&r);
-				return (int)(matchv[pwtp->re_sub].rm_eo - matchv[pwtp->re_sub].rm_so + 1) == pwtp->length;
-			}
-			regfree(&r);
+			/* Skip first three `$'. */
+			if ((p = strchr(newpasswd, '$')) == NULL ||
+			    *(++p) == '$' || (p = strchr(p, '$')) == NULL ||
+			    *(++p) == '$' || (p = strchr(p, '$')) == NULL)
+				continue;
+			return (strlen(p) - 1);
 		}
 	}
 	return 0;
@@ -1268,21 +1272,16 @@ rm_user_from_groups(char *login_name)
 static int
 is_local(char *name, const char *file)
 {
-	regmatch_t	matchv[10];
-	regex_t		r;
 	FILE	       *fp;
 	char		buf[LINE_MAX];
-	char		re[LINE_MAX];
+	size_t		len;
 	int		ret;
 	int		cc;
 
-	(void) snprintf(re, sizeof(re), "^%s:", name);
-	if (regcomp(&r, re, REG_EXTENDED) != 0) {
-		errx(EXIT_FAILURE, "can't compile regular expression `%s'", re);
-	}
 	if ((fp = fopen(file, "r")) == NULL) {
 		err(EXIT_FAILURE, "can't open `%s'", file);
 	}
+	len = strlen(name);
 	for (ret = 0 ; fgets(buf, sizeof(buf), fp) != NULL ; ) {
 		cc = strlen(buf);
 		if (buf[cc - 1] != '\n' && !feof(fp)) {
@@ -1292,7 +1291,7 @@ is_local(char *name, const char *file)
 			    file, buf, cc);
 			continue;
 		}
-		if (regexec(&r, buf, 10, matchv, 0) == 0) {
+		if (strncmp(buf, name, len) == 0 && buf[len] == ':') {
 			ret = 1;
 			break;
 		}
@@ -2113,11 +2112,11 @@ groupmod(int argc, char **argv)
 	if (dupgid && gid < 0) {
 		errx(EXIT_FAILURE, "Duplicate which gid?");
 	}
-	if (!is_local(*argv, _PATH_GROUP)) {
-		errx(EXIT_FAILURE, "Group `%s' must be a local group", *argv);
-	}
 	if ((grp = getgrnam(*argv)) == NULL) {
 		errx(EXIT_FAILURE, "can't find group `%s' to modify", *argv);
+	}
+	if (!is_local(*argv, _PATH_GROUP)) {
+		errx(EXIT_FAILURE, "Group `%s' must be a local group", *argv);
 	}
 	if (newname != NULL && !valid_group(newname)) {
 		errx(EXIT_FAILURE, "invalid group name `%s'", newname);
@@ -2193,7 +2192,8 @@ userinfo(int argc, char **argv)
 		(void) printf("groups\t%s", grp->gr_name);
 	while ((grp = getgrent()) != NULL) {
 		for (cpp = grp->gr_mem ; *cpp ; cpp++) {
-			if (strcmp(*cpp, *argv) == 0 && grp->gr_gid != pwp->pw_gid)
+			if (strcmp(*cpp, pwp->pw_name) == 0 &&
+			    grp->gr_gid != pwp->pw_gid)
 				(void) printf(" %s", grp->gr_name);
 		}
 	}

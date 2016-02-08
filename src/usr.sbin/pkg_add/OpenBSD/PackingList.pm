@@ -1,5 +1,5 @@
 # ex:ts=8 sw=4:
-# $OpenBSD: PackingList.pm,v 1.50 2005/09/19 09:51:01 espie Exp $
+# $OpenBSD: PackingList.pm,v 1.52 2007/02/08 11:07:37 bernd Exp $
 #
 # Copyright (c) 2003-2004 Marc Espie <espie@openbsd.org>
 #
@@ -259,7 +259,7 @@ sub write
 sub fromfile
 {
 	my ($a, $fname, $code) = @_;
-	open(my $fh, '<', $fname) or return undef;
+	open(my $fh, '<', $fname) or return;
 	my $plist = $a->read($fh, $code);
 	close($fh);
 	return $plist;
@@ -268,9 +268,9 @@ sub fromfile
 sub tofile
 {
 	my ($self, $fname) = @_;
-	open(my $fh, '>', $fname) or return undef;
+	open(my $fh, '>', $fname) or return;
 	$self->write($fh);
-	close($fh) or return undef;
+	close($fh) or return;
 	return 1;
 }
 
@@ -378,7 +378,7 @@ sub visit
 	}
 	$visitor->{pass} = 2;
 	while (my $item = shift @{$visitor->{list}}) {
-		$item->method(@l);
+		$item->$method(@l);
 	}
 }
 

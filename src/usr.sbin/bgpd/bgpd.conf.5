@@ -1,4 +1,4 @@
-.\" $OpenBSD: bgpd.conf.5,v 1.76 2006/09/12 13:39:37 jmc Exp $
+.\" $OpenBSD: bgpd.conf.5,v 1.83 2007/03/06 16:52:48 henning Exp $
 .\"
 .\" Copyright (c) 2004 Claudio Jeker <claudio@openbsd.org>
 .\" Copyright (c) 2003, 2004 Henning Brauer <henning@openbsd.org>
@@ -53,6 +53,17 @@ With the exception of macros,
 the sections should be grouped and appear in
 .Nm
 in the order shown above.
+.Pp
+Comments can be put anywhere in the file using a hash mark
+.Pq Sq # ,
+and extend to the end of the current line.
+.Pp
+Additional configuration files can be included with the
+.Ic include
+keyword, for example:
+.Bd -literal -offset indent
+include "/etc/bgpd/bgpd-10.0.0.1.filter"
+.Ed
 .Sh MACROS
 Macros can be defined that will later be expanded in context.
 Macro names must start with a letter, and may contain letters, digits
@@ -103,6 +114,10 @@ AS 65001
 .Ed
 .Pp
 sets the local AS to 65001.
+.Pp
+The AS numbers 64512 \(en 65534 are designated for private use.
+The AS number 23456 is a specially designated Autonomous System Number and
+should not be used.
 .Pp
 .It Xo
 .Ic dump
@@ -304,6 +319,14 @@ router-id 10.0.0.1
 If not given, the BGP ID is determined as the biggest IP address assigned
 to the local machine.
 .Pp
+.It Ic rtable Ar number
+Work with the given kernel routing table
+instead of the default table,
+.Ar 0 .
+Note that this table is used for nexthop verification as well.
+Directly connected networks are always taken into account, even though
+their routes live in table 0.
+.Pp
 .It Xo
 .Ic transparent-as
 .Pq Ic yes Ns \&| Ns Ic no
@@ -420,6 +443,17 @@ which disables the announcement of that address family, and
 are supported) are announced during the capabilities negotiation.
 Only routes for that address family and subsequent address family will be
 announced and processed.
+.Pp
+.It Xo
+.Ic announce capabilities
+.Pq Ic yes Ns \&| Ns Ic no
+.Xc
+If set to
+.Ic no ,
+capability negotiation is disabled during the establishment of the session.
+This can be helpful to connect to old or broken BGP implementations.
+The default is
+.Ic yes .
 .Pp
 .It Ic demote Ar group
 Increase the
@@ -680,6 +714,23 @@ The shared secret can either be given as a password or hexadecimal key.
 tcp md5sig password mekmidasdigoat
 tcp md5sig key deadbeef
 .Ed
+.Pp
+.It Xo
+.Ic ttl-security
+.Pq Ic yes Ns \&| Ns Ic no
+.Xc
+Enable or disable ttl-security.
+When enabled,
+outgoing packets are sent using a TTL of 255
+and a check is made against an incoming packet's TTL.
+For directly connected peers,
+incoming packets are required to have a TTL of 255,
+ensuring they have not been routed.
+For multihop peers,
+incoming packets are required to have a TTL of 256 minus multihop distance,
+ensuring they have not passed through more than the expected number of hops.
+The default is
+.Ic no .
 .El
 .Sh FILTER
 .Xr bgpd 8
@@ -749,6 +800,8 @@ is one of the following operators:
 .Bl -tag -width transmit-as -compact
 .It Ic AS
 (any part)
+.It Ic peer-as
+(leftmost AS number)
 .It Ic source-as
 (rightmost AS number)
 .It Ic transit-as
@@ -889,7 +942,7 @@ prefixlen 8-12
 .Ed
 .Pp
 Or, to match all prefix lengths < 8 or > 12, and hence the CIDR netmasks
-0\-7 and 13\-32:
+0\(en7 and 13\(en32:
 .Bd -literal -offset indent
 prefixlen 8><12
 .Ed

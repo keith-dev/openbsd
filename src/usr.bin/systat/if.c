@@ -1,4 +1,4 @@
-/*	$OpenBSD: if.c,v 1.7 2006/06/02 08:16:51 claudio Exp $ */
+/*	$OpenBSD: if.c,v 1.9 2007/02/25 18:21:24 deraadt Exp $ */
 /*
  * Copyright (c) 2004 Markus Friedl <markus@openbsd.org>
  *
@@ -58,7 +58,7 @@ WINDOW *
 openifstat(void)
 {
 
-	return (subwin(stdscr, LINES-5-1, 0, 5, 0));
+	return (subwin(stdscr, LINES-1-1, 0, 1, 0));
 }
 
 void
@@ -206,10 +206,13 @@ showlinkstate(int state)
 {
 	switch (state) {
 	case LINK_STATE_UP:
+	case LINK_STATE_HALF_DUPLEX:
+	case LINK_STATE_FULL_DUPLEX:
 		return (":U");
 	case LINK_STATE_DOWN:
 		return (":D");
 	case LINK_STATE_UNKNOWN:
+	default:
 		return ("");
 	}
 }

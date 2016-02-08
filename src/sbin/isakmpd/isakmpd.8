@@ -1,4 +1,4 @@
-.\" $OpenBSD: isakmpd.8,v 1.93 2006/09/09 07:52:04 jmc Exp $
+.\" $OpenBSD: isakmpd.8,v 1.101 2007/03/01 20:30:09 jmc Exp $
 .\" $EOM: isakmpd.8,v 1.23 2000/05/02 00:30:23 niklas Exp $
 .\"
 .\" Copyright (c) 1998, 1999, 2000, 2001 Niklas Hallqvist.
@@ -83,8 +83,12 @@ socket, and lastly by scheduled events triggered by timers running out.
 Most uses of
 .Nm
 will be to implement so called "virtual private networks" (VPNs).
+The ability to provide redundancy is made available through
+.Xr carp 4
+and
+.Xr sasyncd 8 .
 For other uses, some more knowledge of IKE as a protocol is required.
-One source of information are the RFCs mentioned below.
+The RFCs mentioned below are a possible starting point.
 .Pp
 On startup
 .Nm
@@ -113,13 +117,13 @@ The default is to use both IPv4 and IPv6.
 If given,
 .Nm
 does not set up flows automatically.
-This is useful when flows are configured with
-.Xr ipsecctl 8
-or by other programs like
+Instead manual flows may be configured using
+.Xr ipsec.conf 5
+or by programs such as
 .Xr bgpd 8 .
 Thus
 .Nm
-only takes care of the SA establishment.
+only takes care of SA establishment.
 .It Fl c Ar config-file
 If given, the
 .Fl c
@@ -275,9 +279,19 @@ Note that only paths beginning with
 .Pa /var/run
 are allowed.
 .It Fl S
-When this option is given,
+This option is used for setups using
+.Xr sasyncd 8
+and
+.Xr carp 4
+to provide redundancy.
 .Nm
-will not delete SAs on shutdown by sending delete messages to all peers.
+starts in passive mode and will not initiate any connections
+or process any incoming traffic until
+sasyncd has determined that the host is the carp master.
+Additionally,
+.Nm
+will not delete SAs on shutdown
+by sending delete messages to all peers.
 .It Fl T
 When this option is given, NAT-Traversal will be disabled and
 .Nm
@@ -304,6 +318,14 @@ Available commands are:
 .Pp
 .It Xo
 .Ic C add
+.Sm off
+.Op Ic section
+.No :
+.Ic tag No = Ic value
+.Sm on
+.Xc
+.It Xo
+.Ic C rmv
 .Sm off
 .Op Ic section
 .No :
@@ -349,11 +371,16 @@ use the
 .Sq force
 option to change this behaviour.
 .Sq add
-appends a configuration value to the named configuration list tag.
+appends a configuration value to the named configuration list tag,
+unless the value is already in the list.
 .Sq rm
 removes a tag in a section.
 .Sq rms
 removes an entire section.
+.Sq rmv
+removes an entry from a list, thus reversing an
+.Sq add
+operation.
 .Pp
 NOTE: Sending
 .Nm
@@ -548,14 +575,6 @@ and named and stored after this easy formula:
 /etc/isakmpd/pubkeys/ufqdn/user@foo.bar.org
 .El
 .Pp
-By default, the system startup script
-.Xr rc 8
-generates a key-pair when starting, if one does not already exist.
-The private and public keys are named
-.Pa local.key
-and
-.Pa local.pub ,
-respectively.
 Depending on the
 .Dv ID-type
 field of
@@ -568,7 +587,9 @@ or key ID (KEY_ID).
 .Pp
 For example,
 .Nm
-can authenticate using the pre-generated keys if the local public key
+can authenticate using the pre-generated keys if the local public key,
+by default
+.Pa /etc/isakmpd/local.pub ,
 is copied to the remote gateway as
 .Pa /etc/isakmpd/pubkeys/ipv4/local.gateway.ip.address
 and the remote gateway's public key
@@ -614,14 +635,6 @@ is entered, the field will be left blank.
 .It
 Create Certificate Signing Requests (CSRs) for IKE peers.
 The CSRs are signed with a pre-generated private key.
-By default, the system startup script
-.Xr rc 8
-generates a key-pair when starting, if one does not already exist.
-The private and public keys are named
-.Pa local.key
-and
-.Pa local.pub ,
-respectively.
 .Pp
 This step, as well as the next one, needs to be done for every peer.
 Furthermore the last step will need to be done once for each ID you
@@ -721,16 +734,16 @@ The same mode requirements as
 .It /etc/isakmpd/keynote/
 The directory where KeyNote credentials are kept.
 .It /etc/isakmpd/private/
-The directory where local private keys for certificate-based authentication,
-and their public key counterparts, are kept.
+The directory where local private keys used for public key authentication
+are kept.
 By default, the system startup script
 .Xr rc 8
 generates a key-pair when starting, if one does not already exist.
-The private and public keys are named
-.Pa local.key
-and
-.Pa local.pub ,
-respectively.
+The entire keypair is in
+.Pa local.key ,
+and a copy of the public key suitable for transferring to other hosts
+is extracted into
+.Pa /etc/isakmpd/local.pub .
 There has to be a certificate for
 .Pa local.key
 in the certificate directory,
@@ -771,6 +784,7 @@ command is issued in the command FIFO.
 .Xr ipsec.conf 5 ,
 .Xr isakmpd.conf 5 ,
 .Xr isakmpd.policy 5 ,
+.Xr sasyncd 8 ,
 .Xr ssl 8 ,
 .Xr tcpdump 8
 .Sh HISTORY
@@ -793,3 +807,9 @@ unprivileged ports (>1024).
 It is not possible to change the interfaces
 .Nm
 listens on without a restart.
+.Pp
+For redundant setups,
+.Xr sasyncd 8
+must be manually restarted every time
+.Nm
+is restarted.

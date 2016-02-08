@@ -1,4 +1,4 @@
-/*	$OpenBSD: rcsnum.c,v 1.3 2006/07/27 03:17:10 ray Exp $	*/
+/*	$OpenBSD: rcsnum.c,v 1.5 2007/03/02 04:53:17 ray Exp $	*/
 /*
  * Copyright (c) 2004 Jean-Francois Brousseau <jfb@openbsd.org>
  * All rights reserved.
@@ -24,7 +24,11 @@
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include "includes.h"
+#include <sys/param.h>
+
+#include <ctype.h>
+#include <err.h>
+#include <string.h>
 
 #include "rcs.h"
 #include "xmalloc.h"
@@ -149,16 +153,13 @@ void
 rcsnum_cpy(const RCSNUM *nsrc, RCSNUM *ndst, u_int depth)
 {
 	u_int len;
-	void *tmp;
 
 	len = nsrc->rn_len;
 	if (depth != 0 && len > depth)
 		len = depth;
 
-	tmp = xrealloc(ndst->rn_id, len, sizeof(*(nsrc->rn_id)));
-	ndst->rn_id = tmp;
-	ndst->rn_len = len;
-	/* Overflow checked in xrealloc(). */
+	rcsnum_setsize(ndst, len);
+	/* Overflow checked in rcsnum_setsize(). */
 	(void)memcpy(ndst->rn_id, nsrc->rn_id,
 	    len * sizeof(*(nsrc->rn_id)));
 }

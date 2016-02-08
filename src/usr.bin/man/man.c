@@ -1,4 +1,4 @@
-/*	$OpenBSD: man.c,v 1.31 2005/11/12 00:51:13 deraadt Exp $	*/
+/*	$OpenBSD: man.c,v 1.33 2007/01/09 18:01:53 deraadt Exp $	*/
 /*	$NetBSD: man.c,v 1.7 1995/09/28 06:05:34 tls Exp $	*/
 
 /*
@@ -40,7 +40,7 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)man.c	8.17 (Berkeley) 1/31/95";
 #else
-static char rcsid[] = "$OpenBSD: man.c,v 1.31 2005/11/12 00:51:13 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: man.c,v 1.33 2007/01/09 18:01:53 deraadt Exp $";
 #endif
 #endif /* not lint */
 
@@ -624,8 +624,10 @@ how(char *fname)
 			print = 1;
 			continue;
 		} else if (!strncmp(buf, D1, sizeof(D1) - 1) ||
-		    !strncmp(buf, D2, sizeof(D2) - 1))
+		    !strncmp(buf, D2, sizeof(D2) - 1)) {
+		    	(void)fclose(fp);
 			return;
+		}
 		if (!print)
 			continue;
 		if (*buf == '\n')
@@ -779,7 +781,7 @@ usage(void)
 	(void)fprintf(stderr, "usage: %s [-achw] [-C file] [-M path] [-m path] "
 	    "[-S subsection] [-s section]\n\t   [section] name [...]\n",
 	    __progname);
-	(void)fprintf(stderr, "usage: %s -f command\n", __progname);
-	(void)fprintf(stderr, "usage: %s -k keyword\n", __progname);
+	(void)fprintf(stderr, "       %s -f command\n", __progname);
+	(void)fprintf(stderr, "       %s -k keyword\n", __progname);
 	exit(1);
 }

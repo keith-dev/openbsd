@@ -1,4 +1,4 @@
-/*	$OpenBSD: ipsecctl.c,v 1.59 2006/08/31 19:01:16 ho Exp $	*/
+/*	$OpenBSD: ipsecctl.c,v 1.67 2007/02/19 08:50:43 hshoexer Exp $	*/
 /*
  * Copyright (c) 2004, 2005 Hans-Joerg Hoexer <hshoexer@openbsd.org>
  *
@@ -51,6 +51,7 @@ void		 ipsecctl_print_port(u_int16_t, const char *);
 void		 ipsecctl_print_key(struct ipsec_key *);
 void		 ipsecctl_print_flow(struct ipsec_rule *, int);
 void		 ipsecctl_print_sa(struct ipsec_rule *, int);
+void		 ipsecctl_print_sagroup(struct ipsec_rule *, int);
 int		 ipsecctl_flush(int);
 void		 ipsecctl_get_rules(struct ipsecctl *);
 void		 ipsecctl_print_title(char *);
@@ -60,6 +61,7 @@ int		 ipsecctl_monitor(int);
 void		 usage(void);
 const char	*ipsecctl_lookup_option(char *, const char **);
 static int	 unmask(struct ipsec_addr *, sa_family_t);
+int		 sacompare(const void *, const void *);
 
 const char	*infile;	/* Used by parse.y */
 const char	*showopt;
@@ -76,6 +78,23 @@ static const char *flowtype[] = {"?", "use", "acquire", "require", "deny",
 static const char *satype[] = {"?", "esp", "ah", "ipcomp", "tcpmd5", "ipip"};
 static const char *tmode[] = {"?", "transport", "tunnel"};
 static const char *auth[] = {"?", "psk", "rsa"};
+
+struct sad {
+	struct sadb_msg	*sad_msg;
+	u_int32_t	 sad_spi;
+};
+
+int
+sacompare(const void *va, const void *vb)
+{
+	const struct sad *a = va, *b = vb;
+
+	if (a->sad_spi < b->sad_spi)
+		return (-1);
+	if (a->sad_spi > b->sad_spi)
+		return (1);
+	return (0);
+}
 
 int
 ipsecctl_rules(char *filename, int opts)
@@ -224,14 +243,14 @@ ipsecctl_free_rule(struct ipsec_rule *rp)
 	}
 	if (rp->xfs)
 		free(rp->xfs);
-	if (rp->mmxfs)
-		free(rp->mmxfs);
-	if (rp->qmxfs)
-		free(rp->qmxfs);
-	if (rp->mmlife)
-		free(rp->mmlife);
-	if (rp->qmlife)
-		free(rp->qmlife);
+	if (rp->p1xfs)
+		free(rp->p1xfs);
+	if (rp->p2xfs)
+		free(rp->p2xfs);
+	if (rp->p1life)
+		free(rp->p1life);
+	if (rp->p2life)
+		free(rp->p2life);
 	if (rp->authkey) {
 		free(rp->authkey->data);
 		free(rp->authkey);
@@ -240,6 +259,12 @@ ipsecctl_free_rule(struct ipsec_rule *rp)
 		free(rp->enckey->data);
 		free(rp->enckey);
 	}
+	if (rp->p2name)
+		free(rp->p2name);
+	if (rp->p2lid)
+		free(rp->p2lid);
+	if (rp->p2rid)
+		free(rp->p2rid);
 	free(rp);
 }
 
@@ -359,7 +384,7 @@ ipsecctl_print_sa(struct ipsec_rule *r, int opts)
 		if (r->xfs && r->xfs->compxf)
 			printf(" comp %s", r->xfs->compxf->name);
 	}
-	if (r->authkey) {
+	if (r->authkey && (opts & IPSECCTL_OPT_SHOWKEY)) {
 		if (r->satype == IPSEC_TCPMD5)
 			printf(" ");
 		else
@@ -367,7 +392,7 @@ ipsecctl_print_sa(struct ipsec_rule *r, int opts)
 		printf("authkey 0x");
 		ipsecctl_print_key(r->authkey);
 	}
-	if (r->enckey) {
+	if (r->enckey && (opts & IPSECCTL_OPT_SHOWKEY)) {
 		if (r->satype == IPSEC_TCPMD5)
 			printf(" ");
 		else
@@ -376,6 +401,21 @@ ipsecctl_print_sa(struct ipsec_rule *r, int opts)
 		ipsecctl_print_key(r->enckey);
 	}
 	printf("\n");
+}
+
+void
+ipsecctl_print_sagroup(struct ipsec_rule *r, int opts)
+{
+	if (!(opts & IPSECCTL_OPT_VERBOSE2))
+		return;
+
+	printf("[group %s to ", satype[r->proto]);
+	ipsecctl_print_addr(r->dst);
+	printf(" spi 0x%08x with %s to ", r->spi, satype[r->proto2]);
+	ipsecctl_print_addr(r->dst2);
+	printf(" spi 0x%08x", r->spi2);
+
+	printf("]\n");
 }
 
 void
@@ -390,6 +430,8 @@ ipsecctl_print_rule(struct ipsec_rule *r, int opts)
 		ipsecctl_print_sa(r, opts);
 	if (r->type & RULE_IKE)
 		ike_print_config(r, opts);
+	if (r->type & RULE_GROUP)
+		ipsecctl_print_sagroup(r, opts);
 }
 
 int
@@ -515,7 +557,8 @@ void
 ipsecctl_show_sas(int opts)
 {
 	struct sadb_msg *msg;
-	int		 mib[5];
+	struct sad	*sad;
+	int		 mib[5], sacount, i;
 	size_t		 need = 0;
 	char		*buf, *lim, *next;
 
@@ -540,15 +583,31 @@ ipsecctl_show_sas(int opts)
 		err(1, "ipsecctl_show_sas: malloc");
 	if (sysctl(mib, 5, buf, &need, NULL, 0) == -1)
 		err(1, "ipsecctl_show_sas: sysctl");
+	sacount = 0;
 	lim = buf + need;
 	for (next = buf; next < lim;
 	    next += msg->sadb_msg_len * PFKEYV2_CHUNK) {
 		msg = (struct sadb_msg *)next;
 		if (msg->sadb_msg_len == 0)
 			break;
-		pfkey_print_sa(msg, opts);
+		sacount++;
 	}
-
+	if ((sad = calloc(sacount, sizeof(*sad))) == NULL)
+		err(1, "ipsecctl_show_sas: calloc");
+	i = 0;
+	for (next = buf; next < lim;
+	    next += msg->sadb_msg_len * PFKEYV2_CHUNK) {
+		msg = (struct sadb_msg *)next;
+		if (msg->sadb_msg_len == 0)
+			break;
+		sad[i].sad_spi = pfkey_get_spi(msg);
+		sad[i].sad_msg = msg;
+		i++;
+	}
+	qsort(sad, sacount, sizeof(*sad), sacompare);
+	for (i = 0; i < sacount; i++)
+		pfkey_print_sa(sad[i].sad_msg, opts);
+	free(sad);
 	free(buf);
 }
 
@@ -563,7 +622,7 @@ usage(void)
 {
 	extern char	*__progname;
 
-	fprintf(stderr, "usage: %s [-dFmnv] [-D macro=value] [-f file]"
+	fprintf(stderr, "usage: %s [-dFkmnv] [-D macro=value] [-f file]"
 	    " [-s modifier]\n", __progname);
 	exit(1);
 }
@@ -589,22 +648,28 @@ main(int argc, char *argv[])
 	if (argc < 2)
 		usage();
 
-	while ((ch = getopt(argc, argv, "D:df:Fmnvs:")) != -1) {
+	while ((ch = getopt(argc, argv, "D:df:Fkmnvs:")) != -1) {
 		switch (ch) {
 		case 'D':
 			if (cmdline_symset(optarg) < 0)
 				warnx("could not parse macro definition %s",
 				    optarg);
 			break;
+
 		case 'd':
 			opts |= IPSECCTL_OPT_DELETE;
 			break;
+
 		case 'f':
 			rulesopt = optarg;
 			break;
 
 		case 'F':
 			opts |= IPSECCTL_OPT_FLUSH;
+			break;
+
+		case 'k':
+			opts |= IPSECCTL_OPT_SHOWKEY;
 			break;
 
 		case 'm':

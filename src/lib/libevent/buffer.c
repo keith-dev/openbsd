@@ -1,4 +1,4 @@
-/*	$OpenBSD: buffer.c,v 1.10 2006/03/18 20:23:42 brad Exp $	*/
+/*	$OpenBSD: buffer.c,v 1.13 2007/02/04 18:59:12 millert Exp $	*/
 
 /*
  * Copyright (c) 2002, 2003 Niels Provos <provos@citi.umich.edu>
@@ -108,7 +108,7 @@ evbuffer_add_buffer(struct evbuffer *outbuf, struct evbuffer *inbuf)
 		/*
 		 * Optimization comes with a price; we need to notify the
 		 * buffer if necessary of the changes. oldoff is the amount
-		 * of data that we tranfered from inbuf to outbuf
+		 * of data that we transferred from inbuf to outbuf
 		 */
 		if (inbuf->off != oldoff && inbuf->cb != NULL)
 			(*inbuf->cb)(inbuf, oldoff, inbuf->off, inbuf->cbarg);
@@ -134,17 +134,23 @@ evbuffer_add_vprintf(struct evbuffer *buf, const char *fmt, va_list ap)
 	size_t space;
 	size_t oldoff = buf->off;
 	int sz;
+	va_list aq;
 
 	for (;;) {
-		buffer = buf->buffer + buf->off;
+		buffer = (char *)buf->buffer + buf->off;
 		space = buf->totallen - buf->misalign - buf->off;
 
+		va_copy(aq, ap);
+
 #ifdef WIN32
-		sz = vsnprintf(buffer, space - 1, fmt, ap);
+		sz = vsnprintf(buffer, space - 1, fmt, aq);
 		buffer[space - 1] = '\0';
 #else
-		sz = vsnprintf(buffer, space, fmt, ap);
+		sz = vsnprintf(buffer, space, fmt, aq);
 #endif
+
+		va_end(aq);
+
 		if (sz == -1)
 			return (-1);
 		if (sz < space) {
@@ -428,12 +434,13 @@ evbuffer_find(struct evbuffer *buffer, const u_char *what, size_t len)
 	u_char *search = buffer->buffer;
 	u_char *p;
 
-	while ((p = memchr(search, *what, remain)) != NULL && remain >= len) {
+	while ((p = memchr(search, *what, remain)) != NULL) {
+		remain = buffer->off - (size_t)(search - buffer->buffer);
+		if (remain < len)
+			break;
 		if (memcmp(p, what, len) == 0)
 			return (p);
-
 		search = p + 1;
-		remain = buffer->off - (size_t)(search - buffer->buffer);
 	}
 
 	return (NULL);

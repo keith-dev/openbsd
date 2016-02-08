@@ -1,4 +1,4 @@
-/*	$OpenBSD: kvm_mips64.c,v 1.3 2006/03/20 15:11:48 mickey Exp $ */
+/*	$OpenBSD: kvm_mips64.c,v 1.5 2007/01/08 18:54:12 deraadt Exp $ */
 /*	$NetBSD: kvm_mips.c,v 1.3 1996/03/18 22:33:44 thorpej Exp $	*/
 
 /*-
@@ -17,11 +17,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -42,7 +38,7 @@
 #if 0
 static char sccsid[] = "@(#)kvm_mips.c	8.1 (Berkeley) 6/4/93";
 #else
-static char *rcsid = "$OpenBSD: kvm_mips64.c,v 1.3 2006/03/20 15:11:48 mickey Exp $";
+static char *rcsid = "$OpenBSD: kvm_mips64.c,v 1.5 2007/01/08 18:54:12 deraadt Exp $";
 #endif
 #endif /* LIBC_SCCS and not lint */
 
@@ -108,7 +104,7 @@ _kvm_initvtop(kvm_t *kd)
 		return (-1);
 	}
 	if (KREAD(kd, (u_long)nlist[1].n_value, &vm->Sysmapsize)) {
-		_kvm_err(kd, kd->program, "cannot read mmutype");
+		_kvm_err(kd, kd->program, "cannot read Sysmapsize");
 		return (-1);
 	}
 	return (0);

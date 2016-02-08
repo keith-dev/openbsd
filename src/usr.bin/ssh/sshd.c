@@ -1,4 +1,4 @@
-/* $OpenBSD: sshd.c,v 1.347 2006/08/18 09:15:20 markus Exp $ */
+/* $OpenBSD: sshd.c,v 1.350 2007/03/09 05:20:06 dtucker Exp $ */
 /*
  * Author: Tatu Ylonen <ylo@cs.hut.fi>
  * Copyright (c) 1995 Tatu Ylonen <ylo@cs.hut.fi>, Espoo, Finland
@@ -288,6 +288,7 @@ sighup_restart(void)
 	logit("Received SIGHUP; restarting.");
 	close_listen_socks();
 	close_startup_pipes();
+	alarm(0);  /* alarm timer persists across exec */
 	execv(saved_argv[0], saved_argv);
 	logit("RESTART FAILED: av[0]='%.100s', error: %.100s.", saved_argv[0],
 	    strerror(errno));
@@ -1358,6 +1359,10 @@ main(int ac, char **av)
 	/* Fill in default values for those options not explicitly set. */
 	fill_default_server_options(&options);
 
+	/* challenge-response is implemented via keyboard interactive */
+	if (options.challenge_response_authentication)
+		options.kbd_interactive_authentication = 1;
+
 	/* set default channel AF */
 	channel_set_af(options.address_family);
 
@@ -1894,10 +1899,10 @@ do_ssh1_kex(void)
 	 * key is in the highest bits.
 	 */
 	if (!rsafail) {
-		BN_mask_bits(session_key_int, sizeof(session_key) * 8);
+		(void) BN_mask_bits(session_key_int, sizeof(session_key) * 8);
 		len = BN_num_bytes(session_key_int);
 		if (len < 0 || (u_int)len > sizeof(session_key)) {
-			error("do_connection: bad session key len from %s: "
+			error("do_ssh1_kex: bad session key len from %s: "
 			    "session_key_int %d > sizeof(session_key) %lu",
 			    get_remote_ipaddr(), len, (u_long)sizeof(session_key));
 			rsafail++;

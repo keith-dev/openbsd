@@ -1,4 +1,4 @@
-/*	$OpenBSD: disk.c,v 1.24 2005/12/18 03:42:23 krw Exp $	*/
+/*	$OpenBSD: disk.c,v 1.26 2006/12/10 19:19:32 krw Exp $	*/
 
 /*
  * Copyright (c) 1997, 2001 Tobias Weingartner
@@ -89,7 +89,8 @@ DISK_getlabelmetrics(char *name)
 		if (lm == NULL)
 			err(1, NULL);
 
-		if (ioctl(fd, DIOCGDINFO, &dl) == -1) {
+		if (ioctl(fd, DIOCGPDINFO, &dl) == -1 &&
+		    ioctl(fd, DIOCGDINFO, &dl) == -1) {
 			warn("DIOCGDINFO");
 			free(lm);
 			lm = NULL;
@@ -229,17 +230,21 @@ DISK_getmetrics(disk_t *disk, DISK_metrics *user)
 int
 DISK_printmetrics(disk_t *disk, char *units)
 {
-	int i;
+	const int secsize = unit_types[SECTORS].conversion;
 	double size;
+	int i;
+
 	i = unit_lookup(units);
-	size = ((double)disk->real->size * unit_types[SECTORS].conversion) /
-	    unit_types[i].conversion;
+	size = ((double)disk->real->size * secsize) / unit_types[i].conversion;
 	printf("Disk: %s\t", disk->name);
-	if (disk->real)
-		printf("geometry: %d/%d/%d [%.0f %s]\n", disk->real->cylinders,
-		    disk->real->heads, disk->real->sectors, size,
-		    unit_types[i].lname);
-	else
+	if (disk->real) {
+		printf("geometry: %d/%d/%d [%.0f ",
+		    disk->real->cylinders, disk->real->heads,
+		    disk->real->sectors, size);
+		if (i == SECTORS && secsize != DEV_BSIZE)
+			printf("%d-byte ", secsize);
+		printf("%s]\n", unit_types[i].lname);
+	} else
 		printf("geometry: <none>\n");
 
 	return (0);

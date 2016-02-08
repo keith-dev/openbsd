@@ -1,4 +1,4 @@
-/*	$OpenBSD: uthread_poll.c,v 1.11 2004/11/30 00:14:51 pat Exp $	*/
+/*	$OpenBSD: uthread_poll.c,v 1.13 2006/10/25 14:32:04 kurt Exp $	*/
 /*
  * Copyright (c) 1999 Daniel Eischen <eischen@vigrid.com>
  * All rights reserved.

@@ -1,4 +1,4 @@
-/*	$OpenBSD: ipsecctl.h,v 1.49 2006/06/18 18:18:01 hshoexer Exp $	*/
+/*	$OpenBSD: ipsecctl.h,v 1.53 2007/01/03 12:17:43 markus Exp $	*/
 /*
  * Copyright (c) 2004, 2005 Hans-Joerg Hoexer <hshoexer@openbsd.org>
  *
@@ -28,6 +28,7 @@
 #define IPSECCTL_OPT_FLUSH		0x0100
 #define IPSECCTL_OPT_DELETE		0x0200
 #define IPSECCTL_OPT_MONITOR		0x0400
+#define IPSECCTL_OPT_SHOWKEY		0x0800
 
 enum {
 	ACTION_ADD, ACTION_DELETE
@@ -77,6 +78,10 @@ enum {
 enum {
 	IKE_AUTH_RSA, IKE_AUTH_PSK
 };
+enum {
+	IKE_MM=0, IKE_AM, IKE_QM
+};
+
 
 struct ipsec_addr {
 	union {
@@ -149,6 +154,7 @@ struct ipsec_life {
 struct ike_mode {
 	struct ipsec_transforms	*xfs;
 	struct ipsec_life	*life;
+	u_int8_t		 ike_exch;
 };
 
 extern const struct ipsec_xf authxfs[];
@@ -169,13 +175,17 @@ struct ipsec_rule {
 	struct ipsec_auth *auth;
 	struct ike_auth *ikeauth;
 	struct ipsec_transforms *xfs;
-	struct ipsec_transforms *mmxfs;
-	struct ipsec_life *mmlife;
-	struct ipsec_transforms *qmxfs;
-	struct ipsec_life *qmlife;
+	struct ipsec_transforms *p1xfs;
+	struct ipsec_life *p1life;
+	struct ipsec_transforms *p2xfs;
+	struct ipsec_life *p2life;
 	struct ipsec_key  *authkey;
 	struct ipsec_key  *enckey;
 
+	char		*tag;		/* pf tag for SAs */
+	char		*p2name;	/* Phase 2 Name (IPsec-XX) */
+	char		*p2lid;		/* Phase 2 source ID */
+	char		*p2rid;		/* Phase 2 destination ID */
 	u_int8_t	 satype;	/* encapsulating prococol */
 	u_int8_t	 proto;		/* encapsulated protocol */
 	u_int8_t	 proto2;
@@ -183,6 +193,8 @@ struct ipsec_rule {
 	u_int8_t	 direction;
 	u_int8_t	 flowtype;
 	u_int8_t	 ikemode;
+	u_int8_t	 p1ie;
+	u_int8_t	 p2ie;
 	u_int16_t	 sport;
 	u_int16_t	 dport;
 	u_int32_t	 spi;

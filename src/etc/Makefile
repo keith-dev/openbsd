@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.239 2006/07/27 17:59:51 deraadt Exp $
+#	$OpenBSD: Makefile,v 1.250 2007/02/27 02:25:13 deraadt Exp $
 
 TZDIR=		/usr/share/zoneinfo
 LOCALTIME=	Canada/Mountain
@@ -17,12 +17,12 @@ BIN1=	changelist ccd.conf csh.cshrc csh.login csh.logout daily dhcpd.conf \
 	hosts.lpd inetd.conf ksh.kshrc locate.rc man.conf monthly motd \
 	mrouted.conf myname netstart networks newsyslog.conf phones printcap \
 	protocols rbootd.conf rc rc.conf rc.local rc.securelevel rc.shutdown \
-	remote rpc security services shells spamd.conf syslog.conf weekly \
+	remote rpc security services shells syslog.conf weekly \
 	etc.${MACHINE}/disktab dhclient.conf mailer.conf ntpd.conf \
 	moduli pf.os sensorsd.conf ifstated.conf
 
 .if ${MACHINE} != "aviion" && ${MACHINE} != "mvme68k" && \
-    ${MACHINE} != "mvme88k"
+    ${MACHINE} != "mvme88k" && ${MACHINE} != "landisk"
 BIN1+=	wsconsctl.conf
 .endif
 
@@ -35,11 +35,11 @@ PCS=	pcs750.bin
 # (pmax or slower :-)).  This way you get only tar'ed snap files and you can
 # gzip them on a faster machine
 .ifndef NOGZIP
-GZIP?=		gzip
+GZIPCMD?=	gzip
 GZIPFLAGS?=	-9
 GZIPEXT?=	.gz
 .else
-GZIP=		cat
+GZIPCMD=	cat
 GZIPFLAGS=
 GZIPEXT=
 .endif
@@ -76,11 +76,14 @@ distribution-etc-root-var: distrib-dirs
 	pwd_mkdb -p -d ${DESTDIR}/etc /etc/master.passwd
 	${INSTALL} -c -o root -g wheel -m 600 bgpd.conf ${DESTDIR}/etc
 	${INSTALL} -c -o root -g wheel -m 600 ospfd.conf ${DESTDIR}/etc
+	${INSTALL} -c -o root -g wheel -m 600 ripd.conf ${DESTDIR}/etc
 	${INSTALL} -c -o root -g wheel -m 600 dvmrpd.conf ${DESTDIR}/etc
 	${INSTALL} -c -o root -g wheel -m 600 pf.conf ${DESTDIR}/etc
 	${INSTALL} -c -o root -g wheel -m 600 chio.conf ${DESTDIR}/etc
 	${INSTALL} -c -o root -g wheel -m 600 hostapd.conf ${DESTDIR}/etc
+	${INSTALL} -c -o root -g wheel -m 600 hoststated.conf ${DESTDIR}/etc
 	${INSTALL} -c -o root -g wheel -m 600 ipsec.conf ${DESTDIR}/etc
+	${INSTALL} -c -o root -g wheel -m 600 sasyncd.conf ${DESTDIR}/etc
 	${INSTALL} -c -o ${BINOWN} -g ${BINGRP} -m 555 \
 	    etc.${MACHINE}/MAKEDEV ${DESTDIR}/dev
 	cd root; \
@@ -229,6 +232,7 @@ distribution-etc-root-var: distrib-dirs
 	cd ../usr.sbin/httpd && exec ${MAKE} -f Makefile.bsd-wrapper distribution
 	cd ../lib/libssl && exec ${MAKE} distribution
 	cd ../gnu/usr.bin/lynx && exec ${MAKE} -f Makefile.bsd-wrapper distribution
+	cd ../usr.bin/bgplg && exec ${MAKE} distribution
 	cd ../usr.bin/mail && exec ${MAKE} distribution
 	cd mail && exec ${MAKE} distribution
 	${INSTALL} -c -o root -g wheel -m 600 root/root.mail \
@@ -286,12 +290,12 @@ snap_pre:
 MAKEDEVARCHS+= alpha
 MAKEDEVARCHS+= amd64
 MAKEDEVARCHS+= armish
-MAKEDEVARCHS+= aviion
 MAKEDEVARCHS+= cats
 MAKEDEVARCHS+= hp300
 MAKEDEVARCHS+= hppa
 MAKEDEVARCHS+= hppa64
 MAKEDEVARCHS+= i386
+MAKEDEVARCHS+= landisk
 MAKEDEVARCHS+= luna88k
 MAKEDEVARCHS+= mac68k
 MAKEDEVARCHS+= macppc
@@ -337,7 +341,7 @@ distrib:
 DHSIZE=1024 1536 2048 3072 4096
 update-moduli:
 	( \
-		echo '#    $$OpenBSD: Makefile,v 1.239 2006/07/27 17:59:51 deraadt Exp $$'; \
+		echo -n '#    $Open'; echo 'BSD$'; \
 		echo '# Time Type Tests Tries Size Generator Modulus'; \
 		( for i in ${DHSIZE}; do \
 			ssh-keygen -b $$i -G /dev/stdout; \

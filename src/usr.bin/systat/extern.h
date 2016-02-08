@@ -1,4 +1,4 @@
-/*	$OpenBSD: extern.h,v 1.15 2006/03/31 04:10:59 deraadt Exp $	*/
+/*	$OpenBSD: extern.h,v 1.17 2007/02/24 09:45:27 otto Exp $	*/
 /*	$NetBSD: extern.h,v 1.3 1996/05/10 23:16:34 thorpej Exp $	*/
 
 /*-
@@ -38,14 +38,12 @@
 
 extern struct	cmdtab *curcmd;
 extern struct	cmdtab cmdtab[];
-extern struct	text *xtext;
 extern WINDOW	*wnd;
 extern char	**dr_name;
 extern char	hostname[];
 extern double	avenrun[3];
-extern float	*dk_mspw;
 extern kvm_t	*kd;
-extern long	ntext, textp;
+extern long	ntext;
 extern int	*dk_select;
 extern int	CMDLINE;
 extern int	dk_ndrive;
@@ -67,6 +65,7 @@ void	 closekre(WINDOW *);
 void	 closembufs(WINDOW *);
 void	 closenetstat(WINDOW *);
 void	 closepigs(WINDOW *);
+void	 closesensors(WINDOW *);
 void	 closeswap(WINDOW *);
 int	 cmdifstat(char *, char *);
 int	 cmdiostat(char *, char *);
@@ -88,6 +87,7 @@ void	 fetchkre(void);
 void	 fetchmbufs(void);
 void	 fetchnetstat(void);
 void	 fetchpigs(void);
+void	 fetchsensors(void);
 void	 fetchswap(void);
 int	 initifstat(void);
 int	 initiostat(void);
@@ -95,6 +95,7 @@ int	 initkre(void);
 int	 initmbufs(void);
 int	 initnetstat(void);
 int	 initpigs(void);
+int	 initsensors(void);
 int	 initswap(void);
 void	 keyboard(void);
 int	 kvm_ckread(void *, void *, size_t);
@@ -105,6 +106,7 @@ void	 labelmbufs(void);
 void	 labelnetstat(void);
 void	 labelpigs(void);
 void	 labels(void);
+void	 labelsensors(void);
 void	 labelswap(void);
 void	 load(void);
 int	 netcmd(char *, char *);
@@ -115,6 +117,7 @@ WINDOW	*openkre(void);
 WINDOW	*openmbufs(void);
 WINDOW	*opennetstat(void);
 WINDOW	*openpigs(void);
+WINDOW	*opensensors(void);
 WINDOW	*openswap(void);
 int	 prefix(char *, char *);
 void	 sigwinch(int);
@@ -124,6 +127,7 @@ void	 showkre(void);
 void	 showmbufs(void);
 void	 shownetstat(void);
 void	 showpigs(void);
+void	 showsensors(void);
 void	 showswap(void);
 void	 status(void);
 void	 gethz(void);

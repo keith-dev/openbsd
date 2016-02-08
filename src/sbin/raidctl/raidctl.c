@@ -1,4 +1,4 @@
-/*	$OpenBSD: raidctl.c,v 1.25 2006/04/02 21:38:56 djm Exp $	*/
+/*	$OpenBSD: raidctl.c,v 1.27 2007/02/21 16:33:09 jmc Exp $	*/
 /*      $NetBSD: raidctl.c,v 1.27 2001/07/10 01:30:52 lukem Exp $   */
 
 /*-
@@ -1147,6 +1147,8 @@ open_device(fdidpair **devfd, char *name)
 			/* they've (apparently) given a full path... */
 			strlcpy(devname[0], name, PATH_MAX);
 		} else {
+			if (name[0] == '\0')
+				errx(1, "invalid device");
 			if (isdigit(name[strlen(name) - 1])) {
 				snprintf(devname[0], PATH_MAX, "%s%s%c",
 				    _PATH_DEV, name, 'a' + getrawpartition());		
@@ -1223,9 +1225,9 @@ static void
 usage(void)
 {
 	fprintf(stderr,
-	    "usage: raidctl [-v] [-afFgrR component] [-BGipPsSu] [-cC config_file]\n");
+	    "usage: raidctl [-BGiPpSsuv] [-A [yes | no | root]] [-Cc config_file]\n");
 	fprintf(stderr,
-	    "               [-A [yes | no | root]] [-I serial_number] dev\n");
+	    "               [-I serial_number] [-aFfgRr component] dev\n");
 	exit(1);
 	/* NOTREACHED */
 }
