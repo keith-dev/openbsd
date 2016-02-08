@@ -1,4 +1,4 @@
-#       $OpenBSD: BSD.x11.dist,v 1.28 2012/10/06 17:44:52 shadchin Exp $
+#       $OpenBSD: BSD.x11.dist,v 1.32 2014/01/12 15:07:47 matthieu Exp $
 
 /set type=dir uname=root gname=wheel mode=0755
 .
@@ -33,6 +33,16 @@
                     internal
                     ..
                 ..
+                EGL
+                ..
+                GLES
+                ..
+                GLES2
+                ..
+                GLES3
+                ..
+                KHR
+                ..
                 X11
                     ICE
                     ..
@@ -64,13 +74,7 @@
                 fontconfig
                 ..
                 freetype2
-                    freetype
-                        config
-                        ..
-                        internal
-                            services
-                            ..
-                        ..
+                    config
                     ..
                 ..
                 pixman-1
@@ -219,6 +223,8 @@
                         ..
                         ja_JP.UTF-8
                         ..
+                        km_KH.UTF-8
+                        ..
                         ko
                         ..
                         ko_KR.UTF-8
@@ -242,6 +248,8 @@
                         pt_BR.UTF-8
                         ..
                         ru_RU.UTF-8
+                        ..
+                        sr_CS.UTF-8
                         ..
                         tatar-cyr
                         ..

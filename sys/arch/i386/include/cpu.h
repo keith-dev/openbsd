@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.h,v 1.130 2013/05/31 17:00:58 tedu Exp $	*/
+/*	$OpenBSD: cpu.h,v 1.132 2014/02/13 23:11:06 kettenis Exp $	*/
 /*	$NetBSD: cpu.h,v 1.35 1996/05/05 19:29:26 christos Exp $	*/
 
 /*-
@@ -123,8 +123,16 @@ struct cpu_info {
 	u_int32_t	cpu_class;		/* CPU class */
 	u_int32_t	ci_cflushsz;		/* clflush cache-line size */
 
+	int		ci_inatomic;
+
 	struct cpu_functions *ci_func;	/* start/stop functions */
 	void (*cpu_setup)(struct cpu_info *);	/* proc-dependant init */
+
+	u_int		*ci_mwait;
+/* bits in ci_mwait[0] */
+#define	MWAIT_IN_IDLE		0x1	/* don't need IPI to wake */
+#define	MWAIT_KEEP_IDLING	0x2	/* cleared by other cpus to wake me */
+#define	MWAIT_IDLING		(MWAIT_IN_IDLE | MWAIT_KEEP_IDLING)
 
 	int		ci_want_resched;
 
@@ -214,6 +222,7 @@ extern struct cpu_info	*cpu_info[MAXCPUS];
 extern void cpu_boot_secondary_processors(void);
 extern void cpu_init_idle_pcbs(void);
 
+void cpu_kick(struct cpu_info *);
 void cpu_unidle(struct cpu_info *);
 
 #else /* MULTIPROCESSOR */
@@ -225,6 +234,7 @@ void cpu_unidle(struct cpu_info *);
 
 #define CPU_IS_PRIMARY(ci)	1
 
+#define cpu_kick(ci)
 #define cpu_unidle(ci)
 
 #endif

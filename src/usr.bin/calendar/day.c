@@ -1,4 +1,4 @@
-/*	$OpenBSD: day.c,v 1.25 2013/04/16 18:28:24 deraadt Exp $	*/
+/*	$OpenBSD: day.c,v 1.27 2013/11/26 13:18:53 deraadt Exp $	*/
 
 /*
  * Copyright (c) 1989, 1993, 1994
@@ -78,7 +78,6 @@ static struct fixs ndays[8];          /* short national days names */
 static struct fixs fnmonths[13];      /* full national months names */
 static struct fixs nmonths[13];       /* short national month names */
 
-
 void
 setnnames(void)
 {
@@ -89,7 +88,7 @@ setnnames(void)
 	for (i = 0; i < 7; i++) {
 		tm.tm_wday = i;
 		l = strftime(buf, sizeof(buf), "%a", &tm);
-		for (; l > 0 && isspace((int)buf[l - 1]); l--)
+		for (; l > 0 && isspace((unsigned char)buf[l - 1]); l--)
 			;
 		buf[l] = '\0';
 		if (ndays[i].name != NULL)
@@ -99,7 +98,7 @@ setnnames(void)
 		ndays[i].len = strlen(buf);
 
 		l = strftime(buf, sizeof(buf), "%A", &tm);
-		for (; l > 0 && isspace((int)buf[l - 1]); l--)
+		for (; l > 0 && isspace((unsigned char)buf[l - 1]); l--)
 			;
 		buf[l] = '\0';
 		if (fndays[i].name != NULL)
@@ -112,7 +111,7 @@ setnnames(void)
 	for (i = 0; i < 12; i++) {
 		tm.tm_mon = i;
 		l = strftime(buf, sizeof(buf), "%b", &tm);
-		for (; l > 0 && isspace((int)buf[l - 1]); l--)
+		for (; l > 0 && isspace((unsigned char)buf[l - 1]); l--)
 			;
 		buf[l] = '\0';
 		if (nmonths[i].name != NULL)
@@ -122,7 +121,7 @@ setnnames(void)
 		nmonths[i].len = strlen(buf);
 
 		l = strftime(buf, sizeof(buf), "%B", &tm);
-		for (; l > 0 && isspace((int)buf[l - 1]); l--)
+		for (; l > 0 && isspace((unsigned char)buf[l - 1]); l--)
 			;
 		buf[l] = '\0';
 		if (fnmonths[i].name != NULL)
@@ -232,7 +231,7 @@ Mktime(char *date)
 	return(mktime(&tm));
 }
 
-void
+static void
 adjust_calendar(int *day, int *month)
 {
 	switch (calendar) {

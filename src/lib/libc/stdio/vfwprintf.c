@@ -1,4 +1,4 @@
-/*	$OpenBSD: vfwprintf.c,v 1.6 2013/04/17 17:40:35 tedu Exp $ */
+/*	$OpenBSD: vfwprintf.c,v 1.8 2013/11/12 07:04:35 deraadt Exp $ */
 /*-
  * Copyright (c) 1990 The Regents of the University of California.
  * All rights reserved.
@@ -53,8 +53,6 @@
 
 #include "local.h"
 #include "fvwrite.h"
-
-wint_t __fputwc_unlock(wchar_t wc, FILE *fp);
 
 union arg {
 	int			intarg;
@@ -235,11 +233,10 @@ __mbsconv(char *mbsarg, int prec)
 #include <locale.h>
 #include <math.h>
 #include "floatio.h"
+#include "gdtoa.h"
 
 #define	DEFPREC		6
 
-extern char *__dtoa(double, int, int, int *, int *, char **);
-extern void  __freedtoa(char *);
 static int exponent(wchar_t *, int, int);
 #endif /* FLOATING_POINT */
 

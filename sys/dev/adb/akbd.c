@@ -1,4 +1,4 @@
-/*	$OpenBSD: akbd.c,v 1.12 2012/01/29 10:54:21 mpi Exp $	*/
+/*	$OpenBSD: akbd.c,v 1.14 2014/01/26 17:48:08 miod Exp $	*/
 /*	$NetBSD: akbd.c,v 1.17 2005/01/15 16:00:59 chs Exp $	*/
 
 /*
@@ -80,7 +80,7 @@ struct wskbd_mapdata akbd_keymapdata = {
 #ifdef AKBD_LAYOUT
 	AKBD_LAYOUT,
 #else
-	KB_US,
+	KB_US | KB_DEFAULT,
 #endif
 };
 
@@ -425,16 +425,6 @@ akbd_ioctl(void *v, u_long cmd, caddr_t data, int flag, struct proc *p)
 		sc->sc_rawkbd = *(int *)data == WSKBD_RAW;
 		return (0);
 #endif
-
-#if defined(__mac68k__)	/* XXX not worth creating akbd_machdep_ioctl() */
-	case WSKBDIO_BELL:
-	case WSKBDIO_COMPLEXBELL:
-#define d ((struct wskbd_bell_data *)data)
-		mac68k_ring_bell(d->pitch, d->period * hz / 1000, d->volume);
-#undef d
-		return (0);
-#endif
-
 	default:
 		return (-1);
 	}

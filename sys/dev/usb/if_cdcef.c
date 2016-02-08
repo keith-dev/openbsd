@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_cdcef.c,v 1.28 2013/04/15 09:23:01 mglocker Exp $	*/
+/*	$OpenBSD: if_cdcef.c,v 1.33 2013/12/07 20:17:42 brad Exp $	*/
 
 /*
  * Copyright (c) 2007 Dale Rahn <drahn@openbsd.org>
@@ -44,7 +44,6 @@
 
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
-#include <netinet/in_var.h>
 #include <netinet/ip.h>
 #include <netinet/if_ether.h>
 
@@ -80,8 +79,6 @@ struct cdcef_softc {
 #define GET_IFP(sc) (&(sc)->sc_arpcom.ac_if)
 
 	int			sc_rxeof_errors;
-	int			sc_unit;
-	int			sc_attached;
 	int			sc_listening;
 };
 
@@ -245,7 +242,7 @@ cdcef_attach(struct device *parent, struct device *self, void *aux)
 	macaddr_hi = htons(0x2acb);
 	bcopy(&macaddr_hi, &sc->sc_arpcom.ac_enaddr[0], sizeof(u_int16_t));
 	bcopy(&ticks, &sc->sc_arpcom.ac_enaddr[2], sizeof(u_int32_t));
-	sc->sc_arpcom.ac_enaddr[5] = (u_int8_t)(sc->sc_unit);
+	sc->sc_arpcom.ac_enaddr[5] = (u_int8_t)(sc->sc_dev.bdev.dv_unit);
 
 	printf(": address %s\n", ether_sprintf(sc->sc_arpcom.ac_enaddr));
 
@@ -262,7 +259,6 @@ cdcef_attach(struct device *parent, struct device *self, void *aux)
 	if_attach(ifp);
 	ether_ifattach(ifp);
 
-	sc->sc_attached = 1;
 	splx(s);
 }
 
@@ -387,8 +383,6 @@ cdcef_rxeof(struct usbf_xfer *xfer, void *priv,
 		if (sc->sc_rxeof_errors++ > 10) {
 			printf("%s: too many errors, disabling\n",
 			    DEVNAME(sc));
-			/* sc->sc_dying = 1; */
-			// return;
 		}
 		goto done;
 	}
@@ -482,23 +476,24 @@ cdcef_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 	switch (command) {
 	case SIOCSIFADDR:
 		ifp->if_flags |= IFF_UP;
-		cdcef_init(sc);
-		switch (ifa->ifa_addr->sa_family) {
-		case AF_INET:
+		if (!(ifp->if_flags & IFF_RUNNING))
+			cdcef_init(sc);
+#ifdef INET
+		if (ifa->ifa_addr->sa_family == AF_INET)
 			arp_ifinit(&sc->sc_arpcom, ifa);
-			break;
-		}
+#endif
 		break;
 
 	case SIOCSIFFLAGS:
 		if (ifp->if_flags & IFF_UP) {
-			if (!(ifp->if_flags & IFF_RUNNING))
+			if (ifp->if_flags & IFF_RUNNING)
+				error = ENETRESET;
+			else
 				cdcef_init(sc);
 		} else {
 			if (ifp->if_flags & IFF_RUNNING)
 				cdcef_stop(sc);
 		}
-		error = 0;
 		break;
 
 	default:
@@ -518,11 +513,6 @@ cdcef_watchdog(struct ifnet *ifp)
 	struct cdcef_softc	*sc = ifp->if_softc;
 	int s;
 
-#if 0
-	if (sc->sc_dying)
-		return;
-#endif
-
 	ifp->if_oerrors++;
 	printf("%s: watchdog timeout\n", DEVNAME(sc));
 
@@ -538,10 +528,9 @@ cdcef_watchdog(struct ifnet *ifp)
 void
 cdcef_init(struct cdcef_softc *sc)
 {
-	int s;
 	struct ifnet    *ifp = GET_IFP(sc);
-	if (ifp->if_flags & IFF_RUNNING)
-		return;
+	int s;
+
 	s = splnet();
 
 	ifp->if_flags |= IFF_RUNNING;

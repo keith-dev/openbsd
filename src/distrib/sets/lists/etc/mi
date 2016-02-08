@@ -88,7 +88,6 @@
 ./etc/nginx/win-utf
 ./etc/npppd/npppd-users
 ./etc/npppd/npppd.conf
-./etc/nsd.conf
 ./etc/ntpd.conf
 ./etc/ospf6d.conf
 ./etc/ospfd.conf
@@ -97,7 +96,6 @@
 ./etc/pf.os
 ./etc/ppp/chap-secrets
 ./etc/ppp/options
-./etc/ppp/options.leaf
 ./etc/ppp/pap-secrets
 ./etc/printcap
 ./etc/protocols
@@ -122,6 +120,8 @@
 ./etc/rc.d/ifstated
 ./etc/rc.d/iked
 ./etc/rc.d/inetd
+./etc/rc.d/ipropd_master
+./etc/rc.d/ipropd_slave
 ./etc/rc.d/isakmpd
 ./etc/rc.d/kadmind
 ./etc/rc.d/kdc
@@ -144,7 +144,6 @@
 ./etc/rc.d/ospf6d
 ./etc/rc.d/ospfd
 ./etc/rc.d/pflogd
-./etc/rc.d/popa3d
 ./etc/rc.d/portmap
 ./etc/rc.d/rarpd
 ./etc/rc.d/rbootd
@@ -247,6 +246,7 @@
 ./var/named/standard/localhost
 ./var/named/standard/loopback
 ./var/named/standard/loopback6.arpa
+./var/nsd/etc/nsd.conf
 ./var/run/utmp
 ./var/www/cgi-bin/printenv
 ./var/www/cgi-bin/test-cgi

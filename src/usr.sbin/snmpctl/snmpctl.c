@@ -1,4 +1,4 @@
-/*	$OpenBSD: snmpctl.c,v 1.15 2013/05/07 09:32:58 jsg Exp $	*/
+/*	$OpenBSD: snmpctl.c,v 1.19 2013/11/14 20:48:52 deraadt Exp $	*/
 
 /*
  * Copyright (c) 2007, 2008 Reyk Floeter <reyk@openbsd.org>
@@ -122,6 +122,11 @@ main(int argc, char *argv[])
 	case SHOW_MIB:
 		show_mib();
 		break;
+	case WALK:
+	case GET:
+	case BULKWALK:
+		snmpclient(res);
+		break;
 	default:
 		goto connect;
 	}
@@ -165,6 +170,9 @@ main(int argc, char *argv[])
 		break;
 	case NONE:
 	case SHOW_MIB:
+	case WALK:
+	case GET:
+	case BULKWALK:
 		break;
 	case TRAP:
 		imsg_compose(ibuf, IMSG_SNMP_END, 0, 0, -1, NULL, 0);
@@ -173,7 +181,7 @@ main(int argc, char *argv[])
 	}
 
 	while (ibuf->w.queued)
-		if (msgbuf_write(&ibuf->w) < 0)
+		if (msgbuf_write(&ibuf->w) <= 0 && errno != EAGAIN)
 			err(1, "write error");
 
 	while (!done) {
@@ -195,6 +203,9 @@ main(int argc, char *argv[])
 				break;
 			case NONE:
 			case SHOW_MIB:
+			case WALK:
+			case GET:
+			case BULKWALK:
 				break;
 			}
 			imsg_free(&imsg);
@@ -222,7 +233,7 @@ show_mib(void)
 
 	for (oid = NULL; (oid = smi_foreach(oid, 0)) != NULL;) {
 		char	 buf[BUFSIZ];
-		smi_oidstring(&oid->o_id, buf, sizeof(buf));
+		smi_oid2string(&oid->o_id, buf, sizeof(buf), 0);
 		printf("%s\n", buf);
 	}
 }
@@ -250,7 +261,7 @@ monitor(struct imsg *imsg)
 	imn = monitor_lookup(imsg->hdr.type);
 	printf("%s: imsg type %u len %u peerid %u pid %d\n", imn->name,
 	    imsg->hdr.type, imsg->hdr.len, imsg->hdr.peerid, imsg->hdr.pid);
-	printf("\ttimestamp: %u, %s", now, ctime(&now));
+	printf("\ttimestamp: %lld, %s", (long long)now, ctime(&now));
 	if (imn->type == -1)
 		done = 1;
 	if (imn->func != NULL)

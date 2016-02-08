@@ -33,7 +33,7 @@
  * PURPOSE.
  */
 
-/* @(#) $Header: /cvs/src/usr.bin/lex/flexdef.h,v 1.7 2004/02/03 21:20:17 espie Exp $ (LBL) */
+/* @(#) $Header: /var/www/space/cvs/src/usr.bin/lex/flexdef.h,v 1.7 2004/02/03 21:20:17 espie Exp $ (LBL) */
 
 #include <stdio.h>
 #include <ctype.h>

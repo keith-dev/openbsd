@@ -1,4 +1,4 @@
-/*	$OpenBSD: ffs_vnops.c,v 1.71 2013/06/11 16:42:18 deraadt Exp $	*/
+/*	$OpenBSD: ffs_vnops.c,v 1.73 2013/12/12 19:00:10 tedu Exp $	*/
 /*	$NetBSD: ffs_vnops.c,v 1.7 1996/05/11 18:27:24 mycroft Exp $	*/
 
 /*
@@ -268,8 +268,7 @@ ffs_read(void *v)
 				break;
 			xfersize = size;
 		}
-		error = uiomove((char *)bp->b_data + blkoffset, (int)xfersize,
-				uio);
+		error = uiomove(bp->b_data + blkoffset, (int)xfersize, uio);
 		if (error)
 			break;
 		brelse(bp);
@@ -297,8 +296,8 @@ ffs_write(void *v)
 	struct buf *bp;
 	daddr_t lbn;
 	off_t osize;
-	int blkoffset, error, extended, flags, ioflag, resid, size, xfersize;
-	int overrun;
+	int blkoffset, error, extended, flags, ioflag, size, xfersize;
+	ssize_t resid, overrun;
 
 	extended = 0;
 	ioflag = ap->a_ioflag;
@@ -374,10 +373,10 @@ ffs_write(void *v)
 			xfersize = size;
 
 		error =
-		    uiomove((char *)bp->b_data + blkoffset, xfersize, uio);
+		    uiomove(bp->b_data + blkoffset, xfersize, uio);
 
 		if (error != 0)
-			bzero((char *)bp->b_data + blkoffset, xfersize);
+			memset(bp->b_data + blkoffset, 0, xfersize);
 
 		if (ioflag & IO_SYNC)
 			(void)bwrite(bp);

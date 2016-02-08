@@ -1,4 +1,4 @@
-.\"	$OpenBSD: date.1,v 1.59 2011/08/31 08:48:40 jmc Exp $
+.\"	$OpenBSD: date.1,v 1.64 2014/02/14 19:12:27 jmc Exp $
 .\"	$NetBSD: date.1,v 1.12 1996/03/12 04:32:37 phil Exp $
 .\"
 .\" Copyright (c) 1980, 1990, 1993
@@ -33,7 +33,7 @@
 .\"
 .\"     @(#)date.1	8.3 (Berkeley) 4/28/95
 .\"
-.Dd $Mdocdate: August 31 2011 $
+.Dd $Mdocdate: February 14 2014 $
 .Dt DATE 1
 .Os
 .Sh NAME
@@ -185,10 +185,7 @@ record of date resets and time changes
 record of the user setting the time
 .El
 .Sh EXIT STATUS
-The
-.Nm
-utility exits 0 on success, 1 if unable to set the date,
-and 2 if able to set the local date, but unable to set it globally.
+.Ex -std
 .Sh EXAMPLES
 Display the date using the specified format string:
 .Bd -literal -offset indent
@@ -222,8 +219,28 @@ utility is compliant with the
 specification.
 .Pp
 The flags
-.Op Fl adjrtz
+.Op Fl adjrtz ,
+as well as the conversion specifiers
+.Ql \&%F ,
+.Ql \&%G ,
+.Ql \&%g ,
+.Ql \&%k ,
+.Ql \&%l ,
+.Ql \&%R ,
+.Ql \&%s ,
+.Ql \&%v ,
+and
+.Ql \&%+ ,
 are extensions to that specification.
+.Pp
+This implementation requires the traditional
+.Bx
+date format,
+[[[[[cc]yy]mm]dd]HH]MM[.SS],
+which differs from the
+X/Open System Interfaces option of the
+.St -p1003.1-2008
+specification.
 .Sh HISTORY
 A
 .Nm

@@ -1,4 +1,4 @@
-/* $OpenBSD: fuse_device.c,v 1.4 2013/07/11 11:38:10 syl Exp $ */
+/* $OpenBSD: fuse_device.c,v 1.13 2014/01/16 10:36:33 syl Exp $ */
 /*
  * Copyright (c) 2012-2013 Sylvestre Gallon <ccna.syl@gmail.com>
  *
@@ -17,9 +17,10 @@
 
 #include <sys/param.h>
 #include <sys/fcntl.h>
+#include <sys/ioctl.h>
 #include <sys/malloc.h>
+#include <sys/mount.h>
 #include <sys/poll.h>
-#include <sys/pool.h>
 #include <sys/statvfs.h>
 #include <sys/vnode.h>
 #include <sys/fusebuf.h>
@@ -82,7 +83,7 @@ const static struct filterops fuse_seltrue_filtops = {
 	filt_seltrue
 };
 
-#ifdef	FUSE_DEBUG
+#ifdef FUSE_DEBUG
 static void
 fuse_dump_buff(char *buff, int len)
 {
@@ -157,33 +158,51 @@ void
 fuse_device_cleanup(dev_t dev, struct fusebuf *fbuf)
 {
 	struct fuse_d *fd;
-	struct fusebuf *f;
+	struct fusebuf *f, *ftmp, *lprev;
 
 	fd = fuse_lookup(minor(dev));
 	if (fd == NULL)
 		return;
 
-	fd->fd_fmp = NULL;
 	/* clear FIFO IN*/
-	while ((f = SIMPLEQ_FIRST(&fd->fd_fbufs_in))) {
+	lprev = NULL;
+	SIMPLEQ_FOREACH_SAFE(f, &fd->fd_fbufs_in, fb_next, ftmp) {
 		if (fbuf == f || fbuf == NULL) {
 			DPRINTF("cleanup unprocessed msg in sc_fbufs_in\n");
-			SIMPLEQ_REMOVE_HEAD(&fd->fd_fbufs_in, fb_next);
+			if (lprev == NULL)
+				SIMPLEQ_REMOVE_HEAD(&fd->fd_fbufs_in, fb_next);
+			else
+				SIMPLEQ_REMOVE_AFTER(&fd->fd_fbufs_in, lprev,
+				    fb_next);
+
 			stat_fbufs_in--;
 			if (fbuf == NULL)
-				pool_put(&fusefs_fbuf_pool, f);
+				fb_delete(f);
+			else
+				break;
 		}
+		lprev = f;
 	}
 
 	/* clear FIFO WAIT*/
-	while ((f = SIMPLEQ_FIRST(&fd->fd_fbufs_wait))) {
+	lprev = NULL;
+	SIMPLEQ_FOREACH_SAFE(f, &fd->fd_fbufs_wait, fb_next, ftmp) {
 		if (fbuf == f || fbuf == NULL) {
 			DPRINTF("umount unprocessed msg in sc_fbufs_wait\n");
-			SIMPLEQ_REMOVE_HEAD(&fd->fd_fbufs_wait, fb_next);
+			if (lprev == NULL)
+				SIMPLEQ_REMOVE_HEAD(&fd->fd_fbufs_wait,
+				    fb_next);
+			else
+				SIMPLEQ_REMOVE_AFTER(&fd->fd_fbufs_wait, lprev,
+				    fb_next);
+
 			stat_fbufs_wait--;
 			if (fbuf == NULL)
-				pool_put(&fusefs_fbuf_pool, f);
+				fb_delete(f);
+			else
+				break;
 		}
+		lprev = f;
 	}
 }
 
@@ -202,7 +221,7 @@ fuse_device_queue_fbuf(dev_t dev, struct fusebuf *fbuf)
 }
 
 void
-fuse_device_set_fmp(struct fusefs_mnt *fmp)
+fuse_device_set_fmp(struct fusefs_mnt *fmp, int set)
 {
 	struct fuse_d *fd;
 
@@ -210,7 +229,7 @@ fuse_device_set_fmp(struct fusefs_mnt *fmp)
 	if (fd == NULL)
 		return;
 
-	fd->fd_fmp = fmp;
+	fd->fd_fmp = set ? fmp : NULL;
 }
 
 void
@@ -238,31 +257,142 @@ int
 fuseclose(dev_t dev, int flags, int fmt, struct proc *p)
 {
 	struct fuse_d *fd;
+	int error;
 
 	fd = fuse_lookup(minor(dev));
 	if (fd == NULL)
 		return (EINVAL);
 
 	if (fd->fd_fmp) {
-		printf("libfuse close the device without umount\n");
+		printf("fuse: device close without umount\n");
 		fd->fd_fmp->sess_init = 0;
+		if ((vfs_busy(fd->fd_fmp->mp, VB_WRITE|VB_NOWAIT)) != 0)
+			goto end;
+		if ((error = dounmount(fd->fd_fmp->mp, MNT_FORCE, curproc,
+		    NULL)) != 0)
+			printf("fuse: unmount failed with error %d\n", error);
 		fd->fd_fmp = NULL;
 	}
 
+end:
 	fuse_destroy(dev, fd);
 	stat_opened_fusedev--;
 	return (0);
 }
 
+/*
+ * FIOCGETFBDAT		Get fusebuf datas from kernel to user
+ * FIOCSETFBDAT		Set fusebuf datas from user to kernel
+ */
 int
 fuseioctl(dev_t dev, u_long cmd, caddr_t addr, int flags, struct proc *p)
 {
+	struct fb_ioctl_xch *ioexch;
+	struct fusebuf *lastfbuf;
+	struct fusebuf *fbuf;
+	struct fuse_d *fd;
 	int error = 0;
 
+	fd = fuse_lookup(minor(dev));
+
 	switch (cmd) {
+	case FIOCGETFBDAT:
+		ioexch = (struct fb_ioctl_xch *)addr;
+
+		/* Looking for uuid in fd_fbufs_in */
+		SIMPLEQ_FOREACH(fbuf, &fd->fd_fbufs_in, fb_next) {
+			if (fbuf->fb_uuid == ioexch->fbxch_uuid)
+				break;
+
+			lastfbuf = fbuf;
+		}
+		if (fbuf == NULL) {
+			printf("fuse: Cannot find fusebuf\n");
+			return (EINVAL);
+		}
+
+		/* Remove the fbuf from fd_fbufs_in */
+		if (fbuf == SIMPLEQ_FIRST(&fd->fd_fbufs_in))
+			SIMPLEQ_REMOVE_HEAD(&fd->fd_fbufs_in, fb_next);
+		else
+			SIMPLEQ_REMOVE_AFTER(&fd->fd_fbufs_in, lastfbuf,
+			    fb_next);
+		stat_fbufs_in--;
+
+		/* Do not handle fbufs with bad len */
+		if (fbuf->fb_len != ioexch->fbxch_len) {
+			printf("fuse: Bad fusebuf len\n");
+			return (EINVAL);
+		}
+
+		/* Update the userland fbuf */
+		error = copyout(fbuf->fb_dat, ioexch->fbxch_data,
+		    ioexch->fbxch_len);
+		if (error) {
+			printf("fuse: cannot copyout\n");
+			return (error);
+		}
+
+#ifdef FUSE_DEBUG
+		fuse_dump_buff(ioexch->fbxch_data, ioexch->fbxch_len);
+#endif
+
+		/* Adding fbuf in fd_fbufs_wait */
+		free(fbuf->fb_dat, M_FUSEFS);
+		fbuf->fb_dat = NULL;
+		SIMPLEQ_INSERT_TAIL(&fd->fd_fbufs_wait, fbuf, fb_next);
+		stat_fbufs_wait++;
+		break;
+
+	case FIOCSETFBDAT:
+		DPRINTF("SET BUFFER\n");
+		ioexch = (struct fb_ioctl_xch *)addr;
+
+		/* looking for uuid in fd_fbufs_wait */
+		SIMPLEQ_FOREACH(fbuf, &fd->fd_fbufs_wait, fb_next) {
+			if (fbuf->fb_uuid == ioexch->fbxch_uuid)
+				break;
+
+			lastfbuf = fbuf;
+		}
+		if (fbuf == NULL) {
+			printf("fuse: Cannot find fusebuf\n");
+			return (EINVAL);
+		}
+
+		/* Do not handle fbufs with bad len */
+		if (fbuf->fb_len != ioexch->fbxch_len) {
+			printf("fuse: Bad fusebuf size\n");
+			return (EINVAL);
+		}
+
+		/* fetching data from userland */
+		fbuf->fb_dat = malloc(ioexch->fbxch_len, M_FUSEFS,
+		    M_WAITOK | M_ZERO);
+		error = copyin(ioexch->fbxch_data, fbuf->fb_dat,
+		    ioexch->fbxch_len);
+		if (error) {
+			printf("fuse: Cannot copyin\n");
+			free(fbuf->fb_dat, M_FUSEFS);
+			fbuf->fb_dat = NULL;
+			return (error);
+		}
+
+#ifdef FUSE_DEBUG
+		fuse_dump_buff(fbuf->fb_dat, fbuf->fb_len);
+#endif
+
+		/* Remove fbuf from fd_fbufs_wait */
+		if (fbuf == SIMPLEQ_FIRST(&fd->fd_fbufs_wait))
+			SIMPLEQ_REMOVE_HEAD(&fd->fd_fbufs_wait, fb_next);
+		else
+			SIMPLEQ_REMOVE_AFTER(&fd->fd_fbufs_wait, lastfbuf,
+			    fb_next);
+		stat_fbufs_wait--;
+		wakeup(fbuf);
+		break;
 	default:
-		DPRINTF("bad ioctl number %d\n", cmd);
-		return (ENODEV);
+		error = EINVAL;
 	}
 
 	return (error);
@@ -274,11 +404,8 @@ fuseread(dev_t dev, struct uio *uio, int ioflag)
 	struct fuse_d *fd;
 	struct fusebuf *fbuf;
 	struct fb_hdr hdr;
+	void *tmpaddr;
 	int error = 0;
-	char *F_dat;
-	int remain;
-	int size;
-	size_t len;
 
 	fd = fuse_lookup(minor(dev));
 	if (fd == NULL)
@@ -292,50 +419,28 @@ fuseread(dev_t dev, struct uio *uio, int ioflag)
 	}
 	fbuf = SIMPLEQ_FIRST(&fd->fd_fbufs_in);
 
-	/*
-	 * If it was not taken by last read
-	 * fetch the fb_hdr.
-	 */
-	len = sizeof(struct fb_hdr);
-	if (fbuf->fb_resid == -1) {
-		/* we get the whole header or nothing */
-		if (uio->uio_resid < len)
-			return (EINVAL);
+	/* We get the whole fusebuf or nothing */
+	if (uio->uio_resid != FUSEBUFSIZE)
+		return (EINVAL);
 
-		memcpy(&hdr, &fbuf->fb_hdr, sizeof(hdr));
-		bzero(&hdr.fh_next, sizeof(hdr.fh_next));
-		error = uiomove(&hdr, len, uio);
-		if (error)
-			goto end;
+	/* Do not send kernel pointers */
+	memcpy(&hdr.fh_next, &fbuf->fb_next, sizeof(fbuf->fb_next));
+	bzero(&fbuf->fb_next, sizeof(fbuf->fb_next));
+	tmpaddr = fbuf->fb_dat;
+	fbuf->fb_dat = NULL;
+	error = uiomove(fbuf, FUSEBUFSIZE, uio);
+	if (error)
+		goto end;
 
 #ifdef FUSE_DEBUG
-		fuse_dump_buff((char *)fbuf, len);
+	fuse_dump_buff((char *)fbuf, FUSEBUFSIZE);
 #endif
-		fbuf->fb_resid = 0;
-	}
+	/* Restore kernel pointers */
+	memcpy(&fbuf->fb_next, &hdr.fh_next, sizeof(fbuf->fb_next));
+	fbuf->fb_dat = tmpaddr;
 
-	/* fetch F_dat if there is something present */
-	if ((fbuf->fb_len > 0) && uio->uio_resid) {
-		size = MIN(fbuf->fb_len - fbuf->fb_resid, uio->uio_resid);
-		F_dat = (char *)&fbuf->F_dat;
-
-		error = uiomove(&F_dat[fbuf->fb_resid], size, uio);
-		if (error)
-			goto end;
-
-#ifdef FUSE_DEBUG
-		fuse_dump_buff(&F_dat[fbuf->fb_resid], size);
-#endif
-		fbuf->fb_resid += size;
-	}
-
-	remain = (fbuf->fb_len - fbuf->fb_resid);
-	DPRINTF("size remaining : %i\n", remain);
-
-	/*
-	 * fbuf moves from a simpleq to another
-	 */
-	if (remain == 0) {
+	/* Remove the fbuf if it does not contains data */
+	if (fbuf->fb_len == 0) {
 		SIMPLEQ_REMOVE_HEAD(&fd->fd_fbufs_in, fb_next);
 		stat_fbufs_in--;
 		SIMPLEQ_INSERT_TAIL(&fd->fd_fbufs_wait, fbuf, fb_next);
@@ -359,76 +464,67 @@ fusewrite(dev_t dev, struct uio *uio, int ioflag)
 	if (fd == NULL)
 		return (ENXIO);
 
-	if (uio->uio_resid < sizeof(hdr)) {
+	/* We get the whole fusebuf or nothing */
+	if (uio->uio_resid != FUSEBUFSIZE)
 		return (EINVAL);
-	}
 
-	/*
-	 * get out header
-	 */
 	if ((error = uiomove(&hdr, sizeof(hdr), uio)) != 0)
 		return (error);
 
+	/* looking for uuid in fd_fbufs_wait */
 	SIMPLEQ_FOREACH(fbuf, &fd->fd_fbufs_wait, fb_next) {
-		if (fbuf->fb_uuid == hdr.fh_uuid) {
-			DPRINTF("catch unique %lu\n", fbuf->fb_uuid);
+		if (fbuf->fb_uuid == hdr.fh_uuid)
 			break;
-		}
 
 		lastfbuf = fbuf;
 	}
+	if (fbuf == NULL)
+		return (EINVAL);
 
+	/* Update fb_hdr */
+	fbuf->fb_len = hdr.fh_len;
+	fbuf->fb_err = hdr.fh_err;
+	fbuf->fb_ino = hdr.fh_ino;
+
+	/* Check for corrupted fbufs */
+	if ((fbuf->fb_len && fbuf->fb_err) ||
+	    SIMPLEQ_EMPTY(&fd->fd_fbufs_wait)) {
+		printf("fuse: dropping corrupted fusebuf\n");
+		error = EINVAL;
+		goto end;
+	}
+
+	/* Get the missing datas from the fbuf */
+	error = uiomove(&fbuf->FD, uio->uio_resid, uio);
+	if (error)
+		return error;
+	fbuf->fb_dat = NULL;
 #ifdef FUSE_DEBUG
-	fuse_dump_buff((char *)&hdr, sizeof(hdr));
+	fuse_dump_buff((char *)fbuf, FUSEBUFSIZE);
 #endif
 
-	if (fbuf != NULL) {
-		fbuf->fb_len = hdr.fh_len;
-		fbuf->fb_err = hdr.fh_err;
-		fbuf->fb_ino = hdr.fh_ino;
-
-		if (uio->uio_resid != hdr.fh_len ||
-		    (uio->uio_resid != 0 && hdr.fh_err) ||
-		    SIMPLEQ_EMPTY(&fd->fd_fbufs_wait)) {
-			printf("corrupted fuse header or queue empty\n");
-			return (EINVAL);
-		}
-
-		if (uio->uio_resid > 0  && fbuf->fb_len > 0) {
-			error = uiomove(&fbuf->F_dat, fbuf->fb_len, uio);
-			if (error)
-				return error;
-#ifdef FUSE_DEBUG
-			fuse_dump_buff((char *)&fbuf->F_dat, fbuf->fb_len);
-#endif
-		}
-
-		if (!error) {
-			switch (fbuf->fb_type) {
-			case FBT_INIT:
-				fd->fd_fmp->sess_init = 1;
-				break ;
-			case FBT_DESTROY:
-				fd->fd_fmp = NULL;
-				break ;
-			}
-
-			wakeup(fbuf);
-		}
-
-		/* the fbuf could not be the HEAD fbuf */
+	switch (fbuf->fb_type) {
+	case FBT_INIT:
+		fd->fd_fmp->sess_init = 1;
+		break ;
+	case FBT_DESTROY:
+		fd->fd_fmp = NULL;
+		break ;
+	}
+end:
+	/* Remove the fbuf if it does not contains data */
+	if (fbuf->fb_len == 0) {
 		if (fbuf == SIMPLEQ_FIRST(&fd->fd_fbufs_wait))
 			SIMPLEQ_REMOVE_HEAD(&fd->fd_fbufs_wait, fb_next);
 		else
 			SIMPLEQ_REMOVE_AFTER(&fd->fd_fbufs_wait, lastfbuf,
 			    fb_next);
 		stat_fbufs_wait--;
-
 		if (fbuf->fb_type == FBT_INIT)
-			pool_put(&fusefs_fbuf_pool, fbuf);
-
-	} else
-		error = EINVAL;
+			fb_delete(fbuf);
+		else
+			wakeup(fbuf);
+	}
 
 	return (error);
 }

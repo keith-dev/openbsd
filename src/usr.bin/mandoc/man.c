@@ -1,6 +1,8 @@
-/*	$Id: man.c,v 1.69 2012/11/17 00:25:20 schwarze Exp $ */
+/*	$Id: man.c,v 1.74 2014/01/06 00:53:14 schwarze Exp $ */
 /*
  * Copyright (c) 2008, 2009, 2010, 2011 Kristaps Dzonsons <kristaps@bsd.lv>
+ * Copyright (c) 2013, 2014 Ingo Schwarze <schwarze@openbsd.org>
+ * Copyright (c) 2011 Joerg Sonnenberger <joerg@netbsd.org>
  *
  * Permission to use, copy, modify, and distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -36,7 +38,8 @@ const	char *const __man_macronames[MAN_MAX] = {
 	"RI",		"na",		"sp",		"nf",
 	"fi",		"RE",		"RS",		"DT",
 	"UC",		"PD",		"AT",		"in",
-	"ft",		"OP",		"EX",		"EE"
+	"ft",		"OP",		"EX",		"EE",
+	"UR",		"UE"
 	};
 
 const	char * const *man_macronames = __man_macronames;
@@ -92,7 +95,7 @@ man_free(struct man *man)
 
 
 struct man *
-man_alloc(struct roff *roff, struct mparse *parse)
+man_alloc(struct roff *roff, struct mparse *parse, int quick)
 {
 	struct man	*p;
 
@@ -100,6 +103,7 @@ man_alloc(struct roff *roff, struct mparse *parse)
 
 	man_hash_init();
 	p->parse = parse;
+	p->quick = quick;
 	p->roff = roff;
 
 	man_alloc1(p);
@@ -424,16 +428,22 @@ man_ptext(struct man *man, int line, char *buf, int offs)
 		return(man_descope(man, line, offs));
 	}
 
-	/* Pump blank lines directly into the backend. */
-
 	for (i = offs; ' ' == buf[i]; i++)
 		/* Skip leading whitespace. */ ;
 
+	/*
+	 * Blank lines are ignored right after headings
+	 * but add a single vertical space elsewhere.
+	 */
+
 	if ('\0' == buf[i]) {
 		/* Allocate a blank entry. */
-		if ( ! man_elem_alloc(man, line, offs, MAN_sp))
-			return(0);
-		man->next = MAN_NEXT_SIBLING;
+		if (MAN_SH != man->last->tok &&
+		    MAN_SS != man->last->tok) {
+			if ( ! man_elem_alloc(man, line, offs, MAN_sp))
+				return(0);
+			man->next = MAN_NEXT_SIBLING;
+		}
 		return(1);
 	}
 
@@ -468,7 +478,7 @@ man_ptext(struct man *man, int line, char *buf, int offs)
 	 */
 
 	assert(i);
-	if (mandoc_eos(buf, (size_t)i, 0))
+	if (mandoc_eos(buf, (size_t)i))
 		man->last->flags |= MAN_EOS;
 
 	return(man_descope(man, line, offs));
@@ -592,6 +602,12 @@ man_pmacro(struct man *man, int ln, char *buf, int offs)
 	assert(man_macros[tok].fp);
 	if ( ! (*man_macros[tok].fp)(man, tok, ln, ppos, &offs, buf))
 		goto err;
+
+	/* In quick mode (for mandocdb), abort after the NAME section. */
+
+	if (man->quick && MAN_SH == tok &&
+	    strcmp(man->last->prev->child->string, "NAME"))
+		return(2);
 
 	/* 
 	 * We weren't in a block-line scope when entering the

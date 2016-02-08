@@ -1,4 +1,4 @@
-/*	$OpenBSD: output.c,v 1.16 2012/03/03 19:15:00 nicm Exp $	*/
+/*	$OpenBSD: output.c,v 1.20 2014/02/21 02:18:00 tedu Exp $	*/
 /*	$NetBSD: output.c,v 1.4 1996/03/19 03:21:41 jtc Exp $	*/
 
 /*
@@ -173,12 +173,8 @@ output_rule_data(void)
     int j;
 
     fprintf(output_file,
-	"#if defined(__cplusplus) || defined(__STDC__)\n"
 	"const short %slhs[] =\n"
-	"#else\n"
-	"short %slhs[] =\n"
-	"#endif\n"
-	"\t{%42d,", symbol_prefix, symbol_prefix, symbol_value[start_symbol]);
+	"\t{%42d,", symbol_prefix, symbol_value[start_symbol]);
 
     j = 10;
     for (i = 3; i < nrules; i++)
@@ -198,12 +194,8 @@ output_rule_data(void)
     fprintf(output_file, "\n};\n");
 
     fprintf(output_file,
-	"#if defined(__cplusplus) || defined(__STDC__)\n"
 	"const short %slen[] =\n"
-	"#else\n"
-	"short %slen[] =\n"
-	"#endif\n"
-	"\t{%42d,", symbol_prefix, symbol_prefix, 2);
+	"\t{%42d,", symbol_prefix, 2);
 
     j = 10;
     for (i = 3; i < nrules; i++)
@@ -230,13 +222,9 @@ output_yydefred(void)
     int i, j;
 
     fprintf(output_file,
-	"#if defined(__cplusplus) || defined(__STDC__)\n"
 	"const short %sdefred[] =\n"
-	"#else\n"
-	"short %sdefred[] =\n"
-	"#endif\n"
 	"\t{%39d,",
-	symbol_prefix, symbol_prefix, (defred[0] ? defred[0] - 2 : 0));
+	symbol_prefix, (defred[0] ? defred[0] - 2 : 0));
 
     j = 10;
     for (i = 1; i < nstates; i++)
@@ -269,15 +257,15 @@ output_actions(void)
     width = NEW2(nvectors, short);
 
     token_actions();
-    FREE(lookaheads);
-    FREE(LA);
-    FREE(LAruleno);
-    FREE(accessing_symbol);
+    free(lookaheads);
+    free(LA);
+    free(LAruleno);
+    free(accessing_symbol);
 
     goto_actions();
-    FREE(goto_map + ntokens);
-    FREE(from_state);
-    FREE(to_state);
+    free(goto_map + ntokens);
+    free(from_state);
+    free(to_state);
 
     sort_actions();
     pack_table();
@@ -369,7 +357,7 @@ token_actions(void)
 	    }
 	}
     }
-    FREE(actionrow);
+    free(actionrow);
 }
 
 void
@@ -381,12 +369,8 @@ goto_actions(void)
 
     k = default_goto(start_symbol + 1);
     fprintf(output_file,
-	"#if defined(__cplusplus) || defined(__STDC__)\n"
 	"const short %sdgoto[] =\n"
-	"#else\n"
-	"short %sdgoto[] =\n"
-	"#endif\n"
-	"\t{%40d,", symbol_prefix, symbol_prefix, k);
+	"\t{%40d,", symbol_prefix, k);
     save_column(start_symbol + 1, k);
 
     j = 10;
@@ -408,7 +392,7 @@ goto_actions(void)
 
     if (!rflag) outline += 2;
     fprintf(output_file, "\n};\n");
-    FREE(state_count);
+    free(state_count);
 }
 
 int
@@ -559,14 +543,14 @@ pack_table(void)
     for (i = 0; i < nvectors; i++)
     {
 	if (froms[i])
-	    FREE(froms[i]);
+	    free(froms[i]);
 	if (tos[i])
-	    FREE(tos[i]);
+	    free(tos[i]);
     }
 
-    FREE(froms);
-    FREE(tos);
-    FREE(pos);
+    free(froms);
+    free(tos);
+    free(pos);
 }
 
 
@@ -663,9 +647,9 @@ pack_vector(int vector)
 
 		newmax = maxtable;
 		do { newmax += 200; } while (newmax <= loc);
-		table = (short *) REALLOC(table, newmax*sizeof(short));
+		table = (short *) realloc(table, newmax*sizeof(short));
 		if (table == 0) no_space();
-		check = (short *) REALLOC(check, newmax*sizeof(short));
+		check = (short *) realloc(check, newmax*sizeof(short));
 		if (check == 0) no_space();
 		for (l  = maxtable; l < newmax; ++l)
 		{
@@ -709,12 +693,8 @@ output_base(void)
     int i, j;
 
     fprintf(output_file,
-	"#if defined(__cplusplus) || defined(__STDC__)\n"
 	"const short %ssindex[] =\n"
-	"#else\n"
-	"short %ssindex[] =\n"
-	"#endif\n"
-	"\t{%39d,", symbol_prefix, symbol_prefix, base[0]);
+	"\t{%39d,", symbol_prefix, base[0]);
 
     j = 10;
     for (i = 1; i < nstates; i++)
@@ -734,12 +714,8 @@ output_base(void)
     if (!rflag) outline += 2;
     fprintf(output_file,
 	"};\n"
-	"#if defined(__cplusplus) || defined(__STDC__)\n"
 	"const short %srindex[] =\n"
-	"#else\n"
-	"short %srindex[] =\n"
-	"#endif\n"
-	"\t{%39d,", symbol_prefix, symbol_prefix, base[nstates]);
+	"\t{%39d,", symbol_prefix, base[nstates]);
 
     j = 10;
     for (i = nstates + 1; i < 2*nstates; i++)
@@ -759,12 +735,8 @@ output_base(void)
     if (!rflag) outline += 2;
     fprintf(output_file,
 	"};\n"
-	"#if defined(__cplusplus) || defined(__STDC__)\n"
 	"const short %sgindex[] =\n"
-	"#else\n"
-	"short %sgindex[] =\n"
-	"#endif\n"
-	"\t{%39d,", symbol_prefix, symbol_prefix, base[2*nstates]);
+	"\t{%39d,", symbol_prefix, base[2*nstates]);
 
     j = 10;
     for (i = 2*nstates + 1; i < nvectors - 1; i++)
@@ -783,7 +755,7 @@ output_base(void)
 
     if (!rflag) outline += 2;
     fprintf(output_file, "\n};\n");
-    FREE(base);
+    free(base);
 }
 
 
@@ -796,12 +768,8 @@ output_table(void)
     ++outline;
     fprintf(code_file, "#define YYTABLESIZE %d\n", high);
     fprintf(output_file,
-	"#if defined(__cplusplus) || defined(__STDC__)\n"
 	"const short %stable[] =\n"
-	"#else\n"
-	"short %stable[] =\n"
-	"#endif\n"
-	"\t{%40d,", symbol_prefix, symbol_prefix, table[0]);
+	"\t{%40d,", symbol_prefix, table[0]);
 
     j = 10;
     for (i = 1; i <= high; i++)
@@ -820,7 +788,7 @@ output_table(void)
 
     if (!rflag) outline += 2;
     fprintf(output_file, "\n};\n");
-    FREE(table);
+    free(table);
 }
 
 
@@ -831,12 +799,8 @@ output_check(void)
     int j;
 
     fprintf(output_file,
-	"#if defined(__cplusplus) || defined(__STDC__)\n"
 	"const short %scheck[] =\n"
-	"#else\n"
-	"short %scheck[] =\n"
-	"#endif\n"
-	"\t{%40d,", symbol_prefix, symbol_prefix, check[0]);
+	"\t{%40d,", symbol_prefix, check[0]);
 
     j = 10;
     for (i = 1; i <= high; i++)
@@ -855,7 +819,7 @@ output_check(void)
 
     if (!rflag) outline += 2;
     fprintf(output_file, "\n};\n");
-    FREE(check);
+    free(check);
 }
 
 
@@ -866,13 +830,13 @@ is_C_identifier(char *name)
     int c;
 
     s = name;
-    c = *s;
+    c = (unsigned char)*s;
     if (c == '"')
     {
-	c = *++s;
+	c = (unsigned char)*++s;
 	if (!isalpha(c) && c != '_' && c != '$')
 	    return (0);
-	while ((c = *++s) != '"')
+	while ((c = (unsigned char)*++s) != '"')
 	{
 	    if (!isalnum(c) && c != '_' && c != '$')
 		return (0);
@@ -882,7 +846,7 @@ is_C_identifier(char *name)
 
     if (!isalpha(c) && c != '_' && c != '$')
 	return (0);
-    while ((c = *++s))
+    while ((c = (unsigned char)*++s))
     {
 	if (!isalnum(c) && c != '_' && c != '$')
 	    return (0);
@@ -904,10 +868,10 @@ output_defines(void)
 	{
 	    fprintf(code_file, "#define ");
 	    if (dflag) fprintf(defines_file, "#define ");
-	    c = *s;
+	    c = (unsigned char)*s;
 	    if (c == '"')
 	    {
-		while ((c = *++s) != '"')
+		while ((c = (unsigned char)*++s) != '"')
 		{
 		    putc(c, code_file);
 		    if (dflag) putc(c, defines_file);
@@ -920,7 +884,7 @@ output_defines(void)
 		    putc(c, code_file);
 		    if (dflag) putc(c, defines_file);
 		}
-		while ((c = *++s));
+		while ((c = (unsigned char)*++s));
 	    }
 	    ++outline;
 	    fprintf(code_file, " %d\n", symbol_value[i]);
@@ -996,12 +960,9 @@ output_debug(void)
     ++outline;
     fprintf(code_file, "#define YYMAXTOKEN %d\n", max);
 
-    symnam = (char **) MALLOC((max+1)*sizeof(char *));
+    symnam = (char **) calloc(max+1, sizeof(char *));
     if (symnam == 0) no_space();
 
-    /* Note that it is  not necessary to initialize the element		*/
-    /* symnam[max].							*/
-    memset(symnam, 0, max * sizeof(char *));
     for (i = ntokens - 1; i >= 2; --i)
 	symnam[symbol_value[i]] = symbol_name[i];
     symnam[0] = "end-of-file";
@@ -1009,12 +970,8 @@ output_debug(void)
     if (!rflag) ++outline;
     fprintf(output_file,
 	"#if YYDEBUG\n"
-	"#if defined(__cplusplus) || defined(__STDC__)\n"
 	"const char * const %sname[] =\n"
-	"#else\n"
-	"char *%sname[] =\n"
-	"#endif\n"
-	"\t{", symbol_prefix, symbol_prefix);
+	"\t{", symbol_prefix);
     j = 80;
     for (i = 0; i <= max; ++i)
     {
@@ -1137,16 +1094,12 @@ output_debug(void)
     }
     if (!rflag) outline += 2;
     fprintf(output_file, "\n};\n");
-    FREE(symnam);
+    free(symnam);
 
     if (!rflag) ++outline;
     fprintf(output_file,
-	"#if defined(__cplusplus) || defined(__STDC__)\n"
 	"const char * const %srule[] =\n"
-	"#else\n"
-	"char *%srule[] =\n"
-	"#endif\n"
-	"\t{", symbol_prefix, symbol_prefix);
+	"\t{", symbol_prefix);
     for (i = 2; i < nrules; ++i)
     {
 	fprintf(output_file, "\"%s :", symbol_name[rlhs[i]]);
@@ -1223,7 +1176,7 @@ output_trailing_text(void)
 
     in = input_file;
     out = code_file;
-    c = *cptr;
+    c = (unsigned char)*cptr;
     if (c == '\n')
     {
 	++lineno;
@@ -1246,7 +1199,7 @@ output_trailing_text(void)
 	    ++outline;
 	    fprintf(out, line_format, lineno, input_file_name);
 	}
-	do { putc(c, out); } while ((c = *++cptr) != '\n');
+	do { putc(c, out); } while ((c = (unsigned char)*++cptr) != '\n');
 	++outline;
 	putc('\n', out);
 	last = '\n';
@@ -1313,11 +1266,11 @@ free_itemsets(void)
 {
     core *cp, *next;
 
-    FREE(state_table);
+    free(state_table);
     for (cp = first_state; cp; cp = next)
     {
 	next = cp->next;
-	FREE(cp);
+	free(cp);
     }
 }
 
@@ -1327,11 +1280,11 @@ free_shifts(void)
 {
     shifts *sp, *next;
 
-    FREE(shift_table);
+    free(shift_table);
     for (sp = first_shift; sp; sp = next)
     {
 	next = sp->next;
-	FREE(sp);
+	free(sp);
     }
 }
 
@@ -1342,10 +1295,10 @@ free_reductions(void)
 {
     reductions *rp, *next;
 
-    FREE(reduction_table);
+    free(reduction_table);
     for (rp = first_reduction; rp; rp = next)
     {
 	next = rp->next;
-	FREE(rp);
+	free(rp);
     }
 }

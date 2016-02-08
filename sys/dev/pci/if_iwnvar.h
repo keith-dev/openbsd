@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_iwnvar.h,v 1.24 2012/11/17 14:02:51 kettenis Exp $	*/
+/*	$OpenBSD: if_iwnvar.h,v 1.27 2014/02/10 19:08:58 kettenis Exp $	*/
 
 /*-
  * Copyright (c) 2007, 2008
@@ -251,6 +251,8 @@ struct iwn_softc {
 	int			calib_cnt;
 	struct iwn_calib_state	calib;
 
+	struct task		init_task;
+
 	struct iwn_fw_info	fw;
 	struct iwn_calib_info	calibcmd[5];
 	uint32_t		errptr;
@@ -273,10 +275,14 @@ struct iwn_softc {
 	uint32_t		eeprom_crystal;
 	int16_t			eeprom_temp;
 	int16_t			eeprom_voltage;
+	int16_t			eeprom_rawtemp;
 	int8_t			maxpwr2GHz;
 	int8_t			maxpwr5GHz;
 	int8_t			maxpwr[IEEE80211_CHAN_MAX];
 	int8_t			enh_maxpwr[35];
+
+	uint8_t			reset_noise_gain;
+	uint8_t			noise_gain;
 
 	int32_t			temp_off;
 	uint32_t		int_mask;
@@ -287,7 +293,6 @@ struct iwn_softc {
 	uint8_t			chainmask;
 
 	int			sc_tx_timer;
-	struct workq_task	sc_resume_wqt;
 
 #if NBPFILTER > 0
 	caddr_t			sc_drvbpf;

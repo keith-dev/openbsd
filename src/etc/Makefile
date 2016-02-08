@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.333 2013/07/10 05:12:15 ajacoutot Exp $
+#	$OpenBSD: Makefile,v 1.345 2014/01/25 20:23:53 deraadt Exp $
 
 TZDIR=		/usr/share/zoneinfo
 LOCALTIME=	Canada/Mountain
@@ -26,7 +26,7 @@ kernels: bootblocks ${ALL_KERNELS}
 .for CONF K in ${KERNELS}
 	cp ../sys/arch/${MACHINE}/compile/${CONF}/bsd ${RELEASEDIR}/$K
 .endfor
-	
+
 # -rw-r--r--
 BINOWN= root
 BINGRP= wheel
@@ -55,8 +55,8 @@ RCDAEMONS=	amd apmd bgpd bootparamd cron dhcpd dhcrelay dvmrpd \
 		relayd ripd route6d rtadvd rtsold rwhod sasyncd sendmail \
 		sensorsd slowcgi smtpd snmpd spamd sshd syslogd watchdogd \
 		wsmoused xdm ypbind ypldap yppasswdd ypserv kdc kadmind \
-		kpasswdd nfsd mountd lockd statd spamlogd sndiod popa3d \
-		tftpd tftpproxy ldomd
+		kpasswdd nfsd mountd lockd statd spamlogd sndiod \
+		tftpd tftpproxy ldomd ipropd_master ipropd_slave
 
 MISETS=	base${OSrev}.tgz comp${OSrev}.tgz \
 	man${OSrev}.tgz game${OSrev}.tgz etc${OSrev}.tgz
@@ -130,7 +130,7 @@ distribution-etc-root-var: distrib-dirs
 	${INSTALL} -c -o root -g wheel -m 600 snmpd.conf ${DESTDIR}/etc
 	${INSTALL} -c -o root -g wheel -m 600 ldapd.conf ${DESTDIR}/etc
 	${INSTALL} -c -o root -g wheel -m 600 ypldap.conf ${DESTDIR}/etc
-	${INSTALL} -c -o root -g _nsd -m 640 nsd.conf ${DESTDIR}/etc
+	${INSTALL} -c -o root -g _nsd -m 640 nsd.conf ${DESTDIR}/var/nsd/etc
 	${INSTALL} -c -o ${BINOWN} -g ${BINGRP} -m 555 \
 	    etc.${MACHINE}/MAKEDEV ${DESTDIR}/dev
 	cd root; \
@@ -177,8 +177,6 @@ distribution-etc-root-var: distrib-dirs
 		    ${DESTDIR}/etc/ppp; \
 		${INSTALL} -c -o root -g wheel -m 600 options \
 		    ${DESTDIR}/etc/ppp; \
-		${INSTALL} -c -o root -g wheel -m 600 options.leaf \
-		    ${DESTDIR}/etc/ppp; \
 		${INSTALL} -c -o root -g wheel -m 600 options.sample \
 		    ${DESTDIR}/etc/ppp; \
 		${INSTALL} -c -o root -g wheel -m 600 chatscript.sample \
@@ -193,6 +191,9 @@ distribution-etc-root-var: distrib-dirs
 		    ${DESTDIR}/etc/ppp; \
 		${INSTALL} -c -o root -g wheel -m 644 ppp.secret.sample \
 		    ${DESTDIR}/etc/ppp
+	cd signify; \
+		${INSTALL} -c -o root -g wheel -m 644 *.pub \
+		    ${DESTDIR}/etc/signify
 	cd systrace; \
 		${INSTALL} -c -o root -g wheel -m 600 usr_sbin_lpd \
 		    ${DESTDIR}/etc/systrace; \
@@ -302,11 +303,13 @@ release:
 .else
 
 release-sets:
+	cd ${RELEASEDIR} && rm -f SHA256
 	cd ../distrib/sets && exec ${SUDO} sh maketars ${OSrev}
 
 sha:
 	-cd ${RELEASEDIR}; \
-	    sum -a sha256 INSTALL.`arch -ks` ${ALL_KERNELS} ${MDEXT} ${MISETS} > SHA256
+	    sum -a sha256 INSTALL.`arch -ks` \
+	    ${ALL_KERNELS} ${MDEXT} ${MISETS} | sort > SHA256
 
 release: sha
 sha: distrib
@@ -321,35 +324,11 @@ distrib:
 	cd ../distrib && \
 	    ${MAKE} && exec ${SUDO} ${MAKE} install
 
-# Because the moduli sizes > 4096 are not commonly used, and because they
-# take a long time to generate we update the <= 4096 ones more frequently.
-DHSIZE=1024 1536 2048 3072 4096
-update-moduli: moduli.6144 moduli.8192
-	( \
-		echo -n '#    $$Open'; echo 'BSD$$'; \
-		echo '# Time Type Tests Tries Size Generator Modulus'; \
-		( for i in ${DHSIZE}; do \
-			ssh-keygen -b $$i -G /dev/stdout; \
-		done) | \
-		ssh-keygen -T /dev/stdout ; \
-		cat moduli.6144 ; \
-		cat moduli.8192 ; \
-	) > moduli
-
-# These two will probably take days, so if you're going to regen them
-# run it in a tmux session or something.
-moduli.6144:
-	ssh-keygen -b 6144 -G /dev/stdout | ssh-keygen -T moduli.6144
-
-moduli.8192:
-	ssh-keygen -b 8192 -G /dev/stdout | ssh-keygen -T moduli.8192
-
 .PHONY: distribution-etc-root-var distribution distrib-dirs \
 	release allarchs kernels release-sets m4 install-mtree \
 	bootblocks ${ALL_KERNELS}
-	
 
-SUBDIR+= etc.alpha etc.amd64 etc.armish etc.aviion etc.beagle etc.hp300
+SUBDIR+= etc.alpha etc.amd64 etc.armish etc.armv7 etc.aviion etc.hp300
 SUBDIR+= etc.hppa etc.hppa64 etc.i386 etc.landisk etc.loongson etc.luna88k
 SUBDIR+= etc.macppc etc.mvme68k etc.mvme88k etc.octeon
 SUBDIR+= etc.sgi etc.socppc etc.sparc etc.sparc64 etc.vax etc.zaurus

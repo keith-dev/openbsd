@@ -2,7 +2,7 @@
 # Copyright (C) 1999 Free Software Foundation, Inc.
 # Roman Maurer <roman.maurer@hermes.si>, 1999.
 # $Id: sl.po,v 1.5 2011/07/22 14:10:38 avsm Exp $
-# $Source: /cvs/src/gnu/usr.bin/lynx/po/sl.po,v $
+# $Source: /var/www/space/cvs/src/gnu/usr.bin/lynx/po/sl.po,v $
 #
 msgid ""
 msgstr ""

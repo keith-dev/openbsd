@@ -1,4 +1,4 @@
-/*	$OpenBSD: fxp.c,v 1.111 2012/10/10 08:22:38 blambert Exp $	*/
+/*	$OpenBSD: fxp.c,v 1.115 2013/12/28 03:34:59 deraadt Exp $	*/
 /*	$NetBSD: if_fxp.c,v 1.2 1997/06/05 02:01:55 thorpej Exp $	*/
 
 /*
@@ -47,7 +47,6 @@
 #include <sys/socket.h>
 #include <sys/syslog.h>
 #include <sys/timeout.h>
-#include <sys/workq.h>
 
 #include <net/if.h>
 #include <net/if_dl.h>
@@ -57,7 +56,6 @@
 #ifdef INET
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
-#include <netinet/in_var.h>
 #include <netinet/ip.h>
 #endif
 
@@ -295,29 +293,25 @@ fxp_activate(struct device *self, int act)
 	int rv = 0;
 
 	switch (act) {
-	case DVACT_QUIESCE:
-		rv = config_activate_children(self, act);
-		break;
 	case DVACT_SUSPEND:
 		if (ifp->if_flags & IFF_RUNNING)
 			fxp_stop(sc, 1, 0);
 		rv = config_activate_children(self, act);
 		break;
-	case DVACT_RESUME:
-		rv = config_activate_children(self, act);
+	case DVACT_WAKEUP:
 		if (ifp->if_flags & IFF_UP)
-			workq_queue_task(NULL, &sc->sc_resume_wqt, 0,
-			    fxp_resume, sc, NULL);
+			fxp_wakeup(sc);
+		break;
+	default:
+		rv = config_activate_children(self, act);
 		break;
 	}
 	return (rv);
 }
 
 void
-fxp_resume(void *arg1, void *arg2)
+fxp_wakeup(struct fxp_softc *sc)
 {
-	struct fxp_softc *sc = arg1;
-
 	int s = splnet();
 
 	/* force reload of the microcode */

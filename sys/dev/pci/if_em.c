@@ -31,7 +31,7 @@ POSSIBILITY OF SUCH DAMAGE.
 
 ***************************************************************************/
 
-/* $OpenBSD: if_em.c,v 1.269 2013/01/27 04:18:02 brad Exp $ */
+/* $OpenBSD: if_em.c,v 1.277 2014/02/22 04:41:31 chris Exp $ */
 /* $FreeBSD: if_em.c,v 1.46 2004/09/29 18:28:28 mlaier Exp $ */
 
 #include <dev/pci/if_em.h>
@@ -130,6 +130,17 @@ const struct pci_matchid em_devices[] = {
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82578DM },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82579LM },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82579V },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_I210_COPPER },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_I210_FIBER },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_I210_SERDES },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_I210_SGMII },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_I210_COPPER_NF },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_I210_SERDES_NF },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_I211_COPPER },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_I217_LM },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_I217_V },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_I218_LM },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_I218_V },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82580_COPPER },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82580_FIBER },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82580_SERDES },
@@ -140,6 +151,9 @@ const struct pci_matchid em_devices[] = {
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_I350_FIBER },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_I350_SERDES },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_I350_SGMII },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_I354_BP_1GBPS },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_I354_BP_2_5GBPS },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_I354_SGMII },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_ICH8_82567V_3 },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_ICH8_IFE },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_ICH8_IFE_G },
@@ -211,10 +225,8 @@ int  em_rxfill(struct em_softc *);
 void em_rxeof(struct em_softc *);
 void em_receive_checksum(struct em_softc *, struct em_rx_desc *,
 			 struct mbuf *);
-#ifdef EM_CSUM_OFFLOAD
 void em_transmit_checksum_setup(struct em_softc *, struct mbuf *,
 				u_int32_t *, u_int32_t *);
-#endif
 void em_iff(struct em_softc *);
 #ifdef EM_DEBUG
 void em_print_hw_stats(struct em_softc *);
@@ -232,7 +244,6 @@ void em_82547_move_tail_locked(struct em_softc *);
 int  em_dma_malloc(struct em_softc *, bus_size_t, struct em_dma_alloc *,
 		   int);
 void em_dma_free(struct em_softc *, struct em_dma_alloc *);
-int  em_is_valid_ether_addr(u_int8_t *);
 u_int32_t em_fill_descriptors(u_int64_t address, u_int32_t length,
 			      PDESC_ARRAY desc_array);
 
@@ -406,6 +417,7 @@ em_attach(struct device *parent, struct device *self, void *aux)
 		case em_82574:
 		case em_82575:
 		case em_82580:
+		case em_i210:
 		case em_i350:
 		case em_ich9lan:
 		case em_ich10lan:
@@ -474,7 +486,8 @@ em_attach(struct device *parent, struct device *self, void *aux)
 	}
 
 	if (sc->hw.mac_type == em_80003es2lan || sc->hw.mac_type == em_82575 ||
-	    sc->hw.mac_type == em_82580 || sc->hw.mac_type == em_i350) {
+	    sc->hw.mac_type == em_82580 || sc->hw.mac_type == em_i210 ||
+	    sc->hw.mac_type == em_i350) {
 		uint32_t reg = EM_READ_REG(&sc->hw, E1000_STATUS);
 		sc->hw.bus_func = (reg & E1000_STATUS_FUNC_MASK) >>
 		    E1000_STATUS_FUNC_SHIFT;
@@ -501,11 +514,6 @@ em_attach(struct device *parent, struct device *self, void *aux)
 	if (em_read_mac_addr(&sc->hw) < 0) {
 		printf("%s: EEPROM read error while reading mac address\n",
 		       sc->sc_dv.dv_xname);
-		goto err_mac_addr;
-	}
-
-	if (!em_is_valid_ether_addr(sc->hw.mac_addr)) {
-		printf("%s: Invalid mac address\n", sc->sc_dv.dv_xname);
 		goto err_mac_addr;
 	}
 
@@ -780,6 +788,9 @@ em_init(void *arg)
 	case em_i350:
 		pba = E1000_PBA_32K; /* 32K for Rx, 16K for Tx */
 		break;
+	case em_i210:
+		pba = E1000_PBA_34K;
+		break;
 	case em_82573: /* 82573: Total Packet Buffer is 32K */
 		/* Jumbo frames not supported */
 		pba = E1000_PBA_12K; /* 12K for Rx, 20K for Tx */
@@ -796,6 +807,7 @@ em_init(void *arg)
 		break;
 	case em_pchlan:
 	case em_pch2lan:
+	case em_pch_lpt:
 		pba = E1000_PBA_26K;
 		break;
 	default:
@@ -1121,14 +1133,12 @@ em_encap(struct em_softc *sc, struct mbuf *m_head)
 	if (map->dm_nsegs > sc->num_tx_desc_avail - 2)
 		goto fail;
 
-#ifdef EM_CSUM_OFFLOAD
-	if (sc->hw.mac_type >= em_82543)
+	if (sc->hw.mac_type >= em_82543 && sc->hw.mac_type != em_82575 &&
+	    sc->hw.mac_type != em_82580 && sc->hw.mac_type != em_i210 &&
+	    sc->hw.mac_type != em_i350)
 		em_transmit_checksum_setup(sc, m_head, &txd_upper, &txd_lower);
 	else
 		txd_upper = txd_lower = 0;
-#else
-	txd_upper = txd_lower = 0;
-#endif
 
 	i = sc->next_avail_tx_desc;
 	if (sc->pcix_82544)
@@ -1633,11 +1643,7 @@ em_allocate_pci_resources(struct em_softc *sc)
 	}
 
 	/* for ICH8 and family we need to find the flash memory */
-	if (sc->hw.mac_type == em_ich8lan ||
-	    sc->hw.mac_type == em_ich9lan ||
-	    sc->hw.mac_type == em_ich10lan ||
-	    sc->hw.mac_type == em_pchlan ||
-	    sc->hw.mac_type == em_pch2lan) {
+	if (IS_ICH8(sc->hw.mac_type)) {
 		val = pci_conf_read(pa->pa_pc, pa->pa_tag, EM_FLASH);
 		if (PCI_MAPREG_TYPE(val) != PCI_MAPREG_TYPE_MEM) {
 			printf(": flash is not mem space\n");
@@ -1768,7 +1774,8 @@ em_hardware_init(struct em_softc *sc)
 	      sc->hw.mac_type == em_82572 ||
 	      sc->hw.mac_type == em_82575 ||
 	      sc->hw.mac_type == em_82580 ||
-	      sc->hw.mac_type == em_i350)) {
+	      sc->hw.mac_type == em_i210 ||
+	      sc->hw.mac_type == em_i350 )) {
 		uint16_t phy_tmp = 0;
 
 		/* Speed up time to link by disabling smart power down */
@@ -1849,14 +1856,14 @@ em_setup_interface(struct em_softc *sc)
 
 #if NVLAN > 0
 	if (sc->hw.mac_type != em_82575 && sc->hw.mac_type != em_82580 &&
-	    sc->hw.mac_type != em_i350)
+	    sc->hw.mac_type != em_i210 && sc->hw.mac_type != em_i350)
 		ifp->if_capabilities |= IFCAP_VLAN_HWTAGGING;
 #endif
 
-#ifdef EM_CSUM_OFFLOAD
-	if (sc->hw.mac_type >= em_82543)
-		ifp->if_capabilities |= IFCAP_CSUM_TCPv4|IFCAP_CSUM_UDPv4;
-#endif
+	if (sc->hw.mac_type >= em_82543 && sc->hw.mac_type != em_82575 &&
+	    sc->hw.mac_type != em_82580 && sc->hw.mac_type != em_i210 &&
+	    sc->hw.mac_type != em_i350)
+		ifp->if_capabilities |= IFCAP_CSUM_TCPv4 | IFCAP_CSUM_UDPv4;
 
 	/* 
 	 * Specify the media types supported by this adapter and register
@@ -1925,9 +1932,6 @@ em_activate(struct device *self, int act)
 	int rv = 0;
 
 	switch (act) {
-	case DVACT_QUIESCE:
-		rv = config_activate_children(self, act);
-		break;
 	case DVACT_SUSPEND:
 		if (ifp->if_flags & IFF_RUNNING)
 			em_stop(sc, 0);
@@ -1935,9 +1939,11 @@ em_activate(struct device *self, int act)
 		rv = config_activate_children(self, act);
 		break;
 	case DVACT_RESUME:
-		rv = config_activate_children(self, act);
 		if (ifp->if_flags & IFF_UP)
 			em_init(sc);
+		break;
+	default:
+		rv = config_activate_children(self, act);
 		break;
 	}
 	return (rv);
@@ -2211,7 +2217,7 @@ em_initialize_transmit_unit(struct em_softc *sc)
 	sc->txd_cmd = E1000_TXD_CMD_IFCS;
 
 	if (sc->hw.mac_type == em_82575 || sc->hw.mac_type == em_82580 ||
-	    sc->hw.mac_type == em_i350) {
+	    sc->hw.mac_type == em_i210 || sc->hw.mac_type == em_i350) {
 		/* 82575/6 need to enable the TX queue and lack the IDE bit */
 		reg_tctl = E1000_READ_REG(&sc->hw, TXDCTL);
 		reg_tctl |= E1000_TXDCTL_QUEUE_ENABLE;
@@ -2275,7 +2281,6 @@ em_free_transmit_structures(struct em_softc *sc)
 		sc->txtag = NULL;
 }
 
-#ifdef EM_CSUM_OFFLOAD
 /*********************************************************************
  *
  *  The offload context needs to be set when we transfer the first
@@ -2356,7 +2361,6 @@ em_transmit_checksum_setup(struct em_softc *sc, struct mbuf *mp,
 	sc->num_tx_desc_avail--;
 	sc->next_avail_tx_desc = curr_txd;
 }
-#endif /* EM_CSUM_OFFLOAD */
 
 /**********************************************************************
  *
@@ -2638,7 +2642,7 @@ em_initialize_receive_unit(struct em_softc *sc)
 	 * asked to or not.  So ask for stripped CRC here and
 	 * cope in rxeof
 	 */
-	if (sc->hw.mac_type == em_i350)
+	if (sc->hw.mac_type == em_i210 || sc->hw.mac_type == em_i350)
 		reg_rctl |= E1000_RCTL_SECRC;
 
 	switch (sc->rx_buffer_len) {
@@ -2675,7 +2679,7 @@ em_initialize_receive_unit(struct em_softc *sc)
 		E1000_WRITE_REG(&sc->hw, RDTR, 0x20);
 
 	if (sc->hw.mac_type == em_82575 || sc->hw.mac_type == em_82580 ||
-	    sc->hw.mac_type == em_i350) {
+	    sc->hw.mac_type == em_i210 || sc->hw.mac_type == em_i350) {
 		/* 82575/6 need to enable the RX queue */
 		uint32_t reg;
 		reg = E1000_READ_REG(&sc->hw, RXDCTL);
@@ -2873,7 +2877,8 @@ em_rxeof(struct em_softc *sc)
 			if (desc_len < ETHER_CRC_LEN) {
 				len = 0;
 				prev_len_adj = ETHER_CRC_LEN - desc_len;
-			} else if (sc->hw.mac_type == em_i350)
+			} else if (sc->hw.mac_type == em_i210 ||
+			    sc->hw.mac_type == em_i350)
 				len = desc_len;
 			else
 				len = desc_len - ETHER_CRC_LEN;
@@ -3051,17 +3056,6 @@ em_disable_intr(struct em_softc *sc)
 		E1000_WRITE_REG(&sc->hw, IMC, (0xffffffff & ~E1000_IMC_RXSEQ));
 	else
 		E1000_WRITE_REG(&sc->hw, IMC, 0xffffffff);
-}
-
-int
-em_is_valid_ether_addr(u_int8_t *addr)
-{
-	const char zero_addr[6] = { 0, 0, 0, 0, 0, 0 };
-
-	if ((addr[0] & 1) || (!bcmp(addr, zero_addr, ETHER_ADDR_LEN)))
-		return (FALSE);
-
-	return (TRUE);
 }
 
 void

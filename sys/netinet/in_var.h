@@ -1,4 +1,4 @@
-/*	$OpenBSD: in_var.h,v 1.20 2013/05/31 19:16:52 mpi Exp $	*/
+/*	$OpenBSD: in_var.h,v 1.33 2014/01/21 10:18:26 mpi Exp $	*/
 /*	$NetBSD: in_var.h,v 1.16 1996/02/13 23:42:15 christos Exp $	*/
 
 /*
@@ -37,6 +37,7 @@
 
 #include <sys/queue.h>
 
+#ifdef _KERNEL
 /*
  * Interface address, Internet version.  One of these structures
  * is allocated for each interface with an Internet address.
@@ -55,10 +56,10 @@ struct in_ifaddr {
 	struct	sockaddr_in ia_dstaddr;	/* reserve space for broadcast addr */
 #define	ia_broadaddr	ia_dstaddr
 	struct	sockaddr_in ia_sockmask; /* reserve space for general netmask */
-	LIST_HEAD(, in_multi) ia_multiaddrs; /* list of multicast addresses */
 	struct  in_multi *ia_allhosts;	/* multicast address record for
 					   the allhosts multicast group */
 };
+#endif
 
 struct	in_aliasreq {
 	char	ifra_name[IFNAMSIZ];		/* if name, e.g. "en0" */
@@ -73,38 +74,11 @@ struct	in_aliasreq {
 #define	ifra_broadaddr	ifra_dstaddr
 	struct	sockaddr_in ifra_mask;
 };
-/*
- * Given a pointer to an in_ifaddr (ifaddr),
- * return a pointer to the addr as a sockaddr_in.
- */
-#define	IA_SIN(ia) (&(((struct in_ifaddr *)(ia))->ia_addr))
 
 
 #ifdef	_KERNEL
 TAILQ_HEAD(in_ifaddrhead, in_ifaddr);
 extern	struct	in_ifaddrhead in_ifaddr;
-extern	struct	ifqueue	ipintrq;		/* ip packet input queue */
-extern	int	inetctlerrmap[];
-void	in_socktrim(struct sockaddr_in *);
-
-
-/*
- * Macro for finding the interface (ifnet structure) corresponding to one
- * of our IP addresses.
- */
-#define INADDR_TO_IFP(addr, ifp, rdomain)				\
-	/* struct in_addr addr; */					\
-	/* struct ifnet *ifp; */					\
-do {									\
-	struct in_ifaddr *ia;						\
-									\
-	for (ia = TAILQ_FIRST(&in_ifaddr); ia != NULL && \
-	    (ia->ia_ifp->if_rdomain != rtable_l2(rdomain) || 		\
-	    ia->ia_addr.sin_addr.s_addr != (addr).s_addr);		\
-	    ia = TAILQ_NEXT(ia, ia_list))				\
-		 continue;						\
-	(ifp) = (ia == NULL) ? NULL : ia->ia_ifp;			\
-} while (/* CONSTCOND */ 0)
 
 /*
  * Macro for finding the internet address structure (in_ifaddr) corresponding
@@ -114,10 +88,12 @@ do {									\
 	/* struct ifnet *ifp; */					\
 	/* struct in_ifaddr *ia; */					\
 do {									\
-	for ((ia) = TAILQ_FIRST(&in_ifaddr);				\
-	    (ia) != NULL && (ia)->ia_ifp != (ifp);	\
-	    (ia) = TAILQ_NEXT((ia), ia_list))				\
-		continue;						\
+	struct ifaddr *ifa;						\
+	TAILQ_FOREACH(ifa, &(ifp)->if_addrlist, ifa_list) {		\
+		if (ifa->ifa_addr->sa_family == AF_INET)		\
+			break;						\
+	}								\
+	(ia) = ifatoia(ifa);						\
 } while (/* CONSTCOND */ 0)
 #endif
 
@@ -131,85 +107,50 @@ struct router_info {
 	struct	router_info *rti_next;
 };
 
+#ifdef _KERNEL
 /*
  * Internet multicast address structure.  There is one of these for each IP
  * multicast group to which this host belongs on a given network interface.
- * They are kept in a linked list, rooted in the interface's in_ifaddr
- * structure.
  */
 struct in_multi {
-	struct	in_addr inm_addr;	/* IP multicast address */
-	struct	in_ifaddr *inm_ia;	/* back pointer to in_ifaddr */
-	u_int	inm_refcount;		/* no. membership claims by sockets */
-	u_int	inm_timer;		/* IGMP membership report timer */
-	LIST_ENTRY(in_multi) inm_list;	/* list of multicast addresses */
-	u_int	inm_state;		/* state of membership */
-	struct	router_info *inm_rti;	/* router version info */
+	struct ifmaddr		inm_ifma;   /* Protocol-independent info */
+#define inm_refcnt		inm_ifma.ifma_refcnt
+#define inm_ifidx		inm_ifma.ifma_ifidx
+
+	struct sockaddr_in	inm_sin;   /* IPv4 multicast address */
+#define inm_addr		inm_sin.sin_addr
+
+	u_int			inm_state; /* state of membership */
+	u_int			inm_timer; /* IGMP membership report timer */
+
+	struct router_info	*inm_rti;  /* router version info */
 };
 
-#ifdef _KERNEL
-/*
- * Structure used by macros below to remember position when stepping through
- * all of the in_multi records.
- */
-struct in_multistep {
-	struct in_ifaddr *i_ia;
-	struct in_multi *i_inm;
-};
+static __inline struct in_multi *
+ifmatoinm(struct ifmaddr *ifma)
+{
+       return ((struct in_multi *)(ifma));
+}
 
 /*
- * Macro for looking up the in_multi record for a given IP multicast address
- * on a given interface.  If no matching record is found, "inm" returns NULL.
+ * Macro for looking up the in_multi record for a given IP multicast
+ * address on a given interface.  If no matching record is found, "inm"
+ * returns NULL.
  */
 #define IN_LOOKUP_MULTI(addr, ifp, inm)					\
 	/* struct in_addr addr; */					\
 	/* struct ifnet *ifp; */					\
 	/* struct in_multi *inm; */					\
 do {									\
-	struct in_ifaddr *ia;						\
+	struct ifmaddr *ifma;						\
 									\
-	IFP_TO_IA((ifp), ia);						\
-	if (ia == NULL)							\
-		(inm) = NULL;						\
-	else								\
-		for ((inm) = LIST_FIRST(&ia->ia_multiaddrs);		\
-		     (inm) != NULL &&		\
-		      (inm)->inm_addr.s_addr != (addr).s_addr;		\
-		     (inm) = LIST_NEXT(inm, inm_list))			\
-			 continue;					\
-} while (/* CONSTCOND */ 0)
-
-/*
- * Macro to step through all of the in_multi records, one at a time.
- * The current position is remembered in "step", which the caller must
- * provide.  IN_FIRST_MULTI(), below, must be called to initialize "step"
- * and get the first record.  Both macros return a NULL "inm" when there
- * are no remaining records.
- */
-#define IN_NEXT_MULTI(step, inm)					\
-	/* struct in_multistep  step; */				\
-	/* struct in_multi *inm; */					\
-do {									\
-	if (((inm) = (step).i_inm) != NULL)				\
-		(step).i_inm = LIST_NEXT((inm), inm_list);		\
-	else								\
-		while ((step).i_ia != NULL) {				\
-			(inm) = LIST_FIRST(&(step).i_ia->ia_multiaddrs); \
-			(step).i_ia = TAILQ_NEXT((step).i_ia, ia_list);	\
-			if ((inm) != NULL) {				\
-				(step).i_inm = LIST_NEXT((inm), inm_list); \
-				break;					\
-			}						\
+	(inm) = NULL;							\
+	TAILQ_FOREACH(ifma, &(ifp)->if_maddrlist, ifma_list)		\
+		if (ifma->ifma_addr->sa_family == AF_INET &&		\
+		    ifmatoinm(ifma)->inm_addr.s_addr == (addr).s_addr) {\
+			(inm) = ifmatoinm(ifma);			\
+			break;						\
 		}							\
-} while (/* CONSTCOND */ 0)
-
-#define IN_FIRST_MULTI(step, inm)					\
-	/* struct in_multistep step; */					\
-	/* struct in_multi *inm; */					\
-do {									\
-	(step).i_ia = TAILQ_FIRST(&in_ifaddr);				\
-	(step).i_inm = NULL;						\
-	IN_NEXT_MULTI((step), (inm));					\
 } while (/* CONSTCOND */ 0)
 
 int	in_ifinit(struct ifnet *,
@@ -218,14 +159,6 @@ struct	in_multi *in_addmulti(struct in_addr *, struct ifnet *);
 void	in_delmulti(struct in_multi *);
 void	in_ifscrub(struct ifnet *, struct in_ifaddr *);
 int	in_control(struct socket *, u_long, caddr_t, struct ifnet *);
-
-int	inet_nat64(int, const void *, void *, const void *, u_int8_t);
-int	inet_nat46(int, const void *, void *, const void *, u_int8_t);
-int	in_mask2len(struct in_addr *);
 #endif
-
-
-/* INET6 stuff */
-#include <netinet6/in6_var.h>
 
 #endif /* _NETINET_IN_VAR_H_ */

@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_msk.c,v 1.98 2013/03/17 10:56:23 brad Exp $	*/
+/*	$OpenBSD: if_msk.c,v 1.102 2013/12/28 03:35:42 deraadt Exp $	*/
 
 /*
  * Copyright (c) 1997, 1998, 1999, 2000
@@ -106,7 +106,6 @@
 #ifdef INET
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
-#include <netinet/in_var.h>
 #include <netinet/ip.h>
 #include <netinet/udp.h>
 #include <netinet/tcp.h>
@@ -789,6 +788,7 @@ mskc_reset(struct sk_softc *sc)
 		break;
 	default:
 		imtimer_ticks = SK_IMTIMER_TICKS_YUKON;
+		break;
 	}
 
 	/* Reset status ring. */
@@ -1073,17 +1073,13 @@ msk_activate(struct device *self, int act)
 	int rv = 0;
 
 	switch (act) {
-	case DVACT_QUIESCE:
-		rv = config_activate_children(self, act);
-		break;
-	case DVACT_SUSPEND:
-		rv = config_activate_children(self, act);
-		break;
 	case DVACT_RESUME:
 		msk_reset(sc_if);
-		rv = config_activate_children(self, act);
 		if (ifp->if_flags & IFF_RUNNING)
 			msk_init(sc_if);
+		break;
+	default:
+		rv = config_activate_children(self, act);
 		break;
 	}
 	return (rv);
@@ -1405,14 +1401,11 @@ mskc_activate(struct device *self, int act)
 	int rv = 0;
 
 	switch (act) {
-	case DVACT_QUIESCE:
-		rv = config_activate_children(self, act);
-		break;
-	case DVACT_SUSPEND:
-		rv = config_activate_children(self, act);
-		break;
 	case DVACT_RESUME:
 		mskc_reset(sc);
+		rv = config_activate_children(self, act);
+		break;
+	default:
 		rv = config_activate_children(self, act);
 		break;
 	}

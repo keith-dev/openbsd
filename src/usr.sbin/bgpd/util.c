@@ -1,4 +1,4 @@
-/*	$OpenBSD: util.c,v 1.14 2011/09/20 21:19:07 claudio Exp $ */
+/*	$OpenBSD: util.c,v 1.17 2013/10/30 17:28:33 deraadt Exp $ */
 
 /*
  * Copyright (c) 2006 Claudio Jeker <claudio@openbsd.org>
@@ -118,18 +118,18 @@ log_rd(u_int64_t rd)
 	case EXT_COMMUNITY_TWO_AS:
 		u32 = rd & 0xffffffff;
 		u16 = (rd >> 32) & 0xffff;
-		snprintf(buf, sizeof(buf), "rd %i:%i", u16, u32);
+		snprintf(buf, sizeof(buf), "rd %hu:%u", u16, u32);
 		break;
 	case EXT_COMMUNITY_FOUR_AS:
 		u32 = (rd >> 16) & 0xffffffff;
 		u16 = rd & 0xffff;
-		snprintf(buf, sizeof(buf), "rd %s:%i", log_as(u32), u16);
+		snprintf(buf, sizeof(buf), "rd %s:%hu", log_as(u32), u16);
 		break;
 	case EXT_COMMUNITY_IPV4:
 		u32 = (rd >> 16) & 0xffffffff;
 		u16 = rd & 0xffff;
 		addr.s_addr = htonl(u32);
-		snprintf(buf, sizeof(buf), "rd %s:%i", inet_ntoa(addr), u16);
+		snprintf(buf, sizeof(buf), "rd %s:%hu", inet_ntoa(addr), u16);
 		break;
 	default:
 		return ("rd ?");
@@ -147,7 +147,7 @@ log_ext_subtype(u_int8_t subtype)
 	switch (subtype) {
 	case EXT_COMMUNITY_ROUTE_TGT:
 		return ("rt");	/* route target */
-	case EXT_CUMMUNITY_ROUTE_ORIG:
+	case EXT_COMMUNITY_ROUTE_ORIG:
 		return ("soo");	/* source of origin */
 	case EXT_COMMUNITY_OSPF_DOM_ID:
 		return ("odi");	/* ospf domain id */
@@ -422,6 +422,8 @@ prefix_compare(const struct bgpd_addr *a, const struct bgpd_addr *b,
 
 	switch (a->aid) {
 	case AID_INET:
+		if (prefixlen == 0)
+			return (0);
 		if (prefixlen > 32)
 			fatalx("prefix_cmp: bad IPv4 prefixlen");
 		mask = htonl(prefixlen2mask(prefixlen));
@@ -431,6 +433,8 @@ prefix_compare(const struct bgpd_addr *a, const struct bgpd_addr *b,
 			return (aa - ba);
 		return (0);
 	case AID_INET6:
+		if (prefixlen == 0)
+			return (0);
 		if (prefixlen > 128)
 			fatalx("prefix_cmp: bad IPv6 prefixlen");
 		for (i = 0; i < prefixlen / 8; i++)

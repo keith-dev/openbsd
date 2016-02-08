@@ -1,4 +1,4 @@
-/*	$OpenBSD: bgpd.h,v 1.277 2013/05/11 14:42:28 benno Exp $ */
+/*	$OpenBSD: bgpd.h,v 1.281 2013/11/13 09:14:48 florian Exp $ */
 
 /*
  * Copyright (c) 2003, 2004 Henning Brauer <henning@openbsd.org>
@@ -103,6 +103,7 @@ enum reconf_action {
 	RECONF_NONE,
 	RECONF_KEEP,
 	RECONF_REINIT,
+	RECONF_RELOAD,
 	RECONF_DELETE
 };
 
@@ -208,6 +209,7 @@ struct bgpd_config {
 	u_int16_t				 holdtime;
 	u_int16_t				 min_holdtime;
 	u_int16_t				 connectretry;
+	u_int8_t				 fib_priority;
 };
 
 enum announce_type {
@@ -716,7 +718,7 @@ struct filter_peers {
 #define EXT_COMMUNITY_OPAQUE		3	/* opaque ext community */
 /* sub types */
 #define EXT_COMMUNITY_ROUTE_TGT		2	/* RFC 4360 & RFC4364 */
-#define EXT_CUMMUNITY_ROUTE_ORIG	3	/* RFC 4360 & RFC4364 */
+#define EXT_COMMUNITY_ROUTE_ORIG	3	/* RFC 4360 & RFC4364 */
 #define EXT_COMMUNITY_OSPF_DOM_ID	5	/* RFC 4577 */
 #define EXT_COMMUNITY_OSPF_RTR_TYPE	6	/* RFC 4577 */
 #define EXT_COMMUNITY_OSPF_RTR_ID	7	/* RFC 4577 */
@@ -733,13 +735,13 @@ struct ext_comm_pairs {
 
 #define IANA_EXT_COMMUNITIES	{					\
 	{ EXT_COMMUNITY_TWO_AS, EXT_COMMUNITY_ROUTE_TGT, 0 },		\
-	{ EXT_COMMUNITY_TWO_AS, EXT_CUMMUNITY_ROUTE_ORIG, 0 },		\
+	{ EXT_COMMUNITY_TWO_AS, EXT_COMMUNITY_ROUTE_ORIG, 0 },		\
 	{ EXT_COMMUNITY_TWO_AS, EXT_COMMUNITY_OSPF_DOM_ID, 0 },		\
 	{ EXT_COMMUNITY_TWO_AS, EXT_COMMUNITY_BGP_COLLECT, 0 },		\
 	{ EXT_COMMUNITY_FOUR_AS, EXT_COMMUNITY_ROUTE_TGT, 0 },		\
-	{ EXT_COMMUNITY_FOUR_AS, EXT_CUMMUNITY_ROUTE_ORIG, 0 },		\
+	{ EXT_COMMUNITY_FOUR_AS, EXT_COMMUNITY_ROUTE_ORIG, 0 },		\
 	{ EXT_COMMUNITY_IPV4, EXT_COMMUNITY_ROUTE_TGT, 0 },		\
-	{ EXT_COMMUNITY_IPV4, EXT_CUMMUNITY_ROUTE_ORIG, 0 },		\
+	{ EXT_COMMUNITY_IPV4, EXT_COMMUNITY_ROUTE_ORIG, 0 },		\
 	{ EXT_COMMUNITY_IPV4, EXT_COMMUNITY_OSPF_RTR_ID, 0 },		\
 	{ EXT_COMMUNITY_OPAQUE, EXT_COMMUNITY_OSPF_RTR_TYPE, 0 }	\
 }
@@ -747,7 +749,10 @@ struct ext_comm_pairs {
 
 struct filter_prefix {
 	struct bgpd_addr	addr;
+	u_int8_t		op;
 	u_int8_t		len;
+	u_int8_t		len_min;
+	u_int8_t		len_max;
 };
 
 struct filter_nexthop {
@@ -757,16 +762,8 @@ struct filter_nexthop {
 #define FILTER_NEXTHOP_NEIGHBOR	2
 };
 
-struct filter_prefixlen {
-	enum comp_ops		op;
-	u_int8_t		aid;
-	u_int8_t		len_min;
-	u_int8_t		len_max;
-};
-
 struct filter_match {
 	struct filter_prefix		prefix;
-	struct filter_prefixlen		prefixlen;
 	struct filter_nexthop		nexthop;
 	struct filter_as		as;
 	struct filter_aslen		aslen;
@@ -936,15 +933,18 @@ int	 host(const char *, struct bgpd_addr *, u_int8_t *);
 
 /* kroute.c */
 int		 kr_init(void);
-int		 ktable_update(u_int, char *, char *, int);
+int		 ktable_update(u_int, char *, char *, int, u_int8_t);
 void		 ktable_preload(void);
-void		 ktable_postload(void);
+void		 ktable_postload(u_int8_t);
 int		 ktable_exists(u_int, u_int *);
-int		 kr_change(u_int, struct kroute_full *);
-int		 kr_delete(u_int, struct kroute_full *);
-void		 kr_shutdown(void);
-void		 kr_fib_couple(u_int);
-void		 kr_fib_decouple(u_int);
+int		 kr_change(u_int, struct kroute_full *,  u_int8_t);
+int		 kr_delete(u_int, struct kroute_full *, u_int8_t);
+void		 kr_shutdown(u_int8_t);
+void		 kr_fib_couple(u_int, u_int8_t);
+void		 kr_fib_couple_all(u_int8_t);
+void		 kr_fib_decouple(u_int, u_int8_t);
+void		 kr_fib_decouple_all(u_int8_t);
+void		 kr_fib_update_prio_all(u_int8_t);
 int		 kr_dispatch_msg(void);
 int		 kr_nexthop_add(u_int32_t, struct bgpd_addr *);
 void		 kr_nexthop_delete(u_int32_t, struct bgpd_addr *);

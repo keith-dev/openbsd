@@ -1,4 +1,4 @@
-/*	$OpenBSD: dhctoken.h,v 1.7 2012/10/30 18:39:44 krw Exp $	*/
+/*	$OpenBSD: dhctoken.h,v 1.9 2013/12/05 22:31:35 krw Exp $	*/
 
 /* Tokens for config file lexer and parser. */
 
@@ -52,13 +52,13 @@
 #define TOK_NAME		265
 #define TOK_LEASE		266
 #define TOK_SERVER_NAME		267
-#define TOK_TOKEN_RING		268
 #define TOK_SEND		269
 #define TOK_REQUEST		270
 #define TOK_REQUIRE		271
 #define TOK_TIMEOUT		272
 #define TOK_RETRY		273
 #define TOK_SELECT_TIMEOUT	274
+#define TOK_NEXT_SERVER		275
 #define TOK_INTERFACE		276
 #define TOK_RENEW		277
 #define TOK_REBIND		278
@@ -76,7 +76,6 @@
 #define TOK_APPEND		290
 #define TOK_PREPEND		291
 #define TOK_REJECT		292
-#define TOK_FDDI		293
 #define TOK_LINK_TIMEOUT	294
 #define TOK_IGNORE		295
 

@@ -1,4 +1,4 @@
-#       $OpenBSD: install.md,v 1.35 2012/10/16 16:45:04 deraadt Exp $
+#       $OpenBSD: install.md,v 1.37 2014/02/03 05:35:40 miod Exp $
 #
 # Copyright (c) 1996 The NetBSD Foundation, Inc.
 # All rights reserved.
@@ -32,6 +32,9 @@
 #
 
 MDXAPERTURE=1
+NCPU=$(sysctl -n hw.ncpufound)
+
+((NCPU > 1)) && { DEFAULTSETS="bsd bsd.rd bsd.mp" ; SANESETS="bsd bsd.mp" ; }
 
 md_installboot() {
 	# Use cat to avoid holes created by cp(1)
@@ -49,7 +52,7 @@ md_prep_disklabel() {
 			disklabel -h -A $_disk | egrep "^#  |^  [a-p]:"
 			ask "Use (A)uto layout, (E)dit auto layout, or create (C)ustom layout?" a
 			case $resp in
-			a*|A*)	_op=-w ; AUTOROOT=y ;;
+			a*|A*)	_op=-w ;;
 			e*|E*)	_op=-E ;;
 			c*|C*)	break ;;
 			*)	continue ;;

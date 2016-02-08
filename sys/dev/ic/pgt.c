@@ -1,4 +1,4 @@
-/*	$OpenBSD: pgt.c,v 1.69 2012/12/05 23:20:18 deraadt Exp $  */
+/*	$OpenBSD: pgt.c,v 1.73 2013/12/06 21:03:03 deraadt Exp $  */
 
 /*
  * Copyright (c) 2006 Claudio Jeker <claudio@openbsd.org>
@@ -58,7 +58,6 @@
 #include <sys/time.h>
 #include <sys/ioctl.h>
 #include <sys/device.h>
-#include <sys/workq.h>
 
 #include <machine/bus.h>
 #include <machine/endian.h>
@@ -78,7 +77,6 @@
 #ifdef INET
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
-#include <netinet/in_var.h>
 #include <netinet/if_ether.h>
 #include <netinet/ip.h>
 #endif
@@ -191,7 +189,7 @@ int	 pgt_dma_alloc(struct pgt_softc *);
 int	 pgt_dma_alloc_queue(struct pgt_softc *sc, enum pgt_queue pq);
 void	 pgt_dma_free(struct pgt_softc *);
 void	 pgt_dma_free_queue(struct pgt_softc *sc, enum pgt_queue pq);
-void	 pgt_resume(void *, void *);
+void	 pgt_wakeup(struct pgt_softc *);
 
 void
 pgt_write_memory_barrier(struct pgt_softc *sc)
@@ -3193,7 +3191,7 @@ pgt_dma_alloc_queue(struct pgt_softc *sc, enum pgt_queue pq)
 		error = bus_dmamem_alloc(sc->sc_dmat, PGT_FRAG_SIZE, PAGE_SIZE,
 		    0, &pd->pd_dmas, 1, &nsegs, BUS_DMA_WAITOK);
 		if (error != 0) {
-			printf("%s: error alloc frag %u on queue %u\n",
+			printf("%s: error alloc frag %zu on queue %u\n",
 			    sc->sc_dev.dv_xname, i, pq);
 			free(pd, M_DEVBUF);
 			break;
@@ -3202,7 +3200,7 @@ pgt_dma_alloc_queue(struct pgt_softc *sc, enum pgt_queue pq)
 		error = bus_dmamem_map(sc->sc_dmat, &pd->pd_dmas, nsegs,
 		    PGT_FRAG_SIZE, (caddr_t *)&pd->pd_mem, BUS_DMA_WAITOK);
 		if (error != 0) {
-			printf("%s: error map frag %u on queue %u\n",
+			printf("%s: error map frag %zu on queue %u\n",
 			    sc->sc_dev.dv_xname, i, pq);
 			free(pd, M_DEVBUF);
 			break;
@@ -3212,7 +3210,7 @@ pgt_dma_alloc_queue(struct pgt_softc *sc, enum pgt_queue pq)
 			error = bus_dmamap_load(sc->sc_dmat, pd->pd_dmam,
 			    pd->pd_mem, PGT_FRAG_SIZE, NULL, BUS_DMA_NOWAIT);
 			if (error != 0) {
-				printf("%s: error load frag %u on queue %u\n",
+				printf("%s: error load frag %zu on queue %u\n",
 				    sc->sc_dev.dv_xname, i, pq);
 				bus_dmamem_free(sc->sc_dmat, &pd->pd_dmas,
 				    nsegs);
@@ -3297,18 +3295,16 @@ pgt_activate(struct device *self, int act)
 		if (sc->sc_power != NULL)
 			(*sc->sc_power)(sc, act);
 		break;
-	case DVACT_RESUME:
-		workq_queue_task(NULL, &sc->sc_resume_wqt, 0,
-		    pgt_resume, sc, NULL);
+	case DVACT_WAKEUP:
+		pgt_wakeup(sc);
 		break;
 	}
 	return 0;
 }
 
 void
-pgt_resume(void *arg1, void *arg2)
+pgt_wakeup(struct pgt_softc *sc)
 {
-	struct pgt_softc *sc = arg1;
 	struct ifnet *ifp = &sc->sc_ic.ic_if;
 
 	if (sc->sc_power != NULL)

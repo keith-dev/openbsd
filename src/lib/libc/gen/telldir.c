@@ -1,4 +1,4 @@
-/*	$OpenBSD: telldir.c,v 1.13 2008/05/01 19:49:18 otto Exp $ */
+/*	$OpenBSD: telldir.c,v 1.17 2013/11/05 20:36:51 schwarze Exp $ */
 /*
  * Copyright (c) 1983, 1993
  *	The Regents of the University of California.  All rights reserved.
@@ -28,89 +28,21 @@
  * SUCH DAMAGE.
  */
 
-#include <sys/param.h>
-#include <sys/queue.h>
 #include <dirent.h>
-#include <stdlib.h>
-#include <unistd.h>
-
 #include "thread_private.h"
 #include "telldir.h"
-
-int _readdir_unlocked(DIR *, struct dirent **, int);
 
 /*
  * return a pointer into a directory
  */
-long
-_telldir_unlocked(DIR *dirp)
-{
-	long i;
-	struct ddloc *lp;
-
-	i = dirp->dd_td->td_last;
-	lp = &dirp->dd_td->td_locs[i];
-
-	/* return previous telldir, if there */
-	for (; i < dirp->dd_td->td_loccnt; i++, lp++) {
-		if (lp->loc_seek == dirp->dd_seek && 
-		    lp->loc_loc == dirp->dd_loc) {
-			dirp->dd_td->td_last = i;
-			return (i);
-		}
-	}
-
-	if (dirp->dd_td->td_loccnt == dirp->dd_td->td_sz) {
-		size_t newsz = dirp->dd_td->td_sz * 2 + 1;
-		struct ddloc *p;
-		p = realloc(dirp->dd_td->td_locs, newsz * sizeof(*p));
-		if (p == NULL)
-			return (-1);
-		dirp->dd_td->td_sz = newsz;
-		dirp->dd_td->td_locs = p;
-		lp = &dirp->dd_td->td_locs[i];
-	}
-	dirp->dd_td->td_loccnt++;
-	lp->loc_seek = dirp->dd_seek;
-	lp->loc_loc = dirp->dd_loc;
-	dirp->dd_td->td_last = i;
-	return (i);
-}
-
 long
 telldir(DIR *dirp)
 {
 	long i;
 
 	_MUTEX_LOCK(&dirp->dd_lock);
-	i = _telldir_unlocked(dirp);
+	i = dirp->dd_curpos;
 	_MUTEX_UNLOCK(&dirp->dd_lock);
 
 	return (i);
-}
-
-/*
- * seek to an entry in a directory.
- * Only values returned by "telldir" should be passed to seekdir.
- */
-void
-__seekdir(DIR *dirp, long loc)
-{
-	struct ddloc *lp;
-	struct dirent *dp;
-
-	if (loc < 0 || loc >= dirp->dd_td->td_loccnt)
-		return;
-	lp = &dirp->dd_td->td_locs[loc];
-	dirp->dd_td->td_last = loc;
-	if (lp->loc_loc == dirp->dd_loc && lp->loc_seek == dirp->dd_seek)
-		return;
-	(void) lseek(dirp->dd_fd, (off_t)lp->loc_seek, SEEK_SET);
-	dirp->dd_seek = lp->loc_seek;
-	dirp->dd_loc = 0;
-	while (dirp->dd_loc < lp->loc_loc) {
-		_readdir_unlocked(dirp, &dp, 0);
-		if (dp == NULL)
-			break;
-	}
 }

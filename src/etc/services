@@ -1,4 +1,4 @@
-#	$OpenBSD: services,v 1.80 2013/02/16 07:13:03 ajacoutot Exp $
+#	$OpenBSD: services,v 1.82 2014/01/09 20:54:10 brad Exp $
 #
 # Network services, Internet style
 #
@@ -180,6 +180,8 @@ conference	531/tcp		chat
 netnews		532/tcp		readnews
 netwall		533/udp				# -for emergency broadcasts
 uucp		540/tcp		uucpd		# uucp daemon
+dhcpv6-client	546/udp				# DHCPv6 client
+dhcpv6-server	547/udp				# DHCPv6 server
 remotefs	556/tcp		rfs_server rfs	# Brunhoff remote filesystem
 silc		706/tcp				# Secure Live Internet Conferencing
 silc		706/udp
@@ -248,6 +250,7 @@ krb524		4444/tcp			# Kerberos 5->4
 krb524		4444/udp			# Kerberos 5->4
 ipsec-nat-t	4500/tcp	ipsec-msft	# IPsec NAT-Traversal
 ipsec-nat-t	4500/udp	ipsec-msft	# IPsec NAT-Traversal
+vxlan		4789/udp			# VXLAN
 rfe		5002/tcp			# Radio Free Ethernet
 rfe		5002/udp			# Actually uses UDP only
 sip		5060/tcp			# SIP

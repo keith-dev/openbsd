@@ -1,4 +1,4 @@
-/*	$OpenBSD: subr_autoconf.c,v 1.68 2013/05/30 16:15:02 deraadt Exp $	*/
+/*	$OpenBSD: subr_autoconf.c,v 1.73 2013/12/12 20:56:01 guenther Exp $	*/
 /*	$NetBSD: subr_autoconf.c,v 1.21 1996/04/04 06:06:18 cgd Exp $	*/
 
 /*
@@ -74,12 +74,6 @@ struct matchinfo {
 	int	indirect, pri;
 };
 
-struct cftable_head allcftables;
-
-static struct cftable staticcftable = {
-	cfdata
-};
-
 #ifndef AUTOCONF_VERBOSE
 #define AUTOCONF_VERBOSE 0
 #endif /* AUTOCONF_VERBOSE */
@@ -119,8 +113,6 @@ config_init(void)
 {
 	TAILQ_INIT(&deferred_config_queue);
 	TAILQ_INIT(&alldevs);
-	TAILQ_INIT(&allcftables);
-	TAILQ_INSERT_TAIL(&allcftables, &staticcftable, list);
 }
 
 /*
@@ -186,7 +178,6 @@ config_search(cfmatch_t fn, struct device *parent, void *aux)
 	struct cfdata *cf;
 	short *p;
 	struct matchinfo m;
-	struct cftable *t;
 
 	m.fn = fn;
 	m.parent = parent;
@@ -194,23 +185,23 @@ config_search(cfmatch_t fn, struct device *parent, void *aux)
 	m.aux = aux;
 	m.indirect = parent && parent->dv_cfdata->cf_driver->cd_indirect;
 	m.pri = 0;
-	TAILQ_FOREACH(t, &allcftables, list) {
-		for (cf = t->tab; cf->cf_driver; cf++) {
-			/*
-			 * Skip cf if no longer eligible, otherwise scan
-			 * through parents for one matching `parent',
-			 * and try match function.
-			 */
-			if (cf->cf_fstate == FSTATE_FOUND)
-				continue;
-			if (cf->cf_fstate == FSTATE_DNOTFOUND ||
-			    cf->cf_fstate == FSTATE_DSTAR)
-				continue;
-			for (p = cf->cf_parents; *p >= 0; p++)
-				if (parent->dv_cfdata == &(t->tab)[*p])
-					mapply(&m, cf);
-		}
+
+	for (cf = cfdata; cf->cf_driver; cf++) {
+		/*
+		 * Skip cf if no longer eligible, otherwise scan
+		 * through parents for one matching `parent',
+		 * and try match function.
+		 */
+		if (cf->cf_fstate == FSTATE_FOUND)
+			continue;
+		if (cf->cf_fstate == FSTATE_DNOTFOUND ||
+		    cf->cf_fstate == FSTATE_DSTAR)
+			continue;
+		for (p = cf->cf_parents; *p >= 0; p++)
+			if (parent->dv_cfdata == &cfdata[*p])
+				mapply(&m, cf);
 	}
+
 	if (autoconf_verbose) {
 		if (m.match) {
 			if (m.indirect)
@@ -240,29 +231,27 @@ config_scan(cfscan_t fn, struct device *parent)
 	short *p;
 	void *match;
 	int indirect;
-	struct cftable *t;
 
 	indirect = parent && parent->dv_cfdata->cf_driver->cd_indirect;
-	TAILQ_FOREACH(t, &allcftables, list) {
-		for (cf = t->tab; cf->cf_driver; cf++) {
-			/*
-			 * Skip cf if no longer eligible, otherwise scan
-			 * through parents for one matching `parent',
-			 * and try match function.
-			 */
-			if (cf->cf_fstate == FSTATE_FOUND)
-				continue;
-			if (cf->cf_fstate == FSTATE_DNOTFOUND ||
-			    cf->cf_fstate == FSTATE_DSTAR)
-				continue;
-			for (p = cf->cf_parents; *p >= 0; p++)
-				if (parent->dv_cfdata == &(t->tab)[*p]) {
-					match = indirect?
-					    config_make_softc(parent, cf) :
-					    (void *)cf;
-					(*fn)(parent, match);
-				}
-		}
+
+	for (cf = cfdata; cf->cf_driver; cf++) {
+		/*
+		 * Skip cf if no longer eligible, otherwise scan
+		 * through parents for one matching `parent',
+		 * and try match function.
+		 */
+		if (cf->cf_fstate == FSTATE_FOUND)
+			continue;
+		if (cf->cf_fstate == FSTATE_DNOTFOUND ||
+		    cf->cf_fstate == FSTATE_DSTAR)
+			continue;
+		for (p = cf->cf_parents; *p >= 0; p++)
+			if (parent->dv_cfdata == &cfdata[*p]) {
+				match = indirect?
+				    config_make_softc(parent, cf) :
+				    (void *)cf;
+				(*fn)(parent, match);
+			}
 	}
 }
 
@@ -299,7 +288,7 @@ config_rootsearch(cfmatch_t fn, char *rootname, void *aux)
 	return (m.match);
 }
 
-char *msgs[3] = { "", " not configured\n", " unsupported\n" };
+const char *msgs[3] = { "", " not configured\n", " unsupported\n" };
 
 /*
  * The given `aux' argument describes a device that has been found
@@ -318,7 +307,7 @@ config_found_sm(struct device *parent, void *aux, cfprint_t print,
 	if ((match = config_search(submatch, parent, aux)) != NULL)
 		return (config_attach(parent, match, aux, print));
 	if (print)
-		printf(msgs[(*print)(aux, parent->dv_xname)]);
+		printf("%s", msgs[(*print)(aux, parent->dv_xname)]);
 	return (NULL);
 }
 
@@ -346,7 +335,6 @@ config_attach(struct device *parent, void *match, void *aux, cfprint_t print)
 	struct device *dev;
 	struct cfdriver *cd;
 	struct cfattach *ca;
-	struct cftable *t;
 
 	mtx_enter(&autoconf_attdet_mtx);
 	while (autoconf_attdet < 0)
@@ -397,15 +385,14 @@ config_attach(struct device *parent, void *match, void *aux, cfprint_t print)
 	 * otherwise identical, or bump the unit number on all starred
 	 * cfdata for this device.
 	 */
-	TAILQ_FOREACH(t, &allcftables, list) {
-		for (cf = t->tab; cf->cf_driver; cf++)
-			if (cf->cf_driver == cd &&
-			    cf->cf_unit == dev->dv_unit) {
-				if (cf->cf_fstate == FSTATE_NOTFOUND)
-					cf->cf_fstate = FSTATE_FOUND;
-				if (cf->cf_fstate == FSTATE_STAR)
-					cf->cf_unit++;
-			}
+	for (cf = cfdata; cf->cf_driver; cf++) {
+		if (cf->cf_driver == cd &&
+		    cf->cf_unit == dev->dv_unit) {
+			if (cf->cf_fstate == FSTATE_NOTFOUND)
+				cf->cf_fstate = FSTATE_FOUND;
+			if (cf->cf_fstate == FSTATE_STAR)
+				cf->cf_unit++;
+		}
 	}
 	device_register(dev, aux);
 	(*ca->ca_attach)(parent, dev, aux);
@@ -436,7 +423,7 @@ config_make_softc(struct device *parent, struct cfdata *cf)
 
 	/* get memory for all device vars */
 	dev = malloc(ca->ca_devsize, M_DEVBUF, M_NOWAIT|M_ZERO);
-	if (!dev)
+	if (dev == NULL)
 		panic("config_make_softc: allocation for device softc failed");
 
 	dev->dv_class = cd->cd_class;
@@ -476,7 +463,7 @@ config_make_softc(struct device *parent, struct cfdata *cf)
 			new *= 2;
 		cd->cd_ndevs = new;
 		nsp = malloc(new * sizeof(void *), M_DEVBUF, M_NOWAIT|M_ZERO);
-		if (nsp == 0)
+		if (nsp == NULL)
 			panic("config_make_softc: %sing dev array",
 			    old != 0 ? "expand" : "creat");
 		if (old != 0) {
@@ -773,11 +760,15 @@ int
 config_suspend(struct device *dev, int act)
 {
 	struct cfattach *ca = dev->dv_cfdata->cf_attach;
+	int r;
 
+	device_ref(dev);
 	if (ca->ca_activate)
-		return (*ca->ca_activate)(dev, act);
+		r = (*ca->ca_activate)(dev, act);
 	else
-		return config_activate_children(dev, act);
+		r = config_activate_children(dev, act);
+	device_unref(dev);      
+	return (r);
 }
 
 /*
@@ -796,9 +787,10 @@ config_activate_children(struct device *parent, int act)
 		if (d->dv_parent != parent)
 			continue;
 		switch (act) {
+		case DVACT_QUIESCE:
 		case DVACT_SUSPEND:
 		case DVACT_RESUME:
-		case DVACT_QUIESCE:
+		case DVACT_WAKEUP:
 		case DVACT_POWERDOWN:
 			rv = config_suspend(d, act);
 			break;

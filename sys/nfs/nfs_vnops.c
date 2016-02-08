@@ -1,4 +1,4 @@
-/*	$OpenBSD: nfs_vnops.c,v 1.144 2013/03/28 03:29:44 guenther Exp $	*/
+/*	$OpenBSD: nfs_vnops.c,v 1.150 2014/01/18 07:10:26 deraadt Exp $	*/
 /*	$NetBSD: nfs_vnops.c,v 1.62.4.1 1996/07/08 20:26:52 jtc Exp $	*/
 
 /*
@@ -78,7 +78,6 @@
 
 #include <net/if.h>
 #include <netinet/in.h>
-#include <netinet/in_var.h>
 
 #include <dev/rndvar.h>
 
@@ -1357,8 +1356,7 @@ again:
 		if (fmode & O_EXCL) {
 			*tl = txdr_unsigned(NFSV3CREATE_EXCLUSIVE);
 			tl = nfsm_build(&info.nmi_mb, NFSX_V3CREATEVERF);
-			*tl++ = arc4random();
-			*tl = arc4random();
+			arc4random_buf(tl, sizeof(*tl) * 2);
 		} else {
 			*tl = txdr_unsigned(NFSV3CREATE_UNCHECKED);
 			nfsm_v3attrbuild(&info.nmi_mb, vap, 0);
@@ -1685,10 +1683,7 @@ nfs_link(void *v)
 
 	if (dvp->v_mount != vp->v_mount) {
 		pool_put(&namei_pool, cnp->cn_pnbuf);
-		if (vp == dvp)
-			vrele(dvp);
-		else
-			vput(dvp);
+		vput(dvp);
 		return (EXDEV);
 	}
 
@@ -1960,8 +1955,7 @@ nfs_readdir(void *v)
 	struct uio *uio = ap->a_uio;
 	int tresid, error = 0;
 	struct vattr vattr;
-	u_long *cookies = NULL;
-	int ncookies = 0, cnt;
+	int cnt;
 	u_int64_t  newoff = uio->uio_offset;
 	struct nfsmount *nmp = VFSTONFS(vp->v_mount);
 	struct uio readdir_uio;
@@ -1993,15 +1987,6 @@ nfs_readdir(void *v)
 
 	if (uio->uio_rw != UIO_READ)
 		return (EINVAL);
-
-	if (ap->a_cookies) {
-		ncookies = uio->uio_resid / 20;
-
-		cookies = malloc(sizeof(*cookies) * ncookies, M_TEMP,
-		    M_WAITOK);
-		*ap->a_ncookies = ncookies;
-		*ap->a_cookies = cookies;
-	}
 
 	if ((nmp->nm_flag & (NFSMNT_NFSV3 | NFSMNT_GOTFSINFO)) == NFSMNT_NFSV3)
 		(void)nfs_fsinfo(nmp, vp, cred, p);
@@ -2035,12 +2020,12 @@ nfs_readdir(void *v)
 			error = EINVAL;
 
 		while (error == 0 &&
-		    (ap->a_cookies == NULL || ncookies != 0) &&
 		    ndp < (struct nfs_dirent *)readdir_iovec.iov_base) {
 			struct dirent *dp = &ndp->dirent;
 			int reclen = dp->d_reclen;
 
 			dp->d_reclen -= NFS_DIRENT_OVERHEAD;
+			dp->d_off = fxdr_hyper(&ndp->cookie[0]);
 
 			if (uio->uio_resid < dp->d_reclen) {
 				eof = 0;
@@ -2048,17 +2033,10 @@ nfs_readdir(void *v)
 				break;
 			}
 
-			error = uiomove((caddr_t)dp, dp->d_reclen, uio);
-			if (error)
+			if ((error = uiomove(dp, dp->d_reclen, uio)))
 				break;
 
 			newoff = fxdr_hyper(&ndp->cookie[0]);
-
-			if (ap->a_cookies != NULL) {
-				*cookies = newoff;
-				cookies++;
-				ncookies--;
-			}
 
 			ndp = (struct nfs_dirent *)((u_int8_t *)ndp + reclen);
 		}
@@ -2067,18 +2045,7 @@ nfs_readdir(void *v)
 	free(data, M_TEMP);
 	data = NULL;
 
-	if (ap->a_cookies) {
-		if (error) {
-			free(*ap->a_cookies, M_TEMP);
-			*ap->a_cookies = NULL;
-			*ap->a_ncookies = 0;
-		} else {
-			*ap->a_ncookies -= ncookies;
-		}
-	}
-
-	if (!error)
-		uio->uio_offset = newoff;
+	uio->uio_offset = newoff;
 
 	if (!error && (eof || uio->uio_resid == tresid)) {
 		nfsstats.direofcache_misses++;
@@ -2176,7 +2143,7 @@ nfs_readdirrpc(struct vnode *vp, struct uio *uiop, struct ucred *cred,
 		nfsm_dissect(tl, u_int32_t *, NFSX_UNSIGNED);
 		more_dirs = fxdr_unsigned(int, *tl);
 
-		/* loop thru the dir entries, doctoring them to 4bsd form */
+		/* loop thru the dir entries, doctoring them to dirent form */
 		while (more_dirs && bigenough) {
 			if (info.nmi_v3) {
 				nfsm_dissect(tl, u_int32_t *,
@@ -2194,26 +2161,26 @@ nfs_readdirrpc(struct vnode *vp, struct uio *uiop, struct ucred *cred,
 				m_freem(info.nmi_mrep);
 				goto nfsmout;
 			}
-			tlen = nfsm_rndup(len + 1);
+			tlen = DIRENT_RECSIZE(len) + NFS_DIRENT_OVERHEAD;
 			left = NFS_READDIRBLKSIZ - blksiz;
-			if ((tlen + NFS_DIRHDSIZ) > left) {
+			if (tlen > left) {
 				dp->d_reclen += left;
 				uiop->uio_iov->iov_base += left;
 				uiop->uio_iov->iov_len -= left;
 				uiop->uio_resid -= left;
 				blksiz = 0;
 			}
-			if ((tlen + NFS_DIRHDSIZ) > uiop->uio_resid)
+			if (tlen > uiop->uio_resid)
 				bigenough = 0;
 			if (bigenough) {
 				ndp = (struct nfs_dirent *)
 				    uiop->uio_iov->iov_base;
 				dp = &ndp->dirent;
-				dp->d_fileno = (int)fileno;
+				dp->d_fileno = fileno;
 				dp->d_namlen = len;
-				dp->d_reclen = tlen + NFS_DIRHDSIZ;
+				dp->d_reclen = tlen;
 				dp->d_type = DT_UNKNOWN;
-				blksiz += dp->d_reclen;
+				blksiz += tlen;
 				if (blksiz == NFS_READDIRBLKSIZ)
 					blksiz = 0;
 				uiop->uio_resid -= NFS_DIRHDSIZ;
@@ -2223,7 +2190,7 @@ nfs_readdirrpc(struct vnode *vp, struct uio *uiop, struct ucred *cred,
 				uiop->uio_iov->iov_len -= NFS_DIRHDSIZ;
 				nfsm_mtouio(uiop, len);
 				cp = uiop->uio_iov->iov_base;
-				tlen -= len;
+				tlen -= NFS_DIRHDSIZ + len;
 				*cp = '\0';	/* null terminate */
 				uiop->uio_iov->iov_base += tlen;
 				uiop->uio_iov->iov_len -= tlen;
@@ -2373,9 +2340,9 @@ nfs_readdirplusrpc(struct vnode *vp, struct uio *uiop, struct ucred *cred,
 				m_freem(info.nmi_mrep);
 				goto nfsmout;
 			}
-			tlen = nfsm_rndup(len + 1);
+			tlen = DIRENT_RECSIZE(len) + NFS_DIRENT_OVERHEAD;
 			left = NFS_READDIRBLKSIZ - blksiz;
-			if ((tlen + NFS_DIRHDSIZ) > left) {
+			if (tlen > left) {
 				dp->d_reclen += left;
 				uiop->uio_iov->iov_base =
 				    (char *)uiop->uio_iov->iov_base + left;
@@ -2383,17 +2350,17 @@ nfs_readdirplusrpc(struct vnode *vp, struct uio *uiop, struct ucred *cred,
 				uiop->uio_resid -= left;
 				blksiz = 0;
 			}
-			if ((tlen + NFS_DIRHDSIZ) > uiop->uio_resid)
+			if (tlen > uiop->uio_resid)
 				bigenough = 0;
 			if (bigenough) {
 				ndirp = (struct nfs_dirent *)
 				    uiop->uio_iov->iov_base;
 				dp = &ndirp->dirent;
-				dp->d_fileno = (int)fileno;
+				dp->d_fileno = fileno;
 				dp->d_namlen = len;
-				dp->d_reclen = tlen + NFS_DIRHDSIZ;
+				dp->d_reclen = tlen;
 				dp->d_type = DT_UNKNOWN;
-				blksiz += dp->d_reclen;
+				blksiz += tlen;
 				if (blksiz == NFS_READDIRBLKSIZ)
 					blksiz = 0;
 				uiop->uio_resid -= NFS_DIRHDSIZ;
@@ -2405,7 +2372,7 @@ nfs_readdirplusrpc(struct vnode *vp, struct uio *uiop, struct ucred *cred,
 				cnp->cn_namelen = len;
 				nfsm_mtouio(uiop, len);
 				cp = uiop->uio_iov->iov_base;
-				tlen -= len;
+				tlen -= NFS_DIRHDSIZ + len;
 				*cp = '\0';
 				uiop->uio_iov->iov_base += tlen;
 				uiop->uio_iov->iov_len -= tlen;
@@ -2550,8 +2517,11 @@ nfs_sillyrename(struct vnode *dvp, struct vnode *vp, struct componentname *cnp)
 	/* Try lookitups until we get one that isn't there */
 	while (1) {
 		/* Fudge together a funny name */
+		u_int32_t rnd[2];
+
+		arc4random_buf(&rnd, sizeof rnd);
 		sp->s_namlen = snprintf(sp->s_name, sizeof sp->s_name,
-		    ".nfs%08X%08X", arc4random(), arc4random());
+		    ".nfs%08X%08X", rnd[0], rnd[1]);
 		if (sp->s_namlen > sizeof sp->s_name)
 			sp->s_namlen = strlen(sp->s_name);
 
@@ -3021,7 +2991,7 @@ nfs_print(void *v)
 	struct vnode *vp = ap->a_vp;
 	struct nfsnode *np = VTONFS(vp);
 
-	printf("tag VT_NFS, fileid %ld fsid 0x%lx",
+	printf("tag VT_NFS, fileid %lld fsid 0x%lx",
 		np->n_vattr.va_fileid, np->n_vattr.va_fsid);
 #ifdef FIFO
 	if (vp->v_type == VFIFO)

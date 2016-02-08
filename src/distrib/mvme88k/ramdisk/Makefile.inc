@@ -1,5 +1,5 @@
 #
-#	$OpenBSD: Makefile.inc,v 1.10 2009/04/17 03:58:54 deraadt Exp $
+#	$OpenBSD: Makefile.inc,v 1.13 2013/11/09 22:35:40 miod Exp $
 #
 
 # TOP is assumed to be defined by Makefile including this one.
@@ -23,11 +23,8 @@ ${CBIN}.mk ${CBIN}.cache ${CBIN}.c: ${CBIN}.conf
 ${CBIN}: ${CBIN}.mk ${CBIN}.cache ${CBIN}.c
 	${MAKE} -f ${CBIN}.mk all
 
-#${CBIN}.mk ${CBIN}.cache ${CBIN}.c: ${CRUNCHCONF}
-#	crunchgen -D ${BSDSRCDIR} -L ${DESTDIR}/usr/lib ${CRUNCHCONF}
-
 #${CBIN}: ${CBIN}.mk ${CBIN}.cache ${CBIN}.c
-#	${MAKE} -f ${CBIN}.mk all
+#	${MAKE} -f ${CBIN}.mk SRCLIBDIR=${.CURDIR}/../../../lib all
 
 do_files:
 	mtree -def ${MTREE} -p ${MOUNT_POINT}/ -u
@@ -37,7 +34,9 @@ do_files:
 	rm ${MOUNT_POINT}/${CBIN}
 
 clean cleandir:
-	/bin/rm -f core ${IMAGE} ${CBIN} ${CBIN}.mk ${CBIN}.cache *.o *.lo *.c
+	/bin/rm -f *.core ${IMAGE} ${CBIN} ${CBIN}.mk ${CBIN}.cache \
+	    *.o *.lo *.c \
+	    lib*.a lib*.olist ${CBIN}.map
 
 .include <bsd.obj.mk>
 .include <bsd.subdir.mk>

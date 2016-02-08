@@ -1,4 +1,4 @@
-/*	$OpenBSD: pfkey.c,v 1.23 2013/03/21 04:30:14 deraadt Exp $	*/
+/*	$OpenBSD: pfkey.c,v 1.29 2014/02/21 20:52:38 markus Exp $	*/
 
 /*
  * Copyright (c) 2010-2013 Reyk Floeter <reyk@openbsd.org>
@@ -99,6 +99,7 @@ static const struct pfkey_constmap pfkey_integr[] = {
 static const struct pfkey_constmap pfkey_satype[] = {
 	{ SADB_SATYPE_AH,	IKEV2_SAPROTO_AH },
 	{ SADB_SATYPE_ESP,	IKEV2_SAPROTO_ESP },
+	{ SADB_X_SATYPE_IPCOMP,	IKEV2_SAPROTO_IPCOMP },
 	{ 0 }
 };
 
@@ -478,8 +479,8 @@ pfkey_sa(int sd, u_int8_t satype, u_int8_t action, struct iked_childsa *sa)
 	sadb.sadb_sa_state = SADB_SASTATE_MATURE;
 	sadb.sadb_sa_replay = 64;
 
-	/* XXX we don't support transport mode, yet */
-	sadb.sadb_sa_flags |= SADB_X_SAFLAGS_TUNNEL;
+	if (!sa->csa_transport)
+		sadb.sadb_sa_flags |= SADB_X_SAFLAGS_TUNNEL;
 
 	if (sa->csa_esn)
 		sadb.sadb_sa_flags |= SADB_X_SAFLAGS_ESN;
@@ -526,7 +527,8 @@ pfkey_sa(int sd, u_int8_t satype, u_int8_t action, struct iked_childsa *sa)
 		return (-1);
 	}
 
-	if (sa->csa_ikesa->sa_udpencap && sa->csa_ikesa->sa_natt) {
+	if (satype == SADB_SATYPE_ESP &&
+	    sa->csa_ikesa->sa_udpencap && sa->csa_ikesa->sa_natt) {
 		sadb.sadb_sa_flags |= SADB_X_SAFLAGS_UDPENCAP;
 		udpencap.sadb_x_udpencap_exttype = SADB_X_EXT_UDPENCAP;
 		udpencap.sadb_x_udpencap_len = sizeof(udpencap) / 8;
@@ -570,6 +572,10 @@ pfkey_sa(int sd, u_int8_t satype, u_int8_t action, struct iked_childsa *sa)
 		sa_enckey.sadb_key_bits =
 		    8 * ibuf_size(sa->csa_encrkey);
 	}
+
+	/* we only support deflate */
+	if (satype == SADB_X_SATYPE_IPCOMP)
+		sadb.sadb_sa_encrypt = SADB_X_CALG_DEFLATE;
 
 	/* local id */
 	sa_srcid = pfkey_id2ident(sa->csa_srcid, SADB_EXT_IDENTITY_SRC);
@@ -710,6 +716,118 @@ pfkey_sa(int sd, u_int8_t satype, u_int8_t action, struct iked_childsa *sa)
 }
 
 int
+pfkey_sa_last_used(int sd, struct iked_childsa *sa, u_int64_t *last_used)
+{
+	struct sadb_msg		*msg, smsg;
+	struct sadb_address	 sa_src, sa_dst;
+	struct sadb_sa		 sadb;
+	struct sadb_lifetime	*sa_life;
+	struct sockaddr_storage	 ssrc, sdst;
+	struct iovec		 iov[IOV_CNT];
+	u_int8_t		*data;
+	ssize_t			 n;
+	int			 iov_cnt, ret = -1;
+	u_int8_t		 satype;
+
+	*last_used = 0;
+
+	if (pfkey_map(pfkey_satype, sa->csa_saproto, &satype) == -1)
+		return (-1);
+
+	bzero(&ssrc, sizeof(ssrc));
+	memcpy(&ssrc, &sa->csa_local->addr, sizeof(ssrc));
+	if (socket_af((struct sockaddr *)&ssrc, 0) == -1) {
+		log_warn("%s: invalid address", __func__);
+		return (-1);
+	}
+
+	bzero(&sdst, sizeof(sdst));
+	memcpy(&sdst, &sa->csa_peer->addr, sizeof(sdst));
+	if (socket_af((struct sockaddr *)&sdst, 0) == -1) {
+		log_warn("%s: invalid address", __func__);
+		return (-1);
+	}
+
+	bzero(&smsg, sizeof(smsg));
+	smsg.sadb_msg_version = PF_KEY_V2;
+	smsg.sadb_msg_seq = ++sadb_msg_seq;
+	smsg.sadb_msg_pid = getpid();
+	smsg.sadb_msg_len = sizeof(smsg) / 8;
+	smsg.sadb_msg_type = SADB_GET;
+	smsg.sadb_msg_satype = satype;
+
+	bzero(&sadb, sizeof(sadb));
+	sadb.sadb_sa_len = sizeof(sadb) / 8;
+	sadb.sadb_sa_exttype = SADB_EXT_SA;
+	sadb.sadb_sa_spi = htonl(sa->csa_spi.spi);
+	sadb.sadb_sa_state = SADB_SASTATE_MATURE;
+	sadb.sadb_sa_replay = 64;
+
+	bzero(&sa_src, sizeof(sa_src));
+	sa_src.sadb_address_len = (sizeof(sa_src) + ROUNDUP(ssrc.ss_len)) / 8;
+	sa_src.sadb_address_exttype = SADB_EXT_ADDRESS_SRC;
+
+	bzero(&sa_dst, sizeof(sa_dst));
+	sa_dst.sadb_address_len = (sizeof(sa_dst) + ROUNDUP(sdst.ss_len)) / 8;
+	sa_dst.sadb_address_exttype = SADB_EXT_ADDRESS_DST;
+
+	iov_cnt = 0;
+
+	/* header */
+	iov[iov_cnt].iov_base = &smsg;
+	iov[iov_cnt].iov_len = sizeof(smsg);
+	iov_cnt++;
+
+	/* sa */
+	iov[iov_cnt].iov_base = &sadb;
+	iov[iov_cnt].iov_len = sizeof(sadb);
+	smsg.sadb_msg_len += sadb.sadb_sa_len;
+	iov_cnt++;
+
+	/* src addr */
+	iov[iov_cnt].iov_base = &sa_src;
+	iov[iov_cnt].iov_len = sizeof(sa_src);
+	iov_cnt++;
+	iov[iov_cnt].iov_base = &ssrc;
+	iov[iov_cnt].iov_len = ROUNDUP(ssrc.ss_len);
+	smsg.sadb_msg_len += sa_src.sadb_address_len;
+	iov_cnt++;
+
+	/* dst addr */
+	iov[iov_cnt].iov_base = &sa_dst;
+	iov[iov_cnt].iov_len = sizeof(sa_dst);
+	iov_cnt++;
+	iov[iov_cnt].iov_base = &sdst;
+	iov[iov_cnt].iov_len = ROUNDUP(sdst.ss_len);
+	smsg.sadb_msg_len += sa_dst.sadb_address_len;
+	iov_cnt++;
+
+	if ((ret = pfkey_write(sd, &smsg, iov, iov_cnt, &data, &n)) != 0)
+		return (-1);
+
+	msg = (struct sadb_msg *)data;
+	if (msg->sadb_msg_errno != 0) {
+		errno = msg->sadb_msg_errno;
+		ret = -1;
+		log_warn("%s: message", __func__);
+		goto done;
+	}
+	if ((sa_life = pfkey_find_ext(data, n, SADB_X_EXT_LIFETIME_LASTUSE))
+	    == NULL) {
+		/* has never been used */
+		ret = -1;
+		goto done;
+	}
+	*last_used = sa_life->sadb_lifetime_usetime;
+	log_debug("%s: last_used %llu", __func__, *last_used);
+
+done:
+	bzero(data, n);
+	free(data);
+	return (ret);
+}
+
+int
 pfkey_sa_getspi(int sd, u_int8_t satype, struct iked_childsa *sa,
     u_int32_t *spip)
 {
@@ -749,7 +867,8 @@ pfkey_sa_getspi(int sd, u_int8_t satype, struct iked_childsa *sa,
 	sa_spirange.sadb_spirange_exttype = SADB_EXT_SPIRANGE;
 	sa_spirange.sadb_spirange_len = sizeof(sa_spirange) / 8;
 	sa_spirange.sadb_spirange_min = 0x100;
-	sa_spirange.sadb_spirange_max = 0xffffffff;
+	sa_spirange.sadb_spirange_max = (satype == SADB_X_SATYPE_IPCOMP) ?
+	    (CPI_PRIVATE_MIN - 1) : 0xffffffff;
 	sa_spirange.sadb_spirange_reserved = 0;
 
 	bzero(&sa_src, sizeof(sa_src));
@@ -996,9 +1115,14 @@ pfkey_reply(int sd, u_int8_t **datap, ssize_t *lenp)
 		    hdr.sadb_msg_pid == (u_int32_t)getpid())
 			break;
 
+		/* ignore messages for other processes */
+		if (hdr.sadb_msg_pid != 0 &&
+		    hdr.sadb_msg_pid != (u_int32_t)getpid())
+			continue;
+
 		/* not the reply, enqueue */
 		if ((pm = malloc(sizeof(*pm))) == NULL) {
-			log_warn("%s", __func__);
+			log_warn("%s: malloc", __func__);
 			free(data);
 			return (-1);
 		}
@@ -1265,6 +1389,11 @@ pfkey_init(struct iked *env, int fd)
 	struct sadb_msg		smsg;
 	struct iovec		iov;
 
+	/* Set up a timer to process messages deferred by the pfkey_reply */
+	pfkey_timer_tv.tv_sec = 1;
+	pfkey_timer_tv.tv_usec = 0;
+	evtimer_set(&pfkey_timer_ev, pfkey_timer_cb, env);
+
 	/* Register the pfkey socket event handler */
 	env->sc_pfkey = fd;
 	event_set(&env->sc_pfkeyev, env->sc_pfkey,
@@ -1299,11 +1428,6 @@ pfkey_init(struct iked *env, int fd)
 
 	if (pfkey_write(fd, &smsg, &iov, 1, NULL, NULL))
 		fatal("pfkey_init: failed to set up AH acquires");
-
-	/* Set up a timer to process messages deferred by the pfkey_reply */
-	pfkey_timer_tv.tv_sec = 1;
-	pfkey_timer_tv.tv_usec = 0;
-	evtimer_set(&pfkey_timer_ev, pfkey_timer_cb, env);
 
 	if (env->sc_opts & IKED_OPT_NOIPV6BLOCKING)
 		return;
@@ -1395,7 +1519,7 @@ pfkey_process(struct iked *env, struct pfkey_message *pm)
 	struct sadb_address	*sa_addr;
 	struct sadb_protocol	*sa_proto;
 	struct sadb_x_policy	 sa_pol;
-	struct sockaddr_storage	*ssrc, *sdst, *smask, *dmask, *speer;
+	struct sockaddr		*ssrc, *sdst, *smask, *dmask, *speer;
 	struct iovec		 iov[IOV_CNT];
 	int			 iov_cnt, sd = env->sc_pfkey;
 	u_int8_t		*reply;
@@ -1403,6 +1527,7 @@ pfkey_process(struct iked *env, struct pfkey_message *pm)
 	const char		*errmsg = NULL;
 	u_int8_t		*data = pm->pm_data;
 	ssize_t			 len = pm->pm_lenght;
+	size_t			 slen;
 
 	if (!env || !data || !len)
 		return;
@@ -1419,10 +1544,14 @@ pfkey_process(struct iked *env, struct pfkey_message *pm)
 			log_debug("%s: no peer address", __func__);
 			return;
 		}
-		speer = (struct sockaddr_storage *)(sa_addr + 1);
-		peer.addr_af = speer->ss_family;
+		speer = (struct sockaddr *)(sa_addr + 1);
+		peer.addr_af = speer->sa_family;
 		peer.addr_port = htons(socket_getport(speer));
-		memcpy(&peer.addr, speer, sizeof(*speer));
+		if ((slen = speer->sa_len) > sizeof(peer.addr)) {
+			log_debug("%s: invalid peer address len", __func__);
+			return;
+		}
+		memcpy(&peer.addr, speer, slen);
 		if (socket_af((struct sockaddr *)&peer.addr,
 		    peer.addr_port) == -1) {
 			log_debug("%s: invalid address", __func__);
@@ -1467,10 +1596,14 @@ pfkey_process(struct iked *env, struct pfkey_message *pm)
 			errmsg = "flow source address";
 			goto out;
 		}
-		ssrc = (struct sockaddr_storage *)(sa_addr + 1);
-		flow.flow_src.addr_af = ssrc->ss_family;
+		ssrc = (struct sockaddr *)(sa_addr + 1);
+		flow.flow_src.addr_af = ssrc->sa_family;
 		flow.flow_src.addr_port = htons(socket_getport(ssrc));
-		memcpy(&flow.flow_src.addr, ssrc, sizeof(*ssrc));
+		if ((slen = ssrc->sa_len) > sizeof(flow.flow_src.addr)) {
+			log_debug("%s: invalid src address len", __func__);
+			return;
+		}
+		memcpy(&flow.flow_src.addr, ssrc, slen);
 		if (socket_af((struct sockaddr *)&flow.flow_src.addr,
 		    flow.flow_src.addr_port) == -1) {
 			log_debug("%s: invalid address", __func__);
@@ -1482,10 +1615,14 @@ pfkey_process(struct iked *env, struct pfkey_message *pm)
 			errmsg = "flow destination address";
 			goto out;
 		}
-		sdst = (struct sockaddr_storage *)(sa_addr + 1);
-		flow.flow_dst.addr_af = sdst->ss_family;
+		sdst = (struct sockaddr *)(sa_addr + 1);
+		flow.flow_dst.addr_af = sdst->sa_family;
 		flow.flow_dst.addr_port = htons(socket_getport(sdst));
-		memcpy(&flow.flow_dst.addr, sdst, sizeof(*sdst));
+		if ((slen = sdst->sa_len) > sizeof(flow.flow_dst.addr)) {
+			log_debug("%s: invalid dst address len", __func__);
+			return;
+		}
+		memcpy(&flow.flow_dst.addr, sdst, slen);
 		if (socket_af((struct sockaddr *)&flow.flow_dst.addr,
 		    flow.flow_dst.addr_port) == -1) {
 			log_debug("%s: invalid address", __func__);
@@ -1497,8 +1634,8 @@ pfkey_process(struct iked *env, struct pfkey_message *pm)
 			errmsg = "flow source mask";
 			goto out;
 		}
-		smask = (struct sockaddr_storage *)(sa_addr + 1);
-		switch (smask->ss_family) {
+		smask = (struct sockaddr *)(sa_addr + 1);
+		switch (smask->sa_family) {
 		case AF_INET:
 			flow.flow_src.addr_mask =
 			    mask2prefixlen((struct sockaddr *)smask);
@@ -1522,8 +1659,8 @@ pfkey_process(struct iked *env, struct pfkey_message *pm)
 			errmsg = "flow destination mask";
 			goto out;
 		}
-		dmask = (struct sockaddr_storage *)(sa_addr + 1);
-		switch (dmask->ss_family) {
+		dmask = (struct sockaddr *)(sa_addr + 1);
+		switch (dmask->sa_family) {
 		case AF_INET:
 			flow.flow_dst.addr_mask =
 			    mask2prefixlen((struct sockaddr *)dmask);

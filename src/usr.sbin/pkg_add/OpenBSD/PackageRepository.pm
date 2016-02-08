@@ -1,5 +1,5 @@
 # ex:ts=8 sw=4:
-# $OpenBSD: PackageRepository.pm,v 1.95 2012/04/28 15:22:49 espie Exp $
+# $OpenBSD: PackageRepository.pm,v 1.108 2014/02/08 11:07:33 espie Exp $
 #
 # Copyright (c) 2003-2010 Marc Espie <espie@openbsd.org>
 #
@@ -158,9 +158,10 @@ sub wipe_info
 
 	my $dir = $pkg->{dir};
 	if (defined $dir) {
-
-	    OpenBSD::Error->rmtree($dir);
-	    delete $pkg->{dir};
+		require OpenBSD::Temp;
+		OpenBSD::Error->rmtree($dir);
+		OpenBSD::Temp->reclaim($dir);
+		delete $pkg->{dir};
 	}
 }
 
@@ -257,6 +258,7 @@ sub grabPlist
 sub parse_problems
 {
 	my ($self, $filename, $hint, $object) = @_;
+	OpenBSD::Temp->reclaim($filename);
 	unlink $filename;
 }
 
@@ -296,16 +298,11 @@ sub did_it_fork
 	}
 }
 
-sub exec_gunzip
+sub uncompress
 {
 	my $self = shift;
-	exec {OpenBSD::Paths->gzip}
-	    ("gzip",
-	    "-d",
-	    "-c",
-	    "-q",
-	    @_)
-	or $self->{state}->fatal("Can't run gzip: #1", $!);
+	require IO::Uncompress::Gunzip;
+	return IO::Uncompress::Gunzip->new(@_, MultiStream => 1);
 }
 
 package OpenBSD::PackageRepository::Local;
@@ -368,20 +365,25 @@ sub open_pipe
 	if (defined $ENV{'PKG_CACHE'}) {
 		$self->may_copy($object, $ENV{'PKG_CACHE'});
 	}
-	my $pid = open(my $fh, "-|");
-	$self->did_it_fork($pid);
-	if ($pid) {
-		return $fh;
-	} else {
-		open STDERR, ">/dev/null";
-		$self->exec_gunzip("-f", $self->relative_url($object->{name}));
-	}
+	return $self->uncompress($self->relative_url($object->{name}));
 }
 
 sub may_exist
 {
 	my ($self, $name) = @_;
 	return -r $self->relative_url($name);
+}
+
+my $local = [];
+
+sub opened
+{
+	return $local;
+}
+
+sub maxcount
+{
+	return 3;
 }
 
 sub list
@@ -425,14 +427,7 @@ sub new
 sub open_pipe
 {
 	my ($self, $object) = @_;
-	my $pid = open(my $fh, "-|");
-	$self->did_it_fork($pid);
-	if ($pid) {
-		return $fh;
-	} else {
-		open STDERR, ">/dev/null";
-		$self->exec_gunzip("-f", "-");
-	}
+	return $self->uncompress(\*STDIN);
 }
 
 package OpenBSD::PackageRepository::Distant;
@@ -472,7 +467,7 @@ sub pkg_copy
 	my $dir = $object->{cache_dir};
 
 	my ($copy, $filename) = OpenBSD::Temp::permanent_file($dir, $name) or die "Can't write copy to cache";
-	chmod 0644, $filename;
+	chmod((0666 & ~umask), $filename);
 	$object->{tempname} = $filename;
 	my $handler = sub {
 		my ($sig) = @_;
@@ -531,32 +526,12 @@ sub open_pipe
 	$object->{cache_dir} = $ENV{'PKG_CACHE'};
 	$object->{parent} = $$;
 
-	my ($rdfh, $wrfh);
-	pipe($rdfh, $wrfh);
-
-	my $pid = open(my $fh, "-|");
-	$self->did_it_fork($pid);
-	if ($pid) {
-		$object->{pid} = $pid;
-	} else {
-		open(STDIN, '<&', $rdfh) or
-		    $self->{state}->fatal("Bad dup: #1", $!);
-		close($rdfh);
-		close($wrfh);
-		$self->exec_gunzip("-f", "-");
-	}
-	my $pid2 = fork();
-
+	my $pid2 = open(my $rdfh, "-|");
 	$self->did_it_fork($pid2);
 	if ($pid2) {
 		$object->{pid2} = $pid2;
 	} else {
 		open STDERR, '>', $object->{errors};
-		open(STDOUT, '>&', $wrfh) or
-		    $self->{state}->fatal("Bad dup: #1", $!);
-		close($rdfh);
-		close($wrfh);
-		close($fh);
 		if (defined $object->{cache_dir}) {
 			my $pid3 = open(my $in, "-|");
 			$self->did_it_fork($pid3);
@@ -570,16 +545,14 @@ sub open_pipe
 		}
 		exit(0);
 	}
-	close($rdfh);
-	close($wrfh);
-	return $fh;
+	return $self->uncompress($rdfh);
 }
 
 sub finish_and_close
 {
 	my ($self, $object) = @_;
 	if (defined $object->{cache_dir}) {
-		while (defined $object->_next) {
+		while (defined $object->next) {
 		}
 	}
 	$self->SUPER::finish_and_close($object);
@@ -595,6 +568,7 @@ sub grab_object
 {
 	my ($self, $object) = @_;
 	my ($ftp, @extra) = split(/\s+/, OpenBSD::Paths->ftp);
+	$ENV{LC_ALL} = 'C';
 	exec {$ftp}
 	    $ftp,
 	    @extra,
@@ -639,7 +613,8 @@ sub try_until_success
 		if (defined $o) {
 			return $o;
 		}
-		if (defined $self->{lasterror} && $self->{lasterror} == 550) {
+		if (defined $self->{lasterror} && 
+		    ($self->{lasterror} == 550 || $self->{lasterror} == 404)) {
 			last;
 		}
 		if ($self->should_have($pkgname)) {
@@ -698,6 +673,7 @@ sub parse_problems
 
 		if (defined $hint && $hint == 0) {
 			next if m/^ftp: -: short write/o;
+			next if m/^ftp: local: -: Broken pipe/o;
 			next if m/^ftp: Writing -: Broken pipe/o;
 			next if m/^421\s+/o;
 		}
@@ -709,6 +685,10 @@ sub parse_problems
 		    m/^ftp: connect: Connection timed out/o ||
 		    m/^ftp: Can't connect or login to host/o) {
 			$self->{lasterror} = 421;
+		}
+		# http error
+		if (m/^ftp: Error retrieving file: 404/o) {
+		    	$self->{lasterror} = 404;
 		}
 		if (m/^550\s+/o) {
 			$self->{lasterror} = 550;

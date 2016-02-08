@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.c,v 1.50 2013/05/09 19:45:19 miod Exp $ */
+/*	$OpenBSD: cpu.c,v 1.52 2014/01/19 12:45:35 deraadt Exp $ */
 
 /*
  * Copyright (c) 1997-2004 Opsycon AB (www.opsycon.se)
@@ -31,6 +31,7 @@
 #include <sys/proc.h>
 #include <sys/device.h>
 #include <sys/malloc.h>
+#include <dev/rndvar.h>
 
 #include <uvm/uvm_extern.h>
 
@@ -198,6 +199,10 @@ cpuattach(struct device *parent, struct device *dev, void *aux)
 		break;
 	case MIPS_OCTEON:
 		printf("Cavium OCTEON CPU");
+		fptype = MIPS_SOFT;
+		break;
+	case MIPS_OCTEON2:
+		printf("Cavium OCTEON II CPU");
 		fptype = MIPS_SOFT;
 		break;
 	default:
@@ -400,7 +405,7 @@ cpu_boot_secondary_processors(void)
 		if (ci->ci_flags & CPUF_PRIMARY)
 			continue;
 
-		ci->ci_randseed = random();
+		ci->ci_randseed = (arc4random() & 0x7fffffff) + 1;
 		sched_init_cpu(ci);
 		cpu_boot_secondary(ci);
 	}

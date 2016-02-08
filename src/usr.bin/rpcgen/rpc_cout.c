@@ -1,4 +1,4 @@
-/*	$OpenBSD: rpc_cout.c,v 1.22 2012/12/05 23:20:26 deraadt Exp $	*/
+/*	$OpenBSD: rpc_cout.c,v 1.24 2013/11/28 18:24:54 deraadt Exp $	*/
 /*	$NetBSD: rpc_cout.c,v 1.6 1996/10/01 04:13:53 cgd Exp $	*/
 
 /*
@@ -340,8 +340,8 @@ emit_union(def)
 	case_list *cl;
 	declaration *cs;
 	char   *object;
-	char   *vecformat = "objp->%s_u.%s";
-	char   *format = "&objp->%s_u.%s";
+	static const char vecformat[] = "objp->%s_u.%s";
+	static const char format[] = "&objp->%s_u.%s";
 
 	fprintf(fout, "\n");
 	print_stat(1, &def->def.un.enum_decl);
@@ -739,7 +739,7 @@ upcase(str)
 
 	hptr = ptr;
 	while (*str != '\0')
-		*ptr++ = toupper(*str++);
+		*ptr++ = toupper((unsigned char)*str++);
 
 	*ptr = '\0';
 	return (hptr);

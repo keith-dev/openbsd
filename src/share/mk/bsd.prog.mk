@@ -1,4 +1,4 @@
-#	$OpenBSD: bsd.prog.mk,v 1.59 2013/07/11 07:03:46 ajacoutot Exp $
+#	$OpenBSD: bsd.prog.mk,v 1.62 2013/12/04 22:58:24 deraadt Exp $
 #	$NetBSD: bsd.prog.mk,v 1.55 1996/04/08 21:19:26 jtc Exp $
 #	@(#)bsd.prog.mk	5.26 (Berkeley) 6/25/91
 
@@ -29,7 +29,6 @@ CRTEND?=         ${DESTDIR}/usr/lib/crtend.o
 LIBCRT0?=	${DESTDIR}/usr/lib/crt0.o
 LIBASN1?=	${DESTDIR}/usr/lib/libasn1.a
 LIBC?=		${DESTDIR}/usr/lib/libc.a
-LIBCOMPAT?=	${DESTDIR}/usr/lib/libcompat.a
 LIBCOM_ERR?=	${DESTDIR}/usr/lib/libcom_err.a
 LIBCRYPTO?=	${DESTDIR}/usr/lib/libcrypto.a
 LIBCURSES?=	${DESTDIR}/usr/lib/libcurses.a
@@ -42,7 +41,7 @@ LIBGSSAPI?=	${DESTDIR}/usr/lib/libgssapi.a
 LIBHDB?=	${DESTDIR}/usr/lib/libhdb.a
 LIBKADM5CLNT?=	${DESTDIR}/usr/lib/libkadm5clnt.a
 LIBKADM5SRV?=	${DESTDIR}/usr/lib/libkadm5srv.a
-LIBKAFS5?=	${DESTDIR}/usr/lib/libkafs5.a
+LIBKAFS?=	${DESTDIR}/usr/lib/libkafs.a
 LIBKEYNOTE?=	${DESTDIR}/usr/lib/libkeynote.a
 LIBKRB5?=	${DESTDIR}/usr/lib/libkrb5.a
 LIBKVM?=	${DESTDIR}/usr/lib/libkvm.a
@@ -107,7 +106,7 @@ all: ${PROG} _SUBDIRUSE
 
 .if !target(clean)
 clean: _SUBDIRUSE
-	rm -f a.out [Ee]rrs mklog core *.core y.tab.h \
+	rm -f a.out [Ee]rrs mklog *.core y.tab.h \
 	    ${PROG} ${OBJS} ${_LEXINTM} ${_YACCINTM} ${CLEANFILES}
 .endif
 

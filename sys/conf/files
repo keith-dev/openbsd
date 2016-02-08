@@ -1,4 +1,4 @@
-#	$OpenBSD: files,v 1.549 2013/07/11 01:20:31 jsg Exp $
+#	$OpenBSD: files,v 1.566 2014/02/10 22:41:27 jmatthew Exp $
 #	$NetBSD: files,v 1.87 1996/05/19 17:17:50 jonathan Exp $
 
 #	@(#)files.newconf	7.5 (Berkeley) 5/10/93
@@ -61,13 +61,10 @@ define	i2c_bitbang
 # 1-Wire bus bit-banging
 define	onewire_bitbang
 
-# net device attributes - we have generic code for ether(net),
-# and fddi.
-define	atm
+# net device attributes - we have generic code for ether(net)
 define	crypto
 define	systrace
 define	ether
-define	fddi
 define	sppp
 define	wlan
 define	bluetooth
@@ -76,7 +73,6 @@ define	bluetooth
 # of device drivers.
 define	ncr5380sbc	# NCR 5380 SCSI Bus Controller
 define	ncr53c7xx	# NCR 53c7xx SCSI Bus Controller
-define	pdq		# DEC FDDI chipset
 define	dp8390nic	# 8390-family Ethernet controllers
 define	rtl80x9		# RealTek 8019/8029 NE2000-compatible
 define	dl10019		# DL10019/10022-family Ethernet controllers
@@ -107,7 +103,6 @@ define agpint {}
 
 # DRM - Direct Rendering Manager: /dev/drm
 define drmdev {}
-include "dev/pci/drm/files.drm"
 
 # VGA graphics
 device	vga: wsemuldisplaydev, pcdisplayops, drmdev, agpint
@@ -200,6 +195,15 @@ file	dev/ic/isp.c			isp
 file	dev/ic/isp_openbsd.c		isp
 file	dev/ic/isp_library.c		isp
 
+# QLogic ISP23xx FC Controllers
+device  qla: scsi
+file    dev/ic/qla.c                    qla
+
+# QLogic firmware shared between qla and isp
+file	dev/microcode/isp/isp_fw2100.c	qla | isp_pci
+file	dev/microcode/isp/isp_fw2200.c	qla | isp
+file	dev/microcode/isp/isp_fw2300.c	qla | isp_pci
+
 # Advanced Host Controller Interface for Serial ATA
 device	ahci: scsi, atascsi
 file	dev/ic/ahci.c			ahci | ahci_pci | ahci_jmb needs-flag
@@ -235,7 +239,7 @@ file	dev/ic/siop.c			siop & (siop_pci | siop_gedoens)
 
 # Symbios/NCR 53c710 SCSI controllers
 device	osiop: scsi
-file	dev/ic/osiop.c			osiop & (osiop_gsc | osiop_eisa | osiop_pcctwo)
+file	dev/ic/osiop.c			osiop & (osiop_gsc | osiop_eisa | osiop_mc | osiop_pcctwo)
 
 # Symbios/NCR 53c700 SCSI controllers
 device	oosiop: scsi
@@ -264,7 +268,11 @@ file	dev/ic/an.c			an
 
 # LANCE and PCnet Ethernet controllers
 device	le: ether, ifnet, ifmedia
-file	dev/ic/am7990.c			le
+define	le24
+define	le32
+file	dev/ic/am7990.c			le24
+file	dev/ic/am79900.c		le32
+file	dev/ic/lance.c			le24 | le32
 
 # 3Com 3c9xx
 device	xl: ether, ifnet, ifmedia, mii
@@ -500,17 +508,21 @@ file	scsi/mpath.c			mpath	needs-flag
 device	softraid: scsi
 attach	softraid at root
 file	dev/softraid.c			softraid	needs-flag
+file	dev/softraid_aoe.c		softraid & ether & aoe
+file	dev/softraid_concat.c		softraid
+file	dev/softraid_crypto.c		softraid & crypto
 file	dev/softraid_raid0.c		softraid
 file	dev/softraid_raid1.c		softraid
-file	dev/softraid_raidp.c		softraid
-file	dev/softraid_crypto.c		softraid & crypto
-file	dev/softraid_aoe.c		softraid & ether & aoe
+file	dev/softraid_raid5.c		softraid
 file	dev/softraid_raid6.c		softraid
-file	dev/softraid_concat.c		softraid
 
 # SPD Memory EEPROM
 device	spdmem
 file	dev/spdmem.c			spdmem
+
+# AIC-6250 SCSI
+device	oaic: scsi
+file	dev/ic/aic6250.c		oaic
 
 # legitimate pseudo-devices
 pseudo-device vnd: disk
@@ -539,6 +551,7 @@ pseudo-device trunk: ifnet, ether, ifmedia
 pseudo-device mpe: ifnet, ether
 pseudo-device vether: ifnet, ether
 pseudo-device pppx: ifnet
+pseudo-device vxlan: ifnet, ether, ifmedia
 
 pseudo-device systrace
 
@@ -562,6 +575,8 @@ file	net/pf_table.c			pf
 file	net/pf_osfp.c			pf
 file	net/pf_if.c			pf
 file	net/pf_lb.c			pf
+file	net/hfsc.c			ifnet
+
 pseudo-device pflog: ifnet
 file	net/if_pflog.c			pflog	needs-flag
 pseudo-device pfsync: ifnet
@@ -589,7 +604,6 @@ file altq/altq_rmclass.c		altq
 file altq/altq_hfsc.c			altq
 file altq/altq_priq.c			altq
 file ddb/db_access.c			ddb | kgdb
-file ddb/db_aout.c			ddb
 file ddb/db_break.c			ddb
 file ddb/db_command.c			ddb
 file ddb/db_elf.c			ddb
@@ -616,8 +630,6 @@ file dev/firmload.c			firmload
 file dev/flash.c			flash			needs-flag
 file dev/ic/ncr5380sbc.c		ncr5380sbc
 file dev/ic/ncr53c7xx.c			ncr53c7xx
-file dev/ic/pdq.c			pdq
-file dev/ic/pdq_ifsubr.c		pdq
 file dev/ic/dp8390.c			dp8390nic
 file dev/ic/rtl80x9.c			rtl80x9
 file dev/ic/tea5757.c			tea5757
@@ -641,9 +653,7 @@ file isofs/udf/udf_subr.c		udf
 file isofs/udf/udf_vfsops.c		udf
 file isofs/udf/udf_vnops.c		udf
 file kern/clock_subr.c
-file kern/exec_aout.c
 file kern/exec_conf.c
-file kern/exec_ecoff.c
 file kern/exec_elf32.c
 file kern/exec_elf64.c
 file kern/exec_script.c
@@ -680,6 +690,7 @@ file kern/kern_time.c
 file kern/kern_timeout.c
 file kern/kern_watchdog.c		!small_kernel
 file kern/kern_workq.c
+file kern/kern_task.c
 file kern/kern_xxx.c
 file kern/kgdb_stub.c			kgdb
 file kern/sched_bsd.c
@@ -756,12 +767,16 @@ file ntfs/ntfs_ihash.c			ntfs
 file ntfs/ntfs_subr.c			ntfs
 file ntfs/ntfs_vfsops.c			ntfs
 file ntfs/ntfs_vnops.c			ntfs
+file tmpfs/tmpfs_mem.c			tmpfs
+file tmpfs/tmpfs_subr.c			tmpfs
+file tmpfs/tmpfs_vfsops.c		tmpfs
+file tmpfs/tmpfs_vnops.c		tmpfs
+file tmpfs/tmpfs_specops.c		tmpfs
+file tmpfs/tmpfs_fifoops.c		tmpfs & fifo
 file net/bpf.c				bpfilter		needs-count
 file net/bpf_filter.c			bpfilter
 file net/if.c
-file net/if_atmsubr.c			atm			needs-flag
-file net/if_ethersubr.c			ether | inet | fddi	needs-flag
-file net/if_fddisubr.c			fddi
+file net/if_ethersubr.c			ether | inet		needs-flag
 file net/if_spppsubr.c			sppp
 file net/if_loop.c			loop
 file net/if_media.c			ifmedia
@@ -791,6 +806,7 @@ file net/if_mpe.c			mpe			needs-count
 file net/if_vether.c			vether			needs-count
 file net/if_pppx.c			pppx			needs-count
 file net/if_aoe.c			ether & aoe
+file net/if_vxlan.c			vxlan			needs-count
 file net80211/ieee80211.c		wlan
 file net80211/ieee80211_amrr.c		wlan
 file net80211/ieee80211_crypto.c	wlan
@@ -807,13 +823,13 @@ file net80211/ieee80211_pae_output.c	wlan
 file net80211/ieee80211_proto.c		wlan
 file net80211/ieee80211_rssadapt.c	wlan
 file net80211/ieee80211_regdomain.c	wlan
-file netinet/if_atm.c			atm
 file netinet/if_ether.c			ether | inet
 file netinet/igmp.c			inet
 file netinet/in.c			inet
 file netinet/in_pcb.c			inet
 file netinet/in_proto.c			inet
 file netinet/inet_nat64.c		inet & pf
+file netinet/inet_ntop.c		inet | inet6
 file netinet/ip_divert.c		inet & pf
 file netinet/ip_icmp.c			inet
 file netinet/ip_id.c			inet
@@ -886,9 +902,6 @@ file netmpls/mpls_output.c		mpls
 file netmpls/mpls_proto.c		mpls
 file netmpls/mpls_raw.c			mpls
 file netmpls/mpls_shim.c		mpls
-file netnatm/natm_pcb.c			natm
-file netnatm/natm_proto.c		natm
-file netnatm/natm.c			natm
 file nfs/krpc_subr.c			nfsclient
 #file nfs/nfs_aiod.c			nfsclient
 file nfs/nfs_bio.c			nfsclient
@@ -994,8 +1007,7 @@ file net/pfkeyv2_convert.c		key | ipsec | tcp_signature
 
 # COMPAT_* support code (base and other shared code)
 file compat/common/compat_util.c	!small_kernel
-file compat/common/compat_dir.c		!small_kernel
-file compat/common/tty_43.c		compat_43
+file compat/common/compat_dir.c		!small_kernel & compat_linux
 
 # libx86emu
 file dev/x86emu/x86emu.c		x86emu

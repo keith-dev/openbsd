@@ -1,4 +1,4 @@
-/*	$OpenBSD: keyword.c,v 1.37 2012/04/11 17:33:26 guenther Exp $	*/
+/*	$OpenBSD: keyword.c,v 1.39 2013/10/24 06:21:47 guenther Exp $	*/
 /*	$NetBSD: keyword.c,v 1.12.6.1 1996/05/30 21:25:13 cgd Exp $	*/
 
 /*-
@@ -84,6 +84,7 @@ int	utime(), stime(), ixrss(), idrss(), isrss();
 #define	CWDLEN	40
 
 /* Bit types must match their respective entries in struct kinfo_proc */
+/* Entries must be sorted in lexical ascending order! */
 VAR var[] = {
 	{"%cpu", "%CPU", NULL, NLIST, pcpu, 4},
 	{"%mem", "%MEM", NULL, NLIST, pmem, 4},
@@ -92,7 +93,7 @@ VAR var[] = {
 	{"args", "", "command"},
 	{"blocked", "", "sigmask"},
 	{"caught", "", "sigcatch"},
-	{"comm", "", "ucomm"},
+	{"comm", "COMMAND", "ucomm"},
 	{"command", "COMMAND", NULL, COMM|LJUST|USER, command, 16},
 	{"cpu", "CPU", NULL, 0, pvar, 3, 0, POFF(p_estcpu), UINT32, "d"},
 	{"cpuid", "CPUID", NULL, 0, pvar, 8, 0, POFF(p_cpuid), UINT64, "lld"},
@@ -100,7 +101,7 @@ VAR var[] = {
 	{"cwd", "CWD", NULL, LJUST, curwd, CWDLEN},
 	{"dsiz", "DSIZ", NULL, 0, dsize, 4},
 	{"emul", "EMUL", NULL, LJUST, emulname, KI_EMULNAMELEN - 1},
-	{"etime", "", "start"},
+	{"etime", "ELAPSED", "start"},
 	{"f", "F", NULL, 0, pvar, 7, 0, POFF(p_flag), INT32, "x"},
 	{"flags", "", "f"},
 	GID("gid", "GID", pvar, POFF(p_gid)),
@@ -144,6 +145,7 @@ VAR var[] = {
 	{"pmem", "", "%mem"},
 	PID("ppid", "PPID", pvar, POFF(p_ppid)),
 	{"pri", "PRI", NULL, 0, pri, 3},
+	{"procflags", "PROCF", NULL, 0, pvar, 7, 0, POFF(p_psflags), INT32, "x"},
 	{"re", "RE", NULL, INF127, pvar, 3, 0, POFF(p_swtime), UINT32, "u"},
 	GID("rgid", "RGID", pvar, POFF(p_rgid)),
 	/* XXX */
@@ -256,16 +258,15 @@ findvar(char *p)
 	if (hp)
 		*hp++ = '\0';
 
+aliased:
 	key.name = p;
 	v = bsearch(&key, var, sizeof(var)/sizeof(VAR) - 1, sizeof(VAR), vcmp);
 
 	if (v && v->alias) {
-		if (hp) {
-			warnx("%s: illegal keyword specification", p);
-			eval = 1;
-		}
-		parsefmt(v->alias);
-		return (NULL);
+		p = v->alias;
+		if (hp == NULL && v->header[0] != '\0')
+			hp = v->header;
+		goto aliased;
 	}
 	if (!v) {
 		warnx("%s: keyword not found", p);

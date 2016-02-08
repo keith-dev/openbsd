@@ -1,4 +1,4 @@
-/*	$OpenBSD: pmap.c,v 1.119 2012/08/30 18:14:26 mpi Exp $ */
+/*	$OpenBSD: pmap.c,v 1.125 2014/02/09 11:25:58 mpi Exp $ */
 
 /*
  * Copyright (c) 2001, 2002, 2007 Dale Rahn.
@@ -143,12 +143,16 @@ void pmap_page_ro32(pmap_t pm, vaddr_t va, vm_prot_t prot);
 #define pmap_simplelock_pv(pm)
 #define pmap_simpleunlock_pv(pm)
 
+/*
+ * Some functions are called in real mode and cannot be profiled.
+ */
+#define __noprof __attribute__((__no_instrument_function__))
 
 /* VP routines */
 int pmap_vp_enter(pmap_t pm, vaddr_t va, struct pte_desc *pted, int flags);
 struct pte_desc *pmap_vp_remove(pmap_t pm, vaddr_t va);
 void pmap_vp_destroy(pmap_t pm);
-struct pte_desc *pmap_vp_lookup(pmap_t pm, vaddr_t va);
+struct pte_desc *pmap_vp_lookup(pmap_t pm, vaddr_t va) __noprof;
 
 /* PV routines */
 void pmap_enter_pv(struct pte_desc *pted, struct vm_page *);
@@ -156,13 +160,13 @@ void pmap_remove_pv(struct pte_desc *pted);
 
 
 /* pte hash table routines */
-void pte_insert32(struct pte_desc *pted);
-void pte_insert64(struct pte_desc *pted);
-void pmap_hash_remove(struct pte_desc *pted);
-void pmap_fill_pte64(pmap_t pm, vaddr_t va, paddr_t pa,
-    struct pte_desc *pted, vm_prot_t prot, int flags, int cache);
-void pmap_fill_pte32(pmap_t pm, vaddr_t va, paddr_t pa,
-    struct pte_desc *pted, vm_prot_t prot, int flags, int cache);
+void pmap_hash_remove(struct pte_desc *);
+void pte_insert32(struct pte_desc *) __noprof;
+void pte_insert64(struct pte_desc *) __noprof;
+void pmap_fill_pte64(pmap_t, vaddr_t, paddr_t, struct pte_desc *, vm_prot_t,
+    int, int) __noprof;
+void pmap_fill_pte32(pmap_t, vaddr_t, paddr_t, struct pte_desc *, vm_prot_t,
+    int, int) __noprof;
 
 void pmap_syncicache_user_virt(pmap_t pm, vaddr_t va);
 
@@ -178,8 +182,7 @@ void pmap_remove_avail(paddr_t base, paddr_t end);
 void *pmap_steal_avail(size_t size, int align);
 
 /* asm interface */
-int pte_spill_r(u_int32_t va, u_int32_t msr, u_int32_t access_type,
-    int exec_fault);
+int pte_spill_r(u_int32_t, u_int32_t, u_int32_t, int) __noprof;
 
 u_int32_t pmap_setusr(pmap_t pm, vaddr_t va);
 void pmap_popusr(u_int32_t oldsr);
@@ -201,8 +204,8 @@ int physmaxaddr;
 
 void pmap_hash_lock_init(void);
 void pmap_hash_lock(int entry);
-void pmap_hash_unlock(int entry);
-int pmap_hash_lock_try(int entry);
+void pmap_hash_unlock(int entry)  __noprof;
+int pmap_hash_lock_try(int entry) __noprof;
 
 volatile unsigned int pmap_hash_lock_word = 0;
 
@@ -801,8 +804,9 @@ _pmap_kenter_pa(vaddr_t va, paddr_t pa, vm_prot_t prot, int flags, int cache)
 	}
 
 	if (cache == PMAP_CACHE_DEFAULT) {
-		if (PHYS_TO_VM_PAGE(pa) != NULL)
-			cache = PMAP_CACHE_WB; /* managed memory is cacheable */
+		pg = PHYS_TO_VM_PAGE(pa);
+		if (pg != NULL && (pg->pg_flags & PG_DEV) == 0)
+			cache = PMAP_CACHE_WB;
 		else
 			cache = PMAP_CACHE_CI;
 	}
@@ -1016,9 +1020,9 @@ pmap_fill_pte64(pmap_t pm, vaddr_t va, paddr_t pa, struct pte_desc *pted,
 	pte64->pte_lo = (pa & PTE_RPGN_64);
 
 
-	if ((cache == PMAP_CACHE_WB))
+	if (cache == PMAP_CACHE_WB)
 		pte64->pte_lo |= PTE_M_64;
-	else if ((cache == PMAP_CACHE_WT))
+	else if (cache == PMAP_CACHE_WT)
 		pte64->pte_lo |= (PTE_W_64 | PTE_M_64);
 	else
 		pte64->pte_lo |= (PTE_M_64 | PTE_I_64 | PTE_G_64);
@@ -1054,9 +1058,9 @@ pmap_fill_pte32(pmap_t pm, vaddr_t va, paddr_t pa, struct pte_desc *pted,
 	    ((va >> ADDR_API_SHIFT_32) & PTE_API_32) | PTE_VALID_32;
 	pte32->pte_lo = (pa & PTE_RPGN_32);
 
-	if ((cache == PMAP_CACHE_WB))
+	if (cache == PMAP_CACHE_WB)
 		pte32->pte_lo |= PTE_M_32;
-	else if ((cache == PMAP_CACHE_WT))
+	else if (cache == PMAP_CACHE_WT)
 		pte32->pte_lo |= (PTE_W_32 | PTE_M_32);
 	else
 		pte32->pte_lo |= (PTE_M_32 | PTE_I_32 | PTE_G_32);
@@ -1392,17 +1396,21 @@ void
 pmap_avail_setup(void)
 {
 	struct mem_region *mp;
+	int pmap_physmem;
 
 	(fw->mem_regions) (&pmap_mem, &pmap_avail);
 	pmap_cnt_avail = 0;
-	physmem = 0;
+	pmap_physmem = 0;
 
 	ndumpmem = 0;
 	for (mp = pmap_mem; mp->size !=0; mp++, ndumpmem++) {
-		physmem += atop(mp->size);
+		pmap_physmem += atop(mp->size);
 		dumpmem[ndumpmem].start = atop(mp->start);
 		dumpmem[ndumpmem].end = atop(mp->start + mp->size);
 	}
+
+	if (physmem == 0)
+		physmem = pmap_physmem;
 
 	for (mp = pmap_avail; mp->size !=0 ; mp++) {
 		if (physmaxaddr <  mp->start + mp->size)
@@ -1643,9 +1651,11 @@ pmap_bootstrap(u_int kernelstart, u_int kernelend)
 
 	msgbuf_addr = pmap_steal_avail(MSGBUFSIZE,4);
 
+#ifdef DEBUG
 	for (mp = pmap_avail; mp->size; mp++) {
 		bzero((void *)mp->start, mp->size);
 	}
+#endif
 
 #define HTABENTS_32 1024
 #define HTABENTS_64 2048
@@ -2001,13 +2011,11 @@ copyoutstr(const void *kaddr, void *udaddr, size_t len, size_t *done)
  * sync instruction cache for user virtual address.
  * The address WAS JUST MAPPED, so we have a VALID USERSPACE mapping
  */
-#define CACHELINESIZE   32		/* For now XXX*/
 void
 pmap_syncicache_user_virt(pmap_t pm, vaddr_t va)
 {
-	vaddr_t p, start;
+	vaddr_t start;
 	int oldsr;
-	int l;
 
 	if (pm != pmap_kernel()) {
 		start = ((u_int)PPC_USER_ADDR + ((u_int)va &
@@ -2019,19 +2027,8 @@ pmap_syncicache_user_virt(pmap_t pm, vaddr_t va)
 	} else {
 		start = va; /* flush mapped page */
 	}
-	p = start;
-	l = PAGE_SIZE;
-	do {
-		__asm__ __volatile__ ("dcbst 0,%0" :: "r"(p));
-		p += CACHELINESIZE;
-	} while ((l -= CACHELINESIZE) > 0);
-	p = start;
-	l = PAGE_SIZE;
-	do {
-		__asm__ __volatile__ ("icbi 0,%0" :: "r"(p));
-		p += CACHELINESIZE;
-	} while ((l -= CACHELINESIZE) > 0);
 
+	syncicache((void *)start, PAGE_SIZE);
 
 	if (pm != pmap_kernel()) {
 		pmap_popusr(oldsr);

@@ -1,4 +1,4 @@
-# $OpenBSD: Makefile,v 1.66 2013/03/25 10:09:05 nicm Exp $
+# $OpenBSD: Makefile,v 1.69 2014/01/28 23:07:09 nicm Exp $
 
 PROG=	tmux
 SRCS=	arguments.c \
@@ -60,7 +60,6 @@ SRCS=	arguments.c \
 	cmd-select-pane.c \
 	cmd-select-window.c \
 	cmd-send-keys.c \
-	cmd-server-info.c \
 	cmd-set-buffer.c \
 	cmd-set-environment.c \
 	cmd-set-option.c \
@@ -69,7 +68,6 @@ SRCS=	arguments.c \
 	cmd-show-options.c \
 	cmd-source-file.c \
 	cmd-split-window.c \
-	cmd-start-server.c \
 	cmd-string.c \
 	cmd-suspend-client.c \
 	cmd-swap-pane.c \
@@ -115,6 +113,7 @@ SRCS=	arguments.c \
 	session.c \
 	signal.c \
 	status.c \
+	style.c \
 	tmux.c \
 	tty-acs.c \
 	tty-keys.c \

@@ -1,4 +1,4 @@
-/*	$OpenBSD: traceroute.c,v 1.82 2012/02/10 23:05:54 deraadt Exp $	*/
+/*	$OpenBSD: traceroute.c,v 1.88 2014/01/24 15:26:32 florian Exp $	*/
 /*	$NetBSD: traceroute.c,v 1.10 1995/05/21 15:50:45 mycroft Exp $	*/
 
 /*-
@@ -256,17 +256,20 @@ int32_t usec_perturb;
 u_char packet[512], *outpacket;	/* last inbound (icmp) packet */
 
 int wait_for_reply(int, struct sockaddr_in *, struct timeval *);
+void dump_packet(void);
 void send_probe(int, u_int8_t, int, struct sockaddr_in *);
 int packet_ok(u_char *, int, struct sockaddr_in *, int, int);
+void dump_packet(void);
 void print_exthdr(u_char *, int);
 void print(u_char *, int, struct sockaddr_in *);
 char *inetname(struct in_addr);
 void print_asn(struct in_addr);
 u_short in_cksum(u_short *, int);
+char *pr_type(u_int8_t);
 int map_tos(char *, int *);
 void usage(void);
 
-int s;				/* receive (icmp) socket file descriptor */
+int rcvsock;			/* receive (icmp) socket file descriptor */
 int sndsock;			/* send (udp) socket file descriptor */
 
 int datalen;			/* How much data */
@@ -279,7 +282,7 @@ int nprobes = 3;
 u_int8_t max_ttl = IPDEFTTL;
 u_int8_t first_ttl = 1;
 u_short ident;
-u_short port = 32768+666;	/* start udp dest port # for probe packets */
+u_int16_t port = 32768+666;	/* start udp dest port # for probe packets */
 u_char	proto = IPPROTO_UDP;
 u_int8_t  icmp_type = ICMP_ECHO; /* default ICMP code/type */
 u_char  icmp_code = 0;
@@ -312,7 +315,7 @@ main(int argc, char *argv[])
 	uid_t uid;
 	u_int rtableid;
 
-	if ((s = socket(AF_INET, SOCK_RAW, IPPROTO_ICMP)) < 0)
+	if ((rcvsock = socket(AF_INET, SOCK_RAW, IPPROTO_ICMP)) < 0)
 		err(5, "icmp socket");
 	if ((sndsock = socket(AF_INET, SOCK_RAW, IPPROTO_RAW)) < 0)
 		err(5, "raw socket");
@@ -328,19 +331,8 @@ main(int argc, char *argv[])
 	while ((ch = getopt(argc, argv, "AcDdf:g:Ilm:nP:p:q:rSs:t:V:vw:x"))
 			!= -1)
 		switch (ch) {
-		case 'S':
-			sump = 1;
-			break;
 		case 'A':
 			Aflag++;
-			break;
-		case 'f':
-			errno = 0;
-			ep = NULL;
-			l = strtol(optarg, &ep, 10);
-			if (errno || !*optarg || *ep || l < 1 || l > max_ttl)
-				errx(1, "min ttl must be 1 to %u.", max_ttl);
-			first_ttl = (u_int8_t)l;
 			break;
 		case 'c':
 			incflag = 0;
@@ -350,6 +342,14 @@ main(int argc, char *argv[])
 			break;
 		case 'D':
 			dump = 1;
+			break;
+		case 'f':
+			errno = 0;
+			ep = NULL;
+			l = strtol(optarg, &ep, 10);
+			if (errno || !*optarg || *ep || l < 1 || l > max_ttl)
+				errx(1, "min ttl must be 1 to %u.", max_ttl);
+			first_ttl = (u_int8_t)l;
 			break;
 		case 'g':
 			if (lsrr >= MAX_LSRR)
@@ -392,7 +392,7 @@ main(int argc, char *argv[])
 			l = strtol(optarg, &ep, 10);
 			if (errno || !*optarg || *ep || l <= 0 || l >= 65536)
 				errx(1, "port must be >0, <65536.");
-			port = (int)l;
+			port = (u_int16_t)l;
 			break;
 		case 'P':
 			if (protoset)
@@ -431,6 +431,9 @@ main(int argc, char *argv[])
 			 */
 			source = optarg;
 			break;
+		case 'S':
+			sump = 1;
+			break;
 		case 't':
 			if (!map_tos(optarg, &tos)) {
 			errno = 0;
@@ -460,7 +463,7 @@ main(int argc, char *argv[])
 			if (setsockopt(sndsock, SOL_SOCKET, SO_RTABLE,
 			    &rtableid, sizeof(rtableid)) == -1)
 				err(1, "setsockopt SO_RTABLE");
-			if (setsockopt(s, SOL_SOCKET, SO_RTABLE,
+			if (setsockopt(rcvsock, SOL_SOCKET, SO_RTABLE,
 			    &rtableid, sizeof(rtableid)) == -1)
 				err(1, "setsockopt SO_RTABLE");
 			break;
@@ -481,7 +484,7 @@ main(int argc, char *argv[])
 	argc -= optind;
 	argv += optind;
 
-	if (argc < 1)
+	if (argc < 1 || argc > 2)
 		usage();
 
 	setlinebuf (stdout);
@@ -565,7 +568,7 @@ main(int argc, char *argv[])
 	usec_perturb = arc4random();
 
 	if (options & SO_DEBUG)
-		(void) setsockopt(s, SOL_SOCKET, SO_DEBUG,
+		(void) setsockopt(rcvsock, SOL_SOCKET, SO_DEBUG,
 		    (char *)&on, sizeof(on));
 #ifdef SO_SNDBUF
 	if (setsockopt(sndsock, SOL_SOCKET, SO_SNDBUF, (char *)&datalen,
@@ -623,7 +626,7 @@ main(int argc, char *argv[])
 
 			(void) gettimeofday(&t1, NULL);
 			send_probe(++seq, ttl, incflag, &to);
-			while ((cc = wait_for_reply(s, &from, &t1))) {
+			while ((cc = wait_for_reply(rcvsock, &from, &t1))) {
 				(void) gettimeofday(&t2, NULL);
 				if (t2.tv_sec - t1.tv_sec > waittime) {
 					cc = 0;
@@ -888,7 +891,7 @@ wait_for_reply(int sock, struct sockaddr_in *from, struct timeval *sent)
 		timerclear(&wait);
 
 	if (select(sock+1, fdsp, (fd_set *)0, (fd_set *)0, &wait) > 0)
-		cc = recvfrom(s, (char *)packet, sizeof(packet), 0,
+		cc = recvfrom(rcvsock, (char *)packet, sizeof(packet), 0,
 		    (struct sockaddr *)from, &fromlen);
 
 	free(fdsp);
@@ -1195,7 +1198,7 @@ void
 print_asn(struct in_addr in)
 {
 	const u_char *uaddr = (const u_char *)&in.s_addr;
-	int i, counter;
+	int counter;
 	struct rrsetinfo *answers = NULL;
 	char qbuf[MAXDNAME];
 
@@ -1208,7 +1211,7 @@ print_asn(struct in_addr in)
 	for (counter = 0; counter < answers->rri_nrdatas; counter++) {
 		char *p, *as = answers->rri_rdatas[counter].rdi_data;
 		as++; /* skip first byte, it contains length */
-		if (p = strchr(as,'|')) {
+		if ((p = strchr(as,'|'))) {
 			printf(counter ? ", " : " [");
 			p[-1] = 0;
 			printf("AS%s", as);

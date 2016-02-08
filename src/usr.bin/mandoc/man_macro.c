@@ -1,7 +1,8 @@
-/*	$Id: man_macro.c,v 1.38 2012/11/17 00:25:20 schwarze Exp $ */
+/*	$Id: man_macro.c,v 1.43 2013/12/30 00:52:18 schwarze Exp $ */
 /*
  * Copyright (c) 2008, 2009, 2010, 2011 Kristaps Dzonsons <kristaps@bsd.lv>
- * Copyright (c) 2012 Ingo Schwarze <schwarze@openbsd.org>
+ * Copyright (c) 2012, 2013 Ingo Schwarze <schwarze@openbsd.org>
+ * Copyright (c) 2013 Franco Fichtner <franco@lastsummer.de>
  *
  * Permission to use, copy, modify, and distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -84,6 +85,8 @@ const	struct man_macro __man_macros[MAN_MAX] = {
 	{ in_line_eoln, 0 }, /* OP */
 	{ in_line_eoln, MAN_BSCOPE }, /* EX */
 	{ in_line_eoln, MAN_BSCOPE }, /* EE */
+	{ blk_exp, MAN_BSCOPE | MAN_EXPLICIT }, /* UR */
+	{ blk_close, 0 }, /* UE */
 };
 
 const	struct man_macro * const man_macros = __man_macros;
@@ -280,6 +283,9 @@ blk_close(MACRO_PROT_ARGS)
 	case (MAN_RE):
 		ntok = MAN_RS;
 		break;
+	case (MAN_UE):
+		ntok = MAN_UR;
+		break;
 	default:
 		abort();
 		/* NOTREACHED */
@@ -289,10 +295,12 @@ blk_close(MACRO_PROT_ARGS)
 		if (ntok == nn->tok && MAN_BLOCK == nn->type)
 			break;
 
-	if (NULL != nn)
-		man_unscope(man, nn, MANDOCERR_MAX);
-	else
+	if (NULL == nn) {
 		man_pmsg(man, line, ppos, MANDOCERR_NOSCOPE);
+		if ( ! rew_scope(MAN_BLOCK, man, MAN_PP))
+			return(0);
+	} else 
+		man_unscope(man, nn, MANDOCERR_MAX);
 
 	return(1);
 }
@@ -419,6 +427,15 @@ in_line_eoln(MACRO_PROT_ARGS)
 		if ( ! man_word_alloc(man, line, la, p))
 			return(0);
 	}
+
+	/*
+	 * Append MAN_EOS in case the last snipped argument
+	 * ends with a dot, e.g. `.IR syslog (3).'
+	 */
+
+	if (n != man->last &&
+	    mandoc_eos(man->last->string, strlen(man->last->string)))
+		man->last->flags |= MAN_EOS;
 
 	/*
 	 * If no arguments are specified and this is MAN_SCOPED (i.e.,

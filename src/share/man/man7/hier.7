@@ -1,4 +1,4 @@
-.\"	$OpenBSD: hier.7,v 1.108 2013/07/10 05:09:42 ajacoutot Exp $
+.\"	$OpenBSD: hier.7,v 1.114 2014/01/20 05:07:49 schwarze Exp $
 .\"	$NetBSD: hier.7,v 1.7 1994/11/30 19:07:10 jtc Exp $
 .\"
 .\" Copyright (c) 1990, 1993
@@ -30,7 +30,7 @@
 .\"
 .\"	@(#)hier.7	8.1 (Berkeley) 6/5/93
 .\"
-.Dd $Mdocdate: July 10 2013 $
+.Dd $Mdocdate: January 20 2014 $
 .Dt HIER 7
 .Os
 .Sh NAME
@@ -137,6 +137,9 @@ List of radius servers and their associated shared secrets for
 .Xr packages 7
 start/stop scripts and subroutines for
 .Xr rc 8 .
+.It signify/
+Key files used by
+.Xr signify 1 .
 .It skel/
 Example
 .Sq .\&
@@ -172,8 +175,6 @@ System programs and administration utilities
 fundamental to both single and multi-user environments.
 These programs are statically compiled and therefore do not depend on any
 system libraries to run.
-.It /stand/
-Programs used in a stand-alone environment.
 .It /tmp/
 Temporary files that are
 .Em not
@@ -262,8 +263,6 @@ C include files for Internet protocol version 6 (see
 .Xr inet6 4 ) .
 .It netmpls/
 C include files for the MPLS protocol.
-.It netnatm/
-C include files for native mode ATM access.
 .It nfs/
 C include files for NFS (Network File System).
 .It objc/
@@ -290,8 +289,6 @@ System C include files (kernel data structures).
 C include files for UFS (the U-word File System).
 .It uvm/
 C include files for the virtual memory interface.
-.It xfs/
-C include files for the XFS file system.
 .El
 .Pp
 .It lib/
@@ -319,7 +316,9 @@ System daemons and utilities (executed by other programs).
 .Pp
 .Bl -tag -width "cvs/contrib/" -compact
 .It auth/
-Login scripts used to authenticate users (for BSD authentication).
+Login scripts used to authenticate users (for
+.Bx
+Authentication).
 .It cvs/contrib/
 User contributed
 .Xr cvs 1
@@ -462,9 +461,7 @@ Additional i386 console fonts.
 .Pp
 .It mk/
 Templates for
-.Xr make
-(see
-.Xr make 1 ) .
+.Xr make 1 .
 .It nls/
 National Language Support (NLS) catalogs.
 .It sendmail/
@@ -496,7 +493,8 @@ Time zone configuration information (see
 .El
 .Pp
 .It src/
-BSD and/or local source files.
+.Bx
+and/or local source files.
 .Pp
 .Bl -tag -width "kerberosV/" -compact
 .It bin/
@@ -637,10 +635,10 @@ Timestamps for
 .El
 .Pp
 .It rwho/
-.Xr rwho
-data files (see
-.Xr rwhod 8 ,
-.Xr rwho 1 ,
+Data files for
+.Xr rwho 1
+(also see
+.Xr rwhod 8
 and
 .Xr ruptime 1 ) .
 .It spool/
@@ -656,9 +654,8 @@ Commonly ~ftp; the anonymous ftp root directory.
 .It lock/
 Lock files for utilities such as
 .Xr cu 1 ,
-.Xr tip 1
-and
-.Xr uucp .
+.Xr tip 1 ,
+and uucp.
 .It mqueue/
 Undelivered mail queue (see
 .Xr sendmail 8 ) .
@@ -668,8 +665,7 @@ Line printer spooling directories.
 Mail spool for
 .Xr smtpd 8 .
 .It uucp/
-.Xr uucp
-spool directory.
+uucp spool directory.
 .It uucppublic/
 Commonly ~uucp; public uucp temporary directory.
 .El

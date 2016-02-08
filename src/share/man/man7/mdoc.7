@@ -1,7 +1,7 @@
-.\"	$OpenBSD: mdoc.7,v 1.99 2013/07/13 19:27:47 schwarze Exp $
+.\"	$OpenBSD: mdoc.7,v 1.108 2014/02/16 14:26:51 schwarze Exp $
 .\"
 .\" Copyright (c) 2009, 2010, 2011 Kristaps Dzonsons <kristaps@bsd.lv>
-.\" Copyright (c) 2010, 2011 Ingo Schwarze <schwarze@openbsd.org>
+.\" Copyright (c) 2010, 2011, 2013 Ingo Schwarze <schwarze@openbsd.org>
 .\"
 .\" Permission to use, copy, modify, and distribute this software for any
 .\" purpose with or without fee is hereby granted, provided that the above
@@ -15,7 +15,7 @@
 .\" ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
 .\" OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 .\"
-.Dd $Mdocdate: July 13 2013 $
+.Dd $Mdocdate: February 16 2014 $
 .Dt MDOC 7
 .Os
 .Sh NAME
@@ -125,7 +125,7 @@ file for a utility
 \&.Nm progname
 \&.Nd one line about what it does
 \&.\e\(dq .Sh LIBRARY
-\&.\e\(dq For sections 2, 3, & 9 only.
+\&.\e\(dq For sections 2, 3, and 9 only.
 \&.\e\(dq Not used in OpenBSD.
 \&.Sh SYNOPSIS
 \&.Nm progname
@@ -138,17 +138,17 @@ utility processes files ...
 \&.\e\(dq .Sh IMPLEMENTATION NOTES
 \&.\e\(dq Not used in OpenBSD.
 \&.\e\(dq .Sh RETURN VALUES
-\&.\e\(dq For sections 2, 3, & 9 only.
+\&.\e\(dq For sections 2, 3, and 9 function return values only.
 \&.\e\(dq .Sh ENVIRONMENT
-\&.\e\(dq For sections 1, 6, 7, & 8 only.
+\&.\e\(dq For sections 1, 6, 7, and 8 only.
 \&.\e\(dq .Sh FILES
 \&.\e\(dq .Sh EXIT STATUS
-\&.\e\(dq For sections 1, 6, & 8 only.
+\&.\e\(dq For sections 1, 6, and 8 only.
 \&.\e\(dq .Sh EXAMPLES
 \&.\e\(dq .Sh DIAGNOSTICS
-\&.\e\(dq For sections 1, 4, 6, 7, & 8 only.
+\&.\e\(dq For sections 1, 4, 6, 7, 8, and 9 printf/stderr messages only.
 \&.\e\(dq .Sh ERRORS
-\&.\e\(dq For sections 2, 3, & 9 only.
+\&.\e\(dq For sections 2, 3, 4, and 9 errno settings only.
 \&.\e\(dq .Sh SEE ALSO
 \&.\e\(dq .Xr foobar 1
 \&.\e\(dq .Sh STANDARDS
@@ -358,8 +358,12 @@ Example usages.
 This often contains snippets of well-formed, well-tested invocations.
 Make sure that examples work properly!
 .It Em DIAGNOSTICS
-Documents error conditions.
-This is most useful in section 4 manuals.
+Documents error messages.
+In section 4 and 9 manuals, these are usually messages printed by the
+kernel to the console and to the kernel log.
+In section 1, 6, 7, and 8, these are usually messages printed by
+userland programs to the standard error output.
+.Pp
 Historically, this section was used in place of
 .Em EXIT STATUS
 for manuals in sections 1, 6, and 8; however, this practise is
@@ -369,7 +373,9 @@ See
 .Sx \&Bl
 .Fl diag .
 .It Em ERRORS
-Documents error handling in sections 2, 3, and 9.
+Documents
+.Xr errno 2
+settings in sections 2, 3, 4, and 9.
 .Pp
 See
 .Sx \&Er .
@@ -477,6 +483,7 @@ in the alphabetical
 .Bl -column "Brq, Bro, Brc" description
 .It Sx \&Lb Ta function library (one argument)
 .It Sx \&In Ta include file (one argument)
+.It Sx \&Fd Ta other preprocessor directive (>0 arguments)
 .It Sx \&Ft Ta function type (>0 arguments)
 .It Sx \&Fo , \&Fc Ta function block: Ar funcname
 .It Sx \&Fn Ta function name:
@@ -711,7 +718,9 @@ for fixed strings to be passed verbatim as arguments, use
 or
 .Sx \&Cm .
 .Ss \&At
-Formats an AT&T version.
+Formats an
+.At
+version.
 Accepts one optional argument:
 .Pp
 .Bl -tag -width "v[1-7] | 32vX" -offset indent -compact
@@ -1089,7 +1098,9 @@ Examples:
 See also
 .Sx \&Bro .
 .Ss \&Bsx
-Format the BSD/OS version provided as an argument, or a default value if
+Format the
+.Bsx
+version provided as an argument, or a default value if
 no argument is provided.
 .Pp
 Examples:
@@ -1109,7 +1120,9 @@ and
 Prints
 .Dq is currently in beta test.
 .Ss \&Bx
-Format the BSD version provided as an argument, or a default value if no
+Format the
+.Bx
+version provided as an argument, or a default value if no
 argument is provided.
 .Pp
 Examples:
@@ -1298,70 +1311,70 @@ It should be capitalised.
 .It Ar section
 The manual section.
 This may be one of
-.Ar 1
+.Cm 1
 .Pq utilities ,
-.Ar 2
+.Cm 2
 .Pq system calls ,
-.Ar 3
+.Cm 3
 .Pq libraries ,
-.Ar 3p
+.Cm 3p
 .Pq Perl libraries ,
-.Ar 4
+.Cm 4
 .Pq devices ,
-.Ar 5
+.Cm 5
 .Pq file formats ,
-.Ar 6
+.Cm 6
 .Pq games ,
-.Ar 7
+.Cm 7
 .Pq miscellaneous ,
-.Ar 8
+.Cm 8
 .Pq system utilities ,
-.Ar 9
+.Cm 9
 .Pq kernel functions ,
-.Ar X11
+.Cm X11
 .Pq X Window System ,
-.Ar X11R6
+.Cm X11R6
 .Pq X Window System ,
-.Ar unass
+.Cm unass
 .Pq unassociated ,
-.Ar local
+.Cm local
 .Pq local system ,
-.Ar draft
+.Cm draft
 .Pq draft manual ,
 or
-.Ar paper
+.Cm paper
 .Pq paper .
 It should correspond to the manual's filename suffix and defaults to
-.Dq 1
+.Cm 1
 if unspecified.
 .It Ar volume
 This overrides the volume inferred from
 .Ar section .
 This field is optional, and if specified, must be one of
-.Ar USD
+.Cm USD
 .Pq users' supplementary documents ,
-.Ar PS1
+.Cm PS1
 .Pq programmers' supplementary documents ,
-.Ar AMD
+.Cm AMD
 .Pq administrators' supplementary documents ,
-.Ar SMM
+.Cm SMM
 .Pq system managers' manuals ,
-.Ar URM
+.Cm URM
 .Pq users' reference manuals ,
-.Ar PRM
+.Cm PRM
 .Pq programmers' reference manuals ,
-.Ar KM
+.Cm KM
 .Pq kernel manuals ,
-.Ar IND
+.Cm IND
 .Pq master index ,
-.Ar MMI
+.Cm MMI
 .Pq master index ,
-.Ar LOCAL
+.Cm LOCAL
 .Pq local manuals ,
-.Ar LOC
+.Cm LOC
 .Pq local manuals ,
 or
-.Ar CON
+.Cm CON
 .Pq contributed manuals .
 .It Ar arch
 This specifies the machine architecture a manual page applies to,
@@ -1372,8 +1385,8 @@ the following are valid architectures:
 .Cm alpha ,
 .Cm amd64 ,
 .Cm armish ,
+.Cm armv7 ,
 .Cm aviion ,
-.Cm beagle ,
 .Cm hp300 ,
 .Cm hppa ,
 .Cm hppa64 ,
@@ -1419,11 +1432,16 @@ See also
 .Sx \&Er
 and
 .Sx \&Ev
-for special-purpose constants and
+for special-purpose constants,
 .Sx \&Va
-for variable symbols.
+for variable symbols, and
+.Sx \&Fd
+for listing preprocessor variable definitions in the
+.Em SYNOPSIS .
 .Ss \&Dx
-Format the DragonFly BSD version provided as an argument, or a default
+Format the
+.Dx
+version provided as an argument, or a default
 value if no argument is provided.
 .Pp
 Examples:
@@ -1580,15 +1598,32 @@ See also
 End a function context started by
 .Sx \&Fo .
 .Ss \&Fd
-Historically used to document include files.
-This usage has been deprecated in favour of
+Preprocessor directive, in particular for listing it in the
+.Em SYNOPSIS .
+Historically, it was also used to document include files.
+The latter usage has been deprecated in favour of
 .Sx \&In .
-Do not use this macro.
+.Pp
+Its syntax is as follows:
+.Bd -ragged -offset indent
+.Pf \. Sx \&Fd
+.Li # Ns Ar directive
+.Op Ar argument ...
+.Ed
+.Pp
+Examples:
+.Dl \&.Fd #define sa_handler __sigaction_u.__sa_handler
+.Dl \&.Fd #define SIO_MAXNFDS
+.Dl \&.Fd #ifdef FS_DEBUG
+.Dl \&.Ft void
+.Dl \&.Fn dbg_open \(dqconst char *\(dq
+.Dl \&.Fd #endif
 .Pp
 See also
-.Sx MANUAL STRUCTURE
+.Sx MANUAL STRUCTURE ,
+.Sx \&In ,
 and
-.Sx \&In .
+.Sx \&Dv .
 .Ss \&Fl
 Command-line flag or option.
 Used when listing arguments to command-line utilities.
@@ -1869,7 +1904,7 @@ section as described in
 .Pp
 Examples:
 .Dl \&.Lb libz
-.Dl \&.Lb mdoc
+.Dl \&.Lb libmandoc
 .Ss \&Li
 Denotes text that should be in a
 .Li literal
@@ -2343,111 +2378,243 @@ and
 .Sx \&Sx .
 .Ss \&St
 Replace an abbreviation for a standard with the full form.
-The following standards are recognised:
+The following standards are recognised.
+Where multiple lines are given without a blank line in between,
+they all refer to the same standard, and using the first form
+is recommended.
+.Bl -tag -width 1n
+.It C language standards
 .Pp
-.Bl -tag -width "-p1003.1g-2000X" -compact
-.It \-p1003.1-88
-.St -p1003.1-88
-.It \-p1003.1-90
-.St -p1003.1-90
-.It \-p1003.1-96
-.St -p1003.1-96
-.It \-p1003.1-2001
-.St -p1003.1-2001
-.It \-p1003.1-2004
-.St -p1003.1-2004
-.It \-p1003.1-2008
-.St -p1003.1-2008
-.It \-p1003.1
-.St -p1003.1
-.It \-p1003.1b
-.St -p1003.1b
-.It \-p1003.1b-93
-.St -p1003.1b-93
-.It \-p1003.1c-95
-.St -p1003.1c-95
-.It \-p1003.1d-99
-.St -p1003.1d-99
-.It \-p1003.1g-2000
-.St -p1003.1g-2000
-.It \-p1003.1i-95
-.St -p1003.1i-95
-.It \-p1003.1j-2000
-.St -p1003.1j-2000
-.It \-p1003.1q-2000
-.St -p1003.1q-2000
-.It \-p1003.2
-.St -p1003.2
-.It \-p1003.2-92
-.St -p1003.2-92
-.It \-p1003.2a-92
-.St -p1003.2a-92
-.It \-p1387.2
-.St -p1387.2
-.It \-p1387.2-95
-.St -p1387.2-95
-.It \-isoC
-.St -isoC
-.It \-isoC-90
-.St -isoC-90
-.It \-isoC-amd1
-.St -isoC-amd1
-.It \-isoC-tcor1
-.St -isoC-tcor1
-.It \-isoC-tcor2
-.St -isoC-tcor2
-.It \-isoC-99
-.St -isoC-99
-.It \-isoC-2011
-.St -isoC-2011
-.It \-iso9945-1-90
-.St -iso9945-1-90
-.It \-iso9945-1-96
-.St -iso9945-1-96
-.It \-iso9945-2-93
-.St -iso9945-2-93
+.Bl -tag -width "-p1003.1g-2000" -compact
 .It \-ansiC
 .St -ansiC
 .It \-ansiC-89
 .St -ansiC-89
+.It \-isoC
+.St -isoC
+.It \-isoC-90
+.St -isoC-90
+.br
+The original C standard.
+.Pp
+.It \-isoC-amd1
+.St -isoC-amd1
+.Pp
+.It \-isoC-tcor1
+.St -isoC-tcor1
+.Pp
+.It \-isoC-tcor2
+.St -isoC-tcor2
+.Pp
+.It \-isoC-99
+.St -isoC-99
 .It \-ansiC-99
 .St -ansiC-99
-.It \-ieee754
-.St -ieee754
-.It \-iso8802-3
-.St -iso8802-3
-.It \-iso8601
-.St -iso8601
-.It \-ieee1275-94
-.St -ieee1275-94
+.br
+The second major version of the C language standard.
+.Pp
+.It \-isoC-2011
+.St -isoC-2011
+.br
+The third major version of the C language standard.
+.El
+.It POSIX.1 before the Single UNIX Specification
+.Pp
+.Bl -tag -width "-p1003.1g-2000" -compact
+.It \-p1003.1-88
+.St -p1003.1-88
+.It \-p1003.1
+.St -p1003.1
+.br
+The original POSIX standard, based on ANSI C.
+.Pp
+.It \-p1003.1-90
+.St -p1003.1-90
+.It \-iso9945-1-90
+.St -iso9945-1-90
+.br
+The first update of POSIX.1.
+.Pp
+.It \-p1003.1b-93
+.St -p1003.1b-93
+.It \-p1003.1b
+.St -p1003.1b
+.br
+Real-time extensions.
+.Pp
+.It \-p1003.1c-95
+.St -p1003.1c-95
+.br
+POSIX thread interfaces.
+.Pp
+.It \-p1003.1i-95
+.St -p1003.1i-95
+.br
+Technical Corrigendum.
+.Pp
+.It \-p1003.1-96
+.St -p1003.1-96
+.It \-iso9945-1-96
+.St -iso9945-1-96
+.br
+Includes POSIX.1-1990, 1b, 1c, and 1i.
+.El
+.It X/Open Portability Guide version 4 and related standards
+.Pp
+.Bl -tag -width "-p1003.1g-2000" -compact
 .It \-xpg3
 .St -xpg3
+.br
+An XPG4 precursor, published in 1989.
+.Pp
+.It \-p1003.2
+.St -p1003.2
+.It \-p1003.2-92
+.St -p1003.2-92
+.It \-iso9945-2-93
+.St -iso9945-2-93
+.br
+An XCU4 precursor.
+.Pp
+.It \-p1003.2a-92
+.St -p1003.2a-92
+.br
+Updates to POSIX.2.
+.Pp
 .It \-xpg4
 .St -xpg4
+.br
+Based on POSIX.1 and POSIX.2, published in 1992.
+.El
+.It Single UNIX Specification version 1 and related standards
+.Pp
+.Bl -tag -width "-p1003.1g-2000" -compact
 .It \-xpg4.2
 .St -xpg4.2
-.It \-xpg4.3
-.St -xpg4.3
-.It \-xbd5
-.St -xbd5
-.It \-xcu5
-.St -xcu5
-.It \-xsh5
-.St -xsh5
-.It \-xns5
-.St -xns5
-.It \-xns5.2
-.St -xns5.2
-.It \-xns5.2d2.0
-.St -xns5.2d2.0
+.br
+This standard was published in 1994 and is also called SUSv1.
+It was used as the basis for UNIX 95 certification.
+The following three refer to parts of it.
+.Pp
+.It \-xsh4.2
+.St -xsh4.2
+.Pp
 .It \-xcurses4.2
 .St -xcurses4.2
+.Pp
+.It \-p1003.1g-2000
+.St -p1003.1g-2000
+.br
+Networking APIs, including sockets.
+.Pp
+.It \-xpg4.3
+.St -xpg4.3
+.Pp
+.It \-svid4
+.St -svid4 ,
+.br
+Published in 1995.
+.El
+.It Single UNIX Specification version 2 and related standards
+.Pp
+.Bl -tag -width "-p1003.1g-2000" -compact
 .It \-susv2
 .St -susv2
+This Standard was published in 1997
+and is also called X/Open Portability Guide version 5.
+It was used as the basis for UNIX 98 certification.
+The following refer to parts of it.
+.Pp
+.It \-xbd5
+.St -xbd5
+.Pp
+.It \-xsh5
+.St -xsh5
+.Pp
+.It \-xcu5
+.St -xcu5
+.Pp
+.It \-xns5
+.St -xns5
+.It \-xns5.2d2.0
+.St -xns5.2d2.0
+.It \-xns5.2
+.St -xns5.2
+.Pp
+.It \-p1387.2
+.St -p1387.2
+.It \-p1387.2-95
+.St -p1387.2-95
+.br
+POSIX software administration.
+.El
+.It Single UNIX Specification version 3 and related standards
+.Pp
+.Bl -tag -width "-p1003.1g-2000X" -compact
+.It \-p1003.1d-99
+.St -p1003.1d-99
+.br
+Additional real-time extensions.
+.Pp
+.It \-p1003.1j-2000
+.St -p1003.1j-2000
+.br
+Advanced real-time extensions.
+.Pp
+.It \-p1003.1q-2000
+.St -p1003.1q-2000
+.br
+Amendment 7: Tracing [C Language].
+.Pp
+.It \-p1003.1-2001
+.St -p1003.1-2001
 .It \-susv3
 .St -susv3
-.It \-svid4
-.St -svid4
+.br
+This standard is based on C99, SUSv2, POSIX.1-1996, 1d, and 1j.
+It is also called X/Open Portability Guide version 6.
+It is used as the basis for UNIX 03 certification.
+.Pp
+.It \-p1003.1-2004
+.St -p1003.1-2004
+.br
+The second and last Technical Corrigendum.
+.El
+.It Single UNIX Specification version 4
+.Pp
+.Bl -tag -width "-p1003.1g-2000" -compact
+.It \-p1003.1-2008
+.St -p1003.1-2008
+.br
+This standard is also called SUSv4 and
+X/Open Portability Guide version 7.
+.Pp
+.It \-p1003.1-2013
+.St -p1003.1-2013
+.br
+This is the first Technical Corrigendum.
+.El
+.It Other standards
+.Pp
+.Bl -tag -width "-p1003.1g-2000" -compact
+.It \-ieee754
+.St -ieee754
+.br
+Floating-point arithmetic.
+.Pp
+.It \-iso8601
+.St -iso8601
+.br
+Representation of dates and times, published in 1988.
+.Pp
+.It \-iso8802-3
+.St -iso8802-3
+.br
+Ethernet local area networks.
+.Pp
+.It \-ieee1275-94
+.St -ieee1275-94
+.El
 .El
 .Ss \&Sx
 Reference a section or subsection in the same manual page.
@@ -2492,7 +2659,9 @@ Examples:
 Prints out
 .Dq currently under development.
 .Ss \&Ux
-Format the UNIX name.
+Format the
+.Ux
+name.
 Accepts no argument.
 .Pp
 Examples:
@@ -3128,9 +3297,9 @@ The following features are unimplemented in mandoc:
 .Fl file Ar file .
 .It
 .Sx \&Bd
-.Fl offset Ar center
+.Fl offset Cm center
 and
-.Fl offset Ar right .
+.Fl offset Cm right .
 Groff does not implement centred and flush-right rendering either,
 but produces large indentations.
 .It

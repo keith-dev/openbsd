@@ -1,4 +1,4 @@
-/*	$OpenBSD: main.c,v 1.52 2013/06/15 17:25:19 millert Exp $	*/
+/*	$OpenBSD: main.c,v 1.54 2013/11/28 10:33:37 sobrado Exp $	*/
 
 /*
  * startup, main loop, environments and error handling
@@ -41,7 +41,6 @@ static const char *initcoms [] = {
 	  "type=whence -v",
 #ifdef JOBS
 	  "stop=kill -STOP",
-	  "suspend=kill -STOP $$",
 #endif
 	  "autoload=typeset -fu",
 	  "functions=typeset -f",
@@ -69,7 +68,7 @@ char username[_PW_NAME_LEN + 1];
 
 /* The shell uses its own variation on argv, to build variables like
  * $0 and $@.
- * If we need to alter argv, allocate a new array first since 
+ * If we need to alter argv, allocate a new array first since
  * modifying the original argv will modify ps output.
  */
 static char **

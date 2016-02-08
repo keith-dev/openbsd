@@ -1,4 +1,4 @@
-dnl	$OpenBSD: mirrors,v 1.114 2013/04/26 13:01:55 sthen Exp $
+dnl	$OpenBSD: mirrors,v 1.118 2014/02/19 22:31:45 sthen Exp $
 This is a list of currently known FTP and HTTP servers at the time
 of the OSREV release.  For a more recent list, please refer to
 
@@ -44,6 +44,10 @@ Costa Rica:
     http://mirrors.ucr.ac.cr/OpenBSD
     ftp://mirrors.ucr.ac.cr/OpenBSD
 
+Czech Republic:
+    http://mirror.steadynet.cz/pub/OpenBSD
+    ftp://mirror.steadynet.cz/pub/OpenBSD
+
 Denmark:
     http://ftp.openbsd.dk/pub/OpenBSD (Aalborg)
     ftp://ftp.openbsd.dk/pub/OpenBSD (Aalborg)
@@ -83,6 +87,9 @@ Hungary:
     http://ftp.fsn.hu/pub/OpenBSD (Budapest)
     ftp://ftp.fsn.hu/pub/OpenBSD (Budapest)
 
+Indonesia:
+    http://kartolo.sby.datautama.net.id/pub/OpenBSD (Surabaya, Java)
+
 Ireland:
     http://ftp.heanet.ie/pub/OpenBSD (Dublin)
     ftp://ftp.heanet.ie/pub/OpenBSD (Dublin)
@@ -104,12 +111,12 @@ Pakistan:
     ftp://stingray.cyber.net.pk/OpenBSD (Karachi)
 
 Poland:
+    http://piotrkosoft.net/pub/OpenBSD (Oswiecim)
+    ftp://ftp.piotrkosoft.net/pub/OpenBSD (Oswiecim)
     http://ftp.icm.edu.pl/pub/OpenBSD (Warszawa)
     ftp://ftp.icm.edu.pl/pub/OpenBSD (Warszawa)
 
 Russia:
-    http://mirror.corbina.net/pub/OpenBSD (Moscow)
-    ftp://mirror.corbina.net/pub/OpenBSD (Moscow)
     http://mirror.yandex.ru/pub/OpenBSD (Moscow)
     ftp://mirror.yandex.ru/pub/OpenBSD (Moscow)
 
@@ -126,8 +133,8 @@ South Africa:
     ftp://ftp.is.co.za/mirror/ftp.openbsd.org (Johannesburg)
 
 Spain:
-    http://mirror.cdmon.com/pub/OpenBSD (Barcelona)
-    ftp://mirror.cdmon.com/pub/OpenBSD (Barcelona)
+    http://mirror.codigo23.net/pub/OpenBSD (Oviedo)
+    ftp://mirror.codigo23.net/pub/OpenBSD (Oviedo)
 
 Sweden:
     http://ftp.eu.openbsd.org/pub/OpenBSD (Stockholm)
@@ -149,6 +156,8 @@ United Kingdom:
     ftp://mirror.bytemark.co.uk/OpenBSD (Manchester)
     http://mirror.ox.ac.uk/pub/OpenBSD (Oxford)
     ftp://mirror.ox.ac.uk/pub/OpenBSD (Oxford)
+    http://mirror.exonetric.net/pub/OpenBSD (London)
+    ftp://mirror.exonetric.net/pub/OpenBSD (London)
 
 USA:
     http://ftp5.usa.openbsd.org/pub/OpenBSD (Redwood City, CA)
@@ -162,8 +171,6 @@ USA:
     http://filedump.se.rit.edu/pub/OpenBSD (Rochester, NY)
     ftp://filedump.se.rit.edu/pub/OpenBSD (Rochester, NY)
     http://openbsd.mirrors.hoobly.com (Pittsburgh, PA)
-    http://mirror.ece.vt.edu/pub/OpenBSD (Blacksburg, VA)
-    http://mirror.servihoo.net/pub/OpenBSD (Kansas City, MO)
     http://openbsd.mirrors.pair.com (Pittsburgh, PA)
     ftp://openbsd.mirrors.pair.com (Pittsburgh, PA)
     http://mirrors.gigenet.com/pub/OpenBSD (Arlington Heights, IL)
@@ -176,6 +183,8 @@ USA:
     ftp://mirrors.syringanetworks.net/pub/OpenBSD (Boise, ID)
     http://mirror.jmu.edu/pub/OpenBSD (Harrisonburg, VA)
     ftp://mirror.jmu.edu/pub/OpenBSD (Harrisonburg, VA)
+    http://openbsd.mirror.frontiernet.net/pub/OpenBSD (Rochester, NY)
+    ftp://openbsd.mirror.frontiernet.net/pub/OpenBSD (Rochester, NY)
 
 
 Additionally, the file ftp://ftp.OpenBSD.org/pub/OpenBSD/ftplist

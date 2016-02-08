@@ -1,4 +1,4 @@
-/*	$OpenBSD: sdmmc.c,v 1.27 2013/05/31 21:28:32 deraadt Exp $	*/
+/*	$OpenBSD: sdmmc.c,v 1.32 2014/01/23 01:41:44 deraadt Exp $	*/
 
 /*
  * Copyright (c) 2006 Uwe Stuehler <uwe@openbsd.org>
@@ -105,6 +105,7 @@ sdmmc_attach(struct device *parent, struct device *self, void *aux)
 	sc->sct = saa->sct;
 	sc->sch = saa->sch;
 	sc->sc_flags = saa->flags;
+	sc->sc_caps = saa->caps;
 	sc->sc_max_xfer = saa->max_xfer;
 
 	SIMPLEQ_INIT(&sc->sf_head);
@@ -149,20 +150,17 @@ sdmmc_activate(struct device *self, int act)
 	int rv = 0;
 
 	switch (act) {
-	case DVACT_QUIESCE:
-		rv = config_activate_children(self, act);
-		break;
 	case DVACT_SUSPEND:
 		rv = config_activate_children(self, act);
 		/* If card in slot, cause a detach/re-attach */
 		if (ISSET(sc->sc_flags, SMF_CARD_PRESENT))
 			sc->sc_dying = -1;
 		break;
-	case DVACT_POWERDOWN:
-		rv = config_activate_children(self, act);
-		break;
 	case DVACT_RESUME:
+		rv = config_activate_children(self, act);
 		wakeup(&sc->sc_tskq);
+		break;
+	default:
 		rv = config_activate_children(self, act);
 		break;
 	}
@@ -175,7 +173,7 @@ sdmmc_create_thread(void *arg)
 	struct sdmmc_softc *sc = arg;
 
 	if (kthread_create(sdmmc_task_thread, sc, &sc->sc_task_thread,
-	    "%s", DEVNAME(sc)) != 0)
+	    DEVNAME(sc)) != 0)
 		printf("%s: can't create task thread\n", DEVNAME(sc));
 
 }
@@ -554,7 +552,7 @@ sdmmc_delay(u_int usecs)
 {
 	int ticks = usecs / (1000000 / hz);
 
-	if (ticks > 0)
+	if (!cold && ticks > 0)
 		tsleep(&sdmmc_delay, PWAIT, "mmcdly", ticks);
 	else
 		delay(usecs);
@@ -571,6 +569,9 @@ sdmmc_app_command(struct sdmmc_softc *sc, struct sdmmc_command *cmd)
 	bzero(&acmd, sizeof acmd);
 	acmd.c_opcode = MMC_APP_CMD;
 	acmd.c_arg = 0;
+	if (sc->sc_card != NULL) {
+		acmd.c_arg = sc->sc_card->rca << 16;
+	}
 	acmd.c_flags = SCF_CMD_AC | SCF_RSP_R1;
 
 	error = sdmmc_mmc_command(sc, &acmd);

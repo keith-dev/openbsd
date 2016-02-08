@@ -1,4 +1,4 @@
-/*	$OpenBSD: printjob.c,v 1.47 2012/03/04 04:05:15 fgsch Exp $	*/
+/*	$OpenBSD: printjob.c,v 1.52 2014/02/07 23:06:21 millert Exp $	*/
 /*	$NetBSD: printjob.c,v 1.31 2002/01/21 14:42:30 wiz Exp $	*/
 
 /*
@@ -226,7 +226,10 @@ again:
 			continue;
 		errcnt = 0;
 	restart:
-		(void)lseek(lfd, pidoff, 0);
+		fdev = (dev_t)-1;
+		fino = (ino_t)-1;
+
+		(void)lseek(lfd, pidoff, SEEK_SET);
 		if ((i = snprintf(line, sizeof(line), "%s\n", q->q_name)) >=
 		    sizeof(line) || i == -1)
 			i = sizeof(line) - 1;	/* can't happen */
@@ -538,20 +541,30 @@ print(int format, char *file)
 	int fd, status, serrno;
 	int n, fi, fo, p[2], stopped = 0, nofile;
 
-	PRIV_START;
-	if (lstat(file, &stb) < 0 || (fi = safe_open(file, O_RDONLY, 0)) < 0) {
+	if (fdev != (dev_t)-1 && fino != (ino_t)-1) {
+		/* symbolic link */
+		PRIV_START;
+		fi = safe_open(file, O_RDONLY, 0);
 		PRIV_END;
-		return(ERROR);
+		if (fi != -1) {
+			/*
+			 * The symbolic link should still point to the same file
+			 * or someone is trying to print something he shouldn't.
+			 */
+			if (fstat(fi, &stb) == -1 ||
+			    stb.st_dev != fdev || stb.st_ino != fino) {
+				close(fi);
+				return(ACCESS);
+			}
+		}
+	} else {
+		/* regular file */
+		PRIV_START;
+		fi = safe_open(file, O_RDONLY|O_NOFOLLOW, 0);
+		PRIV_END;
 	}
-	PRIV_END;
-	/*
-	 * Check to see if data file is a symbolic link. If so, it should
-	 * still point to the same file or someone is trying to print
-	 * something he shouldn't.
-	 */
-	if (S_ISLNK(stb.st_mode) && fstat(fi, &stb) == 0 &&
-	    (stb.st_dev != fdev || stb.st_ino != fino))
-		return(ACCESS);
+	if (fi == -1)
+		return(ERROR);
 	if (!SF && !tof) {		/* start on a fresh page */
 		(void)write(ofd, FF, strlen(FF));
 		tof = 1;
@@ -875,20 +888,34 @@ sendfile(int type, char *file)
 	char buf[BUFSIZ];
 	int sizerr, resp;
 
-	PRIV_START;
-	if (lstat(file, &stb) < 0 || (f = safe_open(file, O_RDONLY, 0)) < 0) {
+	if (fdev != (dev_t)-1 && fino != (ino_t)-1) {
+		/* symbolic link */
+		PRIV_START;
+		f = safe_open(file, O_RDONLY, 0);
 		PRIV_END;
-		return(ERROR);
+		if (f != -1) {
+			/*
+			 * The symbolic link should still point to the same file
+			 * or someone is trying to print something he shouldn't.
+			 */
+			if (fstat(f, &stb) == -1 ||
+			    stb.st_dev != fdev || stb.st_ino != fino) {
+				close(f);
+				return(ACCESS);
+			}
+		}
+	} else {
+		/* regular file */
+		PRIV_START;
+		f = safe_open(file, O_RDONLY|O_NOFOLLOW, 0);
+		PRIV_END;
+		if (fstat(f, &stb) == -1) {
+			close(f);
+			f = -1;
+		}
 	}
-	PRIV_END;
-	/*
-	 * Check to see if data file is a symbolic link. If so, it should
-	 * still point to the same file or someone is trying to print something
-	 * he shouldn't.
-	 */
-	if (S_ISLNK(stb.st_mode) && fstat(f, &stb) == 0 &&
-	    (stb.st_dev != fdev || stb.st_ino != fino))
-		return(ACCESS);
+	if (f == -1)
+		return(ERROR);
 	if ((amt = snprintf(buf, sizeof(buf), "%c%lld %s\n", type,
 	    (long long)stb.st_size, file)) >= sizeof(buf) || amt == -1)
 		return (ACCESS);		/* XXX hack */
@@ -1093,7 +1120,7 @@ sendmail(char *user, int bombed)
 	struct stat stb;
 	FILE *fp;
 
-	if (user[0] == '-' || user[0] == '/' || !isprint(user[0]))
+	if (user[0] == '-' || user[0] == '/' || !isprint((unsigned char)user[0]))
 		return;
 	pipe(p);
 	if ((s = dofork(DORETURN)) == 0) {		/* child */
@@ -1302,14 +1329,6 @@ init(void)
 	RW = (cgetcap(bp, "rw", ':') != NULL);
 
 	cgetnum(bp, "br", &BR);
-	if (cgetnum(bp, "fc", &FC) < 0)
-		FC = 0;
-	if (cgetnum(bp, "fs", &FS) < 0)
-		FS = 0;
-	if (cgetnum(bp, "xc", &XC) < 0)
-		XC = 0;
-	if (cgetnum(bp, "xs", &XS) < 0)
-		XS = 0;
 	cgetstr(bp, "ms", &MS);
 
 	tof = (cgetcap(bp, "fo", ':') == NULL);
@@ -1581,23 +1600,6 @@ setty(void)
 				continue;
 			syslog(LOG_INFO, "%s: unknown stty flag: %s",
 			       printer, *argv);
-		}
-	} else {
-		if (FC) {
-			sttyclearflags(&i.t, FC);
-			i.set = 1;
-		}
-		if (FS) {
-			sttysetflags(&i.t, FS);
-			i.set = 1;
-		}
-		if (XC) {
-			sttyclearlflags(&i.t, XC);
-			i.set = 1;
-		}
-		if (XS) {
-			sttysetlflags(&i.t, XS);
-			i.set = 1;
 		}
 	}
 

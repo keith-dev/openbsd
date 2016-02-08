@@ -1,7 +1,7 @@
-/*	$Id: mandoc.h,v 1.52 2013/07/13 12:51:37 schwarze Exp $ */
+/*	$Id: mandoc.h,v 1.59 2014/01/22 20:58:35 schwarze Exp $ */
 /*
  * Copyright (c) 2010, 2011 Kristaps Dzonsons <kristaps@bsd.lv>
- * Copyright (c) 2012, 2013 Ingo Schwarze <schwarze@openbsd.org>
+ * Copyright (c) 2012, 2013, 2014 Ingo Schwarze <schwarze@openbsd.org>
  *
  * Permission to use, copy, modify, and distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -20,6 +20,7 @@
 
 #define ASCII_NBRSP	 31  /* non-breaking space */
 #define	ASCII_HYPH	 30  /* breakable hyphen */
+#define	ASCII_BREAK	 29  /* breakable zero-width space */
 
 /*
  * Status level.  This refers to both internal status (i.e., whilst
@@ -65,7 +66,7 @@ enum	mandocerr {
 	MANDOCERR_BADNAMESEC, /* bad NAME section contents */
 	MANDOCERR_SECOOO, /* sections out of conventional order */
 	MANDOCERR_SECREP, /* duplicate section name */
-	MANDOCERR_SECMSEC, /* section not in conventional manual section */
+	MANDOCERR_SECMSEC, /* section header suited to sections ... */
 
 	/* related to macros and nesting */
 	MANDOCERR_MACROOBS, /* skipping obsolete macro */
@@ -152,6 +153,7 @@ enum	mandocerr {
 
 	MANDOCERR_FATAL, /* ===== start of fatal errors ===== */
 
+	MANDOCERR_TOOLARGE, /* input too large */
 	MANDOCERR_NOTMANUAL, /* manual isn't really a manual */
 	MANDOCERR_COLUMNS, /* column syntax is inconsistent */
 	MANDOCERR_BADDISP, /* NOT IMPLEMENTED: .Bd -file */
@@ -162,6 +164,13 @@ enum	mandocerr {
 	MANDOCERR_NODOCBODY, /* no document body */
 	MANDOCERR_NODOCPROLOG, /* no document prologue */
 	MANDOCERR_MEM, /* static buffer exhausted */
+
+	/* ===== system errors ===== */
+
+	MANDOCERR_SYSOPEN, /* cannot open file */
+	MANDOCERR_SYSSTAT, /* cannot stat file */
+	MANDOCERR_SYSREAD, /* cannot read file */
+
 	MANDOCERR_MAX
 };
 
@@ -380,6 +389,7 @@ enum	mandoc_esc {
 	ESCAPE_FONT, /* a generic font mode */
 	ESCAPE_FONTBOLD, /* bold font mode */
 	ESCAPE_FONTITALIC, /* italic font mode */
+	ESCAPE_FONTBI, /* bold italic font mode */
 	ESCAPE_FONTROMAN, /* roman font mode */
 	ESCAPE_FONTPREV, /* previous font mode */
 	ESCAPE_NUMBERED, /* a numbered glyph */
@@ -413,7 +423,7 @@ int		  mchars_spec2cp(const struct mchars *,
 const char	 *mchars_spec2str(const struct mchars *, 
 			const char *, size_t, size_t *);
 struct mparse	 *mparse_alloc(enum mparset, enum mandoclevel,
-			mandocmsg, void *, char *);
+			mandocmsg, char *, int);
 void		  mparse_free(struct mparse *);
 void		  mparse_keep(struct mparse *);
 enum mandoclevel  mparse_readfd(struct mparse *, int, const char *);

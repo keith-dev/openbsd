@@ -1,4 +1,4 @@
-/*	$OpenBSD: dev.c,v 1.6 2013/05/05 20:42:53 ratchov Exp $	*/
+/*	$OpenBSD: dev.c,v 1.10 2014/02/08 15:17:37 ratchov Exp $	*/
 /*
  * Copyright (c) 2008-2012 Alexandre Ratchov <alex@caoua.org>
  *
@@ -27,16 +27,6 @@
 #include "sysex.h"
 #include "utils.h"
 
-int  dev_open(struct dev *);
-void dev_close(struct dev *);
-void dev_clear(struct dev *);
-void dev_master(struct dev *, unsigned int);
-
-void slot_attach(struct slot *);
-void slot_ready(struct slot *);
-void slot_mix_drop(struct slot *);
-void slot_sub_sil(struct slot *);
-
 void zomb_onmove(void *, int);
 void zomb_onvol(void *, unsigned int);
 void zomb_fill(void *);
@@ -47,10 +37,66 @@ void zomb_mmcstop(void *);
 void zomb_mmcloc(void *, unsigned int);
 void zomb_exit(void *);
 
+void dev_log(struct dev *);
+void dev_midi_qfr(struct dev *, int);
+void dev_midi_full(struct dev *);
+void dev_midi_vol(struct dev *, struct slot *);
+void dev_midi_master(struct dev *);
+void dev_midi_slotdesc(struct dev *, struct slot *);
+void dev_midi_dump(struct dev *);
 void dev_midi_imsg(void *, unsigned char *, int);
 void dev_midi_omsg(void *, unsigned char *, int);
 void dev_midi_fill(void *, int);
 void dev_midi_exit(void *);
+
+void dev_mon_snoop(struct dev *);
+int play_filt_resamp(struct slot *, void *, void *, int);
+int play_filt_dec(struct slot *, void *, void *, int);
+void dev_mix_badd(struct dev *, struct slot *);
+void dev_empty_cycle(struct dev *);
+void dev_mix_adjvol(struct dev *);
+void dev_mix_cycle(struct dev *);
+int rec_filt_resamp(struct slot *, void *, void *, int);
+int rec_filt_enc(struct slot *, void *, void *, int);
+void dev_sub_bcopy(struct dev *, struct slot *);
+void dev_sub_cycle(struct dev *);
+
+void dev_onmove(struct dev *, int);
+void dev_master(struct dev *, unsigned int);
+void dev_cycle(struct dev *);
+int dev_getpos(struct dev *);
+struct dev *dev_new(char *, struct aparams *, unsigned int, unsigned int,
+    unsigned int, unsigned int, unsigned int, unsigned int);
+void dev_adjpar(struct dev *, int, int, int, int, int);
+int dev_open(struct dev *);
+void dev_close(struct dev *);
+int dev_ref(struct dev *);
+void dev_unref(struct dev *);
+int dev_init(struct dev *);
+void dev_done(struct dev *);
+struct dev *dev_bynum(int);
+void dev_del(struct dev *);
+unsigned int dev_roundof(struct dev *, unsigned int);
+void dev_wakeup(struct dev *);
+void dev_clear(struct dev *);
+void dev_sync_attach(struct dev *);
+void dev_mmcstart(struct dev *);
+void dev_mmcstop(struct dev *);
+void dev_mmcloc(struct dev *, unsigned int);
+
+void slot_log(struct slot *);
+struct slot *slot_new(struct dev *, char *, struct slotops *, void *, int);
+void slot_del(struct slot *);
+void slot_setvol(struct slot *, unsigned int);
+void slot_attach(struct slot *);
+void slot_ready(struct slot *);
+void slot_start(struct slot *);
+void slot_detach(struct slot *);
+void slot_stop(struct slot *);
+void slot_write(struct slot *);
+void slot_read(struct slot *);
+void slot_mix_drop(struct slot *);
+void slot_sub_sil(struct slot *);
 
 struct midiops dev_midiops = {
 	dev_midi_imsg,
@@ -289,7 +335,7 @@ dev_midi_full(struct dev *d)
 
 	x.start = SYSEX_START;
 	x.type = SYSEX_TYPE_RT;
-	x.dev = 0x7f;
+	x.dev = SYSEX_DEV_ANY;
 	x.id0 = SYSEX_MTC;
 	x.id1 = SYSEX_MTC_FULL;
 	x.u.full.hr = d->mtc.hr | (d->mtc.fps_id << 5);
@@ -326,6 +372,7 @@ dev_midi_master(struct dev *d)
 	memset(&x, 0, sizeof(struct sysex));
 	x.start = SYSEX_START;
 	x.type = SYSEX_TYPE_RT;
+	x.dev = SYSEX_DEV_ANY;
 	x.id0 = SYSEX_CONTROL;
 	x.id1 = SYSEX_MASTER;
 	x.u.master.fine = 0;
@@ -345,6 +392,7 @@ dev_midi_slotdesc(struct dev *d, struct slot *s)
 	memset(&x, 0, sizeof(struct sysex));
 	x.start = SYSEX_START;
 	x.type = SYSEX_TYPE_EDU;
+	x.dev = SYSEX_DEV_ANY;
 	x.id0 = SYSEX_AUCAT;
 	x.id1 = SYSEX_AUCAT_SLOTDESC;
 	if (*s->name != '\0') {
@@ -370,7 +418,7 @@ dev_midi_dump(struct dev *d)
 	}
 	x.start = SYSEX_START;
 	x.type = SYSEX_TYPE_EDU;
-	x.dev = 0;
+	x.dev = SYSEX_DEV_ANY;
 	x.id0 = SYSEX_AUCAT;
 	x.id1 = SYSEX_AUCAT_DUMPEND;
 	x.u.dumpend.end = SYSEX_END;
@@ -555,22 +603,18 @@ play_filt_resamp(struct slot *s, void *res_in, void *out, int todo)
 	} else
 		in = res_in;
 
-	nch = s->mix.slot_cmax - s->mix.slot_cmin + 1;
+	nch = s->mix.cmap.nch;
 	vol = ADATA_MUL(s->mix.weight, s->mix.vol) / s->mix.join;
 	cmap_add(&s->mix.cmap, in, out, vol, todo);
 
 	offs = 0;
 	for (i = s->mix.join - 1; i > 0; i--) {
 		offs += nch;
-		if (offs > s->mix.cmap.inext)
-			break;
 		cmap_add(&s->mix.cmap, (adata_t *)in + offs, out, vol, todo);
 	}
 	offs = 0;
 	for (i = s->mix.expand - 1; i > 0; i--) {
 		offs += nch;
-		if (offs > s->mix.cmap.onext)
-			break;
 		cmap_add(&s->mix.cmap, in, (adata_t *)out + offs, vol, todo);
 	}
 	return todo;
@@ -773,7 +817,7 @@ rec_filt_resamp(struct slot *s, void *in, void *res_out, int todo)
 
 	out = (s->sub.resampbuf) ? s->sub.resampbuf : res_out;
 
-	nch = s->sub.slot_cmax - s->sub.slot_cmin + 1;
+	nch = s->sub.cmap.nch;
 	vol = ADATA_UNIT / s->sub.join;
 	cmap_copy(&s->sub.cmap, in, out, vol, todo);
 
@@ -1922,6 +1966,8 @@ slot_stop(struct slot *s)
 void
 slot_write(struct slot *s)
 {
+	int drop;
+
 	if (s->pstate == SLOT_START && s->mix.buf.used == s->mix.buf.len) {
 #ifdef DEBUG
 		if (log_level >= 4) {
@@ -1932,6 +1978,18 @@ slot_write(struct slot *s)
 		s->pstate = SLOT_READY;
 		slot_ready(s);
 	}
+	drop = s->mix.drop;
+	slot_mix_drop(s);
+	while (drop > s->mix.drop) {
+#ifdef DEBUG
+		if (log_level >= 4) {
+			slot_log(s);
+			log_puts(": catching play block\n");
+		}
+#endif
+		s->ops->fill(s->arg);
+		drop--;
+	}
 }
 
 /*
@@ -1940,5 +1998,18 @@ slot_write(struct slot *s)
 void
 slot_read(struct slot *s)
 {
-	/* nothing yet */
+	int sil;
+
+	sil = s->sub.silence;
+	slot_sub_sil(s);
+	while (sil > s->sub.silence) {
+#ifdef DEBUG
+		if (log_level >= 4) {
+			slot_log(s);
+			log_puts(": catching rec block\n");
+		}
+#endif
+		s->ops->flush(s->arg);
+		sil--;
+	}
 }

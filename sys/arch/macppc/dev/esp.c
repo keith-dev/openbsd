@@ -1,4 +1,4 @@
-/* $OpenBSD: esp.c,v 1.9 2013/05/30 16:15:01 deraadt Exp $ */
+/* $OpenBSD: esp.c,v 1.11 2014/01/21 03:42:21 dlg Exp $ */
 
 /*-
  * Copyright (c) 1997, 1998 The NetBSD Foundation, Inc.
@@ -133,11 +133,6 @@ struct cfattach esp_ca = {
 	NULL, espactivate
 };
 
-struct scsi_adapter esp_switch = {
-	/* no max at this level; handled by DMA code */
-	ncr53c9x_scsi_cmd, scsi_minphys, NULL, NULL,
-};
-
 /*
  * Functions and the switch for the MI code.
  */
@@ -261,7 +256,7 @@ espattach(struct device *parent, struct device *self, void *aux)
 	/* Turn on target selection using the `DMA' method */
 	sc->sc_features |= NCR_F_DMASELECT;
 
-	ncr53c9x_attach(sc, &esp_switch);
+	ncr53c9x_attach(sc);
 
 }
 
@@ -269,17 +264,18 @@ int
 esp_activate(struct device *self, int act)
 {
 	struct ncr53c9x_softc *sc = self;
-	int ret = 0;
-
-	ret = config_activate_children(self, act);
+	int rv = 0;
 
 	switch (act) {
 	case DVACT_POWERDOWN:
+		rv = config_activate_children(self, act);
 		NCRCMD(sc, NCRCMD_RSTSCSI);
 		break;
+	default:
+		rv = config_activate_children(self, act);
+		break;
 	}
-
-	return (ret);
+	return (rv);
 }
 
 /*

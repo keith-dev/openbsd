@@ -1,4 +1,4 @@
-/*	$OpenBSD: sysctl.c,v 1.194 2013/07/18 05:02:57 guenther Exp $	*/
+/*	$OpenBSD: sysctl.c,v 1.199 2014/01/23 03:00:04 guenther Exp $	*/
 /*	$NetBSD: sysctl.c,v 1.9 1995/09/30 07:12:50 thorpej Exp $	*/
 
 /*
@@ -102,6 +102,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
+#include <unistd.h>
 
 #include <machine/cpu.h>
 
@@ -310,7 +311,7 @@ parse(char *string, int flags)
 	if ((cp = strchr(string, '=')) != NULL) {
 		*strchr(buf, '=') = '\0';
 		*cp++ = '\0';
-		while (isspace(*cp))
+		while (isspace((unsigned char)*cp))
 			cp++;
 		newval = cp;
 		newsize = strlen(cp);
@@ -387,7 +388,6 @@ parse(char *string, int flags)
 			warnx("use dmesg to view %s", string);
 			return;
 		case KERN_VNODE:
-		case KERN_FILE:
 			if (flags == 0)
 				return;
 			warnx("use pstat to view %s information", string);
@@ -424,6 +424,12 @@ parse(char *string, int flags)
 			if (len < 0)
 				return;
 			break;
+		case KERN_INTRCNT:
+			if (flags == 0)
+				return;
+			warnx("use vmstat or systat to view %s information",
+			    string);
+			return;
 		case KERN_WATCHDOG:
 			len = sysctl_watchdog(string, &bufp, mib, flags,
 			    &type);
@@ -439,7 +445,7 @@ parse(char *string, int flags)
 		case KERN_EMUL:
 			sysctl_emul(string, newval, flags);
 			return;
-		case KERN_FILE2:
+		case KERN_FILE:
 			if (flags == 0)
 				return;
 			warnx("use fstat to view %s information", string);
@@ -2376,7 +2382,7 @@ sysctl_sensors(char *string, char **bufpp, int mib[], int flags, int *typep)
 	}
 	numt = -1;
 	for (i = 0; typename[i] != '\0'; i++)
-		if (isdigit(typename[i])) {
+		if (isdigit((unsigned char)typename[i])) {
 			numt = atoi(&typename[i]);
 			typename[i] = '\0';
 			break;
@@ -2717,7 +2723,7 @@ sysctl_emul(char *string, char *newval, int flags)
 
 }
 
-int
+static int
 emulcmp(const void *m, const void *n)
 {
 	const struct emulname *a = m, *b = n;

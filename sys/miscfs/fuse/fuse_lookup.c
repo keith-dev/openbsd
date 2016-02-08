@@ -1,4 +1,4 @@
-/* $OpenBSD: fuse_lookup.c,v 1.3 2013/06/12 22:55:02 tedu Exp $ */
+/* $OpenBSD: fuse_lookup.c,v 1.8 2014/02/01 09:30:38 syl Exp $ */
 /*
  * Copyright (c) 2012-2013 Sylvestre Gallon <ccna.syl@gmail.com>
  *
@@ -18,19 +18,12 @@
 #include <sys/param.h>
 #include <sys/mount.h>
 #include <sys/namei.h>
-#include <sys/pool.h>
 #include <sys/statvfs.h>
 #include <sys/vnode.h>
 #include <sys/fusebuf.h>
 
 #include "fusefs_node.h"
 #include "fusefs.h"
-
-#ifdef	FUSE_DEBUG_VNOP
-#define	DPRINTF(fmt, arg...)	printf("fuse vnop: " fmt, ##arg)
-#else
-#define	DPRINTF(fmt, arg...)
-#endif
 
 int fusefs_lookup(void *);
 
@@ -62,9 +55,6 @@ fusefs_lookup(void *v)
 	lockparent = flags & LOCKPARENT;
 	wantparent = flags & (LOCKPARENT | WANTPARENT);
 
-	DPRINTF("lookup path %s\n", cnp->cn_pnbuf);
-	DPRINTF("lookup file %s\n", cnp->cn_nameptr);
-
 	if ((error = VOP_ACCESS(vdp, VEXEC, cred, cnp->cn_proc)) != 0)
 		return (error);
 
@@ -83,9 +73,12 @@ fusefs_lookup(void *v)
 	} else if (cnp->cn_namelen == 1 && *(cnp->cn_nameptr) == '.') {
 		nid = dp->ufs_ino.i_number;
 	} else {
+		if (!fmp->sess_init)
+			return (ENOENT);
+
 		/* got a real entry */
-		fbuf = fb_setup(FUSEFDSIZE + cnp->cn_namelen + 1,
-		    dp->ufs_ino.i_number, FBT_LOOKUP, p);
+		fbuf = fb_setup(cnp->cn_namelen + 1, dp->ufs_ino.i_number,
+		    FBT_LOOKUP, p);
 
 		memcpy(fbuf->fb_dat, cnp->cn_nameptr, cnp->cn_namelen);
 		fbuf->fb_dat[cnp->cn_namelen] = '\0';
@@ -126,8 +119,7 @@ fusefs_lookup(void *v)
 		 */
 		error = VOP_ACCESS(vdp, VWRITE, cred, cnp->cn_proc);
 		if (error != 0) {
-			if (fbuf)
-				pool_put(&fusefs_fbuf_pool, fbuf);
+			fb_delete(fbuf);
 			return (error);
 		}
 
@@ -138,8 +130,10 @@ fusefs_lookup(void *v)
 		/*
 		 * Write access to directory required to delete files.
 		 */
-		if ((error = VOP_ACCESS(vdp, VWRITE, cred, cnp->cn_proc)) != 0)
+		if ((error = VOP_ACCESS(vdp, VWRITE, cred, cnp->cn_proc)) != 0) {
+			fb_delete(fbuf);
 			return (error);
+		}
 
 		if (nid == VTOI(vdp)->ufs_ino.i_number) {
 			error = EISDIR;
@@ -193,12 +187,9 @@ fusefs_lookup(void *v)
 		}
 
 		update_vattr(fmp->mp, &fbuf->fb_vattr);
-		memcpy(&(VTOI(tdp)->cached_attrs), &fbuf->fb_vattr,
-		    sizeof(struct vattr));
 
 		if (error) {
-			if (fbuf)
-				pool_put(&fusefs_fbuf_pool, fbuf);
+			fb_delete(fbuf);
 			return (error);
 		}
 
@@ -218,7 +209,6 @@ out:
 	    nameiop != DELETE)
 		cache_enter(vdp, *vpp, cnp);
 
-	if (fbuf)
-		pool_put(&fusefs_fbuf_pool, fbuf);
+	fb_delete(fbuf);
 	return (error);
 }

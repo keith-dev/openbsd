@@ -1,4 +1,4 @@
-/*	$OpenBSD: newfs_msdos.c,v 1.20 2010/05/18 04:41:14 dlg Exp $	*/
+/*	$OpenBSD: newfs_msdos.c,v 1.22 2013/11/22 04:14:01 deraadt Exp $	*/
 
 /*
  * Copyright (c) 1998 Robert Nordier
@@ -714,11 +714,11 @@ getdiskinfo(int fd, const char *fname, const char *dtype, int oflag,
     s1 = fname;
     if ((s2 = strrchr(s1, '/')))
 	s1 = s2 + 1;
-    for (s2 = s1; *s2 && !isdigit(*s2); s2++);
+    for (s2 = s1; *s2 && !isdigit((unsigned char)*s2); s2++);
     if (!*s2 || s2 == s1)
 	s2 = NULL;
     else
-	while (isdigit(*++s2));
+	while (isdigit((unsigned char)*++s2));
     s1 = s2;
     if (s2 && *s2 >= 'a' && *s2 <= 'a' + MAXPARTITIONS - 1) {
 	part = *s2++ - 'a';
@@ -740,12 +740,12 @@ getdiskinfo(int fd, const char *fname, const char *dtype, int oflag,
 	if (part == -1)
 	    part = RAW_PART;
 	if (part >= lp->d_npartitions ||
-	    !lp->d_partitions[part].p_size)
+	    !DL_GETPSIZE(&lp->d_partitions[part]))
 	    errx(1, "%s: partition is unavailable", fname);
 	if (!oflag && part != -1)
-	    bpb->hid += lp->d_partitions[part].p_offset;
+	    bpb->hid += DL_GETPOFFSET(&lp->d_partitions[part]);
 	if (!bpb->bsec)
-	    bpb->bsec = lp->d_partitions[part].p_size;
+	    bpb->bsec = DL_GETPSIZE(&lp->d_partitions[part]);
 	if (!bpb->bps)
 	    bpb->bps = ckgeom(fname, lp->d_secsize, "bytes/sector");
 	if (!bpb->spt)
@@ -841,7 +841,7 @@ mklabel(u_int8_t *dest, const char *src)
     int c, i;
 
     for (i = 0; i < 11; i++) {
-	c = *src ? toupper(*src++) : ' ';
+	c = *src ? toupper((unsigned char)*src++) : ' ';
 	*dest++ = !i && c == '\xe5' ? 5 : c;
     }
 }

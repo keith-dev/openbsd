@@ -1,4 +1,4 @@
-/*	$OpenBSD: tcpcib.c,v 1.5 2013/05/30 16:15:02 deraadt Exp $	*/
+/*	$OpenBSD: tcpcib.c,v 1.7 2013/12/06 21:03:04 deraadt Exp $	*/
 
 /*
  * Copyright (c) 2012 Matt Dainty <matt@bodgit-n-scarper.com>
@@ -220,7 +220,7 @@ tcpcib_attach(struct device *parent, struct device *self, void *aux)
 	reg = pci_conf_read(pa->pa_pc, pa->pa_tag, E600_LPC_WDTBA);
 	wdtbase = reg & 0xffff;
 	sc->sc_wdt_iot = pa->pa_iot;
-	if (reg & (1 << 31) && wdtbase) {
+	if (reg & (1U << 31) && wdtbase) {
 		if (PCI_MAPREG_IO_ADDR(wdtbase) == 0 ||
 		    bus_space_map(sc->sc_wdt_iot, PCI_MAPREG_IO_ADDR(wdtbase),
 		    E600_WDT_SIZE, 0, &sc->sc_wdt_ioh)) {
@@ -269,11 +269,11 @@ int
 tcpcib_activate(struct device *self, int act)
 {
 	struct tcpcib_softc *sc = (struct tcpcib_softc *)self;
-	int ret = 0;
+	int rv = 0;
 	
 	switch (act) {
 	case DVACT_SUSPEND:
-		ret = config_activate_children(self, act);
+		rv = config_activate_children(self, act);
 		/* Watchdog is running, disable it */
 		if (sc->sc_active & E600_WDT_ACTIVE && sc->sc_wdt_period != 0)
 			tcpcib_wdt_stop(sc);
@@ -293,13 +293,13 @@ tcpcib_activate(struct device *self, int act)
 		if (sc->sc_active & E600_HPET_ACTIVE)
 			bus_space_write_4(sc->sc_hpet_iot, sc->sc_hpet_ioh,
 			    E600_HPET_GC, E600_HPET_GC_ENABLE);
-		ret = config_activate_children(self, act);
+		rv = config_activate_children(self, act);
 		break;
 	default:
-		ret = config_activate_children(self, act);
+		rv = config_activate_children(self, act);
 		break;
 	}
-	return (ret);
+	return (rv);
 }
 
 int

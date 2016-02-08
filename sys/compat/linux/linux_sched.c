@@ -1,4 +1,4 @@
-/*	$OpenBSD: linux_sched.c,v 1.14 2012/05/25 04:39:40 guenther Exp $	*/
+/*	$OpenBSD: linux_sched.c,v 1.16 2014/02/12 05:47:36 guenther Exp $	*/
 /*	$NetBSD: linux_sched.c,v 1.6 2000/05/28 05:49:05 thorpej Exp $	*/
 
 /*-
@@ -61,7 +61,7 @@ linux_sys_clone(struct proc *p, void *v, register_t *retval)
 	struct linux_sys_clone_args *uap = v;
 	struct linux_emuldata *emul = p->p_emuldata;
 	int cflags = SCARG(uap, flags);
-	int flags = FORK_TFORK, sig;
+	int flags = FORK_TFORK;
 	int error = 0;
 
 	/*
@@ -110,13 +110,7 @@ linux_sys_clone(struct proc *p, void *v, register_t *retval)
 	LINUX_CLONE_VFORK
 		if ((cflags & (REQUIRED | BANNED)) != REQUIRED)
 			return (EINVAL);
-		/*
-		 * Linux says that CLONE_THREAD means no signal
-		 * will be sent on exit (even if a non-standard
-		 * signal is requested via CLONE_CSIGNAL), so pass
-		 * FORK_NOZOMBIE too.
-		 */
-		flags |= FORK_THREAD | FORK_NOZOMBIE;
+		flags |= FORK_THREAD;
 	} else {
 		/*
 		 * These are only supported with CLONE_THREAD.  Arguably,
@@ -136,18 +130,16 @@ linux_sys_clone(struct proc *p, void *v, register_t *retval)
 		if ((cflags & (LINUX_CLONE_FS | LINUX_CLONE_FILES)) ==
 		    LINUX_CLONE_FS)
 			return (EINVAL);
+
+		/* We don't support alternate exit signals. */
+		if ((cflags & LINUX_CLONE_CSIGNAL) != LINUX_SIGCHLD)
+			return (EINVAL);
 	}
 	/*
 	 * Since we don't support CLONE_PTRACE, the CLONE_UNTRACED
 	 * flag can be silently ignored.  CLONE_DETACHED is always
 	 * ignored by Linux.
 	 */
-
-	sig = cflags & LINUX_CLONE_CSIGNAL;
-	if (sig < 0 || sig >= LINUX__NSIG)
-		return (EINVAL);
-	sig = linux_to_bsd_sig[sig];
-
 	if (cflags & LINUX_CLONE_CHILD_SETTID)
 		emul->child_set_tid = SCARG(uap, child_tidptr);
 	else
@@ -183,7 +175,7 @@ linux_sys_clone(struct proc *p, void *v, register_t *retval)
 	 * or down.  So, we pass a stack size of 0, so that the code
 	 * that makes this adjustment is a noop.
 	 */
-	error = fork1(p, sig, flags, SCARG(uap, stack), 0, linux_child_return,
+	error = fork1(p, flags, SCARG(uap, stack), 0, linux_child_return,
 	    NULL, retval, NULL);
 	if (error)
 		return error;

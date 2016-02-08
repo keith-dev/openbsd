@@ -1,4 +1,4 @@
-/*	$OpenBSD: unvis.c,v 1.9 2009/10/27 23:59:46 deraadt Exp $	*/
+/*	$OpenBSD: unvis.c,v 1.12 2014/01/22 09:45:21 jsg Exp $	*/
 
 /*-
  * Copyright (c) 1989, 1993
@@ -29,9 +29,10 @@
  * SUCH DAMAGE.
  */
 
+#include <err.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <err.h>
+#include <unistd.h>
 #include <vis.h>
 
 void process(FILE *fp, const char *filename);
@@ -43,7 +44,7 @@ main(int argc, char *argv[])
 	int ch;
 
 	while ((ch = getopt(argc, argv, "")) != -1)
-		switch((char)ch) {
+		switch(ch) {
 		case '?':
 		default:
 			(void) fprintf(stderr, "usage: unvis [file ...]\n");
@@ -54,9 +55,10 @@ main(int argc, char *argv[])
 
 	if (*argv)
 		while (*argv) {
-			if ((fp=fopen(*argv, "r")) != NULL)
+			if ((fp=fopen(*argv, "r")) != NULL) {
 				process(fp, *argv);
-			else
+				fclose(fp);
+			} else
 				warn("%s", *argv);
 			argv++;
 		}

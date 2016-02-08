@@ -1,4 +1,4 @@
-#	$OpenBSD: RAMDISK_CD,v 1.198 2013/04/05 13:28:59 deraadt Exp $
+#	$OpenBSD: RAMDISK_CD,v 1.210 2014/02/19 05:32:57 jmatthew Exp $
 
 machine		i386		# architecture, used by config; REQUIRED
 
@@ -130,14 +130,14 @@ axe*	at uhub?		# ASIX Electronics AX88172 USB Ethernet
 cue*	at uhub?		# CATC USB-EL1201A based Ethernet
 kue*	at uhub?		# Kawasaki KL5KUSB101B based Ethernet
 smsc*	at uhub?		# SMSC LAN95xx Ethernet
-upl*	at uhub?		# Prolific PL2301/PL2302 host-to-host `network'
+#upl*	at uhub?		# Prolific PL2301/PL2302 host-to-host `network'
+#ugl*	at uhub?		# Genesys Logic GL620USB-A host-to-host `network'
 #urio*	at uhub?		# Diamond Multimedia Rio 500
 cdce*	at uhub?		# CDC Ethernet
 udav*	at uhub?		# Davicom DM9601 based Ethernet
 mos*	at uhub?		# MOSCHIP MCS7730/7830 10/100 Ethernet
 url*	at uhub?		# Realtek RTL8150L based adapters
 wi*	at uhub?		# WaveLAN IEEE 802.11DS
-#uscanner* at uhub?		# USB Scanners
 #uyap*	at uhub?		# Y@P firmware loader
 #ugen*	at uhub?		# USB Generic driver
 ural*	at uhub?		# Ralink RT2500
@@ -214,9 +214,11 @@ cac*	at pci?			# Compaq Smart ARRAY [234]* RAID controllers
 cac*	at eisa?
 ciss*	at pci?			# Compaq Smart ARRAY [56]* RAID controllers
 twe*	at pci?			# 3ware Escalade RAID controllers
-iha*	at pci?			# Initio Ultra/UltraWide SCSI controllers
+#iha*	at pci?			# Initio Ultra/UltraWide SCSI controllers
 ips*	at pci?			# IBM ServeRAID controllers
 isp*	at pci?			# Qlogic ISP [12]0x0 SCSI/FibreChannel
+#qla*	at pci?			# Qlogic ISP 2[123]xx SCSI/FibreChannel
+#qle*	at pci?			# Qlogic ISP 2[45]xx SCSI/FibreChannel
 aic0	at isa? port 0x340 irq 11	# Adaptec 152[02] SCSI controllers
 aic*	at isapnp?
 aic*	at pcmcia?		# PCMCIA based aic SCSI controllers
@@ -225,18 +227,14 @@ adv*	at pci?			# AdvanSys 1200A/B and ULTRA SCSI
 adw*	at pci?			# AdvanSys ULTRA WIDE SCSI
 pcscp*	at pci?			# AMD 53c974 PCscsi-PCI SCSI
 #sea0	at isa? iomem 0xc8000 irq 5	# Seagate ST0[12] SCSI controllers
-trm*	at pci?			# Tekram DC-3x5U SCSI Controllers
+#trm*	at pci?			# Tekram DC-3x5U SCSI Controllers
 uha0	at isa? port 0x330	# UltraStor [13]4f SCSI controllers
 #uha1	at isa? port 0x334	# UltraStor [13]4f SCSI controllers
 uha*	at eisa?		# UltraStor 24f SCSI controllers
 #wds0	at isa? port 0x350 irq 15 drq 6	# WD7000 and TMC-7000 controllers
 #wds1	at isa? port 0x358 irq 11 drq 5
+vmwpvs*	at pci?			# VMware ParaVirtual SCSI
 softraid0	at root		# Software RAID
-
-# I2O
-iop*	at pci?			# I2O processor
-ioprbs*	at iop?			# I2O arrays
-iopsp*	at iop?			# I2O SCSI pass-through
 
 scsibus* at scsi?
 sd*	at scsibus?		# SCSI disk drives
@@ -260,6 +258,11 @@ wdc*	at isapnp?
 # IDE hard drives
 wd*	at wdc? flags 0x0000
 wd*	at pciide? flags 0x0000
+
+sdhc*   at pci?                 # SD Host Controller
+sdmmc*  at sdhc?                # SD/MMC bus
+rtsx*   at pci?                 # Realtek SD Card Reader
+sdmmc*  at rtsx?                # SD/MMC bus
 
 # ATAPI<->SCSI
 atapiscsi* at wdc?
@@ -285,7 +288,6 @@ le0	at isa? port 0x360 irq 15 drq 6	# IsoLan, NE2100, and DEPCA
 ex0	at isa? port 0x320 irq 5	# Intel EtherExpress PRO/10
 ep*	at eisa?			# 3C579 ethernet
 ef*	at isapnp?			# 3C515 ethernet
-#fea*	at eisa?			# DEC DEFEA FDDI
 le*	at isapnp?
 pcn*	at pci?				# AMD PCnet-PCI Ethernet
 de*	at pci?				# DC21X4X-based ethernet
@@ -297,7 +299,6 @@ ne*	at pcmcia?			# PCMCIA based NE2000 ethernet
 ep*	at pcmcia?			# PCMCIA based 3C5xx ethernet
 sm*	at pcmcia?			# PCMCIA based sm ethernet
 xe*	at pcmcia?			# Xircom ethernet
-fpa*	at pci?				# DEC DEFPA FDDI
 xl*	at pci?				# 3C9xx ethernet
 xl*	at cardbus?			# 3C575 ethernet
 rl*	at pci?				# RealTek 81[23]9 ethernet
@@ -337,6 +338,7 @@ vge*	at pci?				# VIA VT612x
 nfe*	at pci?				# NVIDIA nForce Ethernet
 xge*	at pci?				# Neterion Xframe-I/II 10Gb ethernet
 vic*	at pci?				# VMware VMXnet virtual interface
+vmx*	at pci?				# VMware VMXNET3 virtual interface
 et*	at pci?				# Agere/LSI ET1310
 age*	at pci?				# Attansic L1 Ethernet
 alc*	at pci?				# Attansic L1C/L1D/L2C Ethernet
@@ -360,7 +362,6 @@ wi*	at pci?				# WaveLAN IEEE 802.11DS
 wi*	at pcmcia?			# WaveLAN IEEE 802.11DS
 an*	at pcmcia?			# Aironet IEEE 802.11DS
 #cnw*	at pcmcia?			# Xircom Netwave
-ray*	at pcmcia?			# Raylink Aviator2.4/Pro 802.11FH
 ipw*	at pci?				# Intel PRO/Wireless 2100
 iwi*	at pci?				# Intel PRO/Wireless 2200BG/2915ABG
 wpi*	at pci?				# Intel PRO/Wireless 3945ABG
@@ -420,3 +421,4 @@ pseudo-device	bio	1		# ioctl multiplexing device
 virtio*	at pci?				# Virtio PCI device
 vioblk*	at virtio?			# Virtio block device
 vio*	at virtio?			# Virtio network device
+vioscsi*	at virtio?		# Virtio SCSI device

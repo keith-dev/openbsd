@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_time.c,v 1.80 2013/06/17 19:11:54 guenther Exp $	*/
+/*	$OpenBSD: kern_time.c,v 1.87 2014/01/30 21:01:59 kettenis Exp $	*/
 /*	$NetBSD: kern_time.c,v 1.20 1996/02/18 11:57:06 fvdl Exp $	*/
 
 /*
@@ -46,9 +46,7 @@
 #include <sys/syscallargs.h>
 
 
-struct timeval adjtimedelta;		/* unapplied time correction */
-
-void	itimerround(struct timeval *);
+int64_t adjtimedelta;		/* unapplied time correction (microseconds) */
 
 /* 
  * Time of day and interval timer support.
@@ -70,8 +68,7 @@ settime(struct timespec *ts)
 	 * Adjtime in progress is meaningless or harmful after
 	 * setting the clock. Cancel adjtime and then set new time.
 	 */
-	adjtimedelta.tv_usec = 0;
-	adjtimedelta.tv_sec = 0;
+	adjtimedelta = 0;
 
 	/*
 	 * Don't allow the time to be set forward so far it will wrap
@@ -81,11 +78,10 @@ settime(struct timespec *ts)
 	 * the time past the cutoff, it will take a very long time
 	 * to get to the wrap point.
 	 *
-	 * XXX: we check against INT_MAX since on 64-bit
-	 *	platforms, sizeof(int) != sizeof(long) and
-	 *	time_t is 32 bits even when atv.tv_sec is 64 bits.
+	 * XXX: we check against UINT_MAX until we can figure out
+	 *	how to deal with the hardware RTCs.
 	 */
-	if (ts->tv_sec > INT_MAX - 365*24*60*60) {
+	if (ts->tv_sec > UINT_MAX - 365*24*60*60) {
 		printf("denied attempt to set clock forward to %lld\n",
 		    (long long)ts->tv_sec);
 		return (EPERM);
@@ -112,11 +108,17 @@ settime(struct timespec *ts)
 int
 clock_gettime(struct proc *p, clockid_t clock_id, struct timespec *tp)
 {
+	struct bintime bt;
 	struct proc *q;
 
 	switch (clock_id) {
 	case CLOCK_REALTIME:
 		nanotime(tp);
+		break;
+	case CLOCK_UPTIME:
+		binuptime(&bt);
+		bintime_sub(&bt, &naptime);
+		bintime2timespec(&bt, tp);
 		break;
 	case CLOCK_MONOTONIC:
 		nanouptime(tp);
@@ -157,6 +159,7 @@ sys_clock_gettime(struct proc *p, void *v, register_t *retval)
 	struct timespec ats;
 	int error;
 
+	memset(&ats, 0, sizeof(ats));
 	if ((error = clock_gettime(p, SCARG(uap, clock_id), &ats)) != 0)
 		return (error);
 
@@ -214,10 +217,12 @@ sys_clock_getres(struct proc *p, void *v, register_t *retval)
 	struct proc *q;
 	int error = 0;
 
+	memset(&ts, 0, sizeof(ts));
 	clock_id = SCARG(uap, clock_id);
 	switch (clock_id) {
 	case CLOCK_REALTIME:
 	case CLOCK_MONOTONIC:
+	case CLOCK_UPTIME:
 	case CLOCK_PROCESS_CPUTIME_ID:
 	case CLOCK_THREAD_CPUTIME_ID:
 		ts.tv_sec = 0;
@@ -293,6 +298,7 @@ sys_nanosleep(struct proc *p, void *v, register_t *retval)
 	if (rmtp) {
 		getnanouptime(&ets);
 
+		memset(&rmt, 0, sizeof(rmt));
 		timespecsub(&ets, &sts, &sts);
 		timespecsub(&rqt, &sts, &rmt);
 
@@ -331,6 +337,7 @@ sys_gettimeofday(struct proc *p, void *v, register_t *retval)
 	tzp = SCARG(uap, tzp);
 
 	if (tp) {
+		memset(&atv, 0, sizeof(atv));
 		microtime(&atv);
 		if ((error = copyout(&atv, tp, sizeof (atv))))
 			return (error);
@@ -422,31 +429,33 @@ sys_adjtime(struct proc *p, void *v, register_t *retval)
 	} */ *uap = v;
 	const struct timeval *delta = SCARG(uap, delta);
 	struct timeval *olddelta = SCARG(uap, olddelta);
+	struct timeval atv;
 	int error;
 
-	if (olddelta)
-		if ((error = copyout(&adjtimedelta, olddelta,
-		    sizeof(struct timeval))))
+	if (olddelta) {
+		memset(&atv, 0, sizeof(atv));
+		atv.tv_sec = adjtimedelta / 1000000;
+		atv.tv_usec = adjtimedelta % 1000000;
+		if (atv.tv_usec < 0) {
+			atv.tv_usec += 1000000;
+			atv.tv_sec--;
+		}
+
+		if ((error = copyout(&atv, olddelta, sizeof(struct timeval))))
 			return (error);
+	}
 
 	if (delta) {
 		if ((error = suser(p, 0)))
 			return (error);
 
-		if ((error = copyin(delta, &adjtimedelta,
-		    sizeof(struct timeval))))
+		if ((error = copyin(delta, &atv, sizeof(struct timeval))))
 			return (error);
+
+		/* XXX Check for overflow? */
+		adjtimedelta = (int64_t)atv.tv_sec * 1000000 + atv.tv_usec;
 	}
 
-	/* Normalize the correction. */
-	while (adjtimedelta.tv_usec >= 1000000) {
-		adjtimedelta.tv_usec -= 1000000;
-		adjtimedelta.tv_sec += 1;
-	}
-	while (adjtimedelta.tv_usec < 0) {
-		adjtimedelta.tv_usec += 1000000;
-		adjtimedelta.tv_sec -= 1;
-	}
 	return (0);
 }
 
@@ -486,8 +495,12 @@ sys_getitimer(struct proc *p, void *v, register_t *retval)
 
 	if (which < ITIMER_REAL || which > ITIMER_PROF)
 		return (EINVAL);
+	memset(&aitv, 0, sizeof(aitv));
 	s = splclock();
-	aitv = p->p_p->ps_timer[which];
+	aitv.it_interval.tv_sec  = p->p_p->ps_timer[which].it_interval.tv_sec;
+	aitv.it_interval.tv_usec = p->p_p->ps_timer[which].it_interval.tv_usec;
+	aitv.it_value.tv_sec     = p->p_p->ps_timer[which].it_value.tv_sec;
+	aitv.it_value.tv_usec    = p->p_p->ps_timer[which].it_value.tv_usec;
 
 	if (which == ITIMER_REAL) {
 		struct timeval now;
@@ -565,10 +578,6 @@ sys_setitimer(struct proc *p, void *v, register_t *retval)
 		itimerround(&aitv.it_interval);
 		s = splclock();
 		pr->ps_timer[which] = aitv;
-		if (which == ITIMER_VIRTUAL)
-			timeout_del(&pr->ps_virt_to);
-		if (which == ITIMER_PROF)
-			timeout_del(&pr->ps_prof_to);
 		splx(s);
 	}
 
@@ -774,3 +783,4 @@ ppsratecheck(struct timeval *lasttime, int *curpps, int maxpps)
 
 	return (rv);
 }
+

@@ -1,4 +1,4 @@
-/*	$OpenBSD: scsiconf.h,v 1.153 2013/06/11 16:42:17 deraadt Exp $	*/
+/*	$OpenBSD: scsiconf.h,v 1.160 2014/01/31 02:53:41 dlg Exp $	*/
 /*	$NetBSD: scsiconf.h,v 1.35 1997/04/02 02:29:38 mycroft Exp $	*/
 
 /*
@@ -171,6 +171,7 @@ _8btol(u_int8_t *bytes)
 #define DEVID_EUI	2
 #define DEVID_T10	3
 #define DEVID_SERIAL	4
+#define DEVID_WWN	5
 
 struct devid {
 	u_int8_t	d_type;
@@ -472,7 +473,6 @@ const void *scsi_inqmatch(struct scsi_inquiry_data *, const void *, int,
     workq_add_task(NULL, (_fl), (_f), (_a1), (_a2))
 
 void	scsi_init(void);
-daddr_t scsi_size(struct scsi_link *, int, u_int32_t *);
 int	scsi_test_unit_ready(struct scsi_link *, int, int);
 int	scsi_inquire(struct scsi_link *, struct scsi_inquiry_data *, int);
 int	scsi_inquire_vpd(struct scsi_link *, void *, u_int, u_int8_t, int);
@@ -542,6 +542,7 @@ void			scsi_sense_print_debug(struct scsi_xfer *);
  */
 void	scsi_iopool_init(struct scsi_iopool *, void *,
 	    void *(*)(void *), void (*)(void *, void *));
+void	scsi_iopool_run(struct scsi_iopool *);
 void	scsi_iopool_destroy(struct scsi_iopool *);
 void	scsi_link_shutdown(struct scsi_link *);
 
@@ -551,6 +552,7 @@ void	scsi_io_put(struct scsi_iopool *, void *);
 /*
  * default io allocator.
  */
+#define SCSI_IOPOOL_POISON ((void *)0x5c5)
 void *	scsi_default_get(void *);
 void	scsi_default_put(void *, void *);
 
@@ -559,13 +561,19 @@ void	scsi_default_put(void *, void *);
  */
 void	scsi_ioh_set(struct scsi_iohandler *, struct scsi_iopool *,
 	    void (*)(void *, void *), void *);
-void	scsi_ioh_add(struct scsi_iohandler *);
-void	scsi_ioh_del(struct scsi_iohandler *);
+int	scsi_ioh_add(struct scsi_iohandler *);
+int	scsi_ioh_del(struct scsi_iohandler *);
 
 void	scsi_xsh_set(struct scsi_xshandler *, struct scsi_link *,
 	    void (*)(struct scsi_xfer *));
-void	scsi_xsh_add(struct scsi_xshandler *);
-void	scsi_xsh_del(struct scsi_xshandler *);
+int	scsi_xsh_add(struct scsi_xshandler *);
+int	scsi_xsh_del(struct scsi_xshandler *);
+
+/*
+ * utility functions
+ */
+int	scsi_pending_start(struct mutex *, u_int *);
+int	scsi_pending_finish(struct mutex *, u_int *);
 
 /*
  * Utility functions for SCSI HBA emulation.

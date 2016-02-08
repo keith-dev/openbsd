@@ -1,4 +1,4 @@
-/*	$OpenBSD: client.c,v 1.90 2013/04/30 11:42:56 mglocker Exp $ */
+/*	$OpenBSD: client.c,v 1.92 2013/10/21 08:48:22 phessler Exp $ */
 
 /*
  * Copyright (c) 2003, 2004 Henning Brauer <henning@openbsd.org>
@@ -36,6 +36,7 @@ set_next(struct ntp_peer *p, time_t t)
 {
 	p->next = getmonotime() + t;
 	p->deadline = 0;
+	p->poll = t;
 }
 
 void
@@ -134,9 +135,6 @@ client_query(struct ntp_peer *p)
 	if (p->state < STATE_DNS_DONE || p->addr == NULL)
 		return (-1);
 
-	if (p->addr->ss.ss_family != AF_INET && p->rtable != -1)
-		return (-1);
-
 	if (p->query->fd == -1) {
 		struct sockaddr *sa = (struct sockaddr *)&p->addr->ss;
 
@@ -144,8 +142,8 @@ client_query(struct ntp_peer *p)
 		    0)) == -1)
 			fatal("client_query socket");
 
-		if (p->addr->ss.ss_family == AF_INET && p->rtable != -1 &&
-		    setsockopt(p->query->fd, IPPROTO_IP, SO_RTABLE,
+		if (p->rtable != -1 &&
+		    setsockopt(p->query->fd, SOL_SOCKET, SO_RTABLE,
 		    &p->rtable, sizeof(p->rtable)) == -1)
 			fatal("client_query setsockopt SO_RTABLE");
 		if (connect(p->query->fd, sa, SA_LEN(sa)) == -1) {
@@ -251,7 +249,7 @@ client_dispatch(struct ntp_peer *p, u_int8_t settime)
 	}
 
 	if (p->rtable != -1 &&
-	    setsockopt(p->query->fd, IPPROTO_IP, SO_RTABLE, &p->rtable,
+	    setsockopt(p->query->fd, SOL_SOCKET, SO_RTABLE, &p->rtable,
 	    sizeof(p->rtable)) == -1)
 		fatal("client_dispatch setsockopt SO_RTABLE");
 
@@ -328,6 +326,7 @@ client_dispatch(struct ntp_peer *p, u_int8_t settime)
 
 	p->reply[p->shift].offset = ((T2 - T1) + (T3 - T4)) / 2;
 	p->reply[p->shift].delay = (T4 - T1) - (T3 - T2);
+	p->reply[p->shift].status.stratum = msg.stratum;
 	if (p->reply[p->shift].delay < 0) {
 		interval = error_interval();
 		set_next(p, interval);
@@ -348,7 +347,6 @@ client_dispatch(struct ntp_peer *p, u_int8_t settime)
 	p->reply[p->shift].status.refid = msg.refid;
 	p->reply[p->shift].status.reftime = lfp_to_d(msg.reftime);
 	p->reply[p->shift].status.poll = msg.ppoll;
-	p->reply[p->shift].status.stratum = msg.stratum;
 
 	if (p->addr->ss.ss_family == AF_INET) {
 		p->reply[p->shift].status.send_refid =

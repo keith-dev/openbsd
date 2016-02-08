@@ -1,4 +1,4 @@
-/*	$OpenBSD: parse.y,v 1.266 2013/05/11 14:42:28 benno Exp $ */
+/*	$OpenBSD: parse.y,v 1.271 2014/01/22 00:21:16 henning Exp $ */
 
 /*
  * Copyright (c) 2002, 2003, 2004 Henning Brauer <henning@openbsd.org>
@@ -99,6 +99,12 @@ struct filter_prefix_l {
 	struct filter_prefix	 p;
 };
 
+struct filter_prefixlen {
+	enum comp_ops		op;
+	int			len_min;
+	int			len_max;
+};
+
 struct filter_as_l {
 	struct filter_as_l	*next;
 	struct filter_as	 a;
@@ -108,7 +114,6 @@ struct filter_match_l {
 	struct filter_match	 m;
 	struct filter_prefix_l	*prefix_l;
 	struct filter_as_l	*as_l;
-	u_int8_t		 aid;
 } fmopts;
 
 struct peer	*alloc_peer(void);
@@ -119,6 +124,8 @@ int		 add_mrtconfig(enum mrt_type, char *, int, struct peer *,
 int		 add_rib(char *, u_int, u_int16_t);
 struct rde_rib	*find_rib(char *);
 int		 get_id(struct peer *);
+int		 merge_prefixspec(struct filter_prefix_l *,
+		    struct filter_prefixlen *);
 int		 expand_rule(struct filter_rule *, struct filter_peers_l *,
 		    struct filter_match_l *, struct filter_set_head *);
 int		 str2key(char *, char *, size_t);
@@ -145,13 +152,13 @@ typedef struct {
 		struct filter_match_l	 filter_match;
 		struct filter_prefix_l	*filter_prefix;
 		struct filter_as_l	*filter_as;
-		struct filter_prefixlen	 prefixlen;
 		struct filter_set	*filter_set;
 		struct filter_set_head	*filter_set_head;
 		struct {
 			struct bgpd_addr	prefix;
 			u_int8_t		len;
 		}			prefix;
+		struct filter_prefixlen	prefixlen;
 		struct {
 			u_int8_t		enc_alg;
 			char			enc_key[IPSEC_ENC_KEY_LEN];
@@ -163,7 +170,7 @@ typedef struct {
 
 %}
 
-%token	AS ROUTERID HOLDTIME YMIN LISTEN ON FIBUPDATE RTABLE
+%token	AS ROUTERID HOLDTIME YMIN LISTEN ON FIBUPDATE FIBPRIORITY RTABLE
 %token	RDOMAIN RD EXPORTTRGT IMPORTTRGT
 %token	RDE RIB EVALUATE IGNORE COMPARE
 %token	GROUP NEIGHBOR NETWORK
@@ -185,7 +192,7 @@ typedef struct {
 %token	IPSEC ESP AH SPI IKE
 %token	IPV4 IPV6
 %token	QUALIFY VIA
-%token	NE LE GE XRANGE
+%token	NE LE GE XRANGE LONGER
 %token	<v.string>		STRING
 %token	<v.number>		NUMBER
 %type	<v.number>		asnumber as4number optnumber
@@ -202,8 +209,7 @@ typedef struct {
 %type	<v.prefixlen>		prefixlenop
 %type	<v.filter_set>		filter_set_opt
 %type	<v.filter_set_head>	filter_set filter_set_l
-%type	<v.filter_prefix>	filter_prefix filter_prefix_l
-%type	<v.filter_prefix>	filter_prefix_h filter_prefix_m
+%type	<v.filter_prefix>	filter_prefix filter_prefix_l filter_prefix_h
 %type	<v.u8>			unaryop binaryop filter_as_type
 %type	<v.encspec>		encspec
 %%
@@ -366,6 +372,13 @@ conf_main	: AS as4number		{
 			la->fd = -1;
 			memcpy(&la->sa, addr2sa(&$3, BGP_PORT), sizeof(la->sa));
 			TAILQ_INSERT_TAIL(listen_addrs, la, entry);
+		}
+		| FIBPRIORITY NUMBER		{
+			if ($2 <= RTP_NONE || $2 > RTP_MAX) {
+				yyerror("invalid fib-priority");
+				YYERROR;
+			}
+			conf->fib_priority = $2;
 		}
 		| FIBUPDATE yesno		{
 			struct rde_rib *rr;
@@ -1478,23 +1491,32 @@ filter_peer	: ANY		{
 		}
 		;
 
-filter_prefix_h	: PREFIX filter_prefix			{ $$ = $2; }
-		| PREFIX '{' filter_prefix_m '}'	{ $$ = $3; }
-		;
-
-filter_prefix_m	: filter_prefix_l
-		| '{' filter_prefix_l '}'		{ $$ = $2; }
-		| '{' filter_prefix_l '}' filter_prefix_m
-		{
-			struct filter_prefix_l	*p;
-
-			/* merge, both can be lists */
-			for (p = $2; p != NULL && p->next != NULL; p = p->next)
-				;	/* nothing */
-			if (p != NULL)
-				p->next = $4;
-			$$ = $2;
+filter_prefix_h	: IPV4 prefixlenop			 {
+			if ($2.op == OP_NONE)
+				$2.op = OP_GE;
+			if (($$ = calloc(1, sizeof(struct filter_prefix_l))) ==
+			    NULL)
+				fatal(NULL);
+			$$->p.addr.aid = AID_INET;
+			if (merge_prefixspec($$, &$2) == -1) {
+				free($$);
+				YYERROR;
+			}
 		}
+		| IPV6 prefixlenop			{
+			if ($2.op == OP_NONE)
+				$2.op = OP_GE;
+			if (($$ = calloc(1, sizeof(struct filter_prefix_l))) ==
+			    NULL)
+				fatal(NULL);
+			$$->p.addr.aid = AID_INET6;
+			if (merge_prefixspec($$, &$2) == -1) {
+				free($$);
+				YYERROR;
+			}
+		}
+		| PREFIX filter_prefix			{ $$ = $2; }
+		| PREFIX '{' filter_prefix_l '}'	{ $$ = $3; }
 		;
 
 filter_prefix_l	: filter_prefix				{ $$ = $1; }
@@ -1504,20 +1526,18 @@ filter_prefix_l	: filter_prefix				{ $$ = $1; }
 		}
 		;
 
-filter_prefix	: prefix				{
-			if (fmopts.aid && fmopts.aid != $1.prefix.aid) {
-				yyerror("rules with mixed address families "
-				    "are not allowed");
-				YYERROR;
-			} else
-				fmopts.aid = $1.prefix.aid;
+filter_prefix	: prefix prefixlenop			{
 			if (($$ = calloc(1, sizeof(struct filter_prefix_l))) ==
 			    NULL)
 				fatal(NULL);
 			memcpy(&$$->p.addr, &$1.prefix,
 			    sizeof($$->p.addr));
 			$$->p.len = $1.len;
-			$$->next = NULL;
+
+			if (merge_prefixspec($$, &$2) == -1) {
+				free($$);
+				YYERROR;
+			}
 		}
 		;
 
@@ -1611,20 +1631,6 @@ filter_elm	: filter_prefix_h	{
 			}
 			fmopts.prefix_l = $1;
 		}
-		| PREFIXLEN prefixlenop		{
-			if (fmopts.aid == 0) {
-				yyerror("address family needs to be specified "
-				    "before \"prefixlen\"");
-				YYERROR;
-			}
-			if (fmopts.m.prefixlen.aid) {
-				yyerror("\"prefixlen\" already specified");
-				YYERROR;
-			}
-			memcpy(&fmopts.m.prefixlen, &$2,
-			    sizeof(fmopts.m.prefixlen));
-			fmopts.m.prefixlen.aid = fmopts.aid;
-		}
 		| filter_as_h		{
 			if (fmopts.as_l != NULL) {
 				yyerror("AS filters already specified");
@@ -1686,28 +1692,9 @@ filter_elm	: filter_prefix_h	{
 			free($2);
 			free($3);
 		}
-		| IPV4			{
-			if (fmopts.aid) {
-				yyerror("address family already specified");
-				YYERROR;
-			}
-			fmopts.aid = AID_INET;
-		}
-		| IPV6			{
-			if (fmopts.aid) {
-				yyerror("address family already specified");
-				YYERROR;
-			}
-			fmopts.aid = AID_INET6;
-		}
 		| NEXTHOP address 	{
 			if (fmopts.m.nexthop.flags) {
 				yyerror("nexthop already specified");
-				YYERROR;
-			}
-			if (fmopts.aid && fmopts.aid != $2.aid) {
-				yyerror("nexthop address family doesn't match "
-				    "rule address family");
 				YYERROR;
 			}
 			fmopts.m.nexthop.addr = $2;
@@ -1722,28 +1709,38 @@ filter_elm	: filter_prefix_h	{
 		}
 		;
 
-prefixlenop	: unaryop NUMBER		{
+prefixlenop	: /* empty */			{ bzero(&$$, sizeof($$)); }
+		| LONGER				{
 			bzero(&$$, sizeof($$));
-			if ($2 < 0 || $2 > 128) {
-				yyerror("prefixlen must be < 128");
-				YYERROR;
-			}
-			$$.op = $1;
-			$$.len_min = $2;
+			$$.op = OP_GE;
+			$$.len_min = -1;
 		}
-		| NUMBER binaryop NUMBER	{
+		| PREFIXLEN unaryop NUMBER		{
 			bzero(&$$, sizeof($$));
-			if ($1 < 0 || $1 > 128 || $3 < 0 || $3 > 128) {
-				yyerror("prefixlen must be < 128");
+			if ($3 < 0 || $3 > 128) {
+				yyerror("prefixlen must be >= 0 and <= 128");
 				YYERROR;
 			}
-			if ($1 >= $3) {
-				yyerror("start prefixlen is bigger than end");
+			if ($2 == OP_GT && $3 == 0) {
+				yyerror("prefixlen must be > 0");
 				YYERROR;
 			}
 			$$.op = $2;
-			$$.len_min = $1;
-			$$.len_max = $3;
+			$$.len_min = $3;
+		}
+		| PREFIXLEN NUMBER binaryop NUMBER	{
+			bzero(&$$, sizeof($$));
+			if ($2 < 0 || $2 > 128 || $4 < 0 || $4 > 128) {
+				yyerror("prefixlen must be < 128");
+				YYERROR;
+			}
+			if ($2 >= $4) {
+				yyerror("start prefixlen is bigger than end");
+				YYERROR;
+			}
+			$$.op = $3;
+			$$.len_min = $2;
+			$$.len_max = $4;
 		}
 		;
 
@@ -2149,6 +2146,7 @@ lookup(char *s)
 		{ "evaluate",		EVALUATE},
 		{ "export-target",	EXPORTTRGT},
 		{ "ext-community",	EXTCOMMUNITY},
+		{ "fib-priority",	FIBPRIORITY},
 		{ "fib-update",		FIBUPDATE},
 		{ "from",		FROM},
 		{ "group",		GROUP},
@@ -2181,6 +2179,7 @@ lookup(char *s)
 		{ "nexthop",		NEXTHOP},
 		{ "no-modify",		NOMODIFY},
 		{ "on",			ON},
+		{ "or-longer",		LONGER},
 		{ "origin",		ORIGIN},
 		{ "out",		OUT},
 		{ "passive",		PASSIVE},
@@ -2235,9 +2234,9 @@ lookup(char *s)
 
 #define MAXPUSHBACK	128
 
-char	*parsebuf;
+u_char	*parsebuf;
 int	 parseindex;
-char	 pushback_buffer[MAXPUSHBACK];
+u_char	 pushback_buffer[MAXPUSHBACK];
 int	 pushback_index = 0;
 
 int
@@ -2330,8 +2329,8 @@ findeol(void)
 int
 yylex(void)
 {
-	char	 buf[8096];
-	char	*p, *val;
+	u_char	 buf[8096];
+	u_char	*p, *val;
 	int	 quotec, next, c;
 	int	 token;
 
@@ -2354,7 +2353,7 @@ top:
 				return (findeol());
 			}
 			if (isalnum(c) || c == '_') {
-				*p++ = (char)c;
+				*p++ = c;
 				continue;
 			}
 			*p = '\0';
@@ -2399,7 +2398,7 @@ top:
 				yyerror("string too long");
 				return (findeol());
 			}
-			*p++ = (char)c;
+			*p++ = c;
 		}
 		yylval.v.string = strdup(buf);
 		if (yylval.v.string == NULL)
@@ -2506,8 +2505,8 @@ check_file_secrecy(int fd, const char *fname)
 		log_warnx("%s: owner not root or current user", fname);
 		return (-1);
 	}
-	if (st.st_mode & (S_IRWXG | S_IRWXO)) {
-		log_warnx("%s: group/world readable/writeable", fname);
+	if (st.st_mode & (S_IWGRP | S_IXGRP | S_IRWXO)) {
+		log_warnx("%s: group writable or world read/writeable", fname);
 		return (-1);
 	}
 	return (0);
@@ -2574,9 +2573,13 @@ parse_config(char *filename, struct bgpd_config *xconf,
 	struct rde_rib		*rr;
 	struct rdomain		*rd;
 	int			 errors = 0;
+	u_int8_t		 old_prio;
+
+	old_prio = xconf->fib_priority;
 
 	if ((conf = calloc(1, sizeof(struct bgpd_config))) == NULL)
 		fatal(NULL);
+
 	conf->opts = xconf->opts;
 	conf->csock = strdup(SOCKET_NAME);
 
@@ -2727,6 +2730,13 @@ parse_config(char *filename, struct bgpd_config *xconf,
 	free(filter_l);
 	free(peerfilter_l);
 	free(groupfilter_l);
+
+	if (!errors && old_prio != RTP_NONE && old_prio !=
+	    xconf->fib_priority) {
+		kr_fib_decouple_all(old_prio);
+		kr_fib_update_prio_all(xconf->fib_priority);
+		kr_fib_couple_all(xconf->fib_priority);
+	}
 
 	return (errors ? -1 : 0);
 }
@@ -2880,7 +2890,7 @@ parsesubtype(char *type)
 		{ "ori",	EXT_COMMUNITY_OSPF_RTR_ID },
 		{ "ort",	EXT_COMMUNITY_OSPF_RTR_TYPE },
 		{ "rt",		EXT_COMMUNITY_ROUTE_TGT },
-		{ "soo",	EXT_CUMMUNITY_ROUTE_ORIG }
+		{ "soo",	EXT_COMMUNITY_ROUTE_ORIG }
 	};
 	const struct keywords	*p;
 
@@ -3229,6 +3239,78 @@ get_id(struct peer *newpeer)
 }
 
 int
+merge_prefixspec(struct filter_prefix_l *p, struct filter_prefixlen *pl)
+{
+	u_int8_t max_len = 0;
+
+	switch (p->p.addr.aid) {
+	case AID_INET:
+	case AID_VPN_IPv4:
+		max_len = 32;
+		break;
+	case AID_INET6:
+		max_len = 128;
+		break;
+	}
+
+	switch (pl->op) {
+	case OP_NONE:
+		return (0);
+	case OP_RANGE:
+	case OP_XRANGE:
+		if (pl->len_min > max_len || pl->len_max > max_len) {
+			yyerror("prefixlen %d too big for AF, limit %d",
+			    pl->len_min > max_len ? pl->len_min : pl->len_max,
+			    max_len);
+			return (-1);
+		}
+		if (pl->len_min < p->p.len) {
+			yyerror("prefixlen %d smaller than prefix, limit %d",
+			    pl->len_min, p->p.len);
+			return (-1);
+		}
+		p->p.len_max = pl->len_max;
+		break;
+	case OP_GE:
+		/* fix up the "or-longer" case */
+		if (pl->len_min == -1)
+			pl->len_min = p->p.len;
+		/* FALLTHROUGH */
+	case OP_EQ:
+	case OP_NE:
+	case OP_LE:
+	case OP_GT:
+		if (pl->len_min > max_len) {
+			yyerror("prefixlen %d to big for AF, limit %d",
+			    pl->len_min, max_len);
+			return (-1);
+		}
+		if (pl->len_min < p->p.len) {
+			yyerror("prefixlen %d smaller than prefix, limit %d",
+			    pl->len_min, p->p.len);
+			return (-1);
+		}
+		break;
+	case OP_LT:
+		if (pl->len_min > max_len - 1) {
+			yyerror("prefixlen %d to big for AF, limit %d",
+			    pl->len_min, max_len - 1);
+			return (-1);
+		}
+		if (pl->len_min < p->p.len + 1) {
+			yyerror("prefixlen %d too small for prefix, limit %d",
+			    pl->len_min, p->p.len + 1);
+			return (-1);
+		}
+		break;
+	}
+
+	p->p.op = pl->op;
+	p->p.len_min = pl->len_min;
+	return (0);
+}
+
+int
 expand_rule(struct filter_rule *rule, struct filter_peers_l *peer,
     struct filter_match_l *match, struct filter_set_head *set)
 {
@@ -3240,9 +3322,9 @@ expand_rule(struct filter_rule *rule, struct filter_peers_l *peer,
 
 	p = peer;
 	do {
-		prefix = match->prefix_l;
+		a = match->as_l;
 		do {
-			a = match->as_l;
+			prefix = match->prefix_l;
 			do {
 				if ((r = calloc(1,
 				    sizeof(struct filter_rule))) == NULL) {
@@ -3270,13 +3352,13 @@ expand_rule(struct filter_rule *rule, struct filter_peers_l *peer,
 
 				TAILQ_INSERT_TAIL(filter_l, r, entry);
 
-				if (a != NULL)
-					a = a->next;
-			} while (a != NULL);
+				if (prefix != NULL)
+					prefix = prefix->next;
+			} while (prefix != NULL);
 
-			if (prefix != NULL)
-				prefix = prefix->next;
-		} while (prefix != NULL);
+			if (a != NULL)
+				a = a->next;
+		} while (a != NULL);
 
 		if (p != NULL)
 			p = p->next;
@@ -3287,14 +3369,14 @@ expand_rule(struct filter_rule *rule, struct filter_peers_l *peer,
 		free(p);
 	}
 
-	for (prefix = match->prefix_l; prefix != NULL; prefix = prefix_next) {
-		prefix_next = prefix->next;
-		free(prefix);
-	}
-
 	for (a = match->as_l; a != NULL; a = anext) {
 		anext = a->next;
 		free(a);
+	}
+
+	for (prefix = match->prefix_l; prefix != NULL; prefix = prefix_next) {
+		prefix_next = prefix->next;
+		free(prefix);
 	}
 
 	if (set != NULL) {

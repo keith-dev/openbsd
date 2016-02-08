@@ -1,4 +1,4 @@
-/*	$OpenBSD: ping.c,v 1.94 2013/04/16 22:10:34 deraadt Exp $	*/
+/*	$OpenBSD: ping.c,v 1.99 2014/01/10 21:57:44 florian Exp $	*/
 /*	$NetBSD: ping.c,v 1.20 1995/08/11 22:37:58 cgd Exp $	*/
 
 /*
@@ -347,7 +347,7 @@ main(int argc, char *argv[])
 
 	memset(&interstr, 0, sizeof(interstr));
 
-	interstr.it_value.tv_sec = (long) interval;
+	interstr.it_value.tv_sec = interval;
 	interstr.it_value.tv_usec =
 		(long) ((interval - interstr.it_value.tv_sec) * 1000000);
 
@@ -491,7 +491,7 @@ main(int argc, char *argv[])
 			err(1, "Cannot set the receive buffer size");
 	}
 	if (bufspace < IP_MAXPACKET)
-		warnx("Could only allocate a receive buffer of %i bytes (default %i)",
+		warnx("Could only allocate a receive buffer of %d bytes (default %d)",
 		    bufspace, IP_MAXPACKET);
 
 	if (to->sin_family == AF_INET)
@@ -1313,7 +1313,7 @@ fill(char *bp, char *patp)
 	char *cp;
 
 	for (cp = patp; *cp; cp++)
-		if (!isxdigit(*cp))
+		if (!isxdigit((unsigned char)*cp))
 			errx(1, "patterns must be specified as hex digits");
 	ii = sscanf(patp,
 	    "%2x%2x%2x%2x%2x%2x%2x%2x%2x%2x%2x%2x%2x%2x%2x%2x",

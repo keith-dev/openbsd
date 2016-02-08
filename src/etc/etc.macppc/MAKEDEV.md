@@ -1,6 +1,6 @@
 define(MACHINE,macppc)dnl
 vers(__file__,
-	{-$OpenBSD: MAKEDEV.md,v 1.54 2013/06/03 17:34:15 tedu Exp $-},
+	{-$OpenBSD: MAKEDEV.md,v 1.58 2014/01/05 01:16:52 deraadt Exp $-},
 etc.MACHINE)dnl
 dnl
 dnl Copyright (c) 2001-2006 Todd T. Fries <todd@OpenBSD.org>
@@ -75,7 +75,6 @@ _DEV(uhid, 62)
 _DEV(ulpt, 64)
 _DEV(urio, 65)
 _DEV(usb, 61)
-_DEV(uscan, 74)
 _TITLE(spec)
 _DEV(apm, 25)
 _DEV(au, 44)
@@ -91,7 +90,6 @@ _DEV(fdesc, 21)
 _DEV(fuse, 88)
 _DEV(gpio, 79)
 _DEV(hotplug, 78)
-_DEV(iop, 73)
 _DEV(lkm, 24)
 _DEV(pci, 71)
 _DEV(pf, 39)
@@ -135,9 +133,10 @@ target(all, vnd, 0, 1, 2, 3)dnl
 target(all, gpio, 0, 1, 2)dnl
 target(all, bio)dnl
 target(all, bthub, 0, 1, 2)dnl
-target(all, drm, 0)dnl
+target(all, drm, 0, 1, 2, 3)dnl
 target(ramd, ttya, 0, 1)dnl
 target(ramd, ttyb, 0, 1)dnl
 target(ramd, pty, 0)dnl
 target(ramd, bio)dnl
 target(ramd, diskmap)dnl
+target(ramd, random)dnl

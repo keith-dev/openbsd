@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile.inc,v 1.21 2013/01/29 19:42:52 miod Exp $
+#	$OpenBSD: Makefile.inc,v 1.25 2014/03/02 15:57:34 deraadt Exp $
 
 TOP=		${.CURDIR}/..
 
@@ -29,16 +29,18 @@ all:	${FS}
 ${FS}:	bsd.gz
 	dd if=/dev/zero of=${REALIMAGE} bs=512 count=${FLOPPYSIZE}
 	vnconfig -v -c ${VND} ${REALIMAGE}
+.ifdef LBA
+	fdisk -yi -l ${FLOPPYSIZE} -f ${DESTDIR}/usr/mdec/mbr ${VND}
+.endif
 	disklabel -w ${VND} ${FLOPPYTYPE}
 	newfs -m 0 -o space -i 524288 -c ${FLOPPYSIZE} ${VND_RDEV}
 	mount ${VND_DEV} ${MOUNT_POINT}
 	cp ${BOOT} ${.OBJDIR}/boot
 	strip ${.OBJDIR}/boot
 	strip -R .comment ${.OBJDIR}/boot
-	dd if=${.OBJDIR}/boot of=${MOUNT_POINT}/boot bs=512
 	dd if=bsd.gz of=${MOUNT_POINT}/bsd bs=512
-	/usr/mdec/installboot -v ${MOUNT_POINT}/boot \
-	    ${DESTDIR}/usr/mdec/biosboot ${VND_CRDEV}
+	installboot -v -r ${MOUNT_POINT} ${VND_CRDEV} \
+	    ${DESTDIR}/usr/mdec/biosboot ${.OBJDIR}/boot
 	@echo ""
 	@df -i ${MOUNT_POINT}
 	@echo ""
@@ -112,7 +114,7 @@ ${CBIN}.mk ${CBIN}.cache ${CBIN}.c: ${CRUNCHCONF}
 	-c ${CBIN}.c -e ${CBIN} -m ${CBIN}.mk ${CRUNCHCONF}
 
 ${CBIN}: ${CBIN}.mk ${CBIN}.cache ${CBIN}.c
-	${MAKE} -f ${CBIN}.mk all
+	${MAKE} -f ${CBIN}.mk SRCLIBDIR=${.CURDIR}/../../../lib all
 	strip -R .comment ${CBIN}
 
 ${CRUNCHCONF}: ${LISTS}
@@ -126,8 +128,9 @@ do_files:
 	rm ${MOUNT_POINT}/${CBIN}
 
 clean cleandir:
-	/bin/rm -f core ${IMAGE} ${CBIN} ${CBIN}.mk ${CBIN}*.cache \
+	/bin/rm -f *.core ${IMAGE} ${CBIN} ${CBIN}.mk ${CBIN}*.cache \
 	    *.o *.lo *.c bsd bsd.rd bsd.gz bsd.strip floppy*.fs \
+	    lib*.a lib*.olist ${CBIN}.map \
 	    rdsetroot boot ${CRUNCHCONF} ${FS}
 
 .include <bsd.obj.mk>

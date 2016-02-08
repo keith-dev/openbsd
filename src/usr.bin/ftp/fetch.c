@@ -1,4 +1,4 @@
-/*	$OpenBSD: fetch.c,v 1.109 2013/04/09 08:58:46 sthen Exp $	*/
+/*	$OpenBSD: fetch.c,v 1.114 2014/03/02 17:57:18 tedu Exp $	*/
 /*	$NetBSD: fetch.c,v 1.14 1997/08/18 10:20:20 lukem Exp $	*/
 
 /*-
@@ -95,7 +95,7 @@ char		*SSL_readline(SSL *, size_t *);
 
 #define EMPTYSTRING(x)	((x) == NULL || (*(x) == '\0'))
 
-static const char *at_encoding_warning =
+static const char at_encoding_warning[] =
     "Extra `@' characters in usernames and passwords should be encoded as %%40";
 
 jmp_buf	httpabort;
@@ -188,7 +188,7 @@ url_get(const char *origline, const char *proxyenv, const char *outfile)
 	FILE *fin = NULL;
 	off_t hashbytes;
 	const char *errstr;
-	size_t len, wlen;
+	ssize_t len, wlen;
 #ifndef SMALL
 	char *sslpath = NULL, *sslhost = NULL;
 	char *locbase, *full_host = NULL, *auth = NULL;
@@ -199,6 +199,7 @@ url_get(const char *origline, const char *proxyenv, const char *outfile)
 	SSL *ssl = NULL;
 	int status;
 	int save_errno;
+	const size_t buflen = 128 * 1024;
 
 	direction = "received";
 
@@ -418,13 +419,13 @@ noslash:
 		hashbytes = mark;
 		progressmeter(-1, path);
 
-		if ((buf = malloc(4096)) == NULL)
+		if ((buf = malloc(buflen)) == NULL)
 			errx(1, "Can't allocate memory for transfer buffer");
 
 		/* Finally, suck down the file. */
 		i = 0;
 		oldinti = signal(SIGINFO, psummary);
-		while ((len = read(s, buf, 4096)) > 0) {
+		while ((len = read(s, buf, buflen)) > 0) {
 			bytes += len;
 			for (cp = buf; len > 0; len -= i, cp += i) {
 				if ((i = write(out, cp, len)) == -1) {
@@ -606,8 +607,27 @@ again:
 		SSL_load_error_strings();
 		SSLeay_add_ssl_algorithms();
 		ssl_ctx = SSL_CTX_new(SSLv23_client_method());
+		if (ssl_ctx == NULL) {
+			ERR_print_errors_fp(ttyout);
+			goto cleanup_url_get;
+		}
+		if (ssl_verify) {
+			if (ssl_ca_file == NULL && ssl_ca_path == NULL)
+				ssl_ca_file = _PATH_SSL_CAFILE;
+			if (SSL_CTX_load_verify_locations(ssl_ctx,
+			    ssl_ca_file, ssl_ca_path) != 1) {
+				ERR_print_errors_fp(ttyout);
+				goto cleanup_url_get;
+			}
+			SSL_CTX_set_verify(ssl_ctx, SSL_VERIFY_PEER, NULL);
+			if (ssl_verify_depth != -1)
+				SSL_CTX_set_verify_depth(ssl_ctx,
+				    ssl_verify_depth);
+		}
+		if (ssl_ciphers != NULL)
+			SSL_CTX_set_cipher_list(ssl_ctx, ssl_ciphers);
 		ssl = SSL_new(ssl_ctx);
-		if (ssl == NULL || ssl_ctx == NULL) {
+		if (ssl == NULL) {
 			ERR_print_errors_fp(ttyout);
 			goto cleanup_url_get;
 		}
@@ -813,7 +833,7 @@ again:
 		if (strncasecmp(cp, CONTENTLEN, sizeof(CONTENTLEN) - 1) == 0) {
 			size_t s;
 			cp += sizeof(CONTENTLEN) - 1;
-			if (s=strcspn(cp, " \t"))
+			if ((s = strcspn(cp, " \t")))
 				*(cp+s) = 0;
 			filesize = strtonum(cp, 0, LLONG_MAX, &errstr);
 			if (errstr != NULL)
@@ -916,13 +936,13 @@ again:
 	free(buf);
 
 	/* Finally, suck down the file. */
-	if ((buf = malloc(4096)) == NULL)
+	if ((buf = malloc(buflen)) == NULL)
 		errx(1, "Can't allocate memory for transfer buffer");
 	i = 0;
 	len = 1;
 	oldinti = signal(SIGINFO, psummary);
 	while (len > 0) {
-		len = ftp_read(fin, ssl, buf, 4096);
+		len = ftp_read(fin, ssl, buf, buflen);
 		bytes += len;
 		for (cp = buf, wlen = len; wlen > 0; wlen -= i, cp += i) {
 			if ((i = write(out, cp, wlen)) == -1) {

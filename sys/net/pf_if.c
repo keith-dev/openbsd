@@ -1,4 +1,4 @@
-/*	$OpenBSD: pf_if.c,v 1.66 2013/06/20 12:03:40 mpi Exp $ */
+/*	$OpenBSD: pf_if.c,v 1.72 2014/01/22 04:33:34 henning Exp $ */
 
 /*
  * Copyright 2005 Henning Brauer <henning@openbsd.org>
@@ -48,7 +48,6 @@
 #include <net/if_types.h>
 
 #include <netinet/in.h>
-#include <netinet/in_var.h>
 #include <netinet/in_systm.h>
 #include <netinet/ip.h>
 #include <netinet/ip_var.h>
@@ -118,6 +117,12 @@ pfi_kif_get(const char *kif_name)
 	strlcpy(kif->pfik_name, kif_name, sizeof(kif->pfik_name));
 	kif->pfik_tzero = time_second;
 	TAILQ_INIT(&kif->pfik_dynaddrs);
+
+	if (!strcmp(kif->pfik_name, "any")) {
+		/* both so it works in the ioctl and the regular case */
+		kif->pfik_flags |= PFI_IFLAG_ANY;
+		kif->pfik_flags_new |= PFI_IFLAG_ANY;
+	}
 
 	RB_INSERT(pfi_ifhead, &pfi_ifs, kif);
 	return (kif);
@@ -201,6 +206,10 @@ pfi_kif_match(struct pfi_kif *rule_kif, struct pfi_kif *packet_kif)
 			if (p->ifgl_group == rule_kif->pfik_group)
 				return (1);
 
+	if (rule_kif->pfik_flags & PFI_IFLAG_ANY && packet_kif->pfik_ifp &&
+	    !(packet_kif->pfik_ifp->if_flags & IFF_LOOPBACK))
+		return (1); 
+
 	return (0);
 }
 
@@ -243,9 +252,15 @@ pfi_detach_ifnet(struct ifnet *ifp)
 	hook_disestablish(ifp->if_addrhooks, kif->pfik_ah_cookie);
 	pfi_kif_update(kif);
 
+	if (HFSC_ENABLED(&ifp->if_snd)) {
+		pf_remove_queues(ifp);
+		pf_free_queues(pf_queues_active, ifp);
+	}
+
 	kif->pfik_ifp = NULL;
 	ifp->if_pf_kif = NULL;
 	pfi_kif_unref(kif, PFI_KIF_REF_NONE);
+
 	splx(s);
 }
 
@@ -469,16 +484,16 @@ pfi_table_update(struct pfr_ktable *kt, struct pfi_kif *kif, int net, int flags)
 void
 pfi_instance_add(struct ifnet *ifp, int net, int flags)
 {
-	struct ifaddr	*ia;
+	struct ifaddr	*ifa;
 	int		 got4 = 0, got6 = 0;
 	int		 net2, af;
 
 	if (ifp == NULL)
 		return;
-	TAILQ_FOREACH(ia, &ifp->if_addrlist, ifa_list) {
-		if (ia->ifa_addr == NULL)
+	TAILQ_FOREACH(ifa, &ifp->if_addrlist, ifa_list) {
+		if (ifa->ifa_addr == NULL)
 			continue;
-		af = ia->ifa_addr->sa_family;
+		af = ifa->ifa_addr->sa_family;
 		if (af != AF_INET && af != AF_INET6)
 			continue;
 		if ((flags & PFI_AFLAG_BROADCAST) && af == AF_INET6)
@@ -491,7 +506,7 @@ pfi_instance_add(struct ifnet *ifp, int net, int flags)
 			continue;
 		if ((flags & PFI_AFLAG_NETWORK) && af == AF_INET6 &&
 		    IN6_IS_ADDR_LINKLOCAL(
-		    &((struct sockaddr_in6 *)ia->ifa_addr)->sin6_addr))
+		    &((struct sockaddr_in6 *)ifa->ifa_addr)->sin6_addr))
 			continue;
 		if (flags & PFI_AFLAG_NOALIAS) {
 			if (af == AF_INET && got4)
@@ -507,19 +522,19 @@ pfi_instance_add(struct ifnet *ifp, int net, int flags)
 		if (net2 == 128 && (flags & PFI_AFLAG_NETWORK)) {
 			if (af == AF_INET)
 				net2 = pfi_unmask(&((struct sockaddr_in *)
-				    ia->ifa_netmask)->sin_addr);
+				    ifa->ifa_netmask)->sin_addr);
 			else if (af == AF_INET6)
 				net2 = pfi_unmask(&((struct sockaddr_in6 *)
-				    ia->ifa_netmask)->sin6_addr);
+				    ifa->ifa_netmask)->sin6_addr);
 		}
 		if (af == AF_INET && net2 > 32)
 			net2 = 32;
 		if (flags & PFI_AFLAG_BROADCAST)
-			pfi_address_add(ia->ifa_broadaddr, af, net2);
+			pfi_address_add(ifa->ifa_broadaddr, af, net2);
 		else if (flags & PFI_AFLAG_PEER)
-			pfi_address_add(ia->ifa_dstaddr, af, net2);
+			pfi_address_add(ifa->ifa_dstaddr, af, net2);
 		else
-			pfi_address_add(ia->ifa_addr, af, net2);
+			pfi_address_add(ifa->ifa_addr, af, net2);
 	}
 }
 
@@ -635,6 +650,7 @@ pfi_update_status(const char *name, struct pf_status *pfs)
 			bzero(p->pfik_bytes, sizeof(p->pfik_bytes));
 			p->pfik_tzero = time_second;
 		}
+		splx(s);
 		return;
 	}
 
@@ -645,7 +661,7 @@ pfi_update_status(const char *name, struct pf_status *pfs)
 		return;
 	}
 	if (p->pfik_group != NULL) {
-		bcopy(&p->pfik_group->ifg_members, &ifg_members,
+		memcpy(&ifg_members, &p->pfik_group->ifg_members,
 		    sizeof(ifg_members));
 	} else {
 		/* build a temporary list for p only */

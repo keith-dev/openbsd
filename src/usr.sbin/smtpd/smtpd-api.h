@@ -1,4 +1,4 @@
-/*	$OpenBSD: smtpd-api.h,v 1.8 2013/07/19 21:34:31 eric Exp $	*/
+/*	$OpenBSD: smtpd-api.h,v 1.16 2014/02/04 15:44:06 eric Exp $	*/
 
 /*
  * Copyright (c) 2013 Eric Faurot <eric@openbsd.org>
@@ -57,12 +57,11 @@ enum filter_imsg {
 	IMSG_FILTER_REGISTER,
 	IMSG_FILTER_EVENT,
 	IMSG_FILTER_QUERY,
+	IMSG_FILTER_PIPE_SETUP,
+	IMSG_FILTER_PIPE_ABORT,
 	IMSG_FILTER_NOTIFY,
-	IMSG_FILTER_DATA,
-	IMSG_FILTER_RESPONSE,
+	IMSG_FILTER_RESPONSE
 };
-
-#define	FILTER_ALTERDATA	0x01 /* The filter wants to alter the message */
 
 /* XXX - server side requires mfa_session.c update on filter_hook changes */
 enum filter_hook {
@@ -119,6 +118,8 @@ enum {
 	PROC_SCHEDULER_ROLLBACK,
 	PROC_SCHEDULER_UPDATE,
 	PROC_SCHEDULER_DELETE,
+	PROC_SCHEDULER_HOLD,
+	PROC_SCHEDULER_RELEASE,
 	PROC_SCHEDULER_BATCH,
 	PROC_SCHEDULER_MESSAGES,
 	PROC_SCHEDULER_ENVELOPES,
@@ -138,6 +139,7 @@ enum envelope_flags {
 	EF_PENDING		= 0x10,
 	EF_INFLIGHT		= 0x20,
 	EF_SUSPEND		= 0x40,
+	EF_HOLD			= 0x80,
 };
 
 struct evpstate {
@@ -162,18 +164,19 @@ struct scheduler_info {
 	time_t			lasttry;
 	time_t			lastbounce;
 	time_t			nexttry;
-	uint8_t			penalty;
 };
 
 #define SCHED_NONE		0x00
 #define SCHED_DELAY		0x01
 #define SCHED_REMOVE		0x02
 #define SCHED_EXPIRE		0x04
-#define SCHED_BOUNCE		0x08
-#define SCHED_MDA		0x10
-#define SCHED_MTA		0x20
+#define SCHED_UPDATE		0x08
+#define SCHED_BOUNCE		0x10
+#define SCHED_MDA		0x20
+#define SCHED_MTA		0x40
 
 struct scheduler_batch {
+	int		 mask;
 	int		 type;
 	time_t		 delay;
 	size_t		 evpcount;
@@ -181,6 +184,11 @@ struct scheduler_batch {
 };
 
 #define PROC_TABLE_API_VERSION	1
+
+struct table_open_params {
+	uint32_t	version;
+	char		name[SMTPD_MAXLINESIZE];
+};
 
 enum table_service {
 	K_NONE		= 0x00,
@@ -206,6 +214,79 @@ enum {
 	PROC_TABLE_FETCH,
 };
 
+enum enhanced_status_code {
+	/* 0.0 */
+	ESC_OTHER_STATUS				= 00,
+
+	/* 1.x */
+	ESC_OTHER_ADDRESS_STATUS			= 10,
+	ESC_BAD_DESTINATION_MAILBOX_ADDRESS		= 11,
+	ESC_BAD_DESTINATION_SYSTEM_ADDRESS		= 12,
+	ESC_BAD_DESTINATION_MAILBOX_ADDRESS_SYNTAX     	= 13,
+	ESC_DESTINATION_MAILBOX_ADDRESS_AMBIGUOUS	= 14,
+	ESC_DESTINATION_ADDRESS_VALID			= 15,
+	ESC_DESTINATION_MAILBOX_HAS_MOVED      		= 16,
+	ESC_BAD_SENDER_MAILBOX_ADDRESS_SYNTAX		= 17,
+	ESC_BAD_SENDER_SYSTEM_ADDRESS			= 18,
+
+	/* 2.x */
+	ESC_OTHER_MAILBOX_STATUS			= 20,
+	ESC_MAILBOX_DISABLED				= 21,
+	ESC_MAILBOX_FULL				= 22,
+	ESC_MESSAGE_LENGTH_TOO_LARGE   			= 23,
+	ESC_MAILING_LIST_EXPANSION_PROBLEM		= 24,
+
+	/* 3.x */
+	ESC_OTHER_MAIL_SYSTEM_STATUS			= 30,
+	ESC_MAIL_SYSTEM_FULL				= 31,
+	ESC_SYSTEM_NOT_ACCEPTING_MESSAGES		= 32,
+	ESC_SYSTEM_NOT_CAPABLE_OF_SELECTED_FEATURES    	= 33,
+	ESC_MESSAGE_TOO_BIG_FOR_SYSTEM		    	= 34,
+	ESC_SYSTEM_INCORRECTLY_CONFIGURED      	    	= 35,
+
+	/* 4.x */
+	ESC_OTHER_NETWORK_ROUTING_STATUS      	    	= 40,
+	ESC_NO_ANSWER_FROM_HOST		      	    	= 41,
+	ESC_BAD_CONNECTION		      	    	= 42,
+	ESC_DIRECTORY_SERVER_FAILURE   	      	    	= 43,
+	ESC_UNABLE_TO_ROUTE	   	      	    	= 44,
+	ESC_MAIL_SYSTEM_CONGESTION   	      	    	= 45,
+	ESC_ROUTING_LOOP_DETECTED   	      	    	= 46,
+	ESC_DELIVERY_TIME_EXPIRED   	      	    	= 47,
+
+	/* 5.x */
+	ESC_OTHER_PROTOCOL_STATUS   	      	    	= 50,
+	ESC_INVALID_COMMAND	   	      	    	= 51,
+	ESC_SYNTAX_ERROR	   	      	    	= 52,
+	ESC_TOO_MANY_RECIPIENTS	   	      	    	= 53,
+	ESC_INVALID_COMMAND_ARGUMENTS  	      	    	= 54,
+	ESC_WRONG_PROTOCOL_VERSION  	      	    	= 55,
+
+	/* 6.x */
+	ESC_OTHER_MEDIA_ERROR   	      	    	= 60,
+	ESC_MEDIA_NOT_SUPPORTED   	      	    	= 61,
+	ESC_CONVERSION_REQUIRED_AND_PROHIBITED		= 62,
+	ESC_CONVERSION_REQUIRED_BUT_NOT_SUPPORTED      	= 63,
+	ESC_CONVERSION_WITH_LOSS_PERFORMED	     	= 64,
+	ESC_CONVERSION_FAILED			     	= 65,
+
+	/* 7.x */
+	ESC_OTHER_SECURITY_STATUS      		     	= 70,
+	ESC_DELIVERY_NOT_AUTHORIZED_MESSAGE_REFUSED	= 71,
+	ESC_MAILING_LIST_EXPANSION_PROHIBITED		= 72,
+	ESC_SECURITY_CONVERSION_REQUIRED_NOT_POSSIBLE  	= 73,
+	ESC_SECURITY_FEATURES_NOT_SUPPORTED	  	= 74,
+	ESC_CRYPTOGRAPHIC_FAILURE			= 75,
+	ESC_CRYPTOGRAPHIC_ALGORITHM_NOT_SUPPORTED	= 76,
+	ESC_MESSAGE_INTEGRITY_FAILURE			= 77,
+};
+
+enum enhanced_status_class {
+	ESC_STATUS_OK		= 2,
+	ESC_STATUS_TEMPFAIL	= 4,
+	ESC_STATUS_PERMFAIL	= 5,
+};
+
 static inline uint32_t
 evpid_to_msgid(uint64_t evpid)
 {
@@ -229,11 +310,17 @@ void *dict_get(struct dict *, const char *);
 void *dict_xget(struct dict *, const char *);
 void *dict_pop(struct dict *, const char *);
 void *dict_xpop(struct dict *, const char *);
-int dict_poproot(struct dict *, const char * *, void **);
-int dict_root(struct dict *, const char * *, void **);
-int dict_iter(struct dict *, void **, const char * *, void **);
+int dict_poproot(struct dict *, void **);
+int dict_root(struct dict *, const char **, void **);
+int dict_iter(struct dict *, void **, const char **, void **);
 int dict_iterfrom(struct dict *, void **, const char *, const char **, void **);
 void dict_merge(struct dict *, struct dict *);
+
+
+/* esc.c */
+const char *esc_code(enum enhanced_status_class, enum enhanced_status_code);
+const char *esc_description(enum enhanced_status_code);
+
 
 /* filter_api.c */
 void filter_api_setugid(uid_t, gid_t);
@@ -242,20 +329,20 @@ void filter_api_no_chroot(void);
 
 void filter_api_loop(void);
 void filter_api_accept(uint64_t);
-void filter_api_accept_notify(uint64_t);
+void filter_api_accept_notify(uint64_t, uint64_t *);
 void filter_api_reject(uint64_t, enum filter_status);
 void filter_api_reject_code(uint64_t, enum filter_status, uint32_t,
     const char *);
-void filter_api_data(uint64_t, const char *);
+void filter_api_writeln(uint64_t, const char *);
 
 void filter_api_on_notify(void(*)(uint64_t, enum filter_status));
-void filter_api_on_connect(void(*)(uint64_t, uint64_t, struct filter_connect *));
-void filter_api_on_helo(void(*)(uint64_t, uint64_t, const char *));
-void filter_api_on_mail(void(*)(uint64_t, uint64_t, struct mailaddr *));
-void filter_api_on_rcpt(void(*)(uint64_t, uint64_t, struct mailaddr *));
-void filter_api_on_data(void(*)(uint64_t, uint64_t));
-void filter_api_on_dataline(void(*)(uint64_t, const char *), int);
-void filter_api_on_eom(void(*)(uint64_t, uint64_t));
+void filter_api_on_connect(void(*)(uint64_t, struct filter_connect *));
+void filter_api_on_helo(void(*)(uint64_t, const char *));
+void filter_api_on_mail(void(*)(uint64_t, struct mailaddr *));
+void filter_api_on_rcpt(void(*)(uint64_t, struct mailaddr *));
+void filter_api_on_data(void(*)(uint64_t));
+void filter_api_on_dataline(void(*)(uint64_t, const char *));
+void filter_api_on_eom(void(*)(uint64_t));
 void filter_api_on_event(void(*)(uint64_t, enum filter_hook));
 
 /* queue */
@@ -278,6 +365,8 @@ void scheduler_api_on_commit(size_t(*)(uint32_t));
 void scheduler_api_on_rollback(size_t(*)(uint32_t));
 void scheduler_api_on_update(int(*)(struct scheduler_info *));
 void scheduler_api_on_delete(int(*)(uint64_t));
+void scheduler_api_on_hold(int(*)(uint64_t, uint64_t));
+void scheduler_api_on_release(int(*)(int, uint64_t, int));
 void scheduler_api_on_batch(int(*)(int, struct scheduler_batch *));
 void scheduler_api_on_messages(size_t(*)(uint32_t, uint32_t *, size_t));
 void scheduler_api_on_envelopes(size_t(*)(uint64_t, struct evpstate *, size_t));
@@ -293,6 +382,7 @@ void table_api_on_check(int(*)(int, const char *));
 void table_api_on_lookup(int(*)(int, const char *, char *, size_t));
 void table_api_on_fetch(int(*)(int, char *, size_t));
 int table_api_dispatch(void);
+const char *table_api_get_name(void);
 
 /* tree.c */
 #define tree_init(t) do { SPLAY_INIT(&((t)->tree)); (t)->count = 0; } while(0)

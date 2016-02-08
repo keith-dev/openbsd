@@ -1,4 +1,4 @@
-/*	$OpenBSD: smtpd.h,v 1.423 2013/07/19 22:22:39 eric Exp $	*/
+/*	$OpenBSD: smtpd.h,v 1.450 2014/02/17 13:33:56 eric Exp $	*/
 
 /*
  * Copyright (c) 2008 Gilles Chehade <gilles@poolp.org>
@@ -28,47 +28,45 @@
 #include "iobuf.h"
 
 #define CONF_FILE		 "/etc/mail/smtpd.conf"
+#define MAILNAME_FILE		 "/etc/mail/mailname"
 #define CA_FILE			 "/etc/ssl/cert.pem"
-#define MAX_LISTEN		 16
+
 #define PROC_COUNT		 10
-#define MAX_NAME_SIZE		 64
 
 #define MAX_HOPS_COUNT		 100
 #define	DEFAULT_MAX_BODY_SIZE	(35*1024*1024)
-
 #define MAX_TAG_SIZE		 32
-
-#define	MAX_TABLE_BACKEND_SIZE	 32
-
-/* return and forward path size */
 #define	MAX_FILTER_NAME		 32
 
 #define	EXPAND_BUFFER		 1024
 
-#define SMTPD_QUEUE_INTERVAL	 (15 * 60)
-#define SMTPD_QUEUE_MAXINTERVAL	 (4 * 60 * 60)
 #define SMTPD_QUEUE_EXPIRY	 (4 * 24 * 60 * 60)
-#define SMTPD_USER		 "_smtpd"
-#define SMTPD_QUEUE_USER	 "_smtpq"
 #define SMTPD_SOCKET		 "/var/run/smtpd.sock"
 #ifndef SMTPD_NAME
 #define	SMTPD_NAME		 "OpenSMTPD"
 #endif
-#define	SMTPD_VERSION		 "5.4"
+#define	SMTPD_VERSION		 "5.4.2"
 #define SMTPD_BANNER		 "220 %s ESMTP %s"
 #define SMTPD_SESSION_TIMEOUT	 300
 #define SMTPD_BACKLOG		 5
 
 #define	PATH_SMTPCTL		"/usr/sbin/smtpctl"
 
-#define PATH_CHROOT             "/var/empty"
-#define PATH_SPOOL		"/var/spool/smtpd"
 #define PATH_OFFLINE		"/offline"
 #define PATH_PURGE		"/purge"
 #define PATH_TEMPORARY		"/temporary"
 
 #define	PATH_FILTERS		"/usr/libexec/smtpd"
 #define	PATH_TABLES		"/usr/libexec/smtpd"
+
+
+/*
+ * RFC 5322 defines these characters as valid, some of them are
+ * potentially dangerous and need to be escaped.
+ */
+#define	MAILADDR_ALLOWED       	"!#$%&'*/?^`{|}~+-=_"
+#define	MAILADDR_ESCAPE		"!#$%&'*/?^`{|}~"
+
 
 #define F_STARTTLS		0x01
 #define F_SMTPS			0x02
@@ -79,9 +77,8 @@
 #define	F_STARTTLS_REQUIRE	0x20
 #define	F_AUTH_REQUIRE		0x40
 #define	F_LMTP			0x80
-
-#define F_SCERT			0x01
-#define F_CCERT			0x02
+#define	F_MASK_SOURCE		0x100
+#define	F_TLS_VERIFY		0x200
 
 /* must match F_* for mta */
 #define RELAY_STARTTLS		0x01
@@ -92,6 +89,9 @@
 #define RELAY_BACKUP		0x10	/* XXX - MUST BE SYNC-ED WITH F_BACKUP */
 #define RELAY_MX		0x20
 #define RELAY_LMTP		0x80
+#define	RELAY_TLS_VERIFY	0x200
+
+#define MTA_EXT_DSN		0x400
 
 struct userinfo {
 	char username[SMTPD_MAXLOGNAME];
@@ -106,13 +106,14 @@ struct netaddr {
 };
 
 struct relayhost {
-	uint8_t flags;
+	uint16_t flags;
 	char hostname[SMTPD_MAXHOSTNAMELEN];
 	uint16_t port;
-	char cert[SMTPD_MAXPATHLEN];
+	char pki_name[SMTPD_MAXPATHLEN];
 	char authtable[SMTPD_MAXPATHLEN];
 	char authlabel[SMTPD_MAXPATHLEN];
 	char sourcetable[SMTPD_MAXPATHLEN];
+	char heloname[SMTPD_MAXHOSTNAMELEN];
 	char helotable[SMTPD_MAXPATHLEN];
 };
 
@@ -145,12 +146,11 @@ union lookup {
 	struct addrname		 addrname;
 };
 
-/* XXX */
 /*
  * Bump IMSG_VERSION whenever a change is made to enum imsg_type.
  * This will ensure that we can never use a wrong version of smtpctl with smtpd.
  */
-#define	IMSG_VERSION		5
+#define	IMSG_VERSION		9
 
 enum imsg_type {
 	IMSG_NONE,
@@ -171,14 +171,20 @@ enum imsg_type {
 	IMSG_CTL_LIST_ENVELOPES,
 	IMSG_CTL_REMOVE,
 	IMSG_CTL_SCHEDULE,
+	IMSG_CTL_SHOW_STATUS,
 
 	IMSG_CTL_TRACE,
 	IMSG_CTL_UNTRACE,
 	IMSG_CTL_PROFILE,
 	IMSG_CTL_UNPROFILE,
 
+	IMSG_CTL_MTA_SHOW_HOSTS,
+	IMSG_CTL_MTA_SHOW_RELAYS,
 	IMSG_CTL_MTA_SHOW_ROUTES,
 	IMSG_CTL_MTA_SHOW_HOSTSTATS,
+	IMSG_CTL_MTA_BLOCK,
+	IMSG_CTL_MTA_UNBLOCK,
+	IMSG_CTL_MTA_SHOW_BLOCK,
 
 	IMSG_CONF_START,
 	IMSG_CONF_SSL,
@@ -189,6 +195,7 @@ enum imsg_type {
 	IMSG_CONF_RULE_SOURCE,
 	IMSG_CONF_RULE_SENDER,
 	IMSG_CONF_RULE_DESTINATION,
+	IMSG_CONF_RULE_RECIPIENT,
 	IMSG_CONF_RULE_MAPPING,
 	IMSG_CONF_RULE_USERS,
 	IMSG_CONF_FILTER,
@@ -210,6 +217,8 @@ enum imsg_type {
 	IMSG_DELIVERY_TEMPFAIL,
 	IMSG_DELIVERY_PERMFAIL,
 	IMSG_DELIVERY_LOOP,
+	IMSG_DELIVERY_HOLD,
+	IMSG_DELIVERY_RELEASE,
 
 	IMSG_BOUNCE_INJECT,
 
@@ -226,7 +235,6 @@ enum imsg_type {
 	IMSG_MFA_EVENT_COMMIT,
 	IMSG_MFA_EVENT_ROLLBACK,
 	IMSG_MFA_EVENT_DISCONNECT,
-	IMSG_MFA_SMTP_DATA,
 	IMSG_MFA_SMTP_RESPONSE,
 
 	IMSG_MTA_TRANSFER,
@@ -320,6 +328,7 @@ enum dest_type {
 };
 
 enum action_type {
+	A_NONE,
 	A_RELAY,
 	A_RELAYVIA,
 	A_MAILDIR,
@@ -337,10 +346,19 @@ enum decision {
 struct rule {
 	TAILQ_ENTRY(rule)		r_entry;
 	enum decision			r_decision;
+	uint8_t				r_nottag;
 	char				r_tag[MAX_TAG_SIZE];
+
+	uint8_t				r_notsources;
 	struct table		       *r_sources;
+
+	uint8_t				r_notsenders;
 	struct table		       *r_senders;
 
+	uint8_t				r_notrecipients;
+	struct table		       *r_recipients;
+
+	uint8_t				r_notdestination;
 	enum dest_type			r_desttype;
 	struct table		       *r_destination;
 
@@ -354,6 +372,7 @@ struct rule {
 	struct table		       *r_mapping;
 	struct table		       *r_userbase;
 	time_t				r_qexpire;
+	uint8_t				r_forwardonly;
 };
 
 struct delivery_mda {
@@ -370,12 +389,20 @@ struct delivery_mta {
 enum bounce_type {
 	B_ERROR,
 	B_WARNING,
+	B_DSN
+};
+
+enum dsn_ret {
+	DSN_RETFULL = 1,
+	DSN_RETHDRS
 };
 
 struct delivery_bounce {
 	enum bounce_type	type;
 	time_t			delay;
 	time_t			expire;
+	enum dsn_ret		dsn_ret;
+        int			mta_without_dsn;
 };
 
 enum expand_type {
@@ -419,7 +446,14 @@ struct expand {
 	struct expandnode		*parent;
 };
 
-#define	SMTPD_ENVELOPE_VERSION		1
+#define DSN_SUCCESS 0x01
+#define DSN_FAILURE 0x02
+#define DSN_DELAY   0x04
+#define DSN_NEVER   0x08
+
+#define	DSN_ENVID_LEN	100
+
+#define	SMTPD_ENVELOPE_VERSION		2
 struct envelope {
 	TAILQ_ENTRY(envelope)		entry;
 
@@ -429,6 +463,7 @@ struct envelope {
 	uint64_t			id;
 	enum envelope_flags		flags;
 
+	char				smtpname[SMTPD_MAXHOSTNAMELEN];
 	char				helo[SMTPD_MAXHOSTNAMELEN];
 	char				hostname[SMTPD_MAXHOSTNAMELEN];
 	char				errorline[SMTPD_MAXLINESIZE];
@@ -451,53 +486,28 @@ struct envelope {
 	time_t				lasttry;
 	time_t				nexttry;
 	time_t				lastbounce;
-};
 
-enum envelope_field {
-	EVP_VERSION,
-	EVP_TAG,
-	EVP_MSGID,
-	EVP_TYPE,
-	EVP_HELO,
-	EVP_HOSTNAME,
-	EVP_ERRORLINE,
-	EVP_SOCKADDR,
-	EVP_SENDER,
-	EVP_RCPT,
-	EVP_DEST,
-	EVP_CTIME,
-	EVP_EXPIRE,
-	EVP_RETRY,
-	EVP_LASTTRY,
-	EVP_LASTBOUNCE,
-	EVP_FLAGS,
-	EVP_MDA_METHOD,
-	EVP_MDA_BUFFER,
-	EVP_MDA_USER,
-	EVP_MDA_USERTABLE,
-	EVP_MTA_RELAY,
-	EVP_MTA_RELAY_AUTH,
-	EVP_MTA_RELAY_CERT,
-	EVP_MTA_RELAY_SOURCE,
-	EVP_MTA_RELAY_HELO,
-	EVP_BOUNCE_TYPE,
-	EVP_BOUNCE_DELAY,
-	EVP_BOUNCE_EXPIRE,
+	struct mailaddr			dsn_orcpt;
+	char				dsn_envid[DSN_ENVID_LEN+1];
+	uint8_t				dsn_notify;
+	enum dsn_ret			dsn_ret;
+
+	uint8_t				esc_class;
+	uint8_t				esc_code;
 };
 
 struct listener {
-	uint8_t			 flags;
+	uint16_t       		 flags;
 	int			 fd;
 	struct sockaddr_storage	 ss;
 	in_port_t		 port;
 	struct timeval		 timeout;
 	struct event		 ev;
-	char			 ssl_cert_name[SMTPD_MAXPATHLEN];
-	struct ssl		*ssl;
-	void			*ssl_ctx;
+	char			 pki_name[SMTPD_MAXPATHLEN];
 	char			 tag[MAX_TAG_SIZE];
 	char			 authtable[SMTPD_MAXLINESIZE];
-	char			 helo[SMTPD_MAXHOSTNAMELEN];
+	char			 hostname[SMTPD_MAXHOSTNAMELEN];
+	char			 hostnametable[SMTPD_MAXPATHLEN];
 	TAILQ_ENTRY(listener)	 entry;
 };
 
@@ -509,15 +519,14 @@ struct smtpd {
 #define SMTPD_OPT_NOACTION		0x00000002
 	uint32_t			sc_opts;
 
-#define SMTPD_CONFIGURING		0x00000001
-#define SMTPD_EXITING			0x00000002
-#define SMTPD_MDA_PAUSED		0x00000004
-#define SMTPD_MTA_PAUSED		0x00000008
-#define SMTPD_SMTP_PAUSED		0x00000010
-#define SMTPD_MDA_BUSY			0x00000020
-#define SMTPD_MTA_BUSY			0x00000040
-#define SMTPD_BOUNCE_BUSY		0x00000080
-#define SMTPD_SMTP_DISABLED		0x00000100
+#define SMTPD_EXITING			0x00000001
+#define SMTPD_MDA_PAUSED		0x00000002
+#define SMTPD_MTA_PAUSED		0x00000004
+#define SMTPD_SMTP_PAUSED		0x00000008
+#define SMTPD_MDA_BUSY			0x00000010
+#define SMTPD_MTA_BUSY			0x00000020
+#define SMTPD_BOUNCE_BUSY		0x00000040
+#define SMTPD_SMTP_DISABLED		0x00000080
 	uint32_t			sc_flags;
 
 #define QUEUE_COMPRESSION      		0x00000001
@@ -526,6 +535,19 @@ struct smtpd {
 	uint32_t			sc_queue_flags;
 	char			       *sc_queue_key;
 	size_t				sc_queue_evpcache_size;
+
+	size_t				sc_mda_max_session;
+	size_t				sc_mda_max_user_session;
+	size_t				sc_mda_task_hiwat;
+	size_t				sc_mda_task_lowat;
+	size_t				sc_mda_task_release;
+
+	size_t				sc_mta_max_deferred;
+
+	size_t				sc_scheduler_max_inflight;
+	size_t				sc_scheduler_max_evp_batch_size;
+	size_t				sc_scheduler_max_msg_batch_size;
+	size_t				sc_scheduler_max_schedule;
 
 	int				sc_qexpire;
 #define MAX_BOUNCE_WARN			4
@@ -538,8 +560,9 @@ struct smtpd {
 
 	TAILQ_HEAD(listenerlist, listener)	*sc_listeners;
 
-	TAILQ_HEAD(rulelist, rule)		*sc_rules, *sc_rules_reload;
+	TAILQ_HEAD(rulelist, rule)		*sc_rules;
 	
+	struct dict			       *sc_pki_dict;
 	struct dict			       *sc_ssl_dict;
 
 	struct dict			       *sc_tables_dict;		/* keyed lookup	*/
@@ -589,10 +612,13 @@ struct deliver {
 	struct userinfo		userinfo;
 };
 
+#define MAX_FILTER_PER_CHAIN	16
 struct filter {
-	struct imsgproc	       *process;
+	int			chain;
+	int			done;
 	char			name[MAX_FILTER_NAME];
 	char			path[SMTPD_MAXPATHLEN];
+	char			filters[MAX_FILTER_NAME][MAX_FILTER_PER_CHAIN];
 };
 
 struct mta_host {
@@ -606,7 +632,6 @@ struct mta_host {
 
 #define HOST_IGNORE	0x01
 	int			 flags;
-	int			 nerror;
 };
 
 struct mta_mx {
@@ -645,6 +670,7 @@ struct mta_connector {
 #define CONNECTOR_ERROR_ROUTE_NET	0x0008
 #define CONNECTOR_ERROR_ROUTE_SMTP	0x0010
 #define CONNECTOR_ERROR_ROUTE		0x0018
+#define CONNECTOR_ERROR_BLOCKED		0x0020
 #define CONNECTOR_ERROR			0x00ff
 
 #define CONNECTOR_LIMIT_HOST		0x0100
@@ -676,6 +702,7 @@ struct mta_route {
 #define ROUTE_DISABLED_NET	0x10
 #define ROUTE_DISABLED_SMTP	0x20
 	int			 flags;
+	int			 nerror;
 	int			 penalty;
 	int			 refcount;
 	size_t			 nconn;
@@ -705,7 +732,13 @@ struct mta_limits {
 	time_t	sessdelay_transaction;
 	time_t	sessdelay_keepalive;
 
+	size_t	max_failures_per_session;
+
 	int	family;
+
+	int	task_hiwat;
+	int	task_lowat;
+	int	task_release;
 };
 
 struct mta_relay {
@@ -719,13 +752,14 @@ struct mta_relay {
 	int			 backuppref;
 	char			*sourcetable;
 	uint16_t		 port;
-	char			*cert;
+	char			*pki_name;
 	char			*authtable;
 	char			*authlabel;
 	char			*helotable;
 	char			*heloname;
 	char			*secret;
 
+	int			 state;
 	size_t			 ntask;
 	TAILQ_HEAD(, mta_task)	 tasks;
 
@@ -761,6 +795,14 @@ struct mta_envelope {
 	char				*rcpt;
 	struct mta_task			*task;
 	int				 delivery;
+
+	int				 ext;
+	char				*dsn_orcpt;
+	char				dsn_envid[DSN_ENVID_LEN+1];
+	uint8_t				dsn_notify;
+	enum dsn_ret			dsn_ret;
+
+	char				 status[SMTPD_MAXLINESIZE];
 };
 
 struct mta_task {
@@ -810,6 +852,8 @@ struct scheduler_backend {
 
 	int	(*update)(struct scheduler_info *);
 	int	(*delete)(uint64_t);
+	int	(*hold)(uint64_t, uint64_t);
+	int	(*release)(int, uint64_t, int);
 
 	int	(*batch)(int, struct scheduler_batch *);
 
@@ -985,6 +1029,7 @@ struct ca_cert_resp_msg {
 
 struct ca_vrfy_req_msg {
 	uint64_t		reqid;
+	char			pkiname[SMTPD_MAXHOSTNAMELEN];
 	unsigned char  	       *cert;
 	off_t			cert_len;
 	size_t			n_chain;
@@ -1030,7 +1075,7 @@ int	uncompress_file(FILE *, FILE *);
 #define PURGE_LISTENERS		0x01
 #define PURGE_TABLES		0x02
 #define PURGE_RULES		0x04
-#define PURGE_SSL		0x08
+#define PURGE_PKI		0x08
 #define PURGE_EVERYTHING	0xff
 void purge_config(uint8_t);
 void init_pipes(void);
@@ -1041,6 +1086,7 @@ void config_done(void);
 
 /* control.c */
 pid_t control(void);
+int control_create_socket(void);
 
 
 /* crypto.c */
@@ -1065,15 +1111,12 @@ void dns_imsg(struct mproc *, struct imsg *);
 
 /* enqueue.c */
 int		 enqueue(int, char **);
-int		 enqueue_offline(int, char **);
 
 
 /* envelope.c */
 void envelope_set_errormsg(struct envelope *, char *, ...);
-char *envelope_ascii_field_name(enum envelope_field);
-int envelope_ascii_load(enum envelope_field, struct envelope *, char *);
-int envelope_ascii_dump(enum envelope_field, const struct envelope *, char *,
-    size_t);
+void envelope_set_esc_class(struct envelope *, enum enhanced_status_class);
+void envelope_set_esc_code(struct envelope *, enum enhanced_status_code);
 int envelope_load_buffer(struct envelope *, const char *, size_t);
 int envelope_dump_buffer(const struct envelope *, char *, size_t);
 
@@ -1134,9 +1177,10 @@ void mfa_filter_connect(uint64_t, const struct sockaddr *,
     const struct sockaddr *, const char *);
 void mfa_filter_mailaddr(uint64_t, int, const struct mailaddr *);
 void mfa_filter_line(uint64_t, int, const char *);
+void mfa_filter_eom(uint64_t, int, size_t);
 void mfa_filter(uint64_t, int);
 void mfa_filter_event(uint64_t, int);
-void mfa_filter_data(uint64_t, const char *);
+void mfa_build_fd_chain(uint64_t, int);
 
 /* mproc.c */
 int mproc_fork(struct mproc *, const char*, const char *);
@@ -1187,8 +1231,7 @@ void mta_route_down(struct mta_relay *, struct mta_route *);
 void mta_route_collect(struct mta_relay *, struct mta_route *);
 void mta_source_error(struct mta_relay *, struct mta_route *, const char *);
 void mta_delivery_log(struct mta_envelope *, const char *, const char *, int, const char *);
-void mta_delivery_notify(struct mta_envelope *, int, const char *, uint32_t);
-void mta_delivery(struct mta_envelope *, const char *, const char *, int, const char *, uint32_t);
+void mta_delivery_notify(struct mta_envelope *);
 struct mta_task *mta_route_next_task(struct mta_relay *, struct mta_route *);
 const char *mta_host_to_text(struct mta_host *);
 const char *mta_relay_to_text(struct mta_relay *);
@@ -1206,8 +1249,8 @@ int cmdline_symset(char *);
 /* queue.c */
 pid_t queue(void);
 void queue_ok(uint64_t);
-void queue_tempfail(uint64_t, uint32_t, const char *);
-void queue_permfail(uint64_t, const char *);
+void queue_tempfail(uint64_t, const char *, enum enhanced_status_code);
+void queue_permfail(uint64_t, const char *, enum enhanced_status_code);
 void queue_loop(uint64_t);
 void queue_flow_control(void);
 
@@ -1239,7 +1282,7 @@ pid_t scheduler(void);
 
 /* scheduler_bakend.c */
 struct scheduler_backend *scheduler_backend_lookup(const char *);
-void scheduler_info(struct scheduler_info *, struct envelope *, uint32_t);
+void scheduler_info(struct scheduler_info *, struct envelope *);
 time_t scheduler_compute_schedule(struct scheduler_info *);
 
 
@@ -1256,6 +1299,7 @@ void smtp_session_imsg(struct mproc *, struct imsg *);
 
 /* smtpd.c */
 void imsg_dispatch(struct mproc *, struct imsg *);
+void post_fork(int);
 const char *proc_name(enum smtp_proc_type);
 const char *proc_title(enum smtp_proc_type);
 const char *imsg_to_str(int);
@@ -1263,7 +1307,7 @@ const char *imsg_to_str(int);
 
 /* ssl_smtpd.c */
 void   *ssl_mta_init(char *, off_t, char *, off_t);
-void   *ssl_smtp_init(void *, char *, off_t, char *, off_t);
+void   *ssl_smtp_init(void *, char *, off_t, char *, off_t, void *, void *);
 
 
 /* stat_backend.c */
@@ -1346,7 +1390,6 @@ int  lowercase(char *, const char *, size_t);
 void xlowercase(char *, const char *, size_t);
 int  uppercase(char *, const char *, size_t);
 uint64_t generate_uid(void);
-void fdlimit(double);
 int availdesc(void);
 int ckdir(const char *, mode_t, uid_t, gid_t, int);
 int rmtree(char *, int);
@@ -1365,6 +1408,9 @@ void log_envelope(const struct envelope *, const char *, const char *,
 void session_socket_blockmode(int, enum blockmodes);
 void session_socket_no_linger(int);
 int session_socket_error(int);
+int getmailname(char *, size_t);
+int base64_encode(unsigned char const *, size_t, char *, size_t);
+int base64_decode(char const *, unsigned char *, size_t);
 
 
 /* waitq.c */

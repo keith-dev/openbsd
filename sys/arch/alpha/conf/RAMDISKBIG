@@ -1,4 +1,4 @@
-#	$OpenBSD: RAMDISKBIG,v 1.87 2012/12/10 04:30:56 brad Exp $
+#	$OpenBSD: RAMDISKBIG,v 1.91 2014/02/19 05:32:56 jmatthew Exp $
 #	$NetBSD: GENERIC,v 1.31 1996/12/03 17:25:29 cgd Exp $
 #
 # Generic Alpha kernel.  Enough to get booted, etc., but not much more.
@@ -95,6 +95,7 @@ kue*	at uhub?			# Kawasaki KL5KUSB101B based Ethernet
 smsc*	at uhub?			# SMSC LAN95xx Ethernet
 udav*	at uhub?			# Davicom DM9601 based Ethernet
 upl*	at uhub?			# Prolific PL2301/PL2302 host-to-host `network'
+ugl*	at uhub?			# Genesys Logic GL620USB-A host-to-host `network'
 url*	at uhub?			# Realtek RTL8150L based adapters
 wi*	at uhub?			# WaveLAN IEEE 802.11DS
 
@@ -130,7 +131,6 @@ asc*	at tc?
 #cfb*	at tc?
 #sfb*	at tc?
 le*	at tc?
-fta*	at tc?				# DEC DEFTA FDDI cards
 
 # PCI host bus adapter support
 apecs*	at mainbus?
@@ -160,6 +160,8 @@ cy*	at pci?				# PCI cyclom card
 # PCI SCSI devices
 ahc*	at pci?				# Adaptec 2940 SCSI controllers
 isp*	at pci?				# Qlogic ISP [12]0x0 SCSI/FibreChannel
+#qla*	at pci?				# Qlogic ISP 2[123]xx SCSI/FibreChannel
+#qle*	at pci?				# Qlogic ISP 2[45]xx SCSI/FibreChannel
 siop*	at pci?				# NCR 53c8xx SCSI
 pcscp*	at pci?				# AMD 53c974 PCscsi-PCI SCSI
 twe*	at pci?				# 3ware Escalade RAID controllers
@@ -180,7 +182,6 @@ fxp*	at pci?				# EtherExpress 10/100B ethernet
 ep*	at pci?				# 3COM 3c59x
 xl*	at pci?				# 3COM 3c9xx
 txp*	at pci?				# 3COM 3CR990
-fpa*	at pci?				# DEC DEFPA FDDI cards
 bge*	at pci?				# Broadcom BCM570x (aka Tigon3)
 vge*	at pci?				# VIA VT612x
 re*	at pci?				# Realtek 8169/8169S/8110S
@@ -278,7 +279,6 @@ cy0	at isa? iomem 0xd4000 irq 12	# ISA cyclom card
 #ahc0	at isa?				# Adaptec 284x SCSI controllers
 
 # EISA devices
-fea*	at eisa?			# DEC DEFEA FDDI cards
 ahc*	at eisa?			# Adaptec 274x, aic7770 SCSI
 
 # SCSI devices

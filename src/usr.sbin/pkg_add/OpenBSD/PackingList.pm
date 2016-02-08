@@ -1,7 +1,7 @@
 # ex:ts=8 sw=4:
-# $OpenBSD: PackingList.pm,v 1.121 2012/12/28 15:09:09 espie Exp $
+# $OpenBSD: PackingList.pm,v 1.132 2014/02/08 15:07:12 espie Exp $
 #
-# Copyright (c) 2003-2010 Marc Espie <espie@openbsd.org>
+# Copyright (c) 2003-2014 Marc Espie <espie@openbsd.org>
 #
 # Permission to use, copy, modify, and distribute this software for any
 # purpose with or without fee is hereby granted, provided that the above
@@ -63,6 +63,7 @@ sub match
 
 package OpenBSD::Composite;
 
+# convert call to $self->sub(@args) into $self->visit(sub, @args)
 sub AUTOLOAD
 {
 	our $AUTOLOAD;
@@ -113,7 +114,7 @@ sub make_shallow_copy
 {
 	my ($plist, $h) = @_;
 
-	my $copy = OpenBSD::PackingList->new;
+	my $copy = ref($plist)->new;
 	$copy->set_infodir($plist->infodir);
 	$plist->copy_shallow_if($copy, $h);
 	return $copy;
@@ -123,7 +124,7 @@ sub make_deep_copy
 {
 	my ($plist, $h) = @_;
 
-	my $copy = OpenBSD::PackingList->new;
+	my $copy = ref($plist)->new;
 	$copy->set_infodir($plist->infodir);
 	$plist->copy_deep_if($copy, $h);
 	return $copy;
@@ -141,6 +142,8 @@ sub zap_wrong_annotations
 	my $pkgname = $self->pkgname;
 	if (defined $pkgname && $pkgname =~ m/^(?:\.libs\d*|partial)\-/) {
 		delete $self->{'manual-installation'};
+		delete $self->{'firmware'};
+		delete $self->{'digital-signature'};
 	}
 }
 
@@ -149,10 +152,10 @@ sub conflict_list
 	require OpenBSD::PkgCfl;
 
 	my $self = shift;
-
-	$self->{conflict_list} //= OpenBSD::PkgCfl->make_conflict_list($self);
-	return $self->{conflict_list};
+	return OpenBSD::PkgCfl->make_conflict_list($self);
 }
+
+my $subclass;
 
 sub read
 {
@@ -163,6 +166,9 @@ sub read
 		$plist = $a;
 	} else {
 		$plist = new $a;
+	}
+	if (defined $subclass->{$code}) {
+		bless $plist, "OpenBSD::PackingList::".$subclass->{$code};
 	}
 	&$code($u,
 		sub {
@@ -394,8 +400,8 @@ sub is_signed
 sub fullpkgpath
 {
 	my $self = shift;
-	if (defined $self->{extrainfo} && $self->{extrainfo}->{subdir} ne '') {
-		return $self->{extrainfo}->{subdir};
+	if (defined $self->{extrainfo} && $self->{extrainfo}{subdir} ne '') {
+		return $self->{extrainfo}{subdir};
 	} else {
 		return undef;
 	}
@@ -404,8 +410,8 @@ sub fullpkgpath
 sub fullpkgpath2
 {
 	my $self = shift;
-	if (defined $self->{extrainfo} && $self->{extrainfo}->{subdir} ne '') {
-		return $self->{extrainfo}->{path};
+	if (defined $self->{extrainfo} && $self->{extrainfo}{subdir} ne '') {
+		return $self->{extrainfo}{path};
 	} else {
 		return undef;
 	}
@@ -423,7 +429,7 @@ sub pkgpath
 		}
 		if (defined $self->{pkgpath}) {
 			for my $i (@{$self->{pkgpath}}) {
-				push(@{$h->{$i->{path}->{dir}}}, $i->{path});
+				push(@{$h->{$i->{path}{dir}}}, $i->{path});
 			}
 		}
 	}
@@ -438,10 +444,10 @@ sub match_pkgpath
 }
 
 our @unique_categories =
-    (qw(name url digital-signature no-default-conflict manual-installation always-update explicit-update extrainfo localbase arch));
+    (qw(name url signer digital-signature no-default-conflict manual-installation firmware always-update extrainfo localbase arch));
 
 our @list_categories =
-    (qw(conflict pkgpath incompatibility ask-update updateset depend
+    (qw(conflict pkgpath ask-update depend
     	wantlib define-tag groups users items));
 
 our @cache_categories =
@@ -511,7 +517,7 @@ sub to_cache
 {
 	my ($self) = @_;
 	return if defined $plist_cache->{$self->pkgname};
-	my $plist = new OpenBSD::PackingList;
+	my $plist = OpenBSD::PackingList::Depend->new;
 	for my $c (@cache_categories) {
 		if (defined $self->{$c}) {
 			$plist->{$c} = $self->{$c};
@@ -531,12 +537,25 @@ sub to_installation
 	$self->tofile(OpenBSD::PackageInfo::installed_contents($self->pkgname));
 }
 
+sub check_signature
+{
+	my ($plist, $state) = @_;
+	my $sig = $plist->get('digital-signature');
+	if ($sig->{key} eq 'x509') {
+		require OpenBSD::x509;
+		return OpenBSD::x509::check_signature($plist, $state);
+	} elsif ($sig->{key} eq 'signify') {
+		require OpenBSD::signify;
+		return OpenBSD::signify::check_signature($plist, $state);
+	} else {
+		$state->log("Error: unknown signature style $sig->{key}");
+		return 0;
+	}
+}
 
 sub forget
 {
 }
-
-# convert call to $self->sub(@args) into $self->visit(sub, @args)
 
 sub signature
 {
@@ -545,5 +564,38 @@ sub signature
 	require OpenBSD::Signature;
 	return OpenBSD::Signature->from_plist($self);
 }
+
+$subclass =  {
+	\&defaultCode => 'Full',
+	\&SharedItemsOnly => 'SharedItems',
+	\&DirrmOnly => 'SharedItems',
+	\&LibraryOnly => 'Libraries',
+	\&FilesOnly => 'Files',
+	\&PrelinkStuffOnly => 'Prelink',
+	\&DependOnly => 'Depend',
+	\&ExtraInfoOnly => 'ExtraInfo',
+	\&UpdateInfoOnly => 'UpdateInfo',
+	\&ConflictOnly => 'Conflict' };
+
+package OpenBSD::PackingList::OldLibs;
+our @ISA = qw(OpenBSD::PackingList);
+package OpenBSD::PackingList::Full;
+our @ISA = qw(OpenBSD::PackingList::OldLibs);
+package OpenBSD::PackingList::SharedItems;
+our @ISA = qw(OpenBSD::PackingList);
+package OpenBSD::PackingList::Libraries;
+our @ISA = qw(OpenBSD::PackingList);
+package OpenBSD::PackingList::Files;
+our @ISA = qw(OpenBSD::PackingList);
+package OpenBSD::PackingList::Prelink;
+our @ISA = qw(OpenBSD::PackingList);
+package OpenBSD::PackingList::Depend;
+our @ISA = qw(OpenBSD::PackingList);
+package OpenBSD::PackingList::ExtraInfo;
+our @ISA = qw(OpenBSD::PackingList);
+package OpenBSD::PackingList::UpdateInfo;
+our @ISA = qw(OpenBSD::PackingList);
+package OpenBSD::PackingList::Conflict;
+our @ISA = qw(OpenBSD::PackingList);
 
 1;

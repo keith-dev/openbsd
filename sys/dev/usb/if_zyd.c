@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_zyd.c,v 1.90 2013/04/15 09:23:01 mglocker Exp $	*/
+/*	$OpenBSD: if_zyd.c,v 1.95 2014/02/15 02:20:29 jsg Exp $	*/
 
 /*-
  * Copyright (c) 2006 by Damien Bergamini <damien.bergamini@free.fr>
@@ -49,7 +49,6 @@
 #ifdef INET
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
-#include <netinet/in_var.h>
 #include <netinet/if_ether.h>
 #include <netinet/ip.h>
 #endif
@@ -118,9 +117,10 @@ static const struct zyd_type {
 	ZYD_ZD1211_DEV(ZYDAS,		ALL0298),
 	ZYD_ZD1211_DEV(ZYDAS,		ZD1211),
 	ZYD_ZD1211_DEV(ZYXEL,		AG225H),
-	ZYD_ZD1211_DEV(ZYXEL,		ZYAIRG220),
 	ZYD_ZD1211_DEV(ZYXEL,		G200V2),
 	ZYD_ZD1211_DEV(ZYXEL,		G202),
+	ZYD_ZD1211_DEV(ZYXEL,		G220),
+	ZYD_ZD1211_DEV(ZYXEL,		G220F),
 
 	ZYD_ZD1211B_DEV(ACCTON,		SMCWUSBG),
 	ZYD_ZD1211B_DEV(ACCTON,		WN4501H_LF_IR),
@@ -137,12 +137,12 @@ static const struct zyd_type {
 	ZYD_ZD1211B_DEV(PHILIPS,	SNU5600),
 	ZYD_ZD1211B_DEV(PHILIPS,	SNU5630NS05),
 	ZYD_ZD1211B_DEV(PLANEX2,	GW_US54GXS),
+	ZYD_ZD1211B_DEV(PLANEX4,	GWUS54ZGL),
+	ZYD_ZD1211B_DEV(PLANEX4,	ZD1211B),
 	ZYD_ZD1211B_DEV(SAGEM,		XG76NA),
 	ZYD_ZD1211B_DEV(SITECOMEU,	WL603),
 	ZYD_ZD1211B_DEV(SITECOMEU,	ZD1211B),
 	ZYD_ZD1211B_DEV(UMEDIA,		TEW429UBC1),
-	ZYD_ZD1211B_DEV(UNKNOWN1,	ZD1211B_1),
-	ZYD_ZD1211B_DEV(UNKNOWN1,	ZD1211B_2),
 	ZYD_ZD1211B_DEV(UNKNOWN2,	ZD1211B),
 	ZYD_ZD1211B_DEV(UNKNOWN3,	ZD1211B),
 	ZYD_ZD1211B_DEV(SONY,		IFU_WLM2),
@@ -151,8 +151,10 @@ static const struct zyd_type {
 	ZYD_ZD1211B_DEV(ZCOM,		ZD1211B),
 	ZYD_ZD1211B_DEV(ZYDAS,		ZD1211B),
 	ZYD_ZD1211B_DEV(ZYDAS,		ZD1211B_2),
-	ZYD_ZD1211B_DEV(ZYXEL,		M202),
+	ZYD_ZD1211B_DEV(ZYXEL,		AG220),
+	ZYD_ZD1211B_DEV(ZYXEL,		AG225HV2),
 	ZYD_ZD1211B_DEV(ZYXEL,		G220V2),
+	ZYD_ZD1211B_DEV(ZYXEL,		M202)
 };
 #define zyd_lookup(v, p)	\
 	((const struct zyd_type *)usb_lookup(zyd_devs, v, p))
@@ -796,11 +798,11 @@ zyd_cmd(struct zyd_softc *sc, uint16_t code, const void *idata, int ilen,
 			splx(s);
 		printf("%s: could not send command (error=%s)\n",
 		    sc->sc_dev.dv_xname, usbd_errstr(error));
-		(void)usbd_free_xfer(xfer);
+		usbd_free_xfer(xfer);
 		return EIO;
 	}
 	if (!(flags & ZYD_CMD_FLAG_READ)) {
-		(void)usbd_free_xfer(xfer);
+		usbd_free_xfer(xfer);
 		return 0;	/* write: don't wait for reply */
 	}
 	/* wait at most one second for command reply */
@@ -808,7 +810,7 @@ zyd_cmd(struct zyd_softc *sc, uint16_t code, const void *idata, int ilen,
 	sc->odata = NULL;	/* in case answer is received too late */
 	splx(s);
 
-	(void)usbd_free_xfer(xfer);
+	usbd_free_xfer(xfer);
 	return error;
 }
 
@@ -1643,6 +1645,9 @@ zyd_set_multi(struct zyd_softc *sc)
 	uint32_t lo, hi;
 	uint8_t bit;
 
+	if (ac->ac_multirangecnt > 0)
+		ifp->if_flags |= IFF_ALLMULTI;
+
 	if ((ifp->if_flags & (IFF_ALLMULTI | IFF_PROMISC)) != 0) {
 		lo = hi = 0xffffffff;
 		goto done;
@@ -1650,11 +1655,6 @@ zyd_set_multi(struct zyd_softc *sc)
 	lo = hi = 0;
 	ETHER_FIRST_MULTI(step, ac, enm);
 	while (enm != NULL) {
-		if (bcmp(enm->enm_addrlo, enm->enm_addrhi, ETHER_ADDR_LEN)) {
-			ifp->if_flags |= IFF_ALLMULTI;
-			lo = hi = 0xffffffff;
-			goto done;
-		}
 		bit = enm->enm_addrlo[5] >> 2;
 		if (bit < 32)
 			lo |= 1 << bit;
@@ -1664,7 +1664,7 @@ zyd_set_multi(struct zyd_softc *sc)
 	}
 
 done:
-	hi |= 1 << 31;	/* make sure the broadcast bit is set */
+	hi |= 1U << 31;	/* make sure the broadcast bit is set */
 	zyd_write32(sc, ZYD_MAC_GHTBL, lo);
 	zyd_write32(sc, ZYD_MAC_GHTBH, hi);
 }

@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_nfe.c,v 1.101 2013/04/01 06:40:40 brad Exp $	*/
+/*	$OpenBSD: if_nfe.c,v 1.104 2013/12/28 03:34:54 deraadt Exp $	*/
 
 /*-
  * Copyright (c) 2006, 2007 Damien Bergamini <damien.bergamini@free.fr>
@@ -43,7 +43,6 @@
 #ifdef INET
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
-#include <netinet/in_var.h>
 #include <netinet/ip.h>
 #include <netinet/if_ether.h>
 #endif
@@ -184,18 +183,17 @@ nfe_activate(struct device *self, int act)
 	int rv = 0;
 
 	switch (act) {
-	case DVACT_QUIESCE:
-		rv = config_activate_children(self, act);
-		break;
 	case DVACT_SUSPEND:
 		if (ifp->if_flags & IFF_RUNNING)
 			nfe_stop(ifp, 0);
 		rv = config_activate_children(self, act);
 		break;
 	case DVACT_RESUME:
-		rv = config_activate_children(self, act);
 		if (ifp->if_flags & IFF_UP)
 			nfe_init(ifp);
+		break;
+	default:
+		rv = config_activate_children(self, act);
 		break;
 	}
 	return (rv);

@@ -1,4 +1,4 @@
-/*	$OpenBSD: printconf.c,v 1.90 2013/01/17 02:00:33 claudio Exp $	*/
+/*	$OpenBSD: printconf.c,v 1.93 2013/11/13 09:14:48 florian Exp $	*/
 
 /*
  * Copyright (c) 2003, 2004 Henning Brauer <henning@openbsd.org>
@@ -89,7 +89,7 @@ print_community(int as, int type)
 	else if (as == COMMUNITY_NEIGHBOR_AS)
 		printf("neighbor-as:");
 	else
-		printf("%d:", as);
+		printf("%u:", (unsigned int)as);
 
 	if (type == COMMUNITY_ANY)
 		printf("* ");
@@ -104,15 +104,15 @@ print_extcommunity(struct filter_extcommunity *c)
 {
 	switch (c->type & EXT_COMMUNITY_VALUE) {
 	case EXT_COMMUNITY_TWO_AS:
-		printf("%s %i:%i ", log_ext_subtype(c->subtype),
+		printf("%s %hu:%u ", log_ext_subtype(c->subtype),
 		    c->data.ext_as.as, c->data.ext_as.val);
 		break;
 	case EXT_COMMUNITY_IPV4:
-		printf("%s %s:%i ", log_ext_subtype(c->subtype),
+		printf("%s %s:%u ", log_ext_subtype(c->subtype),
 		    inet_ntoa(c->data.ext_ip.addr), c->data.ext_ip.val);
 		break;
 	case EXT_COMMUNITY_FOUR_AS:
-		printf("%s %s:%i ", log_ext_subtype(c->subtype),
+		printf("%s %s:%u ", log_ext_subtype(c->subtype),
 		    log_as(c->data.ext_as4.as4), c->data.ext_as.val);
 		break;
 	case EXT_COMMUNITY_OPAQUE:
@@ -270,6 +270,7 @@ print_mainconf(struct bgpd_config *conf)
 		printf("nexthop qualify via bgp\n");
 	if (conf->flags & BGPD_FLAG_NEXTHOP_DEFAULT)
 		printf("nexthop qualify via default\n");
+	printf("fib-priority %hhu", conf->fib_priority);
 }
 
 void
@@ -548,23 +549,16 @@ print_rule(struct peer *peer_l, struct filter_rule *r)
 		printf("prefix %s/%u ", log_addr(&r->match.prefix.addr),
 		    r->match.prefix.len);
 
-	if (r->match.prefix.addr.aid == 0 && r->match.prefixlen.aid) {
-		if (r->match.prefixlen.aid == AID_INET)
-			printf("inet ");
-		if (r->match.prefixlen.aid == AID_INET6)
-			printf("inet6 ");
-	}
-
-	if (r->match.prefixlen.op) {
-		if (r->match.prefixlen.op == OP_RANGE ||
-		    r->match.prefixlen.op == OP_XRANGE) {
-			printf("prefixlen %u ", r->match.prefixlen.len_min);
-			print_op(r->match.prefixlen.op);
-			printf(" %u ", r->match.prefixlen.len_max);
+	if (r->match.prefix.op) {
+		if (r->match.prefix.op == OP_RANGE ||
+		    r->match.prefix.op == OP_XRANGE) {
+			printf("prefixlen %u ", r->match.prefix.len_min);
+			print_op(r->match.prefix.op);
+			printf(" %u ", r->match.prefix.len_max);
 		} else {
 			printf("prefixlen ");
-			print_op(r->match.prefixlen.op);
-			printf(" %u ", r->match.prefixlen.len_min);
+			print_op(r->match.prefix.op);
+			printf(" %u ", r->match.prefix.len_min);
 		}
 	}
 

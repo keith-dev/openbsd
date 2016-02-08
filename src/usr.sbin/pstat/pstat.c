@@ -1,4 +1,4 @@
-/*	$OpenBSD: pstat.c,v 1.85 2013/06/05 01:26:00 guenther Exp $	*/
+/*	$OpenBSD: pstat.c,v 1.89 2013/12/01 16:40:56 krw Exp $	*/
 /*	$NetBSD: pstat.c,v 1.27 1996/10/23 22:50:06 cgd Exp $	*/
 
 /*-
@@ -117,6 +117,7 @@ int	nfs_print(struct vnode *);
 void	swapmode(void);
 void	ttymode(void);
 void	ttyprt(struct itty *);
+void	tty2itty(struct tty *tp, struct itty *itp);
 void	ufs_header(void);
 int	ufs_print(struct vnode *);
 void	ext2fs_header(void);
@@ -607,7 +608,7 @@ nfs_print(struct vnode *vp)
 		*flags++ = '-';
 	*flags = '\0';
 
-	(void)printf(" %6ld %5s", np->n_vattr.va_fileid, flagbuf);
+	(void)printf(" %6lld %5s", (long long)np->n_vattr.va_fileid, flagbuf);
 	type = np->n_vattr.va_mode & S_IFMT;
 	if (S_ISCHR(np->n_vattr.va_mode) || S_ISBLK(np->n_vattr.va_mode))
 		if (usenumflag ||
@@ -830,8 +831,8 @@ kinfo_vnodes(int *avnodes)
 	evbuf = vbuf + (numvnodes + 20) *
 	    (sizeof(struct vnode *) + sizeof(struct vnode));
 	KGET(V_MOUNTLIST, kvm_mountlist);
-	for (num = 0, mp = CIRCLEQ_FIRST(&kvm_mountlist); ;
-	    mp = CIRCLEQ_NEXT(&mount, mnt_list)) {
+	num = 0;
+	TAILQ_FOREACH(mp, &kvm_mountlist, mnt_list) {
 		KGET2(mp, &mount, sizeof(mount), "mount entry");
 		for (vp = LIST_FIRST(&mount.mnt_vnodelist);
 		    vp != NULL; vp = LIST_NEXT(&vnode, v_mntvnodes)) {
@@ -846,8 +847,6 @@ kinfo_vnodes(int *avnodes)
 			bp += sizeof(struct vnode);
 			num++;
 		}
-		if (mp == CIRCLEQ_LAST(&kvm_mountlist))
-			break;
 	}
 	*avnodes = num;
 	return ((struct e_vnode *)vbuf);
@@ -988,7 +987,7 @@ ttyprt(struct itty *tp)
 void
 filemode(void)
 {
-	struct kinfo_file2 *kf;
+	struct kinfo_file *kf;
 	char flagbuf[16], *fbp;
 	static char *dtypes[] = { "???", "inode", "socket", "pipe", "kqueue", "crypto", "systrace" };
 	int mib[2], maxfile, nfile;
@@ -1019,9 +1018,9 @@ filemode(void)
 	}
 
 	if (!totalflag) {
-		kf = kvm_getfile2(kd, KERN_FILE_BYFILE, 0, sizeof *kf, &nfile);
+		kf = kvm_getfiles(kd, KERN_FILE_BYFILE, 0, sizeof *kf, &nfile);
 		if (kf == NULL) {
-			warnx("kvm_getfile2: %s", kvm_geterr(kd));
+			warnx("kvm_getfiles: %s", kvm_geterr(kd));
 			return;
 		}
 	}

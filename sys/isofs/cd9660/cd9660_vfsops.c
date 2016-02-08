@@ -1,4 +1,4 @@
-/*	$OpenBSD: cd9660_vfsops.c,v 1.64 2013/06/02 01:07:39 deraadt Exp $	*/
+/*	$OpenBSD: cd9660_vfsops.c,v 1.66 2013/12/01 16:40:56 krw Exp $	*/
 /*	$NetBSD: cd9660_vfsops.c,v 1.26 1997/06/13 15:38:58 pk Exp $	*/
 
 /*-
@@ -113,7 +113,7 @@ cd9660_mountroot()
                 return (error);
         }
 
-        CIRCLEQ_INSERT_TAIL(&mountlist, mp, mnt_list);
+        TAILQ_INSERT_TAIL(&mountlist, mp, mnt_list);
         (void)cd9660_statfs(mp, &mp->mnt_stat, p);
 	vfs_unbusy(mp);
 	inittodr(0);
@@ -490,7 +490,6 @@ iso_disklabelspoof(dev, strat, lp)
 		bp->b_bcount = ISO_DEFAULT_BLOCK_SIZE;
 		CLR(bp->b_flags, B_READ | B_WRITE | B_DONE);
 		SET(bp->b_flags, B_BUSY | B_READ | B_RAW);
-		bp->b_cylinder = bp->b_blkno / lp->d_secpercyl;
 
 		/*printf("d_secsize %d iso_blknum %d b_blkno %d bcount %d\n",
 		    lp->d_secsize, iso_blknum, bp->b_blkno, bp->b_bcount);*/

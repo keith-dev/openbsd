@@ -1,4 +1,4 @@
-.\"	$OpenBSD: dd.1,v 1.25 2011/10/18 09:37:35 nicm Exp $
+.\"	$OpenBSD: dd.1,v 1.29 2014/02/14 17:27:58 schwarze Exp $
 .\"	$NetBSD: dd.1,v 1.5 1995/03/21 09:04:04 cgd Exp $
 .\"
 .\" Copyright (c) 1990, 1993
@@ -33,7 +33,7 @@
 .\"
 .\"	@(#)dd.1	8.2 (Berkeley) 1/13/94
 .\"
-.Dd $Mdocdate: October 18 2011 $
+.Dd $Mdocdate: February 14 2014 $
 .Dt DD 1
 .Os
 .Sh NAME
@@ -139,6 +139,21 @@ For all other devices, the correct number of blocks is read without
 distinguishing between a partial or complete block being read.
 .It Xo
 .Sm off
+.Cm status= Ar value
+.Sm on
+.Xc
+Where
+.Ar value
+is one of the symbols from the following list.
+.Bl -tag -width unblock
+.It Cm noxfer
+Do not print the transfer statistics as the last line of status output.
+.It Cm none
+Do not print the status output.
+Error messages are shown; informational messages are not.
+.El
+.It Xo
+.Sm off
 .Cm conv= Ar value Oo ,
 .Sm on
 .Ar value ... Oc
@@ -165,12 +180,15 @@ There are two conversion maps for
 .Tn ASCII .
 The value
 .Cm ascii
-specifies the recommended one which is compatible with System V.
+specifies the recommended one which is compatible with
+.At V .
 The value
 .Cm oldascii
 specifies the one used in historic
-.Tn AT&T
-and pre-4.3BSD-reno systems.
+.At
+and
+.Pf pre- Bx 4.3 Reno
+systems.
 .It Cm block
 Treats the input as a sequence of newline or end-of-file terminated variable
 length records independent of input and output block boundaries.
@@ -214,8 +232,10 @@ The values
 and
 .Cm oldibm
 are maps used in historic
-.Tn AT&T
-and pre-4.3BSD-reno systems.
+.At
+and
+.Pf pre- Bx 4.3 Reno
+systems.
 .It Cm lcase
 Transform uppercase characters into lowercase characters.
 .It Cm noerror
@@ -365,23 +385,31 @@ The conversions
 .Cm ebcdic ,
 and
 .Cm ibm
-are compliant with the
-.St -xpg4
-specification.
+are marked by
+.St -p1003.1-2008
+as being an
+X/Open System Interfaces option.
 .Pp
 The
 .Cm files
-operand,
+and
+.Cm status
+operands,
 the conversions
 .Cm oldascii ,
 .Cm oldebcdic ,
 .Cm oldibm ,
 and
 .Cm osync ,
-and the size multipliers
+the size multipliers
 .Sq K ,
 .Sq m ,
 .Sq M ,
 and
-.Sq w
-are all extensions to those specifications.
+.Sq w ,
+and
+.Dv SIGINFO
+handling
+are all extensions to the
+.St -p1003.1-2008
+specification.

@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.9 2011/04/18 16:52:09 thib Exp $
+#	$OpenBSD: Makefile,v 1.12 2014/03/02 05:46:26 deraadt Exp $
 
 TOP=	${.CURDIR}/..
 
@@ -26,6 +26,10 @@ ${CDROM}: ${BASE} ${XBASE}
 	cp -p ${BASE} ${.OBJDIR}/cd-dir/${OSREV}/${MACHINE}
 	cp -p ${XBASE} ${.OBJDIR}/cd-dir/${OSREV}/${MACHINE}
 
+	cat ${RELDIR}/SHA256 ${RELXDIR}/SHA256 > \
+	    ${.OBJDIR}/cd-dir/${OSREV}/${MACHINE}/SHA256
+	# XXX no SHA256.sig
+
 	ln -f ${.OBJDIR}/cd-dir/${OSREV}/${MACHINE}/bsd.rd \
 	    ${.OBJDIR}/cd-dir/bsd.rd
 
@@ -41,11 +45,6 @@ ${CDROM}: ${BASE} ${XBASE}
 
 install:
 	cp ${CDROM} ${RELDIR}/
-	# update the SHA256 file
-	grep -v ${CDROM} ${RELDIR}/SHA256 > ${RELDIR}/SHA256.new
-	sum -a sha256 ${CDROM} >> ${RELDIR}/SHA256.new
-	sort ${RELDIR}/SHA256.new > ${RELDIR}/SHA256
-	rm ${RELDIR}/SHA256.new
 
 clean cleandir:
 	/bin/rm -rf cd-dir ${CDROM}

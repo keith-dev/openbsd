@@ -1,4 +1,4 @@
-/*	$OpenBSD: apm.c,v 1.100 2012/10/17 22:49:27 deraadt Exp $	*/
+/*	$OpenBSD: apm.c,v 1.102 2013/12/06 21:03:05 deraadt Exp $	*/
 
 /*-
  * Copyright (c) 1998-2001 Michael Shalayeff. All rights reserved.
@@ -281,6 +281,9 @@ apm_suspend(int state)
 	if (cpu_setperf != NULL)
 		cpu_setperf(perflevel);
 	bufq_restart();
+
+	config_suspend(TAILQ_FIRST(&alldevs), DVACT_WAKEUP);
+
 #if NWSDISPLAY > 0
 	wsdisplay_resume();
 #endif /* NWSDISPLAY > 0 */
@@ -882,7 +885,7 @@ apm_thread_create(void *v)
 	}
 #endif
 
-	if (kthread_create(apm_thread, sc, &sc->sc_thread, "%s",
+	if (kthread_create(apm_thread, sc, &sc->sc_thread,
 	    sc->sc_dev.dv_xname)) {
 		apm_disconnect(sc);
 		printf("%s: failed to create kernel thread, disabled",

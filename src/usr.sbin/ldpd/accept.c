@@ -1,4 +1,4 @@
-/*	$OpenBSD: accept.c,v 1.1 2012/04/12 17:33:43 claudio Exp $ */
+/*	$OpenBSD: accept.c,v 1.3 2013/10/31 16:56:22 deraadt Exp $ */
 
 /*
  * Copyright (c) 2012 Claudio Jeker <claudio@openbsd.org>
@@ -56,7 +56,7 @@ accept_add(int fd, void (*cb)(int, short, void *), void *arg)
 	struct accept_ev	*av;
 
 	if ((av = calloc(1, sizeof(*av))) == NULL)
-		return -1;
+		return (-1);
 	av->fd = fd;
 	av->accept_cb = cb;
 	av->arg = arg;
@@ -77,7 +77,7 @@ accept_del(int fd)
 
 	LIST_FOREACH(av, &accept_queue.queue, entry)
 		if (av->fd == fd) {
-			log_debug("accept_del: %i removed from queue", fd);
+			log_debug("accept_del: %d removed from queue", fd);
 			event_del(&av->ev);
 			LIST_REMOVE(av, entry);
 			free(av);

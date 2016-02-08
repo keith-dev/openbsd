@@ -31,6 +31,6 @@ int     KARATSUBA_MUL_CUTOFF = 80,      /* Min. number of digits before Karatsub
         TOOM_SQR_CUTOFF      = 400;
 #endif
 
-/* $Source: /cvs/src/kerberosV/src/lib/hcrypto/libtommath/bncore.c,v $ */
+/* $Source: /var/www/space/cvs/src/kerberosV/src/lib/hcrypto/libtommath/bncore.c,v $ */
 /* $Revision: 1.1 $ */
 /* $Date: 2013/06/17 19:11:43 $ */

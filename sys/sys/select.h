@@ -1,4 +1,4 @@
-/*	$OpenBSD: select.h,v 1.11 2013/04/29 17:06:20 matthew Exp $	*/
+/*	$OpenBSD: select.h,v 1.14 2013/12/03 23:00:51 naddy Exp $	*/
 
 /*-
  * Copyright (c) 1992, 1993
@@ -62,7 +62,7 @@ struct timespec;
  * Non-underscore versions are exposed later #if __BSD_VISIBLE
  */
 #define	__NBBY	8				/* number of bits in a byte */
-typedef int32_t	__fd_mask;
+typedef uint32_t __fd_mask;
 #define __NFDBITS ((unsigned)(sizeof(__fd_mask) * __NBBY)) /* bits per mask */
 #define	__howmany(x, y)	(((x) + ((y) - 1)) / (y))
 
@@ -71,18 +71,22 @@ typedef	struct fd_set {
 } fd_set;
 
 #define	FD_SET(n, p) \
-	((p)->fds_bits[(n) / __NFDBITS] |= (1 << ((n) % __NFDBITS)))
+	((p)->fds_bits[(n) / __NFDBITS] |= (1U << ((n) % __NFDBITS)))
 #define	FD_CLR(n, p) \
-	((p)->fds_bits[(n) / __NFDBITS] &= ~(1 << ((n) % __NFDBITS)))
+	((p)->fds_bits[(n) / __NFDBITS] &= ~(1U << ((n) % __NFDBITS)))
 #define	FD_ISSET(n, p) \
-	((p)->fds_bits[(n) / __NFDBITS] & (1 << ((n) % __NFDBITS)))
-#ifdef _KERNEL
-#define	FD_COPY(f, t)	bcopy(f, t, sizeof(*(f)))
-#define	FD_ZERO(p)	bzero(p, sizeof(*(p)))
-#else
-#define	FD_COPY(f, t)	memcpy(t, f, sizeof(*(f)))
-#define	FD_ZERO(p)	memset(p, 0, sizeof(*(p)))
+	((p)->fds_bits[(n) / __NFDBITS] & (1U << ((n) % __NFDBITS)))
+
+#if __BSD_VISIBLE
+#define	FD_COPY(f, t)	(void)(*(t) = *(f))
 #endif
+#define	FD_ZERO(p) do {					\
+	fd_set *_p = (p);				\
+	__size_t _n = __howmany(FD_SETSIZE, __NFDBITS);	\
+							\
+	while (_n > 0)					\
+		_p->fds_bits[--_n] = 0;			\
+} while (0)
 
 #if __BSD_VISIBLE
 #define	NBBY	__NBBY

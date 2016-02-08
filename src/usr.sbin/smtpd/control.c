@@ -1,4 +1,4 @@
-/*	$OpenBSD: control.c,v 1.89 2013/07/19 21:14:52 eric Exp $	*/
+/*	$OpenBSD: control.c,v 1.97 2014/02/17 13:33:56 eric Exp $	*/
 
 /*
  * Copyright (c) 2012 Gilles Chehade <gilles@poolp.org>
@@ -98,10 +98,13 @@ control_imsg(struct mproc *p, struct imsg *imsg)
 	}
 	if (p->proc == PROC_SCHEDULER) {
 		switch (imsg->hdr.type) {
+		case IMSG_CTL_OK:
+		case IMSG_CTL_FAIL:
 		case IMSG_CTL_LIST_MESSAGES:
 			c = tree_get(&ctl_conns, imsg->hdr.peerid);
 			if (c == NULL)
 				return;
+			imsg->hdr.peerid = 0;
 			m_forward(&c->mproc, imsg);
 			return;
 		}
@@ -118,16 +121,17 @@ control_imsg(struct mproc *p, struct imsg *imsg)
 	}
 	if (p->proc == PROC_MTA) {
 		switch (imsg->hdr.type) {
+		case IMSG_CTL_OK:
+		case IMSG_CTL_FAIL:
+		case IMSG_CTL_MTA_SHOW_HOSTS:
+		case IMSG_CTL_MTA_SHOW_RELAYS:
 		case IMSG_CTL_MTA_SHOW_ROUTES:
-			c = tree_get(&ctl_conns, imsg->hdr.peerid);
-			if (c == NULL)
-				return;
-			m_forward(&c->mproc, imsg);
-			return;
 		case IMSG_CTL_MTA_SHOW_HOSTSTATS:
+		case IMSG_CTL_MTA_SHOW_BLOCK:
 			c = tree_get(&ctl_conns, imsg->hdr.peerid);
 			if (c == NULL)
 				return;
+			imsg->hdr.peerid = 0;
 			m_forward(&c->mproc, imsg);
 			return;
 		}
@@ -182,35 +186,17 @@ control_sig_handler(int sig, short event, void *p)
 	}
 }
 
-pid_t
-control(void)
+int
+control_create_socket(void)
 {
-	struct sockaddr_un	 sun;
-	int			 fd;
-	mode_t			 old_umask;
-	pid_t			 pid;
-	struct passwd		*pw;
-	struct event		 ev_sigint;
-	struct event		 ev_sigterm;
-
-	switch (pid = fork()) {
-	case -1:
-		fatal("control: cannot fork");
-	case 0:
-		break;
-	default:
-		return (pid);
-	}
-
-	purge_config(PURGE_EVERYTHING);
-
-	if ((pw = getpwnam(SMTPD_USER)) == NULL)
-		fatalx("unknown user " SMTPD_USER);
+	struct sockaddr_un	sun;
+	int			fd;
+	mode_t			old_umask;
 
 	if ((fd = socket(AF_UNIX, SOCK_STREAM, 0)) == -1)
 		fatal("control: socket");
 
-	bzero(&sun, sizeof(sun));
+	memset(&sun, 0, sizeof(sun));
 	sun.sun_family = AF_UNIX;
 	if (strlcpy(sun.sun_path, SMTPD_SOCKET,
 	    sizeof(sun.sun_path)) >= sizeof(sun.sun_path))
@@ -239,6 +225,32 @@ control(void)
 	session_socket_blockmode(fd, BM_NONBLOCK);
 	control_state.fd = fd;
 
+	return fd;
+}
+
+pid_t
+control(void)
+{
+	pid_t			 pid;
+	struct passwd		*pw;
+	struct event		 ev_sigint;
+	struct event		 ev_sigterm;
+
+	switch (pid = fork()) {
+	case -1:
+		fatal("control: cannot fork");
+	case 0:
+		post_fork(PROC_CONTROL);
+		break;
+	default:
+		return (pid);
+	}
+
+	purge_config(PURGE_EVERYTHING);
+
+	if ((pw = getpwnam(SMTPD_USER)) == NULL)
+		fatalx("unknown user " SMTPD_USER);
+
 	stat_backend = env->sc_stat;
 	stat_backend->init();
 
@@ -266,7 +278,7 @@ control(void)
 
 	tree_init(&ctl_conns);
 
-	bzero(&digest, sizeof digest);
+	memset(&digest, 0, sizeof digest);
 	digest.startup = time(NULL);
 
 	config_peer(PROC_SCHEDULER);
@@ -415,6 +427,7 @@ control_digest_update(const char *key, size_t value, int incr)
 static void
 control_dispatch_ext(struct mproc *p, struct imsg *imsg)
 {
+	struct sockaddr_storage	 ss;
 	struct ctl_conn		*c;
 	int			 v;
 	struct stat_kv		*kvp;
@@ -436,8 +449,7 @@ control_dispatch_ext(struct mproc *p, struct imsg *imsg)
 
 	switch (imsg->hdr.type) {
 	case IMSG_SMTP_ENQUEUE_FD:
-		if (env->sc_flags & (SMTPD_SMTP_PAUSED |
-		    SMTPD_CONFIGURING | SMTPD_EXITING)) {
+		if (env->sc_flags & (SMTPD_SMTP_PAUSED | SMTPD_EXITING)) {
 			m_compose(p, IMSG_CTL_FAIL, 0, 0, -1, NULL, 0);
 			return;
 		}
@@ -579,8 +591,8 @@ control_dispatch_ext(struct mproc *p, struct imsg *imsg)
 		if (c->euid)
 			goto badcred;
 
+		imsg->hdr.peerid = c->id;
 		m_forward(p_scheduler, imsg);
-		m_compose(p, IMSG_CTL_OK, 0, 0, -1, NULL, 0);
 		return;
 
 	case IMSG_CTL_PAUSE_MDA:
@@ -629,8 +641,8 @@ control_dispatch_ext(struct mproc *p, struct imsg *imsg)
 		if (c->euid)
 			goto badcred;
 
+		imsg->hdr.peerid = c->id;
 		m_forward(p_scheduler, imsg);
-		m_compose(p, IMSG_CTL_OK, 0, 0, -1, NULL, 0);
 		return;
 
 	case IMSG_CTL_RESUME_MDA:
@@ -679,7 +691,6 @@ control_dispatch_ext(struct mproc *p, struct imsg *imsg)
 		if (c->euid)
 			goto badcred;
 
-		log_info("info: route resumed");
 		m_forward(p_mta, imsg);
 		m_compose(p, IMSG_CTL_OK, 0, 0, -1, NULL, 0);
 		return;
@@ -698,34 +709,54 @@ control_dispatch_ext(struct mproc *p, struct imsg *imsg)
 		    imsg->data, imsg->hdr.len - sizeof(imsg->hdr));
 		return;
 
+	case IMSG_CTL_MTA_SHOW_HOSTS:
+	case IMSG_CTL_MTA_SHOW_RELAYS:
 	case IMSG_CTL_MTA_SHOW_ROUTES:
+	case IMSG_CTL_MTA_SHOW_HOSTSTATS:
+	case IMSG_CTL_MTA_SHOW_BLOCK:
 		if (c->euid)
 			goto badcred;
-		m_compose(p_mta, IMSG_CTL_MTA_SHOW_ROUTES, c->id, 0, -1,
-		    imsg->data, imsg->hdr.len - sizeof(imsg->hdr));
+
+		imsg->hdr.peerid = c->id;
+		m_forward(p_mta, imsg);
 		return;
 
-	case IMSG_CTL_MTA_SHOW_HOSTSTATS:
+	case IMSG_CTL_SHOW_STATUS:
 		if (c->euid)
 			goto badcred;
-		m_compose(p_mta, IMSG_CTL_MTA_SHOW_HOSTSTATS, c->id, 0, -1,
-		    imsg->data, imsg->hdr.len - sizeof(imsg->hdr));
+
+		m_compose(p, IMSG_CTL_SHOW_STATUS, 0, 0, -1, &env->sc_flags,
+		    sizeof(env->sc_flags));
+		return;
+
+	case IMSG_CTL_MTA_BLOCK:
+	case IMSG_CTL_MTA_UNBLOCK:
+		if (c->euid)
+			goto badcred;
+
+		if (imsg->hdr.len - IMSG_HEADER_SIZE <= sizeof(ss))
+			goto invalid;
+		memmove(&ss, imsg->data, sizeof(ss));
+		m_create(p_mta, imsg->hdr.type, c->id, 0, -1);
+		m_add_sockaddr(p_mta, (struct sockaddr *)&ss);
+		m_add_string(p_mta, (char *)imsg->data + sizeof(ss));
+		m_close(p_mta);
 		return;
 
 	case IMSG_CTL_SCHEDULE:
 		if (c->euid)
 			goto badcred;
 
+		imsg->hdr.peerid = c->id;
 		m_forward(p_scheduler, imsg);
-		m_compose(p, IMSG_CTL_OK, 0, 0, -1, NULL, 0);
 		return;
 
 	case IMSG_CTL_REMOVE:
 		if (c->euid)
 			goto badcred;
 
+		imsg->hdr.peerid = c->id;
 		m_forward(p_scheduler, imsg);
-		m_compose(p, IMSG_CTL_OK, 0, 0, -1, NULL, 0);
 		return;
 
 	case IMSG_LKA_UPDATE_TABLE:

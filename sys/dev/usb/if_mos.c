@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_mos.c,v 1.20 2013/04/15 09:23:01 mglocker Exp $	*/
+/*	$OpenBSD: if_mos.c,v 1.24 2014/01/21 09:57:33 brad Exp $	*/
 
 /*
  * Copyright (c) 2008 Johann Christian Rode <jcrode@gmx.net>
@@ -95,7 +95,6 @@
 #ifdef INET
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
-#include <netinet/in_var.h>
 #include <netinet/ip.h>
 #include <netinet/if_ether.h>
 #endif
@@ -560,6 +559,14 @@ mos_iff(struct mos_softc *sc)
 			ETHER_NEXT_MULTI(step, enm);
 		}
 	}
+
+	/* 
+	 * The datasheet claims broadcast frames were always accepted
+	 * regardless of filter settings. But the hardware seems to
+	 * filter broadcast frames, so pass them explicitly.
+	 */
+	h = ether_crc32_be(etherbroadcastaddr, ETHER_ADDR_LEN) >> 26;
+	hashtbl[h / 8] |= 1 << (h % 8);
 
 	mos_write_mcast(sc, (void *)&hashtbl);
 	mos_reg_write_1(sc, MOS_CTL, rxmode);
@@ -1379,11 +1386,7 @@ mos_stop(struct mos_softc *sc)
 
 	/* Stop transfers. */
 	if (sc->mos_ep[MOS_ENDPT_RX] != NULL) {
-		err = usbd_abort_pipe(sc->mos_ep[MOS_ENDPT_RX]);
-		if (err) {
-			printf("%s: abort rx pipe failed: %s\n",
-			    sc->mos_dev.dv_xname, usbd_errstr(err));
-		}
+		usbd_abort_pipe(sc->mos_ep[MOS_ENDPT_RX]);
 		err = usbd_close_pipe(sc->mos_ep[MOS_ENDPT_RX]);
 		if (err) {
 			printf("%s: close rx pipe failed: %s\n",
@@ -1393,11 +1396,7 @@ mos_stop(struct mos_softc *sc)
 	}
 
 	if (sc->mos_ep[MOS_ENDPT_TX] != NULL) {
-		err = usbd_abort_pipe(sc->mos_ep[MOS_ENDPT_TX]);
-		if (err) {
-			printf("%s: abort tx pipe failed: %s\n",
-			    sc->mos_dev.dv_xname, usbd_errstr(err));
-		}
+		usbd_abort_pipe(sc->mos_ep[MOS_ENDPT_TX]);
 		err = usbd_close_pipe(sc->mos_ep[MOS_ENDPT_TX]);
 		if (err) {
 			printf("%s: close tx pipe failed: %s\n",
@@ -1407,11 +1406,7 @@ mos_stop(struct mos_softc *sc)
 	}
 
 	if (sc->mos_ep[MOS_ENDPT_INTR] != NULL) {
-		err = usbd_abort_pipe(sc->mos_ep[MOS_ENDPT_INTR]);
-		if (err) {
-			printf("%s: abort intr pipe failed: %s\n",
-			    sc->mos_dev.dv_xname, usbd_errstr(err));
-		}
+		usbd_abort_pipe(sc->mos_ep[MOS_ENDPT_INTR]);
 		err = usbd_close_pipe(sc->mos_ep[MOS_ENDPT_INTR]);
 		if (err) {
 			printf("%s: close intr pipe failed: %s\n",

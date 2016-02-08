@@ -48,6 +48,6 @@ int mp_cnt_lsb(mp_int *a)
 
 #endif
 
-/* $Source: /cvs/src/kerberosV/src/lib/hcrypto/libtommath/bn_mp_cnt_lsb.c,v $ */
+/* $Source: /var/www/space/cvs/src/kerberosV/src/lib/hcrypto/libtommath/bn_mp_cnt_lsb.c,v $ */
 /* $Revision: 1.1 $ */
 /* $Date: 2013/06/17 19:11:43 $ */

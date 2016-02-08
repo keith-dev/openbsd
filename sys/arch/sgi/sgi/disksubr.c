@@ -1,4 +1,4 @@
-/*	$OpenBSD: disksubr.c,v 1.26 2011/07/10 16:16:08 krw Exp $	*/
+/*	$OpenBSD: disksubr.c,v 1.30 2014/01/06 21:00:55 miod Exp $	*/
 
 /*
  * Copyright (c) 1999 Michael Shalayeff
@@ -41,7 +41,7 @@
 #include <sys/disk.h>
 
 int	readsgilabel(struct buf *, void (*)(struct buf *),
-	    struct disklabel *, int *, int);
+	    struct disklabel *, daddr_t *, int);
 
 /*
  * Attempt to read a disk label from a device
@@ -108,12 +108,11 @@ static struct {
 
 int
 readsgilabel(struct buf *bp, void (*strat)(struct buf *),
-    struct disklabel *lp, int *partoffp, int spoofonly)
+    struct disklabel *lp, daddr_t *partoffp, int spoofonly)
 {
 	struct sgilabel *dlp;
 	int i, *p, cs = 0;
-	u_int64_t fsoffs = 0;
-	u_int64_t fsend = DL_GETBEND(lp);
+	daddr_t fsoffs, fsend;
 	int offset;
 
 	bp->b_blkno = 0;
@@ -126,15 +125,17 @@ readsgilabel(struct buf *bp, void (*strat)(struct buf *),
 	if (biowait(bp))
 		return (bp->b_error);
 
+	fsoffs = DL_SECTOBLK(lp, DL_GETBSTART(lp));
+	fsend = DL_SECTOBLK(lp, DL_GETBEND(lp));
+
 	dlp = (struct sgilabel *)(bp->b_data + LABELOFFSET);
 	if (dlp->magic != htobe32(SGILABEL_MAGIC))
 		goto finished;
 
 	if (dlp->partitions[0].blocks == 0)
 		return (EINVAL);
-	fsoffs = dlp->partitions[0].first * (dlp->dp.dp_secbytes / DEV_BSIZE);
-	fsend = fsoffs + dlp->partitions[0].blocks *
-	    (dlp->dp.dp_secbytes / DEV_BSIZE);
+	fsoffs = (long long)dlp->partitions[0].first;
+	fsend = fsoffs + dlp->partitions[0].blocks;
 
 	/* Only came here to find the offset... */
 	if (partoffp) {
@@ -150,11 +151,6 @@ readsgilabel(struct buf *bp, void (*strat)(struct buf *),
 		return (EINVAL);	/* sgilabel checksum error */
 
 	/* Spoof info from sgi label, in case there is no OpenBSD label. */
-	DL_SETDSIZE(lp, (DL_GETDSIZE(lp)*lp->d_secsize) / dlp->dp.dp_secbytes);
-	lp->d_secsize = dlp->dp.dp_secbytes;
-	lp->d_nsectors = dlp->dp.dp_secs;
-	lp->d_ntracks = dlp->dp.dp_trks0;
-	lp->d_ncylinders = dlp->dp.dp_cyls;
 	lp->d_npartitions = MAXPARTITIONS;
 
 	for (i = 0; i < 16; i++) {
@@ -176,8 +172,8 @@ readsgilabel(struct buf *bp, void (*strat)(struct buf *),
 		}
 	}
 
-	DL_SETBSTART(lp, fsoffs);
-	DL_SETBEND(lp, fsend);
+	DL_SETBSTART(lp, DL_BLKTOSEC(lp, fsoffs));
+	DL_SETBEND(lp, DL_BLKTOSEC(lp, fsend));
 	lp->d_version = 1;
 	lp->d_flags = D_VENDOR;
 	lp->d_checksum = 0;
@@ -188,8 +184,8 @@ finished:
 	if (partoffp)
 		*partoffp = fsoffs;
 	else {
-		DL_SETBSTART(lp, fsoffs);
-		DL_SETBEND(lp, fsend);
+		DL_SETBSTART(lp, DL_BLKTOSEC(lp, fsoffs));
+		DL_SETBEND(lp, DL_BLKTOSEC(lp, fsend));
 	}
 
 	/* don't read the on-disk label if we are in spoofed-only mode */
@@ -223,7 +219,8 @@ finished:
 int
 writedisklabel(dev_t dev, void (*strat)(struct buf *), struct disklabel *lp)
 {
-	int error = EIO, partoff = -1;
+	daddr_t partoff = -1;
+	int error = EIO;
 	int offset;
 	struct buf *bp = NULL;
 	struct disklabel *dlp;

@@ -1,4 +1,4 @@
-/*	$OpenBSD: ikectl.c,v 1.16 2013/01/08 10:38:19 reyk Exp $	*/
+/*	$OpenBSD: ikectl.c,v 1.18 2013/11/14 20:48:52 deraadt Exp $	*/
 
 /*
  * Copyright (c) 2007-2013 Reyk Floeter <reyk@openbsd.org>
@@ -313,7 +313,7 @@ main(int argc, char *argv[])
 	}
 
 	while (ibuf->w.queued)
-		if (msgbuf_write(&ibuf->w) < 0)
+		if (msgbuf_write(&ibuf->w) <= 0 && errno != EAGAIN)
 			err(1, "write error");
 
 	while (!done) {
@@ -366,7 +366,7 @@ monitor(struct imsg *imsg)
 	imn = monitor_lookup(imsg->hdr.type);
 	printf("%s: imsg type %u len %u peerid %u pid %d\n", imn->name,
 	    imsg->hdr.type, imsg->hdr.len, imsg->hdr.peerid, imsg->hdr.pid);
-	printf("\ttimestamp: %u, %s", now, ctime(&now));
+	printf("\ttimestamp: %lld, %s", (long long)now, ctime(&now));
 	if (imn->type == -1)
 		done = 1;
 	if (imn->func != NULL)

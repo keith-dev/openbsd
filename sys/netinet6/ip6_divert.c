@@ -1,4 +1,4 @@
-/*      $OpenBSD: ip6_divert.c,v 1.13 2013/06/26 09:12:40 henning Exp $ */
+/*      $OpenBSD: ip6_divert.c,v 1.17 2013/12/20 02:04:09 krw Exp $ */
 
 /*
  * Copyright (c) 2009 Michele Marchetto <michele@openbsd.org>
@@ -31,7 +31,6 @@
 
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
-#include <netinet/in_var.h>
 #include <netinet/ip.h>
 #include <netinet/ip_var.h>
 #include <netinet/in_pcb.h>
@@ -200,7 +199,7 @@ divert6_packet(struct mbuf *m, int dir)
 	struct inpcb *inp;
 	struct socket *sa = NULL;
 	struct sockaddr_in6 addr;
-	struct pf_divert *pd;
+	struct pf_divert *divert;
 
 	inp = NULL;
 	div6stat.divs_ipackets++;
@@ -211,15 +210,15 @@ divert6_packet(struct mbuf *m, int dir)
 		return (0);
 	}
 
-	pd = pf_find_divert(m);
-	if (pd == NULL) {
+	divert = pf_find_divert(m);
+	if (divert == NULL) {
 		div6stat.divs_errors++;
 		m_freem(m);
 		return (0);
 	}
 
-	CIRCLEQ_FOREACH(inp, &divb6table.inpt_queue, inp_queue) {
-		if (inp->inp_lport != pd->port)
+	TAILQ_FOREACH(inp, &divb6table.inpt_queue, inp_queue) {
+		if (inp->inp_lport != divert->port)
 			continue;
 		if (inp->inp_divertfl == 0)
 			break;
@@ -250,7 +249,7 @@ divert6_packet(struct mbuf *m, int dir)
 	if (dir == PF_OUT)
 		in6_proto_cksum_out(m, NULL);
 
-	if (inp != CIRCLEQ_END(&divb6table.inpt_queue)) {
+	if (inp) {
 		sa = inp->inp_socket;
 		if (sbappendaddr(&sa->so_rcv, sin6tosa(&addr), m, NULL) == 0) {
 			div6stat.divs_fullsock++;
@@ -278,7 +277,7 @@ divert6_usrreq(struct socket *so, int req, struct mbuf *m, struct mbuf *addr,
 
 	if (req == PRU_CONTROL) {
 		return (in6_control(so, (u_long)m, (caddr_t)addr,
-		    (struct ifnet *)control, p));
+		    (struct ifnet *)control));
 	}
 	if (inp == NULL && req != PRU_ATTACH) {
 		error = EINVAL;

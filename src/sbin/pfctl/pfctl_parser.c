@@ -1,8 +1,8 @@
-/*	$OpenBSD: pfctl_parser.c,v 1.293 2013/04/21 23:13:39 deraadt Exp $ */
+/*	$OpenBSD: pfctl_parser.c,v 1.298 2014/01/20 02:59:13 henning Exp $ */
 
 /*
  * Copyright (c) 2001 Daniel Hartmeier
- * Copyright (c) 2002,2003 Henning Brauer
+ * Copyright (c) 2002 - 2013 Henning Brauer <henning@openbsd.org>
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -34,6 +34,7 @@
 #include <sys/types.h>
 #include <sys/ioctl.h>
 #include <sys/socket.h>
+#include <net/if_dl.h>
 #include <net/if.h>
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
@@ -41,6 +42,7 @@
 #include <netinet/ip_icmp.h>
 #include <netinet/icmp6.h>
 #include <net/pfvar.h>
+#include <net/hfsc.h>
 #include <arpa/inet.h>
 
 #include <stdio.h>
@@ -66,6 +68,8 @@ void		 print_ugid (u_int8_t, unsigned, unsigned, const char *, unsigned);
 void		 print_flags (u_int8_t);
 void		 print_fromto(struct pf_rule_addr *, pf_osfp_t,
 		    struct pf_rule_addr *, u_int8_t, u_int8_t, int);
+void		 print_bwspec(const char *index, struct pf_queue_bwspec *);
+void		 print_scspec(const char *, struct pf_queue_scspec *);
 int		 ifa_skip_if(const char *filter, struct node_host *p);
 
 struct node_host	*ifa_grouplookup(const char *, int);
@@ -305,12 +309,12 @@ string_to_loglevel(const char *name)
 	CODE *c;
 	char *p, buf[40];
 
-	if (isdigit(*name))
+	if (isdigit((unsigned char)*name))
 		return (atoi(name));
 
 	for (p = buf; *name && p < &buf[sizeof(buf) - 1]; p++, name++) {
-		if (isupper(*name))
-			*p = tolower(*name);
+		if (isupper((unsigned char)*name))
+			*p = tolower((unsigned char)*name);
 		else
 			*p = *name;
 	}
@@ -779,9 +783,9 @@ print_rule(struct pf_rule *r, const char *anchor_call, int opts)
 	}
 	if (r->onrdomain >= 0) {
 		if (r->ifnot)
-			printf(" on ! rdomain %i", r->onrdomain);
+			printf(" on ! rdomain %d", r->onrdomain);
 		else
-			printf(" on rdomain %i", r->onrdomain);
+			printf(" on rdomain %d", r->onrdomain);
 	}
 	if (r->af) {
 		if (r->af == AF_INET)
@@ -800,7 +804,8 @@ print_rule(struct pf_rule *r, const char *anchor_call, int opts)
 	print_fromto(&r->src, r->os_fingerprint, &r->dst, r->af, r->proto,
 	    opts);
 	if (r->rcv_ifname[0])
-		printf(" received-on %s", r->rcv_ifname);
+		printf(" %sreceived-on %s", r->rcvifnot ? "!" : "",
+		    r->rcv_ifname);
 	if (r->uid.op)
 		print_ugid(r->uid.op, r->uid.uid[0], r->uid.uid[1], "user",
 		    UID_MAX);
@@ -1146,6 +1151,55 @@ print_tabledef(const char *name, int flags, int addrs,
 	printf("\n");
 }
 
+void
+print_bwspec(const char *prefix, struct pf_queue_bwspec *bw)
+{
+	u_int	rate;
+	int	i;
+	static const char unit[] = " KMG";
+
+	if (bw->percent)
+		printf("%s%u%%", prefix, bw->percent);
+	else if (bw->absolute) {
+		rate = bw->absolute;
+		for (i = 0; rate >= 1000 && i <= 3; i++)
+			rate /= 1000;
+		printf("%s%u%c", prefix, rate, unit[i]);
+	}
+}
+
+void
+print_scspec(const char *prefix, struct pf_queue_scspec *sc)
+{
+	print_bwspec(prefix, &sc->m2);
+	if (sc->d) {
+		printf(" burst ");
+		print_bwspec("", &sc->m1);
+		printf(" for %ums", sc->d);
+	}
+}
+
+void
+print_queuespec(struct pf_queuespec *q)
+{
+	/* hide the _root_ifname queues */
+	if (q->qname[0] == '_')
+		return;
+	printf("queue %s", q->qname);
+	if (q->parent[0] && q->parent[0] != '_')
+		printf(" parent %s", q->parent);
+	if (q->ifname[0])
+		printf(" on %s", q->ifname);
+	print_scspec(" bandwidth ", &q->linkshare);
+	print_scspec(", min ", &q->realtime);
+	print_scspec(", max ", &q->upperlimit);
+	if (q->flags & HFSC_DEFAULTCLASS)
+		printf(" default");
+	if (q->qlimit)
+		printf(" qlimit %u", q->qlimit);
+	printf("\n");
+}
+
 int
 parse_flags(char *s)
 {
@@ -1282,6 +1336,9 @@ ifa_load(void)
 				    sizeof(struct in6_addr));
 			n->ifindex = ((struct sockaddr_in6 *)
 			    ifa->ifa_addr)->sin6_scope_id;
+		} else if (n->af == AF_LINK) {
+			n->ifindex = ((struct sockaddr_dl *)
+			    ifa->ifa_addr)->sdl_index;
 		}
 		if ((n->ifname = strdup(ifa->ifa_name)) == NULL)
 			err(1, "ifa_load: strdup");
@@ -1297,6 +1354,34 @@ ifa_load(void)
 
 	iftab = h;
 	freeifaddrs(ifap);
+}
+
+unsigned int
+ifa_nametoindex(const char *ifa_name)
+{
+	struct node_host	*p;
+
+	for (p = iftab; p; p = p->next) {
+		if (p->af == AF_LINK && strcmp(p->ifname, ifa_name) == 0)
+			return (p->ifindex);
+	}
+	errno = ENXIO;
+	return (0);
+}
+
+char *
+ifa_indextoname(unsigned int ifindex, char *ifa_name)
+{
+	struct node_host	*p;
+
+	for (p = iftab; p; p = p->next) {
+		if (p->af == AF_LINK && ifindex == p->ifindex) {
+			strlcpy(ifa_name, p->ifname, IFNAMSIZ);
+			return (ifa_name);
+		}
+	}
+	errno = ENXIO;
+	return (NULL);
 }
 
 struct node_host *

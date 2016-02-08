@@ -1,5 +1,5 @@
 # ex:ts=8 sw=4:
-# $OpenBSD: UpdateSet.pm,v 1.70 2012/09/06 09:07:50 espie Exp $
+# $OpenBSD: UpdateSet.pm,v 1.75 2014/02/04 18:06:01 espie Exp $
 #
 # Copyright (c) 2007-2010 Marc Espie <espie@openbsd.org>
 #
@@ -105,8 +105,11 @@ sub cleanup
 	for my $h ($self->all_handles) {
 		$h->cleanup($error, $errorinfo);
 	}
-	$self->{error} //= $error;
-	$self->{errorinfo} //= $errorinfo;
+	if (defined $error) {
+		$self->{error} //= $error;
+		$self->{errorinfo} //= $errorinfo;
+	}
+	delete $self->{solver};
 	$self->mark_as_finished;
 }
 
@@ -252,9 +255,11 @@ sub move_kept
 {
 	my $self = shift;
 	for my $h (@_) {
-		delete $self->{older}->{$h->pkgname};
-		delete $self->{newer}->{$h->pkgname};
-		$self->{kept}->{$h->pkgname} = $h;
+		delete $self->{older}{$h->pkgname};
+		delete $self->{newer}{$h->pkgname};
+		$self->{kept}{$h->pkgname} = $h;
+		$h->complete_dependency_info;
+		$h->{update_found} = $h;
 	}
 	return $self;
 }
@@ -365,7 +370,12 @@ sub print
 
 sub todo_names
 {
-	&newer_names;
+	my $self = shift;
+	if ($self->newer > 0) {
+		return $self->newer_names;
+	} else {
+		return $self->kept_names;
+	}
 }
 
 sub validate_plists

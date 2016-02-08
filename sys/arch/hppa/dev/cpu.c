@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.c,v 1.39 2011/01/02 20:41:22 kettenis Exp $	*/
+/*	$OpenBSD: cpu.c,v 1.41 2014/01/19 12:45:35 deraadt Exp $	*/
 
 /*
  * Copyright (c) 1998-2003 Michael Shalayeff
@@ -31,6 +31,7 @@
 #include <sys/device.h>
 #include <sys/proc.h>
 #include <sys/reboot.h>
+#include <dev/rndvar.h>
 
 #include <uvm/uvm_extern.h>
 
@@ -200,7 +201,7 @@ cpu_boot_secondary_processors(void)
 		if (ci->ci_cpuid == 0)
 			continue;
 
-		ci->ci_randseed = random();
+		ci->ci_randseed = (arc4random() & 0x7fffffff) + 1;
 
 		sched_init_cpu(ci);
 
@@ -250,12 +251,12 @@ cpu_hatch(void)
 	hppa_ipi_init(ci);
 
 	/* Initialise clock. */
-	mtctl((1 << 31), CR_EIRR);
+	mtctl((1U << 31), CR_EIRR);
 	mfctl(CR_ITMR, itmr);
 	ci->ci_itmr = itmr;
 	itmr += cpu_hzticks;
 	mtctl(itmr, CR_ITMR);
-	ci->ci_mask |= (1 << 31);
+	ci->ci_mask |= (1U << 31);
 
 	/* Enable interrupts. */
 	mtctl(ci->ci_mask, CR_EIEM);

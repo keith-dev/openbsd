@@ -1,4 +1,4 @@
-/*	$OpenBSD: date.c,v 1.38 2012/12/04 02:38:50 deraadt Exp $	*/
+/*	$OpenBSD: date.c,v 1.43 2014/01/21 09:09:15 otto Exp $	*/
 /*	$NetBSD: date.c,v 1.11 1995/09/07 06:21:05 jtc Exp $	*/
 
 /*
@@ -49,7 +49,7 @@
 extern	char *__progname;
 
 time_t tval;
-int retval, jflag;
+int jflag;
 int slidetime;
 
 static void setthetime(char *);
@@ -60,6 +60,7 @@ int
 main(int argc, char *argv[])
 {
 	struct timezone tz;
+	struct tm *tp;
 	int ch, rflag;
 	char *format, buf[1024], *outzone = NULL;
 
@@ -68,7 +69,7 @@ main(int argc, char *argv[])
 	tz.tz_dsttime = tz.tz_minuteswest = 0;
 	rflag = 0;
 	while ((ch = getopt(argc, argv, "ad:jr:ut:z:")) != -1)
-		switch((char)ch) {
+		switch(ch) {
 		case 'd':		/* daylight saving time */
 			tz.tz_dsttime = atoi(optarg) ? 1 : 0;
 			break;
@@ -80,7 +81,7 @@ main(int argc, char *argv[])
 			break;
 		case 'r':		/* user specified seconds */
 			rflag = 1;
-			tval = atol(optarg);
+			tval = atoll(optarg);
 			break;
 		case 'u':		/* do everything in UTC */
 			if (setenv("TZ", "UTC", 1) == -1)
@@ -88,7 +89,7 @@ main(int argc, char *argv[])
 			break;
 		case 't':		/* minutes west of GMT */
 					/* error check; don't allow "PST" */
-			if (isdigit(*optarg)) {
+			if (isdigit((unsigned char)*optarg)) {
 				tz.tz_minuteswest = atoi(optarg);
 				break;
 			}
@@ -139,9 +140,12 @@ main(int argc, char *argv[])
 	if (outzone)
 		setenv("TZ", outzone, 1);
 
-	(void)strftime(buf, sizeof(buf), format, localtime(&tval));
+	tp = localtime(&tval);
+	if (tp == NULL)
+		errx(1, "conversion error");
+	(void)strftime(buf, sizeof(buf), format, tp);
 	(void)printf("%s\n", buf);
-	exit(retval);
+	exit(0);
 }
 
 #define	ATOI2(ar)	((ar) += 2, ((ar)[-2] - '0') * 10 + ((ar)[-1] - '0'))
@@ -154,7 +158,7 @@ setthetime(char *p)
 	int yearset = 0;
 
 	for (t = p, dot = NULL; *t; ++t) {
-		if (isdigit(*t))
+		if (isdigit((unsigned char)*t))
 			continue;
 		if (*t == '.' && dot == NULL) {
 			dot = t;

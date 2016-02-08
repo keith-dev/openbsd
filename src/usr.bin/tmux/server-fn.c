@@ -1,4 +1,4 @@
-/* $OpenBSD: server-fn.c,v 1.70 2013/07/05 14:52:33 nicm Exp $ */
+/* $OpenBSD: server-fn.c,v 1.75 2014/02/14 13:59:01 nicm Exp $ */
 
 /*
  * Copyright (c) 2007 Nicholas Marriott <nicm@users.sourceforge.net>
@@ -56,8 +56,8 @@ server_write_ready(struct client *c)
 }
 
 int
-server_write_client(
-    struct client *c, enum msgtype type, const void *buf, size_t len)
+server_write_client(struct client *c, enum msgtype type, const void *buf,
+    size_t len)
 {
 	struct imsgbuf	*ibuf = &c->ibuf;
 	int              error;
@@ -73,8 +73,8 @@ server_write_client(
 }
 
 void
-server_write_session(
-    struct session *s, enum msgtype type, const void *buf, size_t len)
+server_write_session(struct session *s, enum msgtype type, const void *buf,
+    size_t len)
 {
 	struct client	*c;
 	u_int		 i;
@@ -235,9 +235,7 @@ server_lock_session(struct session *s)
 void
 server_lock_client(struct client *c)
 {
-	const char		*cmd;
-	size_t			 cmdlen;
-	struct msg_lock_data	 lockdata;
+	const char	*cmd;
 
 	if (c->flags & CLIENT_CONTROL)
 		return;
@@ -246,8 +244,7 @@ server_lock_client(struct client *c)
 		return;
 
 	cmd = options_get_string(&c->session->options, "lock-command");
-	cmdlen = strlcpy(lockdata.cmd, cmd, sizeof lockdata.cmd);
-	if (cmdlen >= sizeof lockdata.cmd)
+	if (strlen(cmd) + 1 > MAX_IMSGSIZE - IMSG_HEADER_SIZE)
 		return;
 
 	tty_stop_tty(&c->tty);
@@ -256,7 +253,7 @@ server_lock_client(struct client *c)
 	tty_raw(&c->tty, tty_term_string(c->tty.term, TTYC_E3));
 
 	c->flags |= CLIENT_SUSPENDED;
-	server_write_client(c, MSG_LOCK, &lockdata, sizeof lockdata);
+	server_write_client(c, MSG_LOCK, cmd, strlen(cmd) + 1);
 }
 
 void
@@ -398,14 +395,15 @@ void
 server_destroy_session_group(struct session *s)
 {
 	struct session_group	*sg;
+	struct session		*s1;
 
 	if ((sg = session_group_find(s)) == NULL)
 		server_destroy_session(s);
 	else {
-		TAILQ_FOREACH(s, &sg->sessions, gentry)
+		TAILQ_FOREACH_SAFE(s, &sg->sessions, gentry, s1) {
 			server_destroy_session(s);
-		TAILQ_REMOVE(&session_groups, sg, entry);
-		free(sg);
+			session_destroy(s);
+		}
 	}
 }
 
@@ -456,7 +454,7 @@ server_destroy_session(struct session *s)
 }
 
 void
-server_check_unattached (void)
+server_check_unattached(void)
 {
 	struct session	*s;
 
@@ -482,7 +480,7 @@ server_set_identify(struct client *c)
 	tv.tv_sec = delay / 1000;
 	tv.tv_usec = (delay % 1000) * 1000L;
 
-	if (event_initialized (&c->identify_timer))
+	if (event_initialized(&c->identify_timer))
 		evtimer_del(&c->identify_timer);
 	evtimer_set(&c->identify_timer, server_callback_identify, c);
 	evtimer_add(&c->identify_timer, &tv);
@@ -594,7 +592,7 @@ server_set_stdin_callback(struct client *c, void (*cb)(struct client *, int,
 	c->references++;
 
 	if (c->stdin_closed)
-		c->stdin_callback (c, 1, c->stdin_callback_data);
+		c->stdin_callback(c, 1, c->stdin_callback_data);
 
 	server_write_client(c, MSG_STDIN, NULL, 0);
 

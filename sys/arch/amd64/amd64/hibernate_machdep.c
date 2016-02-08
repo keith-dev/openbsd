@@ -1,4 +1,4 @@
-/*	$OpenBSD: hibernate_machdep.c,v 1.13 2013/06/04 01:20:23 pirofti Exp $	*/
+/*	$OpenBSD: hibernate_machdep.c,v 1.19 2014/01/10 22:34:41 mlarkin Exp $	*/
 
 /*
  * Copyright (c) 2012 Mike Larkin <mlarkin@openbsd.org>
@@ -47,11 +47,6 @@
 #include "ahci.h"
 #include "sd.h"
 
-#if NWD > 0
-#include <dev/ata/atavar.h>
-#include <dev/ata/wdvar.h>
-#endif
-
 /* Hibernate support */
 void    hibernate_enter_resume_4k_pte(vaddr_t, paddr_t);
 void    hibernate_enter_resume_2m_pde(vaddr_t, paddr_t);
@@ -81,8 +76,11 @@ get_hibernate_io_function(void)
 		return NULL;
 
 #if NWD > 0
-	if (strcmp(blkname, "wd") == 0)
+	if (strcmp(blkname, "wd") == 0) {
+		extern int wd_hibernate_io(dev_t dev, daddr_t blkno,
+		    vaddr_t addr, size_t size, int op, void *page);
 		return wd_hibernate_io;
+	}
 #endif
 #if NAHCI > 0 && NSD > 0
 	if (strcmp(blkname, "sd") == 0) {
@@ -168,39 +166,39 @@ hibernate_enter_resume_2m_pde(vaddr_t va, paddr_t pa)
 			pde = (pt_entry_t *)(HIBERNATE_PD_LOW +
 				(pl2_pi(va) * sizeof(pt_entry_t)));
 			npde = (pa & L2_MASK) | 
-				PG_RW | PG_V | PG_u | PG_M | PG_PS;
+				PG_RW | PG_V | PG_M | PG_PS;
 			*pde = npde;
 		} else {
 			/* Map the 1GB containing region */
 			pde = (pt_entry_t *)(HIBERNATE_PDPT_LOW +
 				(pl3_pi(va) * sizeof(pt_entry_t)));
-			npde = (HIBERNATE_PD_LOW2) | PG_RW | PG_V | PG_u;
+			npde = (HIBERNATE_PD_LOW2) | PG_RW | PG_V;
 			*pde = npde;
 
 			/* Map 2MB region */
 			pde = (pt_entry_t *)(HIBERNATE_PD_LOW2 +
 				(pl2_pi(va) * sizeof(pt_entry_t)));
 			npde = (pa & L2_MASK) |
-				PG_RW | PG_V | PG_u | PG_M | PG_PS;
+				PG_RW | PG_V | PG_M | PG_PS;
 			*pde = npde; 
 		}
 	} else {
 		/* First map the 512GB containing region */
 		pde = (pt_entry_t *)(HIBERNATE_PML4T +
 			(pl4_pi(va) * sizeof(pt_entry_t)));
-		npde = (HIBERNATE_PDPT_HI) | PG_RW | PG_V | PG_u;
+		npde = (HIBERNATE_PDPT_HI) | PG_RW | PG_V;
 		*pde = npde;
 
 		/* Map the 1GB containing region */
 		pde = (pt_entry_t *)(HIBERNATE_PDPT_HI +
 			(pl3_pi(va) * sizeof(pt_entry_t)));
-		npde = (HIBERNATE_PD_HI) | PG_RW | PG_V | PG_u;
+		npde = (HIBERNATE_PD_HI) | PG_RW | PG_V;
 		*pde = npde;
 
 		/* Map the requested 2MB region */
 		pde = (pt_entry_t *)(HIBERNATE_PD_HI +
 			(pl2_pi(va) * sizeof(pt_entry_t)));
-		npde = (pa & L2_MASK) | PG_RW | PG_V | PG_u | PG_PS;
+		npde = (pa & L2_MASK) | PG_RW | PG_V | PG_PS;
 		*pde = npde;
 	}
 }
@@ -216,7 +214,7 @@ hibernate_enter_resume_4k_pte(vaddr_t va, paddr_t pa)
 	/* Map the page */
 	pde = (pt_entry_t *)(HIBERNATE_PT_LOW +
 		(pl1_pi(va) * sizeof(pt_entry_t)));
-	npde = (pa & PMAP_PA_MASK) | PG_RW | PG_V | PG_u;
+	npde = (pa & PMAP_PA_MASK) | PG_RW | PG_V;
 	*pde = npde;
 }
 
@@ -245,7 +243,6 @@ hibernate_populate_resume_pt(union hibernate_info *hib_info,
 	pmap_kenter_pa(HIBERNATE_PT_LOW, HIBERNATE_PT_LOW, VM_PROT_ALL);
 	pmap_kenter_pa(HIBERNATE_PT_LOW2, HIBERNATE_PT_LOW2, VM_PROT_ALL);
 	pmap_kenter_pa(HIBERNATE_PT_HI, HIBERNATE_PT_HI, VM_PROT_ALL);
-	pmap_kenter_pa(HIBERNATE_SELTABLE, HIBERNATE_SELTABLE, VM_PROT_ALL);
 
 	/* Identity map 3 pages for stack */
 	pmap_kenter_pa(HIBERNATE_STACK_PAGE, HIBERNATE_STACK_PAGE, VM_PROT_ALL);
@@ -264,25 +261,24 @@ hibernate_populate_resume_pt(union hibernate_info *hib_info,
 	bzero((caddr_t)HIBERNATE_PT_LOW, PAGE_SIZE);
 	bzero((caddr_t)HIBERNATE_PT_LOW2, PAGE_SIZE);
 	bzero((caddr_t)HIBERNATE_PT_HI, PAGE_SIZE);
-	bzero((caddr_t)HIBERNATE_SELTABLE, PAGE_SIZE);
 	bzero((caddr_t)(HIBERNATE_STACK_PAGE - 3*PAGE_SIZE) , 3*PAGE_SIZE);
 
 	/* First 512GB PML4E */
 	pde = (pt_entry_t *)(HIBERNATE_PML4T +
 		(pl4_pi(0) * sizeof(pt_entry_t)));
-	npde = (HIBERNATE_PDPT_LOW) | PG_RW | PG_V | PG_u;
+	npde = (HIBERNATE_PDPT_LOW) | PG_RW | PG_V;
 	*pde = npde;
 
 	/* First 1GB PDPTE */
 	pde = (pt_entry_t *)(HIBERNATE_PDPT_LOW +
 		(pl3_pi(0) * sizeof(pt_entry_t)));
-	npde = (HIBERNATE_PD_LOW) | PG_RW | PG_V | PG_u;
+	npde = (HIBERNATE_PD_LOW) | PG_RW | PG_V;
 	*pde = npde;
 	
 	/* PD for first 2MB */
 	pde = (pt_entry_t *)(HIBERNATE_PD_LOW +
 		(pl2_pi(0) * sizeof(pt_entry_t)));
-	npde = (HIBERNATE_PT_LOW) | PG_RW | PG_V | PG_u;
+	npde = (HIBERNATE_PT_LOW) | PG_RW | PG_V;
 	*pde = npde;
 
 	/*
@@ -397,26 +393,16 @@ hibernate_disable_intr_machdep(void)
 void
 hibernate_quiesce_cpus(void)
 {
-	int i;
-
 	KASSERT(CPU_IS_PRIMARY(curcpu()));
 
 	/* Start the hatched (but idling) APs */
 	cpu_boot_secondary_processors();
-	sched_start_secondary_cpus();
 
-	/* 
-	 * Wait for cpus to halt so we know their FPU state has been
-	 * saved and their caches have been written back.
-	 */
-	x86_broadcast_ipi(X86_IPI_HALT_REALMODE);
-	for (i = 0; i < ncpus; i++) {
-		struct cpu_info *ci = cpu_info[i];
+	/* Demote the APs to real mode */
+        x86_broadcast_ipi(X86_IPI_HALT_REALMODE);
 
-		if (CPU_IS_PRIMARY(ci))
-			continue;
-		while (ci->ci_flags & CPUF_RUNNING)
-			;
-	}
+	/* Wait a bit for the APs to park themselves */
+	delay(1000000);
+
 }
 #endif /* MULTIPROCESSOR */

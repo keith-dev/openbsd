@@ -24,6 +24,6 @@ void mp_set (mp_int * a, mp_digit b)
 }
 #endif
 
-/* $Source: /cvs/src/kerberosV/src/lib/hcrypto/libtommath/bn_mp_set.c,v $ */
+/* $Source: /var/www/space/cvs/src/kerberosV/src/lib/hcrypto/libtommath/bn_mp_set.c,v $ */
 /* $Revision: 1.1 $ */
 /* $Date: 2013/06/17 19:11:43 $ */

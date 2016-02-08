@@ -1,4 +1,4 @@
-#	$OpenBSD: install.md,v 1.55 2012/10/15 17:21:03 deraadt Exp $
+#	$OpenBSD: install.md,v 1.57 2014/01/20 05:14:05 jsing Exp $
 #
 #
 # Copyright (c) 1996 The NetBSD Foundation, Inc.
@@ -39,10 +39,7 @@ NCPU=$(sysctl -n hw.ncpufound)
 ((NCPU > 1)) && { DEFAULTSETS="bsd bsd.rd bsd.mp" ; SANESETS="bsd bsd.mp" ; }
 
 md_installboot() {
-	# LBA biosboot uses /boot's i-node number. Using 'cat' preserves that
-	# number, so multiboot setups (NTLDR) can work across upgrades.
-	cat /mnt/usr/mdec/boot >/mnt/boot
-	if ! /mnt/usr/mdec/installboot /mnt/boot /mnt/usr/mdec/biosboot ${1} ; then
+	if ! installboot -r /mnt ${1} ; then
 		echo "\nFailed to install bootblocks."
 		echo "You will not be able to boot OpenBSD from ${1}."
 		exit
@@ -106,7 +103,7 @@ md_prep_disklabel() {
 			disklabel -h -A $_disk | egrep "^#  |^  [a-p]:"
 			ask "Use (A)uto layout, (E)dit auto layout, or create (C)ustom layout?" a
 			case $resp in
-			a*|A*)	_op=-w ; AUTOROOT=y ;;
+			a*|A*)	_op=-w ;;
 			e*|E*)	_op=-E ;;
 			c*|C*)	break ;;
 			*)	continue ;;

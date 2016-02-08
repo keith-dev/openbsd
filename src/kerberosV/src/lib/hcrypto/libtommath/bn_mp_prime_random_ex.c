@@ -120,6 +120,6 @@ error:
 
 #endif
 
-/* $Source: /cvs/src/kerberosV/src/lib/hcrypto/libtommath/bn_mp_prime_random_ex.c,v $ */
+/* $Source: /var/www/space/cvs/src/kerberosV/src/lib/hcrypto/libtommath/bn_mp_prime_random_ex.c,v $ */
 /* $Revision: 1.1 $ */
 /* $Date: 2013/06/17 19:11:43 $ */

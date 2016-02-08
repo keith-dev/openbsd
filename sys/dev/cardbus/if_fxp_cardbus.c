@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_fxp_cardbus.c,v 1.29 2011/04/02 17:47:04 jasper Exp $ */
+/*	$OpenBSD: if_fxp_cardbus.c,v 1.32 2013/12/06 21:03:02 deraadt Exp $ */
 /*	$NetBSD: if_fxp_cardbus.c,v 1.12 2000/05/08 18:23:36 thorpej Exp $	*/
 
 /*
@@ -46,7 +46,6 @@
 #include <sys/kernel.h>
 #include <sys/timeout.h>
 #include <sys/device.h>
-#include <sys/workq.h>
 
 #include <net/if.h>
 #include <net/if_dl.h>
@@ -62,7 +61,6 @@
 #ifdef INET
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
-#include <netinet/in_var.h>
 #include <netinet/ip.h>
 #include <netinet/if_ether.h>
 #endif

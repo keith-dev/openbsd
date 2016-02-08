@@ -1,4 +1,4 @@
-/*	$OpenBSD: rfx.c,v 1.9 2008/12/27 17:23:03 miod Exp $	*/
+/*	$OpenBSD: rfx.c,v 1.12 2014/01/22 03:03:09 jsg Exp $	*/
 
 /*
  * Copyright (c) 2004, Miodrag Vallat.
@@ -133,15 +133,9 @@ int	rfx_putcmap(struct rfx_cmap *, struct wsdisplay_cmap *);
 void	rfx_setcolor(void *, u_int, u_int8_t, u_int8_t, u_int8_t);
 
 struct wsdisplay_accessops rfx_accessops = {
-	rfx_ioctl,
-	rfx_mmap,
-	NULL,	/* alloc_screen */
-	NULL,	/* free_screen */
-	NULL,	/* show_screen */
-	NULL,	/* load_font */
-	NULL,	/* scrollback */
-	NULL,	/* getchar */
-	rfx_burner,
+	.ioctl = rfx_ioctl,
+	.mmap = rfx_mmap,
+	.burn_screen = rfx_burner
 };
 
 int	rfxmatch(struct device *, void *, void *);
@@ -519,8 +513,8 @@ rfx_initialize(struct rfx_softc *sc, struct sbus_attach_args *sa,
 			value = letoh32(offset);
 		}
 
-		if (offset & (1 << 31)) {
-			offset = (offset & ~(1 << 31)) - RFX_RAMDAC_ADDR;
+		if (offset & (1U << 31)) {
+			offset = (offset & ~(1U << 31)) - RFX_RAMDAC_ADDR;
 			if (offset < RFX_RAMDAC_SIZE)
 				sc->sc_ramdac[offset] = value >> 24;
 		} else {
@@ -534,7 +528,8 @@ rfx_initialize(struct rfx_softc *sc, struct sbus_attach_args *sa,
 
 #ifdef DEBUG
 	if (cnt != 0)
-		printf("%s: incoherent initialization data!\n");
+		printf("%s: incoherent initialization data!\n",
+		    sc->sc_sunfb.sf_dev.dv_xname);
 #endif
 
 	bus_space_unmap(sa->sa_bustag, bh, RFX_INIT_SIZE);

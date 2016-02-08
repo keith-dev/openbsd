@@ -1,7 +1,7 @@
 /*
  * packet.c -- low-level DNS packet encoding and decoding functions.
  *
- * Copyright (c) 2001-2011, NLnet Labs. All rights reserved.
+ * Copyright (c) 2001-2006, NLnet Labs. All rights reserved.
  *
  * See LICENSE for the license.
  *
@@ -22,7 +22,7 @@ encode_dname(query_type *q, domain_type *domain)
 		query_put_dname_offset(q, domain, buffer_position(q->packet));
 		DEBUG(DEBUG_NAME_COMPRESSION, 2,
 		      (LOG_INFO, "dname: %s, number: %lu, offset: %u\n",
-		       dname_to_string(domain_dname(domain), NULL),
+		       domain_to_string(domain),
 		       (unsigned long) domain->number,
 		       query_get_dname_offset(q, domain)));
 		buffer_write(q->packet, dname_name(domain_dname(domain)),
@@ -32,7 +32,7 @@ encode_dname(query_type *q, domain_type *domain)
 	if (domain->parent) {
 		DEBUG(DEBUG_NAME_COMPRESSION, 2,
 		      (LOG_INFO, "dname: %s, number: %lu, pointer: %u\n",
-		       dname_to_string(domain_dname(domain), NULL),
+		       domain_to_string(domain),
 		       (unsigned long) domain->number,
 		       query_get_dname_offset(q, domain)));
 		assert(query_get_dname_offset(q, domain) <= MAX_COMPRESSION_OFFSET);
@@ -44,7 +44,7 @@ encode_dname(query_type *q, domain_type *domain)
 }
 
 int
-packet_encode_rr(query_type *q, domain_type *owner, rr_type *rr)
+packet_encode_rr(query_type *q, domain_type *owner, rr_type *rr, uint32_t ttl)
 {
 	size_t truncation_mark;
 	uint16_t rdlength = 0;
@@ -64,7 +64,7 @@ packet_encode_rr(query_type *q, domain_type *owner, rr_type *rr)
 	encode_dname(q, owner);
 	buffer_write_u16(q->packet, rr->type);
 	buffer_write_u16(q->packet, rr->klass);
-	buffer_write_u32(q->packet, rr->ttl);
+	buffer_write_u32(q->packet, ttl);
 
 	/* Reserve space for rdlength. */
 	rdlength_pos = buffer_position(q->packet);
@@ -137,7 +137,8 @@ packet_encode_rrset(query_type *query,
 	truncation_mark = buffer_position(query->packet);
 
 	for (i = 0; i < rrset->rr_count; ++i) {
-		if (packet_encode_rr(query, owner, &rrset->rrs[i])) {
+		if (packet_encode_rr(query, owner, &rrset->rrs[i],
+			rrset->rrs[i].ttl)) {
 			++added;
 		} else {
 			all_added = 0;
@@ -156,7 +157,8 @@ packet_encode_rrset(query_type *query,
 			    == rrset_rrtype(rrset))
 			{
 				if (packet_encode_rr(query, owner,
-						     &rrsig->rrs[i]))
+					&rrsig->rrs[i],
+					rrset_rrtype(rrset)==TYPE_SOA?rrset->rrs[0].ttl:rrsig->rrs[i].ttl))
 				{
 					++added;
 				} else {

@@ -1,4 +1,4 @@
-/*	$OpenBSD: inet.c,v 1.123 2013/04/18 15:43:22 deraadt Exp $	*/
+/*	$OpenBSD: inet.c,v 1.132 2014/01/25 10:03:32 claudio Exp $	*/
 /*	$NetBSD: inet.c,v 1.14 1995/10/03 21:42:37 thorpej Exp $	*/
 
 /*
@@ -110,8 +110,8 @@ void
 protopr(u_long off, char *name, int af, u_int tableid, u_long pcbaddr)
 {
 	struct inpcbtable table;
-	struct inpcb *head, *next, *prev;
-	struct inpcb inpcb;
+	struct inpcb *prev, *next;
+	struct inpcb inpcb, prevpcb;
 	int istcp, israw, isany;
 	int addrlen = 22;
 	int first = 1;
@@ -124,18 +124,20 @@ protopr(u_long off, char *name, int af, u_int tableid, u_long pcbaddr)
 	istcp = strcmp(name, "tcp") == 0;
 	israw = strncmp(name, "ip", 2) == 0;
 	kread(off, &table, sizeof table);
-	prev = head =
-	    (struct inpcb *)&CIRCLEQ_FIRST(&((struct inpcbtable *)off)->inpt_queue);
-	next = CIRCLEQ_FIRST(&table.inpt_queue);
+	prev = NULL;
+	next = TAILQ_FIRST(&table.inpt_queue);
 
-	while (next != head) {
+	while (next != NULL) {
 		kread((u_long)next, &inpcb, sizeof inpcb);
-		if (CIRCLEQ_PREV(&inpcb, inp_queue) != prev) {
-			printf("???\n");
-			break;
+		if (prev != NULL) {
+			kread((u_long)prev, &prevpcb, sizeof prevpcb);
+			if (TAILQ_NEXT(&prevpcb, inp_queue) != next) {
+				printf("PCB list changed\n");
+				break;
+			}
 		}
 		prev = next;
-		next = CIRCLEQ_NEXT(&inpcb, inp_queue);
+		next = TAILQ_NEXT(&inpcb, inp_queue);
 
 		switch (af) {
 		case AF_INET:
@@ -258,7 +260,7 @@ tcp_stats(char *name)
 	if (sysctl(mib, sizeof(mib) / sizeof(mib[0]),
 	    &tcpstat, &len, NULL, 0) == -1) {
 		if (errno != ENOPROTOOPT)
-			warn(name);
+			warn("%s", name);
 		return;
 	}
 
@@ -286,7 +288,7 @@ tcp_stats(char *name)
 	p(tcps_sndprobe, "\t\t%u window probe packet%s\n");
 	p(tcps_sndwinup, "\t\t%u window update packet%s\n");
 	p(tcps_sndctrl, "\t\t%u control packet%s\n");
-	p(tcps_outhwcsum, "\t\t%u packet%s hardware-checksummed\n");
+	p(tcps_outswcsum, "\t\t%u packet%s software-checksummed\n");
 	p(tcps_rcvtotal, "\t%u packet%s received\n");
 	p2(tcps_rcvackpack, tcps_rcvackbyte, "\t\t%u ack%s (for %qd byte%s)\n");
 	p(tcps_rcvdupack, "\t\t%u duplicate ack%s\n");
@@ -311,7 +313,7 @@ tcp_stats(char *name)
 	p1(tcps_rcvshort, "\t\t%u discarded because packet too short\n");
 	p1(tcps_rcvnosec, "\t\t%u discarded for missing IPsec protection\n");
 	p1(tcps_rcvmemdrop, "\t\t%u discarded due to memory shortage\n");
-	p(tcps_inhwcsum, "\t\t%u packet%s hardware-checksummed\n");
+	p(tcps_inswcsum, "\t\t%u packet%s software-checksummed\n");
 	p(tcps_rcvbadsig, "\t\t%u bad/missing md5 checksum%s\n");
 	p(tcps_rcvgoodsig, "\t\t%qd good md5 checksum%s\n");
 	p(tcps_connattempt, "\t%u connection request%s\n");
@@ -389,7 +391,7 @@ udp_stats(char *name)
 	if (sysctl(mib, sizeof(mib) / sizeof(mib[0]),
 	    &udpstat, &len, NULL, 0) == -1) {
 		if (errno != ENOPROTOOPT)
-			warn(name);
+			warn("%s", name);
 		return;
 	}
 
@@ -404,8 +406,8 @@ udp_stats(char *name)
 	p1(udps_badlen, "\t%lu with bad data length field\n");
 	p1(udps_badsum, "\t%lu with bad checksum\n");
 	p1(udps_nosum, "\t%lu with no checksum\n");
-	p(udps_inhwcsum, "\t%lu input packet%s hardware-checksummed\n");
-	p(udps_outhwcsum, "\t%lu output packet%s hardware-checksummed\n");
+	p(udps_inswcsum, "\t%lu input packet%s software-checksummed\n");
+	p(udps_outswcsum, "\t%lu output packet%s software-checksummed\n");
 	p1(udps_noport, "\t%lu dropped due to no socket\n");
 	p(udps_noportbcast, "\t%lu broadcast/multicast datagram%s dropped due to no socket\n");
 	p1(udps_nosec, "\t%lu dropped due to missing IPsec protection\n");
@@ -435,7 +437,7 @@ ip_stats(char *name)
 	if (sysctl(mib, sizeof(mib) / sizeof(mib[0]),
 	    &ipstat, &len, NULL, 0) == -1) {
 		if (errno != ENOPROTOOPT)
-			warn(name);
+			warn("%s", name);
 		return;
 	}
 
@@ -474,8 +476,8 @@ ip_stats(char *name)
 	p(ips_toolong, "\t%lu packet%s with ip length > max ip packet size\n");
 	p(ips_nogif, "\t%lu tunneling packet%s that can't find gif\n");
 	p(ips_badaddr, "\t%lu datagram%s with bad address in header\n");
-	p(ips_inhwcsum, "\t%lu input datagram%s checksum-processed by hardware\n");
-	p(ips_outhwcsum, "\t%lu output datagram%s checksum-processed by hardware\n");
+	p(ips_inswcsum, "\t%lu input datagram%s software-checksummed\n");
+	p(ips_outswcsum, "\t%lu output datagram%s software-checksummed\n");
 	p(ips_notmember, "\t%lu multicast packet%s which we don't join\n");
 #undef p
 #undef p1
@@ -494,7 +496,7 @@ div_stats(char *name)
 	if (sysctl(mib, sizeof(mib) / sizeof(mib[0]),
 	    &divstat, &len, NULL, 0) == -1) {
 		if (errno != ENOPROTOOPT)
-			warn(name);
+			warn("%s", name);
 		return;
 	}
 
@@ -570,7 +572,7 @@ icmp_stats(char *name)
 	if (sysctl(mib, sizeof(mib) / sizeof(mib[0]),
 	    &icmpstat, &len, NULL, 0) == -1) {
 		if (errno != ENOPROTOOPT)
-			warn(name);
+			warn("%s", name);
 		return;
 	}
 
@@ -581,6 +583,9 @@ icmp_stats(char *name)
 	p(icps_error, "\t%lu call%s to icmp_error\n");
 	p(icps_oldicmp,
 	    "\t%lu error%s not generated because old message was icmp\n");
+	p(icps_toofreq,
+	    "\t%lu error%s not generated because of rate limitation\n");
+
 	for (first = 1, i = 0; i < ICMP_MAXTYPE + 1; i++)
 		if (icmpstat.icps_outhist[i] != 0) {
 			if (first) {
@@ -628,7 +633,7 @@ igmp_stats(char *name)
 	if (sysctl(mib, sizeof(mib) / sizeof(mib[0]),
 	    &igmpstat, &len, NULL, 0) == -1) {
 		if (errno != ENOPROTOOPT)
-			warn(name);
+			warn("%s", name);
 		return;
 	}
 
@@ -664,7 +669,7 @@ pim_stats(char *name)
 	if (sysctl(mib, sizeof(mib) / sizeof(mib[0]),
 	    &pimstat, &len, NULL, 0) == -1) {
 		if (errno != ENOPROTOOPT)
-			warn(name);
+			warn("%s", name);
 		return;
 	}
 
@@ -858,7 +863,7 @@ ah_stats(char *name)
 	if (sysctl(mib, sizeof(mib) / sizeof(mib[0]),
 	    &ahstat, &len, NULL, 0) == -1) {
 		if (errno != ENOPROTOOPT)
-			warn(name);
+			warn("%s", name);
 		return;
 	}
 
@@ -904,7 +909,7 @@ etherip_stats(char *name)
 	if (sysctl(mib, sizeof(mib) / sizeof(mib[0]),
 	    &etheripstat, &len, NULL, 0) == -1) {
 		if (errno != ENOPROTOOPT)
-			warn(name);
+			warn("%s", name);
 		return;
 	}
 
@@ -937,7 +942,7 @@ esp_stats(char *name)
 	if (sysctl(mib, sizeof(mib) / sizeof(mib[0]),
 	    &espstat, &len, NULL, 0) == -1) {
 		if (errno != ENOPROTOOPT)
-			warn(name);
+			warn("%s", name);
 		return;
 	}
 
@@ -984,7 +989,7 @@ ipip_stats(char *name)
 	if (sysctl(mib, sizeof(mib) / sizeof(mib[0]),
 	    &ipipstat, &len, NULL, 0) == -1) {
 		if (errno != ENOPROTOOPT)
-			warn(name);
+			warn("%s", name);
 		return;
 	}
 
@@ -1018,7 +1023,7 @@ carp_stats(char *name)
 	if (sysctl(mib, sizeof(mib) / sizeof(mib[0]),
 	    &carpstat, &len, NULL, 0) == -1) {
 		if (errno != ENOPROTOOPT)
-			warn(name);
+			warn("%s", name);
 		return;
 	}
 
@@ -1060,7 +1065,7 @@ pfsync_stats(char *name)
 	if (sysctl(mib, sizeof(mib) / sizeof(mib[0]),
 	    &pfsyncstat, &len, NULL, 0) == -1) {
 		if (errno != ENOPROTOOPT)
-			warn(name);
+			warn("%s", name);
 		return;
 	}
 
@@ -1103,7 +1108,7 @@ pflow_stats(char *name)
 	if (sysctl(mib, sizeof(mib) / sizeof(mib[0]), &flowstats, &len,
 	    NULL, 0) == -1) {
 		if (errno != ENOPROTOOPT)
-			warn(name);
+			warn("%s", name);
 		return;
 	}
 
@@ -1134,7 +1139,7 @@ ipcomp_stats(char *name)
 	if (sysctl(mib, sizeof(mib) / sizeof(mib[0]),
 	    &ipcompstat, &len, NULL, 0) == -1) {
 		if (errno != ENOPROTOOPT)
-			warn(name);
+			warn("%s", name);
 		return;
 	}
 
@@ -1178,10 +1183,10 @@ socket_dump(u_long off)
 #define	pll(fmt, v, sep) printf(#v " " fmt sep, (long long) so.v);
 #define	pp(fmt, v, sep) printf(#v " " fmt sep, hideroot ? 0 : so.v);
 	printf("socket %#lx\n ", hideroot ? 0 : off);
-	p("%#0.4x", so_type, "\n ");
-	p("%#0.4x", so_options, "\n ");
+	p("%#.4x", so_type, "\n ");
+	p("%#.4x", so_options, "\n ");
 	p("%d", so_linger, "\n ");
-	p("%#0.4x", so_state, "\n ");
+	p("%#.4x", so_state, "\n ");
 	pp("%p", so_pcb, ", ");
 	pp("%p", so_proto, ", ");
 	pp("%p", so_head, "\n ");
@@ -1232,8 +1237,8 @@ sockbuf_dump(struct sockbuf *sb, const char *name)
 	p("%lu", sb_mbmax, ", ");
 	p("%ld", sb_lowat, "\n ");
 	printf("%s ", name);
-	p("%#0.8x", sb_flagsintr, ", ");
-	p("%#0.4x", sb_flags, ", ");
+	p("%#.8x", sb_flagsintr, ", ");
+	p("%#.4x", sb_flags, ", ");
 	p("%u", sb_timeo, "\n ");
 #undef	p
 }
@@ -1253,10 +1258,10 @@ protosw_dump(u_long off, u_long pcb)
 #define	p(fmt, v, sep) printf(#v " " fmt sep, proto.v);
 #define	pp(fmt, v, sep) printf(#v " " fmt sep, hideroot ? 0 : proto.v);
 	printf("protosw %#lx\n ", hideroot ? 0 : off);
-	p("%#0.4x", pr_type, "\n ");
+	p("%#.4x", pr_type, "\n ");
 	pp("%p", pr_domain, "\n ");
 	p("%d", pr_protocol, "\n ");
-	p("%#0.4x", pr_flags, "\n");
+	p("%#.4x", pr_flags, "\n");
 #undef	p
 #undef	pp
 
@@ -1280,7 +1285,7 @@ domain_dump(u_long off, u_long pcb, short protocol)
 #define	p(fmt, v, sep) printf(#v " " fmt sep, dom.v);
 	printf("domain %#lx\n ", hideroot ? 0 : off);
 	p("%d", dom_family, "\n ");
-	printf("dom_name %.*s\n", sizeof(name), name);
+	printf("dom_name %.*s\n", (int)sizeof(name), name);
 #undef	p
 
 	switch (dom.dom_family) {
@@ -1330,7 +1335,7 @@ inpcb_dump(u_long off, short protocol, int af)
 	p("%u", inp_lport, "\n ");
 	pp("%p", inp_socket, ", ");
 	pp("%p", inp_ppcb, "\n ");
-	p("%#0.8x", inp_flags, "\n ");
+	p("%#.8x", inp_flags, "\n ");
 	p("%d", inp_hops, "\n ");
 	p("%u", inp_seclevel[0], ", ");
 	p("%u", inp_seclevel[1], ", ");
@@ -1344,7 +1349,7 @@ inpcb_dump(u_long off, short protocol, int af)
 	pp("%p", inp_ipo, "\n ");
 	pp("%p", inp_ipsec_remotecred, ", ");
 	pp("%p", inp_ipsec_remoteauth, "\n ");
-	p("%d", in6p_cksum, "\n ");
+	p("%d", inp_cksum6, "\n ");
 	pp("%p", inp_icmp6filt, "\n ");
 	pp("%p", inp_pf_sk, "\n ");
 	p("%u", inp_rtableid, "\n ");

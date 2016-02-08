@@ -1,4 +1,4 @@
-/*	$OpenBSD: acpi_machdep.c,v 1.55 2013/07/01 10:08:08 kettenis Exp $	*/
+/*	$OpenBSD: acpi_machdep.c,v 1.57 2014/01/21 09:40:54 kettenis Exp $	*/
 /*
  * Copyright (c) 2005 Thorsten Lockert <tholo@sigmasoft.com>
  *
@@ -233,6 +233,10 @@ void
 acpi_sleep_clocks(struct acpi_softc *sc, int state)
 {
 	rtcstop();
+
+#if NLAPIC > 0
+	lapic_disable();
+#endif
 }
 
 /*
@@ -341,10 +345,13 @@ acpi_sleep_cpu(struct acpi_softc *sc, int state)
 void
 acpi_resume_cpu(struct acpi_softc *sc)
 {
+	fpuinit(&cpu_info_primary);
+
+	cpu_init(&cpu_info_primary);
+
 	/* Re-initialise memory range handling on BSP */
 	if (mem_range_softc.mr_op != NULL)
 		mem_range_softc.mr_op->initAP(&mem_range_softc);
-	fpuinit(&cpu_info_primary);
 }
 
 #ifdef MULTIPROCESSOR

@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_iwivar.h,v 1.23 2010/09/07 16:21:45 deraadt Exp $	*/
+/*	$OpenBSD: if_iwivar.h,v 1.25 2013/12/03 22:37:24 kettenis Exp $	*/
 
 /*-
  * Copyright (c) 2004-2006
@@ -112,9 +112,9 @@ struct iwi_softc {
 	pcitag_t		sc_pcitag;
 	bus_size_t		sc_sz;
 
-	int			sc_tx_timer;
+	struct task		init_task;
 
-	struct workq_task	sc_resume_wqt;
+	int			sc_tx_timer;
 
 #if NBPFILTER > 0
 	caddr_t			sc_drvbpf;

@@ -1,4 +1,4 @@
-/*	$OpenBSD: ikev2_msg.c,v 1.25 2013/03/21 04:30:14 deraadt Exp $	*/
+/*	$OpenBSD: ikev2_msg.c,v 1.29 2014/02/17 11:00:14 reyk Exp $	*/
 
 /*
  * Copyright (c) 2010-2013 Reyk Floeter <reyk@openbsd.org>
@@ -75,7 +75,8 @@ ikev2_msg_cb(int fd, short event, void *arg)
 	    (ssize_t)sizeof(natt))
 		return;
 
-	if (socket_getport(&msg.msg_local) == IKED_NATT_PORT) {
+	if (socket_getport((struct sockaddr *)&msg.msg_local) ==
+	    IKED_NATT_PORT) {
 		if (bcmp(&natt, buf, sizeof(natt)) != 0)
 			return;
 		msg.msg_natt = 1;
@@ -256,6 +257,7 @@ ikev2_msg_send(struct iked *env, struct iked_message *msg)
 	struct ibuf		*buf = msg->msg_data;
 	u_int32_t		 natt = 0x00000000;
 	int			 isnatt = 0;
+	u_int8_t		 exchange, flags;
 	struct ike_header	*hdr;
 	struct iked_message	*m;
 
@@ -265,10 +267,12 @@ ikev2_msg_send(struct iked *env, struct iked_message *msg)
 
 	isnatt = (msg->msg_natt || (msg->msg_sa && msg->msg_sa->sa_natt));
 
+	exchange = hdr->ike_exchange;
+	flags = hdr->ike_flags;
 	log_info("%s: %s from %s to %s, %ld bytes%s", __func__,
-	    print_map(hdr->ike_exchange, ikev2_exchange_map),
-	    print_host(&msg->msg_local, NULL, 0),
-	    print_host(&msg->msg_peer, NULL, 0),
+	    print_map(exchange, ikev2_exchange_map),
+	    print_host((struct sockaddr *)&msg->msg_local, NULL, 0),
+	    print_host((struct sockaddr *)&msg->msg_peer, NULL, 0),
 	    ibuf_length(buf), isnatt ? ", NAT-T" : "");
 
 	if (isnatt) {
@@ -292,18 +296,16 @@ ikev2_msg_send(struct iked *env, struct iked_message *msg)
 		log_debug("%s: failed to copy a message", __func__);
 		return (-1);
 	}
-	m->msg_exchange = hdr->ike_exchange;
+	m->msg_exchange = exchange;
 
-	if (hdr->ike_flags & IKEV2_FLAG_RESPONSE) {
+	if (flags & IKEV2_FLAG_RESPONSE) {
 		TAILQ_INSERT_TAIL(&sa->sa_responses, m, msg_entry);
-		timer_initialize(env, &m->msg_timer,
-		    ikev2_msg_response_timeout, m);
-		timer_register(env, &m->msg_timer, IKED_RESPONSE_TIMEOUT);
+		timer_set(env, &m->msg_timer, ikev2_msg_response_timeout, m);
+		timer_add(env, &m->msg_timer, IKED_RESPONSE_TIMEOUT);
 	} else {
 		TAILQ_INSERT_TAIL(&sa->sa_requests, m, msg_entry);
-		timer_initialize(env, &m->msg_timer,
-		    ikev2_msg_retransmit_timeout, m);
-		timer_register(env, &m->msg_timer, IKED_RETRANSMIT_TIMEOUT);
+		timer_set(env, &m->msg_timer, ikev2_msg_retransmit_timeout, m);
+		timer_add(env, &m->msg_timer, IKED_RETRANSMIT_TIMEOUT);
 	}
 
 	return (0);
@@ -332,7 +334,7 @@ ikev2_msg_encrypt(struct iked *env, struct iked_sa *sa, struct ibuf *src)
 	buf = ibuf_data(src);
 	len = ibuf_size(src);
 
-	log_debug("%s: decrypted length %d", __func__, len);
+	log_debug("%s: decrypted length %zu", __func__, len);
 	print_hex(buf, 0, len);
 
 	if (sa == NULL ||
@@ -364,7 +366,7 @@ ikev2_msg_encrypt(struct iked *env, struct iked_sa *sa, struct ibuf *src)
 	if (ibuf_add(src, &pad, sizeof(pad)) != 0)
 		goto done;
 
-	log_debug("%s: padded length %d", __func__, ibuf_size(src));
+	log_debug("%s: padded length %zu", __func__, ibuf_size(src));
 	print_hex(ibuf_data(src), 0, ibuf_size(src));
 
 	cipher_setkey(sa->sa_encr, encr->buf, ibuf_length(encr));
@@ -389,7 +391,7 @@ ikev2_msg_encrypt(struct iked *env, struct iked_sa *sa, struct ibuf *src)
 		goto done;
 	bzero(ptr, integrlen);
 
-	log_debug("%s: length %d, padding %d, output length %d",
+	log_debug("%s: length %zu, padding %d, output length %zu",
 	    __func__, len + sizeof(pad), pad, ibuf_size(dst));
 	print_hex(ibuf_data(dst), 0, ibuf_size(dst));
 
@@ -411,7 +413,7 @@ ikev2_msg_integr(struct iked *env, struct iked_sa *sa, struct ibuf *src)
 	struct ibuf		*integr, *tmp = NULL;
 	u_int8_t		*ptr;
 
-	log_debug("%s: message length %d", __func__, ibuf_size(src));
+	log_debug("%s: message length %zu", __func__, ibuf_size(src));
 	print_hex(ibuf_data(src), 0, ibuf_size(src));
 
 	if (sa == NULL ||
@@ -427,7 +429,7 @@ ikev2_msg_integr(struct iked *env, struct iked_sa *sa, struct ibuf *src)
 
 	integrlen = hash_length(sa->sa_integr);
 
-	log_debug("%s: integrity checksum length %d", __func__,
+	log_debug("%s: integrity checksum length %zu", __func__,
 	    integrlen);
 
 	/*
@@ -500,11 +502,11 @@ ikev2_msg_decrypt(struct iked *env, struct iked_sa *sa,
 		goto done;
 	}
 
-	log_debug("%s: IV length %d", __func__, ivlen);
+	log_debug("%s: IV length %zd", __func__, ivlen);
 	print_hex(ibuf_data(src), 0, ivlen);
-	log_debug("%s: encrypted payload length %d", __func__, encrlen);
+	log_debug("%s: encrypted payload length %zd", __func__, encrlen);
 	print_hex(ibuf_data(src), encroff, encrlen);
-	log_debug("%s: integrity checksum length %d", __func__, integrlen);
+	log_debug("%s: integrity checksum length %zd", __func__, integrlen);
 	print_hex(ibuf_data(src), integroff, integrlen);
 
 	/*
@@ -554,7 +556,7 @@ ikev2_msg_decrypt(struct iked *env, struct iked_sa *sa,
 		pad = *ptr;
 	}
 
-	log_debug("%s: decrypted payload length %d/%d padding %d",
+	log_debug("%s: decrypted payload length %zd/%zd padding %d",
 	    __func__, outlen, encrlen, pad);
 	print_hex(ibuf_data(out), 0, ibuf_size(out));
 
@@ -679,7 +681,7 @@ ikev2_msg_auth(struct iked *env, struct iked_sa *sa, int response)
 	if (tmplen != hash_length(sa->sa_prf))
 		goto fail;
 
-	log_debug("%s: %s auth data length %d",
+	log_debug("%s: %s auth data length %zu",
 	    __func__, response ? "responder" : "initiator",
 	    ibuf_size(authmsg));
 	print_hex(ibuf_data(authmsg), 0, ibuf_size(authmsg));
@@ -737,7 +739,7 @@ ikev2_msg_authverify(struct iked *env, struct iked_sa *sa,
 		break;
 	}
 
-	log_debug("%s: method %s keylen %d type %s", __func__,
+	log_debug("%s: method %s keylen %zd type %s", __func__,
 	    print_map(auth->auth_method, ikev2_auth_map), keylen,
 	    print_map(id->id_type, ikev2_cert_map));
 
@@ -903,7 +905,7 @@ ikev2_msg_dispose(struct iked *env, struct iked_msgqueue *queue,
     struct iked_message *msg)
 {
 	TAILQ_REMOVE(queue, msg, msg_entry);
-	timer_deregister(env, &msg->msg_timer);
+	timer_del(env, &msg->msg_timer);
 	ikev2_msg_cleanup(env, msg);
 	free(msg);
 }
@@ -944,7 +946,7 @@ ikev2_msg_retransmit_response(struct iked *env, struct iked_sa *sa,
 		return (-1);
 	}
 
-	timer_register(env, &msg->msg_timer, IKED_RESPONSE_TIMEOUT);
+	timer_add(env, &msg->msg_timer, IKED_RESPONSE_TIMEOUT);
 	return (0);
 }
 
@@ -973,7 +975,7 @@ ikev2_msg_retransmit_timeout(struct iked *env, void *arg)
 			return;
 		}
 		/* Exponential timeout */
-		timer_register(env, &msg->msg_timer,
+		timer_add(env, &msg->msg_timer,
 		    IKED_RETRANSMIT_TIMEOUT * (2 << (msg->msg_tries++)));
 	} else {
 		log_debug("%s: retransmit limit reached", __func__);

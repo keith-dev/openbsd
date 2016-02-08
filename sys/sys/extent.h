@@ -1,4 +1,4 @@
-/*	$OpenBSD: extent.h,v 1.12 2009/04/19 15:26:52 kettenis Exp $	*/
+/*	$OpenBSD: extent.h,v 1.14 2014/02/08 20:29:01 kettenis Exp $	*/
 /*	$NetBSD: extent.h,v 1.6 1997/10/09 07:43:05 jtc Exp $	*/
 
 /*-
@@ -44,6 +44,7 @@ struct extent_region {
 
 /* er_flags */
 #define ER_ALLOC	0x01	/* region descriptor dynamically allocated */
+#define ER_DISCARD	0x02	/* discard region descriptor after use */
 
 struct extent {
 	char	*ex_name;		/* name of extent */
@@ -105,6 +106,9 @@ struct	extent *extent_create(char *, u_long, u_long, int,
 void	extent_destroy(struct extent *);
 int	extent_alloc_subregion(struct extent *, u_long, u_long,
 	    u_long, u_long, u_long, u_long, int, u_long *);
+int	extent_alloc_subregion_with_descr(struct extent *, u_long, u_long,
+	    u_long, u_long, u_long, u_long, int, struct extent_region *,
+	    u_long *);
 int	extent_alloc_region(struct extent *, u_long, u_long, int);
 int	extent_free(struct extent *, u_long, u_long, int);
 void	extent_print(struct extent *);
@@ -114,6 +118,13 @@ void	extent_print(struct extent *);
 		_flags, _result) \
 	extent_alloc_subregion((_ex), (_ex)->ex_start, (_ex)->ex_end,  \
 	(_size), (_alignment), (_skew), (_boundary), (_flags), (_result))
+
+/* Simple case of extent_alloc_subregion_with_descr() */
+#define extent_alloc_with_descr(_ex, _size, _alignment, _skew, _boundary, \
+		_flags, _region, _result) \
+	extent_alloc_subregion_with_descr((_ex), (_ex)->ex_start, \
+	(_ex)->ex_end, (_size), (_alignment), (_skew), (_boundary), \
+	(_flags), (_region), (_result))
 #endif /* _KERNEL || _EXTENT_TESTING */
 
 #endif /* ! _SYS_EXTENT_H_ */

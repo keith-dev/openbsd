@@ -1,4 +1,4 @@
-/*	$OpenBSD: pkcs5_pbkdf2.c,v 1.4 2013/06/03 21:07:02 tedu Exp $	*/
+/*	$OpenBSD: pkcs5_pbkdf2.c,v 1.6 2014/01/31 16:56:32 tedu Exp $	*/
 
 /*-
  * Copyright (c) 2008 Damien Bergamini <damien.bergamini@free.fr>
@@ -73,8 +73,8 @@ hmac_sha1(const u_int8_t *text, size_t text_len, const u_int8_t *key,
  * Code based on IEEE Std 802.11-2007, Annex H.4.2.
  */
 int
-pkcs5_pbkdf2(const char *pass, size_t pass_len, const uint8_t *salt, size_t salt_len,
-    uint8_t *key, size_t key_len, unsigned int rounds)
+pkcs5_pbkdf2(const char *pass, size_t pass_len, const uint8_t *salt,
+    size_t salt_len, uint8_t *key, size_t key_len, unsigned int rounds)
 {
 	uint8_t *asalt, obuf[SHA1_DIGEST_LENGTH];
 	uint8_t d1[SHA1_DIGEST_LENGTH], d2[SHA1_DIGEST_LENGTH];
@@ -111,11 +111,11 @@ pkcs5_pbkdf2(const char *pass, size_t pass_len, const uint8_t *salt, size_t salt
 		key += r;
 		key_len -= r;
 	};
-	bzero(asalt, salt_len + 4);
+	explicit_bzero(asalt, salt_len + 4);
 	free(asalt);
-	bzero(d1, sizeof(d1));
-	bzero(d2, sizeof(d2));
-	bzero(obuf, sizeof(obuf));
+	explicit_bzero(d1, sizeof(d1));
+	explicit_bzero(d2, sizeof(d2));
+	explicit_bzero(obuf, sizeof(obuf));
 
 	return 0;
 }

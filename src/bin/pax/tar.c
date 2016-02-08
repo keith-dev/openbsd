@@ -1,4 +1,4 @@
-/*	$OpenBSD: tar.c,v 1.48 2013/07/03 04:08:29 guenther Exp $	*/
+/*	$OpenBSD: tar.c,v 1.53 2014/02/19 03:59:47 guenther Exp $	*/
 /*	$NetBSD: tar.c,v 1.5 1995/03/21 09:07:49 cgd Exp $	*/
 
 /*-
@@ -404,11 +404,7 @@ tar_rd(ARCHD *arcn, char *buf)
 	    0xfff);
 	arcn->sb.st_uid = (uid_t)asc_ul(hd->uid, sizeof(hd->uid), OCT);
 	arcn->sb.st_gid = (gid_t)asc_ul(hd->gid, sizeof(hd->gid), OCT);
-#ifdef LONG_OFF_T
-	arcn->sb.st_size = (off_t)asc_ul(hd->size, sizeof(hd->size), OCT);
-#else
 	arcn->sb.st_size = (off_t)asc_uqd(hd->size, sizeof(hd->size), OCT);
-#endif
 	val = asc_uqd(hd->mtime, sizeof(hd->mtime), OCT);
 	if ((time_t)val < 0 || (time_t)val != val)
 		arcn->sb.st_mtime = INT_MAX;                    /* XXX 2038 */
@@ -619,13 +615,8 @@ tar_wr(ARCHD *arcn)
 		 * data follows this file, so set the pad
 		 */
 		hd->linkflag = AREGTYPE;
-#		ifdef LONG_OFF_T
-		if (ul_oct((u_long)arcn->sb.st_size, hd->size,
-		    sizeof(hd->size), 1)) {
-#		else
 		if (uqd_oct((u_quad_t)arcn->sb.st_size, hd->size,
 		    sizeof(hd->size), 1)) {
-#		endif
 			paxwarn(1,"File is too large for tar %s", arcn->org_name);
 			return(1);
 		}
@@ -636,9 +627,10 @@ tar_wr(ARCHD *arcn)
 	 * copy those fields that are independent of the type
 	 */
 	if (ul_oct((u_long)arcn->sb.st_mode, hd->mode, sizeof(hd->mode), 0) ||
+	    uqd_oct(arcn->sb.st_mtime < 0 ? 0 : arcn->sb.st_mtime, hd->mtime,
+		sizeof(hd->mtime), 1) ||
 	    ul_oct((u_long)arcn->sb.st_uid, hd->uid, sizeof(hd->uid), 0) ||
-	    ul_oct((u_long)arcn->sb.st_gid, hd->gid, sizeof(hd->gid), 0) ||
-	    uqd_oct(arcn->sb.st_mtime, hd->mtime, sizeof(hd->mtime), 1))
+	    ul_oct((u_long)arcn->sb.st_gid, hd->gid, sizeof(hd->gid), 0))
 		goto out;
 
 	/*
@@ -793,7 +785,7 @@ ustar_rd(ARCHD *arcn, char *buf)
 		}
 	}
 
-	if (!arcn->ln_nlen && 
+	if (!arcn->ln_nlen &&
 	    hd->typeflag != LONGLINKTYPE && hd->typeflag != LONGNAMETYPE) {
 		arcn->ln_nlen = expandname(arcn->ln_name, sizeof(arcn->ln_name),
 		    &gnu_link_string, hd->linkname, sizeof(hd->linkname));
@@ -805,11 +797,7 @@ ustar_rd(ARCHD *arcn, char *buf)
 	 */
 	arcn->sb.st_mode = (mode_t)(asc_ul(hd->mode, sizeof(hd->mode), OCT) &
 	    0xfff);
-#ifdef LONG_OFF_T
-	arcn->sb.st_size = (off_t)asc_ul(hd->size, sizeof(hd->size), OCT);
-#else
 	arcn->sb.st_size = (off_t)asc_uqd(hd->size, sizeof(hd->size), OCT);
-#endif
 	val = asc_uqd(hd->mtime, sizeof(hd->mtime), OCT);
 	if ((time_t)val < 0 || (time_t)val != val)
 		arcn->sb.st_mtime = INT_MAX;                    /* XXX 2038 */
@@ -1045,13 +1033,8 @@ ustar_wr(ARCHD *arcn)
 		else
 			hd->typeflag = REGTYPE;
 		arcn->pad = TAR_PAD(arcn->sb.st_size);
-#		ifdef LONG_OFF_T
-		if (ul_oct((u_long)arcn->sb.st_size, hd->size,
-		    sizeof(hd->size), 3)) {
-#		else
 		if (uqd_oct((u_quad_t)arcn->sb.st_size, hd->size,
 		    sizeof(hd->size), 3)) {
-#		endif
 			paxwarn(1,"File is too long for ustar %s",arcn->org_name);
 			return(1);
 		}
@@ -1093,8 +1076,9 @@ ustar_wr(ARCHD *arcn)
 		if (ul_oct((u_long)gid_nobody, hd->gid, sizeof(hd->gid), 3))
 			goto out;
 	}
-	if (ul_oct((u_long)arcn->sb.st_mode, hd->mode, sizeof(hd->mode), 3) ||
-	    uqd_oct(arcn->sb.st_mtime, hd->mtime, sizeof(hd->mtime), 3))
+	if (uqd_oct(arcn->sb.st_mtime < 0 ? 0 : arcn->sb.st_mtime, hd->mtime,
+		sizeof(hd->mtime), 3) ||
+	    ul_oct((u_long)arcn->sb.st_mode, hd->mode, sizeof(hd->mode), 3))
 		goto out;
 	if (!Nflag) {
 		strncpy(hd->uname, name_uid(arcn->sb.st_uid, 0), sizeof(hd->uname));
@@ -1228,7 +1212,7 @@ rd_xheader(ARCHD *arcn, char *buf, off_t size, char typeflag)
 		return (-1);
 
 	for (p = buf; size > 0; size -= len, p = nextp) {
-		if (!isdigit(*p)) {
+		if (!isdigit((unsigned char)*p)) {
 			paxwarn(1, "Invalid extended header record");
 			return (-1);
 		}
@@ -1241,8 +1225,8 @@ rd_xheader(ARCHD *arcn, char *buf, off_t size, char typeflag)
 			return (-1);
 		}
 		if (len > size) {
-			paxwarn(1, "Extended header record length %j is "
-			    "out of range", len);
+			paxwarn(1, "Extended header record length %lld is "
+			    "out of range", (long long)len);
 			return (-1);
 		}
 		nextp = p + len;

@@ -1,4 +1,4 @@
-/*	$OpenBSD: ext2fs_lookup.c,v 1.28 2013/05/30 19:19:09 guenther Exp $	*/
+/*	$OpenBSD: ext2fs_lookup.c,v 1.30 2013/12/12 19:00:09 tedu Exp $	*/
 /*	$NetBSD: ext2fs_lookup.c,v 1.16 2000/08/03 20:29:26 thorpej Exp $	*/
 
 /* 
@@ -139,8 +139,6 @@ ext2fs_readdir(void *v)
 	struct iovec aiov;
 	caddr_t dirbuf;
 	off_t off = uio->uio_offset;
-	u_long *cookies = NULL;
-	int nc = 0, ncookies = 0;
 	int e2d_reclen;
 
 	if (vp->v_type != VDIR)
@@ -161,11 +159,6 @@ ext2fs_readdir(void *v)
 	aiov.iov_len = e2fs_count;
 	auio.uio_resid = e2fs_count;
 	dirbuf = malloc(e2fs_count, M_TEMP, M_WAITOK | M_ZERO);
-	if (ap->a_ncookies) {
-		nc = ncookies = e2fs_count / 16;
-		cookies = malloc(sizeof(*cookies) * ncookies, M_TEMP, M_WAITOK);
-		*ap->a_cookies = cookies;
-	}
 	aiov.iov_base = dirbuf;
 
 	error = VOP_READ(ap->a_vp, &auio, 0, ap->a_cred);
@@ -182,16 +175,11 @@ ext2fs_readdir(void *v)
 			if(dstd.d_reclen > uio->uio_resid) {
 				break;
 			}
+			dstd.d_off = off + e2d_reclen;
 			if ((error = uiomove((caddr_t)&dstd, dstd.d_reclen, uio)) != 0) {
 				break;
 			}
 			off = off + e2d_reclen;
-			if (cookies != NULL) {
-				*cookies++ = off;
-				if (--ncookies <= 0){
-					break;  /* out of cookies */
-				}
-			}
 			/* advance dp */
 			dp = (struct ext2fs_direct *) ((char *)dp + e2d_reclen);
 		}
@@ -200,14 +188,6 @@ ext2fs_readdir(void *v)
 	}
 	free(dirbuf, M_TEMP);
 	*ap->a_eofflag = ext2fs_size(VTOI(ap->a_vp)) <= uio->uio_offset;
-	if (ap->a_ncookies) {
-		if (error) {
-			free(*ap->a_cookies, M_TEMP);
-			*ap->a_ncookies = 0;
-			*ap->a_cookies = NULL;
-		} else
-			*ap->a_ncookies = nc - ncookies;
-	}
 	return (error);
 }
 
@@ -839,7 +819,7 @@ ext2fs_direnter(struct inode *ip, struct vnode *dvp,
 		dsize = EXT2FS_DIRSIZ(nep->e2d_namlen);
 		spacefree += fs2h16(nep->e2d_reclen) - dsize;
 		loc += fs2h16(nep->e2d_reclen);
-		memcpy((caddr_t)ep, (caddr_t)nep, dsize);
+		memcpy(ep, nep, dsize);
 	}
 	/*
 	 * Update the pointer fields in the previous entry (if any),
@@ -863,7 +843,7 @@ ext2fs_direnter(struct inode *ip, struct vnode *dvp,
 		ep->e2d_reclen = h2fs16(dsize);
 		ep = (struct ext2fs_direct *)((char *)ep + dsize);
 	}
-	memcpy((caddr_t)ep, (caddr_t)&newdir, (u_int)newentrysize);
+	memcpy(ep, &newdir, newentrysize);
 	error = VOP_BWRITE(bp);
 	dp->i_flag |= IN_CHANGE | IN_UPDATE;
 	if (!error && dp->i_endoff && dp->i_endoff < ext2fs_size(dp))

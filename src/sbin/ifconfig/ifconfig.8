@@ -1,4 +1,4 @@
-.\"	$OpenBSD: ifconfig.8,v 1.234 2013/05/31 19:56:06 yasuoka Exp $
+.\"	$OpenBSD: ifconfig.8,v 1.240 2014/02/26 21:19:44 claudio Exp $
 .\"	$NetBSD: ifconfig.8,v 1.11 1996/01/04 21:27:29 pk Exp $
 .\"     $FreeBSD: ifconfig.8,v 1.16 1998/02/01 07:03:29 steve Exp $
 .\"
@@ -31,7 +31,7 @@
 .\"
 .\"     @(#)ifconfig.8	8.4 (Berkeley) 6/1/94
 .\"
-.Dd $Mdocdate: May 31 2013 $
+.Dd $Mdocdate: February 26 2014 $
 .Dt IFCONFIG 8
 .Os
 .Sh NAME
@@ -87,7 +87,7 @@ This is the default, if no parameters are given to
 .It Fl C
 Print the names of all network pseudo-devices that
 can be created dynamically at runtime using
-.Cm ifconfig create .
+.Nm Cm create .
 .It Ar interface
 The
 .Ar interface
@@ -403,12 +403,16 @@ This will influence the default routing priority of new static routes added to
 the kernel.
 .Ar n
 is in the range of 0 to 16 with smaller numbers being better.
-.It Cm rdomain Ar route-id
-Attach the interface to the routing table with the specified
-.Ar route-id .
+.It Cm rdomain Ar rdomainid
+Attach the interface to the routing domain with the specified
+.Ar rdomainid .
 Interfaces in different routing domains are separated and can not directly
 pass traffic between each other.
-By default all interfaces belong to routing table 0.
+It is therefore possible to reuse the same addresses in different routing
+domains.
+If the specified rdomain does not yet exist it will be created, including
+a routing table with the same id.
+By default all interfaces belong to routing domain 0.
 .It Cm rtlabel Ar route-label
 (inet)
 Attach
@@ -1426,7 +1430,8 @@ for a complete list of the available protocols,
 .Op Cm deletetunnel Ar src_address dest_address
 .Op Oo Fl Oc Ns Cm keepalive Ar period count
 .Op Cm tunnel Ar src_address dest_address
-.Op Cm tunneldomain Ar route-id
+.Op Cm tunneldomain Ar tableid
+.Op Cm vnetid Ar network-id
 .Ek
 .nr nS 0
 .Pp
@@ -1453,22 +1458,35 @@ is 2 since the round-trip time of keepalive packets needs to be accounted for.
 Disable the
 .Xr gre 4
 keepalive mechanism.
-.It Cm tunnel Ar src_address dest_address
+.It Cm tunnel Ar src_address dest_address Ns Op Ns : Ns Ar dest_port
 Set the source and destination tunnel addresses on a tunnel interface,
 including
 .Xr gif 4 .
 Packets routed to this interface will be encapsulated in
 IPv4 or IPv6, depending on the source and destination address families.
 Both addresses must be of the same family.
-.It Cm tunneldomain Ar route-id
+The optional destination port can be specified for interfaces such as
+.Xr vxlan 4 ,
+which further encapsulate the packets in UDP datagrams.
+.It Cm tunneldomain Ar tableid
 Use routing table
-.Ar route-id
+.Ar tableid
 instead of the default table.
 The tunnel does not need to terminate in the same routing domain as the
 interface itself.
-.Ar route-id
+.Ar tableid
 can be set to any valid routing table ID;
 the corresponding routing domain is derived from this table.
+.It Cm tunnelttl Ar ttl
+Set the IP or multicast TTL of the tunnel packets.
+.It Cm vnetid Ar network-id
+Set the virtual network identifier.
+This is a number which is used by tunnel protocols such as
+.Xr vxlan 4
+to identify packets with a virtual network.
+The accepted size of the number depends on the individual tunnel protocol;
+it is a 24-bit number for
+.Xr vxlan 4 .
 .El
 .\" VLAN
 .Sh VLAN

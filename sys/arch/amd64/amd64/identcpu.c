@@ -1,4 +1,4 @@
-/*	$OpenBSD: identcpu.c,v 1.49 2013/07/30 20:42:34 kettenis Exp $	*/
+/*	$OpenBSD: identcpu.c,v 1.52 2013/11/19 04:12:17 guenther Exp $	*/
 /*	$NetBSD: identcpu.c,v 1.1 2003/04/26 18:39:28 fvdl Exp $	*/
 
 /*
@@ -466,7 +466,7 @@ identifycpu(struct cpu_info *ci)
 	printf("%s: %s", ci->ci_dev->dv_xname, mycpu_model);
 
 	if (ci->ci_tsc_freq != 0)
-		printf(", %lu.%02lu MHz", (ci->ci_tsc_freq + 4999) / 1000000,
+		printf(", %llu.%02llu MHz", (ci->ci_tsc_freq + 4999) / 1000000,
 		    ((ci->ci_tsc_freq + 4999) / 10000) % 100);
 
 	if (ci->ci_flags & CPUF_PRIMARY) {
@@ -568,7 +568,7 @@ identifycpu(struct cpu_info *ci)
 	if (!strcmp(cpu_vendor, "AuthenticAMD"))
 		amd64_errata(ci);
 
-	if (strncmp(mycpu_model, "VIA Nano processor", 18) == 0) {
+	if (!strcmp(cpu_vendor, "CentaurHauls")) {
 		ci->cpu_setup = via_nano_setup;
 #ifndef SMALL_KERNEL
 		strlcpy(ci->ci_sensordev.xname, ci->ci_dev->dv_xname,
@@ -626,9 +626,9 @@ cpu_topology(struct cpu_info *ci)
 {
 #ifndef SMALL_KERNEL
 	u_int32_t eax, ebx, ecx, edx;
-	u_int32_t apicid, max_apicid, max_coreid;
-	u_int32_t smt_bits, core_bits, pkg_bits;
-	u_int32_t smt_mask, core_mask, pkg_mask;
+	u_int32_t apicid, max_apicid = 0, max_coreid = 0;
+	u_int32_t smt_bits = 0, core_bits, pkg_bits = 0;
+	u_int32_t smt_mask = 0, core_mask, pkg_mask = 0;
 
 	/* We need at least apicid at CPUID 1 */
 	CPUID(0, eax, ebx, ecx, edx);

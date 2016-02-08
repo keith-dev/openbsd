@@ -1,4 +1,4 @@
-/*	$OpenBSD: mib.h,v 1.30 2013/03/11 19:49:37 sthen Exp $	*/
+/*	$OpenBSD: mib.h,v 1.33 2013/10/01 19:24:46 reyk Exp $	*/
 
 /*
  * Copyright (c) 2007, 2008 Reyk Floeter <reyk@openbsd.org>
@@ -422,8 +422,10 @@
 #define MIB_foundryNetworks		MIB_enterprises, 1991
 #define MIB_huawaiTechnology		MIB_enterprises, 2011
 #define MIB_ucDavis			MIB_enterprises, 2021
+#define MIB_freeBSD			MIB_enterprises, 2238
 #define MIB_checkPoint			MIB_enterprises, 2620
 #define MIB_juniper			MIB_enterprises, 2636
+#define MIB_printerWorkingGroup		MIB_enterprises, 2699
 #define MIB_audi			MIB_enterprises, 3195
 #define MIB_volkswagen			MIB_enterprises, 3210
 #define MIB_genua			MIB_enterprises, 3717
@@ -432,6 +434,8 @@
 #define MIB_vMware			MIB_enterprises, 6876
 #define MIB_alcatelLucent		MIB_enterprises, 7483
 #define MIB_snom			MIB_enterprises, 7526
+#define MIB_netSNMP			MIB_enterprises, 8072
+#define MIB_netflix			MIB_enterprises, 10949
 #define MIB_google			MIB_enterprises, 11129
 #define MIB_f5Networks			MIB_enterprises, 12276
 #define MIB_sFlow			MIB_enterprises, 14706
@@ -439,9 +443,11 @@
 #define MIB_paloAltoNetworks		MIB_enterprises, 25461
 #define MIB_h3c				MIB_enterprises, 25506
 #define MIB_vantronix			MIB_enterprises, 26766
+#define MIB_netBSD			MIB_enterprises, 32388
 #define OIDVAL_openBSD_eid		30155
 #define MIB_openBSD			MIB_enterprises, OIDVAL_openBSD_eid
 #define MIB_nicira			MIB_enterprises, 39961
+#define MIB_esdenera			MIB_enterprises, 42459
 
 /* UCD-DISKIO-MIB */
 #define MIB_ucdExperimental		MIB_ucDavis, 13
@@ -587,6 +593,10 @@
 #define MIB_pfTblOutXPassPkts		MIB_pfTblEntry, 18
 #define MIB_pfTblOutXPassBytes		MIB_pfTblEntry, 19
 #define MIB_pfTblStatsCleared		MIB_pfTblEntry, 20
+#define MIB_pfTblInMatchPkts		MIB_pfTblEntry, 21
+#define MIB_pfTblInMatchBytes		MIB_pfTblEntry, 22
+#define MIB_pfTblOutMatchPkts		MIB_pfTblEntry, 23
+#define MIB_pfTblOutMatchBytes		MIB_pfTblEntry, 24
 #define MIB_pfTblAddrTable		MIB_pfTables, 129
 #define MIB_pfTblAddrEntry		MIB_pfTblAddrTable, 1
 #define OIDIDX_pfTblAddr		11
@@ -602,6 +612,10 @@
 #define MIB_pfTblAddrOutBlockBytes	MIB_pfTblAddrEntry, 10
 #define MIB_pfTblAddrOutPassPkts	MIB_pfTblAddrEntry, 11
 #define MIB_pfTblAddrOutPassBytes	MIB_pfTblAddrEntry, 12
+#define MIB_pfTblAddrInMatchPkts	MIB_pfTblAddrEntry, 13
+#define MIB_pfTblAddrInMatchBytes	MIB_pfTblAddrEntry, 14
+#define MIB_pfTblAddrOutMatchPkts	MIB_pfTblAddrEntry, 15
+#define MIB_pfTblAddrOutMatchBytes	MIB_pfTblAddrEntry, 16
 #define MIB_pfLabels			MIB_pfMIBObjects, 10
 #define MIB_pfLabelNumber		MIB_pfLabels, 1
 #define MIB_pfLabelTable		MIB_pfLabels, 128
@@ -950,28 +964,51 @@
 	{ MIBDECL(enterasys) },				\
 	{ MIBDECL(sgi) },				\
 	{ MIBDECL(apple) },				\
+	{ MIBDECL(nasa) },				\
 	{ MIBDECL(att) },				\
 	{ MIBDECL(nokia) },				\
 	{ MIBDECL(cern) },				\
+	{ MIBDECL(oracle) },				\
+	{ MIBDECL(motorola) },				\
+	{ MIBDECL(ncr) },				\
+	{ MIBDECL(ericsson) },				\
 	{ MIBDECL(fsc) },				\
 	{ MIBDECL(compaq) },				\
+	{ MIBDECL(bmw) },				\
 	{ MIBDECL(dell) },				\
+	{ MIBDECL(iij) },				\
+	{ MIBDECL(sandia) },				\
+	{ MIBDECL(mercedesBenz) },			\
 	{ MIBDECL(alteon) },				\
 	{ MIBDECL(extremeNetworks) },			\
 	{ MIBDECL(foundryNetworks) },			\
 	{ MIBDECL(huawaiTechnology) },			\
 	{ MIBDECL(ucDavis) },				\
+	{ MIBDECL(freeBSD) },				\
 	{ MIBDECL(checkPoint) },			\
 	{ MIBDECL(juniper) },				\
+	{ MIBDECL(printerWorkingGroup) },		\
+	{ MIBDECL(audi) },				\
+	{ MIBDECL(volkswagen) },			\
+	{ MIBDECL(genua) },				\
+	{ MIBDECL(amazon) },				\
 	{ MIBDECL(force10Networks) },			\
+	{ MIBDECL(vMware) },				\
 	{ MIBDECL(alcatelLucent) },			\
 	{ MIBDECL(snom) },				\
+	{ MIBDECL(netSNMP) },				\
+	{ MIBDECL(netflix) },				\
 	{ MIBDECL(google) },				\
 	{ MIBDECL(f5Networks) },			\
 	{ MIBDECL(sFlow) },				\
 	{ MIBDECL(microSystems) },			\
+	{ MIBDECL(paloAltoNetworks) },			\
+	{ MIBDECL(h3c) },				\
 	{ MIBDECL(vantronix) },				\
+	{ MIBDECL(netBSD) },				\
 	{ MIBDECL(openBSD) },				\
+	{ MIBDECL(nicira) },				\
+	{ MIBDECL(esdenera) },				\
 							\
 	{ MIBDECL(ucdExperimental) },			\
 	{ MIBDECL(ucdDiskIOMIB) },			\
@@ -1108,6 +1145,10 @@
 	{ MIBDECL(pfTblOutXPassPkts) },			\
 	{ MIBDECL(pfTblOutXPassBytes) },		\
 	{ MIBDECL(pfTblStatsCleared) },			\
+	{ MIBDECL(pfTblInMatchPkts) },			\
+	{ MIBDECL(pfTblInMatchBytes) },			\
+	{ MIBDECL(pfTblOutMatchPkts) },			\
+	{ MIBDECL(pfTblOutMatchBytes) },		\
 	{ MIBDECL(pfTblAddrTable) },			\
 	{ MIBDECL(pfTblAddrEntry) },			\
 	{ MIBDECL(pfTblAddrTblIndex) },			\
@@ -1122,6 +1163,10 @@
 	{ MIBDECL(pfTblAddrOutBlockBytes) },		\
 	{ MIBDECL(pfTblAddrOutPassPkts) },		\
 	{ MIBDECL(pfTblAddrOutPassBytes) },		\
+	{ MIBDECL(pfTblAddrInMatchPkts) },		\
+	{ MIBDECL(pfTblAddrInMatchBytes) },		\
+	{ MIBDECL(pfTblAddrOutMatchPkts) },		\
+	{ MIBDECL(pfTblAddrOutMatchBytes) },		\
 	{ MIBDECL(pfLabels) },				\
 	{ MIBDECL(pfLabelNumber) },			\
 	{ MIBDECL(pfLabelTable) },			\

@@ -1,4 +1,4 @@
-/*	$OpenBSD: parser.c,v 1.66 2013/03/07 21:28:34 claudio Exp $ */
+/*	$OpenBSD: parser.c,v 1.68 2014/01/05 20:53:56 deraadt Exp $ */
 
 /*
  * Copyright (c) 2003, 2004 Henning Brauer <henning@openbsd.org>
@@ -55,7 +55,8 @@ enum token_type {
 	FAMILY,
 	GETOPT,
 	RTABLE,
-	FILENAME
+	FILENAME,
+	BULK
 };
 
 enum getopts {
@@ -280,6 +281,7 @@ static const struct token t_network[] = {
 	{ KEYWORD,	"flush",	NETWORK_FLUSH,	NULL},
 	{ KEYWORD,	"show",		NETWORK_SHOW,	t_network_show},
 	{ KEYWORD,	"mrt",		NETWORK_MRT,	t_show_mrt},
+	{ KEYWORD,	"bulk",		NETWORK_BULK_ADD,	t_set},
 	{ ENDTOKEN,	"",		NONE,		NULL}
 };
 
@@ -305,6 +307,8 @@ static const struct token t_set[] = {
 	{ KEYWORD,	"prepend-neighbor",	NONE,	t_prepnbr},
 	{ KEYWORD,	"prepend-self",		NONE,	t_prepself},
 	{ KEYWORD,	"weight",		NONE,	t_weight},
+	{ KEYWORD,	"add",			NETWORK_BULK_ADD,	NULL},
+	{ KEYWORD,	"delete",		NETWORK_BULK_REMOVE,	NULL},
 	{ ENDTOKEN,	"",			NONE,	NULL}
 };
 
@@ -403,7 +407,7 @@ parse(int argc, char *argv[])
 	res.community.type = COMMUNITY_UNSET;
 	TAILQ_INIT(&res.set);
 	if ((res.irr_outdir = getcwd(NULL, 0)) == NULL) {
-		fprintf(stderr, "getcwd failed: %s", strerror(errno));
+		fprintf(stderr, "getcwd failed: %s\n", strerror(errno));
 		return (NULL);
 	}
 
@@ -608,6 +612,10 @@ match_token(int *argc, char **argv[], const struct token table[])
 				t = &table[i];
 			}
 			break;
+		case BULK:
+			match++;
+			t = &table[i];
+			break;
 		case ENDTOKEN:
 			break;
 		}
@@ -685,6 +693,7 @@ show_valid_args(const struct token table[])
 		case FILENAME:
 			fprintf(stderr, "  <filename>\n");
 			break;
+		case BULK:
 		case ENDTOKEN:
 			break;
 		}

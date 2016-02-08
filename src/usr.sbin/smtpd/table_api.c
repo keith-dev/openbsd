@@ -1,4 +1,4 @@
-/*	$OpenBSD: table_api.c,v 1.2 2013/07/20 09:06:46 eric Exp $	*/
+/*	$OpenBSD: table_api.c,v 1.4 2014/02/04 13:55:34 eric Exp $	*/
 
 /*
  * Copyright (c) 2013 Eric Faurot <eric@openbsd.org>
@@ -44,6 +44,8 @@ static struct imsg	 imsg;
 static size_t		 rlen;
 static char		*rdata;
 static struct ibuf	*buf;
+static char		*name;
+
 #if 0
 static char		*rootpath;
 static char		*user = SMTPD_USER;
@@ -102,17 +104,21 @@ table_msg_close(void)
 static void
 table_msg_dispatch(void)
 {
-	uint32_t	 version;
+	struct table_open_params op;
 	char		 res[4096];
 	int		 type, r;
 
 	switch (imsg.hdr.type) {
 	case PROC_TABLE_OPEN:
-		table_msg_get(&version, sizeof(version));
+		table_msg_get(&op, sizeof op);
 		table_msg_end();
 
-		if (version != PROC_TABLE_API_VERSION) {
+		if (op.version != PROC_TABLE_API_VERSION) {
 			log_warnx("warn: table-api: bad API version");
+			fatalx("table-api: terminating");
+		}
+		if ((name = strdup(op.name)) == NULL) {
+			log_warn("warn: table-api");
 			fatalx("table-api: terminating");
 		}
 
@@ -199,7 +205,7 @@ table_msg_dispatch(void)
 		break;
 
 	default:
-		log_warnx("warn: table-api: bad message %i", imsg.hdr.type);
+		log_warnx("warn: table-api: bad message %d", imsg.hdr.type);
 		fatalx("table-api: exiting");
 	}
 }
@@ -226,6 +232,12 @@ void
 table_api_on_fetch(int(*cb)(int, char *, size_t))
 {
 	handler_fetch = cb;
+}
+
+const char *
+table_api_get_name(void)
+{
+	return name;
 }
 
 int

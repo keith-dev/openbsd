@@ -1,4 +1,4 @@
-/*	$OpenBSD: rtsock.c,v 1.126 2013/05/17 11:13:37 krw Exp $	*/
+/*	$OpenBSD: rtsock.c,v 1.139 2014/02/13 22:01:50 bluhm Exp $	*/
 /*	$NetBSD: rtsock.c,v 1.18 1996/03/29 00:32:10 cgd Exp $	*/
 
 /*
@@ -101,15 +101,6 @@ struct mbuf	*rt_msg1(int, struct rt_addrinfo *);
 int		 rt_msg2(int, int, struct rt_addrinfo *, caddr_t,
 		     struct walkarg *);
 void		 rt_xaddrs(caddr_t, caddr_t, struct rt_addrinfo *);
-
-/* Sleazy use of local variables throughout file, warning!!!! */
-#define dst	info.rti_info[RTAX_DST]
-#define gate	info.rti_info[RTAX_GATEWAY]
-#define netmask	info.rti_info[RTAX_NETMASK]
-#define genmask	info.rti_info[RTAX_GENMASK]
-#define ifpaddr	info.rti_info[RTAX_IFP]
-#define ifaaddr	info.rti_info[RTAX_IFA]
-#define brdaddr	info.rti_info[RTAX_BRD]
 
 struct routecb {
 	struct rawcb	rcb;
@@ -368,8 +359,9 @@ route_input(struct mbuf *m0, ...)
 		/* filter messages that the process does not want */
 		rop = (struct routecb *)rp;
 		rtm = mtod(m, struct rt_msghdr *);
-		if (rop->msgfilter != 0 && !(rop->msgfilter & (1 <<
-		    rtm->rtm_type)))
+		/* but RTM_DESYNC can't be filtered */
+		if (rtm->rtm_type != RTM_DESYNC && rop->msgfilter != 0 &&
+		    !(rop->msgfilter & (1 << rtm->rtm_type)))
 			continue;
 		switch (rtm->rtm_type) {
 		case RTM_IFANNOUNCE:
@@ -454,20 +446,20 @@ route_output(struct mbuf *m, ...)
 	struct ifaddr		*ifa = NULL;
 	struct socket		*so;
 	struct rawcb		*rp = NULL;
-	struct sockaddr_rtlabel	 sa_rt;
+	struct sockaddr_rtlabel	 sa_rl;
 #ifdef MPLS
 	struct sockaddr_mpls	 sa_mpls, *psa_mpls;
 #endif
-	const char		*label;
 	va_list			 ap;
 	u_int			 tableid;
 	u_int8_t		 prio;
+	u_char			 vers;
 
 	va_start(ap, m);
 	so = va_arg(ap, struct socket *);
 	va_end(ap);
 
-	dst = NULL;	/* for error handling (goto flush) */
+	info.rti_info[RTAX_DST] = NULL;	/* for error handling (goto flush) */
 	if (m == 0 || ((m->m_len < sizeof(int32_t)) &&
 	    (m = m_pullup(m, sizeof(int32_t))) == 0))
 		return (ENOBUFS);
@@ -479,7 +471,8 @@ route_output(struct mbuf *m, ...)
 		error = EINVAL;
 		goto fail;
 	}
-	switch (mtod(m, struct rt_msghdr *)->rtm_version) {
+	vers = mtod(m, struct rt_msghdr *)->rtm_version;
+	switch (vers) {
 	case RTM_VERSION:
 		if (len < sizeof(struct rt_msghdr)) {
 			error = EINVAL;
@@ -489,8 +482,8 @@ route_output(struct mbuf *m, ...)
 			error = EMSGSIZE;
 			goto fail;
 		}
-		R_Malloc(rtm, struct rt_msghdr *, len);
-		if (rtm == 0) {
+		rtm = malloc(len, M_RTABLE, M_NOWAIT);
+		if (rtm == NULL) {
 			error = ENOBUFS;
 			goto fail;
 		}
@@ -543,6 +536,8 @@ route_output(struct mbuf *m, ...)
 
 	/* make sure that kernel-only bits are not set */
 	rtm->rtm_priority &= RTP_MASK;
+	rtm->rtm_flags &= ~(RTF_DONE|RTF_CLONED);
+	rtm->rtm_fmask &= RTF_FMASK;
 
 	if (rtm->rtm_priority != 0) {
 		if (rtm->rtm_priority > RTP_MAX) {
@@ -561,23 +556,13 @@ route_output(struct mbuf *m, ...)
 	info.rti_addrs = rtm->rtm_addrs;
 	rt_xaddrs(rtm->rtm_hdrlen + (caddr_t)rtm, len + (caddr_t)rtm, &info);
 	info.rti_flags = rtm->rtm_flags;
-	if (dst == 0 || dst->sa_family >= AF_MAX ||
-	    (gate != 0 && gate->sa_family >= AF_MAX)) {
+	if (info.rti_info[RTAX_DST] == NULL ||
+	    info.rti_info[RTAX_DST]->sa_family >= AF_MAX ||
+	    (info.rti_info[RTAX_GATEWAY] != NULL &&
+	    info.rti_info[RTAX_GATEWAY]->sa_family >= AF_MAX) ||
+	    info.rti_info[RTAX_GENMASK] != NULL) {
 		error = EINVAL;
 		goto flush;
-	}
-	if (genmask) {
-		struct radix_node	*t;
-		t = rn_addmask(genmask, 0, 1);
-		if (t && genmask->sa_len >=
-		    ((struct sockaddr *)t->rn_key)->sa_len &&
-		    Bcmp((caddr_t *)genmask + 1, (caddr_t *)t->rn_key + 1,
-		    ((struct sockaddr *)t->rn_key)->sa_len) - 1)
-			genmask = (struct sockaddr *)(t->rn_key);
-		else {
-			error = ENOBUFS;
-			goto flush;
-		}
 	}
 #ifdef MPLS
 	info.rti_mpls = rtm->rtm_mpls;
@@ -585,7 +570,7 @@ route_output(struct mbuf *m, ...)
 
 	switch (rtm->rtm_type) {
 	case RTM_ADD:
-		if (gate == 0) {
+		if (info.rti_info[RTAX_GATEWAY] == NULL) {
 			error = EINVAL;
 			goto flush;
 		}
@@ -595,7 +580,6 @@ route_output(struct mbuf *m, ...)
 			rt_setmetrics(rtm->rtm_inits, &rtm->rtm_rmx,
 			    &saved_nrt->rt_rmx);
 			saved_nrt->rt_refcnt--;
-			saved_nrt->rt_genmask = genmask;
 			/* write back the priority the kernel used */
 			rtm->rtm_priority = saved_nrt->rt_priority & RTP_MASK;
 			rtm->rtm_index = saved_nrt->rt_ifp->if_index;
@@ -613,11 +597,13 @@ route_output(struct mbuf *m, ...)
 	case RTM_GET:
 	case RTM_CHANGE:
 	case RTM_LOCK:
-		if ((rnh = rt_gettable(dst->sa_family, tableid)) == NULL) {
+		rnh = rt_gettable(info.rti_info[RTAX_DST]->sa_family, tableid);
+		if (rnh == NULL) {
 			error = EAFNOSUPPORT;
 			goto flush;
 		}
-		rt = rt_lookup(dst, netmask, tableid);
+		rt = rt_lookup(info.rti_info[RTAX_DST],
+		    info.rti_info[RTAX_NETMASK], tableid);
 		rn = (struct radix_node *)rt;
 		if (rn == NULL || (rn->rn_flags & RNF_ROOT) != 0) {
 			error = ESRCH;
@@ -629,9 +615,10 @@ route_output(struct mbuf *m, ...)
 		 * for RTM_CHANGE/LOCK, if we got multipath routes,
 		 * we require users to specify a matching RTAX_GATEWAY.
 		 *
-		 * for RTM_GET, gate is optional even with multipath.
-		 * if gate == NULL the first match is returned.
-		 * (no need to call rt_mpath_matchgate if gate == NULL)
+		 * for RTM_GET, info.rti_info[RTAX_GATEWAY] is optional
+		 * even with multipath.
+		 * if it is NULL the first match is returned (no need to
+		 * call rt_mpath_matchgate).
 		 */
 		if (rn_mpath_capable(rnh)) {
 			/* first find correct priority bucket */
@@ -645,23 +632,28 @@ route_output(struct mbuf *m, ...)
 			}
 
 			/* if multipath routes */
-			if (rt_mpath_next(rt, 0)) {
-				if (gate)
-					rt = rt_mpath_matchgate(rt, gate, prio);
-				else if (rtm->rtm_type != RTM_GET)
+			if (rt_mpath_next(rt)) { /* XXX ignores down routes */
+				if (info.rti_info[RTAX_GATEWAY] != NULL) {
+					rt = rt_mpath_matchgate(rt,
+					    info.rti_info[RTAX_GATEWAY], prio);
+				} else if (rtm->rtm_type != RTM_GET) {
 					/*
-					 * only RTM_GET may use an empty gate
-					 * on multipath ...
+					 * only RTM_GET may use an empty
+					 * gateway  on multipath ...
 					 */
 					rt = NULL;
-			} else if (gate && (rtm->rtm_type == RTM_GET ||
-			    rtm->rtm_type == RTM_LOCK))
+				}
+			} else if ((info.rti_info[RTAX_GATEWAY] != NULL) &&
+			    (rtm->rtm_type == RTM_GET ||
+			     rtm->rtm_type == RTM_LOCK)) {
 				/*
-				 * ... but if a gate is specified RTM_GET
-				 * and RTM_LOCK must match the gate no matter
+				 * ... but if a gateway is specified RTM_GET
+				 * and RTM_LOCK must match the gateway no matter
 				 * what.
 				 */
-				rt = rt_mpath_matchgate(rt, gate, prio);
+				rt = rt_mpath_matchgate(rt,
+				    info.rti_info[RTAX_GATEWAY], prio);
+			}
 
 			if (!rt) {
 				error = ESRCH;
@@ -681,7 +673,8 @@ route_output(struct mbuf *m, ...)
 		 * if none of them have a netmask both are host routes which is
 		 * also a perfect match.
 		 */
-		if (rtm->rtm_type != RTM_GET && !rt_mask(rt) != !netmask) {
+		if (rtm->rtm_type != RTM_GET &&
+		    !rt_mask(rt) != !info.rti_info[RTAX_NETMASK]) {
 			error = ESRCH;
 			goto flush;
 		}
@@ -689,21 +682,11 @@ route_output(struct mbuf *m, ...)
 		switch (rtm->rtm_type) {
 		case RTM_GET:
 report:
-			dst = rt_key(rt);
-			gate = rt->rt_gateway;
-			netmask = rt_mask(rt);
-			genmask = rt->rt_genmask;
-
-			if (rt->rt_labelid) {
-				bzero(&sa_rt, sizeof(sa_rt));
-				sa_rt.sr_len = sizeof(sa_rt);
-				label = rtlabel_id2name(rt->rt_labelid);
-				if (label != NULL)
-					strlcpy(sa_rt.sr_label, label,
-					    sizeof(sa_rt.sr_label));
-				info.rti_info[RTAX_LABEL] =
-				    (struct sockaddr *)&sa_rt;
-			}
+			info.rti_info[RTAX_DST] = rt_key(rt);
+			info.rti_info[RTAX_GATEWAY] = rt->rt_gateway;
+			info.rti_info[RTAX_NETMASK] = rt_mask(rt);
+			info.rti_info[RTAX_LABEL] =
+			    rtlabel_id2sa(rt->rt_labelid, &sa_rl);
 #ifdef MPLS
 			if (rt->rt_flags & RTF_MPLS) {
 				bzero(&sa_mpls, sizeof(sa_mpls));
@@ -718,30 +701,32 @@ report:
 				rtm->rtm_mpls = info.rti_mpls;
 			}
 #endif
-			ifpaddr = 0;
-			ifaaddr = 0;
+			info.rti_info[RTAX_IFP] = NULL;
+			info.rti_info[RTAX_IFA] = NULL;
 			if (rtm->rtm_addrs & (RTA_IFP | RTA_IFA) &&
 			    (ifp = rt->rt_ifp) != NULL) {
-				ifpaddr =
+				info.rti_info[RTAX_IFP] =
 				    TAILQ_FIRST(&ifp->if_addrlist)->ifa_addr;
-				ifaaddr = rt->rt_ifa->ifa_addr;
+				info.rti_info[RTAX_IFA] = rt->rt_ifa->ifa_addr;
 				if (ifp->if_flags & IFF_POINTOPOINT)
-					brdaddr = rt->rt_ifa->ifa_dstaddr;
+					info.rti_info[RTAX_BRD] =
+					    rt->rt_ifa->ifa_dstaddr;
 				else
-					brdaddr = 0;
+					info.rti_info[RTAX_BRD] = NULL;
 				rtm->rtm_index = ifp->if_index;
 			}
 			len = rt_msg2(rtm->rtm_type, RTM_VERSION, &info, NULL,
 			    NULL);
 			if (len > rtm->rtm_msglen) {
 				struct rt_msghdr	*new_rtm;
-				R_Malloc(new_rtm, struct rt_msghdr *, len);
-				if (new_rtm == 0) {
+				new_rtm = malloc(len, M_RTABLE, M_NOWAIT);
+				if (new_rtm == NULL) {
 					error = ENOBUFS;
 					goto flush;
 				}
-				Bcopy(rtm, new_rtm, rtm->rtm_msglen);
-				Free(rtm); rtm = new_rtm;
+				memcpy(new_rtm, rtm, rtm->rtm_msglen);
+				free(rtm, M_RTABLE);
+				rtm = new_rtm;
 			}
 			rt_msg2(rtm->rtm_type, RTM_VERSION, &info, (caddr_t)rtm,
 			    NULL);
@@ -761,30 +746,37 @@ report:
 			if ((error = rt_getifa(&info, tableid)) != 0)
 				goto flush;
 			newgate = 0;
-			if (gate)
+			if (info.rti_info[RTAX_GATEWAY] != NULL)
 				if (rt->rt_gateway == NULL ||
-				    bcmp(rt->rt_gateway, gate, gate->sa_len))
+				    bcmp(rt->rt_gateway,
+				    info.rti_info[RTAX_GATEWAY],
+				    info.rti_info[RTAX_GATEWAY]->sa_len)) {
 					newgate = 1;
-			if (gate && rt_setgate(rt, rt_key(rt), gate, tableid)) {
+				}
+			if (info.rti_info[RTAX_GATEWAY] != NULL &&
+			    rt_setgate(rt, rt_key(rt),
+			    info.rti_info[RTAX_GATEWAY], tableid)) {
 				error = EDQUOT;
 				goto flush;
 			}
-			if (ifpaddr &&
-			    (ifa = ifa_ifwithnet(ifpaddr, tableid)) &&
-			    (ifp = ifa->ifa_ifp) && (ifaaddr || gate))
-				ifa = ifaof_ifpforaddr(ifaaddr ? ifaaddr : gate,
-				    ifp);
-			else if ((ifaaddr &&
-			    (ifa = ifa_ifwithaddr(ifaaddr, tableid))) ||
-			    (gate && (ifa = ifa_ifwithroute(rt->rt_flags,
-			    rt_key(rt), gate, tableid))))
+			if (info.rti_info[RTAX_IFP] != NULL && (ifa =
+			    ifa_ifwithnet(info.rti_info[RTAX_IFP], tableid)) &&
+			    (ifp = ifa->ifa_ifp) && (info.rti_info[RTAX_IFA] ||
+			    info.rti_info[RTAX_GATEWAY]))
+				ifa = ifaof_ifpforaddr(info.rti_info[RTAX_IFA] ?
+				    info.rti_info[RTAX_IFA] :
+				    info.rti_info[RTAX_GATEWAY], ifp);
+			else if ((info.rti_info[RTAX_IFA] != NULL && (ifa =
+			    ifa_ifwithaddr(info.rti_info[RTAX_IFA], tableid)))||
+			    (info.rti_info[RTAX_GATEWAY] != NULL && (ifa =
+			    ifa_ifwithroute(rt->rt_flags, rt_key(rt),
+				    info.rti_info[RTAX_GATEWAY], tableid))))
 				ifp = ifa->ifa_ifp;
 			if (ifa) {
 				struct ifaddr *oifa = rt->rt_ifa;
 				if (oifa != ifa) {
 				    if (oifa && oifa->ifa_rtrequest)
-					oifa->ifa_rtrequest(RTM_DELETE, rt,
-					    &info);
+					oifa->ifa_rtrequest(RTM_DELETE, rt);
 				    ifafree(rt->rt_ifa);
 				    rt->rt_ifa = ifa;
 				    ifa->ifa_refcnt++;
@@ -805,7 +797,7 @@ report:
 				    info.rti_info[RTAX_SRC];
 
 				if (rt->rt_llinfo == NULL) {
-					rt->rt_llinfo = (caddr_t)
+					rt->rt_llinfo =
 					    malloc(sizeof(struct rt_mpls),
 					    M_TEMP, M_NOWAIT|M_ZERO);
 				}
@@ -838,9 +830,9 @@ report:
 			}
 #endif
 			/* Hack to allow some flags to be toggled */
-			if (rtm->rtm_fmask & RTF_FMASK)
-				rt->rt_flags = (rt->rt_flags &
-				    ~rtm->rtm_fmask) |
+			if (rtm->rtm_fmask)
+				rt->rt_flags =
+				    (rt->rt_flags & ~rtm->rtm_fmask) |
 				    (rtm->rtm_flags & rtm->rtm_fmask);
 
 			rt_setmetrics(rtm->rtm_inits, &rtm->rtm_rmx,
@@ -849,9 +841,7 @@ report:
 			rtm->rtm_priority = rt->rt_priority & RTP_MASK;
 			rtm->rtm_flags = rt->rt_flags;
 			if (rt->rt_ifa && rt->rt_ifa->ifa_rtrequest)
-				rt->rt_ifa->ifa_rtrequest(RTM_ADD, rt, &info);
-			if (genmask)
-				rt->rt_genmask = genmask;
+				rt->rt_ifa->ifa_rtrequest(RTM_ADD, rt);
 			if (info.rti_info[RTAX_LABEL] != NULL) {
 				char *rtlabel = ((struct sockaddr_rtlabel *)
 				    info.rti_info[RTAX_LABEL])->sr_label;
@@ -859,7 +849,8 @@ report:
 				rt->rt_labelid =
 				    rtlabel_name2id(rtlabel);
 			}
-			if_group_routechange(dst, netmask);
+			if_group_routechange(info.rti_info[RTAX_DST],
+			    info.rti_info[RTAX_NETMASK]);
 			/* FALLTHROUGH */
 		case RTM_LOCK:
 			rt->rt_rmx.rmx_locks &= ~(rtm->rtm_inits);
@@ -879,8 +870,8 @@ flush:
 			rtm->rtm_flags |= RTF_DONE;
 		}
 	}
-	if (dst)
-		route_proto.sp_protocol = dst->sa_family;
+	if (info.rti_info[RTAX_DST])
+		route_proto.sp_protocol = info.rti_info[RTAX_DST]->sa_family;
 	if (rt)
 		rtfree(rt);
 
@@ -890,8 +881,7 @@ flush:
 	if (!(so->so_options & SO_USELOOPBACK)) {
 		if (route_cb.any_count <= 1) {
 fail:
-			if (rtm)
-				Free(rtm);
+			free(rtm, M_RTABLE);
 			m_freem(m);
 			return (error);
 		}
@@ -906,7 +896,7 @@ fail:
 			m = NULL;
 		} else if (m->m_pkthdr.len > rtm->rtm_msglen)
 			m_adj(m, rtm->rtm_msglen - m->m_pkthdr.len);
-		Free(rtm);
+		free(rtm, M_RTABLE);
 	}
 	if (m)
 		route_input(m, &route_proto, &route_src, &route_dst);
@@ -1041,7 +1031,7 @@ again:
 	for (i = 0; i < RTAX_MAX; i++) {
 		struct sockaddr *sa;
 
-		if ((sa = rtinfo->rti_info[i]) == 0)
+		if ((sa = rtinfo->rti_info[i]) == NULL)
 			continue;
 		rtinfo->rti_addrs |= (1 << i);
 		dlen = ROUNDUP(sa->sa_len);
@@ -1059,8 +1049,7 @@ again:
 		rw->w_needed += len;
 		if (rw->w_needed <= 0 && rw->w_where) {
 			if (rw->w_tmemsize < len) {
-				if (rw->w_tmem)
-					free(rw->w_tmem, M_RTABLE);
+				free(rw->w_tmem, M_RTABLE);
 				rw->w_tmem = malloc(len, M_RTABLE, M_NOWAIT);
 				if (rw->w_tmem)
 					rw->w_tmemsize = len;
@@ -1177,10 +1166,11 @@ rt_newaddrmsg(int cmd, struct ifaddr *ifa, int error, struct rtentry *rt)
 			else
 				ncmd = RTM_DELADDR;
 
-			ifaaddr = sa = ifa->ifa_addr;
-			ifpaddr = TAILQ_FIRST(&ifp->if_addrlist)->ifa_addr;
-			netmask = ifa->ifa_netmask;
-			brdaddr = ifa->ifa_dstaddr;
+			info.rti_info[RTAX_IFA] = sa = ifa->ifa_addr;
+			info.rti_info[RTAX_IFP] =
+			    TAILQ_FIRST(&ifp->if_addrlist)->ifa_addr;
+			info.rti_info[RTAX_NETMASK] = ifa->ifa_netmask;
+			info.rti_info[RTAX_BRD] = ifa->ifa_dstaddr;
 			if ((m = rt_msg1(ncmd, &info)) == NULL)
 				continue;
 			ifam = mtod(m, struct ifa_msghdr *);
@@ -1193,12 +1183,15 @@ rt_newaddrmsg(int cmd, struct ifaddr *ifa, int error, struct rtentry *rt)
 		if ((cmd == RTM_ADD && pass == 2) ||
 		    (cmd == RTM_DELETE && pass == 1)) {
 			struct rt_msghdr *rtm;
+			struct sockaddr_rtlabel sa_rl;
 			
 			if (rt == 0)
 				continue;
-			netmask = rt_mask(rt);
-			dst = sa = rt_key(rt);
-			gate = rt->rt_gateway;
+			info.rti_info[RTAX_NETMASK] = rt_mask(rt);
+			info.rti_info[RTAX_DST] = sa = rt_key(rt);
+			info.rti_info[RTAX_GATEWAY] = rt->rt_gateway;
+			info.rti_info[RTAX_LABEL] =
+			    rtlabel_id2sa(rt->rt_labelid, &sa_rl);
 			if ((m = rt_msg1(cmd, &info)) == NULL)
 				continue;
 			rtm = mtod(m, struct rt_msghdr *);
@@ -1253,33 +1246,22 @@ sysctl_dumpentry(struct radix_node *rn, void *v, u_int id)
 #ifdef MPLS
 	struct sockaddr_mpls	 sa_mpls;
 #endif
-	struct sockaddr_rtlabel	 sa_rt;
-	const char		*label;
+	struct sockaddr_rtlabel	 sa_rl;
 
 	if (w->w_op == NET_RT_FLAGS && !(rt->rt_flags & w->w_arg))
 		return 0;
 	bzero(&info, sizeof(info));
-	dst = rt_key(rt);
-	gate = rt->rt_gateway;
-	netmask = rt_mask(rt);
-	genmask = rt->rt_genmask;
+	info.rti_info[RTAX_DST] = rt_key(rt);
+	info.rti_info[RTAX_GATEWAY] = rt->rt_gateway;
+	info.rti_info[RTAX_NETMASK] = rt_mask(rt);
 	if (rt->rt_ifp) {
-		ifpaddr = TAILQ_FIRST(&rt->rt_ifp->if_addrlist)->ifa_addr;
-		ifaaddr = rt->rt_ifa->ifa_addr;
+		info.rti_info[RTAX_IFP] =
+		    TAILQ_FIRST(&rt->rt_ifp->if_addrlist)->ifa_addr;
+		info.rti_info[RTAX_IFA] = rt->rt_ifa->ifa_addr;
 		if (rt->rt_ifp->if_flags & IFF_POINTOPOINT)
-			brdaddr = rt->rt_ifa->ifa_dstaddr;
+			info.rti_info[RTAX_BRD] = rt->rt_ifa->ifa_dstaddr;
 	}
-	if (rt->rt_labelid) {
-		bzero(&sa_rt, sizeof(sa_rt));
-		sa_rt.sr_len = sizeof(sa_rt);
-		label = rtlabel_id2name(rt->rt_labelid);
-		if (label != NULL) {
-			strlcpy(sa_rt.sr_label, label,
-			    sizeof(sa_rt.sr_label));
-			info.rti_info[RTAX_LABEL] =
-			    (struct sockaddr *)&sa_rt;
-		}
-	}
+	info.rti_info[RTAX_LABEL] = rtlabel_id2sa(rt->rt_labelid, &sa_rl);
 #ifdef MPLS
 	if (rt->rt_flags & RTF_MPLS) {
 		bzero(&sa_mpls, sizeof(sa_mpls));
@@ -1330,7 +1312,7 @@ sysctl_iflist(int af, struct walkarg *w)
 		ifa = TAILQ_FIRST(&ifp->if_addrlist);
 		if (!ifa)
 			continue;
-		ifpaddr = ifa->ifa_addr;
+		info.rti_info[RTAX_IFP] = ifa->ifa_addr;
 		len = rt_msg2(RTM_IFINFO, RTM_VERSION, &info, 0, w);
 		if (w->w_where && w->w_tmem && w->w_needed <= 0) {
 			struct if_msghdr *ifm;
@@ -1346,13 +1328,13 @@ sysctl_iflist(int af, struct walkarg *w)
 				return (error);
 			w->w_where += len;
 		}
-		ifpaddr = 0;
+		info.rti_info[RTAX_IFP] = NULL;
 		while ((ifa = TAILQ_NEXT(ifa, ifa_list)) != NULL) {
 			if (af && af != ifa->ifa_addr->sa_family)
 				continue;
-			ifaaddr = ifa->ifa_addr;
-			netmask = ifa->ifa_netmask;
-			brdaddr = ifa->ifa_dstaddr;
+			info.rti_info[RTAX_IFA] = ifa->ifa_addr;
+			info.rti_info[RTAX_NETMASK] = ifa->ifa_netmask;
+			info.rti_info[RTAX_BRD] = ifa->ifa_dstaddr;
 			len = rt_msg2(RTM_NEWADDR, RTM_VERSION, &info, 0, w);
 			if (w->w_where && w->w_tmem && w->w_needed <= 0) {
 				struct ifa_msghdr *ifam;
@@ -1368,7 +1350,8 @@ sysctl_iflist(int af, struct walkarg *w)
 				w->w_where += len;
 			}
 		}
-		ifaaddr = netmask = brdaddr = 0;
+		info.rti_info[RTAX_IFA] = info.rti_info[RTAX_NETMASK] =
+		    info.rti_info[RTAX_BRD] = NULL;
 	}
 	return (0);
 }
@@ -1439,8 +1422,7 @@ sysctl_rtable(int *name, u_int namelen, void *where, size_t *given, void *new,
 		return (error);
 	}
 	splx(s);
-	if (w.w_tmem)
-		free(w.w_tmem, M_RTABLE);
+	free(w.w_tmem, M_RTABLE);
 	w.w_needed += w.w_given;
 	if (where) {
 		*given = w.w_where - (caddr_t)where;

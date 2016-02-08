@@ -1,4 +1,4 @@
-/*	$OpenBSD: editor.c,v 1.271 2013/06/11 16:42:04 deraadt Exp $	*/
+/*	$OpenBSD: editor.c,v 1.282 2014/02/22 13:27:46 krw Exp $	*/
 
 /*
  * Copyright (c) 1997-2000 Todd C. Miller <Todd.Miller@courtesan.com>
@@ -62,8 +62,8 @@ struct mountinfo {
 /* used when allocating all space according to recommendations */
 
 struct space_allocation {
-	daddr_t		minsz;	/* starts as blocks, xlated to sectors. */
-	daddr_t		maxsz;	/* starts as blocks, xlated to sectors. */
+	u_int64_t	minsz;	/* starts as blocks, xlated to sectors. */
+	u_int64_t	maxsz;	/* starts as blocks, xlated to sectors. */
 	int		rate;	/* % of extra space to use */
 	char	       *mp;
 };
@@ -71,7 +71,7 @@ struct space_allocation {
 /* entries for swap and var are changed by editor_allocspace() */
 const struct space_allocation alloc_big[] = {
 	{   MEG(80),         GIG(1),   5, "/"		},
-	{   MEG(80),       MEG(256),   5, "swap"	},
+	{   MEG(80),       MEG(256),  10, "swap"	},
 	{  MEG(120),         GIG(4),   8, "/tmp"	},
 	{   MEG(80),         GIG(4),  13, "/var"	},
 	{  MEG(900),         GIG(2),   5, "/usr"	},
@@ -83,7 +83,7 @@ const struct space_allocation alloc_big[] = {
 #else
 	{ MEG(1300),         GIG(2),   4, "/usr/obj"	},
 #endif
-	{    GIG(1),       GIG(300),  45, "/home"	}
+	{    GIG(1),       GIG(300),  40, "/home"	}
 	/* Anything beyond this leave for the user to decide */
 };
 
@@ -152,6 +152,8 @@ void	set_geometry(struct disklabel *, struct disklabel *, struct disklabel *,
 void	zero_partitions(struct disklabel *);
 u_int64_t max_partition_size(struct disklabel *, int);
 void	display_edit(struct disklabel *, char, u_int64_t);
+int64_t	getphysmem(void);
+void	psize(u_int64_t sz, char unit, struct disklabel *lp);
 
 static u_int64_t starting_sector;
 static u_int64_t ending_sector;
@@ -206,7 +208,7 @@ editor(int f)
 	}
 
 #ifdef SUN_CYLCHECK
-	if ((newlab.d_flags & D_VENDOR) & !aflag) {
+	if ((newlab.d_flags & D_VENDOR) && !aflag) {
 		puts("This platform requires that partition offsets/sizes "
 		    "be on cylinder boundaries.\n"
 		    "Partition offsets/sizes will be rounded to the "
@@ -368,9 +370,9 @@ editor(int f)
 				arg = getstring("Write new label?",
 				    "Write the modified label to disk?",
 				    "y");
-			} while (arg && tolower(*arg) != 'y' &&
-			    tolower(*arg) != 'n');
-			if (arg && tolower(*arg) == 'y') {
+			} while (arg && tolower((unsigned char)*arg) != 'y' &&
+			    tolower((unsigned char)*arg) != 'n');
+			if (arg && tolower((unsigned char)*arg) == 'y') {
 				if (writelabel(f, bootarea, &newlab) == 0) {
 					newlab = lab; /* lab now has UID info */
 					goto done;
@@ -512,6 +514,7 @@ getphysmem(void)
 	int64_t physmem;
 	size_t sz = sizeof(physmem);
 	int mib[] = { CTL_HW, HW_PHYSMEM64 };
+
 	if (sysctl(mib, 2, &physmem, &sz, NULL, (size_t)0) == -1)
 		errx(4, "can't get mem size");
 	return physmem;
@@ -529,7 +532,7 @@ editor_allocspace(struct disklabel *lp_org)
 	struct space_allocation *ap;
 	struct partition *pp;
 	struct diskchunk *chunks;
-	daddr_t secs, chunkstart, chunksize, cylsecs, totsecs, xtrasecs;
+	u_int64_t chunkstart, chunksize, cylsecs, secs, totsecs, xtrasecs;
 	char **partmp;
 	int i, j, lastalloc, index = 0, fragsize, partno;
 	int64_t physmem;
@@ -539,7 +542,7 @@ editor_allocspace(struct disklabel *lp_org)
 
 	overlap = 0;
 	for (i = 0;  i < MAXPARTITIONS; i++) {
-		daddr_t psz, pstart, pend;
+		u_int64_t psz, pstart, pend;
 
 		pp = &lp_org->d_partitions[i];
 		psz = DL_GETPSIZE(pp);
@@ -709,9 +712,9 @@ editor_resize(struct disklabel *lp, char *p)
 {
 	struct disklabel label;
 	struct partition *pp, *prev;
-	daddr_t secs, sz, off;
+	u_int64_t secs, sz, off;
 #ifdef SUN_CYLCHECK
-	daddr_t cylsecs;
+	u_int64_t cylsecs;
 #endif
 	int partno, i;
 
@@ -1179,7 +1182,7 @@ getuint64(struct disklabel *lp, char *prompt, char *helpstring,
 		/* deal with units */
 		if (buf[0] != '\0' && n > 0) {
 			if ((flags & DO_CONVERSIONS)) {
-				switch (tolower(buf[n-1])) {
+				switch (tolower((unsigned char)buf[n-1])) {
 
 				case 'c':
 					mult = lp->d_secpercyl;
@@ -1217,7 +1220,7 @@ getuint64(struct disklabel *lp, char *prompt, char *helpstring,
 					if (*p == '+' || *p == '-')
 						operator = *p++;
 					percent = strtod(p, NULL) / 100.0;
-					snprintf(buf, sizeof(buf), "%lld",
+					snprintf(buf, sizeof(buf), "%llu",
 					    DL_GETDSIZE(lp));
 					break;
 				case '&':
@@ -2318,7 +2321,7 @@ max_partition_size(struct disklabel *lp, int partno)
 }
 
 void
-psize(daddr_t sz, char unit, struct disklabel *lp)
+psize(u_int64_t sz, char unit, struct disklabel *lp)
 {
 	double d = scale(sz, unit, lp);
 	if (d < 0)

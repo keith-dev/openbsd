@@ -1,4 +1,4 @@
-/*	$OpenBSD: ntfs_subr.h,v 1.7 2013/05/30 20:11:06 guenther Exp $	*/
+/*	$OpenBSD: ntfs_subr.h,v 1.9 2014/01/19 18:35:45 tedu Exp $	*/
 /*	$NetBSD: ntfs_subr.h,v 1.1 2002/12/23 17:38:33 jdolecek Exp $	*/
 
 /*-
@@ -46,8 +46,8 @@ struct ntvattr {
 
 	u_int32_t		va_compression;
 	u_int32_t		va_compressalg;
-	u_int32_t		va_datalen;
-	u_int32_t		va_allocated;
+	u_int64_t		va_datalen;
+	u_int64_t		va_allocated;
 	cn_t	 		va_vcnstart;
 	cn_t	 		va_vcnend;
 	u_int16_t		va_index;
@@ -93,7 +93,6 @@ void ntfs_ntrele(struct ntnode *);
 int ntfs_loadntnode( struct ntfsmount *, struct ntnode * );
 int ntfs_writentvattr_plain(struct ntfsmount *, struct ntnode *, struct ntvattr *, off_t, size_t, void *, size_t *, struct uio *);
 int ntfs_writeattr_plain(struct ntfsmount *, struct ntnode *, u_int32_t, char *, off_t, size_t, void *, size_t *, struct uio *);
-void ntfs_toupper_init(void);
 int ntfs_fget(struct ntfsmount *, struct ntnode *, int, char *, struct fnode **);
 void ntfs_frele(struct fnode *);
 int ntfs_ntreaddir(struct ntfsmount *, struct fnode *, u_int32_t, struct attr_indexentry **, struct proc *);

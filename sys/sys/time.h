@@ -1,4 +1,4 @@
-/*	$OpenBSD: time.h,v 1.31 2013/07/10 03:05:35 guenther Exp $	*/
+/*	$OpenBSD: time.h,v 1.35 2013/10/25 04:42:48 guenther Exp $	*/
 /*	$NetBSD: time.h,v 1.18 1996/04/23 10:29:33 mycroft Exp $	*/
 
 /*
@@ -42,8 +42,8 @@
  * and used in other calls.
  */
 struct timeval {
-	long	tv_sec;		/* seconds */
-	long	tv_usec;	/* and microseconds */
+	time_t		tv_sec;		/* seconds */
+	suseconds_t	tv_usec;	/* and microseconds */
 };
 
 #ifndef _TIMESPEC_DECLARED
@@ -292,6 +292,7 @@ int	clock_gettime(struct proc *, clockid_t, struct timespec *);
 int	timespecfix(struct timespec *);
 int	itimerfix(struct timeval *);
 int	itimerdecr(struct itimerval *itp, int usec);
+void	itimerround(struct timeval *);
 int	settime(struct timespec *);
 int	ratecheck(struct timeval *, const struct timeval *);
 int	ppsratecheck(struct timeval *, int *, int);

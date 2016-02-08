@@ -1,4 +1,4 @@
-/*	$OpenBSD: uftdi.c,v 1.64 2013/04/15 09:23:02 mglocker Exp $ 	*/
+/*	$OpenBSD: uftdi.c,v 1.71 2014/02/04 12:03:12 mpi Exp $ 	*/
 /*	$NetBSD: uftdi.c,v 1.14 2003/02/23 04:20:07 simonb Exp $	*/
 
 /*
@@ -89,8 +89,6 @@ struct uftdi_softc {
 	u_char			 sc_lsr;
 
 	struct device		*sc_subdev;
-
-	u_char			 sc_dying;
 
 	u_int			 last_lcr;
 };
@@ -249,6 +247,7 @@ static const struct usb_devno uftdi_devs[] = {
 	{ USB_VENDOR_FTDI, USB_PRODUCT_FTDI_FT232_5 },
 	{ USB_VENDOR_FTDI, USB_PRODUCT_FTDI_FT232_6 },
 	{ USB_VENDOR_FTDI, USB_PRODUCT_FTDI_FT4232H },
+	{ USB_VENDOR_FTDI, USB_PRODUCT_FTDI_FTX },
 	{ USB_VENDOR_FTDI, USB_PRODUCT_FTDI_GAMMASCOUT },
 	{ USB_VENDOR_FTDI, USB_PRODUCT_FTDI_GUDE_1 },
 	{ USB_VENDOR_FTDI, USB_PRODUCT_FTDI_GUDE_2 },
@@ -681,6 +680,7 @@ static const struct usb_devno uftdi_devs[] = {
 	{ USB_VENDOR_POSIFLEX, USB_PRODUCT_POSIFLEX_PP7000_2 },
 	{ USB_VENDOR_RATOC, USB_PRODUCT_RATOC_REXUSB60F },
 	{ USB_VENDOR_RTSYSTEMS, USB_PRODUCT_RTSYSTEMS_CT57B },
+	{ USB_VENDOR_SACOM, USB_PRODUCT_SACOM_USB485BL },
 	{ USB_VENDOR_SEALEVEL, USB_PRODUCT_SEALEVEL_2101 },
 	{ USB_VENDOR_SEALEVEL, USB_PRODUCT_SEALEVEL_2102 },
 	{ USB_VENDOR_SEALEVEL, USB_PRODUCT_SEALEVEL_2103 },
@@ -748,7 +748,7 @@ int
 uftdi_match(struct device *parent, void *match, void *aux)
 {
 	struct usb_attach_arg *uaa = aux;
-	usbd_status err;
+	int err;
 	u_int8_t nifaces;
 
 	if (usb_lookup(uftdi_devs, uaa->vendor, uaa->product) == NULL)
@@ -799,6 +799,8 @@ uftdi_attach(struct device *parent, struct device *self, void *aux)
 
 	DPRINTFN(10,("\nuftdi_attach: sc=%p\n", sc));
 
+	sc->sc_udev = dev;
+
 	if (uaa->iface == NULL) {
 		/* Move the device into the configured state. */
 		err = usbd_set_config_index(dev, UFTDI_CONFIG_INDEX, 1);
@@ -819,7 +821,6 @@ uftdi_attach(struct device *parent, struct device *self, void *aux)
 
 	id = usbd_get_interface_descriptor(iface);
 
-	sc->sc_udev = dev;
 	sc->sc_iface = iface;
 
 	if (uaa->release < 0x0200) {
@@ -891,23 +892,20 @@ uftdi_attach(struct device *parent, struct device *self, void *aux)
 
 bad:
 	DPRINTF(("uftdi_attach: ATTACH ERROR\n"));
-	sc->sc_dying = 1;
+	usbd_deactivate(sc->sc_udev);
 }
 
 int
 uftdi_activate(struct device *self, int act)
 {
 	struct uftdi_softc *sc = (struct uftdi_softc *)self;
-	int rv = 0;
 
 	switch (act) {
 	case DVACT_DEACTIVATE:
-		if (sc->sc_subdev != NULL)
-			rv = config_deactivate(sc->sc_subdev);
-		sc->sc_dying = 1;
+		usbd_deactivate(sc->sc_udev);
 		break;
 	}
-	return (rv);
+	return (0);
 }
 
 int
@@ -934,7 +932,7 @@ uftdi_open(void *vsc, int portno)
 
 	DPRINTF(("uftdi_open: sc=%p\n", sc));
 
-	if (sc->sc_dying)
+	if (usbd_is_dying(sc->sc_udev))
 		return (EIO);
 
 	/* Perform a full reset on the device */
@@ -1058,7 +1056,7 @@ uftdi_param(void *vsc, int portno, struct termios *t)
 
 	DPRINTF(("uftdi_param: sc=%p\n", sc));
 
-	if (sc->sc_dying)
+	if (usbd_is_dying(sc->sc_udev))
 		return (EIO);
 
 	switch (sc->sc_type) {

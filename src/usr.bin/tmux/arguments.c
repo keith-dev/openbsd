@@ -1,4 +1,4 @@
-/* $OpenBSD: arguments.c,v 1.5 2013/05/31 12:19:34 nicm Exp $ */
+/* $OpenBSD: arguments.c,v 1.8 2014/01/15 11:44:18 nicm Exp $ */
 
 /*
  * Copyright (c) 2010 Nicholas Marriott <nicm@users.sourceforge.net>
@@ -20,6 +20,7 @@
 
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 #include "tmux.h"
 
@@ -77,7 +78,6 @@ struct args *
 args_parse(const char *template, int argc, char **argv)
 {
 	struct args	*args;
-	char		*ptr;
 	int		 opt;
 
 	args = xcalloc(1, sizeof *args);
@@ -88,7 +88,7 @@ args_parse(const char *template, int argc, char **argv)
 	while ((opt = getopt(argc, argv, template)) != -1) {
 		if (opt < 0)
 			continue;
-		if (opt == '?' || (ptr = strchr(template, opt)) == NULL) {
+		if (opt == '?' || strchr(template, opt) == NULL) {
 			args_free(args);
 			return (NULL);
 		}
@@ -204,19 +204,15 @@ args_set(struct args *args, u_char ch, const char *value)
 	/* Replace existing argument. */
 	if ((entry = args_find(args, ch)) != NULL) {
 		free(entry->value);
-		if (value != NULL)
-			entry->value = xstrdup(value);
-		else
-			entry->value = NULL;
-		return;
+		entry->value = NULL;
+	} else {
+		entry = xcalloc(1, sizeof *entry);
+		entry->flag = ch;
+		RB_INSERT(args_tree, &args->tree, entry);
 	}
 
-	entry = xcalloc(1, sizeof *entry);
-	entry->flag = ch;
 	if (value != NULL)
 		entry->value = xstrdup(value);
-
-	RB_INSERT(args_tree, &args->tree, entry);
 }
 
 /* Get argument value. Will be NULL if it isn't present. */

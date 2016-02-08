@@ -1,5 +1,10 @@
-#	$OpenBSD: Makefile,v 1.3 2013/02/05 22:40:57 bluhm Exp $
+#	$OpenBSD: Makefile,v 1.5 2013/09/04 22:37:49 bluhm Exp $
 
-SUBDIR+= mtree pkg_add relayd
+SUBDIR += mtree
+SUBDIR += relayd
+
+.if defined(REGRESS_FULL)
+SUBDIR += pkg_add
+.endif
 
 .include <bsd.subdir.mk>

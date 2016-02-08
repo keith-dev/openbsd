@@ -32,7 +32,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * @(#) $Header: /cvs/src/lib/libpcap/pcap.h,v 1.15 2012/05/25 01:58:08 lteo Exp $ (LBL)
+ * @(#) $Header: /var/www/space/cvs/src/lib/libpcap/pcap.h,v 1.15 2012/05/25 01:58:08 lteo Exp $ (LBL)
  */
 
 #ifndef lib_pcap_h

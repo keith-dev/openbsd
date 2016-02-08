@@ -1,4 +1,4 @@
-/*	$OpenBSD: conf.c,v 1.17 2013/06/03 15:54:47 tedu Exp $ */
+/*	$OpenBSD: conf.c,v 1.19 2013/11/04 14:11:29 deraadt Exp $ */
 
 /*
  * Copyright (c) 1997 Per Fogelstrom
@@ -113,9 +113,7 @@ cdev_decl(pci);
 #include "ulpt.h"
 #include "urio.h"
 #include "ucom.h"
-#include "uscanner.h"
 
-#include "bthub.h"
 #include "vscsi.h"
 #include "pppx.h"
 #include "hotplug.h"
@@ -202,14 +200,14 @@ struct cdevsw cdevsw[] = {
 #endif
 	cdev_notdef(),			/* 72 */
 	cdev_notdef(),			/* 73 */
-	cdev_usbdev_init(NUSCANNER,uscanner), /* 74: usb scanner */
+	cdev_notdef(),			/* 74: was USB scanners */
 	cdev_notdef(),			/* 75 */
 	cdev_notdef(),			/* 76 */
 	cdev_ptm_init(NPTY,ptm),	/* 77: pseudo-tty ptm device */
 	cdev_vscsi_init(NVSCSI,vscsi),	/* 78: vscsi */
 	cdev_notdef(),			/* 79 */
 	cdev_notdef(),			/* 80 */
-	cdev_bthub_init(NBTHUB,bthub),	/* 81: bluetooth hub */
+	cdev_notdef(),
 	cdev_disk_init(1,diskmap),	/* 82: disk mapper */
 	cdev_pppx_init(NPPPX,pppx),	/* 83: pppx */
 	cdev_hotplug_init(NHOTPLUG,hotplug),	/* 84: devices hot plugging */

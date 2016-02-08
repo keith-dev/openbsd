@@ -1,4 +1,4 @@
-/* $OpenBSD: fusebuf.h,v 1.3 2013/06/04 18:25:09 tedu Exp $ */
+/* $OpenBSD: fusebuf.h,v 1.9 2014/01/16 09:31:44 syl Exp $ */
 /*
  * Copyright (c) 2013 Sylvestre Gallon
  * Copyright (c) 2013 Martin Pieuchot
@@ -22,18 +22,16 @@
 /*
  * Fusebufs are of a single size, 4096 bytes.
  */
-#define	FUSEBUFSIZE	4096
-#define	FUSEFDSIZE	sizeof(((struct fusebuf *)0)->F_dat.FD)
-#define	FUSELEN	(FUSEBUFSIZE - sizeof(struct fb_hdr) - sizeof(union uFD))
+#define	FUSEBUFSIZE	(sizeof(struct fusebuf))
+#define FUSEBUFMAXSIZE	(4096*1024)
 
-/* header at beginning of each fusebuf(9): */
+/* header at beginning of each fusebuf: */
 struct fb_hdr {
 	SIMPLEQ_ENTRY(fusebuf)	fh_next;	/* next buffer in chain */
 	size_t			fh_len;		/* Amount of data */
-	size_t			fh_resid;	/* Needed for partial rw */
-	uint32_t		fh_err;		/* Err code to pass back */
+	int			fh_err;		/* errno to pass back */
 	int			fh_type;	/* type of data */
-	ino_t			fh_ino;		/* Inode of this fusebuf(9) */
+	ino_t			fh_ino;		/* Inode of this fusebuf */
 	uint64_t		fh_uuid;	/* Uuid to track the answer */
 };
 
@@ -45,6 +43,7 @@ struct fb_io {
 	size_t		fi_len;		/* Length of data */
 	mode_t		fi_mode;	/* mode for fd */
 	uint32_t	fi_flags;	/* flags on transfer */
+	dev_t		fi_rdev;	/* dev for mknod */
 };
 
 /*
@@ -54,51 +53,45 @@ struct fb_io {
  *
  * F_databuf can be superior to FUSELEN for fusefs_read, fusefs_writes and
  * fusefs_readdir. If it is the case the transfer will be split in N
- * fusebuf(9) with a changing offset in FD_io.
+ * fusebuf with a changing offset in FD_io.
  *
  * When the userland file system answers to this operation it uses
  * the same ID (fh_uuid).
  */
 struct fusebuf {
 	struct fb_hdr	fb_hdr;
-	struct {
-		union uFD {
-			struct statvfs	FD_stat;	/* vfs statfs */
-			struct vattr	FD_vattr;	/* for attr vnops */
-			struct fb_io	FD_io;		/* for file io vnops */
-
-		} FD;
-		char	F_databuf[FUSELEN];
-	} F_dat;
+	union {
+		struct statvfs	FD_stat;	/* vfs statfs */
+		struct vattr	FD_vattr;	/* for attr vnops */
+		struct fb_io	FD_io;		/* for file io vnops */
+	} FD;
+	uint8_t *F_databuf;			/* data's */
 };
 
 #define fb_next		fb_hdr.fh_next
 #define fb_len		fb_hdr.fh_len
-#define fb_resid	fb_hdr.fh_resid
 #define fb_err		fb_hdr.fh_err
 #define fb_type		fb_hdr.fh_type
 #define fb_ino		fb_hdr.fh_ino
 #define fb_uuid		fb_hdr.fh_uuid
 
-#define fb_stat		F_dat.FD.FD_stat
-#define fb_vattr	F_dat.FD.FD_vattr
-#define fb_io_fd	F_dat.FD.FD_io.fi_fd
-#define fb_io_ino	F_dat.FD.FD_io.fi_ino
-#define fb_io_off	F_dat.FD.FD_io.fi_off
-#define fb_io_len	F_dat.FD.FD_io.fi_len
-#define fb_io_mode	F_dat.FD.FD_io.fi_mode
-#define fb_io_flags	F_dat.FD.FD_io.fi_flags
-#define	fb_dat		F_dat.F_databuf
+#define fb_stat		FD.FD_stat
+#define fb_vattr	FD.FD_vattr
+#define fb_io_fd	FD.FD_io.fi_fd
+#define fb_io_ino	FD.FD_io.fi_ino
+#define fb_io_off	FD.FD_io.fi_off
+#define fb_io_len	FD.FD_io.fi_len
+#define fb_io_mode	FD.FD_io.fi_mode
+#define fb_io_flags	FD.FD_io.fi_flags
+#define fb_io_rdev	FD.FD_io.fi_rdev
+#define	fb_dat		F_databuf
 
 /*
  * Macros for type conversion
- * fbtod(fb,t) -	convert fusebuf(9) pointer to data pointer of correct
+ * fbtod(fb,t) -	convert fusebuf pointer to data pointer of correct
  *			type
  */
 #define	fbtod(fb,t)	((t)((fb)->fb_dat))
-
-/* helper to get F_databuf size */
-#define fbdatsize(fb)	((fb)->fb_len - FUSEFDSIZE)
 
 /* flags needed by setattr */
 #define FUSE_FATTR_MODE		(1 << 0)
@@ -109,7 +102,7 @@ struct fusebuf {
 #define FUSE_FATTR_MTIME	(1 << 5)
 #define FUSE_FATTR_FH		(1 << 6)
 
-/* fusebuf(9) types */
+/* fusebuf types */
 #define	FBT_LOOKUP	0
 #define FBT_GETATTR	1
 #define FBT_SETATTR	2
@@ -136,15 +129,17 @@ struct fusebuf {
 #define FBT_ACCESS	24
 #define FBT_CREATE	25
 #define FBT_DESTROY	26
+#define FBT_RECLAIM	27
 
 #ifdef _KERNEL
 
 /* The node ID of the root inode */
 #define FUSE_ROOT_ID	1
 
-/* fusebuf(9) prototypes */
+/* fusebuf prototypes */
 struct	fusebuf *fb_setup(size_t, ino_t, int, struct proc *);
 int	fb_queue(dev_t, struct fusebuf *);
+void	fb_delete(struct fusebuf *);
 
 #endif /* _KERNEL */
 #endif /* _SYS_FUSEBUF_H_ */

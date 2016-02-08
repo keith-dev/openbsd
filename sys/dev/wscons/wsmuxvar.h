@@ -1,4 +1,4 @@
-/*	$OpenBSD: wsmuxvar.h,v 1.8 2008/06/26 05:42:19 ray Exp $	*/
+/*	$OpenBSD: wsmuxvar.h,v 1.10 2014/01/26 17:48:08 miod Exp $	*/
 /*      $NetBSD: wsmuxvar.h,v 1.10 2005/04/30 03:47:12 augustss Exp $   */
 
 /*
@@ -44,7 +44,7 @@ struct wsevsrc {
 #endif
 #if NWSMUX > 0
 	struct wsmux_softc *me_parent;	/* parent mux device */
-	CIRCLEQ_ENTRY(wsevsrc) me_next;	/* sibling pointers */
+	TAILQ_ENTRY(wsevsrc) me_next;	/* sibling pointers */
 #endif
 };
 
@@ -76,7 +76,7 @@ struct wssrcops {
 struct wsmux_softc {
 	struct wsevsrc sc_base;
 	struct proc *sc_p;		/* open proc */
-	CIRCLEQ_HEAD(, wsevsrc) sc_cld;	/* list of children */
+	TAILQ_HEAD(, wsevsrc) sc_cld;	/* list of children */
 	u_int32_t sc_kbd_layout;	/* current layout of keyboard */
 #ifdef WSDISPLAY_COMPAT_RAWKBD
 	int sc_rawkbd;			/* A hack to remember the kbd mode */
@@ -93,6 +93,8 @@ struct	wsmux_softc *wsmux_create(const char *, int);
 int	wsmux_attach_sc(struct wsmux_softc *, struct wsevsrc *);
 void	wsmux_detach_sc(struct wsevsrc *);
 int	wsmux_set_display(struct wsmux_softc *, struct device *);
+uint32_t wsmux_get_layout(struct wsmux_softc *);
+void	wsmux_set_layout(struct wsmux_softc *, uint32_t);
 
 int	wskbd_add_mux(int, struct wsmux_softc *);
 int	wsmouse_add_mux(int, struct wsmux_softc *);

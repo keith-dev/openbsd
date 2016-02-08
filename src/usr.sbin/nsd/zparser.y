@@ -2,7 +2,7 @@
 /*
  * zyparser.y -- yacc grammar for (DNS) zone files
  *
- * Copyright (c) 2001-2011, NLnet Labs. All rights reserved.
+ * Copyright (c) 2001-2006, NLnet Labs. All rights reserved.
  *
  * See LICENSE for the license.
  *
@@ -67,7 +67,7 @@ nsec3_add_params(const char* hash_algo_str, const char* flag_str,
 %token <type> T_OPT T_APL T_UINFO T_UID T_GID T_UNSPEC T_TKEY T_TSIG T_IXFR
 %token <type> T_AXFR T_MAILB T_MAILA T_DS T_DLV T_SSHFP T_RRSIG T_NSEC T_DNSKEY
 %token <type> T_SPF T_NSEC3 T_IPSECKEY T_DHCID T_NSEC3PARAM T_TLSA
-%token <type> T_NID T_L32 T_L64 T_LP
+%token <type> T_NID T_L32 T_L64 T_LP T_EUI48 T_EUI64 T_CAA
 
 /* other tokens */
 %token	       DOLLAR_TTL DOLLAR_ORIGIN NL SP
@@ -147,6 +147,8 @@ ttl_directive:	DOLLAR_TTL sp STR trail
 
 origin_directive:	DOLLAR_ORIGIN sp abs_dname trail
     {
+	    /* if previous origin is unused, remove it, do not leak it */
+	    domain_table_deldomain(parser->db, parser->origin);
 	    parser->origin = $3;
     }
     |	DOLLAR_ORIGIN sp rel_dname trail
@@ -242,6 +244,9 @@ label:	STR
 	    if ($1.len > MAXLABELLEN) {
 		    zc_error("label exceeds %d character limit", MAXLABELLEN);
 		    $$ = error_dname;
+	    } else if ($1.len <= 0) {
+		    zc_error("zero label length");
+		    $$ = error_dname;
 	    } else {
 		    $$ = dname_make_from_label(parser->rr_region,
 					       (uint8_t *) $1.str,
@@ -250,7 +255,7 @@ label:	STR
     }
     |	BITLAB
     {
-	    zc_error("bitlabels are not supported. RFC2673 has status experimental.");
+	    zc_error("bitlabels are now deprecated. RFC2673 is obsoleted.");
 	    $$ = error_dname;
     }
     ;
@@ -335,11 +340,11 @@ wire_rel_dname:	wire_label
 
 str_seq:	STR
     {
-	    zadd_rdata_txt_wireformat(zparser_conv_text(parser->region, $1.str, $1.len), 1);
+	    zadd_rdata_txt_wireformat(zparser_conv_text(parser->rr_region, $1.str, $1.len), 1);
     }
     |	str_seq sp STR
     {
-	    zadd_rdata_txt_wireformat(zparser_conv_text(parser->region, $3.str, $3.len), 0);
+	    zadd_rdata_txt_wireformat(zparser_conv_text(parser->rr_region, $3.str, $3.len), 0);
     }
     ;
 
@@ -603,6 +608,12 @@ type_and_rdata:
     |	T_L64 sp rdata_unknown { $$ = $1; parse_unknown_rdata($1, $3); }
     |	T_LP sp rdata_lp
     |	T_LP sp rdata_unknown { $$ = $1; parse_unknown_rdata($1, $3); }
+    |	T_EUI48 sp rdata_eui48
+    |	T_EUI48 sp rdata_unknown { $$ = $1; parse_unknown_rdata($1, $3); }
+    |	T_EUI64 sp rdata_eui64
+    |	T_EUI64 sp rdata_unknown { $$ = $1; parse_unknown_rdata($1, $3); }
+    |	T_CAA sp rdata_caa
+    |	T_CAA sp rdata_unknown { $$ = $1; parse_unknown_rdata($1, $3); }
     |	T_UTYPE sp rdata_unknown { $$ = $1; parse_unknown_rdata($1, $3); }
     |	STR error NL
     {
@@ -984,6 +995,27 @@ rdata_lp:	STR sp dname trail
     }
     ;
 
+rdata_eui48:	STR trail
+    {
+	    zadd_rdata_wireformat(zparser_conv_eui(parser->region, $1.str, 48));
+    }
+    ;
+
+rdata_eui64:	STR trail
+    {
+	    zadd_rdata_wireformat(zparser_conv_eui(parser->region, $1.str, 64));
+    }
+    ;
+
+/* RFC 6844 */
+rdata_caa:	STR sp STR sp STR trail
+    {
+	    zadd_rdata_wireformat(zparser_conv_byte(parser->region, $1.str)); /* Flags */
+	    zadd_rdata_wireformat(zparser_conv_tag(parser->region, $3.str, $3.len)); /* Tag */
+	    zadd_rdata_wireformat(zparser_conv_long_text(parser->region, $5.str, $5.len)); /* Value */
+    }
+    ;
+
 rdata_unknown:	URR sp STR sp str_sp_seq trail
     {
 	    /* $2 is the number of octects, currently ignored */
@@ -1067,11 +1099,11 @@ static void
 error_va_list(unsigned line, const char *fmt, va_list args)
 {
 	if (parser->filename) {
-		fprintf(stderr, "%s:%u: ", parser->filename, line);
+		char message[MAXSYSLOGMSGLEN];
+		vsnprintf(message, sizeof(message), fmt, args);
+		log_msg(LOG_ERR, "%s:%u: %s", parser->filename, line, message);
 	}
-	fprintf(stderr, "error: ");
-	vfprintf(stderr, fmt, args);
-	fprintf(stderr, "\n");
+	else log_vmsg(LOG_ERR, fmt, args);
 
 	++parser->errors;
 	parser->error_occurred = 1;
@@ -1103,11 +1135,11 @@ static void
 warning_va_list(unsigned line, const char *fmt, va_list args)
 {
 	if (parser->filename) {
-		fprintf(stderr, "%s:%u: ", parser->filename, line);
+		char m[MAXSYSLOGMSGLEN];
+		vsnprintf(m, sizeof(m), fmt, args);
+		log_msg(LOG_WARNING, "%s:%u: %s", parser->filename, line, m);
 	}
-	fprintf(stderr, "warning: ");
-	vfprintf(stderr, fmt, args);
-	fprintf(stderr, "\n");
+	else log_vmsg(LOG_WARNING, fmt, args);
 }
 
 void

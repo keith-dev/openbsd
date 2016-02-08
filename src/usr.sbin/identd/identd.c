@@ -1,4 +1,4 @@
-/*	$OpenBSD: identd.c,v 1.20 2013/07/17 15:38:48 okan Exp $ */
+/*	$OpenBSD: identd.c,v 1.24 2014/01/07 00:11:11 dlg Exp $ */
 
 /*
  * Copyright (c) 2013 David Gwynne <dlg@openbsd.org>
@@ -25,7 +25,6 @@
 #include <sys/uio.h>
 
 #include <netinet/in.h>
-#include <netinet/ip_var.h>
 #include <netinet/tcp.h>
 #include <netinet/tcp_timer.h>
 #include <netinet/tcp_var.h>
@@ -176,7 +175,7 @@ const struct loggers *logger = &conslogger;
 
 #define sa(_ss) ((struct sockaddr *)(_ss))
 
-__dead void
+static __dead void
 usage(void)
 {
 	extern char *__progname;
@@ -396,7 +395,7 @@ parent_rd(int fd, short events, void *arg)
 		goto done;
 	}
 
-	r->buflen = n;
+	r->buflen = n + 1;
 
 done:
 	SIMPLEQ_INSERT_TAIL(&sc.parent.replies, r, entry);
@@ -746,7 +745,7 @@ void
 identd_request(int fd, short events, void *arg)
 {
 	struct ident_client *c = arg;
-	char buf[64];
+	unsigned char buf[64];
 	ssize_t n, i;
 	char *errstr = unknown_err ? "UNKNOWN-ERROR" : "INVALID-PORT";
 

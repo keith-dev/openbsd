@@ -1,4 +1,4 @@
-/*	$OpenBSD: bgpctl.c,v 1.170 2013/04/09 14:51:33 gilles Exp $ */
+/*	$OpenBSD: bgpctl.c,v 1.173 2013/11/13 22:52:41 sthen Exp $ */
 
 /*
  * Copyright (c) 2003 Henning Brauer <henning@openbsd.org>
@@ -24,6 +24,8 @@
 #include <net/if_types.h>
 
 #include <err.h>
+#include <errno.h>
+#include <fcntl.h>
 #include <netdb.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -91,6 +93,10 @@ void		 network_mrt_dump(struct mrt_rib *, struct mrt_peer *, void *);
 void		 show_mrt_state(struct mrt_bgp_state *, void *);
 void		 show_mrt_msg(struct mrt_bgp_msg *, void *);
 void		 mrt_to_bgpd_addr(union mrt_addr *, struct bgpd_addr *);
+void		 network_bulk(struct parse_result *);
+
+/* parser.c */
+int		 parse_prefix(const char *, struct bgpd_addr *, u_int8_t *);
 
 struct imsgbuf	*ibuf;
 struct mrt_parser show_mrt = { show_mrt_dump, show_mrt_state, show_mrt_msg };
@@ -314,6 +320,12 @@ main(int argc, char *argv[])
 		imsg_compose(ibuf, IMSG_CTL_NEIGHBOR_DESTROY, 0, 0, -1,
 		    &neighbor, sizeof(neighbor));
 		break;
+	case NETWORK_BULK_ADD:
+	case NETWORK_BULK_REMOVE:
+		network_bulk(res);
+		printf("requests sent.\n");
+		done = 1;
+		break;
 	case NETWORK_ADD:
 	case NETWORK_REMOVE:
 		bzero(&net, sizeof(net));
@@ -376,7 +388,7 @@ main(int argc, char *argv[])
 	}
 
 	while (ibuf->w.queued)
-		if (msgbuf_write(&ibuf->w) < 0)
+		if (msgbuf_write(&ibuf->w) <= 0 && errno != EAGAIN)
 			err(1, "write error");
 
 	while (!done) {
@@ -449,6 +461,8 @@ main(int argc, char *argv[])
 			case NETWORK_ADD:
 			case NETWORK_REMOVE:
 			case NETWORK_FLUSH:
+			case NETWORK_BULK_ADD:
+			case NETWORK_BULK_REMOVE:
 			case IRRFILTER:
 			case LOG_VERBOSE:
 			case LOG_BRIEF:
@@ -1619,6 +1633,61 @@ show_result(struct imsg *imsg)
 }
 
 void
+network_bulk(struct parse_result *res)
+{
+	struct network_config net;
+	struct filter_set *s = NULL;
+	struct bgpd_addr h;
+	char *b, *buf, *lbuf;
+	size_t slen;
+	u_int8_t len;
+	FILE *f;
+
+	if ((f = fdopen(STDIN_FILENO, "r")) != NULL) {
+		lbuf = NULL;
+		while ((buf = fgetln(f, &slen))) {
+			if (buf[slen - 1] == '\n')
+				buf[slen - 1] = '\0';
+			else {
+				if ((lbuf = malloc(slen + 1)) == NULL)
+					err(1, NULL);
+				memcpy(lbuf, buf, slen);
+				lbuf[slen] = '\0';
+				buf = lbuf;
+			}
+
+			while ((b = strsep(&buf, " \t")) != NULL) {
+				/* Don't process commented entries */
+				if (strchr(b, '#') != NULL)
+					break;
+				bzero(&net, sizeof(net));
+				parse_prefix(b, &h, &len);
+				memcpy(&net.prefix, &h, sizeof(h));
+				net.prefixlen = len;
+
+				if (res->action == NETWORK_BULK_ADD) {
+					imsg_compose(ibuf, IMSG_NETWORK_ADD,
+					    0, 0, -1, &net, sizeof(net));
+					TAILQ_FOREACH(s, &res->set, entry) {
+						imsg_compose(ibuf,
+						    IMSG_FILTER_SET,
+						    0, 0, -1, s, sizeof(*s));
+					}
+					imsg_compose(ibuf, IMSG_NETWORK_DONE,
+					    0, 0, -1, NULL, 0);
+				} else
+					imsg_compose(ibuf, IMSG_NETWORK_REMOVE,
+					     0, 0, -1, &net, sizeof(net));
+			}
+			free(lbuf);
+		}
+		fclose(f);
+	} else {
+		err(1, "Failed to open stdin\n");
+	}
+}
+
+void
 show_mrt_dump(struct mrt_rib *mr, struct mrt_peer *mp, void *arg)
 {
 	struct ctl_show_rib		 ctl;
@@ -1758,7 +1827,7 @@ network_mrt_dump(struct mrt_rib *mr, struct mrt_peer *mp, void *arg)
 		imsg_compose(ibuf, IMSG_NETWORK_DONE, 0, 0, -1, NULL, 0);
 
 		while (ibuf->w.queued) {
-			if (msgbuf_write(&ibuf->w) < 0)
+			if (msgbuf_write(&ibuf->w) <= 0 && errno != EAGAIN)
 				err(1, "write error");
 		}
 	}
@@ -1819,11 +1888,11 @@ log_warn(const char *emsg, ...)
 void
 fatal(const char *emsg)
 {
-	err(1, emsg);
+	err(1, "%s", emsg);
 }
 
 void
 fatalx(const char *emsg)
 {
-	errx(1, emsg);
+	errx(1, "%s", emsg);
 }

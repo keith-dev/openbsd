@@ -1,4 +1,4 @@
-/*	$OpenBSD: route6d.c,v 1.56 2013/03/21 04:43:17 deraadt Exp $	*/
+/*	$OpenBSD: route6d.c,v 1.61 2014/01/22 06:24:23 claudio Exp $	*/
 /*	$KAME: route6d.c,v 1.111 2006/10/25 06:38:13 jinmei Exp $	*/
 
 /*
@@ -40,6 +40,7 @@
 #include <stdarg.h>
 #include <syslog.h>
 #include <stddef.h>
+#include <stdint.h>
 #include <errno.h>
 #include <err.h>
 #include <util.h>
@@ -55,7 +56,7 @@
 #include <net/if.h>
 #include <net/route.h>
 #include <netinet/in.h>
-#include <netinet/in_var.h>
+#include <netinet6/in6_var.h>
 #include <netinet/ip6.h>
 #include <netinet/udp.h>
 #include <netdb.h>
@@ -924,7 +925,8 @@ sendpacket(struct sockaddr_in6 *sin6, int len)
 	struct iovec iov[2];
 	union {
 		struct cmsghdr hdr;
-		u_char buf[CMSG_SPACE(sizeof(struct in6_pktinfo))];
+		u_char buf[CMSG_SPACE(sizeof(struct in6_pktinfo)) +
+		    CMSG_SPACE(sizeof(int))];
 	} cmsgbuf;
 	struct in6_pktinfo *pi;
 	int idx;
@@ -1138,7 +1140,7 @@ riprecv(void)
 	if (iff_find(ifcp, 'N') != NULL)
 		return;
 
-	tracet(1, "Recv(%s): from %s.%d info(%d)\n",
+	tracet(1, "Recv(%s): from %s.%d info(%zd)\n",
 	    ifcp->ifc_name, inet6_n2p(&nh), ntohs(fsock.sin6_port), nn);
 
 	t = time(NULL);
@@ -2485,13 +2487,13 @@ void
 rt_entry(struct rt_msghdr *rtm, int again)
 {
 	struct	sockaddr_in6 *sin6_dst, *sin6_gw, *sin6_mask;
-	struct	sockaddr_in6 *sin6_genmask, *sin6_ifp;
+	struct	sockaddr_in6 *sin6_ifp;
 	char	*rtmp, *ifname = NULL;
 	struct	riprt *rrt, *orrt;
 	struct	netinfo6 *np;
 	int	s;
 
-	sin6_dst = sin6_gw = sin6_mask = sin6_genmask = sin6_ifp = 0;
+	sin6_dst = sin6_gw = sin6_mask = sin6_ifp = 0;
 	if ((rtm->rtm_flags & RTF_UP) == 0 || rtm->rtm_flags &
 		(RTF_CLONING|RTF_XRESOLVE|RTF_LLINFO|RTF_BLACKHOLE)) {
 		return;		/* not interested in the link route */
@@ -2524,10 +2526,6 @@ rt_entry(struct rt_msghdr *rtm, int again)
 	if (rtm->rtm_addrs & RTA_NETMASK) {
 		sin6_mask = (struct sockaddr_in6 *)rtmp;
 		rtmp += ROUNDUP(sin6_mask->sin6_len);
-	}
-	if (rtm->rtm_addrs & RTA_GENMASK) {
-		sin6_genmask = (struct sockaddr_in6 *)rtmp;
-		rtmp += ROUNDUP(sin6_genmask->sin6_len);
 	}
 	if (rtm->rtm_addrs & RTA_IFP) {
 		sin6_ifp = (struct sockaddr_in6 *)rtmp;
@@ -3270,9 +3268,9 @@ hms(void)
 int
 ripinterval(int timer)
 {
-	double r = rand();
+	double r = arc4random();
 
-	interval = (int)(timer + timer * RIPRANDDEV * (r / RAND_MAX - 0.5));
+	interval = (int)(timer + timer * RIPRANDDEV * (r / UINT32_MAX - 0.5));
 	nextalarm = time(NULL) + interval;
 	return interval;
 }
@@ -3282,9 +3280,9 @@ ripsuptrig(void)
 {
 	time_t t;
 
-	double r = rand();
+	double r = arc4random();
 	t  = (int)(RIP_TRIG_INT6_MIN + 
-		(RIP_TRIG_INT6_MAX - RIP_TRIG_INT6_MIN) * (r / RAND_MAX));
+		(RIP_TRIG_INT6_MAX - RIP_TRIG_INT6_MIN) * (r / UINT32_MAX));
 	sup_trig_update = time(NULL) + t;
 	return t;
 }

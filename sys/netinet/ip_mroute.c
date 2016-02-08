@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip_mroute.c,v 1.61 2013/05/02 11:54:10 mpi Exp $	*/
+/*	$OpenBSD: ip_mroute.c,v 1.64 2014/01/09 06:29:06 tedu Exp $	*/
 /*	$NetBSD: ip_mroute.c,v 1.85 2004/04/26 01:31:57 matt Exp $	*/
 
 /*
@@ -79,7 +79,6 @@
 #include <net/raw_cb.h>
 
 #include <netinet/in.h>
-#include <netinet/in_var.h>
 #include <netinet/in_systm.h>
 #include <netinet/ip.h>
 #include <netinet/ip_var.h>
@@ -146,9 +145,6 @@ static void update_mfc_params(struct mfc *, struct mfcctl2 *);
 static void init_mfc_params(struct mfc *, struct mfcctl2 *);
 static void expire_mfc(struct mfc *);
 static int add_mfc(struct mbuf *);
-#ifdef UPCALL_TIMING
-static void collate(struct timeval *);
-#endif
 static int del_mfc(struct mbuf *);
 static int set_api_config(struct mbuf *); /* chose API capabilities */
 static int get_api_support(struct mbuf *);
@@ -358,10 +354,6 @@ mfc_find(struct in_addr *o, struct in_addr *g)
 	}								\
 } while (/*CONSTCOND*/ 0)
 
-#ifdef UPCALL_TIMING
-u_int32_t upcall_data[51];
-#endif /* UPCALL_TIMING */
-
 /*
  * Handle MRT setsockopt commands to modify the multicast routing tables.
  */
@@ -551,7 +543,7 @@ ip_mrouter_init(struct socket *so, struct mbuf *m)
 	ip_mrouter = so;
 
 	mfchashtbl = hashinit(MFCTBLSIZ, M_MRTABLE, M_WAITOK, &mfchash);
-	bzero((caddr_t)nexpire, sizeof(nexpire));
+	memset(nexpire, 0, sizeof(nexpire));
 
 	pim_assert = 0;
 
@@ -611,12 +603,12 @@ ip_mrouter_done()
 		}
 	}
 
-	bzero((caddr_t)nexpire, sizeof(nexpire));
+	memset(nexpire, 0, sizeof(nexpire));
 	free(mfchashtbl, M_MRTABLE);
 	mfchashtbl = NULL;
 
 	bw_upcalls_n = 0;
-	bzero(bw_meter_timers, sizeof(bw_meter_timers));
+	memset(bw_meter_timers, 0, sizeof(bw_meter_timers));
 
 	/* Reset de-encapsulation cache. */
 	have_encap_tunnel = 0;
@@ -829,11 +821,11 @@ add_vif(struct mbuf *m)
 			log(LOG_DEBUG, "Adding a register vif, ifp: %p\n",
 			    (void *)ifp);
 		if (reg_vif_num == VIFI_INVALID) {
-			bzero(ifp, sizeof(*ifp));
+			memset(ifp, 0, sizeof(*ifp));
 			snprintf(ifp->if_xname, sizeof ifp->if_xname,
 				 "register_vif");
 			ifp->if_flags = IFF_LOOPBACK;
-			bzero(&vifp->v_route, sizeof(vifp->v_route));
+			memset(&vifp->v_route, 0, sizeof(vifp->v_route));
 			reg_vif_num = vifcp->vifc_vifi;
 		}
 #endif
@@ -906,7 +898,7 @@ reset_vif(struct vif *vifp)
 		ifp = vifp->v_ifp;
 		(*ifp->if_ioctl)(ifp, SIOCDELMULTI, (caddr_t)&ifr);
 	}
-	bzero((caddr_t)vifp, sizeof(*vifp));
+	memset(vifp, 0, sizeof(*vifp));
 }
 
 /*
@@ -960,7 +952,7 @@ vif_delete(struct ifnet *ifp)
 	for (i = 0; i < numvifs; i++) {
 		vifp = &viftable[i];
 		if (vifp->v_ifp == ifp)
-			bzero((caddr_t)vifp, sizeof *vifp);
+			memset(vifp, 0, sizeof(*vifp));
 	}
 
 	for (i = numvifs; i > 0; i--)
@@ -1066,7 +1058,7 @@ add_mfc(struct mbuf *m)
 	} else {
 		struct mfcctl *mp = mtod(m, struct mfcctl *);
 		bcopy(mp, (caddr_t)&mfcctl2, sizeof(*mp));
-		bzero((caddr_t)&mfcctl2 + sizeof(struct mfcctl),
+		memset((caddr_t)&mfcctl2 + sizeof(struct mfcctl), 0,
 		    sizeof(mfcctl2) - sizeof(struct mfcctl));
 	}
 	mfccp = &mfcctl2;
@@ -1126,9 +1118,6 @@ add_mfc(struct mbuf *m)
 					ip_mdq(rte->m, rte->ifp, rt);
 				}
 				m_freem(rte->m);
-#ifdef UPCALL_TIMING
-				collate(&rte->t);
-#endif /* UPCALL_TIMING */
 				free(rte, M_MRTABLE);
 			}
 		}
@@ -1179,31 +1168,6 @@ add_mfc(struct mbuf *m)
 	return (0);
 }
 
-#ifdef UPCALL_TIMING
-/*
- * collect delay statistics on the upcalls
- */
-static void
-collate(struct timeval *t)
-{
-	u_int32_t d;
-	struct timeval tp;
-	u_int32_t delta;
-
-	microtime(&tp);
-
-	if (timercmp(t, &tp, <)) {
-		TV_DELTA(tp, *t, delta);
-
-		d = delta >> 10;
-		if (d > 50)
-			d = 50;
-
-		++upcall_data[d];
-	}
-}
-#endif /* UPCALL_TIMING */
-
 /*
  * Delete an mfc entry
  */
@@ -1226,7 +1190,7 @@ del_mfc(struct mbuf *m)
 		return (EINVAL);
 
 	bcopy(mp, (caddr_t)&mfcctl2, sizeof(*mp));
-	bzero((caddr_t)&mfcctl2 + sizeof(struct mfcctl),
+	memset((caddr_t)&mfcctl2 + sizeof(struct mfcctl), 0,
 	    sizeof(mfcctl2) - sizeof(struct mfcctl));
 
 	mfccp = &mfcctl2;
@@ -1345,11 +1309,6 @@ ip_mforward(struct mbuf *m, struct ifnet *ifp)
 		struct rtdetq *rte;
 		u_int32_t hash;
 		int hlen = ip->ip_hl << 2;
-#ifdef UPCALL_TIMING
-		struct timeval tp;
-
-		microtime(&tp);
-#endif /* UPCALL_TIMING */
 
 		++mrtstat.mrts_mfc_misses;
 
@@ -1492,9 +1451,6 @@ ip_mforward(struct mbuf *m, struct ifnet *ifp)
 		rte->next = NULL;
 		rte->m = mb0;
 		rte->ifp = ifp;
-	#ifdef UPCALL_TIMING
-		rte->t = tp;
-	#endif /* UPCALL_TIMING */
 
 		splx(s);
 

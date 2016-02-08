@@ -1,4 +1,4 @@
-/*	$OpenBSD: pkill.c,v 1.32 2013/06/03 04:17:37 tedu Exp $	*/
+/*	$OpenBSD: pkill.c,v 1.34 2013/11/12 13:54:51 deraadt Exp $	*/
 /*	$NetBSD: pkill.c,v 1.5 2002/10/27 11:49:34 kleink Exp $	*/
 
 /*-
@@ -106,6 +106,8 @@ void	usage(void);
 int	killact(struct kinfo_proc *, int);
 int	grepact(struct kinfo_proc *, int);
 void	makelist(struct listhead *, enum listtype, char *);
+char	*getargv(struct kinfo_proc *);
+int	askyn(struct kinfo_proc *);
 
 extern char *__progname;
 
@@ -362,7 +364,7 @@ main(int argc, char **argv)
 
 		SLIST_FOREACH(li, &tdevlist, li_chain) {
 			if (li->li_number == -1 &&
-			    (kp->p_flag & P_CONTROLT) == 0)
+			    (kp->p_psflags & PS_CONTROLT) == 0)
 				break;
 			if (kp->p_tdev == (uid_t)li->li_number)
 				break;

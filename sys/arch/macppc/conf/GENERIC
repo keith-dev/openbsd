@@ -1,4 +1,4 @@
-#	$OpenBSD: GENERIC,v 1.220 2013/07/06 17:40:01 mpi Exp $g
+#	$OpenBSD: GENERIC,v 1.229 2014/02/19 05:32:57 jmatthew Exp $g
 #
 # For further information on compiling OpenBSD kernels, see the config(8)
 # man page.
@@ -12,10 +12,6 @@
 machine		macppc powerpc
 include		"../../../conf/GENERIC"
 maxusers	80			# estimated number of users
-
-# default type, instructs system to try to determine what proper type is
-# actual machine type probed via name of openfirmware root node.
-option		SYS_TYPE=APPL
 
 option		PCIVERBOSE
 option		USBVERBOSE
@@ -66,6 +62,8 @@ ahc*		at pci?		# Adaptec 294x, aic78x0 SCSI
 #ami*		at pci?
 pcscp*		at pci?		# AMD Am53c974 PCscsi-PCI SCSI
 isp*		at pci?		# Qlogic ISP [12]0x0 SCSI/FibreChannel
+#qla*		at pci?		# Qlogic ISP 2[123]xx FibreChannel
+#qle*		at pci?		# Qlogic ISP 2[45]xx FibreChannel
 mpi*		at pci?		# LSI Logic MPT-Fusion Message Passing Interface
 arc*		at pci?		# Areca RAID Controllers
 pciide*		at pci?
@@ -104,10 +102,6 @@ xge*		at pci?		# Neterion Xframe-I/II 10Gb ethernet
 mbg*		at pci?		# Meinberg Funkuhren radio clocks
 malo*		at pci?		# Marvell Libertas
 acx*		at pci?		# TI ACX100/ACX111 (802.11b/g)
-
-iop*		at pci?		# I2O processor
-ioprbs*		at iop?		# I2O arrays
-iopsp*		at iop?		# I2O SCSI pass-through
 
 amphy*		at mii?		# AMD 79C873 PHYs
 dcphy*		at mii?		# Digital Clone PHYs
@@ -254,8 +248,6 @@ ums*	at uhidev?		# USB mouse
 wsmouse*	at ums? mux 0
 uts*	at uhub?		# USB touchscreen
 wsmouse*	at uts? mux 0
-uhts*	 at uhidev?		# USB HID touch screen
-wsmouse* at uhts? mux 0
 ukbd*	at uhidev?		# USB keyboard
 wskbd*	at ukbd? mux 1
 ucycom*	at uhidev?		# Cypress serial
@@ -270,12 +262,12 @@ smsc*	at uhub?		# SMSC LAN95xx Ethernet
 cdce*	at uhub?		# CDC Ethernet
 urndis*	at uhub?		# Remote NDIS Ethernet
 upl*	at uhub?		# Prolific PL2301/PL2302 host-to-host `network'
+ugl*	at uhub?		# Genesys Logic GL620A-USB host-to-host `network'
 udav*	at uhub?		# Davicom DM9601 based Ethernet
 mos*	at uhub?		# MOSCHIP MCS7730/7830 10/100 Ethernet
 url*	at uhub?		# Realtek RTL8150L based adapters
 wi*	at uhub?		# WaveLAN IEEE 802.11DS
 urio*	at uhub?		# Diamond Multimedia Rio 500
-uscanner* at uhub? disable	# USB Scanners
 #uyap*	at uhub?		# Y@P firmware loader
 udsbr*	at uhub?		# D-Link DSB-R100 radio
 radio*	at udsbr?		# USB radio
@@ -295,6 +287,7 @@ urtw*	at uhub?		# RealTek 8187
 udcf*	at uhub?		# Gude Expert mouseCLOCK
 umbg*	at uhub?		# Meinberg Funkuhren USB5131
 uthum*	at uhidev?		# TEMPerHUM sensor
+ugold*	at uhidev?		# gold TEMPer sensor
 utrh*	at uhidev?		# USBRH sensor
 utwitch* at uhidev?		# YUREX BBU sensor
 uow*	at uhub?		# Maxim/Dallas DS2490 1-Wire adapter
@@ -363,8 +356,13 @@ bwi*		at cardbus?	# Broadcom AirForce (802.11b/g)
 
 wsdisplay*	at vgafb?
 
-appleagp*	at pchb?
-agp*		at appleagp?	# AGP bridges
+#appleagp*	at pchb?
+#agp*		at appleagp?	# AGP bridges
+
+#option		DRMDEBUG
+radeondrm*	at pci? 	# ATI Radeon DRM driver
+drm*		at radeondrm?
+wsdisplay*	at radeondrm?
 
 # Audio support
 audio*		at awacs?

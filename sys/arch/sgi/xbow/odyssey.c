@@ -1,4 +1,4 @@
-/*	$OpenBSD: odyssey.c,v 1.7 2012/04/16 22:17:16 miod Exp $ */
+/*	$OpenBSD: odyssey.c,v 1.10 2013/12/23 21:32:30 miod Exp $ */
 /*
  * Copyright (c) 2009, 2010 Joel Sing <jsing@openbsd.org>
  *
@@ -70,7 +70,6 @@ struct odyssey_screen {
 	int height;			/* Height in pixels. */
 	int depth;			/* Colour depth in bits. */
 	int linebytes;			/* Bytes per line. */
-	int ro_curpos;			/* Current position in rasops tile. */
 };
 
 struct odyssey_softc {
@@ -117,7 +116,7 @@ int	odyssey_erasecols(void *, int, int, int, long);
 int	odyssey_copyrows(void *, int, int, int);
 int	odyssey_eraserows(void *, int, int, long);
 
-u_int32_t ieee754_sp(int32_t);
+u_int32_t ieee754_sp(uint);
 
 /*
  * Interfaces for wscons.
@@ -129,7 +128,8 @@ int	odyssey_alloc_screen(void *, const struct wsscreen_descr *, void **,
 void	odyssey_free_screen(void *, void *);
 int	odyssey_show_screen(void *, void *, int, void (*)(void *, int, int),
 	    void *);
-void	odyssey_burner(void *, u_int, u_int);
+int	odyssey_load_font(void *, void *, struct wsdisplay_font *);
+int	odyssey_list_font(void *, struct wsdisplay_font *);
 
 static struct odyssey_screen odyssey_consdata;
 static struct odyssey_softc odyssey_cons_sc;
@@ -139,16 +139,13 @@ struct wsscreen_descr odyssey_stdscreen = {
 };
 
 struct wsdisplay_accessops odyssey_accessops = {
-	odyssey_ioctl,
-	odyssey_mmap,
-	odyssey_alloc_screen,
-	odyssey_free_screen,
-	odyssey_show_screen,
-	NULL,			/* load_font */
-	NULL,			/* scrollback */
-	NULL,			/* getchar */
-	odyssey_burner,
-	NULL			/* pollc */
+	.ioctl = odyssey_ioctl,
+	.mmap = odyssey_mmap,
+	.alloc_screen = odyssey_alloc_screen,
+	.free_screen = odyssey_free_screen,
+	.show_screen = odyssey_show_screen,
+	.load_font = odyssey_load_font,
+	.list_font = odyssey_list_font
 };
 
 const struct wsscreen_descr *odyssey_scrlist[] = {
@@ -478,7 +475,7 @@ odyssey_setup(struct odyssey_softc *sc)
 		else if (i < 0x300)
 			val = ((i - 0x200) >> 1) + 0x80;
 		else
-			val = ((i - 0x300) >> 1) + 0x100;
+			val = ((i - 0x300) >> 0) + 0x100;
 
 		val = (val << 20) | (val << 10) | val;
 
@@ -696,9 +693,20 @@ odyssey_show_screen(void *v, void *cookie, int waitok,
 	return (0);
 }
 
-void
-odyssey_burner(void *v, u_int on, u_int flags)
+int
+odyssey_load_font(void *v, void *emulcookie, struct wsdisplay_font *font)
 {
+	struct odyssey_screen *screen = (struct odyssey_screen *)v;
+
+	return rasops_load_font(&screen->ri, emulcookie, font);
+}
+
+int
+odyssey_list_font(void *v, struct wsdisplay_font *font)
+{
+	struct odyssey_screen *screen = (struct odyssey_screen *)v;
+
+	return rasops_list_font(&screen->ri, font);
 }
 
 /*
@@ -800,7 +808,8 @@ odyssey_putchar(void *cookie, int row, int col, u_int uc, long attr)
 	struct rasops_info *ri = cookie;
 	struct odyssey_softc *sc = ri->ri_hw;
 	struct wsdisplay_font *font = ri->ri_font;
-	int x, y, w, h, bg, fg, ul, i, j, ci, l;
+	int bg, fg, ul, i, j, ci, l;
+	uint x, y, w, h;
 	u_int8_t *fontbitmap;
 	u_int chunk;
 
@@ -1040,23 +1049,18 @@ odyssey_eraserows(void *cookie, int row, int num, long attr)
 }
 
 u_int32_t
-ieee754_sp(int32_t v)
+ieee754_sp(uint v)
 {
-	u_int8_t exp = 0, sign = 0;
-	int i = 32;
+	u_int8_t exp = 0;
+	int i = 12;	/* 0 <= v < 2048 */
 
 	/*
-	 * Convert an integer to IEEE754 single precision floating point:
+	 * Convert a small integer to IEEE754 single precision floating point:
 	 *
 	 * 	Sign - 1 bit
 	 * 	Exponent - 8 bits (with 2^(8-1)-1 = 127 bias)
 	 * 	Fraction - 23 bits
 	 */
-
-	if (v < 0) {
-		sign = 1;
-		v = -v;
-	}
 
 	/* Determine shift for fraction. */
 	while (i && (v & (1 << --i)) == 0);
@@ -1064,7 +1068,7 @@ ieee754_sp(int32_t v)
 	if (v != 0)
 		exp = 127 + i;
 
-	return (sign << 31) | (exp << 23) | ((v << (23 - i)) & 0x7fffff);
+	return (exp << 23) | ((v << (23 - i)) & 0x7fffff);
 }
 
 /*

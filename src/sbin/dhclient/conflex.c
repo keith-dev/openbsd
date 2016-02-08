@@ -1,4 +1,4 @@
-/*	$OpenBSD: conflex.c,v 1.22 2013/06/09 01:51:58 krw Exp $	*/
+/*	$OpenBSD: conflex.c,v 1.28 2014/01/19 03:54:25 krw Exp $	*/
 
 /* Lexical scanner for dhclient config file. */
 
@@ -43,6 +43,8 @@
 #include "dhcpd.h"
 #include "dhctoken.h"
 
+#include <vis.h>
+
 int lexline;
 int lexchar;
 char *token_line;
@@ -60,6 +62,7 @@ static int token;
 static int ugflag;
 static char *tval;
 static char tokbuf[1500];
+static char visbuf[1500];
 
 static int get_char(FILE *);
 static int get_token(FILE *);
@@ -127,11 +130,14 @@ get_token(FILE *cfile)
 {
 	int		c, ttok;
 	static char	tb[2];
-	int		l, p;
+	int		l, p, u;
 
+	u = ugflag;
+	
 	do {
 		l = line;
-		p = lpos;
+		p = lpos - u;
+		u = 0;
 
 		c = get_char(cfile);
 
@@ -235,25 +241,34 @@ read_string(FILE *cfile)
 {
 	int i, c, bs;
 
+	/*
+	 * Read in characters until an un-escaped '"' is encountered. And
+	 * then unvis the data that was read.
+	 */
 	bs = i = 0;
-	do {
-		c = get_char(cfile);
+	memset(visbuf, 0, sizeof(visbuf));
+	while ((c = get_char(cfile)) != EOF) {
+		if (c == '"' && bs == 0)
+			break;
+
+		visbuf[i++] = c;
 		if (bs)
 			bs = 0;
 		else if (c == '\\')
 			bs = 1;
 
-		if (c != '"' && c != EOF && bs == 0)
-			tokbuf[i++] = c;
-
-	} while (i < (sizeof(tokbuf) - 1) && c != EOF && c != '"');
+		if (i == sizeof(visbuf) - 1)
+			break;
+	}
+	if (bs == 1)
+		visbuf[--i] = '\0';
+	i = strnunvis(tokbuf, visbuf, sizeof(tokbuf));
 
 	if (c == EOF)
 		parse_warn("eof in string constant");
-	else if (c != '"')
-		parse_warn("string constant larger than internal buffer");
+	else if (i == -1 || i >= sizeof(tokbuf))
+		parse_warn("string constant too long");
 
-	tokbuf[i] = 0;
 	tval = tokbuf;
 
 	return (TOK_STRING);
@@ -326,7 +341,6 @@ static const struct keywords {
 	{ "deny",				TOK_DENY },
 	{ "ethernet",				TOK_ETHERNET },
 	{ "expire",				TOK_EXPIRE },
-	{ "fddi",				TOK_FDDI },
 	{ "filename",				TOK_FILENAME },
 	{ "fixed-address",			TOK_FIXED_ADDR },
 	{ "hardware",				TOK_HARDWARE },
@@ -337,6 +351,7 @@ static const struct keywords {
 	{ "link-timeout",			TOK_LINK_TIMEOUT },
 	{ "media",				TOK_MEDIA },
 	{ "medium",				TOK_MEDIUM },
+	{ "next-server",			TOK_NEXT_SERVER },
 	{ "option",				TOK_OPTION },
 	{ "prepend",				TOK_PREPEND },
 	{ "rebind",				TOK_REBIND },
@@ -350,9 +365,10 @@ static const struct keywords {
 	{ "send",				TOK_SEND },
 	{ "server-name",			TOK_SERVER_NAME },
 	{ "supersede",				TOK_SUPERSEDE },
-	{ "timeout",				TOK_TIMEOUT },
-	{ "token-ring",				TOK_TOKEN_RING }
+	{ "timeout",				TOK_TIMEOUT }
 };
+
+int	kw_cmp(const void *k, const void *e);
 
 int
 kw_cmp(const void *k, const void *e)

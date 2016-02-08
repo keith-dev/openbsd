@@ -45,6 +45,6 @@ int mp_prime_is_divisible (mp_int * a, int *result)
 }
 #endif
 
-/* $Source: /cvs/src/kerberosV/src/lib/hcrypto/libtommath/bn_mp_prime_is_divisible.c,v $ */
+/* $Source: /var/www/space/cvs/src/kerberosV/src/lib/hcrypto/libtommath/bn_mp_prime_is_divisible.c,v $ */
 /* $Revision: 1.1 $ */
 /* $Date: 2013/06/17 19:11:43 $ */

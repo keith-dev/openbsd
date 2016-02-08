@@ -1,4 +1,4 @@
-/*	$OpenBSD: getusershell.c,v 1.9 2012/04/06 20:54:41 deraadt Exp $ */
+/*	$OpenBSD: getusershell.c,v 1.13 2014/01/19 21:01:06 tobias Exp $ */
 /*
  * Copyright (c) 1985, 1993
  *	The Regents of the University of California.  All rights reserved.
@@ -28,14 +28,14 @@
  * SUCH DAMAGE.
  */
 
-#include <sys/param.h>
-#include <sys/file.h>
 #include <sys/stat.h>
-#include <stdio.h>
+
 #include <ctype.h>
+#include <limits.h>
+#include <paths.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
-#include <paths.h>
 
 /*
  * Local shells should NOT be added here.  They should be added in
@@ -109,7 +109,7 @@ initshells(void)
 		(void)fclose(fp);
 		return (okshells);
 	}
-	shells = calloc((size_t)(statb.st_size / 3), sizeof (char *));
+	shells = calloc((size_t)(statb.st_size / 3 + 2), sizeof (char *));
 	if (shells == NULL) {
 		(void)fclose(fp);
 		free(strings);
@@ -118,13 +118,13 @@ initshells(void)
 	}
 	sp = shells;
 	cp = strings;
-	while (fgets(cp, MAXPATHLEN + 1, fp) != NULL) {
+	while (fgets(cp, PATH_MAX + 1, fp) != NULL) {
 		while (*cp != '#' && *cp != '/' && *cp != '\0')
 			cp++;
 		if (*cp == '#' || *cp == '\0')
 			continue;
 		*sp++ = cp;
-		while (!isspace(*cp) && *cp != '#' && *cp != '\0')
+		while (!isspace((unsigned char)*cp) && *cp != '#' && *cp != '\0')
 			cp++;
 		*cp++ = '\0';
 	}

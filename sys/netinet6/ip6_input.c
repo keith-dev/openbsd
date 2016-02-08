@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip6_input.c,v 1.114 2013/06/26 09:12:40 henning Exp $	*/
+/*	$OpenBSD: ip6_input.c,v 1.123 2014/02/13 11:20:54 mpi Exp $	*/
 /*	$KAME: ip6_input.c,v 1.188 2001/03/29 05:34:31 itojun Exp $	*/
 
 /*
@@ -113,7 +113,6 @@
 #endif
 
 #if NCARP > 0
-#include <netinet/in_var.h>
 #include <netinet/ip_carp.h>
 #endif
 
@@ -319,15 +318,6 @@ ip6_input(struct mbuf *m)
 	}
 #endif
 
-	if (ip6_check_rh0hdr(m, &off)) {
-		ip6stat.ip6s_badoptions++;
-		in6_ifstat_inc(m->m_pkthdr.rcvif, ifs6_in_discard);
-		in6_ifstat_inc(m->m_pkthdr.rcvif, ifs6_in_hdrerr);
-		icmp6_error(m, ICMP6_PARAM_PROB, ICMP6_PARAMPROB_HEADER, off);
-		/* m is already freed */
-		return;
-	}
-
 #if NPF > 0
         /*
          * Packet filter
@@ -341,6 +331,20 @@ ip6_input(struct mbuf *m)
 	ip6 = mtod(m, struct ip6_hdr *);
 	srcrt = !IN6_ARE_ADDR_EQUAL(&odst, &ip6->ip6_dst);
 #endif
+
+	/*
+	 * Be more secure than RFC5095 and scan for type 0 routing headers.
+	 * If pf has already scanned the header chain, do not do it twice.
+	 */
+	if (!(m->m_pkthdr.pf.flags & PF_TAG_PROCESSED) &&
+	    ip6_check_rh0hdr(m, &off)) {
+		ip6stat.ip6s_badoptions++;
+		in6_ifstat_inc(m->m_pkthdr.rcvif, ifs6_in_discard);
+		in6_ifstat_inc(m->m_pkthdr.rcvif, ifs6_in_hdrerr);
+		icmp6_error(m, ICMP6_PARAM_PROB, ICMP6_PARAMPROB_HEADER, off);
+		/* m is already freed */
+		return;
+	}
 
 	if (IN6_IS_ADDR_LOOPBACK(&ip6->ip6_src) ||
 	    IN6_IS_ADDR_LOOPBACK(&ip6->ip6_dst)) {
@@ -453,8 +457,6 @@ ip6_input(struct mbuf *m)
 		    &ip6->ip6_src.s6_addr32[0]);
 	}
 
-#define rt6_key(r) ((struct sockaddr_in6 *)((r)->rt_nodes->rn_key))
-
 	/*
 	 * Accept the packet if the forwarding interface to the destination
 	 * according to the routing table is the loopback interface,
@@ -467,15 +469,6 @@ ip6_input(struct mbuf *m)
 	if (ip6_forward_rt.ro_rt &&
 	    (ip6_forward_rt.ro_rt->rt_flags &
 	     (RTF_HOST|RTF_GATEWAY)) == RTF_HOST &&
-#if 0
-	    /*
-	     * The check below is redundant since the comparison of
-	     * the destination and the key of the rtentry has
-	     * already done through looking up the routing table.
-	     */
-	    IN6_ARE_ADDR_EQUAL(&ip6->ip6_dst,
-	    &rt6_key(ip6_forward_rt.ro_rt)->sin6_addr) &&
-#endif
 	    ip6_forward_rt.ro_rt->rt_ifp->if_type == IFT_LOOP) {
 		struct in6_ifaddr *ia6 =
 			ifatoia6(ip6_forward_rt.ro_rt->rt_ifa);
@@ -491,37 +484,18 @@ ip6_input(struct mbuf *m)
 			deliverifp = ia6->ia_ifp;	/* correct? */
 			goto hbhcheck;
 		} else {
+			char src[INET6_ADDRSTRLEN], dst[INET6_ADDRSTRLEN];
+
+			inet_ntop(AF_INET6, &ip6->ip6_src, src, sizeof(src));
+			inet_ntop(AF_INET6, &ip6->ip6_dst, dst, sizeof(dst));
 			/* address is not ready, so discard the packet. */
 			nd6log((LOG_INFO,
 			    "ip6_input: packet to an unready address %s->%s\n",
-			    ip6_sprintf(&ip6->ip6_src),
-			    ip6_sprintf(&ip6->ip6_dst)));
+			    src, dst));
 
 			goto bad;
 		}
 	}
-
-#if 0
-    {
-	/*
-	 * Last resort: check in6_ifaddr for incoming interface.
-	 * The code is here until I update the "goto ours hack" code above
-	 * working right.
-	 */
-	struct ifaddr *ifa;
-	TAILQ_FOREACH(ifa, &m->m_pkthdr.rcvif->if_addrlist, ifa_list) {
-		if (ifa->ifa_addr == NULL)
-			continue;	/* just for safety */
-		if (ifa->ifa_addr->sa_family != AF_INET6)
-			continue;
-		if (IN6_ARE_ADDR_EQUAL(IFA_IN6(ifa), &ip6->ip6_dst)) {
-			ours = 1;
-			deliverifp = ifa->ifa_ifp;
-			goto hbhcheck;
-		}
-	}
-    }
-#endif
 
 #if NCARP > 0
 	if (m->m_pkthdr.rcvif->if_type == IFT_CARP &&
@@ -1004,8 +978,7 @@ ip6_unknown_opt(u_int8_t *optp, struct mbuf *m, int off)
 void
 ip6_savecontrol(struct inpcb *in6p, struct mbuf *m, struct mbuf **mp)
 {
-#define IS2292(x, y)	((in6p->in6p_flags & IN6P_RFC2292) ? (x) : (y))
-# define in6p_flags	inp_flags
+#define IS2292(x, y)	((in6p->inp_flags & IN6P_RFC2292) ? (x) : (y))
 	struct ip6_hdr *ip6 = mtod(m, struct ip6_hdr *);
 
 #ifdef SO_TIMESTAMP
@@ -1021,7 +994,7 @@ ip6_savecontrol(struct inpcb *in6p, struct mbuf *m, struct mbuf **mp)
 #endif
 
 	/* RFC 2292 sec. 5 */
-	if ((in6p->in6p_flags & IN6P_PKTINFO) != 0) {
+	if ((in6p->inp_flags & IN6P_PKTINFO) != 0) {
 		struct in6_pktinfo pi6;
 		bcopy(&ip6->ip6_dst, &pi6.ipi6_addr, sizeof(struct in6_addr));
 		if (IN6_IS_SCOPE_EMBED(&pi6.ipi6_addr))
@@ -1035,7 +1008,7 @@ ip6_savecontrol(struct inpcb *in6p, struct mbuf *m, struct mbuf **mp)
 			mp = &(*mp)->m_next;
 	}
 
-	if ((in6p->in6p_flags & IN6P_HOPLIMIT) != 0) {
+	if ((in6p->inp_flags & IN6P_HOPLIMIT) != 0) {
 		int hlim = ip6->ip6_hlim & 0xff;
 		*mp = sbcreatecontrol((caddr_t) &hlim, sizeof(int),
 		    IS2292(IPV6_2292HOPLIMIT, IPV6_HOPLIMIT), IPPROTO_IPV6);
@@ -1043,7 +1016,7 @@ ip6_savecontrol(struct inpcb *in6p, struct mbuf *m, struct mbuf **mp)
 			mp = &(*mp)->m_next;
 	}
 
-	if ((in6p->in6p_flags & IN6P_TCLASS) != 0) {
+	if ((in6p->inp_flags & IN6P_TCLASS) != 0) {
 		u_int32_t flowinfo;
 		int tclass;
 
@@ -1064,7 +1037,7 @@ ip6_savecontrol(struct inpcb *in6p, struct mbuf *m, struct mbuf **mp)
 	 * returned to normal user.
 	 * See also RFC 2292 section 6 (or RFC 3542 section 8).
 	 */
-	if ((in6p->in6p_flags & IN6P_HOPOPTS) != 0) {
+	if ((in6p->inp_flags & IN6P_HOPOPTS) != 0) {
 		/*
 		 * Check if a hop-by-hop options header is contatined in the
 		 * received packet, and if so, store the options as ancillary
@@ -1109,7 +1082,7 @@ ip6_savecontrol(struct inpcb *in6p, struct mbuf *m, struct mbuf **mp)
 	}
 
 	/* IPV6_DSTOPTS and IPV6_RTHDR socket options */
-	if ((in6p->in6p_flags & (IN6P_RTHDR | IN6P_DSTOPTS)) != 0) {
+	if ((in6p->inp_flags & (IN6P_RTHDR | IN6P_DSTOPTS)) != 0) {
 		struct ip6_hdr *ip6 = mtod(m, struct ip6_hdr *);
 		int nxt = ip6->ip6_nxt, off = sizeof(struct ip6_hdr);
 
@@ -1157,7 +1130,7 @@ ip6_savecontrol(struct inpcb *in6p, struct mbuf *m, struct mbuf **mp)
 
 			switch (nxt) {
 			case IPPROTO_DSTOPTS:
-				if (!(in6p->in6p_flags & IN6P_DSTOPTS))
+				if (!(in6p->inp_flags & IN6P_DSTOPTS))
 					break;
 
 				*mp = sbcreatecontrol((caddr_t)ip6e, elen,
@@ -1168,7 +1141,7 @@ ip6_savecontrol(struct inpcb *in6p, struct mbuf *m, struct mbuf **mp)
 				break;
 
 			case IPPROTO_ROUTING:
-				if (!(in6p->in6p_flags & IN6P_RTHDR))
+				if (!(in6p->inp_flags & IN6P_RTHDR))
 					break;
 
 				*mp = sbcreatecontrol((caddr_t)ip6e, elen,
@@ -1204,7 +1177,6 @@ ip6_savecontrol(struct inpcb *in6p, struct mbuf *m, struct mbuf **mp)
 	  loopend:
 	  	;
 	}
-# undef in6p_flags
 }
 
 /*
@@ -1437,14 +1409,13 @@ ip6_sysctl(int *name, u_int namelen, void *oldp, size_t *oldlenp,
 	extern int ip6_mrtproto;
 	extern struct mrt6stat mrt6stat;
 #endif
+	int error, s;
 
 	/* All sysctl names at this level are terminal. */
 	if (namelen != 1)
 		return ENOTDIR;
 
 	switch (name[0]) {
-	case IPV6CTL_KAME_VERSION:
-		return sysctl_rdstring(oldp, oldlenp, newp, __KAME_VERSION);
 	case IPV6CTL_V6ONLY:
 		return sysctl_rdint(oldp, oldlenp, newp, ip6_v6only);
 	case IPV6CTL_DAD_PENDING:
@@ -1469,6 +1440,16 @@ ip6_sysctl(int *name, u_int namelen, void *oldp, size_t *oldlenp,
 #else
 		return (EOPNOTSUPP);
 #endif
+	case IPV6CTL_MTUDISCTIMEOUT:
+		error = sysctl_int(oldp, oldlenp, newp, newlen,
+		   &ip6_mtudisc_timeout);
+		if (icmp6_mtudisc_timeout_q != NULL) {
+			s = splsoftnet();
+			rt_timer_queue_change(icmp6_mtudisc_timeout_q,
+					      ip6_mtudisc_timeout);
+			splx(s);
+		}
+		return (error);
 	default:
 		if (name[0] < IPV6CTL_MAXID)
 			return (sysctl_int_arr(ipv6ctl_vars, name, namelen,

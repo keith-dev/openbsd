@@ -1,4 +1,4 @@
-/*	$OpenBSD: ldasm.S,v 1.20 2013/06/01 09:57:57 miod Exp $ */
+/*	$OpenBSD: ldasm.S,v 1.23 2013/12/23 21:18:57 kettenis Exp $ */
 
 /*
  * Copyright (c) 2001 Niklas Hallqvist
@@ -102,7 +102,8 @@ L2:	ldiq	s3, L2		/* get where the linker thought we were */
 	mov	s1, a2		/* loff    */
 	mov	s2, a3		/* dl_data */
 	CALL(_dl_boot)
-	mov	s0, a0
+	mov	s0, a0		/* stack */
+	lda	a1, _dl_dtors	/* cleanup */
 	mov	v0, pv
 	jsr	ra, (pv)
 END(_dl_start)
@@ -276,11 +277,11 @@ LEAF_NOPROFILE(_dl_fcntl, 3)
 	RET
 END(_dl_fcntl)
 
-LEAF_NOPROFILE(_dl_getdirentries, 4)
-	ldiq	v0, SYS_getdirentries
+LEAF_NOPROFILE(_dl_getdents, 3)
+	ldiq	v0, SYS_getdents
 	call_pal PAL_OSF1_callsys
 	RET
-END(_dl_getdirentries)
+END(_dl_getdents)
 
 /* _dl_sigprocmask does not support NULL new mask */
 LEAF_NOPROFILE(_dl_sigprocmask, 4)

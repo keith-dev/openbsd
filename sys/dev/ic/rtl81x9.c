@@ -1,4 +1,4 @@
-/*	$OpenBSD: rtl81x9.c,v 1.77 2013/03/07 01:03:57 brad Exp $ */
+/*	$OpenBSD: rtl81x9.c,v 1.81 2013/12/28 03:35:00 deraadt Exp $ */
 
 /*
  * Copyright (c) 1997, 1998
@@ -102,7 +102,6 @@
 #ifdef INET
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
-#include <netinet/in_var.h>
 #include <netinet/ip.h>
 #include <netinet/if_ether.h>
 #endif
@@ -651,7 +650,7 @@ rl_rxeof(struct rl_softc *sc)
 		wrap = (sc->rl_cdata.rl_rx_buf + RL_RXBUFLEN) - rxbufpos;
 
 		if (total_len > wrap) {
-			m = m_devget(rxbufpos, wrap, ETHER_ALIGN, ifp, NULL);
+			m = m_devget(rxbufpos, wrap, ETHER_ALIGN, ifp);
 			if (m != NULL) {
 				m_copyback(m, wrap, total_len - wrap,
 				    sc->rl_cdata.rl_rx_buf, M_NOWAIT);
@@ -662,8 +661,7 @@ rl_rxeof(struct rl_softc *sc)
 			}
 			cur_rx = (total_len - wrap + ETHER_CRC_LEN);
 		} else {
-			m = m_devget(rxbufpos, total_len, ETHER_ALIGN, ifp,
-			    NULL);
+			m = m_devget(rxbufpos, total_len, ETHER_ALIGN, ifp);
 			cur_rx += total_len + 4 + ETHER_CRC_LEN;
 		}
 
@@ -1242,18 +1240,17 @@ rl_activate(struct device *self, int act)
 	int rv = 0;
 
 	switch (act) {
-	case DVACT_QUIESCE:
-		rv = config_activate_children(self, act);
-		break;
 	case DVACT_SUSPEND:
 		if (ifp->if_flags & IFF_RUNNING)
 			rl_stop(sc);
 		rv = config_activate_children(self, act);
 		break;
 	case DVACT_RESUME:
-		rv = config_activate_children(self, act);
 		if (ifp->if_flags & IFF_UP)
 			rl_init(sc);
+		break;
+	default:
+		rv = config_activate_children(self, act);
 		break;
 	}
 	return (rv);

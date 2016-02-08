@@ -1,4 +1,4 @@
-/*	$OpenBSD: ffs_inode.c,v 1.64 2013/06/11 16:42:18 deraadt Exp $	*/
+/*	$OpenBSD: ffs_inode.c,v 1.67 2014/01/25 23:31:12 guenther Exp $	*/
 /*	$NetBSD: ffs_inode.c,v 1.10 1996/05/11 18:27:19 mycroft Exp $	*/
 
 /*
@@ -59,52 +59,24 @@ int ffs_indirtrunc(struct inode *, daddr_t, daddr_t, daddr_t, int, long *);
  * Update the access, modified, and inode change times as specified by the
  * IN_ACCESS, IN_UPDATE, and IN_CHANGE flags respectively. The IN_MODIFIED
  * flag is used to specify that the inode needs to be updated but that the
- * times have already been set. The access and modified times are taken from
- * the second and third parameters; the inode change time is always taken
- * from the current time. If waitfor is set, then wait for the disk write
- * of the inode to complete.
+ * times have already been set.  If waitfor is set, then wait for
+ * the disk write of the inode to complete.
  */
 int
-ffs_update(struct inode *ip, struct timespec *atime, 
-    struct timespec *mtime, int waitfor)
+ffs_update(struct inode *ip, int waitfor)
 {
 	struct vnode *vp;
 	struct fs *fs;
 	struct buf *bp;
 	int error;
-	struct timespec ts;
 
 	vp = ITOV(ip);
-	if (vp->v_mount->mnt_flag & MNT_RDONLY) {
-		ip->i_flag &=
-		    ~(IN_ACCESS | IN_CHANGE | IN_MODIFIED | IN_UPDATE);
-		return (0);
-	}
+	ufs_itimes(vp);
 
-	if ((ip->i_flag &
-	    (IN_ACCESS | IN_CHANGE | IN_MODIFIED | IN_UPDATE)) == 0 &&
-	    waitfor != MNT_WAIT)
+	if ((ip->i_flag & IN_MODIFIED) == 0 && waitfor != MNT_WAIT)
 		return (0);
 
-	getnanotime(&ts);
-
-	if (ip->i_flag & IN_ACCESS) {
-		DIP_ASSIGN(ip, atime, atime ? atime->tv_sec : ts.tv_sec);
-		DIP_ASSIGN(ip, atimensec, atime ? atime->tv_nsec : ts.tv_nsec);
-	}
-
-	if (ip->i_flag & IN_UPDATE) {
-		DIP_ASSIGN(ip, mtime, mtime ? mtime->tv_sec : ts.tv_sec);
-		DIP_ASSIGN(ip, mtimensec, mtime ? mtime->tv_nsec : ts.tv_nsec);
-		ip->i_modrev++;
-	}
-
-	if (ip->i_flag & IN_CHANGE) {
-		DIP_ASSIGN(ip, ctime, ts.tv_sec);
-		DIP_ASSIGN(ip, ctimensec, ts.tv_nsec);
-	}
-
-	ip->i_flag &= ~(IN_ACCESS | IN_CHANGE | IN_MODIFIED | IN_UPDATE);
+	ip->i_flag &= ~IN_MODIFIED;
 	fs = ip->i_fs;
 
 	/*
@@ -289,8 +261,7 @@ ffs_truncate(struct inode *oip, off_t length, int flags, struct ucred *cred)
 		size = blksize(fs, oip, lbn);
 		(void) uvm_vnp_uncache(ovp);
 		if (ovp->v_type != VDIR)
-			bzero((char *)bp->b_data + offset,
-			      (u_int)(size - offset));
+			memset(bp->b_data + offset, 0, size - offset);
 		bp->b_bcount = size;
 		if (aflags & B_SYNC)
 			bwrite(bp);
@@ -534,7 +505,7 @@ ffs_indirtrunc(struct inode *ip, daddr_t lbn, daddr_t dbn,
 
 	if (lastbn != -1) {
 		copy = malloc(fs->fs_bsize, M_TEMP, M_WAITOK);
-		bcopy(bp->b_data, copy, (u_int) fs->fs_bsize);
+		memcpy(copy, bp->b_data, fs->fs_bsize);
 
 		for (i = last + 1; i < NINDIR(fs); i++)
 			BAP_ASSIGN(ip, i, 0);
@@ -565,8 +536,7 @@ ffs_indirtrunc(struct inode *ip, daddr_t lbn, daddr_t dbn,
 			continue;
 		if (level > SINGLE) {
 			error = ffs_indirtrunc(ip, nlbn, fsbtodb(fs, nb),
-					       (daddr_t)-1, level - 1,
-					       &blkcount);
+					       -1, level - 1, &blkcount);
 			if (error)
 				allerror = error;
 			blocksreleased += blkcount;

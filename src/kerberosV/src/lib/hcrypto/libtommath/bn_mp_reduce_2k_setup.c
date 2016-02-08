@@ -42,6 +42,6 @@ int mp_reduce_2k_setup(mp_int *a, mp_digit *d)
 }
 #endif
 
-/* $Source: /cvs/src/kerberosV/src/lib/hcrypto/libtommath/bn_mp_reduce_2k_setup.c,v $ */
+/* $Source: /var/www/space/cvs/src/kerberosV/src/lib/hcrypto/libtommath/bn_mp_reduce_2k_setup.c,v $ */
 /* $Revision: 1.1 $ */
 /* $Date: 2013/06/17 19:11:43 $ */

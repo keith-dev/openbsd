@@ -1,4 +1,4 @@
-/*	$OpenBSD: rt2860.c,v 1.68 2013/06/11 18:15:53 deraadt Exp $	*/
+/*	$OpenBSD: rt2860.c,v 1.71 2013/12/06 21:03:03 deraadt Exp $	*/
 
 /*-
  * Copyright (c) 2007-2010 Damien Bergamini <damien.bergamini@free.fr>
@@ -50,7 +50,6 @@
 
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
-#include <netinet/in_var.h>
 #include <netinet/if_ether.h>
 #include <netinet/ip.h>
 
@@ -197,6 +196,8 @@ static const struct {
 	uint8_t	val;
 }  rt3090_def_rf[] = {
 	RT3070_DEF_RF
+}, rt3572_def_rf[] = {
+	RT3572_DEF_RF
 };
 
 int
@@ -414,7 +415,7 @@ rt2860_suspend(void *xsc)
 }
 
 void
-rt2860_resume(void *xsc)
+rt2860_wakeup(void *xsc)
 {
 	struct rt2860_softc *sc = xsc;
 	struct ifnet *ifp = &sc->sc_ic.ic_if;
@@ -2158,13 +2159,15 @@ rt2860_select_chan_group(struct rt2860_softc *sc, int group)
 			rt2860_mcu_bbp_write(sc, 75, 0x50);
 		}
 	} else {
-		if (sc->ext_5ghz_lna) {
+		if (sc->mac_ver == 0x3572)
+			rt2860_mcu_bbp_write(sc, 82, 0x94);
+		else
 			rt2860_mcu_bbp_write(sc, 82, 0xf2);
+
+		if (sc->ext_5ghz_lna)
 			rt2860_mcu_bbp_write(sc, 75, 0x46);
-		} else {
-			rt2860_mcu_bbp_write(sc, 82, 0xf2);
+		else
 			rt2860_mcu_bbp_write(sc, 75, 0x50);
-		}
 	}
 
 	tmp = RAL_READ(sc, RT2860_TX_BAND_CFG);
@@ -2191,7 +2194,12 @@ rt2860_select_chan_group(struct rt2860_softc *sc, int group)
 		if (sc->mac_ver == 0x3593 && sc->ntxchains > 2)
 			tmp |= RT3593_PA_PE_A2_EN;
 	}
-	RAL_WRITE(sc, RT2860_TX_PIN_CFG, tmp);
+	if (sc->mac_ver == 0x3572) {
+		rt3090_rf_write(sc, 8, 0x00);
+		RAL_WRITE(sc, RT2860_TX_PIN_CFG, tmp);
+		rt3090_rf_write(sc, 8, 0x80);
+	} else
+		RAL_WRITE(sc, RT2860_TX_PIN_CFG, tmp);
 
 	if (sc->mac_ver == 0x3593) {
 		tmp = RAL_READ(sc, RT2860_GPIO_CTRL);
@@ -2215,7 +2223,10 @@ rt2860_select_chan_group(struct rt2860_softc *sc, int group)
 		else
 			agc = 0x2e + sc->lna[0];
 	} else {		/* 5GHz band */
-		agc = 0x32 + (sc->lna[group] * 5) / 3;
+		if (sc->mac_ver == 0x3572)
+			agc = 0x22 + (sc->lna[group] * 5) / 3;
+		else
+			agc = 0x32 + (sc->lna[group] * 5) / 3;
 	}
 	rt2860_mcu_bbp_write(sc, 66, agc);
 
@@ -2367,9 +2378,16 @@ rt3090_rf_init(struct rt2860_softc *sc)
 	RAL_WRITE(sc, RT3070_GPIO_SWITCH, tmp & ~0x20);
 
 	/* initialize RF registers to default value */
-	for (i = 0; i < nitems(rt3090_def_rf); i++) {
-		rt3090_rf_write(sc, rt3090_def_rf[i].reg,
-		    rt3090_def_rf[i].val);
+	if (sc->mac_ver == 0x3572) {
+		for (i = 0; i < nitems(rt3572_def_rf); i++) {
+			rt3090_rf_write(sc, rt3572_def_rf[i].reg,
+			    rt3572_def_rf[i].val);
+		}
+	} else {
+		for (i = 0; i < nitems(rt3090_def_rf); i++) {
+			rt3090_rf_write(sc, rt3090_def_rf[i].reg,
+			    rt3090_def_rf[i].val);
+		}
 	}
 
 	/* select 20MHz bandwidth */

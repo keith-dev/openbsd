@@ -1,4 +1,4 @@
-/*	$OpenBSD: exec_hp300.c,v 1.3 2013/02/02 13:34:29 miod Exp $	*/
+/*	$OpenBSD: exec_hp300.c,v 1.5 2014/02/23 19:22:40 miod Exp $	*/
 /*	$NetBSD: exec.c,v 1.15 1996/10/13 02:29:01 christos Exp $	*/
 
 /*-

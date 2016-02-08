@@ -1,4 +1,4 @@
-/*	$OpenBSD: acpidump.c,v 1.7 2010/08/08 14:40:19 jmc Exp $	*/
+/*	$OpenBSD: acpidump.c,v 1.9 2013/12/03 01:47:06 deraadt Exp $	*/
 /*
  * Copyright (c) 2000 Mitsuru IWASAKI <iwasaki@FreeBSD.org>
  * All rights reserved.
@@ -27,6 +27,11 @@
  */
 
 #include <sys/types.h>
+#include <sys/mman.h>
+#include <sys/queue.h>
+#include <sys/stat.h>
+
+#include <uvm/uvm_extern.h>
 
 #include <assert.h>
 #include <err.h>
@@ -35,14 +40,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <limits.h>
 
-#include <sys/mman.h>
-#include <sys/queue.h>
-#include <sys/types.h>
-#include <sys/stat.h>
-#include <sys/syslimits.h>
-
-#include <uvm/uvm_extern.h>
 
 #define vm_page_size sysconf(_SC_PAGESIZE)
 #define PRINTFLAG(xx)							\
@@ -170,6 +169,26 @@ int		acpi_mem_fd = -1;
 char		*aml_dumpfile;
 FILE		*fhdr;
 
+int	acpi_checksum(void *_p, size_t _length);
+struct acpi_user_mapping *acpi_user_find_mapping(vm_offset_t _pa, size_t _size);
+void	*acpi_map_physical(vm_offset_t _pa, size_t _size);
+void	acpi_user_init(void);
+struct ACPIrsdp *acpi_find_rsd_ptr(void);
+void	acpi_print_string(char *_s, size_t _length);
+void	acpi_print_rsd_ptr(struct ACPIrsdp *_rp);
+struct ACPIsdt *acpi_map_sdt(vm_offset_t _pa);
+void	aml_dump(struct ACPIsdt *_hdr);
+void	acpi_print_sdt(struct ACPIsdt *_sdp);
+void	acpi_print_rsdt(struct ACPIsdt *_rsdp);
+void	acpi_print_facp(struct FACPbody *_facp);
+void	acpi_print_dsdt(struct ACPIsdt *_dsdp);
+void	acpi_handle_dsdt(struct ACPIsdt *_dsdp);
+void	acpi_handle_facp(struct FACPbody *_facp);
+void	acpi_handle_rsdt(struct ACPIsdt *_rsdp);
+void	asl_dump_from_devmem(void);
+void	usage(void);
+
+
 struct ACPIsdt	dsdt_header = {
 	"DSDT", 0, 1, 0, "OEMID", "OEMTBLID", 0x12345678, "CRTR", 0x12345678
 };
@@ -236,7 +255,7 @@ acpi_user_init(void)
 }
 
 struct ACPIrsdp *
-acpi_find_rsd_ptr()
+acpi_find_rsd_ptr(void)
 {
 	int		i;
 	u_int8_t	buf[sizeof(struct ACPIrsdp)];

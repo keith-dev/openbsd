@@ -1,9 +1,9 @@
-#	$OpenBSD: Makefile.inc,v 1.30 2013/05/13 10:37:02 ajacoutot Exp $
+#	$OpenBSD: Makefile.inc,v 1.33 2014/01/22 21:06:45 tedu Exp $
 
 # string sources
 .PATH: ${LIBCSRCDIR}/arch/${MACHINE_CPU}/string ${LIBCSRCDIR}/string
 
-SRCS+=	bm.c memccpy.c memmem.c memrchr.c stpcpy.c stpncpy.c \
+SRCS+=	bm.c explicit_bzero.c memccpy.c memmem.c memrchr.c stpcpy.c stpncpy.c \
 	strcasecmp.c strcasestr.c strcoll.c strdup.c \
 	strerror.c strerror_r.c strlcat.c strmode.c strndup.c strnlen.c \
 	strsignal.c strtok.c strxfrm.c \
@@ -45,6 +45,12 @@ memmove.po: bcopy.c
 memmove.so: bcopy.c
 	${CC} ${PICFLAG} -DPIC -DMEMMOVE ${CFLAGS} ${CPPFLAGS} -c ${.ALLSRC} \
 		-o ${.TARGET}
+
+memmove.do: bcopy.c
+	${CC} -DMEMMOVE ${CFLAGS} ${CPPFLAGS} ${DIST_CFLAGS} -c ${.ALLSRC} \
+	    -o ${.TARGET}
+	@${LD} -o ${.TARGET}.tmp -x -r ${.TARGET}
+	@mv ${.TARGET}.tmp ${.TARGET}
 .endif
 
 # if no machine specific memcpy(3), build one out of bcopy(3).
@@ -71,6 +77,12 @@ memcpy.po: bcopy.c
 memcpy.so: bcopy.c
 	${CC} ${PICFLAG} -DPIC -DMEMCOPY ${CFLAGS} ${CPPFLAGS} -c ${.ALLSRC} \
 		-o ${.TARGET}
+
+memcpy.do: bcopy.c
+	${CC} -DMEMCOPY ${CFLAGS} ${CPPFLAGS} ${DIST_CFLAGS} -c ${.ALLSRC} \
+	    -o ${.TARGET}
+	@${LD} -o ${.TARGET}.tmp -x -r ${.TARGET}
+	@mv ${.TARGET}.tmp ${.TARGET}
 .endif
 .endif
 
@@ -95,6 +107,12 @@ strchr.po: index.c
 strchr.so: index.c
 	${CC} ${PICFLAG} -DPIC -DSTRCHR ${CFLAGS} ${CPPFLAGS} -c ${.ALLSRC} \
 	    -o ${.TARGET}
+
+strchr.do: index.c
+	${CC} -DSTRCHR ${CFLAGS} ${CPPFLAGS} ${DIST_CFLAGS} -c ${.ALLSRC} \
+	    -o ${.TARGET}
+	@${LD} -o ${.TARGET}.tmp -x -r ${.TARGET}
+	@mv ${.TARGET}.tmp ${.TARGET}
 .endif
 
 # if no machine specific strrchr(3), build one out of rindex(3).
@@ -118,26 +136,32 @@ strrchr.po: rindex.c
 strrchr.so: rindex.c
 	${CC} ${PICFLAG} -DPIC -DSTRRCHR ${CFLAGS} ${CPPFLAGS} -c ${.ALLSRC} \
 	    -o ${.TARGET}
+
+strrchr.do: rindex.c
+	${CC} -DSTRRCHR ${CFLAGS} ${CPPFLAGS} ${DIST_CFLAGS} -c ${.ALLSRC} \
+	    -o ${.TARGET}
+	@${LD} -o ${.TARGET}.tmp -x -r ${.TARGET}
+	@mv ${.TARGET}.tmp ${.TARGET}
 .endif
 
 MAN+=	bm.3 bcmp.3 bcopy.3 bstring.3 bzero.3 ffs.3 memccpy.3 memchr.3 \
 	memcmp.3 memcpy.3 memmem.3 memmove.3 memset.3 stpcpy.3 strcasecmp.3 \
-	strcat.3 strchr.3 strcmp.3 strcoll.3 strcpy.3 strcspn.3 strerror.3 \
-	string.3 strlen.3 strmode.3 strdup.3 strpbrk.3 strrchr.3 strsep.3 \
-	strsignal.3 strspn.3 strstr.3 strtok.3 strxfrm.3 swab.3 strlcpy.3 \
-	wcscasecmp.3 wcscat.3 wcschr.3 wcscmp.3 wcscpy.3 wcscspn.3 wcsdup.3 \
-	wcslcpy.3 wcslen.3 wcspbrk.3 wcsrchr.3 wcsspn.3 wcsstr.3 wcstok.3 \
-	wcswidth.3 wmemchr.3 wmemcmp.3 wmemcpy.3 wmemmove.3 wmemset.3
+	strcat.3 strchr.3 strcmp.3 strcoll.3 strcpy.3 strcspn.3 strdup.3 \
+	strerror.3 string.3 strlen.3 strmode.3 strncat.3 strncpy.3 strpbrk.3 \
+	strrchr.3 strsep.3 strsignal.3 strspn.3 strstr.3 strtok.3 strxfrm.3 \
+	swab.3 strlcpy.3 wcscasecmp.3 wcscat.3 wcschr.3 wcscmp.3 wcscpy.3 \
+	wcscspn.3 wcsdup.3 wcslcpy.3 wcslen.3 wcspbrk.3 wcsrchr.3 wcsspn.3 \
+	wcsstr.3 wcstok.3 wcswidth.3 wmemchr.3 wmemcmp.3 wmemcpy.3 wmemmove.3 \
+	wmemset.3
 
 MLINKS+=bm.3 bm_comp.3 bm.3 bm_exec.3 bm.3 bm_free.3
+MLINKS+=bzero.3 explicit_bzero.3
 MLINKS+=memchr.3 memrchr.3
 MLINKS+=stpcpy.3 stpncpy.3
 MLINKS+=strchr.3 index.3
 MLINKS+=strrchr.3 rindex.3
 MLINKS+=strcasecmp.3 strncasecmp.3
-MLINKS+=strcat.3 strncat.3
 MLINKS+=strcmp.3 strncmp.3
-MLINKS+=strcpy.3 strncpy.3
 MLINKS+=strdup.3 strndup.3
 MLINKS+=strlcpy.3 strlcat.3
 MLINKS+=strlen.3 strnlen.3

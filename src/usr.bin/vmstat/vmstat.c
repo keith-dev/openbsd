@@ -1,5 +1,5 @@
 /*	$NetBSD: vmstat.c,v 1.29.4.1 1996/06/05 00:21:05 cgd Exp $	*/
-/*	$OpenBSD: vmstat.c,v 1.122 2013/07/18 08:42:50 bluhm Exp $	*/
+/*	$OpenBSD: vmstat.c,v 1.127 2013/11/26 21:08:12 deraadt Exp $	*/
 
 /*
  * Copyright (c) 1980, 1986, 1991, 1993
@@ -33,7 +33,6 @@
 #include <sys/param.h>
 #include <sys/time.h>
 #include <sys/proc.h>
-#include <sys/user.h>
 #include <sys/dkstat.h>
 #include <sys/buf.h>
 #include <sys/namei.h>
@@ -64,8 +63,8 @@
 struct nlist namelist[] = {
 #define X_UVMEXP	0		/* sysctl */
 	{ "_uvmexp" },
-#define	X_BOOTTIME	1		/* sysctl */
-	{ "_boottime" },
+#define	X_TIME_UPTIME	1
+	{ "_time_uptime" },
 #define X_NCHSTATS	2		/* sysctl */
 	{ "_nchstats" },
 #define	X_KMEMSTAT	3		/* sysctl */
@@ -78,6 +77,8 @@ struct nlist namelist[] = {
 	{ "_nselcoll" },
 #define X_POOLHEAD	7		/* sysctl */
 	{ "_pool_head" },
+#define	X_NAPTIME	8
+	{ "_naptime" },
 	{ "" },
 };
 
@@ -130,10 +131,9 @@ int
 main(int argc, char *argv[])
 {
 	char errbuf[_POSIX2_LINE_MAX];
-	int c, todo = 0, reps = 0, mib[2];
+	int c, todo = 0, reps = 0;
 	const char *errstr;
 	u_int interval = 0;
-	size_t size;
 
 	while ((c = getopt(argc, argv, "c:fiM:mN:stw:vz")) != -1) {
 		switch (c) {
@@ -268,7 +268,7 @@ choosedrives(char **argv)
 #define BACKWARD_COMPATIBILITY
 	for (ndrives = 0; *argv; ++argv) {
 #ifdef	BACKWARD_COMPATIBILITY
-		if (isdigit(**argv))
+		if (isdigit((unsigned char)**argv))
 			break;
 #endif
 		for (i = 0; i < dk_ndrive; i++) {
@@ -291,31 +291,18 @@ choosedrives(char **argv)
 time_t
 getuptime(void)
 {
-	static struct timeval boottime;
-	static time_t now;
-	time_t uptime;
-	size_t size;
-	int mib[2];
+	struct timespec uptime;
+	time_t time_uptime, naptime;
 
-	if (boottime.tv_sec == 0) {
-		if (nlistf == NULL && memf == NULL) {
-			size = sizeof(boottime);
-			mib[0] = CTL_KERN;
-			mib[1] = KERN_BOOTTIME;
-			if (sysctl(mib, 2, &boottime, &size, NULL, 0) < 0) {
-				warn("could not get kern.boottime");
-				bzero(&boottime, sizeof(boottime));
-			}
-		} else {
-			kread(X_BOOTTIME, &boottime, sizeof(boottime));
-		}
+	if (nlistf == NULL && memf == NULL) {
+		if (clock_gettime(CLOCK_UPTIME, &uptime) == -1)
+			err(1, "clock_gettime");
+		return (uptime.tv_sec);
 	}
-	(void)time(&now);
-	uptime = now - boottime.tv_sec;
-	if (uptime <= 0 || uptime > 60*60*24*365*10)
-		errx(1, "time makes no sense; namelist must be wrong");
 
-	return(uptime);
+	kread(X_NAPTIME, &naptime, sizeof(naptime));
+	kread(X_TIME_UPTIME, &time_uptime, sizeof(time_uptime));
+	return (time_uptime - naptime);
 }
 
 int	hz;
@@ -368,7 +355,7 @@ dovmstat(u_int interval, int reps)
 		}
 		(void)printf(" %u %u %u ",
 		    total.t_rq - 1, total.t_dw + total.t_pw, total.t_sw);
-#define	rate(x)	((((unsigned)x) + halfuptime) / uptime)	/* round */
+#define	rate(x)	((unsigned)((((unsigned)x) + halfuptime) / uptime)) /* round */
 #define pgtok(a) ((a) * ((unsigned int)uvmexp.pagesize >> 10))
 		(void)printf("%6u %7u ",
 		    pgtok(total.t_avm), pgtok(total.t_free));
@@ -1030,7 +1017,6 @@ dopool_kvm(void)
 	struct pool pool, *pp = &pool;
 	long total = 0, inuse = 0;
 	u_long addr;
-	int kmfp;
 
 	kread(X_POOLHEAD, &pool_head, sizeof(pool_head));
 	addr = (u_long)SIMPLEQ_FIRST(&pool_head);

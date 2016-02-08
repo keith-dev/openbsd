@@ -1,4 +1,4 @@
-/*	$OpenBSD: lpr.c,v 1.43 2013/02/15 08:28:08 mpi Exp $ */
+/*	$OpenBSD: lpr.c,v 1.45 2013/11/24 21:32:32 deraadt Exp $ */
 /*	$NetBSD: lpr.c,v 1.19 2000/10/11 20:23:52 is Exp $	*/
 
 /*
@@ -145,7 +145,7 @@ main(int argc, char **argv)
 		switch (ch) {
 
 		case '#':		/* n copies */
-			if (isdigit(*optarg)) {
+			if (isdigit((unsigned char)*optarg)) {
 				i = atoi(optarg);
 				if (i > 0)
 					ncopies = i;
@@ -328,8 +328,8 @@ main(int argc, char **argv)
 			continue;	/* file unreasonable */
 
 		if (sflag && (cp = linked(arg)) != NULL) {
-			(void)snprintf(buf, sizeof(buf), "%d %d",
-			    statb.st_dev, statb.st_ino);
+			(void)snprintf(buf, sizeof(buf), "%d %llu",
+			    statb.st_dev, (unsigned long long)statb.st_ino);
 			card('S', buf);
 			if (format == 'p')
 				card('T', title ? title : arg);

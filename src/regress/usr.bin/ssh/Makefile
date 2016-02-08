@@ -1,5 +1,6 @@
-#	$OpenBSD: Makefile,v 1.65 2013/04/18 02:46:12 djm Exp $
+#	$OpenBSD: Makefile,v 1.68 2014/01/25 04:35:32 dtucker Exp $
 
+REGRESS_FAIL_EARLY= yes
 REGRESS_TARGETS=	t1 t2 t3 t4 t5 t6 t7 t8 t9
 
 CLEANFILES+=	t2.out t6.out1 t6.out2 t7.out t7.out.pub copy.1 copy.2 \
@@ -15,6 +16,7 @@ LTESTS= 	connect \
 		transfer \
 		banner \
 		rekey \
+		dhgex \
 		stderr-data \
 		stderr-after-eof \
 		broken-pipe \
@@ -36,6 +38,7 @@ LTESTS= 	connect \
 		sftp-badcmds \
 		sftp-batch \
 		sftp-glob \
+		sftp-perm \
 		reconfigure \
 		dynamic-forward \
 		forwarding \
@@ -74,7 +77,8 @@ CLEANFILES+=	authorized_keys_${USER} known_hosts pidfile \
 		authorized_principals_${USER} expect actual ready \
 		sshd_proxy.* authorized_keys_${USER}.* revoked-* krl-* \
 		ssh.log failed-ssh.log sshd.log failed-sshd.log \
-		regress.log failed-regress.log ssh-log-wrapper.sh
+		regress.log failed-regress.log ssh-log-wrapper.sh \
+		sftp-server.sh sftp-server.log sftp.log
 
 SUDO_CLEAN+=	/var/run/testdata_${USER} /var/run/keycommand_${USER}
 
@@ -132,6 +136,13 @@ t9.out:
 t9: t9.out
 	ssh-keygen -lf t9.out > /dev/null
 	ssh-keygen -Bf t9.out > /dev/null
+
+t10.out:
+	ssh-keygen -q -t ed25519 -N '' -f $@
+
+t10: t10.out
+	ssh-keygen -lf t10.out > /dev/null
+	ssh-keygen -Bf t10.out > /dev/null
 
 modpipe: modpipe.c
 

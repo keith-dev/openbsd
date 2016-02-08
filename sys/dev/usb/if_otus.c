@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_otus.c,v 1.34 2013/04/15 09:23:01 mglocker Exp $	*/
+/*	$OpenBSD: if_otus.c,v 1.37 2013/11/26 20:33:18 deraadt Exp $	*/
 
 /*-
  * Copyright (c) 2009 Damien Bergamini <damien.bergamini@free.fr>
@@ -47,7 +47,6 @@
 
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
-#include <netinet/in_var.h>
 #include <netinet/if_ether.h>
 #include <netinet/ip.h>
 
@@ -1580,6 +1579,9 @@ otus_set_multi(struct otus_softc *sc)
 	uint32_t lo, hi;
 	uint8_t bit;
 
+	if (ac->ac_multirangecnt > 0)
+		ifp->if_flags |= IFF_ALLMULTI;
+
 	if ((ifp->if_flags & (IFF_ALLMULTI | IFF_PROMISC)) != 0) {
 		lo = hi = 0xffffffff;
 		goto done;
@@ -1587,11 +1589,6 @@ otus_set_multi(struct otus_softc *sc)
 	lo = hi = 0;
 	ETHER_FIRST_MULTI(step, ac, enm);
 	while (enm != NULL) {
-		if (bcmp(enm->enm_addrlo, enm->enm_addrhi, ETHER_ADDR_LEN)) {
-			ifp->if_flags |= IFF_ALLMULTI;
-			lo = hi = 0xffffffff;
-			goto done;
-		}
 		bit = enm->enm_addrlo[5] >> 2;
 		if (bit < 32)
 			lo |= 1 << bit;
@@ -1600,7 +1597,7 @@ otus_set_multi(struct otus_softc *sc)
 		ETHER_NEXT_MULTI(step, enm);
 	}
  done:
-	hi |= 1 << 31;	/* Make sure the broadcast bit is set. */
+	hi |= 1U << 31;	/* Make sure the broadcast bit is set. */
 	otus_write(sc, AR_MAC_REG_GROUP_HASH_TBL_L, lo);
 	otus_write(sc, AR_MAC_REG_GROUP_HASH_TBL_H, hi);
 	return otus_write_barrier(sc);

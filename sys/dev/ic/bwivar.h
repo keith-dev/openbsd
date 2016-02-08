@@ -1,4 +1,4 @@
-/*	$OpenBSD: bwivar.h,v 1.26 2010/08/06 05:26:24 mglocker Exp $	*/
+/*	$OpenBSD: bwivar.h,v 1.29 2013/12/06 21:03:02 deraadt Exp $	*/
 
 /*
  * Copyright (c) 2007 The DragonFly Project.  All rights reserved.
@@ -111,7 +111,7 @@ struct bwi_desc32 {
 #define BWI_DESC32_C_EOR		(1 << 28)
 #define BWI_DESC32_C_INTR		(1 << 29)
 #define BWI_DESC32_C_FRAME_END		(1 << 30)
-#define BWI_DESC32_C_FRAME_START	(1 << 31)
+#define BWI_DESC32_C_FRAME_START	(1U << 31)
 
 struct bwi_desc64 {
 	/* Little endian */
@@ -620,7 +620,6 @@ struct bwi_softc {
 #define sc_txtap                 sc_txtapu.th
         int                      sc_txtap_len;
 #endif
-	struct workq_task	 sc_resume_wqt;
 };
 
 #define BWI_F_BUS_INITED	0x1

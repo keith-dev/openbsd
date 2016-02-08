@@ -1,4 +1,4 @@
-/*	$OpenBSD: kroute.c,v 1.55 2013/07/05 22:13:10 krw Exp $	*/
+/*	$OpenBSD: kroute.c,v 1.64 2014/02/13 00:24:13 krw Exp $	*/
 
 /*
  * Copyright 2012 Kenneth R Westerback <krw@openbsd.org>
@@ -65,10 +65,7 @@ flush_routes(char *ifname, int rdomain)
 	if (rslt == -1)
 		warning("flush_routes: imsg_compose: %s", strerror(errno));
 
-	/* Do flush to maximize chances of cleaning up routes on exit. */
-	rslt = imsg_flush(unpriv_ibuf);
-	if (rslt == -1)
-		warning("flush_routes: imsg_flush: %s", strerror(errno));
+	flush_unpriv_ibuf("flush_routes");
 }
 
 void
@@ -188,9 +185,10 @@ add_route(int rdomain, struct in_addr dest, struct in_addr netmask,
 
 	rslt = imsg_compose(unpriv_ibuf, IMSG_ADD_ROUTE, 0, 0, -1,
 	    &imsg, sizeof(imsg));
-
 	if (rslt == -1)
 		warning("add_route: imsg_compose: %s", strerror(errno));
+
+ 	flush_unpriv_ibuf("add_route");
 }
 
 void
@@ -300,10 +298,8 @@ delete_addresses(char *ifname, int rdomain)
 		    (strcmp(ifi->name, ifa->ifa_name)))
 			continue;
 
-		memset(&addr, 0, sizeof(addr));
-		memcpy(&addr,
-		    &((struct sockaddr_in *)ifa->ifa_addr)->sin_addr,
-		    sizeof(in_addr_t));
+		memcpy(&addr, &((struct sockaddr_in *)ifa->ifa_addr)->sin_addr,
+		    sizeof(addr));
 
 		delete_address(ifi->name, ifi->rdomain, addr);
  	}
@@ -336,10 +332,7 @@ delete_address(char *ifname, int rdomain, struct in_addr addr)
 	if (rslt == -1)
 		warning("delete_address: imsg_compose: %s", strerror(errno));
 
-	/* Do flush to quickly kill previous dhclient, if any. */
-	rslt = imsg_flush(unpriv_ibuf);
-	if (rslt == -1 && errno != EPIPE)
-		warning("delete_address: imsg_flush: %s", strerror(errno));
+	flush_unpriv_ibuf("delete_address");
 }
 
 void
@@ -381,7 +374,6 @@ priv_delete_address(struct imsg_delete_address *imsg)
  * [priv_]add_address is the equivalent of
  *
  *	ifconfig <if> inet <addr> netmask <mask> broadcast <addr>
- *	route -q <rdomain> add <addr> 127.0.0.1
  */
 void
 add_address(char *ifname, int rdomain, struct in_addr addr,
@@ -402,15 +394,15 @@ add_address(char *ifname, int rdomain, struct in_addr addr,
 
 	rslt = imsg_compose(unpriv_ibuf, IMSG_ADD_ADDRESS, 0, 0, -1, &imsg,
 	    sizeof(imsg));
-
 	if (rslt == -1)
 		warning("add_address: imsg_compose: %s", strerror(errno));
+
+	flush_unpriv_ibuf("add_address");
 }
 
 void
 priv_add_address(struct imsg_add_address *imsg)
 {
-	struct imsg_add_route rimsg;
 	struct ifaliasreq ifaliasreq;
 	struct sockaddr_in *in;
 	int s;
@@ -443,7 +435,7 @@ priv_add_address(struct imsg_add_address *imsg)
 	in = (struct sockaddr_in *)&ifaliasreq.ifra_mask;
 	in->sin_family = AF_INET;
 	in->sin_len = sizeof(ifaliasreq.ifra_mask);
-	memcpy(&in->sin_addr.s_addr, &imsg->mask, sizeof(imsg->mask));
+	memcpy(&in->sin_addr, &imsg->mask, sizeof(in->sin_addr));
 
 	/* No need to set broadcast address. Kernel can figure it out. */
 
@@ -452,17 +444,6 @@ priv_add_address(struct imsg_add_address *imsg)
 		    strerror(errno));
 
 	close(s);
-
-	/*
-	 * Add the 127.0.0.1 route for the specified address.
-	 */
-	memset(&rimsg, 0, sizeof(rimsg));
-	rimsg.dest.s_addr = imsg->addr.s_addr;
-	rimsg.gateway.s_addr = inet_addr("127.0.0.1");
-	rimsg.addrs = RTA_DST | RTA_GATEWAY;
-	rimsg.flags = RTF_GATEWAY | RTF_STATIC;
-
-	priv_add_route(&rimsg);
 
 	active_addr = imsg->addr;
 }
@@ -486,12 +467,9 @@ sendhup(struct client_lease *active)
 	rslt = imsg_compose(unpriv_ibuf, IMSG_HUP, 0, 0, -1,
 	    &imsg, sizeof(imsg));
 	if (rslt == -1)
-		warning("cleanup: imsg_compose: %s", strerror(errno));
+		warning("sendhup: imsg_compose: %s", strerror(errno));
 
-	/* Do flush so cleanup message gets through immediately. */
-	rslt = imsg_flush(unpriv_ibuf);
-	if (rslt == -1 && errno != EPIPE)
-		warning("cleanup: imsg_flush: %s", strerror(errno));
+	flush_unpriv_ibuf("sendhup");
 }
 
 /*
@@ -694,7 +672,7 @@ void
 delete_route(int s, int rdomain, struct rt_msghdr *rtm)
 {
 	static int seqno;
-	int rlen;
+	ssize_t rlen;
 
 	rtm->rtm_type = RTM_DELETE;
 	rtm->rtm_tableid = rdomain;
@@ -705,5 +683,22 @@ delete_route(int s, int rdomain, struct rt_msghdr *rtm)
 		if (errno != ESRCH)
 			error("RTM_DELETE write: %s", strerror(errno));
 	} else if (rlen < (int)rtm->rtm_msglen)
-		error("short RTM_DELETE write (%d)\n", rlen);
+		error("short RTM_DELETE write (%zd)\n", rlen);
+}
+
+void
+flush_unpriv_ibuf(const char *who)
+{
+	while (unpriv_ibuf->w.queued) {
+		if (msgbuf_write(&unpriv_ibuf->w) <= 0) {
+			if (errno == EAGAIN)
+				break;
+			if (quit == 0)
+				quit = INTERNALSIG;
+			if (errno != EPIPE && errno != 0)
+				warning("%s: msgbuf_write: %s", who,
+				    strerror(errno));
+			break;
+		}
+	}
 }

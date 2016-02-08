@@ -1,8 +1,8 @@
 #! /usr/bin/perl
 # ex:ts=8 sw=4:
-# $OpenBSD: PkgCreate.pm,v 1.69 2012/12/31 09:42:05 espie Exp $
+# $OpenBSD: PkgCreate.pm,v 1.101 2014/02/02 15:35:52 espie Exp $
 #
-# Copyright (c) 2003-2010 Marc Espie <espie@openbsd.org>
+# Copyright (c) 2003-2014 Marc Espie <espie@openbsd.org>
 #
 # Permission to use, copy, modify, and distribute this software for any
 # purpose with or without fee is hereby granted, provided that the above
@@ -22,9 +22,10 @@ use warnings;
 use OpenBSD::AddCreateDelete;
 use OpenBSD::Dependencies;
 use OpenBSD::SharedLibs;
+use OpenBSD::Signer;
 
 package OpenBSD::PkgCreate::State;
-our @ISA = qw(OpenBSD::AddCreateDelete::State);
+our @ISA = qw(OpenBSD::CreateSign::State);
 
 sub init
 {
@@ -97,23 +98,19 @@ sub handle_options
 			    my $w = shift;
 			    $state->{wantlib}{$w} = 1;
 		    },
-	    's' => sub {
-			    push(@{$state->{signature_params}}, shift);
-		    },
 	};
 	$state->{no_exports} = 1;
-	$state->SUPER::handle_options('p:f:d:M:U:s:A:B:P:W:qQ',
+	$state->SUPER::handle_options('p:f:d:M:U:A:B:P:W:qQ',
 	    '[-nQqvx] [-A arches] [-B pkg-destdir] [-D name[=value]]',
 	    '[-L localbase] [-M displayfile] [-P pkg-dependency]',
-	    '[-s x509 -s cert -s priv] [-U undisplayfile] [-W wantedlib]',
-	    '-d desc -D COMMENT=value -f packinglist -p prefix pkg-name');
+	    '[-s signing-parameter] [-U undisplayfile] [-W wantedlib]',
+	    '[-d desc -D COMMENT=value -f packinglist -p prefix]',
+	    'pkg-name');
 
 	my $base = '/';
 	if (defined $state->opt('B')) {
 		$base = $state->opt('B');
-	} elsif (defined $ENV{'PKG_PREFIX'}) {
-		$base = $ENV{'PKG_PREFIX'};
-	}
+	} 
 
 	$state->{base} = $base;
 
@@ -149,6 +146,7 @@ sub pretend_to_archive
 	$self->comment_create_package;
 }
 
+sub record_digest {}
 sub archive {}
 sub comment_create_package {}
 sub grab_manpages {}
@@ -176,6 +174,15 @@ sub verify_checksum
 {
 }
 
+sub register_forbidden
+{
+	my ($self, $state) = @_;
+	if ($self->is_forbidden) {
+		push(@{$state->{forbidden}}, $self);
+	}
+}
+
+sub is_forbidden() { 0 }
 sub resolve_link
 {
 	my ($filename, $base, $level) = @_;
@@ -284,10 +291,6 @@ sub prepare_for_archival
 	return $o;
 }
 
-sub copy_over
-{
-}
-
 sub discover_directories
 {
 }
@@ -321,6 +324,15 @@ sub pretend_to_archive
 	&OpenBSD::PackingElement::FileBase::pretend_to_archive;
 }
 
+sub may_add
+{
+	my ($class, $subst, $plist, $opt) = @_;
+	if (defined $opt) {
+		my $o = $class->add($plist);
+		$subst->copy($opt, $o->fullname) if defined $o->fullname;
+	}
+}
+
 sub comment_create_package
 {
 	my ($self) = @_;
@@ -352,13 +364,7 @@ sub prepare_for_archival
 	return $o;
 }
 
-sub copy_over
-{
-	my ($self, $wrarc, $rdarc) = @_;
-	$wrarc->destdir($rdarc->info);
-	my $e = $wrarc->prepare($self->{name});
-	$e->write;
-}
+sub forbidden() { 1 }
 
 # override for CONTENTS: we cannot checksum this.
 package OpenBSD::PackingElement::FCONTENTS;
@@ -370,6 +376,12 @@ sub verify_checksum
 {
 }
 
+sub archive
+{
+	my ($self, $state) = @_;
+	$self->SUPER::archive($state);
+	$state->new_gstream;
+}
 
 package OpenBSD::PackingElement::Cwd;
 sub archive
@@ -393,6 +405,13 @@ sub comment_create_package
 
 package OpenBSD::PackingElement::FileBase;
 
+sub record_digest
+{
+	my ($self, $list) = @_;
+	if (defined $self->{d}) {
+		push(@$list, $self->{d}->stringize);
+	}
+}
 sub archive
 {
 	my ($self, $state) = @_;
@@ -432,16 +451,6 @@ sub verify_checksum
 {
 	my ($self, $state) = @_;
 	$self->verify_checksum_with_base($state, $state->{base});
-}
-
-sub copy_over
-{
-	my ($self, $wrarc, $rdarc) = @_;
-	my $e = $rdarc->next;
-	if (!$e->check_name($self)) {
-		die "Names don't match: ", $e->{name}, " ", $self->{name};
-	}
-	$e->copy_long($wrarc);
 }
 
 sub find_every_library
@@ -510,7 +519,7 @@ sub makesum_plist
 	if (-d $state->{base}.$d) {
 		undef $d;
 	}
-	$self->format($state, $tempname, $fh);
+	$self->format($state, $tempname, $fh) or return;
 	if (-z $tempname) {
 		$state->errsay("groff produced empty result for #1", $dest);
 		$state->errsay("\tkeeping source manpage");
@@ -535,6 +544,8 @@ sub avert_duplicates_and_other_checks
 	}
 	$self->SUPER::avert_duplicates_and_other_checks($state);
 }
+
+sub forbidden() { 1 }
 
 package OpenBSD::PackingElement::Conflict;
 sub avert_duplicates_and_other_checks
@@ -584,6 +595,8 @@ sub avert_duplicates_and_other_checks
 	$self->SUPER::avert_duplicates_and_other_checks($state);
 }
 
+sub forbidden() { 1 }
+
 package OpenBSD::PackingElement::NoDefaultConflict;
 sub avert_duplicates_and_other_checks
 {
@@ -614,6 +627,30 @@ sub find_every_library
 	push(@{$h->{$l[0]}{dynamic}}, $self);
 }
 
+package OpenBSD::PackingElement::DigitalSignature;
+sub is_forbidden() { 1 }
+
+package OpenBSD::PackingElement::Signer;
+sub is_forbidden() { 1 }
+
+package OpenBSD::PackingElement::ExtraInfo;
+sub is_forbidden() { 1 }
+
+package OpenBSD::PackingElement::ManualInstallation;
+sub is_forbidden() { 1 }
+
+package OpenBSD::PackingElement::Firmware;
+sub is_forbidden() { 1 }
+
+package OpenBSD::PackingElement::Url;
+sub is_forbidden() { 1 }
+
+package OpenBSD::PackingElement::Arch;
+sub is_forbidden() { 1 }
+
+package OpenBSD::PackingElement::LocalBase;
+sub is_forbidden() { 1 }
+
 package OpenBSD::PackingElement::Fragment;
 our @ISA=qw(OpenBSD::PackingElement);
 
@@ -630,7 +667,6 @@ sub stringize
 {
 	return '!%%'.shift->{name}.'%%';
 }
-
 
 # put together file and filename, in order to handle fragments simply
 package MyFile;
@@ -844,6 +880,12 @@ sub pkgname
 	return $self->{plist}->pkgname;
 }
 
+sub dependency_info
+{
+	my $self = shift;
+	return $self->{plist};
+}
+
 package OpenBSD::PseudoSet;
 sub new
 {
@@ -968,15 +1010,6 @@ sub annotate
 {
 }
 
-sub add_special_file
-{
-	my ($subst, $plist, $name, $opt) = @_;
-	if (defined $opt) {
-	    my $o = OpenBSD::PackingElement::File->add($plist, $name);
-	    $subst->copy($opt, $o->fullname) if defined $o->fullname;
-	}
-}
-
 sub add_description
 {
 	my ($state, $plist, $name, $opt_d) = @_;
@@ -994,69 +1027,29 @@ sub add_description
 	if (!defined $opt_d) {
 		$state->usage("Description required");
 	}
-	if (defined $o->fullname) {
-	    open(my $fh, '>', $o->fullname) or die "Can't write to DESC: $!";
-	    if (defined $comment) {
-	    	print $fh $subst->do($comment), "\n";
-	    }
-	    if ($opt_d =~ /^\-(.*)$/o) {
+	return if $state->opt('q');
+
+	open(my $fh, '>', $o->fullname) or die "Can't write to DESC: $!";
+	if (defined $comment) {
+		print $fh $subst->do($comment), "\n";
+	}
+	if ($opt_d =~ /^\-(.*)$/o) {
 		print $fh $1, "\n";
-	    } else {
+	} else {
 		$subst->copy_fh($opt_d, $fh);
-	    }
-	    if (defined $comment) {
+	}
+	if (defined $comment) {
 		if ($subst->empty('MAINTAINER')) {
 			$state->errsay("no MAINTAINER");
 		} else {
-			print $fh "\n", $subst->do('Maintainer: ${MAINTAINER}'), "\n";
+			print $fh "\n", 
+			    $subst->do('Maintainer: ${MAINTAINER}'), "\n";
 		}
 		if (!$subst->empty('HOMEPAGE')) {
 			print $fh "\n", $subst->do('WWW: ${HOMEPAGE}'), "\n";
 		}
-	    }
-	    close($fh);
 	}
-}
-
-sub add_signature
-{
-	my ($self, $plist, $cert, $privkey) = @_;
-
-	require OpenBSD::x509;
-
-	my $sig = OpenBSD::PackingElement::DigitalSignature->new_x509;
-	$sig->add_object($plist);
-	$sig->{b64sig} = OpenBSD::x509::compute_signature($plist,
-	    $cert, $privkey);
-}
-
-sub create_archive
-{
-	my ($self, $state, $filename, $dir) = @_;
-	open(my $fh, "|-", OpenBSD::Paths->gzip, "-f", "-o", $filename);
-	return  OpenBSD::Ustar->new($fh, $state, $dir);
-}
-
-sub sign_existing_package
-{
-	my ($self, $state, $pkgname, $cert, $privkey) = @_;
-
-
-	my $true_package = $state->repo->find($pkgname);
-	$state->fatal("No such package #1", $pkgname) unless $true_package;
-	my $dir = $true_package->info;
-	my $plist = OpenBSD::PackingList->fromfile($dir.CONTENTS);
-	$plist->set_infodir($dir);
-	$self->add_signature($plist, $cert, $privkey);
-	$plist->save;
-	my $tmp = OpenBSD::Temp::permanent_file(".", "pkg");
-	my $wrarc = $self->create_archive($state, $tmp, ".");
-	$plist->copy_over($wrarc, $true_package);
-	$wrarc->close;
-	$true_package->wipe_info;
-	unlink($plist->pkgname.".tgz");
-	rename($tmp, $plist->pkgname.".tgz") or
-	    $state->fatal("Can't create final signed package: #1", $!);
+	close($fh);
 }
 
 sub add_extra_info
@@ -1089,8 +1082,10 @@ sub add_elements
 
 	my $subst = $state->{subst};
 	add_description($state, $plist, DESC, $state->opt('d'));
-	add_special_file($subst, $plist, DISPLAY, $state->opt('M'));
-	add_special_file($subst, $plist, UNDISPLAY, $state->opt('U'));
+	OpenBSD::PackingElement::FDISPLAY->may_add($subst, $plist,
+	    $state->opt('M'));
+	OpenBSD::PackingElement::FUNDISPLAY->may_add($subst, $plist,
+	    $state->opt('U'));
 	for my $d (sort keys %{$state->{dependencies}}) {
 		OpenBSD::PackingElement::Dependency->add($plist, $d);
 	}
@@ -1128,6 +1123,14 @@ sub read_all_fragments
 		$self->read_fragments($state, $plist, $contentsfile) or
 		    $self->cant_read_fragment($state, $contentsfile);
 	}
+
+	$plist->register_forbidden($state);
+	if (defined $state->{forbidden}) {
+		for my $e (@{$state->{forbidden}}) {
+			$state->errsay("Error: #1 can't be set explicitly", "\@".$e->keyword." ".$e->stringize);
+		}
+		$state->fatal("Can't continue");
+	}
 }
 
 sub create_plist
@@ -1140,18 +1143,19 @@ sub create_plist
 		$pkgname = $1;
 		$pkgname =~ s/\.tgz$//o;
 	}
-	$plist->set_pkgname($pkgname);
 	$state->say("Creating package #1", $pkgname)
 	    if !(defined $state->opt('q')) && $state->opt('v');
 	if (!$state->opt('q')) {
 		$plist->set_infodir(OpenBSD::Temp->dir);
 	}
 
-	$self->add_elements($plist, $state);
 	unless (defined $state->opt('q') && defined $state->opt('n')) {
 		$state->set_status("reading plist");
 	}
 	$self->read_all_fragments($state, $plist);
+
+	$plist->set_pkgname($pkgname);
+	$self->add_elements($plist, $state);
 	return $plist;
 }
 
@@ -1198,8 +1202,7 @@ sub create_package
 	local $SIG{'HUP'} = $h;
 	local $SIG{'KILL'} = $h;
 	local $SIG{'TERM'} = $h;
-	$state->{archive} = $self->create_archive($state, $wname,
-	    $plist->infodir);
+	$state->{archive} = $state->create_archive($wname, $plist->infodir);
 	$state->set_status("archiving");
 	$state->progress->visit_with_size($plist, 'create_package', $state);
 	$state->end_status;
@@ -1283,11 +1286,60 @@ sub tweak_libraries
 	}
 }
 
+sub save_history
+{
+	my ($self, $plist, $dir) = @_;
+
+	unless (-d $dir) {
+		require File::Path;
+
+		File::Path::make_path($dir);
+	}
+
+	my $name = $plist->fullpkgpath;
+	$name =~ s,/,.,g;
+	my $fname = "$dir/$name";
+
+	# grab the old stuff:
+	# - order
+	# - and presence
+	my @old;
+	my (%known, %found);
+	if (open(my $f, '<', $fname)) {
+		while (<$f>) {
+			chomp;
+			push(@old, $_);
+			$known{$_} = 1;
+		}
+		close($f);
+	}
+	my @new;
+	$plist->record_digest(\@new);
+	open(my $f, ">", "$fname.new") or return;
+	
+	# split list
+	# - first, unknown stuff
+	for my $i (@new) {
+		if ($known{$i}) {
+			$found{$i} = 1;
+		} else {
+			print $f "$i\n";
+		}
+	}
+	# - then known stuff, preserve the order
+	for my $i (@old) {
+		if ($found{$i}) {
+			print $f "$i\n";
+		}
+	}
+	close($f);
+	rename("$fname.new", $fname);
+}
+
 sub parse_and_run
 {
 	my ($self, $cmd) = @_;
 
-	my ($cert, $privkey);
 	my $regen_package = 0;
 	my $sign_only = 0;
 
@@ -1304,25 +1356,12 @@ sub parse_and_run
 	}
 
 	try {
-	if (defined $state->{signature_params}) {
-		my @p = @{$state->{signature_params}};
-		if (@p != 3 || $p[0] ne 'x509' || !-f $p[1] || !-f $p[2]) {
-			$state->usage("Signature only works as -s x509 -s cert -s privkey");
-		}
-		$cert = $p[1];
-		$privkey = $p[2];
-	}
-
 	if (defined $state->opt('Q')) {
 		$state->{opt}{q} = 1;
 	}
 
 	if (!defined $state->{contents}) {
-		if (defined $cert) {
-			$sign_only = 1;
-		} else {
-			$state->usage("Packing-list required");
-		}
+		$state->usage("Packing-list required");
 	}
 
 	my $plist;
@@ -1332,14 +1371,6 @@ sub parse_and_run
 		}
 		$plist = $self->read_existing_plist($state, 
 		    $state->{contents}[0]);
-	} elsif ($sign_only) {
-		if ($state->not) {
-			$state->fatal("can't pretend to sign existing packages");
-		}
-		for my $pkgname (@ARGV) {
-			$self->sign_existing($state, $pkgname, $cert, $privkey);
-		}
-		return 0;
 	} else {
 		$plist = $self->create_plist($state, $ARGV[0]);
 	}
@@ -1355,6 +1386,10 @@ sub parse_and_run
 			$state->progress->visit_with_count($plist, 'verify_checksum', $state);
 		} else {
 			$plist = $self->make_plist_with_sum($state, $plist);
+		}
+		if ($state->defines('HISTORY_DIR')) {
+			$self->save_history($plist, 
+			    $state->defines('HISTORY_DIR'));
 		}
 		$self->show_bad_symlinks($state);
 		$state->end_status;
@@ -1388,8 +1423,8 @@ sub parse_and_run
 	}
 	$state->{bad} = 0;
 
-	if (defined $cert) {
-		$self->add_signature($plist, $cert, $privkey);
+	if (defined $state->{signer}) {
+		$state->add_signature($plist);
 		$plist->save if $regen_package;
 	}
 

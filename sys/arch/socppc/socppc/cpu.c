@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.c,v 1.4 2009/09/02 20:29:39 kettenis Exp $	*/
+/*	$OpenBSD: cpu.c,v 1.6 2014/01/19 12:45:36 deraadt Exp $	*/
 
 /*
  * Copyright (c) 2008 Mark Kettenis
@@ -19,19 +19,12 @@
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/device.h>
+#include <dev/rndvar.h>
 
 #include <machine/autoconf.h>
+#include <powerpc/hid.h>
 
 #include <dev/ofw/openfirm.h>
-
-#define HID0_DOZE	(1 << (31-8))
-#define HID0_NAP	(1 << (31-9))
-#define HID0_SLEEP	(1 << (31-10))
-#define HID0_DPM	(1 << (31-11))
-#define HID0_ICE	(1 << (31-16))
-#define HID0_DCE	(1 << (31-17))
-#define HID0_ICFI	(1 << (31-20))
-#define HID0_DCFI	(1 << (31-21))
 
 extern u_int32_t	hid0_idle;
 
@@ -76,7 +69,6 @@ cpu_attach(struct device *parent, struct device *self, void *aux)
 	ci = &cpu_info[0];
 	ci->ci_cpuid = 0;
 	ci->ci_intrdepth = -1;
-	ci->ci_randseed = 1;
 	ci->ci_dev = self;
 
 	printf(": %s\n", cpu_model);

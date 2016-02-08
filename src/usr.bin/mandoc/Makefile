@@ -1,13 +1,10 @@
-#	$OpenBSD: Makefile,v 1.69 2012/04/15 13:52:59 schwarze Exp $
+#	$OpenBSD: Makefile,v 1.74 2014/01/19 00:09:33 schwarze Exp $
 
 .include <bsd.own.mk>
 
-CFLAGS+=-DVERSION=\"1.12.1\"
-CFLAGS+=-W -Wall -Wstrict-prototypes
-
-.if ${COMPILER_VERSION:L} == "gcc3" || ${COMPILER_VERSION:L} == "gcc4" 
-CFLAGS+=-Wno-unused-parameter
-.endif
+CFLAGS  += -DVERSION=\"1.13.0\"
+CFLAGS  += -W -Wall -Wstrict-prototypes -Wno-unused-parameter
+LDADD	+= -lsqlite3
 
 SRCS=	roff.c tbl.c tbl_opts.c tbl_layout.c tbl_data.c eqn.c mandoc.c read.c
 SRCS+=	mdoc_macro.c mdoc.c mdoc_hash.c \
@@ -18,7 +15,7 @@ SRCS+=	main.c mdoc_term.c chars.c term.c tree.c man_term.c eqn_term.c
 SRCS+=	mdoc_man.c
 SRCS+=	html.c mdoc_html.c man_html.c out.c eqn_html.c
 SRCS+=	term_ps.c term_ascii.c tbl_term.c tbl_html.c
-SRCS+=	manpath.c mandocdb.c apropos_db.c apropos.c
+SRCS+=	manpath.c mandocdb.c mansearch_const.c mansearch.c apropos.c
 
 PROG=	mandoc
 

@@ -1,4 +1,4 @@
-/* $OpenBSD: acpi.c,v 1.246 2013/06/01 23:00:16 mlarkin Exp $ */
+/* $OpenBSD: acpi.c,v 1.253 2014/02/21 23:48:38 deraadt Exp $ */
 /*
  * Copyright (c) 2005 Thorsten Lockert <tholo@sigmasoft.com>
  * Copyright (c) 2005 Jordan Hargrave <jordan@openbsd.org>
@@ -74,6 +74,7 @@ int	acpi_hasprocfvs;
 
 void 	acpi_pci_match(struct device *, struct pci_attach_args *);
 pcireg_t acpi_pci_min_powerstate(pci_chipset_tag_t, pcitag_t);
+void	 acpi_pci_set_powerstate(pci_chipset_tag_t, pcitag_t, int, int);
 
 int	acpi_match(struct device *, void *, void *);
 void	acpi_attach(struct device *, struct device *, void *);
@@ -92,6 +93,7 @@ int	acpi_foundprt(struct aml_node *, void *);
 struct acpi_q *acpi_maptable(struct acpi_softc *, paddr_t, const char *,
 	    const char *, const char *, int);
 
+int	acpi_enable(struct acpi_softc *);
 void	acpi_init_states(struct acpi_softc *);
 
 void 	acpi_gpe_task(void *, int);
@@ -559,15 +561,26 @@ void
 acpi_pci_match(struct device *dev, struct pci_attach_args *pa)
 {
 	struct acpi_pci *pdev;
+	int state;
 
 	TAILQ_FOREACH(pdev, &acpi_pcidevs, next) {
-		if (pdev->bus == pa->pa_bus && 
-		    pdev->dev == pa->pa_device && 
-		    pdev->fun == pa->pa_function) {
-			dnprintf(10,"%s at acpi0 %s\n", 
-			    dev->dv_xname, aml_nodename(pdev->node));
-			pdev->device = dev;
-		}
+		if (pdev->bus != pa->pa_bus ||
+		    pdev->dev != pa->pa_device ||
+		    pdev->fun != pa->pa_function)
+			continue;
+
+		dnprintf(10,"%s at acpi0 %s\n", dev->dv_xname,
+		    aml_nodename(pdev->node));
+
+		pdev->device = dev;
+
+		/*
+		 * If some Power Resources are dependent on this device
+		 * initialize them.
+		 */
+		state = pci_get_powerstate(pa->pa_pc, pa->pa_tag);
+		acpi_pci_set_powerstate(pa->pa_pc, pa->pa_tag, state, 1);
+		acpi_pci_set_powerstate(pa->pa_pc, pa->pa_tag, state, 0);
 	}
 }
 
@@ -604,6 +617,66 @@ acpi_pci_min_powerstate(pci_chipset_tag_t pc, pcitag_t tag)
 }
 
 void
+acpi_pci_set_powerstate(pci_chipset_tag_t pc, pcitag_t tag, int state, int pre)
+{
+#if NACPIPWRRES > 0
+	struct acpi_softc *sc = acpi_softc;
+	struct acpi_pwrres *pr;
+	struct acpi_pci *pdev;
+	int bus, dev, fun;
+	char name[5];
+
+	pci_decompose_tag(pc, tag, &bus, &dev, &fun);
+	TAILQ_FOREACH(pdev, &acpi_pcidevs, next) {
+		if (pdev->bus == bus && pdev->dev == dev && pdev->fun == fun)
+			break;
+	}
+
+	/* XXX Add a check to discard nodes without Power Resources? */
+	if (pdev == NULL)
+		return;
+
+	SIMPLEQ_FOREACH(pr, &sc->sc_pwrresdevs, p_next) {
+		if (pr->p_node != pdev->node)
+			continue;
+
+		/*
+		 * If the firmware is already aware that the device
+		 * is in the given state, there's nothing to do.
+		 */
+		if (pr->p_state == state)
+			continue;
+
+		if (pre) {
+			/*
+			 * If a Resource is dependent on this device for
+			 * the given state, make sure it is turned "_ON".
+			 */
+			if (pr->p_res_state == state)
+				acpipwrres_ref_incr(pr->p_res_sc, pr->p_node);
+		} else {
+			/*
+			 * If a Resource was referenced for the state we
+			 * left, drop a reference and turn it "_OFF" if
+			 * it was the last one.
+			 */
+			if (pr->p_res_state == pr->p_state)
+				acpipwrres_ref_decr(pr->p_res_sc, pr->p_node);
+
+			if (pr->p_res_state == state) {
+				snprintf(name, sizeof(name), "_PS%d", state);
+				aml_evalname(sc, pr->p_node, name, 0,
+				    NULL, NULL);
+			}
+
+			pr->p_state = state;
+		}
+
+	}
+#endif /* NACPIPWRRES > 0 */
+}
+
+void
 acpi_pciroots_attach(struct device *dev, void *aux, cfprint_t pr)
 {
 	struct acpi_pci			*pdev;
@@ -629,7 +702,6 @@ acpi_attach(struct device *parent, struct device *self, void *aux)
 	struct acpi_rsdp *rsdp;
 	struct acpi_q *entry;
 	struct acpi_dsdt *p_dsdt;
-	int idx;
 #ifndef SMALL_KERNEL
 	int wakeup_dev_ct;
 	struct acpi_wakeq *wentry;
@@ -658,6 +730,10 @@ acpi_attach(struct device *parent, struct device *self, void *aux)
 
 	SIMPLEQ_INIT(&sc->sc_tables);
 	SIMPLEQ_INIT(&sc->sc_wakedevs);
+#if NACPIPWRRES > 0
+	SIMPLEQ_INIT(&sc->sc_pwrresdevs);
+#endif /* NACPIPWRRES > 0 */
+
 
 #ifndef SMALL_KERNEL
 	sc->sc_note = malloc(sizeof(struct klist), M_DEVBUF, M_NOWAIT | M_ZERO);
@@ -694,7 +770,7 @@ acpi_attach(struct device *parent, struct device *self, void *aux)
 	/*
 	 * Check if we are able to enable ACPI control
 	 */
-	if (!sc->sc_fadt->smi_cmd ||
+	if (sc->sc_fadt->smi_cmd &&
 	    (!sc->sc_fadt->acpi_enable && !sc->sc_fadt->acpi_disable)) {
 		printf(", ACPI control unavailable\n");
 		return;
@@ -780,14 +856,12 @@ acpi_attach(struct device *parent, struct device *self, void *aux)
 	 * This may prevent thermal control on some systems where
 	 * that actually does work
 	 */
-	acpi_write_pmreg(sc, ACPIREG_SMICMD, 0, sc->sc_fadt->acpi_enable);
-	idx = 0;
-	do {
-		if (idx++ > ACPIEN_RETRIES) {
+	if (sc->sc_fadt->smi_cmd) {
+		if (acpi_enable(sc)) {
 			printf(", can't enable ACPI\n");
 			return;
 		}
-	} while (!(acpi_read_pmreg(sc, ACPIREG_PM1_CNT, 0) & ACPI_PM1_SCI_EN));
+	}
 
 	printf("\n%s: tables", DEVNAME(sc));
 	SIMPLEQ_FOREACH(entry, &sc->sc_tables, q_next) {
@@ -1277,6 +1351,22 @@ acpi_map_pmregs(struct acpi_softc *sc)
 	}
 }
 
+int
+acpi_enable(struct acpi_softc *sc)
+{
+	int idx;
+
+	acpi_write_pmreg(sc, ACPIREG_SMICMD, 0, sc->sc_fadt->acpi_enable);
+	idx = 0;
+	do {
+		if (idx++ > ACPIEN_RETRIES) {
+			return ETIMEDOUT;
+		}
+	} while (!(acpi_read_pmreg(sc, ACPIREG_PM1_CNT, 0) & ACPI_PM1_SCI_EN));
+
+	return 0;
+}
+
 void
 acpi_init_states(struct acpi_softc *sc)
 {
@@ -1474,7 +1564,7 @@ acpi_reset(void)
 	 * RESET_REG_SUP is not properly set in some implementations,
 	 * but not testing against it breaks more machines than it fixes
 	 */
-	if (sc->sc_revision <= 1 ||
+	if (fadt->hdr_revision <= 1 ||
 	    !(fadt->flags & FADT_RESET_REG_SUP) || fadt->reset_reg.address == 0)
 		return;
 
@@ -2080,7 +2170,6 @@ acpi_sleep_state(struct acpi_softc *sc, int state)
 	acpi_resume_clocks(sc);		/* AML may need clocks */
 	acpi_resume_pm(sc, state);
 	acpi_resume_cpu(sc);
-	acpibtn_disable_psw();		/* disable _LID for wakeup */
 
 fail_pts:
 	config_suspend(TAILQ_FIRST(&alldevs), DVACT_RESUME);
@@ -2090,6 +2179,7 @@ fail_suspend:
 	enable_intr();
 	splx(s);
 
+	acpibtn_disable_psw();		/* disable _LID for wakeup */
 	inittodr(time_second);
 
 	/* 3rd resume AML step: _TTS(runstate) */
@@ -2101,6 +2191,9 @@ fail_suspend:
 
 fail_quiesce:
 	bufq_restart();
+
+	config_suspend(TAILQ_FIRST(&alldevs), DVACT_WAKEUP);
+
 #if NWSDISPLAY > 0
 	wsdisplay_resume();
 #endif /* NWSDISPLAY > 0 */

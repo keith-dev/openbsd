@@ -1,4 +1,4 @@
-/*      $OpenBSD: ip_divert.c,v 1.13 2013/04/08 15:32:23 lteo Exp $ */
+/*      $OpenBSD: ip_divert.c,v 1.16 2014/01/09 06:29:06 tedu Exp $ */
 
 /*
  * Copyright (c) 2009 Michele Marchetto <michele@openbsd.org>
@@ -203,7 +203,7 @@ divert_packet(struct mbuf *m, int dir)
 	struct inpcb *inp;
 	struct socket *sa = NULL;
 	struct sockaddr_in addr;
-	struct pf_divert *pd;
+	struct pf_divert *divert;
 
 	inp = NULL;
 	divstat.divs_ipackets++;
@@ -214,15 +214,15 @@ divert_packet(struct mbuf *m, int dir)
 		return (0);
 	}
 
-	pd = pf_find_divert(m);
-	if (pd == NULL) {
+	divert = pf_find_divert(m);
+	if (divert == NULL) {
 		divstat.divs_errors++;
 		m_freem(m);
 		return (0);
 	}
 
-	CIRCLEQ_FOREACH(inp, &divbtable.inpt_queue, inp_queue) {
-		if (inp->inp_lport != pd->port)
+	TAILQ_FOREACH(inp, &divbtable.inpt_queue, inp_queue) {
+		if (inp->inp_lport != divert->port)
 			continue;
 		if (inp->inp_divertfl == 0)
 			break;
@@ -233,7 +233,7 @@ divert_packet(struct mbuf *m, int dir)
 		break;
 	}
 
-	bzero(&addr, sizeof(addr));
+	memset(&addr, 0, sizeof(addr));
 	addr.sin_family = AF_INET;
 	addr.sin_len = sizeof(addr);
 
@@ -254,7 +254,7 @@ divert_packet(struct mbuf *m, int dir)
 	if (dir == PF_OUT)
 		in_proto_cksum_out(m, NULL);
 
-	if (inp != CIRCLEQ_END(&divbtable.inpt_queue)) {
+	if (inp) {
 		sa = inp->inp_socket;
 		if (sbappendaddr(&sa->so_rcv, (struct sockaddr *)&addr, 
 		    m, NULL) == 0) {

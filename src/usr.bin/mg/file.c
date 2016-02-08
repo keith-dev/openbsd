@@ -1,4 +1,4 @@
-/*	$OpenBSD: file.c,v 1.87 2013/03/25 11:38:22 florian Exp $	*/
+/*	$OpenBSD: file.c,v 1.90 2013/12/23 14:58:16 lum Exp $	*/
 
 /* This file is in the public domain. */
 
@@ -171,33 +171,6 @@ poptofile(int f, int n)
 }
 
 /*
- * Given a file name, either find the buffer it uses, or create a new
- * empty buffer to put it in.
- */
-struct buffer *
-findbuffer(char *fn)
-{
-	struct buffer	*bp;
-	char		bname[NBUFN], fname[NBUFN];
-
-	if (strlcpy(fname, fn, sizeof(fname)) >= sizeof(fname)) {
-		ewprintf("filename too long");
-		return (NULL);
-	}
-
-	for (bp = bheadp; bp != NULL; bp = bp->b_bufp) {
-		if (strcmp(bp->b_fname, fname) == 0)
-			return (bp);
-	}
-	/* Not found. Create a new one, adjusting name first */
-	if (augbname(bname, fname, sizeof(bname)) == FALSE)
-		return (NULL);
-
-	bp = bfind(bname, TRUE);
-	return (bp);
-}
-
-/*
  * Read the file "fname" into the current buffer.  Make all of the text
  * in the buffer go away, after checking for unsaved changes.  This is
  * called by the "read" command, the "visit" command, and the mainline
@@ -210,7 +183,7 @@ readin(char *fname)
 	struct stat	 statbuf;
 	int	 status, i, ro = FALSE;
 	PF	*ael;
-	char	*dp;
+	char	 dp[NFILEN];
 
 	/* might be old */
 	if (bclear(curbp) != TRUE)
@@ -255,7 +228,8 @@ readin(char *fname)
 		if (errno != ENOENT)
 			ro = TRUE;
 		else if (errno == ENOENT) {
-			dp = dirname(fname);
+			(void)xdirname(dp, fname, sizeof(dp));
+			(void)strlcat(dp, "/", sizeof(dp));
 			if (stat(dp, &statbuf) == -1 && errno == ENOENT) {
 				/* no read-only; like emacs */
 				ewprintf("Use M-x make-directory RET RET to "
@@ -669,19 +643,17 @@ writeout(FILE ** ffp, struct buffer *bp, char *fn)
 {
 	struct stat	statbuf;
 	int	 s;
-	char    *dp;
-
-	dp = dirname(fn);
+	char     dp[NFILEN];
 
 	if (stat(fn, &statbuf) == -1 && errno == ENOENT) {
 		errno = 0;
+		(void)xdirname(dp, fn, sizeof(dp));
+		(void)strlcat(dp, "/", sizeof(dp));
 		if (access(dp, W_OK) && errno == EACCES) {
-			ewprintf("Directory %s%s write-protected", dp,
-			    (dp[0] == '/' && dp[1] == '\0') ? "" : "/");
+			ewprintf("Directory %s write-protected", dp);
 			return (FIOERR);
 		} else if (errno == ENOENT) {
-                        ewprintf("%s%s: no such directory", dp,
-                            (dp[0] == '/' && dp[1] == '\0') ? "" : "/");
+                        ewprintf("%s: no such directory", dp);
 			return (FIOERR);
 		}
         }

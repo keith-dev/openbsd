@@ -1,4 +1,4 @@
-/*	$OpenBSD: main.c,v 1.44 2012/06/22 22:02:29 guenther Exp $	*/
+/*	$OpenBSD: main.c,v 1.46 2013/11/23 17:38:15 deraadt Exp $	*/
 /*	$NetBSD: main.c,v 1.22 1997/02/02 21:12:33 thorpej Exp $	*/
 
 /*
@@ -93,13 +93,19 @@ usage(void)
 	exit(1);
 }
 
+int pflag = 0;
+char *sflag = NULL;
+char *bflag = NULL;
+char *startdir;
+
 int
 main(int argc, char *argv[])
 {
 	char *p;
 	const char *last_component;
 	char *outfile = NULL;
-	int pflag, ch, eflag, uflag, fflag;
+	int ch, eflag, uflag, fflag;
+	char dirbuffer[PATH_MAX];
 
 	pflag = eflag = uflag = fflag = 0;
 	while ((ch = getopt(argc, argv, "egpfb:s:o:u")) != -1) {
@@ -148,10 +154,12 @@ main(int argc, char *argv[])
 			break;
 
 		case 'b':
+			bflag = optarg;
 			builddir = optarg;
 			break;
 
 		case 's':
+			sflag = optarg;
 			srcdir = optarg;
 			break;
 
@@ -163,7 +171,15 @@ main(int argc, char *argv[])
 	argc -= optind;
 	argv += optind;
 	if (argc > 1 || (eflag && argv[0] == NULL))
+
 		usage();
+	if (bflag) {
+		startdir = getcwd(dirbuffer, sizeof dirbuffer);
+		if (startdir == NULL)
+			warn("Use of -b and can't getcwd, no make config");
+	} else {
+		startdir = "../../conf";
+	}
 
 	if (eflag) {
 #ifdef MAKE_BOOTSTRAP
@@ -344,7 +360,8 @@ defoption(const char *name)
 	 */
 	low = emalloc(strlen(name) + 1);
 	for (n = name, p = low; (c = *n) != '\0'; n++)
-		*p++ = isupper(c) ? tolower(c) : c;
+		*p++ = isupper((unsigned char)c) ?
+		    tolower((unsigned char)c) : c;
 	*p = 0;
 
 	n = intern(low);
@@ -390,7 +407,8 @@ removeoption(const char *name)
 	low = emalloc(strlen(name) + 1);
 	/* make lowercase, then remove from select table */
 	for (n = name, p = low; (c = *n) != '\0'; n++)
-		*p++ = isupper(c) ? tolower(c) : c;
+		*p++ = isupper((unsigned char)c) ?
+		    tolower((unsigned char)c) : c;
 	*p = 0;
 	n = intern(low);
 	free(low);
@@ -413,7 +431,8 @@ addoption(const char *name, const char *value)
 	low = emalloc(strlen(name) + 1);
 	/* make lowercase, then add to select table */
 	for (n = name, p = low; (c = *n) != '\0'; n++)
-		*p++ = isupper(c) ? tolower(c) : c;
+		*p++ = isupper((unsigned char)c) ?
+		    tolower((unsigned char)c) : c;
 	*p = 0;
 	n = intern(low);
 	free(low);

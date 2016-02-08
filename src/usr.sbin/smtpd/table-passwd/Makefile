@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.1 2013/07/21 09:38:52 eric Exp $
+#	$OpenBSD: Makefile,v 1.3 2014/02/04 16:32:36 eric Exp $
 
 .PATH: ${.CURDIR}/..
 
@@ -9,7 +9,7 @@ SRCS+=	table_api.c
 SRCS+=	dict.c
 SRCS+=	log.c
 
-NOMAN=	noman
+MAN=	table_passwd.5
 
 BINDIR=	/usr/libexec/smtpd
 
@@ -20,7 +20,7 @@ CFLAGS+=	-g3 -ggdb -I${.CURDIR}/..
 CFLAGS+=	-Wall -Wstrict-prototypes -Wmissing-prototypes
 CFLAGS+=	-Wmissing-declarations
 CFLAGS+=	-Wshadow -Wpointer-arith -Wcast-qual
-CFLAGS+=	-Wsign-compare -Wbounded
+CFLAGS+=	-Wsign-compare
 CFLAGS+=	-DNO_IO
 #CFLAGS+=	-Werror # during development phase (breaks some archs) 
 

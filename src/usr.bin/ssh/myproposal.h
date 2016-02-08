@@ -1,4 +1,4 @@
-/* $OpenBSD: myproposal.h,v 1.32 2013/01/08 18:49:04 markus Exp $ */
+/* $OpenBSD: myproposal.h,v 1.35 2013/12/06 13:39:49 markus Exp $ */
 
 /*
  * Copyright (c) 2000 Markus Friedl.  All rights reserved.
@@ -25,6 +25,7 @@
  */
 
 #define KEX_DEFAULT_KEX		\
+	"curve25519-sha256@libssh.org," \
 	"ecdh-sha2-nistp256," \
 	"ecdh-sha2-nistp384," \
 	"ecdh-sha2-nistp521," \
@@ -37,6 +38,7 @@
 	"ecdsa-sha2-nistp256-cert-v01@openssh.com," \
 	"ecdsa-sha2-nistp384-cert-v01@openssh.com," \
 	"ecdsa-sha2-nistp521-cert-v01@openssh.com," \
+	"ssh-ed25519-cert-v01@openssh.com," \
 	"ssh-rsa-cert-v01@openssh.com," \
 	"ssh-dss-cert-v01@openssh.com," \
 	"ssh-rsa-cert-v00@openssh.com," \
@@ -44,6 +46,7 @@
 	"ecdsa-sha2-nistp256," \
 	"ecdsa-sha2-nistp384," \
 	"ecdsa-sha2-nistp521," \
+	"ssh-ed25519," \
 	"ssh-rsa," \
 	"ssh-dss"
 
@@ -51,6 +54,7 @@
 	"aes128-ctr,aes192-ctr,aes256-ctr," \
 	"arcfour256,arcfour128," \
 	"aes128-gcm@openssh.com,aes256-gcm@openssh.com," \
+	"chacha20-poly1305@openssh.com," \
 	"aes128-cbc,3des-cbc,blowfish-cbc,cast128-cbc," \
 	"aes192-cbc,aes256-cbc,arcfour,rijndael-cbc@lysator.liu.se"
 #define	KEX_DEFAULT_MAC \

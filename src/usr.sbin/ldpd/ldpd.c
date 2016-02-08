@@ -1,4 +1,4 @@
-/*	$OpenBSD: ldpd.c,v 1.17 2013/06/04 02:25:28 claudio Exp $ */
+/*	$OpenBSD: ldpd.c,v 1.19 2013/11/26 11:59:38 henning Exp $ */
 
 /*
  * Copyright (c) 2005 Claudio Jeker <claudio@openbsd.org>
@@ -264,7 +264,6 @@ main(int argc, char *argv[])
 	/* remove unneded stuff from config */
 		/* ... */
 
-
 	event_dispatch();
 
 	ldpd_shutdown();
@@ -340,7 +339,7 @@ main_dispatch_ldpe(int fd, short event, void *bula)
 			shut = 1;
 	}
 	if (event & EV_WRITE) {
-		if (msgbuf_write(&ibuf->w) == -1)
+		if (msgbuf_write(&ibuf->w) == -1 && errno != EAGAIN)
 			fatal("msgbuf_write");
 	}
 
@@ -416,7 +415,7 @@ main_dispatch_lde(int fd, short event, void *bula)
 			shut = 1;
 	}
 	if (event & EV_WRITE) {
-		if (msgbuf_write(&ibuf->w) == -1)
+		if (msgbuf_write(&ibuf->w) == -1 && errno != EAGAIN)
 			fatal("msgbuf_write");
 	}
 

@@ -1,4 +1,4 @@
-/*	$OpenBSD: trap.c,v 1.108 2013/04/09 01:50:02 guenther Exp $	*/
+/*	$OpenBSD: trap.c,v 1.111 2014/02/13 23:11:06 kettenis Exp $	*/
 /*	$NetBSD: trap.c,v 1.95 1996/05/05 06:50:02 mycroft Exp $	*/
 
 /*-
@@ -69,7 +69,7 @@
 #include <sys/exec.h>
 #ifdef COMPAT_LINUX
 #include <compat/linux/linux_syscall.h>
-extern struct emul emul_linux_aout, emul_linux_elf;
+extern struct emul emul_linux_elf;
 #endif
 #ifdef KVM86
 #include <machine/kvm86.h>
@@ -449,10 +449,13 @@ trap(struct trapframe *frame)
 		}
 #endif
 
-		onfault = p->p_addr->u_pcb.pcb_onfault;
-		p->p_addr->u_pcb.pcb_onfault = NULL;
-		rv = uvm_fault(map, va, 0, ftype);
-		p->p_addr->u_pcb.pcb_onfault = onfault;
+		if (curcpu()->ci_inatomic == 0 || map == kernel_map) {
+			onfault = p->p_addr->u_pcb.pcb_onfault;
+			p->p_addr->u_pcb.pcb_onfault = NULL;
+			rv = uvm_fault(map, va, 0, ftype);
+			p->p_addr->u_pcb.pcb_onfault = onfault;
+		} else
+			rv = EFAULT;
 
 		if (rv == 0) {
 			if (map != kernel_map)
@@ -580,8 +583,7 @@ syscall(struct trapframe *frame)
 	case SYS_syscall:
 #ifdef COMPAT_LINUX
 		/* Linux has a special system setup call as number 0 */
-		if (p->p_emul == &emul_linux_aout ||
-		    p->p_emul == &emul_linux_elf)
+		if (p->p_emul == &emul_linux_elf)
 			break;
 #endif
 		/*
@@ -610,7 +612,7 @@ syscall(struct trapframe *frame)
 	argsize = callp->sy_argsize;
 #ifdef COMPAT_LINUX
 	/* XXX extra if() for every emul type.. */
-	if (p->p_emul == &emul_linux_aout || p->p_emul == &emul_linux_elf) {
+	if (p->p_emul == &emul_linux_elf) {
 		/*
 		 * Linux passes the args in ebx, ecx, edx, esi, edi, ebp, in
 		 * increasing order.
@@ -678,7 +680,7 @@ syscall(struct trapframe *frame)
 #ifdef DIAGNOSTIC
 	if (lapic_tpr != ocpl) {
 		printf("WARNING: SPL (0x%x) NOT LOWERED ON "
-		    "syscall(0x%x, 0x%x, 0x%x, 0x%x...) EXIT, PID %d\n",
+		    "syscall(0x%lx, 0x%lx, 0x%lx, 0x%lx...) EXIT, PID %d\n",
 		    lapic_tpr, code, args[0], args[1], args[2], p->p_pid);
 		lapic_tpr = ocpl;
 	}

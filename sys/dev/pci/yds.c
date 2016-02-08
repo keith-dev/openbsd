@@ -1,4 +1,4 @@
-/*	$OpenBSD: yds.c,v 1.43 2013/05/24 07:58:47 ratchov Exp $	*/
+/*	$OpenBSD: yds.c,v 1.45 2013/12/06 21:03:04 deraadt Exp $	*/
 /*	$NetBSD: yds.c,v 1.5 2001/05/21 23:55:04 minoura Exp $	*/
 
 /*
@@ -1345,7 +1345,7 @@ yds_trigger_output(void *addr, void *start, void *end, int blksize,
 		u_int32_t ctrlsize;
 		if ((ctrlsize = YREAD4(sc, YDS_PLAY_CTRLSIZE)) !=
 		    sizeof(struct play_slot_ctrl_bank) / sizeof(u_int32_t))
-			panic("%s: invalid play slot ctrldata %d %d",
+			panic("%s: invalid play slot ctrldata %d %zd",
 			      sc->sc_dev.dv_xname, ctrlsize,
 			      sizeof(struct play_slot_ctrl_bank));
 	}
@@ -1744,14 +1744,15 @@ yds_activate(struct device *self, int act)
 		if (sc->sc_resume_active)
 			yds_close(sc);
 		break;
-	case DVACT_SUSPEND:
-		break;
 	case DVACT_RESUME:
 		yds_halt(sc);
 		yds_init(sc, 1);
 		ac97_resume(&sc->sc_codec[0].host_if, sc->sc_codec[0].codec_if);
 		if (sc->sc_resume_active)
 			yds_open(sc, 0);
+		rv = config_activate_children(self, act);
+		break;
+	default:
 		rv = config_activate_children(self, act);
 		break;
 	}

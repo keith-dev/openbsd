@@ -1,4 +1,4 @@
-/*	$OpenBSD: pcibios.c,v 1.40 2010/11/20 20:11:19 miod Exp $	*/
+/*	$OpenBSD: pcibios.c,v 1.43 2013/11/28 19:30:46 brad Exp $	*/
 /*	$NetBSD: pcibios.c,v 1.5 2000/08/01 05:23:59 uch Exp $	*/
 
 /*
@@ -151,7 +151,7 @@ pcibiosprobe(struct device *parent, void *match, void *aux)
 	rv = bios32_service(PCIBIOS_SIGNATURE, &pcibios_entry,
 		&pcibios_entry_info);
 
-	PCIBIOS_PRINTV(("pcibiosprobe: 0x%lx:0x%lx at 0x%lx[0x%lx]\n",
+	PCIBIOS_PRINTV(("pcibiosprobe: 0x%hx:0x%x at 0x%x[0x%x]\n",
 	    pcibios_entry.segment, pcibios_entry.offset,
 	    pcibios_entry_info.bei_base, pcibios_entry_info.bei_size));
 
@@ -172,7 +172,7 @@ pcibiosattach(struct device *parent, struct device *self, void *aux)
 	    &rev_min, &mech1, &mech2,
 	    &scmech1, &scmech2, &sc->max_bus);
 
-	printf(": rev %d.%d @ 0x%lx/0x%lx\n",
+	printf(": rev %d.%d @ 0x%x/0x%x\n",
 	    rev_maj, rev_min >> 4, pcibios_entry_info.bei_base,
 	    pcibios_entry_info.bei_size);
 
@@ -260,7 +260,7 @@ pcibios_pir_init(struct pcibios_softc *sc)
 			cksum += p[i];
 
 		printf("%s: PCI IRQ Routing Table rev %d.%d @ 0x%lx/%d "
-		    "(%d entries)\n", sc->sc_dev.dv_xname,
+		    "(%zd entries)\n", sc->sc_dev.dv_xname,
 		    pirh->version >> 8, pirh->version & 0xff, pa,
 		    pirh->tablesize, (pirh->tablesize - sizeof(*pirh)) / 16);
 
@@ -346,7 +346,7 @@ pcibios_get_status(struct pcibios_softc *sc, u_int32_t *rev_maj,
 			 "pushl	%%ds\n\t"
 			 "movw	4(%%edi), %%cx\n\t"
 			 "movl	%%ecx, %%ds\n\t"
-			 "lcall	%%cs:*(%%edi)\n\t"
+			 "lcall	*%%cs:(%%edi)\n\t"
 			 "pop	%%ds\n\t"
 			 "pop	%%es\n\t"
 			 "jc	1f\n\t"
@@ -399,7 +399,7 @@ pcibios_get_intr_routing(struct pcibios_softc *sc,
 			 "pushl	%%ds\n\t"
 			 "movw	4(%%esi), %%cx\n\t"
 			 "movl	%%ecx, %%ds\n\t"
-			 "lcall	%%cs:*(%%esi)\n\t"
+			 "lcall	*%%cs:(%%esi)\n\t"
 			 "popl	%%ds\n\t"
 			 "popl	%%es\n\t"
 			 "jc	1f\n\t"

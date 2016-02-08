@@ -1,4 +1,4 @@
-/*	$OpenBSD: vmparam.h,v 1.33 2013/07/05 21:10:50 miod Exp $	*/
+/*	$OpenBSD: vmparam.h,v 1.36 2014/01/30 18:16:41 miod Exp $	*/
 /*	$NetBSD: vmparam.h,v 1.32 2000/03/07 00:05:59 matt Exp $	*/
 
 /*-
@@ -47,7 +47,7 @@
  * USRTEXT is the start of the user text/data space, while USRSTACK
  * is the top (end) of the user stack. Immediately above the user stack
  * resides kernel.
- * */
+ */
 
 #define USRTEXT		PAGE_SIZE
 #define USRSTACK	KERNBASE
@@ -60,13 +60,13 @@
 #define MAXTSIZ		(8*1024*1024)		/* max text size */
 #endif
 #ifndef MAXDSIZ
-#define MAXDSIZ		(40*1024*1024)		/* max data size */
+#define MAXDSIZ		(128*1024*1024)		/* max data size */
 #endif
 #ifndef MAXSSIZ
 #define MAXSSIZ		(8*1024*1024)		/* max stack size */
 #endif
 #ifndef DFLDSIZ
-#define DFLDSIZ		(4*1024*1024)		/* initial data size limit */
+#define DFLDSIZ		(8*1024*1024)		/* initial data size limit */
 #endif
 #ifndef DFLSSIZ
 #define DFLSSIZ		(512*1024)		/* initial stack size limit */
@@ -74,7 +74,7 @@
 
 #define STACKGAP_RANDOM	32*1024
 
-#define BRKSIZ		(8*1024*1024)
+#define BRKSIZ		(16*1024*1024)
 
 /* 
  * Size of shared memory map
@@ -101,22 +101,5 @@
 
 #define	USRIOSIZE		(8 * VAX_NPTEPG)	/* 512MB */
 #define	VM_PHYS_SIZE		(USRIOSIZE*VAX_NBPG)
-
-/*
- * This should be in <machine/pmap.h>, but needs to be in this file
- * due to include ordering issues.
- */
-#define	__HAVE_VM_PAGE_MD
-
-struct vm_page_md {
-	struct pv_entry *pv_head;
-	int		 pv_attr;	/* write/modified bits */
-};
-
-#define	VM_MDPAGE_INIT(pg) \
-	do { \
-		(pg)->mdpage.pv_head = NULL; \
-		(pg)->mdpage.pv_attr = 0; \
-	} while (0)
 
 #endif /* _MACHINE_VMPARAM_H_ */

@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.9 2013/07/16 17:31:39 deraadt Exp $
+#	$OpenBSD: Makefile,v 1.13 2014/03/02 05:46:26 deraadt Exp $
 
 TOP=	${.CURDIR}/..
 
@@ -41,8 +41,14 @@ ${CDROM}: ${BASE} ${XBASE} ${BOOT} ${BOOTXX}
 	cp ${BOOT} ${MOUNT_POINT}/
 	cp ${RELDIR}/bsd.rd ${MOUNT_POINT}/bsd
 	mkdir -p ${MOUNT_POINT}/${OSREV}/${MACHINE}
+
 	cp -p ${BASE} ${MOUNT_POINT}/${OSREV}/${MACHINE}
 	cp -p ${XBASE} ${MOUNT_POINT}/${OSREV}/${MACHINE}
+
+	cat ${RELDIR}/SHA256 ${RELXDIR}/SHA256 > \
+	    ${MOUNT_POINT}/${OSREV}/${MACHINE}/SHA256
+	# XXX no SHA256.sig
+
 	disklabel -B -b ${BOOTXX} ${VND}
 	@echo ""
 	@df -i ${MOUNT_POINT}
@@ -53,14 +59,13 @@ ${CDROM}: ${BASE} ${XBASE} ${BOOT} ${BOOTXX}
 
 install:
 	cp ${CDROM} ${RELDIR}/
-	# update the SHA256 file
-	grep -v ${CDROM} ${RELDIR}/SHA256 > ${RELDIR}/SHA256.new
-	sum -a sha256 ${CDROM} >> ${RELDIR}/SHA256.new
-	sort ${RELDIR}/SHA256.new > ${RELDIR}/SHA256
-	rm ${RELDIR}/SHA256.new
 
 clean cleandir:
 	/bin/rm -f ${CDROM} ${.OBJDIR}/image.*
+
+unconfig:
+	-umount /mnt
+	-vnconfig -u vnd0
 
 .include <bsd.obj.mk>
 .include <bsd.subdir.mk>

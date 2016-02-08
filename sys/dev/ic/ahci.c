@@ -1,4 +1,4 @@
-/*	$OpenBSD: ahci.c,v 1.3 2013/07/09 17:53:46 deraadt Exp $ */
+/*	$OpenBSD: ahci.c,v 1.7 2014/02/13 23:48:30 pelikan Exp $ */
 
 /*
  * Copyright (c) 2006 David Gwynne <dlg@openbsd.org>
@@ -190,8 +190,11 @@ ahci_attach(struct ahci_softc *sc)
 		case AHCI_REG_CAP_ISS_G1:
 			gen = "1 (1.5Gbps)";
 			break;
-		case AHCI_REG_CAP_ISS_G1_2:
-			gen = "1 (1.5Gbps) and 2 (3Gbps)";
+		case AHCI_REG_CAP_ISS_G2:
+			gen = "2 (3Gbps)";
+			break;
+		case AHCI_REG_CAP_ISS_G3:
+			gen = "3 (6Gbps)";
 			break;
 		default:
 			gen = "unknown";
@@ -317,19 +320,6 @@ ahci_activate(struct device *self, int act)
 	int				 i, rv = 0;
 
 	switch (act) {
-	case DVACT_QUIESCE:
-		rv = config_activate_children(self, act);
-		break;
-	case DVACT_SUSPEND:
-		rv = config_activate_children(self, act);
-		break;
-	case DVACT_POWERDOWN:
-		rv = config_activate_children(self, act);
-		for (i = 0; i < AHCI_MAX_PORTS; i++) {
-			if (sc->sc_ports[i] != NULL)
-				ahci_port_stop(sc->sc_ports[i], 1);
-		}
-		break;
 	case DVACT_RESUME:
 		/* enable ahci (global interrupts disabled) */
 		ahci_write(sc, AHCI_REG_GHC, AHCI_REG_GHC_AE);
@@ -345,6 +335,16 @@ ahci_activate(struct device *self, int act)
 		/* Enable interrupts */
 		ahci_write(sc, AHCI_REG_GHC, AHCI_REG_GHC_AE | AHCI_REG_GHC_IE);
 
+		rv = config_activate_children(self, act);
+		break;
+	case DVACT_POWERDOWN:
+		rv = config_activate_children(self, act);
+		for (i = 0; i < AHCI_MAX_PORTS; i++) {
+			if (sc->sc_ports[i] != NULL)
+				ahci_port_stop(sc->sc_ports[i], 1);
+		}
+		break;
+	default:
 		rv = config_activate_children(self, act);
 		break;
 	}
@@ -3170,6 +3170,8 @@ ahci_hibernate_io(dev_t dev, daddr_t blkno, vaddr_t addr, size_t size,
 		struct ahci_ccb *ccb;
 		struct ahci_cmd_hdr *hdr_buf;
 		int pmp_port;
+		daddr_t poffset;
+		size_t psize;
 	} *my = page;
 	struct ata_fis_h2d *fis;
 	u_int32_t sector_count;
@@ -3188,6 +3190,9 @@ ahci_hibernate_io(dev_t dev, daddr_t blkno, vaddr_t addr, size_t size,
 		paddr_t page_phys;
 		u_int64_t item_phys;
 		u_int32_t cmd;
+
+		my->poffset = blkno;
+		my->psize = size;
 
 		/* map dev to an ahci port */
 		disk = disk_lookup(&sd_cd, DISKUNIT(dev));
@@ -3302,6 +3307,10 @@ ahci_hibernate_io(dev_t dev, daddr_t blkno, vaddr_t addr, size_t size,
 		ahci_activate(&my->ap->ap_sc->sc_dev, DVACT_RESUME);
 		return (0);
 	}
+
+	if (blkno > my->psize)
+		return (E2BIG);
+	blkno += my->poffset;
 
 	/* build fis */
 	sector_count = size / 512;	/* dlg promises this is okay */

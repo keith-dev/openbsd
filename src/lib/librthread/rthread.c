@@ -1,4 +1,4 @@
-/*	$OpenBSD: rthread.c,v 1.73 2013/07/30 15:31:01 guenther Exp $ */
+/*	$OpenBSD: rthread.c,v 1.76 2013/12/12 08:12:08 guenther Exp $ */
 /*
  * Copyright (c) 2004,2005 Ted Unangst <tedu@openbsd.org>
  * All Rights Reserved.
@@ -104,13 +104,34 @@ _spinunlock(volatile struct _spinlock *lock)
  * this is handled by __tfork_thread()
  */
 void _rthread_initlib(void) __attribute__((constructor));
-void _rthread_initlib(void)
+void
+_rthread_initlib(void)
 {
-	struct thread_control_block *tcb = &_initial_thread_tcb;
+	static int tcb_set;
+	struct thread_control_block *tcb;
 
-	/* use libc's errno for the main thread */
-	TCB_INIT(tcb, &_initial_thread, ___errno());
-	TCB_SET(tcb);
+	if (__predict_false(tcb_set == 0) && __get_tcb() == NULL) {
+		tcb_set = 1;
+
+		/* use libc's errno for the main thread */
+		tcb = &_initial_thread_tcb;
+		TCB_INIT(tcb, &_initial_thread, ___errno());
+		TCB_SET(tcb);
+	}
+}
+
+/*
+ * This is invoked by ___start() in crt0.  Eventually, when ld.so handles
+ * TCB setup for dynamic executables, this will only be called to handle
+ * the TCB setup for static executables and may migrate to libc.  The
+ * envp argument is so that it can (someday) use that to find the Auxinfo
+ * array and thus the ELF phdr and the PT_TLS info.
+ */
+void __init_tcb(char **_envp);
+void
+__init_tcb(__unused char **envp)
+{
+	_rthread_initlib();
 }
 
 int *
@@ -171,7 +192,8 @@ _rthread_init(void)
 
 	thread->tid = getthrid();
 	thread->donesem.lock = _SPINLOCK_UNLOCKED_ASSIGN;
-	thread->flags |= THREAD_CANCEL_ENABLE|THREAD_CANCEL_DEFERRED;
+	thread->flags |= THREAD_CANCEL_ENABLE | THREAD_CANCEL_DEFERRED |
+	    THREAD_ORIGINAL;
 	thread->flags_lock = _SPINLOCK_UNLOCKED_ASSIGN;
 	strlcpy(thread->name, "Main process", sizeof(thread->name));
 	LIST_INSERT_HEAD(&_thread_list, thread, threads);
@@ -179,6 +201,8 @@ _rthread_init(void)
 
 	_thread_pagesize = (size_t)sysconf(_SC_PAGESIZE);
 	_rthread_attr_default.guard_size = _thread_pagesize;
+
+	_rthread_initlib();
 
 	_threads_ready = 1;
 
@@ -219,7 +243,7 @@ _rthread_init(void)
 static void
 _rthread_free(pthread_t thread)
 {
-	/* initial_thread.tid must remain valid */
+	/* _initial_thread is static, so don't free it */
 	if (thread != &_initial_thread) {
 		/*
 		 * thread->tid is written to by __threxit in the thread
@@ -461,7 +485,27 @@ fail1:
 int
 pthread_kill(pthread_t thread, int sig)
 {
-	return (kill(thread->tid, sig) == 0 ? 0 : errno);
+	pid_t tid;
+	int ret;
+
+	/* killing myself?  do it without locking */
+	if (thread == TCB_THREAD())
+		return (kill(thread->tid, sig) == 0 ? 0 : errno);
+
+	/* block the other thread from exiting */
+	_spinlock(&thread->flags_lock);
+	if (thread->flags & THREAD_DYING)
+		ret = (thread->flags & THREAD_DETACHED) ? ESRCH : 0;
+	else {
+		tid = thread->tid;
+		if (tid == 0) {
+			/* should be impossible without DYING being set */
+			ret = ESRCH;
+		} else
+			ret = kill(tid, sig) == 0 ? 0 : errno;
+	}
+	_spinunlock(&thread->flags_lock);
+	return (ret);
 }
 
 int
@@ -473,10 +517,27 @@ pthread_equal(pthread_t t1, pthread_t t2)
 int
 pthread_cancel(pthread_t thread)
 {
+	pid_t tid;
 
-	_rthread_setflag(thread, THREAD_CANCELED);
-	if (thread->flags & THREAD_CANCEL_ENABLE)
-		kill(thread->tid, SIGTHR);
+	_spinlock(&thread->flags_lock);
+	tid = thread->tid;
+	if ((thread->flags & (THREAD_DYING | THREAD_CANCELED)) == 0 &&
+	    tid != 0) {
+		thread->flags |= THREAD_CANCELED;
+
+		if (thread->flags & THREAD_CANCEL_ENABLE) {
+
+			/* canceling myself?  release the lock first */
+			if (thread == TCB_THREAD()) {
+				_spinunlock(&thread->flags_lock);
+				kill(tid, SIGTHR);
+				return (0);
+			}
+
+			kill(tid, SIGTHR);
+		}
+	}
+	_spinunlock(&thread->flags_lock);
 	return (0);
 }
 

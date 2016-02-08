@@ -22,14 +22,14 @@
 .\" OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
 .\" SUCH DAMAGE.
 .\"
-.\"	$OpenBSD: style.9,v 1.54 2012/11/02 16:35:21 jmc Exp $
+.\"	$OpenBSD: style.9,v 1.57 2014/01/21 03:15:46 schwarze Exp $
 .\"
-.Dd $Mdocdate: November 2 2012 $
+.Dd $Mdocdate: January 21 2014 $
 .Dt STYLE 9
 .Os
 .Sh NAME
 .Nm style
-.Nd "Kernel source file style guide (KNF)"
+.Nd Kernel source file style guide (KNF)
 .Sh DESCRIPTION
 This file specifies the preferred style for kernel source files in the
 .Ox
@@ -59,15 +59,15 @@ current style guidelines.
 .Ed
 .Pp
 Kernel include files (i.e.,
-.Aq Pa sys/*.h )
+.In sys/*.h )
 come first; normally, you'll need
-.Aq Pa sys/types.h
+.In sys/types.h
 OR
-.Aq Pa sys/param.h ,
+.In sys/param.h ,
 but not both!
-.Aq Pa sys/types.h
+.In sys/types.h
 includes
-.Aq Pa sys/cdefs.h ,
+.In sys/cdefs.h ,
 and it's okay to depend on that.
 .Bd -literal -offset indent
 #include <sys/types.h>	/* Non-local includes in brackets. */
@@ -150,7 +150,7 @@ There should be no space between the function name and the argument list.
 Use
 .Li __dead
 from
-.Aq Pa sys/cdefs.h
+.In sys/cdefs.h
 for functions that don't return, i.e.,
 .Bd -literal -offset indent
 __dead void	abort(void);
@@ -636,10 +636,9 @@ Example license for new code.
 .Xr warn 3 ,
 .Xr mdoc 7
 .Sh HISTORY
-This man page is largely based on the src/admin/style/style file from
-the
-.Tn BSD
-4.4-Lite2 release, with updates to reflect the current practice and
+This man page is largely based on the src/admin/style/style file from the
+.Bx 4.4-Lite2
+release, with updates to reflect the current practice and
 desire of the
 .Ox
 project.

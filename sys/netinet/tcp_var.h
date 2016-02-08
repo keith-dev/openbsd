@@ -1,4 +1,4 @@
-/*	$OpenBSD: tcp_var.h,v 1.101 2013/06/01 16:22:05 bluhm Exp $	*/
+/*	$OpenBSD: tcp_var.h,v 1.105 2014/01/23 23:51:29 henning Exp $	*/
 /*	$NetBSD: tcp_var.h,v 1.17 1996/02/13 23:44:24 christos Exp $	*/
 
 /*
@@ -97,6 +97,7 @@ struct tcpcb {
 #define TF_PMTUD_PEND	0x00400000	/* Path MTU Discovery pending */
 #define TF_NEEDOUTPUT	0x00800000	/* call tcp_output after tcp_input */
 #define TF_BLOCKOUTPUT	0x01000000	/* avert tcp_output during tcp_input */
+#define TF_NOPUSH	0x02000000	/* don't push */
 
 	struct	mbuf *t_template;	/* skeletal packet for transmit */
 	struct	inpcb *t_inpcb;		/* back pointer to internet pcb */
@@ -251,9 +252,7 @@ struct tcp_opt_info {
 union syn_cache_sa {
 	struct sockaddr sa;
 	struct sockaddr_in sin;
-#if 1 /*def INET6*/
 	struct sockaddr_in6 sin6;
-#endif
 };
 
 struct syn_cache {
@@ -410,8 +409,8 @@ struct	tcpstat {
 
 	u_int32_t tcps_rcvbadsig;	/* rcvd bad/missing TCP signatures */
 	u_int64_t tcps_rcvgoodsig;	/* rcvd good TCP signatures */
-	u_int32_t tcps_inhwcsum;	/* input hardware-checksummed packets */
-	u_int32_t tcps_outhwcsum;	/* output hardware-checksummed packets */
+	u_int32_t tcps_inswcsum;	/* input software-checksummed packets */
+	u_int32_t tcps_outswcsum;	/* output software-checksummed packets */
 
 	/* ECN stats */
 	u_int32_t tcps_ecn_accepts;	/* ecn connections accepted */
@@ -589,7 +588,7 @@ void	 tcp_mtudisc(struct inpcb *, int);
 void	 tcp_mtudisc_increase(struct inpcb *, int);
 #ifdef INET6
 void	tcp6_mtudisc(struct inpcb *, int);
-void	tcp6_mtudisc_callback(struct in6_addr *);
+void	tcp6_mtudisc_callback(struct sockaddr_in6 *, u_int);
 #endif
 struct tcpcb *
 	 tcp_newtcpcb(struct inpcb *);

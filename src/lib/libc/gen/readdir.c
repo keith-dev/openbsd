@@ -1,4 +1,4 @@
-/*	$OpenBSD: readdir.c,v 1.17 2012/03/22 04:11:53 matthew Exp $ */
+/*	$OpenBSD: readdir.c,v 1.20 2013/11/06 22:26:14 schwarze Exp $ */
 /*
  * Copyright (c) 1983, 1993
  *	The Regents of the University of California.  All rights reserved.
@@ -37,7 +37,7 @@
  * get next entry in a directory.
  */
 int
-_readdir_unlocked(DIR *dirp, struct dirent **result, int skipdeleted)
+_readdir_unlocked(DIR *dirp, struct dirent **result)
 {
 	struct dirent *dp;
 
@@ -46,8 +46,8 @@ _readdir_unlocked(DIR *dirp, struct dirent **result, int skipdeleted)
 		if (dirp->dd_loc >= dirp->dd_size)
 			dirp->dd_loc = 0;
 		if (dirp->dd_loc == 0) {
-			dirp->dd_size = getdirentries(dirp->dd_fd,
-			    dirp->dd_buf, dirp->dd_len, &dirp->dd_seek);
+			dirp->dd_size = getdents(dirp->dd_fd, dirp->dd_buf,
+			    dirp->dd_len);
 			if (dirp->dd_size == 0)
 				return (0);
 			if (dirp->dd_size < 0)
@@ -61,15 +61,9 @@ _readdir_unlocked(DIR *dirp, struct dirent **result, int skipdeleted)
 			return (-1);
 		}
 		dirp->dd_loc += dp->d_reclen;
-
-		/*
-		 * When called from seekdir(), we let it decide on
-		 * the end condition to avoid overshooting: the next
-		 * readdir call should produce the next non-deleted entry,
-		 * and we already advanced dd_loc.
-		 */
-		if (dp->d_ino == 0 && skipdeleted)
+		if (dp->d_ino == 0)
 			continue;
+		dirp->dd_curpos = dp->d_off;
 		*result = dp;
 		return (0);
 	}
@@ -81,7 +75,7 @@ readdir(DIR *dirp)
 	struct dirent *dp;
 
 	_MUTEX_LOCK(&dirp->dd_lock);
-	_readdir_unlocked(dirp, &dp, 1);
+	_readdir_unlocked(dirp, &dp);
 	_MUTEX_UNLOCK(&dirp->dd_lock);
 
 	return (dp);

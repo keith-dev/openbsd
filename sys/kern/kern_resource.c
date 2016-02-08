@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_resource.c,v 1.42 2013/06/03 16:55:22 guenther Exp $	*/
+/*	$OpenBSD: kern_resource.c,v 1.49 2014/01/24 04:26:51 guenther Exp $	*/
 /*	$NetBSD: kern_resource.c,v 1.38 1996/10/23 07:19:38 matthias Exp $	*/
 
 /*-
@@ -53,7 +53,6 @@
 #include <uvm/uvm_extern.h>
 
 void	tuagg_sub(struct tusage *, struct proc *);
-void	tuagg(struct process *, struct proc *);
 
 /*
  * Patchable maximum data and stack limits.
@@ -73,7 +72,6 @@ sys_getpriority(struct proc *curp, void *v, register_t *retval)
 		syscallarg(id_t) who;
 	} */ *uap = v;
 	struct process *pr;
-	struct proc *p;
 	int low = NZERO + PRIO_MAX + 1;
 
 	switch (SCARG(uap, which)) {
@@ -105,11 +103,10 @@ sys_getpriority(struct proc *curp, void *v, register_t *retval)
 	case PRIO_USER:
 		if (SCARG(uap, who) == 0)
 			SCARG(uap, who) = curp->p_ucred->cr_uid;
-		LIST_FOREACH(p, &allproc, p_list)
-			if ((p->p_flag & P_THREAD) == 0 &&
-			    p->p_ucred->cr_uid == SCARG(uap, who) &&
-			    p->p_p->ps_nice < low)
-				low = p->p_p->ps_nice;
+		LIST_FOREACH(pr, &allprocess, ps_list)
+			if (pr->ps_cred->pc_ucred->cr_uid == SCARG(uap, who) &&
+			    pr->ps_nice < low)
+				low = pr->ps_nice;
 		break;
 
 	default:
@@ -160,18 +157,15 @@ sys_setpriority(struct proc *curp, void *v, register_t *retval)
 		break;
 	}
 
-	case PRIO_USER: {
-		struct proc *p;
+	case PRIO_USER:
 		if (SCARG(uap, who) == 0)
 			SCARG(uap, who) = curp->p_ucred->cr_uid;
-		LIST_FOREACH(p, &allproc, p_list)
-			if ((p->p_flag & P_THREAD) == 0 &&
-			    p->p_ucred->cr_uid == SCARG(uap, who)) {
-				error = donice(curp, p->p_p, SCARG(uap, prio));
+		LIST_FOREACH(pr, &allprocess, ps_list)
+			if (pr->ps_cred->pc_ucred->cr_uid == SCARG(uap, who)) {
+				error = donice(curp, pr, SCARG(uap, prio));
 				found++;
 			}
 		break;
-	}
 
 	default:
 		return (EINVAL);
@@ -421,7 +415,6 @@ calcru(struct tusage *tup, struct timeval *up, struct timeval *sp,
 		TIMESPEC_TO_TIMEVAL(ip, &i);
 }
 
-
 /* ARGSUSED */
 int
 sys_getrusage(struct proc *p, void *v, register_t *retval)
@@ -430,20 +423,34 @@ sys_getrusage(struct proc *p, void *v, register_t *retval)
 		syscallarg(int) who;
 		syscallarg(struct rusage *) rusage;
 	} */ *uap = v;
+	struct rusage ru;
+	int error;
+
+	error = dogetrusage(p, SCARG(uap, who), &ru);
+	if (error == 0) {
+		error = copyout(&ru, SCARG(uap, rusage), sizeof(ru));
+#ifdef KTRACE
+		if (error == 0 && KTRPOINT(p, KTR_STRUCT))
+			ktrrusage(p, &ru);
+#endif
+	}
+	return (error);
+}
+
+int
+dogetrusage(struct proc *p, int who, struct rusage *rup)
+{
 	struct process *pr = p->p_p;
 	struct proc *q;
-	struct rusage ru;
-	struct rusage *rup;
 
-	switch (SCARG(uap, who)) {
+	switch (who) {
 
 	case RUSAGE_SELF:
 		/* start with the sum of dead threads, if any */
 		if (pr->ps_ru != NULL)
-			ru = *pr->ps_ru;
+			*rup = *pr->ps_ru;
 		else
-			bzero(&ru, sizeof(ru));
-		rup = &ru;
+			memset(rup, 0, sizeof(*rup));
 
 		/* add on all living threads */
 		TAILQ_FOREACH(q, &pr->ps_threads, p_thr_link) {
@@ -455,19 +462,18 @@ sys_getrusage(struct proc *p, void *v, register_t *retval)
 		break;
 
 	case RUSAGE_THREAD:
-		rup = &p->p_ru;
+		*rup = p->p_ru;
 		calcru(&p->p_tu, &rup->ru_utime, &rup->ru_stime, NULL);
 		break;
 
 	case RUSAGE_CHILDREN:
-		rup = &pr->ps_cru;
+		*rup = pr->ps_cru;
 		break;
 
 	default:
 		return (EINVAL);
 	}
-	return (copyout((caddr_t)rup, (caddr_t)SCARG(uap, rusage),
-	    sizeof (struct rusage)));
+	return (0);
 }
 
 void

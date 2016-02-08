@@ -587,6 +587,6 @@ extern const char *mp_s_rmap;
 #endif
 
 
-/* $Source: /cvs/src/kerberosV/src/lib/hcrypto/libtommath/tommath.h,v $ */
+/* $Source: /var/www/space/cvs/src/kerberosV/src/lib/hcrypto/libtommath/tommath.h,v $ */
 /* $Revision: 1.1 $ */
 /* $Date: 2013/06/17 19:11:43 $ */

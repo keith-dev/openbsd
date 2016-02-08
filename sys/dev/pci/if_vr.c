@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_vr.c,v 1.128 2013/03/07 11:20:26 sthen Exp $	*/
+/*	$OpenBSD: if_vr.c,v 1.132 2013/12/28 03:34:54 deraadt Exp $	*/
 
 /*
  * Copyright (c) 1997, 1998
@@ -77,7 +77,6 @@
 #ifdef INET
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
-#include <netinet/in_var.h>
 #include <netinet/ip.h>
 #include <netinet/if_ether.h>
 #endif	/* INET */
@@ -700,18 +699,17 @@ vr_activate(struct device *self, int act)
 	int rv = 0;
 
 	switch (act) {
-	case DVACT_QUIESCE:
-		rv = config_activate_children(self, act);
-		break;
 	case DVACT_SUSPEND:
 		if (ifp->if_flags & IFF_RUNNING)
 			vr_stop(sc);
 		rv = config_activate_children(self, act);
 		break;
 	case DVACT_RESUME:
-		rv = config_activate_children(self, act);
 		if (ifp->if_flags & IFF_UP)
 			vr_init(sc);
+		break;
+	default:
+		rv = config_activate_children(self, act);
 		break;
 	}
 	return (rv);
@@ -903,7 +901,7 @@ vr_rxeof(struct vr_softc *sc)
 		{
 			struct mbuf *m0;
 			m0 = m_devget(mtod(m, caddr_t), total_len,
-			    ETHER_ALIGN, ifp, NULL);
+			    ETHER_ALIGN, ifp);
 			m_freem(m);
 			if (m0 == NULL) {
 				ifp->if_ierrors++;

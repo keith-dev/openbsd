@@ -1,4 +1,4 @@
-.\"	$OpenBSD: utimes.2,v 1.18 2013/03/31 05:07:55 guenther Exp $
+.\"	$OpenBSD: utimes.2,v 1.21 2014/02/13 07:30:39 guenther Exp $
 .\"	$NetBSD: utimes.2,v 1.9 1996/04/23 10:34:16 mycroft Exp $
 .\"
 .\" Copyright (c) 1990, 1993
@@ -30,7 +30,7 @@
 .\"
 .\"     @(#)utimes.2	8.1 (Berkeley) 6/4/93
 .\"
-.Dd $Mdocdate: March 31 2013 $
+.Dd $Mdocdate: February 13 2014 $
 .Dt UTIMES 2
 .Os
 .Sh NAME
@@ -126,12 +126,9 @@ in the
 .Fa fd
 parameter, the current working directory is used.
 .Pp
-Values for
+The
 .Fa flag
-are constructed by bitwise-inclusive
-.Tn OR Ns ing
-flags from the following list defined in
-.In fcntl.h :
+argument is the bitwise OR of zero or more of the following values:
 .Pp
 .Bl -tag -width AT_SYMLINK_NOFOLLOW -offset indent -compact
 .It Dv AT_SYMLINK_NOFOLLOW
@@ -160,7 +157,7 @@ and the effective user ID of the process does not
 match the owner of the file, and is not the superuser, and write
 access is denied.
 .It Bq Er EFAULT
-.Pa File
+.Fa file
 or
 .Fa times
 points outside the process's allocated address space.
@@ -253,6 +250,7 @@ does not match the owner of the file and is not the superuser.
 The file system containing the file is mounted read-only.
 .El
 .Sh SEE ALSO
+.Xr clock_gettime 2 ,
 .Xr stat 2 ,
 .Xr utime 3
 .Sh STANDARDS

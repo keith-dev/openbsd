@@ -1,4 +1,4 @@
-/*	$OpenBSD: table_sqlite.c,v 1.6 2013/07/22 13:14:49 eric Exp $	*/
+/*	$OpenBSD: table_sqlite.c,v 1.11 2013/12/26 17:25:32 eric Exp $	*/
 
 /*
  * Copyright (c) 2013 Eric Faurot <eric@openbsd.org>
@@ -154,7 +154,7 @@ table_sqlite_update(void)
 		{ "query_domain",	1 },
 		{ "query_credentials",	2 },
 		{ "query_netaddr",	1 },
-		{ "query_userinfo",	4 },
+		{ "query_userinfo",	3 },
 		{ "query_source",	1 },
 		{ "query_mailaddr",	1 },
 		{ "query_addrname",	1 },
@@ -175,8 +175,8 @@ table_sqlite_update(void)
 
 	dbpath = NULL;
 	_db = NULL;
-	bzero(queries, sizeof(queries));
-	bzero(_statements, sizeof(_statements));
+	memset(queries, 0, sizeof(queries));
+	memset(_statements, 0, sizeof(_statements));
 	_query_fetch_source = NULL;
 	_stmt_fetch_source = NULL;
 
@@ -207,7 +207,7 @@ table_sqlite_update(void)
 		}
 
 		key = buf;
-		while (isspace((int)*key))
+		while (isspace((unsigned char)*key))
 			++key;
 		if (*key == '\0' || *key == '#')
 			continue;
@@ -215,8 +215,8 @@ table_sqlite_update(void)
 		strsep(&value, " \t:");
 		if (value) {
 			while (*value) {
-				if (!isspace(*value) &&
-				    !(*value == ':' && isspace(*(value + 1))))
+				if (!isspace((unsigned char)*value) &&
+				    !(*value == ':' && isspace((unsigned char)*(value + 1))))
 					break;
 				++value;
 			}
@@ -353,7 +353,7 @@ table_sqlite_query(const char *key, int service)
 
 	stmt = NULL;
 	for(i = 0; i < SQL_MAX; i++)
-		if (service == 1 << i) {
+		if (service == (1 << i)) {
 			stmt = statements[i];
 			break;
 		}
@@ -450,11 +450,10 @@ table_sqlite_lookup(int service, const char *key, char *dst, size_t sz)
 		}
 		break;
 	case K_USERINFO:
-		if (snprintf(dst, sz, "%s:%i:%i:%s",
-		    sqlite3_column_text(stmt, 0),
+		if (snprintf(dst, sz, "%d:%d:%s",
+		    sqlite3_column_int(stmt, 0),
 		    sqlite3_column_int(stmt, 1),
-		    sqlite3_column_int(stmt, 2),
-		    sqlite3_column_text(stmt, 3)) > (ssize_t)sz) {
+		    sqlite3_column_text(stmt, 2)) > (ssize_t)sz) {
 			log_warnx("warn: table-sqlite: result too large");
 			r = -1;
 		}
@@ -470,10 +469,11 @@ table_sqlite_lookup(int service, const char *key, char *dst, size_t sz)
 		}
 		break;
 	default:
-		log_warnx("warn: table-sqlite: unknown service %i", service);
+		log_warnx("warn: table-sqlite: unknown service %d", service);
 		r = -1;
 	}
 
+	sqlite3_reset(stmt);
 	return (r);
 }
 
@@ -494,7 +494,7 @@ table_sqlite_fetch(int service, char *dst, size_t sz)
 	    goto fetch;
 
 	source_iter = NULL;
-	while(dict_poproot(&sources, NULL, NULL))
+	while (dict_poproot(&sources, NULL))
 		;
 
 	while ((s = sqlite3_step(stmt_fetch_source)) == SQLITE_ROW)

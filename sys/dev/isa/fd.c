@@ -1,4 +1,4 @@
-/*	$OpenBSD: fd.c,v 1.94 2013/06/11 16:42:15 deraadt Exp $	*/
+/*	$OpenBSD: fd.c,v 1.98 2013/12/28 03:39:16 deraadt Exp $	*/
 /*	$NetBSD: fd.c,v 1.90 1996/05/12 23:12:03 mycroft Exp $	*/
 
 /*-
@@ -119,7 +119,8 @@ struct fd_softc {
 
 	TAILQ_ENTRY(fd_softc) sc_drivechain;
 	int sc_ops;		/* I/O ops since last switch */
-	struct buf sc_q;	/* head of buf chain */
+	struct bufq sc_bufq;	/* pending I/O */
+	struct buf *sc_bp;	/* the current I/O */
 	struct timeout fd_motor_on_to;
 	struct timeout fd_motor_off_to;
 	struct timeout fdtimeout_to;
@@ -299,6 +300,7 @@ fdattach(struct device *parent, struct device *self, void *aux)
 	 */
 	fd->sc_dk.dk_flags = DKF_NOLABELREAD;
 	fd->sc_dk.dk_name = fd->sc_dev.dv_xname;
+	bufq_init(&fd->sc_bufq, BUFQ_DEFAULT);
 	disk_attach(&fd->sc_dev, &fd->sc_dk);
 
 	/* Setup timeout structures */
@@ -310,9 +312,20 @@ fdattach(struct device *parent, struct device *self, void *aux)
 int
 fdactivate(struct device *self, int act)
 {
+	struct fd_softc *fd = (void *)self;
+	struct fdc_softc *fdc = (void *)fd->sc_dev.dv_parent;
 	int rv = 0;
 
 	switch (act) {
+	case DVACT_SUSPEND:
+		if (fdc->sc_state != DEVIDLE) {
+			timeout_del(&fd->fd_motor_on_to);
+			timeout_del(&fd->fd_motor_off_to);
+			timeout_del(&fd->fdtimeout_to);
+			fdc->sc_state = IOTIMEDOUT;
+			fdc->sc_errors = 4;
+		}
+		break;
 	case DVACT_POWERDOWN:
 		fd_motor_off(self);
 		break;
@@ -407,18 +420,21 @@ fdstrategy(struct buf *bp)
 		bp->b_bcount = sz << DEV_BSHIFT;
 	}
 
- 	bp->b_cylinder = bp->b_blkno / (fd_bsize / DEV_BSIZE) / fd->sc_type->seccyl;
+	bp->b_resid = bp->b_bcount;
 
 #ifdef FD_DEBUG
-	printf("fdstrategy: b_blkno %lld b_bcount %d blkno %lld cylin %d sz %d\n",
-	    bp->b_blkno, bp->b_bcount, fd->sc_blkno, bp->b_cylinder, sz);
+	printf("fdstrategy: b_blkno %lld b_bcount %d blkno %lld sz %d\n",
+	    (long long)bp->b_blkno, bp->b_bcount,
+	    (long long)fd->sc_blkno, sz);
 #endif
+
+	/* Queue I/O */
+	bufq_queue(&fd->sc_bufq, bp);
 
 	/* Queue transfer on drive, activate drive and controller if idle. */
 	s = splbio();
-	disksort(&fd->sc_q, bp);
 	timeout_del(&fd->fd_motor_off_to); /* a good idea */
-	if (!fd->sc_q.b_active)
+	if (fd->sc_bp == NULL)
 		fdstart(fd);
 #ifdef DIAGNOSTIC
 	else {
@@ -449,7 +465,7 @@ fdstart(struct fd_softc *fd)
 	int active = !TAILQ_EMPTY(&fdc->sc_link.fdlink.sc_drives);
 
 	/* Link into controller queue. */
-	fd->sc_q.b_active = 1;
+	fd->sc_bp = bufq_dequeue(&fd->sc_bufq);
 	TAILQ_INSERT_TAIL(&fdc->sc_link.fdlink.sc_drives, fd, sc_drivechain);
 
 	/* If controller not already active, start it. */
@@ -464,6 +480,9 @@ fdfinish(struct fd_softc *fd, struct buf *bp)
 
 	splassert(IPL_BIO);
 
+	fd->sc_skip = 0;
+	fd->sc_bp = bufq_dequeue(&fd->sc_bufq);
+
 	/*
 	 * Move this drive to the end of the queue to give others a `fair'
 	 * chance.  We only force a switch if N operations are completed while
@@ -473,15 +492,11 @@ fdfinish(struct fd_softc *fd, struct buf *bp)
 	if (TAILQ_NEXT(fd, sc_drivechain) != NULL && ++fd->sc_ops >= 8) {
 		fd->sc_ops = 0;
 		TAILQ_REMOVE(&fdc->sc_link.fdlink.sc_drives, fd, sc_drivechain);
-		if (bp->b_actf) {
+		if (fd->sc_bp != NULL) {
 			TAILQ_INSERT_TAIL(&fdc->sc_link.fdlink.sc_drives, fd,
 					  sc_drivechain);
-		} else
-			fd->sc_q.b_active = 0;
+		}
 	}
-	bp->b_resid = fd->sc_bcount;
-	fd->sc_skip = 0;
-	fd->sc_q.b_actf = bp->b_actf;
 
 	biodone(bp);
 	/* turn off motor 5s from now */
@@ -647,7 +662,7 @@ fdintr(struct fdc_softc *fdc)
 	bus_space_tag_t iot = fdc->sc_iot;
 	bus_space_handle_t ioh = fdc->sc_ioh;
 	bus_space_handle_t ioh_ctl = fdc->sc_ioh_ctl;
-	int read, head, sec, i, nblks;
+	int read, head, sec, i, nblks, cylin;
 	struct fd_type *type;
 	struct fd_formb *finfo = NULL;
 	int fd_bsize;
@@ -661,16 +676,18 @@ loop:
 	}
 	fd_bsize = FD_BSIZE(fd);
 
-	bp = fd->sc_q.b_actf;
+	bp = fd->sc_bp;
 	if (bp == NULL) {
 		fd->sc_ops = 0;
 		TAILQ_REMOVE(&fdc->sc_link.fdlink.sc_drives, fd, sc_drivechain);
-		fd->sc_q.b_active = 0;
 		goto loop;
 	}
 
 	if (bp->b_flags & B_FORMAT)
 	    finfo = (struct fd_formb *)bp->b_data;
+
+	cylin = ((bp->b_blkno * DEV_BSIZE) + (bp->b_bcount - bp->b_resid)) /
+	    (fd_bsize * fd->sc_type->seccyl);
 
 	switch (fdc->sc_state) {
 	case DEVIDLE:
@@ -704,7 +721,7 @@ loop:
 		/* FALLTHROUGH */
 	case DOSEEK:
 	doseek:
-		if (fd->sc_cylin == bp->b_cylinder)
+		if (fd->sc_cylin == cylin)
 			goto doio;
 
 		out_fdc(iot, ioh, NE7CMD_SPECIFY);/* specify command */
@@ -713,7 +730,7 @@ loop:
 
 		out_fdc(iot, ioh, NE7CMD_SEEK);	/* seek function */
 		out_fdc(iot, ioh, fd->sc_drive);	/* drive number */
-		out_fdc(iot, ioh, bp->b_cylinder * fd->sc_type->step);
+		out_fdc(iot, ioh, cylin * fd->sc_type->step);
 
 		fd->sc_cylin = -1;
 		fdc->sc_state = SEEKWAIT;
@@ -801,14 +818,14 @@ loop:
 		/* Make sure seek really happened. */
 		out_fdc(iot, ioh, NE7CMD_SENSEI);
 		if (fdcresult(fdc) != 2 || (st0 & 0xf8) != 0x20 ||
-		    cyl != bp->b_cylinder * fd->sc_type->step) {
+		    cyl != cylin * fd->sc_type->step) {
 #ifdef FD_DEBUG
 			fdcstatus(&fd->sc_dev, 2, "seek failed");
 #endif
 			fdretry(fd);
 			goto loop;
 		}
-		fd->sc_cylin = bp->b_cylinder;
+		fd->sc_cylin = cylin;
 		goto doio;
 
 	case IOTIMEDOUT:
@@ -831,7 +848,7 @@ loop:
 			fdcstatus(&fd->sc_dev, 7, bp->b_flags & B_READ ?
 			    "read failed" : "write failed");
 			printf("blkno %lld nblks %d\n",
-			    fd->sc_blkno, fd->sc_nblks);
+			    (long long)fd->sc_blkno, fd->sc_nblks);
 #endif
 			fdretry(fd);
 			goto loop;
@@ -844,11 +861,13 @@ loop:
 			printf("\n");
 			fdc->sc_errors = 0;
 		}
+
 		fd->sc_blkno += fd->sc_nblks;
 		fd->sc_skip += fd->sc_nbytes;
 		fd->sc_bcount -= fd->sc_nbytes;
+		bp->b_resid -= fd->sc_nbytes;
 		if (!finfo && fd->sc_bcount > 0) {
-			bp->b_cylinder = fd->sc_blkno / fd->sc_type->seccyl;
+			cylin = fd->sc_blkno / fd->sc_type->seccyl;
 			goto doseek;
 		}
 		fdfinish(fd, bp);
@@ -927,7 +946,7 @@ fdtimeout(void *arg)
 #endif
 	fdcstatus(&fd->sc_dev, 0, "timeout");
 
-	if (fd->sc_q.b_actf)
+	if (fd->sc_bp != NULL)
 		fdc->sc_state++;
 	else
 		fdc->sc_state = DEVIDLE;
@@ -940,7 +959,7 @@ void
 fdretry(struct fd_softc *fd)
 {
 	struct fdc_softc *fdc = (void *)fd->sc_dev.dv_parent;
-	struct buf *bp = fd->sc_q.b_actf;
+	struct buf *bp = fd->sc_bp;
 
 	if (fd->sc_opts & FDOPT_NORETRY)
 	    goto fail;
@@ -972,6 +991,7 @@ fdretry(struct fd_softc *fd)
 
 		bp->b_flags |= B_ERROR;
 		bp->b_error = EIO;
+		bp->b_resid = bp->b_bcount;
 		fdfinish(fd, bp);
 	}
 	fdc->sc_errors++;

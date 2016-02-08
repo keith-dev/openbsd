@@ -1,4 +1,4 @@
-/*	$OpenBSD: mutex.c,v 1.7 2011/04/21 04:34:12 miod Exp $	*/
+/*	$OpenBSD: mutex.c,v 1.10 2014/02/01 21:23:10 miod Exp $	*/
 
 /*
  * Copyright (c) 2004 Artur Grabowski <art@openbsd.org>
@@ -28,59 +28,114 @@
 #include <sys/param.h>
 #include <sys/mutex.h>
 #include <sys/systm.h>
+#include <sys/lock.h>
 
 #include <machine/intr.h>
 
-#ifdef MULTIPROCESSOR
-#error This code needs more work
-#endif
+#include <ddb/db_output.h>
 
-/*
- * Single processor systems don't need any mutexes, but they need the spl
- * raising semantics of the mutexes.
- */
+static inline int
+try_lock(struct mutex *mtx)
+{
+#ifdef MULTIPROCESSOR
+	unsigned long t0, v0;
+
+	__asm __volatile(
+		"1:	ldl_l	%0, %3		\n"	/* t0 = mtx->mtx_lock */
+		"	bne	%0, 2f		\n"
+		"	bis	$31, 1, %0	\n"	/* t0 = 1 */
+		"	stl_c	%0, %2		\n"	/* mtx->mtx_lock = 1 */
+		"	beq	%0, 3f		\n"
+		"	mb			\n"
+		"	bis	$31, 1, %1	\n"	/* v0 = 1 */
+		"	br	4f		\n"
+		"3:	br	1b		\n"	/* update failed */
+		"2:	bis	$31, $31, %1	\n"	/* v0 = 0 */
+		"4:				\n"
+		: "=&r" (t0), "=r" (v0), "=m" (mtx->mtx_lock)
+		: "m" (mtx->mtx_lock)
+		: "memory");
+
+	return (v0 != 0);
+#else
+	mtx->mtx_lock = 1;
+	return 1;
+#endif
+}
+
 void
 mtx_init(struct mutex *mtx, int wantipl)
 {
-	mtx->mtx_oldipl = 0;
+	mtx->mtx_oldipl = IPL_NONE;
 	mtx->mtx_wantipl = wantipl;
 	mtx->mtx_lock = 0;
+#ifdef MULTIPROCESSOR
+	mtx->mtx_owner = NULL;
+#endif
 }
 
 void
 mtx_enter(struct mutex *mtx)
 {
-	if (mtx->mtx_wantipl != IPL_NONE)
-		mtx->mtx_oldipl = _splraise(mtx->mtx_wantipl);
-	MUTEX_ASSERT_UNLOCKED(mtx);
-	mtx->mtx_lock = 1;
+	int s;
+
+	for (;;) {
+		if (mtx->mtx_wantipl != IPL_NONE)
+			s = _splraise(mtx->mtx_wantipl);
+		if (try_lock(mtx)) {
+			if (mtx->mtx_wantipl != IPL_NONE)
+				mtx->mtx_oldipl = s;
+			mtx->mtx_owner = curcpu();
 #ifdef DIAGNOSTIC
-	curcpu()->ci_mutex_level++;
+			curcpu()->ci_mutex_level++;
 #endif
+			return;
+		}
+		if (mtx->mtx_wantipl != IPL_NONE)
+			splx(s);
+
+#ifdef MULTIPROCESSOR
+		SPINLOCK_SPIN_HOOK;
+#endif
+	}
 }
 
 int
 mtx_enter_try(struct mutex *mtx)
 {
-	if (mtx->mtx_wantipl != IPL_NONE)
-		mtx->mtx_oldipl = _splraise(mtx->mtx_wantipl);
-	MUTEX_ASSERT_UNLOCKED(mtx);
-	mtx->mtx_lock = 1;
-#ifdef DIAGNOSTIC
-	curcpu()->ci_mutex_level++;
-#endif
+	int s;
 
-	return 1;
+	if (mtx->mtx_wantipl != IPL_NONE)
+		s = _splraise(mtx->mtx_wantipl);
+	if (try_lock(mtx)) {
+		if (mtx->mtx_wantipl != IPL_NONE)
+			mtx->mtx_oldipl = s;
+		mtx->mtx_owner = curcpu();
+#ifdef DIAGNOSTIC
+		curcpu()->ci_mutex_level++;
+#endif
+		return 1;
+	}
+	if (mtx->mtx_wantipl != IPL_NONE)
+		splx(s);
+	return 0;
 }
 
 void
 mtx_leave(struct mutex *mtx)
 {
+	int s;
+
 	MUTEX_ASSERT_LOCKED(mtx);
-	mtx->mtx_lock = 0;
 #ifdef DIAGNOSTIC
 	curcpu()->ci_mutex_level--;
 #endif
+	s = mtx->mtx_oldipl;
+	mtx->mtx_owner = NULL;
+	mtx->mtx_lock = 0;
+#ifdef MULTIPROCESSOR
+	alpha_wmb();
+#endif
 	if (mtx->mtx_wantipl != IPL_NONE)
-		splx(mtx->mtx_oldipl);
+		splx(s);
 }

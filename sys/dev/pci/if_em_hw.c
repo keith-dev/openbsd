@@ -31,7 +31,7 @@
 
 *******************************************************************************/
 
-/* $OpenBSD: if_em_hw.c,v 1.72 2013/04/30 07:07:50 jsg Exp $ */
+/* $OpenBSD: if_em_hw.c,v 1.77 2014/02/22 04:41:31 chris Exp $ */
 /*
  * if_em_hw.c Shared functions for accessing and configuring the MAC
  */
@@ -52,7 +52,6 @@
 #ifdef INET
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
-#include <netinet/in_var.h>
 #include <netinet/ip.h>
 #include <netinet/if_ether.h>
 #endif
@@ -180,6 +179,7 @@ int32_t		em_get_pcs_speed_and_duplex_82575(struct em_hw *, uint16_t *,
     uint16_t *);
 int32_t		em_set_eee_i350(struct em_hw *);
 int32_t		em_set_eee_pchlan(struct em_hw *);
+int32_t		em_valid_nvm_bank_detect_ich8lan(struct em_hw *, uint32_t *);
 
 
 /* IGP cable length table */
@@ -225,6 +225,8 @@ em_set_phy_type(struct em_hw *hw)
 	case M88E1000_I_PHY_ID:
 	case M88E1011_I_PHY_ID:
 	case M88E1111_I_PHY_ID:
+	case M88E1543_E_PHY_ID:
+	case I210_I_PHY_ID:
 		hw->phy_type = em_phy_m88;
 		break;
 	case IGP01E1000_I_PHY_ID:
@@ -255,6 +257,9 @@ em_set_phy_type(struct em_hw *hw)
 		break;
 	case I82579_E_PHY_ID:
 		hw->phy_type = em_phy_82579;
+		break;
+	case I217_E_PHY_ID:
+		hw->phy_type = em_phy_i217;
 		break;
 	case I82580_I_PHY_ID:
 	case I350_I_PHY_ID:
@@ -515,11 +520,25 @@ em_set_mac_type(struct em_hw *hw)
 		hw->mac_type = em_82580;
 		hw->initialize_hw_bits_disable = 1;
 		break;
+	case E1000_DEV_ID_I210_COPPER:
+	case E1000_DEV_ID_I210_FIBER:
+	case E1000_DEV_ID_I210_SERDES:
+	case E1000_DEV_ID_I210_SGMII:
+	case E1000_DEV_ID_I210_COPPER_FLASHLESS:
+	case E1000_DEV_ID_I210_SERDES_FLASHLESS:
+	case E1000_DEV_ID_I211_COPPER:
+		hw->mac_type = em_i210;
+		hw->initialize_hw_bits_disable = 1;
+		hw->eee_enable = 1;
+		break;
 	case E1000_DEV_ID_I350_COPPER:
 	case E1000_DEV_ID_I350_FIBER:
 	case E1000_DEV_ID_I350_SERDES:
 	case E1000_DEV_ID_I350_SGMII:
 	case E1000_DEV_ID_I350_DA4:
+	case E1000_DEV_ID_I354_BACKPLANE_1GBPS:
+	case E1000_DEV_ID_I354_SGMII:
+	case E1000_DEV_ID_I354_BACKPLANE_2_5GBPS:
 		hw->mac_type = em_i350;
 		hw->initialize_hw_bits_disable = 1;
 		hw->eee_enable = 1;
@@ -569,6 +588,12 @@ em_set_mac_type(struct em_hw *hw)
 	case E1000_DEV_ID_PCH2_LV_V:
 		hw->mac_type = em_pch2lan;
 		break;
+	case E1000_DEV_ID_PCH_LPT_I217_LM:
+	case E1000_DEV_ID_PCH_LPT_I217_V:
+	case E1000_DEV_ID_PCH_LPTLP_I218_LM:
+	case E1000_DEV_ID_PCH_LPTLP_I218_V:
+		hw->mac_type = em_pch_lpt;
+		break;
 	case E1000_DEV_ID_EP80579_LAN_1:
 		hw->mac_type = em_icp_xxxx;
 		hw->icp_xxxx_port_num = 0;
@@ -592,12 +617,14 @@ em_set_mac_type(struct em_hw *hw)
 	case em_ich10lan:
 	case em_pchlan:
 	case em_pch2lan:
+	case em_pch_lpt:
 		hw->swfwhw_semaphore_present = TRUE;
 		hw->asf_firmware_present = TRUE;
 		break;
 	case em_80003es2lan:
 	case em_82575:
 	case em_82580:
+	case em_i210:
 	case em_i350:
 		hw->swfw_sync_present = TRUE;
 		/* FALLTHROUGH */
@@ -636,7 +663,7 @@ em_set_media_type(struct em_hw *hw)
 	}
 
 	if (hw->mac_type == em_82575 || hw->mac_type == em_82580 ||
-	    hw->mac_type == em_i350) {
+	    hw->mac_type == em_i210 || hw->mac_type == em_i350) {
 		hw->media_type = em_media_type_copper;
 	
 		ctrl_ext = E1000_READ_REG(hw, CTRL_EXT);
@@ -683,6 +710,7 @@ em_set_media_type(struct em_hw *hw)
 		case em_ich10lan:
 		case em_pchlan:
 		case em_pch2lan:
+		case em_pch_lpt:
 		case em_82573:
 		case em_82574:
 			/*
@@ -740,7 +768,7 @@ em_reset_hw(struct em_hw *hw)
 
         /* Set the completion timeout for 82575 chips */
         if (hw->mac_type == em_82575 || hw->mac_type == em_82580 ||
-	    hw->mac_type == em_i350) {
+	    hw->mac_type == em_i210 || hw->mac_type == em_i350) {
                 ret_val = em_set_pciex_completion_timeout(hw);
                 if (ret_val) {              
                         DEBUGOUT("PCI-E Set completion timeout has failed.\n");
@@ -839,6 +867,7 @@ em_reset_hw(struct em_hw *hw)
 	case em_ich10lan:
 	case em_pchlan:
 	case em_pch2lan:
+	case em_pch_lpt:
 		if (!hw->phy_reset_disable &&
 		    em_check_phy_reset_block(hw) == E1000_SUCCESS) {
 			/*
@@ -970,11 +999,7 @@ em_reset_hw(struct em_hw *hw)
 		if (hw->pci_cmd_word & CMD_MEM_WRT_INVALIDATE)
 			em_pci_set_mwi(hw);
 	}
-	if (hw->mac_type == em_ich8lan ||
-	    hw->mac_type == em_ich9lan ||
-	    hw->mac_type == em_ich10lan ||
-	    hw->mac_type == em_pchlan ||
-	    hw->mac_type == em_pch2lan) {
+	if (IS_ICH8(hw->mac_type)) {
 		uint32_t kab = E1000_READ_REG(hw, KABGTXD);
 		kab |= E1000_KABGTXD_BGSQLBIAS;
 		E1000_WRITE_REG(hw, KABGTXD, kab);
@@ -999,7 +1024,7 @@ em_reset_hw(struct em_hw *hw)
 		EM_WRITE_REG(hw, E1000_MDICNFG, mdicnfg);
 	}
 
-	if (hw->mac_type == em_i350)
+	if (hw->mac_type == em_i210 || hw->mac_type == em_i350)
 		em_set_eee_i350(hw);
 
 	return E1000_SUCCESS;
@@ -1090,6 +1115,7 @@ em_initialize_hardware_bits(struct em_hw *hw)
 		case em_ich10lan:
 		case em_pchlan:
 		case em_pch2lan:
+		case em_pch_lpt:
 			if (hw->mac_type == em_ich8lan)
 				/* Set TARC0 bits 29 and 28 */
 				reg_tarc0 |= 0x30000000;
@@ -1163,7 +1189,8 @@ em_init_hw(struct em_hw *hw)
 	}
 
 	if (hw->mac_type == em_pchlan ||
-		hw->mac_type == em_pch2lan) {
+		hw->mac_type == em_pch2lan ||
+		hw->mac_type == em_pch_lpt) {
 		/*
 		 * The MAC-PHY interconnect may still be in SMBus mode
 		 * after Sx->S0.  Toggle the LANPHYPC Value bit to force
@@ -1221,11 +1248,7 @@ em_init_hw(struct em_hw *hw)
 	/* Disabling VLAN filtering. */
 	DEBUGOUT("Initializing the IEEE VLAN\n");
 	/* VET hardcoded to standard value and VFTA removed in ICH8/ICH9 LAN */
-	if (hw->mac_type != em_ich8lan &&
-	    hw->mac_type != em_ich9lan &&
-	    hw->mac_type != em_ich10lan &&
-	    hw->mac_type != em_pchlan &&
-	    hw->mac_type != em_pch2lan) {
+	if (!IS_ICH8(hw->mac_type)) {
 		if (hw->mac_type < em_82545_rev_3)
 			E1000_WRITE_REG(hw, VET, 0);
 		if (hw->mac_type == em_i350)
@@ -1258,11 +1281,7 @@ em_init_hw(struct em_hw *hw)
 	/* Zero out the Multicast HASH table */
 	DEBUGOUT("Zeroing the MTA\n");
 	mta_size = E1000_MC_TBL_SIZE;
-	if (hw->mac_type == em_ich8lan ||
-	    hw->mac_type == em_ich9lan ||
-	    hw->mac_type == em_ich10lan ||
-	    hw->mac_type == em_pchlan ||
-	    hw->mac_type == em_pch2lan)
+	if (IS_ICH8(hw->mac_type))
 		mta_size = E1000_MC_TBL_SIZE_ICH8LAN;
 	for (i = 0; i < mta_size; i++) {
 		E1000_WRITE_REG_ARRAY(hw, MTA, i, 0);
@@ -1316,11 +1335,7 @@ em_init_hw(struct em_hw *hw)
 	}
 
 	/* More time needed for PHY to initialize */
-	if (hw->mac_type == em_ich8lan ||
-	    hw->mac_type == em_ich9lan ||
-	    hw->mac_type == em_ich10lan ||
-	    hw->mac_type == em_pchlan ||
-	    hw->mac_type == em_pch2lan)
+	if (IS_ICH8(hw->mac_type))
 		msec_delay(15);
 
         /*
@@ -1378,12 +1393,14 @@ em_init_hw(struct em_hw *hw)
 	case em_82572:
 	case em_82575:
 	case em_82580:
+	case em_i210:
 	case em_i350:
 	case em_ich8lan:
 	case em_ich9lan:
 	case em_ich10lan:
 	case em_pchlan:
 	case em_pch2lan:
+	case em_pch_lpt:
 		ctrl = E1000_READ_REG(hw, TXDCTL1);
 		ctrl = (ctrl & ~E1000_TXDCTL_WTHRESH) | 
 		    E1000_TXDCTL_FULL_TX_DESC_WB;
@@ -1407,11 +1424,7 @@ em_init_hw(struct em_hw *hw)
 	 * ICH8 No-snoop bits are opposite polarity. Set to snoop by default
 	 * after reset.
 	 */
-	if (hw->mac_type == em_ich8lan ||
-	    hw->mac_type == em_ich9lan ||
-	    hw->mac_type == em_ich10lan ||
-	    hw->mac_type == em_pchlan ||
-	    hw->mac_type == em_pch2lan) {
+	if (IS_ICH8(hw->mac_type)) {
 		if (hw->mac_type == em_ich8lan)
 			snoop = PCI_EX_82566_SNOOP_ALL;
 		else
@@ -1518,6 +1531,7 @@ em_setup_link(struct em_hw *hw)
 		case em_ich10lan:
 		case em_pchlan:
 		case em_pch2lan:
+		case em_pch_lpt:
 		case em_82573:
 		case em_82574:
 			hw->fc = E1000_FC_FULL;
@@ -1606,11 +1620,7 @@ em_setup_link(struct em_hw *hw)
          * FCAL/H and FCT are hardcoded to standard values in
          * em_ich8lan / em_ich9lan / em_ich10lan.
          */
-	if (hw->mac_type != em_ich8lan &&
-	    hw->mac_type != em_ich9lan &&
-	    hw->mac_type != em_ich10lan &&
-	    hw->mac_type != em_pchlan &&
-	    hw->mac_type != em_pch2lan) {
+	if (!IS_ICH8(hw->mac_type)) {
 		E1000_WRITE_REG(hw, FCT, FLOW_CONTROL_TYPE);
 		E1000_WRITE_REG(hw, FCAH, FLOW_CONTROL_ADDRESS_HIGH);
 		E1000_WRITE_REG(hw, FCAL, FLOW_CONTROL_ADDRESS_LOW);
@@ -1619,7 +1629,8 @@ em_setup_link(struct em_hw *hw)
 
 	if (hw->phy_type == em_phy_82577 ||
 	    hw->phy_type == em_phy_82578 ||
-	    hw->phy_type == em_phy_82579) {
+	    hw->phy_type == em_phy_82579 ||
+	    hw->phy_type == em_phy_i217) {
 		E1000_WRITE_REG(hw, FCRTV_PCH, 0x1000);
 		em_write_phy_reg(hw, PHY_REG(BM_PORT_CTRL_PAGE, 27),
 		    hw->fc_pause_time);
@@ -1970,7 +1981,8 @@ em_copper_link_igp_setup(struct em_hw *hw)
 	}
 	/* disable lplu d0 during driver init */
 	if (hw->mac_type == em_pchlan ||
-		hw->mac_type == em_pch2lan)
+		hw->mac_type == em_pch2lan ||
+		hw->mac_type == em_pch_lpt)
 		ret_val = em_set_lplu_state_pchlan(hw, FALSE);
 	else
 		ret_val = em_set_d0_lplu_state(hw, FALSE);
@@ -2241,7 +2253,8 @@ em_copper_link_mgp_setup(struct em_hw *hw)
 
 	/* disable lplu d0 during driver init */
 	if (hw->mac_type == em_pchlan ||
-		hw->mac_type == em_pch2lan)
+		hw->mac_type == em_pch2lan ||
+		hw->mac_type == em_pch_lpt)
 		ret_val = em_set_lplu_state_pchlan(hw, FALSE);
 
 	/* Enable CRS on TX. This must be set for half-duplex operation. */
@@ -2583,6 +2596,7 @@ em_setup_copper_link(struct em_hw *hw)
 	case em_ich10lan:
 	case em_pchlan:
 	case em_pch2lan:
+	case em_pch_lpt:
 		/*
 		 * Set the mac to wait the maximum time between each
 		 * iteration and increase the max iterations when polling the
@@ -2642,7 +2656,8 @@ em_setup_copper_link(struct em_hw *hw)
 		if (ret_val)
 			return ret_val;
 	} else if (hw->phy_type == em_phy_82577 ||
-		hw->phy_type == em_phy_82579) {
+		hw->phy_type == em_phy_82579 ||
+		hw->phy_type == em_phy_i217) {
 		ret_val = em_copper_link_82577_setup(hw);
 		if (ret_val)
 			return ret_val;
@@ -3693,7 +3708,8 @@ em_check_for_link(struct em_hw *hw)
 			em_check_downshift(hw);
 
 			/* Enable/Disable EEE after link up */
-			if (hw->mac_type == em_pch2lan) {
+			if (hw->mac_type == em_pch2lan ||
+			    hw->mac_type == em_pch_lpt) {
 				ret_val = em_set_eee_pchlan(hw);
 				if (ret_val)
 					return ret_val;
@@ -4477,7 +4493,8 @@ em_read_phy_reg(struct em_hw *hw, uint32_t reg_addr, uint16_t *phy_data)
 	DEBUGFUNC("em_read_phy_reg");
 
 	if (hw->mac_type == em_pchlan ||
-		hw->mac_type == em_pch2lan)
+		hw->mac_type == em_pch2lan ||
+		hw->mac_type == em_pch_lpt)
 		return (em_access_phy_reg_hv(hw, reg_addr, phy_data, TRUE));
 
 	if (((hw->mac_type == em_80003es2lan) || (hw->mac_type == em_82575)) &&
@@ -4590,7 +4607,7 @@ em_read_phy_reg_ex(struct em_hw *hw, uint32_t reg_addr, uint16_t *phy_data)
 		}
 		*phy_data = (uint16_t) mdic;
 
-		if (hw->mac_type == em_pch2lan)
+		if (hw->mac_type == em_pch2lan || hw->mac_type == em_pch_lpt)
 			usec_delay(100);
 	} else {
 		/*
@@ -4640,7 +4657,8 @@ em_write_phy_reg(struct em_hw *hw, uint32_t reg_addr, uint16_t phy_data)
 	DEBUGFUNC("em_write_phy_reg");
 
 	if (hw->mac_type == em_pchlan ||
-		hw->mac_type == em_pch2lan)
+		hw->mac_type == em_pch2lan ||
+		hw->mac_type == em_pch_lpt)
 		return (em_access_phy_reg_hv(hw, reg_addr, &phy_data, FALSE));
 
 	if (em_swfw_sync_acquire(hw, hw->swfw))
@@ -4740,7 +4758,7 @@ em_write_phy_reg_ex(struct em_hw *hw, uint32_t reg_addr, uint16_t phy_data)
 			return -E1000_ERR_PHY;
 		}
 
-		if (hw->mac_type == em_pch2lan)
+		if (hw->mac_type == em_pch2lan || hw->mac_type == em_pch_lpt)
 			usec_delay(100);
 	} else {
 		/*
@@ -4919,14 +4937,14 @@ em_oem_bits_config_pchlan(struct em_hw *hw, boolean_t d0_state)
 	uint16_t oem_reg;
 	uint16_t swfw = E1000_SWFW_PHY0_SM;
 
-	if ((hw->mac_type != em_pchlan) && (hw->mac_type != em_pch2lan))
+	if (hw->mac_type < em_pchlan)
 		return ret_val;
 
 	ret_val = em_swfw_sync_acquire(hw, swfw);
 	if (ret_val)
 		return ret_val;
 
-	if (hw->mac_type != em_pch2lan) {
+	if (hw->mac_type == em_pchlan) {
 		mac_reg = E1000_READ_REG(hw, EXTCNF_CTRL);
 		if (mac_reg & E1000_EXTCNF_CTRL_OEM_WRITE_ENABLE)
 			goto out;
@@ -5020,31 +5038,30 @@ em_phy_reset(struct em_hw *hw)
 	/* Allow time for h/w to get to a quiescent state after reset */
 	msec_delay(10);
 
-	if (hw->phy_type == em_phy_igp || hw->phy_type == em_phy_igp_2) {
+	if (hw->phy_type == em_phy_igp || hw->phy_type == em_phy_igp_2)
 		em_phy_init_script(hw);
-	} else if (hw->mac_type == em_pchlan) {
+
+	if (hw->mac_type == em_pchlan) {
 		ret_val = em_hv_phy_workarounds_ich8lan(hw);
 		if (ret_val)
 			return ret_val;
-
-		ret_val = em_oem_bits_config_pchlan(hw, TRUE);
-		if (ret_val)
-			return ret_val;
-
 	} else if (hw->mac_type == em_pch2lan) {
 		ret_val = em_lv_phy_workarounds_ich8lan(hw);
 		if (ret_val)
 			return ret_val;
-
+	}
+	
+	if (hw->mac_type >= em_pchlan) {
 		ret_val = em_oem_bits_config_pchlan(hw, TRUE);
 		if (ret_val)
 			return ret_val;
+	}
 
-		/* Ungate automatic PHY configuration on non-managed 82579 */
-		if  (!(E1000_READ_REG(hw, FWSM) & E1000_FWSM_FW_VALID)) {
-			msec_delay(10);
-			em_gate_hw_phy_config_ich8lan(hw, FALSE);
-		}
+	/* Ungate automatic PHY configuration on non-managed 82579 */
+	if ((hw->mac_type == em_pch2lan) &&
+	    !(E1000_READ_REG(hw, FWSM) & E1000_FWSM_FW_VALID)) {
+		msec_delay(10);
+		em_gate_hw_phy_config_ich8lan(hw, FALSE);
 	}
 
 	return E1000_SUCCESS;
@@ -5178,8 +5195,12 @@ em_match_gig_phy(struct em_hw *hw)
 			match = TRUE;
 		break;
 	case em_82580:
+	case em_i210:
 	case em_i350:
-		if (hw->phy_id == I82580_I_PHY_ID || hw->phy_id == I350_I_PHY_ID) {
+		if (hw->phy_id == I82580_I_PHY_ID ||
+		    hw->phy_id == I210_I_PHY_ID ||
+		    hw->phy_id == I350_I_PHY_ID ||
+		    hw->phy_id == M88E1543_E_PHY_ID) {
 			uint32_t mdic;
 
 			mdic = EM_READ_REG(hw, E1000_MDICNFG);
@@ -5214,6 +5235,10 @@ em_match_gig_phy(struct em_hw *hw)
 		if (hw->phy_id == I82578_E_PHY_ID)
 			match = TRUE;
 		if (hw->phy_id == I82579_E_PHY_ID)
+			match = TRUE;
+		break;
+	case em_pch_lpt:
+		if (hw->phy_id == I217_E_PHY_ID)
 			match = TRUE;
 		break;
 	case em_icp_xxxx:
@@ -5310,7 +5335,8 @@ em_detect_gig_phy(struct em_hw *hw)
 		hw->phy_type = em_phy_gg82563;
 
 	/* Power on SGMII phy if it is disabled */
-	if (hw->mac_type == em_82580 || hw->mac_type == em_i350) {
+	if (hw->mac_type == em_82580 || hw->mac_type == em_i210 ||
+	    hw->mac_type == em_i350) {
 		uint32_t ctrl_ext = EM_READ_REG(hw, E1000_CTRL_EXT);
 		EM_WRITE_REG(hw, E1000_CTRL_EXT,
 		    ctrl_ext & ~E1000_CTRL_EXT_SDP3_DATA);
@@ -5452,6 +5478,7 @@ em_init_eeprom_params(struct em_hw *hw)
 	case em_82574:
 	case em_82575:
 	case em_82580:
+	case em_i210:
 	case em_i350:
 		eeprom->type = em_eeprom_spi;
 		eeprom->opcode_bits = 8;
@@ -5496,6 +5523,7 @@ em_init_eeprom_params(struct em_hw *hw)
 	case em_ich10lan:
 	case em_pchlan:
 	case em_pch2lan:
+	case em_pch_lpt:
 		{
 		int32_t         i = 0;
 		uint32_t        flash_size = 
@@ -6116,11 +6144,7 @@ em_is_onboard_nvm_eeprom(struct em_hw *hw)
 	uint32_t eecd = 0;
 	DEBUGFUNC("em_is_onboard_nvm_eeprom");
 
-	if (hw->mac_type == em_ich8lan ||
-	    hw->mac_type == em_ich9lan ||
-	    hw->mac_type == em_ich10lan ||
-	    hw->mac_type == em_pchlan ||
-	    hw->mac_type == em_pch2lan)
+	if (IS_ICH8(hw->mac_type))
 		return FALSE;
 
 	if ((hw->mac_type == em_82573) || (hw->mac_type == em_82574)) {
@@ -6181,21 +6205,30 @@ em_validate_eeprom_checksum(struct em_hw *hw)
 			}
 		}
 	}
-	if (hw->mac_type == em_ich8lan ||
-	    hw->mac_type == em_ich9lan ||
-	    hw->mac_type == em_ich10lan ||
-	    hw->mac_type == em_pchlan ||
-	    hw->mac_type == em_pch2lan) {
+	if (IS_ICH8(hw->mac_type)) {
+		uint16_t word;
+		uint16_t valid_csum_mask;
+		
 		/*
 		 * Drivers must allocate the shadow ram structure for the
 		 * EEPROM checksum to be updated.  Otherwise, this bit as
 		 * well as the checksum must both be set correctly for this
 		 * validation to pass.
 		 */
-		em_read_eeprom(hw, 0x19, 1, &eeprom_data);
-		if ((eeprom_data & 0x40) == 0) {
-			eeprom_data |= 0x40;
-			em_write_eeprom(hw, 0x19, 1, &eeprom_data);
+		switch (hw->mac_type) {
+		case em_pch_lpt:
+			word = EEPROM_COMPAT;
+			valid_csum_mask = EEPROM_COMPAT_VALID_CSUM;
+			break;
+		default:
+			word = EEPROM_FUTURE_INIT_WORD1;
+			valid_csum_mask = EEPROM_FUTURE_INIT_WORD1_VALID_CSUM;
+			break;
+		}
+		em_read_eeprom(hw, word, 1, &eeprom_data);
+		if ((eeprom_data & valid_csum_mask) == 0) {
+			eeprom_data |= valid_csum_mask;
+			em_write_eeprom(hw, word, 1, &eeprom_data);
 			em_update_eeprom_checksum(hw);
 		}
 	}
@@ -6603,7 +6636,7 @@ em_commit_shadow_ram(struct em_hw *hw)
 				 * in progress
 				 */
 				if (i == E1000_ICH_NVM_SIG_WORD)
-					high_byte = E1000_ICH_NVM_SIG_MASK |
+					high_byte = E1000_ICH_NVM_VALID_SIG_MASK |
 					    high_byte;
 
 				error = em_verify_write_ich8_byte(hw, (i << 1)
@@ -6768,16 +6801,14 @@ em_init_rx_addrs(struct em_hw *hw)
 	 */
 	if ((hw->mac_type == em_82571) && (hw->laa_is_present == TRUE))
 		rar_num -= 1;
-	if (hw->mac_type == em_ich8lan ||
-	    hw->mac_type == em_ich9lan ||
-	    hw->mac_type == em_ich10lan ||
-	    hw->mac_type == em_pchlan ||
-	    hw->mac_type == em_pch2lan)
+	if (IS_ICH8(hw->mac_type))
 		rar_num = E1000_RAR_ENTRIES_ICH8LAN;
 	if (hw->mac_type == em_ich8lan)
 		rar_num -= 1;
 	if (hw->mac_type == em_82580)
 		rar_num = E1000_RAR_ENTRIES_82580;
+	if (hw->mac_type == em_i210)
+		rar_num = E1000_RAR_ENTRIES_82575;
 	if (hw->mac_type == em_i350)
 		rar_num = E1000_RAR_ENTRIES_I350;
 
@@ -6823,11 +6854,7 @@ em_mc_addr_list_update(struct em_hw *hw, uint8_t *mc_addr_list,
 	/* Clear RAR[1-15] */
 	DEBUGOUT(" Clearing RAR[1-15]\n");
 	num_rar_entry = E1000_RAR_ENTRIES;
-	if (hw->mac_type == em_ich8lan ||
-	    hw->mac_type == em_ich9lan ||
-	    hw->mac_type == em_ich10lan ||
-	    hw->mac_type == em_pchlan ||
-	    hw->mac_type == em_pch2lan)
+	if (IS_ICH8(hw->mac_type))
 		num_rar_entry = E1000_RAR_ENTRIES_ICH8LAN;
 	if (hw->mac_type == em_ich8lan)
 		num_rar_entry -= 1;
@@ -6849,11 +6876,7 @@ em_mc_addr_list_update(struct em_hw *hw, uint8_t *mc_addr_list,
 	/* Clear the MTA */
 	DEBUGOUT(" Clearing MTA\n");
 	num_mta_entry = E1000_NUM_MTA_REGISTERS;
-	if (hw->mac_type == em_ich8lan ||
-	    hw->mac_type == em_ich9lan ||
-	    hw->mac_type == em_ich10lan ||
-	    hw->mac_type == em_pchlan ||
-	    hw->mac_type == em_pch2lan)
+	if (IS_ICH8(hw->mac_type))
 		num_mta_entry = E1000_NUM_MTA_REGISTERS_ICH8LAN;
 
 	for (i = 0; i < num_mta_entry; i++) {
@@ -6912,11 +6935,7 @@ em_hash_mc_addr(struct em_hw *hw, uint8_t *mc_addr)
 		 * MSB
 		 */
 	case 0:
-		if (hw->mac_type == em_ich8lan ||
-		    hw->mac_type == em_ich9lan ||
-		    hw->mac_type == em_ich10lan ||
-		    hw->mac_type == em_pchlan ||
-		    hw->mac_type == em_pch2lan) {
+		if (IS_ICH8(hw->mac_type)) {
 			/* [47:38] i.e. 0x158 for above example address */
 			hash_value = ((mc_addr[4] >> 6) | 
 			    (((uint16_t) mc_addr[5]) << 2));
@@ -6927,11 +6946,7 @@ em_hash_mc_addr(struct em_hw *hw, uint8_t *mc_addr)
 		}
 		break;
 	case 1:
-		if (hw->mac_type == em_ich8lan ||
-		    hw->mac_type == em_ich9lan ||
-		    hw->mac_type == em_ich10lan ||
-		    hw->mac_type == em_pchlan ||
-		    hw->mac_type == em_pch2lan) {
+		if (IS_ICH8(hw->mac_type)) {
 			/* [46:37] i.e. 0x2B1 for above example address */
 			hash_value = ((mc_addr[4] >> 5) |
 			    (((uint16_t) mc_addr[5]) << 3));
@@ -6942,11 +6957,7 @@ em_hash_mc_addr(struct em_hw *hw, uint8_t *mc_addr)
 		}
 		break;
 	case 2:
-		if (hw->mac_type == em_ich8lan ||
-		    hw->mac_type == em_ich9lan ||
-		    hw->mac_type == em_ich10lan ||
-		    hw->mac_type == em_pchlan ||
-		    hw->mac_type == em_pch2lan) {
+		if (IS_ICH8(hw->mac_type)) {
 			/* [45:36] i.e. 0x163 for above example address */
 			hash_value = ((mc_addr[4] >> 4) |
 			    (((uint16_t) mc_addr[5]) << 4));
@@ -6957,11 +6968,7 @@ em_hash_mc_addr(struct em_hw *hw, uint8_t *mc_addr)
 		}
 		break;
 	case 3:
-		if (hw->mac_type == em_ich8lan ||
-		    hw->mac_type == em_ich9lan ||
-		    hw->mac_type == em_ich10lan ||
-		    hw->mac_type == em_pchlan ||
-		    hw->mac_type == em_pch2lan) {
+		if (IS_ICH8(hw->mac_type)) {
 			/* [43:34] i.e. 0x18D for above example address */
 			hash_value = ((mc_addr[4] >> 2) |
 			    (((uint16_t) mc_addr[5]) << 6));
@@ -6974,11 +6981,7 @@ em_hash_mc_addr(struct em_hw *hw, uint8_t *mc_addr)
 	}
 
 	hash_value &= 0xFFF;
-	if (hw->mac_type == em_ich8lan ||
-	    hw->mac_type == em_ich9lan ||
-	    hw->mac_type == em_ich10lan ||
-	    hw->mac_type == em_pchlan ||
-	    hw->mac_type == em_pch2lan)
+	if (IS_ICH8(hw->mac_type))
 		hash_value &= 0x3FF;
 
 	return hash_value;
@@ -7006,11 +7009,7 @@ em_mta_set(struct em_hw *hw, uint32_t hash_value)
 	 * bits of the value.
 	 */
 	hash_reg = (hash_value >> 5) & 0x7F;
-	if (hw->mac_type == em_ich8lan ||
-	    hw->mac_type == em_ich9lan ||
-	    hw->mac_type == em_ich10lan ||
-	    hw->mac_type == em_pchlan ||
-	    hw->mac_type == em_pch2lan)
+	if (IS_ICH8(hw->mac_type))
 		hash_reg &= 0x1F;
 
 	hash_bit = hash_value & 0x1F;
@@ -7101,11 +7100,7 @@ em_clear_vfta(struct em_hw *hw)
 	uint32_t vfta_value = 0;
 	uint32_t vfta_offset = 0;
 	uint32_t vfta_bit_in_reg = 0;
-	if (hw->mac_type == em_ich8lan ||
-	    hw->mac_type == em_ich9lan ||
-	    hw->mac_type == em_ich10lan ||
-	    hw->mac_type == em_pchlan ||
-	    hw->mac_type == em_pch2lan)
+	if (IS_ICH8(hw->mac_type))
 		return;
 
 	if ((hw->mac_type == em_82573) || (hw->mac_type == em_82574)) {
@@ -7256,11 +7251,7 @@ em_clear_hw_cntrs(struct em_hw *hw)
 	temp = E1000_READ_REG(hw, XOFFTXC);
 	temp = E1000_READ_REG(hw, FCRUC);
 
-	if (hw->mac_type != em_ich8lan &&
-	    hw->mac_type != em_ich9lan &&
-	    hw->mac_type != em_ich10lan &&
-	    hw->mac_type != em_pchlan &&
-	    hw->mac_type != em_pch2lan) {
+	if (!IS_ICH8(hw->mac_type)) {
 		temp = E1000_READ_REG(hw, PRC64);
 		temp = E1000_READ_REG(hw, PRC127);
 		temp = E1000_READ_REG(hw, PRC255);
@@ -7288,11 +7279,7 @@ em_clear_hw_cntrs(struct em_hw *hw)
 	temp = E1000_READ_REG(hw, TPR);
 	temp = E1000_READ_REG(hw, TPT);
 
-	if (hw->mac_type != em_ich8lan &&
-	    hw->mac_type != em_ich9lan &&
-	    hw->mac_type != em_ich10lan &&
-	    hw->mac_type != em_pchlan &&
-	    hw->mac_type != em_pch2lan) {
+	if (!IS_ICH8(hw->mac_type)) {
 		temp = E1000_READ_REG(hw, PTC64);
 		temp = E1000_READ_REG(hw, PTC127);
 		temp = E1000_READ_REG(hw, PTC255);
@@ -7329,7 +7316,8 @@ em_clear_hw_cntrs(struct em_hw *hw)
 
 	if (hw->phy_type == em_phy_82577 ||
 	    hw->phy_type == em_phy_82578 ||
-	    hw->phy_type == em_phy_82579) {
+	    hw->phy_type == em_phy_82579 ||
+	    hw->phy_type == em_phy_i217) {
 		uint16_t phy_data;
 
 		em_read_phy_reg(hw, HV_SCC_UPPER, &phy_data);
@@ -7352,7 +7340,7 @@ em_clear_hw_cntrs(struct em_hw *hw)
 	    hw->mac_type == em_ich9lan ||
 	    hw->mac_type == em_ich10lan ||
 	    hw->mac_type == em_pchlan ||
-	    hw->mac_type != em_pch2lan)
+	    (hw->mac_type != em_pch2lan && hw->mac_type != em_pch_lpt))
 		return;
 
 	temp = E1000_READ_REG(hw, ICRXPTC);
@@ -7476,6 +7464,7 @@ em_get_bus_info(struct em_hw *hw)
 	case em_82575:
 	case em_82580:
 	case em_80003es2lan:
+	case em_i210:
 	case em_i350:
 		hw->bus_type = em_bus_type_pci_express;
 		hw->bus_speed = em_bus_speed_2500;
@@ -7492,6 +7481,7 @@ em_get_bus_info(struct em_hw *hw)
 	case em_ich10lan:
 	case em_pchlan:
 	case em_pch2lan:
+	case em_pch_lpt:
 		hw->bus_type = em_bus_type_pci_express;
 		hw->bus_speed = em_bus_speed_2500;
 		hw->bus_width = em_bus_width_pciex_1;
@@ -8063,11 +8053,7 @@ em_set_d3_lplu_state(struct em_hw *hw, boolean_t active)
 		ret_val = em_read_phy_reg(hw, IGP01E1000_GMII_FIFO, &phy_data);
 		if (ret_val)
 			return ret_val;
-	} else if (hw->mac_type == em_ich8lan ||
-	    hw->mac_type == em_ich9lan ||
-	    hw->mac_type == em_ich10lan ||
-	    hw->mac_type == em_pchlan ||
-	    hw->mac_type == em_pch2lan) {
+	} else if (IS_ICH8(hw->mac_type)) {
 		/*
 		 * MAC writes into PHY register based on the state transition
 		 * and start auto-negotiation. SW driver can overwrite the
@@ -8090,11 +8076,7 @@ em_set_d3_lplu_state(struct em_hw *hw, boolean_t active)
 			if (ret_val)
 				return ret_val;
 		} else {
-			if (hw->mac_type == em_ich8lan ||
-			    hw->mac_type == em_ich9lan ||
-			    hw->mac_type == em_ich10lan ||
-			    hw->mac_type == em_pchlan ||
-			    hw->mac_type == em_pch2lan) {
+			if (IS_ICH8(hw->mac_type)) {
 				phy_ctrl &= ~E1000_PHY_CTRL_NOND0A_LPLU;
 				E1000_WRITE_REG(hw, PHY_CTRL, phy_ctrl);
 			} else {
@@ -8146,11 +8128,7 @@ em_set_d3_lplu_state(struct em_hw *hw, boolean_t active)
 			if (ret_val)
 				return ret_val;
 		} else {
-			if (hw->mac_type == em_ich8lan ||
-			    hw->mac_type == em_ich9lan ||
-			    hw->mac_type == em_ich10lan ||
-			    hw->mac_type == em_pchlan ||
-			    hw->mac_type == em_pch2lan) {
+			if (IS_ICH8(hw->mac_type)) {
 				phy_ctrl |= E1000_PHY_CTRL_NOND0A_LPLU;
 				E1000_WRITE_REG(hw, PHY_CTRL, phy_ctrl);
 			} else {
@@ -8202,11 +8180,7 @@ em_set_d0_lplu_state(struct em_hw *hw, boolean_t active)
 	if (hw->mac_type <= em_82547_rev_2)
 		return E1000_SUCCESS;
 
-	if (hw->mac_type == em_ich8lan ||
-	    hw->mac_type == em_ich9lan ||
-	    hw->mac_type == em_ich10lan ||
-	    hw->mac_type == em_pchlan ||
-	    hw->mac_type == em_pch2lan) {
+	if (IS_ICH8(hw->mac_type)) {
 		phy_ctrl = E1000_READ_REG(hw, PHY_CTRL);
 	} else {
 		ret_val = em_read_phy_reg(hw, IGP02E1000_PHY_POWER_MGMT,
@@ -8216,11 +8190,7 @@ em_set_d0_lplu_state(struct em_hw *hw, boolean_t active)
 	}
 
 	if (!active) {
-		if (hw->mac_type == em_ich8lan ||
-		    hw->mac_type == em_ich9lan ||
-		    hw->mac_type == em_ich10lan ||
-		    hw->mac_type == em_pchlan ||
-		    hw->mac_type == em_pch2lan) {
+		if (IS_ICH8(hw->mac_type)) {
 			phy_ctrl &= ~E1000_PHY_CTRL_D0A_LPLU;
 			E1000_WRITE_REG(hw, PHY_CTRL, phy_ctrl);
 		} else {
@@ -8260,11 +8230,7 @@ em_set_d0_lplu_state(struct em_hw *hw, boolean_t active)
 				return ret_val;
 		}
 	} else {
-		if (hw->mac_type == em_ich8lan ||
-		    hw->mac_type == em_ich9lan ||
-		    hw->mac_type == em_ich10lan ||
-		    hw->mac_type == em_pchlan ||
-		    hw->mac_type == em_pch2lan) {
+		if (IS_ICH8(hw->mac_type)) {
 			phy_ctrl |= E1000_PHY_CTRL_D0A_LPLU;
 			E1000_WRITE_REG(hw, PHY_CTRL, phy_ctrl);
 		} else {
@@ -8453,11 +8419,7 @@ em_check_mng_mode(struct em_hw *hw)
 	uint32_t fwsm;
 	fwsm = E1000_READ_REG(hw, FWSM);
 
-	if (hw->mac_type == em_ich8lan ||
-	    hw->mac_type == em_ich9lan ||
-	    hw->mac_type == em_ich10lan ||
-	    hw->mac_type == em_pchlan ||
-	    hw->mac_type == em_pch2lan) {
+	if (IS_ICH8(hw->mac_type)) {
 		if ((fwsm & E1000_FWSM_MODE_MASK) ==
 		    (E1000_MNG_ICH_IAMT_MODE << E1000_FWSM_MODE_SHIFT))
 			return TRUE;
@@ -8700,12 +8662,14 @@ em_get_auto_rd_done(struct em_hw *hw)
 	case em_82575:
 	case em_82580:
 	case em_80003es2lan:
+	case em_i210:
 	case em_i350:
 	case em_ich8lan:
 	case em_ich9lan:
 	case em_ich10lan:
 	case em_pchlan:
 	case em_pch2lan:
+	case em_pch_lpt:
 		while (timeout) {
 			if (E1000_READ_REG(hw, EECD) & E1000_EECD_AUTO_RD)
 				break;
@@ -8941,11 +8905,7 @@ em_check_phy_reset_block(struct em_hw *hw)
 {
 	uint32_t manc = 0;
 	uint32_t fwsm = 0;
-	if (hw->mac_type == em_ich8lan ||
-	    hw->mac_type == em_ich9lan ||
-	    hw->mac_type == em_ich10lan ||
-	    hw->mac_type == em_pchlan ||
-	    hw->mac_type == em_pch2lan) {
+	if (IS_ICH8(hw->mac_type)) {
 		fwsm = E1000_READ_REG(hw, FWSM);
 		return (fwsm & E1000_FWSM_RSPCIPHY) ? E1000_SUCCESS :
 		    E1000_BLK_PHY_RESET;
@@ -8983,11 +8943,7 @@ em_set_pci_ex_no_snoop(struct em_hw *hw, uint32_t no_snoop)
 		gcr_reg |= no_snoop;
 		E1000_WRITE_REG(hw, GCR, gcr_reg);
 	}
-	if (hw->mac_type == em_ich8lan ||
-	    hw->mac_type == em_ich9lan ||
-	    hw->mac_type == em_ich10lan ||
-	    hw->mac_type == em_pchlan ||
-	    hw->mac_type == em_pch2lan) {
+	if (IS_ICH8(hw->mac_type)) {
 		uint32_t ctrl_ext;
 		ctrl_ext = E1000_READ_REG(hw, CTRL_EXT);
 		ctrl_ext |= E1000_CTRL_EXT_RO_DIS;
@@ -9012,11 +8968,7 @@ em_get_software_flag(struct em_hw *hw)
 	uint32_t extcnf_ctrl;
 	DEBUGFUNC("em_get_software_flag");
 
-	if (hw->mac_type == em_ich8lan ||
-	    hw->mac_type == em_ich9lan ||
-	    hw->mac_type == em_ich10lan ||
-	    hw->mac_type == em_pchlan ||
-	    hw->mac_type == em_pch2lan) {
+	if (IS_ICH8(hw->mac_type)) {
 		while (timeout) {
 			extcnf_ctrl = E1000_READ_REG(hw, EXTCNF_CTRL);
 			extcnf_ctrl |= E1000_EXTCNF_CTRL_SWFLAG;
@@ -9052,16 +9004,78 @@ em_release_software_flag(struct em_hw *hw)
 	uint32_t extcnf_ctrl;
 	DEBUGFUNC("em_release_software_flag");
 
-	if (hw->mac_type == em_ich8lan ||
-	    hw->mac_type == em_ich9lan ||
-	    hw->mac_type == em_ich10lan ||
-	    hw->mac_type == em_pchlan ||
-	    hw->mac_type == em_pch2lan) {
+	if (IS_ICH8(hw->mac_type)) {
 		extcnf_ctrl = E1000_READ_REG(hw, EXTCNF_CTRL);
 		extcnf_ctrl &= ~E1000_EXTCNF_CTRL_SWFLAG;
 		E1000_WRITE_REG(hw, EXTCNF_CTRL, extcnf_ctrl);
 	}
 	return;
+}
+
+/**
+ *  em_valid_nvm_bank_detect_ich8lan - finds out the valid bank 0 or 1
+ *  @hw: pointer to the HW structure
+ *  @bank:  pointer to the variable that returns the active bank
+ *
+ *  Reads signature byte from the NVM using the flash access registers.
+ *  Word 0x13 bits 15:14 = 10b indicate a valid signature for that bank.
+ **/
+int32_t
+em_valid_nvm_bank_detect_ich8lan(struct em_hw *hw, uint32_t *bank)
+{
+	uint32_t eecd;
+	uint32_t bank1_offset = hw->flash_bank_size * sizeof(uint16_t);
+	uint32_t act_offset = E1000_ICH_NVM_SIG_WORD * 2 + 1;
+	uint8_t sig_byte = 0;
+	int32_t ret_val;
+
+	DEBUGFUNC("em_valid_nvm_bank_detect_ich8lan");
+
+	switch (hw->mac_type) {
+	case em_ich8lan:
+	case em_ich9lan:
+		eecd = E1000_READ_REG(hw, EECD);
+		if ((eecd & E1000_EECD_SEC1VAL_VALID_MASK) ==
+		    E1000_EECD_SEC1VAL_VALID_MASK) {
+			if (eecd & E1000_EECD_SEC1VAL)
+				*bank = 1;
+			else
+				*bank = 0;
+
+			return E1000_SUCCESS;
+		}
+		DEBUGOUT("Unable to determine valid NVM bank via EEC - reading flash signature\n");
+		/* fall-thru */
+	default:
+		/* set bank to 0 in case flash read fails */
+		*bank = 0;
+
+		/* Check bank 0 */
+		ret_val = em_read_ich8_byte(hw, act_offset,
+							&sig_byte);
+		if (ret_val)
+			return ret_val;
+		if ((sig_byte & E1000_ICH_NVM_VALID_SIG_MASK) ==
+		    E1000_ICH_NVM_SIG_VALUE) {
+			*bank = 0;
+			return E1000_SUCCESS;
+		}
+
+		/* Check bank 1 */
+		ret_val = em_read_ich8_byte(hw, act_offset +
+							bank1_offset,
+							&sig_byte);
+		if (ret_val)
+			return ret_val;
+		if ((sig_byte & E1000_ICH_NVM_VALID_SIG_MASK) ==
+		    E1000_ICH_NVM_SIG_VALUE) {
+			*bank = 1;
+			return E1000_SUCCESS;
+		}
+
+		DEBUGOUT("ERROR: No valid NVM bank present\n");
+		return -1;
+	}
 }
 
 /******************************************************************************
@@ -9089,17 +9103,22 @@ em_read_eeprom_ich8(struct em_hw *hw, uint16_t offset, uint16_t words,
 	 * flash_bank.  So it cannot be trusted and needs to be updated with
 	 * each read.
 	 */
-	/* Value of bit 22 corresponds to the flash bank we're on. */
-	flash_bank = (E1000_READ_REG(hw, EECD) & E1000_EECD_SEC1VAL) ? 1 : 0;
+
+	error = em_get_software_flag(hw);
+	if (error != E1000_SUCCESS)
+		return error;
+
+	error = em_valid_nvm_bank_detect_ich8lan(hw, &flash_bank);
+	if (error != E1000_SUCCESS) {
+		DEBUGOUT("Could not detect valid bank, assuming bank 0\n");
+		flash_bank = 0;
+	}
+
 	/*
 	 * Adjust offset appropriately if we're on bank 1 - adjust for word
 	 * size
 	 */
 	bank_offset = flash_bank * (hw->flash_bank_size * 2);
-
-	error = em_get_software_flag(hw);
-	if (error != E1000_SUCCESS)
-		return error;
 
 	for (i = 0; i < words; i++) {
 		if (hw->eeprom_shadow_ram != NULL &&
@@ -9745,7 +9764,8 @@ em_init_lcd_from_nvm(struct em_hw *hw)
 	if (hw->device_id == E1000_DEV_ID_ICH8_IGP_M_AMT ||
 	    hw->device_id == E1000_DEV_ID_ICH8_IGP_M ||
 	    hw->mac_type == em_pchlan ||
-	    hw->mac_type == em_pch2lan)
+	    hw->mac_type == em_pch2lan ||
+	    hw->mac_type == em_pch_lpt)
 		sw_cfg_mask = FEXTNVM_SW_CONFIG_ICH8M;
 	else
 		sw_cfg_mask = FEXTNVM_SW_CONFIG;
@@ -10322,7 +10342,8 @@ em_set_eee_pchlan(struct em_hw *hw)
 
        DEBUGFUNC("em_set_eee_pchlan");
 
-       if (hw->phy_type != em_phy_82579)
+       if (hw->phy_type != em_phy_82579 &&
+	   hw->phy_type != em_phy_i217)
                goto out;
 
        ret_val = em_read_phy_reg(hw, I82579_LPI_CTRL, &phy_reg);

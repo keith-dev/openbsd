@@ -20,7 +20,7 @@
  * WARRANTIES, INCLUDING, WITHOUT LIMITATION, THE IMPLIED WARRANTIES OF
  * MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE.
  *
- * @(#) $Header: /cvs/src/lib/libpcap/llc.h,v 1.1 2005/10/07 19:32:39 mpf Exp $ (LBL)
+ * @(#) $Header: /var/www/space/cvs/src/lib/libpcap/llc.h,v 1.1 2005/10/07 19:32:39 mpf Exp $ (LBL)
  */
 
 /*

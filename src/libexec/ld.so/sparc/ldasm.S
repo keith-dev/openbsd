@@ -1,4 +1,4 @@
-/*	$OpenBSD: ldasm.S,v 1.20 2013/06/01 09:57:58 miod Exp $	*/
+/*	$OpenBSD: ldasm.S,v 1.22 2013/12/25 11:10:02 kettenis Exp $	*/
 
 /*
  * Copyright (c) 2001 Jason L. Wright (jason@thought.net)
@@ -113,8 +113,13 @@ _dl_start:
 
 	add	%sp, 32 + DL_DATA_SIZE, %sp	! restore stack
 
+1:	call	2f
+	 sethi	%hi(_GLOBAL_OFFSET_TABLE_+(.-1b)), %l7
+2:	or	%l7, %lo(_GLOBAL_OFFSET_TABLE_+(.-1b)), %l7
+	add	%l7, %o7, %l7
+
 	jmp	%o0
-	 clr	%g1			! XXX don't register with atexit
+	 ld	[%l7 + _dl_dtors], %g1	! %g1 = cleanup
 
 
 	.section	".text"
@@ -267,10 +272,10 @@ _dl_fcntl:
 
 	.section ".text"
 	.align 4
-	.globl _dl_getdirentries
-	.type _dl_getdirentries,@function
-_dl_getdirentries:
-	mov  SYS_getdirentries | SYSCALL_G2RFLAG, %g1	! call sys_getdirentries
+	.globl _dl_getdents
+	.type _dl_getdents,@function
+_dl_getdents:
+	mov  SYS_getdents | SYSCALL_G2RFLAG, %g1	! call sys_getdents
 	add %o7, 8, %g2					! just return on success
 	t ST_SYSCALL					! off to wonderland
 	retl

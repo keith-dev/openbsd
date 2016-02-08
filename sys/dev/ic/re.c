@@ -1,4 +1,4 @@
-/*	$OpenBSD: re.c,v 1.142 2013/03/17 20:47:23 brad Exp $	*/
+/*	$OpenBSD: re.c,v 1.147 2013/12/31 21:09:34 brad Exp $	*/
 /*	$FreeBSD: if_re.c,v 1.31 2004/09/04 07:54:05 ru Exp $	*/
 /*
  * Copyright (c) 1997, 1998-2003
@@ -128,7 +128,6 @@
 #ifdef INET
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
-#include <netinet/in_var.h>
 #include <netinet/ip.h>
 #include <netinet/if_ether.h>
 #endif
@@ -198,10 +197,6 @@ void	re_setup_intr(struct rl_softc *, int, int);
 int	re_wol(struct ifnet*, int);
 #endif
 
-#ifdef RE_DIAG
-int	re_diag(struct rl_softc *);
-#endif
-
 struct cfdriver re_cd = {
 	0, "re", DV_IFNET
 };
@@ -224,6 +219,8 @@ static const struct re_revision {
 	{ RL_HWREV_8101,	"RTL8101" },
 	{ RL_HWREV_8101E,	"RTL8101E" },
 	{ RL_HWREV_8102E,	"RTL8102E" },
+	{ RL_HWREV_8106E,	"RTL8106E" },
+	{ RL_HWREV_8106E_SPIN1,	"RTL8106E" },
 	{ RL_HWREV_8401E,	"RTL8401E" },
 	{ RL_HWREV_8402,	"RTL8402" },
 	{ RL_HWREV_8411,	"RTL8411" },
@@ -239,6 +236,10 @@ static const struct re_revision {
 	{ RL_HWREV_8168C_SPIN2,	"RTL8168C/8111C" },
 	{ RL_HWREV_8168CP,	"RTL8168CP/8111CP" },
 	{ RL_HWREV_8168F,	"RTL8168F/8111F" },
+	{ RL_HWREV_8168G,	"RTL8168G/8111G" },
+	{ RL_HWREV_8168G_SPIN1,	"RTL8168G/8111G" },
+	{ RL_HWREV_8168G_SPIN2,	"RTL8168G/8111G" },
+	{ RL_HWREV_8168G_SPIN4,	"RTL8168G/8111G" },
 	{ RL_HWREV_8105E,	"RTL8105E" },
 	{ RL_HWREV_8105E_SPIN1,	"RTL8105E" },
 	{ RL_HWREV_8168D,	"RTL8168D/8111D" },
@@ -610,190 +611,6 @@ re_reset(struct rl_softc *sc)
 		CSR_WRITE_1(sc, RL_LDPS, 1);
 }
 
-#ifdef RE_DIAG
-
-/*
- * The following routine is designed to test for a defect on some
- * 32-bit 8169 cards. Some of these NICs have the REQ64# and ACK64#
- * lines connected to the bus, however for a 32-bit only card, they
- * should be pulled high. The result of this defect is that the
- * NIC will not work right if you plug it into a 64-bit slot: DMA
- * operations will be done with 64-bit transfers, which will fail
- * because the 64-bit data lines aren't connected.
- *
- * There's no way to work around this (short of talking a soldering
- * iron to the board), however we can detect it. The method we use
- * here is to put the NIC into digital loopback mode, set the receiver
- * to promiscuous mode, and then try to send a frame. We then compare
- * the frame data we sent to what was received. If the data matches,
- * then the NIC is working correctly, otherwise we know the user has
- * a defective NIC which has been mistakenly plugged into a 64-bit PCI
- * slot. In the latter case, there's no way the NIC can work correctly,
- * so we print out a message on the console and abort the device attach.
- */
-
-int
-re_diag(struct rl_softc *sc)
-{
-	struct ifnet		*ifp = &sc->sc_arpcom.ac_if;
-	struct mbuf		*m0;
-	struct ether_header	*eh;
-	struct rl_rxsoft	*rxs;
-	struct rl_desc		*cur_rx;
-	bus_dmamap_t		dmamap;
-	u_int16_t		status;
-	u_int32_t		rxstat;
-	int			total_len, i, s, error = 0, phyaddr;
-	u_int8_t		dst[] = { 0x00, 'h', 'e', 'l', 'l', 'o' };
-	u_int8_t		src[] = { 0x00, 'w', 'o', 'r', 'l', 'd' };
-
-	DPRINTF(("inside re_diag\n"));
-	/* Allocate a single mbuf */
-
-	MGETHDR(m0, M_DONTWAIT, MT_DATA);
-	if (m0 == NULL)
-		return (ENOBUFS);
-
-	/*
-	 * Initialize the NIC in test mode. This sets the chip up
-	 * so that it can send and receive frames, but performs the
-	 * following special functions:
-	 * - Puts receiver in promiscuous mode
-	 * - Enables digital loopback mode
-	 * - Leaves interrupts turned off
-	 */
-
-	ifp->if_flags |= IFF_PROMISC;
-	sc->rl_testmode = 1;
-	re_reset(sc);
-	re_init(ifp);
-	sc->rl_flags |= RL_FLAG_LINK;
-	if (sc->sc_hwrev == RL_HWREV_8139CPLUS)
-		phyaddr = 0;
-	else
-		phyaddr = 1;
-
-	re_miibus_writereg((struct device *)sc, phyaddr, MII_BMCR,
-	    BMCR_RESET);
-	for (i = 0; i < RL_TIMEOUT; i++) {
-		status = re_miibus_readreg((struct device *)sc,
-		    phyaddr, MII_BMCR);
-		if (!(status & BMCR_RESET))
-			break;
-	}
-
-	re_miibus_writereg((struct device *)sc, phyaddr, MII_BMCR,
-	    BMCR_LOOP);
-	CSR_WRITE_2(sc, RL_ISR, RL_INTRS);
-
-	DELAY(100000);
-
-	/* Put some data in the mbuf */
-
-	eh = mtod(m0, struct ether_header *);
-	bcopy ((char *)&dst, eh->ether_dhost, ETHER_ADDR_LEN);
-	bcopy ((char *)&src, eh->ether_shost, ETHER_ADDR_LEN);
-	eh->ether_type = htons(ETHERTYPE_IP);
-	m0->m_pkthdr.len = m0->m_len = ETHER_MIN_LEN - ETHER_CRC_LEN;
-
-	/*
-	 * Queue the packet, start transmission.
-	 */
-
-	CSR_WRITE_2(sc, RL_ISR, 0xFFFF);
-	s = splnet();
-	IFQ_ENQUEUE(&ifp->if_snd, m0, NULL, error);
-	re_start(ifp);
-	splx(s);
-	m0 = NULL;
-
-	DPRINTF(("re_diag: transmission started\n"));
-
-	/* Wait for it to propagate through the chip */
-
-	DELAY(100000);
-	for (i = 0; i < RL_TIMEOUT; i++) {
-		status = CSR_READ_2(sc, RL_ISR);
-		CSR_WRITE_2(sc, RL_ISR, status);
-		if ((status & (RL_ISR_TIMEOUT_EXPIRED|RL_ISR_RX_OK)) ==
-		    (RL_ISR_TIMEOUT_EXPIRED|RL_ISR_RX_OK))
-			break;
-		DELAY(10);
-	}
-	if (i == RL_TIMEOUT) {
-		printf("%s: diagnostic failed, failed to receive packet "
-		    "in loopback mode\n", sc->sc_dev.dv_xname);
-		error = EIO;
-		goto done;
-	}
-
-	/*
-	 * The packet should have been dumped into the first
-	 * entry in the RX DMA ring. Grab it from there.
-	 */
-
-	rxs = &sc->rl_ldata.rl_rxsoft[0];
-	dmamap = rxs->rxs_dmamap;
-	bus_dmamap_sync(sc->sc_dmat, dmamap, 0, dmamap->dm_mapsize,
-	    BUS_DMASYNC_POSTREAD);
-	bus_dmamap_unload(sc->sc_dmat, dmamap);
-
-	m0 = rxs->rxs_mbuf;
-	rxs->rxs_mbuf = NULL;
-	eh = mtod(m0, struct ether_header *);
-
-	RL_RXDESCSYNC(sc, 0, BUS_DMASYNC_POSTREAD|BUS_DMASYNC_POSTWRITE);
-	cur_rx = &sc->rl_ldata.rl_rx_list[0];
-	rxstat = letoh32(cur_rx->rl_cmdstat);
-	total_len = rxstat & sc->rl_rxlenmask;
-
-	if (total_len != ETHER_MIN_LEN) {
-		printf("%s: diagnostic failed, received short packet\n",
-		    sc->sc_dev.dv_xname);
-		error = EIO;
-		goto done;
-	}
-
-	DPRINTF(("re_diag: packet received\n"));
-
-	/* Test that the received packet data matches what we sent. */
-
-	if (bcmp((char *)&eh->ether_dhost, (char *)&dst, ETHER_ADDR_LEN) ||
-	    bcmp((char *)&eh->ether_shost, (char *)&src, ETHER_ADDR_LEN) ||
-	    ntohs(eh->ether_type) != ETHERTYPE_IP) {
-		printf("%s: WARNING, DMA FAILURE!\n", sc->sc_dev.dv_xname);
-		printf("%s: expected TX data: %s",
-		    sc->sc_dev.dv_xname, ether_sprintf(dst));
-		printf("/%s/0x%x\n", ether_sprintf(src), ETHERTYPE_IP);
-		printf("%s: received RX data: %s",
-		    sc->sc_dev.dv_xname,
-		    ether_sprintf(eh->ether_dhost));
-		printf("/%s/0x%x\n", ether_sprintf(eh->ether_shost),
-		    ntohs(eh->ether_type));
-		printf("%s: You may have a defective 32-bit NIC plugged "
-		    "into a 64-bit PCI slot.\n", sc->sc_dev.dv_xname);
-		printf("%s: Please re-install the NIC in a 32-bit slot "
-		    "for proper operation.\n", sc->sc_dev.dv_xname);
-		printf("%s: Read the re(4) man page for more details.\n",
-		    sc->sc_dev.dv_xname);
-		error = EIO;
-	}
-
-done:
-	/* Turn interface off, release resources */
-	sc->rl_testmode = 0;
-	sc->rl_flags &= ~RL_FLAG_LINK;
-	ifp->if_flags &= ~IFF_PROMISC;
-	re_stop(ifp);
-	if (m0 != NULL)
-		m_freem(m0);
-	DPRINTF(("leaving re_diag\n"));
-
-	return (error);
-}
-
-#endif
-
 #ifdef __armish__ 
 /*
  * Thecus N2100 doesn't store the full mac address in eeprom
@@ -847,6 +664,8 @@ re_attach(struct rl_softc *sc, const char *intrstr)
 	case RL_HWREV_8402:
 	case RL_HWREV_8105E:
 	case RL_HWREV_8105E_SPIN1:
+	case RL_HWREV_8106E:
+	case RL_HWREV_8106E_SPIN1:
 		sc->rl_flags |= RL_FLAG_INVMAR | RL_FLAG_PHYWAKE |
 		    RL_FLAG_PHYWAKE_PM | RL_FLAG_PAR | RL_FLAG_DESCV2 |
 		    RL_FLAG_MACSTAT | RL_FLAG_CMDSTOP | RL_FLAG_AUTOPAD |
@@ -892,6 +711,15 @@ re_attach(struct rl_softc *sc, const char *intrstr)
 		sc->rl_flags |= RL_FLAG_INVMAR | RL_FLAG_PHYWAKE |
 		    RL_FLAG_PAR | RL_FLAG_DESCV2 | RL_FLAG_MACSTAT |
 		    RL_FLAG_CMDSTOP | RL_FLAG_AUTOPAD | RL_FLAG_NOJUMBO;
+		break;
+	case RL_HWREV_8168G:
+	case RL_HWREV_8168G_SPIN1:
+	case RL_HWREV_8168G_SPIN2:
+	case RL_HWREV_8168G_SPIN4:
+		sc->rl_flags |= RL_FLAG_INVMAR | RL_FLAG_PHYWAKE |
+		    RL_FLAG_PAR | RL_FLAG_DESCV2 | RL_FLAG_MACSTAT |
+		    RL_FLAG_CMDSTOP | RL_FLAG_AUTOPAD | RL_FLAG_NOJUMBO |
+		    RL_FLAG_EARLYOFF;
 		break;
 	case RL_HWREV_8169_8110SB:
 	case RL_HWREV_8169_8110SBL:
@@ -1200,23 +1028,6 @@ re_attach(struct rl_softc *sc, const char *intrstr)
 	re_reset(sc);
 	if_attach(ifp);
 	ether_ifattach(ifp);
-
-#ifdef RE_DIAG
-	/*
-	 * Perform hardware diagnostic on the original RTL8169.
-	 * Some 32-bit cards were incorrectly wired and would
-	 * malfunction if plugged into a 64-bit slot.
-	 */
-	if (sc->sc_hwrev == RL_HWREV_8169) {
-		error = re_diag(sc);
-		if (error) {
-			printf("%s: attach aborted due to hardware diag failure\n",
-			    sc->sc_dev.dv_xname);
-			ether_ifdetach(ifp);
-			goto fail_8;
-		}
-	}
-#endif
 
 	return (0);
 
@@ -1651,6 +1462,9 @@ re_intr(void *arg)
 	if (!(ifp->if_flags & IFF_RUNNING))
 		return (0);
 
+	/* Disable interrupts. */
+	CSR_WRITE_2(sc, RL_IMR, 0);
+
 	rx = tx = 0;
 	status = CSR_READ_2(sc, RL_ISR);
 	/* If the card has gone away the read returns 0xffff. */
@@ -1716,6 +1530,8 @@ re_intr(void *arg)
 
 	if (tx && !IFQ_IS_EMPTY(&ifp->if_snd))
 		re_start(ifp);
+
+	CSR_WRITE_2(sc, RL_IMR, sc->rl_intrs);
 
 	return (claimed);
 }
@@ -1970,6 +1786,7 @@ re_init(struct ifnet *ifp)
 {
 	struct rl_softc *sc = ifp->if_softc;
 	u_int16_t	cfg;
+	uint32_t	rxcfg;
 	int		s;
 	union {
 		u_int32_t align_dummy;
@@ -1984,13 +1801,12 @@ re_init(struct ifnet *ifp)
 	re_stop(ifp);
 
 	/*
-	 * Enable C+ RX and TX mode, as well as RX checksum offload.
-	 * We must configure the C+ register before all others.
+	 * Enable C+ RX and TX mode, as well as VLAN stripping and
+	 * RX checksum offload. We must configure the C+ register
+	 * before all others.
 	 */
-	cfg = RL_CPLUSCMD_TXENB | RL_CPLUSCMD_PCI_MRW;
-
-	if (ifp->if_capabilities & IFCAP_CSUM_IPv4)
-		cfg |= RL_CPLUSCMD_RXCSUM_ENB;
+	cfg = RL_CPLUSCMD_TXENB | RL_CPLUSCMD_PCI_MRW |
+	    RL_CPLUSCMD_RXCSUM_ENB;
 
 	if (ifp->if_capabilities & IFCAP_VLAN_HWTAGGING)
 		cfg |= RL_CPLUSCMD_VLANSTRIP;
@@ -2054,7 +1870,10 @@ re_init(struct ifnet *ifp)
 
 	CSR_WRITE_1(sc, RL_EARLY_TX_THRESH, 16);
 
-	CSR_WRITE_4(sc, RL_RXCFG, RL_RXCFG_CONFIG);
+	rxcfg = RL_RXCFG_CONFIG;
+	if (sc->rl_flags & RL_FLAG_EARLYOFF)
+		rxcfg |= RL_RXCFG_EARLYOFF;
+	CSR_WRITE_4(sc, RL_RXCFG, rxcfg);
 
 	/* Program promiscuous mode and multicast filters. */
 	re_iff(sc);

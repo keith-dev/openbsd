@@ -1,4 +1,4 @@
-/*	$OpenBSD: in6_src.c,v 1.32 2013/05/31 15:04:24 bluhm Exp $	*/
+/*	$OpenBSD: in6_src.c,v 1.37 2014/01/07 17:07:46 mikeb Exp $	*/
 /*	$KAME: in6_src.c,v 1.36 2001/02/06 04:08:17 itojun Exp $	*/
 
 /*
@@ -76,7 +76,6 @@
 #include <net/route.h>
 
 #include <netinet/in.h>
-#include <netinet/in_var.h>
 #include <netinet/in_systm.h>
 #include <netinet/ip.h>
 #include <netinet/in_pcb.h>
@@ -229,7 +228,8 @@ in6_selectsrc(struct sockaddr_in6 *dstsock, struct ip6_pktopts *opts,
 
 		if (opts && opts->ip6po_nexthop) {
 			sin6_next = satosin6(opts->ip6po_nexthop);
-			rt = nd6_lookup(&sin6_next->sin6_addr, 1, NULL);
+			rt = nd6_lookup(&sin6_next->sin6_addr, 1, NULL,
+			    rtableid);
 			if (rt) {
 				ia6 = in6_ifawithscope(rt->rt_ifp, dst,
 				    rtableid);
@@ -260,6 +260,7 @@ in6_selectsrc(struct sockaddr_in6 *dstsock, struct ip6_pktopts *opts,
 
 			/* No route yet, so try to acquire one */
 			bzero(&ro->ro_dst, sizeof(struct sockaddr_in6));
+			ro->ro_tableid = rtableid;
 			sa6 = &ro->ro_dst;
 			sa6->sin6_family = AF_INET6;
 			sa6->sin6_len = sizeof(struct sockaddr_in6);
@@ -330,15 +331,17 @@ selectroute(struct sockaddr_in6 *dstsock, struct ip6_pktopts *opts,
 	dst = &dstsock->sin6_addr;
 
 #if 0
+	char ip[INET6_ADDRSTRLEN];
+
 	if (dstsock->sin6_addr.s6_addr32[0] == 0 &&
 	    dstsock->sin6_addr.s6_addr32[1] == 0 &&
 	    !IN6_IS_ADDR_LOOPBACK(&dstsock->sin6_addr)) {
 		printf("in6_selectroute: strange destination %s\n",
-		       ip6_sprintf(&dstsock->sin6_addr));
+		    inet_ntop(AF_INET6, &dstsock->sin6_addr, ip, sizeof(ip)));
 	} else {
 		printf("in6_selectroute: destination = %s%%%d\n",
-		       ip6_sprintf(&dstsock->sin6_addr),
-		       dstsock->sin6_scope_id); /* for debug */
+		    inet_ntop(AF_INET6, &dstsock->sin6_addr, ip, sizeof(ip)),
+		    dstsock->sin6_scope_id); /* for debug */
 	}
 #endif
 
@@ -446,6 +449,7 @@ selectroute(struct sockaddr_in6 *dstsock, struct ip6_pktopts *opts,
 
 			/* No route yet, so try to acquire one */
 			bzero(&ro->ro_dst, sizeof(struct sockaddr_in6));
+			ro->ro_tableid = rtableid;
 			sa6 = &ro->ro_dst;
 			*sa6 = *dstsock;
 			sa6->sin6_scope_id = 0;
@@ -571,20 +575,16 @@ in6_selectroute(struct sockaddr_in6 *dstsock, struct ip6_pktopts *opts,
  *     hop limit of the interface specified by router advertisement.
  * 3. The system default hoplimit.
 */
-#define in6pcb		inpcb
-#define in6p_hops	inp_hops	
 int
-in6_selecthlim(struct in6pcb *in6p, struct ifnet *ifp)
+in6_selecthlim(struct inpcb *in6p, struct ifnet *ifp)
 {
-	if (in6p && in6p->in6p_hops >= 0)
-		return (in6p->in6p_hops);
+	if (in6p && in6p->inp_hops >= 0)
+		return (in6p->inp_hops);
 	else if (ifp)
 		return (ND_IFINFO(ifp)->chlim);
 	else
 		return (ip6_defhlim);
 }
-#undef in6pcb
-#undef in6p_hops
 
 /*
  * generate kernel-internal form (scopeid embedded into s6_addr16[1]).
@@ -606,8 +606,6 @@ in6_embedscope(in6, sin6, in6p, ifpp)
 	struct in6_addr *in6;
 	const struct sockaddr_in6 *sin6;
 	struct inpcb *in6p;
-#define in6p_outputopts	inp_outputopts6
-#define in6p_moptions	inp_moptions6
 	struct ifnet **ifpp;
 {
 	struct ifnet *ifp = NULL;
@@ -630,17 +628,17 @@ in6_embedscope(in6, sin6, in6p, ifpp)
 		 * KAME assumption: link id == interface id
 		 */
 
-		if (in6p && in6p->in6p_outputopts &&
-		    (pi = in6p->in6p_outputopts->ip6po_pktinfo) &&
+		if (in6p && in6p->inp_outputopts6 &&
+		    (pi = in6p->inp_outputopts6->ip6po_pktinfo) &&
 		    pi->ipi6_ifindex) {
 			ifp = if_get(pi->ipi6_ifindex);
 			if (ifp == NULL)
 				return ENXIO;  /* XXX EINVAL? */
 			in6->s6_addr16[1] = htons(pi->ipi6_ifindex);
 		} else if (in6p && IN6_IS_ADDR_MULTICAST(in6) &&
-			   in6p->in6p_moptions &&
-			   in6p->in6p_moptions->im6o_multicast_ifp) {
-			ifp = in6p->in6p_moptions->im6o_multicast_ifp;
+			   in6p->inp_moptions6 &&
+			   in6p->inp_moptions6->im6o_multicast_ifp) {
+			ifp = in6p->inp_moptions6->im6o_multicast_ifp;
 			in6->s6_addr16[1] = htons(ifp->if_index);
 		} else if (scopeid) {
 			ifp = if_get(scopeid);
@@ -656,8 +654,6 @@ in6_embedscope(in6, sin6, in6p, ifpp)
 
 	return 0;
 }
-#undef in6p_outputopts
-#undef in6p_moptions
 
 /*
  * generate standard sockaddr_in6 from embedded form.

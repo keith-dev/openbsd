@@ -1,4 +1,4 @@
-/*	$OpenBSD: kvm_file2.c,v 1.27 2013/03/20 14:46:45 deraadt Exp $	*/
+/*	$OpenBSD: kvm_file2.c,v 1.34 2014/02/05 03:49:00 guenther Exp $	*/
 
 /*
  * Copyright (c) 2009 Todd C. Miller <Todd.Miller@courtesan.com>
@@ -70,8 +70,10 @@
 #include <sys/protosw.h>
 #include <sys/event.h>
 #include <sys/eventvar.h>
+#include <sys/un.h>
 #include <sys/unpcb.h>
 #include <sys/filedesc.h>
+#include <sys/mbuf.h>
 #include <sys/pipe.h>
 #include <sys/stat.h>
 #include <sys/sysctl.h>
@@ -105,25 +107,27 @@
 #include <nlist.h>
 #include <kvm.h>
 #include <db.h>
+#include <stddef.h>
 #include <stdlib.h>
 #include <stddef.h>
 #include <string.h>
 #include <unistd.h>
 
 #include "kvm_private.h"
+#include "kvm_file.h"
 
-static struct kinfo_file2 *kvm_deadfile2_byfile(kvm_t *, int, int,
+static struct kinfo_file *kvm_deadfile_byfile(kvm_t *, int, int,
     size_t, int *);
-static struct kinfo_file2 *kvm_deadfile2_byid(kvm_t *, int, int,
+static struct kinfo_file *kvm_deadfile_byid(kvm_t *, int, int,
     size_t, int *);
-static int fill_file2(kvm_t *, struct kinfo_file2 *, struct file *, u_long,
+static int fill_file(kvm_t *, struct kinfo_file *, struct file *, u_long,
     struct vnode *, struct proc *, int, pid_t);
-static int filestat(kvm_t *, struct kinfo_file2 *, struct vnode *);
+static int filestat(kvm_t *, struct kinfo_file *, struct vnode *);
 
-LIST_HEAD(proclist, proc);
+LIST_HEAD(processlist, process);
 
-struct kinfo_file2 *
-kvm_getfile2(kvm_t *kd, int op, int arg, size_t esize, int *cnt)
+struct kinfo_file *
+kvm_getfiles(kvm_t *kd, int op, int arg, size_t esize, int *cnt)
 {
 	int mib[6], rv;
 	size_t size;
@@ -139,7 +143,7 @@ kvm_getfile2(kvm_t *kd, int op, int arg, size_t esize, int *cnt)
 
 	if (ISALIVE(kd)) {
 		mib[0] = CTL_KERN;
-		mib[1] = KERN_FILE2;
+		mib[1] = KERN_FILE;
 		mib[2] = op;
 		mib[3] = arg;
 		mib[4] = esize;
@@ -150,7 +154,7 @@ kvm_getfile2(kvm_t *kd, int op, int arg, size_t esize, int *cnt)
 		if (rv == -1) {
 			if (kd->vmfd != -1)
 				goto deadway;
-			_kvm_syserr(kd, kd->program, "kvm_getfile2");
+			_kvm_syserr(kd, kd->program, "kvm_getfiles");
 			return (NULL);
 		}
 		kd->filebase = _kvm_malloc(kd, size);
@@ -161,15 +165,15 @@ kvm_getfile2(kvm_t *kd, int op, int arg, size_t esize, int *cnt)
 		mib[5] = size / esize;
 		rv = sysctl(mib, 6, kd->filebase, &size, NULL, 0);
 		if (rv == -1) {
-			_kvm_syserr(kd, kd->program, "kvm_getfile2");
+			_kvm_syserr(kd, kd->program, "kvm_getfiles");
 			return (NULL);
 		}
 		*cnt = size / esize;
-		return ((struct kinfo_file2 *)kd->filebase);
+		return (kd->filebase);
 	} else {
-		if (esize > sizeof(struct kinfo_file2)) {
+		if (esize > sizeof(struct kinfo_file)) {
 			_kvm_syserr(kd, kd->program,
-			    "kvm_getfile2: unknown fields requested: libkvm out of date?");
+			    "kvm_getfiles: unknown fields requested: libkvm out of date?");
 			return (NULL);
 		}
 	    deadway:
@@ -177,14 +181,14 @@ kvm_getfile2(kvm_t *kd, int op, int arg, size_t esize, int *cnt)
 		case KERN_FILE_BYFILE:
 			if (arg != 0) {
 				_kvm_err(kd, kd->program,
-				    "%s: invalid argument");
+				    "%d: invalid argument", arg);
 				return (NULL);
 			}
-			return (kvm_deadfile2_byfile(kd, op, arg, esize, cnt));
+			return (kvm_deadfile_byfile(kd, op, arg, esize, cnt));
 			break;
 		case KERN_FILE_BYPID:
 		case KERN_FILE_BYUID:
-			return (kvm_deadfile2_byid(kd, op, arg, esize, cnt));
+			return (kvm_deadfile_byid(kd, op, arg, esize, cnt));
 			break;
 		default:
 			return (NULL);
@@ -192,14 +196,14 @@ kvm_getfile2(kvm_t *kd, int op, int arg, size_t esize, int *cnt)
 	}
 }
 
-static struct kinfo_file2 *
-kvm_deadfile2_byfile(kvm_t *kd, int op, int arg, size_t esize, int *cnt)
+static struct kinfo_file *
+kvm_deadfile_byfile(kvm_t *kd, int op, int arg, size_t esize, int *cnt)
 {
 	struct nlist nl[3], *p;
 	size_t buflen;
 	int n = 0;
 	char *where;
-	struct kinfo_file2 kf;
+	struct kinfo_file kf;
 	struct file *fp, file;
 	struct filelist filehead;
 	int nfiles;
@@ -236,7 +240,7 @@ kvm_deadfile2_byfile(kvm_t *kd, int op, int arg, size_t esize, int *cnt)
 			_kvm_err(kd, kd->program, "can't read kfp");
 			return (NULL);
 		}
-		if (fill_file2(kd, &kf, &file, (u_long)fp, NULL, NULL, 0, 0)
+		if (fill_file(kd, &kf, &file, (u_long)fp, NULL, NULL, 0, 0)
 		    == -1)
 			return (NULL);
 		memcpy(where, &kf, esize);
@@ -249,33 +253,32 @@ kvm_deadfile2_byfile(kvm_t *kd, int op, int arg, size_t esize, int *cnt)
 		return (NULL);
 	}
 	*cnt = n;
-	return ((struct kinfo_file2 *)kd->filebase);
+	return (kd->filebase);
 }
 
-static struct kinfo_file2 *
-kvm_deadfile2_byid(kvm_t *kd, int op, int arg, size_t esize, int *cnt)
+static struct kinfo_file *
+kvm_deadfile_byid(kvm_t *kd, int op, int arg, size_t esize, int *cnt)
 {
 	size_t buflen;
 	struct nlist nl[4], *np;
 	int n = 0;
 	char *where;
-	struct kinfo_file2 kf;
+	struct kinfo_file kf;
 	struct file *fp, file;
 	struct filelist filehead;
 	struct filedesc0 filed0;
 #define filed	filed0.fd_fd
-	struct proclist allproc;
-	struct proc *p, proc, proc2;
-	struct process process;
+	struct processlist allprocess;
+	struct proc proc;
+	struct process *pr, process;
 	struct pcred pcred;
 	struct ucred ucred;
 	char *filebuf = NULL;
 	int i, nfiles;
-	pid_t pid;
 
 	nl[0].n_name = "_filehead";
 	nl[1].n_name = "_nfiles";
-	nl[2].n_name = "_allproc";
+	nl[2].n_name = "_allprocess";
 	nl[3].n_name = 0;
 
 	if (kvm_nlist(kd, nl) != 0) {
@@ -293,8 +296,8 @@ kvm_deadfile2_byid(kvm_t *kd, int op, int arg, size_t esize, int *cnt)
 		_kvm_err(kd, kd->program, "can't read nfiles");
 		return (NULL);
 	}
-	if (KREAD(kd, nl[2].n_value, &allproc)) {
-		_kvm_err(kd, kd->program, "can't read allproc");
+	if (KREAD(kd, nl[2].n_value, &allprocess)) {
+		_kvm_err(kd, kd->program, "can't read allprocess");
 		return (NULL);
 	}
 	/* this may be more room than we need but counting is expensive */
@@ -304,61 +307,58 @@ kvm_deadfile2_byid(kvm_t *kd, int op, int arg, size_t esize, int *cnt)
 	if (kd->filebase == NULL)
 		return (NULL);
 
-	for (p = LIST_FIRST(&allproc);
-	    p != NULL;
-	    p = LIST_NEXT(&proc, p_list)) {
-		if (KREAD(kd, (u_long)p, &proc)) {
-			_kvm_err(kd, kd->program, "can't read proc at %x", p);
+	for (pr = LIST_FIRST(&allprocess);
+	    pr != NULL;
+	    pr = LIST_NEXT(&process, ps_list)) {
+		if (KREAD(kd, (u_long)pr, &process)) {
+			_kvm_err(kd, kd->program, "can't read process at %lx",
+			    (u_long)pr);
 			goto cleanup;
 		}
 
-		/* skip system, embryonic and undead processes */
-		if ((proc.p_flag & P_SYSTEM) || (proc.p_flag & P_THREAD) ||
+		if (process.ps_mainproc == NULL)
+			continue;
+		if (KREAD(kd, (u_long)process.ps_mainproc, &proc)) {
+			_kvm_err(kd, kd->program, "can't read proc at %lx",
+			    (u_long)process.ps_mainproc);
+			goto cleanup;
+		}
+
+		/* skip system, exiting, embryonic and undead processes */
+		if (proc.p_flag & P_SYSTEM || process.ps_flags & PS_EXITING ||
 		    proc.p_stat == SIDL || proc.p_stat == SZOMB)
 			continue;
-		if (op == KERN_FILE_BYPID) {
-			if (arg > 0 && proc.p_pid != (pid_t)arg) {
+
+		if (op == KERN_FILE_BYPID && arg > 0 &&
+		    proc.p_pid != (pid_t)arg) {
 				/* not the pid we are looking for */
 				continue;
-			}
-		} else /* if (op == KERN_FILE_BYUID) */ {
-			if (arg >= 0 && proc.p_ucred->cr_uid != (uid_t)arg) {
-				/* not the uid we are looking for */
-				continue;
-			}
 		}
 
-		if (proc.p_fd == NULL || proc.p_p == NULL)
-			continue;
-
-		if (KREAD(kd, (u_long)proc.p_p, &process)) {
-			_kvm_err(kd, kd->program, "can't read process at %x",
-			    proc.p_p);
+		if (KREAD(kd, (u_long)process.ps_cred, &pcred)) {
+			_kvm_err(kd, kd->program, "can't read pcred at %lx",
+			    (u_long)process.ps_cred);
 			goto cleanup;
 		}
-		if (process.ps_flags & PS_EXITING)
-			continue;
-		proc.p_p = &process;
-		if ((proc.p_flag & P_THREAD) == 0)
-			pid = proc.p_pid;
-		else {
-			if (KREAD(kd, (u_long)process.ps_mainproc, &proc2)) {
-				_kvm_err(kd, kd->program,
-				    "can't read proc at %x",
-				    process.ps_mainproc);
-				goto cleanup;
-			}
-			pid = proc2.p_pid;
+		if (KREAD(kd, (u_long)pcred.pc_ucred, &ucred)) {
+			_kvm_err(kd, kd->program, "can't read ucred at %lx",
+			    (u_long)pcred.pc_ucred);
+			goto cleanup;
 		}
-
-		if (KREAD(kd, (u_long)process.ps_cred, &pcred) == 0)
-			KREAD(kd, (u_long)pcred.pc_ucred, &ucred);
+		process.ps_mainproc = &proc;
+		proc.p_p = &process;
 		process.ps_cred = &pcred;
 		pcred.pc_ucred = &ucred;
 
+		if (op == KERN_FILE_BYUID && arg >= 0 &&
+		    proc.p_ucred->cr_uid != (uid_t)arg) {
+			/* not the uid we are looking for */
+			continue;
+		}
+
 		if (KREAD(kd, (u_long)proc.p_fd, &filed0)) {
-			_kvm_err(kd, kd->program, "can't read filedesc at %x",
-			    proc.p_fd);
+			_kvm_err(kd, kd->program, "can't read filedesc at %lx",
+			    (u_long)proc.p_fd);
 			goto cleanup;
 		}
 		if ((char *)proc.p_fd + offsetof(struct filedesc0, fd_dfiles)
@@ -386,11 +386,11 @@ kvm_deadfile2_byid(kvm_t *kd, int op, int arg, size_t esize, int *cnt)
 		}
 		proc.p_fd = &filed;
 
-		if (proc.p_textvp) {
+		if (process.ps_textvp) {
 			if (buflen < esize)
 				goto done;
-			if (fill_file2(kd, &kf, NULL, 0, proc.p_textvp, &proc,
-			    KERN_FILE_TEXT, pid) == -1)
+			if (fill_file(kd, &kf, NULL, 0, process.ps_textvp,
+			    &proc, KERN_FILE_TEXT, proc.p_pid) == -1)
 				goto cleanup;
 			memcpy(where, &kf, esize);
 			where += esize;
@@ -400,8 +400,8 @@ kvm_deadfile2_byid(kvm_t *kd, int op, int arg, size_t esize, int *cnt)
 		if (filed.fd_cdir) {
 			if (buflen < esize)
 				goto done;
-			if (fill_file2(kd, &kf, NULL, 0, filed.fd_cdir, &proc,
-			    KERN_FILE_CDIR, pid) == -1)
+			if (fill_file(kd, &kf, NULL, 0, filed.fd_cdir, &proc,
+			    KERN_FILE_CDIR, proc.p_pid) == -1)
 				goto cleanup;
 			memcpy(where, &kf, esize);
 			where += esize;
@@ -411,8 +411,8 @@ kvm_deadfile2_byid(kvm_t *kd, int op, int arg, size_t esize, int *cnt)
 		if (filed.fd_rdir) {
 			if (buflen < esize)
 				goto done;
-			if (fill_file2(kd, &kf, NULL, 0, filed.fd_rdir, &proc,
-			    KERN_FILE_RDIR, pid) == -1)
+			if (fill_file(kd, &kf, NULL, 0, filed.fd_rdir, &proc,
+			    KERN_FILE_RDIR, proc.p_pid) == -1)
 				goto cleanup;
 			memcpy(where, &kf, esize);
 			where += esize;
@@ -422,8 +422,8 @@ kvm_deadfile2_byid(kvm_t *kd, int op, int arg, size_t esize, int *cnt)
 		if (process.ps_tracevp) {
 			if (buflen < esize)
 				goto done;
-			if (fill_file2(kd, &kf, NULL, 0, process.ps_tracevp,
-			    &proc, KERN_FILE_TRACE, pid) == -1)
+			if (fill_file(kd, &kf, NULL, 0, process.ps_tracevp,
+			    &proc, KERN_FILE_TRACE, proc.p_pid) == -1)
 				goto cleanup;
 			memcpy(where, &kf, esize);
 			where += esize;
@@ -435,8 +435,8 @@ kvm_deadfile2_byid(kvm_t *kd, int op, int arg, size_t esize, int *cnt)
 		    filed.fd_lastfile >= filed.fd_nfiles ||
 		    filed.fd_freefile > filed.fd_lastfile + 1) {
 			_kvm_err(kd, kd->program,
-			    "filedesc corrupted at %x for pid %d",
-			    proc.p_fd, proc.p_pid);
+			    "filedesc corrupted at %lx for pid %d",
+			    (u_long)proc.p_fd, proc.p_pid);
 			goto cleanup;
 		}
 
@@ -449,8 +449,8 @@ kvm_deadfile2_byid(kvm_t *kd, int op, int arg, size_t esize, int *cnt)
 				_kvm_err(kd, kd->program, "can't read file");
 				goto cleanup;
 			}
-			if (fill_file2(kd, &kf, &file, (u_long)fp, NULL,
-			    &proc, i, pid) == -1)
+			if (fill_file(kd, &kf, &file, (u_long)fp, NULL,
+			    &proc, i, proc.p_pid) == -1)
 				goto cleanup;
 			memcpy(where, &kf, esize);
 			where += esize;
@@ -461,14 +461,14 @@ kvm_deadfile2_byid(kvm_t *kd, int op, int arg, size_t esize, int *cnt)
 done:
 	*cnt = n;
 	free(filebuf);
-	return ((struct kinfo_file2 *)kd->filebase);
+	return (kd->filebase);
 cleanup:
 	free(filebuf);
 	return (NULL);
 }
 
 static int
-fill_file2(kvm_t *kd, struct kinfo_file2 *kf, struct file *fp, u_long fpaddr, struct vnode *vp,
+fill_file(kvm_t *kd, struct kinfo_file *kf, struct file *fp, u_long fpaddr, struct vnode *vp,
     struct proc *p, int fd, pid_t pid)
 {
 	struct ucred f_cred;
@@ -570,6 +570,8 @@ fill_file2(kvm_t *kd, struct kinfo_file2 *kf, struct file *fp, u_long fpaddr, st
 			return (-1);
 		}
 		kf->so_family = domain.dom_family;
+		kf->so_rcv_cc = sock.so_rcv.sb_cc;
+		kf->so_snd_cc = sock.so_snd.sb_cc;
 		if (sock.so_splice) {
 			kf->so_splice = PTRTOINT64(sock.so_splice);
 			kf->so_splicelen = sock.so_splicelen;
@@ -622,7 +624,30 @@ fill_file2(kvm_t *kd, struct kinfo_file2 *kf, struct file *fp, u_long fpaddr, st
 				_kvm_err(kd, kd->program, "can't read unpcb");
 				return (-1);
 			}
-			kf->unp_conn = PTRTOINT64(unpcb.unp_conn);
+			kf->unp_conn	= PTRTOINT64(unpcb.unp_conn);
+			kf->unp_refs	= PTRTOINT64(unpcb.unp_refs);
+			kf->unp_nextref	= PTRTOINT64(unpcb.unp_nextref);
+			kf->v_un	= PTRTOINT64(unpcb.unp_vnode);
+			if (unpcb.unp_addr != NULL) {
+				struct mbuf mb;
+				struct sockaddr_un un;
+
+				if (KREAD(kd, (u_long)unpcb.unp_addr, &mb)) {
+					_kvm_err(kd, kd->program,
+					    "can't read sockaddr_un mbuf");
+					return (-1);
+				}
+				if (KREAD(kd, (u_long)mb.m_data, &un)) {
+					_kvm_err(kd, kd->program,
+					    "can't read sockaddr_un");
+					return (-1);
+				}
+
+				kf->unp_addr = PTRTOINT64(unpcb.unp_addr);
+				memcpy(kf->unp_path, un.sun_path, un.sun_len
+				    - offsetof(struct sockaddr_un,sun_path));
+			}
+ 
 			break;
 		    }
 		}
@@ -714,7 +739,7 @@ _kvm_getftype(enum vtype v_type)
 }
 
 static int
-ufs_filestat(kvm_t *kd, struct kinfo_file2 *kf, struct vnode *vp)
+ufs_filestat(kvm_t *kd, struct kinfo_file *kf, struct vnode *vp)
 {
 	struct inode inode;
 	struct ufs1_dinode di1;
@@ -742,7 +767,7 @@ ufs_filestat(kvm_t *kd, struct kinfo_file2 *kf, struct vnode *vp)
 }
 
 static int
-ext2fs_filestat(kvm_t *kd, struct kinfo_file2 *kf, struct vnode *vp)
+ext2fs_filestat(kvm_t *kd, struct kinfo_file *kf, struct vnode *vp)
 {
 	struct inode inode;
 	struct ext2fs_dinode e2di;
@@ -770,7 +795,7 @@ ext2fs_filestat(kvm_t *kd, struct kinfo_file2 *kf, struct vnode *vp)
 }
 
 static int
-msdos_filestat(kvm_t *kd, struct kinfo_file2 *kf, struct vnode *vp)
+msdos_filestat(kvm_t *kd, struct kinfo_file *kf, struct vnode *vp)
 {
 	struct denode de;
 	struct msdosfsmount mp;
@@ -795,7 +820,7 @@ msdos_filestat(kvm_t *kd, struct kinfo_file2 *kf, struct vnode *vp)
 }
 
 static int
-nfs_filestat(kvm_t *kd, struct kinfo_file2 *kf, struct vnode *vp)
+nfs_filestat(kvm_t *kd, struct kinfo_file *kf, struct vnode *vp)
 {
 	struct nfsnode nfsnode;
 
@@ -814,7 +839,7 @@ nfs_filestat(kvm_t *kd, struct kinfo_file2 *kf, struct vnode *vp)
 }
 
 static int
-spec_filestat(kvm_t *kd, struct kinfo_file2 *kf, struct vnode *vp)
+spec_filestat(kvm_t *kd, struct kinfo_file *kf, struct vnode *vp)
 {
 	struct specinfo		specinfo;
 	struct vnode		parent;
@@ -840,7 +865,7 @@ spec_filestat(kvm_t *kd, struct kinfo_file2 *kf, struct vnode *vp)
 }
 
 static int
-filestat(kvm_t *kd, struct kinfo_file2 *kf, struct vnode *vp)
+filestat(kvm_t *kd, struct kinfo_file *kf, struct vnode *vp)
 {
 	int ret = 0;
 
@@ -871,6 +896,9 @@ filestat(kvm_t *kd, struct kinfo_file2 *kf, struct vnode *vp)
 		case VT_NON:
 			if (vp->v_flag & VCLONE)
 				ret = spec_filestat(kd, kf, vp);
+			break;
+		default:
+			ret = -1;
 			break;
 		}
 	}

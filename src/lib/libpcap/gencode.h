@@ -20,7 +20,7 @@
  * WARRANTIES, INCLUDING, WITHOUT LIMITATION, THE IMPLIED WARRANTIES OF
  * MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE.
  *
- * @(#) $Header: /cvs/src/lib/libpcap/gencode.h,v 1.15 2008/06/11 15:02:21 dtucker Exp $ (LBL)
+ * @(#) $Header: /var/www/space/cvs/src/lib/libpcap/gencode.h,v 1.15 2008/06/11 15:02:21 dtucker Exp $ (LBL)
  */
 
 /* Address qualifiers. */

@@ -1,4 +1,4 @@
-/* $OpenBSD: fuse_vfsops.c,v 1.5 2013/06/21 21:30:38 syl Exp $ */
+/* $OpenBSD: fuse_vfsops.c,v 1.8 2013/12/10 13:43:05 pelikan Exp $ */
 /*
  * Copyright (c) 2012-2013 Sylvestre Gallon <ccna.syl@gmail.com>
  *
@@ -108,7 +108,7 @@ fusefs_mount(struct mount *mp, const char *path, void *data,
 	bzero(mp->mnt_stat.f_mntfromname, MNAMELEN);
 	bcopy("fusefs", mp->mnt_stat.f_mntfromname, sizeof("fusefs"));
 
-	fuse_device_set_fmp(fmp);
+	fuse_device_set_fmp(fmp, 1);
 	fbuf = fb_setup(0, 0, FBT_INIT, p);
 
 	/* cannot tsleep on mount */
@@ -139,12 +139,11 @@ fusefs_unmount(struct mount *mp, int mntflags, struct proc *p)
 		fbuf = fb_setup(0, 0, FBT_DESTROY, p);
 
 		error = fb_queue(fmp->dev, fbuf);
-		pool_put(&fusefs_fbuf_pool, fbuf);
 
 		if (error)
-			printf("error from fuse\n");
-	} else {
-		fuse_device_cleanup(fmp->dev, NULL);
+			printf("fusefs: error %d on destroy\n", error);
+
+		fb_delete(fbuf);
 	}
 
 	if (mntflags & MNT_FORCE) {
@@ -158,6 +157,8 @@ fusefs_unmount(struct mount *mp, int mntflags, struct proc *p)
 	if ((error = vflush(mp, 0, flags)))
 		return (error);
 
+	fuse_device_cleanup(fmp->dev, NULL);
+	fuse_device_set_fmp(fmp, 0);
 	free(fmp, M_FUSEFS);
 
 	return (error);
@@ -201,7 +202,7 @@ int fusefs_statfs(struct mount *mp, struct statfs *sbp, struct proc *p)
 		error = fb_queue(fmp->dev, fbuf);
 
 		if (error) {
-			pool_put(&fusefs_fbuf_pool, fbuf);
+			fb_delete(fbuf);
 			return (error);
 		}
 
@@ -212,7 +213,7 @@ int fusefs_statfs(struct mount *mp, struct statfs *sbp, struct proc *p)
 		sbp->f_ffree = fbuf->fb_stat.f_ffree;
 		sbp->f_bsize = fbuf->fb_stat.f_frsize;
 		sbp->f_namemax = fbuf->fb_stat.f_namemax;
-		pool_put(&fusefs_fbuf_pool, fbuf);
+		fb_delete(fbuf);
 	} else {
 		sbp->f_bavail = 0;
 		sbp->f_bfree = 0;
@@ -251,7 +252,7 @@ retry:
 	 * if not create it
 	 */
 	if ((error = getnewvnode(VT_FUSEFS, mp, &fusefs_vops, &nvp)) != 0) {
-		printf("fuse: getnewvnode error\n");
+		printf("fusefs: getnewvnode error\n");
 		*vpp = NULLVP;
 		return (error);
 	}

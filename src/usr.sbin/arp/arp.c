@@ -1,4 +1,4 @@
-/*	$OpenBSD: arp.c,v 1.53 2013/07/20 18:21:11 bluhm Exp $ */
+/*	$OpenBSD: arp.c,v 1.55 2014/02/26 20:50:17 claudio Exp $ */
 /*	$NetBSD: arp.c,v 1.12 1995/04/24 13:25:18 cgd Exp $ */
 
 /*
@@ -83,7 +83,7 @@ static int replace;	/* replace entries when adding */
 static int nflag;	/* no reverse dns lookups */
 static int aflag;	/* do it for all entries */
 static int s = -1;
-static int rdomain = 0;
+static int rdomain;
 
 extern int h_errno;
 
@@ -286,10 +286,10 @@ set(int argc, char *argv[])
 	doing_proxy = flags = export_only = 0;
 	while (argc-- > 0) {
 		if (strncmp(argv[0], "temp", 4) == 0) {
-			struct timeval time;
+			struct timeval now;
 
-			gettimeofday(&time, 0);
-			expire_time = time.tv_sec + 20 * 60;
+			gettimeofday(&now, 0);
+			expire_time = now.tv_sec + 20 * 60;
 			if (flags & RTF_PERMANENT_ARP) {
 				/* temp or permanent, not both */
 				usage();

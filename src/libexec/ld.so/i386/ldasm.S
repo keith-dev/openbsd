@@ -1,4 +1,4 @@
-/*	$OpenBSD: ldasm.S,v 1.14 2013/06/01 09:57:58 miod Exp $ */
+/*	$OpenBSD: ldasm.S,v 1.16 2013/12/23 10:39:10 kettenis Exp $ */
 
 /*
  * Copyright (c) 2002 Dale Rahn
@@ -38,7 +38,6 @@
 	.type   _dl_start,@function
 _dl_start:
 	movl	%esp,%eax		# save stack pointer for _rtld
-	pushl	%ebx			# save ps_strings
 	subl	$DL_DATA_SIZE,%esp	# allocate dl_data
 	pushl	$0			# push 0 for dynamicp (unused on i386)
 	movl	%esp,%ebx
@@ -72,9 +71,11 @@ _dl_start:
 
 	addl	$DL_DATA_SIZE,%esp	# return dl_data
 
-	popl	%ebx			# %ebx = ps_strings
-	movl	$0,%edx			# %edx = cleanup - XXXDSR
-	movl	$0,%ecx			# %ecx = obj_main - XXXDSR
+	call	1f			# %edx = cleanup
+1:	popl	%ebx
+	addl	$_GLOBAL_OFFSET_TABLE_+[.-1b], %ebx
+	leal	_dl_dtors@GOTOFF(%ebx), %edx
+
 	jmp	*%eax
 
 
@@ -122,7 +123,7 @@ DL_SYSCALL(lstat)
 DL_SYSCALL(utrace)
 DL_SYSCALL2(getcwd,__getcwd)
 DL_SYSCALL2(sysctl,__sysctl)
-DL_SYSCALL(getdirentries)
+DL_SYSCALL(getdents)
 
 .L_cerr:
 	/* error: result = -errno; - handled here. */

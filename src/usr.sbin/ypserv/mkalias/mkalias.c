@@ -1,4 +1,4 @@
-/*	$OpenBSD: mkalias.c,v 1.24 2010/06/29 03:47:40 deraadt Exp $ */
+/*	$OpenBSD: mkalias.c,v 1.26 2013/12/05 14:18:54 jca Exp $ */
 
 /*
  * Copyright (c) 1997 Mats O Jansson <moj@stacken.kth.se>
@@ -46,7 +46,7 @@ static void
 split_address(char *address, size_t len, char *user, char *host)
 {
 	char *c, *s, *r;
-	int  i = 0;
+	size_t  i = 0;
 
 	if (memchr(address, '@', len)) {
 		s = user;
@@ -288,7 +288,8 @@ fail:
 	}
 
 	if (new_db != NULL) {
-		snprintf(datestr, sizeof datestr, "%010u", time(NULL));
+		snprintf(datestr, sizeof datestr, "%010lld",
+		    (long long)time(NULL));
 		key.dptr = YP_LAST_KEY;
 		key.dsize = strlen(YP_LAST_KEY);
 		val.dptr = datestr;

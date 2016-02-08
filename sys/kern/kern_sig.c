@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_sig.c,v 1.152 2013/06/01 04:05:26 tedu Exp $	*/
+/*	$OpenBSD: kern_sig.c,v 1.158 2014/02/09 11:17:19 kettenis Exp $	*/
 /*	$NetBSD: kern_sig.c,v 1.54 1996/04/22 01:38:32 christos Exp $	*/
 
 /*
@@ -616,8 +616,9 @@ killpg1(struct proc *cp, int signum, int pgid, int all)
 		/* 
 		 * broadcast
 		 */
-		LIST_FOREACH(p, &allproc, p_list) {
-			if (p->p_pid <= 1 || p->p_flag & (P_SYSTEM|P_THREAD) ||
+		LIST_FOREACH(pr, &allprocess, ps_list) {
+			p = pr->ps_mainproc;
+			if (p->p_pid <= 1 || p->p_flag & P_SYSTEM ||
 			    p == cp || !cansignal(cp, pc, p, signum))
 				continue;
 			nfound++;
@@ -811,27 +812,39 @@ ptsignal(struct proc *p, int signum, enum signal_type type)
 		}
 
 		/*
-		 * A process-wide signal can be diverted to a different
-		 * thread that's in sigwait() for this signal.  If there
-		 * isn't such a thread, then pick a thread that doesn't
-		 * have it blocked so that the stop/kill consideration
-		 * isn't delayed.  Otherwise, mark it pending on the
-		 * main thread.
+		 * If the current thread can process the signal
+		 * immediately, either because it's sigwait()ing
+		 * on it or has it unblocked, then have it take it.
 		 */
-		TAILQ_FOREACH(q, &pr->ps_threads, p_thr_link) {
-			/* ignore exiting threads */
-			if (q->p_flag & P_WEXIT)
-				continue;
+		q = curproc;
+		if (q != NULL && q->p_p == pr && (q->p_flag & P_WEXIT) == 0 &&
+		    ((q->p_sigdivert & mask) || (q->p_sigmask & mask) == 0))
+			p = q;
+		else {
+			/*
+			 * A process-wide signal can be diverted to a
+			 * different thread that's in sigwait() for this
+			 * signal.  If there isn't such a thread, then
+			 * pick a thread that doesn't have it blocked so
+			 * that the stop/kill consideration isn't
+			 * delayed.  Otherwise, mark it pending on the
+			 * main thread.
+			 */
+			TAILQ_FOREACH(q, &pr->ps_threads, p_thr_link) {
+				/* ignore exiting threads */
+				if (q->p_flag & P_WEXIT)
+					continue;
 
-			/* sigwait: definitely go to this thread */
-			if (q->p_sigdivert & mask) {
-				p = q;
-				break;
+				/* sigwait: definitely go to this thread */
+				if (q->p_sigdivert & mask) {
+					p = q;
+					break;
+				}
+
+				/* unblocked: possibly go to this thread */
+				if ((q->p_sigmask & mask) == 0)
+					p = q;
 			}
-
-			/* unblocked: possibly go to this thread */
-			if ((q->p_sigmask & mask) == 0)
-				p = q;
 		}
 	}
 
@@ -1058,6 +1071,9 @@ out:
  *
  *	while (signum = CURSIG(curproc))
  *		postsig(signum);
+ *
+ * Assumes that if the P_SINTR flag is set, we're holding both the
+ * kernel and scheduler locks.
  */
 int
 issignal(struct proc *p)
@@ -1079,7 +1095,7 @@ issignal(struct proc *p)
 
 		/*
 		 * We should see pending but ignored signals
-		 * only if P_TRACED was on when they were posted.
+		 * only if PS_TRACED was on when they were posted.
 		 */
 		if (mask & p->p_sigacts->ps_sigignore &&
 		    (pr->ps_flags & PS_TRACED) == 0)
@@ -1092,9 +1108,11 @@ issignal(struct proc *p)
 			 */
 			p->p_xstat = signum;
 
-			KERNEL_LOCK();
-			single_thread_set(p, SINGLE_SUSPEND, 0);
-			KERNEL_UNLOCK();
+			if (dolock)
+				KERNEL_LOCK();
+			single_thread_set(p, SINGLE_PTRACE, 0);
+			if (dolock)
+				KERNEL_UNLOCK();
 
 			if (dolock)
 				SCHED_LOCK(s);
@@ -1102,9 +1120,11 @@ issignal(struct proc *p)
 			if (dolock)
 				SCHED_UNLOCK(s);
 
-			KERNEL_LOCK();
+			if (dolock)
+				KERNEL_LOCK();
 			single_thread_clear(p, 0);
-			KERNEL_UNLOCK();
+			if (dolock)
+				KERNEL_UNLOCK();
 
 			/*
 			 * If we are no longer being traced, or the parent
@@ -1210,6 +1230,7 @@ keep:
 void
 proc_stop(struct proc *p, int sw)
 {
+	struct process *pr = p->p_p;
 	extern void *softclock_si;
 
 #ifdef MULTIPROCESSOR
@@ -1217,8 +1238,9 @@ proc_stop(struct proc *p, int sw)
 #endif
 
 	p->p_stat = SSTOP;
-	atomic_clearbits_int(&p->p_p->ps_flags, PS_WAITED);
-	atomic_setbits_int(&p->p_flag, P_STOPPED|P_SUSPSIG);
+	atomic_clearbits_int(&pr->ps_flags, PS_WAITED);
+	atomic_setbits_int(&pr->ps_flags, PS_STOPPED);
+	atomic_setbits_int(&p->p_flag, P_SUSPSIG);
 	if (!timeout_pending(&proc_stop_to)) {
 		timeout_add(&proc_stop_to, 0);
 		/*
@@ -1239,17 +1261,17 @@ proc_stop(struct proc *p, int sw)
 void
 proc_stop_sweep(void *v)
 {
-	struct proc *p;
+	struct process *pr;
 
-	LIST_FOREACH(p, &allproc, p_list) {
-		if ((p->p_flag & P_STOPPED) == 0)
+	LIST_FOREACH(pr, &allprocess, ps_list) {
+		if ((pr->ps_flags & PS_STOPPED) == 0)
 			continue;
-		atomic_clearbits_int(&p->p_flag, P_STOPPED);
+		atomic_clearbits_int(&pr->ps_flags, PS_STOPPED);
 
-		if ((p->p_p->ps_pptr->ps_mainproc->p_sigacts->ps_flags &
+		if ((pr->ps_pptr->ps_mainproc->p_sigacts->ps_flags &
 		    SAS_NOCLDSTOP) == 0)
-			prsignal(p->p_p->ps_pptr, SIGCHLD);
-		wakeup(p->p_p->ps_pptr);
+			prsignal(pr->ps_pptr, SIGCHLD);
+		wakeup(pr->ps_pptr);
 	}
 }
 
@@ -1659,7 +1681,7 @@ sys___thrsigdivert(struct proc *p, void *v, register_t *retval)
 	} else {
 		siginfo_t si;
 
-		bzero(&si, sizeof si);
+		memset(&si, 0, sizeof(si));
 		si.si_signo = p->p_sigwait;
 		error = copyout(&si, SCARG(uap, info), sizeof(si));
 	}
@@ -1669,7 +1691,7 @@ sys___thrsigdivert(struct proc *p, void *v, register_t *retval)
 void
 initsiginfo(siginfo_t *si, int sig, u_long trapno, int code, union sigval val)
 {
-	bzero(si, sizeof *si);
+	memset(si, 0, sizeof(*si));
 
 	si->si_signo = sig;
 	si->si_code = code;
@@ -1736,6 +1758,20 @@ userret(struct proc *p)
 {
 	int sig;
 
+	/* send SIGPROF or SIGVTALRM if their timers interrupted this thread */
+	if (p->p_flag & P_PROFPEND) {
+		atomic_clearbits_int(&p->p_flag, P_PROFPEND);
+		KERNEL_LOCK();
+		psignal(p, SIGPROF);
+		KERNEL_UNLOCK();
+	}
+	if (p->p_flag & P_ALRMPEND) {
+		atomic_clearbits_int(&p->p_flag, P_ALRMPEND);
+		KERNEL_LOCK();
+		psignal(p, SIGVTALRM);
+		KERNEL_UNLOCK();
+	}
+
 	while ((sig = CURSIG(p)) != 0)
 		postsig(sig);
 
@@ -1800,6 +1836,8 @@ single_thread_check(struct proc *p, int deep)
  * where the other threads should stop:
  *  - SINGLE_SUSPEND: stop wherever they are, will later either be told to exit
  *    (by setting to SINGLE_EXIT) or be released (via single_thread_clear())
+ *  - SINGLE_PTRACE: stop wherever they are, will wait for them to stop
+ *    later (via single_thread_wait()) and released as with SINGLE_SUSPEND
  *  - SINGLE_UNWIND: just unwind to kernel boundary, will be told to exit
  *    or released as with SINGLE_SUSPEND
  *  - SINGLE_EXIT: unwind to kernel boundary and exit
@@ -1811,11 +1849,16 @@ single_thread_set(struct proc *p, enum single_thread_mode mode, int deep)
 	struct proc *q;
 	int error;
 
+#ifdef MULTIPROCESSOR
+	KASSERT(__mp_lock_held(&kernel_lock));
+#endif
+
 	if ((error = single_thread_check(p, deep)))
 		return error;
 
 	switch (mode) {
 	case SINGLE_SUSPEND:
+	case SINGLE_PTRACE:
 		break;
 	case SINGLE_UNWIND:
 		atomic_setbits_int(&pr->ps_flags, PS_SINGLEUNWIND);
@@ -1858,7 +1901,8 @@ single_thread_set(struct proc *p, enum single_thread_mode mode, int deep)
 			/* if it's not interruptible, then just have to wait */
 			if (q->p_flag & P_SINTR) {
 				/* merely need to suspend?  just stop it */
-				if (mode == SINGLE_SUSPEND) {
+				if (mode == SINGLE_SUSPEND ||
+				    mode == SINGLE_PTRACE) {
 					q->p_stat = SSTOP;
 					break;
 				}
@@ -1884,10 +1928,18 @@ single_thread_set(struct proc *p, enum single_thread_mode mode, int deep)
 		SCHED_UNLOCK(s);
 	}
 
+	if (mode != SINGLE_PTRACE)
+		single_thread_wait(pr);
+
+	return 0;
+}
+
+void
+single_thread_wait(struct process *pr)
+{
 	/* wait until they're all suspended */
 	while (pr->ps_singlecount > 0)
 		tsleep(&pr->ps_singlecount, PUSER, "suspend", 0);
-	return 0;
 }
 
 void
@@ -1897,7 +1949,10 @@ single_thread_clear(struct proc *p, int flag)
 	struct proc *q;
 
 	KASSERT(pr->ps_single == p);
-	
+#ifdef MULTIPROCESSOR
+	KASSERT(__mp_lock_held(&kernel_lock));
+#endif
+
 	pr->ps_single = NULL;
 	atomic_clearbits_int(&pr->ps_flags, PS_SINGLEUNWIND | PS_SINGLEEXIT);
 	TAILQ_FOREACH(q, &pr->ps_threads, p_thr_link) {

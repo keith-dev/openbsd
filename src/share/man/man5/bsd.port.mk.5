@@ -1,4 +1,4 @@
-.\" $OpenBSD: bsd.port.mk.5,v 1.382 2013/07/16 18:38:51 schwarze Exp $
+.\" $OpenBSD: bsd.port.mk.5,v 1.395 2014/02/11 10:35:11 espie Exp $
 .\"
 .\" Copyright (c) 2000-2008 Marc Espie
 .\"
@@ -24,7 +24,7 @@
 .\" (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
 .\" THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 .\"
-.Dd $Mdocdate: July 16 2013 $
+.Dd $Mdocdate: February 11 2014 $
 .Dt BSD.PORT.MK 5
 .Os
 .Sh NAME
@@ -45,7 +45,9 @@ Those live under
 and they do have manpages under
 .Pa ${PORTSDIR}/infrastructure/man .
 .Pp
-Other BSD variants, as well as older versions of
+Other
+.Bx
+variants, as well as older versions of
 .Nm bsd.port.mk ,
 include other targets and variables.
 Conversion methods are outlined here.
@@ -162,7 +164,7 @@ target that simulates invoking
 .It Ar checksum
 Check distribution archives and distribution patches control sum against
 the results recorded in ${CHECKSUM_FILE},
-using the cryptographic signature utilities listed in ${PREFERRED_CIPHERS}.
+using the message digest (checksum) utilities listed in ${PREFERRED_CIPHERS}.
 All the files needed to recreate a port should be in ${CHECKSUMFILES} and
 checksummed.
 Invoking
@@ -250,7 +252,9 @@ port's FULLPKGPATH.
 Extract the distribution files under
 .Pa ${WRKDIR}
 (but see
-.Ev EXTRACT_ONLY ) .
+.Ev EXTRACT_ONLY
+and
+.Ev NO_DEPENDS ).
 Refer to
 .Ev EXTRACT_CASES
 for a complete description.
@@ -313,14 +317,14 @@ to
 instead.
 After stripping that extension if necessary,
 if the entry parses as
-.Sq Ar filename Ns { Ns Ar url Ns }
+.Sq Ar filename Ns { Ns Ar url Ns } Ns Ar sufx
 it will be fetched as
-.Ar url
+.Ar url Ns Ar sufx
 instead, yet still stored as
-.Ar filename .
+.Ar filename Ns Ar sufx .
 .Pp
 Transfers in progress will be stored as
-.Ar filename.part .
+.Ar filenamesufx.part .
 .Pp
 The ports framework uses
 .Pa ${DISTDIR}/${DIST_SUBDIR}
@@ -618,8 +622,8 @@ to
 to avoid some checks, or to
 .Ar no-wantlib-args
 to avoid expensive WANTLIB checks entirely.
-.It Ar print-package-signature
-Print the package signature, as computed using information from the ports tree,
+.It Ar print-update-signature
+Print the update signature, as computed using information from the ports tree,
 in the same format used for
 .Xr pkg_info 1
 .Fl S .
@@ -725,6 +729,11 @@ suitable for
 .It Ar show-prepare-results
 Print the list of actual installed packages found out by
 .Ar prepare .
+.It Ar show-prepare-test-results
+Print the list of actual installed packages found out by
+.Ar prepare
+and
+.Ar test-depends .
 .It Ar show-required-by
 Print the list of
 .Xr pkgpath 7
@@ -1123,8 +1132,7 @@ If set to
 .Sq Auto ,
 it will apply to dependencies, but not to the current port itself.
 See
-.Ev BULK_COOKIES_DIR ,
-.Ev TRUST_PACKAGES .
+.Ev BULK_COOKIES_DIR .
 Defaults to
 .Sq Auto .
 .It Ev BULK_COOKIES_DIR
@@ -1419,13 +1427,26 @@ to
 .Sq :9
 appended to select a different
 .Ev MASTER_SITES .
+.Pp
 Each entry may optionally be of the form
-.Sq Ar filename Ns { Ns Ar url Ns }
+.Sq Ar filename Ns { Ns Ar url Ns } Ns Ar sufx
 to deal with sites that only offer archives as weird urls, doing the transfer
 of
-.Ar url
+.Ar url Ns Ar sufx
 into result file
-.Ar filename .
+.Ar filename Ns Ar sufx .
+For instance, if
+.Bd -literal
+DISTFILES = minetest-{minetest/archive/}${V}${EXTRACT_SUFX}
+.Ed
+.Pp
+then
+.Ar fetch
+will retrieve from url
+.Sq minetest/archive/${V}${EXTRACT_SUFX}
+into
+.Sq minetest-${V}${EXTRACT_SUFX} .
+.Pp
 If ${DISTFILES} varies depending on FLAVORS or architecture,
 use
 .Ev SUPDISTFILES
@@ -1517,6 +1538,8 @@ do
     case $$archive in
 	*.tar.xz)
 	  xzcat ${FULLDISTDIR}/$$archive| tar xf -;;
+	*.tar.lz)
+	  lunzip -c ${FULLDISTDIR}/$$archive| tar xf -;;
 	*.zip)
 	  unzip -q ${FULLDISTDIR}/$$archive -d ${WRKDIR};;
 	*.tar.bz2)
@@ -1532,8 +1555,6 @@ do
     esac
 done
 .Ed
-The use of xz archives is discouraged, as it makes things impossible to
-build on vax.
 .It Ev EXTRACT_ONLY
 Set to the list of distfiles to actually extract if some distfiles
 should not be extracted during the
@@ -1657,8 +1678,8 @@ Path to the current port's directory, relative to ${PORTSDIR},
 including flavors and subpackages.
 See
 .Xr pkgpath 7 .
-.It Ev GCC2_ARCHS , GCC3_ARCHS , GCC4_ARCHS
-List of architectures using gcc 2.95.3, gcc 3.3.5, or gcc 4.2.1.
+.It Ev GCC3_ARCHS , GCC4_ARCHS
+List of architectures using gcc 3.3.6, or gcc 4.2.1.
 Read-only.
 Use with
 .Ev NOT_FOR_ARCHS
@@ -2102,7 +2123,7 @@ In the normal distpatch stage (when
 .Ev PATCHFILES
 is not empty), this is the contents of a case statement, used to apply
 distribution patches.
-Fragments are automatically appended to handle gzip'ed and bzip'ed
+Fragments are automatically appended to handle gzip'ed, bzip'ed and lzip'ed
 patches, so that the default case is more or less equivalent to the following
 shell fragment:
 .Bd -literal
@@ -2113,6 +2134,8 @@ do
     case $$patchfile in
 	*.bz2)
 	  bzip2 -dc $$patchfile | ${PATCH} ${PATCH_DIST_ARGS};;
+	*.lz)
+	  lunzip -c $$patchfile | ${PATCH} ${PATCH_DIST_ARGS};;
 	*.Z|*.gz)
 	  gzcat $$patchfile | ${PATCH} ${PATCH_DIST_ARGS};;
 	*)
@@ -2220,6 +2243,8 @@ User settings.
 Path to
 .Xr pkg_create 1
 command, with possible options.
+Signing options should be set separately in
+.Ev SIGNING_PARAMETERS .
 .It Ev PKG_CREATE_NO_CHECKS
 Porters switch.
 Set to
@@ -2614,6 +2639,11 @@ This should be enough in most cases.
 Set to
 .Sq Yes
 if port can only be built on architectures with shared libraries.
+.It Ev SIGNING_PARAMETERS
+User settings.
+Set to
+.Xr pkg_create 1
+options for signing packages directly during their creation.
 .It Ev SKIPDIR
 See
 .Xr ports 7 .
@@ -2799,14 +2829,6 @@ during
 Refer to
 .Qq THE FAKE FRAMEWORK
 for details.
-.It Ev TRUST_PACKAGES
-User settings.
-If set to
-.Sq Yes ,
-dependency mechanisms will assume the database of installed packages is
-correct.
-See also
-.Ev BULK .
 .It Ev TRY_BROKEN
 User settings.
 If set to
@@ -2902,13 +2924,6 @@ Base location for ports that install stuff outside of
 .Pa ${LOCALBASE} .
 Defaults to
 .Pa /var .
-.It Ev VMEM_WARNING
-Set to
-.Sq Yes
-if the port requires a lot of memory to compile, and the user is
-likely to see a message like
-.Qq virtual memory exhausted
-with the default process limits.
 .It Ev WANTLIB
 Extra list of library specifications that a package will need.
 May include system and X11 libraries.
@@ -3715,6 +3730,9 @@ Renamed into
 .It Ar print-package-depends
 Renamed into
 .Ar print-run-depends
+.It Ar print-package-signature
+Renamed into
+.Ar print-update-signature
 .It Ar readme , readmes
 replaced by the
 .Pa databases/ports-readmes
@@ -4039,7 +4057,9 @@ Likewise, offensive to introspection too.
 .It Pa ${FILESDIR}/md5
 Renamed to
 .Pa distinfo
-to match other BSD, and save directories.
+to match other
+.Bx ,
+and save directories.
 .It Pa ${SCRIPTDIR}/{pre,do,post}-*
 Identical functionality can be obtained through a {pre,do,post}-* target,
 invoking the script manually if necessary.
@@ -4121,7 +4141,8 @@ inconsistencies.
 FLAVORS, MULTI_PACKAGES and FAKE are
 .Ox
 improvements.
-Most recent additions do not come from another BSD.
+Most recent additions do not come from another
+.Bx .
 .\" Voluntarily undocumented:
 .\" AUTOCONF_ENV: probably not needed anyway, should be internal.
 .Sh BUGS AND LIMITATIONS

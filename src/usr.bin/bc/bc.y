@@ -1,5 +1,5 @@
 %{
-/*	$OpenBSD: bc.y,v 1.41 2012/03/08 08:20:08 otto Exp $	*/
+/*	$OpenBSD: bc.y,v 1.44 2013/11/20 21:33:54 deraadt Exp $	*/
 
 /*
  * Copyright (c) 2003, Otto Moerbeek <otto@drijf.net>
@@ -41,9 +41,7 @@
 #include <search.h>
 #include <signal.h>
 #include <stdarg.h>
-#include <stdbool.h>
 #include <string.h>
-#include <termios.h>
 #include <unistd.h>
 
 #include "extern.h"
@@ -949,7 +947,8 @@ yyerror(char *s)
 		n = asprintf(&str,
 		    "%s: %s:%d: %s: newline unexpected",
 		    __progname, filename, lineno, s);
-	else if (isspace(yytext[0]) || !isprint(yytext[0]))
+	else if (isspace((unsigned char)yytext[0]) ||
+	    !isprint((unsigned char)yytext[0]))
 		n = asprintf(&str,
 		    "%s: %s:%d: %s: ascii char 0x%02x unexpected",
 		    __progname, filename, lineno, s, yytext[0]);
@@ -1059,7 +1058,7 @@ escape(const char *str)
 }
 
 /* ARGSUSED */
-void
+static void
 sigchld(int signo)
 {
 	pid_t pid;

@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_wpi.c,v 1.111 2013/06/11 18:15:52 deraadt Exp $	*/
+/*	$OpenBSD: if_wpi.c,v 1.117 2013/12/06 21:03:04 deraadt Exp $	*/
 
 /*-
  * Copyright (c) 2006-2008
@@ -32,7 +32,7 @@
 #include <sys/malloc.h>
 #include <sys/conf.h>
 #include <sys/device.h>
-#include <sys/workq.h>
+#include <sys/task.h>
 
 #include <machine/bus.h>
 #include <machine/endian.h>
@@ -53,7 +53,6 @@
 
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
-#include <netinet/in_var.h>
 #include <netinet/if_ether.h>
 #include <netinet/ip.h>
 
@@ -76,7 +75,8 @@ void		wpi_radiotap_attach(struct wpi_softc *);
 #endif
 int		wpi_detach(struct device *, int);
 int		wpi_activate(struct device *, int);
-void		wpi_resume(void *, void *);
+void		wpi_wakeup(struct wpi_softc *);
+void		wpi_init_task(void *, void *);
 int		wpi_nic_lock(struct wpi_softc *);
 int		wpi_read_prom_data(struct wpi_softc *, uint32_t, void *, int);
 int		wpi_dma_contig_alloc(bus_dma_tag_t, struct wpi_dma_info *,
@@ -326,6 +326,7 @@ wpi_attach(struct device *parent, struct device *self, void *aux)
 	wpi_radiotap_attach(sc);
 #endif
 	timeout_set(&sc->calib_to, wpi_calib_timeout, sc);
+	task_set(&sc->init_task, wpi_init_task, sc, NULL);
 	return;
 
 	/* Free allocated memory if something failed during attachment. */
@@ -363,6 +364,7 @@ wpi_detach(struct device *self, int flags)
 	int qid;
 
 	timeout_del(&sc->calib_to);
+	task_del(systq, &sc->init_task);
 
 	/* Uninstall interrupt handler. */
 	if (sc->sc_ih != NULL)
@@ -394,9 +396,8 @@ wpi_activate(struct device *self, int act)
 		if (ifp->if_flags & IFF_RUNNING)
 			wpi_stop(ifp, 0);
 		break;
-	case DVACT_RESUME:
-		workq_queue_task(NULL, &sc->sc_resume_wqt, 0,
-		    wpi_resume, sc, NULL);
+	case DVACT_WAKEUP:
+		wpi_wakeup(sc);
 		break;
 	}
 
@@ -404,24 +405,31 @@ wpi_activate(struct device *self, int act)
 }
 
 void
-wpi_resume(void *arg1, void *arg2)
+wpi_wakeup(struct wpi_softc *sc)
 {
-	struct wpi_softc *sc = arg1;
-	struct ifnet *ifp = &sc->sc_ic.ic_if;
 	pcireg_t reg;
-	int s;
 
 	/* Clear device-specific "PCI retry timeout" register (41h). */
 	reg = pci_conf_read(sc->sc_pct, sc->sc_pcitag, 0x40);
 	reg &= ~0xff00;
 	pci_conf_write(sc->sc_pct, sc->sc_pcitag, 0x40, reg);
 
+	wpi_init_task(sc, NULL);
+}
+
+void
+wpi_init_task(void *arg1, void *args2)
+{
+	struct wpi_softc *sc = arg1;
+	struct ifnet *ifp = &sc->sc_ic.ic_if;
+	int s;
+
 	s = splnet();
 	while (sc->sc_flags & WPI_FLAG_BUSY)
 		tsleep(&sc->sc_flags, 0, "wpipwr", 0);
 	sc->sc_flags |= WPI_FLAG_BUSY;
 
-	if (ifp->if_flags & IFF_UP)
+	if ((ifp->if_flags & (IFF_UP | IFF_RUNNING)) == IFF_UP)
 		wpi_init(ifp);
 
 	sc->sc_flags &= ~WPI_FLAG_BUSY;
@@ -922,6 +930,8 @@ wpi_read_eeprom_channels(struct wpi_softc *sc, int n)
 			ic->ic_channels[chan].ic_freq =
 			    ieee80211_ieee2mhz(chan, IEEE80211_CHAN_5GHZ);
 			ic->ic_channels[chan].ic_flags = IEEE80211_CHAN_A;
+			/* We have at least one valid 5GHz channel. */
+			sc->sc_flags |= WPI_FLAG_HAS_5GHZ;
 		}
 
 		/* Is active scan allowed on this channel? */
@@ -1618,8 +1628,8 @@ wpi_intr(void *arg)
 		printf("%s: fatal firmware error\n", sc->sc_dev.dv_xname);
 		/* Dump firmware error log and stop. */
 		wpi_fatal_intr(sc);
-		ifp->if_flags &= ~IFF_UP;
 		wpi_stop(ifp, 1);
+		task_add(systq, &sc->init_task);
 		return 1;
 	}
 	if ((r1 & (WPI_INT_FH_RX | WPI_INT_SW_RX)) ||
@@ -2988,7 +2998,7 @@ wpi_read_firmware(struct wpi_softc *sc)
 		return error;
 	}
 	if (size < sizeof (*hdr)) {
-		printf("%s: truncated firmware header: %d bytes\n",
+		printf("%s: truncated firmware header: %zu bytes\n",
 		    sc->sc_dev.dv_xname, size);
 		free(fw->data, M_DEVBUF);
 		return EINVAL;
@@ -3017,7 +3027,7 @@ wpi_read_firmware(struct wpi_softc *sc)
 	/* Check that all firmware sections fit. */
 	if (size < sizeof (*hdr) + fw->main.textsz + fw->main.datasz +
 	    fw->init.textsz + fw->init.datasz + fw->boot.textsz) {
-		printf("%s: firmware file too short: %d bytes\n",
+		printf("%s: firmware file too short: %zu bytes\n",
 		    sc->sc_dev.dv_xname, size);
 		free(fw->data, M_DEVBUF);
 		return EINVAL;

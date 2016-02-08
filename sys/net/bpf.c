@@ -1,4 +1,4 @@
-/*	$OpenBSD: bpf.c,v 1.83 2012/12/28 17:52:06 gsoares Exp $	*/
+/*	$OpenBSD: bpf.c,v 1.90 2013/12/24 23:29:38 tedu Exp $	*/
 /*	$NetBSD: bpf.c,v 1.33 1997/02/21 23:59:35 thorpej Exp $	*/
 
 /*
@@ -172,8 +172,8 @@ bpf_movein(struct uio *uio, u_int linktype, struct mbuf **mp,
 
 	case DLT_ATM_RFC1483:
 		/*
-		 * en atm driver requires 4-byte atm pseudo header.
-		 * though it isn't standard, vpi:vci needs to be
+		 * An ATM driver requires 4-byte ATM pseudo header.
+		 * Though it isn't standard, vpi:vci needs to be
 		 * specified anyway.
 		 */
 		sockp->sa_family = AF_UNSPEC;
@@ -401,7 +401,7 @@ bpfread(dev_t dev, struct uio *uio, int ioflag)
 	D_GET(d);
 
 	/*
-	 * bd_rdStart is tagged when we start the read, iff there's a timeout.
+	 * If there's a timeout, bd_rdStart is tagged when we start the read.
 	 * we can then figure out when we're done reading.
 	 */
 	if (d->bd_rtout != -1 && d->bd_rdStart == 0)
@@ -434,16 +434,15 @@ bpfread(dev_t dev, struct uio *uio, int ioflag)
 			ROTATE_BUFFERS(d);
 			break;
 		}
-		if ((d->bd_rtout != -1) ||
-		    (d->bd_rdStart + d->bd_rtout) < ticks) {
-			error = tsleep((caddr_t)d, PRINET|PCATCH, "bpf",
-			    d->bd_rtout);
+		if (d->bd_rtout == -1) {
+			/* User requested non-blocking I/O */
+			error = EWOULDBLOCK;
 		} else {
-			if (d->bd_rtout == -1) {
-				/* User requested non-blocking I/O */
-				error = EWOULDBLOCK;
+			if ((d->bd_rdStart + d->bd_rtout) < ticks) {
+				error = tsleep((caddr_t)d, PRINET|PCATCH, "bpf",
+				    d->bd_rtout);
 			} else
-				error = 0;
+				error = EWOULDBLOCK;
 		}
 		if (error == EINTR || error == ERESTART) {
 			D_PUT(d);

@@ -1,4 +1,4 @@
-/*	$OpenBSD: amdpm.c,v 1.30 2013/07/03 15:34:48 sf Exp $	*/
+/*	$OpenBSD: amdpm.c,v 1.32 2013/12/06 21:03:03 deraadt Exp $	*/
 
 /*
  * Copyright (c) 2006 Alexander Yurchenko <grange@openbsd.org>
@@ -312,15 +312,9 @@ int
 amdpm_activate(struct device *self, int act)
 {
 	struct amdpm_softc *sc = (struct amdpm_softc *)self;
-	int ret = 0;
+	int rv = 0;
 
 	switch (act) {
-	case DVACT_QUIESCE:
-		ret = config_activate_children(self, act);
-		break;
-	case DVACT_SUSPEND:
-		ret = config_activate_children(self, act);
-		break;
 	case DVACT_RESUME:
 		if (timeout_initialized(&sc->sc_rnd_ch)) {
 			pcireg_t cfg_reg;
@@ -332,13 +326,13 @@ amdpm_activate(struct device *self, int act)
 			    AMDPM_CONFREG, cfg_reg | AMDPM_RNGEN);
 		
 		}
-		ret = config_activate_children(self, act);
+		rv = config_activate_children(self, act);
 		break;
-	case DVACT_POWERDOWN:
-		ret = config_activate_children(self, act);
+	default:
+		rv = config_activate_children(self, act);
 		break;
 	}
-	return (ret);
+	return (rv);
 }
 
 void
@@ -504,7 +498,7 @@ timeout:
 	/*
 	 * Transfer timeout. Kill the transaction and clear status bits.
 	 */
-	printf("%s: exec: op %d, addr 0x%02x, cmdlen %d, len %d, "
+	printf("%s: exec: op %d, addr 0x%02x, cmdlen %zu, len %zu, "
 	    "flags 0x%02x: timeout, status 0x%b\n",
 	    sc->sc_dev.dv_xname, op, addr, cmdlen, len, flags,
 	    st, AMDPM_SMBSTAT_BITS);

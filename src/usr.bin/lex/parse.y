@@ -40,7 +40,7 @@
  * PURPOSE.
  */
 
-/* $Header: /cvs/src/usr.bin/lex/parse.y,v 1.8 2003/06/04 17:34:44 millert Exp $ */
+/* $Header: /var/www/space/cvs/src/usr.bin/lex/parse.y,v 1.8 2003/06/04 17:34:44 millert Exp $ */
 
 
 /* Some versions of bison are broken in that they use alloca() but don't

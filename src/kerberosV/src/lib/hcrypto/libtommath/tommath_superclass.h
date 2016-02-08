@@ -71,6 +71,6 @@
 
 #endif
 
-/* $Source: /cvs/src/kerberosV/src/lib/hcrypto/libtommath/tommath_superclass.h,v $ */
+/* $Source: /var/www/space/cvs/src/kerberosV/src/lib/hcrypto/libtommath/tommath_superclass.h,v $ */
 /* $Revision: 1.1 $ */
 /* $Date: 2013/06/17 19:11:43 $ */

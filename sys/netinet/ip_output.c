@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip_output.c,v 1.243 2013/07/04 19:10:40 sf Exp $	*/
+/*	$OpenBSD: ip_output.c,v 1.257 2014/01/23 23:51:29 henning Exp $	*/
 /*	$NetBSD: ip_output.c,v 1.28 1996/02/13 23:43:07 christos Exp $	*/
 
 /*
@@ -74,6 +74,7 @@
 
 struct mbuf *ip_insertoptions(struct mbuf *, struct mbuf *, int *);
 void ip_mloopback(struct ifnet *, struct mbuf *, struct sockaddr_in *);
+void in_delayed_cksum(struct mbuf *);
 
 /*
  * IP output.  The packet in mbuf chain m contains a skeletal IP
@@ -82,7 +83,8 @@ void ip_mloopback(struct ifnet *, struct mbuf *, struct sockaddr_in *);
  * The mbuf opt, if present, will not be freed.
  */
 int
-ip_output(struct mbuf *m0, ...)
+ip_output(struct mbuf *m0, struct mbuf *opt, struct route *ro, int flags,
+    struct ip_moptions *imo, struct inpcb *inp, ...)
 {
 	struct ip *ip;
 	struct ifnet *ifp;
@@ -92,11 +94,6 @@ ip_output(struct mbuf *m0, ...)
 	struct route iproute;
 	struct sockaddr_in *dst;
 	struct in_ifaddr *ia;
-	struct mbuf *opt;
-	struct route *ro;
-	int flags;
-	struct ip_moptions *imo;
-	va_list ap;
 	u_int8_t sproto = 0, donerouting = 0;
 	u_long mtu;
 #ifdef IPSEC
@@ -106,27 +103,23 @@ ip_output(struct mbuf *m0, ...)
 	struct m_tag *mtag;
 	struct tdb_ident *tdbi;
 
-	struct inpcb *inp;
 	struct tdb *tdb;
-	u_int32_t ipsecflowinfo;
-	int s;
+	u_int32_t ipsecflowinfo = 0;
 #if NPF > 0
 	struct ifnet *encif;
 #endif
 #endif /* IPSEC */
 
-	va_start(ap, m0);
-	opt = va_arg(ap, struct mbuf *);
-	ro = va_arg(ap, struct route *);
-	flags = va_arg(ap, int);
-	imo = va_arg(ap, struct ip_moptions *);
 #ifdef IPSEC
-	inp = va_arg(ap, struct inpcb *);
 	if (inp && (inp->inp_flags & INP_IPV6) != 0)
 		panic("ip_output: IPv6 pcb is passed");
-	ipsecflowinfo = (flags & IP_IPSECFLOW) ? va_arg(ap, u_int32_t) : 0;
+	if (flags & IP_IPSECFLOW) {
+		va_list ap;
+		va_start(ap, inp);
+		ipsecflowinfo = va_arg(ap, u_int32_t);
+		va_end(ap);
+	}
 #endif /* IPSEC */
-	va_end(ap);
 
 #ifdef	DIAGNOSTIC
 	if ((m->m_flags & M_PKTHDR) == 0)
@@ -178,7 +171,7 @@ ip_output(struct mbuf *m0, ...)
 
 		if (ro == 0) {
 			ro = &iproute;
-			bzero((caddr_t)ro, sizeof (*ro));
+			memset(ro, 0, sizeof(*ro));
 		}
 
 		dst = satosin(&ro->ro_dst);
@@ -256,12 +249,6 @@ reroute:
 	if (!ipsec_in_use && inp == NULL)
 		goto done_spd;
 
-	/*
-	 * splnet is chosen over splsoftnet because we are not allowed to
-	 * lower the level, and udp_output calls us in splnet().
-	 */
-	s = splnet();
-
 	/* Do we have any pending SAs to apply ? */
 	mtag = m_tag_find(m, PACKET_TAG_IPSEC_PENDING_TDB, NULL);
 	if (mtag != NULL) {
@@ -282,8 +269,6 @@ reroute:
 		    IPSP_DIRECTION_OUT, NULL, inp, ipsecflowinfo);
 
 	if (tdb == NULL) {
-		splx(s);
-
 		if (error == 0) {
 			/*
 			 * No IPsec processing required, we'll just send the
@@ -316,9 +301,8 @@ reroute:
 			if (tdbi->spi == tdb->tdb_spi &&
 			    tdbi->proto == tdb->tdb_sproto &&
 			    tdbi->rdomain == tdb->tdb_rdomain &&
-			    !bcmp(&tdbi->dst, &tdb->tdb_dst,
+			    !memcmp(&tdbi->dst, &tdb->tdb_dst,
 			    sizeof(union sockaddr_union))) {
-				splx(s);
 				sproto = 0; /* mark as no-IPsec-needed */
 				goto done_spd;
 			}
@@ -328,7 +312,6 @@ reroute:
 		bcopy(&tdb->tdb_dst, &sdst, sizeof(sdst));
 		sspi = tdb->tdb_spi;
 		sproto = tdb->tdb_sproto;
-		splx(s);
 
 		/*
 		 * If it needs TCP/UDP hardware-checksumming, do the
@@ -354,7 +337,7 @@ reroute:
 	} else if (donerouting == 0) {
 		if (ro == 0) {
 			ro = &iproute;
-			bzero((caddr_t)ro, sizeof (*ro));
+			memset(ro, 0, sizeof(*ro));
 		}
 
 		dst = satosin(&ro->ro_dst);
@@ -475,13 +458,9 @@ reroute:
 		 * of outgoing interface.
 		 */
 		if (ip->ip_src.s_addr == INADDR_ANY) {
-			struct in_ifaddr *ia;
-
-			TAILQ_FOREACH(ia, &in_ifaddr, ia_list)
-				if (ia->ia_ifp == ifp) {
-					ip->ip_src = ia->ia_addr.sin_addr;
-					break;
-				}
+			IFP_TO_IA(ifp, ia);
+			if (ia != NULL)
+				ip->ip_src = ia->ia_addr.sin_addr;
 		}
 
 		IN_LOOKUP_MULTI(ip->ip_dst, ifp, inm);
@@ -575,14 +554,11 @@ sendit:
 	 * Check if the packet needs encapsulation.
 	 */
 	if (sproto != 0) {
-		s = splnet();
-
 		tdb = gettdb(rtable_l2(m->m_pkthdr.rdomain),
 		    sspi, &sdst, sproto);
 		if (tdb == NULL) {
 			DPRINTF(("ip_output: unknown TDB"));
 			error = EHOSTUNREACH;
-			splx(s);
 			m_freem(m);
 			goto done;
 		}
@@ -595,12 +571,10 @@ sendit:
 		    tdb->tdb_tap)) == NULL ||
 		    pf_test(AF_INET, PF_OUT, encif, &m, NULL) != PF_PASS) {
 			error = EACCES;
-			splx(s);
 			m_freem(m);
 			goto done;
 		}
 		if (m == NULL) {
-			splx(s);
 			goto done;
 		}
 		ip = mtod(m, struct ip *);
@@ -627,7 +601,6 @@ sendit:
 			    (tdb->tdb_dst.sin.sin_addr.s_addr ==
 			    ip->ip_dst.s_addr);
 			icmp_mtu = tdb->tdb_mtu;
-			splx(s);
 
 			/* Find a host route to store the mtu in */
 			if (ro != NULL)
@@ -636,10 +609,7 @@ sendit:
 			if (transportmode)
 				rt = NULL;
 			else if (rt == NULL || (rt->rt_flags & RTF_HOST) == 0) {
-				struct sockaddr_in dst = {
-					sizeof(struct sockaddr_in), AF_INET};
-				dst.sin_addr = ip->ip_dst;
-				rt = icmp_mtudisc_clone((struct sockaddr *)&dst,
+				rt = icmp_mtudisc_clone(ip->ip_dst,
 				    m->m_pkthdr.rdomain);
 				rt_mtucloned = 1;
 			}
@@ -667,7 +637,6 @@ sendit:
 
 		/* Callee frees mbuf */
 		error = ipsp_process_packet(m, tdb, AF_INET, 0);
-		splx(s);
 		return error;  /* Nothing more to be done */
 	}
 
@@ -726,16 +695,13 @@ sendit:
 	if (ntohs(ip->ip_len) <= mtu) {
 		ip->ip_sum = 0;
 		if ((ifp->if_capabilities & IFCAP_CSUM_IPv4) &&
-		    (ifp->if_bridgeport == NULL)) {
+		    (ifp->if_bridgeport == NULL))
 			m->m_pkthdr.csum_flags |= M_IPV4_CSUM_OUT;
-			ipstat.ips_outhwcsum++;
-		} else
+		else {
+			ipstat.ips_outswcsum++;
 			ip->ip_sum = in_cksum(m, hlen);
-		/* Update relevant hardware checksum stats for TCP/UDP */
-		if (m->m_pkthdr.csum_flags & M_TCP_CSUM_OUT)
-			tcpstat.tcps_outhwcsum++;
-		else if (m->m_pkthdr.csum_flags & M_UDP_CSUM_OUT)
-			udpstat.udps_outhwcsum++;
+		}
+
 		error = (*ifp->if_output)(ifp, m, sintosa(dst), ro->ro_rt);
 		goto done;
 	}
@@ -873,11 +839,12 @@ ip_fragment(struct mbuf *m, struct ifnet *ifp, u_long mtu)
 		mhip->ip_sum = 0;
 		if ((ifp != NULL) &&
 		    (ifp->if_capabilities & IFCAP_CSUM_IPv4) &&
-		    (ifp->if_bridgeport == NULL)) {
+		    (ifp->if_bridgeport == NULL))
 			m->m_pkthdr.csum_flags |= M_IPV4_CSUM_OUT;
-			ipstat.ips_outhwcsum++;
-		} else
+		else {
+			ipstat.ips_outswcsum++;
 			mhip->ip_sum = in_cksum(m, mhlen);
+		}
 		ipstat.ips_ofragments++;
 		fragments++;
 	}
@@ -893,11 +860,12 @@ ip_fragment(struct mbuf *m, struct ifnet *ifp, u_long mtu)
 	ip->ip_sum = 0;
 	if ((ifp != NULL) &&
 	    (ifp->if_capabilities & IFCAP_CSUM_IPv4) &&
-	    (ifp->if_bridgeport == NULL)) {
+	    (ifp->if_bridgeport == NULL))
 		m->m_pkthdr.csum_flags |= M_IPV4_CSUM_OUT;
-		ipstat.ips_outhwcsum++;
-	} else
+	else {
+		ipstat.ips_outswcsum++;
 		ip->ip_sum = in_cksum(m, hlen);
+	}
 sendorfree:
 	if (error) {
 		for (m = m0; m; m = m0) {
@@ -1654,7 +1622,7 @@ ip_pcbopts(struct mbuf **pcbopt, struct mbuf *m)
 	m->m_len += sizeof(struct in_addr);
 	cp = mtod(m, u_char *) + sizeof(struct in_addr);
 	memmove((caddr_t)cp, mtod(m, caddr_t), (unsigned)cnt);
-	bzero(mtod(m, caddr_t), sizeof(struct in_addr));
+	memset(mtod(m, caddr_t), 0, sizeof(struct in_addr));
 
 	for (; cnt > 0; cnt -= optlen, cp += optlen) {
 		opt = cp[IPOPT_OPTVAL];
@@ -1727,8 +1695,9 @@ ip_setmoptions(int optname, struct ip_moptions **imop, struct mbuf *m,
 	u_char loop;
 	int i;
 	struct in_addr addr;
+	struct in_ifaddr *ia;
 	struct ip_mreq *mreq;
-	struct ifnet *ifp;
+	struct ifnet *ifp = NULL;
 	struct ip_moptions *imo = *imop;
 	struct in_multi **immp;
 	struct route ro;
@@ -1778,7 +1747,9 @@ ip_setmoptions(int optname, struct ip_moptions **imop, struct mbuf *m,
 		 * IP address.  Find the interface and confirm that
 		 * it supports multicasting.
 		 */
-		INADDR_TO_IFP(addr, ifp, rtableid);
+		ia = in_iawithaddr(addr, rtableid);
+		if (ia)
+			ifp = ia->ia_ifp;
 		if (ifp == NULL || (ifp->if_flags & IFF_MULTICAST) == 0) {
 			error = EADDRNOTAVAIL;
 			break;
@@ -1845,7 +1816,9 @@ ip_setmoptions(int optname, struct ip_moptions **imop, struct mbuf *m,
 			ifp = ro.ro_rt->rt_ifp;
 			rtfree(ro.ro_rt);
 		} else {
-			INADDR_TO_IFP(mreq->imr_interface, ifp, rtableid);
+			ia = in_iawithaddr(mreq->imr_interface, rtableid);
+			if (ia)
+				ifp = ia->ia_ifp;
 		}
 		/*
 		 * See if we found an interface, and confirm that it
@@ -1860,7 +1833,8 @@ ip_setmoptions(int optname, struct ip_moptions **imop, struct mbuf *m,
 		 * membership slots are full.
 		 */
 		for (i = 0; i < imo->imo_num_memberships; ++i) {
-			if (imo->imo_membership[i]->inm_ia->ia_ifp == ifp &&
+			if (imo->imo_membership[i]->inm_ifidx
+						== ifp->if_index &&
 			    imo->imo_membership[i]->inm_addr.s_addr
 						== mreq->imr_multiaddr.s_addr)
 				break;
@@ -1931,18 +1905,20 @@ ip_setmoptions(int optname, struct ip_moptions **imop, struct mbuf *m,
 		if (mreq->imr_interface.s_addr == INADDR_ANY)
 			ifp = NULL;
 		else {
-			INADDR_TO_IFP(mreq->imr_interface, ifp, rtableid);
-			if (ifp == NULL) {
+			ia = in_iawithaddr(mreq->imr_interface, rtableid);
+			if (ia == NULL) {
 				error = EADDRNOTAVAIL;
 				break;
 			}
+			ifp = ia->ia_ifp;
 		}
 		/*
 		 * Find the membership in the membership array.
 		 */
 		for (i = 0; i < imo->imo_num_memberships; ++i) {
 			if ((ifp == NULL ||
-			     imo->imo_membership[i]->inm_ia->ia_ifp == ifp) &&
+			    imo->imo_membership[i]->inm_ifidx ==
+			        ifp->if_index) &&
 			     imo->imo_membership[i]->inm_addr.s_addr ==
 			     mreq->imr_multiaddr.s_addr)
 				break;
@@ -2095,6 +2071,10 @@ in_delayed_cksum(struct mbuf *m)
 		offset += offsetof(struct udphdr, uh_sum);
 		break;
 
+	case IPPROTO_ICMP:
+		offset += offsetof(struct icmp, icmp_cksum);
+		break;
+
 	default:
 		return;
 	}
@@ -2108,28 +2088,41 @@ in_delayed_cksum(struct mbuf *m)
 void
 in_proto_cksum_out(struct mbuf *m, struct ifnet *ifp)
 {
+	/* some hw and in_delayed_cksum need the pseudo header cksum */
+	if (m->m_pkthdr.csum_flags & (M_TCP_CSUM_OUT|M_UDP_CSUM_OUT)) {
+		struct ip *ip;
+		u_int16_t csum, offset;
+
+		ip  = mtod(m, struct ip *);
+		offset = ip->ip_hl << 2;
+		csum = in_cksum_phdr(ip->ip_src.s_addr, ip->ip_dst.s_addr,
+		    htonl(ntohs(ip->ip_len) - offset + ip->ip_p));
+		if (ip->ip_p == IPPROTO_TCP)
+			offset += offsetof(struct tcphdr, th_sum);
+		else if (ip->ip_p == IPPROTO_UDP)
+			offset += offsetof(struct udphdr, uh_sum);
+		if ((offset + sizeof(u_int16_t)) > m->m_len)
+			m_copyback(m, offset, sizeof(csum), &csum, M_NOWAIT);
+		else
+			*(u_int16_t *)(mtod(m, caddr_t) + offset) = csum;
+	}
+
 	if (m->m_pkthdr.csum_flags & M_TCP_CSUM_OUT) {
 		if (!ifp || !(ifp->if_capabilities & IFCAP_CSUM_TCPv4) ||
 		    ifp->if_bridgeport != NULL) {
+			tcpstat.tcps_outswcsum++;
 			in_delayed_cksum(m);
 			m->m_pkthdr.csum_flags &= ~M_TCP_CSUM_OUT; /* Clear */
 		}
 	} else if (m->m_pkthdr.csum_flags & M_UDP_CSUM_OUT) {
 		if (!ifp || !(ifp->if_capabilities & IFCAP_CSUM_UDPv4) ||
 		    ifp->if_bridgeport != NULL) {
+			udpstat.udps_outswcsum++;
 			in_delayed_cksum(m);
 			m->m_pkthdr.csum_flags &= ~M_UDP_CSUM_OUT; /* Clear */
 		}
 	} else if (m->m_pkthdr.csum_flags & M_ICMP_CSUM_OUT) {
-		struct ip *ip = mtod(m, struct ip *);
-		int hlen;
-		struct icmp *icp;
-
-		hlen = ip->ip_hl << 2;
-		icp = (struct icmp *)(mtod(m, caddr_t) + hlen);
-		icp->icmp_cksum = 0;
-		icp->icmp_cksum = in4_cksum(m, 0, hlen,
-		    ntohs(ip->ip_len) - hlen);
+		in_delayed_cksum(m);
 		m->m_pkthdr.csum_flags &= ~M_ICMP_CSUM_OUT; /* Clear */
 	}
 }

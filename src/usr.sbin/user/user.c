@@ -1,4 +1,4 @@
-/* $OpenBSD: user.c,v 1.95 2013/04/02 05:04:47 deraadt Exp $ */
+/* $OpenBSD: user.c,v 1.98 2013/11/23 17:14:05 deraadt Exp $ */
 /* $NetBSD: user.c,v 1.69 2003/04/14 17:40:07 agc Exp $ */
 
 /*
@@ -290,6 +290,8 @@ copydotfiles(char *skeldir, uid_t uid, gid_t gid, char *dir)
 	DIR		*dirp;
 	int		n;
 
+	if (*skeldir == '\0')
+		return 0;
 	if ((dirp = opendir(skeldir)) == NULL) {
 		warn("can't open source . files dir `%s'", skeldir);
 		return 0;
@@ -308,8 +310,6 @@ copydotfiles(char *skeldir, uid_t uid, gid_t gid, char *dir)
 		(void) asystem("cd %s && %s -rw -pe %s . %s",
 				skeldir, PAX, (verbose) ? "-v" : "", dir);
 	}
-	(void) asystem("%s -R -P %u:%u %s", CHOWN, uid, gid, dir);
-	(void) asystem("%s -R u+w %s", CHMOD, dir);
 	return n;
 }
 
@@ -383,7 +383,7 @@ creategid(char *group, gid_t gid, const char *name)
 		return 0;
 	}
 	(void) chmod(_PATH_GROUP, st.st_mode & 07777);
-	syslog(LOG_INFO, "new group added: name=%s, gid=%d", group, gid);
+	syslog(LOG_INFO, "new group added: name=%s, gid=%u", group, gid);
 	return 1;
 }
 
@@ -569,7 +569,7 @@ append_group(char *user, int ngroups, const char **groups)
 			}
 			if (strncmp(groups[i], buf, j) == 0 &&
 			    groups[i][j] == '\0') {
-				while (isspace(buf[cc - 1]))
+				while (isspace((unsigned char)buf[cc - 1]))
 					cc--;
 				buf[(j = cc)] = '\0';
 				if (buf[strlen(buf) - 1] != ':')
@@ -620,7 +620,8 @@ valid_login(char *login_name)
 
 	for (cp = login_name ; *cp ; cp++) {
 		/* We allow '$' as the last character for samba */
-		if (!isalnum(*cp) && *cp != '.' && *cp != '_' && *cp != '-' &&
+		if (!isalnum((unsigned char)*cp) && *cp != '.' &&
+		    *cp != '_' && *cp != '-' &&
 		    !(*cp == '$' && *(cp + 1) == '\0')) {
 			return 0;
 		}
@@ -637,7 +638,8 @@ valid_group(char *group)
 	unsigned char	*cp;
 
 	for (cp = group ; *cp ; cp++) {
-		if (!isalnum(*cp) && *cp != '.' && *cp != '_' && *cp != '-') {
+		if (!isalnum((unsigned char)*cp) && *cp != '.' &&
+		    *cp != '_' && *cp != '-') {
 			return 0;
 		}
 	}
@@ -673,8 +675,8 @@ getnextgid(uid_t *gidp, uid_t lo, uid_t hi)
 static int
 save_range(user_t *up, char *cp)
 {
-	int	from;
-	int	to;
+	uid_t	from;
+	uid_t	to;
 	int	i;
 
 	if (up->u_rsize == 0) {
@@ -684,7 +686,7 @@ save_range(user_t *up, char *cp)
 		up->u_rsize *= 2;
 		RENEW(range_t, up->u_rv, up->u_rsize, return(0));
 	}
-	if (up->u_rv && sscanf(cp, "%d..%d", &from, &to) == 2) {
+	if (up->u_rv && sscanf(cp, "%u..%u", &from, &to) == 2) {
 		for (i = up->u_defrc ; i < up->u_rc ; i++) {
 			if (up->u_rv[i].r_from == from && up->u_rv[i].r_to == to) {
 				break;
@@ -734,7 +736,7 @@ setdefaults(user_t *up)
 		ret = 0;
 	}
 	for (i = (up->u_defrc != up->u_rc) ? up->u_defrc : 0 ; i < up->u_rc ; i++) {
-		if (fprintf(fp, "range\t\t%d..%d\n", up->u_rv[i].r_from, up->u_rv[i].r_to) <= 0) {
+		if (fprintf(fp, "range\t\t%u..%u\n", up->u_rv[i].r_from, up->u_rv[i].r_to) <= 0) {
 			warn("can't write to `%s'", CONFFILE);
 			ret = 0;
 		}
@@ -780,31 +782,31 @@ read_defaults(user_t *up)
 	if (fp != NULL) {
 		while ((s = fparseln(fp, &len, &lineno, NULL, 0)) != NULL) {
 			if (strncmp(s, "group", 5) == 0) {
-				for (cp = s + 5 ; isspace(*cp) ; cp++) {
+				for (cp = s + 5 ; isspace((unsigned char)*cp); cp++) {
 				}
 				memsave(&up->u_primgrp, cp, strlen(cp));
 			} else if (strncmp(s, "base_dir", 8) == 0) {
-				for (cp = s + 8 ; isspace(*cp) ; cp++) {
+				for (cp = s + 8 ; isspace((unsigned char)*cp); cp++) {
 				}
 				memsave(&up->u_basedir, cp, strlen(cp));
 			} else if (strncmp(s, "skel_dir", 8) == 0) {
-				for (cp = s + 8 ; isspace(*cp) ; cp++) {
+				for (cp = s + 8 ; isspace((unsigned char)*cp); cp++) {
 				}
 				memsave(&up->u_skeldir, cp, strlen(cp));
 			} else if (strncmp(s, "shell", 5) == 0) {
-				for (cp = s + 5 ; isspace(*cp) ; cp++) {
+				for (cp = s + 5 ; isspace((unsigned char)*cp); cp++) {
 				}
 				memsave(&up->u_shell, cp, strlen(cp));
 			} else if (strncmp(s, "password", 8) == 0) {
-				for (cp = s + 8 ; isspace(*cp) ; cp++) {
+				for (cp = s + 8 ; isspace((unsigned char)*cp); cp++) {
 				}
 				memsave(&up->u_password, cp, strlen(cp));
 			} else if (strncmp(s, "class", 5) == 0) {
-				for (cp = s + 5 ; isspace(*cp) ; cp++) {
+				for (cp = s + 5 ; isspace((unsigned char)*cp); cp++) {
 				}
 				memsave(&up->u_class, cp, strlen(cp));
 			} else if (strncmp(s, "inactive", 8) == 0) {
-				for (cp = s + 8 ; isspace(*cp) ; cp++) {
+				for (cp = s + 8 ; isspace((unsigned char)*cp); cp++) {
 				}
 				if (strcmp(cp, UNSET_INACTIVE) == 0) {
 					if (up->u_inactive) {
@@ -815,17 +817,17 @@ read_defaults(user_t *up)
 					memsave(&up->u_inactive, cp, strlen(cp));
 				}
 			} else if (strncmp(s, "range", 5) == 0) {
-				for (cp = s + 5 ; isspace(*cp) ; cp++) {
+				for (cp = s + 5 ; isspace((unsigned char)*cp); cp++) {
 				}
 				(void) save_range(up, cp);
 			} else if (strncmp(s, "preserve", 8) == 0) {
-				for (cp = s + 8 ; isspace(*cp) ; cp++) {
+				for (cp = s + 8 ; isspace((unsigned char)*cp); cp++) {
 				}
 				up->u_preserve = (strncmp(cp, "true", 4) == 0) ? 1 :
 						  (strncmp(cp, "yes", 3) == 0) ? 1 :
 						   atoi(cp);
 			} else if (strncmp(s, "expire", 6) == 0) {
-				for (cp = s + 6 ; isspace(*cp) ; cp++) {
+				for (cp = s + 6 ; isspace((unsigned char)*cp); cp++) {
 				}
 				if (strcmp(cp, UNSET_EXPIRY) == 0) {
 					if (up->u_expire) {
@@ -1112,7 +1114,7 @@ adduser(char *login_name, user_t *up)
 				up->u_password, password);
 		}
 	}
-	cc = snprintf(buf, sizeof(buf), "%s:%s:%d:%d:%s:%ld:%ld:%s:%s:%s\n",
+	cc = snprintf(buf, sizeof(buf), "%s:%s:%u:%u:%s:%ld:%ld:%s:%s:%s\n",
 	    login_name,
 	    password,
 	    up->u_uid,
@@ -1177,6 +1179,9 @@ adduser(char *login_name, user_t *up)
 				err(EXIT_FAILURE, "can't mkdir `%s'", home);
 			}
 			(void) copydotfiles(up->u_skeldir, up->u_uid, gid, home);
+			(void) asystem("%s -R -P %u:%u %s", CHOWN, up->u_uid,
+			    gid, home);
+			(void) asystem("%s -R u+w %s", CHMOD, home);
 		}
 	}
 	if (strcmp(up->u_primgrp, "=uid") == 0 &&
@@ -1184,7 +1189,7 @@ adduser(char *login_name, user_t *up)
 	    !creategid(login_name, gid, "")) {
 		(void) close(ptmpfd);
 		pw_abort();
-		errx(EXIT_FAILURE, "can't create gid %d for login name %s",
+		errx(EXIT_FAILURE, "can't create gid %u for login name %s",
 		    gid, login_name);
 	}
 	if (up->u_groupc > 0 && !append_group(login_name, up->u_groupc, up->u_groupv)) {
@@ -1197,7 +1202,7 @@ adduser(char *login_name, user_t *up)
 		pw_abort();
 		err(EXIT_FAILURE, "pw_mkdb failed");
 	}
-	syslog(LOG_INFO, "new user added: name=%s, uid=%d, gid=%d, home=%s, shell=%s",
+	syslog(LOG_INFO, "new user added: name=%s, uid=%u, gid=%u, home=%s, shell=%s",
 		login_name, up->u_uid, gid, home, up->u_shell);
 	return 1;
 }
@@ -1559,7 +1564,7 @@ moduser(char *login_name, char *newlogin, user_t *up)
 		if (strncmp(login_name, buf, loginc) == 0 && loginc == colonc) {
 			if (up != NULL) {
 				if ((len = snprintf(buf, sizeof(buf),
-				    "%s:%s:%d:%d:%s:%ld:%ld:%s:%s:%s\n",
+				    "%s:%s:%u:%u:%s:%ld:%ld:%s:%s:%s\n",
 				    newlogin,
 				    pwp->pw_passwd,
 				    pwp->pw_uid,
@@ -1644,10 +1649,10 @@ moduser(char *login_name, char *newlogin, user_t *up)
 	if (up == NULL) {
 		syslog(LOG_INFO, "user removed: name=%s", login_name);
 	} else if (strcmp(login_name, newlogin) == 0) {
-		syslog(LOG_INFO, "user information modified: name=%s, uid=%d, gid=%d, home=%s, shell=%s",
+		syslog(LOG_INFO, "user information modified: name=%s, uid=%u, gid=%u, home=%s, shell=%s",
 			login_name, pwp->pw_uid, pwp->pw_gid, pwp->pw_dir, pwp->pw_shell);
 	} else {
-		syslog(LOG_INFO, "user information modified: name=%s, new name=%s, uid=%d, gid=%d, home=%s, shell=%s",
+		syslog(LOG_INFO, "user information modified: name=%s, new name=%s, uid=%u, gid=%u, home=%s, shell=%s",
 			login_name, newlogin, pwp->pw_uid, pwp->pw_gid, pwp->pw_dir, pwp->pw_shell);
 	}
 	return 1;
@@ -1847,7 +1852,7 @@ useradd(int argc, char **argv)
 		(void) printf("inactive\t%s\n", (u.u_inactive == NULL) ? UNSET_INACTIVE : u.u_inactive);
 		(void) printf("expire\t\t%s\n", (u.u_expire == NULL) ? UNSET_EXPIRY : u.u_expire);
 		for (i = 0 ; i < u.u_rc ; i++) {
-			(void) printf("range\t\t%d..%d\n", u.u_rv[i].r_from, u.u_rv[i].r_to);
+			(void) printf("range\t\t%u..%u\n", u.u_rv[i].r_from, u.u_rv[i].r_to);
 		}
 		return EXIT_SUCCESS;
 	}

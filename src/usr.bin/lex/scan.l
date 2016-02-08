@@ -34,7 +34,7 @@
  * PURPOSE.
  */
 
-/* $Header: /cvs/src/usr.bin/lex/scan.l,v 1.9 2006/12/06 05:03:29 ray Exp $ */
+/* $Header: /var/www/space/cvs/src/usr.bin/lex/scan.l,v 1.9 2006/12/06 05:03:29 ray Exp $ */
 
 #include "flexdef.h"
 #include "parse.h"

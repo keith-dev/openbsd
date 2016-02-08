@@ -1,4 +1,4 @@
-/*	$OpenBSD: spamdb.c,v 1.26 2013/04/22 19:49:36 otto Exp $	*/
+/*	$OpenBSD: spamdb.c,v 1.29 2013/11/24 01:06:19 deraadt Exp $	*/
 
 /*
  * Copyright (c) 2004 Bob Beck.  All rights reserved.
@@ -30,6 +30,7 @@
 #include <netdb.h>
 #include <ctype.h>
 #include <errno.h>
+#include <unistd.h>
 
 #include "grey.h"
 
@@ -111,8 +112,8 @@ dbupdate(DB *db, char *ip, int add, int type)
 					errx(-1, "not an email address: %s", ip);
 				/* ensure address is lower case*/
 				for (i = 0; ip[i] != '\0'; i++)
-					if (isupper(ip[i]))
-						ip[i] = (char)tolower(ip[i]);
+					if (isupper((unsigned char)ip[i]))
+						ip[i] = tolower((unsigned char)ip[i]);
 				break;
 			default:
 				errx(-1, "unknown type %d", type);
@@ -129,12 +130,11 @@ dbupdate(DB *db, char *ip, int add, int type)
 				goto bad;
 			}
 		} else {
-			if (dbd.size != sizeof(gd)) {
+			if (gdcopyin(&dbd, &gd) == -1) {
 				/* whatever this is, it doesn't belong */
 				db->del(db, &dbk, 0);
 				goto bad;
 			}
-			memcpy(&gd, dbd.data, sizeof(gd));
 			gd.pcount++;
 			switch (type) {
 			case WHITE:
@@ -185,11 +185,10 @@ dblist(DB *db)
 	    r = db->seq(db, &dbk, &dbd, R_NEXT)) {
 		char *a, *cp;
 
-		if ((dbk.size < 1) || dbd.size != sizeof(struct gdata)) {
+		if ((dbk.size < 1) || gdcopyin(&dbd, &gd) == -1) {
 			db->close(db);
 			errx(1, "bogus size db entry - bad db file?");
 		}
-		memcpy(&gd, dbd.data, sizeof(gd));
 		a = malloc(dbk.size + 1);
 		if (a == NULL)
 			err(1, "malloc");

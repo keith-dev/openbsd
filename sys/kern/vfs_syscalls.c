@@ -1,4 +1,4 @@
-/*	$OpenBSD: vfs_syscalls.c,v 1.193 2013/06/05 01:26:00 guenther Exp $	*/
+/*	$OpenBSD: vfs_syscalls.c,v 1.202 2014/01/21 01:48:45 tedu Exp $	*/
 /*	$NetBSD: vfs_syscalls.c,v 1.71 1996/04/23 10:29:02 mycroft Exp $	*/
 
 /*
@@ -68,36 +68,24 @@ static int change_dir(struct nameidata *, struct proc *);
 void checkdirs(struct vnode *);
 
 int copyout_statfs(struct statfs *, void *, struct proc *);
-#ifdef COMPAT_O53
-int copyout_statfs53(struct statfs *, void *, struct proc *);
-#endif
-
-int getdirentries_internal(struct proc *, int, char *, int, off_t *,
-    register_t *);
 
 int doopenat(struct proc *, int, const char *, int, mode_t, register_t *);
-int domknodat(struct proc *, int, const char *, mode_t, dev_t, register_t *);
-int domkfifoat(struct proc *, int, const char *, mode_t, register_t *);
-int dolinkat(struct proc *, int, const char *, int, const char *, int,
-    register_t *);
-int dosymlinkat(struct proc *, const char *, int, const char *, register_t *);
-int dounlinkat(struct proc *, int, const char *, int, register_t *);
-int dofaccessat(struct proc *, int, const char *, int, int, register_t *);
-int dofstatat(struct proc *, int, const char *, struct stat *, int,
-    register_t *);
+int domknodat(struct proc *, int, const char *, mode_t, dev_t);
+int domkfifoat(struct proc *, int, const char *, mode_t);
+int dolinkat(struct proc *, int, const char *, int, const char *, int);
+int dosymlinkat(struct proc *, const char *, int, const char *);
+int dounlinkat(struct proc *, int, const char *, int);
+int dofaccessat(struct proc *, int, const char *, int, int);
+int dofstatat(struct proc *, int, const char *, struct stat *, int);
 int doreadlinkat(struct proc *, int, const char *, char *, size_t,
     register_t *);
-int dofchmodat(struct proc *, int, const char *, mode_t, int, register_t *);
-int dofchownat(struct proc *, int, const char *, uid_t, gid_t, int,
-    register_t *);
-int dorenameat(struct proc *, int, const char *, int, const char *,
-    register_t *);
-int domkdirat(struct proc *, int, const char *, mode_t, register_t *);
-int doutimensat(struct proc *, int, const char *, struct timespec [2],
-    int, register_t *);
-int dovutimens(struct proc *, struct vnode *, struct timespec [2],
-    register_t *);
-int dofutimens(struct proc *, int, struct timespec [2], register_t *);
+int dofchmodat(struct proc *, int, const char *, mode_t, int);
+int dofchownat(struct proc *, int, const char *, uid_t, gid_t, int);
+int dorenameat(struct proc *, int, const char *, int, const char *);
+int domkdirat(struct proc *, int, const char *, mode_t);
+int doutimensat(struct proc *, int, const char *, struct timespec [2], int);
+int dovutimens(struct proc *, struct vnode *, struct timespec [2]);
+int dofutimens(struct proc *, int, struct timespec [2]);
 
 /*
  * Virtual File System System Calls
@@ -306,7 +294,7 @@ update:
 	cache_purge(vp);
 	if (!error) {
 		vfsp->vfc_refcount++;
-		CIRCLEQ_INSERT_TAIL(&mountlist, mp, mnt_list);
+		TAILQ_INSERT_TAIL(&mountlist, mp, mnt_list);
 		checkdirs(vp);
 		VOP_UNLOCK(vp, 0, p);
  		if ((mp->mnt_flag & MNT_RDONLY) == 0)
@@ -331,7 +319,7 @@ update:
  * track of how many were replaced.  That's the number of references
  * the old vnode had that we've replaced, so finish by vrele()'ing
  * it that many times.  This puts off any possible sleeping until
- * we've finished walking the allprocs list.
+ * we've finished walking the allproc list.
  */
 void
 checkdirs(struct vnode *olddp)
@@ -456,7 +444,7 @@ dounmount(struct mount *mp, int flags, struct proc *p, struct vnode *olddp)
 		return (error);
 	}
 
-	CIRCLEQ_REMOVE(&mountlist, mp, mnt_list);
+	TAILQ_REMOVE(&mountlist, mp, mnt_list);
 	if ((coveredvp = mp->mnt_vnodecovered) != NULLVP) {
 		coveredvp->v_mountedhere = NULL;
  		vrele(coveredvp);
@@ -488,12 +476,9 @@ sys_sync(struct proc *p, void *v, register_t *retval)
 	struct mount *mp, *nmp;
 	int asyncflag;
 
-	for (mp = CIRCLEQ_LAST(&mountlist); mp != CIRCLEQ_END(&mountlist);
-	    mp = nmp) {
-		if (vfs_busy(mp, VB_READ|VB_NOWAIT)) {
-			nmp = CIRCLEQ_PREV(mp, mnt_list);
+	TAILQ_FOREACH_REVERSE_SAFE(mp, &mountlist, mntlist, mnt_list, nmp) {
+		if (vfs_busy(mp, VB_READ|VB_NOWAIT))
 			continue;
-		}
 		if ((mp->mnt_flag & MNT_RDONLY) == 0) {
 			asyncflag = mp->mnt_flag & MNT_ASYNC;
 			mp->mnt_flag &= ~MNT_ASYNC;
@@ -502,7 +487,6 @@ sys_sync(struct proc *p, void *v, register_t *retval)
 			if (asyncflag)
 				mp->mnt_flag |= MNT_ASYNC;
 		}
-		nmp = CIRCLEQ_PREV(mp, mnt_list);
 		vfs_unbusy(mp);
 	}
 
@@ -646,12 +630,9 @@ sys_getfsstat(struct proc *p, void *v, register_t *retval)
 	sfsp = SCARG(uap, buf);
 	count = 0;
 
-	for (mp = CIRCLEQ_FIRST(&mountlist); mp != CIRCLEQ_END(&mountlist);
-	    mp = nmp) {
-		if (vfs_busy(mp, VB_READ|VB_NOWAIT)) {
-			nmp = CIRCLEQ_NEXT(mp, mnt_list);
+	TAILQ_FOREACH_SAFE(mp, &mountlist, mnt_list, nmp) {
+		if (vfs_busy(mp, VB_READ|VB_NOWAIT))
 			continue;
-		}
 		if (sfsp && count < maxcount) {
 			sp = &mp->mnt_stat;
 
@@ -661,7 +642,6 @@ sys_getfsstat(struct proc *p, void *v, register_t *retval)
 			    (flags == MNT_WAIT ||
 			    flags == 0) &&
 			    (error = VFS_STATFS(mp, sp, p))) {
-				nmp = CIRCLEQ_NEXT(mp, mnt_list);
 				vfs_unbusy(mp);
  				continue;
 			}
@@ -679,7 +659,6 @@ sys_getfsstat(struct proc *p, void *v, register_t *retval)
 			sfsp++;
 		}
 		count++;
-		nmp = CIRCLEQ_NEXT(mp, mnt_list);
 		vfs_unbusy(mp);
 	}
 
@@ -690,191 +669,6 @@ sys_getfsstat(struct proc *p, void *v, register_t *retval)
 
 	return (0);
 }
-
-#ifdef COMPAT_O53
-int
-copyout_statfs53(struct statfs *sp, void *uaddr, struct proc *p)
-{
-	struct statfs53 st;
-
-	/* make sure any padding in the changed area is zeroed */
-	memset(&st, 0, sizeof(st));
-	memcpy(&st, sp, offsetof(struct statfs53, f_owner) +
-	    sizeof(st.f_owner));
-	st.f_ctime = sp->f_ctime;
-	memcpy(&st.f_fstypename,  &sp->f_fstypename,  sizeof(st.f_fstypename));
-	memcpy(&st.f_mntonname,   &sp->f_mntonname,   sizeof(st.f_mntonname));
-	memcpy(&st.f_mntfromname, &sp->f_mntfromname, sizeof(st.f_mntfromname));
-	memcpy(&st.mount_info,    &sp->mount_info,    sizeof(st.mount_info));
-
-	/* Don't let non-root see filesystem id (for NFS security) */
-	if (suser(p, 0))
-		memset(&st.f_fsid, 0, sizeof(st.f_fsid));
-
-	return (copyout(&st, uaddr, sizeof(st)));
-}
-
-/*
- * Get filesystem statistics.
- */
-/* ARGSUSED */
-int
-compat_o53_sys_statfs(struct proc *p, void *v, register_t *retval)
-{
-	struct compat_o53_sys_statfs_args /* {
-		syscallarg(const char *) path;
-		syscallarg(struct statfs53 *) buf;
-	} */ *uap = v;
-	struct mount *mp;
-	struct statfs *sp;
-	int error;
-	struct nameidata nd;
-
-	NDINIT(&nd, LOOKUP, FOLLOW, UIO_USERSPACE, SCARG(uap, path), p);
-	if ((error = namei(&nd)) != 0)
-		return (error);
-	mp = nd.ni_vp->v_mount;
-	sp = &mp->mnt_stat;
-	vrele(nd.ni_vp);
-	if ((error = VFS_STATFS(mp, sp, p)) != 0)
-		return (error);
-	sp->f_flags = mp->mnt_flag & MNT_VISFLAGMASK;
-
-	return (copyout_statfs53(sp, SCARG(uap, buf), p));
-}
-
-/*
- * Get filesystem statistics.
- */
-/* ARGSUSED */
-int
-compat_o53_sys_fstatfs(struct proc *p, void *v, register_t *retval)
-{
-	struct compat_o53_sys_fstatfs_args /* {
-		syscallarg(int) fd;
-		syscallarg(struct statfs53 *) buf;
-	} */ *uap = v;
-	struct file *fp;
-	struct mount *mp;
-	struct statfs *sp;
-	int error;
-
-	if ((error = getvnode(p->p_fd, SCARG(uap, fd), &fp)) != 0)
-		return (error);
-	mp = ((struct vnode *)fp->f_data)->v_mount;
-	if (!mp) {
-		FRELE(fp, p);
-		return (ENOENT);
-	}
-	sp = &mp->mnt_stat;
-	error = VFS_STATFS(mp, sp, p);
-	FRELE(fp, p);
-	if (error)
-		return (error);
-	sp->f_flags = mp->mnt_flag & MNT_VISFLAGMASK;
-
-	return (copyout_statfs53(sp, SCARG(uap, buf), p));
-}
-
-int
-compat_o53_sys_getfsstat(struct proc *p, void *v, register_t *retval)
-{
-	struct compat_o53_sys_getfsstat_args /* {
-		syscallarg(struct statfs53 *) buf;
-		syscallarg(size_t) bufsize;
-		syscallarg(int) flags;
-	} */ *uap = v;
-	struct mount *mp, *nmp;
-	struct statfs *sp;
-	struct statfs53 *sfsp;
-	size_t count, maxcount;
-	int error, flags = SCARG(uap, flags);
-
-	maxcount = SCARG(uap, bufsize) / sizeof(struct statfs53);
-	sfsp = SCARG(uap, buf);
-	count = 0;
-
-	for (mp = CIRCLEQ_FIRST(&mountlist); mp != CIRCLEQ_END(&mountlist);
-	    mp = nmp) {
-		if (vfs_busy(mp, VB_READ|VB_NOWAIT)) {
-			nmp = CIRCLEQ_NEXT(mp, mnt_list);
-			continue;
-		}
-		if (sfsp && count < maxcount) {
-			sp = &mp->mnt_stat;
-
-			/* Refresh stats unless MNT_NOWAIT is specified */
-			if (flags != MNT_NOWAIT &&
-			    flags != MNT_LAZY &&
-			    (flags == MNT_WAIT ||
-			    flags == 0) &&
-			    (error = VFS_STATFS(mp, sp, p))) {
-				nmp = CIRCLEQ_NEXT(mp, mnt_list);
-				vfs_unbusy(mp);
- 				continue;
-			}
-
-			sp->f_flags = mp->mnt_flag & MNT_VISFLAGMASK;
-#if notyet
-			if (mp->mnt_flag & MNT_SOFTDEP)
-				sp->f_eflags = STATFS_SOFTUPD;
-#endif
-			error = (copyout_statfs53(sp, sfsp, p));
-			if (error) {
-				vfs_unbusy(mp);
-				return (error);
-			}
-			sfsp++;
-		}
-		count++;
-		nmp = CIRCLEQ_NEXT(mp, mnt_list);
-		vfs_unbusy(mp);
-	}
-
-	if (sfsp && count > maxcount)
-		*retval = maxcount;
-	else
-		*retval = count;
-
-	return (0);
-}
-
-/* ARGSUSED */
-int
-compat_o53_sys_fhstatfs(struct proc *p, void *v, register_t *retval)
-{
-	struct compat_o53_sys_fhstatfs_args /* {
-		syscallarg(const fhandle_t *) fhp;
-		syscallarg(struct statfs53 *) buf;
-	} */ *uap = v;
-	struct statfs *sp;
-	fhandle_t fh;
-	struct mount *mp;
-	struct vnode *vp;
-	int error;
-
-	/*
-	 * Must be super user
-	 */
-	if ((error = suser(p, 0)))
-		return (error);
-
-	if ((error = copyin(SCARG(uap, fhp), &fh, sizeof(fhandle_t))) != 0)
-		return (error);
-
-	if ((mp = vfs_getvfs(&fh.fh_fsid)) == NULL)
-		return (ESTALE);
-	if ((error = VFS_FHTOVP(mp, &fh.fh_fid, &vp)))
-		return (error);
-	mp = vp->v_mount;
-	sp = &mp->mnt_stat;
-	vput(vp);
-	if ((error = VFS_STATFS(mp, sp, p)) != 0)
-		return (error);
-	sp->f_flags = mp->mnt_flag & MNT_VISFLAGMASK;
-	return (copyout_statfs53(sp, SCARG(uap, buf), p));
-}
-#endif /* COMPAT_O53 */
 
 /*
  * Change current working directory to a given file descriptor.
@@ -1164,7 +958,7 @@ sys_getfh(struct proc *p, void *v, register_t *retval)
 	if (error)
 		return (error);
 	vp = nd.ni_vp;
-	bzero(&fh, sizeof(fh));
+	memset(&fh, 0, sizeof(fh));
 	fh.fh_fsid = vp->v_mount->mnt_stat.f_fsid;
 	error = VFS_VPTOFH(vp, &fh.fh_fid);
 	vput(vp);
@@ -1394,7 +1188,7 @@ sys_mknod(struct proc *p, void *v, register_t *retval)
 	} */ *uap = v;
 
 	return (domknodat(p, AT_FDCWD, SCARG(uap, path), SCARG(uap, mode),
-	    SCARG(uap, dev), retval));
+	    SCARG(uap, dev)));
 }
 
 int
@@ -1408,12 +1202,11 @@ sys_mknodat(struct proc *p, void *v, register_t *retval)
 	} */ *uap = v;
 
 	return (domknodat(p, SCARG(uap, fd), SCARG(uap, path),
-	    SCARG(uap, mode), SCARG(uap, dev), retval));
+	    SCARG(uap, mode), SCARG(uap, dev)));
 }
 
 int
-domknodat(struct proc *p, int fd, const char *path, mode_t mode, dev_t dev,
-    register_t *retval)
+domknodat(struct proc *p, int fd, const char *path, mode_t mode, dev_t dev)
 {
 	struct vnode *vp;
 	struct vattr vattr;
@@ -1476,8 +1269,7 @@ sys_mkfifo(struct proc *p, void *v, register_t *retval)
 		syscallarg(mode_t) mode;
 	} */ *uap = v;
 
-	return (domkfifoat(p, AT_FDCWD, SCARG(uap, path), SCARG(uap, mode),
-	    retval));
+	return (domkfifoat(p, AT_FDCWD, SCARG(uap, path), SCARG(uap, mode)));
 }
 
 int
@@ -1490,11 +1282,11 @@ sys_mkfifoat(struct proc *p, void *v, register_t *retval)
 	} */ *uap = v;
 
 	return (domkfifoat(p, SCARG(uap, fd), SCARG(uap, path),
-	    SCARG(uap, mode), retval));
+	    SCARG(uap, mode)));
 }
 
 int
-domkfifoat(struct proc *p, int fd, const char *path, mode_t mode, register_t *retval)
+domkfifoat(struct proc *p, int fd, const char *path, mode_t mode)
 {
 #ifndef FIFO
 	return (EOPNOTSUPP);
@@ -1535,7 +1327,7 @@ sys_link(struct proc *p, void *v, register_t *retval)
 	} */ *uap = v;
 
 	return (dolinkat(p, AT_FDCWD, SCARG(uap, path), AT_FDCWD,
-	    SCARG(uap, link), AT_SYMLINK_FOLLOW, retval));
+	    SCARG(uap, link), AT_SYMLINK_FOLLOW));
 }
 
 int
@@ -1550,12 +1342,12 @@ sys_linkat(struct proc *p, void *v, register_t *retval)
 	} */ *uap = v;
 
 	return (dolinkat(p, SCARG(uap, fd1), SCARG(uap, path1),
-	    SCARG(uap, fd2), SCARG(uap, path2), SCARG(uap, flag), retval));
+	    SCARG(uap, fd2), SCARG(uap, path2), SCARG(uap, flag)));
 }
 
 int
 dolinkat(struct proc *p, int fd1, const char *path1, int fd2,
-    const char *path2, int flag, register_t *retval)
+    const char *path2, int flag)
 {
 	struct vnode *vp;
 	struct nameidata nd;
@@ -1607,8 +1399,7 @@ sys_symlink(struct proc *p, void *v, register_t *retval)
 		syscallarg(const char *) link;
 	} */ *uap = v;
 
-	return (dosymlinkat(p, SCARG(uap, path), AT_FDCWD, SCARG(uap, link),
-	    retval));
+	return (dosymlinkat(p, SCARG(uap, path), AT_FDCWD, SCARG(uap, link)));
 }
 
 int
@@ -1621,12 +1412,11 @@ sys_symlinkat(struct proc *p, void *v, register_t *retval)
 	} */ *uap = v;
 
 	return (dosymlinkat(p, SCARG(uap, path), SCARG(uap, fd),
-	    SCARG(uap, link), retval));
+	    SCARG(uap, link)));
 }
 
 int
-dosymlinkat(struct proc *p, const char *upath, int fd, const char *link,
-    register_t *retval)
+dosymlinkat(struct proc *p, const char *upath, int fd, const char *link)
 {
 	struct vattr vattr;
 	char *path;
@@ -1669,7 +1459,7 @@ sys_unlink(struct proc *p, void *v, register_t *retval)
 		syscallarg(const char *) path;
 	} */ *uap = v;
 
-	return (dounlinkat(p, AT_FDCWD, SCARG(uap, path), 0, retval));
+	return (dounlinkat(p, AT_FDCWD, SCARG(uap, path), 0));
 }
 
 int
@@ -1682,12 +1472,11 @@ sys_unlinkat(struct proc *p, void *v, register_t *retval)
 	} */ *uap = v;
 
 	return (dounlinkat(p, SCARG(uap, fd), SCARG(uap, path),
-	    SCARG(uap, flag), retval));
+	    SCARG(uap, flag)));
 }
 
 int
-dounlinkat(struct proc *p, int fd, const char *path, int flag,
-    register_t *retval)
+dounlinkat(struct proc *p, int fd, const char *path, int flag)
 {
 	struct vnode *vp;
 	int error;
@@ -1817,7 +1606,7 @@ sys_access(struct proc *p, void *v, register_t *retval)
 	} */ *uap = v;
 
 	return (dofaccessat(p, AT_FDCWD, SCARG(uap, path),
-	    SCARG(uap, flags), 0, retval));
+	    SCARG(uap, flags), 0));
 }
 
 int
@@ -1831,12 +1620,11 @@ sys_faccessat(struct proc *p, void *v, register_t *retval)
 	} */ *uap = v;
 
 	return (dofaccessat(p, SCARG(uap, fd), SCARG(uap, path),
-	    SCARG(uap, amode), SCARG(uap, flag), retval));
+	    SCARG(uap, amode), SCARG(uap, flag)));
 }
 
 int
-dofaccessat(struct proc *p, int fd, const char *path, int amode, int flag,
-    register_t *retval)
+dofaccessat(struct proc *p, int fd, const char *path, int amode, int flag)
 {
 	struct vnode *vp;
 	int error;
@@ -1894,8 +1682,7 @@ sys_stat(struct proc *p, void *v, register_t *retval)
 		syscallarg(struct stat *) ub;
 	} */ *uap = v;
 
-	return (dofstatat(p, AT_FDCWD, SCARG(uap, path), SCARG(uap, ub), 0,
-	    retval));
+	return (dofstatat(p, AT_FDCWD, SCARG(uap, path), SCARG(uap, ub), 0));
 }
 
 int
@@ -1909,12 +1696,11 @@ sys_fstatat(struct proc *p, void *v, register_t *retval)
 	} */ *uap = v;
 
 	return (dofstatat(p, SCARG(uap, fd), SCARG(uap, path),
-	    SCARG(uap, buf), SCARG(uap, flag), retval));
+	    SCARG(uap, buf), SCARG(uap, flag)));
 }
 
 int
-dofstatat(struct proc *p, int fd, const char *path, struct stat *buf,
-    int flag, register_t *retval)
+dofstatat(struct proc *p, int fd, const char *path, struct stat *buf, int flag)
 {
 	struct stat sb;
 	int error, follow;
@@ -1955,7 +1741,7 @@ sys_lstat(struct proc *p, void *v, register_t *retval)
 	} */ *uap = v;
 
 	return (dofstatat(p, AT_FDCWD, SCARG(uap, path), SCARG(uap, ub),
-	    AT_SYMLINK_NOFOLLOW, retval));
+	    AT_SYMLINK_NOFOLLOW));
 }
 
 /*
@@ -2146,8 +1932,7 @@ sys_chmod(struct proc *p, void *v, register_t *retval)
 		syscallarg(mode_t) mode;
 	} */ *uap = v;
 
-	return (dofchmodat(p, AT_FDCWD, SCARG(uap, path), SCARG(uap, mode),
-	    0, retval));
+	return (dofchmodat(p, AT_FDCWD, SCARG(uap, path), SCARG(uap, mode), 0));
 }
 
 int
@@ -2161,12 +1946,11 @@ sys_fchmodat(struct proc *p, void *v, register_t *retval)
 	} */ *uap = v;
 
 	return (dofchmodat(p, SCARG(uap, fd), SCARG(uap, path),
-	    SCARG(uap, mode), SCARG(uap, flag), retval));
+	    SCARG(uap, mode), SCARG(uap, flag)));
 }
 
 int
-dofchmodat(struct proc *p, int fd, const char *path, mode_t mode, int flag,
-    register_t *retval)
+dofchmodat(struct proc *p, int fd, const char *path, mode_t mode, int flag)
 {
 	struct vnode *vp;
 	struct vattr vattr;
@@ -2244,7 +2028,7 @@ sys_chown(struct proc *p, void *v, register_t *retval)
 	} */ *uap = v;
 
 	return (dofchownat(p, AT_FDCWD, SCARG(uap, path), SCARG(uap, uid),
-	    SCARG(uap, gid), 0, retval));
+	    SCARG(uap, gid), 0));
 }
 
 int
@@ -2259,12 +2043,12 @@ sys_fchownat(struct proc *p, void *v, register_t *retval)
 	} */ *uap = v;
 
 	return (dofchownat(p, SCARG(uap, fd), SCARG(uap, path),
-	    SCARG(uap, uid), SCARG(uap, gid), SCARG(uap, flag), retval));
+	    SCARG(uap, uid), SCARG(uap, gid), SCARG(uap, flag)));
 }
 
 int
 dofchownat(struct proc *p, int fd, const char *path, uid_t uid, gid_t gid,
-    int flag, register_t *retval)
+    int flag)
 {
 	struct vnode *vp;
 	struct vattr vattr;
@@ -2432,7 +2216,7 @@ sys_utimes(struct proc *p, void *v, register_t *retval)
 	} else
 		ts[0].tv_nsec = ts[1].tv_nsec = UTIME_NOW;
 
-	return (doutimensat(p, AT_FDCWD, SCARG(uap, path), ts, 0, retval));
+	return (doutimensat(p, AT_FDCWD, SCARG(uap, path), ts, 0));
 }
 
 int
@@ -2458,12 +2242,12 @@ sys_utimensat(struct proc *p, void *v, register_t *retval)
 		ts[0].tv_nsec = ts[1].tv_nsec = UTIME_NOW;
 
 	return (doutimensat(p, SCARG(uap, fd), SCARG(uap, path), ts,
-	    SCARG(uap, flag), retval));
+	    SCARG(uap, flag)));
 }
 
 int
 doutimensat(struct proc *p, int fd, const char *path,
-    struct timespec ts[2], int flag, register_t *retval)
+    struct timespec ts[2], int flag)
 {
 	struct vnode *vp;
 	int error, follow;
@@ -2478,12 +2262,11 @@ doutimensat(struct proc *p, int fd, const char *path,
 		return (error);
 	vp = nd.ni_vp;
 
-	return (dovutimens(p, vp, ts, retval));
+	return (dovutimens(p, vp, ts));
 }
 
 int
-dovutimens(struct proc *p, struct vnode *vp, struct timespec ts[2],
-    register_t *retval)
+dovutimens(struct proc *p, struct vnode *vp, struct timespec ts[2])
 {
 	struct vattr vattr;
 	struct timespec now;
@@ -2563,7 +2346,7 @@ sys_futimes(struct proc *p, void *v, register_t *retval)
 	} else
 		ts[0].tv_nsec = ts[1].tv_nsec = UTIME_NOW;
 
-	return (dofutimens(p, SCARG(uap, fd), ts, retval));
+	return (dofutimens(p, SCARG(uap, fd), ts));
 }
 
 int
@@ -2585,11 +2368,11 @@ sys_futimens(struct proc *p, void *v, register_t *retval)
 	} else
 		ts[0].tv_nsec = ts[1].tv_nsec = UTIME_NOW;
 
-	return (dofutimens(p, SCARG(uap, fd), ts, retval));
+	return (dofutimens(p, SCARG(uap, fd), ts));
 }
 
 int
-dofutimens(struct proc *p, int fd, struct timespec ts[2], register_t *retval)
+dofutimens(struct proc *p, int fd, struct timespec ts[2])
 {
 	struct file *fp;
 	struct vnode *vp;
@@ -2601,7 +2384,7 @@ dofutimens(struct proc *p, int fd, struct timespec ts[2], register_t *retval)
 	vref(vp);
 	FRELE(fp, p);
 
-	return (dovutimens(p, vp, ts, retval));
+	return (dovutimens(p, vp, ts));
 }
 
 /*
@@ -2721,7 +2504,7 @@ sys_rename(struct proc *p, void *v, register_t *retval)
 	} */ *uap = v;
 
 	return (dorenameat(p, AT_FDCWD, SCARG(uap, from), AT_FDCWD,
-	    SCARG(uap, to), retval));
+	    SCARG(uap, to)));
 }
 
 int
@@ -2735,12 +2518,12 @@ sys_renameat(struct proc *p, void *v, register_t *retval)
 	} */ *uap = v;
 
 	return (dorenameat(p, SCARG(uap, fromfd), SCARG(uap, from),
-	    SCARG(uap, tofd), SCARG(uap, to), retval));
+	    SCARG(uap, tofd), SCARG(uap, to)));
 }
 
 int
 dorenameat(struct proc *p, int fromfd, const char *from, int tofd,
-    const char *to, register_t *retval)
+    const char *to)
 {
 	struct vnode *tvp, *fvp, *tdvp;
 	struct nameidata fromnd, tond;
@@ -2828,8 +2611,7 @@ sys_mkdir(struct proc *p, void *v, register_t *retval)
 		syscallarg(mode_t) mode;
 	} */ *uap = v;
 
-	return (domkdirat(p, AT_FDCWD, SCARG(uap, path), SCARG(uap, mode),
-	    retval));
+	return (domkdirat(p, AT_FDCWD, SCARG(uap, path), SCARG(uap, mode)));
 }
 
 int
@@ -2842,12 +2624,11 @@ sys_mkdirat(struct proc *p, void *v, register_t *retval)
 	} */ *uap = v;
 
 	return (domkdirat(p, SCARG(uap, fd), SCARG(uap, path),
-	    SCARG(uap, mode), retval));
+	    SCARG(uap, mode)));
 }
 
 int
-domkdirat(struct proc *p, int fd, const char *path, mode_t mode,
-    register_t *retval)
+domkdirat(struct proc *p, int fd, const char *path, mode_t mode)
 {
 	struct vnode *vp;
 	struct vattr vattr;
@@ -2888,26 +2669,32 @@ sys_rmdir(struct proc *p, void *v, register_t *retval)
 		syscallarg(const char *) path;
 	} */ *uap = v;
 
-	return (dounlinkat(p, AT_FDCWD, SCARG(uap, path), AT_REMOVEDIR,
-	    retval));
+	return (dounlinkat(p, AT_FDCWD, SCARG(uap, path), AT_REMOVEDIR));
 }
 
 /*
  * Read a block of directory entries in a file system independent format.
  */
 int
-getdirentries_internal(struct proc *p, int fd, char *buf, int count,
-    off_t *basep, register_t *retval)
+sys_getdents(struct proc *p, void *v, register_t *retval)
 {
+	struct sys_getdents_args /* {
+		syscallarg(int) fd;
+		syscallarg(void *) buf;
+		syscallarg(size_t) buflen;
+	} */ *uap = v;
 	struct vnode *vp;
 	struct file *fp;
 	struct uio auio;
 	struct iovec aiov;
+	size_t buflen;
 	int error, eofflag;
 
-	if (count < 0)
+	buflen = SCARG(uap, buflen);
+
+	if (buflen > INT_MAX)
 		return EINVAL;
-	if ((error = getvnode(p->p_fd, fd, &fp)) != 0)
+	if ((error = getvnode(p->p_fd, SCARG(uap, fd), &fp)) != 0)
 		return (error);
 	if ((fp->f_flag & FREAD) == 0) {
 		error = EBADF;
@@ -2917,49 +2704,30 @@ getdirentries_internal(struct proc *p, int fd, char *buf, int count,
 		error = EINVAL;
 		goto bad;
 	}
-	vp = (struct vnode *)fp->f_data;
+	vp = fp->f_data;
 	if (vp->v_type != VDIR) {
 		error = EINVAL;
 		goto bad;
 	}
-	aiov.iov_base = buf;
-	aiov.iov_len = count;
+	aiov.iov_base = SCARG(uap, buf);
+	aiov.iov_len = buflen;
 	auio.uio_iov = &aiov;
 	auio.uio_iovcnt = 1;
 	auio.uio_rw = UIO_READ;
 	auio.uio_segflg = UIO_USERSPACE;
 	auio.uio_procp = p;
-	auio.uio_resid = count;
+	auio.uio_resid = buflen;
 	vn_lock(vp, LK_EXCLUSIVE | LK_RETRY, p);
-	*basep = auio.uio_offset = fp->f_offset;
-	error = VOP_READDIR(vp, &auio, fp->f_cred, &eofflag, 0, 0);
+	auio.uio_offset = fp->f_offset;
+	error = VOP_READDIR(vp, &auio, fp->f_cred, &eofflag);
 	fp->f_offset = auio.uio_offset;
 	VOP_UNLOCK(vp, 0, p);
 	if (error)
 		goto bad;
-	*retval = count - auio.uio_resid;
+	*retval = buflen - auio.uio_resid;
 bad:
 	FRELE(fp, p);
 	return (error);
-}
-
-int
-sys_getdirentries(struct proc *p, void *v, register_t *retval)
-{
-	struct sys_getdirentries_args /* {
-		syscallarg(int) fd;
-		syscallarg(char *) buf;
-		syscallarg(int) count;
-		syscallarg(off_t *) basep;
-	} */ *uap = v;
-	int error;
-	off_t off;
-
-	error = getdirentries_internal(p, SCARG(uap, fd), SCARG(uap, buf),
-	    SCARG(uap, count), &off, retval);
-	if (!error)
-		error = copyout(&off, SCARG(uap, basep), sizeof(off_t));
-	return error;
 }
 
 /*
@@ -3163,7 +2931,7 @@ sys_pwrite(struct proc *p, void *v, register_t *retval)
 
 	FREF(fp);
 
-	/* dofilewrite() will FRELE the descriptor for us */
+	/* dofilewritev() will FRELE the descriptor for us */
 	return (dofilewritev(p, fd, fp, &iov, 1, 0, &offset, retval));
 }
 
@@ -3207,3 +2975,4 @@ sys_pwritev(struct proc *p, void *v, register_t *retval)
 	return (dofilewritev(p, fd, fp, SCARG(uap, iovp), SCARG(uap, iovcnt),
 	    1, &offset, retval));
 }
+

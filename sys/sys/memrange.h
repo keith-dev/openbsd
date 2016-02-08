@@ -1,4 +1,4 @@
-/* $OpenBSD: memrange.h,v 1.6 2013/04/17 16:24:59 deraadt Exp $ */
+/* $OpenBSD: memrange.h,v 1.8 2013/12/19 21:30:02 deraadt Exp $ */
 /*-
  * Copyright (c) 1999 Michael Smith <msmith@freebsd.org>
  * All rights reserved.
@@ -43,7 +43,6 @@
 #define MDF_ACTIVE		(1<<27)	/* currently active */
 #define MDF_BOGUS		(1<<28)	/* we don't like it */
 #define MDF_FIXACTIVE		(1<<29)	/* can't be turned off */
-#define MDF_BUSY		(1<<30)	/* range is in use */
 #define MDF_FORCE		(1<<31)	/* force risky changes */
 
 struct mem_range_desc {
@@ -85,6 +84,7 @@ struct mem_range_softc {
 extern struct mem_range_softc mem_range_softc;
 
 __BEGIN_DECLS
+extern void mem_range_attach(void);
 extern int mem_range_attr_get(struct mem_range_desc *mrd, int *arg);
 extern int mem_range_attr_set(struct mem_range_desc *mrd, int *arg);
 extern void mem_range_AP_init(void);

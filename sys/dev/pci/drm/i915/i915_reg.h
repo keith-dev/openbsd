@@ -1,4 +1,4 @@
-/*	$OpenBSD: i915_reg.h,v 1.2 2013/07/04 09:52:29 jsg Exp $	*/
+/*	$OpenBSD: i915_reg.h,v 1.8 2014/02/18 02:48:57 jsg Exp $	*/
 /* Copyright 2003 Tungsten Graphics, Inc., Cedar Park, Texas.
  * All Rights Reserved.
  *
@@ -598,6 +598,8 @@
 					will not assert AGPBUSY# and will only
 					be delivered when out of C3. */
 #define   INSTPM_FORCE_ORDERING				(1<<7) /* GEN6+ */
+#define   INSTPM_TLB_INVALIDATE	(1<<9)
+#define   INSTPM_SYNC_FLUSH	(1<<5)
 #define ACTHD	        0x020c8
 #define FW_BLC		0x020d8
 #define FW_BLC2		0x020dc
@@ -1525,14 +1527,13 @@
 					 GEN7_CXT_EXTENDED_SIZE(ctx_reg) + \
 					 GEN7_CXT_GT1_SIZE(ctx_reg) + \
 					 GEN7_CXT_VFSTATE_SIZE(ctx_reg))
-#define HSW_CXT_POWER_SIZE(ctx_reg)	((ctx_reg >> 26) & 0x3f)
-#define HSW_CXT_RING_SIZE(ctx_reg)	((ctx_reg >> 23) & 0x7)
-#define HSW_CXT_RENDER_SIZE(ctx_reg)	((ctx_reg >> 15) & 0xff)
-#define HSW_CXT_TOTAL_SIZE(ctx_reg)	(HSW_CXT_POWER_SIZE(ctx_reg) + \
-					 HSW_CXT_RING_SIZE(ctx_reg) + \
-					 HSW_CXT_RENDER_SIZE(ctx_reg) + \
-					 GEN7_CXT_VFSTATE_SIZE(ctx_reg))
-
+/* Haswell does have the CXT_SIZE register however it does not appear to be
+ * valid. Now, docs explain in dwords what is in the context object. The full
+ * size is 70720 bytes, however, the power context and execlist context will
+ * never be saved (power context is stored elsewhere, and execlists don't work
+ * on HSW) - so the final size is 66944 bytes, which rounds to 17 pages.
+ */
+#define HSW_CXT_TOTAL_SIZE		(17 * PAGE_SIZE)
 
 /*
  * Overlay regs
@@ -1661,10 +1662,20 @@
 #define CRT_HOTPLUG_DETECT_VOLTAGE_475MV	(1 << 2)
 
 #define PORT_HOTPLUG_STAT	0x61114
-/* HDMI/DP bits are gen4+ */
-#define   DPB_HOTPLUG_LIVE_STATUS               (1 << 29)
-#define   DPC_HOTPLUG_LIVE_STATUS               (1 << 28)
-#define   DPD_HOTPLUG_LIVE_STATUS               (1 << 27)
+/*
+ * HDMI/DP bits are gen4+
+ *
+ * WARNING: Bspec for hpd status bits on gen4 seems to be completely confused.
+ * Please check the detailed lore in the commit message for for experimental
+ * evidence.
+ */
+#define   DPD_HOTPLUG_LIVE_STATUS_G4X		(1 << 29)
+#define   DPC_HOTPLUG_LIVE_STATUS_G4X		(1 << 28)
+#define   DPB_HOTPLUG_LIVE_STATUS_G4X		(1 << 27)
+/* VLV DP/HDMI bits again match Bspec */
+#define   DPD_HOTPLUG_LIVE_STATUS_VLV		(1 << 27)
+#define   DPC_HOTPLUG_LIVE_STATUS_VLV		(1 << 28)
+#define   DPB_HOTPLUG_LIVE_STATUS_VLV		(1 << 29)
 #define   DPD_HOTPLUG_INT_STATUS		(3 << 21)
 #define   DPC_HOTPLUG_INT_STATUS		(3 << 19)
 #define   DPB_HOTPLUG_INT_STATUS		(3 << 17)
@@ -2605,14 +2616,14 @@
 #define _PIPEB_GMCH_DATA_M			0x71050
 
 /* Transfer unit size for display port - 1, default is 0x3f (for TU size 64) */
-#define   PIPE_GMCH_DATA_M_TU_SIZE_MASK		(0x3f << 25)
-#define   PIPE_GMCH_DATA_M_TU_SIZE_SHIFT	25
+#define  TU_SIZE(x)             (((x)-1) << 25) /* default size 64 */
+#define  TU_SIZE_MASK           (0x3f << 25)
 
-#define   PIPE_GMCH_DATA_M_MASK			(0xffffff)
+#define  DATA_LINK_M_N_MASK	(0xffffff)
+#define  DATA_LINK_N_MAX	(0x800000)
 
 #define _PIPEA_GMCH_DATA_N			0x70054
 #define _PIPEB_GMCH_DATA_N			0x71054
-#define   PIPE_GMCH_DATA_N_MASK			(0xffffff)
 
 /*
  * Computing Link M and N values for the Display Port link
@@ -2627,11 +2638,9 @@
 
 #define _PIPEA_DP_LINK_M				0x70060
 #define _PIPEB_DP_LINK_M				0x71060
-#define   PIPEA_DP_LINK_M_MASK			(0xffffff)
 
 #define _PIPEA_DP_LINK_N				0x70064
 #define _PIPEB_DP_LINK_N				0x71064
-#define   PIPEA_DP_LINK_N_MASK			(0xffffff)
 
 #define PIPE_GMCH_DATA_M(pipe) _PIPE(pipe, _PIPEA_GMCH_DATA_M, _PIPEB_GMCH_DATA_M)
 #define PIPE_GMCH_DATA_N(pipe) _PIPE(pipe, _PIPEA_GMCH_DATA_N, _PIPEB_GMCH_DATA_N)
@@ -3297,8 +3306,6 @@
 
 
 #define _PIPEA_DATA_M1           0x60030
-#define  TU_SIZE(x)             (((x)-1) << 25) /* default size 64 */
-#define  TU_SIZE_MASK           0x7e000000
 #define  PIPE_DATA_M1_OFFSET    0
 #define _PIPEA_DATA_N1           0x60034
 #define  PIPE_DATA_N1_OFFSET    0
@@ -3489,6 +3496,9 @@
 /* WaCatErrorRejectionIssue */
 #define GEN7_SQ_CHICKEN_MBCUNIT_CONFIG		0x9030
 #define  GEN7_SQ_CHICKEN_MBCUNIT_SQINTMOB	(1<<11)
+
+#define HSW_SCRATCH1				0xb038
+#define  HSW_SCRATCH1_L3_DATA_ATOMICS_DISABLE	(1<<27)
 
 #define HSW_FUSE_STRAP		0x42014
 #define  HSW_CDCLK_LIMIT	(1 << 24)
@@ -4149,7 +4159,7 @@
 #define EDP_LINK_TRAIN_600MV_0DB_IVB		(0x30 <<22)
 #define EDP_LINK_TRAIN_600MV_3_5DB_IVB		(0x36 <<22)
 #define EDP_LINK_TRAIN_800MV_0DB_IVB		(0x38 <<22)
-#define EDP_LINK_TRAIN_800MV_3_5DB_IVB		(0x33 <<22)
+#define EDP_LINK_TRAIN_800MV_3_5DB_IVB		(0x3e <<22)
 
 /* legacy values */
 #define EDP_LINK_TRAIN_500MV_0DB_IVB		(0x00 <<22)
@@ -4325,6 +4335,9 @@
 #define GEN7_ROW_CHICKEN2		0xe4f4
 #define GEN7_ROW_CHICKEN2_GT2		0xf4f4
 #define   DOP_CLOCK_GATING_DISABLE	(1<<0)
+
+#define HSW_ROW_CHICKEN3		0xe49c
+#define  HSW_ROW_CHICKEN3_L3_GLOBAL_ATOMICS_DISABLE    (1 << 6)
 
 #define G4X_AUD_VID_DID			0x62020
 #define INTEL_AUDIO_DEVCL		0x808629FB

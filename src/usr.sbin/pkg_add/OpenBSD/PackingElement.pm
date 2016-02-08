@@ -1,7 +1,7 @@
 # ex:ts=8 sw=4:
-# $OpenBSD: PackingElement.pm,v 1.212 2013/05/13 18:30:51 espie Exp $
+# $OpenBSD: PackingElement.pm,v 1.233 2014/02/10 19:12:20 espie Exp $
 #
-# Copyright (c) 2003-2010 Marc Espie <espie@openbsd.org>
+# Copyright (c) 2003-2014 Marc Espie <espie@openbsd.org>
 #
 # Permission to use, copy, modify, and distribute this software for any
 # purpose with or without fee is hereby granted, provided that the above
@@ -122,6 +122,12 @@ sub write_no_sig
 {
 	my ($self, $fh) = @_;
 	$self->write($fh);
+}
+
+sub write_without_variation
+{
+	my ($self, $fh) = @_;
+	$self->write_no_sig($fh);
 }
 
 # needed for comment checking
@@ -559,12 +565,12 @@ __PACKAGE__->register_with_factory;
 
 sub register_manpage
 {
-	my ($self, $state) = @_;
+	my ($self, $state, $key) = @_;
+	# XXX don't bother register stuff from partial packages
 	return if defined $self->{tempname};
 	my $fname = $self->fullname;
-	if ($fname =~ m,^(.*/man)/(?:man|cat).*?/,) {
-		my $d = $1;
-		push(@{$state->{mandirs}->{$d}}, $fname);
+	if ($fname =~ m,^(.*/man)/((?:man|cat).*),) {
+		push(@{$state->{$key}{$1}}, $2);
     	}
 }
 
@@ -589,6 +595,10 @@ sub format
 
 	my $base = $state->{base};
 	my $fname = $base.$self->fullname;
+	if (-z $fname) {
+		$state->error("empty source manpage: #1", $fname);
+		return;
+	}
 	open(my $fh, '<', $fname) or die "Can't read $fname";
 	my $line = <$fh>;
 	close $fh;
@@ -620,6 +630,7 @@ sub format
 	} else {
 		die "Can't parse source name $fname";
 	}
+	return 1;
 }
 
 package OpenBSD::PackingElement::Mandoc;
@@ -706,19 +717,9 @@ sub keyword() { 'comment' }
 
 sub category() { 'cvstags'}
 
-package OpenBSD::PackingElement::md5;
-our @ISA=qw(OpenBSD::PackingElement::Annotation);
-
-__PACKAGE__->register_with_factory('md5');
-
-sub add
+# don't incorporate this into compared signatures
+sub write_without_variation
 {
-	my ($class, $plist, $args) = @_;
-
-	require OpenBSD::md5;
-
-	$plist->{state}->{lastchecksummable}->add_digest(OpenBSD::md5->fromstring($args));
-	return;
 }
 
 package OpenBSD::PackingElement::sha;
@@ -746,13 +747,11 @@ sub add
 	my ($class, $plist, $args) = @_;
 
 	if ($args eq 'no checksum') {
-		$plist->{state}->{lastfile}->{nochecksum} = 1;
-	} elsif ($args eq 'no shadow') {
-		$plist->{state}->{lastdir}->{noshadow} = 1;
+		$plist->{state}{lastfile}{nochecksum} = 1;
 	} else {
-		my $object = $plist->{state}->{lastfileobject};
-		$object->{tags}->{$args} = 1;
-		push(@{$plist->{tags}->{$args}}, $object);
+		my $object = $plist->{state}{lastfileobject};
+		$object->{tags}{$args} = 1;
+		push(@{$plist->{tags}{$args}}, $object);
 	}
 	return undef;
 }
@@ -846,12 +845,10 @@ sub new
 		return OpenBSD::PackingElement::NoDefaultConflict->new;
 	} elsif ($args eq 'manual-installation') {
 		return OpenBSD::PackingElement::ManualInstallation->new;
-	} elsif ($args eq 'system-package') {
-		return OpenBSD::PackingElement::SystemPackage->new;
+	} elsif ($args eq 'firmware') {
+		return OpenBSD::PackingElement::Firmware->new;
 	} elsif ($args eq 'always-update') {
 		return OpenBSD::PackingElement::AlwaysUpdate->new;
-	} elsif ($args eq 'explicit-update') {
-		return OpenBSD::PackingElement::ExplicitUpdate->new;
 	} else {
 		die "Unknown option: $args";
 	}
@@ -887,10 +884,9 @@ sub write_no_sig()
 {
 }
 
-package OpenBSD::PackingElement::SystemPackage;
-our @ISA=qw(OpenBSD::PackingElement::UniqueOption);
-
-sub category() { 'system-package' }
+package OpenBSD::PackingElement::Firmware;
+our @ISA=qw(OpenBSD::PackingElement::ManualInstallation);
+sub category() { 'firmware' }
 
 package OpenBSD::PackingElement::AlwaysUpdate;
 our @ISA=qw(OpenBSD::PackingElement::UniqueOption);
@@ -900,13 +896,6 @@ sub category()
 	'always-update';
 }
 
-package OpenBSD::PackingElement::ExplicitUpdate;
-our @ISA=qw(OpenBSD::PackingElement::UniqueOption);
-
-sub category()
-{
-	'explicit-update';
-}
 # The special elements that don't end in the right place
 package OpenBSD::PackingElement::ExtraInfo;
 our @ISA=qw(OpenBSD::PackingElement::Unique OpenBSD::PackingElement::Comment);
@@ -1032,26 +1021,6 @@ sub category() { "wantlib" }
 sub keyword() { "wantlib" }
 __PACKAGE__->register_with_factory;
 
-sub destate
-{
-	my ($self, $state) = @_;
-	$state->{lastchecksummable} = $self;
-}
-
-sub write
-{
-	my ($self, $fh) = @_;
-	$self->SUPER::write($fh);
-	if (defined $self->{d}) {
-		$self->{d}->write($fh);
-	}
-}
-
-sub add_digest
-{
-	&OpenBSD::PackingElement::FileBase::add_digest;
-}
-
 OpenBSD::Auto::cache(spec,
     sub {
     	my $self = shift;
@@ -1077,13 +1046,6 @@ sub subdir
 {
 	return shift->{name};
 }
-
-package OpenBSD::PackingElement::Incompatibility;
-our @ISA=qw(OpenBSD::PackingElement::Meta);
-
-sub keyword() { "incompatibility" }
-__PACKAGE__->register_with_factory;
-sub category() { "incompatibility" }
 
 package OpenBSD::PackingElement::AskUpdate;
 our @ISA=qw(OpenBSD::PackingElement::Meta);
@@ -1113,13 +1075,6 @@ OpenBSD::Auto::cache(spec,
 	my $self = shift;
 	return OpenBSD::PkgSpec->new($self->{pattern})
     });
-
-package OpenBSD::PackingElement::UpdateSet;
-our @ISA=qw(OpenBSD::PackingElement::Meta);
-
-sub keyword() { "updateset" }
-__PACKAGE__->register_with_factory;
-sub category() { "updateset" }
 
 package OpenBSD::PackingElement::NewAuth;
 our @ISA=qw(OpenBSD::PackingElement::Action);
@@ -1228,21 +1183,6 @@ sub destate
 	my ($self, $state) = @_;
 	$state->set_cwd($self->name);
 }
-
-package OpenBSD::PackingElement::EndFake;
-our @ISA=qw(OpenBSD::PackingElement::State);
-
-
-sub keyword() { 'endfake' }
-__PACKAGE__->register_with_factory;
-
-sub new
-{
-	my ($class, @args) = @_;
-	bless {}, $class;
-}
-
-sub stringize() { '' }
 
 package OpenBSD::PackingElement::Owner;
 our @ISA=qw(OpenBSD::PackingElement::State);
@@ -1441,9 +1381,6 @@ sub write
 {
 	my ($self, $fh) = @_;
 	$self->SUPER::write($fh);
-	if (defined $self->{noshadow}) {
-		print $fh "\@tag no shadow\n";
-	}
 }
 
 package OpenBSD::PackingElement::Dir;
@@ -1585,9 +1522,6 @@ sub destate
 package OpenBSD::PackingElement::SpecialFile;
 our @ISA=qw(OpenBSD::PackingElement::Unique);
 
-sub exec_on_add { 0 }
-sub exec_on_delete { 0 }
-
 sub add_digest
 {
 	&OpenBSD::PackingElement::FileBase::add_digest;
@@ -1629,27 +1563,52 @@ sub stringize
 	return $self->category;
 }
 
-sub add
-{
-	my ($class, $plist, @args) = @_;
-
-	$class->SUPER::add($plist, $class->category);
-}
-
 sub fullname
 {
 	my $self = shift;
 	my $d = $self->infodir;
 	if (defined $d) {
-		return $d.$self->category;
+		return $d.$self->name;
 	} else {
 		return undef;
 	}
 }
 
+sub category
+{
+	my $self = shift;
+
+	return $self->name;
+}
+
+sub new
+{
+	&OpenBSD::PackingElement::UniqueOption::new;
+}
+
+sub may_verify_digest
+{
+	my ($self, $state) = @_;
+	if (!$state->{check_digest}) {
+		return;
+	}
+	if (!defined $self->{d}) {
+		$state->log->fatal($state->f("#1 does not have a signature",
+		    $self->fullname));
+	}
+	my $d = $self->compute_digest($self->fullname);
+	if (!$d->equals($self->{d})) {
+		$state->log->fatal($state->f("checksum for #1 does not match",
+		    $self->fullname));
+	}
+	if ($state->verbose >= 3) {
+		$state->say("Checksum match for #1", $self->fullname);
+	}
+}
+
 package OpenBSD::PackingElement::FCONTENTS;
 our @ISA=qw(OpenBSD::PackingElement::SpecialFile);
-sub category() { OpenBSD::PackageInfo::CONTENTS }
+sub name() { OpenBSD::PackageInfo::CONTENTS }
 # XXX we don't write `self'
 sub write
 {}
@@ -1662,13 +1621,14 @@ sub copy_deep_if
 {
 }
 
-package OpenBSD::PackingElement::FCOMMENT;
-our @ISA=qw(OpenBSD::PackingElement::SpecialFile);
-sub category() { OpenBSD::PackageInfo::COMMENT }
+# CONTENTS doesn't have a checksum
+sub may_verify_digest
+{
+}
 
 package OpenBSD::PackingElement::FDESC;
 our @ISA=qw(OpenBSD::PackingElement::SpecialFile);
-sub category() { OpenBSD::PackageInfo::DESC }
+sub name() { OpenBSD::PackageInfo::DESC }
 
 package OpenBSD::PackingElement::DisplayFile;
 our @ISA=qw(OpenBSD::PackingElement::SpecialFile);
@@ -1692,11 +1652,11 @@ sub prepare
 
 package OpenBSD::PackingElement::FDISPLAY;
 our @ISA=qw(OpenBSD::PackingElement::DisplayFile);
-sub category() { OpenBSD::PackageInfo::DISPLAY }
+sub name() { OpenBSD::PackageInfo::DISPLAY }
 
 package OpenBSD::PackingElement::FUNDISPLAY;
 our @ISA=qw(OpenBSD::PackingElement::DisplayFile);
-sub category() { OpenBSD::PackageInfo::UNDISPLAY }
+sub name() { OpenBSD::PackageInfo::UNDISPLAY }
 
 package OpenBSD::PackingElement::Arch;
 our @ISA=qw(OpenBSD::PackingElement::Unique);
@@ -1747,8 +1707,31 @@ sub check
 	return;
 }
 
+package OpenBSD::PackingElement::Signer;
+our @ISA=qw(OpenBSD::PackingElement::Unique);
+sub keyword() { 'signer' }
+__PACKAGE__->register_with_factory;
+sub category() { "signer" }
+sub new
+{
+	my ($class, $args) = @_;
+	unless ($args =~ m/^[\w\d\.\-\+\@]+$/) {
+		die "Invalid characters in signer $args\n";
+	}
+	$class->SUPER::new($args);
+}
+
+# don't incorporate this into compared signatures
+sub write_without_variation
+{
+}
+
+# XXX digital-signatures have to be unique, since they are a part
+# of the unsigned packing-list, with only the b64sig part removed
+# (likewise for signer)
 package OpenBSD::PackingElement::DigitalSignature;
 our @ISA=qw(OpenBSD::PackingElement::Unique);
+
 sub keyword() { 'digital-signature' }
 __PACKAGE__->register_with_factory;
 sub category() { "digital-signature" }
@@ -1794,12 +1777,11 @@ sub new
 		$class;
 }
 
-sub new_x509
+sub blank
 {
-	my ($class) = @_;
-	bless { key => 'x509', timestamp => time, b64sig => '' }, $class;
+	my ($class, $type) = @_;
+	bless { key => $type, timestamp => time, b64sig => '' }, $class;
 }
-
 
 sub stringize
 {
@@ -1813,6 +1795,11 @@ sub write_no_sig
 	my ($self, $fh) = @_;
 	print $fh "\@", $self->keyword, " ", $self->{key}, ":",
 	    time_to_iso8601($self->{timestamp}), "\n";
+}
+
+# don't incorporate this into compared signatures
+sub write_without_variation
+{
 }
 
 package OpenBSD::PackingElement::Old;
@@ -1853,7 +1840,7 @@ sub register_old_keyword
 }
 
 for my $k (qw(src display mtree ignore_inst dirrm pkgcfl pkgdep newdepend
-    libdepend ignore)) {
+    libdepend endfake ignore vendor incompatibility md5)) {
 	__PACKAGE__->register_old_keyword($k);
 }
 

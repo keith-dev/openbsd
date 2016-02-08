@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_ral_pci.c,v 1.20 2010/08/04 19:48:33 damien Exp $  */
+/*	$OpenBSD: if_ral_pci.c,v 1.23 2013/12/06 21:03:04 deraadt Exp $  */
 
 /*-
  * Copyright (c) 2005-2010 Damien Bergamini <damien.bergamini@free.fr>
@@ -31,7 +31,6 @@
 #include <sys/malloc.h>
 #include <sys/timeout.h>
 #include <sys/device.h>
-#include <sys/workq.h>
 
 #include <machine/bus.h>
 #include <machine/intr.h>
@@ -59,28 +58,28 @@ static struct ral_opns {
 	int	(*attach)(void *, int);
 	int	(*detach)(void *);
 	void	(*suspend)(void *);
-	void	(*resume)(void *);
+	void	(*wakeup)(void *);
 	int	(*intr)(void *);
 
 }  ral_rt2560_opns = {
 	rt2560_attach,
 	rt2560_detach,
 	rt2560_suspend,
-	rt2560_resume,
+	rt2560_wakeup,
 	rt2560_intr
 
 }, ral_rt2661_opns = {
 	rt2661_attach,
 	rt2661_detach,
 	rt2661_suspend,
-	rt2661_resume,
+	rt2661_wakeup,
 	rt2661_intr
 
 }, ral_rt2860_opns = {
 	rt2860_attach,
 	rt2860_detach,
 	rt2860_suspend,
-	rt2860_resume,
+	rt2860_wakeup,
 	rt2860_intr
 };
 
@@ -97,7 +96,6 @@ struct ral_pci_softc {
 	pci_chipset_tag_t	sc_pc;
 	void			*sc_ih;
 	bus_size_t		sc_mapsize;
-	struct workq_task	sc_resume_wqt;
 };
 
 /* Base Address Register */
@@ -107,7 +105,7 @@ int	ral_pci_match(struct device *, void *, void *);
 void	ral_pci_attach(struct device *, struct device *, void *);
 int	ral_pci_detach(struct device *, int);
 int	ral_pci_activate(struct device *, int);
-void	ral_pci_resume(void *, void *);
+void	ral_pci_wakeup(struct ral_pci_softc *);
 
 struct cfattach ral_pci_ca = {
 	sizeof (struct ral_pci_softc), ral_pci_match, ral_pci_attach,
@@ -131,6 +129,7 @@ const struct pci_matchid ral_pci_devices[] = {
 	{ PCI_VENDOR_EDIMAX, PCI_PRODUCT_EDIMAX_RT2860_5 },
 	{ PCI_VENDOR_EDIMAX, PCI_PRODUCT_EDIMAX_RT2860_6 },
 	{ PCI_VENDOR_EDIMAX, PCI_PRODUCT_EDIMAX_RT2860_7 },
+	{ PCI_VENDOR_RALINK, PCI_PRODUCT_RALINK_RT3060 },
 	{ PCI_VENDOR_RALINK, PCI_PRODUCT_RALINK_RT3062 },
 	{ PCI_VENDOR_RALINK, PCI_PRODUCT_RALINK_RT3090 },
 	{ PCI_VENDOR_RALINK, PCI_PRODUCT_RALINK_RT3091 },
@@ -239,23 +238,20 @@ ral_pci_activate(struct device *self, int act)
 	case DVACT_SUSPEND:
 		(*psc->sc_opns->suspend)(sc);
 		break;
-	case DVACT_RESUME:
-		workq_queue_task(NULL, &psc->sc_resume_wqt, 0,
-		    ral_pci_resume, psc, NULL);
+	case DVACT_WAKEUP:
+		ral_pci_wakeup(psc);
 		break;
 	}
-
 	return 0;
 }
 
 void
-ral_pci_resume(void *arg1, void *arg2)
+ral_pci_wakeup(struct ral_pci_softc *psc)
 {
-	struct ral_pci_softc *psc = arg1;
 	struct rt2560_softc *sc = &psc->sc_sc;
 	int s;
 
 	s = splnet();
-	(*psc->sc_opns->resume)(sc);
+	(*psc->sc_opns->wakeup)(sc);
 	splx(s);
 }

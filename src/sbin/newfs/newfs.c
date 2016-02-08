@@ -1,4 +1,4 @@
-/*	$OpenBSD: newfs.c,v 1.91 2013/06/11 16:42:05 deraadt Exp $	*/
+/*	$OpenBSD: newfs.c,v 1.95 2013/11/22 04:12:48 deraadt Exp $	*/
 /*	$NetBSD: newfs.c,v 1.20 1996/05/16 07:13:03 thorpej Exp $	*/
 
 /*
@@ -113,7 +113,7 @@ u_short	dkcksum(struct disklabel *);
 int	mfs;			/* run as the memory based filesystem */
 int	Nflag;			/* run without writing file system */
 int	Oflag = 1;		/* 0 = 4.3BSD ffs, 1 = 4.4BSD ffs, 2 = ffs2 */
-daddr_t	fssize;			/* file system size */
+daddr_t	fssize;			/* file system size in 512-byte blocks */
 long long	sectorsize;		/* bytes/sector */
 int	fsize = 0;		/* fragment size */
 int	bsize = 0;		/* block size */
@@ -171,6 +171,7 @@ main(int argc, char *argv[])
 	const char *errstr;
 	long long fssize_input = 0;
 	int fssize_usebytes = 0;
+	u_int64_t nsecs;
 
 	if (strstr(__progname, "mfs"))
 		mfs = Nflag = quiet = 1;
@@ -272,7 +273,7 @@ main(int argc, char *argv[])
 				fatal("file system size invalid: %s", optarg);
 			fssize_usebytes = 0;    /* in case of multiple -s */
 			for (s1 = optarg; *s1 != '\0'; s1++)
-				if (isalpha(*s1)) {
+				if (isalpha((unsigned char)*s1)) {
 					fssize_usebytes = 1;
 					break;
 				}
@@ -341,7 +342,7 @@ main(int argc, char *argv[])
 		mfsfakelabel.d_ntracks = 16;
 		mfsfakelabel.d_ncylinders = 16;
 		mfsfakelabel.d_secpercyl = 1024;
-		mfsfakelabel.d_secperunit = 16384;
+		DL_SETDSIZE(&mfsfakelabel, 16384);
 		mfsfakelabel.d_npartitions = 1;
 		mfsfakelabel.d_version = 1;
 		DL_SETPSIZE(&mfsfakelabel.d_partitions[0], 16384);
@@ -405,11 +406,11 @@ main(int argc, char *argv[])
 		cp = strchr(argv[0], '\0') - 1;
 		if (cp == NULL ||
 		    ((*cp < 'a' || *cp > ('a' + maxpartitions - 1))
-		    && !isdigit(*cp)))
+		    && !isdigit((unsigned char)*cp)))
 			fatal("%s: can't figure out file system partition",
 			    argv[0]);
 		lp = getdisklabel(special, fsi);
-		if (isdigit(*cp))
+		if (isdigit((unsigned char)*cp))
 			pp = &lp->d_partitions[0];
 		else
 			pp = &lp->d_partitions[*cp - 'a'];
@@ -428,19 +429,20 @@ havelabel:
 	}
 
 	if (fssize_usebytes) {
-		fssize = (daddr_t)fssize_input / (daddr_t)sectorsize;
-		if ((daddr_t)fssize_input % (daddr_t)sectorsize != 0)
-			fssize++;
+		nsecs = fssize_input / sectorsize;
+		if (fssize_input % sectorsize != 0)
+			nsecs++;
 	} else if (fssize_input == 0)
-		fssize = DL_GETPSIZE(pp);
+		nsecs = DL_GETPSIZE(pp);
 	else
-		fssize = (daddr_t)fssize_input;
+		nsecs = fssize_input;
 
-	if (fssize > DL_GETPSIZE(pp) && !mfs)
+	if (nsecs > DL_GETPSIZE(pp) && !mfs)
 	       fatal("%s: maximum file system size on the `%c' partition is "
-		   "%lld sectors", argv[0], *cp, DL_GETPSIZE(pp));
+		   "%llu sectors", argv[0], *cp, DL_GETPSIZE(pp));
 
-	fssize *= sectorsize / DEV_BSIZE;
+	/* Can't use DL_SECTOBLK() because sectorsize may not be from label! */
+	fssize = nsecs * (sectorsize / DEV_BSIZE);
 	if (oflagset == 0 && fssize >= INT_MAX)
 		Oflag = 2;	/* FFS2 */
 	if (fsize == 0) {
@@ -598,7 +600,7 @@ rewritelabel(char *s, int fd, struct disklabel *lp)
 	if (lp->d_type == DTYPE_SMD && lp->d_flags & D_BADSECT) {
 		int i;
 		int cfd;
-		daddr_t alt;
+		u_int64_t alt;
 		char specname[64];
 		char blk[1024];
 		char *cp;
@@ -609,7 +611,7 @@ rewritelabel(char *s, int fd, struct disklabel *lp)
 		strncpy(specname, s, sizeof(specname) - 1);
 		specname[sizeof(specname) - 1] = '\0';
 		cp = specname + strlen(specname) - 1;
-		if (!isdigit(*cp))
+		if (!isdigit((unsigned char)*cp))
 			*cp = 'c';
 		cfd = open(specname, O_WRONLY);
 		if (cfd < 0)

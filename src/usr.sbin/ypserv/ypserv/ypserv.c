@@ -1,4 +1,4 @@
-/*	$OpenBSD: ypserv.c,v 1.37 2010/01/20 23:20:28 schwarze Exp $ */
+/*	$OpenBSD: ypserv.c,v 1.39 2013/12/05 14:22:42 jca Exp $ */
 
 /*
  * Copyright (c) 1994 Mats O Jansson <moj@stacken.kth.se>
@@ -45,9 +45,11 @@
 #include <rpc/pmap_clnt.h>
 #include <memory.h>
 #include <syslog.h>
+#include <dbm.h>
 #include "acl.h"
 #include "yplog.h"
 #include "ypdef.h"
+#include "ypserv.h"
 #include <sys/wait.h>
 
 void ypdb_init(void);
@@ -391,7 +393,7 @@ main(int argc, char *argv[])
 	struct sockaddr_in saddr;
 	socklen_t asize = sizeof(saddr);
 	extern char *optarg;
-	SVCXPRT *transp;
+	SVCXPRT *transp = NULL;
 
 	while ((ch = getopt(argc, argv, "1a:dx")) != -1)
 		switch (ch) {

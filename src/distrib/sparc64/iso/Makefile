@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.11 2011/06/08 19:16:19 krw Exp $
+#	$OpenBSD: Makefile,v 1.14 2014/03/02 05:46:26 deraadt Exp $
 
 TOP=	${.CURDIR}/..
 
@@ -26,6 +26,10 @@ ${CDROM}: ${BASE} ${XBASE}
 	cp -p ${BASE} ${.OBJDIR}/cd-dir/${OSREV}/${MACHINE}
 	cp -p ${XBASE} ${.OBJDIR}/cd-dir/${OSREV}/${MACHINE}
 
+	cat ${RELDIR}/SHA256 ${RELXDIR}/SHA256 > \
+	    ${.OBJDIR}/cd-dir/${OSREV}/${MACHINE}/SHA256
+	# XXX no SHA256.sig
+
 	cp -p ${RELDIR}/ofwboot ${.OBJDIR}/cd-dir/${OSREV}/${MACHINE}
 
 	echo 'm 1	sun4' > ${.OBJDIR}/cd-dir/.slicemapfile
@@ -48,11 +52,6 @@ ${CDROM}: ${BASE} ${XBASE}
 
 install:
 	cp ${CDROM} ${RELDIR}/
-	# update the SHA256 file
-	grep -v ${CDROM} ${RELDIR}/SHA256 > ${RELDIR}/SHA256.new
-	sum -a sha256 ${CDROM} >> ${RELDIR}/SHA256.new
-	sort ${RELDIR}/SHA256.new > ${RELDIR}/SHA256
-	rm ${RELDIR}/SHA256.new
 
 clean cleandir:
 	/bin/rm -rf ${CDROM} ${.OBJDIR}/cd-dir

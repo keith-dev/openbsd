@@ -1,4 +1,4 @@
-/*	$OpenBSD: kvm_udf.c,v 1.5 2013/03/23 17:11:08 deraadt Exp $	*/
+/*	$OpenBSD: kvm_udf.c,v 1.7 2013/11/16 00:37:11 guenther Exp $	*/
 
 /*
  * Copyright (c) 2001, 2002 Scott Long <scottl@freebsd.org>
@@ -44,6 +44,7 @@
 #include <db.h>
 
 #include "kvm_private.h"
+#include "kvm_file.h"
 
 /* Convert file entry permission (5 bits per owner/group/user) to a mode_t */
 static mode_t
@@ -67,7 +68,7 @@ udf_permtomode(struct unode *up)
 }
 
 int
-_kvm_stat_udf(kvm_t *kd, struct kinfo_file2 *kf, struct vnode *vp)
+_kvm_stat_udf(kvm_t *kd, struct kinfo_file *kf, struct vnode *vp)
 {
 	struct unode up;
 	struct file_entry fentry;

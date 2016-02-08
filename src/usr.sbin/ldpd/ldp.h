@@ -1,4 +1,4 @@
-/*	$OpenBSD: ldp.h,v 1.13 2013/06/04 02:25:28 claudio Exp $ */
+/*	$OpenBSD: ldp.h,v 1.16 2013/10/17 17:52:21 renato Exp $ */
 
 /*
  * Copyright (c) 2009 Michele Marchetto <michele@openbsd.org>
@@ -92,6 +92,7 @@ struct ldp_hdr {
 } __packed;
 
 #define	LDP_HDR_SIZE		10
+#define	LDP_HDR_PDU_LEN		6
 
 /* TLV record */
 struct tlv {
@@ -110,7 +111,6 @@ struct ldp_msg {
 
 #define LDP_MSG_LEN		8
 
-#define	UNKNOWN_FLAGS_MASK	0xc000
 #define	UNKNOWN_FLAG		0x8000
 #define	FORWARD_FLAG		0xc000
 
@@ -191,8 +191,6 @@ struct address_list_tlv {
 	u_int16_t	family;
 	/* address entries */
 } __packed;
-
-#define	BASIC_LABEL_MAP_LEN	24
 
 #define	ADDR_IPV4		0x1
 #define	ADDR_IPV6		0x2

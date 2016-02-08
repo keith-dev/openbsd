@@ -1,12 +1,13 @@
 #!/bin/sh
 #
-# $OpenBSD: identd,v 1.4 2013/03/24 07:43:32 ajacoutot Exp $
+# $OpenBSD: identd,v 1.7 2013/12/11 16:25:48 jca Exp $
 
-daemon="/usr/libexec/identd -b"
-daemon_flags="-el"
+daemon="/usr/sbin/identd"
+daemon_flags="-e"
 
 . /etc/rc.d/rc.subr
 
+pexp="identd: (listen|resolver)"
 rc_reload=NO
 
 rc_cmd $1

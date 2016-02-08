@@ -1,4 +1,4 @@
-/*	$OpenBSD: ipifuncs.c,v 1.19 2013/06/01 22:22:13 mlarkin Exp $	*/
+/*	$OpenBSD: ipifuncs.c,v 1.22 2014/01/21 09:40:54 kettenis Exp $	*/
 /*	$NetBSD: ipifuncs.c,v 1.1 2003/04/26 18:39:28 fvdl Exp $ */
 
 /*-
@@ -36,8 +36,6 @@
  * Interprocessor interrupt handlers.
  */
 
-#include "mtrr.h"
-
 #include <sys/param.h>
 #include <sys/device.h>
 #include <sys/memrange.h>
@@ -67,7 +65,7 @@ void x86_64_ipi_halt_realmode(struct cpu_info *);
 extern void hibernate_drop_to_real_mode(void);
 #endif /* HIBERNATE */
 
-#if NMTRR > 0
+#ifdef MTRR
 void x86_64_ipi_reload_mtrr(struct cpu_info *);
 #else
 #define x86_64_ipi_reload_mtrr NULL
@@ -105,6 +103,7 @@ x86_64_ipi_halt(struct cpu_info *ci)
 	SCHED_ASSERT_UNLOCKED();
 	fpusave_cpu(ci, 1);
 	disable_intr();
+	lapic_disable();
 	wbinvd();
 	ci->ci_flags &= ~CPUF_RUNNING;
 	wbinvd();
@@ -128,7 +127,7 @@ x86_64_ipi_synch_fpu(struct cpu_info *ci)
 		fpusave_cpu(ci, 1);
 }
 
-#if NMTRR > 0
+#ifdef MTRR
 void
 x86_64_ipi_reload_mtrr(struct cpu_info *ci)
 {
@@ -143,7 +142,6 @@ x86_64_ipi_halt_realmode(struct cpu_info *ci)
 {
 	/* Halt CPUs and park in real mode */
 
-	SCHED_ASSERT_UNLOCKED();
 	fpusave_cpu(ci, 1);
 	disable_intr();
 	wbinvd();

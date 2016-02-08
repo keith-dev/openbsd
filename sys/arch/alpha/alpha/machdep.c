@@ -1,4 +1,4 @@
-/* $OpenBSD: machdep.c,v 1.141 2013/06/11 16:42:06 deraadt Exp $ */
+/* $OpenBSD: machdep.c,v 1.149 2014/02/18 19:37:32 miod Exp $ */
 /* $NetBSD: machdep.c,v 1.210 2000/06/01 17:12:38 thorpej Exp $ */
 
 /*-
@@ -78,7 +78,6 @@
 #include <sys/tty.h>
 #include <sys/user.h>
 #include <sys/exec.h>
-#include <sys/exec_ecoff.h>
 #include <sys/sysctl.h>
 #include <sys/core.h>
 #include <sys/kcore.h>
@@ -111,9 +110,8 @@
 
 #ifdef DDB
 #include <machine/db_machdep.h>
-#include <ddb/db_access.h>
-#include <ddb/db_sym.h>
 #include <ddb/db_extern.h>
+#include <ddb/db_interface.h>
 #endif
 
 #include "ioasic.h"
@@ -122,10 +120,6 @@
 #include <machine/tc_machdep.h>
 #include <dev/tc/tcreg.h>
 #include <dev/tc/ioasicvar.h>
-#endif
-
-#ifdef BROKEN_PROM_CONSOLE
-extern void sio_intr_shutdown(void);
 #endif
 
 int	cpu_dump(void);
@@ -167,7 +161,6 @@ int	unusedmem;		/* amount of memory for OS that we don't use */
 int	unknownmem;		/* amount of memory with an unknown use */
 
 int	cputype;		/* system type, from the RPB */
-int	alpha_cpus;
 
 int	bootdev_debug = 0;	/* patchable, or from DDB */
 
@@ -256,7 +249,8 @@ alpha_init(unused, ptb, bim, bip, biv)
 	 * Set our SysValue to the address of our cpu_info structure.
 	 * Secondary processors do this in their spinup trampoline.
 	 */
-	alpha_pal_wrval((u_long)&cpu_info[cpu_id]);
+	alpha_pal_wrval((u_long)&cpu_info_primary);
+	cpu_info[cpu_id] = &cpu_info_primary;
 #endif
 
 	ci = curcpu();
@@ -762,18 +756,19 @@ nobootinfo:
 	 * Figure out the number of cpus in the box, from RPB fields.
 	 * Really.  We mean it.
 	 */
-	for (alpha_cpus = 0, i = 0; i < hwrpb->rpb_pcs_cnt; i++) {
+	for (ncpusfound = 0, i = 0; i < hwrpb->rpb_pcs_cnt; i++) {
 		struct pcs *pcsp;
 
 		pcsp = LOCATE_PCS(hwrpb, i);
 		if ((pcsp->pcs_flags & PCS_PP) != 0)
-			alpha_cpus++;
+			ncpusfound++;
 	}
 
 	/*
 	 * Initialize debuggers, and break into them if appropriate.
 	 */
 #ifdef DDB
+	db_machine_init();
 	ddb_init();
 
 	if (boothowto & RB_KDB)
@@ -967,7 +962,7 @@ skipMHz:
 
 	printf("\n");
 	printf("%ld byte page size, %d processor%s.\n",
-	    hwrpb->rpb_page_size, alpha_cpus, alpha_cpus == 1 ? "" : "s");
+	    hwrpb->rpb_page_size, ncpusfound, ncpusfound == 1 ? "" : "s");
 #if 0
 	/* this is not particularly useful! */
 	printf("variation: 0x%lx, revision 0x%lx\n",
@@ -983,15 +978,8 @@ boot(howto)
 	int howto;
 {
 #if defined(MULTIPROCESSOR)
-#if 0 /* XXX See below. */
-	u_long cpu_id;
-#endif
-#endif
-
-#if defined(MULTIPROCESSOR)
-	/* We must be running on the primary CPU. */
-	if (alpha_pal_whami() != hwrpb->rpb_primary_cpu_id)
-		panic("cpu_reboot: not on primary CPU!");
+	u_long wait_mask;
+	int i;
 #endif
 
 	/* If system is cold, just halt. */
@@ -1026,29 +1014,36 @@ boot(howto)
 	uvm_shutdown();
 	splhigh();		/* Disable interrupts. */
 
+#if defined(MULTIPROCESSOR)
+	/*
+	 * Halt all other CPUs.
+	 */
+	wait_mask = (1UL << hwrpb->rpb_primary_cpu_id);
+	alpha_broadcast_ipi(ALPHA_IPI_HALT);
+
+	/* Ensure any CPUs paused by DDB resume execution so they can halt */
+	cpus_paused = 0;
+
+	for (i = 0; i < 10000; i++) {
+		alpha_mb();
+		if (cpus_running == wait_mask)
+			break;
+		delay(1000);
+	}
+	alpha_mb();
+	if (cpus_running != wait_mask)
+		printf("WARNING: Unable to halt secondary CPUs (0x%lx)\n",
+		    cpus_running);
+#endif
+
 	/* If rebooting and a dump is requested do it. */
 	if (howto & RB_DUMP)
 		dumpsys();
 
 haltsys:
 	doshutdownhooks();
-	config_suspend(TAILQ_FIRST(&alldevs), DVACT_POWERDOWN);
-
-#ifdef BROKEN_PROM_CONSOLE
-	sio_intr_shutdown(NULL);
-#endif
-
-#if defined(MULTIPROCESSOR)
-#if 0 /* XXX doesn't work when called from here?! */
-	/* Kill off any secondary CPUs. */
-	for (cpu_id = 0; cpu_id < hwrpb->rpb_pcs_cnt; cpu_id++) {
-		if (cpu_id == hwrpb->rpb_primary_cpu_id ||
-		    cpu_info[cpu_id].ci_softc == NULL)
-			continue;
-		cpu_halt_secondary(cpu_id);
-	}
-#endif
-#endif
+	if (!TAILQ_EMPTY(&alldevs))
+		config_suspend(TAILQ_FIRST(&alldevs), DVACT_POWERDOWN);
 
 #ifdef BOOTKEY
 	printf("hit any key to %s...\n", howto & RB_HALT ? "halt" : "reboot");
@@ -1722,6 +1717,7 @@ setregs(p, pack, stack, retval)
 #ifdef DEBUG
 	for (i = 0; i < FRAME_SIZE; i++)
 		tfp->tf_regs[i] = 0xbabefacedeadbeef;
+	tfp->tf_regs[FRAME_A1] = 0;
 #else
 	bzero(tfp->tf_regs, FRAME_SIZE * sizeof tfp->tf_regs[0]);
 #endif
@@ -1754,10 +1750,15 @@ void
 fpusave_cpu(struct cpu_info *ci, int save)
 {
 	struct proc *p;
+#if defined(MULTIPROCESSOR)
+	int s;
+#endif
 
 	KDASSERT(ci == curcpu());
 
 #if defined(MULTIPROCESSOR)
+	/* Need to block IPIs */
+	s = splipi();
 	atomic_setbits_ulong(&ci->ci_flags, CPUF_FPUSAVE);
 #endif
 
@@ -1778,6 +1779,7 @@ fpusave_cpu(struct cpu_info *ci, int save)
 out:
 #if defined(MULTIPROCESSOR)
 	atomic_clearbits_ulong(&ci->ci_flags, CPUF_FPUSAVE);
+	alpha_pal_swpipl(s);
 #endif
 	return;
 }
@@ -1792,37 +1794,52 @@ fpusave_proc(struct proc *p, int save)
 	struct cpu_info *oci;
 #if defined(MULTIPROCESSOR)
 	u_long ipi = save ? ALPHA_IPI_SYNCH_FPU : ALPHA_IPI_DISCARD_FPU;
-	int spincount;
+	int s;
 #endif
 
 	KDASSERT(p->p_addr != NULL);
 
-	oci = p->p_addr->u_pcb.pcb_fpcpu;
-	if (oci == NULL) {
-		return;
-	}
+	for (;;) {
+#if defined(MULTIPROCESSOR)
+		/* Need to block IPIs */
+		s = splipi();
+#endif
+
+		oci = p->p_addr->u_pcb.pcb_fpcpu;
+		if (oci == NULL) {
+#if defined(MULTIPROCESSOR)
+			alpha_pal_swpipl(s);
+#endif
+			return;
+		}
 
 #if defined(MULTIPROCESSOR)
-	if (oci == ci) {
+		if (oci == ci) {
+			KASSERT(ci->ci_fpcurproc == p);
+			alpha_pal_swpipl(s);
+			fpusave_cpu(ci, save);
+			return;
+		}
+
+		/*
+		 * The other cpu may still be running and could have
+		 * discarded the fpu context on its own.
+		 */
+		if (oci->ci_fpcurproc != p)
+			continue;
+
+		alpha_send_ipi(oci->ci_cpuid, ipi);
+		alpha_pal_swpipl(s);
+
+		while (p->p_addr->u_pcb.pcb_fpcpu != NULL)
+			SPINLOCK_SPIN_HOOK;
+#else
 		KASSERT(ci->ci_fpcurproc == p);
 		fpusave_cpu(ci, save);
-		return;
-	}
-
-	KASSERT(oci->ci_fpcurproc == p);
-	alpha_send_ipi(oci->ci_cpuid, ipi);
-
-	spincount = 0;
-	while (p->p_addr->u_pcb.pcb_fpcpu != NULL) {
-		spincount++;
-		delay(1000);    /* XXX */
-		if (spincount > 10000)
-			panic("fpsave ipi didn't");
-	}
-#else
-	KASSERT(ci->ci_fpcurproc == p);
-	fpusave_cpu(ci, save);
 #endif /* MULTIPROCESSOR */
+
+		break;
+	}
 }
 
 int
@@ -1871,7 +1888,7 @@ delay(n)
 		 * the usec counter.
 		 */
 		cycles += curcycle;
-		while (cycles > cycles_per_usec) {
+		while (cycles >= cycles_per_usec) {
 			usec++;
 			cycles -= cycles_per_usec;
 		}

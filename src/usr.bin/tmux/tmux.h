@@ -1,4 +1,4 @@
-/* $OpenBSD: tmux.h,v 1.415 2013/07/05 14:38:23 nicm Exp $ */
+/* $OpenBSD: tmux.h,v 1.437 2014/02/23 00:53:06 nicm Exp $ */
 
 /*
  * Copyright (c) 2007 Nicholas Marriott <nicm@users.sourceforge.net>
@@ -19,7 +19,7 @@
 #ifndef TMUX_H
 #define TMUX_H
 
-#define PROTOCOL_VERSION 7
+#define PROTOCOL_VERSION 8
 
 #include <sys/param.h>
 #include <sys/time.h>
@@ -57,14 +57,6 @@ extern char   **environ;
 
 /* Automatic name refresh interval, in milliseconds. */
 #define NAME_INTERVAL 500
-
-/*
- * Maximum sizes of strings in message data. Don't forget to bump
- * PROTOCOL_VERSION if any of these change!
- */
-#define COMMAND_LENGTH 2048	/* packed argv size */
-#define TERMINAL_LENGTH 128	/* length of TERM environment variable */
-#define ENVIRON_LENGTH 1024	/* environment variable length */
 
 /*
  * UTF-8 data size. This must be big enough to hold combined characters as well
@@ -151,7 +143,7 @@ extern char   **environ;
 	"[layout #{window_layout}] #{window_id}"		\
 	"#{?window_active, (active),}";
 #define LIST_WINDOWS_WITH_SESSION_TEMPLATE			\
-	"#{session_name}: "					\
+	"#{session_name}:"					\
 	"#{window_index}: #{window_name}#{window_flags} "	\
 	"(#{window_panes} panes) "				\
 	"[#{window_width}x#{window_height}] "
@@ -437,27 +429,33 @@ ARRAY_DECL(causelist, char *);
 
 /* Message codes. */
 enum msgtype {
-	MSG_COMMAND,
+	MSG_VERSION = 12,
+
+	MSG_IDENTIFY_FLAGS = 100,
+	MSG_IDENTIFY_TERM,
+	MSG_IDENTIFY_TTYNAME,
+	MSG_IDENTIFY_CWD,
+	MSG_IDENTIFY_STDIN,
+	MSG_IDENTIFY_ENVIRON,
+	MSG_IDENTIFY_DONE,
+
+	MSG_COMMAND = 200,
 	MSG_DETACH,
-	MSG_ERROR,
+	MSG_DETACHKILL,
 	MSG_EXIT,
 	MSG_EXITED,
 	MSG_EXITING,
-	MSG_IDENTIFY,
-	MSG_STDIN,
+	MSG_LOCK,
 	MSG_READY,
 	MSG_RESIZE,
-	MSG_SHUTDOWN,
-	MSG_SUSPEND,
-	MSG_VERSION,
-	MSG_WAKEUP,
-	MSG_ENVIRON,
-	MSG_UNLOCK,
-	MSG_LOCK,
 	MSG_SHELL,
+	MSG_SHUTDOWN,
 	MSG_STDERR,
+	MSG_STDIN,
 	MSG_STDOUT,
-	MSG_DETACHKILL
+	MSG_SUSPEND,
+	MSG_UNLOCK,
+	MSG_WAKEUP,
 };
 
 /*
@@ -466,41 +464,8 @@ enum msgtype {
  * Don't forget to bump PROTOCOL_VERSION if any of these change!
  */
 struct msg_command_data {
-	pid_t		pid;		/* from $TMUX or -1 */
-	int		session_id;	/* from $TMUX or -1 */
-
-	int		argc;
-	char		argv[COMMAND_LENGTH];
-};
-
-struct msg_identify_data {
-	char		cwd[MAXPATHLEN];
-
-	char		term[TERMINAL_LENGTH];
-
-#define IDENTIFY_UTF8 0x1
-#define IDENTIFY_256COLOURS 0x2
-/* 0x4 unused */
-#define IDENTIFY_CONTROL 0x8
-#define IDENTIFY_TERMIOS 0x10
-	int		flags;
-};
-
-struct msg_lock_data {
-	char		cmd[COMMAND_LENGTH];
-};
-
-struct msg_environ_data {
-	char		var[ENVIRON_LENGTH];
-};
-
-struct msg_shell_data {
-	char		shell[MAXPATHLEN];
-};
-
-struct msg_exit_data {
-	int		retcode;
-};
+	int	argc;
+}; /* followed by packed argv */
 
 struct msg_stdin_data {
 	ssize_t	size;
@@ -599,6 +564,7 @@ enum mode_key_cmd {
 	MODEKEYCOPY_NEXTSPACEEND,
 	MODEKEYCOPY_NEXTWORD,
 	MODEKEYCOPY_NEXTWORDEND,
+	MODEKEYCOPY_OTHEREND,
 	MODEKEYCOPY_PREVIOUSPAGE,
 	MODEKEYCOPY_PREVIOUSSPACE,
 	MODEKEYCOPY_PREVIOUSWORD,
@@ -760,11 +726,12 @@ struct options_entry {
 	enum {
 		OPTIONS_STRING,
 		OPTIONS_NUMBER,
-		OPTIONS_DATA,
+		OPTIONS_STYLE
 	} type;
 
-	char		*str;
-	long long	 num;
+	char			*str;
+	long long	 	 num;
+	struct grid_cell	 style;
 
 	RB_ENTRY(options_entry) entry;
 };
@@ -948,7 +915,7 @@ struct window_pane {
 
 	char		*cmd;
 	char		*shell;
-	char		*cwd;
+	int		 cwd;
 
 	pid_t		 pid;
 	char		 tty[TTY_NAME_MAX];
@@ -1008,6 +975,7 @@ struct window {
 #define WINDOW_REDRAW 0x4
 #define WINDOW_SILENCE 0x8
 #define WINDOW_ZOOMED 0x10
+#define WINDOW_ALERTFLAGS (WINDOW_BELL|WINDOW_ACTIVITY|WINDOW_SILENCE)
 
 	struct options	 options;
 
@@ -1061,6 +1029,8 @@ struct layout_cell {
 	u_int		 yoff;
 
 	struct window_pane *wp;
+	struct window_pane *lastwp;
+
 	struct layout_cells cells;
 
 	TAILQ_ENTRY(layout_cell) entry;
@@ -1094,7 +1064,7 @@ struct session {
 	u_int		 id;
 
 	char		*name;
-	char		*cwd;
+	int		 cwd;
 
 	struct timeval	 creation_time;
 	struct timeval	 activity_time;
@@ -1293,8 +1263,10 @@ RB_HEAD(status_out_tree, status_out);
 /* Client connection. */
 struct client {
 	struct imsgbuf	 ibuf;
+
+	int		 fd;
 	struct event	 event;
-	int		 retcode;
+	int		 retval;
 
 	struct timeval	 creation_time;
 	struct timeval	 activity_time;
@@ -1302,8 +1274,10 @@ struct client {
 	struct environ	 environ;
 
 	char		*title;
-	char		*cwd;
+	int		 cwd;
 
+	char		*term;
+	char		*ttyname;
 	struct tty	 tty;
 
 	void		(*stdin_callback)(struct client *, int, void *);
@@ -1325,7 +1299,7 @@ struct client {
 #define CLIENT_EXIT 0x4
 #define CLIENT_REDRAW 0x8
 #define CLIENT_STATUS 0x10
-#define CLIENT_REPEAT 0x20 /* allow command to repeat within repeat time */
+#define CLIENT_REPEAT 0x20
 #define CLIENT_SUSPENDED 0x40
 #define CLIENT_BAD 0x80
 #define CLIENT_IDENTIFY 0x100
@@ -1334,7 +1308,11 @@ struct client {
 #define CLIENT_READONLY 0x800
 #define CLIENT_REDRAWWINDOW 0x1000
 #define CLIENT_CONTROL 0x2000
-#define CLIENT_FOCUSED 0x4000
+#define CLIENT_CONTROLCONTROL 0x4000
+#define CLIENT_FOCUSED 0x8000
+#define CLIENT_UTF8 0x10000
+#define CLIENT_256COLOURS 0x20000
+#define CLIENT_IDENTIFIED 0x40000
 	int		 flags;
 
 	struct event	 identify_timer;
@@ -1431,8 +1409,6 @@ struct cmd_q {
 	void			 (*emptyfn)(struct cmd_q *);
 	void			*data;
 
-	struct msg_command_data	*msgdata;
-
 	TAILQ_ENTRY(cmd_q)       waitentry;
 };
 
@@ -1449,12 +1425,10 @@ struct cmd_entry {
 
 #define CMD_STARTSERVER 0x1
 #define CMD_CANTNEST 0x2
-#define CMD_SENDENVIRON 0x4
-#define CMD_READONLY 0x8
+#define CMD_READONLY 0x4
 	int		 flags;
 
 	void		 (*key_binding)(struct cmd *, int);
-	int		 (*check)(struct args *);
 	enum cmd_retval	 (*exec)(struct cmd *, struct cmd_q *);
 };
 
@@ -1480,7 +1454,8 @@ enum options_table_type {
 	OPTIONS_TABLE_COLOUR,
 	OPTIONS_TABLE_ATTRIBUTES,
 	OPTIONS_TABLE_FLAG,
-	OPTIONS_TABLE_CHOICE
+	OPTIONS_TABLE_CHOICE,
+	OPTIONS_TABLE_STYLE
 };
 
 struct options_table_entry {
@@ -1493,6 +1468,8 @@ struct options_table_entry {
 
 	const char	       *default_str;
 	long long		default_num;
+
+	const char	       *style;
 };
 
 /* Tree of format entries. */
@@ -1528,13 +1505,10 @@ extern time_t	 start_time;
 extern char	 socket_path[MAXPATHLEN];
 extern int	 login_shell;
 extern char	*environ_path;
-extern pid_t	 environ_pid;
-extern int	 environ_session_id;
 void		 logfile(const char *);
 const char	*getshell(void);
 int		 checkshell(const char *);
 int		 areshell(const char *);
-const char*	 get_full_path(const char *, const char *);
 void		 setblocking(int, int);
 __dead void	 shell_exec(const char *, const char *);
 
@@ -1543,6 +1517,7 @@ extern struct cmd_q *cfg_cmd_q;
 extern int cfg_finished;
 extern int cfg_references;
 extern struct causelist cfg_causes;
+extern struct client *cfg_client;
 int		 load_cfg(const char *, struct cmd_q *, char **);
 void		 cfg_default_done(struct cmd_q *);
 void		 cfg_show_causes(struct session *);
@@ -1552,16 +1527,19 @@ int		 format_cmp(struct format_entry *, struct format_entry *);
 RB_PROTOTYPE(format_tree, format_entry, entry, format_cmp);
 struct format_tree *format_create(void);
 void		 format_free(struct format_tree *);
-void printflike3 format_add(
-		     struct format_tree *, const char *, const char *, ...);
+void printflike3 format_add(struct format_tree *, const char *, const char *,
+		     ...);
 const char	*format_find(struct format_tree *, const char *);
 char		*format_expand(struct format_tree *, const char *);
 void		 format_session(struct format_tree *, struct session *);
 void		 format_client(struct format_tree *, struct client *);
-void		 format_winlink(
-		     struct format_tree *, struct session *, struct winlink *);
-void		 format_window_pane(struct format_tree *, struct window_pane *);
-void		 format_paste_buffer(struct format_tree *, struct paste_buffer *);
+void		 format_window(struct format_tree *, struct window *);
+void		 format_winlink(struct format_tree *, struct session *,
+		     struct winlink *);
+void		 format_window_pane(struct format_tree *,
+		     struct window_pane *);
+void		 format_paste_buffer(struct format_tree *,
+		     struct paste_buffer *);
 
 /* mode-key.c */
 extern const struct mode_key_table mode_key_tables[];
@@ -1603,12 +1581,15 @@ void	options_free(struct options *);
 struct options_entry *options_find1(struct options *, const char *);
 struct options_entry *options_find(struct options *, const char *);
 void	options_remove(struct options *, const char *);
-struct options_entry *printflike3 options_set_string(
-	    struct options *, const char *, const char *, ...);
+struct options_entry *printflike3 options_set_string(struct options *,
+	    const char *, const char *, ...);
 char   *options_get_string(struct options *, const char *);
-struct options_entry *options_set_number(
-	    struct options *, const char *, long long);
+struct options_entry *options_set_number(struct options *, const char *,
+	    long long);
 long long options_get_number(struct options *, const char *);
+struct options_entry *options_set_style(struct options *, const char *,
+	    const char *, int);
+struct grid_cell *options_get_style(struct options *, const char *);
 
 /* options-table.c */
 extern const struct options_table_entry server_options_table[];
@@ -1669,7 +1650,7 @@ void	tty_set_title(struct tty *, const char *);
 void	tty_update_mode(struct tty *, int, struct screen *);
 void	tty_force_cursor_colour(struct tty *, const char *);
 void	tty_draw_line(struct tty *, struct screen *, u_int, u_int, u_int);
-int	tty_open(struct tty *, const char *, char **);
+int	tty_open(struct tty *, char **);
 void	tty_close(struct tty *);
 void	tty_free(struct tty *);
 void	tty_write(
@@ -1698,7 +1679,7 @@ void	tty_bell(struct tty *);
 /* tty-term.c */
 extern struct tty_terms tty_terms;
 extern const struct tty_term_code_entry tty_term_codes[NTTYCODE];
-struct tty_term *tty_term_find(char *, int, const char *, char **);
+struct tty_term *tty_term_find(char *, int, char **);
 void		 tty_term_free(struct tty_term *);
 int		 tty_term_has(struct tty_term *, enum tty_code_code);
 const char	*tty_term_string(struct tty_term *, enum tty_code_code);
@@ -1767,7 +1748,8 @@ int		 cmd_find_index(struct cmd_q *, const char *,
 struct winlink	*cmd_find_pane(struct cmd_q *, const char *, struct session **,
 		     struct window_pane **);
 char		*cmd_template_replace(const char *, const char *, int);
-const char     	*cmd_get_default_path(struct cmd_q *, const char *);
+struct window	*cmd_lookup_windowid(const char *);
+struct window_pane *cmd_lookup_paneid(const char *);
 extern const struct cmd_entry *cmd_table[];
 extern const struct cmd_entry cmd_attach_session_entry;
 extern const struct cmd_entry cmd_bind_key_entry;
@@ -1858,7 +1840,8 @@ extern const struct cmd_entry cmd_up_pane_entry;
 extern const struct cmd_entry cmd_wait_for_entry;
 
 /* cmd-attach-session.c */
-enum cmd_retval	 cmd_attach_session(struct cmd_q *, const char*, int, int);
+enum cmd_retval	 cmd_attach_session(struct cmd_q *, const char *, int, int,
+		     const char *);
 
 /* cmd-list.c */
 struct cmd_list	*cmd_list_parse(int, char **, const char *, u_int, char **);
@@ -1871,7 +1854,7 @@ int		 cmdq_free(struct cmd_q *);
 void printflike2 cmdq_print(struct cmd_q *, const char *, ...);
 void printflike2 cmdq_info(struct cmd_q *, const char *, ...);
 void printflike2 cmdq_error(struct cmd_q *, const char *, ...);
-int		 cmdq_guard(struct cmd_q *, const char *);
+int		 cmdq_guard(struct cmd_q *, const char *, int);
 void		 cmdq_run(struct cmd_q *, struct cmd_list *);
 void		 cmdq_append(struct cmd_q *, struct cmd_list *);
 int		 cmdq_continue(struct cmd_q *);
@@ -1910,7 +1893,7 @@ void	 server_add_accept(int);
 /* server-client.c */
 void	 server_client_handle_key(struct client *, int);
 void	 server_client_create(int);
-int      server_client_open(struct client *, struct session *, char **);
+int      server_client_open(struct client *, char **);
 void	 server_client_lost(struct client *);
 void	 server_client_callback(int, short, void *);
 void	 server_client_status_timer(void);
@@ -1922,10 +1905,10 @@ void	 server_window_loop(void);
 /* server-fn.c */
 void	 server_fill_environ(struct session *, struct environ *);
 void	 server_write_ready(struct client *);
-int	 server_write_client(
-	     struct client *, enum msgtype, const void *, size_t);
-void	 server_write_session(
-	     struct session *, enum msgtype, const void *, size_t);
+int	 server_write_client(struct client *, enum msgtype, const void *,
+	     size_t);
+void	 server_write_session(struct session *, enum msgtype, const void *,
+	     size_t);
 void	 server_redraw_client(struct client *);
 void	 server_status_client(struct client *);
 void	 server_redraw_session(struct session *);
@@ -2066,8 +2049,6 @@ void printflike5 screen_write_nputs(struct screen_write_ctx *,
 	     ssize_t, struct grid_cell *, int, const char *, ...);
 void	 screen_write_vnputs(struct screen_write_ctx *,
 	     ssize_t, struct grid_cell *, int, const char *, va_list);
-void	 screen_write_parsestyle(
-	     struct grid_cell *, struct grid_cell *, const char *);
 void	 screen_write_putc(
 	     struct screen_write_ctx *, struct grid_cell *, u_char);
 void	 screen_write_copy(struct screen_write_ctx *,
@@ -2103,7 +2084,7 @@ void	 screen_write_setselection(struct screen_write_ctx *, u_char *, u_int);
 void	 screen_write_rawstring(struct screen_write_ctx *, u_char *, u_int);
 
 /* screen-redraw.c */
-void	 screen_redraw_screen(struct client *, int, int);
+void	 screen_redraw_screen(struct client *, int, int, int);
 void	 screen_redraw_pane(struct client *, struct window_pane *);
 
 /* screen.c */
@@ -2147,9 +2128,9 @@ void		 winlink_stack_remove(struct winlink_stack *, struct winlink *);
 int		 window_index(struct window *, u_int *);
 struct window	*window_find_by_id(u_int);
 struct window	*window_create1(u_int, u_int);
-struct window	*window_create(const char *, const char *, const char *,
-		     const char *, struct environ *, struct termios *,
-		     u_int, u_int, u_int, char **);
+struct window	*window_create(const char *, const char *, const char *, int,
+		     struct environ *, struct termios *, u_int, u_int, u_int,
+		     char **);
 void		 window_destroy(struct window *);
 struct window_pane *window_get_active_at(struct window *, u_int, u_int);
 void		 window_set_active_at(struct window *, u_int, u_int);
@@ -2173,8 +2154,8 @@ struct window_pane *window_pane_create(struct window *, u_int, u_int, u_int);
 void		 window_pane_destroy(struct window_pane *);
 void		 window_pane_timer_start(struct window_pane *);
 int		 window_pane_spawn(struct window_pane *, const char *,
-		     const char *, const char *, struct environ *,
-		     struct termios *, char **);
+		     const char *, int, struct environ *, struct termios *,
+		     char **);
 void		 window_pane_resize(struct window_pane *, u_int, u_int);
 void		 window_pane_alternate_on(struct window_pane *,
 		     struct grid_cell *, int);
@@ -2197,7 +2178,6 @@ struct window_pane *window_pane_find_right(struct window_pane *);
 void		 window_set_name(struct window *, const char *);
 void		 window_remove_ref(struct window *);
 void		 winlink_clear_flags(struct winlink *);
-void		 window_mode_attrs(struct grid_cell *, struct options *);
 
 /* layout.c */
 u_int		 layout_count_cells(struct layout_cell *);
@@ -2275,8 +2255,10 @@ void	window_choose_collapse_all(struct window_pane *);
 void	window_choose_set_current(struct window_pane *, u_int);
 
 /* names.c */
-void		 queue_window_name(struct window *);
-char		*default_window_name(struct window *);
+void	 queue_window_name(struct window *);
+char	*default_window_name(struct window *);
+char	*format_window_name(struct window *);
+char	*parse_window_name(const char *);
 
 /* signal.c */
 void	set_signals(void(*)(int, short, void *));
@@ -2308,7 +2290,7 @@ RB_PROTOTYPE(sessions, session, entry, session_cmp);
 int		 session_alive(struct session *);
 struct session	*session_find(const char *);
 struct session	*session_find_by_id(u_int);
-struct session	*session_create(const char *, const char *, const char *,
+struct session	*session_create(const char *, const char *, int,
 		     struct environ *, struct termios *, int, u_int, u_int,
 		     char **);
 void		 session_destroy(struct session *);
@@ -2316,8 +2298,8 @@ int		 session_check_name(const char *);
 void		 session_update_activity(struct session *);
 struct session	*session_next_session(struct session *);
 struct session	*session_previous_session(struct session *);
-struct winlink	*session_new(struct session *,
-		     const char *, const char *, const char *, int, char **);
+struct winlink	*session_new(struct session *, const char *, const char *, int,
+		     int, char **);
 struct winlink	*session_attach(
 		     struct session *, struct window *, int, char **);
 int		 session_detach(struct session *, struct winlink *);
@@ -2345,7 +2327,6 @@ u_int	utf8_split2(u_int, u_char *);
 
 /* procname.c */
 char   *get_proc_name(int, char *);
-char   *get_proc_cwd(int);
 
 /* log.c */
 void		 log_open(int, const char *);
@@ -2367,5 +2348,15 @@ int printflike2	 xasprintf(char **, const char *, ...);
 int		 xvasprintf(char **, const char *, va_list);
 int printflike3	 xsnprintf(char *, size_t, const char *, ...);
 int		 xvsnprintf(char *, size_t, const char *, va_list);
+
+/* style.c */
+int		 style_parse(const struct grid_cell *,
+		     struct grid_cell *, const char *);
+const char	*style_tostring(struct grid_cell *);
+void		 style_update_new(struct options *, const char *, const char *);
+void		 style_update_old(struct options *, const char *,
+		     struct grid_cell *);
+void	style_apply(struct grid_cell *, struct options *, const char *);
+void	style_apply_update(struct grid_cell *, struct options *, const char *);
 
 #endif /* TMUX_H */

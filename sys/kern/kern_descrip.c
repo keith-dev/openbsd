@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_descrip.c,v 1.102 2013/07/04 16:55:19 sf Exp $	*/
+/*	$OpenBSD: kern_descrip.c,v 1.104 2013/09/14 01:35:00 guenther Exp $	*/
 /*	$NetBSD: kern_descrip.c,v 1.42 1996/03/30 22:24:38 christos Exp $	*/
 
 /*
@@ -615,7 +615,6 @@ sys_close(struct proc *p, void *v, register_t *retval)
 /*
  * Return status information about a file descriptor.
  */
-/* ARGSUSED */
 int
 sys_fstat(struct proc *p, void *v, register_t *retval)
 {

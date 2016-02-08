@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.18 2013/01/05 11:20:55 miod Exp $
+#	$OpenBSD: Makefile,v 1.21 2013/11/09 22:35:40 miod Exp $
 
 TOP=		${.CURDIR}/..
 
@@ -80,6 +80,9 @@ ${CBIN}.mk ${CBIN}.cache ${CBIN}.c: ${CBIN}.conf
 ${CBIN}: ${CBIN}.mk ${CBIN}.cache ${CBIN}.c
 	${MAKE} -f ${CBIN}.mk all
 
+#${CBIN}: ${CBIN}.mk ${CBIN}.cache ${CBIN}.c
+#	${MAKE} -f ${CBIN}.mk SRCLIBDIR=${.CURDIR}/../../../lib all
+
 do_files:
 	mtree -def ${MTREE} -p ${MOUNT_POINT}/ -u
 	TOPDIR=${TOP} CURDIR=${.CURDIR} OBJDIR=${.OBJDIR} \
@@ -88,7 +91,8 @@ do_files:
 	rm ${MOUNT_POINT}/${CBIN}
 
 clean cleandir:
-	/bin/rm -f core ${IMAGE} ${CBIN} ${CBIN}.conf ${CBIN}.mk ${CBIN}.cache \
+	/bin/rm -f *.core ${IMAGE} ${CBIN} ${CBIN}.conf ${CBIN}.mk ${CBIN}.cache \
+	    lib*.a lib*.olist ${CBIN}.map \
 	    *.o *.lo *.c bsd ${BSD_RD} rdsetroot
 
 .include <bsd.obj.mk>

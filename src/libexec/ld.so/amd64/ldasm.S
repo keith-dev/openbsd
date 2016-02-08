@@ -1,4 +1,4 @@
-/*	$OpenBSD: ldasm.S,v 1.12 2013/06/01 09:57:58 miod Exp $	*/
+/*	$OpenBSD: ldasm.S,v 1.14 2013/12/23 22:13:03 kettenis Exp $	*/
 
 /*
  * Copyright (c) 2002,2004 Dale Rahn
@@ -63,9 +63,7 @@ _dl_start:
 
 	addq	$DL_DATA_SIZE,%rsp	# return dl_data
 
-#	popq	%rbx			# %rbx = ps_strings - XXXDSR
-#	popq	%rcx			# %rcx = obj_main - XXXDSR
-	movq	$0, %rdx		# %rdx = cleanup - XXXDSR
+	leaq	_dl_dtors(%rip), %rdx	# %rdx = cleanup
 	movq	%r12, %rsp
 	jmp	*%rax
 
@@ -90,7 +88,7 @@ DL_SYSCALL(read)
 DL_SYSCALL(write)
 DL_SYSCALL(close)
 DL_SYSCALL(issetugid)
-DL_SYSCALL(getdirentries)
+DL_SYSCALL(getdents)
 DL_SYSCALL(mprotect)
 DL_SYSCALL(munmap)
 DL_SYSCALL(gettimeofday)

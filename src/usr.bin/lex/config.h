@@ -1,7 +1,7 @@
 /*	$OpenBSD: config.h,v 1.3 1996/10/26 21:50:30 tholo Exp $	*/
 
 /* config.h.  Generated automatically by configure.  */
-/* $Header: /cvs/src/usr.bin/lex/config.h,v 1.3 1996/10/26 21:50:30 tholo Exp $ */
+/* $Header: /var/www/space/cvs/src/usr.bin/lex/config.h,v 1.3 1996/10/26 21:50:30 tholo Exp $ */
 
 /* Define to empty if the keyword does not work.  */
 /* #undef const */

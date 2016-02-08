@@ -1,4 +1,4 @@
-/* $OpenBSD: fusefs.h,v 1.2 2013/06/09 12:51:40 tedu Exp $ */
+/* $OpenBSD: fusefs.h,v 1.6 2014/01/16 09:31:44 syl Exp $ */
 /*
  * Copyright (c) 2012-2013 Sylvestre Gallon <ccna.syl@gmail.com>
  *
@@ -33,6 +33,16 @@
 	{ "fusefs_pool_pages", CTLTYPE_INT }, \
 }
 
+struct fb_ioctl_xch {
+	uint64_t	fbxch_uuid;
+	size_t		fbxch_len;
+	uint8_t		*fbxch_data;
+};
+
+/* FUSE Device ioctls */
+#define FIOCGETFBDAT	_IOW('F', 0, struct fb_ioctl_xch)
+#define FIOCSETFBDAT	_IOW('F', 1, struct fb_ioctl_xch)
+
 #ifdef _KERNEL
 
 struct fuse_msg;
@@ -55,6 +65,7 @@ struct fusefs_mnt {
 #define UNDEF_SETATTR	1<<7
 #define UNDEF_RENAME	1<<8
 #define UNDEF_SYMLINK	1<<9
+#define UNDEF_MKNOD	1<<10
 
 extern struct vops fusefs_vops;
 extern struct pool fusefs_fbuf_pool;
@@ -72,7 +83,7 @@ int fusefs_file_close(struct fusefs_mnt *, struct fusefs_node *,
 /* device helpers. */
 void fuse_device_cleanup(dev_t, struct fusebuf *);
 void fuse_device_queue_fbuf(dev_t, struct fusebuf *);
-void fuse_device_set_fmp(struct fusefs_mnt *);
+void fuse_device_set_fmp(struct fusefs_mnt *, int);
 
 /*
  * The root inode is the root of the file system.  Inode 0 can't be used for
@@ -80,9 +91,6 @@ void fuse_device_set_fmp(struct fusefs_mnt *);
  */
 #define	FUSE_ROOTINO ((ino_t)1)
 #define VFSTOFUSEFS(mp)	((struct fusefs_mnt *)((mp)->mnt_data))
-
-/* #define FUSE_DEBUG_VNOP
-#define FUSE_DEBUG */
 
 #endif /* _KERNEL */
 #endif /* __FUSEFS_H__ */

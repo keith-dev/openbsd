@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.45 2013/07/05 21:29:51 miod Exp $
+#	$OpenBSD: Makefile,v 1.47 2014/02/16 01:16:38 martynas Exp $
 
 SUBDIR=ldconfig ldd
 MAN=	ld.so.1
@@ -12,8 +12,8 @@ PROG=	ld.so
 
 VPATH=${.CURDIR}/../../lib/libc/string
 
-SRCS=	ldasm.S loader.c resolve.c dlfcn.c dl_printf.c rtld_machine.c path.c
-SRCS+=	util.c sod.c strsep.c strtol.c dir.c library_subr.c dl_prebind.c
+SRCS=	ldasm.S boot.c loader.c resolve.c dlfcn.c dl_printf.c rtld_machine.c
+SRCS+=	path.c util.c sod.c strsep.c strtol.c dir.c library_subr.c dl_prebind.c
 SRCS+=	dl_realpath.c dl_uname.c dl_dirname.c strlcat.c strlen.c trace.c
 .if (${MACHINE_ARCH} == "i386")
 SRCS+=	library_mquery.c
@@ -34,8 +34,20 @@ INSTALL_STRIP=
 
 ELF_LDFLAGS+=--shared -Bsymbolic --no-undefined
 
-$(PROG):
-	$(LD) -x -e _dl_start $(ELF_LDFLAGS) -o $(PROG) $(OBJS) $(LDADD)
+test_prog=	test-$(PROG)
+candidate=	$(PROG).test
+
+$(test_prog):
+	printf '#include <stdio.h>\nint main(int argc, char **argv){ printf("%%s\\n", argv[1]); }\n' | \
+	$(CC) -x c - -Wl,-dynamic-linker,${.OBJDIR}/$(candidate) -o $@
+
+$(PROG): $(test_prog)
+	$(LD) -x -e _dl_start $(ELF_LDFLAGS) -o $(candidate) $(OBJS) $(LDADD)
+	ulimit -c 0; [ "`${.OBJDIR}/$(test_prog) ok`" = ok ]
+	cp $(candidate) $@
 .endif
 
 .include <bsd.prog.mk>
+
+boot.o: boot.c
+	${COMPILE.c} -fno-stack-protector ${.IMPSRC}

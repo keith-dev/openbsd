@@ -1,4 +1,4 @@
-/*	$OpenBSD: intel_panel.c,v 1.3 2013/07/05 07:20:27 jsg Exp $	*/
+/*	$OpenBSD: intel_panel.c,v 1.6 2014/01/24 04:05:06 jsg Exp $	*/
 /*
  * Copyright © 2006-2010 Intel Corporation
  * Copyright (c) 2006 Dave Airlie <airlied@linux.ie>
@@ -36,14 +36,7 @@
 
 #define PCI_LBPC 0xf4 /* legacy/combination backlight modes */
 
-int	 is_backlight_combination_mode(struct drm_device *);
-u32	 i915_read_blc_pwm_ctl(struct drm_device *);
-void	 intel_pch_panel_set_backlight(struct drm_device *, u32);
-void	 intel_panel_actually_set_backlight(struct drm_device *, u32);
-void	 intel_panel_init_backlight(struct drm_device *);
-u32	 _intel_panel_get_max_backlight(struct drm_device *);
-u32	 intel_panel_compute_brightness(struct drm_device *, u32);
-u32	 intel_panel_get_backlight(struct drm_device *);
+u32 _intel_panel_get_max_backlight(struct drm_device *dev);
 
 void
 intel_fixed_panel_mode(struct drm_display_mode *fixed_mode,
@@ -127,8 +120,7 @@ done:
 	dev_priv->pch_pf_size = (width << 16) | height;
 }
 
-int
-is_backlight_combination_mode(struct drm_device *dev)
+static int is_backlight_combination_mode(struct drm_device *dev)
 {
 	struct drm_i915_private *dev_priv = dev->dev_private;
 
@@ -141,8 +133,7 @@ is_backlight_combination_mode(struct drm_device *dev)
 	return 0;
 }
 
-u32
-i915_read_blc_pwm_ctl(struct drm_device *dev)
+static u32 i915_read_blc_pwm_ctl(struct drm_device *dev)
 {
 	struct drm_i915_private *dev_priv = dev->dev_private;
 	u32 val;
@@ -176,8 +167,7 @@ i915_read_blc_pwm_ctl(struct drm_device *dev)
 	return val;
 }
 
-u32
-_intel_panel_get_max_backlight(struct drm_device *dev)
+u32 _intel_panel_get_max_backlight(struct drm_device *dev)
 {
 	u32 max;
 
@@ -198,8 +188,7 @@ _intel_panel_get_max_backlight(struct drm_device *dev)
 	return max;
 }
 
-u32
-intel_panel_get_max_backlight(struct drm_device *dev)
+u32 intel_panel_get_max_backlight(struct drm_device *dev)
 {
 	u32 max;
 
@@ -225,8 +214,7 @@ static int i915_panel_invert_brightness;
 	"to dri-devel@lists.freedesktop.org, if your machine needs it. "
 	"It will then be included in an upcoming module version.");
 */
-u32
-intel_panel_compute_brightness(struct drm_device *dev, u32 val)
+static u32 intel_panel_compute_brightness(struct drm_device *dev, u32 val)
 {
 	struct drm_i915_private *dev_priv = dev->dev_private;
 
@@ -240,8 +228,7 @@ intel_panel_compute_brightness(struct drm_device *dev, u32 val)
 	return val;
 }
 
-u32
-intel_panel_get_backlight(struct drm_device *dev)
+static u32 intel_panel_get_backlight(struct drm_device *dev)
 {
 	struct drm_i915_private *dev_priv = dev->dev_private;
 	u32 val;
@@ -267,16 +254,14 @@ intel_panel_get_backlight(struct drm_device *dev)
 	return val;
 }
 
-void
-intel_pch_panel_set_backlight(struct drm_device *dev, u32 level)
+static void intel_pch_panel_set_backlight(struct drm_device *dev, u32 level)
 {
 	struct drm_i915_private *dev_priv = dev->dev_private;
 	u32 val = I915_READ(BLC_PWM_CPU_CTL) & ~BACKLIGHT_DUTY_CYCLE_MASK;
 	I915_WRITE(BLC_PWM_CPU_CTL, val | level);
 }
 
-void
-intel_panel_actually_set_backlight(struct drm_device *dev, u32 level)
+static void intel_panel_actually_set_backlight(struct drm_device *dev, u32 level)
 {
 	struct drm_i915_private *dev_priv = dev->dev_private;
 	u32 tmp;
@@ -303,8 +288,7 @@ intel_panel_actually_set_backlight(struct drm_device *dev, u32 level)
 	I915_WRITE(BLC_PWM_CTL, tmp | level);
 }
 
-void
-intel_panel_set_backlight(struct drm_device *dev, u32 level)
+void intel_panel_set_backlight(struct drm_device *dev, u32 level)
 {
 	struct drm_i915_private *dev_priv = dev->dev_private;
 
@@ -313,8 +297,7 @@ intel_panel_set_backlight(struct drm_device *dev, u32 level)
 		intel_panel_actually_set_backlight(dev, level);
 }
 
-void
-intel_panel_disable_backlight(struct drm_device *dev)
+void intel_panel_disable_backlight(struct drm_device *dev)
 {
 	struct drm_i915_private *dev_priv = dev->dev_private;
 
@@ -336,8 +319,7 @@ intel_panel_disable_backlight(struct drm_device *dev)
 	}
 }
 
-void
-intel_panel_enable_backlight(struct drm_device *dev,
+void intel_panel_enable_backlight(struct drm_device *dev,
 				  enum pipe pipe)
 {
 	struct drm_i915_private *dev_priv = dev->dev_private;
@@ -359,7 +341,7 @@ intel_panel_enable_backlight(struct drm_device *dev,
 		if (tmp & BLM_PWM_ENABLE)
 			goto set_level;
 
-		if (dev_priv->num_pipe == 3)
+		if (INTEL_INFO(dev)->num_pipes == 3)
 			tmp &= ~BLM_PIPE_SELECT_IVB;
 		else
 			tmp &= ~BLM_PIPE_SELECT;
@@ -371,7 +353,8 @@ intel_panel_enable_backlight(struct drm_device *dev,
 		POSTING_READ(reg);
 		I915_WRITE(reg, tmp | BLM_PWM_ENABLE);
 
-		if (HAS_PCH_SPLIT(dev)) {
+		if (HAS_PCH_SPLIT(dev) &&
+		    !(dev_priv->quirks & QUIRK_NO_PCH_PWM_ENABLE)) {
 			tmp = I915_READ(BLC_PWM_PCH_CTL1);
 			tmp |= BLM_PCH_PWM_ENABLE;
 			tmp &= ~BLM_PCH_OVERRIDE_ENABLE;
@@ -388,8 +371,7 @@ set_level:
 	intel_panel_actually_set_backlight(dev, dev_priv->backlight_level);
 }
 
-void
-intel_panel_init_backlight(struct drm_device *dev)
+static void intel_panel_init_backlight(struct drm_device *dev)
 {
 	struct drm_i915_private *dev_priv = dev->dev_private;
 
@@ -422,16 +404,14 @@ intel_panel_detect(struct drm_device *dev)
 }
 
 #ifdef CONFIG_BACKLIGHT_CLASS_DEVICE
-int
-intel_panel_update_status(struct backlight_device *bd)
+static int intel_panel_update_status(struct backlight_device *bd)
 {
 	struct drm_device *dev = bl_get_data(bd);
 	intel_panel_set_backlight(dev, bd->props.brightness);
 	return 0;
 }
 
-int
-intel_panel_get_brightness(struct backlight_device *bd)
+static int intel_panel_get_brightness(struct backlight_device *bd)
 {
 	struct drm_device *dev = bl_get_data(bd);
 	struct drm_i915_private *dev_priv = dev->dev_private;
@@ -443,8 +423,7 @@ static const struct backlight_ops intel_panel_bl_ops = {
 	.get_brightness = intel_panel_get_brightness,
 };
 
-int
-intel_panel_setup_backlight(struct drm_connector *connector)
+int intel_panel_setup_backlight(struct drm_connector *connector)
 {
 	struct drm_device *dev = connector->dev;
 	struct drm_i915_private *dev_priv = dev->dev_private;
@@ -477,8 +456,7 @@ intel_panel_setup_backlight(struct drm_connector *connector)
 	return 0;
 }
 
-void
-intel_panel_destroy_backlight(struct drm_device *dev)
+void intel_panel_destroy_backlight(struct drm_device *dev)
 {
 	struct drm_i915_private *dev_priv = dev->dev_private;
 	if (dev_priv->backlight) {
@@ -487,22 +465,19 @@ intel_panel_destroy_backlight(struct drm_device *dev)
 	}
 }
 #else
-int
-intel_panel_setup_backlight(struct drm_connector *connector)
+int intel_panel_setup_backlight(struct drm_connector *connector)
 {
 	intel_panel_init_backlight(connector->dev);
 	return 0;
 }
 
-void
-intel_panel_destroy_backlight(struct drm_device *dev)
+void intel_panel_destroy_backlight(struct drm_device *dev)
 {
 	return;
 }
 #endif
 
-int
-intel_panel_init(struct intel_panel *panel,
+int intel_panel_init(struct intel_panel *panel,
 		     struct drm_display_mode *fixed_mode)
 {
 	panel->fixed_mode = fixed_mode;
@@ -510,8 +485,7 @@ intel_panel_init(struct intel_panel *panel,
 	return 0;
 }
 
-void
-intel_panel_fini(struct intel_panel *panel)
+void intel_panel_fini(struct intel_panel *panel)
 {
 	struct intel_connector *intel_connector =
 		container_of(panel, struct intel_connector, panel);

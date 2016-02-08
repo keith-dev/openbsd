@@ -1,4 +1,4 @@
-/*	$OpenBSD: worm.c,v 1.23 2009/10/27 23:59:27 deraadt Exp $	*/
+/*	$OpenBSD: worm.c,v 1.26 2014/01/28 14:30:28 jmc Exp $	*/
 
 /*
  * Copyright (c) 1980, 1993
@@ -89,10 +89,10 @@ main(int argc, char **argv)
 	struct timeval t, tod;
 	struct timezone tz;
 	fd_set rset;
+	const char *errstr;
 
 	FD_ZERO(&rset);
 	setbuf(stdout, outbuf);
-	srandomdev();
 	signal(SIGINT, leave);
 	signal(SIGQUIT, leave);
 	signal(SIGTSTP, suspend);	/* process control signal */
@@ -106,10 +106,14 @@ main(int argc, char **argv)
 		endwin();
 		errx(1, "screen too small");
 	}
-	if (argc == 2)
-		start_len = atoi(argv[1]);
-	if ((start_len <= 0) || (start_len > ((LINES-3) * (COLS-2)) / 3))
-		start_len = LENGTH;
+	if (argc >= 2) {
+		start_len = strtonum(argv[1], 1, ((LINES-3) * (COLS-2)) / 3,
+		    &errstr);
+		if (errstr) {
+			endwin();
+			errx(1, "length argument is %s.", errstr);
+		}
+	}
 	stw = newwin(1, COLS-1, 0, 0);
 	tv = newwin(LINES-1, COLS-1, 1, 0);
 	box(tv, '*', '*');
@@ -122,6 +126,8 @@ main(int argc, char **argv)
 	wrefresh(tv);
 	life();			/* Create the worm */
 	prize();		/* Put up a goal */
+	wmove(tv, head->y, head->x);    /* Leave cursor on worm */
+	wrefresh(tv);
 	while(1)
 	{
 		if (wantleave) {
@@ -209,7 +215,7 @@ leave(int dummy)
 int
 rnd(int range)
 {
-	return random() % range;
+	return arc4random_uniform(range);
 }
 
 void

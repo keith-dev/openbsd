@@ -1,6 +1,6 @@
 /*	$OpenBSD: FlexLexer.h,v 1.6 2004/02/03 21:20:17 espie Exp $	*/
 
-// $Header: /cvs/src/usr.bin/lex/FlexLexer.h,v 1.6 2004/02/03 21:20:17 espie Exp $
+// $Header: /var/www/space/cvs/src/usr.bin/lex/FlexLexer.h,v 1.6 2004/02/03 21:20:17 espie Exp $
 
 // FlexLexer.h -- define interfaces for lexical analyzer classes generated
 //		  by flex

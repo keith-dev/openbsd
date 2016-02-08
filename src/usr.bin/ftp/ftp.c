@@ -1,4 +1,4 @@
-/*	$OpenBSD: ftp.c,v 1.82 2012/04/30 13:41:26 haesbaert Exp $	*/
+/*	$OpenBSD: ftp.c,v 1.84 2013/12/20 13:44:51 jca Exp $	*/
 /*	$NetBSD: ftp.c,v 1.27 1997/08/18 10:20:23 lukem Exp $	*/
 
 /*
@@ -378,8 +378,8 @@ static char noop[] = "NOOP\r\n";
 static int current_nop_pos = 0;		/* 0 -> no noop started */
 
 /* to achieve keep alive, we send noop one byte at a time */
-void 
-send_noop_char()
+static void
+send_noop_char(void)
 {
 #ifndef SMALL
 	if (debug)
@@ -393,15 +393,15 @@ send_noop_char()
 	}
 }
 
-void
-may_reset_noop_timeout()
+static void
+may_reset_noop_timeout(void)
 {
 	if (keep_alive_timeout != 0)
 		last_timestamp = time(NULL);
 }
 
-void 
-may_receive_noop_ack()
+static void 
+may_receive_noop_ack(void)
 {
 	int i;
 
@@ -429,8 +429,8 @@ may_receive_noop_ack()
 	full_noops_sent = 0;
 }
 
-void 
-may_send_noop_char()
+static void 
+may_send_noop_char(void)
 {
 	if (keep_alive_timeout != 0) {
 		if (last_timestamp != 0) {
@@ -1090,8 +1090,10 @@ recvrequest(const char *cmd, const char * volatile local, const char *remote,
 			d = 0;
 			do {
 				wr = write(fileno(fout), buf + d, rd);
-				if (wr == -1 && errno == EPIPE)
+				if (wr == -1) {
+					d = -1;
 					break;
+				}
 				d += wr;
 				rd -= wr;
 			} while (d < c);
@@ -2047,7 +2049,7 @@ gunique(const char *local)
 jmp_buf forceabort;
  
 /* ARGSUSED */
-void
+static void
 abortforce(int signo)
 {
 	fputs("Forced abort.  The connection will be closed.\n", ttyout);

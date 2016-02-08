@@ -1,4 +1,4 @@
-/*	$OpenBSD: agp_i810.c,v 1.78 2013/06/06 16:14:26 jsg Exp $	*/
+/*	$OpenBSD: agp_i810.c,v 1.82 2014/02/20 22:18:22 kettenis Exp $	*/
 
 /*-
  * Copyright (c) 2000 Doug Rabson
@@ -129,7 +129,6 @@ struct agp_methods agp_i810_methods = {
 	agp_i810_bind_page,
 	agp_i810_unbind_page,
 	agp_i810_flush_tlb,
-	intagp_dma_sync,
 	agp_i810_enable,
 	agp_i810_alloc_memory,
 	agp_i810_free_memory,
@@ -570,6 +569,9 @@ agp_i810_attach(struct device *parent, struct device *self, void *aux)
 			printf(": no preallocated video memory\n");
 #endif
 
+		/* XXX */
+		isc->stolen = 0;
+
 		/* GATT address is already in there, make sure it's enabled */
 		gatt->ag_physical = READ4(AGP_I810_PGTBL_CTL) & ~1;
 		break;
@@ -621,37 +623,6 @@ int
 agp_i810_activate(struct device *arg, int act)
 {
 	struct agp_i810_softc *isc = (struct agp_i810_softc *)arg;
-	bus_space_tag_t bst = isc->map->bst;
-	bus_space_handle_t bsh = isc->map->bsh;
-	bus_size_t offset;
-
-	if (isc->chiptype == CHIP_I915 ||
-	    isc->chiptype == CHIP_G33 ||
-	    isc->chiptype == CHIP_PINEVIEW) {
-		bst = isc->gtt_map->bst;
-		bsh = isc->gtt_map->bsh;
-	}
-
-	switch(isc->chiptype) {
-	case CHIP_I915:
-	case CHIP_G33:
-	case CHIP_PINEVIEW:
-		offset = 0;
-		break;
-	case CHIP_I965:
-		offset = AGP_I965_GTT;
-		break;
-	case CHIP_G4X:
-	case CHIP_IRONLAKE:
-	case CHIP_SANDYBRIDGE:
-	case CHIP_IVYBRIDGE:
-	case CHIP_HASWELL:
-		offset = AGP_G4X_GTT;
-		break;
-	default:
-		offset = AGP_I810_GTT;
-		break;
-	}
 
 	/*
 	 * Anything kept in agp over a suspend/resume cycle (and thus by X
@@ -665,6 +636,7 @@ agp_i810_activate(struct device *arg, int act)
 
 	return (0);
 }
+
 void
 agp_i810_configure(struct agp_i810_softc *isc)
 {
@@ -692,39 +664,6 @@ agp_i810_configure(struct agp_i810_softc *isc)
 	 */
 	agp_flush_cache();
 }
-
-#if 0
-int
-agp_i810_detach(struct agp_softc *sc)
-{
-	int error;
-	struct agp_i810_softc *isc = sc->sc_chipc;
-
-	error = agp_generic_detach(sc);
-	if (error)
-		return (error);
-
-	/* Clear the GATT base. */
-	if (sc->chiptype == CHIP_I810) {
-		WRITE4(AGP_I810_PGTBL_CTL, 0);
-	} else {
-		unsigned int pgtblctl;
-		pgtblctl = READ4(AGP_I810_PGTBL_CTL);
-		pgtblctl &= ~1;
-		WRITE4(AGP_I810_PGTBL_CTL, pgtblctl);
-	}
-
-	if (sc->chiptype == CHIP_I810) {
-		bus_dmamem_unmap(pa->pa_dmat, isc->gatt->ag_virtual,
-		    gatt->ag_size);
-		agp_free_dmamem(sc->sc_dmat, gatt->ag_size, gatt->ag_dmamap,
-		    &gatt->ag_dmaseg);
-	}
-	free(sc->gatt, M_AGP);
-
-	return (0);
-}
-#endif
 
 void
 agp_i810_bind_page(void *sc, bus_addr_t offset, paddr_t physical, int flags)

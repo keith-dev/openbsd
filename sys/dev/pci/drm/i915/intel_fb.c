@@ -1,4 +1,4 @@
-/*	$OpenBSD: intel_fb.c,v 1.5 2013/07/05 07:20:27 jsg Exp $	*/
+/*	$OpenBSD: intel_fb.c,v 1.10 2014/01/30 15:10:48 kettenis Exp $	*/
 /*
  * Copyright © 2007 David Airlie
  *
@@ -33,14 +33,7 @@
 #include "i915_drv.h"
 #include "intel_drv.h"
 
-int	 intelfb_create(struct intel_fbdev *,
-	     struct drm_fb_helper_surface_size *);
-int	 intel_fb_find_or_create_single(struct drm_fb_helper *,
-	     struct drm_fb_helper_surface_size *);
-void	 intel_fbdev_destroy(struct drm_device *, struct intel_fbdev *);
-
-int
-intelfb_create(struct intel_fbdev *ifbdev,
+static int intelfb_create(struct intel_fbdev *ifbdev,
     struct drm_fb_helper_surface_size *sizes)
 {
 	struct drm_device *dev = ifbdev->helper.dev;
@@ -66,14 +59,13 @@ intelfb_create(struct intel_fbdev *ifbdev,
 							  sizes->surface_depth);
 
 	size = mode_cmd.pitches[0] * mode_cmd.height;
-	size = roundup2(size, PAGE_SIZE) * 2;
+	size = roundup2(size, PAGE_SIZE);
 	obj = i915_gem_alloc_object(dev, size);
 	if (!obj) {
 		DRM_ERROR("failed to allocate framebuffer\n");
 		ret = -ENOMEM;
 		goto out;
 	}
-	obj->dma_flags |= BUS_DMA_GTT_WRAPAROUND;
 
 	DRM_LOCK();
 
@@ -200,9 +192,8 @@ out:
 	return ret;
 }
 
-int
-intel_fb_find_or_create_single(struct drm_fb_helper *helper,
-    struct drm_fb_helper_surface_size *sizes)
+static int intel_fb_find_or_create_single(struct drm_fb_helper *helper,
+					  struct drm_fb_helper_surface_size *sizes)
 {
 	struct intel_fbdev *ifbdev = (struct intel_fbdev *)helper;
 	int new_fb = 0;
@@ -223,8 +214,8 @@ static struct drm_fb_helper_funcs intel_fb_helper_funcs = {
 	.fb_probe = intel_fb_find_or_create_single,
 };
 
-void
-intel_fbdev_destroy(struct drm_device *dev, struct intel_fbdev *ifbdev)
+static void intel_fbdev_destroy(struct drm_device *dev,
+				struct intel_fbdev *ifbdev)
 {
 #if 0
 	struct fb_info *info;
@@ -246,29 +237,29 @@ intel_fbdev_destroy(struct drm_device *dev, struct intel_fbdev *ifbdev)
 
 	drm_framebuffer_cleanup(&ifb->base);
 	if (ifb->obj) {
-		drm_gem_object_unreference(&ifb->obj->base);
+		drm_gem_object_unreference_unlocked(&ifb->obj->base);
 		ifb->obj = NULL;
 	}
 }
 
-int
-intel_fbdev_init(struct drm_device *dev)
+int intel_fbdev_init(struct drm_device *dev)
 {
 	struct intel_fbdev *ifbdev;
 	drm_i915_private_t *dev_priv = dev->dev_private;
 	int ret;
 
-	ifbdev = malloc(sizeof(struct intel_fbdev), M_DRM,
-	    M_WAITOK | M_ZERO);
+	ifbdev = kzalloc(sizeof(struct intel_fbdev), GFP_KERNEL);
+	if (!ifbdev)
+		return -ENOMEM;
 
 	dev_priv->fbdev = ifbdev;
 	ifbdev->helper.funcs = &intel_fb_helper_funcs;
 
 	ret = drm_fb_helper_init(dev, &ifbdev->helper,
-				 dev_priv->num_pipe,
+				 INTEL_INFO(dev)->num_pipes,
 				 INTELFB_CONN_LIMIT);
 	if (ret) {
-		free(ifbdev, M_DRM);
+		kfree(ifbdev);
 		return ret;
 	}
 
@@ -277,27 +268,24 @@ intel_fbdev_init(struct drm_device *dev)
 	return 0;
 }
 
-void
-intel_fbdev_fini(struct drm_device *dev)
+void intel_fbdev_fini(struct drm_device *dev)
 {
 	drm_i915_private_t *dev_priv = dev->dev_private;
 	if (!dev_priv->fbdev)
 		return;
 
 	intel_fbdev_destroy(dev, dev_priv->fbdev);
-	free(dev_priv->fbdev, M_DRM);
+	kfree(dev_priv->fbdev);
 	dev_priv->fbdev = NULL;
 }
 
-void
-intel_fb_output_poll_changed(struct drm_device *dev)
+void intel_fb_output_poll_changed(struct drm_device *dev)
 {
 	drm_i915_private_t *dev_priv = dev->dev_private;
 	drm_fb_helper_hotplug_event(&dev_priv->fbdev->helper);
 }
 
-void
-intel_fb_restore_mode(struct drm_device *dev)
+void intel_fb_restore_mode(struct drm_device *dev)
 {
 	int ret;
 	drm_i915_private_t *dev_priv = dev->dev_private;

@@ -1,4 +1,4 @@
-/* $OpenBSD: tcpdrop.c,v 1.11 2013/07/09 19:35:52 gsoares Exp $ */
+/* $OpenBSD: tcpdrop.c,v 1.13 2014/01/10 04:02:15 lteo Exp $ */
 
 /*
  * Copyright (c) 2004 Markus Friedl <markus@openbsd.org>
@@ -23,7 +23,6 @@
 
 #include <netinet/in.h>
 #include <netinet/tcp.h>
-#include <netinet/ip_var.h>
 #include <netinet/tcp_timer.h>
 #include <netinet/tcp_var.h>
 
@@ -55,6 +54,8 @@ main(int argc, char **argv)
 
 	if (argc == 3) {
 		laddr1 = addr1 = strdup(argv[1]);
+		if (!addr1)
+			err(1, "strdup");
 		port1 = strrchr(addr1, ':');
 		if (port1)
 			*port1++ = '\0';
@@ -62,6 +63,8 @@ main(int argc, char **argv)
 			goto fail;
 
 		faddr2 = addr2 = strdup(argv[2]);
+		if (!addr2)
+			err(1, "strdup");
 		port2 = strrchr(addr2, ':');
 		if (port2)
 			*port2++ = '\0';
@@ -85,11 +88,15 @@ fail:
 
 	if (addr1[0] == '[' && addr1[strlen(addr1) - 1] == ']') {
 		laddr1 = strdup(addr1);
+		if (!laddr1)
+			err(1, "strdup");
 		laddr1[strlen(laddr1) - 1] = '\0';
 		laddr1++;
 	}
 	if (addr2[0] == '[' && addr2[strlen(addr2) - 1] == ']') {
 		faddr2 = strdup(addr2);
+		if (!faddr2)
+			err(1, "strdup");
 		faddr2[strlen(faddr2) - 1] = '\0';
 		faddr2++;
 	}

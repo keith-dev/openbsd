@@ -1,4 +1,4 @@
-/*	$OpenBSD: ioev.c,v 1.13 2013/06/03 15:57:40 eric Exp $	*/
+/*	$OpenBSD: ioev.c,v 1.16 2014/02/04 09:59:21 eric Exp $	*/
 /*      
  * Copyright (c) 2012 Eric Faurot <eric@openbsd.org>
  *
@@ -88,7 +88,7 @@ io_strio(struct io *io)
 	ssl[0] = '\0';
 #ifdef IO_SSL
 	if (io->ssl) {
-		snprintf(ssl, sizeof ssl, " ssl=%s:%s:%i",
+		snprintf(ssl, sizeof ssl, " ssl=%s:%s:%d",
 		    SSL_get_cipher_version(io->ssl),
 		    SSL_get_cipher_name(io->ssl),
 		    SSL_get_cipher_bits(io->ssl, NULL));
@@ -97,11 +97,11 @@ io_strio(struct io *io)
 
 	if (io->iobuf == NULL)
 		snprintf(buf, sizeof buf,
-		    "<io:%p fd=%i to=%i fl=%s%s>",
+		    "<io:%p fd=%d to=%d fl=%s%s>",
 		    io, io->sock, io->timeout, io_strflags(io->flags), ssl);
 	else
 		snprintf(buf, sizeof buf,
-		    "<io:%p fd=%i to=%i fl=%s%s ib=%zu ob=%zu>",
+		    "<io:%p fd=%d to=%d fl=%s%s ib=%zu ob=%zu>",
 		    io, io->sock, io->timeout, io_strflags(io->flags), ssl,
 		    io_pending(io), io_queued(io));
 
@@ -125,7 +125,7 @@ io_strevent(int evt)
 	CASE(IO_TIMEOUT);
 	CASE(IO_ERROR);
 	default:
-		snprintf(buf, sizeof(buf), "IO_? %i", evt);
+		snprintf(buf, sizeof(buf), "IO_? %d", evt);
 		return buf;
 	}
 }
@@ -152,7 +152,7 @@ io_set_linger(int fd, int linger)
 {
 	struct linger    l;
 
-	bzero(&l, sizeof(l));
+	memset(&l, 0, sizeof(l));
 	l.l_onoff = linger ? 1 : 0;
 	l.l_linger = linger;
 	if (setsockopt(fd, SOL_SOCKET, SO_LINGER, &l, sizeof(l)) == -1)
@@ -263,7 +263,8 @@ io_clear(struct io *io)
 	}
 #endif
 
-	event_del(&io->ev);
+	if (event_initialized(&io->ev))
+		event_del(&io->ev);
 	if (io->sock != -1) {
 		close(io->sock);
 		io->sock = -1;
@@ -296,7 +297,7 @@ io_release(struct io *io)
 void
 io_set_timeout(struct io *io, int msec)
 {
-	io_debug("io_set_timeout(%p, %i)\n", io, msec);
+	io_debug("io_set_timeout(%p, %d)\n", io, msec);
 
 	io->timeout = msec;
 }
@@ -408,7 +409,8 @@ io_reset(struct io *io, short events, void (*dispatch)(int, short, void*))
 	 */
 	io->flags |= IO_RESET;
 
-	event_del(&io->ev);
+	if (event_initialized(&io->ev))
+		event_del(&io->ev);
 
 	/*
 	 * The io is paused by the user, so we don't want the timeout to be
@@ -812,7 +814,7 @@ again:
 		io_callback(io, IO_ERROR);
 		break;
 	default:
-		io_debug("io_dispatch_read_ssl(...) -> r=%i\n", n);
+		io_debug("io_dispatch_read_ssl(...) -> r=%d\n", n);
 		io_callback(io, IO_DATAIN);
 		if (current == io && IO_READING(io) && SSL_pending(io->ssl))
 			goto again;
@@ -859,7 +861,7 @@ io_dispatch_write_ssl(int fd, short event, void *humppa)
 		io_callback(io, IO_ERROR);
 		break;
 	default:
-		io_debug("io_dispatch_write_ssl(...) -> w=%i\n", n);
+		io_debug("io_dispatch_write_ssl(...) -> w=%d\n", n);
 		w2 = io_queued(io);
 		if (w > io->lowat && w2 <= io->lowat)
 			io_callback(io, IO_LOWAT);

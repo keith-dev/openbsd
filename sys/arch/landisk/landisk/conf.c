@@ -1,4 +1,4 @@
-/*	$OpenBSD: conf.c,v 1.25 2013/06/03 15:54:47 tedu Exp $	*/
+/*	$OpenBSD: conf.c,v 1.27 2013/11/04 14:11:29 deraadt Exp $	*/
 
 /*
  * Copyright (c) 1994-1998 Mark Brinicombe.
@@ -117,12 +117,6 @@ cdev_decl(pci);
 #include "uhid.h"
 #include "ulpt.h"
 #include "urio.h"
-#include "uscanner.h"
-
-/*
- * Bluetooth devices
- */
-#include "bthub.h"
 
 /*
  * WSCONS devices
@@ -327,7 +321,7 @@ struct cdevsw cdevsw[] = {
 	cdev_ulpt_init(NULPT,ulpt),		/* 66: USB printer */
 	cdev_urio_init(NURIO,urio),		/* 67: Diamond Rio 500 */
 	cdev_tty_init(NUCOM,ucom),		/* 68: USB tty */
-	cdev_usbdev_init(NUSCANNER,uscanner),	/* 69: USB scanner */
+	cdev_notdef(),				/* 69: was USB scanners */
 	cdev_usbdev_init(NUGEN,ugen),		/* 70: USB generic driver */
 	cdev_notdef(),		    		/* 71 was: RAIDframe disk driver */
 	cdev_lkm_dummy(),			/* 72: reserved */
@@ -362,7 +356,7 @@ struct cdevsw cdevsw[] = {
 	cdev_radio_init(NRADIO,radio),		/* 97: generic radio I/O */
 	cdev_ptm_init(NPTY,ptm),		/* 98: pseudo-tty ptm device */
 	cdev_vscsi_init(NVSCSI,vscsi),		/* 99: vscsi */
-	cdev_bthub_init(NBTHUB,bthub),		/* 100: bthub */
+	cdev_notdef(),
 	cdev_disk_init(1,diskmap),		/* 101: disk mapper */
 	cdev_pppx_init(NPPPX,pppx),		/* 102: pppx */
 	cdev_fuse_init(NFUSE,fuse),		/* 103: fuse */

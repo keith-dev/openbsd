@@ -1,4 +1,4 @@
-#	$OpenBSD: RAMDISK-IP27,v 1.27 2012/09/27 14:01:35 jsg Exp $
+#	$OpenBSD: RAMDISK-IP27,v 1.30 2014/02/19 05:32:57 jmatthew Exp $
 #
 # THIS KERNEL IS FOR Origin, Onyx, Fuel, Tezro (IP27, IP35) SYSTEMS ONLY.
 
@@ -36,6 +36,7 @@ option		TGT_ORIGIN	# IP27/IP35
 option		TGT_COHERENT
 option		ARCBIOS	
 option		CPU_R10000	# R10000/R12000/R14000/R16000 support
+option		MIPS_PTE64
 
 # Specify storage configuration using ramdisk
 config		bsd	root on rd0a swap on rd0b
@@ -85,6 +86,8 @@ iockbc*		at iof?
 #### SCSI controllers
 ahc*		at pci?
 isp*		at pci?
+#qla*		at pci?
+#qle*		at pci?
 mpi*		at pci?
 siop*		at pci?
 
@@ -130,6 +133,7 @@ uath*		at uhub?	# Atheros AR5005UG/AR5005UX
 udav*		at uhub?	# Davicom DM9601 based Ethernet
 upgt*		at uhub?	# Conexant/Intersil PrismGT SoftMAC USB
 upl*		at uhub?	# Prolific PL2301/PL2302 host-to-host `network'
+ugl*		at uhub?	# Genesys Logic GL620USB-A host-to-host `network'
 ural*		at uhub?	# Ralink RT2500USB
 url*		at uhub?	# Realtek RTL8150L based adapters
 urtw*		at uhub?	# RealTek 8187

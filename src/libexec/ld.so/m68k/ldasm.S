@@ -1,4 +1,4 @@
-/*	$OpenBSD: ldasm.S,v 1.4 2013/06/01 09:57:58 miod Exp $ */
+/*	$OpenBSD: ldasm.S,v 1.6 2013/12/25 13:06:02 miod Exp $ */
 
 /*
  * Copyright (c) 2006 Dale Rahn
@@ -93,8 +93,7 @@ ENTRY(_dl_start)
 
 	addl	#DL_DATA_SIZE, %sp	| restore sp
 	moveal	%d0, %a0
-	clrl	%d1
-	moveal	%d1, %a1		| cleanup as expected by CSU
+	lea     %pc@(_dl_dtors),%a1	| cleanup
 	jmp	(%a0)
 
 	rts
@@ -191,7 +190,7 @@ DL_SYSCALL2(getcwd,__getcwd)
 DL_SYSCALL2(sysctl,__sysctl)
 	rts
 
-DL_SYSCALL(getdirentries)
+DL_SYSCALL(getdents)
 	rts
 
 	.global		_dl_sigprocmask

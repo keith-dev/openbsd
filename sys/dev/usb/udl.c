@@ -1,4 +1,4 @@
-/*	$OpenBSD: udl.c,v 1.76 2013/05/30 16:15:02 deraadt Exp $ */
+/*	$OpenBSD: udl.c,v 1.79 2013/12/06 21:03:05 deraadt Exp $ */
 
 /*
  * Copyright (c) 2009 Marcus Glocker <mglocker@openbsd.org>
@@ -85,6 +85,8 @@ int		udl_alloc_screen(void *, const struct wsscreen_descr *,
 void		udl_free_screen(void *, void *);
 int		udl_show_screen(void *, void *, int,
 		    void (*)(void *, int, int), void *);
+int		udl_load_font(void *, void *, struct wsdisplay_font *);
+int		udl_list_font(void *, struct wsdisplay_font *);
 void		udl_burner(void *, u_int, u_int);
 
 int		udl_copycols(void *, int, int, int, int);
@@ -212,15 +214,14 @@ struct wsscreen_list udl_screenlist = {
 };
 
 struct wsdisplay_accessops udl_accessops = {
-	udl_ioctl,
-	udl_mmap,
-	udl_alloc_screen,
-	udl_free_screen,
-	udl_show_screen,
-	NULL,
-	NULL,
-	NULL,
-	udl_burner
+	.ioctl = udl_ioctl,
+	.mmap = udl_mmap,
+	.alloc_screen = udl_alloc_screen,
+	.free_screen = udl_free_screen,
+	.show_screen = udl_show_screen,
+	.load_font = udl_load_font,
+	.list_font = udl_list_font,
+	.burn_screen = udl_burner
 };
 
 /*
@@ -486,16 +487,15 @@ int
 udl_activate(struct device *self, int act)
 {
 	struct udl_softc *sc = (struct udl_softc *)self;
-	int ret = 0;
+	int rv;
 
 	switch (act) {
 	case DVACT_DEACTIVATE:
 		usbd_deactivate(sc->sc_udev);
 		break;
 	}
-	ret = config_activate_children(self, act);
-
-	return (ret);
+	rv = config_activate_children(self, act);
+	return (rv);
 }
 
 /* ---------- */
@@ -696,6 +696,24 @@ udl_show_screen(void *v, void *cookie, int waitok,
 	DPRINTF(1, "%s: %s\n", DN(sc), FUNC);
 
 	return (0);
+}
+
+int
+udl_load_font(void *v, void *emulcookie, struct wsdisplay_font *font)
+{
+	struct udl_softc *sc = v;
+	struct rasops_info *ri = &sc->sc_ri;
+
+	return rasops_load_font(ri, emulcookie, font);
+}
+
+int
+udl_list_font(void *v, struct wsdisplay_font *font)
+{
+	struct udl_softc *sc = v;
+	struct rasops_info *ri = &sc->sc_ri;
+
+	return rasops_list_font(ri, font);
 }
 
 void

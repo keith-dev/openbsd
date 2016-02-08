@@ -1,6 +1,6 @@
 define(MACHINE,alpha)dnl
 vers(__file__,
-	{-$OpenBSD: MAKEDEV.md,v 1.57 2013/06/03 16:06:42 tedu Exp $-},
+	{-$OpenBSD: MAKEDEV.md,v 1.60 2014/01/05 01:16:51 deraadt Exp $-},
 etc.MACHINE)dnl
 dnl
 dnl Copyright (c) 2001-2006 Todd T. Fries <todd@OpenBSD.org>
@@ -59,7 +59,6 @@ _DEV(uhid, 46)
 _DEV(ulpt, 47)
 _DEV(urio, 65)
 _DEV(usb, 45)
-_DEV(uscan, 66)
 _TITLE(spec)
 _DEV(au, 24)
 _DEV(bio, 53)
@@ -71,7 +70,6 @@ _DEV(diskmap, 63)
 _DEV(fdesc, 10)
 _DEV(fuse, 67)
 _DEV(hotplug, 56)
-_DEV(iop, 54)
 _DEV(lkm, 16)
 _DEV(pci, 52)
 _DEV(pf, 35)
@@ -91,7 +89,7 @@ divert(__mddivert)dnl
 dnl
 ramdisk)
 	_recurse std fd0 wd0 wd1 wd2 sd0 sd1 sd2 bpf0
-	_recurse st0 cd0 ttyC0 rd0 bio diskmap
+	_recurse st0 cd0 ttyC0 rd0 bio diskmap random
 	;;
 
 _std(1, 2, 39, 6)

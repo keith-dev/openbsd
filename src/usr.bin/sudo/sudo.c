@@ -1199,6 +1199,9 @@ set_loginclass(pw)
 {
     int errflags;
 
+    if (!def_use_loginclass)
+	return;
+
     /*
      * Don't make it a fatal error if the user didn't specify the login
      * class themselves.  We do this because if login.conf gets
@@ -1210,8 +1213,7 @@ set_loginclass(pw)
 	errflags = NO_MAIL|MSG_ONLY|NO_EXIT;
 
     if (login_class && strcmp(login_class, "-") != 0) {
-	if (user_uid != 0 &&
-	    strcmp(runas_user ? runas_user : def_runas_default, "root") != 0)
+	if (user_uid != 0 && pw->pw_uid != 0)
 	    errorx(1, "only root can use -c %s", login_class);
     } else {
 	login_class = pw->pw_class;
@@ -1220,11 +1222,11 @@ set_loginclass(pw)
 		(pw->pw_uid == 0) ? LOGIN_DEFROOTCLASS : LOGIN_DEFCLASS;
     }
 
+    /* Make sure specified login class is valid. */
     lc = login_getclass(login_class);
     if (!lc || !lc->lc_class || strcmp(lc->lc_class, login_class) != 0) {
 	log_error(errflags, "unknown login class: %s", login_class);
-	if (!lc)
-	    lc = login_getclass(NULL);	/* needed for login_getstyle() later */
+	def_use_loginclass = FALSE;
     }
 }
 #else

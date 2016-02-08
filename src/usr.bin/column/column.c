@@ -1,4 +1,4 @@
-/*	$OpenBSD: column.c,v 1.15 2009/10/27 23:59:36 deraadt Exp $	*/
+/*	$OpenBSD: column.c,v 1.17 2014/01/22 09:39:38 jsg Exp $	*/
 /*	$NetBSD: column.c,v 1.4 1995/09/02 05:53:03 jtc Exp $	*/
 
 /*
@@ -241,6 +241,8 @@ maketbl(void)
 			(void)printf("%s\n", t->list[coloff]);
 		}
 	}
+	free(lens);
+	free(cols);
 }
 
 #define	DEFNUM		1000
@@ -256,7 +258,7 @@ input(FILE *fp)
 	if (!list)
 		list = emalloc((maxentry = DEFNUM) * sizeof(char *));
 	while (fgets(buf, MAXLINELEN, fp)) {
-		for (p = buf; isspace(*p); ++p);
+		for (p = buf; isspace((unsigned char)*p); ++p);
 		if (!*p)
 			continue;
 		if (!(p = strchr(p, '\n'))) {

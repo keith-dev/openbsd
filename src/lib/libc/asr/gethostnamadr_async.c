@@ -1,4 +1,4 @@
-/*	$OpenBSD: gethostnamadr_async.c,v 1.22 2013/07/17 07:43:23 eric Exp $	*/
+/*	$OpenBSD: gethostnamadr_async.c,v 1.25 2014/02/26 20:00:08 eric Exp $	*/
 /*
  * Copyright (c) 2012 Eric Faurot <eric@openbsd.org>
  *
@@ -30,6 +30,7 @@
 #include <ctype.h>
 #include <err.h>
 #include <errno.h>
+#include <resolv.h> /* for res_hnok */
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
@@ -174,7 +175,8 @@ gethostnamadr_async_run(struct async *as, struct async_res *ar)
 		/* Name might be an IP address string */
 		if (as->as_type == ASR_GETHOSTBYNAME) {
 			for (c = as->as.hostnamadr.name; *c; c++)
-				if (!isdigit(*c) && *c != '.' && *c != ':')
+				if (!isdigit((unsigned char)*c) &&
+				     *c != '.' && *c != ':')
 					break;
 			if (*c == 0 &&
 			    inet_pton(as->as.hostnamadr.family,
@@ -504,8 +506,7 @@ hostent_from_packet(int reqtype, int family, char *pkt, size_t pktlen)
 			if (strcasecmp(rr.rr_dname, dname) != 0)
 				continue;
 			if (hostent_set_cname(h, rr.rr.ptr.ptrname, 1) == -1)
-				goto fail;
-			/* XXX See if we need MULTI_PTRS_ARE_ALIASES */
+				hostent_add_alias(h, rr.rr.ptr.ptrname, 1);
 			break;
 
 		case T_A:
@@ -570,6 +571,8 @@ hostent_set_cname(struct hostent_ext *h, const char *name, int isdname)
 	if (isdname) {
 		asr_strdname(name, buf, sizeof buf);
 		buf[strlen(buf) - 1] = '\0';
+		if (!res_hnok(buf))
+			return (-1);
 		name = buf;
 	}
 
@@ -598,6 +601,8 @@ hostent_add_alias(struct hostent_ext *h, const char *name, int isdname)
 	if (isdname) {
 		asr_strdname(name, buf, sizeof buf);
 		buf[strlen(buf)-1] = '\0';
+		if (!res_hnok(buf))
+			return (-1);
 		name = buf;
 	}
 

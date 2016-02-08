@@ -1,4 +1,4 @@
-/*	$OpenBSD: pf_norm.c,v 1.160 2013/07/23 22:47:10 bluhm Exp $ */
+/*	$OpenBSD: pf_norm.c,v 1.164 2014/01/22 04:34:25 henning Exp $ */
 
 /*
  * Copyright 2001 Niels Provos <provos@citi.umich.edu>
@@ -48,7 +48,6 @@
 #include <net/if_pflog.h>
 
 #include <netinet/in.h>
-#include <netinet/in_var.h>
 #include <netinet/in_systm.h>
 #include <netinet/ip.h>
 #include <netinet/ip_var.h>
@@ -864,13 +863,8 @@ pf_normalize_tcp(struct pf_pdesc *pd)
 
 	/* If flags changed, or reserved data set, then adjust */
 	if (flags != th->th_flags || th->th_x2 != 0) {
-		u_int16_t	ov, nv;
-
-		ov = *(u_int16_t *)(&th->th_ack + 1);
 		th->th_flags = flags;
 		th->th_x2 = 0;
-		nv = *(u_int16_t *)(&th->th_ack + 1);
-
 		rewrite = 1;
 	}
 
@@ -1253,9 +1247,9 @@ pf_normalize_tcp_stateful(struct pf_pdesc *pd, u_short *reason,
 			    SEQ_LT(tsecr, dst->scrub->pfss_tsval0)? '3' : ' ');
 			DPFPRINTF(LOG_NOTICE,
 			    " tsval: %u  tsecr: %u  +ticks: %u  "
-			    "idle: %lus %lums",
-			    tsval, tsecr, tsval_from_last, delta_ts.tv_sec,
-			    delta_ts.tv_usec / 1000);
+			    "idle: %llu.%06lus",
+			    tsval, tsecr, tsval_from_last,
+			    (long long)delta_ts.tv_sec, delta_ts.tv_usec);
 			DPFPRINTF(LOG_NOTICE,
 			    " src->tsval: %u  tsecr: %u",
 			    src->scrub->pfss_tsval, src->scrub->pfss_tsecr);
@@ -1423,7 +1417,7 @@ pf_normalize_mss(struct pf_pdesc *pd, u_int16_t maxmss)
 		}
 		switch (opt) {
 		case TCPOPT_MAXSEG:
-			bcopy((caddr_t)(optp + 2), (caddr_t)&mss, 2);
+			memcpy(&mss, (optp + 2), 2);
 			if (ntohs(mss) > maxmss) {
 				mss = htons(maxmss);
 				m_copyback(pd->m,

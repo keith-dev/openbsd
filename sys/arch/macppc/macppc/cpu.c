@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.c,v 1.71 2013/06/03 16:55:22 guenther Exp $ */
+/*	$OpenBSD: cpu.c,v 1.75 2014/01/19 12:45:35 deraadt Exp $ */
 
 /*
  * Copyright (c) 1997 Per Fogelstrom
@@ -38,6 +38,7 @@
 #include <sys/proc.h>
 #include <sys/sysctl.h>
 #include <sys/device.h>
+#include <dev/rndvar.h>
 
 #include <uvm/uvm_extern.h>
 
@@ -45,18 +46,10 @@
 
 #include <machine/autoconf.h>
 #include <machine/bat.h>
+#include <machine/cpu.h>
 #include <machine/trap.h>
+#include <powerpc/hid.h>
 
-/* only valid on 603(e,ev) and G3, G4 */
-#define HID0_DOZE	(1 << (31-8))
-#define HID0_NAP	(1 << (31-9))
-#define HID0_SLEEP	(1 << (31-10))
-#define HID0_DPM	(1 << (31-11))
-#define HID0_SGE	(1 << (31-24))
-#define HID0_BTIC	(1 << (31-26))
-#define HID0_LRSTK	(1 << (31-27))
-#define HID0_FOLD	(1 << (31-28))
-#define HID0_BHT	(1 << (31-29))
 extern u_int32_t	hid0_idle;
 
 /* SCOM addresses (24-bit) */
@@ -241,14 +234,13 @@ cpuattach(struct device *parent, struct device *dev, void *aux)
 	int *reg = ca->ca_reg;
 	u_int32_t cpu, pvr, hid0;
 	char name[32];
-	int qhandle, phandle;
-	u_int32_t clock_freq = 0;
+	int qhandle, phandle, len;
+	u_int32_t clock_freq = 0, timebase = 0;
 	struct cpu_info *ci;
 
 	ci = &cpu_info[reg[0]];
 	ci->ci_cpuid = reg[0];
 	ci->ci_intrdepth = -1;
-	ci->ci_randseed = 1;
 	ci->ci_dev = dev;
 
 	pvr = ppc_mfpvr();
@@ -330,14 +322,13 @@ cpuattach(struct device *parent, struct device *dev, void *aux)
 	    " (Revision 0x%x)", pvr & 0xffff);
 	printf(": %s", cpu_model);
 
-	/* This should only be executed on openfirmware systems... */
-
 	for (qhandle = OF_peer(0); qhandle; qhandle = phandle) {
-                if (OF_getprop(qhandle, "device_type", name, sizeof name) >= 0
-                    && !strcmp(name, "cpu")
-                    && OF_getprop(qhandle, "clock-frequency",
-                        &clock_freq, sizeof clock_freq) >= 0)
-		{
+                len = OF_getprop(qhandle, "device_type", name, sizeof(name));
+                if (len >= 0 && strcmp(name, "cpu") == 0) {
+			OF_getprop(qhandle, "clock-frequency", &clock_freq,
+			    sizeof(clock_freq));
+			OF_getprop(qhandle, "timebase-frequency", &timebase,
+			    sizeof(timebase));
 			break;
 		}
                 if ((phandle = OF_child(qhandle)))
@@ -348,6 +339,12 @@ cpuattach(struct device *parent, struct device *dev, void *aux)
                         qhandle = OF_parent(qhandle);
                 }
 	}
+
+	if (timebase != 0) {
+		ticks_per_sec = timebase;
+		ns_per_tick = 1000000000 / ticks_per_sec;
+	}
+
 
 	if (clock_freq != 0) {
 		/* Openfirmware stores clock in Hz, not MHz */
@@ -695,7 +692,7 @@ cpu_boot_secondary_processors(void)
 		ci = &cpu_info[i];
 		if (ci->ci_cpuid == 0)
 			continue;
-		ci->ci_randseed = random();
+		ci->ci_randseed = (arc4random() & 0x7fffffff) + 1;
 
 		sched_init_cpu(ci);
 

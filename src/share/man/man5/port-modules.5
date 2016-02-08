@@ -1,4 +1,4 @@
-.\"	$OpenBSD: port-modules.5,v 1.162 2013/07/02 10:37:01 espie Exp $
+.\"	$OpenBSD: port-modules.5,v 1.165 2013/10/16 10:29:52 ajacoutot Exp $
 .\"
 .\" Copyright (c) 2008 Marc Espie
 .\"
@@ -24,7 +24,7 @@
 .\" (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
 .\" THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 .\"
-.Dd $Mdocdate: July 2 2013 $
+.Dd $Mdocdate: October 16 2013 $
 .Dt PORT-MODULES 5
 .Os
 .Sh NAME
@@ -902,6 +902,24 @@ and
 May affect the
 .Ar test
 target.
+.Pp
+Python 2.x places .pyc files in the same directory as the associated .py file.
+Python 3.x places these in a separate __pycache__ directory and uses an
+additional suffix.
+The python module defines variables to allow a single PLIST to be
+used for both versions.
+Generate or update the PLIST using the python3
+.Ev FLAVOR ,
+then edit it to prefix any lines creating
+.Ev MODPY_PYCACHE
+directories with
+.Ev MODPY_PYCOMMENT .
+As python2 and python3 packages should permit being installed together,
+it may be necessary to suffix names of common binaries or directories,
+or split common files into a subpackage.
+If updating the PLIST without using the python3 flavor,
+take care not to remove ${MODPY_PYCACHE} and ${MODPY_PYC_MAGIC_TAG}
+variables from the PLIST.
 .It lang/ruby
 See
 .Xr ruby-module 5 .
@@ -1129,12 +1147,32 @@ and
 will default to .tar.xz if unset.
 Also unconditionally sets
 .Ev USE_GMAKE .
+.Pp
+If
+.Li MODGNOME_DESKTOP_FILE=Yes ,
+a dependency on
+.Pa devel/desktop-file-utils
+is appended to
+.Ev MODGNOME_RUN_DEPENDS
+and a link to /usr/bin/true is created under
+.Pa ${WRKDIR}/bin/desktop-file-validate .
+.Pp
 If
 .Li MODGNOME_ICON_CACHE=Yes ,
 a dependency on
 .Pa x11/gtk+2,-guic
 is appended to
 .Ev MODGNOME_RUN_DEPENDS .
+.Pp
+If
+.Li MODGNOME_MIME_FILE=Yes ,
+a dependency on
+.Pa misc/shared-mime-info
+is appended to
+.Ev MODGNOME_RUN_DEPENDS
+and a link to /usr/bin/true is created under
+.Pa ${WRKDIR}/bin/update-mime-database .
+.Pp
 Unless
 .Li NO_BUILD=Yes ,
 .Ev CONFIGURE_SHARED
@@ -1149,12 +1187,14 @@ and
 .Pa textproc/intltool
 is appended to
 .Ev MODULES .
+.Pp
 If none of
 .Ev AUTOCONF_VERSION
 nor
 .Ev AUTOMAKE_VERSION
 are defined, then "--disable-maintainer-mode" is appended to
 .Ev CONFIGURE_ARGS .
+.Pp
 Certain build/run dependencies and configure arguments and environment
 can be set by appending gi, gtk-doc, vala and/or yelp to
 .Ev MODGNOME_TOOLS .
@@ -1170,18 +1210,14 @@ are appended to
 Also,
 .Pa x11/gnome/yelp
 is appended to
-.Ev MODGNOME_RUN_DEPENDS ,
-and
-.Ev MODGNOME_RUN_DEPENDS_yelp
-is
-set for use with multi packaged ports.
+.Ev MODGNOME_RUN_DEPENDS .
 This option is to be used when any files are installed into
 .Pa share/gnome/help/
 or page files are installed into
 .Pa share/help/ .
 .Ev MODGNOME_BUILD_DEPENDS
 and
-.Ev MODGNOME_BUILD_DEPENDS
+.Ev MODGNOME_RUN_DEPENDS
 are appended to the
 corresponding
 .Ev BUILD_DEPENDS

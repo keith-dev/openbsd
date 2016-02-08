@@ -1,4 +1,4 @@
-/*	$OpenBSD: util.c,v 1.3 2012/06/16 00:08:32 jmatthew Exp $ */
+/*	$OpenBSD: util.c,v 1.5 2013/11/23 18:02:44 deraadt Exp $ */
 
 /*
  * Copyright (c) 2009 Martin Hedenfalk <martin@bzero.se>
@@ -67,7 +67,7 @@ normalize_dn(char *dn)
 			if (s[n] == '\0' || s[n] == ',')
 				continue;
 		}
-		*p++ = tolower(*s);
+		*p++ = tolower((unsigned char)*s);
 	}
 	*p = '\0';
 }
@@ -130,7 +130,7 @@ ber2db(struct ber_element *root, struct btval *val, int compression_level)
 		destlen = val->size - sizeof(uint32_t);
 		if ((rc = compress2(dest, &destlen, buf, len,
 		    compression_level)) != Z_OK) {
-			log_warn("compress returned %i", rc);
+			log_warn("compress returned %d", rc);
 			free(val->data);
 			ber_free(&ber);
 			return -1;
@@ -183,7 +183,7 @@ db2ber(struct btval *val, int compression_level)
 		srclen = val->size - sizeof(uint32_t);
 		rc = uncompress(buf, &len, src, srclen);
 		if (rc != Z_OK) {
-			log_warnx("dbt_to_ber: uncompress returned %i", rc);
+			log_warnx("dbt_to_ber: uncompress returned %d", rc);
 			free(buf);
 			return NULL;
 		}

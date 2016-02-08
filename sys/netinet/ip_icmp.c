@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip_icmp.c,v 1.102 2013/06/17 02:31:37 lteo Exp $	*/
+/*	$OpenBSD: ip_icmp.c,v 1.114 2014/01/19 05:01:50 claudio Exp $	*/
 /*	$NetBSD: ip_icmp.c,v 1.19 1996/02/13 23:42:22 christos Exp $	*/
 
 /*
@@ -178,8 +178,10 @@ icmp_do_error(struct mbuf *n, int type, int code, n_long dest, int destmtu)
 	/*
 	 * First, do a rate limitation check.
 	 */
-	if (icmp_ratelimit(&oip->ip_src, type, code))
-		goto freeit;	/* XXX stat */
+	if (icmp_ratelimit(&oip->ip_src, type, code)) {
+		icmpstat.icps_toofreq++;
+		goto freeit;
+	}
 
 	/*
 	 * Now, formulate icmp message
@@ -297,10 +299,6 @@ icmp_error(struct mbuf *n, int type, int code, n_long dest, int destmtu)
 			icmp_send(m, NULL);
 }
 
-struct sockaddr_in icmpsrc = { sizeof (struct sockaddr_in), AF_INET };
-static struct sockaddr_in icmpdst = { sizeof (struct sockaddr_in), AF_INET };
-static struct sockaddr_in icmpgw = { sizeof (struct sockaddr_in), AF_INET };
-
 /*
  * Process a received ICMP message.
  */
@@ -309,14 +307,11 @@ icmp_input(struct mbuf *m, ...)
 {
 	struct icmp *icp;
 	struct ip *ip = mtod(m, struct ip *);
-	int icmplen;
-	int i;
+	struct sockaddr_in sin;
+	int icmplen, i, code, hlen;
 	struct in_ifaddr *ia;
 	void *(*ctlfunc)(int, struct sockaddr *, u_int, void *);
-	int code;
-	int hlen;
 	va_list ap;
-	struct rtentry *rt;
 	struct mbuf *opts;
 
 	va_start(ap, m);
@@ -330,11 +325,12 @@ icmp_input(struct mbuf *m, ...)
 	icmplen = ntohs(ip->ip_len) - hlen;
 #ifdef ICMPPRINTFS
 	if (icmpprintfs) {
-		char buf[4 * sizeof("123")];
+		char dst[INET_ADDRSTRLEN], src[INET_ADDRSTRLEN];
 
-		strlcpy(buf, inet_ntoa(ip->ip_dst), sizeof buf);
-		printf("icmp_input from %s to %s, len %d\n",
-		    inet_ntoa(ip->ip_src), buf, icmplen);
+		inet_ntop(AF_INET, &ip->ip_dst, dst, sizeof(dst));
+		inet_ntop(AF_INET, &ip->ip_src, src, sizeof(src));
+
+		printf("icmp_input from %s to %s, len %d\n", src, dst, icmplen);
 	}
 #endif
 	if (icmplen < ICMP_MINLEN) {
@@ -479,10 +475,13 @@ icmp_input(struct mbuf *m, ...)
 		if (icmpprintfs)
 			printf("deliver to protocol %d\n", icp->icmp_ip.ip_p);
 #endif
-		icmpsrc.sin_addr = icp->icmp_ip.ip_dst;
+		memset(&sin, 0, sizeof(sin));
+		sin.sin_family = AF_INET;
+		sin.sin_len = sizeof(struct sockaddr_in);
+		sin.sin_addr = icp->icmp_ip.ip_dst;
 #if NCARP > 0
 		if (m->m_pkthdr.rcvif->if_type == IFT_CARP &&
-		    carp_lsdrop(m, AF_INET, &icmpsrc.sin_addr.s_addr,
+		    carp_lsdrop(m, AF_INET, &sin.sin_addr.s_addr,
 		    &ip->ip_dst.s_addr))
 			goto freeit;
 #endif
@@ -492,7 +491,7 @@ icmp_input(struct mbuf *m, ...)
 		 */
 		ctlfunc = inetsw[ip_protox[icp->icmp_ip.ip_p]].pr_ctlinput;
 		if (ctlfunc)
-			(*ctlfunc)(code, sintosa(&icmpsrc), m->m_pkthdr.rdomain,
+			(*ctlfunc)(code, sintosa(&sin), m->m_pkthdr.rdomain,
 			    &icp->icmp_ip);
 		break;
 
@@ -538,14 +537,17 @@ icmp_input(struct mbuf *m, ...)
 		 * We are not able to respond with all ones broadcast
 		 * unless we receive it over a point-to-point interface.
 		 */
+		memset(&sin, 0, sizeof(sin));
+		sin.sin_family = AF_INET;
+		sin.sin_len = sizeof(struct sockaddr_in);
 		if (ip->ip_dst.s_addr == INADDR_BROADCAST ||
 		    ip->ip_dst.s_addr == INADDR_ANY)
-			icmpdst.sin_addr = ip->ip_src;
+			sin.sin_addr = ip->ip_src;
 		else
-			icmpdst.sin_addr = ip->ip_dst;
+			sin.sin_addr = ip->ip_dst;
 		if (m->m_pkthdr.rcvif == NULL)
 			break;
-		ia = ifatoia(ifaof_ifpforaddr(sintosa(&icmpdst),
+		ia = ifatoia(ifaof_ifpforaddr(sintosa(&sin),
 		    m->m_pkthdr.rcvif));
 		if (ia == 0)
 			break;
@@ -579,6 +581,12 @@ reflect:
 		return;
 
 	case ICMP_REDIRECT:
+	{
+		struct sockaddr_in sdst;
+		struct sockaddr_in sgw;
+		struct sockaddr_in ssrc;
+		struct rtentry *newrt = NULL;
+
 		/* Free packet atttributes */
 		if (m->m_flags & M_PKTHDR)
 			m_tag_delete_chain(m);
@@ -598,39 +606,45 @@ reflect:
 		 * listening on a raw socket (e.g. the routing
 		 * daemon for use in updating its tables).
 		 */
-		icmpgw.sin_addr = ip->ip_src;
-		icmpdst.sin_addr = icp->icmp_gwaddr;
+		memset(&sdst, 0, sizeof(sdst));
+		memset(&sgw, 0, sizeof(sgw));
+		memset(&ssrc, 0, sizeof(ssrc));
+		sdst.sin_family = sgw.sin_family = ssrc.sin_family = AF_INET;
+		sdst.sin_len = sgw.sin_len = ssrc.sin_len = sizeof(sdst);
+		memcpy(&sdst.sin_addr, &icp->icmp_ip.ip_dst, sizeof(sdst));
+		memcpy(&sgw.sin_addr, &icp->icmp_gwaddr, sizeof(sgw));
+		memcpy(&ssrc.sin_addr, &ip->ip_src, sizeof(ssrc));
+
 #ifdef	ICMPPRINTFS
 		if (icmpprintfs) {
-			char buf[4 * sizeof("123")];
-			strlcpy(buf, inet_ntoa(icp->icmp_ip.ip_dst),
-			    sizeof buf);
+			char gw[INET_ADDRSTRLEN], dst[INET_ADDRSTRLEN];
 
-			printf("redirect dst %s to %s\n",
-			    buf, inet_ntoa(icp->icmp_gwaddr));
+			inet_ntop(AF_INET, &icp->icmp_gwaddr, gw, sizeof(gw));
+			inet_ntop(AF_INET, &icp->icmp_ip.ip_dst,
+			    dst, sizeof(dst));
+
+			printf("redirect dst %s to %s\n", dst, gw);
 		}
 #endif
-		icmpsrc.sin_addr = icp->icmp_ip.ip_dst;
+
 #if NCARP > 0
 		if (m->m_pkthdr.rcvif->if_type == IFT_CARP &&
-		    carp_lsdrop(m, AF_INET, &icmpsrc.sin_addr.s_addr,
+		    carp_lsdrop(m, AF_INET, &sdst.sin_addr.s_addr,
 		    &ip->ip_dst.s_addr))
 			goto freeit;
 #endif
-		rt = NULL;
-		rtredirect(sintosa(&icmpsrc), sintosa(&icmpdst),
-		    (struct sockaddr *)0, RTF_GATEWAY | RTF_HOST,
-		    sintosa(&icmpgw), (struct rtentry **)&rt,
-		    m->m_pkthdr.rdomain);
-		if (rt != NULL && icmp_redirtimeout != 0) {
-			(void)rt_timer_add(rt, icmp_redirect_timeout,
+		rtredirect(sintosa(&sdst), sintosa(&sgw), NULL,
+		    RTF_GATEWAY | RTF_HOST, sintosa(&ssrc),
+		    &newrt, m->m_pkthdr.rdomain);
+		if (newrt != NULL && icmp_redirtimeout != 0) {
+			(void)rt_timer_add(newrt, icmp_redirect_timeout,
 			    icmp_redirect_timeout_q, m->m_pkthdr.rdomain);
 		}
-		if (rt != NULL)
-			rtfree(rt);
-		pfctlinput(PRC_REDIRECT_HOST, sintosa(&icmpsrc));
+		if (newrt != NULL)
+			rtfree(newrt);
+		pfctlinput(PRC_REDIRECT_HOST, sintosa(&sdst));
 		break;
-
+	}
 	/*
 	 * No kernel processing for the following;
 	 * just fall through to send to raw listener.
@@ -711,7 +725,8 @@ icmp_reflect(struct mbuf *m, struct mbuf **op, struct in_ifaddr *ia)
 		struct sockaddr_in *dst;
 		struct route ro;
 
-		bzero((caddr_t) &ro, sizeof(ro));
+		memset(&ro, 0, sizeof(ro));
+		ro.ro_tableid = m->m_pkthdr.rdomain;
 		dst = satosin(&ro.ro_dst);
 		dst->sin_family = AF_INET;
 		dst->sin_len = sizeof(*dst);
@@ -745,7 +760,7 @@ icmp_reflect(struct mbuf *m, struct mbuf **op, struct in_ifaddr *ia)
 		 * add on any record-route or timestamp options.
 		 */
 		cp = (u_char *) (ip + 1);
-		if (op && (opts = ip_srcroute()) == 0 &&
+		if (op && (opts = ip_srcroute(m)) == NULL &&
 		    (opts = m_gethdr(M_DONTWAIT, MT_HEADER))) {
 			opts->m_len = sizeof(struct in_addr);
 			mtod(opts, struct in_addr *)->s_addr = 0;
@@ -776,9 +791,8 @@ icmp_reflect(struct mbuf *m, struct mbuf **op, struct in_ifaddr *ia)
 				 */
 				if (opt == IPOPT_RR || opt == IPOPT_TS ||
 				    opt == IPOPT_SECURITY) {
-					bcopy((caddr_t)cp,
-					    mtod(opts, caddr_t) + opts->m_len,
-					    len);
+					memcpy(mtod(opts, caddr_t) +
+					    opts->m_len, cp, len);
 					opts->m_len += len;
 				}
 			}
@@ -794,18 +808,7 @@ icmp_reflect(struct mbuf *m, struct mbuf **op, struct in_ifaddr *ia)
 				printf("%d\n", opts->m_len);
 #endif
 		}
-		/*
-		 * Now strip out original options by copying rest of first
-		 * mbuf's data back, and adjust the IP length.
-		 */
-		ip->ip_len = htons(ntohs(ip->ip_len) - optlen);
-		ip->ip_hl = sizeof(struct ip) >> 2;
-		m->m_len -= optlen;
-		if (m->m_flags & M_PKTHDR)
-			m->m_pkthdr.len -= optlen;
-		optlen += sizeof(struct ip);
-		bcopy((caddr_t)ip + optlen, (caddr_t)(ip + 1),
-		    m->m_len - sizeof(struct ip));
+		ip_stripoptions(m);
 	}
 	m->m_flags &= ~(M_BCAST|M_MCAST);
 	if (op)
@@ -815,8 +818,7 @@ icmp_reflect(struct mbuf *m, struct mbuf **op, struct in_ifaddr *ia)
 }
 
 /*
- * Send an icmp packet back to the ip level,
- * after supplying a checksum.
+ * Send an icmp packet back to the ip level
  */
 void
 icmp_send(struct mbuf *m, struct mbuf *opts)
@@ -828,14 +830,15 @@ icmp_send(struct mbuf *m, struct mbuf *opts)
 	hlen = ip->ip_hl << 2;
 	icp = (struct icmp *)(mtod(m, caddr_t) + hlen);
 	icp->icmp_cksum = 0;
-	icp->icmp_cksum = in4_cksum(m, 0, hlen, ntohs(ip->ip_len) - hlen);
+	m->m_pkthdr.csum_flags |= M_ICMP_CSUM_OUT;
 #ifdef ICMPPRINTFS
 	if (icmpprintfs) {
-		char buf[4 * sizeof("123")];
+		char dst[INET_ADDRSTRLEN], src[INET_ADDRSTRLEN];
 
-		strlcpy(buf, inet_ntoa(ip->ip_dst), sizeof buf);
-		printf("icmp_send dst %s src %s\n",
-		    buf, inet_ntoa(ip->ip_src));
+		inet_ntop(AF_INET, &ip->ip_dst, dst, sizeof(dst));
+		inet_ntop(AF_INET, &ip->ip_src, src, sizeof(src));
+
+		printf("icmp_send dst %s src %s\n", dst, src);
 	}
 #endif
 	(void)ip_output(m, opts, (void *)NULL, 0, (void *)NULL, (void *)NULL);
@@ -907,13 +910,22 @@ icmp_sysctl(int *name, u_int namelen, void *oldp, size_t *oldlenp, void *newp,
 
 
 struct rtentry *
-icmp_mtudisc_clone(struct sockaddr *dst, u_int rtableid)
+icmp_mtudisc_clone(struct in_addr dst, u_int rtableid)
 {
+	struct sockaddr_in *sin;
+	struct route ro;
 	struct rtentry *rt;
 	int error;
 
-	rt = rtalloc1(dst, RT_REPORT, rtableid);
-	if (rt == 0)
+	memset(&ro, 0, sizeof(ro));
+	ro.ro_tableid = rtableid;
+	sin = satosin(&ro.ro_dst);
+	sin->sin_family = AF_INET;
+	sin->sin_len = sizeof(*sin);
+	sin->sin_addr = dst;
+
+	rt = rtalloc1(&ro.ro_dst, RT_REPORT, rtableid);
+	if (rt == NULL)
 		return (NULL);
 
 	/* Check if the route is actually usable */
@@ -927,8 +939,8 @@ icmp_mtudisc_clone(struct sockaddr *dst, u_int rtableid)
 		struct rtentry *nrt;
 		struct rt_addrinfo info;
 
-		bzero(&info, sizeof(info));
-		info.rti_info[RTAX_DST] = dst;
+		memset(&info, 0, sizeof(info));
+		info.rti_info[RTAX_DST] = sintosa(sin);
 		info.rti_info[RTAX_GATEWAY] = rt->rt_gateway;
 		info.rti_flags = RTF_GATEWAY | RTF_HOST | RTF_DYNAMIC;
 
@@ -951,21 +963,19 @@ icmp_mtudisc_clone(struct sockaddr *dst, u_int rtableid)
 	return (rt);
 }
 
+/* Table of common MTUs: */
+static const u_short mtu_table[] = {
+	65535, 65280, 32000, 17914, 9180, 8166,
+	4352, 2002, 1492, 1006, 508, 296, 68, 0
+};
+
 void
 icmp_mtudisc(struct icmp *icp, u_int rtableid)
 {
 	struct rtentry *rt;
-	struct sockaddr *dst = sintosa(&icmpsrc);
 	u_long mtu = ntohs(icp->icmp_nextmtu);  /* Why a long?  IPv6 */
 
-	/* Table of common MTUs: */
-
-	static u_short mtu_table[] = {
-		65535, 65280, 32000, 17914, 9180, 8166,
-		4352, 2002, 1492, 1006, 508, 296, 68, 0
-	};
-
-	rt = icmp_mtudisc_clone(dst, rtableid);
+	rt = icmp_mtudisc_clone(icp->icmp_ip.ip_dst, rtableid);
 	if (rt == 0)
 		return;
 
@@ -978,7 +988,6 @@ icmp_mtudisc(struct icmp *icp, u_int rtableid)
 			mtu -= (icp->icmp_ip.ip_hl << 2);
 
 		/* If we still can't guess a value, try the route */
-
 		if (mtu == 0) {
 			mtu = rt->rt_rmx.rmx_mtu;
 
@@ -988,7 +997,7 @@ icmp_mtudisc(struct icmp *icp, u_int rtableid)
 				mtu = rt->rt_ifp->if_mtu;
 		}
 
-		for (i = 0; i < sizeof(mtu_table) / sizeof(mtu_table[0]); i++)
+		for (i = 0; i < nitems(mtu_table); i++)
 			if (mtu > mtu_table[i]) {
 				mtu = mtu_table[i];
 				break;
@@ -1025,7 +1034,7 @@ icmp_mtudisc_timeout(struct rtentry *rt, struct rttimer *r)
 		struct sockaddr_in sa;
 		struct rt_addrinfo info;
 
-		bzero(&info, sizeof(info));
+		memset(&info, 0, sizeof(info));
 		info.rti_info[RTAX_DST] = rt_key(rt);
 		info.rti_info[RTAX_NETMASK] = rt_mask(rt);
 		info.rti_info[RTAX_GATEWAY] = rt->rt_gateway;
@@ -1056,14 +1065,11 @@ icmp_mtudisc_timeout(struct rtentry *rt, struct rttimer *r)
 int
 icmp_ratelimit(const struct in_addr *dst, const int type, const int code)
 {
-
 	/* PPS limit */
 	if (!ppsratecheck(&icmperrppslim_last, &icmperrpps_count,
 	    icmperrppslim))
-		return 1;
-
-	/*okay to send*/
-	return 0;
+		return 1;	/* The packet is subject to rate limit */
+	return 0;	/* okay to send */
 }
 
 void
@@ -1075,7 +1081,7 @@ icmp_redirect_timeout(struct rtentry *rt, struct rttimer *r)
 	    (RTF_DYNAMIC | RTF_HOST)) {
 		struct rt_addrinfo info;
 
-		bzero(&info, sizeof(info));
+		memset(&info, 0, sizeof(info));
 		info.rti_info[RTAX_DST] = rt_key(rt);
 		info.rti_info[RTAX_NETMASK] = rt_mask(rt);
 		info.rti_info[RTAX_GATEWAY] = rt->rt_gateway;
@@ -1111,7 +1117,7 @@ icmp_do_exthdr(struct mbuf *m, u_int16_t class, u_int8_t ctype, void *buf,
 		/* exthdr already present, giving up */
 		return (0);
 
-	/* the actuall offset starts after the common ICMP header */
+	/* the actual offset starts after the common ICMP header */
 	hlen += ICMP_MINLEN;
 	/* exthdr must start on a word boundary */
 	off = roundup(ntohs(ip->ip_len) - hlen, sizeof(u_int32_t));
@@ -1119,7 +1125,7 @@ icmp_do_exthdr(struct mbuf *m, u_int16_t class, u_int8_t ctype, void *buf,
 	off = max(off, ICMP_EXT_OFFSET);
 	icp->icmp_length = off / sizeof(u_int32_t);
 
-	bzero(&hdr, sizeof(hdr));
+	memset(&hdr, 0, sizeof(hdr));
 	hdr.ieh.ieh_version = ICMP_EXT_HDR_VERSION;
 	hdr.ieo.ieo_length = htons(sizeof(struct icmp_ext_obj_hdr) + len);
 	hdr.ieo.ieo_cnum = class;

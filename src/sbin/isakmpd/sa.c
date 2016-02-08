@@ -1,4 +1,4 @@
-/* $OpenBSD: sa.c,v 1.117 2012/06/30 14:51:31 naddy Exp $	 */
+/* $OpenBSD: sa.c,v 1.120 2014/01/23 01:04:28 deraadt Exp $	 */
 /* $EOM: sa.c,v 1.112 2000/12/12 00:22:52 niklas Exp $	 */
 
 /*
@@ -41,13 +41,12 @@
 #include <regex.h>
 #include <keynote.h>
 
-#include "sysdep.h"
-
 #include "attribute.h"
 #include "conf.h"
 #include "connection.h"
 #include "cookie.h"
 #include "doi.h"
+#include "dpd.h"
 #include "exchange.h"
 #include "isakmp.h"
 #include "log.h"
@@ -1330,6 +1329,22 @@ sa_mark_replaced(struct sa *sa)
 	sa->flags |= SA_FLAG_REPLACED;
 }
 
+/* Replace SA */
+void
+sa_replace(struct sa *sa, struct sa *new_sa)
+{
+	LOG_DBG((LOG_SA, 60, "sa_replace: SA %p (%s) is replaced by SA %p (%s)",
+	    sa, sa->name ? sa->name : "unnamed",
+	    new_sa, new_sa->name ? new_sa->name : "unnamed"));
+	sa_mark_replaced(sa);
+	if (new_sa->flags & SA_FLAG_REPLACED) {
+		/* enable the dpd */
+		if ((new_sa->flags & SA_FLAG_DPD) == SA_FLAG_DPD)
+			dpd_start(new_sa);
+		new_sa->flags &= ~SA_FLAG_REPLACED;
+	}
+}
+
 /*
  * Setup expiration timers for SA.  This is used for ISAKMP SAs, but also
  * possible to use for application SAs if the application does not deal
@@ -1358,7 +1373,7 @@ sa_setup_expirations(struct sa *sa)
 		 * XXX This should probably be configuration controlled
 		 * somehow.
 		 */
-		seconds = sa->seconds * (850 + rand_32() % 100) / 1000;
+		seconds = sa->seconds * (850 + arc4random_uniform(100)) / 1000;
 		LOG_DBG((LOG_TIMER, 95,
 		    "sa_setup_expirations: SA %p soft timeout in %llu seconds",
 		    sa, seconds));

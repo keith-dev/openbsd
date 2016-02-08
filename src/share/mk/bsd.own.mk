@@ -1,4 +1,4 @@
-#	$OpenBSD: bsd.own.mk,v 1.140 2013/07/05 21:13:35 miod Exp $
+#	$OpenBSD: bsd.own.mk,v 1.144 2014/01/25 06:09:43 deraadt Exp $
 #	$NetBSD: bsd.own.mk,v 1.24 1996/04/13 02:08:09 thorpej Exp $
 
 # Host-specific overrides
@@ -24,22 +24,22 @@ DEBUGLIBS?=	no
 # Set toolchain to be able to know differences.
 ELF_TOOLCHAIN?=	yes
 
-GCC2_ARCH=vax
-GCC4_ARCH=alpha amd64 arm hppa hppa64 i386 ia64 mips64 mips64el powerpc sh sparc sparc64
+GCC3_ARCH=m68k m88k vax
 BINUTILS217_ARCH=hppa64 ia64
 
-# i386 PIE works; but there are RAMDISK fitting problems.
 # powerpc has problems on some "embedded" powerpc.
 # arm needs binutils-2.17, which still lacks W^X support
-PIE_ARCH=alpha amd64 hppa mips64 mips64el sh sparc64
+# sparc has not been tried
+# m88k unknown
+# m68k unknown
+# hppa64 unknown
+PIE_ARCH=alpha amd64 hppa i386 mips64 mips64el sh sparc64
 
 .for _arch in ${MACHINE_ARCH}
-.if !empty(GCC2_ARCH:M${_arch})
-COMPILER_VERSION?=gcc2
-.elif !empty(GCC4_ARCH:M${_arch})
-COMPILER_VERSION?=gcc4
-.else
+.if !empty(GCC3_ARCH:M${_arch})
 COMPILER_VERSION?=gcc3
+.else
+COMPILER_VERSION?=gcc4
 .endif
 
 .if !empty(BINUTILS217_ARCH:M${_arch})
@@ -110,7 +110,7 @@ LOCALEMODE?=	${NONBINMODE}
 
 .if !defined(CDIAGFLAGS)
 CDIAGFLAGS=	-Wall -Wpointer-arith -Wuninitialized -Wstrict-prototypes
-CDIAGFLAGS+=	-Wmissing-prototypes -Wunused -Wsign-compare -Wbounded
+CDIAGFLAGS+=	-Wmissing-prototypes -Wunused -Wsign-compare
 CDIAGFLAGS+=	-Wshadow
 .  if ${COMPILER_VERSION} == "gcc4"
 CDIAGFLAGS+=	-Wdeclaration-after-statement

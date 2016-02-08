@@ -1,4 +1,4 @@
-/*	$OpenBSD: util.c,v 1.26 2013/06/09 13:10:19 miod Exp $	*/
+/*	$OpenBSD: util.c,v 1.29 2014/01/23 01:07:45 deraadt Exp $	*/
 
 /*
  * Copyright (c) 1998 Per Fogelstrom, Opsycon AB
@@ -38,7 +38,6 @@
  * Ideally, a scheme to compile these stubs from libc should be used, but
  * this would end up dragging too much code from libc here.
  */
-long __guard[8] __dso_public __attribute__((section(".openbsd.randomdata")));
 long __guard_local __dso_hidden __attribute__((section(".openbsd.randomdata")));
 
 void __stack_smash_handler(char [], int);
@@ -52,8 +51,8 @@ __stack_smash_handler(char func[], int damaged)
 /*
  * Static vars usable after bootstrapping.
  */
-static void *_dl_malloc_pool = 0;
-static long *_dl_malloc_free = 0;
+static char *_dl_malloc_pool;
+static long *_dl_malloc_free;
 
 char *
 _dl_strdup(const char *orig)
@@ -98,7 +97,7 @@ _dl_malloc(size_t need)
 	have = _dl_round_page((long)_dl_malloc_pool) - (long)_dl_malloc_pool;
 	if (need > have) {
 		if (have >= 8 + DL_MALLOC_ALIGN) {
-			p = _dl_malloc_pool;
+			p = (void *)_dl_malloc_pool;
 			p = (void *) ((long)p + DL_MALLOC_ALIGN);
 			p[-1] = have;
 			_dl_free((void *)p);		/* move to freelist */
@@ -111,7 +110,7 @@ _dl_malloc(size_t need)
 			_dl_exit(7);
 		}
 	}
-	p = _dl_malloc_pool;
+	p = (void *)_dl_malloc_pool;
 	_dl_malloc_pool += need;
 	_dl_memset(p, 0, need);
 	p = (void *) ((long)p + DL_MALLOC_ALIGN);
@@ -136,10 +135,10 @@ _dl_randombuf(void *buf, size_t buflen)
 	_dl_sysctl(mib, 2, buf, &buflen, NULL, 0);
 }
 
-unsigned int
+u_int32_t
 _dl_random(void)
 {
-	unsigned int rnd;
+	u_int32_t rnd;
 	_dl_randombuf(&rnd, sizeof(rnd));
 	return (rnd);
 }

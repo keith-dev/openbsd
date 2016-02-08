@@ -1,4 +1,4 @@
-/*	$OpenBSD: ps.c,v 1.55 2012/04/21 03:14:50 guenther Exp $	*/
+/*	$OpenBSD: ps.c,v 1.59 2013/11/21 15:54:45 deraadt Exp $	*/
 /*	$NetBSD: ps.c,v 1.15 1995/05/18 20:33:25 mycroft Exp $	*/
 
 /*-
@@ -31,6 +31,7 @@
  */
 
 #include <sys/param.h>
+#include <sys/sysctl.h>
 #include <sys/user.h>
 #include <sys/time.h>
 #include <sys/resource.h>
@@ -116,19 +117,23 @@ main(int argc, char *argv[])
 	ttydev = NODEV;
 	memf = nlistf = swapf = NULL;
 	while ((ch = getopt(argc, argv,
-	    "acCegHhjkLlM:mN:O:o:p:rSTt:U:uvW:wx")) != -1)
+	    "AaCcegHhjkLlM:mN:O:o:p:rSTt:U:uvW:wx")) != -1)
 		switch (ch) {
+		case 'A':
+			all = 1;
+			xflg = 1;
+			break;
 		case 'a':
 			all = 1;
+			break;
+		case 'C':
+			rawcpu = 1;
 			break;
 		case 'c':
 			commandonly = 1;
 			break;
 		case 'e':			/* XXX set ufmt */
 			needenv = 1;
-			break;
-		case 'C':
-			rawcpu = 1;
 			break;
 		case 'g':
 			break;			/* no-op */
@@ -339,7 +344,7 @@ main(int argc, char *argv[])
 		if (showthreads == 0 && (kinfo[i]->p_flag & P_THREAD) != 0)
 			continue;
 		if (xflg == 0 && ((int)kinfo[i]->p_tdev == NODEV ||
-		    (kinfo[i]->p_flag & P_CONTROLT ) == 0))
+		    (kinfo[i]->p_psflags & PS_CONTROLT ) == 0))
 			continue;
 		if (showthreads && kinfo[i]->p_tid == -1)
 			continue;
@@ -439,7 +444,7 @@ kludge_oldps_options(char *s)
 		 * otherwise check for trailing number, which *may* be a
 		 * pid.
 		 */
-		while (cp >= s && isdigit(*cp))
+		while (cp >= s && isdigit((unsigned char)*cp))
 			--cp;
 	}
 	cp++;
@@ -449,7 +454,8 @@ kludge_oldps_options(char *s)
 	 * if there's a trailing number, and not a preceding 'p' (pid) or
 	 * 't' (tty) flag, then assume it's a pid and insert a 'p' flag.
 	 */
-	if (isdigit(*cp) && (cp == s || (cp[-1] != 't' && cp[-1] != 'p' &&
+	if (isdigit((unsigned char)*cp) &&
+	    (cp == s || (cp[-1] != 't' && cp[-1] != 'p' &&
 	    (cp - 1 == s || cp[-2] != 't'))))
 		*ns++ = 'p';
 	/* and append the number */
@@ -462,7 +468,7 @@ static void
 usage(void)
 {
 	(void)fprintf(stderr,
-	    "usage: %s [-aCceHhjkLlmrSTuvwx] [-M core] [-N system] [-O fmt] [-o fmt] [-p pid]\n",
+	    "usage: %s [-AaCceHhjkLlmrSTuvwx] [-M core] [-N system] [-O fmt] [-o fmt] [-p pid]\n",
 	    __progname);	
 	(void)fprintf(stderr,
 	    "%-*s[-t tty] [-U username] [-W swap]\n", (int)strlen(__progname) + 8, "");

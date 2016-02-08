@@ -1,4 +1,4 @@
-/*	$OpenBSD: buf.h,v 1.89 2013/07/09 15:37:43 beck Exp $	*/
+/*	$OpenBSD: buf.h,v 1.93 2013/11/21 01:16:52 dlg Exp $	*/
 /*	$NetBSD: buf.h,v 1.25 1997/04/09 21:12:17 mycroft Exp $	*/
 
 /*
@@ -42,7 +42,6 @@
 #include <sys/queue.h>
 #include <sys/tree.h>
 #include <sys/mutex.h>
-#include <sys/workq.h>
 
 #define NOLIST ((struct buf *)0x87654321)
 
@@ -64,11 +63,10 @@ LIST_HEAD(workhead, worklist);
  * Buffer queues
  */
 #define BUFQ_NSCAN_N	128
-#define BUFQ_DISKSORT	0
-#define BUFQ_FIFO	1
-#define BUFQ_NSCAN	2
+#define BUFQ_FIFO	0
+#define BUFQ_NSCAN	1
 #define BUFQ_DEFAULT	BUFQ_NSCAN
-#define BUFQ_HOWMANY	3
+#define BUFQ_HOWMANY	2
 
 /*
  * Write limits for bufq - defines high and low water marks for how
@@ -126,19 +124,11 @@ struct bufq_nscan {
 	SIMPLEQ_ENTRY(buf)	bqf_entries;
 };
 
-/* Abuse bufq_fifo, for swapping to regular files. */
-struct bufq_swapreg {
-	SIMPLEQ_ENTRY(buf)	bqf_entries;
-	struct workq_task	bqf_wqtask;
-
-};
-
 /* bufq link in struct buf */
 union bufq_data {
 	struct bufq_disksort	bufq_data_disksort;
 	struct bufq_fifo	bufq_data_fifo;
 	struct bufq_nscan	bufq_data_nscan;
-	struct bufq_swapreg	bufq_swapreg;
 };
 
 /*
@@ -197,15 +187,8 @@ struct buf {
  	struct	workhead b_dep;		/* List of filesystem dependencies. */
 };
 
-/*
- * For portability with historic industry practice, the cylinder number has
- * to be maintained in the `b_resid' field.
- */
-#define	b_cylinder b_resid		/* Cylinder number for disksort(). */
-
 /* Device driver compatibility definitions. */
 #define	b_active b_bcount		/* Driver queue head: drive active. */
-#define	b_errcnt b_resid		/* Retry count while I/O in progress. */
 
 /*
  * These flags are kept in b_flags.

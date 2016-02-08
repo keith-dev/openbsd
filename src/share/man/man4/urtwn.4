@@ -1,4 +1,4 @@
-.\" $OpenBSD: urtwn.4,v 1.22 2013/07/16 16:05:49 schwarze Exp $
+.\" $OpenBSD: urtwn.4,v 1.28 2014/02/15 20:28:19 tedu Exp $
 .\"
 .\" Copyright (c) 2010 Damien Bergamini <damien.bergamini@free.fr>
 .\"
@@ -14,7 +14,7 @@
 .\" ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
 .\" OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 .\"
-.Dd $Mdocdate: July 16 2013 $
+.Dd $Mdocdate: February 15 2014 $
 .Dt URTWN 4
 .Os
 .Sh NAME
@@ -63,7 +63,7 @@ The
 driver can be configured to use
 Wired Equivalent Privacy (WEP) or
 Wi-Fi Protected Access (WPA-PSK and WPA2-PSK).
-WPA is the de facto encryption standard for wireless networks.
+WPA is the current encryption standard for wireless networks.
 It is strongly recommended that WEP
 not be used as the sole mechanism
 to secure wireless communication,
@@ -97,6 +97,7 @@ The following adapters should work:
 .It B-Link BL-LW05-5R
 .It Belkin F7D1102 Surf Wireless Micro
 .It D-Link DWA-121
+.It D-Link DWA-131 rev B
 .It D-Link DWA-133
 .It D-Link DWA-135
 .It Digitus DN-7042
@@ -104,7 +105,9 @@ The following adapters should work:
 .It EDUP EP-N8508
 .It Full River FR-W100NUL
 .It Hercules Wireless N USB Pico HWNUp-150
+.It IO-DATA WN-G150UM
 .It Netgear WNA1000A
+.It Patriot PCUSBW1150
 .It Planex GW-USEco300
 .It Planex GW-USNano2
 .It Planex GW-USValue-EZ
@@ -159,7 +162,7 @@ driver first appeared in
 The
 .Nm
 driver was written by
-.An Damien Bergamini Aq Mt damien@openbsd.org .
+.An Damien Bergamini Aq Mt damien.bergamini@free.fr .
 .Sh CAVEATS
 The
 .Nm

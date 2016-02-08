@@ -1,4 +1,4 @@
-/*	$OpenBSD: stdlib.h,v 1.52 2013/05/31 20:59:24 ajacoutot Exp $	*/
+/*	$OpenBSD: stdlib.h,v 1.56 2013/12/28 01:51:53 martynas Exp $	*/
 /*	$NetBSD: stdlib.h,v 1.25 1995/12/27 21:19:08 jtc Exp $	*/
 
 /*-
@@ -188,7 +188,8 @@ long	 random(void);
 char	*setstate(char *);
 void	 srandom(unsigned int);
 
-char	*realpath(const char *, char *);
+char	*realpath(const char *, char *)
+		__attribute__((__bounded__ (__minbytes__,2,1024)));
 
 int	 setkey(const char *);
 
@@ -248,6 +249,10 @@ int	 posix_openpt(int);
 char	*mkdtemp(char *);
 #endif
 
+#if __XPG_VISIBLE >= 420 || __POSIX_VISIBLE >= 200809
+int     getsubopt(char **, char * const *, char **);
+#endif
+
 #if __BSD_VISIBLE
 void	*alloca(size_t); 
 
@@ -274,14 +279,7 @@ const char *
 	getprogname(void);
 void	setprogname(const char *);
 
-#ifndef _GETOPT_DEFINED_
-#define _GETOPT_DEFINED_
-int	 getopt(int, char * const *, const char *);
-extern	 char *optarg;			/* getopt(3) external variables */
-extern	 int opterr, optind, optopt, optreset;
-int	 getsubopt(char **, char * const *, char **);
 extern	 char *suboptarg;		/* getsubopt(3) external variable */
-#endif /* _GETOPT_DEFINED_ */
 
 int	 mkstemps(char *, int);
 
@@ -305,9 +303,6 @@ quad_t	 strtoq(const char *, char **, int);
 u_quad_t strtouq(const char *, char **, int);
 
 u_int32_t arc4random(void);
-void	arc4random_stir(void);
-void	arc4random_addrandom(unsigned char *, int)
-	__attribute__((__bounded__ (__string__,1,2)));
 u_int32_t arc4random_uniform(u_int32_t);
 void arc4random_buf(void *, size_t)
 	__attribute__((__bounded__ (__string__,1,2)));

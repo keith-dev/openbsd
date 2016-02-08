@@ -1,4 +1,4 @@
-/* $OpenBSD: ssh-keygen.c,v 1.230 2013/07/20 01:44:37 djm Exp $ */
+/* $OpenBSD: ssh-keygen.c,v 1.241 2014/02/05 20:13:25 naddy Exp $ */
 /*
  * Author: Tatu Ylonen <ylo@cs.hut.fi>
  * Copyright (c) 1994 Tatu Ylonen <ylo@cs.hut.fi>, Espoo, Finland
@@ -145,6 +145,18 @@ char *key_type_name = NULL;
 /* Load key from this PKCS#11 provider */
 char *pkcs11provider = NULL;
 
+/* Use new OpenSSH private key format when writing SSH2 keys instead of PEM */
+int use_new_format = 0;
+
+/* Cipher for new-format private keys */
+char *new_format_cipher = NULL;
+
+/*
+ * Number of KDF rounds to derive new format keys /
+ * number of primality trials when screening moduli.
+ */
+int rounds = 0;
+
 /* argv0 */
 extern char *__progname;
 
@@ -180,7 +192,7 @@ type_bits_valid(int type, u_int32_t *bitsp)
 	}
 	if (type == KEY_DSA && *bitsp != 1024)
 		fatal("DSA keys must be 1024 bits");
-	else if (type != KEY_ECDSA && *bitsp < 768)
+	else if (type != KEY_ECDSA && type != KEY_ED25519 && *bitsp < 768)
 		fatal("Key must at least be 768 bits");
 	else if (type == KEY_ECDSA && key_ecdsa_bits_to_nid(*bitsp) == -1)
 		fatal("Invalid ECDSA key length - valid lengths are "
@@ -214,6 +226,10 @@ ask_filename(struct passwd *pw, const char *prompt)
 		case KEY_RSA:
 			name = _PATH_SSH_CLIENT_ID_RSA;
 			break;
+		case KEY_ED25519:
+		case KEY_ED25519_CERT:
+			name = _PATH_SSH_CLIENT_ID_ED25519;
+			break;
 		default:
 			fprintf(stderr, "bad key type\n");
 			exit(1);
@@ -244,7 +260,7 @@ load_identity(char *filename)
 			pass = read_passphrase("Enter passphrase: ",
 			    RP_ALLOW_STDIN);
 		prv = key_load_private(filename, pass, NULL);
-		memset(pass, 0, strlen(pass));
+		explicit_bzero(pass, strlen(pass));
 		free(pass);
 	}
 	return prv;
@@ -869,6 +885,7 @@ do_gen_all_hostkeys(struct passwd *pw)
 		{ "rsa", "RSA" ,_PATH_HOST_RSA_KEY_FILE },
 		{ "dsa", "DSA", _PATH_HOST_DSA_KEY_FILE },
 		{ "ecdsa", "ECDSA",_PATH_HOST_ECDSA_KEY_FILE },
+		{ "ed25519", "ED25519",_PATH_HOST_ED25519_KEY_FILE },
 		{ NULL, NULL, NULL }
 	};
 
@@ -895,7 +912,6 @@ do_gen_all_hostkeys(struct passwd *pw)
 		}
 		printf("%s ", key_types[i].key_type_display);
 		fflush(stdout);
-		arc4random_stir();
 		type = key_type_from_name(key_types[i].key_type);
 		strlcpy(identity_file, key_types[i].path, sizeof(identity_file));
 		bits = 0;
@@ -909,7 +925,8 @@ do_gen_all_hostkeys(struct passwd *pw)
 		public  = key_from_private(private);
 		snprintf(comment, sizeof comment, "%s@%s", pw->pw_name,
 		    hostname);
-		if (!key_save_private(private, identity_file, "", comment)) {
+		if (!key_save_private(private, identity_file, "", comment,
+		    use_new_format, new_format_cipher, rounds)) {
 			printf("Saving the key failed: %s.\n", identity_file);
 			key_free(private);
 			key_free(public);
@@ -917,7 +934,6 @@ do_gen_all_hostkeys(struct passwd *pw)
 			continue;
 		}
 		key_free(private);
-		arc4random_stir();
 		strlcat(identity_file, ".pub", sizeof(identity_file));
 		fd = open(identity_file, O_WRONLY | O_CREAT | O_TRUNC, 0644);
 		if (fd == -1) {
@@ -986,6 +1002,7 @@ do_known_hosts(struct passwd *pw, const char *name)
 	char line[16*1024], tmp[MAXPATHLEN], old[MAXPATHLEN];
 	int c, skip = 0, inplace = 0, num = 0, invalid = 0, has_unhashed = 0;
 	int ca;
+	int found_key = 0;
 
 	if (!have_identity) {
 		cp = tilde_expand_filename(_PATH_SSH_USER_HOSTFILE, pw->pw_uid);
@@ -1088,11 +1105,13 @@ do_known_hosts(struct passwd *pw, const char *name)
 				}
 				c = (strcmp(cp2, cp) == 0);
 				if (find_host && c) {
-					printf("# Host %s found: "
-					    "line %d type %s%s\n", name,
-					    num, key_type(pub),
-					    ca ? " (CA key)" : "");
+					if (!quiet)
+						printf("# Host %s found: "
+						    "line %d type %s%s\n", name,
+						    num, key_type(pub),
+						    ca ? " (CA key)" : "");
 					printhost(out, cp, pub, ca, 0);
+					found_key = 1;
 				}
 				if (delete_host) {
 					if (!c && !ca)
@@ -1109,12 +1128,14 @@ do_known_hosts(struct passwd *pw, const char *name)
 				c = (match_hostname(name, cp,
 				    strlen(cp)) == 1);
 				if (find_host && c) {
-					printf("# Host %s found: "
-					    "line %d type %s%s\n", name,
-					    num, key_type(pub),
-					    ca ? " (CA key)" : "");
+					if (!quiet)
+						printf("# Host %s found: "
+						    "line %d type %s%s\n", name,
+						    num, key_type(pub),
+						    ca ? " (CA key)" : "");
 					printhost(out, name, pub,
 					    ca, hash_hosts && !ca);
+					found_key = 1;
 				}
 				if (delete_host) {
 					if (!c && !ca)
@@ -1190,7 +1211,7 @@ do_known_hosts(struct passwd *pw, const char *name)
 		}
 	}
 
-	exit(0);
+	exit (find_host && !found_key);
 }
 
 /*
@@ -1222,7 +1243,7 @@ do_change_passphrase(struct passwd *pw)
 			    RP_ALLOW_STDIN);
 		private = key_load_private(identity_file, old_passphrase,
 		    &comment);
-		memset(old_passphrase, 0, strlen(old_passphrase));
+		explicit_bzero(old_passphrase, strlen(old_passphrase));
 		free(old_passphrase);
 		if (private == NULL) {
 			printf("Bad passphrase.\n");
@@ -1244,29 +1265,30 @@ do_change_passphrase(struct passwd *pw)
 
 		/* Verify that they are the same. */
 		if (strcmp(passphrase1, passphrase2) != 0) {
-			memset(passphrase1, 0, strlen(passphrase1));
-			memset(passphrase2, 0, strlen(passphrase2));
+			explicit_bzero(passphrase1, strlen(passphrase1));
+			explicit_bzero(passphrase2, strlen(passphrase2));
 			free(passphrase1);
 			free(passphrase2);
 			printf("Pass phrases do not match.  Try again.\n");
 			exit(1);
 		}
 		/* Destroy the other copy. */
-		memset(passphrase2, 0, strlen(passphrase2));
+		explicit_bzero(passphrase2, strlen(passphrase2));
 		free(passphrase2);
 	}
 
 	/* Save the file using the new passphrase. */
-	if (!key_save_private(private, identity_file, passphrase1, comment)) {
+	if (!key_save_private(private, identity_file, passphrase1, comment,
+	    use_new_format, new_format_cipher, rounds)) {
 		printf("Saving the key failed: %s.\n", identity_file);
-		memset(passphrase1, 0, strlen(passphrase1));
+		explicit_bzero(passphrase1, strlen(passphrase1));
 		free(passphrase1);
 		key_free(private);
 		free(comment);
 		exit(1);
 	}
 	/* Destroy the passphrase and the copy of the key in memory. */
-	memset(passphrase1, 0, strlen(passphrase1));
+	explicit_bzero(passphrase1, strlen(passphrase1));
 	free(passphrase1);
 	key_free(private);		 /* Destroys contents */
 	free(comment);
@@ -1338,7 +1360,7 @@ do_change_comment(struct passwd *pw)
 		/* Try to load using the passphrase. */
 		private = key_load_private(identity_file, passphrase, &comment);
 		if (private == NULL) {
-			memset(passphrase, 0, strlen(passphrase));
+			explicit_bzero(passphrase, strlen(passphrase));
 			free(passphrase);
 			printf("Bad passphrase.\n");
 			exit(1);
@@ -1359,7 +1381,7 @@ do_change_comment(struct passwd *pw)
 		printf("Enter new comment: ");
 		fflush(stdout);
 		if (!fgets(new_comment, sizeof(new_comment), stdin)) {
-			memset(passphrase, 0, strlen(passphrase));
+			explicit_bzero(passphrase, strlen(passphrase));
 			key_free(private);
 			exit(1);
 		}
@@ -1367,15 +1389,16 @@ do_change_comment(struct passwd *pw)
 	}
 
 	/* Save the file using the new passphrase. */
-	if (!key_save_private(private, identity_file, passphrase, new_comment)) {
+	if (!key_save_private(private, identity_file, passphrase, new_comment,
+	    use_new_format, new_format_cipher, rounds)) {
 		printf("Saving the key failed: %s.\n", identity_file);
-		memset(passphrase, 0, strlen(passphrase));
+		explicit_bzero(passphrase, strlen(passphrase));
 		free(passphrase);
 		key_free(private);
 		free(comment);
 		exit(1);
 	}
-	memset(passphrase, 0, strlen(passphrase));
+	explicit_bzero(passphrase, strlen(passphrase));
 	free(passphrase);
 	public = key_from_private(private);
 	key_free(private);
@@ -1578,7 +1601,7 @@ do_ca_sign(struct passwd *pw, int argc, char **argv)
 		if ((public = key_load_public(tmp, &comment)) == NULL)
 			fatal("%s: unable to open \"%s\"", __func__, tmp);
 		if (public->type != KEY_RSA && public->type != KEY_DSA &&
-		    public->type != KEY_ECDSA)
+		    public->type != KEY_ECDSA && public->type != KEY_ED25519)
 			fatal("%s: key \"%s\" type %s cannot be certified",
 			    __func__, tmp, key_type(public));
 
@@ -1678,7 +1701,7 @@ parse_absolute_time(const char *s)
 		fatal("Invalid certificate time format %s", s);
 	}
 
-	bzero(&tm, sizeof(tm));
+	memset(&tm, 0, sizeof(tm));
 	if (strptime(buf, fmt, &tm) == NULL)
 		fatal("Invalid certificate time %s", s);
 	if ((tt = mktime(&tm)) < 0)
@@ -1723,7 +1746,7 @@ parse_cert_times(char *timespec)
 		cert_valid_from = parse_absolute_time(from);
 
 	if (*to == '-' || *to == '+')
-		cert_valid_to = parse_relative_time(to, cert_valid_from);
+		cert_valid_to = parse_relative_time(to, now);
 	else
 		cert_valid_to = parse_absolute_time(to);
 
@@ -1948,7 +1971,7 @@ update_krl_from_file(struct passwd *pw, const char *file, const Key *ca,
 			continue;
 		if (strncasecmp(cp, "serial:", 7) == 0) {
 			if (ca == NULL) {
-				fatal("revoking certificated by serial number "
+				fatal("revoking certificates by serial number "
 				    "requires specification of a CA key");
 			}
 			cp += 7;
@@ -1985,7 +2008,7 @@ update_krl_from_file(struct passwd *pw, const char *file, const Key *ca,
 			}
 		} else if (strncasecmp(cp, "id:", 3) == 0) {
 			if (ca == NULL) {
-				fatal("revoking certificated by key ID "
+				fatal("revoking certificates by key ID "
 				    "requires specification of a CA key");
 			}
 			cp += 3;
@@ -2114,7 +2137,7 @@ usage(void)
 	fprintf(stderr, "usage: %s [options]\n", __progname);
 	fprintf(stderr, "Options:\n");
 	fprintf(stderr, "  -A          Generate non-existent host keys for all key types.\n");
-	fprintf(stderr, "  -a trials   Number of trials for screening DH-GEX moduli.\n");
+	fprintf(stderr, "  -a number   Number of KDF rounds for new key format or moduli primality tests.\n");
 	fprintf(stderr, "  -B          Show bubblebabble digest of key file.\n");
 	fprintf(stderr, "  -b bits     Number of bits in the key to create.\n");
 	fprintf(stderr, "  -C comment  Provide new comment.\n");
@@ -2142,6 +2165,7 @@ usage(void)
 	fprintf(stderr, "  -N phrase   Provide new passphrase.\n");
 	fprintf(stderr, "  -n name,... User/host principal names to include in certificate\n");
 	fprintf(stderr, "  -O option   Specify a certificate option.\n");
+	fprintf(stderr, "  -o          Enforce new private key format.\n");
 	fprintf(stderr, "  -P phrase   Provide old passphrase.\n");
 	fprintf(stderr, "  -p          Change passphrase of private key file.\n");
 	fprintf(stderr, "  -Q          Test whether key(s) are revoked in KRL.\n");
@@ -2157,6 +2181,7 @@ usage(void)
 	fprintf(stderr, "  -v          Verbose.\n");
 	fprintf(stderr, "  -W gen      Generator to use for generating DH-GEX moduli.\n");
 	fprintf(stderr, "  -y          Read private key file and print public key.\n");
+	fprintf(stderr, "  -Z cipher   Specify a cipher for new private key format.\n");
 	fprintf(stderr, "  -z serial   Specify a serial number.\n");
 
 	exit(1);
@@ -2175,7 +2200,7 @@ main(int argc, char **argv)
 	struct passwd *pw;
 	struct stat st;
 	int opt, type, fd;
-	u_int32_t memory = 0, generator_wanted = 0, trials = 100;
+	u_int32_t memory = 0, generator_wanted = 0;
 	int do_gen_candidates = 0, do_screen_candidates = 0;
 	int gen_all_hostkeys = 0, gen_krl = 0, update_krl = 0, check_krl = 0;
 	unsigned long start_lineno = 0, lines_to_process = 0;
@@ -2203,8 +2228,9 @@ main(int argc, char **argv)
 		exit(1);
 	}
 
-	while ((opt = getopt(argc, argv, "ABHLQXceghiklpquvxy"
-	    "C:D:F:G:I:J:K:M:N:O:P:R:S:T:V:W:a:b:f:g:j:m:n:r:s:t:z:")) != -1) {
+	/* Remaining characters: EUYdw */
+	while ((opt = getopt(argc, argv, "ABHLQXceghiklopquvxy"
+	    "C:D:F:G:I:J:K:M:N:O:P:R:S:T:V:W:Z:a:b:f:g:j:m:n:r:s:t:z:")) != -1) {
 		switch (opt) {
 		case 'A':
 			gen_all_hostkeys = 1;
@@ -2262,6 +2288,9 @@ main(int argc, char **argv)
 		case 'n':
 			cert_principals = optarg;
 			break;
+		case 'o':
+			use_new_format = 1;
+			break;
 		case 'p':
 			change_passphrase = 1;
 			break;
@@ -2288,6 +2317,9 @@ main(int argc, char **argv)
 			break;
 		case 'O':
 			add_cert_option(optarg);
+			break;
+		case 'Z':
+			new_format_cipher = optarg;
 			break;
 		case 'C':
 			identity_comment = optarg;
@@ -2347,9 +2379,9 @@ main(int argc, char **argv)
 					optarg, errstr);
 			break;
 		case 'a':
-			trials = (u_int32_t)strtonum(optarg, 1, UINT_MAX, &errstr);
+			rounds = (int)strtonum(optarg, 1, INT_MAX, &errstr);
 			if (errstr)
-				fatal("Invalid number of trials: %s (%s)",
+				fatal("Invalid number: %s (%s)",
 					optarg, errstr);
 			break;
 		case 'M':
@@ -2508,7 +2540,8 @@ main(int argc, char **argv)
 			fatal("Couldn't open moduli file \"%s\": %s",
 			    out_file, strerror(errno));
 		}
-		if (prime_test(in, out, trials, generator_wanted, checkpoint,
+		if (prime_test(in, out, rounds == 0 ? 100 : rounds,
+		    generator_wanted, checkpoint,
 		    start_lineno, lines_to_process) != 0)
 			fatal("modulus screening failed");
 		return (0);
@@ -2518,8 +2551,6 @@ main(int argc, char **argv)
 		do_gen_all_hostkeys(pw);
 		return (0);
 	}
-
-	arc4random_stir();
 
 	if (key_type_name == NULL)
 		key_type_name = "rsa";
@@ -2582,15 +2613,15 @@ passphrase_again:
 			 * The passphrases do not match.  Clear them and
 			 * retry.
 			 */
-			memset(passphrase1, 0, strlen(passphrase1));
-			memset(passphrase2, 0, strlen(passphrase2));
+			explicit_bzero(passphrase1, strlen(passphrase1));
+			explicit_bzero(passphrase2, strlen(passphrase2));
 			free(passphrase1);
 			free(passphrase2);
 			printf("Passphrases do not match.  Try again.\n");
 			goto passphrase_again;
 		}
 		/* Clear the other copy of the passphrase. */
-		memset(passphrase2, 0, strlen(passphrase2));
+		explicit_bzero(passphrase2, strlen(passphrase2));
 		free(passphrase2);
 	}
 
@@ -2602,19 +2633,19 @@ passphrase_again:
 	}
 
 	/* Save the key with the given passphrase and comment. */
-	if (!key_save_private(private, identity_file, passphrase1, comment)) {
+	if (!key_save_private(private, identity_file, passphrase1, comment,
+	    use_new_format, new_format_cipher, rounds)) {
 		printf("Saving the key failed: %s.\n", identity_file);
-		memset(passphrase1, 0, strlen(passphrase1));
+		explicit_bzero(passphrase1, strlen(passphrase1));
 		free(passphrase1);
 		exit(1);
 	}
 	/* Clear the passphrase. */
-	memset(passphrase1, 0, strlen(passphrase1));
+	explicit_bzero(passphrase1, strlen(passphrase1));
 	free(passphrase1);
 
 	/* Clear the private key and the random number generator. */
 	key_free(private);
-	arc4random_stir();
 
 	if (!quiet)
 		printf("Your identification has been saved in %s.\n", identity_file);

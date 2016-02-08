@@ -1,7 +1,7 @@
-/*	$Id: mdoc.c,v 1.93 2012/11/17 00:25:20 schwarze Exp $ */
+/*	$Id: mdoc.c,v 1.98 2014/01/05 20:26:27 schwarze Exp $ */
 /*
  * Copyright (c) 2008, 2009, 2010, 2011 Kristaps Dzonsons <kristaps@bsd.lv>
- * Copyright (c) 2010, 2012 Ingo Schwarze <schwarze@openbsd.org>
+ * Copyright (c) 2010, 2012, 2013, 2014 Ingo Schwarze <schwarze@openbsd.org>
  *
  * Permission to use, copy, modify, and distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -193,7 +193,8 @@ mdoc_free(struct mdoc *mdoc)
  * Allocate volatile and non-volatile parse resources.  
  */
 struct mdoc *
-mdoc_alloc(struct roff *roff, struct mparse *parse, char *defos)
+mdoc_alloc(struct roff *roff, struct mparse *parse,
+	char *defos, int quick)
 {
 	struct mdoc	*p;
 
@@ -201,6 +202,7 @@ mdoc_alloc(struct roff *roff, struct mparse *parse, char *defos)
 
 	p->parse = parse;
 	p->defos = defos;
+	p->quick = quick;
 	p->roff = roff;
 
 	mdoc_hash_init();
@@ -291,12 +293,10 @@ mdoc_parseln(struct mdoc *mdoc, int ln, char *buf, int offs)
 	 * whether this mode is on or off.
 	 * Note that this mode is also switched by the Sh macro.
 	 */
-	if (roff_regisset(mdoc->roff, REG_nS)) {
-		if (roff_regget(mdoc->roff, REG_nS))
-			mdoc->flags |= MDOC_SYNOPSIS;
-		else
-			mdoc->flags &= ~MDOC_SYNOPSIS;
-	}
+	if (roff_getreg(mdoc->roff, "nS"))
+		mdoc->flags |= MDOC_SYNOPSIS;
+	else
+		mdoc->flags &= ~MDOC_SYNOPSIS;
 
 	return(roff_getcontrol(mdoc->roff, buf, &offs) ?
 			mdoc_pmacro(mdoc, ln, buf, offs) :
@@ -432,6 +432,7 @@ node_alloc(struct mdoc *mdoc, int line, int pos,
 	p->sec = mdoc->lastsec;
 	p->line = line;
 	p->pos = pos;
+	p->lastline = line;
 	p->tok = tok;
 	p->type = type;
 
@@ -580,6 +581,23 @@ mdoc_word_alloc(struct mdoc *mdoc, int line, int pos, const char *p)
 	return(1);
 }
 
+void
+mdoc_word_append(struct mdoc *mdoc, const char *p)
+{
+	struct mdoc_node	*n;
+	char			*addstr, *newstr;
+
+	n = mdoc->last;
+	addstr = roff_strdup(mdoc->roff, p);
+	if (-1 == asprintf(&newstr, "%s %s", n->string, addstr)) {
+		perror(NULL);
+		exit((int)MANDOCLEVEL_SYSERR);
+	}
+	free(addstr);
+	free(n->string);
+	n->string = newstr;
+	mdoc->next = MDOC_NEXT_SIBLING;
+}
 
 static void
 mdoc_node_free(struct mdoc_node *p)
@@ -826,7 +844,7 @@ mdoc_ptext(struct mdoc *mdoc, int line, char *buf, int offs)
 
 	assert(buf < end);
 
-	if (mandoc_eos(buf+offs, (size_t)(end-buf-offs), 0))
+	if (mandoc_eos(buf+offs, (size_t)(end-buf-offs)))
 		mdoc->last->flags |= MDOC_EOS;
 
 	return(1);
@@ -940,6 +958,12 @@ mdoc_pmacro(struct mdoc *mdoc, int ln, char *buf, int offs)
 
 	if ( ! mdoc_macro(mdoc, tok, ln, sv, &offs, buf)) 
 		goto err;
+
+	/* In quick mode (for mandocdb), abort after the NAME section. */
+
+	if (mdoc->quick && MDOC_Sh == tok &&
+	    SEC_NAME != mdoc->last->sec)
+		return(2);
 
 	return(1);
 

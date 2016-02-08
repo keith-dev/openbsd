@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip_ipsp.c,v 1.190 2013/07/04 09:48:48 mpi Exp $	*/
+/*	$OpenBSD: ip_ipsp.c,v 1.193 2014/01/09 06:29:06 tedu Exp $	*/
 /*
  * The authors of this code are John Ioannidis (ji@tla.org),
  * Angelos D. Keromytis (kermit@csd.uch.gr),
@@ -71,7 +71,6 @@
 #ifndef INET
 #include <netinet/in.h>
 #endif
-#include <netinet6/in6_var.h>
 #endif /* INET6 */
 
 #include <netinet/ip_ipsp.h>
@@ -300,7 +299,7 @@ gettdb(u_int rdomain, u_int32_t spi, union sockaddr_union *dst, u_int8_t proto)
 	for (tdbp = tdbh[hashval]; tdbp != NULL; tdbp = tdbp->tdb_hnext)
 		if ((tdbp->tdb_spi == spi) && (tdbp->tdb_sproto == proto) &&
 		    (tdbp->tdb_rdomain == rdomain) &&
-		    !bcmp(&tdbp->tdb_dst, dst, SA_LEN(&dst->sa)))
+		    !memcmp(&tdbp->tdb_dst, dst, SA_LEN(&dst->sa)))
 			break;
 
 	return tdbp;
@@ -330,14 +329,14 @@ gettdbbysrcdst(u_int rdomain, u_int32_t spi, union sockaddr_union *src,
 		    (tdbp->tdb_rdomain == rdomain) &&
 		    ((tdbp->tdb_flags & TDBF_INVALID) == 0) &&
 		    (tdbp->tdb_dst.sa.sa_family == AF_UNSPEC ||
-		    !bcmp(&tdbp->tdb_dst, dst, SA_LEN(&dst->sa))) &&
-		    !bcmp(&tdbp->tdb_src, src, SA_LEN(&src->sa)))
+		    !memcmp(&tdbp->tdb_dst, dst, SA_LEN(&dst->sa))) &&
+		    !memcmp(&tdbp->tdb_src, src, SA_LEN(&src->sa)))
 			break;
 
 	if (tdbp != NULL)
 		return (tdbp);
 
-	bzero(&su_null, sizeof(su_null));
+	memset(&su_null, 0, sizeof(su_null));
 	su_null.sa.sa_len = sizeof(struct sockaddr);
 	hashval = tdb_hash(rdomain, 0, &su_null, proto);
 
@@ -347,7 +346,7 @@ gettdbbysrcdst(u_int rdomain, u_int32_t spi, union sockaddr_union *src,
 		    (tdbp->tdb_rdomain == rdomain) &&
 		    ((tdbp->tdb_flags & TDBF_INVALID) == 0) &&
 		    (tdbp->tdb_dst.sa.sa_family == AF_UNSPEC ||
-		    !bcmp(&tdbp->tdb_dst, dst, SA_LEN(&dst->sa))) &&
+		    !memcmp(&tdbp->tdb_dst, dst, SA_LEN(&dst->sa))) &&
 		    tdbp->tdb_src.sa.sa_family == AF_UNSPEC)
 			break;
 
@@ -398,9 +397,9 @@ ipsp_aux_match(struct tdb *tdb,
 		 * most problems (all this will do is make every
 		 * policy get its own SAs).
 		 */
-		if (bcmp(&tdb->tdb_filter, pfilter,
+		if (memcmp(&tdb->tdb_filter, pfilter,
 		    sizeof(struct sockaddr_encap)) ||
-		    bcmp(&tdb->tdb_filtermask, pfiltermask,
+		    memcmp(&tdb->tdb_filtermask, pfiltermask,
 		    sizeof(struct sockaddr_encap)))
 			return 0;
 	}
@@ -430,7 +429,7 @@ gettdbbyaddr(u_int rdomain, union sockaddr_union *dst, u_int8_t sproto,
 		if ((tdbp->tdb_sproto == sproto) &&
 		    (tdbp->tdb_rdomain == rdomain) &&
 		    ((tdbp->tdb_flags & TDBF_INVALID) == 0) &&
-		    (!bcmp(&tdbp->tdb_dst, dst, SA_LEN(&dst->sa)))) {
+		    (!memcmp(&tdbp->tdb_dst, dst, SA_LEN(&dst->sa)))) {
 			/* Do IDs and local credentials match ? */
 			if (!ipsp_aux_match(tdbp, srcid, dstid,
 			    local_cred, NULL, filter, filtermask))
@@ -463,7 +462,7 @@ gettdbbysrc(u_int rdomain, union sockaddr_union *src, u_int8_t sproto,
 		if ((tdbp->tdb_sproto == sproto) &&
 		    (tdbp->tdb_rdomain == rdomain) &&
 		    ((tdbp->tdb_flags & TDBF_INVALID) == 0) &&
-		    (!bcmp(&tdbp->tdb_src, src, SA_LEN(&src->sa)))) {
+		    (!memcmp(&tdbp->tdb_src, src, SA_LEN(&src->sa)))) {
 			/* Check whether IDs match */
 			if (!ipsp_aux_match(tdbp, dstid, srcid, NULL, NULL,
 			    filter, filtermask))
@@ -488,7 +487,7 @@ tdb_hashstats(void)
 		return;
 	}
 
-	bzero (buckets, sizeof(buckets));
+	memset(buckets, 0, sizeof(buckets));
 	for (i = 0; i <= tdb_hashmask; i++) {
 		cnt = 0;
 		for (tdbp = tdbh[i]; cnt < NBUCKETS - 1 && tdbp != NULL;
@@ -982,34 +981,28 @@ tdb_add_inp(struct tdb *tdb, struct inpcb *inp, int inout)
 }
 
 #ifdef ENCDEBUG
-/* Return a printable string for the IPv4 address. */
-char *
-inet_ntoa4(struct in_addr ina)
-{
-	static char buf[4][4 * sizeof "123" + 4];
-	unsigned char *ucp = (unsigned char *) &ina;
-	static int i = 3;
-
-	i = (i + 1) % 4;
-	snprintf(buf[i], sizeof buf[0], "%d.%d.%d.%d",
-	    ucp[0] & 0xff, ucp[1] & 0xff,
-	    ucp[2] & 0xff, ucp[3] & 0xff);
-	return (buf[i]);
-}
-
 /* Return a printable string for the address. */
-char *
+const char *
 ipsp_address(union sockaddr_union sa)
 {
+	static char ipspbuf[4][INET6_ADDRSTRLEN];
+	static int ipspround = 0;
+	char *buf;
+
+	ipspround = (ipspround + 1) % 4;
+	buf = ipspbuf[ipspround];
+
 	switch (sa.sa.sa_family) {
 #ifdef INET
 	case AF_INET:
-		return inet_ntoa4(sa.sin.sin_addr);
+		return inet_ntop(AF_INET, &sa.sin.sin_addr,
+		    buf, INET_ADDRSTRLEN);
 #endif /* INET */
 
 #ifdef INET6
 	case AF_INET6:
-		return ip6_sprintf(&sa.sin6.sin6_addr);
+		return inet_ntop(AF_INET6, &sa.sin6.sin6_addr,
+		    buf, INET6_ADDRSTRLEN);
 #endif /* INET6 */
 
 	default:
@@ -1095,7 +1088,7 @@ ipsp_ref_match(struct ipsec_ref *ref1, struct ipsec_ref *ref2)
 {
 	if (ref1->ref_type != ref2->ref_type ||
 	    ref1->ref_len != ref2->ref_len ||
-	    bcmp(ref1 + 1, ref2 + 1, ref1->ref_len))
+	    memcmp(ref1 + 1, ref2 + 1, ref1->ref_len))
 		return 0;
 
 	return 1;
@@ -1177,7 +1170,7 @@ ipsp_parse_headers(struct mbuf *m, int off, u_int8_t proto)
 						return SLIST_FIRST(&tags);
 
 					tdbi = (struct tdb_ident *) (mtag + 1);
-					bzero(tdbi, sizeof(struct tdb_ident));
+					memset(tdbi, 0, sizeof(struct tdb_ident));
 
 					m_copydata(m, off + sizeof(u_int32_t),
 					    sizeof(u_int32_t),
@@ -1212,7 +1205,7 @@ ipsp_parse_headers(struct mbuf *m, int off, u_int8_t proto)
 			u_int32_t spi;
 
 			m_copydata(m, off, sizeof(u_int32_t), (caddr_t) &spi);
-			bzero(&su, sizeof(union sockaddr_union));
+			memset(&su, 0, sizeof(union sockaddr_union));
 
 			s = splsoftnet();
 
@@ -1271,7 +1264,7 @@ ipsp_parse_headers(struct mbuf *m, int off, u_int8_t proto)
 				return SLIST_FIRST(&tags);
 
 			tdbi = (struct tdb_ident *) (mtag + 1);
-			bzero(tdbi, sizeof(struct tdb_ident));
+			memset(tdbi, 0, sizeof(struct tdb_ident));
 
 			/* Get SPI off the relevant header. */
 			if (proto == IPPROTO_AH)

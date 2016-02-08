@@ -1,4 +1,4 @@
-/*	$OpenBSD: ldasm.S,v 1.31 2013/06/01 09:57:58 miod Exp $	*/
+/*	$OpenBSD: ldasm.S,v 1.34 2013/12/23 22:24:37 kettenis Exp $	*/
 /*	$NetBSD: rtld_start.S,v 1.5 2001/08/14 22:17:48 eeh Exp $	*/
 
 /*
@@ -129,8 +129,13 @@ _ENTRY(_dl_start)
 
 	add	%sp, 48 + DL_DATA_SIZE, %sp	! restore stack
 
+1:	call	2f
+	 sethi	%hi(_GLOBAL_OFFSET_TABLE_+(.-1b)), %l7
+2:	or	%l7, %lo(_GLOBAL_OFFSET_TABLE_+(.-1b)), %l7
+	add	%l7, %o7, %l7
+
 	jmp	%o0
-	 clr	%g1			! XXX don't register with atexit
+	 ldx	[%l7 + _dl_dtors], %g1	! %g1 = cleanup
 
 	/*
 	 * We have two separate entry points to the runtime linker.
@@ -281,8 +286,8 @@ _ENTRY(_dl_fcntl)
 	retl
 	 sub %g0, %o0, %o0			! error: result = -errno
 
-_ENTRY(_dl_getdirentries)
-	mov  SYS_getdirentries | SYSCALL_G2RFLAG, %g1	! call sys_getdirentries
+_ENTRY(_dl_getdents)
+	mov  SYS_getdents | SYSCALL_G2RFLAG, %g1	! call sys_getdents
 	add %o7, 8, %g2					! just return on success
 	t ST_SYSCALL					! off to wonderland
 	retl

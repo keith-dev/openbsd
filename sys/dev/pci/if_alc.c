@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_alc.c,v 1.22 2012/11/29 21:10:32 brad Exp $	*/
+/*	$OpenBSD: if_alc.c,v 1.26 2013/12/28 03:34:53 deraadt Exp $	*/
 /*-
  * Copyright (c) 2009, Pyun YongHyeon <yongari@FreeBSD.org>
  * All rights reserved.
@@ -47,13 +47,11 @@
 
 #include <net/if.h>
 #include <net/if_dl.h>
-#include <net/if_llc.h>
 #include <net/if_media.h>
 
 #ifdef INET
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
-#include <netinet/in_var.h>
 #include <netinet/ip.h>
 #include <netinet/if_ether.h>
 #endif
@@ -935,18 +933,17 @@ alc_activate(struct device *self, int act)
 	int rv = 0;
 
 	switch (act) {
-	case DVACT_QUIESCE:
-		rv = config_activate_children(self, act);
-		break;
 	case DVACT_SUSPEND:
 		if (ifp->if_flags & IFF_RUNNING)
 			alc_stop(sc);
 		rv = config_activate_children(self, act);
 		break;
 	case DVACT_RESUME:
-		rv = config_activate_children(self, act);
 		if (ifp->if_flags & IFF_UP)
 			alc_init(ifp);
+		break;
+	default:
+		rv = config_activate_children(self, act);
 		break;
 	}
 	return (rv);

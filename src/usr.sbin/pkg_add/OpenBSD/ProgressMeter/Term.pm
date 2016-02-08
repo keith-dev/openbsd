@@ -1,5 +1,5 @@
 # ex:ts=8 sw=4:
-# $OpenBSD: Term.pm,v 1.17 2011/01/09 13:32:18 espie Exp $
+# $OpenBSD: Term.pm,v 1.22 2014/02/07 11:20:58 espie Exp $
 #
 # Copyright (c) 2004-2007 Marc Espie <espie@openbsd.org>
 #
@@ -82,25 +82,26 @@ sub visit_with_size
 	my ($progress, $plist, $method, $state, @r) = @_;
 	$plist->{totsize} //= compute_size($plist);
 	my $donesize = 0;
-	$progress->show($donesize, $plist->{totsize});
+	my $totsize = $plist->{totsize};
+	$progress->show($donesize, $totsize);
 	if (defined $state->{archive}) {
 		$state->{archive}{callback} = sub {
 		    my $done = shift;
-		    $progress->show($donesize + $done, $plist->{totsize});
+		    $progress->show($donesize + $done, $totsize);
 		};
 	}
-	$plist->size_and($progress, \$donesize, $plist->{totsize},
+	$plist->size_and($progress, \$donesize, $totsize,
 	    $method, $state, @r);
 }
 
 sub visit_with_count
 {
-	my ($progress, $plist, $method, $state, @r) = @_;
+	my ($progress, $plist, $method, @r) = @_;
 	$plist->{total} //= compute_count($plist);
 	my $count = 0;
 	$progress->show($count, $plist->{total});
 	$plist->count_and($progress, \$count, $plist->{total},
-	    $method, $state, @r);
+	    $method, @r);
 }
 
 package OpenBSD::ProgressMeter::Term;
@@ -122,14 +123,14 @@ sub init
 	return unless defined $ENV{TERM} || defined $ENV{TERMCAP};
 	my $termios = POSIX::Termios->new;
 	$termios->getattr(0);
-	$self->{terminal} = Term::Cap->Tgetent({ OSPEED =>
+	my $terminal = Term::Cap->Tgetent({ OSPEED =>
 	    $termios->getospeed});
-	$self->{glitch} = $self->{terminal}->Tputs("xn", 1);
-	$self->{cleareol} = $self->{terminal}->Tputs("ce", 1);
-	$self->{hpa} = $self->{terminal}->Tputs("ch", 1);
+	$self->{glitch} = $terminal->Tputs("xn", 1);
+	$self->{cleareol} = $terminal->Tputs("ce", 1);
+	$self->{hpa} = $terminal->Tputs("ch", 1);
 	if (!defined $self->{hpa}) {
 		# XXX this works with screen and tmux
-		$self->{cuf} = $self->{terminal}->Tputs("RI", 1);
+		$self->{cuf} = $terminal->Tputs("RI", 1);
 		if (defined $self->{cuf}) {
 			$self->{hpa} = "\r".$self->{cuf};
 		}
@@ -293,7 +294,7 @@ sub clear
 		print "\r", ' 'x length($self->{lastdisplay}), "\r";
 	}
 	$self->{lastdisplay} = '';
-	undef $self->{stars};
+	delete $self->{stars};
 }
 
 sub next

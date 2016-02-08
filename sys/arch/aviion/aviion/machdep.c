@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.51 2013/06/11 16:42:07 deraadt Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.60 2014/01/19 12:45:35 deraadt Exp $	*/
 /*
  * Copyright (c) 2007 Miodrag Vallat.
  *
@@ -79,6 +79,7 @@
 #include <sys/core.h>
 #include <sys/kcore.h>
 #include <sys/device.h>
+#include <dev/rndvar.h>
 
 #include <machine/asm.h>
 #include <machine/asm_macro.h>
@@ -123,6 +124,8 @@ void	savectx(struct pcb *);
 void	secondary_main(void);
 vaddr_t	secondary_pre_main(void);
 
+extern void bootstack(void);
+
 int physmem;	  /* available physical memory, in pages */
 
 struct vm_map *exec_map = NULL;
@@ -149,12 +152,11 @@ extern vaddr_t esym;
 
 const char *prom_bootargs;			/* set in locore.S */
 char bootargs[256];				/* local copy */
-u_int bootdev, bootunit, bootpart;		/* set in locore.S */
 
 int32_t cpuid;
 
 int cputyp;					/* set in locore.S */
-int avtyp;
+register_t kernel_vbr;				/* set in locore.S */
 const struct board *platform;
 
 /* multiplication factor for delay() */
@@ -280,7 +282,9 @@ cpu_startup()
 __dead void
 doboot()
 {
+
 	printf("Rebooting system...\n\n");
+	bootstack();
 	cmmu_shutdown();
 	scm_reboot(NULL);
 	/*NOTREACHED*/
@@ -327,10 +331,12 @@ boot(howto)
 
 haltsys:
 	doshutdownhooks();
-	config_suspend(TAILQ_FIRST(&alldevs), DVACT_POWERDOWN);
+	if (!TAILQ_EMPTY(&alldevs))
+		config_suspend(TAILQ_FIRST(&alldevs), DVACT_POWERDOWN);
 
 	if (howto & RB_HALT) {
 		printf("System halted.\n\n");
+		bootstack();
 		cmmu_shutdown();
 		scm_halt();
 	}
@@ -572,7 +578,7 @@ secondary_main()
 	sched_init_cpu(ci);
 	nanouptime(&ci->ci_schedstate.spc_runtime);
 	ci->ci_curproc = NULL;
-	ci->ci_randseed = random();
+	ci->ci_randseed = (arc4random() & 0x7fffffff) + 1;
 
 	/*
 	 * Release cpu_hatch_mutex to let other secondary processors
@@ -611,15 +617,6 @@ nmihand(void *frame)
 		m88k_db_trap(T_KDB_ENTRY, (struct trapframe *)frame);
 	}
 #endif
-}
-
-int
-cpu_exec_aout_makecmds(p, epp)
-	struct proc *p;
-	struct exec_package *epp;
-{
-
-	return (ENOEXEC);
 }
 
 int
@@ -681,7 +678,7 @@ cpu_sysctl(name, namelen, oldp, oldlenp, newp, newlen, p)
 void
 aviion_bootstrap()
 {
-	vaddr_t avail_start;
+	extern vaddr_t avail_start;
 	extern vaddr_t avail_end;
 	extern char *end;
 #ifndef MULTIPROCESSOR
@@ -694,7 +691,7 @@ aviion_bootstrap()
 	aviion_identify();
 
 	cn_tab = &bootcons;
-	platform->bootstrap();
+	aviion_delay_const = platform->bootstrap();
 	/* we can use printf() from here. */
 
 	/* Parse the commandline */
@@ -765,9 +762,7 @@ aviion_bootstrap()
 	    MSGBUFSIZE);
 
 	/* ROM work area is on top of physical memory */
-	/* but we need to make VBR page readable */
-	/* XXX relocate VBR as done on mvme88k */
-	pmap_bootstrap(0, PAGE_SIZE);
+	pmap_bootstrap(0, 0);
 
 	/* Initialize the "u-area" pages. */
 	bzero((caddr_t)curpcb, USPACE);
@@ -923,15 +918,16 @@ void
 intsrc_enable(u_int intsrc, int ipl)
 {
 	u_int32_t psr;
-	u_int64_t intmask = platform->intsrc(intsrc);
+	u_int32_t intmask = platform->intsrc(intsrc);
+	u_int32_t exintmask = platform->exintsrc(intsrc);
 	int i;
 
 	psr = get_psr();
 	set_psr(psr | PSR_IND);
 
 	for (i = IPL_NONE; i < ipl; i++) {
-		int_mask_val[i] |= (u_int32_t)intmask;
-		ext_int_mask_val[i] |= (u_int32_t)(intmask >> 32);
+		int_mask_val[i] |= intmask;
+		ext_int_mask_val[i] |= exintmask;
 	}
 	setipl(getipl());
 
@@ -942,15 +938,16 @@ void
 intsrc_disable(u_int intsrc)
 {
 	u_int32_t psr;
-	u_int64_t intmask = platform->intsrc(intsrc);
+	u_int32_t intmask = platform->intsrc(intsrc);
+	u_int32_t exintmask = platform->exintsrc(intsrc);
 	int i;
 
 	psr = get_psr();
 	set_psr(psr | PSR_IND);
 
 	for (i = 0; i < NIPLS; i++) {
-		int_mask_val[i] &= ~((u_int32_t)intmask);
-		ext_int_mask_val[i] &= ~((u_int32_t)(intmask >> 32));
+		int_mask_val[i] &= ~intmask;
+		ext_int_mask_val[i] &= ~exintmask;
 	}
 	setipl(getipl());
 

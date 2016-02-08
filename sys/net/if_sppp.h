@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_sppp.h,v 1.18 2013/07/10 07:46:10 mpi Exp $	*/
+/*	$OpenBSD: if_sppp.h,v 1.20 2013/11/20 08:21:33 stsp Exp $	*/
 /*	$NetBSD: if_sppp.h,v 1.2.2.1 1999/04/04 06:57:39 explorer Exp $	*/
 
 /*
@@ -93,6 +93,12 @@ struct spppreq {
 #ifdef _KERNEL
 
 #include <sys/timeout.h>
+#include <sys/task.h>
+
+#ifdef INET6
+#include <netinet/in.h>
+#include <netinet6/in6_var.h>
+#endif
 
 #define IDX_LCP 0		/* idx into state table */
 
@@ -120,12 +126,17 @@ struct sipcp {
 #define IPCP_MYADDR_DYN   2	/* my address is dynamically assigned */
 #define IPCP_MYADDR_SEEN  4	/* have seen my address already */
 #define IPCP_HISADDR_DYN  8	/* his address is dynamically assigned */
-#define IPV6CP_MYIFID_DYN	2
-#define IPV6CP_MYIFID_SEEN	4
+#define IPV6CP_MYIFID_DYN	1 /* my ifid is dynamically assigned */
+#define IPV6CP_MYIFID_SEEN	2 /* have seen my suggested ifid */
 	u_int32_t saved_hisaddr; /* if hisaddr (IPv4) is dynamic, save
 				  * original one here, in network byte order */
-	u_int32_t req_hisaddr;	/* remote address requested */
-	u_int32_t req_myaddr;	/* local address requested */
+	u_int32_t req_hisaddr;	/* remote address requested (IPv4) */
+	u_int32_t req_myaddr;	/* local address requested (IPv4) */
+#ifdef INET6
+	struct in6_aliasreq req_ifid;	/* local ifid requested (IPv6) */
+#endif
+	struct task set_addr_task;	/* set address from process context */
+	struct task clear_addr_task;	/* clear address from process context */
 };
 
 struct sauth {

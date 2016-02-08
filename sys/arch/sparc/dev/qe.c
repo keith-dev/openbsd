@@ -1,4 +1,4 @@
-/*	$OpenBSD: qe.c,v 1.33 2010/11/11 17:46:58 miod Exp $	*/
+/*	$OpenBSD: qe.c,v 1.35 2013/11/27 08:56:31 mpi Exp $	*/
 
 /*
  * Copyright (c) 1998, 2000 Jason L. Wright.
@@ -54,7 +54,6 @@
 #ifdef INET
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
-#include <netinet/in_var.h>
 #include <netinet/ip.h>
 #include <netinet/if_ether.h>
 #endif
@@ -806,7 +805,9 @@ qe_mcreset(sc)
 	u_int8_t octet, *ladrp = (u_int8_t *)&hash[0];
 	int i, j;
 
-allmulti:
+	if (ac->ac_multirangecnt > 0)
+		ifp->if_flags |= IFF_ALLMULTI;
+
 	if (ifp->if_flags & IFF_ALLMULTI) {
 		mr->iac = QE_MR_IAC_ADDRCHG | QE_MR_IAC_LOGADDR;
 		for (i = 100; i > 0; i--) {
@@ -823,22 +824,6 @@ allmulti:
 
 	ETHER_FIRST_MULTI(step, ac, enm);
 	while (enm != NULL) {
-		if (bcmp(enm->enm_addrlo, enm->enm_addrhi,
-		    ETHER_ADDR_LEN)) {
-			/*
-			 * We must listen to a range of multicast
-			 * addresses. For now, just accept all
-			 * multicasts, rather than trying to set only
-			 * those filter bits needed to match the range.
-			 * (At this time, the only use of address
-			 * ranges is for IP multicast routing, for
-			 * which the range is big enough to require
-			 * all bits set.)
-			 */
-			ifp->if_flags |= IFF_ALLMULTI;
-			goto allmulti;
-		}
-
 		crc = 0xffffffff;
 
 		for (i = 0; i < ETHER_ADDR_LEN; i++) {

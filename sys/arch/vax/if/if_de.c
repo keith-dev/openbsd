@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_de.c,v 1.22 2008/10/09 00:43:48 brad Exp $	*/
+/*	$OpenBSD: if_de.c,v 1.24 2014/02/13 09:20:07 mpi Exp $	*/
 /*	$NetBSD: if_de.c,v 1.27 1997/04/19 15:02:29 ragge Exp $	*/
 
 /*
@@ -62,7 +62,6 @@
 #ifdef INET
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
-#include <netinet/in_var.h>
 #include <netinet/ip.h>
 #include <netinet/if_ether.h>
 #endif
@@ -249,10 +248,6 @@ deinit(ds)
 	struct ifxmt *ifxp;
 	struct de_ring *rp;
 	int s,incaddr;
-
-	/* not yet, if address still unknown */
-	if (TAILQ_EMPTY(&ifp->if_addrlist))
-		return;
 
 	if (ds->ds_flags & DSF_RUNNING)
 		return;

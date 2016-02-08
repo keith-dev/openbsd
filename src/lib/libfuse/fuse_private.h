@@ -1,4 +1,4 @@
-/* $OpenBSD: fuse_private.h,v 1.4 2013/06/14 20:49:06 syl Exp $ */
+/* $OpenBSD: fuse_private.h,v 1.9 2013/12/03 09:59:40 syl Exp $ */
 /*
  * Copyright (c) 2013 Sylvestre Gallon <ccna.syl@gmail.com>
  *
@@ -70,6 +70,10 @@ struct fuse_config {
 	int			set_gid;
 };
 
+struct fuse_core_opt {
+	char *mp;
+};
+
 struct fuse {
 	struct fuse_chan	*fc;
 	struct fuse_operations	op;
@@ -79,6 +83,7 @@ struct fuse {
 	struct tree		vnode_tree;
 	struct dict		name_tree;
 	uint64_t		max_ino;
+	void			*private_data;
 
 	struct fuse_config	conf;
 	struct fuse_session	se;
@@ -92,8 +97,10 @@ int	ifuse_exec_opcode(struct fuse *, struct fusebuf *);
 
 /* fuse_subr.c */
 struct fuse_vnode	*alloc_vn(struct fuse *, const char *, ino_t, ino_t);
-struct fuse_vnode	*get_vn_by_name_and_parent(struct fuse *, const char *,
+struct fuse_vnode	*get_vn_by_name_and_parent(struct fuse *, uint8_t *,
     ino_t);
+void			remove_vnode_from_name_tree(struct fuse *,
+    struct fuse_vnode *);
 int			set_vn(struct fuse *, struct fuse_vnode *);
 char			*build_realname(struct fuse *, ino_t);
 
@@ -111,7 +118,7 @@ void			*dict_set(struct dict *, const char *, void *);
 void			*dict_get(struct dict *, const char *);;
 void			*dict_pop(struct dict *, const char *);
 
-#define FUSE_VERSION_PKG_INFO "2.6.9"
+#define FUSE_VERSION_PKG_INFO "2.8.0"
 #define unused __attribute__ ((unused))
 
 #endif /* _FUSE_SUBR_ */

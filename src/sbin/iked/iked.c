@@ -1,4 +1,4 @@
-/*	$OpenBSD: iked.c,v 1.17 2013/03/21 04:30:14 deraadt Exp $	*/
+/*	$OpenBSD: iked.c,v 1.19 2014/02/17 15:07:23 markus Exp $	*/
 
 /*
  * Copyright (c) 2010-2013 Reyk Floeter <reyk@openbsd.org>
@@ -21,13 +21,6 @@
 #include <sys/socket.h>
 #include <sys/wait.h>
 #include <sys/uio.h>
-
-#include <net/if.h>
-#include <netinet/in_systm.h>
-#include <netinet/in.h>
-#include <netinet/ip.h>
-#include <netinet/tcp.h>
-#include <arpa/inet.h>
 
 #include <stdlib.h>
 #include <stdio.h>
@@ -224,6 +217,7 @@ parent_configure(struct iked *env)
 
 	config_setcoupled(env, env->sc_decoupled ? 0 : 1);
 	config_setmode(env, env->sc_passive ? 1 : 0);
+	config_setocsp(env);
 
 	return (0);
 }
@@ -253,6 +247,7 @@ parent_reload(struct iked *env, int reset, const char *filename)
 
 		config_setcoupled(env, env->sc_decoupled ? 0 : 1);
 		config_setmode(env, env->sc_passive ? 1 : 0);
+		config_setocsp(env);
 	} else {
 		config_setreset(env, reset, PROC_IKEV1);
 		config_setreset(env, reset, PROC_IKEV2);
@@ -375,6 +370,9 @@ parent_dispatch_ca(int fd, struct privsep_proc *p, struct imsg *imsg)
 		parent_reload(env, 0, str);
 		if (str != NULL)
 			free(str);
+		break;
+	case IMSG_OCSP_FD:
+		ocsp_connect(env);
 		break;
 	default:
 		return (-1);

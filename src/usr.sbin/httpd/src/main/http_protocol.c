@@ -1,4 +1,4 @@
-/*	$OpenBSD: http_protocol.c,v 1.37 2010/02/25 07:49:53 pyr Exp $ */
+/*	$OpenBSD: http_protocol.c,v 1.39 2013/08/22 04:43:41 guenther Exp $ */
 
 /* ====================================================================
  * The Apache Software License, Version 1.1
@@ -681,8 +681,8 @@ API_EXPORT(char *) ap_make_etag_orig(request_rec *r, int force_weak)
         components = ap_make_array(r->pool, 4, sizeof(char *));
         if (etag_bits & ETAG_INODE) {
             ent = (char **) ap_push_array(components);
-            *ent = ap_psprintf(r->pool, "%lx",
-                               (unsigned long) r->finfo.st_ino);
+            *ent = ap_psprintf(r->pool, "%qx",
+                               (unsigned long long) r->finfo.st_ino);
         }
         if (etag_bits & ETAG_SIZE) {
             ent = (char **) ap_push_array(components);
@@ -1349,14 +1349,14 @@ API_EXPORT(void) ap_note_digest_auth_failure(request_rec *r)
      */
     char * nonce_prefix = ap_md5(r->pool,
            (unsigned char *)
-           ap_psprintf(r->pool, "%s%lu",
-                       ap_auth_nonce(r), r->request_time));
+           ap_psprintf(r->pool, "%s%lld",
+                       ap_auth_nonce(r), (long long)r->request_time));
 
     ap_table_setn(r->err_headers_out,
 	    r->proxyreq == STD_PROXY ? "Proxy-Authenticate"
 		  : "WWW-Authenticate",
-           ap_psprintf(r->pool, "Digest realm=\"%s\", nonce=\"%s%lu\"",
-               ap_auth_name(r), nonce_prefix, r->request_time));
+           ap_psprintf(r->pool, "Digest realm=\"%s\", nonce=\"%s%lld\"",
+               ap_auth_name(r), nonce_prefix, (long long)r->request_time));
 }
 
 API_EXPORT(int) ap_get_basic_auth_pw(request_rec *r, const char **pw)

@@ -1,4 +1,4 @@
-/*	$OpenBSD: tftpd.c,v 1.15 2013/06/01 21:06:39 deraadt Exp $	*/
+/*	$OpenBSD: tftpd.c,v 1.18 2013/11/26 21:47:16 deraadt Exp $	*/
 
 /*
  * Copyright (c) 2012 David Gwynne <dlg@uq.edu.au>
@@ -187,6 +187,10 @@ void		tftp_wrq_end(int, short, void *);
 int		parse_options(struct tftp_client *, char *, size_t,
 		    struct opt_client *);
 int		validate_access(struct tftp_client *, const char *);
+
+struct tftp_client *
+		client_alloc(void);
+void		client_free(struct tftp_client *client);
 
 struct formats {
 	const char	*f_mode;
@@ -561,7 +565,7 @@ tftpd_events(void)
 }
 
 struct tftp_client *
-client_alloc()
+client_alloc(void)
 {
 	struct tftp_client *client;
 
@@ -741,7 +745,7 @@ parse_options(struct tftp_client *client, char *cp, size_t size,
 		}
 
 		for (option = cp; *cp; cp++)
-			*cp = tolower(*cp);
+			*cp = tolower((unsigned char)*cp);
 
 		for (i = 0; i < NOPT; i++) {
 			if (strcmp(option, opt_names[i]) == 0) {
@@ -799,7 +803,7 @@ again:
 		goto again;
 	}
 	for (cp = mode; *cp; cp++)
-		*cp = tolower(*cp);
+		*cp = tolower((unsigned char)*cp);
 
 	for (pf = formats; pf->f_mode; pf++) {
 		if (strcmp(pf->f_mode, mode) == 0)
@@ -1274,6 +1278,8 @@ tftp_wrq(int fd, short events, void *arg)
 
 	if (n < client->packet_size) {
 		tftp_wrq_ack_packet(client);
+		fclose(client->file);
+		client->file = NULL;
 		event_set(&client->sev, client->sock, EV_READ,
 		    tftp_wrq_end, client);
 		event_add(&client->sev, &client->tv);

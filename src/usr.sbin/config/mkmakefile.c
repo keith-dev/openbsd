@@ -1,4 +1,4 @@
-/*	$OpenBSD: mkmakefile.c,v 1.37 2012/09/17 17:36:13 espie Exp $	*/
+/*	$OpenBSD: mkmakefile.c,v 1.39 2013/11/23 17:38:15 deraadt Exp $	*/
 /*	$NetBSD: mkmakefile.c,v 1.34 1997/02/02 21:12:36 thorpej Exp $	*/
 
 /*
@@ -60,6 +60,7 @@
 static const char *srcpath(struct files *);
 
 static int emitdefs(FILE *);
+static int emitreconfig(FILE *);
 static int emitfiles(FILE *, int);
 
 static int emitobjs(FILE *);
@@ -118,6 +119,10 @@ mkmakefile(void)
 			continue;
 		}
 		if ((*fn)(ofp))
+			goto wrerror;
+	}
+	if (startdir != NULL) {
+		if (emitreconfig(ofp) != 0)
 			goto wrerror;
 	}
 	if (ferror(ifp)) {
@@ -275,6 +280,33 @@ emitdefs(FILE *fp)
 }
 
 static int
+emitreconfig(FILE *fp)
+{
+	if (fputs("\n"
+	    ".PHONY: config\n"
+	    "config:\n", fp) < 0)
+		return (1);
+	if (fprintf(fp, "\tcd %s && config ", startdir) < 0)
+		return (1);
+	if (pflag) {
+		if (fputs("-p ", fp) < 0)
+			return (1);
+	}
+	if (sflag) {
+		if (fprintf(fp, "-s %s ", sflag) < 0)
+			return (1);
+	}
+	if (bflag) {
+		if (fprintf(fp, "-b %s ", bflag) < 0)
+			return (1);
+	}
+	/* other options */
+	if (fprintf(fp, "%s\n", conffile) < 0)
+		return (1);
+	return (0);
+}
+
+static int
 emitobjs(FILE *fp)
 {
 	struct files *fi;
@@ -343,7 +375,7 @@ emitfiles(FILE *fp, int suffix)
 	struct files *fi;
 	int lpos, len, sp;
 	const char *fpath;
-	int uppersuffix = toupper(suffix);
+	char uppersuffix = toupper((unsigned char)suffix);
 
 	if (fprintf(fp, "%cFILES=", uppersuffix) < 0)
 		return (1);

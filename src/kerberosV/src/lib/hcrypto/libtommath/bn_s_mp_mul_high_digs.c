@@ -76,6 +76,6 @@ s_mp_mul_high_digs (mp_int * a, mp_int * b, mp_int * c, int digs)
 }
 #endif
 
-/* $Source: /cvs/src/kerberosV/src/lib/hcrypto/libtommath/bn_s_mp_mul_high_digs.c,v $ */
+/* $Source: /var/www/space/cvs/src/kerberosV/src/lib/hcrypto/libtommath/bn_s_mp_mul_high_digs.c,v $ */
 /* $Revision: 1.1 $ */
 /* $Date: 2013/06/17 19:11:43 $ */

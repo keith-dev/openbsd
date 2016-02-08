@@ -1,4 +1,4 @@
-/*	$OpenBSD: ffs_softdep.c,v 1.119 2013/06/11 16:42:18 deraadt Exp $	*/
+/*	$OpenBSD: ffs_softdep.c,v 1.125 2014/02/04 01:04:03 tedu Exp $	*/
 
 /*
  * Copyright 1998, 2000 Marshall Kirk McKusick. All Rights Reserved.
@@ -1165,33 +1165,33 @@ softdep_initialize(void)
 	sema_init(&newblk_in_progress, "newblk", PRIBIO, 0);
 	timeout_set(&proc_waiting_timeout, pause_timer, NULL);
 	pool_init(&pagedep_pool, sizeof(struct pagedep), 0, 0, 0,
-	    "pagedeppl", &pool_allocator_nointr);
+	    "pagedep", &pool_allocator_nointr);
 	pool_init(&inodedep_pool, sizeof(struct inodedep), 0, 0, 0,
-	    "inodedeppl", &pool_allocator_nointr);
+	    "inodedep", &pool_allocator_nointr);
 	pool_init(&newblk_pool, sizeof(struct newblk), 0, 0, 0,
-	    "newblkpl", &pool_allocator_nointr);
+	    "newblk", &pool_allocator_nointr);
 	pool_init(&bmsafemap_pool, sizeof(struct bmsafemap), 0, 0, 0,
-	    "bmsafemappl", &pool_allocator_nointr);
+	    "bmsafemap", &pool_allocator_nointr);
 	pool_init(&allocdirect_pool, sizeof(struct allocdirect), 0, 0, 0,
-	    "allocdirectpl", &pool_allocator_nointr);
+	    "allocdir", &pool_allocator_nointr);
 	pool_init(&indirdep_pool, sizeof(struct indirdep), 0, 0, 0,
-	    "indirdeppl", &pool_allocator_nointr);
+	    "indirdep", &pool_allocator_nointr);
 	pool_init(&allocindir_pool, sizeof(struct allocindir), 0, 0, 0,
-	    "allocindirpl", &pool_allocator_nointr);
+	    "allocindir", &pool_allocator_nointr);
 	pool_init(&freefrag_pool, sizeof(struct freefrag), 0, 0, 0,
-	    "freefragpl", &pool_allocator_nointr);
+	    "freefrag", &pool_allocator_nointr);
 	pool_init(&freeblks_pool, sizeof(struct freeblks), 0, 0, 0,
-	    "freeblkspl", &pool_allocator_nointr);
+	    "freeblks", &pool_allocator_nointr);
 	pool_init(&freefile_pool, sizeof(struct freefile), 0, 0, 0,
-	    "freefilepl", &pool_allocator_nointr);
+	    "freefile", &pool_allocator_nointr);
 	pool_init(&diradd_pool, sizeof(struct diradd), 0, 0, 0,
-	    "diraddpl", &pool_allocator_nointr);
+	    "diradd", &pool_allocator_nointr);
 	pool_init(&mkdir_pool, sizeof(struct mkdir), 0, 0, 0,
-	    "mkdirpl", &pool_allocator_nointr);
+	    "mkdir", &pool_allocator_nointr);
 	pool_init(&dirrem_pool, sizeof(struct dirrem), 0, 0, 0,
-	    "dirrempl", &pool_allocator_nointr);
+	    "dirrem", &pool_allocator_nointr);
 	pool_init(&newdirblk_pool, sizeof(struct newdirblk), 0, 0, 0,
-	    "newdirblkpl", &pool_allocator_nointr);
+	    "newdirblk", &pool_allocator_nointr);
 }
 
 /*
@@ -1214,7 +1214,7 @@ softdep_mount(struct vnode *devvp, struct mount *mp, struct fs *fs,
 	 */
 	if ((fs->fs_flags & FS_UNCLEAN) == 0)
 		return (0);
-	bzero(&cstotal, sizeof cstotal);
+	memset(&cstotal, 0, sizeof(cstotal));
 	for (cyl = 0; cyl < fs->fs_ncg; cyl++) {
 		if ((error = bread(devvp, fsbtodb(fs, cgtod(fs, cyl)),
 		    fs->fs_cgsize, &bp)) != 0) {
@@ -1230,10 +1230,10 @@ softdep_mount(struct vnode *devvp, struct mount *mp, struct fs *fs,
 		brelse(bp);
 	}
 #ifdef DEBUG
-	if (bcmp(&cstotal, &fs->fs_cstotal, sizeof cstotal))
+	if (memcmp(&cstotal, &fs->fs_cstotal, sizeof(cstotal)))
 		printf("ffs_mountfs: superblock updated for soft updates\n");
 #endif
-	bcopy(&cstotal, &fs->fs_cstotal, sizeof cstotal);
+	memcpy(&fs->fs_cstotal, &cstotal, sizeof(cstotal));
 	return (0);
 }
 
@@ -1528,8 +1528,9 @@ allocdirect_merge(struct allocdirectlst *adphead, struct allocdirect *newadp,
 	    newadp->ad_oldsize != oldadp->ad_newsize ||
 	    newadp->ad_lbn >= NDADDR) {
 		FREE_LOCK(&lk);
-		panic("allocdirect_merge: old %lld != new %lld || lbn %lld >= %d",
-		    newadp->ad_oldblkno, oldadp->ad_newblkno, newadp->ad_lbn,
+		panic("allocdirect_merge: old %lld != new %lld || lbn %lld >= "
+		    "%d", (long long)newadp->ad_oldblkno,
+		    (long long)oldadp->ad_newblkno, (long long)newadp->ad_lbn,
 		    NDADDR);
 	}
 	newadp->ad_oldblkno = oldadp->ad_oldblkno;
@@ -1834,7 +1835,7 @@ setup_allocindir_phase2(struct buf *bp, struct inode *ip,
 #if 0
 		BUF_KERNPROC(newindirdep->ir_savebp);
 #endif
-		bcopy(bp->b_data, newindirdep->ir_savebp->b_data, bp->b_bcount);
+		memcpy(newindirdep->ir_savebp->b_data, bp->b_data, bp->b_bcount);
 	}
 }
 
@@ -2051,7 +2052,7 @@ deallocate_dependencies(struct buf *bp, struct inodedep *inodedep)
 				FREE_LOCK(&lk);
 				panic("deallocate_dependencies: not indir");
 			}
-			bcopy(bp->b_data, indirdep->ir_savebp->b_data,
+			memcpy(indirdep->ir_savebp->b_data, bp->b_data,
 			    bp->b_bcount);
 			WORKLIST_REMOVE(wk);
 			WORKLIST_INSERT(&indirdep->ir_savebp->b_dep, wk);
@@ -2725,7 +2726,7 @@ softdep_change_directoryentry_offset(struct inode *dp, caddr_t base,
 		}
 	}
 done:
-	bcopy(oldloc, newloc, entrysize);
+	memmove(newloc, oldloc, entrysize);
 	FREE_LOCK(&lk);
 }
 
@@ -3295,8 +3296,8 @@ softdep_disk_io_initiation(struct buf *bp)
 			ACQUIRE_LOCK(&lk);
 			indirdep->ir_state &= ~ATTACHED;
 			indirdep->ir_state |= UNDONE;
-			bcopy(bp->b_data, indirdep->ir_saveddata, bp->b_bcount);
-			bcopy(indirdep->ir_savebp->b_data, bp->b_data,
+			memcpy(indirdep->ir_saveddata, bp->b_data, bp->b_bcount);
+			memcpy(bp->b_data, indirdep->ir_savebp->b_data,
 			    bp->b_bcount);
 			continue;
 
@@ -3401,7 +3402,7 @@ initiate_write_inodeblock_ufs1(struct inodedep *inodedep, struct buf *bp)
 		    M_INODEDEP, M_WAITOK);
 		ACQUIRE_LOCK(&lk);
 		*inodedep->id_savedino1 = *dp;
-		bzero((caddr_t)dp, sizeof(struct ufs1_dinode));
+		memset(dp, 0, sizeof(struct ufs1_dinode));
 		return;
 	}
 	/*
@@ -3425,15 +3426,16 @@ initiate_write_inodeblock_ufs1(struct inodedep *inodedep, struct buf *bp)
 		    (d1 = dp->di_db[adp->ad_lbn]) != (d2 = adp->ad_newblkno)) {
 			FREE_LOCK(&lk);
 			panic("%s: direct pointer #%lld mismatch %d != %d",
-			    "softdep_write_inodeblock", adp->ad_lbn, d1, d2);
+			    "softdep_write_inodeblock", (long long)adp->ad_lbn,
+			    d1, d2);
 		}
 		if (adp->ad_lbn >= NDADDR &&
 		    (d1 = dp->di_ib[adp->ad_lbn - NDADDR]) !=
 		    (d2 = adp->ad_newblkno)) {
 			FREE_LOCK(&lk);
 			panic("%s: indirect pointer #%lld mismatch %d != %d",
-			    "softdep_write_inodeblock", adp->ad_lbn - NDADDR,
-			    d1, d2);
+			    "softdep_write_inodeblock", (long long)(adp->ad_lbn -
+			    NDADDR), d1, d2);
 		}
 		deplist |= 1 << adp->ad_lbn;
 		if ((adp->ad_state & ATTACHED) == 0) {
@@ -3541,7 +3543,7 @@ initiate_write_inodeblock_ufs2(struct inodedep *inodedep, struct buf *bp)
 		inodedep->id_savedino2 = malloc(sizeof(struct ufs2_dinode),
 		    M_INODEDEP, M_WAITOK);
 		*inodedep->id_savedino2 = *dp;
-		bzero((caddr_t)dp, sizeof(struct ufs2_dinode));
+		memset(dp, 0, sizeof(struct ufs2_dinode));
 		return;
 	}
 	/*
@@ -3571,7 +3573,8 @@ initiate_write_inodeblock_ufs2(struct inodedep *inodedep, struct buf *bp)
 		    (d2 = adp->ad_newblkno)) {
 			FREE_LOCK(&lk);
 			panic("%s: direct pointer #%lld mismatch %lld != %lld",
-			    "softdep_write_inodeblock", adp->ad_lbn, d1, d2);
+			    "softdep_write_inodeblock", (long long)adp->ad_lbn,
+			    d1, d2);
 		}
 		deplist |= 1 << adp->ad_lbn;
 		if ((adp->ad_state & ATTACHED) == 0) {
@@ -3638,15 +3641,16 @@ initiate_write_inodeblock_ufs2(struct inodedep *inodedep, struct buf *bp)
 		    (d1 = dp->di_db[adp->ad_lbn]) != (d2 = adp->ad_newblkno)) {
 			FREE_LOCK(&lk);
 			panic("%s: direct pointer #%lld mismatch %lld != %lld",
-			    "softdep_write_inodeblock", adp->ad_lbn, d1, d2);
+			    "softdep_write_inodeblock", (long long)adp->ad_lbn,
+			    d1, d2);
 		}
 		if (adp->ad_lbn >= NDADDR &&
 		    (d1 = dp->di_ib[adp->ad_lbn - NDADDR]) !=
 		    (d2 = adp->ad_newblkno)) {
 			FREE_LOCK(&lk);
 			panic("%s: indirect pointer #%lld mismatch %lld != %lld",
-			    "softdep_write_inodeblock", adp->ad_lbn - NDADDR,
-			    d1, d2);
+			    "softdep_write_inodeblock", (long long)(adp->ad_lbn -
+			    NDADDR), d1, d2);
 		}
 		deplist |= 1 << adp->ad_lbn;
 		if ((adp->ad_state & ATTACHED) == 0) {
@@ -3821,7 +3825,7 @@ softdep_disk_write_complete(struct buf *bp)
 			indirdep = WK_INDIRDEP(wk);
 			if (indirdep->ir_state & GOINGAWAY)
 				panic("disk_write_complete: indirdep gone");
-			bcopy(indirdep->ir_saveddata, bp->b_data, bp->b_bcount);
+			memcpy(bp->b_data, indirdep->ir_saveddata, bp->b_bcount);
 			free(indirdep->ir_saveddata, M_INDIRDEP);
 			indirdep->ir_saveddata = NULL;
 			indirdep->ir_state &= ~UNDONE;
@@ -4031,18 +4035,20 @@ handle_written_inodeblock(struct inodedep *inodedep, struct buf *bp)
 		if (fstype == UM_UFS1) {
 			if (adp->ad_lbn < NDADDR) {
 				if (dp1->di_db[adp->ad_lbn] != adp->ad_oldblkno)
-					 panic("%s: %s #%lld mismatch %d != %lld",
+					 panic("%s: %s #%lld mismatch %d != "
+					     "%lld",
 					     "handle_written_inodeblock",
-					     "direct pointer", adp->ad_lbn,
+					     "direct pointer",
+					     (long long)adp->ad_lbn,
 					     dp1->di_db[adp->ad_lbn],
-					     adp->ad_oldblkno);
+					     (long long)adp->ad_oldblkno);
 				dp1->di_db[adp->ad_lbn] = adp->ad_newblkno;
 			} else {
 				if (dp1->di_ib[adp->ad_lbn - NDADDR] != 0)
 					panic("%s: %s #%lld allocated as %d",
 					    "handle_written_inodeblock",
 					    "indirect pointer",
-					    adp->ad_lbn - NDADDR,
+					    (long long)(adp->ad_lbn - NDADDR),
 					    dp1->di_ib[adp->ad_lbn - NDADDR]);
 				dp1->di_ib[adp->ad_lbn - NDADDR] =
 				   adp->ad_newblkno;
@@ -4050,18 +4056,19 @@ handle_written_inodeblock(struct inodedep *inodedep, struct buf *bp)
 		} else {
 			if (adp->ad_lbn < NDADDR) {
 				if (dp2->di_db[adp->ad_lbn] != adp->ad_oldblkno)
-					panic("%s: %s #%lld mismatch %lld != %lld",
-					    "handle_written_inodeblock",
-					    "direct pointer", adp->ad_lbn,
+					panic("%s: %s #%lld mismatch %lld != "
+					    "%lld", "handle_written_inodeblock",
+					    "direct pointer",
+					    (long long)adp->ad_lbn,
 					    dp2->di_db[adp->ad_lbn],
-					    adp->ad_oldblkno);
+					    (long long)adp->ad_oldblkno);
 				dp2->di_db[adp->ad_lbn] = adp->ad_newblkno;
 			} else {
 				if (dp2->di_ib[adp->ad_lbn - NDADDR] != 0)
 					panic("%s: %s #%lld allocated as %lld",
 					    "handle_written_inodeblock",
 					    "indirect pointer",
-					    adp->ad_lbn - NDADDR,
+					    (long long)(adp->ad_lbn - NDADDR),
 					    dp2->di_ib[adp->ad_lbn - NDADDR]);
 				dp2->di_ib[adp->ad_lbn - NDADDR] =
 				    adp->ad_newblkno;
@@ -5391,7 +5398,7 @@ clear_inodedeps(struct proc *p)
 	 * Ugly code to find mount point given pointer to superblock.
 	 */
 	fs = inodedep->id_fs;
-	CIRCLEQ_FOREACH(mp, &mountlist, mnt_list)
+	TAILQ_FOREACH(mp, &mountlist, mnt_list)
 		if ((mp->mnt_flag & MNT_SOFTDEP) && fs == VFSTOUFS(mp)->um_fs)
 			break;
 	/*
@@ -5612,7 +5619,7 @@ softdep_error(char *func, int error)
 
 void
 softdep_print(struct buf *bp, int full,
-    int (*pr)(const char *, ...) /* __attribute__((__format__(__kprintf__,1,2))) */)
+    int (*pr)(const char *, ...) __attribute__((__format__(__kprintf__,1,2))))
 {
 	struct worklist *wk;
 
@@ -5623,7 +5630,7 @@ softdep_print(struct buf *bp, int full,
 
 void
 worklist_print(struct worklist *wk, int full,
-    int (*pr)(const char *, ...) /* __attribute__((__format__(__kprintf__,1,2))) */)
+    int (*pr)(const char *, ...) __attribute__((__format__(__kprintf__,1,2))))
 {
 	struct pagedep *pagedep;
 	struct inodedep *inodedep;
@@ -5651,7 +5658,7 @@ worklist_print(struct worklist *wk, int full,
 	case D_PAGEDEP:
 		pagedep = WK_PAGEDEP(wk);
 		(*pr)("mount %p ino %u lbn %lld\n", pagedep->pd_mnt,
-		    pagedep->pd_ino, pagedep->pd_lbn);
+		    pagedep->pd_ino, (long long)pagedep->pd_lbn);
 		break;
 	case D_INODEDEP:
 		inodedep = WK_INODEDEP(wk);
@@ -5664,8 +5671,8 @@ worklist_print(struct worklist *wk, int full,
 	case D_NEWBLK:
 		newblk = WK_NEWBLK(wk);
 		(*pr)("fs %p newblk %lld state %d bmsafemap %p\n",
-		    newblk->nb_fs, newblk->nb_newblkno, newblk->nb_state,
-		    newblk->nb_bmsafemap);
+		    newblk->nb_fs, (long long)newblk->nb_newblkno,
+		    newblk->nb_state, newblk->nb_bmsafemap);
 		break;
 	case D_BMSAFEMAP:
 		bmsafemap = WK_BMSAFEMAP(wk);
@@ -5673,9 +5680,10 @@ worklist_print(struct worklist *wk, int full,
 		break;
 	case D_ALLOCDIRECT:
 		adp = WK_ALLOCDIRECT(wk);
-		(*pr)("lbn %lld newlbk %lld oldblk %lld newsize %ld olsize %ld\n"
-		    "%s  bp %p inodedep %p freefrag %p\n", adp->ad_lbn,
-		    adp->ad_newblkno, adp->ad_oldblkno, adp->ad_newsize,
+		(*pr)("lbn %lld newlbk %lld oldblk %lld newsize %ld olsize "
+		    "%ld\n%s  bp %p inodedep %p freefrag %p\n",
+		    (long long)adp->ad_lbn, (long long)adp->ad_newblkno,
+		    (long long)adp->ad_oldblkno, adp->ad_newsize,
 		    adp->ad_oldsize,
 		    prefix, adp->ad_buf, adp->ad_inodedep, adp->ad_freefrag);
 		break;
@@ -5688,14 +5696,15 @@ worklist_print(struct worklist *wk, int full,
 		aip = WK_ALLOCINDIR(wk);
 		(*pr)("off %d newblk %lld oldblk %lld freefrag %p\n"
 		    "%s  indirdep %p buf %p\n", aip->ai_offset,
-		    aip->ai_newblkno, aip->ai_oldblkno, aip->ai_freefrag,
-		    prefix, aip->ai_indirdep, aip->ai_buf);
+		    (long long)aip->ai_newblkno, (long long)aip->ai_oldblkno,
+		    aip->ai_freefrag, prefix, aip->ai_indirdep, aip->ai_buf);
 		break;
 	case D_FREEFRAG:
 		freefrag = WK_FREEFRAG(wk);
 		(*pr)("vnode %p mp %p blkno %lld fsize %ld ino %u\n",
-		    freefrag->ff_devvp, freefrag->ff_mnt, freefrag->ff_blkno,
-		    freefrag->ff_fragsize, freefrag->ff_inum);
+		    freefrag->ff_devvp, freefrag->ff_mnt,
+		    (long long)freefrag->ff_blkno, freefrag->ff_fragsize,
+		    freefrag->ff_inum);
 		break;
 	case D_FREEBLKS:
 		freeblks = WK_FREEBLKS(wk);

@@ -1,6 +1,6 @@
-/*	$OpenBSD: rthread_sem.c,v 1.9 2013/06/01 23:06:26 tedu Exp $ */
+/*	$OpenBSD: rthread_sem.c,v 1.18 2013/12/11 16:24:16 tedu Exp $ */
 /*
- * Copyright (c) 2004,2005 Ted Unangst <tedu@openbsd.org>
+ * Copyright (c) 2004,2005,2013 Ted Unangst <tedu@openbsd.org>
  * All Rights Reserved.
  *
  * Permission to use, copy, modify, and distribute this software for any
@@ -15,14 +15,38 @@
  * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
+#include <sys/param.h>
+#include <sys/types.h>
+#include <sys/mman.h>
+#include <sys/stat.h>
 
-#include <stdlib.h>
-#include <unistd.h>
 #include <errno.h>
+#include <fcntl.h>
+#include <sha2.h>
+#include <stdarg.h>
+#include <stdlib.h>
+#include <stdio.h>
+#include <string.h>
+#include <unistd.h>
 
 #include <pthread.h>
 
 #include "rthread.h"
+
+#define SHARED_IDENT ((void *)-1)
+
+/* SHA256_DIGEST_STRING_LENGTH includes nul */
+/* "/tmp/" + sha256 + ".sem" */
+#define SEM_PATH_SIZE (5 + SHA256_DIGEST_STRING_LENGTH + 4)
+
+/* long enough to be hard to guess */
+#define SEM_RANDOM_NAME_LEN	10
+
+/*
+ * Size of memory to be mmap()'ed by named semaphores.
+ * Should be >= SEM_PATH_SIZE and page-aligned.
+ */
+#define SEM_MMAP_SIZE	getpagesize()
 
 /*
  * Internal implementation of semaphores
@@ -31,7 +55,11 @@ int
 _sem_wait(sem_t sem, int tryonly, const struct timespec *abstime,
     int *delayed_cancel)
 {
+	void *ident = (void *)&sem->waitcount;
 	int r;
+
+	if (sem->shared)
+		ident = SHARED_IDENT;
 
 	_spinlock(&sem->lock);
 	if (sem->value) {
@@ -42,7 +70,7 @@ _sem_wait(sem_t sem, int tryonly, const struct timespec *abstime,
 	} else {
 		sem->waitcount++;
 		do {
-			r = __thrsleep(&sem->waitcount, CLOCK_REALTIME |
+			r = __thrsleep(ident, CLOCK_REALTIME |
 			    _USING_TICKETS, abstime, &sem->lock.ticket,
 			    delayed_cancel);
 			_spinlock(&sem->lock);
@@ -63,12 +91,16 @@ _sem_wait(sem_t sem, int tryonly, const struct timespec *abstime,
 int
 _sem_post(sem_t sem)
 {
+	void *ident = (void *)&sem->waitcount;
 	int rv = 0;
+
+	if (sem->shared)
+		ident = SHARED_IDENT;
 
 	_spinlock(&sem->lock);
 	sem->value++;
 	if (sem->waitcount) {
-		__thrwakeup(&sem->waitcount, 1);
+		__thrwakeup(ident, 1);
 		rv = 1;
 	}
 	_spinunlock(&sem->lock);
@@ -83,14 +115,44 @@ sem_init(sem_t *semp, int pshared, unsigned int value)
 {
 	sem_t sem;
 
-	if (pshared) {
-		errno = EPERM;
-		return (-1);
-	}
-
 	if (value > SEM_VALUE_MAX) {
 		errno = EINVAL;
 		return (-1);
+	}
+
+	if (pshared) {
+		errno = EPERM;
+		return (-1);
+#ifdef notyet
+		char name[SEM_RANDOM_NAME_LEN];
+		sem_t *sempshared;
+		int i;
+
+		for (;;) {
+			for (i = 0; i < SEM_RANDOM_NAME_LEN - 1; i++)
+				name[i] = arc4random_uniform(255) + 1;
+			name[SEM_RANDOM_NAME_LEN - 1] = '\0';
+			sempshared = sem_open(name, O_CREAT | O_EXCL, 0, value);
+			if (sempshared != SEM_FAILED)
+				break;
+			if (errno == EEXIST)
+				continue;
+			if (errno != EPERM)
+				errno = ENOSPC;
+			return (-1);
+		}
+
+		/* unnamed semaphore should not be opened twice */
+		if (sem_unlink(name) == -1) {
+			sem_close(sempshared);
+			errno = ENOSPC;
+			return (-1);
+		}
+
+		*semp = *sempshared;
+		free(sempshared);
+		return (0);
+#endif
 	}
 
 	sem = calloc(1, sizeof(*sem));
@@ -108,20 +170,26 @@ sem_init(sem_t *semp, int pshared, unsigned int value)
 int
 sem_destroy(sem_t *semp)
 {
-	if (!semp || !*semp) {
+	sem_t sem;
+
+	if (!semp || !(sem = *semp)) {
 		errno = EINVAL;
 		return (-1);
 	}
 
-	if ((*semp)->waitcount) {
+	if (sem->waitcount) {
 #define MSG "sem_destroy on semaphore with waiters!\n"
 		write(2, MSG, sizeof(MSG) - 1);
 #undef MSG
 		errno = EBUSY;
 		return (-1);
 	}
-	free(*semp);
+
 	*semp = NULL;
+	if (sem->shared)
+		munmap(sem, SEM_MMAP_SIZE);
+	else
+		free(sem);
 
 	return (0);
 }
@@ -129,9 +197,9 @@ sem_destroy(sem_t *semp)
 int
 sem_getvalue(sem_t *semp, int *sval)
 {
-	sem_t sem = *semp;
+	sem_t sem;
 
-	if (!semp || !*semp) {
+	if (!semp || !(sem = *semp)) {
 		errno = EINVAL;
 		return (-1);
 	}
@@ -146,9 +214,9 @@ sem_getvalue(sem_t *semp, int *sval)
 int
 sem_post(sem_t *semp)
 {
-	sem_t sem = *semp;
+	sem_t sem;
 
-	if (!semp || !*semp) {
+	if (!semp || !(sem = *semp)) {
 		errno = EINVAL;
 		return (-1);
 	}
@@ -161,11 +229,11 @@ sem_post(sem_t *semp)
 int
 sem_wait(sem_t *semp)
 {
-	sem_t sem = *semp;
 	pthread_t self = pthread_self();
+	sem_t sem;
 	int r;
 
-	if (!semp || !*semp) {
+	if (!semp || !(sem = *semp)) {
 		errno = EINVAL;
 		return (-1);
 	}
@@ -185,11 +253,11 @@ sem_wait(sem_t *semp)
 int
 sem_timedwait(sem_t *semp, const struct timespec *abstime)
 {
-	sem_t sem = *semp;
 	pthread_t self = pthread_self();
+	sem_t sem;
 	int r;
 
-	if (!semp || !*semp) {
+	if (!semp || !(sem = *semp)) {
 		errno = EINVAL;
 		return (-1);
 	}
@@ -209,10 +277,10 @@ sem_timedwait(sem_t *semp, const struct timespec *abstime)
 int
 sem_trywait(sem_t *semp)
 {
-	sem_t sem = *semp;
+	sem_t sem;
 	int r;
 
-	if (!semp || !*semp) {
+	if (!semp || !(sem = *semp)) {
 		errno = EINVAL;
 		return (-1);
 	}
@@ -227,27 +295,122 @@ sem_trywait(sem_t *semp)
 	return (0);
 }
 
-/* ARGSUSED */
+
+static void
+makesempath(const char *origpath, char *sempath, size_t len)
+{
+	char buf[SHA256_DIGEST_STRING_LENGTH];
+
+	SHA256Data(origpath, strlen(origpath), buf);
+	snprintf(sempath, len, "/tmp/%s.sem", buf);
+}
+
 sem_t *
-sem_open(const char *name __unused, int oflag __unused, ...)
+sem_open(const char *name, int oflag, ...)
 {
-	errno = ENOSYS;
-	return (SEM_FAILED);
+	char sempath[SEM_PATH_SIZE];
+	struct stat sb;
+	sem_t sem, *semp;
+	unsigned int value = 0;
+	int created = 0, fd;
+
+	if (oflag & ~(O_CREAT | O_EXCL)) {
+		errno = EINVAL;
+		return (SEM_FAILED);
+	}
+
+	if (oflag & O_CREAT) {
+		va_list ap;
+		va_start(ap, oflag);
+		/* 3rd parameter mode is not used */
+		va_arg(ap, mode_t);
+		value = va_arg(ap, unsigned);
+		va_end(ap);
+
+		if (value > SEM_VALUE_MAX) {
+			errno = EINVAL;
+			return (SEM_FAILED);
+		}
+	}
+
+	makesempath(name, sempath, sizeof(sempath));
+	fd = open(sempath, O_RDWR | O_NOFOLLOW | oflag, 0600);
+	if (fd == -1)
+		return (SEM_FAILED);
+	if (fstat(fd, &sb) == -1 || !S_ISREG(sb.st_mode)) {
+		close(fd);
+		errno = EINVAL;
+		return (SEM_FAILED);
+	}
+	if (sb.st_uid != getuid()) {
+		close(fd);
+		errno = EPERM;
+		return (SEM_FAILED);
+	}
+	if (sb.st_size != SEM_MMAP_SIZE) {
+		if (!(oflag & O_CREAT)) {
+			close(fd);
+			errno = EINVAL;
+			return (SEM_FAILED);
+		}
+		if (sb.st_size != 0) {
+			close(fd);
+			errno = EINVAL;
+			return (SEM_FAILED);
+		}
+		if (ftruncate(fd, SEM_MMAP_SIZE) == -1) {
+			close(fd);
+			errno = EINVAL;
+			return (SEM_FAILED);
+		}
+
+		created = 1;
+	}
+	sem = mmap(NULL, SEM_MMAP_SIZE, PROT_READ | PROT_WRITE,
+	    MAP_FILE | MAP_SHARED | MAP_HASSEMAPHORE, fd, 0);
+	close(fd);
+	if (sem == MAP_FAILED) {
+		errno = EINVAL;
+		return (SEM_FAILED);
+	}
+	semp = malloc(sizeof(*semp));
+	if (!semp) {
+		munmap(sem, SEM_MMAP_SIZE);
+		errno = ENOSPC;
+		return (SEM_FAILED);
+	}
+	if (created) {
+		sem->lock = _SPINLOCK_UNLOCKED_ASSIGN;
+		sem->value = value;
+		sem->shared = 1;
+	}
+	*semp = sem;
+
+	return (semp);
 }
 
-/* ARGSUSED */
 int
-sem_close(sem_t *sem __unused)
+sem_close(sem_t *semp)
 {
-	errno = ENOSYS;
-	return (-1);
+	sem_t sem;
+
+	if (!semp || !(sem = *semp) || !sem->shared) {
+		errno = EINVAL;
+		return (-1);
+	}
+
+	*semp = NULL;
+	munmap(sem, SEM_MMAP_SIZE);
+	free(semp);
+
+	return (0);
 }
 
-/* ARGSUSED */
 int
-sem_unlink(const char *name __unused)
+sem_unlink(const char *name)
 {
-	errno = ENOSYS;
-	return (-1);
-}
+	char sempath[SEM_PATH_SIZE];
 
+	makesempath(name, sempath, sizeof(sempath));
+	return (unlink(sempath));
+}

@@ -1,4 +1,4 @@
-/*	$OpenBSD: ping6.c,v 1.84 2013/05/31 19:46:57 naddy Exp $	*/
+/*	$OpenBSD: ping6.c,v 1.88 2014/01/10 21:57:44 florian Exp $	*/
 /*	$KAME: ping6.c,v 1.163 2002/10/25 02:19:06 itojun Exp $	*/
 
 /*
@@ -271,6 +271,15 @@ main(int argc, char *argv[])
 	size_t rthlen;
 	int mflag = 0;
 	uid_t uid;
+	u_int rtableid;
+
+	if ((s = socket(AF_INET6, SOCK_RAW, IPPROTO_ICMPV6)) < 0)
+		err(1, "socket");
+
+	/* revoke root privilege */
+	uid = getuid();
+	if (setresuid(uid, uid, uid) == -1)
+		err(1, "setresuid");
 
 	/* just to be sure */
 	memset(&smsghdr, 0, sizeof(smsghdr));
@@ -279,7 +288,7 @@ main(int argc, char *argv[])
 	preload = 0;
 	datap = &outpack[ICMP6ECHOLEN + ICMP6ECHOTMLEN];
 	while ((ch = getopt(argc, argv,
-	    "a:b:c:dEefHg:h:I:i:l:mnNp:qRS:s:tvwW")) != -1) {
+	    "a:b:c:dEefHg:h:I:i:l:mnNp:qRS:s:tvV:wW")) != -1) {
 		switch (ch) {
 		case 'a':
 		{
@@ -472,6 +481,16 @@ main(int argc, char *argv[])
 		case 'v':
 			options |= F_VERBOSE;
 			break;
+		case 'V':
+			rtableid = (unsigned int)strtonum(optarg, 0,
+			    RT_TABLEID_MAX, &errstr);
+			if (errstr)
+				errx(1, "rtable value is %s: %s",
+				    errstr, optarg);
+			if (setsockopt(s, SOL_SOCKET, SO_RTABLE, &rtableid,
+			    sizeof(rtableid)) == -1)
+				err(1, "setsockopt SO_RTABLE");
+			break;
 		case 'w':
 			options &= ~F_NOUSERDATA;
 			options |= F_FQDN;
@@ -532,10 +551,6 @@ main(int argc, char *argv[])
 
 	memcpy(&dst, res->ai_addr, res->ai_addrlen);
 
-	if ((s = socket(res->ai_family, res->ai_socktype,
-	    res->ai_protocol)) < 0)
-		err(1, "socket");
-
 	/* set the source address if specified. */
 	if ((options & F_SRCADDR) &&
 	    bind(s, (struct sockaddr *)&src, srclen) != 0) {
@@ -582,11 +597,6 @@ main(int argc, char *argv[])
 		    (socklen_t)sizeof(opton)))
 			err(1, "setsockopt(IPV6_RECVDSTOPTS)");
 	}
-
-	/* revoke root privilege */
-	uid = getuid();
-	if (setresuid(uid, uid, uid) == -1)
-		err(1, "setresuid");
 
 	if ((options & F_FLOOD) && (options & F_INTERVAL))
 		errx(1, "-f and -i incompatible options");
@@ -1227,7 +1237,8 @@ dnsdecode(const u_char **sp, const u_char *ep, const u_char *base,
 				return NULL;	/*source overrun*/
 			while (i-- > 0 && cp < ep) {
 				l = snprintf(cresult, sizeof(cresult),
-				    isprint(*cp) ? "%c" : "\\%03o", *cp & 0xff);
+				    isprint((unsigned char)*cp) ? "%c" : "\\%03o",
+				    *cp & 0xff);
 				if (l >= sizeof(cresult) || l < 0)
 					return NULL;
 				if (strlcat(buf, cresult, bufsiz) >= bufsiz)
@@ -2383,7 +2394,7 @@ fill(char *bp, char *patp)
 	char *cp;
 
 	for (cp = patp; *cp; cp++)
-		if (!isxdigit(*cp))
+		if (!isxdigit((unsigned char)*cp))
 			errx(1, "patterns must be specified as hex digits");
 	ii = sscanf(patp,
 	    "%2x%2x%2x%2x%2x%2x%2x%2x%2x%2x%2x%2x%2x%2x%2x%2x",
@@ -2462,6 +2473,7 @@ usage(void)
 #endif
 	    "] [-a addrtype] [-b bufsiz] [-c count] [-g gateway]\n\t"
 	    "[-h hoplimit] [-I interface] [-i wait] [-l preload] [-p pattern]"
-	    "\n\t[-S sourceaddr] [-s packetsize] [hops ...] host\n");
+	    "\n\t[-S sourceaddr] [-s packetsize] [-V rtable] [hops ...]"
+	    " host\n");
 	exit(1);
 }

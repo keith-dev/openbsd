@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_clock.c,v 1.81 2013/04/24 17:29:02 matthew Exp $	*/
+/*	$OpenBSD: kern_clock.c,v 1.84 2013/12/24 01:11:00 tedu Exp $	*/
 /*	$NetBSD: kern_clock.c,v 1.34 1996/06/09 04:51:03 briggs Exp $	*/
 
 /*-
@@ -144,39 +144,10 @@ initclocks(void)
 /*
  * hardclock does the accounting needed for ITIMER_PROF and ITIMER_VIRTUAL.
  * We don't want to send signals with psignal from hardclock because it makes
- * MULTIPROCESSOR locking very complicated. Instead we use a small trick
- * to send the signals safely and without blocking too many interrupts
- * while doing that (signal handling can be heavy).
- *
- * hardclock detects that the itimer has expired, and schedules a timeout
- * to deliver the signal. This works because of the following reasons:
- *  - The timeout can be scheduled with a 1 tick time because we're
- *    doing it before the timeout processing in hardclock. So it will
- *    be scheduled to run as soon as possible.
- *  - The timeout will be run in softclock which will run before we
- *    return to userland and process pending signals.
- *  - If the system is so busy that several VIRTUAL/PROF ticks are
- *    sent before softclock processing, we'll send only one signal.
- *    But if we'd send the signal from hardclock only one signal would
- *    be delivered to the user process. So userland will only see one
- *    signal anyway.
+ * MULTIPROCESSOR locking very complicated. Instead, to use an idea from
+ * FreeBSD, we set a flag on the thread and when it goes to return to
+ * userspace it signals itself.
  */
-
-void
-virttimer_trampoline(void *v)
-{
-	struct process *pr = v;
-
-	psignal(pr->ps_mainproc, SIGVTALRM);
-}
-
-void
-proftimer_trampoline(void *v)
-{
-	struct process *pr = v;
-
-	psignal(pr->ps_mainproc, SIGPROF);
-}
 
 /*
  * The real-time timer, interrupting hz times per second.
@@ -196,11 +167,15 @@ hardclock(struct clockframe *frame)
 		 */
 		if (CLKF_USERMODE(frame) &&
 		    timerisset(&pr->ps_timer[ITIMER_VIRTUAL].it_value) &&
-		    itimerdecr(&pr->ps_timer[ITIMER_VIRTUAL], tick) == 0)
-			timeout_add(&pr->ps_virt_to, 1);
+		    itimerdecr(&pr->ps_timer[ITIMER_VIRTUAL], tick) == 0) {
+			atomic_setbits_int(&p->p_flag, P_ALRMPEND);
+			need_proftick(p);
+		}
 		if (timerisset(&pr->ps_timer[ITIMER_PROF].it_value) &&
-		    itimerdecr(&pr->ps_timer[ITIMER_PROF], tick) == 0)
-			timeout_add(&pr->ps_prof_to, 1);
+		    itimerdecr(&pr->ps_timer[ITIMER_PROF], tick) == 0) {
+			atomic_setbits_int(&p->p_flag, P_PROFPEND);
+			need_proftick(p);
+		}
 	}
 
 	/*
@@ -238,7 +213,7 @@ int
 hzto(const struct timeval *tv)
 {
 	struct timeval now;
-	unsigned long ticks;
+	unsigned long nticks;
 	long sec, usec;
 
 	/*
@@ -269,18 +244,18 @@ hzto(const struct timeval *tv)
 		usec += 1000000;
 	}
 	if (sec < 0 || (sec == 0 && usec <= 0)) {
-		ticks = 0;
+		nticks = 0;
 	} else if (sec <= LONG_MAX / 1000000)
-		ticks = (sec * 1000000 + (unsigned long)usec + (tick - 1))
+		nticks = (sec * 1000000 + (unsigned long)usec + (tick - 1))
 		    / tick + 1;
 	else if (sec <= LONG_MAX / hz)
-		ticks = sec * hz
+		nticks = sec * hz
 		    + ((unsigned long)usec + (tick - 1)) / tick + 1;
 	else
-		ticks = LONG_MAX;
-	if (ticks > INT_MAX)
-		ticks = INT_MAX;
-	return ((int)ticks);
+		nticks = LONG_MAX;
+	if (nticks > INT_MAX)
+		nticks = INT_MAX;
+	return ((int)nticks);
 }
 
 /*
@@ -289,8 +264,9 @@ hzto(const struct timeval *tv)
 int
 tvtohz(const struct timeval *tv)
 {
-	unsigned long ticks;
-	long sec, usec;
+	unsigned long nticks;
+	time_t sec;
+	long usec;
 
 	/*
 	 * If the number of usecs in the whole seconds part of the time
@@ -315,18 +291,18 @@ tvtohz(const struct timeval *tv)
 	sec = tv->tv_sec;
 	usec = tv->tv_usec;
 	if (sec < 0 || (sec == 0 && usec <= 0))
-		ticks = 0;
+		nticks = 0;
 	else if (sec <= LONG_MAX / 1000000)
-		ticks = (sec * 1000000 + (unsigned long)usec + (tick - 1))
+		nticks = (sec * 1000000 + (unsigned long)usec + (tick - 1))
 		    / tick + 1;
 	else if (sec <= LONG_MAX / hz)
-		ticks = sec * hz
+		nticks = sec * hz
 		    + ((unsigned long)usec + (tick - 1)) / tick + 1;
 	else
-		ticks = LONG_MAX;
-	if (ticks > INT_MAX)
-		ticks = INT_MAX;
-	return ((int)ticks);
+		nticks = LONG_MAX;
+	if (nticks > INT_MAX)
+		nticks = INT_MAX;
+	return ((int)nticks);
 }
 
 int

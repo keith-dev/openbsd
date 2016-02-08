@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_ipw.c,v 1.95 2011/04/07 15:30:16 miod Exp $	*/
+/*	$OpenBSD: if_ipw.c,v 1.98 2013/12/06 21:03:04 deraadt Exp $	*/
 
 /*-
  * Copyright (c) 2004-2008
@@ -52,7 +52,6 @@
 
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
-#include <netinet/in_var.h>
 #include <netinet/if_ether.h>
 #include <netinet/ip.h>
 
@@ -65,7 +64,7 @@
 int		ipw_match(struct device *, void *, void *);
 void		ipw_attach(struct device *, struct device *, void *);
 int		ipw_activate(struct device *, int);
-void		ipw_resume(void *, void *);
+void		ipw_wakeup(struct ipw_softc *);
 int		ipw_dma_alloc(struct ipw_softc *);
 void		ipw_release(struct ipw_softc *);
 int		ipw_media_change(struct ifnet *);
@@ -301,9 +300,8 @@ ipw_activate(struct device *self, int act)
 		if (ifp->if_flags & IFF_RUNNING)
 			ipw_stop(ifp, 0);
 		break;
-	case DVACT_RESUME:
-		workq_queue_task(NULL, &sc->sc_resume_wqt, 0,
-		    ipw_resume, sc, NULL);
+	case DVACT_WAKEUP:
+		ipw_wakeup(sc);
 		break;
 	}
 
@@ -311,9 +309,8 @@ ipw_activate(struct device *self, int act)
 }
 
 void
-ipw_resume(void *arg1, void *arg2)
+ipw_wakeup(struct ipw_softc *sc)
 {
-	struct ipw_softc *sc = arg1;
 	struct ifnet *ifp = &sc->sc_ic.ic_if;
 	pcireg_t data;
 	int s;

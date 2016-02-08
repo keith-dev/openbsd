@@ -1,6 +1,3 @@
-LINK	instbin					bin/sha256
-
-LINK	instbin					bin/dd
 LINK	instbin					sbin/mount_cd9660
 LINK	instbin					sbin/dhclient
 LINK	instbin					bin/mt bin/eject
@@ -12,5 +9,4 @@ LINK	instbin					sbin/bioctl
 COPY	${DESTDIR}/etc/firmware/kue		etc/firmware/kue
 COPY	${DESTDIR}/etc/firmware/3c990		etc/firmware/3c990
 
-HASH	var/hash
 TZ

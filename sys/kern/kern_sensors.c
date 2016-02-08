@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_sensors.c,v 1.25 2013/03/28 16:58:45 deraadt Exp $	*/
+/*	$OpenBSD: kern_sensors.c,v 1.27 2013/12/09 17:39:08 mikeb Exp $	*/
 
 /*
  * Copyright (c) 2005 David Gwynne <dlg@openbsd.org>
@@ -26,11 +26,13 @@
 #include <sys/device.h>
 #include <sys/hotplug.h>
 #include <sys/timeout.h>
-#include <sys/workq.h>
+#include <sys/task.h>
+#include <sys/rwlock.h>
 
 #include <sys/sensors.h>
 #include "hotplug.h"
 
+struct taskq		*sensors_taskq;
 int			sensordev_count;
 SLIST_HEAD(, ksensordev) sensordev_list =
     SLIST_HEAD_INITIALIZER(sensordev_list);
@@ -172,24 +174,28 @@ struct sensor_task {
 	void				(*func)(void *);
 	void				*arg;
 
-	int				period;
+	unsigned int			period;
 	struct timeout			timeout;
-	volatile enum {
-		ST_TICKING,
-		ST_WORKQ,
-		ST_RUNNING,
-		ST_DYING,
-		ST_DEAD
-	}				state;
+	struct task			task;
+	struct rwlock			lock;
 };
 
 void	sensor_task_tick(void *);
 void	sensor_task_work(void *, void *);
 
 struct sensor_task *
-sensor_task_register(void *arg, void (*func)(void *), int period)
+sensor_task_register(void *arg, void (*func)(void *), unsigned int period)
 {
 	struct sensor_task *st;
+
+#ifdef DIAGNOSTIC
+	if (period == 0)
+		panic("sensor_task_register: period is 0");
+#endif
+
+	if (sensors_taskq == NULL &&
+	    (sensors_taskq = taskq_create("sensors", 1, IPL_HIGH)) == NULL)
+		sensors_taskq = systq;
 
 	st = malloc(sizeof(struct sensor_task), M_DEVBUF, M_NOWAIT);
 	if (st == NULL)
@@ -199,6 +205,8 @@ sensor_task_register(void *arg, void (*func)(void *), int period)
 	st->arg = arg;
 	st->period = period;
 	timeout_set(&st->timeout, sensor_task_tick, st);
+	task_set(&st->task, sensor_task_work, st, NULL);
+	rw_init(&st->lock, "sensor");
 
 	sensor_task_tick(st);
 
@@ -208,59 +216,39 @@ sensor_task_register(void *arg, void (*func)(void *), int period)
 void
 sensor_task_unregister(struct sensor_task *st)
 {
-	timeout_del(&st->timeout);
+	/*
+	 * we can't reliably timeout_del or task_del because there's a window
+	 * between when they come off the lists and the timeout or task code
+	 * actually runs the respective handlers for them. mark the sensor_task
+	 * as dying by setting period to 0 and let sensor_task_work mop up.
+	 */
 
-	switch (st->state) {
-	case ST_TICKING:
-		free(st, M_DEVBUF);
-		break;
-
-	case ST_WORKQ:
-		st->state = ST_DYING;
-		break;
-
-	case ST_RUNNING:
-		st->state = ST_DYING;
-		while (st->state != ST_DEAD)
-			tsleep(st, 0, "stunr", 0);
-		free(st, M_DEVBUF);
-		break;
-	default:
-		panic("sensor_task_unregister: unexpected state %d",
-		    st->state);
-	}
+	rw_enter_write(&st->lock);
+	st->period = 0;
+	rw_exit_write(&st->lock);
 }
 
 void
 sensor_task_tick(void *arg)
 {
 	struct sensor_task *st = arg;
-
-	/* try to schedule the task */
-	if (workq_add_task(NULL, 0, sensor_task_work, st, NULL) != 0)
-		timeout_add_msec(&st->timeout, 500);
-
-	st->state = ST_WORKQ;
+	task_add(sensors_taskq, &st->task);
 }
 
 void
 sensor_task_work(void *xst, void *arg)
 {
 	struct sensor_task *st = xst;
+	unsigned int period = 0;
 
-	if (st->state == ST_DYING) {
+	rw_enter_write(&st->lock);
+	period = st->period;
+	if (period > 0)
+		st->func(st->arg);
+	rw_exit_write(&st->lock);
+
+	if (period == 0)
 		free(st, M_DEVBUF);
-		return;
-	}
-
-	st->state = ST_RUNNING;
-	st->func(st->arg);
-
-	if (st->state == ST_DYING) {
-		st->state = ST_DEAD;
-		wakeup(st);
-	} else {
-		st->state = ST_TICKING;
-		timeout_add_sec(&st->timeout, st->period);
-	}
+	else 
+		timeout_add_sec(&st->timeout, period);
 }

@@ -1,4 +1,4 @@
-/*	$OpenBSD: theo.c,v 1.125 2013/05/30 20:15:40 florian Exp $	*/
+/*	$OpenBSD: theo.c,v 1.130 2014/01/21 22:25:56 henning Exp $	*/
 /*
  * Copyright (c) 2002 Artur Grabowski <art@openbsd.org>
  * All rights reserved.
@@ -167,7 +167,12 @@ static const char *talk[] = {
 	"if you assign that responsibility to non-hikers I will walk over and cripple you now.",
 	"i ojbect two yoru splelng of achlhlocis.",
 	"We have two kinds of developers - those that deal with their own shit and those that deal with other people's shit.",
-	"If people keep adding such huge stuff, soon mg will be bigger than emacs."
+	"If people keep adding such huge stuff, soon mg will be bigger than emacs.",
+	"this change comes down to: This year, next year, 5 years from now, 10 years from now, or Oh fuck.",
+	"backwards compatibility is king, and will remain king, until 2038.",
+	"I don't know if the Internet's safe yet.",
+	"Those who don't understand Unix are condemned to reinvent Multics in a browser",
+	"Don't tell anybody I said that."
 };
 
 static const int ntalk = sizeof(talk)/sizeof(talk[0]);

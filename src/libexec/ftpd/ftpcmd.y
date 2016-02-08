@@ -1,4 +1,4 @@
-/*	$OpenBSD: ftpcmd.y,v 1.54 2012/03/04 04:05:15 fgsch Exp $	*/
+/*	$OpenBSD: ftpcmd.y,v 1.56 2014/02/08 13:31:51 millert Exp $	*/
 /*	$NetBSD: ftpcmd.y,v 1.7 1996/04/08 19:03:11 jtc Exp $	*/
 
 /*
@@ -59,6 +59,7 @@
 #include <time.h>
 #include <unistd.h>
 #include <netdb.h>
+#include <limits.h>
 
 #include "monitor.h"
 #include "extern.h"
@@ -97,6 +98,7 @@ char	*fromname;
 
 %union {
 	int	i;
+	off_t	o;
 	char   *s;
 }
 
@@ -122,11 +124,13 @@ char	*fromname;
 
 %token	<s> STRING
 %token	<i> NUMBER
+%token	<o> BIGNUM
 
 %type	<i> check_login check_login_epsvall octal_number byte_size
 %type	<i> struct_code mode_code type_code form_code
-%type	<s> pathstring pathname password username
 %type	<i> host_port host_long_port4 host_long_port6
+%type	<o> file_size
+%type	<s> pathstring pathname password username
 
 %start	cmd_list
 
@@ -656,16 +660,16 @@ rcmd
 			}
 		}
 
-	| REST check_login SP byte_size CRLF
+	| REST check_login SP file_size CRLF
 		{
 			if ($2) {
 				if (fromname) {
 					free(fromname);
 					fromname = NULL;
 				}
-				restart_point = $4;	/* XXX $4 is only "int" */
-				reply(350, "Restarting at %qd. %s",
-				    restart_point,
+				restart_point = $4;
+				reply(350, "Restarting at %lld. %s",
+				    (long long)restart_point,
 				    "Send STORE or RETRIEVE to initiate transfer.");
 			}
 		}
@@ -685,6 +689,17 @@ password
 
 byte_size
 	: NUMBER
+	;
+
+file_size
+	: NUMBER
+		{
+			$$ = $1;
+		}
+	| BIGNUM
+		{
+			$$ = $1;
+		}
 	;
 
 host_port
@@ -1312,9 +1327,9 @@ yylex()
 				cpos++;
 				return (SP);
 			}
-			if (isdigit(cbuf[cpos])) {
+			if (isdigit((unsigned char)cbuf[cpos])) {
 				cp = &cbuf[cpos];
-				while (isdigit(cbuf[++cpos]))
+				while (isdigit((unsigned char)cbuf[++cpos]))
 					;
 				c = cbuf[cpos];
 				cbuf[cpos] = '\0';
@@ -1327,18 +1342,27 @@ yylex()
 			goto dostr1;
 
 		case ARGS:
-			if (isdigit(cbuf[cpos])) {
+			if (isdigit((unsigned char)cbuf[cpos])) {
+				long long llval;
+
 				cp = &cbuf[cpos];
-				while (isdigit(cbuf[++cpos]))
-					;
-				c = cbuf[cpos];
-				cbuf[cpos] = '\0';
-				yylval.i = atoi(cp);
-				cbuf[cpos] = c;
-				return (NUMBER);
+				errno = 0;
+				llval = strtoll(cp, &cp2, 10);
+				if (llval < 0 ||
+				    (errno == ERANGE && llval == LLONG_MAX))
+					break;
+
+				cpos = (int)(cp2 - cbuf);
+				if (llval > INT_MAX) {
+					yylval.o = llval;
+					return (BIGNUM);
+				} else {
+					yylval.i = (int)llval;
+					return (NUMBER);
+				}
 			}
 			if (strncasecmp(&cbuf[cpos], "ALL", 3) == 0 &&
-			    !isalnum(cbuf[cpos + 3])) {
+			    !isalnum((unsigned char)cbuf[cpos + 3])) {
 				cpos += 3;
 				return ALL;
 			}
@@ -1420,8 +1444,8 @@ upper(s)
 	char *p;
 
 	for (p = s; *p; p++) {
-		if (islower(*p))
-			*p = (char)toupper(*p);
+		if (islower((unsigned char)*p))
+			*p = (char)toupper((unsigned char)*p);
 	}
 }
 
@@ -1501,7 +1525,7 @@ sizecmd(filename)
 		if (stat(filename, &stbuf) < 0 || !S_ISREG(stbuf.st_mode))
 			reply(550, "%s: not a plain file.", filename);
 		else
-			reply(213, "%qu", stbuf.st_size);
+			reply(213, "%lld", (long long)stbuf.st_size);
 		break; }
 	case TYPE_A: {
 		FILE *fin;
@@ -1532,7 +1556,7 @@ sizecmd(filename)
 		}
 		(void) fclose(fin);
 
-		reply(213, "%qd", count);
+		reply(213, "%lld", (long long)count);
 		break; }
 	default:
 		reply(504, "SIZE not implemented for Type %c.", "?AEIL"[type]);

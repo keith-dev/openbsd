@@ -1,4 +1,4 @@
-/*	$OpenBSD: rt2661.c,v 1.68 2012/08/23 10:34:25 stsp Exp $	*/
+/*	$OpenBSD: rt2661.c,v 1.70 2013/12/06 21:03:03 deraadt Exp $	*/
 
 /*-
  * Copyright (c) 2006
@@ -51,7 +51,6 @@
 
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
-#include <netinet/in_var.h>
 #include <netinet/if_ether.h>
 #include <netinet/ip.h>
 
@@ -420,7 +419,7 @@ rt2661_suspend(void *xsc)
 }
 
 void
-rt2661_resume(void *xsc)
+rt2661_wakeup(void *xsc)
 {
 	struct rt2661_softc *sc = xsc;
 	struct ifnet *ifp = &sc->sc_ic.ic_if;

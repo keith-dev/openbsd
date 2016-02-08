@@ -1,4 +1,4 @@
-/*	$OpenBSD: xl.c,v 1.109 2013/03/14 01:42:45 brad Exp $	*/
+/*	$OpenBSD: xl.c,v 1.112 2013/12/28 03:35:01 deraadt Exp $	*/
 
 /*
  * Copyright (c) 1997, 1998, 1999
@@ -122,7 +122,6 @@
 #ifdef INET
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
-#include <netinet/in_var.h>
 #include <netinet/ip.h>
 #include <netinet/if_ether.h>
 #endif
@@ -204,9 +203,6 @@ xl_activate(struct device *self, int act)
 	int rv = 0;
 
 	switch (act) {
-	case DVACT_QUIESCE:
-		rv = config_activate_children(self, act);
-		break;
 	case DVACT_SUSPEND:
 		if (ifp->if_flags & IFF_RUNNING) {
 			xl_reset(sc);
@@ -214,17 +210,19 @@ xl_activate(struct device *self, int act)
 		}
 		rv = config_activate_children(self, act);
 		break;
+	case DVACT_RESUME:
+		xl_reset(sc);
+		if (ifp->if_flags & IFF_UP)
+			xl_init(sc);
+		break;
 	case DVACT_POWERDOWN:
 		rv = config_activate_children(self, act);
 #ifndef SMALL_KERNEL
 		xl_wol_power(sc);
 #endif
 		break;
-	case DVACT_RESUME:
-		xl_reset(sc);
+	default:
 		rv = config_activate_children(self, act);
-		if (ifp->if_flags & IFF_UP)
-			xl_init(sc);
 		break;
 	}
 	return (rv);

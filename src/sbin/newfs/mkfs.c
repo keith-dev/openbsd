@@ -1,4 +1,4 @@
-/*	$OpenBSD: mkfs.c,v 1.78 2013/06/11 16:42:05 deraadt Exp $	*/
+/*	$OpenBSD: mkfs.c,v 1.85 2014/01/24 22:29:21 miod Exp $	*/
 /*	$NetBSD: mkfs.c,v 1.25 1995/06/18 21:35:38 cgd Exp $	*/
 
 /*
@@ -40,7 +40,6 @@
  */
 
 #include <sys/param.h>
-#include <machine/vmparam.h>
 #include <sys/time.h>
 #include <sys/disklabel.h>
 #include <sys/ioctl.h>
@@ -86,7 +85,7 @@
 extern int	mfs;		/* run as the memory based filesystem */
 extern int	Nflag;		/* run mkfs without writing file system */
 extern int	Oflag;		/* format as an 4.3BSD file system */
-extern daddr_t fssize;	/* file system size */
+extern daddr_t fssize;		/* file system size in 512-byte blocks. */
 extern long long	sectorsize;	/* bytes/sector */
 extern int	fsize;		/* fragment size */
 extern int	bsize;		/* block size */
@@ -144,6 +143,7 @@ static		void checksz(void);
 #ifndef STANDALONE
 volatile sig_atomic_t cur_cylno;
 volatile const char *cur_fsys;
+void	siginfo(int sig);
 
 void
 siginfo(int sig)
@@ -195,10 +195,11 @@ mkfs(struct partition *pp, char *fsys, int fi, int fo, mode_t mfsmode,
 	 * Verify that its last block can actually be accessed.
 	 */
 	if (Oflag <= 1 && fssize > INT_MAX)
-		errx(13, "preposterous size %lld, max is %d", fssize, INT_MAX);
+		errx(13, "preposterous size %lld, max is %d", (long long)fssize,
+		    INT_MAX);
 	if (Oflag == 2 && fssize > MAXDISKSIZE)
-		errx(13, "preposterous size %lld, max is %lld", fssize,
-		    MAXDISKSIZE);
+		errx(13, "preposterous size %lld, max is %lld",
+		    (long long)fssize, MAXDISKSIZE);
 
 	wtfs(fssize - (sectorsize / DEV_BSIZE), sectorsize, (char *)&sblock);
 
@@ -405,7 +406,7 @@ mkfs(struct partition *pp, char *fsys, int fi, int fo, mode_t mfsmode,
 		    sblock.fs_ipg / INOPF(&sblock), sblock.fs_frag);
 		if (sblock.fs_size < lastminfpg)
 			errx(28, "file system size %jd < minimum size of %d "
-			    "sectors", (intmax_t)sblock.fs_size, lastminfpg);
+			    "fragments", (intmax_t)sblock.fs_size, lastminfpg);
 
 		if (sblock.fs_size % sblock.fs_fpg >= lastminfpg ||
 		    sblock.fs_size % sblock.fs_fpg == 0)
@@ -490,7 +491,8 @@ mkfs(struct partition *pp, char *fsys, int fi, int fo, mode_t mfsmode,
 #define B2MBFACTOR (1 / (1024.0 * 1024.0))
 		printf("%s: %.1fMB in %jd sectors of %lld bytes\n", fsys,
 		    (float)sblock.fs_size * sblock.fs_fsize * B2MBFACTOR,
-		    (intmax_t)fsbtodb(&sblock, sblock.fs_size), sectorsize);
+		    (intmax_t)fsbtodb(&sblock, sblock.fs_size) /
+		    (sectorsize / DEV_BSIZE), sectorsize);
 		printf("%d cylinder groups of %.2fMB, %d blocks, %d"
 		    " inodes each\n", sblock.fs_ncg,
 		    (float)sblock.fs_fpg * sblock.fs_fsize * B2MBFACTOR,
@@ -557,7 +559,7 @@ mkfs(struct partition *pp, char *fsys, int fi, int fo, mode_t mfsmode,
 		if (quiet)
 			continue;
 		j = snprintf(tmpbuf, sizeof tmpbuf, " %lld,",
-		    fsbtodb(&sblock, cgsblock(&sblock, cylno)));
+		    (long long)fsbtodb(&sblock, cgsblock(&sblock, cylno)));
 		if (j >= sizeof tmpbuf)
 			j = sizeof tmpbuf - 1;
 		if (j == -1 || i+j >= width) {
@@ -625,7 +627,7 @@ initcg(int cylno, time_t utime)
 	dmax = cbase + sblock.fs_fpg;
 	if (dmax > sblock.fs_size)
 		dmax = sblock.fs_size;
-	if (fsbtodb(&sblock, cgsblock(&sblock, cylno)) + iobufsize / sectorsize
+	if (fsbtodb(&sblock, cgsblock(&sblock, cylno)) + iobufsize / DEV_BSIZE 
 	    > fssize)
 		errx(40, "inode table does not fit in cylinder group");
 
@@ -1014,7 +1016,7 @@ rdfs(daddr_t bno, int size, void *bf)
 	}
 	n = pread(fsi, bf, size, (off_t)bno * DEV_BSIZE);
 	if (n != size) {
-		err(34, "rdfs: read error on block %lld", bno);
+		err(34, "rdfs: read error on block %lld", (long long)bno);
 	}
 }
 
@@ -1034,7 +1036,7 @@ wtfs(daddr_t bno, int size, void *bf)
 		return;
 	n = pwrite(fso, bf, size, (off_t)bno * DEV_BSIZE);
 	if (n != size) {
-		err(36, "wtfs: write error on block %lld", bno);
+		err(36, "wtfs: write error on block %lld", (long long)bno);
 	}
 }
 
@@ -1168,7 +1170,7 @@ struct inoinfo {
   
         ino_t   i_dotdot;               /* inode number of `..' */
         u_int   i_numblks;              /* size of block array in bytes */
-        daddr_t       i_blks[1];              /* actually longer */
+        daddr_t i_blks[1];              /* actually longer */
 };
 
 static void

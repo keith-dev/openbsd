@@ -1,4 +1,4 @@
-.\"	$OpenBSD: exports.5,v 1.16 2010/03/26 19:30:40 jmc Exp $
+.\"	$OpenBSD: exports.5,v 1.19 2014/02/13 10:20:13 schwarze Exp $
 .\"	$NetBSD: exports.5,v 1.9 1996/02/18 11:57:50 fvdl Exp $
 .\"
 .\" Copyright (c) 1989, 1991, 1993
@@ -30,24 +30,19 @@
 .\"
 .\"     @(#)exports.5	8.3 (Berkeley) 3/29/95
 .\"
-.Dd $Mdocdate: March 26 2010 $
+.Dd $Mdocdate: February 13 2014 $
 .Dt EXPORTS 5
 .Os
 .Sh NAME
 .Nm exports
-.Nd define remote mount points for
-.Tn NFS
-mount requests
+.Nd define remote mount points for NFS mount requests
 .Sh SYNOPSIS
 .Nm exports
 .Sh DESCRIPTION
 The
 .Nm
-file specifies remote mount points for the
-.Tn NFS
-mount protocol per the
-.Tn NFS
-server specification; see
+file specifies remote mount points for the NFS
+mount protocol per the NFS server specification; see
 .%T "Network File System Protocol Specification RFC 1094, Appendix A"
 and
 .%T "NFS: Network File System Version 3 Specification, Appendix I" .
@@ -95,16 +90,18 @@ user credentials on the server.
 Export options are specified as follows:
 .Pp
 .Sm off
-.Fl maproot No = Sy user
+.Fl maproot No = Ar user
 .Sm on
 The credential of the specified user is used for remote access by root.
 The credential includes all the groups to which the user is a member
 on the local machine (see
 .Xr id 1 ) .
-The user may be specified by name or number.
+The
+.Ar user
+may be specified by name or number.
 .Pp
 .Sm off
-.Fl maproot No = Sy user:group1:group2:...
+.Fl maproot No = Ar user:group1:group2:...
 .Sm on
 The colon separated list is used to specify the precise credential
 to be used for remote access by root.
@@ -113,11 +110,11 @@ Note that user: should be used to distinguish a credential containing
 no groups from a complete credential for that user.
 .Pp
 .Sm off
-.Fl mapall No = Sy user
+.Fl mapall No = Ar user
 .Sm on
 or
 .Sm off
-.Fl mapall No = Sy user:group1:group2:...
+.Fl mapall No = Ar user:group1:group2:...
 .Sm on
 Specifies a mapping for all client UIDs (including root)
 using the same semantics as
@@ -182,11 +179,11 @@ Using the full domain specification for a hostname can normally
 circumvent the problem of a host that has the same name as a netgroup.
 The third case is specified by the flag
 .Sm off
-.Fl network No = Sy netname
+.Fl network No = Ar netname
 .Sm on
 and optionally
 .Sm off
-.Fl mask No = Sy netmask .
+.Fl mask No = Ar netmask .
 .Sm on
 If the mask is not specified, it will default to the mask for that network
 class (A, B or C; see
@@ -203,13 +200,13 @@ For example:
 .Ed
 .Pp
 Given that
-.Sy /usr ,
-.Sy /u
+.Pa /usr ,
+.Pa /u
 and
-.Sy /u2
+.Pa /u2
 are
 local filesystem mount points, the above example specifies the following:
-.Sy /usr
+.Pa /usr
 is exported to hosts
 .Em friends
 where
@@ -234,14 +231,14 @@ it is exported to the rest of the world as read-only with
 all users mapped to the user and groups associated with
 .Dq nobody .
 .Pp
-.Sy /u
+.Pa /u
 is exported to all hosts on the subnetwork
 .Em 131.104.48
 with root mapped to the UID for
 .Dq bin
 and with no group access.
 .Pp
-.Sy /u2
+.Pa /u2
 is exported to the hosts in
 .Dq friends
 with root mapped to UID and groups
@@ -278,7 +275,7 @@ because NFS mount filehandles are filesystem wide the
 option applies to exports of the entire filesystem -- even mountpoints
 that are higher up elsewhere in the directory hierarchy.
 Hence if the server has a filesystem
-.Sy /export
+.Pa /export
 and you wished to export the sub-directory
 .Bd -literal -offset indent
 /export/root/client -alldirs client.foo.com
@@ -286,8 +283,8 @@ and you wished to export the sub-directory
 .Pp
 you must realize that this also allows mounts to be requested
 against other locations in the
-.Sy /export
+.Pa /export
 filesystem; thus the host client.foo.com is also permitted to
 mount the directory
-.Sy /export/root/client2
+.Pa /export/root/client2
 if it exists.

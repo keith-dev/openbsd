@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_bwi_pci.c,v 1.12 2010/08/08 12:02:25 mglocker Exp $ */
+/*	$OpenBSD: if_bwi_pci.c,v 1.14 2013/12/06 21:03:04 deraadt Exp $ */
 
 /*
  * Copyright (c) 2007 Marcus Glocker <mglocker@openbsd.org>
@@ -24,7 +24,6 @@
 
 #include <sys/param.h>
 #include <sys/sockio.h>
-#include <sys/workq.h>
 #include <sys/mbuf.h>
 #include <sys/kernel.h>
 #include <sys/socket.h>
@@ -62,7 +61,7 @@ int		bwi_pci_detach(struct device *, int);
 void		bwi_pci_conf_write(void *, uint32_t, uint32_t);
 uint32_t	bwi_pci_conf_read(void *, uint32_t);
 int		bwi_pci_activate(struct device *, int);
-void		bwi_pci_resume(void *, void *);
+void		bwi_pci_wakeup(struct bwi_softc *);
 
 struct bwi_pci_softc {
 	struct bwi_softc	 psc_bwi;
@@ -190,9 +189,8 @@ bwi_pci_activate(struct device *self, int act)
 		if (ifp->if_flags & IFF_RUNNING)
 			bwi_stop(sc, 1);
 		break;
-	case DVACT_RESUME:
-		workq_queue_task(NULL, &sc->sc_resume_wqt, 0,
-		    bwi_pci_resume, sc, NULL);
+	case DVACT_WAKEUP:
+		bwi_pci_wakeup(sc);
 		break;
 	}
 
@@ -200,9 +198,8 @@ bwi_pci_activate(struct device *self, int act)
 }
 
 void
-bwi_pci_resume(void *arg1, void *arg2)
+bwi_pci_wakeup(struct bwi_softc *sc)
 {
-	struct bwi_softc *sc = arg1;
 	struct ifnet *ifp = &sc->sc_ic.ic_if;
 
 	if (ifp->if_flags & IFF_UP)

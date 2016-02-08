@@ -1,4 +1,4 @@
-/*	$OpenBSD: engine.c,v 1.45 2013/05/30 08:58:38 espie Exp $ */
+/*	$OpenBSD: engine.c,v 1.47 2013/11/22 15:47:35 espie Exp $ */
 /*
  * Copyright (c) 2012 Marc Espie.
  *
@@ -763,7 +763,7 @@ do_run_command(Job *job)
 		else
 			break;
 	}
-	while (isspace(*cmd))
+	while (ISSPACE(*cmd))
 		cmd++;
 	/* Print the command before fork if make -n or !silent*/
 	if ( noExecute || !silent)
@@ -792,7 +792,7 @@ do_run_command(Job *job)
 		 */
 		if (random_delay)
 			if (!(runningJobs == NULL && no_jobs_left()))
-				usleep(random() % random_delay);
+				usleep(arc4random_uniform(random_delay));
 		run_command(cmd, errCheck);
 		/*NOTREACHED*/
 	default:

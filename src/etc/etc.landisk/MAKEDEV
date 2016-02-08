@@ -3,8 +3,8 @@
 # THIS FILE AUTOMATICALLY GENERATED.  DO NOT EDIT.
 # generated from:
 #
-#	OpenBSD: etc.landisk/MAKEDEV.md,v 1.29 2013/06/03 16:06:42 tedu Exp 
-#	OpenBSD: MAKEDEV.common,v 1.66 2013/06/21 21:30:38 syl Exp 
+#	OpenBSD: etc.landisk/MAKEDEV.md,v 1.32 2014/01/05 01:16:52 deraadt Exp 
+#	OpenBSD: MAKEDEV.common,v 1.73 2013/11/21 11:04:44 kettenis Exp 
 #	OpenBSD: MAKEDEV.mi,v 1.81 2012/11/05 08:07:09 jasper Exp 
 #	OpenBSD: MAKEDEV.sub,v 1.14 2005/02/07 06:14:18 david Exp 
 #
@@ -58,7 +58,6 @@
 #	ulpt*	Printer devices
 #	urio*	Diamond Multimedia Rio 500
 #	usb*	Bus control devices used by usbd for attach/detach
-#	uscanner*	Scanners
 # Special purpose devices:
 #	audio*	Audio devices
 #	bio	ioctl tunnel pseudo-device
@@ -208,7 +207,7 @@ U=`unt $i`
 case $i in
 ramdisk)
 	R std bpf0 wd0 wd1 sd0 tty00 rd0 wsmouse
-	R st0 ttyC0 wskbd0 apm bio diskmap
+	R st0 ttyC0 wskbd0 apm bio diskmap random
 	;;
 
 std)
@@ -326,10 +325,6 @@ audio*)
 	MKlist[${#MKlist[*]}]=";[ -e audioctl ] || ln -s audioctl$U audioctl"
 	;;
 
-uscanner*)
-	M uscanner$U c 69 $U 660
-	;;
-
 usb*)
 	[ "$i" = "usb" ] && u= || u=$U
 	M usb$u c 64 $U 660
@@ -356,9 +351,9 @@ ugen*)
 	;;
 
 uall)
-	R ttyU0 ttyU1 ttyU2 ttyU3 ugen0 ugen1 ulpt0 ulpt1 uhid0 uhid1
-	R uhid2 uhid3 uscanner0 urio0 usb0 usb1 usb2 usb3 usb4 usb5
-	R usb6 usb7
+	R ttyU0 ttyU1 ttyU2 ttyU3 ugen0 ugen1 ugen2 ugen3 ugen4 ugen5
+	R ugen6 ugen7 ulpt0 ulpt1 uhid0 uhid1 uhid2 uhid3 urio0 usb0
+	R usb1 usb2 usb3 usb4 usb5 usb6 usb7
 	;;
 
 ttyU[0-9a-zA-Z])

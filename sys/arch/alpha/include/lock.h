@@ -1,4 +1,4 @@
-/* $OpenBSD: lock.h,v 1.4 2013/05/21 20:05:30 tedu Exp $	*/
+/* $OpenBSD: lock.h,v 1.6 2014/02/01 21:18:24 miod Exp $	*/
 /* $NetBSD: lock.h,v 1.16 2001/12/17 23:34:57 thorpej Exp $ */
 
 /*-
@@ -54,13 +54,35 @@ do {									\
 	int __s;							\
 									\
 	if (__ci->ci_ipis != 0) {					\
-		/* printf("CPU %lu has IPIs pending\n",			\
-		    __ci->ci_cpuid); */					\
 		__s = splipi();						\
-		alpha_ipi_process(__ci, NULL);				\
+		alpha_ipi_process_with_frame(__ci);			\
 		splx(__s);						\
 	}								\
 } while (0)
 #endif /* MULTIPROCESSOR */
+
+#define	rw_cas	__cpu_cas
+static inline int
+__cpu_cas(volatile unsigned long *addr, unsigned long old, unsigned long new)
+{
+	unsigned long t0, v0;
+
+	__asm __volatile(
+		"1:	ldq_l	%1, 0(%2)	\n"	/* v0 = *addr */
+		"	cmpeq	%1, %3, %0	\n"	/* t0 = v0 == old */
+		"	beq	%0, 2f		\n"
+		"	mov	%4, %0		\n"	/* t0 = new */
+		"	stq_c	%0, 0(%2)	\n"	/* *addr = new */
+		"	beq	%0, 3f		\n"
+		"	mb			\n"
+		"2:	br	4f		\n"
+		"3:	br	1b		\n"	/* update failed */
+		"4:				\n"
+		: "=&r" (t0), "=&r" (v0)
+		: "r" (addr), "r" (old), "r" (new)
+		: "memory");
+
+	return (v0 != old);
+}
 
 #endif /* _MACHINE_LOCK_H_ */

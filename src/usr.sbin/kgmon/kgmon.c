@@ -1,4 +1,4 @@
-/*	$OpenBSD: kgmon.c,v 1.18 2013/03/12 09:37:16 mpi Exp $	*/
+/*	$OpenBSD: kgmon.c,v 1.20 2013/11/27 13:32:02 okan Exp $	*/
 
 /*
  * Copyright (c) 1983, 1992, 1993
@@ -75,7 +75,7 @@ int	getncpu(void);
 int
 main(int argc, char **argv)
 {
-	int ch, err, ncpu, cpuid = -1;
+	int ch, ncpu, cpuid = -1;
 	struct kvmvars kvmvars;
 	char *sys, *kmemf;
 	const char *p;
@@ -84,7 +84,7 @@ main(int argc, char **argv)
 	kmemf = NULL;
 	sys = NULL;
 	while ((ch = getopt(argc, argv, "M:N:bc:hpr")) != -1) {
-		switch((char)ch) {
+		switch(ch) {
 
 		case 'M':
 			kmemf = optarg;

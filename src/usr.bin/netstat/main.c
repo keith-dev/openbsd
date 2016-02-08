@@ -1,4 +1,4 @@
-/*	$OpenBSD: main.c,v 1.95 2013/03/20 15:23:37 deraadt Exp $	*/
+/*	$OpenBSD: main.c,v 1.100 2014/02/13 20:51:21 tedu Exp $	*/
 /*	$NetBSD: main.c,v 1.9 1996/05/07 02:55:02 thorpej Exp $	*/
 
 /*
@@ -31,7 +31,6 @@
  */
 
 #include <sys/param.h>
-#include <sys/file.h>
 #include <sys/protosw.h>
 #include <sys/socket.h>
 #include <sys/sysctl.h>
@@ -42,6 +41,7 @@
 #include <ctype.h>
 #include <err.h>
 #include <errno.h>
+#include <fcntl.h>
 #include <kvm.h>
 #include <limits.h>
 #include <netdb.h>
@@ -58,39 +58,35 @@ struct nlist nl[] = {
 	{ "_tcbtable" },
 #define N_UDBTABLE	1
 	{ "_udbtable" },
-#define N_DDPCB		2
-	{ "_ddpcb"},
-#define N_UNIXSW	3
-	{ "_unixsw" },
 
-#define N_MFCHASHTBL	4
+#define N_MFCHASHTBL	2
 	{ "_mfchashtbl" },
-#define N_MFCHASH	5
+#define N_MFCHASH	3
 	{ "_mfchash" },
-#define N_VIFTABLE	6
+#define N_VIFTABLE	4
 	{ "_viftable" },
 
-#define N_MF6CTABLE	7
+#define N_MF6CTABLE	5
 	{ "_mf6ctable" },
-#define N_MIF6TABLE	8
+#define N_MIF6TABLE	6
 	{ "_mif6table" },
 
-#define N_RTREE		9
+#define N_RTREE		7
 	{ "_rt_tables"},
-#define N_RTMASK	10
+#define N_RTMASK	8
 	{ "_mask_rnhead" },
-#define N_AF2RTAFIDX	11
+#define N_AF2RTAFIDX	9
 	{ "_af2rtafidx" },
-#define N_RTBLIDMAX	12
+#define N_RTBLIDMAX	10
 	{ "_rtbl_id_max" },
 
-#define N_RAWIPTABLE	13
+#define N_RAWIPTABLE	11
 	{ "_rawcbtable" },
-#define N_RAWIP6TABLE	14
+#define N_RAWIP6TABLE	12
 	{ "_rawin6pcbtable" },
-#define N_DIVBTABLE	15
+#define N_DIVBTABLE	13
 	{ "_divbtable" },
-#define N_DIVB6TABLE	16
+#define N_DIVB6TABLE	14
 	{ "_divb6table" },
 
 	{ "" }
@@ -162,6 +158,7 @@ main(int argc, char *argv[])
 	u_int tableid;
 	int Tflag = 0;
 	int repeatcount = 0;
+	int need_nlist;
 
 	hideroot = getuid();
 
@@ -185,6 +182,8 @@ main(int argc, char *argv[])
 			break;
 		case 'c':
 			repeatcount = strtonum(optarg, 1, INT_MAX, &errstr);
+			if (errstr)
+				errx(1, "count is %s", errstr);
 			break;
 		case 'd':
 			dflag = 1;
@@ -292,7 +291,9 @@ main(int argc, char *argv[])
 			interface = optarg;
 			break;
 		case 'w':
-			interval = atoi(optarg);
+			interval = strtonum(optarg, 1, INT_MAX, &errstr);
+			if (errstr)
+				errx(1, "interval is %s", errstr);
 			iflag = 1;
 			break;
 		case '?':
@@ -316,10 +317,10 @@ main(int argc, char *argv[])
 #define	BACKWARD_COMPATIBILITY
 #ifdef	BACKWARD_COMPATIBILITY
 	if (*argv) {
-		if (isdigit(**argv)) {
-			interval = atoi(*argv);
-			if (interval <= 0)
-				usage();
+		if (isdigit((unsigned char)**argv)) {
+			interval = strtonum(*argv, 1, INT_MAX, &errstr);
+			if (errstr)
+				errx(1, "interval is %s", errstr);
 			++argv;
 			iflag = 1;
 		}
@@ -331,6 +332,10 @@ main(int argc, char *argv[])
 	}
 #endif
 
+	need_nlist = !mflag && (pflag || nlistf != NULL || memf != NULL ||
+	    (!iflag && !sflag && (rflag ? Aflag :
+	    (gflag || af != AF_UNIX || Pflag))));
+
 	/*
 	 * Discard setgid privileges if not the running kernel so that bad
 	 * guys can't print interesting stuff from kernel memory.
@@ -341,8 +346,8 @@ main(int argc, char *argv[])
 		if (setresgid(gid, gid, gid) == -1)
 			err(1, "setresgid");
 
-	if ((kvmd = kvm_openfiles(nlistf, memf, NULL, O_RDONLY,
-	    buf)) == NULL) {
+	if ((kvmd = kvm_openfiles(nlistf, memf, NULL, O_RDONLY |
+	    (need_nlist ? 0 : KVM_NO_FILES), buf)) == NULL) {
 		fprintf(stderr, "%s: kvm_openfiles: %s\n", __progname, buf);
 		exit(1);
 	}
@@ -351,7 +356,7 @@ main(int argc, char *argv[])
 		if (setresgid(gid, gid, gid) == -1)
 			err(1, "setresgid");
 
-	if (kvm_nlist(kvmd, nl) < 0 || nl[0].n_type == 0) {
+	if (need_nlist && (kvm_nlist(kvmd, nl) < 0 || nl[0].n_type == 0)) {
 		if (nlistf)
 			fprintf(stderr, "%s: %s: no namelist\n", __progname,
 			    nlistf);
@@ -429,7 +434,7 @@ main(int argc, char *argv[])
 			printproto(tp, tp->pr_name, AF_INET6, tableid,
 			    pcbaddr);
 	if ((af == AF_UNIX || af == AF_UNSPEC) && !sflag)
-		unixpr(nl[N_UNIXSW].n_value, pcbaddr);
+		unixpr(kvmd, pcbaddr);
 	exit(0);
 }
 
@@ -566,7 +571,7 @@ gettable(const char *s)
 
 	len = sizeof(info);
 	if (sysctl(mib, 6, &info, &len, NULL, 0) == -1)
-		err(1, "routing table %i", tableid);
+		err(1, "routing table %d", tableid);
 
 	return (tableid);
 }

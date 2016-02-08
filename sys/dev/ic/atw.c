@@ -1,4 +1,4 @@
-/*	$OpenBSD: atw.c,v 1.76 2011/04/05 19:54:35 jasper Exp $	*/
+/*	$OpenBSD: atw.c,v 1.80 2013/12/06 21:03:02 deraadt Exp $	*/
 /*	$NetBSD: atw.c,v 1.69 2004/07/23 07:07:55 dyoung Exp $	*/
 
 /*-
@@ -2028,7 +2028,7 @@ void
 atw_filter_setup(struct atw_softc *sc)
 {
 	struct ieee80211com *ic = &sc->sc_ic;
-	struct arpcom *ec = &ic->ic_ac;
+	struct arpcom *ac = &ic->ic_ac;
 	struct ifnet *ifp = &sc->sc_ic.ic_if;
 	int hash;
 	u_int32_t hashes[2];
@@ -2056,15 +2056,14 @@ atw_filter_setup(struct atw_softc *sc)
 
 	hashes[0] = hashes[1] = 0x0;
 
+	if (ac->ac_multirangecnt > 0)
+		goto allmulti;
+
 	/*
 	 * Program the 64-bit multicast hash filter.
 	 */
-	ETHER_FIRST_MULTI(step, ec, enm);
+	ETHER_FIRST_MULTI(step, ac, enm);
 	while (enm != NULL) {
-		if (memcmp(enm->enm_addrlo, enm->enm_addrhi,
-		    ETHER_ADDR_LEN) != 0)
-			goto allmulti;
-
 		hash = atw_calchash(enm->enm_addrlo);
 		hashes[hash >> 5] |= 1 << (hash & 0x1f);
 		ETHER_NEXT_MULTI(step, enm);
@@ -3016,6 +3015,7 @@ atw_linkintr(struct atw_softc *sc, u_int32_t linkstatus)
 	}
 }
 
+#if 0
 static __inline int
 atw_hw_decrypted(struct atw_softc *sc, struct ieee80211_frame *wh)
 {
@@ -3025,6 +3025,7 @@ atw_hw_decrypted(struct atw_softc *sc, struct ieee80211_frame *wh)
 		return 0;
 	return (sc->sc_wepctl & ATW_WEPCTL_WEPRXBYP) == 0;
 }
+#endif
 
 /*
  * atw_rxintr:
@@ -3984,18 +3985,16 @@ atw_activate(struct device *self, int act)
 		if (sc->sc_power != NULL)
 			(*sc->sc_power)(sc, act);
 		break;
-	case DVACT_RESUME:
-		workq_queue_task(NULL, &sc->sc_resume_wqt, 0,
-		    atw_resume, sc, NULL);
+	case DVACT_WAKEUP:
+		atw_wakeup(sc);
 		break;
 	}
 	return 0;
 }
 
 void
-atw_resume(void *arg1, void *arg2)
+atw_wakeup(struct atw_softc *sc)
 {
-	struct atw_softc *sc = (struct atw_softc *)arg1;
 	struct ifnet *ifp = &sc->sc_ic.ic_if;
 
 	if (sc->sc_power != NULL)

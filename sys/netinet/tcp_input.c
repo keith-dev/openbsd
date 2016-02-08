@@ -1,4 +1,4 @@
-/*	$OpenBSD: tcp_input.c,v 1.265 2013/07/01 10:53:52 bluhm Exp $	*/
+/*	$OpenBSD: tcp_input.c,v 1.272 2014/01/24 18:54:58 henning Exp $	*/
 /*	$NetBSD: tcp_input.c,v 1.23 1996/02/13 23:43:44 christos Exp $	*/
 
 /*
@@ -148,7 +148,8 @@ struct timeval tcp_ackdrop_ppslim_last;
 do { \
 	if (tp && tp->t_inpcb && (tp->t_inpcb->inp_flags & INP_IPV6) && \
 	    tp->t_inpcb->inp_route6.ro_rt) { \
-		nd6_nud_hint(tp->t_inpcb->inp_route6.ro_rt, NULL, 0); \
+		nd6_nud_hint(tp->t_inpcb->inp_route6.ro_rt, NULL, 0, \
+		    tp->t_inpcb->inp_rtableid); \
 	} \
 } while (0)
 #else
@@ -378,7 +379,7 @@ tcp_input(struct mbuf *m, ...)
 	struct m_tag *mtag;
 	struct tdb_ident *tdbi;
 	struct tdb *tdb;
-	int error, s;
+	int error;
 #endif /* IPSEC */
 	int af;
 #ifdef TCP_ECN
@@ -513,10 +514,10 @@ tcp_input(struct mbuf *m, ...)
 		int sum;
 
 		if (m->m_pkthdr.csum_flags & M_TCP_CSUM_IN_BAD) {
-			tcpstat.tcps_inhwcsum++;
 			tcpstat.tcps_rcvbadsum++;
 			goto drop;
 		}
+		tcpstat.tcps_inswcsum++;
 		switch (af) {
 		case AF_INET:
 			sum = in4_cksum(m, IPPROTO_TCP, iphlen, tlen);
@@ -532,9 +533,6 @@ tcp_input(struct mbuf *m, ...)
 			tcpstat.tcps_rcvbadsum++;
 			goto drop;
 		}
-	} else {
-		m->m_pkthdr.csum_flags &= ~M_TCP_CSUM_IN_OK;
-		tcpstat.tcps_inhwcsum++;
 	}
 
 	/*
@@ -596,7 +594,8 @@ findpcb:
 #ifdef INET6
 		case AF_INET6:
 			inp = in6_pcbhashlookup(&tcbtable, &ip6->ip6_src,
-			    th->th_sport, &ip6->ip6_dst, th->th_dport);
+			    th->th_sport, &ip6->ip6_dst, th->th_dport,
+			    m->m_pkthdr.rdomain);
 			break;
 #endif
 		case AF_INET:
@@ -621,7 +620,8 @@ findpcb:
 #ifdef INET6
 		case AF_INET6:
 			inp = in6_pcblookup_listen(&tcbtable,
-			    &ip6->ip6_dst, th->th_dport, inpl_reverse, m);
+			    &ip6->ip6_dst, th->th_dport, inpl_reverse, m,
+			    m->m_pkthdr.rdomain);
 			break;
 #endif /* INET6 */
 		case AF_INET:
@@ -641,6 +641,8 @@ findpcb:
 			goto dropwithreset_ratelim;
 		}
 	}
+	KASSERT(sotoinpcb(inp->inp_socket) == inp);
+	KASSERT(intotcpcb(inp)->t_inpcb == inp);
 
 	/* Check the minimum TTL for socket. */
 	if (inp->inp_ip_minttl && inp->inp_ip_minttl > ip->ip_ttl)
@@ -886,7 +888,6 @@ findpcb:
 #ifdef IPSEC
 	/* Find most recent IPsec tag */
 	mtag = m_tag_find(m, PACKET_TAG_IPSEC_IN_DONE, NULL);
-        s = splnet();
 	if (mtag != NULL) {
 		tdbi = (struct tdb_ident *)(mtag + 1);
 	        tdb = gettdb(tdbi->rdomain, tdbi->spi,
@@ -897,7 +898,6 @@ findpcb:
 	    tdb, inp, 0);
 	if (error) {
 		tcpstat.tcps_rcvnosec++;
-		splx(s);
 		goto drop;
 	}
 
@@ -909,7 +909,6 @@ findpcb:
 				inp->inp_ipo = ipsec_add_policy(inp, af,
 				    IPSP_DIRECTION_OUT);
 				if (inp->inp_ipo == NULL) {
-					splx(s);
 					goto drop;
 				}
 			}
@@ -936,7 +935,6 @@ findpcb:
 			inp->inp_tdb_in = NULL;
 		}
 	}
-        splx(s);
 #endif /* IPSEC */
 
 	/*
@@ -969,7 +967,7 @@ findpcb:
 
 		/* subtract out the tcp timestamp modulator */
 		opti.ts_ecr -= tp->ts_modulate;
-                                                     
+
 		/* make sure ts_ecr is sensible */
 		rtt_test = tcp_now - opti.ts_ecr;
 		if (rtt_test < 0 || rtt_test > TCP_RTT_MAX)
@@ -3773,7 +3771,7 @@ syn_cache_get(struct sockaddr *src, struct sockaddr *dst, struct tcphdr *th,
 	case AF_INET:
 
 		inp->inp_laddr = ((struct sockaddr_in *)dst)->sin_addr;
-		inp->inp_options = ip_srcroute();
+		inp->inp_options = ip_srcroute(m);
 		if (inp->inp_options == NULL) {
 			inp->inp_options = sc->sc_ipopts;
 			sc->sc_ipopts = NULL;
@@ -4047,7 +4045,7 @@ syn_cache_add(struct sockaddr *src, struct sockaddr *dst, struct tcphdr *th,
 		/*
 		 * Remember the IP options, if any.
 		 */
-		ipopts = ip_srcroute();
+		ipopts = ip_srcroute(m);
 		break;
 #endif
 	default:

@@ -1,4 +1,4 @@
-/*	$OpenBSD: auth_subr.c,v 1.37 2013/01/08 02:26:09 deraadt Exp $	*/
+/*	$OpenBSD: auth_subr.c,v 1.39 2013/11/24 23:51:29 deraadt Exp $	*/
 
 /*
  * Copyright (c) 2000-2002,2004 Todd C. Miller <Todd.Miller@courtesan.com>
@@ -49,7 +49,7 @@
  *
  *	BSDI $From: auth_subr.c,v 2.4 1999/09/08 04:10:40 prb Exp $
  */
-#include <sys/param.h>
+
 #include <sys/time.h>
 #include <sys/resource.h>
 #include <sys/socket.h>
@@ -59,6 +59,7 @@
 #include <err.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <limits.h>
 #include <paths.h>
 #include <pwd.h>
 #include <stdarg.h>
@@ -304,7 +305,7 @@ auth_close(auth_session_t *as)
 char *
 auth_challenge(auth_session_t *as)
 {
-	char path[MAXPATHLEN];
+	char path[PATH_MAX];
 	int len;
 
 	if (as == NULL || as->style == NULL || as->name == NULL)
@@ -345,18 +346,20 @@ auth_setenv(auth_session_t *as)
 	 */
     	for (line = as->spool; line < as->spool + as->index;) {
 		if (!strncasecmp(line, BI_SETENV, sizeof(BI_SETENV)-1)) {
-			if (isblank(line[sizeof(BI_SETENV) - 1])) {
+			if (isblank((unsigned char)line[sizeof(BI_SETENV) - 1])) {
 				/* only do it once! */
 				line[0] = 'd'; line[1] = 'i'; line[2] = 'd';
 				line += sizeof(BI_SETENV) - 1;
-				for (name = line; isblank(*name); ++name)
+				for (name = line;
+				    isblank((unsigned char)*name); ++name)
 					;
-				for (line = name; *line && !isblank(*line);
+				for (line = name;
+				    *line && !isblank((unsigned char)*line);
 				    ++line)
 					;
 				if (*line)
 					*line++ = '\0';
-				for (; isblank(*line); ++line)
+				for (; isblank((unsigned char)*line); ++line)
 					;
 				if (*line != '\0' && setenv(name, line, 1))
 					_warn("setenv(%s, %s)", name, line);
@@ -367,9 +370,11 @@ auth_setenv(auth_session_t *as)
 				/* only do it once! */
 				line[2] = 'd'; line[3] = 'i'; line[4] = 'd';
 				line += sizeof(BI_UNSETENV) - 1;
-				for (name = line; isblank(*name); ++name)
+				for (name = line;
+				    isblank((unsigned char)*name); ++name)
 					;
-				for (line = name; *line && !isblank(*line);
+				for (line = name;
+				    *line && !isblank((unsigned char)*line);
 				    ++line)
 					;
 				if (*line)
@@ -390,14 +395,14 @@ auth_clrenv(auth_session_t *as)
 {
 	char *line;
 
-    	for (line = as->spool; line < as->spool + as->index;) {
+	for (line = as->spool; line < as->spool + as->index;) {
 		if (!strncasecmp(line, BI_SETENV, sizeof(BI_SETENV)-1)) {
-			if (isblank(line[sizeof(BI_SETENV) - 1])) {
+			if (isblank((unsigned char)line[sizeof(BI_SETENV) - 1])) {
 				line[0] = 'i'; line[1] = 'g'; line[2] = 'n';
 			}
 		} else
 		if (!strncasecmp(line, BI_UNSETENV, sizeof(BI_UNSETENV)-1)) {
-			if (isblank(line[sizeof(BI_UNSETENV) - 1])) {
+			if (isblank((unsigned char)line[sizeof(BI_UNSETENV) - 1])) {
 				line[2] = 'i'; line[3] = 'g'; line[4] = 'n';
 			}
 		}
@@ -660,17 +665,17 @@ auth_getvalue(auth_session_t *as, char *what)
 			goto next;
 		line += sizeof(BI_VALUE) - 1;
 
-		if (!isblank(*line))
+		if (!isblank((unsigned char)*line))
 			goto next;
 
-		while (isblank(*++line))
+		while (isblank((unsigned char)*++line))
 			;
 
 		if (strncmp(line, what, len) != 0 ||
-		    !isblank(line[len]))
+		    !isblank((unsigned char)line[len]))
 			goto next;
 		line += len;
-		while (isblank(*++line))
+		while (isblank((unsigned char)*++line))
 			;
 		value = strdup(line);
 		if (value == NULL)
@@ -696,12 +701,12 @@ auth_getvalue(auth_session_t *as, char *what)
 				case '3': case '4': case '5':
 				case '6': case '7':
 					n = *line - '0';
-					if (isdigit(line[1])) {
+					if (isdigit((unsigned char)line[1])) {
 						++line;
 						n <<= 3;
 						n |= *line-'0';
 					}
-					if (isdigit(line[1])) {
+					if (isdigit((unsigned char)line[1])) {
 						++line;
 						n <<= 3;
 						n |= *line-'0';

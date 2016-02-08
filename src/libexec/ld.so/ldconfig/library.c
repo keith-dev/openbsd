@@ -1,4 +1,4 @@
-/* $OpenBSD: library.c,v 1.4 2013/03/20 21:49:59 kurt Exp $ */
+/* $OpenBSD: library.c,v 1.6 2013/12/03 01:47:06 deraadt Exp $ */
 /*
  * Copyright (c) 2006 Dale Rahn <drahn@dalerahn.com>
  *
@@ -17,9 +17,9 @@
 
 #include <sys/types.h>
 #include <sys/stat.h>
-#include <sys/syslimits.h>
 #include <sys/param.h>
 #include <sys/mman.h>
+#include <limits.h>
 #include <fcntl.h>
 #include <nlist.h>
 #include <elf_abi.h>
@@ -34,13 +34,14 @@
 #include "prebind.h"
 #include "prebind_struct.h"
 
-char * _dl_default_path[2] = { "/usr/lib", NULL };
+char *_dl_default_path[2] = { "/usr/lib", NULL };
 
-elf_object_t * elf_load_shlib_hint(struct sod *sod, struct sod *req_sod,
-    int ignore_hints, char **libpath);
-char * elf_find_shlib(struct sod *sodp, char **searchpath, int nohints);
+elf_object_t *elf_load_shlib_hint(struct sod *sod, struct sod *req_sod,
+	    int ignore_hints, char **libpath);
+char	 *elf_find_shlib(struct sod *sodp, char **searchpath, int nohints);
 elf_object_t * elf_tryload_shlib(const char *libname);
-int elf_match_file(struct sod *sodp, char *name, int namelen);
+int	elf_match_file(struct sod *sodp, char *name, int namelen);
+int	load_lib(const char *, struct elf_object *);
 
 int
 load_lib(const char *name, struct elf_object *parent)

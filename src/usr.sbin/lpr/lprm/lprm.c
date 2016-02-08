@@ -1,4 +1,4 @@
-/*	$OpenBSD: lprm.c,v 1.18 2009/10/27 23:59:52 deraadt Exp $	*/
+/*	$OpenBSD: lprm.c,v 1.20 2014/01/22 19:31:00 tobias Exp $	*/
 /*	$$NetBSD: lprm.c,v 1.9 1999/08/16 03:12:32 simonb Exp $	*/
 
 /*
@@ -113,7 +113,7 @@ main(int argc, char **argv)
 		case 'w':
 			l = strtol(optarg, &cp, 10);
 			if (*cp != '\0' || l < 0 || l >= INT_MAX)
-				errx(1, "wait time must be postive integer: %s",
+				errx(1, "wait time must be positive integer: %s",
 				    optarg);
 			wait_time = (u_int)l;
 			if (wait_time < 30)
@@ -131,7 +131,7 @@ main(int argc, char **argv)
 	if (users < 0 && argc != 0)
 		usage();
 	while (argc > 0) {
-		if (isdigit(*argv[0])) {
+		if (isdigit((unsigned char)*argv[0])) {
 			if (requests >= MAXREQUESTS)
 				fatal("Too many requests");
 			requ[requests++] = atoi(argv[0]);

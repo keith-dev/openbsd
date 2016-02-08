@@ -1,4 +1,4 @@
-/* $OpenBSD: drmP.h,v 1.139 2013/07/08 09:43:18 jsg Exp $ */
+/* $OpenBSD: drmP.h,v 1.168 2014/02/23 09:36:52 kettenis Exp $ */
 /* drmP.h -- Private header for Direct Rendering Manager -*- linux-c -*-
  * Created: Mon Jan  4 10:05:05 1999 by faith@precisioninsight.com
  */
@@ -71,6 +71,7 @@
 
 #include "drm_linux_list.h"
 #include "drm.h"
+#include "drm_mm.h"
 #include "drm_atomic.h"
 #include "agp.h"
 
@@ -101,14 +102,6 @@
 #define DRM_READUNLOCK()	rw_exit_read(&dev->dev_lock)
 #define DRM_MAXUNITS		8
 
-/* D_CLONE only supports one device, this will be fixed eventually */
-#define drm_get_device_from_kdev(_kdev)	\
-	(drm_cd.cd_ndevs > 0 ? drm_cd.cd_devs[0] : NULL)
-#if 0
-#define drm_get_device_from_kdev(_kdev)			\
-	(minor(_kdev) < drm_cd.cd_ndevs) ? drm_cd.cd_devs[minor(_kdev)] : NULL
-#endif
-
 /* DRM_SUSER returns true if the user is superuser */
 #define DRM_SUSER(p)		(suser(p, 0) == 0)
 #define DRM_MTRR_WC		MDF_WRITECOMBINE
@@ -123,20 +116,45 @@
 
 extern struct cfdriver drm_cd;
 
+/* freebsd compat */
+#define	TAILQ_CONCAT(head1, head2, field) do {				\
+	if (!TAILQ_EMPTY(head2)) {					\
+		*(head1)->tqh_last = (head2)->tqh_first;		\
+		(head2)->tqh_first->field.tqe_prev = (head1)->tqh_last;	\
+		(head1)->tqh_last = (head2)->tqh_last;			\
+		TAILQ_INIT((head2));					\
+	}								\
+} while (0)
+
 /* linux compat */
 typedef u_int64_t u64;
 typedef u_int32_t u32;
 typedef u_int16_t u16;
 typedef u_int8_t u8;
 
+typedef int32_t s32;
 typedef int64_t s64;
 
 typedef uint16_t __le16;
+typedef uint16_t __be16;
+typedef uint32_t __le32;
+typedef uint32_t __be32;
 
 #define EXPORT_SYMBOL(x)
+#define MODULE_FIRMWARE(x)
+#define __iomem
+#define __must_check
+#define __init
 #define ARRAY_SIZE nitems
+#define DRM_ARRAY_SIZE nitems
+#define DIV_ROUND_UP howmany
+
+#define ERESTARTSYS EINTR
 
 #define unlikely(x)	__builtin_expect(!!(x), 0)
+#define likely(x)	__builtin_expect(!!(x), 1)
+
+#define	IS_ALIGNED(x, y)	(((x) & ((y) - 1)) == 0)
 
 #define BUG()								\
 do {									\
@@ -146,18 +164,41 @@ do {									\
 #define BUG_ON(x) KASSERT(!(x))
 
 #define WARN(condition, fmt...) ({ 					\
-	if (condition)							\
+	int __ret = !!(condition);					\
+	if (__ret)							\
 		printf(fmt);						\
-	(condition);							\
+	unlikely(__ret);						\
+})
+
+#define WARN_ONCE(condition, fmt...) ({					\
+	static int __warned;						\
+	int __ret = !!(condition);					\
+	if (__ret && !__warned) {					\
+		printf(fmt);						\
+		__warned = 1;						\
+	}								\
+	unlikely(__ret);						\
 })
 
 #define _WARN_STR(x) #x
 
 #define WARN_ON(condition) ({						\
-	if (condition)							\
+	int __ret = !!(condition);					\
+	if (__ret)							\
 		printf("WARNING %s failed at %s:%d\n",			\
 		    _WARN_STR(condition), __FILE__, __LINE__);		\
-	(condition);							\
+	unlikely(__ret);						\
+})
+
+#define WARN_ON_ONCE(condition) ({					\
+	static int __warned;						\
+	int __ret = !!(condition);					\
+	if (__ret && !__warned) {					\
+		printf("WARNING %s failed at %s:%d\n",			\
+		    _WARN_STR(condition), __FILE__, __LINE__);		\
+		__warned = 1;						\
+	}								\
+	unlikely(__ret);						\
 })
 
 #define IS_ERR_VALUE(x) unlikely((x) >= (unsigned long)-ELAST)
@@ -166,6 +207,12 @@ static inline void *
 ERR_PTR(long error)
 {
 	return (void *) error;
+}
+
+static inline long
+PTR_ERR(const void *ptr)
+{
+	return (long) ptr;
 }
 
 static inline long
@@ -188,6 +235,67 @@ IS_ERR_OR_NULL(const void *ptr)
 #define __DECONST(type, var)    ((type)(__uintptr_t)(const void *)(var))
 #endif
 
+#define GFP_ATOMIC	M_NOWAIT
+#define GFP_KERNEL	(M_WAITOK | M_CANFAIL)
+#define __GFP_NOWARN	0
+#define __GFP_NORETRY	0
+
+static inline void *
+kmalloc(size_t size, int flags)
+{
+	return malloc(size, M_DRM, flags);
+}
+
+static inline void *
+kmalloc_array(size_t n, size_t size, int flags)
+{
+	if (n == 0 || SIZE_MAX / n < size)
+		return NULL;
+	return malloc(n * size, M_DRM, flags);
+}
+
+static inline void *
+kcalloc(size_t n, size_t size, int flags)
+{
+	if (n == 0 || SIZE_MAX / n < size)
+		return NULL;
+	return malloc(n * size, M_DRM, flags | M_ZERO);
+}
+
+static inline void *
+kzalloc(size_t size, int flags)
+{
+	return malloc(size, M_DRM, flags | M_ZERO);
+}
+
+static inline void
+kfree(void *objp)
+{
+	free(objp, M_DRM);
+}
+
+static inline void *
+vzalloc(unsigned long size)
+{
+	return malloc(size, M_DRM, M_WAITOK | M_CANFAIL | M_ZERO);
+}
+
+static inline void
+vfree(void *objp)
+{
+	free(objp, M_DRM);
+}
+
+#define min_t(t, a, b) ({ \
+	t __min_a = (a); \
+	t __min_b = (b); \
+	__min_a < __min_b ? __min_a : __min_b; })
+
+static inline uint64_t
+div_u64(uint64_t x, uint32_t y)
+{
+	return (x / y);
+}
 
 /* DRM_READMEMORYBARRIER() prevents reordering of reads.
  * DRM_WRITEMEMORYBARRIER() prevents reordering of writes.
@@ -213,12 +321,46 @@ IS_ERR_OR_NULL(const void *ptr)
 #define DRM_READMEMORYBARRIER()		DRM_MEMORYBARRIER() 
 #define DRM_WRITEMEMORYBARRIER()	DRM_MEMORYBARRIER()
 #define DRM_MEMORYBARRIER()		__asm __volatile("sync" : : : "memory");
+#elif defined(__sparc64__)
+#define DRM_READMEMORYBARRIER()		DRM_MEMORYBARRIER() 
+#define DRM_WRITEMEMORYBARRIER()	DRM_MEMORYBARRIER()
+#define DRM_MEMORYBARRIER()		membar(Sync)
 #endif
+
+#define smp_mb__before_atomic_dec()	DRM_MEMORYBARRIER()
+#define smp_mb__after_atomic_dec()	DRM_MEMORYBARRIER()
+#define smp_mb__before_atomic_inc()	DRM_MEMORYBARRIER()
+#define smp_mb__after_atomic_inc()	DRM_MEMORYBARRIER()
 
 #define	DRM_COPY_TO_USER(user, kern, size)	copyout(kern, user, size)
 #define	DRM_COPY_FROM_USER(kern, user, size)	copyin(user, kern, size)
+
+#define le16_to_cpu(x) letoh16(x)
 #define le32_to_cpu(x) letoh32(x)
+#define cpu_to_le16(x) htole16(x)
 #define cpu_to_le32(x) htole32(x)
+
+#define be32_to_cpup(x) betoh32(*x)
+
+#ifdef __macppc__
+static __inline int
+of_machine_is_compatible(const char *model)
+{
+	extern char *hw_prod;
+	return (strcmp(model, hw_prod) == 0);
+}
+#endif
+
+static inline unsigned long
+roundup_pow_of_two(unsigned long x)
+{
+	return (1UL << flsl(x - 1));
+}
+
+static inline uint32_t ror32(uint32_t word, unsigned int shift)
+{
+	return (word >> shift) | (word << (32 - shift));
+}
 
 #define DRM_UDELAY(udelay)	DELAY(udelay)
 
@@ -229,12 +371,20 @@ udelay(unsigned long usecs)
 }
 
 static __inline void
+usleep_range(unsigned long min, unsigned long max)
+{
+	DELAY(min);
+}
+
+static __inline void
 mdelay(unsigned long msecs)
 {
 	int loops = msecs;
 	while (loops--)
 		DELAY(1000);
 }
+
+#define	drm_can_sleep()	(hz & 1)
 
 #define LOCK_TEST_WITH_RETURN(dev, file_priv)				\
 do {									\
@@ -262,7 +412,7 @@ do {									\
 	    curproc->p_pid, __func__ , ## arg)
 
 
-#define DRM_INFO(fmt, arg...)  printf("%s: " fmt, dev_priv->dev.dv_xname, ## arg)
+#define DRM_INFO(fmt, arg...)  printf("drm: " fmt, ## arg)
 
 #ifdef DRMDEBUG
 #undef DRM_DEBUG
@@ -307,10 +457,28 @@ do {									\
 #define DRM_DEBUG_DRIVER(fmt, arg...) do { } while(/* CONSTCOND */ 0)
 #endif
 
+#define dev_warn(dev, fmt, arg...) do {					\
+	DRM_ERROR(fmt, ## arg);						\
+} while(0)
+
+#define dev_err(dev, fmt, arg...) do {					\
+	DRM_ERROR(fmt, ## arg);						\
+} while(0)
+
+#define dev_info(dev, fmt, arg...) do {					\
+	printf("%s: " fmt, dev.dv_xname, ## arg);			\
+} while(0)
+
+#define PCI_ANY_ID (uint16_t) (~0U)
+
 struct drm_pcidev {
-	int vendor;
-	int device;
-	long driver_private;
+	uint16_t vendor;
+	uint16_t device;
+	uint16_t subvendor;
+	uint16_t subdevice;
+	uint32_t class;
+	uint32_t class_mask;
+	unsigned long driver_data;
 };
 
 struct drm_file;
@@ -470,25 +638,8 @@ struct drm_mem {
 #define DRM_ATI_GART_R600 4
 
 #define DMA_BIT_MASK(n) (((n) == 64) ? ~0ULL : (1ULL<<(n)) -1)
+#define lower_32_bits(n)	((u32)(n))
 #define upper_32_bits(_val) ((u_int32_t)(((_val) >> 16) >> 16))
-
-struct drm_ati_pcigart_info {
-	union pcigart_table {
-		struct fb_gart {
-			bus_space_tag_t		 bst;
-			bus_space_handle_t	 bsh;
-		}	fb;
-		struct mem_gart {
-			struct drm_dmamem	*mem;
-			u_int32_t		*addr;
-		}	dma;
-	}			 tbl;
-	bus_addr_t		 bus_addr;
-	bus_addr_t		 table_mask;
-	bus_size_t		 table_size;
-	int			 gart_table_location;
-	int			 gart_reg_if;
-};
 
 /*
  *  Locking protocol:
@@ -506,9 +657,9 @@ struct drm_ati_pcigart_info {
  * Subdrivers (radeon, intel, etc) may have other locking requirement, these
  * requirements will be detailed in those drivers.
  */
-struct drm_obj {
+struct drm_gem_object {
 	struct uvm_object		 uobj;
-	SPLAY_ENTRY(drm_obj)	 	 entry;
+	SPLAY_ENTRY(drm_gem_object) 	 entry;
 	struct drm_device		*dev;
 	struct uvm_object		*uao;
 	struct drm_local_map		*map;
@@ -532,7 +683,7 @@ struct drm_obj {
 
 struct drm_handle {
 	SPLAY_ENTRY(drm_handle)	 entry;
-	struct drm_obj		*obj;
+	struct drm_gem_object	*obj;
 	uint32_t		 handle;
 };
 
@@ -564,6 +715,7 @@ struct drm_driver_info {
 		    struct drm_file *);
 	void	(*close)(struct drm_device *, struct drm_file *);
 	void	(*lastclose)(struct drm_device *);
+	struct uvm_object *(*mmap)(struct drm_device *, voff_t, vsize_t);
 	int	(*dma_ioctl)(struct drm_device *, struct drm_dma *,
 		    struct drm_file *);
 	int	(*irq_handler)(void *);
@@ -579,14 +731,19 @@ struct drm_driver_info {
 	int	(*get_vblank_timestamp)(struct drm_device *, int, int *,
 		    struct timeval *, unsigned);;
 
-	/*
-	 * driver-specific constructor for gem objects to set up private data.
-	 * returns 0 on success.
+	/**
+	 * Driver-specific constructor for drm_gem_objects, to set up
+	 * obj->driver_private.
+	 *
+	 * Returns 0 on success.
 	 */
-	int	(*gem_init_object)(struct drm_obj *);
-	void	(*gem_free_object)(struct drm_obj *);
-	int	(*gem_fault)(struct drm_obj *, struct uvm_faultinfo *, off_t,
-		    vaddr_t, vm_page_t *, int, int, vm_prot_t, int);
+	int (*gem_init_object) (struct drm_gem_object *obj);
+	void (*gem_free_object) (struct drm_gem_object *obj);
+	int (*gem_open_object) (struct drm_gem_object *, struct drm_file *);
+	void (*gem_close_object) (struct drm_gem_object *, struct drm_file *);
+
+	int	(*gem_fault)(struct drm_gem_object *, struct uvm_faultinfo *,
+		    off_t, vaddr_t, vm_page_t *, int, int, vm_prot_t, int);
 
 	int	(*dumb_create)(struct drm_file *file_priv,
 		    struct drm_device *dev, struct drm_mode_create_dumb *args);
@@ -648,6 +805,9 @@ struct drm_device {
 	u_int16_t	 pci_vendor;
 	u_int16_t	 pci_subdevice;
 	u_int16_t	 pci_subvendor;
+
+	pci_chipset_tag_t		 pc;
+	pcitag_t	 		*bridgetag;
 
 	bus_dma_tag_t			dmat;
 	bus_space_tag_t			bst;
@@ -717,12 +877,7 @@ struct drm_device {
 	atomic_t		 obj_count;
 	u_int			 obj_name;
 	atomic_t		 obj_memory;
-	atomic_t		 pin_count;
-	atomic_t		 pin_memory;
-	atomic_t		 gtt_count;
-	atomic_t		 gtt_memory;
-	uint32_t		 gtt_total;
-	SPLAY_HEAD(drm_name_tree, drm_obj)	name_tree;
+	SPLAY_HEAD(drm_name_tree, drm_gem_object) name_tree;
 	struct pool				objpl;
 	
 	/* mode stuff */
@@ -740,7 +895,15 @@ struct drm_attach_args {
 	u_int16_t			 pci_device;
 	u_int16_t			 pci_subvendor;
 	u_int16_t			 pci_subdevice;
+	pci_chipset_tag_t		 pc;
+	pcitag_t			*bridgetag;
+	int				 console;
 };
+
+#define DRMDEVCF_CONSOLE	0
+#define drmdevcf_console	cf_loc[DRMDEVCF_CONSOLE]
+/* spec'd as console? */
+#define DRMDEVCF_CONSOLE_UNK	-1
 
 extern int	drm_debug_flag;
 
@@ -778,13 +941,14 @@ struct dmi_system_id {
         struct dmi_strmatch matches[4];
 };
 #define	DMI_MATCH(a, b) {(a), (b)}
+#define	DMI_EXACT_MATCH(a, b) {(a), (b)}
 int dmi_check_system(const struct dmi_system_id *);
 
 
 /* Device setup support (drm_drv.c) */
 int	drm_pciprobe(struct pci_attach_args *, const struct drm_pcidev * );
 struct device	*drm_attach_pci(struct drm_driver_info *, 
-		     struct pci_attach_args *, int, struct device *);
+		     struct pci_attach_args *, int, int, struct device *);
 dev_type_ioctl(drmioctl);
 dev_type_read(drmread);
 dev_type_poll(drmpoll);
@@ -815,14 +979,6 @@ void	drm_core_ioremapfree(struct drm_local_map *, struct drm_device *);
 
 int	drm_mtrr_add(unsigned long, size_t, int);
 int	drm_mtrr_del(int, unsigned long, size_t, int);
-
-/* Heap interface (DEPRECATED) */
-int		 drm_init_heap(struct drm_heap *, int, int);
-struct drm_mem	*drm_alloc_block(struct drm_heap *, int, int,
-		     struct drm_file *);
-int		 drm_mem_free(struct drm_heap *, int, struct drm_file *);
-void		 drm_mem_release(struct drm_heap *, struct drm_file *);
-void		 drm_mem_takedown(struct drm_heap *);
 
 /* Context management (DRI1, deprecated) */
 int	drm_ctxbitmap_init(struct drm_device *);
@@ -857,8 +1013,11 @@ void	drm_reclaim_buffers(struct drm_device *, struct drm_file *);
 int	drm_irq_install(struct drm_device *);
 int	drm_irq_uninstall(struct drm_device *);
 void	drm_vblank_cleanup(struct drm_device *);
+u32	drm_get_last_vbltimestamp(struct drm_device *, int ,
+				  struct timeval *, unsigned);
 int	drm_vblank_init(struct drm_device *, int);
 u_int32_t drm_vblank_count(struct drm_device *, int);
+u_int32_t drm_vblank_count_and_time(struct drm_device *, int, struct timeval *);
 int	drm_vblank_get(struct drm_device *, int);
 void	drm_vblank_put(struct drm_device *, int);
 void	drm_vblank_off(struct drm_device *, int);
@@ -869,6 +1028,13 @@ bool	drm_handle_vblank(struct drm_device *, int);
 void	drm_calc_timestamping_constants(struct drm_crtc *);
 int	drm_calc_vbltimestamp_from_scanoutpos(struct drm_device *,
 	    int, int *, struct timeval *, unsigned, struct drm_crtc *);
+bool	drm_mode_parse_command_line_for_connector(const char *,
+	    struct drm_connector *, struct drm_cmdline_mode *);
+struct drm_display_mode *
+	 drm_mode_create_from_cmdline_mode(struct drm_device *,
+	     struct drm_cmdline_mode *);
+
+extern unsigned int drm_timestamp_monotonic;
 
 /* AGP/PCI Express/GART support (drm_agpsupport.c) */
 struct drm_agp_head *drm_agp_init(void);
@@ -889,12 +1055,6 @@ int	drm_agp_unbind(struct drm_device *, struct drm_agp_binding *);
 /* Scatter Gather Support (drm_scatter.c) */
 void	drm_sg_cleanup(struct drm_device *, struct drm_sg_mem *);
 int	drm_sg_alloc(struct drm_device *, struct drm_scatter_gather *);
-
-/* ATI PCIGART support (ati_pcigart.c) */
-int	drm_ati_pcigart_init(struct drm_device *,
-	    struct drm_ati_pcigart_info *);
-int	drm_ati_pcigart_cleanup(struct drm_device *,
-	    struct drm_ati_pcigart_info *);
 
 /* Locking IOCTL support (drm_drv.c) */
 int	drm_lock(struct drm_device *, void *, struct drm_file *);
@@ -927,46 +1087,56 @@ int	drm_agp_bind_ioctl(struct drm_device *, void *, struct drm_file *);
 int	drm_sg_alloc_ioctl(struct drm_device *, void *, struct drm_file *);
 int	drm_sg_free(struct drm_device *, void *, struct drm_file *);
 
-struct drm_obj *drm_gem_object_alloc(struct drm_device *, size_t);
-int	 drm_gem_object_init(struct drm_device *, struct drm_obj *, size_t);
-void	 drm_gem_object_release(struct drm_obj *);
+static inline int
+drm_sysfs_connector_add(struct drm_connector *connector)
+{
+	return 0;
+}
+
+static inline void
+drm_sysfs_connector_remove(struct drm_connector *connector)
+{
+}
+
+/* Graphics Execution Manager library functions (drm_gem.c) */
+void drm_gem_object_release(struct drm_gem_object *obj);
+struct drm_gem_object *drm_gem_object_alloc(struct drm_device *dev,
+					    size_t size);
+int drm_gem_object_init(struct drm_device *dev,
+			struct drm_gem_object *obj, size_t size);
+
 void	 drm_unref(struct uvm_object *);
 void	 drm_ref(struct uvm_object *);
-void	 drm_unref_locked(struct uvm_object *);
-void	 drm_ref_locked(struct uvm_object *);
-void	drm_hold_object_locked(struct drm_obj *);
-void	drm_hold_object(struct drm_obj *);
-void	drm_unhold_object_locked(struct drm_obj *);
-void	drm_unhold_object(struct drm_obj *);
-int	drm_try_hold_object(struct drm_obj *);
-void	drm_unhold_and_unref(struct drm_obj *);
-int	drm_handle_create(struct drm_file *, struct drm_obj *, int *);
 
-void drm_gem_free_mmap_offset(struct drm_obj *obj);
-int drm_gem_create_mmap_offset(struct drm_obj *obj);
+int drm_gem_handle_create(struct drm_file *file_priv,
+			  struct drm_gem_object *obj,
+			  u32 *handlep);
+int drm_gem_handle_delete(struct drm_file *filp, u32 handle);
 
-struct drm_obj *drm_gem_object_lookup(struct drm_device *,
-			    struct drm_file *, int );
+void drm_gem_free_mmap_offset(struct drm_gem_object *obj);
+int drm_gem_create_mmap_offset(struct drm_gem_object *obj);
+
+struct drm_gem_object *drm_gem_object_lookup(struct drm_device *dev,
+					     struct drm_file *filp,
+					     u32 handle);
 int	drm_gem_close_ioctl(struct drm_device *, void *, struct drm_file *);
 int	drm_gem_flink_ioctl(struct drm_device *, void *, struct drm_file *);
 int	drm_gem_open_ioctl(struct drm_device *, void *, struct drm_file *);
-int	drm_gem_load_uao(bus_dma_tag_t, bus_dmamap_t, struct uvm_object *,
-	    bus_size_t, int, bus_dma_segment_t **);
 
 static __inline void
-drm_gem_object_reference(struct drm_obj *obj)
+drm_gem_object_reference(struct drm_gem_object *obj)
 {
 	drm_ref(&obj->uobj);
 }
 
 static __inline void
-drm_gem_object_unreference(struct drm_obj *obj)
+drm_gem_object_unreference(struct drm_gem_object *obj)
 {
 	drm_unref(&obj->uobj);
 }
 
 static __inline void
-drm_gem_object_unreference_unlocked(struct drm_obj *obj)
+drm_gem_object_unreference_unlocked(struct drm_gem_object *obj)
 {
 	struct drm_device *dev = obj->dev;
 
@@ -975,38 +1145,17 @@ drm_gem_object_unreference_unlocked(struct drm_obj *obj)
 	DRM_UNLOCK();
 }
 
-static __inline void 
-drm_lock_obj(struct drm_obj *obj)
-{
-	simple_lock(&obj->uobj);
-}
-
-static __inline void 
-drm_unlock_obj(struct drm_obj *obj)
-{
-	simple_unlock(&obj->uobj);
-}
-
 static __inline__ int drm_core_check_feature(struct drm_device *dev,
 					     int feature)
 {
 	return ((dev->driver->flags & feature) ? 1 : 0);
 }
 
-#ifdef DRMLOCKDEBUG
+#define DRM_PCIE_SPEED_25 1
+#define DRM_PCIE_SPEED_50 2
+#define DRM_PCIE_SPEED_80 4
 
-#define DRM_ASSERT_HELD(obj)		\
-	KASSERT(obj->do_flags & DRM_BUSY && obj->holding_proc == curproc)
-#define DRM_OBJ_ASSERT_LOCKED(obj) /* XXX mutexes */
-#define DRM_ASSERT_LOCKED(lock) MUTEX_ASSERT_LOCKED(lock)
-#else
-
-#define DRM_ASSERT_HELD(obj)
-#define DRM_OBJ_ASSERT_LOCKED(obj)
-#define DRM_ASSERT_LOCKED(lock) 
-
-#endif
-
+int	 drm_pcie_get_speed_cap_mask(struct drm_device *, u32 *);
 
 #endif /* __KERNEL__ */
 #endif /* _DRM_P_H_ */

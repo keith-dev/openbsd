@@ -1,4 +1,4 @@
-#	$OpenBSD: GENERIC,v 1.269 2012/10/17 12:12:18 kettenis Exp $
+#	$OpenBSD: GENERIC,v 1.275 2014/02/19 05:32:57 jmatthew Exp $
 #
 # For further information on compiling OpenBSD kernels, see the config(8)
 # man page.
@@ -113,8 +113,11 @@ malo*	at pcmcia?		# Marvell 88W8385
 ahc*	at pci?			# Adaptec 2940 SCSI controllers
 siop*	at pci?			# NCR 538XX SCSI controllers
 isp*	at pci?			# Qlogic ISP [12]0x0 SCSI/FibreChannel
+#qla*	at pci?			# Qlogic ISP 2[123]xx FibreChannel
+qle*	at pci?			# Qlogic ISP 2[45]xx FibreChannel
 pcscp*	at pci?			# AMD 53c974 PCscsi-PCI SCSI
 mpi*	at pci?			# LSI Logic Fusion MPT Message Passing Interface
+mpii*	at pci?			# LSI Message Passing Interface II
 arc*	at pci?			# Areca RAID Controllers
 jmb*	at pci?			# JMicron JMB36x controllers
 ahci*	at jmb? flags 0x0000	# flags 0x0001 to force SATA 1 (1.5Gb/s)
@@ -217,6 +220,7 @@ urndis*	at uhub?		# Remote NDIS devices
 udav*	at uhub?		# Davicom DM9601 based Ethernet
 mos*	at uhub?		# MOSCHIP MCS7730/7830 10/100 Ethernet
 upl*	at uhub?		# Prolific PL2301/PL2302 host-to-host `network'
+ugl*	at uhub?		# Genesys Logic GL620USB-A host-to-host `network'
 ural*	at uhub?		# Ralink RT2500USB
 uath*	at uhub?		# Atheros AR5005UG/AR5005UX
 rsu*	at uhub?		# Realtek RTL8188SU/RTL8191SU/RTL8192SU
@@ -228,7 +232,6 @@ zyd*	at uhub?		# Zydas ZD1211
 url*	at uhub?		# Realtek RTL8150L based adapters
 wi*	at uhub?		# WaveLAN IEEE 802.11DS
 urio*	at uhub?		# Diamond Multimedia Rio 500
-uscanner* at uhub? disable	# USB Scanners
 #uyap*	at uhub?		# Y@P firmware loader
 udsbr*	at uhub?		# D-Link DSB-R100 radio
 radio*	at udsbr?		# USB radio
@@ -236,6 +239,7 @@ ugen*	at uhub?		# USB Generic driver
 udcf*	at uhub?		# Gude Expert mouseCLOCK
 umbg*	at uhub?		# Meinberg Funkuhren USB5131
 uthum*	at uhidev?		# TEMPerHUM sensor
+ugold*	at uhidev?		# gold TEMPer sensor
 utwitch* at uhidev?		# UYUREX BBU sensor
 uow*	at uhub?		# Maxim/Dallas DS2490 1-Wire adapter
 onewire* at uow?
@@ -394,6 +398,7 @@ dma*	at sbus?				# SBus
 esp*	at dma?					# SBus
 esp*	at sbus?
 isp*	at sbus?
+#qla*	at sbus?
 
 # SCSI bus layer.  SCSI devices attach to the SCSI bus, which attaches
 # to the underlying hardware controller.
@@ -483,7 +488,7 @@ machfb*		at pci?			# PGX/PGX64 framebuffers
 wsdisplay*	at machfb?
 mgx*		at sbus?		# SMS MGX/MGXPlus framebuffer
 wsdisplay*	at mgx?
-radeonfb*	at pci?			# XVR-100 framebuffer
+radeonfb*	at pci?			# XVR-100/300 framebuffer
 wsdisplay*	at radeonfb?
 raptor*		at pci?			# Raptor framebuffer
 wsdisplay*	at raptor?
@@ -497,6 +502,10 @@ vigra*		at sbus?		# Viagra framebuffer series
 wsdisplay*	at vigra?
 zx*		at sbus?		# Sun Leo (ZX) framebuffer
 wsdisplay*	at zx?
+
+radeondrm*	at pci?			# ATI Radeon DRM driver
+drm*		at radeondrm?
+wsdisplay*	at radeondrm?
 
 audiocs*	at sbus?
 

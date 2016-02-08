@@ -1,4 +1,4 @@
-#	$OpenBSD: files.usb,v 1.105 2013/05/31 19:32:30 mpi Exp $
+#	$OpenBSD: files.usb,v 1.112 2014/01/20 18:27:46 jcs Exp $
 #	$NetBSD: files.usb,v 1.16 2000/02/14 20:29:54 augustss Exp $
 #
 # Config file and device description for machine-independent USB code.
@@ -99,14 +99,15 @@ device	uts: wsmousedev
 attach	uts at uhub
 file	dev/usb/uts.c			uts
 
-device	uhts: wsmousedev
-attach	uhts at uhidbus
-file	dev/usb/uhts.c			uhts
-
 # Apple USB Touchpad
 device	utpms: hid, wsmousedev
 attach	utpms at uhidbus
 file	dev/usb/utpms.c			utpms
+
+# Broadcom touchpad
+device	ubcmtp: wsmousedev
+attach	ubcmtp at uhub
+file	dev/usb/ubcmtp.c		ubcmtp
 
 # Cypress microcontroller based serial adpaters
 device	ucycom: hid, ucombus
@@ -132,6 +133,11 @@ file	dev/usb/umass_scsi.c		umass & scsibus
 device	uthum: hid
 attach	uthum at uhidbus
 file	dev/usb/uthum.c			uthum
+
+# gold TEMPer
+device	ugold: hid
+attach	ugold at uhidbus
+file	dev/usb/ugold.c			ugold
 
 # Strawberry Linux USBRH
 device	utrh: hid
@@ -210,6 +216,12 @@ device	axe: ether, ifnet, mii, ifmedia
 attach	axe at uhub
 file	dev/usb/if_axe.c		axe
 
+# Ethernet adapters
+# ASIX Electronics AX88178a and AX88179
+device	axen: ether, ifnet, mii, ifmedia
+attach	axen at uhub
+file	dev/usb/if_axen.c		axen
+
 # SMSC LAN95xx
 device	smsc: ether, ifnet, mii, ifmedia 
 attach	smsc at uhub
@@ -249,6 +261,11 @@ file	dev/usb/if_udav.c		udav
 device	upl: ifnet
 attach	upl at uhub
 file	dev/usb/if_upl.c		upl
+
+# Genesys Logic GL620USB-A host-host
+device	ugl: ether, ifnet, ifmedia
+attach	ugl at uhub
+file	dev/usb/if_ugl.c		ugl
 
 # Realtek RTL8150L(M)
 device	url: ether, ifnet, mii
@@ -323,12 +340,6 @@ device	uticom: ucombus
 attach	uticom at uhub
 file	dev/usb/uticom.c		uticom
 
-# Scanners
-# Generic scanner support
-device	uscanner
-attach	uscanner at uhub
-file	dev/usb/uscanner.c		uscanner		needs-flag
-
 # Prism3 WI @ USB
 attach	wi at uhub with wi_usb
 file	dev/usb/if_wi_usb.c		wi_usb
@@ -387,12 +398,6 @@ file	dev/usb/if_rsu.c		rsu
 device	otus: ether, ifnet, ifmedia, wlan, firmload
 attach	otus at uhub
 file	dev/usb/if_otus.c		otus
-
-# Analog Devices Eagle driver
-device	ueagle: atm, ifnet, ezload, firmload
-attach	ueagle at uhub
-file	dev/usb/ueagle.c		ueagle
-
 
 # USB logical device
 device	usbf {}

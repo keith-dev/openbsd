@@ -1,4 +1,4 @@
-/*	$OpenBSD: route.c,v 1.163 2013/07/19 20:10:23 guenther Exp $	*/
+/*	$OpenBSD: route.c,v 1.166 2014/01/22 06:23:37 claudio Exp $	*/
 /*	$NetBSD: route.c,v 1.16 1996/04/15 18:27:05 cgd Exp $	*/
 
 /*
@@ -62,7 +62,7 @@
 const struct if_status_description
 			if_status_descriptions[] = LINK_STATE_DESCRIPTIONS;
 
-union sockunion so_dst, so_gate, so_mask, so_genmask, so_ifa, so_ifp, so_label, so_src;
+union sockunion so_dst, so_gate, so_mask, so_ifa, so_ifp, so_label, so_src;
 
 typedef union sockunion *sup;
 pid_t	pid;
@@ -173,7 +173,7 @@ main(int argc, char **argv)
 	kw = keyword(*argv);
 	if (Tflag && Terr != 0 && kw != K_ADD) {
 		errno = Terr;
-		err(1, "routing table %i", tableid);
+		err(1, "routing table %d", tableid);
 	}
 	switch (kw) {
 	case K_EXEC:
@@ -362,17 +362,23 @@ flushroutes(int argc, char **argv)
 void
 set_metric(char *value, int key)
 {
-	int flag = 0;
-	u_int noval, *valp = &noval;
+	long long relative_expire;
 	const char *errstr;
+	int flag = 0;
 
 	switch (key) {
 	case K_MTU:
-		valp = &rt_metrics.rmx_mtu;
+		rt_metrics.rmx_mtu = strtonum(value, 0, UINT_MAX, &errstr);
+		if (errstr)
+			errx(1, "set_metric mtu: %s is %s", value, errstr);
 		flag = RTV_MTU;
 		break;
 	case K_EXPIRE:
-		valp = &rt_metrics.rmx_expire;
+		relative_expire = strtonum(value, 0, INT_MAX, &errstr);
+		if (errstr)
+			errx(1, "set_metric expire: %s is %s", value, errstr);
+		rt_metrics.rmx_expire = relative_expire ?
+		    relative_expire + time(NULL) : 0;
 		flag = RTV_EXPIRE;
 		break;
 	case K_HOPCOUNT:
@@ -391,9 +397,6 @@ set_metric(char *value, int key)
 		rt_metrics.rmx_locks |= flag;
 	if (locking)
 		locking = 0;
-	*valp = strtonum(value, 0, UINT_MAX, &errstr);
-	if (errstr)
-		errx(1, "set_metric: %s is %s", value, errstr);
 }
 
 int
@@ -528,11 +531,6 @@ newroute(int argc, char **argv)
 				if (!--argc)
 					usage(1+*argv);
 				getaddr(RTA_IFP, *++argv, NULL);
-				break;
-			case K_GENMASK:
-				if (!--argc)
-					usage(1+*argv);
-				getaddr(RTA_GENMASK, *++argv, NULL);
 				break;
 			case K_GATEWAY:
 				if (!--argc)
@@ -825,9 +823,6 @@ getaddr(int which, char *s, struct hostent **hpp)
 	case RTA_NETMASK:
 		su = &so_mask;
 		break;
-	case RTA_GENMASK:
-		su = &so_genmask;
-		break;
 	case RTA_IFP:
 		su = &so_ifp;
 		afamily = AF_LINK;
@@ -849,7 +844,6 @@ getaddr(int which, char *s, struct hostent **hpp)
 			getaddr(RTA_NETMASK, s, NULL);
 			break;
 		case RTA_NETMASK:
-		case RTA_GENMASK:
 			su->sa.sa_len = 0;
 		}
 		return (0);
@@ -1169,7 +1163,6 @@ rtmsg(int cmd, int flags, int fmask, u_char prio)
 	NEXTADDR(RTA_DST, so_dst);
 	NEXTADDR(RTA_GATEWAY, so_gate);
 	NEXTADDR(RTA_NETMASK, so_mask);
-	NEXTADDR(RTA_GENMASK, so_genmask);
 	NEXTADDR(RTA_IFP, so_ifp);
 	NEXTADDR(RTA_IFA, so_ifa);
 	NEXTADDR(RTA_LABEL, so_label);
@@ -1274,6 +1267,7 @@ get_linkstate(int mt, int link_state)
 void
 print_rtmsg(struct rt_msghdr *rtm, int msglen)
 {
+	long long relative_expire;
 	struct if_msghdr *ifm;
 	struct ifa_msghdr *ifam;
 	struct if_announcemsghdr *ifan;
@@ -1340,12 +1334,12 @@ print_rtmsg(struct rt_msghdr *rtm, int msglen)
 		bprintf(stdout, rtm->rtm_flags, routeflags);
 		if (verbose) {
 #define lock(f)	((rtm->rtm_rmx.rmx_locks & __CONCAT(RTV_,f)) ? 'L' : ' ')
-			if (rtm->rtm_rmx.rmx_expire)
-				rtm->rtm_rmx.rmx_expire -= time(NULL);
-			printf("\nuse: %8llu   mtu: %8u%c   expire: %8d%c",
+			relative_expire = rtm->rtm_rmx.rmx_expire ?
+			    rtm->rtm_rmx.rmx_expire - time(NULL) : 0;
+			printf("\nuse: %8llu   mtu: %8u%c   expire: %8lld%c",
 			    rtm->rtm_rmx.rmx_pksent,
 			    rtm->rtm_rmx.rmx_mtu, lock(MTU),
-			    rtm->rtm_rmx.rmx_expire, lock(EXPIRE));
+			    relative_expire, lock(EXPIRE));
 #undef lock
 		}
 		pmsg_common(rtm);
@@ -1380,6 +1374,7 @@ priorityname(u_int8_t prio)
 void
 print_getmsg(struct rt_msghdr *rtm, int msglen)
 {
+	long long relative_expire;
 	struct sockaddr *dst = NULL, *gate = NULL, *mask = NULL, *ifa = NULL;
 	struct sockaddr_dl *ifp = NULL;
 	struct sockaddr_rtlabel *sa_rl = NULL;
@@ -1465,12 +1460,13 @@ print_getmsg(struct rt_msghdr *rtm, int msglen)
 		printf("      label: %s\n", sa_rl->sr_label);
 
 #define lock(f)	((rtm->rtm_rmx.rmx_locks & __CONCAT(RTV_,f)) ? 'L' : ' ')
-	printf("%s\n", "     use       mtu    expire");
-	printf("%8llu  ", rtm->rtm_rmx.rmx_pksent);
-	printf("%8u%c ", rtm->rtm_rmx.rmx_mtu, lock(MTU));
-	if (rtm->rtm_rmx.rmx_expire)
-		rtm->rtm_rmx.rmx_expire -= time(NULL);
-	printf("%8d%c\n", rtm->rtm_rmx.rmx_expire, lock(EXPIRE));
+	relative_expire = rtm->rtm_rmx.rmx_expire ?
+	    rtm->rtm_rmx.rmx_expire - time(NULL) : 0;
+	printf("     use       mtu    expire\n");
+	printf("%8llu  %8u%c %8lld%c\n",
+	    rtm->rtm_rmx.rmx_pksent,
+	    rtm->rtm_rmx.rmx_mtu, lock(MTU),
+	    relative_expire, lock(EXPIRE));
 #undef lock
 #define	RTA_IGN	(RTA_DST|RTA_GATEWAY|RTA_NETMASK|RTA_IFP|RTA_IFA|RTA_BRD)
 	if (verbose)
@@ -1526,7 +1522,6 @@ pmsg_addrs(char *cp, int addrs)
 				if (family != AF_UNSPEC)
 					switch (i) {
 					case RTA_NETMASK:
-					case RTA_GENMASK:
 						sa->sa_family = family;
 					}
 				printf(" %s", routename(sa));

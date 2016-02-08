@@ -1,4 +1,4 @@
-/*	$OpenBSD: show.c,v 1.38 2013/03/20 15:23:37 deraadt Exp $	*/
+/*	$OpenBSD: show.c,v 1.40 2013/11/21 17:32:13 mikeb Exp $	*/
 /*	$NetBSD: show.c,v 1.1 1996/11/15 18:01:41 gwr Exp $	*/
 
 /*
@@ -36,6 +36,7 @@
 #include <sys/sysctl.h>
 
 #include <net/if.h>
+#include <net/if_var.h>
 #include <net/if_dl.h>
 #include <net/if_types.h>
 #include <net/pfkeyv2.h>
@@ -212,7 +213,7 @@ p_rttables(int af, u_int tableid)
  */
 #define	WID_GW(af)	((af) == AF_INET6 ? (nflag ? 30 : 18) : 18)
 
-int
+static int
 WID_DST(int af)
 {
 

@@ -12,7 +12,6 @@ auth:*:11:
 games:*:13:
 staff:*:20:root
 smmsp:*:25:
-popa3d:*:26:
 sshd:*:27:
 _portmap:*:28:
 _identd:*:29:
@@ -23,8 +22,6 @@ _fingerd:*:33:
 _sshagnt:*:34:
 _x11:*:35:
 utmp:*:45:
-_kdc:*:59:
-_kadmin:*:60:
 _lkm:*:61:
 _spamd:*:62:
 _radius:*:63:
@@ -45,7 +42,6 @@ _dhcp:*:77:
 _mopd:*:78:
 _tftpd:*:79:
 _rbootd:*:80:
-_afs:*:81:
 _ppp:*:82:
 _ntp:*:83:
 _ftp:*:84:
@@ -58,7 +54,6 @@ _ospf6d:*:90:
 _snmpd:*:91:
 _rtadvd:*:92:
 _ypldap:*:93:
-_btd:*:94:
 _smtpd:*:95:
 _rwalld:*:96:
 _nsd:*:97:

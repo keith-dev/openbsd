@@ -1,4 +1,4 @@
-/*	$OpenBSD: intel_lvds.c,v 1.4 2013/07/05 07:20:27 jsg Exp $	*/
+/*	$OpenBSD: intel_lvds.c,v 1.11 2014/01/22 22:33:24 jsg Exp $	*/
 /*
  * Copyright © 2006-2007 Intel Corporation
  * Copyright (c) 2006 Dave Airlie <airlied@linux.ie>
@@ -54,52 +54,17 @@ struct intel_lvds_encoder {
 	struct intel_lvds_connector *attached_connector;
 };
 
-struct intel_lvds	*to_intel_lvds(struct drm_encoder *);
-struct intel_lvds	*intel_attached_lvds(struct drm_connector *);
-void	 intel_enable_lvds(struct intel_encoder *);
-void	 intel_disable_lvds(struct intel_encoder *);
-void	 intel_lvds_dpms(struct drm_encoder *, int);
-int	 intel_lvds_mode_valid(struct drm_connector *,
-	     struct drm_display_mode *);
-void	 centre_horizontally(struct drm_display_mode *, int);
-void	 centre_vertically(struct drm_display_mode *, int);
-bool	 intel_lvds_mode_fixup(struct drm_encoder *,
-	     const struct drm_display_mode *, struct drm_display_mode *);
-void	 intel_lvds_prepare(struct drm_encoder *);
-void	 intel_lvds_commit(struct drm_encoder *);
-void	 intel_lvds_mode_set(struct drm_encoder *, struct drm_display_mode *,
-	     struct drm_display_mode *);
-enum drm_connector_status	 intel_lvds_detect(struct drm_connector *,
-				     bool);
-int	 intel_lvds_get_modes(struct drm_connector *);
-int	 intel_no_modeset_on_lid_dmi_callback(const struct dmi_system_id *);
-void	 intel_lvds_destroy(struct drm_connector *);
-int	 intel_lvds_set_property(struct drm_connector *,
-	     struct drm_property *, uint64_t);
-int	 intel_no_lvds_dmi_callback(const struct dmi_system_id *);
-void	 intel_find_lvds_downclock(struct drm_device *,
-	     struct drm_display_mode *, struct drm_connector *);
-bool	 lvds_is_present_in_vbt(struct drm_device *, u8 *);
-bool	 intel_lvds_supported(struct drm_device *);
-struct intel_lvds_encoder *to_lvds_encoder(struct drm_encoder *);
-struct intel_lvds_connector *to_lvds_connector(struct drm_connector *);
-bool	 intel_lvds_get_hw_state(struct intel_encoder *, enum pipe *);
-
-
-struct intel_lvds_encoder *
-to_lvds_encoder(struct drm_encoder *encoder)
+static struct intel_lvds_encoder *to_lvds_encoder(struct drm_encoder *encoder)
 {
 	return container_of(encoder, struct intel_lvds_encoder, base.base);
 }
 
-struct intel_lvds_connector *
-to_lvds_connector(struct drm_connector *connector)
+static struct intel_lvds_connector *to_lvds_connector(struct drm_connector *connector)
 {
 	return container_of(connector, struct intel_lvds_connector, base.base);
 }
 
-bool
-intel_lvds_get_hw_state(struct intel_encoder *encoder,
+static bool intel_lvds_get_hw_state(struct intel_encoder *encoder,
 				    enum pipe *pipe)
 {
 	struct drm_device *dev = encoder->base.dev;
@@ -128,8 +93,7 @@ intel_lvds_get_hw_state(struct intel_encoder *encoder,
 /**
  * Sets the power state for the panel.
  */
-void
-intel_enable_lvds(struct intel_encoder *encoder)
+static void intel_enable_lvds(struct intel_encoder *encoder)
 {
 	struct drm_device *dev = encoder->base.dev;
 	struct intel_lvds_encoder *lvds_encoder = to_lvds_encoder(&encoder->base);
@@ -179,8 +143,7 @@ intel_enable_lvds(struct intel_encoder *encoder)
 	intel_panel_enable_backlight(dev, intel_crtc->pipe);
 }
 
-void
-intel_disable_lvds(struct intel_encoder *encoder)
+static void intel_disable_lvds(struct intel_encoder *encoder)
 {
 	struct drm_device *dev = encoder->base.dev;
 	struct intel_lvds_encoder *lvds_encoder = to_lvds_encoder(&encoder->base);
@@ -218,8 +181,7 @@ intel_disable_lvds(struct intel_encoder *encoder)
 	POSTING_READ(lvds_reg);
 }
 
-int
-intel_lvds_mode_valid(struct drm_connector *connector,
+static int intel_lvds_mode_valid(struct drm_connector *connector,
 				 struct drm_display_mode *mode)
 {
 	struct intel_connector *intel_connector = to_intel_connector(connector);
@@ -233,7 +195,7 @@ intel_lvds_mode_valid(struct drm_connector *connector,
 	return MODE_OK;
 }
 
-void
+static void
 centre_horizontally(struct drm_display_mode *mode,
 		    int width)
 {
@@ -257,7 +219,7 @@ centre_horizontally(struct drm_display_mode *mode,
 	mode->private_flags |= INTEL_MODE_CRTC_TIMINGS_SET;
 }
 
-void
+static void
 centre_vertically(struct drm_display_mode *mode,
 		  int height)
 {
@@ -280,8 +242,7 @@ centre_vertically(struct drm_display_mode *mode,
 	mode->private_flags |= INTEL_MODE_CRTC_TIMINGS_SET;
 }
 
-static inline u32
-panel_fitter_scaling(u32 source, u32 target)
+static inline u32 panel_fitter_scaling(u32 source, u32 target)
 {
 	/*
 	 * Floating point operation is not supported. So the FACTOR
@@ -294,8 +255,7 @@ panel_fitter_scaling(u32 source, u32 target)
 	return (FACTOR * ratio + FACTOR/2) / FACTOR;
 }
 
-bool
-intel_lvds_mode_fixup(struct drm_encoder *encoder,
+static bool intel_lvds_mode_fixup(struct drm_encoder *encoder,
 				  const struct drm_display_mode *mode,
 				  struct drm_display_mode *adjusted_mode)
 {
@@ -469,8 +429,7 @@ out:
 	return true;
 }
 
-void
-intel_lvds_mode_set(struct drm_encoder *encoder,
+static void intel_lvds_mode_set(struct drm_encoder *encoder,
 				struct drm_display_mode *mode,
 				struct drm_display_mode *adjusted_mode)
 {
@@ -488,7 +447,7 @@ intel_lvds_mode_set(struct drm_encoder *encoder,
  * connected and closed means disconnected.  We also send hotplug events as
  * needed, using lid status notification from the input layer.
  */
-enum drm_connector_status
+static enum drm_connector_status
 intel_lvds_detect(struct drm_connector *connector, bool force)
 {
 	struct drm_device *dev = connector->dev;
@@ -504,8 +463,7 @@ intel_lvds_detect(struct drm_connector *connector, bool force)
 /**
  * Return the list of DDC modes if available, or the BIOS fixed mode otherwise.
  */
-int
-intel_lvds_get_modes(struct drm_connector *connector)
+static int intel_lvds_get_modes(struct drm_connector *connector)
 {
 	struct intel_lvds_connector *lvds_connector = to_lvds_connector(connector);
 	struct drm_device *dev = connector->dev;
@@ -523,8 +481,7 @@ intel_lvds_get_modes(struct drm_connector *connector)
 	return 1;
 }
 
-int
-intel_no_modeset_on_lid_dmi_callback(const struct dmi_system_id *id)
+static int intel_no_modeset_on_lid_dmi_callback(const struct dmi_system_id *id)
 {
 	printf("Skipping forced modeset for %s\n", id->ident);
 	return 1;
@@ -554,8 +511,7 @@ static const struct dmi_system_id intel_no_modeset_on_lid[] = {
  *  - the suspend/resume paths will also set it to
  *    zero, since they restore the mode ("lid open").
  */
-int
-intel_lid_notify(struct notifier_block *nb, unsigned long val,
+static int intel_lid_notify(struct notifier_block *nb, unsigned long val,
 			    void *unused)
 {
 	struct intel_lvds_connector *lvds_connector =
@@ -601,8 +557,7 @@ intel_lid_notify(struct notifier_block *nb, unsigned long val,
  * Unregister the DDC bus for this connector then free the driver private
  * structure.
  */
-void
-intel_lvds_destroy(struct drm_connector *connector)
+static void intel_lvds_destroy(struct drm_connector *connector)
 {
 	struct intel_lvds_connector *lvds_connector =
 		to_lvds_connector(connector);
@@ -613,19 +568,16 @@ intel_lvds_destroy(struct drm_connector *connector)
 #endif
 
 	if (!IS_ERR_OR_NULL(lvds_connector->base.edid))
-		free(lvds_connector->base.edid, M_DRM);
+		kfree(lvds_connector->base.edid);
 
 	intel_panel_fini(&lvds_connector->base.panel);
 
-#if 0
 	drm_sysfs_connector_remove(connector);
-#endif
 	drm_connector_cleanup(connector);
-	free(connector, M_DRM);
+	kfree(connector);
 }
 
-int
-intel_lvds_set_property(struct drm_connector *connector,
+static int intel_lvds_set_property(struct drm_connector *connector,
 				   struct drm_property *property,
 				   uint64_t value)
 {
@@ -684,8 +636,7 @@ static const struct drm_encoder_funcs intel_lvds_enc_funcs = {
 	.destroy = intel_encoder_destroy,
 };
 
-int
-intel_no_lvds_dmi_callback(const struct dmi_system_id *id)
+static int __init intel_no_lvds_dmi_callback(const struct dmi_system_id *id)
 {
 	printf("Skipping LVDS initialization for %s\n", id->ident);
 	return 1;
@@ -806,10 +757,10 @@ static const struct dmi_system_id intel_no_lvds[] = {
 	},
 	{
 		.callback = intel_no_lvds_dmi_callback,
-		.ident = "Hewlett-Packard HP t5740e Thin Client",
+		.ident = "Hewlett-Packard HP t5740",
 		.matches = {
 			DMI_MATCH(DMI_BOARD_VENDOR, "Hewlett-Packard"),
-			DMI_MATCH(DMI_PRODUCT_NAME, "HP t5740e Thin Client"),
+			DMI_MATCH(DMI_PRODUCT_NAME, " t5740"),
 		},
 	},
 	{
@@ -860,6 +811,38 @@ static const struct dmi_system_id intel_no_lvds[] = {
 			DMI_MATCH(DMI_PRODUCT_NAME, "ESPRIMO Q900"),
 		},
 	},
+	{
+		.callback = intel_no_lvds_dmi_callback,
+		.ident = "Intel D410PT",
+		.matches = {
+			DMI_MATCH(DMI_BOARD_VENDOR, "Intel"),
+			DMI_MATCH(DMI_BOARD_NAME, "D410PT"),
+		},
+	},
+	{
+		.callback = intel_no_lvds_dmi_callback,
+		.ident = "Intel D425KT",
+		.matches = {
+			DMI_MATCH(DMI_BOARD_VENDOR, "Intel"),
+			DMI_EXACT_MATCH(DMI_BOARD_NAME, "D425KT"),
+		},
+	},
+	{
+		.callback = intel_no_lvds_dmi_callback,
+		.ident = "Intel D510MO",
+		.matches = {
+			DMI_MATCH(DMI_BOARD_VENDOR, "Intel"),
+			DMI_EXACT_MATCH(DMI_BOARD_NAME, "D510MO"),
+		},
+	},
+	{
+		.callback = intel_no_lvds_dmi_callback,
+		.ident = "Intel D525MW",
+		.matches = {
+			DMI_MATCH(DMI_BOARD_VENDOR, "Intel"),
+			DMI_EXACT_MATCH(DMI_BOARD_NAME, "D525MW"),
+		},
+	},
 
 	{ }	/* terminating entry */
 };
@@ -871,8 +854,7 @@ static const struct dmi_system_id intel_no_lvds[] = {
  *
  * Find the reduced downclock for LVDS in EDID.
  */
-void
-intel_find_lvds_downclock(struct drm_device *dev,
+static void intel_find_lvds_downclock(struct drm_device *dev,
 				      struct drm_display_mode *fixed_mode,
 				      struct drm_connector *connector)
 {
@@ -923,8 +905,7 @@ intel_find_lvds_downclock(struct drm_device *dev,
  * If it is not present, return false.
  * If no child dev is parsed from VBT, it assumes that the LVDS is present.
  */
-bool
-lvds_is_present_in_vbt(struct drm_device *dev,
+static bool lvds_is_present_in_vbt(struct drm_device *dev,
 				   u8 *i2c_pin)
 {
 	struct drm_i915_private *dev_priv = dev->dev_private;
@@ -967,8 +948,7 @@ lvds_is_present_in_vbt(struct drm_device *dev,
 	return false;
 }
 
-bool
-intel_lvds_supported(struct drm_device *dev)
+static bool intel_lvds_supported(struct drm_device *dev)
 {
 	/* With the introduction of the PCH we gained a dedicated
 	 * LVDS presence pin, use it. */
@@ -987,8 +967,7 @@ intel_lvds_supported(struct drm_device *dev)
  * Create the connector, register the LVDS DDC bus, and try to figure out what
  * modes we can display on the LVDS panel (if present).
  */
-bool
-intel_lvds_init(struct drm_device *dev)
+bool intel_lvds_init(struct drm_device *dev)
 {
 	struct drm_i915_private *dev_priv = dev->dev_private;
 	struct intel_lvds_encoder *lvds_encoder;
@@ -1027,15 +1006,13 @@ intel_lvds_init(struct drm_device *dev)
 		}
 	}
 
-	lvds_encoder = malloc(sizeof(struct intel_lvds_encoder), M_DRM,
-	    M_WAITOK | M_ZERO);
+	lvds_encoder = kzalloc(sizeof(struct intel_lvds_encoder), GFP_KERNEL);
 	if (!lvds_encoder)
 		return false;
 
-	lvds_connector = malloc(sizeof(struct intel_lvds_connector), M_DRM,
-	    M_WAITOK | M_ZERO);
+	lvds_connector = kzalloc(sizeof(struct intel_lvds_connector), GFP_KERNEL);
 	if (!lvds_connector) {
-		free(lvds_encoder, M_DRM);
+		kfree(lvds_encoder);
 		return false;
 	}
 
@@ -1103,7 +1080,7 @@ intel_lvds_init(struct drm_device *dev)
 			drm_mode_connector_update_edid_property(connector,
 								edid);
 		} else {
-			free(edid, M_DRM);
+			kfree(edid);
 			edid = ERR_PTR(-EINVAL);
 		}
 	} else {
@@ -1194,8 +1171,8 @@ out:
 		DRM_DEBUG_KMS("lid notifier registration failed\n");
 		lvds_connector->lid_notifier.notifier_call = NULL;
 	}
-	drm_sysfs_connector_add(connector);
 #endif
+	drm_sysfs_connector_add(connector);
 
 	intel_panel_init(&intel_connector->panel, fixed_mode);
 	intel_panel_setup_backlight(connector);
@@ -1208,7 +1185,7 @@ failed:
 	drm_encoder_cleanup(encoder);
 	if (fixed_mode)
 		drm_mode_destroy(dev, fixed_mode);
-	free(lvds_encoder, M_DRM);
-	free(lvds_connector, M_DRM);
+	kfree(lvds_encoder);
+	kfree(lvds_connector);
 	return false;
 }

@@ -1,4 +1,4 @@
-/* $OpenBSD: softraid_raid6.c,v 1.53 2013/06/11 16:42:13 deraadt Exp $ */
+/* $OpenBSD: softraid_raid6.c,v 1.61 2014/01/22 05:11:36 jsing Exp $ */
 /*
  * Copyright (c) 2009 Marco Peereboom <marco@peereboom.us>
  * Copyright (c) 2009 Jordan Hargrave <jordan@openbsd.org>
@@ -34,6 +34,7 @@
 #include <sys/mount.h>
 #include <sys/sensors.h>
 #include <sys/stat.h>
+#include <sys/task.h>
 #include <sys/conf.h>
 #include <sys/uio.h>
 
@@ -65,12 +66,8 @@ void	sr_raid6_xorp(void *, void *, int);
 void	sr_raid6_xorq(void *, void *, int, int);
 int	sr_raid6_addio(struct sr_workunit *wu, int, daddr_t, daddr_t,
 	    void *, int, int, void *, void *, int);
-void	sr_dump(void *, int);
 void	sr_raid6_scrub(struct sr_discipline *);
 int	sr_failio(struct sr_workunit *);
-
-void	*sr_get_block(struct sr_discipline *, int);
-void	sr_put_block(struct sr_discipline *, void *, int);
 
 void	gf_init(void);
 uint8_t gf_inv(uint8_t);
@@ -130,8 +127,8 @@ sr_raid6_create(struct sr_discipline *sd, struct bioc_createraid *bc,
 	 */
 	sd->sd_meta->ssdi.ssd_strip_size = MAXPHYS;
 	sd->sd_meta->ssdi.ssd_size = (coerced_size &
-	    ~((sd->sd_meta->ssdi.ssd_strip_size >> DEV_BSHIFT) - 1)) *
-	    (no_chunk - 2);
+	    ~(((u_int64_t)sd->sd_meta->ssdi.ssd_strip_size >>
+	    DEV_BSHIFT) - 1)) * (no_chunk - 2);
 
 	return sr_raid6_init(sd);
 }
@@ -237,7 +234,7 @@ die:
 	sd->sd_set_vol_state(sd);
 
 	sd->sd_must_flush = 1;
-	workq_add_task(NULL, 0, sr_meta_save_callback, sd, NULL);
+	task_add(systq, &sd->sd_meta_save_task);
 done:
 	splx(s);
 }
@@ -308,12 +305,11 @@ sr_raid6_set_vol_state(struct sr_discipline *sd)
 		/* XXX this might be a little too much */
 		goto die;
 
-	case BIOC_SVSCRUB:
+	case BIOC_SVDEGRADED:
 		switch (new_state) {
-		case BIOC_SVONLINE:
 		case BIOC_SVOFFLINE:
-		case BIOC_SVDEGRADED:
-		case BIOC_SVSCRUB: /* can go to same state */
+		case BIOC_SVREBUILD:
+		case BIOC_SVDEGRADED: /* can go to the same state */
 			break;
 		default:
 			goto die;
@@ -331,23 +327,24 @@ sr_raid6_set_vol_state(struct sr_discipline *sd)
 		}
 		break;
 
-	case BIOC_SVREBUILD:
+	case BIOC_SVSCRUB:
 		switch (new_state) {
 		case BIOC_SVONLINE:
 		case BIOC_SVOFFLINE:
 		case BIOC_SVDEGRADED:
-		case BIOC_SVREBUILD: /* can go to the same state */
+		case BIOC_SVSCRUB: /* can go to same state */
 			break;
 		default:
 			goto die;
 		}
 		break;
 
-	case BIOC_SVDEGRADED:
+	case BIOC_SVREBUILD:
 		switch (new_state) {
+		case BIOC_SVONLINE:
 		case BIOC_SVOFFLINE:
-		case BIOC_SVREBUILD:
-		case BIOC_SVDEGRADED: /* can go to the same state */
+		case BIOC_SVDEGRADED:
+		case BIOC_SVREBUILD: /* can go to the same state */
 			break;
 		default:
 			goto die;
@@ -382,9 +379,11 @@ sr_raid6_rw(struct sr_workunit *wu)
 	struct scsi_xfer	*xs = wu->swu_xs;
 	struct sr_chunk		*scp;
 	int			s, fail, i, gxinv, pxinv;
-	daddr_t			blk, lbaoffs, strip_no, chunk, qchunk, pchunk, fchunk;
-	daddr_t			strip_size, no_chunk, lba, chunk_offs, phys_offs;
-	daddr_t			strip_bits, length, strip_offs, datalen, row_size;
+	daddr_t			blk, lba;
+	int64_t			chunk_offs, lbaoffs, phys_offs, strip_offs;
+	int64_t			strip_no, strip_size, strip_bits;
+	int64_t			fchunk, no_chunk, chunk, qchunk, pchunk;
+	int64_t			length, datalen, row_size;
 	void			*pbuf, *data, *qbuf;
 
 	/* blk and scsi error will be handled by sr_validate_io */
@@ -567,11 +566,11 @@ sr_raid6_rw(struct sr_workunit *wu)
 			 * parity in the intr routine. The result in pbuf
 			 * is the new parity data.
 			 */
-			qbuf = sr_get_block(sd, length);
+			qbuf = sr_block_get(sd, length);
 			if (qbuf == NULL)
 				goto bad;
 
-			pbuf = sr_get_block(sd, length);
+			pbuf = sr_block_get(sd, length);
 			if (pbuf == NULL)
 				goto bad;
 
@@ -691,7 +690,7 @@ sr_raid6_intr(struct buf *bp)
 
 	/* Free allocated data buffer. */
 	if (ccb->ccb_flags & SR_CCBF_FREEBUF) {
-		sr_put_block(sd, ccb->ccb_buf.b_data, ccb->ccb_buf.b_bcount);
+		sr_block_put(sd, ccb->ccb_buf.b_data, ccb->ccb_buf.b_bcount);
 		ccb->ccb_buf.b_data = NULL;
 	}
 
@@ -717,14 +716,14 @@ sr_raid6_wu_done(struct sr_workunit *wu)
 
 	if (xs->flags & SCSI_DATA_IN) {
 		printf("%s: retrying read on block %lld\n",
-		    sd->sd_meta->ssd_devname, wu->swu_blk_start);
+		    sd->sd_meta->ssd_devname, (long long)wu->swu_blk_start);
 		sr_wu_release_ccbs(wu);
 		wu->swu_state = SR_WU_RESTART;
 		if (sd->sd_scsi_rw(wu) == 0)
 			return SR_WU_RESTART;
 	} else {
 		printf("%s: permanently fail write on block %lld\n",
-		    sd->sd_meta->ssd_devname, wu->swu_blk_start);
+		    sd->sd_meta->ssd_devname, (long long)wu->swu_blk_start);
 	}
 
 	wu->swu_state = SR_WU_FAILED;
@@ -743,12 +742,13 @@ sr_raid6_addio(struct sr_workunit *wu, int chunk, daddr_t blkno,
 	struct sr_raid6_opaque  *pqbuf;
 
 	DNPRINTF(SR_D_DIS, "sr_raid6_addio: %s %d.%llx %llx %p:%p\n",
-	    (xsflags & SCSI_DATA_IN) ? "read" : "write", chunk, blkno, len,
+	    (xsflags & SCSI_DATA_IN) ? "read" : "write", chunk,
+	    (long long)blkno, (long long)len,
 	    pbuf, qbuf);
 
 	/* Allocate temporary buffer. */
 	if (data == NULL) {
-		data = sr_get_block(sd, len);
+		data = sr_block_get(sd, len);
 		if (data == NULL)
 			return (-1);
 		ccbflags |= SR_CCBF_FREEBUF;
@@ -757,7 +757,7 @@ sr_raid6_addio(struct sr_workunit *wu, int chunk, daddr_t blkno,
 	ccb = sr_ccb_rw(sd, chunk, blkno, len, data, xsflags, ccbflags);
 	if (ccb == NULL) {
 		if (ccbflags & SR_CCBF_FREEBUF)
-			sr_put_block(sd, data, len);
+			sr_block_put(sd, data, len);
 		return (-1);
 	}
 	if (pbuf || qbuf) {

@@ -1,4 +1,4 @@
-/* $OpenBSD: softraid_aoe.c,v 1.33 2013/06/11 16:42:13 deraadt Exp $ */
+/* $OpenBSD: softraid_aoe.c,v 1.36 2014/01/21 04:23:14 jsing Exp $ */
 /*
  * Copyright (c) 2008 Ted Unangst <tedu@openbsd.org>
  * Copyright (c) 2008 Marco Peereboom <marco@openbsd.org>
@@ -248,7 +248,7 @@ sr_aoe_alloc_resources(struct sr_discipline *sd)
 	DNPRINTF(SR_D_DIS, "%s: sr_aoe_alloc_resources\n",
 	    DEVNAME(sd->sd_sc));
 
-	sr_wu_alloc(sd);
+	sr_wu_alloc(sd, sizeof(struct sr_workunit));
 	sr_ccb_alloc(sd);
 
 	return 0;
@@ -388,10 +388,6 @@ sr_aoe_rw(struct sr_workunit *wu)
 	const int		aoe_frags = 2;
 
 
-	printf("%s: sr_aoe_rw 0x%02x\n", DEVNAME(sd->sd_sc),
-	    xs->cmd->opcode);
-	return (1);
-
 	DNPRINTF(SR_D_DIS, "%s: sr_aoe_rw 0x%02x\n", DEVNAME(sd->sd_sc),
 	    xs->cmd->opcode);
 
@@ -468,7 +464,8 @@ sr_aoe_request_done(struct aoe_req *ar, struct aoe_packet *ap)
 	struct sr_discipline	*sd;
 	struct scsi_xfer	*xs;
 	struct sr_workunit	*wu;
-	daddr_t			blk, offset;
+	daddr_t			blk;
+	int64_t			offset;
 	int			len, s;
 
 	wu = ar->v;

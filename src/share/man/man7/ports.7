@@ -23,10 +23,10 @@
 .\" (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
 .\" THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 .\"
-.\" $OpenBSD: ports.7,v 1.95 2013/06/19 08:59:02 espie Exp $
+.\" $OpenBSD: ports.7,v 1.98 2014/01/20 05:07:49 schwarze Exp $
 .\" $FreeBSD: ports.7,v 1.7 1998/06/23 04:38:50 hoek Exp $
 .\"
-.Dd $Mdocdate: June 19 2013 $
+.Dd $Mdocdate: January 20 2014 $
 .Dt PORTS 7
 .Os
 .Sh NAME
@@ -83,9 +83,6 @@ offers a few useful targets.
 .It Ar index
 rebuild the ports complete index,
 .Pa /usr/ports/INDEX
-.It Ar mirror-maker
-see
-.Xr mirroring-ports 7 ,
 .It Ar pkglocatedb
 build a
 .Xr pkg_mklocatedb 1
@@ -195,7 +192,7 @@ is non empty, then
 .Ev REPORT_PROBLEM
 will default to:
 .Bd -literal -offset indent
-echo $$d ($@) >$${REPORT_PROBLEM_LOGFILE}
+echo $$subdir ($@) >>$${REPORT_PROBLEM_LOGFILE}
 .Ed
 .Pp
 That is, any failure will append the faulty directory name together
@@ -252,7 +249,7 @@ See
 and
 .Ev MASTER_SITE_OVERRIDE .
 Use
-.Xr dpb
+.Xr dpb 1
 with option
 .Fl F
 to quickly fetch distfiles for a subtree.
@@ -740,6 +737,7 @@ List of users and groups created by ports.
 .Xr pkg_info 1 ,
 .Xr bsd.port.mk 5 ,
 .Xr port-modules 5 ,
+.Xr mirroring-ports 7 ,
 .Xr packages 7
 .Pp
 The

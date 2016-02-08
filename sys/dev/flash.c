@@ -1,4 +1,4 @@
-/*	$OpenBSD: flash.c,v 1.26 2013/06/11 16:42:13 deraadt Exp $	*/
+/*	$OpenBSD: flash.c,v 1.29 2013/11/11 03:03:34 dlg Exp $	*/
 
 /*
  * Copyright (c) 2005 Uwe Stuehler <uwe@openbsd.org>
@@ -155,6 +155,7 @@ flashattach(struct flash_softc *sc, struct flash_ctl_tag *tag,
 	 * Initialize and attach the disk structure.
 	 */
 	sc->sc_dk.dk_name = sc->sc_dev.dv_xname;
+	bufq_init(&sc->sc_bufq, BUFQ_FIFO);
 	disk_attach(&sc->sc_dev, &sc->sc_dk);
 
 	/* XXX establish shutdown hook to finish any commands. */
@@ -795,10 +796,12 @@ flashstrategy(struct buf *bp)
 		goto done;
 
 	/* Queue the transfer. */
+	bufq_queue(&sc->sc_bufq, bp);
+
 	s = splbio();
-	disksort(&sc->sc_q, bp);
 	flashstart(sc);
 	splx(s);
+
 	device_unref(&sc->sc_dev);
 	return;
 
@@ -863,16 +866,9 @@ flashsize(dev_t dev)
 void
 flashstart(struct flash_softc *sc)
 {
-	struct buf *dp, *bp;
+	struct buf *bp;
 
-	while (1) {
-		/* Remove the next buffer from the queue or stop. */
-		dp = &sc->sc_q;
-		bp = dp->b_actf;
-		if (bp == NULL)
-			return;
-		dp->b_actf = bp->b_actf;
-
+	while ((bp = bufq_dequeue(&sc->sc_bufq)) != NULL) {
 		/* Transfer this buffer now. */
 		_flashstart(sc, bp);
 	}
@@ -881,12 +877,15 @@ flashstart(struct flash_softc *sc)
 void
 _flashstart(struct flash_softc *sc, struct buf *bp)
 {
+	struct disklabel *lp;
 	int part;
 	daddr_t offset;
 	long pgno;
 
 	part = flashpart(bp->b_dev);
-	offset = DL_GETPOFFSET(&sc->sc_dk.dk_label->d_partitions[part]) +
+
+	lp = sc->sc_dk.dk_label;
+	offset = DL_SECTOBLK(lp, DL_GETPOFFSET(&lp->d_partitions[part])) +
 	    bp->b_blkno;
 	pgno = offset / (sc->sc_flashdev->pagesize / DEV_BSIZE);
 
@@ -969,7 +968,7 @@ flashgetdefaultlabel(dev_t dev, struct flash_softc *sc,
 	lp->d_nsectors = sc->sc_flashdev->capacity / lp->d_ntracks
 	    / lp->d_ncylinders;
 	lp->d_secpercyl = lp->d_ntracks * lp->d_nsectors;
-	DL_SETDSIZE(lp, (daddr_t)lp->d_ncylinders * lp->d_secpercyl);
+	DL_SETDSIZE(lp, (u_int64_t)lp->d_ncylinders * lp->d_secpercyl);
 
 	lp->d_version = 1;
 

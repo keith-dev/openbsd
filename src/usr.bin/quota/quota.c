@@ -1,4 +1,4 @@
-/*	$OpenBSD: quota.c,v 1.30 2010/04/08 02:43:57 william Exp $	*/
+/*	$OpenBSD: quota.c,v 1.32 2013/11/26 13:19:07 deraadt Exp $	*/
 
 /*
  * Copyright (c) 1980, 1990, 1993
@@ -462,7 +462,7 @@ getprivs(long id, int quotatype)
 			 * on a filesystem independent of /etc/fstab, and it
 			 * will still print quotas for them.
 			 */
-			if ((fs = getfsspec(fst[i].f_mntfromname)) == NULL)
+			if ((fs = getfsspec(fst[i].f_mntfromspec)) == NULL)
 				continue;
 			if (getufsquota(&fst[i], fs, qup, id, quotatype) == 0)
 				continue;
@@ -684,10 +684,10 @@ alldigits(char *s)
 {
 	int c;
 
-	c = *s++;
+	c = (unsigned char)*s++;
 	do {
 		if (!isdigit(c))
 			return (0);
-	} while ((c = *s++));
+	} while ((c = (unsigned char)*s++));
 	return (1);
 }

@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.523 2013/06/11 16:42:08 deraadt Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.531 2014/01/05 20:23:57 mlarkin Exp $	*/
 /*	$NetBSD: machdep.c,v 1.214 1996/11/10 03:16:17 thorpej Exp $	*/
 
 /*-
@@ -164,6 +164,11 @@ extern struct proc *npxproc;
 #include <dev/ic/comreg.h>
 #include <dev/ic/comvar.h>
 #endif /* NCOM > 0 */
+
+#ifdef HIBERNATE
+#include <machine/hibernate_var.h>
+#endif /* HIBERNATE */
+
 
 void	replacesmap(void);
 int     intr_handler(struct intrframe *, struct intrhand *);
@@ -2506,6 +2511,31 @@ sys_sigreturn(struct proc *p, void *v, register_t *retval)
 	return (EJUSTRETURN);
 }
 
+#ifdef MULTIPROCESSOR
+/* force a CPU into the kernel, whether or not it's idle */
+void
+cpu_kick(struct cpu_info *ci)
+{
+	/* only need to kick other CPUs */
+	if (ci != curcpu()) {
+		if (ci->ci_mwait != NULL) {
+			/*
+			 * If not idling, then send an IPI, else
+			 * just clear the "keep idling" bit.
+			 */
+			if ((ci->ci_mwait[0] & MWAIT_IN_IDLE) == 0)
+				i386_send_ipi(ci, I386_IPI_NOP);
+			else
+				atomic_clearbits_int(&ci->ci_mwait[0],
+				    MWAIT_KEEP_IDLING);
+		} else {
+			/* no mwait, so need an IPI */
+			i386_send_ipi(ci, I386_IPI_NOP);
+		}
+	}
+}
+#endif
+
 /*
  * Notify the current process (p) that it has a signal pending,
  * process as soon as possible.
@@ -2514,13 +2544,22 @@ void
 signotify(struct proc *p)
 {
 	aston(p);
-	cpu_unidle(p->p_cpu);
+	cpu_kick(p->p_cpu);
 }
 
 #ifdef MULTIPROCESSOR
 void
 cpu_unidle(struct cpu_info *ci)
 {
+	if (ci->ci_mwait != NULL) {
+		/*
+		 * Just clear the "keep idling" bit; if it wasn't
+		 * idling then we didn't need to do anything anyway.
+		 */
+		atomic_clearbits_int(&ci->ci_mwait[0], MWAIT_KEEP_IDLING);
+		return;
+	}
+
 	if (ci != curcpu())
 		i386_send_ipi(ci, I386_IPI_NOP);
 }
@@ -2578,7 +2617,8 @@ boot(int howto)
 
 haltsys:
 	doshutdownhooks();
-	config_suspend(TAILQ_FIRST(&alldevs), DVACT_POWERDOWN);
+	if (!TAILQ_EMPTY(&alldevs))
+		config_suspend(TAILQ_FIRST(&alldevs), DVACT_POWERDOWN);
 
 #ifdef MULTIPROCESSOR
 	i386_broadcast_ipi(I386_IPI_HALT);
@@ -2768,16 +2808,16 @@ dumpsys()
 		maddr = ptoa(dumpmem[i].start);
 		blkno = dumplo + btodb(maddr) + 1;
 #if 0
-		printf("(%d %lld %d) ", maddr, blkno, npg);
+		printf("(%d %lld %d) ", maddr, (long long)blkno, npg);
 #endif
 		for (j = npg; j--; maddr += NBPG, blkno += btodb(NBPG)) {
 
 			/* Print out how many MBs we have more to go. */
 			if (dbtob(blkno - dumplo) % (1024 * 1024) < NBPG)
-				printf("%d ",
+				printf("%ld ",
 				    (ptoa(dumpsize) - maddr) / (1024 * 1024));
 #if 0
-			printf("(%x %lld) ", maddr, blkno);
+			printf("(%x %lld) ", maddr, (long long)blkno);
 #endif
 			pmap_enter(pmap_kernel(), dumpspace, maddr,
 			    VM_PROT_READ, PMAP_WIRED);
@@ -3185,9 +3225,27 @@ init386(paddr_t first_avail)
 				e = 0xfffff000;
 			}
 
-			/* skip first 16 pages for tramps and hibernate */
+			/* skip first 16 pages due to SMI corruption */
 			if (a < 16 * NBPG)
 				a = 16 * NBPG;
+
+#ifdef MULTIPROCESSOR
+			/* skip MP trampoline code page */
+			if (a < MP_TRAMPOLINE + NBPG)
+				a = MP_TRAMPOLINE + NBPG;
+#endif /* MULTIPROCESSOR */
+
+#if NACPI > 0 && !defined(SMALL_KERNEL)
+			/* skip ACPI resume trampoline code page */
+			if (a < ACPI_TRAMPOLINE + NBPG)
+				a = ACPI_TRAMPOLINE + NBPG;
+#endif /* ACPI */
+
+#ifdef HIBERNATE
+			/* skip hibernate reserved pages */
+			if (a < HIBERNATE_HIBALLOC_PAGE + PAGE_SIZE)
+				a = HIBERNATE_HIBALLOC_PAGE + PAGE_SIZE;
+#endif /* HIBERNATE */
 
 			/* skip shorter than page regions */
 			if (a >= e || (e - a) < NBPG) {
@@ -3224,7 +3282,7 @@ init386(paddr_t first_avail)
 
 			if (extent_alloc_region(iomem_ex, a, e - a, EX_NOWAIT))
 				/* XXX What should we do? */
-				printf("\nWARNING: CAN'T ALLOCATE RAM (%x-%x)"
+				printf("\nWARNING: CAN'T ALLOCATE RAM (%lx-%lx)"
 				    " FROM IOMEM EXTENT MAP!\n", a, e);
 
 			physmem += atop(e - a);
@@ -3339,19 +3397,6 @@ init386(paddr_t first_avail)
 }
 
 /*
- * cpu_exec_aout_makecmds():
- *	cpu-dependent a.out format hook for execve().
- *
- * Determine of the given exec package refers to something which we
- * understand and, if so, set up the vmcmds for it.
- */
-int
-cpu_exec_aout_makecmds(struct proc *p, struct exec_package *epp)
-{
-	return ENOEXEC;
-}
-
-/*
  * consinit:
  * initialize the system console.
  */
@@ -3431,7 +3476,7 @@ need_resched(struct cpu_info *ci)
 	/* There's a risk we'll be called before the idle threads start */
 	if (ci->ci_curproc) {
 		aston(ci->ci_curproc);
-		cpu_unidle(ci);
+		cpu_kick(ci);
 	}
 }
 

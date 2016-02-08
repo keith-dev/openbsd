@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_fork.c,v 1.152 2013/06/11 13:00:31 tedu Exp $	*/
+/*	$OpenBSD: kern_fork.c,v 1.158 2014/02/12 05:47:36 guenther Exp $	*/
 /*	$NetBSD: kern_fork.c,v 1.29 1996/02/09 18:59:34 christos Exp $	*/
 
 /*
@@ -100,15 +100,14 @@ sys_fork(struct proc *p, void *v, register_t *retval)
 	flags = FORK_FORK;
 	if (p->p_p->ps_ptmask & PTRACE_FORK)
 		flags |= FORK_PTRACE;
-	return (fork1(p, SIGCHLD, flags, NULL, 0,
-	    fork_return, NULL, retval, NULL));
+	return (fork1(p, flags, NULL, 0, fork_return, NULL, retval, NULL));
 }
 
 /*ARGSUSED*/
 int
 sys_vfork(struct proc *p, void *v, register_t *retval)
 {
-	return (fork1(p, SIGCHLD, FORK_VFORK|FORK_PPWAIT, NULL, 0, NULL,
+	return (fork1(p, FORK_VFORK|FORK_PPWAIT, NULL, 0, NULL,
 	    NULL, retval, NULL));
 }
 
@@ -134,36 +133,11 @@ sys___tfork(struct proc *p, void *v, register_t *retval)
 #endif
 
 	flags = FORK_TFORK | FORK_THREAD | FORK_SIGHAND | FORK_SHAREVM
-	    | FORK_NOZOMBIE | FORK_SHAREFILES;
+	    | FORK_SHAREFILES;
 
-	return (fork1(p, 0, flags, param.tf_stack, param.tf_tid,
+	return (fork1(p, flags, param.tf_stack, param.tf_tid,
 	    tfork_child_return, param.tf_tcb, retval, NULL));
 }
-
-#ifdef COMPAT_O51
-int
-compat_o51_sys___tfork(struct proc *p, void *v, register_t *retval)
-{
-	struct compat_o51_sys___tfork_args /* {
-		syscallarg(struct __tfork51) *param;
-	} */ *uap = v;
-	struct __tfork51 param;
-	int flags;
-	int error;
-
-	if ((error = copyin(SCARG(uap, param), &param, sizeof(param))))
-		return (error);
-
-	if (param.tf_flags != 0)
-		return (EINVAL);
-
-	flags = FORK_TFORK | FORK_THREAD | FORK_SIGHAND | FORK_SHAREVM
-	    | FORK_NOZOMBIE | FORK_SHAREFILES;
-
-	return (fork1(p, 0, flags, NULL, param.tf_tid, tfork_child_return,
-	    param.tf_tcb, retval, NULL));
-}
-#endif
 
 void
 tfork_child_return(void *arg)
@@ -207,9 +181,12 @@ process_new(struct proc *p, struct process *parent)
 	crhold(parent->ps_cred->pc_ucred);
 	pr->ps_limit->p_refcnt++;
 
+	/* bump references to the text vnode (for procfs) */
+	pr->ps_textvp = parent->ps_textvp;
+	if (pr->ps_textvp)
+		vref(pr->ps_textvp);
+
 	timeout_set(&pr->ps_realit_to, realitexpire, pr);
-	timeout_set(&pr->ps_virt_to, virttimer_trampoline, pr);
-	timeout_set(&pr->ps_prof_to, proftimer_trampoline, pr);
 
 	pr->ps_flags = parent->ps_flags & (PS_SUGID | PS_SUGIDEXEC);
 	if (parent->ps_session->s_ttyvp != NULL &&
@@ -217,13 +194,16 @@ process_new(struct proc *p, struct process *parent)
 		atomic_setbits_int(&pr->ps_flags, PS_CONTROLT);
 
 	p->p_p = pr;
+
+	/* it's sufficiently inited to be globally visible */
+	LIST_INSERT_HEAD(&allprocess, pr, ps_list);
 }
 
 /* print the 'table full' message once per 10 seconds */
 struct timeval fork_tfmrate = { 10, 0 };
 
 int
-fork1(struct proc *curp, int exitsig, int flags, void *stack, pid_t *tidptr,
+fork1(struct proc *curp, int flags, void *stack, pid_t *tidptr,
     void (*func)(void *), void *arg, register_t *retval,
     struct proc **rnewprocp)
 {
@@ -242,8 +222,7 @@ fork1(struct proc *curp, int exitsig, int flags, void *stack, pid_t *tidptr,
 
 	/* sanity check some flag combinations */
 	if (flags & FORK_THREAD) {
-		if ((flags & (FORK_SIGHAND | FORK_NOZOMBIE)) !=
-		    (FORK_SIGHAND | FORK_NOZOMBIE))
+		if ((flags & FORK_SIGHAND) == 0)
 			return (EINVAL);
 	}
 	if (flags & FORK_SIGHAND && (flags & FORK_SHAREVM) == 0)
@@ -315,7 +294,6 @@ fork1(struct proc *curp, int exitsig, int flags, void *stack, pid_t *tidptr,
 	p = pool_get(&proc_pool, PR_WAITOK);
 
 	p->p_stat = SIDL;			/* protect against others */
-	p->p_exitsig = exitsig;
 	p->p_flag = 0;
 	p->p_xstat = 0;
 
@@ -352,12 +330,9 @@ fork1(struct proc *curp, int exitsig, int flags, void *stack, pid_t *tidptr,
 			startprofclock(pr);
 		if ((flags & FORK_PTRACE) && (curpr->ps_flags & PS_TRACED))
 			atomic_setbits_int(&pr->ps_flags, PS_TRACED);
+		if (flags & FORK_NOZOMBIE)
+			atomic_setbits_int(&pr->ps_flags, PS_NOZOMBIE);
 	}
-
-	/* bump references to the text vnode (for procfs) */
-	p->p_textvp = curp->p_textvp;
-	if (p->p_textvp)
-		vref(p->p_textvp);
 
 	if (flags & FORK_SHAREFILES)
 		p->p_fd = fdshare(curp);
@@ -368,8 +343,6 @@ fork1(struct proc *curp, int exitsig, int flags, void *stack, pid_t *tidptr,
 		atomic_setbits_int(&pr->ps_flags, PS_PPWAIT);
 		atomic_setbits_int(&curpr->ps_flags, PS_ISPWAIT);
 	}
-	if (flags & FORK_NOZOMBIE)
-		atomic_setbits_int(&p->p_flag, P_NOZOMBIE);
 
 #ifdef KTRACE
 	/*
@@ -565,7 +538,7 @@ int
 ispidtaken(pid_t pid)
 {
 	uint32_t i;
-	struct proc *p;
+	struct process *pr;
 
 	for (i = 0; i < nitems(oldpids); i++)
 		if (pid == oldpids[i])
@@ -575,9 +548,9 @@ ispidtaken(pid_t pid)
 		return (1);
 	if (pgfind(pid) != NULL)
 		return (1);
-	LIST_FOREACH(p, &zombproc, p_list) {
-		if (p->p_pid == pid ||
-		    (p->p_p->ps_pgrp && p->p_p->ps_pgrp->pg_id == pid))
+	LIST_FOREACH(pr, &zombprocess, ps_list) {
+		if (pr->ps_pid == pid ||
+		    (pr->ps_pgrp && pr->ps_pgrp->pg_id == pid))
 			return (1);
 	}
 	return (0);
@@ -595,7 +568,7 @@ allocpid(void)
 		pid = ++lastpid;
 	} else {
 		do {
-			pid = 1 + arc4random_uniform(PID_MAX - 1);
+			pid = 1 + arc4random_uniform(PID_MAX);
 		} while (ispidtaken(pid));
 	}
 

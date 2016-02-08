@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip6_forward.c,v 1.60 2013/07/04 19:10:41 sf Exp $	*/
+/*	$OpenBSD: ip6_forward.c,v 1.64 2014/01/29 00:50:56 dlg Exp $	*/
 /*	$KAME: ip6_forward.c,v 1.75 2001/06/29 12:42:13 jinmei Exp $	*/
 
 /*
@@ -49,8 +49,8 @@
 #include <net/route.h>
 
 #include <netinet/in.h>
-#include <netinet/in_var.h>
 #include <netinet/ip_var.h>
+#include <netinet6/in6_var.h>
 #include <netinet/ip6.h>
 #include <netinet6/ip6_var.h>
 #include <netinet/icmp6.h>
@@ -100,12 +100,12 @@ ip6_forward(struct mbuf *m, int srcrt)
 	struct tdb_ident *tdbi;
 	u_int32_t sspi;
 	struct tdb *tdb;
-	int s;
 #if NPF > 0
 	struct ifnet *encif;
 #endif
 #endif /* IPSEC */
 	u_int rtableid = 0;
+	char src6[INET6_ADDRSTRLEN], dst6[INET6_ADDRSTRLEN];
 
 	/*
 	 * Do not forward packets to multicast destination (should be handled
@@ -120,11 +120,12 @@ ip6_forward(struct mbuf *m, int srcrt)
 		/* XXX in6_ifstat_inc(rt->rt_ifp, ifs6_in_discard) */
 		if (ip6_log_time + ip6_log_interval < time_second) {
 			ip6_log_time = time_second;
+			inet_ntop(AF_INET6, &ip6->ip6_src, src6, sizeof(src6));
+			inet_ntop(AF_INET6, &ip6->ip6_dst, dst6, sizeof(dst6));
 			log(LOG_DEBUG,
 			    "cannot forward "
 			    "from %s to %s nxt %d received on %s\n",
-			    ip6_sprintf(&ip6->ip6_src),
-			    ip6_sprintf(&ip6->ip6_dst),
+			    src6, dst6,
 			    ip6->ip6_nxt,
 			    m->m_pkthdr.rcvif->if_xname);
 		}
@@ -140,6 +141,17 @@ ip6_forward(struct mbuf *m, int srcrt)
 	}
 	ip6->ip6_hlim -= IPV6_HLIMDEC;
 
+	/*
+	 * Save at most ICMPV6_PLD_MAXLEN (= the min IPv6 MTU -
+	 * size of IPv6 + ICMPv6 headers) bytes of the packet in case
+	 * we need to generate an ICMP6 message to the src.
+	 * Thanks to M_EXT, in most cases copy will not occur.
+	 *
+	 * It is important to save it before IPsec processing as IPsec
+	 * processing may modify the mbuf.
+	 */
+	mcopy = m_copy(m, 0, imin(m->m_pkthdr.len, ICMPV6_PLD_MAXLEN));
+
 #if NPF > 0
 reroute:
 #endif
@@ -147,8 +159,6 @@ reroute:
 #ifdef IPSEC
 	if (!ipsec_in_use)
 		goto done_spd;
-
-	s = splnet();
 
 	/*
 	 * Check if there was an outgoing SA bound to the flow
@@ -174,8 +184,6 @@ reroute:
 		    &error, IPSP_DIRECTION_OUT, NULL, NULL, 0);
 
 	if (tdb == NULL) {
-	        splx(s);
-
 		if (error == 0) {
 		        /*
 			 * No IPsec processing required, we'll just send the
@@ -209,7 +217,6 @@ reroute:
 			    tdbi->rdomain == tdb->tdb_rdomain &&
 			    !bcmp(&tdbi->dst, &tdb->tdb_dst,
 			    sizeof(union sockaddr_union))) {
-				splx(s);
 				sproto = 0; /* mark as no-IPsec-needed */
 				goto done_spd;
 			}
@@ -219,7 +226,6 @@ reroute:
 	        bcopy(&tdb->tdb_dst, &sdst, sizeof(sdst));
 		sspi = tdb->tdb_spi;
 		sproto = tdb->tdb_sproto;
-	        splx(s);
 	}
 
 	/* Fall through to the routing/multicast handling code */
@@ -229,17 +235,6 @@ reroute:
 #if NPF > 0
 	rtableid = m->m_pkthdr.rdomain;
 #endif
-
-	/*
-	 * Save at most ICMPV6_PLD_MAXLEN (= the min IPv6 MTU -
-	 * size of IPv6 + ICMPv6 headers) bytes of the packet in case
-	 * we need to generate an ICMP6 message to the src.
-	 * Thanks to M_EXT, in most cases copy will not occur.
-	 *
-	 * It is important to save it before IPsec processing as IPsec
-	 * processing may modify the mbuf.
-	 */
-	mcopy = m_copy(m, 0, imin(m->m_pkthdr.len, ICMPV6_PLD_MAXLEN));
 
 	dst = &ip6_forward_rt.ro_dst;
 	if (!srcrt) {
@@ -314,11 +309,12 @@ reroute:
 
 		if (ip6_log_time + ip6_log_interval < time_second) {
 			ip6_log_time = time_second;
+			inet_ntop(AF_INET6, &ip6->ip6_src, src6, sizeof(src6));
+			inet_ntop(AF_INET6, &ip6->ip6_dst, dst6, sizeof(dst6));
 			log(LOG_DEBUG,
 			    "cannot forward "
 			    "src %s, dst %s, nxt %d, rcvif %s, outif %s\n",
-			    ip6_sprintf(&ip6->ip6_src),
-			    ip6_sprintf(&ip6->ip6_dst),
+			    src6, dst6,
 			    ip6->ip6_nxt,
 			    m->m_pkthdr.rcvif->if_xname, rt->rt_ifp->if_xname);
 		}
@@ -337,12 +333,9 @@ reroute:
 	 * PMTU notification.  is it okay?
 	 */
 	if (sproto != 0) {
-		s = splnet();
-
 		tdb = gettdb(rtable_l2(m->m_pkthdr.rdomain),
 		    sspi, &sdst, sproto);
 		if (tdb == NULL) {
-			splx(s);
 			error = EHOSTUNREACH;
 			m_freem(m);
 			goto senderr;	/*XXX*/
@@ -352,15 +345,12 @@ reroute:
 		if ((encif = enc_getif(tdb->tdb_rdomain,
 		    tdb->tdb_tap)) == NULL ||
 		    pf_test(AF_INET6, PF_FWD, encif, &m, NULL) != PF_PASS) {
-			splx(s);
 			error = EHOSTUNREACH;
 			m_freem(m);
 			goto senderr;
 		}
-		if (m == NULL) {
-			splx(s);
+		if (m == NULL)
 			goto senderr;
-		}
 		ip6 = mtod(m, struct ip6_hdr *);
 		/*
 		 * PF_TAG_REROUTE handling or not...
@@ -376,7 +366,6 @@ reroute:
 
 		/* Callee frees mbuf */
 		error = ipsp_process_packet(m, tdb, AF_INET6, 0);
-		splx(s);
 		m_freem(mcopy);
 		goto freert;
 	}
@@ -446,10 +435,11 @@ reroute:
 		if ((rt->rt_flags & (RTF_BLACKHOLE|RTF_REJECT)) == 0)
 #endif
 		{
+			inet_ntop(AF_INET6, &ip6->ip6_src, src6, sizeof(src6));
+			inet_ntop(AF_INET6, &ip6->ip6_dst, dst6, sizeof(dst6));
 			printf("ip6_forward: outgoing interface is loopback. "
 			       "src %s, dst %s, nxt %d, rcvif %s, outif %s\n",
-			       ip6_sprintf(&ip6->ip6_src),
-			       ip6_sprintf(&ip6->ip6_dst),
+			       src6, dst6,
 			       ip6->ip6_nxt, m->m_pkthdr.rcvif->if_xname,
 			       rt->rt_ifp->if_xname);
 		}

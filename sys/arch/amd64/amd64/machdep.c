@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.165 2013/06/29 21:06:15 brad Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.173 2014/01/05 20:23:56 mlarkin Exp $	*/
 /*	$NetBSD: machdep.c,v 1.3 2003/05/07 22:58:18 fvdl Exp $	*/
 
 /*-
@@ -685,6 +685,31 @@ sys_sigreturn(struct proc *p, void *v, register_t *retval)
 	return (EJUSTRETURN);
 }
 
+#ifdef MULTIPROCESSOR
+/* force a CPU into the kernel, whether or not it's idle */
+void
+cpu_kick(struct cpu_info *ci)
+{
+	/* only need to kick other CPUs */
+	if (ci != curcpu()) {
+		if (ci->ci_mwait != NULL) {
+			/*
+			 * If not idling, then send an IPI, else
+			 * just clear the "keep idling" bit.
+			 */
+			if ((ci->ci_mwait[0] & MWAIT_IN_IDLE) == 0)
+				x86_send_ipi(ci, X86_IPI_NOP);
+			else
+				atomic_clearbits_int(&ci->ci_mwait[0],
+				    MWAIT_KEEP_IDLING);
+		} else {
+			/* no mwait, so need an IPI */
+			x86_send_ipi(ci, X86_IPI_NOP);
+		}
+	}
+}
+#endif
+
 /*
  * Notify the current process (p) that it has a signal pending,
  * process as soon as possible.
@@ -693,13 +718,22 @@ void
 signotify(struct proc *p)
 {
 	aston(p);
-	cpu_unidle(p->p_cpu);
+	cpu_kick(p->p_cpu);
 }
 
 #ifdef MULTIPROCESSOR
 void
 cpu_unidle(struct cpu_info *ci)
 {
+	if (ci->ci_mwait != NULL) {
+		/*
+		 * Just clear the "keep idling" bit; if it wasn't
+		 * idling then we didn't need to do anything anyway.
+		 */
+		atomic_clearbits_int(&ci->ci_mwait[0], MWAIT_KEEP_IDLING);
+		return;
+	}
+
 	if (ci != curcpu())
 		x86_send_ipi(ci, X86_IPI_NOP);
 }
@@ -754,7 +788,8 @@ boot(int howto)
 
 haltsys:
 	doshutdownhooks();
-	config_suspend(TAILQ_FIRST(&alldevs), DVACT_POWERDOWN);
+	if (!TAILQ_EMPTY(&alldevs))
+		config_suspend(TAILQ_FIRST(&alldevs), DVACT_POWERDOWN);
 
 #ifdef MULTIPROCESSOR
 	x86_broadcast_ipi(X86_IPI_HALT);
@@ -1159,7 +1194,7 @@ cpu_init_extents(void)
 		if (extent_alloc_region(iomem_ex, mem_clusters[i].start,
 		    mem_clusters[i].size, EX_NOWAIT)) {
 			/* XXX What should we do? */
-			printf("WARNING: CAN'T ALLOCATE RAM (%lx-%lx)"
+			printf("WARNING: CAN'T ALLOCATE RAM (%llx-%llx)"
 			    " FROM IOMEM EXTENT MAP!\n", mem_clusters[i].start,
 			    mem_clusters[i].start + mem_clusters[i].size - 1);
 		}
@@ -1193,7 +1228,6 @@ map_tramps(void) {
 	    VM_PROT_ALL);		/* protection */
 #endif /* MULTIPROCESSOR */
 
-
 	pmap_kenter_pa((vaddr_t)ACPI_TRAMPOLINE, /* virtual */
 	    (paddr_t)ACPI_TRAMPOLINE,	/* physical */
 	    VM_PROT_ALL);		/* protection */
@@ -1224,7 +1258,7 @@ init_x86_64(paddr_t first_avail)
 	cninit();
 
 	/*
-	 * Initailize PAGE_SIZE-dependent variables.
+	 * Initialize PAGE_SIZE-dependent variables.
 	 */
 	uvm_setpagesize();
 
@@ -1274,10 +1308,12 @@ init_x86_64(paddr_t first_avail)
  *
  * first_avail - This is the first available physical page after the
  *               kernel, page tables, etc.
+ *
+ * We skip the first few pages for trampolines, hibernate, and to avoid
+ * buggy SMI implementations that could corrupt the first 64KB.
  */
+	avail_start = 16*PAGE_SIZE;
 
-	avail_start = PAGE_SIZE; /* BIOS leaves data in low memory */
-				 /* and VM system doesn't work with phys 0 */
 #ifdef MULTIPROCESSOR
 	if (avail_start < MP_TRAMPOLINE + PAGE_SIZE)
 		avail_start = MP_TRAMPOLINE + PAGE_SIZE;
@@ -1325,7 +1361,7 @@ init_x86_64(paddr_t first_avail)
 			continue;
 
 		/* Check and adjust our segment(s) */
-		/* Nuke page zero */
+		/* Nuke low pages */
 		if (s1 < avail_start) {
 			s1 = avail_start;
 			if (s1 > e1)
@@ -1701,7 +1737,7 @@ need_resched(struct cpu_info *ci)
 	/* There's a risk we'll be called before the idle threads start */
 	if (ci->ci_curproc) {
 		aston(ci->ci_curproc);
-		cpu_unidle(ci);
+		cpu_kick(ci);
 	}
 }
 
@@ -1821,7 +1857,7 @@ getbootinfo(char *bootinfo, int bootinfo_size)
 #endif
 #endif
 		case BOOTARG_CONSDEV:
-			if (q->ba_size >= sizeof(bios_oconsdev_t) +
+			if (q->ba_size >= sizeof(bios_consdev_t) +
 			    offsetof(struct _boot_args32, ba_arg)) {
 				bios_consdev_t *cdp =
 				    (bios_consdev_t*)q->ba_arg;
@@ -1829,10 +1865,7 @@ getbootinfo(char *bootinfo, int bootinfo_size)
 				static const int ports[] =
 				    { 0x3f8, 0x2f8, 0x3e8, 0x2e8 };
 				int unit = minor(cdp->consdev);
-				int consaddr = -1;
-				if (q->ba_size >= sizeof(bios_consdev_t) +
-				    offsetof(struct _boot_args32, ba_arg))
-					consaddr = cdp->consaddr;
+				int consaddr = cdp->consaddr;
 				if (consaddr == -1 && unit >= 0 &&
 				    unit < (sizeof(ports)/sizeof(ports[0])))
 					consaddr = ports[unit];
@@ -1851,7 +1884,6 @@ getbootinfo(char *bootinfo, int bootinfo_size)
 				printf(" console 0x%x:%d",
 				    cdp->consdev, cdp->conspeed);
 #endif
-				cnset(cdp->consdev);
 			}
 			break;
 		case BOOTARG_BOOTMAC:

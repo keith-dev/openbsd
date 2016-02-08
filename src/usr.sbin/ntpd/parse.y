@@ -1,4 +1,4 @@
-/*	$OpenBSD: parse.y,v 1.50 2012/09/20 12:43:16 patrick Exp $ */
+/*	$OpenBSD: parse.y,v 1.52 2013/11/25 12:58:42 benno Exp $ */
 
 /*
  * Copyright (c) 2002, 2003, 2004 Henning Brauer <henning@openbsd.org>
@@ -162,8 +162,7 @@ main		: LISTEN ON address listen_opts	{
 					fatal(NULL);
 				if (p->addr != NULL)
 					p->state = STATE_DNS_DONE;
-				if (!(p->rtable > 0 && p->addr &&
-				    p->addr->ss.ss_family != AF_INET))
+				if (!(p->rtable > 0 && p->addr))
 					TAILQ_INSERT_TAIL(&conf->ntp_peers,
 					    p, entry);
 				h = next;
@@ -202,8 +201,7 @@ main		: LISTEN ON address listen_opts	{
 				fatal(NULL);
 			if (p->addr != NULL)
 				p->state = STATE_DNS_DONE;
-			if (!(p->rtable > 0 && p->addr &&
-			    p->addr->ss.ss_family != AF_INET))
+			if (!(p->rtable > 0 && p->addr))
 				TAILQ_INSERT_TAIL(&conf->ntp_peers, p, entry);
 			free($2->name);
 			free($2);
@@ -388,9 +386,9 @@ lookup(char *s)
 
 #define MAXPUSHBACK	128
 
-char	*parsebuf;
+u_char	*parsebuf;
 int	 parseindex;
-char	 pushback_buffer[MAXPUSHBACK];
+u_char	 pushback_buffer[MAXPUSHBACK];
 int	 pushback_index = 0;
 
 int
@@ -483,8 +481,8 @@ findeol(void)
 int
 yylex(void)
 {
-	char	 buf[8096];
-	char	*p;
+	u_char	 buf[8096];
+	u_char	*p;
 	int	 quotec, next, c;
 	int	 token;
 
@@ -525,7 +523,7 @@ yylex(void)
 				yyerror("string too long");
 				return (findeol());
 			}
-			*p++ = (char)c;
+			*p++ = c;
 		}
 		yylval.v.string = strdup(buf);
 		if (yylval.v.string == NULL)

@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_sis.c,v 1.111 2013/06/28 03:24:18 brad Exp $ */
+/*	$OpenBSD: if_sis.c,v 1.115 2013/12/28 03:34:54 deraadt Exp $ */
 /*
  * Copyright (c) 1997, 1998, 1999
  *	Bill Paul <wpaul@ctr.columbia.edu>.  All rights reserved.
@@ -78,7 +78,6 @@
 #ifdef INET
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
-#include <netinet/in_var.h>
 #include <netinet/ip.h>
 #include <netinet/if_ether.h>
 #endif
@@ -1212,18 +1211,17 @@ sis_activate(struct device *self, int act)
 	int rv = 0;
 
 	switch (act) {
-	case DVACT_QUIESCE:
-		rv = config_activate_children(self, act);
-		break;
 	case DVACT_SUSPEND:
 		if (ifp->if_flags & IFF_RUNNING)
 			sis_stop(sc);
 		rv = config_activate_children(self, act);
 		break;
 	case DVACT_RESUME:
-		rv = config_activate_children(self, act);
 		if (ifp->if_flags & IFF_UP)
 			sis_init(sc);
+		break;
+	default:
+		rv = config_activate_children(self, act);
 		break;
 	}
 	return (rv);
@@ -1403,7 +1401,7 @@ sis_rxeof(struct sis_softc *sc)
 		{
 			struct mbuf *m0;
 			m0 = m_devget(mtod(m, char *), total_len, ETHER_ALIGN,
-			    ifp, NULL);
+			    ifp);
 			m_freem(m);
 			if (m0 == NULL) {
 				ifp->if_ierrors++;

@@ -1,4 +1,4 @@
-/*	$OpenBSD: ftpd.c,v 1.197 2013/07/26 18:13:02 guenther Exp $	*/
+/*	$OpenBSD: ftpd.c,v 1.199 2014/01/08 17:31:36 jca Exp $	*/
 /*	$NetBSD: ftpd.c,v 1.15 1995/06/03 22:46:47 mycroft Exp $	*/
 
 /*
@@ -1586,6 +1586,12 @@ send_data(FILE *instr, FILE *outstr, off_t blksize, off_t filesize, int isreg)
 		if (isreg && filesize < (off_t)16 * 1024 * 1024) {
 			size_t fsize = (size_t)filesize;
 
+			if (fsize == 0) {
+				transflag = 0;
+				reply(226, "Transfer complete.");
+				return(0);
+			}
+
 			buf = mmap(0, fsize, PROT_READ, MAP_SHARED, filefd,
 			    (off_t)0);
 			if (buf == MAP_FAILED) {
@@ -2812,8 +2818,8 @@ logxfer(char *name, off_t size, time_t start)
 		strvis(vpw, guest? guestpw : pw->pw_name, VIS_SAFE|VIS_NOSLASH);
 
 		len = snprintf(buf, sizeof(buf),
-		    "%.24s %d %s %qd %s %c %s %c %c %s ftp %d %s %s\n",
-		    ctime(&now), now - start + (now == start),
+		    "%.24s %lld %s %qd %s %c %s %c %c %s ftp %d %s %s\n",
+		    ctime(&now), (long long)(now - start + (now == start)),
 		    vremotehost, (long long)size, vpath,
 		    ((type == TYPE_A) ? 'a' : 'b'), "*" /* none yet */,
 		    'o', ((guest) ? 'a' : 'r'),

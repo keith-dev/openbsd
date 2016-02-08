@@ -1,6 +1,6 @@
 define(MACHINE,zaurus)dnl
 vers(__file__,
-	{-$OpenBSD: MAKEDEV.md,v 1.33 2013/06/03 17:34:15 tedu Exp $-},
+	{-$OpenBSD: MAKEDEV.md,v 1.36 2014/02/14 20:02:40 ratchov Exp $-},
 etc.MACHINE)dnl
 dnl
 dnl Copyright (c) 2001-2004 Todd T. Fries <todd@OpenBSD.org>
@@ -63,7 +63,6 @@ _DEV(uhid, 65)
 _DEV(ulpt, 66)
 _DEV(urio, 67)
 _DEV(usb, 64)
-_DEV(uscan, 69)
 _TITLE(spec)
 _DEV(apm, 34)
 _DEV(au, 36)
@@ -93,7 +92,7 @@ divert(__mddivert)dnl
 dnl
 ramdisk)
 	_recurse std bpf0 wd0 wd1 sd0 tty00 rd0 wsmouse
-	_recurse st0 ttyC0 wskbd0 apm bio diskmap
+	_recurse st0 ttyC0 wskbd0 apm bio diskmap random
 	;;
 
 _std(1, 2, 8, 6)
@@ -101,6 +100,7 @@ _std(1, 2, 8, 6)
 dnl
 dnl *** zaurus specific targets
 dnl
+twrget(all, au, audio, 0, 1, 2)dnl
 target(all, ch, 0)dnl
 target(all, vscsi, 0)dnl
 target(all, diskmap)dnl

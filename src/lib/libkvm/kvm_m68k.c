@@ -1,4 +1,4 @@
-/*	$OpenBSD: kvm_m68k.c,v 1.21 2013/03/28 16:27:31 deraadt Exp $ */
+/*	$OpenBSD: kvm_m68k.c,v 1.23 2013/11/01 15:57:56 deraadt Exp $ */
 /*	$NetBSD: kvm_m68k.c,v 1.9 1996/05/07 06:09:11 leo Exp $	*/
 
 /*-
@@ -40,12 +40,11 @@
  */
 
 #include <sys/param.h>
-#include <sys/user.h>
 #include <sys/proc.h>
 #include <sys/stat.h>
 
 #include <sys/core.h>
-#include <sys/exec_aout.h>
+#include <sys/exec.h>
 #include <sys/kcore.h>
 
 #include <unistd.h>

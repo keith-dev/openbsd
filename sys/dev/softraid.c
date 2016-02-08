@@ -1,4 +1,4 @@
-/* $OpenBSD: softraid.c,v 1.311 2013/07/19 17:14:13 krw Exp $ */
+/* $OpenBSD: softraid.c,v 1.331 2014/01/22 23:32:42 jsing Exp $ */
 /*
  * Copyright (c) 2007, 2008, 2009 Marco Peereboom <marco@peereboom.us>
  * Copyright (c) 2008 Chris Kuethe <ckuethe@openbsd.org>
@@ -33,12 +33,13 @@
 #include <sys/queue.h>
 #include <sys/fcntl.h>
 #include <sys/disklabel.h>
+#include <sys/vnode.h>
 #include <sys/mount.h>
 #include <sys/sensors.h>
 #include <sys/stat.h>
 #include <sys/conf.h>
 #include <sys/uio.h>
-#include <sys/workq.h>
+#include <sys/task.h>
 #include <sys/kthread.h>
 #include <sys/dkio.h>
 
@@ -70,6 +71,7 @@ uint32_t	sr_debug = 0
 		    /* | SR_D_META */
 		    /* | SR_D_DIS */
 		    /* | SR_D_STATE */
+		    /* | SR_D_REBUILD */
 		;
 #endif
 
@@ -134,8 +136,9 @@ int			sr_already_assembled(struct sr_discipline *);
 int			sr_hotspare(struct sr_softc *, dev_t);
 void			sr_hotspare_rebuild(struct sr_discipline *);
 int			sr_rebuild_init(struct sr_discipline *, dev_t, int);
-void			sr_rebuild(void *);
+void			sr_rebuild_start(void *);
 void			sr_rebuild_thread(void *);
+void			sr_rebuild(struct sr_discipline *);
 void			sr_roam_chunks(struct sr_discipline *);
 int			sr_chunk_in_use(struct sr_softc *, dev_t);
 int			sr_rw(struct sr_softc *, dev_t, char *, size_t,
@@ -406,8 +409,8 @@ sr_rw(struct sr_softc *sc, dev_t dev, char *buf, size_t size, daddr_t offset,
 	int			rv = 1;
 	char			*dma_buf;
 
-	DNPRINTF(SR_D_MISC, "%s: sr_rw(0x%x, %p, %d, %llu 0x%x)\n",
-	    DEVNAME(sc), dev, buf, size, offset, flags);
+	DNPRINTF(SR_D_MISC, "%s: sr_rw(0x%x, %p, %zu, %lld 0x%x)\n",
+	    DEVNAME(sc), dev, buf, size, (long long)offset, flags);
 
 	dma_bufsize = (size > MAXPHYS) ? MAXPHYS : size;
 	dma_buf = dma_alloc(dma_bufsize, PR_WAITOK);
@@ -476,8 +479,8 @@ sr_meta_rw(struct sr_discipline *sd, dev_t dev, void *md, size_t size,
 {
 	int			rv = 1;
 
-	DNPRINTF(SR_D_META, "%s: sr_meta_rw(0x%x, %p, %d, %llu 0x%x)\n",
-	    DEVNAME(sd->sd_sc), dev, md, size, offset, flags);
+	DNPRINTF(SR_D_META, "%s: sr_meta_rw(0x%x, %p, %zu, %lld 0x%x)\n",
+	    DEVNAME(sd->sd_sc), dev, md, size, (long long)offset, flags);
 
 	if (md == NULL) {
 		printf("%s: sr_meta_rw: invalid metadata pointer\n",
@@ -720,7 +723,7 @@ restart:
 	/* not all disciplines have sync */
 	if (sd->sd_scsi_sync) {
 		bzero(&wu, sizeof(wu));
-		wu.swu_fake = 1;
+		wu.swu_flags |= SR_WUF_FAKE;
 		wu.swu_dis = sd;
 		sd->sd_scsi_sync(&wu);
 	}
@@ -1571,7 +1574,7 @@ sr_meta_native_probe(struct sr_softc *sc, struct sr_chunk *ch_entry)
 
 	/* Make sure this is a 512-byte/sector device. */
 	if (label.d_secsize != DEV_BSIZE) {
-		sr_error(sc, "%s has unsupported sector size (%d)",
+		sr_error(sc, "%s has unsupported sector size (%u)",
 		    devname, label.d_secsize);
 		goto unwind;
 	}
@@ -1585,7 +1588,8 @@ sr_meta_native_probe(struct sr_softc *sc, struct sr_chunk *ch_entry)
 		goto unwind;
 	}
 
-	size = DL_GETPSIZE(&label.d_partitions[part]) - SR_DATA_OFFSET;
+	size = DL_SECTOBLK(&label, DL_GETPSIZE(&label.d_partitions[part])) -
+	    SR_DATA_OFFSET;
 	if (size <= 0) {
 		DNPRINTF(SR_D_META, "%s: %s partition too small\n", DEVNAME(sc),
 		    devname);
@@ -1593,8 +1597,8 @@ sr_meta_native_probe(struct sr_softc *sc, struct sr_chunk *ch_entry)
 	}
 	ch_entry->src_size = size;
 
-	DNPRINTF(SR_D_META, "%s: probe found %s size %d\n", DEVNAME(sc),
-	    devname, size);
+	DNPRINTF(SR_D_META, "%s: probe found %s size %lld\n", DEVNAME(sc),
+	    devname, (long long)size);
 
 	return (SR_META_F_NATIVE);
 unwind:
@@ -1913,7 +1917,7 @@ sr_copy_internal_data(struct scsi_xfer *xs, void *v, size_t size)
 {
 	size_t			copy_cnt;
 
-	DNPRINTF(SR_D_MISC, "sr_copy_internal_data xs: %p size: %d\n",
+	DNPRINTF(SR_D_MISC, "sr_copy_internal_data xs: %p size: %zu\n",
 	    xs, size);
 
 	if (xs->datalen) {
@@ -2051,7 +2055,7 @@ sr_ccb_rw(struct sr_discipline *sd, int chunk, daddr_t blkno,
 	DNPRINTF(SR_D_DIS, "%s: %s %s ccb "
 	    "b_bcount %d b_blkno %lld b_flags 0x%0x b_data %p\n",
 	    DEVNAME(sd->sd_sc), sd->sd_meta->ssd_devname, sd->sd_name,
-	    ccb->ccb_buf.b_bcount, ccb->ccb_buf.b_blkno,
+	    ccb->ccb_buf.b_bcount, (long long)ccb->ccb_buf.b_blkno,
 	    ccb->ccb_buf.b_flags, ccb->ccb_buf.b_data);
 
 out:
@@ -2069,7 +2073,7 @@ sr_ccb_done(struct sr_ccb *ccb)
 	    " b_flags 0x%0x block %lld target %d\n",
 	    DEVNAME(sc), sd->sd_meta->ssd_devname, sd->sd_name,
 	    ccb->ccb_buf.b_bcount, ccb->ccb_buf.b_resid, ccb->ccb_buf.b_flags,
-	    ccb->ccb_buf.b_blkno, ccb->ccb_target);
+	    (long long)ccb->ccb_buf.b_blkno, ccb->ccb_target);
 
 	splassert(IPL_BIO);
 
@@ -2078,14 +2082,16 @@ sr_ccb_done(struct sr_ccb *ccb)
 
 	if (ccb->ccb_buf.b_flags & B_ERROR) {
 		DNPRINTF(SR_D_INTR, "%s: i/o error on block %lld target %d\n",
-		    DEVNAME(sc), ccb->ccb_buf.b_blkno, ccb->ccb_target);
+		    DEVNAME(sc), (long long)ccb->ccb_buf.b_blkno,
+		    ccb->ccb_target);
 		if (ISSET(sd->sd_capabilities, SR_CAP_REDUNDANT))
 			sd->sd_set_chunk_state(sd, ccb->ccb_target,
 			    BIOC_SDOFFLINE);
 		else
 			printf("%s: i/o error on block %lld target %d "
-			    "b_error %d\n", DEVNAME(sc), ccb->ccb_buf.b_blkno,
-			    ccb->ccb_target, ccb->ccb_buf.b_error);
+			    "b_error %d\n", DEVNAME(sc),
+			    (long long)ccb->ccb_buf.b_blkno, ccb->ccb_target,
+			    ccb->ccb_buf.b_error);
 		ccb->ccb_state = SR_CCB_FAILED;
 		wu->swu_ios_failed++;
 	} else {
@@ -2097,31 +2103,29 @@ sr_ccb_done(struct sr_ccb *ccb)
 }
 
 int
-sr_wu_alloc(struct sr_discipline *sd)
+sr_wu_alloc(struct sr_discipline *sd, int wu_size)
 {
 	struct sr_workunit	*wu;
 	int			i, no_wu;
 
-	if (!sd)
-		return (1);
-
 	DNPRINTF(SR_D_WU, "%s: sr_wu_alloc %p %d\n", DEVNAME(sd->sd_sc),
 	    sd, sd->sd_max_wu);
-
-	if (sd->sd_wu)
-		return (1);
 
 	no_wu = sd->sd_max_wu;
 	sd->sd_wu_pending = no_wu;
 
-	sd->sd_wu = malloc(sizeof(struct sr_workunit) * no_wu,
-	    M_DEVBUF, M_WAITOK | M_ZERO);
+	mtx_init(&sd->sd_wu_mtx, IPL_BIO);
+	TAILQ_INIT(&sd->sd_wu);
 	TAILQ_INIT(&sd->sd_wu_freeq);
 	TAILQ_INIT(&sd->sd_wu_pendq);
 	TAILQ_INIT(&sd->sd_wu_defq);
+
 	for (i = 0; i < no_wu; i++) {
-		wu = &sd->sd_wu[i];
+		wu = malloc(wu_size, M_DEVBUF, M_WAITOK | M_ZERO);
+		TAILQ_INSERT_TAIL(&sd->sd_wu, wu, swu_next);
 		TAILQ_INIT(&wu->swu_ccb);
+		task_set(&wu->swu_task, sr_wu_done_callback, sd, wu);
+		wu->swu_dis = sd;
 		sr_wu_put(sd, wu);
 	}
 
@@ -2133,9 +2137,6 @@ sr_wu_free(struct sr_discipline *sd)
 {
 	struct sr_workunit	*wu;
 
-	if (!sd)
-		return;
-
 	DNPRINTF(SR_D_WU, "%s: sr_wu_free %p\n", DEVNAME(sd->sd_sc), sd);
 
 	while ((wu = TAILQ_FIRST(&sd->sd_wu_freeq)) != NULL)
@@ -2145,8 +2146,10 @@ sr_wu_free(struct sr_discipline *sd)
 	while ((wu = TAILQ_FIRST(&sd->sd_wu_defq)) != NULL)
 		TAILQ_REMOVE(&sd->sd_wu_defq, wu, swu_link);
 
-	if (sd->sd_wu)
-		free(sd->sd_wu, M_DEVBUF);
+	while ((wu = TAILQ_FIRST(&sd->sd_wu)) != NULL) {
+		TAILQ_REMOVE(&sd->sd_wu, wu, swu_next);
+		free(wu, M_DEVBUF);
+	}
 }
 
 void *
@@ -2195,9 +2198,12 @@ sr_wu_init(struct sr_discipline *sd, struct sr_workunit *wu)
 		panic("%s: sr_wu_init got active wu", DEVNAME(sd->sd_sc));
 	splx(s);
 
-	bzero(wu, sizeof(*wu));
-	TAILQ_INIT(&wu->swu_ccb);
-	wu->swu_dis = sd;
+	wu->swu_xs = NULL;
+	wu->swu_state = SR_WU_FREE;
+	wu->swu_flags = 0;
+	wu->swu_blk_start = 0;
+	wu->swu_blk_end = 0;
+	wu->swu_collider = NULL;
 }
 
 void
@@ -2245,8 +2251,7 @@ sr_wu_done(struct sr_workunit *wu)
 	if (wu->swu_ios_complete < wu->swu_io_count)
 		return;
 
-	workq_queue_task(sd->sd_workq, &wu->swu_wqt, 0,
-	    sr_wu_done_callback, sd, wu);
+	task_add(sd->sd_taskq, &wu->swu_task);
 }
 
 void
@@ -2863,7 +2868,7 @@ sr_hotspare(struct sr_softc *sc, dev_t dev)
 		goto fail;
 	}
 	if (label.d_secsize != DEV_BSIZE) {
-		sr_error(sc, "%s has unsupported sector size (%d)",
+		sr_error(sc, "%s has unsupported sector size (%u)",
 		    devname, label.d_secsize);
 		goto fail;
 	}
@@ -2874,7 +2879,8 @@ sr_hotspare(struct sr_softc *sc, dev_t dev)
 	}
 
 	/* Calculate partition size. */
-	size = DL_GETPSIZE(&label.d_partitions[part]) - SR_DATA_OFFSET;
+	size = DL_SECTOBLK(&label, DL_GETPSIZE(&label.d_partitions[part])) -
+	    SR_DATA_OFFSET;
 
 	/*
 	 * Create and populate chunk metadata.
@@ -3164,7 +3170,7 @@ sr_rebuild_init(struct sr_discipline *sd, dev_t dev, int hotspare)
 		goto done;
 	}
 	if (label.d_secsize != DEV_BSIZE) {
-		sr_error(sc, "%s has unsupported sector size (%d)",
+		sr_error(sc, "%s has unsupported sector size (%u)",
 		    devname, label.d_secsize);
 		goto done;
 	}
@@ -3175,14 +3181,15 @@ sr_rebuild_init(struct sr_discipline *sd, dev_t dev, int hotspare)
 	}
 
 	/* Is the partition large enough? */
-	size = DL_GETPSIZE(&label.d_partitions[part]) - SR_DATA_OFFSET;
+	size = DL_SECTOBLK(&label, DL_GETPSIZE(&label.d_partitions[part])) -
+	    SR_DATA_OFFSET;
 	if (size < csize) {
-		sr_error(sc, "%s partition too small, at least %llu bytes "
-		    "required", devname, csize << DEV_BSHIFT);
+		sr_error(sc, "%s partition too small, at least %lld bytes "
+		    "required", devname, (long long)(csize << DEV_BSHIFT));
 		goto done;
 	} else if (size > csize)
-		sr_warn(sc, "%s partition too large, wasting %llu bytes",
-		    devname, (size - csize) << DEV_BSHIFT);
+		sr_warn(sc, "%s partition too large, wasting %lld bytes",
+		    devname, (long long)((size - csize) << DEV_BSHIFT));
 
 	/* Ensure that this chunk is not already in use. */
 	status = sr_chunk_in_use(sc, dev);
@@ -3227,7 +3234,7 @@ sr_rebuild_init(struct sr_discipline *sd, dev_t dev, int hotspare)
 	    sd->sd_meta->ssd_devname, devname);
 
 	sd->sd_reb_abort = 0;
-	kthread_create_deferred(sr_rebuild, sd);
+	kthread_create_deferred(sr_rebuild_start, sd);
 
 	rv = 0;
 done:
@@ -3300,9 +3307,9 @@ sr_ioctl_createraid(struct sr_softc *sc, struct bioc_createraid *bc,
 	sd = malloc(sizeof(struct sr_discipline), M_DEVBUF, M_WAITOK | M_ZERO);
 	sd->sd_sc = sc;
 	SLIST_INIT(&sd->sd_meta_opt);
-	sd->sd_workq = workq_create("srdis", 1, IPL_BIO);
-	if (sd->sd_workq == NULL) {
-		sr_error(sc, "could not create discipline workq");
+	sd->sd_taskq = taskq_create("srdis", 1, IPL_BIO);
+	if (sd->sd_taskq == NULL) {
+		sr_error(sc, "could not create discipline taskq");
 		goto unwind;
 	}
 	if (sr_discipline_init(sd, bc->bc_level)) {
@@ -3460,7 +3467,6 @@ sr_ioctl_createraid(struct sr_softc *sc, struct bioc_createraid *bc,
 		}
 
 		/* Setup SCSI iopool. */
-		mtx_init(&sd->sd_wu_mtx, IPL_BIO);
 		scsi_iopool_init(&sd->sd_iopool, sd, sr_wu_get, sr_wu_put);
 
 		/*
@@ -3546,7 +3552,7 @@ sr_ioctl_createraid(struct sr_softc *sc, struct bioc_createraid *bc,
 	rv = sr_meta_save(sd, SR_META_DIRTY);
 
 	if (sd->sd_vol_status == BIOC_SVREBUILD)
-		kthread_create_deferred(sr_rebuild, sd);
+		kthread_create_deferred(sr_rebuild_start, sd);
 
 	sd->sd_ready = 1;
 
@@ -3890,8 +3896,8 @@ sr_discipline_shutdown(struct sr_discipline *sd, int meta_save)
 
 	sr_chunks_unwind(sc, &sd->sd_vol.sv_chunk_list);
 
-	if (sd->sd_workq)
-		workq_destroy(sd->sd_workq);
+	if (sd->sd_taskq)
+		taskq_destroy(sd->sd_taskq);
 
 	sr_discipline_free(sd);
 
@@ -3911,6 +3917,7 @@ sr_discipline_init(struct sr_discipline *sd, int level)
 	sd->sd_ioctl_handler = NULL;
 	sd->sd_openings = NULL;
 	sd->sd_meta_opt_handler = NULL;
+	sd->sd_rebuild = sr_rebuild;
 	sd->sd_scsi_inquiry = sr_raid_inquiry;
 	sd->sd_scsi_read_cap = sr_raid_read_cap;
 	sd->sd_scsi_tur = sr_raid_tur;
@@ -3925,6 +3932,8 @@ sr_discipline_init(struct sr_discipline *sd, int level)
 	sd->sd_set_vol_state = sr_set_vol_state;
 	sd->sd_start_discipline = NULL;
 
+	task_set(&sd->sd_meta_save_task, sr_meta_save_callback, sd, NULL);
+
 	switch (level) {
 	case 0:
 		sr_raid0_discipline_init(sd);
@@ -3932,11 +3941,8 @@ sr_discipline_init(struct sr_discipline *sd, int level)
 	case 1:
 		sr_raid1_discipline_init(sd);
 		break;
-	case 4:
-		sr_raidp_discipline_init(sd, SR_MD_RAID4);
-		break;
 	case 5:
-		sr_raidp_discipline_init(sd, SR_MD_RAID5);
+		sr_raid5_discipline_init(sd);
 		break;
 	case 6:
 		sr_raid6_discipline_init(sd);
@@ -4107,7 +4113,7 @@ sr_raid_sync(struct sr_workunit *wu)
 	DNPRINTF(SR_D_DIS, "%s: sr_raid_sync\n", DEVNAME(sd->sd_sc));
 
 	/* when doing a fake sync don't count the wu */
-	ios = wu->swu_fake ? 0 : 1;
+	ios = (wu->swu_flags & SR_WUF_FAKE) ? 0 : 1;
 
 	s = splbio();
 	sd->sd_sync = 1;
@@ -4156,6 +4162,8 @@ sr_schedule_wu(struct sr_workunit *wu)
 
 	DNPRINTF(SR_D_WU, "sr_schedule_wu: schedule wu %p state %i "
 	    "flags 0x%x\n", wu, wu->swu_state, wu->swu_flags);
+
+	KASSERT(wu->swu_io_count > 0);
 
 	s = splbio();
 
@@ -4254,7 +4262,7 @@ sr_raid_recreate_wu(struct sr_workunit *wu)
 int
 sr_alloc_resources(struct sr_discipline *sd)
 {
-	if (sr_wu_alloc(sd)) {
+	if (sr_wu_alloc(sd, sizeof(struct sr_workunit))) {
 		sr_error(sd->sd_sc, "unable to allocate work units");
 		return (ENOMEM);
 	}
@@ -4316,7 +4324,7 @@ die:
 	sd->sd_set_vol_state(sd);
 
 	sd->sd_must_flush = 1;
-	workq_add_task(NULL, 0, sr_meta_save_callback, sd, NULL);
+	task_add(systq, &sd->sd_meta_save_task);
 done:
 	splx(s);
 }
@@ -4377,6 +4385,18 @@ die:
 	}
 
 	sd->sd_vol_status = new_state;
+}
+
+void *
+sr_block_get(struct sr_discipline *sd, int length)
+{
+	return dma_alloc(length, PR_NOWAIT | PR_ZERO);
+}
+
+void
+sr_block_put(struct sr_discipline *sd, void *ptr, int length)
+{
+	dma_free(ptr, length);
 }
 
 void
@@ -4543,8 +4563,8 @@ sr_validate_io(struct sr_workunit *wu, daddr_t *blk, char *func)
 	if (wu->swu_blk_end > sd->sd_meta->ssdi.ssd_size) {
 		DNPRINTF(SR_D_DIS, "%s: %s out of bounds start: %lld "
 		    "end: %lld length: %d\n",
-		    DEVNAME(sd->sd_sc), func, wu->swu_blk_start,
-		    wu->swu_blk_end, xs->datalen);
+		    DEVNAME(sd->sd_sc), func, (long long)wu->swu_blk_start,
+		    (long long)wu->swu_blk_end, xs->datalen);
 
 		sd->sd_scsi_sense.error_code = SSD_ERRCODE_CURRENT |
 		    SSD_ERRCODE_VALID;
@@ -4561,10 +4581,13 @@ bad:
 }
 
 void
-sr_rebuild(void *arg)
+sr_rebuild_start(void *arg)
 {
 	struct sr_discipline	*sd = arg;
 	struct sr_softc		*sc = sd->sd_sc;
+
+	DNPRINTF(SR_D_REBUILD, "%s: %s starting rebuild thread\n",
+	    DEVNAME(sd->sd_sc), sd->sd_meta->ssd_devname);
 
 	if (kthread_create(sr_rebuild_thread, sd, &sd->sd_background_proc,
 	    DEVNAME(sc)) != 0)
@@ -4576,6 +4599,20 @@ void
 sr_rebuild_thread(void *arg)
 {
 	struct sr_discipline	*sd = arg;
+
+	DNPRINTF(SR_D_REBUILD, "%s: %s rebuild thread started\n",
+	    DEVNAME(sd->sd_sc), sd->sd_meta->ssd_devname);
+
+	sd->sd_reb_active = 1;
+	sd->sd_rebuild(sd);
+	sd->sd_reb_active = 0;
+
+	kthread_exit(0);
+}
+
+void
+sr_rebuild(struct sr_discipline *sd)
+{
 	struct sr_softc		*sc = sd->sd_sc;
 	daddr_t			whole_blk, partial_blk, blk, sz, lba;
 	daddr_t			psz, rb, restart;
@@ -4614,8 +4651,6 @@ sr_rebuild_thread(void *arg)
 		    DEVNAME(sc), sd->sd_meta->ssd_devname, percent);
 	}
 
-	sd->sd_reb_active = 1;
-
 	/* currently this is 64k therefore we can use dma_alloc */
 	buf = dma_alloc(SR_REBUILD_IO_SIZE << DEV_BSHIFT, PR_WAITOK);
 	for (blk = restart; blk <= whole_blk; blk++) {
@@ -4630,6 +4665,9 @@ sr_rebuild_thread(void *arg)
 		/* get some wu */
 		wu_r = sr_scsi_wu_get(sd, 0);
 		wu_w = sr_scsi_wu_get(sd, 0);
+
+		DNPRINTF(SR_D_REBUILD, "%s: %s rebuild wu_r %p, wu_w %p\n",
+		    DEVNAME(sd->sd_sc), sd->sd_meta->ssd_devname, wu_r, wu_w);
 
 		/* setup read io */
 		bzero(&xs_r, sizeof xs_r);
@@ -4683,10 +4721,13 @@ sr_rebuild_thread(void *arg)
 		TAILQ_INSERT_TAIL(&sd->sd_wu_defq, wu_w, swu_link);
 		splx(s);
 
+		DNPRINTF(SR_D_REBUILD, "%s: %s rebuild scheduling wu_r %p\n",
+		    DEVNAME(sd->sd_sc), sd->sd_meta->ssd_devname, wu_r);
+
 		wu_r->swu_state = SR_WU_INPROGRESS;
 		sr_schedule_wu(wu_r);
 
-		/* wait for read completion */
+		/* wait for write completion */
 		slept = 0;
 		while ((wu_w->swu_flags & SR_WUF_REBUILDIOCOMP) == 0) {
 			tsleep(wu_w, PRIBIO, "sr_rebuild", 0);
@@ -4722,12 +4763,13 @@ sr_rebuild_thread(void *arg)
 
 	/* all done */
 	sd->sd_meta->ssd_rebuild = 0;
-	for (c = 0; c < sd->sd_meta->ssdi.ssd_chunk_no; c++)
+	for (c = 0; c < sd->sd_meta->ssdi.ssd_chunk_no; c++) {
 		if (sd->sd_vol.sv_chunks[c]->src_meta.scm_status ==
 		    BIOC_SDREBUILD) {
 			sd->sd_set_chunk_state(sd, c, BIOC_SDONLINE);
 			break;
 		}
+	}
 
 abort:
 	if (sr_meta_save(sd, SR_META_DIRTY))
@@ -4735,8 +4777,6 @@ abort:
 		    DEVNAME(sc), sd->sd_meta->ssd_devname);
 fail:
 	dma_free(buf, SR_REBUILD_IO_SIZE << DEV_BSHIFT);
-	sd->sd_reb_active = 0;
-	kthread_exit(0);
 }
 
 #ifndef SMALL_KERNEL
@@ -4895,6 +4935,26 @@ sr_meta_print(struct sr_metadata *m)
 		printf("\n");
 		omh = (struct sr_meta_opt_hdr *)((void *)omh +
 		    omh->som_length);
+	}
+}
+
+void
+sr_dump_block(void *blk, int len)
+{
+	uint8_t			*b = blk;
+	int			i, j, c;
+
+	for (i = 0; i < len; i += 16) {
+		for (j = 0; j < 16; j++)
+			printf("%.2x ", b[i + j]);
+		printf("  ");
+		for (j = 0; j < 16; j++) {
+			c = b[i + j];
+			if (c < ' ' || c > 'z' || i + j > len)
+				c = '.';
+			printf("%c", c);
+		}
+		printf("\n");
 	}
 }
 

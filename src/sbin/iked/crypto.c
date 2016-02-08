@@ -1,4 +1,4 @@
-/*	$OpenBSD: crypto.c,v 1.9 2013/01/08 10:38:19 reyk Exp $	*/
+/*	$OpenBSD: crypto.c,v 1.13 2014/02/17 11:00:14 reyk Exp $	*/
 
 /*
  * Copyright (c) 2010-2013 Reyk Floeter <reyk@openbsd.org>
@@ -328,7 +328,7 @@ cipher_setiv(struct iked_cipher *encr, void *iv, size_t len)
 	ibuf_release(encr->encr_iv);
 	if (iv != NULL) {
 		if (len < encr->encr_ivlength) {
-			log_debug("%s: invalid IV length %d", __func__, len);
+			log_debug("%s: invalid IV length %zu", __func__, len);
 			return (NULL);
 		}
 		encr->encr_iv = ibuf_new(iv, encr->encr_ivlength);
@@ -384,7 +384,7 @@ cipher_update(struct iked_cipher *encr, void *in, size_t inlen,
 
 	olen = 0;
 	if (!EVP_CipherUpdate(encr->encr_ctx, out, &olen, in, inlen)) {
-		ca_sslerror();
+		ca_sslerror(__func__);
 		*outlen = 0;
 		return;
 	}
@@ -398,7 +398,7 @@ cipher_final(struct iked_cipher *encr, void *out, size_t *outlen)
 
 	olen = 0;
 	if (!EVP_CipherFinal_ex(encr->encr_ctx, out, &olen)) {
-		ca_sslerror();
+		ca_sslerror(__func__);
 		*outlen = 0;
 		return;
 	}
@@ -442,15 +442,8 @@ dsa_new(u_int16_t id, struct iked_hash *prf, int sign)
 
 	switch (id) {
 	case IKEV2_AUTH_RSA_SIG:
-		/*
-		 * XXX RFC4306 is not very clear about this and the
-		 * XXX informational RFC4718 says that we should use
-		 * XXX SHA1 here, but shouldn't we use the negotiated PRF
-		 * XXX alg instead?
-		 */
-		if ((dsa.dsa_priv =
-		    EVP_get_digestbyname("sha1WithRSAEncryption")) == NULL)
-			fatalx("dsa_new: cipher not available");
+		/* RFC5996 says we SHOULD use SHA1 here */
+		dsa.dsa_priv = EVP_sha1();
 		break;
 	case IKEV2_AUTH_SHARED_KEY_MIC:
 		if (prf == NULL || prf->hash_priv == NULL)
@@ -578,6 +571,7 @@ dsa_setkey(struct iked_dsa *dsa, void *key, size_t keylen, u_int8_t type)
 		if (!EVP_PKEY_set1_RSA(pkey, rsa))
 			goto sslerr;
 
+		RSA_free(rsa);	/* pkey now has the reference */
 		dsa->dsa_cert = NULL;
 		dsa->dsa_key = pkey;
 		break;
@@ -591,7 +585,7 @@ dsa_setkey(struct iked_dsa *dsa, void *key, size_t keylen, u_int8_t type)
 	return (dsa->dsa_keydata);
 
  sslerr:
-	ca_sslerror();
+	ca_sslerror(__func__);
  err:
 	log_debug("%s: error", __func__);
 
@@ -684,7 +678,7 @@ dsa_verify_final(struct iked_dsa *dsa, void *buf, size_t len)
 	} else {
 		if (EVP_VerifyFinal(dsa->dsa_ctx, buf, len,
 		    dsa->dsa_key) != 1) {
-			ca_sslerror();
+			ca_sslerror(__func__);
 			return (-1);
 		}
 	}

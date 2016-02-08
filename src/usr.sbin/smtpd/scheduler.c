@@ -1,4 +1,4 @@
-/*	$OpenBSD: scheduler.c,v 1.32 2013/07/19 21:14:52 eric Exp $	*/
+/*	$OpenBSD: scheduler.c,v 1.42 2014/02/04 14:56:03 eric Exp $	*/
 
 /*
  * Copyright (c) 2008 Gilles Chehade <gilles@poolp.org>
@@ -51,35 +51,33 @@ static void scheduler_reset_events(void);
 static void scheduler_timeout(int, short, void *);
 static void scheduler_process_remove(struct scheduler_batch *);
 static void scheduler_process_expire(struct scheduler_batch *);
+static void scheduler_process_update(struct scheduler_batch *);
 static void scheduler_process_bounce(struct scheduler_batch *);
 static void scheduler_process_mda(struct scheduler_batch *);
 static void scheduler_process_mta(struct scheduler_batch *);
 
 static struct scheduler_backend *backend = NULL;
 static struct event		 ev;
+static size_t			 ninflight;
+static uint64_t			*evpids;
+static uint32_t			*msgids;
+static struct evpstate		*state;
 
 extern const char *backend_scheduler;
-
-#define	MSGBATCHSIZE	1024
-#define	EVPBATCHSIZE	256
-
-#define SCHEDULE_MAX	1024
 
 void
 scheduler_imsg(struct mproc *p, struct imsg *imsg)
 {
 	struct bounce_req_msg	 req;
-	struct evpstate		 state[EVPBATCHSIZE];
 	struct envelope		 evp;
 	struct scheduler_info	 si;
 	struct msg		 m;
-	uint64_t		 evpid, id;
-	uint32_t		 msgid, msgids[MSGBATCHSIZE];
+	uint64_t		 evpid, id, holdq;
+	uint32_t		 msgid;
 	uint32_t       		 inflight;
-	uint32_t       		 penalty;
 	size_t			 n, i;
 	time_t			 timestamp;
-	int			 v;
+	int			 v, r, type;
 
 	switch (imsg->hdr.type) {
 
@@ -89,7 +87,7 @@ scheduler_imsg(struct mproc *p, struct imsg *imsg)
 		m_end(&m);
 		log_trace(TRACE_SCHEDULER,
 		    "scheduler: inserting evp:%016" PRIx64, evp.id);
-		scheduler_info(&si, &evp, 0);
+		scheduler_info(&si, &evp);
 		stat_increment("scheduler.envelope.incoming", 1);
 		backend->insert(&si);
 		return;
@@ -128,8 +126,11 @@ scheduler_imsg(struct mproc *p, struct imsg *imsg)
 		stat_decrement("scheduler.envelope", 1);
 		if (! inflight)
 			backend->remove(evpid);
-		else
+		else {
 			backend->delete(evpid);
+			ninflight -= 1;
+			stat_decrement("scheduler.envelope.inflight", 1);
+		}
 
 		scheduler_reset_events();
 		return;
@@ -141,6 +142,7 @@ scheduler_imsg(struct mproc *p, struct imsg *imsg)
 		log_trace(TRACE_SCHEDULER,
 		    "scheduler: deleting evp:%016" PRIx64 " (ok)", evpid);
 		backend->delete(evpid);
+		ninflight -= 1;
 		stat_increment("scheduler.delivery.ok", 1);
 		stat_decrement("scheduler.envelope.inflight", 1);
 		stat_decrement("scheduler.envelope", 1);
@@ -150,12 +152,12 @@ scheduler_imsg(struct mproc *p, struct imsg *imsg)
 	case IMSG_DELIVERY_TEMPFAIL:
 		m_msg(&m, imsg);
 		m_get_envelope(&m, &evp);
-		m_get_u32(&m, &penalty);
 		m_end(&m);
 		log_trace(TRACE_SCHEDULER,
 		    "scheduler: updating evp:%016" PRIx64, evp.id);
-		scheduler_info(&si, &evp, penalty);
+		scheduler_info(&si, &evp);
 		backend->update(&si);
+		ninflight -= 1;
 		stat_increment("scheduler.delivery.tempfail", 1);
 		stat_decrement("scheduler.envelope.inflight", 1);
 
@@ -185,6 +187,7 @@ scheduler_imsg(struct mproc *p, struct imsg *imsg)
 		log_trace(TRACE_SCHEDULER,
 		    "scheduler: deleting evp:%016" PRIx64 " (fail)", evpid);
 		backend->delete(evpid);
+		ninflight -= 1;
 		stat_increment("scheduler.delivery.permfail", 1);
 		stat_decrement("scheduler.envelope.inflight", 1);
 		stat_decrement("scheduler.envelope", 1);
@@ -198,9 +201,37 @@ scheduler_imsg(struct mproc *p, struct imsg *imsg)
 		log_trace(TRACE_SCHEDULER,
 		    "scheduler: deleting evp:%016" PRIx64 " (loop)", evpid);
 		backend->delete(evpid);
+		ninflight -= 1;
 		stat_increment("scheduler.delivery.loop", 1);
 		stat_decrement("scheduler.envelope.inflight", 1);
 		stat_decrement("scheduler.envelope", 1);
+		scheduler_reset_events();
+		return;
+
+	case IMSG_DELIVERY_HOLD:
+		m_msg(&m, imsg);
+		m_get_evpid(&m, &evpid);
+		m_get_id(&m, &holdq);
+		m_end(&m);
+		log_trace(TRACE_SCHEDULER,
+		    "scheduler: holding evp:%016" PRIx64 " on %016" PRIx64,
+		    evpid, holdq);
+		backend->hold(evpid, holdq);
+		ninflight -= 1;
+		stat_decrement("scheduler.envelope.inflight", 1);
+		scheduler_reset_events();
+		return;
+
+	case IMSG_DELIVERY_RELEASE:
+		m_msg(&m, imsg);
+		m_get_int(&m, &type);
+		m_get_id(&m, &holdq);
+		m_get_int(&m, &r);
+		m_end(&m);
+		log_trace(TRACE_SCHEDULER,
+		    "scheduler: releasing %d on holdq (%i, %016" PRIx64 ")",
+		    r, type, holdq);
+		backend->release(type, holdq, r);
 		scheduler_reset_events();
 		return;
 
@@ -235,14 +266,14 @@ scheduler_imsg(struct mproc *p, struct imsg *imsg)
 
 	case IMSG_CTL_LIST_MESSAGES:
 		msgid = *(uint32_t *)(imsg->data);
-		n = backend->messages(msgid, msgids, MSGBATCHSIZE);
+		n = backend->messages(msgid, msgids, env->sc_scheduler_max_msg_batch_size);
 		m_compose(p, IMSG_CTL_LIST_MESSAGES, imsg->hdr.peerid, 0, -1,
 		    msgids, n * sizeof (*msgids));
 		return;
 
 	case IMSG_CTL_LIST_ENVELOPES:
 		id = *(uint64_t *)(imsg->data);
-		n = backend->envelopes(id, state, EVPBATCHSIZE);
+		n = backend->envelopes(id, state, env->sc_scheduler_max_evp_batch_size);
 		for (i = 0; i < n; i++) {
 			m_create(p_queue, IMSG_CTL_LIST_ENVELOPES,
 			    imsg->hdr.peerid, 0, -1);
@@ -263,8 +294,10 @@ scheduler_imsg(struct mproc *p, struct imsg *imsg)
 		else
 			log_debug("debug: scheduler: "
 			    "scheduling evp:%016" PRIx64, id);
-		backend->schedule(id);
+		r = backend->schedule(id);
 		scheduler_reset_events();
+		m_compose(p, r ? IMSG_CTL_OK : IMSG_CTL_FAIL, imsg->hdr.peerid,
+		    0, -1, NULL, 0);
 		return;
 
 	case IMSG_MTA_SCHEDULE:
@@ -281,8 +314,10 @@ scheduler_imsg(struct mproc *p, struct imsg *imsg)
 		else
 			log_debug("debug: scheduler: "
 			    "removing evp:%016" PRIx64, id);
-		backend->remove(id);
+		r = backend->remove(id);
 		scheduler_reset_events();
+		m_compose(p, r ? IMSG_CTL_OK : IMSG_CTL_FAIL, imsg->hdr.peerid,
+		    0, -1, NULL, 0);
 		return;
 
 	case IMSG_CTL_PAUSE_EVP:
@@ -293,8 +328,10 @@ scheduler_imsg(struct mproc *p, struct imsg *imsg)
 		else
 			log_debug("debug: scheduler: "
 			    "suspending evp:%016" PRIx64, id);
-		backend->suspend(id);
+		r = backend->suspend(id);
 		scheduler_reset_events();
+		m_compose(p, r ? IMSG_CTL_OK : IMSG_CTL_FAIL, imsg->hdr.peerid,
+		    0, -1, NULL, 0);
 		return;
 
 	case IMSG_CTL_RESUME_EVP:
@@ -305,8 +342,10 @@ scheduler_imsg(struct mproc *p, struct imsg *imsg)
 		else
 			log_debug("debug: scheduler: "
 			    "resuming evp:%016" PRIx64, id);
-		backend->resume(id);
+		r = backend->resume(id);
 		scheduler_reset_events();
+		m_compose(p, r ? IMSG_CTL_OK : IMSG_CTL_FAIL, imsg->hdr.peerid,
+		    0, -1, NULL, 0);
 		return;
 	}
 
@@ -362,6 +401,7 @@ scheduler(void)
 	case -1:
 		fatal("scheduler: cannot fork");
 	case 0:
+		post_fork(PROC_SCHEDULER);
 		break;
 	default:
 		return (pid);
@@ -374,8 +414,6 @@ scheduler(void)
 
 	config_process(PROC_SCHEDULER);
 
-	fdlimit(1.0);
-
 	backend->init();
 
 	if (chroot(PATH_CHROOT) == -1)
@@ -387,6 +425,10 @@ scheduler(void)
 	    setresgid(pw->pw_gid, pw->pw_gid, pw->pw_gid) ||
 	    setresuid(pw->pw_uid, pw->pw_uid, pw->pw_uid))
 		fatal("scheduler: cannot drop privileges");
+
+	evpids = xcalloc(env->sc_scheduler_max_schedule, sizeof *evpids, "scheduler: init evpids");
+	msgids = xcalloc(env->sc_scheduler_max_msg_batch_size, sizeof *msgids, "scheduler: list msg");
+	state = xcalloc(env->sc_scheduler_max_evp_batch_size, sizeof *state, "scheduler: list evp");
 
 	imsg_callback = scheduler_imsg;
 	event_init();
@@ -416,37 +458,33 @@ scheduler_timeout(int fd, short event, void *p)
 {
 	struct timeval		tv;
 	struct scheduler_batch	batch;
-	int			typemask;
-	uint64_t		evpids[SCHEDULE_MAX];
+	int			typemask, left;
 
 	log_trace(TRACE_SCHEDULER, "scheduler: getting next batch");
 
 	tv.tv_sec = 0;
 	tv.tv_usec = 0;
 
-	typemask = SCHED_REMOVE | SCHED_EXPIRE | SCHED_BOUNCE;
-	if (!(env->sc_flags & SMTPD_MDA_PAUSED))
+	typemask = SCHED_REMOVE | SCHED_EXPIRE | SCHED_UPDATE | SCHED_BOUNCE;
+	if (ninflight < env->sc_scheduler_max_inflight &&
+	    !(env->sc_flags & SMTPD_MDA_PAUSED))
 		typemask |= SCHED_MDA;
-	if (!(env->sc_flags & SMTPD_MTA_PAUSED))
+	if (ninflight < env->sc_scheduler_max_inflight &&
+	    !(env->sc_flags & SMTPD_MTA_PAUSED))
 		typemask |= SCHED_MTA;
 
-	bzero(&batch, sizeof (batch));
-	batch.evpids = evpids;
-	batch.evpcount = SCHEDULE_MAX;
+	left = typemask;
 
-	backend->batch(typemask, &batch);
+    again:
+
+	log_trace(TRACE_SCHEDULER, "scheduler: typemask=0x%x", left);
+
+	memset(&batch, 0, sizeof (batch));
+	batch.evpids = evpids;
+	batch.evpcount = env->sc_scheduler_max_schedule;
+	backend->batch(left, &batch);
 
 	switch (batch.type) {
-	case SCHED_NONE:
-		log_trace(TRACE_SCHEDULER, "scheduler: SCHED_NONE");
-		return;
-
-	case SCHED_DELAY:
-		tv.tv_sec = batch.delay;
-		log_trace(TRACE_SCHEDULER,
-		    "scheduler: SCHED_DELAY %s", duration_to_text(tv.tv_sec));
-		break;
-
 	case SCHED_REMOVE:
 		log_trace(TRACE_SCHEDULER, "scheduler: SCHED_REMOVE %zu",
 		    batch.evpcount);
@@ -457,6 +495,12 @@ scheduler_timeout(int fd, short event, void *p)
 		log_trace(TRACE_SCHEDULER, "scheduler: SCHED_EXPIRE %zu",
 		    batch.evpcount);
 		scheduler_process_expire(&batch);
+		break;
+
+	case SCHED_UPDATE:
+		log_trace(TRACE_SCHEDULER, "scheduler: SCHED_UPDATE %zu",
+		    batch.evpcount);
+		scheduler_process_update(&batch);
 		break;
 
 	case SCHED_BOUNCE:
@@ -478,10 +522,37 @@ scheduler_timeout(int fd, short event, void *p)
 		break;
 
 	default:
-		fatalx("scheduler_timeout: unknown batch type");
+		break;
 	}
 
-	evtimer_add(&ev, &tv);
+	log_trace(TRACE_SCHEDULER, "scheduler: mask=0x%x", batch.mask);
+
+	left &= batch.mask;
+	left &= ~batch.type;
+
+	/* We can still schedule something immediatly. */
+	if (left)
+		goto again;
+
+	/* We can schedule in the next event frame */
+	if (batch.mask & typemask ||
+	    (batch.mask & SCHED_DELAY && batch.type != SCHED_DELAY)) {
+		tv.tv_sec = 0;
+		tv.tv_usec = 0;
+		evtimer_add(&ev, &tv);
+		return;
+	}
+
+	if (batch.type == SCHED_DELAY) {
+		tv.tv_sec = batch.delay;
+		tv.tv_usec = 0;
+		log_trace(TRACE_SCHEDULER,
+		    "scheduler: SCHED_DELAY %s", duration_to_text(tv.tv_sec));
+		evtimer_add(&ev, &tv);
+		return;
+	}
+
+	log_trace(TRACE_SCHEDULER, "scheduler: SCHED_NONE");
 }
 
 static void
@@ -519,6 +590,19 @@ scheduler_process_expire(struct scheduler_batch *batch)
 }
 
 static void
+scheduler_process_update(struct scheduler_batch *batch)
+{
+	size_t	i;
+
+	for (i = 0; i < batch->evpcount; i++) {
+		log_debug("debug: scheduler: evp:%016" PRIx64
+		    " scheduled (update)", batch->evpids[i]);
+	}
+
+	stat_increment("scheduler.envelope.update", batch->evpcount);
+}
+
+static void
 scheduler_process_bounce(struct scheduler_batch *batch)
 {
 	size_t	i;
@@ -531,6 +615,7 @@ scheduler_process_bounce(struct scheduler_batch *batch)
 		m_close(p_queue);
 	}
 
+	ninflight += batch->evpcount;
 	stat_increment("scheduler.envelope.inflight", batch->evpcount);
 }
 
@@ -547,6 +632,7 @@ scheduler_process_mda(struct scheduler_batch *batch)
 		m_close(p_queue);
 	}
 
+	ninflight += batch->evpcount;
 	stat_increment("scheduler.envelope.inflight", batch->evpcount);
 }
 
@@ -563,5 +649,6 @@ scheduler_process_mta(struct scheduler_batch *batch)
 		m_close(p_queue);
 	}
 
+	ninflight += batch->evpcount;
 	stat_increment("scheduler.envelope.inflight", batch->evpcount);
 }

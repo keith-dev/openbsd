@@ -1,4 +1,4 @@
-/*	$OpenBSD: lock_machdep.c,v 1.3 2012/10/29 21:58:07 kettenis Exp $	*/
+/*	$OpenBSD: lock_machdep.c,v 1.5 2014/01/30 00:51:13 dlg Exp $	*/
 
 /*
  * Copyright (c) 2007 Artur Grabowski <art@openbsd.org>
@@ -16,12 +16,11 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
-
+#include <sys/atomic.h>
 #include <sys/param.h>
 #include <sys/lock.h>
 #include <sys/systm.h>
 
-#include <machine/atomic.h>
 #include <machine/lock.h>
 #include <machine/psl.h>
 
@@ -85,7 +84,7 @@ __mp_lock_spin(struct __mp_lock *mpl)
 #else
 	int ticks = __mp_lock_spinout;
 
-	while (mpl->mpl_count != 0 && ticks-- > 0)
+	while (mpl->mpl_count != 0 && --ticks > 0)
 		SPINLOCK_SPIN_HOOK;
 
 	if (ticks == 0) {
@@ -114,7 +113,7 @@ __mp_lock(struct __mp_lock *mpl)
 		u_int64_t s;
 
 		s = intr_disable();
-		if (sparc64_casx(&mpl->mpl_count, 0, 1) == 0) {
+		if (atomic_cas_ulong(&mpl->mpl_count, 0, 1) == 0) {
 			sparc_membar(LoadLoad | LoadStore);
 			mpl->mpl_cpu = curcpu();
 		}

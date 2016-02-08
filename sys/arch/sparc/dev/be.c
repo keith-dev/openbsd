@@ -1,4 +1,4 @@
-/*	$OpenBSD: be.c,v 1.43 2008/11/28 02:44:17 brad Exp $	*/
+/*	$OpenBSD: be.c,v 1.46 2013/12/24 01:11:04 dlg Exp $	*/
 
 /*
  * Copyright (c) 1998 Theo de Raadt and Jason L. Wright.
@@ -46,7 +46,6 @@
 #ifdef INET
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
-#include <netinet/in_var.h>
 #include <netinet/ip.h>
 #include <netinet/if_ether.h>
 #endif
@@ -324,8 +323,7 @@ bestop(sc)
 	int tries;
 
 	sc->sc_arpcom.ac_if.if_timer = 0;
-	if (timeout_pending(&sc->sc_tick))
-		timeout_del(&sc->sc_tick);
+	timeout_del(&sc->sc_tick);
 
 	tries = 32;
 	sc->sc_br->tx_cfg = 0;
@@ -1159,6 +1157,9 @@ be_mcreset(sc)
 	else
 		br->rx_cfg &= ~BE_BR_RXCFG_PMISC;
 
+	if (ac->ac_multirangecnt > 0)
+		ifp->if_flags |= IFF_ALLMULTI;
+
 	if (ifp->if_flags & IFF_ALLMULTI) {
 		br->htable3 = 0xffff;
 		br->htable2 = 0xffff;
@@ -1171,25 +1172,6 @@ be_mcreset(sc)
 
 	ETHER_FIRST_MULTI(step, ac, enm);
 	while (enm != NULL) {
-		if (bcmp(enm->enm_addrlo, enm->enm_addrhi, ETHER_ADDR_LEN)) {
-			/*
-			 * We must listen to a range of multicast
-			 * addresses.  For now, just accept all
-			 * multicasts, rather than trying to set only
-			 * those filter bits needed to match the range.
-			 * (At this time, the only use of address
-			 * ranges is for IP multicast routing, for
-			 * which the range is big enough to require
-			 * all bits set.)
-			 */
-			br->htable3 = 0xffff;
-			br->htable2 = 0xffff;
-			br->htable1 = 0xffff;
-			br->htable0 = 0xffff;
-			ifp->if_flags |= IFF_ALLMULTI;
-			return;
-		}
-
 		crc = 0xffffffff;
 
 		for (i = 0; i < ETHER_ADDR_LEN; i++) {

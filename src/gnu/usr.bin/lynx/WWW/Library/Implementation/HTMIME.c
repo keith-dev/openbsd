@@ -2501,7 +2501,7 @@ int HTrjis(char **t,
  */
 /*
  * RJIS ( Recover JIS code from broken file )
- * $Header: /cvs/src/gnu/usr.bin/lynx/WWW/Library/Implementation/HTMIME.c,v 1.7 2011/07/22 14:10:38 avsm Exp $
+ * $Header: /var/www/space/cvs/src/gnu/usr.bin/lynx/WWW/Library/Implementation/HTMIME.c,v 1.7 2011/07/22 14:10:38 avsm Exp $
  * Copyright (C) 1992 1994
  * Hironobu Takahashi (takahasi@tiny.or.jp)
  *

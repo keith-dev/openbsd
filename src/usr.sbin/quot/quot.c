@@ -1,4 +1,4 @@
-/*	$OpenBSD: quot.c,v 1.22 2013/06/11 16:42:19 deraadt Exp $	*/
+/*	$OpenBSD: quot.c,v 1.24 2013/11/12 22:27:12 deraadt Exp $	*/
 
 /*
  * Copyright (C) 1991, 1994 Wolfgang Solfrank.
@@ -53,6 +53,7 @@ static char count;
 static char unused;
 static void (*func)(int, struct fs *, char *);
 static int cmpusers(const void *, const void *);
+void	quot(char *, char *);
 static long blocksize;
 static char *header;
 static int headerlen;
@@ -406,8 +407,9 @@ dofsizes(int fd, struct fs *super, char *name)
 	for (fp = fsizes; fp; fp = fp->fsz_next) {
 		for (i = 0; i < FSZCNT; i++) {
 			if (fp->fsz_count[i])
-				printf("%d\t%d\t%lld\n",
-				    fp->fsz_first + i, fp->fsz_count[i],
+				printf("%lld\t%llu\t%lld\n",
+				    (long long)fp->fsz_first + i,
+				    (unsigned long long)fp->fsz_count[i],
 				    SIZE(sz += fp->fsz_sz[i]));
 		}
 	}
@@ -456,7 +458,8 @@ static void
 donames(int fd, struct fs *super, char *name)
 {
 	int c;
-	ino_t inode, inode1;
+	unsigned long long inode;
+	ino_t inode1;
 	ino_t maxino;
 	union dinode *dp;
 
@@ -466,7 +469,7 @@ donames(int fd, struct fs *super, char *name)
 		while ((c = getchar()) != EOF && c != '\n');
 	ungetc(c, stdin);
 	inode1 = -1;
-	while (scanf("%d", &inode) == 1) {
+	while (scanf("%llu", &inode) == 1) {
 		if (inode < 0 || inode > maxino) {
 #ifndef	COMPAT
 			fprintf(stderr, "invalid inode %llu\n",

@@ -31,7 +31,7 @@
 
 *******************************************************************************/
 
-/* $OpenBSD: if_em_hw.h,v 1.54 2012/11/26 01:17:41 jsg Exp $ */
+/* $OpenBSD: if_em_hw.h,v 1.58 2014/02/22 04:41:32 chris Exp $ */
 /* $FreeBSD: if_em_hw.h,v 1.15 2005/05/26 23:32:02 tackerman Exp $ */
 
 /* if_em_hw.h
@@ -72,14 +72,20 @@ typedef enum {
     em_82575,
     em_82580,
     em_i350,
+    em_i210,
     em_80003es2lan,
     em_ich8lan,
     em_ich9lan,
     em_ich10lan,
     em_pchlan,
     em_pch2lan,
+    em_pch_lpt,
     em_num_macs
 } em_mac_type;
+
+#define IS_ICH8(t) \
+	(t == em_ich8lan || t == em_ich9lan || t == em_ich10lan || \
+	 t == em_pchlan || t == em_pch2lan || t == em_pch_lpt)
 
 typedef enum {
     em_eeprom_uninitialized = 0,
@@ -242,6 +248,7 @@ typedef enum {
     em_phy_82577,
     em_phy_82578,
     em_phy_82579,
+    em_phy_i217,
     em_phy_82580,
     em_phy_undefined = 0xFF
 } em_phy_type;
@@ -536,6 +543,10 @@ int32_t em_check_phy_reset_block(struct em_hw *hw);
 #define E1000_DEV_ID_PCH_D_HV_DC         0x10F0
 #define E1000_DEV_ID_PCH2_LV_LM          0x1502
 #define E1000_DEV_ID_PCH2_LV_V           0x1503
+#define E1000_DEV_ID_PCH_LPT_I217_LM     0x153A
+#define E1000_DEV_ID_PCH_LPT_I217_V      0x153B
+#define E1000_DEV_ID_PCH_LPTLP_I218_LM   0x155A
+#define E1000_DEV_ID_PCH_LPTLP_I218_V    0x1559
 #define E1000_DEV_ID_82575EB_PT          0x10A7
 #define E1000_DEV_ID_82575EB_PF          0x10A9
 #define E1000_DEV_ID_82575GB_QP          0x10D6
@@ -560,7 +571,17 @@ int32_t em_check_phy_reset_block(struct em_hw *hw);
 #define E1000_DEV_ID_I350_SERDES         0x1523
 #define E1000_DEV_ID_I350_SGMII          0x1524
 #define E1000_DEV_ID_82576_QUAD_CU_ET2   0x1526
+#define E1000_DEV_ID_I210_COPPER	 0x1533
+#define E1000_DEV_ID_I210_FIBER		 0x1536
+#define E1000_DEV_ID_I210_SERDES	 0x1537
+#define E1000_DEV_ID_I210_SGMII		 0x1538
+#define E1000_DEV_ID_I210_COPPER_FLASHLESS      0x157B
+#define E1000_DEV_ID_I210_SERDES_FLASHLESS      0x157C
+#define E1000_DEV_ID_I211_COPPER	 0x1539
 #define E1000_DEV_ID_I350_DA4            0x1546
+#define E1000_DEV_ID_I354_BACKPLANE_1GBPS       0x1F40
+#define E1000_DEV_ID_I354_SGMII                 0x1F41
+#define E1000_DEV_ID_I354_BACKPLANE_2_5GBPS     0x1F45
 #define E1000_DEV_ID_82574L              0x10D3
 #define E1000_DEV_ID_EP80579_LAN_1       0x5040
 #define E1000_DEV_ID_EP80579_LAN_2       0x5044
@@ -1698,13 +1719,16 @@ struct em_hw {
 #define E1000_EECD_AUPDEN    0x00100000 /* Enable Autonomous FLASH update */
 #define E1000_EECD_SHADV     0x00200000 /* Shadow RAM Data Valid */
 #define E1000_EECD_SEC1VAL   0x00400000 /* Sector One Valid */
+#define E1000_EECD_SEC1VAL_VALID_MASK   (E1000_EECD_AUTO_RD | E1000_EECD_PRES)
 #define E1000_EECD_SECVAL_SHIFT      22
 #define E1000_STM_OPCODE     0xDB00
 #define E1000_HICR_FW_RESET  0xC0
 
-#define E1000_SHADOW_RAM_WORDS     2048
-#define E1000_ICH_NVM_SIG_WORD     0x13
-#define E1000_ICH_NVM_SIG_MASK     0xC0
+#define E1000_SHADOW_RAM_WORDS		2048
+#define E1000_ICH_NVM_SIG_WORD		0x13
+#define E1000_ICH_NVM_SIG_MASK		0xC000
+#define E1000_ICH_NVM_VALID_SIG_MASK	0xC0
+#define E1000_ICH_NVM_SIG_VALUE		0x80
 
 /* EEPROM Read */
 #define E1000_EERD_START      0x00000001 /* Start Read */
@@ -2442,6 +2466,10 @@ struct em_host_command_info {
 #define EEPROM_CFG                    0x0012
 #define EEPROM_FLASH_VERSION          0x0032
 #define EEPROM_CHECKSUM_REG           0x003F
+
+#define EEPROM_COMPAT_VALID_CSUM      0x0001
+#define EEPROM_FUTURE_INIT_WORD1      0x0019
+#define EEPROM_FUTURE_INIT_WORD1_VALID_CSUM     0x0040
 
 #define E1000_NVM_CFG_DONE_PORT_0  0x040000 /* MNG config cycle done */
 #define E1000_NVM_CFG_DONE_PORT_1  0x080000 /* ...for second port */
@@ -3357,11 +3385,14 @@ struct em_host_command_info {
 #define GG82563_E_PHY_ID     0x01410CA0
 #define BME1000_E_PHY_ID     0x01410CB0
 #define BME1000_E_PHY_ID_R2  0x01410CB1
+#define M88E1543_E_PHY_ID    0x01410EA0
 #define I82577_E_PHY_ID      0x01540050
 #define I82578_E_PHY_ID      0x004DD040
 #define I82579_E_PHY_ID      0x01540090
+#define I217_E_PHY_ID        0x015400A0
 #define I82580_I_PHY_ID      0x015403A0
 #define I350_I_PHY_ID        0x015403B0
+#define I210_I_PHY_ID        0x01410C00
 #define IGP04E1000_E_PHY_ID  0x02A80391
 #define M88E1141_E_PHY_ID    0x01410CD0
 

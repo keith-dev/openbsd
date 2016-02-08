@@ -1,4 +1,4 @@
-.\"	$OpenBSD: cksum.1,v 1.24 2013/04/15 15:54:17 millert Exp $
+.\"	$OpenBSD: cksum.1,v 1.33 2014/01/30 05:12:29 lteo Exp $
 .\"
 .\" Copyright (c) 1991, 1993
 .\"	The Regents of the University of California.  All rights reserved.
@@ -32,7 +32,7 @@
 .\"
 .\"	@(#)cksum.1	8.2 (Berkeley) 4/28/95
 .\"
-.Dd $Mdocdate: April 15 2013 $
+.Dd $Mdocdate: January 30 2014 $
 .Dt CKSUM 1
 .Os
 .Sh NAME
@@ -42,18 +42,20 @@
 .Sh SYNOPSIS
 .Nm cksum
 .Bk -words
-.Op Fl bpqrtx
+.Op Fl bcpqrtx
 .Op Fl a Ar algorithms
-.Op Fl c Op Ar checklist ...
-.Op Fl o Ar 1 | 2
+.Op Fl C Ar checklist
+.Op Fl h Ar hashfile
+.Op Fl o Cm 1 | 2
 .Op Fl s Ar string
 .Op Ar
 .Ek
 .Nm sum
-.Op Fl bpqrtx
+.Op Fl bcpqrtx
 .Op Fl a Ar algorithms
-.Op Fl c Op Ar checklist ...
-.Op Fl o Ar 1 | 2
+.Op Fl C Ar checklist
+.Op Fl h Ar hashfile
+.Op Fl o Cm 1 | 2
 .Op Fl s Ar string
 .Op Ar
 .Sh DESCRIPTION
@@ -61,7 +63,7 @@ The
 .Nm cksum
 utility writes to the standard output a single line for each input file.
 The format of this line varies with the algorithm being used as follows:
-.Bl -tag -width Ds
+.Bl -tag -width sysvsum
 .It cksum
 The output line consists of three whitespace separated fields:
 a CRC checksum, the number of octets in the input,
@@ -100,19 +102,8 @@ The options are as follows:
 .Bl -tag -width Ds
 .It Fl a Ar algorithms
 Use the specified algorithm(s) instead of the default (cksum).
-Supported algorithms include
-.Ar cksum ,
-.Ar md4 ,
-.Ar md5 ,
-.Ar rmd160 ,
-.Ar sha1 ,
-.Ar sha224 ,
-.Ar sha256 ,
-.Ar sha384 ,
-.Ar sha512 ,
-.Ar sum ,
-and
-.Ar sysvsum .
+Supported algorithms include cksum, md4, md5, rmd160, sha1,
+sha224, sha256, sha384, sha512, sum, and sysvsum.
 Multiple algorithms may be specified, separated by a comma or whitespace.
 Additionally, multiple
 .Fl a
@@ -130,12 +121,7 @@ suffix, the checksum will be output in hex format.
 If an algorithm with the same output format is repeated,
 only the first instance is used.
 Note that output format suffixes are not supported
-for the
-.Ar cksum ,
-.Ar sum
-and
-.Ar sysvsum
-algorithms.
+for the cksum, sum and sysvsum algorithms.
 .It Fl b
 Output checksums in base64 notation, not hexadecimal by
 default.
@@ -144,18 +130,26 @@ A
 or
 .Sq x
 suffix on the algorithm will override this default.
-This option is ignored for the
-.Ar cksum ,
-.Ar sum
-and
-.Ar sysvsum
+This option is ignored for the cksum, sum and sysvsum
 algorithms, which do not use hexadecimal output.
-.It Fl c Op Ar checklist ...
-Compares all checksums contained in the file
+.It Fl C Ar checklist
+Compare the checksum of each
+.Ar file
+against the checksums in the
+.Ar checklist .
+Any specified
+.Ar file
+that is not listed in the
 .Ar checklist
-with newly computed checksums for the corresponding files.
+is ignored.
+.It Fl c
+If this option is specified, the
+.Ar file
+options become checklists.
+Each checklist should contain hash results in the normal format,
+which will be verified against the specified paths.
 Output consists of the digest used, the file name,
-and an OK or FAILED for the result of the comparison.
+and an OK, FAILED, or MISSING for the result of the comparison.
 This will validate any of the supported checksums.
 If no file is given, stdin is used.
 The
@@ -163,7 +157,11 @@ The
 option may not be used in conjunction with more than a single
 .Fl a
 option.
-.It Fl o Ar 1 | 2
+.It Fl h Ar hashfile
+Place the checksum into
+.Ar hashfile
+instead of stdout.
+.It Fl o Cm 1 | 2
 Use historic algorithms instead of the (superior) default one
 (see below).
 .It Fl p
@@ -189,8 +187,7 @@ by 10 for each additional flag.
 Runs a built-in test script.
 .El
 .Pp
-Algorithm 1 (aka
-.Ar sum )
+Algorithm 1 (aka sum)
 is the algorithm used by historic
 .Bx
 systems as the
@@ -205,9 +202,7 @@ option.
 This is a 16-bit checksum, with a right rotation before each addition;
 overflow is discarded.
 .Pp
-Algorithm 2 (aka
-.Ar sysvsum )
-is the algorithm used by historic
+Algorithm 2 (aka sysvsum) is the algorithm used by historic
 .At V
 systems as the
 default
@@ -229,7 +224,7 @@ Partial blocks are rounded up.
 .Pp
 The default CRC used is based on the polynomial used for CRC error checking
 in the networking standard
-.St -iso8802-3 .
+ISO/IEC 8802-3:1996.
 The CRC checksum encoding is defined by the generating polynomial:
 .Bd -unfilled -offset indent
 G(x) = x^32 + x^26 + x^23 + x^22 + x^16 + x^12 +
@@ -269,11 +264,10 @@ The
 .Nm cksum
 and
 .Nm sum
-utilities exit 0 on success or \*(Gt0 if an error occurred.
+utilities exit 0 on success,
+and >0 if an error occurs.
 .Sh SEE ALSO
-.Xr md5 1 ,
-.Xr sha1 1 ,
-.Xr sha256 1
+.Xr md5 1
 .Pp
 The default calculation is identical to that given in pseudo-code
 in the following ACM article:
@@ -301,13 +295,7 @@ The
 utility appeared in
 .Bx 4.4 .
 .Sh CAVEATS
-Do not use the
-.Ar cksum ,
-.Ar md4 ,
-.Ar md5 ,
-.Ar sum ,
-or
-.Ar sysvsum
+Do not use the cksum, md4, md5, sum, or sysvsum
 algorithms to verify file integrity.
 An attacker can trivially produce modified payload that
 has the same checksum as the original version.

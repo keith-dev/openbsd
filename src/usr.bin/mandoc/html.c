@@ -1,7 +1,7 @@
-/*	$Id: html.c,v 1.30 2012/05/28 13:00:51 schwarze Exp $ */
+/*	$Id: html.c,v 1.33 2014/01/22 20:58:35 schwarze Exp $ */
 /*
  * Copyright (c) 2008, 2009, 2010, 2011 Kristaps Dzonsons <kristaps@bsd.lv>
- * Copyright (c) 2011, 2012 Ingo Schwarze <schwarze@openbsd.org>
+ * Copyright (c) 2011, 2012, 2013, 2014 Ingo Schwarze <schwarze@openbsd.org>
  *
  * Permission to use, copy, modify, and distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -231,6 +231,9 @@ print_metaf(struct html *h, enum mandoc_esc deco)
 	case (ESCAPE_FONTBOLD):
 		font = HTMLFONT_BOLD;
 		break;
+	case (ESCAPE_FONTBI):
+		font = HTMLFONT_BI;
+		break;
 	case (ESCAPE_FONT):
 		/* FALLTHROUGH */
 	case (ESCAPE_FONTROMAN):
@@ -249,10 +252,20 @@ print_metaf(struct html *h, enum mandoc_esc deco)
 	h->metal = h->metac;
 	h->metac = font;
 
-	if (HTMLFONT_NONE != font)
-		h->metaf = HTMLFONT_BOLD == font ?
-			print_otag(h, TAG_B, 0, NULL) :
-			print_otag(h, TAG_I, 0, NULL);
+	switch (font) {
+	case (HTMLFONT_ITALIC):
+		h->metaf = print_otag(h, TAG_I, 0, NULL);
+		break;
+	case (HTMLFONT_BOLD):
+		h->metaf = print_otag(h, TAG_B, 0, NULL);
+		break;
+	case (HTMLFONT_BI):
+		h->metaf = print_otag(h, TAG_B, 0, NULL);
+		print_otag(h, TAG_I, 0, NULL);
+		break;
+	default:
+		break;
+	}
 }
 
 int
@@ -314,7 +327,8 @@ print_encode(struct html *h, const char *p, int norecurse)
 	int		 c, len, nospace;
 	const char	*seq;
 	enum mandoc_esc	 esc;
-	static const char rejs[6] = { '\\', '<', '>', '&', ASCII_HYPH, '\0' };
+	static const char rejs[8] = { '\\', '<', '>', '&',
+		ASCII_NBRSP, ASCII_HYPH, ASCII_BREAK, '\0' };
 
 	nospace = 0;
 
@@ -343,8 +357,13 @@ print_encode(struct html *h, const char *p, int norecurse)
 		case ('&'):
 			printf("&amp;");
 			continue;
+		case (ASCII_NBRSP):
+			putchar('-');
+			continue;
 		case (ASCII_HYPH):
 			putchar('-');
+			/* FALLTHROUGH */
+		case (ASCII_BREAK):
 			continue;
 		default:
 			break;
@@ -362,6 +381,8 @@ print_encode(struct html *h, const char *p, int norecurse)
 		case (ESCAPE_FONTBOLD):
 			/* FALLTHROUGH */
 		case (ESCAPE_FONTITALIC):
+			/* FALLTHROUGH */
+		case (ESCAPE_FONTBI):
 			/* FALLTHROUGH */
 		case (ESCAPE_FONTROMAN):
 			if (0 == norecurse)
@@ -540,10 +561,20 @@ print_text(struct html *h, const char *word)
 	}
 
 	assert(NULL == h->metaf);
-	if (HTMLFONT_NONE != h->metac)
-		h->metaf = HTMLFONT_BOLD == h->metac ?
-			print_otag(h, TAG_B, 0, NULL) :
-			print_otag(h, TAG_I, 0, NULL);
+	switch (h->metac) {
+	case (HTMLFONT_ITALIC):
+		h->metaf = print_otag(h, TAG_I, 0, NULL);
+		break;
+	case (HTMLFONT_BOLD):
+		h->metaf = print_otag(h, TAG_B, 0, NULL);
+		break;
+	case (HTMLFONT_BI):
+		h->metaf = print_otag(h, TAG_B, 0, NULL);
+		print_otag(h, TAG_I, 0, NULL);
+		break;
+	default:
+		break;
+	}
 
 	assert(word);
 	if ( ! print_encode(h, word, 0)) {
@@ -693,7 +724,7 @@ buffmt_man(struct html *h,
 			bufcat(h, sec ? sec : "1");
 			break;
 		case('N'):
-			bufcat_fmt(h, name);
+			bufcat_fmt(h, "%s", name);
 			break;
 		default:
 			bufncat(h, p, 2);

@@ -1,4 +1,4 @@
-/*	$OpenBSD: pr.c,v 1.31 2013/04/18 02:28:48 deraadt Exp $	*/
+/*	$OpenBSD: pr.c,v 1.33 2013/11/26 13:19:07 deraadt Exp $	*/
 
 /*-
  * Copyright (c) 1991 Keith Muller.
@@ -844,6 +844,7 @@ flsh_errs(void)
     }
 }
 
+static void ferrout(char *fmt, ...) __attribute__((format (printf, 1, 2)));
 static void
 ferrout(char *fmt, ...)
 {
@@ -861,8 +862,10 @@ ferrout(char *fmt, ...)
 	sigprocmask(SIG_BLOCK, &block, &oblock);
 
 	if (vasprintf(&p, fmt, ap) == -1 || (f = malloc(sizeof(*f))) == NULL) {
+		va_end(ap);
+		va_start(ap, fmt);
 		flsh_errs();
-		fprintf(stderr, fmt, ap);
+		vfprintf(stderr, fmt, ap);
 		fputs("pr: memory allocation failed\n", stderr);
 		exit(1);
 	}
@@ -1805,11 +1808,11 @@ setup(int argc, char *argv[])
 	    break;
 	case 'e':
 	    ++eflag;
-	    if ((eoptarg != NULL) && !isdigit(*eoptarg))
+	    if ((eoptarg != NULL) && !isdigit((unsigned char)*eoptarg))
 		inchar = *eoptarg++;
 	    else
 		inchar = INCHAR;
-	    if ((eoptarg != NULL) && isdigit(*eoptarg)) {
+	    if ((eoptarg != NULL) && isdigit((unsigned char)*eoptarg)) {
 		ingap = strtonum(eoptarg, 0, INT_MAX, &errstr);
 		if (errstr) {
 		    ferrout("pr: -e gap is %s: %s\n", errstr, eoptarg);
@@ -1832,11 +1835,11 @@ setup(int argc, char *argv[])
 	    break;
 	case 'i':
 	    ++iflag;
-	    if ((eoptarg != NULL) && !isdigit(*eoptarg))
+	    if ((eoptarg != NULL) && !isdigit((unsigned char)*eoptarg))
 		ochar = *eoptarg++;
 	    else
 		ochar = OCHAR;
-	    if ((eoptarg != NULL) && isdigit(*eoptarg)) {
+	    if ((eoptarg != NULL) && isdigit((unsigned char)*eoptarg)) {
 		ogap = strtonum(eoptarg, 0, INT_MAX, &errstr);
 		if (errstr) {
 		    ferrout("pr: -i gap is %s: %s\n", errstr, eoptarg);
@@ -1861,11 +1864,11 @@ setup(int argc, char *argv[])
 	    ++merge;
 	    break;
 	case 'n':
-	    if ((eoptarg != NULL) && !isdigit(*eoptarg))
+	    if ((eoptarg != NULL) && !isdigit((unsigned char)*eoptarg))
 		nmchar = *eoptarg++;
 	    else
 		nmchar = NMCHAR;
-	    if ((eoptarg != NULL) && isdigit(*eoptarg)) {
+	    if ((eoptarg != NULL) && isdigit((unsigned char)*eoptarg)) {
 		nmwd = strtonum(eoptarg, 1, INT_MAX, &errstr);
 		if (errstr) {
 		    ferrout("pr: -n width is %s: %s\n", errstr, eoptarg);

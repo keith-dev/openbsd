@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_jme.c,v 1.29 2012/11/29 21:10:32 brad Exp $	*/
+/*	$OpenBSD: if_jme.c,v 1.35 2014/01/27 12:04:46 brad Exp $	*/
 /*-
  * Copyright (c) 2008, Pyun YongHyeon <yongari@FreeBSD.org>
  * All rights reserved.
@@ -53,7 +53,6 @@
 #ifdef INET
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
-#include <netinet/in_var.h>
 #include <netinet/ip.h>
 #include <netinet/if_ether.h>
 #endif
@@ -80,6 +79,7 @@
 #undef	JME_SHOW_ERRORS
 
 int	jme_match(struct device *, void *, void *);
+void	jme_map_intr_vector(struct jme_softc *);
 void	jme_attach(struct device *, struct device *, void *);
 int	jme_detach(struct device *, int);
 
@@ -155,13 +155,8 @@ jme_miibus_readreg(struct device *dev, int phy, int reg)
 	int i;
 
 	/* For FPGA version, PHY address 0 should be ignored. */
-	if (sc->jme_caps & JME_CAP_FPGA) {
-		if (phy == 0)
-			return (0);
-	} else {
-		if (sc->jme_phyaddr != phy)
-			return (0);
-	}
+	if ((sc->jme_caps & JME_CAP_FPGA) && phy == 0)
+		return (0);
 
 	CSR_WRITE_4(sc, JME_SMI, SMI_OP_READ | SMI_OP_EXECUTE |
 	    SMI_PHY_ADDR(phy) | SMI_REG_ADDR(reg));
@@ -190,13 +185,8 @@ jme_miibus_writereg(struct device *dev, int phy, int reg, int val)
 	int i;
 
 	/* For FPGA version, PHY address 0 should be ignored. */
-	if (sc->jme_caps & JME_CAP_FPGA) {
-		if (phy == 0)
-			return;
-	} else {
-		if (sc->jme_phyaddr != phy)
-			return;
-	}
+	if ((sc->jme_caps & JME_CAP_FPGA) && phy == 0)
+		return;
 
 	CSR_WRITE_4(sc, JME_SMI, SMI_OP_WRITE | SMI_OP_EXECUTE |
 	    ((val << SMI_DATA_SHIFT) & SMI_DATA_MASK) |
@@ -480,6 +470,76 @@ jme_reg_macaddr(struct jme_softc *sc, uint8_t eaddr[])
 }
 
 void
+jme_map_intr_vector(struct jme_softc *sc)
+{
+	uint32_t map[MSINUM_NUM_INTR_SOURCE / JME_MSI_MESSAGES];
+
+	bzero(map, sizeof(map));
+
+	/* Map Tx interrupts source to MSI/MSIX vector 2. */
+	map[MSINUM_REG_INDEX(N_INTR_TXQ0_COMP)] =
+	    MSINUM_INTR_SOURCE(2, N_INTR_TXQ0_COMP);
+	map[MSINUM_REG_INDEX(N_INTR_TXQ1_COMP)] |=
+	    MSINUM_INTR_SOURCE(2, N_INTR_TXQ1_COMP);
+	map[MSINUM_REG_INDEX(N_INTR_TXQ2_COMP)] |=
+	    MSINUM_INTR_SOURCE(2, N_INTR_TXQ2_COMP);
+	map[MSINUM_REG_INDEX(N_INTR_TXQ3_COMP)] |=
+	    MSINUM_INTR_SOURCE(2, N_INTR_TXQ3_COMP);
+	map[MSINUM_REG_INDEX(N_INTR_TXQ4_COMP)] |=
+	    MSINUM_INTR_SOURCE(2, N_INTR_TXQ4_COMP);
+	map[MSINUM_REG_INDEX(N_INTR_TXQ4_COMP)] |=
+	    MSINUM_INTR_SOURCE(2, N_INTR_TXQ5_COMP);
+	map[MSINUM_REG_INDEX(N_INTR_TXQ6_COMP)] |=
+	    MSINUM_INTR_SOURCE(2, N_INTR_TXQ6_COMP);
+	map[MSINUM_REG_INDEX(N_INTR_TXQ7_COMP)] |=
+	    MSINUM_INTR_SOURCE(2, N_INTR_TXQ7_COMP);
+	map[MSINUM_REG_INDEX(N_INTR_TXQ_COAL)] |=
+	    MSINUM_INTR_SOURCE(2, N_INTR_TXQ_COAL);
+	map[MSINUM_REG_INDEX(N_INTR_TXQ_COAL_TO)] |=
+	    MSINUM_INTR_SOURCE(2, N_INTR_TXQ_COAL_TO);
+
+	/* Map Rx interrupts source to MSI/MSIX vector 1. */
+	map[MSINUM_REG_INDEX(N_INTR_RXQ0_COMP)] =
+	    MSINUM_INTR_SOURCE(1, N_INTR_RXQ0_COMP);
+	map[MSINUM_REG_INDEX(N_INTR_RXQ1_COMP)] =
+	    MSINUM_INTR_SOURCE(1, N_INTR_RXQ1_COMP);
+	map[MSINUM_REG_INDEX(N_INTR_RXQ2_COMP)] =
+	    MSINUM_INTR_SOURCE(1, N_INTR_RXQ2_COMP);
+	map[MSINUM_REG_INDEX(N_INTR_RXQ3_COMP)] =
+	    MSINUM_INTR_SOURCE(1, N_INTR_RXQ3_COMP);
+	map[MSINUM_REG_INDEX(N_INTR_RXQ0_DESC_EMPTY)] =
+	    MSINUM_INTR_SOURCE(1, N_INTR_RXQ0_DESC_EMPTY);
+	map[MSINUM_REG_INDEX(N_INTR_RXQ1_DESC_EMPTY)] =
+	    MSINUM_INTR_SOURCE(1, N_INTR_RXQ1_DESC_EMPTY);
+	map[MSINUM_REG_INDEX(N_INTR_RXQ2_DESC_EMPTY)] =
+	    MSINUM_INTR_SOURCE(1, N_INTR_RXQ2_DESC_EMPTY);
+	map[MSINUM_REG_INDEX(N_INTR_RXQ3_DESC_EMPTY)] =
+	    MSINUM_INTR_SOURCE(1, N_INTR_RXQ3_DESC_EMPTY);
+	map[MSINUM_REG_INDEX(N_INTR_RXQ0_COAL)] =
+	    MSINUM_INTR_SOURCE(1, N_INTR_RXQ0_COAL);
+	map[MSINUM_REG_INDEX(N_INTR_RXQ1_COAL)] =
+	    MSINUM_INTR_SOURCE(1, N_INTR_RXQ1_COAL);
+	map[MSINUM_REG_INDEX(N_INTR_RXQ2_COAL)] =
+	    MSINUM_INTR_SOURCE(1, N_INTR_RXQ2_COAL);
+	map[MSINUM_REG_INDEX(N_INTR_RXQ3_COAL)] =
+	    MSINUM_INTR_SOURCE(1, N_INTR_RXQ3_COAL);
+	map[MSINUM_REG_INDEX(N_INTR_RXQ0_COAL_TO)] =
+	    MSINUM_INTR_SOURCE(1, N_INTR_RXQ0_COAL_TO);
+	map[MSINUM_REG_INDEX(N_INTR_RXQ1_COAL_TO)] =
+	    MSINUM_INTR_SOURCE(1, N_INTR_RXQ1_COAL_TO);
+	map[MSINUM_REG_INDEX(N_INTR_RXQ2_COAL_TO)] =
+	    MSINUM_INTR_SOURCE(1, N_INTR_RXQ2_COAL_TO);
+	map[MSINUM_REG_INDEX(N_INTR_RXQ3_COAL_TO)] =
+	    MSINUM_INTR_SOURCE(1, N_INTR_RXQ3_COAL_TO);
+
+	/* Map all other interrupts source to MSI/MSIX vector 0. */
+	CSR_WRITE_4(sc, JME_MSINUM_BASE + sizeof(uint32_t) * 0, map[0]);
+	CSR_WRITE_4(sc, JME_MSINUM_BASE + sizeof(uint32_t) * 1, map[1]);
+	CSR_WRITE_4(sc, JME_MSINUM_BASE + sizeof(uint32_t) * 2, map[2]);
+	CSR_WRITE_4(sc, JME_MSINUM_BASE + sizeof(uint32_t) * 3, map[3]);
+}
+
+void
 jme_attach(struct device *parent, struct device *self, void *aux)
 {
 	struct jme_softc *sc = (struct jme_softc *)self;
@@ -510,7 +570,9 @@ jme_attach(struct device *parent, struct device *self, void *aux)
 		return;
 	}
 
-	if (pci_intr_map(pa, &ih) != 0) {
+	if (pci_intr_map_msi(pa, &ih) == 0)
+		jme_map_intr_vector(sc);
+	else if (pci_intr_map(pa, &ih) != 0) {
 		printf(": can't map interrupt\n");
 		return;
 	}
@@ -613,12 +675,9 @@ jme_attach(struct device *parent, struct device *self, void *aux)
 	IFQ_SET_READY(&ifp->if_snd);
 	strlcpy(ifp->if_xname, sc->sc_dev.dv_xname, IFNAMSIZ);
 
-	ifp->if_capabilities = IFCAP_VLAN_MTU;
-
-#ifdef JME_CHECKSUM
-	ifp->if_capabilities |= IFCAP_CSUM_IPv4 | IFCAP_CSUM_TCPv4 |
-				IFCAP_CSUM_UDPv4;
-#endif
+	ifp->if_capabilities = IFCAP_VLAN_MTU | IFCAP_CSUM_IPv4 |
+	    IFCAP_CSUM_TCPv4 | IFCAP_CSUM_UDPv4 | IFCAP_CSUM_TCPv6 |
+	    IFCAP_CSUM_UDPv6;
 
 #if NVLAN > 0
 	ifp->if_capabilities |= IFCAP_VLAN_HWTAGGING;
@@ -632,7 +691,8 @@ jme_attach(struct device *parent, struct device *self, void *aux)
 
 	ifmedia_init(&sc->sc_miibus.mii_media, 0, jme_mediachange,
 	    jme_mediastatus);
-	mii_attach(self, &sc->sc_miibus, 0xffffffff, MII_PHY_ANY,
+	mii_attach(self, &sc->sc_miibus, 0xffffffff,
+	    sc->jme_caps & JME_CAP_FPGA ? MII_PHY_ANY : sc->jme_phyaddr,
 	    MII_OFFSET_ANY, MIIF_DOPAUSE);
 
 	if (LIST_FIRST(&sc->sc_miibus.mii_phys) == NULL) {
@@ -1058,48 +1118,36 @@ jme_encap(struct jme_softc *sc, struct mbuf **m_head)
 	struct jme_txdesc *txd;
 	struct jme_desc *desc;
 	struct mbuf *m;
-	int maxsegs;
 	int error, i, prod;
 	uint32_t cflags;
 
 	prod = sc->jme_cdata.jme_tx_prod;
 	txd = &sc->jme_cdata.jme_txdesc[prod];
 
-	maxsegs = (JME_TX_RING_CNT - sc->jme_cdata.jme_tx_cnt) -
-		  (JME_TXD_RSVD + 1);
-	if (maxsegs > JME_MAXTXSEGS)
-		maxsegs = JME_MAXTXSEGS;
-	if (maxsegs < (sc->jme_txd_spare - 1))
-		panic("%s: not enough segments %d", sc->sc_dev.dv_xname,
-		    maxsegs);
-
 	error = bus_dmamap_load_mbuf(sc->sc_dmat, txd->tx_dmamap,
 				     *m_head, BUS_DMA_NOWAIT);
+	if (error != 0 && error != EFBIG)
+		goto drop;
 	if (error != 0) {
-		bus_dmamap_unload(sc->sc_dmat, txd->tx_dmamap);
-		error = EFBIG;
-	}
-	if (error == EFBIG) {
 		if (m_defrag(*m_head, M_DONTWAIT)) {
-			printf("%s: can't defrag TX mbuf\n",
-			    sc->sc_dev.dv_xname);
-			m_freem(*m_head);
-			*m_head = NULL;
-			return (ENOBUFS);
+			error = ENOBUFS;
+			goto drop;
 		}
-		error = bus_dmamap_load_mbuf(sc->sc_dmat,
-					     txd->tx_dmamap, *m_head,
-					     BUS_DMA_NOWAIT);
-		if (error != 0) {
-			printf("%s: could not load defragged TX mbuf\n",
-			    sc->sc_dev.dv_xname);
-			m_freem(*m_head);
-			*m_head = NULL;
-			return (error);
-		}
-	} else if (error) {
-		printf("%s: could not load TX mbuf\n", sc->sc_dev.dv_xname);
-		return (error);
+		error = bus_dmamap_load_mbuf(sc->sc_dmat, txd->tx_dmamap,
+					     *m_head, BUS_DMA_NOWAIT);
+		if (error != 0)
+			goto drop;
+	}
+
+	/*
+	 * Check descriptor overrun. Leave one free descriptor.
+	 * Since we always use 64bit address mode for transmitting,
+	 * each Tx request requires one more dummy descriptor.
+	 */
+	if (sc->jme_cdata.jme_tx_cnt + txd->tx_dmamap->dm_nsegs + JME_TXD_RSVD >
+	    JME_TX_RING_CNT - JME_TXD_RSVD) {
+		bus_dmamap_unload(sc->sc_dmat, txd->tx_dmamap);
+		return (ENOBUFS);
 	}
 
 	m = *m_head;
@@ -1127,7 +1175,6 @@ jme_encap(struct jme_softc *sc, struct mbuf **m_head)
 	desc->addr_hi = htole32(m->m_pkthdr.len);
 	desc->addr_lo = 0;
 	sc->jme_cdata.jme_tx_cnt++;
-	KASSERT(sc->jme_cdata.jme_tx_cnt < JME_TX_RING_CNT - JME_TXD_RSVD);
 	JME_DESC_INC(prod, JME_TX_RING_CNT);
 	for (i = 0; i < txd->tx_dmamap->dm_nsegs; i++) {
 		desc = &sc->jme_rdata.jme_tx_ring[prod];
@@ -1137,10 +1184,7 @@ jme_encap(struct jme_softc *sc, struct mbuf **m_head)
 		    htole32(JME_ADDR_HI(txd->tx_dmamap->dm_segs[i].ds_addr));
 		desc->addr_lo =
 		    htole32(JME_ADDR_LO(txd->tx_dmamap->dm_segs[i].ds_addr));
-
 		sc->jme_cdata.jme_tx_cnt++;
-		KASSERT(sc->jme_cdata.jme_tx_cnt <=
-			 JME_TX_RING_CNT - JME_TXD_RSVD);
 		JME_DESC_INC(prod, JME_TX_RING_CNT);
 	}
 
@@ -1154,7 +1198,7 @@ jme_encap(struct jme_softc *sc, struct mbuf **m_head)
 	desc->flags |= htole32(JME_TD_OWN | JME_TD_INTR);
 
 	txd->tx_m = m;
-	txd->tx_ndesc = txd->tx_dmamap->dm_nsegs + 1;
+	txd->tx_ndesc = txd->tx_dmamap->dm_nsegs + JME_TXD_RSVD;
 
 	/* Sync descriptors. */
 	bus_dmamap_sync(sc->sc_dmat, txd->tx_dmamap, 0,
@@ -1163,6 +1207,11 @@ jme_encap(struct jme_softc *sc, struct mbuf **m_head)
 	     sc->jme_cdata.jme_tx_ring_map->dm_mapsize, BUS_DMASYNC_PREWRITE);
 
 	return (0);
+
+  drop:
+	m_freem(*m_head);
+	*m_head = NULL;
+	return (error);
 }
 
 void
@@ -1188,7 +1237,7 @@ jme_start(struct ifnet *ifp)
 		 * Check number of available TX descs, always
 		 * leave JME_TXD_RSVD free TX descs.
 		 */
-		if (sc->jme_cdata.jme_tx_cnt + sc->jme_txd_spare >
+		if (sc->jme_cdata.jme_tx_cnt + JME_TXD_RSVD >
 		    JME_TX_RING_CNT - JME_TXD_RSVD) {
 			ifp->if_flags |= IFF_OACTIVE;
 			break;
@@ -1204,13 +1253,15 @@ jme_start(struct ifnet *ifp)
 		 * for the NIC to drain the ring.
 		 */
 		if (jme_encap(sc, &m_head)) {
-			if (m_head == NULL) {
+			if (m_head == NULL)
 				ifp->if_oerrors++;
-				break;
+			else {
+				IF_PREPEND(&ifp->if_snd, m_head);
+				ifp->if_flags |= IFF_OACTIVE;
 			}
-			ifp->if_flags |= IFF_OACTIVE;
 			break;
 		}
+
 		enq++;
 
 #if NBPFILTER > 0
@@ -1542,7 +1593,7 @@ jme_txeof(struct jme_softc *sc)
 	if (sc->jme_cdata.jme_tx_cnt == 0)
 		ifp->if_timer = 0;
 
-	if (sc->jme_cdata.jme_tx_cnt + sc->jme_txd_spare <=
+	if (sc->jme_cdata.jme_tx_cnt + JME_TXD_RSVD <=
 	    JME_TX_RING_CNT - JME_TXD_RSVD)
 		ifp->if_flags &= ~IFF_OACTIVE;
 
@@ -1789,14 +1840,6 @@ jme_init(struct ifnet *ifp)
 	 * Reset the chip to a known state.
 	 */
 	jme_reset(sc);
-
-	/*
-	 * Since we always use 64bit address mode for transmitting,
-	 * each Tx request requires one more dummy descriptor.
-	 */
-	sc->jme_txd_spare =
-	howmany(ifp->if_mtu + sizeof(struct ether_vlan_header), MCLBYTES) + 1;
-	KASSERT(sc->jme_txd_spare >= 2);
 
 	/* Init descriptors. */
 	error = jme_init_rx_ring(sc);

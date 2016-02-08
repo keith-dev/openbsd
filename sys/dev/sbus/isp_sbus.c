@@ -1,4 +1,4 @@
-/*	$OpenBSD: isp_sbus.c,v 1.18 2011/04/22 23:19:55 deraadt Exp $	*/
+/*	$OpenBSD: isp_sbus.c,v 1.20 2014/02/14 14:00:08 jmatthew Exp $	*/
 /* $NetBSD: isp_sbus.c,v 1.46 2001/09/26 20:53:14 eeh Exp $ */
 /*
  * SBus specific probe and attach routines for QLogic ISP SCSI adapters.
@@ -56,8 +56,8 @@
 #endif
 
 #if	defined(ISP_FIRMWARE_2200)
+extern const u_int16_t isp_2200_risc_code[];
 #define	ISP_2200_RISC_CODE	(u_int16_t *) isp_2200_risc_code
-#include <dev/microcode/isp/asm_2200.h>
 #else
 #define	ISP_2200_RISC_CODE	NULL
 #endif
@@ -706,9 +706,6 @@ mbxsync:
 		/* FALLTHROUGH */
 	case RQSTYPE_A64:
 		isp_put_request_t3(isp, (ispreqt3_t *) rq, (ispreqt3_t *) qep);
-		break;
-	case RQSTYPE_T7RQS:
-		isp_put_request_t7(isp, (ispreqt7_t *) rq, (ispreqt7_t *) qep);
 		break;
 	}
 	*nxtip = nxti;

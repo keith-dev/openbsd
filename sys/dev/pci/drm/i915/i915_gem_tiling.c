@@ -1,4 +1,4 @@
-/*	$OpenBSD: i915_gem_tiling.c,v 1.5 2013/05/18 21:43:42 kettenis Exp $	*/
+/*	$OpenBSD: i915_gem_tiling.c,v 1.14 2014/01/30 15:10:48 kettenis Exp $	*/
 /*
  * Copyright (c) 2008-2009 Owain G. Ainsworth <oga@openbsd.org>
  *
@@ -49,7 +49,7 @@
 #include <machine/pmap.h>
 
 #include <sys/queue.h>
-#include <sys/workq.h>
+#include <sys/task.h>
 
 /** @file i915_gem_tiling.c
  *
@@ -221,7 +221,7 @@ i915_gem_detect_bit_6_swizzle(struct drm_device *dev)
 }
 
 /* Check pitch constriants for all chips & tiling formats */
-bool
+static bool
 i915_tiling_ok(struct drm_device *dev, int stride, int size, int tiling_mode)
 {
 	int tile_width;
@@ -272,7 +272,8 @@ i915_tiling_ok(struct drm_device *dev, int stride, int size, int tiling_mode)
 	return true;
 }
 
-bool
+/* Is the current GTT allocation valid for the change in tiling? */
+static bool
 i915_gem_object_fence_ok(struct drm_i915_gem_object *obj, int tiling_mode)
 {
 	u32 size;
@@ -303,7 +304,7 @@ i915_gem_object_fence_ok(struct drm_i915_gem_object *obj, int tiling_mode)
 	while (size < obj->base.size)
 		size <<= 1;
 
-	if (obj->dmamap->dm_segs[0].ds_len != size)
+	if (obj->gtt_space->size != size)
 		return false;
 
 	if (obj->gtt_offset & (size - 1))
@@ -327,18 +328,17 @@ i915_gem_set_tiling(struct drm_device *dev, void *data,
 
 	obj = to_intel_bo(drm_gem_object_lookup(dev, file, args->handle));
 	if (&obj->base == NULL)
-		return ENOENT;
-	drm_hold_object(&obj->base);
+		return -ENOENT;
 
 	if (!i915_tiling_ok(dev,
 			    args->stride, obj->base.size, args->tiling_mode)) {
-		ret = EINVAL;
-		goto out;
+		drm_gem_object_unreference_unlocked(&obj->base);
+		return -EINVAL;
 	}
 
 	if (obj->pin_count) {
-		ret = EBUSY;
-		goto out;
+		drm_gem_object_unreference_unlocked(&obj->base);
+		return -EBUSY;
 	}
 
 	if (args->tiling_mode == I915_TILING_NONE) {
@@ -387,7 +387,7 @@ i915_gem_set_tiling(struct drm_device *dev, void *data,
 		 */
 
 		obj->map_and_fenceable =
-			obj->dmamap == NULL ||
+			obj->gtt_space == NULL ||
 			(obj->gtt_offset + obj->base.size <= dev_priv->mm.gtt_mappable_end &&
 			 i915_gem_object_fence_ok(obj, args->tiling_mode));
 
@@ -416,9 +416,8 @@ i915_gem_set_tiling(struct drm_device *dev, void *data,
 	/* we have to maintain this existing ABI... */
 	args->stride = obj->stride;
 	args->tiling_mode = obj->tiling_mode;
+	drm_gem_object_unreference(&obj->base);
 	DRM_UNLOCK();
-out:
-	drm_unhold_and_unref(&obj->base);
 
 	return ret;
 }
@@ -436,8 +435,7 @@ i915_gem_get_tiling(struct drm_device *dev, void *data,
 
 	obj = to_intel_bo(drm_gem_object_lookup(dev, file, args->handle));
 	if (&obj->base == NULL)
-		return ENOENT;
-	drm_hold_object(&obj->base);
+		return -ENOENT;
 
 	DRM_LOCK();
 
@@ -462,8 +460,8 @@ i915_gem_get_tiling(struct drm_device *dev, void *data,
 	if (args->swizzle_mode == I915_BIT_6_SWIZZLE_9_10_17)
 		args->swizzle_mode = I915_BIT_6_SWIZZLE_9_10;
 
+	drm_gem_object_unreference(&obj->base);
 	DRM_UNLOCK();
-	drm_unhold_and_unref(&obj->base);
 
 	return 0;
 }
@@ -473,7 +471,7 @@ i915_gem_get_tiling(struct drm_device *dev, void *data,
  * bit 17 of its physical address and therefore being interpreted differently
  * by the GPU.
  */
-int
+static void
 i915_gem_swizzle_page(struct vm_page *pg)
 {
 	char temp[64];
@@ -484,10 +482,8 @@ i915_gem_swizzle_page(struct vm_page *pg)
 #if defined (__HAVE_PMAP_DIRECT)
 	va = pmap_map_direct(pg);
 #else
-	va = uvm_km_valloc(kernel_map, PAGE_SIZE);
-	if (va == 0)
-		return (ENOMEM);
-	pmap_kenter_pa(va, VM_PAGE_TO_PHYS(pg), UVM_PROT_RW);
+	va = uvm_km_valloc_wait(phys_map, PAGE_SIZE);
+	pmap_kenter_pa(va, VM_PAGE_TO_PHYS(pg), VM_PROT_READ|VM_PROT_WRITE);
 	pmap_update(pmap_kernel());
 #endif
 	vaddr = (char *)va;
@@ -503,43 +499,26 @@ i915_gem_swizzle_page(struct vm_page *pg)
 #else
 	pmap_kremove(va, PAGE_SIZE);
 	pmap_update(pmap_kernel());
-	uvm_km_free(kernel_map, va, PAGE_SIZE);
+	uvm_km_free_wakeup(phys_map, va, PAGE_SIZE);
 #endif
-	return (0);
 }
 
 void
 i915_gem_object_do_bit_17_swizzle(struct drm_i915_gem_object *obj)
 {
-	struct vm_page *pg;
-	bus_dma_segment_t *segp;
 	int page_count = obj->base.size >> PAGE_SHIFT;
-	int i, n, ret;
+	int i;
 
 	if (obj->bit_17 == NULL)
 		return;
 
-	segp = &obj->dma_segs[0];
-	n = 0;
 	for (i = 0; i < page_count; i++) {
-		char new_bit_17 = (segp->ds_addr + n) >> 17;
+		struct vm_page *page = obj->pages[i];
+		char new_bit_17 = VM_PAGE_TO_PHYS(page) >> 17;
 		if ((new_bit_17 & 0x1) !=
 		    (test_bit(i, obj->bit_17) != 0)) {
-			/* XXX move this to somewhere where we already have pg */
-			pg = PHYS_TO_VM_PAGE(segp->ds_addr + n);
-			KASSERT(pg != NULL);
-			ret = i915_gem_swizzle_page(pg);
-			if (ret) {
-				printf("%s: page swizzle failed\n", __func__);
-				return;
-			}
-			atomic_clearbits_int(&pg->pg_flags, PG_CLEAN);
-		}
-
-		n += PAGE_SIZE;
-		if (n >= segp->ds_len) {
-			n = 0;
-			segp++;
+			i915_gem_swizzle_page(page);
+			atomic_clearbits_int(&page->pg_flags, PG_CLEAN);
 		}
 	}
 }
@@ -547,9 +526,8 @@ i915_gem_object_do_bit_17_swizzle(struct drm_i915_gem_object *obj)
 void
 i915_gem_object_save_bit_17_swizzle(struct drm_i915_gem_object *obj)
 {
-	bus_dma_segment_t *segp;
 	int page_count = obj->base.size >> PAGE_SHIFT;
-	int i, n;
+	int i;
 
 	if (obj->bit_17 == NULL) {
 		/* round up number of pages to a multiple of 32 so we know what
@@ -557,7 +535,7 @@ i915_gem_object_save_bit_17_swizzle(struct drm_i915_gem_object *obj)
 		 * and a better way should be done
 		 */
 		size_t nb17 = ((page_count + 31) & ~31)/32;
-		obj->bit_17 = drm_alloc(nb17 * sizeof(u_int32_t));
+		obj->bit_17 = kmalloc(nb17 * sizeof(u_int32_t), GFP_KERNEL);
 		if (obj->bit_17 == NULL) {
 			DRM_ERROR("Failed to allocate memory for bit 17 "
 				  "record\n");
@@ -565,18 +543,11 @@ i915_gem_object_save_bit_17_swizzle(struct drm_i915_gem_object *obj)
 		}
 	}
 
-	segp = &obj->dma_segs[0];
-	n = 0;
 	for (i = 0; i < page_count; i++) {
-		if ((segp->ds_addr + n) & (1 << 17))
+		struct vm_page *page = obj->pages[i];
+		if (VM_PAGE_TO_PHYS(page) & (1 << 17))
 			set_bit(i, obj->bit_17);
 		else
 			clear_bit(i, obj->bit_17);
-
-		n += PAGE_SIZE;
-		if (n >= segp->ds_len) {
-			n = 0;
-			segp++;
-		}
 	}
 }

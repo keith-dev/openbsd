@@ -16,7 +16,7 @@
 #include <openssl/md5.h>
 
 ldns_dnssec_data_chain *
-ldns_dnssec_data_chain_new()
+ldns_dnssec_data_chain_new(void)
 {
 	ldns_dnssec_data_chain *nc = LDNS_CALLOC(ldns_dnssec_data_chain, 1);
         if(!nc) return NULL;
@@ -216,7 +216,7 @@ ldns_dnssec_build_data_chain_other(ldns_resolver *res,
 	}
 }
 
-ldns_dnssec_data_chain *
+static ldns_dnssec_data_chain *
 ldns_dnssec_build_data_chain_nokeyname(ldns_resolver *res,
                                        uint16_t qflags,
                                        ldns_rr *orig_rr,
@@ -285,8 +285,10 @@ ldns_dnssec_build_data_chain(ldns_resolver *res,
 	ldns_rr_class c = 0;
 
 	bool other_rrset = false;
-	
+
 	ldns_dnssec_data_chain *new_chain = ldns_dnssec_data_chain_new();
+
+	assert(pkt != NULL);
 
 	if (!ldns_dnssec_pkt_has_rrsigs(pkt)) {
 		/* hmm. no dnssec data in the packet. go up to try and deny
@@ -402,15 +404,16 @@ ldns_dnssec_build_data_chain(ldns_resolver *res,
 	if (signatures && ldns_rr_list_rr_count(signatures) > 0) {
 		key_name = ldns_rr_rdf(ldns_rr_list_rr(signatures, 0), 7);
 	}
-
 	if (!key_name) {
+		if (signatures) {
+			ldns_rr_list_deep_free(signatures);
+		}
 		return ldns_dnssec_build_data_chain_nokeyname(res,
 		                                              qflags,
 		                                              orig_rr,
 		                                              rrset,
 		                                              new_chain);
 	}
-
 	if (type != LDNS_RR_TYPE_DNSKEY) {
 		ldns_dnssec_build_data_chain_dnskey(res,
 		                                    qflags,
@@ -419,7 +422,7 @@ ldns_dnssec_build_data_chain(ldns_resolver *res,
 		                                    new_chain,
 		                                    key_name,
 		                                    c
-		                                    );
+		                                   );
 	} else {
 		ldns_dnssec_build_data_chain_other(res,
 		                                   qflags,
@@ -427,18 +430,16 @@ ldns_dnssec_build_data_chain(ldns_resolver *res,
 		                                   key_name,
 		                                   c,
 		                                   dss
-		                                    
-		                                    );
+		                                  );
 	}
 	if (signatures) {
 		ldns_rr_list_deep_free(signatures);
 	}
-
 	return new_chain;
 }
 
 ldns_dnssec_trust_tree *
-ldns_dnssec_trust_tree_new()
+ldns_dnssec_trust_tree_new(void)
 {
 	ldns_dnssec_trust_tree *new_tree = LDNS_XMALLOC(ldns_dnssec_trust_tree,
 										   1);
@@ -494,7 +495,7 @@ print_tabs(FILE *out, size_t nr, uint8_t *map, size_t treedepth)
 	}
 }
 
-void
+static void
 ldns_dnssec_trust_tree_print_sm_fmt(FILE *out, 
 		const ldns_output_format *fmt,
 		ldns_dnssec_trust_tree *tree,
@@ -625,18 +626,6 @@ ldns_dnssec_trust_tree_print_sm_fmt(FILE *out,
 	if (mapset) {
 		LDNS_FREE(sibmap);
 	}
-}
-
-void
-ldns_dnssec_trust_tree_print_sm(FILE *out, 
-		ldns_dnssec_trust_tree *tree,
-		size_t tabs,
-		bool extended,
-		uint8_t *sibmap,
-		size_t treedepth)
-{
-	ldns_dnssec_trust_tree_print_sm_fmt(out, ldns_output_format_default, 
-			tree, tabs, extended, sibmap, treedepth);
 }
 
 void
@@ -826,10 +815,7 @@ ldns_dnssec_derive_trust_tree_normal_rrset_time(
 						/* might contain different names! 
 						   sort and split */
 						ldns_rr_list_sort(cur_rrset);
-						if (tmp_rrset && tmp_rrset != cur_rrset) {
-							ldns_rr_list_deep_free(tmp_rrset);
-							tmp_rrset = NULL;
-						}
+						assert(tmp_rrset == cur_rrset);
 						tmp_rrset = ldns_rr_list_pop_rrset(cur_rrset);
 						
 						/* with nsecs, this might be the wrong one */
@@ -849,6 +835,12 @@ ldns_dnssec_derive_trust_tree_normal_rrset_time(
 							cur_sig_rr, 
 							cur_parent_rr,
 							check_time);
+					if (tmp_rrset && tmp_rrset != cur_rrset
+							) {
+						ldns_rr_list_deep_free(
+								tmp_rrset);
+						tmp_rrset = NULL;
+					}
 					/* avoid dupes */
 					for (i = 0; i < new_tree->parent_count; i++) {
 						if (cur_parent_rr == new_tree->parents[i]->rr) {
@@ -870,9 +862,6 @@ ldns_dnssec_derive_trust_tree_normal_rrset_time(
 		}
 	}
  done:
-	if (tmp_rrset && tmp_rrset != cur_rrset) {
-		ldns_rr_list_deep_free(tmp_rrset);
-	}
 	ldns_rr_list_deep_free(cur_rrset);
 }
 
@@ -1077,7 +1066,8 @@ ldns_dnssec_trust_tree_contains_keys(ldns_dnssec_trust_tree *tree,
 					if (tree->parent_status[i] != LDNS_STATUS_OK) {
 						result = tree->parent_status[i];
 					} else {
-						if (ldns_rr_get_type(tree->rr)
+						if (tree->rr &&
+						    ldns_rr_get_type(tree->rr)
 						    == LDNS_RR_TYPE_NSEC &&
 						    parent_result == LDNS_STATUS_OK
 						    ) {
@@ -1210,8 +1200,8 @@ ldns_fetch_valid_domain_keys_time(const ldns_resolver *res,
 			*status = LDNS_STATUS_CRYPTO_NO_TRUSTED_DNSKEY;
 
 			parent_domain = ldns_dname_left_chop(domain);
-			while (ldns_rdf_size(parent_domain) > 0) {
-				/* Fail if we are at the root */
+			while (parent_domain && /* Fail if we are at the root*/
+					ldns_rdf_size(parent_domain) > 0) {
 	
 				if ((parent_keys = 
 					ldns_fetch_valid_domain_keys_time(res,
@@ -1247,7 +1237,9 @@ ldns_fetch_valid_domain_keys_time(const ldns_resolver *res,
 					ldns_rdf_deep_free(prev_parent_domain);
 				}
 			}
-			ldns_rdf_deep_free(parent_domain);
+			if (parent_domain) {
+				ldns_rdf_deep_free(parent_domain);
+			}
 		}
 	}
 	return trusted_keys;
@@ -1519,11 +1511,10 @@ ldns_dnssec_verify_denial(ldns_rr *rr,
 	rr_name = ldns_rr_owner(rr);
 	chopped_dname = ldns_dname_left_chop(rr_name);
 	result = ldns_dname_cat(wildcard_name, chopped_dname);
+	ldns_rdf_deep_free(chopped_dname);
 	if (result != LDNS_STATUS_OK) {
 		return result;
 	}
-	
-	ldns_rdf_deep_free(chopped_dname);
 	
 	for  (i = 0; i < ldns_rr_list_rr_count(nsecs); i++) {
 		cur_nsec = ldns_rr_list_rr(nsecs, i);
@@ -1576,7 +1567,6 @@ ldns_dnssec_verify_denial(ldns_rr *rr,
 	return LDNS_STATUS_OK;
 }
 
-#ifdef HAVE_SSL
 ldns_status
 ldns_dnssec_verify_denial_nsec3_match( ldns_rr *rr
 				     , ldns_rr_list *nsecs
@@ -1612,7 +1602,7 @@ ldns_dnssec_verify_denial_nsec3_match( ldns_rr *rr
 						   ldns_rr_get_type(rr),
 						   nsecs);
                 if(!closest_encloser) {
-                        result = LDNS_STATUS_NSEC3_ERR;
+                        result = LDNS_STATUS_DNSSEC_NSEC_RR_NOT_COVERED;
                         goto done;
                 }
 
@@ -1636,16 +1626,14 @@ ldns_dnssec_verify_denial_nsec3_match( ldns_rr *rr
 			ldns_rdf_deep_free(hashed_wildcard_name);
 		}
 
+		if (! wildcard_covered) {
+			result = LDNS_STATUS_DNSSEC_NSEC_WILDCARD_NOT_COVERED;
+		} else {
+			result = LDNS_STATUS_OK;
+		}
 		ldns_rdf_deep_free(closest_encloser);
 		ldns_rdf_deep_free(wildcard);
 
-		if (!wildcard_covered) {
-			result = LDNS_STATUS_DNSSEC_NSEC_WILDCARD_NOT_COVERED;
-		} else if (closest_encloser && wildcard_covered) {
-			result = LDNS_STATUS_OK;
-		} else {
-			result = LDNS_STATUS_DNSSEC_NSEC_RR_NOT_COVERED;
-		}
 	} else if (packet_nodata && packet_qtype != LDNS_RR_TYPE_DS) {
 		/* section 8.5 */
 		hashed_name = ldns_nsec3_hash_name_frm_nsec3(
@@ -1818,9 +1806,6 @@ ldns_dnssec_verify_denial_nsec3(ldns_rr *rr,
 				packet_qtype, packet_nodata, NULL
 	       );
 }
-
-
-#endif /* HAVE_SSL */
 
 #ifdef USE_GOST
 EVP_PKEY*

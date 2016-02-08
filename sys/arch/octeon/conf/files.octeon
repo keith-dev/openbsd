@@ -1,4 +1,4 @@
-#	$OpenBSD: files.octeon,v 1.13 2013/03/26 18:46:55 jasper Exp $
+#	$OpenBSD: files.octeon,v 1.17 2014/01/15 10:36:10 pirofti Exp $
 
 # Standard stanzas config(8) can't run without
 maxpartitions 16
@@ -25,12 +25,10 @@ include "dev/ata/files.ata"
 include "dev/atapiscsi/files.atapiscsi"
 include	"dev/i2c/files.i2c"
 include	"dev/gpio/files.gpio"
-include	"dev/i2o/files.i2o"
 include	"dev/isa/files.isa"
 include	"dev/isa/files.isapnp"
 include	"dev/mii/files.mii"
 include	"dev/pci/files.pci"
-include	"dev/pci/files.agp"
 include	"dev/pckbc/files.pckbc"
 include	"dev/usb/files.usb"
 include "dev/bluetooth/files.bluetooth"
@@ -50,6 +48,11 @@ attach	cpu at mainbus
 device	clock
 attach	clock at mainbus
 
+# TOD clock
+device	octrtc
+attach	octrtc at mainbus
+file	arch/octeon/dev/octrtc.c			octrtc
+
 define	iobus {[base = -1]}
 device	iobus
 attach	iobus at mainbus
@@ -68,6 +71,11 @@ file	arch/octeon/dev/cn30xxsmi.c			iobus
 device	octcf: disk
 attach	octcf at iobus
 file	arch/octeon/dev/octcf.c				octcf
+
+# On-board RNG
+device	octrng
+attach	octrng at iobus
+file	arch/octeon/dev/octrng.c			octrng
 
 device	cn30xxgmx {}
 attach	cn30xxgmx at iobus

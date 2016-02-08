@@ -1,4 +1,4 @@
-/*	$OpenBSD: kvm.c,v 1.49 2011/03/12 04:54:28 guenther Exp $ */
+/*	$OpenBSD: kvm.c,v 1.52 2013/11/16 00:41:44 guenther Exp $ */
 /*	$NetBSD: kvm.c,v 1.43 1996/05/05 04:31:59 gwr Exp $	*/
 
 /*-
@@ -35,16 +35,16 @@
  */
 
 #include <sys/param.h>
-#include <sys/user.h>
 #include <sys/proc.h>
 #include <sys/ioctl.h>
 #include <sys/stat.h>
 #include <sys/sysctl.h>
 
 #include <sys/core.h>
-#include <sys/exec_aout.h>
+#include <sys/exec.h>
 #include <sys/kcore.h>
 
+#include <errno.h>
 #include <ctype.h>
 #include <db.h>
 #include <fcntl.h>
@@ -71,8 +71,7 @@ static int	clear_gap(kvm_t *, FILE *, int);
 static int	kvm_setfd(kvm_t *);
 
 char *
-kvm_geterr(kd)
-	kvm_t *kd;
+kvm_geterr(kvm_t *kd)
 {
 	return (kd->errbuf);
 }

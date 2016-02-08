@@ -1,4 +1,4 @@
-/*	$OpenBSD: varmodifiers.c,v 1.33 2012/10/18 17:54:43 espie Exp $	*/
+/*	$OpenBSD: varmodifiers.c,v 1.35 2013/11/22 15:47:35 espie Exp $	*/
 /*	$NetBSD: var.c,v 1.18 1997/03/18 19:24:46 christos Exp $	*/
 
 /*
@@ -867,7 +867,7 @@ VarRESubstitute(struct Name *word, bool addSpace, Buffer buf, void *patternp)
 				rp++;
 			}
 			else if (*rp == '&' ||
-			    (*rp == '\\' && isdigit(rp[1]))) {
+			    (*rp == '\\' && ISDIGIT(rp[1]))) {
 				int n;
 				const char *subbuf;
 				int sublen;
@@ -1173,7 +1173,7 @@ do_upper(const char *s, const struct Name *n UNUSED, void *arg UNUSED)
 	len = strlen(s);
 	t = emalloc(len+1);
 	for (i = 0; i < len; i++)
-		t[i] = toupper(s[i]);
+		t[i] = TOUPPER(s[i]);
 	t[len] = '\0';
 	return t;
 }
@@ -1187,7 +1187,7 @@ do_lower(const char *s, const struct Name *n UNUSED, void *arg UNUSED)
 	len = strlen(s);
 	t = emalloc(len+1);
 	for (i = 0; i < len; i++)
-		t[i] = tolower(s[i]);
+		t[i] = TOLOWER(s[i]);
 	t[len] = '\0';
 	return t;
 }
@@ -1464,7 +1464,7 @@ VarModifiers_Apply(char *str, const struct Name *name, SymTable *ctxt,
 		if (DEBUG(VAR))
 			printf("Applying :%c to \"%s\"\n", *tstr, str);
 
-		mod = choose_mod[*tstr];
+		mod = choose_mod[(unsigned char)*tstr];
 		arg = NULL;
 
 		if (mod != NULL && (!mod->atstart || atstart))

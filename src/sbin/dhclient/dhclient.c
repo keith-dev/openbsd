@@ -1,4 +1,4 @@
-/*	$OpenBSD: dhclient.c,v 1.260 2013/07/15 14:03:01 krw Exp $	*/
+/*	$OpenBSD: dhclient.c,v 1.293 2014/02/09 20:45:56 krw Exp $	*/
 
 /*
  * Copyright 2004 Henning Brauer <henning@openbsd.org>
@@ -57,12 +57,13 @@
 #include "privsep.h"
 
 #include <sys/ioctl.h>
+#include <sys/uio.h>
 
+#include <limits.h>
 #include <poll.h>
 #include <pwd.h>
 #include <resolv.h>
 
-#define	CLIENT_PATH 		"PATH=/usr/bin:/usr/sbin:/bin:/sbin"
 #define DEFAULT_LEASE_TIME	43200	/* 12 hours. */
 #define TIME_MAX		2147483647
 
@@ -93,7 +94,6 @@ struct imsgbuf *unpriv_ibuf;
 void		 sighdlr(int);
 int		 findproto(char *, int);
 struct sockaddr	*get_ifa(char *, int);
-int		 resolv_conf_priority(int);
 void		 usage(void);
 int		 res_hnok(const char *dn);
 char		*option_as_string(unsigned int code, unsigned char *data, int len);
@@ -113,6 +113,29 @@ void add_static_routes(int, struct option_data *);
 void add_classless_static_routes(int, struct option_data *);
 
 int compare_lease(struct client_lease *, struct client_lease *);
+
+void state_reboot(void);
+void state_init(void);
+void state_selecting(void);
+void state_bound(void);
+void state_panic(void);
+
+void send_discover(void);
+void send_request(void);
+void send_decline(void);
+
+void bind_lease(void);
+
+void make_discover(struct client_lease *);
+void make_request(struct client_lease *);
+void make_decline(struct client_lease *);
+
+void rewrite_client_leases(void);
+void rewrite_option_db(struct client_lease *, struct client_lease *);
+char *lease_as_string(char *, struct client_lease *);
+
+struct client_lease *packet_to_lease(struct in_addr, struct option_data *);
+void go_daemon(void);
 
 #define	ROUNDUP(a) \
 	    ((a) > 0 ? (1 + (((a) - 1) | (sizeof(long) - 1))) : sizeof(long))
@@ -182,7 +205,7 @@ routehandler(void)
 	struct in_addr a, b;
 	ssize_t n;
 	int linkstat, rslt;
-	struct hardware hw;
+	struct ether_addr hw;
 	struct rt_msghdr *rtm;
 	struct if_msghdr *ifm;
 	struct ifa_msghdr *ifam;
@@ -433,6 +456,7 @@ main(int argc, char *argv[])
 	config = calloc(1, sizeof(*config));
 	if (config == NULL)
 		error("config calloc");
+	TAILQ_INIT(&config->reject_list);
 
 	get_ifname(argv[0]);
 	if (path_dhclient_db == NULL && asprintf(&path_dhclient_db, "%s.%s",
@@ -454,7 +478,7 @@ main(int argc, char *argv[])
 	/* Put us into the correct rdomain */
 	ifi->rdomain = get_rdomain(ifi->name);
 	if (setrtable(ifi->rdomain) == -1)
-		error("setting routing table to %d: '%s'", ifi->rdomain,
+		error("setting routing table to %u: '%s'", ifi->rdomain,
 		    strerror(errno));
 
 	read_client_conf();
@@ -470,7 +494,7 @@ main(int argc, char *argv[])
 		error("Cannot stat /etc/resolv.conf.tail: %s",
 		    strerror(errno));
 	} else {
-		if (sb.st_size > 0) {
+		if (sb.st_size > 0 && sb.st_size < SIZE_MAX) {
 			config->resolv_tail = calloc(1, sb.st_size + 1);
 			if (config->resolv_tail == NULL) {
 				error("no memory for resolv.conf.tail "
@@ -538,7 +562,8 @@ main(int argc, char *argv[])
 		error("no memory for unpriv_ibuf");
 	imsg_init(unpriv_ibuf, socket_fd[1]);
 
-	if ((fd = open(path_dhclient_db, O_RDONLY|O_EXLOCK|O_CREAT, 0)) == -1)
+	if ((fd = open(path_dhclient_db,
+	    O_RDONLY|O_EXLOCK|O_CREAT|O_NOFOLLOW, 0640)) == -1)
 		error("can't open and lock %s: %s", path_dhclient_db,
 		    strerror(errno));
 	read_client_leases();
@@ -651,7 +676,6 @@ void
 state_selecting(void)
 {
 	struct client_lease *lp, *picked;
-	time_t cur_time;
 
 	cancel_timeout();
 
@@ -677,28 +701,46 @@ state_selecting(void)
 		return;
 	}
 
-	time(&cur_time);
-
-	/* If it was a BOOTREPLY, we can just take the address right now. */
+	/* If it was a BOOTREPLY, we can just take the lease right now. */
 	if (!picked->options[DHO_DHCP_MESSAGE_TYPE].len) {
+		struct option_data *option;
+
 		client->new = picked;
 
-		/* Make up some lease expiry times
-		   XXX these should be configurable. */
-		client->new->expiry = cur_time + 12000;
-		client->new->renewal += cur_time + 8000;
-		client->new->rebind += cur_time + 10000;
+		/*
+		 * Fake up DHO_DHCP_LEASE_TIME, DHO_RENEWAL_TIME and
+		 * DHO_REBINDING_TIME options so bind_lease() can
+		 * set the times.
+		 */
+		option = &client->new->options[DHO_DHCP_LEASE_TIME];
+		option->data = malloc(4);
+		if (option->data) {
+			option->len = 4;
+			putULong(option->data, 12000);
+		}
+		option = &client->new->options[DHO_DHCP_RENEWAL_TIME];
+		option->data = malloc(4);
+		if (option->data) {
+			option->len = 4;
+			putULong(option->data, 8000);
+		}
+		option = &client->new->options[DHO_DHCP_REBINDING_TIME];
+		option->data = malloc(4);
+		if (option->data) {
+			option->len = 4;
+			putULong(option->data, 10000);
+		}
 
 		client->state = S_REQUESTING;
-
-		/* Bind to the address we received. */
 		bind_lease();
+
 		return;
 	}
 
 	client->destination.s_addr = INADDR_BROADCAST;
 	client->state = S_REQUESTING;
-	client->first_sending = cur_time;
+	client->first_sending = time(NULL);
+
 	client->interval = 0;
 
 	/*
@@ -718,7 +760,6 @@ void
 dhcpack(struct in_addr client_addr, struct option_data *options, char *info)
 {
 	struct client_lease *lease;
-	time_t cur_time;
 
 	if (client->state != S_REBOOTING &&
 	    client->state != S_REQUESTING &&
@@ -743,12 +784,27 @@ dhcpack(struct in_addr client_addr, struct option_data *options, char *info)
 	/* Stop resending DHCPREQUEST. */
 	cancel_timeout();
 
+	bind_lease();
+}
+
+void
+bind_lease(void)
+{
+	struct in_addr gateway, mask;
+	struct option_data *options, *opt;
+	struct client_lease *lease;
+	time_t cur_time;
+
+	lease = apply_defaults(client->new);
+	options = lease->options;
+
 	/* Figure out the lease time. */
-	if (client->new->options[DHO_DHCP_LEASE_TIME].data)
+	if (options[DHO_DHCP_LEASE_TIME].data)
 		client->new->expiry =
-		    getULong(client->new->options[DHO_DHCP_LEASE_TIME].data);
+		    getULong(options[DHO_DHCP_LEASE_TIME].data);
 	else
 		client->new->expiry = DEFAULT_LEASE_TIME;
+
 	/*
 	 * A number that looks negative here is really just very large,
 	 * because the lease expiry offset is unsigned.
@@ -763,16 +819,16 @@ dhcpack(struct in_addr client_addr, struct option_data *options, char *info)
 	 * Take the server-provided renewal time if there is one;
 	 * otherwise figure it out according to the spec.
 	 */
-	if (client->new->options[DHO_DHCP_RENEWAL_TIME].len)
+	if (options[DHO_DHCP_RENEWAL_TIME].len)
 		client->new->renewal =
-		    getULong(client->new->options[DHO_DHCP_RENEWAL_TIME].data);
+		    getULong(options[DHO_DHCP_RENEWAL_TIME].data);
 	else
 		client->new->renewal = client->new->expiry / 2;
 
 	/* Same deal with the rebind time. */
-	if (client->new->options[DHO_DHCP_REBINDING_TIME].len)
+	if (options[DHO_DHCP_REBINDING_TIME].len)
 		client->new->rebind =
-		    getULong(client->new->options[DHO_DHCP_REBINDING_TIME].data);
+		    getULong(options[DHO_DHCP_REBINDING_TIME].data);
 	else
 		client->new->rebind = client->new->renewal +
 		    client->new->renewal / 2 + client->new->renewal / 4;
@@ -790,24 +846,15 @@ dhcpack(struct in_addr client_addr, struct option_data *options, char *info)
 	if (client->new->rebind < cur_time)
 		client->new->rebind = TIME_MAX;
 
-	bind_lease();
-}
-
-void
-bind_lease(void)
-{
-	struct in_addr gateway, mask;
-	struct option_data *options;
-	struct client_lease *lease;
-
-	lease = apply_defaults(client->new);
-	options = lease->options;
+	lease->expiry = client->new->expiry;
+	lease->renewal = client->new->renewal;
+	lease->rebind = client->new->rebind;
 
 	/*
-	 * A duplicate lease once we are responsible means we don't
+	 * A duplicate lease once we are responsible & S_RENEWING means we don't
 	 * need to change the interface, routing table or resolv.conf.
 	 */
-	if ((client->flags & IS_RESPONSIBLE) &&
+	if ((client->flags & IS_RESPONSIBLE) && client->state == S_RENEWING &&
 	    compare_lease(client->active, client->new) == 0) {
 		client->new->resolv_conf = client->active->resolv_conf;
 		client->active->resolv_conf = NULL;
@@ -821,9 +868,11 @@ bind_lease(void)
 	delete_addresses(ifi->name, ifi->rdomain);
 	flush_routes(ifi->name, ifi->rdomain);
 
-	memset(&mask, 0, sizeof(mask));
-	memcpy(&mask.s_addr, options[DHO_SUBNET_MASK].data,
-	    options[DHO_SUBNET_MASK].len);
+	opt = &options[DHO_SUBNET_MASK];
+	if (opt->len == sizeof(mask))
+		mask.s_addr = ((struct in_addr *)opt->data)->s_addr;
+	else
+		mask.s_addr = INADDR_ANY;
 
         /*
 	 * Add address and default route last, so we know when the binding
@@ -833,12 +882,29 @@ bind_lease(void)
 	if (options[DHO_CLASSLESS_STATIC_ROUTES].len) {
 		add_classless_static_routes(ifi->rdomain,
 		    &options[DHO_CLASSLESS_STATIC_ROUTES]);
+	} else if (options[DHO_CLASSLESS_MS_STATIC_ROUTES].len) {
+		add_classless_static_routes(ifi->rdomain,
+		    &options[DHO_CLASSLESS_MS_STATIC_ROUTES]);
 	} else {
-		if (options[DHO_ROUTERS].len) {
-			memset(&gateway, 0, sizeof(gateway));
+		opt = &options[DHO_ROUTERS];
+		if (opt->len >= sizeof(gateway)) {
 			/* XXX Only use FIRST router address for now. */
-			memcpy(&gateway.s_addr, options[DHO_ROUTERS].data,
-			    options[DHO_ROUTERS].len);
+			gateway.s_addr = ((struct in_addr *)opt->data)->s_addr;
+
+			/*
+			 * If we were given a /32 IP assignment, then make sure
+			 * the gateway address is routable with equivalent of
+			 *
+			 *     route add -net $gw -netmask 255.255.255.255 \
+			 *         -cloning -iface $addr
+			 */
+			if (mask.s_addr == INADDR_BROADCAST) {
+				add_route(ifi->rdomain, gateway, mask,
+				    client->new->address,
+				    RTA_DST | RTA_NETMASK | RTA_GATEWAY,
+				    RTF_CLONING | RTF_STATIC);
+			}
+
 			add_default_route(ifi->rdomain, client->new->address,
 			    gateway);
 		}
@@ -882,15 +948,19 @@ newlease:
 void
 state_bound(void)
 {
+	struct option_data *opt;
+	struct in_addr *dest;
+
 	client->xid = arc4random();
 	make_request(client->active);
 
-	if (client->active->options[DHO_DHCP_SERVER_IDENTIFIER].len == 4) {
-		memcpy(&client->destination.s_addr,
-		    client->active->options[DHO_DHCP_SERVER_IDENTIFIER].data,
-		    client->active->options[DHO_DHCP_SERVER_IDENTIFIER].len);
-	} else
-		client->destination.s_addr = INADDR_BROADCAST;
+	dest = &client->destination;
+	opt = &client->active->options[DHO_DHCP_SERVER_IDENTIFIER];
+
+	if (opt->len == sizeof(*dest))
+		dest->s_addr = ((struct in_addr *)opt->data)->s_addr;
+	else
+		dest->s_addr = INADDR_BROADCAST;
 
 	client->first_sending = time(NULL);
 	client->interval = 0;
@@ -1025,8 +1095,10 @@ packet_to_lease(struct in_addr client_addr, struct option_data *options)
 		}
 	}
 
-	memcpy(&lease->address.s_addr, &client->packet.yiaddr,
-	    sizeof(in_addr_t));
+	lease->address.s_addr = client->packet.yiaddr.s_addr;
+
+	/* Save the siaddr (a.k.a. next-server) info. */
+	lease->next_server.s_addr = client->packet.siaddr.s_addr;
 
 	/* If the server name was filled out, copy it. */
 	if ((!lease->options[DHO_DHCP_OPTION_OVERLOAD].len ||
@@ -1155,7 +1227,7 @@ send_discover(void)
 		client->bootrequest_packet.secs = htons(65535);
 	client->secs = client->bootrequest_packet.secs;
 
-	note("DHCPDISCOVER on %s to %s port %d interval %lld",
+	note("DHCPDISCOVER on %s to %s port %hu interval %lld",
 	    ifi->name, inet_ntoa(sockaddr_broadcast.sin_addr),
 	    ntohs(sockaddr_broadcast.sin_port),
 	    (long long)client->interval);
@@ -1321,13 +1393,15 @@ send_request(void)
 		client->interval = client->active->expiry - cur_time + 1;
 
 	/*
-	 * If the lease rebind time has elapsed, or if we're not yet bound,
-	 * broadcast the DHCPREQUEST rather than unicasting.
+ 	 * If the reboot timeout has expired, or the lease rebind time has
+	 * elapsed, or if we're not yet bound, broadcast the DHCPREQUEST rather
+	 * than unicasting.
 	 */
 	memset(&destination, 0, sizeof(destination));
 	if (client->state == S_REQUESTING ||
 	    client->state == S_REBOOTING ||
-	    cur_time > client->active->rebind)
+	    cur_time > client->active->rebind ||
+	    interval > config->reboot_timeout)
 		destination.sin_addr.s_addr = INADDR_BROADCAST;
 	else
 		destination.sin_addr.s_addr = client->destination.s_addr;
@@ -1350,7 +1424,7 @@ send_request(void)
 			client->bootrequest_packet.secs = htons(65535);
 	}
 
-	note("DHCPREQUEST on %s to %s port %d", ifi->name,
+	note("DHCPREQUEST on %s to %s port %hu", ifi->name,
 	    inet_ntoa(destination.sin_addr), ntohs(destination.sin_port));
 
 	send_packet(from, &destination, NULL);
@@ -1361,7 +1435,7 @@ send_request(void)
 void
 send_decline(void)
 {
-	note("DHCPDECLINE on %s to %s port %d", ifi->name,
+	note("DHCPDECLINE on %s to %s port %hu", ifi->name,
 	    inet_ntoa(sockaddr_broadcast.sin_addr),
 	    ntohs(sockaddr_broadcast.sin_port));
 
@@ -1415,18 +1489,20 @@ make_discover(struct client_lease *lease)
 		client->bootrequest_packet_length = BOOTP_MIN_LEN;
 
 	packet->op = BOOTREQUEST;
-	packet->htype = ifi->hw_address.htype;
-	packet->hlen = ifi->hw_address.hlen;
+	packet->htype = HTYPE_ETHER ;
+	packet->hlen = ETHER_ADDR_LEN;
 	packet->hops = 0;
 	packet->xid = client->xid;
 	packet->secs = 0; /* filled in by send_discover. */
 	packet->flags = 0;
 
-	memset(&packet->ciaddr, 0, sizeof(packet->ciaddr));
-	memset(&packet->yiaddr, 0, sizeof(packet->yiaddr));
-	memset(&packet->siaddr, 0, sizeof(packet->siaddr));
-	memset(&packet->giaddr, 0, sizeof(packet->giaddr));
-	memcpy(&packet->chaddr, ifi->hw_address.haddr, ifi->hw_address.hlen);
+	packet->ciaddr.s_addr = INADDR_ANY;
+	packet->yiaddr.s_addr = INADDR_ANY;
+	packet->siaddr.s_addr = INADDR_ANY;
+	packet->giaddr.s_addr = INADDR_ANY;
+
+	memcpy(&packet->chaddr, ifi->hw_address.ether_addr_octet,
+	    ETHER_ADDR_LEN);
 }
 
 void
@@ -1484,8 +1560,8 @@ make_request(struct client_lease * lease)
 		client->bootrequest_packet_length = BOOTP_MIN_LEN;
 
 	packet->op = BOOTREQUEST;
-	packet->htype = ifi->hw_address.htype;
-	packet->hlen = ifi->hw_address.hlen;
+	packet->htype = HTYPE_ETHER ;
+	packet->hlen = ETHER_ADDR_LEN;
 	packet->hops = 0;
 	packet->xid = client->xid;
 	packet->secs = 0; /* Filled in by send_request. */
@@ -1497,17 +1573,17 @@ make_request(struct client_lease * lease)
 	 */
 	if (client->state == S_BOUND ||
 	    client->state == S_RENEWING ||
-	    client->state == S_REBINDING) {
-		memcpy(&packet->ciaddr, &lease->address.s_addr,
-		    sizeof(in_addr_t));
-	} else {
-		memset(&packet->ciaddr, 0, sizeof(packet->ciaddr));
-	}
+	    client->state == S_REBINDING)
+		packet->ciaddr.s_addr = lease->address.s_addr;
+	else
+		packet->ciaddr.s_addr = INADDR_ANY;
 
-	memset(&packet->yiaddr, 0, sizeof(packet->yiaddr));
-	memset(&packet->siaddr, 0, sizeof(packet->siaddr));
-	memset(&packet->giaddr, 0, sizeof(packet->giaddr));
-	memcpy(&packet->chaddr, ifi->hw_address.haddr, ifi->hw_address.hlen);
+	packet->yiaddr.s_addr = INADDR_ANY;
+	packet->siaddr.s_addr = INADDR_ANY;
+	packet->giaddr.s_addr = INADDR_ANY;
+
+	memcpy(&packet->chaddr, ifi->hw_address.ether_addr_octet,
+	    ETHER_ADDR_LEN);
 }
 
 void
@@ -1552,19 +1628,21 @@ make_decline(struct client_lease *lease)
 		client->bootrequest_packet_length = BOOTP_MIN_LEN;
 
 	packet->op = BOOTREQUEST;
-	packet->htype = ifi->hw_address.htype;
-	packet->hlen = ifi->hw_address.hlen;
+	packet->htype = HTYPE_ETHER ;
+	packet->hlen = ETHER_ADDR_LEN;
 	packet->hops = 0;
 	packet->xid = client->xid;
 	packet->secs = 0; /* Filled in by send_request. */
 	packet->flags = 0;
 
 	/* ciaddr must always be zero. */
-	memset(&packet->ciaddr, 0, sizeof(packet->ciaddr));
-	memset(&packet->yiaddr, 0, sizeof(packet->yiaddr));
-	memset(&packet->siaddr, 0, sizeof(packet->siaddr));
-	memset(&packet->giaddr, 0, sizeof(packet->giaddr));
-	memcpy(&packet->chaddr, ifi->hw_address.haddr, ifi->hw_address.hlen);
+	packet->ciaddr.s_addr = INADDR_ANY;
+	packet->yiaddr.s_addr = INADDR_ANY;
+	packet->siaddr.s_addr = INADDR_ANY;
+	packet->giaddr.s_addr = INADDR_ANY;
+
+	memcpy(&packet->chaddr, ifi->hw_address.ether_addr_octet,
+	    ETHER_ADDR_LEN);
 }
 
 void
@@ -1654,8 +1732,8 @@ rewrite_option_db(struct client_lease *offered, struct client_lease *effective)
 		warning("cannot make effective lease into string");
 
 	write_file(path_option_db,
-	    O_WRONLY | O_CREAT | O_TRUNC | O_SYNC | O_EXLOCK,
-	    S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH, 0, 0, db, strlen(db));
+	    O_WRONLY | O_CREAT | O_TRUNC | O_SYNC | O_EXLOCK | O_NOFOLLOW,
+	    S_IRUSR | S_IWUSR | S_IRGRP, 0, 0, db, strlen(db));
 }
 
 char *
@@ -1680,16 +1758,44 @@ lease_as_string(char *type, struct client_lease *lease)
 	p += rslt;
 	sz -= rslt;
 
+	rslt = snprintf(p, sz, "  next-server %s;\n",
+	    inet_ntoa(lease->next_server));
+	if (rslt == -1 || rslt >= sz)
+		return (NULL);
+	p += rslt;
+	sz -= rslt;
+
 	if (lease->filename) {
-		rslt = snprintf(p, sz, "  filename \"%s\";\n", lease->filename);
+		rslt = snprintf(p, sz, "  filename ");
+		if (rslt == -1 || rslt >= sz)
+			return (NULL);
+		p += rslt;
+		sz -= rslt;
+		rslt = pretty_print_string(p, sz, lease->filename,
+		    strlen(lease->filename), 1);
+		if (rslt == -1 || rslt >= sz)
+			return (NULL);
+		p += rslt;
+		sz -= rslt;
+		rslt = snprintf(p, sz, ";\n");
 		if (rslt == -1 || rslt >= sz)
 			return (NULL);
 		p += rslt;
 		sz -= rslt;
 	}
 	if (lease->server_name) {
-		rslt = snprintf(p, sz, "  server-name \"%s\";\n",
-		    lease->server_name);
+		rslt = snprintf(p, sz, "  server-name ");
+		if (rslt == -1 || rslt >= sz)
+			return (NULL);
+		p += rslt;
+		sz -= rslt;
+		rslt = pretty_print_string(p, sz, lease->server_name,
+		    strlen(lease->server_name), 1);
+		if (rslt == -1 || rslt >= sz)
+			return (NULL);
+		p += rslt;
+		sz -= rslt;
+		rslt = snprintf(p, sz, ";\n");
 		if (rslt == -1 || rslt >= sz)
 			return (NULL);
 		p += rslt;
@@ -1777,11 +1883,11 @@ int
 res_hnok(const char *name)
 {
 	const char *dn = name;
-	int pch = '.', ch = *dn++;
+	int pch = '.', ch = (unsigned char)*dn++;
 	int warn = 0;
 
 	while (ch != '\0') {
-		int nch = *dn++;
+		int nch = (unsigned char)*dn++;
 
 		if (ch == '.') {
 			;
@@ -1809,7 +1915,7 @@ option_as_string(unsigned int code, unsigned char *data, int len)
 	unsigned char *dp = data;
 
 	if (code > 255)
-		error("option_as_string: bad code %d", code);
+		error("option_as_string: bad code %u", code);
 
 	for (; dp < data + len; dp++) {
 		if (!isascii(*dp) || !isprint(*dp)) {
@@ -2071,6 +2177,21 @@ apply_defaults(struct client_lease *lease)
 	if (newlease == NULL)
 		error("Unable to clone lease");
 
+	if (config->filename) {
+		if (newlease->filename)
+			free(newlease->filename);
+		newlease->filename = strdup(config->filename);
+	}
+	if (config->server_name) {
+		if (newlease->server_name)
+			free(newlease->server_name);
+		newlease->server_name = strdup(config->server_name);
+	}
+	if (config->address.s_addr != INADDR_ANY)
+		newlease->address.s_addr = config->address.s_addr;
+	if (config->next_server.s_addr != INADDR_ANY)
+		newlease->next_server.s_addr = config->next_server.s_addr;
+
 	for (i = 0; i < 256; i++) {
 		for (j = 0; j < config->ignored_option_count; j++) {
 			if (config->ignored_options[j] == i) {
@@ -2175,6 +2296,8 @@ clone_lease(struct client_lease *oldlease)
 	newlease->rebind = oldlease->rebind;
 	newlease->is_static = oldlease->is_static;
 	newlease->is_bootp = oldlease->is_bootp;
+	newlease->address = oldlease->address;
+	newlease->next_server = oldlease->next_server;
 
 	if (oldlease->server_name) {
 		newlease->server_name = strdup(oldlease->server_name);
@@ -2184,6 +2307,11 @@ clone_lease(struct client_lease *oldlease)
 	if (oldlease->filename) {
 		newlease->filename = strdup(oldlease->filename);
 		if (newlease->filename == NULL)
+			goto cleanup;
+	}
+	if (oldlease->resolv_conf) {
+		newlease->resolv_conf = strdup(oldlease->resolv_conf);
+		if (newlease->resolv_conf == NULL)
 			goto cleanup;
 	}
 
@@ -2263,36 +2391,35 @@ void
 write_file(char *path, int flags, mode_t mode, uid_t uid, gid_t gid,
     u_int8_t *contents, size_t sz)
 {
-	struct imsg_write_file *imsg;
+	struct iovec iov[2];
+	struct imsg_write_file imsg;
 	size_t rslt;
 
-	imsg = calloc(1, sizeof(*imsg) + sz);
-	if (imsg == NULL)
-		error("no memory for imsg_write_file");
-	imsg->rdomain = ifi->rdomain;
+	memset(&imsg, 0, sizeof(imsg));
 
-	rslt = strlcpy(imsg->path, path, MAXPATHLEN);
-	if (rslt >= MAXPATHLEN) {
-		free(imsg);
+	rslt = strlcpy(imsg.path, path, sizeof(imsg.path));
+	if (rslt >= sizeof(imsg.path)) {
 		warning("write_file: path too long (%zu)", rslt);
 		return;
 	}
-	memcpy(imsg->contents, contents, sz);
-	imsg->len = sz;
-	imsg->flags = flags;
-	imsg->mode = mode;
-	imsg->uid = uid;
-	imsg->gid = gid;
 
-	rslt = imsg_compose(unpriv_ibuf, IMSG_WRITE_FILE, 0, 0, -1, imsg,
-	    sizeof(*imsg) + sz);
-	if (rslt == -1)
-		warning("write_file: imsg_compose: %s", strerror(errno));
+	imsg.rdomain = ifi->rdomain;
+	imsg.len = sz;
+	imsg.flags = flags;
+	imsg.mode = mode;
+	imsg.uid = uid;
+	imsg.gid = gid;
 
-	/* Do flush to maximize chances of keeping file current. */
-	rslt = imsg_flush(unpriv_ibuf);
+	iov[0].iov_base = &imsg;
+	iov[0].iov_len = sizeof(imsg);
+	iov[1].iov_base = contents;
+	iov[1].iov_len = sz;
+
+	rslt = imsg_composev(unpriv_ibuf, IMSG_WRITE_FILE, 0, 0, -1, iov, 2);
 	if (rslt == -1)
-		warning("write_file: imsg_flush: %s", strerror(errno));
+		warning("write_file: imsg_composev: %s", strerror(errno));
+
+	flush_unpriv_ibuf("write_file");
 }
 
 void
@@ -2311,7 +2438,7 @@ priv_write_file(struct imsg_write_file *imsg)
 		return;
 	}
 
-	n = write(fd, imsg->contents, imsg->len);
+	n = write(fd, imsg+1, imsg->len);
 	if (n == -1)
 		note("Couldn't write contents to '%s': %s", imsg->path,
 		    strerror(errno));
@@ -2319,8 +2446,12 @@ priv_write_file(struct imsg_write_file *imsg)
 		note("Short contents write to '%s' (%zd vs %zd)", imsg->path,
 		    n, imsg->len);
 
-	fchmod(fd, imsg->mode);
-	fchown(fd, imsg->uid, imsg->gid);
+	if (fchmod(fd, imsg->mode) == -1)
+		note("fchmod(fd, 0x%x) of '%s' failed (%s)", imsg->mode,
+		    imsg->path, strerror(errno));
+	if (fchown(fd, imsg->uid, imsg->gid) == -1)
+		note("fchown(fd, %d, %d) of '%s' failed (%s)", imsg->uid,
+		    imsg->gid, imsg->path, strerror(errno));
 
 	close(fd);
 }
@@ -2362,20 +2493,19 @@ void
 add_static_routes(int rdomain, struct option_data *static_routes)
 {
 	struct in_addr		 dest, netmask, gateway;
-	u_int8_t		 *addr;
+	struct in_addr		 *addr;
 	int			 i;
 
-	memset(&netmask, 0, sizeof(netmask));	/* Not used for CLASSFULL! */
+	netmask.s_addr = INADDR_ANY;	/* Not used for CLASSFULL! */
 
-	for (i = 0; (i + 7) < static_routes->len; i += 8) {
-		addr = &static_routes->data[i];
-		memset(&dest, 0, sizeof(dest));
-		memset(&gateway, 0, sizeof(gateway));
-
-		memcpy(&dest.s_addr, addr, 4);
-		if (dest.s_addr == INADDR_ANY)
+	for (i = 0; (i + 2*sizeof(*addr)) <= static_routes->len;
+	    i += 2*sizeof(*addr)) {
+		addr = (struct in_addr *)&static_routes->data[i];
+		if (addr->s_addr == INADDR_ANY)
 			continue; /* RFC 2132 says 0.0.0.0 is not allowed. */
-		memcpy(&gateway.s_addr, addr+4, 4);
+
+		dest.s_addr = addr->s_addr;
+		gateway.s_addr = (addr+1)->s_addr;
 
 		/* XXX Order implies priority but we're ignoring that. */
 		add_route(rdomain, dest, netmask, gateway,
@@ -2383,30 +2513,34 @@ add_static_routes(int rdomain, struct option_data *static_routes)
 	}
 }
 
-void add_classless_static_routes(int rdomain,
-    struct option_data *classless_static_routes)
+void add_classless_static_routes(int rdomain, struct option_data *opt)
 {
 	struct in_addr	 dest, netmask, gateway;
 	int		 bits, bytes, i;
 
 	i = 0;
-	while (i < classless_static_routes->len) {
-		bits = classless_static_routes->data[i];
+	while (i < opt->len) {
+		bits = opt->data[i++];
 		bytes = (bits + 7) / 8;
-		i++;
 
-		memset(&netmask, 0, sizeof(netmask));
+		if (bytes > sizeof(netmask))
+			return;
+		else if (i + bytes > opt->len)
+			return;
+
 		if (bits)
 			netmask.s_addr = htonl(0xffffffff << (32 - bits));
+		else
+			netmask.s_addr = INADDR_ANY;
 
-		memset(&dest, 0, sizeof(dest));
-		memcpy(&dest, &classless_static_routes->data[i], bytes);
+		memcpy(&dest, &opt->data[i], bytes);
 		dest.s_addr = dest.s_addr & netmask.s_addr;
 		i += bytes;
 
-		memset(&gateway, 0, sizeof(gateway));
-		memcpy(&gateway, &classless_static_routes->data[i], 4);
-		i += 4;
+		if (i + sizeof(gateway) > opt->len)
+			return;
+		memcpy(&gateway, &opt->data[i], sizeof(gateway));
+		i += sizeof(gateway);
 
 		if (gateway.s_addr == INADDR_ANY)
 			continue; /* OBSD TCP/IP doesn't support this. */

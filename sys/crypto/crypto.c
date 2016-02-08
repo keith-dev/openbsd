@@ -1,4 +1,4 @@
-/*	$OpenBSD: crypto.c,v 1.60 2013/03/27 16:42:05 tedu Exp $	*/
+/*	$OpenBSD: crypto.c,v 1.63 2014/01/21 05:40:32 mikeb Exp $	*/
 /*
  * The author of this code is Angelos D. Keromytis (angelos@cis.upenn.edu)
  *
@@ -36,7 +36,7 @@ int crypto_drivers_num = 0;
 struct pool cryptop_pool;
 struct pool cryptodesc_pool;
 
-struct workq *crypto_workq;
+struct taskq *crypto_taskq;
 
 /*
  * Create a new session.
@@ -402,23 +402,9 @@ crypto_unregister(u_int32_t driverid, int alg)
 int
 crypto_dispatch(struct cryptop *crp)
 {
-	int s;
-	u_int32_t hid;
-
-	s = splvm();
-	/*
-	 * Keep track of ops per driver, for coallescing purposes. If
-	 * we have been given an invalid hid, we'll deal with in the
-	 * crypto_invoke(), through session migration.
-	 */
-	hid = (crp->crp_sid >> 32) & 0xffffffff;
-	if (hid < crypto_drivers_num)
-		crypto_drivers[hid].cc_queued++;
-	splx(s);
-
-	if (crypto_workq) {
-		workq_queue_task(crypto_workq, &crp->crp_wqt, 0,
-		    (workq_fn)crypto_invoke, crp, NULL);
+	if (crypto_taskq && !(crp->crp_flags & CRYPTO_F_NOQUEUE)) {
+		task_set(&crp->crp_task, (void (*))crypto_invoke, crp, NULL);
+		task_add(crypto_taskq, &crp->crp_task);
 	} else {
 		crypto_invoke(crp);
 	}
@@ -429,9 +415,9 @@ crypto_dispatch(struct cryptop *crp)
 int
 crypto_kdispatch(struct cryptkop *krp)
 {
-	if (crypto_workq) {
-		workq_queue_task(crypto_workq, &krp->krp_wqt, 0,
-		    (workq_fn)crypto_kinvoke, krp, NULL);
+	if (crypto_taskq) {
+		task_set(&krp->krp_task, (void (*))crypto_kinvoke, krp, NULL);
+		task_add(crypto_taskq, &krp->krp_task);
 	} else {
 		crypto_kinvoke(krp);
 	}
@@ -514,8 +500,6 @@ crypto_invoke(struct cryptop *crp)
 	hid = (crp->crp_sid >> 32) & 0xffffffff;
 	if (hid >= crypto_drivers_num)
 		goto migrate;
-
-	crypto_drivers[hid].cc_queued--;
 
 	if (crypto_drivers[hid].cc_flags & CRYPTOCAP_F_CLEANUP) {
 		crypto_freesession(crp->crp_sid);
@@ -618,7 +602,7 @@ crypto_getreq(int num)
 void
 crypto_init(void)
 {
-	crypto_workq = workq_create("crypto", 1, IPL_HIGH);
+	crypto_taskq = taskq_create("crypto", 1, IPL_HIGH);
 
 	pool_init(&cryptop_pool, sizeof(struct cryptop), 0, 0,
 	    0, "cryptop", NULL);
@@ -637,8 +621,9 @@ crypto_done(struct cryptop *crp)
 		/* not from the crypto queue, wakeup the userland process */
 		crp->crp_callback(crp);
 	} else {
-		workq_queue_task(crypto_workq, &crp->crp_wqt, 0,
-		    (workq_fn)crp->crp_callback, crp, NULL);
+		task_set(&crp->crp_task, (void (*))crp->crp_callback,
+		    crp, NULL);
+		task_add(crypto_taskq, &crp->crp_task);
 	}
 }
 
@@ -648,8 +633,8 @@ crypto_done(struct cryptop *crp)
 void
 crypto_kdone(struct cryptkop *krp)
 {
-	workq_queue_task(crypto_workq, &krp->krp_wqt, 0,
-	    (workq_fn)krp->krp_callback, krp, NULL);
+	task_set(&krp->krp_task, (void (*))krp->krp_callback, krp, NULL);
+	task_add(crypto_taskq, &krp->krp_task);
 }
 
 int

@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.171 2013/06/19 19:47:48 robert Exp $
+#	$OpenBSD: Makefile,v 1.181 2013/12/08 17:05:09 naddy Exp $
 #	$NetBSD: Makefile,v 1.59 1996/05/15 21:36:43 jtc Exp $
 
 #	@(#)Makefile	5.45.1.1 (Berkeley) 5/6/91
@@ -9,22 +9,19 @@
 
 .include <bsd.own.mk>
 
-# Missing: mp.h
 FILES=	a.out.h ar.h assert.h bitstring.h blf.h bm.h bsd_auth.h \
 	complex.h cpio.h ctype.h curses.h db.h dbm.h des.h dirent.h disktab.h \
 	dlfcn.h elf_abi.h err.h errno.h fenv.h float.h fnmatch.h fstab.h fts.h \
 	ftw.h getopt.h glob.h grp.h ifaddrs.h inttypes.h iso646.h kvm.h \
 	langinfo.h libgen.h limits.h locale.h login_cap.h malloc.h math.h md4.h \
 	md5.h memory.h mpool.h ndbm.h netdb.h netgroup.h nlist.h nl_types.h \
-	ohash.h paths.h poll.h pwd.h ranlib.h re_comp.h \
-	readpassphrase.h regex.h resolv.h rmd160.h search.h setjmp.h \
-	sgtty.h sha1.h sha2.h signal.h sndio.h spawn.h stab.h \
-	stdbool.h stddef.h stdio.h stdlib.h \
-	string.h strings.h struct.h sysexits.h tar.h tgmath.h \
-	time.h ttyent.h tzfile.h unistd.h utime.h utmp.h vis.h \
-	wchar.h wctype.h
+	ohash.h paths.h poll.h pwd.h ranlib.h readpassphrase.h regex.h \
+	resolv.h rmd160.h search.h setjmp.h sha1.h sha2.h signal.h sndio.h \
+	spawn.h stdbool.h stddef.h stdio.h stdlib.h string.h strings.h struct.h \
+	sysexits.h tar.h tgmath.h time.h ttyent.h tzfile.h unistd.h utime.h \
+	utmp.h vis.h wchar.h wctype.h
 
-FILES+=	link.h link_aout.h link_elf.h
+FILES+=	link.h link_elf.h
 
 .if (${MACHINE_ARCH} != "vax")
 FILES+= ieeefp.h
@@ -35,32 +32,28 @@ LFILES=	fcntl.h syslog.h termios.h stdarg.h stdint.h varargs.h
 
 DIRS=	arpa protocols rpc rpcsvc
 LDIRS=	altq crypto ddb dev isofs miscfs msdosfs net netinet netinet6 \
-	netmpls netnatm net80211 netbt nfs ntfs scsi sys ufs uvm
+	netmpls net80211 netbt nfs ntfs scsi sys ufs uvm
 
 # Places that need a prerequisite target met before includes
 PRDIRS=
 
 # Directories with an includes target
-RDIRS=	../lib/librthread ../lib/libcompat ../lib/libcurses \
-	../lib/libform ../lib/libssl ../lib/libmenu \
-	../lib/libocurses ../lib/libossaudio ../lib/libpanel ../lib/librpcsvc \
-	../lib/libskey ../lib/libedit ../lib/libexpat \
-	../lib/libpcap ../lib/libsqlite3 ../lib/libutil ../lib/libusbhid \
-	../lib/libwrap \
-	../lib/libz ../lib/libkeynote ../lib/libevent ../usr.bin/lex \
-	../gnu/lib/libreadline ../gnu/usr.sbin/sendmail/libmilter \
-	../sys/arch/${MACHINE} ../usr.sbin/httpd
+RDIRS=	../lib/librthread ../lib/libcurses ../lib/libform ../lib/libssl \
+	../lib/libmenu ../lib/libocurses ../lib/libossaudio ../lib/libpanel \
+	../lib/librpcsvc ../lib/libskey ../lib/libedit ../lib/libexpat \
+	../lib/libfuse ../lib/libpcap ../lib/libsqlite3 ../lib/libutil \
+	../lib/libusbhid ../lib/libwrap ../lib/libz ../lib/libkeynote \
+	../lib/libevent ../usr.bin/lex ../gnu/lib/libreadline \
+	../gnu/usr.sbin/sendmail/libmilter ../usr.sbin/httpd \
+	../sys/arch/${MACHINE}
 
 .if ${COMPILER_VERSION:L} == "gcc3"
 RDIRS+= ../gnu/usr.bin/gcc ../gnu/lib/libobjc
 PRDIRS+= ../gnu/lib/libstdc++
-.elif ${COMPILER_VERSION:L} == "gcc4"
+.else
 RDIRS+= ../gnu/usr.bin/cc/libobjc
 PRDIRS+= ../gnu/lib/libstdc++-v3
 RDIRS+= ../gnu/usr.bin/cc/include
-.else
-RDIRS+= ../gnu/egcs/libio ../gnu/egcs/libstdc++ \
-	../gnu/lib/libobjc ../gnu/egcs/gcc
 .endif
 
 # prereq implies includes
@@ -76,7 +69,7 @@ RDIRS+=../kerberosV/lib/libasn1
 RDIRS+=../kerberosV/lib/libgssapi
 RDIRS+=../kerberosV/lib/libhdb
 RDIRS+=../kerberosV/lib/libkadm5clnt
-RDIRS+=../kerberosV/lib/libkafs5
+RDIRS+=../kerberosV/lib/libkafs
 RDIRS+=../kerberosV/lib/libkrb5
 RDIRS+=../kerberosV/lib/libroken
 RDIRS+=../kerberosV/lib/libkdc
@@ -143,7 +136,7 @@ copies:
 	cd ../sys; \
 	pax -rw -pa -L \
 	    `find ${LDIRS} -follow -type f -name '*.h' '!' \
-	    '(' -path 'dev/microcode/*' -or -path 'dev/pci/drm/i915/*' ')' \
+	    '(' -path 'dev/microcode/*' -or -path 'dev/pci/drm/*/*' ')' \
 	    -print` ${DESTDIR}/usr/include
 	cd ${DESTDIR}/usr/include && rm -rf ${MACHINE} ${MACHINE_CPU} machine
 	${INSTALL} -d -o ${BINOWN} -g ${BINGRP} -m 755 \

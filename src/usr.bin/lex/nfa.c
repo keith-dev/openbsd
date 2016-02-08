@@ -33,7 +33,7 @@
  * PURPOSE.
  */
 
-/* $Header: /cvs/src/usr.bin/lex/nfa.c,v 1.9 2003/06/04 17:34:44 millert Exp $ */
+/* $Header: /var/www/space/cvs/src/usr.bin/lex/nfa.c,v 1.9 2003/06/04 17:34:44 millert Exp $ */
 
 #include "flexdef.h"
 

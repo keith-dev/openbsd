@@ -1,4 +1,4 @@
-/*	$OpenBSD: pucdata.c,v 1.87 2013/04/21 20:46:28 deraadt Exp $	*/
+/*	$OpenBSD: pucdata.c,v 1.92 2014/02/02 19:25:41 miod Exp $	*/
 /*	$NetBSD: pucdata.c,v 1.6 1999/07/03 05:55:23 cgd Exp $	*/
 
 /*
@@ -48,23 +48,107 @@
 
 const struct puc_device_description puc_devs[] = {
 
-	{   /* Intel GM45 KT */
-	    {   PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82GM45_KT, 0x0000, 0x0000 },
-	    {	0xffff,	0xffff,				      0x0000, 0x0000 },
+	{	/* 6 Series KT */
+	    {	PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_6SERIES_KT, 0x0000, 0x0000 },
+	    {	0xffff, 0xffff,					0x0000, 0x0000 },
 	    {
 		{ PUC_COM_POW2(0), 0x10, 0x0000 },
 	    },
 	},
-	{   /* Intel 6 Series KT */
-	    {   PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_6SERIES_KT, 0x0000, 0x0000 },
-	    {	0xffff,	0xffff,				      0x0000, 0x0000 },
+	{	/* Series KT */
+	    {	PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_7SERIES_KT, 0x0000, 0x0000 },
+	    {	0xffff, 0xffff,					0x0000, 0x0000 },
 	    {
 		{ PUC_COM_POW2(0), 0x10, 0x0000 },
 	    },
 	},
-	{   /* Intel 7 Series KT */
-	    {   PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_7SERIES_KT, 0x0000, 0x0000 },
-	    {	0xffff,	0xffff,				      0x0000, 0x0000 },
+	{	/* 82946GZ KT */
+	    {	PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82946GZ_KT, 0x0000, 0x0000 },
+	    {	0xffff, 0xffff,					0x0000, 0x0000 },
+	    {
+		{ PUC_COM_POW2(0), 0x10, 0x0000 },
+	    },
+	},
+	{	/* 82Q965 KT */
+	    {	PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82Q965_KT, 0x0000, 0x0000 },
+	    {	0xffff, 0xffff,					0x0000, 0x0000 },
+	    {
+		{ PUC_COM_POW2(0), 0x10, 0x0000 },
+	    },
+	},
+	{	/* 82G965 KT */
+	    {	PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82G965_KT, 0x0000, 0x0000 },
+	    {	0xffff, 0xffff,					0x0000, 0x0000 },
+	    {
+		{ PUC_COM_POW2(0), 0x10, 0x0000 },
+	    },
+	},
+	{	/* 82Q35 KT */
+	    {	PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82Q35_KT, 0x0000, 0x0000 },
+	    {	0xffff, 0xffff,					0x0000, 0x0000 },
+	    {
+		{ PUC_COM_POW2(0), 0x10, 0x0000 },
+	    },
+	},
+	{	/* 82G33 KT */
+	    {	PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82G33_KT, 0x0000, 0x0000 },
+	    {	0xffff, 0xffff,					0x0000, 0x0000 },
+	    {
+		{ PUC_COM_POW2(0), 0x10, 0x0000 },
+	    },
+	},
+	{	/* 82Q33 KT */
+	    {	PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82Q33_KT, 0x0000, 0x0000 },
+	    {	0xffff, 0xffff,					0x0000, 0x0000 },
+	    {
+		{ PUC_COM_POW2(0), 0x10, 0x0000 },
+	    },
+	},
+	{	/* 82X38 KT */
+	    {	PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82X38_KT, 0x0000, 0x0000 },
+	    {	0xffff, 0xffff,					0x0000, 0x0000 },
+	    {
+		{ PUC_COM_POW2(0), 0x10, 0x0000 },
+	    },
+	},
+	{	/* GM965 KT */
+	    {	PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82GM965_KT, 0x0000, 0x0000 },
+	    {	0xffff, 0xffff,					0x0000, 0x0000 },
+	    {
+		{ PUC_COM_POW2(0), 0x10, 0x0000 },
+	    },
+	},
+	{	/* GME965 KT */
+	    {	PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82GME965_KT, 0x0000, 0x0000 },
+	    {	0xffff, 0xffff,					0x0000, 0x0000 },
+	    {
+		{ PUC_COM_POW2(0), 0x10, 0x0000 },
+	    },
+	},
+	{	/* GM45 KT */
+	    {	PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82GM45_KT, 0x0000, 0x0000 },
+	    {	0xffff, 0xffff,					0x0000, 0x0000 },
+	    {
+		{ PUC_COM_POW2(0), 0x10, 0x0000 },
+	    },
+	},
+	{	/* Q45 KT */
+	    {	PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82Q45_KT, 0x0000, 0x0000 },
+	    {	0xffff, 0xffff,					0x0000, 0x0000 },
+	    {
+		{ PUC_COM_POW2(0), 0x10, 0x0000 },
+	    },
+	},
+	{	/* 3400 KT */
+	    {	PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_3400_KT, 0x0000, 0x0000 },
+	    {	0xffff, 0xffff,					0x0000, 0x0000 },
+	    {
+		{ PUC_COM_POW2(0), 0x10, 0x0000 },
+	    },
+	},
+	{	/* 8 Series KT */
+	    {	PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_8SERIES_KT, 0x0000, 0x0000 },
+	    {	0xffff, 0xffff,					0x0000, 0x0000 },
 	    {
 		{ PUC_COM_POW2(0), 0x10, 0x0000 },
 	    },
@@ -966,6 +1050,15 @@ const struct puc_device_description puc_devs[] = {
 	    },
 	},
 
+	/* Oxford Semiconductor OXPCIE952 PCIE Parallel port */
+	{   /* "Oxford Semiconductor OXPCIE952 PCIE Parallel port", */
+	    {   PCI_VENDOR_OXFORD2, PCI_PRODUCT_OXFORD2_OXPCIE952,	0, 0 },
+	    {   0xffff, 0xffff,						0, 0 },
+	    {
+		{ PUC_LPT, 0x10, 0x0000 },
+	    },
+	},
+
 	/* SIIG 2050 (uses Oxford 16PCI954 and a 10x clock) */
 	{   /* "Oxford Semiconductor OX16PCI954 UARTs", */
 	    {   PCI_VENDOR_OXFORD2, PCI_PRODUCT_OXFORD2_OX16PCI954,
@@ -1031,6 +1124,29 @@ const struct puc_device_description puc_devs[] = {
 	    {   0xffff, 0xffff,						0, 0 },
 	    {
 		{ PUC_LPT, 0x10, 0x0000 },
+	    },
+	},
+
+	/* Oxford Semiconductor PCIE `950 UARTs - 128 byte FIFOs */
+	{   /* "Oxford Semiconductor PCIE UARTs", */
+	    {   PCI_VENDOR_OXFORD2, PCI_PRODUCT_OXFORD2_OXPCIE952S,	0, 0 },
+	    {   0xffff, 0xffff,						0, 0 },
+	    {
+		{ PUC_COM_POW2(0), 0x10, 0x0000 },
+	    },
+	},
+
+	/*
+	 * Brainboxes BB16PCI958.
+	 * Apparently based on an Oxford Semiconductor OX16PCI958 chip.
+	 */
+	{    /* "Brainboxes BB16PCI958 UARTs", */
+	    {	PCI_VENDOR_BRAINBOXES, PCI_PRODUCT_BRAINBOXES_IS200_BB16PCI958,
+		    							0, 0 },
+	    {	0xffff, 0xffff,						0, 0 },
+	    {
+		{ PUC_COM_POW2(0), 0x18, 0x0000 },
+		{ PUC_COM_POW2(0), 0x18, 0x0008 },
 	    },
 	},
 

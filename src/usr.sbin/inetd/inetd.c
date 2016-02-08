@@ -1,4 +1,4 @@
-/*	$OpenBSD: inetd.c,v 1.135 2013/04/19 18:03:16 deraadt Exp $	*/
+/*	$OpenBSD: inetd.c,v 1.137 2013/11/23 17:24:29 deraadt Exp $	*/
 
 /*
  * Copyright (c) 1983,1991 The Regents of the University of California.
@@ -289,6 +289,12 @@ int	dg_broadcast(struct in_addr *in);
 
 #define NUMINT	(sizeof(intab) / sizeof(struct inent))
 char	*CONFIG = _PATH_INETDCONF;
+
+void		fd_grow(fd_set **fdsp, int *bytes, int fd);
+int		dg_badinput(struct sockaddr *sa);
+void		inetd_setproctitle(char *a, int s);
+void		initring(void);
+u_int32_t	machtime(void);
 
 void
 fd_grow(fd_set **fdsp, int *bytes, int fd)
@@ -760,7 +766,8 @@ doconfig(void)
 					/* XXX */
 					strncpy(protoname, sep->se_proto,
 						sizeof(protoname));
-					if (isdigit(protoname[strlen(protoname) - 1]))
+					if (isdigit((unsigned char)
+					    protoname[strlen(protoname) - 1]))
 						protoname[strlen(protoname) - 1] = '\0';
 					sp = getservbyname(sep->se_service,
 					    protoname);
@@ -815,7 +822,8 @@ doconfig(void)
 					/* XXX */
 					strncpy(protoname, sep->se_proto,
 						sizeof(protoname));
-					if (isdigit(protoname[strlen(protoname) - 1]))
+					if (isdigit((unsigned char)
+					    protoname[strlen(protoname) - 1]))
 						protoname[strlen(protoname) - 1] = '\0';
 					sp = getservbyname(sep->se_service,
 					    protoname);
@@ -1664,7 +1672,7 @@ initring(void)
 	endring = ring;
 
 	for (i = 0; i <= sizeof ring; ++i)
-		if (isprint(i))
+		if (isprint((unsigned char)i))
 			*endring++ = i;
 }
 

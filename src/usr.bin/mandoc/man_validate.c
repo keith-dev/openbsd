@@ -1,7 +1,7 @@
-/*	$Id: man_validate.c,v 1.57 2012/11/17 00:25:20 schwarze Exp $ */
+/*	$Id: man_validate.c,v 1.60 2014/01/06 22:39:19 schwarze Exp $ */
 /*
  * Copyright (c) 2008, 2009, 2010, 2011 Kristaps Dzonsons <kristaps@bsd.lv>
- * Copyright (c) 2010, 2012 Ingo Schwarze <schwarze@openbsd.org>
+ * Copyright (c) 2010, 2012, 2013, 2014 Ingo Schwarze <schwarze@openbsd.org>
  *
  * Permission to use, copy, modify, and distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -45,6 +45,7 @@ static	int	  check_eq2(CHKARGS);
 static	int	  check_le1(CHKARGS);
 static	int	  check_ge2(CHKARGS);
 static	int	  check_le5(CHKARGS);
+static	int	  check_head1(CHKARGS);
 static	int	  check_par(CHKARGS);
 static	int	  check_part(CHKARGS);
 static	int	  check_root(CHKARGS);
@@ -76,6 +77,7 @@ static	v_check	  posts_sec[] = { post_sec, NULL };
 static	v_check	  posts_sp[] = { post_vs, check_le1, NULL };
 static	v_check	  posts_th[] = { check_ge2, check_le5, post_TH, NULL };
 static	v_check	  posts_uc[] = { post_UC, NULL };
+static	v_check	  posts_ur[] = { check_head1, check_part, NULL };
 static	v_check	  pres_sec[] = { pre_sec, NULL };
 
 static	const struct man_valid man_valids[MAN_MAX] = {
@@ -115,6 +117,8 @@ static	const struct man_valid man_valids[MAN_MAX] = {
 	{ NULL, posts_eq2 }, /* OP */
 	{ NULL, posts_nf }, /* EX */
 	{ NULL, posts_fi }, /* EE */
+	{ NULL, posts_ur }, /* UR */
+	{ NULL, NULL }, /* UE */
 };
 
 
@@ -203,8 +207,8 @@ check_root(CHKARGS)
 
 	        man->meta.title = mandoc_strdup("unknown");
 		man->meta.msec = mandoc_strdup("1");
-		man->meta.date = mandoc_normdate
-			(man->parse, NULL, n->line, n->pos);
+		man->meta.date = man->quick ? mandoc_strdup("") :
+		    mandoc_normdate(man->parse, NULL, n->line, n->pos);
 	}
 
 	return(1);
@@ -240,6 +244,17 @@ INEQ_DEFINE(2, ==, eq2)
 INEQ_DEFINE(1, <=, le1)
 INEQ_DEFINE(2, >=, ge2)
 INEQ_DEFINE(5, <=, le5)
+
+static int
+check_head1(CHKARGS)
+{
+
+	if (MAN_HEAD == n->type && 1 != n->nchild)
+		mandoc_vmsg(MANDOCERR_ARGCOUNT, man->parse, n->line,
+		    n->pos, "line arguments eq 1 (have %d)", n->nchild);
+
+	return(1);
+}
 
 static int
 post_ft(CHKARGS)
@@ -376,7 +391,6 @@ static int
 post_TH(CHKARGS)
 {
 	const char	*p;
-	int		 line, pos;
 
 	free(man->meta.title);
 	free(man->meta.vol);
@@ -384,8 +398,6 @@ post_TH(CHKARGS)
 	free(man->meta.msec);
 	free(man->meta.date);
 
-	line = n->line;
-	pos = n->pos;
 	man->meta.title = man->meta.vol = man->meta.date =
 		man->meta.msec = man->meta.source = NULL;
 
@@ -419,9 +431,10 @@ post_TH(CHKARGS)
 	if (n)
 		n = n->next;
 	if (n && n->string && '\0' != n->string[0]) {
-		pos = n->pos;
-		man->meta.date = mandoc_normdate
-		    (man->parse, n->string, line, pos);
+		man->meta.date = man->quick ?
+		    mandoc_strdup(n->string) :
+		    mandoc_normdate(man->parse, n->string,
+			n->line, n->pos);
 	} else
 		man->meta.date = mandoc_strdup("");
 

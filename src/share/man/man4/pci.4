@@ -1,4 +1,4 @@
-.\"	$OpenBSD: pci.4,v 1.313 2013/04/17 02:28:40 jsg Exp $
+.\"	$OpenBSD: pci.4,v 1.325 2014/02/14 13:37:23 jmatthew Exp $
 .\"	$NetBSD: pci.4,v 1.29 2000/04/01 00:32:23 tsarna Exp $
 .\"
 .\" Copyright (c) 2000 Theo de Raadt.  All rights reserved.
@@ -31,7 +31,7 @@
 .\" (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
 .\" THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 .\"
-.Dd $Mdocdate: April 17 2013 $
+.Dd $Mdocdate: February 14 2014 $
 .Dt PCI 4
 .Os
 .Sh NAME
@@ -117,12 +117,18 @@ LSI Logic Fusion-MPT Message Passing Interface
 LSI Logic Fusion-MPT Message Passing Interface II
 .It Xr pcscp 4
 Advanced Micro Devices Am53c974 PCscsi-PCI SCSI interface
+.It Xr qla 4
+QLogic ISP2100/ISP2200/ISP2300 Fibre Channel controller
+.It Xr qle 4
+QLogic ISP2400/ISP2500 Fibre Channel controller
 .It Xr siop 4
 LSI/Symbios Logic/NCR 53c8xx SCSI interface
 .It Xr sli 4
 Emulex LightPulse Fibre Channel SCSI interface
 .It Xr trm 4
 TRM-S1040 based PCI SCSI interface
+.It Xr vmwpvs 4
+VMware Paravirtual SCSI
 .El
 .Ss IDE disk controllers
 .Bl -tag -width 10n -offset ind -compact
@@ -151,10 +157,6 @@ Compaq Smart ARRAY 5/6 SAS/SATA/SCSI RAID controller
 DPT EATA SCSI RAID controller
 .It Xr gdt 4
 ICP-Vortex and Intel GDT SATA/SCSI RAID controller
-.It Xr iop 4
-.Tn I2O
-.Tn RAID
-controller
 .It Xr ips 4
 IBM SATA/SCSI ServeRAID controller
 .It Xr mfi 4
@@ -197,11 +199,6 @@ Intel PRO/1000 10/100/Gigabit Ethernet device
 SMC 83C170 (EPIC/100) 10/100 Ethernet device
 .It Xr et 4
 Agere/LSI ET1310 10/100/Gigabit Ethernet device
-.It Xr fpa 4
-.Tn DEC
-DEFPA/DEFEA/DEFTA
-.Tn FDDI
-network device
 .It Xr fxp 4
 Intel EtherExpress PRO/100 10/100 Ethernet device
 .It Xr gem 4
@@ -299,8 +296,7 @@ Intel PRO/Wireless 2100 IEEE 802.11b wireless network device
 Intel
 PRO/Wireless 2200BG/2225BG/2915ABG IEEE 802.11a/b/g wireless network device
 .It Xr iwn 4
-Intel WiFi Link 4965/5000/1000/6000
-IEEE 802.11a/g/n wireless network devices
+Intel WiFi Link and Centrino IEEE 802.11a/g/n wireless network devices
 .It Xr malo 4
 Marvell Libertas IEEE 802.11b/g wireless network device
 .It Xr pgt 4
@@ -323,8 +319,6 @@ Geode LX Security Block crypto accelerator
 Hifn 7751/7811/7951/7955/7956/9751 crypto accelerator
 .It Xr lofn 4
 Hifn 6500 crypto accelerator
-.It Xr noct 4
-NetOctave NSP2000 crypto accelerator
 .It Xr nofn 4
 Hifn 7814/7851/7854 HIPP1 crypto accelerator
 .It Xr safe 4
@@ -491,6 +485,8 @@ Intel Atom E600 series LPC bridge and watchdog timer
 USB Universal Host Controller Interface
 .It Xr viapm 4
 VIA SMBus controller
+.It Xr virtio 4
+VirtIO support driver
 .El
 .Sh IOCTLS
 If the kernel is compiled with the
@@ -501,7 +497,7 @@ calls are supported by the
 .Nm
 driver.
 They are defined in the header file
-.Aq Pa sys/pciio.h .
+.In sys/pciio.h .
 .Bl -tag -width 012345678901234
 .It PCIOCREAD
 This

@@ -1,4 +1,4 @@
-#	$OpenBSD: files.pci,v 1.294 2013/06/01 01:13:34 reyk Exp $
+#	$OpenBSD: files.pci,v 1.303 2014/02/12 23:04:26 jmatthew Exp $
 #	$NetBSD: files.pci,v 1.20 1996/09/24 17:47:15 christos Exp $
 #
 # Config file and device description for machine-independent PCI code.
@@ -107,10 +107,6 @@ device	ips: scsi
 attach	ips at pci
 file	dev/pci/ips.c			ips
 
-# I2O
-attach	iop at pci with iop_pci
-file	dev/pci/iop_pci.c		iop_pci
-
 # Ensoniq AudioPCI S5016, 1371
 device	eap: audio, auconv, mulaw, ac97, midibus
 attach	eap at pci
@@ -217,6 +213,15 @@ file	dev/pci/ciss_pci.c		ciss_pci
 attach	isp at pci with isp_pci
 file	dev/pci/isp_pci.c		isp_pci
 
+# QLogic ISP23xx FC Controllers
+attach  qla at pci with qla_pci
+file    dev/pci/qla_pci.c               qla_pci
+
+# QLogic ISP24xx FC Controllers
+device  qle: scsi
+attach  qle at pci
+file    dev/pci/qle.c                   qle
+
 # LSI Logic Fusion-MPT Message Passing Interface
 attach	mpi at pci with mpi_pci
 file	dev/pci/mpi_pci.c		mpi_pci
@@ -248,11 +253,6 @@ file	dev/pci/if_de.c			de
 # device declaration in sys/conf/files
 attach	ep at pci with ep_pci
 file	dev/pci/if_ep_pci.c		ep_pci
-
-# Digital DEFPA PCI FDDI Controller
-device	fpa: pdq, fddi, ifnet
-attach	fpa at pci
-file	dev/pci/if_fpa.c		fpa
 
 # AMD PCnet-PCI Ethernet controller family
 device pcn: ether, ifnet, ifmedia, mii
@@ -452,11 +452,6 @@ file	dev/pci/nofn.c			nofn
 device	ubsec: crypto
 attach	ubsec at pci
 file	dev/pci/ubsec.c			ubsec
-
-# Netoctave NSP2000
-device	noct: crypto
-attach	noct at pci
-file	dev/pci/noct.c			noct
 
 # Safenet SafeXcel 1141
 device	safe: crypto
@@ -763,6 +758,11 @@ device	vmx: ether, ifnet, ifmedia
 attach	vmx at pci
 file	dev/pci/if_vmx.c		vmx
 
+# VMware Paravirtual SCSI controller
+device	vmwpvs: scsi
+attach	vmwpvs at pci
+file	dev/pci/vmwpvs.c		vmwpvs
+
 # Atheros L2 Ethernet
 device	lii: ether, ifnet, ifmedia, mii
 attach	lii at pci
@@ -849,3 +849,14 @@ file	dev/pci/vioblk.c		vioblk
 device	viomb
 attach	viomb at virtio
 file	dev/pci/viomb.c			viomb
+
+device	viornd
+attach	viornd at virtio
+file	dev/pci/viornd.c		viornd
+
+device	vioscsi: scsi
+attach	vioscsi at virtio
+file	dev/pci/vioscsi.c		vioscsi
+
+include "dev/pci/files.agp"
+include "dev/pci/drm/files.drm"

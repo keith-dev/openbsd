@@ -1,7 +1,7 @@
 # ex:ts=8 sw=4:
-# $OpenBSD: Delete.pm,v 1.119 2012/01/16 08:42:38 schwarze Exp $
+# $OpenBSD: Delete.pm,v 1.133 2014/02/08 10:43:25 espie Exp $
 #
-# Copyright (c) 2003-2007 Marc Espie <espie@openbsd.org>
+# Copyright (c) 2003-2014 Marc Espie <espie@openbsd.org>
 #
 # Permission to use, copy, modify, and distribute this software for any
 # purpose with or without fee is hereby granted, provided that the above
@@ -28,7 +28,7 @@ use File::Basename;
 sub keep_old_files
 {
 	my ($state, $plist) = @_;
-	my $p = new OpenBSD::PackingList;
+	my $p = OpenBSD::PackingList->new;
 	my $borked = borked_package($plist->pkgname);
 	$p->set_infodir(installed_info($borked));
 	mkdir($p->infodir);
@@ -42,36 +42,36 @@ sub keep_old_files
 sub manpages_unindex
 {
 	my ($state) = @_;
-	return unless defined $state->{mandirs};
+	return unless defined $state->{rmman};
 	my $destdir = $state->{destdir};
 	require OpenBSD::Makewhatis;
 
-	while (my ($k, $v) = each %{$state->{mandirs}}) {
-		my @l = map { $destdir.$_ } @$v;
+	# fudge verbose for API differences
+	my $v = $state->{v};
+	$state->{v} = $state->verbose >= 2;
+	while (my ($k, $v) = each %{$state->{rmman}}) {
+		my @l = map { "$destdir$k/$_" } @$v;
 		if ($state->{not}) {
 			$state->say("Removing manpages in #1: #2",
-			    $destdir.$k, join(' ', @l))
-				 if $state->verbose >= 2;
+			    $destdir.$k, join(' ', @l)) if $state->verbose;
 		} else {
-			eval { OpenBSD::Makewhatis::remove($destdir.$k, \@l,
-			    $state); };
+			eval {
+				OpenBSD::Makewhatis::remove($destdir.$k, \@l,
+				    $state);
+			};
 			if ($@) {
-				$state->errsay("Error in makewhatis: #1", $@);
-			}
+				$state->errsay("Error in makewhatis: #1", $_);
+			};
 		}
 	}
-	undef $state->{mandirs};
+	$state->{v} = $v;
+	delete $state->{rmman};
 }
 
 sub validate_plist
 {
 	my ($plist, $state) = @_;
 
-	if ($plist->has('system-package')) {
-		$state->{problems}++;
-		$state->errsay("Error: can't delete system packages");
-		return;
-	}
 	$plist->prepare_for_deletion($state, $plist->pkgname);
 }
 
@@ -104,11 +104,11 @@ sub delete_package
 		$state->fatal("Package real name #1 does not match #2",
 			$plist->pkgname, $pkgname);
 	}
-	if ($plist->is_signed) {
-		if (!$state->{quick}) {
-			require OpenBSD::x509;
-			if (!OpenBSD::x509::check_signature($plist, $state)) {
-				$state->fatal("package #1 was corrupted: signature check failed", $pkgname);
+	if ($plist->has('firmware')) {
+		if ($state->{interactive}) {
+			if (!$state->confirm("\nDelete firmware $pkgname", 0)) {
+				$state->errsay("NOT deleting #1", $pkgname);
+				return;
 			}
 		}
 	}
@@ -148,9 +148,8 @@ sub delete_plist
 
 	my $pkgname = $plist->pkgname;
 	$state->{pkgname} = $pkgname;
-	$ENV{'PKG_PREFIX'} = $plist->localbase;
 	if (!$state->{size_only}) {
-		$plist->register_manpage($state);
+		$plist->register_manpage($state, 'rmman');
 		manpages_unindex($state);
 		$state->progress->visit_with_size($plist, 'delete', $state);
 		if ($plist->has(UNDISPLAY)) {
@@ -190,7 +189,7 @@ sub rename_file_to_temp
 		}
 		$self->set_name($j);
 	} else {
-		$state->errsay("Bad rename #1 to #2: #", $n, $j, $!);
+		$state->errsay("Bad rename #1 to #2: #3", $n, $j, $!);
 	}
 }
 
@@ -225,7 +224,7 @@ sub mark_directory
 {
 	my ($self, $state, $dir) = @_;
 
-	$state->{dirs_okay}->{$dir} = 1;
+	$state->{dirs_okay}{$dir} = 1;
 	my $d2 = dirname($dir);
 	if ($d2 ne $dir) {
 		$self->mark_directory($state, $d2);
@@ -294,7 +293,7 @@ sub delete
 sub record_shared
 {
 	my ($self, $recorder, $pkgname) = @_;
-	$recorder->{users}->{$self->name} = $pkgname;
+	$recorder->{users}{$self->name} = $pkgname;
 }
 
 package OpenBSD::PackingElement::NewGroup;
@@ -312,7 +311,7 @@ sub delete
 sub record_shared
 {
 	my ($self, $recorder, $pkgname) = @_;
-	$recorder->{groups}->{$self->name} = $pkgname;
+	$recorder->{groups}{$self->name} = $pkgname;
 }
 
 package OpenBSD::PackingElement::DirBase;
@@ -321,8 +320,6 @@ sub prepare_for_deletion
 	my ($self, $state, $pkgname) = @_;
 	my $fname = $state->{destdir}.$self->fullname;
 	$state->vstat->remove_directory($fname, $self);
-	return unless $self->{noshadow};
-	$state->{noshadow}{$fname} = 1;
 }
 
 sub delete
@@ -339,8 +336,27 @@ sub delete
 sub record_shared
 {
 	my ($self, $recorder, $pkgname) = @_;
+	# enough for the entry to exist, we only record interesting
+	# entries more thoroughly
+	$recorder->{dirs}{$self->fullname} //= [];
+}
+
+package OpenBSD::PackingElement::Mandir;
+sub record_shared
+{
+	my ($self, $recorder, $pkgname) = @_;
 	$self->{pkgname} = $pkgname;
-	push(@{$recorder->{dirs}->{$self->fullname}} , $self);
+	push(@{$recorder->{dirs}{$self->fullname}} , $self);
+}
+package OpenBSD::PackingElement::Fontdir;
+sub record_shared
+{
+	&OpenBSD::PackingElement::Mandir::record_shared;
+}
+package OpenBSD::PackingElement::Infodir;
+sub record_shared
+{
+	&OpenBSD::PackingElement::Mandir::record_shared;
 }
 
 package OpenBSD::PackingElement::Unexec;
@@ -358,14 +374,14 @@ package OpenBSD::PackingElement::UnexecDelete;
 sub should_run
 {
 	my ($self, $state) = @_;
-	return !$state->{replacing};
+	return !$state->replacing;
 }
 
 package OpenBSD::PackingElement::UnexecUpdate;
 sub should_run
 {
 	my ($self, $state) = @_;
-	return $state->{replacing};
+	return $state->replacing;
 }
 
 package OpenBSD::PackingElement::FileBase;
@@ -454,7 +470,7 @@ sub copy_old_stuff
 
 	if (defined $self->{stillaround}) {
 		delete $self->{stillaround};
-		if ($state->{replacing}) {
+		if ($state->replacing) {
 			$self->rename_file_to_temp($state);
 		}
 		$self->add_object($plist);
@@ -477,9 +493,6 @@ sub prepare_for_deletion
 	return unless defined $s;
 	if ($s->ro) {
 		$s->report_ro($state, $fname);
-	}
-	if ($s->noexec && $self->exec_on_delete) {
-		$s->report_noexec($state, $fname);
 	}
 }
 
@@ -522,7 +535,7 @@ sub delete
 	if (!defined $orig) {
 		$state->fatal("\@sample element does not reference a valid file");
 	}
-	my $action = $state->{replacing} ? "check" : "remove";
+	my $action = $state->replacing ? "check" : "remove";
 	my $origname = $orig->realname($state);
 	if (! -e $realname) {
 		$state->log("File #1 does not exist", $realname);
@@ -620,7 +633,7 @@ sub delete
 	}
 	return if $state->{not};
 	return unless -e $realname or -l $realname;
-	if ($state->{replacing}) {
+	if ($state->replacing) {
 		$state->log("Remember to update #1", $realname);
 		$self->mark_dir($state);
 	} elsif ($state->{extra}) {
@@ -639,7 +652,7 @@ sub delete
 	my ($self, $state) = @_;
 	return unless $state->{extra};
 	my $realname = $self->realname($state);
-	return if $state->{replacing};
+	return if $state->replacing;
 	if ($state->{extra}) {
 		$self->SUPER::delete($state);
 	} else {

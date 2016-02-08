@@ -1,4 +1,4 @@
-/*	$OpenBSD: for.c,v 1.43 2013/05/06 11:29:18 espie Exp $	*/
+/*	$OpenBSD: for.c,v 1.45 2013/11/22 15:47:35 espie Exp $	*/
 /*	$NetBSD: for.c,v 1.4 1996/11/06 17:59:05 christos Exp $ */
 
 /*
@@ -138,7 +138,7 @@ For_Eval(const char *line)
 	For 	*arg;
 	unsigned long n;
 
-	while (isspace(*ptr))
+	while (ISSPACE(*ptr))
 		ptr++;
 
 	/* Parse loop.  */
@@ -149,14 +149,14 @@ For_Eval(const char *line)
 
 	for (;;) {
 		/* Grab the variables.  */
-		for (wrd = ptr; *ptr && !isspace(*ptr); ptr++)
+		for (wrd = ptr; *ptr && !ISSPACE(*ptr); ptr++)
 			continue;
 		if (ptr - wrd == 0) {
 			Parse_Error(PARSE_FATAL, "Syntax error in for");
 			return 0;
 		}
 		endVar = ptr++;
-		while (isspace(*ptr))
+		while (ISSPACE(*ptr))
 			ptr++;
 		/* End of variable list ? */
 		if (endVar - wrd == 2 && wrd[0] == 'i' && wrd[1] == 'n')
@@ -185,11 +185,15 @@ For_Eval(const char *line)
 	free(sub);
 	if (arg->nvars != 1 && n % arg->nvars != 0) {
 		LstNode ln;
+
 		Parse_Error(PARSE_FATAL, "Wrong number of items in for loop");
 		(void)fprintf(stderr, "%lu items for %d variables:", 
 		    n, arg->nvars);
-		for (ln = Lst_First(&arg->lst); ln != NULL; ln = Lst_Adv(ln))
-			(void)fprintf(stderr, " %s", Lst_Datum(ln));
+		for (ln = Lst_First(&arg->lst); ln != NULL; ln = Lst_Adv(ln)) {
+			char *p = Lst_Datum(ln);
+
+			(void)fprintf(stderr, " %s", p);
+		}
 		(void)fprintf(stderr, "\n");
 		return 0;
 	}
@@ -210,11 +214,11 @@ For_Accumulate(For *arg, const char *line)
 
 	if (*ptr == '.') {
 
-		for (ptr++; isspace(*ptr); ptr++)
+		for (ptr++; ISSPACE(*ptr); ptr++)
 			continue;
 
 		if (strncmp(ptr, "endfor", 6) == 0 &&
-		    (isspace(ptr[6]) || !ptr[6])) {
+		    (ISSPACE(ptr[6]) || !ptr[6])) {
 			if (DEBUG(FOR))
 				(void)fprintf(stderr, "For: end for %lu\n",
 				    arg->level);
@@ -223,7 +227,7 @@ For_Accumulate(For *arg, const char *line)
 				return false;
 		}
 		else if (strncmp(ptr, "for", 3) == 0 &&
-		     isspace(ptr[3])) {
+		     ISSPACE(ptr[3])) {
 			arg->level++;
 			if (DEBUG(FOR))
 				(void)fprintf(stderr, "For: new loop %lu\n",

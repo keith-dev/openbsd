@@ -1,4 +1,4 @@
-/*	$OpenBSD: parse.y,v 1.30 2013/03/21 04:30:14 deraadt Exp $	*/
+/*	$OpenBSD: parse.y,v 1.37 2014/02/17 15:07:23 markus Exp $	*/
 
 /*
  * Copyright (c) 2010-2013 Reyk Floeter <reyk@openbsd.org>
@@ -63,6 +63,7 @@ static struct file {
 struct file	*pushfile(const char *, int);
 int		 popfile(void);
 int		 check_file_secrecy(int, const char *);
+int		 check_pubkey(char *, int );
 int		 yyparse(void);
 int		 yylex(void);
 int		 yyerror(const char *, ...);
@@ -91,6 +92,7 @@ static int		 debug = 0;
 static int		 rules = 0;
 static int		 passive = 0;
 static int		 decouple = 0;
+static char		*ocsp_url = NULL;
 
 struct ipsec_xf {
 	const char	*name;
@@ -368,6 +370,7 @@ typedef struct {
 %token	PASSIVE ACTIVE ANY TAG TAP PROTO LOCAL GROUP NAME CONFIG EAP USER
 %token	IKEV1 FLOW SA TCPMD5 TUNNEL TRANSPORT COUPLE DECOUPLE SET
 %token	INCLUDE LIFETIME BYTES INET INET6 QUICK SKIP DEFAULT
+%token	IPCOMP OCSP
 %token	<v.string>		STRING
 %token	<v.number>		NUMBER
 %type	<v.string>		string
@@ -384,7 +387,7 @@ typedef struct {
 %type	<v.id>			id
 %type	<v.transforms>		transforms
 %type	<v.filters>		filters
-%type	<v.ikemode>		ikeflags ikematch ikemode
+%type	<v.ikemode>		ikeflags ikematch ikemode ipcomp
 %type	<v.ikeauth>		ikeauth
 %type	<v.ikekey>		keyspec
 %type	<v.mode>		ike_sa child_sa
@@ -428,6 +431,12 @@ set		: SET ACTIVE	{ passive = 0; }
 		| SET PASSIVE	{ passive = 1; }
 		| SET COUPLE	{ decouple = 0; }
 		| SET DECOUPLE	{ decouple = 1; }
+		| SET OCSP STRING		{
+			if ((ocsp_url = strdup($3)) == NULL) {
+				yyerror("cannot set ocsp_url");
+				YYERROR;
+			}
+		}
 		;
 
 user		: USER STRING STRING		{
@@ -751,7 +760,7 @@ ike_sa		: /* empty */	{
 			encxfs = ikeencxfs;
 		} transforms	{
 			if (($$ = calloc(1, sizeof(*$$))) == NULL)
-				err(1, "child_sa: calloc");
+				err(1, "ike_sa: calloc");
 			$$->xfs = $3;
 		}
 		;
@@ -768,7 +777,7 @@ child_sa	: /* empty */	{
 		}
 		;
 
-ikeflags	: ikematch ikemode		{ $$ = $1 | $2; }
+ikeflags	: ikematch ikemode ipcomp	{ $$ = $1 | $2 | $3; }
 		;
 
 ikematch	: /* empty */			{ $$ = 0; }
@@ -780,6 +789,10 @@ ikematch	: /* empty */			{ $$ = 0; }
 ikemode		: /* empty */			{ $$ = IKED_POLICY_PASSIVE; }
 		| PASSIVE			{ $$ = IKED_POLICY_PASSIVE; }
 		| ACTIVE			{ $$ = IKED_POLICY_ACTIVE; }
+		;
+
+ipcomp		: /* empty */			{ $$ = 0; }
+		| IPCOMP			{ $$ = IKED_POLICY_IPCOMP; }
 		;
 
 ikeauth		: /* empty */			{
@@ -825,7 +838,7 @@ byte_spec	: NUMBER			{
 				yyerror("invalid byte specification: %s", $1);
 				YYERROR;
 			}
-			switch (toupper(unit)) {
+			switch (toupper((unsigned char)unit)) {
 			case 'K':
 				bytes *= 1024;
 				break;
@@ -854,7 +867,7 @@ time_spec	: NUMBER			{
 				yyerror("invalid time specification: %s", $1);
 				YYERROR;
 			}
-			switch (tolower(unit)) {
+			switch (tolower((unsigned char)unit)) {
 			case 'm':
 				seconds *= 60;
 				break;
@@ -1076,9 +1089,11 @@ lookup(char *s)
 		{ "include",		INCLUDE },
 		{ "inet",		INET },
 		{ "inet6",		INET6 },
+		{ "ipcomp",		IPCOMP },
 		{ "lifetime",		LIFETIME },
 		{ "local",		LOCAL },
 		{ "name",		NAME },
+		{ "ocsp",		OCSP },
 		{ "passive",		PASSIVE },
 		{ "peer",		PEER },
 		{ "port",		PORT },
@@ -1117,9 +1132,9 @@ lookup(char *s)
 
 #define MAXPUSHBACK	128
 
-char	*parsebuf;
+u_char	*parsebuf;
 int	 parseindex;
-char	 pushback_buffer[MAXPUSHBACK];
+u_char	 pushback_buffer[MAXPUSHBACK];
 int	 pushback_index = 0;
 
 int
@@ -1211,8 +1226,8 @@ findeol(void)
 int
 yylex(void)
 {
-	char	 buf[8096];
-	char	*p, *val;
+	u_char	 buf[8096];
+	u_char	*p, *val;
 	int	 quotec, next, c;
 	int	 token;
 
@@ -1235,7 +1250,7 @@ top:
 				return (findeol());
 			}
 			if (isalnum(c) || c == '_') {
-				*p++ = (char)c;
+				*p++ = c;
 				continue;
 			}
 			*p = '\0';
@@ -1280,7 +1295,7 @@ top:
 				yyerror("string too long");
 				return (findeol());
 			}
-			*p++ = (char)c;
+			*p++ = c;
 		}
 		yylval.v.string = strdup(buf);
 		if (yylval.v.string == NULL)
@@ -1367,8 +1382,8 @@ check_file_secrecy(int fd, const char *fname)
 		warnx("%s: owner not root or current user", fname);
 		return (-1);
 	}
-	if (st.st_mode & (S_IRWXG | S_IRWXO)) {
-		warnx("%s: group/world readable/writeable", fname);
+	if (st.st_mode & (S_IWGRP | S_IXGRP | S_IRWXO)) {
+		warnx("%s: group writable or world read/writable", fname);
 		return (-1);
 	}
 	return (0);
@@ -1453,6 +1468,7 @@ parse_config(const char *filename, struct iked *x_env)
 
 	env->sc_passive = passive ? 1 : 0;
 	env->sc_decoupled = decouple ? 1 : 0;
+	env->sc_ocsp_url = ocsp_url;
 
 	if (!rules)
 		log_warnx("%s: no valid configuration rules found",
@@ -1623,6 +1639,48 @@ get_id_type(char *string)
 		return (IKEV2_ID_UFQDN);
 	else
 		return (IKEV2_ID_FQDN);
+}
+
+int
+check_pubkey(char *idstr, int type)
+{
+	char		 keyfile[MAXPATHLEN];
+	FILE		*fp = NULL;
+	const char	*suffix = NULL;
+
+	switch (type) {
+	case IKEV2_ID_IPV4:
+		suffix = "ipv4";
+		break;
+	case IKEV2_ID_IPV6:
+		suffix = "ipv6";
+		break;
+	case IKEV2_ID_FQDN:
+		suffix = "fqdn";
+		break;
+	case IKEV2_ID_UFQDN:
+		suffix = "ufqdn";
+		break;
+	default:
+		/* Unspecified ID or public key not supported for this type */
+		return (-1);
+	}
+
+	lc_string(idstr);
+	if ((size_t)snprintf(keyfile, sizeof(keyfile),
+	    IKED_CA IKED_PUBKEY_DIR "%s/%s", suffix,
+	    idstr) >= sizeof(keyfile)) {
+		log_warnx("%s: public key path is too long", __func__);
+		return (-1);
+	}
+
+	if ((fp = fopen(keyfile, "r")) == NULL)
+		return (-1);
+	fclose(fp);
+
+	log_debug("%s: found public key file %s", __func__, keyfile);
+
+	return (0);
 }
 
 struct ipsec_addr_wrap *
@@ -2160,7 +2218,8 @@ print_policy(struct iked_policy *pol)
 
 	RB_FOREACH(flow, iked_flows, &pol->pol_flows) {
 		print_verbose(" from %s",
-		    print_host(&flow->flow_src.addr, NULL, 0));
+		    print_host((struct sockaddr *)&flow->flow_src.addr, NULL,
+		    0));
 		if (flow->flow_src.addr_af != AF_UNSPEC &&
 		    flow->flow_src.addr_net)
 			print_verbose("/%d", flow->flow_src.addr_mask);
@@ -2169,7 +2228,8 @@ print_policy(struct iked_policy *pol)
 			    ntohs(flow->flow_src.addr_port));
 
 		print_verbose(" to %s",
-		    print_host(&flow->flow_dst.addr, NULL, 0));
+		    print_host((struct sockaddr *)&flow->flow_dst.addr, NULL,
+		    0));
 		if (flow->flow_dst.addr_af != AF_UNSPEC &&
 		    flow->flow_dst.addr_net)
 			print_verbose("/%d", flow->flow_dst.addr_mask);
@@ -2180,13 +2240,15 @@ print_policy(struct iked_policy *pol)
 
 	if ((pol->pol_flags & IKED_POLICY_DEFAULT) == 0) {
 		print_verbose(" local %s",
-		    print_host(&pol->pol_local.addr, NULL, 0));
+		    print_host((struct sockaddr *)&pol->pol_local.addr, NULL,
+		    0));
 		if (pol->pol_local.addr.ss_family != AF_UNSPEC &&
 		    pol->pol_local.addr_net)
 			print_verbose("/%d", pol->pol_local.addr_mask);
 
 		print_verbose(" peer %s",
-		    print_host(&pol->pol_peer.addr, NULL, 0));
+		    print_host((struct sockaddr *)&pol->pol_peer.addr, NULL,
+		    0));
 		if (pol->pol_peer.addr.ss_family != AF_UNSPEC &&
 		    pol->pol_peer.addr_net)
 			print_verbose("/%d", pol->pol_peer.addr_mask);
@@ -2271,7 +2333,8 @@ print_policy(struct iked_policy *pol)
 		cfg = &pol->pol_cfg[i];
 		print_verbose(" config %s %s", print_xf(cfg->cfg_type,
 		    cfg->cfg.address.addr_af, cpxfs),
-		    print_host(&cfg->cfg.address.addr, NULL, 0));
+		    print_host((struct sockaddr *)&cfg->cfg.address.addr, NULL,
+		    0));
 	}
 
 	if (pol->pol_tag[0] != '\0')
@@ -2323,6 +2386,8 @@ create_ike(char *name, int af, u_int8_t ipproto, struct ipsec_hosts *hosts,
     struct iked_auth *authtype, struct ipsec_filters *filter,
     struct ipsec_addr_wrap *ikecfg)
 {
+	char			 idstr[IKED_ID_SIZE];
+	u_int 			 idtype = IKEV2_ID_NONE;
 	struct ipsec_addr_wrap	*ipa, *ipb;
 	struct iked_policy	 pol;
 	struct iked_proposal	 prop[2];
@@ -2334,8 +2399,10 @@ create_ike(char *name, int af, u_int8_t ipproto, struct ipsec_hosts *hosts,
 
 	bzero(&pol, sizeof(pol));
 	bzero(&prop, sizeof(prop));
+	bzero(idstr, sizeof(idstr));
 
 	pol.pol_id = ++policy_id;
+	pol.pol_certreqtype = env->sc_certreqtype;
 	pol.pol_af = af;
 	pol.pol_saproto = saproto;
 	pol.pol_ipproto = ipproto;
@@ -2558,6 +2625,29 @@ create_ike(char *name, int af, u_int8_t ipproto, struct ipsec_hosts *hosts,
 		cfg->cfg.address.addr_net = ipa->netaddress;
 		cfg->cfg.address.addr_af = ipa->af;
 	}
+
+	if (dstid) {
+		strlcpy(idstr, dstid, sizeof(idstr));
+		idtype = pol.pol_peerid.id_type;
+	} else if (!pol.pol_peer.addr_net) {
+		print_host((struct sockaddr *)&pol.pol_peer.addr, idstr,
+		    sizeof(idstr));
+		switch (pol.pol_peer.addr.ss_family) {
+		case AF_INET:
+			idtype = IKEV2_ID_IPV4;
+			break;
+		case AF_INET6:
+			idtype = IKEV2_ID_IPV6;
+			break;
+		default:
+			log_warnx("%s: unknown address family", __func__);
+			break;
+		}
+	}
+
+	/* Check if we have a raw public key for this peer */
+	if (check_pubkey(idstr, idtype) != -1)
+		pol.pol_certreqtype = IKEV2_CERT_RSA_KEY;
 
 	config_setpolicy(env, &pol, PROC_IKEV2);
 

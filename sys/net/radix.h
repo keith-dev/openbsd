@@ -1,4 +1,4 @@
-/*	$OpenBSD: radix.h,v 1.19 2012/12/28 17:52:06 gsoares Exp $	*/
+/*	$OpenBSD: radix.h,v 1.24 2014/01/22 10:17:59 claudio Exp $	*/
 /*	$NetBSD: radix.h,v 1.8 1996/02/13 22:00:37 christos Exp $	*/
 
 /*
@@ -60,11 +60,6 @@ struct radix_node {
 			struct	radix_node *rn_R;/* progeny */
 		} rn_node;
 	} rn_u;
-#ifdef RN_DEBUG
-	int rn_info;
-	struct radix_node *rn_twin;
-	struct radix_node *rn_ybro;
-#endif
 };
 
 #define rn_dupedkey rn_u.rn_leaf.rn_Dupedkey
@@ -78,7 +73,7 @@ struct radix_node {
  * Annotations to tree concerning potential routes applying to subtrees.
  */
 
-extern struct radix_mask {
+struct radix_mask {
 	short	rm_b;			/* bit offset; -1-index(netmask) */
 	char	rm_unused;		/* cf. rn_bmask */
 	u_char	rm_flags;		/* cf. rn_flags */
@@ -88,23 +83,10 @@ extern struct radix_mask {
 		struct	radix_node *rmu_leaf;	/* for normal routes */
 	}	rm_rmu;
 	int	rm_refs;		/* # of references to this struct */
-} *rn_mkfreelist;
+};
 
 #define rm_mask rm_rmu.rmu_mask
 #define rm_leaf rm_rmu.rmu_leaf		/* extra field would make 32 bytes */
-
-#define MKGet(m) do {							\
-	if (rn_mkfreelist) {						\
-		m = rn_mkfreelist;					\
-		rn_mkfreelist = (m)->rm_mklist;				\
-	} else								\
-		R_Malloc(m, struct radix_mask *, sizeof (*(m)));	\
-} while (0)
-
-#define MKFree(m) do {							\
-	(m)->rm_mklist = rn_mkfreelist;					\
-	rn_mkfreelist = (m);						\
-} while (0)
 
 struct radix_node_head {
 	struct	radix_node *rnh_treetop;
@@ -132,11 +114,6 @@ struct radix_node_head {
 };
 
 #ifdef _KERNEL
-#define Bcmp(a, b, n) bcmp(((caddr_t)(a)), ((caddr_t)(b)), (unsigned)(n))
-#define Bcopy(a, b, n) bcopy(((caddr_t)(a)), ((caddr_t)(b)), (unsigned)(n))
-#define Bzero(p, n) bzero((caddr_t)(p), (unsigned)(n));
-#define R_Malloc(p, t, n) (p = (t) malloc((unsigned long)(n), M_RTABLE, M_NOWAIT))
-#define Free(p) free((caddr_t)p, M_RTABLE);
 
 void	rn_init(void);
 int	rn_inithead(void **, int);
@@ -154,4 +131,5 @@ struct radix_node	*rn_lookup(void *, void *, struct radix_node_head *);
 struct radix_node	*rn_match(void *, struct radix_node_head *);
 
 #endif /* _KERNEL */
+
 #endif /* _NET_RADIX_H_ */

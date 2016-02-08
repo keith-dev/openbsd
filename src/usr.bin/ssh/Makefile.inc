@@ -1,24 +1,44 @@
-#	$OpenBSD: Makefile.inc,v 1.39 2010/10/01 23:10:48 djm Exp $
+#	$OpenBSD: Makefile.inc,v 1.44 2014/02/28 22:46:54 deraadt Exp $
+
+.include <bsd.own.mk>
 
 CFLAGS+=	-I${.CURDIR}/..
 
 CDIAGFLAGS=	-Wall
-#CDIAGFLAGS+=	-Werror
-CDIAGFLAGS+=	-Wpointer-arith
-CDIAGFLAGS+=	-Wuninitialized
-CDIAGFLAGS+=	-Wstrict-prototypes
+CDIAGFLAGS+=	-Wchar-subscripts
+CDIAGFLAGS+=	-Wcomment
+CDIAGFLAGS+=	-Wextra
+CDIAGFLAGS+=	-Wformat
+CDIAGFLAGS+=	-Wformat-security
+CDIAGFLAGS+=	-Wimplicit
+CDIAGFLAGS+=	-Winline
+CDIAGFLAGS+=	-Wmissing-declarations
 CDIAGFLAGS+=	-Wmissing-prototypes
-CDIAGFLAGS+=	-Wunused
-CDIAGFLAGS+=	-Wsign-compare
-CDIAGFLAGS+=	-Wbounded
+CDIAGFLAGS+=	-Wparentheses
+CDIAGFLAGS+=	-Wpointer-arith
+CDIAGFLAGS+=	-Wreturn-type
 CDIAGFLAGS+=	-Wshadow
+CDIAGFLAGS+=	-Wsign-compare
+CDIAGFLAGS+=	-Wstrict-aliasing
+CDIAGFLAGS+=	-Wstrict-prototypes
+CDIAGFLAGS+=	-Wswitch
+CDIAGFLAGS+=	-Wtrigraphs
+CDIAGFLAGS+=	-Wuninitialized
+CDIAGFLAGS+=	-Wunused
+.if ${COMPILER_VERSION} == "gcc4"
+CDIAGFLAGS+=	-Wold-style-definition
+.endif
+CDIAGFLAGS+=	-Wno-unused-parameter # Not clean for this yet
+#CDIAGFLAGS+=	-Wwrite-strings # XXX too messy; needs libc changes
+#CDIAGFLAGS+=	-Wcast-qual # XXX not clean
+#CDIAGFLAGS+=	-Wcast-align # XXX can't be clean with sockaddr casts?
 
+#CDIAGFLAGS+=	-Werror
 #DEBUG=-g
 
-#CFLAGS+=	-DJPAKE
+WARNINGS=yes
 
 CFLAGS+=	-DENABLE_PKCS11
-.include <bsd.own.mk>
 .ifndef NOPIC
 CFLAGS+=	-DHAVE_DLOPEN
 .endif
@@ -32,3 +52,5 @@ DPADD+=         ${.CURDIR}/../lib/${__objdir}/libssh.a
 LDADD+=         -L${.CURDIR}/../lib -lssh
 DPADD+=         ${.CURDIR}/../lib/libssh.a
 .endif
+
+LDADD+=		-lutil

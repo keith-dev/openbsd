@@ -1,4 +1,4 @@
-/*	$OpenBSD: pcidump.c,v 1.33 2013/06/15 19:45:03 kettenis Exp $	*/
+/*	$OpenBSD: pcidump.c,v 1.35 2013/11/12 19:48:53 deraadt Exp $	*/
 
 /*
  * Copyright (c) 2006, 2007 David Gwynne <loki@animata.net>
@@ -53,6 +53,10 @@ void dump_pcie_linkspeed(int, int, int, uint8_t);
 void print_pcie_ls(uint8_t);
 int dump_rom(int, int, int);
 int dump_vga_bios(void);
+
+void	dump_type0(int bus, int dev, int func);
+void	dump_type1(int bus, int dev, int func);
+void	dump_type2(int bus, int dev, int func);
 
 __dead void
 usage(void)
@@ -282,41 +286,47 @@ probe(int bus, int dev, int func)
 void
 print_pcie_ls(uint8_t speed)
 {
-	switch (speed) {
-	case 1:
-		printf("2.5");
-		break;
-	case 2:
-		printf("5.0");
-		break;
-	case 3:
+	if (speed & 4)
 		printf("8.0");
-		break;
-	default:
+	else if (speed & 2)
+		printf("5.0");
+	else if (speed & 1)
+		printf("2.5");
+	else
 		printf("unknown (%d)", speed);
-	}
 }
 
 void
 dump_pcie_linkspeed(int bus, int dev, int func, uint8_t ptr)
 {
-	u_int32_t creg, sreg;
-	u_int8_t cap, cwidth, cspeed, swidth, sspeed;
+	u_int32_t lcap, sreg, lcap2 = 0, xcap;
+	u_int8_t cwidth, cspeed, swidth, sspeed;
 
-	if (pci_read(bus, dev, func, ptr + PCI_PCIE_LCAP, &creg) != 0)
+	if (pci_read(bus, dev, func, ptr + PCI_PCIE_XCAP, &xcap) != 0)
 		return;
+
+	if (PCI_PCIE_XCAP_VER(xcap) >= 2) {
+		if (pci_read(bus, dev, func, ptr + PCI_PCIE_LCAP2, &lcap2) != 0)
+			lcap2 = 0;
+		else
+			cspeed = (lcap2 & 0x0e) >> 1;
+	}
+
+	if (pci_read(bus, dev, func, ptr + PCI_PCIE_LCAP, &lcap) != 0)
+		return;
+	if (lcap2 == 0)
+		cspeed = lcap & 0x0f;
 
 	if (pci_read(bus, dev, func, ptr + PCI_PCIE_LCSR, &sreg) != 0)
 		return;
 	sreg = sreg >> 16;
 
-	cwidth = (creg >> 4) & 0x3f;
-	swidth = (sreg >> 4) & 0x3f;
-	cspeed = creg & 0x0f;
-	sspeed = sreg & 0x0f;
-	
+	cwidth = (lcap >> 4) & 0x3f;
 	if (cwidth == 0)
 		return;
+
+	swidth = (sreg >> 4) & 0x3f;
+	sspeed = sreg & 0x0f;
 
 	printf("\t        Link Speed: ");
 	print_pcie_ls(sspeed);

@@ -1,4 +1,4 @@
-.\"	$OpenBSD: mtrr.4,v 1.14 2008/06/16 15:21:10 jmc Exp $
+.\"	$OpenBSD: mtrr.4,v 1.17 2014/02/15 23:41:19 schwarze Exp $
 .\"
 .\" Pentium MTRR driver for OpenBSD.
 .\" Copyright 1999 Matthieu Herrb <matthieu@openbsd.org>
@@ -8,7 +8,7 @@
 .\" OpenBSD project (for instance by leaving this copyright notice
 .\" intact).
 .\"
-.Dd $Mdocdate: June 16 2008 $
+.Dd $Mdocdate: February 15 2014 $
 .Dt MTRR 4 i386
 .Os
 .Sh NAME
@@ -31,7 +31,7 @@ calls performed on
 or
 .Pa /dev/xf86 .
 Declarations and data types are to be found in
-.Aq Pa sys/memrange.h .
+.In sys/memrange.h .
 .Pp
 The specific attributes, and number of programmable ranges may vary between
 architectures.
@@ -76,9 +76,6 @@ The region is currently active.
 We believe the region to be invalid or otherwise erroneous.
 .It Dv MDF_FIXACTIVE
 The region cannot be disabled.
-.It Dv MDF_BUSY
-The region is currently owned by another process and may not be
-altered.
 .El
 .Pp
 Operations are performed using
@@ -106,14 +103,17 @@ The
 ioctl is used to add, alter and remove memory range attributes.
 A range with the
 .Dv MDF_FIXACTIVE
-flag may not be removed; a range with the
-.Dv MDF_BUSY
-flag may not be removed or updated.
+flag may not be removed.
 .Pp
 .Fa mo_arg[0]
 should be set to MEMRANGE_SET_UPDATE to update an existing
 or establish a new range, or to MEMRANGE_SET_REMOVE to remove a range.
-.Sh RETURN VALUES
+.Sh ERRORS
+On
+.Xr ioctl 2
+failure,
+.Xr errno 2
+will be set as follows:
 .Bl -tag -width Er
 .It Bq Er EOPNOTSUPP
 Memory range operations are not supported on this architecture.

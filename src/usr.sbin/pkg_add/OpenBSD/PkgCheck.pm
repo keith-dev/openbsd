@@ -1,9 +1,9 @@
 #! /usr/bin/perl
 
 # ex:ts=8 sw=4:
-# $OpenBSD: PkgCheck.pm,v 1.40 2013/05/26 16:02:20 espie Exp $
+# $OpenBSD: PkgCheck.pm,v 1.46 2014/02/10 19:40:47 espie Exp $
 #
-# Copyright (c) 2003-2010 Marc Espie <espie@openbsd.org>
+# Copyright (c) 2003-2014 Marc Espie <espie@openbsd.org>
 #
 # Permission to use, copy, modify, and distribute this software for any
 # purpose with or without fee is hereby granted, provided that the above
@@ -316,15 +316,11 @@ sub handle_options
 	$self->{quick} = $self->opt('q');
 	if (defined $self->opt('B')) {
 		$self->{destdir} = $self->opt('B');
-	} elsif (defined $ENV{'PKG_PREFIX'}) {
-		$self->{destdir} = $ENV{'PKG_PREFIX'};
-	}
+	} 
 	if (defined $self->{destdir}) {
 		$self->{destdir} .= '/';
-		$ENV{'PKG_DESTDIR'} = $self->{destdir};
 	} else {
 		$self->{destdir} = '';
-		delete $ENV{'PKG_DESTDIR'};
 	}
 }
 
@@ -687,13 +683,6 @@ sub package_files_check
 		my $name = shift;
 		my $plist = OpenBSD::PackingList->from_installation($name);
 		$state->log->set_context($name);
-		if ($plist->is_signed && !$state->defines('nosig')) {
-			require OpenBSD::x509;
-
-			if (!OpenBSD::x509::check_signature($plist, $state)) {
-				$state->fatal("#1 is corrupted", $name);
-			}
-		}
 		if ($state->{quick}) {
 			$plist->basic_check($state);
 		} else {
@@ -710,6 +699,7 @@ sub install_pkglocate
 	my $spec = 'pkglocatedb->=0.4';
 
 	my @l = installed_stems()->find('pkglocatedb');
+	require OpenBSD::PkgSpec;
 	if (OpenBSD::PkgSpec->new($spec)->match_ref(\@l)) {
 		return 1;
 	}
@@ -745,6 +735,23 @@ sub display_unknown
 		$state->say("Unknown directories:");
 		for my $e (sort {$b cmp $a } @{$state->{unknown}{dir}}) {
 			$state->say("\t#1", $e);
+		}
+	}
+}
+
+sub display_tmps
+{
+	my ($self, $state) = @_;
+	$state->say("Unregistered temporary files:");
+	for my $e (sort @{$state->{tmps}}) {
+		$state->say("\t#1", $e);
+	}
+	if ($state->{force}) {
+		unlink(@{$state->{tmps}});
+	} elsif ($state->{interactive}) {
+		require OpenBSD::Interactive;
+		if (OpenBSD::Interactive::confirm("Remove")) {
+			unlink(@{$state->{tmps}});
 		}
 	}
 }
@@ -803,9 +810,17 @@ sub localbase_check
 			push(@{$state->{unknown}{dir}}, $File::Find::name);
 		} else {
 			return if $state->{known}{$File::Find::dir}{$_};
-			push(@{$state->{unknown}{file}}, $File::Find::name);
+			if (m/^pkg\..{10}$/) {
+				push(@{$state->{tmps}}, $File::Find::name);
+			} else {
+				push(@{$state->{unknown}{file}}, 
+				    $File::Find::name);
+			}
 		}
 	}, OpenBSD::Paths->localbase);
+	if (defined $state->{tmps}) {
+		$self->display_tmps($state);
+	}
 	if (defined $state->{unknown}) {
 		if ($self->install_pkglocate($state)) {
 			$self->locate_unknown($state);

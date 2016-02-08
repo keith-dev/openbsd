@@ -1,4 +1,4 @@
-/* $OpenBSD: shm_open.c,v 1.2 2013/06/02 21:08:19 tedu Exp $ */
+/* $OpenBSD: shm_open.c,v 1.4 2013/11/12 06:09:48 deraadt Exp $ */
 /*
  * Copyright (c) 2013 Ted Unangst <tedu@openbsd.org>
  *
@@ -25,6 +25,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 /* SHA256_DIGEST_STRING_LENGTH includes nul */
 /* "/tmp/" + sha256 + ".shm" */
@@ -61,13 +62,13 @@ shm_open(const char *path, int flags, mode_t mode)
 	if (fd == -1)
 		return -1;
 	if (fstat(fd, &sb) == -1 || !S_ISREG(sb.st_mode)) {
-		errno = EINVAL;
 		close(fd);
+		errno = EINVAL;
 		return -1;
 	}
 	if (sb.st_uid != getuid()) {
-		errno = EPERM;
 		close(fd);
+		errno = EPERM;
 		return -1;
 	}
 	return fd;

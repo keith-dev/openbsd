@@ -6,7 +6,7 @@
  * this stuff is worth it, you can buy me a beer in return.   Poul-Henning Kamp
  * ----------------------------------------------------------------------------
  *
- * $OpenBSD: kern_tc.c,v 1.20 2013/06/03 16:55:22 guenther Exp $
+ * $OpenBSD: kern_tc.c,v 1.22 2014/01/30 21:01:59 kettenis Exp $
  * $FreeBSD: src/sys/kern/kern_tc.c,v 1.148 2003/03/18 08:45:23 phk Exp $
  */
 
@@ -95,7 +95,7 @@ static struct timecounter *timecounters = &dummy_timecounter;
 volatile time_t time_second = 1;
 volatile time_t time_uptime = 0;
 
-extern struct timeval adjtimedelta;
+struct bintime naptime;
 static struct bintime boottimebin;
 static int timestepwarnings;
 
@@ -339,9 +339,13 @@ tc_setclock(struct timespec *ts)
 	bt2 = timehands->th_offset;
 	timehands->th_offset = bt;
 
+	/* XXX fiddle all the little crinkly bits around the fiords... */
+	tc_windup();
+
 #ifndef SMALL_KERNEL
 	/* convert the bintime to ticks */
 	bintime_sub(&bt, &bt2);
+	bintime_add(&naptime, &bt);
 	adj_ticks = (long long)hz * bt.sec +
 	    (((uint64_t)1000000 * (uint32_t)(bt.frac >> 32)) >> 32) / tick;
 	if (adj_ticks > 0) {
@@ -350,9 +354,6 @@ tc_setclock(struct timespec *ts)
 		timeout_adjust_ticks(adj_ticks);
 	}
 #endif
-
-	/* XXX fiddle all the little crinkly bits around the fiords... */
-	tc_windup();
 }
 
 /*
@@ -610,20 +611,15 @@ sysctl_tc(int *name, u_int namelen, void *oldp, size_t *oldlenp,
 void
 ntp_update_second(int64_t *adjust, time_t *sec)
 {
-	struct timeval adj;
+	int64_t adj;
 
 	/* Skew time according to any adjtime(2) adjustments. */
-	timerclear(&adj);
-	if (adjtimedelta.tv_sec > 0)
-		adj.tv_usec = 5000;
-	else if (adjtimedelta.tv_sec == 0)
-		adj.tv_usec = MIN(5000, adjtimedelta.tv_usec);
-	else if (adjtimedelta.tv_sec < -1)
-		adj.tv_usec = -5000;
-	else if (adjtimedelta.tv_sec == -1)
-		adj.tv_usec = MAX(-5000, adjtimedelta.tv_usec - 1000000);
-	timersub(&adjtimedelta, &adj, &adjtimedelta);
-	*adjust = ((int64_t)adj.tv_usec * 1000) << 32;
+	if (adjtimedelta > 0)
+		adj = MIN(5000, adjtimedelta);
+	else
+		adj = MAX(-5000, adjtimedelta);
+	adjtimedelta -= adj;
+	*adjust = (adj * 1000) << 32;
 	*adjust += timecounter->tc_freq_adj;
 }
 

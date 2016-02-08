@@ -1,5 +1,5 @@
 # ex:ts=8 sw=4:
-# $OpenBSD: Handle.pm,v 1.30 2012/04/28 11:53:53 espie Exp $
+# $OpenBSD: Handle.pm,v 1.39 2014/02/08 16:11:02 espie Exp $
 #
 # Copyright (c) 2007-2009 Marc Espie <espie@openbsd.org>
 #
@@ -24,6 +24,7 @@ use warnings;
 package OpenBSD::Handle;
 
 use OpenBSD::PackageInfo;
+use OpenBSD::Error;
 
 use constant {
 	BAD_PACKAGE => 1,
@@ -38,8 +39,10 @@ sub is_real { return 1; }
 sub cleanup
 {
 	my ($self, $error, $errorinfo) = @_;
-	$self->{error} //= $error;
-	$self->{errorinfo} //= $errorinfo;
+	if (defined $error) {
+		$self->{error} //= $error;
+		$self->{errorinfo} //= $errorinfo;
+	}
 	if (defined $self->location) {
 		if (defined $self->{error} && $self->{error} == BAD_PACKAGE) {
 			$self->location->close_with_client_error;
@@ -49,6 +52,8 @@ sub cleanup
 		$self->location->wipe_info;
 	}
 	delete $self->{plist};
+	delete $self->{db};
+	delete $self->{conflict_list};
 }
 
 sub new
@@ -91,6 +96,25 @@ sub plist
 {
 	return shift->{plist};
 }
+
+sub dependency_info
+{
+	my $self = shift;
+	if (defined $self->{plist}) {
+		return $self->{plist};
+	} elsif (defined $self->{location} && 
+	    defined $self->{location}{update_info}) {
+		return $self->{location}{update_info};
+	} else {
+		return undef;
+	}
+}
+
+OpenBSD::Auto::cache(conflict_list,
+    sub {
+    	require OpenBSD::PkgCfl;
+	return OpenBSD::PkgCfl->make_conflict_list(shift->dependency_info);
+    });
 
 sub set_error
 {
@@ -144,6 +168,23 @@ sub complete_old
 			$self->set_error(BAD_PACKAGE);
 		} else {
 			$self->{plist} = $plist;
+			delete $location->{contents};
+			delete $location->{update_info};
+		}
+	}
+}
+
+sub complete_dependency_info
+{
+	my $self = shift;
+	my $location = $self->{location};
+
+	if (!defined $location) {
+		$self->set_error(NOT_FOUND);
+	} else {
+		if (!defined $self->{plist}) {
+			# trigger build
+			$location->update_info;
 		}
 	}
 }
@@ -159,7 +200,7 @@ sub create_old
 	if (defined $location) {
 		$self->{location} = $location;
 	}
-	$self->complete_old;
+	$self->complete_dependency_info;
 
 	return $self;
 }
@@ -200,6 +241,7 @@ sub get_plist
 		$handle->set_error(BAD_PACKAGE);
 		return;
 	}
+	delete $location->{update_info};
 	unless ($plist->has('url')) {
 		OpenBSD::PackingElement::Url->add($plist, $location->url);
 	}
@@ -240,6 +282,10 @@ sub get_location
 			$state);
 		if (!$handle->{tweaked}) {
 			$state->say("Can't find #1", $name);
+			eval {
+				my $r = [$name];
+				$state->quirks->filter_obsolete($r, $state);
+			}
 		}
 		return;
 	}

@@ -1,4 +1,4 @@
-/*	$OpenBSD: xy.c,v 1.54 2013/06/11 16:42:11 deraadt Exp $	*/
+/*	$OpenBSD: xy.c,v 1.58 2013/11/20 00:15:32 dlg Exp $	*/
 /*	$NetBSD: xy.c,v 1.26 1997/07/19 21:43:56 pk Exp $	*/
 
 /*
@@ -238,7 +238,7 @@ xygetdisklabel(xy, b)
 	lp->d_secsize = XYFM_BPS;
 	if (sl->sl_magic == SUN_DKMAGIC) {
 		lp->d_secpercyl = sl->sl_nsectors * sl->sl_ntracks;
-		DL_SETDSIZE(lp, (daddr_t)lp->d_secpercyl * sl->sl_ncylinders);
+		DL_SETDSIZE(lp, (u_int64_t)lp->d_secpercyl * sl->sl_ncylinders);
 	} else {
 		lp->d_secpercyl = 1;
 	}
@@ -508,10 +508,7 @@ xyattach(parent, self, aux)
 		xy->parent = xyc;
 
 		/* init queue of waiting bufs */
-
-		xy->xyq.b_active = 0;
-		xy->xyq.b_actf = 0;
-		xy->xyq.b_actb = &xy->xyq.b_actf; /* XXX b_actb: not used? */
+		bufq_init(&xy->xy_bufq, BUFQ_DEFAULT);
 
 		xy->xyrq = &xyc->reqs[xa->driveno];
 
@@ -933,7 +930,8 @@ xysize(dev)
 
 {
 	struct xy_softc *xysc;
-	int     unit, part, size, omask;
+	int     unit, part, omask;
+	daddr_t size;
 
 	/* valid unit? */
 	unit = DISKUNIT(dev);
@@ -1002,13 +1000,13 @@ xystrategy(bp)
 	if (bounds_check_with_label(bp, xy->sc_dk.dk_label) == -1)
 		goto done;
 
+	bufq_queue(&xy->xy_bufq, bp);
+
 	/*
 	 * now we know we have a valid buf structure that we need to do I/O
 	 * on.
 	 */
 	s = splbio();		/* protect the queues */
-
-	disksort(&xy->xyq, bp);
 
 	/* start 'em up */
 
@@ -1237,7 +1235,7 @@ xyc_startbuf(xycsc, xysc, bp)
 #ifdef XYC_DEBUG
 	printf("xyc_startbuf: %s%c: %s block %lld\n",
 	    xysc->sc_dev.dv_xname, 'a' + partno,
-	    (bp->b_flags & B_READ) ? "read" : "write", bp->b_blkno);
+	    (bp->b_flags & B_READ) ? "read" : "write", (long long)bp->b_blkno);
 	printf("xyc_startbuf: b_bcount %d, b_data 0x%x\n",
 	    bp->b_bcount, bp->b_data);
 #endif
@@ -1603,7 +1601,6 @@ xyc_reset(xycsc, quiet, blastmode, error, xysc)
 			    dvma_mapout((vaddr_t)iorq->dbufbase,
 					(vaddr_t)iorq->buf->b_data,
 					iorq->buf->b_bcount);
-			    iorq->xy->xyq.b_actf = iorq->buf->b_actf;
 			    disk_unbusy(&xycsc->reqs[lcv].xy->sc_dk,
 				(xycsc->reqs[lcv].buf->b_bcount -
 				xycsc->reqs[lcv].buf->b_resid),
@@ -1650,9 +1647,9 @@ xyc_start(xycsc, iorq)
 	if (iorq == NULL) {
 		for (lcv = 0; lcv < XYC_MAXDEV ; lcv++) {
 			if ((xy = xycsc->sc_drives[lcv]) == NULL) continue;
-			if (xy->xyq.b_actf == NULL) continue;
+			if (!bufq_peek(&xy->xy_bufq)) continue;
 			if (xy->xyrq->mode != XY_SUB_FREE) continue;
-			xyc_startbuf(xycsc, xy, xy->xyq.b_actf);
+			xyc_startbuf(xycsc, xy, bufq_dequeue(&xy->xy_bufq));
 		}
 	}
 	xyc_submit_iorq(xycsc, iorq, XY_SUB_NOQ);
@@ -1782,7 +1779,6 @@ xyc_remove_iorq(xycsc)
 			dvma_mapout((vaddr_t) iorq->dbufbase,
 				    (vaddr_t) bp->b_data,
 				    bp->b_bcount);
-			iorq->xy->xyq.b_actf = bp->b_actf;
 			disk_unbusy(&iorq->xy->sc_dk,
 			    (bp->b_bcount - bp->b_resid),
 			    (bp->b_flags & B_READ));

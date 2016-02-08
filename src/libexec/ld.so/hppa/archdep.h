@@ -1,4 +1,4 @@
-/*	$OpenBSD: archdep.h,v 1.6 2013/01/13 18:44:55 miod Exp $	*/
+/*	$OpenBSD: archdep.h,v 1.9 2014/01/19 10:25:45 guenther Exp $	*/
 
 /*
  * Copyright (c) 2004 Michael Shalayeff
@@ -51,14 +51,6 @@ _dl_mmap(void *addr, unsigned int len, unsigned int prot,
 		flags, fd, 0, offset));
 }
 
-static inline void *
-_dl_mquery(void *addr, unsigned int len, unsigned int prot,
-	unsigned int flags, int fd, off_t offset)
-{
-	return((void *)_dl__syscall((quad_t)SYS_mquery, addr, len, prot,
-		flags, fd, 0, offset));
-}
-
 
 static inline void
 RELOC_REL(Elf_Rel *r, const Elf_Sym *s, Elf_Addr *p, unsigned long v)
@@ -89,16 +81,9 @@ RELOC_RELA(Elf_RelA *r, const Elf_Sym *s, Elf_Addr *p, unsigned long v,
 
 #define RELOC_GOT(obj, offs)
 
-#define	MD_CALL(sobj, func, arg) \
-    hppa_call((arg), (sobj)->dyn.pltgot, (func))
-
-#define	MD_ATEXIT(sobj, sym, func) \
-    MD_CALL((sobj), (void (*)())((sobj)->obj_base + (sym)->st_value), &_hppa_dl_dtors)
-
 #define GOT_PERMS PROT_READ
 
 void _hppa_dl_dtors(void);
-void hppa_call(void *, Elf_Addr *, void (*)(void));
 Elf_Addr _dl_md_plabel(Elf_Addr, Elf_Addr *);
 
 #endif /* _HPPA_ARCHDEP_H_ */

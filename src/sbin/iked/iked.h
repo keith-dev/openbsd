@@ -1,4 +1,4 @@
-/*	$OpenBSD: iked.h,v 1.56 2013/01/08 10:38:19 reyk Exp $	*/
+/*	$OpenBSD: iked.h,v 1.70 2014/02/21 20:52:38 markus Exp $	*/
 
 /*
  * Copyright (c) 2010-2013 Reyk Floeter <reyk@openbsd.org>
@@ -165,6 +165,7 @@ struct iked_childsa {
 	u_int8_t			 csa_allocated;	/* from the kernel */
 	u_int8_t			 csa_persistent;/* do not rekey */
 	u_int8_t			 csa_esn;	/* use ESN */
+	u_int8_t			 csa_transport;	/* transport mode */
 
 	struct iked_spi			 csa_spi;
 
@@ -182,6 +183,9 @@ struct iked_childsa {
 	struct iked_sa			*csa_ikesa;	/* parent SA */
 
 	struct iked_childsa		*csa_peersa;	/* peer */
+
+	struct iked_childsa		*csa_parent;	/* IPCOMP parent */
+	u_int				 csa_children;	/* IPCOMP children */
 
 	RB_ENTRY(iked_childsa)		 csa_node;
 	TAILQ_ENTRY(iked_childsa)	 csa_entry;
@@ -238,8 +242,11 @@ struct iked_policy {
 #define IKED_POLICY_REFCNT		 0x04
 #define IKED_POLICY_QUICK		 0x08
 #define IKED_POLICY_SKIP		 0x10
+#define IKED_POLICY_IPCOMP		 0x20
 
 	int				 pol_refcnt;
+
+	u_int8_t			 pol_certreqtype;
 
 	int				 pol_af;
 	u_int8_t			 pol_saproto;
@@ -336,8 +343,9 @@ struct iked_sahdr {
 
 struct iked_sa {
 	struct iked_sahdr		 sa_hdr;
-	u_int32_t			 sa_msgid;
-	u_int32_t			 sa_reqid;
+	u_int32_t			 sa_msgid;	/* Last request rcvd */
+	int				 sa_msgid_set;	/* msgid initialized */
+	u_int32_t			 sa_reqid;	/* Next request sent */
 
 	int				 sa_type;
 #define IKED_SATYPE_LOOKUP		 0		/* Used for lookup */
@@ -401,8 +409,13 @@ struct iked_sa {
 	struct iked_childsas		 sa_childsas;	/* IPSec Child SAs */
 	struct iked_saflows		 sa_flows;	/* IPSec flows */
 
+	u_int8_t			 sa_ipcomp;	/* IPcomp transform */
+	u_int16_t			 sa_cpi_out;	/* IPcomp outgoing */
+	u_int16_t			 sa_cpi_in;	/* IPcomp incoming*/
+
 	struct iked_timer		 sa_timer;	/* SA timeouts */
 #define IKED_IKE_SA_REKEY_TIMEOUT	 300		/* 5 minutes */
+#define IKED_IKE_SA_ALIVE_TIMEOUT	 60		/* 1 minute */
 
 	struct iked_msgqueue		 sa_requests;	/* request queue */
 #define IKED_RETRANSMIT_TIMEOUT		 2		/* 2 seconds */
@@ -412,8 +425,12 @@ struct iked_sa {
 
 	RB_ENTRY(iked_sa)		 sa_peer_entry;
 	RB_ENTRY(iked_sa)		 sa_entry;
+
+	struct iked_addr		*sa_addrpool;	/* address from pool */
+	RB_ENTRY(iked_sa)		 sa_addrpool_entry;	/* pool entries */
 };
 RB_HEAD(iked_sas, iked_sa);
+RB_HEAD(iked_addrpool, iked_sa);
 
 struct iked_message {
 	struct ibuf		*msg_data;
@@ -429,6 +446,7 @@ struct iked_message {
 
 	int			 msg_fd;
 	int			 msg_response;
+	int			 msg_responded;
 	int			 msg_natt;
 	int			 msg_error;
 	int			 msg_e;
@@ -500,6 +518,12 @@ struct privsep_proc {
 	struct iked		*p_env;
 };
 
+struct iked_ocsp_entry {
+	TAILQ_ENTRY(iked_ocsp_entry) ioe_entry;	/* next request */
+	void			*ioe_ocsp;	/* private ocsp request data */
+};
+TAILQ_HEAD(iked_ocsp_requests, iked_ocsp_entry);
+
 /*
  * Daemon configuration
  */
@@ -534,6 +558,11 @@ struct iked {
 #define IKED_INITIATOR_INTERVAL		 60
 
 	struct privsep			 sc_ps;
+
+	struct iked_ocsp_requests	 sc_ocsp;
+	char				*sc_ocsp_url;
+
+	struct iked_addrpool		 sc_addrpool;
 };
 
 struct iked_socket {
@@ -592,6 +621,8 @@ int	 config_setuser(struct iked *, struct iked_user *, enum privsep_procid);
 int	 config_getuser(struct iked *, struct imsg *);
 int	 config_setcompile(struct iked *, enum privsep_procid);
 int	 config_getcompile(struct iked *, struct imsg *);
+int	 config_setocsp(struct iked *);
+int	 config_getocsp(struct iked *, struct imsg *);
 
 /* policy.c */
 void	 policy_init(struct iked *);
@@ -623,6 +654,7 @@ struct iked_user *
 	 user_lookup(struct iked *, const char *);
 RB_PROTOTYPE(iked_sas, iked_sa, sa_entry, sa_cmp);
 RB_PROTOTYPE(iked_sapeers, iked_sa, sa_peer_entry, sa_peer_cmp);
+RB_PROTOTYPE(iked_addrpool, iked_sa, sa_addrpool_entry, sa_addrpool_cmp);
 RB_PROTOTYPE(iked_users, iked_user, user_entry, user_cmp);
 RB_PROTOTYPE(iked_activesas, iked_childsa, csa_node, childsa_cmp);
 RB_PROTOTYPE(iked_flows, iked_flow, flow_node, flow_cmp);
@@ -766,6 +798,7 @@ int	 pfkey_block(int, int, u_int);
 int	 pfkey_sa_init(int, struct iked_childsa *, u_int32_t *);
 int	 pfkey_sa_add(int, struct iked_childsa *, struct iked_childsa *);
 int	 pfkey_sa_delete(int, struct iked_childsa *);
+int	 pfkey_sa_last_used(int, struct iked_childsa *, u_int64_t *);
 int	 pfkey_flush(int);
 int	 pfkey_socket(void);
 void	 pfkey_init(struct iked *, int fd);
@@ -779,16 +812,15 @@ int	 ca_setcert(struct iked *, struct iked_sahdr *, struct iked_id *,
 int	 ca_setauth(struct iked *, struct iked_sa *,
 	    struct ibuf *, enum privsep_procid);
 void	 ca_sslinit(void);
-void	 ca_sslerror(void);
+void	 ca_sslerror(const char *);
 char	*ca_asn1_name(u_int8_t *, size_t);
 char	*ca_x509_name(void *);
 
 /* timer.c */
-void	 timer_initialize(struct iked *, struct iked_timer *,
+void	 timer_set(struct iked *, struct iked_timer *,
 	    void (*)(struct iked *, void *), void *);
-int	 timer_initialized(struct iked *, struct iked_timer *);
-void	 timer_register(struct iked *, struct iked_timer *, int);
-void	 timer_deregister(struct iked *, struct iked_timer *);
+void	 timer_add(struct iked *, struct iked_timer *, int);
+void	 timer_del(struct iked *, struct iked_timer *);
 
 /* proc.c */
 void	 proc_init(struct privsep *, struct privsep_proc *, u_int);
@@ -809,13 +841,13 @@ int	 proc_composev_imsg(struct iked *, enum privsep_procid,
 	    u_int16_t, int, const struct iovec *, int);
 int	 proc_forward_imsg(struct iked *, struct imsg *,
 	    enum privsep_procid);
-void	 proc_flush_imsg(struct iked *, enum privsep_procid);
 
 /* util.c */
 void	 socket_set_blockmode(int, enum blockmodes);
 int	 socket_af(struct sockaddr *, in_port_t);
 in_port_t
-	 socket_getport(struct sockaddr_storage *);
+	 socket_getport(struct sockaddr *);
+int	 socket_setport(struct sockaddr *, in_port_t);
 int	 socket_getaddr(int, struct sockaddr_storage *);
 int	 socket_bypass(int, struct sockaddr *);
 int	 udp_bind(struct sockaddr *, in_port_t);
@@ -829,7 +861,7 @@ void	 lc_string(char *);
 void	 print_hex(u_int8_t *, off_t, size_t);
 void	 print_hexval(u_int8_t *, off_t, size_t);
 const char *
-	 print_bits(u_short, char *);
+	 print_bits(u_short, u_char *);
 int	 sockaddr_cmp(struct sockaddr *, struct sockaddr *, int);
 u_int8_t mask2prefixlen(struct sockaddr *);
 u_int8_t mask2prefixlen6(struct sockaddr *);
@@ -838,7 +870,7 @@ struct in6_addr *
 u_int32_t
 	 prefixlen2mask(u_int8_t);
 const char *
-	 print_host(struct sockaddr_storage *, char *, size_t);
+	 print_host(struct sockaddr *, char *, size_t);
 char	*get_string(u_int8_t *, size_t);
 const char *
 	 print_proto(u_int8_t);
@@ -870,14 +902,20 @@ void	 ibuf_zero(struct ibuf *);
 /* log.c */
 void	 log_init(int);
 void	 log_verbose(int);
-void	 log_warn(const char *, ...);
-void	 log_warnx(const char *, ...);
-void	 log_info(const char *, ...);
-void	 log_debug(const char *, ...);
-void	 print_debug(const char *, ...);
-void	 print_verbose(const char *, ...);
+void	 log_warn(const char *, ...) __attribute__((format(printf, 1, 2)));
+void	 log_warnx(const char *, ...) __attribute__((format(printf, 1, 2)));
+void	 log_info(const char *, ...) __attribute__((format(printf, 1, 2)));
+void	 log_debug(const char *, ...) __attribute__((format(printf, 1, 2)));
+void	 print_debug(const char *, ...) __attribute__((format(printf, 1, 2)));
+void	 print_verbose(const char *, ...) __attribute__((format(printf, 1, 2)));
 __dead void fatal(const char *);
 __dead void fatalx(const char *);
+
+/* ocsp.c */
+int	 ocsp_connect(struct iked *env);
+int	 ocsp_receive_fd(struct iked *, struct imsg *);
+int	 ocsp_validate_cert(struct iked *, struct iked_static_id *,
+    void *, size_t, struct iked_sahdr, u_int8_t);
 
 /* parse.y */
 int	 parse_config(const char *, struct iked *);

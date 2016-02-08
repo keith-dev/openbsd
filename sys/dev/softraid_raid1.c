@@ -1,4 +1,4 @@
-/* $OpenBSD: softraid_raid1.c,v 1.53 2013/06/11 16:42:13 deraadt Exp $ */
+/* $OpenBSD: softraid_raid1.c,v 1.56 2014/01/22 04:24:29 jsing Exp $ */
 /*
  * Copyright (c) 2007 Marco Peereboom <marco@peereboom.us>
  *
@@ -33,6 +33,8 @@
 #include <sys/mount.h>
 #include <sys/sensors.h>
 #include <sys/stat.h>
+#include <sys/task.h>
+#include <sys/workq.h>
 #include <sys/conf.h>
 #include <sys/uio.h>
 
@@ -187,7 +189,7 @@ die:
 	sd->sd_set_vol_state(sd);
 
 	sd->sd_must_flush = 1;
-	workq_add_task(NULL, 0, sr_meta_save_callback, sd, NULL);
+	task_add(systq, &sd->sd_meta_save_task);
 done:
 	splx(s);
 }
@@ -261,12 +263,11 @@ sr_raid1_set_vol_state(struct sr_discipline *sd)
 		/* XXX this might be a little too much */
 		goto die;
 
-	case BIOC_SVSCRUB:
+	case BIOC_SVDEGRADED:
 		switch (new_state) {
-		case BIOC_SVONLINE:
 		case BIOC_SVOFFLINE:
-		case BIOC_SVDEGRADED:
-		case BIOC_SVSCRUB: /* can go to same state */
+		case BIOC_SVREBUILD:
+		case BIOC_SVDEGRADED: /* can go to the same state */
 			break;
 		default:
 			goto die;
@@ -284,23 +285,24 @@ sr_raid1_set_vol_state(struct sr_discipline *sd)
 		}
 		break;
 
-	case BIOC_SVREBUILD:
+	case BIOC_SVSCRUB:
 		switch (new_state) {
 		case BIOC_SVONLINE:
 		case BIOC_SVOFFLINE:
 		case BIOC_SVDEGRADED:
-		case BIOC_SVREBUILD: /* can go to the same state */
+		case BIOC_SVSCRUB: /* can go to same state */
 			break;
 		default:
 			goto die;
 		}
 		break;
 
-	case BIOC_SVDEGRADED:
+	case BIOC_SVREBUILD:
 		switch (new_state) {
+		case BIOC_SVONLINE:
 		case BIOC_SVOFFLINE:
-		case BIOC_SVREBUILD:
-		case BIOC_SVDEGRADED: /* can go to the same state */
+		case BIOC_SVDEGRADED:
+		case BIOC_SVREBUILD: /* can go to the same state */
 			break;
 		default:
 			goto die;
@@ -426,7 +428,7 @@ sr_raid1_wu_done(struct sr_workunit *wu)
 	/* If all I/O failed, retry reads and give up on writes. */
 	if (xs->flags & SCSI_DATA_IN) {
 		printf("%s: retrying read on block %lld\n",
-		    sd->sd_meta->ssd_devname, wu->swu_blk_start);
+		    sd->sd_meta->ssd_devname, (long long)wu->swu_blk_start);
 		if (wu->swu_cb_active == 1)
 			panic("%s: sr_raid1_intr_cb",
 			    DEVNAME(sd->sd_sc));
@@ -436,7 +438,7 @@ sr_raid1_wu_done(struct sr_workunit *wu)
 			return SR_WU_RESTART;
 	} else {
 		printf("%s: permanently failing write on block %lld\n",
-		    sd->sd_meta->ssd_devname, wu->swu_blk_start);
+		    sd->sd_meta->ssd_devname, (long long)wu->swu_blk_start);
 	}
 
 	wu->swu_state = SR_WU_FAILED;

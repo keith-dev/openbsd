@@ -1,4 +1,4 @@
-.\"	$OpenBSD: make.1,v 1.105 2013/06/24 15:44:36 jmc Exp $
+.\"	$OpenBSD: make.1,v 1.110 2014/02/13 07:30:39 guenther Exp $
 .\"	$NetBSD: make.1,v 1.18 1997/03/10 21:19:53 christos Exp $
 .\"
 .\" Copyright (c) 1990, 1993
@@ -30,7 +30,7 @@
 .\"
 .\"	from: @(#)make.1	8.4 (Berkeley) 3/19/94
 .\"
-.Dd $Mdocdate: June 24 2013 $
+.Dd $Mdocdate: February 13 2014 $
 .Dt MAKE 1
 .Os
 .Sh NAME
@@ -82,7 +82,9 @@ The handling of
 .Sq Pa BSDmakefile
 and
 .Sq Pa .depend
-are BSD extensions.
+are
+.Bx
+extensions.
 .Pp
 Standard options are as follows:
 .Bl -tag -width Ds
@@ -338,7 +340,9 @@ popularized by
 .Xr imake .
 The
 .Ic !\&
-operator is a BSD extension.
+operator is a
+.Bx
+extension.
 .Pp
 As an extension, targets and prerequisites may contain the shell wildcard
 expressions
@@ -493,7 +497,7 @@ can be used to reset the currently valid list of suffixes,
 but inference rules already read are still known by
 .Nm ,
 and they are marked as inactive.
-Redefining the corresponding suffix (or suffixes) will re-active the rule.
+Redefining the corresponding suffix (or suffixes) will reactivate the rule.
 .Pp
 In case of duplicate inference rules with the same suffix combination,
 the new rule overrides the old one.
@@ -521,13 +525,20 @@ to the variable (extension).
 .It Ic \&+=
 Append the value to the current value of the variable (extension).
 .It Ic \&?=
-Assign the value to the variable if it is not already defined (BSD
-extension).
+Assign the value to the variable if it is not already defined
+.Po
+.Bx
+extension
+.Pc .
 Normally, expansion is not done until the variable is referenced.
 .It Ic \&!=
 Expand the value and pass it to the shell for execution and assign
 the result to the variable.
-Any newlines in the result are replaced with spaces (BSD extension).
+Any newlines in the result are replaced with spaces
+.Po
+.Bx
+extension
+.Pc .
 .El
 .Pp
 Any whitespace before the assigned
@@ -687,49 +698,27 @@ A path to the directory where
 .Nm
 was executed.
 .It Va .OBJDIR
-A path to the directory where the targets are built.
+Path to the directory where targets are built.
 At startup,
 .Nm
-searches for an alternate directory to place target files -- it
-will attempt to change into this special directory.
-First, if
-.Ev MAKEOBJDIRPREFIX
-is defined,
+searches for an alternate directory to place target files.
 .Nm
-prepends its contents to the current directory name and tries for
-the resulting directory.
-If that fails,
-.Nm
-remains in the current directory.
-If
-.Ev MAKEOBJDIRPREFIX
-is not defined,
-.Nm
-checks
+tries to
+.Xr chdir 2
+into
 .Ev MAKEOBJDIR
-and tries to change into that directory.
+(or
+.Pa obj
+if
+.Ev MAKEOBJDIR
+is not defined),
+and sets
+.Va .OBJDIR
+accordingly.
 Should that fail,
-.Nm
-remains in the current directory.
-If
-.Ev MAKEOBJDIR
-is not defined, it tries to change into the directory named
-.Pa obj.${MACHINE}
-(see
-.Va MACHINE
-variable).
-If it still has found no special directory,
-.Nm
-next tries the directory named
-.Pa obj .
-If this fails,
-.Nm
-tries to prepend
-.Pa /usr/obj
-to the current directory name.
-Finally, if none of these directories are available
-.Nm
-will settle for and use the current directory.
+.Va .OBJDIR
+is set to
+.Va .CURDIR .
 .It Va .MAKEFLAGS
 The environment variable
 .Ev MAKEFLAGS
@@ -954,12 +943,12 @@ If
 or
 .Ar new_string
 do not contain the pattern matching character
-.Ar %
+.Sq %
 then it is assumed that they are
 anchored at the end of each word, so only suffixes or entire
 words may be replaced.
 Otherwise
-.Ar %
+.Sq %
 is the substring of
 .Ar old_string
 to be replaced in
@@ -970,14 +959,16 @@ may contain variable values, which will be expanded.
 To put an actual single dollar, just double it.
 .El
 .Pp
-All modifiers are BSD extensions, except for the standard
+All modifiers are
+.Bx
+extensions, except for the standard
 .At V
 style variable substitution.
 .Pp
 The interpretation of
-.Ar %
+.Sq %
 and
-.Ar $
+.Sq $
 in
 .At V
 variable substitutions is not mandated by POSIX, though it is
@@ -1122,9 +1113,7 @@ may be any one of the following:
 .It Cm ||
 logical OR
 .It Cm \&&&
-Logical
-.Tn AND ;
-of higher precedence than
+Logical AND; of higher precedence than
 .Cm || .
 .El
 .Pp
@@ -1559,10 +1548,6 @@ This implementation is a distant derivative of
 .Nm pmake ,
 originally written by Adam de Boor.
 .Sh BUGS
-The determination of
-.Va .OBJDIR
-is contorted to the point of absurdity.
-.Pp
 If the same target is specified several times in complete target rules,
 .Nm
 silently ignores all commands after the first non empty set of commands,
@@ -1608,7 +1593,9 @@ For loops are expanded before tests, so a fragment such as:
 .Pp
 requires the quotes.
 .Pp
-When handling pre-BSD 4.4 archives,
+When handling
+.Pf pre- Bx 4.4
+archives,
 .Nm
 may erroneously mark archive members as out of date if the archive name
 was truncated.

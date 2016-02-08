@@ -1,4 +1,4 @@
-/*	$OpenBSD: msdosfs_denode.c,v 1.45 2013/06/11 16:42:16 deraadt Exp $	*/
+/*	$OpenBSD: msdosfs_denode.c,v 1.47 2013/12/24 00:18:46 halex Exp $	*/
 /*	$NetBSD: msdosfs_denode.c,v 1.23 1997/10/17 11:23:58 ws Exp $	*/
 
 /*-
@@ -312,7 +312,7 @@ retry:
 			if (error == E2BIG) {
 				ldep->de_FileSize = de_cn2off(pmp, size);
 				error = 0;
-			} else {
+			} else if (error) {
 				printf("deget(): pcbmap returned %d\n", error);
 				return (error);
 			}
@@ -387,7 +387,7 @@ detrunc(struct denode *dep, uint32_t length, int flags, struct ucred *cred,
 	 * directory's life.
 	 */
 	if ((DETOV(dep)->v_flag & VROOT) && !FAT32(pmp)) {
-		printf("detrunc(): can't truncate root directory, clust %ld, offset %ld\n",
+		printf("detrunc(): can't truncate root directory, clust %u, offset %u\n",
 		    dep->de_dirclust, dep->de_diroffset);
 		return (EINVAL);
 	}

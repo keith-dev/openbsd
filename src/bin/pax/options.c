@@ -1,4 +1,4 @@
-/*	$OpenBSD: options.c,v 1.77 2013/03/27 17:14:10 zhuk Exp $	*/
+/*	$OpenBSD: options.c,v 1.84 2014/02/06 20:51:55 guenther Exp $	*/
 /*	$NetBSD: options.c,v 1.6 1996/03/26 23:54:18 mrg Exp $	*/
 
 /*-
@@ -61,7 +61,6 @@ static OPLIST *optail = NULL;	/* option tail */
 
 static int no_op(void);
 static void printflg(unsigned int);
-static int c_frmt(const void *, const void *);
 static off_t str_offt(char *);
 static char *get_line(FILE *fp);
 static void pax_options(int, char **);
@@ -82,44 +81,54 @@ static int getline_error;
 #define BZIP2_CMD	"bzip2"		/* command to run as bzip2 */
 
 /*
- *	Format specific routine table - MUST BE IN SORTED ORDER BY NAME
+ *	Format specific routine table
  *	(see pax.h for description of each function)
  *
- * 	name, blksz, hdsz, udev, hlk, blkagn, inhead, id, st_read,
+ *	name, blksz, hdsz, udev, hlk, blkagn, inhead, id, st_read,
  *	read, end_read, st_write, write, end_write, trail,
  *	rd_data, wr_data, options
  */
 
 FSUB fsub[] = {
+#ifdef NOCPIO
+/* 0: OLD BINARY CPIO */
+	{ },
+/* 1: OLD OCTAL CHARACTER CPIO */
+	{ },
+/* 2: SVR4 HEX CPIO */
+	{ },
+/* 3: SVR4 HEX CPIO WITH CRC */
+	{ },
+#else
 /* 0: OLD BINARY CPIO */
 	{"bcpio", 5120, sizeof(HD_BCPIO), 1, 0, 0, 1, bcpio_id, cpio_strd,
 	bcpio_rd, bcpio_endrd, cpio_stwr, bcpio_wr, cpio_endwr, cpio_trail,
-	rd_wrfile, wr_rdfile, bad_opt},
+	bad_opt},
 
 /* 1: OLD OCTAL CHARACTER CPIO */
 	{"cpio", 5120, sizeof(HD_CPIO), 1, 0, 0, 1, cpio_id, cpio_strd,
 	cpio_rd, cpio_endrd, cpio_stwr, cpio_wr, cpio_endwr, cpio_trail,
-	rd_wrfile, wr_rdfile, bad_opt},
+	bad_opt},
 
 /* 2: SVR4 HEX CPIO */
 	{"sv4cpio", 5120, sizeof(HD_VCPIO), 1, 0, 0, 1, vcpio_id, cpio_strd,
 	vcpio_rd, vcpio_endrd, cpio_stwr, vcpio_wr, cpio_endwr, cpio_trail,
-	rd_wrfile, wr_rdfile, bad_opt},
+	bad_opt},
 
 /* 3: SVR4 HEX CPIO WITH CRC */
 	{"sv4crc", 5120, sizeof(HD_VCPIO), 1, 0, 0, 1, crc_id, crc_strd,
 	vcpio_rd, vcpio_endrd, crc_stwr, vcpio_wr, cpio_endwr, cpio_trail,
-	rd_wrfile, wr_rdfile, bad_opt},
-
+	bad_opt},
+#endif
 /* 4: OLD TAR */
 	{"tar", 10240, BLKMULT, 0, 1, BLKMULT, 0, tar_id, no_op,
 	tar_rd, tar_endrd, no_op, tar_wr, tar_endwr, tar_trail,
-	rd_wrfile, wr_rdfile, tar_opt},
+	tar_opt},
 
 /* 5: POSIX USTAR */
 	{"ustar", 10240, BLKMULT, 0, 1, BLKMULT, 0, ustar_id, ustar_strd,
 	ustar_rd, tar_endrd, ustar_stwr, ustar_wr, tar_endwr, tar_trail,
-	rd_wrfile, wr_rdfile, tar_opt},
+	tar_opt},
 };
 #define	F_OCPIO	0	/* format when called as cpio -6 */
 #define	F_ACPIO	1	/* format when called as cpio -c */
@@ -161,10 +170,13 @@ options(int argc, char **argv)
 	if (strcmp(NM_TAR, argv0) == 0) {
 		tar_options(argc, argv);
 		return;
-	} else if (strcmp(NM_CPIO, argv0) == 0) {
+	}
+#ifndef NOCPIO
+	else if (strcmp(NM_CPIO, argv0) == 0) {
 		cpio_options(argc, argv);
 		return;
 	}
+#endif /* !NOCPIO */
 	/*
 	 * assume pax as the default
 	 */
@@ -182,11 +194,10 @@ static void
 pax_options(int argc, char **argv)
 {
 	int c;
-	int i;
+	unsigned i;
 	unsigned int flg = 0;
 	unsigned int bflg = 0;
 	char *pt;
-	FSUB tmp;
 
 	/*
 	 * process option flags
@@ -368,16 +379,21 @@ pax_options(int argc, char **argv)
 			/*
 			 * specify an archive format on write
 			 */
-			tmp.name = optarg;
-			if ((frmt = (FSUB *)bsearch((void *)&tmp, (void *)fsub,
-			    sizeof(fsub)/sizeof(FSUB), sizeof(FSUB), c_frmt)) != NULL) {
+			for (i = 0; i < sizeof(fsub)/sizeof(FSUB); ++i)
+				if (fsub[i].name != NULL &&
+				    strcmp(fsub[i].name, optarg) == 0)
+					break;
+			if (i < sizeof(fsub)/sizeof(FSUB)) {
+				frmt = &fsub[i];
 				flg |= XF;
 				break;
 			}
 			paxwarn(1, "Unknown -x format: %s", optarg);
 			(void)fputs("pax: Known -x formats are:", stderr);
 			for (i = 0; i < (sizeof(fsub)/sizeof(FSUB)); ++i)
-				(void)fprintf(stderr, " %s", fsub[i].name);
+				if (fsub[i].name != NULL)
+					(void)fprintf(stderr, " %s",
+					    fsub[i].name);
 			(void)fputs("\n\n", stderr);
 			pax_usage();
 			break;
@@ -1030,6 +1046,8 @@ mkpath(path)
 
 	return (0);
 }
+
+#ifndef NOCPIO
 /*
  * cpio_options()
  *	look at the user specified flags. set globals as required and check if
@@ -1039,9 +1057,9 @@ mkpath(path)
 static void
 cpio_options(int argc, char **argv)
 {
-	int c, i;
+	int c;
+	unsigned i;
 	char *str;
-	FSUB tmp;
 	FILE *fp;
 
 	kflag = 1;
@@ -1212,14 +1230,20 @@ cpio_options(int argc, char **argv)
 				/*
 				 * specify an archive format on write
 				 */
-				tmp.name = optarg;
-				if ((frmt = (FSUB *)bsearch((void *)&tmp, (void *)fsub,
-				    sizeof(fsub)/sizeof(FSUB), sizeof(FSUB), c_frmt)) != NULL)
+				for (i = 0; i < sizeof(fsub)/sizeof(FSUB); ++i)
+					if (fsub[i].name != NULL &&
+					    strcmp(fsub[i].name, optarg) == 0)
+						break;
+				if (i < sizeof(fsub)/sizeof(FSUB)) {
+					frmt = &fsub[i];
 					break;
+				}
 				paxwarn(1, "Unknown -H format: %s", optarg);
 				(void)fputs("cpio: Known -H formats are:", stderr);
 				for (i = 0; i < (sizeof(fsub)/sizeof(FSUB)); ++i)
-					(void)fprintf(stderr, " %s", fsub[i].name);
+					if (fsub[i].name != NULL)
+						(void)fprintf(stderr, " %s",
+						    fsub[i].name);
 				(void)fputs("\n\n", stderr);
 				cpio_usage();
 				break;
@@ -1296,6 +1320,7 @@ cpio_options(int argc, char **argv)
 			break;
 	}
 }
+#endif /* !NOCPIO */
 
 /*
  * printflg()
@@ -1315,18 +1340,6 @@ printflg(unsigned int flg)
 		(void)fprintf(stderr, " -%c", flgch[pos-1]);
 	}
 	(void)putc('\n', stderr);
-}
-
-/*
- * c_frmt()
- *	comparison routine used by bsearch to find the format specified
- *	by the user
- */
-
-static int
-c_frmt(const void *a, const void *b)
-{
-	return(strcmp(((FSUB *)a)->name, ((FSUB *)b)->name));
 }
 
 /*
@@ -1439,7 +1452,7 @@ opt_add(const char *str)
 /*
  * str_offt()
  *	Convert an expression of the following forms to an off_t > 0.
- * 	1) A positive decimal number.
+ *	1) A positive decimal number.
  *	2) A positive decimal number followed by a b (mult by 512).
  *	3) A positive decimal number followed by a k (mult by 1024).
  *	4) A positive decimal number followed by a m (mult by 512).
@@ -1457,13 +1470,8 @@ str_offt(char *val)
 	char *expr;
 	off_t num, t;
 
-#	ifdef LONG_OFF_T
-	num = strtol(val, &expr, 0);
-	if ((num == LONG_MAX) || (num <= 0) || (expr == val))
-#	else
-	num = strtoq(val, &expr, 0);
-	if ((num == QUAD_MAX) || (num <= 0) || (expr == val))
-#	endif
+	num = strtoll(val, &expr, 0);
+	if ((num == LLONG_MAX) || (num <= 0) || (expr == val))
 		return(0);
 
 	switch (*expr) {
@@ -1535,7 +1543,7 @@ get_line(FILE *f)
 	temp[len-1] = 0;
 	return(temp);
 }
-			
+
 /*
  * no_op()
  *	for those option functions where the archive format has nothing to do.
@@ -1589,6 +1597,7 @@ tar_usage(void)
 	exit(1);
 }
 
+#ifndef NOCPIO
 /*
  * cpio_usage()
  *	print the usage summary to the user
@@ -1606,3 +1615,4 @@ cpio_usage(void)
 	    stderr);
 	exit(1);
 }
+#endif /* !NOCPIO */

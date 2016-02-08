@@ -1,4 +1,4 @@
-/*	$OpenBSD: wdc.c,v 1.119 2011/06/10 01:38:46 deraadt Exp $	*/
+/*	$OpenBSD: wdc.c,v 1.123 2014/01/24 06:21:59 dlg Exp $	*/
 /*	$NetBSD: wdc.c,v 1.68 1999/06/23 19:00:17 bouyer Exp $	*/
 /*
  * Copyright (c) 1998, 2001 Manuel Bouyer.  All rights reserved.
@@ -75,6 +75,9 @@
 #include <dev/ic/wdcvar.h>
 #include <dev/ic/wdcevent.h>
 
+#include <scsi/scsi_all.h>
+#include <scsi/scsiconf.h>
+
 #define WDCDELAY  100 /* 100 microseconds */
 #define WDCNDELAY_RST (WDC_RESET_WAIT * 1000 / WDCDELAY)
 #if 0
@@ -83,6 +86,10 @@
 #endif /* 0 */
 
 struct pool wdc_xfer_pool;
+struct scsi_iopool wdc_xfer_iopool;
+
+void *	wdc_xfer_get(void *);
+void	wdc_xfer_put(void *, void *);
 
 void  __wdcerror(struct channel_softc *, char *);
 int   __wdcwait_reset(struct channel_softc *, int);
@@ -709,7 +716,10 @@ wdc_alloc_queue(void)
 	if (inited == 0) {
 		/* Initialize the wdc_xfer pool. */
 		pool_init(&wdc_xfer_pool, sizeof(struct wdc_xfer), 0,
-		    0, 0, "wdcspl", NULL);
+		    0, 0, "wdcxfer", NULL);
+		pool_setipl(&wdc_xfer_pool, IPL_BIO);
+		scsi_iopool_init(&wdc_xfer_iopool, NULL,
+		    wdc_xfer_get, wdc_xfer_put);
 		inited = 1;
 	}
 
@@ -1913,24 +1923,48 @@ wdc_exec_xfer(struct channel_softc *chp, struct wdc_xfer *xfer)
 	wdcstart(chp);
 }
 
-struct wdc_xfer *
-wdc_get_xfer(int flags)
+void *
+wdc_xfer_get(void *null)
 {
-	struct wdc_xfer *xfer;
+	return (pool_get(&wdc_xfer_pool, PR_NOWAIT | PR_ZERO));
+}
+
+void
+wdc_scrub_xfer(struct wdc_xfer *xfer)
+{
+	memset(xfer, 0, sizeof(*xfer));
+	xfer->c_flags = C_SCSIXFER;
+}
+
+void
+wdc_xfer_put(void *null, void *xxfer)
+{
+	struct wdc_xfer *xfer = xxfer;
+	int put = 0;
 	int s;
 
 	s = splbio();
-	xfer = pool_get(&wdc_xfer_pool,
-	    ((flags & WDC_NOSLEEP) != 0 ? PR_NOWAIT : PR_WAITOK));
+	if (ISSET(xfer->c_flags, C_SCSIXFER))
+		CLR(xfer->c_flags, C_SCSIXFER);
+	else
+		put = 1;
 	splx(s);
-	if (xfer != NULL)
-		memset(xfer, 0, sizeof(struct wdc_xfer));
-	return xfer;
+
+	if (put)
+		pool_put(&wdc_xfer_pool, xfer);
+}
+
+struct wdc_xfer *
+wdc_get_xfer(int flags)
+{
+	return (scsi_io_get(&wdc_xfer_iopool,
+	    ISSET(flags, WDC_NOSLEEP) ? SCSI_NOSLEEP : 0));
 }
 
 void
 wdc_free_xfer(struct channel_softc *chp, struct wdc_xfer *xfer)
 {
+	int put = 0;
 	int s;
 
 	if (xfer->c_flags & C_PRIVATEXFER) {
@@ -1942,8 +1976,11 @@ wdc_free_xfer(struct channel_softc *chp, struct wdc_xfer *xfer)
 	s = splbio();
 	chp->ch_flags &= ~WDCF_ACTIVE;
 	TAILQ_REMOVE(&chp->ch_queue->sc_xfer, xfer, c_xferchain);
-	pool_put(&wdc_xfer_pool, xfer);
+	put = !ISSET(xfer->c_flags, C_SCSIXFER);
 	splx(s);
+
+	if (put)
+		scsi_io_put(&wdc_xfer_iopool, xfer);
 }
 
 

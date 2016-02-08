@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_iwi.c,v 1.111 2010/11/15 19:11:57 damien Exp $	*/
+/*	$OpenBSD: if_iwi.c,v 1.116 2013/12/06 21:03:04 deraadt Exp $	*/
 
 /*-
  * Copyright (c) 2004-2008
@@ -31,7 +31,7 @@
 #include <sys/systm.h>
 #include <sys/conf.h>
 #include <sys/device.h>
-#include <sys/workq.h>
+#include <sys/task.h>
 
 #include <machine/bus.h>
 #include <machine/endian.h>
@@ -52,7 +52,6 @@
 
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
-#include <netinet/in_var.h>
 #include <netinet/if_ether.h>
 #include <netinet/ip.h>
 
@@ -75,7 +74,8 @@ const struct pci_matchid iwi_devices[] = {
 int		iwi_match(struct device *, void *, void *);
 void		iwi_attach(struct device *, struct device *, void *);
 int		iwi_activate(struct device *, int);
-void		iwi_resume(void *, void *);
+void		iwi_wakeup(struct iwi_softc *);
+void		iwi_init_task(void *, void *);
 int		iwi_alloc_cmd_ring(struct iwi_softc *, struct iwi_cmd_ring *);
 void		iwi_reset_cmd_ring(struct iwi_softc *, struct iwi_cmd_ring *);
 void		iwi_free_cmd_ring(struct iwi_softc *, struct iwi_cmd_ring *);
@@ -325,6 +325,7 @@ iwi_attach(struct device *parent, struct device *self, void *aux)
 	sc->sc_txtap.wt_ihdr.it_present = htole32(IWI_TX_RADIOTAP_PRESENT);
 #endif
 
+	task_set(&sc->init_task, iwi_init_task, sc, NULL);
 	return;
 
 fail:	while (--ac >= 0)
@@ -343,9 +344,8 @@ iwi_activate(struct device *self, int act)
 		if (ifp->if_flags & IFF_RUNNING)
 			iwi_stop(ifp, 0);
 		break;
-	case DVACT_RESUME:
-		workq_queue_task(NULL, &sc->sc_resume_wqt, 0,
-		    iwi_resume, sc, NULL);
+	case DVACT_WAKEUP:
+		iwi_wakeup(sc);
 		break;
 	}
 
@@ -353,24 +353,31 @@ iwi_activate(struct device *self, int act)
 }
 
 void
-iwi_resume(void *arg1, void *arg2)
+iwi_wakeup(struct iwi_softc *sc)
 {
-	struct iwi_softc *sc = arg1;
-	struct ifnet *ifp = &sc->sc_ic.ic_if;
 	pcireg_t data;
-	int s;
 
 	/* clear device specific PCI configuration register 0x41 */
 	data = pci_conf_read(sc->sc_pct, sc->sc_pcitag, 0x40);
 	data &= ~0x0000ff00;
 	pci_conf_write(sc->sc_pct, sc->sc_pcitag, 0x40, data);
 
+	iwi_init_task(sc, NULL);
+}
+
+void
+iwi_init_task(void *arg1, void *arg2)
+{
+	struct iwi_softc *sc = arg1;
+	struct ifnet *ifp = &sc->sc_ic.ic_if;
+	int s;
+
 	s = splnet();
 	while (sc->sc_flags & IWI_FLAG_BUSY)
 		tsleep(&sc->sc_flags, 0, "iwipwr", 0);
 	sc->sc_flags |= IWI_FLAG_BUSY;
 
-	if (ifp->if_flags & IFF_UP)
+	if ((ifp->if_flags & (IFF_UP | IFF_RUNNING)) == IFF_UP)
 		iwi_init(ifp);
 
 	sc->sc_flags &= ~IWI_FLAG_BUSY;
@@ -1159,8 +1166,8 @@ iwi_intr(void *arg)
 
 	if (r & IWI_INTR_FATAL_ERROR) {
 		printf("%s: fatal firmware error\n", sc->sc_dev.dv_xname);
-		ifp->if_flags &= ~IFF_UP;
 		iwi_stop(ifp, 1);
+		task_add(systq, &sc->init_task);
 		return 1;
 	}
 
@@ -2239,7 +2246,7 @@ iwi_init(struct ifnet *ifp)
 		goto fail1;
 	}
 	if (size < sizeof (struct iwi_firmware_hdr)) {
-		printf("%s: firmware image too short: %u bytes\n",
+		printf("%s: firmware image too short: %zu bytes\n",
 		    sc->sc_dev.dv_xname, size);
 		error = EINVAL;
 		goto fail2;
@@ -2256,7 +2263,7 @@ iwi_init(struct ifnet *ifp)
 
 	if (size < sizeof (struct iwi_firmware_hdr) + letoh32(hdr->bootsz) +
 	    letoh32(hdr->ucodesz) + letoh32(hdr->mainsz)) {
-		printf("%s: firmware image too short: %u bytes\n",
+		printf("%s: firmware image too short: %zu bytes\n",
 		    sc->sc_dev.dv_xname, size);
 		error = EINVAL;
 		goto fail2;

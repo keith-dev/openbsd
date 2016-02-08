@@ -1,4 +1,4 @@
-/*	$OpenBSD: ieee80211_node.c,v 1.78 2013/03/24 17:01:23 claudio Exp $	*/
+/*	$OpenBSD: ieee80211_node.c,v 1.80 2013/12/01 10:08:55 stsp Exp $	*/
 /*	$NetBSD: ieee80211_node.c,v 1.14 2004/05/09 09:18:47 dyoung Exp $	*/
 
 /*-
@@ -50,7 +50,6 @@
 #include <net/if_dl.h>
 #include <net/if_media.h>
 #include <net/if_arp.h>
-#include <net/if_llc.h>
 
 #if NBPFILTER > 0
 #include <net/bpf.h>
@@ -910,6 +909,7 @@ ieee80211_find_txnode(struct ieee80211com *ic, const u_int8_t *macaddr)
 			return NULL;
 		/* XXX no rate negotiation; just dup */
 		ni->ni_rates = ic->ic_bss->ni_rates;
+		ni->ni_txrate = 0;
 		if (ic->ic_newassoc)
 			(*ic->ic_newassoc)(ic, ni, 1);
 	}
@@ -1042,6 +1042,7 @@ ieee80211_find_rxnode(struct ieee80211com *ic,
 	IEEE80211_ADDR_COPY(ni->ni_bssid, (bssid != NULL) ? bssid : zero);
 
 	ni->ni_rates = ic->ic_bss->ni_rates;
+	ni->ni_txrate = 0;
 	if (ic->ic_newassoc)
 		(*ic->ic_newassoc)(ic, ni, 1);
 

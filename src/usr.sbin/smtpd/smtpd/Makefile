@@ -1,11 +1,11 @@
-#	$OpenBSD: Makefile,v 1.65 2013/07/19 21:34:31 eric Exp $
+#	$OpenBSD: Makefile,v 1.69 2014/02/04 15:44:06 eric Exp $
 
 .PATH:		${.CURDIR}/..
 
 PROG=		smtpd
 
 SRCS=		aliases.c bounce.c ca.c compress_backend.c config.c		\
-		control.c crypto.c delivery.c dict.c dns.c envelope.c		\
+		control.c crypto.c delivery.c dict.c dns.c envelope.c esc.c	\
 		expand.c forward.c iobuf.c ioev.c limit.c lka.c	lka_session.c	\
 		log.c mda.c mfa.c mfa_session.c mproc.c				\
 		mta.c mta_session.c parse.y queue.c queue_backend.c		\
@@ -34,7 +34,7 @@ SRCS+=		scheduler_null.c
 SRCS+=		scheduler_proc.c
 SRCS+=		stat_ramstat.c
 
-MAN=		smtpd.8 smtpd.conf.5
+MAN=		smtpd.8 smtpd.conf.5 table.5
 BINDIR=		/usr/sbin
 
 LDADD+=		-levent -lutil -lssl -lcrypto -lm -lz
@@ -43,10 +43,14 @@ CFLAGS+=	-g3 -ggdb -I${.CURDIR}/.. -I${.CURDIR}/../../../lib/libc/asr
 CFLAGS+=	-Wall -Wstrict-prototypes -Wmissing-prototypes
 CFLAGS+=	-Wmissing-declarations
 CFLAGS+=	-Wshadow -Wpointer-arith -Wcast-qual
-CFLAGS+=	-Wsign-compare -Wbounded
+CFLAGS+=	-Wsign-compare
 #CFLAGS+=	-Werror # during development phase (breaks some archs)
 CFLAGS+=	-DIO_SSL
 CFLAGS+=	-DQUEUE_PROFILING
 YFLAGS=
+
+.if ${MACHINE} == "vax"
+LDFLAGS+=	-Wl,--no-keep-memory
+.endif
 
 .include <bsd.prog.mk>

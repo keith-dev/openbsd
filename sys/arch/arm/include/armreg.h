@@ -1,4 +1,4 @@
-/*	$OpenBSD: armreg.h,v 1.12 2013/04/28 13:27:13 patrick Exp $	*/
+/*	$OpenBSD: armreg.h,v 1.14 2013/11/26 20:33:11 deraadt Exp $	*/
 /*	$NetBSD: armreg.h,v 1.27 2003/09/06 08:43:02 rearnsha Exp $	*/
 
 /*
@@ -53,7 +53,7 @@
  */
 
 #define PSR_FLAGS 0xf0000000	/* flags */
-#define PSR_N_bit (1 << 31)	/* negative */
+#define PSR_N_bit (1U << 31)	/* negative */
 #define PSR_Z_bit (1 << 30)	/* zero */
 #define PSR_C_bit (1 << 29)	/* carry */
 #define PSR_V_bit (1 << 28)	/* overflow */
@@ -219,6 +219,7 @@
 #define CPU_ID_CORTEX_A15_R1	0x411fc0f0
 #define CPU_ID_CORTEX_A15_R2	0x412fc0f0
 #define CPU_ID_CORTEX_A15_R3	0x413fc0f0
+#define CPU_ID_CORTEX_A15_R4	0x414fc0f0
 #define CPU_ID_CORTEX_A15_MASK	0xff0ffff0
 
 

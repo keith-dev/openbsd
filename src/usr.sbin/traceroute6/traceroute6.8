@@ -1,4 +1,4 @@
-.\"	$OpenBSD: traceroute6.8,v 1.15 2012/08/15 19:25:41 jmc Exp $
+.\"	$OpenBSD: traceroute6.8,v 1.20 2014/02/26 20:52:29 claudio Exp $
 .\"	$KAME: traceroute6.8,v 1.9 2002/08/30 03:56:20 onoe Exp $
 .\"
 .\" Copyright (C) 1995, 1996, 1997, and 1998 WIDE Project.
@@ -28,7 +28,7 @@
 .\" OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
 .\" SUCH DAMAGE.
 .\"
-.Dd $Mdocdate: August 15 2012 $
+.Dd $Mdocdate: February 26 2014 $
 .Dt TRACEROUTE6 8
 .Os
 .\"
@@ -38,13 +38,14 @@
 .\"
 .Sh SYNOPSIS
 .Nm traceroute6
-.Op Fl AdIlnrv
+.Op Fl AcDdIlnrSv
 .Op Fl f Ar firsthop
 .Op Fl g Ar gateway
 .Op Fl m Ar hoplimit
 .Op Fl p Ar port
 .Op Fl q Ar probes
 .Op Fl s Ar src
+.Op Fl V Ar rtable
 .Op Fl w Ar waittime
 .Ar host
 .Op Ar datalen
@@ -60,6 +61,13 @@ The options are as follows:
 Look up the AS number for each hop address.
 Uses the DNS service described at
 .Lk http://www.team-cymru.org/Services/ip-to-asn.html .
+.It Fl c
+Do not increment the destination port number in successive UDP packets.
+Rather, all UDP packets will have the same destination port, as set via the
+.Fl p
+flag (or 33434 if none is specified).
+.It Fl D
+Dump the packet data to standard error before transmitting it.
 .It Fl d
 Debug mode.
 .It Fl f Ar firsthop
@@ -102,10 +110,14 @@ socket option;
 it can be used to ping a local host through an interface
 that has no route through it
 (e.g. after the interface was dropped by a routing daemon).
+.It Fl S
+Print how many probes were not answered for each hop.
 .It Fl s Ar src
 Specify the source IPv6 address to be used.
 .It Fl v
 Be verbose.
+.It Fl V Ar rtable
+Set the routing table to be used.
 .It Fl w Ar waittime
 Specify the time delay between probes.
 .El

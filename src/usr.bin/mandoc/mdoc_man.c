@@ -1,6 +1,6 @@
-/*	$Id: mdoc_man.c,v 1.50 2013/06/02 18:16:51 schwarze Exp $ */
+/*	$Id: mdoc_man.c,v 1.58 2014/01/24 11:56:34 schwarze Exp $ */
 /*
- * Copyright (c) 2011, 2012, 2013 Ingo Schwarze <schwarze@openbsd.org>
+ * Copyright (c) 2011, 2012, 2013, 2014 Ingo Schwarze <schwarze@openbsd.org>
  *
  * Permission to use, copy, modify, and distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -252,6 +252,7 @@ static	int		outflags;
 #define	MMAN_An_split	(1 << 9)  /* author mode is "split" */
 #define	MMAN_An_nosplit	(1 << 10) /* author mode is "nosplit" */
 #define	MMAN_PD		(1 << 11) /* inter-paragraph spacing disabled */
+#define	MMAN_nbrword	(1 << 12) /* do not break the next word */
 
 #define	BL_STACK_MAX	32
 
@@ -360,6 +361,15 @@ print_word(const char *s)
 		case (ASCII_HYPH):
 			putchar('-');
 			break;
+		case (ASCII_BREAK):
+			printf("\\:");
+			break;
+		case (' '):
+			if (MMAN_nbrword & outflags) {
+				printf("\\ ");
+				break;
+			}
+			/* FALLTHROUGH */
 		default:
 			putchar((unsigned char)*s);
 			break;
@@ -367,6 +377,7 @@ print_word(const char *s)
 		if (TPremain)
 			TPremain--;
 	}
+	outflags &= ~MMAN_nbrword;
 }
 
 static void
@@ -438,7 +449,7 @@ print_offs(const char *v)
 	if (Bl_stack_len)
 		sz += Bl_stack[Bl_stack_len - 1];
 
-	snprintf(buf, sizeof(buf), "%ldn", sz);
+	snprintf(buf, sizeof(buf), "%zun", sz);
 	print_word(buf);
 	outflags |= MMAN_nl;
 }
@@ -491,7 +502,7 @@ print_width(const char *v, const struct mdoc_node *child, size_t defsz)
 		remain = sz + 2;
 	}
 	if (numeric) {
-		snprintf(buf, sizeof(buf), "%ldn", sz + 2);
+		snprintf(buf, sizeof(buf), "%zun", sz + 2);
 		print_word(buf);
 	} else
 		print_word(v);
@@ -549,7 +560,7 @@ man_mdoc(void *arg, const struct mdoc *mdoc)
 static void
 print_node(DECL_ARGS)
 {
-	const struct mdoc_node	*prev, *sub;
+	const struct mdoc_node	*sub;
 	const struct manact	*act;
 	int			 cond, do_sub;
 
@@ -557,8 +568,7 @@ print_node(DECL_ARGS)
 	 * Break the line if we were parsed subsequent the current node.
 	 * This makes the page structure be more consistent.
 	 */
-	prev = n->prev ? n->prev : n->parent;
-	if (MMAN_spc & outflags && prev && prev->line < n->line)
+	if (MMAN_spc & outflags && MDOC_LINE & n->flags)
 		outflags |= MMAN_nl;
 
 	act = NULL;
@@ -584,7 +594,7 @@ print_node(DECL_ARGS)
 		 */
 		act = manacts + n->tok;
 		cond = NULL == act->cond || (*act->cond)(meta, n);
-		if (cond && act->pre)
+		if (cond && act->pre && ENDBODY_NOT == n->end)
 			do_sub = (*act->pre)(meta, n);
 	}
 
@@ -600,8 +610,17 @@ print_node(DECL_ARGS)
 	/*
 	 * Lastly, conditionally run the post-node handler.
 	 */
+	if (MDOC_ENDED & n->flags)
+		return;
+
 	if (cond && act->post)
 		(*act->post)(meta, n);
+
+	if (ENDBODY_NOT != n->end)
+		n->pending->flags |= MDOC_ENDED;
+
+	if (ENDBODY_NOSPACE == n->end)
+		outflags &= ~(MMAN_spc | MMAN_nl);
 }
 
 static int
@@ -639,7 +658,7 @@ post_enc(DECL_ARGS)
 	suffix = manacts[n->tok].suffix;
 	if (NULL == suffix)
 		return;
-	outflags &= ~MMAN_spc;
+	outflags &= ~(MMAN_spc | MMAN_nl);
 	print_word(suffix);
 }
 
@@ -702,24 +721,12 @@ static int
 pre_sect(DECL_ARGS)
 {
 
-	switch (n->type) {
-	case (MDOC_HEAD):
+	if (MDOC_HEAD == n->type) {
 		outflags |= MMAN_sp;
 		print_block(manacts[n->tok].prefix, 0);
 		print_word("");
 		putchar('\"');
 		outflags &= ~MMAN_spc;
-		break;
-	case (MDOC_BODY):
-		if (MDOC_Sh == n->tok) {
-			if (MDOC_SYNPRETTY & n->flags)
-				outflags |= MMAN_Bk;
-			else
-				outflags &= ~MMAN_Bk;
-		}
-		break;
-	default:
-		break;
 	}
 	return(1);
 }
@@ -897,7 +904,7 @@ static void
 post_bk(DECL_ARGS)
 {
 
-	if (MDOC_BODY == n->type && ! (MDOC_SYNPRETTY & n->flags))
+	if (MDOC_BODY == n->type)
 		outflags &= ~MMAN_Bk;
 }
 
@@ -1031,12 +1038,17 @@ post_eo(DECL_ARGS)
 static int
 pre_fa(DECL_ARGS)
 {
+	int	 am_Fa;
 
-	if (MDOC_Fa == n->tok)
+	am_Fa = MDOC_Fa == n->tok;
+
+	if (am_Fa)
 		n = n->child;
 
 	while (NULL != n) {
 		font_push('I');
+		if (am_Fa || MDOC_SYNPRETTY & n->flags)
+			outflags |= MMAN_nbrword;
 		print_node(meta, n);
 		font_pop();
 		if (NULL != (n = n->next))
@@ -1100,6 +1112,9 @@ pre_fn(DECL_ARGS)
 	if (NULL == n)
 		return(0);
 
+	if (MDOC_SYNPRETTY & n->flags)
+		print_block(".HP 4n", MMAN_nl);
+
 	font_push('B');
 	print_node(meta, n);
 	font_pop();
@@ -1120,7 +1135,7 @@ post_fn(DECL_ARGS)
 	print_word(")");
 	if (MDOC_SYNPRETTY & n->flags) {
 		print_word(";");
-		outflags |= MMAN_br;
+		outflags |= MMAN_PP;
 	}
 }
 
@@ -1133,6 +1148,8 @@ pre_fo(DECL_ARGS)
 		pre_syn(n);
 		break;
 	case (MDOC_HEAD):
+		if (MDOC_SYNPRETTY & n->flags)
+			print_block(".HP 4n", MMAN_nl);
 		font_push('B');
 		break;
 	case (MDOC_BODY):
@@ -1145,7 +1162,7 @@ pre_fo(DECL_ARGS)
 	}
 	return(1);
 }
-		
+
 static void
 post_fo(DECL_ARGS)
 {
@@ -1291,7 +1308,7 @@ mid_it(void)
 
 	/* Restore the indentation of the enclosing list. */
 	print_line(".RS", MMAN_Bk_susp);
-	snprintf(buf, sizeof(buf), "%ldn", Bl_stack[Bl_stack_len - 1]);
+	snprintf(buf, sizeof(buf), "%zun", Bl_stack[Bl_stack_len - 1]);
 	print_word(buf);
 
 	/* Remeber to close out this .RS block later. */
@@ -1405,8 +1422,10 @@ pre_nm(DECL_ARGS)
 {
 	char	*name;
 
-	if (MDOC_BLOCK == n->type)
+	if (MDOC_BLOCK == n->type) {
+		outflags |= MMAN_Bk;
 		pre_syn(n);
+	}
 	if (MDOC_ELEM != n->type && MDOC_HEAD != n->type)
 		return(1);
 	name = n->child ? n->child->string : meta->name;
@@ -1416,7 +1435,7 @@ pre_nm(DECL_ARGS)
 		if (NULL == n->parent->prev)
 			outflags |= MMAN_sp;
 		print_block(".HP", 0);
-		printf(" %ldn", strlen(name) + 1);
+		printf(" %zun", strlen(name) + 1);
 		outflags |= MMAN_nl;
 	}
 	font_push('B');
@@ -1429,9 +1448,18 @@ static void
 post_nm(DECL_ARGS)
 {
 
-	if (MDOC_ELEM != n->type && MDOC_HEAD != n->type)
-		return;
-	font_pop();
+	switch (n->type) {
+	case (MDOC_BLOCK):
+		outflags &= ~MMAN_Bk;
+		break;
+	case (MDOC_HEAD):
+		/* FALLTHROUGH */
+	case (MDOC_ELEM):
+		font_pop();
+		break;
+	default:
+		break;
+	}
 }
 
 static int

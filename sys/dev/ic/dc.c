@@ -1,4 +1,4 @@
-/*	$OpenBSD: dc.c,v 1.125 2012/11/29 21:10:31 brad Exp $	*/
+/*	$OpenBSD: dc.c,v 1.131 2013/12/28 03:34:59 deraadt Exp $	*/
 
 /*
  * Copyright (c) 1997, 1998, 1999
@@ -110,7 +110,6 @@
 #ifdef INET
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
-#include <netinet/in_var.h>
 #include <netinet/ip.h>
 #include <netinet/if_ether.h>
 #endif
@@ -888,15 +887,13 @@ dc_crc_le(struct dc_softc *sc, caddr_t addr)
 void
 dc_setfilt_21143(struct dc_softc *sc)
 {
-	struct dc_desc *sframe;
-	u_int32_t h, *sp;
 	struct arpcom *ac = &sc->sc_arpcom;
+	struct ifnet *ifp = &sc->sc_arpcom.ac_if;
 	struct ether_multi *enm;
 	struct ether_multistep step;
-	struct ifnet *ifp;
+	struct dc_desc *sframe;
+	u_int32_t h, *sp;
 	int i;
-
-	ifp = &sc->sc_arpcom.ac_if;
 
 	i = sc->dc_cdata.dc_tx_prod;
 	DC_INC(sc->dc_cdata.dc_tx_prod, DC_TX_LIST_CNT);
@@ -913,36 +910,31 @@ dc_setfilt_21143(struct dc_softc *sc)
 	sc->dc_cdata.dc_tx_chain[i].sd_mbuf =
 	    (struct mbuf *)&sc->dc_ldata->dc_sbuf[0];
 
-	/* If we want promiscuous mode, set the allframes bit. */
-	if (ifp->if_flags & IFF_PROMISC)
-		DC_SETBIT(sc, DC_NETCFG, DC_NETCFG_RX_PROMISC);
-	else
-		DC_CLRBIT(sc, DC_NETCFG, DC_NETCFG_RX_PROMISC);
+	DC_CLRBIT(sc, DC_NETCFG, (DC_NETCFG_RX_ALLMULTI | DC_NETCFG_RX_PROMISC));
+	ifp->if_flags &= ~IFF_ALLMULTI;
 
-allmulti:
-	if (ifp->if_flags & IFF_ALLMULTI)
-		DC_SETBIT(sc, DC_NETCFG, DC_NETCFG_RX_ALLMULTI);
-	else {
-		DC_CLRBIT(sc, DC_NETCFG, DC_NETCFG_RX_ALLMULTI);
-
+	if (ifp->if_flags & IFF_PROMISC || ac->ac_multirangecnt > 0) {
+		ifp->if_flags |= IFF_ALLMULTI;
+		if (ifp->if_flags & IFF_PROMISC)
+			DC_SETBIT(sc, DC_NETCFG, DC_NETCFG_RX_PROMISC);
+		else
+			DC_SETBIT(sc, DC_NETCFG, DC_NETCFG_RX_ALLMULTI);
+	} else {
 		ETHER_FIRST_MULTI(step, ac, enm);
 		while (enm != NULL) {
-			if (bcmp(enm->enm_addrlo, enm->enm_addrhi,
-			    ETHER_ADDR_LEN)) {
-				ifp->if_flags |= IFF_ALLMULTI;
-				goto allmulti;
-			}
-
 			h = dc_crc_le(sc, enm->enm_addrlo);
+
 			sp[h >> 4] |= htole32(1 << (h & 0xF));
+
 			ETHER_NEXT_MULTI(step, enm);
 		}
 	}
 
-	if (ifp->if_flags & IFF_BROADCAST) {
-		h = dc_crc_le(sc, (caddr_t)&etherbroadcastaddr);
-		sp[h >> 4] |= htole32(1 << (h & 0xF));
-	}
+	/*
+	 * Always accept broadcast frames.
+	 */
+	h = dc_crc_le(sc, (caddr_t)&etherbroadcastaddr);
+	sp[h >> 4] |= htole32(1 << (h & 0xF));
 
 	/* Set our MAC address */
 	sp[39] = DC_SP_FIELD(sc->sc_arpcom.ac_enaddr, 0);
@@ -977,61 +969,45 @@ allmulti:
 void
 dc_setfilt_admtek(struct dc_softc *sc)
 {
-	struct ifnet *ifp;
 	struct arpcom *ac = &sc->sc_arpcom;
+	struct ifnet *ifp = &sc->sc_arpcom.ac_if;
 	struct ether_multi *enm;
 	struct ether_multistep step;
+	u_int32_t hashes[2];
 	int h = 0;
-	u_int32_t hashes[2] = { 0, 0 };
 
-	ifp = &sc->sc_arpcom.ac_if;
+	DC_CLRBIT(sc, DC_NETCFG, (DC_NETCFG_RX_ALLMULTI | DC_NETCFG_RX_PROMISC));
+	bzero(hashes, sizeof(hashes));
+	ifp->if_flags &= ~IFF_ALLMULTI;
+
+	if (ifp->if_flags & IFF_PROMISC || ac->ac_multirangecnt > 0) {
+		ifp->if_flags |= IFF_ALLMULTI;
+		if (ifp->if_flags & IFF_PROMISC)
+			DC_SETBIT(sc, DC_NETCFG, DC_NETCFG_RX_PROMISC);
+		else
+			DC_SETBIT(sc, DC_NETCFG, DC_NETCFG_RX_ALLMULTI);
+	} else {
+		/* now program new ones */
+		ETHER_FIRST_MULTI(step, ac, enm);
+		while (enm != NULL) {
+			if (DC_IS_CENTAUR(sc))
+				h = dc_crc_le(sc, enm->enm_addrlo);
+			else
+				h = dc_crc_be(enm->enm_addrlo);
+
+			if (h < 32)
+				hashes[0] |= (1 << h);
+			else
+				hashes[1] |= (1 << (h - 32));
+
+			ETHER_NEXT_MULTI(step, enm);
+		}
+	}
 
 	/* Init our MAC address */
 	CSR_WRITE_4(sc, DC_AL_PAR0, ac->ac_enaddr[3] << 24 |
 	    ac->ac_enaddr[2] << 16 | ac->ac_enaddr[1] << 8 | ac->ac_enaddr[0]);
 	CSR_WRITE_4(sc, DC_AL_PAR1, ac->ac_enaddr[5] << 8 | ac->ac_enaddr[4]);
-
-	/* If we want promiscuous mode, set the allframes bit. */
-	if (ifp->if_flags & IFF_PROMISC)
-		DC_SETBIT(sc, DC_NETCFG, DC_NETCFG_RX_PROMISC);
-	else
-		DC_CLRBIT(sc, DC_NETCFG, DC_NETCFG_RX_PROMISC);
-
-allmulti:
-	if (ifp->if_flags & IFF_ALLMULTI)
-		DC_SETBIT(sc, DC_NETCFG, DC_NETCFG_RX_ALLMULTI);
-	else
-		DC_CLRBIT(sc, DC_NETCFG, DC_NETCFG_RX_ALLMULTI);
-
-	/* first, zot all the existing hash bits */
-	CSR_WRITE_4(sc, DC_AL_MAR0, 0);
-	CSR_WRITE_4(sc, DC_AL_MAR1, 0);
-
-	/*
-	 * If we're already in promisc or allmulti mode, we
-	 * don't have to bother programming the multicast filter.
-	 */
-	if (ifp->if_flags & (IFF_PROMISC|IFF_ALLMULTI))
-		return;
-
-	/* now program new ones */
-	ETHER_FIRST_MULTI(step, ac, enm);
-	while (enm != NULL) {
-		if (bcmp(enm->enm_addrlo, enm->enm_addrhi, ETHER_ADDR_LEN)) {
-			ifp->if_flags |= IFF_ALLMULTI;
-			goto allmulti;
-		}
-
-		if (DC_IS_CENTAUR(sc))
-			h = dc_crc_le(sc, enm->enm_addrlo);
-		else
-			h = dc_crc_be(enm->enm_addrlo);
-		if (h < 32)
-			hashes[0] |= (1 << h);
-		else
-			hashes[1] |= (1 << (h - 32));
-		ETHER_NEXT_MULTI(step, enm);
-	}
 
 	CSR_WRITE_4(sc, DC_AL_MAR0, hashes[0]);
 	CSR_WRITE_4(sc, DC_AL_MAR1, hashes[1]);
@@ -1040,14 +1016,43 @@ allmulti:
 void
 dc_setfilt_asix(struct dc_softc *sc)
 {
-	struct ifnet *ifp;
 	struct arpcom *ac = &sc->sc_arpcom;
+	struct ifnet *ifp = &sc->sc_arpcom.ac_if;
 	struct ether_multi *enm;
 	struct ether_multistep step;
+	u_int32_t hashes[2];
 	int h = 0;
-	u_int32_t hashes[2] = { 0, 0 };
 
-	ifp = &sc->sc_arpcom.ac_if;
+	DC_CLRBIT(sc, DC_NETCFG, (DC_NETCFG_RX_ALLMULTI | DC_AX_NETCFG_RX_BROAD |
+	    DC_NETCFG_RX_PROMISC));
+	bzero(hashes, sizeof(hashes));
+	ifp->if_flags &= ~IFF_ALLMULTI;
+
+	/*
+	 * Always accept broadcast frames.
+	 */
+	DC_SETBIT(sc, DC_NETCFG, DC_AX_NETCFG_RX_BROAD);
+
+	if (ifp->if_flags & IFF_PROMISC || ac->ac_multirangecnt > 0) {
+		ifp->if_flags |= IFF_ALLMULTI;
+		if (ifp->if_flags & IFF_PROMISC)
+			DC_SETBIT(sc, DC_NETCFG, DC_NETCFG_RX_PROMISC);
+		else
+			DC_SETBIT(sc, DC_NETCFG, DC_NETCFG_RX_ALLMULTI);
+	} else {
+		/* now program new ones */
+		ETHER_FIRST_MULTI(step, ac, enm);
+		while (enm != NULL) {
+			h = dc_crc_be(enm->enm_addrlo);
+
+			if (h < 32)
+				hashes[0] |= (1 << h);
+			else
+				hashes[1] |= (1 << (h - 32));
+
+			ETHER_NEXT_MULTI(step, enm);
+		}
+	}
 
 	/* Init our MAC address */
 	CSR_WRITE_4(sc, DC_AX_FILTIDX, DC_AX_FILTIDX_PAR0);
@@ -1056,50 +1061,6 @@ dc_setfilt_asix(struct dc_softc *sc)
 	CSR_WRITE_4(sc, DC_AX_FILTIDX, DC_AX_FILTIDX_PAR1);
 	CSR_WRITE_4(sc, DC_AX_FILTDATA,
 	    *(u_int32_t *)(&sc->sc_arpcom.ac_enaddr[4]));
-
-	/* If we want promiscuous mode, set the allframes bit. */
-	if (ifp->if_flags & IFF_PROMISC)
-		DC_SETBIT(sc, DC_NETCFG, DC_NETCFG_RX_PROMISC);
-	else
-		DC_CLRBIT(sc, DC_NETCFG, DC_NETCFG_RX_PROMISC);
-
-	if (ifp->if_flags & IFF_ALLMULTI)
-		DC_SETBIT(sc, DC_NETCFG, DC_NETCFG_RX_ALLMULTI);
-	else
-		DC_CLRBIT(sc, DC_NETCFG, DC_NETCFG_RX_ALLMULTI);
-
-	/*
-	 * The ASIX chip has a special bit to enable reception
-	 * of broadcast frames.
-	 */
-	if (ifp->if_flags & IFF_BROADCAST)
-		DC_SETBIT(sc, DC_NETCFG, DC_AX_NETCFG_RX_BROAD);
-	else
-		DC_CLRBIT(sc, DC_NETCFG, DC_AX_NETCFG_RX_BROAD);
-
-	/* first, zot all the existing hash bits */
-	CSR_WRITE_4(sc, DC_AX_FILTIDX, DC_AX_FILTIDX_MAR0);
-	CSR_WRITE_4(sc, DC_AX_FILTDATA, 0);
-	CSR_WRITE_4(sc, DC_AX_FILTIDX, DC_AX_FILTIDX_MAR1);
-	CSR_WRITE_4(sc, DC_AX_FILTDATA, 0);
-
-	/*
-	 * If we're already in promisc or allmulti mode, we
-	 * don't have to bother programming the multicast filter.
-	 */
-	if (ifp->if_flags & (IFF_PROMISC|IFF_ALLMULTI))
-		return;
-
-	/* now program new ones */
-	ETHER_FIRST_MULTI(step, ac, enm);
-	while (enm != NULL) {
-		h = dc_crc_be(enm->enm_addrlo);
-		if (h < 32)
-			hashes[0] |= (1 << h);
-		else
-			hashes[1] |= (1 << (h - 32));
-		ETHER_NEXT_MULTI(step, enm);
-	}
 
 	CSR_WRITE_4(sc, DC_AX_FILTIDX, DC_AX_FILTIDX_MAR0);
 	CSR_WRITE_4(sc, DC_AX_FILTDATA, hashes[0]);
@@ -1110,15 +1071,14 @@ dc_setfilt_asix(struct dc_softc *sc)
 void
 dc_setfilt_xircom(struct dc_softc *sc)
 {
-	struct dc_desc *sframe;
 	struct arpcom *ac = &sc->sc_arpcom;
+	struct ifnet *ifp = &sc->sc_arpcom.ac_if;
 	struct ether_multi *enm;
 	struct ether_multistep step;
+	struct dc_desc *sframe;
 	u_int32_t h, *sp;
-	struct ifnet *ifp;
 	int i;
 
-	ifp = &sc->sc_arpcom.ac_if;
 	DC_CLRBIT(sc, DC_NETCFG, (DC_NETCFG_TX_ON|DC_NETCFG_RX_ON));
 
 	i = sc->dc_cdata.dc_tx_prod;
@@ -1136,29 +1096,32 @@ dc_setfilt_xircom(struct dc_softc *sc)
 	sc->dc_cdata.dc_tx_chain[i].sd_mbuf =
 	    (struct mbuf *)&sc->dc_ldata->dc_sbuf[0];
 
-	/* If we want promiscuous mode, set the allframes bit. */
-	if (ifp->if_flags & IFF_PROMISC)
-		DC_SETBIT(sc, DC_NETCFG, DC_NETCFG_RX_PROMISC);
-	else
-		DC_CLRBIT(sc, DC_NETCFG, DC_NETCFG_RX_PROMISC);
+	DC_CLRBIT(sc, DC_NETCFG, (DC_NETCFG_RX_ALLMULTI | DC_NETCFG_RX_PROMISC));
+	ifp->if_flags &= ~IFF_ALLMULTI;
 
-	if (ifp->if_flags & IFF_ALLMULTI)
-		DC_SETBIT(sc, DC_NETCFG, DC_NETCFG_RX_ALLMULTI);
-	else
-		DC_CLRBIT(sc, DC_NETCFG, DC_NETCFG_RX_ALLMULTI);
+	if (ifp->if_flags & IFF_PROMISC || ac->ac_multirangecnt > 0) {
+		ifp->if_flags |= IFF_ALLMULTI;
+		if (ifp->if_flags & IFF_PROMISC)
+			DC_SETBIT(sc, DC_NETCFG, DC_NETCFG_RX_PROMISC);
+		else
+			DC_SETBIT(sc, DC_NETCFG, DC_NETCFG_RX_ALLMULTI);
+	} else {
+		/* now program new ones */
+		ETHER_FIRST_MULTI(step, ac, enm);
+		while (enm != NULL) {
+			h = dc_crc_le(sc, enm->enm_addrlo);
 
-	/* now program new ones */
-	ETHER_FIRST_MULTI(step, ac, enm);
-	while (enm != NULL) {
-		h = dc_crc_le(sc, enm->enm_addrlo);
-		sp[h >> 4] |= htole32(1 << (h & 0xF));
-		ETHER_NEXT_MULTI(step, enm);
+			sp[h >> 4] |= htole32(1 << (h & 0xF));
+
+			ETHER_NEXT_MULTI(step, enm);
+		}
 	}
 
-	if (ifp->if_flags & IFF_BROADCAST) {
-		h = dc_crc_le(sc, (caddr_t)&etherbroadcastaddr);
-		sp[h >> 4] |= htole32(1 << (h & 0xF));
-	}
+	/*
+	 * Always accept broadcast frames.
+	 */
+	h = dc_crc_le(sc, (caddr_t)&etherbroadcastaddr);
+	sp[h >> 4] |= htole32(1 << (h & 0xF));
 
 	/* Set our MAC address */
 	sp[0] = DC_SP_FIELD(sc->sc_arpcom.ac_enaddr, 0);
@@ -2186,8 +2149,7 @@ dc_rxeof(struct dc_softc *sc)
 		total_len -= ETHER_CRC_LEN;
 
 		m->m_pkthdr.rcvif = ifp;
-		m0 = m_devget(mtod(m, char *), total_len, ETHER_ALIGN,
-		    ifp, NULL);
+		m0 = m_devget(mtod(m, char *), total_len, ETHER_ALIGN, ifp);
 		dc_newbuf(sc, i, m);
 		DC_INC(i, DC_RX_LIST_CNT);
 		if (m0 == NULL) {
@@ -2973,7 +2935,6 @@ dc_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 	struct dc_softc		*sc = ifp->if_softc;
 	struct ifreq		*ifr = (struct ifreq *) data;
 	struct ifaddr		*ifa = (struct ifaddr *)data;
-	struct mii_data		*mii;
 	int			s, error = 0;
 
 	s = splnet();
@@ -2990,26 +2951,20 @@ dc_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 		break;
 	case SIOCSIFFLAGS:
 		if (ifp->if_flags & IFF_UP) {
-			if (ifp->if_flags & IFF_RUNNING &&
-			    (ifp->if_flags ^ sc->dc_if_flags) &
-			     IFF_PROMISC) {
-				dc_setfilt(sc);
-			} else {
-				if (!(ifp->if_flags & IFF_RUNNING)) {
-					sc->dc_txthresh = 0;
-					dc_init(sc);
-				}
+			if (ifp->if_flags & IFF_RUNNING)
+				error = ENETRESET;
+			else {
+				sc->dc_txthresh = 0;
+				dc_init(sc);
 			}
 		} else {
 			if (ifp->if_flags & IFF_RUNNING)
 				dc_stop(sc, 0);
 		}
-		sc->dc_if_flags = ifp->if_flags;
 		break;
 	case SIOCGIFMEDIA:
 	case SIOCSIFMEDIA:
-		mii = &sc->sc_mii;
-		error = ifmedia_ioctl(ifp, ifr, &mii->mii_media, command);
+		error = ifmedia_ioctl(ifp, ifr, &sc->sc_mii.mii_media, command);
 #ifdef SRM_MEDIA
 		if (sc->dc_srm_media)
 			sc->dc_srm_media = 0;
@@ -3149,18 +3104,17 @@ dc_activate(struct device *self, int act)
 	int rv = 0;
 
 	switch (act) {
-	case DVACT_QUIESCE:
-		rv = config_activate_children(self, act);
-		break;
 	case DVACT_SUSPEND:
 		if (ifp->if_flags & IFF_RUNNING)
 			dc_stop(sc, 0);
 		rv = config_activate_children(self, act);
 		break;
 	case DVACT_RESUME:
-		rv = config_activate_children(self, act);
 		if (ifp->if_flags & IFF_UP)
 			dc_init(sc);
+		break;
+	default:
+		rv = config_activate_children(self, act);
 		break;
 	}
 	return (rv);

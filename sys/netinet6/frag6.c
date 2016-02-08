@@ -1,4 +1,4 @@
-/*	$OpenBSD: frag6.c,v 1.47 2013/06/11 18:15:54 deraadt Exp $	*/
+/*	$OpenBSD: frag6.c,v 1.51 2013/11/11 09:15:35 mpi Exp $	*/
 /*	$KAME: frag6.c,v 1.40 2002/05/27 21:40:31 itojun Exp $	*/
 
 /*
@@ -46,7 +46,7 @@
 #include <net/route.h>
 
 #include <netinet/in.h>
-#include <netinet/in_var.h>
+#include <netinet6/in6_var.h>
 #include <netinet/ip6.h>
 #include <netinet6/ip6_var.h>
 #include <netinet/icmp6.h>
@@ -189,6 +189,7 @@ frag6_input(struct mbuf **mp, int *offp, int proto)
 #ifdef IN6_IFSTAT_STRICT
 	/* find the destination interface of the packet. */
 	bzero(&ro, sizeof(ro));
+	ro.ro_tableid = m->m_pkthdr.rdomain;
 	dst = &ro.ro_dst;
 	dst->sin6_family = AF_INET6;
 	dst->sin6_len = sizeof(struct sockaddr_in6);
@@ -236,10 +237,10 @@ frag6_input(struct mbuf **mp, int *offp, int proto)
 	offset += sizeof(struct ip6_frag);
 
 	/*
-	 * draft-gont-6man-ipv6-atomic-fragments-00:  A host that receives an
-	 * IPv6 packet which includes a Fragment Header with the "Fragment
-	 * Offset" equal to 0 and the "M" bit equal to 0 MUST process such
-	 * packet in isolation from any other packets/fragments.
+	 * RFC6946:  A host that receives an IPv6 packet which includes
+	 * a Fragment Header with the "Fragment Offset" equal to 0 and
+	 * the "M" bit equal to 0 MUST process such packet in isolation
+	 * from any other packets/fragments.
 	 */
 	fragoff = ntohs(ip6f->ip6f_offlg & IP6F_OFF_MASK);
 	if (fragoff == 0 && !(ip6f->ip6f_offlg & IP6F_MORE_FRAG)) {
@@ -422,9 +423,11 @@ frag6_input(struct mbuf **mp, int *offp, int proto)
 		i = (paf6->ip6af_off + paf6->ip6af_frglen) - ip6af->ip6af_off;
 		if (i > 0) {
 #if 0				/* suppress the noisy log */
+			char ip[INET6_ADDRSTRLEN];
 			log(LOG_ERR, "%d bytes of a fragment from %s "
 			    "overlaps the previous fragment\n",
-			    i, ip6_sprintf(&q6->ip6q_src));
+			    i,
+			    inet_ntop(AF_INET6, &q6->ip6q_src, ip, sizeof(ip)));
 #endif
 			free(ip6af, M_FTABLE);
 			goto flushfrags;
@@ -434,9 +437,11 @@ frag6_input(struct mbuf **mp, int *offp, int proto)
 		i = (ip6af->ip6af_off + ip6af->ip6af_frglen) - af6->ip6af_off;
 		if (i > 0) {
 #if 0				/* suppress the noisy log */
+			char ip[INET6_ADDRSTRLEN];
 			log(LOG_ERR, "%d bytes of a fragment from %s "
 			    "overlaps the succeeding fragment",
-			    i, ip6_sprintf(&q6->ip6q_src));
+			    i,
+			    inet_ntop(AF_INET6, &q6->ip6q_src, ip, sizeof(ip)));
 #endif
 			free(ip6af, M_FTABLE);
 			goto flushfrags;

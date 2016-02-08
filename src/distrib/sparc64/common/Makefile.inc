@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile.inc,v 1.12 2011/04/18 16:52:10 thib Exp $
+#	$OpenBSD: Makefile.inc,v 1.15 2013/10/18 14:04:05 deraadt Exp $
 
 TOP=		${.CURDIR}/..
 
@@ -67,8 +67,8 @@ rd_teardown:
 	cp ${REALIMAGE} ${IMAGE}
 	rm ${REALIMAGE}
 
-rdsetroot:	${TOP}/../../common/rdsetroot.c
-	${HOSTCC} -o rdsetroot ${TOP}/../../common/rdsetroot.c
+rdsetroot:	${TOP}/../../common/elfrdsetroot.c
+	${HOSTCC} -o rdsetroot ${TOP}/../../common/elfrdsetroot.c
 
 unconfig:
 	-umount -f ${MOUNT_POINT}
@@ -90,7 +90,7 @@ ${CBIN}.mk ${CBIN}.cache ${CBIN}.c: ${CRUNCHCONF}
 	-c ${CBIN}.c -e ${CBIN} -m ${CBIN}.mk ${CRUNCHCONF}
 
 ${CBIN}: ${CBIN}.mk ${CBIN}.cache ${CBIN}.c
-	${MAKE} -f ${CBIN}.mk all
+	${MAKE} -f ${CBIN}.mk SRCLIBDIR=${.CURDIR}/../../../lib all
 
 do_files:
 	mtree -def ${MTREE} -p ${MOUNT_POINT}/ -u
@@ -100,7 +100,8 @@ do_files:
 	rm ${MOUNT_POINT}/${CBIN}
 
 clean cleandir:
-	/bin/rm -f core ${IMAGE} ${CBIN} ${CBIN}.mk ${CBIN}*.cache \
+	/bin/rm -f *.core ${IMAGE} ${CBIN} ${CBIN}.mk ${CBIN}*.cache \
+	    lib*.a lib*.olist ${CBIN}.map \
 	    *.o *.lo *.c bsd bsd.rd bsd.gz bsd.strip floppy*.fs rdsetroot
 
 .include <bsd.subdir.mk>

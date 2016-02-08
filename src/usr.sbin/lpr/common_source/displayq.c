@@ -1,4 +1,4 @@
-/*	$OpenBSD: displayq.c,v 1.32 2012/03/04 04:05:15 fgsch Exp $	*/
+/*	$OpenBSD: displayq.c,v 1.34 2013/11/24 21:32:32 deraadt Exp $	*/
 /*	$NetBSD: displayq.c,v 1.21 2001/08/30 00:51:50 itojun Exp $	*/
 
 /*
@@ -73,8 +73,8 @@ static int	first;		/* first file in ``files'' column? */
 static int	lflag;		/* long output option */
 static off_t	totsize;	/* total print job size in bytes */
 
-static const char *head0 = "Rank   Owner      Job  Files";
-static const char *head1 = "Total Size\n";
+static const char head0[] = "Rank   Owner      Job  Files";
+static const char head1[] = "Total Size\n";
 
 static void	alarmer(int);
 static void	inform(char *, int);
@@ -412,7 +412,7 @@ inlist(char *name, char *file)
 	/*
 	 * Check the request list
 	 */
-	for (n = 0, cp = file+3; isdigit(*cp); )
+	for (n = 0, cp = file+3; isdigit((unsigned char)*cp); )
 		n = n * 10 + (*cp++ - '0');
 	for (r = requ; r < &requ[requests]; r++)
 		if (*r == n && !strcmp(cp, from))

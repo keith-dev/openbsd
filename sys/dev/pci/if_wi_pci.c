@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_wi_pci.c,v 1.48 2010/09/07 16:21:45 deraadt Exp $	*/
+/*	$OpenBSD: if_wi_pci.c,v 1.50 2013/12/06 21:03:04 deraadt Exp $	*/
 
 /*
  * Copyright (c) 2001-2003 Todd C. Miller <Todd.Miller@courtesan.com>
@@ -46,7 +46,6 @@
 #include <sys/timeout.h>
 #include <sys/socket.h>
 #include <sys/tree.h>
-#include <sys/workq.h>
 
 #include <net/if.h>
 #include <net/if_dl.h>
@@ -78,7 +77,7 @@ const struct wi_pci_product *wi_pci_lookup(struct pci_attach_args *pa);
 int	wi_pci_match(struct device *, void *, void *);
 void	wi_pci_attach(struct device *, struct device *, void *);
 int	wi_pci_activate(struct device *, int);
-void	wi_pci_resume(void *arg1, void *arg2);
+void	wi_pci_wakeup(struct wi_softc *);
 int	wi_pci_acex_attach(struct pci_attach_args *pa, struct wi_softc *sc);
 int	wi_pci_plx_attach(struct pci_attach_args *pa, struct wi_softc *sc);
 int	wi_pci_tmd_attach(struct pci_attach_args *pa, struct wi_softc *sc);
@@ -88,7 +87,6 @@ void	wi_pci_plx_print_cis(struct wi_softc *);
 
 struct wi_pci_softc {
 	struct wi_softc		 sc_wi;		/* real softc */
-	struct workq_task	sc_resume_wqt;
 };
 
 struct cfattach wi_pci_ca = {
@@ -159,7 +157,6 @@ wi_pci_attach(struct device *parent, struct device *self, void *aux)
 int
 wi_pci_activate(struct device *self, int act)
 {
-	struct wi_pci_softc *psc = (struct wi_pci_softc *)self;
 	struct wi_softc *sc = (struct wi_softc *)self;
 	struct ifnet *ifp = &sc->sc_ic.ic_if;
 
@@ -168,20 +165,17 @@ wi_pci_activate(struct device *self, int act)
 		if (ifp->if_flags & IFF_RUNNING)
 			wi_stop(sc);
 		break;
-	case DVACT_RESUME:
+	case DVACT_WAKEUP:
 		if (ifp->if_flags & IFF_UP)
-			workq_queue_task(NULL, &psc->sc_resume_wqt, 0,
-			    wi_pci_resume, sc, NULL);
+			wi_pci_wakeup(sc);
 		break;
 	}
 	return (0);
 }
 
 void
-wi_pci_resume(void *arg1, void *arg2)
+wi_pci_wakeup(struct wi_softc *sc)
 {
-	struct wi_softc *sc = (struct wi_softc *)arg1;
-
 	int s;
 
 	s = splnet();

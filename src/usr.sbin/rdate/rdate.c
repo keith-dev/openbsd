@@ -1,4 +1,4 @@
-/*	$OpenBSD: rdate.c,v 1.28 2013/04/20 20:39:14 millert Exp $	*/
+/*	$OpenBSD: rdate.c,v 1.30 2013/11/12 22:27:13 deraadt Exp $	*/
 /*	$NetBSD: rdate.c,v 1.4 1996/03/16 12:37:45 pk Exp $	*/
 
 /*
@@ -57,10 +57,11 @@
 #define logwtmp(a,b,c)
 #endif
 
-void rfc868time_client (const char *, int, struct timeval *, struct timeval *, int);
-void ntp_client (const char *, int, struct timeval *, struct timeval *, int);
+void rfc868time_client(const char *, int, struct timeval *, struct timeval *, int);
+void ntp_client(const char *, int, struct timeval *, struct timeval *, int);
 
 extern char    *__progname;
+__dead void	usage(void);
 
 __dead void
 usage(void)
@@ -163,8 +164,8 @@ main(int argc, char **argv)
 				   __progname, adjsec);
 			else
 				(void) fprintf(stdout,
-				   "%s: adjust local clock by %ld seconds\n",
-				   __progname, adjust.tv_sec);
+				   "%s: adjust local clock by %lld seconds\n",
+				   __progname, (long long)adjust.tv_sec);
 		}
 	}
 

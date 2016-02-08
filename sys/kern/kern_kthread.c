@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_kthread.c,v 1.32 2013/03/28 16:55:25 deraadt Exp $	*/
+/*	$OpenBSD: kern_kthread.c,v 1.34 2014/02/12 05:47:36 guenther Exp $	*/
 /*	$NetBSD: kern_kthread.c,v 1.3 1998/12/22 21:21:36 kleink Exp $	*/
 
 /*-
@@ -56,18 +56,17 @@ int	kthread_create_now;
  */
 int
 kthread_create(void (*func)(void *), void *arg,
-    struct proc **newpp, const char *fmt, ...)
+    struct proc **newpp, const char *name)
 {
 	struct proc *p;
 	int error;
-	va_list ap;
 
 	/*
 	 * First, create the new process.  Share the memory, file
 	 * descriptors and don't leave the exit status around for the
 	 * parent to wait for.
 	 */
-	error = fork1(&proc0, 0, FORK_SHAREVM|FORK_SHAREFILES|FORK_NOZOMBIE|
+	error = fork1(&proc0, FORK_SHAREVM|FORK_SHAREFILES|FORK_NOZOMBIE|
 	    FORK_SIGHAND, NULL, 0, func, arg, NULL, &p);
 	if (error)
 		return (error);
@@ -78,9 +77,7 @@ kthread_create(void (*func)(void *), void *arg,
 	atomic_setbits_int(&p->p_flag, P_SYSTEM);
 
 	/* Name it as specified. */
-	va_start(ap, fmt);
-	vsnprintf(p->p_comm, sizeof p->p_comm, fmt, ap);
-	va_end(ap);
+	strlcpy(p->p_comm, name, sizeof p->p_comm);
 
 	/* All done! */
 	if (newpp != NULL)

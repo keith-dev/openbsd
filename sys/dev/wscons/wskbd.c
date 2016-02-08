@@ -1,4 +1,4 @@
-/* $OpenBSD: wskbd.c,v 1.72 2013/01/06 18:07:07 ratchov Exp $ */
+/* $OpenBSD: wskbd.c,v 1.76 2014/01/26 17:48:08 miod Exp $ */
 /* $NetBSD: wskbd.c,v 1.80 2005/05/04 01:52:16 augustss Exp $ */
 
 /*
@@ -95,10 +95,10 @@
 #include <sys/fcntl.h>
 #include <sys/vnode.h>
 #include <sys/poll.h>
-#include <sys/workq.h>
 
 #include <ddb/db_var.h>
 
+#include <dev/wscons/wscons_features.h>
 #include <dev/wscons/wsconsio.h>
 #include <dev/wscons/wskbdvar.h>
 #include <dev/wscons/wsksymdef.h>
@@ -112,11 +112,6 @@
 #include "wskbd.h"
 #include "wsmux.h"
 
-#ifndef	SMALL_KERNEL
-#define	BURNER_SUPPORT
-#define	SCROLLBACK_SUPPORT
-#endif
-
 #ifdef WSKBD_DEBUG
 #define DPRINTF(x)	if (wskbddebug) printf x
 int	wskbddebug = 0;
@@ -127,8 +122,6 @@ int	wskbddebug = 0;
 #include <dev/wscons/wsmuxvar.h>
 
 struct wskbd_internal {
-	const struct wskbd_mapdata *t_keymap;
-
 	const struct wskbd_consops *t_consops;
 	void	*t_consaccesscookie;
 
@@ -143,6 +136,9 @@ struct wskbd_internal {
 	keysym_t t_symbols[MAXKEYSYMSPERKEY];
 
 	struct wskbd_softc *t_sc;	/* back pointer */
+
+	struct wskbd_mapdata t_keymap;	/* translation map table and
+					   current layout */
 };
 
 struct wskbd_softc {
@@ -170,7 +166,6 @@ struct wskbd_softc {
 
 	int	sc_maplen;		/* number of entries in sc_map */
 	struct wscons_keymap *sc_map;	/* current translation map */
-	kbd_t	sc_layout; /* current layout */
 
 	int	sc_refcnt;
 	u_char	sc_dying;		/* device is being detached */
@@ -302,7 +297,7 @@ static struct wskbd_internal wskbd_console_data;
 void	wskbd_update_layout(struct wskbd_internal *, kbd_t);
 
 #if NAUDIO > 0
-extern int wskbd_set_mixervolume(long dir, int out);
+extern int wskbd_set_mixervolume(long, long);
 #endif
 
 void
@@ -312,6 +307,8 @@ wskbd_update_layout(struct wskbd_internal *id, kbd_t enc)
 		id->t_flags |= WSKFL_METAESC;
 	else
 		id->t_flags &= ~WSKFL_METAESC;
+
+	id->t_keymap.layout = enc;
 }
 
 /*
@@ -359,7 +356,9 @@ wskbd_attach(struct device *parent, struct device *self, void *aux)
 {
 	struct wskbd_softc *sc = (struct wskbd_softc *)self;
 	struct wskbddev_attach_args *ap = aux;
+	kbd_t layout;
 #if NWSMUX > 0
+	struct wsmux_softc *wsmux_sc;
 	int mux, error;
 #endif
 
@@ -375,8 +374,11 @@ wskbd_attach(struct device *parent, struct device *self, void *aux)
 		/* printf(" (mux %d ignored for console)", mux); */
 		mux = -1;
 	}
-	if (mux >= 0)
+	if (mux >= 0) {
 		printf(" mux %d", mux);
+		wsmux_sc = wsmux_getmux(mux);
+	} else
+		wsmux_sc = NULL;
 #else
 #if 0	/* not worth keeping, especially since the default value is not -1... */
 	if (sc->sc_base.me_dv.dv_cfdata->wskbddevcf_mux >= 0)
@@ -389,8 +391,7 @@ wskbd_attach(struct device *parent, struct device *self, void *aux)
 	} else {
 		sc->id = malloc(sizeof(struct wskbd_internal),
 		    M_DEVBUF, M_WAITOK | M_ZERO);
-		sc->id->t_keymap = ap->keymap;
-		wskbd_update_layout(sc->id, ap->keymap->layout);
+		bcopy(ap->keymap, &sc->id->t_keymap, sizeof(sc->id->t_keymap));
 	}
 
 #if NWSDISPLAY > 0
@@ -405,11 +406,36 @@ wskbd_attach(struct device *parent, struct device *self, void *aux)
 	sc->sc_translating = 1;
 	sc->sc_ledstate = -1; /* force update */
 
-	if (wskbd_load_keymap(sc->id->t_keymap,
-	    &sc->sc_map, &sc->sc_maplen) != 0)
-		panic("cannot load keymap");
-
-	sc->sc_layout = sc->id->t_keymap->layout;
+	/*
+	 * If this layout is the default choice of the driver (i.e. the
+	 * driver doesn't know better), pick the existing layout of the
+	 * current mux, if any.
+	 */
+	layout = sc->id->t_keymap.layout;
+#if NWSMUX > 0
+	if (layout & KB_DEFAULT) {
+		if (wsmux_sc != NULL && wsmux_get_layout(wsmux_sc) != KB_NONE)
+			layout = wsmux_get_layout(wsmux_sc);
+	}
+#endif
+	for (;;) {
+		if (wskbd_load_keymap(&sc->id->t_keymap, layout, &sc->sc_map,
+		    &sc->sc_maplen) == 0)
+			break;
+#if NWSMUX > 0
+		if (layout == sc->id->t_keymap.layout)
+			panic("cannot load keymap");
+		if (wsmux_sc != NULL && wsmux_get_layout(wsmux_sc) != KB_NONE) {
+			printf("\n%s: cannot load keymap, "
+			    "falling back to default\n%s",
+			    sc->sc_base.me_dv.dv_xname,
+			    sc->sc_base.me_dv.dv_xname);
+			layout = wsmux_get_layout(wsmux_sc);
+		} else
+#endif
+			panic("cannot load keymap");
+	}
+	wskbd_update_layout(sc->id, layout);
 
 	/* set default bell and key repeat data */
 	sc->sc_bell_data = wskbd_default_bell_data;
@@ -432,11 +458,21 @@ wskbd_attach(struct device *parent, struct device *self, void *aux)
 	printf("\n");
 
 #if NWSMUX > 0
-	if (mux >= 0) {
-		error = wsmux_attach_sc(wsmux_getmux(mux), &sc->sc_base);
+	if (wsmux_sc != NULL) {
+		error = wsmux_attach_sc(wsmux_sc, &sc->sc_base);
 		if (error)
 			printf("%s: attach error=%d\n",
 			    sc->sc_base.me_dv.dv_xname, error);
+
+		/*
+		 * Try and set this encoding as the mux default if it
+		 * hasn't any yet, and if this is not a driver default
+		 * layout (i.e. parent driver pretends to know better).
+		 * Note that wsmux_set_layout() rejects layouts with
+		 * KB_DEFAULT set.
+		 */
+		if (wsmux_get_layout(wsmux_sc) == KB_NONE)
+			wsmux_set_layout(wsmux_sc, layout);
 	}
 #endif
 
@@ -456,7 +492,6 @@ wskbd_attach(struct device *parent, struct device *self, void *aux)
 		}
 	}
 #endif
-
 }
 
 void    
@@ -466,7 +501,7 @@ wskbd_cnattach(const struct wskbd_consops *consops, void *conscookie,
 
 	KASSERT(!wskbd_console_initted);
 
-	wskbd_console_data.t_keymap = mapdata;
+	bcopy(mapdata, &wskbd_console_data.t_keymap, sizeof(*mapdata));
 	wskbd_update_layout(&wskbd_console_data, mapdata->layout);
 
 	wskbd_console_data.t_consops = consops;
@@ -484,10 +519,11 @@ wskbd_cndetach(void)
 {
 	KASSERT(wskbd_console_initted);
 
-	wskbd_console_data.t_keymap = 0;
+	wskbd_console_data.t_keymap.keydesc = NULL;
+	wskbd_console_data.t_keymap.layout = KB_NONE;
 
-	wskbd_console_data.t_consops = 0;
-	wskbd_console_data.t_consaccesscookie = 0;
+	wskbd_console_data.t_consops = NULL;
+	wskbd_console_data.t_consaccesscookie = NULL;
 
 #if NWSDISPLAY > 0
 	wsdisplay_unset_cons_kbd();
@@ -515,6 +551,7 @@ wskbd_repeat(void *v)
 		/* deliver keys */
 		if (sc->sc_displaydv != NULL)
 			wsdisplay_kbdinput(sc->sc_displaydv,
+			    sc->id->t_keymap.layout,
 			    sc->id->t_symbols, sc->sc_repeating);
 	} else {
 		/* queue event */
@@ -618,14 +655,14 @@ wskbd_input(struct device *dev, u_int type, int value)
 	 * send upstream.
 	 */
 	if (sc->sc_translating) {
-#ifdef BURNER_SUPPORT
+#ifdef HAVE_BURNER_SUPPORT
 		if (type == WSCONS_EVENT_KEY_DOWN && sc->sc_displaydv != NULL)
 			wsdisplay_burn(sc->sc_displaydv, WSDISPLAY_BURN_KBD);
 #endif
 		num = wskbd_translate(sc->id, type, value);
 		if (num > 0) {
 			if (sc->sc_displaydv != NULL) {
-#ifdef SCROLLBACK_SUPPORT
+#ifdef HAVE_SCROLLBACK_SUPPORT
 				/* XXX - Shift_R+PGUP(release) emits PrtSc */
 				if (sc->id->t_symbols[0] != KS_Print_Screen) {
 					wsscrollback(sc->sc_displaydv,
@@ -633,6 +670,7 @@ wskbd_input(struct device *dev, u_int type, int value)
 				}
 #endif
 				wsdisplay_kbdinput(sc->sc_displaydv,
+				    sc->id->t_keymap.layout,
 				    sc->id->t_symbols, num);
 			}
 
@@ -958,7 +996,6 @@ wskbd_displayioctl(struct device *dev, u_long cmd, caddr_t data, int flag,
 	struct wskbd_bell_data *ubdp, *kbdp;
 	struct wskbd_keyrepeat_data *ukdp, *kkdp;
 	struct wskbd_map_data *umdp;
-	struct wskbd_mapdata md;
 	kbd_t enc;
 	void *buf;
 	int len, error;
@@ -1073,9 +1110,9 @@ getkeyrepeat:
 					  &sc->sc_map, &sc->sc_maplen);
 			memcpy(sc->sc_map, buf, len);
 			/* drop the variant bits handled by the map */
-			sc->sc_layout = KB_USER |
-			      (KB_VARIANT(sc->sc_layout) & KB_HANDLEDBYWSKBD);
-			wskbd_update_layout(sc->id, sc->sc_layout);
+			enc = KB_USER | (KB_VARIANT(sc->id->t_keymap.layout) &
+			    KB_HANDLEDBYWSKBD);
+			wskbd_update_layout(sc->id, enc);
 		}
 		free(buf, M_TEMP);
 		return(error);
@@ -1089,28 +1126,30 @@ getkeyrepeat:
 		return(error);
 
 	case WSKBDIO_GETENCODING:
-		*((kbd_t *) data) = sc->sc_layout;
+		*((kbd_t *)data) = sc->id->t_keymap.layout & ~KB_DEFAULT;
 		return(0);
 
 	case WSKBDIO_SETENCODING:
 		enc = *((kbd_t *)data);
 		if (KB_ENCODING(enc) == KB_USER) {
 			/* user map must already be loaded */
-			if (KB_ENCODING(sc->sc_layout) != KB_USER)
+			if (KB_ENCODING(sc->id->t_keymap.layout) != KB_USER)
 				return (EINVAL);
 			/* map variants make no sense */
 			if (KB_VARIANT(enc) & ~KB_HANDLEDBYWSKBD)
 				return (EINVAL);
 		} else {
-			md = *(sc->id->t_keymap); /* structure assignment */
-			md.layout = enc;
-			error = wskbd_load_keymap(&md, &sc->sc_map,
-						  &sc->sc_maplen);
+			error = wskbd_load_keymap(&sc->id->t_keymap, enc,
+			    &sc->sc_map, &sc->sc_maplen);
 			if (error)
-				return(error);
+				return (error);
 		}
-		sc->sc_layout = enc;
 		wskbd_update_layout(sc->id, enc);
+#if NWSMUX > 0
+		/* Update mux default layout */
+		if (sc->sc_base.me_parent != NULL)
+			wsmux_set_layout(sc->sc_base.me_parent, enc);
+#endif
 		return (0);
 	}
 
@@ -1388,7 +1427,7 @@ internal_command(struct wskbd_softc *sc, u_int *type, keysym_t ksym,
 	if (*type != WSCONS_EVENT_KEY_DOWN)
 		return (0);
 
-#ifdef SCROLLBACK_SUPPORT
+#ifdef HAVE_SCROLLBACK_SUPPORT
 #if NWSDISPLAY > 0
 	switch (ksym) {
 	case KS_Cmd_ScrollBack:
@@ -1531,7 +1570,7 @@ wskbd_translate(struct wskbd_internal *id, u_int type, int value)
 		kp = sc->sc_map + value;
 	} else {
 		kp = &kpbuf;
-		wskbd_get_mapentry(id->t_keymap, value, kp);
+		wskbd_get_mapentry(&id->t_keymap, value, kp);
 	}
 
 	/* if this key has a command, process it first */
@@ -1646,16 +1685,13 @@ wskbd_translate(struct wskbd_internal *id, u_int type, int value)
 		switch (ksym) {
 #if NAUDIO > 0
 		case KS_AudioMute:
-			workq_add_task(NULL, 0, (workq_fn)wskbd_set_mixervolume,
-			    (void *)(long)0, (void *)(int)1);
+			wskbd_set_mixervolume(0, 1);
 			return (0);
 		case KS_AudioLower:
-			workq_add_task(NULL, 0, (workq_fn)wskbd_set_mixervolume,
-			    (void *)(long)-1, (void*)(int)1);
+			wskbd_set_mixervolume(-1, 1);
 			return (0);
 		case KS_AudioRaise:
-			workq_add_task(NULL, 0, (workq_fn)wskbd_set_mixervolume,
-			    (void *)(long)1, (void*)(int)1);
+			wskbd_set_mixervolume(1, 1);
 			return (0);
 #endif
 		default:

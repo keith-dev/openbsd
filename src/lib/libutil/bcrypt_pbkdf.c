@@ -1,4 +1,4 @@
-/* $OpenBSD: bcrypt_pbkdf.c,v 1.4 2013/07/29 00:55:53 tedu Exp $ */
+/* $OpenBSD: bcrypt_pbkdf.c,v 1.6 2014/01/31 16:56:32 tedu Exp $ */
 /*
  * Copyright (c) 2013 Ted Unangst <tedu@openbsd.org>
  *
@@ -41,8 +41,8 @@
  *
  * One modification from official pbkdf2. Instead of outputting key material
  * linearly, we mix it. pbkdf2 has a known weakness where if one uses it to
- * generate (i.e.) 512 bits of key material for use as two 256 bit keys, an
- * attacker can merely run once through the outer loop below, but the user
+ * generate (e.g.) 512 bits of key material for use as two 256 bit keys, an
+ * attacker can merely run once through the outer loop, but the user
  * always runs it twice. Shuffling output bytes requires computing the
  * entirety of the key material to assemble any subkey. This is something a
  * wise caller could do; we just do it for you.
@@ -87,9 +87,9 @@ bcrypt_hash(uint8_t *sha2pass, uint8_t *sha2salt, uint8_t *out)
 	}
 
 	/* zap */
-	memset(ciphertext, 0, sizeof(ciphertext));
-	memset(cdata, 0, sizeof(cdata));
-	memset(&state, 0, sizeof(state));
+	explicit_bzero(ciphertext, sizeof(ciphertext));
+	explicit_bzero(cdata, sizeof(cdata));
+	explicit_bzero(&state, sizeof(state));
 }
 
 int
@@ -155,8 +155,8 @@ bcrypt_pbkdf(const char *pass, size_t passlen, const uint8_t *salt, size_t saltl
 	}
 
 	/* zap */
-	memset(&ctx, 0, sizeof(ctx));
-	memset(out, 0, sizeof(out));
+	explicit_bzero(&ctx, sizeof(ctx));
+	explicit_bzero(out, sizeof(out));
 
 	return 0;
 }

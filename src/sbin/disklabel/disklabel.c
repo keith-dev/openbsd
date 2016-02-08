@@ -1,4 +1,4 @@
-/*	$OpenBSD: disklabel.c,v 1.187 2013/06/18 18:24:15 krw Exp $	*/
+/*	$OpenBSD: disklabel.c,v 1.192 2014/02/14 15:03:43 krw Exp $	*/
 
 /*
  * Copyright (c) 1987, 1993
@@ -182,7 +182,7 @@ main(int argc, char *argv[])
 				fprintf(stderr, "Valid units are bckmgt\n");
 				exit(1);
 			}
-			print_unit = tolower(optarg[0]);
+			print_unit = tolower((unsigned char)optarg[0]);
 			break;
 		case 'n':
 			donothing++;
@@ -261,7 +261,7 @@ main(int argc, char *argv[])
 		fclose(t);
 		break;
 	case WRITE:
-		if (dflag | aflag) {
+		if (dflag || aflag) {
 			readlabel(f);
 		} else if (argc < 2 || argc > 3)
 			usage();
@@ -521,7 +521,7 @@ makebootarea(char *boot, struct disklabel *dp)
 			p = dkname;
 		else
 			p++;
-		while (*p && !isdigit(*p))
+		while (*p && !isdigit((unsigned char)*p))
 			*np++ = *p++;
 		*np++ = '\0';
 
@@ -716,7 +716,7 @@ char
 canonical_unit(struct disklabel *lp, char unit)
 {
 	struct partition *pp;
-	daddr_t small;
+	u_int64_t small;
 	int i;
 
 	if (unit == '*') {
@@ -734,7 +734,7 @@ canonical_unit(struct disklabel *lp, char unit)
 		else
 			unit = 'T';
 	}
-	unit = toupper(unit);
+	unit = toupper((unsigned char)unit);
 
 	return (unit);
 }
@@ -960,7 +960,7 @@ getnum(char *nptr, u_int64_t min, u_int64_t max, const char **errstr)
 	char *p, c;
 	u_int64_t ret;
 
-	for (p = nptr; *p != '\0' && !isspace(*p); p++)
+	for (p = nptr; *p != '\0' && !isspace((unsigned char)*p); p++)
 		;
 	c = *p;
 	*p = '\0';
@@ -1149,16 +1149,6 @@ getasciilabel(FILE *f, struct disklabel *lp)
 				lp->d_ncylinders = v;
 			continue;
 		}
-		if (!strcmp(cp, "total sectors")) {
-			lv = GETNUM(lv, tp, 1, &errstr);
-			if (errstr) {
-				warnx("line %d: bad %s: %s", lineno, cp, tp);
-				errors++;
-			} else {
-				DL_SETDSIZE(lp, lv);
-			}
-			continue;
-		}
 
 		/* Ignore fields that are no longer in the disklabel. */
 		if (!strcmp(cp, "rpm") ||
@@ -1224,7 +1214,7 @@ getasciilabel(FILE *f, struct disklabel *lp)
 					pp->p_fstype = cpp - fstypenames;
 					goto gottype;
 				}
-			if (isdigit(*cp))
+			if (isdigit((unsigned char)*cp))
 				v = GETNUM(pp->p_fstype, cp, 0, &errstr);
 			else
 				v = FSMAXTYPES;
@@ -1320,7 +1310,7 @@ checklabel(struct disklabel *lp)
 		part = 'a' + i;
 		pp = &lp->d_partitions[i];
 		if (DL_GETPSIZE(pp) == 0 && DL_GETPOFFSET(pp) != 0)
-			warnx("warning, partition %c: size 0, but offset %lld",
+			warnx("warning, partition %c: size 0, but offset %llu",
 			    part, DL_GETPOFFSET(pp));
 #ifdef SUN_CYLCHECK
 		if (lp->d_flags & D_VENDOR) {
@@ -1360,8 +1350,8 @@ checklabel(struct disklabel *lp)
 		part = 'a' + i;
 		pp = &lp->d_partitions[i];
 		if (DL_GETPSIZE(pp) || DL_GETPOFFSET(pp))
-			warnx("warning, unused partition %c: size %lld "
-			    "offset %lld", part, DL_GETPSIZE(pp),
+			warnx("warning, unused partition %c: size %llu "
+			    "offset %llu", part, DL_GETPSIZE(pp),
 			    DL_GETPOFFSET(pp));
 	}
 	return (errors > 0);
@@ -1379,13 +1369,13 @@ setbootflag(struct disklabel *lp)
 {
 	struct partition *pp;
 	int i, errors = 0;
-	daddr_t bend;
+	u_int64_t bend;
 	char part;
 
 	if (bootbuf == NULL)
 		return;
 
-	bend = bootsize / lp->d_secsize;
+	bend = (u_int64_t)bootsize / lp->d_secsize;
 	for (i = 0; i < lp->d_npartitions; i++) {
 		if (i == RAW_PART)
 			/* It will *ALWAYS* overlap 'c'. */

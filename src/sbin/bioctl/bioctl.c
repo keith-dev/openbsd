@@ -1,4 +1,4 @@
-/* $OpenBSD: bioctl.c,v 1.112 2012/09/10 11:28:47 jsing Exp $       */
+/* $OpenBSD: bioctl.c,v 1.119 2014/01/18 09:11:12 jsing Exp $       */
 
 /*
  * Copyright (c) 2004, 2005 Marco Peereboom
@@ -27,25 +27,32 @@
  *
  */
 
+#include <sys/param.h>
 #include <sys/ioctl.h>
 #include <sys/dkio.h>
-#include <sys/param.h>
-#include <sys/types.h>
 #include <sys/stat.h>
-#include <dev/biovar.h>
 #include <dev/softraidvar.h>
+#include <dev/biovar.h>
 
 #include <errno.h>
 #include <err.h>
 #include <fcntl.h>
 #include <util.h>
+#include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-#include <ctype.h>
 #include <vis.h>
 #include <readpassphrase.h>
+
+#ifdef AOE
+#include <net/if.h>
+#include <netinet/in.h>
+#include <netinet/if_ether.h>
+
+struct sr_aoe_config 	*create_aoe(u_int16_t, char *);
+#endif /* AOE */
 
 struct locator {
 	int		channel;
@@ -69,7 +76,6 @@ int			bio_getvolbyname(char *);
 void			bio_setstate(char *, int, char *);
 void			bio_setblink(char *, char *, int);
 void			bio_blink(char *, int, int);
-struct sr_aoe_config 	*create_aoe(u_int16_t, char *);
 void			bio_createraid(u_int16_t, char *, char *);
 void			bio_deleteraid(char *);
 void			bio_changepass(char *);
@@ -124,7 +130,7 @@ main(int argc, char *argv[])
 			break;
 		case 'c': /* create */
 			func |= BIOC_CREATERAID;
-			if (isdigit(*optarg)) {
+			if (isdigit((unsigned char)*optarg)) {
 				cr_level = strtonum(optarg, 0, 10, &errstr);
 				if (errstr != NULL)
 					errx(1, "Invalid RAID level");
@@ -334,7 +340,8 @@ bio_status(struct bio_status *bs)
 void
 bio_inq(char *name)
 {
-	char 			*status, size[64], scsiname[16], volname[32];
+	char 			*status, *cache;
+	char			size[64], scsiname[16], volname[32];
 	char			percent[10], seconds[20];
 	int			i, d, volheader, hotspare, unused;
 	char			encname[16], serial[32];
@@ -409,6 +416,17 @@ bio_inq(char *name)
 		default:
 			status = BIOC_SVINVALID_S;
 		}
+		switch (bv.bv_cache) {
+		case BIOC_CVWRITEBACK:
+			cache = BIOC_CVWRITEBACK_S;
+			break;
+		case BIOC_CVWRITETHROUGH:
+			cache = BIOC_CVWRITETHROUGH_S;
+			break;
+		case BIOC_CVUNKNOWN:
+		default:
+			cache = BIOC_CVUNKNOWN_S;
+		}
 
 		snprintf(volname, sizeof volname, "%s %u",
 		    bi.bi_dev, bv.bv_volid);
@@ -437,9 +455,9 @@ bio_inq(char *name)
 				    percent, seconds);
 				break;
 			default:
-				printf("%11s %-10s %14s %-7s RAID%u%s%s\n",
+				printf("%11s %-10s %14s %-7s RAID%u%s%s %s\n",
 				    volname, status, size, bv.bv_dev,
-				    bv.bv_level, percent, seconds);
+				    bv.bv_level, percent, seconds, cache);
 				break;
 			}
 			
@@ -512,7 +530,7 @@ bio_inq(char *name)
 			    volname, status, size, scsiname, encname,
 			    bd.bd_vendor);
 			if (verbose)
-				printf("%7s %-10s %14s %-7s %-6s '%s'\n",
+				printf("%11s %-10s %14s %-7s %-6s '%s'\n",
 				    "", "", "", "", "", serial);
 		}
 	}
@@ -747,6 +765,7 @@ bio_blink(char *enclosure, int target, int blinktype)
 	close(bioh);
 }
 
+#ifdef AOE
 struct sr_aoe_config *
 create_aoe(u_int16_t level, char *dev_list)
 {
@@ -790,6 +809,7 @@ create_aoe(u_int16_t level, char *dev_list)
 invalid:
 	errx(1, "invalid AOE dev list: use nic,dsteaddr,shelf,slot");
 }
+#endif /* AOE */
 
 void
 bio_createraid(u_int16_t level, char *dev_list, char *key_disk)
@@ -797,7 +817,9 @@ bio_createraid(u_int16_t level, char *dev_list, char *key_disk)
 	struct bioc_createraid	create;
 	struct sr_crypto_kdfinfo kdfinfo;
 	struct sr_crypto_kdf_pbkdf2 kdfhint;
+#ifdef AOE
 	struct sr_aoe_config	*sac;
+#endif /* AOE */
 	struct stat		sb;
 	int			rv, no_dev, fd;
 	dev_t			*dt;
@@ -806,11 +828,14 @@ bio_createraid(u_int16_t level, char *dev_list, char *key_disk)
 	if (!dev_list)
 		errx(1, "no devices specified");
 
+#ifdef AOE
 	if (level == 'a') {
 		sac = create_aoe(level, dev_list);
 		no_dev = 0;
 		dt = NULL;
-	} else  {
+	} else
+#endif /* AOE */
+	{
 		dt = (dev_t *)malloc(BIOC_CRMAXLEN);
 		if (!dt)
 			err(1, "not enough memory for dev_t list");
@@ -826,18 +851,21 @@ bio_createraid(u_int16_t level, char *dev_list, char *key_disk)
 	case 1:
 		min_disks = 2;
 		break;
-	case 4:
+#ifdef RAID5
 	case 5:
 		min_disks = 3;
 		break;
+#endif /* RAID5 */
 	case 'C':
 		min_disks = 1;
 		break;
 	case 'c':
 		min_disks = 2;
 		break;
+#ifdef AOE
 	case 'a':
 		break;
+#endif /* AOE */
 	default:
 		errx(1, "unsupported raid level");
 	}
@@ -857,11 +885,14 @@ bio_createraid(u_int16_t level, char *dev_list, char *key_disk)
 	create.bc_flags = BIOC_SCDEVT | cflags;
 	create.bc_key_disk = NODEV;
 
+#ifdef AOE
 	if (level == 'a') {
 		create.bc_opaque = sac;
 		create.bc_opaque_size = sizeof(*sac);
 		create.bc_opaque_flags = BIOC_SOIN;
-	} else if (level == 'C' && key_disk == NULL) {
+	} else
+#endif /* AOE */
+	if (level == 'C' && key_disk == NULL) {
 
 		memset(&kdfinfo, 0, sizeof(kdfinfo));
 		memset(&kdfhint, 0, sizeof(kdfhint));

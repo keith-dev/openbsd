@@ -1,4 +1,4 @@
-/*	$OpenBSD: sd.c,v 1.246 2013/06/11 16:42:17 deraadt Exp $	*/
+/*	$OpenBSD: sd.c,v 1.253 2014/02/19 10:15:35 mpi Exp $	*/
 /*	$NetBSD: sd.c,v 1.111 1997/04/02 02:29:41 mycroft Exp $	*/
 
 /*-
@@ -47,6 +47,7 @@
  * Ported to run under 386BSD by Julian Elischer (julian@dialix.oz.au) Sept 1992
  */
 
+#include <sys/stdint.h>
 #include <sys/types.h>
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -104,10 +105,10 @@ void	viscpy(u_char *, u_char *, int);
 int	sd_ioctl_inquiry(struct sd_softc *, struct dk_inquiry *);
 int	sd_ioctl_cache(struct sd_softc *, long, struct dk_cache *);
 
-void	sd_cmd_rw6(struct scsi_xfer *, int, daddr_t, u_int);
-void	sd_cmd_rw10(struct scsi_xfer *, int, daddr_t, u_int);
-void	sd_cmd_rw12(struct scsi_xfer *, int, daddr_t, u_int);
-void	sd_cmd_rw16(struct scsi_xfer *, int, daddr_t, u_int);
+void	sd_cmd_rw6(struct scsi_xfer *, int, u_int64_t, u_int);
+void	sd_cmd_rw10(struct scsi_xfer *, int, u_int64_t, u_int);
+void	sd_cmd_rw12(struct scsi_xfer *, int, u_int64_t, u_int);
+void	sd_cmd_rw16(struct scsi_xfer *, int, u_int64_t, u_int);
 
 void	sd_buf_done(struct scsi_xfer *);
 
@@ -224,13 +225,16 @@ sdattach(struct device *parent, struct device *self, void *aux)
 
 	switch (result) {
 	case SDGP_RESULT_OK:
-		printf("%s: %lldMB, %lu bytes/sector, %lld sectors",
+		printf("%s: %lluMB, %lu bytes/sector, %llu sectors",
 		    sc->sc_dev.dv_xname,
 		    dp->disksize / (1048576 / dp->secsize), dp->secsize,
 		    dp->disksize);
 		if (ISSET(sc->flags, SDF_THIN)) {
 			sortby = BUFQ_FIFO;
 			printf(", thin");
+		}
+		if (ISSET(sc_link->flags, SDEV_READONLY)) {
+			printf(", readonly");
 		}
 		printf("\n");
 		break;
@@ -530,8 +534,8 @@ sdstrategy(struct buf *bp)
 		goto bad;
 	}
 
-	SC_DEBUG(sc->sc_link, SDEV_DB2, ("sdstrategy: %ld bytes @ blk %d\n",
-	    bp->b_bcount, bp->b_blkno));
+	SC_DEBUG(sc->sc_link, SDEV_DB2, ("sdstrategy: %ld bytes @ blk %lld\n",
+	    bp->b_bcount, (long long)bp->b_blkno));
 	/*
 	 * If the device has been made invalid, error out
 	 */
@@ -571,7 +575,7 @@ sdstrategy(struct buf *bp)
 }
 
 void
-sd_cmd_rw6(struct scsi_xfer *xs, int read, daddr_t secno, u_int nsecs)
+sd_cmd_rw6(struct scsi_xfer *xs, int read, u_int64_t secno, u_int nsecs)
 {
 	struct scsi_rw *cmd = (struct scsi_rw *)xs->cmd;
 
@@ -583,7 +587,7 @@ sd_cmd_rw6(struct scsi_xfer *xs, int read, daddr_t secno, u_int nsecs)
 }
 
 void
-sd_cmd_rw10(struct scsi_xfer *xs, int read, daddr_t secno, u_int nsecs)
+sd_cmd_rw10(struct scsi_xfer *xs, int read, u_int64_t secno, u_int nsecs)
 {
 	struct scsi_rw_big *cmd = (struct scsi_rw_big *)xs->cmd;
 
@@ -595,7 +599,7 @@ sd_cmd_rw10(struct scsi_xfer *xs, int read, daddr_t secno, u_int nsecs)
 }
 
 void
-sd_cmd_rw12(struct scsi_xfer *xs, int read, daddr_t secno, u_int nsecs)
+sd_cmd_rw12(struct scsi_xfer *xs, int read, u_int64_t secno, u_int nsecs)
 {
 	struct scsi_rw_12 *cmd = (struct scsi_rw_12 *)xs->cmd;
 
@@ -607,7 +611,7 @@ sd_cmd_rw12(struct scsi_xfer *xs, int read, daddr_t secno, u_int nsecs)
 }
 
 void
-sd_cmd_rw16(struct scsi_xfer *xs, int read, daddr_t secno, u_int nsecs)
+sd_cmd_rw16(struct scsi_xfer *xs, int read, u_int64_t secno, u_int nsecs)
 {
 	struct scsi_rw_16 *cmd = (struct scsi_rw_16 *)xs->cmd;
 
@@ -637,7 +641,7 @@ sdstart(struct scsi_xfer *xs)
 	struct scsi_link *link = xs->sc_link;
 	struct sd_softc *sc = link->device_softc;
 	struct buf *bp;
-	daddr_t secno;
+	u_int64_t secno;
 	int nsecs;
 	int read;
 	struct partition *p;
@@ -658,7 +662,8 @@ sdstart(struct scsi_xfer *xs)
 		return;
 	}
 
-	secno = bp->b_blkno / (sc->sc_dk.dk_label->d_secsize / DEV_BSIZE);
+	secno = DL_BLKTOSEC(sc->sc_dk.dk_label, bp->b_blkno);
+
 	p = &sc->sc_dk.dk_label->d_partitions[DISKPART(bp->b_dev)];
 	secno += DL_GETPOFFSET(p);
 	nsecs = howmany(bp->b_bcount, sc->sc_dk.dk_label->d_secsize);
@@ -1195,9 +1200,10 @@ sd_interpret_sense(struct scsi_xfer *xs)
 daddr_t
 sdsize(dev_t dev)
 {
+	struct disklabel *lp;
 	struct sd_softc *sc;
 	int part, omask;
-	int64_t size;
+	daddr_t size;
 
 	sc = sdlookup(DISKUNIT(dev));
 	if (sc == NULL)
@@ -1214,13 +1220,14 @@ sdsize(dev_t dev)
 		size = -1;
 		goto exit;
 	}
+
+	lp = sc->sc_dk.dk_label;
 	if ((sc->sc_link->flags & SDEV_MEDIA_LOADED) == 0)
 		size = -1;
-	else if (sc->sc_dk.dk_label->d_partitions[part].p_fstype != FS_SWAP)
+	else if (lp->d_partitions[part].p_fstype != FS_SWAP)
 		size = -1;
 	else
-		size = DL_GETPSIZE(&sc->sc_dk.dk_label->d_partitions[part]) *
-			(sc->sc_dk.dk_label->d_secsize / DEV_BSIZE);
+		size = DL_SECTOBLK(lp, DL_GETPSIZE(&lp->d_partitions[part]));
 	if (omask == 0 && sdclose(dev, 0, S_IFBLK, NULL) != 0)
 		size = -1;
 
@@ -1242,17 +1249,19 @@ sddump(dev_t dev, daddr_t blkno, caddr_t va, size_t size)
 	struct sd_softc *sc;	/* disk unit to do the I/O */
 	struct disklabel *lp;	/* disk's disklabel */
 	int	unit, part;
-	int	sectorsize;	/* size of a disk sector */
-	daddr_t	nsects;		/* number of sectors in partition */
-	daddr_t	sectoff;	/* sector offset of partition */
-	int	totwrt;		/* total number of sectors left to write */
-	int	nwrt;		/* current number of sectors to write */
+	u_int32_t sectorsize;	/* size of a disk sector */
+	u_int64_t nsects;	/* number of sectors in partition */
+	u_int64_t sectoff;	/* sector offset of partition */
+	u_int64_t totwrt;	/* total number of sectors left to write */
+	u_int32_t nwrt;		/* current number of sectors to write */
 	struct scsi_xfer *xs;	/* ... convenience */
 	int rv;
 
 	/* Check if recursive dump; if so, punt. */
 	if (sddoingadump)
 		return EFAULT;
+	if (blkno < 0)
+		return EINVAL;
 
 	/* Mark as active early. */
 	sddoingadump = 1;
@@ -1280,21 +1289,26 @@ sddump(dev_t dev, daddr_t blkno, caddr_t va, size_t size)
 	sectorsize = lp->d_secsize;
 	if ((size % sectorsize) != 0)
 		return EFAULT;
+	if ((blkno % DL_BLKSPERSEC(lp)) != 0)
+		return EFAULT;
 	totwrt = size / sectorsize;
-	blkno = dbtob(blkno) / sectorsize;	/* blkno in DEV_BSIZE units */
+	blkno = DL_BLKTOSEC(lp, blkno);
 
 	nsects = DL_GETPSIZE(&lp->d_partitions[part]);
 	sectoff = DL_GETPOFFSET(&lp->d_partitions[part]);
 
 	/* Check transfer bounds against partition size. */
-	if ((blkno < 0) || ((blkno + totwrt) > nsects))
+	if ((blkno + totwrt) > nsects)
 		return EINVAL;
 
 	/* Offset block number to start of partition. */
 	blkno += sectoff;
 
 	while (totwrt > 0) {
-		nwrt = totwrt;		/* XXX */
+		if (totwrt > UINT32_MAX)
+			nwrt = UINT32_MAX;
+		else
+			nwrt = totwrt;
 
 #ifndef	SD_DUMP_NOT_TRUSTED
 		xs = scsi_xs_get(sc->sc_link, SCSI_NOSLEEP);
@@ -1314,7 +1328,8 @@ sddump(dev_t dev, daddr_t blkno, caddr_t va, size_t size)
 			return (ENXIO);
 #else	/* SD_DUMP_NOT_TRUSTED */
 		/* Let's just talk about this first... */
-		printf("sd%d: dump addr 0x%x, blk %d\n", unit, va, blkno);
+		printf("sd%d: dump addr 0x%x, blk %lld\n", unit, va,
+		    (long long)blkno);
 		delay(500 * 1000);	/* half a second */
 #endif	/* SD_DUMP_NOT_TRUSTED */
 
@@ -1424,6 +1439,11 @@ sd_read_cap_16(struct sd_softc *sc, int flags)
 	scsi_xs_put(xs);
 
 	if (rv == 0) {
+		if (_8btol(rdcap->addr) == 0) {
+			rv = EIO;
+			goto done;
+		}
+
 		sc->params.disksize = _8btol(rdcap->addr) + 1;
 		sc->params.secsize = _4btol(rdcap->length);
 		if (ISSET(_2btol(rdcap->lowest_aligned), READ_CAP_16_TPE))

@@ -1,4 +1,4 @@
-/*	$OpenBSD: tmpfs_vnops.c,v 1.6 2013/06/05 14:20:19 espie Exp $	*/
+/*	$OpenBSD: tmpfs_vnops.c,v 1.15 2014/02/28 15:59:38 espie Exp $	*/
 /*	$NetBSD: tmpfs_vnops.c,v 1.100 2012/11/05 17:27:39 dholland Exp $	*/
 
 /*
@@ -53,12 +53,15 @@ __KERNEL_RCSID(0, "$NetBSD: tmpfs_vnops.c,v 1.100 2012/11/05 17:27:39 dholland E
 #include <sys/vnode.h>
 #include <sys/lockf.h>
 #include <sys/poll.h>
+#include <sys/file.h>
 
 #include <uvm/uvm.h>
 
 #include <miscfs/fifofs/fifo.h>
 #include <tmpfs/tmpfs_vnops.h>
 #include <tmpfs/tmpfs.h>
+
+int tmpfs_kqfilter(void *v);
 
 /*
  * vnode operations vector used for files stored in a tmpfs file system.
@@ -76,7 +79,7 @@ struct vops tmpfs_vops = {
 	.vop_write	= tmpfs_write,
 	.vop_ioctl	= tmpfs_ioctl,
 	.vop_poll	= tmpfs_poll,
-	.vop_kqfilter	= vop_generic_kqfilter,
+	.vop_kqfilter	= tmpfs_kqfilter,
 	.vop_revoke	= vop_generic_revoke,
 	.vop_fsync	= tmpfs_fsync,
 	.vop_remove	= tmpfs_remove,
@@ -166,9 +169,15 @@ tmpfs_lookup(void *v)
 		/*
 		 * Lookup of ".." case.
 		 */
-		if (lastcn && cnp->cn_nameiop == RENAME) {
-			error = EINVAL;
-			goto out;
+		if (lastcn) {
+			if (cnp->cn_nameiop == RENAME) {
+				error = EINVAL;
+				goto out;
+			}
+			if (cnp->cn_nameiop == DELETE) {
+				/* Keep the name for tmpfs_rmdir(). */
+				cnp->cn_flags |= SAVENAME;
+			}
 		}
 		KASSERT(dnode->tn_type == VDIR);
 		pnode = dnode->tn_spec.tn_dir.tn_parent;
@@ -210,7 +219,7 @@ tmpfs_lookup(void *v)
 	 * Other lookup cases: perform directory scan.
 	 */
 	de = tmpfs_dir_lookup(dnode, cnp);
-	if (de == NULL || de->td_node == TMPFS_NODE_WHITEOUT) {
+	if (de == NULL) {
 		/*
 		 * The entry was not found in the directory.  This is valid
 		 * if we are creating or renaming an entry and are working
@@ -230,10 +239,6 @@ tmpfs_lookup(void *v)
 			error = EJUSTRETURN;
 		} else {
 			error = ENOENT;
-		}
-		if (de) {
-			KASSERT(de->td_node == TMPFS_NODE_WHITEOUT);
-			/* cnp->cn_flags |= ISWHITEOUT; */
 		}
 		goto done;
 	}
@@ -353,15 +358,7 @@ tmpfs_mknod(void *v)
 	if (error)
 		return error;
 
-	/*
-	 * As in ufs_mknod(), remove inode so that it will be reloaded by
-	 * VFS_VGET and checked to see if it is an alias of an existing entry
-	 * in the vnode cache.
-	 */
 	vput(*vpp);
-	(*vpp)->v_type = VNON;
-	vgone(*vpp);
-	*vpp = NULL;
 
 	return 0;
 }
@@ -599,6 +596,7 @@ tmpfs_write(void *v)
 	const int ioflag = ap->a_ioflag;
 	tmpfs_node_t *node;
 	off_t oldsize;
+	ssize_t overrun;
 	int extended;
 	int error;
 
@@ -607,17 +605,23 @@ tmpfs_write(void *v)
 	node = VP_TO_TMPFS_NODE(vp);
 	oldsize = node->tn_size;
 
-	if (uio->uio_offset < 0 || vp->v_type != VREG) {
-		error = EINVAL;
-		goto out;
-	}
-	if (uio->uio_resid == 0) {
-		error = 0;
-		goto out;
-	}
+	if (vp->v_type != VREG)
+		return (EINVAL);
+
+	if (uio->uio_resid == 0)
+		return (0);
+
 	if (ioflag & IO_APPEND) {
 		uio->uio_offset = node->tn_size;
 	}
+
+	if (uio->uio_offset < 0 ||
+	    (u_int64_t)uio->uio_offset + uio->uio_resid > LLONG_MAX)
+		return (EFBIG);
+
+	/* do the filesize rlimit check */
+	if ((error = vn_fsizechk(vp, uio, ioflag, &overrun)))
+		return (error);
 
 	extended = uio->uio_offset + uio->uio_resid > node->tn_size;
 	if (extended) {
@@ -651,6 +655,10 @@ out:
 		KASSERT(oldsize == node->tn_size);
 	} else {
 		KASSERT(uio->uio_resid == 0);
+
+		/* correct the result for writes clamped by vn_fsizechk() */
+		uio->uio_resid += overrun;
+
 	}
 	return error;
 }
@@ -689,7 +697,7 @@ tmpfs_remove(void *v)
 	} */ *ap = v;
 	struct vnode *dvp = ap->a_dvp, *vp = ap->a_vp;
 	struct componentname *cnp = ap->a_cnp;
-	tmpfs_node_t *node;
+	tmpfs_node_t *dnode, *node;
 	tmpfs_dirent_t *de;
 	int error;
 
@@ -701,6 +709,8 @@ tmpfs_remove(void *v)
 		error = EPERM;
 		goto out;
 	}
+
+	dnode = VP_TO_TMPFS_NODE(dvp);
 	node = VP_TO_TMPFS_NODE(vp);
 
 	/* Files marked as immutable or append-only cannot be deleted. */
@@ -709,10 +719,18 @@ tmpfs_remove(void *v)
 		goto out;
 	}
 
+	/*
+	 * Likewise, files residing on directories marked as append-only cannot
+	 * be deleted.
+	 */
+	if (dnode->tn_flags & APPEND) {
+		error = EPERM;
+		goto out;
+	}
+
 	/* Lookup the directory entry (check the cached hint first). */
 	de = tmpfs_dir_cached(node);
 	if (de == NULL) {
-		tmpfs_node_t *dnode = VP_TO_TMPFS_DIR(dvp);
 		de = tmpfs_dir_lookup(dnode, cnp);
 	}
 
@@ -720,15 +738,16 @@ tmpfs_remove(void *v)
 
 	/*
 	 * Remove the entry from the directory (drops the link count) and
-	 * destroy it or replace it with a whiteout.
+	 * destroy it.
 	 * Note: the inode referred by it will not be destroyed
 	 * until the vnode is reclaimed/recycled.
 	 */
-	tmpfs_dir_detach(dvp, de);
-	if (0 /* ap->a_cnp->cn_flags & DOWHITEOUT */)
-		tmpfs_dir_attach(dvp, de, TMPFS_NODE_WHITEOUT);
-	else
-		tmpfs_free_dirent(VFS_TO_TMPFS(vp->v_mount), de);
+	tmpfs_dir_detach(dnode, de);
+	tmpfs_free_dirent(VFS_TO_TMPFS(vp->v_mount), de);
+	if (node->tn_links > 0)  {
+		/* We removed a hard link. */
+		tmpfs_update(node, TMPFS_NODE_CHANGED);
+	}
 	error = 0;
 out:
 	pool_put(&namei_pool, cnp->cn_pnbuf);
@@ -760,7 +779,6 @@ tmpfs_link(void *v)
 	tmpfs_dirent_t *de;
 	int error;
 
-	KASSERT(dvp != vp);
 	KASSERT(VOP_ISLOCKED(dvp));
 
 	if (vp->v_type == VDIR) {
@@ -768,6 +786,8 @@ tmpfs_link(void *v)
 		vput(dvp);
 		return EPERM;
 	}
+
+	KASSERT(dvp != vp);
 
 	if (dvp->v_mount != vp->v_mount) {
 		VOP_ABORTOP(dvp, cnp);
@@ -793,6 +813,11 @@ tmpfs_link(void *v)
 		goto out;
 	}
 
+	if (TMPFS_DIRSEQ_FULL(dnode)) {
+		error = ENOSPC;
+		goto out;
+	}
+
 	/* Allocate a new directory entry to represent the inode. */
 	error = tmpfs_alloc_dirent(VFS_TO_TMPFS(vp->v_mount),
 	    cnp->cn_nameptr, cnp->cn_namelen, &de);
@@ -800,11 +825,11 @@ tmpfs_link(void *v)
 		goto out;
 	}
 
-	/* 
+	/*
 	 * Insert the entry into the directory.
 	 * It will increase the inode link count.
 	 */
-	tmpfs_dir_attach(dvp, de, node);
+	tmpfs_dir_attach(dnode, de, node);
 
 	/* Update the timestamps and trigger the event. */
 	if (node->tn_vnode) {
@@ -856,20 +881,25 @@ tmpfs_rmdir(void *v)
 
 	KASSERT(VOP_ISLOCKED(dvp));
 	KASSERT(VOP_ISLOCKED(vp));
-	KASSERT(node->tn_spec.tn_dir.tn_parent == dnode);
 	KASSERT(cnp->cn_flags & HASBUF);
 
+	if (cnp->cn_namelen == 2 && cnp->cn_nameptr[0] == '.' &&
+	    cnp->cn_nameptr[1] == '.') {
+		error = ENOTEMPTY;
+		goto out;
+	}
+
+	KASSERT(node->tn_spec.tn_dir.tn_parent == dnode);
+
 	/*
-	 * Directories with more than two non-whiteout
-	 * entries ('.' and '..') cannot be removed.
+	 * Directories with more than two entries ('.' and '..') cannot be 
+	 * removed.
 	 */
 	if (node->tn_size > 0) {
 		KASSERT(error == 0);
 		TAILQ_FOREACH(de, &node->tn_spec.tn_dir.tn_dir, td_entries) {
-			if (de->td_node != TMPFS_NODE_WHITEOUT) {
-				error = ENOTEMPTY;
-				break;
-			}
+			error = ENOTEMPTY;
+			break;
 		}
 		if (error)
 			goto out;
@@ -893,27 +923,18 @@ tmpfs_rmdir(void *v)
 	tmpfs_update(node, TMPFS_NODE_STATUSALL);
 
 	/* Detach the directory entry from the directory. */
-	tmpfs_dir_detach(dvp, de);
+	tmpfs_dir_detach(dnode, de);
 
 	/* Purge the cache for parent. */
 	cache_purge(dvp);
 
 	/*
-	 * Destroy the directory entry or replace it with a whiteout.
+	 * Destroy the directory entry.
 	 * Note: the inode referred by it will not be destroyed
 	 * until the vnode is reclaimed.
 	 */
-	if (0 /* ap->a_cnp->cn_flags & DOWHITEOUT */)
-		tmpfs_dir_attach(dvp, de, TMPFS_NODE_WHITEOUT);
-	else
-		tmpfs_free_dirent(tmp, de);
-
-	/* Destroy the whiteout entries from the node. */
-	while ((de = TAILQ_FIRST(&node->tn_spec.tn_dir.tn_dir)) != NULL) {
-		KASSERT(de->td_node == TMPFS_NODE_WHITEOUT);
-		tmpfs_dir_detach(vp, de);
-		tmpfs_free_dirent(tmp, de);
-	}
+	tmpfs_free_dirent(tmp, de);
+	KASSERT(TAILQ_FIRST(&node->tn_spec.tn_dir.tn_dir) == NULL);
 
 	KASSERT(node->tn_links == 0);
 out:
@@ -948,7 +969,7 @@ tmpfs_symlink(void *v)
 	if (error == 0)
 		vput(*vpp);
 
-	return 0;
+	return error;
 }
 
 int
@@ -959,15 +980,10 @@ tmpfs_readdir(void *v)
 		struct uio	*a_uio;
 		kauth_cred_t	a_cred;
 		int		*a_eofflag;
-		off_t		**a_cookies;
-		int		*ncookies;
 	} */ *ap = v;
 	struct vnode *vp = ap->a_vp;
 	struct uio *uio = ap->a_uio;
 	int *eofflag = ap->a_eofflag;
-	u_long **cookies = ap->a_cookies;
-	int *ncookies = ap->a_ncookies;
-	off_t startoff, cnt;
 	tmpfs_node_t *node;
 	int error;
 
@@ -978,74 +994,18 @@ tmpfs_readdir(void *v)
 		return ENOTDIR;
 	}
 	node = VP_TO_TMPFS_DIR(vp);
-	startoff = uio->uio_offset;
-	cnt = 0;
-	if (node->tn_links == 0) {
+	/*
+	 * Retrieve the directory entries, unless it is being destroyed.
+	 */
+	if (node->tn_links) {
+		error = tmpfs_dir_getdents(node, uio);
+	} else {
 		error = 0;
-		goto out;
 	}
 
-	if (uio->uio_offset == TMPFS_DIRCOOKIE_DOT) {
-		error = tmpfs_dir_getdotdent(node, uio);
-		if (error != 0) {
-			if (error == -1)
-				error = 0;
-			goto out;
-		}
-		cnt++;
-	}
-	if (uio->uio_offset == TMPFS_DIRCOOKIE_DOTDOT) {
-		error = tmpfs_dir_getdotdotdent(node, uio);
-		if (error != 0) {
-			if (error == -1)
-				error = 0;
-			goto out;
-		}
-		cnt++;
-	}
-	error = tmpfs_dir_getdents(node, uio, &cnt);
-	if (error == -1) {
-		error = 0;
-	}
-	KASSERT(error >= 0);
-out:
 	if (eofflag != NULL) {
-		*eofflag = (!error && uio->uio_offset == TMPFS_DIRCOOKIE_EOF);
+		*eofflag = !error && uio->uio_offset == TMPFS_DIRSEQ_EOF;
 	}
-	if (error || cookies == NULL || ncookies == NULL) {
-		return error;
-	}
-
-	/* Update NFS-related variables, if any. */
-	off_t i, off = startoff;
-	tmpfs_dirent_t *de = NULL;
-
-	*cookies = malloc(cnt * sizeof(off_t), M_TEMP, M_WAITOK);
-	*ncookies = cnt;
-
-	for (i = 0; i < cnt; i++) {
-		KASSERT(off != TMPFS_DIRCOOKIE_EOF);
-		if (off != TMPFS_DIRCOOKIE_DOT) {
-			if (off == TMPFS_DIRCOOKIE_DOTDOT) {
-				de = TAILQ_FIRST(&node->tn_spec.tn_dir.tn_dir);
-			} else if (de != NULL) {
-				de = TAILQ_NEXT(de, td_entries);
-			} else {
-				de = tmpfs_dir_lookupbycookie(node, off);
-				KASSERT(de != NULL);
-				de = TAILQ_NEXT(de, td_entries);
-			}
-			if (de == NULL) {
-				off = TMPFS_DIRCOOKIE_EOF;
-			} else {
-				off = tmpfs_dircookie(de);
-			}
-		} else {
-			off = TMPFS_DIRCOOKIE_DOTDOT;
-		}
-		(*cookies)[i] = off;
-	}
-	KASSERT(uio->uio_offset == off);
 	return error;
 }
 
@@ -1186,161 +1146,6 @@ tmpfs_advlock(void *v)
 	    ap->a_fl, ap->a_flags);
 }
 
-#if 0
-int
-tmpfs_getpages(void *v)
-{
-	struct vop_getpages_args /* {
-		struct vnode *a_vp;
-		voff_t a_offset;
-		struct vm_page **a_m;
-		int *a_count;
-		int a_centeridx;
-		vm_prot_t a_access_type;
-		int a_advice;
-		int a_flags;
-	} */ * const ap = v;
-	struct vnode *vp = ap->a_vp;
-	const voff_t offset = ap->a_offset;
-	struct vm_page **pgs = ap->a_m;
-	const int centeridx = ap->a_centeridx;
-	const vm_prot_t access_type = ap->a_access_type;
-	const int advice = ap->a_advice;
-	const int flags = ap->a_flags;
-	int error, npages = *ap->a_count;
-	tmpfs_node_t *node;
-	struct uvm_object *uobj;
-
-	KASSERT(vp->v_type == VREG);
-	KASSERT(mutex_owned(vp->v_interlock));
-
-	node = VP_TO_TMPFS_NODE(vp);
-	uobj = node->tn_spec.tn_reg.tn_aobj;
-
-	/*
-	 * Currently, PGO_PASTEOF is not supported.
-	 */
-	if (vp->v_size <= offset + (centeridx << PAGE_SHIFT)) {
-		if ((flags & PGO_LOCKED) == 0)
-			mutex_exit(vp->v_interlock);
-		return EINVAL;
-	}
-
-	if (vp->v_size < offset + (npages << PAGE_SHIFT)) {
-		npages = (round_page(vp->v_size) - offset) >> PAGE_SHIFT;
-	}
-
-	if ((flags & PGO_LOCKED) != 0)
-		return EBUSY;
-
-	if ((flags & PGO_NOTIMESTAMP) == 0) {
-		if ((vp->v_mount->mnt_flag & MNT_NOATIME) == 0)
-			node->tn_status |= TMPFS_NODE_ACCESSED;
-
-		if ((access_type & VM_PROT_WRITE) != 0) {
-			node->tn_status |= TMPFS_NODE_MODIFIED;
-			if (vp->v_mount->mnt_flag & MNT_RELATIME)
-				node->tn_status |= TMPFS_NODE_ACCESSED;
-		}
-	}
-
-	/*
-	 * Invoke the pager.
-	 *
-	 * Clean the array of pages before.  XXX: PR/32166
-	 * Note that vnode lock is shared with underlying UVM object.
-	 */
-	if (pgs) {
-		memset(pgs, 0, sizeof(struct vm_pages *) * npages);
-	}
-	KASSERT(vp->v_interlock == uobj->vmobjlock);
-
-	error = (*uobj->pgops->pgo_get)(uobj, offset, pgs, &npages, centeridx,
-	    access_type, advice, flags | PGO_ALLPAGES);
-
-#if defined(DEBUG)
-	if (!error && pgs) {
-		for (int i = 0; i < npages; i++) {
-			KASSERT(pgs[i] != NULL);
-		}
-	}
-#endif
-	return error;
-}
-
-int
-tmpfs_putpages(void *v)
-{
-	struct vop_putpages_args /* {
-		struct vnode *a_vp;
-		voff_t a_offlo;
-		voff_t a_offhi;
-		int a_flags;
-	} */ * const ap = v;
-	struct vnode *vp = ap->a_vp;
-	const voff_t offlo = ap->a_offlo;
-	const voff_t offhi = ap->a_offhi;
-	const int flags = ap->a_flags;
-	tmpfs_node_t *node;
-	struct uvm_object *uobj;
-	int error;
-
-	KASSERT(mutex_owned(vp->v_interlock));
-
-	if (vp->v_type != VREG) {
-		mutex_exit(vp->v_interlock);
-		return 0;
-	}
-
-	node = VP_TO_TMPFS_NODE(vp);
-	uobj = node->tn_spec.tn_reg.tn_aobj;
-
-	KASSERT(vp->v_interlock == uobj->vmobjlock);
-	error = (*uobj->pgops->pgo_put)(uobj, offlo, offhi, flags);
-
-	/* XXX mtime */
-
-	return error;
-}
-
-int
-tmpfs_whiteout(void *v)
-{
-	struct vop_whiteout_args /* {
-		struct vnode		*a_dvp;
-		struct componentname	*a_cnp;
-		int			a_flags;
-	} */ *ap = v;
-	struct vnode *dvp = ap->a_dvp;
-	struct componentname *cnp = ap->a_cnp;
-	const int flags = ap->a_flags;
-	tmpfs_mount_t *tmp = VFS_TO_TMPFS(dvp->v_mount);
-	tmpfs_dirent_t *de;
-	int error;
-
-	switch (flags) {
-	case LOOKUP:
-		break;
-	case CREATE:
-		error = tmpfs_alloc_dirent(tmp, cnp->cn_nameptr,
-		    cnp->cn_namelen, &de);
-		if (error)
-			return error;
-		tmpfs_dir_attach(dvp, de, TMPFS_NODE_WHITEOUT);
-		break;
-	case DELETE:
-		cnp->cn_flags &= ~DOWHITEOUT; /* when in doubt, cargo cult */
-		de = tmpfs_dir_lookup(VP_TO_TMPFS_DIR(dvp), cnp);
-		if (de == NULL)
-			return ENOENT;
-		tmpfs_dir_detach(dvp, de);
-		tmpfs_free_dirent(tmp, de);
-		break;
-	}
-	return 0;
-}
-#endif
-
 int
 tmpfs_print(void *v)
 {
@@ -1480,6 +1285,7 @@ int tmpfs_check_sticky(struct ucred *,
     struct tmpfs_node *, struct tmpfs_node *);
 void tmpfs_rename_cache_purge(struct vnode *, struct vnode *, struct vnode *,
     struct vnode *);
+void tmpfs_rename_abort(void *);
 
 int
 tmpfs_rename(void *v)
@@ -1510,8 +1316,6 @@ tmpfs_rename(void *v)
 	KASSERT(fcnp->cn_nameptr != NULL);
 	/* KASSERT(VOP_ISLOCKED(fdvp) != LK_EXCLUSIVE); */
 	/* KASSERT(VOP_ISLOCKED(fvp) != LK_EXCLUSIVE); */
-	KASSERT(VOP_ISLOCKED(tdvp) == LK_EXCLUSIVE);
-	KASSERT((tvp == NULL) || (VOP_ISLOCKED(tvp) == LK_EXCLUSIVE));
 	KASSERT(fdvp->v_type == VDIR);
 	KASSERT(tdvp->v_type == VDIR);
 	KASSERT(fcnp->cn_flags & HASBUF);
@@ -1525,17 +1329,25 @@ tmpfs_rename(void *v)
 	 */
 	if (fvp->v_mount != tdvp->v_mount ||
 	    (tvp != NULL && (fvp->v_mount != tvp->v_mount))) {
-	    	VOP_ABORTOP(tdvp, tcnp);
-	    	if (tdvp == tvp)
-	    		vrele(tdvp);
-		else
-			vput(tdvp);
-		if (tvp != NULL)
-			vput(tvp);
-		VOP_ABORTOP(fdvp, fcnp);
-		vrele(fdvp);
-		vrele(fvp);
+	    	tmpfs_rename_abort(v);
 		return EXDEV;
+	}
+
+	/*
+	 * Can't check the locks on these until we know they're on
+	 * the same FS, as not all FS do locking the same way.
+	 */
+	KASSERT(VOP_ISLOCKED(tdvp) == LK_EXCLUSIVE);
+	KASSERT((tvp == NULL) || (VOP_ISLOCKED(tvp) == LK_EXCLUSIVE));
+
+	/*
+	 * Reject renaming '.' and '..'.
+	 */
+	if ((fcnp->cn_namelen == 1 && fcnp->cn_nameptr[0] == '.') ||
+	    (fcnp->cn_namelen == 2 && fcnp->cn_nameptr[0] == '.' &&
+	     fcnp->cn_nameptr[1] == '.')) {
+	     	tmpfs_rename_abort(v);
+	     	return EINVAL;
 	}
 
 	/*
@@ -2415,8 +2227,10 @@ tmpfs_rename_attachdetach(struct tmpfs_mount *tmpfs,
 	if (fdvp != tdvp) {
 		/* tmpfs_dir_detach clobbers fde->td_node, so save it.  */
 		struct tmpfs_node *fnode = fde->td_node;
-		tmpfs_dir_detach(fdvp, fde);
-		tmpfs_dir_attach(tdvp, fde, fnode);
+		tmpfs_node_t *fdnode = VP_TO_TMPFS_DIR(fdvp);
+		tmpfs_node_t *tdnode = VP_TO_TMPFS_DIR(tdvp);
+		tmpfs_dir_detach(fdnode, fde);
+		tmpfs_dir_attach(tdnode, fde, fnode);
 	} else if (tvp == NULL) {
 		/*
 		 * We are changing the directory.  tmpfs_dir_attach and
@@ -2431,6 +2245,7 @@ tmpfs_rename_attachdetach(struct tmpfs_mount *tmpfs,
 	 * If we are replacing an existing target entry, delete it.
 	 */
 	if (tde != NULL) {
+		tmpfs_node_t *tdnode = VP_TO_TMPFS_DIR(tdvp);
 		KASSERT(tvp != NULL);
 		KASSERT(tde->td_node != NULL);
 		KASSERT((fvp->v_type == VDIR) == (tvp->v_type == VDIR));
@@ -2441,7 +2256,7 @@ tmpfs_rename_attachdetach(struct tmpfs_mount *tmpfs,
 			 * the vnode will be recycled when released.  */
 			tde->td_node->tn_links--;
 		}
-		tmpfs_dir_detach(tdvp, tde);
+		tmpfs_dir_detach(tdnode, tde);
 		tmpfs_free_dirent(tmpfs, tde);
 	}
 }
@@ -2486,7 +2301,7 @@ tmpfs_do_remove(struct tmpfs_mount *tmpfs, struct vnode *dvp,
 		    cred->cr_uid != de->td_node->tn_uid)
 			return EPERM;
 
-	tmpfs_dir_detach(dvp, de);
+	tmpfs_dir_detach(dnode, de);
 	tmpfs_free_dirent(tmpfs, de);
 
 	return 0;
@@ -2605,6 +2420,9 @@ tmpfs_rename_check_permitted(struct ucred *cred,
 	error = tmpfs_check_sticky(cred, fdnode, fnode);
 	if (error)
 		return error;
+
+	if (TMPFS_DIRSEQ_FULL(tdnode))
+		return (ENOSPC);
 
 	error = tmpfs_check_sticky(cred, tdnode, tnode);
 	if (error)
@@ -2740,4 +2558,127 @@ tmpfs_rename_cache_purge(struct vnode *fdvp, struct vnode *fvp,
 
 	if ((tvp != NULL) && (tvp->v_type == VDIR))
 		cache_purge(tvp);
+}
+
+void
+tmpfs_rename_abort(void *v)
+{
+	struct vop_rename_args *ap = v;
+	struct vnode *fdvp = ap->a_fdvp;
+	struct vnode *fvp = ap->a_fvp;
+	struct componentname *fcnp = ap->a_fcnp;
+	struct vnode *tdvp = ap->a_tdvp;
+	struct vnode *tvp = ap->a_tvp;
+	struct componentname *tcnp = ap->a_tcnp;
+
+	VOP_ABORTOP(tdvp, tcnp);
+	if (tdvp == tvp)
+		vrele(tdvp);
+	else
+		vput(tdvp);
+	if (tvp != NULL)
+		vput(tvp);
+	VOP_ABORTOP(fdvp, fcnp);
+	vrele(fdvp);
+	vrele(fvp);
+}
+
+void filt_tmpfsdetach(struct knote *kn);
+int filt_tmpfsread(struct knote *kn, long hint);
+int filt_tmpfswrite(struct knote *kn, long hint);
+int filt_tmpfsvnode(struct knote *kn, long hint);
+
+struct filterops tmpfsread_filtops = 
+	{ 1, NULL, filt_tmpfsdetach, filt_tmpfsread };
+struct filterops tmpfswrite_filtops = 
+	{ 1, NULL, filt_tmpfsdetach, filt_tmpfswrite };
+struct filterops tmpfsvnode_filtops = 
+	{ 1, NULL, filt_tmpfsdetach, filt_tmpfsvnode };
+
+int
+tmpfs_kqfilter(void *v)
+{
+	struct vop_kqfilter_args *ap = v;
+	struct vnode *vp = ap->a_vp;
+	struct knote *kn = ap->a_kn;
+
+	switch (kn->kn_filter) {
+	case EVFILT_READ:
+		kn->kn_fop = &tmpfsread_filtops;
+		break;
+	case EVFILT_WRITE:
+		kn->kn_fop = &tmpfswrite_filtops;
+		break;
+	case EVFILT_VNODE:
+		kn->kn_fop = &tmpfsvnode_filtops;
+		break;
+	default:
+		return (EINVAL);
+	}
+
+	kn->kn_hook = (caddr_t)vp;
+
+	SLIST_INSERT_HEAD(&vp->v_selectinfo.si_note, kn, kn_selnext);
+
+	return (0);
+}
+
+void
+filt_tmpfsdetach(struct knote *kn)
+{
+	struct vnode *vp = (struct vnode *)kn->kn_hook;
+
+	SLIST_REMOVE(&vp->v_selectinfo.si_note, kn, knote, kn_selnext);
+}
+
+int
+filt_tmpfsread(struct knote *kn, long hint)
+{
+	struct vnode *vp = (struct vnode *)kn->kn_hook;
+	tmpfs_node_t *node = VP_TO_TMPFS_NODE(vp);
+
+	/*
+	 * filesystem is gone, so set the EOF flag and schedule 
+	 * the knote for deletion.
+	 */
+	if (hint == NOTE_REVOKE) {
+		kn->kn_flags |= (EV_EOF | EV_ONESHOT);
+		return (1);
+	}
+
+        kn->kn_data = node->tn_size - kn->kn_fp->f_offset;
+	if (kn->kn_data == 0 && kn->kn_sfflags & NOTE_EOF) {
+		kn->kn_fflags |= NOTE_EOF;
+		return (1);
+	}
+
+        return (kn->kn_data != 0);
+}
+
+int
+filt_tmpfswrite(struct knote *kn, long hint)
+{
+	/*
+	 * filesystem is gone, so set the EOF flag and schedule 
+	 * the knote for deletion.
+	 */
+	if (hint == NOTE_REVOKE) {
+		kn->kn_flags |= (EV_EOF | EV_ONESHOT);
+		return (1);
+	}
+
+        kn->kn_data = 0;
+        return (1);
+}
+
+int
+filt_tmpfsvnode(struct knote *kn, long hint)
+{
+	if (kn->kn_sfflags & hint)
+		kn->kn_fflags |= hint;
+	if (hint == NOTE_REVOKE) {
+		kn->kn_flags |= EV_EOF;
+		return (1);
+	}
+	return (kn->kn_fflags != 0);
 }

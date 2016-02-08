@@ -1,11 +1,11 @@
-#	$OpenBSD: Makefile,v 1.1 2013/01/08 21:42:19 bluhm Exp $
+#	$OpenBSD: Makefile,v 1.3 2014/01/18 05:54:52 martynas Exp $
 
 PROG ?=		relay
 CFLAGS +=	-Wall -Werror
 CFLAGS +=	-Wstrict-prototypes -Wmissing-prototypes
 CFLAGS +=	-Wmissing-declarations
 CFLAGS +=	-Wshadow -Wpointer-arith -Wcast-qual
-CFLAGS +=	-Wsign-compare -Wbounded
+CFLAGS +=	-Wsign-compare
 NOMAN =		yes
 
 TARGETS =	tcp-copy tcp-splice udp-copy udp-splice
@@ -20,6 +20,8 @@ copy splice: ${PROG}
 .for r in copy splice
 
 run-regress-$p-$r: $r
+	@echo
+	@echo $@
 .if empty (REMOTE_SSH)
 	./$r ${p:S/tcp//:S/udp/-u/} 12345 localhost 12346 & \
 	rpid=$$! ; \

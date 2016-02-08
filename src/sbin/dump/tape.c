@@ -1,4 +1,4 @@
-/*	$OpenBSD: tape.c,v 1.36 2013/06/11 16:42:04 deraadt Exp $	*/
+/*	$OpenBSD: tape.c,v 1.38 2013/11/12 04:59:02 deraadt Exp $	*/
 /*	$NetBSD: tape.c,v 1.11 1997/06/05 11:13:26 lukem Exp $	*/
 
 /*-
@@ -69,6 +69,10 @@ static	void enslave(void);
 static	void flushtape(void);
 static	void killall(void);
 static	void rollforward(void);
+
+void	tperror(int signo);
+void	sigpipe(int signo);
+void	proceed(int signo);
 
 /*
  * Concurrent dump mods (Caltech) - disk block reading and tape writing
@@ -152,7 +156,7 @@ void
 writerec(char *dp, int isspcl)
 {
 
-	slp->req[trecno].dblk = (daddr_t)0;
+	slp->req[trecno].dblk = 0;
 	slp->req[trecno].count = 1;
 	*(union u_spcl *)(*(nextblock)++) = *(union u_spcl *)dp;
 	if (isspcl)

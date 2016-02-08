@@ -1,4 +1,4 @@
-/*	$OpenBSD: vfs_subr.c,v 1.204 2013/06/24 18:52:37 beck Exp $	*/
+/*	$OpenBSD: vfs_subr.c,v 1.211 2014/01/21 01:48:45 tedu Exp $	*/
 /*	$NetBSD: vfs_subr.c,v 1.53 1996/04/22 01:39:13 christos Exp $	*/
 
 /*
@@ -139,7 +139,7 @@ vntblinit(void)
 	    &pool_allocator_nointr);
 	TAILQ_INIT(&vnode_hold_list);
 	TAILQ_INIT(&vnode_free_list);
-	CIRCLEQ_INIT(&mountlist);
+	TAILQ_INIT(&mountlist);
 	/*
 	 * Initialize the filesystem syncer.
 	 */
@@ -238,7 +238,7 @@ vfs_getvfs(fsid_t *fsid)
 {
 	struct mount *mp;
 
-	CIRCLEQ_FOREACH(mp, &mountlist, mnt_list) {
+	TAILQ_FOREACH(mp, &mountlist, mnt_list) {
 		if (mp->mnt_stat.f_fsid.val[0] == fsid->val[0] &&
 		    mp->mnt_stat.f_fsid.val[1] == fsid->val[1]) {
 			return (mp);
@@ -267,7 +267,7 @@ vfs_getnewfsid(struct mount *mp)
 		++xxxfs_mntid;
 	tfsid.val[0] = makedev(nblkdev + mtype, xxxfs_mntid);
 	tfsid.val[1] = mtype;
-	if (!CIRCLEQ_EMPTY(&mountlist)) {
+	if (!TAILQ_EMPTY(&mountlist)) {
 		while (vfs_getvfs(&tfsid)) {
 			tfsid.val[0]++;
 			xxxfs_mntid++;
@@ -395,8 +395,8 @@ getnewvnode(enum vtagtype tag, struct mount *mp, struct vops *vops,
 		vp->v_flag = 0;
 		vp->v_socket = 0;
 	}
-	vp->v_type = VNON;
 	cache_purge(vp);
+	vp->v_type = VNON;
 	vp->v_tag = tag;
 	vp->v_op = vops;
 	insmntque(vp, mp);
@@ -525,7 +525,7 @@ loop:
 		nvp->v_specnext = *vpp;
 		nvp->v_specmountpoint = NULL;
 		nvp->v_speclockf = NULL;
-		bzero(nvp->v_specbitmap, sizeof(nvp->v_specbitmap));
+		memset(nvp->v_specbitmap, 0, sizeof(nvp->v_specbitmap));
 		*vpp = nvp;
 		if (vp != NULLVP) {
 			nvp->v_flag |= VALIASED;
@@ -1215,17 +1215,13 @@ printlockedvnodes(void)
 
 	printf("Locked vnodes\n");
 
-	for (mp = CIRCLEQ_FIRST(&mountlist); mp != CIRCLEQ_END(&mountlist);
-	    mp = nmp) {
-		if (vfs_busy(mp, VB_READ|VB_NOWAIT)) {
-			nmp = CIRCLEQ_NEXT(mp, mnt_list);
+	TAILQ_FOREACH_SAFE(mp, &mountlist, mnt_list, nmp) {
+		if (vfs_busy(mp, VB_READ|VB_NOWAIT))
 			continue;
-		}
 		LIST_FOREACH(vp, &mp->mnt_vnodelist, v_mntvnodes) {
 			if (VOP_ISLOCKED(vp))
 				vprint((char *)0, vp);
 		}
-		nmp = CIRCLEQ_NEXT(mp, mnt_list);
 		vfs_unbusy(mp);
  	}
 
@@ -1314,16 +1310,12 @@ sysctl_vnode(char *where, size_t *sizep, struct proc *p)
 	}
 	ewhere = where + *sizep;
 
-	for (mp = CIRCLEQ_FIRST(&mountlist); mp != CIRCLEQ_END(&mountlist);
-	    mp = nmp) {
-		if (vfs_busy(mp, VB_READ|VB_NOWAIT)) {
-			nmp = CIRCLEQ_NEXT(mp, mnt_list);
+	TAILQ_FOREACH_SAFE(mp, &mountlist, mnt_list, nmp) {
+		if (vfs_busy(mp, VB_READ|VB_NOWAIT))
 			continue;
-		}
 		savebp = bp;
 again:
-		for (vp = LIST_FIRST(&mp->mnt_vnodelist); vp != NULL;
-		    vp = nvp) {
+		LIST_FOREACH_SAFE(vp, &mp->mnt_vnodelist, v_mntvnodes, nvp) {
 			/*
 			 * Check that the vp is still associated with
 			 * this filesystem.  RACE: could have been
@@ -1335,7 +1327,6 @@ again:
 				bp = savebp;
 				goto again;
 			}
-			nvp = LIST_NEXT(vp, v_mntvnodes);
 			if (bp + sizeof(struct e_vnode) > ewhere) {
 				*sizep = bp - where;
 				vfs_unbusy(mp);
@@ -1353,7 +1344,6 @@ again:
 			bp += sizeof(struct e_vnode);
 		}
 
-		nmp = CIRCLEQ_NEXT(mp, mnt_list);
 		vfs_unbusy(mp);
 	}
 
@@ -1612,9 +1602,7 @@ vfs_unmountall(void)
 
  retry:
 	allerror = 0;
-	for (mp = CIRCLEQ_LAST(&mountlist); mp != CIRCLEQ_END(&mountlist);
-	    mp = nmp) {
-		nmp = CIRCLEQ_PREV(mp, mnt_list);
+	TAILQ_FOREACH_REVERSE_SAFE(mp, &mountlist, mntlist, mnt_list, nmp) {
 		if ((vfs_busy(mp, VB_WRITE|VB_NOWAIT)) != 0)
 			continue;
 		if ((error = dounmount(mp, MNT_FORCE, curproc, NULL)) != 0) {
@@ -1820,7 +1808,6 @@ vinvalbuf(struct vnode *vp, int flags, struct ucred *cred, struct proc *p,
 		panic("vinvalbuf(): vp isn't locked");
 #endif
 
-loop:
 	if (flags & V_SAVE) {
 		s = splbio();
 		vwaitforio(vp, 0, "vinvalbuf", 0);
@@ -1835,6 +1822,7 @@ loop:
 		}
 		splx(s);
 	}
+loop:
 	s = splbio();
 	for (;;) {
 		if ((blist = LIST_FIRST(&vp->v_cleanblkhd)) &&
@@ -1857,13 +1845,24 @@ loop:
 				bp->b_flags |= B_WANTED;
 				error = tsleep(bp, slpflag | (PRIBIO + 1),
 				    "vinvalbuf", slptimeo);
-				splx(s);
 				if (error) {
+					splx(s);
 					return (error);
 				}
-				goto loop;
+				break;
 			}
 			bremfree(bp);
+			/*
+			 * XXX Since there are no node locks for NFS, I believe
+			 * there is a slight chance that a delayed write will
+			 * occur while sleeping just above, so check for it.
+			 */
+			if ((bp->b_flags & B_DELWRI) && (flags & V_SAVE)) {
+				buf_acquire(bp);
+				splx(s);
+				(void) VOP_BWRITE(bp);
+				goto loop;
+			}
 			buf_acquire_nomap(bp);
 			bp->b_flags |= B_INVAL;
 			brelse(bp);
@@ -2141,19 +2140,20 @@ vn_isdisk(struct vnode *vp, int *errp)
 
 void
 vfs_buf_print(void *b, int full,
-    int (*pr)(const char *, ...) /* __attribute__((__format__(__kprintf__,1,2))) */)
+    int (*pr)(const char *, ...) __attribute__((__format__(__kprintf__,1,2))))
 {
 	struct buf *bp = b;
 
 	(*pr)("  vp %p lblkno 0x%llx blkno 0x%llx dev 0x%x\n"
-	      "  proc %p error %d flags %b\n",
+	      "  proc %p error %d flags %lb\n",
 	    bp->b_vp, (int64_t)bp->b_lblkno, (int64_t)bp->b_blkno, bp->b_dev,
 	    bp->b_proc, bp->b_error, bp->b_flags, B_BITS);
 
-	(*pr)("  bufsize 0x%lx bcount 0x%lx resid 0x%lx sync 0x%x\n"
+	(*pr)("  bufsize 0x%lx bcount 0x%lx resid 0x%lx sync 0x%llx\n"
 	      "  data %p saveaddr %p dep %p iodone %p\n",
-	    bp->b_bufsize, bp->b_bcount, (long)bp->b_resid, bp->b_synctime,
-	    bp->b_data, bp->b_saveaddr, LIST_FIRST(&bp->b_dep), bp->b_iodone);
+	    bp->b_bufsize, bp->b_bcount, (long)bp->b_resid,
+	    (long long)bp->b_synctime, bp->b_data, bp->b_saveaddr,
+	    LIST_FIRST(&bp->b_dep), bp->b_iodone);
 
 	(*pr)("  dirty {off 0x%x end 0x%x} valid {off 0x%x end 0x%x}\n",
 	    bp->b_dirtyoff, bp->b_dirtyend, bp->b_validoff, bp->b_validend);
@@ -2169,7 +2169,7 @@ const char *vtags[] = { VTAG_NAMES };
 
 void
 vfs_vnode_print(void *v, int full,
-    int (*pr)(const char *, ...) /* __attribute__((__format__(__kprintf__,1,2))) */)
+    int (*pr)(const char *, ...) __attribute__((__format__(__kprintf__,1,2))))
 {
 	struct vnode *vp = v;
 
@@ -2203,7 +2203,7 @@ vfs_vnode_print(void *v, int full,
 
 void
 vfs_mount_print(struct mount *mp, int full,
-    int (*pr)(const char *, ...) /* __attribute__((__format__(__kprintf__,1,2))) */)
+    int (*pr)(const char *, ...) __attribute__((__format__(__kprintf__,1,2))))
 {
 	struct vfsconf *vfc = mp->mnt_vfc;
 	struct vnode *vp;
@@ -2224,7 +2224,7 @@ vfs_mount_print(struct mount *mp, int full,
 	(*pr)("  files %llu ffiles %llu favail %lld\n", mp->mnt_stat.f_files,
 	    mp->mnt_stat.f_ffree, mp->mnt_stat.f_favail);
 
-	(*pr)("  f_fsidx {0x%x, 0x%x} owner %u ctime 0x%x\n",
+	(*pr)("  f_fsidx {0x%x, 0x%x} owner %u ctime 0x%llx\n",
 	    mp->mnt_stat.f_fsid.val[0], mp->mnt_stat.f_fsid.val[1],
 	    mp->mnt_stat.f_owner, mp->mnt_stat.f_ctime);
 

@@ -1,4 +1,4 @@
-/*	$OpenBSD: rde_filter.c,v 1.68 2012/11/13 09:47:20 claudio Exp $ */
+/*	$OpenBSD: rde_filter.c,v 1.71 2014/01/24 06:07:13 phessler Exp $ */
 
 /*
  * Copyright (c) 2004 Claudio Jeker <claudio@openbsd.org>
@@ -30,9 +30,9 @@ int	rde_filter_match(struct filter_rule *, struct rde_aspath *,
 int	filterset_equal(struct filter_set_head *, struct filter_set_head *);
 
 enum filter_actions
-rde_filter(u_int16_t ribid, struct rde_aspath **new, struct filter_head *rules,
+rde_filter(struct filter_head *rules, struct rde_aspath **new,
     struct rde_peer *peer, struct rde_aspath *asp, struct bgpd_addr *prefix,
-    u_int8_t prefixlen, struct rde_peer *from, enum directions dir)
+    u_int8_t prefixlen, struct rde_peer *from)
 {
 	struct filter_rule	*f;
 	enum filter_actions	 action = ACTION_ALLOW; /* default allow */
@@ -47,11 +47,10 @@ rde_filter(u_int16_t ribid, struct rde_aspath **new, struct filter_head *rules,
 		 */
 		return (ACTION_DENY);
 
+	if (rules == NULL)
+		return (action);
+
 	TAILQ_FOREACH(f, rules, entry) {
-		if (dir != f->dir)
-			continue;
-		if (dir == DIR_IN && f->peer.ribid != ribid)
-			continue;
 		if (f->peer.groupid != 0 &&
 		    f->peer.groupid != peer->conf.groupid)
 			continue;
@@ -330,58 +329,27 @@ rde_filter_match(struct filter_rule *f, struct rde_aspath *asp,
 			return (0);
 
 		/* test prefixlen stuff too */
-		switch (f->match.prefixlen.op) {
-		case OP_NONE:
-			/* perfect match */
+		switch (f->match.prefix.op) {
+		case OP_NONE: /* perfect match */
 			return (plen == f->match.prefix.len);
-		case OP_RANGE:
-			return ((plen >= f->match.prefixlen.len_min) &&
-			    (plen <= f->match.prefixlen.len_max));
-		case OP_XRANGE:
-			return ((plen < f->match.prefixlen.len_min) ||
-			    (plen > f->match.prefixlen.len_max));
 		case OP_EQ:
-			return (plen == f->match.prefixlen.len_min);
+			return (plen == f->match.prefix.len_min);
 		case OP_NE:
-			return (plen != f->match.prefixlen.len_min);
-		case OP_LE:
-			return (plen <= f->match.prefixlen.len_min);
-		case OP_LT:
-			return (plen < f->match.prefixlen.len_min);
-		case OP_GE:
-			return (plen >= f->match.prefixlen.len_min);
-		case OP_GT:
-			return (plen > f->match.prefixlen.len_min);
-		}
-		/* NOTREACHED */
-	} else if (f->match.prefixlen.op != OP_NONE) {
-		/* only prefixlen without a prefix */
-
-		if (f->match.prefixlen.aid != prefix->aid)
-			/* don't use IPv4 rules for IPv6 and vice versa */
-			return (0);
-
-		switch (f->match.prefixlen.op) {
-		case OP_NONE:
-			fatalx("internal filter bug");
+			return (plen != f->match.prefix.len_min);
 		case OP_RANGE:
-			return ((plen >= f->match.prefixlen.len_min) &&
-			    (plen <= f->match.prefixlen.len_max));
+			return ((plen >= f->match.prefix.len_min) &&
+			    (plen <= f->match.prefix.len_max));
 		case OP_XRANGE:
-			return ((plen < f->match.prefixlen.len_min) ||
-			    (plen > f->match.prefixlen.len_max));
-		case OP_EQ:
-			return (plen == f->match.prefixlen.len_min);
-		case OP_NE:
-			return (plen != f->match.prefixlen.len_min);
+			return ((plen < f->match.prefix.len_min) ||
+			    (plen > f->match.prefix.len_max));
 		case OP_LE:
-			return (plen <= f->match.prefixlen.len_min);
+			return (plen <= f->match.prefix.len_min);
 		case OP_LT:
-			return (plen < f->match.prefixlen.len_min);
+			return (plen < f->match.prefix.len_min);
 		case OP_GE:
-			return (plen >= f->match.prefixlen.len_min);
+			return (plen >= f->match.prefix.len_min);
 		case OP_GT:
-			return (plen > f->match.prefixlen.len_min);
+			return (plen > f->match.prefix.len_min);
 		}
 		/* NOTREACHED */
 	}
@@ -420,42 +388,32 @@ rde_filter_match(struct filter_rule *f, struct rde_aspath *asp,
 
 int
 rde_filter_equal(struct filter_head *a, struct filter_head *b,
-    struct rde_peer *peer, enum directions dir)
+    struct rde_peer *peer)
 {
 	struct filter_rule	*fa, *fb;
 
-	fa = TAILQ_FIRST(a);
-	fb = TAILQ_FIRST(b);
+	fa = a ? TAILQ_FIRST(a) : NULL;
+	fb = b ? TAILQ_FIRST(b) : NULL;
 
 	while (fa != NULL || fb != NULL) {
-		/* skip all rules with wrong direction */
-		if (fa != NULL && dir != fa->dir) {
-			fa = TAILQ_NEXT(fa, entry);
-			continue;
-		}
-		if (fb != NULL && dir != fb->dir) {
-			fb = TAILQ_NEXT(fb, entry);
-			continue;
-		}
-
 		/* skip all rules with wrong peer */
-		if (fa != NULL && fa->peer.groupid != 0 &&
+		if (peer != NULL && fa != NULL && fa->peer.groupid != 0 &&
 		    fa->peer.groupid != peer->conf.groupid) {
 			fa = TAILQ_NEXT(fa, entry);
 			continue;
 		}
-		if (fa != NULL && fa->peer.peerid != 0 &&
+		if (peer != NULL && fa != NULL && fa->peer.peerid != 0 &&
 		    fa->peer.peerid != peer->conf.id) {
 			fa = TAILQ_NEXT(fa, entry);
 			continue;
 		}
 
-		if (fb != NULL && fb->peer.groupid != 0 &&
+		if (peer != NULL && fb != NULL && fb->peer.groupid != 0 &&
 		    fb->peer.groupid != peer->conf.groupid) {
 			fb = TAILQ_NEXT(fb, entry);
 			continue;
 		}
-		if (fb != NULL && fb->peer.peerid != 0 &&
+		if (peer != NULL && fb != NULL && fb->peer.peerid != 0 &&
 		    fb->peer.peerid != peer->conf.id) {
 			fb = TAILQ_NEXT(fb, entry);
 			continue;
@@ -479,6 +437,22 @@ rde_filter_equal(struct filter_head *a, struct filter_head *b,
 		fb = TAILQ_NEXT(fb, entry);
 	}
 	return (1);
+}
+
+void
+rde_free_filter(struct filter_head *fh)
+{
+	struct filter_rule	*r;
+
+	if (fh == NULL)
+		return;
+
+	while ((r = TAILQ_FIRST(fh)) != NULL) {
+		TAILQ_REMOVE(fh, r, entry);
+		filterset_free(&r->set);
+		free(r);
+	}
+	free(fh);
 }
 
 /* free a filterset and take care of possible name2id references */

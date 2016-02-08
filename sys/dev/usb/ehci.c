@@ -1,4 +1,4 @@
-/*	$OpenBSD: ehci.c,v 1.134 2013/06/12 11:42:01 mpi Exp $ */
+/*	$OpenBSD: ehci.c,v 1.141 2014/02/24 18:21:20 mpi Exp $ */
 /*	$NetBSD: ehci.c,v 1.66 2004/06/30 03:11:56 mycroft Exp $	*/
 
 /*
@@ -86,8 +86,6 @@ int ehcidebug = 0;
 #define DPRINTF(x)
 #define DPRINTFN(n,x)
 #endif
-
-#define mstohz(ms) ((ms) * hz / 1000)
 
 struct ehci_pipe {
 	struct usbd_pipe pipe;
@@ -740,7 +738,7 @@ ehci_check_qh_intr(struct ehci_softc *sc, struct ehci_xfer *ex)
  done:
 	DPRINTFN(12, ("ehci_check_intr: ex=%p done\n", ex));
 	timeout_del(&ex->xfer.timeout_handle);
-	usb_rem_task(ex->xfer.pipe->device, &ex->abort_task);
+	usb_rem_task(ex->xfer.pipe->device, &ex->xfer.abort_task);
 	ehci_idone(ex);
 }
 
@@ -788,7 +786,7 @@ ehci_check_itd_intr(struct ehci_softc *sc, struct ehci_xfer *ex) {
 done:
 	DPRINTFN(12, ("ehci_check_itd_intr: ex=%p done\n", ex));
 	timeout_del(&ex->xfer.timeout_handle);
-	usb_rem_task(ex->xfer.pipe->device, &ex->abort_task);
+	usb_rem_task(ex->xfer.pipe->device, &ex->xfer.abort_task);
 	ehci_idone(ex);
 }
 
@@ -1039,12 +1037,16 @@ ehci_activate(struct device *self, int act)
 	int i, rv = 0;
 
 	switch (act) {
-	case DVACT_QUIESCE:
-		rv = config_activate_children(self, act);
-		break;
 	case DVACT_SUSPEND:
 		rv = config_activate_children(self, act);
 		sc->sc_bus.use_polling++;
+
+		for (i = 1; i <= sc->sc_noport; i++) {
+			cmd = EOREAD4(sc, EHCI_PORTSC(i));
+			if ((cmd & (EHCI_PS_PO|EHCI_PS_PE)) == EHCI_PS_PE)
+				EOWRITE4(sc, EHCI_PORTSC(i),
+				    cmd | EHCI_PS_SUSP);
+		}
 
 		/*
 		 * First tell the host to stop processing Asynchronous
@@ -1073,10 +1075,6 @@ ehci_activate(struct device *self, int act)
 
 		sc->sc_bus.use_polling--;
 		break;
-	case DVACT_POWERDOWN:
-		rv = config_activate_children(self, act);
-		ehci_reset(sc);
-		break;
 	case DVACT_RESUME:
 		sc->sc_bus.use_polling++;
 
@@ -1089,7 +1087,27 @@ ehci_activate(struct device *self, int act)
 
 		EOWRITE4(sc, EHCI_PERIODICLISTBASE, DMAADDR(&sc->sc_fldma, 0));
 		EOWRITE4(sc, EHCI_ASYNCLISTADDR,
-		    sc->sc_async_head->physaddr | EHCI_LINK_QH);
+	  	    sc->sc_async_head->physaddr | EHCI_LINK_QH);
+
+		hcr = 0;
+		for (i = 1; i <= sc->sc_noport; i++) {
+			cmd = EOREAD4(sc, EHCI_PORTSC(i));
+			if ((cmd & (EHCI_PS_PO|EHCI_PS_SUSP)) == EHCI_PS_SUSP) {
+				EOWRITE4(sc, EHCI_PORTSC(i), cmd | EHCI_PS_FPR);
+				hcr = 1;
+			}
+		}
+
+		if (hcr) {
+			usb_delay_ms(&sc->sc_bus, USB_RESUME_WAIT);
+			for (i = 1; i <= sc->sc_noport; i++) {
+				cmd = EOREAD4(sc, EHCI_PORTSC(i));
+				if ((cmd & (EHCI_PS_PO|EHCI_PS_SUSP)) ==
+				   EHCI_PS_SUSP)
+					EOWRITE4(sc, EHCI_PORTSC(i),
+					   cmd & ~EHCI_PS_FPR);
+			}
+		}
 
 		/* Turn on controller */
 		EOWRITE4(sc, EHCI_USBCMD,
@@ -1124,6 +1142,13 @@ ehci_activate(struct device *self, int act)
 		if (sc->sc_child != NULL)
 			rv = config_deactivate(sc->sc_child);
 		sc->sc_bus.dying = 1;
+		break;
+	case DVACT_POWERDOWN:
+		rv = config_activate_children(self, act);
+		ehci_reset(sc);
+		break;
+	default:
+		rv = config_activate_children(self, act);
 		break;
 	}
 	return (rv);
@@ -1182,8 +1207,6 @@ ehci_allocx(struct usbd_bus *bus)
 
 	if (xfer != NULL) {
 		memset(xfer, 0, sizeof(struct ehci_xfer));
-		usb_init_task(&EXFER(xfer)->abort_task, ehci_timeout_task,
-		    xfer, USB_TASK_TYPE_ABORT);
 		EXFER(xfer)->ehci_xfer_flags = 0;
 #ifdef DIAGNOSTIC
 		EXFER(xfer)->isdone = 1;
@@ -2742,7 +2765,7 @@ ehci_abort_xfer(struct usbd_xfer *xfer, usbd_status status)
 		s = splusb();
 		xfer->status = status;	/* make software ignore it */
 		timeout_del(&xfer->timeout_handle);
-		usb_rem_task(epipe->pipe.device, &exfer->abort_task);
+		usb_rem_task(epipe->pipe.device, &xfer->abort_task);
 		usb_transfer_complete(xfer);
 		splx(s);
 		return;
@@ -2776,7 +2799,7 @@ ehci_abort_xfer(struct usbd_xfer *xfer, usbd_status status)
 	exfer->ehci_xfer_flags |= EHCI_XFER_ABORTING;
 	xfer->status = status;	/* make software ignore it */
 	timeout_del(&xfer->timeout_handle);
-	usb_rem_task(epipe->pipe.device, &exfer->abort_task);
+	usb_rem_task(epipe->pipe.device, &xfer->abort_task);
 	splx(s);
 
 	/*
@@ -2852,7 +2875,7 @@ ehci_abort_isoc_xfer(struct usbd_xfer *xfer, usbd_status status)
 		s = splusb();
 		xfer->status = status;
 		timeout_del(&xfer->timeout_handle);
-		usb_rem_task(epipe->pipe.device, &exfer->abort_task);
+		usb_rem_task(epipe->pipe.device, &xfer->abort_task);
 		usb_transfer_complete(xfer);
 		splx(s);
 		return;
@@ -2877,7 +2900,7 @@ ehci_abort_isoc_xfer(struct usbd_xfer *xfer, usbd_status status)
 
 	xfer->status = status;
 	timeout_del(&xfer->timeout_handle);
-	usb_rem_task(epipe->pipe.device, &exfer->abort_task);
+	usb_rem_task(epipe->pipe.device, &xfer->abort_task);
 
 	s = splusb();
 	for (itd = exfer->itdstart; itd != NULL; itd = itd->xfer_next) {
@@ -2915,10 +2938,6 @@ ehci_timeout(void *addr)
 	struct ehci_softc *sc = (struct ehci_softc *)epipe->pipe.device->bus;
 
 	DPRINTF(("ehci_timeout: exfer=%p\n", exfer));
-#if defined(EHCI_DEBUG) && defined(USB_DEBUG)
-	if (ehcidebug > 1)
-		usbd_dump_pipe(exfer->xfer.pipe);
-#endif
 
 	if (sc->sc_bus.dying) {
 		ehci_abort_xfer(&exfer->xfer, USBD_TIMEOUT);
@@ -2926,7 +2945,9 @@ ehci_timeout(void *addr)
 	}
 
 	/* Execute the abort in a process context. */
-	usb_add_task(exfer->xfer.pipe->device, &exfer->abort_task);
+	usb_init_task(&exfer->xfer.abort_task, ehci_timeout_task, addr,
+	    USB_TASK_TYPE_ABORT);
+	usb_add_task(exfer->xfer.pipe->device, &exfer->xfer.abort_task);
 }
 
 void
@@ -3058,7 +3079,6 @@ ehci_device_request(struct usbd_xfer *xfer)
 	usb_device_request_t *req = &xfer->request;
 	struct usbd_device *dev = epipe->pipe.device;
 	struct ehci_softc *sc = (struct ehci_softc *)dev->bus;
-	int addr = dev->address;
 	struct ehci_soft_qtd *setup, *stat, *next;
 	struct ehci_soft_qh *sqh;
 	int isread;
@@ -3072,7 +3092,7 @@ ehci_device_request(struct usbd_xfer *xfer)
 	DPRINTFN(3,("ehci_device_request: type=0x%02x, request=0x%02x, "
 	    "wValue=0x%04x, wIndex=0x%04x len=%u, addr=%d, endpt=%d\n",
 	    req->bmRequestType, req->bRequest, UGETW(req->wValue),
-	    UGETW(req->wIndex), len, addr,
+	    UGETW(req->wIndex), len, dev->address,
 	    epipe->pipe.endpoint->edesc->bEndpointAddress));
 
 	setup = ehci_alloc_sqtd(sc);
@@ -3088,17 +3108,6 @@ ehci_device_request(struct usbd_xfer *xfer)
 
 	sqh = epipe->sqh;
 	epipe->u.ctl.length = len;
-
-	/* Update device address and length since they may have changed
-	   during the setup of the control pipe in usbd_new_device(). */
-	/* XXX This only needs to be done once, but it's too early in open. */
-	/* XXXX Should not touch ED here! */
-	sqh->qh.qh_endp =
-	    (sqh->qh.qh_endp & htole32(~(EHCI_QH_ADDRMASK | EHCI_QH_MPLMASK))) |
-	    htole32(
-	     EHCI_QH_SET_ADDR(addr) |
-	     EHCI_QH_SET_MPL(UGETW(epipe->pipe.endpoint->edesc->wMaxPacketSize))
-	    );
 
 	/* Set up data transaction */
 	if (len != 0) {
@@ -3595,14 +3604,13 @@ ehci_device_isoc_start(struct usbd_xfer *xfer)
 	struct ehci_soft_itd *itd, *prev, *start, *stop;
 	struct usb_dma *dma_buf;
 	int i, j, k, frames, uframes, ufrperframe;
-	int s, trans_count, offs, total_length;
+	int s, trans_count, offs;
 	int frindex;
 
 	start = NULL;
 	prev = NULL;
 	itd = NULL;
 	trans_count = 0;
-	total_length = 0;
 	exfer = (struct ehci_xfer *) xfer;
 	sc = (struct ehci_softc *)xfer->pipe->device->bus;
 	epipe = (struct ehci_pipe *)xfer->pipe;
@@ -3716,7 +3724,6 @@ ehci_device_isoc_start(struct usbd_xfer *xfer)
 			    EHCI_ITD_SET_OFFS(EHCI_PAGE_OFFSET(DMAADDR(dma_buf,
 			    offs))));
 
-			total_length += xfer->frlengths[trans_count];
 			offs += xfer->frlengths[trans_count];
 			trans_count++;
 
@@ -3724,7 +3731,7 @@ ehci_device_isoc_start(struct usbd_xfer *xfer)
 				itd->itd.itd_ctl[j] |= htole32(EHCI_ITD_IOC);
 				break;
 			}
-		}       
+		}
 
 		/* Step 1.75, set buffer pointers. To simplify matters, all
 		 * pointers are filled out for the next 7 hardware pages in
@@ -3774,7 +3781,6 @@ ehci_device_isoc_start(struct usbd_xfer *xfer)
 
 	stop = itd;
 	stop->xfer_next = NULL;
-	exfer->isoc_len = total_length;
 
 	/*
 	 * Part 2: Transfer descriptors have now been set up, now they must

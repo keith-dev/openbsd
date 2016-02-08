@@ -1,4 +1,4 @@
-/*	$OpenBSD: pxa2x0_apm.c,v 1.39 2012/10/17 22:49:27 deraadt Exp $	*/
+/*	$OpenBSD: pxa2x0_apm.c,v 1.41 2013/12/06 21:03:05 deraadt Exp $	*/
 
 /*-
  * Copyright (c) 2001 Alexander Guy.  All rights reserved.
@@ -354,6 +354,9 @@ apm_resume(struct pxa2x0_apm_softc *sc)
 	bus_space_write_4(sc->sc_iot, sc->sc_pm_ioh, POWMAN_PSSR, PSSR_OTGPH);
 
 	bufq_restart();
+
+	config_suspend(TAILQ_FIRST(&alldevs), DVACT_WAKEUP);
+
 #if NWSDISPLAY > 0
 	wsdisplay_resume();
 #endif /* NWSDISPLAY > 0 */
@@ -433,7 +436,7 @@ apm_thread_create(void *v)
 	struct pxa2x0_apm_softc *sc = v;
 
 	if (kthread_create(apm_thread, sc, &sc->sc_thread,
-	    "%s", sc->sc_dev.dv_xname)) {
+	    sc->sc_dev.dv_xname)) {
 		/* apm_disconnect(sc); */
 		printf("%s: failed to create kernel thread, disabled",
 		    sc->sc_dev.dv_xname);

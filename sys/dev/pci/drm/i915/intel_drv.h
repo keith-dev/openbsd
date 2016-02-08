@@ -1,4 +1,4 @@
-/*	$OpenBSD: intel_drv.h,v 1.2 2013/07/05 07:20:27 jsg Exp $	*/
+/*	$OpenBSD: intel_drv.h,v 1.5 2014/01/23 03:49:53 jsg Exp $	*/
 /*
  * Copyright (c) 2006 Dave Airlie <airlied@linux.ie>
  * Copyright (c) 2007-2008 Intel Corporation
@@ -302,7 +302,7 @@ struct dip_infoframe {
 } __attribute__((packed));
 
 struct intel_hdmi {
-	u32 sdvox_reg;
+	u32 hdmi_reg;
 	int ddc_bus;
 	uint32_t color_range;
 	bool has_hdmi_sink;
@@ -337,7 +337,7 @@ struct intel_dp {
 	int panel_power_cycle_delay;
 	int backlight_on_delay;
 	int backlight_off_delay;
-	struct workq_task panel_vdd_task;
+	struct task panel_vdd_task;
 	struct timeout panel_vdd_to;
 	bool want_panel_vdd;
 	struct intel_connector *attached_connector;
@@ -346,7 +346,7 @@ struct intel_dp {
 struct intel_digital_port {
 	struct intel_encoder base;
 	enum port port;
-	u32 port_reversal;
+	u32 saved_port_bits;
 	struct intel_dp dp;
 	struct intel_hdmi hdmi;
 };
@@ -366,7 +366,7 @@ intel_get_crtc_for_plane(struct drm_device *dev, int plane)
 }
 
 struct intel_unpin_work {
-	struct workq_task task;
+	struct task task;
 	struct drm_crtc *crtc;
 	struct drm_i915_gem_object *old_fb_obj;
 	struct drm_i915_gem_object *pending_flip_obj;
@@ -379,7 +379,7 @@ struct intel_unpin_work {
 };
 
 struct intel_fbc_work {
-	struct workq_task task;
+	struct task task;
 	struct timeout to;
 	struct drm_crtc *crtc;
 	struct drm_framebuffer *fb;
@@ -397,7 +397,7 @@ extern void intel_attach_broadcast_rgb_property(struct drm_connector *connector)
 
 extern void intel_crt_init(struct drm_device *dev);
 extern void intel_hdmi_init(struct drm_device *dev,
-			    int sdvox_reg, enum port port);
+			    int hdmi_reg, enum port port);
 extern void intel_hdmi_init_connector(struct intel_digital_port *intel_dig_port,
 				      struct intel_connector *intel_connector);
 extern struct intel_hdmi *enc_to_intel_hdmi(struct drm_encoder *encoder);
