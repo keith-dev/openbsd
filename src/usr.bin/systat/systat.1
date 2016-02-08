@@ -1,4 +1,4 @@
-.\"	$OpenBSD: systat.1,v 1.57 2007/05/31 19:20:17 jmc Exp $
+.\"	$OpenBSD: systat.1,v 1.61 2007/11/22 18:20:04 jmc Exp $
 .\"	$NetBSD: systat.1,v 1.6 1996/05/10 23:16:39 thorpej Exp $
 .\"
 .\" Copyright (c) 1985, 1990, 1993
@@ -30,7 +30,7 @@
 .\"
 .\"	@(#)systat.1	8.2 (Berkeley) 12/30/93
 .\"
-.Dd $Mdocdate: May 31 2007 $
+.Dd $Mdocdate: November 22 2007 $
 .Dt SYSTAT 1
 .Os
 .Sh NAME
@@ -62,8 +62,7 @@ By default
 .Nm
 displays the processes getting the largest percentage of the processor
 in the lower window.
-Other displays show swap space usage, disk
-.Tn I/O
+Other displays include swap space usage, disk I/O
 statistics (a la
 .Xr iostat 8 ) ,
 virtual memory statistics (a la
@@ -125,7 +124,7 @@ The default interval is 5 seconds.
 .El
 .Pp
 Certain characters cause immediate action by
-.Nm systat .
+.Nm .
 These are
 .Bl -tag -width Fl
 .It Ic \&^L
@@ -137,13 +136,16 @@ being shown in
 the lower window and the refresh interval.
 .It Ic \&^Z
 Suspend
-.Nm systat .
+.Nm .
 .It Ic \&:
 Move the cursor to the command line and interpret the input
 line typed as a command.
 While entering a command the
 current character erase, word erase, and line kill characters
 may be used.
+.It Ic q
+Exit
+.Nm .
 .El
 .Pp
 The following commands are interpreted by the
@@ -157,7 +159,7 @@ Print the load average over the past 1, 5, and 15 minutes
 on the command line.
 .It Ic quit
 Exit
-.Nm systat .
+.Nm .
 (This may be abbreviated to
 .Ic q . )
 .It Ic stop
@@ -296,9 +298,7 @@ Areas known to the kernel but not in use are shown as not available.
 .It Ic vmstat
 Take over the entire display and show a (rather crowded) compendium
 of statistics related to virtual memory usage, process scheduling,
-device interrupts, system name translation caching, disk
-.Tn I/O
-etc.
+device interrupts, system name translation caching, disk I/O etc.
 .Pp
 The upper left quadrant of the screen shows the number
 of users logged in and the load average over the last 1, 5,
@@ -509,7 +509,6 @@ The
 program appeared in
 .Bx 4.3 .
 .Sh BUGS
-Takes 2-10 percent of the CPU.
 Certain displays presume a minimum of 80 characters per line.
 The
 .Ic vmstat

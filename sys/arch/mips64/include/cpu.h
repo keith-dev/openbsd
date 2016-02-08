@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.h,v 1.20 2007/07/18 20:03:50 miod Exp $	*/
+/*	$OpenBSD: cpu.h,v 1.22 2007/12/18 08:29:02 jasper Exp $	*/
 
 /*-
  * Copyright (c) 1992, 1993
@@ -400,11 +400,13 @@ extern int want_resched;	/* resched() was called */
  * CTL_MACHDEP definitions.
  */
 #define	CPU_ALLOWAPERTURE	1	/* allow mmap of /dev/xf86 */
-#define	CPU_MAXID		2	/* number of valid machdep ids */
+#define	CPU_KBDRESET		2	/* keyboard reset */
+#define	CPU_MAXID		3	/* number of valid machdep ids */
 
-#define CTL_MACHDEP_NAMES { \
-	{ 0, 0 }, \
-	{ "allowaperture", CTLTYPE_INT }, \
+#define CTL_MACHDEP_NAMES {			\
+	{ 0, 0 },				\
+	{ "allowaperture", CTLTYPE_INT },	\
+	{ "kbdreset", CTLTYPE_INT },		\
 }
 
 /*
@@ -434,7 +436,7 @@ extern int want_resched;	/* resched() was called */
 #define	MIPS_VR5400	0x54	/* NEC Vr5400 CPU		ISA IV+ */
 
 /*
- * MIPS FPU types. Only soft, rest is teh same as cpu type.
+ * MIPS FPU types. Only soft, rest is the same as cpu type.
  */
 #define	MIPS_SOFT	0x00	/* Software emulation		ISA I   */
 

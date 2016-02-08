@@ -1,4 +1,20 @@
-/* $OpenBSD: machdep.c,v 1.10 2007/06/06 17:15:11 deraadt Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.23 2008/01/23 16:37:58 jsing Exp $	*/
+/*
+ * Copyright (c) 2007 Miodrag Vallat.
+ *
+ * Permission to use, copy, modify, and distribute this software for any
+ * purpose with or without fee is hereby granted, provided that the above
+ * copyright notice, this permission notice, and the disclaimer below
+ * appear in all copies.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+ * WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+ * MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+ * ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+ * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+ * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
+ * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+/* $OpenBSD: machdep.c,v 1.23 2008/01/23 16:37:58 jsing Exp $	*/
 /*
  * Copyright (c) 1998, 1999, 2000, 2001 Steve Murphree, Jr.
  * Copyright (c) 1996 Nivas Madhur
@@ -65,17 +81,25 @@
 #include <sys/extent.h>
 #include <sys/core.h>
 #include <sys/kcore.h>
+#include <sys/device.h>
 
 #include <machine/asm.h>
 #include <machine/asm_macro.h>
 #include <machine/autoconf.h>
+#include <machine/avcommon.h>
 #include <machine/board.h>
+#include <machine/bus.h>
 #include <machine/cmmu.h>
 #include <machine/cpu.h>
 #include <machine/kcore.h>
 #include <machine/prom.h>
 #include <machine/reg.h>
 #include <machine/trap.h>
+#ifdef M88100
+#include <machine/m88100.h>
+#endif
+
+#include <aviion/dev/vmevar.h>
 
 #include <dev/cons.h>
 
@@ -96,13 +120,10 @@ void	consinit(void);
 __dead void doboot(void);
 void	dumpconf(void);
 void	dumpsys(void);
-u_int	getipl(void);
 void	identifycpu(void);
 void	savectx(struct pcb *);
 void	secondary_main(void);
-void	secondary_pre_main(void);
-
-intrhand_t intr_handlers[NVMEINTR];
+vaddr_t	secondary_pre_main(void);
 
 int physmem;	  /* available physical memory, in pages */
 
@@ -142,9 +163,11 @@ char bootargs[256];				/* local copy */
 u_int bootdev, bootunit, bootpart;		/* set in locore.S */
 
 int cputyp;					/* set in locore.S */
-int cpuspeed = 20;				/* safe guess */
 int avtyp;
 const struct board *platform;
+
+/* multiplication factor for delay() */
+u_int	aviion_delay_const = 33;
 
 vaddr_t first_addr;
 vaddr_t last_addr;
@@ -153,6 +176,12 @@ vaddr_t avail_start, avail_end;
 vaddr_t virtual_avail, virtual_end;
 
 extern struct user *proc0paddr;
+
+/*
+ * Interrupt masks, one per IPL level.
+ */
+u_int32_t int_mask_val[NIPLS];
+u_int32_t ext_int_mask_val[NIPLS];
 
 /*
  * This is to fake out the console routines, while booting.
@@ -170,7 +199,7 @@ struct consdev bootcons = {
 	nullcnpollc,
 	NULL,
 	makedev(14, 0),
-	CN_NORMAL
+	CN_LOWPRI
 };
 
 /*
@@ -195,11 +224,6 @@ consinit()
 void
 identifycpu()
 {
-#if 0
-	/* XXX FILL ME */
-	cpuspeed = getcpuspeed(&brdid);
-#endif
-
 	strlcpy(cpu_model, platform->descr, sizeof cpu_model);
 }
 
@@ -225,15 +249,13 @@ cpu_startup()
 {
 	caddr_t v;
 	int sz, i;
-	vsize_t size;
-	int base, residual;
 	vaddr_t minaddr, maxaddr;
 
 	/*
 	 * Initialize error message buffer (at end of core).
 	 * avail_end was pre-decremented in aviion_bootstrap() to compensate.
 	 */
-	for (i = 0; i < btoc(MSGBUFSIZE); i++)
+	for (i = 0; i < atop(MSGBUFSIZE); i++)
 		pmap_kenter_pa((paddr_t)msgbufp + i * PAGE_SIZE,
 		    avail_end + i * PAGE_SIZE, VM_PROT_READ | VM_PROT_WRITE);
 	pmap_update(pmap_kernel());
@@ -244,7 +266,8 @@ cpu_startup()
 	 */
 	printf(version);
 	identifycpu();
-	printf("real mem  = %d\n", ctob(physmem));
+	printf("real mem = %u (%uMB)\n", ptoa(physmem),
+	    ptoa(physmem)/1024/1024);
 
 	/*
 	 * Find out how much space we need, allocate it,
@@ -289,18 +312,13 @@ cpu_startup()
 	phys_map = uvm_km_suballoc(kernel_map, &minaddr, &maxaddr,
 	    VM_PHYS_SIZE, 0, FALSE, NULL);
 
-	printf("avail mem = %ld (%d pages)\n", ptoa(uvmexp.free), uvmexp.free);
+	printf("avail mem = %lu (%luMB)\n", ptoa(uvmexp.free),
+	    ptoa(uvmexp.free)/1024/1024);
 
 	/*
 	 * Set up buffers, so they can be used to read disk labels.
 	 */
 	bufinit();
-
-	/*
-	 * Set up interrupt handlers.
-	 */
-	for (i = 0; i < NVMEINTR; i++)
-		SLIST_INIT(&intr_handlers[i]);
 
 	/*
 	 * Configure the system.
@@ -431,7 +449,7 @@ dumpconf(void)
 
 	/* aviion only uses a single segment. */
 	cpu_kcore_hdr.ram_segs[0].start = 0;
-	cpu_kcore_hdr.ram_segs[0].size = ctob(physmem);
+	cpu_kcore_hdr.ram_segs[0].size = ptoa(physmem);
 	cpu_kcore_hdr.cputype = cputyp;
 
 	/*
@@ -566,11 +584,11 @@ abort:
 
 /*
  * Secondary CPU early initialization routine.
- * Determine CPU number and set it, then allocate the idle pcb (and stack).
+ * Determine CPU number and set it, then allocate its startup stack.
  *
  * Running on a minimal stack here, with interrupts disabled; do nothing fancy.
  */
-void
+vaddr_t
 secondary_pre_main()
 {
 	struct cpu_info *ci;
@@ -587,76 +605,46 @@ secondary_pre_main()
 	pmap_bootstrap_cpu(ci->ci_cpuid);
 
 	/*
-	 * Allocate UPAGES contiguous pages for the idle PCB and stack.
+	 * Allocate UPAGES contiguous pages for the startup stack.
 	 */
-	ci->ci_idle_pcb = (struct pcb *)uvm_km_zalloc(kernel_map, USPACE);
-	if (ci->ci_idle_pcb == NULL) {
-		printf("cpu%d: unable to allocate idle stack\n", ci->ci_cpuid);
+	init_stack = uvm_km_zalloc(kernel_map, USPACE);
+	if (init_stack == (vaddr_t)NULL) {
+		printf("cpu%d: unable to allocate startup stack\n",
+		    ci->ci_cpuid);
+		for (;;) ;
 	}
+
+	return (init_stack);
 }
 
 /*
  * Further secondary CPU initialization.
  *
- * We are now running on our idle stack, with proper page tables.
+ * We are now running on our startup stack, with proper page tables.
  * There is nothing to do but display some details about the CPU and its CMMUs.
  */
 void
 secondary_main()
 {
 	struct cpu_info *ci = curcpu();
+	int s;
 
 	cpu_configuration_print(0);
+	sched_init_cpu(ci);
 	ncpus++;
 	__cpu_simple_unlock(&cpu_mutex);
 
 	microuptime(&ci->ci_schedstate.spc_runtime);
 	ci->ci_curproc = NULL;
 
-	/*
-	 * Upon return, the secondary cpu bootstrap code in locore will
-	 * enter the idle loop, waiting for some food to process on this
-	 * processor.
-	 */
+	set_psr(get_psr() & ~PSR_IND);
+	spl0();
+
+	SCHED_LOCK(s);
+	cpu_switchto(NULL, sched_chooseproc());
 }
 
 #endif	/* MULTIPROCESSOR */
-
-/*
- * Try to insert ihand in the list of handlers for vector vec.
- */
-int
-intr_establish(int vec, struct intrhand *ihand, const char *name)
-{
-	struct intrhand *intr;
-	intrhand_t *list;
-
-	if (vec < 0 || vec >= NVMEINTR) {
-#ifdef DIAGNOSTIC
-		printf("intr_establish: vec (0x%x) not between 0x00 and 0xff\n",
-		      vec);
-#endif /* DIAGNOSTIC */
-		return (EINVAL);
-	}
-
-	list = &intr_handlers[vec];
-	if (!SLIST_EMPTY(list)) {
-		intr = SLIST_FIRST(list);
-		if (intr->ih_ipl != ihand->ih_ipl) {
-#ifdef DIAGNOSTIC
-			printf("intr_establish: there are other handlers with "
-			    "vec (0x%x) at ipl %x, but you want it at %x\n",
-			    vec, intr->ih_ipl, ihand->ih_ipl);
-#endif /* DIAGNOSTIC */
-			return (EINVAL);
-		}
-	}
-
-	evcount_attach(&ihand->ih_count, name, (void *)&ihand->ih_ipl,
-	    &evcount_intr);
-	SLIST_INSERT_HEAD(list, ihand, ih_link);
-	return (0);
-}
 
 void
 nmihand(void *frame)
@@ -728,6 +716,8 @@ cpu_sysctl(name, namelen, oldp, oldlenp, newp, newlen, p)
 			consdev = NODEV;
 		return (sysctl_rdstruct(oldp, oldlenp, newp, &consdev,
 		    sizeof consdev));
+	case CPU_CPUTYPE:
+		return (sysctl_rdint(oldp, oldlenp, newp, cputyp));
 	default:
 		return (EOPNOTSUPP);
 	}
@@ -801,11 +791,17 @@ aviion_bootstrap()
 	first_addr = round_page(first_addr);
 
 	last_addr = platform->memsize();
-	physmem = btoc(last_addr);
 
 	setup_board_config();
 	master_cpu = cmmu_init();
 	set_cpu_number(master_cpu);
+	SET(curcpu()->ci_flags, CIF_ALIVE | CIF_PRIMARY);
+
+#ifdef M88100
+	if (CPU_IS88100) {
+		m88100_apply_patches();
+	}
+#endif
 
 	/*
 	 * Now that set_cpu_number() set us with a valid cpu_info pointer,
@@ -822,7 +818,7 @@ aviion_bootstrap()
 
 	/* Steal MSGBUFSIZE at the top of physical memory for msgbuf. */
 	avail_end -= round_page(MSGBUFSIZE);
-	pmap_bootstrap((vaddr_t)trunc_page((unsigned)&kernelstart));
+	pmap_bootstrap((vaddr_t)trunc_page((vaddr_t)&kernelstart));
 
 	/*
 	 * Tell the VM system about available physical memory.
@@ -865,7 +861,7 @@ bootcnprobe(cp)
 	struct consdev *cp;
 {
 	cp->cn_dev = makedev(0, 0);
-	cp->cn_pri = CN_NORMAL;
+	cp->cn_pri = CN_LOWPRI;
 }
 
 void
@@ -893,53 +889,60 @@ bootcnputc(dev, c)
 		scm_putc(c);
 }
 
-u_int
+int
 getipl(void)
 {
-	u_int curspl, psr;
-
-	disable_interrupt(psr);
-	curspl = platform->getipl();
-	set_psr(psr);
-	return curspl;
+	return (int)platform->getipl();
 }
 
-u_int
-setipl(u_int level)
+int
+setipl(int level)
 {
-	u_int curspl, psr;
-
-	disable_interrupt(psr);
-	curspl = platform->setipl(level);
-
-	/*
-	 * The flush pipeline is required to make sure the above change gets
-	 * through the data pipe and to the hardware; otherwise, the next
-	 * bunch of instructions could execute at the wrong spl protection.
-	 */
-	flush_pipeline();
-
-	set_psr(psr);
-	return curspl;
+	return (int)platform->setipl((u_int)level);
 }
 
-u_int
-raiseipl(u_int level)
+int
+raiseipl(int level)
 {
-	u_int curspl, psr;
+	return (int)platform->raiseipl((u_int)level);
+}
 
-	disable_interrupt(psr);
-	curspl = platform->raiseipl(level);
+void
+intsrc_enable(u_int intsrc, int ipl)
+{
+	u_int32_t psr;
+	u_int64_t intmask = platform->intsrc(intsrc);
+	int i;
 
-	/*
-	 * The flush pipeline is required to make sure the above change gets
-	 * through the data pipe and to the hardware; otherwise, the next
-	 * bunch of instructions could execute at the wrong spl protection.
-	 */
-	flush_pipeline();
+	psr = get_psr();
+	set_psr(psr | PSR_IND);
+
+	for (i = IPL_NONE; i < ipl; i++) {
+		int_mask_val[i] |= (u_int32_t)intmask;
+		ext_int_mask_val[i] |= (u_int32_t)(intmask >> 32);
+	}
+	setipl(getipl());
 
 	set_psr(psr);
-	return curspl;
+}
+
+void
+intsrc_disable(u_int intsrc)
+{
+	u_int32_t psr;
+	u_int64_t intmask = platform->intsrc(intsrc);
+	int i;
+
+	psr = get_psr();
+	set_psr(psr | PSR_IND);
+
+	for (i = 0; i < NIPLS; i++) {
+		int_mask_val[i] &= ~((u_int32_t)intmask);
+		ext_int_mask_val[i] &= ~((u_int32_t)(intmask >> 32));
+	}
+	setipl(getipl());
+
+	set_psr(psr);
 }
 
 u_char hostaddr[6];

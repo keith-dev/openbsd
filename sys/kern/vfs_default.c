@@ -1,4 +1,4 @@
-/*	$OpenBSD: vfs_default.c,v 1.34 2007/06/01 23:47:56 deraadt Exp $  */
+/*	$OpenBSD: vfs_default.c,v 1.36 2007/12/27 13:59:12 thib Exp $  */
 
 /*
  * Portions of this code are:
@@ -68,6 +68,18 @@ vop_generic_revoke(void *v)
 
 	vp = ap->a_vp;
  
+	if (vp->v_type == VBLK && vp->v_specinfo != 0) {
+		struct mount *mp = vp->v_specmountpoint;
+
+		/*
+		 * If we have a mount point associated with the vnode, we must
+		 * flush it out now, as to not leave a dangling zombie mount
+		 * point laying around in VFS.
+		 */
+		if (mp != NULL && !vfs_busy(mp, VB_WRITE|VB_WAIT))
+			dounmount(mp, MNT_FORCE | MNT_DOOMED, p, NULL);
+	}
+
 	if (vp->v_flag & VALIASED) {
 		/*
 		 * If a vgone (or vclean) is already in progress,
@@ -177,6 +189,16 @@ vop_generic_kqfilter(void *v)
 	}
 
 	return (0);
+}
+
+/* Trivial lookup routine that always fails. */
+int
+vop_generic_lookup(void *v)
+{
+	struct vop_lookup_args	*ap = v;
+
+	*ap->a_vpp = NULL;
+	return (ENOTDIR);
 }
 
 void

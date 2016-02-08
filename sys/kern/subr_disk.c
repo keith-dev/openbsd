@@ -1,4 +1,4 @@
-/*	$OpenBSD: subr_disk.c,v 1.64 2007/08/05 04:26:21 krw Exp $	*/
+/*	$OpenBSD: subr_disk.c,v 1.68 2007/12/23 01:59:58 dlg Exp $	*/
 /*	$NetBSD: subr_disk.c,v 1.17 1996/03/16 23:17:08 christos Exp $	*/
 
 /*
@@ -466,6 +466,11 @@ donot:
 				n++;
 				break;
 
+			case DOSPTYP_NTFS:
+				pp->p_fstype = FS_NTFS;
+				n++;
+				break;
+
 			case DOSPTYP_FAT12:
 			case DOSPTYP_FAT16S:
 			case DOSPTYP_FAT16B:
@@ -610,6 +615,9 @@ bounds_check_with_label(struct buf *bp, struct disklabel *lp, int wlabel)
 	if (lp->d_secpercyl == 0)
 		goto bad;
 
+	if (bp->b_blkno < 0 || sz < 0)
+		panic("bounds_check_with_label %lld %lld\n", bp->b_blkno, sz);
+
 	/* beyond partition? */
 	if (bp->b_blkno + sz > blockpersec(DL_GETPSIZE(p), lp)) {
 		sz = blockpersec(DL_GETPSIZE(p), lp) - bp->b_blkno;
@@ -704,6 +712,7 @@ int
 disk_construct(struct disk *diskp, char *lockname)
 {
 	rw_init(&diskp->dk_lock, lockname);
+	mtx_init(&diskp->dk_mtx, IPL_BIO);
 	
 	diskp->dk_flags |= DKF_CONSTRUCTED;
 	    
@@ -725,11 +734,10 @@ disk_attach(struct disk *diskp)
 	 * it's not safe to sleep here, since we're probably going to be
 	 * called during autoconfiguration.
 	 */
-	diskp->dk_label = malloc(sizeof(struct disklabel), M_DEVBUF, M_NOWAIT);
+	diskp->dk_label = malloc(sizeof(struct disklabel), M_DEVBUF,
+	    M_NOWAIT|M_ZERO);
 	if (diskp->dk_label == NULL)
 		panic("disk_attach: can't allocate storage for disklabel");
-
-	bzero(diskp->dk_label, sizeof(struct disklabel));
 
 	/*
 	 * Set the attached timestamp.
@@ -777,9 +785,10 @@ disk_busy(struct disk *diskp)
 	 * XXX We'd like to use something as accurate as microtime(),
 	 * but that doesn't depend on the system TOD clock.
 	 */
-	if (diskp->dk_busy++ == 0) {
+	mtx_enter(&diskp->dk_mtx);
+	if (diskp->dk_busy++ == 0)
 		microuptime(&diskp->dk_timestamp);
-	}
+	mtx_leave(&diskp->dk_mtx);
 }
 
 /*
@@ -790,6 +799,8 @@ void
 disk_unbusy(struct disk *diskp, long bcount, int read)
 {
 	struct timeval dv_time, diff_time;
+
+	mtx_enter(&diskp->dk_mtx);
 
 	if (diskp->dk_busy-- == 0)
 		printf("disk_unbusy: %s: dk_busy < 0\n", diskp->dk_name);
@@ -810,6 +821,8 @@ disk_unbusy(struct disk *diskp, long bcount, int read)
 		}
 	} else
 		diskp->dk_seek++;
+
+	mtx_leave(&diskp->dk_mtx);
 
 	add_disk_randomness(bcount ^ diff_time.tv_usec);
 }
@@ -911,11 +924,10 @@ bufq_default_alloc(void)
 {
 	struct bufq_default *bq;
 
-	bq = malloc(sizeof(*bq), M_DEVBUF, M_NOWAIT);
+	bq = malloc(sizeof(*bq), M_DEVBUF, M_NOWAIT|M_ZERO);
 	if (bq == NULL)
 		panic("bufq_default_alloc: no memory");
 
-	memset(bq, 0, sizeof(*bq));
 	bq->bufq.bufq_free = bufq_default_free;
 	bq->bufq.bufq_add = bufq_default_add;
 	bq->bufq.bufq_get = bufq_default_get;

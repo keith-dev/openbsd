@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.c,v 1.43 2007/05/23 23:40:21 kettenis Exp $ */
+/*	$OpenBSD: cpu.c,v 1.46 2008/02/15 17:33:51 drahn Exp $ */
 
 /*
  * Copyright (c) 1997 Per Fogelstrom
@@ -55,6 +55,7 @@
 #define HID0_LRSTK	(1 << (31-27))
 #define HID0_FOLD	(1 << (31-28))
 #define HID0_BHT	(1 << (31-29))
+extern u_int32_t	hid0_idle;
 
 /* SCOM addresses (24-bit) */
 #define SCOM_PCR	0x0aa001 /* Power Control Register */
@@ -376,16 +377,18 @@ cpuattach(struct device *parent, struct device *dev, void *aux)
 	case PPC_CPU_IBM750FX:
 	case PPC_CPU_MPC7410:
 		/* select DOZE mode */
-		hid0 &= ~(HID0_NAP | HID0_SLEEP);
-		hid0 |= HID0_DOZE | HID0_DPM;
+		hid0 &= ~(HID0_NAP | HID0_DOZE | HID0_SLEEP);
+		hid0_idle = HID0_DOZE;
+		hid0 |= HID0_DPM;
 		break;
 	case PPC_CPU_MPC7447A:
 	case PPC_CPU_MPC7450:
 	case PPC_CPU_MPC7455:
 	case PPC_CPU_MPC7457:
 		/* select NAP mode */
-		hid0 &= ~(HID0_DOZE | HID0_SLEEP);
-		hid0 |= HID0_NAP | HID0_DPM;
+		hid0 &= ~(HID0_NAP | HID0_DOZE | HID0_SLEEP);
+		hid0_idle = HID0_NAP;
+		hid0 |= HID0_DPM;
 		/* try some other flags */
 		hid0 |= HID0_SGE | HID0_BTIC;
 		hid0 |= HID0_LRSTK | HID0_FOLD | HID0_BHT;
@@ -395,8 +398,8 @@ cpuattach(struct device *parent, struct device *dev, void *aux)
 		break;
 	case PPC_CPU_IBM970FX:
 		/* select NAP mode */
-		hid0 &= ~(HID0_DOZE | HID0_SLEEP);
-		hid0 |= HID0_NAP | HID0_DPM;
+		hid0 &= ~(HID0_NAP | HID0_DOZE | HID0_SLEEP);
+		hid0 |= HID0_DPM;
 		break;
 	}
 	if (ppc_proc_is_64b == 0)
@@ -554,14 +557,13 @@ struct cpu_hatch_data {
 };
 
 volatile struct cpu_hatch_data *cpu_hatch_data;
-volatile int cpu_hatch_stack;
+volatile void *cpu_hatch_stack;
 
 int
 cpu_spinup(struct device *self, struct cpu_info *ci)
 {
 	volatile struct cpu_hatch_data hatch_data, *h = &hatch_data;
 	int i;
-	struct pcb *pcb;
 	struct pglist mlist;
 	struct vm_page *m;
 	int error;
@@ -570,10 +572,9 @@ cpu_spinup(struct device *self, struct cpu_info *ci)
 	u_char *reset_cpu;
 
         /*
-         * Allocate some contiguous pages for the idle PCB and stack
+         * Allocate some contiguous pages for the interrupt stack
          * from the lowest 256MB (because bat0 always maps it va == pa).
          */
-        size += USPACE;
         size += INTSTK;
         size += 4096;   /* SPILLSTK */
 
@@ -588,16 +589,8 @@ cpu_spinup(struct device *self, struct cpu_info *ci)
 	cp = (char *)VM_PAGE_TO_PHYS(m);
 	bzero(cp, size);
 
-        pcb = (struct pcb *)cp;
-        ci->ci_idle_pcb = pcb;
-        ci->ci_intstk = cp + USPACE + INTSTK;
-
-        /*
-         * Initialize the idle stack pointer, reserving space for an
-         * (empty) trapframe (XXX is the trapframe really necessary?)
-         */
-        pcb->pcb_sp = (paddr_t)pcb + USPACE - sizeof(struct trapframe);
-	cpu_hatch_stack = ci->ci_idle_pcb->pcb_sp;
+	ci->ci_intstk = cp + INTSTK;
+	cpu_hatch_stack = ci->ci_intstk - sizeof(struct trapframe);
 
 	h->ci = ci;
 	h->running = 0;
@@ -676,7 +669,7 @@ void
 cpu_hatch(void)
 {
 	volatile struct cpu_hatch_data *h = cpu_hatch_data;
-	int scratch, i;
+	int scratch, i, s;
 
         /* Initialize timebase. */
         __asm ("mttbl %0; mttbu %0; mttbl %0" :: "r"(0));
@@ -759,5 +752,12 @@ cpu_hatch(void)
 
 	curcpu()->ci_ipending = 0;
 	curcpu()->ci_cpl = 0;
+
+	s = splhigh();
+	microuptime(&curcpu()->ci_schedstate.spc_runtime);
+	splx(s);
+
+	SCHED_LOCK(s);
+	cpu_switchto(NULL, sched_chooseproc());
 }
 #endif

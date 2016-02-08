@@ -1,4 +1,4 @@
-/*	$OpenBSD: conf.c,v 1.15 2007/08/02 16:40:27 deraadt Exp $	*/
+/*	$OpenBSD: conf.c,v 1.17 2007/11/25 17:11:12 oga Exp $	*/
 
 /*
  * Copyright (c) 1994, 1995 Charles M. Hannum.  All rights reserved.
@@ -100,7 +100,7 @@ int	nblkdev = sizeof(bdevsw) / sizeof(bdevsw[0]);
 #define cdev_ocis_init(c,n) { \
         dev_init(c,n,open), dev_init(c,n,close), (dev_type_read((*))) enodev, \
         (dev_type_write((*))) enodev, dev_init(c,n,ioctl), \
-        (dev_type_stop((*))) enodev, 0,  dev_init(c,n,select), \
+        (dev_type_stop((*))) enodev, 0,  dev_init(c,n,poll), \
         (dev_type_mmap((*))) enodev, 0 }
 
 /* open, close, read */
@@ -151,6 +151,7 @@ cdev_decl(mcd);
 cdev_decl(music);
 #include "acpi.h"
 #include "bthub.h"
+#include "pctr.h"
 #include "iop.h"
 #ifdef XFS
 #include <xfs/nxfs.h>
@@ -170,6 +171,8 @@ cdev_decl(cztty);
 #include "radio.h"
 #include "nvram.h"
 cdev_decl(nvram);
+#include "agp.h"
+cdev_decl(agp);
 
 #include "wsdisplay.h"
 #include "wskbd.h"
@@ -241,7 +244,7 @@ struct cdevsw	cdevsw[] =
 #endif
 	cdev_notdef(),			/* 44 */
 	cdev_random_init(1,random),	/* 45: random data source */
-	cdev_notdef(),			/* 46 */
+	cdev_ocis_init(NPCTR,pctr),	/* 46: performance counters */
 	cdev_disk_init(NRD,rd),		/* 47: ram disk driver */
 	cdev_notdef(),			/* 48 */
 	cdev_bktr_init(NBKTR,bktr),     /* 49: Bt848 video capture device */
@@ -292,6 +295,7 @@ struct cdevsw	cdevsw[] =
 	cdev_acpi_init(NACPI,acpi),	/* 83: ACPI */
 	cdev_bthub_init(NBTHUB,bthub),	/* 84: bthub */
 	cdev_nvram_init(NNVRAM,nvram),	/* 85: NVRAM interface */
+	cdev_agp_init(NAGP,agp),	/* 86: agp */
 };
 int	nchrdev = sizeof(cdevsw) / sizeof(cdevsw[0]);
 

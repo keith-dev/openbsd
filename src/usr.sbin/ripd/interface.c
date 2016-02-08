@@ -1,4 +1,4 @@
-/*	$OpenBSD: interface.c,v 1.2 2006/11/28 19:21:15 reyk Exp $ */
+/*	$OpenBSD: interface.c,v 1.5 2007/10/24 19:50:33 claudio Exp $ */
 
 /*
  * Copyright (c) 2006 Michele Marchetto <mydecay@openbeer.it>
@@ -44,7 +44,6 @@ extern struct ripd_conf	*conf;
 
 int	 if_act_start(struct iface *);
 int	 if_act_reset(struct iface *);
-void	 if_keepalive_timer(int, short, void *);
 
 struct {
 	int			state;
@@ -134,7 +133,7 @@ if_fsm(struct iface *iface, enum iface_event event)
 struct iface *
 if_find_index(u_short ifindex)
 {
-	struct iface    *iface;
+	struct iface	 *iface;
 
 	LIST_FOREACH(iface, &conf->iface_list, entry) {
 		if (iface->ifindex == ifindex)
@@ -296,7 +295,7 @@ if_set_mcast(struct iface *iface)
 int
 if_set_mcast_loop(int fd)
 {
-	u_int8_t        loop = 0;
+	u_int8_t	 loop = 0;
 
 	if (setsockopt(fd, IPPROTO_IP, IP_MULTICAST_LOOP,
 	    (char *)&loop, sizeof(loop)) < 0) {
@@ -310,7 +309,7 @@ if_set_mcast_loop(int fd)
 void
 if_set_recvbuf(int fd)
 {
-	int     bsize;
+	int	 bsize;
 
 	bsize = 65535;
 	while (setsockopt(fd, SOL_SOCKET, SO_RCVBUF, &bsize,
@@ -343,7 +342,7 @@ if_join_group(struct iface *iface, struct in_addr *addr)
 int
 if_leave_group(struct iface *iface, struct in_addr *addr)
 {
-	struct ip_mreq   mreq;
+	struct ip_mreq	 mreq;
 
 	switch (iface->type) {
 	case IF_TYPE_POINTOPOINT:
@@ -365,10 +364,10 @@ if_leave_group(struct iface *iface, struct in_addr *addr)
 struct iface *
 if_new(struct kif *kif)
 {
-	struct sockaddr_in      *sain;
-	struct iface            *iface;
-	struct ifreq            *ifr;
-	int                      s;
+	struct sockaddr_in	*sain;
+	struct iface		*iface;
+	struct ifreq		*ifr;
+	int			s;
 
 	if ((iface = calloc(1, sizeof(*iface))) == NULL)
 		err(1, "if_new: calloc");
@@ -406,6 +405,7 @@ if_new(struct kif *kif)
 	iface->flags = kif->flags;
 	iface->linkstate = kif->link_state;
 	iface->media_type = kif->media_type;
+	iface->baudrate = kif->baudrate;
 
 	/* get address */
 	if (ioctl(s, SIOCGIFADDR, ifr) < 0)

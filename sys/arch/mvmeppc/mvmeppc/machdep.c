@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.53 2007/05/26 20:26:51 pedro Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.55 2008/01/23 16:37:57 jsing Exp $	*/
 /*	$NetBSD: machdep.c,v 1.4 1996/10/16 19:33:11 ws Exp $	*/
 
 /*
@@ -104,7 +104,7 @@ static struct consdev bootcons = {
 	bootcnpollc,
 	NULL,
 	makedev(14, 0), 
-	CN_NORMAL,
+	CN_LOWPRI,
 };
 
 /* 
@@ -284,15 +284,15 @@ initppc(startkernel, endkernel, args)
 	/* MVME2[67]00 max out at 256MB, and we need BAT2 for now. */
 #else
 	/* use BATs to map 1GB memory, no pageable BATs now */
-	if (physmem > btoc(0x10000000)) {
+	if (physmem > atop(0x10000000)) {
 		ppc_mtdbat1l(BATL(0x10000000, BAT_M));
 		ppc_mtdbat1u(BATU(0x10000000));
 	}
-	if (physmem > btoc(0x20000000)) {
+	if (physmem > atop(0x20000000)) {
 		ppc_mtdbat2l(BATL(0x20000000, BAT_M));
 		ppc_mtdbat2u(BATU(0x20000000));
 	}
-	if (physmem > btoc(0x30000000)) {
+	if (physmem > atop(0x30000000)) {
 		ppc_mtdbat3l(BATL(0x30000000, BAT_M));
 		ppc_mtdbat3u(BATU(0x30000000));
 	}
@@ -395,8 +395,8 @@ cpu_startup()
 
 	printf("%s", version);
 	
-	printf("real mem = %u (%uMB)\n", ctob(physmem),
-	    ctob(physmem)/1024/1024);
+	printf("real mem = %u (%uMB)\n", ptoa(physmem),
+	    ptoa(physmem)/1024/1024);
 
 	/*
 	 * Find out how much space we need, allocate it,

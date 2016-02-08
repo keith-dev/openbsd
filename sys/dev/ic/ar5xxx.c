@@ -1,4 +1,4 @@
-/*	$OpenBSD: ar5xxx.c,v 1.42 2007/06/26 10:53:01 tom Exp $	*/
+/*	$OpenBSD: ar5xxx.c,v 1.47 2007/12/03 19:14:04 fgsch Exp $	*/
 
 /*
  * Copyright (c) 2004, 2005, 2006, 2007 Reyk Floeter <reyk@openbsd.org>
@@ -65,6 +65,10 @@ static const struct {
 	{ PCI_VENDOR_ATHEROS, PCI_PRODUCT_ATHEROS_AR5413,
 	    ar5k_ar5212_attach },
 	{ PCI_VENDOR_ATHEROS, PCI_PRODUCT_ATHEROS_AR5424,
+	    ar5k_ar5212_attach },
+	{ PCI_VENDOR_ATHEROS, PCI_PRODUCT_ATHEROS_AR5416,
+	    ar5k_ar5212_attach },
+	{ PCI_VENDOR_ATHEROS, PCI_PRODUCT_ATHEROS_AR5418,
 	    ar5k_ar5212_attach },
 	{ PCI_VENDOR_3COM, PCI_PRODUCT_3COM_3CRDAG675,
 	    ar5k_ar5212_attach },
@@ -174,13 +178,11 @@ ath_hal_attach(u_int16_t device, void *arg, bus_space_tag_t st,
 	}
 
 	if ((hal = malloc(sizeof(struct ath_hal),
-		 M_DEVBUF, M_NOWAIT)) == NULL) {
+		 M_DEVBUF, M_NOWAIT | M_ZERO)) == NULL) {
 		*status = ENOMEM;
 		AR5K_PRINT("out of memory\n");
 		return (NULL);
 	}
-
-	bzero(hal, sizeof(struct ath_hal));
 
 	hal->ah_sc = sc;
 	hal->ah_st = st;
@@ -272,9 +274,16 @@ ath_hal_attach(u_int16_t device, void *arg, bus_space_tag_t st,
 	/* Get rate tables */
 	if (hal->ah_capabilities.cap_mode & HAL_MODE_11A)
 		ar5k_rt_copy(&hal->ah_rt_11a, &ar5k_rt_11a);
-	if (hal->ah_capabilities.cap_mode & HAL_MODE_11B)
+	if (hal->ah_capabilities.cap_mode & HAL_MODE_11B) {
 		ar5k_rt_copy(&hal->ah_rt_11b, &ar5k_rt_11b);
-	if (hal->ah_capabilities.cap_mode & HAL_MODE_11G)
+		/*
+		 * XXX Workaround for AR24xx/AR54xx and newer chipsets
+		 * XXX to limit 11b operation to 1-2Mbit/s. This
+		 * XXX needs to be fixed but allows basic operation for now.
+		 */
+		if (hal->ah_single_chip == AH_TRUE)
+			hal->ah_rt_11b.rateCount = 2;
+	} if (hal->ah_capabilities.cap_mode & HAL_MODE_11G)
 		ar5k_rt_copy(&hal->ah_rt_11g, &ar5k_rt_11g);
 	if (hal->ah_capabilities.cap_mode & HAL_MODE_TURBO)
 		ar5k_rt_copy(&hal->ah_rt_turbo, &ar5k_rt_turbo);
@@ -397,7 +406,7 @@ ath_hal_init_channels(struct ath_hal *hal, HAL_CHANNEL *channels,
 	HAL_CHANNEL *all_channels;
 
 	if ((all_channels = malloc(sizeof(HAL_CHANNEL) * max_channels,
-	    M_TEMP, M_NOWAIT)) == NULL)
+	    M_TEMP, M_NOWAIT | M_ZERO)) == NULL)
 		return (AH_FALSE);
 
 	i = c = 0;
@@ -1257,12 +1266,26 @@ ar5k_ar5112_channel(struct ath_hal *hal, HAL_CHANNEL *channel)
 	u_int16_t c;
 
 	data = data0 = data1 = data2 = 0;
-	c = channel->c_channel;
+	c = channel->c_channel + hal->ah_chanoff;
 
 	/*
 	 * Set the channel on the AR5112 or newer
 	 */
 	if (c < 4800) {
+		/*
+		 * XXX Workaround for AR24xx/AR54xx and newer chipsets to
+		 * XXX set the 2GHz channels correctly.
+		 * XXX This needs to be replaced with a true algorithm
+		 * XXX after figuring out how to calculate the Atheros
+		 * XXX channel for these chipsets.
+		 */
+		if (hal->ah_single_chip == AH_TRUE) {
+			c += c < 2427 ? -45 :		/* channel 1-3 */
+			    (c < 2447 ? -40 :		/* channel 4-7 */
+			    (c < 2462 ? -35 :		/* channel 8-10 */
+			    (c < 2477 ? -30 : -25)));	/* channel 11-13 */
+		}
+
 		if (!((c - 2224) % 5)) {
 			data0 = ((2 * (c - 704)) - 3040) / 10;
 			data1 = 1;
@@ -1498,7 +1521,7 @@ ar5k_rfregs(struct ath_hal *hal, HAL_CHANNEL *channel, u_int mode)
 	if (hal->ah_rf_banks == NULL) {
 		/* XXX do extra checks? */
 		if ((hal->ah_rf_banks = malloc(hal->ah_rf_banks_size,
-		    M_DEVBUF, M_NOWAIT)) == NULL) {
+		    M_DEVBUF, M_NOWAIT | M_ZERO)) == NULL) {
 			AR5K_PRINT("out of memory\n");
 			return (AH_FALSE);
 		}
@@ -1542,10 +1565,11 @@ ar5k_ar5111_rfregs(struct ath_hal *hal, HAL_CHANNEL *channel, u_int mode)
 	}
 
 	if (channel->c_channel_flags & IEEE80211_CHAN_2GHZ) {
-		if (channel->c_channel_flags & IEEE80211_CHAN_B)
-			ee_mode = AR5K_EEPROM_MODE_11B;
-		else
+		if ((channel->c_channel_flags & IEEE80211_CHAN_G) ==
+		    IEEE80211_CHAN_G)
 			ee_mode = AR5K_EEPROM_MODE_11G;
+		else
+			ee_mode = AR5K_EEPROM_MODE_11B;
 		obdb = 0;
 
 		if (!ar5k_rfregs_op(rf, hal->ah_offset[0],
@@ -1646,10 +1670,11 @@ ar5k_ar5112_rfregs(struct ath_hal *hal, HAL_CHANNEL *channel, u_int mode)
 	}
 
 	if (channel->c_channel_flags & IEEE80211_CHAN_2GHZ) {
-		if (channel->c_channel_flags & IEEE80211_CHAN_B)
-			ee_mode = AR5K_EEPROM_MODE_11B;
-		else
+		if ((channel->c_channel_flags & IEEE80211_CHAN_G) ==
+		    IEEE80211_CHAN_G)
 			ee_mode = AR5K_EEPROM_MODE_11G;
+		else
+			ee_mode = AR5K_EEPROM_MODE_11B;
 		obdb = 0;
 
 		if (!ar5k_rfregs_op(rf, hal->ah_offset[6],

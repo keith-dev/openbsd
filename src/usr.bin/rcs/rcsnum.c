@@ -1,4 +1,4 @@
-/*	$OpenBSD: rcsnum.c,v 1.7 2007/05/29 00:19:10 ray Exp $	*/
+/*	$OpenBSD: rcsnum.c,v 1.10 2008/01/31 16:36:11 tobias Exp $	*/
 /*
  * Copyright (c) 2004 Jean-Francois Brousseau <jfb@openbsd.org>
  * All rights reserved.
@@ -53,6 +53,24 @@ rcsnum_alloc(void)
 	rnp->rn_id = NULL;
 
 	return (rnp);
+}
+
+/*
+ * rcsnum_addmagic()
+ *
+ * Adds a magic branch number to an RCS number.
+ * Returns 0 on success, or -1 on failure.
+ */
+int
+rcsnum_addmagic(RCSNUM *rn)
+{
+	if (!rn->rn_len || rn->rn_len > RCSNUM_MAXLEN - 1)
+		return -1;
+	rcsnum_setsize(rn, rn->rn_len + 1);
+	rn->rn_id[rn->rn_len - 1] = rn->rn_id[rn->rn_len - 2];
+	rn->rn_id[rn->rn_len - 2] = 0;
+
+	return 0;
 }
 
 /*
@@ -281,9 +299,9 @@ rcsnum_aton(const char *str, char **ep, RCSNUM *nump)
 				s--;
 
 			/*
-			 * If we have a "magic" branch, adjust it
-			 * so the .0. is removed.
-			 */
+	 		 * If we have a "magic" branch, adjust it
+	 		 * so the .0. is removed.
+	 		 */
 			if (!strncmp(s, RCS_MAGIC_BRANCH,
 			    strlen(RCS_MAGIC_BRANCH))) {
 				nump->rn_id[nump->rn_len - 1] =
@@ -295,10 +313,10 @@ rcsnum_aton(const char *str, char **ep, RCSNUM *nump)
 
 	/* We can't have a single-digit rcs number. */
 	if (nump->rn_len == 0) {
+		nump->rn_len++;
 		nump->rn_id = xrealloc(nump->rn_id,
 		    nump->rn_len + 1, sizeof(*(nump->rn_id)));
-		nump->rn_id[nump->rn_len + 1] = 0;
-		nump->rn_len++;
+		nump->rn_id[nump->rn_len] = 0;
 	}
 
 	nump->rn_len++;

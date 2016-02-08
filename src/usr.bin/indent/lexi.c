@@ -1,4 +1,4 @@
-/*	$OpenBSD: lexi.c,v 1.12 2005/03/06 14:34:25 millert Exp $	*/
+/*	$OpenBSD: lexi.c,v 1.14 2007/11/27 16:22:14 martynas Exp $	*/
 
 /*
  * Copyright (c) 1980, 1993
@@ -34,7 +34,7 @@
 
 #ifndef lint
 /*static char sccsid[] = "@(#)lexi.c	8.1 (Berkeley) 6/6/93";*/
-static char rcsid[] = "$OpenBSD: lexi.c,v 1.12 2005/03/06 14:34:25 millert Exp $";
+static char rcsid[] = "$OpenBSD: lexi.c,v 1.14 2007/11/27 16:22:14 martynas Exp $";
 #endif /* not lint */
 
 /*
@@ -228,7 +228,7 @@ lexi(void)
 	    ps.last_u_d = true;
 	    return (decl);
 	}
-	ps.last_u_d = false;	/* Operator after indentifier is binary */
+	ps.last_u_d = false;	/* Operator after identifier is binary */
 	last_code = ident;	/* Remember that this is the code we will
 				 * return */
 
@@ -579,7 +579,7 @@ addkey(char *key, int val)
 	 */
 	nspecials = sizeof (specialsinit) / sizeof (specialsinit[0]);
 	maxspecials = nspecials + (nspecials >> 2);
-	specials = (struct templ *)malloc(maxspecials * sizeof specials[0]);
+	specials = (struct templ *)calloc(maxspecials, sizeof specials[0]);
 	if (specials == NULL)
 	    err(1, NULL);
 	memcpy(specials, specialsinit, sizeof specialsinit);

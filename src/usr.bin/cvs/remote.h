@@ -1,4 +1,4 @@
-/*	$OpenBSD: remote.h,v 1.24 2007/07/03 13:22:43 joris Exp $	*/
+/*	$OpenBSD: remote.h,v 1.32 2008/02/27 22:34:04 joris Exp $	*/
 /*
  * Copyright (c) 2006 Joris Vink <joris@openbsd.org>
  *
@@ -44,8 +44,12 @@ extern int server_response;
 #define SERVER_OK	0
 #define SERVER_ERROR	1
 
+#define CVS_SERVER_UNCHANGED	"d[o.o]b"
+#define CVS_SERVER_UPTODATE	(time_t)-2
+
 void	cvs_client_connect_to_server(void);
 void	cvs_client_disconnect(void);
+void	cvs_client_send_logmsg(char *);
 void	cvs_client_send_request(char *, ...);
 void	cvs_client_read_response(void);
 void	cvs_client_get_responses(void);
@@ -97,11 +101,15 @@ void	cvs_server_annotate(char *);
 void	cvs_server_commit(char *);
 void	cvs_server_checkout(char *);
 void	cvs_server_diff(char *);
+void	cvs_server_export(char *);
 void	cvs_server_init(char *);
 void	cvs_server_log(char *);
+void	cvs_server_rannotate(char *);
+void	cvs_server_rdiff(char *);
 void	cvs_server_release(char *);
 void	cvs_server_remove(char *);
 void	cvs_server_rlog(char *);
+void	cvs_server_rtag(char *);
 void	cvs_server_status(char *);
 void	cvs_server_tag(char *);
 void	cvs_server_update(char *);
@@ -111,7 +119,7 @@ void	cvs_remote_classify_file(struct cvs_file *);
 void	cvs_remote_output(const char *);
 char	*cvs_remote_input(void);
 void	cvs_remote_receive_file(int, size_t);
-void	cvs_remote_send_file(const char *);
+void	cvs_remote_send_file(const char *, int);
 
 extern int cvs_client_inlog_fd;
 extern int cvs_client_outlog_fd;
@@ -121,5 +129,7 @@ extern struct cvs_resp cvs_responses[];
 
 struct cvs_req *cvs_remote_get_request_info(const char *);
 struct cvs_resp *cvs_remote_get_response_info(const char *);
+
+void	cvs_validate_directory(const char *);
 
 #endif

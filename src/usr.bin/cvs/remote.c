@@ -1,4 +1,4 @@
-/*	$OpenBSD: remote.c,v 1.15 2007/05/16 19:40:45 xsa Exp $	*/
+/*	$OpenBSD: remote.c,v 1.21 2008/02/27 22:34:04 joris Exp $	*/
 /*
  * Copyright (c) 2006 Joris Vink <joris@openbsd.org>
  *
@@ -23,6 +23,7 @@
 #include <string.h>
 #include <unistd.h>
 
+#include "atomicio.h"
 #include "cvs.h"
 #include "remote.h"
 
@@ -56,6 +57,8 @@ void
 cvs_remote_output(const char *data)
 {
 	FILE *out;
+	size_t len;
+	char nl = '\n';
 
 	if (cvs_server_active)
 		out = stdout;
@@ -64,6 +67,13 @@ cvs_remote_output(const char *data)
 
 	fputs(data, out);
 	fputs("\n", out);
+
+	if (cvs_server_active == 0 && cvs_client_inlog_fd != -1) {
+		len = strlen(data);
+		if (atomicio(vwrite, cvs_client_inlog_fd, data, len) != len ||
+		    atomicio(vwrite, cvs_client_inlog_fd, &nl, 1) != 1)
+			fatal("failed to write to log file");
+	}
 }
 
 char *
@@ -71,6 +81,7 @@ cvs_remote_input(void)
 {
 	FILE *in;
 	size_t len;
+	char nl = '\n';
 	char *data, *ldata;
 
 	if (cvs_server_active)
@@ -101,19 +112,10 @@ cvs_remote_input(void)
 	}
 
 	if (cvs_server_active == 0 && cvs_client_outlog_fd != -1) {
-		BUF *bp;
-
-		bp = cvs_buf_alloc(strlen(ldata), BUF_AUTOEXT);
-
-		if (cvs_buf_append(bp, ldata, strlen(ldata)) < 0)
-			fatal("cvs_remote_input: cvs_buf_append");
-
-		cvs_buf_putc(bp, '\n');
-
-		if (cvs_buf_write_fd(bp, cvs_client_outlog_fd) < 0)
-			fatal("cvs_remote_input: cvs_buf_write_fd");
-
-		cvs_buf_free(bp);
+		len = strlen(data);
+		if (atomicio(vwrite, cvs_client_outlog_fd, data, len) != len ||
+		    atomicio(vwrite, cvs_client_outlog_fd, &nl, 1) != 1)
+			fatal("failed to write to log file");
 	}
 
 	return (ldata);
@@ -124,7 +126,7 @@ cvs_remote_receive_file(int fd, size_t len)
 {
 	FILE *in;
 	char data[MAXBSIZE];
-	size_t nread, nwrite, nleft, toread;
+	size_t nread, nleft, toread;
 
 	if (cvs_server_active)
 		in = stdin;
@@ -140,20 +142,20 @@ cvs_remote_receive_file(int fd, size_t len)
 		if (nread == 0)
 			fatal("error receiving file");
 
-		nwrite = write(fd, data, nread);
-		if (nwrite != nread)
+		if (atomicio(vwrite, fd, data, nread) != nread)
 			fatal("failed to write %zu bytes", nread);
 
-		if (cvs_server_active == 0 &&
-		    cvs_client_outlog_fd != -1)
-			(void)write(cvs_client_outlog_fd, data, nread);
+		if (cvs_server_active == 0 && cvs_client_outlog_fd != -1 &&
+		    atomicio(vwrite, cvs_client_outlog_fd, data, nread)
+		    != nread)
+			fatal("failed to write to log file");
 
 		nleft -= nread;
 	}
 }
 
 void
-cvs_remote_send_file(const char *path)
+cvs_remote_send_file(const char *path, int _fd)
 {
 	int fd;
 	FILE *out, *in;
@@ -167,11 +169,17 @@ cvs_remote_send_file(const char *path)
 	else
 		out = current_cvsroot->cr_srvin;
 
-	if ((fd = open(path, O_RDONLY)) == -1)
-		fatal("cvs_remote_send_file: %s: %s", path, strerror(errno));
+	fd = dup(_fd);
+	if (fd == -1)
+		fatal("cvs_remote_send_file: dup: %s", strerror(errno));
+
+	if (lseek(fd, SEEK_SET, 0) < 0)
+		fatal("cvs_remote_send_file: %s: lseek: %s", path,
+		    strerror(errno));
 
 	if (fstat(fd, &st) == -1)
-		fatal("cvs_remote_send_file: %s: %s", path, strerror(errno));
+		fatal("cvs_remote_send_file: %s: fstat: %s", path,
+		    strerror(errno));
 
 	cvs_modetostr(st.st_mode, buf, sizeof(buf));
 	cvs_remote_output(buf);
@@ -188,8 +196,9 @@ cvs_remote_send_file(const char *path)
 		if (rw != ret)
 			fatal("failed to write %zu bytes", ret);
 
-		if (cvs_server_active == 0 && cvs_client_inlog_fd != -1)
-			(void)write(cvs_client_inlog_fd, data, ret);
+		if (cvs_server_active == 0 && cvs_client_inlog_fd != -1 &&
+		    atomicio(vwrite, cvs_client_inlog_fd, data, ret) != ret)
+			fatal("failed to write to log file");
 
 		total += ret;
 	}
@@ -242,3 +251,22 @@ cvs_remote_classify_file(struct cvs_file *cf)
 		cf->file_status = FILE_MODIFIED;
 }
 
+
+void
+cvs_validate_directory(const char *path)
+{
+	char *dir, *sp, *dp;
+
+	dir = xstrdup(path);
+
+	for (sp = dir; sp != NULL; sp = dp) {
+		dp = strchr(sp, '/');
+		if (dp != NULL)
+			*(dp++) = '\0';
+
+		if (!strcmp(sp, ".."))
+			fatal("path validation failed!");
+	}
+
+	xfree(dir);
+}

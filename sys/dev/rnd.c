@@ -1,9 +1,10 @@
-/*	$OpenBSD: rnd.c,v 1.82 2007/06/17 21:22:04 jasper Exp $	*/
+/*	$OpenBSD: rnd.c,v 1.87 2008/03/02 21:29:07 djm Exp $	*/
 
 /*
  * rnd.c -- A strong random number generator
  *
  * Copyright (c) 1996, 1997, 2000-2002 Michael Shalayeff.
+ * Copyright (c) 2008 Damien Miller.
  *
  * Version 1.89, last modified 19-Sep-99
  *
@@ -237,9 +238,11 @@
 #undef RNDEBUG
 
 #include <sys/param.h>
+#include <sys/endian.h>
 #include <sys/systm.h>
 #include <sys/conf.h>
 #include <sys/disk.h>
+#include <sys/limits.h>
 #include <sys/ioctl.h>
 #include <sys/malloc.h>
 #include <sys/fcntl.h>
@@ -247,8 +250,10 @@
 #include <sys/sysctl.h>
 #include <sys/timeout.h>
 #include <sys/poll.h>
+#include <sys/mutex.h>
 
 #include <crypto/md5.h>
+#include <crypto/arc4.h>
 
 #include <dev/rndvar.h>
 #include <dev/rndioctl.h>
@@ -259,6 +264,19 @@ int	rnd_debug = 0x0000;
 #define	RD_OUTPUT	0x00f0	/* output data */
 #define	RD_WAIT		0x0100	/* sleep/wakeup for good data */
 #endif
+
+/*
+ * Maximum number of bytes to serve directly from the main arc4random
+ * pool. Larger requests are served from discrete arc4 instances keyed
+ * from the main pool.
+ */
+#define ARC4_MAIN_MAX_BYTES	2048
+
+/*
+ * Key size (in bytes) for arc4 instances setup to serve requests larger
+ * than ARC4_MAIN_MAX_BYTES.
+ */
+#define ARC4_SUB_KEY_BYTES	(256 / 8)
 
 /*
  * The pool is stirred with a primitive polynomial of degree 128
@@ -380,13 +398,6 @@ struct timer_rand_state {
 	u_int	max_entropy : 1;
 };
 
-struct arc4_stream {
-	u_int8_t s[256];
-	u_int	cnt;
-	u_int8_t i;
-	u_int8_t j;
-};
-
 struct rand_event {
 	struct timer_rand_state *re_state;
 	u_int re_nbits;
@@ -396,7 +407,8 @@ struct rand_event {
 
 struct timeout rnd_timeout, arc4_timeout;
 struct random_bucket random_state;
-struct arc4_stream arc4random_state;
+struct rc4_ctx arc4random_state;
+u_long arc4random_count = 0;
 struct timer_rand_state rnd_states[RND_SRC_NUM];
 struct rand_event rnd_event_space[QEVLEN];
 struct rand_event *rnd_event_head = rnd_event_space;
@@ -418,6 +430,7 @@ struct filterops rndwrite_filtops =
 int rnd_attached;
 int arc4random_initialized;
 struct rndstats rndstats;
+struct mutex rndlock;
 
 static __inline u_int32_t roll(u_int32_t w, int i)
 {
@@ -474,55 +487,14 @@ void dequeue_randomness(void *);
 static void add_entropy_words(const u_int32_t *, u_int n);
 void extract_entropy(u_int8_t *, int);
 
-static u_int8_t arc4_getbyte(void);
 void arc4_stir(void);
 void arc4_reinit(void *v);
 void arc4maybeinit(void);
-
-/* Arcfour random stream generator.  This code is derived from section
- * 17.1 of Applied Cryptography, second edition, which describes a
- * stream cipher allegedly compatible with RSA Labs "RC4" cipher (the
- * actual description of which is a trade secret).  The same algorithm
- * is used as a stream cipher called "arcfour" in Tatu Ylonen's ssh
- * package.
- *
- * The initialization function here has been modified to not discard
- * the old state, and its input always includes the time of day in
- * microseconds.  Moreover, bytes from the stream may at any point be
- * diverted to multiple processes or even kernel functions desiring
- * random numbers.  This increases the strength of the random stream,
- * but makes it impossible to use this code for encryption, since there
- * is no way to ever reproduce the same stream of random bytes.
- *
- * RC4 is a registered trademark of RSA Laboratories.
- */
-
-static u_int8_t
-arc4_getbyte(void)
-{
-	u_int8_t si, sj, ret;
-	int s;
-
-	s = splhigh();
-	rndstats.arc4_reads++;
-	arc4random_state.cnt++;
-	arc4random_state.i++;
-	si = arc4random_state.s[arc4random_state.i];
-	arc4random_state.j += si;
-	sj = arc4random_state.s[arc4random_state.j];
-	arc4random_state.s[arc4random_state.i] = sj;
-	arc4random_state.s[arc4random_state.j] = si;
-	ret = arc4random_state.s[(si + sj) & 0xff];
-	splx(s);
-	return (ret);
-}
 
 void
 arc4_stir(void)
 {
 	u_int8_t buf[256];
-	u_int8_t si;
-	int n, s;
 	int len;
 
 	nanotime((struct timespec *) buf);
@@ -532,29 +504,22 @@ arc4_stir(void)
 	get_random_bytes(buf + sizeof (struct timeval), len);
 	len += sizeof(struct timeval);
 
-	s = splhigh();
-	arc4random_state.i--;
-	for (n = 0; n < 256; n++) {
-		arc4random_state.i++;
-		si = arc4random_state.s[arc4random_state.i];
-		arc4random_state.j += si + buf[n % len];
-		arc4random_state.s[arc4random_state.i] =
-		    arc4random_state.s[arc4random_state.j];
-		arc4random_state.s[arc4random_state.j] = si;
-	}
-	arc4random_state.j = arc4random_state.i;
-	arc4random_state.cnt = 0;
+	mtx_enter(&rndlock);
+	if (rndstats.arc4_nstirs > 0)
+		rc4_crypt(&arc4random_state, buf, buf, sizeof(buf));
+
+	rc4_keysetup(&arc4random_state, buf, sizeof(buf));
+	arc4random_count = 0;
 	rndstats.arc4_stirs += len;
 	rndstats.arc4_nstirs++;
-	splx(s);
 
 	/*
 	 * Throw away the first N words of output, as suggested in the
 	 * paper "Weaknesses in the Key Scheduling Algorithm of RC4"
 	 * by Fluher, Mantin, and Shamir.  (N = 256 in our case.)
 	 */
-	for (n = 0; n < 256 * 4; n++)
-		arc4_getbyte();
+	rc4_skip(&arc4random_state, 256 * 4);
+	mtx_leave(&rndlock);
 }
 
 void
@@ -587,27 +552,102 @@ arc4_reinit(void *v)
 u_int32_t
 arc4random(void)
 {
+	u_int32_t ret;
+
 	arc4maybeinit();
-	return ((arc4_getbyte() << 24) | (arc4_getbyte() << 16)
-		| (arc4_getbyte() << 8) | arc4_getbyte());
+	mtx_enter(&rndlock);
+	rc4_getbytes(&arc4random_state, (u_char*)&ret, sizeof(ret));
+	rndstats.arc4_reads += sizeof(ret);
+	arc4random_count += sizeof(ret);
+	mtx_leave(&rndlock);
+	return ret;
+}
+
+static void
+arc4random_bytes_large(void *buf, size_t n)
+{
+	u_char lbuf[ARC4_SUB_KEY_BYTES];
+	struct rc4_ctx lctx;
+
+	mtx_enter(&rndlock);
+	rc4_getbytes(&arc4random_state, lbuf, sizeof(lbuf));
+	rndstats.arc4_reads += n;
+	arc4random_count += sizeof(lbuf);
+	mtx_leave(&rndlock);
+
+	rc4_keysetup(&lctx, lbuf, sizeof(lbuf));
+	rc4_skip(&lctx, 256 * 4);
+	rc4_getbytes(&lctx, (u_char*)buf, n);
+	bzero(lbuf, sizeof(lbuf));
+	bzero(&lctx, sizeof(lctx));
 }
 
 void
 arc4random_bytes(void *buf, size_t n)
 {
-	u_int8_t *cp = buf;
-	u_int8_t *end = cp + n;
-
 	arc4maybeinit();
-	while (cp < end)
-		*cp++ = arc4_getbyte();
+
+	/* Satisfy large requests via an independent ARC4 instance */
+	if (n > ARC4_MAIN_MAX_BYTES) {
+		arc4random_bytes_large(buf, n);
+		return;
+	}
+
+	mtx_enter(&rndlock);
+	rc4_getbytes(&arc4random_state, (u_char*)buf, n);
+	rndstats.arc4_reads += n;
+	arc4random_count += n;
+	mtx_leave(&rndlock);
+}
+
+/*
+ * Calculate a uniformly distributed random number less than upper_bound
+ * avoiding "modulo bias".
+ *
+ * Uniformity is achieved by generating new random numbers until the one
+ * returned is outside the range [0, 2**32 % upper_bound).  This
+ * guarantees the selected random number will be inside
+ * [2**32 % upper_bound, 2**32) which maps back to [0, upper_bound)
+ * after reduction modulo upper_bound.
+ */
+u_int32_t
+arc4random_uniform(u_int32_t upper_bound)
+{
+	u_int32_t r, min;
+
+	if (upper_bound < 2)
+		return 0;
+
+#if (ULONG_MAX > 0xffffffffUL)
+	min = 0x100000000UL % upper_bound;
+#else
+	/* Calculate (2**32 % upper_bound) avoiding 64-bit math */
+	if (upper_bound > 0x80000000)
+		min = 1 + ~upper_bound;		/* 2**32 - upper_bound */
+	else {
+		/* (2**32 - (x * 2)) % x == 2**32 % x when x <= 2**31 */
+		min = ((0xffffffff - (upper_bound << 2)) + 1) % upper_bound;
+	}
+#endif
+
+	/*
+	 * This could theoretically loop forever but each retry has
+	 * p > 0.5 (worst case, usually far better) of selecting a
+	 * number inside the range we need, so it should rarely need
+	 * to re-roll.
+	 */
+	for (;;) {
+		r = arc4random();
+		if (r >= min)
+			break;
+	}
+
+	return r % upper_bound;
 }
 
 void
 randomattach(void)
 {
-	int i;
-
 	if (rnd_attached) {
 #ifdef RNDEBUG
 		printf("random: second attach\n");
@@ -627,8 +667,8 @@ randomattach(void)
 	bzero(&rndstats, sizeof(rndstats));
 	bzero(&rnd_event_space, sizeof(rnd_event_space));
 
-	for (i = 0; i < 256; i++)
-		arc4random_state.s[i] = i;
+	bzero(&arc4random_state, sizeof(arc4random_state));
+	mtx_init(&rndlock, IPL_HIGH);
 	arc4_reinit(NULL);
 
 	rnd_attached = 1;
@@ -711,7 +751,6 @@ enqueue_randomness(int state, int val)
 	struct rand_event *rep;
 	struct timespec	tv;
 	u_int	time, nbits;
-	int s;
 
 	/* XXX on sparc we get here before randomattach() */
 	if (!rnd_attached)
@@ -788,10 +827,10 @@ enqueue_randomness(int state, int val)
 	} else if (p->max_entropy)
 		nbits = 8 * sizeof(val) - 1;
 
-	s = splhigh();
+	mtx_enter(&rndlock);
 	if ((rep = rnd_put()) == NULL) {
 		rndstats.rnd_drops++;
-		splx(s);
+		mtx_leave(&rndlock);
 		return;
 	}
 
@@ -809,7 +848,7 @@ enqueue_randomness(int state, int val)
 		random_state.tmo++;
 		timeout_add(&rnd_timeout, 1);
 	}
-	splx(s);
+	mtx_leave(&rndlock);
 }
 
 void
@@ -819,18 +858,17 @@ dequeue_randomness(void *v)
 	struct rand_event *rep;
 	u_int32_t buf[2];
 	u_int nbits;
-	int s;
 
 	timeout_del(&rnd_timeout);
 	rndstats.rnd_deqs++;
 
-	s = splhigh();
+	mtx_enter(&rndlock);
 	while ((rep = rnd_get())) {
 
 		buf[0] = rep->re_time;
 		buf[1] = rep->re_val;
 		nbits = rep->re_nbits;
-		splx(s);
+		mtx_leave(&rndlock);
 
 		add_entropy_words(buf, 2);
 
@@ -852,11 +890,11 @@ dequeue_randomness(void *v)
 			KNOTE(&rnd_rsel.si_note, 0);
 		}
 
-		s = splhigh();
+		mtx_enter(&rndlock);
 	}
 
 	rs->tmo = 0;
-	splx(s);
+	mtx_leave(&rndlock);
 }
 
 #if POOLWORDS % 16
@@ -876,7 +914,6 @@ extract_entropy(u_int8_t *buf, int nbytes)
 	u_char buffer[16];
 	MD5_CTX tmp;
 	u_int i;
-	int s;
 
 	add_timer_randomness(nbytes);
 
@@ -888,13 +925,13 @@ extract_entropy(u_int8_t *buf, int nbytes)
 
 		/* Hash the pool to get the output */
 		MD5Init(&tmp);
-		s = splhigh();
+		mtx_enter(&rndlock);
 		MD5Update(&tmp, (u_int8_t*)rs->pool, sizeof(rs->pool));
 		if (rs->entropy_count / 8 > i)
 			rs->entropy_count -= i * 8;
 		else
 			rs->entropy_count = 0;
-		splx(s);
+		mtx_leave(&rndlock);
 		MD5Final(buffer, &tmp);
 
 		/*
@@ -922,7 +959,7 @@ extract_entropy(u_int8_t *buf, int nbytes)
 
 	/* Wipe data from memory */
 	bzero(&tmp, sizeof(tmp));
-	bzero(&buffer, sizeof(buffer));
+	bzero(buffer, sizeof(buffer));
 }
 
 /*
@@ -947,7 +984,7 @@ randomread(dev_t dev, struct uio *uio, int ioflag)
 	if (uio->uio_resid == 0)
 		return 0;
 
-	MALLOC(buf, u_int32_t *, POOLBYTES, M_TEMP, M_WAITOK);
+	buf = malloc(POOLBYTES, M_TEMP, M_WAITOK);
 
 	while (!ret && uio->uio_resid > 0) {
 		int	n = min(POOLBYTES, uio->uio_resid);
@@ -998,14 +1035,8 @@ randomread(dev_t dev, struct uio *uio, int ioflag)
 				buf[i] = random() << 16 | (random() & 0xFFFF);
 			break;
 		case RND_ARND:
-		{
-			u_int8_t *cp = (u_int8_t *) buf;
-			u_int8_t *end = cp + n;
-			arc4maybeinit();
-			while (cp < end)
-				*cp++ = arc4_getbyte();
+			arc4random_bytes(buf, n);
 			break;
-		}
 		default:
 			ret = ENXIO;
 		}
@@ -1013,7 +1044,7 @@ randomread(dev_t dev, struct uio *uio, int ioflag)
 			ret = uiomove((caddr_t)buf, n, uio);
 	}
 
-	FREE(buf, M_TEMP);
+	free(buf, M_TEMP);
 	return ret;
 }
 
@@ -1037,7 +1068,6 @@ int
 randomkqfilter(dev_t dev, struct knote *kn)
 {
 	struct klist *klist;
-	int s;
 
 	switch (kn->kn_filter) {
 	case EVFILT_READ:
@@ -1053,9 +1083,9 @@ randomkqfilter(dev_t dev, struct knote *kn)
 	}
 	kn->kn_hook = (void *)&random_state;
 
-	s = splhigh();
+	mtx_enter(&rndlock);
 	SLIST_INSERT_HEAD(klist, kn, kn_selnext);
-	splx(s);
+	mtx_leave(&rndlock);
 
 	return (0);
 }
@@ -1063,10 +1093,9 @@ randomkqfilter(dev_t dev, struct knote *kn)
 void
 filt_rndrdetach(struct knote *kn)
 {
-	int s = splhigh();
-
+	mtx_enter(&rndlock);
 	SLIST_REMOVE(&rnd_rsel.si_note, kn, knote, kn_selnext);
-	splx(s);
+	mtx_leave(&rndlock);
 }
 
 int
@@ -1081,10 +1110,9 @@ filt_rndread(struct knote *kn, long hint)
 void
 filt_rndwdetach(struct knote *kn)
 {
-	int s = splhigh();
-
+	mtx_enter(&rndlock);
 	SLIST_REMOVE(&rnd_wsel.si_note, kn, knote, kn_selnext);
-	splx(s);
+	mtx_leave(&rndlock);
 }
 
 int
@@ -1105,7 +1133,7 @@ randomwrite(dev_t dev, struct uio *uio, int flags)
 	if (uio->uio_resid == 0)
 		return 0;
 
-	MALLOC(buf, u_int32_t *, POOLBYTES, M_TEMP, M_WAITOK);
+	buf = malloc(POOLBYTES, M_TEMP, M_WAITOK);
 
 	while (!ret && uio->uio_resid > 0) {
 		u_short	n = min(POOLBYTES, uio->uio_resid);
@@ -1121,14 +1149,14 @@ randomwrite(dev_t dev, struct uio *uio, int flags)
 	if (minor(dev) == RND_ARND && !ret)
 		arc4random_initialized = 0;
 
-	FREE(buf, M_TEMP);
+	free(buf, M_TEMP);
 	return ret;
 }
 
 int
 randomioctl(dev_t dev, u_long cmd, caddr_t data, int flag, struct proc *p)
 {
-	int	s, ret = 0;
+	int	ret = 0;
 	u_int	cnt;
 
 	add_timer_randomness((u_long)p ^ (u_long)data ^ cmd);
@@ -1143,29 +1171,29 @@ randomioctl(dev_t dev, u_long cmd, caddr_t data, int flag, struct proc *p)
 		break;
 
 	case RNDGETENTCNT:
-		s = splhigh();
+		mtx_enter(&rndlock);
 		*(u_int *)data = random_state.entropy_count;
-		splx(s);
+		mtx_leave(&rndlock);
 		break;
 	case RNDADDTOENTCNT:
 		if (suser(p, 0) != 0)
 			ret = EPERM;
 		else {
 			cnt = *(u_int *)data;
-			s = splhigh();
+			mtx_enter(&rndlock);
 			random_state.entropy_count += cnt;
 			if (random_state.entropy_count > POOLBITS)
 				random_state.entropy_count = POOLBITS;
-			splx(s);
+			mtx_leave(&rndlock);
 		}
 		break;
 	case RNDZAPENTCNT:
 		if (suser(p, 0) != 0)
 			ret = EPERM;
 		else {
-			s = splhigh();
+			mtx_enter(&rndlock);
 			random_state.entropy_count = 0;
-			splx(s);
+			mtx_leave(&rndlock);
 		}
 		break;
 	case RNDSTIRARC4:
@@ -1174,18 +1202,18 @@ randomioctl(dev_t dev, u_long cmd, caddr_t data, int flag, struct proc *p)
 		else if (random_state.entropy_count < 64)
 			ret = EAGAIN;
 		else {
-			s = splhigh();
+			mtx_enter(&rndlock);
 			arc4random_initialized = 0;
-			splx(s);
+			mtx_leave(&rndlock);
 		}
 		break;
 	case RNDCLRSTATS:
 		if (suser(p, 0) != 0)
 			ret = EPERM;
 		else {
-			s = splhigh();
+			mtx_enter(&rndlock);
 			bzero(&rndstats, sizeof(rndstats));
-			splx(s);
+			mtx_leave(&rndlock);
 		}
 		break;
 	default:

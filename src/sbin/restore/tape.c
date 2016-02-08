@@ -1,4 +1,4 @@
-/*	$OpenBSD: tape.c,v 1.32 2007/06/03 20:16:08 millert Exp $	*/
+/*	$OpenBSD: tape.c,v 1.36 2007/09/25 09:55:33 chl Exp $	*/
 /*	$NetBSD: tape.c,v 1.26 1997/04/15 07:12:25 lukem Exp $	*/
 
 /*
@@ -39,7 +39,7 @@
 #if 0
 static char sccsid[] = "@(#)tape.c	8.6 (Berkeley) 9/13/94";
 #else
-static const char rcsid[] = "$OpenBSD: tape.c,v 1.32 2007/06/03 20:16:08 millert Exp $";
+static const char rcsid[] = "$OpenBSD: tape.c,v 1.36 2007/09/25 09:55:33 chl Exp $";
 #endif
 #endif /* not lint */
 
@@ -183,7 +183,7 @@ newtapebuf(long size)
 		return;
 	if (tapebuf != NULL)
 		free(tapebuf);
-	tapebuf = malloc(size * TP_BSIZE);
+	tapebuf = calloc(size, TP_BSIZE);
 	if (tapebuf == NULL)
 		errx(1, "Cannot allocate space for tape buffer");
 	tapebufsize = size;
@@ -290,6 +290,7 @@ getvol(long nextvol)
 	union u_spcl tmpspcl;
 #	define tmpbuf tmpspcl.s_spcl
 	char buf[TP_BSIZE];
+	const char *errstr;
 
 	if (nextvol == 1) {
 		tapesread = 0;
@@ -334,15 +335,14 @@ again:
 		do	{
 			fprintf(stderr, "Specify next volume #: ");
 			(void)fflush(stderr);
-			(void)fgets(buf, TP_BSIZE, terminal);
-		} while (!feof(terminal) && buf[0] == '\n');
-		if (feof(terminal))
-			exit(1);
-		newvol = atoi(buf);
-		if (newvol <= 0) {
-			fprintf(stderr,
-			    "Volume numbers are positive numerics\n");
-		}
+			if (fgets(buf, sizeof buf, terminal) == NULL)
+				exit(1);
+			buf[strcspn(buf, "\n")] = '\0';
+
+			newvol = strtonum(buf, 1, INT_MAX, &errstr);
+			if (errstr)
+				fprintf(stderr, "Volume number %s: %s\n", errstr, buf);
+		} while (errstr);
 	}
 	if (newvol == volno) {
 		tapesread |= 1 << volno;
@@ -353,11 +353,9 @@ again:
 	fprintf(stderr, "Enter ``none'' if there are no more tapes\n");
 	fprintf(stderr, "otherwise enter tape name (default: %s) ", magtape);
 	(void)fflush(stderr);
-	if (fgets(buf, TP_BSIZE, terminal) == NULL || feof(terminal))
+	if (fgets(buf, sizeof buf, terminal) == NULL || feof(terminal))
 		exit(1);
-	i = strlen(buf);
-	if (i > 0 && buf[--i] == '\n')
-		buf[i] = '\0';
+	buf[strcspn(buf, "\n")] = '\0';
 	if (strcmp(buf, "none") == 0) {
 		terminateinput();
 		return;

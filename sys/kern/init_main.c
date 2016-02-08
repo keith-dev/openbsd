@@ -1,4 +1,4 @@
-/*	$OpenBSD: init_main.c,v 1.143 2007/07/25 23:11:52 art Exp $	*/
+/*	$OpenBSD: init_main.c,v 1.148 2008/01/01 16:31:42 miod Exp $	*/
 /*	$NetBSD: init_main.c,v 1.84.4.1 1996/06/02 09:08:06 mrg Exp $	*/
 
 /*
@@ -103,7 +103,7 @@ extern void nfs_init(void);
 const char	copyright[] =
 "Copyright (c) 1982, 1986, 1989, 1991, 1993\n"
 "\tThe Regents of the University of California.  All rights reserved.\n"
-"Copyright (c) 1995-2007 OpenBSD. All rights reserved.  http://www.OpenBSD.org\n";
+"Copyright (c) 1995-2008 OpenBSD. All rights reserved.  http://www.OpenBSD.org\n";
 
 /* Components of the first process -- never freed. */
 struct	session session0;
@@ -136,7 +136,7 @@ void	start_init(void *);
 void	start_cleaner(void *);
 void	start_update(void *);
 void	start_reaper(void *);
-void	start_crypto(void *);
+void	init_crypto(void);
 void	init_exec(void);
 void	kqueue_init(void);
 void	workq_init(void);
@@ -310,7 +310,7 @@ main(void *framep)
 
 	/* Allocate a prototype map so we have something to fork. */
 	uvmspace_init(&vmspace0, pmap_kernel(), round_page(VM_MIN_ADDRESS),
-	    trunc_page(VM_MAX_ADDRESS), TRUE);
+	    trunc_page(VM_MAX_ADDRESS), TRUE, TRUE);
 	p->p_vmspace = &vmspace0;
 
 	p->p_addr = proc0paddr;				/* XXX */
@@ -327,7 +327,9 @@ main(void *framep)
 	(void)chgproccnt(0, 1);
 
 	/* Initialize run queues */
-	rqinit();
+	sched_init_runqueues();
+	sleep_queue_init();
+	sched_init_cpu(curcpu());
 
 	/* Initialize work queues */
 	workq_init();
@@ -393,7 +395,6 @@ main(void *framep)
 #if !defined(NO_PROPOLICE)
 	{
 		volatile long newguard[8];
-		int i;
 
 		arc4random_bytes((long *)newguard, sizeof(newguard));
 
@@ -507,8 +508,7 @@ main(void *framep)
 
 #ifdef CRYPTO
 	/* Create the crypto kernel thread. */
-	if (kthread_create(start_crypto, NULL, NULL, "crypto"))
-		panic("crypto thread");
+	init_crypto();
 #endif /* CRYPTO */
 
 	microtime(&rtv);
@@ -721,12 +721,3 @@ start_reaper(void *arg)
 	reaper();
 	/* NOTREACHED */
 }
-
-#ifdef CRYPTO
-void
-start_crypto(void *arg)
-{
-	crypto_thread();
-	/* NOTREACHED */
-}
-#endif /* CRYPTO */

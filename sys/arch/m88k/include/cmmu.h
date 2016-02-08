@@ -1,4 +1,4 @@
-/*	$OpenBSD: cmmu.h,v 1.17 2007/02/11 12:49:35 miod Exp $ */
+/*	$OpenBSD: cmmu.h,v 1.20 2007/12/15 19:33:32 miod Exp $ */
 /*
  * Mach Operating System
  * Copyright (c) 1993-1992 Carnegie Mellon University
@@ -33,25 +33,6 @@
  */
 #if defined(_KERNEL) && !defined(_LOCORE)
 
-#ifdef MULTIPROCESSOR
-/*
- * This lock protects the cmmu SAR and SCR's; other ports
- * can be accessed without locking it.
- *
- * May be used from "db_interface.c".
- */
-extern __cpu_simple_lock_t cmmu_cpu_lock;
-
-#define CMMU_LOCK   __cpu_simple_lock(&cmmu_cpu_lock)
-#define CMMU_UNLOCK __cpu_simple_unlock(&cmmu_cpu_lock)
-
-#else
-
-#define	CMMU_LOCK	do { /* nothing */ } while (0)
-#define	CMMU_UNLOCK	do { /* nothing */ } while (0)
-
-#endif	/* MULTIPROCESSOR */
-
 /* machine dependent cmmu function pointer structure */
 struct cmmu_p {
 	cpuid_t (*init)(void);
@@ -59,12 +40,11 @@ struct cmmu_p {
 	void (*cpu_configuration_print)(int);
 	void (*shutdown)(void);
 	cpuid_t (*cpu_number)(void);
-	void (*set_sapr)(cpuid_t, apr_t);
+	void (*set_sapr)(apr_t);
 	void (*set_uapr)(apr_t);
 	void (*flush_tlb)(cpuid_t, u_int, vaddr_t, u_int);
 	void (*flush_cache)(cpuid_t, paddr_t, psize_t);
 	void (*flush_inst_cache)(cpuid_t, paddr_t, psize_t);
-	void (*flush_data_page)(cpuid_t, paddr_t);
 	void (*dma_cachectl)(pmap_t, vaddr_t, vsize_t, int);
 	void (*dma_cachectl_pa)(paddr_t, psize_t, int);
 #ifdef MULTIPROCESSOR
@@ -74,17 +54,31 @@ struct cmmu_p {
 
 extern struct cmmu_p *cmmu;
 
+#ifdef MULTIPROCESSOR
+/*
+ * On 8820x-based systems, this lock protects the CMMU SAR and SCR registers;
+ * other registers may be accessed without locking it.
+ * On 88410-based systems, this lock protects accesses to the BusSwitch GCSR
+ * register, which masks or unmasks the 88410 control addresses.
+ */
+extern __cpu_simple_lock_t cmmu_cpu_lock;
+#define CMMU_LOCK   __cpu_simple_lock(&cmmu_cpu_lock)
+#define CMMU_UNLOCK __cpu_simple_unlock(&cmmu_cpu_lock)
+#else
+#define	CMMU_LOCK	do { /* nothing */ } while (0)
+#define	CMMU_UNLOCK	do { /* nothing */ } while (0)
+#endif	/* MULTIPROCESSOR */
+
 #define cmmu_init			(cmmu->init)
 #define setup_board_config		(cmmu->setup_board_config)
 #define	cpu_configuration_print(a)	(cmmu->cpu_configuration_print)(a)
 #define	cmmu_shutdown			(cmmu->shutdown)
 #define	cmmu_cpu_number			(cmmu->cpu_number)
-#define	cmmu_set_sapr(a, b)		(cmmu->set_sapr)(a, b)
+#define	cmmu_set_sapr(a)		(cmmu->set_sapr)(a)
 #define	cmmu_set_uapr(a)		(cmmu->set_uapr)(a)
 #define	cmmu_flush_tlb(a, b, c, d) 	(cmmu->flush_tlb)(a, b, c, d)
 #define	cmmu_flush_cache(a, b, c)	(cmmu->flush_cache)(a, b, c)
 #define	cmmu_flush_inst_cache(a, b, c)	(cmmu->flush_inst_cache)(a, b, c)
-#define	cmmu_flush_data_page(a, b)	(cmmu->flush_data_page)(a, b)
 #define	dma_cachectl(a, b, c, d)	(cmmu->dma_cachectl)(a, b, c, d)
 #define	dma_cachectl_pa(a, b, c)	(cmmu->dma_cachectl_pa)(a, b, c)
 #define	cmmu_initialize_cpu(a)		(cmmu->initialize_cpu)(a)

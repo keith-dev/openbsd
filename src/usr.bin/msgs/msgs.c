@@ -1,4 +1,4 @@
-/*	$OpenBSD: msgs.c,v 1.31 2007/05/17 10:59:26 moritz Exp $	*/
+/*	$OpenBSD: msgs.c,v 1.33 2007/09/11 18:22:42 cloder Exp $	*/
 /*	$NetBSD: msgs.c,v 1.7 1995/09/28 06:57:40 tls Exp $	*/
 
 /*-
@@ -40,7 +40,7 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)msgs.c	8.2 (Berkeley) 4/28/95";
 #else
-static char rcsid[] = "$OpenBSD: msgs.c,v 1.31 2007/05/17 10:59:26 moritz Exp $";
+static char rcsid[] = "$OpenBSD: msgs.c,v 1.33 2007/09/11 18:22:42 cloder Exp $";
 #endif
 #endif /* not lint */
 
@@ -75,6 +75,7 @@ static char rcsid[] = "$OpenBSD: msgs.c,v 1.31 2007/05/17 10:59:26 moritz Exp $"
 #include <sys/stat.h>
 #include <dirent.h>
 #include <ctype.h>
+#include <err.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <pwd.h>
@@ -126,7 +127,6 @@ bool	printing = NO;
 bool	mailing = NO;
 bool	quitit = NO;
 bool	sending = NO;
-bool	intrpflg = NO;
 bool	restricted = NO;
 int	uid;
 int	msg;
@@ -136,6 +136,7 @@ int	nlines;
 int	Lpp = 0;
 time_t	t;
 time_t	keep;
+volatile sig_atomic_t	intrpflg = 0;
 
 void prmesg(int);
 void onintr(int);
@@ -371,7 +372,8 @@ main(int argc, char *argv[])
 			printf("Message %d:\nFrom %s %sSubject: ",
 			    nextmsg, pw->pw_name, ctime(&t));
 			fflush(stdout);
-			fgets(inbuf, sizeof inbuf, stdin);
+			if (fgets(inbuf, sizeof inbuf, stdin) == NULL)
+				errx(1, "could not read input");
 			putchar('\n');
 			fflush(stdout);
 			fprintf(newmsg, "From %s %sSubject: %s\n",
@@ -380,8 +382,7 @@ main(int argc, char *argv[])
 		} else
 			blankline = seensubj = NO;
 		for (;;) {
-			fgets(inbuf, sizeof inbuf, stdin);
-			if (feof(stdin) || ferror(stdin))
+			if (fgets(inbuf, sizeof inbuf, stdin) == NULL)
 				break;
 			blankline = (blankline || (inbuf[0] == '\n'));
 			seensubj = (seensubj ||
@@ -587,7 +588,7 @@ cmnd:
 			prevmsg = msg;
 		}
 
-		printf("--%s--\n", sep);
+		printf("--%s--\n", (intrpflg ? "Interrupt" : sep));
 		sep = "-";
 		if (msg >= nextmsg) {
 			nextmsg = msg + 1;
@@ -688,10 +689,9 @@ onintr(int signo)
 		write(STDOUT_FILENO, "\n", 1);
 		if (hdrs)
 			_exit(0);
-		sep = "Interrupt";
 		if (newmsg)
 			fseeko(newmsg, (off_t)0, SEEK_END);
-		intrpflg = YES;
+		intrpflg = 1;
 	}
 	errno = save_errno;
 }
@@ -751,10 +751,10 @@ ask(char *prompt)
 
 	printf("%s ", prompt);
 	fflush(stdout);
-	intrpflg = NO;
-	(void) fgets(inbuf, sizeof inbuf, stdin);
-	if ((n = strlen(inbuf)) > 0 && inbuf[n - 1] == '\n')
-		inbuf[n - 1] = '\0';
+	intrpflg = 0;
+	if (fgets(inbuf, sizeof inbuf, stdin) == NULL)
+		errx(1, "could not read input");
+	inbuf[strcspn(inbuf, "\n")] = '\0';
 	if (intrpflg)
 		inbuf[0] = 'x';
 

@@ -1,4 +1,4 @@
-; $OpenBSD: db.loopback,v 1.2 2005/02/07 06:08:10 david Exp $
+; $OpenBSD: db.loopback,v 1.4 2008/01/03 21:20:25 jakob Exp $
 
 $ORIGIN 127.in-addr.arpa.
 $TTL 6h

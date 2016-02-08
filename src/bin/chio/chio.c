@@ -1,4 +1,4 @@
-/*	$OpenBSD: chio.c,v 1.20 2006/06/14 02:14:25 krw Exp $	*/
+/*	$OpenBSD: chio.c,v 1.22 2007/11/27 16:22:12 martynas Exp $	*/
 /*	$NetBSD: chio.c,v 1.1.1.1 1996/04/03 00:34:38 thorpej Exp $	*/
 
 /*
@@ -621,7 +621,7 @@ do_status(char *cname, int argc, char *argv[])
  * operation. If the drive is not accessible, we attempt
  * to unmount the tape in it before moving to avoid
  * errors in "disconnected" type pickers where the drive
- * is on a seperate target from the changer.
+ * is on a separate target from the changer.
  */
 static void
 check_source_drive(int unit)
@@ -838,7 +838,7 @@ usage(void)
 {
 	int i;
 
-	fprintf(stderr, "usage: %s [-f device] command [args ...]\n",
+	fprintf(stderr, "usage: %s [-f changer] command [arg ...]\n",
 	    __progname);
 	fprintf(stderr, "commands:");
 	for (i = 0; commands[i].cc_name; i++)

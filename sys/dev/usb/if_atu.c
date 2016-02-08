@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_atu.c,v 1.86 2007/07/18 18:10:31 damien Exp $ */
+/*	$OpenBSD: if_atu.c,v 1.91 2007/11/27 16:22:13 martynas Exp $ */
 /*
  * Copyright (c) 2003, 2004
  *	Daan Vreeken <Danovitsch@Vitsch.net>.  All rights reserved.
@@ -53,7 +53,6 @@
 #include <sys/kernel.h>
 #include <sys/socket.h>
 #include <sys/systm.h>
-#include <sys/malloc.h>
 #include <sys/kthread.h>
 #include <sys/queue.h>
 #include <sys/device.h>
@@ -718,7 +717,7 @@ atu_initial_config(struct atu_softc *sc)
 	/*
 	 * TODO:
 	 * read reg domain MIB_PHY @ 0x17 (1 byte), (reply = 0x30)
-	 * we should do something usefull with this info. right now it's just
+	 * we should do something useful with this info. right now it's just
 	 * ignored
 	 */
 	err = atu_get_mib(sc, MIB_PHY__REG_DOMAIN, &reg_domain);
@@ -877,7 +876,7 @@ atu_internal_firmware(void *arg)
 	 * Uploading firmware is done with the DFU (Device Firmware Upgrade)
 	 * interface. See "Universal Serial Bus - Device Class Specification
 	 * for Device Firmware Upgrade" pdf for details of the protocol.
-	 * Maybe this could be moved to a seperate 'firmware driver' once more
+	 * Maybe this could be moved to a separate 'firmware driver' once more
 	 * device drivers need it... For now we'll just do it here.
 	 *
 	 * Just for your information, the Atmel's DFU descriptor looks like
@@ -1255,17 +1254,12 @@ atu_attach(struct device *parent, struct device *self, void *aux)
 {
 	struct atu_softc		*sc = (struct atu_softc *)self;
 	struct usb_attach_arg		*uaa = aux;
-	char				*devinfop;
 	usbd_status			err;
 	usbd_device_handle		dev = uaa->device;
 	u_int8_t			mode, channel;
 	int i;
 
 	sc->sc_state = ATU_S_UNCONFIG;
-
-	devinfop = usbd_devinfo_alloc(dev, 0);
-	printf("\n%s: %s", sc->atu_dev.dv_xname, devinfop);
-	usbd_devinfo_free(devinfop);
 
 	err = usbd_set_config_no(dev, ATU_CONFIG_NO, 1);
 	if (err) {
@@ -1313,8 +1307,6 @@ atu_attach(struct device *parent, struct device *self, void *aux)
 	if (err || (mode != MODE_NETCARD && mode != MODE_NOFLASHNETCARD)) {
 		DPRINTF(("%s: starting internal firmware download\n",
 		    sc->atu_dev.dv_xname));
-
-		printf("\n");
 
 		if (rootvp == NULL)
 			mountroothook_establish(atu_internal_firmware, sc);
@@ -1408,7 +1400,7 @@ atu_complete_attach(struct atu_softc *sc)
 	/* read device config & get MAC address */
 	err = atu_get_card_config(sc);
 	if (err) {
-		printf("\n%s: could not get card cfg!\n",
+		printf("%s: could not get card cfg!\n",
 		    sc->atu_dev.dv_xname);
 		return;
 	}
@@ -1428,7 +1420,8 @@ atu_complete_attach(struct atu_softc *sc)
 #endif /* ATU_DEBUG */
 
 	/* Show the world our MAC address */
-	printf(", address %s\n", ether_sprintf(ic->ic_myaddr));
+	printf("%s: address %s\n", sc->atu_dev.dv_xname,
+	    ether_sprintf(ic->ic_myaddr));
 
 	sc->atu_cdata.atu_tx_inuse = 0;
 
@@ -1758,7 +1751,7 @@ atu_rxeof(usbd_xfer_handle xfer, usbd_private_handle priv, usbd_status status)
 		mb.m_flags = 0;
 		bpf_mtap(sc->sc_radiobpf, &mb, BPF_DIRECTION_IN);
 	}
-#endif /* NPBFILTER > 0 */
+#endif /* NBPFILTER > 0 */
 
 	if (wh->i_fc[1] & IEEE80211_FC1_WEP) {
 		/*

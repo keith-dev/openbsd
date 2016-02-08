@@ -1,4 +1,4 @@
-/*	$OpenBSD: uftdi.c,v 1.41 2007/06/14 10:11:15 mbalmer Exp $ 	*/
+/*	$OpenBSD: uftdi.c,v 1.45 2008/02/22 12:42:40 jsg Exp $ 	*/
 /*	$NetBSD: uftdi.c,v 1.14 2003/02/23 04:20:07 simonb Exp $	*/
 
 /*
@@ -157,7 +157,8 @@ uftdi_match(struct device *parent, void *match, void *aux)
 		     uaa->vendor, uaa->product));
 
 	if (uaa->vendor == USB_VENDOR_FTDI &&
-	    (uaa->product == USB_PRODUCT_FTDI_SERIAL_8U100AX ||
+	    (uaa->product == USB_PRODUCT_FTDI_EISCOU ||
+	     uaa->product == USB_PRODUCT_FTDI_SERIAL_8U100AX ||
 	     uaa->product == USB_PRODUCT_FTDI_SERIAL_8U232AM ||
 	     uaa->product == USB_PRODUCT_FTDI_SERIAL_232BM ||
 	     uaa->product == USB_PRODUCT_FTDI_SEMC_DSS20 ||
@@ -177,7 +178,15 @@ uftdi_match(struct device *parent, void *match, void *aux)
 	     uaa->product == USB_PRODUCT_FTDI_LCD_CFA_632 ||
 	     uaa->product == USB_PRODUCT_FTDI_LCD_CFA_633 ||
 	     uaa->product == USB_PRODUCT_FTDI_LCD_CFA_634 ||
-	     uaa->product == USB_PRODUCT_FTDI_MJS_SIRIUS_PC))
+	     uaa->product == USB_PRODUCT_FTDI_LCD_CFA_635 ||
+	     uaa->product == USB_PRODUCT_FTDI_MJS_SIRIUS_PC ||
+	     uaa->product == USB_PRODUCT_FTDI_OPENPORT_13M ||
+	     uaa->product == USB_PRODUCT_FTDI_OPENPORT_13S ||
+	     uaa->product == USB_PRODUCT_FTDI_OPENPORT_13U ||
+	     uaa->product == USB_PRODUCT_FTDI_UOPTBR))
+		return (UMATCH_VENDOR_PRODUCT);
+	if (uaa->vendor == USB_VENDOR_IODATA &&
+	     uaa->product == USB_PRODUCT_IODATA_FT232R)
 		return (UMATCH_VENDOR_PRODUCT);
 	if (uaa->vendor == USB_VENDOR_SIIG2 &&
 	    (uaa->product == USB_PRODUCT_SIIG2_US2308))
@@ -193,6 +202,9 @@ uftdi_match(struct device *parent, void *match, void *aux)
 	    (uaa->product == USB_PRODUCT_FALCOM_TWIST ||
 	     uaa->product == USB_PRODUCT_FALCOM_SAMBA))
 		 return (UMATCH_VENDOR_PRODUCT);
+	if (uaa->vendor == USB_VENDOR_RATOC &&
+	    (uaa->product == USB_PRODUCT_RATOC_REXUSB60F))
+		return (UMATCH_VENDOR_PRODUCT);
 	if (uaa->vendor == USB_VENDOR_SEALEVEL &&
 	    uaa->product == USB_PRODUCT_SEALEVEL_USBSERIAL)
 		return (UMATCH_VENDOR_PRODUCT);
@@ -209,7 +221,6 @@ uftdi_attach(struct device *parent, struct device *self, void *aux)
 	usbd_interface_handle iface;
 	usb_interface_descriptor_t *id;
 	usb_endpoint_descriptor_t *ed;
-	char *devinfop;
 	char *devname = sc->sc_dev.dv_xname;
 	int i;
 	usbd_status err;
@@ -221,23 +232,19 @@ uftdi_attach(struct device *parent, struct device *self, void *aux)
 		/* Move the device into the configured state. */
 		err = usbd_set_config_index(dev, UFTDI_CONFIG_INDEX, 1);
 		if (err) {
-			printf("\n%s: failed to set configuration, err=%s\n",
-			       devname, usbd_errstr(err));
+			printf("%s: failed to set configuration, err=%s\n",
+			    sc->sc_dev.dv_xname, usbd_errstr(err));
 			goto bad;
 		}
 
 		err = usbd_device2interface_handle(dev, UFTDI_IFACE_INDEX, &iface);
 		if (err) {
-			printf("\n%s: failed to get interface, err=%s\n",
-			       devname, usbd_errstr(err));
+			printf("%s: failed to get interface, err=%s\n",
+			    sc->sc_dev.dv_xname, usbd_errstr(err));
 			goto bad;
 		}
 	} else
 		iface = uaa->iface;
-
-	devinfop = usbd_devinfo_alloc(dev, 0);
-	printf("\n%s: %s\n", devname, devinfop);
-	usbd_devinfo_free(devinfop);
 
 	id = usbd_get_interface_descriptor(iface);
 
@@ -264,6 +271,7 @@ uftdi_attach(struct device *parent, struct device *self, void *aux)
 		case USB_PRODUCT_FTDI_LCD_CFA_632:
 		case USB_PRODUCT_FTDI_LCD_CFA_633:
 		case USB_PRODUCT_FTDI_LCD_CFA_634:
+		case USB_PRODUCT_FTDI_LCD_CFA_635:
 		case USB_PRODUCT_FTDI_MHAM_KW:
 		case USB_PRODUCT_FTDI_MHAM_YS:
 		case USB_PRODUCT_FTDI_MHAM_Y6:
@@ -295,6 +303,17 @@ uftdi_attach(struct device *parent, struct device *self, void *aux)
 			goto bad;
 		}
 		break;
+
+	case USB_VENDOR_IODATA:
+		switch (uaa->product) {
+		case USB_PRODUCT_IODATA_FT232R:
+			sc->sc_type = UFTDI_TYPE_8U232AM;
+			sc->sc_hdrlen = 0;
+			break;
+		default:
+			goto bad;
+		}
+		break;			
 
 	case USB_VENDOR_SIIG2:
 		switch (uaa->product) {

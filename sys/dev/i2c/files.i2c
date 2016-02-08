@@ -1,4 +1,4 @@
-# $OpenBSD: files.i2c,v 1.36 2006/06/17 04:43:01 drahn Exp $
+# $OpenBSD: files.i2c,v 1.43 2007/10/26 15:00:49 martin Exp $
 #	$NetBSD: files.i2c,v 1.3 2003/10/20 16:24:10 briggs Exp $
 
 define	i2c {[addr = -1], [size = -1]}
@@ -18,6 +18,11 @@ file	dev/i2c/i2c_bitbang.c			i2c_bitbang
 device	lmtemp
 attach	lmtemp at i2c
 file	dev/i2c/lm75.c				lmtemp
+
+# National Semiconductor LM93 sensor
+device	lmn
+attach	lmn at i2c
+file	dev/i2c/lm93.c				lmn
 
 # National Semiconductor LM87 sensor
 device	lmenv
@@ -103,6 +108,11 @@ device	wbenv
 attach	wbenv at i2c
 file	dev/i2c/w83l784r.c			wbenv
 
+# Winbond W83793G
+device	wbng
+attach	wbng at i2c
+file	dev/i2c/w83793g.c			wbng
+
 # Genesys Logic GL518SM
 device	glenv
 attach	glenv at i2c
@@ -118,7 +128,22 @@ device	fintek
 attach	fintek at i2c
 file	dev/i2c/fintek.c			fintek
 
-# Phillips Semiconductor PCA9532
+# Philips Semiconductor PCA9532
 device	pcaled: gpiobus
 attach	pcaled at i2c
 file	dev/i2c/pca9532.c			pcaled
+
+# Andigilog aSC7621
+device	adl
+attach	adl at i2c
+file	dev/i2c/asc7621.c			adl
+
+# TI TMHC50 / Analog ADM1022
+device	thmc
+attach	thmc at i2c
+file	dev/i2c/thmc50.c			thmc
+
+# SPD Memory EEPROM
+device	spdmem
+attach	spdmem at i2c
+file	dev/i2c/spdmem.c			spdmem

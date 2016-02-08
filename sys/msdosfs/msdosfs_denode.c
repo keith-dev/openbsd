@@ -1,4 +1,4 @@
-/*	$OpenBSD: msdosfs_denode.c,v 1.32 2007/06/02 02:04:21 deraadt Exp $	*/
+/*	$OpenBSD: msdosfs_denode.c,v 1.35 2008/01/13 21:27:09 krw Exp $	*/
 /*	$NetBSD: msdosfs_denode.c,v 1.23 1997/10/17 11:23:58 ws Exp $	*/
 
 /*-
@@ -226,9 +226,7 @@ retry:
 		*depp = 0;
 		return (error);
 	}
-	MALLOC(ldep, struct denode *, sizeof(struct denode), M_MSDOSFSNODE,
-	    M_WAITOK);
-	bzero((caddr_t)ldep, sizeof *ldep);
+	ldep = malloc(sizeof(*ldep), M_MSDOSFSNODE, M_WAITOK | M_ZERO);
 	lockinit(&ldep->de_lock, PINOD, "denode", 0, 0);
 	nvp->v_data = ldep;
 	ldep->de_vnode = nvp;
@@ -324,8 +322,10 @@ retry:
 			if (error == E2BIG) {
 				ldep->de_FileSize = de_cn2off(pmp, size);
 				error = 0;
-			} else
+			} else {
 				printf("deget(): pcbmap returned %d\n", error);
+				return (error);
+			}
 		}
 	} else
 		nvp->v_type = VREG;
@@ -617,7 +617,7 @@ msdosfs_reclaim(v)
 #if 0 /* XXX */
 	dep->de_flag = 0;
 #endif
-	FREE(dep, M_MSDOSFSNODE);
+	free(dep, M_MSDOSFSNODE);
 	vp->v_data = NULL;
 	return (0);
 }

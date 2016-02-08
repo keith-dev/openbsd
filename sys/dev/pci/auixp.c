@@ -1,4 +1,4 @@
-/* $OpenBSD: auixp.c,v 1.10 2007/05/26 00:36:03 krw Exp $ */
+/* $OpenBSD: auixp.c,v 1.17 2008/02/13 23:35:08 jakemsr Exp $ */
 /* $NetBSD: auixp.c,v 1.9 2005/06/27 21:13:09 thorpej Exp $ */
 
 /*
@@ -136,7 +136,6 @@ paddr_t	auixp_mappage(void *, void *, off_t, int);
 
 
 /* power management (do we support that already?) */
-int	auixp_power(struct auixp_softc *, int);
 #if 0
 void	auixp_powerhook(int, void *);
 int	auixp_suspend(struct auixp_softc *);
@@ -365,6 +364,7 @@ auixp_set_params(void *hdl, int setmode, int usemode,
 	struct auixp_codec *co;
 	struct auixp_softc *sc;
 	int error;
+	u_int temprate;
 
 	co = (struct auixp_codec *) hdl;
 	sc = co->sc;
@@ -376,11 +376,11 @@ auixp_set_params(void *hdl, int setmode, int usemode,
 			switch (play->channels) {
 			case 1:
 				play->factor = 4;
-				play->sw_code = mulaw_to_slinear16_mts;
+				play->sw_code = mulaw_to_slinear16_le_mts;
 				break;
 			case 2:
 				play->factor = 2;
-				play->sw_code = mulaw_to_slinear16;
+				play->sw_code = mulaw_to_slinear16_le;
 				break;
 			default:
 				return (EINVAL);
@@ -392,11 +392,11 @@ auixp_set_params(void *hdl, int setmode, int usemode,
 				switch (play->channels) {
 				case 1:
 					play->factor = 4;
-					play->sw_code = linear8_to_linear16_mts;
+					play->sw_code = linear8_to_linear16_le_mts;
 					break;
 				case 2:
 					play->factor = 2;
-					play->sw_code = linear8_to_linear16;
+					play->sw_code = linear8_to_linear16_le;
 					break;
 				default:
 					return (EINVAL);
@@ -424,11 +424,11 @@ auixp_set_params(void *hdl, int setmode, int usemode,
 				switch (play->channels) {
 				case 1:
 					play->factor = 4;
-					play->sw_code = ulinear8_to_linear16_mts;
+					play->sw_code = ulinear8_to_linear16_le_mts;
 					break;
 				case 2:
 					play->factor = 2;
-					play->sw_code = ulinear8_to_linear16;
+					play->sw_code = ulinear8_to_linear16_le;
 					break;
 				default:
 					return (EINVAL);
@@ -438,10 +438,10 @@ auixp_set_params(void *hdl, int setmode, int usemode,
 				switch (play->channels) {
 				case 1:
 					play->factor = 2;
-					play->sw_code = change_sign16_mts;
+					play->sw_code = change_sign16_le_mts;
 					break;
 				case 2:
-					play->sw_code = change_sign16;
+					play->sw_code = change_sign16_le;
 					break;
 				default:
 					return (EINVAL);
@@ -455,11 +455,11 @@ auixp_set_params(void *hdl, int setmode, int usemode,
 			switch (play->channels) {
 			case 1:
 				play->factor = 4;
-				play->sw_code = alaw_to_slinear16_mts;
+				play->sw_code = alaw_to_slinear16_le_mts;
 				break;
 			case 2:
 				play->factor = 2;
-				play->sw_code = alaw_to_slinear16;
+				play->sw_code = alaw_to_slinear16_le;
 				break;
 			default:
 				return (EINVAL);
@@ -471,11 +471,11 @@ auixp_set_params(void *hdl, int setmode, int usemode,
 				switch (play->channels) {
 				case 1:
 					play->factor = 4;
-					play->sw_code = linear8_to_linear16_mts;
+					play->sw_code = linear8_to_linear16_le_mts;
 					break;
 				case 2:
 					play->factor = 2;
-					play->sw_code = linear8_to_linear16;
+					play->sw_code = linear8_to_linear16_le;
 					break;
 				default:
 					return (EINVAL);
@@ -504,11 +504,11 @@ auixp_set_params(void *hdl, int setmode, int usemode,
 				switch (play->channels) {
 				case 1:
 					play->factor = 4;
-					play->sw_code = ulinear8_to_linear16_mts;
+					play->sw_code = ulinear8_to_linear16_le_mts;
 					break;
 				case 2:
 					play->factor = 2;
-					play->sw_code = ulinear8_to_linear16;
+					play->sw_code = ulinear8_to_linear16_le;
 					break;
 				default:
 					return (EINVAL);
@@ -518,10 +518,10 @@ auixp_set_params(void *hdl, int setmode, int usemode,
 				switch (play->channels) {
 				case 1:
 					play->factor = 2;
-					play->sw_code = change_sign16_swap_bytes_mts;
+					play->sw_code = swap_bytes_change_sign16_le_mts;
 					break;
 				case 2:
-					play->sw_code = change_sign16_swap_bytes;
+					play->sw_code = swap_bytes_change_sign16_le;
 					break;
 				default:
 					return (EINVAL);
@@ -535,9 +535,24 @@ auixp_set_params(void *hdl, int setmode, int usemode,
 			return (EINVAL);
 		}
 
-		error = ac97_set_rate(co->codec_if, play, AUMODE_PLAY);
+		temprate = play->sample_rate;
+		error = ac97_set_rate(co->codec_if,
+		    AC97_REG_PCM_LFE_DAC_RATE, &play->sample_rate);
 		if (error)
 			return (error);
+
+		play->sample_rate = temprate;
+		error = ac97_set_rate(co->codec_if,
+		    AC97_REG_PCM_SURR_DAC_RATE, &play->sample_rate);
+		if (error)
+			return (error);
+
+		play->sample_rate = temprate;
+		error = ac97_set_rate(co->codec_if,
+		    AC97_REG_PCM_FRONT_DAC_RATE, &play->sample_rate);
+		if (error)
+			return (error);
+
 	}
 
 	if (setmode & AUMODE_RECORD) {
@@ -553,7 +568,7 @@ auixp_set_params(void *hdl, int setmode, int usemode,
 			break;
 		case AUDIO_ENCODING_ULINEAR_LE:
 			if (rec->precision == 16)
-				rec->sw_code = change_sign16;
+				rec->sw_code = change_sign16_le;
 			break;
 		case AUDIO_ENCODING_ALAW:
 			rec->sw_code = ulinear8_to_alaw;
@@ -566,13 +581,14 @@ auixp_set_params(void *hdl, int setmode, int usemode,
 			break;
 		case AUDIO_ENCODING_ULINEAR_BE:
 			if (rec->precision == 16)
-				rec->sw_code = swap_bytes_change_sign16;
+				rec->sw_code = swap_bytes_change_sign16_le;
 			break;
 		default:
 			return (EINVAL);
 		}
 
-		error = ac97_set_rate(co->codec_if, rec, AUMODE_RECORD);
+		error = ac97_set_rate(co->codec_if, AC97_REG_PCM_LR_ADC_RATE,
+		    &rec->sample_rate);
 		if (error)
 			return (error);
 	}
@@ -781,10 +797,9 @@ auixp_allocate_dma_chain(struct auixp_softc *sc, struct auixp_dma **dmap)
 
 	/* allocate keeper of dma area */
 	*dmap = NULL;
-	dma = malloc(sizeof(*dma), M_DEVBUF, M_NOWAIT);
+	dma = malloc(sizeof(*dma), M_DEVBUF, M_NOWAIT | M_ZERO);
 	if (!dma)
 		return ENOMEM;
-	bzero(dma, sizeof(*dma));
 
 	/* allocate for daisychain of IXP hardware-dma descriptors */
 	error = auixp_allocmem(sc, DMA_DESC_CHAIN * sizeof(atiixp_dma_desc_t),
@@ -1241,21 +1256,6 @@ auixp_attach(struct device *parent, struct device *self, void *aux)
 	if (!sc->sc_output_dma || !sc->sc_input_dma)
 		return;
 
-	/* fill in the missing details about the dma channels. */
-
-	/* for output */
-	sc->sc_output_dma->linkptr        = ATI_REG_OUT_DMA_LINKPTR;
-	sc->sc_output_dma->dma_enable_bit = ATI_REG_CMD_OUT_DMA_EN |
-					    ATI_REG_CMD_SEND_EN;
-	/* have spdif? then this too! XXX not seeing LED yet! XXX */
-	if (sc->has_spdif)
-		sc->sc_output_dma->dma_enable_bit |= ATI_REG_CMD_SPDF_OUT_EN;
-
-	/* and for input */
-	sc->sc_input_dma->linkptr         = ATI_REG_IN_DMA_LINKPTR;
-	sc->sc_input_dma->dma_enable_bit  = ATI_REG_CMD_IN_DMA_EN  |
-					    ATI_REG_CMD_RECEIVE_EN;
-
 #if 0
 	/* could preliminary program DMA chain */
 	auixp_program_dma_chain(sc, sc->sc_output_dma);
@@ -1285,7 +1285,7 @@ auixp_attach(struct device *parent, struct device *self, void *aux)
 	    sizeof sc->sc_audev.config);
 
 	/* power up chip */
-	auixp_power(sc, PCI_PMCSR_STATE_D0);
+	pci_set_powerstate(pc, tag, PCI_PMCSR_STATE_D0);
 
 	/* init chip */
 	if (auixp_init(sc) == -1) {
@@ -1348,6 +1348,23 @@ auixp_post_config(void *self)
 		if (codec->present)
 			audio_attach_mi(&auixp_hw_if, codec, &sc->sc_dev);
 	}
+
+	if (sc->has_spdif)
+		sc->has_spdif = 0;
+
+	/* fill in the missing details about the dma channels. */
+	/* for output */
+	sc->sc_output_dma->linkptr        = ATI_REG_OUT_DMA_LINKPTR;
+	sc->sc_output_dma->dma_enable_bit = ATI_REG_CMD_OUT_DMA_EN |
+					    ATI_REG_CMD_SEND_EN;
+	/* have spdif? then this too! XXX not seeing LED yet! XXX */
+	if (sc->has_spdif)
+		sc->sc_output_dma->dma_enable_bit |= ATI_REG_CMD_SPDF_OUT_EN;
+
+	/* and for input */
+	sc->sc_input_dma->linkptr         = ATI_REG_IN_DMA_LINKPTR;
+	sc->sc_input_dma->dma_enable_bit  = ATI_REG_CMD_IN_DMA_EN  |
+					    ATI_REG_CMD_RECEIVE_EN;
 
 	/* done! now enable all interrupts we can service */
 	auixp_enable_interrupts(sc);
@@ -1618,7 +1635,11 @@ auixp_autodetect_codecs(struct auixp_softc *sc)
 		codec->host_if.flags  = auixp_flags_codec;
 		switch (subdev) {
 		case 0x1311462: /* MSI S270 */
-			codec->codec_flags = AC97_HOST_DONT_ENABLE_SPDIF;
+		case 0x1611462: /* LG K1 Express */
+		case 0x3511462: /* MSI L725 */
+		case 0x4711462: /* MSI L720 */
+		case 0x0611462: /* MSI S250 */
+			codec->codec_flags = AC97_HOST_ALC650_PIN47_IS_EAPD;
 			break;
 		}
 	}
@@ -1797,28 +1818,6 @@ auixp_init(struct auixp_softc *sc)
 	 * note: we are NOT enabling interrupts yet, no codecs have been
 	 * detected yet nor is anything else set up
 	 */
-
-	return 0;
-}
-
-/*
- * TODO power saving and suspend / resume support
- */
-int
-auixp_power(struct auixp_softc *sc, int state)
-{
-	pcitag_t tag;
-	pci_chipset_tag_t pc;
-	pcireg_t data;
-	int pmcapreg;
-
-	tag = sc->sc_tag;
-	pc = sc->sc_pct;
-	if (pci_get_capability(pc, tag, PCI_CAP_PWRMGMT, &pmcapreg, 0)) {
-		data = pci_conf_read(pc, tag, pmcapreg + PCI_PMCSR);
-		if ((data & PCI_PMCSR_STATE_MASK) != state)
-			pci_conf_write(pc, tag, pmcapreg + PCI_PMCSR, state);
-	}
 
 	return 0;
 }

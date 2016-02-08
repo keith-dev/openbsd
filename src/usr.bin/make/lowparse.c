@@ -1,5 +1,5 @@
 /*	$OpenPackages$ */
-/*	$OpenBSD: lowparse.c,v 1.19 2007/05/17 03:37:31 ray Exp $ */
+/*	$OpenBSD: lowparse.c,v 1.22 2007/09/22 10:43:38 espie Exp $ */
 
 /* low-level parsing functions. */
 
@@ -51,341 +51,347 @@
 static LIST	    fileNames;	/* file names to free at end */
 #endif
 
-/* Input stream structure, file or string. */
-typedef struct {
-    const char		*fname; /* Name of file */
-    unsigned long	lineno; /* Line number */
-    FILE		*F;	/* Open stream, or NULL if pure string. */
-    char		*str;	/* Input string, if F == NULL. */
+/* Input stream structure: file or string.
+ * Files have str == NULL, F != NULL.
+ * Strings have F == NULL, str != NULL.
+ */
+struct input_stream {
+	const char *fname; 	/* Name of file */
+	unsigned long lineno; 	/* Line number */
+	FILE *F;		/* Open stream, or NULL if pure string. */
+	char *str;		/* Input string, if F == NULL. */
 
-    /* Line buffer. */
-    char		*ptr;	/* Where we are. */
-    char		*end;	/* Don't overdo it. */
-} IFile;
+	/* Line buffer. */
+	char *ptr;		/* Where we are. */
+	char *end;		/* Don't overdo it. */
+};
 
-static IFile	*current;	/* IFile being parsed. */
+static struct input_stream *current;	/* the input_stream being parsed. */
 
-static LIST	input_stack;	/* Stack of IFiles waiting to be parsed 
+static LIST input_stack;	/* Stack of input_stream waiting to be parsed
 				 * (includes and loop reparses) */
 
-/* IFile ctors. 
+/* input_stream ctors.
  *
- * obj = new_ifile(filename, filehandle);
- *	Create input object from filename, filehandle. */
-static IFile *new_ifile(const char *, FILE *);
-/* obj = new_istring(str, filename, lineno);
- *	Create input object from str, filename, lineno. */
-static IFile *new_istring(char *, const char *, unsigned long);
-/* free_ifile(obj);
- *	Discard consumed input object, closing streams, freeing memory.  */
-static void free_ifile(IFile *);
+ * obj = new_input_file(filename, filehandle);
+ *	Create input stream from filename, filehandle. */
+static struct input_stream *new_input_file(const char *, FILE *);
+/* obj = new_input_string(str, filename, lineno);
+ *	Create input stream from str, filename, lineno. */
+static struct input_stream *new_input_string(char *, const char *, unsigned long);
+/* free_input_stream(obj);
+ *	Discard consumed input stream, closing files, freeing memory.  */
+static void free_input_stream(struct input_stream *);
 
 
-/* Handling basic character reading. 
- * c = ParseReadc();
+/* Handling basic character reading.
+ * c = read_char();
  *	New character c from current input stream, or EOF at end of stream. */
-#define ParseReadc()	current->ptr < current->end ? *current->ptr++ : newline()
-/* len = newline();
- *	Guts for ParseReadc. Grabs a new line off fgetln when we have
- *	consumed the current line and returns its length. Or EOF at end of
+#define read_char()	\
+    current->ptr < current->end ? *current->ptr++ : grab_new_line_and_readchar()
+/* char = grab_new_line_and_readchar();
+ *	Guts for read_char. Grabs a new line off fgetln when we have
+ *	consumed the current line and returns the first char, or EOF at end of
  *	stream.  */
-static int newline(void);
-/* c = skiptoendofline();
+static int grab_new_line_and_readchar(void);
+/* c = skip_to_end_of_line();
  *	Skips to the end of the current line, returns either '\n' or EOF.  */
-static int skiptoendofline(void);
+static int skip_to_end_of_line(void);
 
 
 /* Helper functions to handle basic parsing. */
-/* ParseFoldLF(buffer, firstchar);
+/* read_logical_line(buffer, firstchar);
  *	Grabs logical line into buffer, the first character has already been
  *	read into firstchar.  */
-static void ParseFoldLF(Buffer, int);
+static void read_logical_line(Buffer, int);
 
 /* firstchar = ParseSkipEmptyLines(buffer);
  *	Scans lines, skipping empty lines. May put some characters into
  *	buffer, returns the first character useful to continue parsing
  *	(e.g., not a backslash or a space. */
-static int ParseSkipEmptyLines(Buffer);
+static int skip_empty_lines_and_read_char(Buffer);
 
-static IFile *
-new_ifile(const char *name, FILE *stream)
+static struct input_stream *
+new_input_file(const char *name, FILE *stream)
 {
-    IFile *ifile;
+	struct input_stream *istream;
 #if 0
-    Lst_AtEnd(&fileNames, name);
+	Lst_AtEnd(&fileNames, name);
 #endif
 
-    ifile = emalloc(sizeof(*ifile));
-    ifile->fname = name;
-    ifile->str = NULL;
-    /* Naturally enough, we start reading at line 0. */
-    ifile->lineno = 0;
-    ifile->F = stream;
-    ifile->ptr = ifile->end = NULL;
-    return ifile;
+	istream = emalloc(sizeof(*istream));
+	istream->fname = name;
+	istream->str = NULL;
+	/* Naturally enough, we start reading at line 0. */
+	istream->lineno = 0;
+	istream->F = stream;
+	istream->ptr = istream->end = NULL;
+	return istream;
 }
 
 static void
-free_ifile(IFile *ifile)
+free_input_stream(struct input_stream *istream)
 {
-    if (ifile->F && fileno(ifile->F) != STDIN_FILENO)
-	(void)fclose(ifile->F);
-    free(ifile->str);
-    /* Note we can't free the file names yet, as they are embedded in GN for
-     * error reports. */
-    free(ifile);
+	if (istream->F && fileno(istream->F) != STDIN_FILENO)
+		(void)fclose(istream->F);
+	free(istream->str);
+	/* Note we can't free the file names yet, as they are embedded in GN
+	 * for error reports. */
+	free(istream);
 }
 
-static IFile *
-new_istring(char *str, const char *name, unsigned long lineno)
+static struct input_stream *
+new_input_string(char *str, const char *name, unsigned long lineno)
 {
-    IFile *ifile;
+	struct input_stream *istream;
 
-    ifile = emalloc(sizeof(*ifile));
-    /* No malloc, name is always taken from an already existing ifile */
-    ifile->fname = name;
-    ifile->F = NULL;
-    /* Strings are used in for loops, so we need to reset the line counter
-     * to an appropriate value. */
-    ifile->lineno = lineno;
-    ifile->ptr = ifile->str = str;
-    ifile->end = str + strlen(str);
-    return ifile;
+	istream = emalloc(sizeof(*istream));
+	/* No malloc, name is always taken from an already existing istream */
+	istream->fname = name;
+	istream->F = NULL;
+	/* Strings are used in for loops, so we need to reset the line counter
+	 * to an appropriate value. */
+	istream->lineno = lineno;
+	istream->ptr = istream->str = str;
+	istream->end = str + strlen(str);
+	return istream;
 }
 
 
 void
 Parse_FromString(char *str, unsigned long lineno)
 {
-    if (DEBUG(FOR))
-	(void)fprintf(stderr, "%s\n----\n", str);
+	if (DEBUG(FOR))
+		(void)fprintf(stderr, "%s\n----\n", str);
 
-    if (current != NULL)
-	Lst_Push(&input_stack, current);
-    current = new_istring(str, current->fname, lineno);
+	if (current != NULL)
+		Lst_Push(&input_stack, current);
+	current = new_input_string(str, current->fname, lineno);
 }
 
 
 void
 Parse_FromFile(const char *name, FILE *stream)
 {
-    if (current != NULL)
-	Lst_Push(&input_stack, current);
-    current = new_ifile(name, stream);
+	if (current != NULL)
+		Lst_Push(&input_stack, current);
+	current = new_input_file(name, stream);
 }
 
 bool
 Parse_NextFile(void)
 {
-    if (current != NULL)
-	free_ifile(current);
-    current = (IFile *)Lst_Pop(&input_stack);
-    return current != NULL;
+	if (current != NULL)
+		free_input_stream(current);
+	current = (struct input_stream *)Lst_Pop(&input_stack);
+	return current != NULL;
 }
 
 static int
-newline(void)
+grab_new_line_and_readchar(void)
 {
-    size_t len;
+	size_t len;
 
-    if (current->F) {
-	current->ptr = fgetln(current->F, &len);
-	if (current->ptr) {
-	    current->end = current->ptr + len;
-	    return *current->ptr++;
-	} else {
-	    current->end = NULL;
+	if (current->F) {
+		current->ptr = fgetln(current->F, &len);
+		if (current->ptr) {
+			current->end = current->ptr + len;
+			return *current->ptr++;
+		} else {
+			current->end = NULL;
+		}
 	}
-    }
-    return EOF;
+	return EOF;
 }
 
 static int
-skiptoendofline(void)
+skip_to_end_of_line(void)
 {
-    if (current->F) {
-	if (current->end - current->ptr > 1)
-	    current->ptr = current->end - 1;
-	if (*current->ptr == '\n')
-	    return *current->ptr++;
-	return EOF;
-    } else {
-	int c;
+	if (current->F) {
+		if (current->end - current->ptr > 1)
+			current->ptr = current->end - 1;
+		if (*current->ptr == '\n')
+			return *current->ptr++;
+		return EOF;
+	} else {
+		int c;
 
-	do {
-	    c = ParseReadc();
-	} while (c != '\n' && c != EOF);
-	return c;
-    }
+		do {
+			c = read_char();
+		} while (c != '\n' && c != EOF);
+		return c;
+	}
 }
 
 
 char *
 Parse_ReadNextConditionalLine(Buffer linebuf)
 {
-    int c;
+	int c;
 
 	/* If first char isn't dot, skip to end of line, handling \ */
-    while ((c = ParseReadc()) != '.') {
-	for (;c != '\n'; c = ParseReadc()) {
-	    if (c == '\\') {
-		c = ParseReadc();
-		if (c == '\n')
-		    current->lineno++;
-	    }
-	    if (c == EOF) {
-		Parse_Error(PARSE_FATAL, "Unclosed conditional");
-		return NULL;
-	    }
+	while ((c = read_char()) != '.') {
+		for (;c != '\n'; c = read_char()) {
+			if (c == '\\') {
+				c = read_char();
+				if (c == '\n')
+					current->lineno++;
+			}
+			if (c == EOF) {
+				Parse_Error(PARSE_FATAL, 
+				    "Unclosed conditional");
+				return NULL;
+			}
+		}
+		current->lineno++;
 	}
-	current->lineno++;
-    }
 
 	/* This is the line we need to copy */
-    return Parse_ReadUnparsedLine(linebuf, "conditional");
+	return Parse_ReadUnparsedLine(linebuf, "conditional");
 }
 
 static void
-ParseFoldLF(Buffer linebuf, int c)
+read_logical_line(Buffer linebuf, int c)
 {
-    for (;;) {
-	if (c == '\n') {
-	    current->lineno++;
-	    break;
-	}
-	if (c == EOF)
-	    break;
-	Buf_AddChar(linebuf, c);
-	c = ParseReadc();
-	while (c == '\\') {
-	    c = ParseReadc();
-	    if (c == '\n') {
-		Buf_AddSpace(linebuf);
-		current->lineno++;
-		do {
-		    c = ParseReadc();
-		} while (c == ' ' || c == '\t');
-	    } else {
-		Buf_AddChar(linebuf, '\\');
-		if (c == '\\') {
-		    Buf_AddChar(linebuf, '\\');
-		    c = ParseReadc();
+	for (;;) {
+		if (c == '\n') {
+			current->lineno++;
+			break;
 		}
-		break;
-	    }
+		if (c == EOF)
+			break;
+		Buf_AddChar(linebuf, c);
+		c = read_char();
+		while (c == '\\') {
+			c = read_char();
+			if (c == '\n') {
+				Buf_AddSpace(linebuf);
+				current->lineno++;
+				do {
+					c = read_char();
+				} while (c == ' ' || c == '\t');
+			} else {
+				Buf_AddChar(linebuf, '\\');
+				if (c == '\\') {
+					Buf_AddChar(linebuf, '\\');
+					c = read_char();
+				}
+				break;
+			}
+		}
 	}
-    }
 }
 
 char *
 Parse_ReadUnparsedLine(Buffer linebuf, const char *type)
 {
-    int c;
+	int c;
 
-    Buf_Reset(linebuf);
-    c = ParseReadc();
-    if (c == EOF) {
-	Parse_Error(PARSE_FATAL, "Unclosed %s", type);
-	return NULL;
-    }
-
-    /* Handle '\' at beginning of line, since \\n needs special treatment */
-    while (c == '\\') {
-	c = ParseReadc();
-	if (c == '\n') {
-	    current->lineno++;
-	    do {
-		c = ParseReadc();
-	    } while (c == ' ' || c == '\t');
-	} else {
-	    Buf_AddChar(linebuf, '\\');
-	    if (c == '\\') {
-		Buf_AddChar(linebuf, '\\');
-		c = ParseReadc();
-	    }
-	    break;
+	Buf_Reset(linebuf);
+	c = read_char();
+	if (c == EOF) {
+		Parse_Error(PARSE_FATAL, "Unclosed %s", type);
+		return NULL;
 	}
-    }
-    ParseFoldLF(linebuf, c);
 
-    return Buf_Retrieve(linebuf);
+	/* Handle '\' at beginning of line, since \\n needs special treatment */
+	while (c == '\\') {
+		c = read_char();
+		if (c == '\n') {
+			current->lineno++;
+			do {
+				c = read_char();
+			} while (c == ' ' || c == '\t');
+		} else {
+			Buf_AddChar(linebuf, '\\');
+			if (c == '\\') {
+				Buf_AddChar(linebuf, '\\');
+				c = read_char();
+			}
+			break;
+		}
+	}
+	read_logical_line(linebuf, c);
+
+	return Buf_Retrieve(linebuf);
 }
 
 /* This is a fairly complex function, but without it, we could not skip
  * blocks of comments without reading them. */
 static int
-ParseSkipEmptyLines(Buffer linebuf)
+skip_empty_lines_and_read_char(Buffer linebuf)
 {
-    int 	c;		/* the current character */
+	int c;		/* the current character */
 
-    for (;;) {
-	Buf_Reset(linebuf);
-	c = ParseReadc();
-	/* Strip leading spaces, fold on '\n' */
-	if (c == ' ') {
-	    do {
-		c = ParseReadc();
-	    } while (c == ' ' || c == '\t');
-	    while (c == '\\') {
-		c = ParseReadc();
-		if (c == '\n') {
-		    current->lineno++;
-		    do {
-			c = ParseReadc();
-		    } while (c == ' ' || c == '\t');
-		} else {
-		    Buf_AddChar(linebuf, '\\');
-		    if (c == '\\') {
-			Buf_AddChar(linebuf, '\\');
-			c = ParseReadc();
-		    }
-		    if (c == EOF)
-			return '\n';
-		    else
-			return c;
+	for (;;) {
+		Buf_Reset(linebuf);
+		c = read_char();
+		/* Strip leading spaces, fold on '\n' */
+		if (c == ' ') {
+			do {
+				c = read_char();
+			} while (c == ' ' || c == '\t');
+			while (c == '\\') {
+				c = read_char();
+				if (c == '\n') {
+					current->lineno++;
+					do {
+						c = read_char();
+					} while (c == ' ' || c == '\t');
+				} else {
+					Buf_AddChar(linebuf, '\\');
+					if (c == '\\') {
+						Buf_AddChar(linebuf, '\\');
+						c = read_char();
+					}
+					if (c == EOF)
+						return '\n';
+					else
+						return c;
+				}
+			}
+			assert(c != '\t');
 		}
-	    }
-	    assert(c != '\t');
-	}
-	if (c == '#')
-	    c = skiptoendofline();
-	/* Almost identical to spaces, except this occurs after comments
-	 * have been taken care of, and we keep the tab itself.  */
-	if (c == '\t') {
-	    Buf_AddChar(linebuf, '\t');
-	    do {
-		c = ParseReadc();
-	    } while (c == ' ' || c == '\t');
-	    while (c == '\\') {
-		c = ParseReadc();
-		if (c == '\n') {
-		    current->lineno++;
-		    do {
-			c = ParseReadc();
-		    } while (c == ' ' || c == '\t');
-		} else {
-		    Buf_AddChar(linebuf, '\\');
-		    if (c == '\\') {
-			Buf_AddChar(linebuf, '\\');
-			c = ParseReadc();
-		    }
-		    if (c == EOF)
-			return '\n';
-		    else
-			return c;
+		if (c == '#')
+			c = skip_to_end_of_line();
+		/* Almost identical to spaces, except this occurs after
+		 * comments have been taken care of, and we keep the tab
+		 * itself.  */
+		if (c == '\t') {
+			Buf_AddChar(linebuf, '\t');
+			do {
+				c = read_char();
+			} while (c == ' ' || c == '\t');
+			while (c == '\\') {
+				c = read_char();
+				if (c == '\n') {
+					current->lineno++;
+					do {
+						c = read_char();
+					} while (c == ' ' || c == '\t');
+				} else {
+					Buf_AddChar(linebuf, '\\');
+					if (c == '\\') {
+						Buf_AddChar(linebuf, '\\');
+						c = read_char();
+					}
+					if (c == EOF)
+						return '\n';
+					else
+						return c;
+				}
+			}
 		}
-	    }
+		if (c == '\n')
+			current->lineno++;
+		else
+			return c;
 	}
-	if (c == '\n')
-	    current->lineno++;
-	else
-	    return c;
-    }
 }
 
 /* Parse_ReadNormalLine removes beginning and trailing blanks (but keeps
  * the first tab), handles escaped newlines, and skips over uninteresting
- * lines.  
+ * lines.
  *
  * The line number is incremented, which implies that continuation
  * lines are numbered with the last line number (we could do better, at a
@@ -396,45 +402,45 @@ ParseSkipEmptyLines(Buffer linebuf)
 char *
 Parse_ReadNormalLine(Buffer linebuf)
 {
-    int 	c;		/* the current character */
+	int c;		/* the current character */
 
-    c = ParseSkipEmptyLines(linebuf);
+	c = skip_empty_lines_and_read_char(linebuf);
 
-    if (c == EOF)
-	return NULL;
-    else {
-	ParseFoldLF(linebuf, c);
-	Buf_KillTrailingSpaces(linebuf);
-	return Buf_Retrieve(linebuf);
-    }
+	if (c == EOF)
+		return NULL;
+	else {
+		read_logical_line(linebuf, c);
+		Buf_KillTrailingSpaces(linebuf);
+		return Buf_Retrieve(linebuf);
+	}
 }
 
 unsigned long
 Parse_Getlineno(void)
 {
-    return current ? current->lineno : 0;
+	return current ? current->lineno : 0;
 }
 
 const char *
 Parse_Getfilename(void)
 {
-    return current ? current->fname : NULL;
+	return current ? current->fname : NULL;
 }
 
 #ifdef CLEANUP
 void
 LowParse_Init(void)
 {
-    Static_Lst_Init(&input_stack);
-    current = NULL;
+	Static_Lst_Init(&input_stack);
+	current = NULL;
 }
 
 void
 LowParse_End(void)
 {
-    Lst_Destroy(&input_stack, NOFREE);	/* Should be empty now */
+	Lst_Destroy(&input_stack, NOFREE);	/* Should be empty now */
 #if 0
-    Lst_Destroy(&fileNames, (SimpleProc)free);
+	Lst_Destroy(&fileNames, (SimpleProc)free);
 #endif
 }
 #endif
@@ -443,13 +449,14 @@ LowParse_End(void)
 void
 Parse_ReportErrors(void)
 {
-    if (fatal_errors) {
+	if (fatal_errors) {
 #ifdef CLEANUP
-	while (Parse_NextFile())
-		;
+		while (Parse_NextFile())
+			;
 #endif
-	fprintf(stderr, "Fatal errors encountered -- cannot continue\n");
-	exit(1);
-    } else
-    	assert(current == NULL);
+		fprintf(stderr, 
+		    "Fatal errors encountered -- cannot continue\n");
+		exit(1);
+	} else
+		assert(current == NULL);
 }

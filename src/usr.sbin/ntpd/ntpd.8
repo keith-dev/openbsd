@@ -1,4 +1,4 @@
-.\" $OpenBSD: ntpd.8,v 1.18 2007/05/31 19:20:26 jmc Exp $
+.\" $OpenBSD: ntpd.8,v 1.23 2007/12/11 11:26:27 jmc Exp $
 .\"
 .\" Copyright (c) 2003, 2004, 2006 Henning Brauer <henning@openbsd.org>
 .\"
@@ -14,7 +14,7 @@
 .\" AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT
 .\" OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 .\"
-.Dd $Mdocdate: May 31 2007 $
+.Dd $Mdocdate: December 11 2007 $
 .Dt NTPD 8
 .Os
 .Sh NAME
@@ -23,7 +23,7 @@
 .Sh SYNOPSIS
 .Nm ntpd
 .Bk -words
-.Op Fl dSs
+.Op Fl dnSsv
 .Op Fl f Ar file
 .Ek
 .Sh DESCRIPTION
@@ -38,6 +38,40 @@ It implements the Simple Network Time Protocol version 4,
 as described in RFC 2030,
 and the Network Time Protocol version 3,
 as described in RFC 1305.
+.Pp
+The options are as follows:
+.Bl -tag -width "-f fileXXX"
+.It Fl d
+Do not daemonize.
+If this option is specified,
+.Nm
+will run in the foreground and log to
+.Em stderr .
+.It Fl f Ar file
+Use
+.Ar file
+as the configuration file,
+instead of the default
+.Pa /etc/ntpd.conf .
+.It Fl n
+Configtest mode.
+Only check the configuration file for validity.
+.It Fl S
+Do not set the time immediately at startup.
+This is the default.
+.It Fl s
+Set the time immediately at startup if the local clock is off by more
+than 180 seconds.
+Allows for a large time correction,
+eliminating the need to run
+.Xr rdate 8
+before starting
+.Nm .
+.It Fl v
+This option allows
+.Nm
+to send DEBUG priority messages to syslog.
+.El
 .Pp
 .Nm
 uses the
@@ -55,13 +89,18 @@ option, all calls to
 .Xr adjtime 2
 will be logged.
 .Pp
+After the local clock is synchronized,
+.Nm
+adjusts the clock frequency using the
+.Xr adjfreq 2
+system call to compensate for systematic drift.
+.Pp
 .Nm
 is usually started at boot time, and can be enabled by
-setting the following in
-.Pa /etc/rc.conf.local :
-.Pp
-.Dl ntpd_flags=\&"\&"
-.Pp
+setting
+.Va ntpd_flags
+in
+.Pa /etc/rc.conf.local .
 See
 .Xr rc 8
 and
@@ -71,46 +110,25 @@ and enabling daemons.
 .Pp
 When
 .Nm
-starts up, it reads settings from a configuration file,
+starts up, it reads settings from its configuration file,
 typically
-.Xr ntpd.conf 5 .
+.Xr ntpd.conf 5 ,
+and its initial clock drift from
+.Pa /var/db/ntpd.drift .
+Clock drift is periodically written to the drift file thereafter.
 .Pp
-The options are as follows:
-.Bl -tag -width "-f fileXXX"
-.It Fl d
-Do not daemonize.
-If this option is specified,
+When
 .Nm
-will run in the foreground and log to
-.Em stderr .
-.It Fl f Ar file
-Use
-.Ar file
-as the configuration file,
-instead of the default
-.Pa /etc/ntpd.conf .
-.It Fl S
-Do not set the time immediately at startup.
-This is the default.
-.It Fl s
-Set the time immediately at startup if the local clock is off by more
-than 180 seconds.
-Allows for a large time correction,
-eliminating the need to run
-.Xr rdate 8
-before starting
-.Nm .
-.El
+receives a
+.Dv SIGINFO
+signal, it writes its peer and sensor status to
+.Xr syslog 3 .
 .Sh FILES
 .Bl -tag -width "/var/db/ntpd.driftXXX" -compact
 .It Pa /etc/ntpd.conf
-default
-.Nm
-configuration file
+Default configuration file.
 .It Pa /var/db/ntpd.drift
-drift file, written by
-.Nm
-periodically and used at startup to get the initial clock drift
+Drift file.
 .El
 .Sh SEE ALSO
 .Xr date 1 ,

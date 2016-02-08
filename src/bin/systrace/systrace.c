@@ -1,4 +1,4 @@
-/*	$OpenBSD: systrace.c,v 1.54 2006/07/02 12:34:15 sturm Exp $	*/
+/*	$OpenBSD: systrace.c,v 1.56 2007/11/26 09:28:33 martynas Exp $	*/
 /*
  * Copyright 2002 Niels Provos <provos@citi.umich.edu>
  * All rights reserved.
@@ -737,7 +737,7 @@ main(int argc, char **argv)
 		usage();
 	}
 
-	/* Initalize libevent but without kqueue because of systrace fd */
+	/* Initialize libevent but without kqueue because of systrace fd */
 	setenv("EVENT_NOKQUEUE", "yes", 0);
 	event_init();
 
@@ -754,7 +754,7 @@ main(int argc, char **argv)
 
 	if (pidattach == 0) {
 		/* Run a command and attach to it */
-		if ((args = malloc((argc + 1) * sizeof(char *))) == NULL)
+		if ((args = calloc(argc + 1, sizeof(char *))) == NULL)
 			err(1, "malloc");
 
 		for (i = 0; i < argc; i++)

@@ -1,4 +1,4 @@
-/*	$OpenBSD: fio.c,v 1.28 2007/05/25 21:27:16 krw Exp $	*/
+/*	$OpenBSD: fio.c,v 1.30 2007/10/05 14:39:39 chl Exp $	*/
 /*	$NetBSD: fio.c,v 1.8 1997/07/07 22:57:55 phil Exp $	*/
 
 /*
@@ -34,7 +34,7 @@
 #if 0
 static const char sccsid[] = "@(#)fio.c	8.2 (Berkeley) 4/20/95";
 #else
-static const char rcsid[] = "$OpenBSD: fio.c,v 1.28 2007/05/25 21:27:16 krw Exp $";
+static const char rcsid[] = "$OpenBSD: fio.c,v 1.30 2007/10/05 14:39:39 chl Exp $";
 #endif
 #endif /* not lint */
 
@@ -91,7 +91,7 @@ setptr(FILE *ibuf, off_t offset)
 		msgCount = 0;
 	} else {
 		/* Seek into the file to get to the new messages */
-		(void)fseeko(ibuf, offset, 0);
+		(void)fseeko(ibuf, offset, SEEK_SET);
 		/*
 		 * We need to make "offset" a pointer to the end of
 		 * the temp file that has the copy of the mail file.
@@ -132,7 +132,7 @@ setptr(FILE *ibuf, off_t offset)
 		(void)fwrite(linebuf, sizeof(*linebuf), count, otf);
 		if (ferror(otf))
 			err(1, "/tmp");
-		if (count)
+		if (count && linebuf[count - 1] == '\n')
 			linebuf[count - 1] = '\0';
 		if (maybe && linebuf[0] == 'F' && ishead(linebuf)) {
 			msgCount++;
@@ -268,7 +268,8 @@ setinput(struct message *mp)
 {
 
 	fflush(otf);
-	if (fseek(itf, (long)positionof(mp->m_block, mp->m_offset), 0) < 0)
+	if (fseek(itf, (long)positionof(mp->m_block, mp->m_offset), SEEK_SET)
+	    < 0)
 		err(1, "fseek");
 	return(itf);
 }

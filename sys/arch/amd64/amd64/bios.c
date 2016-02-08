@@ -1,4 +1,4 @@
-/*	$OpenBSD: bios.c,v 1.12 2007/08/06 16:12:25 gwk Exp $	*/
+/*	$OpenBSD: bios.c,v 1.15 2007/12/05 19:17:14 deraadt Exp $	*/
 /*
  * Copyright (c) 2006 Gordon Willem Klok <gklok@cogeco.ca>
  *
@@ -31,6 +31,13 @@
 
 #include <dev/isa/isareg.h>
 #include <amd64/include/isa_machdep.h>
+#include <dev/pci/pcivar.h>
+
+#include <dev/acpi/acpireg.h>
+#include <dev/acpi/acpivar.h>
+
+#include "acpi.h"
+#include "pci.h"
 
 struct bios_softc {
 	struct device sc_dev;
@@ -39,6 +46,7 @@ struct bios_softc {
 void smbios_info(char *);
 int bios_match(struct device *, void *, void *);
 void bios_attach(struct device *, struct device *, void *);
+int bios_print(void *, const char *);
 char *fixstring(char *);
 
 struct cfattach bios_ca = {
@@ -68,7 +76,7 @@ bios_match(struct device *parent, void *match , void *aux)
 	struct bios_attach_args *bia = aux;
 
 	/* only one */
-	if (bios_cd.cd_ndevs || strcmp(bia->bios_dev, bios_cd.cd_name))
+	if (bios_cd.cd_ndevs || strcmp(bia->ba_name, bios_cd.cd_name))
 		return 0;
 	return 1;
 }
@@ -131,25 +139,43 @@ bios_attach(struct device *parent, struct device *self, void *aux)
 			printf("\n%s:", sc->sc_dev.dv_xname);
 			if ((smbios_get_string(&bios, sb->vendor,
 			    scratch, sizeof(scratch))) != NULL)
-				printf(" vendor %s", scratch);
+				printf(" vendor %s",
+				    fixstring(scratch));
 			if ((smbios_get_string(&bios, sb->version,
 			    scratch, sizeof(scratch))) != NULL)
-				printf(" version \"%s\"", scratch);
+				printf(" version \"%s\"",
+				    fixstring(scratch));
 			if ((smbios_get_string(&bios, sb->release,
 			    scratch, sizeof(scratch))) != NULL)
-				printf(" date %s", scratch);
+				printf(" date %s", fixstring(scratch));
 		}
 
 		smbios_info(sc->sc_dev.dv_xname);
 		break;
 	}
 	printf("\n");
+
+#if NACPI > 0
+#if NPCI > 0
+	if (pci_mode != 0)
+#endif
+	{
+		struct bios_attach_args ba;
+
+		memset(&ba, 0, sizeof(ba));
+		ba.ba_name = "acpi";
+		ba.ba_iot = X86_BUS_SPACE_IO;
+		ba.ba_memt = X86_BUS_SPACE_MEM;
+
+		config_found(self, &ba, bios_print);
+	}
+#endif
 }
 
 /*
  * smbios_find_table() takes a caller supplied smbios struct type and
  * a pointer to a handle (struct smbtable) returning one if the structure
- * is sucessfully located and zero otherwise. Callers should take care
+ * is successfully located and zero otherwise. Callers should take care
  * to initialize the cookie field of the smbtable structure to zero before
  * the first invocation of this function.
  * Multiple tables of the same type can be located by repeatedly calling
@@ -168,7 +194,7 @@ smbios_find_table(u_int8_t type, struct smbtable *st)
 	/*
 	 * The cookie field of the smtable structure is used to locate
 	 * multiple instances of a table of an arbitrary type. Following the
-	 * sucessful location of a table, the type is encoded as bits 0:7 of
+	 * successful location of a table, the type is encoded as bits 0:7 of
 	 * the cookie value, the offset in terms of the number of structures
 	 * preceding that referenced by the handle is encoded in bits 15:31.
 	 */
@@ -380,4 +406,15 @@ smbios_info(char * str)
 			}
 		}
 	}
+}
+
+int
+bios_print(void *aux, const char *pnp)
+{
+        struct bios_attach_args *ba = aux;
+
+        if (pnp)
+                printf("%s at %s",
+                    ba->ba_name, pnp);
+        return (UNCONF);
 }

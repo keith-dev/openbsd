@@ -1,4 +1,4 @@
-/*	$OpenBSD: param.h,v 1.27 2007/07/24 15:45:10 kettenis Exp $	*/
+/*	$OpenBSD: param.h,v 1.29 2007/10/27 22:20:16 martin Exp $	*/
 /*	$NetBSD: param.h,v 1.25 2001/05/30 12:28:51 mrg Exp $ */
 
 /*
@@ -72,12 +72,6 @@
 #define	_MACHINE_ARCH	sparc64
 #define	MACHINE_ARCH	"sparc64"
 #define	MID_MACHINE	MID_SPARC64
-
-#ifdef _KERNEL				/* XXX */
-#ifndef _LOCORE				/* XXX */
-#include <machine/cpu.h>		/* XXX */
-#endif					/* XXX */
-#endif					/* XXX */
 
 /*
  * Round p (pointer or byte index) up to a correctly-aligned value for
@@ -174,10 +168,6 @@
 #define	ctod(x)		((x) << (PGSHIFT - DEV_BSHIFT))
 #define	dtoc(x)		((x) >> (PGSHIFT - DEV_BSHIFT))
 
-/* pages to bytes */
-#define	ctob(x)		((x) << PGSHIFT)
-#define	btoc(x)		(((vsize_t)(x) + PGOFSET) >> PGSHIFT)
-
 /* bytes to disk blocks */
 #define	btodb(x)	((x) >> DEV_BSHIFT)
 #define	dbtob(x)	((x) << DEV_BSHIFT)
@@ -220,5 +210,11 @@ extern void	delay(unsigned int);
 #define PAGE_SHIFT	13
 #define PAGE_SIZE	(1 << PAGE_SHIFT)
 #define PAGE_MASK	(PAGE_SIZE - 1)
+
+#ifdef _KERNEL
+#ifndef _LOCORE
+#include <machine/cpu.h>
+#endif
+#endif
 
 #endif	/* _SPARC64_PARAM_H_ */

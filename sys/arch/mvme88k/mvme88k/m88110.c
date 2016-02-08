@@ -1,4 +1,4 @@
-/*	$OpenBSD: m88110.c,v 1.38 2007/02/11 12:49:38 miod Exp $	*/
+/*	$OpenBSD: m88110.c,v 1.58 2008/01/02 19:59:31 miod Exp $	*/
 /*
  * Copyright (c) 1998 Steve Murphree, Jr.
  * All rights reserved.
@@ -29,7 +29,6 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
  */
-
 /*
  * Mach Operating System
  * Copyright (c) 1993-1991 Carnegie Mellon University
@@ -63,6 +62,7 @@
 #include <uvm/uvm_extern.h>
 
 #include <machine/asm_macro.h>
+#include <machine/bugio.h>
 #include <machine/cmmu.h>
 #include <machine/cpu.h>
 #include <machine/lock.h>
@@ -71,25 +71,39 @@
 #include <machine/psl.h>
 
 #include <mvme88k/dev/busswreg.h>
+#ifdef MULTIPROCESSOR
+#include <machine/mvme197.h>
+#endif
 
 cpuid_t	m88110_init(void);
+cpuid_t	m88410_init(void);
 void	m88110_setup_board_config(void);
+void	m88410_setup_board_config(void);
 void	m88110_cpu_configuration_print(int);
+void	m88410_cpu_configuration_print(int);
 void	m88110_shutdown(void);
 cpuid_t	m88110_cpu_number(void);
-void	m88110_set_sapr(cpuid_t, apr_t);
+void	m88110_set_sapr(apr_t);
 void	m88110_set_uapr(apr_t);
-void	m88110_flush_tlb(cpuid_t, unsigned, vaddr_t, u_int);
+void	m88110_flush_tlb(cpuid_t, u_int, vaddr_t, u_int);
+void	m88410_flush_tlb(cpuid_t, u_int, vaddr_t, u_int);
 void	m88110_flush_cache(cpuid_t, paddr_t, psize_t);
+void	m88410_flush_cache(cpuid_t, paddr_t, psize_t);
 void	m88110_flush_inst_cache(cpuid_t, paddr_t, psize_t);
-void	m88110_flush_data_page(cpuid_t, paddr_t);
+void	m88410_flush_inst_cache(cpuid_t, paddr_t, psize_t);
 void	m88110_dma_cachectl(pmap_t, vaddr_t, vsize_t, int);
+void	m88410_dma_cachectl(pmap_t, vaddr_t, vsize_t, int);
 void	m88110_dma_cachectl_pa(paddr_t, psize_t, int);
+void	m88410_dma_cachectl_pa(paddr_t, psize_t, int);
 void	m88110_initialize_cpu(cpuid_t);
+void	m88410_initialize_cpu(cpuid_t);
 
-/* This is the function table for the MC88110 built-in CMMUs */
+/*
+ * This is the function table for the MC88110 built-in CMMUs without
+ * external 88410.
+ */
 struct cmmu_p cmmu88110 = {
-        m88110_init,
+	m88110_init,
 	m88110_setup_board_config,
 	m88110_cpu_configuration_print,
 	m88110_shutdown,
@@ -99,7 +113,6 @@ struct cmmu_p cmmu88110 = {
 	m88110_flush_tlb,
 	m88110_flush_cache,
 	m88110_flush_inst_cache,
-	m88110_flush_data_page,
 	m88110_dma_cachectl,
 	m88110_dma_cachectl_pa,
 #ifdef MULTIPROCESSOR
@@ -107,7 +120,30 @@ struct cmmu_p cmmu88110 = {
 #endif
 };
 
+/*
+ * This is the function table for the MC88110 built-in CMMUs with
+ * external 88410.
+ */
+struct cmmu_p cmmu88410 = {
+	m88410_init,
+	m88410_setup_board_config,
+	m88410_cpu_configuration_print,
+	m88110_shutdown,
+	m88110_cpu_number,
+	m88110_set_sapr,
+	m88110_set_uapr,
+	m88110_flush_tlb,
+	m88410_flush_cache,
+	m88410_flush_inst_cache,
+	m88410_dma_cachectl,
+	m88410_dma_cachectl_pa,
+#ifdef MULTIPROCESSOR
+	m88410_initialize_cpu,
+#endif
+};
+
 void patc_clear(void);
+
 void m88110_cmmu_sync_cache(paddr_t, psize_t);
 void m88110_cmmu_sync_inval_cache(paddr_t, psize_t);
 void m88110_cmmu_inval_cache(paddr_t, psize_t);
@@ -131,8 +167,27 @@ patc_clear(void)
 void
 m88110_setup_board_config(void)
 {
+	max_cpus = 1;
+}
+
+void
+m88410_setup_board_config(void)
+{
 #ifdef MULTIPROCESSOR
-	max_cpus = 2;
+	struct mvmeprom_brdid brdid;
+
+	/*
+	 * MVME197SP are 01-W3815B04, while MVME197DP are 01-W3815B03.
+	 * If the CNFG memory has been lost and the board is a 197SP,
+	 * we'll just fail to spin up the non-existing second processor.
+	 */
+	bzero(&brdid, sizeof(brdid));
+	bugbrdid(&brdid);
+	if (bcmp(brdid.pwa, "01-W3815B04", 11) == 0)
+		max_cpus = 1;
+	else
+		max_cpus = 2;
+	/* XXX what about 01-W3977B QP boards??? */
 #else
 	max_cpus = 1;
 #endif
@@ -140,7 +195,7 @@ m88110_setup_board_config(void)
 
 /*
  * Should only be called after the calling cpus knows its cpu
- * number and master/slave status . Should be called first
+ * number and master/slave status. Should be called first
  * by the master, before the slaves are started.
  */
 void
@@ -158,12 +213,18 @@ m88110_cpu_configuration_print(int master)
 		    proctype, procvers);
 		break;
 	case ARN_88110:
-		printf("M88110 version 0x%x", procvers);
-		if (mc88410_present())
-			printf(", external M88410 cache controller");
+		printf("M88110 version 0x%x, 8K I/D caches", procvers);
 		break;
 	}
 	printf("\n");
+}
+
+void
+m88410_cpu_configuration_print(int master)
+{
+	m88110_cpu_configuration_print(master);
+	/* XXX how to get its size? */
+	printf("cpu%d: external M88410 cache controller\n", cpu_number());
 }
 
 /*
@@ -179,55 +240,14 @@ m88110_init(void)
 	return (cpu);
 }
 
-void
-m88110_initialize_cpu(cpuid_t cpu)
+cpuid_t
+m88410_init(void)
 {
-	int i;
+	cpuid_t cpu;
 
-	/* clear BATCs */
-	for (i = 0; i < 8; i++) {
-		set_dir(i);
-		set_dbp(0);
-		set_iir(i);
-		set_ibp(0);
-	}
-
-	/* clear PATCs */
-	patc_clear();
-
-	/* Do NOT enable ICTL_PREN (branch prediction) */
-	set_ictl(BATC_32M
-		 | CMMU_ICTL_DID	/* Double instruction disable */
-		 | CMMU_ICTL_MEN
-		 | CMMU_ICTL_CEN
-		 | CMMU_ICTL_BEN
-		 | CMMU_ICTL_HTEN);
-
-	set_dctl(BATC_32M
-                 | CMMU_DCTL_RSVD1	/* Data Matching Disable */
-                 | CMMU_DCTL_MEN
-		 | CMMU_DCTL_CEN
-		 | CMMU_DCTL_SEN
-		 | CMMU_DCTL_ADS
-		 | CMMU_DCTL_HTEN);
-
-	mc88110_inval_inst();		/* clear instruction cache & TIC */
-	mc88110_inval_data();		/* clear data cache */
-	if (mc88410_present())
-		mc88410_inval();	/* clear external data cache */
-
-	set_dcmd(CMMU_DCMD_INV_SATC);	/* invalidate ATCs */
-
-	set_isr(0);
-	set_dsr(0);
-}
-
-/*
- * Just before poweroff or reset....
- */
-void
-m88110_shutdown(void)
-{
+	cpu = m88110_cpu_number();
+	m88410_initialize_cpu(cpu);
+	return (cpu);
 }
 
 cpuid_t
@@ -241,21 +261,126 @@ m88110_cpu_number(void)
 }
 
 void
-m88110_set_sapr(cpuid_t cpu, apr_t ap)
+m88110_initialize_cpu(cpuid_t cpu)
 {
 	u_int ictl, dctl;
+	int i;
+	int procvers = (get_cpu_pid() & PID_VN) >> VN_SHIFT;
 
+	/* clear BATCs */
+	for (i = 0; i < 8; i++) {
+		set_dir(i);
+		set_dbp(0);
+		set_iir(i);
+		set_ibp(0);
+	}
+
+	/* clear PATCs */
+	patc_clear();
+
+	ictl = BATC_512K | CMMU_ICTL_DID | CMMU_ICTL_CEN | CMMU_ICTL_BEN;
+
+	/*
+	 * 88110 errata #10 (4.2) or #2 (5.1.1):
+	 * ``Under some circumstances, the 88110 may incorrectly latch data
+	 *   as it comes from the bus.
+	 *   [...]
+	 *   It is the data matching mechanism that may give corrupt data to
+	 *   the register files.
+	 *   Suggested fix: Set the Data Matching Disable bit (bit 2) of the
+	 *   DCTL.  This bit is not documented in the user's manual. This bit
+	 *   is only present for debug purposes and its functionality should
+	 *   not be depended upon long term.''
+	 *
+	 * 88110 errata #5 (5.1.1):
+	 * ``Setting the xmem bit in the dctl register to perform st/ld
+	 *   xmems can cause the cpu to hang if a st instruction follows the
+	 *   xmem.
+	 *   Work-Around: do not set the xmem bit in dctl, or separate st
+	 *   from xmem instructions.''
+	 */
+	dctl = BATC_512K | CMMU_DCTL_CEN | CMMU_DCTL_ADS;
+	dctl |= CMMU_DCTL_RSVD1; /* Data Matching Disable */
+
+	/*
+	 * 88110 rev 4.2 errata #1:
+	 * ``Under certain conditions involving exceptions, with branch
+	 *   prediction enabled, the CPU may hang.
+	 *   Suggested fix: Clear the PREN bit of the ICTL.  This will
+	 *   disable branch prediction.''
+	 *
+	 * ...but this errata becomes...
+	 *
+	 * 88110 rev 5.1 errata #1:
+	 * ``Under certain conditions involving exceptions, with branch
+	 *   prediction enabled and decoupled loads/stores enabled, load
+	 *   instructions may complete incorrectly or stores may execute
+	 *   to the wrong. address.
+	 *   Suggested fix: Clear the PREN bit of the ICTL or the DEN bit
+	 *   of the DCTL.''
+	 *
+	 * So since branch prediction appears to give better performance
+	 * than data cache decoupling, and it is not known whether the
+	 * problem has been understood better and thus the conditions
+	 * narrowed on 5.1, or changes between 4.2 and 5.1 only restrict
+	 * the conditions on which it may occur, we'll enable branch
+	 * prediction on 5.1 processors and data cache decoupling on
+	 * earlier versions.
+	 */
+	if (procvers >= 0xf)	/* > 0xb ? */
+		ictl |= CMMU_ICTL_PREN;
+	else
+		dctl |= CMMU_DCTL_DEN;
+
+	mc88110_inval_inst();		/* clear instruction cache & TIC */
+	mc88110_inval_data();		/* clear data cache */
+
+	set_ictl(ictl);
+	set_dctl(dctl);
+
+	set_isr(0);
+	set_dsr(0);
+}
+
+void
+m88410_initialize_cpu(cpuid_t cpu)
+{
+	u_int dctl;
+
+	m88110_initialize_cpu(cpu);
+	dctl = get_dctl();
+	dctl |= CMMU_DCTL_SEN;
+	set_dctl(dctl);
 	CMMU_LOCK;
+	mc88410_inval();	/* clear external data cache */
+	CMMU_UNLOCK;
+
+#ifdef MULTIPROCESSOR
+	/*
+	 * Mark us as allowing IPIs now.
+	 */
+	*(volatile u_int8_t *)(BS_BASE + BS_CPINT) = BS_CPI_ICLR | BS_CPI_IEN;
+#endif
+}
+
+/*
+ * Just before poweroff or reset....
+ */
+void
+m88110_shutdown(void)
+{
+}
+
+void
+m88110_set_sapr(apr_t ap)
+{
+	u_int ictl, dctl;
 
 	set_icmd(CMMU_ICMD_INV_SATC);
 	set_dcmd(CMMU_DCMD_INV_SATC);
 
 	ictl = get_ictl();
 	dctl = get_dctl();
-
-	/* disable translation */
-	set_ictl((ictl & ~CMMU_ICTL_MEN));
-	set_dctl((dctl & ~CMMU_DCTL_MEN));
 
 	set_isap(ap);
 	set_dsap(ap);
@@ -267,17 +392,16 @@ m88110_set_sapr(cpuid_t cpu, apr_t ap)
 	set_dcmd(CMMU_DCMD_INV_UATC);
 	set_dcmd(CMMU_DCMD_INV_SATC);
 
-	/* restore MMU settings */
+	/* Enable translation */
+	ictl |= CMMU_ICTL_MEN | CMMU_ICTL_HTEN;
+	dctl |= CMMU_DCTL_MEN | CMMU_DCTL_HTEN;
 	set_ictl(ictl);
 	set_dctl(dctl);
-
-	CMMU_UNLOCK;
 }
 
 void
 m88110_set_uapr(apr_t ap)
 {
-	CMMU_LOCK;
 	set_iuap(ap);
 	set_duap(ap);
 
@@ -285,8 +409,7 @@ m88110_set_uapr(apr_t ap)
 	set_dcmd(CMMU_DCMD_INV_UATC);
 
 	/* We need to at least invalidate the TIC, as it is va-addressed */
-	mc88110_inval_inst();
-	CMMU_UNLOCK;
+	set_icmd(CMMU_ICMD_INV_TIC);
 }
 
 /*
@@ -297,13 +420,22 @@ m88110_set_uapr(apr_t ap)
  *	flush any tlb
  */
 void
-m88110_flush_tlb(cpuid_t cpu, unsigned kernel, vaddr_t vaddr, u_int count)
+m88110_flush_tlb(cpuid_t cpu, u_int kernel, vaddr_t vaddr, u_int count)
 {
 	u_int32_t psr;
+#ifdef MULTIPROCESSOR
+	struct cpu_info *ci = curcpu();
 
-	disable_interrupt(psr);
+	if (cpu != ci->ci_cpuid) {
+		m197_send_ipi(kernel ?
+		    CI_IPI_TLB_FLUSH_KERNEL : CI_IPI_TLB_FLUSH_USER, cpu);
+		return;
+	}
+#endif
 
-	CMMU_LOCK;
+	psr = get_psr();
+	set_psr(psr | PSR_IND);
+
 	if (kernel) {
 		set_icmd(CMMU_ICMD_INV_SATC);
 		set_dcmd(CMMU_DCMD_INV_SATC);
@@ -311,166 +443,388 @@ m88110_flush_tlb(cpuid_t cpu, unsigned kernel, vaddr_t vaddr, u_int count)
 		set_icmd(CMMU_ICMD_INV_UATC);
 		set_dcmd(CMMU_DCMD_INV_UATC);
 	}
-	CMMU_UNLOCK;
 
 	set_psr(psr);
 }
 
 /*
  *	Functions that invalidate caches.
+ */
+
+/*
+ * 88110 general information #22:
+ * ``Issuing a command to flush and invalidate the data cache while the
+ *   dcache is disabled (CEN = 0 in dctl) will cause problems.  Do not
+ *   flush a disabled data cache.  In general, there is no reason to
+ *   perform this operation with the cache disabled, since it may be
+ *   incoherent with the proper state of memory.  Before 5.0 the flush
+ *   command was treated like a nop when the cache was disabled.  This
+ *   is no longer the case.''
  *
- * Cache invalidates require physical addresses.  Care must be exercised when
- * using segment invalidates.  This implies that the starting physical address
- * plus the segment length should be invalidated.  A typical mistake is to
- * extract the first physical page of a segment from a virtual address, and
- * then expecting to invalidate when the pages are not physically contiguous.
- *
- * We don't push Instruction Caches prior to invalidate because they are not
- * snooped and never modified (I guess it doesn't matter then which form
- * of the command we use then).
+ * Since we always enable the data cache, and no cmmu cache operation
+ * will occur before we do, it is not necessary to pay attention to this.
  */
 
-/*
- * Care must be taken to avoid flushing the data cache when
- * the data cache is not on!  From the 0F92L Errata Documentation
- * Package, Version 1.1
- */
+#define	trunc_cache_line(a)	((a) & ~(MC88110_CACHE_LINE - 1))
+#define	round_cache_line(a)	trunc_cache_line((a) + MC88110_CACHE_LINE - 1)
 
 /*
- * XXX These routines are really suboptimal because they invalidate
- * way too much...
- * Improve them once the 197 support is really working...
+ * Flush both Instruction and Data caches
  */
 
-/*
- *	flush both Instruction and Data caches
- */
 void
 m88110_flush_cache(cpuid_t cpu, paddr_t pa, psize_t size)
 {
 	u_int32_t psr;
 
-	disable_interrupt(psr);
+	psr = get_psr();
+	set_psr(psr | PSR_IND);
 
 	mc88110_inval_inst();
 	mc88110_flush_data();
-	if (mc88410_present())
-		mc88410_flush();
+
+	set_psr(psr);
+}
+
+void
+m88410_flush_cache(cpuid_t cpu, paddr_t pa, psize_t size)
+{
+	u_int32_t psr;
+#ifdef MULTIPROCESSOR
+	struct cpu_info *ci = curcpu();
+
+	if (cpu != ci->ci_cpuid) {
+		m197_send_complex_ipi(CI_IPI_CACHE_FLUSH, cpu, pa, size);
+		return;
+	}
+#endif
+
+	psr = get_psr();
+	set_psr(psr | PSR_IND);
+
+	mc88110_inval_inst();
+	/* flush all data to avoid errata invalidate */
+	mc88110_flush_data();
+	CMMU_LOCK;
+	mc88410_flush();
+	CMMU_UNLOCK;
+
 	set_psr(psr);
 }
 
 /*
- *	flush Instruction caches
+ * Flush Instruction caches
  */
+
 void
 m88110_flush_inst_cache(cpuid_t cpu, paddr_t pa, psize_t size)
 {
-	u_int32_t psr;
-
-	disable_interrupt(psr);
-
+	/* atomic so no psr games */
 	mc88110_inval_inst();
-	set_psr(psr);
 }
 
-/*
- * flush data cache
- */
 void
-m88110_flush_data_page(cpuid_t cpu, paddr_t pa)
+m88410_flush_inst_cache(cpuid_t cpu, paddr_t pa, psize_t size)
 {
 	u_int32_t psr;
+#ifdef MULTIPROCESSOR
+	struct cpu_info *ci = curcpu();
 
-	disable_interrupt(psr);
+	if (cpu != ci->ci_cpuid) {
+		m197_send_complex_ipi(CI_IPI_ICACHE_FLUSH, cpu, pa, size);
+		return;
+	}
+#endif
 
-	mc88110_flush_data();
-	if (mc88410_present())
-		mc88410_flush();
+	psr = get_psr();
+	set_psr(psr | PSR_IND);
+
+	mc88110_inval_inst();
+	CMMU_LOCK;
+	mc88410_flush();
+	CMMU_UNLOCK;
+
 	set_psr(psr);
 }
 
 /*
- * sync dcache (and icache too)
+ * Sync dcache - icache is never dirty but needs to be invalidated as well.
  */
+
 void
 m88110_cmmu_sync_cache(paddr_t pa, psize_t size)
 {
-	u_int32_t psr;
-
-	disable_interrupt(psr);
-
-	mc88110_inval_inst();
-	mc88110_flush_data();
-	if (mc88410_present())
-		mc88410_flush();
-	set_psr(psr);
+	if (size <= MC88110_CACHE_LINE)
+		mc88110_flush_data_line(pa);
+	else
+		mc88110_flush_data_page(pa);
 }
 
 void
 m88110_cmmu_sync_inval_cache(paddr_t pa, psize_t size)
 {
-	u_int32_t psr;
-
-	disable_interrupt(psr);
-
-	mc88110_sync_data();
-	if (mc88410_present())
-		mc88410_sync();
-	set_psr(psr);
+	if (size <= MC88110_CACHE_LINE)
+		mc88110_sync_data_line(pa);
+	else
+		mc88110_sync_data_page(pa);
 }
 
 void
 m88110_cmmu_inval_cache(paddr_t pa, psize_t size)
 {
+	/*
+	 * I'd love to do this...
+
+	if (size <= MC88110_CACHE_LINE)
+		mc88110_inval_data_line(pa);
+	else
+		mc88110_inval_data_page(pa);
+
+	 * ... but there is no mc88110_inval_data_page(). Callers know
+	 * this and turn invalidates into syncs with invalidate for page
+	 * or larger areas.
+	 */
+	mc88110_inval_data_line(pa);
+}
+
+/*
+ * High level cache handling functions (used by bus_dma).
+ */
+
+void
+m88110_dma_cachectl(pmap_t pmap, vaddr_t _va, vsize_t _size, int op)
+{
 	u_int32_t psr;
+	vaddr_t va;
+	paddr_t pa;
+	psize_t size, count;
+	void (*flusher)(paddr_t, psize_t);
 
-	disable_interrupt(psr);
+	va = trunc_cache_line(_va);
+	size = round_cache_line(_va + _size) - va;
 
-	mc88110_inval_inst();
-	mc88110_inval_data();
-	if (mc88410_present())
-		mc88410_inval();
+	switch (op) {
+	case DMA_CACHE_SYNC:
+		flusher = m88110_cmmu_sync_cache;
+		break;
+	case DMA_CACHE_SYNC_INVAL:
+		flusher = m88110_cmmu_sync_inval_cache;
+		break;
+	default:
+		if (va != _va || size != _size || size >= PAGE_SIZE)
+			flusher = m88110_cmmu_sync_inval_cache;
+		else
+			flusher = m88110_cmmu_inval_cache;
+		break;
+	}
+
+	psr = get_psr();
+	set_psr(psr | PSR_IND);
+
+	if (op != DMA_CACHE_SYNC)
+		mc88110_inval_inst();
+	while (size != 0) {
+		count = (va & PAGE_MASK) == 0 && size >= PAGE_SIZE ?
+		    PAGE_SIZE : MC88110_CACHE_LINE;
+
+		if (pmap_extract(pmap, va, &pa) != FALSE) {
+			(*flusher)(pa, count);
+		}
+
+		va += count;
+		size -= count;
+	}
+
 	set_psr(psr);
 }
 
 void
-m88110_dma_cachectl(pmap_t pmap, vaddr_t va, vsize_t size, int op)
+m88410_dma_cachectl(pmap_t pmap, vaddr_t _va, vsize_t _size, int op)
 {
+	u_int32_t psr;
+	vaddr_t va;
 	paddr_t pa;
+	psize_t size, count;
+	void (*flusher)(paddr_t, psize_t);
+	void (*ext_flusher)(void);
 
-	if (pmap_extract(pmap, va, &pa) == FALSE) {
-#ifdef DIAGNOSTIC
-		printf("cachectl: pmap_extract(%p, %p) failed\n", pmap, va);
-#endif
-		pa = 0;
-		size = ~0;
-	}
+	va = trunc_cache_line(_va);
+	size = round_cache_line(_va + _size) - va;
 
 	switch (op) {
 	case DMA_CACHE_SYNC:
-		m88110_cmmu_sync_cache(pa, size);
+#if 0
+		flusher = m88110_cmmu_sync_cache;
+		ext_flusher = mc88410_flush;
+#endif
 		break;
 	case DMA_CACHE_SYNC_INVAL:
-		m88110_cmmu_sync_inval_cache(pa, size);
+		flusher = m88110_cmmu_sync_inval_cache;
+		ext_flusher = mc88410_sync;
 		break;
 	default:
-		m88110_cmmu_inval_cache(pa, size);
+		if (va != _va || size != _size || size >= PAGE_SIZE) {
+			flusher = m88110_cmmu_sync_inval_cache;
+			ext_flusher = mc88410_sync;
+		} else {
+			flusher = m88110_cmmu_inval_cache;
+#ifdef notyet
+			ext_flusher = mc88410_inval;
+#else
+			ext_flusher = mc88410_sync;
+#endif
+		}
 		break;
 	}
+
+	psr = get_psr();
+	set_psr(psr | PSR_IND);
+
+	if (op == DMA_CACHE_SYNC) {
+		va = trunc_page(_va);
+		size = round_page(_va + _size) - va;
+		CMMU_LOCK;
+		while (size != 0) {
+			if (pmap_extract(pmap, va, &pa) != FALSE) {
+				m88110_cmmu_sync_cache(pa, PAGE_SIZE);
+				mc88410_flush_page(pa);
+			}
+			va += PAGE_SIZE;
+			size -= PAGE_SIZE;
+		}
+		CMMU_UNLOCK;
+	} else {
+		mc88110_inval_inst();
+		while (size != 0) {
+			count = (va & PAGE_MASK) == 0 && size >= PAGE_SIZE ?
+			    PAGE_SIZE : MC88110_CACHE_LINE;
+
+			if (pmap_extract(pmap, va, &pa) != FALSE) {
+				(*flusher)(pa, count);
+			}
+
+			va += count;
+			size -= count;
+		}
+		CMMU_LOCK;
+		(*ext_flusher)();
+		CMMU_UNLOCK;
+	}
+
+	set_psr(psr);
 }
 
 void
-m88110_dma_cachectl_pa(paddr_t pa, psize_t size, int op)
+m88110_dma_cachectl_pa(paddr_t _pa, psize_t _size, int op)
 {
+	u_int32_t psr;
+	paddr_t pa;
+	psize_t size, count;
+	void (*flusher)(paddr_t, psize_t);
+
+	pa = trunc_cache_line(_pa);
+	size = round_cache_line(_pa + _size) - pa;
+
 	switch (op) {
 	case DMA_CACHE_SYNC:
-		m88110_cmmu_sync_cache(pa, size);
+		flusher = m88110_cmmu_sync_cache;
 		break;
 	case DMA_CACHE_SYNC_INVAL:
-		m88110_cmmu_sync_inval_cache(pa, size);
+		flusher = m88110_cmmu_sync_inval_cache;
 		break;
 	default:
-		m88110_cmmu_inval_cache(pa, size);
+		if (pa != _pa || size != _size || size >= PAGE_SIZE)
+			flusher = m88110_cmmu_sync_inval_cache;
+		else
+			flusher = m88110_cmmu_inval_cache;
 		break;
 	}
+
+	psr = get_psr();
+	set_psr(psr | PSR_IND);
+
+	if (op != DMA_CACHE_SYNC)
+		mc88110_inval_inst();
+	while (size != 0) {
+		count = (pa & PAGE_MASK) == 0 && size >= PAGE_SIZE ?
+		    PAGE_SIZE : MC88110_CACHE_LINE;
+
+		(*flusher)(pa, count);
+
+		pa += count;
+		size -= count;
+	}
+
+	set_psr(psr);
+}
+
+void
+m88410_dma_cachectl_pa(paddr_t _pa, psize_t _size, int op)
+{
+	u_int32_t psr;
+	paddr_t pa;
+	psize_t size, count;
+	void (*flusher)(paddr_t, psize_t);
+	void (*ext_flusher)(void);
+
+	pa = trunc_cache_line(_pa);
+	size = round_cache_line(_pa + _size) - pa;
+
+	switch (op) {
+	case DMA_CACHE_SYNC:
+#if 0
+		flusher = m88110_cmmu_sync_cache;
+		ext_flusher = mc88410_flush;
+#endif
+		break;
+	case DMA_CACHE_SYNC_INVAL:
+		flusher = m88110_cmmu_sync_inval_cache;
+		ext_flusher = mc88410_sync;
+		break;
+	default:
+		if (pa != _pa || size != _size || size >= PAGE_SIZE) {
+			flusher = m88110_cmmu_sync_inval_cache;
+			ext_flusher = mc88410_sync;
+		} else {
+			flusher = m88110_cmmu_inval_cache;
+#ifdef notyet
+			ext_flusher = mc88410_inval;
+#else
+			ext_flusher = mc88410_sync;
+#endif
+		}
+		break;
+	}
+
+	psr = get_psr();
+	set_psr(psr | PSR_IND);
+
+	if (op == DMA_CACHE_SYNC) {
+		pa = trunc_page(_pa);
+		size = round_page(_pa + _size) - pa;
+		CMMU_LOCK;
+		while (size != 0) {
+			m88110_cmmu_sync_cache(pa, PAGE_SIZE);
+			mc88410_flush_page(pa);
+			pa += PAGE_SIZE;
+			size -= PAGE_SIZE;
+		}
+		CMMU_UNLOCK;
+	} else {
+		mc88110_inval_inst();
+		while (size != 0) {
+			count = (pa & PAGE_MASK) == 0 && size >= PAGE_SIZE ?
+			    PAGE_SIZE : MC88110_CACHE_LINE;
+
+			(*flusher)(pa, count);
+
+			pa += count;
+			size -= count;
+		}
+		CMMU_LOCK;
+		(*ext_flusher)();
+		CMMU_UNLOCK;
+	}
+
+	set_psr(psr);
 }

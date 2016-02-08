@@ -1,4 +1,4 @@
-/* $OpenBSD: subr.S,v 1.14 2006/11/18 22:48:44 miod Exp $	*/
+/* $OpenBSD: subr.S,v 1.17 2008/02/20 18:35:41 miod Exp $	*/
 /*
  * Mach Operating System
  * Copyright (c) 1993-1992 Carnegie Mellon University
@@ -32,7 +32,9 @@
 
 #include <sys/errno.h>
 
+#include <machine/param.h>
 #include <machine/asm.h>
+#include <machine/psl.h>
 #include <machine/trap.h>
 
 #ifdef	M88100
@@ -359,7 +361,7 @@ ASLOCAL(Lcidone)
 	ldcr	r5,   CPU
 	ld	r6,   r5,   CI_CURPCB
 	jmp.n	r1
-	 st	r0,r6,PCB_ONFAULT
+	 st	r0,   r6,   PCB_ONFAULT
 
 ASLOCAL(Lciflt)
 	br.n	_ASM_LABEL(Lcidone)
@@ -635,7 +637,7 @@ ASLOCAL(Lcodone)
 	ldcr	r5,   CPU
 	ld	r6,   r5,   CI_CURPCB
 	jmp.n	r1
-	 st	r0,r6,PCB_ONFAULT	/* clear the handler */
+	 st	r0,   r6,   PCB_ONFAULT	/* clear the handler */
 
 ASLOCAL(Lcoflt)
 	br.n	_ASM_LABEL(Lcodone)
@@ -703,7 +705,7 @@ ASLOCAL(Lcosdone)
 	ldcr	r5,   CPU
 	ld	r6,   r5,   CI_CURPCB
 	jmp.n	r1
-	 st	r0,r6,PCB_ONFAULT	/* clear the handler */
+	 st	r0,   r6,   PCB_ONFAULT	/* clear the handler */
 
 #undef	SRC
 #undef	DEST
@@ -718,10 +720,13 @@ ASLOCAL(Lcosdone)
  * Copy len bytes from src to dst, aborting if we encounter a page fault.
  */
 ENTRY(kcopy)
+	subu	r31,  r31,  16
 	ldcr	r5,   CPU
 	ld	r6,   r5,   CI_CURPCB
 	or.u	r5,   r0,   hi16(_ASM_LABEL(kcopy_fault))
+	ld	r7,   r6,   PCB_ONFAULT
 	or	r5,   r5,   lo16(_ASM_LABEL(kcopy_fault))
+	st	r7,   r31,  0			/* save old pcb_onfault */
 	st	r5,   r6,   PCB_ONFAULT		/* pcb_onfault = kcopy_fault */
 	bcnd	le0,r4,_ASM_LABEL(kcopy_out)	/* nothing to do if <= 0 */
 /*
@@ -971,9 +976,11 @@ ASLOCAL(kcopy_out)
 	or	r2,   r0,   0		/* return success */
 ASLOCAL(kcopy_out_fault)
 	ldcr	r5,   CPU
+	ld	r7,   r31,  0
 	ld	r6,   r5,   CI_CURPCB
+	add	r31,  r31,  16
 	jmp.n	r1		/* all done, return to caller */
-	 st	r0,   r6,   PCB_ONFAULT	/* clear the handler */
+	 st	r7,   r6,   PCB_ONFAULT	/* restore previous pcb_onfault */
 
 ASLOCAL(kcopy_fault)
 	br.n	_ASM_LABEL(kcopy_out_fault)
@@ -1017,6 +1024,7 @@ ASLOCAL(kr_strat)
 	word	_ASM_LABEL(kr_byte_copy)
 	word	_ASM_LABEL(kr_3byte_word_copy)
 
+#ifdef DDB
 /*
  * non-local goto
  *	int setjmp(label_t *);
@@ -1067,13 +1075,14 @@ ENTRY(longjmp)
 	ld	r31,r2,18*4
 	jmp.n	r1
 	 or	r2,r0,1
+#endif
 
 /*
  * Signal trampoline code.
  * The kernel arranges for the handler to be invoked directly, and return
  * here.
  */
-GLOBAL(sigcode)			/* r31 points to sigframe */
+ENTRY(sigcode)			/* r31 points to sigframe */
 	ld	r2,  r31, 0	/* pick sigcontext* */
 	or	r13, r0,  SYS_sigreturn
 	tb0	0,   r0,  128	/* syscall trap, calling sigreturn */
@@ -1090,3 +1099,97 @@ GLOBAL(sigcode)			/* r31 points to sigframe */
 	NOP
 	NOP
 GLOBAL(esigcode)
+
+/*
+ * Helper functions for pmap_copy_page() and pmap_zero_page().
+ */
+/*
+ * void copypage(vaddr_t src, vaddr_t dst);
+ *
+ * This copies PAGE_SIZE bytes from src to dst in 32 byte chunks.
+ */
+ENTRY(copypage)
+	addu	r12, r2, PAGE_SIZE
+1:
+	ld.d	r4,  r2, 0x00
+	ld.d	r6,  r2, 0x08
+	st.d	r4,  r3, 0x00
+	ld.d	r8,  r2, 0x10
+	st.d	r6,  r3, 0x08
+	ld.d	r10, r2, 0x18
+	st.d	r8,  r3, 0x10
+	addu	r2,  r2, 0x20
+	st.d	r10, r3, 0x18
+	cmp	r4,  r2, r12
+	bb1.n	ne,  r4, 1b
+	 addu	r3,  r3, 0x20
+	jmp	r1
+
+/*
+ * void zeropage(vaddr_t dst);
+ *
+ * This zeroes PAGE_SIZE bytes from src to dst in 64 byte chunks.
+ */
+ENTRY(zeropage)
+	addu	r12, r2, PAGE_SIZE
+	or	r3,  r1, r0
+	or	r1,  r0, r0
+1:
+	st.d	r0,  r2, 0x00
+	st.d	r0,  r2, 0x08
+	st.d	r0,  r2, 0x10
+	st.d	r0,  r2, 0x18
+	st.d	r0,  r2, 0x20
+	st.d	r0,  r2, 0x28
+	st.d	r0,  r2, 0x30
+	st.d	r0,  r2, 0x38
+	addu	r2,  r2, 0x40
+	cmp	r4,  r2, r12
+	bb1	ne,  r4, 1b
+	jmp	r3
+
+/*
+ * PSR initialization code, invoked from locore on every processor startup.
+ */
+ASENTRY(setup_psr)
+	ldcr	r2,  PID
+	extu	r3,  r2, 8<8>
+
+	/*
+	 * Ensure that the PSR is as we like:
+	 *	supervisor mode
+	 *	big-endian byte ordering
+	 *	concurrent operation allowed
+	 *	carry bit clear (I don't think we really care about this)
+	 *	FPU enabled
+	 *	misaligned access raises an exception
+	 *	interrupts disabled
+	 *	shadow registers frozen
+	 *
+	 * The manual says not to disable interrupts and freeze shadowing
+	 * at the same time because interrupts are not actually disabled
+	 * until after the next instruction. Well, if an interrupt
+	 * occurs now, we're in deep trouble anyway, so I'm going to do
+	 * the two together.
+	 *
+	 * Upon a reset (or poweron, I guess), the PSR indicates:
+	 *   supervisor mode
+	 *   interrupts, shadowing, FPU, misaligned exception: all disabled
+	 *
+	 * We'll just construct our own turning on what we want.
+	 *
+	 *	jfriedl@omron.co.jp
+	 */
+
+	cmp	r4, r3, CPU_88110
+	bb1	eq, r4, 1f	/* if it's a mc88110, skip SSBR */
+	stcr	r0, SSBR	/* clear this for later */
+1:
+	stcr	r0, SR1		/* clear the CPU flags */
+
+	or.u	r2, r0, hi16(KERNEL_PSR)
+	or	r2, r2, lo16(KERNEL_PSR)
+	stcr	r2, PSR
+	FLUSH_PIPELINE
+
+	jmp	r1

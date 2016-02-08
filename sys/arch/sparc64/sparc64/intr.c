@@ -1,4 +1,4 @@
-/*	$OpenBSD: intr.c,v 1.26 2007/05/29 18:10:43 miod Exp $	*/
+/*	$OpenBSD: intr.c,v 1.30 2008/02/14 19:07:56 kettenis Exp $	*/
 /*	$NetBSD: intr.c,v 1.39 2001/07/19 23:38:11 eeh Exp $ */
 
 /*
@@ -78,8 +78,6 @@ int	intr_list_handler(void *);
  */
 int ignore_stray = 1;
 int straycnt[16];
-
-int handled_intr_level;	/* interrupt level that we're handling now */
 
 void
 strayintr(fp, vectored)
@@ -207,7 +205,6 @@ intr_establish(level, ih)
 	 * and we do want to preserve order.
 	 */
 	ih->ih_pil = level; /* XXXX caller should have done this before */
-	ih->ih_busy = 0;    /* XXXX caller should have done this before */
 	ih->ih_pending = 0; /* XXXX caller should have done this before */
 	ih->ih_next = NULL;
 
@@ -310,12 +307,10 @@ softintr_establish(level, fun, arg)
 {
 	struct intrhand *ih;
 
-	ih = malloc(sizeof(*ih), M_DEVBUF, 0);
-	bzero(ih, sizeof(*ih));
+	ih = malloc(sizeof(*ih), M_DEVBUF, M_ZERO);
 	ih->ih_fun = (int (*)(void *))fun;	/* XXX */
 	ih->ih_arg = arg;
 	ih->ih_pil = level;
-	ih->ih_busy = 0;
 	ih->ih_pending = 0;
 	ih->ih_clr = NULL;
 	return (void *)ih;
@@ -341,6 +336,7 @@ softintr_schedule(cookie)
 void
 splassert_check(int wantipl, const char *func)
 {
+	struct cpu_info *ci = curcpu();
 	int oldipl;
 
 	__asm __volatile("rdpr %%pil,%0" : "=r" (oldipl));
@@ -349,12 +345,33 @@ splassert_check(int wantipl, const char *func)
 		splassert_fail(wantipl, oldipl, func);
 	}
 
-	if (handled_intr_level > wantipl) {
+	if (ci->ci_handled_intr_level > wantipl) {
 		/*
 		 * XXX - need to show difference between what's blocked and
 		 * what's running.
 		 */
-		splassert_fail(wantipl, handled_intr_level, func);
+		splassert_fail(wantipl, ci->ci_handled_intr_level, func);
 	}
 }
+#endif
+
+#ifdef MULTIPROCESSOR
+
+void sparc64_intlock(struct trapframe64 *);
+void sparc64_intunlock(struct trapframe64 *);
+
+void
+sparc64_intlock(struct trapframe64 *tf)
+{
+	if(tf->tf_pil < PIL_SCHED)
+		__mp_lock(&kernel_lock);
+}
+
+void
+sparc64_intunlock(struct trapframe64 *tf)
+{
+	if(tf->tf_pil < PIL_SCHED)
+		__mp_unlock(&kernel_lock);
+}
+
 #endif

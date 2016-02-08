@@ -1,4 +1,4 @@
-/*	$OpenBSD: subr_autoconf.c,v 1.52 2007/05/30 05:36:36 deraadt Exp $	*/
+/*	$OpenBSD: subr_autoconf.c,v 1.55 2007/11/23 18:21:43 kettenis Exp $	*/
 /*	$NetBSD: subr_autoconf.c,v 1.21 1996/04/04 06:06:18 cgd Exp $	*/
 
 /*
@@ -58,8 +58,6 @@
 /*
  * Autoconfiguration subroutines.
  */
-
-typedef int (*cond_predicate_t)(struct device *, void *);
 
 /*
  * ioconf.c exports exactly two names: cfdata and cfroots.  All system
@@ -411,10 +409,10 @@ config_make_softc(struct device *parent, struct cfdata *cf)
 		panic("config_make_softc");
 
 	/* get memory for all device vars */
-	dev = (struct device *)malloc(ca->ca_devsize, M_DEVBUF, M_NOWAIT);
+	dev = malloc(ca->ca_devsize, M_DEVBUF, M_NOWAIT|M_ZERO);
 	if (!dev)
 		panic("config_make_softc: allocation for device softc failed");
-	bzero(dev, ca->ca_devsize);
+
 	dev->dv_class = cd->cd_class;
 	dev->dv_cfdata = cf;
 	dev->dv_flags = DVF_ACTIVE;	/* always initially active */
@@ -451,11 +449,10 @@ config_make_softc(struct device *parent, struct cfdata *cf)
 		while (new <= dev->dv_unit)
 			new *= 2;
 		cd->cd_ndevs = new;
-		nsp = malloc(new * sizeof(void *), M_DEVBUF, M_NOWAIT);	
+		nsp = malloc(new * sizeof(void *), M_DEVBUF, M_NOWAIT|M_ZERO);
 		if (nsp == 0)
 			panic("config_make_softc: %sing dev array",
 			    old != 0 ? "expand" : "creat");
-		bzero(nsp + old, (new - old) * sizeof(void *));
 		if (old != 0) {
 			bcopy(cd->cd_devs, nsp, old * sizeof(void *));
 			free(cd->cd_devs, M_DEVBUF);
@@ -716,7 +713,7 @@ config_pending_decr(void)
 int
 config_detach_children(struct device *parent, int flags)
 {
-	struct device *dev, *next_dev, *prev_dev;
+	struct device *dev, *next_dev;
 	int rv = 0;
 
 	/*
@@ -731,15 +728,13 @@ config_detach_children(struct device *parent, int flags)
 	 * we are about to detach, so it would disappear.
 	 * Just play it safe and restart from the parent.
 	 */
-	for (prev_dev = NULL, dev = TAILQ_LAST(&alldevs, devicelist);
+	for (dev = TAILQ_LAST(&alldevs, devicelist);
 	    dev != NULL; dev = next_dev) {
 		if (dev->dv_parent == parent) {
 			if ((rv = config_detach(dev, flags)) != 0)
 				return (rv);
-			next_dev = prev_dev ? prev_dev : TAILQ_LAST(&alldevs,
-			    devicelist);
+			next_dev = TAILQ_LAST(&alldevs, devicelist);
 		} else {
-			prev_dev = dev;
 			next_dev = TAILQ_PREV(dev, devicelist, dv_list);
 		}
 	}

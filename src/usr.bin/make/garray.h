@@ -2,7 +2,7 @@
 #define GARRAY_H
 
 /* $OpenPackages$ */
-/* $OpenBSD: garray.h,v 1.1 2001/06/12 22:44:21 espie Exp $ */
+/* $OpenBSD: garray.h,v 1.4 2007/12/01 15:14:34 espie Exp $ */
 /* Growable array implementation */
 
 /*
@@ -42,21 +42,37 @@ do {								\
 	for (ln = Lst_First((l1)); ln != NULL; ln = Lst_Adv(ln))\
 		Array_AtEnd((l2), Lst_Datum(ln));		\
 } while (0)
-		
+
 #ifdef STATS_GROW
 #define MAY_INCREASE_STATS	STAT_GROWARRAY++
 #else
 #define MAY_INCREASE_STATS
 #endif
 
-#define Array_AtEnd(l, gn) 						    \
-do { 									    \
-	if ((l)->n >= (l)->size) { 					    \
-	    (l)->size *= 2; 					    	    \
-	    (l)->a = erealloc((l)->a, sizeof(struct GNode *) * (l)->size);  \
-	    MAY_INCREASE_STATS;						    \
-	} 								    \
-	(l)->a[(l)->n++] = (gn); 					    \
+#define Array_AtEnd(l, gn) 				\
+do { 							\
+	if ((l)->n >= (l)->size) { 			\
+		(l)->size *= 2; 			\
+		(l)->a = erealloc((l)->a, 		\
+		    sizeof(struct GNode *) * (l)->size);\
+		MAY_INCREASE_STATS;			\
+	} 						\
+	(l)->a[(l)->n++] = (gn); 			\
+} while (0)
+
+#define Array_Push(l, gn)	Array_AtEnd(l, gn)
+
+#define Array_Pop(l) \
+	((l)->n > 0 ?  (l)->a[--(l)->n] : NULL)
+
+#define Array_PushNew(l, gn) \
+do {						\
+	unsigned int i;				\
+	for (i = 0; i < (l)->n; i++)		\
+		if ((l)->a[i] == (gn))		\
+		    break;			\
+	if (i == (l)->n)			\
+		Array_Push(l, gn);		\
 } while (0)
 
 #define Array_Find(l, func, v)			\
@@ -65,6 +81,14 @@ do {						\
 	for (i = 0; i < (l)->n; i++)		\
 		if ((func)((l)->a[i], (v)) == 0)\
 		    break;			\
+} while (0)
+
+#define Array_FindP(l, func, v)				\
+do {							\
+	unsigned int i;					\
+	for (i = 0; i < (l)->n; i++)			\
+		if ((func)(&((l)->a[i]), (v)) == 0)	\
+		    break;				\
 } while (0)
 
 #define Array_ForEach(l, func, v)		\

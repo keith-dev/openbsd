@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_zyd.c,v 1.58 2007/06/14 10:11:15 mbalmer Exp $	*/
+/*	$OpenBSD: if_zyd.c,v 1.66 2007/12/07 05:05:02 deraadt Exp $	*/
 
 /*-
  * Copyright (c) 2006 by Damien Bergamini <damien.bergamini@free.fr>
@@ -98,7 +98,9 @@ static const struct zyd_type {
 	ZYD_ZD1211_DEV(ASUS,		WL159G),
 	ZYD_ZD1211_DEV(CYBERTAN,	TG54USB),
 	ZYD_ZD1211_DEV(DRAYTEK,		VIGOR550),
+	ZYD_ZD1211_DEV(PLANEX2,		GWUS54GD),
 	ZYD_ZD1211_DEV(PLANEX2,		GWUS54GZL),
+	ZYD_ZD1211_DEV(PLANEX3,		GWUS54GZ),
 	ZYD_ZD1211_DEV(PLANEX3,		GWUS54MINI),
 	ZYD_ZD1211_DEV(SAGEM,		XG760A),
 	ZYD_ZD1211_DEV(SENAO,		NUB8301),
@@ -116,6 +118,7 @@ static const struct zyd_type {
 	ZYD_ZD1211_DEV(ZYDAS,		ZD1211),
 	ZYD_ZD1211_DEV(ZYXEL,		AG225H),
 	ZYD_ZD1211_DEV(ZYXEL,		ZYAIRG220),
+	ZYD_ZD1211_DEV(ZYXEL,		G200V2),
 
 	ZYD_ZD1211B_DEV(ACCTON,		SMCWUSBG),
 	ZYD_ZD1211B_DEV(ACCTON,		ZD1211B),
@@ -126,6 +129,7 @@ static const struct zyd_type {
 	ZYD_ZD1211B_DEV(FIBERLINE,	WL430U),
 	ZYD_ZD1211B_DEV(MELCO,		KG54L),
 	ZYD_ZD1211B_DEV(PHILIPS,	SNU5600),
+	ZYD_ZD1211B_DEV(PLANEX2,	GW_US54GXS),
 	ZYD_ZD1211B_DEV(SAGEM,		XG76NA),
 	ZYD_ZD1211B_DEV(SITECOMEU,	ZD1211B),
 	ZYD_ZD1211B_DEV(UMEDIA,		TEW429UBC1),
@@ -208,8 +212,9 @@ int		zyd_rf_attach(struct zyd_softc *, uint8_t);
 const char	*zyd_rf_name(uint8_t);
 int		zyd_hw_init(struct zyd_softc *);
 int		zyd_read_eeprom(struct zyd_softc *);
-int		zyd_set_macaddr(struct zyd_softc *, const uint8_t *);
-int		zyd_set_bssid(struct zyd_softc *, const uint8_t *);
+void		zyd_set_multi(struct zyd_softc *);
+void		zyd_set_macaddr(struct zyd_softc *, const uint8_t *);
+void		zyd_set_bssid(struct zyd_softc *, const uint8_t *);
 int		zyd_switch_radio(struct zyd_softc *, int);
 void		zyd_set_led(struct zyd_softc *, int, int);
 int		zyd_set_rxfilter(struct zyd_softc *);
@@ -256,8 +261,8 @@ zyd_attachhook(void *xsc)
 
 	fwname = (sc->mac_rev == ZYD_ZD1211) ? "zd1211" : "zd1211b";
 	if ((error = loadfirmware(fwname, &fw, &size)) != 0) {
-		printf("%s: could not read firmware file %s (error=%d)\n",
-		    sc->sc_dev.dv_xname, fwname, error);
+		printf("%s: error %d, could not read firmware file %s\n",
+		    sc->sc_dev.dv_xname, error, fwname);
 		return;
 	}
 
@@ -279,14 +284,9 @@ zyd_attach(struct device *parent, struct device *self, void *aux)
 {
 	struct zyd_softc *sc = (struct zyd_softc *)self;
 	struct usb_attach_arg *uaa = aux;
-	char *devinfop;
 	usb_device_descriptor_t* ddesc;
 
 	sc->sc_udev = uaa->device;
-
-	devinfop = usbd_devinfo_alloc(sc->sc_udev, 0);
-	printf("\n%s: %s\n", sc->sc_dev.dv_xname, devinfop);
-	usbd_devinfo_free(devinfop);
 
 	sc->mac_rev = zyd_lookup(uaa->vendor, uaa->product)->rev;
 
@@ -643,12 +643,7 @@ zyd_free_rx_list(struct zyd_softc *sc)
 struct ieee80211_node *
 zyd_node_alloc(struct ieee80211com *ic)
 {
-	struct zyd_node *zn;
-
-	zn = malloc(sizeof (struct zyd_node), M_DEVBUF, M_NOWAIT);
-	if (zn != NULL)
-		bzero(zn, sizeof (struct zyd_node));
-	return (struct ieee80211_node *)zn;
+	return malloc(sizeof (struct zyd_node), M_DEVBUF, M_NOWAIT | M_ZERO);
 }
 
 int
@@ -1506,6 +1501,7 @@ zyd_hw_init(struct zyd_softc *sc)
 {
 	struct zyd_rf *rf = &sc->sc_rf;
 	const struct zyd_phy_pair *phyp;
+	uint32_t tmp;
 	int error;
 
 	/* specify that the plug and play is finished */
@@ -1530,6 +1526,10 @@ zyd_hw_init(struct zyd_softc *sc)
 		if ((error = zyd_write16(sc, phyp->reg, phyp->val)) != 0)
 			goto fail;
 	}
+	if (sc->fix_cr157) {
+		if (zyd_read32(sc, ZYD_EEPROM_PHY_REG, &tmp) == 0)
+			(void)zyd_write32(sc, ZYD_CR157, tmp >> 8);
+	}
 	zyd_unlock_phy(sc);
 
 	/* HMAC init */
@@ -1539,13 +1539,13 @@ zyd_hw_init(struct zyd_softc *sc)
 	if (sc->mac_rev == ZYD_ZD1211) {
 		zyd_write32(sc, ZYD_MAC_RETRY, 0x00000002);
 	} else {
-		zyd_write32(sc, ZYD_MAC_RETRY, 0x02020202);
+		zyd_write32(sc, ZYD_MACB_MAX_RETRY, 0x02020202);
 		zyd_write32(sc, ZYD_MACB_TXPWR_CTL4, 0x007f003f);
 		zyd_write32(sc, ZYD_MACB_TXPWR_CTL3, 0x007f003f);
 		zyd_write32(sc, ZYD_MACB_TXPWR_CTL2, 0x003f001f);
 		zyd_write32(sc, ZYD_MACB_TXPWR_CTL1, 0x001f000f);
 		zyd_write32(sc, ZYD_MACB_AIFS_CTL1, 0x00280028);
-		zyd_write32(sc, ZYD_MACB_AIFS_CTL2, 0x008C003C);
+		zyd_write32(sc, ZYD_MACB_AIFS_CTL2, 0x008C003c);
 		zyd_write32(sc, ZYD_MACB_TXOP, 0x01800824);
 	}
 
@@ -1603,8 +1603,10 @@ zyd_read_eeprom(struct zyd_softc *sc)
 	ic->ic_myaddr[5] = tmp >>  8;
 
 	(void)zyd_read32(sc, ZYD_EEPROM_POD, &tmp);
-	sc->rf_rev = tmp & 0x0f;
-	sc->pa_rev = (tmp >> 16) & 0x0f;
+	sc->rf_rev    = tmp & 0x0f;
+	sc->fix_cr47  = (tmp >> 8 ) & 0x01;
+	sc->fix_cr157 = (tmp >> 13) & 0x01;
+	sc->pa_rev    = (tmp >> 16) & 0x0f;
 
 	/* read regulatory domain (currently unused) */
 	(void)zyd_read32(sc, ZYD_EEPROM_SUBID, &tmp);
@@ -1636,7 +1638,43 @@ zyd_read_eeprom(struct zyd_softc *sc)
 	return 0;
 }
 
-int
+void
+zyd_set_multi(struct zyd_softc *sc)
+{
+	struct arpcom *ac = &sc->sc_ic.ic_ac;
+	struct ifnet *ifp = &ac->ac_if;
+	struct ether_multi *enm;
+	struct ether_multistep step;
+	uint32_t lo, hi;
+	uint8_t bit;
+
+	if ((ifp->if_flags & (IFF_ALLMULTI | IFF_PROMISC)) != 0) {
+		lo = hi = 0xffffffff;
+		goto done;
+	}
+	lo = hi = 0;
+	ETHER_FIRST_MULTI(step, ac, enm);
+	while (enm != NULL) {
+		if (bcmp(enm->enm_addrlo, enm->enm_addrhi, ETHER_ADDR_LEN)) {
+			ifp->if_flags |= IFF_ALLMULTI;
+			lo = hi = 0xffffffff;
+			goto done;
+		}
+		bit = enm->enm_addrlo[5] >> 2;
+		if (bit < 32)
+			lo |= 1 << bit;
+		else
+			hi |= 1 << (bit - 32);
+		ETHER_NEXT_MULTI(step, enm);
+	}
+
+done:
+	hi |= 1 << 31;	/* make sure the broadcast bit is set */
+	zyd_write32(sc, ZYD_MAC_GHTBL, lo);
+	zyd_write32(sc, ZYD_MAC_GHTBH, hi);
+}
+
+void
 zyd_set_macaddr(struct zyd_softc *sc, const uint8_t *addr)
 {
 	uint32_t tmp;
@@ -1646,11 +1684,9 @@ zyd_set_macaddr(struct zyd_softc *sc, const uint8_t *addr)
 
 	tmp = addr[5] << 8 | addr[4];
 	(void)zyd_write32(sc, ZYD_MAC_MACADRH, tmp);
-
-	return 0;
 }
 
-int
+void
 zyd_set_bssid(struct zyd_softc *sc, const uint8_t *addr)
 {
 	uint32_t tmp;
@@ -1660,8 +1696,6 @@ zyd_set_bssid(struct zyd_softc *sc, const uint8_t *addr)
 
 	tmp = addr[5] << 8 | addr[4];
 	(void)zyd_write32(sc, ZYD_MAC_BSSADRH, tmp);
-
-	return 0;
 }
 
 int
@@ -1717,6 +1751,7 @@ zyd_set_chan(struct zyd_softc *sc, struct ieee80211_channel *c)
 {
 	struct ieee80211com *ic = &sc->sc_ic;
 	struct zyd_rf *rf = &sc->sc_rf;
+	uint32_t tmp;
 	u_int chan;
 
 	chan = ieee80211_chan2ieee(ic, c);
@@ -1728,17 +1763,26 @@ zyd_set_chan(struct zyd_softc *sc, struct ieee80211_channel *c)
 	(*rf->set_channel)(rf, chan);
 
 	/* update Tx power */
-	(void)zyd_write32(sc, ZYD_CR31, sc->pwr_int[chan - 1]);
-	(void)zyd_write32(sc, ZYD_CR68, sc->pwr_cal[chan - 1]);
+	(void)zyd_write16(sc, ZYD_CR31, sc->pwr_int[chan - 1]);
 
 	if (sc->mac_rev == ZYD_ZD1211B) {
-		(void)zyd_write32(sc, ZYD_CR67, sc->ofdm36_cal[chan - 1]);
-		(void)zyd_write32(sc, ZYD_CR66, sc->ofdm48_cal[chan - 1]);
-		(void)zyd_write32(sc, ZYD_CR65, sc->ofdm54_cal[chan - 1]);
+		(void)zyd_write16(sc, ZYD_CR67, sc->ofdm36_cal[chan - 1]);
+		(void)zyd_write16(sc, ZYD_CR66, sc->ofdm48_cal[chan - 1]);
+		(void)zyd_write16(sc, ZYD_CR65, sc->ofdm54_cal[chan - 1]);
 
-		(void)zyd_write32(sc, ZYD_CR69, 0x28);
-		(void)zyd_write32(sc, ZYD_CR69, 0x2a);
+		(void)zyd_write16(sc, ZYD_CR68, sc->pwr_cal[chan - 1]);
+
+		(void)zyd_write16(sc, ZYD_CR69, 0x28);
+		(void)zyd_write16(sc, ZYD_CR69, 0x2a);
 	}
+
+	if (sc->fix_cr47) {
+		/* set CCK baseband gain from EEPROM */
+		if (zyd_read32(sc, ZYD_EEPROM_PHY_REG, &tmp) == 0)
+			(void)zyd_write16(sc, ZYD_CR47, tmp & 0xff);
+	}
+
+	(void)zyd_write32(sc, ZYD_CR_CONFIG_PHILIPS, 0);
 
 	zyd_unlock_phy(sc);
 }
@@ -2283,12 +2327,24 @@ zyd_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		/* FALLTHROUGH */
 	case SIOCSIFFLAGS:
 		if (ifp->if_flags & IFF_UP) {
-			if (!(ifp->if_flags & IFF_RUNNING))
-				zyd_init(ifp);
+			/*
+			 * If only the PROMISC or ALLMULTI flag changes, then
+			 * don't do a full re-init of the chip, just update
+			 * the Rx filter.
+			 */
+			if ((ifp->if_flags & IFF_RUNNING) &&
+			    ((ifp->if_flags ^ sc->sc_if_flags) &
+			     (IFF_ALLMULTI | IFF_PROMISC)) != 0) {
+				zyd_set_multi(sc);
+			} else {
+				if (!(ifp->if_flags & IFF_RUNNING))
+					zyd_init(ifp);
+			}
 		} else {
 			if (ifp->if_flags & IFF_RUNNING)
 				zyd_stop(ifp, 1);
 		}
+		sc->sc_if_flags = ifp->if_flags;
 		break;
 
 	case SIOCADDMULTI:
@@ -2297,8 +2353,11 @@ zyd_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		error = (cmd == SIOCADDMULTI) ?
 		    ether_addmulti(ifr, &ic->ic_ac) :
 		    ether_delmulti(ifr, &ic->ic_ac);
-		if (error == ENETRESET)
+		if (error == ENETRESET) {
+			if (ifp->if_flags & IFF_RUNNING)
+				zyd_set_multi(sc);
 			error = 0;
+		}
 		break;
 
 	case SIOCS80211CHANNEL:
@@ -2342,9 +2401,7 @@ zyd_init(struct ifnet *ifp)
 
 	IEEE80211_ADDR_COPY(ic->ic_myaddr, LLADDR(ifp->if_sadl));
 	DPRINTF(("setting MAC address to %s\n", ether_sprintf(ic->ic_myaddr)));
-	error = zyd_set_macaddr(sc, ic->ic_myaddr);
-	if (error != 0)
-		return error;
+	zyd_set_macaddr(sc, ic->ic_myaddr);
 
 	/* we'll do software WEP decryption for now */
 	DPRINTF(("setting encryption type\n"));

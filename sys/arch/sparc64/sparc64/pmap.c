@@ -1,4 +1,4 @@
-/*	$OpenBSD: pmap.c,v 1.42 2007/06/06 17:15:13 deraadt Exp $	*/
+/*	$OpenBSD: pmap.c,v 1.50 2008/01/10 20:37:14 marco Exp $	*/
 /*	$NetBSD: pmap.c,v 1.107 2001/08/31 16:47:41 eeh Exp $	*/
 #undef	NO_VCACHE /* Don't forget the locked TLB in dostart */
 /*
@@ -109,11 +109,9 @@ pseg_check(struct pmap *pm, vaddr_t addr, int64_t tte, paddr_t spare)
 #if 1
 extern int64_t pseg_get(struct pmap*, vaddr_t addr);
 extern int pseg_set(struct pmap*, vaddr_t addr, int64_t tte, paddr_t spare);
-extern paddr_t pseg_find(struct pmap*, vaddr_t addr, paddr_t spare);
 #else
 static int64_t pseg_get(struct pmap*, vaddr_t addr);
 static int pseg_set(struct pmap*, vaddr_t addr, int64_t tte, paddr_t spare);
-static paddr_t pseg_find(struct pmap*, vaddr_t addr, paddr_t spare);
 
 static int64_t pseg_get(struct pmap* pm, vaddr_t addr) {
 	paddr_t *pdir, *ptbl;
@@ -145,27 +143,6 @@ static int pseg_set(struct pmap* pm, vaddr_t addr, int64_t tte, paddr_t spare) {
 	stxa_sync(&ptbl[va_to_pte(addr)], ASI_PHYS_CACHED, tte);
 	return (0);
 }
-
-static paddr_t pseg_find(struct pmap* pm, vaddr_t addr, paddr_t spare) {
-	int i, j, k, s;
-	paddr_t *pdir, *ptbl;
-
-	if (!(pdir = (paddr_t *)ldda(&pm->pm_segs[va_to_seg(addr)],
-	    ASI_PHYS_CACHED))) {
-		if (!spare) return (1);
-		stxa_sync(&pm->pm_segs[va_to_seg(addr)], ASI_PHYS_CACHED, spare);
-		pdir = spare;
-		spare = NULL;
-	}
-	if (!(ptbl = (paddr_t *)ldda(&pdir[va_to_dir(addr)], ASI_PHYS_CACHED))) {
-		if (!spare) return (1);
-		stxa_sync(&pdir[va_to_dir(addr)], ASI_PHYS_CACHED, spare);
-		ptbl = spare;
-		spare = NULL;
-	}
-	return (paddr_t)(&ptbl[va_to_pte(addr)]);
-}
-
 
 #endif
 
@@ -467,7 +444,7 @@ pmap_enter_kpage(vaddr_t va, int64_t data)
 }
 
 /*
- * See checp bootargs to see if we need to enable bootdebug.
+ * Check bootargs to see if we need to enable bootdebug.
  */
 #ifdef DEBUG
 void pmap_bootdebug(void);
@@ -560,9 +537,9 @@ pmap_calculate_colors() {
  */
 
 void
-pmap_bootstrap(kernelstart, kernelend, maxctx)
+pmap_bootstrap(kernelstart, kernelend, maxctx, numcpus)
 	u_long kernelstart, kernelend;
-	u_int maxctx;
+	u_int maxctx, numcpus;
 {
 	extern int data_start[], end[];	/* start of data segment */
 	extern int msgbufmapped;
@@ -827,7 +804,7 @@ remap_data:
 	BDPRINTF(PDB_BOOT1, ("Calculating physmem:"));
 
 	for (mp = mem; mp->size; mp++)
-		physmem += btoc(mp->size);
+		physmem += atop(mp->size);
 	BDPRINTF(PDB_BOOT1, (" result %x or %d pages\r\n", 
 			     (int)physmem, (int)physmem));
 	/* 
@@ -993,7 +970,7 @@ remap_data:
 	/*
 	 * Allocate a 64KB page for the cpu_info structure now.
 	 */
-	if ((cpu0paddr = prom_alloc_phys(8*NBPG, 8*NBPG)) == 0 ) {
+	if ((cpu0paddr = prom_alloc_phys(numcpus * 8*NBPG, 8*NBPG)) == 0 ) {
 		prom_printf("Cannot allocate new cpu_info\r\n");
 		OF_exit();
 	}
@@ -1183,7 +1160,7 @@ remap_data:
 		}
 		s = mp->start;
 		sz = mp->size;
-		npgs += btoc(sz);
+		npgs += atop(sz);
 		for (mp1 = avail; mp1 < mp; mp1++)
 			if (s < mp1->start)
 				break;
@@ -1395,16 +1372,20 @@ remap_data:
 
 		/* Initialize our cpu_info structure */
 		bzero((void *)intstk, 8*NBPG);
+		cpus->ci_self = cpus;
 		cpus->ci_next = NULL; /* Redundant, I know. */
 		cpus->ci_curproc = &proc0;
 		cpus->ci_cpcb = (struct pcb *)u0[0]; /* Need better source */
 		cpus->ci_upaid = CPU_UPAID;
-		cpus->ci_number = cpus->ci_upaid; /* How do we figure this out? */
+		cpus->ci_number = 0;
+		cpus->ci_flags = CPUF_RUNNING;
 		cpus->ci_fpproc = NULL;
 		cpus->ci_spinup = main; /* Call main when we're running. */
 		cpus->ci_initstack = (void *)u0[1];
 		cpus->ci_paddr = cpu0paddr;
 		proc0paddr = cpus->ci_cpcb;
+
+		cpu0paddr += 64 * KB;
 
 		/* The rest will be done at CPU attach time. */
 		BDPRINTF(PDB_BOOT1, 
@@ -2340,12 +2321,12 @@ pmap_dumpmmu(dump, blkno)
 	/* Describe the locked text segment */
 	kcpu->ktextbase = (u_int64_t)ktext;
 	kcpu->ktextp = (u_int64_t)ktextp;
-	kcpu->ktextsz = (u_int64_t)ektextp - ktextp;
+	kcpu->ktextsz = (u_int64_t)(roundup(ektextp, 4*MEG) - ktextp);
 
 	/* Describe locked data segment */
 	kcpu->kdatabase = (u_int64_t)kdata;
 	kcpu->kdatap = (u_int64_t)kdatap;
-	kcpu->kdatasz = (u_int64_t)ekdatap - kdatap;
+	kcpu->kdatasz = (u_int64_t)(roundup(ekdatap, 4*MEG) - kdatap);
 
 	/* Now the memsegs */
 	kcpu->nmemseg = memsize;
@@ -2960,12 +2941,6 @@ pmap_page_protect(pg, prot)
 				pv->pv_va |= PV_REF;
 			if (data & (TLB_MODIFY))
 				pv->pv_va |= PV_MOD;
-			if (data & TLB_TSB_LOCK) {
-#ifdef DIAGNOSTIC
-				printf("pmap_page_protect: Removing wired page pm %p va %p\n",
-				       (void *)(u_long)pv->pv_pmap, (void *)(u_long)pv->pv_va);
-#endif			
-			}
 			if (pseg_set(pv->pv_pmap, pv->pv_va&PV_VAMASK, 0, 0)) {
 				printf("pmap_page_protect: gotten pseg empty!\n");
 				Debugger();

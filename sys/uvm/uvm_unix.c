@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvm_unix.c,v 1.28 2007/04/11 12:51:51 miod Exp $	*/
+/*	$OpenBSD: uvm_unix.c,v 1.34 2008/03/02 20:29:20 kettenis Exp $	*/
 /*	$NetBSD: uvm_unix.c,v 1.18 2000/09/13 15:00:25 thorpej Exp $	*/
 
 /*
@@ -134,9 +134,9 @@ uvm_grow(p, sp)
 	 * For common case of already allocated (from trap).
 	 */
 #ifdef MACHINE_STACK_GROWS_UP
-	if (sp < USRSTACK + ctob(vm->vm_ssize))
+	if (sp < USRSTACK + ptoa(vm->vm_ssize))
 #else
-	if (sp >= USRSTACK - ctob(vm->vm_ssize))
+	if (sp >= USRSTACK - ptoa(vm->vm_ssize))
 #endif
 		return;
 
@@ -144,32 +144,12 @@ uvm_grow(p, sp)
 	 * Really need to check vs limit and increment stack size if ok.
 	 */
 #ifdef MACHINE_STACK_GROWS_UP
-	si = btoc(sp - USRSTACK) - vm->vm_ssize;
+	si = atop(sp - USRSTACK) - vm->vm_ssize + 1;
 #else
-	si = btoc(USRSTACK - sp) - vm->vm_ssize;
+	si = atop(USRSTACK - sp) - vm->vm_ssize;
 #endif
-	if (vm->vm_ssize + si <= btoc(p->p_rlimit[RLIMIT_STACK].rlim_cur))
+	if (vm->vm_ssize + si <= atop(p->p_rlimit[RLIMIT_STACK].rlim_cur))
 		vm->vm_ssize += si;
-}
-
-/*
- * sys_oadvise: old advice system call
- */
-
-/* ARGSUSED */
-int
-sys_ovadvise(p, v, retval)
-	struct proc *p;
-	void *v;
-	register_t *retval;
-{
-#if 0
-	struct sys_ovadvise_args /* {
-		syscallarg(int) anom;
-	} */ *uap = v;
-#endif
-
-	return (EINVAL);
 }
 
 /*
@@ -186,7 +166,7 @@ uvm_coredump(p, vp, cred, chdr)
 	struct vmspace *vm = p->p_vmspace;
 	vm_map_t map = &vm->vm_map;
 	vm_map_entry_t entry;
-	vaddr_t start, end;
+	vaddr_t start, end, top;
 	struct coreseg cseg;
 	off_t offset;
 	int flag, error = 0;
@@ -201,7 +181,8 @@ uvm_coredump(p, vp, cred, chdr)
 			panic("uvm_coredump: user process with submap?");
 		}
 
-		if (!(entry->protection & VM_PROT_WRITE))
+		if (!(entry->protection & VM_PROT_WRITE) &&
+		    entry->start != p->p_sigcode)
 			continue;
 
 		/*
@@ -222,13 +203,17 @@ uvm_coredump(p, vp, cred, chdr)
 
 #ifdef MACHINE_STACK_GROWS_UP
 		if (USRSTACK <= start && start < (USRSTACK + MAXSSIZ)) {
-			end = round_page(USRSTACK + ctob(vm->vm_ssize));
+			top = round_page(USRSTACK + ptoa(vm->vm_ssize));
+			if (end > top)
+				end = top;
+
 			if (start >= end)
 				continue;
-			start = USRSTACK;
 #else
 		if (start >= (vaddr_t)vm->vm_maxsaddr) {
-			start = trunc_page(USRSTACK - ctob(vm->vm_ssize));
+			top = trunc_page(USRSTACK - ptoa(vm->vm_ssize));
+			if (start < top)
+				start = top;
 
 			if (start >= end)
 				continue;

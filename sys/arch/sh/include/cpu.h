@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.h,v 1.10 2007/06/06 17:15:12 deraadt Exp $	*/
+/*	$OpenBSD: cpu.h,v 1.12 2008/02/11 20:44:43 miod Exp $	*/
 /*	$NetBSD: cpu.h,v 1.41 2006/01/21 04:24:12 uwe Exp $	*/
 
 /*-
@@ -81,7 +81,6 @@ struct clockframe {
 };
 
 #define	CLKF_USERMODE(cf)	(!KERNELMODE((cf)->ssr))
-#define	CLKF_BASEPRI(cf)	(((cf)->ssr & 0xf0) == 0)
 #define	CLKF_PC(cf)		((cf)->spc)
 #define	CLKF_INTR(cf)		0	/* XXX */
 
@@ -125,6 +124,11 @@ extern int want_resched;		/* need_resched() was called */
  * We need a machine-independent name for this.
  */
 #define	DELAY(x)		delay(x)
+
+#define	cpu_idle_enter()	do { /* nothing */ } while (0)
+#define	cpu_idle_cycle()	__asm volatile("sleep")
+#define	cpu_idle_leave()	do { /* nothing */ } while (0)
+
 #endif /* _KERNEL */
 
 /*

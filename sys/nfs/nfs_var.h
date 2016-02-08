@@ -1,4 +1,4 @@
-/*	$OpenBSD: nfs_var.h,v 1.28 2007/06/21 22:59:49 thib Exp $	*/
+/*	$OpenBSD: nfs_var.h,v 1.33 2008/01/06 17:38:23 blambert Exp $	*/
 /*	$NetBSD: nfs_var.h,v 1.3 1996/02/18 11:53:54 fvdl Exp $	*/
 
 /*
@@ -214,7 +214,7 @@ int nfs_request(struct vnode *, struct mbuf *, int, struct proc *,
 		     struct ucred *, struct mbuf **, struct mbuf **,
 		     caddr_t *);
 int nfs_rephead(int, struct nfsrv_descript *, struct nfssvc_sock *, int,
-		u_quad_t *, struct mbuf **, struct mbuf **, caddr_t *);
+		struct mbuf **, struct mbuf **, caddr_t *);
 void nfs_timer(void *);
 int nfs_sigintr(struct nfsmount *, struct nfsreq *, struct proc *);
 int nfs_sndlock(int *, struct nfsreq *);
@@ -238,9 +238,8 @@ void nfsrv_cleancache(void);
 
 /* nfs_subs.c */
 struct mbuf *nfsm_reqh(struct vnode *, u_long, int, caddr_t *);
-struct mbuf *nfsm_rpchead(struct ucred *, int, int, int, int, char *, int,
-			       char *, struct mbuf *, int, struct mbuf **,
-			       u_int32_t *);
+void nfsm_rpchead(struct nfsreq *, struct ucred *, int, struct mbuf *, int);
+void *nfsm_build(struct mbuf **, u_int, caddr_t *);
 int nfsm_mbuftouio(struct mbuf **, struct uio *, int, caddr_t *);
 int nfsm_uiotombuf(struct uio *, struct mbuf **, int, caddr_t *);
 int nfsm_disct(struct mbuf **, caddr_t *, int, int, caddr_t *);
@@ -253,6 +252,7 @@ int nfs_getattrcache(struct vnode *, struct vattr *);
 int nfs_namei(struct nameidata *, fhandle_t *, int, struct nfssvc_sock *,
 		   struct mbuf *, struct mbuf **, caddr_t *, struct vnode **,
 		   struct proc *, int);
+void nfsm_v3attrbuild(struct mbuf **, struct vattr *, int, caddr_t *);
 void nfsm_adj(struct mbuf *, int, int);
 void nfsm_srvwcc(struct nfsrv_descript *, int, struct vattr *, int,
 		      struct vattr *, struct mbuf **, char **);
@@ -285,12 +285,6 @@ void nfsrv_init(int);
 int nfssvc_iod(struct proc *);
 void start_nfsio(void *);
 void nfs_getset_niothreads(int);
-int nfs_getauth(struct nfsmount *, struct nfsreq *, struct ucred *,
-		     char **, int *, char *, int *, NFSKERBKEY_T);
-int nfs_getnickauth(struct nfsmount *, struct ucred *, char **, int *,
-			 char *, int);
-int nfs_savenickauth(struct nfsmount *, struct ucred *, int, NFSKERBKEY_T,
-			  struct mbuf **, char **, struct mbuf *);
 
 /* nfs_kq.c */
 int  nfs_kqfilter(void *);

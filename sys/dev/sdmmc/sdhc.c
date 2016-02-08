@@ -1,4 +1,4 @@
-/*	$OpenBSD: sdhc.c,v 1.21 2007/05/31 23:37:21 uwe Exp $	*/
+/*	$OpenBSD: sdhc.c,v 1.24 2007/10/01 15:34:48 krw Exp $	*/
 
 /*
  * Copyright (c) 2006 Uwe Stuehler <uwe@openbsd.org>
@@ -155,12 +155,10 @@ sdhc_host_found(struct sdhc_softc *sc, bus_space_tag_t iot,
 
 	/* Allocate one more host structure. */
 	sc->sc_nhosts++;
-	MALLOC(hp, struct sdhc_host *, sizeof(struct sdhc_host),
-	    M_DEVBUF, M_WAITOK);
+	hp = malloc(sizeof(*hp), M_DEVBUF, M_WAITOK | M_ZERO);
 	sc->sc_host[sc->sc_nhosts - 1] = hp;
 
 	/* Fill in the new host structure. */
-	bzero(hp, sizeof(struct sdhc_host));
 	hp->sc = sc;
 	hp->iot = iot;
 	hp->ioh = ioh;
@@ -246,7 +244,7 @@ sdhc_host_found(struct sdhc_softc *sc, bus_space_tag_t iot,
 	return 0;
 
 err:
-	FREE(hp, M_DEVBUF);
+	free(hp, M_DEVBUF);
 	sc->sc_host[sc->sc_nhosts - 1] = NULL;
 	sc->sc_nhosts--;
 	return (error);
@@ -390,7 +388,8 @@ sdhc_bus_power(sdmmc_chipset_handle_t sch, u_int32_t ocr)
 	/*
 	 * Disable bus power before voltage change.
 	 */
-	HWRITE1(hp, SDHC_POWER_CTL, 0);
+	if (!(hp->sc->sc_flags & SDHC_F_NOPWR0))
+		HWRITE1(hp, SDHC_POWER_CTL, 0);
 
 	/* If power is disabled, reset the host and return now. */
 	if (ocr == 0) {

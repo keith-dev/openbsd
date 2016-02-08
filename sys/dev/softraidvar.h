@@ -1,6 +1,7 @@
-/* $OpenBSD: softraidvar.h,v 1.32 2007/06/06 23:06:02 deraadt Exp $ */
+/* $OpenBSD: softraidvar.h,v 1.49 2008/02/22 23:00:04 hshoexer Exp $ */
 /*
  * Copyright (c) 2006 Marco Peereboom <marco@peereboom.us>
+ * Copyright (c) 2008 Chris Kuethe <ckuethe@openbsd.org>
  *
  * Permission to use, copy, modify, and distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -14,6 +15,9 @@
  * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
+
+#ifndef SOFTRAIDVAR_H
+#define SOFTRAIDVAR_H
 
 #include <dev/biovar.h>
 
@@ -72,6 +76,8 @@ struct sr_ccb {
 #define SR_CCB_OK		2
 #define SR_CCB_FAILED		3
 
+	void			*ccb_opaque; /* discipline usable pointer */
+
 	TAILQ_ENTRY(sr_ccb)	ccb_link;
 } __packed;
 
@@ -116,17 +122,52 @@ struct sr_workunit {
 
 TAILQ_HEAD(sr_wu_list, sr_workunit);
 
+/* RAID 0 */
+#define SR_RAID0_NOWU		16
+struct sr_raid0 {
+	int32_t			sr0_strip_bits;
+};
+
 /* RAID 1 */
 #define SR_RAID1_NOWU		16
 struct sr_raid1 {
 	u_int32_t		sr1_counter;
 };
 
-/* RAID C */
-#define SR_RAIDC_NOWU		16
-struct sr_raidc {
-	u_int64_t		src_sid;
-	char			src_key[64];
+/* CRYPTO */
+#define SR_CRYPTO_MAXKEYS	32
+#define SR_CRYPTO_KEYBITS	128
+#define SR_CRYPTO_KEYBYTES	(SR_CRYPTO_KEYBITS >> 3)
+#define SR_CRYPTO_ROUNDS	14
+#define SR_CRYPTO_PBKDF2_ROUNDS	20000
+
+struct sr_crypto_metadata {
+	u_int32_t		scm_flags;
+#define SR_CRYPTOF_INVALID	(0)
+#define SR_CRYPTOF_KEY		(1<<0)
+#define SR_CRYPTOF_SALT		(1<<1)
+#define SR_CRYPTOF_PASSPHRASE	(1<<2)
+
+	u_int32_t		scm_pad;
+	u_int8_t		scm_key1[SR_CRYPTO_MAXKEYS][SR_CRYPTO_KEYBYTES];
+	u_int8_t		scm_key2[SR_CRYPTO_MAXKEYS][SR_CRYPTO_KEYBYTES];
+	u_int8_t		scm_salt[64];
+	char			scm_passphrase[128]; /* _PASSWORD_LEN */
+};
+
+#define SR_CRYPTO_NOWU		16
+struct sr_crypto {
+	/*
+	 * [0] contains encrypted key & salt
+	 * [1] contains password
+	 */
+	struct sr_crypto_metadata scr_meta[2];
+
+	/* decrypted keys */
+	u_int8_t		scr_key1[SR_CRYPTO_MAXKEYS][SR_CRYPTO_KEYBYTES];
+	u_int8_t		scr_key2[SR_CRYPTO_MAXKEYS][SR_CRYPTO_KEYBYTES];
+
+	u_int64_t		scr_sid;
 };
 
 #define SR_META_SIZE		32	/* save space at chunk beginning */
@@ -181,11 +222,11 @@ SLIST_HEAD(sr_metadata_list_head, sr_metadata_list);
 #define SR_OPT_VERSION		1	/* bump when sr_opt_meta changes */
 struct sr_opt_meta {
 	u_int32_t		som_type;
-	u_int32_t		som_pad;
 #define SR_OPT_INVALID		0x00
 #define SR_OPT_CRYPTO		0x01
+	u_int32_t		som_pad;
 	union {
-		struct sr_raidc	smm_crypto;
+		struct sr_crypto_metadata smm_crypto;
 	}			som_meta;
 };
 
@@ -196,8 +237,8 @@ struct sr_chunk_meta {
 	u_int32_t		scm_status;	/* use bio bioc_disk status */
 	u_int32_t		scm_pad1;
 	char			scm_devname[32];/* /dev/XXXXX */
-	int64_t			scm_size;	/* size of partition */
-	int64_t			scm_coerced_size; /* coerced size of part */
+	int64_t			scm_size;	/* size of partition in blocks*/
+	int64_t			scm_coerced_size; /* coerced sz of part in blk*/
 	struct sr_uuid		scm_uuid;	/* unique identifier */
 } __packed;
 
@@ -210,27 +251,30 @@ struct sr_chunk {
 	/* helper members before metadata makes it onto the chunk  */
 	int			src_meta_ondisk;/* set when meta is on disk */
 	char			src_devname[32];
-	int64_t			src_size;
+	int64_t			src_size;	/* in blocks */
 
 	SLIST_ENTRY(sr_chunk)	src_link;
 };
 
 SLIST_HEAD(sr_chunk_head, sr_chunk);
 
-#define SR_VOL_VERSION	1	/* bump when sr_vol_meta changes */
+#define SR_VOL_VERSION	2	/* bump when sr_vol_meta changes */
 struct sr_vol_meta {
 	u_int32_t		svm_volid;	/* volume id */
 	u_int32_t		svm_status; 	/* use bioc_vol status */
 	u_int32_t		svm_flags;	/* flags */
 #define	SR_VOL_DIRTY		0x01
 	u_int32_t		svm_level;	/* raid level */
-	int64_t			svm_size;	/* virtual disk size */
+	int64_t			svm_size;	/* virt disk size in blocks */
 	char			svm_devname[32];/* /dev/XXXXX */
 	char			svm_vendor[8];	/* scsi vendor */
 	char			svm_product[16];/* scsi product */
 	char			svm_revision[4];/* scsi revision */
 	u_int32_t		svm_no_chunk;	/* number of chunks */
 	struct sr_uuid 		svm_uuid;	/* volume unique identifier */
+
+	/* optional members */
+	u_int32_t		svm_strip_size;	/* strip size */
 } __packed;
 
 struct sr_volume {
@@ -253,14 +297,15 @@ struct sr_discipline {
 #define	SR_MD_RAID1		1
 #define	SR_MD_RAID5		2
 #define	SR_MD_CACHE		3
-#define	SR_MD_RAIDC		4
+#define	SR_MD_CRYPTO		4
 	char			sd_name[10];	/* human readable dis name */
 	u_int8_t		sd_scsibus;	/* scsibus discipline uses */
 	struct scsi_link	sd_link;	/* link to midlayer */
 
 	union {
+	    struct sr_raid0	mdd_raid0;
 	    struct sr_raid1	mdd_raid1;
-	    struct sr_raidc	mdd_raidc;
+	    struct sr_crypto	mdd_crypto;
 	}			sd_dis_specific;/* dis specific members */
 #define mds			sd_dis_specific
 
@@ -336,3 +381,61 @@ struct sr_softc {
 #define SR_MAXSCSIBUS		256
 	struct sr_discipline	*sc_dis[SR_MAXSCSIBUS]; /* scsibus is u_int8_t */
 };
+
+/* work units & ccbs */
+int			sr_alloc_ccb(struct sr_discipline *);
+void			sr_free_ccb(struct sr_discipline *);
+struct sr_ccb		*sr_get_ccb(struct sr_discipline *);
+void			sr_put_ccb(struct sr_ccb *);
+int			sr_alloc_wu(struct sr_discipline *);
+void			sr_free_wu(struct sr_discipline *);
+struct sr_workunit	*sr_get_wu(struct sr_discipline *);
+void			sr_put_wu(struct sr_workunit *);
+
+/* misc functions */
+int32_t			sr_validate_stripsize(u_int32_t);
+void			sr_save_metadata_callback(void *, void *);
+int			sr_validate_io(struct sr_workunit *, daddr64_t *,
+			    char *);
+int			sr_check_io_collision(struct sr_workunit *);
+
+/* discipline functions */
+int			sr_raid_inquiry(struct sr_workunit *);
+int			sr_raid_read_cap(struct sr_workunit *);
+int			sr_raid_tur(struct sr_workunit *);
+int			sr_raid_request_sense( struct sr_workunit *);
+int			sr_raid_start_stop(struct sr_workunit *);
+int			sr_raid_sync(struct sr_workunit *);
+void			sr_raid_startwu(struct sr_workunit *);
+
+/* raid 0 */
+int			sr_raid0_alloc_resources(struct sr_discipline *);
+int			sr_raid0_free_resources(struct sr_discipline *);
+int			sr_raid0_rw(struct sr_workunit *);
+void			sr_raid0_intr(struct buf *);
+void			sr_raid0_set_chunk_state(struct sr_discipline *,
+			    int, int);
+void			sr_raid0_set_vol_state(struct sr_discipline *);
+
+/* raid 1 */
+int			sr_raid1_alloc_resources(struct sr_discipline *);
+int			sr_raid1_free_resources(struct sr_discipline *);
+int			sr_raid1_rw(struct sr_workunit *);
+void			sr_raid1_intr(struct buf *);
+void			sr_raid1_recreate_wu(struct sr_workunit *);
+void			sr_raid1_set_chunk_state(struct sr_discipline *,
+			    int, int);
+void			sr_raid1_set_vol_state(struct sr_discipline *);
+
+/* crypto discipline */
+int			sr_crypto_alloc_resources(struct sr_discipline *);
+int			sr_crypto_free_resources(struct sr_discipline *);
+int			sr_crypto_rw(struct sr_workunit *);
+int			sr_crypto_encrypt_key(struct sr_discipline *);
+void			sr_crypto_create_keys(struct sr_discipline *);
+
+#ifdef SR_DEBUG
+void			sr_dump_mem(u_int8_t *, int);
+#endif
+
+#endif /* SOFTRAIDVAR_H */

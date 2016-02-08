@@ -1,4 +1,4 @@
-/*	$OpenBSD: glxsb.c,v 1.8 2007/08/07 09:48:23 markus Exp $	*/
+/*	$OpenBSD: glxsb.c,v 1.13 2007/12/09 21:30:24 hshoexer Exp $	*/
 
 /*
  * Copyright (c) 2006 Tom Cosgrove <tom@openbsd.org>
@@ -191,7 +191,6 @@ struct cfdriver glxsb_cd = {
 #define	GLXSB_SID(crd,ses)		(((crd) << 28) | ((ses) & 0x0fffffff))
 
 static struct glxsb_softc *glxsb_sc;
-extern int i386_has_xcrypt;
 
 int glxsb_crypto_setup(struct glxsb_softc *);
 int glxsb_crypto_newsession(uint32_t *, struct cryptoini *);
@@ -380,7 +379,7 @@ glxsb_crypto_newsession(uint32_t *sidp, struct cryptoini *cri)
 				return (EINVAL);
 			}
 
-			get_random_bytes(ses->ses_iv, sizeof(ses->ses_iv));
+			arc4random_bytes(ses->ses_iv, sizeof(ses->ses_iv));
 			ses->ses_klen = c->cri_klen;
 
 			/* Copy the key (Geode LX wants the primary key only) */
@@ -405,14 +404,12 @@ glxsb_crypto_newsession(uint32_t *sidp, struct cryptoini *cri)
 		case CRYPTO_SHA2_512_HMAC:
 			axf = &auth_hash_hmac_sha2_512_96;
 		authcommon:
-			MALLOC(swd, struct swcr_data *,
-			    sizeof(struct swcr_data), M_CRYPTO_DATA,
-			    M_NOWAIT);
+			swd = malloc(sizeof(struct swcr_data), M_CRYPTO_DATA,
+			    M_NOWAIT|M_ZERO);
 			if (swd == NULL) {
 				glxsb_crypto_freesession(sesn);
 				return (ENOMEM);
 			}
-			bzero(swd, sizeof(struct swcr_data));
 			ses->ses_swd = swd;
 
 			swd->sw_ictx = malloc(axf->ctxsize, M_CRYPTO_DATA,
@@ -489,7 +486,7 @@ glxsb_crypto_freesession(uint64_t tid)
 			bzero(swd->sw_octx, axf->ctxsize);
 			free(swd->sw_octx, M_CRYPTO_DATA);
 		}
-		FREE(swd, M_CRYPTO_DATA);
+		free(swd, M_CRYPTO_DATA);
 	}
 	bzero(&sc->sc_sessions[sesn], sizeof(sc->sc_sessions[sesn]));
 	return (0);
@@ -740,6 +737,10 @@ glxsb_crypto_process(struct cryptop *crp)
 		goto out;
 	}
 	ses = &sc->sc_sessions[sesn];
+	if (ses->ses_used == 0) {
+		err = EINVAL;
+		goto out;
+	}
 
 	for (crd = crp->crp_desc; crd; crd = crd->crd_next) {
 		switch (crd->crd_alg) {

@@ -1,4 +1,4 @@
-/*	$OpenBSD: trap.c,v 1.37 2007/07/16 20:21:20 miod Exp $	*/
+/*	$OpenBSD: trap.c,v 1.41 2008/02/20 19:13:38 miod Exp $	*/
 /* tracked to 1.23 */
 
 /*
@@ -70,10 +70,8 @@
 #include <machine/trap.h>
 #include <machine/psl.h>
 #include <machine/cpu.h>
-#include <machine/pio.h>
 #include <machine/intr.h>
 #include <machine/autoconf.h>
-#include <machine/pte.h>
 #include <machine/pmap.h>
 #include <machine/mips_opcode.h>
 #include <machine/frame.h>
@@ -196,8 +194,6 @@ trap(trapframe)
 
 	/*
 	 * Enable hardware interrupts if they were on before the trap.
-	 * If it was off disable all (splhigh) so we don't accidently
-	 * enable it when doing a spllower().
 	 */
 	if (trapframe->sr & SR_INT_ENAB) {
 		if (type != T_BREAK) {
@@ -206,21 +202,18 @@ trap(trapframe)
 #endif
 			enableintr();
 		}
-	} else
-		splhigh();
-
+	}
 
 	switch (type) {
 	case T_TLB_MOD:
 		/* check for kernel address */
 		if (trapframe->badvaddr < 0) {
-			pt_entry_t *pte;
-			unsigned int entry;
+			pt_entry_t *pte, entry;
 			paddr_t pa;
 			vm_page_t pg;
 
 			pte = kvtopte(trapframe->badvaddr);
-			entry = pte->pt_entry;
+			entry = *pte;
 #ifdef DIAGNOSTIC
 			if (!(entry & PG_V) || (entry & PG_M))
 				panic("trap: ktlbmod: invalid pte");
@@ -232,7 +225,7 @@ trap(trapframe)
 				goto kernel_fault;
 			}
 			entry |= PG_M;
-			pte->pt_entry = entry;
+			*pte = entry;
 			tlb_update(trapframe->badvaddr & ~PGOFSET, entry);
 			pa = pfn_to_pad(entry);
 			pg = PHYS_TO_VM_PAGE(pa);
@@ -245,8 +238,7 @@ trap(trapframe)
 
 	case T_TLB_MOD+T_USER:
 	    {
-		pt_entry_t *pte;
-		unsigned int entry;
+		pt_entry_t *pte, entry;
 		paddr_t pa;
 		vm_page_t pg;
 		pmap_t pmap = p->p_vmspace->vm_map.pmap;
@@ -254,7 +246,7 @@ trap(trapframe)
 		if (!(pte = pmap_segmap(pmap, trapframe->badvaddr)))
 			panic("trap: utlbmod: invalid segmap");
 		pte += uvtopte(trapframe->badvaddr);
-		entry = pte->pt_entry;
+		entry = *pte;
 #ifdef DIAGNOSTIC
 		if (!(entry & PG_V) || (entry & PG_M))
 			panic("trap: utlbmod: invalid pte");
@@ -266,7 +258,7 @@ trap(trapframe)
 			goto fault_common;
 		}
 		entry |= PG_M;
-		pte->pt_entry = entry;
+		*pte = entry;
 		tlb_update((trapframe->badvaddr & ~PGOFSET) |
 		    (pmap->pm_tlbpid << VMTLB_PID_SHIFT), entry);
 		pa = pfn_to_pad(entry);
@@ -593,11 +585,18 @@ printf("SIG-BUSB @%p pc %p, ra %p\n", trapframe->badvaddr, trapframe->pc, trapfr
 		goto out;
 	    }
 
-#ifdef DDB
 	case T_BREAK:
+#ifdef DDB
 		kdb_trap(type, trapframe);
-		return;
 #endif
+		/* Reenable interrupts if necessary */
+		if (trapframe->sr & SR_INT_ENAB) {
+#ifndef IMASK_EXTERNAL
+			updateimask(trapframe->cpl);
+#endif
+			enableintr();
+		}
+		return;
 
 	case T_BREAK+T_USER:
 	    {
@@ -1129,7 +1128,7 @@ stacktrace_subr(regs, printfn)
 	struct trap_frame *regs;
 	int (*printfn)(const char*, ...);
 {
-	long pc, sp, fp, ra, va, subr;
+	vaddr_t pc, sp, fp, ra, va, subr;
 	long a0, a1, a2, a3;
 	unsigned instr, mask;
 	InstFmt i;
@@ -1138,10 +1137,10 @@ stacktrace_subr(regs, printfn)
 	unsigned int frames =  0;
 
 	/* get initial values from the exception frame */
-	sp = regs->sp;
-	pc = regs->pc;
-	fp = regs->s8;
-	ra = regs->ra;		/* May be a 'leaf' function */
+	sp = (vaddr_t)regs->sp;
+	pc = (vaddr_t)regs->pc;
+	fp = (vaddr_t)regs->s8;
+	ra = (vaddr_t)regs->ra;		/* May be a 'leaf' function */
 	a0 = regs->a0;
 	a1 = regs->a1;
 	a2 = regs->a2;
@@ -1159,7 +1158,7 @@ loop:
 	}
 
 	/* check for bad SP: could foul up next frame */
-	if (sp & 3 || (!IS_XKPHYS((vaddr_t)sp) && sp < KSEG0_BASE)) {
+	if (sp & 3 || (!IS_XKPHYS(sp) && sp < KSEG0_BASE)) {
 		(*printfn)("SP %p: not in kernel\n", sp);
 		ra = 0;
 		subr = 0;
@@ -1170,7 +1169,7 @@ loop:
 	/* Backtraces should contine through interrupts from kernel mode */
 	if (pc >= (vaddr_t)MipsKernIntr && pc < (vaddr_t)MipsUserIntr) {
 		(*printfn)("MipsKernIntr+%x: (%x, %x ,%x) -------\n",
-		       pc-(vaddr_t)MipsKernIntr, a0, a1, a2);
+		       pc - (vaddr_t)MipsKernIntr, a0, a1, a2);
 		regs = (struct trap_frame *)(sp + STAND_ARG_SIZE);
 		a0 = kdbpeek(&regs->a0);
 		a1 = kdbpeek(&regs->a1);
@@ -1191,7 +1190,8 @@ loop:
 		Between((vaddr_t)a, pc, (vaddr_t)b)
 
 	/* check for bad PC */
-	if (pc & 3 || pc < KSEG0_BASE || pc >= (unsigned)edata) {
+	if (pc & 3 || (!IS_XKPHYS(pc) && pc < KSEG0_BASE) ||
+	    pc >= (vaddr_t)edata) {
 		(*printfn)("PC %p: not in kernel\n", pc);
 		ra = 0;
 		goto done;

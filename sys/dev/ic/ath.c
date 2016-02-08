@@ -1,4 +1,4 @@
-/*      $OpenBSD: ath.c,v 1.66 2007/07/18 18:10:31 damien Exp $  */
+/*      $OpenBSD: ath.c,v 1.69 2007/10/13 16:12:29 fgsch Exp $  */
 /*	$NetBSD: ath.c,v 1.37 2004/08/18 21:59:39 dyoung Exp $	*/
 
 /*-
@@ -1119,8 +1119,6 @@ ath_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		if (error == ENETRESET) {
 			if ((ifp->if_flags & (IFF_RUNNING|IFF_UP)) ==
 			    (IFF_RUNNING|IFF_UP)) {
-				struct ieee80211com *ic = &sc->sc_ic;
-
 				if (ic->ic_opmode != IEEE80211_M_MONITOR)
 					ath_init(ifp);	/* XXX lose error */
 				else
@@ -1613,14 +1611,13 @@ ath_desc_alloc(struct ath_softc *sc)
 
 	/* allocate buffers */
 	bsize = sizeof(struct ath_buf) * (ATH_TXBUF + ATH_RXBUF + 1);
-	bf = malloc(bsize, M_DEVBUF, M_NOWAIT);
+	bf = malloc(bsize, M_DEVBUF, M_NOWAIT | M_ZERO);
 	if (bf == NULL) {
 		printf("%s: unable to allocate Tx/Rx buffers\n",
 		    sc->sc_dev.dv_xname);
 		error = ENOMEM;
 		goto fail3;
 	}
-	bzero(bf, bsize);
 	sc->sc_bufptr = bf;
 
 	TAILQ_INIT(&sc->sc_rxbuf);
@@ -1728,11 +1725,11 @@ ath_desc_free(struct ath_softc *sc)
 struct ieee80211_node *
 ath_node_alloc(struct ieee80211com *ic)
 {
-	struct ath_node *an =
-		malloc(sizeof(struct ath_node), M_DEVBUF, M_NOWAIT);
+	struct ath_node *an;
+	
+	an = malloc(sizeof(*an), M_DEVBUF, M_NOWAIT | M_ZERO);
 	if (an) {
 		int i;
-		bzero(an, sizeof(struct ath_node));
 		for (i = 0; i < ATH_RHIST_SIZE; i++)
 			an->an_rx_hist[i].arh_ticks = ATH_RHIST_NOTIME;
 		an->an_rx_hist_next = ATH_RHIST_SIZE-1;

@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.h,v 1.22 2007/05/19 20:34:32 miod Exp $ */
+/*	$OpenBSD: cpu.h,v 1.34 2008/01/13 20:20:29 miod Exp $ */
 /*
  * Copyright (c) 1996 Nivas Madhur
  * Copyright (c) 1992, 1993
@@ -42,14 +42,16 @@
 #define __M88K_CPU_H__
 
 /*
- * CTL_MACHDEP definitinos.
+ * CTL_MACHDEP definitions.
  */
 #define	CPU_CONSDEV	1	/* dev_t: console terminal device */
-#define	CPU_MAXID	2	/* number of valid machdep ids */
+#define	CPU_CPUTYPE	2	/* int: cpu type */
+#define	CPU_MAXID	3	/* number of valid machdep ids */
 
 #define	CTL_MACHDEP_NAMES { \
 	{ 0, 0 }, \
 	{ "console_device", CTLTYPE_STRUCT }, \
+	{ "cputype", CTLTYPE_INT }, \
 }
 
 #ifdef _KERNEL
@@ -58,6 +60,7 @@
 #include <machine/pcb.h>
 #include <machine/psl.h>
 #include <machine/intr.h>
+#include <sys/queue.h>
 #include <sys/sched.h>
 
 #if defined(MULTIPROCESSOR)
@@ -81,36 +84,48 @@ extern u_int max_cpus;
  */
 
 struct cpu_info {
-	u_int	ci_alive;			/* nonzero if CPU present */
+	u_int	ci_flags;
+#define	CIF_ALIVE		0x01		/* cpu initialized */
+#define	CIF_PRIMARY		0x02		/* primary cpu */
 
 	struct proc *ci_curproc;		/* current process... */
 	struct pcb *ci_curpcb;			/* ...and its pcb */
 
 	u_int	ci_cpuid;			/* cpu number */
-	u_int	ci_primary;			/* set if master cpu */
+
 	u_int	ci_pfsr_i0, ci_pfsr_i1;		/* instruction... */
 	u_int	ci_pfsr_d0, ci_pfsr_d1;		/* ... and data CMMU PFSRs */
 
 	struct schedstate_percpu ci_schedstate;	/* scheduling state */
 	int	ci_want_resched;		/* need_resched() invoked */
 
-	struct pcb *ci_idle_pcb;		/* idle pcb (and stack) */
-
 	u_int	ci_intrdepth;			/* interrupt depth */
 
 	u_long	ci_spin_locks;			/* spin locks counter */
 
-	volatile int ci_ddb_state;		/* ddb status */
+	int	ci_ddb_state;			/* ddb status */
 #define	CI_DDB_RUNNING	0
 #define	CI_DDB_ENTERDDB	1
 #define	CI_DDB_INDDB	2
 #define	CI_DDB_PAUSE	3
 
-	volatile int ci_ipi;			/* pending ipis */
+	int	ci_softintr;			/* pending soft interrupts */
+
+#ifdef MULTIPROCESSOR
+
+	int	ci_ipi;				/* pending ipis */
 #define	CI_IPI_NOTIFY		0x00000001
 #define	CI_IPI_HARDCLOCK	0x00000002
 #define	CI_IPI_STATCLOCK	0x00000004
 #define	CI_IPI_DDB		0x00000008
+#define	CI_IPI_TLB_FLUSH_KERNEL	0x00000010
+#define	CI_IPI_TLB_FLUSH_USER	0x00000020
+
+#define	CI_IPI_CACHE_FLUSH	0x00000040
+#define	CI_IPI_ICACHE_FLUSH	0x00000080
+	u_int32_t	ci_ipi_arg1;
+	u_int32_t	ci_ipi_arg2;
+#endif
 };
 
 extern cpuid_t master_cpu;
@@ -119,22 +134,24 @@ extern struct cpu_info m88k_cpus[MAX_CPUS];
 #define	CPU_INFO_ITERATOR	cpuid_t
 #define	CPU_INFO_FOREACH(cii, ci) \
 	for ((cii) = 0; (cii) < MAX_CPUS; (cii)++) \
-		if (((ci) = &m88k_cpus[cii])->ci_alive != 0)
+		if (((ci) = &m88k_cpus[cii])->ci_flags & CIF_ALIVE)
 #define	CPU_INFO_UNIT(ci)	((ci)->ci_cpuid)
 
 #if defined(MULTIPROCESSOR)
 
-#define	curcpu() \
-({									\
-	struct cpu_info *cpuptr;					\
-									\
-	__asm__ __volatile__ ("ldcr %0, cr17" : "=r" (cpuptr));		\
-	cpuptr;								\
-})
+static __inline__ struct cpu_info *
+curcpu(void)
+{
+	struct cpu_info *cpuptr;
 
-#define	CPU_IS_PRIMARY(ci)	((ci)->ci_primary != 0)
+	__asm__ __volatile__ ("ldcr %0, cr17" : "=r" (cpuptr));
+	return cpuptr;
+}
+
+#define	CPU_IS_PRIMARY(ci)	((ci)->ci_flags & CIF_PRIMARY)
 
 void	cpu_boot_secondary_processors(void);
+__dead void cpu_emergency_disable(void);
 void	m88k_send_ipi(int, cpuid_t);
 void	m88k_broadcast_ipi(int);
 
@@ -165,6 +182,10 @@ void	set_cpu_number(cpuid_t);
 #define	cpu_exec(p)		do { /* nothing */ } while (0)
 #define	cpu_wait(p)		do { /* nothing */ } while (0)
 
+#define	cpu_idle_enter()	do { /* nothing */ } while (0)
+#define	cpu_idle_cycle()	do { /* nothing */ } while (0)
+#define	cpu_idle_leave()	do { /* nothing */ } while (0)
+
 #if defined(MULTIPROCESSOR)
 #include <sys/lock.h>
 #include <sys/mplock.h>
@@ -194,8 +215,7 @@ struct clockframe {
 #define SIR_NET		0x01
 #define SIR_CLOCK	0x02
 
-extern unsigned int ssir;
-#define setsoftint(x)	atomic_setbits_int(&ssir, x)
+#define setsoftint(x)	atomic_setbits_int(&curcpu()->ci_softintr, x)
 #define setsoftnet()	setsoftint(SIR_NET)
 #define setsoftclock()	setsoftint(SIR_CLOCK)
 
@@ -230,14 +250,6 @@ do {									\
 #define	need_proftick(p)	aston(p)
 
 void	signotify(struct proc *);
-
-/*
- * switchframe - should be double word aligned.
- */
-struct switchframe {
-	u_int	sf_pc;			/* pc */
-	void	*sf_proc;		/* proc pointer */
-};
 
 int	badaddr(vaddr_t addr, int size);
 

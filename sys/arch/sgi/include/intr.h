@@ -1,4 +1,4 @@
-/*	$OpenBSD: intr.h,v 1.18 2007/06/20 16:50:41 miod Exp $ */
+/*	$OpenBSD: intr.h,v 1.20 2007/12/06 12:34:39 jsing Exp $ */
 
 /*
  * Copyright (c) 2001-2004 Opsycon AB  (www.opsycon.se / www.opsycon.com)
@@ -41,7 +41,7 @@
  *  The IMASK_EXTERNAL define is used to select whether the CPU
  *  interrupt mask should be controlled by the cpl mask value
  *  or not. If the mask is external, the CPU mask is never changed
- *  from the value it gets when interrupt dispatchers are registred.
+ *  from the value it gets when interrupt dispatchers are registered.
  *  When an external masking register is used dedicated interrupt
  *  handlers must be written as well as ipending handlers.
  */
@@ -106,7 +106,7 @@ void	splinit(void);
 #define	splassert(X)
 
 /*
- *  Schedule prioritys for base interrupts (cpu)
+ *  Schedule prioritys for base interrupts (CPU)
  */
 #define	INTPRI_CLOCK	1
 #define	INTPRI_MACEIO	2	/* O2 I/O interrupt */
@@ -129,8 +129,8 @@ extern intrmask_t imask[NIPLS];
 /*
  *  A note on clock interrupts. Clock interrupts are always
  *  allowed to happen but will not be serviced if masked.
- *  The reason for this is that clocks usually sits on INT5
- *  and can not be easily masked if external HW masking is used.
+ *  The reason for this is that clocks usually sit on INT5
+ *  and cannot be easily masked if external HW masking is used.
  */
 
 /* Inlines */

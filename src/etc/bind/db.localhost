@@ -1,4 +1,4 @@
-; $OpenBSD: db.localhost,v 1.2 2005/02/07 06:08:10 david Exp $
+; $OpenBSD: db.localhost,v 1.4 2008/01/03 21:20:25 jakob Exp $
 
 $ORIGIN localhost.
 $TTL 6h

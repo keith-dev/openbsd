@@ -1,4 +1,4 @@
-/*	$OpenBSD: fhc.c,v 1.13 2007/05/01 19:44:56 kettenis Exp $	*/
+/*	$OpenBSD: fhc.c,v 1.15 2008/01/17 22:53:18 kettenis Exp $	*/
 
 /*
  * Copyright (c) 2004 Jason L. Wright (jason@thought.net)
@@ -136,7 +136,7 @@ fhc_print(void *args, const char *busname)
 	char *class;
 
 	if (busname != NULL) {
-		printf("%s at %s", fa->fa_name, busname);
+		printf("\"%s\" at %s", fa->fa_name, busname);
 		class = getpropstring(fa->fa_node, "device_type");
 		if (*class != '\0')
 			printf(" class %s", class);
@@ -167,11 +167,10 @@ fhc_alloc_bus_tag(struct fhc_softc *sc)
 {
 	struct sparc_bus_space_tag *bt;
 
-	bt = malloc(sizeof(*bt), M_DEVBUF, M_NOWAIT);
+	bt = malloc(sizeof(*bt), M_DEVBUF, M_NOWAIT | M_ZERO);
 	if (bt == NULL)
 		panic("fhc: couldn't alloc bus tag");
 
-	bzero(bt, sizeof(*bt));
 	snprintf(bt->name, sizeof(bt->name), "%s", sc->sc_dv.dv_xname);
 	bt->cookie = sc;
 	bt->parent = sc->sc_bt;

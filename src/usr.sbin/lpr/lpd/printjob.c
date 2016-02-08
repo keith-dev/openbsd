@@ -1,4 +1,4 @@
-/*	$OpenBSD: printjob.c,v 1.42 2007/04/07 21:57:27 stevesk Exp $	*/
+/*	$OpenBSD: printjob.c,v 1.44 2007/09/10 14:29:53 tobias Exp $	*/
 /*	$NetBSD: printjob.c,v 1.31 2002/01/21 14:42:30 wiz Exp $	*/
 
 /*
@@ -503,7 +503,7 @@ printit(char *file)
 	/* pass 2 */
 
 pass2:
-	fseek(cfp, 0L, 0);
+	fseek(cfp, 0L, SEEK_SET);
 	while (getline(cfp))
 		switch (line[0]) {
 		case 'L':	/* identification line */
@@ -862,7 +862,7 @@ sendit(char *file)
 	/*
 	 * pass 2
 	 */
-	fseek(cfp, 0L, 0);
+	fseek(cfp, 0L, SEEK_SET);
 	while (getline(cfp))
 		if (line[0] == 'U' && strchr(line+1, '/') == 0)
 			(void)unlink(line+1);
@@ -1564,7 +1564,7 @@ setty(void)
 			syslog(LOG_INFO, "%s: ioctl(TIOCGWINSZ): %m",
 			       printer);
 
-		argv = (char **)malloc(256 * sizeof(char *));
+		argv = (char **)calloc(256, sizeof(char *));
 		if (argv == NULL) {
 			syslog(LOG_ERR, "%s: malloc: %m", printer);
 			exit(1);

@@ -1,4 +1,4 @@
-/*	$OpenBSD: clock.c,v 1.33 2007/05/06 14:52:36 kettenis Exp $	*/
+/*	$OpenBSD: clock.c,v 1.38 2007/11/14 20:43:12 kettenis Exp $	*/
 /*	$NetBSD: clock.c,v 1.41 2001/07/24 19:29:25 eeh Exp $ */
 
 /*
@@ -80,7 +80,6 @@
 
 #include <machine/bus.h>
 #include <machine/autoconf.h>
-#include <machine/eeprom.h>
 #include <machine/cpu.h>
 #include <machine/idprom.h>
 
@@ -441,11 +440,13 @@ timermatch(parent, cf, aux)
 	void *cf;
 	void *aux;
 {
+#ifndef MULTIPROCESSOR
 	struct mainbus_attach_args *ma = aux;
 
 	if (!timerreg_4u.t_timer || !timerreg_4u.t_clrintr)
 		return (strcmp("counter-timer", ma->ma_name) == 0);
 	else
+#endif
 		return (0);
 }
 
@@ -587,7 +588,7 @@ cpu_initclocks()
 		printf("Using %%tick -- intr in %ld cycles...",
 		    tick_increment);
 #endif
-		next_tick(tick_increment);
+		tick_start();
 #ifdef DEBUG
 		printf("done.\n");
 #endif
@@ -716,15 +717,21 @@ int
 tickintr(cap)
 	void *cap;
 {
-	int s;
+	u_int64_t base, s;
 
 	hardclock((struct clockframe *)cap);
 
-	s = splhigh();
-	/* Reset the interrupt */
-	next_tick(tick_increment);
+	/* 
+	 * Reset the interrupt.  We need to disable interrupts to
+	 * block out IPIs, otherwise a value that is in the past could
+	 * be written to the TICK_CMPR register, causing hardclock to
+	 * stop.
+	 */
+	s = intr_disable();
+	base = sparc_rdpr(tick);
+	sparc_wr(tick_cmpr, (base + tick_increment) & TICK_TICKS, 0);
 	level0.ih_count.ec_count++;
-	splx(s);
+	intr_restore(s);
 
 	return (1);
 }
@@ -872,16 +879,22 @@ resettodr()
 		printf("Cannot set time in time-of-day clock\n");
 }
 
-/*
- * XXX: these may actually belong somewhere else, but since the
- * EEPROM is so closely tied to the clock on some models, perhaps
- * it needs to stay here...
- */
-int
-eeprom_uio(uio)
-	struct uio *uio;
+void
+tick_start(void)
 {
-	return (ENODEV);
+	u_int64_t base, s;
+
+	/*
+	 * Try to make the tick interrupts as synchronously as possible on
+	 * all CPUs to avoid inaccuracies for migrating processes.  Leave out
+	 * one tick to make sure that it is not missed.
+	 */
+
+	s = intr_disable();
+	base = sparc_rdpr(tick) & TICK_TICKS;
+	base = roundup(base, tick_increment);
+	sparc_wr(tick_cmpr, (base + tick_increment) & TICK_TICKS, 0);
+	intr_restore(s);
 }
 
 u_int

@@ -1,4 +1,4 @@
-/*	$OpenBSD: admin.c,v 1.51 2007/06/28 21:38:09 xsa Exp $	*/
+/*	$OpenBSD: admin.c,v 1.55 2008/02/04 15:07:32 tobias Exp $	*/
 /*
  * Copyright (c) 2004 Jean-Francois Brousseau <jfb@openbsd.org>
  * Copyright (c) 2005 Joris Vink <joris@openbsd.org>
@@ -34,7 +34,7 @@
 void	cvs_admin_local(struct cvs_file *);
 
 struct cvs_cmd cvs_cmd_admin = {
-	CVS_OP_ADMIN, 0, "admin",
+	CVS_OP_ADMIN, CVS_USE_WDIR, "admin",
 	{ "adm", "rcs" },
 	"Administrative front-end for RCS",
 	"[-ILqU] [-A oldfile] [-a users] [-b branch]\n"
@@ -49,7 +49,6 @@ struct cvs_cmd cvs_cmd_admin = {
 
 static int	 runflags = 0;
 static int	 lkmode = RCS_LOCK_INVAL;
-static int	 kflag = RCS_KWEXP_DEFAULT;
 static char	*alist, *comment, *elist, *logmsg, *logstr, *koptstr;
 static char	*oldfilename, *orange, *state, *statestr;
 static RCSNUM	*logrev;
@@ -170,7 +169,7 @@ cvs_admin(int argc, char **argv)
 			cvs_client_send_request("Argument -U");
 
 		if (logstr != NULL)
-			cvs_client_send_request("Argument -m%s", logstr);
+			cvs_client_send_logmsg(logstr);
 
 		if (orange != NULL)
 			cvs_client_send_request("Argument -o%s", orange);
@@ -207,7 +206,7 @@ cvs_admin_local(struct cvs_file *cf)
 
 	cvs_log(LP_TRACE, "cvs_admin_local(%s)", cf->file_path);
 
-	cvs_file_classify(cf, NULL);
+	cvs_file_classify(cf, cvs_directory_tag);
 
 	if (cf->file_type == CVS_DIR) {
 		if (verbosity > 1)
@@ -299,7 +298,7 @@ cvs_admin_local(struct cvs_file *cf)
 	}
 
 	/* Default `-kv' is accepted here. */
-	if (koptstr != NULL) {
+	if (kflag) {
 		if (cf->file_rcs->rf_expand == NULL ||
 		    strcmp(cf->file_rcs->rf_expand, koptstr) != 0)
 			rcs_kwexp_set(cf->file_rcs, kflag);

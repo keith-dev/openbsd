@@ -1,4 +1,4 @@
-/*	$OpenBSD: rtw.c,v 1.61 2007/06/07 20:20:15 damien Exp $	*/
+/*	$OpenBSD: rtw.c,v 1.65 2007/11/21 15:58:22 blambert Exp $	*/
 /*	$NetBSD: rtw.c,v 1.29 2004/12/27 19:49:16 dyoung Exp $ */
 
 /*-
@@ -92,7 +92,6 @@ void	 rtw_txdesc_blk_init_all(struct rtw_txdesc_blk *);
 void	 rtw_txsoft_blk_init_all(struct rtw_txsoft_blk *);
 void	 rtw_txdesc_blk_init(struct rtw_txdesc_blk *);
 void	 rtw_txdescs_sync(struct rtw_txdesc_blk *, u_int, u_int, int);
-u_int	 rtw_txring_next(struct rtw_regs *, struct rtw_txdesc_blk *);
 void	 rtw_txring_fixup(struct rtw_softc *);
 void	 rtw_rxbufs_release(bus_dma_tag_t, struct rtw_rxsoft *);
 void	 rtw_rxdesc_init(struct rtw_rxdesc_blk *, struct rtw_rxsoft *, int, int);
@@ -167,8 +166,6 @@ int	 rtw_txdesc_dmamaps_create(bus_dma_tag_t, struct rtw_txsoft *, u_int);
 int	 rtw_rxdesc_dmamaps_create(bus_dma_tag_t, struct rtw_rxsoft *, u_int);
 void	 rtw_rxdesc_dmamaps_destroy(bus_dma_tag_t, struct rtw_rxsoft *, u_int);
 void	 rtw_txdesc_dmamaps_destroy(bus_dma_tag_t, struct rtw_txsoft *, u_int);
-void	 rtw_init_channels(enum rtw_locale, struct ieee80211_channel (*)[],
-	    const char*);
 void	 rtw_identify_country(struct rtw_regs *, enum rtw_locale *);
 int	 rtw_identify_sta(struct rtw_regs *, u_int8_t (*)[], const char *);
 void	 rtw_rxdescs_sync(struct rtw_rxdesc_blk *, int, int, int);
@@ -664,14 +661,12 @@ rtw_srom_read(struct rtw_regs *regs, u_int32_t flags, struct rtw_srom *sr,
 
 	RTW_WRITE8(regs, RTW_9346CR, ecr);
 
-	sr->sr_content = malloc(sr->sr_size, M_DEVBUF, M_NOWAIT);
+	sr->sr_content = malloc(sr->sr_size, M_DEVBUF, M_NOWAIT | M_ZERO);
 
 	if (sr->sr_content == NULL) {
 		printf("%s: unable to allocate SROM buffer\n", dvname);
 		return ENOMEM;
 	}
-
-	bzero(sr->sr_content, sr->sr_size);
 
 	/* RTL8180 has a single 8-bit register for controlling the
 	 * 93cx6 SROM.  There is no "ready" bit. The RTL8180
@@ -759,47 +754,6 @@ rtw_set_rfprog(struct rtw_regs *regs, int rfchipid,
 	RTW_DPRINTF(RTW_DEBUG_INIT,
 	    ("%s: %s RF programming method, %#02x\n", dvname, method,
 	    RTW_READ8(regs, RTW_CONFIG4)));
-}
-
-void
-rtw_init_channels(enum rtw_locale locale,
-    struct ieee80211_channel (*chans)[IEEE80211_CHAN_MAX+1],
-    const char *dvname)
-{
-	int i;
-	const char *name = NULL;
-#define ADD_CHANNEL(_chans, _chan) do {			\
-	(*_chans)[_chan].ic_flags = IEEE80211_CHAN_B;		\
-	(*_chans)[_chan].ic_freq =				\
-	    ieee80211_ieee2mhz(_chan, (*_chans)[_chan].ic_flags);\
-} while (0)
-
-	switch (locale) {
-	case RTW_LOCALE_USA:	/* 1-11 */
-		name = "USA";
-		for (i = 1; i <= 11; i++)
-			ADD_CHANNEL(chans, i);
-		break;
-	case RTW_LOCALE_JAPAN:	/* 1-14 */
-		name = "Japan";
-		ADD_CHANNEL(chans, 14);
-		for (i = 1; i <= 14; i++)
-			ADD_CHANNEL(chans, i);
-		break;
-	case RTW_LOCALE_EUROPE:	/* 1-13 */
-		name = "Europe";
-		for (i = 1; i <= 13; i++)
-			ADD_CHANNEL(chans, i);
-		break;
-	default:			/* 10-11 allowed by most countries */
-		name = "<unknown>";
-		for (i = 10; i <= 11; i++)
-			ADD_CHANNEL(chans, i);
-		break;
-	}
-	RTW_DPRINTF(RTW_DEBUG_ATTACH, ("%s: Geographic Location %s\n",
-	    dvname, name));
-#undef ADD_CHANNEL
 }
 
 void
@@ -1086,11 +1040,9 @@ rtw_rxdesc_init_all(struct rtw_rxdesc_blk *rdb, struct rtw_rxsoft *ctl,
     int kick)
 {
 	int i;
-	struct rtw_rxdesc *rd;
 	struct rtw_rxsoft *rs;
 
 	for (i = 0; i < rdb->rdb_ndesc; i++) {
-		rd = &rdb->rdb_desc[i];
 		rs = &ctl[i];
 		rtw_rxdesc_init(rdb, rs, i, kick);
 	}
@@ -1335,7 +1287,7 @@ rtw_intr_rx(struct rtw_softc *sc, u_int16_t isr)
 			mb.m_flags = 0;
 			bpf_mtap(sc->sc_radiobpf, &mb, BPF_DIRECTION_IN);
 		}
-#endif /* NPBFILTER > 0 */
+#endif /* NBPFILTER > 0 */
 
 		ieee80211_input(&sc->sc_if, m, ni, rssi, htsftl);
 		ieee80211_release_node(&sc->sc_ic, ni);
@@ -3263,7 +3215,7 @@ rtw_start(struct ifnet *ifp)
 			bpf_mtap(sc->sc_radiobpf, &mb, BPF_DIRECTION_OUT);
 
 		}
-#endif /* NPBFILTER > 0 */
+#endif /* NBPFILTER > 0 */
 
 		for (i = 0, lastdesc = desc = ts->ts_first;
 		     i < dmamap->dm_nsegs;
@@ -3936,7 +3888,7 @@ rtw_attach(struct rtw_softc *sc)
 	const char *vername;
 	struct ifnet *ifp;
 	char scratch[sizeof("unknown 0xXXXXXXXX")];
-	int pri, rc;
+	int pri, rc, i;
 
 
 	/* Use default DMA memory access */
@@ -4082,8 +4034,11 @@ rtw_attach(struct rtw_softc *sc)
 	if (sc->sc_locale == RTW_LOCALE_UNKNOWN)
 		rtw_identify_country(&sc->sc_regs, &sc->sc_locale);
 
-	rtw_init_channels(sc->sc_locale, &sc->sc_ic.ic_channels,
-	    sc->sc_dev.dv_xname);
+	for (i = 1; i <= 14; i++) {
+		sc->sc_ic.ic_channels[i].ic_flags = IEEE80211_CHAN_B;
+		sc->sc_ic.ic_channels[i].ic_freq =
+		    ieee80211_ieee2mhz(i, sc->sc_ic.ic_channels[i].ic_flags);
+	}
 
 	if (rtw_identify_sta(&sc->sc_regs, &sc->sc_ic.ic_myaddr,
 	    sc->sc_dev.dv_xname) != 0)

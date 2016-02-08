@@ -1,4 +1,4 @@
-/*	$OpenBSD: control.c,v 1.55 2007/03/28 12:33:32 henning Exp $ */
+/*	$OpenBSD: control.c,v 1.58 2008/01/31 12:17:35 henning Exp $ */
 
 /*
  * Copyright (c) 2003, 2004 Henning Brauer <henning@openbsd.org>
@@ -131,6 +131,7 @@ control_accept(int listenfd, int restricted)
 
 	if ((ctl_conn = malloc(sizeof(struct ctl_conn))) == NULL) {
 		log_warn("session_control_accept");
+		close(connfd);
 		return (0);
 	}
 
@@ -256,16 +257,41 @@ control_dispatch_msg(struct pollfd *pfd, u_int *ctl_cnt)
 				p = getpeerbyaddr(&neighbor->addr);
 				if (p == NULL)
 					p = getpeerbydesc(neighbor->descr);
-				if (p != NULL)
+				if (p != NULL && !neighbor->show_timers) {
 					imsg_compose_rde(imsg.hdr.type,
 					    imsg.hdr.pid,
 					    p, sizeof(struct peer));
-			} else
+					imsg_compose_rde(IMSG_CTL_END,
+					    imsg.hdr.pid, NULL, 0);
+				}
+				if (p != NULL && neighbor->show_timers) {
+					u_int			 i;
+					time_t			 d;
+					struct ctl_timer	 ct;
+
+					imsg_compose(&c->ibuf,
+					    IMSG_CTL_SHOW_NEIGHBOR,
+					    0, 0, -1, p, sizeof(*p));
+					for (i = 1; i < Timer_Max; i++) {
+						if (!timer_running(p, i, &d))
+							continue;
+						ct.type = i;
+						ct.val = d;
+						imsg_compose(&c->ibuf,
+						    IMSG_CTL_SHOW_TIMER,
+						    0, 0, -1, &ct, sizeof(ct));
+					}
+					imsg_compose(&c->ibuf, IMSG_CTL_END,
+					    0, 0, -1, NULL, 0);
+				}
+			} else {
 				for (p = peers; p != NULL; p = p->next)
 					imsg_compose_rde(imsg.hdr.type,
 					    imsg.hdr.pid,
 					    p, sizeof(struct peer));
-			imsg_compose_rde(IMSG_CTL_END, imsg.hdr.pid, NULL, 0);
+				imsg_compose_rde(IMSG_CTL_END, imsg.hdr.pid,
+					NULL, 0);
+			}
 			break;
 		case IMSG_CTL_SHOW_TERSE:
 			for (p = peers; p != NULL; p = p->next)
@@ -303,8 +329,8 @@ control_dispatch_msg(struct pollfd *pfd, u_int *ctl_cnt)
 					break;
 				case IMSG_CTL_NEIGHBOR_CLEAR:
 					bgp_fsm(p, EVNT_STOP);
-					p->IdleHoldTimer = time(NULL) +
-					    SESSION_CLEAR_DELAY;
+					timer_set(p, Timer_IdleHold,
+					    SESSION_CLEAR_DELAY);
 					control_result(c, CTL_RES_OK);
 					break;
 				case IMSG_CTL_NEIGHBOR_RREFRESH:

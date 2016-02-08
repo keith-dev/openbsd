@@ -1,4 +1,4 @@
-/*	$OpenBSD: ufs_vnops.c,v 1.82 2007/06/20 15:03:40 thib Exp $	*/
+/*	$OpenBSD: ufs_vnops.c,v 1.86 2008/01/17 11:31:56 fgsch Exp $	*/
 /*	$NetBSD: ufs_vnops.c,v 1.18 1996/05/11 18:28:04 mycroft Exp $	*/
 
 /*
@@ -390,10 +390,13 @@ ufs_setattr(void *v)
 		    ((vap->va_vaflags & VA_UTIMES_NULL) == 0 || 
 		    (error = VOP_ACCESS(vp, VWRITE, cred, p))))
 			return (error);
-		if (vap->va_atime.tv_sec != VNOVAL)
-			ip->i_flag |= IN_ACCESS;
 		if (vap->va_mtime.tv_sec != VNOVAL)
 			ip->i_flag |= IN_CHANGE | IN_UPDATE;
+		if (vap->va_atime.tv_sec != VNOVAL) {
+			if (!(vp->v_mount->mnt_flag & MNT_NOATIME) ||
+			    (ip->i_flag & (IN_CHANGE | IN_UPDATE)))
+				ip->i_flag |= IN_ACCESS;
+		}
 		error = UFS_UPDATE2(ip, &vap->va_atime, &vap->va_mtime, 0);
 		if (error)
 			return (error);
@@ -447,7 +450,7 @@ ufs_chown(struct vnode *vp, uid_t uid, gid_t gid, struct ucred *cred,
 	uid_t ouid;
 	gid_t ogid;
 	int error = 0;
-	daddr_t change;
+	daddr64_t change;
 	enum ufs_quota_flags quota_flags = 0;
 
 	if (uid == (uid_t)VNOVAL)
@@ -1206,7 +1209,7 @@ ufs_mkdir(void *v)
   
 bad:
         if (error == 0) {
-		VN_KNOTE(dvp, NOTE_WRITE);
+		VN_KNOTE(dvp, NOTE_WRITE | NOTE_LINK);
                 *ap->a_vpp = tvp;
         } else {
                 dp->i_effnlink--;
@@ -1409,7 +1412,7 @@ ufs_readdir(void *v)
 			auio.uio_iovcnt = 1;
 			auio.uio_segflg = UIO_SYSSPACE;
 			aiov.iov_len = count;
-			MALLOC(dirbuf, caddr_t, count, M_TEMP, M_WAITOK);
+			dirbuf = malloc(count, M_TEMP, M_WAITOK);
 			aiov.iov_base = dirbuf;
 			error = VOP_READ(ap->a_vp, &auio, 0, ap->a_cred);
 			if (error == 0) {
@@ -1430,7 +1433,7 @@ ufs_readdir(void *v)
 				if (dp >= edp)
 					error = uiomove(dirbuf, readcnt, uio);
 			}
-			FREE(dirbuf, M_TEMP);
+			free(dirbuf, M_TEMP);
 		}
 #	else
 		error = VOP_READ(ap->a_vp, uio, 0, ap->a_cred);
@@ -1462,8 +1465,7 @@ ufs_readdir(void *v)
                 }
                 lost += uio->uio_offset - off;
                 uio->uio_offset = off;
-                MALLOC(cookies, u_long *, ncookies * sizeof(u_long), M_TEMP,
-                    M_WAITOK);
+                cookies = malloc(ncookies * sizeof(u_long), M_TEMP, M_WAITOK);
                 *ap->a_ncookies = ncookies;
                 *ap->a_cookies = cookies;
                 for (off = offstart, dp = dpstart; off < uio->uio_offset; ) {
@@ -1563,10 +1565,10 @@ ufs_strategy(void *v)
 			splx(s);
 			return (error);
 		}
-		if ((long)bp->b_blkno == -1)
+		if (bp->b_blkno == -1)
 			clrbuf(bp);
 	}
-	if ((long)bp->b_blkno == -1) {
+	if (bp->b_blkno == -1) {
 		s = splbio();
 		biodone(bp);
 		splx(s);

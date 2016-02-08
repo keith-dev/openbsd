@@ -1,4 +1,4 @@
-/*	$OpenBSD: audioctl.c,v 1.13 2007/08/06 19:16:06 sobrado Exp $	*/
+/*	$OpenBSD: audioctl.c,v 1.16 2007/11/26 13:36:34 deraadt Exp $	*/
 /*	$NetBSD: audioctl.c,v 1.14 1998/04/27 16:55:23 augustss Exp $	*/
 
 /*
@@ -96,6 +96,7 @@ struct field {
 	{ "blocksize",		&info.blocksize,	UINT,	0 },
 	{ "hiwat",		&info.hiwat,		UINT,	0 },
 	{ "lowat",		&info.lowat,		UINT,	0 },
+	{ "output_muted",	&info.output_muted,	UCHAR,	0 },
 	{ "monitor_gain",	&info.monitor_gain,	UINT,	0 },
 	{ "mode",		&info.mode,		P_R,	READONLY },
 	{ "play.rate",		&info.play.sample_rate,	UINT,	0 },
@@ -179,7 +180,7 @@ struct field *
 findfield(char *name)
 {
 	int i;
-	for(i = 0; fields[i].name; i++)
+	for (i = 0; fields[i].name; i++)
 		if (strcmp(fields[i].name, name) == 0)
 			return &fields[i];
 	return (0);
@@ -194,7 +195,7 @@ prfield(struct field *p, const char *sep)
 
 	if (sep)
 		fprintf(out, "%s%s", p->name, sep);
-	switch(p->format) {
+	switch (p->format) {
 	case STRING:
 		fprintf(out, "%s", (char*)p->valp);
 		break;
@@ -228,7 +229,7 @@ prfield(struct field *p, const char *sep)
 		break;
 	case ENC:
 		v = *(u_int*)p->valp;
-		for(i = 0; encs[i].ename; i++)
+		for (i = 0; encs[i].ename; i++)
 			if (encs[i].eno == v)
 				break;
 		if (encs[i].ename)
@@ -256,7 +257,7 @@ rdfield(struct field *p, char *q)
 	int i;
 	u_int u;
 
-	switch(p->format) {
+	switch (p->format) {
 	case UINT:
 		if (sscanf(q, "%u", (unsigned int *)p->valp) != 1)
 			warnx("Bad number %s", q);
@@ -273,7 +274,7 @@ rdfield(struct field *p, char *q)
 			warnx("Bad number %s", q);
 		break;
 	case ENC:
-		for(i = 0; encs[i].ename; i++)
+		for (i = 0; encs[i].ename; i++)
 			if (strcmp(encs[i].ename, q) == 0)
 				break;
 		if (encs[i].ename)
@@ -294,7 +295,7 @@ getinfo(int fd)
 
 	if (ioctl(fd, AUDIO_GETDEV, &adev) < 0)
 		err(1, "AUDIO_GETDEV");
-	for(;;) {
+	for (;;) {
 		audio_encoding_t enc;
 		enc.index = i++;
 		if (ioctl(fd, AUDIO_GETENC, &enc) < 0)
@@ -322,10 +323,10 @@ usage(void)
 	extern char *__progname;		/* from crt0.o */
 
 	fprintf(stderr,
-	    "usage: %s [-f file] [-n] -a\n"
-	    "       %s [-f file] [-n] name ...\n"
-	    "       %s [-f file] [-n] name=value ...\n", __progname,
-		__progname, __progname);
+	    "usage: %s [-an] [-f file]\n"
+	    "       %s [-n] [-f file] name ...\n"
+	    "       %s [-n] [-f file] name=value ...\n",
+	    __progname, __progname, __progname);
 
 	exit(1);
 }
@@ -344,7 +345,7 @@ main(int argc, char **argv)
 		file = "/dev/audioctl";
     
 	while ((ch = getopt(argc, argv, "af:nw")) != -1) {
-		switch(ch) {
+		switch (ch) {
 		case 'a':
 			aflag++;
 			break;
@@ -363,6 +364,9 @@ main(int argc, char **argv)
 	}
 	argc -= optind;
 	argv += optind;
+
+	if (argc == 0)
+		aflag++;
 
 	if ((fd = open(file, O_RDWR)) < 0) {
 		if ((fd = open(file, O_RDONLY)) < 0)

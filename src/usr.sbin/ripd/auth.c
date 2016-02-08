@@ -1,4 +1,4 @@
-/*	$OpenBSD: auth.c,v 1.5 2007/03/31 09:49:20 michele Exp $ */
+/*	$OpenBSD: auth.c,v 1.9 2007/10/24 20:52:50 claudio Exp $ */
 
 /*
  * Copyright (c) 2006 Michele Marchetto <mydecay@openbeer.it>
@@ -29,17 +29,17 @@
 #include "log.h"
 #include "ripe.h"
 
-u_int32_t	 auth_calc_modulator(struct auth_md  *md);
+u_int32_t	 auth_calc_modulator(struct auth_md *md);
 struct auth_md	*md_list_find(struct auth_md_head *, u_int8_t);
 void		 auth_trailer_header_gen(struct buf *);
 u_int32_t	 auth_get_seq_num(struct auth_md*);
 
 u_int32_t
-auth_calc_modulator(struct auth_md  *md)
+auth_calc_modulator(struct auth_md *md)
 {
 	u_int32_t		r;
 	MD5_CTX			md5ctx;
-	char			digest[MD5_DIGEST_LENGTH];
+	u_int8_t		digest[MD5_DIGEST_LENGTH];
 
 	MD5Init(&md5ctx);
 	MD5Update(&md5ctx, (void *)&md->keyid, sizeof(md->keyid));
@@ -69,8 +69,8 @@ auth_trailer_header_gen(struct buf *buf)
 
 /* XXX add the support for key lifetime and rollover */
 int
-auth_validate(char **buf, u_int16_t *len, struct iface *iface, struct nbr *nbr,
-    struct nbr_failed *nbr_failed, u_int32_t *crypt_seq_num)
+auth_validate(u_int8_t **buf, u_int16_t *len, struct iface *iface,
+    struct nbr *nbr, struct nbr_failed *nbr_failed, u_int32_t *crypt_seq_num)
 {
 	MD5_CTX			 hash;
 	u_int8_t		 digest[MD5_DIGEST_LENGTH];
@@ -79,8 +79,8 @@ auth_validate(char **buf, u_int16_t *len, struct iface *iface, struct nbr *nbr,
 	struct rip_auth		*auth_head;
 	struct md5_auth		*a;
 	struct auth_md		*md;
-	char			*auth_data;
-	char			*b = *buf;
+	u_int8_t		*auth_data;
+	u_int8_t		*b = *buf;
 
 	*buf += RIP_HDR_LEN;
 	*len -= RIP_HDR_LEN;
@@ -152,8 +152,7 @@ auth_validate(char **buf, u_int16_t *len, struct iface *iface, struct nbr *nbr,
 		bzero(auth_data, MD5_DIGEST_LENGTH);
 
 		/* insert plaintext key */
-		bzero(digest, MD5_DIGEST_LENGTH);
-		strncpy(digest, md->key, MD5_DIGEST_LENGTH);
+		memcpy(digest, md->key, MD5_DIGEST_LENGTH);
 
 		/* calculate MD5 digest */
 		MD5Init(&hash);
@@ -246,8 +245,7 @@ auth_add_trailer(struct buf *buf, struct iface *iface)
 			return (-1);
 	}
 
-	bzero(digest, MD5_DIGEST_LENGTH);
-	strncpy(digest, md->key, MD5_DIGEST_LENGTH);
+	memcpy(digest, md->key, MD5_DIGEST_LENGTH);
 
 	auth_trailer_header_gen(buf);
 
@@ -261,24 +259,30 @@ auth_add_trailer(struct buf *buf, struct iface *iface)
 }
 
 /* md list */
-void
+int
 md_list_add(struct auth_md_head *head, u_int8_t keyid, char *key)
 {
 	struct auth_md	*md;
 
+	if (strlen(key) > MD5_DIGEST_LENGTH)
+		return (-1);
+
 	if ((md = md_list_find(head, keyid)) != NULL) {
 		/* update key */
-		strncpy(md->key, key, sizeof(md->key));
-		return;
+		bzero(md->key, sizeof(md->key));
+		memcpy(md->key, key, strlen(key));
+		return (0);
 	}
 
 	if ((md = calloc(1, sizeof(struct auth_md))) == NULL)
 		fatalx("md_list_add");
 
 	md->keyid = keyid;
-	strncpy(md->key, key, sizeof(md->key));
+	memcpy(md->key, key, strlen(key));
 	md->seq_modulator = auth_calc_modulator(md);
 	TAILQ_INSERT_TAIL(head, md, entry);
+
+	return (0);
 }
 
 void
@@ -293,7 +297,7 @@ md_list_copy(struct auth_md_head *to, struct auth_md_head *from)
 			fatalx("md_list_copy");
 
 		md->keyid = m->keyid;
-		strncpy(md->key, m->key, sizeof(md->key));
+		memcpy(md->key, m->key, sizeof(md->key));
 		md->seq_modulator = m->seq_modulator;
 		TAILQ_INSERT_TAIL(to, md, entry);
 	}

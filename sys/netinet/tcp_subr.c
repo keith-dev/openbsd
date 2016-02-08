@@ -1,4 +1,4 @@
-/*	$OpenBSD: tcp_subr.c,v 1.98 2007/06/25 12:17:43 markus Exp $	*/
+/*	$OpenBSD: tcp_subr.c,v 1.103 2008/02/20 14:23:31 markus Exp $	*/
 /*	$NetBSD: tcp_subr.c,v 1.22 1996/02/13 23:44:00 christos Exp $	*/
 
 /*
@@ -76,6 +76,7 @@
 #include <sys/socketvar.h>
 #include <sys/protosw.h>
 #include <sys/kernel.h>
+#include <sys/pool.h>
 
 #include <net/route.h>
 #include <net/if.h>
@@ -317,18 +318,23 @@ tcp_template(tp)
 /* This function looks hairy, because it was so IPv4-dependent. */
 #endif /* INET6 */
 void
-tcp_respond(tp, template, m, ack, seq, flags)
+tcp_respond(tp, template, th0, ack, seq, flags)
 	struct tcpcb *tp;
 	caddr_t template;
-	struct mbuf *m;
+	struct tcphdr *th0;
 	tcp_seq ack, seq;
 	int flags;
 {
 	int tlen;
 	int win = 0;
+	struct mbuf *m = 0;
 	struct route *ro = 0;
 	struct tcphdr *th;
-	struct tcpiphdr *ti = (struct tcpiphdr *)template;
+	struct ip *ip;
+	struct ipovly *ih;
+#ifdef INET6
+	struct ip6_hdr *ip6;
+#endif
 	int af;		/* af on wire */
 
 	if (tp) {
@@ -345,69 +351,48 @@ tcp_respond(tp, template, m, ack, seq, flags)
 		 */
 		ro = &tp->t_inpcb->inp_route;
 	} else
-		af = (((struct ip *)ti)->ip_v == 6) ? AF_INET6 : AF_INET;
-	if (m == 0) {
-		m = m_gethdr(M_DONTWAIT, MT_HEADER);
-		if (m == NULL)
-			return;
-#ifdef TCP_COMPAT_42
-		tlen = 1;
-#else
-		tlen = 0;
-#endif
-		m->m_data += max_linkhdr;
-		switch (af) {
-#ifdef INET6
-		case AF_INET6:
-			bcopy(ti, mtod(m, caddr_t), sizeof(struct tcphdr) +
-			    sizeof(struct ip6_hdr));
-			break;
-#endif /* INET6 */
-		case AF_INET:
-			bcopy(ti, mtod(m, caddr_t), sizeof(struct tcphdr) +
-			    sizeof(struct ip));
-			break;
-		}
+		af = (((struct ip *)template)->ip_v == 6) ? AF_INET6 : AF_INET;
 
-		ti = mtod(m, struct tcpiphdr *);
-		flags = TH_ACK;
-	} else {
-		m_freem(m->m_next);
-		m->m_next = 0;
-		m->m_data = (caddr_t)ti;
-		tlen = 0;
+	m = m_gethdr(M_DONTWAIT, MT_HEADER);
+	if (m == NULL)
+		return;
+	m->m_data += max_linkhdr;
+	tlen = 0;
+
 #define xchg(a,b,type) do { type t; t=a; a=b; b=t; } while (0)
-		switch (af) {
-#ifdef INET6
-		case AF_INET6:
-			m->m_len = sizeof(struct tcphdr) + sizeof(struct ip6_hdr);
-			xchg(((struct ip6_hdr *)ti)->ip6_dst,
-			    ((struct ip6_hdr *)ti)->ip6_src, struct in6_addr);
-			th = (void *)((caddr_t)ti + sizeof(struct ip6_hdr));
-			break;
-#endif /* INET6 */
-		case AF_INET:
-			m->m_len = sizeof (struct tcpiphdr);
-			xchg(ti->ti_dst.s_addr, ti->ti_src.s_addr, u_int32_t);
-			th = (void *)((caddr_t)ti + sizeof(struct ip));
-			break;
-		}
-		xchg(th->th_dport, th->th_sport, u_int16_t);
-#undef xchg
-	}
 	switch (af) {
 #ifdef INET6
 	case AF_INET6:
-		tlen += sizeof(struct tcphdr) + sizeof(struct ip6_hdr);
-		th = (struct tcphdr *)((caddr_t)ti + sizeof(struct ip6_hdr));
+		ip6 = mtod(m, struct ip6_hdr *);
+		th = (struct tcphdr *)(ip6 + 1);
+		tlen = sizeof(*ip6) + sizeof(*th);
+		if (th0) {
+			bcopy(template, ip6, sizeof(*ip6));
+			bcopy(th0, th, sizeof(*th));
+			xchg(ip6->ip6_dst, ip6->ip6_src, struct in6_addr);
+		} else {
+			bcopy(template, ip6, tlen);
+		}
 		break;
 #endif /* INET6 */
 	case AF_INET:
-		ti->ti_len = htons((u_int16_t)(sizeof (struct tcphdr) + tlen));
-		tlen += sizeof (struct tcpiphdr);
-		th = (struct tcphdr *)((caddr_t)ti + sizeof(struct ip));
+		ip = mtod(m, struct ip *);
+		th = (struct tcphdr *)(ip + 1);
+		tlen = sizeof(*ip) + sizeof(*th);
+		if (th0) {
+			bcopy(template, ip, sizeof(*ip));
+			bcopy(th0, th, sizeof(*th));
+			xchg(ip->ip_dst.s_addr, ip->ip_src.s_addr, u_int32_t);
+		} else {
+			bcopy(template, ip, tlen);
+		}
 		break;
 	}
+	if (th0)
+		xchg(th->th_dport, th->th_sport, u_int16_t);
+	else
+		flags = TH_ACK;
+#undef xchg
 
 	m->m_len = tlen;
 	m->m_pkthdr.len = tlen;
@@ -427,23 +412,23 @@ tcp_respond(tp, template, m, ack, seq, flags)
 	switch (af) {
 #ifdef INET6
 	case AF_INET6:
-		((struct ip6_hdr *)ti)->ip6_flow   = htonl(0x60000000);
-		((struct ip6_hdr *)ti)->ip6_nxt  = IPPROTO_TCP;
-		((struct ip6_hdr *)ti)->ip6_hlim =
-			in6_selecthlim(tp ? tp->t_inpcb : NULL, NULL);	/*XXX*/
-		((struct ip6_hdr *)ti)->ip6_plen = tlen - sizeof(struct ip6_hdr);
+		ip6->ip6_flow = htonl(0x60000000);
+		ip6->ip6_nxt  = IPPROTO_TCP;
+		ip6->ip6_hlim = in6_selecthlim(tp ? tp->t_inpcb : NULL, NULL);	/*XXX*/
+		ip6->ip6_plen = tlen - sizeof(struct ip6_hdr);
 		th->th_sum = 0;
 		th->th_sum = in6_cksum(m, IPPROTO_TCP,
-		   sizeof(struct ip6_hdr), ((struct ip6_hdr *)ti)->ip6_plen);
-		HTONS(((struct ip6_hdr *)ti)->ip6_plen);
+		   sizeof(struct ip6_hdr), ip6->ip6_plen);
+		HTONS(ip6->ip6_plen);
 		ip6_output(m, tp ? tp->t_inpcb->inp_outputopts6 : NULL,
 		    (struct route_in6 *)ro, 0, NULL, NULL,
 		    tp ? tp->t_inpcb : NULL);
 		break;
 #endif /* INET6 */
 	case AF_INET:
-		bzero(ti->ti_x1, sizeof ti->ti_x1);
-		ti->ti_len = htons((u_short)tlen - sizeof(struct ip));
+		ih = (struct ipovly *)ip;
+		bzero(ih->ih_x1, sizeof ih->ih_x1);
+		ih->ih_len = htons((u_short)tlen - sizeof(struct ip));
 
 		/*
 		 * There's no point deferring to hardware checksum processing
@@ -452,8 +437,8 @@ tcp_respond(tp, template, m, ack, seq, flags)
 		 */
 		th->th_sum = 0;
 		th->th_sum = in_cksum(m, tlen);
-		((struct ip *)ti)->ip_len = htons(tlen);
-		((struct ip *)ti)->ip_ttl = ip_defttl;
+		ip->ip_len = htons(tlen);
+		ip->ip_ttl = ip_defttl;
 		ip_output(m, (void *)NULL, ro, ip_mtudisc ? IP_MTUDISC : 0,
 			(void *)NULL, tp ? tp->t_inpcb : (void *)NULL);
 	}
@@ -1189,50 +1174,3 @@ tcp_signature(struct tdb *tdb, int af, struct mbuf *m, struct tcphdr *th,
 	return (0);
 }
 #endif /* TCP_SIGNATURE */
-
-#define TCP_RNDISS_ROUNDS	16
-#define TCP_RNDISS_OUT	7200
-#define TCP_RNDISS_MAX	30000
-
-u_int8_t tcp_rndiss_sbox[128];
-u_int16_t tcp_rndiss_msb;
-u_int16_t tcp_rndiss_cnt;
-long tcp_rndiss_reseed;
-
-u_int16_t
-tcp_rndiss_encrypt(val)
-	u_int16_t val;
-{
-	u_int16_t sum = 0, i;
-
-	for (i = 0; i < TCP_RNDISS_ROUNDS; i++) {
-		sum += 0x79b9;
-		val ^= ((u_int16_t)tcp_rndiss_sbox[(val^sum) & 0x7f]) << 7;
-		val = ((val & 0xff) << 7) | (val >> 8);
-	}
-
-	return val;
-}
-
-void
-tcp_rndiss_init()
-{
-	get_random_bytes(tcp_rndiss_sbox, sizeof(tcp_rndiss_sbox));
-
-	tcp_rndiss_reseed = time_second + TCP_RNDISS_OUT;
-	tcp_rndiss_msb = tcp_rndiss_msb == 0x8000 ? 0 : 0x8000;
-	tcp_rndiss_cnt = 0;
-}
-
-tcp_seq
-tcp_rndiss_next()
-{
-        if (tcp_rndiss_cnt >= TCP_RNDISS_MAX ||
-	    time_second > tcp_rndiss_reseed)
-                tcp_rndiss_init();
-
-	/* (arc4random() & 0x7fff) ensures a 32768 byte gap between ISS */
-	return ((tcp_rndiss_encrypt(tcp_rndiss_cnt++) | tcp_rndiss_msb) <<16) |
-		(arc4random() & 0x7fff);
-}
-

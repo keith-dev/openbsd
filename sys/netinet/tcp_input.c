@@ -1,4 +1,4 @@
-/*	$OpenBSD: tcp_input.c,v 1.207 2007/06/15 18:23:06 markus Exp $	*/
+/*	$OpenBSD: tcp_input.c,v 1.212 2008/02/20 11:24:02 markus Exp $	*/
 /*	$NetBSD: tcp_input.c,v 1.23 1996/02/13 23:43:44 christos Exp $	*/
 
 /*
@@ -75,6 +75,7 @@
 #include <sys/socket.h>
 #include <sys/socketvar.h>
 #include <sys/kernel.h>
+#include <sys/pool.h>
 
 #include <dev/rndvar.h>
 
@@ -1503,6 +1504,7 @@ trimthenstep6:
 			(TF_RCVD_SCALE|TF_REQ_SCALE)) {
 			tp->snd_scale = tp->requested_s_scale;
 			tp->rcv_scale = tp->request_r_scale;
+			tiwin = th->th_win << tp->snd_scale;
 		}
 		tcp_reass_lock(tp);
 		(void) tcp_reass(tp, (struct tcphdr *)0, (struct mbuf *)0,
@@ -1585,7 +1587,7 @@ trimthenstep6:
 			/*
 			 * If we get an old ACK, there is probably packet
 			 * reordering going on.  Be conservative and reset
-			 * t_dupacks so that we are less agressive in
+			 * t_dupacks so that we are less aggressive in
 			 * doing a fast retransmit.
 			 */
 			if (th->th_ack != tp->snd_una) {
@@ -2207,14 +2209,15 @@ dropwithreset:
 	if (tiflags & TH_RST)
 		goto drop;
 	if (tiflags & TH_ACK) {
-		tcp_respond(tp, mtod(m, caddr_t), m, (tcp_seq)0, th->th_ack,
+		tcp_respond(tp, mtod(m, caddr_t), th, (tcp_seq)0, th->th_ack,
 		    TH_RST);
 	} else {
 		if (tiflags & TH_SYN)
 			tlen++;
-		tcp_respond(tp, mtod(m, caddr_t), m, th->th_seq + tlen,
+		tcp_respond(tp, mtod(m, caddr_t), th, th->th_seq + tlen,
 		    (tcp_seq)0, TH_RST|TH_ACK);
 	}
+	m_freem(m);
 	return;
 
 drop:
@@ -3788,8 +3791,6 @@ syn_cache_get(src, dst, th, hlen, tlen, so, m)
 	if (sc->sc_request_r_scale != 15) {
 		tp->requested_s_scale = sc->sc_requested_s_scale;
 		tp->request_r_scale = sc->sc_request_r_scale;
-		tp->snd_scale = sc->sc_requested_s_scale;
-		tp->rcv_scale = sc->sc_request_r_scale;
 		tp->t_flags |= TF_REQ_SCALE|TF_RCVD_SCALE;
 	}
 	if (sc->sc_flags & SCF_TIMESTAMP)
@@ -3863,7 +3864,8 @@ syn_cache_get(src, dst, th, hlen, tlen, so, m)
 	return (so);
 
 resetandabort:
-	tcp_respond(NULL, mtod(m, caddr_t), m, (tcp_seq)0, th->th_ack, TH_RST);
+	tcp_respond(NULL, mtod(m, caddr_t), th, (tcp_seq)0, th->th_ack, TH_RST);
+	m_freem(m);
 abort:
 	if (so != NULL)
 		(void) soabort(so);
@@ -4068,12 +4070,7 @@ syn_cache_add(src, dst, th, iphlen, so, m, optp, optlen, oi, issp)
 	sc->sc_ipopts = ipopts;
 	sc->sc_irs = th->th_seq;
 
-#ifdef TCP_COMPAT_42
-	tcp_iss += TCP_ISSINCR/2;
-	sc->sc_iss = tcp_iss;
-#else
 	sc->sc_iss = issp ? *issp : arc4random();
-#endif
 	sc->sc_peermaxseg = oi->maxseg;
 	sc->sc_ourmaxseg = tcp_mss_adv(m->m_flags & M_PKTHDR ?
 	    m->m_pkthdr.rcvif : NULL, sc->sc_src.sa.sa_family);

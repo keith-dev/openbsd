@@ -1,4 +1,4 @@
-/*	$OpenBSD: bios.c,v 1.70 2007/08/06 16:12:25 gwk Exp $	*/
+/*	$OpenBSD: bios.c,v 1.78 2008/03/02 18:01:05 deraadt Exp $	*/
 
 /*
  * Copyright (c) 1997-2001 Michael Shalayeff
@@ -57,7 +57,13 @@
 #include <dev/isa/isareg.h>
 #include <i386/isa/isa_machdep.h>
 
+#include <dev/pci/pcivar.h>
+
+#include <dev/acpi/acpireg.h>
+#include <dev/acpi/acpivar.h>
+
 #include "apm.h"
+#include "acpi.h"
 #include "pcibios.h"
 #include "pci.h"
 
@@ -94,9 +100,7 @@ struct smbios_entry smbios_entry;
 #ifdef MULTIPROCESSOR
 void		*bios_smpinfo;
 #endif
-#ifdef NFSCLIENT
 bios_bootmac_t	*bios_bootmac;
-#endif
 
 void		smbios_info(char*);
 
@@ -125,7 +129,7 @@ biosprobe(struct device *parent, void *match, void *aux)
 	    bootapiver, BOOTARG_APIVER, bootargp, bootargc);
 #endif
 	/* there could be only one */
-	if (bios_cd.cd_ndevs || strcmp(bia->bios_dev, bios_cd.cd_name))
+	if (bios_cd.cd_ndevs || strcmp(bia->ba_name, bios_cd.cd_name))
 		return 0;
 
 	if (!(bootapiver & BAPIV_VECTOR) || bootargp == NULL)
@@ -145,7 +149,10 @@ biosattach(struct device *parent, struct device *self, void *aux)
 	struct smbtable bios;
 	volatile u_int8_t *va;
 	char scratch[64], *str;
-	int flags;
+	int flags, havesmbios = 0;
+#if NAPM > 0 || defined(MULTIPROCESSOR)
+	int ncpu = 0;
+#endif
 
 	/* remember flags */
 	flags = sc->sc_dev.dv_cfdata->cf_flags;
@@ -223,7 +230,7 @@ biosattach(struct device *parent, struct device *self, void *aux)
 	if (!(flags & BIOSF_SMBIOS)) {
 		for (va = ISA_HOLE_VADDR(SMBIOS_START);
 		    va < (u_int8_t *)ISA_HOLE_VADDR(SMBIOS_END); va+= 16) {
-			struct smbhdr * sh = (struct smbhdr *)va;
+			struct smbhdr *sh = (struct smbhdr *)va;
 			u_int8_t chksum;
 			vaddr_t eva;
 			paddr_t pa, end;
@@ -261,6 +268,7 @@ biosattach(struct device *parent, struct device *self, void *aux)
 			for (; pa < end; pa+= NBPG, eva+= NBPG)
 				pmap_kenter_pa(eva, pa, VM_PROT_READ);
 
+			havesmbios = 1;
 			printf(", SMBIOS rev. %d.%d @ 0x%lx (%d entries)",
 			    sh->majrev, sh->minrev, sh->addr, sh->count);
 
@@ -271,15 +279,41 @@ biosattach(struct device *parent, struct device *self, void *aux)
 
 				if ((smbios_get_string(&bios, sb->vendor,
 				    scratch, sizeof(scratch))) != NULL)
-					printf(" vendor %s", scratch);
+					printf(" vendor %s",
+					    fixstring(scratch));
 				if ((smbios_get_string(&bios, sb->version,
 				    scratch, sizeof(scratch))) != NULL)
-					printf(" version \"%s\"", scratch);
+					printf(" version \"%s\"",
+					    fixstring(scratch));
 				if ((smbios_get_string(&bios, sb->release,
 				    scratch, sizeof(scratch))) != NULL)
-					printf(" date %s", scratch);
+					printf(" date %s", fixstring(scratch));
 			}
 			smbios_info(sc->sc_dev.dv_xname);
+
+#ifdef MULTIPROCESSOR
+			/* count cpus so that we can disable apm when cpu > 1 */
+			bzero(&bios, sizeof(bios));
+			while (smbios_find_table(SMBIOS_TYPE_PROCESSOR,&bios)) {
+				struct smbios_cpu *cpu = bios.tblhdr;
+
+				if (cpu->cpu_status & SMBIOS_CPUST_POPULATED) {
+					/*
+					 * smbios 2.5 added multi code support
+					 */
+					if (sh->majrev * 100 +
+					    sh->minrev >= 250 &&
+					    cpu->cpu_core_enabled)
+						ncpu += cpu->cpu_core_enabled;
+					else {
+						ncpu++;
+						if (cpu->cpu_id_edx & CPUID_HTT)
+							ncpu++;
+					}
+				}
+			}
+#endif /* MULTIPROCESSOR */
+
 			break;
 		}
 	}
@@ -287,8 +321,9 @@ biosattach(struct device *parent, struct device *self, void *aux)
 	printf("\n");
 
 #if NAPM > 0
-	if (apm) {
+	if (apm && ncpu < 2) {
 		struct bios_attach_args ba;
+
 #if defined(DEBUG) || defined(APMDEBUG)
 		printf("apminfo: %x, code %x[%x]/%x[%x], data %x[%x], ept %x\n",
 		    apm->apm_detail,
@@ -296,22 +331,40 @@ biosattach(struct device *parent, struct device *self, void *aux)
 		    apm->apm_code16_base, apm->apm_code16_len,
 		    apm->apm_data_base, apm->apm_data_len, apm->apm_entry);
 #endif
-		ba.bios_dev = "apm";
-		ba.bios_func = 0x15;
-		ba.bios_memt = bia->bios_memt;
-		ba.bios_iot = bia->bios_iot;
-		ba.bios_apmp = apm;
+		ba.ba_name = "apm";
+		ba.ba_func = 0x15;
+		ba.ba_memt = bia->ba_memt;
+		ba.ba_iot = bia->ba_iot;
+		ba.ba_apmp = apm;
 		config_found(self, &ba, bios_print);
 	}
 #endif
+
+#if NACPI > 0
+#if NPCI > 0
+	if (havesmbios && pci_mode_detect() != 0)
+#endif
+	{
+		struct bios_attach_args ba;
+
+		memset(&ba, 0, sizeof(ba));
+		ba.ba_name = "acpi";
+		ba.ba_func = 0x00;		/* XXX ? */
+		ba.ba_iot = I386_BUS_SPACE_IO;
+		ba.ba_memt = I386_BUS_SPACE_MEM;
+		if (config_found(self, &ba, bios_print))
+			flags |= BIOSF_PCIBIOS;
+	}
+#endif
+
 #if NPCI > 0 && NPCIBIOS > 0
 	if (!(flags & BIOSF_PCIBIOS)) {
 		struct bios_attach_args ba;
 
-		ba.bios_dev = "pcibios";
-		ba.bios_func = 0x1A;
-		ba.bios_memt = bia->bios_memt;
-		ba.bios_iot = bia->bios_iot;
+		ba.ba_name = "pcibios";
+		ba.ba_func = 0x1A;
+		ba.ba_memt = bia->ba_memt;
+		ba.ba_iot = bia->ba_iot;
 		config_found(self, &ba, bios_print);
 	}
 #endif
@@ -444,11 +497,9 @@ bios_getopt()
 			break;
 #endif
 
-#ifdef NFSCLIENT
 		case BOOTARG_BOOTMAC:
 			bios_bootmac = (bios_bootmac_t *)q->ba_arg;
 			break;
-#endif
 
 		default:
 #ifdef BIOS_DEBUG
@@ -469,7 +520,7 @@ bios_print(void *aux, const char *pnp)
 
 	if (pnp)
 		printf("%s at %s function 0x%x",
-		    ba->bios_dev, pnp, ba->bios_func);
+		    ba->ba_name, pnp, ba->ba_func);
 	return (UNCONF);
 }
 
@@ -588,7 +639,7 @@ bioscnprobe(struct consdev *cn)
 	if (0 && bios_call(BOOTC_CHECK, NULL))
 		return;
 
-	cn->cn_pri = CN_NORMAL;
+	cn->cn_pri = CN_LOWPRI;
 	cn->cn_dev = makedev(48, 0);
 #endif
 }
@@ -677,7 +728,7 @@ bios_getdiskinfo(dev_t dev)
 /*
  * smbios_find_table() takes a caller supplied smbios struct type and
  * a pointer to a handle (struct smbtable) returning one if the structure
- * is sucessfully located and zero otherwise. Callers should take care
+ * is successfully located and zero otherwise. Callers should take care
  * to initialize the cookie field of the smbtable structure to zero before
  * the first invocation of this function.
  * Multiple tables of the same type can be located by repeatedly calling
@@ -696,7 +747,7 @@ smbios_find_table(u_int8_t type, struct smbtable *st)
 	/*
 	 * The cookie field of the smtable structure is used to locate
 	 * multiple instances of a table of an arbitrary type. Following the
-	 * sucessful location of a table, the type is encoded as bits 0:7 of
+	 * successful location of a table, the type is encoded as bits 0:7 of
 	 * the cookie value, the offset in terms of the number of structures
 	 * preceding that referenced by the handle is encoded in bits 15:31.
 	 */

@@ -1,4 +1,4 @@
-#	$OpenBSD: rc,v 1.304 2007/04/25 14:12:05 espie Exp $
+#	$OpenBSD: rc,v 1.312 2008/02/27 20:27:38 djm Exp $
 
 # System startup script run by init on autoboot
 # or after single-user.
@@ -94,9 +94,26 @@ wsconsctl_conf()
 	set -- `stripcom /etc/wsconsctl.conf`
 	IFS="$save_IFS"
 	while [ $# -ge 1 ] ; do
-		eval /sbin/wsconsctl -w $1
+		eval /sbin/wsconsctl $1
 		shift
 	done
+}
+
+random_seed()
+{
+	if [ -f /var/db/host.random -a "X$random_seed_done" = "X" ]; then
+		dd if=/var/db/host.random of=/dev/urandom bs=1024 count=64 \
+		    > /dev/null 2>&1
+		dd if=/var/db/host.random of=/dev/arandom bs=1024 count=64 \
+		    > /dev/null 2>&1
+	
+		# reset seed file, so that if a shutdown-less reboot occurs,
+		# the next seed is not a repeat
+		dd if=/dev/urandom of=/var/db/host.random bs=1024 count=64 \
+		    > /dev/null 2>&1
+
+		random_seed_done=1
+	fi
 }
 
 # End subroutines
@@ -196,6 +213,8 @@ mount -a -t nonfs,vnd
 mount -uw /		# root on nfs requires this, others aren't hurt
 rm -f /fastboot		# XXX (root now writeable)
 
+random_seed
+
 # pick up option configuration
 . /etc/rc.conf
 
@@ -221,13 +240,13 @@ if [ X"${pf}" != X"NO" ]; then
 		RULES="$RULES\npass out inet6 proto icmp6 all icmp6-type routersol"
 		RULES="$RULES\npass in inet6 proto icmp6 all icmp6-type routeradv"
 	fi
-	RULES="$RULES\npass proto { pfsync, carp }"
+	RULES="$RULES\npass proto carp"
 	case `sysctl vfs.mounts.nfs 2>/dev/null` in
 	*[1-9]*)
 		# don't kill NFS
 		RULES="scrub in all no-df\n$RULES"
-		RULES="$RULES\npass in proto udp from any port { 111, 2049 } to any"
-		RULES="$RULES\npass out proto udp from any to any port { 111, 2049 }"
+		RULES="$RULES\npass in proto { tcp, udp } from any port { 111, 2049 } to any"
+		RULES="$RULES\npass out proto { tcp, udp } from any to any port { 111, 2049 }"
 		;;
 	esac
 	echo $RULES | pfctl -f -
@@ -249,6 +268,10 @@ if [ X"${pf}" != X"NO" ]; then
 	if [ -f ${pf_rules} ]; then
 		pfctl -f ${pf_rules}
 	fi
+	# bring up pfsync after the working ruleset has been loaded
+	if [ -f /etc/hostname.pfsync0 ]; then
+		. /etc/netstart pfsync0
+	fi
 fi
 
 mount -s /usr >/dev/null 2>&1
@@ -260,15 +283,8 @@ if [ ! -f /var/db/host.random ]; then
 		>/dev/null 2>&1
 	chmod 600 /var/db/host.random >/dev/null 2>&1
 else
-	dd if=/var/db/host.random of=/dev/urandom bs=1024 count=64 \
-	    > /dev/null 2>&1
-	dd if=/var/db/host.random of=/dev/arandom bs=1024 count=64 \
-	    > /dev/null 2>&1
-
-	# reset seed file, so that if a shutdown-less reboot occurs,
-	# the next seed is not a repeat
-	dd if=/dev/urandom of=/var/db/host.random bs=1024 count=64 \
-	    > /dev/null 2>&1
+	# Try to read seed if it was not initially present (e.g. /var on NFS)
+	random_seed
 fi
 
 # clean up left-over files
@@ -294,11 +310,13 @@ if [ -d /var/empty ]; then
 fi
 syslogd ${syslogd_flags}
 
-if [ X"${pf}" != X"NO" -a X"${pflogd_flags}" != X"NO" ]; then
+if [ X"${pf}" != X"NO" ]; then
 	ifconfig pflog0 create >/dev/null 2>&1
 	if ifconfig pflog0 >/dev/null 2>&1; then
 		ifconfig pflog0 up
-		pflogd ${pflogd_flags}
+		if [ X"${pflogd_flags}" != X"NO" ]; then
+			pflogd ${pflogd_flags}
+		fi
 	fi
 fi
 
@@ -556,6 +574,10 @@ fi
 
 echo -n starting network daemons:
 
+if [ X"${snmpd_flags}" != X"NO" ]; then
+	echo -n ' snmpd';		/usr/sbin/snmpd $snmpd_flags
+fi
+
 if [ X"${routed_flags}" != X"NO" ]; then
 	echo -n ' routed';		routed $routed_flags
 fi
@@ -576,6 +598,10 @@ if [ X"${ospfd_flags}" != X"NO" ]; then
 	echo -n ' ospfd';		/usr/sbin/ospfd $ospfd_flags
 fi
 
+if [ X"${ospf6d_flags}" != X"NO" ]; then
+	echo -n ' ospf6d';		/usr/sbin/ospf6d $ospf6d_flags
+fi
+
 if [ X"${bgpd_flags}" != X"NO" ]; then
 	echo -n ' bgpd';		/usr/sbin/bgpd $bgpd_flags
 fi
@@ -584,8 +610,8 @@ if [ X"${ifstated_flags}" != X"NO" ]; then
 	echo -n ' ifstated';		ifstated $ifstated_flags
 fi
 
-if [ X"${hoststated_flags}" != X"NO" ]; then
-	echo -n ' hoststated';		/usr/sbin/hoststated $hoststated_flags
+if [ X"${relayd_flags}" != X"NO" ]; then
+	echo -n ' relayd';		/usr/sbin/relayd $relayd_flags
 fi
 
 if [ X"${dhcpd_flags}" != X"NO" -a -f /etc/dhcpd.conf ]; then

@@ -35,7 +35,7 @@ char copyright[] =
 
 #ifndef lint
 /*static char sccsid[] = "from: @(#)sliplogin.c	5.6 (Berkeley) 3/2/91";*/
-static char rcsid[] = "$Id: sliplogin.c,v 1.26 2007/03/06 03:22:11 ray Exp $";
+static char rcsid[] = "$Id: sliplogin.c,v 1.28 2007/09/14 14:29:20 chl Exp $";
 #endif /* not lint */
 
 /*
@@ -109,7 +109,7 @@ findid(char *name)
 	static char laddr[16];
 	static char raddr[16];
 	static char mask[16];
-	char user[MAXLOGNAME], *p;
+	char user[MAXLOGNAME];
 	int n;
 
 	strlcpy(loginname, name, sizeof loginname);
@@ -120,10 +120,8 @@ findid(char *name)
 	while (fgets(loginargs, sizeof(loginargs), fp)) {
 		if (ferror(fp))
 			break;
-		if ((p = strchr(loginargs, '#')))
-			*p = '\0';
-		if ((p = strchr(loginargs, '\n')))
-			*p = '\0';
+		loginargs[strcspn(loginargs, "#")] = '\0';
+		loginargs[strcspn(loginargs, "\n")] = '\0';
 		n = sscanf(loginargs, "%15s%*[ \t]%15s%*[ \t]%15s%*[ \t]%15s%*[ \t]%15s%*[ \t]%15s%*[ \t]%15s%*[ \t]%15s%*[ \t]%15s\n",
 		    user, laddr, raddr, mask, slopt[0], slopt[1],
 		    slopt[2], slopt[3], slopt[4]);

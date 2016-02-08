@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvm_page_i.h,v 1.17 2007/04/13 18:57:49 art Exp $	*/
+/*	$OpenBSD: uvm_page_i.h,v 1.20 2008/01/09 17:42:17 miod Exp $	*/
 /*	$NetBSD: uvm_page_i.h,v 1.14 2000/11/27 07:47:42 chs Exp $	*/
 
 /* 
@@ -79,40 +79,6 @@
  */
 
 #if defined(UVM_PAGE_INLINE) || defined(UVM_PAGE)
-
-/*
- * uvm_lock_fpageq: lock the free page queue
- *
- * => free page queue can be accessed in interrupt context, so this
- *	blocks all interrupts that can cause memory allocation, and
- *	returns the previous interrupt level.
- */
-
-PAGE_INLINE int
-uvm_lock_fpageq(void)
-{
-	int s;
-
-	s = splvm();
-	simple_lock(&uvm.fpageqlock);
-	return (s);
-}
-
-/*
- * uvm_unlock_fpageq: unlock the free page queue
- *
- * => caller must supply interrupt level returned by uvm_lock_fpageq()
- *	so that it may be restored.
- */
-
-PAGE_INLINE void
-uvm_unlock_fpageq(int s)
-{
-
-	simple_unlock(&uvm.fpageqlock);
-	splx(s);
-}
-
 /*
  * uvm_pagelookup: look up a page
  *
@@ -295,11 +261,15 @@ uvm_pagecopy(struct vm_page *src, struct vm_page *dst)
 PAGE_INLINE int
 uvm_page_lookup_freelist(struct vm_page *pg)
 {
+#if VM_PHYSSEG_MAX == 1
+	return (vm_physmem[0].free_list);
+#else
 	int lcv;
 
 	lcv = vm_physseg_find(atop(VM_PAGE_TO_PHYS(pg)), NULL);
 	KASSERT(lcv != -1);
 	return (vm_physmem[lcv].free_list);
+#endif
 }
 
 #endif /* defined(UVM_PAGE_INLINE) || defined(UVM_PAGE) */

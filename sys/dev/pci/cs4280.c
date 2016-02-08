@@ -1,4 +1,4 @@
-/*	$OpenBSD: cs4280.c,v 1.26 2007/08/01 21:37:21 miod Exp $	*/
+/*	$OpenBSD: cs4280.c,v 1.29 2007/11/05 00:17:28 jakemsr Exp $	*/
 /*	$NetBSD: cs4280.c,v 1.5 2000/06/26 04:56:23 simonb Exp $	*/
 
 /*
@@ -621,6 +621,9 @@ cs4280_attach(parent, self, aux)
 
 	sc->sc_dmatag = pa->pa_dmat;
 
+	/* Get out of power save mode if needed. */
+	pci_set_powerstate(pc, pa->pa_tag, PCI_PMCSR_STATE_D0);
+
 	/* LATENCY_TIMER setting */
 	mem = pci_conf_read(pa->pa_pc, pa->pa_tag, PCI_BHLC_REG);
 	if ( PCI_LATTIMER(mem) < 32 ) {
@@ -1159,7 +1162,7 @@ cs4280_set_params(addr, setmode, usemode, play, rec)
 		case AUDIO_ENCODING_ULINEAR_BE:
 			if (mode == AUMODE_RECORD) {
 				if (p->precision == 16)
-					p->sw_code = change_sign16_swap_bytes;
+					p->sw_code = change_sign16_swap_bytes_le;
 				else
 					p->sw_code = change_sign8;
 			}
@@ -1167,7 +1170,7 @@ cs4280_set_params(addr, setmode, usemode, play, rec)
 		case AUDIO_ENCODING_ULINEAR_LE:
 			if (mode == AUMODE_RECORD) {
 				if (p->precision == 16)
-					p->sw_code = change_sign16;
+					p->sw_code = change_sign16_le;
 				else
 					p->sw_code = change_sign8;
 			}
@@ -1175,7 +1178,7 @@ cs4280_set_params(addr, setmode, usemode, play, rec)
 		case AUDIO_ENCODING_ULAW:
 			if (mode == AUMODE_PLAY) {
 				p->factor = 2;
-				p->sw_code = mulaw_to_slinear16;
+				p->sw_code = mulaw_to_slinear16_le;
 			} else {
 				p->sw_code = slinear8_to_mulaw;
 			}
@@ -1183,7 +1186,7 @@ cs4280_set_params(addr, setmode, usemode, play, rec)
 		case AUDIO_ENCODING_ALAW:
 			if (mode == AUMODE_PLAY) {
 				p->factor = 2;
-				p->sw_code = alaw_to_slinear16;
+				p->sw_code = alaw_to_slinear16_le;
 			} else {
 				p->sw_code = slinear8_to_alaw;
 			}

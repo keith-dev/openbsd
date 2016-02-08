@@ -1,4 +1,4 @@
-/*	$OpenBSD: param.h,v 1.72 2007/07/25 20:07:28 deraadt Exp $	*/
+/*	$OpenBSD: param.h,v 1.74 2008/03/10 17:15:33 deraadt Exp $	*/
 /*	$NetBSD: param.h,v 1.23 1996/03/17 01:02:29 thorpej Exp $	*/
 
 /*-
@@ -41,8 +41,8 @@
 #define BSD4_3	1
 #define BSD4_4	1
 
-#define OpenBSD	200711		/* OpenBSD version (year & month). */
-#define OpenBSD4_2 1		/* OpenBSD 4.2 */
+#define OpenBSD	200805		/* OpenBSD version (year & month). */
+#define OpenBSD4_3 1		/* OpenBSD 4.3 */
 
 #ifndef NULL
 #ifdef 	__GNUG__
@@ -113,8 +113,8 @@
 
 #define	PRIMASK		0x0ff
 #define	PCATCH		0x100	/* OR'd with pri for tsleep to check signals */
-#define PNORELOCK	0x200	/* OR'd with pri for ltsleep to not relock
-				   the interlock */
+#define PNORELOCK	0x200	/* OR'd with pri for msleep to not reaquire
+				   the mutex */
 
 #define	NBPW	sizeof(int)	/* number of bytes per word (integer) */
 

@@ -1,4 +1,4 @@
-/*	$OpenBSD: sendbug.c,v 1.50 2007/07/31 03:44:21 ray Exp $	*/
+/*	$OpenBSD: sendbug.c,v 1.54 2008/01/04 00:50:09 ray Exp $	*/
 
 /*
  * Written by Ray Lai <ray@cyth.net>.
@@ -27,6 +27,7 @@
 #include "atomicio.h"
 
 #define _PATH_DMESG "/var/run/dmesg.boot"
+#define DMESG_START "OpenBSD "
 
 int	checkfile(const char *);
 void	dmesg(FILE *);
@@ -41,6 +42,18 @@ void	template(FILE *);
 const char *categories = "system user library documentation ports kernel "
     "alpha amd64 arm i386 m68k m88k mips ppc sgi sparc sparc64 vax";
 char *version = "4.2";
+const char *comment[] = {
+	"<synopsis of the problem (one line)>",
+	"<[ non-critical | serious | critical ] (one line)>",
+	"<[ low | medium | high ] (one line)>",
+	"<PR category (one line)>",
+	"<[ sw-bug | doc-bug | change-request | support ] (one line)>",
+	"<release number or tag (one line)>",
+	"<machine, os, target, libraries (multiple lines)>",
+	"<precise description of the problem (multiple lines)>",
+	"<code/input/activities to reproduce the problem (multiple lines)>",
+	"<how to correct or work around the problem, if known (multiple lines)>"
+};
 
 struct passwd *pw;
 char os[BUFSIZ], rel[BUFSIZ], mach[BUFSIZ], details[BUFSIZ];
@@ -188,17 +201,17 @@ dmesg(FILE *fp)
 	}
 
 	fputs("\n"
-	    "<dmesg is attached.>\n"
-	    "<Feel free to delete or use the -D flag if it contains "
-	    "sensitive information.>\n", fp);
-	/* Find last line starting with "OpenBSD". */
+	    "SENDBUG: dmesg is attached.\n"
+	    "SENDBUG: Feel free to delete or use the -D flag if it contains "
+	    "sensitive information.\n", fp);
+	/* Find last dmesg. */
 	for (;;) {
 		off_t o;
 
 		o = ftello(dfp);
 		if (fgets(buf, sizeof(buf), dfp) == NULL)
 			break;
-		if (!strncmp("OpenBSD ", buf, sizeof("OpenBSD ") - 1))
+		if (!strncmp(DMESG_START, buf, sizeof(DMESG_START) - 1))
 			offset = o;
 	}
 	if (offset != -1) {
@@ -227,9 +240,9 @@ int
 editit(const char *pathname)
 {
 	char *argp[] = {"sh", "-c", NULL, NULL}, *ed, *p;
-	sig_t sighup, sigint, sigquit;
+	sig_t sighup, sigint, sigquit, sigchld;
 	pid_t pid;
-	int saved_errno, st;
+	int saved_errno, st, ret = -1;
 
 	ed = getenv("VISUAL");
 	if (ed == NULL || ed[0] == '\0')
@@ -243,6 +256,7 @@ editit(const char *pathname)
 	sighup = signal(SIGHUP, SIG_IGN);
 	sigint = signal(SIGINT, SIG_IGN);
 	sigquit = signal(SIGQUIT, SIG_IGN);
+	sigchld = signal(SIGCHLD, SIG_DFL);
 	if ((pid = fork()) == -1)
 		goto fail;
 	if (pid == 0) {
@@ -252,24 +266,20 @@ editit(const char *pathname)
 	while (waitpid(pid, &st, 0) == -1)
 		if (errno != EINTR)
 			goto fail;
-	free(p);
-	(void)signal(SIGHUP, sighup);
-	(void)signal(SIGINT, sigint);
-	(void)signal(SIGQUIT, sigquit);
-	if (!WIFEXITED(st)) {
+	if (!WIFEXITED(st))
 		errno = EINTR;
-		return (-1);
-	}
-	return (WEXITSTATUS(st));
+	else
+		ret = WEXITSTATUS(st);
 
  fail:
 	saved_errno = errno;
 	(void)signal(SIGHUP, sighup);
 	(void)signal(SIGINT, sigint);
 	(void)signal(SIGQUIT, sigquit);
+	(void)signal(SIGCHLD, sigchld);
 	free(p);
 	errno = saved_errno;
-	return (-1);
+	return (ret);
 }
 
 int
@@ -414,39 +424,53 @@ init(void)
 int
 send_file(const char *file, int dst)
 {
-	int blank = 0;
 	size_t len;
-	char *buf;
+	char *buf, *lbuf;
 	FILE *fp;
+	int rval = -1, saved_errno;
 
 	if ((fp = fopen(file, "r")) == NULL)
 		return (-1);
+	lbuf = NULL;
 	while ((buf = fgetln(fp, &len))) {
+		if (buf[len - 1] == '\n')
+			buf[len - 1] = '\0';
+		else {
+			/* EOF without EOL, copy and add the NUL */
+			if ((lbuf = malloc(len + 1)) == NULL)
+				goto end;
+			memcpy(lbuf, buf, len);
+			lbuf[len] = '\0';
+			buf = lbuf;
+		}
+
 		/* Skip lines starting with "SENDBUG". */
-		if (len >= sizeof("SENDBUG") - 1 &&
-		    memcmp(buf, "SENDBUG", sizeof("SENDBUG") - 1) == 0)
+		if (strncmp(buf, "SENDBUG", sizeof("SENDBUG") - 1) == 0)
 			continue;
-		if (len == 1 && buf[0] == '\n')
-			blank = 1;
-		/* Skip comments, but only if we encountered a blank line. */
 		while (len) {
 			char *sp = NULL, *ep = NULL;
 			size_t copylen;
 
-			if (blank && (sp = memchr(buf, '<', len)) != NULL)
-				ep = memchr(sp, '>', len - (sp - buf + 1));
+			if ((sp = strchr(buf, '<')) != NULL) {
+				size_t i;
+
+				for (i = 0; i < sizeof(comment) / sizeof(*comment); ++i) {
+					size_t commentlen = strlen(comment[i]);
+
+					if (strncmp(sp, comment[i], commentlen) == 0) {
+						ep = sp + commentlen - 1;
+						break;
+					}
+				}
+			}
 			/* Length of string before comment. */
 			if (ep)
 				copylen = sp - buf;
 			else
 				copylen = len;
-			if (atomicio(vwrite, dst, buf, copylen) != copylen) {
-				int saved_errno = errno;
-
-				fclose(fp);
-				errno = saved_errno;
-				return (-1);
-			}
+			if (atomicio(vwrite, dst, buf, copylen) != copylen ||
+			    atomicio(vwrite, dst, "\n", 1) != 1)
+				goto end;
 			if (!ep)
 				break;
 			/* Skip comment. */
@@ -454,8 +478,13 @@ send_file(const char *file, int dst)
 			buf = ep + 1;
 		}
 	}
+	rval = 0;
+ end:
+	saved_errno = errno;
+	free(lbuf);
 	fclose(fp);
-	return (0);
+	errno = saved_errno;
+	return (rval);
 }
 
 /*
@@ -466,7 +495,7 @@ int
 matchline(const char *s, const char *line, size_t linelen)
 {
 	size_t slen;
-	int comment;
+	int iscomment;
 
 	slen = strlen(s);
 	/* Is line shorter than string? */
@@ -478,13 +507,13 @@ matchline(const char *s, const char *line, size_t linelen)
 	/* Does line contain anything but comments and whitespace? */
 	line += slen;
 	linelen -= slen;
-	comment = 0;
+	iscomment = 0;
 	while (linelen) {
-		if (comment) {
+		if (iscomment) {
 			if (*line == '>')
-				comment = 0;
+				iscomment = 0;
 		} else if (*line == '<')
-			comment = 1;
+			iscomment = 1;
 		else if (!isspace((unsigned char)*line))
 			return (1);
 		++line;
@@ -533,8 +562,7 @@ template(FILE *fp)
 {
 	fprintf(fp, "SENDBUG: -*- sendbug -*-\n");
 	fprintf(fp, "SENDBUG: Lines starting with `SENDBUG' will"
-	    " be removed automatically, as\n");
-	fprintf(fp, "SENDBUG: will all comments (text enclosed in `<' and `>').\n");
+	    " be removed automatically.\n");
 	fprintf(fp, "SENDBUG:\n");
 	fprintf(fp, "SENDBUG: Choose from the following categories:\n");
 	fprintf(fp, "SENDBUG:\n");
@@ -553,28 +581,24 @@ template(FILE *fp)
 	fprintf(fp, ">Originator:\t%s\n", fullname);
 	fprintf(fp, ">Organization:\n");
 	fprintf(fp, "net\n");
-	fprintf(fp, ">Synopsis:\t<synopsis of the problem (one line)>\n");
-	fprintf(fp, ">Severity:\t"
-	    "<[ non-critical | serious | critical ] (one line)>\n");
-	fprintf(fp, ">Priority:\t<[ low | medium | high ] (one line)>\n");
-	fprintf(fp, ">Category:\t<PR category (one line)>\n");
-	fprintf(fp, ">Class:\t\t"
-	    "<[ sw-bug | doc-bug | change-request | support ] (one line)>\n");
-	fprintf(fp, ">Release:\t<release number or tag (one line)>\n");
+	fprintf(fp, ">Synopsis:\t%s\n", comment[0]);
+	fprintf(fp, ">Severity:\t%s\n", comment[1]);
+	fprintf(fp, ">Priority:\t%s\n", comment[2]);
+	fprintf(fp, ">Category:\t%s\n", comment[3]);
+	fprintf(fp, ">Class:\t\t%s\n", comment[4]);
+	fprintf(fp, ">Release:\t%s\n", comment[5]);
 	fprintf(fp, ">Environment:\n");
-	fprintf(fp, "\t<machine, os, target, libraries (multiple lines)>\n");
+	fprintf(fp, "\t%s\n", comment[6]);
 	fprintf(fp, "\tSystem      : %s %s\n", os, rel);
 	fprintf(fp, "\tDetails     : %s\n", details);
 	fprintf(fp, "\tArchitecture: %s.%s\n", os, mach);
 	fprintf(fp, "\tMachine     : %s\n", mach);
 	fprintf(fp, ">Description:\n");
-	fprintf(fp, "\t<precise description of the problem (multiple lines)>\n");
+	fprintf(fp, "\t%s\n", comment[7]);
 	fprintf(fp, ">How-To-Repeat:\n");
-	fprintf(fp, "\t<code/input/activities to reproduce the problem"
-	    " (multiple lines)>\n");
+	fprintf(fp, "\t%s\n", comment[8]);
 	fprintf(fp, ">Fix:\n");
-	fprintf(fp, "\t<how to correct or work around the problem,"
-	    " if known (multiple lines)>\n");
+	fprintf(fp, "\t%s\n", comment[9]);
 
 	if (!Dflag)
 		dmesg(fp);

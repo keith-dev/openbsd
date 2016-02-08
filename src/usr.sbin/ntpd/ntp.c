@@ -1,4 +1,4 @@
-/*	$OpenBSD: ntp.c,v 1.99 2007/08/04 02:58:02 ckuethe Exp $ */
+/*	$OpenBSD: ntp.c,v 1.103 2008/01/28 11:45:59 mpf Exp $ */
 
 /*
  * Copyright (c) 2003, 2004 Henning Brauer <henning@openbsd.org>
@@ -38,14 +38,18 @@
 #define	PFD_MAX		2
 
 volatile sig_atomic_t	 ntp_quit = 0;
+volatile sig_atomic_t	 ntp_report = 0;
 struct imsgbuf		*ibuf_main;
 struct ntpd_conf	*conf;
 u_int			 peer_cnt;
+u_int			 sensors_cnt;
+time_t			 lastreport;
 
 void	ntp_sighdlr(int);
 int	ntp_dispatch_imsg(void);
 void	peer_add(struct ntp_peer *);
 void	peer_remove(struct ntp_peer *);
+void	report_peers(int);
 
 void
 ntp_sighdlr(int sig)
@@ -55,20 +59,21 @@ ntp_sighdlr(int sig)
 	case SIGTERM:
 		ntp_quit = 1;
 		break;
+	case SIGINFO:
+		ntp_report = 1;
+		break;
 	}
 }
 
 pid_t
-ntp_main(int pipe_prnt[2], struct ntpd_conf *nconf)
+ntp_main(int pipe_prnt[2], struct ntpd_conf *nconf, struct passwd *pw)
 {
 	int			 a, b, nfds, i, j, idx_peers, timeout;
 	int			 hotplugfd, nullfd;
 	u_int			 pfd_elms = 0, idx2peer_elms = 0;
 	u_int			 listener_cnt, new_cnt, sent_cnt, trial_cnt;
-	u_int			 sensors_cnt = 0;
 	pid_t			 pid;
 	struct pollfd		*pfd = NULL;
-	struct passwd		*pw;
 	struct servent		*se;
 	struct listen_addr	*la;
 	struct ntp_peer		*p;
@@ -98,9 +103,6 @@ ntp_main(int pipe_prnt[2], struct ntpd_conf *nconf)
 	if ((se = getservbyname("ntp", "udp")) == NULL)
 		fatal("getservbyname");
 
-	if ((pw = getpwnam(NTPD_USER)) == NULL)
-		fatal("getpwnam");
-
 	if ((nullfd = open(_PATH_DEVNULL, O_RDWR, 0)) == -1)
 		fatal(NULL);
 	hotplugfd = sensor_hotplugfd();
@@ -108,7 +110,7 @@ ntp_main(int pipe_prnt[2], struct ntpd_conf *nconf)
 	if (stat(pw->pw_dir, &stb) == -1)
 		fatal("stat");
 	if (stb.st_uid != 0 || (stb.st_mode & (S_IWGRP|S_IWOTH)) != 0)
-		fatal("bad privsep dir permissions");
+		fatalx("bad privsep dir permissions");
 	if (chroot(pw->pw_dir) == -1)
 		fatal("chroot");
 	if (chdir("/") == -1)
@@ -135,6 +137,7 @@ ntp_main(int pipe_prnt[2], struct ntpd_conf *nconf)
 
 	signal(SIGTERM, ntp_sighdlr);
 	signal(SIGINT, ntp_sighdlr);
+	signal(SIGINFO, ntp_sighdlr);
 	signal(SIGPIPE, SIG_IGN);
 	signal(SIGHUP, SIG_IGN);
 	signal(SIGCHLD, SIG_DFL);
@@ -172,6 +175,9 @@ ntp_main(int pipe_prnt[2], struct ntpd_conf *nconf)
 	peer_cnt = 0;
 	TAILQ_FOREACH(p, &conf->ntp_peers, entry)
 		peer_cnt++;
+
+	/* wait 5 min before reporting first status to let things settle down */
+	lastreport = time(NULL) + (5 * 60) - REPORT_INTERVAL;
 
 	while (ntp_quit == 0) {
 		if (peer_cnt > idx2peer_elms) {
@@ -223,11 +229,6 @@ ntp_main(int pipe_prnt[2], struct ntpd_conf *nconf)
 				if (client_query(p) == 0)
 					sent_cnt++;
 			}
-			if (p->next > 0 && p->next < nextaction)
-				nextaction = p->next;
-
-			if (p->deadline > 0 && p->deadline < nextaction)
-				nextaction = p->deadline;
 			if (p->deadline > 0 && p->deadline <= getmonotime()) {
 				timeout = error_interval();
 				log_debug("no reply from %s received in time, "
@@ -241,6 +242,19 @@ ntp_main(int pipe_prnt[2], struct ntpd_conf *nconf)
 				client_nextaddr(p);
 				set_next(p, timeout);
 			}
+			if (p->senderrors > MAX_SEND_ERRORS) {
+				log_debug("failed to send query to %s, "
+				    "next query %ds", log_sockaddr(
+				    (struct sockaddr *)&p->addr->ss),
+				    INTERVAL_QUERY_PATHETIC);
+				p->senderrors = 0;
+				client_nextaddr(p);
+				set_next(p, INTERVAL_QUERY_PATHETIC);
+			}
+			if (p->next > 0 && p->next < nextaction)
+				nextaction = p->next;
+			if (p->deadline > 0 && p->deadline < nextaction)
+				nextaction = p->deadline;
 
 			if (p->state == STATE_QUERY_SENT &&
 			    p->query->fd != -1) {
@@ -324,6 +338,8 @@ ntp_main(int pipe_prnt[2], struct ntpd_conf *nconf)
 			if (s->next <= getmonotime())
 				sensor_query(s);
 		}
+		report_peers(ntp_report);
+		ntp_report = 0;
 	}
 
 	msgbuf_write(&ibuf_main->w);
@@ -403,6 +419,9 @@ ntp_dispatch_imsg(void)
 					h->next = NULL;
 					npeer->addr = h;
 					npeer->addr_head.a = h;
+					npeer->addr_head.name =
+					    peer->addr_head.name;
+					npeer->addr_head.pool = 1;
 					client_peer_init(npeer);
 					npeer->state = STATE_DNS_DONE;
 					peer_add(npeer);
@@ -652,5 +671,61 @@ error_interval(void)
 	interval = INTERVAL_QUERY_PATHETIC * QSCALE_OFF_MAX / QSCALE_OFF_MIN;
 	r = arc4random() % (interval / 10);
 	return (interval + r);
+}
+
+void
+report_peers(int always)
+{
+	time_t now;
+	u_int badpeers = 0;
+	u_int badsensors = 0;
+	struct ntp_peer *p;
+	struct ntp_sensor *s;
+
+	TAILQ_FOREACH(p, &conf->ntp_peers, entry) {
+		if (p->trustlevel < TRUSTLEVEL_BADPEER)
+			badpeers++;
+	}
+	TAILQ_FOREACH(s, &conf->ntp_sensors, entry) {
+		if (!s->update.good)
+			badsensors++;
+	}
+
+	now = time(NULL);
+	if (!always) {
+		if ((peer_cnt == 0 || badpeers == 0 || badpeers < peer_cnt / 2)
+		    && (sensors_cnt == 0 || badsensors == 0 ||
+		    badsensors < sensors_cnt / 2))
+			return;
+
+		if (lastreport + REPORT_INTERVAL > now)
+			return;
+	}
+	lastreport = now;
+	if (peer_cnt > 0) {
+		log_warnx("%u out of %u peers valid", peer_cnt - badpeers,
+		    peer_cnt);
+		TAILQ_FOREACH(p, &conf->ntp_peers, entry) {
+			if (p->trustlevel < TRUSTLEVEL_BADPEER) {
+				const char *a = "not resolved";
+				const char *pool = "";
+				if (p->addr)
+					a = log_sockaddr(
+					    (struct sockaddr *)&p->addr->ss);
+				if (p->addr_head.pool)
+					pool = "from pool ";
+				log_warnx("bad peer %s%s (%s)",  pool,
+				    p->addr_head.name, a);
+			}
+		}
+	}
+	if (sensors_cnt > 0) {
+		log_warnx("%u out of %u sensors valid",
+		    sensors_cnt - badsensors, sensors_cnt);
+		TAILQ_FOREACH(s, &conf->ntp_sensors, entry) {
+			if (!s->update.good)
+				log_warnx("bad sensor %s", s->device);
+		}
+	}
 }
 

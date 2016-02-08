@@ -1,4 +1,4 @@
-/*	$OpenBSD: parse.y,v 1.4 2007/06/01 06:48:34 cnst Exp $ */
+/*	$OpenBSD: parse.y,v 1.13 2008/02/27 16:07:20 mpf Exp $ */
 
 /*
  * Copyright (c) 2006 Bob Beck <beck@openbsd.org>
@@ -33,6 +33,25 @@
 #include <stdio.h>
 #include <string.h>
 
+TAILQ_HEAD(files, file)		 files = TAILQ_HEAD_INITIALIZER(files);
+static struct file {
+	TAILQ_ENTRY(file)	 entry;
+	FILE			*stream;
+	char			*name;
+	int			 lineno;
+	int			 errors;
+} *file, *topfile;
+struct file	*pushfile(const char *);
+int		 popfile(void);
+int		 yyparse(void);
+int		 yylex(void);
+int		 yyerror(const char *, ...);
+int		 kw_cmp(const void *, const void *);
+int		 lookup(char *);
+int		 lgetc(int);
+int		 lungetc(int);
+int		 findeol(void);
+
 struct changer {
 	TAILQ_ENTRY(changer)	  entry;
 	char			 *name;
@@ -42,23 +61,9 @@ struct changer {
 TAILQ_HEAD(changers, changer)	 changers;
 struct changer			*curchanger;
 
-static FILE			*fin = NULL;
-static int			 lineno = 1;
-static int			 errors = 0;
-const char			*infile;
-
-int	 yyerror(const char *, ...);
-int	 yyparse(void);
-int	 kw_cmp(const void *, const void *);
-int	 lookup(char *);
-int	 lgetc(FILE *);
-int	 lungetc(int);
-int	 findeol(void);
-int	 yylex(void);
-
 typedef struct {
 	union {
-		u_int32_t		 number;
+		int64_t			 number;
 		char			*string;
 	} v;
 	int lineno;
@@ -70,12 +75,13 @@ typedef struct {
 %token	DRIVE
 %token	ERROR
 %token	<v.string>		STRING
+%token	<v.number>		NUMBER
 %%
 
 grammar		: /* empty */
 		| grammar '\n'
-		| grammar changer '\n'
-		| grammar error '\n'		{ errors++; }
+		| grammar main '\n'
+		| grammar error '\n'		{ file->errors++; }
 		;
 
 optnl		: '\n' optnl
@@ -85,7 +91,7 @@ optnl		: '\n' optnl
 nl		: '\n' optnl
 		;
 
-changer		: CHANGER STRING optnl '{' optnl {
+main		: CHANGER STRING optnl '{' optnl {
 			curchanger = new_changer($2);
 		}
 		    changeropts_l '}' {
@@ -131,9 +137,9 @@ yyerror(const char *fmt, ...)
 	va_list		 ap;
 	char		*nfmt;
 
-	errors = 1;
+	file->errors++;
 	va_start(ap, fmt);
-	if (asprintf(&nfmt, "%s:%d: %s", infile, yylval.lineno, fmt) == -1)
+	if (asprintf(&nfmt, "%s:%d: %s", file->name, yylval.lineno, fmt) == -1)
 		err(1, "yyerror asprintf");
 	err(1, nfmt, ap);
 	va_end(ap);
@@ -174,9 +180,9 @@ char	 pushback_buffer[MAXPUSHBACK];
 int	 pushback_index = 0;
 
 int
-lgetc(FILE *f)
+lgetc(int quotec)
 {
-	int	c, next;
+	int		c, next;
 
 	if (parsebuf) {
 		/* Read character from the parsebuffer instead of input. */
@@ -192,24 +198,32 @@ lgetc(FILE *f)
 	if (pushback_index)
 		return (pushback_buffer[--pushback_index]);
 
-	while ((c = getc(f)) == '\\') {
-		next = getc(f);
+	if (quotec) {
+		if ((c = getc(file->stream)) == EOF) {
+			yyerror("reached end of file while parsing "
+			    "quoted string");
+			if (file == topfile || popfile() == EOF)
+				return (EOF);
+			return (quotec);
+		}
+		return (c);
+	}
+
+	while ((c = getc(file->stream)) == '\\') {
+		next = getc(file->stream);
 		if (next != '\n') {
 			c = next;
 			break;
 		}
-		yylval.lineno = lineno;
-		lineno++;
-	}
-	if (c == '\t' || c == ' ') {
-		/* Compress blanks to a single space. */
-		do {
-			c = getc(f);
-		} while (c == '\t' || c == ' ');
-		ungetc(c, f);
-		c = ' ';
+		yylval.lineno = file->lineno;
+		file->lineno++;
 	}
 
+	while (c == EOF) {
+		if (file == topfile || popfile() == EOF)
+			return (EOF);
+		c = getc(file->stream);
+	}
 	return (c);
 }
 
@@ -239,9 +253,9 @@ findeol(void)
 
 	/* skip to either EOF or the first real EOL */
 	while (1) {
-		c = lgetc(fin);
+		c = lgetc(0);
 		if (c == '\n') {
-			lineno++;
+			file->lineno++;
 			break;
 		}
 		if (c == EOF)
@@ -255,32 +269,40 @@ yylex(void)
 {
 	char	 buf[8096];
 	char	*p;
-	int	 endc, c;
+	int	 quotec, next, c;
 	int	 token;
 
 	p = buf;
-	while ((c = lgetc(fin)) == ' ')
+	while ((c = lgetc(0)) == ' ' || c == '\t')
 		; /* nothing */
 
-	yylval.lineno = lineno;
+	yylval.lineno = file->lineno;
 	if (c == '#')
-		while ((c = lgetc(fin)) != '\n' && c != EOF)
+		while ((c = lgetc(0)) != '\n' && c != EOF)
 			; /* nothing */
 
 	switch (c) {
 	case '\'':
 	case '"':
-		endc = c;
+		quotec = c;
 		while (1) {
-			if ((c = lgetc(fin)) == EOF)
+			if ((c = lgetc(quotec)) == EOF)
 				return (0);
-			if (c == endc) {
+			if (c == '\n') {
+				file->lineno++;
+				continue;
+			} else if (c == '\\') {
+				if ((next = lgetc(quotec)) == EOF)
+					return (0);
+				if (next == quotec || c == ' ' || c == '\t')
+					c = next;
+				else if (next == '\n')
+					continue;
+				else
+					lungetc(next);
+			} else if (c == quotec) {
 				*p = '\0';
 				break;
-			}
-			if (c == '\n') {
-				lineno++;
-				continue;
 			}
 			if (p + 1 >= buf + sizeof(buf) - 1) {
 				yyerror("string too long");
@@ -292,6 +314,42 @@ yylex(void)
 		if (yylval.v.string == NULL)
 			err(1, "yylex: strdup");
 		return (STRING);
+	}
+
+#define allowed_to_end_number(x) \
+	(isspace(x) || x == ')' || x ==',' || x == '/' || x == '}' || x == '=')
+
+	if (c == '-' || isdigit(c)) {
+		do {
+			*p++ = c;
+			if ((unsigned)(p-buf) >= sizeof(buf)) {
+				yyerror("string too long");
+				return (findeol());
+			}
+		} while ((c = lgetc(0)) != EOF && isdigit(c));
+		lungetc(c);
+		if (p == buf + 1 && buf[0] == '-')
+			goto nodigits;
+		if (c == EOF || allowed_to_end_number(c)) {
+			const char *errstr = NULL;
+
+			*p = '\0';
+			yylval.v.number = strtonum(buf, LLONG_MIN,
+			    LLONG_MAX, &errstr);
+			if (errstr) {
+				yyerror("\"%s\" invalid number: %s",
+				    buf, errstr);
+				return (findeol());
+			}
+			return (NUMBER);
+		} else {
+nodigits:
+			while (p > buf + 1)
+				lungetc(*--p);
+			c = *--p;
+			if (c == '-')
+				return (c);
+		}
 	}
 
 #define allowed_in_string(x) \
@@ -307,7 +365,7 @@ yylex(void)
 				yyerror("string too long");
 				return (findeol());
 			}
-		} while ((c = lgetc(fin)) != EOF && (allowed_in_string(c)));
+		} while ((c = lgetc(0)) != EOF && (allowed_in_string(c)));
 		lungetc(c);
 		*p = '\0';
 		if ((token = lookup(buf)) == STRING)
@@ -316,32 +374,66 @@ yylex(void)
 		return (token);
 	}
 	if (c == '\n') {
-		yylval.lineno = lineno;
-		lineno++;
+		yylval.lineno = file->lineno;
+		file->lineno++;
 	}
 	if (c == EOF)
 		return (0);
 	return (c);
 }
 
+struct file *
+pushfile(const char *name)
+{
+	struct file	*nfile;
+
+	if ((nfile = calloc(1, sizeof(struct file))) == NULL ||
+	    (nfile->name = strdup(name)) == NULL)
+		return (NULL);
+	if ((nfile->stream = fopen(nfile->name, "r")) == NULL) {
+		free(nfile->name);
+		free(nfile);
+		return (NULL);
+	}
+	nfile->lineno = 1;
+	TAILQ_INSERT_TAIL(&files, nfile, entry);
+	return (nfile);
+}
+
+int
+popfile(void)
+{
+	struct file	*prev;
+
+	if ((prev = TAILQ_PREV(file, files, entry)) != NULL)
+		prev->errors += file->errors;
+
+	TAILQ_REMOVE(&files, file, entry);
+	fclose(file->stream);
+	free(file->name);
+	free(file);
+	file = prev;
+	return (file ? 0 : EOF);
+}
+
 char *
 parse_tapedev(const char *filename, const char *changer, int drive)
 {
 	struct changer	*p;
-	char *tapedev = NULL;
+	char		*tapedev = NULL;
+	int		 errors = 0;
 
-	lineno = 1;
-	errors = 0;
 	TAILQ_INIT(&changers);
 
-	if ((fin = fopen(filename, "r")) == NULL)
+	if ((file = pushfile(filename)) == NULL) {
+		warnx("cannot open the main config file!");
 		goto guess;
-
-	infile = filename;
+	}
+	topfile = file;
 
 	yyparse();
-
-	fclose(fin);
+	errors = file->errors;
+	popfile();
 
 	TAILQ_FOREACH(p, &changers, entry) {
 		if (strcmp(basename(changer), p->name) == 0) {

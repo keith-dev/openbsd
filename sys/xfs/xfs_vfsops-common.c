@@ -88,7 +88,7 @@ xfs_mount_common_sys(struct mount *mp,
 	mp->mnt_flag & MNT_DELEXPORT) {
 
 	NNPFSDEB(XDEBVFOPS, 
-	       ("xfs_mount: ignoreing MNT_UPDATE or MNT_DELEXPORT\n"));
+	       ("xfs_mount: ignoring MNT_UPDATE or MNT_DELEXPORT\n"));
 	return 0;
     }
 #endif
@@ -165,12 +165,10 @@ xfs_mount_common_sys(struct mount *mp,
     mp->mnt_stat.f_fsid.val[0] = dev;
     mp->mnt_stat.f_fsid.val[1] = MOUNT_NNPFS;
 	
-    MALLOC(mp->m_stat.f_mntonname, char *, strlen(path) + 1, 
-	   M_PATHNAME, M_WAITOK);
+    mp->m_stat.f_mntonname = malloc(strlen(path) + 1, M_PATHNAME, M_WAITOK);
     strcpy(mp->m_stat.f_mntonname, path);
 
-    MALLOC(mp->m_stat.f_mntfromname, char *, sizeof("arla"),
-	   M_PATHNAME, M_WAITOK);
+    mp->m_stat.f_mntfromname = malloc(sizeof("arla"), M_PATHNAME, M_WAITOK);
     strcpy(mp->m_stat.f_mntfromname, "arla");
 #else /* __osf__ */
     strncpy(mp->mnt_stat.f_mntonname,

@@ -1,4 +1,4 @@
-/*	$OpenBSD: split.c,v 1.13 2006/08/10 22:44:17 millert Exp $	*/
+/*	$OpenBSD: split.c,v 1.16 2007/10/20 18:08:57 sobrado Exp $	*/
 /*	$NetBSD: split.c,v 1.5 1995/08/31 22:22:05 jtc Exp $	*/
 
 /*
@@ -40,7 +40,7 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)split.c	8.3 (Berkeley) 4/25/94";
 #else
-static char rcsid[] = "$OpenBSD: split.c,v 1.13 2006/08/10 22:44:17 millert Exp $";
+static char rcsid[] = "$OpenBSD: split.c,v 1.16 2007/10/20 18:08:57 sobrado Exp $";
 #endif
 #endif /* not lint */
 
@@ -244,6 +244,9 @@ split2(void)
 	while (fgets(bfr, sizeof(bfr), infp) != NULL) {
 		const int len = strlen(bfr);
 
+		if (len == 0)
+			continue;
+
 		/* If line is too long to deal with, just write it out */
 		if (bfr[len - 1] != '\n')
 			goto writeit;
@@ -286,44 +289,32 @@ void
 newfile(void)
 {
 	static char *suffix, *sufftail;
-	static int defname;
+	char *sptr;
 
 	if (ofd == -1) {
-		if (fname[0] == '\0') {
-			fname[0] = 'x';
-			suffix = fname + 1;
-			defname = 1;
+		ofd = fileno(stdout);
+		if (*fname == '\0') {
+			*fname = 'x';	/* no name specified, use 'x' */
+			memset(fname + 1, 'a', sufflen);
+			suffix = fname;
+			sufflen++;	/* treat 'x' as part of suffix */
 		} else {
 			suffix = fname + strlen(fname);
-			defname = 0;
+			memset(suffix, 'a', sufflen);
 		}
-		memset(suffix, 'a', sufflen);
 		suffix[sufflen] = '\0';
 		sufftail = suffix + sufflen - 1;
-		--sufftail[0];		/* incremented later */
-		ofd = fileno(stdout);
-	}
-
-	if (sufftail[0] == 'z') {
-		int i;
-
-		/* Increment the non-tail portion of the suffix. */
-		for (i = sufflen - 2; i >= 0; i--) {
-			if (suffix[i] != 'z') {
-				suffix[i]++;
+	} else {
+		for (sptr = sufftail; sptr >= suffix; sptr--) {
+			if (*sptr != 'z') {
+				(*sptr)++;
 				break;
-			}
+			} else
+				*sptr = 'a';
 		}
-		if (i < 0) {
-			/* Hack to support y and z prefix if no name spec'd. */
-			if (!defname || fname[0] == 'z')
-				errx(EX_DATAERR, "too many files");
-			++fname[0];
-			memset(suffix, 'a', sufflen);
-		} else
-			sufftail[0] = 'a';	/* reset tail */
-	} else
-		++sufftail[0];
+		if (sptr < suffix)
+			errx(EX_DATAERR, "too many files");
+	}
 
 	if (!freopen(fname, "w", stdout))
 		err(EX_IOERR, "%s", fname);
@@ -335,8 +326,8 @@ usage(void)
 {
 	extern char *__progname;
 
-	(void)fprintf(stderr, "usage: %s [-a suffix_length] "
-	    "[-b byte_count[k|m] | -l line_count | -p pattern] [file [name]]\n",
-	    __progname);
+	(void)fprintf(stderr, "usage: %s [-a suffix_length]\n"
+	    "             [-b byte_count[k|m] | -l line_count | -p pattern] "
+	    "[file [name]]\n", __progname);
 	exit(EX_USAGE);
 }

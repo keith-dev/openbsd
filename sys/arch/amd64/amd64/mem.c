@@ -1,4 +1,4 @@
-/*	$OpenBSD: mem.c,v 1.6 2007/01/15 23:19:05 jsg Exp $ */
+/*	$OpenBSD: mem.c,v 1.9 2007/11/03 22:23:35 mikeb Exp $ */
 /*
  * Copyright (c) 1988 University of Utah.
  * Copyright (c) 1982, 1986, 1990, 1993
@@ -46,12 +46,17 @@
 #include <sys/param.h>
 #include <sys/buf.h>
 #include <sys/systm.h>
+#include <sys/conf.h>
+#include <sys/exec.h>
 #include <sys/uio.h>
 #include <sys/ioccom.h>
 #include <sys/malloc.h>
 #include <sys/memrange.h>
 #include <sys/proc.h>
 #include <sys/fcntl.h>
+#ifdef LKM
+#include <sys/lkm.h>
+#endif
 
 #include <machine/cpu.h>
 #include <machine/conf.h>
@@ -60,6 +65,10 @@
 
 caddr_t zeropage;
 extern int start, end, etext;
+
+#ifdef LKM
+extern vaddr_t lkm_start, lkm_end;
+#endif
 
 /* open counter for aperture */
 #ifdef APERTURE
@@ -143,6 +152,13 @@ mmrw(dev_t dev, struct uio *uio, int flags)
                                 if (v < (vaddr_t)&etext &&
                                     uio->uio_rw == UIO_WRITE)
                                         return EFAULT;
+#ifdef LKM
+			} else if (v >= lkm_start && v < lkm_end) {
+				if (!uvm_map_checkprot(lkm_map, v, v + c,
+				    uio->uio_rw == UIO_READ ?
+				    UVM_PROT_READ: UVM_PROT_WRITE))
+					return (EFAULT);
+#endif
                         } else if ((!uvm_kernacc((caddr_t)v, c,
 			    uio->uio_rw == UIO_READ ? B_READ : B_WRITE)) &&
 			    (v < PMAP_DIRECT_BASE && v > PMAP_DIRECT_END))
@@ -162,11 +178,9 @@ mmrw(dev_t dev, struct uio *uio, int flags)
 				c = iov->iov_len;
 				break;
 			}
-			if (zeropage == NULL) {
+			if (zeropage == NULL)
 				zeropage = (caddr_t)
-				    malloc(PAGE_SIZE, M_TEMP, M_WAITOK);
-				bzero(zeropage, PAGE_SIZE);
-			}
+				    malloc(PAGE_SIZE, M_TEMP, M_WAITOK|M_ZERO);
 			c = min(iov->iov_len, PAGE_SIZE);
 			error = uiomove(zeropage, c, uio);
 			continue;
@@ -191,7 +205,7 @@ mmmmap(dev_t dev, off_t off, int prot)
 	switch (minor(dev)) {
 /* minor device 0 is physical memory */
 	case 0:
-		if ((paddr_t)off > (paddr_t)ctob(physmem) && suser(p, 0) != 0)
+		if ((paddr_t)off > (paddr_t)ptoa(physmem) && suser(p, 0) != 0)
 			return -1;
 		return atop(off);
 
@@ -202,7 +216,7 @@ mmmmap(dev_t dev, off_t off, int prot)
 		case 1:
 			/* Allow mapping of the VGA framebuffer & BIOS only */
 			if ((off >= VGA_START && off <= BIOS_END) ||
-			    (unsigned)off > (unsigned)ctob(physmem))
+			    (unsigned)off > (unsigned)ptoa(physmem))
 				return atop(off);
 			else
 				return -1;
@@ -210,7 +224,7 @@ mmmmap(dev_t dev, off_t off, int prot)
 			/* Allow mapping of the whole 1st megabyte 
 			   for x86emu */
 			if (off <= BIOS_END || 
-			    (unsigned)off > (unsigned)ctob(physmem))
+			    (unsigned)off > (unsigned)ptoa(physmem))
 				return atop(off);
 			else 
 				return -1;

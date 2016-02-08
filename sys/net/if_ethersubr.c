@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_ethersubr.c,v 1.110 2007/06/06 10:04:36 henning Exp $	*/
+/*	$OpenBSD: if_ethersubr.c,v 1.114 2008/02/05 22:57:30 mpf Exp $	*/
 /*	$NetBSD: if_ethersubr.c,v 1.19 1996/05/07 02:40:30 thorpej Exp $	*/
 
 /*
@@ -367,11 +367,8 @@ ether_output(ifp0, m0, dst, rt0)
 		    sizeof(eh->ether_shost));
 
 #if NCARP > 0
-	if (ifp0 != ifp && ifp0->if_type == IFT_CARP &&
-	    !(ifp0->if_flags & IFF_LINK1)) {
-		bcopy((caddr_t)((struct arpcom *)ifp0)->ac_enaddr,
-		    (caddr_t)eh->ether_shost, sizeof(eh->ether_shost));
-	}
+	if (ifp0 != ifp && ifp0->if_type == IFT_CARP)
+	    carp_rewrite_lladdr(ifp0, eh->ether_shost);
 #endif
 
 #if NBRIDGE > 0
@@ -567,12 +564,10 @@ ether_input(ifp, eh, m)
 		    (carp_input(m, (u_int8_t *)&eh->ether_shost,
 		    (u_int8_t *)&eh->ether_dhost, eh->ether_type) == 0))
 			return;
-		/* Always clear multicast flags if received on a carp address */
+		/* clear mcast if received on a carp IP balanced address */
 		else if (ifp->if_type == IFT_CARP &&
-		    ifp->if_flags & IFF_LINK2 &&
 		    m->m_flags & (M_BCAST|M_MCAST) &&
-		    !bcmp(((struct arpcom *)ifp)->ac_enaddr,
-		    (caddr_t)eh->ether_dhost, ETHER_ADDR_LEN))
+		    carp_our_mcastaddr(ifp, (u_int8_t *)&eh->ether_dhost))
 			m->m_flags &= ~(M_BCAST|M_MCAST);
 	}
 #endif /* NCARP > 0 */
@@ -600,6 +595,10 @@ ether_input(ifp, eh, m)
 		}
 	}
 
+	/*
+	 * Schedule softnet interrupt and enqueue packet within the same spl.
+	 */
+	s = splnet();
 decapsulate:
 
 	switch (etype) {
@@ -620,7 +619,7 @@ decapsulate:
 		if (ifp->if_flags & IFF_NOARP)
 			goto dropanyway;
 		revarpinput(m);	/* XXX queue? */
-		return;
+		goto done;
 
 #endif
 #ifdef INET6
@@ -641,7 +640,7 @@ decapsulate:
 		/* probably this should be done with a NETISR as well */
 		/* XXX queue this */
 		aarpinput((struct arpcom *)ifp, m);
-		return;
+		goto done;
 #endif
 #if NPPPOE > 0
 	case ETHERTYPE_PPPOEDISC:
@@ -650,18 +649,18 @@ decapsulate:
 		/*
 		if (m->m_flags & M_PROMISC) {
 			m_freem(m);
-			return;
+			goto done;
 		}
 		*/
 #ifndef PPPOE_SERVER
 		if (m->m_flags & (M_MCAST | M_BCAST)) {
 			m_freem(m);
-			return;
+			goto done;
 		}
 #endif
 		M_PREPEND(m, sizeof(*eh), M_DONTWAIT);
 		if (m == NULL)
-			return;
+			goto done;
 
 		eh_tmp = mtod(m, struct ether_header *);
 		bcopy(eh, eh_tmp, sizeof(struct ether_header));
@@ -708,7 +707,7 @@ decapsulate:
 				m_adj(m, AT_LLC_SIZE);
 				/* XXX Really this should use netisr too */
 				aarpinput((struct arpcom *)ifp, m);
-				return;
+				goto done;
 			}
 #endif /* NETATALK */
 			if (l->llc_control == LLC_UI &&
@@ -722,7 +721,7 @@ decapsulate:
 				m->m_pkthdr.len -= 6;	/* XXX */
 				M_PREPEND(m, sizeof(*eh), M_DONTWAIT);
 				if (m == 0)
-					return;
+					goto done;
 				*mtod(m, struct ether_header *) = *eh;
 				goto decapsulate;
 			}
@@ -730,12 +729,12 @@ decapsulate:
 		dropanyway:
 		default:
 			m_freem(m);
-			return;
+			goto done;
 		}
 	}
 
-	s = splnet();
 	IF_INPUT_ENQUEUE(inq, m);
+done:
 	splx(s);
 }
 
@@ -1052,7 +1051,7 @@ ether_addmulti(ifr, ac)
 	 * New address or range; malloc a new multicast record
 	 * and link it into the interface's multicast list.
 	 */
-	enm = (struct ether_multi *)malloc(sizeof(*enm), M_IFMADDR, M_NOWAIT);
+	enm = malloc(sizeof(*enm), M_IFMADDR, M_NOWAIT);
 	if (enm == NULL) {
 		splx(s);
 		return (ENOBUFS);

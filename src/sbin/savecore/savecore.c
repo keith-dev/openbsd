@@ -1,4 +1,4 @@
-/*	$OpenBSD: savecore.c,v 1.42 2005/01/07 21:57:10 millert Exp $	*/
+/*	$OpenBSD: savecore.c,v 1.44 2007/09/14 14:29:20 chl Exp $	*/
 /*	$NetBSD: savecore.c,v 1.26 1996/03/18 21:16:05 leo Exp $	*/
 
 /*-
@@ -40,7 +40,7 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)savecore.c	8.3 (Berkeley) 1/2/94";
 #else
-static char rcsid[] = "$OpenBSD: savecore.c,v 1.42 2005/01/07 21:57:10 millert Exp $";
+static char rcsid[] = "$OpenBSD: savecore.c,v 1.44 2007/09/14 14:29:20 chl Exp $";
 #endif
 #endif /* not lint */
 
@@ -312,14 +312,9 @@ check_kmem(void)
 	core_vers[sizeof(core_vers) - 1] = '\0';
 
 	if (strcmp(vers, core_vers) && kernel == 0) {
-		char *p;
+		vers[strcspn(vers, "\n")] = '\0';
+		core_vers[strcspn(core_vers, "\n")] = '\0';
 
-		p = strchr(vers, '\n');
-		if (p)
-			*p = '\0';
-		p = strchr(core_vers, '\n');
-		if (p)
-			*p = '\0';
 		syslog(LOG_WARNING,
 		    "warning: %s version mismatch:\n\t%s\nand\t%s\n",
 		    _PATH_UNIX, vers, core_vers);

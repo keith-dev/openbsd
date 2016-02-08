@@ -1,4 +1,4 @@
-/*	$OpenBSD: vm_machdep.c,v 1.15 2007/06/20 17:29:36 miod Exp $	*/
+/*	$OpenBSD: vm_machdep.c,v 1.23 2008/01/04 00:40:38 kettenis Exp $	*/
 /*	$NetBSD: vm_machdep.c,v 1.38 2001/06/30 00:02:20 eeh Exp $ */
 
 /*
@@ -227,11 +227,8 @@ cpu_fork(p1, p2, stack, stacksize, func, arg)
 	opcb->lastcall = NULL;
 #endif
 	bcopy((caddr_t)opcb, (caddr_t)npcb, sizeof(struct pcb));
-       	if (p1->p_md.md_fpstate) {
-		if (p1 == fpproc) {
-			savefpstate(p1->p_md.md_fpstate);
-			fpproc = NULL;
-		}
+	if (p1->p_md.md_fpstate) {
+		fpusave_proc(p1, 1);
 		p2->p_md.md_fpstate = malloc(sizeof(struct fpstate64),
 		    M_SUBPROC, M_WAITOK);
 		bcopy(p1->p_md.md_fpstate, p2->p_md.md_fpstate,
@@ -286,50 +283,105 @@ cpu_fork(p1, p2, stack, stacksize, func, arg)
 	npcb->pcb_pc = (long)proc_trampoline - 8;
 	npcb->pcb_sp = (long)rp - STACK_OFFSET;
 
-	/* Need to create a %tstate if we're forking from proc0 */
+	/* Need to create a %tstate if we're forking from proc0. */
 	if (p1 == &proc0)
-		tf2->tf_tstate = (ASI_PRIMARY_NO_FAULT<<TSTATE_ASI_SHIFT) |
-			((PSTATE_USER)<<TSTATE_PSTATE_SHIFT);
+		tf2->tf_tstate =
+		    ((u_int64_t)ASI_PRIMARY_NO_FAULT << TSTATE_ASI_SHIFT) |
+		    ((PSTATE_USER) << TSTATE_PSTATE_SHIFT);
 	else
-		/* clear condition codes and disable FPU */
+		/* Clear condition codes and disable FPU. */
 		tf2->tf_tstate &=
-		    ~((PSTATE_PEF<<TSTATE_PSTATE_SHIFT)|TSTATE_CCR);
+		    ~((PSTATE_PEF << TSTATE_PSTATE_SHIFT) | TSTATE_CCR);
 
 #ifdef NOTDEF_DEBUG
 	printf("cpu_fork: Copying over trapframe: otf=%p ntf=%p sp=%p opcb=%p npcb=%p\n", 
-	       (struct trapframe *)((int)opcb + USPACE - sizeof(*tf2)), tf2, rp, opcb, npcb);
-	printf("cpu_fork: tstate=%x:%x pc=%x:%x npc=%x:%x rsp=%x\n",
-	       (long)(tf2->tf_tstate>>32), (long)tf2->tf_tstate, 
-	       (long)(tf2->tf_pc>>32), (long)tf2->tf_pc,
-	       (long)(tf2->tf_npc>>32), (long)tf2->tf_npc, 
+	       (struct trapframe *)((char *)opcb + USPACE - sizeof(*tf2)), tf2, rp, opcb, npcb);
+	printf("cpu_fork: tstate=%lx pc=%lx npc=%lx rsp=%lx\n",
+	       (long)tf2->tf_tstate, (long)tf2->tf_pc, (long)tf2->tf_npc,
 	       (long)(tf2->tf_out[6]));
 	Debugger();
 #endif
 }
 
 /*
+ * These are the "function" entry points in locore.s to handle IPI's.
+ */
+void	ipi_save_fpstate(void);
+void	ipi_drop_fpstate(void);
+
+void
+fpusave_cpu(struct cpu_info *ci, int save)
+{
+	struct proc *p;
+
+	KDASSERT(ci == curcpu());
+
+	p = ci->ci_fpproc;
+	if (p == NULL)
+		return;
+
+	if (save)
+		savefpstate(p->p_md.md_fpstate);
+	else
+		clearfpstate();
+
+	ci->ci_fpproc = NULL;
+}
+
+void
+fpusave_proc(struct proc *p, int save)
+{
+	struct cpu_info *ci = curcpu();
+
+#ifdef MULTIPROCESSOR
+	if (p == ci->ci_fpproc) {
+		u_int64_t s = intr_disable();
+		fpusave_cpu(ci, save);
+		intr_restore(s);
+		return;
+	}
+
+	for (ci = cpus; ci != NULL; ci = ci->ci_next) {
+		int spincount = 0;
+
+		if (ci == curcpu())
+			continue;
+		if (ci->ci_fpproc != p)
+			continue;
+		sparc64_send_ipi(ci->ci_upaid,
+		    save ? ipi_save_fpstate : ipi_drop_fpstate, (vaddr_t)p, 0);
+		while(ci->ci_fpproc == p) {
+			spincount++;
+			if (spincount > 10000000) {
+				panic("ipi_save_fpstate didn't");
+			}
+			sparc_membar(Sync);
+		}
+		break;
+	}
+#else
+	if (p == ci->ci_fpproc)
+		fpusave_cpu(ci, save);
+#endif
+}
+
+/*
  * cpu_exit is called as the last action during exit.
  *
- * We clean up a little and then call switchexit() with the old proc
- * as an argument.  switchexit() switches to the idle context, schedules
- * the old vmspace and stack to be freed, then selects a new process to
- * run.
+ * We clean up a little and then call sched_exit() with the old proc
+ * as an argument.  sched_exit() schedules the old vmspace and stack
+ * to be freed, then selects a new process to run.
  */
 void
-cpu_exit(p)
-	struct proc *p;
+cpu_exit(struct proc *p)
 {
-	register struct fpstate64 *fs;
-
-	if ((fs = p->p_md.md_fpstate) != NULL) {
-		if (p == fpproc) {
-			savefpstate(fs);
-			fpproc = NULL;
-		}
-		free((void *)fs, M_SUBPROC);
+	if (p->p_md.md_fpstate != NULL) {
+		fpusave_proc(p, 0);
+		free(p->p_md.md_fpstate, M_SUBPROC);
 	}
-	switchexit(p);
-	/* NOTREACHED */
+
+	pmap_deactivate(p);
+	sched_exit(p);
 }
 
 /*
@@ -355,10 +407,7 @@ cpu_coredump(p, vp, cred, chdr)
 	md_core.md_tf = *p->p_md.md_tf;
 	md_core.md_wcookie = p->p_addr->u_pcb.pcb_wcookie;
 	if (p->p_md.md_fpstate) {
-		if (p == fpproc) {
-			savefpstate(p->p_md.md_fpstate);
-			fpproc = NULL;
-		}
+		fpusave_proc(p, 1);
 		md_core.md_fpstate = *p->p_md.md_fpstate;
 	} else
 		bzero((caddr_t)&md_core.md_fpstate, 

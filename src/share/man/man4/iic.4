@@ -1,4 +1,4 @@
-.\"	$OpenBSD: iic.4,v 1.58 2007/05/31 19:19:50 jmc Exp $
+.\"	$OpenBSD: iic.4,v 1.67 2008/02/12 10:12:14 robert Exp $
 .\"
 .\" Copyright (c) 2004, 2006 Alexander Yurchenko <grange@openbsd.org>
 .\"
@@ -14,7 +14,7 @@
 .\" ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
 .\" OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 .\"
-.Dd $Mdocdate: May 31 2007 $
+.Dd $Mdocdate: February 12 2008 $
 .Dt IIC 4
 .Os
 .Sh NAME
@@ -104,6 +104,8 @@ VIA SMBus controller
 .Bl -tag -width 13n -compact
 .It Xr adc 4
 Analog Devices AD7416/AD7417/7418 temperature sensor
+.It Xr adl 4
+Andigilog aSC7621 temperature, voltage, and fan sensor
 .It Xr admcts 4
 Analog Devices ADM1026 temperature and voltage sensor
 .It Xr admlc 4
@@ -122,6 +124,8 @@ Analog Devices ADT7460 temperature, voltage, and fan sensor
 Asus ASB 100 temperature sensor
 .It Xr asms 4
 Apple sudden motion sensor
+.It Xr ecadc 4
+Environmental Monitoring Subsystem temperature sensor
 .It Xr fcu 4
 Apple Fan Control Unit sensor device
 .It Xr fintek 4
@@ -132,6 +136,8 @@ Genesys Logic GL518SM temperature, voltage, and fan sensor
 National Semiconductor LM78/79/81 temperature, voltage, and fan sensor
 .It Xr lmenv 4
 National Semiconductor LM87 temperature, voltage, and fan sensor
+.It Xr lmn 4
+National Semiconductor LM93 temperature, voltage, and fan sensor
 .It Xr lmtemp 4
 National Semiconductor LM75/LM77 temperature sensor
 .It Xr maxds 4
@@ -141,15 +147,23 @@ Maxim MAX6642/MAX6690 temperature sensor
 .It Xr pcagpio 4
 Philips PCA955[467] GPIO controller
 .It Xr pcaled 4
-Philips PCA9532 LED dimmer
+Philips PCA9532 GPIO LED dimmer
 .It Xr pcfadc 4
 Philips PCF8591 temperature sensor
 .It Xr ricohrtc 4
 Ricoh RS5C372 Real Time Clock
+.It Xr spdmem 4
+Serial Presence Detect memory
+.It Xr tda 4
+Philips TDA8444 fan controller
+.It Xr thmc 4
+TI THMC50, Analog ADM1022/1028 temperature sensor
 .It Xr tsl 4
 TAOS TSL2560/61 light sensor
 .It Xr wbenv 4
 Winbond W83L784R/W83L785R/W83L785TS-L temperature, voltage, and fan sensor
+.It Xr wbng 4
+Winbond W83793G temperature, voltage, and fan sensor
 .El
 .Sh SEE ALSO
 .Xr intro 4 ,

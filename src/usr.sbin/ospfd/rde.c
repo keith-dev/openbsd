@@ -1,4 +1,4 @@
-/*	$OpenBSD: rde.c,v 1.69 2007/07/25 19:11:27 claudio Exp $ */
+/*	$OpenBSD: rde.c,v 1.73 2008/02/11 12:37:37 norby Exp $ */
 
 /*
  * Copyright (c) 2004, 2005 Claudio Jeker <claudio@openbsd.org>
@@ -60,7 +60,7 @@ struct lsa	*rde_asext_get(struct rroute *);
 struct lsa	*rde_asext_put(struct rroute *);
 
 struct lsa	*orig_asext_lsa(struct rroute *, u_int16_t);
-struct lsa	*orig_sum_lsa(struct rt_node *, u_int8_t, int);
+struct lsa	*orig_sum_lsa(struct rt_node *, struct area *, u_int8_t, int);
 
 struct ospfd_conf	*rdeconf = NULL, *nconf = NULL;
 struct imsgbuf		*ibuf_ospfe;
@@ -501,7 +501,7 @@ rde_dispatch_imsg(int fd, short event, void *bula)
 		case IMSG_CTL_SHOW_DB_ASBR:
 			if (imsg.hdr.len != IMSG_HEADER_SIZE &&
 			    imsg.hdr.len != IMSG_HEADER_SIZE + sizeof(aid)) {
-				log_warnx("rde_dispatch: wrong imsg len");
+				log_warnx("rde_dispatch_imsg: wrong imsg len");
 				break;
 			}
 			if (imsg.hdr.len == IMSG_HEADER_SIZE) {
@@ -553,7 +553,7 @@ rde_dispatch_imsg(int fd, short event, void *bula)
 			    NULL, 0);
 			break;
 		default:
-			log_debug("rde_dispatch_msg: unexpected imsg %d",
+			log_debug("rde_dispatch_imsg: unexpected imsg %d",
 			    imsg.hdr.type);
 			break;
 		}
@@ -609,7 +609,8 @@ rde_dispatch_parent(int fd, short event, void *bula)
 		switch (imsg.hdr.type) {
 		case IMSG_NETWORK_ADD:
 			if (imsg.hdr.len != IMSG_HEADER_SIZE + sizeof(rr)) {
-				log_warnx("rde_dispatch: wrong imsg len");
+				log_warnx("rde_dispatch_parent: "
+				    "wrong imsg len");
 				break;
 			}
 			memcpy(&rr, imsg.data, sizeof(rr));
@@ -623,7 +624,8 @@ rde_dispatch_parent(int fd, short event, void *bula)
 			break;
 		case IMSG_NETWORK_DEL:
 			if (imsg.hdr.len != IMSG_HEADER_SIZE + sizeof(rr)) {
-				log_warnx("rde_dispatch: wrong imsg len");
+				log_warnx("rde_dispatch_parent: "
+				    "wrong imsg len");
 				break;
 			}
 			memcpy(&rr, imsg.data, sizeof(rr));
@@ -642,7 +644,8 @@ rde_dispatch_parent(int fd, short event, void *bula)
 			break;
 		case IMSG_KROUTE_GET:
 			if (imsg.hdr.len != IMSG_HEADER_SIZE + sizeof(kr)) {
-				log_warnx("rde_dispatch: wrong imsg len");
+				log_warnx("rde_dispatch_parent: "
+				    "wrong imsg len");
 				break;
 			}
 			memcpy(&kr, imsg.data, sizeof(kr));
@@ -717,23 +720,31 @@ rde_router_id(void)
 void
 rde_send_change_kroute(struct rt_node *r)
 {
-	struct kroute	 	 kr;
+	int			 krcount = 0;
+	struct kroute		 kr;
 	struct rt_nexthop	*rn;
+	struct buf		*wbuf;
+
+	if ((wbuf = imsg_create(ibuf_main, IMSG_KROUTE_CHANGE, 0, 0,
+	    sizeof(kr))) == NULL) {
+		return;
+	}
 
 	TAILQ_FOREACH(rn, &r->nexthop, entry) {
-		if (!rn->invalid)
-			break;
+		if (rn->invalid)
+			continue;
+		krcount++;
+
+		bzero(&kr, sizeof(kr));
+		kr.prefix.s_addr = r->prefix.s_addr;
+		kr.nexthop.s_addr = rn->nexthop.s_addr;
+		kr.prefixlen = r->prefixlen;
+		kr.ext_tag = r->ext_tag;
+		imsg_add(wbuf, &kr, sizeof(kr));
 	}
-	if (!rn)
+	if (krcount == 0)
 		fatalx("rde_send_change_kroute: no valid nexthop found");
-
-	bzero(&kr, sizeof(kr));
-	kr.prefix.s_addr = r->prefix.s_addr;
-	kr.nexthop.s_addr = rn->nexthop.s_addr;
-	kr.prefixlen = r->prefixlen;
-	kr.ext_tag = r->ext_tag;
-
-	imsg_compose(ibuf_main, IMSG_KROUTE_CHANGE, 0, 0, &kr, sizeof(kr));
+	imsg_close(ibuf_main, wbuf);
 }
 
 void
@@ -1038,7 +1049,7 @@ rde_asext_get(struct rroute *rr)
 struct lsa *
 rde_asext_put(struct rroute *rr)
 {
-	/* 
+	/*
 	 * just try to remove the LSA. If the prefix is announced as
 	 * stub net LSA lsa_find() will fail later and nothing will happen.
 	 */
@@ -1085,13 +1096,13 @@ rde_summary_update(struct rt_node *rte, struct area *area)
 
 	/* update lsa but only if it was changed */
 	v = lsa_find(area, type, rte->prefix.s_addr, rde_router_id());
-	lsa = orig_sum_lsa(rte, type, rte->invalid);
+	lsa = orig_sum_lsa(rte, area, type, rte->invalid);
 	lsa_merge(rde_nbr_self(area), lsa, v);
 
 	if (v == NULL)
 		v = lsa_find(area, type, rte->prefix.s_addr, rde_router_id());
 
-	/* suppressed/deleted routes are not found in the second lsa_find */ 
+	/* suppressed/deleted routes are not found in the second lsa_find */
 	if (v)
 		v->cost = rte->cost;
 }
@@ -1115,7 +1126,7 @@ orig_asext_lsa(struct rroute *rr, u_int16_t age)
 
 	/* LSA header */
 	lsa->hdr.age = htons(age);
-	lsa->hdr.opts = rdeconf->options;	/* XXX not updated */
+	lsa->hdr.opts = area_ospf_options(NULL);
 	lsa->hdr.type = LSA_TYPE_EXTERNAL;
 	lsa->hdr.adv_rtr = rdeconf->rtr_id.s_addr;
 	lsa->hdr.seq_num = htonl(INIT_SEQ_NUM);
@@ -1150,7 +1161,7 @@ orig_asext_lsa(struct rroute *rr, u_int16_t age)
 }
 
 struct lsa *
-orig_sum_lsa(struct rt_node *rte, u_int8_t type, int invalid)
+orig_sum_lsa(struct rt_node *rte, struct area *area, u_int8_t type, int invalid)
 {
 	struct lsa	*lsa;
 	u_int16_t	 len;
@@ -1161,7 +1172,7 @@ orig_sum_lsa(struct rt_node *rte, u_int8_t type, int invalid)
 
 	/* LSA header */
 	lsa->hdr.age = htons(invalid ? MAX_AGE : DEFAULT_AGE);
-	lsa->hdr.opts = rdeconf->options;	/* XXX not updated */
+	lsa->hdr.opts = area_ospf_options(area);
 	lsa->hdr.type = type;
 	lsa->hdr.adv_rtr = rdeconf->rtr_id.s_addr;
 	lsa->hdr.seq_num = htonl(INIT_SEQ_NUM);

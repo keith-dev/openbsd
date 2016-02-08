@@ -1,4 +1,4 @@
-/*	$OpenBSD: pmap_motorola.h,v 1.15 2006/06/24 13:22:14 miod Exp $	*/
+/*	$OpenBSD: pmap_motorola.h,v 1.17 2007/12/28 18:57:28 miod Exp $	*/
 
 /* 
  * Copyright (c) 1987 Carnegie-Mellon University
@@ -38,6 +38,8 @@
 
 #ifndef	_PMAP_MOTOROLA_H_
 #define	_PMAP_MOTOROLA_H_
+
+#ifdef	_KERNEL
 
 #include <machine/cpu.h>
 #include <machine/pte.h>
@@ -109,8 +111,6 @@ struct pv_page {
 	struct pv_entry pvp_pv[NPVPPG];
 };
 
-#ifdef	_KERNEL
-
 extern struct pmap	kernel_pmap_store;
 
 #define pmap_kernel()	(&kernel_pmap_store)
@@ -129,6 +129,7 @@ extern struct pv_entry	*pv_table;	/* array of entries, one per page */
 #define	pmap_copy(dp,sp,d,l,s)		do { /* nothing */ } while (0)
 #define	pmap_update(pmap)		do { /* nothing (yet) */ } while (0)
 #define	pmap_unuse_final(p)		do { /* nothing */ } while (0)
+#define	pmap_remove_holes(map)		do { /* nothing */ } while (0)
 
 extern pt_entry_t	*Sysmap;
 extern char		*vmmap;		/* map for mem, dumps, etc. */

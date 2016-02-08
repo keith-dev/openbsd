@@ -1,4 +1,4 @@
-/*	$OpenBSD: parse.y,v 1.50 2007/07/11 14:10:25 pyr Exp $ */
+/*	$OpenBSD: parse.y,v 1.61 2008/02/26 10:09:58 mpf Exp $ */
 
 /*
  * Copyright (c) 2004, 2005 Esben Norby <norby@openbsd.org>
@@ -24,11 +24,13 @@
 %{
 #include <sys/types.h>
 #include <sys/socket.h>
+#include <sys/stat.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <ctype.h>
 #include <err.h>
 #include <errno.h>
+#include <unistd.h>
 #include <ifaddrs.h>
 #include <limits.h>
 #include <stdarg.h>
@@ -40,27 +42,46 @@
 #include "ospfe.h"
 #include "log.h"
 
+TAILQ_HEAD(files, file)		 files = TAILQ_HEAD_INITIALIZER(files);
+static struct file {
+	TAILQ_ENTRY(file)	 entry;
+	FILE			*stream;
+	char			*name;
+	int			 lineno;
+	int			 errors;
+} *file, *topfile;
+struct file	*pushfile(const char *, int);
+int		 popfile(void);
+int		 check_file_secrecy(int, const char *);
+int		 yyparse(void);
+int		 yylex(void);
+int		 yyerror(const char *, ...);
+int		 kw_cmp(const void *, const void *);
+int		 lookup(char *);
+int		 lgetc(int);
+int		 lungetc(int);
+int		 findeol(void);
+
+TAILQ_HEAD(symhead, sym)	 symhead = TAILQ_HEAD_INITIALIZER(symhead);
+struct sym {
+	TAILQ_ENTRY(sym)	 entry;
+	int			 used;
+	int			 persist;
+	char			*nam;
+	char			*val;
+};
+int		 symset(const char *, const char *, int);
+char		*symget(const char *);
+
+void		 clear_config(struct ospfd_conf *xconf);
+u_int32_t	 get_rtr_id(void);
+int		 host(const char *, struct in_addr *, struct in_addr *);
+
 static struct ospfd_conf	*conf;
-static FILE			*fin = NULL;
-static int			 lineno = 1;
 static int			 errors = 0;
-char				*infile;
 
 struct area	*area = NULL;
 struct iface	*iface = NULL;
-
-int	 yyerror(const char *, ...);
-int	 yyparse(void);
-int	 kw_cmp(const void *, const void *);
-int	 lookup(char *);
-int	 lgetc(FILE *);
-int	 lungetc(int);
-int	 findeol(void);
-int	 yylex(void);
-void	 clear_config(struct ospfd_conf *xconf);
-int	 check_file_secrecy(int fd, const char *fname);
-u_int32_t	get_rtr_id(void);
-int	 host(const char *, struct in_addr *, struct in_addr *);
 
 struct config_defaults {
 	char		auth_key[MAX_SIMPLE_AUTH_LEN];
@@ -80,23 +101,12 @@ struct config_defaults	 areadefs;
 struct config_defaults	 ifacedefs;
 struct config_defaults	*defs;
 
-TAILQ_HEAD(symhead, sym)	 symhead = TAILQ_HEAD_INITIALIZER(symhead);
-struct sym {
-	TAILQ_ENTRY(sym)	 entries;
-	int			 used;
-	int			 persist;
-	char			*nam;
-	char			*val;
-};
-
-int			 symset(const char *, const char *, int);
-char			*symget(const char *);
-struct area		*conf_get_area(struct in_addr);
-struct iface		*conf_get_if(struct kif *, struct kif_addr *);
+struct area	*conf_get_area(struct in_addr);
+struct iface	*conf_get_if(struct kif *, struct kif_addr *);
 
 typedef struct {
 	union {
-		u_int32_t	 number;
+		int64_t		 number;
 		char		*string;
 	} v;
 	int lineno;
@@ -115,7 +125,8 @@ typedef struct {
 %token	DEMOTE
 %token	ERROR
 %token	<v.string>	STRING
-%type	<v.number>	number yesno no optlist, optlist_l option demotecount
+%token	<v.number>	NUMBER
+%type	<v.number>	yesno no optlist optlist_l option demotecount
 %type	<v.string>	string
 
 %%
@@ -125,22 +136,7 @@ grammar		: /* empty */
 		| grammar conf_main '\n'
 		| grammar varset '\n'
 		| grammar area '\n'
-		| grammar error '\n'		{ errors++; }
-		;
-
-number		: STRING {
-			u_int32_t	 uval;
-			const char	*errstr;
-
-			uval = strtonum($1, 0, UINT_MAX, &errstr);
-			if (errstr) {
-				yyerror("number %s is %s", $1, errstr);
-				free($1);
-				YYERROR;
-			} else
-				$$ = uval;
-			free($1);
-		}
+		| grammar error '\n'		{ file->errors++; }
 		;
 
 string		: string STRING	{
@@ -162,6 +158,7 @@ yesno		: YES	{ $$ = 1; }
 
 no		: /* empty */	{ $$ = 0; }
 		| NO		{ $$ = 1; }
+		;
 
 varset		: STRING '=' string		{
 			if (conf->opts & OSPFD_OPT_VERBOSE)
@@ -186,6 +183,27 @@ conf_main	: ROUTERID STRING {
 				conf->flags |= OSPFD_FLAG_NO_FIB_UPDATE;
 			else
 				conf->flags &= ~OSPFD_FLAG_NO_FIB_UPDATE;
+		}
+		| no REDISTRIBUTE NUMBER '/' NUMBER optlist {
+			struct redistribute	*r;
+
+			if ((r = calloc(1, sizeof(*r))) == NULL)
+				fatal(NULL);
+			r->type = REDIST_ADDR;
+			if ($3 < 0 || $3 > 255 || $5 < 1 || $5 > 32) {
+				yyerror("bad network: %llu/%llu", $3, $5);
+				free(r);
+				YYERROR;
+			}
+			r->addr.s_addr = htonl($3 << IN_CLASSA_NSHIFT);
+			r->mask.s_addr = prefixlen2mask($5);
+
+			if ($1)
+				r->type |= REDIST_NO;
+			r->metric = $6;
+
+			SIMPLEQ_INSERT_TAIL(&conf->redist_list, r, entry);
+			conf->redistribute |= REDISTRIBUTE_ON;
 		}
 		| no REDISTRIBUTE STRING optlist {
 			struct redistribute	*r;
@@ -239,8 +257,8 @@ conf_main	: ROUTERID STRING {
 			SIMPLEQ_INSERT_TAIL(&conf->redist_list, r, entry);
 			conf->redistribute |= REDISTRIBUTE_ON;
 		}
-		| RTLABEL STRING EXTTAG number {
-			if (!$4) {
+		| RTLABEL STRING EXTTAG NUMBER {
+			if ($4 < 0 || $4 > UINT_MAX) {
 				yyerror("invalid external route tag");
 				free($2);
 				YYERROR;
@@ -251,7 +269,7 @@ conf_main	: ROUTERID STRING {
 		| RFC1583COMPAT yesno {
 			conf->rfc1583compat = $2;
 		}
-		| SPFDELAY number {
+		| SPFDELAY NUMBER {
 			if ($2 < MIN_SPF_DELAY || $2 > MAX_SPF_DELAY) {
 				yyerror("spf-delay out of range "
 				    "(%d-%d)", MIN_SPF_DELAY,
@@ -260,7 +278,7 @@ conf_main	: ROUTERID STRING {
 			}
 			conf->spf_delay = $2;
 		}
-		| SPFHOLDTIME number {
+		| SPFHOLDTIME NUMBER {
 			if ($2 < MIN_SPF_HOLDTIME || $2 > MAX_SPF_HOLDTIME) {
 				yyerror("spf-holdtime out of range "
 				    "(%d-%d)", MIN_SPF_HOLDTIME,
@@ -306,14 +324,14 @@ optlist_l	: optlist_l comma option {
 		| option { $$ = $1; }
 		;
 
-option		: METRIC number {
+option		: METRIC NUMBER {
 			if ($2 == 0 || $2 > MAX_METRIC) {
 				yyerror("invalid redistribute metric");
 				YYERROR;
 			}
 			$$ = $2;
 		}
-		| TYPE number {
+		| TYPE NUMBER {
 			switch ($2) {
 			case 1:
 				$$ = 0;
@@ -322,13 +340,13 @@ option		: METRIC number {
 				$$ = LSA_ASEXT_E_FLAG;
 				break;
 			default:
-				yyerror("illegal external type %u", $2);
+				yyerror("only external type 1 and 2 allowed");
 				YYERROR;
 			}
 		}
 		;
 
-authmd		: AUTHMD number STRING {
+authmd		: AUTHMD NUMBER STRING {
 			if ($2 < MIN_MD_ID || $2 > MAX_MD_ID) {
 				yyerror("auth-md key-id out of range "
 				    "(%d-%d)", MIN_MD_ID, MAX_MD_ID);
@@ -346,7 +364,7 @@ authmd		: AUTHMD number STRING {
 			free($3);
 		}
 
-authmdkeyid	: AUTHMDKEYID number {
+authmdkeyid	: AUTHMDKEYID NUMBER {
 			if ($2 < MIN_MD_ID || $2 > MAX_MD_ID) {
 				yyerror("auth-md-keyid out of range "
 				    "(%d-%d)", MIN_MD_ID, MAX_MD_ID);
@@ -387,7 +405,7 @@ authkey		: AUTHKEY STRING {
 		}
 		;
 
-defaults	: METRIC number {
+defaults	: METRIC NUMBER {
 			if ($2 < MIN_METRIC || $2 > MAX_METRIC) {
 				yyerror("metric out of range (%d-%d)",
 				    MIN_METRIC, MAX_METRIC);
@@ -395,7 +413,7 @@ defaults	: METRIC number {
 			}
 			defs->metric = $2;
 		}
-		| ROUTERPRIORITY number {
+		| ROUTERPRIORITY NUMBER {
 			if ($2 < MIN_PRIORITY || $2 > MAX_PRIORITY) {
 				yyerror("router-priority out of range (%d-%d)",
 				    MIN_PRIORITY, MAX_PRIORITY);
@@ -403,7 +421,7 @@ defaults	: METRIC number {
 			}
 			defs->priority = $2;
 		}
-		| ROUTERDEADTIME number {
+		| ROUTERDEADTIME NUMBER {
 			if ($2 < MIN_RTR_DEAD_TIME || $2 > MAX_RTR_DEAD_TIME) {
 				yyerror("router-dead-time out of range (%d-%d)",
 				    MIN_RTR_DEAD_TIME, MAX_RTR_DEAD_TIME);
@@ -411,7 +429,7 @@ defaults	: METRIC number {
 			}
 			defs->dead_interval = $2;
 		}
-		| TRANSMITDELAY number {
+		| TRANSMITDELAY NUMBER {
 			if ($2 < MIN_TRANSMIT_DELAY ||
 			    $2 > MAX_TRANSMIT_DELAY) {
 				yyerror("transmit-delay out of range (%d-%d)",
@@ -420,7 +438,7 @@ defaults	: METRIC number {
 			}
 			defs->transmit_delay = $2;
 		}
-		| HELLOINTERVAL number {
+		| HELLOINTERVAL NUMBER {
 			if ($2 < MIN_HELLO_INTERVAL ||
 			    $2 > MAX_HELLO_INTERVAL) {
 				yyerror("hello-interval out of range (%d-%d)",
@@ -429,7 +447,7 @@ defaults	: METRIC number {
 			}
 			defs->hello_interval = $2;
 		}
-		| RETRANSMITINTERVAL number {
+		| RETRANSMITINTERVAL NUMBER {
 			if ($2 < MIN_RXMT_INTERVAL || $2 > MAX_RXMT_INTERVAL) {
 				yyerror("retransmit-interval out of range "
 				    "(%d-%d)", MIN_RXMT_INTERVAL,
@@ -475,7 +493,7 @@ area		: AREA STRING {
 		}
 		;
 
-demotecount	: number	{ $$ = $1; }
+demotecount	: NUMBER	{ $$ = $1; }
 		| /*empty*/	{ $$ = 1; }
 		;
 
@@ -485,8 +503,8 @@ areaopts_l	: areaopts_l areaoptsl nl
 
 areaoptsl	: interface
 		| DEMOTE STRING	demotecount {
-			if ($3 > 255) {
-				yyerror("demote count too big: max 255");
+			if ($3 < 1 || $3 > 255) {
+				yyerror("demote count out of range (1-255)");
 				free($2);
 				YYERROR;
 			}
@@ -611,9 +629,9 @@ yyerror(const char *fmt, ...)
 {
 	va_list	ap;
 
-	errors = 1;
+	file->errors++;
 	va_start(ap, fmt);
-	fprintf(stderr, "%s:%d: ", infile, yylval.lineno);
+	fprintf(stderr, "%s:%d: ", file->name, yylval.lineno);
 	vfprintf(stderr, fmt, ap);
 	fprintf(stderr, "\n");
 	va_end(ap);
@@ -623,7 +641,6 @@ yyerror(const char *fmt, ...)
 int
 kw_cmp(const void *k, const void *e)
 {
-
 	return (strcmp(k, ((const struct keywords *)e)->k_name));
 }
 
@@ -680,9 +697,9 @@ char	 pushback_buffer[MAXPUSHBACK];
 int	 pushback_index = 0;
 
 int
-lgetc(FILE *f)
+lgetc(int quotec)
 {
-	int	c, next;
+	int		c, next;
 
 	if (parsebuf) {
 		/* Read character from the parsebuffer instead of input. */
@@ -698,24 +715,32 @@ lgetc(FILE *f)
 	if (pushback_index)
 		return (pushback_buffer[--pushback_index]);
 
-	while ((c = getc(f)) == '\\') {
-		next = getc(f);
+	if (quotec) {
+		if ((c = getc(file->stream)) == EOF) {
+			yyerror("reached end of file while parsing "
+			    "quoted string");
+			if (file == topfile || popfile() == EOF)
+				return (EOF);
+			return (quotec);
+		}
+		return (c);
+	}
+
+	while ((c = getc(file->stream)) == '\\') {
+		next = getc(file->stream);
 		if (next != '\n') {
 			c = next;
 			break;
 		}
-		yylval.lineno = lineno;
-		lineno++;
-	}
-	if (c == '\t' || c == ' ') {
-		/* Compress blanks to a single space. */
-		do {
-			c = getc(f);
-		} while (c == '\t' || c == ' ');
-		ungetc(c, f);
-		c = ' ';
+		yylval.lineno = file->lineno;
+		file->lineno++;
 	}
 
+	while (c == EOF) {
+		if (file == topfile || popfile() == EOF)
+			return (EOF);
+		c = getc(file->stream);
+	}
 	return (c);
 }
 
@@ -745,9 +770,9 @@ findeol(void)
 
 	/* skip to either EOF or the first real EOL */
 	while (1) {
-		c = lgetc(fin);
+		c = lgetc(0);
 		if (c == '\n') {
-			lineno++;
+			file->lineno++;
 			break;
 		}
 		if (c == EOF)
@@ -761,21 +786,21 @@ yylex(void)
 {
 	char	 buf[8096];
 	char	*p, *val;
-	int	 endc, c;
+	int	 quotec, next, c;
 	int	 token;
 
 top:
 	p = buf;
-	while ((c = lgetc(fin)) == ' ')
+	while ((c = lgetc(0)) == ' ' || c == '\t')
 		; /* nothing */
 
-	yylval.lineno = lineno;
+	yylval.lineno = file->lineno;
 	if (c == '#')
-		while ((c = lgetc(fin)) != '\n' && c != EOF)
+		while ((c = lgetc(0)) != '\n' && c != EOF)
 			; /* nothing */
 	if (c == '$' && parsebuf == NULL) {
 		while (1) {
-			if ((c = lgetc(fin)) == EOF)
+			if ((c = lgetc(0)) == EOF)
 				return (0);
 
 			if (p + 1 >= buf + sizeof(buf) - 1) {
@@ -803,17 +828,25 @@ top:
 	switch (c) {
 	case '\'':
 	case '"':
-		endc = c;
+		quotec = c;
 		while (1) {
-			if ((c = lgetc(fin)) == EOF)
+			if ((c = lgetc(quotec)) == EOF)
 				return (0);
-			if (c == endc) {
+			if (c == '\n') {
+				file->lineno++;
+				continue;
+			} else if (c == '\\') {
+				if ((next = lgetc(quotec)) == EOF)
+					return (0);
+				if (next == quotec || c == ' ' || c == '\t')
+					c = next;
+				else if (next == '\n')
+					continue;
+				else
+					lungetc(next);
+			} else if (c == quotec) {
 				*p = '\0';
 				break;
-			}
-			if (c == '\n') {
-				lineno++;
-				continue;
 			}
 			if (p + 1 >= buf + sizeof(buf) - 1) {
 				yyerror("string too long");
@@ -823,8 +856,44 @@ top:
 		}
 		yylval.v.string = strdup(buf);
 		if (yylval.v.string == NULL)
-			errx(1, "yylex: strdup");
+			err(1, "yylex: strdup");
 		return (STRING);
+	}
+
+#define allowed_to_end_number(x) \
+	(isspace(x) || x == ')' || x ==',' || x == '/' || x == '}' || x == '=')
+
+	if (c == '-' || isdigit(c)) {
+		do {
+			*p++ = c;
+			if ((unsigned)(p-buf) >= sizeof(buf)) {
+				yyerror("string too long");
+				return (findeol());
+			}
+		} while ((c = lgetc(0)) != EOF && isdigit(c));
+		lungetc(c);
+		if (p == buf + 1 && buf[0] == '-')
+			goto nodigits;
+		if (c == EOF || allowed_to_end_number(c)) {
+			const char *errstr = NULL;
+
+			*p = '\0';
+			yylval.v.number = strtonum(buf, LLONG_MIN,
+			    LLONG_MAX, &errstr);
+			if (errstr) {
+				yyerror("\"%s\" invalid number: %s",
+				    buf, errstr);
+				return (findeol());
+			}
+			return (NUMBER);
+		} else {
+nodigits:
+			while (p > buf + 1)
+				lungetc(*--p);
+			c = *--p;
+			if (c == '-')
+				return (c);
+		}
 	}
 
 #define allowed_in_string(x) \
@@ -840,7 +909,7 @@ top:
 				yyerror("string too long");
 				return (findeol());
 			}
-		} while ((c = lgetc(fin)) != EOF && (allowed_in_string(c)));
+		} while ((c = lgetc(0)) != EOF && (allowed_in_string(c)));
 		lungetc(c);
 		*p = '\0';
 		if ((token = lookup(buf)) == STRING)
@@ -849,12 +918,75 @@ top:
 		return (token);
 	}
 	if (c == '\n') {
-		yylval.lineno = lineno;
-		lineno++;
+		yylval.lineno = file->lineno;
+		file->lineno++;
 	}
 	if (c == EOF)
 		return (0);
 	return (c);
+}
+
+int
+check_file_secrecy(int fd, const char *fname)
+{
+	struct stat	st;
+
+	if (fstat(fd, &st)) {
+		log_warn("cannot stat %s", fname);
+		return (-1);
+	}
+	if (st.st_uid != 0 && st.st_uid != getuid()) {
+		log_warnx("%s: owner not root or current user", fname);
+		return (-1);
+	}
+	if (st.st_mode & (S_IRWXG | S_IRWXO)) {
+		log_warnx("%s: group/world readable/writeable", fname);
+		return (-1);
+	}
+	return (0);
+}
+
+struct file *
+pushfile(const char *name, int secret)
+{
+	struct file	*nfile;
+
+	if ((nfile = calloc(1, sizeof(struct file))) == NULL ||
+	    (nfile->name = strdup(name)) == NULL) {
+		log_warn("malloc");
+		return (NULL);
+	}
+	if ((nfile->stream = fopen(nfile->name, "r")) == NULL) {
+		log_warn("%s", nfile->name);
+		free(nfile->name);
+		free(nfile);
+		return (NULL);
+	} else if (secret &&
+	    check_file_secrecy(fileno(nfile->stream), nfile->name)) {
+		fclose(nfile->stream);
+		free(nfile->name);
+		free(nfile);
+		return (NULL);
+	}
+	nfile->lineno = 1;
+	TAILQ_INSERT_TAIL(&files, nfile, entry);
+	return (nfile);
+}
+
+int
+popfile(void)
+{
+	struct file	*prev;
+
+	if ((prev = TAILQ_PREV(file, files, entry)) != NULL)
+		prev->errors += file->errors;
+
+	TAILQ_REMOVE(&files, file, entry);
+	fclose(file->stream);
+	free(file->name);
+	free(file);
+	file = prev;
+	return (file ? 0 : EOF);
 }
 
 struct ospfd_conf *
@@ -864,6 +996,9 @@ parse_config(char *filename, int opts)
 
 	if ((conf = calloc(1, sizeof(struct ospfd_conf))) == NULL)
 		fatal("parse_config");
+	conf->opts = opts;
+	if (conf->opts & OSPFD_OPT_STUB_ROUTER)
+		conf->flags |= OSPFD_FLAG_STUB_ROUTER;
 
 	bzero(&globaldefs, sizeof(globaldefs));
 	defs = &globaldefs;
@@ -875,46 +1010,34 @@ parse_config(char *filename, int opts)
 	defs->metric = DEFAULT_METRIC;
 	defs->priority = DEFAULT_PRIORITY;
 
-	conf->options = OSPF_OPTION_E;
 	conf->spf_delay = DEFAULT_SPF_DELAY;
 	conf->spf_hold_time = DEFAULT_SPF_HOLDTIME;
 	conf->spf_state = SPF_IDLE;
 
-	if ((fin = fopen(filename, "r")) == NULL) {
-		warn("%s", filename);
+	if ((file = pushfile(filename, !(conf->opts & OSPFD_OPT_NOACTION))) == NULL) {
 		free(conf);
 		return (NULL);
 	}
-	infile = filename;
+	topfile = file;
 
-	conf->opts = opts;
-	if (conf->opts & OSPFD_OPT_STUB_ROUTER)
-		conf->flags |= OSPFD_FLAG_STUB_ROUTER;
 	LIST_INIT(&conf->area_list);
 	LIST_INIT(&conf->cand_list);
 	SIMPLEQ_INIT(&conf->redist_list);
 
-	if (!(conf->opts & OSPFD_OPT_NOACTION))
-		if (check_file_secrecy(fileno(fin), filename)) {
-			fclose(fin);
-			free(conf);
-			return (NULL);
-		}
-
 	yyparse();
-
-	fclose(fin);
+	errors = file->errors;
+	popfile();
 
 	/* Free macros and check which have not been used. */
 	for (sym = TAILQ_FIRST(&symhead); sym != NULL; sym = next) {
-		next = TAILQ_NEXT(sym, entries);
+		next = TAILQ_NEXT(sym, entry);
 		if ((conf->opts & OSPFD_OPT_VERBOSE2) && !sym->used)
 			fprintf(stderr, "warning: macro '%s' not "
 			    "used\n", sym->nam);
 		if (!sym->persist) {
 			free(sym->nam);
 			free(sym->val);
-			TAILQ_REMOVE(&symhead, sym, entries);
+			TAILQ_REMOVE(&symhead, sym, entry);
 			free(sym);
 		}
 	}
@@ -939,7 +1062,7 @@ symset(const char *nam, const char *val, int persist)
 	struct sym	*sym;
 
 	for (sym = TAILQ_FIRST(&symhead); sym && strcmp(nam, sym->nam);
-	    sym = TAILQ_NEXT(sym, entries))
+	    sym = TAILQ_NEXT(sym, entry))
 		;	/* nothing */
 
 	if (sym != NULL) {
@@ -948,7 +1071,7 @@ symset(const char *nam, const char *val, int persist)
 		else {
 			free(sym->nam);
 			free(sym->val);
-			TAILQ_REMOVE(&symhead, sym, entries);
+			TAILQ_REMOVE(&symhead, sym, entry);
 			free(sym);
 		}
 	}
@@ -968,7 +1091,7 @@ symset(const char *nam, const char *val, int persist)
 	}
 	sym->used = 0;
 	sym->persist = persist;
-	TAILQ_INSERT_TAIL(&symhead, sym, entries);
+	TAILQ_INSERT_TAIL(&symhead, sym, entry);
 	return (0);
 }
 
@@ -999,7 +1122,7 @@ symget(const char *nam)
 {
 	struct sym	*sym;
 
-	TAILQ_FOREACH(sym, &symhead, entries)
+	TAILQ_FOREACH(sym, &symhead, entry)
 		if (strcmp(nam, sym->nam) == 0) {
 			sym->used = 1;
 			return (sym->val);

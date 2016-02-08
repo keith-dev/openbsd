@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvm_param.h,v 1.12 2007/03/26 08:43:34 art Exp $	*/
+/*	$OpenBSD: uvm_param.h,v 1.14 2008/02/17 20:33:47 kettenis Exp $	*/
 /*	$NetBSD: uvm_param.h,v 1.5 2001/03/09 01:02:12 chs Exp $	*/
 
 /* 
@@ -112,7 +112,8 @@ typedef int	boolean_t;
 #define	VM_VNODEMIN	9
 #define	VM_MAXSLP	10
 #define	VM_USPACE	11
-#define	VM_MAXID	12		/* number of valid vm ids */
+#define	VM_KMPAGESFREE	12
+#define	VM_MAXID	13		/* number of valid vm ids */
 
 #define	CTL_VM_NAMES { \
 	{ 0, 0 }, \
@@ -127,6 +128,7 @@ typedef int	boolean_t;
 	{ "vnodemin", CTLTYPE_INT }, \
 	{ "maxslp", CTLTYPE_INT }, \
 	{ "uspace", CTLTYPE_INT }, \
+	{ "kmpagesfree", CTLTYPE_INT }, \
 }
 
 struct _ps_strings {
@@ -142,7 +144,7 @@ struct _ps_strings {
  */
 #ifdef _KERNEL
 #define	atop(x)		((x) >> PAGE_SHIFT)
-#define	ptoa(x)		((x) << PAGE_SHIFT)
+#define	ptoa(x)		((paddr_t)(x) << PAGE_SHIFT)
 
 /*
  * Round off or truncate to the nearest page.  These will work

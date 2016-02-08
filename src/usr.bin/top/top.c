@@ -1,4 +1,4 @@
-/*	$OpenBSD: top.c,v 1.52 2007/07/27 13:59:27 deraadt Exp $	*/
+/*	$OpenBSD: top.c,v 1.65 2007/11/29 10:06:30 otto Exp $	*/
 
 /*
  *  Top users/processes display for Unix
@@ -75,7 +75,6 @@ int displays = 0;	/* indicates unspecified */
 char do_unames = Yes;
 struct process_select ps;
 char interactive = Maybe;
-char warnings = 0;
 double delay = Default_DELAY;
 char *order_name = NULL;
 int topn = Default_TOPN;
@@ -146,23 +145,22 @@ parseargs(int ac, char **av)
 			break;
 
 		case 'U':	/* display only username's processes */
-			if ((ps.uid = userid(optarg)) == (uid_t)-1) {
-				fprintf(stderr, "%s: unknown user\n", optarg);
-				exit(1);
-			}
+			if ((ps.uid = userid(optarg)) == (uid_t)-1)
+				new_message(MT_delayed, "%s: unknown user",
+				    optarg);
 			break;
 
 		case 'p': {	/* display only process id */
-			unsigned long long num;
 			const char *errstr;
 
-			num = strtonum(optarg, 0, INT_MAX, &errstr);
-			if (errstr != NULL || !find_pid(num)) {
-				fprintf(stderr, "%s: unknown pid\n", optarg);
-				exit(1);
+			i = strtonum(optarg, 0, INT_MAX, &errstr);
+			if (errstr != NULL || !find_pid(i))
+				new_message(MT_delayed, "%s: unknown pid",
+				    optarg);
+			else {
+				ps.pid = (pid_t)i;
+				ps.system = Yes;
 			}
-			ps.pid = (pid_t)num;
-			ps.system = Yes;
 			break;
 		}
 
@@ -194,21 +192,21 @@ parseargs(int ac, char **av)
 				displays = i;
 				break;
 			}
-			warnx("warning: display count should be positive "
+			new_message(MT_delayed,
+			    "warning: display count should be positive "
 			    "-- option ignored");
-			warnings++;
 			break;
 
 		case 's':
 			delay = strtod(optarg, &endp);
 
-			if (delay > 0 && delay <= 1000000 && *endp == '\0')
+			if (delay >= 0 && delay <= 1000000 && *endp == '\0')
 				break;
 
-			warnx("warning: delay should be a non-negative number"
+			new_message(MT_delayed,
+			    "warning: delay should be a non-negative number"
 			    " -- using default");
 			delay = Default_DELAY;
-			warnings++;
 			break;
 
 		case 'q':	/* be quick about it */
@@ -218,8 +216,8 @@ parseargs(int ac, char **av)
 				(void) nice(-20);
 				break;
 			}
-			warnx("warning: `-q' option can only be used by root");
-			warnings++;
+			new_message(MT_delayed,
+			    "warning: `-q' option can only be used by root");
 			break;
 
 		case 'o':	/* select sort order */
@@ -239,9 +237,9 @@ parseargs(int ac, char **av)
 	/* get count of top processes to display (if any) */
 	if (optind < ac) {
 		if ((topn = atoiwi(av[optind])) == Invalid) {
-			warnx("warning: process count should "
+			new_message(MT_delayed,
+			    "warning: process count should "
 			    "be a non-negative number -- using default");
-			warnings++;
 			topn = Infinity;
 		}
 #if Default_TOPN == Infinity
@@ -318,16 +316,19 @@ main(int argc, char *argv[])
 	if (order_name != NULL) {
 		if ((order_index = string_index(order_name,
 		    statics.order_names)) == -1) {
-			char **pp;
+			char **pp, msg[80];
 
-			warnx("'%s' is not a recognized sorting order",
+			snprintf(msg, sizeof(msg),
+			    "'%s' is not a recognized sorting order",
 			    order_name);
-			fprintf(stderr, "\tTry one of these:");
+			strlcat(msg, ". Valid are:", sizeof(msg));
 			pp = statics.order_names;
-			while (*pp != NULL)
-				fprintf(stderr, " %s", *pp++);
-			fputc('\n', stderr);
-			exit(1);
+			while (*pp != NULL) {
+				strlcat(msg, " ", sizeof(msg));
+				strlcat(msg, *pp++, sizeof(msg));
+			}
+			new_message(MT_delayed, msg);
+			order_index = 0;
 		}
 	}
 
@@ -338,16 +339,13 @@ main(int argc, char *argv[])
 	header_text = format_header(uname_field);
 
 	/* initialize display interface */
-	if ((max_topn = display_init(&statics)) == -1) {
-		warnx("can't allocate sufficient memory");
-		exit(4);
-	}
+	max_topn = display_init(&statics);
+
 	/* print warning if user requested more processes than we can display */
-	if (topn > max_topn) {
-		warnx("warning: this terminal can only display %d processes",
+	if (topn > max_topn)
+		new_message(MT_delayed,
+		    "warning: this terminal can only display %d processes",
 		    max_topn);
-		warnings++;
-	}
 	/* adjust for topn == Infinity */
 	if (topn == Infinity) {
 		/*
@@ -387,7 +385,8 @@ main(int argc, char *argv[])
 	sigaddset(&mask, SIGQUIT);
 	sigaddset(&mask, SIGTSTP);
 	sigprocmask(SIG_BLOCK, &mask, &oldmask);
-	init_screen();
+	if (interactive)
+		init_screen();
 	(void) signal(SIGINT, leave);
 	siginterrupt(SIGINT, 1);
 	(void) signal(SIGQUIT, leave);
@@ -395,12 +394,6 @@ main(int argc, char *argv[])
 	if (smart_terminal)
 		(void) signal(SIGWINCH, sigwinch);
 	sigprocmask(SIG_SETMASK, &oldmask, NULL);
-	if (warnings) {
-		fputs("....", stderr);
-		fflush(stderr);	/* why must I do this? */
-		sleep((unsigned)(3 * warnings));
-		fputc('\n', stderr);
-	}
 restart:
 
 	/*
@@ -438,6 +431,15 @@ restart:
 		/* update the header area */
 		i_header(header_text);
 
+		if (topn == Infinity) {
+#if Default_TOPN == Infinity
+			topn = smart_terminal ? Largest :
+			    (topn_specified ? Largest : Nominal_TOPN);
+#else
+			topn = Largest;
+#endif
+		}
+
 		if (topn > 0) {
 			/* determine number of processes to actually display */
 			/*
@@ -459,8 +461,7 @@ restart:
 				    &pid);
 				i_process(i, s, pid == hlpid);
 			}
-		} else
-			i = 0;
+		}
 
 		/* do end-screen processing */
 		u_endscreen();
@@ -507,7 +508,7 @@ restart:
 int
 rundisplay(void)
 {
-	static char tempbuf1[50], tempbuf2[50];
+	static char tempbuf[50];
 	sigset_t mask;
 	char ch, *iptr;
 	int change, i;
@@ -585,7 +586,6 @@ rundisplay(void)
 	    !(pfd[0].revents & (POLLERR|POLLHUP|POLLNVAL))) {
 		char *errmsg;
 		ssize_t len;
-		int newval;
 
 		clear_message();
 
@@ -658,30 +658,42 @@ rundisplay(void)
 		case CMD_number2:
 			new_message(MT_standout,
 			    "Number of processes to show: ");
-			newval = readline(tempbuf1, 8, Yes);
-			if (newval > -1) {
-				if (newval > max_topn) {
-					new_message(MT_standout | MT_delayed,
-					    " This terminal can only "
-					    "display %d processes.",
-					    max_topn);
-					putr();
+
+			if (readline(tempbuf, 8) > 0) {
+				char *ptr;
+				ptr = tempbuf;
+				if ((i = atoiwi(ptr)) != Invalid) {
+					if (i > max_topn) {
+						new_message(MT_standout |
+						    MT_delayed,
+						    " This terminal can only "
+						    "display %d processes.",
+						    max_topn);
+						putr();
+					}
+					if ((i > topn || i == Infinity)
+					    && topn == 0) {
+						/* redraw the header */
+						display_header(Yes);
+					} else if (i == 0)
+						display_header(No);
+					topn = i;
+				} else {
+					new_message(MT_standout,
+					    "Processes should be a "
+					    "non-negative number");
+ 					putr();
+					no_command = Yes;
 				}
-				if (newval == 0)
-					display_header(No);
-				else if (newval > topn && topn == 0) {
-					/* redraw the header */
-					display_header(Yes);
-				}
-				topn = newval;
-			}
+			} else
+				clear_message();
 			break;
 
 		case CMD_delay:	/* new seconds delay */
 			new_message(MT_standout, "Seconds to delay: ");
-			if (readline(tempbuf2, sizeof(tempbuf2), No) > 0) {
+			if (readline(tempbuf, sizeof(tempbuf)) > 0) {
 				char *endp;
-				double newdelay = strtod(tempbuf2, &endp);
+				double newdelay = strtod(tempbuf, &endp);
 
 				if (newdelay >= 0 && newdelay < 1000000 &&
 				    *endp == '\0') {
@@ -702,18 +714,28 @@ rundisplay(void)
 			    "Displays to show (currently %s): ",
 			    displays == -1 ? "infinite" :
 			    itoa(displays));
-			if ((i = readline(tempbuf1, 10, Yes)) > 0)
-				displays = i;
-			else if (i == 0)
-				quit(0);
 
-			clear_message();
+			if (readline(tempbuf, 10) > 0) {
+				char *ptr;
+				ptr = tempbuf;				
+				if ((i = atoiwi(ptr)) != Invalid) {
+					if (i == 0)
+						quit(0);
+					displays = i;
+				} else {
+					new_message(MT_standout,
+					    "Displays should be a non-negative number");
+					putr();
+					no_command = Yes;
+				}
+			} else
+				clear_message();
 			break;
 
 		case CMD_kill:	/* kill program */
 			new_message(0, "kill ");
-			if (readline(tempbuf2, sizeof(tempbuf2), No) > 0) {
-				if ((errmsg = kill_procs(tempbuf2)) != NULL) {
+			if (readline(tempbuf, sizeof(tempbuf)) > 0) {
+				if ((errmsg = kill_procs(tempbuf)) != NULL) {
 					new_message(MT_standout, "%s", errmsg);
 					putr();
 					no_command = Yes;
@@ -724,8 +746,8 @@ rundisplay(void)
 
 		case CMD_renice:	/* renice program */
 			new_message(0, "renice ");
-			if (readline(tempbuf2, sizeof(tempbuf2), No) > 0) {
-				if ((errmsg = renice_procs(tempbuf2)) != NULL) {
+			if (readline(tempbuf, sizeof(tempbuf)) > 0) {
+				if ((errmsg = renice_procs(tempbuf)) != NULL) {
 					new_message(MT_standout, "%s", errmsg);
 					putr();
 					no_command = Yes;
@@ -746,13 +768,13 @@ rundisplay(void)
 		case CMD_user:
 			new_message(MT_standout,
 			    "Username to show: ");
-			if (readline(tempbuf2, sizeof(tempbuf2), No) > 0) {
-				if (tempbuf2[0] == '+' &&
-				    tempbuf2[1] == '\0') {
+			if (readline(tempbuf, sizeof(tempbuf)) > 0) {
+				if (tempbuf[0] == '+' &&
+				    tempbuf[1] == '\0') {
 					ps.uid = (uid_t)-1;
-				} else if ((uid = userid(tempbuf2)) == (uid_t)-1) {
+				} else if ((uid = userid(tempbuf)) == (uid_t)-1) {
 					new_message(MT_standout,
-					    " %s: unknown user", tempbuf2);
+					    " %s: unknown user", tempbuf);
 					no_command = Yes;
 				} else
 					ps.uid = uid;
@@ -772,13 +794,12 @@ rundisplay(void)
 		case CMD_order:
 			new_message(MT_standout,
 			    "Order to sort: ");
-			if (readline(tempbuf2,
-			    sizeof(tempbuf2), No) > 0) {
-				if ((i = string_index(tempbuf2,
+			if (readline(tempbuf, sizeof(tempbuf)) > 0) {
+				if ((i = string_index(tempbuf,
 				    statics.order_names)) == -1) {
 					new_message(MT_standout,
 					    " %s: unrecognized sorting order",
-					    tempbuf2);
+					    tempbuf);
 					no_command = Yes;
 				} else
 					order_index = i;
@@ -789,21 +810,21 @@ rundisplay(void)
 
 		case CMD_pid:
 			new_message(MT_standout, "Process ID to show: ");
-			if (readline(tempbuf2, sizeof(tempbuf2), No) > 0) {
-				if (tempbuf2[0] == '+' &&
-				    tempbuf2[1] == '\0') {
+			if (readline(tempbuf, sizeof(tempbuf)) > 0) {
+				if (tempbuf[0] == '+' &&
+				    tempbuf[1] == '\0') {
 					ps.pid = (pid_t)-1;
 					ps.system = old_system;
 				} else {
 					unsigned long long num;
 					const char *errstr;
 
-					num = strtonum(tempbuf2, 0, INT_MAX,
+					num = strtonum(tempbuf, 0, INT_MAX,
 					    &errstr);
 					if (errstr != NULL || !find_pid(num)) {
 						new_message(MT_standout,
 						    " %s: unknown pid",
-						    tempbuf2);
+						    tempbuf);
 						no_command = Yes;
 					} else {
 						if (ps.system == No)
@@ -832,34 +853,34 @@ rundisplay(void)
 		case CMD_grep:
 			new_message(MT_standout,
 			    "Grep command name: ");
-			if (readline(tempbuf2, sizeof(tempbuf2), No) > 0) {
+			if (readline(tempbuf, sizeof(tempbuf)) > 0) {
 				free(ps.command);
-				if (tempbuf2[0] == '+' &&
-				    tempbuf2[1] == '\0')
+				if (tempbuf[0] == '+' &&
+				    tempbuf[1] == '\0')
 					ps.command = NULL;
 				else
-					ps.command = strdup(tempbuf2);
+					ps.command = strdup(tempbuf);
 				putr();
 			} else
 				clear_message();
 			break;
 
 		case CMD_hl:
-			new_message(MT_standout, "Process ID to higlight: ");
-			if (readline(tempbuf2, sizeof(tempbuf2), No) > 0) {
-				if (tempbuf2[0] == '+' &&
-				    tempbuf2[1] == '\0') {
+			new_message(MT_standout, "Process ID to highlight: ");
+			if (readline(tempbuf, sizeof(tempbuf)) > 0) {
+				if (tempbuf[0] == '+' &&
+				    tempbuf[1] == '\0') {
 					hlpid = -1;
 				} else {
 					unsigned long long num;
 					const char *errstr;
 
-					num = strtonum(tempbuf2, 0, INT_MAX,
+					num = strtonum(tempbuf, 0, INT_MAX,
 					    &errstr);
 					if (errstr != NULL || !find_pid(num)) {
 						new_message(MT_standout,
 						    " %s: unknown pid",
-						    tempbuf2);
+						    tempbuf);
 						no_command = Yes;
 					} else
 						hlpid = (pid_t)num;

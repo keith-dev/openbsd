@@ -1,4 +1,4 @@
-/*	$OpenBSD: route.c,v 1.74 2006/11/17 01:11:23 itojun Exp $	*/
+/*	$OpenBSD: route.c,v 1.78 2007/12/19 08:49:23 claudio Exp $	*/
 /*	$NetBSD: route.c,v 1.15 1996/05/07 02:55:06 thorpej Exp $	*/
 
 /*
@@ -29,14 +29,6 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  */
-
-#ifndef lint
-#if 0
-static char sccsid[] = "from: @(#)route.c	8.3 (Berkeley) 3/9/94";
-#else
-static char *rcsid = "$OpenBSD: route.c,v 1.74 2006/11/17 01:11:23 itojun Exp $";
-#endif
-#endif /* not lint */
 
 #include <sys/param.h>
 #include <sys/protosw.h>
@@ -295,7 +287,7 @@ p_krtentry(struct rtentry *rt)
 	p_flags(rt->rt_flags, "%-6.6s ");
 	printf("%6d %8ld ", rt->rt_refcnt, rt->rt_use);
 	if (rt->rt_rmx.rmx_mtu)
-		printf("%6ld ", rt->rt_rmx.rmx_mtu);
+		printf("%6u ", rt->rt_rmx.rmx_mtu);
 	else
 		printf("%6s ", "-");
 	putchar((rt->rt_rmx.rmx_locks & RTV_MTU) ? 'L' : ' ');
@@ -310,7 +302,7 @@ p_krtentry(struct rtentry *rt)
 	}
 	putchar('\n');
 	if (vflag)
-		printf("\texpire   %10lu%c\n",
+		printf("\texpire   %10u%c\n",
 		    rt->rt_rmx.rmx_expire,
 		    (rt->rt_rmx.rmx_locks & RTV_EXPIRE) ? 'L' : ' ');
 }
@@ -319,30 +311,24 @@ p_krtentry(struct rtentry *rt)
  * Print routing statistics
  */
 void
-rt_stats(int usesysctl, u_long off)
+rt_stats(void)
 {
 	struct rtstat rtstat;
 	int mib[6];
 	size_t size;
- 
-	if (usesysctl) {
-		mib[0] = CTL_NET;
-		mib[1] = PF_ROUTE;
-		mib[2] = 0;
-		mib[3] = 0;
-		mib[4] = NET_RT_STATS;
-		mib[5] = 0;
-		size = sizeof (rtstat);
 
-		if (sysctl(mib, 6, &rtstat, &size, NULL, 0) < 0) {
-			perror("sysctl of routing table statistics");
-			exit(1);
-		}
-	} else if (off == 0) {
-		printf("rtstat: symbol not in namelist\n");
-		return;
-	} else
-		kread(off, &rtstat, sizeof (rtstat));
+	mib[0] = CTL_NET;
+	mib[1] = PF_ROUTE;
+	mib[2] = 0;
+	mib[3] = 0;
+	mib[4] = NET_RT_STATS;
+	mib[5] = 0;
+	size = sizeof (rtstat);
+
+	if (sysctl(mib, 6, &rtstat, &size, NULL, 0) < 0) {
+		perror("sysctl of routing table statistics");
+		exit(1);
+	}
 
 	printf("routing:\n");
 	printf("\t%u bad routing redirect%s\n",
@@ -362,10 +348,7 @@ encap_print(struct rtentry *rt)
 {
 	struct sockaddr_encap sen1, sen2, sen3;
 	struct ipsec_policy ipo;
-
-#ifdef INET6
 	struct sockaddr_in6 s61, s62;
-#endif /* INET6 */
 
 	bcopy(kgetsa(rt_key(rt)), &sen1, sizeof(sen1));
 	bcopy(kgetsa(rt_mask(rt)), &sen2, sizeof(sen2));
@@ -379,7 +362,6 @@ encap_print(struct rtentry *rt)
 		    ntohs(sen1.sen_dport), sen1.sen_proto);
 	}
 
-#ifdef INET6
 	if (sen1.sen_type == SENT_IP6) {
 		bzero(&s61, sizeof(s61));
 		bzero(&s62, sizeof(s62));
@@ -441,7 +423,6 @@ encap_print(struct rtentry *rt)
 		printf("%-42s %-5u %-5u ", netname6(&s61, &s62),
 		    ntohs(sen1.sen_ip6_dport), sen1.sen_ip6_proto);
 	}
-#endif /* INET6 */
 
 	if (sen3.sen_type == SENT_IPSP) {
 		char hostn[NI_MAXHOST];

@@ -1,4 +1,4 @@
-/*	$OpenBSD: elink3.c,v 1.69 2007/01/19 01:33:44 krw Exp $	*/
+/*	$OpenBSD: elink3.c,v 1.71 2007/10/13 16:12:29 fgsch Exp $	*/
 /*	$NetBSD: elink3.c,v 1.32 1997/05/14 00:22:00 thorpej Exp $	*/
 
 /*
@@ -782,8 +782,6 @@ epsetmedia(sc, medium)
 	 * PHY which media to use.
 	 */
 	if (sc->ep_flags & EP_FLAGS_MII) {
-		int config0, config1;
-
 		GO_WINDOW(3);
 
 		if (sc->ep_chipset == EP_CHIPSET_ROADRUNNER) {
@@ -1389,10 +1387,7 @@ epget(sc, totlen)
 			timeout_add(&sc->sc_epmbuffill_tmo, 1);
 		/* Convert one of our saved mbuf's. */
 		sc->next_mb = (sc->next_mb + 1) % MAX_MBS;
-		m->m_data = m->m_pktdat;
-		m->m_flags = M_PKTHDR;
-		m_tag_init(m);
-		m->m_pkthdr.csum_flags = 0;
+		m = m_inithdr(m);
 	}
 	m->m_pkthdr.rcvif = ifp;
 	m->m_pkthdr.len = totlen;

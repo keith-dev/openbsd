@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_cas.c,v 1.8 2007/04/18 21:08:35 kettenis Exp $	*/
+/*	$OpenBSD: if_cas.c,v 1.14 2008/02/08 10:56:41 thib Exp $	*/
 
 /*
  *
@@ -32,6 +32,14 @@
 
 /*
  * Driver for Sun Cassini ethernet controllers.
+ *
+ * There are basically two variants of this chip: Cassini and
+ * Cassini+.  We can distinguish between the two by revision: 0x10 and
+ * up are Cassini+.  The most important difference is that Cassini+
+ * has a second RX descriptor ring.  Cassini+ will not work without
+ * configuring that second ring.  However, since we don't use it we
+ * don't actually fill the descriptors, and only hand off the first
+ * four to the chip.
  */
 
 #include "bpfilter.h"
@@ -304,6 +312,7 @@ cas_attach(struct device *parent, struct device *self, void *aux)
 	bus_size_t size;
 	int gotenaddr = 0;
 
+	sc->sc_rev = PCI_REVISION(pa->pa_class);
 	sc->sc_dmatag = pa->pa_dmat;
 
 #define PCI_CAS_BASEADDR	0x10
@@ -411,6 +420,8 @@ cas_config(struct cas_softc *sc)
 		    sc->sc_dev.dv_xname, error);
 		goto fail_3;
 	}
+
+	bzero(sc->sc_control_data, sizeof(struct cas_control_data));
 
 	/*
 	 * Create the receive buffer DMA maps.
@@ -521,10 +532,6 @@ cas_config(struct cas_softc *sc)
 		 */
 		bus_space_write_4(sc->sc_memt, sc->sc_memh,
 		    CAS_MII_DATAPATH_MODE, CAS_MII_DATAPATH_SERDES);
-
-		bus_space_write_4(sc->sc_memt, sc->sc_memh,
-		    CAS_MII_SLINK_CONTROL,
-		    CAS_MII_SLINK_LOOPBACK|CAS_MII_SLINK_EN_SYNC_D);
 
 		bus_space_write_4(sc->sc_memt, sc->sc_memh,
 		     CAS_MII_CONFIG, CAS_MII_CONFIG_ENABLE);
@@ -672,7 +679,8 @@ cas_reset(struct cas_softc *sc)
 	cas_reset_tx(sc);
 
 	/* Do a full reset */
-	bus_space_write_4(t, h, CAS_RESET, CAS_RESET_RX|CAS_RESET_TX);
+	bus_space_write_4(t, h, CAS_RESET,
+	    CAS_RESET_RX | CAS_RESET_TX | CAS_RESET_BLOCK_PCS);
 	if (!cas_bitwait(sc, h, CAS_RESET, CAS_RESET_RX | CAS_RESET_TX, 0))
 		printf("%s: cannot reset device\n", sc->sc_dev.dv_xname);
 	splx(s);
@@ -930,7 +938,6 @@ cas_cringsize(int sz)
 int
 cas_init(struct ifnet *ifp)
 {
-
 	struct cas_softc *sc = (struct cas_softc *)ifp->if_softc;
 	bus_space_tag_t t = sc->sc_memt;
 	bus_space_handle_t h = sc->sc_memh;
@@ -984,6 +991,14 @@ cas_init(struct ifnet *ifp)
 	    (((uint64_t)CAS_CDRXCADDR(sc,0)) >> 32));
 	bus_space_write_4(t, h, CAS_RX_CRING_PTR_LO, CAS_CDRXCADDR(sc, 0));
 
+	if (CAS_PLUS(sc)) {
+		KASSERT((CAS_CDRXADDR2(sc, 0) & 0x1fff) == 0);
+		bus_space_write_4(t, h, CAS_RX_DRING_PTR_HI2,
+		    (((uint64_t)CAS_CDRXADDR2(sc,0)) >> 32));
+		bus_space_write_4(t, h, CAS_RX_DRING_PTR_LO2,
+		    CAS_CDRXADDR2(sc, 0));
+	}
+
 	/* step 8. Global Configuration & Interrupt Mask */
 	bus_space_write_4(t, h, CAS_INTMASK,
 		      ~(CAS_INTR_TX_INTME|CAS_INTR_TX_EMPTY|
@@ -1010,6 +1025,8 @@ cas_init(struct ifnet *ifp)
 
 	/* Encode Receive Descriptor ring size */
 	v = cas_ringsize(CAS_NRXDESC) << CAS_RX_CONFIG_RXDRNG_SZ_SHIFT;
+	if (CAS_PLUS(sc))
+		v |= cas_ringsize(32) << CAS_RX_CONFIG_RXDRNG2_SZ_SHIFT;
 
 	/* Encode Receive Completion ring size */
 	v |= cas_cringsize(CAS_NRXCOMP) << CAS_RX_CONFIG_RXCRNG_SZ_SHIFT;
@@ -1039,6 +1056,8 @@ cas_init(struct ifnet *ifp)
 
 	/* step 15.  Give the receiver a swift kick */
 	bus_space_write_4(t, h, CAS_RX_KICK, CAS_NRXDESC-4);
+	if (CAS_PLUS(sc))
+		bus_space_write_4(t, h, CAS_RX_KICK2, 4);
 
 	/* Start the one second timer. */
 	timeout_add(&sc->sc_tick_ch, hz);
@@ -1188,7 +1207,7 @@ cas_rint(struct cas_softc *sc)
 				 */
 				if (ifp->if_bpf)
 					bpf_mtap(ifp->if_bpf, m, BPF_DIRECTION_IN);
-#endif /* NPBFILTER > 0 */
+#endif /* NBPFILTER > 0 */
 
 				ifp->if_ipackets++;
 				ether_input_mbuf(ifp, m);
@@ -1225,7 +1244,7 @@ cas_rint(struct cas_softc *sc)
 				 */
 				if (ifp->if_bpf)
 					bpf_mtap(ifp->if_bpf, m, BPF_DIRECTION_IN);
-#endif /* NPBFILTER > 0 */
+#endif /* NBPFILTER > 0 */
 
 				ifp->if_ipackets++;
 				ether_input_mbuf(ifp, m);
@@ -1464,16 +1483,6 @@ cas_mii_writereg(struct device *self, int phy, int reg, int val)
 			phy, reg, val);
 #endif
 
-#if 0
-	/* Select the desired PHY in the MIF configuration register */
-	v = bus_space_read_4(t, mif, CAS_MIF_CONFIG);
-	/* Clear PHY select bit */
-	v &= ~CAS_MIF_CONFIG_PHY_SEL;
-	if (phy == CAS_PHYAD_EXTERNAL)
-		/* Set PHY select bit to get at external device */
-		v |= CAS_MIF_CONFIG_PHY_SEL;
-	bus_space_write_4(t, mif, CAS_MIF_CONFIG, v);
-#endif
 	/* Construct the frame command */
 	v = CAS_MIF_FRAME_WRITE			|
 	    (phy << CAS_MIF_PHY_SHIFT)		|
@@ -1584,6 +1593,7 @@ cas_pcs_writereg(struct device *self, int phy, int reg, int val)
 	struct cas_softc *sc = (void *)self;
 	bus_space_tag_t t = sc->sc_memt;
 	bus_space_handle_t pcs = sc->sc_memh;
+	int reset = 0;
 
 #ifdef CAS_DEBUG
 	if (sc->sc_debug)
@@ -1594,8 +1604,12 @@ cas_pcs_writereg(struct device *self, int phy, int reg, int val)
 	if (phy != CAS_PHYAD_EXTERNAL)
 		return;
 
+	if (reg == MII_ANAR)
+		bus_space_write_4(t, pcs, CAS_MII_CONFIG, 0);
+
 	switch (reg) {
 	case MII_BMCR:
+		reset = (val & CAS_MII_CONTROL_RESET);
 		reg = CAS_MII_CONTROL;
 		break;
 	case MII_BMSR:
@@ -1613,12 +1627,12 @@ cas_pcs_writereg(struct device *self, int phy, int reg, int val)
 
 	bus_space_write_4(t, pcs, reg, val);
 
-	if (reg == CAS_MII_ANAR) {
-		bus_space_write_4(t, pcs, CAS_MII_SLINK_CONTROL,
-		    CAS_MII_SLINK_LOOPBACK|CAS_MII_SLINK_EN_SYNC_D);
+	if (reset)
+		cas_bitwait(sc, pcs, CAS_MII_CONTROL, CAS_MII_CONTROL_RESET, 0);
+
+	if (reg == CAS_MII_ANAR || reset)
 		bus_space_write_4(t, pcs, CAS_MII_CONFIG,
 		    CAS_MII_CONFIG_ENABLE);
-	}
 }
 
 int
@@ -1728,7 +1742,7 @@ cas_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		break;
 
 	default:
-		error = EINVAL;
+		error = ENOTTY;
 		break;
 	}
 

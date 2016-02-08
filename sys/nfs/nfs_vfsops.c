@@ -1,4 +1,4 @@
-/*	$OpenBSD: nfs_vfsops.c,v 1.66 2007/06/20 15:00:43 thib Exp $	*/
+/*	$OpenBSD: nfs_vfsops.c,v 1.69 2008/01/06 18:38:32 deraadt Exp $	*/
 /*	$NetBSD: nfs_vfsops.c,v 1.46.4.1 1996/05/25 22:40:35 fvdl Exp $	*/
 
 /*
@@ -115,7 +115,7 @@ nfs_statfs(mp, sbp, p)
 	caddr_t bpos, dpos, cp2;
 	struct nfsmount *nmp = VFSTONFS(mp);
 	int error = 0, v3 = (nmp->nm_flag & NFSMNT_NFSV3), retattr;
-	struct mbuf *mreq, *mrep = NULL, *md, *mb, *mb2;
+	struct mbuf *mreq, *mrep = NULL, *md, *mb;
 	struct ucred *cred;
 	struct nfsnode *np;
 	u_quad_t tquad;
@@ -169,7 +169,8 @@ nfs_statfs(mp, sbp, p)
 		    &sbp->mount_info.nfs_args, sizeof(struct nfs_args));
 	}
 	strncpy(&sbp->f_fstypename[0], mp->mnt_vfc->vfc_name, MFSNAMELEN);
-	nfsm_reqdone;
+	m_freem(mrep);
+nfsmout: 
 	vrele(vp);
 	crfree(cred);
 	return (error);
@@ -191,7 +192,7 @@ nfs_fsinfo(nmp, vp, cred, p)
 	u_int32_t *tl, pref, max;
 	caddr_t bpos, dpos, cp2;
 	int error = 0, retattr;
-	struct mbuf *mreq, *mrep, *md, *mb, *mb2;
+	struct mbuf *mreq, *mrep, *md, *mb;
 
 	nfsstats.rpccnt[NFSPROC_FSINFO]++;
 	nfsm_reqhead(vp, NFSPROC_FSINFO, NFSX_FH(1));
@@ -231,7 +232,8 @@ nfs_fsinfo(nmp, vp, cred, p)
 		}
 		nmp->nm_flag |= NFSMNT_GOTFSINFO;
 	}
-	nfsm_reqdone;
+	m_freem(mrep);
+nfsmout: 
 	return (error);
 }
 
@@ -671,9 +673,8 @@ mountnfs(argp, mp, nam, pth, hst)
 		m_freem(nam);
 		return (0);
 	} else {
-		MALLOC(nmp, struct nfsmount *, sizeof (struct nfsmount),
-		    M_NFSMNT, M_WAITOK);
-		bzero((caddr_t)nmp, sizeof (struct nfsmount));
+		nmp = malloc(sizeof(struct nfsmount), M_NFSMNT,
+		    M_WAITOK|M_ZERO);
 		mp->mnt_data = (qaddr_t)nmp;
 		TAILQ_INIT(&nmp->nm_uidlruhead);
 	}

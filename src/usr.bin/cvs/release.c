@@ -1,4 +1,4 @@
-/*	$OpenBSD: release.c,v 1.34 2007/06/26 18:02:43 xsa Exp $	*/
+/*	$OpenBSD: release.c,v 1.40 2008/02/24 11:06:13 xsa Exp $	*/
 /*-
  * Copyright (c) 2005-2007 Xavier Santolaria <xsa@openbsd.org>
  *
@@ -23,8 +23,6 @@
 #include "cvs.h"
 #include "remote.h"
 
-extern char *__progname;
-
 void	cvs_release_local(struct cvs_file *);
 
 static void	release_check_files(struct cvs_file *);
@@ -33,7 +31,7 @@ static int	dflag = 0;
 static int	files_altered = 0;
 
 struct cvs_cmd cvs_cmd_release = {
-	CVS_OP_RELEASE, 0, "release",
+	CVS_OP_RELEASE, CVS_USE_WDIR, "release",
 	{ "re", "rel" },
 	"Indicate that a Module is no longer in use",
 	"[-d] dir...",
@@ -107,7 +105,7 @@ cvs_release_local(struct cvs_file *cf)
 
 	cvs_log(LP_TRACE, "cvs_release_local(%s)", cf->file_path);
 
-	cvs_file_classify(cf, NULL);
+	cvs_file_classify(cf, cvs_directory_tag);
 
 	if (cvs_server_active == 1) {
 		cvs_history_add(CVS_HISTORY_RELEASE, cf, NULL);
@@ -125,11 +123,16 @@ cvs_release_local(struct cvs_file *cf)
 		cvs_chdir(cf->file_path, 0);
 
 		if (stat(CVS_PATH_CVSDIR, &st) == -1 || !S_ISDIR(st.st_mode)) {
-			cvs_log(LP_ERR, "no repository directory: %s",
-			    cf->file_path);
+			if (verbosity > 0)
+				cvs_log(LP_ERR, "no repository directory: %s",
+				    cf->file_path);
 			return;
 		}
 	}
+
+	/* Skip the interactive part if -Q is specified. */
+	if (verbosity == 0)
+		goto delete;
 
 	saved_noexec = cvs_noexec;
 	cvs_noexec = 1;
@@ -157,7 +160,7 @@ cvs_release_local(struct cvs_file *cf)
 
 	if (cvs_yesno() == -1) {
 		(void)fprintf(stderr,
-		    "** `%s' aborted by user choice.\n", cvs_command);
+		    "** `%s' aborted by user choice.\n", cmdp->cmd_name);
 
 		/* change back to original working dir */
 		cvs_chdir(wdir, 0);
@@ -168,6 +171,7 @@ cvs_release_local(struct cvs_file *cf)
 	/* change back to original working dir */
 	cvs_chdir(wdir, 0);
 
+delete:
 	if (dflag == 1) {
 		if (cvs_rmdir(cf->file_path) != 0)
 			fatal("cvs_release_local: cvs_rmdir failed");
@@ -179,7 +183,7 @@ release_check_files(struct cvs_file *cf)
 {
 	cvs_log(LP_TRACE, "release_check_files(%s)", cf->file_path);
 
-	cvs_file_classify(cf, NULL);
+	cvs_file_classify(cf, cvs_directory_tag);
 
 	if (cf->file_status == FILE_MERGE ||
 	    cf->file_status == FILE_ADDED ||

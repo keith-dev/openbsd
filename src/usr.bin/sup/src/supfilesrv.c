@@ -1,4 +1,4 @@
-/*	$OpenBSD: supfilesrv.c,v 1.36 2006/03/04 16:18:06 miod Exp $	*/
+/*	$OpenBSD: supfilesrv.c,v 1.38 2007/09/14 14:29:20 chl Exp $	*/
 
 /*
  * Copyright (c) 1992 Carnegie Mellon University
@@ -547,7 +547,7 @@ init(argc, argv)
 	int i;
 	int x;
 	char *clienthost, *clientuser;
-	char *p, *q;
+	char *p;
 	char buf[STRINGLENGTH];
 	int maxsleep;
 	FILE *f;
@@ -637,11 +637,13 @@ init(argc, argv)
 	if (f == NULL)
 		quit(1, "Unable to open cryptfile %s\n", cryptkey);
 	if ((p = fgets(buf, sizeof(buf), f)) != NULL) {
-		if ((q = strchr(p, '\n')))
-			*q = '\0';
+		p[strcspn(p, "\n")] = '\0';
 		if (*p == '\0')
 			quit(1, "No cryptkey found in %s\n", cryptkey);
 		cryptkey = strdup(buf);
+		if (cryptkey == NULL)
+			quit(1, "Unable to allocate memory\n");
+			
 	}
 	(void) fclose(f);
 	x = request (dbgportsq ? DEBUGFPORT : FILEPORT, clienthost, &maxsleep);
@@ -864,9 +866,7 @@ srvsetup()
 				struct stat fsbuf;
 
 				while ((p = fgets(buf, sizeof(buf), f)) != NULL) {
-					q = strchr(p, '\n');
-					if (q)
-						*q = '\0';
+					p[strcspn(p, "\n")] = '\0';
 					if (strchr("#;:", *p))
 						continue;
 					q = nxtarg(&p, " \t");
@@ -922,9 +922,7 @@ srvsetup()
 		f = fopen(buf, "r");
 		if (f) {
 			while ((p = fgets(buf, sizeof(buf), f)) != NULL) {
-				q = strchr(p, '\n');
-				if (q)
-					*q = '\0';
+				p[strcspn(p, "\n")] = '\0';
 				if (strchr("#;:", *p))
 					continue;
 				q = nxtarg(&p, " \t=");
@@ -948,9 +946,7 @@ srvsetup()
 	f = fopen(buf, "r");
 	if (f) {
 		while ((p = fgets(buf, sizeof(buf), f)) != NULL) {
-			q = strchr(p, '\n');
-			if (q)
-				*q = '\0';
+			p[strcspn(p, "\n")] = '\0';
 			if (strchr("#;:", *p))
 				continue;
 			prefix = strdup(p);
@@ -1002,9 +998,7 @@ srvsetup()
 			while ((p = fgets (buf, sizeof(buf), f)) != NULL) {
 				int not;
 
-				q = strchr (p,'\n');
-				if (q)
-					*q = '\0';
+				p[strcspn(p, "\n")] = '\0';
 				if (strchr("#;:", *p))
 					continue;
 				q = nxtarg(&p, " \t");
@@ -1061,7 +1055,7 @@ void
 docrypt()
 {
 	int x;
-	char *p,*q;
+	char *p;
 	char buf[STRINGLENGTH];
 	FILE *f;
 	struct stat sbuf;
@@ -1080,8 +1074,7 @@ docrypt()
 
 				if (cryptkey == NULL &&
 				    (p = fgets(buf, sizeof(buf), f))) {
-					if ((q = strchr(p, '\n')) != NULL)
-						*q = '\0';
+					p[strcspn(p, "\n")] = '\0';
 					if (*p)
 						cryptkey = strdup(buf);
 				}

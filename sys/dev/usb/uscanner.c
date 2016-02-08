@@ -1,4 +1,4 @@
-/*	$OpenBSD: uscanner.c,v 1.35 2007/06/14 10:11:16 mbalmer Exp $ */
+/*	$OpenBSD: uscanner.c,v 1.39 2008/02/26 18:34:18 deraadt Exp $ */
 /*	$NetBSD: uscanner.c,v 1.40 2003/01/27 00:32:44 wiz Exp $	*/
 
 /*
@@ -176,6 +176,11 @@ static const struct uscan_info uscanner_devs[] = {
  {{ USB_VENDOR_EPSON, USB_PRODUCT_EPSON_640U }, 0 },
  {{ USB_VENDOR_EPSON, USB_PRODUCT_EPSON_1650 }, 0 },
  {{ USB_VENDOR_EPSON, USB_PRODUCT_EPSON_2400 }, 0 },
+ {{ USB_VENDOR_EPSON, USB_PRODUCT_EPSON_DX3800 }, 0 },
+ {{ USB_VENDOR_EPSON, USB_PRODUCT_EPSON_DX4000 }, 0 },
+ {{ USB_VENDOR_EPSON, USB_PRODUCT_EPSON_DX5000 }, 0 },
+ {{ USB_VENDOR_EPSON, USB_PRODUCT_EPSON_DX6000 }, 0 },
+ {{ USB_VENDOR_EPSON, USB_PRODUCT_EPSON_CX5400 }, 0 },
  {{ USB_VENDOR_EPSON, USB_PRODUCT_EPSON_GT9700F }, USC_KEEP_OPEN },
 
   /* UMAX */
@@ -259,12 +264,28 @@ int
 uscanner_match(struct device *parent, void *match, void *aux)
 {
 	struct usb_attach_arg *uaa = aux;
+	usb_interface_descriptor_t *id;
 
-	if (uaa->iface != NULL)
+	if (uaa->iface == NULL)
+		return UMATCH_NONE; /* do not grab the entire device */
+
+	if (uscanner_lookup(uaa->vendor, uaa->product) == NULL)
+		return UMATCH_NONE; /* not in the list of known devices */
+	id = usbd_get_interface_descriptor(uaa->iface);
+	if (id == NULL)
 		return UMATCH_NONE;
 
-	return (uscanner_lookup(uaa->vendor, uaa->product) != NULL ?
-		UMATCH_VENDOR_PRODUCT : UMATCH_NONE);
+	/*
+	* There isn't a specific UICLASS for scanners, many vendors use
+	* UICLASS_VENDOR, so detecting the right interface is not so easy.
+	* But certainly we can exclude PRINTER and MASS - which some
+	* multifunction devices implement.
+	*/
+	if (id->bInterfaceClass == UICLASS_PRINTER ||
+	    id->bInterfaceClass == UICLASS_MASS)
+		return UMATCH_NONE;
+
+	return UMATCH_VENDOR_PRODUCT;
 }
 
 void
@@ -274,27 +295,18 @@ uscanner_attach(struct device *parent, struct device *self, void *aux)
 	struct usb_attach_arg *uaa = aux;
 	usb_interface_descriptor_t *id = 0;
 	usb_endpoint_descriptor_t *ed, *ed_bulkin = NULL, *ed_bulkout = NULL;
-	char *devinfop;
 	int i;
 	usbd_status err;
-
-	devinfop = usbd_devinfo_alloc(uaa->device, 0);
-	printf("\n%s: %s\n", sc->sc_dev.dv_xname, devinfop);
-	usbd_devinfo_free(devinfop);
+	int ifnum;
 
 	sc->sc_dev_flags = uscanner_lookup(uaa->vendor, uaa->product)->flags;
 
 	sc->sc_udev = uaa->device;
 
-	err = usbd_set_config_no(uaa->device, 1, 1); /* XXX */
-	if (err) {
-		printf("%s: setting config no failed\n",
-		    sc->sc_dev.dv_xname);
-		return;
-	}
+	id = usbd_get_interface_descriptor(uaa->iface);
+	ifnum = id->bInterfaceNumber;
 
-	/* XXX We only check the first interface */
-	err = usbd_device2interface_handle(sc->sc_udev, 0, &sc->sc_iface);
+	err = usbd_device2interface_handle(sc->sc_udev, ifnum, &sc->sc_iface);
 	if (!err && sc->sc_iface)
 	    id = usbd_get_interface_descriptor(sc->sc_iface);
 	if (err || id == 0) {

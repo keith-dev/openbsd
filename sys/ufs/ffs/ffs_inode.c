@@ -1,4 +1,4 @@
-/*	$OpenBSD: ffs_inode.c,v 1.49 2007/06/01 18:54:27 pedro Exp $	*/
+/*	$OpenBSD: ffs_inode.c,v 1.52 2008/01/05 19:49:26 otto Exp $	*/
 /*	$NetBSD: ffs_inode.c,v 1.10 1996/05/11 18:27:19 mycroft Exp $	*/
 
 /*
@@ -53,7 +53,7 @@
 #include <ufs/ffs/fs.h>
 #include <ufs/ffs/ffs_extern.h>
 
-int ffs_indirtrunc(struct inode *, daddr_t, daddr_t, daddr_t, int, long *);
+int ffs_indirtrunc(struct inode *, daddr64_t, daddr64_t, daddr64_t, int, long *);
 
 /*
  * Update the access, modified, and inode change times as specified by the
@@ -79,11 +79,6 @@ ffs_update(struct inode *ip, struct timespec *atime,
 		ip->i_flag &=
 		    ~(IN_ACCESS | IN_CHANGE | IN_MODIFIED | IN_UPDATE);
 		return (0);
-	}
-
-	if ((vp->v_mount->mnt_flag & MNT_NOATIME) &&
-	    !(ip->i_flag & (IN_CHANGE | IN_UPDATE))) {
-		ip->i_flag &= ~IN_ACCESS;
 	}
 
 	if ((ip->i_flag &
@@ -465,15 +460,15 @@ done:
  * NB: triple indirect blocks are untested.
  */
 int
-ffs_indirtrunc(struct inode *ip, daddr_t lbn, daddr_t dbn, daddr_t lastbn,
-    int level, long *countp)
+ffs_indirtrunc(struct inode *ip, daddr64_t lbn, daddr64_t dbn,
+    daddr64_t lastbn, int level, long *countp)
 {
 	int i;
 	struct buf *bp;
 	struct fs *fs = ip->i_fs;
 	struct vnode *vp;
 	void *copy = NULL;
-	daddr_t nb, nlbn, last;
+	daddr64_t nb, nlbn, last;
 	long blkcount, factor;
 	int nblocks, blocksreleased = 0;
 	int error = 0, allerror = 0;
@@ -527,7 +522,7 @@ ffs_indirtrunc(struct inode *ip, daddr_t lbn, daddr_t dbn, daddr_t lastbn,
 		bap1 = (int32_t *)bp->b_data;
 
 	if (lastbn != -1) {
-		MALLOC(copy, void *, fs->fs_bsize, M_TEMP, M_WAITOK);
+		copy = malloc(fs->fs_bsize, M_TEMP, M_WAITOK);
 		bcopy(bp->b_data, copy, (u_int) fs->fs_bsize);
 
 		for (i = last + 1; i < NINDIR(fs); i++)
@@ -559,7 +554,7 @@ ffs_indirtrunc(struct inode *ip, daddr_t lbn, daddr_t dbn, daddr_t lastbn,
 			continue;
 		if (level > SINGLE) {
 			error = ffs_indirtrunc(ip, nlbn, fsbtodb(fs, nb),
-					       (daddr_t)-1, level - 1,
+					       (daddr64_t)-1, level - 1,
 					       &blkcount);
 			if (error)
 				allerror = error;
@@ -584,7 +579,7 @@ ffs_indirtrunc(struct inode *ip, daddr_t lbn, daddr_t dbn, daddr_t lastbn,
 		}
 	}
 	if (copy != NULL) {
-		FREE(copy, M_TEMP);
+		free(copy, M_TEMP);
 	} else {
 		bp->b_flags |= B_INVAL;
 		brelse(bp);

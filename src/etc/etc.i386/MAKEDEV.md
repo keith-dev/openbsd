@@ -1,5 +1,5 @@
 vers(__file__,
-	{-$OpenBSD: MAKEDEV.md,v 1.38 2007/07/23 23:21:25 todd Exp $-},
+	{-$OpenBSD: MAKEDEV.md,v 1.40 2007/11/25 17:11:11 oga Exp $-},
 etc.MACHINE)dnl
 dnl
 dnl Copyright (c) 2001-2006 Todd T. Fries <todd@OpenBSD.org>
@@ -17,9 +17,11 @@ dnl ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
 dnl OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 dnl
 dnl
+__devitem(agp, agp*, AGP bridge)dnl
 __devitem(apm, apm, Power management device)dnl
-__devitem(acpi, acpi, Advanced Configuration and Power Interface)dnl
 __devitem(nvram, nvram, NVRAM access)dnl
+_mkdev(agp, agp*, {-M agp$U c major_agp_c $U
+	MKlist[${#MKlist[*]}]=";[ -e agpgart ] || ln -s agp$U agpgart"-})dnl
 _mkdev(nvram, nvram, {-M nvram c major_nvram_c 0 440 kmem-})dnl
 _TITLE(make)
 _DEV(all)
@@ -66,8 +68,8 @@ _DEV(urio, 65)
 _DEV(usb, 61)
 _DEV(uscan, 77)
 _TITLE(spec)
+_DEV(agp, 87)
 _DEV(apm, 21)
-_DEV(acpi, 85)
 _DEV(au, 42)
 _DEV(bio, 79)
 _DEV(bktr, 49)
@@ -134,5 +136,6 @@ target(all, bktr, 0)dnl
 target(all, gpio, 0, 1, 2)dnl
 target(all, nvram)dnl
 target(all, bthub, 0, 1, 2)dnl
+target(all, agp, 0)dnl
 twrget(ramd, wsdisp, ttyC, 0)dnl
 target(ramd, mcd, 0)dnl

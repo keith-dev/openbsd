@@ -1,4 +1,4 @@
-/*	$OpenBSD: brgphy.c,v 1.71 2007/01/30 02:35:16 krw Exp $	*/
+/*	$OpenBSD: brgphy.c,v 1.75 2008/03/02 16:05:26 brad Exp $	*/
 
 /*
  * Copyright (c) 2000
@@ -127,14 +127,18 @@ static const struct mii_phydesc brgphys[] = {
 	  MII_STR_xxBROADCOM_BCM5752 },
 	{ MII_OUI_xxBROADCOM,		MII_MODEL_xxBROADCOM_BCM5780,
 	  MII_STR_xxBROADCOM_BCM5780 },
+	{ MII_OUI_xxBROADCOM2,		MII_MODEL_xxBROADCOM2_BCM5722,
+	  MII_STR_xxBROADCOM2_BCM5722 },
 	{ MII_OUI_xxBROADCOM2,		MII_MODEL_xxBROADCOM2_BCM5755,
 	  MII_STR_xxBROADCOM2_BCM5755 },
 	{ MII_OUI_xxBROADCOM2,		MII_MODEL_xxBROADCOM2_BCM5787,
 	  MII_STR_xxBROADCOM2_BCM5787 },
-	{ MII_OUI_xxBROADCOM,		MII_MODEL_xxBROADCOM_BCM5706C,
-	  MII_STR_xxBROADCOM_BCM5706C },
+	{ MII_OUI_xxBROADCOM,		MII_MODEL_xxBROADCOM_BCM5706,
+	  MII_STR_xxBROADCOM_BCM5706 },
 	{ MII_OUI_xxBROADCOM,		MII_MODEL_xxBROADCOM_BCM5708C,
 	  MII_STR_xxBROADCOM_BCM5708C },
+	{ MII_OUI_BROADCOM2,		MII_MODEL_BROADCOM2_BCM5906,
+	  MII_STR_BROADCOM2_BCM5906 },
 
 	{ 0,				0,
 	  NULL },
@@ -371,7 +375,7 @@ brgphy_status(struct mii_softc *sc)
 			mii->mii_media_active |= IFM_100_TX | IFM_FDX;
 			break;
 		case BRGPHY_RES_100T4:
-			mii->mii_media_active |= IFM_100_T4;
+			mii->mii_media_active |= IFM_100_T4 | IFM_HDX;
 			break;
 		case BRGPHY_RES_100HD:
 			mii->mii_media_active |= IFM_100_TX | IFM_HDX;

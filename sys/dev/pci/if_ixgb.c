@@ -31,7 +31,7 @@ POSSIBILITY OF SUCH DAMAGE.
 
 ***************************************************************************/
 
-/* $OpenBSD: if_ixgb.c,v 1.36 2006/12/04 14:35:20 reyk Exp $ */
+/* $OpenBSD: if_ixgb.c,v 1.40 2008/03/02 08:42:42 brad Exp $ */
 
 #include <dev/pci/if_ixgb.h>
 
@@ -838,7 +838,7 @@ ixgb_update_link_status(struct ixgb_softc *sc)
 
 	if (sc->hw.link_up) {
 		if (!sc->link_active) {
-			ifp->if_baudrate = 1000000000;
+			ifp->if_baudrate = IF_Gbps(10);
 			sc->link_active = 1;
 			ifp->if_link_state = LINK_STATE_FULL_DUPLEX;
 			if_link_state_change(ifp);
@@ -1154,16 +1154,12 @@ ixgb_dma_free(struct ixgb_softc *sc, struct ixgb_dma_alloc *dma)
 int
 ixgb_allocate_transmit_structures(struct ixgb_softc *sc)
 {
-	if (!(sc->tx_buffer_area =
-	      (struct ixgb_buffer *) malloc(sizeof(struct ixgb_buffer) *
-					    sc->num_tx_desc, M_DEVBUF,
-					    M_NOWAIT))) {
+	if (!(sc->tx_buffer_area = malloc(sizeof(struct ixgb_buffer) *
+	    sc->num_tx_desc, M_DEVBUF, M_NOWAIT | M_ZERO))) {
 		printf("%s: Unable to allocate tx_buffer memory\n",
 		       sc->sc_dv.dv_xname);
 		return (ENOMEM);
 	}
-	bzero(sc->tx_buffer_area,
-	      sizeof(struct ixgb_buffer) * sc->num_tx_desc);
 
 	return (0);
 }
@@ -1500,7 +1496,7 @@ ixgb_get_buf(struct ixgb_softc *sc, int i,
 	error = bus_dmamap_load_mbuf(sc->rxtag, rx_buffer->map,
 	    mp, BUS_DMA_NOWAIT);
 	if (error) {
-		m_free(mp);
+		m_freem(mp);
 		return (error);
 	}
 	rx_buffer->m_head = mp;
@@ -1525,17 +1521,12 @@ ixgb_allocate_receive_structures(struct ixgb_softc *sc)
 	int             i, error;
 	struct ixgb_buffer *rx_buffer;
 
-	if (!(sc->rx_buffer_area =
-	      (struct ixgb_buffer *) malloc(sizeof(struct ixgb_buffer) *
-					    sc->num_rx_desc, M_DEVBUF,
-					    M_NOWAIT))) {
+	if (!(sc->rx_buffer_area = malloc(sizeof(struct ixgb_buffer) *
+	    sc->num_rx_desc, M_DEVBUF, M_NOWAIT | M_ZERO))) {
 		printf("%s: Unable to allocate rx_buffer memory\n",
 		       sc->sc_dv.dv_xname);
 		return (ENOMEM);
 	}
-
-	bzero(sc->rx_buffer_area,
-	      sizeof(struct ixgb_buffer) * sc->num_rx_desc);
 
 	sc->rxtag = sc->osdep.ixgb_pa.pa_dmat;
 
@@ -1928,8 +1919,13 @@ ixgb_receive_checksum(struct ixgb_softc *sc,
 void
 ixgb_enable_intr(struct ixgb_softc *sc)
 {
-	IXGB_WRITE_REG(&sc->hw, IMS, (IXGB_INT_RXT0 | IXGB_INT_TXDW |
-			    IXGB_INT_RXDMT0 | IXGB_INT_LSC | IXGB_INT_RXO));
+	uint32_t val;
+
+	val = IXGB_INT_RXT0 | IXGB_INT_TXDW | IXGB_INT_RXDMT0 |
+	      IXGB_INT_LSC | IXGB_INT_RXO;
+	if (sc->hw.subsystem_vendor_id == SUN_SUBVENDOR_ID)
+		val |= IXGB_INT_GPI0;
+	IXGB_WRITE_REG(&sc->hw, IMS, val);
 }
 
 void

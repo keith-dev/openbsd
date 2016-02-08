@@ -1,4 +1,4 @@
-/*	$OpenBSD: remove.c,v 1.65 2007/06/28 21:38:09 xsa Exp $	*/
+/*	$OpenBSD: remove.c,v 1.72 2008/02/09 20:04:00 xsa Exp $	*/
 /*
  * Copyright (c) 2005, 2006 Xavier Santolaria <xsa@openbsd.org>
  *
@@ -32,7 +32,7 @@ static int	removed = 0;
 static int	existing = 0;
 
 struct cvs_cmd cvs_cmd_remove = {
-	CVS_OP_REMOVE, 0, "remove",
+	CVS_OP_REMOVE, CVS_USE_WDIR, "remove",
 	{ "rm", "delete" },
 	"Remove an entry from the repository",
 	"[-flR] [file ...]",
@@ -59,6 +59,7 @@ cvs_remove(int argc, char **argv)
 			flags &= ~CR_RECURSE_DIRS;
 			break;
 		case 'R':
+			flags |= CR_RECURSE_DIRS;
 			break;
 		default:
 			fatal("%s", cvs_cmd_remove.cmd_synopsis);
@@ -136,6 +137,7 @@ cvs_remove_local(struct cvs_file *cf)
 {
 	CVSENTRIES *entlist;
 	char *entry, buf[MAXPATHLEN], tbuf[CVS_TIME_BUFSZ], rbuf[CVS_REV_BUFSZ];
+	char sticky[CVS_ENT_MAXLINELEN];
 
 	cvs_log(LP_TRACE, "cvs_remove_local(%s)", cf->file_path);
 
@@ -145,7 +147,7 @@ cvs_remove_local(struct cvs_file *cf)
 		return;
 	}
 
-	cvs_file_classify(cf, NULL);
+	cvs_file_classify(cf, cvs_directory_tag);
 
 	if (cf->file_status == FILE_UNKNOWN) {
 		if (verbosity > 1)
@@ -185,16 +187,20 @@ cvs_remove_local(struct cvs_file *cf)
 			}
 			return;
 		default:
-			rcsnum_tostr(cf->file_ent->ce_rev, rbuf,
-			     sizeof(rbuf));
+			rcsnum_tostr(cf->file_ent->ce_rev, rbuf, sizeof(rbuf));
 
 			ctime_r(&cf->file_ent->ce_mtime, tbuf);
-			if (tbuf[strlen(tbuf) - 1] == '\n')
-				tbuf[strlen(tbuf) - 1] = '\0';
+			tbuf[strcspn(tbuf, "\n")] = '\0';
+
+			sticky[0] = '\0';
+			if (cf->file_ent->ce_tag != NULL)
+				(void)xsnprintf(sticky, sizeof(sticky), "T%s",
+				    cf->file_ent->ce_tag);
 
 			entry = xmalloc(CVS_ENT_MAXLINELEN);
-			(void)xsnprintf(entry, CVS_ENT_MAXLINELEN,
-			     "/%s/-%s/%s//", cf->file_name, rbuf, tbuf);
+			cvs_ent_line_str(cf->file_name, rbuf, tbuf,
+			    cf->file_ent->ce_opts ? : "", sticky, 0, 1,
+			    entry, CVS_ENT_MAXLINELEN);
 
 			if (cvs_server_active == 1) {
 				cvs_server_update_entry("Checked-in", cf);

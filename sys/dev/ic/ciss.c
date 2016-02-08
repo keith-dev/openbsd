@@ -1,4 +1,4 @@
-/*	$OpenBSD: ciss.c,v 1.27 2007/06/24 05:34:35 dlg Exp $	*/
+/*	$OpenBSD: ciss.c,v 1.29 2007/10/20 16:10:09 krw Exp $	*/
 
 /*
  * Copyright (c) 2005,2006 Michael Shalayeff
@@ -350,12 +350,11 @@ ciss_attach(struct ciss_softc *sc)
 	}
 
 	if (!(sc->sc_lds = malloc(sc->maxunits * sizeof(*sc->sc_lds),
-	    M_DEVBUF, M_NOWAIT))) {
+	    M_DEVBUF, M_NOWAIT | M_ZERO))) {
 		bus_dmamem_free(sc->dmat, sc->cmdseg, 1);
 		bus_dmamap_destroy(sc->dmat, sc->cmdmap);
 		return -1;
 	}
-	bzero(sc->sc_lds, sc->maxunits * sizeof(*sc->sc_lds));
 
 	sc->sc_flush = CISS_FLUSH_ENABLE;
 	if (!(sc->sc_sh = shutdownhook_establish(ciss_shutdown, sc))) {
@@ -422,9 +421,8 @@ ciss_attach(struct ciss_softc *sc)
 	sc->sc_flags |= CISS_BIO;
 #ifndef SMALL_KERNEL
 	sc->sensors = malloc(sizeof(struct ksensor) * sc->maxunits,
-	    M_DEVBUF, M_NOWAIT);
+	    M_DEVBUF, M_NOWAIT | M_ZERO);
 	if (sc->sensors) {
-		bzero(sc->sensors, sizeof(struct ksensor) * sc->maxunits);
 		strlcpy(sc->sensordev.xname, sc->sc_dev.dv_xname,
 		    sizeof(sc->sensordev.xname));
 		for (i = 0; i < sc->maxunits;
@@ -832,6 +830,7 @@ ciss_scsi_raw_cmd(struct scsi_xfer *xs)	/* TODO */
 
 	CISS_DPRINTF(CISS_D_CMD, ("ciss_scsi_raw_cmd "));
 
+	lock = CISS_LOCK(sc);
 	if (xs->cmdlen > CISS_MAX_CDB) {
 		CISS_DPRINTF(CISS_D_CMD, ("CDB too big %p ", xs));
 		bzero(&xs->sense, sizeof(xs->sense));
@@ -840,10 +839,10 @@ ciss_scsi_raw_cmd(struct scsi_xfer *xs)	/* TODO */
 		xs->sense.add_sense_code = 0x20; /* illcmd, 0x24 illfield */
 		xs->error = XS_SENSE;
 		scsi_done(xs);
+		CISS_UNLOCK(sc, lock);
 		return (COMPLETE);
 	}
 
-	lock = CISS_LOCK(sc);
 	error = 0;
 	xs->error = XS_NOERROR;
 
@@ -892,6 +891,7 @@ ciss_scsi_cmd(struct scsi_xfer *xs)
 
 	CISS_DPRINTF(CISS_D_CMD, ("ciss_scsi_cmd "));
 
+	lock = CISS_LOCK(sc);
 	if (xs->cmdlen > CISS_MAX_CDB) {
 		CISS_DPRINTF(CISS_D_CMD, ("CDB too big %p ", xs));
 		bzero(&xs->sense, sizeof(xs->sense));
@@ -900,10 +900,10 @@ ciss_scsi_cmd(struct scsi_xfer *xs)
 		xs->sense.add_sense_code = 0x20; /* illcmd, 0x24 illfield */
 		xs->error = XS_SENSE;
 		scsi_done(xs);
+		CISS_UNLOCK(sc, lock);
 		return (COMPLETE);
 	}
 
-	lock = CISS_LOCK(sc);
 	error = 0;
 	xs->error = XS_NOERROR;
 

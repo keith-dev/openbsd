@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_workq.c,v 1.3 2007/06/11 22:15:11 thib Exp $ */
+/*	$OpenBSD: kern_workq.c,v 1.7 2008/02/15 04:08:36 tedu Exp $ */
 
 /*
  * Copyright (c) 2007 David Gwynne <dlg@openbsd.org>
@@ -104,7 +104,7 @@ workq_create(const char *name, int maxqs)
 void
 workq_destroy(struct workq *wq)
 {
-	int			s;
+	int s;
 
 	s = splhigh();
 
@@ -120,15 +120,14 @@ workq_destroy(struct workq *wq)
 }
 
 int
-workq_add_task(struct workq *wq, int flags, workq_fn func,
-    void *a1, void *a2)
+workq_add_task(struct workq *wq, int flags, workq_fn func, void *a1, void *a2)
 {
 	struct workq_task	*wqt;
-	int			wake = 1;
 	int			s;
 
-	if (wq == NULL)
+	if (wq == NULL) {
 		wq = &workq_syswq;
+	}
 	
 	s = splhigh();
 	wqt = pool_get(&workq_task_pool, (flags & WQ_WAITOK) ?
@@ -144,14 +143,9 @@ workq_add_task(struct workq *wq, int flags, workq_fn func,
 
 	s = splhigh();
 	SIMPLEQ_INSERT_TAIL(&wq->wq_tasklist, wqt, wqt_entry);
-	if ((wq->wq_running < wq->wq_max) && (wq->wq_running == wq->wq_busy)) {
-		kthread_create_deferred(workq_create_thread, wq);
-		wake = 0;
-	}
 	splx(s);
 
-	if (wake)
-		wakeup_one(wq);
+	wakeup_one(wq);
 
 	return (0);
 }
@@ -185,15 +179,12 @@ workq_thread(void *arg)
 			wq->wq_busy++;
 			splx(s);
 
-			if (wqt->wqt_flags & WQ_MPSAFE)
-				;
 			wqt->wqt_func(wqt->wqt_arg1, wqt->wqt_arg2);
-			if (wqt->wqt_flags & WQ_MPSAFE)
-				;
 
 			s = splhigh();
-			wq->wq_busy--;
 			pool_put(&workq_task_pool, wqt);
+
+			wq->wq_busy--;
 		}
 		tsleep(wq, PWAIT, "bored", 0);
 	}
@@ -201,5 +192,6 @@ workq_thread(void *arg)
 	splx(s);
 	wakeup(&wq->wq_running);
 
+	KERNEL_PROC_LOCK(curproc);
 	kthread_exit(0);
 }

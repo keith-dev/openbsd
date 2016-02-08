@@ -1,4 +1,4 @@
-/*	$OpenBSD: tcp_usrreq.c,v 1.91 2007/06/25 12:17:43 markus Exp $	*/
+/*	$OpenBSD: tcp_usrreq.c,v 1.95 2007/12/13 20:00:53 reyk Exp $	*/
 /*	$NetBSD: tcp_usrreq.c,v 1.20 1996/02/13 23:44:16 christos Exp $	*/
 
 /*
@@ -78,6 +78,7 @@
 #include <sys/sysctl.h>
 #include <sys/domain.h>
 #include <sys/kernel.h>
+#include <sys/pool.h>
 
 #include <dev/rndvar.h>
 
@@ -181,6 +182,9 @@ tcp_usrreq(so, req, m, nam, control)
 	 * structure will point at a subsidiary (struct tcpcb).
 	 */
 	if (inp == 0 && req != PRU_ATTACH) {
+		error = so->so_error;
+		if (error == 0)
+			error = EINVAL;
 		splx(s);
 		/*
 		 * The following corrects an mbuf leak under rare
@@ -188,7 +192,7 @@ tcp_usrreq(so, req, m, nam, control)
 		 */
 		if (m && (req == PRU_SEND || req == PRU_SENDOOB))
 			m_freem(m);
-		return (EINVAL);		/* XXX */
+		return (error);
 	}
 	if (inp) {
 		tp = intotcpcb(inp);
@@ -329,12 +333,7 @@ tcp_usrreq(so, req, m, nam, control)
 		tcpstat.tcps_connattempt++;
 		tp->t_state = TCPS_SYN_SENT;
 		TCP_TIMER_ARM(tp, TCPT_KEEP, tcptv_keep_init);
-#ifdef TCP_COMPAT_42
-		tp->iss = tcp_iss;
-		tcp_iss += TCP_ISSINCR/2;
-#else  /* TCP_COMPAT_42 */
 		tcp_set_iss_tsm(tp);
-#endif /* !TCP_COMPAT_42 */
 		tcp_sendseqinit(tp);
 #if defined(TCP_SACK)
 		tp->snd_last = tp->snd_una;
@@ -955,6 +954,13 @@ tcp_sysctl(name, namelen, oldp, oldlenp, newp, newlen)
 		}
 		return (0);
 #endif
+
+	case TCPCTL_STATS:
+		if (newp != NULL)
+			return (EPERM);
+		return (sysctl_struct(oldp, oldlenp, newp, newlen,
+		    &tcpstat, sizeof(tcpstat)));
+
 	default:
 		if (name[0] < TCPCTL_MAXID)
 			return (sysctl_int_arr(tcpctl_vars, name, namelen,

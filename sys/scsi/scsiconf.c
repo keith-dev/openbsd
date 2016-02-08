@@ -1,4 +1,4 @@
-/*	$OpenBSD: scsiconf.c,v 1.125 2007/05/08 18:50:39 deraadt Exp $	*/
+/*	$OpenBSD: scsiconf.c,v 1.129 2007/11/26 15:40:51 dlg Exp $	*/
 /*	$NetBSD: scsiconf.c,v 1.57 1996/05/02 01:09:01 neil Exp $	*/
 
 /*
@@ -149,6 +149,7 @@ scsibusattach(struct device *parent, struct device *self, void *aux)
 	if (!cold)
 		scsi_autoconf = 0;
 
+	sc_link_proto->bus = sb;
 	sc_link_proto->scsibus = sb->sc_dev.dv_unit;
 	sb->adapter_link = sc_link_proto;
 	if (sb->adapter_link->adapter_buswidth == 0)
@@ -168,10 +169,9 @@ scsibusattach(struct device *parent, struct device *self, void *aux)
 		panic("scsibusattach: can't allocate target links");
 	nbytes = sb->adapter_link->luns * sizeof(struct scsi_link *);
 	for (i = 0; i < sb->sc_buswidth; i++) {
-		sb->sc_link[i] = malloc(nbytes, M_DEVBUF, M_NOWAIT);
+		sb->sc_link[i] = malloc(nbytes, M_DEVBUF, M_NOWAIT | M_ZERO);
 		if (sb->sc_link[i] == NULL)
 			panic("scsibusattach: can't allocate lun links");
-		bzero(sb->sc_link[i], nbytes);
 	}
 
 #if NBIO > 0
@@ -421,14 +421,18 @@ scsi_detach_lun(struct scsibus_softc *sc, int target, int lun, int flags)
 	if (((flags & DETACH_FORCE) == 0) && (link->flags & SDEV_OPEN))
 		return (EBUSY);
 
-	/* detaching a device from scsibus is a two step process... */
+	/* detaching a device from scsibus is a three step process... */
 
 	/* 1. detach the device */
 	rv = config_detach(link->device_softc, flags);
 	if (rv != 0)
 		return (rv);
 
-	/* 2. free up its state in the midlayer */
+	/* 2. free up its state in the adapter */
+	if (alink->adapter->dev_free != NULL)
+		alink->adapter->dev_free(link);
+
+	/* 3. free up its state in the midlayer */
 	free(link, M_DEVBUF);
 	sc->sc_link[target][lun] = NULL;
 
@@ -716,6 +720,14 @@ scsi_probedev(struct scsibus_softc *scsi, int target, int lun)
 
 	SC_DEBUG(sc_link, SDEV_DB2, ("scsi_link created.\n"));
 
+	/* ask the adapter if this will be a valid device */
+	if (scsi->adapter_link->adapter->dev_probe != NULL &&
+	    scsi->adapter_link->adapter->dev_probe(sc_link) != 0) {
+		if (lun == 0)
+			rslt = EINVAL;
+		goto free;
+	}
+
 	/*
 	 * Tell drivers that are paying attention to avoid sync/wide/tags until
 	 * INQUIRY data has been processed and the quirks information is
@@ -800,7 +812,10 @@ scsi_probedev(struct scsibus_softc *scsi, int target, int lun)
 			sc_link->quirks &= ~SDEV_NOSYNC;
 		if ((inqbuf.flags & SID_WBus16) != 0)
 			sc_link->quirks &= ~SDEV_NOWIDE;
-	}
+	} else
+		/* Older devices do not have SYNCHRONIZE CACHE capability. */
+		sc_link->quirks |= SDEV_NOSYNCCACHE;
+
 	/*
 	 * Now apply any quirks from the table.
 	 */
@@ -862,6 +877,9 @@ scsi_probedev(struct scsibus_softc *scsi, int target, int lun)
 	return (0);
 
 bad:
+	if (scsi->adapter_link->adapter->dev_free != NULL)
+		scsi->adapter_link->adapter->dev_free(sc_link);
+free:
 	free(sc_link, M_DEVBUF);
 	return (rslt);
 }

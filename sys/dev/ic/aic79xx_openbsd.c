@@ -1,4 +1,4 @@
-/*	$OpenBSD: aic79xx_openbsd.c,v 1.26 2006/11/28 23:59:45 dlg Exp $	*/
+/*	$OpenBSD: aic79xx_openbsd.c,v 1.28 2007/10/20 00:21:49 krw Exp $	*/
 
 /*
  * Copyright (c) 2004 Milos Urbanek, Kenneth R. Westerback & Marco Peereboom
@@ -278,10 +278,9 @@ ahd_done(struct ahd_softc *ahd, struct scb *scb)
 
 	ahd_lock(ahd, &s);
 	ahd_free_scb(ahd, scb);
-	ahd_unlock(ahd, &s);
-
 	xs->flags |= ITSDONE;
 	scsi_done(xs);
+	ahd_unlock(ahd, &s);
 }
 
 void
@@ -324,17 +323,17 @@ ahd_action(struct scsi_xfer *xs)
 	target_id = xs->sc_link->target;
 	our_id = SCSI_SCSI_ID(ahd, xs->sc_link);
 	
+	ahd_lock(ahd, &s);
 	if ((ahd->flags & AHD_INITIATORROLE) == 0) {
 		xs->error = XS_DRIVER_STUFFUP;
 		xs->flags |= ITSDONE;
 		scsi_done(xs);
+		ahd_unlock(ahd, &s);
 		return (COMPLETE);
-		/* return 	ccb->ccb_h.status = CAM_PROVIDE_FAIL; */
 	}
 	/*
 	 * get an scb to use.
 	 */
-	ahd_lock(ahd, &s);
 	tinfo = ahd_fetch_transinfo(ahd, 'A', our_id, target_id, &tstate);
 
 	quirks = xs->sc_link->quirks;
@@ -550,10 +549,10 @@ ahd_setup_data(struct ahd_softc *ahd, struct scsi_xfer *xs,
 	if (hscb->cdb_len > MAX_CDB_LEN) {
 		ahd_lock(ahd, &s);
 		ahd_free_scb(ahd, scb);
-		ahd_unlock(ahd, &s);
 		xs->error = XS_DRIVER_STUFFUP;
 		xs->flags |= ITSDONE;
 		scsi_done(xs);
+		ahd_unlock(ahd, &s);
 		return (COMPLETE);
 	}
 
@@ -609,10 +608,9 @@ ahd_platform_alloc(struct ahd_softc *ahd, void *platform_arg)
 {
 	if (sizeof(struct ahd_platform_data) > 0) {
 		ahd->platform_data = malloc(sizeof(struct ahd_platform_data),
-		    M_DEVBUF, M_NOWAIT);
+		    M_DEVBUF, M_NOWAIT | M_ZERO);
 		if (ahd->platform_data == NULL)
 			return (ENOMEM);
-		bzero(ahd->platform_data, sizeof(struct ahd_platform_data));
 	}	
 
 	return (0);

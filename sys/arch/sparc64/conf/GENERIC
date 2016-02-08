@@ -1,4 +1,4 @@
-#	$OpenBSD: GENERIC,v 1.184 2007/08/04 16:49:04 kettenis Exp $
+#	$OpenBSD: GENERIC,v 1.195 2008/02/24 21:49:37 uwe Exp $
 #
 # For further information on compiling OpenBSD kernels, see the config(8)
 # man page.
@@ -161,6 +161,8 @@ uark*	at uhub?		# Arkmicro ARK3116 serial
 ucom*	at uark?
 uipaq*	at uhub?		# iPAQ serial adapter
 ucom*	at uipaq?
+uchcom*	at uhub?		# WinChipHead CH341/340 serial
+ucom*	at uchcom?
 uaudio* at uhub?		# USB Audio
 audio*	at uaudio?
 umidi*	at uhub?		# USB MIDI
@@ -199,6 +201,7 @@ udsbr*	at uhub?		# D-Link DSB-R100 radio
 radio*	at udsbr?		# USB radio
 ugen*	at uhub?		# USB Generic driver
 udcf*	at uhub?		# Gude Expert mouseCLOCK
+umbg*	at uhub?		# Meinberg Funkuhren USB5131
 uow*	at uhub?		# Maxim/Dallas DS2490 1-Wire adapter
 onewire* at uow?
 
@@ -207,6 +210,13 @@ onewire* at uow?
 
 # Bluetooth bus support
 #bthub*	at ubt?
+
+# Bluetooth HID support
+#bthidev* at bthub?
+#btkbd*	at bthidev?
+#btms*	at bthidev?
+#wskbd*	at btkbd? mux 1
+#wsmouse* at btms? mux 0
 
 # CardBus bus support
 cardbus* at cardslot?
@@ -218,6 +228,7 @@ cardslot* at cbb?
 
 auxio*	at ebus?
 auxio*	at sbus?
+beep*	at ebus?
 beeper*	at ebus?
 power*	at ebus?
 
@@ -271,6 +282,7 @@ clock*	at ebus?
 rtc*	at ebus?
 clock0	at fhc0
 clkbrd*	at fhc?
+#environ* at fhc?
 
 ## Timer chip found on (some) sun4u systems.
 timer*	at mainbus0
@@ -365,7 +377,7 @@ ukphy*	at mii?				# Unknown PHYs
 # sensors
 pcfiic*	at ebus?
 iic*	at pcfiic?
-alipm*	at pci? disable
+alipm*	at pci?
 iic*	at alipm?
 mbg*	at pci?				# Meinberg Funkuhren radio clocks
 
@@ -381,7 +393,10 @@ lmenv*	at iic?				# National Semiconductor LM87
 lmtemp*	at iic?				# NS LM75/LM77 temperature sensor
 maxds*	at iic?				# Maxim DS1631
 maxtmp*	at iic?				# Maxim MAX6642/MAX6690
-pcfadc*	at iic?				# Philips PCF8591
+pcfadc*	at iic?				# Philips PCF8591 
+ecadc*	at iic?				# SUNW,envctrl temperature sensors
+spdmem* at iic?				# SPD memory eeproms
+tda*	at iic?				# Philips TDA8444
 
 # Framebuffers
 agten*		at sbus?		# Fujitsu AG-10e framebuffer

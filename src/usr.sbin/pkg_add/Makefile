@@ -1,4 +1,4 @@
-# $OpenBSD: Makefile,v 1.46 2007/06/25 12:21:08 espie Exp $
+# $OpenBSD: Makefile,v 1.48 2008/02/04 12:15:03 espie Exp $
 
 .include <bsd.own.mk>
 
@@ -64,6 +64,7 @@ LIBBASE=/usr/libdata/perl5
 PODS= \
     OpenBSD::Getopt \
     OpenBSD::IdCache \
+    OpenBSD::Intro \
     OpenBSD::Mtree \
     OpenBSD::PackageName \
     OpenBSD::PackingElement \
@@ -109,7 +110,7 @@ mansrc.build:
 
 # Nothing to build
 depend:
-all: ${MANSRC_COOKIE}
+all: ${MANSRC_COOKIE} .WAIT ${MANALL} ${PSALL}
 
 stamp-mansrc.build:
 	@cd ${.CURDIR} && exec ${MAKE} mansrc.build

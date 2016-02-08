@@ -1,4 +1,4 @@
-/*	$OpenBSD: diff3.c,v 1.23 2007/07/03 00:56:23 ray Exp $	*/
+/*	$OpenBSD: diff3.c,v 1.26 2008/03/02 19:40:58 tobias Exp $	*/
 
 /*
  * Copyright (C) Caldera International Inc.  2001-2002.
@@ -72,7 +72,7 @@ static const char copyright[] =
 
 #ifndef lint
 static const char rcsid[] =
-    "$OpenBSD: diff3.c,v 1.23 2007/07/03 00:56:23 ray Exp $";
+    "$OpenBSD: diff3.c,v 1.26 2008/03/02 19:40:58 tobias Exp $";
 #endif /* not lint */
 
 #include <ctype.h>
@@ -137,14 +137,14 @@ static int last[4];
 static int eflag = 3;	/* default -E for compatibility with former RCS */
 static int oflag = 1;	/* default -E for compatibility with former RCS */
 static int debug  = 0;
-static char f1mark[40], f3mark[40];	/* markers for -E and -X */
+static char f1mark[256], f3mark[256];	/* markers for -E and -X */
 
 static int duplicate(struct range *, struct range *);
 static int edit(struct diff *, int, int);
 static char *getchange(FILE *);
 static char *getline(FILE *, size_t *);
 static int number(char **);
-static size_t readin(char *, struct diff **);
+static ssize_t readin(char *, struct diff **);
 static int skip(int, int, char *);
 static int edscript(int);
 static int merge(size_t, size_t);
@@ -408,7 +408,7 @@ out:
 static int
 diff3_internal(int argc, char **argv, const char *fmark, const char *rmark)
 {
-	size_t m, n;
+	ssize_t m, n;
 	int i;
 
 	if (argc < 5)
@@ -425,8 +425,14 @@ diff3_internal(int argc, char **argv, const char *fmark, const char *rmark)
 	}
 
 	increase();
-	m = readin(argv[0], &d13);
-	n = readin(argv[1], &d23);
+	if ((m = readin(argv[0], &d13)) < 0) {
+		warn("%s", argv[0]);
+		return (-1);
+	}
+	if ((n = readin(argv[1], &d23)) < 0) {
+		warn("%s", argv[1]);
+		return (-1);
+	}
 
 	for (i = 0; i <= 2; i++)
 		if ((fp[i] = fopen(argv[i + 2], "r")) == NULL) {
@@ -550,7 +556,7 @@ ed_patch_lines(struct rcs_lines *dlines, struct rcs_lines *plines)
  * since the vector is processed in one sequential pass.
  * The vector could be optimized out of existence)
  */
-static size_t
+static ssize_t
 readin(char *name, struct diff **dd)
 {
 	int a, b, c, d;
@@ -558,6 +564,8 @@ readin(char *name, struct diff **dd)
 	size_t i;
 
 	fp[0] = fopen(name, "r");
+	if (fp[0] == NULL)
+		return (-1);
 	for (i = 0; (p = getchange(fp[0])); i++) {
 		if (i >= szchanges - 1)
 			increase();
@@ -869,7 +877,7 @@ repos(int nchar)
 	int i;
 
 	for (i = 0; i < 2; i++)
-		(void)fseek(fp[i], (long)-nchar, 1);
+		(void)fseek(fp[i], (long)-nchar, SEEK_CUR);
 }
 
 /*
@@ -903,7 +911,7 @@ edscript(int n)
 			prange(&de[n].old);
 		else
 			diff_output("%da\n=======\n", de[n].old.to -1);
-		(void)fseek(fp[2], (long)de[n].new.from, 0);
+		(void)fseek(fp[2], (long)de[n].new.from, SEEK_SET);
 		for (k = de[n].new.to-de[n].new.from; k > 0; k-= j) {
 			j = k > BUFSIZ ? BUFSIZ : k;
 			if (fread(block, 1, (size_t)j,

@@ -1,4 +1,4 @@
-/*	$OpenBSD: rcsprog.c,v 1.139 2007/06/30 08:23:49 xsa Exp $	*/
+/*	$OpenBSD: rcsprog.c,v 1.141 2008/03/04 16:43:51 joris Exp $	*/
 /*
  * Copyright (c) 2005 Jean-Francois Brousseau <jfb@openbsd.org>
  * All rights reserved.
@@ -37,7 +37,7 @@
 #define RCS_CMD_MAXARG	128
 #define RCSPROG_OPTSTRING	"A:a:b::c:e::ik:Ll::m:Mn:N:o:qt::TUu::Vx::z::"
 
-const char rcs_version[] = "OpenRCS 4.1";
+const char rcs_version[] = "OpenRCS 4.3";
 
 int	 rcsflags;
 int	 rcs_optind;
@@ -436,6 +436,12 @@ rcs_main(int argc, char **argv)
 			const char *username;
 			char rev_str[RCS_REV_BUFSZ];
 
+			if (file->rf_head == NULL) {
+				warnx("%s contains no revisions", fpath);
+				rcs_close(file);
+				continue;
+			}
+
 			if ((username = getlogin()) == NULL)
 				err(1, "getlogin");
 			if (lrev == NULL) {
@@ -461,6 +467,12 @@ rcs_main(int argc, char **argv)
 			RCSNUM *rev;
 			const char *username;
 			char rev_str[RCS_REV_BUFSZ];
+
+			if (file->rf_head == NULL) {
+				warnx("%s contains no revisions", fpath);
+				rcs_close(file);
+				continue;
+			}
 
 			if ((username = getlogin()) == NULL)
 				err(1, "getlogin");

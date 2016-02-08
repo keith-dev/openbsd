@@ -1,4 +1,4 @@
-/*	$OpenBSD: ntpd.c,v 1.49 2007/01/15 08:19:11 otto Exp $ */
+/*	$OpenBSD: ntpd.c,v 1.58 2007/12/31 17:21:35 henning Exp $ */
 
 /*
  * Copyright (c) 2003, 2004 Henning Brauer <henning@openbsd.org>
@@ -42,12 +42,14 @@ int		ntpd_adjtime(double);
 void		ntpd_adjfreq(double, int);
 void		ntpd_settime(double);
 void		readfreq(void);
-void		writefreq(double);
+int		writefreq(double);
 
 volatile sig_atomic_t	 quit = 0;
 volatile sig_atomic_t	 reconfig = 0;
 volatile sig_atomic_t	 sigchld = 0;
 struct imsgbuf		*ibuf;
+int			 debugsyslog = 0;
+int			 timeout = INFTIM;
 
 void
 sighdlr(int sig)
@@ -71,7 +73,7 @@ usage(void)
 {
 	extern char *__progname;
 
-	fprintf(stderr, "usage: %s [-dSs] [-f file]\n", __progname);
+	fprintf(stderr, "usage: %s [-dnSsv] [-f file]\n", __progname);
 	exit(1);
 }
 
@@ -85,8 +87,9 @@ main(int argc, char *argv[])
 	struct pollfd		 pfd[POLL_MAX];
 	pid_t			 chld_pid = 0, pid;
 	const char		*conffile;
-	int			 ch, nfds, timeout = INFTIM;
+	int			 ch, nfds;
 	int			 pipe_chld[2];
+	struct passwd		*pw;
 
 	conffile = CONFFILE;
 
@@ -95,7 +98,7 @@ main(int argc, char *argv[])
 	log_init(1);		/* log to stderr until daemonized */
 	res_init();		/* XXX */
 
-	while ((ch = getopt(argc, argv, "df:sS")) != -1) {
+	while ((ch = getopt(argc, argv, "df:nsSv")) != -1) {
 		switch (ch) {
 		case 'd':
 			lconf.debug = 1;
@@ -103,11 +106,17 @@ main(int argc, char *argv[])
 		case 'f':
 			conffile = optarg;
 			break;
+		case 'n':
+			lconf.noaction = 1;
+			break;
 		case 's':
 			lconf.settime = 1;
 			break;
 		case 'S':
 			lconf.settime = 0;
+			break;
+		case 'v':
+			debugsyslog = 1;
 			break;
 		default:
 			usage();
@@ -118,12 +127,17 @@ main(int argc, char *argv[])
 	if (parse_config(conffile, &lconf))
 		exit(1);
 
+	if (lconf.noaction) {
+		fprintf(stderr, "configuration OK\n");
+		exit(0);
+	}
+
 	if (geteuid()) {
 		fprintf(stderr, "ntpd: need root privileges\n");
 		exit(1);
 	}
 
-	if (getpwnam(NTPD_USER) == NULL) {
+	if ((pw = getpwnam(NTPD_USER)) == NULL) {
 		fprintf(stderr, "ntpd: unknown user %s\n", NTPD_USER);
 		exit(1);
 	}
@@ -143,7 +157,7 @@ main(int argc, char *argv[])
 
 	signal(SIGCHLD, sighdlr);
 	/* fork child process */
-	chld_pid = ntp_main(pipe_chld, &lconf);
+	chld_pid = ntp_main(pipe_chld, &lconf, pw);
 
 	setproctitle("[priv]");
 	readfreq();
@@ -295,6 +309,7 @@ dispatch_imsg(struct ntpd_conf *lconf)
 				if (daemon(1, 0))
 					fatal("daemon");
 			lconf->settime = 0;
+			timeout = INFTIM;
 			break;
 		case IMSG_HOST_DNS:
 			name = imsg.data;
@@ -362,6 +377,7 @@ void
 ntpd_adjfreq(double relfreq, int wrlog)
 {
 	int64_t curfreq;
+	int r;
 
 	if (adjfreq(NULL, &curfreq) == -1) {
 		log_warn("adjfreq failed");
@@ -373,13 +389,14 @@ ntpd_adjfreq(double relfreq, int wrlog)
 	 * that unit before adding. We log values in part per million.
 	 */
 	curfreq += relfreq * 1e9 * (1LL << 32);
+	r = writefreq(curfreq / 1e9 / (1LL << 32));
 	if (wrlog)
-		log_info("adjusting clock frequency by %f to %fppm",
-		    relfreq * 1e6, curfreq / 1e3 / (1LL << 32));
+		log_info("adjusting clock frequency by %f to %fppm%s",
+		    relfreq * 1e6, curfreq / 1e3 / (1LL << 32),
+		    r ? "" : " (no drift file)");
 
 	if (adjfreq(&curfreq, NULL) == -1)
 		log_warn("adjfreq failed");
-	writefreq(curfreq / 1e9 / (1LL << 32));
 }
 
 void
@@ -419,35 +436,50 @@ readfreq(void)
 	int64_t current;
 	double d;
 
-	/* if we're adjusting frequency already, don't override */
-	if (adjfreq(NULL, &current) == -1) {
-		log_warn("adjfreq failed");
+	fp = fopen(DRIFTFILE, "r");
+	if (fp == NULL) {
+		/* if the drift file has been deleted by the user, reset */
+		current = 0;
+		if (adjfreq(&current, NULL) == -1)
+			log_warn("adjfreq reset failed");
 		return;
 	}
-	if (current != 0)
-		return;
 
-	fp = fopen(DRIFTFILE, "r");
-	if (fp == NULL)
-		return;
-
-	if (fscanf(fp, "%le", &d) == 1)
-		ntpd_adjfreq(d, 0);
+	/* if we're adjusting frequency already, don't override */
+	if (adjfreq(NULL, &current) == -1)
+		log_warn("adjfreq failed");
+	else if (current == 0) {
+		if (fscanf(fp, "%le", &d) == 1)
+			ntpd_adjfreq(d, 0);
+	}
 	fclose(fp);
 }
 
-void
+int
 writefreq(double d)
 {
 	int r;
 	FILE *fp;
+	static int warnonce = 1;
 
 	fp = fopen(DRIFTFILE, "w");
-	if (fp == NULL)
-		return;
+	if (fp == NULL) {
+		if (warnonce) {
+			log_warn("can't open %s", DRIFTFILE);
+			warnonce = 0;
+		}
+		return 0;
+	}
 
 	fprintf(fp, "%e\n", d);
 	r = ferror(fp);
-	if (fclose(fp) != 0 || r != 0)
+	if (fclose(fp) != 0 || r != 0) {
+		if (warnonce) {
+			log_warnx("can't write %s", DRIFTFILE);
+			warnonce = 0;
+		}
 		unlink(DRIFTFILE);
+		return 0;
+	}
+	return 1;
 }

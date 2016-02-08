@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_xe.c,v 1.33 2007/06/06 09:43:44 henning Exp $	*/
+/*	$OpenBSD: if_xe.c,v 1.35 2007/09/11 13:39:33 gilles Exp $	*/
 
 /*
  * Copyright (c) 1999 Niklas Hallqvist, Brandon Creighton, Job de Haas
@@ -249,12 +249,11 @@ xe_pcmcia_attach(parent, self, aux)
 
 	/* Fake a cfe. */
 	SIMPLEQ_FIRST(&pa->pf->cfe_head) = cfe = (struct pcmcia_config_entry *)
-	    malloc(sizeof *cfe, M_DEVBUF, M_NOWAIT);
+	    malloc(sizeof *cfe, M_DEVBUF, M_NOWAIT | M_ZERO);
 	if (!cfe) {
 		printf(": function enable failed\n");
 		return;
 	}
-	bzero(cfe, sizeof *cfe);
 
 	/*
 	 * XXX Use preprocessor symbols instead.

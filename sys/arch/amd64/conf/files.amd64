@@ -1,4 +1,4 @@
-#	$OpenBSD: files.amd64,v 1.33 2007/08/02 16:40:27 deraadt Exp $
+#	$OpenBSD: files.amd64,v 1.38 2007/11/26 23:50:03 art Exp $
 
 maxpartitions 16
 maxusers 2 16 128
@@ -18,11 +18,11 @@ file	arch/amd64/amd64/syscall.c
 file	arch/amd64/amd64/trap.c
 file	arch/amd64/amd64/vm_machdep.c
 file	arch/amd64/amd64/fpu.c
-file	arch/amd64/amd64/Locore.c
 file	arch/amd64/amd64/softintr.c
 file	arch/amd64/amd64/i8259.c
 file	arch/amd64/amd64/cacheinfo.c
 file	arch/amd64/amd64/mutex.S
+file	arch/amd64/amd64/lock_machdep.c		multiprocessor
 
 file	arch/amd64/amd64/intr.c
 file	arch/amd64/amd64/bus_space.c
@@ -103,8 +103,12 @@ file	arch/amd64/pci/pciide_machdep.c		pciide
 
 include	"dev/puc/files.puc"
 
+# AGP
+include "dev/pci/files.agp"
+file	arch/amd64/pci/agp_machdep.c		agp
+
 # PCI Host bridge chipsets
-device	pchb: pcibus
+device	pchb: pcibus, agpbus, agp_i810
 attach	pchb at pci
 file	arch/amd64/pci/pchb.c			pchb
 
@@ -127,7 +131,12 @@ include	"dev/pcmcia/files.pcmcia"
 # PCI-ISA bridges
 device	pcib: isabus
 attach	pcib at pci
-file	arch/amd64/pci/pcib.c			pcib
+file	arch/amd64/pci/pcib.c			pcib | amdpcib
+
+# AMD 8111 LPC bridge
+device	amdpcib: isabus
+attach	amdpcib at pci
+file	dev/pci/amdpcib.c			amdpcib
 
 device	aapic
 attach	aapic at pci
@@ -163,6 +172,9 @@ file	dev/isa/fdc.c				fdc needs-flag
 device	fd: disk, isa_dma
 attach	fd at fdc
 file	dev/isa/fd.c				fd needs-flag
+
+pseudo-device	pctr
+file	arch/amd64/amd64/pctr.c		pctr needs-flag
 
 pseudo-device	nvram
 file	arch/amd64/amd64/nvram.c	nvram needs-flag
@@ -215,6 +227,3 @@ major	{cd = 6}
 major	{rd = 17}
 major	{wd = 0}
 major	{fd = 2}
-
-file	arch/amd64/pci/agp_machdep.c		pciagp
-file	dev/pci/agp_i810.c			pciagp

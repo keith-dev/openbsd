@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_sysctl.c,v 1.155 2007/08/09 04:12:12 cnst Exp $	*/
+/*	$OpenBSD: kern_sysctl.c,v 1.160 2008/02/09 15:10:58 kettenis Exp $	*/
 /*	$NetBSD: kern_sysctl.c,v 1.17 1996/05/20 17:49:05 mrg Exp $	*/
 
 /*-
@@ -567,10 +567,10 @@ hw_sysctl(int *name, u_int namelen, void *oldp, size_t *oldlenp, void *newp,
 	case HW_BYTEORDER:
 		return (sysctl_rdint(oldp, oldlenp, newp, BYTE_ORDER));
 	case HW_PHYSMEM:
-		return (sysctl_rdint(oldp, oldlenp, newp, ctob(physmem)));
+		return (sysctl_rdint(oldp, oldlenp, newp, ptoa(physmem)));
 	case HW_USERMEM:
 		return (sysctl_rdint(oldp, oldlenp, newp,
-		    ctob(physmem - uvmexp.wired)));
+		    ptoa(physmem - uvmexp.wired)));
 	case HW_PAGESIZE:
 		return (sysctl_rdint(oldp, oldlenp, newp, PAGE_SIZE));
 	case HW_DISKNAMES:
@@ -642,6 +642,12 @@ hw_sysctl(int *name, u_int namelen, void *oldp, size_t *oldlenp, void *newp,
 			return (sysctl_rdstring(oldp, oldlenp, newp, hw_uuid));
 		else
 			return (EOPNOTSUPP);
+	case HW_PHYSMEM64:
+		return (sysctl_rdquad(oldp, oldlenp, newp,
+		    ptoa((psize_t)physmem)));
+	case HW_USERMEM64:
+		return (sysctl_rdquad(oldp, oldlenp, newp,
+		    ptoa((psize_t)physmem - uvmexp.wired)));
 	default:
 		return (EOPNOTSUPP);
 	}
@@ -1280,9 +1286,7 @@ fill_kproc2(struct proc *p, struct kinfo_proc2 *ki)
 		ki->p_vm_tsize = vm->vm_tsize;
 		ki->p_vm_dsize = vm->vm_dused;
 		ki->p_vm_ssize = vm->vm_ssize;
-
-		ki->p_forw = PTRTOINT64(p->p_forw);
-		ki->p_back = PTRTOINT64(p->p_back);
+		ki->p_forw = ki->p_back = 0;
 		ki->p_addr = PTRTOINT64(p->p_addr);
 		ki->p_stat = p->p_stat;
 		ki->p_swtime = p->p_swtime;
@@ -1589,6 +1593,7 @@ sysctl_diskinit(int update, struct proc *p)
 			sdk = diskstats + i;
 			strlcpy(sdk->ds_name, dk->dk_name,
 			    sizeof(sdk->ds_name));
+			mtx_enter(&dk->dk_mtx);
 			sdk->ds_busy = dk->dk_busy;
 			sdk->ds_rxfer = dk->dk_rxfer;
 			sdk->ds_wxfer = dk->dk_wxfer;
@@ -1598,6 +1603,7 @@ sysctl_diskinit(int update, struct proc *p)
 			sdk->ds_attachtime = dk->dk_attachtime;
 			sdk->ds_timestamp = dk->dk_timestamp;
 			sdk->ds_time = dk->dk_time;
+			mtx_leave(&dk->dk_mtx);
 		}
 
 		/* Eliminate trailing comma */
@@ -1611,6 +1617,7 @@ sysctl_diskinit(int update, struct proc *p)
 			sdk = diskstats + i;
 			strlcpy(sdk->ds_name, dk->dk_name,
 			    sizeof(sdk->ds_name));
+			mtx_enter(&dk->dk_mtx);
 			sdk->ds_busy = dk->dk_busy;
 			sdk->ds_rxfer = dk->dk_rxfer;
 			sdk->ds_wxfer = dk->dk_wxfer;
@@ -1620,6 +1627,7 @@ sysctl_diskinit(int update, struct proc *p)
 			sdk->ds_attachtime = dk->dk_attachtime;
 			sdk->ds_timestamp = dk->dk_timestamp;
 			sdk->ds_time = dk->dk_time;
+			mtx_leave(&dk->dk_mtx);
 		}
 	}
 	rw_exit_write(&sysctl_disklock);
@@ -1692,8 +1700,7 @@ sysctl_sysvipc(int *name, u_int namelen, void *where, size_t *sizep)
 		*sizep = 0;
 		return (ENOMEM);
 	}
-	buf = malloc(min(tsize, buflen), M_TEMP, M_WAITOK);
-	bzero(buf, min(tsize, buflen));
+	buf = malloc(min(tsize, buflen), M_TEMP, M_WAITOK|M_ZERO);
 
 	switch (*name) {
 #ifdef SYSVMSG
@@ -1791,8 +1798,7 @@ sysctl_sensors(int *name, u_int namelen, void *oldp, size_t *oldlenp,
 			return (ENOENT);
 
 		/* Grab a copy, to clear the kernel pointers */
-		usd = malloc(sizeof(*usd), M_TEMP, M_WAITOK);
-		bzero(usd, sizeof(*usd));
+		usd = malloc(sizeof(*usd), M_TEMP, M_WAITOK|M_ZERO);
 		usd->num = ksd->num;
 		strlcpy(usd->xname, ksd->xname, sizeof(usd->xname));
 		memcpy(usd->maxnumt, ksd->maxnumt, sizeof(usd->maxnumt));
@@ -1813,8 +1819,7 @@ sysctl_sensors(int *name, u_int namelen, void *oldp, size_t *oldlenp,
 		return (ENOENT);
 
 	/* Grab a copy, to clear the kernel pointers */
-	us = malloc(sizeof(*us), M_TEMP, M_WAITOK);
-	bzero(us, sizeof(*us));
+	us = malloc(sizeof(*us), M_TEMP, M_WAITOK|M_ZERO);
 	memcpy(us->desc, ks->desc, sizeof(us->desc));
 	us->tv = ks->tv;
 	us->value = ks->value;

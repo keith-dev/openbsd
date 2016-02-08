@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_synch.c,v 1.80 2007/05/16 17:27:30 art Exp $	*/
+/*	$OpenBSD: kern_synch.c,v 1.83 2007/11/30 16:44:44 oga Exp $	*/
 /*	$NetBSD: kern_synch.c,v 1.37 1996/04/22 01:38:37 christos Exp $	*/
 
 /*
@@ -67,10 +67,17 @@ void endtsleep(void *);
  */
 #define TABLESIZE	128
 #define LOOKUP(x)	(((long)(x) >> 8) & (TABLESIZE - 1))
-struct slpque {
-	struct proc *sq_head;
-	struct proc **sq_tailp;
-} slpque[TABLESIZE];
+TAILQ_HEAD(slpque,proc) slpque[TABLESIZE];
+
+void
+sleep_queue_init(void)
+{
+	int i;
+
+	for (i = 0; i < TABLESIZE; i++)
+		TAILQ_INIT(&slpque[i]);
+}
+
 
 /*
  * During autoconfiguration or after a panic, a sleep will simply
@@ -129,19 +136,55 @@ tsleep(void *ident, int priority, const char *wmesg, int timo)
 	return (error);
 }
 
+/*
+ * Same as tsleep, but if we have a mutex provided, then once we've 
+ * entered the sleep queue we drop the mutex. After sleeping we re-lock.
+ */
+int
+msleep(void *ident, struct mutex *mtx,  int priority, const char *wmesg, int timo)
+{
+	struct sleep_state sls;
+	int error, error1, spl;
+
+	sleep_setup(&sls, ident, priority, wmesg);
+	sleep_setup_timeout(&sls, timo);
+	sleep_setup_signal(&sls, priority);
+
+	if (mtx) {
+		/* XXX - We need to make sure that the mutex doesn't
+		 * unblock splsched. This can be made a bit more 
+		 * correct when the sched_lock is a mutex.
+		 */
+		spl = MUTEX_OLDIPL(mtx);
+		MUTEX_OLDIPL(mtx) = splsched();
+		mtx_leave(mtx);
+	}
+
+	sleep_finish(&sls, 1);
+	error1 = sleep_finish_timeout(&sls);
+	error = sleep_finish_signal(&sls);
+
+	if (mtx && (priority & PNORELOCK) == 0)
+		mtx_enter(mtx);
+
+	MUTEX_OLDIPL(mtx) = spl; /* put the ipl back else it breaks things */
+	/* Signal errors are higher priority than timeouts. */
+	if (error == 0 && error1 != 0)
+		error = error1;
+
+	return (error);
+}
+
 void
 sleep_setup(struct sleep_state *sls, void *ident, int prio, const char *wmesg)
 {
 	struct proc *p = curproc;
-	struct slpque *qp;
 
 #ifdef DIAGNOSTIC
 	if (ident == NULL)
 		panic("tsleep: no ident");
 	if (p->p_stat != SONPROC)
 		panic("tsleep: not SONPROC");
-	if (p->p_back != NULL)
-		panic("tsleep: p_back not NULL");
 #endif
 
 #ifdef KTRACE
@@ -159,12 +202,7 @@ sleep_setup(struct sleep_state *sls, void *ident, int prio, const char *wmesg)
 	p->p_wmesg = wmesg;
 	p->p_slptime = 0;
 	p->p_priority = prio & PRIMASK;
-	qp = &slpque[LOOKUP(ident)];
-	if (qp->sq_head == 0)
-		qp->sq_head = p;
-	else
-		*qp->sq_tailp = p;
-	*(qp->sq_tailp = &p->p_forw) = NULL;
+	TAILQ_INSERT_TAIL(&slpque[LOOKUP(ident)], p, p_runq);
 }
 
 void
@@ -179,11 +217,12 @@ sleep_finish(struct sleep_state *sls, int do_sleep)
 		mi_switch();
 	} else if (!do_sleep) {
 		unsleep(p);
-#ifdef DIAGNOSTIC
-		if (p->p_stat != SONPROC)
-			panic("sleep_finish !SONPROC");
-#endif
 	}
+
+#ifdef DIAGNOSTIC
+	if (p->p_stat != SONPROC)
+		panic("sleep_finish !SONPROC");
+#endif
 
 	p->p_cpu->ci_schedstate.spc_curpriority = p->p_usrpri;
 	SCHED_UNLOCK(sls->sls_s);
@@ -296,17 +335,9 @@ endtsleep(void *arg)
 void
 unsleep(struct proc *p)
 {
-	struct slpque *qp;
-	struct proc **hp;
-
 	if (p->p_wchan) {
-		hp = &(qp = &slpque[LOOKUP(p->p_wchan)])->sq_head;
-		while (*hp != p)
-			hp = &(*hp)->p_forw;
-		*hp = p->p_forw;
-		if (qp->sq_tailp == &p->p_forw)
-			qp->sq_tailp = hp;
-		p->p_wchan = 0;
+		TAILQ_REMOVE(&slpque[LOOKUP(p->p_wchan)], p, p_runq);
+		p->p_wchan = NULL;
 	}
 }
 
@@ -317,25 +348,22 @@ void
 wakeup_n(void *ident, int n)
 {
 	struct slpque *qp;
-	struct proc *p, **q;
+	struct proc *p;
+	struct proc *pnext;
 	int s;
 
 	SCHED_LOCK(s);
 	qp = &slpque[LOOKUP(ident)];
-restart:
-	for (q = &qp->sq_head; (p = *q) != NULL; ) {
+	for (p = TAILQ_FIRST(qp); p != NULL && n != 0; p = pnext) {
+		pnext = TAILQ_NEXT(p, p_runq);
 #ifdef DIAGNOSTIC
-		if (p->p_back)
-			panic("wakeup: p_back not NULL");
 		if (p->p_stat != SSLEEP && p->p_stat != SSTOP)
 			panic("wakeup: p_stat is %d", (int)p->p_stat);
 #endif
 		if (p->p_wchan == ident) {
 			--n;
 			p->p_wchan = 0;
-			*q = p->p_forw;
-			if (qp->sq_tailp == &p->p_forw)
-				qp->sq_tailp = q;
+			TAILQ_REMOVE(qp, p, p_runq);
 			if (p->p_stat == SSLEEP) {
 				/* OPTIMIZED EXPANSION OF setrunnable(p); */
 				if (p->p_slptime > 1)
@@ -357,13 +385,8 @@ restart:
 				need_resched(p->p_cpu);
 				/* END INLINE EXPANSION */
 
-				if (n != 0)
-					goto restart;
-				else
-					break;
 			}
-		} else
-			q = &p->p_forw;
+		}
 	}
 	SCHED_UNLOCK(s);
 }

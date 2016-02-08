@@ -1,4 +1,4 @@
-/*	$OpenBSD: pcivar.h,v 1.54 2007/08/01 21:43:03 deraadt Exp $	*/
+/*	$OpenBSD: pcivar.h,v 1.57 2007/12/31 19:13:36 kettenis Exp $	*/
 /*	$NetBSD: pcivar.h,v 1.23 1997/06/06 23:48:05 thorpej Exp $	*/
 
 /*
@@ -223,6 +223,13 @@ struct pci_matchid {
 };
 
 int pci_matchbyid(struct pci_attach_args *, const struct pci_matchid *, int);
+int pci_set_powerstate(pci_chipset_tag_t, pcitag_t, int);
+
+/*
+ * Vital Product Data (PCI 2.2)
+ */
+int pci_vpd_read(pci_chipset_tag_t, pcitag_t, int, int, pcireg_t *);
+int pci_vpd_write(pci_chipset_tag_t, pcitag_t, int, int, pcireg_t *);
 
 /*
  * Helper functions for autoconfiguration.
@@ -233,6 +240,7 @@ int	pci_find_device(struct pci_attach_args *pa,
 			int (*match)(struct pci_attach_args *));
 int	pci_probe_device(struct pci_softc *, pcitag_t tag,
 	    int (*)(struct pci_attach_args *), struct pci_attach_args *);
+int	pci_detach_devices(struct pci_softc *, int);
 void	pci_devinfo(pcireg_t, pcireg_t, int, char *, size_t);
 const struct pci_quirkdata *
 	pci_lookup_quirkdata(pci_vendor_id_t, pci_product_id_t);

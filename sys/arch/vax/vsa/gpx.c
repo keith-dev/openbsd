@@ -1,4 +1,4 @@
-/*	$OpenBSD: gpx.c,v 1.16 2006/11/29 19:08:22 miod Exp $	*/
+/*	$OpenBSD: gpx.c,v 1.18 2007/12/28 20:44:39 miod Exp $	*/
 /*
  * Copyright (c) 2006 Miodrag Vallat.
  *
@@ -235,9 +235,10 @@ int
 gpx_match(struct device *parent, void *vcf, void *aux)
 {
 	struct vsbus_attach_args *va = aux;
-	struct adder *adder;
+	volatile struct adder *adder;
 	vaddr_t tmp;
 	u_int depth;
+	u_short status;
 	extern struct consdev wsdisplay_cons;
 	extern int oldvsbus;
 
@@ -259,6 +260,17 @@ gpx_match(struct device *parent, void *vcf, void *aux)
 			return (0);
 		break;
 	}
+
+	/* Check for hardware */
+	adder = (volatile struct adder *)
+	    vax_map_physmem(va->va_paddr + GPX_ADDER_OFFSET, 1);
+	if (adder == NULL)
+		return (0);
+	adder->status = 0;
+	status = adder->status;
+	vax_unmap_physmem((vaddr_t)adder, 1);
+	if (status == offsetof(struct adder, status))
+		return (0);
 
 	/* Check for a recognized color depth */
 	tmp = vax_map_physmem(va->va_paddr + GPX_READBACK_OFFSET, 1);
@@ -1217,12 +1229,13 @@ gpx_resetcmap(struct gpx_screen *ss)
  */
 
 int	gpxcnprobe(void);
-void	gpxcninit(void);
+int	gpxcninit(void);
 
 int
 gpxcnprobe()
 {
 	extern vaddr_t virtual_avail;
+	volatile struct adder *adder;
 	vaddr_t tmp;
 	int depth;
 
@@ -1235,6 +1248,14 @@ gpxcnprobe()
 
 		if ((vax_confdata & KA420_CFG_VIDOPT) == 0)
 			break; /* no color option */
+
+		/* Check for hardware */
+		tmp = virtual_avail;
+		ioaccess(tmp, vax_trunc_page(GPXADDR + GPX_ADDER_OFFSET), 1);
+		adder = (struct adder *)tmp;
+		adder->status = 0;
+		if (adder->status == offsetof(struct adder, status))
+			return (0);
 
 		/* Check for a recognized color depth */
 		tmp = virtual_avail;
@@ -1258,7 +1279,7 @@ gpxcnprobe()
  * Because it's called before the VM system is initialized, virtual memory
  * for the framebuffer can be stolen directly without disturbing anything.
  */
-void
+int
 gpxcninit()
 {
 	struct gpx_screen *ss = &gpx_consscr;
@@ -1288,11 +1309,13 @@ gpxcninit()
 
 	virtual_avail = round_page(virtual_avail);
 
-	/* this had better not fail as we can't recover there */
+	/* this had better not fail */
 	if (gpx_setup_screen(ss) != 0)
-		panic(__func__);
+		return (1);
 
 	ri = &ss->ss_ri;
 	ri->ri_ops.alloc_attr(ri, 0, 0, 0, &defattr);
 	wsdisplay_cnattach(&gpx_stdscreen, ri, 0, 0, defattr);
+
+	return (0);
 }

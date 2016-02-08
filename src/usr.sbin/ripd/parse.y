@@ -1,4 +1,4 @@
-/*	$OpenBSD: parse.y,v 1.6 2007/01/15 18:23:43 michele Exp $ */
+/*	$OpenBSD: parse.y,v 1.19 2008/02/27 15:36:42 mpf Exp $ */
 
 /*
  * Copyright (c) 2006 Michele Marchetto <mydecay@openbeer.it>
@@ -25,11 +25,13 @@
 %{
 #include <sys/types.h>
 #include <sys/socket.h>
+#include <sys/stat.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <ctype.h>
 #include <err.h>
 #include <errno.h>
+#include <unistd.h>
 #include <ifaddrs.h>
 #include <limits.h>
 #include <stdarg.h>
@@ -41,52 +43,57 @@
 #include "ripe.h"
 #include "log.h"
 
-static struct ripd_conf		*conf;
-static FILE			*fin = NULL;
-static int			 lineno = 1;
-static int			 errors = 0;
-char				*infile;
-char				*start_state;
+TAILQ_HEAD(files, file)		 files = TAILQ_HEAD_INITIALIZER(files);
+static struct file {
+	TAILQ_ENTRY(file)	 entry;
+	FILE			*stream;
+	char			*name;
+	int			 lineno;
+	int			 errors;
+} *file, *topfile;
+struct file	*pushfile(const char *, int);
+int		 popfile(void);
+int		 yyparse(void);
+int		 yylex(void);
+int		 yyerror(const char *, ...);
+int		 kw_cmp(const void *, const void *);
+int		 lookup(char *);
+int		 lgetc(int);
+int		 lungetc(int);
+int		 findeol(void);
 
-struct iface	*iface = NULL;
-
-int		yyerror(const char *, ...);
-int		yyparse(void);
-int		kw_cmp(const void *, const void *);
-int		lookup(char *);
-int		lgetc(FILE *);
-int		lungetc(int);
-int		findeol(void);
-int		yylex(void);
-void		clear_config(struct ripd_conf *);
-int		check_file_secrecy(int, const char *);
-u_int32_t	get_rtr_id(void);
-int		host(const char *, struct in_addr *, struct in_addr *);
+TAILQ_HEAD(symhead, sym)	 symhead = TAILQ_HEAD_INITIALIZER(symhead);
+struct sym {
+	TAILQ_ENTRY(sym)	 entry;
+	int			 used;
+	int			 persist;
+	char			*nam;
+	char			*val;
+};
+int		 symset(const char *, const char *, int);
+char		*symget(const char *);
 
 static struct {
-	char			 auth_key[MAX_SIMPLE_AUTH_LEN];
+	u_int8_t		 auth_key[MAX_SIMPLE_AUTH_LEN];
 	struct auth_md_head	 md_list;
 	enum auth_type		 auth_type;
 	u_int8_t		 auth_keyid;
 	u_int8_t		 cost;
 } *defs, globaldefs, ifacedefs;
 
-TAILQ_HEAD(symhead, sym)	 symhead = TAILQ_HEAD_INITIALIZER(symhead);
-struct sym {
-	TAILQ_ENTRY(sym)	 entries;
-	int			 used;
-	int			 persist;
-	char			*nam;
-	char			*val;
-};
+struct iface	*iface = NULL;
+static struct ripd_conf	*conf;
+static int		 errors = 0;
 
-int			 symset(const char *, const char *, int);
-char			*symget(const char *);
-struct iface		*conf_get_if(struct kif *);
+struct iface	*conf_get_if(struct kif *);
+void		 clear_config(struct ripd_conf *);
+int		 check_file_secrecy(int, const char *);
+u_int32_t	 get_rtr_id(void);
+int		 host(const char *, struct in_addr *, struct in_addr *);
 
 typedef struct {
 	union {
-		u_int32_t	 number;
+		int64_t		 number;
 		char		*string;
 	} v;
 	int lineno;
@@ -94,15 +101,16 @@ typedef struct {
 
 %}
 
-%token  SPLIT_HORIZON TRIGGERED_UPDATES FIBUPDATE REDISTRIBUTE
+%token	SPLIT_HORIZON TRIGGERED_UPDATES FIBUPDATE REDISTRIBUTE
 %token	AUTHKEY AUTHTYPE AUTHMD AUTHMDKEYID
-%token  INTERFACE RTLABEL
+%token	INTERFACE RTLABEL
 %token	COST PASSIVE
 %token	YES NO
-%token  ERROR
-%token  <v.string>	STRING
-%type   <v.number>	number yesno no
-%type   <v.string>	string
+%token	ERROR
+%token	<v.string>	STRING
+%token	<v.number>	NUMBER
+%type	<v.number>	yesno no
+%type	<v.string>	string
 
 %%
 
@@ -111,21 +119,7 @@ grammar		: /* empty */
 		| grammar conf_main '\n'
 		| grammar varset '\n'
 		| grammar interface '\n'
-		;
-
-number		: STRING {
-			u_int32_t	 uval;
-			const char	*errstr;
-
-			uval = strtonum($1, 0, UINT_MAX, &errstr);
-			if (errstr) {
-				yyerror("number %s is %s", $1, errstr);
-				free($1);
-				YYERROR;
-			} else
-				$$ = uval;
-			free($1);
-		}
+		| grammar error '\n'		{ file->errors++; }
 		;
 
 string		: string STRING {
@@ -161,7 +155,7 @@ varset		: STRING '=' string {
 conf_main	: SPLIT_HORIZON STRING {
 			/* clean flags first */
 			conf->options &= ~(OPT_SPLIT_HORIZON |
-				    OPT_SPLIT_POISONED);
+			    OPT_SPLIT_POISONED);
 			if (!strcmp($2, "none"))
 				/* nothing */ ;
 			else if (!strcmp($2, "default"))
@@ -239,25 +233,23 @@ conf_main	: SPLIT_HORIZON STRING {
 		| defaults
 		;
 
-authmd		: AUTHMD number STRING {
+authmd		: AUTHMD NUMBER STRING {
 			if ($2 < MIN_MD_ID || $2 > MAX_MD_ID) {
 				yyerror("auth-md key-id out of range "
 				    "(%d-%d)", MIN_MD_ID, MAX_MD_ID);
 				free($3);
 				YYERROR;
 			}
-			if (strlen($3) > MD5_DIGEST_LENGTH) {
+			if (md_list_add(&defs->md_list, $2, $3) == -1) {
 				yyerror("auth-md key length out of range "
-				    "(max length %d)",
-				    MD5_DIGEST_LENGTH);
+				    "(max length %d)", MD5_DIGEST_LENGTH);
 				free($3);
 				YYERROR;
 			}
-			md_list_add(&defs->md_list, $2, $3);
 			free($3);
 		}
 
-authmdkeyid	: AUTHMDKEYID number {
+authmdkeyid	: AUTHMDKEYID NUMBER {
 			if ($2 < MIN_MD_ID || $2 > MAX_MD_ID) {
 				yyerror("auth-md-keyid out of range "
 				    "(%d-%d)", MIN_MD_ID, MAX_MD_ID);
@@ -292,13 +284,13 @@ authkey		: AUTHKEY STRING {
 				free($2);
 				YYERROR;
 			}
-			strncpy(defs->auth_key, $2,
-			    sizeof(defs->auth_key));
+			bzero(defs->auth_key, MAX_SIMPLE_AUTH_LEN);
+			memcpy(defs->auth_key, $2, strlen($2));
 			free($2);
 		}
 		;
 
-defaults	: COST number {
+defaults	: COST NUMBER {
 			if ($2 < 1 || $2 > INFINITY) {
 				yyerror("cost out of range (%d-%d)", 1,
 				    INFINITY);
@@ -319,7 +311,7 @@ optnl		: '\n' optnl
 nl		: '\n' optnl
 		;
 
-interface       : INTERFACE STRING {
+interface	: INTERFACE STRING {
 			struct kif *kif;
 
 			if ((kif = kif_findname($2)) == NULL) {
@@ -347,11 +339,11 @@ interface       : INTERFACE STRING {
 		}
 		;
 
-interface_block : '{' optnl interfaceopts_l '}'
+interface_block	: '{' optnl interfaceopts_l '}'
 		| '{' optnl '}'
 		;
 
-interfaceopts_l : interfaceopts_l interfaceoptsl
+interfaceopts_l	: interfaceopts_l interfaceoptsl
 		| interfaceoptsl
 		;
 
@@ -370,9 +362,9 @@ yyerror(const char *fmt, ...)
 {
 	va_list	ap;
 
-	errors = 1;
+	file->errors++;
 	va_start(ap, fmt);
-	fprintf(stderr, "%s:%d: ", infile, yylval.lineno);
+	fprintf(stderr, "%s:%d: ", file->name, yylval.lineno);
 	vfprintf(stderr, fmt, ap);
 	fprintf(stderr, "\n");
 	va_end(ap);
@@ -424,9 +416,9 @@ char	 pushback_buffer[MAXPUSHBACK];
 int	 pushback_index = 0;
 
 int
-lgetc(FILE *f)
+lgetc(int quotec)
 {
-	int	c, next;
+	int		c, next;
 
 	if (parsebuf) {
 		/* Read character from the parsebuffer instead of input. */
@@ -442,26 +434,32 @@ lgetc(FILE *f)
 	if (pushback_index)
 		return (pushback_buffer[--pushback_index]);
 
-	while ((c = getc(f)) == '\\') {
-		next = getc(f);
-		if (next != '\n') {
-			if (isspace(next))
-				yyerror("whitespace after \\");
-			ungetc(next, f);
-			break;
+	if (quotec) {
+		if ((c = getc(file->stream)) == EOF) {
+			yyerror("reached end of file while parsing "
+			    "quoted string");
+			if (file == topfile || popfile() == EOF)
+				return (EOF);
+			return (quotec);
 		}
-		yylval.lineno = lineno;
-		lineno++;
-	}
-	if (c == '\t' || c == ' ') {
-		/* Compress blanks to a single space. */
-		do {
-			c = getc(f);
-		} while (c == '\t' || c == ' ');
-		ungetc(c, f);
-		c = ' ';
+		return (c);
 	}
 
+	while ((c = getc(file->stream)) == '\\') {
+		next = getc(file->stream);
+		if (next != '\n') {
+			c = next;
+			break;
+		}
+		yylval.lineno = file->lineno;
+		file->lineno++;
+	}
+
+	while (c == EOF) {
+		if (file == topfile || popfile() == EOF)
+			return (EOF);
+		c = getc(file->stream);
+	}
 	return (c);
 }
 
@@ -491,9 +489,9 @@ findeol(void)
 
 	/* skip to either EOF or the first real EOL */
 	while (1) {
-		c = lgetc(fin);
+		c = lgetc(0);
 		if (c == '\n') {
-			lineno++;
+			file->lineno++;
 			break;
 		}
 		if (c == EOF)
@@ -507,21 +505,21 @@ yylex(void)
 {
 	char	 buf[8096];
 	char	*p, *val;
-	int	 endc, c;
+	int	 quotec, next, c;
 	int	 token;
 
 top:
 	p = buf;
-	while ((c = lgetc(fin)) == ' ')
+	while ((c = lgetc(0)) == ' ' || c == '\t')
 		; /* nothing */
 
-	yylval.lineno = lineno;
+	yylval.lineno = file->lineno;
 	if (c == '#')
-		while ((c = lgetc(fin)) != '\n' && c != EOF)
+		while ((c = lgetc(0)) != '\n' && c != EOF)
 			; /* nothing */
 	if (c == '$' && parsebuf == NULL) {
 		while (1) {
-			if ((c = lgetc(fin)) == EOF)
+			if ((c = lgetc(0)) == EOF)
 				return (0);
 
 			if (p + 1 >= buf + sizeof(buf) - 1) {
@@ -549,17 +547,25 @@ top:
 	switch (c) {
 	case '\'':
 	case '"':
-		endc = c;
+		quotec = c;
 		while (1) {
-			if ((c = lgetc(fin)) == EOF)
+			if ((c = lgetc(quotec)) == EOF)
 				return (0);
-			if (c == endc) {
+			if (c == '\n') {
+				file->lineno++;
+				continue;
+			} else if (c == '\\') {
+				if ((next = lgetc(quotec)) == EOF)
+					return (0);
+				if (next == quotec || c == ' ' || c == '\t')
+					c = next;
+				else if (next == '\n')
+					continue;
+				else
+					lungetc(next);
+			} else if (c == quotec) {
 				*p = '\0';
 				break;
-			}
-			if (c == '\n') {
-				lineno++;
-				continue;
 			}
 			if (p + 1 >= buf + sizeof(buf) - 1) {
 				yyerror("string too long");
@@ -569,8 +575,44 @@ top:
 		}
 		yylval.v.string = strdup(buf);
 		if (yylval.v.string == NULL)
-			errx(1, "yylex: strdup");
+			err(1, "yylex: strdup");
 		return (STRING);
+	}
+
+#define allowed_to_end_number(x) \
+	(isspace(x) || x == ')' || x ==',' || x == '/' || x == '}' || x == '=')
+
+	if (c == '-' || isdigit(c)) {
+		do {
+			*p++ = c;
+			if ((unsigned)(p-buf) >= sizeof(buf)) {
+				yyerror("string too long");
+				return (findeol());
+			}
+		} while ((c = lgetc(0)) != EOF && isdigit(c));
+		lungetc(c);
+		if (p == buf + 1 && buf[0] == '-')
+			goto nodigits;
+		if (c == EOF || allowed_to_end_number(c)) {
+			const char *errstr = NULL;
+
+			*p = '\0';
+			yylval.v.number = strtonum(buf, LLONG_MIN,
+			    LLONG_MAX, &errstr);
+			if (errstr) {
+				yyerror("\"%s\" invalid number: %s",
+				    buf, errstr);
+				return (findeol());
+			}
+			return (NUMBER);
+		} else {
+nodigits:
+			while (p > buf + 1)
+				lungetc(*--p);
+			c = *--p;
+			if (c == '-')
+				return (c);
+		}
 	}
 
 #define allowed_in_string(x) \
@@ -586,7 +628,7 @@ top:
 				yyerror("string too long");
 				return (findeol());
 			}
-		} while ((c = lgetc(fin)) != EOF && (allowed_in_string(c)));
+		} while ((c = lgetc(0)) != EOF && (allowed_in_string(c)));
 		lungetc(c);
 		*p = '\0';
 		if ((token = lookup(buf)) == STRING)
@@ -595,12 +637,75 @@ top:
 		return (token);
 	}
 	if (c == '\n') {
-		yylval.lineno = lineno;
-		lineno++;
+		yylval.lineno = file->lineno;
+		file->lineno++;
 	}
 	if (c == EOF)
 		return (0);
 	return (c);
+}
+
+int
+check_file_secrecy(int fd, const char *fname)
+{
+	struct stat	st;
+
+	if (fstat(fd, &st)) {
+		log_warn("cannot stat %s", fname);
+		return (-1);
+	}
+	if (st.st_uid != 0 && st.st_uid != getuid()) {
+		log_warnx("%s: owner not root or current user", fname);
+		return (-1);
+	}
+	if (st.st_mode & (S_IRWXG | S_IRWXO)) {
+		log_warnx("%s: group/world readable/writeable", fname);
+		return (-1);
+	}
+	return (0);
+}
+
+struct file *
+pushfile(const char *name, int secret)
+{
+	struct file	*nfile;
+
+	if ((nfile = calloc(1, sizeof(struct file))) == NULL ||
+	    (nfile->name = strdup(name)) == NULL) {
+		log_warn("malloc");
+		return (NULL);
+	}
+	if ((nfile->stream = fopen(nfile->name, "r")) == NULL) {
+		log_warn("%s", nfile->name);
+		free(nfile->name);
+		free(nfile);
+		return (NULL);
+	} else if (secret &&
+	    check_file_secrecy(fileno(nfile->stream), nfile->name)) {
+		fclose(nfile->stream);
+		free(nfile->name);
+		free(nfile);
+		return (NULL);
+	}
+	nfile->lineno = 1;
+	TAILQ_INSERT_TAIL(&files, nfile, entry);
+	return (nfile);
+}
+
+int
+popfile(void)
+{
+	struct file	*prev;
+
+	if ((prev = TAILQ_PREV(file, files, entry)) != NULL)
+		prev->errors += file->errors;
+
+	TAILQ_REMOVE(&files, file, entry);
+	fclose(file->stream);
+	free(file->name);
+	free(file);
+	file = prev;
+	return (file ? 0 : EOF);
 }
 
 struct ripd_conf *
@@ -616,38 +721,29 @@ parse_config(char *filename, int opts)
 	TAILQ_INIT(&defs->md_list);
 	defs->cost = DEFAULT_COST;
 	defs->auth_type = AUTH_NONE;
-
-	if ((fin = fopen(filename, "r")) == NULL) {
-		warn("%s", filename);
-		free(conf);
-		return (NULL);
-	}
-	infile = filename;
-
 	conf->opts = opts;
 	SIMPLEQ_INIT(&conf->redist_list);
 
-	if (!(conf->opts & RIPD_OPT_NOACTION))
-		if (check_file_secrecy(fileno(fin), filename)) {
-			fclose(fin);
-			free(conf);
-			return (NULL);
-		}
+	if ((file = pushfile(filename, !(conf->opts & RIPD_OPT_NOACTION))) == NULL) {
+		free(conf);
+		return (NULL);
+	}
+	topfile = file;
 
 	yyparse();
-
-	fclose(fin);
+	errors = file->errors;
+	popfile();
 
 	/* Free macros and check which have not been used. */
 	for (sym = TAILQ_FIRST(&symhead); sym != NULL; sym = next) {
-		next = TAILQ_NEXT(sym, entries);
+		next = TAILQ_NEXT(sym, entry);
 		if ((conf->opts & RIPD_OPT_VERBOSE2) && !sym->used)
 			fprintf(stderr, "warning: macro '%s' not "
 			    "used\n", sym->nam);
 		if (!sym->persist) {
 			free(sym->nam);
 			free(sym->val);
-			TAILQ_REMOVE(&symhead, sym, entries);
+			TAILQ_REMOVE(&symhead, sym, entry);
 			free(sym);
 		}
 	}
@@ -669,7 +765,7 @@ symset(const char *nam, const char *val, int persist)
 	struct sym	*sym;
 
 	for (sym = TAILQ_FIRST(&symhead); sym && strcmp(nam, sym->nam);
-	    sym = TAILQ_NEXT(sym, entries))
+	    sym = TAILQ_NEXT(sym, entry))
 		;	/* nothing */
 
 	if (sym != NULL) {
@@ -678,7 +774,7 @@ symset(const char *nam, const char *val, int persist)
 		else {
 			free(sym->nam);
 			free(sym->val);
-			TAILQ_REMOVE(&symhead, sym, entries);
+			TAILQ_REMOVE(&symhead, sym, entry);
 			free(sym);
 		}
 	}
@@ -698,7 +794,7 @@ symset(const char *nam, const char *val, int persist)
 	}
 	sym->used = 0;
 	sym->persist = persist;
-	TAILQ_INSERT_TAIL(&symhead, sym, entries);
+	TAILQ_INSERT_TAIL(&symhead, sym, entry);
 	return (0);
 }
 
@@ -729,7 +825,7 @@ symget(const char *nam)
 {
 	struct sym	*sym;
 
-	TAILQ_FOREACH(sym, &symhead, entries)
+	TAILQ_FOREACH(sym, &symhead, entry)
 		if (strcmp(nam, sym->nam) == 0) {
 			sym->used = 1;
 			return (sym->val);
@@ -740,7 +836,7 @@ symget(const char *nam)
 struct iface *
 conf_get_if(struct kif *kif)
 {
-	struct iface    *i;
+	struct iface	*i;
 
 	LIST_FOREACH(i, &conf->iface_list, entry)
 		if (i->ifindex == kif->ifindex) {

@@ -1,4 +1,4 @@
-/*	$OpenBSD: dvmrpd.h,v 1.6 2007/03/21 19:33:48 michele Exp $ */
+/*	$OpenBSD: dvmrpd.h,v 1.8 2007/09/11 18:23:05 claudio Exp $ */
 
 /*
  * Copyright (c) 2004, 2005, 2006 Esben Norby <norby@openbsd.org>
@@ -206,10 +206,9 @@ struct iface {
 	struct in_addr		 mask;
 	struct in_addr		 querier;	/* designated querier */
 
+	u_int64_t		 baudrate;
 	u_int32_t		 gen_id;
 	u_int32_t		 group_cnt;
-
-	u_int32_t		 baudrate;
 	u_int32_t		 probe_interval;
 
 	u_int32_t		 query_interval;
@@ -279,7 +278,7 @@ struct kroute {
 
 struct kif {
 	char			 ifname[IF_NAMESIZE];
-	u_long			 baudrate;
+	u_int64_t		 baudrate;
 	int			 flags;
 	int			 mtu;
 	u_short			 ifindex;
@@ -300,9 +299,9 @@ struct ctl_iface {
 	time_t			 querier_present_timer;
 	time_t			 uptime;
 
+	u_int64_t		 baudrate;
 	u_int32_t		 gen_id;
 	u_int32_t		 group_cnt;
-	u_int32_t		 baudrate;
 	u_int32_t		 probe_interval;
 	u_int32_t		 query_interval;
 	u_int32_t		 query_resp_interval;

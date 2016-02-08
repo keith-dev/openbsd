@@ -1,4 +1,4 @@
-.\"	$OpenBSD: disklabel.8,v 1.63 2007/06/02 08:02:51 jmc Exp $
+.\"	$OpenBSD: disklabel.8,v 1.66 2008/01/25 15:30:11 otto Exp $
 .\"	$NetBSD: disklabel.8,v 1.9 1995/03/18 14:54:38 cgd Exp $
 .\"
 .\" Copyright (c) 1987, 1988, 1991, 1993
@@ -33,7 +33,7 @@
 .\"
 .\"	@(#)disklabel.8	8.2 (Berkeley) 4/19/94
 .\"
-.Dd $Mdocdate: June 2 2007 $
+.Dd $Mdocdate: January 25 2008 $
 .Dt DISKLABEL 8
 .Os
 .Sh NAME
@@ -112,7 +112,7 @@ The
 flag is implied by
 .Fl B
 and never needs to be specified.
-.It Fl b
+.It Fl b Ar boot1
 Specify the single level boot program, or the primary boot program,
 depending on the system boot architecture
 .Pq single or two-level .
@@ -167,7 +167,8 @@ Make no permanent changes to the disklabel
 Print partition sizes and offsets in
 .Ar unit
 instead of sectors.
-Valid units are b(ytes), c(ylinders), k(ilobytes), m(egabytes) and g(igabytes).
+Valid units are b(ytes), c(ylinders), k(ilobytes), m(egabytes), g(igabytes)
+and t(erabytes).
 For operations other than displaying a partition the
 .Ql %
 (percent of total) and
@@ -187,7 +188,7 @@ system.
 This flag does not work on a number of architectures, thus it is
 not considered the right way to put a new label on a disk.
 Its use is discouraged.
-.It Fl s
+.It Fl s Ar boot2
 On machines with a two-level bootstrap
 .Pq such as i386-based systems ,
 specify the secondary boot program.
@@ -425,7 +426,8 @@ If any changes have been made, the user will be
 asked whether or not to save the changes to the on-disk label.
 .It Cm r
 Recalculate free space.
-This option should really not be necessary under normal circumstances.
+This command displays all the free areas on the disk and the total
+number of free sectors.
 .It Cm s Op Ar path
 Save the label to a file in
 .Tn ASCII
@@ -687,6 +689,8 @@ partition of the boot disk is the root partition, and the
 partition of the boot disk is the swap partition,
 but all other letters can be used in any order for any other
 partitions as desired.
+.Pp
+The maximum disk and partition size is 64PB.
 .Sh BUGS
 When a disk name is given without a full pathname, the constructed
 device name uses the

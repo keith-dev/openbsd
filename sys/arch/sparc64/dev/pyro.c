@@ -1,4 +1,4 @@
-/*	$OpenBSD: pyro.c,v 1.7 2007/04/03 19:59:01 kettenis Exp $	*/
+/*	$OpenBSD: pyro.c,v 1.11 2008/01/19 11:13:43 kettenis Exp $	*/
 
 /*
  * Copyright (c) 2002 Jason L. Wright (jason@thought.net)
@@ -73,6 +73,9 @@ bus_space_tag_t _pyro_alloc_bus_tag(struct pyro_pbm *, const char *,
     int, int, int);
 bus_dma_tag_t pyro_alloc_dma_tag(struct pyro_pbm *);
 
+pcireg_t pyro_conf_read(pci_chipset_tag_t, pcitag_t, int);
+void pyro_conf_write(pci_chipset_tag_t, pcitag_t, int, pcireg_t);
+
 int pyro_intr_map(struct pci_attach_args *, pci_intr_handle_t *);
 int _pyro_bus_map(bus_space_tag_t, bus_space_tag_t, bus_addr_t,
     bus_size_t, int, bus_space_handle_t *);
@@ -141,10 +144,9 @@ pyro_init(struct pyro_softc *sc, int busa)
 	struct pcibus_attach_args pba;
 	int *busranges = NULL, nranges;
 
-	pbm = (struct pyro_pbm *)malloc(sizeof(*pbm), M_DEVBUF, M_NOWAIT);
+	pbm = malloc(sizeof(*pbm), M_DEVBUF, M_NOWAIT | M_ZERO);
 	if (pbm == NULL)
 		panic("pyro: can't alloc pyro pbm");
-	bzero(pbm, sizeof(*pbm));
 
 	pbm->pp_sc = sc;
 	pbm->pp_bus_a = busa;
@@ -189,6 +191,8 @@ pyro_init(struct pyro_softc *sc, int busa)
 	pba.pba_dmat = pbm->pp_dmat;
 	pba.pba_memt = pbm->pp_memt;
 	pba.pba_iot = pbm->pp_iot;
+	pba.pba_pc->conf_read = pyro_conf_read;
+	pba.pba_pc->conf_write = pyro_conf_write;
 	pba.pba_pc->intr_map = pyro_intr_map;
 
 	free(busranges, M_DEVBUF);
@@ -228,6 +232,20 @@ pyro_print(void *aux, const char *p)
 	if (p == NULL)
 		return (UNCONF);
 	return (QUIET);
+}
+
+pcireg_t
+pyro_conf_read(pci_chipset_tag_t pc, pcitag_t tag, int reg)
+{
+	return (bus_space_read_4(pc->bustag, pc->bushandle,
+	    (PCITAG_OFFSET(tag) << 4) + reg));
+}
+
+void
+pyro_conf_write(pci_chipset_tag_t pc, pcitag_t tag, int reg, pcireg_t data)
+{
+        bus_space_write_4(pc->bustag, pc->bushandle,
+	    (PCITAG_OFFSET(tag) << 4) + reg, data);
 }
 
 /*
@@ -299,11 +317,10 @@ _pyro_alloc_bus_tag(struct pyro_pbm *pbm, const char *name, int ss,
 	struct pyro_softc *sc = pbm->pp_sc;
 	struct sparc_bus_space_tag *bt;
 
-	bt = malloc(sizeof(*bt), M_DEVBUF, M_NOWAIT);
+	bt = malloc(sizeof(*bt), M_DEVBUF, M_NOWAIT | M_ZERO);
 	if (bt == NULL)
 		panic("pyro: could not allocate bus tag");
 
-	bzero(bt, sizeof *bt);
 	snprintf(bt->name, sizeof(bt->name), "%s-pbm_%s(%d/%2.2x)",
 	    sc->sc_dv.dv_xname, name, ss, asi);
 
@@ -324,12 +341,10 @@ pyro_alloc_dma_tag(struct pyro_pbm *pbm)
 	struct pyro_softc *sc = pbm->pp_sc;
 	bus_dma_tag_t dt, pdt = sc->sc_dmat;
 
-	dt = (bus_dma_tag_t)malloc(sizeof(struct sparc_bus_dma_tag),
-	    M_DEVBUF, M_NOWAIT);
+	dt = malloc(sizeof(*dt), M_DEVBUF, M_NOWAIT | M_ZERO);
 	if (dt == NULL)
 		panic("pyro: could not alloc dma tag");
 
-	bzero(dt, sizeof(*dt));
 	dt->_cookie = pbm;
 	dt->_parent = pdt;
 	dt->_dmamap_create	= pyro_dmamap_create;
@@ -356,7 +371,6 @@ pyro_alloc_chipset(struct pyro_pbm *pbm, int node, pci_chipset_tag_t pc)
 	memcpy(npc, pc, sizeof *pc);
 	npc->cookie = pbm;
 	npc->rootnode = node;
-	npc->tagshift = 4;	/* PCIe has a larger config space */
 	return (npc);
 }
 

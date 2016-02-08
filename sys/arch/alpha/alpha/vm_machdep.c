@@ -1,4 +1,4 @@
-/* $OpenBSD: vm_machdep.c,v 1.33 2007/05/27 20:59:24 miod Exp $ */
+/* $OpenBSD: vm_machdep.c,v 1.36 2007/10/13 07:18:30 miod Exp $ */
 /* $NetBSD: vm_machdep.c,v 1.55 2000/03/29 03:49:48 simonb Exp $ */
 
 /*
@@ -96,9 +96,6 @@ cpu_coredump(p, vp, cred, chdr)
 
 /*
  * cpu_exit is called as the last action during exit.
- * We block interrupts and call switch_exit.  switch_exit switches
- * to proc0's PCB and stack, then jumps into the middle of cpu_switch,
- * as if it were switching from proc0.
  */
 void
 cpu_exit(p)
@@ -114,9 +111,7 @@ cpu_exit(p)
 	 * vmspace's context until the switch to proc0 in switch_exit().
 	 */
 	pmap_deactivate(p);
-
-	(void) splhigh();
-	switch_exit(p);
+	sched_exit(p);
 	/* NOTREACHED */
 }
 
@@ -214,7 +209,7 @@ cpu_fork(p1, p2, stack, stacksize, func, arg)
 		p2tf->tf_regs[FRAME_A4] = 1;		/* is child */
 
 		/*
-		 * If specificed, give the child a different stack.
+		 * If specified, give the child a different stack.
 		 */
 		if (stack != NULL)
 			p2tf->tf_regs[FRAME_SP] = (u_long)stack + stacksize;

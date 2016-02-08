@@ -1,5 +1,5 @@
 %{
-/*	$OpenBSD: date.y,v 1.16 2007/02/22 06:42:09 otto Exp $	*/
+/*	$OpenBSD: date.y,v 1.18 2008/02/16 01:00:00 cnst Exp $	*/
 
 /*
 **  Originally written by Steven M. Bellovin <smb@research.att.com> while
@@ -485,17 +485,13 @@ static TABLE const MilitaryTable[] = {
 static int
 yyerror(const char *s)
 {
+#if !defined(TEST)
 	char *str;
 
-	if (isspace(yyInput[0]) || !isprint(yyInput[0]))
-		(void)xasprintf(&str,
-		    "%s: unexpected char 0x%02x in date string", s, yyInput[0]);
-	else
-		(void)xasprintf(&str, "%s: unexpected %s in date string",
-		    s, yyInput);
-
+	(void)xasprintf(&str, "parsing date string: %s", s);
 	cvs_log(LP_ERR, "%s", str);
 	xfree(str);
+#endif
 	return (0);
 }
 
@@ -524,7 +520,7 @@ ToSeconds(time_t Hours, time_t Minutes, time_t	Seconds, MERIDIAN Meridian)
 			Hours = 0;
 		return ((Hours + 12) * 60L + Minutes) * 60L + Seconds;
 	default:
-		abort();
+		return (-1);
 	}
 	/* NOTREACHED */
 }

@@ -1,4 +1,4 @@
-/* $OpenBSD: if_pppoe.c,v 1.12 2007/05/28 06:31:01 mcbride Exp $ */
+/* $OpenBSD: if_pppoe.c,v 1.14 2008/02/20 09:37:52 brad Exp $ */
 /* $NetBSD: if_pppoe.c,v 1.51 2003/11/28 08:56:48 keihan Exp $ */
 
 /*
@@ -225,10 +225,9 @@ pppoe_clone_create(struct if_clone *ifc, int unit)
 	struct pppoe_softc *sc;
 	int s;
 
-        MALLOC(sc, struct pppoe_softc *, sizeof(*sc), M_DEVBUF, M_WAITOK);
+        sc = malloc(sizeof(*sc), M_DEVBUF, M_WAITOK|M_ZERO);
         if (sc == NULL)
                 return (ENOMEM);
-        bzero(sc, sizeof(struct pppoe_softc));
 
 	sc->sc_unique = arc4random();
 
@@ -367,25 +366,22 @@ pppoe_find_softc_by_hunique(u_int8_t *token, size_t len, struct ifnet *rcvif)
 void
 pppoeintr(void)
 {
-	struct pppoe_softc *sc;
 	struct mbuf *m;
 
 	splassert(IPL_SOFTNET);
 	
-	LIST_FOREACH(sc, &pppoe_softc_list, sc_list) {
-		while (ppoediscinq.ifq_head) {
-			MBUFLOCK(IF_DEQUEUE(&ppoediscinq, m););
-			if (m == NULL)
-				break;
-			pppoe_disc_input(m);
-		}
+	while (ppoediscinq.ifq_head) {
+		MBUFLOCK(IF_DEQUEUE(&ppoediscinq, m););
+		if (m == NULL)
+			break;
+		pppoe_disc_input(m);
+	}
 
-		while (ppoeinq.ifq_head) {
-			MBUFLOCK(IF_DEQUEUE(&ppoeinq, m););
-			if (m == NULL)
-				break;
-			pppoe_data_input(m);
-		}
+	while (ppoeinq.ifq_head) {
+		MBUFLOCK(IF_DEQUEUE(&ppoeinq, m););
+		if (m == NULL)
+			break;
+		pppoe_data_input(m);
 	}
 }
 
@@ -734,6 +730,8 @@ pppoe_data_input(struct mbuf *m)
 #ifdef PPPOE_TERM_UNKNOWN_SESSIONS
 	u_int8_t shost[ETHER_ADDR_LEN];
 #endif
+	if (LIST_EMPTY(&pppoe_softc_list))
+		goto drop;
 
 	KASSERT(m->m_flags & M_PKTHDR);
 

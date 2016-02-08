@@ -1,4 +1,4 @@
-/*	$OpenBSD: central.c,v 1.4 2004/09/27 17:28:03 jason Exp $	*/
+/*	$OpenBSD: central.c,v 1.6 2008/01/17 22:53:18 kettenis Exp $	*/
 
 /*
  * Copyright (c) 2004 Jason L. Wright (jason@thought.net)
@@ -137,7 +137,7 @@ central_print(void *args, const char *busname)
 	char *class;
 
 	if (busname != NULL) {
-		printf("%s at %s", ca->ca_name, busname);
+		printf("\"%s\" at %s", ca->ca_name, busname);
 		class = getpropstring(ca->ca_node, "device_type");
 		if (*class != '\0')
 			printf(" class %s", class);
@@ -150,11 +150,10 @@ central_alloc_bus_tag(struct central_softc *sc)
 {
 	struct sparc_bus_space_tag *bt;
 
-	bt = malloc(sizeof(*bt), M_DEVBUF, M_NOWAIT);
+	bt = malloc(sizeof(*bt), M_DEVBUF, M_NOWAIT | M_ZERO);
 	if (bt == NULL)
 		panic("central: couldn't alloc bus tag");
 
-	bzero(bt, sizeof(*bt));
 	snprintf(bt->name, sizeof(bt->name), "%s", sc->sc_dv.dv_xname);
 	bt->cookie = sc;
 	bt->parent = sc->sc_bt;

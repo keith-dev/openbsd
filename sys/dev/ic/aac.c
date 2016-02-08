@@ -1,4 +1,4 @@
-/*	$OpenBSD: aac.c,v 1.35 2007/03/20 10:30:32 mickey Exp $	*/
+/*	$OpenBSD: aac.c,v 1.37 2007/10/01 04:03:51 krw Exp $	*/
 
 /*-
  * Copyright (c) 2000 Michael Smith
@@ -1207,10 +1207,9 @@ aac_alloc_commands(struct aac_softc *sc)
 	if (sc->total_fibs + AAC_FIB_COUNT > sc->aac_max_fibs)
 		return (ENOMEM);
 
-	fm = malloc(sizeof(struct aac_fibmap), M_DEVBUF, M_NOWAIT);
+	fm = malloc(sizeof(*fm), M_DEVBUF, M_NOWAIT | M_ZERO);
 	if (fm == NULL)
 		goto exit;
-	bzero(fm, sizeof(struct aac_fibmap));
 
 	/* allocate the FIBs in DMAable memory and load them */
 	if (bus_dmamem_alloc(sc->aac_dmat, AAC_FIBMAP_SIZE, PAGE_SIZE, 0,
@@ -1559,8 +1558,7 @@ aac_init(struct aac_softc *sc)
 	/* Allocate some FIBs and associated command structs */
 	TAILQ_INIT(&sc->aac_fibmap_tqh);
 	sc->aac_commands = malloc(AAC_MAX_FIBS * sizeof(struct aac_command),
-				  M_DEVBUF, M_WAITOK);
-	bzero(sc->aac_commands, AAC_MAX_FIBS * sizeof(struct aac_command));
+	    M_DEVBUF, M_WAITOK | M_ZERO);
 	while (sc->total_fibs < AAC_MAX_FIBS) {
 		if (aac_alloc_commands(sc) != 0)
 			break;
@@ -1592,7 +1590,7 @@ aac_init(struct aac_softc *sc)
 	 * therefore 'assuming' that this value is in 16MB units (2^24).
 	 * Round up since the granularity is so high.
 	 */
-	ip->HostPhysMemPages = ctob(physmem) / AAC_PAGE_SIZE;
+	ip->HostPhysMemPages = ptoa(physmem) / AAC_PAGE_SIZE;
 	if (sc->flags & AAC_FLAGS_BROKEN_MEMMAP) {
 		ip->HostPhysMemPages =
 		    (ip->HostPhysMemPages + AAC_PAGE_SIZE) / AAC_PAGE_SIZE;

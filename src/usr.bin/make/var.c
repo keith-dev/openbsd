@@ -1,5 +1,5 @@
 /*	$OpenPackages$ */
-/*	$OpenBSD: var.c,v 1.74 2007/07/30 10:03:11 espie Exp $	*/
+/*	$OpenBSD: var.c,v 1.83 2007/11/17 16:39:45 espie Exp $	*/
 /*	$NetBSD: var.c,v 1.18 1997/03/18 19:24:46 christos Exp $	*/
 
 /*
@@ -98,7 +98,7 @@ char	var_Error[] = "";
  * identical string instances...
  */
 static char	varNoError[] = "";
-bool		errorIsOkay;	
+bool		errorIsOkay;
 static bool	checkEnvFirst;	/* true if environment should be searched for
 				 * variables before the global context */
 
@@ -191,7 +191,7 @@ typedef struct Var_ {
 #define VAR_FROM_ENV	8	/* Special source: environment */
 #define VAR_SEEN_ENV	16	/* No need to go look up environment again */
 #define VAR_SHELL	32	/* Magic behavior */
-				
+
 #define POISONS (POISON_NORMAL | POISON_EMPTY | POISON_NOT_DEFINED)
 				/* Defined in var.h */
 	char name[1];		/* the variable's name */
@@ -205,7 +205,6 @@ static struct ohash_info var_info = {
 };
 
 static int classify_var(const char *, const char **, uint32_t *);
-static Var *find_any_var(const char *, const char *, SymTable *, int, uint32_t);
 static Var *find_global_var(const char *, const char *, uint32_t);
 static Var *find_global_var_without_env(const char *, const char *, uint32_t);
 static void fill_from_env(Var *);
@@ -215,7 +214,6 @@ static void var_set_value(Var *, const char *);
 #define var_get_value(v)	Buf_Retrieve(&((v)->val))
 static void var_append_value(Var *, const char *);
 static void poison_check(Var *);
-static void varq_set_append(int, const char *, GNode *, bool);
 static void var_set_append(const char *, const char *, const char *, int, bool);
 static void set_magic_shell_variable(void);
 
@@ -229,7 +227,8 @@ typedef const char * (*find_t)(const char *);
 static find_t find_pos(int);
 static void push_used(Var *);
 static void pop_used(Var *);
-static char *get_expanded_value(Var *, int, SymTable *, bool, bool *);
+static char *get_expanded_value(const char *, const char *, int, uint32_t,
+    SymTable *, bool, bool *);
 static bool parse_base_variable_name(const char **, struct Name *, SymTable *);
 
 
@@ -437,7 +436,7 @@ delete_var(Var *v)
 void
 SymTable_Init(SymTable *ctxt)
 {
-	static SymTable sym_template;	
+	static SymTable sym_template;
 	memcpy(ctxt, &sym_template, sizeof(*ctxt));
 }
 
@@ -454,59 +453,6 @@ SymTable_Destroy(SymTable *ctxt)
 			delete_var(ctxt->locals[i]);
 }
 #endif
-
-/* set or append to dynamic variable.
- */
-static void
-varq_set_append(int idx, const char *val, GNode *gn, bool append)
-{
-	Var *v = gn->context.locals[idx];
-
-	if (v == NULL) {
-		v = create_var(varnames[idx], NULL);
-#ifdef STATS_VAR_LOOKUP
-		STAT_VAR_CREATION++;
-#endif
-		if (val != NULL)
-			var_set_initial_value(v, val);
-		else
-			Buf_Init(&(v->val), 1);
-		v->flags = 0;
-		gn->context.locals[idx] = v;
-	} else {
-		if (append)
-			Buf_AddSpace(&(v->val));
-		else
-			Buf_Reset(&(v->val));
-		Buf_AddString(&(v->val), val);
-	}
-	if (DEBUG(VAR))
-		printf("%s:%s = %s\n", gn->name, varnames[idx],
-		    var_get_value(v));
-}
-
-void
-Varq_Set(int idx, const char *val, GNode *gn)
-{
-	varq_set_append(idx, val, gn, false);
-}
-
-void
-Varq_Append(int idx, const char *val, GNode *gn)
-{
-	varq_set_append(idx, val, gn, true);
-}
-
-char *
-Varq_Value(int idx, GNode *gn)
-{
-	Var *v = gn->context.locals[idx];
-
-	if (v == NULL)
-		return NULL;
-	else
-		return var_get_value(v);
-}
 
 /***
  ***	Global variable handling.
@@ -560,10 +506,10 @@ find_global_var(const char *name, const char *ename, uint32_t k)
 
 	v = find_global_var_without_env(name, ename, k);
 
-	if ((v->flags & VAR_SEEN_ENV) == 0 &&
-	    (checkEnvFirst  && (v->flags & VAR_FROM_CMD) == 0 ||
-		(v->flags & VAR_DUMMY) != 0))
-		    fill_from_env(v);
+	if ((v->flags & VAR_SEEN_ENV) == 0)
+		if ((checkEnvFirst && (v->flags & VAR_FROM_CMD) == 0) ||
+		    (v->flags & VAR_DUMMY) != 0)
+			fill_from_env(v);
 
 	return v;
 }
@@ -639,7 +585,7 @@ Var_Deletei(const char *name, const char *ename)
 	}
 	slot = ohash_lookup_interval(&global_variables, name, ename, k);
 	v = ohash_find(&global_variables, slot);
-	
+
 	if (v == NULL)
 		return;
 
@@ -697,14 +643,14 @@ var_set_append(const char *name, const char *ename, const char *val, int ctxt,
 }
 
 void
-Var_Seti_with_ctxt(const char *name, const char *ename, const char *val, 
+Var_Seti_with_ctxt(const char *name, const char *ename, const char *val,
     int ctxt)
 {
 	var_set_append(name, ename, val, ctxt, false);
 }
 
 void
-Var_Appendi_with_ctxt(const char *name, const char *ename, const char *val, 
+Var_Appendi_with_ctxt(const char *name, const char *ename, const char *val,
     int ctxt)
 {
 	var_set_append(name, ename, val, ctxt, true);
@@ -766,26 +712,6 @@ Var_Definedi(const char *name, const char *ename)
  ***/
 
 
-/* XXX contrary to find_global_var(), find_any_var() can return NULL pointers.
- */
-static Var *
-find_any_var(const char *name, const char *ename, SymTable *ctxt,
-    int idx, uint32_t k)
-{
-	/* Handle local variables first */
-	if (idx != GLOBAL_INDEX) {
-		if (ctxt != NULL) {
-			if (idx < LOCAL_SIZE)
-				return ctxt->locals[idx];
-			else
-				return ctxt->locals[EXTENDED2SIMPLE(idx)];
-		} else
-			return NULL;
-	} else {
-		return find_global_var(name, ename, k);
-	}
-}
-
 /* All the scanning functions needed to account for all the forms of
  * variable names that exist:
  *	$A, ${AB}, $(ABC), ${A:mod}, $(A:mod)
@@ -824,7 +750,7 @@ find_pos(int c)
 	}
 }
 
-static bool 
+static bool
 parse_base_variable_name(const char **pstr, struct Name *name, SymTable *ctxt)
 {
 	const char *str = *pstr;
@@ -856,13 +782,12 @@ parse_base_variable_name(const char **pstr, struct Name *name, SymTable *ctxt)
 bool
 Var_ParseSkip(const char **pstr, SymTable *ctxt)
 {
-	Var *v;
 	const char *str = *pstr;
 	struct Name name;
 	bool result;
 	bool has_modifier;
 	const char *tstr = str;
-	
+
 	has_modifier = parse_base_variable_name(&tstr, &name, ctxt);
 	VarName_Free(&name);
 	result = true;
@@ -901,14 +826,14 @@ Var_ParseBuffer(Buffer buf, const char *str, SymTable *ctxt, bool err,
 static Var *call_trace[MAX_DEPTH];
 static int current_depth = 0;
 
-static void 
+static void
 push_used(Var *v)
 {
 	if (v->flags & VAR_IN_USE) {
 		int i;
 		fprintf(stderr, "Problem with variable expansion chain: ");
-		for (i = 0; 
-		    i < (current_depth > MAX_DEPTH ? MAX_DEPTH : current_depth); 
+		for (i = 0;
+		    i < (current_depth > MAX_DEPTH ? MAX_DEPTH : current_depth);
 		    i++)
 			fprintf(stderr, "%s -> ", call_trace[i]->name);
 		fprintf(stderr, "%s\n", v->name);
@@ -930,17 +855,10 @@ pop_used(Var *v)
 }
 
 static char *
-get_expanded_value(Var *v, int idx, SymTable *ctxt, bool err, bool *freePtr)
+get_expanded_value(const char *name, const char *ename, int idx, uint32_t k, 
+    SymTable *ctxt, bool err, bool *freePtr)
 {
 	char *val;
-
-	if (v == NULL)
-		return NULL;
-
-	if ((v->flags & POISONS) != 0)
-		poison_check(v);
-	if ((v->flags & VAR_DUMMY) != 0)
-		return NULL;
 
 	/* Before doing any modification, we have to make sure the
 	 * value has been fully expanded. If it looks like recursion
@@ -950,20 +868,42 @@ get_expanded_value(Var *v, int idx, SymTable *ctxt, bool err, bool *freePtr)
 	 * value returned by Var_Subst will have been dynamically
 	 * allocated, so it will need freeing when we return.
 	 */
-	val = var_get_value(v);
 	if (idx == GLOBAL_INDEX) {
+		Var *v = find_global_var(name, ename, k);
+
+		if (v == NULL)
+			return NULL;
+
+		if ((v->flags & POISONS) != 0)
+			poison_check(v);
+		if ((v->flags & VAR_DUMMY) != 0)
+			return NULL;
+
+		val = var_get_value(v);
 		if (strchr(val, '$') != NULL) {
 			push_used(v);
 			val = Var_Subst(val, ctxt, err);
 			pop_used(v);
 			*freePtr = true;
 		}
-	} else if (idx >= LOCAL_SIZE) {
-		if (IS_EXTENDED_F(idx))
-			val = Var_GetTail(val);
-		else
-			val = Var_GetHead(val);
-		*freePtr = true;
+	} else {
+		if (ctxt != NULL) {
+			if (idx < LOCAL_SIZE)
+				val = ctxt->locals[idx];
+			else
+				val = ctxt->locals[EXTENDED2SIMPLE(idx)];
+		} else
+			val = NULL;
+		if (val == NULL)
+			return NULL;
+
+		if (idx >= LOCAL_SIZE) {
+			if (IS_EXTENDED_F(idx))
+				val = Var_GetTail(val);
+			else
+				val = Var_GetHead(val);
+			*freePtr = true;
+		}
 	}
 	return val;
 }
@@ -976,7 +916,6 @@ Var_Parse(const char *str,	/* The string to parse */
     bool *freePtr)		/* OUT: true if caller should free result */
 {
 	const char *tstr;
-	Var *v;
 	struct Name name;
 	char *val;
 	uint32_t k;
@@ -990,8 +929,7 @@ Var_Parse(const char *str,	/* The string to parse */
 	has_modifier = parse_base_variable_name(&tstr, &name, ctxt);
 
 	idx = classify_var(name.s, &name.e, &k);
-	v = find_any_var(name.s, name.e, ctxt, idx, k);
-	val = get_expanded_value(v, idx, ctxt, err, freePtr);
+	val = get_expanded_value(name.s, name.e, idx, k, ctxt, err, freePtr);
 	if (has_modifier) {
 		val = VarModifiers_Apply(val, &name, ctxt, err, freePtr,
 		    &tstr, str[1]);
@@ -1018,6 +956,7 @@ Var_Parse(const char *str,	/* The string to parse */
 					Fatal(
 "Using $< in a non-suffix rule context is a GNUmake idiom (line %lu of %s)",
 					    n->lineno, n->fname);
+					break;
 				default:
 					Error(
 "Using undefined dynamic variable $%s (line %lu of %s)",
@@ -1106,8 +1045,8 @@ Var_Subst(const char *str,	/* the string in which to substitute */
 
 static BUFFER subst_buffer;
 
-/* we would like to subst on intervals, but it's complicated, so we cheat 
- * by storing the interval in a static buffer. 
+/* we would like to subst on intervals, but it's complicated, so we cheat
+ * by storing the interval in a static buffer.
  */
 char *
 Var_Substi(const char *str, const char *estr, SymTable *ctxt, bool undefErr)
@@ -1149,7 +1088,7 @@ Var_NewLoopVar(const char *name, const char *ename)
 	k = ohash_interval(name, &ename);
 
 	l->me = find_global_var_without_env(name, ename, k);
-	l->old = *(l->me);			
+	l->old = *(l->me);
 	l->me->flags = VAR_SEEN_ENV | VAR_DUMMY;
 	return l;
 }
@@ -1220,7 +1159,7 @@ Var_SubstVar(Buffer buf,	/* To store result */
 			}
 			if (*p == ':') {
 				bool doFree;	/* should val be freed ? */
-				char *newval;	
+				char *newval;
 				struct Name name;
 
 				doFree = false;
@@ -1230,7 +1169,7 @@ Var_SubstVar(Buffer buf,	/* To store result */
 				/* val won't be freed since !doFree, but
 				 * VarModifiers_Apply doesn't know that,
 				 * hence the cast. */
-				newval = VarModifiers_Apply((char *)val, 
+				newval = VarModifiers_Apply((char *)val,
 				    &name, NULL, false, &doFree, &p, paren);
 				Buf_AddString(buf, newval);
 				if (doFree)

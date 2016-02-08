@@ -1,4 +1,4 @@
-/*	$OpenBSD: mkalias.c,v 1.19 2007/08/05 14:25:48 fgsch Exp $ */
+/*	$OpenBSD: mkalias.c,v 1.21 2007/09/04 14:37:53 fgsch Exp $ */
 
 /*
  * Copyright (c) 1997 Mats O Jansson <moj@stacken.kth.se>
@@ -27,7 +27,7 @@
  */
 
 #ifndef lint
-static const char rcsid[] = "$OpenBSD: mkalias.c,v 1.19 2007/08/05 14:25:48 fgsch Exp $";
+static const char rcsid[] = "$OpenBSD: mkalias.c,v 1.21 2007/09/04 14:37:53 fgsch Exp $";
 #endif
 
 #include <ctype.h>
@@ -42,23 +42,9 @@ static const char rcsid[] = "$OpenBSD: mkalias.c,v 1.19 2007/08/05 14:25:48 fgsc
 #include <netinet/in.h>
 #include <arpa/nameser.h>
 #include <resolv.h>
+#include <err.h>
 #include "ypdb.h"
 #include "ypdef.h"
-
-char *
-findlast(const char *b, int c, size_t len)
-{
-	const char *p;
-
-	if (len != 0) {
-		p = b + len - 1;
-		do {
-			if (*p == c)
-				return ((char *)p);
-		} while (p-- != b);
-	}
-	return (NULL);
-}
 
 static void
 split_address(char *address, size_t len, char *user, char *host)
@@ -80,7 +66,7 @@ split_address(char *address, size_t len, char *user, char *host)
 		*s = '\0';
 	}
 
-	if ((r = findlast(address, '!',  len))) {
+	if ((r = memrchr(address, '!',  len))) {
 		s = host;
 		for (c = address; i < len; i++) {
 			if (c == r) {
@@ -206,17 +192,16 @@ main(int argc, char *argv[])
 
 	db = ypdb_open(input, O_RDONLY, 0444);
 	if (db == NULL) {
-		fprintf(stderr,
-		    "mkalias: Unable to open input database %s\n",
-		    input);
-		exit(1);
+		err(1, "Unable to open input database %s", input);
+		/* NOTREACHED */
 	}
 
 	if (output != NULL) {
 		if (strlen(output) + strlen(YPDB_SUFFIX) > MAXPATHLEN) {
-			fprintf(stderr,"mkalias: %s: file name too long\n",
-			    output);
+			errx(1, "%s: file name too long", output);
+			/* NOTREACHED */
 		}
+
 		snprintf(db_outfile, sizeof(db_outfile),
 		    "%s%s", output, YPDB_SUFFIX);
 
@@ -230,9 +215,8 @@ main(int argc, char *argv[])
 
 		if (strlen(output) + strlen(mapname) +
 		    strlen(YPDB_SUFFIX) > MAXPATHLEN) {
-			fprintf(stderr,"mkalias: %s: directory name too long\n",
-			    output);
-			exit(1);
+			errx(1, "%s: directory name too long", output);
+			/* NOTREACHED */
 		}
 
 		snprintf(db_tempname, sizeof(db_tempname), "%s%s%s", output,
@@ -250,10 +234,9 @@ main(int argc, char *argv[])
 fail:
 			if (fd != -1)
 				unlink(db_tempname);
-			fprintf(stderr,
-			    "mkalias: Unable to open output database %s\n",
+			err(1, "Unable to open output database %s",
 			    db_outfile);
-			exit(1);
+			/* NOTREACHED */
 		}
 	}
 
@@ -279,7 +262,7 @@ fail:
 		split_address(val.dptr, val.dsize, user, host);
 
 		if (eflag && check_host(val.dptr, val.dsize, host, dflag, uflag, Eflag)) {
-			printf("Invalid host %s in %*.*s:%*.*s\n",
+			warnx("Invalid host %s in %*.*s:%*.*s",
 			    host, key.dsize, key.dsize, key.dptr,
 			    val.dsize, val.dsize, val.dptr);
 			continue;
@@ -291,7 +274,7 @@ fail:
 		if (new_db != NULL) {
 			status = ypdb_store(new_db, val, key, YPDB_INSERT);
 			if (status != 0) {
-				printf("mkalias: problem storing %*.*s %*.*s\n",
+				warnx("problem storing %*.*s %*.*s",
 				    val.dsize, val.dsize, val.dptr,
 				    key.dsize, key.dsize, key.dptr);
 			}
@@ -313,7 +296,7 @@ fail:
 		val.dsize = strlen(datestr);
 		status = ypdb_store(new_db, key, val, YPDB_INSERT);
 		if (status != 0) {
-			printf("mkalias: problem storing %*.*s %*.*s\n",
+			warnx("problem storing %*.*s %*.*s",
 			    key.dsize, key.dsize, key.dptr,
 			    val.dsize, val.dsize, val.dptr);
 		}
@@ -327,7 +310,7 @@ fail:
 		val.dsize = strlen(myname);
 		status = ypdb_store(new_db, key, val, YPDB_INSERT);
 		if (status != 0) {
-			printf("mkalias: problem storing %*.*s %*.*s\n",
+			warnx("problem storing %*.*s %*.*s",
 			    key.dsize, key.dsize, key.dptr,
 			    val.dsize, val.dsize, val.dptr);
 		}
@@ -338,10 +321,9 @@ fail:
 	if (new_db != NULL) {
 		ypdb_close(new_db);
 		if (rename(db_tempname, db_outfile) < 0) {
-			perror("rename");
-			fprintf(stderr,"rename %s -> %s failed!\n",
-			    db_tempname, db_outfile);
-			exit(1);
+			err(1, "rename %s -> %s failed", db_tempname,
+			    db_outfile);
+			/* NOTREACHED */
 		}
 	}
 	return(0);

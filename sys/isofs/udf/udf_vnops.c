@@ -1,4 +1,4 @@
-/*	$OpenBSD: udf_vnops.c,v 1.27 2007/06/06 17:15:13 deraadt Exp $	*/
+/*	$OpenBSD: udf_vnops.c,v 1.30 2007/12/09 20:54:01 jmc Exp $	*/
 
 /*
  * Copyright (c) 2001, 2002 Scott Long <scottl@freebsd.org>
@@ -29,7 +29,7 @@
  */
 
 /*
- * Ported to OpenBSD by Pedro Martelletto <pedro@openbsd.org> in February 2005.
+ * Ported to OpenBSD by Pedro Martelletto in February 2005.
  */
 
 #include <sys/param.h>
@@ -617,8 +617,7 @@ udf_getfid(struct udf_dirstream *ds)
 		 * File ID descriptors can only be at most one
 		 * logical sector in size.
 		 */
-		ds->buf = malloc(ds->ump->um_bsize, M_UDFFID, M_WAITOK);
-		bzero(ds->buf, ds->ump->um_bsize);
+		ds->buf = malloc(ds->ump->um_bsize, M_UDFFID, M_WAITOK|M_ZERO);
 		bcopy(fid, ds->buf, frag_size);
 
 		/* Reduce all of the casting magic */
@@ -723,8 +722,7 @@ udf_readdir(void *v)
 		 * it left off.
 		 */
 		ncookies = uio->uio_resid / 8;
-		MALLOC(cookies, u_long *, sizeof(u_long) * ncookies,
-		    M_TEMP, M_WAITOK);
+		cookies = malloc(sizeof(u_long) * ncookies, M_TEMP, M_WAITOK);
 		uiodir.ncookies = ncookies;
 		uiodir.cookies = cookies;
 		uiodir.acookies = 0;
@@ -808,7 +806,7 @@ udf_readdir(void *v)
 
 	if (ap->a_ncookies != NULL) {
 		if (error)
-			FREE(cookies, M_TEMP);
+			free(cookies, M_TEMP);
 		else {
 			*ap->a_ncookies = uiodir.acookies;
 			*ap->a_cookies = cookies;

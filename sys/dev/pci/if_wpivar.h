@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_wpivar.h,v 1.12 2007/06/16 14:15:37 damien Exp $	*/
+/*	$OpenBSD: if_wpivar.h,v 1.15 2007/11/19 19:34:25 damien Exp $	*/
 
 /*-
  * Copyright (c) 2006, 2007
@@ -73,14 +73,13 @@ struct wpi_tx_ring {
 	struct wpi_dma_info	cmd_dma;
 	struct wpi_tx_desc	*desc;
 	struct wpi_tx_cmd	*cmd;
-	struct wpi_tx_data	*data;
+	struct wpi_tx_data	data[WPI_TX_RING_COUNT];
 	int			qid;
-	int			count;
 	int			queued;
 	int			cur;
 };
 
-#define WPI_RBUF_COUNT	(WPI_RX_RING_COUNT + 16)
+#define WPI_RBUF_COUNT	(WPI_RX_RING_COUNT + 32)
 
 struct wpi_softc;
 
@@ -141,8 +140,7 @@ struct wpi_softc {
 	struct wpi_dma_info	fw_dma;
 
 	/* rings */
-	struct wpi_tx_ring	txq[4];
-	struct wpi_tx_ring	cmdq;
+	struct wpi_tx_ring	txq[WPI_NTXQUEUES];
 	struct wpi_rx_ring	rxq;
 
 	bus_space_tag_t		sc_st;

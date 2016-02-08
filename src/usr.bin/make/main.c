@@ -1,5 +1,5 @@
 /*	$OpenPackages$ */
-/*	$OpenBSD: main.c,v 1.76 2007/07/30 09:51:53 espie Exp $ */
+/*	$OpenBSD: main.c,v 1.91 2008/01/10 20:34:03 espie Exp $ */
 /*	$NetBSD: main.c,v 1.34 1997/03/24 20:56:36 gwr Exp $	*/
 
 /*
@@ -53,6 +53,7 @@
 #include "parse.h"
 #include "parsevar.h"
 #include "dir.h"
+#include "direxpand.h"
 #include "error.h"
 #include "pathnames.h"
 #include "init.h"
@@ -74,29 +75,24 @@
 # endif
 #endif
 
-#ifndef DEFMAXLOCAL
-#define DEFMAXLOCAL DEFMAXJOBS
-#endif	/* DEFMAXLOCAL */
 
 #define MAKEFLAGS	".MAKEFLAGS"
 
 static LIST		to_create; 	/* Targets to be made */
 Lst create = &to_create;
-GNode			*DEFAULT;	/* .DEFAULT node */
 bool 		allPrecious;	/* .PRECIOUS given on line by itself */
 
 static bool		noBuiltins;	/* -r flag */
 static LIST		makefiles;	/* ordered list of makefiles to read */
 static LIST		varstoprint;	/* list of variables to print */
 int			maxJobs;	/* -j argument */
-static int		maxLocal;	/* -L argument */
 bool 		compatMake;	/* -B argument */
+static bool		forceJobs = false;
 int 		debug;		/* -d flag */
 bool 		noExecute;	/* -n flag */
 bool 		keepgoing;	/* -k flag */
 bool 		queryFlag;	/* -q flag */
 bool 		touchFlag;	/* -t flag */
-bool 		usePipes;	/* !-P flag */
 bool 		ignoreErrors;	/* -i flag */
 bool 		beSilent;	/* -s flag */
 
@@ -122,7 +118,7 @@ static void setup_CURDIR_OBJDIR(struct dirs *, const char *);
 
 static void setup_VPATH(void);
 
-static void read_all_make_rules(bool, Lst, struct dirs *);
+static void read_all_make_rules(bool, bool, Lst, struct dirs *);
 static void read_makefile_list(Lst, struct dirs *);
 static int ReadMakefile(void *, void *);
 
@@ -147,8 +143,7 @@ posixParseOptLetter(int c)
 		compatMake = true;
 		return;	/* XXX don't pass to submakes. */
 	case 'P':
-		usePipes = false;
-		break;
+		break;	/* old option */
 	case 'S':
 		keepgoing = false;
 		break;
@@ -199,7 +194,6 @@ static void
 MainParseArgs(int argc, char **argv)
 {
 	int c, optend;
-	int forceJobs = 0;
 
 #define OPTFLAGS "BD:I:PSV:d:ef:ij:km:nqrst"
 #define OPTLETTERS "BPSiknqrst"
@@ -264,11 +258,17 @@ MainParseArgs(int argc, char **argv)
 				case 'j':
 					debug |= DEBUG_JOB;
 					break;
+				case 'J':
+					debug |= DEBUG_JOBBANNER;
+					break;
 				case 'l':
 					debug |= DEBUG_LOUD;
 					break;
 				case 'm':
 					debug |= DEBUG_MAKE;
+					break;
+				case 'p':
+					debug |= DEBUG_PARALLEL;
 					break;
 				case 's':
 					debug |= DEBUG_SUFF;
@@ -302,12 +302,11 @@ MainParseArgs(int argc, char **argv)
 					optarg);
 				usage();
 			}
-			maxLocal = maxJobs;
 			record_option(c, optarg);
 			break;
 		}
 		case 'm':
-			Dir_AddDir(sysIncPath, optarg);
+			Dir_AddDir(systemIncludePath, optarg);
 			record_option(c, optarg);
 			break;
 		case -1:
@@ -325,12 +324,6 @@ MainParseArgs(int argc, char **argv)
 		}
 	}
 
-	/*
-	 * Be compatible if user did not specify -j and did not explicitly
-	 * turn compatibility on
-	 */
-	if (!compatMake && !forceJobs)
-		compatMake = true;
 }
 
 /*-
@@ -407,7 +400,7 @@ add_dirpath(Lst l, const char *n)
 }
 
 /*
- * Get the name of this type of MACHINE from utsname so we can share an 
+ * Get the name of this type of MACHINE from utsname so we can share an
  * executable for similar machines. (i.e. m68k: amiga hp300, mac68k, sun3, ...)
  *
  * Note that both MACHINE and MACHINE_ARCH are decided at
@@ -479,13 +472,14 @@ figure_out_CURDIR()
 		exit(2);
 	}
 
-	/* ...but we can use the alias $PWD if we can prove it is the same 
+	/* ...but we can use the alias $PWD if we can prove it is the same
 	 * directory */
 	if ((dir = getenv("PWD")) != NULL) {
 		if (stat(dir, &sb) == 0 && sa.st_ino == sb.st_ino &&
-		    sa.st_dev == sb.st_dev)
+		    sa.st_dev == sb.st_dev) {
 		    	free(cwd);
 			return estrdup(dir);
+		}
 	}
 
 	return cwd;
@@ -581,7 +575,7 @@ setup_VPATH()
 		char *vpath;
 
 		vpath = Var_Subst("${VPATH}", NULL, false);
-		add_dirpath(dirSearchPath, vpath);
+		add_dirpath(defaultPath, vpath);
 		(void)free(vpath);
 	}
 }
@@ -596,7 +590,8 @@ read_makefile_list(Lst mk, struct dirs *d)
 }
 
 static void
-read_all_make_rules(bool noBuiltins, Lst makefiles, struct dirs *d)
+read_all_make_rules(bool noBuiltins, bool read_depend,
+    Lst makefiles, struct dirs *d)
 {
 	/*
 	 * Read in the built-in rules first, followed by the specified
@@ -607,7 +602,7 @@ read_all_make_rules(bool noBuiltins, Lst makefiles, struct dirs *d)
 		LIST sysMkPath; 		/* Path of sys.mk */
 
 		Lst_Init(&sysMkPath);
-		Dir_Expand(_PATH_DEFSYSMK, sysIncPath, &sysMkPath);
+		Dir_Expand(_PATH_DEFSYSMK, systemIncludePath, &sysMkPath);
 		if (Lst_IsEmpty(&sysMkPath))
 			Fatal("make: no system rules (%s).", _PATH_DEFSYSMK);
 
@@ -623,8 +618,10 @@ read_all_make_rules(bool noBuiltins, Lst makefiles, struct dirs *d)
 		if (!ReadMakefile("makefile", d))
 			(void)ReadMakefile("Makefile", d);
 
-	/* Always read a .depend file, if it exists. */
-	(void)ReadMakefile(".depend", d);
+	/* read a .depend file, if it exists, and we're not building depend */
+	
+	if (read_depend)
+		(void)ReadMakefile(".depend", d);
 }
 
 
@@ -656,6 +653,7 @@ main(int argc, char **argv)
 	const char *syspath = _PATH_DEFSYSPATH;
 	char *p;
 	static struct dirs d;
+	bool read_depend = true;/* false if we don't want to read .depend */
 
 	no_fd_limits();
 	setup_CURDIR_OBJDIR(&d, machine);
@@ -676,11 +674,9 @@ main(int argc, char **argv)
 	queryFlag = false;		/* This is not just a check-run */
 	noBuiltins = false;		/* Read the built-in rules */
 	touchFlag = false;		/* Actually update targets */
-	usePipes = true;		/* Catch child output in pipes */
 	debug = 0;			/* No debug verbosity, please. */
 
-	maxLocal = DEFMAXLOCAL; 	/* Set default local max concurrency */
-	maxJobs = maxLocal;
+	maxJobs = DEFMAXJOBS;
 	compatMake = false;		/* No compat mode */
 
 
@@ -690,9 +686,10 @@ main(int argc, char **argv)
 	Init();
 
 	if (d.object != d.current)
-		Dir_AddDir(dirSearchPath, d.current);
+		Dir_AddDir(defaultPath, d.current);
 	Var_Set(".CURDIR", d.current);
 	Var_Set(".OBJDIR", d.object);
+	Targ_setdirs(d.current, d.object);
 
 	/*
 	 * Initialize various variables.
@@ -714,11 +711,16 @@ main(int argc, char **argv)
 
 	MainParseArgs(argc, argv);
 
+	/*
+	 * Be compatible if user did not specify -j and did not explicitly
+	 * turn compatibility on
+	 */
+	if (!compatMake && !forceJobs)
+		compatMake = true;
+
 	/* And set up everything for sub-makes */
 	Var_AddCmdline(MAKEFLAGS);
 
-
-	DEFAULT = NULL;
 
 	/*
 	 * Set up the .TARGETS variable to contain the list of targets to be
@@ -731,6 +733,9 @@ main(int argc, char **argv)
 		for (ln = Lst_First(create); ln != NULL; ln = Lst_Adv(ln)) {
 			char *name = (char *)Lst_Datum(ln);
 
+			if (strcmp(name, "depend") == 0)
+				read_depend = false;
+
 			Var_Append(".TARGETS", name);
 		}
 	} else
@@ -742,10 +747,10 @@ main(int argc, char **argv)
 	 * add the directories from the DEFSYSPATH (more than one may be given
 	 * as dir1:...:dirn) to the system include path.
 	 */
-	if (Lst_IsEmpty(sysIncPath))
-	    add_dirpath(sysIncPath, syspath);
+	if (Lst_IsEmpty(systemIncludePath))
+	    add_dirpath(systemIncludePath, syspath);
 
-	read_all_make_rules(noBuiltins, &makefiles, &d);
+	read_all_make_rules(noBuiltins, read_depend, &makefiles, &d);
 
 	Var_Append("MFLAGS", Var_Value(MAKEFLAGS));
 
@@ -755,9 +760,7 @@ main(int argc, char **argv)
 
 	setup_VPATH();
 
-	/* Now that all search paths have been read for suffixes et al, it's
-	 * time to add the default search path to their lists...  */
-	Suff_DoPaths();
+	process_suffixes_after_makefile_is_read();
 
 	/* Print the initial graph, if the user requested it.  */
 	if (DEBUG(GRAPH1))
@@ -767,16 +770,16 @@ main(int argc, char **argv)
 	if (!Lst_IsEmpty(&varstoprint)) {
 		LstNode ln;
 
-		for (ln = Lst_First(&varstoprint); ln != NULL; 
+		for (ln = Lst_First(&varstoprint); ln != NULL;
 		    ln = Lst_Adv(ln)) {
 			char *value = Var_Value((char *)Lst_Datum(ln));
 
 			printf("%s\n", value ? value : "");
 		}
 	} else {
-		/* Have now read the entire graph and need to make a list 
-		 * of targets to create. If none was given on the command 
-		 * line, we consult the parsing module to find the main 
+		/* Have now read the entire graph and need to make a list
+		 * of targets to create. If none was given on the command
+		 * line, we consult the parsing module to find the main
 		 * target(s) to create.  */
 		if (Lst_IsEmpty(create))
 			Parse_MainName(&targs);
@@ -784,20 +787,17 @@ main(int argc, char **argv)
 			Targ_FindList(&targs, create);
 
 		if (compatMake)
-			/* Compat_Init will take care of creating all the 
+			/* Compat_Init will take care of creating all the
 			 * targets as well as initializing the module.  */
 			Compat_Run(&targs);
 		else {
-			/* Initialize job module before traversing the graph, 
-			 * now that any .BEGIN and .END targets have been 
-			 * read. This is done only if the -q flag wasn't given 
-			 * (to prevent the .BEGIN from being executed should 
+			/* Initialize job module before traversing the graph,
+			 * now that any .BEGIN and .END targets have been
+			 * read. This is done only if the -q flag wasn't given
+			 * (to prevent the .BEGIN from being executed should
 			 * it exist).  */
-			if (!queryFlag) {
-				if (maxLocal == -1)
-					maxLocal = maxJobs;
-				Job_Init(maxJobs, maxLocal);
-			}
+			if (!queryFlag)
+				Job_Init(maxJobs);
 
 			/* Traverse the graph, checking on all the targets.  */
 			outOfDate = Make_Run(&targs);
@@ -862,9 +862,9 @@ ReadMakefile(void *p, void *q)
 			}
 		}
 		/* look in -I and system include directories. */
-		name = Dir_FindFile(fname, parseIncPath);
+		name = Dir_FindFile(fname, userIncludePath);
 		if (!name)
-			name = Dir_FindFile(fname, sysIncPath);
+			name = Dir_FindFile(fname, systemIncludePath);
 		if (!name || !(stream = fopen(name, "r")))
 			return false;
 		fname = name;

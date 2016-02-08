@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.h,v 1.95 2007/06/07 11:20:58 dim Exp $	*/
+/*	$OpenBSD: cpu.h,v 1.99 2007/11/28 17:05:09 tedu Exp $	*/
 /*	$NetBSD: cpu.h,v 1.35 1996/05/05 19:29:26 christos Exp $	*/
 
 /*-
@@ -114,7 +114,6 @@ struct cpu_info {
 	u_long		ci_flags;	/* flags; see below */
 	u_int32_t	ci_ipis; 	/* interprocessor interrupts pending */
 	int		sc_apic_version;/* local APIC version */
-	u_int64_t	ci_tscbase;
 
 	u_int32_t	ci_level;
 	u_int32_t	ci_vendor[4];
@@ -181,7 +180,7 @@ extern struct cpu_info *cpu_info_list;
 
 #ifdef MULTIPROCESSOR
 
-#define I386_MAXPROCS		32	/* because we use a bitmask */
+#define MAXCPUS			32	/* because we use a bitmask */
 
 #define CPU_STARTUP(_ci)	((_ci)->ci_func->start(_ci))
 #define CPU_STOP(_ci)		((_ci)->ci_func->stop(_ci))
@@ -204,7 +203,7 @@ curcpu(void)
 
 #define CPU_IS_PRIMARY(ci)	((ci)->ci_flags & CPUF_PRIMARY)
 
-extern struct cpu_info	*cpu_info[I386_MAXPROCS];
+extern struct cpu_info	*cpu_info[MAXCPUS];
 extern u_long		 cpus_running;
 
 extern void cpu_boot_secondary_processors(void);
@@ -212,7 +211,7 @@ extern void cpu_init_idle_pcbs(void);
 
 #else /* MULTIPROCESSOR */
 
-#define I386_MAXPROCS		1
+#define MAXCPUS			1
 
 #define cpu_number()		0
 #define	curcpu()		(&cpu_info_primary)
@@ -264,12 +263,10 @@ struct timeval;
 #define	DELAY(x)		(*delay_func)(x)
 #define delay(x)		(*delay_func)(x)
 
-#if defined(I586_CPU) || defined(I686_CPU)
 /*
  * High resolution clock support (Pentium only)
  */
 void	calibrate_cyclecounter(void);
-#endif
 
 /*
  * pull in #defines for kinds of processors
@@ -313,18 +310,21 @@ extern int cpu_cache_eax;
 extern int cpu_cache_ebx;
 extern int cpu_cache_ecx;
 extern int cpu_cache_edx;
+
 /* machdep.c */
 extern int cpu_apmhalt;
 extern int cpu_class;
 extern char cpu_model[];
 extern const struct cpu_nocpuid_nameclass i386_nocpuid_cpus[];
 extern const struct cpu_cpuid_nameclass i386_cpuid_cpus[];
+extern void (*cpu_idle_enter_fcn)(void);
+extern void (*cpu_idle_cycle_fcn)(void);
+extern void (*cpu_idle_leave_fcn)(void);
+
 /* apm.c */
 extern int cpu_apmwarn;
 
-#if defined(I586_CPU) || defined(I686_CPU)
 extern int cpuspeed;
-#endif
 
 #if !defined(SMALL_KERNEL)
 #define BUS66  6667
@@ -337,11 +337,9 @@ extern int cpuspeed;
 extern int bus_clock;
 #endif
 
-#ifdef I586_CPU
 /* F00F bug fix stuff for pentium cpu */
 extern int cpu_f00f_bug;
 void fix_f00f(void);
-#endif
 
 /* dkcsum.c */
 void	dkcsumattach(void);
@@ -379,30 +377,19 @@ void	i8254_inittimecounter(void);
 void	i8254_inittimecounter_simple(void);
 
 
+#if !defined(SMALL_KERNEL)
 /* est.c */
-#if !defined(SMALL_KERNEL) && defined(I686_CPU)
 void	est_init(const char *, int);
 void	est_setperf(int);
-#endif
-
 /* longrun.c */
-#if !defined(SMALL_KERNEL) && defined(I586_CPU)
 void	longrun_init(void);
 void	longrun_setperf(int);
-#endif
-
 /* p4tcc.c */
-#if !defined(SMALL_KERNEL) && defined(I686_CPU)
 void	p4tcc_init(int, int);
 void	p4tcc_setperf(int);
-#endif
-
-#if !defined(SMALL_KERNEL) && defined(I586_CPU)
 /* powernow.c */
 void	k6_powernow_init(void);
 void	k6_powernow_setperf(int);
-#endif
-#if !defined(SMALL_KERNEL) && defined(I686_CPU)
 /* powernow-k7.c */
 void	k7_powernow_init(void);
 void	k7_powernow_setperf(int);

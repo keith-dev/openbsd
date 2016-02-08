@@ -1,4 +1,4 @@
-/*	$OpenBSD: vnd.c,v 1.79 2007/06/20 18:15:46 deraadt Exp $	*/
+/*	$OpenBSD: vnd.c,v 1.84 2007/10/15 01:37:49 fgsch Exp $	*/
 /*	$NetBSD: vnd.c,v 1.26 1996/03/30 23:06:11 christos Exp $	*/
 
 /*
@@ -162,6 +162,7 @@ void	vndiodone(struct buf *);
 void	vndshutdown(void);
 void	vndgetdisklabel(dev_t, struct vnd_softc *);
 void	vndencrypt(struct vnd_softc *, caddr_t, size_t, daddr64_t, int);
+size_t	vndbdevsize(struct vnode *, struct proc *);
 
 #define vndlock(sc) rw_enter(&sc->sc_rwlock, RW_WRITE|RW_INTR)
 #define vndunlock(sc) rw_exit_write(&sc->sc_rwlock)
@@ -198,12 +199,11 @@ vndattach(int num)
 	if (num <= 0)
 		return;
 	size = num * sizeof(struct vnd_softc);
-	mem = malloc(size, M_DEVBUF, M_NOWAIT);
+	mem = malloc(size, M_DEVBUF, M_NOWAIT | M_ZERO);
 	if (mem == NULL) {
 		printf("WARNING: no memory for vnode disks\n");
 		return;
 	}
-	bzero(mem, size);
 	vnd_softc = (struct vnd_softc *)mem;
 	for (i = 0; i < num; i++) {
 		rw_init(&vnd_softc[i].sc_rwlock, "vndlock");
@@ -230,6 +230,12 @@ vndopen(dev_t dev, int flags, int mode, struct proc *p)
 
 	if ((error = vndlock(sc)) != 0)
 		return (error);
+
+	if (!vndsimple(dev) && sc->sc_vp != NULL &&
+	    (sc->sc_vp->v_type != VREG || sc->sc_keyctx != NULL)) {
+		error = EINVAL;
+		goto bad;
+	}
 
 	if ((flags & FWRITE) && (sc->sc_flags & VNF_READONLY)) {
 		error = EROFS;
@@ -493,6 +499,15 @@ vndstrategy(struct buf *bp)
 		}
 	}
 
+	if (vnd->sc_vp->v_type != VREG || vnd->sc_keyctx != NULL) {
+		bp->b_error = EINVAL;
+		bp->b_flags |= B_ERROR;
+		s = splbio();
+		biodone(bp);
+		splx(s);
+		return;
+	}
+
 	/* The old-style buffercache bypassing method.  */
 	bn += DL_GETPOFFSET(&vnd->sc_dk.dk_label->d_partitions[DISKPART(bp->b_dev)]);
 	bn = dbtob(bn);
@@ -502,7 +517,7 @@ vndstrategy(struct buf *bp)
 	for (resid = bp->b_resid; resid; resid -= sz) {
 		struct vnode *vp;
 		daddr64_t nbn;
-		int off, s, nra;
+		int off, nra;
 
 		nra = 0;
 		vn_lock(vnd->sc_vp, LK_RETRY | LK_EXCLUSIVE, p);
@@ -692,6 +707,26 @@ vndwrite(dev_t dev, struct uio *uio, int flags)
 	return (physio(vndstrategy, NULL, dev, B_WRITE, minphys, uio));
 }
 
+size_t
+vndbdevsize(struct vnode *vp, struct proc *p)
+{
+	struct partinfo pi;
+	struct bdevsw *bsw;
+	long sscale;
+	dev_t dev;
+
+	dev = vp->v_rdev;
+	bsw = bdevsw_lookup(dev);
+	if (bsw->d_ioctl == NULL)
+		return (0);
+	if (bsw->d_ioctl(dev, DIOCGPART, (caddr_t)&pi, FREAD, p))
+		return (0);
+	sscale = pi.disklab->d_secsize / DEV_BSIZE;
+	DNPRINTF(VDB_INIT, "vndbdevsize: size %li secsize %li sscale %li\n",
+	    (long)pi.part->p_size,(long)pi.disklab->d_secsize,sscale);
+	return (pi.part->p_size * sscale);
+}
+
 /* ARGSUSED */
 int
 vndioctl(dev_t dev, u_long cmd, caddr_t addr, int flag, struct proc *p)
@@ -757,16 +792,27 @@ vndioctl(dev_t dev, u_long cmd, caddr_t addr, int flag, struct proc *p)
 			return (error);
 		}
 
-		error = VOP_GETATTR(nd.ni_vp, &vattr, p->p_ucred, p);
-		if (error) {
+		if (nd.ni_vp->v_type != VREG && !vndsimple(dev)) {
 			VOP_UNLOCK(nd.ni_vp, 0, p);
-			(void) vn_close(nd.ni_vp, VNDRW(vnd), p->p_ucred, p);
+			vn_close(nd.ni_vp, VNDRW(vnd), p->p_ucred, p);
 			vndunlock(vnd);
-			return (error);
+			return (EINVAL);
+		}
+
+		if (nd.ni_vp->v_type == VBLK)
+			vnd->sc_size = vndbdevsize(nd.ni_vp, p);
+		else {
+			error = VOP_GETATTR(nd.ni_vp, &vattr, p->p_ucred, p);
+			if (error) {
+				VOP_UNLOCK(nd.ni_vp, 0, p);
+				vn_close(nd.ni_vp, VNDRW(vnd), p->p_ucred, p);
+				vndunlock(vnd);
+				return (error);
+			}
+			vnd->sc_size = btodb(vattr.va_size); /* note truncation */
 		}
 		VOP_UNLOCK(nd.ni_vp, 0, p);
 		vnd->sc_vp = nd.ni_vp;
-		vnd->sc_size = btodb(vattr.va_size);	/* note truncation */
 		if ((error = vndsetcred(vnd, p->p_ucred)) != 0) {
 			(void) vn_close(nd.ni_vp, VNDRW(vnd), p->p_ucred, p);
 			vndunlock(vnd);
@@ -839,7 +885,7 @@ vndioctl(dev_t dev, u_long cmd, caddr_t addr, int flag, struct proc *p)
 			free(vnd->sc_keyctx, M_DEVBUF);
 		}
 
-		/* Detatch the disk. */
+		/* Detach the disk. */
 		disk_detach(&vnd->sc_dk);
 
 		/* This must be atomic. */

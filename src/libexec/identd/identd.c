@@ -1,4 +1,4 @@
-/*	$OpenBSD: identd.c,v 1.43 2007/06/28 21:43:36 millert Exp $	*/
+/*	$OpenBSD: identd.c,v 1.46 2007/09/26 02:46:29 ray Exp $	*/
 
 /*
  * This program is in the public domain and may be used freely by anyone
@@ -65,8 +65,8 @@ void
 usage(void)
 {
 	syslog(LOG_ERR,
-	    "%s [-i | -w | -b] [-t seconds] [-u uid] [-g gid] [-p port] "
-	    "[-a address] [-c charset] [-noelvmNUdh]", __progname);
+	    "usage: %s [-dehlmNnoUv] [-b | -i | -w] [-a address] [-c charset] "
+	    "[-g gid] [-p port] [-t seconds] [-u uid]", __progname);
 	exit(2);
 }
 
@@ -157,6 +157,7 @@ main(int argc, char *argv[])
 	gid_t   set_gid = 0;
 	extern char *optarg;
 	socklen_t len;
+	const char *errstr;
 
 	openlog(__progname, LOG_PID, LOG_DAEMON);
 
@@ -192,7 +193,9 @@ main(int argc, char *argv[])
 			background_flag = 0;
 			break;
 		case 't':
-			timeout = atoi(optarg);
+			timeout = strtonum(optarg, 0, 100000000, &errstr);
+			if (errstr)
+				error("timeout is %s: %s", errstr, optarg);
 			break;
 		case 'p':
 			portno = optarg;
@@ -318,13 +321,13 @@ main(int argc, char *argv[])
 	}
 	if (set_gid) {
 		if (setegid(set_gid) == -1)
-			error("main: setgid");
+			error("main: setegid");
 		if (setgid(set_gid) == -1)
 			error("main: setgid");
 	}
 	if (set_uid) {
 		if (seteuid(set_uid) == -1)
-			error("main: setuid");
+			error("main: seteuid");
 		if (setuid(set_uid) == -1)
 			error("main: setuid");
 	}
@@ -371,10 +374,10 @@ main(int argc, char *argv[])
 			} while (nfds < 0 && errno == EINTR);
 
 			/*
-			 * An error occurred in select? Just die
+			 * An error occurred in poll? Just die
 			 */
 			if (nfds < 0)
-				error("main: select");
+				error("main: poll");
 
 			/*
 			 * Timeout limit reached. Exit nicely
@@ -423,7 +426,7 @@ main(int argc, char *argv[])
 		 * reach to other end anyway, so lets give the poor user some
 		 * errors.
 		 */
-		perror("in.identd: getpeername()");
+		perror("identd: getpeername()");
 		exit(1);
 	}
 	if (sa.ss_family == AF_INET6) {
@@ -482,12 +485,12 @@ error(char *fmt, ...)
 	
 	if (syslog_flag) {
 		va_copy(ap2, ap);
-		syslog(LOG_ERR, fmt, ap2);
+		vsyslog(LOG_ERR, fmt, ap2);
 		va_end(ap2);
 	}
 	if (debug_flag) {
 		fprintf(stderr, "%d , %d : ERROR : X-DBG : ", lport, fport);
-		fprintf(stderr, fmt, ap);
+		vfprintf(stderr, fmt, ap);
 		perror(": ");
 	} else
 		printf("%d , %d : ERROR : UNKNOWN-ERROR\r\n", lport, fport);

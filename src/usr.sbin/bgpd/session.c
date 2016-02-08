@@ -1,4 +1,4 @@
-/*	$OpenBSD: session.c,v 1.276 2007/06/19 09:44:55 pyr Exp $ */
+/*	$OpenBSD: session.c,v 1.279 2007/12/23 18:56:17 henning Exp $ */
 
 /*
  * Copyright (c) 2003, 2004, 2005 Henning Brauer <henning@openbsd.org>
@@ -56,7 +56,6 @@ void	session_sighdlr(int);
 int	setup_listeners(u_int *);
 void	init_conf(struct bgpd_config *);
 void	init_peer(struct peer *);
-int	timer_due(time_t);
 void	start_timer_holdtime(struct peer *);
 void	start_timer_keepalive(struct peer *);
 void	session_close_connection(struct peer *);
@@ -184,7 +183,6 @@ session_main(struct bgpd_config *config, struct peer *cpeers,
 	int			 nfds, timeout;
 	unsigned int		 i, j, idx_peers, idx_listeners, idx_mrts;
 	pid_t			 pid;
-	time_t			 nextaction;
 	u_int			 pfd_elms = 0, peer_l_elms = 0, mrt_l_elms = 0;
 	u_int			 listener_cnt, ctl_cnt, mrt_cnt;
 	u_int			 new_cnt;
@@ -305,7 +303,7 @@ session_main(struct bgpd_config *config, struct peer *cpeers,
 				/* reinit due? */
 				if (p->conf.reconf_action == RECONF_REINIT) {
 					bgp_fsm(p, EVNT_STOP);
-					p->IdleHoldTimer = time(NULL);
+					timer_set(p, Timer_IdleHold, 0);
 				}
 
 				/* deletion due? */
@@ -397,63 +395,53 @@ session_main(struct bgpd_config *config, struct peer *cpeers,
 		pfd[PFD_SOCK_RCTL].fd = rcsock;
 		pfd[PFD_SOCK_RCTL].events = POLLIN;
 
-		nextaction = time(NULL) + 240;	/* loop every 240s at least */
 		i = PFD_LISTENERS_START;
-
 		TAILQ_FOREACH(la, conf->listen_addrs, entry) {
 			pfd[i].fd = la->fd;
 			pfd[i].events = POLLIN;
 			i++;
 		}
-
 		idx_listeners = i;
+		timeout = 240;	/* loop every 240s at least */
 
 		for (p = peers; p != NULL; p = p->next) {
+			time_t	nextaction;
+
 			/* check timers */
-			if (timer_due(p->HoldTimer))
+			if (timer_due(p, Timer_Hold))
 				bgp_fsm(p, EVNT_TIMER_HOLDTIME);
-			if (timer_due(p->ConnectRetryTimer))
+			if (timer_due(p, Timer_ConnectRetry))
 				bgp_fsm(p, EVNT_TIMER_CONNRETRY);
-			if (timer_due(p->KeepaliveTimer))
+			if (timer_due(p, Timer_Keepalive))
 				bgp_fsm(p, EVNT_TIMER_KEEPALIVE);
-			if (timer_due(p->IdleHoldTimer))
+			if (timer_due(p, Timer_IdleHold))
 				bgp_fsm(p, EVNT_START);
-			if (timer_due(p->IdleHoldResetTimer)) {
+			if (timer_due(p, Timer_IdleHoldReset)) {
 				p->IdleHoldTime /= 2;
 				if (p->IdleHoldTime <=
 				    INTERVAL_IDLE_HOLD_INITIAL) {
 					p->IdleHoldTime =
 					    INTERVAL_IDLE_HOLD_INITIAL;
-					p->IdleHoldResetTimer = 0;
+					timer_stop(p, Timer_IdleHoldReset);
 					p->errcnt = 0;
 				} else
-					p->IdleHoldResetTimer =
-					    time(NULL) + p->IdleHoldTime;
+					timer_set(p, Timer_IdleHoldReset,
+					    p->IdleHoldTime);
 			}
 
-			/* set nextaction to the first expiring timer */
-			if (p->ConnectRetryTimer &&
-			    p->ConnectRetryTimer < nextaction)
-				nextaction = p->ConnectRetryTimer;
-			if (p->HoldTimer && p->HoldTimer < nextaction)
-				nextaction = p->HoldTimer;
-			if (p->KeepaliveTimer && p->KeepaliveTimer < nextaction)
-				nextaction = p->KeepaliveTimer;
-			if (p->IdleHoldTimer && p->IdleHoldTimer < nextaction)
-				nextaction = p->IdleHoldTimer;
-			if (p->IdleHoldResetTimer &&
-			    p->IdleHoldResetTimer < nextaction)
-				nextaction = p->IdleHoldResetTimer;
+			if ((nextaction = timer_nextduein(p)) != -1 &&
+			    nextaction < timeout)
+				timeout = nextaction;
 
-			/* carp demotion */
+			/* XXX carp demotion */
 			if (p->demoted && p->state == STATE_ESTABLISHED) {
 				if (time(NULL) - p->stats.last_updown >=
 				    INTERVAL_HOLD_DEMOTED)
 					session_demote(p, -1);
-				if (p->stats.last_updown +
-				    INTERVAL_HOLD_DEMOTED < nextaction)
-					nextaction = p->stats.last_updown +
-					    INTERVAL_HOLD_DEMOTED;
+				if (p->stats.last_updown + INTERVAL_HOLD_DEMOTED
+				    - time(NULL) < timeout)
+					timeout = p->stats.last_updown +
+					    INTERVAL_HOLD_DEMOTED - time(NULL);
 			}
 
 			/* are we waiting for a write? */
@@ -490,7 +478,6 @@ session_main(struct bgpd_config *config, struct peer *cpeers,
 			i++;
 		}
 
-		timeout = nextaction - time(NULL);
 		if (timeout < 0)
 			timeout = 0;
 		if ((nfds = poll(pfd, i, timeout * 1000)) == -1)
@@ -611,9 +598,9 @@ init_peer(struct peer *p)
 
 	change_state(p, STATE_IDLE, EVNT_NONE);
 	if (p->conf.down)
-		p->IdleHoldTimer = 0;		/* no autostart */
+		timer_stop(p, Timer_IdleHold);		/* no autostart */
 	else
-		p->IdleHoldTimer = time(NULL);	/* start ASAP */
+		timer_set(p, Timer_IdleHold, 0);	/* start ASAP */
 
 	/*
 	 * on startup, demote if requested.
@@ -634,9 +621,9 @@ bgp_fsm(struct peer *peer, enum session_events event)
 	case STATE_IDLE:
 		switch (event) {
 		case EVNT_START:
-			peer->HoldTimer = 0;
-			peer->KeepaliveTimer = 0;
-			peer->IdleHoldTimer = 0;
+			timer_stop(peer, Timer_Hold);
+			timer_stop(peer, Timer_Keepalive);
+			timer_stop(peer, Timer_IdleHold);
 
 			/* allocate read buffer */
 			peer->rbuf = calloc(1, sizeof(struct buf_read));
@@ -659,15 +646,15 @@ bgp_fsm(struct peer *peer, enum session_events event)
 			peer->stats.last_sent_suberr = 0;
 
 			if (!peer->depend_ok)
-				peer->ConnectRetryTimer = 0;
+				timer_stop(peer, Timer_ConnectRetry);
 			else if (peer->passive || peer->conf.passive ||
 			    peer->conf.template) {
 				change_state(peer, STATE_ACTIVE, event);
-				peer->ConnectRetryTimer = 0;
+				timer_stop(peer, Timer_ConnectRetry);
 			} else {
 				change_state(peer, STATE_CONNECT, event);
-				peer->ConnectRetryTimer =
-				    time(NULL) + INTERVAL_CONNECTRETRY;
+				timer_set(peer, Timer_ConnectRetry,
+				    INTERVAL_CONNECTRETRY);
 				session_connect(peer);
 			}
 			peer->passive = 0;
@@ -685,20 +672,20 @@ bgp_fsm(struct peer *peer, enum session_events event)
 		case EVNT_CON_OPEN:
 			session_tcp_established(peer);
 			session_open(peer);
-			peer->ConnectRetryTimer = 0;
+			timer_stop(peer, Timer_ConnectRetry);
 			peer->holdtime = INTERVAL_HOLD_INITIAL;
 			start_timer_holdtime(peer);
 			change_state(peer, STATE_OPENSENT, event);
 			break;
 		case EVNT_CON_OPENFAIL:
-			peer->ConnectRetryTimer =
-			    time(NULL) + INTERVAL_CONNECTRETRY;
+			timer_set(peer, Timer_ConnectRetry,
+			    INTERVAL_CONNECTRETRY);
 			session_close_connection(peer);
 			change_state(peer, STATE_ACTIVE, event);
 			break;
 		case EVNT_TIMER_CONNRETRY:
-			peer->ConnectRetryTimer =
-			    time(NULL) + INTERVAL_CONNECTRETRY;
+			timer_set(peer, Timer_ConnectRetry,
+			    INTERVAL_CONNECTRETRY);
 			session_connect(peer);
 			break;
 		default:
@@ -714,20 +701,20 @@ bgp_fsm(struct peer *peer, enum session_events event)
 		case EVNT_CON_OPEN:
 			session_tcp_established(peer);
 			session_open(peer);
-			peer->ConnectRetryTimer = 0;
+			timer_stop(peer, Timer_ConnectRetry);
 			peer->holdtime = INTERVAL_HOLD_INITIAL;
 			start_timer_holdtime(peer);
 			change_state(peer, STATE_OPENSENT, event);
 			break;
 		case EVNT_CON_OPENFAIL:
-			peer->ConnectRetryTimer =
-			    time(NULL) + INTERVAL_CONNECTRETRY;
+			timer_set(peer, Timer_ConnectRetry,
+			    INTERVAL_CONNECTRETRY);
 			session_close_connection(peer);
 			change_state(peer, STATE_ACTIVE, event);
 			break;
 		case EVNT_TIMER_CONNRETRY:
-			peer->ConnectRetryTimer =
-			    time(NULL) + peer->holdtime;
+			timer_set(peer, Timer_ConnectRetry,
+			    peer->holdtime);
 			change_state(peer, STATE_CONNECT, event);
 			session_connect(peer);
 			break;
@@ -747,8 +734,8 @@ bgp_fsm(struct peer *peer, enum session_events event)
 			break;
 		case EVNT_CON_CLOSED:
 			session_close_connection(peer);
-			peer->ConnectRetryTimer =
-			    time(NULL) + INTERVAL_CONNECTRETRY;
+			timer_set(peer, Timer_ConnectRetry,
+			    INTERVAL_CONNECTRETRY);
 			change_state(peer, STATE_ACTIVE, event);
 			break;
 		case EVNT_CON_FATAL:
@@ -770,7 +757,7 @@ bgp_fsm(struct peer *peer, enum session_events event)
 			if (parse_notification(peer)) {
 				change_state(peer, STATE_IDLE, event);
 				/* don't punish, capa negotiation */
-				peer->IdleHoldTimer = time(NULL);
+				timer_set(peer, Timer_IdleHold, 0);
 				peer->IdleHoldTime /= 2;
 			} else
 				change_state(peer, STATE_IDLE, event);
@@ -860,30 +847,22 @@ bgp_fsm(struct peer *peer, enum session_events event)
 	}
 }
 
-int
-timer_due(time_t timer)
-{
-	if (timer > 0 && timer <= time(NULL))
-		return (1);
-	return (0);
-}
-
 void
 start_timer_holdtime(struct peer *peer)
 {
 	if (peer->holdtime > 0)
-		peer->HoldTimer = time(NULL) + peer->holdtime;
+		timer_set(peer, Timer_Hold, peer->holdtime);
 	else
-		peer->HoldTimer = 0;
+		timer_stop(peer, Timer_Hold);
 }
 
 void
 start_timer_keepalive(struct peer *peer)
 {
 	if (peer->holdtime > 0)
-		peer->KeepaliveTimer = time(NULL) + peer->holdtime / 3;
+		timer_set(peer, Timer_Keepalive, peer->holdtime / 3);
 	else
-		peer->KeepaliveTimer = 0;
+		timer_stop(peer, Timer_Keepalive);
 }
 
 void
@@ -924,10 +903,10 @@ change_state(struct peer *peer, enum session_state state,
 		if (peer->IdleHoldTime == 0)
 			peer->IdleHoldTime = INTERVAL_IDLE_HOLD_INITIAL;
 		peer->holdtime = INTERVAL_HOLD_INITIAL;
-		peer->ConnectRetryTimer = 0;
-		peer->KeepaliveTimer = 0;
-		peer->HoldTimer = 0;
-		peer->IdleHoldResetTimer = 0;
+		timer_stop(peer, Timer_ConnectRetry);
+		timer_stop(peer, Timer_Keepalive);
+		timer_stop(peer, Timer_Hold);
+		timer_stop(peer, Timer_IdleHoldReset);
 		session_close_connection(peer);
 		msgbuf_clear(&peer->wbuf);
 		free(peer->rbuf);
@@ -936,7 +915,7 @@ change_state(struct peer *peer, enum session_state state,
 		if (peer->state == STATE_ESTABLISHED)
 			session_down(peer);
 		if (event != EVNT_STOP) {
-			peer->IdleHoldTimer = time(NULL) + peer->IdleHoldTime;
+			timer_set(peer, Timer_IdleHold, peer->IdleHoldTime);
 			if (event != EVNT_NONE &&
 			    peer->IdleHoldTime < MAX_IDLE_HOLD/2)
 				peer->IdleHoldTime *= 2;
@@ -959,7 +938,7 @@ change_state(struct peer *peer, enum session_state state,
 	case STATE_OPENCONFIRM:
 		break;
 	case STATE_ESTABLISHED:
-		peer->IdleHoldResetTimer = time(NULL) + peer->IdleHoldTime;
+		timer_set(peer, Timer_IdleHoldReset, peer->IdleHoldTime);
 		session_up(peer);
 		break;
 	default:		/* something seriously fucked */
@@ -1000,11 +979,12 @@ session_accept(int listenfd)
 
 	p = getpeerbyip((struct sockaddr *)&cliaddr);
 
-	if (p != NULL && p->state == STATE_IDLE && p->errcnt < 2 &&
-	    p->IdleHoldTimer > 0) {
-		/* fast reconnect after clear */
-		p->passive = 1;
-		bgp_fsm(p, EVNT_START);
+	if (p != NULL && p->state == STATE_IDLE && p->errcnt < 2) {
+		if (timer_running(p, Timer_IdleHold, NULL)) {
+			/* fast reconnect after clear */
+			p->passive = 1;
+			bgp_fsm(p, EVNT_START);
+		}
 	}
 
 	if (p != NULL &&
@@ -1972,7 +1952,7 @@ parse_open(struct peer *peer)
 			session_notification(peer, ERR_OPEN, ERR_OPEN_OPT,
 				NULL, 0);
 			change_state(peer, STATE_IDLE, EVNT_RCVD_OPEN);
-			peer->IdleHoldTimer = time(NULL);	/* no punish */
+			timer_set(peer, Timer_IdleHold, 0);	/* no punish */
 			peer->IdleHoldTime /= 2;
 			return (-1);
 		}
@@ -2532,9 +2512,8 @@ session_dispatch_imsg(struct imsgbuf *ibuf, int idx, u_int *listener_cnt)
 				case ERR_CEASE_MAX_PREFIX:
 					bgp_fsm(p, EVNT_STOP);
 					if (p->conf.max_prefix_restart)
-						p->IdleHoldTimer =
-						    time(NULL) + 60 *
-						    p->conf.max_prefix_restart;
+						timer_set(p, Timer_IdleHold, 60 *
+						    p->conf.max_prefix_restart);
 					break;
 				default:
 					bgp_fsm(p, EVNT_CON_FATAL);

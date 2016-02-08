@@ -1,4 +1,4 @@
-/*	$OpenBSD: rbus_machdep.c,v 1.3 2007/05/31 23:35:46 tedu Exp $ */
+/*	$OpenBSD: rbus_machdep.c,v 1.6 2007/12/20 13:34:48 kettenis Exp $ */
 /*	$NetBSD: rbus_machdep.c,v 1.2 1999/10/15 06:43:06 haya Exp $	*/
 
 /*
@@ -69,7 +69,7 @@ rbus_pccbb_parent_mem(struct device *self, struct pci_attach_args *pa)
 	struct extent *ex;
 
 	size = RBUS_MEM_SIZE;
-	start = min_start = max(RBUS_MEM_START, ctob(physmem));
+	start = min_start = max(RBUS_MEM_START, ptoa(physmem));
 #if NPCIBIOS > 0
 	if ((ex = pciaddr_search(PCIADDR_SEARCH_MEM, &start, size)) == NULL)
 #endif
@@ -79,7 +79,7 @@ rbus_pccbb_parent_mem(struct device *self, struct pci_attach_args *pa)
 		start = ex->ex_start;
 
 		/* XXX: unfortunately, iomem_ex cannot be used for the
-		 * dynamic bus_space allocatoin.  There are some
+		 * dynamic bus_space allocation.  There are some
 		 * hidden memory (or some obstacles which do not
 		 * recognised by the kernel) in the region governed by
 		 * iomem_ex.  So I decide to use only very high
@@ -125,4 +125,10 @@ rbus_pccbb_parent_io(struct device *self, struct pci_attach_args *pa)
 	}
 
 	return rbus_new_root_share(pa->pa_iot, ex, start, size, 0);
+}
+
+void
+pccbb_attach_hook(struct device *parent, struct device *self,
+    struct pci_attach_args *pa)
+{
 }

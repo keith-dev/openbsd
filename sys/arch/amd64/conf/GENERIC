@@ -1,4 +1,4 @@
-#	$OpenBSD: GENERIC,v 1.191 2007/08/05 17:01:25 mglocker Exp $
+#	$OpenBSD: GENERIC,v 1.216 2008/02/25 23:16:47 brad Exp $
 #
 # For further information on compiling OpenBSD kernels, see the config(8)
 # man page.
@@ -11,7 +11,7 @@
 
 machine		amd64
 include		"../../../conf/GENERIC"
-maxusers	32			# estimated number of users
+maxusers	40			# estimated number of users
 
 option		USER_PCICONF	# user-space PCI configuration
 
@@ -35,24 +35,24 @@ bios0	at mainbus?
 cpu0	at mainbus?
 isa0	at mainbus0
 isa0	at pcib?
+isa0	at amdpcib?
 pci*	at mainbus0
 
 #option		ACPIVERBOSE
-#option		ACPI_ENABLE
 
-acpi0		at mainbus? disable
-#acpitimer*	at acpi?
-#acpihpet*	at acpi?
-#acpiac*	at acpi?
-#acpibat*	at acpi?
-#acpibtn*	at acpi?
-#acpicpu*	at acpi?
+acpi0		at bios?
+acpitimer*	at acpi?
+acpihpet*	at acpi?
+acpiac*		at acpi?
+acpibat*	at acpi?
+acpibtn*	at acpi?
+acpicpu*	at acpi?
 #acpidock*	at acpi?
-acpiec*		at acpi? disable
+acpiec*		at acpi?
 acpiprt*	at acpi? 
-#acpitz*	at acpi?
+acpitz*		at acpi?
 
-ipmi0	at mainbus?		# IPMI
+ipmi0	at mainbus? disable	# IPMI
 
 option		PCIVERBOSE
 option		USBVERBOSE
@@ -62,19 +62,27 @@ ppb*	at pci?			# PCI-PCI bridges
 pci*	at ppb?
 pci*	at pchb?
 pcib*	at pci?			# PCI-ISA bridge
+amdpcib* at pci?		# AMD 8111 LPC bridge
+
+agp* 	at pchb?		# AGP bridge
 
 # National Semiconductor LM7[89] and compatible hardware monitors
 lm0	at isa? port 0x290
 #lm1	at isa? port 0x280
 #lm2	at isa? port 0x310
 
-it0	at isa? port 0x290	# IT8705F, IT8712F and SiS970 hardware
-it1	at isa? port 0xc00	# monitors
-it2	at isa? port 0xd00
+it0	at isa? port 0x290	# ITE IT8705F, IT8712F, IT8716F, IT8718F,
+it1	at isa? port 0xc00	# IT8726F and SiS SiS950 monitors and
+it2	at isa? port 0xd00	# watchdog timer
 				
 viaenv*	at pci?			# VIA VT82C686A hardware monitor
 #viasio* at isa? port 0x2e flags 0x0000	# VIA VT1211 LPC Super I/O
 #viasio* at isa? port 0x4e flags 0x0000
+
+wbsio*	at isa? port 0x2e	# Winbond LPC Super I/O
+wbsio*	at isa? port 0x4e
+lm*	at wbsio?
+
 aps0	at isa? port 0x1600		# ThinkPad Active Protection System
 
 piixpm*	at pci?			# Intel PIIX PM
@@ -91,6 +99,7 @@ amdpm*	at pci?			# AMD-7xx/8111 and NForce SMBus controller
 iic*	at amdpm?
 
 adc*	at iic?			# Analog Devices AD7416/AD7417/7418
+adl*	at iic?			# Andigilog aSC7621
 admtemp* at iic?		# Analog Devices ADM1021
 admlc*	at iic?			# Analog Devices ADM1024
 admtm*	at iic?			# Analog Devices ADM1025
@@ -98,11 +107,14 @@ admcts*	at iic?			# Analog Devices ADM1026
 admtmp*	at iic?			# Analog Devices ADM1030
 admtt*	at iic?			# Analog Devices ADM1031
 adt*	at iic?			# Analog Devices ADT7460
-lm*	at iic?			# LM78/79 and clones
+lm*	at iic?			# National Semiconductor LM78/79
 lmenv*	at iic?			# National Semiconductor LM87
-lmtemp*	at iic?			# NS LM75/LM77 temperature sensor
+lmtemp*	at iic?			# National Semiconductor LM75/LM77
+lmn*	at iic?			# National Semiconductor LM93
 maxds*	at iic?			# Maxim DS1631
 maxtmp*	at iic?			# Maxim MAX6642/MAX6690
+spdmem*	at iic?			# SPD memory eeproms
+wbng*	at iic?			# Winbond W83793G
 
 #option PCMCIAVERBOSE
 
@@ -157,6 +169,8 @@ uipaq*	at uhub?		# iPAQ serial adapter
 ucom*	at uipaq?
 umsm*	at uhub?		# Qualcomm MSM EVDO
 ucom*	at umsm?
+uchcom*	at uhub?		# WinChipHead CH341/340 serial
+ucom*	at uchcom?
 uaudio* at uhub?		# USB Audio
 audio*	at uaudio?
 umidi*	at uhub?		# USB MIDI
@@ -198,6 +212,7 @@ uath*	at uhub?		# Atheros AR5005UG/AR5005UX
 ural*	at uhub?		# Ralink RT2500USB
 rum*	at uhub?		# Ralink RT2501USB/RT2601USB
 zyd*	at uhub?		# Zydas ZD1211
+upgt*	at uhub?		# Conexant/Intersil PrismGT SoftMAC USB
 udcf*	at uhub?		# Gude Expert mouseCLOCK
 uow*	at uhub?		# Maxim/Dallas DS2490 1-Wire adapter
 onewire* at uow?
@@ -217,6 +232,13 @@ scsibus* at sdmmc?		# SCSI emulation
 #bthub*	at sbt?
 #bthub*	at ubt?
 
+# Bluetooth HID support
+#bthidev* at bthub?
+#btkbd*	at bthidev?
+#btms*	at bthidev?
+#wskbd*	at btkbd? mux 1
+#wsmouse* at btms? mux 0
+
 isadma0	at isa?
 
 option	WSDISPLAY_COMPAT_USL		# VT handling
@@ -230,7 +252,6 @@ pms*		at pckbc?		# PS/2 mouse for wsmouse
 pmsi*		at pckbc?		# PS/2 "Intelli"mouse for wsmouse
 vga0		at isa?
 vga*		at pci?
-#option		PCIAGP
 wsdisplay*	at vga?
 wskbd*		at pckbd? mux 1
 wsmouse*	at pms? mux 0
@@ -386,6 +407,8 @@ thtc*	at pci?				# Tehuti Networks 10Gb ethernet
 tht*	at thtc?
 gem*	at pci?				# Sun 'gem' ethernet
 bce*	at pci?				# Broadcom BCM4401
+et*	at pci?				# Agere/LSI ET1310
+#lii*	at pci?				# Attansic L2 Ethernet
 
 # Wireless network cards
 acx*	at pci?				# TI ACX100/ACX111 (802.11b/g)
@@ -394,6 +417,8 @@ ath*	at pci?				# Atheros AR5k (802.11a/b/g)
 ath*	at cardbus?			# Atheros AR5k (802.11a/b/g)
 atw*	at pci?				# ADMtek ADM8211 (802.11)
 atw*	at cardbus?			# ADMtek ADM8211 (802.11)
+bwi*	at pci?				# Broadcom AirForce (802.11b/g)
+bwi*	at cardbus?			# Broadcom AirForce (802.11b/g)
 wi*	at pci?				# WaveLAN IEEE 802.11DS
 wi*	at pcmcia?			# WaveLAN IEEE 802.11DS
 #awi*	at pcmcia?			# Bay Networks IEEE 802.11FH
@@ -403,6 +428,7 @@ cnw*	at pcmcia?			# Xircom Netwave
 ray*	at pcmcia?			# Raylink Aviator2.4/Pro 802.11FH
 iwi*	at pci?				# Intel PRO/Wireless 2200BG/2915ABG
 wpi*	at pci?				# Intel PRO/Wireless 3945ABG
+iwn*	at pci?				# Intel Wireless WiFi Link 4965AGN
 ral*	at pci?				# Ralink RT2500/RT2501/RT2600
 ral*	at cardbus?			# Ralink RT2500/RT2501/RT2600
 rtw*	at pci?				# Realtek 8180
@@ -439,9 +465,11 @@ rgephy*	at mii?				# Realtek 8169S/8110S PHY
 urlphy*	at mii?				# Realtek RTL8150L internal PHY
 ciphy*	at mii?				# Cicada CS8201 10/100/1000 copper PHY
 gentbi*	at mii?				# Generic 1000BASE-X ten-bit PHY
+etphy*	at mii?				# Agere/LSI ET1011 TruePHY
 ukphy*	at mii?				# "unknown" PHYs
 
 eap*	at pci?				# Ensoniq AudioPCI S5016
+envy*	at pci?				# VIA Envy24 (aka ICE1712)
 #eso*	at pci?				# ESS Solo-1 PCI AudioDrive
 #sv*	at pci?				# S3 SonicVibes (S3 617)
 #neo*	at pci?				# NeoMagic 256AV/ZX
@@ -463,7 +491,7 @@ mpu*	at isa? port 0x330
 # OPL[23] FM synthesizers
 #opl*	at eso?
 opl*	at yds?
-#opl*	at cmpci?
+opl*	at cmpci?
 
 # MIDI support
 midi*	at pcppi?		# MIDI interface to the PC speaker
@@ -476,6 +504,7 @@ spkr0	at pcppi?		# PC speaker
 
 # Audio Support
 audio*	at eap?
+audio*	at envy?
 #audio*	at eso?
 #audio*	at sv?
 #audio*	at neo?
@@ -526,6 +555,7 @@ owid*	at onewire?		# ID
 owsbm*	at onewire?		# Smart Battery Monitor
 owtemp* at onewire?		# Temperature
 
+pseudo-device	pctr		1
 pseudo-device	nvram		1
 pseudo-device	sequencer	1
 #pseudo-device	raid		4	# RAIDframe disk driver

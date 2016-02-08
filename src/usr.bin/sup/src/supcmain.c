@@ -1,4 +1,4 @@
-/*	$OpenBSD: supcmain.c,v 1.20 2005/04/27 18:13:16 mickey Exp $	*/
+/*	$OpenBSD: supcmain.c,v 1.23 2007/11/25 16:40:03 jmc Exp $	*/
 
 /*
  * Copyright (c) 1992 Carnegie Mellon University
@@ -64,7 +64,7 @@
  *
  *	-X	"crosspatch" flag
  *	    		Sup is being run remotely with a crosspatch.
- *			Need to be carefull as we may be running as root
+ *			Need to be careful as we may be running as root
  *			instead of collection owner.
  *
  *	The remaining flags affect all collections unless an explicit list
@@ -592,7 +592,7 @@ init(argc, argv)
 	int argc;
 	char **argv;
 {
-	char buf[STRINGLENGTH], *p, *q;
+	char buf[STRINGLENGTH], *p;
 	char username[STRINGLENGTH];
 	char *supfname, *arg;
 	COLLECTION *c, *lastC;
@@ -666,8 +666,7 @@ init(argc, argv)
 	lastC = NULL;
 	bogus = FALSE;
 	while ((p = fgets(buf, sizeof(buf), f)) != NULL) {
-		if ((q = strchr(p, '\n')))
-			*q = '\0';
+		p[strcspn(p, "\n")] = '\0';
 		if (strchr("#;:", *p))
 			continue;
 		arg = nxtarg (&p, " \t");

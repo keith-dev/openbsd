@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_sig.c,v 1.94 2007/05/30 07:42:52 moritz Exp $	*/
+/*	$OpenBSD: kern_sig.c,v 1.97 2007/11/27 16:22:13 martynas Exp $	*/
 /*	$NetBSD: kern_sig.c,v 1.54 1996/04/22 01:38:32 christos Exp $	*/
 
 /*
@@ -1278,7 +1278,7 @@ postsig(int signum)
 #endif
 		/*
 		 * Set the new mask value and also defer further
-		 * occurences of this signal.
+		 * occurrences of this signal.
 		 *
 		 * Special case: user has done a sigpause.  Here the
 		 * current mask is not of interest, but rather the
@@ -1375,7 +1375,7 @@ coredump(struct proc *p)
 	}
 
 	/* Don't dump if will exceed file size limit. */
-	if (USPACE + ctob(vm->vm_dsize + vm->vm_ssize) >=
+	if (USPACE + ptoa(vm->vm_dsize + vm->vm_ssize) >=
 	    p->p_rlimit[RLIMIT_CORE].rlim_cur)
 		return (EFBIG);
 
@@ -1406,9 +1406,9 @@ coredump(struct proc *p)
 	vp = nd.ni_vp;
 	if ((error = VOP_GETATTR(vp, &vattr, cred, p)) != 0)
 		goto out;
-	/* Don't dump to non-regular files or files with links. */
 	if (vp->v_type != VREG || vattr.va_nlink != 1 ||
-	    vattr.va_mode & ((VREAD | VWRITE) >> 3 | (VREAD | VWRITE) >> 6)) {
+	    vattr.va_mode & ((VREAD | VWRITE) >> 3 | (VREAD | VWRITE) >> 6) ||
+	    vattr.va_uid != cred->cr_uid) {
 		error = EACCES;
 		goto out;
 	}
@@ -1425,9 +1425,9 @@ coredump(struct proc *p)
 	core.c_signo = p->p_sigacts->ps_sig;
 	core.c_ucode = p->p_sigacts->ps_code;
 	core.c_cpusize = 0;
-	core.c_tsize = (u_long)ctob(vm->vm_tsize);
-	core.c_dsize = (u_long)ctob(vm->vm_dsize);
-	core.c_ssize = (u_long)round_page(ctob(vm->vm_ssize));
+	core.c_tsize = (u_long)ptoa(vm->vm_tsize);
+	core.c_dsize = (u_long)ptoa(vm->vm_dsize);
+	core.c_ssize = (u_long)round_page(ptoa(vm->vm_ssize));
 	error = cpu_coredump(p, vp, cred, &core);
 	if (error)
 		goto out;

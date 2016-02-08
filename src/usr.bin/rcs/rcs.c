@@ -1,4 +1,4 @@
-/*	$OpenBSD: rcs.c,v 1.41 2007/07/03 00:56:23 ray Exp $	*/
+/*	$OpenBSD: rcs.c,v 1.46 2008/02/02 16:21:38 xsa Exp $	*/
 /*
  * Copyright (c) 2004 Jean-Francois Brousseau <jfb@openbsd.org>
  * All rights reserved.
@@ -72,6 +72,7 @@
 #define RCS_TOK_LOG		21
 #define RCS_TOK_TEXT		22
 #define RCS_TOK_STRICT		23
+#define RCS_TOK_COMMITID	24
 
 #define RCS_ISKEY(t)	(((t) >= RCS_TOK_HEAD) && ((t) <= RCS_TOK_BRANCHES))
 
@@ -195,6 +196,7 @@ static struct rcs_key {
 	{ "branch",   RCS_TOK_BRANCH,   RCS_TOK_NUM,    RCS_VOPT     },
 	{ "branches", RCS_TOK_BRANCHES, RCS_TOK_NUM,    RCS_VOPT     },
 	{ "comment",  RCS_TOK_COMMENT,  RCS_TOK_STRING, RCS_VOPT     },
+	{ "commitid", RCS_TOK_COMMITID, RCS_TOK_ID,     0            },
 	{ "date",     RCS_TOK_DATE,     RCS_TOK_NUM,    0            },
 	{ "desc",     RCS_TOK_DESC,     RCS_TOK_STRING, RCS_NOSCOL   },
 	{ "expand",   RCS_TOK_EXPAND,   RCS_TOK_STRING, RCS_VOPT     },
@@ -421,6 +423,8 @@ rcs_write(RCSFILE *rfp)
 
 	fprintf(fp, "symbols");
 	TAILQ_FOREACH(symp, &(rfp->rf_symbols), rs_list) {
+		if (RCSNUM_ISBRANCH(symp->rs_num))
+			rcsnum_addmagic(symp->rs_num);
 		rcsnum_tostr(symp->rs_num, numbuf, sizeof(numbuf));
 		fprintf(fp, "\n\t%s:%s", symp->rs_name, numbuf);
 	}
@@ -466,7 +470,7 @@ rcs_write(RCSFILE *rfp)
 		    rdp->rd_author, rdp->rd_state);
 		fputs("branches", fp);
 		TAILQ_FOREACH(brp, &(rdp->rd_branches), rb_list) {
-			fprintf(fp, " %s", rcsnum_tostr(brp->rb_num, numbuf,
+			fprintf(fp, "\n\t%s", rcsnum_tostr(brp->rb_num, numbuf,
 			    sizeof(numbuf)));
 		}
 		fputs(";\n", fp);
@@ -1273,6 +1277,57 @@ rcs_getrev(RCSFILE *rfp, RCSNUM *frev)
 	return (rbuf);
 }
 
+void
+rcs_delta_stats(struct rcs_delta *rdp, int *ladded, int *lremoved)
+{
+	struct rcs_lines *plines;
+	struct rcs_line *lp;
+	int added, i, lineno, nbln, removed;
+	char op, *ep;
+	u_char tmp;
+
+	added = removed = 0;
+
+	plines = rcs_splitlines(rdp->rd_text, rdp->rd_tlen);
+	lp = TAILQ_FIRST(&(plines->l_lines));
+
+	/* skip first bogus line */
+	for (lp = TAILQ_NEXT(lp, l_list); lp != NULL;
+		lp = TAILQ_NEXT(lp, l_list)) {
+			if (lp->l_len < 2)
+				errx(1,
+				    "line too short, RCS patch seems broken");
+			op = *(lp->l_line);
+			/* NUL-terminate line buffer for strtol() safety. */
+			tmp = lp->l_line[lp->l_len - 1];
+			lp->l_line[lp->l_len - 1] = '\0';
+			lineno = (int)strtol((lp->l_line + 1), &ep, 10);
+			ep++;
+			nbln = (int)strtol(ep, &ep, 10);
+			/* Restore the last byte of the buffer */
+			lp->l_line[lp->l_len - 1] = tmp;
+			if (nbln < 0)
+				errx(1, "invalid line number specification "
+				    "in RCS patch");
+
+			if (op == 'a') {
+				added += nbln;
+				for (i = 0; i < nbln; i++) {
+					lp = TAILQ_NEXT(lp, l_list);
+					if (lp == NULL)
+						errx(1, "truncated RCS patch");
+				}
+			} else if (op == 'd')
+				removed += nbln;
+			else
+				errx(1, "unknown RCS patch operation '%c'", op);
+	}
+
+	*ladded = added;
+	*lremoved = removed;
+}
+ 	 
+
 /*
  * rcs_rev_add()
  *
@@ -1726,7 +1781,7 @@ rcs_parse_init(RCSFILE *rfp)
 	pdp->rp_pttype = RCS_TOK_ERR;
 
 	if ((pdp->rp_file = fdopen(rfp->rf_fd, "r")) == NULL)
-		err(1, "fopen: `%s'", rfp->rf_path);
+		err(1, "fdopen: `%s'", rfp->rf_path);
 
 	pdp->rp_buf = xmalloc((size_t)RCS_BUFSIZE);
 	pdp->rp_blen = RCS_BUFSIZE;
@@ -1928,6 +1983,7 @@ rcs_parse_delta(RCSFILE *rfp)
 		case RCS_TOK_AUTHOR:
 		case RCS_TOK_STATE:
 		case RCS_TOK_NEXT:
+		case RCS_TOK_COMMITID:
 			ntok = rcs_gettok(rfp);
 			if (ntok == RCS_TOK_SCOLON) {
 				if (rk->rk_flags & RCS_VOPT)
@@ -1998,6 +2054,8 @@ rcs_parse_delta(RCSFILE *rfp)
 				tokstr = NULL;
 			} else if (tok == RCS_TOK_NEXT) {
 				rcsnum_aton(tokstr, NULL, rdp->rd_next);
+			} else if (tok == RCS_TOK_COMMITID) {
+				/* XXX just parse it, no action yet */
 			}
 			break;
 		case RCS_TOK_BRANCHES:
@@ -2482,7 +2540,9 @@ rcs_gettok(RCSFILE *rfp)
 			}
 			if (bp == pdp->rp_bufend)
 				break;
-			if (!isdigit(ch) && ch != '.') {
+			if (isalpha(ch) && ch != '.') {
+				type = RCS_TOK_ID;
+			} else if (!isdigit(ch) && ch != '.') {
 				ungetc(ch, pdp->rp_file);
 				break;
 			}

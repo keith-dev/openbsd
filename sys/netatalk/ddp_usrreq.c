@@ -1,4 +1,4 @@
-/*	$OpenBSD: ddp_usrreq.c,v 1.8 2007/05/26 12:09:40 claudio Exp $	*/
+/*	$OpenBSD: ddp_usrreq.c,v 1.11 2007/12/14 18:33:40 deraadt Exp $	*/
 
 /*
  * Copyright (c) 1990,1994 Regents of The University of Michigan.
@@ -469,11 +469,10 @@ at_pcballoc( so )
 {
     struct ddpcb	*ddp;
 
-    MALLOC( ddp, struct ddpcb *, sizeof( *ddp ), M_PCB, M_NOWAIT );
+    ddp = malloc(sizeof(*ddp), M_PCB, M_NOWAIT | M_ZERO);
     if ( ddp == NULL ) {
 	return (ENOBUFS);
     }
-    bzero( ddp, sizeof( *ddp ));
 
     ddp->ddp_lsat.sat_port = ATADDR_ANYPORT;
 
@@ -526,7 +525,7 @@ at_pcbdetach( so, ddp )
 	ddp->ddp_next->ddp_prev = ddp->ddp_prev;
     }
 
-    FREE( ddp, M_PCB );
+    free( ddp, M_PCB );
 }
 
 /*
@@ -587,4 +586,28 @@ ddp_init()
 {
     atintrq1.ifq_maxlen = IFQ_MAXLEN;
     atintrq2.ifq_maxlen = IFQ_MAXLEN;
+}
+
+/*
+ * Sysctl for ddp variables.
+ */
+int
+ddp_sysctl(int *name, u_int namelen, void *oldp, size_t *oldlenp,
+    void *newp, size_t newlen)
+{
+	/* All sysctl names at this level are terminal. */
+	if (namelen != 1)
+		return (ENOTDIR);
+
+	switch (name[0]) {
+	case DDPCTL_STATS:
+		if (newp != NULL)
+			return (EPERM);
+		return (sysctl_struct(oldp, oldlenp, newp, newlen,
+		    &ddpstat, sizeof(ddpstat)));
+
+	default:
+		return (ENOPROTOOPT);
+	}
+	/* NOTREACHED */
 }

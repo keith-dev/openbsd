@@ -1,4 +1,4 @@
-/* $OpenBSD: machdep.c,v 1.92 2007/06/06 17:15:13 deraadt Exp $ */
+/* $OpenBSD: machdep.c,v 1.94 2008/02/16 22:59:34 miod Exp $ */
 /* $NetBSD: machdep.c,v 1.108 2000/09/13 15:00:23 thorpej Exp $	 */
 
 /*
@@ -192,7 +192,6 @@ cpu_startup()
 	printf("real mem = %u (%uMB)\n", avail_end,
 	    avail_end/1024/1024);
 	physmem = btoc(avail_end);
-	panicstr = NULL;
 	mtpr(AST_NO, PR_ASTLVL);
 	spl0();
 
@@ -228,12 +227,19 @@ cpu_startup()
 	exec_map = uvm_km_suballoc(kernel_map, &minaddr, &maxaddr,
 				 16 * NCARGS, VM_MAP_PAGEABLE, FALSE, NULL);
 
+#if VAX46 || VAX48 || VAX49 || VAX53
 	/*
 	 * Allocate a submap for physio.  This map effectively limits the
 	 * number of processes doing physio at any one time.
+	 *
+	 * Note that machines on which all mass storage I/O controllers 
+	 * can perform address translation, do not need this.
 	 */
-	phys_map = uvm_km_suballoc(kernel_map, &minaddr, &maxaddr,
-				   VM_PHYS_SIZE, 0, FALSE, NULL);
+	if (vax_boardtype == VAX_BTYP_46 || vax_boardtype == VAX_BTYP_48 ||
+	    vax_boardtype == VAX_BTYP_49 || vax_boardtype == VAX_BTYP_1303)
+		phys_map = uvm_km_suballoc(kernel_map, &minaddr, &maxaddr,
+		    VM_PHYS_SIZE, 0, FALSE, NULL);
+#endif
 
 	printf("avail mem = %lu (%luMB)\n", ptoa(uvmexp.free),
 	    ptoa(uvmexp.free)/1024/1024);

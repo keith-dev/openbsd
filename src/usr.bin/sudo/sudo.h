@@ -17,7 +17,7 @@
  * Agency (DARPA) and Air Force Research Laboratory, Air Force
  * Materiel Command, USAF, under agreement number F39502-99-1-0512.
  *
- * $Sudo: sudo.h,v 1.209.2.10 2007/07/06 14:14:34 millert Exp $
+ * $Sudo: sudo.h,v 1.209.2.13 2007/11/27 23:41:23 millert Exp $
  */
 
 #ifndef _SUDO_SUDO_H
@@ -39,6 +39,7 @@ struct sudo_user {
     char *path;
     char *shell;
     char *tty;
+    char *ttypath;
     char  cwd[PATH_MAX];
     char *host;
     char *shost;
@@ -50,7 +51,7 @@ struct sudo_user {
     char *cmnd_safe;
     char *class_name;
     int ngroups;
-    gid_t *groups;
+    GETGROUPS_T *groups;
     struct list_member *env_vars;
 };
 
@@ -77,6 +78,8 @@ struct sudo_user {
 #define TRUE                     1
 #undef FALSE
 #define FALSE                    0
+#undef IMPLIED
+#define IMPLIED                  2
 #undef NOMATCH
 #define NOMATCH                 -1
 #undef UNSPEC
@@ -132,6 +135,7 @@ struct sudo_user {
 #define user_ngroups		(sudo_user.ngroups)
 #define user_groups		(sudo_user.groups)
 #define user_tty		(sudo_user.tty)
+#define user_ttypath		(sudo_user.ttypath)
 #define user_cwd		(sudo_user.cwd)
 #define user_runas		(sudo_user.runas)
 #define user_cmnd		(sudo_user.cmnd)

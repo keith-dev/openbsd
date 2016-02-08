@@ -1,7 +1,7 @@
-/*	$OpenBSD: if_trunk.c,v 1.32 2007/05/26 17:13:31 jason Exp $	*/
+/*	$OpenBSD: if_trunk.c,v 1.41 2008/01/10 09:52:04 brad Exp $	*/
 
 /*
- * Copyright (c) 2005, 2006 Reyk Floeter <reyk@openbsd.org>
+ * Copyright (c) 2005, 2006, 2007 Reyk Floeter <reyk@openbsd.org>
  *
  * Permission to use, copy, modify, and distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -119,6 +119,13 @@ int	 trunk_lb_input(struct trunk_softc *, struct trunk_port *,
 int	 trunk_lb_porttable(struct trunk_softc *, struct trunk_port *);
 const void *trunk_lb_gethdr(struct mbuf *, u_int, u_int, void *);
 
+/* Broadcast mode */
+int	 trunk_bcast_attach(struct trunk_softc *);
+int	 trunk_bcast_detach(struct trunk_softc *);
+int	 trunk_bcast_start(struct trunk_softc *, struct mbuf *);
+int	 trunk_bcast_input(struct trunk_softc *, struct trunk_port *,
+	    struct ether_header *, struct mbuf *);
+
 /* Trunk protocol table */
 static const struct {
 	enum trunk_proto	ti_proto;
@@ -127,6 +134,7 @@ static const struct {
 	{ TRUNK_PROTO_ROUNDROBIN,	trunk_rr_attach },
 	{ TRUNK_PROTO_FAILOVER,		trunk_fail_attach },
 	{ TRUNK_PROTO_LOADBALANCE,	trunk_lb_attach },
+	{ TRUNK_PROTO_BROADCAST,	trunk_bcast_attach },
 	{ TRUNK_PROTO_NONE,		NULL }
 };
 
@@ -145,10 +153,8 @@ trunk_clone_create(struct if_clone *ifc, int unit)
 	int i, error = 0;
 
 	if ((tr = malloc(sizeof(struct trunk_softc),
-	    M_DEVBUF, M_NOWAIT)) == NULL)
+	    M_DEVBUF, M_NOWAIT|M_ZERO)) == NULL)
 		return (ENOMEM);
-
-	bzero(tr, sizeof(struct trunk_softc));
 
 	tr->tr_unit = unit;
 	tr->tr_proto = TRUNK_PROTO_NONE;
@@ -321,10 +327,8 @@ trunk_port_create(struct trunk_softc *tr, struct ifnet *ifp)
 		return (error);
 
 	if ((tp = malloc(sizeof(struct trunk_port),
-	    M_DEVBUF, M_NOWAIT)) == NULL)
+	    M_DEVBUF, M_NOWAIT|M_ZERO)) == NULL)
 		return (ENOMEM);
-
-	bzero(tp, sizeof(struct trunk_port));
 
 	/* Check if port is a stacked trunk */
 	SLIST_FOREACH(tr_ptr, &trunk_list, tr_entries) {
@@ -493,8 +497,10 @@ trunk_port_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 	/* Should be checked by the caller */
 	if (ifp->if_type != IFT_IEEE8023ADLAG ||
 	    (tp = (struct trunk_port *)ifp->if_tp) == NULL ||
-	    (tr = (struct trunk_softc *)tp->tp_trunk) == NULL)
+	    (tr = (struct trunk_softc *)tp->tp_trunk) == NULL) {
+		error = EINVAL;
 		goto fallback;
+	}
 
 	switch (cmd) {
 	case SIOCGTRUNKPORT:
@@ -514,6 +520,7 @@ trunk_port_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		trunk_port2req(tp, rp);
 		break;
 	default:
+		error = ENOTTY;
 		goto fallback;
 	}
 
@@ -524,9 +531,9 @@ trunk_port_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 	splx(s);
 
 	if (tp != NULL)
-		return ((*tp->tp_ioctl)(ifp, cmd, data));
+		error = (*tp->tp_ioctl)(ifp, cmd, data);
 
-	return (EINVAL);
+	return (error);
 }
 
 void
@@ -756,8 +763,7 @@ trunk_ether_addmulti(struct trunk_softc *tr, struct ifreq *ifr)
 	if ((error = ether_addmulti(ifr, &tr->tr_ac)) != ENETRESET)
 		return (error);
 
-	if ((mc = (struct trunk_mc *)malloc(sizeof(struct trunk_mc),
-	    M_DEVBUF, M_NOWAIT)) == NULL) {
+	if ((mc = malloc(sizeof(*mc), M_DEVBUF, M_NOWAIT)) == NULL) {
 		error = ENOMEM;
 		goto failed;
 	}
@@ -1076,7 +1082,7 @@ trunk_input(struct ifnet *ifp, struct ether_header *eh, struct mbuf *m)
 	return (0);
 
  bad:
-	if (error && trifp != NULL)
+	if (error > 0 && trifp != NULL)
 		trifp->if_ierrors++;
 	return (error);
 }
@@ -1222,8 +1228,10 @@ trunk_rr_start(struct trunk_softc *tr, struct mbuf *m)
 	struct trunk_port *tp = (struct trunk_port *)tr->tr_psc, *tp_next;
 	int error = 0;
 
-	if (tp == NULL && (tp = trunk_link_active(tr, NULL)) == NULL)
+	if (tp == NULL && (tp = trunk_link_active(tr, NULL)) == NULL) {
+		m_freem(m);
 		return (ENOENT);
+	}
 
 	/* Send mbuf */
 	if ((error = trunk_enqueue(tp->tp_if, m)) != 0)
@@ -1279,8 +1287,10 @@ trunk_fail_start(struct trunk_softc *tr, struct mbuf *m)
 	struct trunk_port *tp;
 
 	/* Use the master port if active or the next available port */
-	if ((tp = trunk_link_active(tr, tr->tr_primary)) == NULL)
+	if ((tp = trunk_link_active(tr, tr->tr_primary)) == NULL) {
+		m_freem(m);
 		return (ENOENT);
+	}
 
 	/* Send mbuf */
 	return (trunk_enqueue(tp->tp_if, m));
@@ -1301,7 +1311,7 @@ trunk_fail_input(struct trunk_softc *tr, struct trunk_port *tp,
 	if (tr->tr_primary->tp_link_state == LINK_STATE_DOWN) {
 		tmp_tp = trunk_link_active(tr, NULL);
 		/*
-		 * If tmp_tp is null, we've recieved a packet when all
+		 * If tmp_tp is null, we've received a packet when all
 		 * our links are down. Weird, but process it anyways.
 		 */
 		if ((tmp_tp == NULL || tmp_tp == tp)) {
@@ -1322,10 +1332,8 @@ trunk_lb_attach(struct trunk_softc *tr)
 {
 	struct trunk_lb *lb;
 
-	if ((lb = (struct trunk_lb *)malloc(sizeof(struct trunk_lb),
-	    M_DEVBUF, M_NOWAIT)) == NULL)
+	if ((lb = malloc(sizeof(*lb), M_DEVBUF, M_NOWAIT|M_ZERO)) == NULL)
 		return (ENOMEM);
-	bzero(lb, sizeof(struct trunk_lb));
 
 	tr->tr_detach = trunk_lb_detach;
 	tr->tr_start = trunk_lb_start;
@@ -1407,16 +1415,20 @@ trunk_lb_start(struct trunk_softc *tr, struct mbuf *m)
 	int idx;
 
 	p = trunk_hashmbuf(m, lb->lb_key);
-	if ((idx = p % tr->tr_count) >= TRUNK_MAX_PORTS)
+	if ((idx = p % tr->tr_count) >= TRUNK_MAX_PORTS) {
+		m_freem(m);
 		return (EINVAL);
+	}
 	tp = lb->lb_ports[idx];
 
 	/*
 	 * Check the port's link state. This will return the next active
 	 * port if the link is down or the port is NULL.
 	 */
-	if ((tp = trunk_link_active(tr, tp)) == NULL)
+	if ((tp = trunk_link_active(tr, tp)) == NULL) {
+		m_freem(m);
 		return (ENOENT);
+	}
 
 	/* Send mbuf */
 	return (trunk_enqueue(tp->tp_if, m));
@@ -1431,5 +1443,73 @@ trunk_lb_input(struct trunk_softc *tr, struct trunk_port *tp,
 	/* Just pass in the packet to our trunk device */
 	m->m_pkthdr.rcvif = ifp;
 
+	return (0);
+}
+
+/*
+ * Broadcast mode
+ */
+
+int
+trunk_bcast_attach(struct trunk_softc *tr)
+{
+	tr->tr_detach = trunk_bcast_detach;
+	tr->tr_start = trunk_bcast_start;
+	tr->tr_input = trunk_bcast_input;
+	tr->tr_init = NULL;
+	tr->tr_stop = NULL;
+	tr->tr_port_create = NULL;
+	tr->tr_port_destroy = NULL;
+	tr->tr_linkstate = NULL;
+
+	return (0);
+}
+
+int
+trunk_bcast_detach(struct trunk_softc *tr)
+{
+	return (0);
+}
+
+int
+trunk_bcast_start(struct trunk_softc *tr, struct mbuf *m)
+{
+	int			 active_ports = 0;
+	int			 errors = 0;
+	int			 ret;
+	struct trunk_port	*tp;
+	struct mbuf		*n;
+
+	SLIST_FOREACH(tp, &tr->tr_ports, tp_entries) {
+		if (TRUNK_PORTACTIVE(tp)) {
+			if (active_ports) {
+				n = m_copym(m, 0, M_COPYALL, M_DONTWAIT);
+				if (n == NULL) {
+					m_free(m);
+					return (ENOBUFS);
+				}
+			} else
+				n = m;
+			active_ports++;
+			if ((ret = trunk_enqueue(tp->tp_if, n)))
+				errors++;
+		}
+	}
+	if (active_ports == 0) {
+		m_free(m);
+		return (ENOENT);
+	}
+	if (errors == active_ports)
+		return (ret);
+	return (0);
+}
+
+int
+trunk_bcast_input(struct trunk_softc *tr, struct trunk_port *tp,
+    struct ether_header *eh, struct mbuf *m)
+{
+	struct ifnet *ifp = &tr->tr_ac.ac_if;
+
+	m->m_pkthdr.rcvif = ifp;
 	return (0);
 }

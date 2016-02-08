@@ -1,4 +1,4 @@
-/*	$OpenBSD: cvs.c,v 1.129 2007/08/06 19:16:06 sobrado Exp $	*/
+/*	$OpenBSD: cvs.c,v 1.143 2008/02/26 21:23:00 joris Exp $	*/
 /*
  * Copyright (c) 2006, 2007 Joris Vink <joris@openbsd.org>
  * Copyright (c) 2004 Jean-Francois Brousseau <jfb@openbsd.org>
@@ -59,7 +59,6 @@ int	cvs_server_active = 0;
 
 char	*cvs_tagname = NULL;
 char	*cvs_defargs;		/* default global arguments from .cvsrc */
-char	*cvs_command;		/* name of the command we are running */
 char	*cvs_rootstr;
 char	*cvs_rsh = CVS_RSH_DEFAULT;
 char	*cvs_editor = CVS_EDITOR_DEFAULT;
@@ -68,6 +67,7 @@ char	*cvs_msg = NULL;
 char	*cvs_tmpdir = CVS_TMPDIR_DEFAULT;
 
 struct cvsroot *current_cvsroot = NULL;
+struct cvs_cmd *cmdp;			/* struct of command we are running */
 
 int		cvs_getopt(int, char **);
 __dead void	usage(void);
@@ -128,11 +128,9 @@ main(int argc, char **argv)
 {
 	char *envstr, *cmd_argv[CVS_CMD_MAXARG], **targv;
 	int i, ret, cmd_argc;
-	struct cvs_cmd *cmdp;
 	struct passwd *pw;
 	struct stat st;
 	char fpath[MAXPATHLEN];
-	char *root, *rootp;
 
 	tzset();
 
@@ -158,9 +156,8 @@ main(int argc, char **argv)
 	}
 
 	if ((cvs_homedir = getenv("HOME")) == NULL) {
-		if ((pw = getpwuid(getuid())) == NULL)
-			fatal("getpwuid failed");
-		cvs_homedir = pw->pw_dir;
+		if ((pw = getpwuid(getuid())) != NULL)
+			cvs_homedir = pw->pw_dir;
 	}
 
 	if ((envstr = getenv("TMPDIR")) != NULL)
@@ -173,8 +170,6 @@ main(int argc, char **argv)
 	if (argc == 0)
 		usage();
 
-	cvs_command = argv[0];
-
 	/*
 	 * check the tmp dir, either specified through
 	 * the environment variable TMPDIR, or via
@@ -185,7 +180,17 @@ main(int argc, char **argv)
 	else if (!S_ISDIR(st.st_mode))
 		fatal("`%s' is not valid temporary directory", cvs_tmpdir);
 
-	if (cvs_readrc == 1) {
+	cmdp = cvs_findcmd(argv[0]);
+	if (cmdp == NULL) {
+		fprintf(stderr, "Unknown command: `%s'\n\n", argv[0]);
+		fprintf(stderr, "CVS commands are:\n");
+		for (i = 0; cvs_cdt[i] != NULL; i++)
+			fprintf(stderr, "\t%-16s%s\n",
+			    cvs_cdt[i]->cmd_name, cvs_cdt[i]->cmd_descr);
+		exit(1);
+	}
+
+	if (cvs_readrc == 1 && cvs_homedir != NULL) {
 		cvs_read_rcfile();
 
 		if (cvs_defargs != NULL) {
@@ -206,16 +211,6 @@ main(int argc, char **argv)
 	signal(SIGABRT, sighandler);
 	signal(SIGALRM, sighandler);
 	signal(SIGPIPE, sighandler);
-
-	cmdp = cvs_findcmd(cvs_command);
-	if (cmdp == NULL) {
-		fprintf(stderr, "Unknown command: `%s'\n\n", cvs_command);
-		fprintf(stderr, "CVS commands are:\n");
-		for (i = 0; cvs_cdt[i] != NULL; i++)
-			fprintf(stderr, "\t%-16s%s\n",
-			    cvs_cdt[i]->cmd_name, cvs_cdt[i]->cmd_descr);
-		exit(1);
-	}
 
 	cvs_cmdop = cmdp->cmd_op;
 
@@ -241,18 +236,9 @@ main(int argc, char **argv)
 	cvs_file_init();
 
 	if (cvs_cmdop == CVS_OP_SERVER) {
-		if (cmd_argc > 1)
-			fatal("server does not take any extra arguments");
-
-		setvbuf(stdin, NULL, _IOLBF, 0);
-		setvbuf(stdout, NULL, _IOLBF, 0);
-
-		cvs_server_active = 1;
-		root = cvs_remote_input();
-		if ((rootp = strchr(root, ' ')) == NULL)
-			fatal("bad Root request");
-		cvs_rootstr = xstrdup(rootp + 1);
-		xfree(root);
+		cmdp->cmd(cmd_argc, cmd_argv);
+		cvs_cleanup();
+		return (0);
 	}
 
 	if ((current_cvsroot = cvsroot_get(".")) == NULL) {
@@ -283,8 +269,10 @@ main(int argc, char **argv)
 			    current_cvsroot->cr_dir);
 	}
 
-	if (cvs_cmdop != CVS_OP_INIT)
+	if (cvs_cmdop != CVS_OP_INIT) {
 		cvs_parse_configfile();
+		cvs_parse_modules();
+	}
 
 	umask(cvs_umask);
 
@@ -367,7 +355,6 @@ cvs_getopt(int argc, char **argv)
 			printf("%s\n", CVS_VERSION);
 			exit(0);
 			/* NOTREACHED */
-			break;
 		case 'w':
 			cvs_readonly = 0;
 			break;
@@ -404,10 +391,10 @@ cvs_getopt(int argc, char **argv)
 static void
 cvs_read_rcfile(void)
 {
-	char rcpath[MAXPATHLEN], linebuf[128], *lp, *p;
-	int i, linenum;
-	size_t len;
-	struct cvs_cmd *cmdp;
+	char rcpath[MAXPATHLEN], *buf, *lbuf, *lp, *p;
+	int cmd_parsed, cvs_parsed, i, linenum;
+	size_t len, pos;
+	struct cvs_cmd *tcmdp;
 	FILE *fp;
 
 	linenum = 0;
@@ -426,52 +413,73 @@ cvs_read_rcfile(void)
 		return;
 	}
 
-	while (fgets(linebuf, (int)sizeof(linebuf), fp) != NULL) {
-		linenum++;
-		if ((len = strlen(linebuf)) == 0)
-			continue;
-		if (linebuf[len - 1] != '\n') {
-			cvs_log(LP_ERR, "line too long in `%s:%d'", rcpath,
-				linenum);
-			break;
+	cmd_parsed = cvs_parsed = 0;
+	lbuf = NULL;
+	while ((buf = fgetln(fp, &len)) != NULL) {
+		if (buf[len - 1] == '\n') {
+			buf[len - 1] = '\0';
+		} else {
+			lbuf = xmalloc(len + 1);
+			memcpy(lbuf, buf, len);
+			lbuf[len] = '\0';
+			buf = lbuf;
 		}
-		linebuf[--len] = '\0';
+
+		linenum++;
 
 		/* skip any whitespaces */
-		p = linebuf;
+		p = buf;
 		while (*p == ' ')
 			p++;
 
-		/* allow comments */
-		if (*p == '#')
+		/*
+		 * Allow comments.
+		 * GNU cvs stops parsing a line if it encounters a \t
+		 * in front of a command, stick at this behaviour for
+		 * compatibility.
+		 */
+		if (*p == '#' || *p == '\t')
 			continue;
 
-		lp = strchr(p, ' ');
-		if (lp == NULL)
-			continue;	/* ignore lines with no arguments */
-		*lp = '\0';
-		if (strcmp(p, "cvs") == 0) {
+		pos = strcspn(p, " \t");
+		if (pos == strlen(p)) {
+			lp = NULL;
+		} else {
+			lp = p + pos;
+			*lp = '\0';
+		}
+
+		if (strcmp(p, "cvs") == 0 && !cvs_parsed) {
 			/*
 			 * Global default options.  In the case of cvs only,
 			 * we keep the 'cvs' string as first argument because
 			 * getopt() does not like starting at index 0 for
 			 * argument processing.
 			 */
-			*lp = ' ';
-			cvs_defargs = xstrdup(p);
+			if (lp != NULL) {
+				*lp = ' ';
+				cvs_defargs = xstrdup(p);
+			}
+			cvs_parsed = 1;
 		} else {
-			lp++;
-			cmdp = cvs_findcmd(p);
-			if (cmdp == NULL) {
+			tcmdp = cvs_findcmd(p);
+			if (tcmdp == NULL && verbosity == 2)
 				cvs_log(LP_NOTICE,
 				    "unknown command `%s' in `%s:%d'",
 				    p, rcpath, linenum);
-				continue;
-			}
 
-			cmdp->cmd_defargs = xstrdup(lp);
+			if (tcmdp != cmdp || cmd_parsed)
+				continue;
+
+			if (lp != NULL) {
+				lp++;
+				cmdp->cmd_defargs = xstrdup(lp);
+			}
+			cmd_parsed = 1;
 		}
 	}
+	if (lbuf != NULL)
+		xfree(lbuf);
 
 	if (ferror(fp)) {
 		cvs_log(LP_NOTICE, "failed to read line from `%s'", rcpath);
@@ -490,7 +498,6 @@ cvs_read_rcfile(void)
 int
 cvs_var_set(const char *var, const char *val)
 {
-	char *valcp;
 	const char *cp;
 	struct cvs_var *vp;
 
@@ -512,7 +519,6 @@ cvs_var_set(const char *var, const char *val)
 		if (strcmp(vp->cv_name, var) == 0)
 			break;
 
-	valcp = xstrdup(val);
 	if (vp == NULL) {
 		vp = xcalloc(1, sizeof(*vp));
 
@@ -522,7 +528,7 @@ cvs_var_set(const char *var, const char *val)
 	} else	/* free the previous value */
 		xfree(vp->cv_val);
 
-	vp->cv_val = valcp;
+	vp->cv_val = xstrdup(val);
 
 	return (0);
 }

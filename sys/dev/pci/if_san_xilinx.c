@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_san_xilinx.c,v 1.18 2006/04/20 20:31:12 miod Exp $	*/
+/*	$OpenBSD: if_san_xilinx.c,v 1.21 2007/10/08 04:15:15 krw Exp $	*/
 
 /*-
  * Copyright (c) 2001-2004 Sangoma Technologies (SAN)
@@ -343,11 +343,10 @@ wan_xilinx_init(sdla_t *card)
 	timeout_set(&card->u.xilinx.led_timer, aft_led_timer, (void *)card);
 
 	/* allocate and initialize private data */
-	sc = malloc(sizeof(xilinx_softc_t), M_DEVBUF, M_NOWAIT);
+	sc = malloc(sizeof(*sc), M_DEVBUF, M_NOWAIT | M_ZERO);
 	if (sc == NULL)
 		return (NULL);
 
-	memset(sc, 0, sizeof(xilinx_softc_t));
 	ifp = (struct ifnet *)&sc->common.ifp;
 	ifp->if_softc = sc;
 	sc->common.card	= card;
@@ -1066,7 +1065,7 @@ xilinx_chip_configure(sdla_t *card)
 	    card->devname);
 
 	if (sdla_te_config(card)) {
-		log(LOG_INFO, "%s: Failed %s configuratoin!\n", card->devname,
+		log(LOG_INFO, "%s: Failed %s configuration!\n", card->devname,
 		    IS_T1(&card->fe_te.te_cfg)?"T1":"E1");
 		return (EINVAL);
 	}
@@ -2390,11 +2389,10 @@ aft_alloc_rx_buffers(xilinx_softc_t *sc)
 	SIMPLEQ_INIT(&sc->wp_rx_complete_list);
 
 	/* allocate receive buffers in one cluster */
-	buf = malloc(sizeof(*buf) * MAX_RX_BUF, M_DEVBUF, M_NOWAIT);
+	buf = malloc(sizeof(*buf) * MAX_RX_BUF, M_DEVBUF, M_NOWAIT | M_ZERO);
 	if (buf == NULL)
 		return (1);
 
-	bzero(buf, sizeof(*buf) * MAX_RX_BUF);
 	sc->wp_rx_buffers = buf;
 	sc->wp_rx_buffer_last = buf;
 

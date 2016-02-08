@@ -1,4 +1,4 @@
-/*	$OpenBSD: sysv_shm.c,v 1.47 2007/05/29 10:44:28 sturm Exp $	*/
+/*	$OpenBSD: sysv_shm.c,v 1.49 2007/09/15 10:10:37 martin Exp $	*/
 /*	$NetBSD: sysv_shm.c,v 1.50 1998/10/21 22:24:29 tron Exp $	*/
 
 /*
@@ -155,7 +155,7 @@ shm_deallocate_segment(struct shmid_ds *shmseg)
 	size = round_page(shmseg->shm_segsz);
 	uao_detach(shm_handle->shm_object);
 	pool_put(&shm_pool, shmseg);
-	shm_committed -= btoc(size);
+	shm_committed -= atop(size);
 	shm_nused--;
 }
 
@@ -400,10 +400,10 @@ shmget_allocate_segment(struct proc *p,
 	if (shm_nused >= shminfo.shmmni) /* any shmids left? */
 		return (ENOSPC);
 	size = round_page(SCARG(uap, size));
-	if (shm_committed + btoc(size) > shminfo.shmall)
+	if (shm_committed + atop(size) > shminfo.shmall)
 		return (ENOMEM);
 	shm_nused++;
-	shm_committed += btoc(size);
+	shm_committed += atop(size);
 
 	/*
 	 * If a key has been specified and we had to wait for memory
@@ -417,7 +417,7 @@ shmget_allocate_segment(struct proc *p,
 		if (shm_find_segment_by_key(key) != -1) {
 			pool_put(&shm_pool, shmseg);
 			shm_nused--;
-			shm_committed -= btoc(size);
+			shm_committed -= atop(size);
 			return (EAGAIN);
 		}
 	}
@@ -535,11 +535,9 @@ shminit(void)
 	    sizeof(struct shm_handle), 0, 0, 0, "shmpl",
 	    &pool_allocator_nointr);
 	shmsegs = malloc(shminfo.shmmni * sizeof(struct shmid_ds *),
-	    M_SHM, M_WAITOK);
-	bzero(shmsegs, shminfo.shmmni * sizeof(struct shmid_ds *));
+	    M_SHM, M_WAITOK|M_ZERO);
 	shmseqs = malloc(shminfo.shmmni * sizeof(unsigned short),
-	    M_SHM, M_WAITOK);
-	bzero(shmseqs, shminfo.shmmni * sizeof(unsigned short));
+	    M_SHM, M_WAITOK|M_ZERO);
 
 	shminfo.shmmax *= PAGE_SIZE;	/* actually in pages */
 	shm_last_free = 0;
@@ -578,8 +576,8 @@ sysctl_sysvshm(int *name, u_int namelen, void *oldp, size_t *oldlenp,
 			return (error);
 
 		/* If new shmmax > shmall, crank shmall */
-		if (btoc(round_page(shminfo.shmmax)) > shminfo.shmall)
-			shminfo.shmall = btoc(round_page(shminfo.shmmax));
+		if (atop(round_page(shminfo.shmmax)) > shminfo.shmall)
+			shminfo.shmall = atop(round_page(shminfo.shmmax));
 		return (0);
 	case KERN_SHMINFO_SHMMIN:
 		val = shminfo.shmmin;
@@ -601,18 +599,15 @@ sysctl_sysvshm(int *name, u_int namelen, void *oldp, size_t *oldlenp,
 
 		/* Expand shmsegs and shmseqs arrays */
 		newsegs = malloc(val * sizeof(struct shmid_ds *),
-		    M_SHM, M_WAITOK);
+		    M_SHM, M_WAITOK|M_ZERO);
 		bcopy(shmsegs, newsegs,
 		    shminfo.shmmni * sizeof(struct shmid_ds *));
-		bzero(newsegs + shminfo.shmmni,
-		    (val - shminfo.shmmni) * sizeof(struct shmid_ds *));
 		free(shmsegs, M_SHM);
 		shmsegs = newsegs;
-		newseqs = malloc(val * sizeof(unsigned short), M_SHM, M_WAITOK);
+		newseqs = malloc(val * sizeof(unsigned short), M_SHM,
+		    M_WAITOK|M_ZERO);
 		bcopy(shmseqs, newseqs,
 		    shminfo.shmmni * sizeof(unsigned short));
-		bzero(newseqs + shminfo.shmmni,
-		    (val - shminfo.shmmni) * sizeof(unsigned short));
 		free(shmseqs, M_SHM);
 		shmseqs = newseqs;
 		shminfo.shmmni = val;

@@ -1,5 +1,5 @@
 /*	$NetBSD: mem.c,v 1.31 1996/05/03 19:42:19 christos Exp $	*/
-/*	$OpenBSD: mem.c,v 1.32 2006/12/29 13:04:37 pedro Exp $ */
+/*	$OpenBSD: mem.c,v 1.34 2007/09/07 15:00:19 art Exp $ */
 /*
  * Copyright (c) 1988 University of Utah.
  * Copyright (c) 1982, 1986, 1990, 1993
@@ -183,9 +183,8 @@ mmrw(dev_t dev, struct uio *uio, int flags)
 				break;
 			}
 			if (zeropage == NULL) {
-				zeropage = (caddr_t)
-				    malloc(PAGE_SIZE, M_TEMP, M_WAITOK);
-				bzero(zeropage, PAGE_SIZE);
+				zeropage = malloc(PAGE_SIZE, M_TEMP,
+				    M_WAITOK|M_ZERO);
 			}
 			c = min(iov->iov_len, PAGE_SIZE);
 			error = uiomove(zeropage, c, uio);
@@ -215,7 +214,7 @@ mmmmap(dev_t dev, off_t off, int prot)
 	switch (minor(dev)) {
 /* minor device 0 is physical memory */
 	case 0:
-		if ((u_int)off > ctob(physmem) &&
+		if ((u_int)off > ptoa(physmem) &&
 		    suser(p, 0) != 0)
 			return -1;
 		return atop(off);
@@ -227,7 +226,7 @@ mmmmap(dev_t dev, off_t off, int prot)
 		case 1:
 			/* Allow mapping of the VGA framebuffer & BIOS only */
 			if ((off >= VGA_START && off <= BIOS_END) ||
-			    (unsigned)off > (unsigned)ctob(physmem))
+			    (unsigned)off > (unsigned)ptoa(physmem))
 				return atop(off);
 			else
 				return -1;
@@ -235,7 +234,7 @@ mmmmap(dev_t dev, off_t off, int prot)
 			/* Allow mapping of the whole 1st megabyte
 			   for x86emu */
 			if (off <= BIOS_END ||
-			    (unsigned)off > (unsigned)ctob(physmem))
+			    (unsigned)off > (unsigned)ptoa(physmem))
 				return atop(off);
 			else
 				return -1;

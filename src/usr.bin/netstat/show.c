@@ -1,4 +1,4 @@
-/*	$OpenBSD: show.c,v 1.10 2007/07/25 11:50:47 claudio Exp $	*/
+/*	$OpenBSD: show.c,v 1.12 2007/12/14 18:35:46 deraadt Exp $	*/
 /*	$NetBSD: show.c,v 1.1 1996/11/15 18:01:41 gwr Exp $	*/
 
 /*
@@ -191,7 +191,7 @@ p_rttables(int af, u_int tableid)
 	}
 }
 
-/* 
+/*
  * column widths; each followed by one space
  * width of destination/gateway column
  * strlen("fe80::aaaa:bbbb:cccc:dddd@gif0") == 30, strlen("/128") == 4
@@ -265,10 +265,10 @@ p_rtentry(struct rt_msghdr *rtm)
 	p_sockaddr(rti_info[RTAX_GATEWAY], NULL, RTF_HOST,
 	    WID_GW(sa->sa_family));
 	p_flags(rtm->rtm_flags, "%-6.6s ");
-	printf("%6d %8ld ", (int)rtm->rtm_rmx.rmx_refcnt,
+	printf("%6u %8llu ", rtm->rtm_rmx.rmx_refcnt,
 	    rtm->rtm_rmx.rmx_pksent);
 	if (rtm->rtm_rmx.rmx_mtu)
-		printf("%6ld ", rtm->rtm_rmx.rmx_mtu);
+		printf("%6u ", rtm->rtm_rmx.rmx_mtu);
 	else
 		printf("%6s ", "-");
 	putchar((rtm->rtm_rmx.rmx_locks & RTV_MTU) ? 'L' : ' ');

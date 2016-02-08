@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip6_input.c,v 1.78 2007/08/03 06:43:12 itojun Exp $	*/
+/*	$OpenBSD: ip6_input.c,v 1.82 2008/02/24 23:31:30 mcbride Exp $	*/
 /*	$KAME: ip6_input.c,v 1.188 2001/03/29 05:34:31 itojun Exp $	*/
 
 /*
@@ -105,6 +105,10 @@
 #include "faith.h"
 #include "gif.h"
 #include "bpfilter.h"
+
+#ifdef MROUTING
+#include <netinet6/ip6_mroute.h>
+#endif
 
 #if NPF > 0
 #include <net/pfvar.h>
@@ -254,7 +258,6 @@ ip6_input(m)
 
 #if NCARP > 0
 	if (m->m_pkthdr.rcvif->if_type == IFT_CARP &&
-	    m->m_pkthdr.rcvif->if_flags & IFF_LINK0 &&
 	    ip6->ip6_nxt != IPPROTO_ICMPV6 &&
 	    carp_lsdrop(m, AF_INET6, ip6->ip6_src.s6_addr32,
 	    ip6->ip6_dst.s6_addr32))
@@ -327,7 +330,7 @@ ip6_input(m)
 		in6_ifstat_inc(m->m_pkthdr.rcvif, ifs6_in_discard);
 		in6_ifstat_inc(m->m_pkthdr.rcvif, ifs6_in_hdrerr);
 		icmp6_error(m, ICMP6_PARAM_PROB, ICMP6_PARAMPROB_OPTION, 0);
-		/* m is allready freed */
+		/* m is already freed */
 		return;
 	}
 
@@ -548,7 +551,6 @@ ip6_input(m)
 
 #if NCARP > 0
 	if (m->m_pkthdr.rcvif->if_type == IFT_CARP &&
-	    m->m_pkthdr.rcvif->if_flags & IFF_LINK0 &&
 	    ip6->ip6_nxt == IPPROTO_ICMPV6 &&
 	    carp_lsdrop(m, AF_INET6, ip6->ip6_src.s6_addr32,
 	    ip6->ip6_dst.s6_addr32))
@@ -737,7 +739,7 @@ ip6_check_rh0hdr(struct mbuf *m)
 				return (1);
 			}
 
-			if (off + sizeof(opt6) > lim) {
+			if (off + sizeof(rthdr) > lim) {
 				/* packet to short to make sense */
 				return (1);
 			}
@@ -1470,6 +1472,11 @@ ip6_sysctl(name, namelen, oldp, oldlenp, newp, newlen)
 	void *newp;
 	size_t newlen;
 {
+#ifdef MROUTING
+	extern int ip6_mrtproto;
+	extern struct mrt6stat mrt6stat;
+#endif
+
 	/* All sysctl names at this level are terminal. */
 	if (namelen != 1)
 		return ENOTDIR;
@@ -1479,6 +1486,26 @@ ip6_sysctl(name, namelen, oldp, oldlenp, newp, newlen)
 		return sysctl_rdstring(oldp, oldlenp, newp, __KAME_VERSION);
 	case IPV6CTL_V6ONLY:
 		return sysctl_rdint(oldp, oldlenp, newp, ip6_v6only);
+	case IPV6CTL_STATS:
+		if (newp != NULL)
+			return (EPERM);
+		return (sysctl_struct(oldp, oldlenp, newp, newlen,
+		    &ip6stat, sizeof(ip6stat)));
+	case IPV6CTL_MRTSTATS:
+#ifdef MROUTING
+		if (newp != NULL)
+			return (EPERM);
+		return (sysctl_struct(oldp, oldlenp, newp, newlen,
+		    &mrt6stat, sizeof(mrt6stat)));
+#else
+		return (EOPNOTSUPP);
+#endif
+	case IPV6CTL_MRTPROTO:
+#ifdef MROUTING
+		return sysctl_rdint(oldp, oldlenp, newp, ip6_mrtproto);
+#else
+		return (EOPNOTSUPP);
+#endif
 	default:
 		if (name[0] < IPV6CTL_MAXID)
 			return (sysctl_int_arr(ipv6ctl_vars, name, namelen,

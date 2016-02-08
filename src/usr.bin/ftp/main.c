@@ -1,4 +1,4 @@
-/*	$OpenBSD: main.c,v 1.65 2007/06/16 08:58:33 espie Exp $	*/
+/*	$OpenBSD: main.c,v 1.68 2007/11/28 16:21:25 jmc Exp $	*/
 /*	$NetBSD: main.c,v 1.24 1997/08/18 10:20:26 lukem Exp $	*/
 
 /*
@@ -66,7 +66,7 @@ static const char copyright[] =
 #endif /* not lint */
 
 #if !defined(lint) && !defined(SMALL)
-static const char rcsid[] = "$OpenBSD: main.c,v 1.65 2007/06/16 08:58:33 espie Exp $";
+static const char rcsid[] = "$OpenBSD: main.c,v 1.68 2007/11/28 16:21:25 jmc Exp $";
 #endif /* not lint and not SMALL */
 
 /*
@@ -121,6 +121,7 @@ main(volatile int argc, char *argv[])
 	el = NULL;
 	hist = NULL;
 	cookiefile = NULL;
+	resume = 0;
 #endif
 	mark = HASHBYTES;
 	marg_sl = sl_init();
@@ -181,7 +182,7 @@ main(volatile int argc, char *argv[])
 	cookiefile = getenv("http_cookies");
 #endif
 
-	while ((ch = getopt(argc, argv, "46Aac:dEegik:mno:pP:r:tvV")) != -1) {
+	while ((ch = getopt(argc, argv, "46AaCc:dEegik:mno:pP:r:tvV")) != -1) {
 		switch (ch) {
 		case '4':
 			family = PF_INET;
@@ -196,6 +197,12 @@ main(volatile int argc, char *argv[])
 
 		case 'a':
 			anonftp = 1;
+			break;
+
+		case 'C':
+#ifndef SMALL
+			resume = 1;
+#endif
 			break;
 
 		case 'c':
@@ -373,12 +380,12 @@ lostpeer(void)
 	alarmtimer(0);
 	if (connected) {
 		if (cout != NULL) {
-			(void)shutdown(fileno(cout), 1+1);
+			(void)shutdown(fileno(cout), SHUT_RDWR);
 			(void)fclose(cout);
 			cout = NULL;
 		}
 		if (data >= 0) {
-			(void)shutdown(data, 1+1);
+			(void)shutdown(data, SHUT_RDWR);
 			(void)close(data);
 			data = -1;
 		}
@@ -387,7 +394,7 @@ lostpeer(void)
 	pswitch(1);
 	if (connected) {
 		if (cout != NULL) {
-			(void)shutdown(fileno(cout), 1+1);
+			(void)shutdown(fileno(cout), SHUT_RDWR);
 			(void)fclose(cout);
 			cout = NULL;
 		}
@@ -757,15 +764,17 @@ void
 usage(void)
 {
 	(void)fprintf(stderr,
-	    "usage: %s [-46AadEegimnptVv] [-c cookie] [-k seconds] "
-	    "[-P port] [-r seconds]\n"
-	    "           [host [port]]\n"
-	    "       %s [-o output] ftp://[user:password@]host[:port]/file[/]\n"
-	    "       %s [-o output] http://host[:port]/file\n"
+	    "usage: %s [-46AadEegimnptVv] [-k seconds] "
+	    "[-P port] [-r seconds] [host [port]]\n"
+	    "       %s [-C] [-o output] "
+	    "ftp://[user:password@]host[:port]/file[/]\n"
+	    "       %s [-C] [-c cookie] [-o output] "
+	    "http://host[:port]/file\n"
 #ifndef SMALL
-	    "       %s [-o output] https://host[:port]/file\n"
+	    "       %s [-C] [-c cookie] [-o output] "
+	    "https://host[:port]/file\n"
 #endif
-	    "       %s [-o output] host:[/path/]file[/]\n",
+	    "       %s [-C] [-o output] host:[/path/]file[/]\n",
 #ifndef SMALL
 	    __progname, __progname, __progname, __progname, __progname);
 #else

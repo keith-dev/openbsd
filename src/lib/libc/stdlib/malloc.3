@@ -30,15 +30,16 @@
 .\" OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
 .\" SUCH DAMAGE.
 .\"
-.\"	$OpenBSD: malloc.3,v 1.47 2007/08/08 21:24:29 millert Exp $
+.\"	$OpenBSD: malloc.3,v 1.50 2007/09/05 06:03:08 deraadt Exp $
 .\"
-.Dd $Mdocdate: August 8 2007 $
+.Dd $Mdocdate: September 5 2007 $
 .Dt MALLOC 3
 .Os
 .Sh NAME
 .Nm malloc ,
 .Nm calloc ,
 .Nm realloc ,
+.Nm recalloc ,
 .Nm free ,
 .Nm cfree
 .Nd memory allocation and deallocation
@@ -50,6 +51,8 @@
 .Fn calloc "size_t nmemb" "size_t size"
 .Ft void *
 .Fn realloc "void *ptr" "size_t size"
+.Ft void *
+.Fn recalloc "void *ptr" "size_t nmemb" "size_t size"
 .Ft void
 .Fn free "void *ptr"
 .Ft void
@@ -112,7 +115,7 @@ function allocates space for an array of
 .Fa nmemb
 objects, each of whose size is
 .Fa size .
-The space is initialized to all bits zero.
+The space is initialized to zero.
 The use of
 .Fn calloc
 is strongly encouraged when allocating multiple sized objects
@@ -122,9 +125,9 @@ The
 .Fn free
 function causes the space pointed to by
 .Fa ptr
-to be deallocated, that is, at least made available for further allocation,
-but if possible, it will be passed back to the kernel with
-.Xr sbrk 2 .
+to be either placed on a list of free pages to make it available for future
+allocation or, if required, to be returned to the kernel using
+.Xr munmap 2 .
 If
 .Fa ptr
 is a null pointer, no action occurs.
@@ -203,7 +206,18 @@ if ((newp = realloc(p, num * size)) == NULL) {
 	...
 .Ed
 .Pp
-Malloc will first look for a symbolic link called
+The
+.Fn recalloc
+function is similar to
+.Fn realloc
+except that it shares semantics with
+.Fn calloc
+rather than
+.Fn malloc .
+Newly allocated space is initialized to zero and the resulting size is
+checked for integer overflow.
+.Pp
+These functions will first look for a symbolic link called
 .Pa /etc/malloc.conf
 and next check the environment for a variable called
 .Ev MALLOC_OPTIONS
@@ -258,6 +272,8 @@ sizeof(ptr) errors where sizeof(*ptr) is meant.
 .Dq realloc .
 Always reallocate when
 .Fn realloc
+or
+.Fn recalloc
 is called, even if the initial allocation was big enough.
 This can substantially aid in compacting memory.
 .\".Pp
@@ -433,6 +449,8 @@ We found something we didn't understand.
 .El
 .Sh SEE ALSO
 .Xr brk 2 ,
+.Xr mmap 2 ,
+.Xr munmap 2 ,
 .Xr alloca 3 ,
 .Xr getpagesize 3
 .Sh STANDARDS
@@ -440,6 +458,12 @@ The
 .Fn malloc
 function conforms to
 .St -ansiC .
+.Pp
+The
+.Fn recalloc
+function is an
+.Ox
+extension.
 .Sh HISTORY
 The present implementation of
 .Fn malloc

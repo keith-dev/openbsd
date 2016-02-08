@@ -1,4 +1,4 @@
-/*	$OpenBSD: kroute.c,v 1.154 2007/05/11 11:27:59 claudio Exp $ */
+/*	$OpenBSD: kroute.c,v 1.157 2007/11/24 17:01:04 claudio Exp $ */
 
 /*
  * Copyright (c) 2003, 2004 Henning Brauer <henning@openbsd.org>
@@ -236,6 +236,10 @@ kr_change(struct kroute_label *kl)
 		rtlabel_unref(kr->r.labelid);
 	kl->kr.labelid = rtlabel_name2id(kl->label);
 
+	/* for blackhole and reject routes nexthop needs to be 127.0.0.1 */
+	if (kl->kr.flags & (F_BLACKHOLE|F_REJECT))
+		kl->kr.nexthop.s_addr = htonl(INADDR_LOOPBACK);
+
 	if (send_rtmsg(kr_state.fd, action, &kl->kr) == -1)
 		return (-1);
 
@@ -301,6 +305,7 @@ kr6_change(struct kroute6_label *kl)
 {
 	struct kroute6_node	*kr6;
 	int			 action = RTM_ADD;
+	struct in6_addr		 lo6 = IN6ADDR_LOOPBACK_INIT;
 
 	if ((kr6 = kroute6_find(&kl->kr.prefix, kl->kr.prefixlen)) != NULL) {
 		if (kr6->r.flags & F_BGPD_INSERTED)
@@ -316,6 +321,10 @@ kr6_change(struct kroute6_label *kl)
 	if (kr6)
 		rtlabel_unref(kr6->r.labelid);
 	kl->kr.labelid = rtlabel_name2id(kl->label);
+
+	/* for blackhole and reject routes nexthop needs to be ::1 */
+	if (kl->kr.flags & (F_BLACKHOLE|F_REJECT))
+		bcopy(&lo6, &kl->kr.nexthop, sizeof(kl->kr.nexthop));
 
 	if (send_rt6msg(kr_state.fd, action, &kl->kr) == -1)
 		return (-1);
@@ -1979,7 +1988,7 @@ fetchtable(u_int rtableid, int connected_only)
 	mib[6] = rtableid;
 
 	if (sysctl(mib, 7, NULL, &len, NULL, 0) == -1) {
-		if (rtableid != 0 && errno == EINVAL)	/* table nonexistant */
+		if (rtableid != 0 && errno == EINVAL)	/* table nonexistent */
 			return (0);
 		log_warn("sysctl");
 		return (-1);
@@ -2161,6 +2170,8 @@ fetchifs(int ifindex)
 	lim = buf + len;
 	for (next = buf; next < lim; next += ifm.ifm_msglen) {
 		memcpy(&ifm, next, sizeof(ifm));
+		if (ifm.ifm_version != RTM_VERSION)
+			continue;
 		if (ifm.ifm_type != RTM_IFINFO)
 			continue;
 

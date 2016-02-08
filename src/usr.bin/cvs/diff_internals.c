@@ -1,4 +1,4 @@
-/*	$OpenBSD: diff_internals.c,v 1.14 2007/06/29 05:04:40 ray Exp $	*/
+/*	$OpenBSD: diff_internals.c,v 1.19 2008/02/27 22:34:04 joris Exp $	*/
 /*
  * Copyright (C) Caldera International Inc.  2001-2002.
  * All rights reserved.
@@ -71,6 +71,7 @@
 #include <errno.h>
 #include <regex.h>
 #include <stddef.h>
+#include <stdio.h>
 #include <string.h>
 #include <unistd.h>
 
@@ -178,6 +179,8 @@ static void	 prune(void);
 static void	 equiv(struct line *, int, struct line *, int, int *);
 static void	 unravel(int);
 static void	 unsort(struct line *, int, int *);
+static void	 diff_head(void);
+static void	 rdiff_head(void);
 static void	 change(FILE *, FILE *, int, int, int, int);
 static void	 sort(struct line *, int);
 static int	 ignoreline(char *);
@@ -193,9 +196,10 @@ static int	 files_differ(FILE *, FILE *);
 static char	*match_function(const long *, int, FILE *);
 static char	*preadline(int, size_t, off_t);
 
-static int aflag, bflag, dflag, iflag, tflag, Tflag, wflag;
+static int aflag, bflag, dflag, tflag, Tflag, wflag;
 static int context = 3;
 int diff_format = D_NORMAL;
+int diff_iflag = 0;
 int diff_pflag = 0;
 char *diff_file = NULL;
 RCSNUM *diff_rev1 = NULL;
@@ -291,10 +295,10 @@ u_char cup2low[256] = {
 };
 
 int
-cvs_diffreg(const char *file1, const char *file2, BUF *out)
+cvs_diffreg(const char *file1, const char *file2, int _fd1, int _fd2, BUF *out)
 {
 	FILE *f1, *f2;
-	int i, rval;
+	int i, rval, fd1, fd2;
 
 	f1 = f2 = NULL;
 	rval = D_SAME;
@@ -302,27 +306,42 @@ cvs_diffreg(const char *file1, const char *file2, BUF *out)
 	lastline = 0;
 	lastmatchline = 0;
 	context_vec_ptr = context_vec_start - 1;
-	chrtran = (iflag ? cup2low : clow2low);
+	chrtran = (diff_iflag ? cup2low : clow2low);
 	if (out != NULL)
 		diffbuf = out;
 
-	f1 = fopen(file1, "r");
+	fd1 = dup(_fd1);
+	if (fd1 == -1)
+		fatal("cvs_diffreg: dup: %s", strerror(errno));
+
+	fd2 = dup(_fd2);
+	if (fd2 == -1)
+		fatal("cvs_diffreg: dup: %s", strerror(errno));
+
+	if (lseek(fd1, SEEK_SET, 0) < 0)
+		fatal("cvs_diffreg: lseek: %s", strerror(errno));
+
+	f1 = fdopen(fd1, "r");
 	if (f1 == NULL) {
 		cvs_log(LP_ERR, "%s", file1);
 		goto closem;
 	}
 
-	f2 = fopen(file2, "r");
+	if (lseek(fd2, SEEK_SET, 0) < 0)
+		fatal("cvs_diffreg: lseek: %s", strerror(errno));
+
+	f2 = fdopen(fd2, "r");
 	if (f2 == NULL) {
 		cvs_log(LP_ERR, "%s", file2);
 		goto closem;
 	}
 
-	if (fstat(fileno(f1), &stb1) < 0) {
+	if (fstat(fd1, &stb1) < 0) {
 		cvs_log(LP_ERR, "%s", file1);
 		goto closem;
 	}
-	if (fstat(fileno(f2), &stb2) < 0) {
+
+	if (fstat(fd2, &stb2) < 0) {
 		cvs_log(LP_ERR, "%s", file2);
 		goto closem;
 	}
@@ -382,6 +401,7 @@ closem:
 	}
 	if (f1 != NULL)
 		fclose(f1);
+
 	if (f2 != NULL)
 		fclose(f2);
 
@@ -633,7 +653,7 @@ check(FILE *f1, FILE *f2)
 			ixnew[j] = ctnew += skipline(f2);
 			j++;
 		}
-		if (bflag == 1 || wflag == 1 || iflag == 1) {
+		if (bflag == 1 || wflag == 1 || diff_iflag == 1) {
 			for (;;) {
 				c = getc(f1);
 				d = getc(f2);
@@ -851,6 +871,85 @@ ignoreline(char *line)
 	return (ret == 0);	/* if it matched, it should be ignored. */
 }
 
+static void
+diff_head(void)
+{
+	char buf[64];
+	struct tm *t;
+	time_t curr_time;
+
+	if (diff_rev1 != NULL) {
+		t = gmtime(&stb1.st_mtime);
+	} else {
+		time(&curr_time);
+		t = localtime(&curr_time);
+	}
+
+	(void)strftime(buf, sizeof(buf), "%b %G %H:%M:%S -0000", t);
+	diff_output("%s %s	%d %s", diff_format == D_CONTEXT ?
+	    "***" : "---", diff_file, t->tm_mday, buf);
+
+	if (diff_rev1 != NULL) {
+		rcsnum_tostr(diff_rev1, buf, sizeof(buf));
+		diff_output("\t%s", buf);
+	}
+
+	diff_output("\n");
+
+	t = gmtime(&stb2.st_mtime);
+
+	(void)strftime(buf, sizeof(buf), "%b %G %H:%M:%S -0000", t);
+	diff_output("%s %s	%d %s", diff_format == D_CONTEXT ?
+	    "---" : "+++", diff_file, t->tm_mday, buf);
+
+	if (diff_rev2 != NULL) {
+		rcsnum_tostr(diff_rev2, buf, sizeof(buf));
+		diff_output("\t%s", buf);
+	}
+
+	diff_output("\n");
+}
+
+static void
+rdiff_head(void)
+{
+	char buf[64];
+	struct tm *t;
+	time_t curr_time;
+
+	if (diff_rev1 != NULL) {
+		t = localtime(&stb1.st_mtime);
+	} else {
+		time(&curr_time);
+		t = localtime(&curr_time);
+	}
+
+	diff_output("%s ", diff_format == D_CONTEXT ? "***" : "---");
+
+	if (diff_rev1 == NULL) {
+		diff_output("%s", CVS_PATH_DEVNULL);
+		t = gmtime(&stb1.st_atime);
+	} else {
+		rcsnum_tostr(diff_rev1, buf, sizeof(buf));
+		diff_output("%s:%s", diff_file, buf);
+	}
+
+	(void)strftime(buf, sizeof(buf), "%a %b %e %H:%M:%S %G", t);
+	diff_output("\t%s\n", buf);
+
+	if (diff_rev2 != NULL) {
+		t = localtime(&stb2.st_mtime);
+	} else {
+		time(&curr_time);
+		t = localtime(&curr_time);
+	}
+
+	(void)strftime(buf, sizeof(buf), "%a %b %e %H:%M:%S %G", t);
+
+	diff_output("%s %s	%s\n", diff_format == D_CONTEXT ? "---" : "+++",
+	    diff_file, buf);
+}
+
 /*
  * Indicate that there is a difference between lines a and b of the from file
  * to get to lines c to d of the to file.  If a is greater then b then there
@@ -862,8 +961,6 @@ static void
 change(FILE *f1, FILE *f2, int a, int b, int c, int d)
 {
 	static size_t max_context = 64;
-	char buf[64];
-	struct tm *t;
 	int i;
 
 	if (diff_format != D_IFDEF && a > b && c > d)
@@ -910,35 +1007,11 @@ proceed:
 			/*
 			 * Print the context/unidiff header first time through.
 			 */
-			t = localtime(&stb1.st_mtime);
-			(void)strftime(buf, sizeof(buf),
-			    "%d %b %G %H:%M:%S", t);
+			if (cvs_cmdop == CVS_OP_RDIFF)
+				rdiff_head();
+			else
+				diff_head();
 
-			diff_output("%s %s	%s",
-			    diff_format == D_CONTEXT ? "***" : "---", diff_file,
-			    buf);
-
-			if (diff_rev1 != NULL) {
-				rcsnum_tostr(diff_rev1, buf, sizeof(buf));
-				diff_output("\t%s", buf);
-			}
-
-			diff_output("\n");
-
-			t = localtime(&stb2.st_mtime);
-			(void)strftime(buf, sizeof(buf),
-			    "%d %b %G %H:%M:%S", t);
-
-			diff_output("%s %s	%s",
-			    diff_format == D_CONTEXT ? "---" : "+++", diff_file,
-			    buf);
-
-			if (diff_rev2 != NULL) {
-				rcsnum_tostr(diff_rev2, buf, sizeof(buf));
-				diff_output("\t%s", buf);
-			}
-
-			diff_output("\n");
 			anychange = 1;
 		} else if (a > context_vec_ptr->b + (2 * context) + 1 &&
 		    c > context_vec_ptr->d + (2 * context) + 1) {
@@ -1044,7 +1117,7 @@ fetch(long *f, int a, int b, FILE *lb, int ch, int oldfile)
 					    "No newline at end of file");
 				else
 					diff_output("\n\\ No newline at end of "
-					    "file");
+					    "file\n");
 				return;
 			}
 			if (c == '\t' && tflag == 1) {
@@ -1071,7 +1144,7 @@ readhash(FILE *f)
 	sum = 1;
 	space = 0;
 	if (bflag != 1 && wflag != 1) {
-		if (iflag == 1)
+		if (diff_iflag == 1)
 			for (i = 0; (t = getc(f)) != '\n'; i++) {
 				if (t == EOF) {
 					if (i == 0)

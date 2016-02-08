@@ -1,4 +1,4 @@
-/*	$OpenBSD: parse.y,v 1.125 2007/08/10 12:32:12 markus Exp $	*/
+/*	$OpenBSD: parse.y,v 1.133 2008/02/22 23:51:31 hshoexer Exp $	*/
 
 /*
  * Copyright (c) 2002, 2003, 2004 Henning Brauer <henning@openbsd.org>
@@ -47,12 +47,41 @@
 
 #include "ipsecctl.h"
 
+TAILQ_HEAD(files, file)		 files = TAILQ_HEAD_INITIALIZER(files);
+static struct file {
+	TAILQ_ENTRY(file)	 entry;
+	FILE			*stream;
+	char			*name;
+	int			 lineno;
+	int			 errors;
+} *file;
+struct file	*pushfile(const char *, int);
+int		 popfile(void);
+int		 check_file_secrecy(int, const char *);
+int		 yyparse(void);
+int		 yylex(void);
+int		 yyerror(const char *, ...);
+int		 kw_cmp(const void *, const void *);
+int		 lookup(char *);
+int		 lgetc(int);
+int		 lungetc(int);
+int		 findeol(void);
+
+TAILQ_HEAD(symhead, sym)	 symhead = TAILQ_HEAD_INITIALIZER(symhead);
+struct sym {
+	TAILQ_ENTRY(sym)	 entry;
+	int			 used;
+	int			 persist;
+	char			*nam;
+	char			*val;
+};
+int		 symset(const char *, const char *, int);
+char		*symget(const char *);
+int		 cmdline_symset(char *);
+
 #define KEYSIZE_LIMIT	1024
 
 static struct ipsecctl	*ipsec = NULL;
-static FILE		*fin = NULL;
-static int		 lineno = 1;
-static int		 errors = 0;
 static int		 debug = 0;
 
 const struct ipsec_xf authxfs[] = {
@@ -73,6 +102,9 @@ const struct ipsec_xf encxfs[] = {
 	{ "3des-cbc",		ENCXF_3DES_CBC,		24,	24 },
 	{ "des-cbc",		ENCXF_DES_CBC,		8,	8 },
 	{ "aes",		ENCXF_AES,		16,	32 },
+	{ "aes-128",		ENCXF_AES_128,		16,	16 },
+	{ "aes-192",		ENCXF_AES_192,		24,	24 },
+	{ "aes-256",		ENCXF_AES_256,		32,	32 },
 	{ "aesctr",		ENCXF_AESCTR,		16+4,	32+4 },
 	{ "blowfish",		ENCXF_BLOWFISH,		5,	56 },
 	{ "cast128",		ENCXF_CAST128,		5,	16 },
@@ -110,27 +142,6 @@ const struct ipsec_xf groupxfs[] = {
 	{ NULL,			0,			0,	0 },
 };
 
-int			 yyerror(const char *, ...);
-int			 yyparse(void);
-int			 kw_cmp(const void *, const void *);
-int			 lookup(char *);
-int			 lgetc(FILE *);
-int			 lungetc(int);
-int			 findeol(void);
-int			 yylex(void);
-
-TAILQ_HEAD(symhead, sym)	 symhead = TAILQ_HEAD_INITIALIZER(symhead);
-struct sym {
-	TAILQ_ENTRY(sym)	 entries;
-	int		 used;
-	int		 persist;
-	char		*nam;
-	char		*val;
-};
-
-int			 symset(const char *, const char *, int);
-int			 cmdline_symset(char *);
-char			*symget(const char *);
 int			 atoul(char *, u_long *);
 int			 atospi(char *, u_int32_t *);
 u_int8_t		 x2i(unsigned char *);
@@ -187,7 +198,7 @@ struct ipsec_transforms *ipsec_transforms;
 
 typedef struct {
 	union {
-		u_int32_t	 number;
+		int64_t	 	 number;
 		u_int8_t	 ikemode;
 		u_int8_t	 dir;
 		u_int8_t	 satype;	/* encapsulating prococol */
@@ -236,14 +247,16 @@ typedef struct {
 %token	PASSIVE ACTIVE ANY IPIP IPCOMP COMPXF TUNNEL TRANSPORT DYNAMIC LIFE
 %token	TYPE DENY BYPASS LOCAL PROTO USE ACQUIRE REQUIRE DONTACQ GROUP PORT TAG
 %token	<v.string>		STRING
+%token	<v.number>		NUMBER
 %type	<v.string>		string
 %type	<v.dir>			dir
 %type	<v.satype>		satype
 %type	<v.proto>		proto
+%type	<v.number>		protoval
 %type	<v.tmode>		tmode
-%type	<v.number>		number
 %type	<v.hosts>		hosts
 %type	<v.port>		port
+%type	<v.number>		portval
 %type	<v.peers>		peers
 %type	<v.singlehost>		singlehost
 %type	<v.host>		host host_list
@@ -269,25 +282,7 @@ grammar		: /* empty */
 		| grammar sarule '\n'
 		| grammar tcpmd5rule '\n'
 		| grammar varset '\n'
-		| grammar error '\n'		{ errors++; }
-		;
-
-number		: STRING			{
-			unsigned long	ulval;
-
-			if (atoul($1, &ulval) == -1) {
-				yyerror("%s is not a number", $1);
-				free($1);
-				YYERROR;
-			}
-			if (ulval > UINT_MAX) {
-				yyerror("0x%lx out of range", ulval);
-				free($1);
-				YYERROR;
-			}
-			$$ = (u_int32_t)ulval;
-			free($1);
-		}
+		| grammar error '\n'		{ file->errors++; }
 		;
 
 comma		: ','
@@ -356,24 +351,28 @@ satype		: /* empty */			{ $$ = IPSEC_ESP; }
 		;
 
 proto		: /* empty */			{ $$ = 0; }
-		| PROTO STRING			{
-			struct protoent *p;
-			const char *errstr;
-			int proto;
-
-			if ((p = getprotobyname($2)) != NULL) {
-				$$ = p->p_proto;
-			} else {
-				errstr = NULL;
-				proto = strtonum($2, 0, 255, &errstr);
-				if (errstr)
-					errx(1, "unknown protocol: %s", $2);
-				$$ = proto;
-			}
-
-		}
+		| PROTO protoval		{ $$ = $2; }
 		| PROTO ESP 			{ $$ = IPPROTO_ESP; }
 		| PROTO AH			{ $$ = IPPROTO_AH; }
+		;
+
+protoval	: STRING			{
+			struct protoent *p;
+
+			p = getprotobyname($1);
+			if (p == NULL) {
+				yyerror("unknown protocol: %s", $1);
+				YYERROR;
+			}
+			$$ = p->p_proto;
+			free($1);
+		}
+		| NUMBER			{
+			if ($1 > 255 || $1 < 0) {
+				yyerror("protocol outside range");
+				YYERROR;
+			}
+		}
 		;
 
 tmode		: /* empty */			{ $$ = IPSEC_TUNNEL; }
@@ -401,23 +400,26 @@ hosts		: FROM host port TO host port		{
 		;
 
 port		: /* empty */				{ $$ = 0; }
-		| PORT STRING				{
-			struct servent *s;
-			const char *errstr;
-			int port;
+		| PORT portval				{ $$ = $2; }
+		;
 
-			if ((s = getservbyname($2, "tcp")) != NULL ||
-			    (s = getservbyname($2, "udp")) != NULL) {
+portval		: STRING				{
+			struct servent *s;
+
+			if ((s = getservbyname($1, "tcp")) != NULL ||
+			    (s = getservbyname($1, "udp")) != NULL) {
 				$$ = s->s_port;
 			} else {
-				errstr = NULL;
-				port = strtonum($2, 0, USHRT_MAX, &errstr);
-				if (errstr) {
-					yyerror("unknown port: %s", $2);
-					YYERROR;
-				}
-				$$ = htons(port);
+				yyerror("unknown port: %s", $1);
+				YYERROR;
 			}
+		}
+		| NUMBER				{
+			if ($1 > USHRT_MAX || $1 < 0) {
+				yyerror("port outside range");
+				YYERROR;
+			}
+			$$ = htons($1);
 		}
 		;
 
@@ -476,10 +478,10 @@ host		: STRING			{
 			}
 			free($1);
 		}
-		| STRING '/' number		{
+		| STRING '/' NUMBER		{
 			char	*buf;
 
-			if (asprintf(&buf, "%s/%u", $1, $3) == -1)
+			if (asprintf(&buf, "%s/%lld", $1, $3) == -1)
 				err(1, "host: asprintf");
 			free($1);
 			if (($$ = host(buf)) == NULL)	{
@@ -555,7 +557,6 @@ spispec		: SPI STRING			{
 				*p++ = 0;
 
 				if (atospi(p, &spi) == -1) {
-					yyerror("%s is not a valid spi", p);
 					free($2);
 					YYERROR;
 				}
@@ -564,7 +565,6 @@ spispec		: SPI STRING			{
 				$$.spiin = 0;
 
 			if (atospi($2, &spi) == -1) {
-				yyerror("%s is not a valid spi", $2);
 				free($2);
 				YYERROR;
 			}
@@ -572,6 +572,19 @@ spispec		: SPI STRING			{
 
 
 			free($2);
+		}
+		| SPI NUMBER			{
+			if ($2 > UINT_MAX || $2 < 0) {
+				yyerror("%lld not a valid spi", $2);
+				YYERROR;
+			}
+			if ($2 >= SPI_RESERVED_MIN && $2 <= SPI_RESERVED_MAX) {
+				yyerror("%lld within reserved spi range", $2);
+				YYERROR;
+			}
+
+			$$.spiin = 0;
+			$$.spiout = $2;
 		}
 		;
 
@@ -697,13 +710,12 @@ life		: /* empty */			{
 			life->lifevolume = -1;
 			$$ = life;
 		}
-		| LIFE number			{
-			struct ipsec_life *life;
-
-			life = parse_life($2);
-			if (life == NULL)
-				yyerror("%s not a valid lifetime", $2);
-			$$ = life;
+		| LIFE NUMBER			{
+			if ($2 > INT_MAX || $2 < 0) {
+				yyerror("%lld not a valid lifetime", $2);
+				YYERROR;
+			}
+			$$ = parse_life($2);
 		}
 		;
 
@@ -822,11 +834,10 @@ int
 yyerror(const char *fmt, ...)
 {
 	va_list		 ap;
-	extern const char *infile;
 
-	errors = 1;
+	file->errors++;
 	va_start(ap, fmt);
-	fprintf(stderr, "%s: %d: ", infile, yylval.lineno);
+	fprintf(stderr, "%s: %d: ", file->name, yylval.lineno);
 	vfprintf(stderr, fmt, ap);
 	fprintf(stderr, "\n");
 	va_end(ap);
@@ -914,9 +925,9 @@ char	 pushback_buffer[MAXPUSHBACK];
 int	 pushback_index = 0;
 
 int
-lgetc(FILE *f)
+lgetc(int quotec)
 {
-	int	c, next;
+	int		c, next;
 
 	if (parsebuf) {
 		/* Read character from the parsebuffer instead of input. */
@@ -932,24 +943,31 @@ lgetc(FILE *f)
 	if (pushback_index)
 		return (pushback_buffer[--pushback_index]);
 
-	while ((c = getc(f)) == '\\') {
-		next = getc(f);
+	if (quotec) {
+		if ((c = getc(file->stream)) == EOF) {
+			yyerror("reached end of file while parsing quoted string");
+			if (popfile() == EOF)
+				return (EOF);
+			return (quotec);
+		}
+		return (c);
+	}
+
+	while ((c = getc(file->stream)) == '\\') {
+		next = getc(file->stream);
 		if (next != '\n') {
 			c = next;
 			break;
 		}
-		yylval.lineno = lineno;
-		lineno++;
-	}
-	if (c == '\t' || c == ' ') {
-		/* Compress blanks to a single space. */
-		do {
-			c = getc(f);
-		} while (c == '\t' || c == ' ');
-		ungetc(c, f);
-		c = ' ';
+		yylval.lineno = file->lineno;
+		file->lineno++;
 	}
 
+	while (c == EOF) {
+		if (popfile() == EOF)
+			return (EOF);
+		c = getc(file->stream);
+	}
 	return (c);
 }
 
@@ -979,9 +997,9 @@ findeol(void)
 
 	/* skip to either EOF or the first real EOL */
 	while (1) {
-		c = lgetc(fin);
+		c = lgetc(0);
 		if (c == '\n') {
-			lineno++;
+			file->lineno++;
 			break;
 		}
 		if (c == EOF)
@@ -995,21 +1013,21 @@ yylex(void)
 {
 	char	 buf[8096];
 	char	*p, *val;
-	int	 endc, c;
+	int	 quotec, next, c;
 	int	 token;
 
 top:
 	p = buf;
-	while ((c = lgetc(fin)) == ' ')
+	while ((c = lgetc(0)) == ' ' || c == '\t')
 		; /* nothing */
 
-	yylval.lineno = lineno;
+	yylval.lineno = file->lineno;
 	if (c == '#')
-		while ((c = lgetc(fin)) != '\n' && c != EOF)
+		while ((c = lgetc(0)) != '\n' && c != EOF)
 			; /* nothing */
 	if (c == '$' && parsebuf == NULL) {
 		while (1) {
-			if ((c = lgetc(fin)) == EOF)
+			if ((c = lgetc(0)) == EOF)
 				return (0);
 
 			if (p + 1 >= buf + sizeof(buf) - 1) {
@@ -1026,7 +1044,7 @@ top:
 		}
 		val = symget(buf);
 		if (val == NULL) {
-			yyerror("macro \"%s\" not defined", buf);
+			yyerror("macro '%s' not defined", buf);
 			return (findeol());
 		}
 		parsebuf = val;
@@ -1037,17 +1055,25 @@ top:
 	switch (c) {
 	case '\'':
 	case '"':
-		endc = c;
+		quotec = c;
 		while (1) {
-			if ((c = lgetc(fin)) == EOF)
+			if ((c = lgetc(quotec)) == EOF)
 				return (0);
-			if (c == endc) {
+			if (c == '\n') {
+				file->lineno++;
+				continue;
+			} else if (c == '\\') {
+				if ((next = lgetc(quotec)) == EOF)
+					return (0);
+				if (next == quotec || c == ' ' || c == '\t')
+					c = next;
+				else if (next == '\n')
+					continue;
+				else
+					lungetc(next);
+			} else if (c == quotec) {
 				*p = '\0';
 				break;
-			}
-			if (c == '\n') {
-				lineno++;
-				continue;
 			}
 			if (p + 1 >= buf + sizeof(buf) - 1) {
 				yyerror("string too long");
@@ -1059,6 +1085,42 @@ top:
 		if (yylval.v.string == NULL)
 			err(1, "yylex: strdup");
 		return (STRING);
+	}
+
+#define allowed_to_end_number(x) \
+	(isspace(x) || x == ')' || x ==',' || x == '/' || x == '}' || x == '=')
+
+	if (c == '-' || isdigit(c)) {
+		do {
+			*p++ = c;
+			if ((unsigned)(p-buf) >= sizeof(buf)) {
+				yyerror("string too long");
+				return (findeol());
+			}
+		} while ((c = lgetc(0)) != EOF && isdigit(c));
+		lungetc(c);
+		if (p == buf + 1 && buf[0] == '-')
+			goto nodigits;
+		if (c == EOF || allowed_to_end_number(c)) {
+			const char *errstr = NULL;
+
+			*p = '\0';
+			yylval.v.number = strtonum(buf, LLONG_MIN,
+			    LLONG_MAX, &errstr);
+			if (errstr) {
+				yyerror("\"%s\" invalid number: %s",
+				    buf, errstr);
+				return (findeol());
+			}
+			return (NUMBER);
+		} else {
+nodigits:
+			while (p > buf + 1)
+				lungetc(*--p);
+			c = *--p;
+			if (c == '-')
+				return (c);
+		}
 	}
 
 #define allowed_in_string(x) \
@@ -1074,7 +1136,7 @@ top:
 				yyerror("string too long");
 				return (findeol());
 			}
-		} while ((c = lgetc(fin)) != EOF && (allowed_in_string(c)));
+		} while ((c = lgetc(0)) != EOF && (allowed_in_string(c)));
 		lungetc(c);
 		*p = '\0';
 		if ((token = lookup(buf)) == STRING)
@@ -1083,8 +1145,8 @@ top:
 		return (token);
 	}
 	if (c == '\n') {
-		yylval.lineno = lineno;
-		lineno++;
+		yylval.lineno = file->lineno;
+		file->lineno++;
 	}
 	if (c == EOF)
 		return (0);
@@ -1092,25 +1154,101 @@ top:
 }
 
 int
-parse_rules(FILE *input, struct ipsecctl *ipsecx)
+check_file_secrecy(int fd, const char *fname)
+{
+	struct stat	st;
+
+	if (fstat(fd, &st)) {
+		warn("cannot stat %s", fname);
+		return (-1);
+	}
+	if (st.st_uid != 0 && st.st_uid != getuid()) {
+		warnx("%s: owner not root or current user", fname);
+		return (-1);
+	}
+	if (st.st_mode & (S_IRWXG | S_IRWXO)) {
+		warnx("%s: group/world readable/writeable", fname);
+		return (-1);
+	}
+	return (0);
+}
+
+struct file *
+pushfile(const char *name, int secret)
+{
+	struct file	*nfile;
+
+	if ((nfile = calloc(1, sizeof(struct file))) == NULL ||
+	    (nfile->name = strdup(name)) == NULL) {
+		warn("malloc");
+		return (NULL);
+	}
+	if (TAILQ_FIRST(&files) == NULL && strcmp(nfile->name, "-") == 0) {
+		nfile->stream = stdin;
+		free(nfile->name);
+		if ((nfile->name = strdup("stdin")) == NULL) {
+			warn("strdup");
+			free(nfile);
+			return (NULL);
+		}
+	} else if ((nfile->stream = fopen(nfile->name, "r")) == NULL) {
+		warn("%s", nfile->name);
+		free(nfile->name);
+		free(nfile);
+		return (NULL);
+	} else if (secret &&
+	    check_file_secrecy(fileno(nfile->stream), nfile->name)) {
+		fclose(nfile->stream);
+		free(nfile->name);
+		free(nfile);
+		return (NULL);
+	}
+	nfile->lineno = 1;
+	TAILQ_INSERT_TAIL(&files, nfile, entry);
+	return (nfile);
+}
+
+int
+popfile(void)
+{
+	struct file	*prev;
+
+	if ((prev = TAILQ_PREV(file, files, entry)) != NULL) {
+		prev->errors += file->errors;
+		TAILQ_REMOVE(&files, file, entry);
+		fclose(file->stream);
+		free(file->name);
+		free(file);
+		file = prev;
+		return (0);
+	}
+	return (EOF);
+}
+
+int
+parse_rules(const char *filename, struct ipsecctl *ipsecx)
 {
 	struct sym	*sym;
+	int		 errors = 0;
 
 	ipsec = ipsecx;
-	fin = input;
-	lineno = 1;
-	errors = 0;
+
+	if ((file = pushfile(filename, 1)) == NULL) {
+		return (-1);
+	}
 
 	yyparse();
+	errors = file->errors;
+	popfile();
 
 	/* Free macros and check which have not been used. */
 	while ((sym = TAILQ_FIRST(&symhead))) {
 		if ((ipsec->opts & IPSECCTL_OPT_VERBOSE2) && !sym->used)
 			fprintf(stderr, "warning: macro '%s' not "
 			    "used\n", sym->nam);
-		TAILQ_REMOVE(&symhead, sym, entries);
 		free(sym->nam);
 		free(sym->val);
+		TAILQ_REMOVE(&symhead, sym, entry);
 		free(sym);
 	}
 
@@ -1123,16 +1261,16 @@ symset(const char *nam, const char *val, int persist)
 	struct sym	*sym;
 
 	for (sym = TAILQ_FIRST(&symhead); sym && strcmp(nam, sym->nam);
-	    sym = TAILQ_NEXT(sym, entries))
+	    sym = TAILQ_NEXT(sym, entry))
 		;	/* nothing */
 
 	if (sym != NULL) {
 		if (sym->persist == 1)
 			return (0);
 		else {
-			TAILQ_REMOVE(&symhead, sym, entries);
 			free(sym->nam);
 			free(sym->val);
+			TAILQ_REMOVE(&symhead, sym, entry);
 			free(sym);
 		}
 	}
@@ -1152,7 +1290,7 @@ symset(const char *nam, const char *val, int persist)
 	}
 	sym->used = 0;
 	sym->persist = persist;
-	TAILQ_INSERT_TAIL(&symhead, sym, entries);
+	TAILQ_INSERT_TAIL(&symhead, sym, entry);
 	return (0);
 }
 
@@ -1183,7 +1321,7 @@ symget(const char *nam)
 {
 	struct sym	*sym;
 
-	TAILQ_FOREACH(sym, &symhead, entries)
+	TAILQ_FOREACH(sym, &symhead, entry)
 		if (strcmp(nam, sym->nam) == 0) {
 			sym->used = 1;
 			return (sym->val);
@@ -1214,8 +1352,12 @@ atospi(char *s, u_int32_t *spivalp)
 
 	if (atoul(s, &ulval) == -1)
 		return (-1);
+	if (ulval > UINT_MAX) {
+		yyerror("%lld not a valid spi", ulval);
+		return (-1);
+	}
 	if (ulval >= SPI_RESERVED_MIN && ulval <= SPI_RESERVED_MAX) {
-		yyerror("illegal SPI value");
+		yyerror("%lld within reserved spi range", ulval);
 		return (-1);
 	}
 	*spivalp = ulval;

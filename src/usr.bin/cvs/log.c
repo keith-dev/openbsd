@@ -1,4 +1,4 @@
-/*	$OpenBSD: log.c,v 1.40 2007/06/26 02:24:10 niallo Exp $	*/
+/*	$OpenBSD: log.c,v 1.42 2008/01/10 10:05:40 tobias Exp $	*/
 /*
  * Copyright (c) 2006 Joris Vink <joris@openbsd.org>
  * Copyright (c) 2004 Jean-Francois Brousseau <jfb@openbsd.org>
@@ -61,7 +61,6 @@ cvs_vlog(u_int level, const char *fmt, va_list vap)
 {
 	int ecp;
 	FILE *out;
-	struct cvs_cmd *cmdp;
 
 	if (cvs_trace != 1 && level == LP_TRACE)
 		return;
@@ -94,21 +93,14 @@ cvs_vlog(u_int level, const char *fmt, va_list vap)
 		else
 			putc('C', out);
 		(void)fputs("-> ", out);
-	} else {
+	} else if (level != LP_RCS) {
 		(void)fputs(__progname, out);
-		if (cvs_command != NULL) {
-			/*
-			 * always use the command name in error messages,
-			 * not aliases
-			 */
-			cmdp = cvs_findcmd(cvs_command);
-			putc(' ', out);
-			if (level == LP_ABORT)
-				(void)fprintf(out,
-				    "[%s aborted]", cmdp->cmd_name);
-			else
-				(void)fputs(cmdp->cmd_name, out);
-		}
+		putc(' ', out);
+		if (level == LP_ABORT)
+			(void)fprintf(out,
+			    "[%s aborted]", cmdp->cmd_name);
+		else
+			(void)fputs(cmdp->cmd_name, out);
 		(void)fputs(": ", out);
 	}
 

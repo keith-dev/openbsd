@@ -1,4 +1,4 @@
-/*	$OpenBSD: mfs_vnops.c,v 1.28 2007/06/01 23:47:57 deraadt Exp $	*/
+/*	$OpenBSD: mfs_vnops.c,v 1.32 2007/12/16 21:21:25 otto Exp $	*/
 /*	$NetBSD: mfs_vnops.c,v 1.8 1996/03/17 02:16:32 christos Exp $	*/
 
 /*
@@ -146,23 +146,13 @@ mfs_strategy(void *v)
 		panic("mfs_strategy: bad dev");
 
 	mfsp = VTOMFS(vp);
-	/* check for mini-root access */
-	if (mfsp->mfs_pid == 0) {
-		caddr_t base;
-
-		base = mfsp->mfs_baseoff + (bp->b_blkno << DEV_BSHIFT);
-		if (bp->b_flags & B_READ)
-			bcopy(base, bp->b_data, bp->b_bcount);
-		else
-			bcopy(bp->b_data, base, bp->b_bcount);
-		s = splbio();
-		biodone(bp);
-		splx(s);
-	} else if (p !=  NULL && mfsp->mfs_pid == p->p_pid) {
-		mfs_doio(bp, mfsp->mfs_baseoff);
+	if (p != NULL && mfsp->mfs_pid == p->p_pid) {
+		mfs_doio(mfsp, bp);
 	} else {
+		s = splbio();
 		bp->b_actf = mfsp->mfs_buflist;
 		mfsp->mfs_buflist = bp;
+		splx(s);
 		wakeup((caddr_t)vp);
 	}
 	return (0);
@@ -174,11 +164,16 @@ mfs_strategy(void *v)
  * Trivial on the HP since buffer has already been mapped into KVA space.
  */
 void
-mfs_doio(struct buf *bp, caddr_t base)
+mfs_doio(struct mfsnode *mfsp, struct buf *bp)
 {
+	caddr_t base;
+	long offset = bp->b_blkno << DEV_BSHIFT;
 	int s;
 
-	base += (bp->b_blkno << DEV_BSHIFT);
+	if (bp->b_bcount > mfsp->mfs_size - offset)
+		bp->b_bcount = mfsp->mfs_size - offset;
+
+	base = mfsp->mfs_baseoff + offset;
 	if (bp->b_flags & B_READ)
 		bp->b_error = copyin(base, bp->b_data, bp->b_bcount);
 	else
@@ -221,14 +216,21 @@ mfs_close(void *v)
 	struct vnode *vp = ap->a_vp;
 	struct mfsnode *mfsp = VTOMFS(vp);
 	struct buf *bp;
-	int error;
+	int error, s;
 
 	/*
 	 * Finish any pending I/O requests.
 	 */
-	while ((bp = mfsp->mfs_buflist) != NULL) {
+	while (1) {
+		s = splbio();
+		bp = mfsp->mfs_buflist;
+		if (bp == NULL) {
+			splx(s);
+			break;
+		}
 		mfsp->mfs_buflist = bp->b_actf;
-		mfs_doio(bp, mfsp->mfs_baseoff);
+		splx(s);
+		mfs_doio(mfsp, bp);
 		wakeup((caddr_t)bp);
 	}
 	/*

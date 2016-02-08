@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.9 2007/05/03 18:38:11 deraadt Exp $
+#	$OpenBSD: Makefile,v 1.12 2007/11/26 10:26:03 deraadt Exp $
 #	$NetBSD: Makefile,v 1.2 2001/03/04 14:50:05 mrg Exp $
 
 CURDIR=	${.CURDIR}
@@ -12,8 +12,12 @@ WARNS=		0
 
 PROG?=		ofwboot
 NOMAN=		ja, man!
-SRCS=		srt0.s Locore.c boot.c ofdev.c alloc.c net.c netif_of.c vers.c
+
 .PATH:		${S}/arch/sparc64/sparc64
+SRCS=		srt0.s Locore.c boot.c ofdev.c alloc.c net.c netif_of.c vers.c
+
+.PATH:		${S}/lib/libkern/arch/sparc64 ${S}/lib/libkern
+SRCS+=		strlcpy.c strcmp.c strlcat.c strlen.c
 
 CWARNFLAGS+=	-Wno-main
 AFLAGS+=	-Wa,-Av9a
@@ -36,7 +40,7 @@ RELOC=		800000
 
 ENTRY=		_start
 
-CLEANFILES+=	vers.c sparc machine
+CLEANFILES+=	sparc machine
 
 CPPFLAGS+=	-I${CURDIR}/../../.. -I${CURDIR}/../../../.. -I${CURDIR} -I.
 CPPFLAGS+=	-DRELOC=0x${RELOC}
@@ -49,14 +53,14 @@ CPPFLAGS+=	-DSPARC_BOOT_UFS
 CPPFLAGS+=	-DSPARC_BOOT_NFS
 #CPPFLAGS+=	-DSPARC_BOOT_HSFS
 
-.if !make(libdep) && !make(sadep) && !make(salibdir) && !make(kernlibdir) && !make(obj)
+.if !make(libdep) && !make(sadep) && !make(salibdir) && !make(obj)
 .BEGIN:
 	@([ -h machine ] || ln -s ${.CURDIR}/../../include machine)
 .endif
 
-${PROG}: ${OBJS} ${LIBSA} ${LIBZ} ${LIBKERN}
+${PROG}: ${OBJS} ${LIBSA} ${LIBZ}
 	${LD} -N -Ttext ${RELOC} -e ${ENTRY} -o ${PROG} \
-	    ${OBJS} -L${LIBSADIR} ${LIBSA} -L${LIBKERNDIR} ${LIBKERN} \
+	    ${OBJS} -L${LIBSADIR} ${LIBSA} \
 	    -L${LIBZDIR} ${LIBZ}
 
 NORMAL_S=	${CC} ${AFLAGS} ${CPPFLAGS} -c $<

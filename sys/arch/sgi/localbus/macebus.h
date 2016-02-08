@@ -1,4 +1,4 @@
-/*	$OpenBSD: macebus.h,v 1.7 2005/12/19 21:37:48 miod Exp $	*/
+/*	$OpenBSD: macebus.h,v 1.11 2008/02/20 18:46:20 miod Exp $	*/
 
 /*
  * Copyright (c) 2003-2004 Opsycon AB (www.opsycon.com).
@@ -44,6 +44,7 @@
 #define	MACE_VIN2_OFFS		0x00180000
 #define	MACE_VOUT_OFFS		0x00200000
 #define	MACE_IO_OFFS		0x00300000
+#define	MACE_IO_SIZE		0x00050000
 #define	MACE_ISAX_OFFS		0x00380000
 #define	MACE_ISAX_SIZE		0x00020000
 
@@ -110,7 +111,6 @@
 #define	MACE_ISA_INT_SERIAL_1	0x03f00000	/* Serial port 1 */
 #define	MACE_ISA_INT_SERIAL_2	0xfc000000	/* Serial port 2 */
 
-
 /* ISA Peripherals */
 #define	MACE_ISA_EPP_OFFS	(MACE_ISAX_OFFS+0x00000000)
 #define	MACE_ISA_ECP_OFFS	(MACE_ISAX_OFFS+0x00008000)
@@ -119,8 +119,8 @@
 #define	MACE_ISA_RTC_OFFS	(MACE_ISAX_OFFS+0x00020000)
 #define	MACE_ISA_GAME_OFFS	(MACE_ISAX_OFFS+0x00030000)
 
-
 extern bus_space_t macebus_tag;
+extern struct machine_bus_dma_tag mace_bus_dma_tag;
 
 u_int8_t mace_read_1(bus_space_tag_t, bus_space_handle_t, bus_size_t);
 u_int16_t mace_read_2(bus_space_tag_t, bus_space_handle_t, bus_size_t);
@@ -135,5 +135,9 @@ void mace_write_8(bus_space_tag_t, bus_space_handle_t, bus_size_t, u_int64_t);
 int mace_space_map(bus_space_tag_t, bus_addr_t, bus_size_t, int, bus_space_handle_t *);
 void mace_space_unmap(bus_space_tag_t, bus_space_handle_t, bus_size_t);
 int mace_space_region(bus_space_tag_t, bus_space_handle_t, bus_size_t, bus_size_t, bus_space_handle_t *);
+
+void   *macebus_intr_establish(void *, u_long, int, int, int (*)(void *),
+	    void *, char *);
+void	macebus_intr_disestablish(void *, void *);
 
 #endif	/* _MACEBUS_H_ */

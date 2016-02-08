@@ -1,4 +1,4 @@
-/*	$OpenBSD: dz_ibus.c,v 1.22 2006/08/03 18:45:40 miod Exp $	*/
+/*	$OpenBSD: dz_ibus.c,v 1.24 2008/01/23 16:37:57 jsing Exp $	*/
 /*	$NetBSD: dz_ibus.c,v 1.15 1999/08/27 17:50:42 ragge Exp $ */
 /*
  * Copyright (c) 1998 Ludd, University of Lule}, Sweden.
@@ -151,6 +151,8 @@ dz_vsbus_attach(parent, self, aux)
 	struct dzkm_attach_args daa;
 #endif
 
+	printf(": ");
+
 	/* 
 	 * XXX - This is evil and ugly, but...
 	 * due to the nature of how bus_space_* works on VAX, this will
@@ -159,6 +161,8 @@ dz_vsbus_attach(parent, self, aux)
 
 	if (dz_regs == 0) /* This isn't console */
 		dz_regs = vax_map_physmem(va->va_paddr, 1);
+	else
+		printf("console, ");
 
 	sc->sc_ioh = dz_regs;
 	sc->sc_dr.dr_csr = 0;
@@ -185,7 +189,7 @@ dz_vsbus_attach(parent, self, aux)
 	evcount_attach(&sc->sc_tintrcnt, sc->sc_dev.dv_xname,
 	    (void *)&sc->sc_tcvec, &evcount_intr);
 
-	printf(": 4 lines");
+	printf("4 lines");
 
 	dzattach(sc);
 
@@ -309,7 +313,7 @@ dzcnprobe(cndev)
 	default:
 		return;
 	}
-	cndev->cn_pri = diagcons != 0 ? CN_REMOTE : CN_NORMAL;
+	cndev->cn_pri = diagcons != 0 ? CN_HIGHPRI : CN_LOWPRI;
 	cndev->cn_dev = makedev(major, dz_can_have_kbd() ? 3 : diagcons);
 	dz_regs = iospace;
 	dz = (void *)dz_regs;

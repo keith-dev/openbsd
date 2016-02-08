@@ -1,4 +1,4 @@
-/*	$OpenBSD: rcs.h,v 1.6 2007/02/27 07:59:13 xsa Exp $	*/
+/*	$OpenBSD: rcs.h,v 1.8 2008/02/02 16:21:38 xsa Exp $	*/
 /*
  * Copyright (c) 2004 Jean-Francois Brousseau <jfb@openbsd.org>
  * All rights reserved.
@@ -253,6 +253,7 @@ int			 rcs_state_check(const char *);
 RCSNUM			*rcs_tag_resolve(RCSFILE *, const char *);
 const char		*rcs_errstr(int);
 void			 rcs_write(RCSFILE *);
+void			 rcs_delta_stats(struct rcs_delta *, int *, int *);
 
 int	rcs_kflag_get(const char *);
 void	rcs_kflag_usage(void);
@@ -265,6 +266,7 @@ RCSNUM	*rcsnum_revtobr(const RCSNUM *);
 RCSNUM	*rcsnum_inc(RCSNUM *);
 RCSNUM	*rcsnum_dec(RCSNUM *);
 void	 rcsnum_free(RCSNUM *);
+int	 rcsnum_addmagic(RCSNUM *);
 int	 rcsnum_aton(const char *, char **, RCSNUM *);
 char	*rcsnum_tostr(const RCSNUM *, char *, size_t);
 void	 rcsnum_cpy(const RCSNUM *, RCSNUM *, u_int);

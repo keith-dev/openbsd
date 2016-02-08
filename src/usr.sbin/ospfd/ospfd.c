@@ -1,4 +1,4 @@
-/*	$OpenBSD: ospfd.c,v 1.48 2007/07/25 19:11:27 claudio Exp $ */
+/*	$OpenBSD: ospfd.c,v 1.56 2007/10/25 12:06:30 claudio Exp $ */
 
 /*
  * Copyright (c) 2005 Claudio Jeker <claudio@openbsd.org>
@@ -55,7 +55,6 @@ int		check_child(pid_t, const char *);
 void	main_dispatch_ospfe(int, short, void *);
 void	main_dispatch_rde(int, short, void *);
 
-int	check_file_secrecy(int, const char *);
 void	ospf_redistribute_default(int);
 
 int	ospf_reload(void);
@@ -119,7 +118,8 @@ usage(void)
 {
 	extern char *__progname;
 
-	fprintf(stderr, "usage: %s [-cdnv] [-f file]\n", __progname);
+	fprintf(stderr, "usage: %s [-cdnv] [-D macro=value] [-f file]\n",
+	    __progname);
 	exit(1);
 }
 
@@ -137,13 +137,20 @@ main(int argc, char *argv[])
 	conffile = CONF_FILE;
 	ospfd_process = PROC_MAIN;
 
-	while ((ch = getopt(argc, argv, "cdf:nv")) != -1) {
+	log_init(1);	/* log to stderr until daemonized */
+
+	while ((ch = getopt(argc, argv, "cdD:f:nv")) != -1) {
 		switch (ch) {
 		case 'c':
 			opts |= OSPFD_OPT_FORCE_DEMOTE;
 			break;
 		case 'd':
 			debug = 1;
+			break;
+		case 'D':
+			if (cmdline_symset(optarg) < 0)
+				log_warnx("could not parse macro definition %s",
+				    optarg);
 			break;
 		case 'f':
 			conffile = optarg;
@@ -162,9 +169,6 @@ main(int argc, char *argv[])
 			/* NOTREACHED */
 		}
 	}
-
-	/* start logging */
-	log_init(debug);
 
 	mib[0] = CTL_NET;
 	mib[1] = PF_INET;
@@ -203,6 +207,8 @@ main(int argc, char *argv[])
 	/* check for ospfd user */
 	if (getpwnam(OSPFD_USER) == NULL)
 		errx(1, "unknown user %s", OSPFD_USER);
+
+	log_init(debug);
 
 	if (!debug)
 		daemon(1, 0);
@@ -426,7 +432,7 @@ main_dispatch_rde(int fd, short event, void *bula)
 	struct imsgbuf  *ibuf = bula;
 	struct imsg	 imsg;
 	ssize_t		 n;
-	int		 shut = 0;
+	int		 count, shut = 0;
 
 	switch (event) {
 	case EV_READ:
@@ -453,7 +459,9 @@ main_dispatch_rde(int fd, short event, void *bula)
 
 		switch (imsg.hdr.type) {
 		case IMSG_KROUTE_CHANGE:
-			if (kr_change(imsg.data))
+			count = (imsg.hdr.len - IMSG_HEADER_SIZE) /
+			    sizeof(struct kroute);
+			if (kr_change(imsg.data, count))
 				log_warn("main_dispatch_rde: error changing "
 				    "route");
 			break;
@@ -490,29 +498,6 @@ main_imsg_compose_rde(int type, pid_t pid, void *data, u_int16_t datalen)
 	imsg_compose(ibuf_rde, type, 0, pid, data, datalen);
 }
 
-int
-check_file_secrecy(int fd, const char *fname)
-{
-	struct stat	st;
-
-	if (fstat(fd, &st)) {
-		warn("cannot stat %s", fname);
-		return (-1);
-	}
-
-	if (st.st_uid != 0 && st.st_uid != getuid()) {
-		warnx("%s: owner not root or current user", fname);
-		return (-1);
-	}
-
-	if (st.st_mode & (S_IRWXG | S_IRWXO)) {
-		warnx("%s: group/world readable/writeable", fname);
-		return (-1);
-	}
-
-	return (0);
-}
-
 /* this needs to be added here so that ospfctl can be used without libevent */
 void
 imsg_event_add(struct imsgbuf *ibuf)
@@ -530,10 +515,6 @@ int
 ospf_redistribute(struct kroute *kr, u_int32_t *metric)
 {
 	struct redistribute	*r;
-
-	/* stub area router? */
-	if ((ospfd_conf->options & OSPF_OPTION_E) == 0)
-		return (0);
 
 	/* only allow 0.0.0.0/0 via REDISTRIBUTE_DEFAULT */
 	if (kr->prefix.s_addr == INADDR_ANY && kr->prefixlen == 0)
@@ -575,7 +556,7 @@ ospf_redistribute(struct kroute *kr, u_int32_t *metric)
 			    (r->addr.s_addr & r->mask.s_addr) &&
 			    kr->prefixlen >= mask2prefixlen(r->mask.s_addr)) {
 				*metric = r->metric;
-				return (r->type & REDIST_NO? 0 : 1);
+				return (r->type & REDIST_NO ? 0 : 1);
 			}
 			break;
 		}
@@ -652,11 +633,15 @@ merge_config(struct ospfd_conf *conf, struct ospfd_conf *xconf)
 	struct area		*a, *xa, *na;
 	struct iface		*iface;
 	struct redistribute	*r;
+	int			 rchange = 0;
 
 	/* change of rtr_id needs a restart */
 	conf->flags = xconf->flags;
 	conf->spf_delay = xconf->spf_delay;
 	conf->spf_hold_time = xconf->spf_hold_time;
+	if ((conf->redistribute & REDISTRIBUTE_ON) !=
+	    (xconf->redistribute & REDISTRIBUTE_ON))
+		rchange = 1;
 	conf->redistribute = xconf->redistribute;
 	conf->rfc1583compat = xconf->rfc1583compat;
 
@@ -735,7 +720,7 @@ merge_config(struct ospfd_conf *conf, struct ospfd_conf *xconf)
 					}
 				}
 			}
-			if (a->dirty) {
+			if (a->dirty || rchange) {
 				a->dirty = 0;
 				orig_rtr_lsa(a);
 			}
@@ -764,8 +749,9 @@ merge_interfaces(struct area *a, struct area *xa)
 	for (i = LIST_FIRST(&a->iface_list); i != NULL; i = ni) {
 		ni = LIST_NEXT(i, entry);
 		if (iface_lookup(xa, i) == NULL) {
-			log_debug("merge_config: proc %d area %s removing interface %s",
-			    ospfd_process, inet_ntoa(a->id), i->name);
+			log_debug("merge_config: proc %d area %s removing "
+			    "interface %s", ospfd_process, inet_ntoa(a->id),
+			    i->name);
 			if (ospfd_process == PROC_OSPF_ENGINE)
 				if_fsm(i, IF_EVT_DOWN);
 			LIST_REMOVE(i, entry);
@@ -777,8 +763,9 @@ merge_interfaces(struct area *a, struct area *xa)
 		ni = LIST_NEXT(xi, entry);
 		if ((i = iface_lookup(a, xi)) == NULL) {
 			/* new interface but delay initialisation */
-			log_debug("merge_config: proc %d area %s adding interface %s",
-			    ospfd_process, inet_ntoa(a->id), xi->name);
+			log_debug("merge_config: proc %d area %s adding "
+			    "interface %s", ospfd_process, inet_ntoa(a->id),
+			    xi->name);
 			LIST_REMOVE(xi, entry);
 			LIST_INSERT_HEAD(&a->iface_list, xi, entry);
 			xi->area = a;

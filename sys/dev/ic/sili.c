@@ -1,4 +1,4 @@
-/*	$OpenBSD: sili.c,v 1.33 2007/04/22 00:06:51 dlg Exp $ */
+/*	$OpenBSD: sili.c,v 1.39 2007/11/28 13:47:09 dlg Exp $ */
 
 /*
  * Copyright (c) 2007 David Gwynne <dlg@openbsd.org>
@@ -23,6 +23,7 @@
 #include <sys/proc.h>
 #include <sys/malloc.h>
 #include <sys/kernel.h>
+#include <sys/mutex.h>
 
 #include <machine/bus.h>
 
@@ -80,6 +81,7 @@ struct sili_port {
 	struct sili_dmamem	*sp_scratch;
 
 	TAILQ_HEAD(, sili_ccb)	sp_free_ccbs;
+	struct mutex		sp_free_ccb_mtx;
 
 	volatile u_int32_t	sp_active;
 	TAILQ_HEAD(, sili_ccb)	sp_active_ccbs;
@@ -159,12 +161,14 @@ u_int32_t		sili_port_intr(struct sili_port *, int);
 
 /* atascsi interface */
 int			sili_ata_probe(void *, int);
+void			sili_ata_free(void *, int);
 struct ata_xfer		*sili_ata_get_xfer(void *, int);
 void			sili_ata_put_xfer(struct ata_xfer *);
 int			sili_ata_cmd(struct ata_xfer *);
 
 struct atascsi_methods sili_atascsi_methods = {
 	sili_ata_probe,
+	sili_ata_free,
 	sili_ata_get_xfer,
 	sili_ata_cmd
 };
@@ -205,6 +209,17 @@ sili_attach(struct sili_softc *sc)
 int
 sili_detach(struct sili_softc *sc, int flags)
 {
+	int				rv;
+
+	if (sc->sc_atascsi != NULL) {
+		rv = atascsi_detach(sc->sc_atascsi, flags);
+		if (rv != 0)
+			return (rv);
+	}
+
+	if (sc->sc_ports != NULL)
+		sili_ports_free(sc);
+
 	return (0);
 }
 
@@ -380,8 +395,9 @@ sili_intr(void *arg)
 	u_int32_t			is;
 	int				port;
 
+	/* If the card has gone away, this will return 0xffffffff. */
 	is = sili_read(sc, SILI_REG_GIS);
-	if (is == 0)
+	if (is == 0 || is == 0xffffffff)
 		return (0);
 	sili_write(sc, SILI_REG_GIS, is);
 	DPRINTF(SILI_D_INTR, "sili_intr, GIS: %08x\n", is);
@@ -402,8 +418,7 @@ sili_ports_alloc(struct sili_softc *sc)
 	int				i;
 
 	sc->sc_ports = malloc(sizeof(struct sili_port) * sc->sc_nports,
-	    M_DEVBUF, M_WAITOK);
-	bzero(sc->sc_ports, sizeof(struct sili_port) * sc->sc_nports);
+	    M_DEVBUF, M_WAITOK | M_ZERO);
 
 	for (i = 0; i < sc->sc_nports; i++) {
 		sp = &sc->sc_ports[i];
@@ -457,6 +472,7 @@ sili_ccb_alloc(struct sili_port *sp)
 	int				i;
 
 	TAILQ_INIT(&sp->sp_free_ccbs);
+	mtx_init(&sp->sp_free_ccb_mtx, IPL_BIO);
 	TAILQ_INIT(&sp->sp_active_ccbs);
 	TAILQ_INIT(&sp->sp_deferred_ccbs);
 
@@ -521,12 +537,14 @@ sili_get_ccb(struct sili_port *sp)
 {
 	struct sili_ccb			*ccb;
 
+	mtx_enter(&sp->sp_free_ccb_mtx);
 	ccb = TAILQ_FIRST(&sp->sp_free_ccbs);
 	if (ccb != NULL) {
 		KASSERT(ccb->ccb_xa.state == ATA_S_PUT);
 		TAILQ_REMOVE(&sp->sp_free_ccbs, ccb, ccb_entry);
 		ccb->ccb_xa.state = ATA_S_SETUP;
 	}
+	mtx_leave(&sp->sp_free_ccb_mtx);
 
 	return (ccb);
 }
@@ -547,7 +565,9 @@ sili_put_ccb(struct sili_ccb *ccb)
 #endif
 
 	ccb->ccb_xa.state = ATA_S_PUT;
+	mtx_enter(&sp->sp_free_ccb_mtx);
 	TAILQ_INSERT_TAIL(&sp->sp_free_ccbs, ccb, ccb_entry);
+	mtx_leave(&sp->sp_free_ccb_mtx);
 }
 
 struct sili_dmamem *
@@ -556,8 +576,7 @@ sili_dmamem_alloc(struct sili_softc *sc, bus_size_t size, bus_size_t align)
 	struct sili_dmamem		*sdm;
 	int				nsegs;
 
-	sdm = malloc(sizeof(struct sili_dmamem), M_DEVBUF, M_WAITOK);
-	bzero(sdm, sizeof(struct sili_dmamem));
+	sdm = malloc(sizeof(*sdm), M_DEVBUF, M_WAITOK | M_ZERO);
 	sdm->sdm_size = size;
 
 	if (bus_dmamap_create(sc->sc_dmat, size, 1, size, 0,
@@ -679,7 +698,7 @@ sili_post_direct(struct sili_port *sp, u_int slot, void *buf, size_t buflen)
 
 #ifdef DIAGNOSTIC
 	if (buflen != 64 && buflen != 128)
-		panic("sili_pcopy: buflen of %d is not 64 or 128", buflen);
+		panic("sili_pcopy: buflen of %zu is not 64 or 128", buflen);
 #endif
 
 	bus_space_write_raw_region_4(sp->sp_sc->sc_iot_port, sp->sp_ioh, r,
@@ -782,6 +801,18 @@ sili_ata_probe(void *xsc, int port)
 	    SILI_PREG_IE_CMDCOMP);
 
 	return (port_type);
+}
+
+void
+sili_ata_free(void *xsc, int port)
+{
+	struct sili_softc		*sc = xsc;
+	struct sili_port		*sp = &sc->sc_ports[port];
+
+	if (sp->sp_ccbs != NULL)
+		sili_ccb_free(sp);
+
+	/* XXX we should do more here */
 }
 
 int

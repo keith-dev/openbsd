@@ -1,4 +1,4 @@
-/*	$OpenBSD: util.h,v 1.20 2007/07/03 13:22:43 joris Exp $	*/
+/*	$OpenBSD: util.h,v 1.24 2008/02/04 19:08:32 joris Exp $	*/
 /*
  * Copyright (c) 2006 Niall O'Higgins <niallo@openbsd.org>
  * All rights reserved.
@@ -31,8 +31,7 @@ void	  cvs_get_repository_path(const char *, char *, size_t);
 void	  cvs_get_repository_name(const char *, char *, size_t);
 void	  cvs_modetostr(mode_t, char *, size_t);
 void	  cvs_strtomode(const char *, mode_t *);
-void	  cvs_mkadmin(const char *, const char *, const char *,
-	      char *, char *, int);
+void	  cvs_mkadmin(const char *, const char *, const char *, char *, char *);
 void	  cvs_mkpath(const char *, char *);
 int	  cvs_cksum(const char *, char *, size_t);
 int	  cvs_getargv(const char *, char **, int);
@@ -42,12 +41,15 @@ int	  cvs_unlink(const char *);
 int	  cvs_rmdir(const char *);
 char	**cvs_makeargv(const char *, int *);
 void	  cvs_freeargv(char **, int);
+void	  cvs_exec(const char *);
 u_int	  cvs_revision_select(RCSFILE *, char *);
 
 struct cvs_line {
+	struct rcs_delta	*l_delta;
 	u_char			*l_line;
 	size_t			 l_len;
 	int			 l_lineno;
+	int			 l_lineno_orig;
 	int			 l_needsfree;
 	TAILQ_ENTRY(cvs_line)	 l_list;
 };
@@ -64,9 +66,6 @@ struct cvs_argvector {
 	char **argv;
 };
 
-BUF			*cvs_patchfile(u_char *, size_t, u_char *,
-			    size_t, int (*p)(struct cvs_lines *,
-			    struct cvs_lines *));
 struct cvs_lines	*cvs_splitlines(u_char *, size_t);
 void			cvs_freelines(struct cvs_lines *);
 struct cvs_argvector	*cvs_strsplit(char *, const char *);

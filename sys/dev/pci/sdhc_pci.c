@@ -1,4 +1,4 @@
-/*	$OpenBSD: sdhc_pci.c,v 1.5 2006/07/19 20:58:45 fgsch Exp $	*/
+/*	$OpenBSD: sdhc_pci.c,v 1.7 2007/10/30 18:13:45 chl Exp $	*/
 
 /*
  * Copyright (c) 2006 Uwe Stuehler <uwe@openbsd.org>
@@ -85,6 +85,11 @@ sdhc_pci_attach(struct device *parent, struct device *self, void *aux)
             pa->pa_function == 4)
 		sdhc_takecontroller(pa);
 
+	/* ENE controllers break if set to 0V bus power */
+	if (PCI_VENDOR(pa->pa_id) == PCI_VENDOR_ENE &&
+	    PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_ENE_SDCARD)
+		sc->sc.sc_flags |= SDHC_F_NOPWR0;
+
 	if (pci_intr_map(pa, &ih)) {
 		printf(": can't map interrupt\n");
 		return;
@@ -110,8 +115,8 @@ sdhc_pci_attach(struct device *parent, struct device *self, void *aux)
 	nslots = SDHC_PCI_NUM_SLOTS(slotinfo);
 
 	/* Allocate an array big enough to hold all the possible hosts */
-	MALLOC(sc->sc.sc_host, struct sdhc_host **,
-	    sizeof(struct sdhc_host *) * nslots, M_DEVBUF, M_WAITOK);
+	sc->sc.sc_host = malloc(sizeof(struct sdhc_host *) * nslots, M_DEVBUF,
+	    M_WAITOK);
 
 	/* XXX: handle 64-bit BARs */
 	for (reg = SDHC_PCI_BAR_START + SDHC_PCI_FIRST_BAR(slotinfo) *

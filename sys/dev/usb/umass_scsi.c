@@ -1,4 +1,4 @@
-/*	$OpenBSD: umass_scsi.c,v 1.18 2007/06/13 10:33:52 mbalmer Exp $ */
+/*	$OpenBSD: umass_scsi.c,v 1.21 2007/10/20 04:37:54 krw Exp $ */
 /*	$NetBSD: umass_scsipi.c,v 1.9 2003/02/16 23:14:08 augustss Exp $	*/
 /*
  * Copyright (c) 2001 The NetBSD Foundation, Inc.
@@ -155,9 +155,7 @@ umass_scsi_setup(struct umass_softc *sc)
 {
 	struct umass_scsi_softc *scbus;
 
-	scbus = malloc(sizeof(struct umass_scsi_softc), M_DEVBUF, M_WAITOK);
-	memset(&scbus->sc_link, 0, sizeof(struct scsi_link));
-	memset(&scbus->sc_adapter, 0, sizeof(struct scsi_adapter));
+	scbus = malloc(sizeof(*scbus), M_DEVBUF, M_WAITOK | M_ZERO);
 
 	sc->bus = (struct umassbus_softc *)scbus;
 
@@ -279,14 +277,10 @@ umass_scsi_cmd(struct scsi_xfer *xs)
 	/* Return if command finishes early. */
  done:
 	xs->flags |= ITSDONE;
-	
 	s = splbio();
 	scsi_done(xs);
 	splx(s);
-	if (xs->flags & SCSI_POLL)
-		return (COMPLETE);
-	else
-		return (SUCCESSFULLY_QUEUED);
+	return (COMPLETE);
 }
 
 void

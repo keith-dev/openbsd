@@ -1,4 +1,4 @@
-/*	$OpenBSD: ripd.c,v 1.3 2007/01/24 10:14:17 claudio Exp $ */
+/*	$OpenBSD: ripd.c,v 1.8 2007/10/24 20:23:09 claudio Exp $ */
 
 /*
  * Copyright (c) 2006 Michele Marchetto <mydecay@openbeer.it>
@@ -48,18 +48,17 @@
 #include "control.h"
 #include "rde.h"
 
-__dead void	 usage(void);
-int		 check_child(pid_t, const char *);
-void		 main_sig_handler(int, short, void *);
-void		 ripd_shutdown(void);
-void		 main_dispatch_ripe(int, short, void *);
-void		 main_dispatch_rde(int, short, void *);
-int		 check_file_secrecy(int, const char *);
-void		 ripd_redistribute_default(int);
+__dead void		 usage(void);
+int			 check_child(pid_t, const char *);
+void			 main_sig_handler(int, short, void *);
+void			 ripd_shutdown(void);
+void			 main_dispatch_ripe(int, short, void *);
+void			 main_dispatch_rde(int, short, void *);
+void			 ripd_redistribute_default(int);
 
-int     pipe_parent2ripe[2];
-int     pipe_parent2rde[2];
-int     pipe_ripe2rde[2];
+int			 pipe_parent2ripe[2];
+int			 pipe_parent2rde[2];
+int			 pipe_ripe2rde[2];
 
 struct ripd_conf	*conf = NULL;
 struct imsgbuf		*ibuf_ripe;
@@ -73,7 +72,8 @@ usage(void)
 {
 	extern char *__progname;
 
-	fprintf(stderr, "usage: %s [-dnv] [-f file]\n", __progname);
+	fprintf(stderr, "usage: %s [-dnv] [-D macro=value] [-f file]\n",
+	    __progname);
 	exit(1);
 }
 
@@ -129,10 +129,17 @@ main(int argc, char *argv[])
 	conffile = CONF_FILE;
 	ripd_process = PROC_MAIN;
 
-	while ((ch = getopt(argc, argv, "df:nv")) != -1) {
+	log_init(1);	/* log to stderr until daemonized */
+
+	while ((ch = getopt(argc, argv, "dD:f:nv")) != -1) {
 		switch (ch) {
 		case 'd':
 			debug = 1;
+			break;
+                case 'D':
+			if (cmdline_symset(optarg) < 0)
+				log_warnx("could not parse macro definition %s",
+				    optarg);
 			break;
 		case 'f':
 			conffile = optarg;
@@ -150,9 +157,6 @@ main(int argc, char *argv[])
 			/* NOTREACHED */
 		}
 	}
-
-	/* start logging */
-	log_init(debug);
 
 	mib[0] = CTL_NET;
 	mib[1] = PF_INET;
@@ -180,13 +184,15 @@ main(int argc, char *argv[])
 		exit(0);
 	}
 
-	/* check for root privileges  */
+	/* check for root privileges */
 	if (geteuid())
 		errx(1, "need root privileges");
 
 	/* check for ripd user */
 	if (getpwnam(RIPD_USER) == NULL)
 		errx(1, "unknown user %s", RIPD_USER);
+
+	log_init(debug);
 
 	if (!debug)
 		daemon(1, 0);
@@ -324,16 +330,17 @@ check_child(pid_t pid, const char *pname)
 void
 main_dispatch_ripe(int fd, short event, void *bula)
 {
-	struct imsgbuf  *ibuf = bula;
-	struct imsg      imsg;
-	ssize_t          n;
+	struct imsgbuf	*ibuf = bula;
+	struct imsg	 imsg;
+	ssize_t		 n;
+	int		 shut = 0;
 
 	switch (event) {
 	case EV_READ:
 		if ((n = imsg_read(ibuf)) == -1)
 			fatal("imsg_read error");
-		if (n == 0)     /* connection closed */
-			fatalx("pipe closed");
+		if (n == 0)	/* connection closed */
+			shut = 1;
 		break;
 	case EV_WRITE:
 		if (msgbuf_write(&ibuf->w) == -1)
@@ -380,23 +387,30 @@ main_dispatch_ripe(int fd, short event, void *bula)
 		}
 		imsg_free(&imsg);
 	}
-	imsg_event_add(ibuf);
+	if (!shut)
+		imsg_event_add(ibuf);
+	else {
+		/* this pipe is dead, so remove the event handler */  
+		event_del(&ibuf->ev);
+		event_loopexit(NULL);
+	}
 }
 
 /* ARGSUSED */
 void
 main_dispatch_rde(int fd, short event, void *bula)
 {
-	struct imsgbuf  *ibuf = bula;
-	struct imsg      imsg;
-	ssize_t          n;
+	struct imsgbuf	*ibuf = bula;
+	struct imsg	 imsg;
+	ssize_t		 n;
+	int		 shut = 0;
 
 	switch (event) {
 	case EV_READ:
 		if ((n = imsg_read(ibuf)) == -1)
 			fatal("imsg_read error");
-		if (n == 0)     /* connection closed */
-			fatalx("pipe closed");
+		if (n == 0)	/* connection closed */
+			shut = 1;
 		break;
 	case EV_WRITE:
 		if (msgbuf_write(&ibuf->w) == -1)
@@ -432,7 +446,13 @@ main_dispatch_rde(int fd, short event, void *bula)
 		}
 		imsg_free(&imsg);
 	}
-	imsg_event_add(ibuf);
+	if (!shut)
+		imsg_event_add(ibuf);
+	else {
+		/* this pipe is dead, so remove the event handler */  
+		event_del(&ibuf->ev);
+		event_loopexit(NULL);
+	}
 }
 
 void
@@ -445,29 +465,6 @@ void
 main_imsg_compose_rde(int type, pid_t pid, void *data, u_int16_t datalen)
 {
 	imsg_compose(ibuf_rde, type, 0, pid, data, datalen);
-}
-
-int
-check_file_secrecy(int fd, const char *fname)
-{
-	struct stat     st;
-
-	if (fstat(fd, &st)) {
-		log_warn("cannot stat %s", fname);
-		return (-1);
-	}
-
-	if (st.st_uid != 0 && st.st_uid != getuid()) {
-		log_warnx("%s: owner not root or current user", fname);
-		return (-1);
-	}
-
-	if (st.st_mode & (S_IRWXG | S_IRWXO)) {
-		log_warnx("%s: group/world readable/writeable", fname);
-		return (-1);
-	}
-
-	return (0);
 }
 
 int

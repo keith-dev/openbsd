@@ -1,4 +1,4 @@
-/*	$OpenBSD: pstat.c,v 1.64 2006/06/04 01:39:32 deraadt Exp $	*/
+/*	$OpenBSD: pstat.c,v 1.73 2008/02/20 09:49:08 thib Exp $	*/
 /*	$NetBSD: pstat.c,v 1.27 1996/10/23 22:50:06 cgd Exp $	*/
 
 /*-
@@ -40,7 +40,7 @@ static char copyright[] =
 #if 0
 from: static char sccsid[] = "@(#)pstat.c	8.9 (Berkeley) 2/16/94";
 #else
-static char *rcsid = "$OpenBSD: pstat.c,v 1.64 2006/06/04 01:39:32 deraadt Exp $";
+static char *rcsid = "$OpenBSD: pstat.c,v 1.73 2008/02/20 09:49:08 thib Exp $";
 #endif
 #endif /* not lint */
 
@@ -79,7 +79,7 @@ static char *rcsid = "$OpenBSD: pstat.c,v 1.64 2006/06/04 01:39:32 deraadt Exp $
 #include <string.h>
 #include <unistd.h>
 
-struct nlist nl[] = {
+struct nlist vnodenl[] = {
 #define	FNL_NFILE	0		/* sysctl */
 	{"_nfiles"},
 #define FNL_MAXFILE	1		/* sysctl */
@@ -92,8 +92,10 @@ struct nlist nl[] = {
 	{"_ttylist"},
 #define	V_MOUNTLIST	5		/* no sysctl */
 	{ "_mountlist" },
-	{ "" }
+	{ NULL }
 };
+
+struct nlist *globalnl;
 
 int	usenumflag;
 int	totalflag;
@@ -106,7 +108,7 @@ kvm_t	*kd = NULL;
 #define	KGET(idx, var)							\
 	KGET1(idx, &var, sizeof(var), SVAR(var))
 #define	KGET1(idx, p, s, msg)						\
-	KGET2(nl[idx].n_value, p, s, msg)
+	KGET2(globalnl[idx].n_value, p, s, msg)
 #define	KGET2(addr, p, s, msg)						\
 	if (kvm_read(kd, (u_long)(addr), p, s) != s)			\
 		warnx("cannot read %s: %s", msg, kvm_geterr(kd))
@@ -142,15 +144,19 @@ void	vnodemode(void);
 int
 main(int argc, char *argv[])
 {
-	int fileflag = 0, swapflag = 0, ttyflag = 0, vnodeflag = 0;
+	int fileflag = 0, swapflag = 0, ttyflag = 0, vnodeflag = 0, ch;
 	char buf[_POSIX2_LINE_MAX];
-	int ch;
+	const char *dformat = NULL;
 	extern char *optarg;
 	extern int optind;
 	gid_t gid;
+	int i;
 
-	while ((ch = getopt(argc, argv, "TM:N:fiknstv")) != -1)
+	while ((ch = getopt(argc, argv, "d:TM:N:fiknstv")) != -1)
 		switch (ch) {
+		case 'd':
+			dformat = optarg;
+			break;
 		case 'f':
 			fileflag = 1;
 			break;
@@ -185,6 +191,12 @@ main(int argc, char *argv[])
 	argc -= optind;
 	argv += optind;
 
+	if (dformat && getuid())
+		errx(1, "Only root can use -d");
+
+	if ((dformat == 0 && argc > 0) || (dformat && argc == 0))
+		usage();
+
 	/*
 	 * Discard setgid privileges if not the running kernel so that bad
 	 * guys can't print interesting stuff from kernel memory.
@@ -194,19 +206,116 @@ main(int argc, char *argv[])
 		if (setresgid(gid, gid, gid) == -1)
 			err(1, "setresgid");
 
-	if (vnodeflag)
+	if (vnodeflag || dformat)
 		if ((kd = kvm_openfiles(nlistf, memf, NULL, O_RDONLY, buf)) == 0)
 			errx(1, "kvm_openfiles: %s", buf);
 
 	if (nlistf == NULL && memf == NULL)
 		if (setresgid(gid, gid, gid) == -1)
 			err(1, "setresgid");
+	if (dformat) {
+		struct nlist *nl;
+		int longformat = 0, stringformat = 0, error = 0, n;
+		int mask = ~0;
+		char format[10], buf[1024];
+		
+		n = strlen(dformat);
+		if (n == 0)
+			errx(1, "illegal format");
+
+		/*
+		 * Support p, c, s, and {l, ll, h, hh, j, t, z, }[diouxX]
+		 */
+		if (strcmp(dformat, "p") == 0)
+			longformat = sizeof(long) == 8;
+		else if (strcmp(dformat, "c") == 0)
+			mask = 0xff;
+		else if (strcmp(dformat, "s") == 0)
+			stringformat = 1;
+		else if (strchr("diouxX", dformat[n - 1])) {
+			char *ptbl[]= {"l", "ll", "h", "hh", "j", "t", "z", ""};
+			int i;
+
+			char *mod;
+			for (i = 0; i < sizeof(ptbl)/sizeof(ptbl[0]); i++) {
+				mod = ptbl[i];
+				if (strlen(mod) == n - 1 &&
+				    strncmp(mod, dformat, strlen(mod)) == 0)
+					break;
+			}
+			if (i == sizeof(ptbl)/sizeof(ptbl[0])
+			    && dformat[1] != '\0')
+				errx(1, "illegal format");
+			if (strcmp(mod, "l") == 0)
+				longformat = sizeof(long) == sizeof(long long);
+			else if (strcmp(mod, "h") == 0)
+				mask = 0xffff;
+			else if (strcmp(mod, "hh") == 0)
+				mask = 0xff;
+			else
+				longformat = 1;
+
+		} else
+			errx(1, "illegal format");
+
+		if (*dformat == 's') {
+			stringformat = 1;
+			snprintf(format, sizeof(format), "%%.%zus",
+			    sizeof buf);
+		} else
+			snprintf(format, sizeof(format), "%%%s", dformat);
+
+		nl = calloc(argc + 1, sizeof *nl);
+		if (!nl)
+			err(1, "calloc nl: ");
+		for (i = 0; i < argc; i++) {
+			if (asprintf(&nl[i].n_name, "_%s",
+			    argv[i]) == -1)
+				warn("asprintf");
+		}
+		kvm_nlist(kd, nl);
+		globalnl = nl;
+		for (i = 0; i < argc; i++) {
+			long long v;
+
+			printf("%s ", argv[i]);
+			if (!nl[i].n_value && argv[i][0] == '0') {
+				nl[i].n_value = strtoul(argv[i], NULL, 16);
+				nl[i].n_type = N_DATA;
+			}
+			if (!nl[i].n_value) {
+				printf("not found\n");
+				error++;
+				continue;
+			}
+
+			printf("at %p: ", (void *)nl[i].n_value);
+			if (nl[i].n_type == N_DATA) {
+				if (stringformat) {
+					KGET1(i, &buf, sizeof(buf), argv[i]);
+					buf[sizeof(buf) - 1] = '\0';
+				} else
+					KGET1(i, &v, sizeof(v), argv[i]);
+				if (stringformat)
+					printf(format, &buf);
+				else if (longformat)
+					printf(format, v);
+				else
+					printf(format, ((int)v) & mask);
+			}
+			printf("\n");
+		}
+		for (i = 0; i < argc; i++)
+			free(nl[i].n_name);
+		free(nl);
+		exit(error);
+	}
 
 	if (vnodeflag)
-		if (kvm_nlist(kd, nl) == -1)
+		if (kvm_nlist(kd, vnodenl) == -1)
 			errx(1, "kvm_nlist: %s", kvm_geterr(kd));
 
-	if (!(fileflag | vnodeflag | ttyflag | swapflag | totalflag))
+	if (!(fileflag | vnodeflag | ttyflag | swapflag | totalflag || dformat))
 		usage();
 	if (fileflag || totalflag)
 		filemode();
@@ -226,6 +335,8 @@ vnodemode(void)
 	struct vnode *vp;
 	struct mount *maddr, *mp = NULL;
 	int numvnodes;
+
+	globalnl = vnodenl;
 
 	e_vnodebase = loadvnodes(&numvnodes);
 	if (totalflag) {
@@ -284,7 +395,7 @@ vnodemode(void)
 void
 vnode_header(void)
 {
-	(void)printf("%*s TYP VFLAG  USE HOLD", 2 * sizeof(long), "ADDR");
+	(void)printf("%*s TYP VFLAG  USE HOLD", 2 * (int)sizeof(long), "ADDR");
 }
 
 void
@@ -348,7 +459,7 @@ vnode_print(struct vnode *avnode, struct vnode *vp)
 	if (flag == 0)
 		*fp++ = '-';
 	*fp = '\0';
-	(void)printf("%0*lx %s %5s %4d %4u", 2 * sizeof(long),
+	(void)printf("%0*lx %s %5s %4d %4u", 2 * (int)sizeof(long),
 	    (long)avnode, type, flags, vp->v_usecount, vp->v_holdcnt);
 }
 
@@ -716,8 +827,8 @@ kinfo_vnodes(int *avnodes)
 			err(1, "sysctl(KERN_NUMVNODES) failed");
 	} else
 		KGET(V_NUMV, numvnodes);
-	if ((vbuf = malloc((numvnodes + 20) *
-	    (sizeof(struct vnode *) + sizeof(struct vnode)))) == NULL)
+	if ((vbuf = calloc(numvnodes + 20,
+	    sizeof(struct vnode *) + sizeof(struct vnode))) == NULL)
 		err(1, "malloc: vnode buffer");
 	bp = vbuf;
 	evbuf = vbuf + (numvnodes + 20) *
@@ -886,6 +997,8 @@ filemode(void)
 	int mib[2], maxfile, nfile;
 	size_t len;
 
+	globalnl = vnodenl;
+
 	if (kd == 0) {
 		mib[0] = CTL_KERN;
 		mib[1] = KERN_MAXFILES;
@@ -922,12 +1035,12 @@ filemode(void)
 	(void)printf("%d/%d open files\n", nfile, maxfile);
 
 	(void)printf("%*s TYPE       FLG  CNT  MSG  %*s  OFFSET\n",
-	    2 * sizeof(long), "LOC", 2 * sizeof(long), "DATA");
+	    2 * (int)sizeof(long), "LOC", 2 * (int)sizeof(long), "DATA");
 	for (; (char *)ffp < buf + len; addr = LIST_NEXT(ffp, f_list), ffp++) {
 		memmove(&fp, ffp, sizeof fp);
 		if ((unsigned)fp.f_type > DTYPE_SOCKET)
 			continue;
-		(void)printf("%0*lx ", 2 * sizeof(long), (long)addr);
+		(void)printf("%0*lx ", 2 * (int)sizeof(long), (long)addr);
 		(void)printf("%-8.8s", dtypes[fp.f_type]);
 		fbp = flagbuf;
 		if (fp.f_flag & FREAD)
@@ -943,7 +1056,7 @@ filemode(void)
 		*fbp = '\0';
 		(void)printf("%6s  %3ld", flagbuf, fp.f_count);
 		(void)printf("  %3ld", fp.f_msgcount);
-		(void)printf("  %0*lx", 2 * sizeof(long), (long)fp.f_data);
+		(void)printf("  %0*lx", 2 * (int)sizeof(long), (long)fp.f_data);
 
 		if (fp.f_offset < 0)
 			(void)printf("  %llx\n", (long long)fp.f_offset);
@@ -1015,7 +1128,7 @@ swapmode(void)
 		    "Total", hlen, 0, 0, 0, 0.0);
 		return;
 	}
-	if ((swdev = malloc(nswap * sizeof(*swdev))) == NULL)
+	if ((swdev = calloc(nswap, sizeof(*swdev))) == NULL)
 		err(1, "malloc");
 	if (swapctl(SWAP_STATS, swdev, nswap) == -1)
 		err(1, "swapctl");
@@ -1082,6 +1195,6 @@ void
 usage(void)
 {
 	(void)fprintf(stderr,
-	    "usage: pstat [-fknsTtv] [-M core] [-N system]\n");
+	    "usage: pstat [-fknsTtv] [-d format] [-M core] [-N system] [symbols ...]\n");
 	exit(1);
 }

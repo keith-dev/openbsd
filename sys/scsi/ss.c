@@ -1,4 +1,4 @@
-/*	$OpenBSD: ss.c,v 1.58 2006/12/21 02:05:46 krw Exp $	*/
+/*	$OpenBSD: ss.c,v 1.60 2007/11/27 16:22:14 martynas Exp $	*/
 /*	$NetBSD: ss.c,v 1.10 1996/05/05 19:52:55 christos Exp $	*/
 
 /*
@@ -36,7 +36,6 @@
 #include <sys/fcntl.h>
 #include <sys/errno.h>
 #include <sys/ioctl.h>
-#include <sys/malloc.h>
 #include <sys/buf.h>
 #include <sys/proc.h>
 #include <sys/user.h>
@@ -462,7 +461,7 @@ bad:
 
 /*
  * close the device.. only called if we are the LAST
- * occurence of an open device
+ * occurrence of an open device
  */
 int
 ssclose(dev, flag, mode, p)

@@ -1,4 +1,4 @@
-/*	$OpenBSD: acpivar.h,v 1.36 2007/05/31 17:49:16 gwk Exp $	*/
+/*	$OpenBSD: acpivar.h,v 1.42 2007/12/05 19:17:13 deraadt Exp $	*/
 /*
  * Copyright (c) 2005 Thorsten Lockert <tholo@sigmasoft.com>
  *
@@ -20,6 +20,7 @@
 
 #include <sys/timeout.h>
 #include <sys/rwlock.h>
+#include <machine/biosvar.h>
 
 /* #define ACPI_DEBUG */
 #ifdef ACPI_DEBUG
@@ -33,6 +34,11 @@ extern int acpi_debug;
 
 extern int acpi_hasprocfvs;
 
+#ifdef MULTIPROCESSOR
+#define LAPIC_MAP_SIZE	256
+extern u_int8_t acpi_lapic_flags[LAPIC_MAP_SIZE];
+#endif
+
 struct klist;
 struct acpiec_softc;
 
@@ -41,7 +47,6 @@ struct acpi_attach_args {
 	bus_space_tag_t	 aaa_iot;
 	bus_space_tag_t	 aaa_memt;
 	void		*aaa_table;
-	paddr_t		 aaa_pbase; /* Physical base address of ACPI tables */
 	struct aml_node *aaa_node;
 	const char	*aaa_dev;
 };
@@ -59,35 +64,43 @@ struct acpi_q {
 	u_int8_t		 q_data[0];
 };
 
-typedef SIMPLEQ_HEAD(, acpi_q) acpi_qhead_t;
+struct acpi_wakeq {
+	SIMPLEQ_ENTRY(acpi_wakeq)	 q_next;
+	struct aml_node			*q_node;
+	struct aml_value		*q_wakepkg;
+	int				 q_gpe;
+	int				 q_state;
+};
 
-#define ACPIREG_PM1A_STS    0x00
-#define ACPIREG_PM1A_EN	    0x01
-#define ACPIREG_PM1A_CNT    0x02
-#define ACPIREG_PM1B_STS    0x03
-#define ACPIREG_PM1B_EN	    0x04
-#define ACPIREG_PM1B_CNT    0x05
-#define ACPIREG_PM2_CNT	    0x06
-#define ACPIREG_PM_TMR	    0x07
-#define ACPIREG_GPE0_STS    0x08
-#define ACPIREG_GPE0_EN	    0x09
-#define ACPIREG_GPE1_STS    0x0A
-#define ACPIREG_GPE1_EN	    0x0B
-#define ACPIREG_SMICMD	    0x0C
-#define ACPIREG_MAXREG	    0x0D
+typedef SIMPLEQ_HEAD(, acpi_q) acpi_qhead_t;
+typedef SIMPLEQ_HEAD(, acpi_wakeq) acpi_wakeqhead_t;
+
+#define ACPIREG_PM1A_STS	0x00
+#define ACPIREG_PM1A_EN		0x01
+#define ACPIREG_PM1A_CNT	0x02
+#define ACPIREG_PM1B_STS	0x03
+#define ACPIREG_PM1B_EN		0x04
+#define ACPIREG_PM1B_CNT	0x05
+#define ACPIREG_PM2_CNT		0x06
+#define ACPIREG_PM_TMR		0x07
+#define ACPIREG_GPE0_STS	0x08
+#define ACPIREG_GPE0_EN		0x09
+#define ACPIREG_GPE1_STS	0x0A
+#define ACPIREG_GPE1_EN		0x0B
+#define ACPIREG_SMICMD		0x0C
+#define ACPIREG_MAXREG		0x0D
 
 /* Special registers */
-#define ACPIREG_PM1_STS	    0x0E
-#define ACPIREG_PM1_EN	    0x0F
-#define ACPIREG_PM1_CNT	    0x10
-#define ACPIREG_GPE_STS     0x11
-#define ACPIREG_GPE_EN      0x12
+#define ACPIREG_PM1_STS		0x0E
+#define ACPIREG_PM1_EN		0x0F
+#define ACPIREG_PM1_CNT		0x10
+#define ACPIREG_GPE_STS		0x11
+#define ACPIREG_GPE_EN		0x12
 
-struct acpi_parsestate
-{
-	u_int8_t           *start;
-	u_int8_t           *end;
-	u_int8_t           *pos;
+struct acpi_parsestate {
+	u_int8_t		*start;
+	u_int8_t		*end;
+	u_int8_t		*pos;
 };
 
 struct acpi_reg_map {
@@ -145,7 +158,8 @@ struct acpi_softc {
 	 * First-level ACPI tables
 	 */
 	struct acpi_fadt	*sc_fadt;
-	acpi_qhead_t		sc_tables;
+	acpi_qhead_t		 sc_tables;
+	acpi_wakeqhead_t	 sc_wakedevs;
 
 	/*
 	 * Second-level information from FADT
@@ -171,9 +185,9 @@ struct acpi_softc {
 		int slp_typb;
 	}			sc_sleeptype[6];
 	int			sc_maxgpe;
-        int                     sc_lastgpe;
+	int			sc_lastgpe;
 
-	struct gpe_block       *gpe_table;
+	struct gpe_block	*gpe_table;
 
 	int			sc_wakeup;
 	u_int32_t		sc_gpe_sts;
@@ -193,6 +207,8 @@ struct acpi_softc {
 
 	struct timeout		sc_dev_timeout;
 	int			sc_poll;
+
+	int			sc_revision;
 };
 
 #define GPE_NONE  0x00
@@ -225,13 +241,14 @@ int	 acpi_map_address(struct acpi_softc *, struct acpi_gas *, bus_addr_t, bus_si
 
 int	 acpi_map(paddr_t, size_t, struct acpi_mem_map *);
 void	 acpi_unmap(struct acpi_mem_map *);
-int	 acpi_probe(struct device *, struct cfdata *, struct acpi_attach_args *);
+int	 acpi_probe(struct device *, struct cfdata *, struct bios_attach_args *);
 u_int	 acpi_checksum(const void *, size_t);
 void	 acpi_attach_machdep(struct acpi_softc *);
 int	 acpi_interrupt(void *);
 void	 acpi_enter_sleep_state(struct acpi_softc *, int);
 void	 acpi_powerdown(void);
 void	 acpi_resume(struct acpi_softc *);
+void	 acpi_reset(void);
 
 #define ACPI_IOREAD 0
 #define ACPI_IOWRITE 1
@@ -239,7 +256,8 @@ void	 acpi_resume(struct acpi_softc *);
 void acpi_delay(struct acpi_softc *, int64_t);
 int acpi_gasio(struct acpi_softc *, int, int, uint64_t, int, int, void *);
 
-int     acpi_set_gpehandler(struct acpi_softc *, int, int (*)(struct acpi_softc *, int, void *), void *, const char *);
+int	acpi_set_gpehandler(struct acpi_softc *, int,
+	    int (*)(struct acpi_softc *, int, void *), void *, const char *);
 void	acpi_enable_gpe(struct acpi_softc *, u_int32_t);
 
 int	acpiec_intr(struct acpiec_softc *);

@@ -1,4 +1,4 @@
-#	$OpenBSD: GENERIC,v 1.21 2007/07/17 21:28:48 jakemsr Exp $
+#	$OpenBSD: GENERIC,v 1.28 2008/02/20 18:46:20 miod Exp $
 #
 # For further information on compiling OpenBSD kernels, see the config(8)
 # man page.
@@ -11,7 +11,7 @@
 
 machine		sgi mips64
 include		"../../../conf/GENERIC"
-maxusers	32			# estimated number of users
+maxusers	32		# Estimated number of users
 
 # Make options
 makeoption	LINK_ADDRESS="0xffffffff80100000"
@@ -19,14 +19,11 @@ makeoption	LINK_ADDRESS="0xffffffff80100000"
 # MD options
 option		ARCBIOS		# We use arcbios for FW communication.
 
-#option		APERTURE
-
-#option	WSDISPLAY_COMPAT_RAWKBD		# provide raw scancodes; needed for X11
+option	WSDISPLAY_COMPAT_RAWKBD	# Provide raw scancodes; needed for X11
 
 option		PCIVERBOSE
-option		USBVERBOSE
 
-#option		UVMHIST		# enable uvm history logging
+#option		UVMHIST		# Enable uvm history logging
 
 #option		DEBUG
 #option		SYSCALL_DEBUG
@@ -34,7 +31,7 @@ option		USBVERBOSE
 # Define what targets to support
 option		TGT_O2
 
-# Specify storage configuration (its a joke..)
+# Specify storage configuration (it's a joke..)
 config		bsd	swap generic
 
 #
@@ -44,15 +41,19 @@ mainbus0	at root
 cpu*		at mainbus0
 
 #### Main local buses
-#crimebus0	at mainbus0
 macebus0	at mainbus0	# MACE controller localbus.
+
+# GBE Framebuffer
+gbe0		at mainbus0
 
 # Localbus devices
 clock0		at macebus0
-mec0		at macebus0 sys 0x18 base 0x00280000 irq 4
-mavb0		at macebus0 sys 0x18 base 0x00300000 irq 7
-com0		at macebus0 sys 0x18 base 0x00390000 irq 5
-com1		at macebus0 sys 0x18 base 0x00398000 irq 5
+mec0		at macebus0 base 0x00280000 irq 4
+mavb0		at macebus0 base 0x00300000 irq 7
+mkbc0		at macebus0 base 0x00320000 irq 6
+com0		at macebus0 base 0x00390000 irq 5
+com1		at macebus0 base 0x00398000 irq 5
+power0		at macebus0 irq 6
 
 #### PCI Bus
 macepcibr0	at macebus0	# MACE controller PCI Bus bridge.
@@ -106,9 +107,14 @@ audio*		at mavb?
 emu*		at pci?
 audio*		at emu?
 
-#### WS console
-#wsdisplay*	at vga?
-#wskbd*		at ukbd? mux 1
+#### WS Console
+wsdisplay*	at gbe?
+
+#### Keyboard and Mouse
+pckbd*		at mkbc?
+pms*		at mkbc?
+wskbd*		at pckbd? mux 1
+wsmouse*	at pms? mux 0
 
 #### SCSI Bus devices
 sd*		at scsibus?
@@ -120,8 +126,8 @@ safte*		at scsibus?
 ses*		at scsibus?
 uk*		at scsibus?
 
-#### crypto devices
+#### Crypto devices
 hifn*		at pci?		# Hi/fn 7751 crypto card
 
-#pseudo-device	wsmux	2	# mouse & keyboard multiplexor
-pseudo-device	crypto		1
+pseudo-device	wsmux	2       # Mouse and keyboard multiplexor
+pseudo-device	crypto	1

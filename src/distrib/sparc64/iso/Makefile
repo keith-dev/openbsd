@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.3 2007/08/10 12:29:55 deraadt Exp $
+#	$OpenBSD: Makefile,v 1.5 2008/03/04 05:37:51 deraadt Exp $
 
 TOP=	${.CURDIR}/..
 
@@ -11,7 +11,7 @@ RELDIR?=	/home/rel-${MACHINE}
 BASE=		${RELDIR}/base${OSrev}.tgz ${RELDIR}/comp${OSrev}.tgz \
 		${RELDIR}/etc${OSrev}.tgz ${RELDIR}/game${OSrev}.tgz \
 		${RELDIR}/man${OSrev}.tgz ${RELDIR}/misc${OSrev}.tgz \
-		${RELDIR}/bsd ${RELDIR}/bsd.rd \
+		${RELDIR}/bsd ${RELDIR}/bsd.mp ${RELDIR}/bsd.rd \
 		${RELDIR}/INSTALL.${MACHINE}
 XBASE=		${RELXDIR}/xbase${OSrev}.tgz ${RELXDIR}/xetc${OSrev}.tgz \
 		${RELXDIR}/xfont${OSrev}.tgz ${RELXDIR}/xshare${OSrev}.tgz \
@@ -28,6 +28,13 @@ ${CDROM}: ${BASE} ${XBASE}
 
 	cp -p ${RELDIR}/ofwboot ${.OBJDIR}/cd-dir/${OSREV}/${MACHINE}
 
+	echo 'm 1	sun4' > ${.OBJDIR}/cd-dir/.slicemapfile
+	echo 'm 2	sun4c' >> ${.OBJDIR}/cd-dir/.slicemapfile
+	echo 'm 3	sun4m' >> ${.OBJDIR}/cd-dir/.slicemapfile
+	echo 'm 4	sun4d' >> ${.OBJDIR}/cd-dir/.slicemapfile
+	echo 'm 5	sun4u' >> ${.OBJDIR}/cd-dir/.slicemapfile
+	echo 'm 5	sun4us' >> ${.OBJDIR}/cd-dir/.slicemapfile
+	echo 'm 6	sun4v' >> ${.OBJDIR}/cd-dir/.slicemapfile
 	mkhybrid -R -T -L -d -D -N \
 	    -A "OpenBSD ${OSREV} ${MACHINE} Install CD" \
 	    -P "Copyright (c) `date +%Y` Theo de Raadt, The OpenBSD project" \

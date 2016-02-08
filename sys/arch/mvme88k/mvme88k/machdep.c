@@ -1,4 +1,4 @@
-/* $OpenBSD: machdep.c,v 1.192 2007/06/06 17:15:12 deraadt Exp $	*/
+/* $OpenBSD: machdep.c,v 1.210 2008/01/23 16:37:57 jsing Exp $	*/
 /*
  * Copyright (c) 1998, 1999, 2000, 2001 Steve Murphree, Jr.
  * Copyright (c) 1996 Nivas Madhur
@@ -77,6 +77,9 @@
 #ifdef M88100
 #include <machine/m88100.h>
 #endif
+#ifdef MVME188
+#include <mvme88k/dev/sysconvar.h>
+#endif
 
 #include <dev/cons.h>
 
@@ -95,17 +98,14 @@ void	consinit(void);
 void	dumpconf(void);
 void	dumpsys(void);
 int	getcpuspeed(struct mvmeprom_brdid *);
-u_int	getipl(void);
 void	identifycpu(void);
 void	mvme_bootstrap(void);
 void	mvme88k_vector_init(u_int32_t *, u_int32_t *);
 void	myetheraddr(u_char *);
 void	savectx(struct pcb *);
 void	secondary_main(void);
-void	secondary_pre_main(void);
+vaddr_t	secondary_pre_main(void);
 void	_doboot(void);
-
-extern void setlevel(unsigned int);
 
 extern void	m187_bootstrap(void);
 extern vaddr_t	m187_memsize(void);
@@ -135,7 +135,7 @@ struct vm_map *exec_map = NULL;
 struct vm_map *phys_map = NULL;
 
 #ifdef MULTIPROCESSOR
-__cpu_simple_lock_t cpu_mutex = __SIMPLELOCK_UNLOCKED;
+__cpu_simple_lock_t cpu_boot_mutex;
 #endif
 
 /*
@@ -166,7 +166,6 @@ int boothowto;					/* set in locore.S */
 int bootdev;					/* set in locore.S */
 int cputyp;					/* set in locore.S */
 int brdtyp;					/* set in locore.S */
-int cpumod;					/* set in mvme_bootstrap() */
 int cpuspeed = 25;				/* safe guess */
 
 vaddr_t first_addr;
@@ -191,7 +190,7 @@ struct consdev bootcons = {
 	bootcnpollc,
 	NULL,
 	makedev(14, 0),
-	CN_NORMAL,
+	CN_LOWPRI,
 };
 
 /*
@@ -258,10 +257,8 @@ getcpuspeed(struct mvmeprom_brdid *brdid)
 #endif
 #ifdef MVME197
 	case BRD_197:
-		if (speed == 40 || speed == 50)
-			return speed;
-		speed = 50;
-		break;
+		/* we already computed the speed in m197_bootstrap() */
+		return cpuspeed;
 #endif
 	}
 
@@ -330,7 +327,7 @@ cpu_startup()
 	 * Initialize error message buffer (at end of core).
 	 * avail_end was pre-decremented in mvme_bootstrap() to compensate.
 	 */
-	for (i = 0; i < btoc(MSGBUFSIZE); i++)
+	for (i = 0; i < atop(MSGBUFSIZE); i++)
 		pmap_kenter_pa((paddr_t)msgbufp + i * PAGE_SIZE,
 		    avail_end + i * PAGE_SIZE, VM_PROT_READ | VM_PROT_WRITE);
 	pmap_update(pmap_kernel());
@@ -341,8 +338,8 @@ cpu_startup()
 	 */
 	printf(version);
 	identifycpu();
-	printf("real mem = %u (%uMB)\n", ctob(physmem),
-	    ctob(physmem)/1024/1024);
+	printf("real mem = %u (%uMB)\n", ptoa(physmem),
+	    ptoa(physmem)/1024/1024);
 
 	/*
 	 * Find out how much space we need, allocate it,
@@ -545,7 +542,7 @@ dumpconf(void)
 
 	/* mvme88k only uses a single segment. */
 	cpu_kcore_hdr.ram_segs[0].start = 0;
-	cpu_kcore_hdr.ram_segs[0].size = ctob(physmem);
+	cpu_kcore_hdr.ram_segs[0].size = ptoa(physmem);
 	cpu_kcore_hdr.cputype = cputyp;
 
 	/*
@@ -680,14 +677,15 @@ abort:
 
 /*
  * Secondary CPU early initialization routine.
- * Determine CPU number and set it, then allocate the idle pcb (and stack).
+ * Determine CPU number and set it, then allocate the startup stack.
  *
  * Running on a minimal stack here, with interrupts disabled; do nothing fancy.
  */
-void
+vaddr_t
 secondary_pre_main()
 {
 	struct cpu_info *ci;
+	vaddr_t init_stack;
 
 	set_cpu_number(cmmu_cpu_number()); /* Determine cpu number by CMMU */
 	ci = curcpu();
@@ -701,37 +699,45 @@ secondary_pre_main()
 	pmap_bootstrap_cpu(ci->ci_cpuid);
 
 	/*
-	 * Allocate UPAGES contiguous pages for the idle PCB and stack.
+	 * Allocate UPAGES contiguous pages for the startup stack.
 	 */
-	ci->ci_idle_pcb = (struct pcb *)uvm_km_zalloc(kernel_map, USPACE);
-	if (ci->ci_idle_pcb == NULL) {
-		printf("cpu%d: unable to allocate idle stack\n", ci->ci_cpuid);
+	init_stack = uvm_km_zalloc(kernel_map, USPACE);
+	if (init_stack == (vaddr_t)NULL) {
+		printf("cpu%d: unable to allocate startup stack\n",
+		    ci->ci_cpuid);
+		__cpu_simple_unlock(&cpu_boot_mutex);
+		for (;;) ;
 	}
+
+	return (init_stack);
 }
 
 /*
  * Further secondary CPU initialization.
  *
- * We are now running on our idle stack, with proper page tables.
+ * We are now running on our startup stack, with proper page tables.
  * There is nothing to do but display some details about the CPU and its CMMUs.
  */
 void
 secondary_main()
 {
 	struct cpu_info *ci = curcpu();
+	int s;
 
 	cpu_configuration_print(0);
 	ncpus++;
-	__cpu_simple_unlock(&cpu_mutex);
+
+	__cpu_simple_unlock(&cpu_boot_mutex);
 
 	microuptime(&ci->ci_schedstate.spc_runtime);
 	ci->ci_curproc = NULL;
+	SET(ci->ci_flags, CIF_ALIVE);
 
-	/*
-	 * Upon return, the secondary cpu bootstrap code in locore will
-	 * enter the idle loop, waiting for some food to process on this
-	 * processor.
-	 */
+	set_psr(get_psr() & ~PSR_IND);
+	spl0();
+
+	SCHED_LOCK(s);
+	cpu_switchto(NULL, sched_chooseproc());
 }
 
 #endif	/* MULTIPROCESSOR */
@@ -764,38 +770,39 @@ intr_findvec(int start, int end, int skip)
 }
 
 /*
- * Try to insert ihand in the list of handlers for vector vec.
+ * Try to insert ih in the list of handlers for vector vec.
  */
 int
-intr_establish(int vec, struct intrhand *ihand, const char *name)
+intr_establish(int vec, struct intrhand *ih, const char *name)
 {
 	struct intrhand *intr;
 	intrhand_t *list;
 
-	if (vec < 0 || vec >= NVMEINTR) {
-#ifdef DIAGNOSTIC
-		panic("intr_establish: vec (0x%x) not between 0x00 and 0xff",
-		      vec);
-#endif /* DIAGNOSTIC */
-		return (EINVAL);
-	}
-
 	list = &intr_handlers[vec];
 	if (!SLIST_EMPTY(list)) {
 		intr = SLIST_FIRST(list);
-		if (intr->ih_ipl != ihand->ih_ipl) {
+		if (intr->ih_ipl != ih->ih_ipl) {
 #ifdef DIAGNOSTIC
 			panic("intr_establish: there are other handlers with "
 			    "vec (0x%x) at ipl %x, but you want it at %x",
-			    vec, intr->ih_ipl, ihand->ih_ipl);
+			    vec, intr->ih_ipl, ih->ih_ipl);
 #endif /* DIAGNOSTIC */
 			return (EINVAL);
 		}
 	}
 
-	evcount_attach(&ihand->ih_count, name, (void *)&ihand->ih_ipl,
+	evcount_attach(&ih->ih_count, name, (void *)&ih->ih_ipl,
 	    &evcount_intr);
-	SLIST_INSERT_HEAD(list, ihand, ih_link);
+	SLIST_INSERT_HEAD(list, ih, ih_link);
+
+#ifdef MVME188
+	/*
+	 * Enable VME interrupt source for this level.
+	 */
+	if (brdtyp == BRD_188)
+		syscon_intsrc_enable(INTSRC_VME + (ih->ih_ipl - 1), ih->ih_ipl);
+#endif
+
 	return (0);
 }
 
@@ -869,6 +876,8 @@ cpu_sysctl(name, namelen, oldp, oldlenp, newp, newlen, p)
 			consdev = NODEV;
 		return (sysctl_rdstruct(oldp, oldlenp, newp, &consdev,
 		    sizeof consdev));
+	case CPU_CPUTYPE:
+		return (sysctl_rdint(oldp, oldlenp, newp, cputyp));
 	default:
 		return (EOPNOTSUPP);
 	}
@@ -889,16 +898,17 @@ void
 mvme88k_vector_init(u_int32_t *vbr, u_int32_t *vectors)
 {
 	extern void vector_init(u_int32_t *, u_int32_t *);	/* gross */
+	int i;
 
 	/* Save BUG vector */
-	bugvec[0] = vbr[MVMEPROM_VECTOR * 2 + 0];
-	bugvec[1] = vbr[MVMEPROM_VECTOR * 2 + 1];
+	for (i = 0; i < 16 * 2; i++)
+		bugvec[i] = vbr[MVMEPROM_VECTOR * 2 + i];
 
 	vector_init(vbr, vectors);
 
 	/* Save new BUG vector */
-	sysbugvec[0] = vbr[MVMEPROM_VECTOR * 2 + 0];
-	sysbugvec[1] = vbr[MVMEPROM_VECTOR * 2 + 1];
+	for (i = 0; i < 16 * 2; i++)
+		sysbugvec[i] = vbr[MVMEPROM_VECTOR * 2 + i];
 }
 
 /*
@@ -971,11 +981,12 @@ mvme_bootstrap()
 		break;
 #endif
 	}
-	physmem = btoc(last_addr);
+	physmem = atop(last_addr);
 
 	setup_board_config();
 	master_cpu = cmmu_init();
 	set_cpu_number(master_cpu);
+	SET(curcpu()->ci_flags, CIF_ALIVE | CIF_PRIMARY);
 
 #ifdef M88100
 	if (CPU_IS88100) {
@@ -1005,7 +1016,7 @@ mvme_bootstrap()
 	printf("MVME%x boot: memory from 0x%x to 0x%x\n",
 	    brdtyp, avail_start, avail_end);
 #endif
-	pmap_bootstrap((vaddr_t)trunc_page((unsigned)&kernelstart));
+	pmap_bootstrap((vaddr_t)trunc_page((vaddr_t)&kernelstart));
 
 	/*
 	 * Tell the VM system about available physical memory.
@@ -1028,6 +1039,7 @@ mvme_bootstrap()
 void
 cpu_boot_secondary_processors()
 {
+	struct cpu_info *ci = curcpu();
 	cpuid_t cpu;
 	int rc;
 	extern void secondary_start(void);
@@ -1041,11 +1053,21 @@ cpu_boot_secondary_processors()
 	case BRD_197:
 #endif
 		for (cpu = 0; cpu < max_cpus; cpu++) {
-			if (cpu != curcpu()->ci_cpuid) {
+			if (cpu != ci->ci_cpuid) {
+				__cpu_simple_lock(&cpu_boot_mutex);
 				rc = spin_cpu(cpu, (vaddr_t)secondary_start);
-				if (rc != 0 && rc != FORKMPU_NO_MPU)
+				switch (rc) {
+				case 0:
+					__cpu_simple_lock(&cpu_boot_mutex);
+					break;
+				default:
 					printf("cpu%d: spin_cpu error %d\n",
 					    cpu, rc);
+					/* FALLTHROUGH */
+				case FORKMPU_NO_MPU:
+					break;
+				}
+				__cpu_simple_unlock(&cpu_boot_mutex);
 			}
 		}
 		break;
@@ -1065,7 +1087,7 @@ bootcnprobe(cp)
 	struct consdev *cp;
 {
 	cp->cn_dev = makedev(14, 0);
-	cp->cn_pri = CN_NORMAL;
+	cp->cn_pri = CN_LOWPRI;
 }
 
 void
@@ -1093,53 +1115,22 @@ bootcnputc(dev, c)
 		bugoutchr(c);
 }
 
-u_int
+int
 getipl(void)
 {
-	u_int curspl, psr;
-
-	disable_interrupt(psr);
-	curspl = (*md_getipl)();
-	set_psr(psr);
-	return curspl;
+	return (int)(*md_getipl)();
 }
 
-unsigned
-setipl(unsigned level)
+int
+setipl(int level)
 {
-	u_int curspl, psr;
-
-	disable_interrupt(psr);
-	curspl = (*md_setipl)(level);
-
-	/*
-	 * The flush pipeline is required to make sure the above change gets
-	 * through the data pipe and to the hardware; otherwise, the next
-	 * bunch of instructions could execute at the wrong spl protection.
-	 */
-	flush_pipeline();
-
-	set_psr(psr);
-	return curspl;
+	return (int)(*md_setipl)((u_int)level);
 }
 
-unsigned
-raiseipl(unsigned level)
+int
+raiseipl(int level)
 {
-	u_int curspl, psr;
-
-	disable_interrupt(psr);
-	curspl = (*md_raiseipl)(level);
-
-	/*
-	 * The flush pipeline is required to make sure the above change gets
-	 * through the data pipe and to the hardware; otherwise, the next
-	 * bunch of instructions could execute at the wrong spl protection.
-	 */
-	flush_pipeline();
-
-	set_psr(psr);
-	return curspl;
+	return (int)(*md_raiseipl)((u_int)level);
 }
 
 #ifdef MULTIPROCESSOR
@@ -1150,21 +1141,22 @@ m88k_send_ipi(int ipi, cpuid_t cpu)
 	struct cpu_info *ci;
 
 	ci = &m88k_cpus[cpu];
-	if (ci->ci_alive)
+	if (ISSET(ci->ci_flags, CIF_ALIVE))
 		(*md_send_ipi)(ipi, cpu);
 }
 
 void
 m88k_broadcast_ipi(int ipi)
 {
+	struct cpu_info *us = curcpu();
 	struct cpu_info *ci;
 	CPU_INFO_ITERATOR cii;
 
 	CPU_INFO_FOREACH(cii, ci) {
-		if (ci == curcpu())
+		if (ci == us)
 			continue;
 
-		if (ci->ci_alive)
+		if (ISSET(ci->ci_flags, CIF_ALIVE))
 			(*md_send_ipi)(ipi, ci->ci_cpuid);
 	}
 }

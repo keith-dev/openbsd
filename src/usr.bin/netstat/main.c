@@ -1,4 +1,4 @@
-/*	$OpenBSD: main.c,v 1.68 2007/07/25 11:50:47 claudio Exp $	*/
+/*	$OpenBSD: main.c,v 1.74 2008/01/03 21:01:40 claudio Exp $	*/
 /*	$NetBSD: main.c,v 1.9 1996/05/07 02:55:02 thorpej Exp $	*/
 
 /*
@@ -30,20 +30,6 @@
  * SUCH DAMAGE.
  */
 
-#ifndef lint
-char copyright[] =
-"@(#) Copyright (c) 1983, 1988, 1993\n\
-	Regents of the University of California.  All rights reserved.\n";
-#endif /* not lint */
-
-#ifndef lint
-#if 0
-static char sccsid[] = "from: @(#)main.c	8.4 (Berkeley) 3/1/94";
-#else
-static char *rcsid = "$OpenBSD: main.c,v 1.68 2007/07/25 11:50:47 claudio Exp $";
-#endif
-#endif /* not lint */
-
 #include <sys/param.h>
 #include <sys/file.h>
 #include <sys/protosw.h>
@@ -67,169 +53,85 @@ static char *rcsid = "$OpenBSD: main.c,v 1.68 2007/07/25 11:50:47 claudio Exp $"
 #include "netstat.h"
 
 struct nlist nl[] = {
-#define N_MBSTAT	0
-	{ "_mbstat" },
-#define N_IPSTAT	1
-	{ "_ipstat" },
-#define N_TCBTABLE	2
+#define N_TCBTABLE	0
 	{ "_tcbtable" },
-#define N_TCPSTAT	3
-	{ "_tcpstat" },
-#define N_UDBTABLE	4
+#define N_UDBTABLE	1
 	{ "_udbtable" },
-#define N_UDPSTAT	5
-	{ "_udpstat" },
-#define N_IFNET		6
-	{ "_ifnet" },
-#define N_ICMPSTAT	7
-	{ "_icmpstat" },
-#define N_RTSTAT	8
-	{ "_rtstat" },
-#define N_UNIXSW	9
-	{ "_unixsw" },
-#define N_RTREE		10
-	{ "_rt_tables"},
-#define N_FILE		11
-	{ "_file" },
-#define N_IGMPSTAT	12
-	{ "_igmpstat" },
-#define N_MRTPROTO	13
-	{ "_ip_mrtproto" },
-#define N_MRTSTAT	14
-	{ "_mrtstat" },
-#define N_MFCHASHTBL	15
-	{ "_mfchashtbl" },
-#define N_MFCHASH	16
-	{ "_mfchash" },
-#define N_VIFTABLE	17
-	{ "_viftable" },
-#define N_AHSTAT	18
-	{ "_ahstat"},
-#define N_ESPSTAT	19
-	{ "_espstat"},
-#define N_IP4STAT	20
-	{ "_ipipstat"},
-#define N_DDPSTAT	21
-	{ "_ddpstat"},
-#define N_DDPCB		22
+#define N_DDPCB		2
 	{ "_ddpcb"},
-#define N_ETHERIPSTAT	23
-	{ "_etheripstat"},
-#define N_IP6STAT	24
-	{ "_ip6stat" },
-#define N_ICMP6STAT	25
-	{ "_icmp6stat" },
-#define N_PIM6STAT	26
-	{ "_pim6stat" },
-#define N_MRT6PROTO	27
-	{ "_ip6_mrtproto" },
-#define N_MRT6STAT	28
-	{ "_mrt6stat" },
-#define N_MF6CTABLE	29
+#define N_UNIXSW	3
+	{ "_unixsw" },
+
+#define N_MFCHASHTBL	4
+	{ "_mfchashtbl" },
+#define N_MFCHASH	5
+	{ "_mfchash" },
+#define N_VIFTABLE	6
+	{ "_viftable" },
+
+#define N_MF6CTABLE	7
 	{ "_mf6ctable" },
-#define N_MIF6TABLE	30
+#define N_MIF6TABLE	8
 	{ "_mif6table" },
-#define N_MBPOOL	31
-	{ "_mbpool" },
-#define N_MCLPOOL	32
-	{ "_mclpool" },
-#define N_IPCOMPSTAT	33
-	{ "_ipcompstat" },
-#define N_RIP6STAT	34
-	{ "_rip6stat" },
-#define N_CARPSTAT	35
-	{ "_carpstats" },
-#define N_RAWIPTABLE	36
-	{ "_rawcbtable" },
-#define N_RAWIP6TABLE	37
-	{ "_rawin6pcbtable" },
-#define N_PFSYNCSTAT	38
-	{ "_pfsyncstats" },
-#define N_PIMSTAT	39
-	{ "_pimstat" },
-#define N_AF2RTAFIDX	40
-	{ "_af2rtafidx" },
-#define N_RTBLIDMAX	41
-	{ "_rtbl_id_max" },
-#define N_RTMASK	42
+
+#define N_RTREE		9
+	{ "_rt_tables"},
+#define N_RTMASK	10
 	{ "_mask_rnhead" },
+#define N_AF2RTAFIDX	11
+	{ "_af2rtafidx" },
+#define N_RTBLIDMAX	12
+	{ "_rtbl_id_max" },
+
+#define N_RAWIPTABLE	13
+	{ "_rawcbtable" },
+#define N_RAWIP6TABLE	14
+	{ "_rawin6pcbtable" },
+
 	{ ""}
 };
 
 struct protox {
 	u_char	pr_index;			/* index into nlist of cb head */
-	u_char	pr_sindex;			/* index into nlist of stat block */
-	u_char	pr_wanted;			/* 1 if wanted, 0 otherwise */
 	void	(*pr_cblocks)(u_long, char *);	/* control blocks printing routine */
-	void	(*pr_stats)(u_long, char *);	/* statistics printing routine */
+	void	(*pr_stats)(char *);		/* statistics printing routine */
 	void	(*pr_dump)(u_long);		/* pcb printing routine */
 	char	*pr_name;			/* well-known name */
 } protox[] = {
-	{ N_TCBTABLE,	N_TCPSTAT,	1,	protopr,
-	  tcp_stats,	tcp_dump,	"tcp" },
-	{ N_UDBTABLE,	N_UDPSTAT,	1,	protopr,
-	  udp_stats,	0,		"udp" },
-	{ N_RAWIPTABLE,	N_IPSTAT,	1,	protopr,
-	  ip_stats,	0,		"ip" },
-	{ -1,		N_ICMPSTAT,	1,	0,
-	  icmp_stats,	0,		"icmp" },
-	{ -1,		N_IGMPSTAT,	1,	0,
-	  igmp_stats,	0,		"igmp" },
-	{ -1,		N_AHSTAT,	1,	0,
-	  ah_stats,	0,		"ah" },
-	{ -1,		N_ESPSTAT,	1,	0,
-	  esp_stats,	0,		"esp" },
-	{ -1,		N_IP4STAT,	1,	0,
-	  ipip_stats,	0,		"ipencap" },
-	{ -1,		N_ETHERIPSTAT,	1,	0,
-	  etherip_stats,0,		"etherip" },
-	{ -1,		N_IPCOMPSTAT,	1,	0,
-	  ipcomp_stats,	0,		"ipcomp" },
-	{ -1,		N_CARPSTAT,	1,	0,
-	  carp_stats,	0,		"carp" },
-	{ -1,		N_PFSYNCSTAT,	1,	0,
-	  pfsync_stats,	0,		"pfsync" },
-	{ -1,		N_PIMSTAT,	1,	0,
-	  pim_stats,	0,		"pim" },
-	{ -1,		-1,		0,	0,
-	  0,		0,		0 }
+	{ N_TCBTABLE,	protopr,	tcp_stats,	tcp_dump,	"tcp" },
+	{ N_UDBTABLE,	protopr,	udp_stats,	NULL,		"udp" },
+	{ N_RAWIPTABLE,	protopr,	ip_stats,	NULL,		"ip" },
+	{ -1,		NULL,		icmp_stats,	NULL,		"icmp" },
+	{ -1,		NULL,		igmp_stats,	NULL,		"igmp" },
+	{ -1,		NULL,		ah_stats,	NULL,		"ah" },
+	{ -1,		NULL,		esp_stats,	NULL,		"esp" },
+	{ -1,		NULL,		ipip_stats,	NULL,		"ipencap" },
+	{ -1,		NULL,		etherip_stats,	NULL,		"etherip" },
+	{ -1,		NULL,		ipcomp_stats,	NULL,		"ipcomp" },
+	{ -1,		NULL,		carp_stats,	NULL,		"carp" },
+	{ -1,		NULL,		pfsync_stats,	NULL,		"pfsync" },
+	{ -1,		NULL,		pim_stats,	NULL,		"pim" },
+	{ -1,		NULL,		NULL,		NULL,		NULL }
 };
 
-#ifdef INET6
 struct protox ip6protox[] = {
-	{ N_TCBTABLE,	N_TCPSTAT,	1,	ip6protopr,
-	  0,		tcp_dump,	"tcp" },
-	{ N_UDBTABLE,	N_UDPSTAT,	1,	ip6protopr,
-	  0,		0,		"udp" },
-	{ N_RAWIP6TABLE,N_IP6STAT,	1,	ip6protopr,
-	  ip6_stats,	0,		"ip6" },
-	{ -1,		N_ICMP6STAT,	1,	0,
-	  icmp6_stats,	0,		"icmp6" },
-	{ -1,		N_PIM6STAT,	1,	0,
-	  pim6_stats,	0,		"pim6" },
-	{ -1,		N_RIP6STAT,	1,	0,
-	  rip6_stats,	0,		"rip6" },
-	{ -1,		-1,		0,	0,
-	  0,		0,		0 }
+	{ N_TCBTABLE,	ip6protopr,	NULL,		tcp_dump,	"tcp" },
+	{ N_UDBTABLE,	ip6protopr,	NULL,		NULL,		"udp" },
+	{ N_RAWIP6TABLE,ip6protopr,	ip6_stats,	NULL,		"ip6" },
+	{ -1,		NULL,		icmp6_stats,	NULL,		"icmp6" },
+	{ -1,		NULL,		pim6_stats,	NULL,		"pim6" },
+	{ -1,		NULL,		rip6_stats,	NULL,		"rip6" },
+	{ -1,		NULL,		NULL,		NULL,		NULL }
 };
-#endif
 
 struct protox atalkprotox[] = {
-	{ N_DDPCB,	N_DDPSTAT,	1,	atalkprotopr,
-	  ddp_stats,	0,		"ddp" },
-	{ -1,		-1,		0,	0,
-	  0,		0,		0 }
+	{ N_DDPCB,	atalkprotopr,	ddp_stats,	NULL,		"ddp" },
+	{ -1,		NULL,		NULL,		NULL,		NULL }
 };
 
-#ifndef INET6
-struct protox *protoprotox[] = {
-	protox, atalkprotox, NULL
-};
-#else
 struct protox *protoprotox[] = {
 	protox, ip6protox, atalkprotox, NULL
 };
-#endif
 
 static void printproto(struct protox *, char *);
 static void usage(void);
@@ -398,16 +300,7 @@ main(int argc, char *argv[])
 	if (nlistf != NULL || memf != NULL || Pflag)
 		if (setresgid(gid, gid, gid) == -1)
 			err(1, "setresgid");
-	if (nlistf == NULL && memf == NULL && rflag && !Aflag) {
-		/* printing the routing table no longer needs kvm */
-		if (setresgid(gid, gid, gid) == -1)
-			err(1, "setresgid");
-		if (sflag)
-			rt_stats(1, 0);
-		else
-			p_rttables(af, tableid);
-		exit(0);
-	}
+
 	if ((kvmd = kvm_openfiles(nlistf, memf, NULL, O_RDONLY,
 	    buf)) == NULL) {
 		fprintf(stderr, "%s: kvm_open: %s\n", __progname, buf);
@@ -445,8 +338,7 @@ main(int argc, char *argv[])
 		exit(1);
 	}
 	if (mflag) {
-		mbpr(nl[N_MBSTAT].n_value, nl[N_MBPOOL].n_value,
-		    nl[N_MCLPOOL].n_value);
+		mbpr();
 		exit(0);
 	}
 	if (pflag) {
@@ -470,42 +362,35 @@ main(int argc, char *argv[])
 	 */
 	sethostent(1);
 	setnetent(1);
-	
+
 	if (iflag) {
-		intpr(interval, nl[N_IFNET].n_value);
+		intpr(interval);
 		exit(0);
 	}
 	if (rflag) {
 		if (sflag)
-			rt_stats(0, nl[N_RTSTAT].n_value);
-		else
+			rt_stats();
+		else if (Aflag || nlistf != NULL || memf != NULL)
 			routepr(nl[N_RTREE].n_value, nl[N_RTMASK].n_value,
 			    nl[N_AF2RTAFIDX].n_value, nl[N_RTBLIDMAX].n_value);
+		else
+			p_rttables(af, tableid);
 		exit(0);
 	}
 	if (gflag) {
 		if (sflag) {
 			if (af == AF_INET || af == AF_UNSPEC)
-				mrt_stats(nl[N_MRTPROTO].n_value,
-				    nl[N_MRTSTAT].n_value);
-#ifdef INET6
+				mrt_stats();
 			if (af == AF_INET6 || af == AF_UNSPEC)
-				mrt6_stats(nl[N_MRT6PROTO].n_value,
-				    nl[N_MRT6STAT].n_value);
-#endif
-		}
-		else {
+				mrt6_stats();
+		} else {
 			if (af == AF_INET || af == AF_UNSPEC)
-				mroutepr(nl[N_MRTPROTO].n_value,
-				    nl[N_MFCHASHTBL].n_value,
+				mroutepr(nl[N_MFCHASHTBL].n_value,
 				    nl[N_MFCHASH].n_value,
 				    nl[N_VIFTABLE].n_value);
-#ifdef INET6
 			if (af == AF_INET6 || af == AF_UNSPEC)
-				mroute6pr(nl[N_MRT6PROTO].n_value,
-				    nl[N_MF6CTABLE].n_value,
+				mroute6pr(nl[N_MF6CTABLE].n_value,
 				    nl[N_MIF6TABLE].n_value);
-#endif
 		}
 		exit(0);
 	}
@@ -517,17 +402,15 @@ main(int argc, char *argv[])
 			for (tp = protox; tp->pr_name; tp++)
 				if (strcmp(tp->pr_name, p->p_name) == 0)
 					break;
-			if (tp->pr_name == 0 || tp->pr_wanted == 0)
+			if (tp->pr_name == 0)
 				continue;
 			printproto(tp, p->p_name);
 		}
 		endprotoent();
 	}
-#ifdef INET6
 	if (af == AF_INET6 || af == AF_UNSPEC)
 		for (tp = ip6protox; tp->pr_name; tp++)
 			printproto(tp, tp->pr_name);
-#endif
 	if ((af == AF_UNIX || af == AF_UNSPEC) && !sflag)
 		unixpr(nl[N_UNIXSW].n_value);
 	if (af == AF_APPLETALK || af == AF_UNSPEC)
@@ -544,19 +427,16 @@ main(int argc, char *argv[])
 static void
 printproto(struct protox *tp, char *name)
 {
-	void (*pr)(u_long, char *);
-	u_char i;
-
 	if (sflag) {
-		pr = tp->pr_stats;
-		i = tp->pr_sindex;
+		if (tp->pr_stats != NULL)
+			(*tp->pr_stats)(name);
 	} else {
-		pr = tp->pr_cblocks;
-		i = tp->pr_index;
+		u_char i = tp->pr_index;
+		if (tp->pr_cblocks != NULL &&
+		    i < sizeof(nl) / sizeof(nl[0]) &&
+		    (nl[i].n_value || af != AF_UNSPEC))
+			(*tp->pr_cblocks)(nl[i].n_value, name);
 	}
-	if (pr != NULL && i < sizeof(nl) / sizeof(nl[0]) &&
-	    (nl[i].n_value || af != AF_UNSPEC))
-		(*pr)(nl[i].n_value, name);
 }
 
 /*
@@ -636,7 +516,8 @@ usage(void)
 {
 	(void)fprintf(stderr,
 	    "usage: %s [-Aan] [-f address_family] [-M core] [-N system]\n"
-	    "       %s [-bdFgilmnqrstu] [-f address_family] [-M core] [-N system] [-T tableid]\n"
+	    "       %s [-bdFgilmnqrstu] [-f address_family] [-M core] [-N system]\n"
+	    "               [-T tableid]\n"
 	    "       %s [-bdn] [-I interface] [-M core] [-N system] [-w wait]\n"
 	    "       %s [-M core] [-N system] -P pcbaddr\n"
 	    "       %s [-s] [-M core] [-N system] [-p protocol]\n"

@@ -1,4 +1,4 @@
-/*	$OpenBSD: psycho.c,v 1.52 2007/08/04 16:44:15 kettenis Exp $	*/
+/*	$OpenBSD: psycho.c,v 1.55 2008/01/19 11:13:43 kettenis Exp $	*/
 /*	$NetBSD: psycho.c,v 1.39 2001/10/07 20:30:41 eeh Exp $	*/
 
 /*
@@ -114,6 +114,9 @@ void psycho_map_psycho(struct psycho_softc *, int, bus_addr_t, bus_size_t,
 int psycho_intr_map(struct pci_attach_args *, pci_intr_handle_t *);
 void psycho_identify_pbm(struct psycho_softc *sc, struct psycho_pbm *pp,
     struct pcibus_attach_args *pa);
+
+pcireg_t psycho_conf_read(pci_chipset_tag_t, pcitag_t, int);
+void psycho_conf_write(pci_chipset_tag_t, pcitag_t, int, pcireg_t);
 
 /* base pci_chipset */
 extern struct sparc_pci_chipset _sparc_pci_chipset;
@@ -343,11 +346,10 @@ psycho_attach(struct device *parent, struct device *self, void *aux)
 	/*
 	 * Allocate our psycho_pbm
 	 */
-	pp = sc->sc_psycho_this = malloc(sizeof *pp, M_DEVBUF, M_NOWAIT);
+	pp = sc->sc_psycho_this = malloc(sizeof *pp, M_DEVBUF,
+		M_NOWAIT | M_ZERO);
 	if (pp == NULL)
 		panic("could not allocate psycho pbm");
-
-	memset(pp, 0, sizeof *pp);
 
 	pp->pp_sc = sc;
 
@@ -448,11 +450,9 @@ psycho_attach(struct device *parent, struct device *self, void *aux)
 		 * For the moment, 32KB should be more than enough.
 		 */
 		sc->sc_is = malloc(sizeof(struct iommu_state),
-			M_DEVBUF, M_NOWAIT);
+			M_DEVBUF, M_NOWAIT | M_ZERO);
 		if (sc->sc_is == NULL)
 			panic("psycho_attach: malloc iommu_state");
-
-		memset(sc->sc_is, 0, sizeof *sc->sc_is);
 
 		if (getproplen(sc->sc_node, "no-streaming-cache") < 0) {
 			struct strbuf_ctl *sb = &pp->pp_sb;
@@ -543,6 +543,8 @@ psycho_attach(struct device *parent, struct device *self, void *aux)
 	pba.pba_memt = sc->sc_psycho_this->pp_memt;
 	pba.pba_pc->bustag = sc->sc_configtag;
 	pba.pba_pc->bushandle = sc->sc_configaddr;
+	pba.pba_pc->conf_read = psycho_conf_read;
+	pba.pba_pc->conf_write = psycho_conf_write;
 	pba.pba_pc->intr_map = psycho_intr_map;
 
 	if (sc->sc_mode == PSYCHO_MODE_PSYCHO)
@@ -617,11 +619,9 @@ psycho_set_intr(struct psycho_softc *sc, int ipl, void *handler,
 {
 	struct intrhand *ih;
 
-	ih = (struct intrhand *)malloc(sizeof(struct intrhand),
-	    M_DEVBUF, M_NOWAIT);
+	ih = malloc(sizeof(*ih), M_DEVBUF, M_NOWAIT | M_ZERO);
 	if (ih == NULL)
 		panic("couldn't malloc intrhand");
-	memset(ih, 0, sizeof(struct intrhand));
 	ih->ih_arg = sc;
 	ih->ih_map = mapper;
 	ih->ih_clr = clearer;
@@ -884,12 +884,10 @@ psycho_alloc_bus_tag(struct psycho_pbm *pp,
 	struct psycho_softc *sc = pp->pp_sc;
 	struct sparc_bus_space_tag *bt;
 
-	bt = malloc(sizeof(*bt), M_DEVBUF, M_NOWAIT);
+	bt = malloc(sizeof(*bt), M_DEVBUF, M_NOWAIT | M_ZERO);
 	if (bt == NULL)
 		panic("could not allocate psycho bus tag");
 
-	bzero(bt, sizeof *bt);
-	
 	snprintf(bt->name, sizeof(bt->name), "%s-pbm_%s(%d-%2.2x)",
 	    sc->sc_dev.dv_xname, name, ss, asi); 
 
@@ -913,11 +911,10 @@ psycho_alloc_dma_tag(struct psycho_pbm *pp)
 	bus_dma_tag_t dt, pdt = sc->sc_dmatag;
 
 	dt = (bus_dma_tag_t)malloc(sizeof(struct sparc_bus_dma_tag),
-	    M_DEVBUF, M_NOWAIT);
+	    M_DEVBUF, M_NOWAIT | M_ZERO);
 	if (dt == NULL)
 		panic("could not allocate psycho dma tag");
 
-	bzero(dt, sizeof *dt);
 	dt->_cookie = pp;
 	dt->_parent = pdt;
 	dt->_dmamap_create	= psycho_dmamap_create;
@@ -1053,6 +1050,21 @@ psycho_bus_addr(bus_space_tag_t t, bus_space_tag_t t0, bus_space_handle_t h)
 	}
 
 	return (-1);
+}
+
+
+pcireg_t
+psycho_conf_read(pci_chipset_tag_t pc, pcitag_t tag, int reg)
+{
+	return (bus_space_read_4(pc->bustag, pc->bushandle,
+	    PCITAG_OFFSET(tag) + reg));
+}
+
+void
+psycho_conf_write(pci_chipset_tag_t pc, pcitag_t tag, int reg, pcireg_t data)
+{
+        bus_space_write_4(pc->bustag, pc->bushandle,
+	    PCITAG_OFFSET(tag) + reg, data);
 }
 
 /*
@@ -1247,4 +1259,3 @@ psycho_sabre_dvmamap_sync(bus_dma_tag_t t, bus_dma_tag_t t0, bus_dmamap_t map,
 	if (ops & (BUS_DMASYNC_POSTREAD | BUS_DMASYNC_PREWRITE))
 		membar(MemIssue);
 }
-

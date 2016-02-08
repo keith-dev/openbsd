@@ -1,5 +1,5 @@
 /*	$NetBSD: vmstat.c,v 1.29.4.1 1996/06/05 00:21:05 cgd Exp $	*/
-/*	$OpenBSD: vmstat.c,v 1.104 2006/10/02 23:03:56 pedro Exp $	*/
+/*	$OpenBSD: vmstat.c,v 1.108 2007/12/30 13:29:52 sobrado Exp $	*/
 
 /*
  * Copyright (c) 1980, 1986, 1991, 1993
@@ -40,7 +40,7 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)vmstat.c	8.1 (Berkeley) 6/6/93";
 #else
-static const char rcsid[] = "$OpenBSD: vmstat.c,v 1.104 2006/10/02 23:03:56 pedro Exp $";
+static const char rcsid[] = "$OpenBSD: vmstat.c,v 1.108 2007/12/30 13:29:52 sobrado Exp $";
 #endif
 #endif /* not lint */
 
@@ -92,10 +92,7 @@ struct nlist namelist[] = {
 	{ "_nselcoll" },
 #define X_POOLHEAD	7		/* sysctl */
 	{ "_pool_head" },
-	{ "" },
-};
-
-struct nlist namelist2[] = {
+#define X_KMPAGESFREE	8		/* sysctl */
 	{ "_uvm_km_pages_free" },
 	{ "" },
 };
@@ -128,7 +125,6 @@ void	dopool(void);
 void	dosum(void);
 void	dovmstat(u_int, int);
 void	kread(int, void *, size_t);
-int	kreado(struct nlist *, void *, size_t);
 void	usage(void);
 void	dotimes(void);
 void	doforkst(void);
@@ -216,9 +212,7 @@ main(int argc, char *argv[])
 	 * Discard setgid privileges if not the running kernel so that bad
 	 * guys can't print interesting stuff from kernel memory.
 	 */
-#if notyet
 	if (nlistf != NULL || memf != NULL) {
-#endif
 		kd = kvm_openfiles(nlistf, memf, NULL, O_RDONLY, errbuf);
 		if (kd == 0)
 			errx(1, "kvm_openfiles: %s", errbuf);
@@ -243,10 +237,8 @@ main(int argc, char *argv[])
 			} else
 				errx(1, "kvm_nlist: %s", kvm_geterr(kd));
 		}
-#ifdef notyet
 	} else if (setresgid(gid, gid, gid) == -1)
 		err(1, "setresgid");
-#endif /* notyet */
 
 	mib[0] = CTL_HW;
 	mib[1] = HW_NCPU;
@@ -364,7 +356,8 @@ getuptime(void)
 	return(uptime);
 }
 
-int	hz, hdrcnt;
+int	hz;
+volatile sig_atomic_t hdrcnt;
 
 void
 dovmstat(u_int interval, int reps)
@@ -415,9 +408,9 @@ dovmstat(u_int interval, int reps)
 		    total.t_rq - 1, total.t_dw + total.t_pw, total.t_sw);
 #define	rate(x)	(((x) + halfuptime) / uptime)	/* round */
 #define pgtok(a) ((a) * ((unsigned int)uvmexp.pagesize >> 10))
-		(void)printf("%7u%7u ",
+		(void)printf("%7u %7u ",
 		    pgtok(total.t_avm), pgtok(total.t_free));
-		(void)printf("%5u ", rate(uvmexp.faults - ouvmexp.faults));
+		(void)printf("%4u ", rate(uvmexp.faults - ouvmexp.faults));
 		(void)printf("%3u ", rate(uvmexp.pdreact - ouvmexp.pdreact));
 		(void)printf("%3u ", rate(uvmexp.pageins - ouvmexp.pageins));
 		(void)printf("%3u %3u ",
@@ -449,16 +442,16 @@ printhdr(void)
 {
 	int i;
 
-	(void)printf(" procs   memory        page%*s", 20, "");
+	(void)printf(" procs    memory       page%*s", 20, "");
 	if (ndrives > 0)
-		(void)printf("%s %*straps         cpu\n",
+		(void)printf("%s %*straps          cpu\n",
 		   ((ndrives > 1) ? "disks" : "disk"),
-		   ((ndrives > 1) ? ndrives * 4 - 4 : 0), "");
+		   ((ndrives > 1) ? ndrives * 4 - 5 : 0), "");
 	else
-		(void)printf("%*s  traps          cpu\n",
+		(void)printf("%*s  traps           cpu\n",
 		   ndrives * 3, "");
 
-	(void)printf(" r b w    avm    fre   flt  re  pi  po  fr  sr ");
+	(void)printf(" r b w    avm     fre  flt  re  pi  po  fr  sr ");
 	for (i = 0; i < dk_ndrive; i++)
 		if (dk_select[i])
 			(void)printf("%c%c%c ", dr_name[i][0],
@@ -1064,8 +1057,18 @@ dopool_sysctl(void)
 
 	inuse /= 1024;
 	total /= 1024;
-	if (!kreado(namelist2, &kmfp, sizeof(kmfp)))
-		total += kmfp * (getpagesize() / 1024);
+	if (nlistf == NULL && memf == NULL) {
+		int mib[] = { CTL_VM, VM_KMPAGESFREE };
+		size_t size = sizeof(kmfp);
+
+		if (sysctl(mib, 2, &kmfp, &size, NULL, 0) < 0) {
+			warn("could not read uvm.kmpagesfree");
+			return;
+		}
+	} else {
+		kread(X_KMPAGESFREE, &kmfp, sizeof(kmfp));
+	}
+	total += kmfp * (getpagesize() / 1024);
 	printf("\nIn use %ldK, total allocated %ldK; utilization %.1f%%\n",
 	    inuse, total, (double)(100 * inuse) / total);
 }
@@ -1110,8 +1113,8 @@ dopool_kvm(void)
 
 	inuse /= 1024;
 	total /= 1024;
-	if (!kreado(namelist2, &kmfp, sizeof(kmfp)))
-		total += kmfp * (getpagesize() / 1024);
+	kread(X_KMPAGESFREE, &kmfp, sizeof(kmfp));
+	total += kmfp * (getpagesize() / 1024);
 	printf("\nIn use %ldK, total allocated %ldK; utilization %.1f%%\n",
 	    inuse, total, (double)(100 * inuse) / total);
 }
@@ -1136,26 +1139,6 @@ kread(int nlx, void *addr, size_t size)
 			++sym;
 		errx(1, "%s: %s", sym, kvm_geterr(kd));
 	}
-}
-
-/*
- * kreado reads something from the kernel, given its nlist index.
- */
-int
-kreado(struct nlist *nl, void *addr, size_t size)
-{
-	int c;
-
-	if ((c = kvm_nlist(kd, nl)) != 0)
-		return (c);
-
-	if (nl->n_type == 0 || nl->n_value == 0)
-		return (-1);
-
-	if (kvm_read(kd, nl->n_value, addr, size) != size)
-		return (-1);
-
-	return (0);
 }
 
 void

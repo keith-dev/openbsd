@@ -1,4 +1,4 @@
-.\" $OpenBSD: rum.4,v 1.27 2007/05/31 19:19:51 jmc Exp $
+.\" $OpenBSD: rum.4,v 1.32 2008/03/04 13:23:42 jmc Exp $
 .\"
 .\" Copyright (c) 2005-2007
 .\"	Damien Bergamini <damien.bergamini@free.fr>
@@ -15,7 +15,7 @@
 .\" ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
 .\" OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 .\"
-.Dd $Mdocdate: May 31 2007 $
+.Dd $Mdocdate: March 4 2008 $
 .Os
 .Dt RUM 4
 .Sh NAME
@@ -172,6 +172,37 @@ Force 802.11b operation.
 .It Cm 11g
 Force 802.11g operation.
 .El
+.It Cm nwflag Ar flag
+Set a specified flag for the wireless network interface.
+The flag name can be either
+.Ql hidenwid
+or
+.Ql nobridge .
+The
+.Ql hidenwid
+flag will hide the network ID (ESSID) in beacon frames when operating
+in Host AP mode.
+It will also prevent responses to probe requests with an unspecified
+network ID.
+The
+.Ql nobridge
+flag will disable the direct bridging of frames between associated
+nodes when operating in Host AP mode.
+Setting this flag will block and filter direct inter-station
+communications.
+.Pp
+Note that the
+.Ql hidenwid
+and
+.Ql nobridge
+options do not provide any security.
+The hidden network ID will be sent in clear text by associating
+stations and can be easily discovered with tools like
+.Xr tcpdump 8
+and
+.Xr hostapd 8 .
+.It Fl nwflag Ar flag
+Remove a specified flag for the wireless network interface.
 .It Cm nwid Ar id
 Set the network ID.
 The
@@ -231,12 +262,14 @@ The following adapters should work:
 .It Abocom WUG2700
 .It Airlink101 AWLL5025
 .It ASUS WL-167g ver 2
+.It Atlantis Land A02-UP1-W54
 .It Belkin F5D7050 ver 3
 .It Belkin F5D9050 ver 3
 .It Buffalo WLI-U2-SG54HP
 .It Buffalo WLI-U2-G54HP
 .It CNet CWD-854 ver F
 .It Conceptronic C54RU ver 2
+.It Corega CG-WLUSB2GL
 .It Corega CG-WLUSB2GO
 .It "D-Link DWL-G122 rev C1"
 .It D-Link WUA-1340
@@ -298,7 +331,7 @@ Join an existing BSS network,
 .Ed
 .Sh DIAGNOSTICS
 .Bl -diag
-.It "rum%d: failed loadfirmware of file %s"
+.It "rum%d: error %d, could not read firmware %s"
 For some reason, the driver was unable to read the microcode file from the
 filesystem.
 The file might be missing or corrupted.
@@ -321,7 +354,7 @@ This should not happen.
 .Xr ifconfig 8
 .Pp
 Ralink Technology:
-.Pa http://www.ralinktech.com.tw
+.Pa http://www.ralinktech.com/
 .Sh HISTORY
 The
 .Nm

@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile.inc,v 1.80 2006/10/24 04:40:59 tedu Exp $
+#	$OpenBSD: Makefile.inc,v 1.83 2008/01/05 02:11:44 deraadt Exp $
 #	$NetBSD: Makefile.inc,v 1.35 1995/10/16 23:49:07 jtc Exp $
 #	@(#)Makefile.inc	8.1 (Berkeley) 6/17/93
 
@@ -13,11 +13,15 @@ SRCS+=	Ovfork.S brk.S cerror.S exect.S fork.S rfork.S \
 LSRCS+=	Lint_Ovfork.c Lint_brk.c Lint_exect.c Lint_fork.c \
 	Lint_rfork.c Lint_sbrk.c \
 	Lint_sigpending.c Lint_sigprocmask.c Lint_sigreturn.c \
-	Lint_sigsuspend.c Lint_syscall.c Lint_crt.c
+	Lint_sigsuspend.c Lint_syscall.c Lint_crt.c Lint_environ.c \
+	Lint_setjmp.c Lint_longjmp.c \
+	Lint_sigsetjmp.c Lint_siglongjmp.c
 DPSRCS+= Lint_Ovfork.c Lint_brk.c Lint_exect.c Lint_fork.c \
 	Lint_sbrk.c \
 	Lint_sigpending.c Lint_sigprocmask.c Lint_sigreturn.c \
-	Lint_sigsuspend.c Lint_syscall.c Lint_crt.c
+	Lint_sigsuspend.c Lint_syscall.c Lint_crt.c Lint_environ.c \
+	Lint_setjmp.c Lint_longjmp.c \
+	Lint_sigsetjmp.c Lint_siglongjmp.c
 
 # glue to provide compatibility between GCC 1.X and 2.X and for compat
 # with old syscall interfaces.
@@ -57,7 +61,7 @@ ASM=	accept.o access.o acct.o adjfreq.o adjtime.o bind.o chdir.o chflags.o \
 	setuid.o shmat.o shmctl.o shmdt.o shmget.o shutdown.o sigaction.o \
 	sigaltstack.o socket.o socketpair.o stat.o statfs.o swapctl.o \
 	symlink.o sync.o sysarch.o umask.o unlink.o unmount.o \
-	utimes.o vadvise.o wait4.o write.o writev.o xfspioctl.o __semctl.o \
+	utimes.o wait4.o write.o writev.o xfspioctl.o __semctl.o \
 	__syscall.o __sysctl.o __getcwd.o sched_yield.o getthrid.o \
 	thrsleep.o thrwakeup.o threxit.o thrsigdivert.o
 

@@ -1,4 +1,4 @@
-/*	$OpenBSD: in_pcb.c,v 1.89 2007/04/10 17:47:55 miod Exp $	*/
+/*	$OpenBSD: in_pcb.c,v 1.92 2007/12/30 21:13:27 claudio Exp $	*/
 /*	$NetBSD: in_pcb.c,v 1.25 1996/02/13 23:41:53 christos Exp $	*/
 
 /*
@@ -76,6 +76,7 @@
 #include <sys/socketvar.h>
 #include <sys/proc.h>
 #include <sys/domain.h>
+#include <sys/pool.h>
 
 #include <net/if.h>
 #include <net/route.h>
@@ -115,7 +116,7 @@ int ipport_hifirstauto = IPPORT_HIFIRSTAUTO;
 int ipport_hilastauto = IPPORT_HILASTAUTO;
 
 struct pool inpcb_pool;
-int inpcb_pool_initalized = 0;
+int inpcb_pool_initialized = 0;
 
 #define	INPCBHASH(table, faddr, fport, laddr, lport) \
 	&(table)->inpt_hashtbl[(ntohl((faddr)->s_addr) + \
@@ -190,10 +191,10 @@ in_pcballoc(so, v)
 	struct inpcb *inp;
 	int s;
 
-	if (inpcb_pool_initalized == 0) {
+	if (inpcb_pool_initialized == 0) {
 		pool_init(&inpcb_pool, sizeof(struct inpcb), 0, 0, 0,
 		    "inpcbpl", NULL);
-		inpcb_pool_initalized = 1;
+		inpcb_pool_initialized = 1;
 	}
 	inp = pool_get(&inpcb_pool, PR_NOWAIT);
 	if (inp == NULL)
@@ -627,13 +628,13 @@ in_losing(inp)
 	if ((rt = inp->inp_route.ro_rt)) {
 		inp->inp_route.ro_rt = 0;
 		bzero((caddr_t)&info, sizeof(info));
+		info.rti_flags = rt->rt_flags;
 		info.rti_info[RTAX_DST] = &inp->inp_route.ro_dst;
 		info.rti_info[RTAX_GATEWAY] = rt->rt_gateway;
 		info.rti_info[RTAX_NETMASK] = rt_mask(rt);
 		rt_missmsg(RTM_LOSING, &info, rt->rt_flags, rt->rt_ifp, 0, 0);
 		if (rt->rt_flags & RTF_DYNAMIC)
-			(void) rtrequest(RTM_DELETE, rt_key(rt),
-				rt->rt_gateway, rt_mask(rt), rt->rt_flags,
+			(void)rtrequest1(RTM_DELETE, &info,
 				(struct rtentry **)0, 0);
 		/*
 		 * A new route can be allocated

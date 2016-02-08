@@ -1,4 +1,4 @@
-/*	$OpenBSD: sd.c,v 1.136 2007/06/23 19:19:49 krw Exp $	*/
+/*	$OpenBSD: sd.c,v 1.141 2007/12/28 16:19:15 dlg Exp $	*/
 /*	$NetBSD: sd.c,v 1.111 1997/04/02 02:29:41 mycroft Exp $	*/
 
 /*-
@@ -257,6 +257,7 @@ sdattach(struct device *parent, struct device *self, void *aux)
 int
 sdactivate(struct device *self, enum devact act)
 {
+	struct sd_softc *sd = (struct sd_softc *)self;
 	int rv = 0;
 
 	switch (act) {
@@ -264,9 +265,8 @@ sdactivate(struct device *self, enum devact act)
 		break;
 
 	case DVACT_DEACTIVATE:
-		/*
-		 * Nothing to do; we key off the device's DVF_ACTIVATE.
-		 */
+		sd->flags |= SDF_DYING;
+		sd_kill_buffers(sd);
 		break;
 	}
 
@@ -320,6 +320,10 @@ sdopen(dev_t dev, int flag, int fmt, struct proc *p)
 	sd = sdlookup(unit);
 	if (sd == NULL)
 		return (ENXIO);
+	if (sd->flags & SDF_DYING) {
+		device_unref(&sd->sc_dev);
+		return (ENXIO);
+	}
 
 	sc_link = sd->sc_link;
 	SC_DEBUG(sc_link, SDEV_DB1,
@@ -443,7 +447,11 @@ sdclose(dev_t dev, int flag, int fmt, struct proc *p)
 
 	sd = sdlookup(DISKUNIT(dev));
 	if (sd == NULL)
-		return ENXIO;
+		return (ENXIO);
+	if (sd->flags & SDF_DYING) {
+		device_unref(&sd->sc_dev);
+		return (ENXIO);
+	}
 
 	if ((error = sdlock(sd)) != 0) {
 		device_unref(&sd->sc_dev);
@@ -496,6 +504,10 @@ sdstrategy(struct buf *bp)
 
 	sd = sdlookup(DISKUNIT(bp->b_dev));
 	if (sd == NULL) {
+		bp->b_error = ENXIO;
+		goto bad;
+	}
+	if (sd->flags & SDF_DYING) {
 		bp->b_error = ENXIO;
 		goto bad;
 	}
@@ -597,6 +609,9 @@ sdstart(void *v)
 	daddr64_t blkno;
 	int nblks, cmdlen, error;
 	struct partition *p;
+
+	if (sd->flags & SDF_DYING)
+		return;
 
 	SC_DEBUG(sc_link, SDEV_DB2, ("sdstart\n"));
 
@@ -758,11 +773,6 @@ sddone(struct scsi_xfer *xs)
 {
 	struct sd_softc *sd = xs->sc_link->device_softc;
 
-	if (sd->flags & SDF_FLUSHING) {
-		/* Flush completed, no longer dirty. */
-		sd->flags &= ~(SDF_FLUSHING|SDF_DIRTY);
-	}
-
 	if (xs->bp != NULL)
 		disk_unbusy(&sd->sc_dk, (xs->bp->b_bcount - xs->bp->b_resid),
 		    (xs->bp->b_flags & B_READ));
@@ -827,7 +837,11 @@ sdioctl(dev_t dev, u_long cmd, caddr_t addr, int flag, struct proc *p)
 
 	sd = sdlookup(DISKUNIT(dev));
 	if (sd == NULL)
-		return ENXIO;
+		return (ENXIO);
+	if (sd->flags & SDF_DYING) {
+		device_unref(&sd->sc_dev);
+		return (ENXIO);
+	}
 
 	SC_DEBUG(sd->sc_link, SDEV_DB2, ("sdioctl 0x%lx\n", cmd));
 
@@ -953,7 +967,7 @@ sdioctl(dev_t dev, u_long cmd, caddr_t addr, int flag, struct proc *p)
 int
 sd_ioctl_inquiry(struct sd_softc *sd, struct dk_inquiry *di)
 {
-	struct scsi_inquiry_vpd vpd;
+	struct scsi_vpd_serial vpd;
 
 	bzero(di, sizeof(struct dk_inquiry));
 	scsi_strvis(di->vendor, sd->sc_link->inqdata.vendor,
@@ -967,6 +981,8 @@ sd_ioctl_inquiry(struct sd_softc *sd, struct dk_inquiry *di)
 	if (scsi_inquire_vpd(sd->sc_link, &vpd, sizeof(vpd),
 	    SI_PG_SERIAL, 0) == 0)
 		scsi_strvis(di->serial, vpd.serial, sizeof(vpd.serial));
+	else
+		strlcpy(di->serial, "(unknown)", sizeof(vpd.serial));
 
 	return (0);
 }
@@ -1140,6 +1156,10 @@ sdsize(dev_t dev)
 	sd = sdlookup(DISKUNIT(dev));
 	if (sd == NULL)
 		return -1;
+	if (sd->flags & SDF_DYING) {
+		size = -1;
+		goto exit;
+	}
 
 	part = DISKPART(dev);
 	omask = sd->sc_dk.dk_openmask & (1 << part);
@@ -1447,36 +1467,26 @@ void
 sd_flush(struct sd_softc *sd, int flags)
 {
 	struct scsi_link *sc_link = sd->sc_link;
-	struct scsi_synchronize_cache sync_cmd;
+	struct scsi_synchronize_cache cmd;
+
+	if (sc_link->quirks & SDEV_NOSYNCCACHE)
+		return;
 
 	/*
-	 * If the device is SCSI-2, issue a SYNCHRONIZE CACHE.
-	 * We issue with address 0 length 0, which should be
-	 * interpreted by the device as "all remaining blocks
-	 * starting at address 0".  We ignore ILLEGAL REQUEST
-	 * in the event that the command is not supported by
-	 * the device, and poll for completion so that we know
-	 * that the cache has actually been flushed.
-	 *
-	 * Unless, that is, the device can't handle the SYNCHRONIZE CACHE
-	 * command, as indicated by our quirks flags.
-	 *
-	 * XXX What about older devices?
+	 * Issue a SYNCHRONIZE CACHE. Address 0, length 0 means "all remaining
+	 * blocks starting at address 0". Ignore ILLEGAL REQUEST in the event
+	 * that the command is not supported by the device.
 	 */
-	if (SCSISPC(sc_link->inqdata.version) >= 2 &&
-	    (sc_link->quirks & SDEV_NOSYNCCACHE) == 0) {
-		bzero(&sync_cmd, sizeof(sync_cmd));
-		sync_cmd.opcode = SYNCHRONIZE_CACHE;
 
-		if (scsi_scsi_cmd(sc_link,
-		    (struct scsi_generic *)&sync_cmd, sizeof(sync_cmd),
-		    NULL, 0, SDRETRIES, 100000, NULL,
-		    flags|SCSI_IGNORE_ILLEGAL_REQUEST))
-			printf("%s: WARNING: cache synchronization failed\n",
-			    sd->sc_dev.dv_xname);
-		else
-			sd->flags |= SDF_FLUSHING;
-	}
+	bzero(&cmd, sizeof(cmd));
+	cmd.opcode = SYNCHRONIZE_CACHE;
+		
+	if (scsi_scsi_cmd(sc_link, (struct scsi_generic *)&cmd, sizeof(cmd),
+	    NULL, 0, SDRETRIES, 100000, NULL,
+	    flags | SCSI_IGNORE_ILLEGAL_REQUEST)) {
+		SC_DEBUG(sc_link, SDEV_DB1, ("cache sync failed\n"));
+	} else
+		sd->flags &= ~SDF_DIRTY;
 }
 
 /*

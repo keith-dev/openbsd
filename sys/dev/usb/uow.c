@@ -1,4 +1,4 @@
-/*	$OpenBSD: uow.c,v 1.23 2007/06/14 10:11:16 mbalmer Exp $	*/
+/*	$OpenBSD: uow.c,v 1.25 2007/10/11 18:33:15 deraadt Exp $	*/
 
 /*
  * Copyright (c) 2006 Alexander Yurchenko <grange@openbsd.org>
@@ -120,19 +120,12 @@ uow_attach(struct device *parent, struct device *self, void *aux)
 	struct usb_attach_arg *uaa = aux;
 	usb_interface_descriptor_t *id;
 	usb_endpoint_descriptor_t *ed;
-	char *devinfop;
 	int ep_ibulk = -1, ep_obulk = -1, ep_intr = -1;
 	struct onewirebus_attach_args oba;
 	usbd_status error;
 	int i;
 
 	sc->sc_udev = uaa->device;
-
-	/* Display device info string */
-	printf("\n");
-	devinfop = usbd_devinfo_alloc(uaa->device, 0);
-	printf("%s: %s\n", sc->sc_dev.dv_xname, devinfop);
-	usbd_devinfo_free(devinfop);
 
 	/* Set USB configuration */
 	if ((error = usbd_set_config_no(sc->sc_udev,
@@ -223,7 +216,9 @@ uow_attach(struct device *parent, struct device *self, void *aux)
 	sc->sc_ow_bus.bus_read_block = uow_ow_read_block;
 	sc->sc_ow_bus.bus_write_block = uow_ow_write_block;
 	sc->sc_ow_bus.bus_matchrom = uow_ow_matchrom;
+#if 0
 	sc->sc_ow_bus.bus_search = uow_ow_search;
+#endif
 
 	bzero(&oba, sizeof(oba));
 	oba.oba_bus = &sc->sc_ow_bus;

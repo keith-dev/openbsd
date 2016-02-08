@@ -1,4 +1,4 @@
-/*	$OpenBSD: repository.c,v 1.14 2007/07/03 13:22:43 joris Exp $	*/
+/*	$OpenBSD: repository.c,v 1.19 2008/02/03 23:34:41 joris Exp $	*/
 /*
  * Copyright (c) 2006 Joris Vink <joris@openbsd.org>
  *
@@ -104,11 +104,17 @@ cvs_repository_getdir(const char *dir, const char *wdir,
 		    !strcmp(dp->d_name, CVS_LOCK))
 			continue;
 
-		if (cvs_file_chkign(dp->d_name))
-			continue;
-
 		(void)xsnprintf(fpath, MAXPATHLEN, "%s/%s", wdir, dp->d_name);
 		(void)xsnprintf(rpath, MAXPATHLEN, "%s/%s", dir, dp->d_name);
+
+		if (!TAILQ_EMPTY(&checkout_ign_pats)) {
+			if ((s = strrchr(fpath, ',')) != NULL)
+				*s = '\0';
+			if (cvs_file_chkign(fpath))
+				continue;
+			if (s != NULL)
+				*s = ',';
+		}
 
 		/*
 		 * nfs and afs will show d_type as DT_UNKNOWN
@@ -150,12 +156,14 @@ cvs_repository_getdir(const char *dir, const char *wdir,
 			if (!strcmp(dp->d_name, CVS_PATH_ATTIC))
 				cvs_repository_getdir(rpath, wdir, fl, dl, 0);
 			else
-				cvs_file_get(fpath, dl);
+				cvs_file_get(fpath, 0, dl);
 			break;
 		case CVS_FILE:
-			if ((s = strrchr(fpath, ',')) != NULL)
+			if ((s = strrchr(fpath, ',')) != NULL &&
+			    s != fpath && !strcmp(s, RCS_FILE_EXT)) {
 				*s = '\0';
-			cvs_file_get(fpath, fl);
+				cvs_file_get(fpath, 0, fl);
+			}
 			break;
 		default:
 			fatal("type %d unknown, shouldn't happen", type);

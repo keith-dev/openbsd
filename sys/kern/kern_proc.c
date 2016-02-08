@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_proc.c,v 1.34 2007/08/04 02:43:54 ckuethe Exp $	*/
+/*	$OpenBSD: kern_proc.c,v 1.36 2007/10/10 15:53:53 art Exp $	*/
 /*	$NetBSD: kern_proc.c,v 1.14 1996/02/09 18:59:41 christos Exp $	*/
 
 /*
@@ -124,8 +124,7 @@ uid_find(uid_t uid)
 			break;
 	if (uip)
 		return (uip);
-	MALLOC(nuip, struct uidinfo *, sizeof(*nuip), M_PROC, M_WAITOK);
-	/* may have slept, have to check again */
+	nuip = malloc(sizeof(*nuip), M_PROC, M_WAITOK|M_ZERO);
 	LIST_FOREACH(uip, uipp, ui_hash)
 		if (uip->ui_uid == uid)
 			break;
@@ -133,7 +132,6 @@ uid_find(uid_t uid)
 		free(nuip, M_PROC);
 		return (uip);
 	}
-	bzero(nuip, sizeof(*nuip));
 	nuip->ui_uid = uid;
 	LIST_INSERT_HEAD(uipp, nuip, ui_hash);
 
@@ -379,8 +377,8 @@ proc_printit(struct proc *p, const char *modif, int (*pr)(const char *, ...))
 	    p->p_comm, p->p_pid, pst, p->p_flag, P_BITS);
 	(*pr)("    pri=%u, usrpri=%u, nice=%d\n",
 	    p->p_priority, p->p_usrpri, p->p_nice);
-	(*pr)("    forw=%p, back=%p, list=%p,%p\n",
-	    p->p_forw, p->p_back, p->p_list.le_next, p->p_list.le_prev);
+	(*pr)("    forw=%p, list=%p,%p\n",
+	    TAILQ_NEXT(p, p_runq), p->p_list.le_next, p->p_list.le_prev);
 	(*pr)("    user=%p, vmspace=%p\n",
 	    p->p_addr, p->p_vmspace);
 	(*pr)("    estcpu=%u, cpticks=%d, pctcpu=%u.%u%, swtime=%u\n",

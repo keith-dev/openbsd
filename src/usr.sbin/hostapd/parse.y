@@ -1,4 +1,4 @@
-/*	$OpenBSD: parse.y,v 1.29 2007/02/09 17:55:49 reyk Exp $	*/
+/*	$OpenBSD: parse.y,v 1.38 2008/02/27 15:36:42 mpf Exp $	*/
 
 /*
  * Copyright (c) 2004, 2005, 2006 Reyk Floeter <reyk@openbsd.org>
@@ -52,21 +52,30 @@
 #include <stdarg.h>
 #include <string.h>
 #include <unistd.h>
+#include <stdint.h>
+#include <err.h>
 
 #include "hostapd.h"
 
-extern struct hostapd_config hostapd_cfg;
-static int errors = 0;
-
-TAILQ_HEAD(filehead, file)	 filehead = TAILQ_HEAD_INITIALIZER(filehead);
-struct file {
+TAILQ_HEAD(files, file)		 files = TAILQ_HEAD_INITIALIZER(files);
+static struct file {
 	TAILQ_ENTRY(file)	 entry;
-
-	char			*name;
 	FILE			*stream;
+	char			*name;
 	int			 lineno;
-};
-static struct file *file;
+	int			 errors;
+} *file, *topfile;
+struct file	*pushfile(const char *, int);
+int		 popfile(void);
+int		 check_file_secrecy(int, const char *);
+int		 yyparse(void);
+int		 yylex(void);
+int		 yyerror(const char *, ...);
+int		 kw_cmp(const void *, const void *);
+int		 lookup(char *);
+int		 lgetc(int);
+int		 lungetc(int);
+int		 findeol(void);
 
 TAILQ_HEAD(symhead, sym)	 symhead = TAILQ_HEAD_INITIALIZER(symhead);
 struct sym {
@@ -76,18 +85,10 @@ struct sym {
 	char			*nam;
 	char			*val;
 };
-
-int		 yyerror(const char *, ...);
-int		 yyparse(void);
-int		 kw_cmp(const void *, const void *);
-int		 lookup(char *);
-int		 lgetc(void);
-int		 lungetc(int);
-int		 findeol(void);
-int		 yylex(void);
 int		 symset(const char *, const char *, int);
 char		*symget(const char *);
-struct file	*hostapd_add_file(struct hostapd_config *, const char *);
+
+extern struct hostapd_config hostapd_cfg;
 
 typedef struct {
 	union {
@@ -102,7 +103,7 @@ typedef struct {
 		} authalg;
 		struct in_addr		in;
 		char			*string;
-		long			val;
+		int64_t			number;
 		u_int16_t		reason;
 		enum hostapd_op		op;
 		struct timeval		timeout;
@@ -153,8 +154,7 @@ struct hostapd_ieee80211_frame *frame_ieee80211;
 %token	ADDRESS PORT ON NOTIFY TTL INCLUDE ROUTE ROAMING RSSI TXRATE FREQ
 %token	HOPPER DELAY
 %token	<v.string>	STRING
-%token	<v.val>		VALUE
-%type	<v.val>		number
+%token	<v.number>	NUMBER
 %type	<v.in>		ipv4addr
 %type	<v.reflladdr>	refaddr, lladdr, randaddr, frmactionaddr, frmmatchaddr
 %type	<v.reason>	frmreason_l
@@ -162,10 +162,10 @@ struct hostapd_ieee80211_frame *frame_ieee80211;
 %type	<v.string>	string
 %type	<v.authalg>	authalg
 %type	<v.op>		unaryop
-%type	<v.val>		percent
-%type	<v.val>		txrate
-%type	<v.val>		freq
-%type	<v.val>		not
+%type	<v.number>	percent
+%type	<v.number>	txrate
+%type	<v.number>	freq
+%type	<v.number>	not
 %type	<v.timeout>	timeout
 
 %%
@@ -181,7 +181,7 @@ grammar		: /* empty */
 		| grammar option '\n'
 		| grammar event '\n'
 		| grammar varset '\n'
-		| grammar error '\n'		{ errors++; }
+		| grammar error '\n'		{ file->errors++; }
 		;
 
 include		: INCLUDE STRING
@@ -189,7 +189,7 @@ include		: INCLUDE STRING
 			struct file *nfile;
 
 			if ((nfile =
-			    hostapd_add_file(&hostapd_cfg, $2)) == NULL) {
+			    pushfile($2, 1)) == NULL) {
 				yyerror("failed to include file %s", $2);
 				free($2);
 				YYERROR;
@@ -272,15 +272,23 @@ iappmodeaddr	: /* empty */
 		;
 
 iappmodeport	: /* empty */
-		| PORT number
+		| PORT NUMBER
 		{
+			if ($2 < 0 || $2 > UINT16_MAX) {
+				yyerror("port out of range: %lld", $2);
+				YYERROR;
+			}
 			hostapd_cfg.c_iapp.i_addr.sin_port = htons($2);
 		}
 		;
 
 iappmodettl	: /* empty */
-		| TTL number
+		| TTL NUMBER
 		{
+			if ($2 < 1 || $2 > UINT8_MAX) {
+				yyerror("ttl out of range: %lld", $2);
+				YYERROR;
+			}
 			hostapd_cfg.c_iapp.i_ttl = $2;
 		}
 		;
@@ -476,19 +484,34 @@ frmaction	: frmactiontype frmactiondir frmactionfrom frmactionto frmactionbssid
 		;
 
 limit		: /* empty */
-		| LIMIT number SEC
+		| LIMIT NUMBER SEC
 		{
+			if ($2 < 0 || $2 > LONG_MAX) {
+				yyerror("limit out of range: %lld sec", $2);
+				YYERROR;
+			}
 			frame.f_limit.tv_sec = $2;
 		}
-		| LIMIT number USEC
+		| LIMIT NUMBER USEC
 		{
+			if ($2 < 0 || $2 > LONG_MAX) {
+				yyerror("limit out of range: %lld usec", $2);
+				YYERROR;
+			}
 			frame.f_limit.tv_usec = $2;
 		}
 		;
 
 rate		: /* empty */
-		| RATE number '/' number SEC
+		| RATE NUMBER '/' NUMBER SEC
 		{
+			if (($2 < 1 || $2 > LONG_MAX) ||
+			    ($4 < 1 || $4 > LONG_MAX)) {
+				yyerror("rate out of range: %lld/%lld sec",
+				    $2, $4);
+				YYERROR;
+			}
+
 			if (!($2 && $4)) {
 				yyerror("invalid rate");
 				YYERROR;
@@ -985,7 +1008,7 @@ tableaddrentry	: lladdr
 		;
 
 tableaddropt	: /* empty */
-		| assign ipv4addr ipnetmask
+		| assign ipv4addr ipv4netmask
 		{
 			entry->e_flags |= HOSTAPD_ENTRY_F_INADDR;
 			entry->e_inaddr.in_af = AF_INET;
@@ -1013,12 +1036,16 @@ ipv4addr	: STRING
 		}
 		;
 
-ipnetmask	: /* empty */
+ipv4netmask	: /* empty */
 		{
 			entry->e_inaddr.in_netmask = -1;
 		}
-		| '/' number
+		| '/' NUMBER
 		{
+			if ($2 < 0 || $2 > 32) {
+				yyerror("netmask out of range: %lld", $2);
+				YYERROR;
+			}
 			entry->e_inaddr.in_netmask = $2;
 		}
 		;
@@ -1042,19 +1069,6 @@ lladdr		: STRING
 randaddr	: RANDOM
 		{
 			$$.flags |= HOSTAPD_ACTION_F_REF_RANDOM;
-		}
-		;
-
-number		: STRING
-		{
-			const char *errstr;
-			$$ = strtonum($1, 0, LONG_MAX, &errstr);
-			if (errstr) {
-				yyerror("invalid number: %s", $1);
-				free($1);
-				YYERROR;
-			}
-			free($1);
 		}
 		;
 
@@ -1188,8 +1202,12 @@ freq		: STRING
 		}
 		;
 
-timeout		: number
+timeout		: NUMBER
 		{
+			if ($1 < 1 || $1 > LONG_MAX) {
+				yyerror("timeout out of range: %lld", $1);
+				YYERROR;
+			}
 			$$.tv_sec = $1 / 1000;
 			$$.tv_usec = ($1 % 1000) * 1000;
 		}
@@ -1313,10 +1331,9 @@ char	 pushback_buffer[MAXPUSHBACK];
 int	 pushback_index = 0;
 
 int
-lgetc(void)
+lgetc(int quotec)
 {
-	int	c, next;
-	struct file *pfile;
+	int		c, next;
 
 	if (parsebuf) {
 		/* Read character from the parsebuffer instead of input. */
@@ -1332,6 +1349,17 @@ lgetc(void)
 	if (pushback_index)
 		return (pushback_buffer[--pushback_index]);
 
+	if (quotec) {
+		if ((c = getc(file->stream)) == EOF) {
+			yyerror("reached end of file while parsing "
+			    "quoted string");
+			if (file == topfile || popfile() == EOF)
+				return (EOF);
+			return (quotec);
+		}
+		return (c);
+	}
+
 	while ((c = getc(file->stream)) == '\\') {
 		next = getc(file->stream);
 		if (next != '\n') {
@@ -1341,27 +1369,12 @@ lgetc(void)
 		yylval.lineno = file->lineno;
 		file->lineno++;
 	}
-	if (c == '\t' || c == ' ') {
-		/* Compress blanks to a single space. */
-		do {
-			c = getc(file->stream);
-		} while (c == '\t' || c == ' ');
-		if (ungetc(c, file->stream) == EOF)
-			hostapd_fatal("lgetc: ungetc");
-		c = ' ';
-	}
 
-	while (c == EOF &&
-	    (pfile = TAILQ_PREV(file, filehead, entry)) != NULL) {
-		fclose(file->stream);
-		free(file->name);
-		TAILQ_REMOVE(&filehead, file, entry);
-		free(file);
-
-		file = pfile;
+	while (c == EOF) {
+		if (file == topfile || popfile() == EOF)
+			return (EOF);
 		c = getc(file->stream);
 	}
-
 	return (c);
 }
 
@@ -1391,7 +1404,7 @@ findeol(void)
 
 	/* skip to either EOF or the first real EOL */
 	while (1) {
-		c = lgetc();
+		c = lgetc(0);
 		if (c == '\n') {
 			file->lineno++;
 			break;
@@ -1407,21 +1420,21 @@ yylex(void)
 {
 	char	 buf[8096];
 	char	*p, *val;
-	int	 endc, c;
+	int	 quotec, next, c;
 	int	 token;
 
 top:
 	p = buf;
-	while ((c = lgetc()) == ' ')
+	while ((c = lgetc(0)) == ' ' || c == '\t')
 		; /* nothing */
 
 	yylval.lineno = file->lineno;
 	if (c == '#')
-		while ((c = lgetc()) != '\n' && c != EOF)
+		while ((c = lgetc(0)) != '\n' && c != EOF)
 			; /* nothing */
 	if (c == '$' && parsebuf == NULL) {
 		while (1) {
-			if ((c = lgetc()) == EOF)
+			if ((c = lgetc(0)) == EOF)
 				return (0);
 
 			if (p + 1 >= buf + sizeof(buf) - 1) {
@@ -1449,17 +1462,25 @@ top:
 	switch (c) {
 	case '\'':
 	case '"':
-		endc = c;
+		quotec = c;
 		while (1) {
-			if ((c = lgetc()) == EOF)
+			if ((c = lgetc(quotec)) == EOF)
 				return (0);
-			if (c == endc) {
-				*p = '\0';
-				break;
-			}
 			if (c == '\n') {
 				file->lineno++;
 				continue;
+			} else if (c == '\\') {
+				if ((next = lgetc(quotec)) == EOF)
+					return (0);
+				if (next == quotec || c == ' ' || c == '\t')
+					c = next;
+				else if (next == '\n')
+					continue;
+				else
+					lungetc(next);
+			} else if (c == quotec) {
+				*p = '\0';
+				break;
 			}
 			if (p + 1 >= buf + sizeof(buf) - 1) {
 				yyerror("string too long");
@@ -1471,6 +1492,42 @@ top:
 		if (yylval.v.string == NULL)
 			hostapd_fatal("yylex: strdup");
 		return (STRING);
+	}
+
+#define allowed_to_end_number(x) \
+	(isspace(x) || x == ')' || x ==',' || x == '/' || x == '}' || x == '=')
+
+	if (c == '-' || isdigit(c)) {
+		do {
+			*p++ = c;
+			if ((unsigned)(p-buf) >= sizeof(buf)) {
+				yyerror("string too long");
+				return (findeol());
+			}
+		} while ((c = lgetc(0)) != EOF && isdigit(c));
+		lungetc(c);
+		if (p == buf + 1 && buf[0] == '-')
+			goto nodigits;
+		if (c == EOF || allowed_to_end_number(c)) {
+			const char *errstr = NULL;
+
+			*p = '\0';
+			yylval.v.number = strtonum(buf, LLONG_MIN,
+			    LLONG_MAX, &errstr);
+			if (errstr) {
+				yyerror("\"%s\" invalid number: %s",
+				    buf, errstr);
+				return (findeol());
+			}
+			return (NUMBER);
+		} else {
+nodigits:
+			while (p > buf + 1)
+				lungetc(*--p);
+			c = *--p;
+			if (c == '-')
+				return (c);
+		}
 	}
 
 #define allowed_in_string(x) \
@@ -1486,7 +1543,7 @@ top:
 				yyerror("string too long");
 				return (findeol());
 			}
-		} while ((c = lgetc()) != EOF && (allowed_in_string(c)));
+		} while ((c = lgetc(0)) != EOF && (allowed_in_string(c)));
 		lungetc(c);
 		*p = '\0';
 		if ((token = lookup(buf)) == STRING)
@@ -1581,52 +1638,80 @@ symget(const char *nam)
 	return (NULL);
 }
 
-struct file *
-hostapd_add_file(struct hostapd_config *cfg, const char *name)
+int
+check_file_secrecy(int fd, const char *fname)
 {
-	struct file *nfile = NULL;
+	struct stat	st;
 
-	if ((nfile = calloc(1, sizeof(struct file))) == NULL)
+	if (fstat(fd, &st)) {
+		warn("cannot stat %s", fname);
+		return (-1);
+	}
+	if (st.st_uid != 0 && st.st_uid != getuid()) {
+		warnx("%s: owner not root or current user", fname);
+		return (-1);
+	}
+	if (st.st_mode & (S_IRWXG | S_IRWXO)) {
+		warnx("%s: group/world readable/writeable", fname);
+		return (-1);
+	}
+	return (0);
+}
+
+struct file *
+pushfile(const char *name, int secret)
+{
+	struct file	*nfile;
+
+	if ((nfile = calloc(1, sizeof(struct file))) == NULL ||
+	    (nfile->name = strdup(name)) == NULL) {
+		warn("out of memory");
 		return (NULL);
-
-	if ((nfile->name = strdup(name)) == NULL)
-		goto err;
-
-	if ((nfile->stream = fopen(name, "rb")) == NULL) {
-		hostapd_log(HOSTAPD_LOG, "failed to open %s", name);
-		goto err;
 	}
-
-	if (hostapd_check_file_secrecy(fileno(nfile->stream), name)) {
-		hostapd_log(HOSTAPD_LOG, "invalid permissions for %s", name);
-		goto err;
-	}
-
-	nfile->lineno = 1;
-	TAILQ_INSERT_TAIL(&filehead, nfile, entry);
-
-	return (nfile);
-
- err:
-	if (nfile->name != NULL)
+	if ((nfile->stream = fopen(nfile->name, "r")) == NULL) {
+		warn("%s", nfile->name);
 		free(nfile->name);
-	if (nfile->stream != NULL)
+		free(nfile);
+		return (NULL);
+	} else if (secret &&
+	    check_file_secrecy(fileno(nfile->stream), nfile->name)) {
 		fclose(nfile->stream);
-	free(nfile);
+		free(nfile->name);
+		free(nfile);
+		return (NULL);
+	}
+	nfile->lineno = 1;
+	TAILQ_INSERT_TAIL(&files, nfile, entry);
+	return (nfile);
+}
 
-	return (NULL);
+int
+popfile(void)
+{
+	struct file	*prev;
+
+	if ((prev = TAILQ_PREV(file, files, entry)) != NULL)
+		prev->errors += file->errors;
+
+	TAILQ_REMOVE(&files, file, entry);
+	fclose(file->stream);
+	free(file->name);
+	free(file);
+	file = prev;
+	return (file ? 0 : EOF);
 }
 
 int
 hostapd_parse_file(struct hostapd_config *cfg)
 {
 	struct sym *sym, *next;
-	struct file *nfile;
+	int errors = 0;
 	int ret;
 
-	if ((file = hostapd_add_file(cfg, cfg->c_config)) == NULL)
+	if ((file = pushfile(cfg->c_config, 1)) == NULL)
 		hostapd_fatal("failed to open the main config file: %s\n",
 		    cfg->c_config);
+	topfile = file;
 
 	/* Init tables and data structures */
 	TAILQ_INIT(&cfg->c_apmes);
@@ -1638,24 +1723,16 @@ hostapd_parse_file(struct hostapd_config *cfg)
 	cfg->c_apme_hopdelay.tv_sec = HOSTAPD_HOPPER_MDELAY / 1000;
 	cfg->c_apme_hopdelay.tv_usec = (HOSTAPD_HOPPER_MDELAY % 1000) * 1000;
 
-	errors = 0;
-
 	ret = yyparse();
-
-	for (file = TAILQ_FIRST(&filehead); file != NULL; file = nfile) {
-		nfile = TAILQ_NEXT(file, entry);
-		fclose(file->stream);
-		free(file->name);
-		TAILQ_REMOVE(&filehead, file, entry);
-		free(file);
-	}
+	errors = file->errors;
+	popfile();
 
 	/* Free macros and check which have not been used. */
 	for (sym = TAILQ_FIRST(&symhead); sym != NULL; sym = next) {
 		next = TAILQ_NEXT(sym, entry);
 		if (!sym->used)
 			hostapd_log(HOSTAPD_LOG_VERBOSE,
-			    "warning: macro \"%s\" not used", sym->nam);
+			    "warning: macro '%s' not used", sym->nam);
 		if (!sym->persist) {
 			free(sym->nam);
 			free(sym->val);
@@ -1670,10 +1747,10 @@ hostapd_parse_file(struct hostapd_config *cfg)
 int
 yyerror(const char *fmt, ...)
 {
-	va_list ap;
-	char *nfmt;
+	va_list		 ap;
+	char		*nfmt;
 
-	errors = 1;
+	file->errors++;
 
 	va_start(ap, fmt);
 	if (asprintf(&nfmt, "%s:%d: %s\n", file->name, yylval.lineno,

@@ -1,4 +1,4 @@
-/*	$OpenBSD: pciide.c,v 1.272 2007/07/02 14:01:14 dlg Exp $	*/
+/*	$OpenBSD: pciide.c,v 1.281 2008/02/27 20:10:29 kettenis Exp $	*/
 /*	$NetBSD: pciide.c,v 1.127 2001/08/03 01:31:08 tsutsui Exp $	*/
 
 /*
@@ -108,12 +108,6 @@ int wdcdebug_pciide_mask = WDCDEBUG_PCIIDE_MASK;
 #include <dev/pci/pcivar.h>
 #include <dev/pci/pcidevs.h>
 
-#if defined(SMALL_KERNEL)
-#define	INLINE
-#else
-#define	INLINE __inline
-#endif
-
 #include <dev/pci/pciidereg.h>
 #include <dev/pci/pciidevar.h>
 #include <dev/pci/pciide_piix_reg.h>
@@ -137,21 +131,21 @@ int wdcdebug_pciide_mask = WDCDEBUG_PCIIDE_MASK;
 #include <dev/pci/pciide_jmicron_reg.h>
 #include <dev/pci/cy82c693var.h>
 
-/* inlines for reading/writing 8-bit PCI registers */
+/* functions for reading/writing 8-bit PCI registers */
 
-static INLINE u_int8_t pciide_pci_read(pci_chipset_tag_t, pcitag_t,
+u_int8_t pciide_pci_read(pci_chipset_tag_t, pcitag_t,
 					int);
-static INLINE void pciide_pci_write(pci_chipset_tag_t, pcitag_t,
+void pciide_pci_write(pci_chipset_tag_t, pcitag_t,
 					int, u_int8_t);
 
-static INLINE u_int8_t
+u_int8_t
 pciide_pci_read(pci_chipset_tag_t pc, pcitag_t pa, int reg)
 {
 	return (pci_conf_read(pc, pa, (reg & ~0x03)) >>
 	    ((reg & 0x03) * 8) & 0xff);
 }
 
-static INLINE void
+void
 pciide_pci_write(pci_chipset_tag_t pc, pcitag_t pa, int reg, u_int8_t val)
 {
 	pcireg_t pcival;
@@ -173,9 +167,9 @@ void piix_setup_channel(struct channel_softc *);
 void piix3_4_setup_channel(struct channel_softc *);
 void piix_timing_debug(struct pciide_softc *);
 
-static u_int32_t piix_setup_idetim_timings(u_int8_t, u_int8_t, u_int8_t);
-static u_int32_t piix_setup_idetim_drvs(struct ata_drive_datas *);
-static u_int32_t piix_setup_sidetim_timings(u_int8_t, u_int8_t, u_int8_t);
+u_int32_t piix_setup_idetim_timings(u_int8_t, u_int8_t, u_int8_t);
+u_int32_t piix_setup_idetim_drvs(struct ata_drive_datas *);
+u_int32_t piix_setup_sidetim_timings(u_int8_t, u_int8_t, u_int8_t);
 
 void amd756_chip_map(struct pciide_softc *, struct pci_attach_args *);
 void amd756_setup_channel(struct channel_softc *);
@@ -235,6 +229,8 @@ int  pdc202xx_pci_intr(void *);
 int  pdc20265_pci_intr(void *);
 void pdc20262_dma_start(void *, int, int);
 int  pdc20262_dma_finish(void *, int, int, int);
+
+u_int8_t pdc268_config_read(struct channel_softc *, int);
 
 void pdcsata_chip_map(struct pciide_softc *, struct pci_attach_args *);
 void pdc203xx_setup_channel(struct channel_softc *);
@@ -447,11 +443,11 @@ const struct pciide_product_desc pciide_intel_products[] =  {
 	  IDE_PCI_CLASS_OVERRIDE,
 	  piixsata_chip_map
 	},
-	{ PCI_PRODUCT_INTEL_82801GR_SATA, /* Intel 82801GR (ICH7R) SATA */
+	{ PCI_PRODUCT_INTEL_82801GR_AHCI, /* Intel 82801GR (ICH7R) AHCI */
 	  IDE_PCI_CLASS_OVERRIDE,
 	  piixsata_chip_map
 	},
-	{ PCI_PRODUCT_INTEL_82801GR_AHCI, /* Intel 82801GR (ICH7R) AHCI */
+	{ PCI_PRODUCT_INTEL_82801GR_RAID, /* Intel 82801GR (ICH7R) RAID */
 	  IDE_PCI_CLASS_OVERRIDE,
 	  piixsata_chip_map
 	},
@@ -463,23 +459,23 @@ const struct pciide_product_desc pciide_intel_products[] =  {
 	  IDE_PCI_CLASS_OVERRIDE,
 	  piixsata_chip_map
 	},
-	{ PCI_PRODUCT_INTEL_82801GHM_RAID, /* Intel 82801GHM (ICH7-M DH) SATA */
+	{ PCI_PRODUCT_INTEL_82801GHM_RAID, /* Intel 82801GHM (ICH7M DH) RAID */
 	  IDE_PCI_CLASS_OVERRIDE,
 	  piixsata_chip_map
 	},
-	{ PCI_PRODUCT_INTEL_82801H_SATA_1_6P, /* Intel 82801H (ICH8) SATA */
+	{ PCI_PRODUCT_INTEL_82801H_SATA_1, /* Intel 82801H (ICH8) SATA */
 	  IDE_PCI_CLASS_OVERRIDE,
 	  piixsata_chip_map
 	},
-	{ PCI_PRODUCT_INTEL_82801H_AHCI, /* Intel 82801H (ICH8) AHCI */
+	{ PCI_PRODUCT_INTEL_82801H_AHCI_6P, /* Intel 82801H (ICH8) AHCI */
 	  IDE_PCI_CLASS_OVERRIDE,
 	  piixsata_chip_map
 	},
-	{ PCI_PRODUCT_INTEL_82801H_RAID, /* Intel 82801H (ICH8) SATA */
+	{ PCI_PRODUCT_INTEL_82801H_RAID, /* Intel 82801H (ICH8) RAID */
 	  IDE_PCI_CLASS_OVERRIDE,
 	  piixsata_chip_map
 	},
-	{ PCI_PRODUCT_INTEL_82801H_SATA_1_4P, /* Intel 82801H (ICH8) SATA */
+	{ PCI_PRODUCT_INTEL_82801H_AHCI_4P, /* Intel 82801H (ICH8) AHCI */
 	  IDE_PCI_CLASS_OVERRIDE,
 	  piixsata_chip_map
 	},
@@ -487,17 +483,45 @@ const struct pciide_product_desc pciide_intel_products[] =  {
 	  IDE_PCI_CLASS_OVERRIDE,
 	  piixsata_chip_map
 	},
-	{ PCI_PRODUCT_INTEL_82801HBM_SATA_1, /* Intel 82801HBM (ICH8M) SATA */
+	{ PCI_PRODUCT_INTEL_82801HBM_SATA, /* Intel 82801HBM (ICH8M) SATA */
 	  IDE_PCI_CLASS_OVERRIDE,
 	  piixsata_chip_map
 	},
-	{ PCI_PRODUCT_INTEL_82801HBM_SATA_2, /* Intel 82801HBM (ICH8M) SATA */
+	{ PCI_PRODUCT_INTEL_82801HBM_AHCI, /* Intel 82801HBM (ICH8M) AHCI */
+	  IDE_PCI_CLASS_OVERRIDE,
+	  piixsata_chip_map
+	},
+	{ PCI_PRODUCT_INTEL_82801HBM_RAID, /* Intel 82801HBM (ICH8M) RAID */
 	  IDE_PCI_CLASS_OVERRIDE,
 	  piixsata_chip_map
 	},
 	{ PCI_PRODUCT_INTEL_82801HBM_IDE, /* Intel 82801HBM (ICH8M) IDE */
 	  0,
 	  piix_chip_map
+	},
+	{ PCI_PRODUCT_INTEL_82801I_SATA_1, /* Intel 82801I (ICH9) SATA */
+	  0,
+	  piixsata_chip_map
+	},
+	{ PCI_PRODUCT_INTEL_82801I_SATA_2, /* Intel 82801I (ICH9) SATA */
+	  0,
+	  piixsata_chip_map
+	},
+	{ PCI_PRODUCT_INTEL_82801I_SATA_3, /* Intel 82801I (ICH9) SATA */
+	  0,
+	  piixsata_chip_map
+	},
+	{ PCI_PRODUCT_INTEL_82801I_SATA_4, /* Intel 82801I (ICH9) SATA */
+	  0,
+	  piixsata_chip_map
+	},
+	{ PCI_PRODUCT_INTEL_82801I_SATA_5, /* Intel 82801I (ICH9M) SATA */
+	  0,
+	  piixsata_chip_map
+	},
+	{ PCI_PRODUCT_INTEL_82801I_SATA_6, /* Intel 82801I (ICH9M) SATA */
+	  0,
+	  piixsata_chip_map
 	},
 	{ PCI_PRODUCT_INTEL_6321ESB_SATA, /* Intel 6321ESB SATA */
 	  0,
@@ -606,6 +630,10 @@ const struct pciide_product_desc pciide_via_products[] =  {
 	  0,
 	  apollo_chip_map
 	},
+	{ PCI_PRODUCT_VIATECH_VX700_IDE, /* VIA VX700 IDE */
+	  0,
+	  apollo_chip_map
+	},
 	{ PCI_PRODUCT_VIATECH_VT6420_SATA, /* VIA VT6420 SATA */
 	  IDE_PCI_CLASS_OVERRIDE,
 	  sata_chip_map
@@ -619,6 +647,10 @@ const struct pciide_product_desc pciide_via_products[] =  {
 	  sata_chip_map
 	},
 	{ PCI_PRODUCT_VIATECH_VT8237A_SATA_2, /* VIA VT8237A SATA */
+	  0,
+	  sata_chip_map
+	},
+	{ PCI_PRODUCT_VIATECH_VT8237S_SATA, /* VIA VT8237S SATA */
 	  0,
 	  sata_chip_map
 	},
@@ -929,6 +961,14 @@ const struct pciide_product_desc pciide_nvidia_products[] = {
 	  0,
 	  nforce_chip_map
 	},
+	{ PCI_PRODUCT_NVIDIA_MCP73_IDE,
+	  0,
+	  nforce_chip_map
+	},
+	{ PCI_PRODUCT_NVIDIA_MCP77_IDE,
+	  0,
+	  nforce_chip_map
+	},
 	{ PCI_PRODUCT_NVIDIA_NFORCE2_400_SATA,
 	  0,
 	  sata_chip_map
@@ -1044,6 +1084,10 @@ const struct pciide_product_desc pciide_ati_products[] = {
 	  ixp_chip_map
 	},
 	{ PCI_PRODUCT_ATI_IXP_IDE_600,
+	  0,
+	  ixp_chip_map
+	},
+	{ PCI_PRODUCT_ATI_IXP_IDE_700,
 	  0,
 	  ixp_chip_map
 	},
@@ -2189,7 +2233,7 @@ piix_timing_debug(struct pciide_softc *sc)
 		    pci_conf_read(sc->sc_pc, sc->sc_tag, PIIX_SIDETIM)),
 		    DEBUG_PROBE);
 		if (sc->sc_wdcdev.cap & WDC_CAPABILITY_UDMA) {
-			WDCDEBUG_PRINT((", udamreg 0x%x",
+			WDCDEBUG_PRINT((", udmareg 0x%x",
 			    pci_conf_read(sc->sc_pc, sc->sc_tag, PIIX_UDMAREG)),
 			    DEBUG_PROBE);
 		}
@@ -2702,7 +2746,7 @@ pio:		/* use PIO mode */
 
 
 /* setup ISP and RTC fields, based on mode */
-static u_int32_t
+u_int32_t
 piix_setup_idetim_timings(u_int8_t mode, u_int8_t dma, u_int8_t channel)
 {
 
@@ -2719,7 +2763,7 @@ piix_setup_idetim_timings(u_int8_t mode, u_int8_t dma, u_int8_t channel)
 }
 
 /* setup DTE, PPE, IE and TIME field based on PIO mode */
-static u_int32_t
+u_int32_t
 piix_setup_idetim_drvs(struct ata_drive_datas *drvp)
 {
 	u_int32_t ret = 0;
@@ -2774,7 +2818,7 @@ piix_setup_idetim_drvs(struct ata_drive_datas *drvp)
 }
 
 /* setup values in SIDETIM registers, based on mode */
-static u_int32_t
+u_int32_t
 piix_setup_sidetim_timings(u_int8_t mode, u_int8_t dma, u_int8_t channel)
 {
 	if (dma)
@@ -2990,7 +3034,8 @@ apollo_chip_map(struct pciide_softc *sc, struct pci_attach_args *pa)
 	}
 
 	if ((PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_VIATECH_VT6410) ||
-	    (PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_VIATECH_CX700_IDE)) { 
+	    (PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_VIATECH_CX700_IDE) ||
+	    (PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_VIATECH_VX700_IDE)) { 
 		printf(": ATA133");
 		sc->sc_wdcdev.UDMA_cap = 6;
 	} else {
@@ -3796,10 +3841,8 @@ sii3112_chip_map(struct pciide_softc *sc, struct pci_attach_args *pa)
 	struct pciide_satalink *sl = sc->sc_cookie;
 
 	/* Allocate memory for private data */
-	sc->sc_cookie = malloc(sizeof(struct pciide_satalink), M_DEVBUF,
-	    M_NOWAIT);
+	sc->sc_cookie = malloc(sizeof(*sl), M_DEVBUF, M_NOWAIT | M_ZERO);
 	sl = sc->sc_cookie;
-	bzero(sl, sizeof(*sl));
 
 #define	SII3112_RESET_BITS						\
 	(SCS_CMD_PBM_RESET | SCS_CMD_ARB_RESET |			\
@@ -4074,10 +4117,8 @@ sii3114_chip_map(struct pciide_softc *sc, struct pci_attach_args *pa)
 	struct pciide_satalink *sl = sc->sc_cookie;
 
 	/* Allocate memory for private data */
-	sc->sc_cookie = malloc(sizeof(struct pciide_satalink), M_DEVBUF,
-	    M_NOWAIT);
+	sc->sc_cookie = malloc(sizeof(*sl), M_DEVBUF, M_NOWAIT | M_ZERO);
 	sl = sc->sc_cookie;
-	bzero(sl, sizeof(*sl));
 
 #define	SII3114_RESET_BITS						\
 	(SCS_CMD_PBM_RESET | SCS_CMD_ARB_RESET |			\
@@ -4407,9 +4448,8 @@ cy693_chip_map(struct pciide_softc *sc, struct pci_attach_args *pa)
 	struct pciide_cy *cy;
 
 	/* Allocate memory for private data */
-	sc->sc_cookie = malloc(sizeof(struct pciide_cy), M_DEVBUF, M_NOWAIT);
+	sc->sc_cookie = malloc(sizeof(*cy), M_DEVBUF, M_NOWAIT | M_ZERO);
 	cy = sc->sc_cookie;
-	bzero(cy, sizeof(*cy));
 
 	/*
 	 * this chip has 2 PCI IDE functions, one for primary and one for
@@ -4664,9 +4704,8 @@ sis_chip_map(struct pciide_softc *sc, struct pci_attach_args *pa)
 	struct pciide_sis *sis;
 
 	/* Allocate memory for private data */
-	sc->sc_cookie = malloc(sizeof(struct pciide_sis), M_DEVBUF, M_NOWAIT);
+	sc->sc_cookie = malloc(sizeof(*sis), M_DEVBUF, M_NOWAIT | M_ZERO);
 	sis = sc->sc_cookie;
-	bzero(sis, sizeof(*sis));
 
 	/* Find PCI bridge (dev 0 func 0 on the same bus) */
 	br_tag = pci_make_tag(pa->pa_pc, pa->pa_bus, 0, 0);
@@ -5842,7 +5881,7 @@ hpt_pci_intr(void *arg)
 	(sc)->sc_pp->ide_product == PCI_PRODUCT_PROMISE_PDC20276  ||	\
 	(sc)->sc_pp->ide_product == PCI_PRODUCT_PROMISE_PDC20277)
 
-static INLINE u_int8_t
+u_int8_t
 pdc268_config_read(struct channel_softc *chp, int index)
 {
 	struct pciide_channel *cp = (struct pciide_channel *)chp;
@@ -5853,20 +5892,6 @@ pdc268_config_read(struct channel_softc *chp, int index)
 	    PDC268_INDEX(channel), index);
 	return (bus_space_read_1(sc->sc_dma_iot, sc->sc_dma_ioh,
 	    PDC268_DATA(channel)));
-}
-
-/* unused */
-static __inline void
-pdc268_config_write(struct channel_softc *chp, int index, u_int8_t value)
-{
-	struct pciide_channel *cp = (struct pciide_channel *)chp;
-	struct pciide_softc *sc = (struct pciide_softc *)cp->wdc_channel.wdc;
-	int channel = chp->channel;
-
-	bus_space_write_1(sc->sc_dma_iot, sc->sc_dma_ioh,
-	    PDC268_INDEX(channel), index);
-	bus_space_write_1(sc->sc_dma_iot, sc->sc_dma_ioh,
-	    PDC268_DATA(channel), value);
 }
 
 void
@@ -6337,10 +6362,8 @@ pdcsata_chip_map(struct pciide_softc *sc, struct pci_attach_args *pa)
 	const char *intrstr;
 
 	/* Allocate memory for private data */
-	sc->sc_cookie = malloc(sizeof(struct pciide_pdcsata), M_DEVBUF,
-	    M_NOWAIT);
+	sc->sc_cookie = malloc(sizeof(*ps), M_DEVBUF, M_NOWAIT | M_ZERO);
 	ps = sc->sc_cookie;
-	bzero(ps, sizeof(*ps));
 
 	/*
 	 * Promise SATA controllers have 3 or 4 channels,
@@ -7264,10 +7287,8 @@ svwsata_chip_map(struct pciide_softc *sc, struct pci_attach_args *pa)
 	struct pciide_svwsata *ss;
 
 	/* Allocate memory for private data */
-	sc->sc_cookie = malloc(sizeof(struct pciide_svwsata), M_DEVBUF,
-	    M_NOWAIT);
+	sc->sc_cookie = malloc(sizeof(*ss), M_DEVBUF, M_NOWAIT | M_ZERO);
 	ss = sc->sc_cookie;
-	bzero(ss, sizeof(*ss));
 
 	/* The 4-port version has a dummy second function. */
 	if (pci_conf_read(sc->sc_pc, sc->sc_tag,

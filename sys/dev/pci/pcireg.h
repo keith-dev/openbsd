@@ -1,4 +1,4 @@
-/*	$OpenBSD: pcireg.h,v 1.32 2006/07/31 11:06:33 mickey Exp $	*/
+/*	$OpenBSD: pcireg.h,v 1.34 2007/11/26 13:20:28 jsg Exp $	*/
 /*	$NetBSD: pcireg.h,v 1.26 2000/05/10 16:58:42 thorpej Exp $	*/
 
 /*
@@ -486,6 +486,16 @@ typedef u_int8_t pci_revision_t;
 #define PCI_CAP_MSIX		0x11
 
 /*
+ * Vital Product Data; access via capability pointer (PCI rev 2.2).
+ */
+#define	PCI_VPD_ADDRESS_MASK	0x7fff
+#define	PCI_VPD_ADDRESS_SHIFT	16
+#define	PCI_VPD_ADDRESS(ofs)	\
+	(((ofs) & PCI_VPD_ADDRESS_MASK) << PCI_VPD_ADDRESS_SHIFT)
+#define	PCI_VPD_DATAREG(ofs)	((ofs) + 4)
+#define	PCI_VPD_OPFLAG		0x80000000
+
+/*
  * Power Management Control Status Register; access via capability pointer.
  */
 #define PCI_PMCSR		0x04
@@ -494,6 +504,40 @@ typedef u_int8_t pci_revision_t;
 #define PCI_PMCSR_STATE_D1	0x01
 #define PCI_PMCSR_STATE_D2	0x02
 #define PCI_PMCSR_STATE_D3	0x03
+
+/*
+ * PCI Express; access via capability pointer.
+ */
+#define PCI_PCIE_XCAP		0x00
+#define PCI_PCIE_XCAP_SI	0x01000000
+#define PCI_PCIE_DCAP		0x04
+#define PCI_PCIE_DCSR		0x08
+#define PCI_PCIE_LCAP		0x0c
+#define PCI_PCIE_LCSR		0x10
+#define PCI_PCIE_SLCAP		0x14
+#define PCI_PCIE_SLCAP_ABP	0x00000001
+#define PCI_PCIE_SLCAP_PCP	0x00000002
+#define PCI_PCIE_SLCAP_MSP	0x00000004
+#define PCI_PCIE_SLCAP_AIP	0x00000008
+#define PCI_PCIE_SLCAP_PIP	0x00000010
+#define PCI_PCIE_SLCAP_HPS	0x00000020
+#define PCI_PCIE_SLCAP_HPC	0x00000040
+#define PCI_PCIE_SLCSR		0x18
+#define PCI_PCIE_SLCSR_ABE	0x00000001
+#define PCI_PCIE_SLCSR_PFE	0x00000002
+#define PCI_PCIE_SLCSR_MSE	0x00000004
+#define PCI_PCIE_SLCSR_PDE	0x00000008
+#define PCI_PCIE_SLCSR_CCE	0x00000010
+#define PCI_PCIE_SLCSR_HPE	0x00000020
+#define PCI_PCIE_SLCSR_ABP	0x00010000
+#define PCI_PCIE_SLCSR_PFD	0x00020000
+#define PCI_PCIE_SLCSR_MSC	0x00040000
+#define PCI_PCIE_SLCSR_PDC	0x00080000
+#define PCI_PCIE_SLCSR_CC	0x00100000
+#define PCI_PCIE_SLCSR_MS	0x00200000
+#define PCI_PCIE_SLCSR_PDS	0x00400000
+#define PCI_PCIE_SLCSR_LACS	0x01000000
+#define PCI_PCIE_RCSR		0x1c
 
 /*
  * Interrupt Configuration Register; contains interrupt pin and line.

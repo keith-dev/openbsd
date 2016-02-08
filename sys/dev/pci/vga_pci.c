@@ -1,4 +1,4 @@
-/* $OpenBSD: vga_pci.c,v 1.26 2007/01/28 20:28:50 gwk Exp $ */
+/* $OpenBSD: vga_pci.c,v 1.29 2007/11/28 23:37:34 oga Exp $ */
 /* $NetBSD: vga_pci.c,v 1.3 1998/06/08 06:55:58 thorpej Exp $ */
 
 /*
@@ -93,9 +93,12 @@
 #include <dev/vesa/vesabiosvar.h>
 #endif
 
+#include "drmbase.h"
+
 int	vga_pci_match(struct device *, void *, void *);
 void	vga_pci_attach(struct device *, struct device *, void *);
 paddr_t	vga_pci_mmap(void* v, off_t off, int prot);
+int vga_drm_print(void *, const char *);
 
 #ifdef VESAFB
 int vesafb_putcmap(struct vga_pci_softc *, struct wsdisplay_cmap *);
@@ -110,22 +113,8 @@ int
 vga_pci_match(struct device *parent, void *match, void *aux)
 {
 	struct pci_attach_args *pa = aux;
-	int potential;
 
-	potential = 0;
-
-	/*
-	 * If it's prehistoric/vga or display/vga, we might match.
-	 * For the console device, this is jut a sanity check.
-	 */
-	if (PCI_CLASS(pa->pa_class) == PCI_CLASS_PREHISTORIC &&
-	    PCI_SUBCLASS(pa->pa_class) == PCI_SUBCLASS_PREHISTORIC_VGA)
-		potential = 1;
-	if (PCI_CLASS(pa->pa_class) == PCI_CLASS_DISPLAY &&
-	     PCI_SUBCLASS(pa->pa_class) == PCI_SUBCLASS_DISPLAY_VGA)
-		potential = 1;
-
-	if (!potential)
+	if (DEVICE_IS_VGA_PCI(pa->pa_class) == 0)
 		return (0);
 
 	/* check whether it is disabled by firmware */
@@ -163,9 +152,6 @@ vga_pci_attach(struct device *parent, struct device *self, void *aux)
 	reg |= PCI_COMMAND_MASTER_ENABLE;
 	pci_conf_write(pa->pa_pc, pa->pa_tag, PCI_COMMAND_STATUS_REG, reg);
 
-#ifdef PCIAGP
-	agp_attach(parent, self, aux);
-#endif
 #ifdef VESAFB
 	if (vesabios_softc != NULL && vesabios_softc->sc_nmodes > 0) {
 		sc->sc_textmode = vesafb_get_mode(sc);
@@ -178,6 +164,18 @@ vga_pci_attach(struct device *parent, struct device *self, void *aux)
 	printf("\n");
 	vga_common_attach(self, pa->pa_iot, pa->pa_memt,
 	    WSDISPLAY_TYPE_PCIVGA);
+
+#if NDRMBASE > 0
+	config_found(self, aux, vga_drm_print);
+#endif
+}
+
+int
+vga_drm_print(void *aux, const char *pnp)
+{
+       if (pnp)
+               printf("direct rendering for %s", pnp);
+       return (UNSUPP);
 }
 
 paddr_t
@@ -193,11 +191,7 @@ vga_pci_mmap(void *v, off_t off, int prot)
 		return atop(sc->sc_base + off);
 	}
 #endif
-#ifdef PCIAGP
-	return agp_mmap(v, off, prot);
-#else
 	return -1;
-#endif
 }
 
 int
@@ -283,18 +277,6 @@ vga_pci_ioctl(void *v, u_long cmd, caddr_t addr, int flag, struct proc *pb)
 		break;
 
 #endif
-#ifdef PCIAGP
-	case AGPIOC_INFO:
-	case AGPIOC_ACQUIRE:
-	case AGPIOC_RELEASE:
-	case AGPIOC_SETUP:
-	case AGPIOC_ALLOCATE:
-	case AGPIOC_DEALLOCATE:
-	case AGPIOC_BIND:
-	case AGPIOC_UNBIND:
-		error = agp_ioctl(v, cmd, addr, flag, pb);
-		break;
-#endif
 	default:
 		error = ENOTTY;
 	}
@@ -306,8 +288,5 @@ vga_pci_ioctl(void *v, u_long cmd, caddr_t addr, int flag, struct proc *pb)
 void
 vga_pci_close(void *v)
 {
-#ifdef PCIAGP
-	agp_close(v);
-#endif
 }
 #endif

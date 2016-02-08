@@ -1,4 +1,4 @@
-/*	$OpenBSD: tset.c,v 1.29 2007/02/20 01:52:01 ray Exp $	*/
+/*	$OpenBSD: tset.c,v 1.32 2007/10/15 02:16:35 deraadt Exp $	*/
 
 /****************************************************************************
  * Copyright (c) 1998,1999,2000 Free Software Foundation, Inc.              *
@@ -182,7 +182,6 @@ static const char *
 askuser(const char *dflt)
 {
     static char answer[256];
-    char *p;
 
     /* We can get recalled; if so, don't continue uselessly. */
     if (feof(stdin) || ferror(stdin)) {
@@ -204,8 +203,7 @@ askuser(const char *dflt)
 	    return (dflt);
 	}
 
-	if ((p = strchr(answer, '\n')) != 0)
-	    *p = '\0';
+	answer[strcspn(answer, "\n")] = '\0';
 	if (answer[0])
 	    return (answer);
 	if (dflt != 0)
@@ -963,9 +961,9 @@ set_tabs(void)
  */
 #ifdef TERMIOS
 static void
-report(const char *name, int which, unsigned def)
+report(const char *name, int which, unsigned int def)
 {
-    unsigned older, newer;
+    unsigned int older, newer;
     char *p;
 
     newer = mode.c_cc[which];

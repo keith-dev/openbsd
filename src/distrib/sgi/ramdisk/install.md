@@ -1,4 +1,4 @@
-#	$OpenBSD: install.md,v 1.7 2006/03/17 09:22:43 otto Exp $
+#	$OpenBSD: install.md,v 1.9 2008/03/04 00:36:38 krw Exp $
 #
 #
 # Copyright (c) 1996 The NetBSD Foundation, Inc.
@@ -137,7 +137,7 @@ __EOT
 	esac
 
 	echo "Installing boot loader in volume header."
-	/usr/mdec/sgivol -wf boot /usr/mdec/boot $_disk
+	/usr/mdec/sgivol -w boot /usr/mdec/boot $_disk
 	case $? in
 	0)
 		;;
@@ -180,4 +180,7 @@ refer to the install document.
 
 To reboot the system, just enter 'reboot' at the shell prompt.
 __EOT
+}
+
+md_consoleinfo() {
 }

@@ -1,4 +1,4 @@
-/*	$OpenBSD: read.c,v 1.9 2006/03/24 17:10:02 kjell Exp $	*/
+/*	$OpenBSD: read.c,v 1.12 2007/09/29 12:31:28 otto Exp $	*/
 /*	$NetBSD: read.c,v 1.4 1994/11/23 07:42:07 jtc Exp $	*/
 
 /*-
@@ -37,7 +37,7 @@
 #if 0
 static char sccsid[] = "@(#)read.c	8.1 (Berkeley) 6/6/93";
 #endif
-static char rcsid[] = "$OpenBSD: read.c,v 1.9 2006/03/24 17:10:02 kjell Exp $";
+static char rcsid[] = "$OpenBSD: read.c,v 1.12 2007/09/29 12:31:28 otto Exp $";
 #endif /* not lint */
 
 #include <sys/types.h>
@@ -45,8 +45,6 @@ static char rcsid[] = "$OpenBSD: read.c,v 1.9 2006/03/24 17:10:02 kjell Exp $";
 #include <sys/limits.h>
 
 #include <err.h>
-#include <errno.h>
-#include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -91,6 +89,7 @@ bytes(FILE *fp, off_t off)
 	}
 	if (ferror(fp)) {
 		ierr();
+		free(sp);
 		return(1);
 	}
 
@@ -124,6 +123,8 @@ bytes(FILE *fp, off_t off)
 		if ((len = p - sp))
 			WR(sp, len);
 	}
+
+	free(sp);
 	return(0);
 }
 
@@ -148,7 +149,7 @@ lines(FILE *fp, off_t off)
 		size_t len;
 		char *l;
 	} *lines;
-	int ch;
+	int ch, rc = 0;
 	char *p = NULL;
 	int wrap;
 	size_t cnt, recno, blen, newsize;
@@ -192,7 +193,8 @@ lines(FILE *fp, off_t off)
 	}
 	if (ferror(fp)) {
 		ierr();
-		return(1);
+		rc = 1;
+		goto done;
 	}
 	if (cnt) {
 		lines[recno].l = sp;
@@ -216,5 +218,10 @@ lines(FILE *fp, off_t off)
 		for (cnt = 0; cnt < recno; ++cnt)
 			WR(lines[cnt].l, lines[cnt].len);
 	}
-	return(0);
+done:
+	for (cnt = 0; cnt < off; cnt++)
+		free(lines[cnt].l);
+	free(sp);
+	free(lines);
+	return(rc);
 }

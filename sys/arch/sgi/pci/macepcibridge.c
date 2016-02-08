@@ -1,4 +1,4 @@
-/*	$OpenBSD: macepcibridge.c,v 1.12 2007/06/21 20:17:12 miod Exp $ */
+/*	$OpenBSD: macepcibridge.c,v 1.15 2008/02/20 18:46:20 miod Exp $ */
 
 /*
  * Copyright (c) 2001-2004 Opsycon AB (www.opsycon.se)
@@ -41,7 +41,6 @@
 #include <uvm/uvm.h>
 
 #include <machine/autoconf.h>
-#include <machine/pte.h>
 #include <machine/cpu.h>
 #include <machine/vmparam.h>
 
@@ -189,7 +188,6 @@ mace_pcibrattach(struct device *parent, struct device *self, void *aux)
 	sc->sc_pc.pc_attach_hook = mace_pcibr_attach_hook;
 	sc->sc_pc.pc_make_tag = mace_pcibr_make_tag;
 	sc->sc_pc.pc_decompose_tag = mace_pcibr_decompose_tag;
-	sc->sc_pc.pc_sync_cache = sys_config._IOSyncDCache;
 
 	/* Create extents for PCI mappings */
 	mace_pcibbus_io_tag.bus_extent = extent_create("pci_io",
@@ -219,7 +217,7 @@ mace_pcibrattach(struct device *parent, struct device *self, void *aux)
 	printf(": mace rev %d, host system O2\n", pcireg);
 
 	/* Register the PCI ERROR interrupt handler */
-	BUS_INTR_ESTABLISH(ca, NULL, 8, IST_LEVEL, IPL_HIGH,
+	macebus_intr_establish(NULL, 8, IST_LEVEL, IPL_HIGH,
 	    mace_pcibr_errintr, (void *)sc, sc->sc_dev.dv_xname);
 
 	sc->sc_pc.pc_bus_maxdevs = mace_pcibr_bus_maxdevs;

@@ -1,4 +1,4 @@
-/*	$OpenBSD: options.c,v 1.8 2006/12/15 14:09:13 stevesk Exp $	*/
+/*	$OpenBSD: options.c,v 1.20 2008/01/18 20:14:03 krw Exp $	*/
 
 /* DHCP options parsing and reassembly. */
 
@@ -49,8 +49,11 @@ int bad_options_max = 5;
 
 void	parse_options(struct packet *);
 void	parse_option_buffer(struct packet *, unsigned char *, int);
+void	create_priority_list(unsigned char *, unsigned char *, int);
+int	store_option_fragment(unsigned char *, int, unsigned char,
+	    int, unsigned char *);
 int	store_options(unsigned char *, int, struct tree_cache **,
-	    unsigned char *, int, int, int, int);
+	    unsigned char *, int, int, int);
 
 
 /*
@@ -194,6 +197,53 @@ parse_option_buffer(struct packet *packet,
 }
 
 /*
+ * Fill priority_list with a complete list of DHCP options sorted by
+ * priority. i.e.
+ *     1) Mandatory options.
+ *     2) Options from prl that are not already present.
+ *     3) Options from the default list that are not already present.
+ */
+void
+create_priority_list(unsigned char *priority_list, unsigned char *prl,
+    int prl_len)
+{
+	int stored_list[256];
+	int i, priority_len = 0;
+
+	bzero(stored_list, 256);
+	bzero(priority_list, 256);
+
+	/* Some options we don't want on the priority list. */
+	stored_list[DHO_PAD] = 1;
+	stored_list[DHO_END] = 1;
+
+	/* Mandatory options. */
+	for(i = 0; dhcp_option_default_priority_list[i] != DHO_END; i++) {
+		priority_list[priority_len++] =
+		    dhcp_option_default_priority_list[i];
+		stored_list[dhcp_option_default_priority_list[i]] = 1;
+	}
+
+	/* Supplied priority list. */
+	if (!prl)
+		prl_len = 0;
+	for(i = 0; i < prl_len; i++) {
+		if (stored_list[prl[i]])
+			continue;
+		priority_list[priority_len++] = prl[i];	
+		stored_list[prl[i]] = 1;
+	}	
+
+	/* Default priority list. */
+	prl = dhcp_option_default_priority_list;
+	for(i = 0; i < 256; i++) {
+		if (stored_list[prl[i]])
+			continue;
+		priority_list[priority_len++] = prl[i];	
+		stored_list[prl[i]] = 1;
+	}
+}
+/*
  * cons options into a big buffer, and then split them out into the
  * three separate buffers if needed.  This allows us to cons up a set of
  * vendor options using the same routine.
@@ -204,13 +254,11 @@ cons_options(struct packet *inpacket, struct dhcp_packet *outpacket,
     int overload, /* Overload flags that may be set. */
     int terminate, int bootpp, u_int8_t *prl, int prl_len)
 {
-	unsigned char priority_list[300];
-	int priority_len;
+	unsigned char priority_list[256];
 	unsigned char buffer[4096];	/* Really big buffer... */
 	int main_buffer_size;
 	int mainbufix, bufix;
 	int option_size;
-	int length;
 
 	/*
 	 * If the client has provided a maximum DHCP message size, use
@@ -224,123 +272,129 @@ cons_options(struct packet *inpacket, struct dhcp_packet *outpacket,
 	    inpacket &&
 	    inpacket->options[DHO_DHCP_MAX_MESSAGE_SIZE].data &&
 	    (inpacket->options[DHO_DHCP_MAX_MESSAGE_SIZE].len >=
-	    sizeof(u_int16_t)))
+	    sizeof(u_int16_t))) {
 		mms = getUShort(
 		    inpacket->options[DHO_DHCP_MAX_MESSAGE_SIZE].data);
+	}
 
-	if (mms)
+	if (mms) {
+		if (mms < 576)
+			mms = 576;	/* mms must be >= minimum IP MTU */
 		main_buffer_size = mms - DHCP_FIXED_LEN;
-	else if (bootpp)
+	} else if (bootpp)
 		main_buffer_size = 64;
 	else
 		main_buffer_size = 576 - DHCP_FIXED_LEN;
 
-	if (main_buffer_size > sizeof(buffer))
-		main_buffer_size = sizeof(buffer);
-
-	/* Preload the option priority list with mandatory options. */
-	priority_len = 0;
-	priority_list[priority_len++] = DHO_DHCP_MESSAGE_TYPE;
-	priority_list[priority_len++] = DHO_DHCP_SERVER_IDENTIFIER;
-	priority_list[priority_len++] = DHO_DHCP_LEASE_TIME;
-	priority_list[priority_len++] = DHO_DHCP_MESSAGE;
+	if (main_buffer_size > sizeof(outpacket->options))
+		main_buffer_size = sizeof(outpacket->options);
 
 	/*
-	 * If the client has provided a list of options that it wishes
-	 * returned, use it to prioritize.  Otherwise, prioritize based
-	 * on the default priority list.
+	 * Get complete list of possible options in priority order. Use the
+	 * list provided in the options. Lacking that use the list provided by
+	 * prl. If that is not available just use the default list.
 	 */
-	if (inpacket &&
-	    inpacket->options[DHO_DHCP_PARAMETER_REQUEST_LIST].data) {
-		int prlen =
-		    inpacket->options[DHO_DHCP_PARAMETER_REQUEST_LIST].len;
-		if (prlen + priority_len > sizeof(priority_list))
-			prlen = sizeof(priority_list) - priority_len;
-
-		memcpy(&priority_list[priority_len],
+	if (inpacket && inpacket->options[DHO_DHCP_PARAMETER_REQUEST_LIST].data)
+		create_priority_list(priority_list,
 		    inpacket->options[DHO_DHCP_PARAMETER_REQUEST_LIST].data,
-		    prlen);
-		priority_len += prlen;
-		prl = priority_list;
-	} else if (prl) {
-		if (prl_len + priority_len > sizeof(priority_list))
-			prl_len = sizeof(priority_list) - priority_len;
-
-		memcpy(&priority_list[priority_len], prl, prl_len);
-		priority_len += prl_len;
-		prl = priority_list;
-	} else {
-		memcpy(&priority_list[priority_len],
-		    dhcp_option_default_priority_list,
-		    sizeof_dhcp_option_default_priority_list);
-		priority_len += sizeof_dhcp_option_default_priority_list;
-	}
+		    inpacket->options[DHO_DHCP_PARAMETER_REQUEST_LIST].len);
+	else if (prl)
+		create_priority_list(priority_list, prl, prl_len);
+	else
+		create_priority_list(priority_list, NULL, 0);
 
 	/* Copy the options into the big buffer... */
 	option_size = store_options(
 	    buffer,
 	    (main_buffer_size - 7 + ((overload & 1) ? DHCP_FILE_LEN : 0) +
 		((overload & 2) ? DHCP_SNAME_LEN : 0)),
-	    options, priority_list, priority_len, main_buffer_size,
-	    (main_buffer_size + ((overload & 1) ? DHCP_FILE_LEN : 0)),
+	    options, priority_list, main_buffer_size - 7,
+	    (main_buffer_size - 7 + ((overload & 1) ? DHCP_FILE_LEN : 0)),
 	    terminate);
 
-	/* Put the cookie up front... */
+	/* Initialize the buffers to be used and put the cookie up front. */
+	memset(outpacket->options, DHO_PAD, sizeof(outpacket->options));
+	if (overload & 1)
+		memset(outpacket->file, DHO_PAD, DHCP_FILE_LEN);
+	if (overload & 2)
+		memset(outpacket->sname, DHO_PAD, DHCP_SNAME_LEN);
+
 	memcpy(outpacket->options, DHCP_OPTIONS_COOKIE, 4);
 	mainbufix = 4;
 
 	/*
-	 * If we're going to have to overload, store the overload option
-	 * at the beginning.  If we can, though, just store the whole
-	 * thing in the packet's option buffer and leave it at that.
+	 * If we can, just store the whole thing in the packet's option buffer
+	 * and leave it at that.
 	 */
 	if (option_size <= main_buffer_size - mainbufix) {
-		memcpy(&outpacket->options[mainbufix],
-		    buffer, option_size);
+		memcpy(&outpacket->options[mainbufix], buffer, option_size);
 		mainbufix += option_size;
 		if (mainbufix < main_buffer_size)
-			outpacket->options[mainbufix++] = DHO_END;
-		length = DHCP_FIXED_NON_UDP + mainbufix;
-	} else {
-		outpacket->options[mainbufix++] = DHO_DHCP_OPTION_OVERLOAD;
+			outpacket->options[mainbufix++] = (char)DHO_END;
+		return (DHCP_FIXED_NON_UDP + mainbufix);
+	}
+
+	/*
+	 * We're going to have to overload. Store the overload option
+	 * at the beginning.
+	 */
+	outpacket->options[mainbufix++] = DHO_DHCP_OPTION_OVERLOAD;
+	outpacket->options[mainbufix++] = 1;
+	if (option_size > main_buffer_size - mainbufix + DHCP_FILE_LEN)
+		outpacket->options[mainbufix++] = 3;
+	else
 		outpacket->options[mainbufix++] = 1;
-		if (option_size >
-		    main_buffer_size - mainbufix + DHCP_FILE_LEN)
-			outpacket->options[mainbufix++] = 3;
-		else
-			outpacket->options[mainbufix++] = 1;
 
-		memcpy(&outpacket->options[mainbufix],
-		    buffer, main_buffer_size - mainbufix);
-		bufix = main_buffer_size - mainbufix;
-		length = DHCP_FIXED_NON_UDP + mainbufix;
-		if (overload & 1) {
-			if (option_size - bufix <= DHCP_FILE_LEN) {
-				memcpy(outpacket->file,
-				    &buffer[bufix], option_size - bufix);
-				mainbufix = option_size - bufix;
-				if (mainbufix < DHCP_FILE_LEN)
-					outpacket->file[mainbufix++] = (char)DHO_END;
-				while (mainbufix < DHCP_FILE_LEN)
-					outpacket->file[mainbufix++] = DHO_PAD;
-			} else {
-				memcpy(outpacket->file,
-				    &buffer[bufix], DHCP_FILE_LEN);
-				bufix += DHCP_FILE_LEN;
-			}
-		}
-		if ((overload & 2) && option_size < bufix) {
-			memcpy(outpacket->sname,
-			    &buffer[bufix], option_size - bufix);
+	bufix = main_buffer_size - mainbufix;
+	memcpy(&outpacket->options[mainbufix], buffer, bufix);
 
-			mainbufix = option_size - bufix;
-			if (mainbufix < DHCP_SNAME_LEN)
-				outpacket->file[mainbufix++] = (char)DHO_END;
-			while (mainbufix < DHCP_SNAME_LEN)
-				outpacket->file[mainbufix++] = DHO_PAD;
+	if (overload & 1) {
+		mainbufix = option_size - bufix;
+		if (mainbufix <= DHCP_FILE_LEN) {
+			memcpy(outpacket->file, &buffer[bufix], mainbufix);
+			if (mainbufix < DHCP_FILE_LEN)
+				outpacket->file[mainbufix] = (char)DHO_END;
+			bufix = option_size;
+		} else {
+			memcpy(outpacket->file, &buffer[bufix], DHCP_FILE_LEN);
+			bufix += DHCP_FILE_LEN;
 		}
 	}
-	return (length);
+
+	if ((overload & 2) && option_size > bufix) {
+		mainbufix = option_size - bufix;
+		memcpy(outpacket->sname, &buffer[bufix], mainbufix);
+		if (mainbufix < DHCP_SNAME_LEN)
+			outpacket->sname[mainbufix] = (char)DHO_END;
+	}
+
+	return (DHCP_FIXED_NON_UDP + main_buffer_size);
+}
+
+/*
+ * Store a <code><length><data> fragment in buffer. Return the number of
+ * characters used. Return 0 if no data could be stored.
+ */
+int
+store_option_fragment(unsigned char *buffer, int buffer_size,
+    unsigned char code, int length, unsigned char *data)
+{
+	buffer_size -= 2; /* Space for option code and option length. */
+
+	if (buffer_size < 1)
+		return (0);
+
+	if (buffer_size > 255)
+		buffer_size = 255;
+	if (length > buffer_size)
+		length = buffer_size;
+
+	buffer[0] = code;
+	buffer[1] = length;
+
+	memcpy(&buffer[2], data, length);
+
+	return (length + 2);
 }
 
 /*
@@ -348,111 +402,70 @@ cons_options(struct packet *inpacket, struct dhcp_packet *outpacket,
  */
 int
 store_options(unsigned char *buffer, int buflen, struct tree_cache **options,
-    unsigned char *priority_list, int priority_len, int first_cutoff,
-    int second_cutoff, int terminate)
+    unsigned char *priority_list, int first_cutoff, int second_cutoff,
+    int terminate)
 {
+	int code, i, incr, ix, length, optstart;
+	int cutoff = first_cutoff;
 	int bufix = 0;
-	int option_stored[256];
-	int i;
-	int ix;
-	int tto;
-
-	/* Zero out the stored-lengths array. */
-	memset(option_stored, 0, sizeof(option_stored));
 
 	/*
-	 * Copy out the options in the order that they appear in the
-	 * priority list...
+	 * Store options in the order they appear in the priority list.
 	 */
-	for (i = 0; i < priority_len; i++) {
+	for (i = 0; i < 256; i++) {
 		/* Code for next option to try to store. */
-		int code = priority_list[i];
-		int optstart;
-
-		/*
-		 * Number of bytes left to store (some may already have
-		 * been stored by a previous pass).
-		 */
-		int length;
-
-		/* If no data is available for this option, skip it. */
-		if (!options[code]) {
+		code = priority_list[i];
+		if (code == DHO_PAD || code == DHO_END)
 			continue;
-		}
 
-		/*
-		 * The client could ask for things that are mandatory,
-		 * in which case we should avoid storing them twice...
-		 */
-		if (option_stored[code])
-			continue;
-		option_stored[code] = 1;
-
-		/* Find the value of the option... */
-		if (!tree_evaluate(options[code]))
+		if (!options[code] || !tree_evaluate(options[code]))
 			continue;
 
 		/* We should now have a constant length for the option. */
 		length = options[code]->len;
 
-		/* Do we add a NUL? */
-		if (terminate && dhcp_options[code].format[0] == 't') {
-			length++;
-			tto = 1;
-		} else
-			tto = 0;
-
 		/* Try to store the option. */
-
-		/*
-		 * If the option's length is more than 255, we must
-		 * store it in multiple hunks.   Store 255-byte hunks
-		 * first.  However, in any case, if the option data will
-		 * cross a buffer boundary, split it across that
-		 * boundary.
-		 */
-		ix = 0;
-
 		optstart = bufix;
+		ix = 0;
 		while (length) {
-			unsigned char incr = length > 255 ? 255 : length;
+			incr = store_option_fragment(&buffer[bufix],
+			    cutoff - bufix, code, length,
+			    options[code]->value + ix);
 
-			/*
-			 * If this hunk of the buffer will cross a
-			 * boundary, only go up to the boundary in this
-			 * pass.
-			 */
-			if (bufix < first_cutoff &&
-			    bufix + incr > first_cutoff)
-				incr = first_cutoff - bufix;
-			else if (bufix < second_cutoff &&
-			    bufix + incr > second_cutoff)
-				incr = second_cutoff - bufix;
-
-			/*
-			 * If this option is going to overflow the
-			 * buffer, skip it.
-			 */
-			if (bufix + 2 + incr > buflen) {
-				bufix = optstart;
-				break;
+			if (incr > 0) {
+				bufix += incr;
+				length -= incr - 2;
+				ix += incr - 2;
+				continue;
 			}
 
-			/* Everything looks good - copy it in! */
-			buffer[bufix] = code;
-			buffer[bufix + 1] = incr;
-			if (tto && incr == length) {
-				memcpy(buffer + bufix + 2,
-				    options[code]->value + ix, incr - 1);
-				buffer[bufix + 2 + incr - 1] = 0;
-			} else
-				memcpy(buffer + bufix + 2,
-				    options[code]->value + ix, incr);
-			length -= incr;
-			ix += incr;
-			bufix += 2 + incr;
+			/*
+			 * No fragment could be stored in the space before the
+			 * cutoff. Fill the unusable space with DHO_PAD and
+			 * move cutoff for another attempt.
+			 */
+			memset(&buffer[bufix], DHO_PAD, cutoff - bufix);
+			bufix = cutoff;
+			if (cutoff < second_cutoff)
+				cutoff = second_cutoff;
+			else if (cutoff < buflen)
+				cutoff = buflen;
+			else
+				break;
+		}
+
+		if (length > 0) {
+zapfrags:
+			memset(&buffer[optstart], DHO_PAD, buflen - optstart);
+			bufix = optstart;
+		} else if (terminate && dhcp_options[code].format[0] == 't') {
+			if (bufix < cutoff)
+				buffer[bufix++] = '\0';
+			else
+				goto zapfrags;
 		}
 	}
+
 	return (bufix);
 }
 

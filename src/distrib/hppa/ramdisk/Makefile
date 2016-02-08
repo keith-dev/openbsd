@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.11 2007/06/17 00:28:21 deraadt Exp $
+#	$OpenBSD: Makefile,v 1.13 2008/03/04 23:43:11 deraadt Exp $
 
 CBIN=		instbin
 ARCHDIR=	${.CURDIR}/..
@@ -18,7 +18,7 @@ DISKTYPE=	rdroot
 PID!=		echo $$$$
 REALIMAGE!=	echo /tmp/image.${PID}
 IMAGE?=		ramdisk${REV}.fs
-IMAGESIZE?=	5120 # 2.5MB in 512 byte blocks
+IMAGESIZE?=	4608 # 2.25MB in 512 byte blocks
 NEWFS_WILL_FAIL?=false
 RDSETROOT?=	elfrdsetroot
 CRUNCHGENOPTS?=-E
@@ -65,7 +65,7 @@ ${CDROM}: bsd ${CDBOOT}
 obsd:
 	cd ${SRCDIR}/sys/arch/${MACHINE}/conf && config ${KERNEL}
 	cd ${SRCDIR}/sys/arch/${MACHINE}/compile/${KERNEL} && \
-	    make depend && make clean && make
+	    ${MAKE} depend && ${MAKE} clean && ${MAKE}
 	cp ${SRCDIR}/sys/arch/${MACHINE}/compile/${KERNEL}/bsd obsd
 
 bsd.rd:	obsd ${IMAGE} ${RDSETROOT}
@@ -105,7 +105,7 @@ ${CBIN}.mk ${CBIN}.cache ${CBIN}.c: ${CBIN}.conf
 	    ${CBIN}.conf
 
 ${CBIN}: ${CBIN}.mk ${CBIN}.cache ${CBIN}.c
-	make -f ${CBIN}.mk all
+	${MAKE} -f ${CBIN}.mk all
 
 clean cleandir:
 	/bin/rm -f *.core ${IMAGE} ${CBIN} ${CBIN}.mk ${CBIN}.cache \

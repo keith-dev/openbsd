@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.c,v 1.25 2007/05/29 18:18:20 tom Exp $	*/
+/*	$OpenBSD: cpu.c,v 1.29 2007/11/28 17:05:09 tedu Exp $	*/
 /* $NetBSD: cpu.c,v 1.1.2.7 2000/06/26 02:04:05 sommerfeld Exp $ */
 
 /*-
@@ -137,7 +137,7 @@ void	cpu_set_tss_gates(struct cpu_info *);
  * curproc, etc. are used early.
  */
 
-struct cpu_info *cpu_info[I386_MAXPROCS] = { &cpu_info_primary };
+struct cpu_info *cpu_info[MAXCPUS] = { &cpu_info_primary };
 
 void   	cpu_hatch(void *);
 void   	cpu_boot_secondary(struct cpu_info *);
@@ -295,6 +295,7 @@ cpu_attach(struct device *parent, struct device *self, void *aux)
 		cpu_alloc_ldt(ci);
 		ci->ci_flags |= CPUF_PRESENT | CPUF_AP;
 		identifycpu(ci);
+		sched_init_cpu(ci);
 		ci->ci_next = cpu_info_list->ci_next;
 		cpu_info_list->ci_next = ci;
 		ncpus++;
@@ -341,7 +342,6 @@ cpu_init(struct cpu_info *ci)
 		lcr4(rcr4() | CR4_PGE);	/* enable global TLB caching */
 
 	ci->ci_flags |= CPUF_RUNNING;
-#if defined(I686_CPU)
 	/*
 	 * If we have FXSAVE/FXRESTOR, use them.
 	 */
@@ -354,7 +354,6 @@ cpu_init(struct cpu_info *ci)
 		if (cpu_feature & (CPUID_SSE|CPUID_SSE2))
 			lcr4(rcr4() | CR4_OSXMMEXCPT);
 	}
-#endif /* I686_CPU */
 }
 
 void
@@ -363,7 +362,7 @@ cpu_boot_secondary_processors()
 	struct cpu_info *ci;
 	u_long i;
 
-	for (i = 0; i < I386_MAXPROCS; i++) {
+	for (i = 0; i < MAXCPUS; i++) {
 		ci = cpu_info[i];
 		if (ci == NULL)
 			continue;
@@ -383,7 +382,7 @@ cpu_init_idle_pcbs()
 	struct cpu_info *ci;
 	u_long i;
 
-	for (i=0; i < I386_MAXPROCS; i++) {
+	for (i=0; i < MAXCPUS; i++) {
 		ci = cpu_info[i];
 		if (ci == NULL)
 			continue;
@@ -463,6 +462,9 @@ cpu_hatch(void *v)
 		    ci->ci_dev.dv_xname, ci->ci_cpuid);
 	microuptime(&ci->ci_schedstate.spc_runtime);
 	splx(s);
+
+	SCHED_LOCK(s);
+	cpu_switchto(NULL, sched_chooseproc());
 }
 
 void
@@ -526,7 +528,7 @@ cpu_set_tss_gates(struct cpu_info *ci)
 
 #if defined(DDB) && defined(MULTIPROCESSOR)
 	/*
-	 * Set up seperate handler for the DDB IPI, so that it doesn't
+	 * Set up separate handler for the DDB IPI, so that it doesn't
 	 * stomp on a possibly corrupted stack.
 	 *
 	 * XXX overwriting the gate set in db_machine_init.

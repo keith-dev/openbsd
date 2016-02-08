@@ -1,4 +1,4 @@
-/*	$OpenBSD: sensorsd.c,v 1.34 2007/08/14 17:10:02 cnst Exp $ */
+/*	$OpenBSD: sensorsd.c,v 1.36 2007/12/05 17:28:06 cnst Exp $ */
 
 /*
  * Copyright (c) 2003 Henning Brauer <henning@openbsd.org>
@@ -96,7 +96,7 @@ void
 usage(void)
 {
 	extern char *__progname;
-	fprintf(stderr, "usage: %s [-d]\n", __progname);
+	fprintf(stderr, "usage: %s [-d] [-c check] [-r report]\n", __progname);
 	exit(1);
 }
 
@@ -109,11 +109,24 @@ main(int argc, char *argv[])
 	time_t		 next_report, last_report = 0, next_check;
 	int		 mib[3], dev;
 	int		 sleeptime, sensor_cnt = 0, ch;
+	int		 check_period = CHECK_PERIOD;
+	int		 report_period = REPORT_PERIOD;
+	const char	*errstr;
 
-	while ((ch = getopt(argc, argv, "d")) != -1) {
+	while ((ch = getopt(argc, argv, "c:dr:")) != -1) {
 		switch (ch) {
+		case 'c':
+			check_period = strtonum(optarg, 1, 600, &errstr);
+			if (errstr)
+				errx(1, "check %s", errstr);
+			break;
 		case 'd':
 			debug = 1;
+			break;
+		case 'r':
+			report_period = strtonum(optarg, 1, 600, &errstr);
+			if (errstr)
+				errx(1, "report %s", errstr);
 			break;
 		default:
 			usage();
@@ -163,12 +176,12 @@ main(int argc, char *argv[])
 		}
 		if (next_check <= time(NULL)) {
 			check();
-			next_check = time(NULL) + CHECK_PERIOD;
+			next_check = time(NULL) + check_period;
 		}
 		if (next_report <= time(NULL)) {
 			report(last_report);
 			last_report = next_report;
-			next_report = time(NULL) + REPORT_PERIOD;
+			next_report = time(NULL) + report_period;
 		}
 		if (next_report < next_check)
 			sleeptime = next_report - time(NULL);
@@ -353,7 +366,8 @@ report_sdlim(struct sdlim_t *sdlim, time_t last_report)
 				as = ", UNKNOWN";
 				break;
 			}
-			syslog(LOG_ALERT, "%s.%s%d: %s%s",
+			syslog(limit->astatus == SENSOR_S_OK ? LOG_INFO :
+			    LOG_ALERT, "%s.%s%d: %s%s",
 			    sdlim->dxname, sensor_type_s[limit->type],
 			    limit->numt,
 			    print_sensor(limit->type, limit->last_val), as);
@@ -379,7 +393,8 @@ report_sdlim(struct sdlim_t *sdlim, time_t last_report)
 				    print_sensor(limit->type, limit->last_val));
 				break;
 			}
-			syslog(LOG_ALERT, "%s.%s%d: %s",
+			syslog(limit->ustatus == SENSORSD_S_WITHIN ? LOG_INFO :
+			    LOG_ALERT, "%s.%s%d: %s",
 			    sdlim->dxname, sensor_type_s[limit->type],
 			    limit->numt, us);
 		}

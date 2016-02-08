@@ -1,4 +1,4 @@
-/*	$OpenBSD: extern.h,v 1.3 2003/06/03 02:56:14 millert Exp $ */
+/*	$OpenBSD: extern.h,v 1.5 2008/01/13 20:31:19 chl Exp $ */
 
 /*-
  * Copyright (c) 1990 The Regents of the University of California.

@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_bnxreg.h,v 1.20 2007/03/05 11:13:10 reyk Exp $	*/
+/*	$OpenBSD: if_bnxreg.h,v 1.23 2008/02/28 02:02:43 brad Exp $	*/
 
 /*-
  * Copyright (c) 2006 Broadcom Corporation
@@ -233,9 +233,11 @@
 #define BNX_CHIP_ID_5706_A0			0x57060000
 #define BNX_CHIP_ID_5706_A1			0x57060010
 #define BNX_CHIP_ID_5706_A2			0x57060020
+#define BNX_CHIP_ID_5706_A3			0x57060030
 #define BNX_CHIP_ID_5708_A0			0x57080000
 #define BNX_CHIP_ID_5708_B0			0x57081000
 #define BNX_CHIP_ID_5708_B1			0x57081010
+#define BNX_CHIP_ID_5708_B2			0x57081020
 
 #define BNX_CHIP_BOND_ID(sc)		(((sc)->bnx_chipid) & 0xf)
 
@@ -653,7 +655,7 @@ struct flash_spec {
  * PCI registers defined in the PCI 2.2 spec.
  */
 #define BNX_PCI_BAR0			0x10
-#define BNX_PCI_PCIX_CMD		0x42
+#define BNX_PCI_PCIX_CMD		0x40
 
 /****************************************************************************/
 /* Convenience definitions.                                                 */
@@ -4591,8 +4593,6 @@ struct bnx_softc
 
 	struct pci_attach_args		bnx_pa;
 	pci_intr_handle_t		bnx_ih;
-
-	struct ifmedia		bnx_ifmedia;		/* TBI media info */
 
 	bus_space_tag_t		bnx_btag;			/* Device bus tag */
 	bus_space_handle_t	bnx_bhandle;		/* Device bus handle */

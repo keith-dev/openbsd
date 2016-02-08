@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.5 2005/07/21 13:22:53 deraadt Exp $
+#	$OpenBSD: Makefile,v 1.9 2007/11/30 14:02:00 jsing Exp $
 
 
 PROG=		boot
@@ -14,11 +14,16 @@ AFLAGS+=	${SAABI}
 
 LDFLAGS+=	${SALDFLAGS} -T ${.CURDIR}/ld.script -e __start
 
+S=		${.CURDIR}/../../../..
 SRCS=		start.S boot.c filesystem.c conf.c diskio.c arcbios.c strstr.c
 
 CLEANFILES+= machine mips64
 
-.if !make(libdep) && !make(sadep) && !make(salibdir) && !make(kernlibdir) && !make(obj)
+.PATH:		${S}/lib/libkern/arch/mips64 ${S}/lib/libkern
+SRCS+=		strlcpy.c memcpy.c strlen.c strrchr.c strlcat.c ashrdi3.c strncmp.c \
+		strcmp.S udivdi3.c umoddi3.c qdivrem.c
+
+.if !make(libdep) && !make(sadep) && !make(salibdir) && !make(obj)
 .BEGIN:
 	@([ -h machine ] || ln -s ${.CURDIR}/../../include machine)
 	@([ -h mips64 ] || ln -s ${.CURDIR}/../../../mips64/include mips64)
@@ -26,7 +31,7 @@ CLEANFILES+= machine mips64
 
 ${PROG}: $(OBJS) $(LDADD)
 	$(LD) $(LDFLAGS) -o boot $(OBJS) -L${LIBSADIR} ${LIBSA} \
-	-L${LIBZDIR} ${LIBZ} -L${LIBKERNDIR} ${LIBKERN}
+	-L${LIBZDIR} ${LIBZ}
 
 
 install:

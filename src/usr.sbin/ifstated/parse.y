@@ -1,4 +1,4 @@
-/*	$OpenBSD: parse.y,v 1.16 2006/10/25 18:58:42 henning Exp $	*/
+/*	$OpenBSD: parse.y,v 1.26 2008/02/26 10:09:58 mpf Exp $	*/
 
 /*
  * Copyright (c) 2004 Ryan McBride <mcbride@openbsd.org>
@@ -24,54 +24,62 @@
 #include <sys/types.h>
 #include <sys/time.h>
 #include <sys/socket.h>
+#include <sys/stat.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <net/if.h>
 
 #include <ctype.h>
+#include <unistd.h>
 #include <err.h>
 #include <errno.h>
+#include <limits.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
 #include <syslog.h>
 #include <event.h>
-#include <limits.h>
 
 #include "ifstated.h"
 
-static struct ifsd_config	*conf;
-static FILE			*fin = NULL;
-static int			 lineno = 1;
-static int			 errors = 0;
-char				*infile;
-char				*start_state;
-
-struct ifsd_action		*curaction;
-struct ifsd_state		*curstate = NULL;
-
-int	 yyerror(const char *, ...);
-int	 yyparse(void);
-int	 kw_cmp(const void *, const void *);
-int	 lookup(char *);
-int	 lgetc(FILE *);
-int	 lungetc(int);
-int	 findeol(void);
-int	 yylex(void);
-
+TAILQ_HEAD(files, file)		 files = TAILQ_HEAD_INITIALIZER(files);
+static struct file {
+	TAILQ_ENTRY(file)	 entry;
+	FILE			*stream;
+	char			*name;
+	int			 lineno;
+	int			 errors;
+} *file, *topfile;
+struct file	*pushfile(const char *, int);
+int		 popfile(void);
+int		 check_file_secrecy(int, const char *);
+int		 yyparse(void);
+int		 yylex(void);
+int		 yyerror(const char *, ...);
+int		 kw_cmp(const void *, const void *);
+int		 lookup(char *);
+int		 lgetc(int);
+int		 lungetc(int);
+int		 findeol(void);
 
 TAILQ_HEAD(symhead, sym)	 symhead = TAILQ_HEAD_INITIALIZER(symhead);
 struct sym {
-	TAILQ_ENTRY(sym)	 entries;
+	TAILQ_ENTRY(sym)	 entry;
 	int			 used;
 	int			 persist;
 	char			*nam;
 	char			*val;
 };
+int		 symset(const char *, const char *, int);
+char		*symget(const char *);
+
+static struct ifsd_config	*conf;
+char				*start_state;
+
+struct ifsd_action		*curaction;
+struct ifsd_state		*curstate = NULL;
 
 void			 link_states(struct ifsd_action *);
-int			 symset(const char *, const char *, int);
-char			*symget(const char *);
 void			 set_expression_depth(struct ifsd_expression *, int);
 void			 init_state(struct ifsd_state *);
 struct ifsd_ifstate	*new_ifstate(u_short, int);
@@ -79,7 +87,7 @@ struct ifsd_external	*new_external(char *, u_int32_t);
 
 typedef struct {
 	union {
-		u_int32_t	 number;
+		int64_t		 number;
 		char		*string;
 		struct in_addr	 addr;
 		u_short		 interface;
@@ -96,12 +104,12 @@ typedef struct {
 
 %token	STATE INITSTATE
 %token	LINK UP DOWN UNKNOWN ADDED REMOVED
-%token	IF RUN SETSTATE EVERY INIT LOGLEVEL
+%token	IF RUN SETSTATE EVERY INIT
 %left	AND OR
 %left	UNARY
 %token	ERROR
 %token	<v.string>	STRING
-%type	<v.number>	number
+%token	<v.number>	NUMBER
 %type	<v.string>	string
 %type	<v.interface>	interface
 %type	<v.ifstate>	if_test
@@ -115,22 +123,7 @@ grammar		: /* empty */
 		| grammar varset '\n'
 		| grammar action '\n'
 		| grammar state '\n'
-		| grammar error '\n'		{ errors++; }
-		;
-
-number		: STRING			{
-			u_int32_t	 uval;
-			const char	*errstr;
-
-			uval = strtonum($1, 0, UINT_MAX, &errstr);
-			if (errstr) {	
-				yyerror("number %s is %s", $1, errstr);
-				free($1);
-				YYERROR;
-			} else
-				$$ = uval;
-			free($1);
-		}
+		| grammar error '\n'		{ file->errors++; }
 		;
 
 string		: string STRING				{
@@ -162,19 +155,6 @@ varset		: STRING '=' string		{
 
 conf_main	: INITSTATE STRING		{
 			start_state = $2;
-		}
-		| LOGLEVEL STRING			{
-			if (!strcmp($2, "none"))
-				conf->loglevel = IFSD_LOG_NONE;
-			else if (!strcmp($2, "quiet"))
-				conf->loglevel = IFSD_LOG_QUIET;
-			else if (!strcmp($2, "normal"))
-				conf->loglevel = IFSD_LOG_NORMAL;
-			else if (!strcmp($2, "verbose"))
-				conf->loglevel = IFSD_LOG_VERBOSE;
-			else if (!strcmp($2, "debug"))
-				conf->loglevel = IFSD_LOG_DEBUG;
-			free($2);
 		}
 		;
 
@@ -271,7 +251,12 @@ if_test		: interface '.' LINK '.' UP		{
 		}
 		;
 
-ext_test	: STRING EVERY number {
+ext_test	: STRING EVERY NUMBER {
+			if ($3 <= 0 || $3 > UINT_MAX) {
+				yyerror("invalid interval: %d", $3);
+				free($1);
+				YYERROR;
+			}
 			$$ = new_external($1, $3);
 			free($1);
 		}
@@ -369,11 +354,11 @@ struct keywords {
 int
 yyerror(const char *fmt, ...)
 {
-	va_list	ap;
+	va_list		 ap;
 
-	errors = 1;
+	file->errors++;
 	va_start(ap, fmt);
-	fprintf(stderr, "%s:%d: ", infile, yylval.lineno);
+	fprintf(stderr, "%s:%d: ", file->name, yylval.lineno);
 	vfprintf(stderr, fmt, ap);
 	fprintf(stderr, "\n");
 	va_end(ap);
@@ -399,7 +384,6 @@ lookup(char *s)
 		{ "init",		INIT},
 		{ "init-state",		INITSTATE},
 		{ "link",		LINK},
-		{ "loglevel",		LOGLEVEL},
 		{ "removed",		REMOVED},
 		{ "run",		RUN},
 		{ "set-state",		SETSTATE},
@@ -427,9 +411,9 @@ char	 pushback_buffer[MAXPUSHBACK];
 int	 pushback_index = 0;
 
 int
-lgetc(FILE *f)
+lgetc(int quotec)
 {
-	int	c, next;
+	int		c, next;
 
 	if (parsebuf) {
 		/* Read character from the parsebuffer instead of input. */
@@ -445,24 +429,32 @@ lgetc(FILE *f)
 	if (pushback_index)
 		return (pushback_buffer[--pushback_index]);
 
-	while ((c = getc(f)) == '\\') {
-		next = getc(f);
+	if (quotec) {
+		if ((c = getc(file->stream)) == EOF) {
+			yyerror("reached end of file while parsing "
+			    "quoted string");
+			if (file == topfile || popfile() == EOF)
+				return (EOF);
+			return (quotec);
+		}
+		return (c);
+	}
+
+	while ((c = getc(file->stream)) == '\\') {
+		next = getc(file->stream);
 		if (next != '\n') {
 			c = next;
 			break;
 		}
-		yylval.lineno = lineno;
-		lineno++;
-	}
-	if (c == '\t' || c == ' ') {
-		/* Compress blanks to a single space. */
-		do {
-			c = getc(f);
-		} while (c == '\t' || c == ' ');
-		ungetc(c, f);
-		c = ' ';
+		yylval.lineno = file->lineno;
+		file->lineno++;
 	}
 
+	while (c == EOF) {
+		if (file == topfile || popfile() == EOF)
+			return (EOF);
+		c = getc(file->stream);
+	}
 	return (c);
 }
 
@@ -492,9 +484,9 @@ findeol(void)
 
 	/* skip to either EOF or the first real EOL */
 	while (1) {
-		c = lgetc(fin);
+		c = lgetc(0);
 		if (c == '\n') {
-			lineno++;
+			file->lineno++;
 			break;
 		}
 		if (c == EOF)
@@ -508,21 +500,21 @@ yylex(void)
 {
 	char	 buf[8096];
 	char	*p, *val;
-	int	 endc, c;
+	int	 quotec, next, c;
 	int	 token;
 
 top:
 	p = buf;
-	while ((c = lgetc(fin)) == ' ')
+	while ((c = lgetc(0)) == ' ' || c == '\t')
 		; /* nothing */
 
-	yylval.lineno = lineno;
+	yylval.lineno = file->lineno;
 	if (c == '#')
-		while ((c = lgetc(fin)) != '\n' && c != EOF)
+		while ((c = lgetc(0)) != '\n' && c != EOF)
 			; /* nothing */
 	if (c == '$' && parsebuf == NULL) {
 		while (1) {
-			if ((c = lgetc(fin)) == EOF)
+			if ((c = lgetc(0)) == EOF)
 				return (0);
 
 			if (p + 1 >= buf + sizeof(buf) - 1) {
@@ -550,17 +542,25 @@ top:
 	switch (c) {
 	case '\'':
 	case '"':
-		endc = c;
+		quotec = c;
 		while (1) {
-			if ((c = lgetc(fin)) == EOF)
+			if ((c = lgetc(quotec)) == EOF)
 				return (0);
-			if (c == endc) {
+			if (c == '\n') {
+				file->lineno++;
+				continue;
+			} else if (c == '\\') {
+				if ((next = lgetc(quotec)) == EOF)
+					return (0);
+				if (next == quotec || c == ' ' || c == '\t')
+					c = next;
+				else if (next == '\n')
+					continue;
+				else
+					lungetc(next);
+			} else if (c == quotec) {
 				*p = '\0';
 				break;
-			}
-			if (c == '\n') {
-				lineno++;
-				continue;
 			}
 			if (p + 1 >= buf + sizeof(buf) - 1) {
 				yyerror("string too long");
@@ -570,8 +570,44 @@ top:
 		}
 		yylval.v.string = strdup(buf);
 		if (yylval.v.string == NULL)
-			errx(1, "yylex: strdup");
+			err(1, "yylex: strdup");
 		return (STRING);
+	}
+
+#define allowed_to_end_number(x) \
+	(isspace(x) || x == ')' || x ==',' || x == '/' || x == '}' || x == '=')
+
+	if (c == '-' || isdigit(c)) {
+		do {
+			*p++ = c;
+			if ((unsigned)(p-buf) >= sizeof(buf)) {
+				yyerror("string too long");
+				return (findeol());
+			}
+		} while ((c = lgetc(0)) != EOF && isdigit(c));
+		lungetc(c);
+		if (p == buf + 1 && buf[0] == '-')
+			goto nodigits;
+		if (c == EOF || allowed_to_end_number(c)) {
+			const char *errstr = NULL;
+
+			*p = '\0';
+			yylval.v.number = strtonum(buf, LLONG_MIN,
+			    LLONG_MAX, &errstr);
+			if (errstr) {
+				yyerror("\"%s\" invalid number: %s",
+				    buf, errstr);
+				return (findeol());
+			}
+			return (NUMBER);
+		} else {
+nodigits:
+			while (p > buf + 1)
+				lungetc(*--p);
+			c = *--p;
+			if (c == '-')
+				return (c);
+		}
 	}
 
 #define allowed_in_string(x) \
@@ -587,7 +623,7 @@ top:
 				yyerror("string too long");
 				return (findeol());
 			}
-		} while ((c = lgetc(fin)) != EOF && (allowed_in_string(c)));
+		} while ((c = lgetc(0)) != EOF && (allowed_in_string(c)));
 		lungetc(c);
 		*p = '\0';
 		if ((token = lookup(buf)) == STRING)
@@ -596,17 +632,81 @@ top:
 		return (token);
 	}
 	if (c == '\n') {
-		yylval.lineno = lineno;
-		lineno++;
+		yylval.lineno = file->lineno;
+		file->lineno++;
 	}
 	if (c == EOF)
 		return (0);
 	return (c);
 }
 
+int
+check_file_secrecy(int fd, const char *fname)
+{
+	struct stat	st;
+
+	if (fstat(fd, &st)) {
+		warn("cannot stat %s", fname);
+		return (-1);
+	}
+	if (st.st_uid != 0 && st.st_uid != getuid()) {
+		warnx("%s: owner not root or current user", fname);
+		return (-1);
+	}
+	if (st.st_mode & (S_IRWXG | S_IRWXO)) {
+		warnx("%s: group/world readable/writeable", fname);
+		return (-1);
+	}
+	return (0);
+}
+
+struct file *
+pushfile(const char *name, int secret)
+{
+	struct file	*nfile;
+
+	if ((nfile = calloc(1, sizeof(struct file))) == NULL ||
+	    (nfile->name = strdup(name)) == NULL) {
+		warn("malloc");
+		return (NULL);
+	}
+	if ((nfile->stream = fopen(nfile->name, "r")) == NULL) {
+		warnx("%s", nfile->name);
+		free(nfile->name);
+		free(nfile);
+		return (NULL);
+	} else if (secret &&
+	    check_file_secrecy(fileno(nfile->stream), nfile->name)) {
+		fclose(nfile->stream);
+		free(nfile->name);
+		free(nfile);
+		return (NULL);
+	}
+	nfile->lineno = 1;
+	TAILQ_INSERT_TAIL(&files, nfile, entry);
+	return (nfile);
+}
+
+int
+popfile(void)
+{
+	struct file	*prev;
+
+	if ((prev = TAILQ_PREV(file, files, entry)) != NULL)
+		prev->errors += file->errors;
+
+	TAILQ_REMOVE(&files, file, entry);
+	fclose(file->stream);
+	free(file->name);
+	free(file);
+	file = prev;
+	return (file ? 0 : EOF);
+}
+
 struct ifsd_config *
 parse_config(char *filename, int opts)
 {
+	int		 errors = 0;
 	struct sym	*sym, *next;
 	struct ifsd_state *state;
 
@@ -615,23 +715,21 @@ parse_config(char *filename, int opts)
 		return (NULL);
 	}
 
-	if ((fin = fopen(filename, "r")) == NULL) {
-		warn("%s", filename);
+	if ((file = pushfile(filename, 0)) == NULL) {
 		free(conf);
 		return (NULL);
 	}
-	infile = filename;
+	topfile = file;
 
 	TAILQ_INIT(&conf->states);
 
 	init_state(&conf->always);
 	curaction = conf->always.always;
-	conf->loglevel = IFSD_LOG_NORMAL;
 	conf->opts = opts;
 
 	yyparse();
-
-	fclose(fin);
+	errors = file->errors;
+	popfile();
 
 	/* Link states */
 	TAILQ_FOREACH(state, &conf->states, entries) {
@@ -654,14 +752,14 @@ parse_config(char *filename, int opts)
 
 	/* Free macros and check which have not been used. */
 	for (sym = TAILQ_FIRST(&symhead); sym != NULL; sym = next) {
-		next = TAILQ_NEXT(sym, entries);
+		next = TAILQ_NEXT(sym, entry);
 		if ((conf->opts & IFSD_OPT_VERBOSE2) && !sym->used)
 			fprintf(stderr, "warning: macro '%s' not "
 			    "used\n", sym->nam);
 		if (!sym->persist) {
 			free(sym->nam);
 			free(sym->val);
-			TAILQ_REMOVE(&symhead, sym, entries);
+			TAILQ_REMOVE(&symhead, sym, entry);
 			free(sym);
 		}
 	}
@@ -697,7 +795,7 @@ link_states(struct ifsd_action *action)
 		if (state == NULL) {
 			fprintf(stderr, "error: state '%s' not declared\n",
 			    action->act.statename);
-			errors++;
+			file->errors++;
 		}
 		break;
 	}
@@ -714,7 +812,7 @@ symset(const char *nam, const char *val, int persist)
 	struct sym	*sym;
 
 	for (sym = TAILQ_FIRST(&symhead); sym && strcmp(nam, sym->nam);
-	    sym = TAILQ_NEXT(sym, entries))
+	    sym = TAILQ_NEXT(sym, entry))
 		;	/* nothing */
 
 	if (sym != NULL) {
@@ -723,7 +821,7 @@ symset(const char *nam, const char *val, int persist)
 		else {
 			free(sym->nam);
 			free(sym->val);
-			TAILQ_REMOVE(&symhead, sym, entries);
+			TAILQ_REMOVE(&symhead, sym, entry);
 			free(sym);
 		}
 	}
@@ -743,7 +841,7 @@ symset(const char *nam, const char *val, int persist)
 	}
 	sym->used = 0;
 	sym->persist = persist;
-	TAILQ_INSERT_TAIL(&symhead, sym, entries);
+	TAILQ_INSERT_TAIL(&symhead, sym, entry);
 	return (0);
 }
 
@@ -774,7 +872,7 @@ symget(const char *nam)
 {
 	struct sym	*sym;
 
-	TAILQ_FOREACH(sym, &symhead, entries)
+	TAILQ_FOREACH(sym, &symhead, entry)
 		if (strcmp(nam, sym->nam) == 0) {
 			sym->used = 1;
 			return (sym->val);

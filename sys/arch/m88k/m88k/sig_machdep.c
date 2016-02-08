@@ -1,4 +1,4 @@
-/*	$OpenBSD: sig_machdep.c,v 1.4 2006/01/02 19:46:12 miod Exp $	*/
+/*	$OpenBSD: sig_machdep.c,v 1.8 2007/12/31 09:23:53 martin Exp $	*/
 /*
  * Copyright (c) 1998, 1999, 2000, 2001 Steve Murphree, Jr.
  * Copyright (c) 1996 Nivas Madhur
@@ -118,8 +118,8 @@ sendsig(sig_t catcher, int sig, int mask, unsigned long code, int type,
 	if (((vaddr_t)fp & 0x07) != 0)
 		fp = (struct sigframe *)((vaddr_t)fp & ~0x07);
 
-	if ((unsigned)fp <= USRSTACK - ctob(p->p_vmspace->vm_ssize))
-		(void)uvm_grow(p, (unsigned)fp);
+	if ((vaddr_t)fp <= USRSTACK - ptoa(p->p_vmspace->vm_ssize))
+		(void)uvm_grow(p, (vaddr_t)fp);
 
 #ifdef DEBUG
 	if ((sigdebug & SDB_FOLLOW) ||
@@ -159,7 +159,9 @@ sendsig(sig_t catcher, int sig, int mask, unsigned long code, int type,
 	 */
 	tf->tf_r[1] = p->p_sigcode;		/* return to sigcode */
 	tf->tf_r[2] = sig;			/* first arg is signo */
-	tf->tf_r[3] = (vaddr_t)&fp->sf_si;	/* second arg is siginfo */
+	tf->tf_r[3] = psp->ps_siginfo & sigmask(sig) ? (vaddr_t)&fp->sf_si : 0;
+	tf->tf_r[4] = (vaddr_t)&fp->sf_sc;
+	tf->tf_r[31] = (vaddr_t)fp;
 	addr = (vaddr_t)catcher;		/* and resume in the handler */
 #ifdef M88100
 	if (CPU_IS88100) {
@@ -172,7 +174,6 @@ sendsig(sig_t catcher, int sig, int mask, unsigned long code, int type,
 		tf->tf_exip = (addr & XIP_ADDR);
 	}
 #endif
-	tf->tf_r[31] = (vaddr_t)fp;
 
 #ifdef DEBUG
 	if ((sigdebug & SDB_FOLLOW) ||
@@ -224,5 +225,13 @@ sys_sigreturn(struct proc *p, void *v, register_t *retval)
 		p->p_sigacts->ps_sigstk.ss_flags &= ~SS_ONSTACK;
 	p->p_sigmask = scp->sc_mask & ~sigcantmask;
 
-	return (EJUSTRETURN);
+	/*
+	 * We really want to return to the instruction pointed to by
+	 * the sigcontext.  However, due to the way exceptions work
+	 * on 88110, returning EJUSTRETURN will cause m88110_syscall()
+	 * to skip one instruction.  We avoid this by returning
+	 * ERESTART, which will indeed cause the instruction pointed
+	 * to by exip to be run.
+	 */
+	return (CPU_IS88100 ? EJUSTRETURN : ERESTART);
 }

@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.403 2007/07/20 17:04:14 mk Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.418 2008/02/18 16:31:55 kettenis Exp $	*/
 /*	$NetBSD: machdep.c,v 1.214 1996/11/10 03:16:17 thorpej Exp $	*/
 
 /*-
@@ -179,6 +179,13 @@ extern struct proc *npxproc;
 char machine[] = MACHINE;
 
 /*
+ * switchto vectors
+ */
+void (*cpu_idle_leave_fcn)(void) = NULL;
+void (*cpu_idle_cycle_fcn)(void) = NULL;
+void (*cpu_idle_enter_fcn)(void) = NULL;
+
+/*
  * Declare these as initialized data so we can patch them.
  */
 #if NAPM > 0
@@ -232,7 +239,7 @@ paddr_t avail_end;
 struct vm_map *exec_map = NULL;
 struct vm_map *phys_map = NULL;
 
-#if !defined(SMALL_KERNEL) && defined(I686_CPU)
+#if !defined(SMALL_KERNEL)
 int p4_model;
 int p3_early;
 void (*update_cpuspeed)(void) = NULL;
@@ -392,7 +399,7 @@ cpu_startup()
 	 */
 	pa = avail_end;
 	va = (vaddr_t)msgbufp;
-	for (i = 0; i < btoc(MSGBUFSIZE); i++) {
+	for (i = 0; i < atop(MSGBUFSIZE); i++) {
 		pmap_kenter_pa(va, pa, VM_PROT_READ|VM_PROT_WRITE);
 		va += PAGE_SIZE;
 		pa += PAGE_SIZE;
@@ -413,8 +420,9 @@ cpu_startup()
 	curcpu()->ci_feature_flags = cpu_feature;
 	identifycpu(curcpu());
 
-	printf("real mem  = %llu (%lluMB)\n", ctob((unsigned long long)physmem),
-	    ctob((unsigned long long)physmem)/1024U/1024U);
+	printf("real mem  = %llu (%lluMB)\n",
+	    (unsigned long long)ptoa((psize_t)physmem),
+	    (unsigned long long)ptoa((psize_t)physmem)/1024U/1024U);
 
 	/*
 	 * Find out how much space we need, allocate it,
@@ -447,8 +455,8 @@ cpu_startup()
 				   VM_PHYS_SIZE, 0, FALSE, NULL);
 
 	printf("avail mem = %llu (%lluMB)\n",
-	    ptoa((unsigned long long)uvmexp.free),
-	    ptoa((unsigned long long)uvmexp.free)/1024U/1024U);
+	    (unsigned long long)ptoa((psize_t)uvmexp.free),
+	    (unsigned long long)ptoa((psize_t)uvmexp.free)/1024U/1024U);
 
 	/*
 	 * Set up buffers, so they can be used to read disk labels.
@@ -552,7 +560,7 @@ setup_buffers()
 	 * of the memory below 4GB.
 	 */
 	if (bufpages == 0)
-		bufpages = btoc(avail_end) * bufcachepercent / 100;
+		bufpages = atop(avail_end) * bufcachepercent / 100;
 
 	/* Restrict to at most 25% filled kvm */
 	if (bufpages >
@@ -924,6 +932,51 @@ const struct cpu_cpuid_nameclass i386_cpuid_cpus[] = {
 				"686 class"		/* Default */
 			},
 			NULL
+		},
+		/* Family 7 */
+		{
+			CPUCLASS_686,
+		} ,
+		/* Family 8 */
+		{
+			CPUCLASS_686,
+		} ,
+		/* Family 9 */
+		{
+			CPUCLASS_686,
+		} ,
+		/* Family A */
+		{
+			CPUCLASS_686,
+		} ,
+		/* Family B */
+		{
+			CPUCLASS_686,
+		} ,
+		/* Family C */
+		{
+			CPUCLASS_686,
+		} ,
+		/* Family D */
+		{
+			CPUCLASS_686,
+		} ,
+		/* Family E */
+		{
+			CPUCLASS_686,
+		} ,
+		/* Family F */
+		{
+			/* Extended processor family - Transmeta Efficeon */
+			CPUCLASS_686,
+			{
+				0, 0, "TM8000", "TM8000",
+				0, 0, 0, 0,
+				0, 0, 0, 0,
+				0, 0, 0, 0,
+				"TM8000"	/* Default */
+			},
+			tm86_cpu_setup
 		} }
 	},
 	{
@@ -1027,7 +1080,6 @@ const struct cpu_cpuid_feature i386_cpuid_ecxfeatures[] = {
 void
 winchip_cpu_setup(struct cpu_info *ci)
 {
-#if defined(I586_CPU)
 
 	switch ((ci->ci_signature >> 4) & 15) { /* model */
 	case 4: /* WinChip C6 */
@@ -1037,10 +1089,9 @@ winchip_cpu_setup(struct cpu_info *ci)
 		printf("%s: TSC disabled\n", ci->ci_dev.dv_xname);
 		break;
 	}
-#endif
 }
 
-#if defined(I686_CPU) && !defined(SMALL_KERNEL)
+#if !defined(SMALL_KERNEL)
 void
 cyrix3_setperf_setup(struct cpu_info *ci)
 {
@@ -1057,7 +1108,6 @@ cyrix3_setperf_setup(struct cpu_info *ci)
 void
 cyrix3_cpu_setup(struct cpu_info *ci)
 {
-#if defined(I686_CPU)
 	int model = (ci->ci_signature >> 4) & 15;
 	int step = ci->ci_signature & 15;
 
@@ -1076,6 +1126,11 @@ cyrix3_cpu_setup(struct cpu_info *ci)
 #endif
 
 	switch (model) {
+	/* Possible earlier models */
+	case 0: case 1: case 2:
+	case 3: case 4: case 5:
+		break;
+
 	case 6: /* C3 Samuel 1 */
 	case 7: /* C3 Samuel 2 or C3 Ezra */
 	case 8: /* C3 Ezra-T */
@@ -1092,11 +1147,11 @@ cyrix3_cpu_setup(struct cpu_info *ci)
 		if (step < 3)
 			break;
 		/*
-		 * C3 Nehemiah: fall through.
+		 * C3 Nehemiah & later: fall through.
 		 */
-	case 10:
+	default:
 		/*
-		 * C3 Nehemiah/Esther:
+		 * C3 Nehemiah/Esther & later models:
 		 * First we check for extended feature flags, and then
 		 * (if present) retrieve the ones at 0xC0000001.  In this
 		 * bit 2 tells us if the RNG is present.  Bit 3 tells us
@@ -1185,7 +1240,6 @@ cyrix3_cpu_setup(struct cpu_info *ci)
 		printf("\n");
 		break;
 	}
-#endif
 }
 
 void
@@ -1224,7 +1278,6 @@ cyrix6x86_cpu_setup(struct cpu_info *ci)
 void
 natsem6x86_cpu_setup(struct cpu_info *ci)
 {
-#if defined(I586_CPU) || defined(I686_CPU)
 	extern int clock_broken_latch;
 	int model = (ci->ci_signature >> 4) & 15;
 
@@ -1235,22 +1288,19 @@ natsem6x86_cpu_setup(struct cpu_info *ci)
 		printf("%s: TSC disabled\n", ci->ci_dev.dv_xname);
 		break;
 	}
-#endif
 }
 
 void
 intel586_cpu_setup(struct cpu_info *ci)
 {
-#if defined(I586_CPU)
 	if (!cpu_f00f_bug) {
 		fix_f00f();
 		printf("%s: F00F bug workaround installed\n",
 		    ci->ci_dev.dv_xname);
 	}
-#endif
 }
 
-#if !defined(SMALL_KERNEL) && defined(I586_CPU)
+#if !defined(SMALL_KERNEL)
 void
 amd_family5_setperf_setup(struct cpu_info *ci)
 {
@@ -1280,14 +1330,14 @@ amd_family5_setup(struct cpu_info *ci)
 		break;
 	case 12:
 	case 13:
-#if !defined(SMALL_KERNEL) && defined(I586_CPU)
+#if !defined(SMALL_KERNEL)
 		setperf_setup = amd_family5_setperf_setup;
 #endif
 		break;
 	}
 }
 
-#if !defined(SMALL_KERNEL) && defined(I686_CPU)
+#if !defined(SMALL_KERNEL)
 void
 amd_family6_setperf_setup(struct cpu_info *ci)
 {
@@ -1302,12 +1352,13 @@ amd_family6_setperf_setup(struct cpu_info *ci)
 		break;
 	}
 }
-#endif /* !SMALL_KERNEL && I686_CPU */
+#endif
 
 void
 amd_family6_setup(struct cpu_info *ci)
 {
-#if !defined(SMALL_KERNEL) && defined(I686_CPU)
+#if !defined(SMALL_KERNEL)
+	int family = (ci->ci_signature >> 8) & 15;
 	extern void (*pagezero)(void *, size_t);
 	extern void sse2_pagezero(void *, size_t);
 	extern void i686_pagezero(void *, size_t);
@@ -1318,10 +1369,14 @@ amd_family6_setup(struct cpu_info *ci)
 		pagezero = i686_pagezero;
 
 	setperf_setup = amd_family6_setperf_setup;
+
+	if (family == 0xf) {
+		amd64_errata(ci);
+	}
 #endif
 }
 
-#if !defined(SMALL_KERNEL) && defined(I686_CPU)
+#if !defined(SMALL_KERNEL)
 /*
  * Temperature read on the CPU is relative to the maximum
  * temperature supported by the CPU, Tj(Max).
@@ -1379,7 +1434,7 @@ intel686_cpusensors_setup(struct cpu_info *ci)
 }
 #endif
 
-#if !defined(SMALL_KERNEL) && defined(I686_CPU)
+#if !defined(SMALL_KERNEL)
 void
 intel686_setperf_setup(struct cpu_info *ci)
 {
@@ -1402,7 +1457,7 @@ void
 intel686_common_cpu_setup(struct cpu_info *ci)
 {
 
-#if !defined(SMALL_KERNEL) && defined(I686_CPU)
+#if !defined(SMALL_KERNEL)
 	setperf_setup = intel686_setperf_setup;
 	cpusensors_setup = intel686_cpusensors_setup;
 	{
@@ -1430,7 +1485,7 @@ intel686_cpu_setup(struct cpu_info *ci)
 	int step = ci->ci_signature & 15;
 	u_quad_t msr119;
 
-#if !defined(SMALL_KERNEL) && defined(I686_CPU)
+#if !defined(SMALL_KERNEL)
 	p3_get_bus_clock(ci);
 #endif
 
@@ -1457,7 +1512,7 @@ intel686_cpu_setup(struct cpu_info *ci)
 		ci->ci_level = 2;
 	}
 
-#if !defined(SMALL_KERNEL) && defined(I686_CPU)
+#if !defined(SMALL_KERNEL)
 	p3_early = (model == 8 && step == 1) ? 1 : 0;
 	update_cpuspeed = p3_update_cpuspeed;
 #endif
@@ -1466,13 +1521,13 @@ intel686_cpu_setup(struct cpu_info *ci)
 void
 intel686_p4_cpu_setup(struct cpu_info *ci)
 {
-#if !defined(SMALL_KERNEL) && defined(I686_CPU)
+#if !defined(SMALL_KERNEL)
 	p4_get_bus_clock(ci);
 #endif
 
 	intel686_common_cpu_setup(ci);
 
-#if !defined(SMALL_KERNEL) && defined(I686_CPU)
+#if !defined(SMALL_KERNEL)
 	p4_model = (ci->ci_signature >> 4) & 15;
 	update_cpuspeed = p4_update_cpuspeed;
 #endif
@@ -1481,7 +1536,7 @@ intel686_p4_cpu_setup(struct cpu_info *ci)
 void
 tm86_cpu_setup(struct cpu_info *ci)
 {
-#if !defined(SMALL_KERNEL) && defined(I586_CPU)
+#if !defined(SMALL_KERNEL)
 	longrun_init();
 #endif
 }
@@ -1721,7 +1776,6 @@ identifycpu(struct cpu_info *ci)
 		printf("%s: %s", cpu_device, cpu_model);
 	}
 
-#if defined(I586_CPU) || defined(I686_CPU)
 	if (ci->ci_feature_flags && (ci->ci_feature_flags & CPUID_TSC)) {
 		/* Has TSC */
 		calibrate_cyclecounter();
@@ -1742,7 +1796,6 @@ identifycpu(struct cpu_info *ci)
 			}
 		}
 	}
-#endif
 	if ((ci->ci_flags & CPUF_PRIMARY) == 0) {
 		printf("\n");
 
@@ -1781,49 +1834,15 @@ identifycpu(struct cpu_info *ci)
 #endif
 
 #ifndef SMALL_KERNEL
-#if defined(I586_CPU) || defined(I686_CPU)
 	if (cpuspeed != 0 && cpu_cpuspeed == NULL)
 		cpu_cpuspeed = pentium_cpuspeed;
-#endif
 #endif
 
 	cpu_class = class;
 
-	/*
-	 * Now that we have told the user what they have,
-	 * let them know if that machine type isn't configured.
-	 */
-	switch (cpu_class) {
-#if !defined(I486_CPU) && !defined(I586_CPU) && !defined(I686_CPU)
-#error No CPU classes configured.
-#endif
-#ifndef I686_CPU
-	case CPUCLASS_686:
-		printf("NOTICE: this kernel does not support Pentium Pro CPU class\n");
-#ifdef I586_CPU
-		printf("NOTICE: lowering CPU class to i586\n");
-		cpu_class = CPUCLASS_586;
-		break;
-#endif
-#endif
-#ifndef I586_CPU
-	case CPUCLASS_586:
-		printf("NOTICE: this kernel does not support Pentium CPU class\n");
-#ifdef I486_CPU
-		printf("NOTICE: lowering CPU class to i486\n");
+	if (cpu_class == CPUCLASS_386) {
+		printf("WARNING: 386 (possibly unknown?) cpu class, assuming 486\n");
 		cpu_class = CPUCLASS_486;
-		break;
-#endif
-#endif
-#ifndef I486_CPU
-	case CPUCLASS_486:
-		printf("NOTICE: this kernel does not support i486 CPU class\n");
-#endif
-	case CPUCLASS_386:
-		printf("NOTICE: this kernel does not support i386 CPU class\n");
-		panic("no appropriate CPU class available");
-	default:
-		break;
 	}
 
 	ci->cpu_class = class;
@@ -1846,7 +1865,6 @@ identifycpu(struct cpu_info *ci)
 	 */
 	lcr0(rcr0() | CR0_WP);
 
-#if defined(I686_CPU)
 	/*
 	 * If we have FXSAVE/FXRESTOR, use them.
 	 */
@@ -1868,9 +1886,6 @@ identifycpu(struct cpu_info *ci)
 	} else
 		i386_use_fxsave = 0;
 
-	if (vendor == CPUVENDOR_AMD)
-		amd64_errata(ci);
-#endif /* I686_CPU */
 }
 
 char *
@@ -1893,7 +1908,6 @@ tm86_cpu_name(int model)
 }
 
 #ifndef SMALL_KERNEL
-#ifdef I686_CPU
 void
 cyrix3_get_bus_clock(struct cpu_info *ci)
 {
@@ -2098,16 +2112,13 @@ p3_update_cpuspeed(void)
 
 	cpuspeed = (bus_clock * mult) / 1000;
 }
-#endif	/* I686_CPU */
 
-#if defined(I586_CPU) || defined(I686_CPU)
 int
 pentium_cpuspeed(int *freq)
 {
 	*freq = cpuspeed;
 	return (0);
 }
-#endif
 #endif	/* !SMALL_KERNEL */
 
 #ifdef COMPAT_IBCS2
@@ -2160,9 +2171,7 @@ void
 sendsig(sig_t catcher, int sig, int mask, u_long code, int type,
     union sigval val)
 {
-#ifdef I686_CPU
 	extern char sigcode, sigcode_xmm;
-#endif
 	struct proc *p = curproc;
 	struct trapframe *tf = p->p_md.md_regs;
 	struct sigframe *fp, frame;
@@ -2260,10 +2269,8 @@ sendsig(sig_t catcher, int sig, int mask, u_long code, int type,
 	tf->tf_ds = GSEL(GUDATA_SEL, SEL_UPL);
 	tf->tf_eip = p->p_sigcode;
 	tf->tf_cs = GSEL(GUCODE_SEL, SEL_UPL);
-#ifdef I686_CPU
 	if (i386_use_fxsave)
 		tf->tf_eip += &sigcode_xmm - &sigcode;
-#endif
 	tf->tf_eflags &= ~(PSL_T|PSL_VM|PSL_AC);
 	tf->tf_esp = (int)fp;
 	tf->tf_ss = GSEL(GUDATA_SEL, SEL_UPL);
@@ -2385,6 +2392,8 @@ boot(int howto)
 			printf("WARNING: not updating battery clock\n");
 		}
 	}
+
+	delay(4*1000000);	/* XXX */
 
 	/* Disable interrupts. */
 	splhigh();
@@ -2571,7 +2580,7 @@ dumpsys()
 	for (i = 0; !error && i < ndumpmem; i++) {
 
 		npg = dumpmem[i].end - dumpmem[i].start;
-		maddr = ctob(dumpmem[i].start);
+		maddr = ptoa(dumpmem[i].start);
 		blkno = dumplo + btodb(maddr) + 1;
 #if 0
 		printf("(%d %lld %d) ", maddr, blkno, npg);
@@ -2581,7 +2590,7 @@ dumpsys()
 			/* Print out how many MBs we have more to go. */
 			if (dbtob(blkno - dumplo) % (1024 * 1024) < NBPG)
 				printf("%d ",
-				    (ctob(dumpsize) - maddr) / (1024 * 1024));
+				    (ptoa(dumpsize) - maddr) / (1024 * 1024));
 #if 0
 			printf("(%x %lld) ", maddr, blkno);
 #endif
@@ -2749,7 +2758,6 @@ extern int IDTVEC(div), IDTVEC(dbg), IDTVEC(nmi), IDTVEC(bpt), IDTVEC(ofl),
     IDTVEC(rsvd), IDTVEC(fpu), IDTVEC(align), IDTVEC(syscall), IDTVEC(mchk),
     IDTVEC(osyscall), IDTVEC(simd);
 
-#if defined(I586_CPU)
 extern int IDTVEC(f00f_redirect);
 
 int cpu_f00f_bug = 0;
@@ -2785,7 +2793,6 @@ fix_f00f(void)
 	/* Tell the rest of the world */
 	cpu_f00f_bug = 1;
 }
-#endif
 
 #ifdef MULTIPROCESSOR
 void
@@ -2996,13 +3003,28 @@ init386(paddr_t first_avail)
 			if (a < 8 * NBPG)
 				a = 8 * NBPG;
 
-			/* skip shorter than page regions */
-			if (a >= e || (e - a) < NBPG) {
+			/* skip regions which are zero or negative in size */
+			if (a >= e) {
 #ifdef DEBUG
 				printf("-S");
 #endif
 				continue;
 			}
+
+			/*
+			 * XXX - This is a hack to work around BIOS bugs and
+			 * a bug in the  msgbuf allocation.  We skip regions
+			 * smaller than the message buffer or 16-bit segment
+			 * limit in size.
+			 */
+			if ((e - a) < max((MSGBUFSIZE / NBPG), (64 * 1024))) {
+#ifdef DEBUG
+				printf("-X");
+#endif
+				continue;
+			}
+
+			/* skip legacy IO region */
 			if ((a > IOM_BEGIN && a < IOM_END) ||
 			    (e > IOM_BEGIN && e < IOM_END)) {
 #ifdef DEBUG
@@ -3062,20 +3084,20 @@ init386(paddr_t first_avail)
 			if (a < atop(16 * 1024 * 1024)) {
 				lim = MIN(atop(16 * 1024 * 1024), e);
 #ifdef DEBUG
--				printf(" %x-%x (<16M)", a, lim);
+				printf(" %x-%x (<16M)", a, lim);
 #endif
 				uvm_page_physload(a, lim, a, lim,
 				    VM_FREELIST_FIRST16);
 				if (e > lim) {
 #ifdef DEBUG
--					printf(" %x-%x", lim, e);
+					printf(" %x-%x", lim, e);
 #endif
 					uvm_page_physload(lim, e, lim, e,
 					    VM_FREELIST_DEFAULT);
 				}
 			} else {
 #ifdef DEBUG
--				printf(" %x-%x", a, e);
+				printf(" %x-%x", a, e);
 #endif
 				uvm_page_physload(a, e, a, e,
 				    VM_FREELIST_DEFAULT);
@@ -3253,7 +3275,7 @@ idt_vec_alloc(int low, int high)
 void
 idt_vec_set(int vec, void (*function)(void))
 {
-	setgate(&idt[vec], function, 0, SDT_SYS386IGT, SEL_KPL, GCODE_SEL);
+	setgate(&idt[vec], function, 0, SDT_SYS386IGT, SEL_KPL, GICODE_SEL);
 }
 
 void
@@ -3347,7 +3369,7 @@ cpu_sysctl(int *name, u_int namelen, void *oldp, size_t *oldlenp, void *newp,
 }
 
 int
-bus_space_map(bus_space_tag_t t, bus_addr_t bpa, bus_size_t size, int cacheable,
+bus_space_map(bus_space_tag_t t, bus_addr_t bpa, bus_size_t size, int flags,
     bus_space_handle_t *bshp)
 {
 	int error;
@@ -3359,6 +3381,8 @@ bus_space_map(bus_space_tag_t t, bus_addr_t bpa, bus_size_t size, int cacheable,
 	switch (t) {
 	case I386_BUS_SPACE_IO:
 		ex = ioport_ex;
+		if (flags & BUS_SPACE_MAP_LINEAR)
+			return (EINVAL);
 		break;
 
 	case I386_BUS_SPACE_MEM:
@@ -3395,7 +3419,7 @@ bus_space_map(bus_space_tag_t t, bus_addr_t bpa, bus_size_t size, int cacheable,
 	 * For memory space, map the bus physical address to
 	 * a kernel virtual address.
 	 */
-	error = bus_mem_add_mapping(bpa, size, cacheable, bshp);
+	error = bus_mem_add_mapping(bpa, size, flags, bshp);
 	if (error) {
 		if (extent_free(ex, bpa, size, EX_NOWAIT |
 		    (ioport_malloc_safe ? EX_MALLOCOK : 0))) {
@@ -3410,7 +3434,7 @@ bus_space_map(bus_space_tag_t t, bus_addr_t bpa, bus_size_t size, int cacheable,
 
 int
 _bus_space_map(bus_space_tag_t t, bus_addr_t bpa, bus_size_t size,
-    int cacheable, bus_space_handle_t *bshp)
+    int flags, bus_space_handle_t *bshp)
 {
 	/*
 	 * For I/O space, that's all she wrote.
@@ -3424,13 +3448,13 @@ _bus_space_map(bus_space_tag_t t, bus_addr_t bpa, bus_size_t size,
 	 * For memory space, map the bus physical address to
 	 * a kernel virtual address.
 	 */
-	return (bus_mem_add_mapping(bpa, size, cacheable, bshp));
+	return (bus_mem_add_mapping(bpa, size, flags, bshp));
 }
 
 int
 bus_space_alloc(bus_space_tag_t t, bus_addr_t rstart, bus_addr_t rend,
     bus_size_t size, bus_size_t alignment, bus_size_t boundary,
-    int cacheable, bus_addr_t *bpap, bus_space_handle_t *bshp)
+    int flags, bus_addr_t *bpap, bus_space_handle_t *bshp)
 {
 	struct extent *ex;
 	u_long bpa;
@@ -3480,7 +3504,7 @@ bus_space_alloc(bus_space_tag_t t, bus_addr_t rstart, bus_addr_t rend,
 	 * For memory space, map the bus physical address to
 	 * a kernel virtual address.
 	 */
-	error = bus_mem_add_mapping(bpa, size, cacheable, bshp);
+	error = bus_mem_add_mapping(bpa, size, flags, bshp);
 	if (error) {
 		if (extent_free(iomem_ex, bpa, size, EX_NOWAIT |
 		    (ioport_malloc_safe ? EX_MALLOCOK : 0))) {
@@ -3496,7 +3520,7 @@ bus_space_alloc(bus_space_tag_t t, bus_addr_t rstart, bus_addr_t rend,
 }
 
 int
-bus_mem_add_mapping(bus_addr_t bpa, bus_size_t size, int cacheable,
+bus_mem_add_mapping(bus_addr_t bpa, bus_size_t size, int flags,
     bus_space_handle_t *bshp)
 {
 	u_long pa, endpa;
@@ -3525,7 +3549,7 @@ bus_mem_add_mapping(bus_addr_t bpa, bus_size_t size, int cacheable,
 		pmap_kenter_pa(va, pa, VM_PROT_READ | VM_PROT_WRITE);
 
 		pte = kvtopte(va);
-		if (cacheable)
+		if (flags & BUS_SPACE_MAP_CACHEABLE)
 			*pte &= ~PG_N;
 		else
 			*pte |= PG_N;
@@ -3667,10 +3691,9 @@ _bus_dmamap_create(bus_dma_tag_t t, bus_size_t size, int nsegments,
 	mapsize = sizeof(struct i386_bus_dmamap) +
 	    (sizeof(bus_dma_segment_t) * (nsegments - 1));
 	if ((mapstore = malloc(mapsize, M_DEVBUF,
-	    (flags & BUS_DMA_NOWAIT) ? M_NOWAIT : M_WAITOK)) == NULL)
+	    ((flags & BUS_DMA_NOWAIT) ? M_NOWAIT : M_WAITOK) | M_ZERO)) == NULL)
 		return (ENOMEM);
 
-	bzero(mapstore, mapsize);
 	map = (struct i386_bus_dmamap *)mapstore;
 	map->_dm_size = size;
 	map->_dm_segcnt = nsegments;
@@ -3968,7 +3991,7 @@ _bus_dmamem_unmap(bus_dma_tag_t t, caddr_t kva, size_t size)
 }
 
 /*
- * Common functin for mmap(2)'ing DMA-safe memory.  May be called by
+ * Common function for mmap(2)'ing DMA-safe memory.  May be called by
  * bus-specific DMA mmap(2)'ing functions.
  */
 paddr_t

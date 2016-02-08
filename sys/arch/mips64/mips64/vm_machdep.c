@@ -1,4 +1,4 @@
-/*	$OpenBSD: vm_machdep.c,v 1.14 2007/07/16 20:20:08 miod Exp $	*/
+/*	$OpenBSD: vm_machdep.c,v 1.18 2007/10/18 04:32:25 miod Exp $	*/
 /*
  * Copyright (c) 1988 University of Utah.
  * Copyright (c) 1992, 1993
@@ -53,7 +53,6 @@
 #include <sys/signalvar.h>
 
 
-#include <machine/pte.h>
 #include <machine/cpu.h>
 #include <machine/autoconf.h>
 
@@ -69,48 +68,60 @@ cpu_fork(p1, p2, stack, stacksize, func, arg)
 	void (*func)(void *);
 	void *arg;
 {
-	struct pcb *pcb;
+	struct pcb *pcb = &p2->p_addr->u_pcb;
 	extern struct proc *machFPCurProcPtr;
 
-	p2->p_md.md_regs = &p2->p_addr->u_pcb.pcb_regs;
-	p2->p_md.md_flags = p1->p_md.md_flags & MDP_FORKSAVE;
-
+	/*
+	 * If we own the FPU, save its state before copying the PCB.
+	 */
 	if (p1 == machFPCurProcPtr) {
-		if (p2->p_addr->u_pcb.pcb_regs.sr & SR_FR_32)
+		if (p1->p_addr->u_pcb.pcb_regs.sr & SR_FR_32)
 			MipsSaveCurFPState(p1);
 		else
 			MipsSaveCurFPState16(p1);
 	}
 
-#ifdef notyet
+	p2->p_md.md_flags = p1->p_md.md_flags & MDP_FORKSAVE;
+
+	/* Copy pcb from p1 to p2 */
+	if (p1 == curproc) {
+		/* Sync the PCB before we copy it. */
+		savectx(p1->p_addr, 0);
+	}
+#ifdef DIAGNOSTIC
+	else if (p1 != &proc0)
+		panic("cpu_fork: curproc");
+#endif
+	*pcb = p1->p_addr->u_pcb;
+	p2->p_md.md_regs = &p2->p_addr->u_pcb.pcb_regs;
+
 	/*
 	 * If specified, give the child a different stack.
 	 */
 	if (stack != NULL)
-		/* XXX How??? */;
-#endif
+		p2->p_md.md_regs->sp = (u_int64_t)stack + stacksize;
 
 	/*
-	 *  Copy the process control block to the new proc and
-	 *  create a clean stack for exit through trampoline.
-	 *  pcb_context has s0-s7, sp, s8, ra, sr, icr, cpl.
+	 * Copy the process control block to the new proc and
+	 * create a clean stack for exit through trampoline.
+	 * pcb_context has s0-s7, sp, s8, ra, sr, icr, cpl.
 	 */
-	pcb = &p2->p_addr->u_pcb;
-	*pcb = p1->p_addr->u_pcb;
 
-	pcb->pcb_context.val[13] = 0;
-	pcb->pcb_context.val[12] = (idle_mask << 8) & IC_INT_MASK;
-	pcb->pcb_context.val[11] = (pcb->pcb_regs.sr & ~SR_INT_MASK) |
-	    (idle_mask & SR_INT_MASK);
+	if (p1 != curproc) {
+		pcb->pcb_context.val[13] = 0;
+		pcb->pcb_context.val[12] = (idle_mask << 8) & IC_INT_MASK;
+		pcb->pcb_context.val[11] = (pcb->pcb_regs.sr & ~SR_INT_MASK) |
+		    (idle_mask & SR_INT_MASK);
+	}
 	pcb->pcb_context.val[10] = (register_t)proc_trampoline;
-	pcb->pcb_context.val[8] = (register_t)(caddr_t)pcb + USPACE - 64;
+	pcb->pcb_context.val[8] = (register_t)pcb +
+	    USPACE - sizeof(struct trap_frame);
 	pcb->pcb_context.val[0] = (register_t)func;
 	pcb->pcb_context.val[1] = (register_t)arg;
 }
 
 /*
  * cpu_exit is called as the last action during exit.
- * release adress space and machine dependent resources.
  */
 void
 cpu_exit(p)
@@ -121,9 +132,8 @@ cpu_exit(p)
 	if (machFPCurProcPtr == p)
 		machFPCurProcPtr = (struct proc *)0;
 
-	(void) splhigh();
-	switch_exit(p);
-	/* NOTREACHED */
+	pmap_deactivate(p);
+	sched_exit(p);
 }
 
 /*

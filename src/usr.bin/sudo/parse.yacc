@@ -54,15 +54,13 @@
 # include <unistd.h>
 #endif /* HAVE_UNISTD_H */
 #include <pwd.h>
-#if defined(HAVE_MALLOC_H) && !defined(STDC_HEADERS)
-# include <malloc.h>
-#endif /* HAVE_MALLOC_H && !STDC_HEADERS */
 #if defined(YYBISON) && defined(HAVE_ALLOCA_H) && !defined(__GNUC__)
 # include <alloca.h>
 #endif /* YYBISON && HAVE_ALLOCA_H && !__GNUC__ */
 #ifdef HAVE_LSEARCH
 # include <search.h>
 #endif /* HAVE_LSEARCH */
+#include <limits.h>
 
 #include "sudo.h"
 #include "parse.h"
@@ -72,8 +70,21 @@
 #endif /* HAVE_LSEARCH */
 
 #ifndef lint
-__unused static const char rcsid[] = "$Sudo: parse.yacc,v 1.204.2.6 2007/08/13 16:30:02 millert Exp $";
+__unused static const char rcsid[] = "$Sudo: parse.yacc,v 1.204.2.10 2008/01/16 23:20:53 millert Exp $";
 #endif /* lint */
+
+/*
+ * We must define SIZE_MAX for yacc's skeleton.c.
+ * If there is no SIZE_MAX or SIZE_T_MAX we have to assume that size_t
+ * could be signed (as it is on SunOS 4.x).
+ */
+#ifndef SIZE_MAX
+# ifdef SIZE_T_MAX
+#  define SIZE_MAX	SIZE_T_MAX
+# else
+#  define SIZE_MAX	INT_MAX
+# endif /* SIZE_T_MAX */
+#endif /* SIZE_MAX */
 
 /*
  * Globals
@@ -106,6 +117,9 @@ int used_runas = FALSE;
 	else if ((_var) == UNSPEC) \
 	    (_var) = NOMATCH; \
 } while (0)
+
+#define	SETENV_RESET \
+	if (setenv_ok == IMPLIED) setenv_ok = def_setenv ? TRUE : UNSPEC
 
 /*
  * The matching stack, initial space allocated in init_parser().
@@ -198,7 +212,7 @@ static void append		__P((char *, char **, size_t *, size_t *, char *));
 static void expand_ga_list	__P((void));
 static void expand_match_list	__P((void));
 static aliasinfo *find_alias	__P((char *, int));
-static int  more_aliases	__P((void));
+static void more_aliases	__P((void));
        void init_parser		__P((void));
        void yyerror		__P((char *));
 
@@ -443,7 +457,7 @@ cmndspeclist	:	cmndspec
 		|	cmndspeclist ',' cmndspec
 		;
 
-cmndspec	:	runasspec cmndtag opcmnd {
+cmndspec	:	{ SETENV_RESET; } runasspec cmndtag opcmnd {
 			    /*
 			     * Push the entry onto the stack if it is worth
 			     * saving and reset cmnd_matches for next cmnd.
@@ -508,9 +522,8 @@ runasspec	:	/* empty */ {
 			     * then check against default runas user.
 			     */
 			    if (runas_matches == UNSPEC) {
-				runas_matches =
-				    userpw_matches(def_runas_default,
-					*user_runas, runas_pw);
+				runas_matches = userpw_matches(def_runas_default,
+				    *user_runas, runas_pw) ? TRUE : NOMATCH;
 			    }
 			}
 		|	RUNAS runaslist {
@@ -696,6 +709,9 @@ cmnd		:	ALL {
 				    expand_match_list();
 				}
 			    }
+			    /* sudo "ALL" implies the SETENV tag */
+			    if (setenv_ok == UNSPEC)
+				setenv_ok = IMPLIED;
 
 			    efree(safe_cmnd);
 			    safe_cmnd = NULL;
@@ -964,12 +980,8 @@ add_alias(alias, type, val)
     size_t onaliases;
     char s[512];
 
-    if (naliases >= nslots && !more_aliases()) {
-	(void) snprintf(s, sizeof(s), "Out of memory defining alias `%s'",
-			alias);
-	yyerror(s);
-	return(FALSE);
-    }
+    if (naliases >= nslots)
+	more_aliases();
 
     ai.type = type;
     ai.val = val;
@@ -1013,17 +1025,12 @@ find_alias(alias, type)
 /*
  * Allocates more space for the aliases list.
  */
-static int
+static void
 more_aliases()
 {
 
     nslots += MOREALIASES;
-    if (nslots == MOREALIASES)
-	aliases = (aliasinfo *) malloc(nslots * sizeof(aliasinfo));
-    else
-	aliases = (aliasinfo *) realloc(aliases, nslots * sizeof(aliasinfo));
-
-    return(aliases != NULL);
+    aliases = (aliasinfo *) erealloc3(aliases, nslots, sizeof(aliasinfo));
 }
 
 /*

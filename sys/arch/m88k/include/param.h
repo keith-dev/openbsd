@@ -1,4 +1,4 @@
-/*	$OpenBSD: param.h,v 1.10 2007/05/28 21:02:49 thib Exp $ */
+/*	$OpenBSD: param.h,v 1.12 2007/12/31 09:23:53 martin Exp $ */
 /*
  * Copyright (c) 1999 Steve Murphree, Jr.
  * Copyright (c) 1988 University of Utah.
@@ -99,10 +99,6 @@
 #define ctod(x)			((x) << (PGSHIFT - DEV_BSHIFT))
 #define dtoc(x)			((x) >> (PGSHIFT - DEV_BSHIFT))
 
-/* pages to bytes */
-#define ctob(x)			((x) << PGSHIFT)
-#define btoc(x)			(((x) + PGOFSET) >> PGSHIFT)
-
 /* bytes to disk blocks */
 #define btodb(x)		((x) >> DEV_BSHIFT)
 #define dbtob(x)		((x) << DEV_BSHIFT)
@@ -124,8 +120,8 @@ extern int cputyp;
 /*
  * Values for the cputyp variable.
  */
-#define CPU_88100	0x100
-#define CPU_88110	0x110
+#define CPU_88100	0x00
+#define CPU_88110	0x01
 
 #ifdef M88100
 #ifdef M88110

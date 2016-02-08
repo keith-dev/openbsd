@@ -1,4 +1,4 @@
-/*	$OpenBSD: ipsecctl.h,v 1.54 2007/03/16 20:51:01 markus Exp $	*/
+/*	$OpenBSD: ipsecctl.h,v 1.56 2008/02/22 23:51:31 hshoexer Exp $	*/
 /*
  * Copyright (c) 2004, 2005 Hans-Joerg Hoexer <hshoexer@openbsd.org>
  *
@@ -63,7 +63,8 @@ enum {
 };
 enum {
 	ENCXF_UNKNOWN, ENCXF_NONE, ENCXF_3DES_CBC, ENCXF_DES_CBC, ENCXF_AES,
-	ENCXF_AESCTR, ENCXF_BLOWFISH, ENCXF_CAST128, ENCXF_NULL, ENCXF_SKIPJACK
+	ENCXF_AES_128, ENCXF_AES_192, ENCXF_AES_256, ENCXF_AESCTR, 
+	ENCXF_BLOWFISH, ENCXF_CAST128, ENCXF_NULL, ENCXF_SKIPJACK
 };
 enum {
 	COMPXF_UNKNOWN, COMPXF_DEFLATE, COMPXF_LZS
@@ -219,7 +220,7 @@ struct ipsecctl {
 	struct ipsec_group_queue group_queue;
 };
 
-int	parse_rules(FILE *, struct ipsecctl *);
+int	parse_rules(const char *, struct ipsecctl *);
 int	cmdline_symset(char *);
 int	ipsecctl_add_rule(struct ipsecctl *, struct ipsec_rule *);
 void	ipsecctl_free_rule(struct ipsec_rule *);

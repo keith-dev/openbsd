@@ -1,4 +1,4 @@
-#	$OpenBSD: files.pci,v 1.242 2007/08/14 23:16:43 dlg Exp $
+#	$OpenBSD: files.pci,v 1.250 2008/01/21 20:00:33 sobrado Exp $
 #	$NetBSD: files.pci,v 1.20 1996/09/24 17:47:15 christos Exp $
 #
 # Config file and device description for machine-independent PCI code.
@@ -15,7 +15,6 @@ file	dev/pci/pci_subr.c		pci
 # Generic VGA
 attach	vga at pci with vga_pci
 file	dev/pci/vga_pci.c		vga_pci
-file	dev/pci/agp.c			vga_pci & pciagp
 
 device	tga: wsemuldisplaydev, rasops8, rasops32
 attach	tga at pci
@@ -131,6 +130,11 @@ attach	azalia at pci
 file	dev/pci/azalia.c		azalia
 file	dev/pci/azalia_codec.c		azalia
 
+# VIA Envy24 (aka ICE1712)
+device	envy: audio, auconv, mulaw
+attach	envy at pci
+file	dev/pci/envy.c			envy
+
 # Creative Labs EMU10k1 (SBLive! series and PCI512)
 device	emu: audio, auconv, mulaw, ac97
 attach	emu at pci
@@ -204,7 +208,7 @@ file	dev/pci/cac_pci.c		cac_pci
 attach	ciss at pci with ciss_pci
 file	dev/pci/ciss_pci.c		ciss_pci
 
-# Qlogic ISP 10x0 (PCI) family
+# QLogic ISP 10x0 (PCI) family
 # device declaration in sys/conf/files
 attach	isp at pci with isp_pci
 file	dev/pci/isp_pci.c		isp_pci
@@ -220,6 +224,11 @@ file	dev/pci/sli_pci.c		sli_pci
 # Silicon Image 3124/3132/3531 SATALink
 attach	sili at pci with sili_pci
 file	dev/pci/sili_pci.c		sili_pci
+
+# QLogic iSCSI HBAs
+device	qli: scsi
+attach	qli at pci with qli_pci
+file	dev/pci/qli_pci.c		qli_pci
 
 # Ethernet driver for DC21040-based boards
 device	de: ether, ifnet, ifmedia
@@ -534,6 +543,11 @@ device	wpi: ifnet, wlan, firmload
 attach	wpi at pci
 file	dev/pci/if_wpi.c		wpi
 
+# Intel Wireless WiFi Link 4965AGN
+device	iwn: ifnet, wlan, firmload
+attach	iwn at pci
+file	dev/pci/if_iwn.c		iwn
+
 # C-Media CMI8x38 Audio Chip
 device	cmpci {}: audio, auconv, mulaw
 attach	cmpci at pci
@@ -600,6 +614,11 @@ device	nfe: ether, ifnet, mii, ifmedia, mii_phy
 attach	nfe at pci
 file	dev/pci/if_nfe.c		nfe
 
+# Agere ET1310 Ethernet
+device	et: ether, ifnet, mii, ifmedia, mii_phy
+attach	et at pci
+file	dev/pci/if_et.c			et
+
 # AMD-76x PM and SMBus controller
 device	amdpm: i2cbus
 attach	amdpm at pci
@@ -649,6 +668,12 @@ file	dev/pci/if_pgt_pci.c		pgt_pci
 attach	malo at pci with malo_pci
 file	dev/pci/if_malo_pci.c		malo_pci
 
+#
+# Broadcom AirForce
+#
+attach	bwi at pci with bwi_pci
+file	dev/pci/if_bwi_pci.c		bwi_pci
+
 # Sangoma PCI card
 device	san: ifnet, ifmedia, sppp
 attach	san at pci
@@ -684,6 +709,11 @@ file	dev/pci/bt8370.c		art
 device	vic: ether, ifnet, ifmedia
 attach	vic at pci
 file	dev/pci/if_vic.c		vic
+
+# Atheros L2 Ethernet
+device	lii: ether, ifnet, ifmedia, mii
+attach	lii at pci
+file	dev/pci/if_lii.c		lii
 
 # Intel ICH SMBus controller
 device	ichiic: i2cbus

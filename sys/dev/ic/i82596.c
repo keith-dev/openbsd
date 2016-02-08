@@ -1,4 +1,4 @@
-/*	$OpenBSD: i82596.c,v 1.26 2006/03/25 22:41:43 djm Exp $	*/
+/*	$OpenBSD: i82596.c,v 1.28 2007/09/18 00:46:41 krw Exp $	*/
 /*	$NetBSD: i82586.c,v 1.18 1998/08/15 04:42:42 mycroft Exp $	*/
 
 /*-
@@ -325,13 +325,12 @@ i82596_attach(sc, name, etheraddr, media, nmedia, defmedia)
 
 	if (padbuf == NULL) {
 		padbuf = malloc(ETHER_MIN_LEN - ETHER_CRC_LEN, M_DEVBUF,
-		    M_NOWAIT);
+		    M_NOWAIT | M_ZERO);
 		if (padbuf == NULL) {
 			printf("%s: can't allocate pad buffer\n",
 			    sc->sc_dev.dv_xname);
 			return;
 		}
-		bzero(padbuf, ETHER_MIN_LEN - ETHER_CRC_LEN);
 	}
 
 	/* Attach the interface. */
@@ -1974,19 +1973,20 @@ ie_mc_reset(sc)
 	/*
 	 * Step through the list of addresses.
 	 */
-again:
 	size = 0;
 	sc->mcast_count = 0;
 	ETHER_FIRST_MULTI(step, &sc->sc_arpcom, enm);
 	while (enm) {
-		size += 6;
+		size += ETHER_ADDR_LEN;
 		if (sc->mcast_count >= IE_MAXMCAST ||
-		    bcmp(enm->enm_addrlo, enm->enm_addrhi, 6) != 0) {
+		    bcmp(enm->enm_addrlo, enm->enm_addrhi,
+		        ETHER_ADDR_LEN) != 0) {
 			sc->sc_arpcom.ac_if.if_flags |= IFF_ALLMULTI;
 			i82596_ioctl(&sc->sc_arpcom.ac_if,
 				     SIOCSIFFLAGS, (void *)0);
 			return;
 		}
+		sc->mcast_count++;
 		ETHER_NEXT_MULTI(step, enm);
 	}
 
@@ -2002,12 +2002,12 @@ again:
 	/*
 	 * We've got the space; now copy the addresses
 	 */
+	sc->mcast_count = 0;
 	ETHER_FIRST_MULTI(step, &sc->sc_arpcom, enm);
 	while (enm) {
-		if (sc->mcast_count >= IE_MAXMCAST)
-			goto again; /* Just in case */
-
-		bcopy(enm->enm_addrlo, &sc->mcast_addrs[sc->mcast_count], 6);
+		bcopy(enm->enm_addrlo,
+		   &sc->mcast_addrs[sc->mcast_count * ETHER_ADDR_LEN],
+		   ETHER_ADDR_LEN);
 		sc->mcast_count++;
 		ETHER_NEXT_MULTI(step, enm);
 	}

@@ -1,4 +1,4 @@
-/*	$OpenBSD: xd.c,v 1.41 2007/07/01 19:06:57 miod Exp $	*/
+/*	$OpenBSD: xd.c,v 1.43 2007/11/28 16:33:20 martin Exp $	*/
 /*	$NetBSD: xd.c,v 1.37 1997/07/29 09:58:16 fair Exp $	*/
 
 /*
@@ -427,11 +427,10 @@ xdcattach(parent, self, aux)
 	/* Setup device view of DVMA address */
 	xdc->dvmaiopb = (struct xd_iopb *) ((u_long) xdc->iopbase - DVMA_BASE);
 
-	xdc->reqs = (struct xd_iorq *)
-	    malloc(XDC_MAXIOPB * sizeof(struct xd_iorq), M_DEVBUF, M_NOWAIT);
+	xdc->reqs = malloc(XDC_MAXIOPB * sizeof(struct xd_iorq), M_DEVBUF,
+	    M_NOWAIT | M_ZERO);
 	if (xdc->reqs == NULL)
 		panic("xdc malloc");
-	bzero(xdc->reqs, XDC_MAXIOPB * sizeof(struct xd_iorq));
 
 	/* init free list, iorq to iopb pointers, and non-zero fields in the
 	 * iopb which never change. */
@@ -805,7 +804,7 @@ xddump(dev, blkno, va, size)
 	/* outline: globals: "dumplo" == sector number of partition to start
 	 * dump at (convert to physical sector with partition table)
 	 * "dumpsize" == size of dump in clicks "physmem" == size of physical
-	 * memory (clicks, ctob() to get bytes) (normal case: dumpsize ==
+	 * memory (clicks, ptoa() to get bytes) (normal case: dumpsize ==
 	 * physmem)
 	 *
 	 * dump a copy of physical memory to the dump device starting at sector

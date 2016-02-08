@@ -1,4 +1,4 @@
-/*	$OpenBSD: pmap.h,v 1.2 2007/03/05 21:48:21 miod Exp $	*/
+/*	$OpenBSD: pmap.h,v 1.4 2007/12/15 17:24:06 deraadt Exp $	*/
 /*	$NetBSD: pmap.h,v 1.28 2006/04/10 23:12:11 uwe Exp $	*/
 
 /*-
@@ -49,6 +49,8 @@
 #include <sys/queue.h>
 #include <sh/pte.h>
 
+#ifdef _KERNEL
+
 #define	PMAP_STEAL_MEMORY
 #define	PMAP_GROWKERNEL
 
@@ -64,6 +66,7 @@ extern struct pmap __pmap_kernel;
 void pmap_bootstrap(void);
 void pmap_proc_iflush(struct proc *, vaddr_t, size_t);
 #define	pmap_unuse_final(p)		do { /* nothing */ } while (0)
+#define	pmap_remove_holes(map)		do { /* nothing */ } while (0)
 #define	pmap_kernel()			(&__pmap_kernel)
 #define	pmap_deactivate(pmap)		do { /* nothing */ } while (0)
 #define	pmap_update(pmap)		do { /* nothing */ } while (0)
@@ -97,4 +100,6 @@ void pmap_prefer(vaddr_t, vaddr_t *);
 pt_entry_t *__pmap_pte_lookup(pmap_t, vaddr_t);
 pt_entry_t *__pmap_kpte_lookup(vaddr_t);
 boolean_t __pmap_pte_load(pmap_t, vaddr_t, int);
+
+#endif /* !_KERNEL */
 #endif /* !_SH_PMAP_H_ */

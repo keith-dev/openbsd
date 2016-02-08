@@ -1,4 +1,4 @@
-/* $OpenBSD: sign.c,v 1.7 2006/04/17 09:36:56 moritz Exp $ */
+/* $OpenBSD: sign.c,v 1.9 2007/10/12 19:52:06 jasper Exp $ */
 
 /*
  * sign.c
@@ -185,7 +185,8 @@ embed_signature(struct key *key, FILE *fin, FILE *fout)
 void
 sign_usage(void)
 {
-	fprintf(stderr, "Usage: gzsig sign [-q] [-f secret_file] privkey [file ...]\n");
+	fprintf(stderr, "Usage: %s sign [-q] [-f secret_file] privkey [file ...]\n",
+	    __progname);
 }
 
 int
@@ -200,8 +201,7 @@ sign_passwd_cb(char *buf, int size, int rwflag, void *u)
 		if (fgets(buf, size, f) == NULL)
 			err(1, "fgets(%.64s)", passphrase_file);
 		fclose(f);
-		if ((p = strchr(buf, '\n')) != NULL)
-			*p = '\0';
+		buf[strcspn(buf, "\n")] = '\0';
 	} else {
 		p = getpass("Enter passphrase: ");
 		if (strlcpy(buf, p, size) >= size)

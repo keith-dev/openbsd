@@ -1,4 +1,4 @@
-/*	$OpenBSD: acx.c,v 1.76 2007/08/05 22:40:38 claudio Exp $ */
+/*	$OpenBSD: acx.c,v 1.80 2007/11/26 09:28:33 martynas Exp $ */
 
 /*
  * Copyright (c) 2006 Jonathan Gray <jsg@openbsd.org>
@@ -1238,7 +1238,7 @@ acx_txerr(struct acx_softc *sc, uint8_t err)
 		stats->err_abort++;
 		break;
 	case DESC_ERR_PARAM:
-		printf("wrong paramters in descriptor\n");
+		printf("wrong parameters in descriptor\n");
 		stats->err_param++;
 		break;
 	case DESC_ERR_NO_WEPKEY:
@@ -1524,7 +1524,7 @@ acx_load_base_firmware(struct acx_softc *sc, const char *name)
 	error = loadfirmware(name, &ucode, &size);
 
 	if (error != 0) {
-		printf("%s: error %d, could not read microcode %s!\n",
+		printf("%s: error %d, could not read firmware %s\n",
 		    ifp->if_xname, error, name);
 		return (EIO);
 	}
@@ -1573,7 +1573,7 @@ acx_load_radio_firmware(struct acx_softc *sc, const char *name)
 	error = loadfirmware(name, &ucode, &size);
 
 	if (error != 0) {
-		printf("%s: error %d, could not read microcode %s!\n",
+		printf("%s: error %d, could not read firmware %s\n",
 		    ifp->if_xname, error, name);
 		return (EIO);
 	}
@@ -1708,11 +1708,9 @@ acx_node_alloc(struct ieee80211com *ic)
 {
 	struct acx_node *wn;
 
-	wn = malloc(sizeof(struct acx_node), M_DEVBUF, M_NOWAIT);
+	wn = malloc(sizeof(*wn), M_DEVBUF, M_NOWAIT | M_ZERO);
 	if (wn == NULL)
 		return (NULL);
-
-	bzero(wn, sizeof(struct acx_node));
 
 	return ((struct ieee80211_node *)wn);
 }
@@ -2346,6 +2344,7 @@ acx_set_probe_req_tmplt(struct acx_softc *sc, const char *ssid, int ssid_len)
 	struct ieee80211com *ic = &sc->sc_ic;
 	struct acx_tmplt_probe_req req;
 	struct ieee80211_frame *wh;
+	struct ieee80211_rateset *rs;
 	uint8_t *frm;
 	int len;
 
@@ -2361,8 +2360,10 @@ acx_set_probe_req_tmplt(struct acx_softc *sc, const char *ssid, int ssid_len)
 
 	frm = req.data.u_data.var;
 	frm = ieee80211_add_ssid(frm, ssid, ssid_len);
-	frm = ieee80211_add_rates(frm, &ic->ic_sup_rates[sc->chip_phymode]);
-	frm = ieee80211_add_xrates(frm, &ic->ic_sup_rates[sc->chip_phymode]);
+	rs = &ic->ic_sup_rates[sc->chip_phymode];
+	frm = ieee80211_add_rates(frm, rs);
+	if (rs->rs_nrates > IEEE80211_RATE_SIZE)
+		frm = ieee80211_add_xrates(frm, rs);
 	len = frm - req.data.u_data.var;
 
 	return (acx_set_tmplt(sc, ACXCMD_TMPLT_PROBE_REQ, &req,

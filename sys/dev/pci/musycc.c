@@ -1,4 +1,4 @@
-/*	$OpenBSD: musycc.c,v 1.15 2006/03/25 22:41:46 djm Exp $ */
+/*	$OpenBSD: musycc.c,v 1.18 2007/11/26 09:28:33 martynas Exp $ */
 
 /*
  * Copyright (c) 2004,2005  Internet Business Solutions AG, Zurich, Switzerland
@@ -116,15 +116,14 @@ musycc_attach_common(struct musycc_softc *sc, u_int32_t portmap, u_int32_t mode)
 	    MUSYCC_CONF_BLAPSE_SET(3) | MUSYCC_CONF_INTB;
 
 	/* initialize group descriptors */
-	sc->mc_groups = (struct musycc_group *)malloc(sc->mc_ngroups *
-	    sizeof(struct musycc_group), M_DEVBUF, M_NOWAIT);
+	sc->mc_groups = malloc(sc->mc_ngroups * sizeof(struct musycc_group),
+	    M_DEVBUF, M_NOWAIT | M_ZERO);
 	if (sc->mc_groups == NULL) {
 		printf(": couldn't alloc group descriptors\n");
 		musycc_free_groupdesc(sc);
 		musycc_free_intqueue(sc);
 		return (-1);
 	}
-	bzero(sc->mc_groups, sc->mc_ngroups * sizeof(struct musycc_group));
 
 	for (i = 0; i < sc->mc_ngroups; i++) {
 		mg = &sc->mc_groups[i];
@@ -310,7 +309,7 @@ musycc_alloc_group(struct musycc_group *mg)
 	/* add all descriptors to the freelist */
 	for (j = 0; j < MUSYCC_DMA_CNT; j++) {
 		dd = &mg->mg_dma_pool[j];
-		/* initalize, same as for spare maps */
+		/* initialize, same as for spare maps */
 		if (bus_dmamap_create(mg->mg_dmat, MCLBYTES, MUSYCC_DMA_SIZE,
 		    MCLBYTES, 0, BUS_DMA_NOWAIT, &dd->map)) {
 			musycc_free_group(mg);
@@ -1653,10 +1652,9 @@ musycc_channel_create(const char *name, u_int8_t locked)
 {
 	struct channel_softc	*cc;
 
-	cc = malloc(sizeof(*cc), M_DEVBUF, M_NOWAIT);
+	cc = malloc(sizeof(*cc), M_DEVBUF, M_NOWAIT | M_ZERO);
 	if (!cc)
 		return (NULL);
-	bzero(cc, sizeof(*cc));
 
 	cc->cc_state = CHAN_FLOAT;
 	cc->cc_locked = locked;

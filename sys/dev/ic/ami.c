@@ -1,4 +1,4 @@
-/*	$OpenBSD: ami.c,v 1.184 2007/06/24 05:34:35 dlg Exp $	*/
+/*	$OpenBSD: ami.c,v 1.186 2007/12/28 16:19:14 dlg Exp $	*/
 
 /*
  * Copyright (c) 2001 Michael Shalayeff
@@ -233,11 +233,10 @@ ami_allocmem(struct ami_softc *sc, size_t size)
 	struct ami_mem		*am;
 	int			nsegs;
 
-	am = malloc(sizeof(struct ami_mem), M_DEVBUF, M_NOWAIT);
+	am = malloc(sizeof(struct ami_mem), M_DEVBUF, M_NOWAIT|M_ZERO);
 	if (am == NULL)
 		return (NULL);
 
-	memset(am, 0, sizeof(struct ami_mem));
 	am->am_size = size;
 
 	if (bus_dmamap_create(sc->sc_dmat, size, 1, size, 0,
@@ -565,13 +564,12 @@ ami_attach(struct ami_softc *sc)
 #endif
 
 	rsc = malloc(sizeof(struct ami_rawsoftc) * sc->sc_channels,
-	    M_DEVBUF, M_NOWAIT);
+	    M_DEVBUF, M_NOWAIT|M_ZERO);
 	if (!rsc) {
 		printf("%s: no memory for raw interface\n", DEVNAME(sc));
 		return (0);
 	}
 
-	bzero(rsc, sizeof(struct ami_rawsoftc) * sc->sc_channels);
 	for (sc->sc_rawsoftcs = rsc;
 	     rsc < &sc->sc_rawsoftcs[sc->sc_channels]; rsc++) {
 
@@ -1873,7 +1871,7 @@ ami_ioctl_inq(struct ami_softc *sc, struct bioc_inq *bi)
 	if (!p)
 		return (ENOMEM);
 
-	plist = malloc(AMI_BIG_MAX_PDRIVES, M_DEVBUF, M_NOWAIT);
+	plist = malloc(AMI_BIG_MAX_PDRIVES, M_DEVBUF, M_NOWAIT|M_ZERO);
 	if (!plist) {
 		error = ENOMEM;
 		goto bail;
@@ -1882,8 +1880,6 @@ ami_ioctl_inq(struct ami_softc *sc, struct bioc_inq *bi)
 	if ((error = ami_mgmt(sc, AMI_FCOP, AMI_FC_RDCONF, 0, 0, sizeof *p,
 	    p)))
 		goto bail2;
-
-	memset(plist, 0, AMI_BIG_MAX_PDRIVES);
 
 	bi->bi_novol = p->ada_nld;
 	bi->bi_nodisk = 0;
@@ -1950,11 +1946,9 @@ ami_vol(struct ami_softc *sc, struct bioc_vol *bv, struct ami_big_diskarray *p)
 	int ld = p->ada_nld, error = EINVAL;
 	u_int8_t ch, tg;
 
-	plist = malloc(AMI_BIG_MAX_PDRIVES, M_DEVBUF, M_NOWAIT);
+	plist = malloc(AMI_BIG_MAX_PDRIVES, M_DEVBUF, M_NOWAIT|M_ZERO);
 	if (!plist)
 		return (ENOMEM);
-
-	memset(plist, 0, AMI_BIG_MAX_PDRIVES);
 
 	/* setup plist */
 	for (i = 0; i < p->ada_nld; i++)
@@ -2019,17 +2013,15 @@ ami_disk(struct ami_softc *sc, struct bioc_disk *bd,
     struct ami_big_diskarray *p)
 {
 	struct scsi_inquiry_data inqbuf;
-	struct scsi_inquiry_vpd vpdbuf;
+	struct scsi_vpd_serial vpdbuf;
 	char *plist;
 	int i, s, t, off;
 	int ld = p->ada_nld, error = EINVAL;
 	u_int8_t ch, tg;
 
-	plist = malloc(AMI_BIG_MAX_PDRIVES, M_DEVBUF, M_NOWAIT);
+	plist = malloc(AMI_BIG_MAX_PDRIVES, M_DEVBUF, M_NOWAIT|M_ZERO);
 	if (!plist)
 		return (ENOMEM);
-
-	memset(plist, 0, AMI_BIG_MAX_PDRIVES);
 
 	/* setup plist */
 	for (i = 0; i < p->ada_nld; i++)
@@ -2081,8 +2073,8 @@ ami_disk(struct ami_softc *sc, struct bioc_disk *bd,
 			bcopy(vpdbuf.serial, ser, sizeof ser - 1);
 
 			ser[sizeof ser - 1] = '\0';
-			if (vpdbuf.page_length < sizeof ser)
-				ser[vpdbuf.page_length] = '\0';
+			if (vpdbuf.hdr.page_length < sizeof ser)
+				ser[vpdbuf.hdr.page_length] = '\0';
 
 			strlcpy(bd->bd_serial, ser, sizeof(bd->bd_serial));
 		}
@@ -2241,7 +2233,7 @@ int
 ami_ioctl_disk(struct ami_softc *sc, struct bioc_disk *bd)
 {
 	struct scsi_inquiry_data inqbuf;
-	struct scsi_inquiry_vpd vpdbuf;
+	struct scsi_vpd_serial vpdbuf;
 	struct ami_big_diskarray *p; /* struct too large for stack */
 	int i, s, t, d;
 	int off;
@@ -2321,8 +2313,8 @@ ami_ioctl_disk(struct ami_softc *sc, struct bioc_disk *bd)
 				bcopy(vpdbuf.serial, ser, sizeof ser - 1);
 
 				ser[sizeof ser - 1] = '\0';
-				if (vpdbuf.page_length < sizeof ser)
-					ser[vpdbuf.page_length] = '\0';
+				if (vpdbuf.hdr.page_length < sizeof ser)
+					ser[vpdbuf.hdr.page_length] = '\0';
 				strlcpy(bd->bd_serial, ser,
 				    sizeof(bd->bd_serial));
 			}
@@ -2447,10 +2439,9 @@ ami_create_sensors(struct ami_softc *sc)
 		return (1);
 
 	sc->sc_sensors = malloc(sizeof(struct ksensor) * sc->sc_nunits,
-	    M_DEVBUF, M_WAITOK);
+	    M_DEVBUF, M_WAITOK|M_ZERO);
 	if (sc->sc_sensors == NULL)
 		return (1);
-	bzero(sc->sc_sensors, sizeof(struct ksensor) * sc->sc_nunits);	
 
 	strlcpy(sc->sc_sensordev.xname, DEVNAME(sc),
 	    sizeof(sc->sc_sensordev.xname));

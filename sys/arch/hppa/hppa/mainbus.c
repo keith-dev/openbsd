@@ -1,4 +1,4 @@
-/*	$OpenBSD: mainbus.c,v 1.66 2007/07/15 20:11:12 kettenis Exp $	*/
+/*	$OpenBSD: mainbus.c,v 1.69 2007/12/28 19:48:50 kettenis Exp $	*/
 
 /*
  * Copyright (c) 1998-2004 Michael Shalayeff
@@ -614,12 +614,11 @@ mbus_dmamap_create(void *v, bus_size_t size, int nsegments,
 
 	mapsize = sizeof(struct hppa_bus_dmamap) +
 	    (sizeof(bus_dma_segment_t) * (nsegments - 1));
-	map = malloc(mapsize, M_DEVBUF,
-		(flags & BUS_DMA_NOWAIT) ? M_NOWAIT : M_WAITOK);
+	map = malloc(mapsize, M_DEVBUF, (flags & BUS_DMA_NOWAIT) ?
+	    (M_NOWAIT | M_ZERO) : (M_WAITOK | M_ZERO));
 	if (!map)
 		return (ENOMEM);
 
-	bzero(map, mapsize);
 	map->_dm_size = size;
 	map->_dm_segcnt = nsegments;
 	map->_dm_maxsegsz = maxsegsz;
@@ -1081,11 +1080,14 @@ mbattach(parent, self, aux)
 	nca.ca_dp.dp_bc[3] = nca.ca_dp.dp_bc[4] = nca.ca_dp.dp_bc[5] = -1;
 	nca.ca_dp.dp_mod = -1;
 	switch (cpu_hvers) {
-#if 0
 	case HPPA_BOARD_HP809:
 	case HPPA_BOARD_HP819:
+	case HPPA_BOARD_HP829:
 	case HPPA_BOARD_HP839:
+	case HPPA_BOARD_HP849:
 	case HPPA_BOARD_HP859:
+	case HPPA_BOARD_HP869:
+#if 0
 	case HPPA_BOARD_HP770_J200:
 	case HPPA_BOARD_HP770_J210:
 	case HPPA_BOARD_HP770_J210XC:

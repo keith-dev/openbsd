@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_skreg.h,v 1.44 2007/02/26 20:27:17 kettenis Exp $	*/
+/*	$OpenBSD: if_skreg.h,v 1.48 2008/02/14 05:04:59 brad Exp $	*/
 
 /*
  * Copyright (c) 1997, 1998, 1999, 2000
@@ -350,13 +350,15 @@
 #define SK_YUKON_EX		0xB5
 #define SK_YUKON_EC		0xB6
 #define SK_YUKON_FE		0xB7
+#define SK_YUKON_FE_P		0xB8
+#define SK_YUKON_SUPR		0xB9
 
 #define SK_IS_GENESIS(sc) \
     ((sc)->sk_type == SK_GENESIS)
 #define SK_IS_YUKON(sc) \
     ((sc)->sk_type >= SK_YUKON && (sc)->sk_type <= SK_YUKON_LP)
 #define SK_IS_YUKON2(sc) \
-    ((sc)->sk_type >= SK_YUKON_XL && (sc)->sk_type <= SK_YUKON_FE)
+    ((sc)->sk_type >= SK_YUKON_XL && (sc)->sk_type <= SK_YUKON_SUPR)
 
 /* Known revisions in SK_CONFIG */
 #define SK_YUKON_LITE_REV_A0	0x0 /* invented, see test in skc_attach */
@@ -1458,6 +1460,8 @@
 #define SK_PCI_PWRMGMTCTRL	0x004C /* 16 bits */
 #define SK_PCI_PME_EVENT	0x004F
 
+#define SK_Y2_REG1_PHY1_PWRD	0x04000000
+#define SK_Y2_REG1_PHY2_PWRD	0x08000000
 #define SK_Y2_REG1_PHY1_COMA	0x10000000
 #define SK_Y2_REG1_PHY2_COMA	0x20000000
 

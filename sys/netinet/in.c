@@ -1,4 +1,4 @@
-/*	$OpenBSD: in.c,v 1.49 2007/07/20 19:00:35 claudio Exp $	*/
+/*	$OpenBSD: in.c,v 1.51 2007/10/01 16:39:30 krw Exp $	*/
 /*	$NetBSD: in.c,v 1.26 1996/02/13 23:41:39 christos Exp $	*/
 
 /*
@@ -273,9 +273,7 @@ in_control(so, cmd, data, ifp)
 		if (ifp == 0)
 			panic("in_control");
 		if (ia == (struct in_ifaddr *)0) {
-			ia = (struct in_ifaddr *)
-				malloc(sizeof *ia, M_IFADDR, M_WAITOK);
-			bzero((caddr_t)ia, sizeof *ia);
+			ia = malloc(sizeof *ia, M_IFADDR, M_WAITOK | M_ZERO);
 			s = splsoftnet();
 			TAILQ_INSERT_TAIL(&in_ifaddr, ia, ia_list);
 			TAILQ_INSERT_TAIL(&ifp->if_addrlist, (struct ifaddr *)ia,
@@ -452,6 +450,8 @@ cleanup:
 			in_delmulti(ia->ia_allhosts);
 			ia->ia_allhosts = NULL;
 		}
+		/* remove backpointer, since ifp may die before ia */
+		ia->ia_ifp = NULL;
 		IFAFREE((&ia->ia_ifa));
 		dohooks(ifp->if_addrhooks, 0);
 		splx(s);

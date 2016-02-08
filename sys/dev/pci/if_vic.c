@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_vic.c,v 1.49 2007/06/15 02:29:50 dlg Exp $	*/
+/*	$OpenBSD: if_vic.c,v 1.52 2007/11/28 11:13:47 reyk Exp $	*/
 
 /*
  * Copyright (c) 2006 Reyk Floeter <reyk@openbsd.org>
@@ -55,6 +55,15 @@
 #include <dev/pci/pcidevs.h>
 
 #define VIC_PCI_BAR		PCI_MAPREG_START /* Base Address Register */
+
+#define VIC_LANCE_SIZE		0x20
+#define VIC_MORPH_SIZE		0x04
+#define  VIC_MORPH_MASK			0xffff
+#define  VIC_MORPH_LANCE		0x2934
+#define  VIC_MORPH_VMXNET		0x4392
+#define VIC_VMXNET_SIZE		0x40
+#define VIC_LANCE_MINLEN	(VIC_LANCE_SIZE + VIC_MORPH_SIZE + \
+				    VIC_VMXNET_SIZE)
 
 #define VIC_MAGIC		0xbabe864f
 
@@ -304,7 +313,6 @@ struct cfattach vic_ca = {
 int		vic_intr(void *);
 void		vic_shutdown(void *);
 
-int		vic_map_pci(struct vic_softc *, struct pci_attach_args *);
 int		vic_query(struct vic_softc *);
 int		vic_alloc_data(struct vic_softc *);
 int		vic_init_data(struct vic_softc *sc);
@@ -346,8 +354,28 @@ const struct pci_matchid vic_devices[] = {
 int
 vic_match(struct device *parent, void *match, void *aux)
 {
-	return (pci_matchbyid((struct pci_attach_args *)aux,
-	    vic_devices, sizeof(vic_devices)/sizeof(vic_devices[0])));
+	struct pci_attach_args		*pa = aux;
+	pcireg_t			memtype;
+	bus_size_t			pcisize;
+	bus_addr_t			pciaddr;
+
+	switch (pa->pa_id) {
+	case PCI_ID_CODE(PCI_VENDOR_VMWARE, PCI_PRODUCT_VMWARE_NET):
+		return (1);
+
+	case PCI_ID_CODE(PCI_VENDOR_AMD, PCI_PRODUCT_AMD_PCNET_PCI):
+		memtype = pci_mapreg_type(pa->pa_pc, pa->pa_tag, VIC_PCI_BAR);
+		if (pci_mapreg_info(pa->pa_pc, pa->pa_tag, VIC_PCI_BAR,
+		    memtype, &pciaddr, &pcisize, NULL) != 0)
+			break;
+
+		if (pcisize > VIC_LANCE_MINLEN)
+			return (2);
+
+		break;
+	}
+
+	return (0);
 }
 
 void
@@ -355,21 +383,89 @@ vic_attach(struct device *parent, struct device *self, void *aux)
 {
 	struct vic_softc		*sc = (struct vic_softc *)self;
 	struct pci_attach_args		*pa = aux;
+	bus_space_handle_t		ioh;
+	pcireg_t			r;
+	pci_intr_handle_t		ih;
 	struct ifnet			*ifp;
 
-	if (vic_map_pci(sc, pa) != 0) {
-		/* error printed by vic_map_pci */
+	sc->sc_pc = pa->pa_pc;
+	sc->sc_tag = pa->pa_tag;
+	sc->sc_dmat = pa->pa_dmat;
+
+	r = pci_mapreg_type(sc->sc_pc, sc->sc_tag, VIC_PCI_BAR);
+	if (pci_mapreg_map(pa, VIC_PCI_BAR, r, 0, &sc->sc_iot,
+	    &ioh, NULL, &sc->sc_ios, 0) != 0) {
+		printf(": unable to map system interface register\n");
 		return;
+	}
+
+	switch (pa->pa_id) {
+	case PCI_ID_CODE(PCI_VENDOR_VMWARE, PCI_PRODUCT_VMWARE_NET):
+		if (bus_space_subregion(sc->sc_iot, ioh, 0, sc->sc_ios,
+		    &sc->sc_ioh) != 0) {
+			printf(": unable to map register window\n");
+			goto unmap;
+		}
+		break;
+
+	case PCI_ID_CODE(PCI_VENDOR_AMD, PCI_PRODUCT_AMD_PCNET_PCI):
+		if (bus_space_subregion(sc->sc_iot, ioh, 
+		    VIC_LANCE_SIZE + VIC_MORPH_SIZE, VIC_VMXNET_SIZE,
+		    &sc->sc_ioh) != 0) {
+			printf(": unable to map register window\n");
+			goto unmap;
+		}
+
+		bus_space_barrier(sc->sc_iot, ioh, VIC_LANCE_SIZE, 4,
+		    BUS_SPACE_BARRIER_READ);
+		r = bus_space_read_4(sc->sc_iot, ioh, VIC_LANCE_SIZE);
+
+		if ((r & VIC_MORPH_MASK) == VIC_MORPH_VMXNET)
+			break;
+		if ((r & VIC_MORPH_MASK) != VIC_MORPH_LANCE) {
+			printf(": unexpect morph value (0x%08x)\n", r);
+			goto unmap;
+		}
+
+		r &= ~VIC_MORPH_MASK;
+		r |= VIC_MORPH_VMXNET;
+
+		bus_space_write_4(sc->sc_iot, ioh, VIC_LANCE_SIZE, r);
+		bus_space_barrier(sc->sc_iot, ioh, VIC_LANCE_SIZE, 4,
+		    BUS_SPACE_BARRIER_WRITE);
+
+		bus_space_barrier(sc->sc_iot, ioh, VIC_LANCE_SIZE, 4,
+		    BUS_SPACE_BARRIER_READ);
+		r = bus_space_read_4(sc->sc_iot, ioh, VIC_LANCE_SIZE);
+
+		if ((r & VIC_MORPH_MASK) != VIC_MORPH_VMXNET) {
+			printf(": unable to morph vlance chip\n", r);
+			goto unmap;
+		}
+
+		break;
+	}
+
+	if (pci_intr_map(pa, &ih) != 0) {
+		printf(": unable to map interrupt\n");
+		goto unmap;
+	}
+
+	sc->sc_ih = pci_intr_establish(pa->pa_pc, ih, IPL_NET,
+	    vic_intr, sc, DEVNAME(sc));
+	if (sc->sc_ih == NULL) {
+		printf(": unable to establish interrupt\n");
+		goto unmap;
 	}
 
 	if (vic_query(sc) != 0) {
 		/* error printed by vic_query */
-		return;
+		goto unmap;
 	}
 
 	if (vic_alloc_data(sc) != 0) {
 		/* error printed by vic_alloc */
-		return;
+		goto unmap;
 	}
 
 	timeout_set(&sc->sc_tick, vic_tick, sc);
@@ -405,49 +501,19 @@ vic_attach(struct device *parent, struct device *self, void *aux)
 	if_attach(ifp);
 	ether_ifattach(ifp);
 
+	printf(": %s, address %s\n", pci_intr_string(pa->pa_pc, ih),
+	    ether_sprintf(sc->sc_lladdr));
+
+#ifdef VIC_DEBUG
+	printf("%s: feature 0x%8x, cap 0x%8x, rx/txbuf %d/%d\n", DEVNAME(sc),
+	    sc->sc_feature, sc->sc_cap, sc->sc_nrxbuf, sc->sc_ntxbuf);
+#endif
+
 	return;
-}
-
-int
-vic_map_pci(struct vic_softc *sc, struct pci_attach_args *pa)
-{
-	pcireg_t			memtype;
-	pci_intr_handle_t		ih;
-	const char			*intrstr;
-
-	sc->sc_pc = pa->pa_pc;
-	sc->sc_tag = pa->pa_tag;
-	sc->sc_dmat = pa->pa_dmat;
-
-	memtype = pci_mapreg_type(sc->sc_pc, sc->sc_tag, VIC_PCI_BAR);
-	if (pci_mapreg_map(pa, VIC_PCI_BAR, memtype, 0, &sc->sc_iot,
-	    &sc->sc_ioh, NULL, &sc->sc_ios, 0) != 0) {
-		printf(": unable to map system interface register\n");
-		return (1);
-	}
-
-	if (pci_intr_map(pa, &ih) != 0) {
-		printf(": unable to map interrupt\n");
-		goto unmap;
-	}
-
-	intrstr = pci_intr_string(pa->pa_pc, ih);
-	sc->sc_ih = pci_intr_establish(pa->pa_pc, ih, IPL_NET,
-	    vic_intr, sc, DEVNAME(sc));
-	if (sc->sc_ih == NULL) {
-		printf(": unable to map interrupt%s%s\n",
-		    intrstr == NULL ? "" : " at ",
-		    intrstr == NULL ? "" : intrstr);
-		goto unmap;
-	}
-	printf(": %s\n", intrstr);
-
-	return (0);
 
 unmap:
-	bus_space_unmap(sc->sc_iot, sc->sc_ioh, sc->sc_ios);
+	bus_space_unmap(sc->sc_iot, ioh, sc->sc_ios);
 	sc->sc_ios = 0;
-	return (1);
 }
 
 int
@@ -461,12 +527,12 @@ vic_query(struct vic_softc *sc)
 	/* Check for a supported version */
 	if ((major & VIC_VERSION_MAJOR_M) !=
 	    (VIC_MAGIC & VIC_VERSION_MAJOR_M)) {
-		printf("%s: magic mismatch\n", DEVNAME(sc));
+		printf(": magic mismatch\n");
 		return (1);
 	}
 
 	if (VIC_MAGIC > major || VIC_MAGIC < minor) {
-		printf("%s: unsupported version (%X)\n", DEVNAME(sc),
+		printf(": unsupported version (%X)\n",
 		    major & ~VIC_VERSION_MAJOR_M);
 		return (1);
 	}
@@ -477,14 +543,6 @@ vic_query(struct vic_softc *sc)
 	sc->sc_cap = vic_read_cmd(sc, VIC_CMD_HWCAP);
 
 	vic_getlladdr(sc);
-
-	printf("%s: VMXnet %04X, address %s\n", DEVNAME(sc),
-	    major & ~VIC_VERSION_MAJOR_M, ether_sprintf(sc->sc_lladdr));
-
-#ifdef VIC_DEBUG
-	printf("%s: feature 0x%8x, cap 0x%8x, rx/txbuf %d/%d\n", DEVNAME(sc),
-	    sc->sc_feature, sc->sc_cap, sc->sc_nrxbuf, sc->sc_ntxbuf);
-#endif
 
 	if (sc->sc_nrxbuf > VIC_NBUF_MAX || sc->sc_nrxbuf == 0)
 		sc->sc_nrxbuf = VIC_NBUF;
@@ -505,14 +563,14 @@ vic_alloc_data(struct vic_softc *sc)
 	sc->sc_rxbuf = malloc(sizeof(struct vic_rxbuf) * sc->sc_nrxbuf,
 	    M_NOWAIT, M_DEVBUF);
 	if (sc->sc_rxbuf == NULL) {
-		printf("%s: unable to allocate rxbuf\n", DEVNAME(sc));
+		printf(": unable to allocate rxbuf\n");
 		goto err;
 	}
 
 	sc->sc_txbuf = malloc(sizeof(struct vic_txbuf) * sc->sc_ntxbuf,
 	    M_NOWAIT, M_DEVBUF);
 	if (sc->sc_txbuf == NULL) {
-		printf("%s: unable to allocate txbuf\n", DEVNAME(sc));
+		printf(": unable to allocate txbuf\n");
 		goto freerx;
 	}
 
@@ -521,7 +579,7 @@ vic_alloc_data(struct vic_softc *sc)
 	    sc->sc_ntxbuf * sizeof(struct vic_txdesc);
 
 	if (vic_alloc_dmamem(sc) != 0) {
-		printf("%s: unable to allocate dma region\n", DEVNAME(sc));
+		printf(": unable to allocate dma region\n");
 		goto freetx;
 	}
 	kva = VIC_DMA_KVA(sc);

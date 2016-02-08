@@ -1,4 +1,4 @@
-/*	$OpenBSD: natm_pcb.c,v 1.7 2006/03/05 21:48:57 miod Exp $	*/
+/*	$OpenBSD: natm_pcb.c,v 1.9 2007/10/06 02:18:39 krw Exp $	*/
 
 /*
  *
@@ -65,10 +65,9 @@ int wait;
 {
   struct natmpcb *npcb;
 
-  MALLOC(npcb, struct natmpcb *, sizeof(*npcb), M_PCB, wait);
+  npcb = malloc(sizeof(*npcb), M_PCB, wait | M_ZERO);
 
   if (npcb) {
-    bzero(npcb, sizeof(*npcb));
     npcb->npcb_flags = NPCB_FREE;
   }
   return(npcb);
@@ -95,7 +94,7 @@ int op;
     if (npcb->npcb_inq) {
       npcb->npcb_flags = NPCB_DRAIN;	/* flag for distruction */
     } else {
-      FREE(npcb, M_PCB);		/* kill it! */
+      free(npcb, M_PCB);		/* kill it! */
     }
   }
 

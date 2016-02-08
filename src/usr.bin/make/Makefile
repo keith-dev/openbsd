@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.43 2007/07/21 14:40:33 espie Exp $
+#	$OpenBSD: Makefile,v 1.49 2008/01/12 13:05:57 espie Exp $
 
 PROG=	make
 CFLAGS+= -I${.OBJDIR} -I${.CURDIR}
@@ -15,21 +15,21 @@ CDEFS+=-DHAS_EXTENDED_GETCWD
 CFLAGS+=${CDEFS}
 HOSTCFLAGS+=${CDEFS}
 
-SRCS=	arch.c buf.c cmd_exec.c compat.c cond.c dir.c error.c for.c \
-	init.c job.c lowparse.c main.c make.c memory.c parse.c \
+SRCS=	arch.c buf.c cmd_exec.c compat.c cond.c dir.c direxpand.c engine.c \
+	error.c for.c init.c job.c lowparse.c main.c make.c memory.c parse.c \
 	parsevar.c str.c stats.c suff.c targ.c timestamp.c \
 	var.c varmodifiers.c varname.c
 SRCS+=	lstAddNew.c lstAppend.c lstConcat.c lstConcatDestroy.c \
 	lstDeQueue.c lstDestroy.c lstDupl.c lstFindFrom.c lstForEachFrom.c \
-	lstInsert.c lstMember.c lstRemove.c lstReplace.c lstSucc.c
+	lstInsert.c lstMember.c lstRemove.c lstReplace.c lstRequeue.c lstSucc.c
 .PATH:	${.CURDIR}/lst.lib
 
-CLEANFILES+=generate hashconsts.h generate.o regress.o check
+CLEANFILES+=generate generate.o regress.o check
 
 CLEANFILES+=${LIBOBJS} libohash.a
-CLEANFILES+= varhashconsts.h condhashconsts.h generate.o generate
+CLEANFILES+= varhashconsts.h condhashconsts.h nodehashconsts.h
 
-beforedepend: varhashconsts.h condhashconsts.h
+beforedepend: varhashconsts.h condhashconsts.h nodehashconsts.h
 # may need tweaking if you add variable synonyms or change the hash function
 MAGICVARSLOTS=77
 MAGICCONDSLOTS=65
@@ -39,6 +39,9 @@ varhashconsts.h: generate
 
 condhashconsts.h: generate
 	${.OBJDIR}/generate 2 ${MAGICCONDSLOTS} >${.TARGET}
+
+nodehashconsts.h: generate
+	${.OBJDIR}/generate 3 0 >${.TARGET}
 
 generate: generate.c stats.c memory.c
 	${HOSTCC} ${LDSTATIC} -o ${.TARGET} ${HOSTCFLAGS} ${.ALLSRC} ${LDADD}
@@ -52,8 +55,10 @@ regress: check
 # kludge for people who forget to make depend
 var.o: varhashconsts.h
 cond.o: condhashconsts.h
+targ.o parse.o: nodehashconsts.h
 var.ln: varhashconsts.h
 cond.ln: condhashconsts.h
+targ.ln parse.ln: nodehashconsts.h
 
 .if make(install)
 SUBDIR+= PSD.doc

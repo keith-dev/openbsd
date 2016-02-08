@@ -1,4 +1,4 @@
-/*	$OpenBSD: rpc_svcout.c,v 1.22 2005/10/20 21:44:42 jmc Exp $	*/
+/*	$OpenBSD: rpc_svcout.c,v 1.24 2007/10/03 15:12:13 weingart Exp $	*/
 /*	$NetBSD: rpc_svcout.c,v 1.7 1995/06/24 14:59:59 pk Exp $	*/
 /*
  * Sun RPC is a product of Sun Microsystems, Inc. and is provided for
@@ -31,7 +31,7 @@
  */
 
 #ifndef lint
- static char sccsid[] = "@(#)rpc_svcout.c 1.29 89/03/30 (C) 1987 SMI";
+static const char sccsid[] = "@(#)rpc_svcout.c 1.29 89/03/30 (C) 1987 SMI";
 #endif
 
 /*
@@ -66,7 +66,6 @@ static void write_caller_func(void);
 static void write_rpc_svc_fg(char *, char *);
 static void write_msg_out(void);
 static void open_log_file(char *, char *);
-int nullproc(proc_list *proc);
 
 static void
 p_xdrfunc(char *rname, char *typename)

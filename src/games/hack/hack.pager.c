@@ -1,4 +1,4 @@
-/*	$OpenBSD: hack.pager.c,v 1.12 2007/02/21 03:53:32 ray Exp $	*/
+/*	$OpenBSD: hack.pager.c,v 1.14 2007/09/14 14:29:20 chl Exp $	*/
 
 /*
  * Copyright (c) 1985, Stichting Centrum voor Wiskunde en Informatica,
@@ -62,7 +62,7 @@
  */
 
 #ifndef lint
-static const char rcsid[] = "$OpenBSD: hack.pager.c,v 1.12 2007/02/21 03:53:32 ray Exp $";
+static const char rcsid[] = "$OpenBSD: hack.pager.c,v 1.14 2007/09/14 14:29:20 chl Exp $";
 #endif /* not lint */
 
 /* This file contains the command routine dowhatis() and a pager. */
@@ -137,16 +137,14 @@ intruph(int notused)
 static void
 page_more(FILE *fp, int strip)
 {
-	char *bufr, *ep;
+	char *bufr;
 	sig_t prevsig = signal(SIGINT, intruph);
 
 	set_pager(0);
 	bufr = (char *) alloc((unsigned) CO);
 	while (fgets(bufr, CO, fp) && (!strip || *bufr == '\t') &&
 	    !got_intrup) {
-		ep = strchr(bufr, '\n');
-		if(ep)
-			*ep = 0;
+		bufr[strcspn(bufr, "\n")] = '\0';
 		if(page_line(bufr+strip)) {
 			set_pager(2);
 			goto ret;

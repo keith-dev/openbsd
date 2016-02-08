@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_exec.c,v 1.102 2007/03/15 10:22:30 art Exp $	*/
+/*	$OpenBSD: kern_exec.c,v 1.106 2008/02/13 19:31:22 kettenis Exp $	*/
 /*	$NetBSD: kern_exec.c,v 1.75 1996/02/09 18:59:28 christos Exp $	*/
 
 /*-
@@ -334,7 +334,7 @@ sys_execve(struct proc *p, void *v, register_t *retval)
 			free(*tmpfap, M_EXEC);
 			tmpfap++; argc++;
 		}
-		FREE(pack.ep_fa, M_EXEC);
+		free(pack.ep_fa, M_EXEC);
 		pack.ep_flags &= ~EXEC_HASARGL;
 	}
 
@@ -388,6 +388,9 @@ sys_execve(struct proc *p, void *v, register_t *retval)
 	sgap = STACKGAPLEN;
 	if (stackgap_random != 0)
 		sgap += (arc4random() * ALIGNBYTES) & (stackgap_random - 1);
+#ifdef MACHINE_STACK_GROWS_UP
+	sgap = ALIGN(sgap);
+#endif
 	/* Now check if args & environ fit into new stack */
 	len = ((argc + envc + 2 + pack.ep_emul->e_arglen) * sizeof(char *) +
 	    sizeof(long) + dp + sgap + sizeof(struct ps_strings)) - argp;
@@ -411,11 +414,11 @@ sys_execve(struct proc *p, void *v, register_t *retval)
 	vm = p->p_vmspace;
 	/* Now map address space */
 	vm->vm_taddr = (char *)pack.ep_taddr;
-	vm->vm_tsize = btoc(pack.ep_tsize);
+	vm->vm_tsize = atop(round_page(pack.ep_tsize));
 	vm->vm_daddr = (char *)pack.ep_daddr;
-	vm->vm_dsize = btoc(pack.ep_dsize);
+	vm->vm_dsize = atop(round_page(pack.ep_dsize));
 	vm->vm_dused = 0;
-	vm->vm_ssize = btoc(pack.ep_ssize);
+	vm->vm_ssize = atop(round_page(pack.ep_ssize));
 	vm->vm_maxsaddr = (char *)pack.ep_maxsaddr;
 	vm->vm_minsaddr = (char *)pack.ep_minsaddr;
 
@@ -435,8 +438,8 @@ sys_execve(struct proc *p, void *v, register_t *retval)
 	arginfo.ps_nenvstr = envc;
 
 #ifdef MACHINE_STACK_GROWS_UP
-	stack = (char *)USRSTACK + sizeof(arginfo);
-	slen = len - sizeof(arginfo);
+	stack = (char *)USRSTACK + sizeof(arginfo) + sgap;
+	slen = len - sizeof(arginfo) - sgap;
 #else
 	stack = (char *)(USRSTACK - len);
 #endif
@@ -676,7 +679,7 @@ bad:
 	if (pack.ep_interp != NULL)
 		pool_put(&namei_pool, pack.ep_interp);
 	if (pack.ep_emul_arg != NULL)
-		FREE(pack.ep_emul_arg, M_TEMP);
+		free(pack.ep_emul_arg, M_TEMP);
 	/* close and put the exec'd file */
 	vn_close(pack.ep_vp, FREAD, cred, p);
 	pool_put(&namei_pool, nid.ni_cnd.cn_pnbuf);
@@ -705,7 +708,7 @@ exec_abort:
 	if (pack.ep_interp != NULL)
 		pool_put(&namei_pool, pack.ep_interp);
 	if (pack.ep_emul_arg != NULL)
-		FREE(pack.ep_emul_arg, M_TEMP);
+		free(pack.ep_emul_arg, M_TEMP);
 	pool_put(&namei_pool, nid.ni_cnd.cn_pnbuf);
 	vn_close(pack.ep_vp, FREAD, cred, p);
 	uvm_km_free_wakeup(exec_map, (vaddr_t) argp, NCARGS);

@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_stge.c,v 1.35 2006/12/29 22:16:05 kettenis Exp $	*/
+/*	$OpenBSD: if_stge.c,v 1.38 2007/10/23 07:24:19 brad Exp $	*/
 /*	$NetBSD: if_stge.c,v 1.27 2005/05/16 21:35:32 bouyer Exp $	*/
 
 /*-
@@ -153,18 +153,14 @@ const struct mii_bitbang_ops stge_mii_bitbang_ops = {
  * Devices supported by this driver.
  */
 const struct pci_matchid stge_devices[] = {
+	{ PCI_VENDOR_ANTARES, PCI_PRODUCT_ANTARES_TC9021 },
+	{ PCI_VENDOR_DLINK, PCI_PRODUCT_DLINK_DGE550T },
 	{ PCI_VENDOR_SUNDANCE, PCI_PRODUCT_SUNDANCE_ST1023 },
 	{ PCI_VENDOR_SUNDANCE, PCI_PRODUCT_SUNDANCE_ST2021 },
-	{ PCI_VENDOR_TAMARACK, PCI_PRODUCT_TAMARACK_TC9021 },
-	{ PCI_VENDOR_TAMARACK, PCI_PRODUCT_TAMARACK_TC9021_ALT },
-	/*
-	 * The Sundance sample boards use the Sundance vendor ID,
-	 * but the Tamarack product ID.
-	 */
 	{ PCI_VENDOR_SUNDANCE, PCI_PRODUCT_SUNDANCE_TC9021 },
 	{ PCI_VENDOR_SUNDANCE, PCI_PRODUCT_SUNDANCE_TC9021_ALT },
-	{ PCI_VENDOR_DLINK, PCI_PRODUCT_DLINK_DGE550T },
-	{ PCI_VENDOR_ANTARES, PCI_PRODUCT_ANTARES_TC9021 }
+	{ PCI_VENDOR_TAMARACK, PCI_PRODUCT_TAMARACK_TC9021 },
+	{ PCI_VENDOR_TAMARACK, PCI_PRODUCT_TAMARACK_TC9021_ALT }
 };
 
 int
@@ -189,8 +185,7 @@ stge_attach(struct device *parent, struct device *self, void *aux)
 	bus_size_t iosize;
 	int ioh_valid, memh_valid;
 	int i, rseg, error;
-	pcireg_t pmode;
-	int pmreg;
+	int state;
 
 	timeout_set(&sc->sc_timeout, stge_tick, sc);
 
@@ -220,22 +215,15 @@ stge_attach(struct device *parent, struct device *self, void *aux)
 	sc->sc_dmat = pa->pa_dmat;
 
 	/* Get it out of power save mode if needed. */
-	if (pci_get_capability(pc, pa->pa_tag, PCI_CAP_PWRMGMT, &pmreg, 0)) {
-		pmode = pci_conf_read(pc, pa->pa_tag, pmreg + PCI_PMCSR) &
-		    PCI_PMCSR_STATE_MASK;
-		if (pmode == PCI_PMCSR_STATE_D3) {
-			/*
-			 * The card has lost all configuration data in
-			 * this state, so punt.
-			 */
-			printf(": unable to wake up from power state D3\n");
-			return;
-		}
-		if (pmode != 0) {
-			printf(": waking up from power state D%d\n", pmode);
-			pci_conf_write(pc, pa->pa_tag, pmreg + PCI_PMCSR,
-			    PCI_PMCSR_STATE_D0);
-		}
+	state = pci_set_powerstate(pc, pa->pa_tag, PCI_PMCSR_STATE_D0);
+	if (state == PCI_PMCSR_STATE_D3) {
+		/*
+		 * The card has lost all configuration data in
+		 * this state, so punt.
+		 */
+		printf(": unable to wake up from power state D3, "
+		    "reboot required.\n");
+		return;
 	}
 
 	/*

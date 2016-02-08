@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_iwi.c,v 1.83 2007/07/18 18:10:31 damien Exp $	*/
+/*	$OpenBSD: if_iwi.c,v 1.86 2007/11/17 19:09:16 damien Exp $	*/
 
 /*-
  * Copyright (c) 2004-2006
@@ -40,7 +40,6 @@
 #include <sys/kernel.h>
 #include <sys/socket.h>
 #include <sys/systm.h>
-#include <sys/malloc.h>
 #include <sys/conf.h>
 #include <sys/device.h>
 
@@ -916,6 +915,7 @@ iwi_frame_intr(struct iwi_softc *sc, struct iwi_rx_data *data,
 			panic("%s: could not load old rx mbuf",
 			    sc->sc_dev.dv_xname);
 		}
+		CSR_WRITE_4(sc, data->reg, data->map->dm_segs[0].ds_addr);
 		ifp->if_ierrors++;
 		return;
 	}
@@ -2151,8 +2151,8 @@ iwi_init(struct ifnet *ifp)
 	}
 
 	if ((error = loadfirmware(name, &data, &size)) != 0) {
-		printf("%s: could not read firmware %s\n",
-		    sc->sc_dev.dv_xname, name);
+		printf("%s: error %d, could not read firmware %s\n",
+		    sc->sc_dev.dv_xname, error, name);
 		goto fail1;
 	}
 

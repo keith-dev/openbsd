@@ -1,4 +1,4 @@
-/*	$OpenBSD: setlocale.c,v 1.14 2005/08/08 08:05:35 espie Exp $	*/
+/*	$OpenBSD: setlocale.c,v 1.17 2007/11/28 10:24:38 chl Exp $	*/
 /*
  * Copyright (c) 1991, 1993
  *	The Regents of the University of California.  All rights reserved.
@@ -77,7 +77,6 @@ static char current_locale_string[_LC_LAST * 33];
 
 static char	*currentlocale(void);
 static void revert_to_default(int);
-static int force_locale_enable(int);
 static int load_locale_sub(int, const char *, int);
 static char	*loadlocale(int);
 static const char *__get_locale_env(int);
@@ -215,17 +214,10 @@ revert_to_default(int category)
 }
 
 static int
-force_locale_enable(int category)
-{
-	revert_to_default(category);
-
-	return 0;
-}
-
-static int
 load_locale_sub(int category, const char *locname, int isspecial)
 {
 	char name[PATH_MAX];
+	int len;
 
 	/* check for the default locales */
 	if (!strcmp(new_categories[category], "C") ||
@@ -238,12 +230,14 @@ load_locale_sub(int category, const char *locname, int isspecial)
 	if (strchr(locname, '/') != NULL)
 		return -1;
 
-	(void)snprintf(name, sizeof(name), "%s/%s/%s",
+	len = snprintf(name, sizeof(name), "%s/%s/%s",
 		       _PathLocale, locname, categories[category]);
+	if (len < 0 || len >= sizeof(name))
+		return -1;
 
 	switch (category) {
 	case LC_CTYPE:
-		if (_xpg4_setrunelocale(locname) == -1)
+		if (_xpg4_setrunelocale(locname))
 			return -1;
 		__install_currentrunelocale_ctype();
 		break;

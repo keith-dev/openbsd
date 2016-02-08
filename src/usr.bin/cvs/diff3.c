@@ -1,4 +1,4 @@
-/*	$OpenBSD: diff3.c,v 1.37 2007/06/28 21:38:09 xsa Exp $	*/
+/*	$OpenBSD: diff3.c,v 1.45 2008/03/01 14:40:23 joris Exp $	*/
 
 /*
  * Copyright (C) Caldera International Inc.  2001-2002.
@@ -72,16 +72,18 @@ static const char copyright[] =
 
 #ifndef lint
 static const char rcsid[] =
-    "$OpenBSD: diff3.c,v 1.37 2007/06/28 21:38:09 xsa Exp $";
+    "$OpenBSD: diff3.c,v 1.45 2008/03/01 14:40:23 joris Exp $";
 #endif /* not lint */
 
 #include <ctype.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 
+#include "atomicio.h"
 #include "cvs.h"
 #include "diff.h"
 
@@ -144,7 +146,7 @@ static int edit(struct diff *, int, int);
 static char *getchange(FILE *);
 static char *getline(FILE *, size_t *);
 static int number(char **);
-static size_t readin(char *, struct diff **);
+static size_t readin(int, struct diff **);
 static int skip(int, int, char *);
 static int edscript(int);
 static int merge(size_t, size_t);
@@ -158,10 +160,12 @@ static int diff3_internal(int, char **, const char *, const char *);
 
 int diff3_conflicts = 0;
 
+static int fds[5];
+
 void
 cvs_merge_file(struct cvs_file *cf, int verbose)
 {
-	int argc;
+	int i, argc;
 	char *data, *patch;
 	char *argv[5], r1[CVS_REV_BUFSZ], r2[CVS_REV_BUFSZ];
 	char *dp13, *dp23, *path1, *path2, *path3;
@@ -170,43 +174,38 @@ cvs_merge_file(struct cvs_file *cf, int verbose)
 	struct cvs_line *lp;
 	struct cvs_lines *dlines, *plines;
 
+	overlapcnt = 0;
 	b1 = b2 = b3 = d1 = d2 = diffb = NULL;
 	rcsnum_tostr(cf->file_ent->ce_rev, r1, sizeof(r1));
 	rcsnum_tostr(cf->file_rcsrev, r2, sizeof(r2));
 
-	b1 = cvs_buf_load_fd(cf->fd, BUF_AUTOEXT);
-	d1 = cvs_buf_alloc((size_t)128, BUF_AUTOEXT);
-	d2 = cvs_buf_alloc((size_t)128, BUF_AUTOEXT);
-	diffb = cvs_buf_alloc((size_t)128, BUF_AUTOEXT);
-
-	(void)close(cf->fd);
-	cf->fd = open(cf->file_path, O_WRONLY | O_TRUNC);
-	if (cf->fd == -1) {
-		fatal("cvs_merge_file: failed to reopen fd for writing: %s",
-		    strerror(errno));
-	}
+	b1 = cvs_buf_load_fd(cf->fd);
+	d1 = cvs_buf_alloc(128);
+	d2 = cvs_buf_alloc(128);
+	diffb = cvs_buf_alloc(128);
 
 	(void)xasprintf(&path1, "%s/diff1.XXXXXXXXXX", cvs_tmpdir);
 	(void)xasprintf(&path2, "%s/diff2.XXXXXXXXXX", cvs_tmpdir);
 	(void)xasprintf(&path3, "%s/diff3.XXXXXXXXXX", cvs_tmpdir);
 
-	cvs_buf_write_stmp(b1, path1, NULL);
+	fds[2] = cvs_buf_write_stmp(b1, path1, NULL);
 	if (verbose == 1)
 		cvs_printf("Retrieving revision %s\n", r1);
-	rcs_rev_write_stmp(cf->file_rcs, cf->file_ent->ce_rev, path2, 0);
+	fds[3] = rcs_rev_write_stmp(cf->file_rcs, cf->file_ent->ce_rev,
+	    path2, 0);
 	if (verbose == 1)
 		cvs_printf("Retrieving revision %s\n", r2);
-	rcs_rev_write_stmp(cf->file_rcs, cf->file_rcsrev, path3, 0);
+	fds[4] = rcs_rev_write_stmp(cf->file_rcs, cf->file_rcsrev, path3, 0);
 
-	cvs_diffreg(path1, path3, d1);
-	cvs_diffreg(path2, path3, d2);
+	cvs_diffreg(path1, path3, fds[2], fds[4], d1);
+	cvs_diffreg(path2, path3, fds[3], fds[4], d2);
 
 	(void)xasprintf(&dp13, "%s/d13.XXXXXXXXXX", cvs_tmpdir);
-	cvs_buf_write_stmp(d1, dp13, NULL);
+	fds[0] = cvs_buf_write_stmp(d1, dp13, NULL);
 	cvs_buf_free(d1);
 
 	(void)xasprintf(&dp23, "%s/d23.XXXXXXXXXX", cvs_tmpdir);
-	cvs_buf_write_stmp(d2, dp23, NULL);
+	fds[1] = cvs_buf_write_stmp(d2, dp23, NULL);
 	cvs_buf_free(d2);
 
 	argc = 0;
@@ -216,6 +215,13 @@ cvs_merge_file(struct cvs_file *cf, int verbose)
 	argv[argc++] = path1;
 	argv[argc++] = path2;
 	argv[argc++] = path3;
+
+	if (lseek(fds[2], SEEK_SET, 0) < 0)
+		fatal("cvs_merge_file: lseek fds[2]: %s", strerror(errno));
+	if (lseek(fds[3], SEEK_SET, 0) < 0)
+		fatal("cvs_merge_file: lseek fds[3]: %s", strerror(errno));
+	if (lseek(fds[4], SEEK_SET, 0) < 0)
+		fatal("cvs_merge_file: lseek fds[4]: %s", strerror(errno));
 
 	diff3_conflicts = diff3_internal(argc, argv, cf->file_path, r2);
 	if (diff3_conflicts < 0)
@@ -240,11 +246,19 @@ cvs_merge_file(struct cvs_file *cf, int verbose)
 		    (diff3_conflicts > 1) ? "s" : "");
 	}
 
+	(void)close(cf->fd);
+	cf->fd = open(cf->file_path, O_CREAT | O_RDWR | O_TRUNC, 0644);
+	if (cf->fd == -1) {
+		fatal("cvs_merge_file: failed to reopen fd for writing: %s",
+		    strerror(errno));
+	}
+
 	TAILQ_FOREACH(lp, &(dlines->l_lines), l_list) {
 		if (lp->l_line == NULL)
 			continue;
 
-		if (write(cf->fd, lp->l_line, lp->l_len) == -1)
+		if (atomicio(vwrite, cf->fd, lp->l_line, lp->l_len) !=
+		    lp->l_len)
 			fatal("cvs_merge_file: %s", strerror(errno));
 	}
 
@@ -253,6 +267,9 @@ cvs_merge_file(struct cvs_file *cf, int verbose)
 	if (data != NULL)
 		xfree(data);
 	xfree(patch);
+
+	for (i = 0; i < 3; i++)
+		fclose(fp[i]);
 
 	(void)unlink(path1);
 	(void)unlink(path2);
@@ -284,11 +301,13 @@ diff3_internal(int argc, char **argv, const char *fmark, const char *rmark)
 	(void)xsnprintf(f3mark, sizeof(f3mark), ">>>>>>> %s", rmark);
 
 	increase();
-	m = readin(argv[0], &d13);
-	n = readin(argv[1], &d23);
+
+	/* fds[0] and fds[1] are closed in readin() */
+	m = readin(fds[0], &d13);
+	n = readin(fds[1], &d23);
 
 	for (i = 0; i <= 2; i++) {
-		if ((fp[i] = fopen(argv[i + 2], "r")) == NULL) {
+		if ((fp[i] = fdopen(fds[i + 2], "r")) == NULL) {
 			cvs_log(LP_ERR, "%s", argv[i + 2]);
 			return (-1);
 		}
@@ -411,13 +430,16 @@ ed_patch_lines(struct cvs_lines *dlines, struct cvs_lines *plines)
  * The vector could be optimized out of existence)
  */
 static size_t
-readin(char *name, struct diff **dd)
+readin(int fd, struct diff **dd)
 {
 	int a, b, c, d;
 	char kind, *p;
 	size_t i;
 
-	fp[0] = fopen(name, "r");
+	fp[0] = fdopen(fd, "r");
+	if (fp[0] == NULL)
+		fatal("readin: fdopen: %s", strerror(errno));
+
 	for (i = 0; (p = getchange(fp[0])); i++) {
 		if (i >= szchanges - 1)
 			increase();
@@ -448,6 +470,7 @@ readin(char *name, struct diff **dd)
 		(*dd)[i].old.from = (*dd)[i-1].old.to;
 		(*dd)[i].new.from = (*dd)[i-1].new.to;
 	}
+
 	(void)fclose(fp[0]);
 
 	return (i);
@@ -729,7 +752,7 @@ repos(int nchar)
 	int i;
 
 	for (i = 0; i < 2; i++)
-		(void)fseek(fp[i], (long)-nchar, 1);
+		(void)fseek(fp[i], (long)-nchar, SEEK_CUR);
 }
 
 /*
@@ -763,7 +786,7 @@ edscript(int n)
 			prange(&de[n].old);
 		else
 			diff_output("%da\n=======\n", de[n].old.to -1);
-		(void)fseek(fp[2], (long)de[n].new.from, 0);
+		(void)fseek(fp[2], (long)de[n].new.from, SEEK_SET);
 		for (k = de[n].new.to-de[n].new.from; k > 0; k-= j) {
 			j = k > BUFSIZ ? BUFSIZ : k;
 			if (fread(block, (size_t)1, (size_t)j,

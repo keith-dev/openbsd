@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.253 2007/08/01 21:23:25 miod Exp $
+#	$OpenBSD: Makefile,v 1.260 2008/02/09 12:10:53 mcbride Exp $
 
 TZDIR=		/usr/share/zoneinfo
 LOCALTIME=	Canada/Mountain
@@ -76,14 +76,16 @@ distribution-etc-root-var: distrib-dirs
 	pwd_mkdb -p -d ${DESTDIR}/etc /etc/master.passwd
 	${INSTALL} -c -o root -g wheel -m 600 bgpd.conf ${DESTDIR}/etc
 	${INSTALL} -c -o root -g wheel -m 600 ospfd.conf ${DESTDIR}/etc
+	${INSTALL} -c -o root -g wheel -m 600 ospf6d.conf ${DESTDIR}/etc
 	${INSTALL} -c -o root -g wheel -m 600 ripd.conf ${DESTDIR}/etc
 	${INSTALL} -c -o root -g wheel -m 600 dvmrpd.conf ${DESTDIR}/etc
 	${INSTALL} -c -o root -g wheel -m 600 pf.conf ${DESTDIR}/etc
-	${INSTALL} -c -o root -g wheel -m 600 chio.conf ${DESTDIR}/etc
+	${INSTALL} -c -o root -g operator -m 644 chio.conf ${DESTDIR}/etc
 	${INSTALL} -c -o root -g wheel -m 600 hostapd.conf ${DESTDIR}/etc
-	${INSTALL} -c -o root -g wheel -m 600 hoststated.conf ${DESTDIR}/etc
+	${INSTALL} -c -o root -g wheel -m 600 relayd.conf ${DESTDIR}/etc
 	${INSTALL} -c -o root -g wheel -m 600 ipsec.conf ${DESTDIR}/etc
 	${INSTALL} -c -o root -g wheel -m 600 sasyncd.conf ${DESTDIR}/etc
+	${INSTALL} -c -o root -g wheel -m 600 snmpd.conf ${DESTDIR}/etc
 	${INSTALL} -c -o ${BINOWN} -g ${BINGRP} -m 555 \
 	    etc.${MACHINE}/MAKEDEV ${DESTDIR}/dev
 	cd root; \
@@ -108,7 +110,9 @@ distribution-etc-root-var: distrib-dirs
 		${INSTALL} -c -o root -g wheel -m 644 dot.mailrc \
 		    ${DESTDIR}/etc/skel/.mailrc; \
 		${INSTALL} -c -o root -g wheel -m 644 dot.profile \
-		    ${DESTDIR}/etc/skel/.profile
+		    ${DESTDIR}/etc/skel/.profile; \
+		${INSTALL} -c -o root -g wheel -m 600 /dev/null \
+		    ${DESTDIR}/etc/skel/.ssh/authorized_keys
 	cd kerberosV; \
 		${INSTALL} -c -o root -g wheel -m 644 README \
 		    ${DESTDIR}/etc/kerberosV; \
@@ -168,14 +172,14 @@ distribution-etc-root-var: distrib-dirs
 		    ${DESTDIR}/var/named/etc/named.conf; \
 		${INSTALL} -c -o root -g named -m 640 named-*.conf \
 		    ${DESTDIR}/var/named/etc; \
+		${INSTALL} -c -o root -g wheel -m 644 root.hint \
+		    ${DESTDIR}/var/named/etc; \
 		${INSTALL} -c -o root -g wheel -m 644 db.localhost \
 		    ${DESTDIR}/var/named/standard/localhost; \
 		${INSTALL} -c -o root -g wheel -m 644 db.loopback \
 		    ${DESTDIR}/var/named/standard/loopback; \
 		${INSTALL} -c -o root -g wheel -m 644 db.loopback6.arpa \
 		    ${DESTDIR}/var/named/standard/loopback6.arpa; \
-		${INSTALL} -c -o root -g wheel -m 644 root.hint \
-		    ${DESTDIR}/var/named/standard; \
 	/bin/rm -f ${DESTDIR}/etc/localtime
 	ln -s ${TZDIR}/${LOCALTIME} ${DESTDIR}/etc/localtime
 	/bin/rm -f ${DESTDIR}/etc/rmt

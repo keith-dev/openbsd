@@ -1,4 +1,4 @@
-/*	$OpenBSD: mount.c,v 1.45 2007/06/01 05:37:14 deraadt Exp $	*/
+/*	$OpenBSD: mount.c,v 1.48 2007/11/17 17:18:32 krw Exp $	*/
 /*	$NetBSD: mount.c,v 1.24 1995/11/18 03:34:29 cgd Exp $	*/
 
 /*
@@ -40,7 +40,7 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)mount.c	8.19 (Berkeley) 4/19/94";
 #else
-static char rcsid[] = "$OpenBSD: mount.c,v 1.45 2007/06/01 05:37:14 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: mount.c,v 1.48 2007/11/17 17:18:32 krw Exp $";
 #endif
 #endif /* not lint */
 
@@ -375,8 +375,10 @@ mountfs(const char *vfstype, const char *spec, const char *name,
 		if (!hasopt(optbuf, "update"))
 			optbuf = catopt(optbuf, "update");
 	} else if (skipmounted) {
-		if (statfs(name, &sf) < 0)
-			err(1, "statfs %s", name);
+		if (statfs(name, &sf) < 0) {
+			warn("statfs %s", name);
+			return (1);
+		}
 		/* XXX can't check f_mntfromname, thanks to mfs, etc. */
 		if (strncmp(name, sf.f_mntonname, MNAMELEN) == 0 &&
 		    strncmp(vfstype, sf.f_fstypename, MFSNAMELEN) == 0) {
@@ -390,7 +392,7 @@ mountfs(const char *vfstype, const char *spec, const char *name,
 	}
 
 	argvsize = 64;
-	if((argv = malloc(argvsize * sizeof(char*))) == NULL)
+	if((argv = calloc(argvsize, sizeof(char *))) == NULL)
 		err(1, "malloc");
 	argc = 0;
 	argv[argc++] = NULL;	/* this should be a full path name */
@@ -652,7 +654,7 @@ maketypelist(char *fslist)
 		++nextcp;
 
 	/* Build an array of that many types. */
-	if ((av = typelist = malloc((i + 1) * sizeof(char *))) == NULL)
+	if ((av = typelist = calloc(i + 1, sizeof(char *))) == NULL)
 		err(1, NULL);
 	av[0] = fslist;
 	for (i = 1, nextcp = fslist; (nextcp = strchr(nextcp, ',')); i++) {
@@ -712,11 +714,9 @@ usage(void)
 {
 
 	(void)fprintf(stderr,
-	    "usage: mount %s %s\n       mount %s\n       mount %s\n",
-	    "[-dfruvw] [-o options] [-t ffs | external_type]",
-	    "special node",
-	    "[-Aadfruvw] [-t ffs | external_type]",
-	    "[-dfrsuvw] special | node");
+	    "usage: mount [-Aadfruvw] [-t type]\n"
+	    "       mount [-dfrsuvw] special | node\n"
+	    "       mount [-dfruvw] [-o options] [-t type] special node\n");
 	exit(1);
 }
 

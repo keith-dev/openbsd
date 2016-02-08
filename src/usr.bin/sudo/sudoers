@@ -1,8 +1,10 @@
-# $OpenBSD: sudoers,v 1.12 2007/08/09 16:12:08 ajacoutot Exp $
+# $OpenBSD: sudoers,v 1.19 2007/12/03 15:09:48 millert Exp $
 #
 # sudoers file.
 #
 # This file MUST be edited with the 'visudo' command as root.
+# Failure to use 'visudo' may result in syntax or file permission errors
+# that prevent sudo from running.
 #
 # See the sudoers man page for the details on how to write a sudoers file.
 #
@@ -14,7 +16,10 @@
 # Cmnd alias specification
 
 # Defaults specification
-Defaults env_keep +="DESTDIR FETCH_CMD FLAVOR FTPMODE MAKE MULTI_PACKAGES OKAY_FILES PKG_DBDIR PKG_DESTDIR PKG_CACHE PKG_PATH PKG_TMPDIR PORTSDIR RELEASEDIR SUBPACKAGE"
+Defaults env_keep +="DESTDIR FETCH_CMD FLAVOR FTPMODE GROUP MAKE MULTI_PACKAGES"
+Defaults env_keep +="OKAY_FILES OWNER PKG_DBDIR PKG_DESTDIR PKG_CACHE PKG_PATH"
+Defaults env_keep +="PKG_TMPDIR PORTSDIR RELEASEDIR SUBPACKAGE WRKOBJDIR"
+Defaults env_keep +="SSH_AUTH_SOCK EDITOR VISUAL"
 
 # Uncomment to preserve the environment for users in group wheel
 #Defaults:%wheel !env_reset

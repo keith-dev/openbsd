@@ -1,4 +1,4 @@
-/*	$OpenBSD: natm.c,v 1.7 2006/03/04 22:40:16 brad Exp $	*/
+/*	$OpenBSD: natm.c,v 1.9 2007/12/09 21:36:40 hshoexer Exp $	*/
 
 /*
  *
@@ -305,7 +305,7 @@ struct proc *p;
     case PRU_LISTEN:			/* listen for connection */
     case PRU_ACCEPT:			/* accept connection from peer */
     case PRU_CONNECT2:			/* connect two sockets */
-    case PRU_ABORT:			/* abort (fast DISCONNECT, DETATCH) */
+    case PRU_ABORT:			/* abort (fast DISCONNECT, DETACH) */
 					/* (only happens if LISTEN socket) */
     case PRU_RCVD:			/* have taken data; more room now */
     case PRU_FASTTIMO:			/* 200ms timeout */
@@ -368,7 +368,7 @@ next:
   if (npcb->npcb_flags & NPCB_DRAIN) {
     m_freem(m);
     if (npcb->npcb_inq == 0)
-      FREE(npcb, M_PCB);			/* done! */
+      free(npcb, M_PCB);			/* done! */
     goto next;
   }
 

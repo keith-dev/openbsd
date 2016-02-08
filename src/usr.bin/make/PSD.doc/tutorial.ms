@@ -1,4 +1,4 @@
-.\"	$OpenBSD: tutorial.ms,v 1.10 2007/02/20 08:18:47 jmc Exp $
+.\"	$OpenBSD: tutorial.ms,v 1.13 2007/11/02 17:27:24 espie Exp $
 .\"	$NetBSD: tutorial.ms,v 1.3 1996/03/06 00:15:31 christos Exp $
 .\" Copyright (c) 1988, 1989 by Adam de Boor
 .\" Copyright (c) 1989 by Berkeley Softworks
@@ -1379,9 +1379,6 @@ Debugging of makefiles is best accomplished using the
 and
 .B "\-d m"
 flags.
-.xH 2 Exercises
-.ce
-\s+4\fBTBA\fP\s0
 .xH 1 Short-cuts and Other Nice Things
 .LP
 Based on what I've told you so far, you may have gotten the impression
@@ -1768,56 +1765,6 @@ SYSTEM	= <command.mk>
 #include $(SYSTEM)
 .DE
 won't work.
-.xH 2 Saving Commands
-.No
-.LP
-.Ix 0 def ...
-There may come a time when you will want to save certain commands to
-be executed when everything else is done. For instance: you're
-making several different libraries at one time and you want to create the
-members in parallel. Problem is,
-.CW ranlib
-is another one of those programs that can't be run more than once in
-the same directory at the same time (each one creates a file called
-.CW __.SYMDEF
-into which it stuffs information for the linker to use. Two of them
-running at once will overwrite each other's file and the result will
-be garbage for both parties). You might want a way to save the ranlib
-commands til the end so they can be run one after the other, thus
-keeping them from trashing each other's file. Make allows you to do
-this by inserting an ellipsis (``.\|.\|.'') as a command between
-commands to be run at once and those to be run later.
-.LP
-So for the
-.CW ranlib
-case above, you might do this:
-.Rd 5
-.DS
-lib1.a          : $(LIB1OBJS)
-        rm -f $(.TARGET)
-        ar cr $(.TARGET) $(.ALLSRC)
-        ...
-        ranlib $(.TARGET)
-
-lib2.a          : $(LIB2OBJS)
-        rm -f $(.TARGET)
-        ar cr $(.TARGET) $(.ALLSRC)
-        ...
-        ranlib $(.TARGET)
-.DE
-.Ix 0 ref variable local .TARGET
-.Ix 0 ref variable local .ALLSRC
-This would save both
-.DS
-ranlib $(.TARGET)
-.DE
-commands until the end, when they would run one after the other
-(using the correct value for the
-.CW .TARGET
-variable, of course).
-.LP
-Commands saved in this manner are only executed if Make manages to
-re-create everything without an error.
 .xH 2 Target Attributes
 .LP
 Make allows you to give attributes to targets by means of special
@@ -1835,18 +1782,6 @@ to the target of the transformation rule when the rule is applied.
 .Ix 0 ref source
 .Ix 0 ref target
 .nr pw 12
-.IP .DONTCARE \n(pw
-.Ix 0 def attributes .DONTCARE
-.Ix 0 def .DONTCARE
-If a target is marked with this attribute and Make can't figure out
-how to create it, it will ignore this fact and assume the file isn't
-really needed or actually exists and Make just can't find it. This may prove
-wrong, but the error will be noted later on, not when Make tries to create
-the target so marked. This attribute also prevents Make from
-attempting to touch the target if it is given the
-.B \-t
-flag.
-.Ix 0 ref flags -t
 .IP .EXEC \n(pw
 .Ix 0 def attributes .EXEC
 .Ix 0 def .EXEC
@@ -1902,25 +1837,6 @@ as a source. This is because none of the other targets can be made
 until
 .CW init
 has been made, thus they depend on it.
-.IP .EXPORT \n(pw
-.Ix 0 def attributes .EXPORT
-.Ix 0 def .EXPORT
-This is used to mark those targets whose creation should be sent to
-another machine if at all possible. This may be used by some
-exportation schemes if the exportation is expensive. You should ask
-your system administrator if it is necessary.
-.IP .EXPORTSAME \n(pw
-.Ix 0 def attributes .EXPORTSAME
-.Ix 0 def .EXPORTSAME
-Tells the export system that the job should be exported to a machine
-of the same architecture as the current one. Certain operations (e.g.
-running text through
-.CW nroff )
-can be performed the same on any architecture (CPU and
-operating system type), while others (e.g. compiling a program with
-.CW cc )
-must be performed on a machine with the same architecture. Not all
-export systems will support this attribute.
 .IP .IGNORE \n(pw
 .Ix 0 def attributes .IGNORE
 .Ix 0 def .IGNORE attribute
@@ -2033,17 +1949,6 @@ and have it descend the directory tree (if your makefiles are set up
 correctly), printing what it would have executed if you hadn't
 included the
 .B \-n
-flag.
-.IP .NOEXPORT \n(pw
-.Ix 0 def attributes .NOEXPORT
-.Ix 0 def .NOEXPORT attribute
-If possible, Make will attempt to export the creation of all targets to
-another machine (this depends on how Make was configured). Sometimes,
-the creation is so simple, it is pointless to send it to another
-machine. If you give the target the
-.CW .NOEXPORT
-attribute, it will be run locally, even if you've given Make the
-.B "\-L 0"
 flag.
 .IP .NOTMAIN \n(pw
 .Ix 0 def attributes .NOTMAIN
@@ -2170,10 +2075,6 @@ function of being a place on which Make can hang commands you put off
 to the end. Thus the script for this target will be executed before
 any of the commands you save with the ``.\|.\|.''.
 .Ix 0 ref ...
-.IP .EXPORT \n(pw
-The sources for this target are passed to the exportation system compiled
-into Make. Some systems will use these sources to configure
-themselves. You should ask your system administrator about this.
 .IP .IGNORE \n(pw
 .Ix 0 def .IGNORE target
 .Ix 0 ref .IGNORE attribute
@@ -2306,15 +2207,6 @@ attribute is given to every target in the file.
 This target applies the
 .CW .MAKE
 attribute to all its sources. It does nothing if you don't give it any sources.
-.IP .SHELL \n(pw
-.Ix 0 def .SHELL
-Make is not constrained to only using the Bourne shell to execute
-the commands you put in the makefile. You can tell it some other shell
-to use with this target. Check out
-.B "A Shell is a Shell is a Shell"
-(section 4.4)
-.Rm 7 4.4
-for more information.
 .IP .SILENT \n(pw
 .Ix 0 def .SILENT target
 .Ix 0 ref .SILENT attribute
@@ -2524,17 +2416,6 @@ How can you still use transformation rules to make your life easier
 (Hint: assume the error-checking versions have
 .CW ec
 tacked onto their prefix)?
-.IP (3.2)
-Assume, for a moment or two, you want to perform a sort of
-``indirection'' by placing the name of a variable into another one,
-then you want to get the value of the first by expanding the second
-somehow. Unfortunately, Make doesn't allow constructs like
-.DS I
-$($(FOO))
-.DE
-What do you do? Hint: no further variable expansion is performed after
-modifiers are applied, thus if you cause a $ to occur in the
-expansion, that's what will be in the result.
 .xH 1 Make for Gods
 .LP
 This chapter is devoted to those facilities in Make that allow you to
@@ -2993,197 +2874,6 @@ would wreak havoc if you tried
 .CW "make draft print" '' ``
 since you would use the same formatter for each target. As I said,
 this all gets somewhat complicated.
-.xH 2 A Shell is a Shell is a Shell
-.Rd 7
-.LP
-In normal operation, the Bourne Shell (better known as
-.CW sh '') ``
-is used to execute the commands to re-create targets. Make also allows you
-to specify a different shell for it to use when executing these
-commands. There are several things Make must know about the shell you
-wish to use. These things are specified as the sources for the
-.CW .SHELL
-.Ix 0 ref .SHELL
-.Ix 0 ref target .SHELL
-target by keyword, as follows:
-.IP "\fBpath=\fP\fIpath\fP"
-Make needs to know where the shell actually resides, so it can
-execute it. If you specify this and nothing else, Make will use the
-last component of the path and look in its table of the shells it
-knows and use the specification it finds, if any. Use this if you just
-want to use a different version of the Bourne or C Shell (yes, Make knows
-how to use the C Shell too).
-.IP "\fBname=\fP\fIname\fP"
-This is the name by which the shell is to be known. It is a single
-word and, if no other keywords are specified (other than
-.B path ),
-it is the name by which Make attempts to find a specification for
-it (as mentioned above). You can use this if you would just rather use
-the C Shell than the Bourne Shell
-.CW ".SHELL: name=csh" '' (``
-will do it).
-.IP "\fBquiet=\fP\fIecho-off command\fP"
-As mentioned before, Make actually controls whether commands are
-printed by introducing commands into the shell's input stream. This
-keyword, and the next two, control what those commands are. The
-.B quiet
-keyword is the command used to turn echoing off. Once it is turned
-off, echoing is expected to remain off until the echo-on command is given.
-.IP "\fBecho=\fP\fIecho-on command\fP"
-The command Make should give to turn echoing back on again.
-.IP "\fBfilter=\fP\fIprinted echo-off command\fP"
-Many shells will echo the echo-off command when it is given. This
-keyword tells Make in what format the shell actually prints the
-echo-off command. Wherever Make sees this string in the shell's
-output, it will delete it and any following whitespace, up to and
-including the next newline. See the example at the end of this section
-for more details.
-.IP "\fBechoFlag=\fP\fIflag to turn echoing on\fP"
-Unless a target has been marked
-.CW .SILENT ,
-Make wants to start the shell running with echoing on. To do this, it
-passes this flag to the shell as one of its arguments. If either this
-or the next flag begins with a `\-', the flags will be passed to the
-shell as separate arguments. Otherwise, the two will be concatenated
-(if they are used at the same time, of course).
-.IP "\fBerrFlag=\fP\fIflag to turn error checking on\fP"
-Likewise, unless a target is marked
-.CW .IGNORE ,
-Make wishes error-checking to be on from the very start. To this end,
-it will pass this flag to the shell as an argument. The same rules for
-an initial `\-' apply as for the
-.B echoFlag .
-.IP "\fBcheck=\fP\fIcommand to turn error checking on\fP"
-Just as for echo-control, error-control is achieved by inserting
-commands into the shell's input stream. This is the command to make
-the shell check for errors. It also serves another purpose if the
-shell doesn't have error-control as commands, but I'll get into that
-in a minute. Again, once error checking has been turned on, it is
-expected to remain on until it is turned off again.
-.IP "\fBignore=\fP\fIcommand to turn error checking off\fP"
-This is the command Make uses to turn error checking off. It has
-another use if the shell doesn't do error-control, but I'll tell you
-about that.\|.\|.\|now.
-.IP "\fBhasErrCtl=\fP\fIyes or no\fP"
-This takes a value that is either
-.B yes
-or
-.B no .
-Now you might think that the existence of the
-.B check
-and
-.B ignore
-keywords would be enough to tell Make if the shell can do
-error-control, but you'd be wrong. If
-.B hasErrCtl
-is
-.B yes ,
-Make uses the check and ignore commands in a straight-forward manner.
-If this is
-.B no ,
-however, their use is rather different. In this case, the check
-command is used as a template, in which the string
-.B %s
-is replaced by the command that's about to be executed, to produce a
-command for the shell that will echo the command to be executed. The
-ignore command is also used as a template, again with
-.B %s
-replaced by the command to be executed, to produce a command that will
-execute the command to be executed and ignore any error it returns.
-When these strings are used as templates, you must provide newline(s)
-.CW \en '') (``
-in the appropriate place(s).
-.LP
-The strings that follow these keywords may be enclosed in single or
-double quotes (the quotes will be stripped off) and may contain the
-usual C backslash-characters (\en is newline, \er is return, \eb is
-backspace, \e' escapes a single-quote inside single-quotes, \e"
-escapes a double-quote inside double-quotes). Now for an example.
-.LP
-This is actually the contents of the
-.CW <shx.mk>
-system makefile, and causes Make to use the Bourne Shell in such a
-way that each command is printed as it is executed. That is, if more
-than one command is given on a line, each will be printed separately.
-Similarly, each time the body of a loop is executed, the commands
-within that loop will be printed, etc. The specification runs like
-this:
-.DS
-#
-# This is a shell specification to have the bourne shell echo
-# the commands just before executing them, rather than when it reads
-# them. Useful if you want to see how variables are being expanded, etc.
-#
-\&.SHELL 	: path=/bin/sh \e
-	quiet="set -" \e
-	echo="set -x" \e
-	filter="+ set - " \e
-	echoFlag=x \e
-	errFlag=e \e
-	hasErrCtl=yes \e
-	check="set -e" \e
-	ignore="set +e"
-.DE
-.LP
-It tells Make the following:
-.Bp
-The shell is located in the file
-.CW /bin/sh .
-It need not tell Make that the name of the shell is
-.CW sh 
-as Make can figure that out for itself (it's the last component of
-the path).
-.Bp
-The command to stop echoing is
-.CW "set -" .
-.Bp
-The command to start echoing is
-.CW "set -x" .
-.Bp
-When the echo off command is executed, the shell will print
-.CW "+ set - " 
-(The `+' comes from using the
-.CW \-x
-flag (rather than the
-.CW \-v
-flag Make usually uses)). Make will remove all occurrences of this
-string from the output, so you don't notice extra commands you didn't
-put there.
-.Bp
-The flag the Bourne Shell will take to start echoing in this way is
-the
-.CW \-x
-flag. The Bourne Shell will only take its flag arguments concatenated
-as its first argument, so neither this nor the
-.B errFlag
-specification begins with a \-.
-.Bp
-The flag to use to turn error-checking on from the start is
-.CW \-e .
-.Bp
-The shell can turn error-checking on and off, and the commands to do
-so are
-.CW "set +e"
-and
-.CW "set -e" ,
-respectively.
-.LP
-This will cause Make to execute the two commands
-.DS
-echo "+ \fIcmd\fP"
-sh -c '\fIcmd\fP || true'
-.DE
-for each command for which errors are to be ignored. (In case you are
-wondering, the thing for
-.CW ignore
-tells the shell to execute another shell without error checking on and
-always exit 0, since the
-.B ||
-causes the
-.CW "exit 0"
-to be executed only if the first command exited non-zero, and if the
-first command exited zero, the shell will also exit zero, since that's
-the last command it executed).
 .xH 2 Compatibility
 .Ix 0 ref compatibility
 .LP

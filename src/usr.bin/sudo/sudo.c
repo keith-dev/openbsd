@@ -102,7 +102,7 @@
 #include "version.h"
 
 #ifndef lint
-__unused __unused static const char rcsid[] = "$Sudo: sudo.c,v 1.369.2.29 2007/08/15 13:48:56 millert Exp $";
+__unused __unused static const char rcsid[] = "$Sudo: sudo.c,v 1.369.2.34 2007/12/13 14:12:49 millert Exp $";
 #endif /* lint */
 
 /*
@@ -540,9 +540,9 @@ init_vars(sudo_mode, envp)
     }
 
     if ((p = ttyname(STDIN_FILENO)) || (p = ttyname(STDOUT_FILENO))) {
-	if (strncmp(p, _PATH_DEV, sizeof(_PATH_DEV) - 1) == 0)
-	    p += sizeof(_PATH_DEV) - 1;
-	user_tty = estrdup(p);
+	user_tty = user_ttypath = estrdup(p);
+	if (strncmp(user_tty, _PATH_DEV, sizeof(_PATH_DEV) - 1) == 0)
+	    user_tty += sizeof(_PATH_DEV) - 1;
     } else
 	user_tty = "unknown";
 
@@ -596,7 +596,7 @@ init_vars(sudo_mode, envp)
 
 #ifdef HAVE_GETGROUPS
     if ((user_ngroups = getgroups(0, NULL)) > 0) {
-	user_groups = emalloc2(user_ngroups, MAX(sizeof(gid_t), sizeof(int)));
+	user_groups = emalloc2(user_ngroups, sizeof(GETGROUPS_T));
 	if (getgroups(user_ngroups, user_groups) < 0)
 	    log_error(USE_ERRNO|MSG_ONLY, "can't get group vector");
     } else
@@ -730,8 +730,10 @@ parse_args(argc, argv)
 
     while (NewArgc > 0) {
 	if (NewArgv[0][0] == '-') {
-	    if (NewArgv[0][1] != '\0' && NewArgv[0][2] != '\0')
+	    if (NewArgv[0][1] != '\0' && NewArgv[0][2] != '\0') {
 		warnx("please use single character options");
+		usage(1);
+	    }
 
 	    switch (NewArgv[0][1]) {
 		case 'p':
@@ -740,6 +742,7 @@ parse_args(argc, argv)
 			usage(1);
 
 		    user_prompt = NewArgv[1];
+		    def_passprompt_override = TRUE;
 
 		    NewArgc--;
 		    NewArgv++;
@@ -1251,9 +1254,15 @@ usage(exit_val)
     int exit_val;
 {
     char **p, **uvec[4];
-    int i, linelen, linemax, ulen;
+    int i, linelen, linemax, ulen, plen;
     static char *uvec1[] = {
-	" -h | -K | -k | -L | -l | -V | -v",
+	" -h |",
+	" -K |",
+	" -k |",
+	" -L |",
+	" -l |",
+	" -V |",
+	" -v",
 	NULL
     };
     static char *uvec2[] = {
@@ -1305,14 +1314,16 @@ usage(exit_val)
     ulen = (int)strlen(getprogname()) + 7;
     linemax = 80;
     for (i = 0; uvec[i] != NULL; i++) {
-	linelen = linemax - ulen;
 	printf("usage: %s", getprogname());
+	linelen = linemax - ulen;
 	for (p = uvec[i]; *p != NULL; p++) {
-	    if (linelen == linemax || (linelen -= strlen(*p)) >= 0) {
+	    plen = (int)strlen(*p);
+	    if (linelen >= plen || linelen == linemax - ulen) {
 		fputs(*p, stdout);
+		linelen -= plen;
 	    } else {
 		p--;
-		linelen = linemax;
+		linelen = linemax - ulen;
 		printf("\n%*s", ulen, "");
 	    }
 	}

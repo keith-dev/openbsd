@@ -1,4 +1,4 @@
-/*	$OpenBSD: area.c,v 1.6 2007/06/13 17:23:36 claudio Exp $ */
+/*	$OpenBSD: area.c,v 1.8 2007/10/11 12:19:31 claudio Exp $ */
 
 /*
  * Copyright (c) 2004, 2005 Esben Norby <norby@openbsd.org>
@@ -17,11 +17,7 @@
  */
 
 #include <sys/types.h>
-#include <sys/socket.h>
 #include <sys/tree.h>
-
-#include <netinet/in.h>
-#include <arpa/inet.h>
 #include <err.h>
 #include <stdlib.h>
 
@@ -49,9 +45,9 @@ area_new(void)
 int
 area_del(struct area *area)
 {
-	struct iface		*iface = NULL;
-	struct vertex		*v, *nv;
-	struct rde_nbr		*n;
+	struct iface	*iface = NULL;
+	struct vertex	*v, *nv;
+	struct rde_nbr	*n;
 
 	/* area is removed so neutralize the demotion done by the area */
 	if (area->active == 0)
@@ -93,12 +89,12 @@ area_find(struct ospfd_conf *conf, struct in_addr area_id)
 void
 area_track(struct area *area, int state)
 {
-	int			old = area->active;
+	int	old = area->active;
 
 	if (state & NBR_STA_FULL)
 		area->active++;
 	else if (area->active == 0)
-		fatalx("king bula sez: area already inactive");
+		fatalx("area_track: area already inactive");
 	else
 		area->active--;
 
@@ -119,3 +115,13 @@ area_border_router(struct ospfd_conf *conf)
 	return (active > 1);
 }
 
+u_int8_t
+area_ospf_options(struct area *area)
+{
+	u_int8_t	opt = 0;
+
+	if (area && !area->stub)
+		opt |= OSPF_OPTION_E;
+
+	return (opt);
+}

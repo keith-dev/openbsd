@@ -1,4 +1,4 @@
-/*	$OpenBSD: wd.c,v 1.66 2007/06/20 18:15:46 deraadt Exp $ */
+/*	$OpenBSD: wd.c,v 1.69 2008/02/07 12:58:30 sthen Exp $ */
 /*	$NetBSD: wd.c,v 1.193 1999/02/28 17:15:27 explorer Exp $ */
 
 /*
@@ -224,12 +224,16 @@ wdattach(struct device *parent, struct device *self, void *aux)
 	struct wd_softc *wd = (void *)self;
 	struct ata_atapi_attach *aa_link= aux;
 	struct wdc_command wdc_c;
+	struct channel_softc *chp;
 	int i, blank;
+	u_int8_t drive;
 	char buf[41], c, *p, *q;
 	WDCDEBUG_PRINT(("wdattach\n"), DEBUG_FUNCS | DEBUG_PROBE);
 
 	wd->openings = aa_link->aa_openings;
 	wd->drvp = aa_link->aa_drv_data;
+	chp = wd->drvp->chnl_softc;
+	drive = wd->drvp->drive;
 
 	strlcpy(wd->drvp->drive_name, wd->sc_dev.dv_xname,
 	    sizeof(wd->drvp->drive_name));
@@ -321,6 +325,34 @@ wdattach(struct device *parent, struct device *self, void *aux)
 	WDCDEBUG_PRINT(("%s: atap_dmatiming_mimi=%d, atap_dmatiming_recom=%d\n",
 	    self->dv_xname, wd->sc_params.atap_dmatiming_mimi,
 	    wd->sc_params.atap_dmatiming_recom), DEBUG_PROBE);
+
+	/* use read look ahead if supported */
+	if (wd->sc_params.atap_cmd_set1 & WDC_CMD1_AHEAD) {
+		bzero(&wdc_c, sizeof(struct wdc_command));
+		wdc_c.r_command = SET_FEATURES;
+		wdc_c.r_precomp = WDSF_READAHEAD_EN;
+		wdc_c.timeout = 1000;
+		wdc_c.flags = at_poll;
+
+		if (wdc_exec_command(wd->drvp, &wdc_c) != WDC_COMPLETE) {
+			printf("%s: enable look ahead command didn't "
+			    "complete\n", wd->sc_dev.dv_xname);
+		}
+	}
+
+	/* use write cache if supported */
+	if (wd->sc_params.atap_cmd_set1 & WDC_CMD1_CACHE) {
+		bzero(&wdc_c, sizeof(struct wdc_command));
+		wdc_c.r_command = SET_FEATURES;
+		wdc_c.r_precomp = WDSF_EN_WR_CACHE;
+		wdc_c.timeout = 1000;
+		wdc_c.flags = at_poll;
+	
+		if (wdc_exec_command(wd->drvp, &wdc_c) != WDC_COMPLETE) {
+			printf("%s: enable write cache command didn't "
+			    "complete\n", wd->sc_dev.dv_xname);
+		}
+	}
 
 	/*
 	 * FREEZE LOCK the drive so malicous users can't lock it on us.
@@ -516,7 +548,7 @@ __wdstart(struct wd_softc *wd, struct buf *bp)
 	 * the sector number of the problem, and will eventually allow the
 	 * transfer to succeed.
 	 */
-	if (wd->sc_multi == 1 || wd->retries >= WDIORETRIES_SINGLE)
+	if (wd->retries >= WDIORETRIES_SINGLE)
 		wd->sc_wdc_bio.flags = ATA_SINGLE;
 	else
 		wd->sc_wdc_bio.flags = 0;
@@ -1033,11 +1065,8 @@ wddump(dev_t dev, daddr64_t blkno, caddr_t va, size_t size)
 	}
 
 	while (nblks > 0) {
-again:
 		wd->sc_wdc_bio.blkno = blkno;
 		wd->sc_wdc_bio.flags = ATA_POLL;
-		if (wddumpmulti == 1)
-			wd->sc_wdc_bio.flags |= ATA_SINGLE;
 		if (wd->sc_flags & WDF_LBA48)
 			wd->sc_wdc_bio.flags |= ATA_LBA48;
 		if (wd->sc_flags & WDF_LBA)
@@ -1084,11 +1113,6 @@ again:
 			panic("wddump: unknown error type");
 		}
 		if (err != 0) {
-			if (wddumpmulti != 1) {
-				wddumpmulti = 1; /* retry in single-sector */
-				printf(", retrying\n");
-				goto again;
-			}
 			printf("\n");
 			return err;
 		}

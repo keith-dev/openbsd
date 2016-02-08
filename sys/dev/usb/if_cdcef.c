@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_cdcef.c,v 1.17 2007/06/14 06:55:10 mbalmer Exp $	*/
+/*	$OpenBSD: if_cdcef.c,v 1.20 2007/11/25 16:40:03 jmc Exp $	*/
 
 /*
  * Copyright (c) 2007 Dale Rahn <drahn@openbsd.org>
@@ -142,7 +142,6 @@ cdcef_attach(struct device *parent, struct device *self, void *aux)
 	struct cdcef_softc *sc = (struct cdcef_softc *)self;
 	struct usbf_attach_arg *uaa = aux;
 	usbf_device_handle dev = uaa->device;
-	char *devinfop;
 	struct ifnet *ifp;
 	usbf_status err;
 	usb_cdc_union_descriptor_t udesc;
@@ -155,14 +154,10 @@ cdcef_attach(struct device *parent, struct device *self, void *aux)
 	    CDCEF_PRODUCT_ID, CDCEF_DEVICE_CODE, CDCEF_VENDOR_STRING,
 	    CDCEF_PRODUCT_STRING, CDCEF_SERIAL_STRING);
 
-	devinfop = usbf_devinfo_alloc(dev);
-	printf(": %s\n", devinfop);
-	usbf_devinfo_free(devinfop);
-
 	/* Fill in the fields needed by the parent device. */
 	sc->sc_dev.methods = &cdcef_methods;
 
-	/* timeout to start delayed tranfers */
+	/* timeout to start delayed transfers */
 	timeout_set(&sc->start_to, cdcef_start_timeout, sc);
 
 	/*
@@ -170,14 +165,14 @@ cdcef_attach(struct device *parent, struct device *self, void *aux)
 	 */
 	err = usbf_add_config(dev, &sc->sc_config);
 	if (err) {
-		printf("%s: usbf_add_config failed\n", DEVNAME(sc));
+		printf(": usbf_add_config failed\n");
 		return;
 	}
 	err = usbf_add_interface(sc->sc_config, UICLASS_CDC,
 	    UISUBCLASS_ETHERNET_NETWORKING_CONTROL_MODEL, 0, NULL,
 	    &sc->sc_iface);
 	if (err) {
-		printf("%s: usbf_add_interface failed\n", DEVNAME(sc));
+		printf(": usbf_add_interface failed\n");
 		return;
 	}
 	/* XXX don't use hard-coded values 128 and 16. */
@@ -186,7 +181,7 @@ cdcef_attach(struct device *parent, struct device *self, void *aux)
 	    usbf_add_endpoint(sc->sc_iface, UE_DIR_OUT | 1, UE_BULK,
 	    64, 16, &sc->sc_ep_out);
 	if (err) {
-		printf("%s: usbf_add_endpoint failed\n", DEVNAME(sc));
+		printf(": usbf_add_endpoint failed\n");
 		return;
 	}
 
@@ -199,7 +194,7 @@ cdcef_attach(struct device *parent, struct device *self, void *aux)
 	err = usbf_add_config_desc(sc->sc_config,
 	    (usb_descriptor_t *)&udesc, NULL);
 	if (err) {
-		printf("%s: usbf_add_config_desc failed\n", DEVNAME(sc));
+		printf(": usbf_add_config_desc failed\n");
 		return;
 	}
 
@@ -208,7 +203,7 @@ cdcef_attach(struct device *parent, struct device *self, void *aux)
 	 */
 	err = usbf_end_config(sc->sc_config);
 	if (err) {
-		printf("%s: usbf_end_config failed\n", DEVNAME(sc));
+		printf(": usbf_end_config failed\n");
 		return;
 	}
 
@@ -220,7 +215,7 @@ cdcef_attach(struct device *parent, struct device *self, void *aux)
 	sc->sc_buffer_out = usbf_alloc_buffer(sc->sc_xfer_out,
 	    CDCEF_BUFSZ);
 	if (sc->sc_buffer_in == NULL || sc->sc_buffer_out == NULL) {
-		printf("%s: usbf_alloc_buffer failed\n", DEVNAME(sc));
+		printf(": usbf_alloc_buffer failed\n");
 		return;
 	}
 
@@ -230,7 +225,7 @@ cdcef_attach(struct device *parent, struct device *self, void *aux)
 	    usbf_open_pipe(sc->sc_iface,
 	    usbf_endpoint_address(sc->sc_ep_in), &sc->sc_pipe_in);
 	if (err) {
-		printf("%s: usbf_open_pipe failed\n", DEVNAME(sc));
+		printf(": usbf_open_pipe failed\n");
 		return;
 	}
 
@@ -239,7 +234,7 @@ cdcef_attach(struct device *parent, struct device *self, void *aux)
 	    sc->sc_buffer_out, CDCEF_BUFSZ, USBD_SHORT_XFER_OK, 0, cdcef_rxeof);
 	err = usbf_transfer(sc->sc_xfer_out);
 	if (err && err != USBF_IN_PROGRESS) {
-		printf("%s: usbf_transfer failed\n", DEVNAME(sc));
+		printf(": usbf_transfer failed\n");
 		return;
 	}
 
@@ -250,8 +245,7 @@ cdcef_attach(struct device *parent, struct device *self, void *aux)
 	bcopy(&ticks, &sc->sc_arpcom.ac_enaddr[2], sizeof(u_int32_t));
 	sc->sc_arpcom.ac_enaddr[5] = (u_int8_t)(sc->sc_unit);
 
-	printf("%s: address %s\n", DEVNAME(sc),
-	    ether_sprintf(sc->sc_arpcom.ac_enaddr));
+	printf(": address %s\n", ether_sprintf(sc->sc_arpcom.ac_enaddr));
 
 	ifp = GET_IFP(sc);
 	ifp->if_softc = sc;

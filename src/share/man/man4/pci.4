@@ -1,4 +1,4 @@
-.\"	$OpenBSD: pci.4,v 1.225 2007/08/14 22:10:42 jmc Exp $
+.\"	$OpenBSD: pci.4,v 1.246 2008/01/21 20:00:32 sobrado Exp $
 .\"	$NetBSD: pci.4,v 1.29 2000/04/01 00:32:23 tsarna Exp $
 .\"
 .\" Copyright (c) 2000 Theo de Raadt.  All rights reserved.
@@ -31,7 +31,7 @@
 .\" (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
 .\" THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 .\"
-.Dd $Mdocdate: August 14 2007 $
+.Dd $Mdocdate: January 21 2008 $
 .Dt PCI 4
 .Os
 .Sh NAME
@@ -44,9 +44,13 @@
 .Cd "pci* at irongate?"
 .Cd "pci* at lca?"
 .Cd "pci* at tsp?"
+.Cd "pci* at mcpcia?"
 .Pp
 .Cd "# amd64, i386"
 .Cd "pci* at mainbus0"
+.Pp
+.Cd "# armish"
+.Cd "pci* at iopxs0"
 .Pp
 .Cd "# hppa"
 .Cd "pci* at dino?"
@@ -58,6 +62,9 @@
 .Cd "# macppc"
 .Cd "pci* at mpcpcibr?"
 .Cd "pci* at ht?"
+.Pp
+.Cd "# sgi"
+.Cd "pci* at macepcibr?"
 .Pp
 .Cd "# sparc64"
 .Cd "pci* at psycho?"
@@ -98,7 +105,7 @@ Buslogic SCSI interface
 .It Xr iha 4
 Initio INIC-940/950 based PCI SCSI interface
 .It Xr isp 4
-Qlogic based SCSI or Fibre Channel SCSI interface
+QLogic based SCSI or Fibre Channel SCSI interface
 .It Xr mpi 4
 LSI Logic Fusion-MPT Message Passing Interface
 .It Xr pcscp 4
@@ -175,6 +182,8 @@ Intel PRO/1000 10/100/Gigabit Ethernet device
 3Com EtherLink III and Fast EtherLink III 10/100 Ethernet device
 .It Xr epic 4
 SMC 83C170 (EPIC/100) 10/100 Ethernet device
+.It Xr et 4
+Agere/LSI ET1310 10/100/Gigabit Ethernet device
 .It Xr fpa 4
 .Tn DEC
 DEFPA
@@ -190,6 +199,8 @@ Sun Happy Meal 10/100 Ethernet device
 Intel(R) PRO/10GbE 10Gb Ethernet device
 .It Xr lge 4
 Level 1 LXT1001 NetCellerator PCI Gigabit Ethernet device
+.It Xr lii 4
+Attansic L2 10/100 Ethernet device
 .It Xr lmc 4
 Lan Media Corporation
 .Tn SSI/DS1/HSSI/DS3
@@ -250,21 +261,25 @@ TI ACX100/ACX111 IEEE 802.11a/b/g wireless network device
 .It Xr an 4
 Aironet Communications 4500/4800 IEEE 802.11FH/b wireless network device
 .It Xr ath 4
-Atheros IEEE 802.11a/b/g wireless network device
+Atheros IEEE 802.11a/b/g wireless network device with GPIO
 .It Xr atw 4
 ADMtek ADM8211 IEEE 802.11b wireless network device
+.It Xr bwi 4
+Broadcom AirForce IEEE 802.11b/g wireless network device
 .It Xr ipw 4
-.Tn Intel
-PRO/Wireless 2100 IEEE 802.11b wireless network device
+Intel PRO/Wireless 2100 IEEE 802.11b wireless network device
 .It Xr iwi 4
-.Tn Intel
+Intel
 PRO/Wireless 2200BG/2225BG/2915ABG IEEE 802.11a/b/g wireless network device
+.It Xr iwn 4
+Intel
+Wireless WiFi Link 4965AGN IEEE 802.11a/b/g/Draft-N wireless network device
 .It Xr malo 4
 Marvell Libertas IEEE 802.11b/g wireless network device
 .It Xr pgt 4
 Conexant/Intersil Prism GT Full-MAC IEEE 802.11a/b/g wireless network device
 .It Xr ral 4
-Ralink Technology IEEE 802.11a/b/g wireless network device
+Ralink Technology IEEE 802.11a/b/g/Draft-N wireless network device
 .It Xr rtw 4
 Realtek RTL8180L IEEE 802.11b wireless network device
 .It Xr wi 4
@@ -327,11 +342,13 @@ Cirrus Logic CS4280/CS4610/CS4615 audio device
 .It Xr clct 4
 Cirrus Logic CS4281 audio device
 .It Xr cmpci 4
-C-Media CMI8x38 PCI audio device
+C-Media CMI8338, CMI8738, CMI8768 PCI audio device
 .It Xr eap 4
 Ensoniq AudioPCI audio device
 .It Xr emu 4
 Creative Labs SBLive!, PCI 512, and Audigy audio device
+.It Xr envy 4
+VIA Envy24 audio device
 .It Xr esa 4
 ESS Technology Allegro-1/Maestro-3 family audio device
 .It Xr eso 4
@@ -362,7 +379,7 @@ Gemtek PCI FM radio device
 .Ss Hardware Sensors
 .Bl -tag -width 10n -offset ind -compact
 .It Xr elansc 4
-AMD Elan SC520 System Controller
+AMD Elan SC520 System Controller with watchdog timer and GPIO
 .It Xr geodesc 4
 Geode SC1100/SCx200 IAOC watchdog timer device
 .It Xr ichwdt 4
@@ -375,11 +392,13 @@ VIA VT82C686A/VT8231 hardware monitor
 ICS PCI-WDT500/501 watchdog timer device
 .El
 .Ss Miscellaneous devices
-.Bl -tag -width 10n -offset ind -compact
+.Bl -tag -width "piixpcib(4)" -offset ind -compact
 .It Xr alipm 4
 Acer Labs M7101 SMBus controller
 .It Xr amdiic 4
 AMD-8111 SMBus controller
+.It Xr amdpcib 4
+AMD-8111 series LPC bridge and timecounter
 .It Xr amdpm 4
 AMD-756/766/768/8111 Power Management and SMBus controller
 .It Xr bktr 4
@@ -393,17 +412,23 @@ Yenta compatible
 bridges
 .It Xr ehci 4
 USB Enhanced Host Controller Interface
+.It Xr glxpcib 4
+CS5536 PCI-ISA Bridge with timecounter, watchdog timer, and GPIO
+.It Xr gscpcib 4
+National Semiconductor Geode SC1100 PCI-ISA bridge with GPIO
 .It Xr ichiic 4
 Intel ICH SMBus controller
 .It Xr nviic 4
 NVIDIA nForce2/3/4 SMBus controller
 .It Xr ohci 4
 USB Open Host Controller Interface
+.It Xr pcib 4
+PCI-ISA bridge
 .It Xr pcic 4
 .Tn PCI
 .Tn PCMCIA
 controllers, including the Cirrus Logic GD6729
-.It Xr piixpcib
+.It Xr piixpcib 4
 Intel PIIX4 ISA bridges
 .It Xr piixpm 4
 Intel PIIX SMBus controller
@@ -485,7 +510,8 @@ Character device for the
 driver.
 .El
 .Sh SEE ALSO
-.Xr intro 4
+.Xr intro 4 ,
+.Xr pcidump 8
 .Sh HISTORY
 The machine-independent
 .Tn PCI

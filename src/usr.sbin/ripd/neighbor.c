@@ -1,4 +1,4 @@
-/*	$OpenBSD: neighbor.c,v 1.7 2007/03/27 20:19:04 michele Exp $ */
+/*	$OpenBSD: neighbor.c,v 1.9 2007/10/24 19:50:33 claudio Exp $ */
 
 /*
  * Copyright (c) 2006 Michele Marchetto <mydecay@openbeer.it>
@@ -44,7 +44,6 @@ void	nbr_stop_timer(struct nbr *);
 
 void	nbr_failed_new(struct nbr *);
 void	nbr_failed_timeout(int, short, void *);
-void	nbr_failed_stop_timer(struct nbr_failed *);
 
 LIST_HEAD(nbr_head, nbr);
 
@@ -154,7 +153,7 @@ nbr_fsm(struct nbr *nbr, enum nbr_event event)
 void
 nbr_init(u_int32_t hashsize)
 {
-	u_int32_t        hs, i;
+	u_int32_t	 hs, i;
 
 	for (hs = 1; hs < hashsize; hs <<= 1)
 		;
@@ -274,7 +273,7 @@ nbr_failed_new(struct nbr *nbr)
 	iface = nbr->iface;
 
 	timerclear(&tv);
-	tv.tv_sec = FAILED_NBR_TIMEOUT; 
+	tv.tv_sec = FAILED_NBR_TIMEOUT;
 
 	evtimer_set(&nbr_failed->timeout_timer, nbr_failed_timeout,
 	    nbr_failed);

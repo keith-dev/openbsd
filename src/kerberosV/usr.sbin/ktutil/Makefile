@@ -1,4 +1,4 @@
-# $OpenBSD: Makefile,v 1.12 2006/04/14 08:28:55 biorn Exp $
+# $OpenBSD: Makefile,v 1.14 2008/01/29 00:29:34 espie Exp $
 
 KRBDEPTH=../..
 .include <${.CURDIR}/../../Makefile.inc>
@@ -25,6 +25,15 @@ SRCS+=	${PRINTVER}
 slc:	slc-gram.o slc-lex.o ${PRINTVER}
 	$(CC) -o slc $> -lkrb5 -lcrypto
 
+slc-lex.o: y.tab.h
+y.tab.h slc-gram.o: stamp_grammar
+
+stamp_grammar:
+	${YACC} -d ${KRB5SRC}/lib/sl/slc-gram.y
+	$(CC) -c ${CFLAGS} -o slc-gram.o y.tab.c
+	rm -f y.tab.c
+	touch $@
+
 SLC=	slc
 
 ktutil:	ktutil-commands.h
@@ -37,5 +46,8 @@ DPADD+=	${LIBREADLINE} ${LIBCURSES} ${LIBKADM5CLNT} ${LIBKRB5} \
 	${LIBCRYPTO} ${LIBDES}
 LDADD+=	-lreadline -lcurses -lkadm5clnt -lkrb5 \
 	-lcrypto -ldes
+
+CLEANFILES+=	ktutil-commands.c slc slc-lex.o \
+		ktutil-commands.h slc-gram.o stamp_grammar
 
 .include <bsd.prog.mk>

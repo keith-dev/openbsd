@@ -1,4 +1,4 @@
-/*	$OpenBSD: cardslot.c,v 1.7 2005/09/19 19:05:39 fgsch Exp $	*/
+/*	$OpenBSD: cardslot.c,v 1.10 2007/12/21 17:36:52 kettenis Exp $	*/
 /*	$NetBSD: cardslot.c,v 1.9 2000/03/22 09:35:06 haya Exp $	*/
 
 /*
@@ -53,19 +53,23 @@
 #define STATIC
 #define DPRINTF(a) printf a
 #else
+#ifdef DDB
+#define STATIC
+#else
 #define STATIC static
+#endif
 #define DPRINTF(a)
 #endif
 
 STATIC void cardslotattach(struct device *, struct device *, void *);
 
 STATIC int cardslotmatch(struct device *, void *, void *);
-static void create_slot_manager(void *);
-static void cardslot_event_thread(void *arg);
+STATIC void create_slot_manager(void *);
+STATIC void cardslot_event_thread(void *arg);
 
 STATIC int cardslot_cb_print(void *aux, const char *pcic);
-static int cardslot_16_print(void *, const char *);
-static int cardslot_16_submatch(struct device *, void *,void *);
+STATIC int cardslot_16_print(void *, const char *);
+STATIC int cardslot_16_submatch(struct device *, void *,void *);
 
 struct cfattach cardslot_ca = {
 	sizeof(struct cardslot_softc), cardslotmatch, cardslotattach
@@ -97,8 +101,8 @@ cardslotattach(struct device *parent, struct device *self, void *aux)
 	struct cbslot_attach_args *cba = caa->caa_cb_attach;
 	struct pcmciabus_attach_args *pa = caa->caa_16_attach;
 
-	struct cardbus_softc *csc;
-	struct pcmcia_softc *psc;
+	struct cardbus_softc *csc = NULL;
+	struct pcmcia_softc *psc = NULL;
 
 	sc->sc_slot = sc->sc_dev.dv_unit;
 	sc->sc_cb_softc = NULL;
@@ -160,7 +164,7 @@ cardslot_cb_print(void *aux, const char *pnp)
 	return (UNCONF);
 }
 
-static int
+STATIC int
 cardslot_16_submatch(struct device *parent, void *match, void *aux)
 {
 	struct cfdata *cf = match;
@@ -174,7 +178,7 @@ cardslot_16_submatch(struct device *parent, void *match, void *aux)
 	return (0);
 }
 
-static int
+STATIC int
 cardslot_16_print(void *arg, const char *pnp)
 {
 	if (pnp)
@@ -183,7 +187,7 @@ cardslot_16_print(void *arg, const char *pnp)
 	return (UNCONF);
 }
 
-static void
+STATIC void
 create_slot_manager(void *arg)
 {
 	struct cardslot_softc *sc = (struct cardslot_softc *)arg;
@@ -232,13 +236,13 @@ cardslot_event_throw(struct cardslot_softc *sc, int ev)
 }
 
 /*
- * static void cardslot_event_thread(void *arg)
+ * STATIC void cardslot_event_thread(void *arg)
  *
  *   This function is the main routine handing cardslot events such as
  *   insertions and removals.
  *
  */
-static void
+STATIC void
 cardslot_event_thread(void *arg)
 {
 	struct cardslot_softc *sc = arg;
@@ -314,7 +318,8 @@ cardslot_event_thread(void *arg)
 					    CARDSLOT_STATUS_NOTWORK);
 				}
 			} else {
-				panic("no cardbus on %s", sc->sc_dev.dv_xname);
+				printf("%s: CardBus support disabled\n",
+				    sc->sc_dev.dv_xname);
 			}
 
 			break;

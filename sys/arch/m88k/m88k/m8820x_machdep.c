@@ -1,6 +1,6 @@
-/*	$OpenBSD: m8820x_machdep.c,v 1.26 2007/05/20 20:12:32 miod Exp $	*/
+/*	$OpenBSD: m8820x_machdep.c,v 1.35 2007/12/15 19:33:34 miod Exp $	*/
 /*
- * Copyright (c) 2004, Miodrag Vallat.
+ * Copyright (c) 2004, 2007, Miodrag Vallat.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -96,12 +96,11 @@
 cpuid_t	m8820x_init(void);
 void	m8820x_cpu_configuration_print(int);
 void	m8820x_shutdown(void);
-void	m8820x_set_sapr(cpuid_t, apr_t);
+void	m8820x_set_sapr(apr_t);
 void	m8820x_set_uapr(apr_t);
 void	m8820x_flush_tlb(cpuid_t, u_int, vaddr_t, u_int);
 void	m8820x_flush_cache(cpuid_t, paddr_t, psize_t);
 void	m8820x_flush_inst_cache(cpuid_t, paddr_t, psize_t);
-void	m8820x_flush_data_page(cpuid_t, paddr_t);
 void	m8820x_dma_cachectl(pmap_t, vaddr_t, vsize_t, int);
 void	m8820x_dma_cachectl_pa(paddr_t, psize_t, int);
 void	m8820x_initialize_cpu(cpuid_t);
@@ -118,7 +117,6 @@ struct cmmu_p cmmu8820x = {
 	m8820x_flush_tlb,
 	m8820x_flush_cache,
 	m8820x_flush_inst_cache,
-	m8820x_flush_data_page,
 	m8820x_dma_cachectl,
 	m8820x_dma_cachectl_pa,
 #ifdef MULTIPROCESSOR
@@ -423,8 +421,7 @@ m8820x_initialize_cpu(cpuid_t cpu)
 		 * XXX Investigate why enabling parity at this point
 		 * doesn't work.
 		 */
-		sctr = cmmu->cmmu_regs[CMMU_SCTR] &
-		    ~(CMMU_SCTR_PE | CMMU_SCTR_SE | CMMU_SCTR_PR);
+		sctr = 0;
 #ifdef MULTIPROCESSOR
 		if (max_cpus > 1)
 			sctr |= CMMU_SCTR_SE;
@@ -465,8 +462,6 @@ m8820x_shutdown()
 
 	cmmu = m8820x_cmmu;
 	for (cmmu_num = 0; cmmu_num < max_cmmus; cmmu_num++, cmmu++) {
-		cmmu->cmmu_regs[CMMU_SCTR] &=
-		    ~(CMMU_SCTR_PE | CMMU_SCTR_SE | CMMU_SCTR_PR);
 		cmmu->cmmu_regs[CMMU_SAPR] = cmmu->cmmu_regs[CMMU_UAPR] =
 		    ((0x00000 << PG_BITS) | CACHE_INH) &
 		    ~(CACHE_WT | CACHE_GLOBAL | APR_V);
@@ -476,8 +471,10 @@ m8820x_shutdown()
 }
 
 void
-m8820x_set_sapr(cpuid_t cpu, apr_t ap)
+m8820x_set_sapr(apr_t ap)
 {
+	int cpu = cpu_number();
+
 	CMMU_LOCK;
 
 	m8820x_cmmu_set_reg(CMMU_SAPR, ap, 0, cpu, 0);
@@ -491,7 +488,8 @@ m8820x_set_uapr(apr_t ap)
 	u_int32_t psr;
 	int cpu = cpu_number();
 
-	disable_interrupt(psr);
+	psr = get_psr();
+	set_psr(psr | PSR_IND);
 	CMMU_LOCK;
 
 	m8820x_cmmu_set_reg(CMMU_UAPR, ap, 0, cpu, 0);
@@ -512,7 +510,8 @@ m8820x_flush_tlb(cpuid_t cpu, unsigned kernel, vaddr_t vaddr, u_int count)
 {
 	u_int32_t psr;
 
-	disable_interrupt(psr);
+	psr = get_psr();
+	set_psr(psr | PSR_IND);
 	CMMU_LOCK;
 
 	/*
@@ -528,12 +527,6 @@ m8820x_flush_tlb(cpuid_t cpu, unsigned kernel, vaddr_t vaddr, u_int count)
 		    kernel ? CMMU_FLUSH_SUPER_ALL : CMMU_FLUSH_USER_ALL,
 		    0, cpu, 0);
 		break;
-	case 3:
-		m8820x_cmmu_set_cmd(
-		    kernel ? CMMU_FLUSH_SUPER_PAGE : CMMU_FLUSH_USER_PAGE,
-		    ADDR_VAL, cpu, 0, vaddr);
-		vaddr += PAGE_SIZE;
-		/* FALLTHROUGH */
 	case 2:
 		m8820x_cmmu_set_cmd(
 		    kernel ? CMMU_FLUSH_SUPER_PAGE : CMMU_FLUSH_USER_PAGE,
@@ -580,7 +573,8 @@ m8820x_flush_cache(cpuid_t cpu, paddr_t pa, psize_t size)
 	size = round_cache_line(pa + size) - trunc_cache_line(pa);
 	pa = trunc_cache_line(pa);
 
-	disable_interrupt(psr);
+	psr = get_psr();
+	set_psr(psr | PSR_IND);
 	CMMU_LOCK;
 
 	while (size != 0) {
@@ -615,7 +609,8 @@ m8820x_flush_inst_cache(cpuid_t cpu, paddr_t pa, psize_t size)
 	size = round_cache_line(pa + size) - trunc_cache_line(pa);
 	pa = trunc_cache_line(pa);
 
-	disable_interrupt(psr);
+	psr = get_psr();
+	set_psr(psr | PSR_IND);
 	CMMU_LOCK;
 
 	while (size != 0) {
@@ -632,22 +627,6 @@ m8820x_flush_inst_cache(cpuid_t cpu, paddr_t pa, psize_t size)
 		pa += count;
 		size -= count;
 	}
-	m8820x_cmmu_wait(cpu);
-
-	CMMU_UNLOCK;
-	set_psr(psr);
-}
-
-void
-m8820x_flush_data_page(cpuid_t cpu, paddr_t pa)
-{
-	u_int32_t psr;
-
-	disable_interrupt(psr);
-	CMMU_LOCK;
-
-	m8820x_cmmu_set_cmd(CMMU_FLUSH_CACHE_CBI_PAGE,
-	    MODE_VAL /* | ADDR_VAL */, cpu, DATA_CMMU, pa);
 	m8820x_cmmu_wait(cpu);
 
 	CMMU_UNLOCK;
@@ -700,11 +679,22 @@ m8820x_cmmu_inval_cache(int cpu, paddr_t pa, psize_t size)
 	m8820x_cmmu_wait(cpu);
 }
 
+/*
+ * High level cache handling functions (used by bus_dma).
+ *
+ * On multiprocessor systems, since the CMMUs snoop each other, they
+ * all have a coherent view of the data. Thus, we only need to writeback
+ * on a single CMMU. However, invalidations need to be done on all CMMUs.
+ */
+
 void
 m8820x_dma_cachectl(pmap_t pmap, vaddr_t _va, vsize_t _size, int op)
 {
 	u_int32_t psr;
-	int cpu = cpu_number();
+	int cpu;
+#ifdef MULTIPROCESSOR
+	struct cpu_info *ci = curcpu();
+#endif
 	vaddr_t va;
 	paddr_t pa;
 	psize_t size, count;
@@ -728,17 +718,44 @@ m8820x_dma_cachectl(pmap_t pmap, vaddr_t _va, vsize_t _size, int op)
 		break;
 	}
 
-	disable_interrupt(psr);
+#ifndef MULTIPROCESSOR
+	cpu = cpu_number();
+#endif
+
+	psr = get_psr();
+	set_psr(psr | PSR_IND);
 	CMMU_LOCK;
 
+	pa = 0;
 	while (size != 0) {
 		count = (va & PAGE_MASK) == 0 && size >= PAGE_SIZE ?
 		    PAGE_SIZE : MC88200_CACHE_LINE;
 
-		if (pmap_extract(pmap, va, &pa) != FALSE)
-			(*flusher)(cpu, pa, count);
+		if ((va & PAGE_MASK) == 0 || pa == 0) {
+			if (pmap_extract(pmap, va, &pa) == FALSE)
+				panic("pmap_extract(%p, %p) failed", pmap, va);
+		}
+
+#ifdef MULTIPROCESSOR
+		/* writeback on a single cpu... */
+		(*flusher)(ci->ci_cpuid, pa, count);
+
+		/* invalidate on all... */
+		if (flusher != m8820x_cmmu_sync_cache) {
+			for (cpu = 0; cpu < MAX_CPUS; cpu++) {
+				if (!ISSET(m88k_cpus[cpu].ci_flags, CIF_ALIVE))
+					continue;
+				if (cpu == ci->ci_cpuid)
+					continue;
+				m8820x_cmmu_inval_cache(cpu, pa, count);
+			}
+		}
+#else	/* MULTIPROCESSOR */
+		(*flusher)(cpu, pa, count);
+#endif	/* MULTIPROCESSOR */
 
 		va += count;
+		pa += count;
 		size -= count;
 	}
 
@@ -750,7 +767,10 @@ void
 m8820x_dma_cachectl_pa(paddr_t _pa, psize_t _size, int op)
 {
 	u_int32_t psr;
-	int cpu = cpu_number();
+	int cpu;
+#ifdef MULTIPROCESSOR
+	struct cpu_info *ci = curcpu();
+#endif
 	paddr_t pa;
 	psize_t size, count;
 	void (*flusher)(int, paddr_t, psize_t);
@@ -773,14 +793,36 @@ m8820x_dma_cachectl_pa(paddr_t _pa, psize_t _size, int op)
 		break;
 	}
 
-	disable_interrupt(psr);
+#ifndef MULTIPROCESSOR
+	cpu = cpu_number();
+#endif
+
+	psr = get_psr();
+	set_psr(psr | PSR_IND);
 	CMMU_LOCK;
 
 	while (size != 0) {
 		count = (pa & PAGE_MASK) == 0 && size >= PAGE_SIZE ?
 		    PAGE_SIZE : MC88200_CACHE_LINE;
 
+#ifdef MULTIPROCESSOR
+		/* writeback on a single cpu... */
+		(*flusher)(ci->ci_cpuid, pa, count);
+
+		/* invalidate on all... */
+		if (flusher != m8820x_cmmu_sync_cache) {
+			for (cpu = 0; cpu < MAX_CPUS; cpu++) {
+				if (!ISSET(m88k_cpus[cpu].ci_flags,
+				    CIF_ALIVE))
+					continue;
+				if (cpu == ci->ci_cpuid)
+					continue;
+				m8820x_cmmu_inval_cache(cpu, pa, count);
+			}
+		}
+#else	/* MULTIPROCESSOR */
 		(*flusher)(cpu, pa, count);
+#endif	/* MULTIPROCESSOR */
 
 		pa += count;
 		size -= count;

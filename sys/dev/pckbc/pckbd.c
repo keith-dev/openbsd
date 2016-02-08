@@ -1,4 +1,4 @@
-/* $OpenBSD: pckbd.c,v 1.9 2007/01/30 20:45:05 jcs Exp $ */
+/* $OpenBSD: pckbd.c,v 1.13 2007/12/31 17:08:07 miod Exp $ */
 /* $NetBSD: pckbd.c,v 1.24 2000/06/05 22:20:57 sommerfeld Exp $ */
 
 /*-
@@ -83,12 +83,7 @@
 
 #include <machine/bus.h>
 
-#ifndef __sparc64__
-#include <dev/isa/isavar.h>		/* XXX XXX XXX */
-#endif
-
 #include <dev/ic/pckbcvar.h>
-
 #include <dev/pckbc/pckbdreg.h>
 #include <dev/pckbc/pckbdvar.h>
 #include <dev/pckbc/wskbdmap_mfii.h>
@@ -124,7 +119,9 @@ struct pckbd_softc {
 
 	struct device *sc_wskbddev;
 #ifdef WSDISPLAY_COMPAT_RAWKBD
-	int rawkbd;
+	int	rawkbd;
+	u_int	sc_rawcnt;
+	char	sc_rawbuf[3];
 #endif
 };
 
@@ -211,15 +208,14 @@ pckbd_set_xtscancode(kbctag, kbcslot)
 #endif
 		cmd[0] = KBC_SETTABLE;
 		cmd[1] = table;
-		if (pckbc_poll_cmd(kbctag, kbcslot, cmd, 2, 0, 0, 0)) {
-			u_char cmd[1];
+		if (pckbc_poll_cmd(kbctag, kbcslot, cmd, 2, 0, NULL, 0)) {
 #ifdef DEBUG
 			printf("pckbd: table set of %d failed\n", table);
 #endif
 			if (table > 1) {
 				cmd[0] = KBC_RESET;
 				(void)pckbc_poll_cmd(kbctag, kbcslot, cmd,
-				    1, 1, 0, 1);
+				    1, 1, NULL, 1);
 				pckbc_flush(kbctag, kbcslot);
 
 				continue;
@@ -232,7 +228,7 @@ pckbd_set_xtscancode(kbctag, kbcslot)
 		 * table it reports it's in.
 		 */
 		if (table == 3) {
-			u_char cmd[1], resp[0];
+			u_char resp[1];
 
 			cmd[0] = KBC_SETTABLE;
 			cmd[1] = 0;
@@ -359,7 +355,7 @@ pckbdattach(parent, self, aux)
 		 */
 		cmd[0] = KBC_ENABLE;
 		(void) pckbc_poll_cmd(sc->id->t_kbctag, sc->id->t_kbcslot,
-		    cmd, 1, 0, 0, 0);
+		    cmd, 1, 0, NULL, 0);
 		sc->sc_enabled = 1;
 	} else {
 		sc->id = malloc(sizeof(struct pckbd_internal),
@@ -369,7 +365,7 @@ pckbdattach(parent, self, aux)
 		/* no interrupts until enabled */
 		cmd[0] = KBC_DISABLE;
 		(void) pckbc_poll_cmd(sc->id->t_kbctag, sc->id->t_kbcslot,
-				      cmd, 1, 0, 0, 0);
+				      cmd, 1, 0, NULL, 0);
 		sc->sc_enabled = 0;
 	}
 
@@ -567,16 +563,28 @@ pckbd_input(vsc, data)
 	int data;
 {
 	struct pckbd_softc *sc = vsc;
-	int type, key;
+	int rc, type, key;
+
+	rc = pckbd_decode(sc->id, data, &type, &key);
 
 #ifdef WSDISPLAY_COMPAT_RAWKBD
 	if (sc->rawkbd) {
-		char d = data;
-		wskbd_rawinput(sc->sc_wskbddev, &d, 1);
-		return;
+		sc->sc_rawbuf[sc->sc_rawcnt++] = (char)data;
+
+		if (rc != 0 || sc->sc_rawcnt == sizeof(sc->sc_rawbuf)) {
+			wskbd_rawinput(sc->sc_wskbddev, sc->sc_rawbuf,
+			    sc->sc_rawcnt);
+			sc->sc_rawcnt = 0;
+		}
+
+		/*
+		 * Pass audio keys to wskbd_input anyway.
+		 */
+		if (rc == 0 || (key != 160 && key != 174 && key != 176))
+			return;
 	}
 #endif
-	if (pckbd_decode(sc->id, data, &type, &key))
+	if (rc != 0)
 		wskbd_input(sc->sc_wskbddev, type, key);
 }
 
@@ -664,7 +672,7 @@ pckbd_cnattach(kbctag, kbcslot)
 
 	/* Just to be sure. */
 	cmd[0] = KBC_ENABLE;
-	res = pckbc_poll_cmd(kbctag, kbcslot, cmd, 1, 0, 0, 0);
+	res = pckbc_poll_cmd(kbctag, kbcslot, cmd, 1, 0, NULL, 0);
 #if 0
 	if (res)
 		return (res);

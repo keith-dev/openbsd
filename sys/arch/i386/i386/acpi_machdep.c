@@ -1,4 +1,4 @@
-/*	$OpenBSD: acpi_machdep.c,v 1.6 2007/05/29 08:22:14 gwk Exp $	*/
+/*	$OpenBSD: acpi_machdep.c,v 1.12 2008/02/05 22:00:54 marco Exp $	*/
 /*
  * Copyright (c) 2005 Thorsten Lockert <tholo@sigmasoft.com>
  *
@@ -24,6 +24,8 @@
 #include <uvm/uvm_extern.h>
 
 #include <machine/bus.h>
+#include <machine/conf.h>
+#include <machine/acpiapm.h>
 #include <i386/isa/isa_machdep.h>
 
 #include <dev/isa/isareg.h>
@@ -98,7 +100,7 @@ acpi_scan(struct acpi_mem_map *handle, paddr_t pa, size_t len)
 			if (rsdp->revision == 0 &&
 			    acpi_checksum(ptr, sizeof(struct acpi_rsdp1)) == 0)
 				return (ptr);
-			else if (rsdp->revision == 2 &&
+			else if (rsdp->revision >= 2 && rsdp->revision <= 3 &&
 			    acpi_checksum(ptr, sizeof(struct acpi_rsdp)) == 0)
 				return (ptr);
 		}
@@ -108,16 +110,16 @@ acpi_scan(struct acpi_mem_map *handle, paddr_t pa, size_t len)
 }
 
 int
-acpi_probe(struct device *parent, struct cfdata *match, struct acpi_attach_args *aaa)
+acpi_probe(struct device *parent, struct cfdata *match, struct bios_attach_args *ba)
 {
 	struct acpi_mem_map handle;
 	u_int8_t *ptr;
 	paddr_t ebda;
 #if NAPM > 0
 	extern int apm_attached;
-	
+
 	if (apm_attached)
-		return (0);	
+		return (0);
 #endif
 #if NBIOS > 0
 	{
@@ -161,7 +163,7 @@ acpi_probe(struct device *parent, struct cfdata *match, struct acpi_attach_args 
 	return (0);
 
 havebase:
-	aaa->aaa_pbase = ptr - handle.va + handle.pa;
+	ba->ba_acpipbase = ptr - handle.va + handle.pa;
 	acpi_unmap(&handle);
 
 	return (1);
@@ -170,8 +172,13 @@ havebase:
 void
 acpi_attach_machdep(struct acpi_softc *sc)
 {
-#ifdef ACPI_ENABLE
+	extern void (*cpuresetfn)(void);
+
 	sc->sc_interrupt = isa_intr_establish(NULL, sc->sc_fadt->sci_int,
-	    IST_LEVEL, IPL_TTY, acpi_interrupt, sc, "acpi");
-#endif
+	    IST_LEVEL, IPL_TTY, acpi_interrupt, sc, sc->sc_dev.dv_xname);
+	acpiapm_open = acpiopen;
+	acpiapm_close = acpiclose;
+	acpiapm_ioctl = acpiioctl;
+	acpiapm_kqfilter = acpikqfilter;
+	cpuresetfn = acpi_reset;
 }

@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_axe.c,v 1.78 2007/06/14 10:11:15 mbalmer Exp $	*/
+/*	$OpenBSD: if_axe.c,v 1.82 2008/02/22 12:42:40 jsg Exp $	*/
 
 /*
  * Copyright (c) 2005, 2006, 2007 Jonathan Gray <jsg@openbsd.org>
@@ -162,6 +162,7 @@ const struct axe_type axe_devs[] = {
 	{ { USB_VENDOR_JVC, USB_PRODUCT_JVC_MP_PRX1}, 0 },
 	{ { USB_VENDOR_LINKSYS2, USB_PRODUCT_LINKSYS2_USB200M}, 0 },
 	{ { USB_VENDOR_LINKSYS4, USB_PRODUCT_LINKSYS4_USB1000 }, AX178 },
+	{ { USB_VENDOR_LOGITEC, USB_PRODUCT_LOGITEC_LAN_GTJU2}, AX178 },
 	{ { USB_VENDOR_MELCO, USB_PRODUCT_MELCO_LUAU2KTX}, 0 },
 	{ { USB_VENDOR_NETGEAR, USB_PRODUCT_NETGEAR_FA120}, 0 },
 	{ { USB_VENDOR_OQO, USB_PRODUCT_OQO_ETHER01PLUS }, AX772 },
@@ -583,21 +584,16 @@ axe_attach(struct device *parent, struct device *self, void *aux)
 	usb_endpoint_descriptor_t *ed;
 	struct mii_data	*mii;
 	u_char eaddr[ETHER_ADDR_LEN];
-	char *devinfop;
 	char *devname = sc->axe_dev.dv_xname;
 	struct ifnet *ifp;
 	int i, s;
-
-	devinfop = usbd_devinfo_alloc(dev, 0);
-	printf("\n");
 
 	sc->axe_unit = self->dv_unit; /*device_get_unit(self);*/
 
 	err = usbd_set_config_no(dev, AXE_CONFIG_NO, 1);
 	if (err) {
-		printf("axe%d: getting interface handle failed\n",
-		    sc->axe_unit);
-		usbd_devinfo_free(devinfop);
+		printf("%s: getting interface handle failed\n",
+		    sc->axe_dev.dv_xname);
 		return;
 	}
 
@@ -609,9 +605,8 @@ axe_attach(struct device *parent, struct device *self, void *aux)
 
 	err = usbd_device2interface_handle(dev, AXE_IFACE_IDX, &sc->axe_iface);
 	if (err) {
-		printf("axe%d: getting interface handle failed\n",
-		    sc->axe_unit);
-		usbd_devinfo_free(devinfop);
+		printf("%s: getting interface handle failed\n",
+		    sc->axe_dev.dv_xname);
 		return;
 	}
 
@@ -620,9 +615,6 @@ axe_attach(struct device *parent, struct device *self, void *aux)
 	sc->axe_vendor = uaa->vendor;
 
 	id = usbd_get_interface_descriptor(sc->axe_iface);
-
-	printf("%s: %s", sc->axe_dev.dv_xname, devinfop);
-	usbd_devinfo_free(devinfop);
 
 	/* decide on what our bufsize will be */
 	if (sc->axe_flags & AX178 || sc->axe_flags & AX772)
@@ -635,7 +627,8 @@ axe_attach(struct device *parent, struct device *self, void *aux)
 	for (i = 0; i < id->bNumEndpoints; i++) {
 		ed = usbd_interface2endpoint_descriptor(sc->axe_iface, i);
 		if (!ed) {
-			printf(" couldn't get ep %d\n", i);
+			printf("%s: couldn't get ep %d\n",
+			    sc->axe_dev.dv_xname, i);
 			return;
 		}
 		if (UE_GET_DIR(ed->bEndpointAddress) == UE_DIR_IN &&
@@ -652,6 +645,8 @@ axe_attach(struct device *parent, struct device *self, void *aux)
 
 	s = splnet();
 
+	printf("%s:", sc->axe_dev.dv_xname);
+
 	/* We need the PHYID for init dance in some cases */
 	axe_cmd(sc, AXE_CMD_READ_PHYID, 0, 0, (void *)&sc->axe_phyaddrs);
 
@@ -660,12 +655,12 @@ axe_attach(struct device *parent, struct device *self, void *aux)
 
 	if (sc->axe_flags & AX178) {
 		axe_ax88178_init(sc);
-		printf(", AX88178");
+		printf(" AX88178");
 	} else if (sc->axe_flags & AX772) {
 		axe_ax88772_init(sc);
-		printf(", AX88772");
+		printf(" AX88772");
 	} else
-		printf(", AX88172");
+		printf(" AX88172");
 
 	/*
 	 * Get station address.
@@ -729,7 +724,7 @@ axe_attach(struct device *parent, struct device *self, void *aux)
 	if_attach(ifp);
 	ether_ifattach(ifp);
 
-	timeout_set(&sc->axe_stat_ch, NULL, NULL);
+	timeout_set(&sc->axe_stat_ch, axe_tick, sc);
 
 	sc->axe_attached = 1;
 	splx(s);
@@ -1126,8 +1121,6 @@ axe_tick_task(void *xsc)
 			   axe_start(ifp);
 	}
 
-	timeout_del(&sc->axe_stat_ch);
-	timeout_set(&sc->axe_stat_ch, axe_tick, sc);
 	timeout_add(&sc->axe_stat_ch, hz);
 
 	splx(s);
@@ -1327,8 +1320,6 @@ axe_init(void *xsc)
 
 	splx(s);
 
-	timeout_del(&sc->axe_stat_ch);
-	timeout_set(&sc->axe_stat_ch, axe_tick, sc);
 	timeout_add(&sc->axe_stat_ch, hz);
 	return;
 }

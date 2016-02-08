@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.93 2007/08/04 16:44:15 kettenis Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.105 2008/01/04 00:40:38 kettenis Exp $	*/
 /*	$NetBSD: machdep.c,v 1.108 2001/07/24 19:30:14 eeh Exp $ */
 
 /*-
@@ -136,6 +136,9 @@ int     _bus_dmamap_load_uio(bus_dma_tag_t, bus_dma_tag_t, bus_dmamap_t,
             struct uio *, int);
 int     _bus_dmamap_load_raw(bus_dma_tag_t, bus_dma_tag_t, bus_dmamap_t,
             bus_dma_segment_t *, int, bus_size_t, int);
+int	_bus_dmamap_load_buffer(bus_dma_tag_t, bus_dmamap_t, void *,
+	    bus_size_t, struct proc *, int, bus_addr_t *, int *, int);
+
 void    _bus_dmamap_unload(bus_dma_tag_t, bus_dma_tag_t, bus_dmamap_t);
 void    _bus_dmamap_sync(bus_dma_tag_t, bus_dma_tag_t, bus_dmamap_t,
 	    bus_addr_t, bus_size_t, int);
@@ -246,8 +249,8 @@ cpu_startup()
 	 */
 	printf(version);
 	/*identifycpu();*/
-	printf("real mem = %lu (%luMB)\n", ctob(physmem),
-	    ctob(physmem)/1024/1024);
+	printf("real mem = %lu (%luMB)\n", ptoa((psize_t)physmem),
+	    ptoa((psize_t)physmem)/1024/1024);
 	/*
 	 * Find out how much space we need, allocate it,
 	 * and then give everything true virtual addresses.
@@ -276,8 +279,8 @@ cpu_startup()
 #ifdef DEBUG
 	pmapdebug = opmapdebug;
 #endif
-	printf("avail mem = %lu (%luMB)\n", ptoa(uvmexp.free),
-	    ptoa(uvmexp.free)/1024/1024);
+	printf("avail mem = %lu (%luMB)\n", ptoa((psize_t)uvmexp.free),
+	    ptoa((psize_t)uvmexp.free)/1024/1024);
 
 	/*
 	 * Set up buffers, so they can be used to read disk labels.
@@ -322,7 +325,6 @@ setregs(p, pack, stack, retval)
 	register_t *retval;
 {
 	struct trapframe64 *tf = p->p_md.md_tf;
-	struct fpstate64 *fs;
 	int64_t tstate;
 	int pstate = PSTATE_USER;
 	Elf_Ehdr *eh = pack->ep_hdr;
@@ -376,20 +378,16 @@ setregs(p, pack, stack, retval)
 		break;
 	}
 
-	tstate = (ASI_PRIMARY_NO_FAULT<<TSTATE_ASI_SHIFT) |
-		((pstate)<<TSTATE_PSTATE_SHIFT) | 
-		(tf->tf_tstate & TSTATE_CWP);
-	if ((fs = p->p_md.md_fpstate) != NULL) {
+	tstate = ((u_int64_t)ASI_PRIMARY_NO_FAULT << TSTATE_ASI_SHIFT) |
+	    (pstate << TSTATE_PSTATE_SHIFT) | (tf->tf_tstate & TSTATE_CWP);
+	if (p->p_md.md_fpstate != NULL) {
 		/*
 		 * We hold an FPU state.  If we own *the* FPU chip state
 		 * we must get rid of it, and the only way to do that is
 		 * to save it.  In any case, get rid of our FPU state.
 		 */
-		if (p == fpproc) {
-			savefpstate(fs);
-			fpproc = NULL;
-		}
-		free((void *)fs, M_SUBPROC);
+		fpusave_proc(p, 0);
+		free(p->p_md.md_fpstate, M_SUBPROC);
 		p->p_md.md_fpstate = NULL;
 	}
 	bzero((caddr_t)tf, sizeof *tf);
@@ -450,7 +448,7 @@ cpu_sysctl(name, namelen, oldp, oldlenp, newp, newlen, p)
 		ret = sysctl_int(oldp, oldlenp, newp, newlen,
 		    &sparc_led_blink);
 		/*
-		 * If we were false and are now true, call start the timer.
+		 * If we were false and are now true, start the timer.
 		 */
 		if (!oldval && sparc_led_blink > oldval)
 			blink_led_timeout(NULL);
@@ -669,6 +667,21 @@ sys_sigreturn(p, v, retval)
 	p->p_sigmask = scp->sc_mask & ~sigcantmask;
 
 	return (EJUSTRETURN);
+}
+
+/*
+ * Notify the current process (p) that it has a signal pending,
+ * process as soon as possible.
+ */
+void
+signotify(struct proc *p)
+{
+	aston(p);
+#ifdef MULTIPROCESSOR
+	/* Send IPI if necessary. */
+	if (p->p_cpu != curcpu() && p->p_cpu != NULL)
+		smp_signotify(p);
+#endif
 }
 
 int	waittime = -1;
@@ -1031,11 +1044,10 @@ _bus_dmamap_create(t, t0, size, nsegments, maxsegsz, boundary, flags, dmamp)
 	 */
 	mapsize = sizeof(struct sparc_bus_dmamap) +
 	    (sizeof(bus_dma_segment_t) * (nsegments - 1));
-	if ((mapstore = malloc(mapsize, M_DEVBUF,
-	    (flags & BUS_DMA_NOWAIT) ? M_NOWAIT : M_WAITOK)) == NULL)
+	if ((mapstore = malloc(mapsize, M_DEVBUF, (flags & BUS_DMA_NOWAIT) ?
+	    (M_NOWAIT | M_ZERO) : (M_WAITOK | M_ZERO))) == NULL)
 		return (ENOMEM);
 
-	bzero(mapstore, mapsize);
 	map = (struct sparc_bus_dmamap *)mapstore;
 	map->_dm_size = size;
 	map->_dm_segcnt = nsegments;
@@ -1093,49 +1105,26 @@ _bus_dmamap_load(t, t0, map, buf, buflen, p, flags)
 	struct proc *p;
 	int flags;
 {
-	bus_size_t sgsize;
-	vaddr_t vaddr = (vaddr_t)buf;
-	int i;
+	bus_addr_t lastaddr;
+	int seg, error;
 
 	/*
 	 * Make sure that on error condition we return "no valid mappings".
 	 */
+	map->dm_mapsize = 0;
 	map->dm_nsegs = 0;
 
 	if (buflen > map->_dm_size)
-		return (EFBIG);
+		return (EINVAL);
 
-	sgsize = round_page(buflen + ((int)vaddr & PGOFSET));
-
-	/*
-	 * We always use just one segment.
-	 */
-	map->dm_mapsize = buflen;
-	i = 0;
-	map->dm_segs[i].ds_addr = NULL;
-	map->dm_segs[i].ds_len = 0;
-	while (sgsize > 0 && i < map->_dm_segcnt) {
-		paddr_t pa;
-
-		(void) pmap_extract(pmap_kernel(), vaddr, &pa);
-		sgsize -= NBPG;
-		vaddr += NBPG;
-		if (map->dm_segs[i].ds_len == 0)
-			map->dm_segs[i].ds_addr = pa;
-		if (pa == (map->dm_segs[i].ds_addr + map->dm_segs[i].ds_len)
-		    && ((map->dm_segs[i].ds_len + NBPG) < map->_dm_maxsegsz)) {
-			/* Hey, waddyaknow, they're contiguous */
-			map->dm_segs[i].ds_len += NBPG;
-			continue;
-		}
-		map->dm_segs[++i].ds_addr = pa;
-		map->dm_segs[i].ds_len = NBPG;
+	seg = 0;
+	error = _bus_dmamap_load_buffer(t, map, buf, buflen, p, flags,
+	    &lastaddr, &seg, 1);
+	if (error == 0) {
+		map->dm_mapsize = buflen;
+		map->dm_nsegs = seg + 1;
 	}
-	/* Is this what the above comment calls "one segment"? */
-	map->dm_nsegs = i;
-
-	/* Mapping is bus dependent */
-	return (0);
+	return (error);
 }
 
 /*
@@ -1313,6 +1302,87 @@ _bus_dmamap_load_raw(t, t0, map, segs, nsegs, size, flags)
 	panic("_bus_dmamap_load_raw: not implemented");
 }
 
+int
+_bus_dmamap_load_buffer(bus_dma_tag_t t, bus_dmamap_t map, void *buf,
+    bus_size_t buflen, struct proc *p, int flags, bus_addr_t *lastaddrp,
+    int *segp, int first)
+{
+	bus_size_t sgsize;
+	bus_addr_t curaddr, lastaddr, baddr, bmask;
+	vaddr_t vaddr = (vaddr_t)buf;
+	int seg;
+	pmap_t pmap;
+
+	if (p != NULL)
+		pmap = p->p_vmspace->vm_map.pmap;
+	else
+		pmap = pmap_kernel();
+
+	lastaddr = *lastaddrp;
+	bmask  = ~(map->_dm_boundary - 1);
+
+	for (seg = *segp; buflen > 0 ; ) {
+		/*
+		 * Get the physical address for this segment.
+		 */
+		pmap_extract(pmap, vaddr, (paddr_t *)&curaddr);
+
+		/*
+		 * Compute the segment size, and adjust counts.
+		 */
+		sgsize = PAGE_SIZE - ((u_long)vaddr & PGOFSET);
+		if (buflen < sgsize)
+			sgsize = buflen;
+
+		/*
+		 * Make sure we don't cross any boundaries.
+		 */
+		if (map->_dm_boundary > 0) {
+			baddr = (curaddr + map->_dm_boundary) & bmask;
+			if (sgsize > (baddr - curaddr))
+				sgsize = (baddr - curaddr);
+		}
+
+		/*
+		 * Insert chunk into a segment, coalescing with
+		 * previous segment if possible.
+		 */
+		if (first) {
+			map->dm_segs[seg].ds_addr = curaddr;
+			map->dm_segs[seg].ds_len = sgsize;
+			first = 0;
+		} else {
+			if (curaddr == lastaddr &&
+			    (map->dm_segs[seg].ds_len + sgsize) <=
+			     map->_dm_maxsegsz &&
+			    (map->_dm_boundary == 0 ||
+			     (map->dm_segs[seg].ds_addr & bmask) ==
+			     (curaddr & bmask)))
+				map->dm_segs[seg].ds_len += sgsize;
+			else {
+				if (++seg >= map->_dm_segcnt)
+					break;
+				map->dm_segs[seg].ds_addr = curaddr;
+				map->dm_segs[seg].ds_len = sgsize;
+			}
+		}
+
+		lastaddr = curaddr + sgsize;
+		vaddr += sgsize;
+		buflen -= sgsize;
+	}
+
+	*segp = seg;
+	*lastaddrp = lastaddr;
+
+	/*
+	 * Did we fit?
+	 */
+	if (buflen != 0)
+		return (EFBIG);		/* XXX better return value here? */
+	return (0);
+}
+
 /*
  * Common function for unloading a DMA map.  May be called by
  * bus-specific DMA map unload functions.
@@ -1394,7 +1464,7 @@ _bus_dmamem_alloc(t, t0, size, alignment, boundary, segs, nsegs, rsegs, flags)
 	 * Compute the location, size, and number of segments actually
 	 * returned by the VM code.
 	 */
-	segs[0].ds_addr = NULL; /* UPA does not map things */
+	segs[0].ds_addr = 0UL; /* UPA does not map things */
 	segs[0].ds_len = size;
 	*rsegs = 1;
 
@@ -1506,7 +1576,7 @@ _bus_dmamem_unmap(t, t0, kva, size)
 }
 
 /*
- * Common functin for mmap(2)'ing DMA-safe memory.  May be called by
+ * Common function for mmap(2)'ing DMA-safe memory.  May be called by
  * bus-specific DMA mmap(2)'ing functions.
  */
 paddr_t
@@ -1797,11 +1867,9 @@ bus_intr_allocate(bus_space_tag_t t, int (*handler)(void *), void *arg,
 {
 	struct intrhand *ih;
 
-	ih = (struct intrhand *)malloc(sizeof(struct intrhand), M_DEVBUF, M_NOWAIT);
+	ih = malloc(sizeof(*ih), M_DEVBUF, M_NOWAIT | M_ZERO);
 	if (ih == NULL)
 		return (NULL);
-
-	memset(ih, 0, sizeof(struct intrhand));
 
 	ih->ih_fun = handler;
 	ih->ih_arg = arg;

@@ -1,4 +1,4 @@
-/*	$OpenBSD: rcsnum.c,v 1.45 2007/05/29 00:19:10 ray Exp $	*/
+/*	$OpenBSD: rcsnum.c,v 1.52 2008/03/01 20:03:56 joris Exp $	*/
 /*
  * Copyright (c) 2004 Jean-Francois Brousseau <jfb@openbsd.org>
  * All rights reserved.
@@ -32,8 +32,6 @@
 static void	 rcsnum_setsize(RCSNUM *, u_int);
 static char	*rcsnum_itoa(u_int16_t, char *, size_t);
 
-int rcsnum_flags;
-
 /*
  * rcsnum_alloc()
  *
@@ -52,6 +50,24 @@ rcsnum_alloc(void)
 }
 
 /*
+ * rcsnum_addmagic()
+ *
+ * Adds a magic branch number to an RCS number.
+ * Returns 0 on success, or -1 on failure.
+ */
+int
+rcsnum_addmagic(RCSNUM *rn)
+{
+	if (!rn->rn_len || rn->rn_len > RCSNUM_MAXLEN - 1)
+		return -1;
+	rcsnum_setsize(rn, rn->rn_len + 1);
+	rn->rn_id[rn->rn_len - 1] = rn->rn_id[rn->rn_len - 2];
+	rn->rn_id[rn->rn_len - 2] = 0;
+
+	return 0;
+}
+
+/*
  * rcsnum_parse()
  *
  * Parse a string specifying an RCS number and return the corresponding RCSNUM.
@@ -66,8 +82,6 @@ rcsnum_parse(const char *str)
 	if (rcsnum_aton(str, &ep, num) < 0 || *ep != '\0') {
 		rcsnum_free(num);
 		num = NULL;
-		if (*ep != '\0')
-			rcs_errno = RCS_ERR_BADNUM;
 	}
 
 	return (num);
@@ -226,10 +240,8 @@ rcsnum_aton(const char *str, char **ep, RCSNUM *nump)
 			break;
 
 		if (*sp == '.') {
-			if (nump->rn_len >= RCSNUM_MAXLEN - 1) {
-				rcs_errno = RCS_ERR_BADNUM;
+			if (nump->rn_len >= RCSNUM_MAXLEN - 1)
 				goto rcsnum_aton_failed;
-			}
 
 			nump->rn_len++;
 			nump->rn_id = xrealloc(nump->rn_id,
@@ -269,8 +281,7 @@ rcsnum_aton(const char *str, char **ep, RCSNUM *nump)
 	 * completely insane and not understandable reason in that output.
 	 *
 	 */
-	if (nump->rn_len > 2 && nump->rn_id[nump->rn_len - 1] == 0
-	    && !(rcsnum_flags & RCSNUM_NO_MAGIC)) {
+	if (nump->rn_len > 2 && nump->rn_id[nump->rn_len - 1] == 0) {
 		/*
 		 * Look for ".0.x" at the end of the branch number.
 		 */
@@ -284,7 +295,7 @@ rcsnum_aton(const char *str, char **ep, RCSNUM *nump)
 			 * so the .0. is removed.
 			 */
 			if (!strncmp(s, RCS_MAGIC_BRANCH,
-			    strlen(RCS_MAGIC_BRANCH))) {
+			    sizeof(RCS_MAGIC_BRANCH) - 1)) {
 				nump->rn_id[nump->rn_len - 1] =
 				    nump->rn_id[nump->rn_len];
 				nump->rn_len--;
@@ -294,10 +305,10 @@ rcsnum_aton(const char *str, char **ep, RCSNUM *nump)
 
 	/* We can't have a single-digit rcs number. */
 	if (nump->rn_len == 0) {
+		nump->rn_len++;
 		nump->rn_id = xrealloc(nump->rn_id,
 		    nump->rn_len + 1, sizeof(*(nump->rn_id)));
-		nump->rn_id[nump->rn_len + 1] = 0;
-		nump->rn_len++;
+		nump->rn_id[nump->rn_len] = 0;
 	}
 
 	nump->rn_len++;
@@ -387,6 +398,36 @@ rcsnum_brtorev(const RCSNUM *brnum)
 	num->rn_id[num->rn_len++] = 1;
 
 	return (num);
+}
+
+RCSNUM *
+rcsnum_new_branch(RCSNUM *rev)
+{
+	RCSNUM *branch;
+
+	if (rev->rn_len > RCSNUM_MAXLEN - 1)
+		return NULL;
+
+	branch = rcsnum_alloc();
+	rcsnum_cpy(rev, branch, 0);
+	rcsnum_setsize(branch, rev->rn_len + 1);
+	branch->rn_id[branch->rn_len - 1] = 2;
+
+	return branch;
+}
+
+RCSNUM *
+rcsnum_branch_root(RCSNUM *brev)
+{
+	RCSNUM *root;
+
+	if (!RCSNUM_ISBRANCHREV(brev))
+		fatal("rcsnum_branch_root: no revision on branch specified");
+
+	root = rcsnum_alloc();
+	rcsnum_cpy(brev, root, 0);
+	root->rn_len -= 2;
+	return (root);
 }
 
 static void

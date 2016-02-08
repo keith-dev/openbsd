@@ -1,4 +1,4 @@
-/*	$OpenBSD: ahci.c,v 1.128 2007/07/03 22:33:20 dlg Exp $ */
+/*	$OpenBSD: ahci.c,v 1.136 2007/11/28 16:01:34 dlg Exp $ */
 
 /*
  * Copyright (c) 2006 David Gwynne <dlg@openbsd.org>
@@ -24,6 +24,7 @@
 #include <sys/device.h>
 #include <sys/proc.h>
 #include <sys/queue.h>
+#include <sys/mutex.h>
 
 #include <machine/bus.h>
 
@@ -49,6 +50,8 @@ int ahcidebug = AHCI_D_VERBOSE;
 #endif
 
 #define AHCI_PCI_BAR		0x24
+#define AHCI_PCI_ATI_IXP600_MAGIC	0x40
+#define AHCI_PCI_ATI_IXP600_LOCKED	0x01
 #define AHCI_PCI_INTERFACE	0x01
 
 #define AHCI_REG_CAP		0x000 /* HBA Capabilities */
@@ -92,6 +95,7 @@ int ahcidebug = AHCI_D_VERBOSE;
 #define  AHCI_REG_VS_0_95		0x00000905 /* 0.95 */
 #define  AHCI_REG_VS_1_0		0x00010000 /* 1.0 */
 #define  AHCI_REG_VS_1_1		0x00010100 /* 1.1 */
+#define  AHCI_REG_VS_1_2		0x00010200 /* 1.2 */
 #define AHCI_REG_CCC_CTL	0x014 /* Coalescing Control */
 #define  AHCI_REG_CCC_CTL_INT(_r)	(((_r) & 0xf8) >> 3) /* CCC INT slot */
 #define AHCI_REG_CCC_PORTS	0x018 /* Coalescing Ports */
@@ -351,6 +355,7 @@ struct ahci_port {
 
 	TAILQ_HEAD(, ahci_ccb)	ap_ccb_free;
 	TAILQ_HEAD(, ahci_ccb)	ap_ccb_pending;
+	struct mutex		ap_ccb_mtx;
 
 	u_int32_t		ap_state;
 #define AP_S_NORMAL			0
@@ -386,6 +391,7 @@ struct ahci_softc {
 
 	int			sc_flags;
 #define AHCI_F_NO_NCQ			(1<<0)
+#define AHCI_F_IGN_FR			(1<<1)
 
 	u_int			sc_ncmds;
 
@@ -414,10 +420,14 @@ const struct ahci_device *ahci_lookup_device(struct pci_attach_args *);
 int			ahci_no_match(struct pci_attach_args *);
 int			ahci_vt8251_attach(struct ahci_softc *,
 			    struct pci_attach_args *);
+int			ahci_ati_ixp600_attach(struct ahci_softc *,
+			    struct pci_attach_args *);
 
 static const struct ahci_device ahci_devices[] = {
 	{ PCI_VENDOR_VIATECH,	PCI_PRODUCT_VIATECH_VT8251_SATA,
-	    ahci_no_match,	ahci_vt8251_attach }
+	    ahci_no_match,	ahci_vt8251_attach },
+	{ PCI_VENDOR_ATI,	PCI_PRODUCT_ATI_IXP_SATA_600,
+	    NULL,		ahci_ati_ixp600_attach }
 };
 
 int			ahci_pci_match(struct device *, void *, void *);
@@ -500,12 +510,14 @@ int			ahci_pwait_eq(struct ahci_port *, bus_size_t,
 
 /* provide methods for atascsi to call */
 int			ahci_ata_probe(void *, int);
+void			ahci_ata_free(void *, int);
 struct ata_xfer *	ahci_ata_get_xfer(void *, int);
 void			ahci_ata_put_xfer(struct ata_xfer *);
 int			ahci_ata_cmd(struct ata_xfer *);
 
 struct atascsi_methods ahci_atascsi_methods = {
 	ahci_ata_probe,
+	ahci_ata_free,
 	ahci_ata_get_xfer,
 	ahci_ata_cmd
 };
@@ -541,6 +553,33 @@ int
 ahci_vt8251_attach(struct ahci_softc *sc, struct pci_attach_args *pa)
 {
 	sc->sc_flags |= AHCI_F_NO_NCQ;
+
+	return (0);
+}
+
+int
+ahci_ati_ixp600_attach(struct ahci_softc *sc, struct pci_attach_args *pa)
+{
+	pcireg_t			magic;
+
+	if (PCI_SUBCLASS(pa->pa_class) == PCI_SUBCLASS_MASS_STORAGE_IDE) {
+		magic = pci_conf_read(pa->pa_pc, pa->pa_tag,
+		    AHCI_PCI_ATI_IXP600_MAGIC);
+		pci_conf_write(pa->pa_pc, pa->pa_tag,
+		    AHCI_PCI_ATI_IXP600_MAGIC,
+		    magic | AHCI_PCI_ATI_IXP600_LOCKED);
+
+		pci_conf_write(pa->pa_pc, pa->pa_tag, PCI_CLASS_REG,
+		    PCI_CLASS_MASS_STORAGE << PCI_CLASS_SHIFT |
+		    PCI_SUBCLASS_MASS_STORAGE_SATA << PCI_SUBCLASS_SHIFT |
+		    AHCI_PCI_INTERFACE << PCI_INTERFACE_SHIFT |
+		    PCI_REVISION(pa->pa_class) << PCI_REVISION_SHIFT);
+
+		pci_conf_write(pa->pa_pc, pa->pa_tag,
+		    AHCI_PCI_ATI_IXP600_MAGIC, magic);
+	}
+
+	sc->sc_flags |= AHCI_F_IGN_FR;
 
 	return (0);
 }
@@ -802,6 +841,9 @@ ahci_init(struct ahci_softc *sc)
 	case AHCI_REG_VS_1_1:
 		revision = "1.1";
 		break;
+	case AHCI_REG_VS_1_2:
+		revision = "1.2";
+		break;
 
 	default:
 		printf(" unsupported AHCI revision 0x%08x\n", reg);
@@ -824,13 +866,12 @@ ahci_port_alloc(struct ahci_softc *sc, u_int port)
 	struct ahci_cmd_table		*table;
 	int				i, rc = ENOMEM;
 
-	ap = malloc(sizeof(struct ahci_port), M_DEVBUF, M_NOWAIT);
+	ap = malloc(sizeof(*ap), M_DEVBUF, M_NOWAIT | M_ZERO);
 	if (ap == NULL) {
 		printf("%s: unable to allocate memory for port %d\n",
 		    DEVNAME(sc), port);
 		goto reterr;
 	}
-	bzero(ap, sizeof(struct ahci_port));
 
 #ifdef AHCI_DEBUG
 	snprintf(ap->ap_name, sizeof(ap->ap_name), "%s.%d",
@@ -851,6 +892,7 @@ ahci_port_alloc(struct ahci_softc *sc, u_int port)
 #endif
 	TAILQ_INIT(&ap->ap_ccb_free);
 	TAILQ_INIT(&ap->ap_ccb_pending);
+	mtx_init(&ap->ap_ccb_mtx, IPL_BIO);
 
 	/* Disable port interrupts */
 	ahci_pwrite(ap, AHCI_PREG_IE, 0);
@@ -899,13 +941,12 @@ ahci_port_alloc(struct ahci_softc *sc, u_int port)
 
 	/* Allocate a CCB for each command slot */
 	ap->ap_ccbs = malloc(sizeof(struct ahci_ccb) * sc->sc_ncmds, M_DEVBUF,
-	    M_NOWAIT);
+	    M_NOWAIT | M_ZERO);
 	if (ap->ap_ccbs == NULL) {
 		printf("%s: unable to allocate command list for port %d\n",
 		    DEVNAME(sc), port);
 		goto freeport;
 	}
-	bzero(ap->ap_ccbs, sizeof(struct ahci_ccb) * sc->sc_ncmds);
 
 	/* Command List Structures and Command Tables */
 	ap->ap_dmamem_cmd_list = ahci_dmamem_alloc(sc,
@@ -1085,9 +1126,11 @@ ahci_port_start(struct ahci_port *ap, int fre_only)
 	}
 #endif
 
-	/* Wait for FR to come on */
-	if (ahci_pwait_set(ap, AHCI_PREG_CMD, AHCI_PREG_CMD_FR))
-		return (2);
+	if (!(ap->ap_sc->sc_flags & AHCI_F_IGN_FR)) {
+		/* Wait for FR to come on */
+		if (ahci_pwait_set(ap, AHCI_PREG_CMD, AHCI_PREG_CMD_FR))
+			return (2);
+	}
 
 	/* Wait for CR to come on */
 	if (!fre_only && ahci_pwait_set(ap, AHCI_PREG_CMD, AHCI_PREG_CMD_CR))
@@ -1833,12 +1876,14 @@ ahci_get_ccb(struct ahci_port *ap)
 {
 	struct ahci_ccb			*ccb;
 
+	mtx_enter(&ap->ap_ccb_mtx);
 	ccb = TAILQ_FIRST(&ap->ap_ccb_free);
 	if (ccb != NULL) {
 		KASSERT(ccb->ccb_xa.state == ATA_S_PUT);
 		TAILQ_REMOVE(&ap->ap_ccb_free, ccb, ccb_entry);
 		ccb->ccb_xa.state = ATA_S_SETUP;
 	}
+	mtx_leave(&ap->ap_ccb_mtx);
 
 	return (ccb);
 }
@@ -1859,7 +1904,9 @@ ahci_put_ccb(struct ahci_ccb *ccb)
 #endif
 
 	ccb->ccb_xa.state = ATA_S_PUT;
+	mtx_enter(&ap->ap_ccb_mtx);
 	TAILQ_INSERT_TAIL(&ap->ap_ccb_free, ccb, ccb_entry);
+	mtx_leave(&ap->ap_ccb_mtx);
 }
 
 struct ahci_ccb *
@@ -2030,11 +2077,10 @@ ahci_dmamem_alloc(struct ahci_softc *sc, size_t size)
 	struct ahci_dmamem		*adm;
 	int				nsegs;
 
-	adm = malloc(sizeof(struct ahci_dmamem), M_DEVBUF, M_NOWAIT);
+	adm = malloc(sizeof(*adm), M_DEVBUF, M_NOWAIT | M_ZERO);
 	if (adm == NULL)
 		return (NULL);
 
-	bzero(adm, sizeof(struct ahci_dmamem));
 	adm->adm_size = size;
 
 	if (bus_dmamap_create(sc->sc_dmat, size, 1, size, 0,
@@ -2158,14 +2204,18 @@ ahci_ata_probe(void *xsc, int port)
 		return (ATA_PORT_T_DISK);
 }
 
+void
+ahci_ata_free(void *xsc, int port)
+{
+
+}
+
 struct ata_xfer *
 ahci_ata_get_xfer(void *aaa_cookie, int port)
 {
 	struct ahci_softc		*sc = aaa_cookie;
 	struct ahci_port		*ap = sc->sc_ports[port];
 	struct ahci_ccb			*ccb;
-
-	splassert(IPL_BIO);
 
 	ccb = ahci_get_ccb(ap);
 	if (ccb == NULL) {
@@ -2184,8 +2234,6 @@ void
 ahci_ata_put_xfer(struct ata_xfer *xa)
 {
 	struct ahci_ccb			*ccb = (struct ahci_ccb *)xa;
-
-	splassert(IPL_BIO);
 
 	DPRINTF(AHCI_D_XFER, "ahci_ata_put_xfer slot %d\n", ccb->ccb_slot);
 

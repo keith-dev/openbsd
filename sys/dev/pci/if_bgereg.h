@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_bgereg.h,v 1.72 2007/02/10 01:23:19 krw Exp $	*/
+/*	$OpenBSD: if_bgereg.h,v 1.81 2008/03/02 11:24:50 brad Exp $	*/
 
 /*
  * Copyright (c) 2001 Wind River Systems
@@ -280,10 +280,12 @@
 #define BGE_CHIPID_BCM5755_A0		0xa0000000
 #define BGE_CHIPID_BCM5755_A1		0xa0010000
 #define BGE_CHIPID_BCM5755_A2		0xa0020000
+#define BGE_CHIPID_BCM5755_C0		0xa2000000
 #define BGE_CHIPID_BCM5787_A0		0xb0000000
 #define BGE_CHIPID_BCM5787_A1		0xb0010000
 #define BGE_CHIPID_BCM5787_A2		0xb0020000
 #define BGE_CHIPID_BCM5906_A1		0xc0010000
+#define BGE_CHIPID_BCM5906_A2		0xc0020000
 
 /* shorthand one */
 #define BGE_ASICREV(x)			((x) >> 28)
@@ -359,7 +361,7 @@
 #define BGE_PCISTATE_FORCE_RESET	0x00000001
 #define BGE_PCISTATE_INTR_NOT_ACTIVE	0x00000002
 #define BGE_PCISTATE_PCI_BUSMODE	0x00000004 /* 1 = PCI, 0 = PCI-X */
-#define BGE_PCISTATE_PCI_BUSSPEED	0x00000008 /* 1 = 33/66, 0 = 66/133 */
+#define BGE_PCISTATE_PCI_BUSSPEED	0x00000008 /* 1 = 66/133, 0 = 33/66 */
 #define BGE_PCISTATE_32BIT_BUS		0x00000010 /* 1 = 32bit, 0 = 64bit */
 #define BGE_PCISTATE_WANT_EXPROM	0x00000020
 #define BGE_PCISTATE_EXPROM_RETRY	0x00000040
@@ -602,8 +604,7 @@
 #define BGE_SERDES_STS			0x0594
 #define BGE_SGDIG_CFG			0x05B0
 #define BGE_SGDIG_STS			0x05B4
-#define BGE_RX_STATS			0x0800
-#define BGE_TX_STATS			0x0880
+#define BGE_MAC_STATS			0x0800
 
 /* Ethernet MAC Mode register */
 #define BGE_MACMODE_RESET		0x00000001
@@ -1451,6 +1452,19 @@
 
 
 /*
+ * V? CPU registers
+ */
+#define BGE_VCPU_STATUS			0x5100
+#define BGE_VCPU_EXT_CTRL		0x6890
+
+#define BGE_VCPU_STATUS_INIT_DONE	0x04000000
+#define BGE_VCPU_STATUS_DRV_RESET 	0x08000000
+
+#define BGE_VCPU_EXT_CTRL_HALT_CPU	0x00400000
+#define BGE_VCPU_EXT_CTRL_DISABLE_WOL	0x20000000
+
+
+/*
  * TX CPU registers
  */
 #define BGE_TXCPU_MODE			0x5400
@@ -1695,6 +1709,58 @@
 #define BGE_EE_DELAY			0x6848
 
 #define BGE_FASTBOOT_PC			0x6894
+
+/*
+ * NVRAM Control registers
+ */
+
+#define BGE_NVRAM_CMD			0x7000
+#define BGE_NVRAM_STAT			0x7004
+#define BGE_NVRAM_WRDATA		0x7008
+#define BGE_NVRAM_ADDR			0x700c
+#define BGE_NVRAM_RDDATA		0x7010
+#define BGE_NVRAM_CFG1			0x7014
+#define BGE_NVRAM_CFG2			0x7018
+#define BGE_NVRAM_CFG3			0x701c
+#define BGE_NVRAM_SWARB			0x7020
+#define BGE_NVRAM_ACCESS		0x7024
+#define BGE_NVRAM_WRITE1		0x7028
+
+
+#define BGE_NVRAMCMD_RESET		0x00000001
+#define BGE_NVRAMCMD_DONE		0x00000008
+#define BGE_NVRAMCMD_START		0x00000010
+#define BGE_NVRAMCMD_WR			0x00000020 /* 1 = wr, 0 = rd */
+#define BGE_NVRAMCMD_ERASE		0x00000040
+#define BGE_NVRAMCMD_FIRST		0x00000080
+#define BGE_NVRAMCMD_LAST		0x00000100
+
+#define BGE_NVRAM_READCMD \
+	(BGE_NVRAMCMD_FIRST|BGE_NVRAMCMD_LAST| \
+	BGE_NVRAMCMD_START|BGE_NVRAMCMD_DONE)
+#define BGE_NVRAM_WRITECMD \
+	(BGE_NVRAMCMD_FIRST|BGE_NVRAMCMD_LAST| \
+	BGE_NVRAMCMD_START|BGE_NVRAMCMD_DONE|BGE_NVRAMCMD_WR)
+
+#define BGE_NVRAMSWARB_SET0		0x00000001
+#define BGE_NVRAMSWARB_SET1		0x00000002
+#define BGE_NVRAMSWARB_SET2		0x00000003
+#define BGE_NVRAMSWARB_SET3		0x00000004
+#define BGE_NVRAMSWARB_CLR0		0x00000010
+#define BGE_NVRAMSWARB_CLR1		0x00000020
+#define BGE_NVRAMSWARB_CLR2		0x00000040
+#define BGE_NVRAMSWARB_CLR3		0x00000080
+#define BGE_NVRAMSWARB_GNT0		0x00000100
+#define BGE_NVRAMSWARB_GNT1		0x00000200
+#define BGE_NVRAMSWARB_GNT2		0x00000400
+#define BGE_NVRAMSWARB_GNT3		0x00000800
+#define BGE_NVRAMSWARB_REQ0		0x00001000
+#define BGE_NVRAMSWARB_REQ1		0x00002000
+#define BGE_NVRAMSWARB_REQ2		0x00004000
+#define BGE_NVRAMSWARB_REQ3		0x00008000
+
+#define BGE_NVRAMACC_ENABLE		0x00000001
+#define BGE_NVRAMACC_WRENABLE		0x00000002
 
 /*
  * TLP Control Register
@@ -1988,6 +2054,7 @@ struct bge_status_block {
  * Offset of MAC address inside EEPROM.
  */
 #define BGE_EE_MAC_OFFSET		0x7C
+#define BGE_EE_MAC_OFFSET_5906		0x10
 #define BGE_EE_HWCFG_OFFSET		0xC8
 
 #define BGE_HWCFG_VOLTAGE		0x00000003
@@ -2212,8 +2279,8 @@ struct bge_gib {
  * boundary.
  */
 
-#define BGE_JUMBO_FRAMELEN	9018
-#define BGE_JUMBO_MTU		(BGE_JUMBO_FRAMELEN - ETHER_HDR_LEN - ETHER_CRC_LEN)
+#define BGE_JUMBO_FRAMELEN	9022
+#define BGE_JUMBO_MTU		(BGE_JUMBO_FRAMELEN - ETHER_HDR_LEN - ETHER_CRC_LEN - ETHER_VLAN_ENCAP_LEN)
 #define BGE_PAGE_SIZE		PAGE_SIZE
 
 /*
@@ -2361,21 +2428,22 @@ struct bge_softc {
 #define BGE_TXRING_VALID	0x00000001
 #define BGE_RXRING_VALID	0x00000002
 #define BGE_JUMBO_RXRING_VALID	0x00000004
-#define BGE_TBI			0x00000008
-#define BGE_RX_ALIGNBUG		0x00000010
-#define BGE_NO_3LED		0x00000020
-#define BGE_PCIX		0x00000040
-#define BGE_PCIE		0x00000080
-#define BGE_ASF_MODE		0x00000100
-#define BGE_NO_EEPROM		0x00000200
-#define BGE_JUMBO_CAP		0x00000400
-#define BGE_10_100_ONLY		0x00000800
-#define BGE_PHY_ADC_BUG		0x00001000
-#define BGE_PHY_5704_A0_BUG	0x00002000
-#define BGE_PHY_JITTER_BUG	0x00004000
-#define BGE_PHY_BER_BUG		0x00008000
-#define BGE_PHY_ADJUST_TRIM	0x00010000
-#define BGE_NO_ETH_WIRE_SPEED	0x00020000
+#define BGE_RX_ALIGNBUG		0x00000008
+#define BGE_NO_3LED		0x00000010
+#define BGE_PCIX		0x00000020
+#define BGE_PCIE		0x00000040
+#define BGE_ASF_MODE		0x00000080
+#define BGE_NO_EEPROM		0x00000100
+#define BGE_JUMBO_CAP		0x00000200
+#define BGE_10_100_ONLY		0x00000400
+#define BGE_PHY_FIBER_TBI	0x00000800
+#define BGE_PHY_FIBER_MII	0x00001000
+#define BGE_PHY_ADC_BUG		0x00002000
+#define BGE_PHY_5704_A0_BUG	0x00004000
+#define BGE_PHY_JITTER_BUG	0x00008000
+#define BGE_PHY_BER_BUG		0x00010000
+#define BGE_PHY_ADJUST_TRIM	0x00020000
+#define BGE_NO_ETH_WIRE_SPEED	0x00040000
 
 	bus_dma_tag_t		bge_dmatag;
 	u_int32_t		bge_chipid;
@@ -2397,17 +2465,24 @@ struct bge_softc {
 	u_int32_t		bge_rx_max_coal_bds;
 	u_int32_t		bge_tx_max_coal_bds;
 	u_int32_t		bge_tx_buf_ratio;
+	u_int32_t		bge_sts;
+#define BGE_STS_LINK		0x00000001	/* MAC link status */
+#define BGE_STS_LINK_EVT	0x00000002	/* pending link event */
+#define BGE_STS_AUTOPOLL	0x00000004	/* PHY auto-polling  */
+#define BGE_STS_BIT(sc, x)	((sc)->bge_sts & (x))
+#define BGE_STS_SETBIT(sc, x)	((sc)->bge_sts |= (x))
+#define BGE_STS_CLRBIT(sc, x)	((sc)->bge_sts &= ~(x))
 	int			bge_flowflags;
 	int			bge_if_flags;
 	int			bge_txcnt;
-	int			bge_link;	/* link state */
-	int			bge_link_evt;	/* pending link event */
 	struct timeout		bge_timeout;
 	void			*sc_powerhook;
 	void			*sc_shutdownhook;
-	u_long			bge_rx_discards;
-	u_long			bge_tx_discards;
-	u_long			bge_tx_collisions;
+	u_int32_t		bge_rx_discards;
+	u_int32_t		bge_tx_discards;
+	u_int32_t		bge_rx_inerrors;
+	u_int32_t		bge_rx_overruns;
+	u_int32_t		bge_tx_collisions;
 	SLIST_HEAD(, txdmamap_pool_entry) txdma_list;
 	struct txdmamap_pool_entry *txdma[BGE_TX_RING_CNT];
 };

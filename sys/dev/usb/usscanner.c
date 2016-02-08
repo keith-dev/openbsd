@@ -1,4 +1,4 @@
-/*	$OpenBSD: usscanner.c,v 1.22 2007/06/14 10:11:16 mbalmer Exp $	*/
+/*	$OpenBSD: usscanner.c,v 1.26 2007/10/20 04:37:54 krw Exp $	*/
 /*	$NetBSD: usscanner.c,v 1.6 2001/01/23 14:04:14 augustss Exp $	*/
 
 /*
@@ -57,7 +57,6 @@
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/kernel.h>
-#include <sys/malloc.h>
 #include <sys/device.h>
 #include <sys/conf.h>
 #include <sys/buf.h>
@@ -212,17 +211,12 @@ usscanner_attach(struct device *parent, struct device *self, void *aux)
 	struct scsibus_attach_args saa;
 	usbd_device_handle	dev = uaa->device;
 	usbd_interface_handle	iface;
-	char			*devinfop;
 	usbd_status		err;
 	usb_endpoint_descriptor_t *ed;
 	u_int8_t		epcount;
 	int			i;
 
 	DPRINTFN(10,("usscanner_attach: sc=%p\n", sc));
-
-	devinfop = usbd_devinfo_alloc(dev, 0);
-	printf("\n%s: %s\n", sc->sc_dev.dv_xname, devinfop);
-	usbd_devinfo_free(devinfop);
 
 	err = usbd_set_config_no(dev, USSCANNER_CONFIG_NO, 1);
 	if (err) {
@@ -501,7 +495,7 @@ usscanner_intr_cb(usbd_xfer_handle xfer, usbd_private_handle priv,
 
 	sc->sc_state = UAS_IDLE;
 
-	sc->sc_xs->xs_status |= XS_STS_DONE;
+	sc->sc_xs->xs_control |= XS_STS_DONE;
 	s = splbio();
 	scsipi_done(sc->sc_xs);
 	splx(s);
@@ -723,6 +717,7 @@ usscanner_scsipi_cmd(struct scsipi_xfer *xs)
 	struct scsipi_link *sc_link = xs->sc_link;
 	struct usscanner_softc *sc = sc_link->adapter_softc;
 	usbd_status err;
+	int s;
 
 #ifdef notyet
 	DPRINTFN(8, ("%s: usscanner_scsi_cmd: %d:%d "
@@ -775,13 +770,12 @@ usscanner_scsipi_cmd(struct scsipi_xfer *xs)
 
 	return (SUCCESSFULLY_QUEUED);
 
-
  done:
 	sc->sc_state = UAS_IDLE;
-	xs->xs_status |= XS_STS_DONE;
+	xs->xs_control |= XS_STS_DONE;
+	s = splbio();
 	scsipi_done(xs);
-	if (xs->xs_control & XS_CTL_POLL)
-		return (COMPLETE);
-	else
-		return (SUCCESSFULLY_QUEUED);
+	splx(s);
+
+	return (COMPLETE);
 }

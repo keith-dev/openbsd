@@ -1,4 +1,4 @@
-/*	$OpenBSD: workq.h,v 1.2 2007/05/31 21:33:07 tedu Exp $ */
+/*	$OpenBSD: workq.h,v 1.4 2007/11/28 13:54:07 tedu Exp $ */
 
 /*
  * Copyright (c) 2007 David Gwynne <dlg@openbsd.org>

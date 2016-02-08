@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_ipw.c,v 1.67 2007/07/18 18:10:31 damien Exp $	*/
+/*	$OpenBSD: if_ipw.c,v 1.71 2008/02/23 20:38:08 hshoexer Exp $	*/
 
 /*-
  * Copyright (c) 2004-2006
@@ -40,7 +40,6 @@
 #include <sys/kernel.h>
 #include <sys/socket.h>
 #include <sys/systm.h>
-#include <sys/malloc.h>
 #include <sys/conf.h>
 #include <sys/device.h>
 
@@ -861,6 +860,7 @@ ipw_data_intr(struct ipw_softc *sc, struct ipw_status *status,
 			panic("%s: could not load old rx mbuf",
 			    sc->sc_dev.dv_xname);
 		}
+		sbd->bd->physaddr = htole32(sbuf->map->dm_segs[0].ds_addr);
 		ifp->if_ierrors++;
 		return;
 	}
@@ -1669,6 +1669,7 @@ ipw_read_firmware(struct ipw_softc *sc, struct ipw_firmware *fw)
 
 	fw->main = p;
 	fw->ucode = p + fw->main_size;
+	sc->fw_data = fw->data;
 
 	return 0;
 
@@ -1887,7 +1888,8 @@ ipw_init(struct ifnet *ifp)
 	}
 
 	if ((error = ipw_read_firmware(sc, &fw)) != NULL) {
-		printf("%s: could not read firmware\n", sc->sc_dev.dv_xname);
+		printf("%s: error %d, could not read firmware\n",
+		    sc->sc_dev.dv_xname, error);
 		goto fail1;
 	}
 
@@ -1966,6 +1968,14 @@ ipw_stop(struct ifnet *ifp, int disable)
 	 */
 	for (i = 0; i < IPW_NTBD; i++)
 		ipw_release_sbd(sc, &sc->stbd_list[i]);
+
+	/*
+	 * Free memory claimed by firmware.
+	 */
+	if (sc->fw_data) {
+		free(sc->fw_data, M_DEVBUF);
+		sc->fw_data = NULL;
+	}
 
 	ieee80211_new_state(ic, IEEE80211_S_INIT, -1);
 }

@@ -1,4 +1,4 @@
-/*	$OpenBSD: lcore_access.S,v 1.10 2007/05/20 14:34:23 miod Exp $ */
+/*	$OpenBSD: lcore_access.S,v 1.13 2008/02/20 21:34:19 miod Exp $ */
 
 /*
  * Copyright (c) 2001-2003 Opsycon AB  (www.opsycon.se / www.opsycon.com)
@@ -58,7 +58,7 @@
 onfault_table:
 	PTR_VAL	0		# invalid index number
 	PTR_VAL	_copyerr
-	PTR_VAL	_copyerr
+	PTR_VAL	_kcopyerr
 #if defined(DDB) || defined(DEBUG)
 	PTR_VAL	kt_ddberr
 #else
@@ -186,119 +186,6 @@ LEAF(mem_zero_page, 0)
 END(mem_zero_page)
 
 /*
- *	Block I/O routines mainly used by I/O drivers.
- *
- *	Args as:	a0 = port
- *			a1 = memory address
- *			a2 = count
- */
-LEAF(insb, 0)
-	beq	a2, zero, 2f
-	PTR_ADDU a2, a1
-1:
-	lbu	v0, 0(a0)
-	PTR_ADDU a1, 1
-	bne	a1, a2, 1b
-	sb	v0, -1(a1)
-2:
-	jr	ra
-	nop
-END(insb)
-
-LEAF(insw, 0)
-	beq	a2, zero, 2f
-	PTR_ADDU a2, a2
-	PTR_ADDU a2, a1
-1:
-	lhu	v0, 0(a0)
-	PTR_ADDU a1, 2
-	bne	a1, a2, 1b
-	sh	v0, -2(a1)
-2:
-	jr	ra
-	nop
-END(insw)
-
-LEAF(insl, 0)
-	beq	a2, zero, 2f
-	PTR_SLL	a2, 2
-	PTR_ADDU a2, a1
-1:
-	lw	v0, 0(a0)
-	PTR_ADDU a1, 4
-	bne	a1, a2, 1b
-	sw	v0, -4(a1)
-2:
-	jr	ra
-	nop
-END(insl)
-
-LEAF(outsb, 0)
-	beq	a2, zero, 2f
-	PTR_ADDU a2, a1
-1:
-	lbu	v0, 0(a1)
-	PTR_ADDU a1, 1
-	bne	a1, a2, 1b
-	sb	v0, 0(a0)
-2:
-	jr	ra
-	nop
-END(outsb)
-
-LEAF(outsw, 0)
-	beq	a2, zero, 2f
-	PTR_ADDU a2, a2
-	LI	v0, 1
-	and	v0, a1
-	bne	v0, zero, 3f		# arghh, unaligned.
-	PTR_ADDU a2, a1
-1:
-	lhu	v0, 0(a1)
-	PTR_ADDU a1, 2
-	bne	a1, a2, 1b
-	sh	v0, 0(a0)
-2:
-	jr	ra
-	nop
-3:
-	LWHI	v0, 0(a1)
-	LWLO	v0, 3(a1)
-	PTR_ADDU a1, 2
-	bne	a1, a2, 3b
-	sh	v0, 0(a0)
-
-	jr	ra
-	nop
-END(outsw)
-
-LEAF(outsl, 0)
-	beq	a2, zero, 2f
-	PTR_SLL	a2, 2
-	LI	v0, 3
-	and	v0, a1
-	bne	v0, zero, 3f		# arghh, unaligned.
-	PTR_ADDU a2, a1
-1:
-	lw	v0, 0(a1)
-	PTR_ADDU a1, 4
-	bne	a1, a2, 1b
-	sw	v0, 0(a0)
-2:
-	jr	ra
-	nop
-3:
-	LWHI	v0, 0(a1)
-	LWLO	v0, 3(a1)
-	PTR_ADDU a1, 4
-	bne	a1, a2, 3b
-	sw	v0, 0(a0)
-
-	jr	ra
-	nop
-END(outsl)
-
-/*
  * Copy a null terminated string from the user address space into
  * the kernel address space.
  *
@@ -415,19 +302,31 @@ _copyerr:
 /*
  *  kcopy is a wrapper around bcopy that catches bad memory references.
  */
-NON_LEAF(kcopy, FRAMESZ(CF_SZ), ra)
-	PTR_SUBU sp, sp, FRAMESZ(CF_SZ)
-	.mask	0x80000000, (CF_RA_OFFS - FRAMESZ(CF_SZ))
-	PTR_S	ra, CF_RA_OFFS(sp)
-	li	v0, KT_KCOPYERR
+NON_LEAF(kcopy, FRAMESZ(CF_SZ + REGSZ), ra)
+	PTR_SUBU sp, sp, FRAMESZ(CF_SZ + REGSZ)
+	.mask	0x80000000, (CF_RA_OFFS - FRAMESZ(CF_SZ + REGSZ))
+	PTR_S	ra, CF_RA_OFFS + REGSZ(sp)
 	PTR_L	t3, curprocpaddr
+	lw	v1, PCB_ONFAULT(t3)
+	li	v0, KT_KCOPYERR
+	PTR_S	v1, CF_ARGSZ(sp)	# save old pcb_onfault
 	jal	bcopy
 	sw	v0, PCB_ONFAULT(t3)
 
-	PTR_L	ra, CF_RA_OFFS(sp)
+	PTR_L	v0, CF_ARGSZ(sp)
 	PTR_L	t3, curprocpaddr
-	sw	zero, PCB_ONFAULT(t3)
-	PTR_ADDU sp, sp, FRAMESZ(CF_SZ)
+	PTR_L	ra, CF_RA_OFFS + REGSZ(sp)
+	sw	v0, PCB_ONFAULT(t3)
+	PTR_ADDU sp, sp, FRAMESZ(CF_SZ + REGSZ)
 	j	ra
 	move	v0, zero
 END(kcopy)
+
+_kcopyerr:
+	PTR_L	v0, CF_ARGSZ(sp)
+	PTR_L	t3, curprocpaddr
+	PTR_L	ra, CF_RA_OFFS + REGSZ(sp)
+	sw	v0, PCB_ONFAULT(t3)
+	PTR_ADDU sp, sp, FRAMESZ(CF_SZ + REGSZ)
+	j	ra
+	li	v0, EFAULT		# return error

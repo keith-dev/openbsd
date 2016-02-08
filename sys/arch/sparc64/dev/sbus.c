@@ -1,4 +1,4 @@
-/*	$OpenBSD: sbus.c,v 1.27 2007/05/29 09:54:13 sobrado Exp $	*/
+/*	$OpenBSD: sbus.c,v 1.32 2008/01/17 22:53:18 kettenis Exp $	*/
 /*	$NetBSD: sbus.c,v 1.46 2001/10/07 20:30:41 eeh Exp $ */
 
 /*-
@@ -137,7 +137,7 @@ int sbus_debug = 0;
 #endif
 
 bus_space_tag_t sbus_alloc_bustag(struct sbus_softc *, int);
-bus_dma_tag_t sbus_alloc_dmatag(struct sbus_softc *, bus_dma_tag_t);
+bus_dma_tag_t sbus_alloc_dma_tag(struct sbus_softc *, bus_dma_tag_t);
 int sbus_get_intr(struct sbus_softc *, int,
     struct sbus_intr **, int *, int);
 int sbus_overtemp(void *);
@@ -172,8 +172,6 @@ struct cfattach sbus_xbox_ca = {
 struct cfdriver sbus_cd = {
 	NULL, "sbus", DV_DULL
 };
-
-extern struct cfdriver sbus_cd;
 
 /*
  * DVMA routines
@@ -219,7 +217,7 @@ sbus_print(void *args, const char *busname)
 	int i;
 
 	if (busname != NULL) {
-		printf("%s at %s", sa->sa_name, busname);
+		printf("\"%s\" at %s", sa->sa_name, busname);
 		class = getpropstring(sa->sa_node, "device_type");
 		if (*class != '\0')
 			printf(" class %s", class);
@@ -271,7 +269,7 @@ sbus_xbox_attach(struct device *parent, struct device *self, void *aux)
 	sc->sc_master = sbus->sc_master;
 
 	sc->sc_bustag = xa->xa_bustag;
-	sc->sc_dmatag = sbus_alloc_dmatag(sc, xa->xa_dmatag);
+	sc->sc_dmatag = sbus_alloc_dma_tag(sc, xa->xa_dmatag);
 
 	/*
 	 * Parent has already done the address translation computations.
@@ -356,11 +354,9 @@ sbus_mb_attach(struct device *parent, struct device *self, void *aux)
 	iommu_init(name, &sc->sc_is, 0, -1);
 
 	/* Enable the over temp intr */
-	ih = (struct intrhand *)
-		malloc(sizeof(struct intrhand), M_DEVBUF, M_NOWAIT);
+	ih = malloc(sizeof(*ih), M_DEVBUF, M_NOWAIT | M_ZERO);
 	if (ih == NULL)
 		panic("couldn't malloc intrhand");
-	memset(ih, 0, sizeof(struct intrhand));
 	ih->ih_map = &sysio->therm_int_map;
 	ih->ih_clr = NULL; /* &sysio->therm_clr_int; */
 	ih->ih_fun = sbus_overtemp;
@@ -386,7 +382,7 @@ sbus_mb_attach(struct device *parent, struct device *self, void *aux)
 			panic("sbus iommu: can't toss first dvma page");
 	}
 
-	sc->sc_dmatag = sbus_alloc_dmatag(sc, ma->ma_dmatag);
+	sc->sc_dmatag = sbus_alloc_dma_tag(sc, ma->ma_dmatag);
 
 	sbus_attach_common(sc, node, 0);
 }
@@ -772,11 +768,10 @@ sbus_alloc_bustag(struct sbus_softc *sc, int indirect)
 {
 	struct sparc_bus_space_tag *sbt;
 
-	sbt = malloc(sizeof(*sbt), M_DEVBUF, M_NOWAIT);
+	sbt = malloc(sizeof(*sbt), M_DEVBUF, M_NOWAIT | M_ZERO);
 	if (sbt == NULL)
 		return (NULL);
 
-	bzero(sbt, sizeof *sbt);
 	snprintf(sbt->name, sizeof(sbt->name), "%s",
 		sc->sc_dev.dv_xname);
 	sbt->cookie = sc;
@@ -795,7 +790,7 @@ sbus_alloc_bustag(struct sbus_softc *sc, int indirect)
 
 
 bus_dma_tag_t
-sbus_alloc_dmatag(struct sbus_softc *sc, bus_dma_tag_t psdt)
+sbus_alloc_dma_tag(struct sbus_softc *sc, bus_dma_tag_t psdt)
 {
 	bus_dma_tag_t sdt;
 

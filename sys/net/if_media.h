@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_media.h,v 1.24 2007/05/29 22:11:57 henning Exp $	*/
+/*	$OpenBSD: if_media.h,v 1.27 2007/10/05 19:28:26 brad Exp $	*/
 /*	$NetBSD: if_media.h,v 1.22 2000/02/17 21:53:16 sommerfeld Exp $	*/
 
 /*-
@@ -145,7 +145,7 @@ struct	ifmedia_entry *ifmedia_match(struct ifmedia *, u_int, u_int);
 void	ifmedia_delete_instance(struct ifmedia *, u_int);
 
 /* Compute baudrate for a given media. */
-int	ifmedia_baudrate(int);
+u_int64_t	ifmedia_baudrate(int);
 #endif /*_KERNEL */
 
 /*
@@ -183,6 +183,7 @@ int	ifmedia_baudrate(int);
 #define	IFM_10G_LR	18		/* 10GBase-LR - single-mode fiber */
 #define	IFM_10G_SR	19		/* 10GBase-SR - multi-mode fiber */
 #define	IFM_10G_CX4	20		/* 10GBase-CX4 - copper */
+#define	IFM_2500_SX	21		/* 2500baseSX - multi-mode fiber */
 
 #define	IFM_ETH_MASTER	0x00000100	/* master mode (1000baseT) */
 #define	IFM_ETH_RXPAUSE	0x00000200	/* receive PAUSE frames */
@@ -422,6 +423,8 @@ struct ifmedia_description {
 	{ IFM_ETHER|IFM_10G_CX4,	"10GbaseCX4" },			\
 	{ IFM_ETHER|IFM_10G_CX4,	"10GCX4" },			\
 	{ IFM_ETHER|IFM_10G_CX4,	"10GBASE-CX4" },		\
+	{ IFM_ETHER|IFM_2500_SX,	"2500baseSX" },			\
+	{ IFM_ETHER|IFM_2500_SX,	"2500SX" },			\
 									\
 	{ IFM_FDDI|IFM_FDDI_SMF,	"Single-mode" },		\
 	{ IFM_FDDI|IFM_FDDI_SMF,	"SMF" },			\
@@ -514,7 +517,7 @@ struct ifmedia_description {
  */
 struct ifmedia_baudrate {
 	int	ifmb_word;		/* media word */
-	int	ifmb_baudrate;		/* corresponding baudrate */
+	u_int64_t	ifmb_baudrate;		/* corresponding baudrate */
 };
 
 #define	IFM_BAUDRATE_DESCRIPTIONS {					\
@@ -533,9 +536,10 @@ struct ifmedia_baudrate {
 	{ IFM_ETHER|IFM_1000_CX,	IF_Mbps(1000) },		\
 	{ IFM_ETHER|IFM_1000_T,		IF_Mbps(1000) },		\
 	{ IFM_ETHER|IFM_HPNA_1,		IF_Mbps(1) },			\
-	{ IFM_ETHER|IFM_10G_LR,		IF_Mbps(1000) },		\
-	{ IFM_ETHER|IFM_10G_SR,		IF_Mbps(1000) },		\
-	{ IFM_ETHER|IFM_10G_CX4,	IF_Mbps(1000) },		\
+	{ IFM_ETHER|IFM_10G_LR,		IF_Gbps(10) },			\
+	{ IFM_ETHER|IFM_10G_SR,		IF_Gbps(10) },			\
+	{ IFM_ETHER|IFM_10G_CX4,	IF_Gbps(10) },			\
+	{ IFM_ETHER|IFM_2500_SX,	IF_Mbps(2500) },		\
 									\
 	{ IFM_FDDI|IFM_FDDI_SMF,	IF_Mbps(100) },			\
 	{ IFM_FDDI|IFM_FDDI_MMF,	IF_Mbps(100) },			\

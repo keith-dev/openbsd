@@ -1,4 +1,4 @@
-/*	$OpenBSD: edit.c,v 1.36 2007/07/01 10:43:13 xsa Exp $	*/
+/*	$OpenBSD: edit.c,v 1.45 2008/03/01 21:29:36 deraadt Exp $	*/
 /*
  * Copyright (c) 2006, 2007 Xavier Santolaria <xsa@openbsd.org>
  *
@@ -42,7 +42,7 @@ static RCSNUM	*cvs_base_handle(struct cvs_file *, int);
 static int	edit_aflags = 0;
 
 struct cvs_cmd cvs_cmd_edit = {
-	CVS_OP_EDIT, 0, "edit",
+	CVS_OP_EDIT, CVS_USE_WDIR, "edit",
 	{ },
 	"Get ready to edit a watched file",
 	"[-lR] [-a action] [file ...]",
@@ -52,7 +52,7 @@ struct cvs_cmd cvs_cmd_edit = {
 };
 
 struct cvs_cmd cvs_cmd_editors = {
-	CVS_OP_EDITORS, 0, "editors",
+	CVS_OP_EDITORS, CVS_USE_WDIR, "editors",
 	{ },
 	"See who is editing a watched file",
 	"[-lR] [file ...]",
@@ -62,7 +62,7 @@ struct cvs_cmd cvs_cmd_editors = {
 };
 
 struct cvs_cmd cvs_cmd_unedit = {
-	CVS_OP_UNEDIT, 0, "unedit",
+	CVS_OP_UNEDIT, CVS_USE_WDIR, "unedit",
 	{ },
 	"Undo an edit command",
 	"[-lR] [file ...]",
@@ -100,6 +100,7 @@ cvs_edit(int argc, char **argv)
 			flags &= ~CR_RECURSE_DIRS;
 			break;
 		case 'R':
+			flags |= CR_RECURSE_DIRS;
 			break;
 		default:
 			fatal("%s", cvs_cmd_edit.cmd_synopsis);
@@ -157,6 +158,7 @@ cvs_editors(int argc, char **argv)
 			flags &= ~CR_RECURSE_DIRS;
 			break;
 		case 'R':
+			flags |= CR_RECURSE_DIRS;
 			break;
 		default:
 			fatal("%s", cvs_cmd_editors.cmd_synopsis);
@@ -211,6 +213,7 @@ cvs_unedit(int argc, char **argv)
 			flags &= ~CR_RECURSE_DIRS;
 			break;
 		case 'R':
+			flags |= CR_RECURSE_DIRS;
 			break;
 		default:
 			fatal("%s", cvs_cmd_unedit.cmd_synopsis);
@@ -264,7 +267,7 @@ cvs_edit_local(struct cvs_file *cf)
 
 	cvs_log(LP_TRACE, "cvs_edit_local(%s)", cf->file_path);
 
-	cvs_file_classify(cf, NULL);
+	cvs_file_classify(cf, cvs_directory_tag);
 
 	if ((fp = fopen(CVS_PATH_NOTIFY, "a")) == NULL)
 		fatal("cvs_edit_local: fopen: `%s': %s",
@@ -275,8 +278,7 @@ cvs_edit_local(struct cvs_file *cf)
 		fatal("gmtime failed");
 
 	asctime_r(t, timebuf);
-	if (timebuf[strlen(timebuf) - 1] == '\n')
-                timebuf[strlen(timebuf) - 1] = '\0';
+	timebuf[strcspn(timebuf, "\n")] = '\0';
 
 	if (gethostname(thishost, sizeof(thishost)) == -1)
 		fatal("gethostname failed");
@@ -327,7 +329,7 @@ cvs_unedit_local(struct cvs_file *cf)
 	struct tm *t;
 	time_t now;
 	char bfpath[MAXPATHLEN], timebuf[64], thishost[MAXHOSTNAMELEN];
-	char wdir[MAXPATHLEN];
+	char wdir[MAXPATHLEN], sticky[CVS_ENT_MAXLINELEN];
 	RCSNUM *ba_rev;
 
 	if (cvs_noexec == 1)
@@ -335,7 +337,7 @@ cvs_unedit_local(struct cvs_file *cf)
 
 	cvs_log(LP_TRACE, "cvs_unedit_local(%s)", cf->file_path);
 
-	cvs_file_classify(cf, NULL);
+	cvs_file_classify(cf, cvs_directory_tag);
 
 	(void)xsnprintf(bfpath, MAXPATHLEN, "%s/%s",
 	    CVS_PATH_BASEDIR, cf->file_name);
@@ -362,8 +364,7 @@ cvs_unedit_local(struct cvs_file *cf)
 		fatal("gmtime failed");
 
 	asctime_r(t, timebuf);
-	if (timebuf[strlen(timebuf) - 1] == '\n')
-                timebuf[strlen(timebuf) - 1] = '\0';
+	timebuf[strcspn(timebuf, "\n")] = '\0';
 
 	if (gethostname(thishost, sizeof(thishost)) == -1)
 		fatal("gethostname failed");
@@ -396,13 +397,16 @@ cvs_unedit_local(struct cvs_file *cf)
 
 		memset(timebuf, 0, sizeof(timebuf));
 		ctime_r(&cf->file_ent->ce_mtime, timebuf);
-		if (timebuf[strlen(timebuf) - 1] == '\n')
-			timebuf[strlen(timebuf) - 1] = '\0';
+		timebuf[strcspn(timebuf, "\n")] = '\0';
+
+		sticky[0] = '\0';
+		if (cf->file_ent->ce_tag != NULL)
+			(void)xsnprintf(sticky, sizeof(sticky), "T%s",
+			    cf->file_ent->ce_tag);
 
 		(void)xasprintf(&entry, "/%s/%s/%s/%s/%s",
-		    cf->file_name, rbuf, timebuf,
-		    (cf->file_ent->ce_tag) ? cf->file_ent->ce_tag : "",
-		    (cf->file_ent->ce_opts) ? cf->file_ent->ce_opts : "");
+		    cf->file_name, rbuf, timebuf, cf->file_ent->ce_opts ? : "",
+		    sticky);
 
 		cvs_ent_add(entlist, entry);
 
@@ -425,7 +429,6 @@ cvs_base_handle(struct cvs_file *cf, int flags)
 {
 	FILE *fp, *tfp;
 	RCSNUM *ba_rev;
-	size_t len;
 	int i;
 	char *dp, *sp;
 	char buf[MAXPATHLEN], *fields[2], rbuf[CVS_REV_BUFSZ];
@@ -448,10 +451,8 @@ cvs_base_handle(struct cvs_file *cf, int flags)
 	}
 
 	if (fp != NULL) {
-		while(fgets(buf, sizeof(buf), fp)) {
-			len = strlen(buf);
-			if (len > 0 && buf[len - 1] == '\n')
-				buf[len - 1] = '\0';
+		while (fgets(buf, sizeof(buf), fp)) {
+			buf[strcspn(buf, "\n")] = '\0';
 
 			if (buf[0] != 'B')
 				continue;

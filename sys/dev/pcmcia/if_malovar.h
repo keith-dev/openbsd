@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_malovar.h,v 1.24 2007/08/09 21:24:02 mglocker Exp $ */
+/*	$OpenBSD: if_malovar.h,v 1.27 2007/10/09 20:37:32 mglocker Exp $ */
 
 /*
  * Copyright (c) 2007 Marcus Glocker <mglocker@openbsd.org>
@@ -160,6 +160,11 @@ struct malo_cmd_body_macctrl {
 	uint16_t	reserved;
 } __packed;
 
+struct malo_cmd_body_macaddr {
+	uint16_t	action;
+	uint8_t		macaddr[ETHER_ADDR_LEN];
+} __packed;
+
 struct malo_cmd_body_assoc {
 	uint8_t		peermac[ETHER_ADDR_LEN];
 	uint16_t	capinfo;
@@ -202,6 +207,19 @@ struct malo_cmd_body_bgscan_query {
 	uint8_t		flush;
 } __packed;
 
+#define MALO_RATE_BITMAP_DS1	(1 << 0)
+#define MALO_RATE_BITMAP_DS2	(1 << 1)
+#define MALO_RATE_BITMAP_DS5	(1 << 2)
+#define MALO_RATE_BITMAP_DS11	(1 << 3)
+#define MALO_RATE_BITMAP_OFDM6	(1 << 5)
+#define MALO_RATE_BITMAP_OFDM9	(1 << 6)
+#define MALO_RATE_BITMAP_OFDM12	(1 << 7)
+#define MALO_RATE_BITMAP_OFDM18	(1 << 8)
+#define MALO_RATE_BITMAP_OFDM24	(1 << 9)
+#define MALO_RATE_BITMAP_OFDM36	(1 << 10)
+#define MALO_RATE_BITMAP_OFDM48	(1 << 11)
+#define MALO_RATE_BITMAP_OFDM54	(1 << 12)
+#define MALO_RATE_BITMAP_AUTO	0x1fef
 struct malo_cmd_body_rate {
 	uint16_t	action;
 	uint16_t	hwauto;
@@ -335,6 +353,10 @@ struct malo_softc {
 				     int);
 
 	int			 sc_flags;
+	uint8_t			*sc_fw_h;
+	uint8_t			*sc_fw_m;
+	size_t			 sc_fw_h_size;
+	size_t			 sc_fw_m_size;
 	int			 sc_cmd_ctxsave;
 	void			*sc_cmd;
 	void			*sc_data;

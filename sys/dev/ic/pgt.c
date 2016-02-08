@@ -1,4 +1,4 @@
-/*	$OpenBSD: pgt.c,v 1.43 2007/07/18 18:10:31 damien Exp $  */
+/*	$OpenBSD: pgt.c,v 1.46 2007/12/30 17:37:57 claudio Exp $  */
 
 /*
  * Copyright (c) 2006 Claudio Jeker <claudio@openbsd.org>
@@ -308,7 +308,7 @@ pgt_load_firmware(struct pgt_softc *sc)
 	error = loadfirmware(name, &ucode, &size);
 
 	if (error != 0) {
-		DPRINTF(("%s: error %d, could not read microcode %s!\n",
+		DPRINTF(("%s: error %d, could not read firmware %s\n",
 		    sc->sc_dev.dv_xname, error, name));
 		return (EIO);
 	}
@@ -837,10 +837,13 @@ pgt_ieee80211_encap(struct pgt_softc *sc, struct ether_header *eh,
 	}
 
 	M_PREPEND(m, sizeof(*frame) + sizeof(*snap), M_DONTWAIT);
-	if (m != NULL)
-		m = m_pullup(m, sizeof(*frame) + sizeof(*snap));
 	if (m == NULL)
 		return (m);
+	if (m->m_len < sizeof(*frame) + sizeof(*snap)) {
+		m = m_pullup(m, sizeof(*frame) + sizeof(*snap));
+		if (m == NULL)
+			return (m);
+	}
 	frame = mtod(m, struct ieee80211_frame *);
 	snap = (struct llc *)&frame[1];
 	if (ni != NULL) {
@@ -1812,9 +1815,8 @@ pgt_ieee80211_node_alloc(struct ieee80211com *ic)
 {
 	struct pgt_ieee80211_node *pin;
 
-	pin = malloc(sizeof(*pin), M_DEVBUF, M_NOWAIT);
+	pin = malloc(sizeof(*pin), M_DEVBUF, M_NOWAIT | M_ZERO);
 	if (pin != NULL) {
-		bzero(pin, sizeof *pin);
 		pin->pin_dot1x_auth = PIN_DOT1X_UNAUTHORIZED;
 	}
 	return (struct ieee80211_node *)pin;
@@ -2284,8 +2286,7 @@ pgt_ioctl(struct ifnet *ifp, u_long cmd, caddr_t req)
 	case SIOCG80211ALLNODES: {
 		struct ieee80211_nodereq *nr = NULL;
 		na = (struct ieee80211_nodereq_all *)req;
-		wreq = malloc(sizeof(*wreq), M_DEVBUF, M_WAITOK);
-		bzero(wreq, sizeof(*wreq));
+		wreq = malloc(sizeof(*wreq), M_DEVBUF, M_WAITOK | M_ZERO);
 
 		maxscan = PGT_OBJ_BSSLIST_NBSS;
 		pob = malloc(sizeof(*pob) +

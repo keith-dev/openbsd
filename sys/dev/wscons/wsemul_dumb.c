@@ -1,4 +1,4 @@
-/* $OpenBSD: wsemul_dumb.c,v 1.4 2007/03/07 06:23:04 miod Exp $ */
+/* $OpenBSD: wsemul_dumb.c,v 1.7 2007/11/27 16:37:27 miod Exp $ */
 /* $NetBSD: wsemul_dumb.c,v 1.7 2000/01/05 11:19:36 drochner Exp $ */
 
 /*
@@ -31,8 +31,6 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include <sys/cdefs.h>
-
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/time.h>
@@ -50,7 +48,7 @@ void	*wsemul_dumb_attach(int console, const struct wsscreen_descr *,
 				 void *, int, int, void *, long);
 void	wsemul_dumb_output(void *cookie, const u_char *data, u_int count,
 				int);
-int	wsemul_dumb_translate(void *cookie, keysym_t, char **);
+int	wsemul_dumb_translate(void *cookie, keysym_t, const char **);
 void	wsemul_dumb_detach(void *cookie, u_int *crowp, u_int *ccolp);
 void	wsemul_dumb_resetop(void *, enum wsemul_resetops);
 
@@ -222,7 +220,7 @@ wsemul_dumb_output(cookie, data, count, kernel)
 			    edp->nrows - n, n, edp->defattr);
 			edp->crow -= n - 1;
 			break;
-		}	
+		}
 	}
 	/* XXX */
 	(*edp->emulops->cursor)(edp->emulcookie, 1, edp->crow, edp->ccol);
@@ -232,7 +230,7 @@ int
 wsemul_dumb_translate(cookie, in, out)
 	void *cookie;
 	keysym_t in;
-	char **out;
+	const char **out;
 {
 	return (0);
 }
@@ -266,6 +264,10 @@ wsemul_dumb_resetop(cookie, op)
 					   edp->defattr);
 		edp->ccol = edp->crow = 0;
 		(*edp->emulops->cursor)(edp->emulcookie, 1, 0, 0);
+		break;
+	case WSEMUL_CLEARCURSOR:
+		(*edp->emulops->cursor)(edp->emulcookie, 0,
+		    edp->crow, edp->ccol);
 		break;
 	default:
 		break;

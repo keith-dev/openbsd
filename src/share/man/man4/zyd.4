@@ -1,4 +1,4 @@
-.\" $OpenBSD: zyd.4,v 1.23 2007/05/31 19:19:53 jmc Exp $
+.\" $OpenBSD: zyd.4,v 1.26 2007/11/18 00:43:13 brad Exp $
 .\"
 .\" Copyright (c) 1997, 1998, 1999
 .\" Bill Paul <wpaul@ctr.columbia.edu>. All rights reserved.
@@ -30,7 +30,7 @@
 .\" ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF
 .\" THE POSSIBILITY OF SUCH DAMAGE.
 .\"
-.Dd $Mdocdate: May 31 2007 $
+.Dd $Mdocdate: November 18 2007 $
 .Dt ZYD 4
 .Os
 .Sh NAME
@@ -197,6 +197,8 @@ driver:
 .It MSI US54SE
 .It Philips SNU5600
 .It Planet WL-U356
+.It Planex GW-US54GD
+.It Planex GW-US54GXS
 .It Planex GW-US54GZL
 .It Planex GW-US54Mini
 .It Safecom SWMULZ-5400
@@ -255,8 +257,8 @@ Join an existing BSS network,
 .Ed
 .Sh DIAGNOSTICS
 .Bl -diag
-.It "zyd%d: could not read firmware file %s (error=%d)"
-For some reason, the driver was unable to read the firmware file from the
+.It "zyd%d: error %d, could not read firmware %s"
+For some reason, the driver was unable to read the firmware image from the
 filesystem.
 The file might be missing or corrupted.
 .It "zyd%d: could not load firmware (error=%d)"

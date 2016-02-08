@@ -1,4 +1,4 @@
-/*	$OpenBSD: ctlreg.h,v 1.11 2007/03/13 19:27:50 kettenis Exp $	*/
+/*	$OpenBSD: ctlreg.h,v 1.15 2008/01/06 16:09:49 kettenis Exp $	*/
 /*	$NetBSD: ctlreg.h,v 1.28 2001/08/06 23:55:34 eeh Exp $ */
 
 /*
@@ -438,6 +438,7 @@
 #define	SOFTINT13	(0x1<<13)
 #define	SOFTINT14	(0x1<<14)
 #define	SOFTINT15	(0x1<<15)
+#define	STICK_INT	(0x1<<16)
 
 /* Interrupt Dispatch -- usually reserved for cross-calls */
 #define	ASR_IDSR	0x48 /* Interrupt dispatch status reg */
@@ -446,15 +447,18 @@
 #define	IDSR_BUSY	0x01
 
 #define	ASI_INTERRUPT_DISPATCH		0x77	/* [4u] spitfire interrupt dispatch regs */
-#define	IDCR(x)		(((x)<<14)&0x70)	/* Store anything to this address to dispatch crosscall to CPU (x) */
-#define	IDDR_0H		0x40			/* Store data to send in these regs */
+
+/* Interrupt delivery initiation */
+#define	IDCR(x)		((((u_int64_t)(x)) << 14) | 0x70)
+
+#define	IDDR_0H		0x40	/* Store data to send in these regs */
 #define	IDDR_0L		0x48	/* unimplemented */
 #define	IDDR_1H		0x50
 #define	IDDR_1L		0x58	/* unimplemented */
 #define	IDDR_2H		0x60
 #define	IDDR_2L		0x68	/* unimplemented */
-#define	IDDR_3H		0x70	/* unimplemented */
-#define	IDDR_3L		0x78	/* unimplemented */
+#define	IDDR_3H		0x80	/* unimplemented */
+#define	IDDR_3L		0x88	/* unimplemented */
 
 /*
  * Error registers 
@@ -505,28 +509,6 @@
  * D$ so we need to flush the D$ to make sure we don't get data pollution.
  */
 
-extern __inline u_int32_t sparc_cas(u_int32_t *, u_int32_t, u_int32_t);
-extern __inline u_int32_t
-sparc_cas(u_int32_t *rs1, u_int32_t rs2, u_int32_t rd)
-{
-	__asm __volatile("casa [%1] ASI_PRIMARY, %2, %0"
-	    : "+r" (rd)
-	    : "r" (rs1), "r" (rs2)
-	    : "memory" );
-	return (rd);
-}
-
-extern __inline u_int64_t sparc_casx(u_int64_t *, u_int64_t, u_int64_t);
-extern __inline u_int64_t
-sparc_casx(u_int64_t *rs1, u_int64_t rs2, u_int64_t rd)
-{
-	__asm __volatile("casxa [%1] ASI_PRIMARY, %3, %0"
-	    : "+r" (rd)
-	    : "r" (rs1), "r" (rs2)
-	    : "memory" );
-	return (rd);
-}
-
 #define sparc_membar(mask) do {                                         \
         if (mask)                                                       \
                 __asm __volatile("membar %0" : : "n" (mask) : "memory");\
@@ -561,6 +543,7 @@ do {									\
 	else								\
 		__asm __volatile("wrpr %0, %1, %%" #name		\
 		    : : "r" (val), "rI" (xor) : "%g0");			\
+	__asm __volatile("" : : : "memory");				\
 } while(0)
 
 

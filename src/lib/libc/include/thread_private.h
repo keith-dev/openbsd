@@ -1,4 +1,4 @@
-/* $OpenBSD: thread_private.h,v 1.20 2007/06/05 18:11:48 kurt Exp $ */
+/* $OpenBSD: thread_private.h,v 1.22 2008/01/01 00:43:39 kurt Exp $ */
 
 /* PUBLIC DOMAIN: No Rights Reserved. Marco S Hyman <marc@snafu.org> */
 
@@ -93,7 +93,7 @@ void	_thread_mutex_destroy(void **);
 			    sizeof (storage), error)
 
 /*
- * Macros used in libc to access non-static mutexes.
+ * Macros used in libc to access mutexes.
  */
 #define _MUTEX_LOCK(mutex)						\
 	do {								\
@@ -148,6 +148,18 @@ void	_thread_atexit_unlock(void);
 #define _ATEXIT_UNLOCK()	do {					\
 					if (__isthreaded)		\
 						_thread_atexit_unlock();\
+				} while (0)
+
+void	_thread_arc4_lock(void);
+void	_thread_arc4_unlock(void);
+
+#define _ARC4_LOCK()		do {					\
+					if (__isthreaded)		\
+						_thread_arc4_lock();	\
+				} while (0)
+#define _ARC4_UNLOCK()		do {					\
+					if (__isthreaded)		\
+						_thread_arc4_unlock();\
 				} while (0)
 
 #endif /* _THREAD_PRIVATE_H_ */

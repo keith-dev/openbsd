@@ -1,4 +1,4 @@
-/*	$OpenBSD: aic7xxx_openbsd.c,v 1.35 2007/08/04 14:37:34 krw Exp $	*/
+/*	$OpenBSD: aic7xxx_openbsd.c,v 1.37 2007/10/20 00:21:49 krw Exp $	*/
 /*	$NetBSD: aic7xxx_osm.c,v 1.14 2003/11/02 11:07:44 wiz Exp $	*/
 
 /*
@@ -281,10 +281,9 @@ ahc_done(struct ahc_softc *ahc, struct scb *scb)
 
         s = splbio();       
 	ahc_free_scb(ahc, scb);
-        splx(s);       
-
 	xs->flags |= ITSDONE;
 	scsi_done(xs);
+        splx(s);       
 }
 
 void
@@ -584,10 +583,10 @@ ahc_setup_data(struct ahc_softc *ahc, struct scsi_xfer *xs,
 	if (hscb->cdb_len > sizeof(hscb->cdb32)) {
 		s = splbio();
 		ahc_free_scb(ahc, scb);
-		splx(s);
 		xs->error = XS_DRIVER_STUFFUP;
 		xs->flags |= ITSDONE;
 		scsi_done(xs);
+		splx(s);
 		return (COMPLETE);
 	}
 
@@ -699,10 +698,9 @@ ahc_platform_alloc(struct ahc_softc *ahc, void *platform_arg)
 {
 	if (sizeof(struct ahc_platform_data) > 0) {
 		ahc->platform_data = malloc(sizeof(struct ahc_platform_data),
-		    M_DEVBUF, M_NOWAIT);
+		    M_DEVBUF, M_NOWAIT | M_ZERO);
 		if (ahc->platform_data == NULL)
 			return (ENOMEM);
-		bzero(ahc->platform_data, sizeof(struct ahc_platform_data));
 	}
 
 	return (0);

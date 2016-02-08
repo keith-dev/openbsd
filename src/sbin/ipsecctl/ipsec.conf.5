@@ -1,4 +1,4 @@
-.\"	$OpenBSD: ipsec.conf.5,v 1.114 2007/05/31 19:19:44 jmc Exp $
+.\"	$OpenBSD: ipsec.conf.5,v 1.117 2008/02/22 23:51:31 hshoexer Exp $
 .\"
 .\" Copyright (c) 2004 Mathieu Sauve-Frankel  All rights reserved.
 .\"
@@ -22,7 +22,7 @@
 .\" (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
 .\" THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 .\"
-.Dd $Mdocdate: May 31 2007 $
+.Dd $Mdocdate: February 22 2008 $
 .Dt IPSEC.CONF 5
 .Os
 .Sh NAME
@@ -545,6 +545,9 @@ keyword:
 .It Li des Ta "56 bits"
 .It Li 3des Ta "168 bits"
 .It Li aes Ta "128 bits"
+.It Li aes-128 Ta "128 bits"
+.It Li aes-192 Ta "192 bits"
+.It Li aes-256 Ta "256 bits"
 .It Li aesctr Ta "160 bits" Ta "[phase 2 only]"
 .It Li blowfish Ta "160 bits"
 .It Li cast Ta "128 bits"
@@ -690,21 +693,35 @@ the
 .Ic peer
 specification can be left out.
 .It Ic type Ar modifier
-This optional parameter sets up special flows using the modifiers
-.Ar require ,
-.Ar use ,
-.Ar acquire ,
-.Ar dontacq ,
-.Ar bypass
-or
-.Ar deny .
-A bypass flow is used to specify a flow for which security processing
-will be bypassed: matching packets will not be processed by any other
-flows and handled in normal operation.
-A deny flow is used to drop any matching packets.
+This optional parameter sets up special flows using modifiers.
 By default,
 .Xr ipsecctl 8
 will automatically set up normal flows with the corresponding type.
+.Ar modifier
+may be one of the following:
+.Pp
+.Bl -tag -width "acquireXX" -offset indent -compact
+.It acquire
+Use IPsec and establish SAs dynamically.
+Unencrypted traffic is permitted until it is protected by IPsec.
+.It bypass
+Matching packets are not processed by IPsec.
+.It deny
+Matching packets are dropped.
+.It dontacq
+Use IPsec.
+If no SAs are available,
+does not trigger
+.Xr isakmpd 8 .
+.It require
+Use IPsec and establish SAs dynamically.
+Unencrypted traffic is not permitted until it is protected by IPsec.
+.It use
+Use IPsec.
+Unencrypted traffic is permitted.
+Does not trigger
+.Xr isakmpd 8 .
+.El
 .El
 .Sh MANUAL SECURITY ASSOCIATIONS (SAs)
 In this scenario,
@@ -810,10 +827,6 @@ and is specified as follows:
 .Bd -literal -offset -indent
 authkey file "filename"
 .Ed
-.Pp
-It is also possible to specify two values separated by a colon.
-.Xr ipsecctl 8
-will then generate the matching incoming SA using the second value specified.
 .It Ic enckey Ar keyspec
 The encryption key is defined similarly to
 .Ic authkey .
@@ -845,6 +858,14 @@ is a 32-bit value defining the Security Parameter Index (SPI) for this SA.
 The encryption key is defined similarly to
 .Ic authkey .
 .El
+.Pp
+Since an SA is directional, a second SA is normally configured in the
+reverse direction.
+This is done by adding a second, colon-separated, value to
+.Ic spi ,
+.Ic authkey ,
+and
+.Ic enckey .
 .Sh SEE ALSO
 .Xr openssl 1 ,
 .Xr enc 4 ,

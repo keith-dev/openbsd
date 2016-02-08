@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_malloc.c,v 1.70 2007/05/29 00:17:32 thib Exp $	*/
+/*	$OpenBSD: kern_malloc.c,v 1.74 2008/02/21 10:40:48 kettenis Exp $	*/
 /*	$NetBSD: kern_malloc.c,v 1.15.4.2 1996/06/13 17:10:56 cgd Exp $	*/
 
 /*
@@ -158,8 +158,11 @@ malloc(unsigned long size, int type, int flags)
 #endif
 
 #ifdef MALLOC_DEBUG
-	if (debug_malloc(size, type, flags, (void **)&va))
+	if (debug_malloc(size, type, flags, (void **)&va)) {
+		if ((flags & M_ZERO) && va != NULL)
+			memset(va, 0, size);
 		return (va);
+	}
 #endif
 
 	if (size > 65535 * PAGE_SIZE) {
@@ -193,14 +196,13 @@ malloc(unsigned long size, int type, int flags)
 	copysize = 1 << indx < MAX_COPY ? 1 << indx : MAX_COPY;
 #endif
 	if (kbp->kb_next == NULL) {
-		kbp->kb_last = NULL;
 		if (size > MAXALLOCSAVE)
 			allocsize = round_page(size);
 		else
 			allocsize = 1 << indx;
-		npg = btoc(allocsize);
+		npg = atop(round_page(allocsize));
 		va = (caddr_t) uvm_km_kmemalloc(kmem_map, NULL,
-		    (vsize_t)ctob(npg), 
+		    (vsize_t)ptoa(npg), 
 		    ((flags & M_NOWAIT) ? UVM_KMF_NOWAIT : 0) |
 		    ((flags & M_CANFAIL) ? UVM_KMF_CANFAIL : 0));
 		if (va == NULL) {
@@ -258,7 +260,7 @@ malloc(unsigned long size, int type, int flags)
 			freep->next = cp;
 		}
 		freep->next = savedlist;
-		if (kbp->kb_last == NULL)
+		if (savedlist == NULL)
 			kbp->kb_last = (caddr_t)freep;
 	}
 	va = kbp->kb_next;
@@ -329,6 +331,9 @@ out:
 out:
 #endif
 	splx(s);
+
+	if ((flags & M_ZERO) && va != NULL)
+		memset(va, 0, size);
 	return (va);
 }
 
@@ -381,7 +386,7 @@ free(void *addr, int type)
 			addr, size, memname[type], alloc);
 #endif /* DIAGNOSTIC */
 	if (size > MAXALLOCSAVE) {
-		uvm_km_free(kmem_map, (vaddr_t)addr, ctob(kup->ku_pagecnt));
+		uvm_km_free(kmem_map, (vaddr_t)addr, ptoa(kup->ku_pagecnt));
 #ifdef KMEMSTATS
 		size = kup->ku_pagecnt << PGSHIFT;
 		ksp->ks_memuse -= size;
@@ -600,8 +605,8 @@ sysctl_malloc(int *name, u_int namelen, void *oldp, size_t *oldlenp, void *newp,
 					totlen += strlen(memname[i]);
 				totlen++;
 			}
-			memall = malloc(totlen + M_LAST, M_SYSCTL, M_WAITOK);
-			bzero(memall, totlen + M_LAST);
+			memall = malloc(totlen + M_LAST, M_SYSCTL,
+			    M_WAITOK|M_ZERO);
 			for (siz = 0, i = 0; i < M_LAST; i++) {
 				snprintf(memall + siz, 
 				    totlen + M_LAST - siz,

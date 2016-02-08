@@ -1,5 +1,5 @@
 # ex:ts=8 sw=4:
-# $OpenBSD: SharedLibs.pm,v 1.29 2007/06/20 13:44:40 espie Exp $
+# $OpenBSD: SharedLibs.pm,v 1.31 2007/10/06 12:13:41 steven Exp $
 #
 # Copyright (c) 2003-2005 Marc Espie <espie@openbsd.org>
 #
@@ -55,6 +55,7 @@ sub init_path($)
 				for my $d (split(/\:/o, $1)) {
 					$path->{$d} = 1;
 				}
+				last;
 			}
 		}
 		close($fh);
@@ -124,7 +125,7 @@ sub add_libs_from_installed_package
 	$done_plist->{$pkgname} = 1;
 	my $plist = OpenBSD::PackingList->from_installation($pkgname, 
 	    \&OpenBSD::PackingList::LibraryOnly);
-	next if !defined $plist;
+	return if !defined $plist;
 
 	$plist->mark_available_lib($pkgname);
 }

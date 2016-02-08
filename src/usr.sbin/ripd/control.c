@@ -1,4 +1,4 @@
-/*	$OpenBSD: control.c,v 1.3 2007/03/19 10:10:29 henning Exp $ */
+/*	$OpenBSD: control.c,v 1.6 2008/01/31 12:17:35 henning Exp $ */
 
 /*
  * Copyright (c) 2003, 2004 Henning Brauer <henning@openbsd.org>
@@ -128,6 +128,7 @@ control_accept(int listenfd, short event, void *bula)
 
 	if ((c = malloc(sizeof(struct ctl_conn))) == NULL) {
 		log_warn("control_accept");
+		close(connfd);
 		return;
 	}
 
@@ -186,7 +187,7 @@ control_dispatch_imsg(int fd, short event, void *bula)
 {
 	struct ctl_conn	*c;
 	struct imsg	 imsg;
-	int		 n;
+	ssize_t		 n;
 	unsigned int	 ifidx;
 
 	if ((c = control_connbyfd(fd)) == NULL) {
@@ -242,11 +243,6 @@ control_dispatch_imsg(int fd, short event, void *bula)
 			break;
 		case IMSG_CTL_KROUTE_ADDR:
 		case IMSG_CTL_KROUTE:
-			c->ibuf.pid = imsg.hdr.pid;
-			ripe_imsg_compose_parent(imsg.hdr.type,
-			    imsg.hdr.pid, imsg.data,
-			    imsg.hdr.len - IMSG_HEADER_SIZE);
-			break;
 		case IMSG_CTL_IFINFO:
 			c->ibuf.pid = imsg.hdr.pid;
 			ripe_imsg_compose_parent(imsg.hdr.type,

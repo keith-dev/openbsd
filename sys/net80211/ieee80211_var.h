@@ -1,4 +1,4 @@
-/*	$OpenBSD: ieee80211_var.h,v 1.32 2007/07/28 11:13:41 damien Exp $	*/
+/*	$OpenBSD: ieee80211_var.h,v 1.37 2007/11/17 14:05:01 damien Exp $	*/
 /*	$NetBSD: ieee80211_var.h,v 1.7 2004/05/06 03:07:10 dyoung Exp $	*/
 
 /*-
@@ -241,6 +241,7 @@ struct ieee80211com {
 	u_int			ic_edca_updtcount;
 	u_int8_t		ic_globalcnt[EAPOL_KEY_NONCE_LEN];
 	u_int64_t		ic_keyreplaycnt;
+	u_int8_t		ic_psk[IEEE80211_PMK_LEN];
 
 	u_int8_t		*ic_tim_bitmap;
 	u_int			ic_tim_len;
@@ -312,6 +313,8 @@ int	ieee80211_fix_rate(struct ieee80211com *, struct ieee80211_node *, int);
 int	ieee80211_rate2media(struct ieee80211com *, int,
 		enum ieee80211_phymode);
 int	ieee80211_media2rate(int);
+u_int8_t ieee80211_rate2plcp(u_int8_t, enum ieee80211_phymode);
+u_int8_t ieee80211_plcp2rate(u_int8_t, enum ieee80211_phymode);
 u_int	ieee80211_mhz2ieee(u_int, u_int);
 u_int	ieee80211_chan2ieee(struct ieee80211com *,
 		const struct ieee80211_channel *);

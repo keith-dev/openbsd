@@ -1,4 +1,4 @@
-#	$OpenBSD: genassym.cf,v 1.16 2007/05/28 23:10:10 beck Exp $
+#	$OpenBSD: genassym.cf,v 1.26 2008/02/14 19:07:56 kettenis Exp $
 #	$NetBSD: genassym.cf,v 1.23 2001/08/08 00:09:30 eeh Exp $
 
 #
@@ -93,11 +93,9 @@ include <machine/db_machdep.h>
 endif
 include <machine/pmap.h>
 include <machine/cpu.h>
+include <machine/mutex.h>
 
-include <machine/bsd_openprom.h>
 include <machine/reg.h>
-
-#include <sparc64/sparc64/cpuvar.h>
 
 ifdef notyet
 include <sparc64/dev/zsreg.h>
@@ -116,7 +114,9 @@ member	p_stat
 member	p_wchan
 member	p_vmspace
 member	p_pid
+member	p_cpu
 member	P_FPSTATE	p_md.md_fpstate
+member	P_MD_ASTPENDING	p_md.md_astpending
 
 export	SRUN
 export	SONPROC
@@ -144,6 +144,7 @@ member	faults
 
 # CPU info structure
 struct	cpu_info
+member	ci_self
 member	ci_curproc
 member	ci_cpcb
 member	ci_next
@@ -151,6 +152,8 @@ member	ci_fpproc
 member	ci_number
 member	ci_upaid
 member	ci_want_resched
+member	ci_handled_intr_level
+member	ci_intrpending
 member	ci_spinup
 member	ci_initstack
 member	ci_paddr
@@ -185,6 +188,7 @@ member	pcb_pstate
 member	pcb_cwp
 member	pcb_pil
 member	pcb_rw
+member	pcb_rwsp
 member	pcb_sp
 member	pcb_wcookie
 member	pcb_pc
@@ -230,7 +234,6 @@ member	ih_fun
 member	ih_arg
 member	ih_number
 member	ih_pil
-member	ih_busy
 member	IH_PEND		ih_pending
 member	ih_next
 member	ih_map
@@ -277,3 +280,8 @@ export	TLB_E
 export	TLB_P
 export	TLB_W
 export	TLB_G
+
+struct	mutex
+member	mtx_wantipl
+member	mtx_oldipl
+member	mtx_owner

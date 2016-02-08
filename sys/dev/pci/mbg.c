@@ -1,7 +1,7 @@
-/*	$OpenBSD: mbg.c,v 1.13 2007/03/22 16:55:31 deraadt Exp $ */
+/*	$OpenBSD: mbg.c,v 1.24 2007/11/26 19:44:43 mbalmer Exp $ */
 
 /*
- * Copyright (c) 2006 Marc Balmer <mbalmer@openbsd.org>
+ * Copyright (c) 2006, 2007 Marc Balmer <mbalmer@openbsd.org>
  *
  * Permission to use, copy, modify, and distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -37,11 +37,19 @@ struct mbg_softc {
 	bus_space_tag_t		sc_iot;
 	bus_space_handle_t	sc_ioh;
 
+	/*
+	 * I/O region used by the AMCC S5920 found on the PCI509 card
+	 * used to access the data.
+	 */
+	bus_space_tag_t		sc_iot_s5920;
+	bus_space_handle_t	sc_ioh_s5920;
+
 	struct ksensor		sc_timedelta;
 	struct ksensor		sc_signal;
 	struct ksensordev	sc_sensordev;
-	u_int8_t		sc_status;
-
+	struct timeout		sc_timeout;	/* invalidate sensor */
+	int			sc_trust;	/* trust time in ticks */
+	
 	int			(*sc_read)(struct mbg_softc *, int cmd,
 				    char *buf, size_t len,
 				    struct timespec *tstamp);
@@ -53,12 +61,20 @@ struct mbg_time {
 	u_int8_t		min;
 	u_int8_t		hour;
 	u_int8_t		mday;
-	u_int8_t		wday;
+	u_int8_t		wday;	/* 1 (monday) - 7 (sunday) */
 	u_int8_t		mon;
-	u_int8_t		year;
+	u_int8_t		year;	/* 0 - 99 */
 	u_int8_t		status;
 	u_int8_t		signal;
 	int8_t			utc_off;
+};
+
+struct mbg_time_hr {
+	u_int32_t		sec;		/* always UTC */
+	u_int32_t		frac;		/* fractions of second */
+	int32_t			utc_off;	/* informal only, in seconds */
+	u_int16_t		status;
+	u_int8_t		signal;
 };
 
 /* mbg_time.status bits */
@@ -69,8 +85,13 @@ struct mbg_time {
 #define MBG_UTC			0x10	/* special UTC firmware is installed */
 #define MBG_LEAP		0x20	/* announcement of a leap second */
 #define MBG_IFTM		0x40	/* current time was set from host */
-#define MBG_INVALID		0x80	/* time is invalid */
- 
+#define MBG_INVALID		0x80	/* time invalid, batt. was disconn. */
+
+/* AMCC S5920 registers */
+#define AMCC_DATA		0x00	/* data register, on 2nd IO region */
+#define AMCC_OMB		0x0c	/* outgoing mailbox */
+#define AMCC_IMB		0x1c	/* incoming mailbox */
+
 /* AMCC S5933 registers */
 #define AMCC_OMB1		0x00	/* outgoing mailbox 1 */
 #define AMCC_IMB4		0x1c	/* incoming mailbox 4 */
@@ -90,10 +111,19 @@ struct mbg_time {
 /* commands */
 #define MBG_GET_TIME		0x00
 #define MBG_GET_SYNC_TIME	0x02
-#define MBG_GET_HR_TIME		0x03
+#define MBG_GET_TIME_HR		0x03
+#define MBG_SET_TIME		0x10
+#define MBG_GET_TZCODE		0x32
+#define MBG_SET_TZCODE		0x33
 #define MBG_GET_FW_ID_1		0x40
 #define MBG_GET_FW_ID_2		0x41
 #define MBG_GET_SERNUM		0x42
+
+/* timezone codes (for MBG_{GET|SET}_TZCODE) */
+#define MBG_TZCODE_CET_CEST	0x00
+#define MBG_TZCODE_CET		0x01
+#define MBG_TZCODE_UTC		0x02
+#define MBG_TZCODE_EET_EEST	0x03
 
 /* misc. constants */
 #define MBG_FIFO_LEN		16
@@ -101,14 +131,22 @@ struct mbg_time {
 #define MBG_BUSY		0x01
 #define MBG_SIG_BIAS		55
 #define MBG_SIG_MAX		68
+#define NSECPERSEC		1000000000LL	/* nanoseconds per second */
+#define HRDIVISOR		0x100000000LL	/* for hi-res timestamp */
 
 int	mbg_probe(struct device *, void *, void *);
 void	mbg_attach(struct device *, struct device *, void *);
 void	mbg_task(void *);
+void	mbg_task_hr(void *);
+void	mbg_update_sensor(struct mbg_softc *sc, struct timespec *tstamp,
+	    int64_t timedelta, u_int8_t rsignal, u_int16_t status);
+int	mbg_read_amcc_s5920(struct mbg_softc *, int cmd, char *buf, size_t len,
+	    struct timespec *tstamp);
 int	mbg_read_amcc_s5933(struct mbg_softc *, int cmd, char *buf, size_t len,
 	    struct timespec *tstamp);
 int	mbg_read_asic(struct mbg_softc *, int cmd, char *buf, size_t len,
 	    struct timespec *tstamp);
+void	mbg_timeout(void *);
 
 struct cfattach mbg_ca = {
 	sizeof(struct mbg_softc), mbg_probe, mbg_attach
@@ -119,9 +157,11 @@ struct cfdriver mbg_cd = {
 };
 
 const struct pci_matchid mbg_devices[] = {
-	{ PCI_VENDOR_MEINBERG, PCI_PRODUCT_MEINBERG_GPS170 },
+	{ PCI_VENDOR_MEINBERG, PCI_PRODUCT_MEINBERG_GPS170PCI },
 	{ PCI_VENDOR_MEINBERG, PCI_PRODUCT_MEINBERG_PCI32 },
-	{ PCI_VENDOR_MEINBERG, PCI_PRODUCT_MEINBERG_PCI511 }
+	{ PCI_VENDOR_MEINBERG, PCI_PRODUCT_MEINBERG_PCI509 },
+	{ PCI_VENDOR_MEINBERG, PCI_PRODUCT_MEINBERG_PCI511 },
+	{ PCI_VENDOR_MEINBERG, PCI_PRODUCT_MEINBERG_PEX511 }
 };
 
 int
@@ -137,13 +177,23 @@ mbg_attach(struct device *parent, struct device *self, void *aux)
 	struct mbg_softc *sc = (struct mbg_softc *)self;
 	struct pci_attach_args *const pa = (struct pci_attach_args *)aux;
 	struct mbg_time tframe;
+	struct timeval tv_trust;
 	pcireg_t memtype;
-	bus_size_t iosize;
-	char fw_id[MBG_ID_LEN];
+	bus_size_t iosize, iosize2;
+	int bar = PCI_MAPREG_START, signal, t_trust;
 	const char *desc;
+#ifdef MBG_DEBUG
+	char fw_id[MBG_ID_LEN];
+#endif
 
-	memtype = pci_mapreg_type(pa->pa_pc, pa->pa_tag, PCI_MAPREG_START);
-	if (pci_mapreg_map(pa, PCI_MAPREG_START, memtype, 0, &sc->sc_iot,
+	timeout_set(&sc->sc_timeout, mbg_timeout, sc);
+
+	/* for the PEX511 use BAR2 instead of BAR0*/
+	if (PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_MEINBERG_PEX511)
+		bar += 0x08;
+
+	memtype = pci_mapreg_type(pa->pa_pc, pa->pa_tag, bar);
+	if (pci_mapreg_map(pa, bar, memtype, 0, &sc->sc_iot,
 	    &sc->sc_ioh, NULL, &iosize, 0)) {
 		printf(": PCI %s region not found\n",
 		    memtype == PCI_MAPREG_TYPE_IO ? "I/O" : "memory");
@@ -153,43 +203,6 @@ mbg_attach(struct device *parent, struct device *self, void *aux)
 	if ((desc = pci_findproduct(pa->pa_id)) == NULL)
 		desc = "Radio clock";
 	strlcpy(sc->sc_timedelta.desc, desc, sizeof(sc->sc_timedelta.desc));
-
-	switch (PCI_PRODUCT(pa->pa_id)) {
-	case PCI_PRODUCT_MEINBERG_PCI32:
-		sc->sc_read = mbg_read_amcc_s5933;
-		break;
-	case PCI_PRODUCT_MEINBERG_PCI511:
-		/* FALLTHROUGH */
-	case PCI_PRODUCT_MEINBERG_GPS170:
-		sc->sc_read = mbg_read_asic;
-		break;
-	default:
-		/* this can not normally happen, but then there is murphy */
-		panic(": unsupported product 0x%04x", PCI_PRODUCT(pa->pa_id));
-		break;
-	}	
-	if (sc->sc_read(sc, MBG_GET_FW_ID_1, fw_id, MBG_FIFO_LEN, NULL) ||
-	    sc->sc_read(sc, MBG_GET_FW_ID_2, &fw_id[MBG_FIFO_LEN], MBG_FIFO_LEN,
-	    NULL))
-		printf(": firmware unknown, ");
-	else {
-		fw_id[MBG_ID_LEN - 1] = '\0';
-		printf(": firmware %s, ", fw_id);
-	}
-
-	if (sc->sc_read(sc, MBG_GET_TIME, (char *)&tframe,
-	    sizeof(struct mbg_time), NULL)) {
-		printf("unknown status\n");
-		sc->sc_status = 0;
-	} else {
-		if (tframe.status & MBG_FREERUN)
-			printf("free running on xtal\n");
-		else if (tframe.status & MBG_SYNC)
-			printf("synchronised\n");
-		else if (tframe.status & MBG_INVALID)
-			printf("invalid\n");
-		sc->sc_status = tframe.status;
-	}
 
 	strlcpy(sc->sc_sensordev.xname, sc->sc_dev.dv_xname,
 	    sizeof(sc->sc_sensordev.xname));
@@ -204,14 +217,98 @@ mbg_attach(struct device *parent, struct device *self, void *aux)
 	sc->sc_signal.status = SENSOR_S_UNKNOWN;
 	sc->sc_signal.value = 0LL;
 	sc->sc_signal.flags = 0;
-	strlcpy(sc->sc_signal.desc, "Signal strength",
-	    sizeof(sc->sc_signal.desc));
+	strlcpy(sc->sc_signal.desc, "Signal", sizeof(sc->sc_signal.desc));
 	sensor_attach(&sc->sc_sensordev, &sc->sc_signal);
 
-	sensor_task_register(sc, mbg_task, 10);
+	t_trust = 12 * 60 * 60;		/* twelve hours */
+
+	switch (PCI_PRODUCT(pa->pa_id)) {
+	case PCI_PRODUCT_MEINBERG_PCI32:
+		sc->sc_read = mbg_read_amcc_s5933;
+		sensor_task_register(sc, mbg_task, 10);
+		break;
+	case PCI_PRODUCT_MEINBERG_PCI509:
+		/*
+		 * map the second I/O region needed in addition to the first
+		 * to get at the actual data.
+		 */
+		memtype = pci_mapreg_type(pa->pa_pc, pa->pa_tag,
+		    PCI_MAPREG_START + 0x04);
+		if (pci_mapreg_map(pa, PCI_MAPREG_START + 0x04, memtype, 0,
+		    &sc->sc_iot_s5920, &sc->sc_ioh_s5920, NULL, &iosize2, 0)) {
+			printf(": PCI2 %s region not found\n",
+			    memtype == PCI_MAPREG_TYPE_IO ? "I/O" : "memory");
+
+			/* unmap first mapped region as well if we fail */
+			bus_space_unmap(sc->sc_iot, sc->sc_ioh, iosize);
+			return;
+		}
+		sc->sc_read = mbg_read_amcc_s5920;
+		sensor_task_register(sc, mbg_task, 10);
+		break;
+	case PCI_PRODUCT_MEINBERG_PCI511:
+	case PCI_PRODUCT_MEINBERG_PEX511:
+		sc->sc_read = mbg_read_asic;
+		sensor_task_register(sc, mbg_task, 10);
+		break;
+	case PCI_PRODUCT_MEINBERG_GPS170PCI:
+		t_trust = 4 * 24 * 60 * 60;	/* four days */
+		sc->sc_read = mbg_read_asic;
+		sensor_task_register(sc, mbg_task_hr, 1);
+		break;
+	default:
+		/* this can not normally happen, but then there is murphy */
+		panic(": unsupported product 0x%04x", PCI_PRODUCT(pa->pa_id));
+		break;
+	}
+
+	tv_trust.tv_sec = t_trust;
+	tv_trust.tv_usec = 0L;
+	sc->sc_trust = tvtohz(&tv_trust);
+
+	if (sc->sc_read(sc, MBG_GET_TIME, (char *)&tframe,
+	    sizeof(struct mbg_time), NULL)) {
+		printf(": unknown status");
+		sc->sc_signal.status = SENSOR_S_CRIT;
+	} else {
+		sc->sc_signal.status = SENSOR_S_OK;
+		signal = tframe.signal - MBG_SIG_BIAS;
+		if (signal < 0)
+			signal = 0;
+		else if (signal > MBG_SIG_MAX)
+			signal = MBG_SIG_MAX;
+		sc->sc_signal.value = signal;
+
+		if (tframe.status & MBG_SYNC)
+			printf(": synchronized");
+		else
+			printf(": not synchronized");
+		if (tframe.status & MBG_FREERUN) {
+			sc->sc_signal.status = SENSOR_S_WARN;
+			printf(", free running");
+		}
+		if (tframe.status & MBG_IFTM)
+			printf(", time set from host");
+	}
+#ifdef MBG_DEBUG
+	if (sc->sc_read(sc, MBG_GET_FW_ID_1, fw_id, MBG_FIFO_LEN, NULL) ||
+	    sc->sc_read(sc, MBG_GET_FW_ID_2, &fw_id[MBG_FIFO_LEN], MBG_FIFO_LEN,
+	    NULL))
+		printf(", firmware unknown");
+	else {
+		fw_id[MBG_ID_LEN - 1] = '\0';
+		printf(", firmware %s", fw_id);
+	}
+#endif
+	printf("\n");
 	sensordev_install(&sc->sc_sensordev);
+	timeout_add(&sc->sc_timeout, sc->sc_trust);
 }
 
+/*
+ * mbg_task() reads a timestamp from cards that to not provide a high
+ * resolution timestamp.  The precision is limited to 1/100 sec.
+ */
 void
 mbg_task(void *arg)
 {
@@ -219,17 +316,16 @@ mbg_task(void *arg)
 	struct mbg_time tframe;
 	struct clock_ymdhms ymdhms;
 	struct timespec tstamp;
+	int64_t timedelta;
 	time_t trecv;
-	int signal;
 
 	if (sc->sc_read(sc, MBG_GET_TIME, (char *)&tframe, sizeof(tframe),
 	    &tstamp)) {
-		log(LOG_ERR, "%s: error reading time\n", sc->sc_dev.dv_xname);
+		sc->sc_signal.status = SENSOR_S_CRIT;
 		return;
 	}
 	if (tframe.status & MBG_INVALID) {
-		log(LOG_INFO, "%s: invalid time, battery was disconnected\n",
-		    sc->sc_dev.dv_xname);
+		sc->sc_signal.status = SENSOR_S_CRIT;
 		return;
 	}
 	ymdhms.dt_year = tframe.year + 2000;
@@ -240,37 +336,129 @@ mbg_task(void *arg)
 	ymdhms.dt_sec = tframe.sec;
 	trecv = clock_ymdhms_to_secs(&ymdhms) - tframe.utc_off * 3600;
 
-	sc->sc_timedelta.value = (int64_t)((tstamp.tv_sec - trecv) * 100
+	timedelta = (int64_t)((tstamp.tv_sec - trecv) * 100
 	    - tframe.hundreds) * 10000000LL + tstamp.tv_nsec;
-	sc->sc_timedelta.status = SENSOR_S_OK;
-	sc->sc_timedelta.tv.tv_sec = tstamp.tv_sec;
-	sc->sc_timedelta.tv.tv_usec = tstamp.tv_nsec / 1000;
 
-	signal = tframe.signal - MBG_SIG_BIAS;
+	mbg_update_sensor(sc, &tstamp, timedelta, tframe.signal,
+	    (u_int16_t)tframe.status);
+}
+
+/*
+ * mbg_task_hr() reads a timestamp from cards that do provide a high
+ * resolution timestamp.
+ */
+void
+mbg_task_hr(void *arg)
+{
+	struct mbg_softc *sc = (struct mbg_softc *)arg;
+	struct mbg_time_hr tframe;
+	struct timespec tstamp;
+	int64_t tlocal, trecv;
+
+	if (sc->sc_read(sc, MBG_GET_TIME_HR, (char *)&tframe, sizeof(tframe),
+	    &tstamp)) {
+		sc->sc_signal.status = SENSOR_S_CRIT;
+		return;
+	}
+	if (tframe.status & MBG_INVALID) {
+		sc->sc_signal.status = SENSOR_S_CRIT;
+		return;
+	}
+
+	tlocal = tstamp.tv_sec * NSECPERSEC + tstamp.tv_nsec;
+	trecv = letoh32(tframe.sec) * NSECPERSEC +
+	    (letoh32(tframe.frac) * NSECPERSEC >> 32);
+
+	mbg_update_sensor(sc, &tstamp, tlocal - trecv, tframe.signal,
+	    letoh16(tframe.status));
+}
+
+/* update the sensor value, common to all cards */
+void
+mbg_update_sensor(struct mbg_softc *sc, struct timespec *tstamp,
+    int64_t timedelta, u_int8_t rsignal, u_int16_t status)
+{
+	int signal;
+
+	sc->sc_timedelta.value = timedelta;
+	sc->sc_timedelta.tv.tv_sec = tstamp->tv_sec;
+	sc->sc_timedelta.tv.tv_usec = tstamp->tv_nsec / 1000;
+
+	signal = rsignal - MBG_SIG_BIAS;
 	if (signal < 0)
 		signal = 0;
 	else if (signal > MBG_SIG_MAX)
 		signal = MBG_SIG_MAX;
 
 	sc->sc_signal.value = signal * 100000 / MBG_SIG_MAX;
-	sc->sc_signal.status = SENSOR_S_OK;
+	sc->sc_signal.status = status & MBG_FREERUN ?
+	    SENSOR_S_WARN : SENSOR_S_OK;
 	sc->sc_signal.tv.tv_sec = sc->sc_timedelta.tv.tv_sec;
 	sc->sc_signal.tv.tv_usec = sc->sc_timedelta.tv.tv_usec;
-
-	if (tframe.status != sc->sc_status) {
-		if (tframe.status & MBG_SYNC)
-			log(LOG_INFO, "%s: clock is synchronized",
-			    sc->sc_dev.dv_xname);
-		else if (tframe.status & MBG_FREERUN)
-			log(LOG_INFO, "%s: clock is free running on xtal",
-			    sc->sc_dev.dv_xname);
-		sc->sc_status = tframe.status;
+	if (!(status & MBG_FREERUN)) {
+		sc->sc_timedelta.status = SENSOR_S_OK;
+		timeout_add(&sc->sc_timeout, sc->sc_trust);
 	}
 }
 
 /*
+ * send a command and read back results to an AMCC S5920 based card
+ * (e.g. the PCI509 DCF77 radio clock)
+ */
+int
+mbg_read_amcc_s5920(struct mbg_softc *sc, int cmd, char *buf, size_t len,
+    struct timespec *tstamp)
+{
+	long timer, tmax;
+	size_t quot, rem;
+	u_int32_t ul;
+	int n;
+	u_int8_t status;
+
+	quot = len / 4;
+	rem = len % 4;
+
+	/* write the command, optionally taking a timestamp */
+	if (tstamp)
+		nanotime(tstamp);
+	bus_space_write_1(sc->sc_iot, sc->sc_ioh, AMCC_OMB, cmd);
+
+	/* wait for the BUSY flag to go low (approx 70 us on i386) */
+	timer = 0;
+	tmax = cold ? 50 : hz / 10;
+	do {
+		if (cold)
+			delay(20);
+		else
+			tsleep(tstamp, 0, "mbg", 1);
+		status = bus_space_read_1(sc->sc_iot, sc->sc_ioh,
+		    AMCC_IMB4 + 3);
+	} while ((status & MBG_BUSY) && timer++ < tmax);
+
+	if (status & MBG_BUSY)
+		return -1;
+
+	/* read data from the device */
+	if (len) {
+		for (n = 0; n < quot; n++) {
+			*(u_int32_t *)buf = bus_space_read_4(sc->sc_iot_s5920,
+			    sc->sc_ioh_s5920, AMCC_DATA);
+			buf += sizeof(u_int32_t);
+		}
+		if (rem) {
+			ul =  bus_space_read_4(sc->sc_iot_s5920,
+			    sc->sc_ioh_s5920, AMCC_DATA);
+			for (n = 0; n < rem; n++)
+				*buf++ = *((char *)&ul + n);
+		}
+	} else
+		bus_space_read_4(sc->sc_iot_s5920, sc->sc_ioh_s5920, AMCC_DATA);
+	return 0;
+}
+
+/*
  * send a command and read back results to an AMCC S5933 based card
- * (i.e. the PCI32 DCF77 radio clock)
+ * (e.g. the PCI32 DCF77 radio clock)
  */
 int
 mbg_read_amcc_s5933(struct mbg_softc *sc, int cmd, char *buf, size_t len,
@@ -310,7 +498,6 @@ mbg_read_amcc_s5933(struct mbg_softc *sc, int cmd, char *buf, size_t len,
 	for (n = 0; n < len; n++) {
 		if (bus_space_read_2(sc->sc_iot, sc->sc_ioh, AMCC_MCSR)
 		    & 0x20) {
-			printf("%s: FIFO error\n", sc->sc_dev.dv_xname);
 			return -1;
 		}
 		buf[n] = bus_space_read_1(sc->sc_iot, sc->sc_ioh,
@@ -321,7 +508,7 @@ mbg_read_amcc_s5933(struct mbg_softc *sc, int cmd, char *buf, size_t len,
 
 /*
  * send a command and read back results to an ASIC based card
- * (i.e. the PCI511 DCF77 radio clock)
+ * (e.g. the PCI511 DCF77 radio clock)
  */
 int
 mbg_read_asic(struct mbg_softc *sc, int cmd, char *buf, size_t len,
@@ -330,8 +517,8 @@ mbg_read_asic(struct mbg_softc *sc, int cmd, char *buf, size_t len,
 	long timer, tmax;
 	size_t n;
 	u_int32_t data;
-	char *p = buf;
 	u_int16_t port;
+	char *p = buf;
 	u_int8_t status;
 	int s;
 
@@ -375,4 +562,24 @@ mbg_read_asic(struct mbg_softc *sc, int cmd, char *buf, size_t len,
 		}
 	}
 	return 0;
+}
+
+/*
+ * Degrade the sensor state if we are feerunning for more than
+ * TRUSTTIME seconds.
+ */
+void
+mbg_timeout(void *xsc)
+{
+	struct mbg_softc *sc = xsc;
+
+	if (sc->sc_timedelta.status == SENSOR_S_OK) {
+		sc->sc_timedelta.status = SENSOR_S_WARN;
+		/*
+		 * further degrade in TRUSTTIME seconds if no new valid NMEA
+		 * sentences are received.
+		 */
+		timeout_add(&sc->sc_timeout, sc->sc_trust);
+	} else
+		sc->sc_timedelta.status = SENSOR_S_CRIT;
 }

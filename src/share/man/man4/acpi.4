@@ -1,4 +1,4 @@
-.\"	$OpenBSD: acpi.4,v 1.23 2007/06/04 19:49:35 mk Exp $
+.\"	$OpenBSD: acpi.4,v 1.28 2007/12/05 19:17:12 deraadt Exp $
 .\"
 .\" Copyright (c) 2006 Alexander Yurchenko <grange@openbsd.org>
 .\"
@@ -14,17 +14,16 @@
 .\" ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
 .\" OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 .\"
-.Dd $Mdocdate: June 4 2007 $
+.Dd $Mdocdate: December 5 2007 $
 .Dt ACPI 4
 .Os
 .Sh NAME
 .Nm acpi
 .Nd Advanced Configuration and Power Interface
 .Sh SYNOPSIS
-.Cd "acpi0 at mainbus?"
+.Cd "acpi0 at bios?"
 .Pp
 .Cd "option ACPIVERBOSE"
-.Cd "option ACPI_ENABLE"
 .Sh DESCRIPTION
 The
 .Nm
@@ -36,18 +35,11 @@ If the configuration option
 .Dq Dv ACPIVERBOSE
 is set, information about all detected ACPI devices will be displayed
 on boot.
-.Pp
-If the configuration option
-.Dq Dv ACPI_ENABLE
-is set, the
+Userland may access
 .Nm
-driver will take control of ACPI from the firmware (BIOS).
-WARNING: this may cause an overheating on some machines since
-.Nm
-doesn't provide any thermal or cooling control.
-For thermal control, use
-.Xr acpitz 4
-to shut down the system when temperatures exceed critical limits.
+by using the
+.Xr apm 4
+device.
 .Pp
 The following devices can attach to
 .Nm :
@@ -76,7 +68,21 @@ ACPI power management timer
 .It Xr acpitz 4
 ACPI thermal zone
 .El
+.Sh FILES
+.Bl -tag -width "/dev/apmctlXXX"
+.It /dev/apm
+Power management data device.
+May only be opened read-only.
+May be opened by multiple concurrent users.
+.It /dev/apmctl
+Power management control device.
+May be opened read-write or write-only.
+May only be opened by one user at a time.
+An attempt to open the file when in use will fail, returning
+.Er EBUSY .
+.El
 .Sh SEE ALSO
+.Xr apm 4 ,
 .Xr intro 4
 .Sh HISTORY
 The

@@ -1,4 +1,4 @@
-/*	$OpenBSD: acpi_machdep.c,v 1.6 2007/02/22 07:39:55 jordan Exp $	*/
+/*	$OpenBSD: acpi_machdep.c,v 1.12 2008/02/05 22:00:54 marco Exp $	*/
 /*
  * Copyright (c) 2005 Thorsten Lockert <tholo@sigmasoft.com>
  *
@@ -25,17 +25,13 @@
 
 #include <machine/bus.h>
 #include <machine/biosvar.h>
+#include <machine/isa_machdep.h>
 
 #include <dev/isa/isareg.h>
 #include <dev/acpi/acpireg.h>
 #include <dev/acpi/acpivar.h>
 
 #include "ioapic.h"
-
-#if NIOAPIC > 0
-#include <machine/i82093var.h>
-#include <machine/mpbiosvar.h>
-#endif
 
 #define ACPI_BIOS_RSDP_WINDOW_BASE        0xe0000
 #define ACPI_BIOS_RSDP_WINDOW_SIZE        0x20000
@@ -94,7 +90,7 @@ acpi_scan(struct acpi_mem_map *handle, paddr_t pa, size_t len)
 			if (rsdp->revision == 0 &&
 			    acpi_checksum(ptr, sizeof(struct acpi_rsdp1)) == 0)
 				return (ptr);
-			else if (rsdp->revision == 2 &&
+			else if (rsdp->revision >= 2 && rsdp->revision <= 3 &&
 			    acpi_checksum(ptr, sizeof(struct acpi_rsdp)) == 0)
 				return (ptr);
 		}
@@ -104,7 +100,7 @@ acpi_scan(struct acpi_mem_map *handle, paddr_t pa, size_t len)
 }
 
 int
-acpi_probe(struct device *parent, struct cfdata *match, struct acpi_attach_args *aaa)
+acpi_probe(struct device *parent, struct cfdata *match, struct bios_attach_args *ba)
 {
 	struct acpi_mem_map handle;
 	u_int8_t *ptr;
@@ -147,7 +143,7 @@ acpi_probe(struct device *parent, struct cfdata *match, struct acpi_attach_args 
 	return (0);
 
 havebase:
-	aaa->aaa_pbase = ptr - handle.va + handle.pa;
+	ba->ba_acpipbase = ptr - handle.va + handle.pa;
 	acpi_unmap(&handle);
 
 	return (1);
@@ -156,22 +152,9 @@ havebase:
 void
 acpi_attach_machdep(struct acpi_softc *sc)
 {
-#ifdef ACPI_ENABLE
-	struct pic *pic;
-	int pin;
-	int irq;
+	extern void (*cpuresetfn)(void);
 
-	pic = &i8259_pic;
-	pin = sc->sc_fadt->sci_int;
-	irq = sc->sc_fadt->sci_int;
-#if NIOAPIC > 0
-	pic = (struct pic *)ioapic_find_bybase(sc->sc_fadt->sci_int);
-	if (pic == NULL) {
-		printf("error: can't establish ACPI interrupt!\n");
-		return;
-	}
-#endif
-	sc->sc_interrupt = intr_establish(irq, pic, pin, IST_LEVEL, IPL_TTY, 
-	    acpi_interrupt, sc, "acpi");
-#endif
+	sc->sc_interrupt = isa_intr_establish(NULL, sc->sc_fadt->sci_int,
+	    IST_LEVEL, IPL_TTY, acpi_interrupt, sc, sc->sc_dev.dv_xname);
+	cpuresetfn = acpi_reset;
 }

@@ -1,4 +1,4 @@
-/*	$OpenBSD: ifconfig.c,v 1.185 2007/07/31 06:37:48 pyr Exp $	*/
+/*	$OpenBSD: ifconfig.c,v 1.193 2008/02/05 22:57:30 mpf Exp $	*/
 /*	$NetBSD: ifconfig.c,v 1.40 1997/10/01 02:19:43 enami Exp $	*/
 
 /*
@@ -196,6 +196,8 @@ void	setcarp_vhid(const char *, int);
 void	setcarp_state(const char *, int);
 void	setcarpdev(const char *, int);
 void	unsetcarpdev(const char *, int);
+void	setcarp_nodes(const char *, int);
+void	setcarp_balancing(const char *, int);
 void	setpfsync_syncdev(const char *, int);
 void	setpfsync_maxupd(const char *, int);
 void	unsetpfsync_syncdev(const char *, int);
@@ -313,6 +315,8 @@ const struct	cmd {
 	{ "vhid",	NEXTARG,	0,		setcarp_vhid },
 	{ "state",	NEXTARG,	0,		setcarp_state },
 	{ "carpdev",	NEXTARG,	0,		setcarpdev },
+	{ "carpnodes",	NEXTARG,	0,		setcarp_nodes },
+	{ "balancing",	NEXTARG,	0,		setcarp_balancing },
 	{ "-carpdev",	1,		0,		unsetcarpdev },
 	{ "syncdev",	NEXTARG,	0,		setpfsync_syncdev },
 	{ "-syncdev",	1,		0,		unsetpfsync_syncdev },
@@ -896,7 +900,7 @@ list_cloners(void)
 	if (ioctl(s, SIOCIFGCLONERS, &ifcr) == -1)
 		err(1, "SIOCIFGCLONERS for count");
 
-	buf = malloc(ifcr.ifcr_total * IFNAMSIZ);
+	buf = calloc(ifcr.ifcr_total, IFNAMSIZ);
 	if (buf == NULL)
 		err(1, "unable to allocate cloner name buffer");
 
@@ -2307,7 +2311,7 @@ status(int link, struct sockaddr_dl *sdl)
 		goto proto_status;
 	}
 
-	media_list = (int *)malloc(ifmr.ifm_count * sizeof(int));
+	media_list = (int *)calloc(ifmr.ifm_count, sizeof(int));
 	if (media_list == NULL)
 		err(1, "malloc");
 	ifmr.ifm_ulist = media_list;
@@ -2883,12 +2887,14 @@ unsetvlandev(const char *val, int d)
 }
 
 static const char *carp_states[] = { CARP_STATES };
+static const char *carp_bal_modes[] = { CARP_BAL_MODES };
 
 void
 carp_status(void)
 {
-	const char *state;
+	const char *state, *balmode;
 	struct carpreq carpr;
+	int i;
 
 	memset((char *)&carpr, 0, sizeof(struct carpreq));
 	ifr.ifr_data = (caddr_t)&carpr;
@@ -2896,16 +2902,36 @@ carp_status(void)
 	if (ioctl(s, SIOCGVH, (caddr_t)&ifr) == -1)
 		return;
 
-	if (carpr.carpr_vhid > 0) {
-		if (carpr.carpr_state > CARP_MAXSTATE)
+	if (carpr.carpr_vhids[0] == 0)
+		return;
+
+	if (carpr.carpr_balancing > CARP_BAL_MAXID)
+		balmode = "<UNKNOWN>";
+	else
+		balmode = carp_bal_modes[carpr.carpr_balancing];
+
+	for (i = 0; carpr.carpr_vhids[i]; i++) {
+		if (carpr.carpr_states[i] > CARP_MAXSTATE)
 			state = "<UNKNOWN>";
 		else
-			state = carp_states[carpr.carpr_state];
-
-		printf("\tcarp: %s carpdev %s vhid %d advbase %d advskew %d\n",
-		    state, carpr.carpr_carpdev[0] != '\0' ?
-		    carpr.carpr_carpdev : "none", carpr.carpr_vhid,
-		    carpr.carpr_advbase, carpr.carpr_advskew);
+			state = carp_states[carpr.carpr_states[i]];
+		if (carpr.carpr_vhids[1] == 0) {
+			printf("\tcarp: %s carpdev %s vhid %u advbase %d "
+			    "advskew %u\n", state,
+			    carpr.carpr_carpdev[0] != '\0' ?
+		    	    carpr.carpr_carpdev : "none", carpr.carpr_vhids[0],
+		    	    carpr.carpr_advbase, carpr.carpr_advskews[0]);
+		} else {
+			if (i == 0) {
+				printf("\tcarp: carpdev %s advbase %d"
+				    " balancing %s\n",
+				    carpr.carpr_carpdev[0] != '\0' ?
+				    carpr.carpr_carpdev : "none",
+				    carpr.carpr_advbase, balmode);
+			}
+			printf("\t\tstate %s vhid %u advskew %u\n", state,
+			    carpr.carpr_vhids[i], carpr.carpr_advskews[i]);
+		}
 	}
 }
 
@@ -2936,7 +2962,7 @@ setcarp_vhid(const char *val, int d)
 	struct carpreq carpr;
 	int vhid;
 
-	vhid = strtonum(val, 0, 255, &errmsg);
+	vhid = strtonum(val, 1, 255, &errmsg);
 	if (errmsg)
 		errx(1, "vhid %s: %s", val, errmsg);
 
@@ -2946,7 +2972,8 @@ setcarp_vhid(const char *val, int d)
 	if (ioctl(s, SIOCGVH, (caddr_t)&ifr) == -1)
 		err(1, "SIOCGVH");
 
-	carpr.carpr_vhid = vhid;
+	carpr.carpr_vhids[0] = vhid;
+	carpr.carpr_vhids[1] = 0;
 
 	if (ioctl(s, SIOCSVH, (caddr_t)&ifr) == -1)
 		err(1, "SIOCSVH");
@@ -2970,7 +2997,7 @@ setcarp_advskew(const char *val, int d)
 	if (ioctl(s, SIOCGVH, (caddr_t)&ifr) == -1)
 		err(1, "SIOCGVH");
 
-	carpr.carpr_advskew = advskew;
+	carpr.carpr_advskews[0] = advskew;
 
 	if (ioctl(s, SIOCSVH, (caddr_t)&ifr) == -1)
 		err(1, "SIOCSVH");
@@ -3054,6 +3081,73 @@ unsetcarpdev(const char *val, int d)
 		err(1, "SIOCGVH");
 
 	bzero((char *)&carpr.carpr_carpdev, sizeof(carpr.carpr_carpdev));
+
+	if (ioctl(s, SIOCSVH, (caddr_t)&ifr) == -1)
+		err(1, "SIOCSVH");
+}
+
+void
+setcarp_nodes(const char *val, int d)
+{
+	char *str;
+	int i;
+	struct carpreq carpr;
+
+	bzero((char *)&carpr, sizeof(struct carpreq));
+	ifr.ifr_data = (caddr_t)&carpr;
+
+	if (ioctl(s, SIOCGVH, (caddr_t)&ifr) == -1)
+		err(1, "SIOCGVH");
+
+	bzero(carpr.carpr_vhids, sizeof(carpr.carpr_vhids));
+	bzero(carpr.carpr_advskews, sizeof(carpr.carpr_advskews));
+
+	str = strdup(val);
+	if (str == NULL)
+		err(1, "strdup");
+
+	for (i = 0; (str = strtok(str, ",")) != NULL; str = NULL) {
+		u_int vhid, advskew;
+		if (i > CARP_MAXNODES)
+			errx(1, "too many carp nodes");
+		if (sscanf(str, "%u:%u", &vhid, &advskew) != 2) {
+			errx(1, "non parsable arg: %s", str);
+		}
+		if (vhid >= 255)
+			errx(1, "vhid %u: value too large", vhid);
+		if (advskew >= 255)
+			errx(1, "advskew %u: value too large", advskew);
+
+		carpr.carpr_vhids[i] = vhid;
+		carpr.carpr_advskews[i] = advskew;
+		i++;
+	}
+	free(str);
+
+	if (ioctl(s, SIOCSVH, (caddr_t)&ifr) == -1)
+		err(1, "SIOCSVH");
+}
+
+void
+setcarp_balancing(const char *val, int d)
+{
+	int i;
+	struct carpreq carpr;
+
+	bzero((char *)&carpr, sizeof(struct carpreq));
+	ifr.ifr_data = (caddr_t)&carpr;
+
+	if (ioctl(s, SIOCGVH, (caddr_t)&ifr) == -1)
+		err(1, "SIOCGVH");
+
+	for (i = 0; i <= CARP_BAL_MAXID; i++)
+		if (!strcasecmp(val, carp_bal_modes[i]))
+			break;
+
+	if (i > CARP_BAL_MAXID)
+		errx(1, "balancing %s: unknown mode", val);
+
+	carpr.carpr_balancing = i;
 
 	if (ioctl(s, SIOCSVH, (caddr_t)&ifr) == -1)
 		err(1, "SIOCSVH");
@@ -3452,7 +3546,8 @@ sppp_printproto(const char *name, struct sauth *auth)
 		printf("0x%04x ", auth->proto);
 		break;
 	}
-	printf("%sname \"%.*s\" ", name, AUTHNAMELEN, auth->name);
+	if (auth->name[0])
+		printf("%sname \"%.*s\" ", name, AUTHNAMELEN, auth->name);
 }
 
 void
@@ -3865,6 +3960,8 @@ getifgroups(void)
 	}
 	if (cnt)
 		printf("\n");
+
+	free(ifgr.ifgr_groups);
 }
 
 #ifdef INET6

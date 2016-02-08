@@ -1,4 +1,4 @@
-/*	$OpenBSD: tables.c,v 1.3 2004/04/18 00:43:27 deraadt Exp $	*/
+/*	$OpenBSD: tables.c,v 1.5 2007/10/29 16:51:02 krw Exp $	*/
 
 /* Tables of information... */
 
@@ -324,7 +324,13 @@ struct option dhcp_options[256] = {
  * Default dhcp option priority list (this is ad hoc and should not be
  * mistaken for a carefully crafted and optimized list).
  */
-unsigned char dhcp_option_default_priority_list[] = {
+
+unsigned char dhcp_option_default_priority_list[256] = {
+	DHO_DHCP_MESSAGE_TYPE,		/* Mandatory */
+	DHO_DHCP_SERVER_IDENTIFIER,	/* Mandatory */
+	DHO_DHCP_LEASE_TIME,		/* Mandatory */
+	DHO_DHCP_MESSAGE,		/* Mandatory */
+	DHO_END,			/* End of mandatory options. */
 	DHO_DHCP_REQUESTED_ADDRESS,
 	DHO_DHCP_OPTION_OVERLOAD,
 	DHO_DHCP_MAX_MESSAGE_SIZE,
@@ -344,7 +350,6 @@ unsigned char dhcp_option_default_priority_list[] = {
 	DHO_LPR_SERVERS,
 	DHO_IMPRESS_SERVERS,
 	DHO_RESOURCE_LOCATION_SERVERS,
-	DHO_HOST_NAME,
 	DHO_BOOT_SIZE,
 	DHO_MERIT_DUMP,
 	DHO_DOMAIN_NAME,
@@ -383,29 +388,31 @@ unsigned char dhcp_option_default_priority_list[] = {
 	DHO_FONT_SERVERS,
 	DHO_X_DISPLAY_MANAGER,
 	DHO_DHCP_PARAMETER_REQUEST_LIST,
+	DHO_DHCP_USER_CLASS_ID,
+	DHO_PAD,
 
 	/* Presently-undefined options... */
-	62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76,
-	78, 79, 80, 81, 82, 83, 84, 85, 86, 87, 88, 89, 90, 91, 92,
-	93, 94, 95, 96, 97, 98, 99, 100, 101, 102, 103, 104, 105, 106,
-	107, 108, 109, 110, 111, 112, 113, 114, 115, 116, 117, 118,
-	119, 120, 121, 122, 123, 124, 125, 126, 127, 128, 129, 130,
-	131, 132, 133, 134, 135, 136, 137, 138, 139, 140, 141, 142,
-	143, 144, 145, 146, 147, 148, 149, 150, 151, 152, 153, 154,
-	155, 156, 157, 158, 159, 160, 161, 162, 163, 164, 165, 166,
-	167, 168, 169, 170, 171, 172, 173, 174, 175, 176, 177, 178,
-	179, 180, 181, 182, 183, 184, 185, 186, 187, 188, 189, 190,
-	191, 192, 193, 194, 195, 196, 197, 198, 199, 200, 201, 202,
-	203, 204, 205, 206, 207, 208, 209, 210, 211, 212, 213, 214,
-	215, 216, 217, 218, 219, 220, 221, 222, 223, 224, 225, 226,
-	227, 228, 229, 230, 231, 232, 233, 234, 235, 236, 237, 238,
-	239, 240, 241, 242, 243, 244, 245, 246, 247, 248, 249, 250,
-	251, 252, 253, 254,
+	           62,  63,  64,  65,  66,  67,  68,  69,
+	 70,  71,  72,  73,  74,  75,  76,       78,  79,
+	 80,  81,  82,  83,  84,  85,  86,  87,  88,  89,
+	 90,  91,  92,  93,  94,  95,  96,  97,  98,  99,
+	100, 101, 102, 103, 104, 105, 106, 107, 108, 109,
+	110, 111, 112, 113, 114, 115, 116, 117, 118, 119,
+	120, 121, 122, 123, 124, 125, 126, 127, 128, 129,
+	130, 131, 132, 133, 134, 135, 136, 137, 138, 139,
+	140, 141, 142, 143, 144, 145, 146, 147, 148, 149,
+	150, 151, 152, 153, 154, 155, 156, 157, 158, 159,
+	160, 161, 162, 163, 164, 165, 166, 167, 168, 169,
+	170, 171, 172, 173, 174, 175, 176, 177, 178, 179,
+	180, 181, 182, 183, 184, 185, 186, 187, 188, 189,
+	190, 191, 192, 193, 194, 195, 196, 197, 198, 199,
+	200, 201, 202, 203, 204, 205, 206, 207, 208, 209,
+	210, 211, 212, 213, 214, 215, 216, 217, 218, 219,
+	220, 221, 222, 223, 224, 225, 226, 227, 228, 229,
+	230, 231, 232, 233, 234, 235, 236, 237, 238, 239,
+	240, 241, 242, 243, 244, 245, 246, 247, 248, 249,
+	250, 251, 252, 253, 254
 };
-
-int sizeof_dhcp_option_default_priority_list =
-	sizeof(dhcp_option_default_priority_list);
-
 
 char *hardware_types[] = {
 	"unknown-0",

@@ -1,4 +1,4 @@
-/*	$OpenBSD: bgpd.h,v 1.218 2007/05/28 17:26:33 henning Exp $ */
+/*	$OpenBSD: bgpd.h,v 1.222 2008/01/23 08:11:32 claudio Exp $ */
 
 /*
  * Copyright (c) 2003, 2004 Henning Brauer <henning@openbsd.org>
@@ -346,6 +346,7 @@ enum imsg_type {
 	IMSG_CTL_SHOW_NETWORK6,
 	IMSG_CTL_SHOW_RIB_MEM,
 	IMSG_CTL_SHOW_TERSE,
+	IMSG_CTL_SHOW_TIMER,
 	IMSG_REFRESH,
 	IMSG_IFINFO,
 	IMSG_DEMOTE
@@ -447,7 +448,7 @@ struct kroute_nexthop {
 
 struct kif {
 	char			 ifname[IFNAMSIZ];
-	u_long			 baudrate;
+	u_int64_t		 baudrate;
 	int			 flags;
 	u_short			 ifindex;
 	u_int8_t		 media_type;
@@ -479,6 +480,7 @@ struct ctl_show_nexthop {
 struct ctl_neighbor {
 	struct bgpd_addr	addr;
 	char			descr[PEER_DESCR_LEN];
+	int			show_timers;
 };
 
 struct kroute_label {
@@ -600,6 +602,24 @@ struct filter_peers {
 #define	COMMUNITY_NO_ADVERTISE		0xff02
 #define	COMMUNITY_NO_EXPSUBCONFED	0xff03
 #define	COMMUNITY_NO_PEER		0xff04	/* RFC 3765 */
+
+/* extended community definitions */
+#define EXT_COMMUNITY_IANA		0x80
+#define EXT_COMMUNITY_TRANSITIVE	0x40
+#define EXT_COMMUNITY_VALUE		0x3f
+/* extended types */
+#define EXT_COMMUNITY_TWO_AS		0	/* 2 octet AS specific */
+#define EXT_COMMUNITY_IPV4		1	/* IPv4 specific */
+#define EXT_COMMUNITY_FOUR_AS		2	/* 4 octet AS specific */
+#define EXT_COMMUNITY_OPAQUE		3	/* opaque ext community */
+/* sub types */
+#define EXT_COMMUNITY_ROUTE_TGT		2	/* RFC 4360 & RFC4364 */
+#define EXT_CUMMUNITY_ROUTE_ORIG	3	/* RFC 4360 & RFC4364 */
+#define EXT_COMMUNITY_OSPF_DOM_ID	5	/* RFC 4577 */
+#define EXT_COMMUNITY_OSPF_RTR_TYPE	6	/* RFC 4577 */
+#define EXT_COMMUNITY_OSPF_RTR_ID	7	/* RFC 4577 */
+#define EXT_COMMUNITY_BGP_COLLECT	8	/* RFC 4384 */
+
 
 struct filter_prefix {
 	struct bgpd_addr	addr;
@@ -738,7 +758,6 @@ void		 fatalx(const char *) __dead;
 int	 cmdline_symset(char *);
 
 /* config.c */
-int	 check_file_secrecy(int, const char *);
 int	 host(const char *, struct bgpd_addr *, u_int8_t *);
 
 /* imsg.c */

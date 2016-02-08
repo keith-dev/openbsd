@@ -1,4 +1,4 @@
-/*	$OpenBSD: newfs.c,v 1.69 2007/06/26 19:03:21 otto Exp $	*/
+/*	$OpenBSD: newfs.c,v 1.75 2008/01/29 13:02:31 krw Exp $	*/
 /*	$NetBSD: newfs.c,v 1.20 1996/05/16 07:13:03 thorpej Exp $	*/
 
 /*
@@ -157,7 +157,7 @@ main(int argc, char *argv[])
 	char *cp = NULL, *s1, *s2, *special, *opstring;
 #ifdef MFS
 	char mountfromname[BUFSIZ];
-	char *pop = NULL;
+	char *pop = NULL, node[MAXPATHLEN];
 	pid_t pid, res;
 	struct statfs sf;
 	struct stat mountpoint;
@@ -170,7 +170,7 @@ main(int argc, char *argv[])
 	char **saveargv = argv;
 	int ffsflag = 1;
 	const char *errstr;
-
+	
 	if (strstr(__progname, "mfs"))
 		mfs = Nflag = quiet = 1;
 
@@ -257,7 +257,8 @@ main(int argc, char *argv[])
 					reqopt = opt = FS_OPTTIME;
 				else
 					fatal("%s: unknown optimization "
-					    "preference: use `space' or `time'.");
+					    "preference: use `space' or `time'.",
+					    optarg);
 			}
 			break;
 		case 'q':
@@ -299,6 +300,7 @@ main(int argc, char *argv[])
 	}
 
 	special = argv[0];
+
 	if (!mfs) {
 		char execname[MAXPATHLEN], name[MAXPATHLEN];
 
@@ -468,8 +470,10 @@ havelabel:
 	}
 #ifdef MFS
 	if (mfs) {
-		if (stat(argv[1], &mountpoint) < 0)
-			err(88, "stat %s", argv[1]);
+		if (realpath(argv[1], node) == NULL)
+			err(1, "realpath %s", argv[1]);
+		if (stat(node, &mountpoint) < 0)
+			err(ECANCELED, "stat %s", node);
 		mfsuid = mountpoint.st_uid;
 		mfsgid = mountpoint.st_gid;
 		mfsmode = mountpoint.st_mode & ALLPERMS;
@@ -518,28 +522,28 @@ havelabel:
 				 * can mount a filesystem which hides our
 				 * ramdisk before we see the success.
 				 */
-				if (statfs(argv[1], &sf) < 0)
-					err(88, "statfs %s", argv[1]);
+				if (statfs(node, &sf) < 0)
+					err(ECANCELED, "statfs %s", node);
 				if (!strcmp(sf.f_mntfromname, mountfromname) &&
-				    !strncmp(sf.f_mntonname, argv[1],
+				    !strncmp(sf.f_mntonname, node,
 					     MNAMELEN) &&
 				    !strcmp(sf.f_fstypename, "mfs")) {
 					if (pop != NULL)
-						copy(pop, argv[1], &args);
+						copy(pop, node, &args);
 					exit(0);
 				}
 				res = waitpid(pid, &status, WNOHANG);
 				if (res == -1)
-					err(11, "waitpid");
+					err(EDEADLK, "waitpid");
 				if (res != pid)
 					continue;
 				if (WIFEXITED(status)) {
 					if (WEXITSTATUS(status) == 0)
 						exit(0);
-					errx(1, "%s: mount: %s", argv[1],
+					errx(1, "%s: mount: %s", node,
 					     strerror(WEXITSTATUS(status)));
 				} else
-					errx(11, "abnormal termination");
+					errx(EDEADLK, "abnormal termination");
 			}
 			/* NOTREACHED */
 		}
@@ -553,7 +557,7 @@ havelabel:
 		args.fspec = mountfromname;
 		if (mntflags & MNT_RDONLY && pop != NULL)
 			mntflags &= ~MNT_RDONLY;
-		if (mount(MOUNT_MFS, argv[1], mntflags, &args) < 0)
+		if (mount(MOUNT_MFS, node, mntflags, &args) < 0)
 			exit(errno); /* parent prints message */
 	}
 #endif
@@ -626,7 +630,7 @@ rewritelabel(char *s, int fd, struct disklabel *lp)
 			if (lseek(cfd, offset, SEEK_SET) == -1)
 				fatal("lseek to badsector area: %s",
 				    strerror(errno));
-			if (write(cfd, blk, lp->d_secsize) < lp->d_secsize)
+			if (write(cfd, blk, lp->d_secsize) != lp->d_secsize)
 				warn("alternate label %d write", i/2);
 		}
 		close(cfd);
@@ -660,7 +664,7 @@ usage(void)
 
 	if (mfs) {
 	    fprintf(stderr,
-	        "usage: %s [-b block-size] [-c fragements-per-cylinder-group] "
+	        "usage: %s [-b block-size] [-c fragments-per-cylinder-group] "
 		"[-e maxbpg]\n"
 		"\t[-f frag-size] [-i bytes] [-m free space] [-o options] "
 		"[-P file]\n"

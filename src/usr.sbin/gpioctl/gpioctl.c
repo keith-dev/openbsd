@@ -1,4 +1,4 @@
-/*	$OpenBSD: gpioctl.c,v 1.5 2007/03/18 16:16:56 deraadt Exp $	*/
+/*	$OpenBSD: gpioctl.c,v 1.7 2007/11/17 16:55:05 mbalmer Exp $	*/
 /*
  * Copyright (c) 2004 Alexander Yurchenko <grange@openbsd.org>
  *
@@ -55,6 +55,9 @@ const struct bitstr {
 	{ GPIO_PIN_PUSHPULL, "pp" },
 	{ GPIO_PIN_TRISTATE, "tri" },
 	{ GPIO_PIN_PULLUP, "pu" },
+	{ GPIO_PIN_PULLDOWN, "pd" },
+	{ GPIO_PIN_INVIN, "iin" },
+	{ GPIO_PIN_INVOUT, "iout" },
 	{ 0, NULL },
 };
 

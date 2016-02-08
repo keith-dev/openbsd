@@ -1,4 +1,4 @@
-/*	$OpenBSD: audioio.h,v 1.16 2005/12/14 13:59:04 fgsch Exp $	*/
+/*	$OpenBSD: audioio.h,v 1.18 2007/10/03 21:49:13 jakemsr Exp $	*/
 /*	$NetBSD: audioio.h,v 1.24 1998/08/13 06:28:41 mrg Exp $	*/
 
 /*
@@ -74,7 +74,8 @@ struct audio_info {
 	u_int	blocksize;	/* H/W read/write block size */
 	u_int	hiwat;		/* output high water mark */
 	u_int	lowat;		/* output low water mark */
-	u_int	_ispare1;
+	u_char	output_muted;	/* toggle play mute */
+	u_char	cspare[3];
 	u_int	mode;		/* current device mode */
 #define AUMODE_PLAY	0x01
 #define AUMODE_RECORD	0x02
@@ -84,6 +85,14 @@ typedef struct audio_info audio_info_t;
 
 #define AUDIO_INITINFO(p) \
 	(void)memset((void *)(p), 0xff, sizeof(struct audio_info))
+
+struct audio_bufinfo {
+	u_int	blksize;	/* block size */
+	u_int	hiwat;		/* high water mark */
+	u_int	lowat;		/* low water mark */
+	u_int	seek;		/* current position */
+};
+typedef struct audio_bufinfo audio_bufinfo_t;
 
 /*
  * Parameter for the AUDIO_GETDEV ioctl to determine current
@@ -182,6 +191,8 @@ typedef struct audio_encoding {
 #define  AUDIO_PROP_FULLDUPLEX	0x01
 #define  AUDIO_PROP_MMAP	0x02
 #define  AUDIO_PROP_INDEPENDENT	0x04
+#define AUDIO_GETPRINFO	_IOR('A', 35, struct audio_bufinfo)
+#define AUDIO_GETRRINFO	_IOR('A', 36, struct audio_bufinfo)
 
 /*
  * Mixer device

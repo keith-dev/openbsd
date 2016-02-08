@@ -1,4 +1,4 @@
-/*	$OpenBSD: scsiconf.h,v 1.87 2007/06/23 19:19:49 krw Exp $	*/
+/*	$OpenBSD: scsiconf.h,v 1.90 2007/12/29 00:45:26 dlg Exp $	*/
 /*	$NetBSD: scsiconf.h,v 1.35 1997/04/02 02:29:38 mycroft Exp $	*/
 
 /*
@@ -88,6 +88,7 @@
 struct buf;
 struct scsi_xfer;
 struct scsi_link;
+struct scsibus_softc;
 
 /*
  * Temporary hack
@@ -102,8 +103,8 @@ extern int scsi_autoconf;
 struct scsi_adapter {
 	int		(*scsi_cmd)(struct scsi_xfer *);
 	void		(*scsi_minphys)(struct buf *);
-	int		(*open_target_lu)(void);
-	int		(*close_target_lu)(void);
+	int		(*dev_probe)(struct scsi_link *);
+	void		(*dev_free)(struct scsi_link *);
 	int		(*ioctl)(struct scsi_link *, u_long, caddr_t, int,
 			    struct proc *);
 };
@@ -175,6 +176,7 @@ struct scsi_link {
 	void	*device_softc;		/* needed for call to foo_start */
 	struct	scsi_adapter *adapter;	/* adapter entry points etc. */
 	void	*adapter_softc;		/* needed for call to foo_scsi_cmd */
+	struct	scsibus_softc *bus;	/* link to the scsibus we're on */
 	struct	scsi_inquiry_data inqdata; /* copy of INQUIRY data from probe */
 };
 

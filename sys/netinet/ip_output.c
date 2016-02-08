@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip_output.c,v 1.188 2007/07/20 19:00:35 claudio Exp $	*/
+/*	$OpenBSD: ip_output.c,v 1.190 2007/10/29 16:19:23 chl Exp $	*/
 /*	$NetBSD: ip_output.c,v 1.28 1996/02/13 23:43:07 christos Exp $	*/
 
 /*
@@ -1303,8 +1303,7 @@ ip_ctloutput(op, so, level, optname, mp)
 				}
 			}
 
-			MALLOC(ipr, struct ipsec_ref *,
-			       sizeof(struct ipsec_ref) + m->m_len - 2,
+			ipr = malloc(sizeof(struct ipsec_ref) + m->m_len - 2,
 			       M_CREDENTIALS, M_NOWAIT);
 			if (ipr == NULL) {
 				error = ENOBUFS;
@@ -1323,7 +1322,7 @@ ip_ctloutput(op, so, level, optname, mp)
 				if (ipr->ref_type < IPSP_IDENTITY_PREFIX ||
 				    ipr->ref_type > IPSP_IDENTITY_CONNECTION ||
 				    ((char *)(ipr + 1))[ipr->ref_len - 1]) {
-					FREE(ipr, M_CREDENTIALS);
+					free(ipr, M_CREDENTIALS);
 					error = EINVAL;
 				} else {
 					if (inp->inp_ipo->ipo_srcid != NULL)
@@ -1336,7 +1335,7 @@ ip_ctloutput(op, so, level, optname, mp)
 				if (ipr->ref_type < IPSP_IDENTITY_PREFIX ||
 				    ipr->ref_type > IPSP_IDENTITY_CONNECTION ||
 				    ((char *)(ipr + 1))[ipr->ref_len - 1]) {
-					FREE(ipr, M_CREDENTIALS);
+					free(ipr, M_CREDENTIALS);
 					error = EINVAL;
 				} else {
 					if (inp->inp_ipo->ipo_dstid != NULL)
@@ -1347,7 +1346,7 @@ ip_ctloutput(op, so, level, optname, mp)
 			case IP_IPSEC_LOCAL_CRED:
 				if (ipr->ref_type < IPSP_CRED_KEYNOTE ||
 				    ipr->ref_type > IPSP_CRED_X509) {
-					FREE(ipr, M_CREDENTIALS);
+					free(ipr, M_CREDENTIALS);
 					error = EINVAL;
 				} else {
 					if (inp->inp_ipo->ipo_local_cred != NULL)
@@ -1358,7 +1357,7 @@ ip_ctloutput(op, so, level, optname, mp)
 			case IP_IPSEC_LOCAL_AUTH:
 				if (ipr->ref_type < IPSP_AUTH_PASSPHRASE ||
 				    ipr->ref_type > IPSP_AUTH_RSA) {
-					FREE(ipr, M_CREDENTIALS);
+					free(ipr, M_CREDENTIALS);
 					error = EINVAL;
 				} else {
 					if (inp->inp_ipo->ipo_local_auth != NULL)
@@ -1703,6 +1702,7 @@ ip_setmoptions(optname, imop, m)
 	struct ip_mreq *mreq;
 	struct ifnet *ifp;
 	struct ip_moptions *imo = *imop;
+	struct in_multi **immp;
 	struct route ro;
 	struct sockaddr_in *dst;
 
@@ -1712,13 +1712,17 @@ ip_setmoptions(optname, imop, m)
 		 * allocate one and initialize to default values.
 		 */
 		imo = (struct ip_moptions *)malloc(sizeof(*imo), M_IPMOPTS,
-		    M_WAITOK);
-
+		    M_WAITOK|M_ZERO);
+		immp = (struct in_multi **)malloc(
+		    (sizeof(*immp) * IP_MIN_MEMBERSHIPS), M_IPMOPTS,
+		    M_WAITOK|M_ZERO);
 		*imop = imo;
 		imo->imo_multicast_ifp = NULL;
 		imo->imo_multicast_ttl = IP_DEFAULT_MULTICAST_TTL;
 		imo->imo_multicast_loop = IP_DEFAULT_MULTICAST_LOOP;
 		imo->imo_num_memberships = 0;
+		imo->imo_max_memberships = IP_MIN_MEMBERSHIPS;
+		imo->imo_membership = immp;
 	}
 
 	switch (optname) {
@@ -1834,9 +1838,34 @@ ip_setmoptions(optname, imop, m)
 			error = EADDRINUSE;
 			break;
 		}
-		if (i == IP_MAX_MEMBERSHIPS) {
-			error = ETOOMANYREFS;
-			break;
+		if (imo->imo_num_memberships == imo->imo_max_memberships) {
+			struct in_multi **nmships, **omships;
+			size_t newmax;
+			/*
+			 * Resize the vector to next power-of-two minus 1. If the
+			 * size would exceed the maximum then we know we've really
+			 * run out of entries. Otherwise, we reallocate the vector.
+			 */
+			nmships = NULL;
+			omships = imo->imo_membership;
+			newmax = ((imo->imo_max_memberships + 1) * 2) - 1;
+			if (newmax <= IP_MAX_MEMBERSHIPS) {
+				nmships = (struct in_multi **)malloc(
+				    sizeof(*nmships) * newmax, M_IPMOPTS,
+				    M_NOWAIT|M_ZERO);
+				if (nmships != NULL) {
+					bcopy(omships, nmships,
+					    sizeof(*omships) *
+					    imo->imo_max_memberships);
+					free(omships, M_IPMOPTS);
+					imo->imo_membership = nmships;
+					imo->imo_max_memberships = newmax;
+				}
+			}
+			if (nmships == NULL) {
+				error = ETOOMANYREFS;
+				break;
+			}
 		}
 		/*
 		 * Everything looks good; add a new record to the multicast
@@ -1910,12 +1939,13 @@ ip_setmoptions(optname, imop, m)
 	}
 
 	/*
-	 * If all options have default values, no need to keep the mbuf.
+	 * If all options have default values, no need to keep the data.
 	 */
 	if (imo->imo_multicast_ifp == NULL &&
 	    imo->imo_multicast_ttl == IP_DEFAULT_MULTICAST_TTL &&
 	    imo->imo_multicast_loop == IP_DEFAULT_MULTICAST_LOOP &&
 	    imo->imo_num_memberships == 0) {
+		free(imo->imo_membership , M_IPMOPTS);
 		free(*imop, M_IPMOPTS);
 		*imop = NULL;
 	}
@@ -1984,6 +2014,7 @@ ip_freemoptions(imo)
 	if (imo != NULL) {
 		for (i = 0; i < imo->imo_num_memberships; ++i)
 			in_delmulti(imo->imo_membership[i]);
+		free(imo->imo_membership, M_IPMOPTS);
 		free(imo, M_IPMOPTS);
 	}
 }

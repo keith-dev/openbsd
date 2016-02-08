@@ -1,4 +1,4 @@
-/*	$OpenBSD: ofw_machdep.c,v 1.19 2007/07/28 13:22:22 kettenis Exp $	*/
+/*	$OpenBSD: ofw_machdep.c,v 1.23 2008/01/10 22:46:48 deraadt Exp $	*/
 /*	$NetBSD: ofw_machdep.c,v 1.16 2001/07/20 00:07:14 eeh Exp $	*/
 
 /*
@@ -560,6 +560,56 @@ prom_get_msgbuf(len, align)
 	return addr; /* Kluge till we go 64-bit */
 }
 
+#ifdef MULTIPROCESSOR
+/*
+ * Start secondary cpu, arrange 'func' as the entry.
+ */
+void
+prom_start_cpu(int cpu, void *func, long arg)
+{
+	static struct {
+		cell_t  name;
+		cell_t  nargs;
+		cell_t  nreturns;
+		cell_t  cpu;
+		cell_t  func;
+		cell_t  arg;
+	} args;
+
+	args.name = ADR2CELL("SUNW,start-cpu");
+	args.nargs = 3;
+	args.nreturns = 0;
+	args.cpu = HDL2CELL(cpu);
+	args.func = ADR2CELL(func);
+	args.arg = arg;
+
+	openfirmware(&args);
+}
+
+void
+prom_start_cpu_by_cpuid(int cpu, void *func, long arg)
+{
+	static struct {
+		cell_t  name;
+		cell_t  nargs;
+		cell_t  nreturns;
+		cell_t  cpu;
+		cell_t  func;
+		cell_t  arg;
+		cell_t	status;
+	} args;
+
+	args.name = ADR2CELL("SUNW,start-cpu-by-cpuid");
+	args.nargs = 3;
+	args.nreturns = 1;
+	args.cpu = cpu;
+	args.func = ADR2CELL(func);
+	args.arg = arg;
+
+	openfirmware(&args);
+}
+#endif
+
 /* 
  * Low-level prom I/O routines.
  */
@@ -618,7 +668,7 @@ prom_printf(const char *fmt, ...)
 
 #ifdef DEBUG
 int ofmapintrdebug = 0;
-#define	DPRINTF(x)	if (ofmapintrdebug) printf x
+#define	DPRINTF(x)	do { if (ofmapintrdebug) printf x; } while (0)
 #else
 #define DPRINTF(x)
 #endif
@@ -875,6 +925,6 @@ OF_mapintr(int node, int *interrupt, int validlen, int buflen)
 			DPRINTF(("reg len %d\n", len));
 
 		node = OF_parent(node);
-	} 
+	}
 	return (rc);
 }

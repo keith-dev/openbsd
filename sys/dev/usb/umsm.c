@@ -1,4 +1,4 @@
-/*	$OpenBSD: umsm.c,v 1.16 2007/06/19 23:59:27 jcs Exp $	*/
+/*	$OpenBSD: umsm.c,v 1.20 2008/02/19 10:57:48 jsg Exp $	*/
 
 /*
  * Copyright (c) 2006 Jonathan Gray <jsg@openbsd.org>
@@ -56,8 +56,10 @@ struct ucom_methods umsm_methods = {
 
 static const struct usb_devno umsm_devs[] = {
 	{ USB_VENDOR_AIRPRIME,	USB_PRODUCT_AIRPRIME_PC5220 },
+	{ USB_VENDOR_ANYDATA,	USB_PRODUCT_ANYDATA_ADU_500A },
 	{ USB_VENDOR_DELL,	USB_PRODUCT_DELL_W5500 },
 	{ USB_VENDOR_KYOCERA2,	USB_PRODUCT_KYOCERA2_KPC650 },
+	{ USB_VENDOR_NOVATEL1,	USB_PRODUCT_NOVATEL1_FLEXPACKGPS },
 	{ USB_VENDOR_NOVATEL,	USB_PRODUCT_NOVATEL_EXPRESSCARD },
 	{ USB_VENDOR_NOVATEL,	USB_PRODUCT_NOVATEL_MERLINV620 },
 	{ USB_VENDOR_NOVATEL,	USB_PRODUCT_NOVATEL_S720 },
@@ -73,6 +75,7 @@ static const struct usb_devno umsm_devs[] = {
 	{ USB_VENDOR_SIERRA,	USB_PRODUCT_SIERRA_MC5725 },
 	{ USB_VENDOR_SIERRA,	USB_PRODUCT_SIERRA_MC8755 },
 	{ USB_VENDOR_SIERRA,	USB_PRODUCT_SIERRA_MC8755_2 },
+	{ USB_VENDOR_SIERRA,    USB_PRODUCT_SIERRA_MC8755_3 },
 	{ USB_VENDOR_SIERRA,	USB_PRODUCT_SIERRA_MC8765 },
 	{ USB_VENDOR_SIERRA,	USB_PRODUCT_SIERRA_MC8775 },
 };
@@ -115,14 +118,10 @@ umsm_attach(struct device *parent, struct device *self, void *aux)
 	usb_interface_descriptor_t *id;
 	usb_endpoint_descriptor_t *ed;
 	usbd_status error;
-	char *devinfop;
 	int i;
 
 	bzero(&uca, sizeof(uca));
 	sc->sc_udev = uaa->device;
-	devinfop = usbd_devinfo_alloc(uaa->device, 0);
-	printf("\n%s: %s\n", sc->sc_dev.dv_xname, devinfop);
-	usbd_devinfo_free(devinfop);
 
 	if (usbd_set_config_index(sc->sc_udev, UMSM_CONFIG_NO, 1) != 0) {
 		printf("%s: could not set configuration no\n",

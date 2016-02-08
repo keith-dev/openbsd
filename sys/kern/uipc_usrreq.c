@@ -1,4 +1,4 @@
-/*	$OpenBSD: uipc_usrreq.c,v 1.34 2007/01/16 17:52:18 thib Exp $	*/
+/*	$OpenBSD: uipc_usrreq.c,v 1.37 2007/11/28 16:56:46 tedu Exp $	*/
 /*	$NetBSD: uipc_usrreq.c,v 1.18 1996/02/09 19:00:50 christos Exp $	*/
 
 /*
@@ -351,13 +351,12 @@ unp_attach(struct socket *so)
 		if (error)
 			return (error);
 	}
-	unp = malloc(sizeof(*unp), M_PCB, M_NOWAIT);
+	unp = malloc(sizeof(*unp), M_PCB, M_NOWAIT|M_ZERO);
 	if (unp == NULL)
 		return (ENOBUFS);
-	bzero((caddr_t)unp, sizeof(*unp));
 	unp->unp_socket = so;
 	so->so_pcb = unp;
-	nanotime(&unp->unp_ctime);
+	getnanotime(&unp->unp_ctime);
 	return (0);
 }
 
@@ -718,7 +717,7 @@ restart:
 	 */
 	memcpy(CMSG_DATA(cm), fdp, nfds * sizeof(int));
 	cm->cmsg_len = CMSG_LEN(nfds * sizeof(int));
-	rights->m_len = CMSG_SPACE(nfds * sizeof(int));
+	rights->m_len = CMSG_LEN(nfds * sizeof(int));
  out:
 	fdpunlock(p->p_fd);
 	free(fdp, M_TEMP);

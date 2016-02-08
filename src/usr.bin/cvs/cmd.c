@@ -1,4 +1,4 @@
-/*	$OpenBSD: cmd.c,v 1.61 2007/06/27 20:27:38 xsa Exp $	*/
+/*	$OpenBSD: cmd.c,v 1.68 2008/02/03 18:18:44 tobias Exp $	*/
 /*
  * Copyright (c) 2005 Joris Vink <joris@openbsd.org>
  * All rights reserved.
@@ -30,8 +30,6 @@
 
 #include "cvs.h"
 
-extern char *cvs_rootstr;
-
 struct cvs_cmd *cvs_cdt[] = {
 	&cvs_cmd_add,
 	&cvs_cmd_admin,
@@ -44,9 +42,12 @@ struct cvs_cmd *cvs_cdt[] = {
 	&cvs_cmd_import,
 	&cvs_cmd_init,
 	&cvs_cmd_log,
+	&cvs_cmd_rannotate,
+	&cvs_cmd_rdiff,
 	&cvs_cmd_release,
 	&cvs_cmd_remove,
 	&cvs_cmd_rlog,
+	&cvs_cmd_rtag,
 	&cvs_cmd_server,
 	&cvs_cmd_status,
 	&cvs_cmd_tag,
@@ -55,8 +56,6 @@ struct cvs_cmd *cvs_cdt[] = {
 #if 0
 	&cvs_cmd_edit,
 	&cvs_cmd_editors,
-	&cvs_cmd_rdiff,
-	&cvs_cmd_rtag,
 	&cvs_cmd_unedit,
 	&cvs_cmd_watch,
 	&cvs_cmd_watchers,
@@ -68,39 +67,22 @@ struct cvs_cmd *
 cvs_findcmd(const char *cmd)
 {
 	int i, j;
-	struct cvs_cmd *cmdp;
+	struct cvs_cmd *p;
 
-	cmdp = NULL;
-
-	for (i = 0; (cvs_cdt[i] != NULL) && (cmdp == NULL); i++) {
+	p = NULL;
+	for (i = 0; (cvs_cdt[i] != NULL) && (p == NULL); i++) {
 		if (strcmp(cmd, cvs_cdt[i]->cmd_name) == 0)
-			cmdp = cvs_cdt[i];
+			p = cvs_cdt[i];
 		else {
 			for (j = 0; j < CVS_CMD_MAXALIAS; j++) {
 				if (strcmp(cmd,
 				    cvs_cdt[i]->cmd_alias[j]) == 0) {
-					cmdp = cvs_cdt[i];
+					p = cvs_cdt[i];
 					break;
 				}
 			}
 		}
 	}
 
-	return (cmdp);
-}
-
-struct cvs_cmd *
-cvs_findcmdbyreq(u_int reqid)
-{
-	int i;
-	struct cvs_cmd *cmdp;
-
-	cmdp = NULL;
-	for (i = 0; cvs_cdt[i] != NULL; i++)
-		if (cvs_cdt[i]->cmd_req == reqid) {
-			cmdp = cvs_cdt[i];
-			break;
-		}
-
-	return (cmdp);
+	return (p);
 }

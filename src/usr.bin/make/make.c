@@ -1,5 +1,5 @@
 /*	$OpenPackages$ */
-/*	$OpenBSD: make.c,v 1.35 2004/04/07 13:11:36 espie Exp $	*/
+/*	$OpenBSD: make.c,v 1.57 2008/01/12 13:08:59 espie Exp $	*/
 /*	$NetBSD: make.c,v 1.10 1996/11/06 17:59:15 christos Exp $	*/
 
 /*
@@ -55,309 +55,142 @@
  *				place the parent on the toBeMade queue if it
  *				should be.
  *
- *	Make_TimeStamp		Function to set the parent's cmtime field
- *				based on a child's modification time.
- *
- *	Make_DoAllVar		Set up the various local variables for a
- *				target, including the .ALLSRC variable, making
- *				sure that any variable that needs to exist
- *				at the very least has the empty value.
- *
- *	Make_OODate		Determine if a target is out-of-date.
- *
- *	Make_HandleUse		See if a child is a .USE node for a parent
- *				and perform the .USE actions if so.
  */
 
 #include <limits.h>
 #include <stdio.h>
+#include <signal.h>
+#include <stddef.h>
+#include <stdlib.h>
+#include <string.h>
+#include <ohash.h>
 #include "config.h"
 #include "defines.h"
 #include "dir.h"
 #include "job.h"
-#include "arch.h"
 #include "suff.h"
 #include "var.h"
-#include "targ.h"
 #include "error.h"
 #include "make.h"
 #include "gnode.h"
 #include "extern.h"
 #include "timestamp.h"
+#include "engine.h"
 #include "lst.h"
+#include "targ.h"
+#include "garray.h"
+#include "memory.h"
 
-static LIST	toBeMade;	/* The current fringe of the graph. These
-				 * are nodes which await examination by
-				 * MakeOODate. It is added to by
-				 * Make_Update and subtracted from by
-				 * MakeStartJobs */
-static int	numNodes;	/* Number of nodes to be processed. If this
-				 * is non-zero when Job_Empty() returns
-				 * true, there's a cycle in the graph */
+/* what gets added each time. Kept as one static array so that it doesn't
+ * get resized every time.
+ */
+static struct growableArray examine;
+/* The current fringe of the graph. These are nodes which await examination by
+ * MakeOODate. It is added to by Make_Update and subtracted from by
+ * MakeStartJobs */
+static struct growableArray toBeMade;	
+
+static struct ohash targets;	/* stuff we must build */
 
 static void MakeAddChild(void *, void *);
-static void MakeAddAllSrc(void *, void *);
-static void MakeTimeStamp(void *, void *);
 static void MakeHandleUse(void *, void *);
 static bool MakeStartJobs(void);
 static void MakePrintStatus(void *, void *);
-/*-
- *-----------------------------------------------------------------------
- * Make_TimeStamp --
- *	Set the cmtime field of a parent node based on the mtime stamp in its
- *	child.
- *
- * Side Effects:
- *	The cmtime of the parent node will be changed if the mtime
- *	field of the child is greater than it.
- *-----------------------------------------------------------------------
- */
-void
-Make_TimeStamp(
-    GNode *pgn, /* the current parent */
-    GNode *cgn) /* the child we've just examined */
+static bool try_to_make_node(GNode *);
+static void add_targets_to_make(Lst);
+
+static bool has_unmade_predecessor(GNode *);
+static void requeue_successors(GNode *);
+static void random_setup(void);
+
+static bool randomize_queue;
+long random_delay = 0;
+
+bool 
+no_jobs_left()
 {
-    if (is_strictly_before(pgn->cmtime, cgn->mtime))
-	pgn->cmtime = cgn->mtime;
+	return Array_IsEmpty(&toBeMade);
 }
 
-/* Wrapper to call Make_TimeStamp from a forEach loop.	*/
 static void
-MakeTimeStamp(
-    void *pgn,	/* the current parent */
-    void *cgn)	/* the child we've just examined */
+random_setup()
 {
-    Make_TimeStamp((GNode *)pgn, (GNode *)cgn);
+	randomize_queue = Var_Definedi("RANDOM_ORDER", NULL);
+
+	if (Var_Definedi("RANDOM_DELAY", NULL))
+		random_delay = strtonum(Var_Value("RANDOM_DELAY"), 0, 1000, 
+		    NULL) * 1000000;
+
+	if (randomize_queue || random_delay) {
+		unsigned int random_seed;
+		char *t;
+		
+		t = Var_Value("RANDOM_SEED");
+		if (t != NULL)
+			random_seed = strtonum(t, 0, UINT_MAX, NULL);
+		else
+			random_seed = time(NULL);
+		fprintf(stderr, "RANDOM_SEED=%u\n", random_seed);
+		srandom(random_seed);
+	}
 }
 
-/*-
- *-----------------------------------------------------------------------
- * Make_OODate --
- *	See if a given node is out of date with respect to its sources.
- *	Used by Make_Run when deciding which nodes to place on the
- *	toBeMade queue initially and by Make_Update to screen out USE and
- *	EXEC nodes. In the latter case, however, any other sort of node
- *	must be considered out-of-date since at least one of its children
- *	will have been recreated.
- *
- * Results:
- *	true if the node is out of date. false otherwise.
- *
- * Side Effects:
- *	The mtime field of the node and the cmtime field of its parents
- *	will/may be changed.
- *-----------------------------------------------------------------------
- */
-bool
-Make_OODate(GNode *gn)	/* the node to check */
-{
-    bool	    oodate;
-
-    /*
-     * Certain types of targets needn't even be sought as their datedness
-     * doesn't depend on their modification time...
-     */
-    if ((gn->type & (OP_JOIN|OP_USE|OP_EXEC)) == 0) {
-	(void)Dir_MTime(gn);
-	if (DEBUG(MAKE)) {
-	    if (!is_out_of_date(gn->mtime)) {
-		printf("modified %s...", Targ_FmtTime(gn->mtime));
-	    } else {
-		printf("non-existent...");
-	    }
-	}
-    }
-
-    /*
-     * A target is remade in one of the following circumstances:
-     *	its modification time is smaller than that of its youngest child
-     *	    and it would actually be run (has commands or type OP_NOP)
-     *	it's the object of a force operator
-     *	it has no children, was on the lhs of an operator and doesn't exist
-     *	    already.
-     *
-     * Libraries are only considered out-of-date if the archive module says
-     * they are.
-     *
-     * These weird rules are brought to you by Backward-Compatibility and
-     * the strange people who wrote 'Make'.
-     */
-    if (gn->type & OP_USE) {
-	/*
-	 * If the node is a USE node it is *never* out of date
-	 * no matter *what*.
-	 */
-	if (DEBUG(MAKE)) {
-	    printf(".USE node...");
-	}
-	oodate = false;
-    } else if ((gn->type & OP_LIB) && Arch_IsLib(gn)) {
-	if (DEBUG(MAKE)) {
-	    printf("library...");
-	}
-
-	/*
-	 * always out of date if no children and :: target
-	 */
-
-	oodate = Arch_LibOODate(gn) ||
-	    (is_out_of_date(gn->cmtime) && (gn->type & OP_DOUBLEDEP));
-    } else if (gn->type & OP_JOIN) {
-	/*
-	 * A target with the .JOIN attribute is only considered
-	 * out-of-date if any of its children was out-of-date.
-	 */
-	if (DEBUG(MAKE)) {
-	    printf(".JOIN node...");
-	}
-	oodate = gn->childMade;
-    } else if (gn->type & (OP_FORCE|OP_EXEC|OP_PHONY)) {
-	/*
-	 * A node which is the object of the force (!) operator or which has
-	 * the .EXEC attribute is always considered out-of-date.
-	 */
-	if (DEBUG(MAKE)) {
-	    if (gn->type & OP_FORCE) {
-		printf("! operator...");
-	    } else if (gn->type & OP_PHONY) {
-		printf(".PHONY node...");
-	    } else {
-		printf(".EXEC node...");
-	    }
-	}
-	oodate = true;
-    } else if (is_strictly_before(gn->mtime, gn->cmtime) ||
-	       (is_out_of_date(gn->cmtime) &&
-		(is_out_of_date(gn->mtime) || (gn->type & OP_DOUBLEDEP))))
-    {
-	/*
-	 * A node whose modification time is less than that of its
-	 * youngest child or that has no children (cmtime == OUT_OF_DATE) and
-	 * either doesn't exist (mtime == OUT_OF_DATE) or was the object of a
-	 * :: operator is out-of-date. Why? Because that's the way Make does
-	 * it.
-	 */
-	if (DEBUG(MAKE)) {
-	    if (is_strictly_before(gn->mtime, gn->cmtime)) {
-		printf("modified before source...");
-	    } else if (is_out_of_date(gn->mtime)) {
-		printf("non-existent and no sources...");
-	    } else {
-		printf(":: operator and no sources...");
-	    }
-	}
-	oodate = true;
-    } else {
-#if 0
-	/* WHY? */
-	if (DEBUG(MAKE)) {
-	    printf("source %smade...", gn->childMade ? "" : "not ");
-	}
-	oodate = gn->childMade;
-#else
-	oodate = false;
-#endif /* 0 */
-    }
-
-    /*
-     * If the target isn't out-of-date, the parents need to know its
-     * modification time. Note that targets that appear to be out-of-date
-     * but aren't, because they have no commands and aren't of type OP_NOP,
-     * have their mtime stay below their children's mtime to keep parents from
-     * thinking they're out-of-date.
-     */
-    if (!oodate)
-	Lst_ForEach(&gn->parents, MakeTimeStamp, gn);
-
-    return oodate;
-}
-
-/*-
- *-----------------------------------------------------------------------
- * MakeAddChild  --
- *	Function used by Make_Run to add a child to the list l.
- *	It will only add the child if its make field is false.
- *
- * Side Effects:
- *	The given list is extended
- *-----------------------------------------------------------------------
- */
 static void
-MakeAddChild(
-    void *gnp,		/* the node to add */
-    void *lp)		/* the list to which to add it */
+randomize_garray(struct growableArray *g)
 {
-    GNode	   *gn = (GNode *)gnp;
-    Lst 	   l = (Lst)lp;
+	/* This is a fairly standard algorithm to randomize an array. */
+	unsigned int i, v;
+	GNode *e;
 
-    if (!gn->make && !(gn->type & OP_USE))
-	Lst_EnQueue(l, gn);
+	for (i = g->n; i > 0; i--) {
+		v = random() % i;
+		if (v == i-1)
+			continue;
+		else {
+			e = g->a[i-1];
+			g->a[i-1] = g->a[v];
+			g->a[v] = e;
+		}
+	}
 }
 
-/*-
- *-----------------------------------------------------------------------
- * Make_HandleUse --
- *	Function called by Make_Run and SuffApplyTransform on the downward
- *	pass to handle .USE and transformation nodes. A callback function
- *	for Lst_ForEach, it implements the .USE and transformation
- *	functionality by copying the node's commands, type flags
- *	and children to the parent node. Should be called before the
- *	children are enqueued to be looked at by MakeAddChild.
- *
- *	A .USE node is much like an explicit transformation rule, except
- *	its commands are always added to the target node, even if the
- *	target already has commands.
- *
- * Side Effects:
- *	Children and commands may be added to the parent and the parent's
- *	type may be changed.
- *
- *-----------------------------------------------------------------------
- */
-void
-Make_HandleUse(
-    GNode	*cgn,	/* The .USE node */
-    GNode	*pgn)	/* The target of the .USE node */
+static bool
+has_unmade_predecessor(GNode *gn)
 {
-    GNode	*gn;	/* A child of the .USE node */
-    LstNode	ln;	/* An element in the children list */
+	LstNode ln;
 
-    if (cgn->type & (OP_USE|OP_TRANSFORM)) {
-	if ((cgn->type & OP_USE) || Lst_IsEmpty(&pgn->commands)) {
-	    /* .USE or transformation and target has no commands -- append
-	     * the child's commands to the parent.  */
-	    Lst_Concat(&pgn->commands, &cgn->commands);
+	if (Lst_IsEmpty(&gn->preds))
+		return false;
+
+
+	for (ln = Lst_First(&gn->preds); ln != NULL; ln = Lst_Adv(ln)) {
+		GNode	*pgn = (GNode *)Lst_Datum(ln);
+
+		if (pgn->must_make && pgn->built_status == UNKNOWN) {
+			if (DEBUG(MAKE))
+				printf("predecessor %s not made yet.\n", 
+				    pgn->name);
+			return true;
+		}
 	}
-
-	for (ln = Lst_First(&cgn->children); ln != NULL; ln = Lst_Adv(ln)) {
-	    gn = (GNode *)Lst_Datum(ln);
-
-	    if (Lst_AddNew(&pgn->children, gn)) {
-		Lst_AtEnd(&gn->parents, pgn);
-		pgn->unmade += 1;
-	    }
-	}
-
-	pgn->type |= cgn->type & ~(OP_OPMASK|OP_USE|OP_TRANSFORM);
-
-	/*
-	 * This child node is now "made", so we decrement the count of
-	 * unmade children in the parent... We also remove the child
-	 * from the parent's list to accurately reflect the number of decent
-	 * children the parent has. This is used by Make_Run to decide
-	 * whether to queue the parent or examine its children...
-	 */
-	if (cgn->type & OP_USE) {
-	    pgn->unmade--;
-	}
-    }
+	return false;
 }
+
 static void
-MakeHandleUse(
-    void *pgn,	/* the current parent */
-    void *cgn)	/* the child we've just examined */
+requeue_successors(GNode *gn)
 {
-    Make_HandleUse((GNode *)pgn, (GNode *)cgn);
+	LstNode ln;
+	/* Deal with successor nodes. If any is marked for making and has an
+	 * unmade count of 0, has not been made and isn't in the examination
+	 * queue, it means we need to place it in the queue as it restrained
+	 * itself before.	*/
+	for (ln = Lst_First(&gn->successors); ln != NULL; ln = Lst_Adv(ln)) {
+		GNode	*succ = (GNode *)Lst_Datum(ln);
+
+		if (succ->must_make && succ->unmade == 0 
+		    && succ->built_status == UNKNOWN)
+			Array_PushNew(&toBeMade, succ);
+	}
 }
 
 /*-
@@ -380,238 +213,139 @@ MakeHandleUse(
  *	If the child wasn't made, the cmtime field of the parent will be
  *	altered if the child's mtime is big enough.
  *
- *	Finally, if the child is the implied source for the parent, the
- *	parent's IMPSRC variable is set appropriately.
- *
  *-----------------------------------------------------------------------
  */
 void
 Make_Update(GNode *cgn)	/* the child node */
 {
-    GNode	*pgn;	/* the parent node */
-    char	*cname; /* the child's name */
-    LstNode	ln;	/* Element in parents and iParents lists */
+	GNode	*pgn;	/* the parent node */
+	char	*cname; /* the child's name */
+	LstNode	ln;	/* Element in parents list */
 
-    cname = Varq_Value(TARGET_INDEX, cgn);
+	cname = Var(TARGET_INDEX, cgn);
 
-    /*
-     * If the child was actually made, see what its modification time is
-     * now -- some rules won't actually update the file. If the file still
-     * doesn't exist, make its mtime now.
-     */
-    if (cgn->made != UPTODATE) {
-#ifndef RECHECK
 	/*
-	 * We can't re-stat the thing, but we can at least take care of rules
-	 * where a target depends on a source that actually creates the
-	 * target, but only if it has changed, e.g.
-	 *
-	 * parse.h : parse.o
-	 *
-	 * parse.o : parse.y
-	 *	yacc -d parse.y
-	 *	cc -c y.tab.c
-	 *	mv y.tab.o parse.o
-	 *	cmp -s y.tab.h parse.h || mv y.tab.h parse.h
-	 *
-	 * In this case, if the definitions produced by yacc haven't changed
-	 * from before, parse.h won't have been updated and cgn->mtime will
-	 * reflect the current modification time for parse.h. This is
-	 * something of a kludge, I admit, but it's a useful one..
-	 * XXX: People like to use a rule like
-	 *
-	 * FRC:
-	 *
-	 * To force things that depend on FRC to be made, so we have to
-	 * check for gn->children being empty as well...
+	 * If the child was actually made, see what its modification time is
+	 * now -- some rules won't actually update the file. If the file still
+	 * doesn't exist, make its mtime now.
 	 */
-	if (!Lst_IsEmpty(&cgn->commands) || Lst_IsEmpty(&cgn->children)) {
-	    cgn->mtime = now;
-	}
-#else
-	/*
-	 * This is what Make does and it's actually a good thing, as it
-	 * allows rules like
-	 *
-	 *	cmp -s y.tab.h parse.h || cp y.tab.h parse.h
-	 *
-	 * to function as intended. Unfortunately, thanks to the stateless
-	 * nature of NFS (by which I mean the loose coupling of two clients
-	 * using the same file from a common server), there are times
-	 * when the modification time of a file created on a remote
-	 * machine will not be modified before the local stat() implied by
-	 * the Dir_MTime occurs, thus leading us to believe that the file
-	 * is unchanged, wreaking havoc with files that depend on this one.
-	 *
-	 * I have decided it is better to make too much than to make too
-	 * little, so this stuff is commented out unless you're sure it's ok.
-	 * -- ardeb 1/12/88
-	 */
-	/*
-	 * Christos, 4/9/92: If we are	saving commands pretend that
-	 * the target is made now. Otherwise archives with ... rules
-	 * don't work!
-	 */
-	if (noExecute || (cgn->type & OP_SAVE_CMDS) ||
-	    is_out_of_date(Dir_MTime(cgn))) {
-	    cgn->mtime = now;
-	}
-	if (DEBUG(MAKE)) {
-	    printf("update time: %s\n", Targ_FmtTime(cgn->mtime));
-	}
-#endif
-    }
-
-    for (ln = Lst_First(&cgn->parents); ln != NULL; ln = Lst_Adv(ln)) {
-	pgn = (GNode *)Lst_Datum(ln);
-	if (pgn->make) {
-	    pgn->unmade -= 1;
-
-	    if ( ! (cgn->type & (OP_EXEC|OP_USE))) {
-		if (cgn->made == MADE) {
-		    pgn->childMade = true;
-		    if (is_strictly_before(pgn->cmtime, cgn->mtime))
-			pgn->cmtime = cgn->mtime;
-		} else {
-		    (void)Make_TimeStamp(pgn, cgn);
-		}
-	    }
-	    if (pgn->unmade == 0) {
+	if (cgn->built_status != UPTODATE) {
 		/*
-		 * Queue the node up -- any unmade predecessors will
-		 * be dealt with in MakeStartJobs.
+		 * This is what Make does and it's actually a good thing, as it
+		 * allows rules like
+		 *
+		 *	cmp -s y.tab.h parse.h || cp y.tab.h parse.h
+		 *
+		 * to function as intended. Unfortunately, thanks to the
+		 * stateless nature of NFS, there are times when the
+		 * modification time of a file created on a remote machine
+		 * will not be modified before the local stat() implied by
+		 * the Dir_MTime occurs, thus leading us to believe that the
+		 * file is unchanged, wreaking havoc with files that depend
+		 * on this one.
 		 */
-		Lst_EnQueue(&toBeMade, pgn);
-	    } else if (pgn->unmade < 0) {
-		Error("Graph cycles through %s", pgn->name);
-	    }
+		if (noExecute || is_out_of_date(Dir_MTime(cgn)))
+			cgn->mtime = now;
+		if (DEBUG(MAKE))
+			printf("update time: %s\n", time_to_string(cgn->mtime));
 	}
-    }
-    /* Deal with successor nodes. If any is marked for making and has an unmade
-     * count of 0, has not been made and isn't in the examination queue,
-     * it means we need to place it in the queue as it restrained itself
-     * before.	*/
-    for (ln = Lst_First(&cgn->successors); ln != NULL; ln = Lst_Adv(ln)) {
-	GNode	*succ = (GNode *)Lst_Datum(ln);
 
-	if (succ->make && succ->unmade == 0 && succ->made == UNMADE)
-	    (void)Lst_QueueNew(&toBeMade, succ);
-    }
+	for (ln = Lst_First(&cgn->parents); ln != NULL; ln = Lst_Adv(ln)) {
+		pgn = (GNode *)Lst_Datum(ln);
+		pgn->unmade--;
+		if (pgn->must_make) {
+			if (DEBUG(MAKE))
+				printf("%s--=%d ", 
+				    pgn->name, pgn->unmade);
 
-    /* Set the .PREFIX and .IMPSRC variables for all the implied parents
-     * of this node.  */
-    {
-    char	*cpref = Varq_Value(PREFIX_INDEX, cgn);
-
-    for (ln = Lst_First(&cgn->iParents); ln != NULL; ln = Lst_Adv(ln)) {
-	pgn = (GNode *)Lst_Datum(ln);
-	if (pgn->make) {
-	    Varq_Set(IMPSRC_INDEX, cname, pgn);
-	    Varq_Set(PREFIX_INDEX, cpref, pgn);
+			if ( ! (cgn->type & (OP_EXEC|OP_USE))) {
+				if (cgn->built_status == MADE) {
+					pgn->childMade = true;
+					if (is_strictly_before(pgn->cmtime,
+					    cgn->mtime))
+						pgn->cmtime = cgn->mtime;
+				} else {
+					(void)Make_TimeStamp(pgn, cgn);
+				}
+			}
+			if (pgn->unmade == 0) {
+				/*
+				 * Queue the node up -- any unmade
+				 * predecessors will be dealt with in
+				 * MakeStartJobs.
+				 */
+				if (DEBUG(MAKE))
+					printf("QUEUING ");
+				Array_Push(&toBeMade, pgn);
+			} else if (pgn->unmade < 0) {
+				Error("Child %s discovered graph cycles through %s", cgn->name, pgn->name);
+			}
+		}
 	}
-    }
-    }
+	if (DEBUG(MAKE))
+		printf("\n");
+	requeue_successors(cgn);
 }
 
-/*-
- *-----------------------------------------------------------------------
- * MakeAddAllSrc --
- *	Add a child's name to the ALLSRC and OODATE variables of the given
- *	node. Called from Make_DoAllVar via Lst_ForEach. A child is added only
- *	if it has not been given the .EXEC, .USE or .INVISIBLE attributes.
- *	.EXEC and .USE children are very rarely going to be files, so...
- *	A child is added to the OODATE variable if its modification time is
- *	later than that of its parent, as defined by Make, except if the
- *	parent is a .JOIN node. In that case, it is only added to the OODATE
- *	variable if it was actually made (since .JOIN nodes don't have
- *	modification times, the comparison is rather unfair...)..
- *
- * Side Effects:
- *	The ALLSRC variable for the given node is extended.
- *-----------------------------------------------------------------------
- */
-static void
-MakeAddAllSrc(
-    void *cgnp, /* The child to add */
-    void *pgnp) /* The parent to whose ALLSRC variable it should be */
-			/* added */
+static bool
+try_to_make_node(GNode *gn)
 {
-    GNode	*cgn = (GNode *)cgnp;
-    GNode	*pgn = (GNode *)pgnp;
-    if ((cgn->type & (OP_EXEC|OP_USE|OP_INVISIBLE)) == 0) {
-	const char *child;
-
-	if (OP_NOP(cgn->type) ||
-	    (child = Varq_Value(TARGET_INDEX, cgn)) == NULL) {
-	    /*
-	     * this node is only source; use the specific pathname for it
-	     */
-	    child = cgn->path != NULL ? cgn->path : cgn->name;
+	if (DEBUG(MAKE))
+		printf("Examining %s...", gn->name);
+		
+	if (gn->unmade != 0) {
+		if (DEBUG(MAKE))
+			printf(" Requeuing (%d)\n", gn->unmade);
+		add_targets_to_make(&gn->children);
+		Array_Push(&toBeMade, gn);
+		return false;
+	}
+	if (has_been_built(gn)) {
+		if (DEBUG(MAKE))
+			printf(" already made\n");
+			return false;
+	}
+	if (has_unmade_predecessor(gn)) {
+		if (DEBUG(MAKE))
+			printf(" Dropping for now\n");
+		return false;
 	}
 
-	Varq_Append(ALLSRC_INDEX, child, pgn);
-	if (pgn->type & OP_JOIN) {
-	    if (cgn->made == MADE) {
-		Varq_Append(OODATE_INDEX, child, pgn);
-	    }
-	} else if (is_strictly_before(pgn->mtime, cgn->mtime) ||
-		   (!is_strictly_before(cgn->mtime, now) && cgn->made == MADE))
-	{
-	    /*
-	     * It goes in the OODATE variable if the parent is younger than the
-	     * child or if the child has been modified more recently than
-	     * the start of the make. This is to keep pmake from getting
-	     * confused if something else updates the parent after the
-	     * make starts (shouldn't happen, I know, but sometimes it
-	     * does). In such a case, if we've updated the kid, the parent
-	     * is likely to have a modification time later than that of
-	     * the kid and anything that relies on the OODATE variable will
-	     * be hosed.
-	     *
-	     * XXX: This will cause all made children to go in the OODATE
-	     * variable, even if they're not touched, if RECHECK isn't defined,
-	     * since cgn->mtime is set to now in Make_Update. According to
-	     * some people, this is good...
-	     */
-	    Varq_Append(OODATE_INDEX, child, pgn);
+	Suff_FindDeps(gn);
+	if (gn->unmade != 0) {
+		if (DEBUG(MAKE))
+			printf(" Requeuing (after deps: %d)\n", gn->unmade);
+		add_targets_to_make(&gn->children);
+		return false;
 	}
-    }
+	if (Make_OODate(gn)) {
+		if (DEBUG(MAKE))
+			printf("out-of-date\n");
+		if (queryFlag)
+			return true;
+		Make_DoAllVar(gn);
+		Job_Make(gn);
+	} else {
+		if (DEBUG(MAKE))
+			printf("up-to-date\n");
+		gn->built_status = UPTODATE;
+		if (gn->type & OP_JOIN) {
+			/*
+			 * Even for an up-to-date .JOIN node, we need it
+			 * to have its context variables so references
+			 * to it get the correct value for .TARGET when
+			 * building up the context variables of its
+			 * parent(s)...
+			 */
+			Make_DoAllVar(gn);
+		}
+
+		Make_Update(gn);
+	}
+	return false;
 }
 
-/*-
- *-----------------------------------------------------------------------
- * Make_DoAllVar --
- *	Set up the ALLSRC and OODATE variables. Sad to say, it must be
- *	done separately, rather than while traversing the graph. This is
- *	because Make defined OODATE to contain all sources whose modification
- *	times were later than that of the target, *not* those sources that
- *	were out-of-date. Since in both compatibility and native modes,
- *	the modification time of the parent isn't found until the child
- *	has been dealt with, we have to wait until now to fill in the
- *	variable. As for ALLSRC, the ordering is important and not
- *	guaranteed when in native mode, so it must be set here, too.
- *
- * Side Effects:
- *	The ALLSRC and OODATE variables of the given node is filled in.
- *	If the node is a .JOIN node, its TARGET variable will be set to
- *	match its ALLSRC variable.
- *-----------------------------------------------------------------------
- */
-void
-Make_DoAllVar(GNode *gn)
-{
-    Lst_ForEach(&gn->children, MakeAddAllSrc, gn);
-
-    if (Varq_Value(OODATE_INDEX, gn) == NULL)
-	Varq_Set(OODATE_INDEX, "", gn);
-    if (Varq_Value(ALLSRC_INDEX, gn) == NULL)
-	Varq_Set(ALLSRC_INDEX, "", gn);
-
-    if (gn->type & OP_JOIN)
-	Varq_Set(TARGET_INDEX, Varq_Value(ALLSRC_INDEX, gn), gn);
-}
-
-/*-
+/*
  *-----------------------------------------------------------------------
  * MakeStartJobs --
  *	Start as many jobs as possible.
@@ -629,69 +363,13 @@ Make_DoAllVar(GNode *gn)
 static bool
 MakeStartJobs(void)
 {
-    GNode	*gn;
+	GNode	*gn;
 
-    while (!Job_Full() && (gn = (GNode *)Lst_DeQueue(&toBeMade)) != NULL) {
-	if (DEBUG(MAKE)) {
-	    printf("Examining %s...", gn->name);
+	while (!Job_Full() && (gn = Array_Pop(&toBeMade)) != NULL) {
+		if (try_to_make_node(gn))
+			return true;
 	}
-	/*
-	 * Make sure any and all predecessors that are going to be made,
-	 * have been.
-	 */
-	if (!Lst_IsEmpty(&gn->preds)) {
-	    LstNode ln;
-
-	    for (ln = Lst_First(&gn->preds); ln != NULL; ln = Lst_Adv(ln)){
-		GNode	*pgn = (GNode *)Lst_Datum(ln);
-
-		if (pgn->make && pgn->made == UNMADE) {
-		    if (DEBUG(MAKE)) {
-			printf("predecessor %s not made yet.\n", pgn->name);
-		    }
-		    break;
-		}
-	    }
-	    /*
-	     * If ln isn't NULL, there's a predecessor as yet unmade, so we
-	     * just drop this node on the floor. When the node in question
-	     * has been made, it will notice this node as being ready to
-	     * make but as yet unmade and will place the node on the queue.
-	     */
-	    if (ln != NULL) {
-		continue;
-	    }
-	}
-
-	numNodes--;
-	if (Make_OODate(gn)) {
-	    if (DEBUG(MAKE)) {
-		printf("out-of-date\n");
-	    }
-	    if (queryFlag) {
-		return true;
-	    }
-	    Make_DoAllVar(gn);
-	    Job_Make(gn);
-	} else {
-	    if (DEBUG(MAKE)) {
-		printf("up-to-date\n");
-	    }
-	    gn->made = UPTODATE;
-	    if (gn->type & OP_JOIN) {
-		/*
-		 * Even for an up-to-date .JOIN node, we need it to have its
-		 * context variables so references to it get the correct
-		 * value for .TARGET when building up the context variables
-		 * of its parent(s)...
-		 */
-		Make_DoAllVar(gn);
-	    }
-
-	    Make_Update(gn);
-	}
-    }
-    return false;
+	return false;
 }
 
 /*-
@@ -712,38 +390,102 @@ MakePrintStatus(
 			     * a cycle in the graph, not an error in an
 			     * inferior */
 {
-    GNode	*gn = (GNode *)gnp;
-    bool	cycle = *(bool *)cyclep;
-    if (gn->made == UPTODATE) {
-	printf("`%s' is up to date.\n", gn->name);
-    } else if (gn->unmade != 0) {
-	if (cycle) {
-	    bool t = true;
-	    /*
-	     * If printing cycles and came to one that has unmade children,
-	     * print out the cycle by recursing on its children. Note a
-	     * cycle like:
-	     *	a : b
-	     *	b : c
-	     *	c : b
-	     * will cause this to erroneously complain about a being in
-	     * the cycle, but this is a good approximation.
-	     */
-	    if (gn->made == CYCLE) {
-		Error("Graph cycles through `%s'", gn->name);
-		gn->made = ENDCYCLE;
-		Lst_ForEach(&gn->children, MakePrintStatus, &t);
-		gn->made = UNMADE;
-	    } else if (gn->made != ENDCYCLE) {
-		gn->made = CYCLE;
-		Lst_ForEach(&gn->children, MakePrintStatus, &t);
-	    }
-	} else {
-	    printf("`%s' not remade because of errors.\n", gn->name);
+	GNode	*gn = (GNode *)gnp;
+	bool	cycle = *(bool *)cyclep;
+	if (gn->built_status == UPTODATE) {
+		printf("`%s' is up to date.\n", gn->name);
+	} else if (gn->unmade != 0) {
+		if (cycle) {
+			bool t = true;
+			/*
+			 * If printing cycles and came to one that has unmade
+			 * children, print out the cycle by recursing on its
+			 * children. Note a cycle like:
+			 *	a : b
+			 *	b : c
+			 *	c : b
+			 * will cause this to erroneously complain about a
+			 * being in the cycle, but this is a good approximation.
+			 */
+			if (gn->built_status == CYCLE) {
+				Error("Graph cycles through `%s'", gn->name);
+				gn->built_status = ENDCYCLE;
+				Lst_ForEach(&gn->children, MakePrintStatus, &t);
+				gn->built_status = UNKNOWN;
+			} else if (gn->built_status != ENDCYCLE) {
+				gn->built_status = CYCLE;
+				Lst_ForEach(&gn->children, MakePrintStatus, &t);
+			}
+		} else {
+			printf("`%s' not remade because of errors.\n",
+			    gn->name);
+		}
 	}
-    }
 }
 
+
+static void
+MakeAddChild(void *to_addp, void *ap)
+{
+	GNode *gn = (GNode *)to_addp;
+
+	if (!gn->must_make && !(gn->type & OP_USE))
+		Array_Push((struct growableArray *)ap, gn);
+}
+
+static void
+MakeHandleUse(void *pgn, void *cgn)
+{
+	Make_HandleUse((GNode *)pgn, (GNode *)cgn);
+}
+
+/* Add stuff to the toBeMade queue. we try to sort things so that stuff 
+ * that can be done directly is done right away.  This won't be perfect,
+ * since some dependencies are only discovered later (e.g., SuffFindDeps).
+ */
+static void
+add_targets_to_make(Lst todo)
+{
+	GNode *gn;
+
+	unsigned int slot;
+
+	AppendList2Array(todo, &examine);
+
+	while ((gn = Array_Pop(&examine)) != NULL) {
+		if (gn->must_make) 	/* already known */
+			continue;
+		gn->must_make = true;
+
+		slot = ohash_qlookup(&targets, gn->name);
+		if (!ohash_find(&targets, slot))
+			ohash_insert(&targets, slot, gn);
+
+
+		look_harder_for_target(gn);
+		/*
+		 * Apply any .USE rules before looking for implicit
+		 * dependencies to make sure everything that should have
+		 * commands has commands ...
+		 */
+		Lst_ForEach(&gn->children, MakeHandleUse, gn);
+		expand_all_children(gn);
+
+		if (gn->unmade != 0) {
+			if (DEBUG(MAKE))
+				printf("%s: not queuing (%d unmade children)\n",
+				    gn->name, gn->unmade);
+			Lst_ForEach(&gn->children, MakeAddChild,
+			    &examine);
+		} else {
+			if (DEBUG(MAKE))
+				printf("%s: queuing\n", gn->name);
+			Array_Push(&toBeMade, gn);
+		}
+	}
+	if (randomize_queue)
+		randomize_garray(&toBeMade);
+}
 
 /*-
  *-----------------------------------------------------------------------
@@ -761,7 +503,7 @@ MakePrintStatus(
  *	true if work was done. false otherwise.
  *
  * Side Effects:
- *	The make field of all nodes involved in the creation of the given
+ *	The must_make field of all nodes involved in the creation of the given
  *	targets is set to 1. The toBeMade list is set to contain all the
  *	'leaves' of these subgraphs.
  *-----------------------------------------------------------------------
@@ -769,85 +511,71 @@ MakePrintStatus(
 bool
 Make_Run(Lst targs)		/* the initial list of targets */
 {
-    GNode	    *gn;	/* a temporary pointer */
-    LIST	    examine;	/* List of targets to examine */
-    int 	    errors;	/* Number of errors the Job module reports */
+	int errors;	/* Number of errors the Job module reports */
+	GNode *gn;
+	unsigned int i;
+	bool cycle;
 
-    Static_Lst_Init(&toBeMade);
+	/* wild guess at initial sizes */
+	Array_Init(&toBeMade, 500);
+	Array_Init(&examine, 150);
+	ohash_init(&targets, 10, &gnode_info);
+	if (DEBUG(PARALLEL))
+		random_setup();
 
-    Lst_Clone(&examine, targs, NOCOPY);
-    numNodes = 0;
-
-    /*
-     * Make an initial downward pass over the graph, marking nodes to be made
-     * as we go down. We call Suff_FindDeps to find where a node is and
-     * to get some children for it if it has none and also has no commands.
-     * If the node is a leaf, we stick it on the toBeMade queue to
-     * be looked at in a minute, otherwise we add its children to our queue
-     * and go on about our business.
-     */
-    while ((gn = (GNode *)Lst_DeQueue(&examine)) != NULL) {
-	if (!gn->make) {
-	    gn->make = true;
-	    numNodes++;
-
-	    /*
-	     * Apply any .USE rules before looking for implicit dependencies
-	     * to make sure everything has commands that should...
-	     */
-	    Lst_ForEach(&gn->children, MakeHandleUse, gn);
-	    Suff_FindDeps(gn);
-
-	    if (gn->unmade != 0) {
-		Lst_ForEach(&gn->children, MakeAddChild, &examine);
-	    } else {
-		Lst_EnQueue(&toBeMade, gn);
-	    }
+	add_targets_to_make(targs);
+	if (queryFlag) {
+		/*
+		 * We wouldn't do any work unless we could start some jobs in
+		 * the next loop... (we won't actually start any, of course,
+		 * this is just to see if any of the targets was out of date)
+		 */
+		return MakeStartJobs();
+	} else {
+		/*
+		 * Initialization. At the moment, no jobs are running and until
+		 * some get started, nothing will happen since the remaining
+		 * upward traversal of the graph is performed by the routines
+		 * in job.c upon the finishing of a job. So we fill the Job
+		 * table as much as we can before going into our loop.
+		 */
+		(void)MakeStartJobs();
 	}
-    }
 
-    if (queryFlag) {
 	/*
-	 * We wouldn't do any work unless we could start some jobs in the
-	 * next loop... (we won't actually start any, of course, this is just
-	 * to see if any of the targets was out of date)
+	 * Main Loop: The idea here is that the ending of jobs will take
+	 * care of the maintenance of data structures and the waiting for output
+	 * will cause us to be idle most of the time while our children run as
+	 * much as possible. Because the job table is kept as full as possible,
+	 * the only time when it will be empty is when all the jobs which need
+	 * running have been run, so that is the end condition of this loop.
+	 * Note that the Job module will exit if there were any errors unless
+	 * the keepgoing flag was given.
 	 */
-	return MakeStartJobs();
-    } else {
+	while (!Job_Empty()) {
+		handle_running_jobs();
+		(void)MakeStartJobs();
+	}
+
+	errors = Job_Finish();
+	cycle = false;
+
+	for (gn = ohash_first(&targets, &i); gn != NULL; 
+	    gn = ohash_next(&targets, &i)) {
+	    	if (has_been_built(gn))
+			continue;
+		cycle = true;
+		errors++;
+	    	printf("Error: target %s unaccounted for (%s)\n", 
+		    gn->name, status_to_string(gn));
+	}
 	/*
-	 * Initialization. At the moment, no jobs are running and until some
-	 * get started, nothing will happen since the remaining upward
-	 * traversal of the graph is performed by the routines in job.c upon
-	 * the finishing of a job. So we fill the Job table as much as we can
-	 * before going into our loop.
+	 * Print the final status of each target. E.g. if it wasn't made
+	 * because some inferior reported an error.
 	 */
-	(void)MakeStartJobs();
-    }
+	Lst_ForEach(targs, MakePrintStatus, &cycle);
+	if (errors)
+		Fatal("Errors while building");
 
-    /*
-     * Main Loop: The idea here is that the ending of jobs will take
-     * care of the maintenance of data structures and the waiting for output
-     * will cause us to be idle most of the time while our children run as
-     * much as possible. Because the job table is kept as full as possible,
-     * the only time when it will be empty is when all the jobs which need
-     * running have been run, so that is the end condition of this loop.
-     * Note that the Job module will exit if there were any errors unless the
-     * keepgoing flag was given.
-     */
-    while (!Job_Empty()) {
-	Job_CatchOutput();
-	Job_CatchChildren(!usePipes);
-	(void)MakeStartJobs();
-    }
-
-    errors = Job_Finish();
-
-    /*
-     * Print the final status of each target. E.g. if it wasn't made
-     * because some inferior reported an error.
-     */
-    errors = errors == 0 && numNodes != 0;
-    Lst_ForEach(targs, MakePrintStatus, &errors);
-
-    return true;
+	return true;
 }

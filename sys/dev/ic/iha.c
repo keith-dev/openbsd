@@ -1,4 +1,4 @@
-/*	$OpenBSD: iha.c,v 1.26 2007/04/10 17:47:55 miod Exp $ */
+/*	$OpenBSD: iha.c,v 1.29 2007/12/29 03:04:19 dlg Exp $ */
 /*-------------------------------------------------------------------------
  *
  * Device driver for the INI-9XXXU/UW or INIC-940/950  PCI SCSI Controller.
@@ -54,10 +54,10 @@ struct cfdriver iha_cd = {
 };
 
 struct scsi_adapter iha_switch = {
-	iha_scsi_cmd,	/*  int (*scsi_cmd)(struct scsi_xfer *); */
-	iha_minphys,	/* void (*scsi_minphys)(struct buf *);   */
-	NULL,		/*  int (*open_target_lu)(void);         */
-	NULL		/*  int (*close_target_lu)(void);        */
+	iha_scsi_cmd,	/* scsi_cmd() */
+	iha_minphys,	/* scsi_minphys() */
+	NULL,		/* probe_dev(void) */
+	NULL		/* free_dev() */
 };
 
 struct scsi_device iha_dev = {
@@ -350,10 +350,10 @@ iha_scsi_cmd(xs)
 
 	iha_exec_scb(sc, pScb);
 
-	if ((xs->flags & ITSDONE) == 0)
-		return (SUCCESSFULLY_QUEUED);
-	else
+	if (xs->flags & (SCSI_POLL | ITSDONE))
 		return (COMPLETE);
+	else
+		return (SUCCESSFULLY_QUEUED);
 }
 
 /*
@@ -2482,6 +2482,7 @@ iha_done_scb(sc, pScb)
 {
 	struct scsi_sense_data *s1, *s2;
 	struct scsi_xfer *xs = pScb->SCB_Xs;
+	int s;
 
 	if (xs != NULL) {
 		timeout_del(&xs->stimeout);
@@ -2562,7 +2563,9 @@ iha_done_scb(sc, pScb)
 		}
 
 		xs->flags |= ITSDONE;
+		s = splbio();
 		scsi_done(xs);
+		splx(s);
 	}
 	
 	iha_append_free_scb(sc, pScb);

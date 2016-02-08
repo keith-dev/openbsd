@@ -1,4 +1,4 @@
-/*	$OpenBSD: vfs_syscalls.c,v 1.141 2007/08/06 16:58:26 millert Exp $	*/
+/*	$OpenBSD: vfs_syscalls.c,v 1.145 2008/01/22 14:33:40 millert Exp $	*/
 /*	$NetBSD: vfs_syscalls.c,v 1.71 1996/04/23 10:29:02 mycroft Exp $	*/
 
 /*
@@ -158,7 +158,6 @@ sys_mount(struct proc *p, void *v, register_t *retval)
 			vput(vp);
 			return (error);
 		}
-		VOP_UNLOCK(vp, 0, p);
 		mp->mnt_flag |= SCARG(uap, flags) & (MNT_RELOAD | MNT_UPDATE);
 		goto update;
 	}
@@ -238,8 +237,7 @@ sys_mount(struct proc *p, void *v, register_t *retval)
 	 * Allocate and initialize the file system.
 	 */
 	mp = (struct mount *)malloc((u_long)sizeof(struct mount),
-		M_MOUNT, M_WAITOK);
-	bzero((char *)mp, (u_long)sizeof(struct mount));
+		M_MOUNT, M_WAITOK|M_ZERO);
 	(void) vfs_busy(mp, VB_READ|VB_NOWAIT);
 	mp->mnt_op = vfsp->vfc_vfsops;
 	mp->mnt_vfc = vfsp;
@@ -269,7 +267,7 @@ update:
 		mp->mnt_stat.f_ctime = time_second;
 	}
 	if (mp->mnt_flag & MNT_UPDATE) {
-		vrele(vp);
+		vput(vp);
 		if (mp->mnt_flag & MNT_WANTRDWR)
 			mp->mnt_flag &= ~MNT_RDONLY;
 		mp->mnt_flag &=~
@@ -1059,8 +1057,10 @@ sys_fhopen(struct proc *p, void *v, register_t *retval)
 			type |= F_WAIT;
 		VOP_UNLOCK(vp, 0, p);
 		error = VOP_ADVLOCK(vp, (caddr_t)fp, F_SETLK, &lf, type);
-		if (error)
+		if (error) {
+			vp = NULL;	/* closef will vn_close the file */
 			goto bad;
+		}
 		vn_lock(vp, LK_EXCLUSIVE | LK_RETRY, p);
 		fp->f_flag |= FHASLOCK;
 	}
@@ -1939,7 +1939,7 @@ sys_utimes(struct proc *p, void *v, register_t *retval)
 
 	VATTR_NULL(&vattr);
 	if (SCARG(uap, tptr) == NULL) {
-		microtime(&tv[0]);
+		getmicrotime(&tv[0]);
 		tv[1] = tv[0];
 		vattr.va_vaflags |= VA_UTIMES_NULL;
 	} else {
@@ -1990,7 +1990,7 @@ sys_futimes(struct proc *p, void *v, register_t *retval)
 
 	VATTR_NULL(&vattr);
 	if (SCARG(uap, tptr) == NULL) {
-		microtime(&tv[0]);
+		getmicrotime(&tv[0]);
 		tv[1] = tv[0];
 		vattr.va_vaflags |= VA_UTIMES_NULL;
 	} else {

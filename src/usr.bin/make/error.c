@@ -1,5 +1,5 @@
 /*	$OpenPackages$ */
-/*	$OpenBSD: error.c,v 1.12 2004/04/07 13:11:35 espie Exp $ */
+/*	$OpenBSD: error.c,v 1.16 2008/01/12 13:08:59 espie Exp $ */
 
 /*
  * Copyright (c) 2001 Marc Espie.
@@ -29,16 +29,21 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdarg.h>
+#include <sys/types.h>
+#include <unistd.h>
 
 #include "config.h"
 #include "defines.h"
 #include "error.h"
 #include "job.h"
 #include "targ.h"
+#include "var.h"
 
 #include "lowparse.h"
 
-int	    fatal_errors = 0;
+int fatal_errors = 0;
+bool supervise_jobs = false;
+
 static void ParseVErrorInternal(const char *, unsigned long, int, const char *, va_list);
 /*-
  * Error --
@@ -70,9 +75,10 @@ Fatal(char *fmt, ...)
 {
 	va_list ap;
 
-	va_start(ap, fmt);
-	Job_Wait();
+	if (supervise_jobs)
+		Job_Wait();
 
+	va_start(ap, fmt);
 	(void)vfprintf(stderr, fmt, ap);
 	va_end(ap);
 	(void)fprintf(stderr, "\n");
@@ -132,7 +138,14 @@ DieHorribly(void)
 void
 Finish(int errors) /* number of errors encountered in Make_Make */
 {
-	Fatal("%d error%s", errors, errors == 1 ? "" : "s");
+	Job_Wait();
+	if (errors != 0) {
+		Error("Stop in %s:", Var_Value(".CURDIR"));
+	}
+	print_errors();
+	if (DEBUG(GRAPH2))
+		Targ_PrintGraph(2);
+	exit(2);		/* Not 1 so -q can distinguish error */
 }
 
 
@@ -147,7 +160,7 @@ Finish(int errors) /* number of errors encountered in Make_Make */
  */
 /* VARARGS */
 static void
-ParseVErrorInternal(const char *cfname, unsigned long clineno, int type, 
+ParseVErrorInternal(const char *cfname, unsigned long clineno, int type,
 	const char *fmt, va_list ap)
 {
 	if (cfname)
@@ -173,7 +186,7 @@ Parse_Error(int type, const char *fmt, ...)
 	va_list ap;
 
 	va_start(ap, fmt);
-	ParseVErrorInternal(Parse_Getfilename(), Parse_Getlineno(), type, 
+	ParseVErrorInternal(Parse_Getfilename(), Parse_Getlineno(), type,
 	    fmt, ap);
 	va_end(ap);
 }

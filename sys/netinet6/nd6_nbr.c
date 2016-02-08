@@ -1,4 +1,4 @@
-/*	$OpenBSD: nd6_nbr.c,v 1.45 2007/06/08 09:31:38 henning Exp $	*/
+/*	$OpenBSD: nd6_nbr.c,v 1.48 2008/03/04 11:19:35 markus Exp $	*/
 /*	$KAME: nd6_nbr.c,v 1.61 2001/02/10 16:06:14 jinmei Exp $	*/
 
 /*
@@ -195,7 +195,7 @@ nd6_ns_input(m, off, icmp6len)
 #if NCARP > 0
 	if (ifp->if_type == IFT_CARP) {
 		ifa = (struct ifaddr *)in6ifa_ifpwithaddr(ifp, &taddr6);
-		if (ifa && !carp_iamatch6(ifp, ifa))
+		if (ifa && !carp_iamatch6(ifp, lladdr, &proxydl))
 			ifa = NULL;
 	} else {
 		ifa = (struct ifaddr *)in6ifa_ifpwithaddr(ifp, &taddr6);
@@ -682,6 +682,8 @@ nd6_na_input(m, off, icmp6len)
 			 * affect the status of associated prefixes..
 			 */
 			pfxlist_onlink_check();
+			if ((rt->rt_flags & RTF_LLINFO) == 0)
+				goto freeit;	/* ln is gone */
 		}
 	} else {
 		int llchange;
@@ -1103,7 +1105,7 @@ nd6_dad_start(ifa, tick)
 		return;
 	}
 
-	dp = malloc(sizeof(*dp), M_IP6NDP, M_NOWAIT);
+	dp = malloc(sizeof(*dp), M_IP6NDP, M_NOWAIT | M_ZERO);
 	if (dp == NULL) {
 		log(LOG_ERR, "nd6_dad_start: memory allocation failed for "
 			"%s(%s)\n",
@@ -1111,7 +1113,6 @@ nd6_dad_start(ifa, tick)
 			ifa->ifa_ifp ? ifa->ifa_ifp->if_xname : "???");
 		return;
 	}
-	bzero(dp, sizeof(*dp));
 	bzero(&dp->dad_timer_ch, sizeof(dp->dad_timer_ch));
 	TAILQ_INSERT_TAIL(&dadq, (struct dadq *)dp, dad_list);
 

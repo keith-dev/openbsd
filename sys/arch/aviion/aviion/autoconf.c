@@ -1,4 +1,4 @@
-/*	$OpenBSD: autoconf.c,v 1.5 2007/06/15 01:19:06 deraadt Exp $	*/
+/*	$OpenBSD: autoconf.c,v 1.7 2007/12/12 20:36:40 miod Exp $	*/
 /*
  * Copyright (c) 1998 Steve Murphree, Jr.
  * Copyright (c) 1996 Nivas Madhur
@@ -130,6 +130,16 @@ cmdline_parse(void)
 	char *p;
 
 	/*
+	 * If the boot commandline has been manually entered, it
+	 * may end with a '\r' character.
+	 */
+	for (p = bootargs; *p != '\0'; p++)
+		;
+	if (p != bootargs)
+		if (*--p == '\r')
+			*p = '\0';
+
+	/*
 	 * Skip boot device ``foo(ctrl,dev,lun)'' and filename,
 	 * i.e. eat everything until whitespace.
 	 */
@@ -164,7 +174,7 @@ cmdline_parse(void)
 	 * commandline, so we can simply use its numerical value, as a
 	 * word, to tell device types apart.
 	 */
-	bootdevtype = *(int *)bootargs;
+	bcopy(bootargs, &bootdevtype, sizeof(int));
 }
 
 void

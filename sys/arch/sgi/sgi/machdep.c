@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.47 2007/07/18 20:05:25 miod Exp $ */
+/*	$OpenBSD: machdep.c,v 1.54 2008/02/20 19:13:38 miod Exp $ */
 
 /*
  * Copyright (c) 2003-2004 Opsycon AB  (www.opsycon.se / www.opsycon.com)
@@ -61,10 +61,8 @@
 #include <machine/db_machdep.h>
 #include <ddb/db_interface.h>
 
-#include <machine/pte.h>
 #include <machine/cpu.h>
 #include <machine/frame.h>
-#include <machine/pio.h>
 #include <machine/psl.h>
 #include <machine/autoconf.h>
 #include <machine/memconf.h>
@@ -96,18 +94,18 @@ extern void stacktrace(void);
 void dump_tlb(void);
 #endif
 
-/* the following is used externally (sysctl_hw) */
-char	machine[] = MACHINE;		/* machine "architecture" */
+/* The following is used externally (sysctl_hw) */
+char	machine[] = MACHINE;		/* Machine "architecture" */
 char	cpu_model[30];
 
 /*
  * Declare these as initialized data so we can patch them.
  */
 #ifndef	BUFCACHEPERCENT
-#define	BUFCACHEPERCENT	5	/* Can be changed in config */
+#define	BUFCACHEPERCENT	5	/* Can be changed in config. */
 #endif
 #ifndef	BUFPAGES
-#define BUFPAGES 0		/* Can be changed in config */
+#define BUFPAGES 0		/* Can be changed in config. */
 #endif
 
 int	bufpages = BUFPAGES;
@@ -120,13 +118,14 @@ int	extent_malloc_flags = 0;
 
 caddr_t	msgbufbase;
 
-int	physmem;		/* max supported memory, changes to actual */
-int	rsvdmem;		/* reserved memory not usable */
-int	ncpu = 1;		/* At least one cpu in the system */
+int	physmem;		/* Max supported memory, changes to actual. */
+int	rsvdmem;		/* Reserved memory not usable. */
+int	ncpu = 1;		/* At least one CPU in the system. */
 struct	user *proc0paddr;
 struct	user *curprocpaddr;
-int	console_ok;		/* set when console initialized */
+int	console_ok;		/* Set when console initialized. */
 int	bootdriveoffs = 0;
+int	kbd_reset;
 
 int32_t *environment;
 struct sys_rec sys_config;
@@ -179,9 +178,8 @@ crime_configure_memory(void)
 #endif
 
 		/*
-		 * Do not report memory regions below 256MB, since
-		 * arcbios will do. Moreover, empty banks are reported
-		 * at address zero.
+		 * Do not report memory regions below 256MB, since ARCBIOS will do.
+		 * Moreover, empty banks are reported at address zero.
 		 */
 		if (addr < 256 * 1024 * 1024)
 			continue;
@@ -192,8 +190,8 @@ crime_configure_memory(void)
 		last_page = atop(addr + size);
 
 		/*
-		 * Try to coalesce with other memory segments if banks
-		 * are contiguous.
+		 * Try to coalesce with other memory segments if banks are 
+		 * contiguous.
 		 */
 		m = NULL;
 		for (i = 0; i < MAXMEMSEGS; i++) {
@@ -250,7 +248,7 @@ mips_init(int argc, void *argv)
 	setsr(getsr() | SR_KX | SR_UX);
 
 	/*
-	 * Clear the compiled BSS segment in OpenBSD code
+	 * Clear the compiled BSS segment in OpenBSD code.
 	 */
 	bzero(edata, end - edata);
 
@@ -270,8 +268,8 @@ mips_init(int argc, void *argv)
 	}
 
 	/*
-	 *  Initialize the system type and set up memory layout
-	 *  Note that some systems have more complex memory setup.
+	 *  Initialize the system type and set up memory layout.
+	 *  Note that some systems have a more complex memory setup.
 	 */
 	bios_ident();
 
@@ -289,11 +287,6 @@ bios_printf("SR=%08x\n", getsr()); /* leave this in for now. need to see sr */
 		sys_config.cons_ioaddr[1] = MACE_ISA_SER2_OFFS;
 		sys_config.cons_baudclk = 1843200;		/*XXX*/
 		sys_config.cons_iot = &macebus_tag;
-		sys_config.local.bus_base = 0x0;		/*XXX*/
-		sys_config.pci_io[0].bus_base = 0xffffffff00000000;/*XXX*/
-		sys_config.pci_mem[0].bus_base = 0xffffffff00000000;/*XXX*/
-		sys_config.pci_mem[0].bus_base_dma = 0x00000000;/*XXX*/
-		sys_config.pci_mem[0].bus_reverse = my_endian;
 		sys_config.cpu[0].tlbwired = 2;
 
 		crime_configure_memory();
@@ -303,14 +296,14 @@ bios_printf("SR=%08x\n", getsr()); /* leave this in for now. need to see sr */
 		if (cp && atoi(cp, 10, NULL) > 100)
 			sys_config.cpu[0].clock = atoi(cp, 10, NULL) * 1000000;
 
-		/* R1xK O2's are one disk slot machines. Offset slotno */
+		/* R1xK O2s are one disk slot machines. Offset slotno. */
 		switch ((cp0_get_prid() >> 8) & 0xff) {
 		case MIPS_R10000:
 		case MIPS_R12000:
 			bootdriveoffs = -1;
 			break;
 		}
-		/* R12K O2's must run with DSD on */
+		/* R12K O2s must run with DSD on. */
 		switch ((cp0_get_prid() >> 8) & 0xff) {
 		case MIPS_R12000:
 			setsr(getsr() | SR_DSD);
@@ -322,19 +315,14 @@ bios_printf("SR=%08x\n", getsr()); /* leave this in for now. need to see sr */
 #if defined(TGT_ORIGIN200) || defined(TGT_ORIGIN2000)
 	case SGI_O200:
 		bios_printf("Found SGI-IP27, setting up.\n");
-		strlcpy(cpu_model, "SGI- Origin200 (IP27)", sizeof(cpu_model));
+		strlcpy(cpu_model, "SGI-Origin200 (IP27)", sizeof(cpu_model));
 
 		kl_scan_config(0);
 
 		sys_config.cons_ioaddr[0] = kl_get_console_base();
 		sys_config.cons_ioaddr[1] = kl_get_console_base() - 8;
 		sys_config.cons_baudclk = 22000000 / 3;	/*XXX*/
-		sys_config.cons_iot = &xbowmux_tag;
-		sys_config.local.bus_base = 0x0;		/*XXX*/
-		sys_config.pci_io[0].bus_base = 0xffffffff00000000;/*XXX*/
-		sys_config.pci_mem[0].bus_base = 0xffffffff00000000;/*XXX*/
-		sys_config.pci_mem[0].bus_base_dma = 0x00000000;/*XXX*/
-		sys_config.pci_mem[0].bus_reverse = my_endian;
+		sys_config.cons_iot = &xbowbus_tag;
 		sys_config.cpu[0].tlbwired = 2;
 		break;
 #endif
@@ -347,20 +335,27 @@ bios_printf("SR=%08x\n", getsr()); /* leave this in for now. need to see sr */
 	}
 
 	/*
+	 * Read and store console type.
+	 */
+	cp = Bios_GetEnvironmentVariable("ConsoleOut");
+	if (cp != NULL && *cp != '\0')
+		strlcpy(bios_console, cp, sizeof bios_console);
+
+	/*
 	 * Look at arguments passed to us and compute boothowto.
-	 * Default to SINGLE and ASKNAME if no args or
-	 * SINGLE and DFLTROOT if this is a ramdisk kernel.
+	 * Default to AUTOBOOT if no args or SINGLE and DFLTROOT
+	 * if this is a ramdisk kernel.
 	 */
 #ifdef RAMDISK_HOOKS
 	boothowto = RB_SINGLE | RB_DFLTROOT;
 #else
-	boothowto = RB_SINGLE | RB_ASKNAME;
+	boothowto = RB_AUTOBOOT;
 #endif /* RAMDISK_HOOKS */
 
 	dobootopts(argc, argv);
 
 	/*
-	 *  Figure out where we was booted from.
+	 * Figure out where we booted from.
 	 */
 	cp = Bios_GetEnvironmentVariable("OSLoadPartition");
 	if (cp == NULL)
@@ -374,7 +369,7 @@ bios_printf("SR=%08x\n", getsr()); /* leave this in for now. need to see sr */
 	switch (sys_config.system_type) {
 #if defined(TGT_O2)
 	case SGI_O2:
-		/* get ethernet address from ARCBIOS */
+		/* Get Ethernet address from ARCBIOS. */
 		cp = Bios_GetEnvironmentVariable("eaddr");
 		if (cp != NULL && strlen(cp) > 0)
 			strlcpy(bios_enaddr, cp, sizeof bios_enaddr);
@@ -385,8 +380,8 @@ bios_printf("SR=%08x\n", getsr()); /* leave this in for now. need to see sr */
 	}
 
 	/*
-	 *  Set pagesize to enable use of page macros and functions.
-	 *  Commit available memory to UVM system
+	 * Set pagesize to enable use of page macros and functions.
+	 * Commit available memory to UVM system.
 	 */
 	uvmexp.pagesize = PAGE_SIZE;
 	uvm_setpagesize();
@@ -411,13 +406,13 @@ bios_printf("SR=%08x\n", getsr()); /* leave this in for now. need to see sr */
 		fp = mem_layout[i].mem_first_page;
 		lp = mem_layout[i].mem_last_page;
 
-		/* Account for kernel and kernel symbol table */
+		/* Account for kernel and kernel symbol table. */
 		if (fp >= firstkernpage && lp < lastkernpage)
-			continue;	/* In kernel */
+			continue;	/* In kernel. */
 
 		if (lp < firstkernpage || fp > lastkernpage) {
 			uvm_page_physload(fp, lp, fp, lp, VM_FREELIST_DEFAULT);
-			continue;	/* Outside kernel */
+			continue;	/* Outside kernel. */
 		}
 
 		if (fp >= firstkernpage)
@@ -445,7 +440,7 @@ bios_printf("SR=%08x\n", getsr()); /* leave this in for now. need to see sr */
 		sys_config.cpu[0].fpvers_min = cp1_get_prid() & 0x0f;
 
 		/*
-		 *  Configure TLB.
+		 * Configure TLB.
 		 */
 		switch(sys_config.cpu[0].type) {
 		case MIPS_RM7000:
@@ -473,7 +468,7 @@ bios_printf("SR=%08x\n", getsr()); /* leave this in for now. need to see sr */
 	}
 
 	/*
-	 *  Configure Cache.
+	 * Configure cache.
 	 */
 	switch(sys_config.cpu[0].type) {
 	case MIPS_R10000:
@@ -502,21 +497,21 @@ bios_printf("SR=%08x\n", getsr()); /* leave this in for now. need to see sr */
 	}
 
 	/*
-	 *  Last chance to call the bios. Wiping the TLB means
-	 *  bios data areas are demapped on most systems.
-	 *  O2's are OK. Does not have mapped bios text or data.
+	 * Last chance to call the BIOS. Wiping the TLB means the BIOS' data
+	 * areas are demapped on most systems. O2s are okay as they do not have 
+	 * mapped BIOS text or data.
 	 */
-	delay(20*1000);		/* Let any uart fifo drain... */
+	delay(20*1000);		/* Let any UART FIFO drain... */
 	tlb_set_wired(0);
 	tlb_flush(sys_config.cpu[0].tlbsize);
 	tlb_set_wired(sys_config.cpu[0].tlbwired);
 
 #if 0
-	/* XXX Save the following as an example on how to optimize I/O mapping */
+	/* XXX Save the following as an example on how to optimize I/O mapping. */
 
 	/*
-	 *  Set up some fixed mappings. These are so frequently
-	 *  used so faulting them in will waste to many cycles.
+	 * Set up some fixed mappings. These are frequently used so faulting
+	 * them in will waste too many cycles.
 	 */
 	if (sys_config.system_type == MOMENTUM_CP7000G ||
 	    sys_config.system_type == MOMENTUM_CP7000 ||
@@ -547,7 +542,7 @@ bios_printf("SR=%08x\n", getsr()); /* leave this in for now. need to see sr */
 
 #if defined(TGT_ORIGIN200) || defined(TGT_ORIGIN2000)
 	/*
-	 *  If an IP27 system set up Node 0's HUB.
+	 * If an IP27 system set up Node 0's HUB.
 	 */
 	if (sys_config.system_type == SGI_O200) {
 		IP27_LHUB_S(PI_REGION_PRESENT, 1);
@@ -556,7 +551,7 @@ bios_printf("SR=%08x\n", getsr()); /* leave this in for now. need to see sr */
 #endif
 
 	/*
-	 *  Get a console, very early but after initial mapping setup.
+	 * Get a console, very early but after initial mapping setup.
 	 */
 	consinit();
 	printf("Initial setup done, switching console.\n");
@@ -599,7 +594,7 @@ bios_printf("SR=%08x\n", getsr()); /* leave this in for now. need to see sr */
 	bcopy(exception, (char *)GEN_EXC_VEC, e_exception - exception);
 
 	/*
-	 *  Turn off bootstrap exception vectors.
+	 * Turn off bootstrap exception vectors.
 	 */
 	setsr(getsr() & ~SR_BOOT_EXC_VEC);
 	proc0.p_md.md_regs->sr = getsr();
@@ -616,7 +611,7 @@ bios_printf("SR=%08x\n", getsr()); /* leave this in for now. need to see sr */
 #endif
 
 	/*
-	 *  Return new stack pointer.
+	 * Return new stack pointer.
 	 */
 	return ((caddr_t)proc0paddr + USPACE - 64);
 }
@@ -645,7 +640,7 @@ allocsys(caddr_t v)
 
 
 /*
- *  Decode boot options.
+ * Decode boot options.
  */
 static void
 dobootopts(int argc, void *argv)
@@ -659,27 +654,53 @@ dobootopts(int argc, void *argv)
 			cp = (char *)(long)((int32_t *)argv)[i];
 		else
 			cp = ((char **)argv)[i];
-		if (cp != NULL && strncmp(cp, "OSLoadOptions=", 14) == 0) {
+		if (cp == NULL)
+			continue;
+
+		/*
+		 * Parse PROM options.
+		 */
+		if (strncmp(cp, "OSLoadOptions=", 14) == 0) {
 			if (strcmp(&cp[14], "auto") == 0)
 					boothowto &= ~(RB_SINGLE|RB_ASKNAME);
 			else if (strcmp(&cp[14], "single") == 0)
 					boothowto |= RB_SINGLE;
 			else if (strcmp(&cp[14], "debug") == 0)
 					boothowto |= RB_KDB;
+			continue;
+		}
+
+		/*
+		 * Parse kernel options.
+		 */
+		if (*cp == '-') {
+			while (*++cp != '\0')
+				switch (*cp) {
+				case 'a':
+					boothowto |= RB_ASKNAME;
+					break;
+				case 'c':
+					boothowto |= RB_CONFIG;
+					break;
+				case 'd':
+					boothowto |= RB_KDB;
+					break;
+				case 's':
+					boothowto |= RB_SINGLE;
+					break;
+				}
 		}
 	}
 
-	/* Catch serial consoles on O2's */
-	cp = Bios_GetEnvironmentVariable("ConsoleOut");
-	if (cp != NULL && strncmp(cp, "serial", 6) == 0)
+	/* Catch serial consoles on O2s. */
+	if (strncmp(bios_console, "serial", 6) == 0)
 		boothowto |= RB_SERCONS;
 }
 
 
 /*
- * Console initialization: called early on from main,
- * before vm init or startup.  Do enough configuration
- * to choose and initialize a console.
+ * Console initialization: called early on from main, before vm init or startup.
+ * Do enough configuration to choose and initialize a console.
  */
 void
 consinit()
@@ -692,8 +713,8 @@ consinit()
 }
 
 /*
- * cpu_startup: allocate memory for variable-sized tables,
- * initialize cpu, and do autoconfiguration.
+ * cpu_startup: allocate memory for variable-sized tables, initialize CPU, and 
+ * do auto-configuration.
  */
 void
 cpu_startup()
@@ -703,7 +724,7 @@ cpu_startup()
 	extern int pmapdebug;
 	int opmapdebug = pmapdebug;
 
-	pmapdebug = 0;	/* Shut up pmap debug during bootstrap */
+	pmapdebug = 0;	/* Shut up pmap debug during bootstrap. */
 #endif
 
 	/*
@@ -722,20 +743,20 @@ cpu_startup()
 	if (bufpages == 0)
 		bufpages = physmem * bufcachepercent / 100;
 
-	/* Restrict to at most 25% filled kvm */
+	/* Restrict to at most 25% filled kvm. */
 	if (bufpages >
 	    (VM_MAX_KERNEL_ADDRESS-VM_MIN_KERNEL_ADDRESS) / PAGE_SIZE / 4) 
 		bufpages = (VM_MAX_KERNEL_ADDRESS-VM_MIN_KERNEL_ADDRESS) /
 		    PAGE_SIZE / 4;
 
 	/*
-	 * Allocate a submap for exec arguments.  This map effectively
+	 * Allocate a submap for exec arguments. This map effectively
 	 * limits the number of processes exec'ing at any time.
 	 */
 	minaddr = vm_map_min(kernel_map);
 	exec_map = uvm_km_suballoc(kernel_map, &minaddr, &maxaddr,
 	    16 * NCARGS, VM_MAP_PAGEABLE, FALSE, NULL);
-	/* Allocate a submap for physio */
+	/* Allocate a submap for physio. */
 	phys_map = uvm_km_suballoc(kernel_map, &minaddr, &maxaddr,
 	    VM_PHYS_SIZE, 0, FALSE, NULL);
 
@@ -770,7 +791,7 @@ cpu_startup()
 }
 
 /*
- * machine dependent system variables.
+ * Machine dependent system variables.
  */
 int
 cpu_sysctl(name, namelen, oldp, oldlenp, newp, newlen, p)
@@ -782,11 +803,15 @@ cpu_sysctl(name, namelen, oldp, oldlenp, newp, newlen, p)
 	size_t newlen;
 	struct proc *p;
 {
-	/* all sysctl names at this level are terminal */
+	/* All sysctl names at this level are terminal. */
 	if (namelen != 1)
-		return ENOTDIR;		/* overloaded */
+		return ENOTDIR;		/* Overloaded */
 
 	switch (name[0]) {
+	case CPU_KBDRESET:
+		if (securelevel > 0)
+			return (sysctl_rdint(oldp, oldlenp, newp, kbd_reset));
+		return (sysctl_int(oldp, oldlenp, newp, newlen, &kbd_reset));
 	default:
 		return EOPNOTSUPP;
 	}
@@ -854,7 +879,7 @@ void
 boot(int howto)
 {
 
-	/* take a snap shot before clobbering any registers */
+	/* Take a snapshot before clobbering any registers. */
 	if (curproc)
 		savectx(curproc->p_addr, 0);
 
@@ -866,7 +891,7 @@ boot(int howto)
 	if (cold) {
 		/*
 		 * If the system is cold, just halt, unless the user
-		 * explicitely asked for reboot.
+		 * explicitly asked for reboot.
 		 */
 		if ((howto & RB_USERREQ) == 0)
 			howto |= RB_HALT;
@@ -880,14 +905,14 @@ boot(int howto)
 		if (curproc == NULL)
 			curproc = &proc0;
 		/*
-		 * Synchronize the disks....
+		 * Synchronize the disks...
 		 */
 		waittime = 0;
 		vfs_shutdown();
 
 		/*
-		 * If we've been adjusting the clock, the todr
-		 * will be out of synch; adjust it now.
+		 * If we've been adjusting the clock, the todr will be out of
+		 * sync; adjust it now.
 		 */
 		if ((howto & RB_TIMEBAD) == 0) {
 			resettodr();
@@ -896,7 +921,7 @@ boot(int howto)
 		}
 	}
 
-	(void) splhigh();		/* extreme priority */
+	(void) splhigh();		/* Extreme priority. */
 
 	if (howto & RB_DUMP)
 		dumpsys();
@@ -925,8 +950,8 @@ haltsys:
 	/*NOTREACHED*/
 }
 
-int	dumpmag = (int)0x8fca0101;	/* magic number for savecore */
-int	dumpsize = 0;		/* also for savecore */
+int	dumpmag = (int)0x8fca0101;	/* Magic number for savecore. */
+int	dumpsize = 0;			/* Also for savecore. */
 long	dumplo = 0;
 
 void
@@ -947,17 +972,16 @@ dumpconf(void)
 		dumplo = nblks - btodb(ctob(physmem));
 
 	/*
-	 * Don't dump on the first page
-	 * in case the dump device includes a disk label.
+	 * Don't dump on the first page in case the dump device includes a 
+	 * disk label.
 	 */
 	if (dumplo < btodb(PAGE_SIZE))
 		dumplo = btodb(PAGE_SIZE);
 }
 
 /*
- * Doadump comes here after turning off memory management and
- * getting on the dump stack, either when called above, or by
- * the auto-restart code.
+ * Doadump comes here after turning off memory management and getting on the
+ * dump stack, either when called above, or by the auto-restart code.
  */
 void
 dumpsys()
@@ -968,8 +992,8 @@ dumpsys()
 	if (dumpdev == NODEV)
 		return;
 	/*
-	 * For dumps during autoconfiguration,
-	 * if dump device has already configured...
+	 * For dumps during auto-configuration, if dump device has already
+	 * configured...
 	 */
 	if (dumpsize == 0)
 		dumpconf();
@@ -1012,7 +1036,7 @@ initcpu()
 }
 
 /*
- * Convert "xx:xx:xx:xx:xx:xx" string to ethernet hardware address.
+ * Convert "xx:xx:xx:xx:xx:xx" string to Ethernet hardware address.
  */
 void
 enaddr_aton(const char *s, u_int8_t *a)
@@ -1044,18 +1068,18 @@ atoi(const char *s, int b, const char **o)
 		return 0;
 	}
 
-	/* skip spaces if any */
+	/* Skip spaces if any. */
 	do {
 		c = *s++;
 	} while (c == ' ' || c == '\t');
 
-	/* parse sign, allow more than one (compat) */
+	/* Parse sign, allow more than one (compat). */
 	while (c == '-') {
 		neg = !neg;
 		c = *s++;
 	}
 
-	/* parse base specification, if any */
+	/* Parse base specification, if any. */
 	if (c == '0') {
 		c = *s++;
 		switch (c) {
@@ -1074,7 +1098,7 @@ atoi(const char *s, int b, const char **o)
 		}
 	}
 
-	/* parse number proper */
+	/* Parse number proper. */
 	for (;;) {
 		if (c >= '0' && c <= '9')
 			d = c - '0';
@@ -1096,9 +1120,8 @@ atoi(const char *s, int b, const char **o)
 }
 
 /*
- *  RM7000 Performance counter support.
+ * RM7000 Performance counter support.
  */
-
 int
 rm7k_perfcntr(cmd, arg1, arg2, arg3)
 	int cmd;
@@ -1142,8 +1165,8 @@ printf("perfcnt error %d\n", cmd);
 }
 
 /*
- *  Called when the performance counter d31 gets set.
- *  Increase spill value and reset d31.
+ * Called when the performance counter d31 gets set.
+ * Increase spill value and reset d31.
  */
 void
 rm7k_perfintr(trapframe)
@@ -1167,7 +1190,7 @@ rm7k_watchintr(trapframe)
 
 #ifdef DEBUG
 /*
- *	Dump TLB contents.
+ * Dump TLB contents.
  */
 void
 dump_tlb()

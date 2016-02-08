@@ -1,4 +1,4 @@
-/* $OpenBSD: wsdisplay.c,v 1.81 2007/07/25 23:11:52 art Exp $ */
+/* $OpenBSD: wsdisplay.c,v 1.85 2008/01/23 16:37:55 jsing Exp $ */
 /* $NetBSD: wsdisplay.c,v 1.82 2005/02/27 00:27:52 perry Exp $ */
 
 /*
@@ -250,7 +250,7 @@ void	(*wsdisplay_cons_kbd_pollc)(dev_t, int);
 
 struct consdev wsdisplay_cons = {
 	NULL, NULL, wsdisplay_getc_dummy, wsdisplay_cnputc,
-	    wsdisplay_pollc, NULL, NODEV, CN_NORMAL
+	    wsdisplay_pollc, NULL, NODEV, CN_LOWPRI
 };
 
 #ifndef WSDISPLAY_DEFAULTSCREENS
@@ -1134,6 +1134,10 @@ wsdisplay_internal_ioctl(struct wsdisplay_softc *sc, struct wsscreen *scr,
 			wsmoused_release(sc);
 #endif
 
+			/* clear cursor */
+			(*scr->scr_dconf->wsemul->reset)
+			    (scr->scr_dconf->wsemulcookie, WSEMUL_CLEARCURSOR);
+
 #ifdef BURNER_SUPPORT
 			/* disable the burner while X is running */
 			if (sc->sc_burnout)
@@ -1548,7 +1552,7 @@ wsdisplay_kbdinput(struct device *dev, keysym_t ks)
 {
 	struct wsdisplay_softc *sc = (struct wsdisplay_softc *)dev;
 	struct wsscreen *scr;
-	char *dp;
+	const char *dp;
 	int count;
 	struct tty *tp;
 
@@ -1836,7 +1840,7 @@ wsdisplay_switch(struct device *dev, int no, int waitok)
 	    (sc->sc_scr[no]->scr_flags & SCR_GRAPHICS)) {
 		/* switching from a text console to a graphic console */
 	
-		/* remote a potential wsmoused(8) selection */
+		/* remove a potential wsmoused(8) selection */
 		mouse_remove(sc);
 		wsmoused_release(sc);
 	}

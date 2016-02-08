@@ -1,4 +1,4 @@
-#	$OpenBSD: files,v 1.409 2007/07/18 18:17:09 damien Exp $
+#	$OpenBSD: files,v 1.424 2008/01/21 20:00:32 sobrado Exp $
 #	$NetBSD: files,v 1.87 1996/05/19 17:17:50 jonathan Exp $
 
 #	@(#)files.newconf	7.5 (Berkeley) 5/10/93
@@ -93,8 +93,12 @@ file	dev/ic/pcdisplay_chars.c	pcdisplayops
 define	mk48txx
 file	dev/ic/mk48txx.c		mk48txx
 
+# DRM - Direct Rendering Manager: /dev/drm
+define drm {}
+include "dev/pci/drm/files.drm"
+
 # VGA graphics
-device	vga: wsemuldisplaydev, pcdisplayops
+device	vga: wsemuldisplaydev, pcdisplayops, drm
 file	dev/ic/vga.c			vga & (vga_pci | vga_isa) needs-flag
 file	dev/ic/vga_subr.c		vga & (vga_pci | vga_isa) needs-flag
 
@@ -175,7 +179,7 @@ file	dev/ic/ami.c			ami
 device	mfi: scsi
 file	dev/ic/mfi.c			mfi
 
-# Qlogic ISP 10x0 SCSI Controllers
+# QLogic ISP 10x0 SCSI Controllers
 device	isp: scsi
 file	dev/ic/isp.c			isp
 file	dev/ic/isp_openbsd.c		isp
@@ -302,11 +306,9 @@ file	dev/ic/com.c			com & (com | com_cardbus | com_gsc |
 file	dev/ic/com_subr.c		com | pccom
 
 # PC-like keyboard controller
-device	pckbc {[slot = -1]}
+define	pckbcslot {[slot = -1]}
+device	pckbc: pckbcslot
 file	dev/ic/pckbc.c			pckbc needs-flag
-
-# HPPA PS/2 input ports (forward definition)
-device	gsckbc {[slot = -1]}
 
 # PCF8584 I2C Controllers
 device	pcfiic: i2cbus
@@ -371,6 +373,7 @@ file	dev/ic/rtw.c			rtw
 device	ral: ether, ifnet, ifmedia, firmload, wlan
 file	dev/ic/rt2560.c			ral
 file	dev/ic/rt2661.c			ral
+file	dev/ic/rt2860.c			ral
 
 # Texas Instruments ACX 802.11
 device	acx: ether, ifnet, ifmedia, firmload, wlan
@@ -389,6 +392,10 @@ file	dev/ic/aic6915.c		sf
 # Marvell Libertas Open
 device	malo: ether, ifnet, ifmedia, firmload, wlan
 file	dev/ic/malo.c			malo
+
+# Broadcom AirForce
+device	bwi: ether, ifnet, ifmedia, firmload, wlan
+file	dev/ic/bwi.c			bwi
 
 # Attributes which machine-independent bus support can be attached to.
 # These should be defined here, because some of these busses can have
@@ -435,6 +442,9 @@ file	dev/ipmi.c			ipmi	needs-flag
 device	softraid: scsi
 attach	softraid at root
 file	dev/softraid.c			softraid	needs-flag
+file	dev/softraid_raid0.c		softraid
+file	dev/softraid_raid1.c		softraid
+file	dev/softraid_crypto.c		softraid & crypto
 
 # legitimate pseudo-devices
 pseudo-device vnd: disk
@@ -444,6 +454,8 @@ pseudo-device rd: disk
 file	dev/ramdisk.c			rd needs-flag
 
 pseudo-device pty: tty
+pseudo-device nmea: tty
+pseudo-device msts: tty
 
 pseudo-device loop: ifnet
 pseudo-device sl: ifnet
@@ -641,6 +653,7 @@ file kern/kern_physio.c
 file kern/kern_proc.c
 file kern/kern_prot.c
 file kern/kern_resource.c
+file kern/kern_sched.c
 file kern/kern_sensors.c		!small_kernel
 file kern/kern_sig.c
 file kern/kern_subr.c
@@ -676,6 +689,8 @@ file kern/sysv_shm.c			sysvshm
 file kern/tty.c
 file kern/tty_conf.c
 file kern/tty_pty.c			pty			needs-count
+file kern/tty_nmea.c			nmea			needs-flag
+file kern/tty_msts.c			msts			needs-flag
 file kern/tty_subr.c
 file kern/tty_tty.c
 file kern/uipc_domain.c
@@ -813,7 +828,7 @@ file crypto/criov.c			(inet & ipsec) | crypto
 file crypto/cryptosoft.c		(inet & ipsec) | crypto
 file crypto/xform.c			(inet & ipsec) | crypto
 file crypto/deflate.c			(inet & ipsec) | crypto
-file crypto/arc4.c			wi | wlan
+file crypto/arc4.c			
 file crypto/michael.c			wlan
 file netatalk/aarp.c			netatalk
 file netatalk/at_control.c		netatalk
@@ -958,6 +973,66 @@ file net/pfkeyv2.c			key | ipsec | tcp_signature
 file net/pfkeyv2_parsemessage.c		key | ipsec | tcp_signature
 file net/pfkeyv2_convert.c		key | ipsec | tcp_signature
 
-# NMEA0183 support
-pseudo-device nmea: tty
-file	kern/tty_nmea.c			nmea needs-flag
+# COMPAT_* support code (base and other shared code)
+file compat/common/compat_exec.c	!small_kernel
+file compat/common/compat_util.c	!small_kernel
+file compat/common/compat_dir.c		!small_kernel
+file compat/common/compat_vm.c		!small_kernel &
+	(compat_freebsd | compat_bsdos | compat_sunos | compat_hpux | compat_linux)
+file compat/common/kern_info_09.c	!small_kernel &
+	(compat_freebsd | compat_ibcs2 | compat_sunos | compat_hpux |
+	compat_osf1 | compat_linux)
+file compat/common/kern_ipc_10.c	!small_kernel &
+	(compat_freebsd | compat_ibcs2 | compat_sunos | compat_hpux | compat_bsdos)
+file compat/common/vfs_syscalls_25.c	!small_kernel &
+	(compat_freebsd | compat_bsdos | compat_sunos | compat_hpux)
+file compat/common/vfs_syscalls_35.c	!small_kernel &
+	(compat_freebsd | compat_bsdos | compat_sunos | compat_hpux)
+file compat/common/kern_ipc_35.c	!small_kernel & compat_35
+file compat/common/kern_ipc_23.c	!small_kernel & compat_23
+file compat/common/kern_exit_43.c	!small_kernel
+file compat/common/kern_info_43.c	!small_kernel
+file compat/common/kern_resource_43.c	!small_kernel
+file compat/common/kern_sig_43.c	!small_kernel
+file compat/common/tty_43.c		!small_kernel
+file compat/common/uipc_syscalls_43.c	!small_kernel
+file compat/common/vfs_syscalls_43.c	!small_kernel
+file compat/common/vm_43.c		!small_kernel
+
+# libkern MI components
+file lib/libkern/mcount.c		gprof
+file lib/libkern/getsn.c
+file lib/libkern/arch/${MACHINE_ARCH}/random.S | lib/libkern/random.c
+file lib/libkern/arch/${MACHINE_ARCH}/srandom.S | lib/libkern/srandom.c
+file lib/libkern/arch/${MACHINE_ARCH}/strchr.S | lib/libkern/strchr.c
+file lib/libkern/arch/${MACHINE_ARCH}/strrchr.S | lib/libkern/strrchr.c
+file lib/libkern/arch/${MACHINE_ARCH}/__main.S | lib/libkern/__main.c
+file lib/libkern/arch/${MACHINE_ARCH}/imax.S | lib/libkern/imax.c
+file lib/libkern/arch/${MACHINE_ARCH}/imin.S | lib/libkern/imin.c
+file lib/libkern/arch/${MACHINE_ARCH}/lmax.S | lib/libkern/lmax.c
+file lib/libkern/arch/${MACHINE_ARCH}/lmin.S | lib/libkern/lmin.c
+file lib/libkern/arch/${MACHINE_ARCH}/max.S | lib/libkern/max.c
+file lib/libkern/arch/${MACHINE_ARCH}/min.S | lib/libkern/min.c
+file lib/libkern/arch/${MACHINE_ARCH}/ulmax.S | lib/libkern/ulmax.c
+file lib/libkern/arch/${MACHINE_ARCH}/ulmin.S | lib/libkern/ulmin.c
+file lib/libkern/arch/${MACHINE_ARCH}/memchr.S | lib/libkern/memchr.c
+file lib/libkern/arch/${MACHINE_ARCH}/memcmp.S | lib/libkern/memcmp.c
+file lib/libkern/arch/${MACHINE_ARCH}/bcmp.S | lib/libkern/bcmp.c
+file lib/libkern/arch/${MACHINE_ARCH}/bzero.S | lib/libkern/bzero.c
+file lib/libkern/arch/${MACHINE_ARCH}/bcopy.S | lib/libkern/bcopy.c
+file lib/libkern/arch/${MACHINE_ARCH}/ovbcopy.S | lib/libkern/ovbcopy.c
+file lib/libkern/arch/${MACHINE_ARCH}/memcpy.S | lib/libkern/memcpy.c
+file lib/libkern/arch/${MACHINE_ARCH}/memmove.S | lib/libkern/memmove.c
+file lib/libkern/arch/${MACHINE_ARCH}/ffs.S | lib/libkern/ffs.c
+file lib/libkern/arch/${MACHINE_ARCH}/memset.S | lib/libkern/memset.c
+file lib/libkern/arch/${MACHINE_ARCH}/strcmp.S | lib/libkern/strcmp.c
+file lib/libkern/arch/${MACHINE_ARCH}/strlcat.S | lib/libkern/strlcat.c
+file lib/libkern/arch/${MACHINE_ARCH}/strlcpy.S | lib/libkern/strlcpy.c
+file lib/libkern/arch/${MACHINE_ARCH}/strlen.S | lib/libkern/strlen.c
+file lib/libkern/arch/${MACHINE_ARCH}/strncmp.S | lib/libkern/strncmp.c
+file lib/libkern/arch/${MACHINE_ARCH}/strncpy.S | lib/libkern/strncpy.c
+file lib/libkern/arch/${MACHINE_ARCH}/scanc.S | lib/libkern/scanc.c
+file lib/libkern/arch/${MACHINE_ARCH}/skpc.S | lib/libkern/skpc.c
+file lib/libkern/arch/${MACHINE_ARCH}/htonl.S | lib/libkern/htonl.c
+file lib/libkern/arch/${MACHINE_ARCH}/htons.S | lib/libkern/htons.c
+file lib/libkern/arch/${MACHINE_ARCH}/strncasecmp.S | lib/libkern/strncasecmp.c

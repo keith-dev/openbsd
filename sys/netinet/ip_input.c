@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip_input.c,v 1.151 2007/05/30 04:46:45 henning Exp $	*/
+/*	$OpenBSD: ip_input.c,v 1.157 2008/02/05 22:57:31 mpf Exp $	*/
 /*	$NetBSD: ip_input.c,v 1.30 1996/03/16 23:53:58 christos Exp $	*/
 
 /*
@@ -44,6 +44,7 @@
 #include <sys/socketvar.h>
 #include <sys/syslog.h>
 #include <sys/sysctl.h>
+#include <sys/pool.h>
 
 #include <net/if.h>
 #include <net/if_dl.h>
@@ -60,6 +61,10 @@
 
 #if NPF > 0
 #include <net/pfvar.h>
+#endif
+
+#ifdef MROUTING
+#include <netinet/ip_mroute.h>
 #endif
 
 #ifdef IPSEC
@@ -132,41 +137,9 @@ int	ipqmaxlen = IFQ_MAXLEN;
 struct	in_ifaddrhead in_ifaddr;
 struct	ifqueue ipintrq;
 
-int	ipq_locked;
-static __inline int ipq_lock_try(void);
-static __inline void ipq_unlock(void);
-
 struct pool ipqent_pool;
 
 struct ipstat ipstat;
-
-static __inline int
-ipq_lock_try()
-{
-	int s;
-
-	/* Use splvm() due to mbuf allocation. */
-	s = splvm();
-	if (ipq_locked) {
-		splx(s);
-		return (0);
-	}
-	ipq_locked = 1;
-	splx(s);
-	return (1);
-}
-
-#define ipq_lock() ipq_lock_try()
-
-static __inline void
-ipq_unlock()
-{
-	int s;
-
-	s = splvm();
-	ipq_locked = 0;
-	splx(s);
-}
 
 char *
 inet_ntoa(ina)
@@ -378,10 +351,8 @@ ipv4_input(m)
 
 #if NCARP > 0
 	if (m->m_pkthdr.rcvif->if_type == IFT_CARP &&
-	    m->m_pkthdr.rcvif->if_flags & IFF_LINK0 &&
-	    ip->ip_p != IPPROTO_ICMP &&
-	    carp_lsdrop(m, AF_INET, &ip->ip_src.s_addr,
-	    &ip->ip_dst.s_addr))
+	    ip->ip_p != IPPROTO_ICMP && carp_lsdrop(m, AF_INET,
+	    &ip->ip_src.s_addr, &ip->ip_dst.s_addr))
 		goto bad;
 #endif
 
@@ -479,10 +450,8 @@ ipv4_input(m)
 
 #if NCARP > 0
 	if (m->m_pkthdr.rcvif->if_type == IFT_CARP &&
-	    m->m_pkthdr.rcvif->if_flags & IFF_LINK0 &&
-	    ip->ip_p == IPPROTO_ICMP &&
-	    carp_lsdrop(m, AF_INET, &ip->ip_src.s_addr,
-	    &ip->ip_dst.s_addr))
+	    ip->ip_p == IPPROTO_ICMP && carp_lsdrop(m, AF_INET,
+	    &ip->ip_src.s_addr, &ip->ip_dst.s_addr))
 		goto bad;
 #endif
 	/*
@@ -548,7 +517,6 @@ ours:
 		 * Look for queue of fragments
 		 * of this datagram.
 		 */
-		ipq_lock();
 		LIST_FOREACH(fp, &ipq, ipq_q)
 			if (ip->ip_id == fp->ipq_id &&
 			    ip->ip_src.s_addr == fp->ipq_src.s_addr &&
@@ -573,7 +541,6 @@ found:
 			if (ntohs(ip->ip_len) == 0 ||
 			    (ntohs(ip->ip_len) & 0x7) != 0) {
 				ipstat.ips_badfrags++;
-				ipq_unlock();
 				goto bad;
 			}
 		}
@@ -589,14 +556,12 @@ found:
 			if (ip_frags + 1 > ip_maxqueue) {
 				ip_flush();
 				ipstat.ips_rcvmemdrop++;
-				ipq_unlock();
 				goto bad;
 			}
 
 			ipqe = pool_get(&ipqent_pool, PR_NOWAIT);
 			if (ipqe == NULL) {
 				ipstat.ips_rcvmemdrop++;
-				ipq_unlock();
 				goto bad;
 			}
 			ip_frags++;
@@ -605,7 +570,6 @@ found:
 			ipqe->ipqe_ip = ip;
 			m = ip_reass(ipqe, fp);
 			if (m == 0) {
-				ipq_unlock();
 				return;
 			}
 			ipstat.ips_reassembled++;
@@ -615,7 +579,6 @@ found:
 		} else
 			if (fp)
 				ip_freef(fp);
-		ipq_unlock();
 	}
 
 #ifdef IPSEC
@@ -761,8 +724,7 @@ ip_reass(ipqe, fp)
 	 * If first fragment to arrive, create a reassembly queue.
 	 */
 	if (fp == 0) {
-		MALLOC(fp, struct ipq *, sizeof (struct ipq),
-		    M_FTABLE, M_NOWAIT);
+		fp = malloc(sizeof (struct ipq), M_FTABLE, M_NOWAIT);
 		if (fp == NULL)
 			goto dropfrag;
 		LIST_INSERT_HEAD(&ipq, fp, ipq_q);
@@ -899,7 +861,7 @@ insert:
 	ip->ip_src = fp->ipq_src;
 	ip->ip_dst = fp->ipq_dst;
 	LIST_REMOVE(fp, ipq_q);
-	FREE(fp, M_FTABLE);
+	free(fp, M_FTABLE);
 	m->m_len += (ip->ip_hl << 2);
 	m->m_data -= (ip->ip_hl << 2);
 	/* some debugging cruft by sklower, below, will go away soon */
@@ -938,7 +900,7 @@ ip_freef(fp)
 		ip_frags--;
 	}
 	LIST_REMOVE(fp, ipq_q);
-	FREE(fp, M_FTABLE);
+	free(fp, M_FTABLE);
 }
 
 /*
@@ -952,7 +914,6 @@ ip_slowtimo()
 	struct ipq *fp, *nfp;
 	int s = splsoftnet();
 
-	ipq_lock();
 	for (fp = LIST_FIRST(&ipq); fp != LIST_END(&ipq); fp = nfp) {
 		nfp = LIST_NEXT(fp, ipq_q);
 		if (--fp->ipq_ttl == 0) {
@@ -960,7 +921,6 @@ ip_slowtimo()
 			ip_freef(fp);
 		}
 	}
-	ipq_unlock();
 	if (ipforward_rt.ro_rt) {
 		RTFREE(ipforward_rt.ro_rt);
 		ipforward_rt.ro_rt = 0;
@@ -975,13 +935,10 @@ void
 ip_drain()
 {
 
-	if (ipq_lock_try() == 0)
-		return;
 	while (!LIST_EMPTY(&ipq)) {
 		ipstat.ips_fragdropped++;
 		ip_freef(LIST_FIRST(&ipq));
 	}
-	ipq_unlock();
 }
 
 /*
@@ -1614,6 +1571,10 @@ ip_sysctl(name, namelen, oldp, oldlenp, newp, newlen)
 	size_t newlen;
 {
 	int error;
+#ifdef MROUTING
+	extern int ip_mrtproto;
+	extern struct mrtstat mrtstat;
+#endif
 
 	/* Almost all sysctl names at this level are terminal. */
 	if (namelen != 1 && name[0] != IPCTL_IFQUEUE)
@@ -1665,6 +1626,26 @@ ip_sysctl(name, namelen, oldp, oldlenp, newp, newlen)
 	case IPCTL_IFQUEUE:
 	        return (sysctl_ifq(name + 1, namelen - 1,
 		    oldp, oldlenp, newp, newlen, &ipintrq));
+	case IPCTL_STATS:
+		if (newp != NULL)
+			return (EPERM);
+		return (sysctl_struct(oldp, oldlenp, newp, newlen,
+		    &ipstat, sizeof(ipstat)));
+	case IPCTL_MRTSTATS:
+#ifdef MROUTING
+		if (newp != NULL)
+			return (EPERM);
+		return (sysctl_struct(oldp, oldlenp, newp, newlen,
+		    &mrtstat, sizeof(mrtstat)));
+#else
+		return (EOPNOTSUPP);
+#endif
+	case IPCTL_MRTPROTO:
+#ifdef MROUTING
+		return (sysctl_rdint(oldp, oldlenp, newp, ip_mrtproto));
+#else
+		return (EOPNOTSUPP);
+#endif
 	default:
 		if (name[0] < IPCTL_MAXID)
 			return (sysctl_int_arr(ipctl_vars, name, namelen,

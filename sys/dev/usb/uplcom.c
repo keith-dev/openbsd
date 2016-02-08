@@ -1,4 +1,4 @@
-/*	$OpenBSD: uplcom.c,v 1.43 2007/06/14 10:11:16 mbalmer Exp $	*/
+/*	$OpenBSD: uplcom.c,v 1.50 2008/03/03 20:58:43 jsg Exp $	*/
 /*	$NetBSD: uplcom.c,v 1.29 2002/09/23 05:51:23 simonb Exp $	*/
 /*
  * Copyright (c) 2001 The NetBSD Foundation, Inc.
@@ -159,7 +159,9 @@ static const struct usb_devno uplcom_devs[] = {
 	{ USB_VENDOR_ELECOM, USB_PRODUCT_ELECOM_UCSGT0 },
 	{ USB_VENDOR_HAL, USB_PRODUCT_HAL_IMR001 },
 	{ USB_VENDOR_IODATA, USB_PRODUCT_IODATA_USBRSAQ },
+	{ USB_VENDOR_IODATA, USB_PRODUCT_IODATA_USBRSAQ5 },
 	{ USB_VENDOR_LEADTEK, USB_PRODUCT_LEADTEK_9531 },
+	{ USB_VENDOR_MICROSOFT, USB_PRODUCT_MICROSOFT_700WX },
 	{ USB_VENDOR_MOBILEACTION, USB_PRODUCT_MOBILEACTION_MA620 },
 	{ USB_VENDOR_NOKIA, USB_PRODUCT_NOKIA_CA42 },
 	{ USB_VENDOR_OTI, USB_PRODUCT_OTI_DKU5 },
@@ -185,7 +187,9 @@ static const struct usb_devno uplcom_devs[] = {
 	{ USB_VENDOR_SYNTECH, USB_PRODUCT_SYNTECH_SERIAL },
 	{ USB_VENDOR_TDK, USB_PRODUCT_TDK_UHA6400 },
 	{ USB_VENDOR_TDK, USB_PRODUCT_TDK_UPA9664 },
-	{ USB_VENDOR_TRIPPLITE, USB_PRODUCT_TRIPPLITE_U209 }
+	{ USB_VENDOR_TRIPPLITE, USB_PRODUCT_TRIPPLITE_U209 },
+	{ USB_VENDOR_SMART, USB_PRODUCT_SMART_PL2303 },
+	{ USB_VENDOR_YCCABLE, USB_PRODUCT_YCCABLE_PL2303 }
 };
 #define uplcom_lookup(v, p) usb_lookup(uplcom_devs, v, p)
 
@@ -228,16 +232,10 @@ uplcom_attach(struct device *parent, struct device *self, void *aux)
 	usb_device_descriptor_t *ddesc;
 	usb_interface_descriptor_t *id;
 	usb_endpoint_descriptor_t *ed;
-
-	char *devinfop;
 	char *devname = sc->sc_dev.dv_xname;
 	usbd_status err;
 	int i;
 	struct ucom_attach_args uca;
-
-	devinfop = usbd_devinfo_alloc(dev, 0);
-	printf("\n%s: %s\n", devname, devinfop);
-	usbd_devinfo_free(devinfop);
 
         sc->sc_udev = dev;
 
@@ -251,7 +249,7 @@ uplcom_attach(struct device *parent, struct device *self, void *aux)
 	/* Move the device into the configured state. */
 	err = usbd_set_config_index(dev, UPLCOM_CONFIG_INDEX, 1);
 	if (err) {
-		printf("\n%s: failed to set configuration, err=%s\n",
+		printf("%s: failed to set configuration, err=%s\n",
 			devname, usbd_errstr(err));
 		sc->sc_dying = 1;
 		return;
@@ -280,12 +278,21 @@ uplcom_attach(struct device *parent, struct device *self, void *aux)
 	 * The Linux driver suggest this will only be true for the HX
 	 * variants. The datasheets disagree.
 	 */
-	if (ddesc->bMaxPacketSize == 0x40) {
-		DPRINTF(("%s: Assuming HX variant\n", sc->sc_dev.dv_xname));
+	if (ddesc->bDeviceClass == 0x02)
+		sc->sc_type_hx = 0;
+	else if (ddesc->bMaxPacketSize == 0x40)
 		sc->sc_type_hx = 1;
-	} else
+	else
 		sc->sc_type_hx = 0;
 
+#ifdef USB_DEBUG
+	/* print the chip type */
+	if (sc->sc_type_hx) {
+		DPRINTF(("uplcom_attach: chiptype 2303X\n"));
+	} else {
+		DPRINTF(("uplcom_attach: chiptype 2303\n"));
+	}
+#endif
 	/* get the (first/common) interface */
 	err = usbd_device2interface_handle(dev, UPLCOM_IFACE_INDEX,
 							&sc->sc_iface);

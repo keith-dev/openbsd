@@ -1,4 +1,4 @@
-/*	$OpenBSD: ike.c,v 1.61 2007/03/16 20:51:01 markus Exp $	*/
+/*	$OpenBSD: ike.c,v 1.63 2008/02/22 23:51:31 hshoexer Exp $	*/
 /*
  * Copyright (c) 2005 Hans-Joerg Hoexer <hshoexer@openbsd.org>
  *
@@ -231,6 +231,15 @@ ike_section_p2(struct ipsec_rule *r, FILE *fd)
 			case ENCXF_AES:
 				fprintf(fd, "AES");
 				break;
+			case ENCXF_AES_128:
+				fprintf(fd, "AES-128");
+				break;
+			case ENCXF_AES_192:
+				fprintf(fd, "AES-192");
+				break;
+			case ENCXF_AES_256:
+				fprintf(fd, "AES-256");
+				break;
 			case ENCXF_AESCTR:
 				fprintf(fd, "AESCTR");
 				break;
@@ -366,6 +375,15 @@ ike_section_p1(struct ipsec_rule *r, FILE *fd)
 		case ENCXF_AES:
 			fprintf(fd, "AES");
 			break;
+		case ENCXF_AES_128:
+			fprintf(fd, "AES-128");
+			break;
+		case ENCXF_AES_192:
+			fprintf(fd, "AES-192");
+			break;
+		case ENCXF_AES_256:
+			fprintf(fd, "AES-256");
+			break;
 		case ENCXF_BLOWFISH:
 			fprintf(fd, "BLF");
 			break;
@@ -489,6 +507,8 @@ ike_section_p2ids(struct ipsec_rule *r, FILE *fd)
 	} else {
 		fprintf(fd, SET "[lid-%s]:ID-type=IPV%d_ADDR force\n",
 		    r->p2lid, ((src->af == AF_INET) ? 4 : 6));
+		if ((p = strrchr(src->name, '/')) != NULL)
+			*p = '\0';
 		fprintf(fd, SET "[lid-%s]:Address=%s force\n", r->p2lid,
 		    src->name);
 	}
@@ -529,6 +549,8 @@ ike_section_p2ids(struct ipsec_rule *r, FILE *fd)
 	} else {
 		fprintf(fd, SET "[rid-%s]:ID-type=IPV%d_ADDR force\n",
 		    r->p2rid, ((dst->af == AF_INET) ? 4 : 6));
+		if ((p = strrchr(dst->name, '/')) != NULL)
+			*p = '\0';
 		fprintf(fd, SET "[rid-%s]:Address=%s force\n", r->p2rid,
 		    dst->name);
 	}

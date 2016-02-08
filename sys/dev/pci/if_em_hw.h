@@ -31,7 +31,7 @@
 
 *******************************************************************************/
 
-/* $OpenBSD: if_em_hw.h,v 1.21 2007/03/16 00:07:37 reyk Exp $ */
+/* $OpenBSD: if_em_hw.h,v 1.24 2008/02/20 00:00:06 brad Exp $ */
 /* $FreeBSD: if_em_hw.h,v 1.15 2005/05/26 23:32:02 tackerman Exp $ */
 
 /* if_em_hw.h
@@ -69,6 +69,7 @@ typedef enum {
     em_82573,
     em_80003es2lan,
     em_ich8lan,
+    em_ich9lan,
     em_num_macs
 } em_mac_type;
 
@@ -460,9 +461,12 @@ int32_t em_check_phy_reset_block(struct em_hw *hw);
 #define E1000_DEV_ID_82571EB_COPPER      0x105E
 #define E1000_DEV_ID_82571EB_FIBER       0x105F
 #define E1000_DEV_ID_82571EB_SERDES      0x1060
+#define E1000_DEV_ID_82571EB_SERDES_DUAL 0x10D9
+#define E1000_DEV_ID_82571EB_SERDES_QUAD 0x10DA
 #define E1000_DEV_ID_82571EB_QUAD_COPPER 0x10A4
 #define E1000_DEV_ID_82571EB_QUAD_FIBER  0x10A5
-#define E1000_DEV_ID_82571EB_QUAD_COPPER_LOWPROFILE  0x10BC
+#define E1000_DEV_ID_82571EB_QUAD_COPPER_LP 0x10BC
+#define E1000_DEV_ID_82571PT_QUAD_COPPER 0x10D5
 #define E1000_DEV_ID_82572EI_COPPER      0x107D
 #define E1000_DEV_ID_82572EI_FIBER       0x107E
 #define E1000_DEV_ID_82572EI_SERDES      0x107F
@@ -478,11 +482,10 @@ int32_t em_check_phy_reset_block(struct em_hw *hw);
 #define E1000_DEV_ID_82573E_PM           0x10B3
 #define E1000_DEV_ID_82573L_PL_2         0x10B4
 #define E1000_DEV_ID_82546GB_QUAD_COPPER_KSP3 0x10B5
-#define E1000_DEV_ID_80003ES2LAN_COPPER_DPT     0x1096
-#define E1000_DEV_ID_80003ES2LAN_SERDES_DPT     0x1098
-#define E1000_DEV_ID_80003ES2LAN_COPPER_SPT     0x10BA
-#define E1000_DEV_ID_80003ES2LAN_SERDES_SPT     0x10BB
-
+#define E1000_DEV_ID_80003ES2LAN_COPPER_DPT 0x1096
+#define E1000_DEV_ID_80003ES2LAN_SERDES_DPT 0x1098
+#define E1000_DEV_ID_80003ES2LAN_COPPER_SPT 0x10BA
+#define E1000_DEV_ID_80003ES2LAN_SERDES_SPT 0x10BB
 #define E1000_DEV_ID_ICH8_IGP_M_AMT      0x1049
 #define E1000_DEV_ID_ICH8_IGP_AMT        0x104A
 #define E1000_DEV_ID_ICH8_IGP_C          0x104B
@@ -490,6 +493,11 @@ int32_t em_check_phy_reset_block(struct em_hw *hw);
 #define E1000_DEV_ID_ICH8_IFE_GT         0x10C4
 #define E1000_DEV_ID_ICH8_IFE_G          0x10C5
 #define E1000_DEV_ID_ICH8_IGP_M          0x104D
+#define E1000_DEV_ID_ICH9_IGP_AMT        0x10BD
+#define E1000_DEV_ID_ICH9_IGP_C          0x294C
+#define E1000_DEV_ID_ICH9_IFE            0x10C0
+#define E1000_DEV_ID_ICH9_IFE_GT         0x10C3
+#define E1000_DEV_ID_ICH9_IFE_G          0x10C2
 
 #define NODE_ADDRESS_SIZE 6
 #define ETH_LENGTH_OF_ADDRESS 6
@@ -575,7 +583,7 @@ int32_t em_check_phy_reset_block(struct em_hw *hw);
  * E1000_RAR_ENTRIES - 1 multicast addresses.
  */
 #define E1000_RAR_ENTRIES 15
-#define E1000_RAR_ENTRIES_ICH8LAN  6
+#define E1000_RAR_ENTRIES_ICH8LAN  7
 
 #define MIN_NUMBER_OF_DESCRIPTORS  8
 #define MAX_NUMBER_OF_DESCRIPTORS  0xFFF8
@@ -1064,7 +1072,7 @@ struct em_ffvt_entry {
 #define E1000_SWSM      0x05B50 /* SW Semaphore */
 #define E1000_FWSM      0x05B54 /* FW Semaphore */
 #define E1000_FFLT_DBG  0x05F04 /* Debug Register */
-#define E1000_HICR      0x08F00 /* Host Inteface Control */
+#define E1000_HICR      0x08F00 /* Host Interface Control */
 
 /* RSS registers */
 #define E1000_CPUVEC    0x02C10 /* CPU Vector Register - RW */
@@ -2409,6 +2417,7 @@ struct em_host_command_info {
 
 /* PBA constants */
 #define E1000_PBA_8K 0x0008    /* 8KB, default Rx allocation */
+#define E1000_PBA_10K 0x000A
 #define E1000_PBA_12K 0x000C    /* 12KB, default Rx allocation */
 #define E1000_PBA_16K 0x0010    /* 16KB, default TX allocation */
 #define E1000_PBA_22K 0x0016
@@ -3256,6 +3265,7 @@ struct em_host_command_info {
 #define ICH_FLASH_CYCLE_REPEAT_COUNT         10      /* 10 cycles */
 #define ICH_FLASH_SEG_SIZE_256               256
 #define ICH_FLASH_SEG_SIZE_4K                4096
+#define ICH_FLASH_SEG_SIZE_8K                8192
 #define ICH_FLASH_SEG_SIZE_64K               65536
 
 #define ICH_CYCLE_READ                       0x0
@@ -3285,6 +3295,7 @@ struct em_host_command_info {
 #define ICH_FLASH_SECTOR_SIZE      4096
 #define ICH_GFPREG_BASE_MASK       0x1FFF
 #define ICH_FLASH_LINEAR_ADDR_MASK 0x00FFFFFF
+#define ICH_FLASH_SECT_ADDR_SHIFT  12
 
 /* ICH8 GbE Flash Hardware Sequencing Flash Status Register bit breakdown */
 /* Offset 04h HSFSTS */

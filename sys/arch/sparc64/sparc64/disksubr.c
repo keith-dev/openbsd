@@ -1,4 +1,4 @@
-/*	$OpenBSD: disksubr.c,v 1.46 2007/06/20 18:15:46 deraadt Exp $	*/
+/*	$OpenBSD: disksubr.c,v 1.48 2007/10/02 03:26:59 krw Exp $	*/
 /*	$NetBSD: disksubr.c,v 1.13 2000/12/17 22:39:18 pk Exp $ */
 
 /*
@@ -229,10 +229,12 @@ sun_extended_sum(struct sun_disklabel *sl, void *end)
 static char *
 disklabel_sun_to_bsd(struct sun_disklabel *sl, struct disklabel *lp)
 {
-	struct partition *npp;
+	struct sun_preamble *preamble = (struct sun_preamble *)sl;
+	struct sun_partinfo *ppp;
 	struct sun_dkpart *spp;
-	int i, secpercyl;
+	struct partition *npp;
 	u_short cksum = 0, *sp1, *sp2;
+	int i, secpercyl;
 
 	/* Verify the XOR check. */
 	sp1 = (u_short *)sl;
@@ -327,13 +329,50 @@ disklabel_sun_to_bsd(struct sun_disklabel *sl, struct disklabel *lp)
 				npp->p_cpg = 16;
 			}
 		}
-		if (sl->sl_xpmag == SL_XPMAGTYP)
+		if (sl->sl_xpmag == SL_XPMAGTYP) {
 			for (i = 0; i < MAXPARTITIONS; i++) {
 				npp = &lp->d_partitions[i];
 				npp->p_fstype = sl->sl_types[i];
 				npp->p_fragblock = sl->sl_fragblock[i];
 				npp->p_cpg = sl->sl_cpg[i];
 			}
+		}
+	} else if (preamble->sl_nparts <= 8) {
+		/*
+		 * A more traditional Sun label.  Recognise certain filesystem
+		 * types from it, if they are available.
+		 */
+		i = preamble->sl_nparts;
+		if (i == 0)
+			i = 8;
+
+		npp = &lp->d_partitions[i-1];
+		ppp = &preamble->sl_part[i-1];
+		for (; i > 0; i--, npp--, ppp--) {
+			if (npp->p_size == 0)
+				continue;
+			if ((ppp->spi_tag == 0) && (ppp->spi_flag == 0))
+				continue;
+
+			switch (ppp->spi_tag) {
+			case SPTAG_SUNOS_ROOT:
+			case SPTAG_SUNOS_USR:
+			case SPTAG_SUNOS_VAR:
+			case SPTAG_SUNOS_HOME:
+				npp->p_fstype = FS_BSDFFS;
+				npp->p_fragblock =
+				    DISKLABELV1_FFS_FRAGBLOCK(2048, 8);
+				npp->p_cpg = 16;
+				break;
+			case SPTAG_LINUX_EXT2:
+				npp->p_fstype = FS_EXT2FS;
+				break;
+			default:
+				/* FS_SWAP for _SUNOS_SWAP and _LINUX_SWAP? */
+				npp->p_fstype = FS_UNUSED;
+				break;
+			}
+		}
 	}
 
 	lp->d_checksum = 0;

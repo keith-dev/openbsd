@@ -1,4 +1,4 @@
-.\"	$OpenBSD: isa.4,v 1.52 2007/08/01 21:23:26 miod Exp $
+.\"	$OpenBSD: isa.4,v 1.59 2008/02/17 16:48:47 jmc Exp $
 .\"	$NetBSD: isa.4,v 1.19 2000/03/18 16:54:37 augustss Exp $
 .\"
 .\" Copyright (c) 2000 Theo de Raadt.  All rights reserved.
@@ -31,7 +31,7 @@
 .\" (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
 .\" THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 .\"
-.Dd $Mdocdate: August 1 2007 $
+.Dd $Mdocdate: February 17 2008 $
 .Dt ISA 4
 .Os
 .Sh NAME
@@ -39,11 +39,13 @@
 .Nd introduction to ISA bus support
 .Sh SYNOPSIS
 .Cd "# amd64 and i386"
+.Cd "isa* at amdpcib?"
 .Cd "isa0 at mainbus0"
 .Cd "isa0 at pcib?"
 .Pp
 .Cd "# i386"
 .Cd "isa0 at ichpcib?"
+.Cd "isa* at glxpcib?"
 .Cd "isa0 at gscpcib?"
 .Cd "isa* at piixpcib?"
 .Pp
@@ -138,6 +140,8 @@ multiplexing serial communications interface
 3Com EtherLink (3C501) Ethernet device
 .It Xr ep 4
 3Com EtherLink III and Fast EtherLink III 10/100 Ethernet device
+.It Xr ex 4
+Intel EtherExpress Pro/10 and Pro/10+ Ethernet device
 .It Xr ie 4
 Intel i82586/i82596 Ethernet device
 .It Xr lc 4
@@ -185,19 +189,22 @@ SoundForte RadioLink SF16-FMR2 FM radio device
 .El
 .Ss Hardware Sensors
 .Bl -tag -width 12n -offset ind -compact
+.It Xr aps 4
+ThinkPad Active Protection System accelerometer
 .It Xr it 4
-ITE IT8705F, IT8712F, and SiS SiS950 temperature, voltage, and fan sensor
+ITE IT8705F/IT8712F/IT8716F/IT8718F/IT8726F and SiS SiS950
+temperature, voltage, and fan sensor with watchdog timer
 .It Xr lm 4
-National Semiconductor LM78, LM79 and compatible hardware monitors
+National Semiconductor LM78/79/81 temperature, voltage, and fan sensor
 .It Xr nsclpcsio 4
-National Semiconductor PC87366 LPC Super I/O
+National Semiconductor PC87366 LPC Super I/O with GPIO
 .It Xr viasio 4
 VIA VT1211 LPC Super I/O
+.It Xr wbsio 4
+Winbond LPC Super I/O
 .El
 .Ss Miscellaneous devices
 .Bl -tag -width 12n -offset ind -compact
-.It Xr aps 4
-ThinkPad Active Protection System hardware monitors
 .It Xr gscsio 4
 National Semiconductor Geode SC1100 I2C controller
 .It Xr lms 4

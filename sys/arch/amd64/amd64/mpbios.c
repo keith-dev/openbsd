@@ -1,4 +1,4 @@
-/*	$OpenBSD: mpbios.c,v 1.9 2007/01/15 23:19:05 jsg Exp $	*/
+/*	$OpenBSD: mpbios.c,v 1.11 2007/11/16 16:16:07 deraadt Exp $	*/
 /*	$NetBSD: mpbios.c,v 1.7 2003/05/15 16:32:50 fvdl Exp $	*/
 
 /*-
@@ -589,8 +589,7 @@ mpbios_scan(struct device *self)
 		}
 
 		mp_busses = malloc(sizeof(struct mp_bus)*mp_nbus,
-		    M_DEVBUF, M_NOWAIT);
-		memset(mp_busses, 0, sizeof(struct mp_bus) * mp_nbus);
+		    M_DEVBUF, M_NOWAIT|M_ZERO);
 		mp_intrs = malloc(sizeof(struct mp_intr_map)*intr_cnt,
 		    M_DEVBUF, M_NOWAIT);
 
@@ -641,7 +640,7 @@ mpbios_scan(struct device *self)
 
 			(u_char*)position += mp_conf[type].length;
 		}
-		mp_nintr = cur_intr;
+		mp_nintrs = cur_intr;
 
 		if (mp_verbose && mp_cth->ext_len)
 			printf("%s: MP WARNING: %d bytes of extended entries not examined\n",

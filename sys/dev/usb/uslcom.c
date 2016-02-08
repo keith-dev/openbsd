@@ -1,4 +1,4 @@
-/*	$OpenBSD: uslcom.c,v 1.13 2007/06/14 10:11:16 mbalmer Exp $	*/
+/*	$OpenBSD: uslcom.c,v 1.17 2007/11/24 10:52:12 jsg Exp $	*/
 
 /*
  * Copyright (c) 2006 Jonathan Gray <jsg@openbsd.org>
@@ -125,6 +125,7 @@ static const struct usb_devno uslcom_devs[] = {
 	{ USB_VENDOR_SILABS,		USB_PRODUCT_SILABS_CP210X_1 },
 	{ USB_VENDOR_SILABS,		USB_PRODUCT_SILABS_CP210X_2 },
 	{ USB_VENDOR_SILABS,		USB_PRODUCT_SILABS_SUNNTO },
+	{ USB_VENDOR_SILABS,		USB_PRODUCT_SILABS_TRAQMATE },
 	{ USB_VENDOR_SILABS2,		USB_PRODUCT_SILABS2_DCU11CLONE },
 	{ USB_VENDOR_USI,		USB_PRODUCT_USI_MC60 }
 };
@@ -167,14 +168,10 @@ uslcom_attach(struct device *parent, struct device *self, void *aux)
 	usb_interface_descriptor_t *id;
 	usb_endpoint_descriptor_t *ed;
 	usbd_status error;
-	char *devinfop;
 	int i;
 
 	bzero(&uca, sizeof(uca));
 	sc->sc_udev = uaa->device;
-	devinfop = usbd_devinfo_alloc(uaa->device, 0);
-	printf("\n%s: %s\n", sc->sc_dev.dv_xname, devinfop);
-	usbd_devinfo_free(devinfop);
 
 	if (usbd_set_config_index(sc->sc_udev, USLCOM_CONFIG_NO, 1) != 0) {
 		printf("%s: could not set configuration no\n",
@@ -349,31 +346,17 @@ uslcom_param(void *vsc, int portno, struct termios *t)
 	usb_device_request_t req;
 	int data;
 
-	switch (t->c_ospeed) {
-	case 600:
-	case 1200:
-	case 1800:
-	case 2400:
-	case 4800:
-	case 9600:
-	case 19200:
-	case 38400:
-	case 57600:
-	case 115200:
-	case 460800:
-	case 921600:
-		req.bmRequestType = USLCOM_WRITE;
-		req.bRequest = USLCOM_BAUD_RATE;
-		USETW(req.wValue, USLCOM_BAUD_REF / t->c_ospeed);
-		USETW(req.wIndex, portno);
-		USETW(req.wLength, 0);
-		err = usbd_do_request(sc->sc_udev, &req, NULL);
-		if (err)
-			return (EIO);
-		break;
-	default:
+	if (t->c_ospeed <= 0 || t->c_ospeed > 921600)
 		return (EINVAL);
-	}
+
+	req.bmRequestType = USLCOM_WRITE;
+	req.bRequest = USLCOM_BAUD_RATE;
+	USETW(req.wValue, USLCOM_BAUD_REF / t->c_ospeed);
+	USETW(req.wIndex, portno);
+	USETW(req.wLength, 0);
+	err = usbd_do_request(sc->sc_udev, &req, NULL);
+	if (err)
+		return (EIO);
 
 	if (ISSET(t->c_cflag, CSTOPB))
 		data = USLCOM_STOP_BITS_2;

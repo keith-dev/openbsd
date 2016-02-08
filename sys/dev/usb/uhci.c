@@ -1,4 +1,4 @@
-/*	$OpenBSD: uhci.c,v 1.61 2007/07/20 14:31:17 mbalmer Exp $	*/
+/*	$OpenBSD: uhci.c,v 1.64 2007/11/25 16:40:03 jmc Exp $	*/
 /*	$NetBSD: uhci.c,v 1.172 2003/02/23 04:19:26 simonb Exp $	*/
 /*	$FreeBSD: src/sys/dev/usb/uhci.c,v 1.33 1999/11/17 22:33:41 n_hibma Exp $	*/
 
@@ -577,10 +577,9 @@ uhci_allocm(struct usbd_bus *bus, usb_dma_t *dma, u_int32_t size)
 		uhci_soft_td_t **stds;
 		DPRINTF(("uhci_allocm: get %d TDs\n", n));
 		stds = malloc(sizeof(uhci_soft_td_t *) * n, M_TEMP,
-			      M_NOWAIT);
+			      M_NOWAIT | M_ZERO);
 		if (stds == NULL)
 			panic("uhci_allocm");
-		memset(stds, 0, sizeof(uhci_soft_td_t *) * n);
 		for(i=0; i < n; i++)
 			stds[i] = uhci_alloc_std(sc);
 		for(i=0; i < n; i++)
@@ -2630,7 +2629,7 @@ uhci_device_intr_done(usbd_xfer_handle xfer)
 	if (xfer->pipe->repeat) {
 		uhci_soft_td_t *data, *dataend;
 
-		DPRINTFN(5,("uhci_device_intr_done: requeing\n"));
+		DPRINTFN(5,("uhci_device_intr_done: requeuing\n"));
 
 		/* This alloc cannot fail since we freed the chain above. */
 		uhci_alloc_std_chain(upipe, sc, xfer->length,

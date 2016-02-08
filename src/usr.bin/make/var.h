@@ -58,7 +58,7 @@ extern void Var_Appendi_with_ctxt(const char *, const char *,
 	const char *, int);
 #define Var_Append(n, v)	Var_Appendi_with_ctxt(n, NULL, v, VAR_GLOBAL)
 #define Var_Appendi(n, e, v) 	Var_Appendi_with_ctxt(n, e, v, VAR_GLOBAL)
-	
+
 /* Var_Deletei(name, end);
  *	Deletes a global variable. */
 extern void Var_Deletei(const char *, const char *);
@@ -71,15 +71,9 @@ extern void Var_Deletei(const char *, const char *);
 #define OODATE_INDEX	4
 #define ALLSRC_INDEX	5
 #define IMPSRC_INDEX	6
-/* value = Varq_Value(index, node);
- *	Returns value of dynamic variable for a given node. */
-extern char *Varq_Value(int,  GNode *);
-/* Varq_Set(index, val, node);
- *	Sets value of dynamic variable for a given node. Copies val. */
-extern void Varq_Set(int, const char *, GNode *);
-/* Varq_Append(index, val, node);
- *	Appends to value of dynamic variable for a given node. */
-extern void Varq_Append(int, const char *, GNode *);
+
+#define Var(idx, gn)	((gn)->context.locals[idx])
+
 
 /* SymTable_Init(t);
  *	Inits the local symtable in a GNode. */
@@ -101,10 +95,10 @@ extern char *Var_Parse(const char *, SymTable *, bool, size_t *,
 	bool *);
 /* Note that var_Error is an instance of the empty string "", so that
  * callers who don't care don't need to. */
-extern char	var_Error[];	
+extern char	var_Error[];
 
 /* ok = Var_ParseSkip(&varspec, ctxt, &ok);
- *	Parses a variable specification and returns true if the varspec 
+ *	Parses a variable specification and returns true if the varspec
  *	is correct. Advances pointer past specification.  */
 extern bool Var_ParseSkip(const char **, SymTable *);
 
@@ -152,7 +146,7 @@ extern void Var_Dump(void);
 extern void Var_AddCmdline(const char *);
 
 /* stuff common to var.c and varparse.c */
-extern bool	errorIsOkay;	
+extern bool	errorIsOkay;
 
 #define		VAR_GLOBAL	0
 	/* Variables defined in a global context, e.g in the Makefile itself */

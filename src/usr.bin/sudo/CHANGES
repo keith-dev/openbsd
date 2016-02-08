@@ -1951,3 +1951,97 @@ Sudo 1.6.9p3 released.
 616) Fixed a K&R compilation error.
 
 Sudo 1.6.9p4 released.
+
+617) Fixed a bug in the IP address matching introduced by the IPV6 merge.
+
+618) For "visudo -f file" we now use the permissions of the original file
+     and not the hard-coded sudoers owner/group/mode.  This makes
+     it possible to use visudo with a revision control system.
+
+619) Fixed sudoedit when used on a non-existent file.
+
+620) Regenerated configure using autoconf 2.6.1 and libtool 1.5.24.
+
+621) Groups and netgroups are now valid in an LDAP sudoRunas statement.
+
+Sudo 1.6.9p5 released.
+
+622) Worked around bugs in the session support of some PAM implementations.
+     The full tty path is now passed to PAM as well.
+
+623) Sudo now only prints the password prompt if the process is in the
+     foreground.
+
+624) inttypes.h is now included when appropriate if it is present.
+
+625) Simplified alias allocation in the parser.
+
+Sudo 1.6.9p6 released.
+
+626) Go back to using TCSAFLUSH instead of TCSADRAIN when turning
+     off echo in tgetpass().
+
+627) Fixed addition of -lutil for logincap on FreeBSD and NetBSD.
+
+628) Add configure check for struct in6_addr since some systems define
+     AF_INET6 but have no real IPv6 support.
+
+Sudo 1.6.9p7 released.
+
+629) Fixed a bug where a sudoers entry with no runas user specified
+     was treated differently from a line with the default runas
+     user specified.
+
+Sudo 1.6.9p8 released.
+
+630) The ALL command in sudoers now implies SETENV permissions.
+
+631) The command search is now performed using the target user's
+     auxiliary group vector too.
+
+632) When determining if the PAM prompt is the default "Password: ",
+     compare the localized version if possible.
+
+633) Added passprompt_override flag to sudoers to cause sudo's prompt
+     to be used in all cases.  Also set when the -p flag is used.
+
+Sudo 1.6.9p9 released.
+
+634) Moved LDAP options into a table for simplified parsing/setting.
+
+635) Fixed a problem with how some LDAP options were being applied.
+
+636) Added support for connecting directly to LDAP servers via SSL
+     in addition to the existing start_tls support.
+
+Sudo 1.6.9p10 released.
+
+637) Fixed a compilation problem on SCO related to how they
+     store the high resolution timestamps in struct stat.
+
+638) Avoid checking the passwd file group multiple times
+     in the LDAP query when the user's passwd group is also
+     listed in the supplemental group vector.
+
+639) The URI specifier can now be used in ldap.conf even when
+     the LDAP SDK doesn't support ldap_initialize().
+
+640) New %p prompt escape that expands to the user whose password
+     is being prompted, as specified by the rootpw, targetpw and
+     runaspw sudoers flags.  Based on a diff from Patrick Schoenfeld.
+
+Sudo 1.6.9p11 released.
+
+641) Added a configure check for the ber_set_option() function.
+
+642) Fixed a compilation problem with the HP-UX K&R C compiler.
+
+643) Revamped the Kerberos 5 ticket verification code.
+
+644) Added support for the checkpeer ldap.conf variable for
+     netscape-based LDAP SDKs.
+
+645) Fixed a problem where an incomplete password could be echoed
+     to the screen if there was a read timeout.
+
+Sudo 1.6.9p12 released.

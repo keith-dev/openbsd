@@ -1,4 +1,4 @@
-/*	$OpenBSD: rde_rib.c,v 1.2 2007/04/09 20:45:52 michele Exp $ */
+/*	$OpenBSD: rde_rib.c,v 1.5 2007/10/24 20:38:03 claudio Exp $ */
 
 /*
  * Copyright (c) 2006 Michele Marchetto <mydecay@openbeer.it>
@@ -167,7 +167,7 @@ rt_new_kr(struct kroute *kr)
 }
 
 struct rt_node *
-rt_new_rr(struct rip_route *e, int metric)
+rt_new_rr(struct rip_route *e, u_int8_t metric)
 {
 	struct rt_node	*rn;
 
@@ -191,8 +191,8 @@ int
 rt_insert(struct rt_node *r)
 {
 	if (RB_INSERT(rt_tree, &rt, r) != NULL) {
-		log_warnx("rt_insert failed for %s/%s",
-		    inet_ntoa(r->prefix), inet_ntoa(r->netmask));
+		log_warnx("rt_insert failed for %s/%u",
+		    inet_ntoa(r->prefix), mask2prefixlen(r->netmask.s_addr));
 		free(r);
 		return (-1);
 	}
@@ -204,8 +204,8 @@ int
 rt_remove(struct rt_node *r)
 {
 	if (RB_REMOVE(rt_tree, &rt, r) == NULL) {
-		log_warnx("rt_remove failed for %s/%s",
-		    inet_ntoa(r->prefix), inet_ntoa(r->netmask));
+		log_warnx("rt_remove failed for %s/%u",
+		    inet_ntoa(r->prefix), mask2prefixlen(r->netmask.s_addr));
 		return (-1);
 	}
 
@@ -265,7 +265,7 @@ rt_complete(struct rip_route *rr)
 void
 rt_clear(void)
 {
-	struct rt_node  *r;
+	struct rt_node	*r;
 
 	while ((r = RB_MIN(rt_tree, &rt)) != NULL)
 		rt_remove(r);

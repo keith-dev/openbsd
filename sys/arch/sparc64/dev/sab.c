@@ -1,4 +1,4 @@
-/*	$OpenBSD: sab.c,v 1.19 2006/05/28 22:41:44 jason Exp $	*/
+/*	$OpenBSD: sab.c,v 1.24 2008/03/01 16:03:04 kettenis Exp $	*/
 
 /*
  * Copyright (c) 2001 Jason L. Wright (jason@thought.net)
@@ -50,10 +50,8 @@
 
 #include <machine/autoconf.h>
 #include <machine/openfirm.h>
-#include <machine/bsd_openprom.h>
 #include <machine/conf.h>
 #include <machine/cpu.h>
-#include <machine/eeprom.h>
 #include <machine/psl.h>
 
 #include <dev/cons.h>
@@ -105,6 +103,7 @@ struct sabtty_softc {
 #define	SABTTYF_CONS_OUT	0x20
 #define	SABTTYF_TXDRAIN		0x40
 #define	SABTTYF_DONTDDB		0x80
+	int			sc_speed;
 	u_int8_t		sc_rbuf[SABTTY_RBUF_SIZE];
 	u_int8_t		*sc_rend, *sc_rput, *sc_rget;
 	u_int8_t		sc_polling, sc_pollrfc;
@@ -142,6 +141,7 @@ void sabtty_reset(struct sabtty_softc *);
 void sabtty_flush(struct sabtty_softc *);
 int sabtty_speed(int);
 void sabtty_console_flags(struct sabtty_softc *);
+void sabtty_console_speed(struct sabtty_softc *);
 void sabtty_cnpollc(struct sabtty_softc *, int);
 void sabtty_shutdown(void *);
 int sabttyparam(struct sabtty_softc *, struct tty *, struct termios *);
@@ -408,6 +408,7 @@ sabtty_attach(parent, self, aux)
 	}
 
 	sabtty_console_flags(sc);
+	sabtty_console_speed(sc);
 
 	if (sc->sc_flags & (SABTTYF_CONS_IN | SABTTYF_CONS_OUT)) {
 		struct termios t;
@@ -415,14 +416,14 @@ sabtty_attach(parent, self, aux)
 
 		switch (sc->sc_flags & (SABTTYF_CONS_IN | SABTTYF_CONS_OUT)) {
 		case SABTTYF_CONS_IN:
-			acc = "input";
+			acc = " input";
 			break;
 		case SABTTYF_CONS_OUT:
-			acc = "output";
+			acc = " output";
 			break;
 		case SABTTYF_CONS_IN|SABTTYF_CONS_OUT:
 		default:
-			acc = "i/o";
+			acc = "";
 			break;
 		}
 
@@ -432,7 +433,7 @@ sabtty_attach(parent, self, aux)
 		}
 
 		t.c_ispeed = 0;
-		t.c_ospeed = 9600;
+		t.c_ospeed = sc->sc_speed;
 		t.c_cflag = CREAD | CS8 | HUPCL;
 		sc->sc_tty->t_ospeed = 0;
 		sabttyparam(sc, sc->sc_tty, &t);
@@ -450,7 +451,7 @@ sabtty_attach(parent, self, aux)
 			cn_tab->cn_putc = sab_cnputc;
 			cn_tab->cn_dev = makedev(77/*XXX*/, self->dv_unit);
 		}
-		printf(": console %s", acc);
+		printf(": console%s", acc);
 	} else {
 		/* Not a console... */
 		sabtty_reset(sc);
@@ -664,7 +665,10 @@ sabttyopen(dev, flags, mode, p)
 		if (sc->sc_openflags & TIOCFLAG_MDMBUF)
 			tp->t_cflag |= MDMBUF;
 		tp->t_lflag = TTYDEF_LFLAG;
-		tp->t_ispeed = tp->t_ospeed = TTYDEF_SPEED;
+		if (sc->sc_flags & (SABTTYF_CONS_IN | SABTTYF_CONS_OUT))
+			tp->t_ispeed = tp->t_ospeed = sc->sc_speed;
+		else
+			tp->t_ispeed = tp->t_ospeed = TTYDEF_SPEED;
 
 		sc->sc_rput = sc->sc_rget = sc->sc_rbuf;
 
@@ -1308,8 +1312,7 @@ void
 sabtty_console_flags(sc)
 	struct sabtty_softc *sc;
 {
-	int node, channel, cookie;
-	u_int options;
+	int node, channel, options, cookie;
 	char buf[255];
 
 	node = sc->sc_parent->sc_node;
@@ -1343,6 +1346,30 @@ sabtty_console_flags(sc)
 		if (channel == cookie)
 			sc->sc_flags |= SABTTYF_CONS_OUT;
 	}
+}
+
+void
+sabtty_console_speed(sc)
+	struct sabtty_softc *sc;
+{
+	char *name;
+	int node, channel, options;
+
+	node = sc->sc_parent->sc_node;
+	channel = sc->sc_portno;
+
+	if (getpropint(node, "ssp-console", -1) == channel) {
+		sc->sc_speed = getpropspeed(node, "ssp-console-modes");
+		return;
+	}
+	if (getpropint(node, "ssp-control", -1) == channel) {
+		sc->sc_speed = getpropspeed(node, "ssp-control-modes");
+		return;
+	}
+
+	options = OF_finddevice("/options");
+	name = sc->sc_portno ? "ttyb-mode" : "ttya-mode";
+	sc->sc_speed = getpropspeed(options, name);
 }
 
 void

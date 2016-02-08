@@ -1,4 +1,4 @@
-/*	$OpenBSD: parse.y,v 1.207 2007/05/31 18:38:58 claudio Exp $ */
+/*	$OpenBSD: parse.y,v 1.215 2008/02/26 10:09:58 mpf Exp $ */
 
 /*
  * Copyright (c) 2002, 2003, 2004 Henning Brauer <henning@openbsd.org>
@@ -22,11 +22,13 @@
 %{
 #include <sys/types.h>
 #include <sys/socket.h>
+#include <sys/stat.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
 
 #include <ctype.h>
 #include <err.h>
+#include <unistd.h>
 #include <errno.h>
 #include <limits.h>
 #include <stdarg.h>
@@ -37,6 +39,37 @@
 #include "bgpd.h"
 #include "mrt.h"
 #include "session.h"
+
+TAILQ_HEAD(files, file)		 files = TAILQ_HEAD_INITIALIZER(files);
+static struct file {
+	TAILQ_ENTRY(file)	 entry;
+	FILE			*stream;
+	char			*name;
+	int			 lineno;
+	int			 errors;
+} *file, *topfile;
+struct file	*pushfile(const char *, int);
+int		 popfile(void);
+int		 check_file_secrecy(int, const char *);
+int		 yyparse(void);
+int		 yylex(void);
+int		 yyerror(const char *, ...);
+int		 kw_cmp(const void *, const void *);
+int		 lookup(char *);
+int		 lgetc(int);
+int		 lungetc(int);
+int		 findeol(void);
+
+TAILQ_HEAD(symhead, sym)	 symhead = TAILQ_HEAD_INITIALIZER(symhead);
+struct sym {
+	TAILQ_ENTRY(sym)	 entry;
+	int			 used;
+	int			 persist;
+	char			*nam;
+	char			*val;
+};
+int		 symset(const char *, const char *, int);
+char		*symget(const char *);
 
 static struct bgpd_config	*conf;
 static struct mrt_head		*mrtconf;
@@ -51,24 +84,6 @@ static struct filter_rule	*curpeer_filter[2];
 static struct filter_rule	*curgroup_filter[2];
 static struct listen_addrs	*listen_addrs;
 static u_int32_t		 id;
-
-TAILQ_HEAD(files, file)		 files = TAILQ_HEAD_INITIALIZER(files);
-static struct file {
-	TAILQ_ENTRY(file)	 entry;
-	FILE			*stream;
-	char			*name;
-	int			 lineno;
-	int			 errors;
-}				*file;
-
-int	 yyerror(const char *, ...);
-int	 yyparse(void);
-int	 kw_cmp(const void *, const void *);
-int	 lookup(char *);
-int	 lgetc(void);
-int	 lungetc(int);
-int	 findeol(void);
-int	 yylex(void);
 
 struct filter_peers_l {
 	struct filter_peers_l	*next;
@@ -92,7 +107,6 @@ struct filter_match_l {
 	sa_family_t		 af;
 } fmopts;
 
-struct file	*include_file(const char *);
 struct peer	*alloc_peer(void);
 struct peer	*new_peer(void);
 struct peer	*new_group(void);
@@ -109,23 +123,12 @@ void		 move_filterset(struct filter_set_head *,
 		    struct filter_set_head *);
 struct filter_rule	*get_rule(enum action_types);
 
-TAILQ_HEAD(symhead, sym)	 symhead = TAILQ_HEAD_INITIALIZER(symhead);
-struct sym {
-	TAILQ_ENTRY(sym)	 entry;
-	int			 used;
-	int			 persist;
-	char			*nam;
-	char			*val;
-};
-
-int	 symset(const char *, const char *, int);
-char	*symget(const char *);
-int	 getcommunity(char *);
-int	 parsecommunity(char *, int *, int *);
+int		 getcommunity(char *);
+int		 parsecommunity(char *, int *, int *);
 
 typedef struct {
 	union {
-		u_int32_t		 number;
+		int64_t			 number;
 		char			*string;
 		struct bgpd_addr	 addr;
 		u_int8_t		 u8;
@@ -172,7 +175,8 @@ typedef struct {
 %token	IPV4 IPV6
 %token	QUALIFY VIA
 %token	<v.string>		STRING
-%type	<v.number>		number asnumber as4number optnumber yesno inout
+%token	<v.number>		NUMBER
+%type	<v.number>		asnumber as4number optnumber yesno inout
 %type	<v.number>		espah family restart
 %type	<v.string>		string
 %type	<v.addr>		address
@@ -202,23 +206,8 @@ grammar		: /* empty */
 		| grammar error '\n'		{ file->errors++; }
 		;
 
-number		: STRING			{
-			u_int32_t	 uval;
-			const char	*errstr;
-
-			uval = strtonum($1, 0, UINT_MAX, &errstr);
-			if (errstr) {
-				yyerror("number %s is %s", $1, errstr);
-				free($1);
-				YYERROR;
-			} else
-				$$ = uval;
-			free($1);
-		}
-		;
-
-asnumber	: number			{
-			if ($1 >= USHRT_MAX) {
+asnumber	: NUMBER			{
+			if ($1 < 0 || $1 >= USHRT_MAX) {
 				yyerror("AS too big: max %u", USHRT_MAX - 1);
 				YYERROR;
 			}
@@ -245,13 +234,9 @@ as4number	: STRING			{
 				}
 				free($1);
 			} else {
-				uval = strtonum($1, 0, USHRT_MAX - 1, &errstr);
-				if (errstr) {
-					yyerror("number %s is %s", $1, errstr);
-					free($1);
-					YYERROR;
-				}
+				yyerror("AS %s is bad", $1);
 				free($1);
+				YYERROR;
 			}
 			if (uvalh == 0 && uval == AS_TRANS) {
 				yyerror("AS %u is reserved and may not be used",
@@ -260,6 +245,15 @@ as4number	: STRING			{
 			}
 			$$ = uval | (uvalh << 16);
 		}
+		| asnumber {
+			if ($1 == AS_TRANS) {
+				yyerror("AS %u is reserved and may not be used",
+				    AS_TRANS);
+				YYERROR;
+			}
+			$$ = $1;
+		}
+		;
 
 string		: string STRING			{
 			if (asprintf(&$$, "%s %s", $1, $2) == -1)
@@ -296,7 +290,7 @@ varset		: STRING '=' string		{
 include		: INCLUDE STRING		{
 			struct file	*nfile;
 
-			if ((nfile = include_file($2)) == NULL) {
+			if ((nfile = pushfile($2, 1)) == NULL) {
 				yyerror("failed to include file %s", $2);
 				free($2);
 				YYERROR;
@@ -326,18 +320,18 @@ conf_main	: AS as4number		{
 			}
 			conf->bgpid = $2.v4.s_addr;
 		}
-		| HOLDTIME number	{
-			if ($2 < MIN_HOLDTIME) {
-				yyerror("holdtime must be at least %u",
-				    MIN_HOLDTIME);
+		| HOLDTIME NUMBER	{
+			if ($2 < MIN_HOLDTIME || $2 > USHRT_MAX) {
+				yyerror("holdtime must be between %u and %u",
+				    MIN_HOLDTIME, USHRT_MAX);
 				YYERROR;
 			}
 			conf->holdtime = $2;
 		}
-		| HOLDTIME YMIN number	{
-			if ($3 < MIN_HOLDTIME) {
-				yyerror("holdtime min must be at least %u",
-				    MIN_HOLDTIME);
+		| HOLDTIME YMIN NUMBER	{
+			if ($3 < MIN_HOLDTIME || $3 > USHRT_MAX) {
+				yyerror("holdtime must be between %u and %u",
+				    MIN_HOLDTIME, USHRT_MAX);
 				YYERROR;
 			}
 			conf->min_holdtime = $3;
@@ -458,6 +452,12 @@ conf_main	: AS as4number		{
 		| DUMP STRING STRING optnumber		{
 			int action;
 
+			if ($4 < 0 || $4 > UINT_MAX) {
+				yyerror("bad timeout");
+				free($2);
+				free($3);
+				YYERROR;
+			}
 			if (!strcmp($2, "table"))
 				action = MRT_TABLE_DUMP;
 			else if (!strcmp($2, "table-mp"))
@@ -522,7 +522,7 @@ conf_main	: AS as4number		{
 			}
 			free($4);
 		}
-		| RTABLE number {
+		| RTABLE NUMBER {
 			if ($2 > RT_TABLEID_MAX || $2 < 0) {
 				yyerror("invalid rtable id");
 				YYERROR;
@@ -534,6 +534,12 @@ conf_main	: AS as4number		{
 mrtdump		: DUMP STRING inout STRING optnumber	{
 			int action;
 
+			if ($5 < 0 || $5 > UINT_MAX) {
+				yyerror("bad timeout");
+				free($2);
+				free($4);
+				YYERROR;
+			}
 			if (!strcmp($2, "all"))
 				action = $3 ? MRT_ALL_IN : MRT_ALL_OUT;
 			else if (!strcmp($2, "updates"))
@@ -579,12 +585,35 @@ address		: STRING		{
 		}
 		;
 
-prefix		: STRING '/' number	{
+prefix		: STRING '/' NUMBER	{
 			char	*s;
 
-			if (asprintf(&s, "%s/%u", $1, $3) == -1)
+			if ($3 < 0 || $3 > 128) {
+				yyerror("bad prefixlen %lld", $3);
+				free($1);
+				YYERROR;
+			}
+			if (asprintf(&s, "%s/%lld", $1, $3) == -1)
 				fatal(NULL);
 			free($1);
+
+			if (!host(s, &$$.prefix, &$$.len)) {
+				yyerror("could not parse address \"%s\"", s);
+				free(s);
+				YYERROR;
+			}
+			free(s);
+		}
+		| NUMBER '/' NUMBER	{
+			char	*s;
+
+			/* does not match IPv6 */
+			if ($1 < 0 || $1 > 255 || $3 < 0 || $3 > 32) {
+				yyerror("bad prefix %lld/%lld", $1, $3);
+				YYERROR;
+			}
+			if (asprintf(&s, "%lld/%lld", $1, $3) == -1)
+				fatal(NULL);
 
 			if (!host(s, &$$.prefix, &$$.len)) {
 				yyerror("could not parse address \"%s\"", s);
@@ -613,7 +642,7 @@ nl		: '\n' optnl		/* one newline or more */
 		;
 
 optnumber	: /* empty */		{ $$ = 0; }
-		| number
+		| NUMBER
 		;
 
 neighbor	: {	curpeer = new_peer(); }
@@ -717,7 +746,7 @@ peeropts	: REMOTEAS as4number	{
 			memcpy(&curpeer->conf.local_addr, &$2,
 			    sizeof(curpeer->conf.local_addr));
 		}
-		| MULTIHOP number	{
+		| MULTIHOP NUMBER	{
 			if ($2 < 2 || $2 > 255) {
 				yyerror("invalid multihop distance %d", $2);
 				YYERROR;
@@ -730,18 +759,18 @@ peeropts	: REMOTEAS as4number	{
 		| DOWN		{
 			curpeer->conf.down = 1;
 		}
-		| HOLDTIME number	{
-			if ($2 < MIN_HOLDTIME) {
-				yyerror("holdtime must be at least %u",
-				    MIN_HOLDTIME);
+		| HOLDTIME NUMBER	{
+			if ($2 < MIN_HOLDTIME || $2 > USHRT_MAX) {
+				yyerror("holdtime must be between %u and %u",
+				    MIN_HOLDTIME, USHRT_MAX);
 				YYERROR;
 			}
 			curpeer->conf.holdtime = $2;
 		}
-		| HOLDTIME YMIN number	{
-			if ($3 < MIN_HOLDTIME) {
-				yyerror("holdtime min must be at least %u",
-				    MIN_HOLDTIME);
+		| HOLDTIME YMIN NUMBER	{
+			if ($3 < MIN_HOLDTIME || $3 > USHRT_MAX) {
+				yyerror("holdtime must be between %u and %u",
+				    MIN_HOLDTIME, USHRT_MAX);
 				YYERROR;
 			}
 			curpeer->conf.min_holdtime = $3;
@@ -799,7 +828,11 @@ peeropts	: REMOTEAS as4number	{
 			else
 				curpeer->conf.enforce_as = ENFORCE_AS_OFF;
 		}
-		| MAXPREFIX number restart {
+		| MAXPREFIX NUMBER restart {
+			if ($2 < 0 || $2 > UINT_MAX) {
+				yyerror("bad maximum number of prefixes");
+				YYERROR;
+			}
 			curpeer->conf.max_prefix = $2;
 			curpeer->conf.max_prefix_restart = $3;
 		}
@@ -847,7 +880,7 @@ peeropts	: REMOTEAS as4number	{
 			else
 				curpeer->conf.auth.method = AUTH_IPSEC_IKE_AH;
 		}
-		| IPSEC espah inout SPI number STRING STRING encspec {
+		| IPSEC espah inout SPI NUMBER STRING STRING encspec {
 			u_int32_t	auth_alg;
 			u_int8_t	keylen;
 
@@ -897,6 +930,12 @@ peeropts	: REMOTEAS as4number	{
 				}
 				curpeer->conf.auth.method =
 				    AUTH_IPSEC_MANUAL_AH;
+			}
+
+			if ($5 < 0 || $5 > UINT_MAX) {
+				yyerror("bad spi number %lld", $5);
+				free($7);
+				YYERROR;
 			}
 
 			if ($3 == 1) {
@@ -1022,7 +1061,7 @@ peeropts	: REMOTEAS as4number	{
 		;
 
 restart		: /* nada */		{ $$ = 0; }
-		| RESTART number	{
+		| RESTART NUMBER	{
 			if ($2 < 1 || $2 > USHRT_MAX) {
 				yyerror("restart out of range. 1 to %u minutes",
 				    USHRT_MAX);
@@ -1341,18 +1380,18 @@ filter_elm	: filter_prefix_h	{
 		}
 		;
 
-prefixlenop	: unaryop number		{
+prefixlenop	: unaryop NUMBER		{
 			bzero(&$$, sizeof($$));
-			if ($2 > 128) {
+			if ($2 < 0 || $2 > 128) {
 				yyerror("prefixlen must be < 128");
 				YYERROR;
 			}
 			$$.op = $1;
 			$$.len_min = $2;
 		}
-		| number binaryop number	{
+		| NUMBER binaryop NUMBER	{
 			bzero(&$$, sizeof($$));
-			if ($1 > 128 || $3 > 128) {
+			if ($1 < 0 || $1 > 128 || $3 < 0 || $3 > 128) {
 				yyerror("prefixlen must be < 128");
 				YYERROR;
 			}
@@ -1401,15 +1440,24 @@ delete		: /* empty */	{ $$ = 0; }
 		| DELETE	{ $$ = 1; }
 		;
 
-filter_set_opt	: LOCALPREF number		{
+filter_set_opt	: LOCALPREF NUMBER		{
+			if ($2 < -INT_MAX || $2 > UINT_MAX) {
+				yyerror("bad localpref %lld", $2);
+				YYERROR;
+			}
 			if (($$ = calloc(1, sizeof(struct filter_set))) == NULL)
 				fatal(NULL);
-			$$->type = ACTION_SET_LOCALPREF;
-			$$->action.metric = $2;
+			if ($2 > 0) {
+				$$->type = ACTION_SET_LOCALPREF;
+				$$->action.metric = $2;
+			} else {
+				$$->type = ACTION_SET_RELATIVE_LOCALPREF;
+				$$->action.relative = $2;
+			}
 		}
-		| LOCALPREF '+' number		{
-			if ($3 > INT_MAX) {
-				yyerror("localpref too big: max %u", INT_MAX);
+		| LOCALPREF '+' NUMBER		{
+			if ($3 < 0 || $3 > INT_MAX) {
+				yyerror("bad localpref +%lld", $3);
 				YYERROR;
 			}
 			if (($$ = calloc(1, sizeof(struct filter_set))) == NULL)
@@ -1417,9 +1465,9 @@ filter_set_opt	: LOCALPREF number		{
 			$$->type = ACTION_SET_RELATIVE_LOCALPREF;
 			$$->action.relative = $3;
 		}
-		| LOCALPREF '-' number		{
-			if ($3 > INT_MAX) {
-				yyerror("localpref to small: min -%u", INT_MAX);
+		| LOCALPREF '-' NUMBER		{
+			if ($3 < 0 || $3 > INT_MAX) {
+				yyerror("bad localpref -%lld", $3);
 				YYERROR;
 			}
 			if (($$ = calloc(1, sizeof(struct filter_set))) == NULL)
@@ -1427,15 +1475,24 @@ filter_set_opt	: LOCALPREF number		{
 			$$->type = ACTION_SET_RELATIVE_LOCALPREF;
 			$$->action.relative = -$3;
 		}
-		| MED number			{
+		| MED NUMBER			{
+			if ($2 < -INT_MAX || $2 > UINT_MAX) {
+				yyerror("bad metric %lld", $2);
+				YYERROR;
+			}
 			if (($$ = calloc(1, sizeof(struct filter_set))) == NULL)
 				fatal(NULL);
-			$$->type = ACTION_SET_MED;
-			$$->action.metric = $2;
+			if ($2 > 0) {
+				$$->type = ACTION_SET_MED;
+				$$->action.metric = $2;
+			} else {
+				$$->type = ACTION_SET_RELATIVE_MED;
+				$$->action.relative = $2;
+			}
 		}
-		| MED '+' number			{
-			if ($3 > INT_MAX) {
-				yyerror("metric too big: max %u", INT_MAX);
+		| MED '+' NUMBER			{
+			if ($3 < 0 || $3 > INT_MAX) {
+				yyerror("bad metric +%lld", $3);
 				YYERROR;
 			}
 			if (($$ = calloc(1, sizeof(struct filter_set))) == NULL)
@@ -1443,9 +1500,9 @@ filter_set_opt	: LOCALPREF number		{
 			$$->type = ACTION_SET_RELATIVE_MED;
 			$$->action.relative = $3;
 		}
-		| MED '-' number			{
-			if ($3 > INT_MAX) {
-				yyerror("metric to small: min -%u", INT_MAX);
+		| MED '-' NUMBER			{
+			if ($3 < 0 || $3 > INT_MAX) {
+				yyerror("bad metric -%lld", $3);
 				YYERROR;
 			}
 			if (($$ = calloc(1, sizeof(struct filter_set))) == NULL)
@@ -1453,15 +1510,24 @@ filter_set_opt	: LOCALPREF number		{
 			$$->type = ACTION_SET_RELATIVE_MED;
 			$$->action.relative = -$3;
 		}
-		| METRIC number			{	/* alias for MED */
+		| METRIC NUMBER			{	/* alias for MED */
+			if ($2 < -INT_MAX || $2 > UINT_MAX) {
+				yyerror("bad metric %lld", $2);
+				YYERROR;
+			}
 			if (($$ = calloc(1, sizeof(struct filter_set))) == NULL)
 				fatal(NULL);
-			$$->type = ACTION_SET_MED;
-			$$->action.metric = $2;
+			if ($2 > 0) {
+				$$->type = ACTION_SET_MED;
+				$$->action.metric = $2;
+			} else {
+				$$->type = ACTION_SET_RELATIVE_MED;
+				$$->action.relative = $2;
+			}
 		}
-		| METRIC '+' number			{
-			if ($3 > INT_MAX) {
-				yyerror("metric too big: max %u", INT_MAX);
+		| METRIC '+' NUMBER			{
+			if ($3 < 0 || $3 > INT_MAX) {
+				yyerror("bad metric +%lld", $3);
 				YYERROR;
 			}
 			if (($$ = calloc(1, sizeof(struct filter_set))) == NULL)
@@ -1469,9 +1535,9 @@ filter_set_opt	: LOCALPREF number		{
 			$$->type = ACTION_SET_RELATIVE_MED;
 			$$->action.metric = $3;
 		}
-		| METRIC '-' number			{
-			if ($3 > INT_MAX) {
-				yyerror("metric to small: min -%u", INT_MAX);
+		| METRIC '-' NUMBER			{
+			if ($3 < 0 || $3 > INT_MAX) {
+				yyerror("bad metric -%lld", $3);
 				YYERROR;
 			}
 			if (($$ = calloc(1, sizeof(struct filter_set))) == NULL)
@@ -1479,15 +1545,24 @@ filter_set_opt	: LOCALPREF number		{
 			$$->type = ACTION_SET_RELATIVE_MED;
 			$$->action.relative = -$3;
 		}
-		| WEIGHT number				{
+		| WEIGHT NUMBER				{
+			if ($2 < -INT_MAX || $2 > UINT_MAX) {
+				yyerror("bad weight %lld", $2);
+				YYERROR;
+			}
 			if (($$ = calloc(1, sizeof(struct filter_set))) == NULL)
 				fatal(NULL);
-			$$->type = ACTION_SET_WEIGHT;
-			$$->action.metric = $2;
+			if ($2 > 0) {
+				$$->type = ACTION_SET_WEIGHT;
+				$$->action.metric = $2;
+			} else {
+				$$->type = ACTION_SET_RELATIVE_WEIGHT;
+				$$->action.relative = $2;
+			}
 		}
-		| WEIGHT '+' number			{
-			if ($3 > INT_MAX) {
-				yyerror("weight too big: max %u", INT_MAX);
+		| WEIGHT '+' NUMBER			{
+			if ($3 < 0 || $3 > INT_MAX) {
+				yyerror("bad weight +%lld", $3);
 				YYERROR;
 			}
 			if (($$ = calloc(1, sizeof(struct filter_set))) == NULL)
@@ -1495,9 +1570,9 @@ filter_set_opt	: LOCALPREF number		{
 			$$->type = ACTION_SET_RELATIVE_WEIGHT;
 			$$->action.relative = $3;
 		}
-		| WEIGHT '-' number			{
-			if ($3 > INT_MAX) {
-				yyerror("weight to small: min -%u", INT_MAX);
+		| WEIGHT '-' NUMBER			{
+			if ($3 < 0 || $3 > INT_MAX) {
+				yyerror("bad weight -%lld", $3);
 				YYERROR;
 			}
 			if (($$ = calloc(1, sizeof(struct filter_set))) == NULL)
@@ -1532,24 +1607,24 @@ filter_set_opt	: LOCALPREF number		{
 				fatal(NULL);
 			$$->type = ACTION_SET_NEXTHOP_SELF;
 		}
-		| PREPEND_SELF number		{
+		| PREPEND_SELF NUMBER		{
+			if ($2 < 0 || $2 > 128) {
+				yyerror("bad number of prepends");
+				YYERROR;
+			}
 			if (($$ = calloc(1, sizeof(struct filter_set))) == NULL)
 				fatal(NULL);
 			$$->type = ACTION_SET_PREPEND_SELF;
-			if ($2 > 128) {
-				yyerror("too many prepends");
-				YYERROR;
-			}
 			$$->action.prepend = $2;
 		}
-		| PREPEND_PEER number		{
+		| PREPEND_PEER NUMBER		{
+			if ($2 < 0 || $2 > 128) {
+				yyerror("bad number of prepends");
+				YYERROR;
+			}
 			if (($$ = calloc(1, sizeof(struct filter_set))) == NULL)
 				fatal(NULL);
 			$$->type = ACTION_SET_PREPEND_PEER;
-			if ($2 > 128) {
-				yyerror("too many prepends");
-				YYERROR;
-			}
 			$$->action.prepend = $2;
 		}
 		| PFTABLE STRING		{
@@ -1789,10 +1864,9 @@ char	 pushback_buffer[MAXPUSHBACK];
 int	 pushback_index = 0;
 
 int
-lgetc(void)
+lgetc(int quotec)
 {
-	int		 c, next;
-	struct file	*prevfile;
+	int		c, next;
 
 	if (parsebuf) {
 		/* Read character from the parsebuffer instead of input. */
@@ -1808,6 +1882,17 @@ lgetc(void)
 	if (pushback_index)
 		return (pushback_buffer[--pushback_index]);
 
+	if (quotec) {
+		if ((c = getc(file->stream)) == EOF) {
+			yyerror("reached end of file while parsing "
+			    "quoted string");
+			if (file == topfile || popfile() == EOF)
+				return (EOF);
+			return (quotec);
+		}
+		return (c);
+	}
+
 	while ((c = getc(file->stream)) == '\\') {
 		next = getc(file->stream);
 		if (next != '\n') {
@@ -1817,26 +1902,12 @@ lgetc(void)
 		yylval.lineno = file->lineno;
 		file->lineno++;
 	}
-	if (c == '\t' || c == ' ') {
-		/* Compress blanks to a single space. */
-		do {
-			c = getc(file->stream);
-		} while (c == '\t' || c == ' ');
-		ungetc(c, file->stream);
-		c = ' ';
-	}
 
-	while (c == EOF &&
-	    (prevfile = TAILQ_PREV(file, files, entry)) != NULL) {
-		prevfile->errors += file->errors;
-		TAILQ_REMOVE(&files, file, entry);
-		fclose(file->stream);
-		free(file->name);
-		free(file);
-		file = prevfile;
+	while (c == EOF) {
+		if (file == topfile || popfile() == EOF)
+			return (EOF);
 		c = getc(file->stream);
 	}
-
 	return (c);
 }
 
@@ -1866,7 +1937,7 @@ findeol(void)
 
 	/* skip to either EOF or the first real EOL */
 	while (1) {
-		c = lgetc();
+		c = lgetc(0);
 		if (c == '\n') {
 			file->lineno++;
 			break;
@@ -1882,21 +1953,21 @@ yylex(void)
 {
 	char	 buf[8096];
 	char	*p, *val;
-	int	 endc, c;
+	int	 quotec, next, c;
 	int	 token;
 
 top:
 	p = buf;
-	while ((c = lgetc()) == ' ')
+	while ((c = lgetc(0)) == ' ' || c == '\t')
 		; /* nothing */
 
 	yylval.lineno = file->lineno;
 	if (c == '#')
-		while ((c = lgetc()) != '\n' && c != EOF)
+		while ((c = lgetc(0)) != '\n' && c != EOF)
 			; /* nothing */
 	if (c == '$' && parsebuf == NULL) {
 		while (1) {
-			if ((c = lgetc()) == EOF)
+			if ((c = lgetc(0)) == EOF)
 				return (0);
 
 			if (p + 1 >= buf + sizeof(buf) - 1) {
@@ -1913,7 +1984,7 @@ top:
 		}
 		val = symget(buf);
 		if (val == NULL) {
-			yyerror("macro \"%s\" not defined", buf);
+			yyerror("macro '%s' not defined", buf);
 			return (findeol());
 		}
 		parsebuf = val;
@@ -1924,17 +1995,25 @@ top:
 	switch (c) {
 	case '\'':
 	case '"':
-		endc = c;
+		quotec = c;
 		while (1) {
-			if ((c = lgetc()) == EOF)
+			if ((c = lgetc(quotec)) == EOF)
 				return (0);
-			if (c == endc) {
-				*p = '\0';
-				break;
-			}
 			if (c == '\n') {
 				file->lineno++;
 				continue;
+			} else if (c == '\\') {
+				if ((next = lgetc(quotec)) == EOF)
+					return (0);
+				if (next == quotec || c == ' ' || c == '\t')
+					c = next;
+				else if (next == '\n')
+					continue;
+				else
+					lungetc(next);
+			} else if (c == quotec) {
+				*p = '\0';
+				break;
 			}
 			if (p + 1 >= buf + sizeof(buf) - 1) {
 				yyerror("string too long");
@@ -1946,6 +2025,42 @@ top:
 		if (yylval.v.string == NULL)
 			fatal("yylex: strdup");
 		return (STRING);
+	}
+
+#define allowed_to_end_number(x) \
+	(isspace(x) || x == ')' || x ==',' || x == '/' || x == '}' || x == '=')
+
+	if (c == '-' || isdigit(c)) {
+		do {
+			*p++ = c;
+			if ((unsigned)(p-buf) >= sizeof(buf)) {
+				yyerror("string too long");
+				return (findeol());
+			}
+		} while ((c = lgetc(0)) != EOF && isdigit(c));
+		lungetc(c);
+		if (p == buf + 1 && buf[0] == '-')
+			goto nodigits;
+		if (c == EOF || allowed_to_end_number(c)) {
+			const char *errstr = NULL;
+
+			*p = '\0';
+			yylval.v.number = strtonum(buf, LLONG_MIN,
+			    LLONG_MAX, &errstr);
+			if (errstr) {
+				yyerror("\"%s\" invalid number: %s",
+				    buf, errstr);
+				return (findeol());
+			}
+			return (NUMBER);
+		} else {
+nodigits:
+			while (p > buf + 1)
+				lungetc(*--p);
+			c = *--p;
+			if (c == '-')
+				return (c);
+		}
 	}
 
 #define allowed_in_string(x) \
@@ -1961,7 +2076,7 @@ top:
 				yyerror("string too long");
 				return (findeol());
 			}
-		} while ((c = lgetc()) != EOF && (allowed_in_string(c)));
+		} while ((c = lgetc(0)) != EOF && (allowed_in_string(c)));
 		lungetc(c);
 		*p = '\0';
 		if ((token = lookup(buf)) == STRING)
@@ -1978,31 +2093,68 @@ top:
 	return (c);
 }
 
+int
+check_file_secrecy(int fd, const char *fname)
+{
+	struct stat	st;
+
+	if (fstat(fd, &st)) {
+		log_warn("cannot stat %s", fname);
+		return (-1);
+	}
+	if (st.st_uid != 0 && st.st_uid != getuid()) {
+		log_warnx("%s: owner not root or current user", fname);
+		return (-1);
+	}
+	if (st.st_mode & (S_IRWXG | S_IRWXO)) {
+		log_warnx("%s: group/world readable/writeable", fname);
+		return (-1);
+	}
+	return (0);
+}
+
 struct file *
-include_file(const char *name)
+pushfile(const char *name, int secret)
 {
 	struct file	*nfile;
 
 	if ((nfile = calloc(1, sizeof(struct file))) == NULL ||
-	    (nfile->name = strdup(name)) == NULL)
-		return (NULL);
-
-	if ((nfile->stream = fopen(nfile->name, "r")) == NULL) {
-		log_warn("%s", nfile->name);
+	    (nfile->name = strdup(name)) == NULL) {
+		log_warn("malloc");
 		return (NULL);
 	}
-
-	if (check_file_secrecy(fileno(nfile->stream), nfile->name)) {
+	if ((nfile->stream = fopen(nfile->name, "r")) == NULL) {
+		log_warn("%s", nfile->name);
+		free(nfile->name);
+		free(nfile);
+		return (NULL);
+	}
+	if (secret &&
+	    check_file_secrecy(fileno(nfile->stream), nfile->name)) {
 		fclose(nfile->stream);
 		free(nfile->name);
 		free(nfile);
 		return (NULL);
 	}
-
 	nfile->lineno = 1;
 	TAILQ_INSERT_TAIL(&files, nfile, entry);
-
 	return (nfile);
+}
+
+int
+popfile(void)
+{
+	struct file	*prev;
+
+	if ((prev = TAILQ_PREV(file, files, entry)) != NULL)
+		prev->errors += file->errors;
+
+	TAILQ_REMOVE(&files, file, entry);
+	fclose(file->stream);
+	free(file->name);
+	free(file);
+	file = prev;
+	return (file ? 0 : EOF);
 }
 
 int
@@ -2017,13 +2169,16 @@ parse_config(char *filename, struct bgpd_config *xconf,
 	struct filter_rule	*r;
 	int			 errors = 0;
 
-	if ((file = include_file(filename)) == NULL) {
-		log_warnx("cannot open the main config file!");
-		return (-1);
-	}
-
 	if ((conf = calloc(1, sizeof(struct bgpd_config))) == NULL)
 		fatal(NULL);
+	conf->opts = xconf->opts;
+
+	if ((file = pushfile(filename, 1)) == NULL) {
+		free(conf);
+		return (-1);
+	}
+	topfile = file;
+
 	if ((mrtconf = calloc(1, sizeof(struct mrt_head))) == NULL)
 		fatal(NULL);
 	if ((listen_addrs = calloc(1, sizeof(struct listen_addrs))) == NULL)
@@ -2045,7 +2200,6 @@ parse_config(char *filename, struct bgpd_config *xconf,
 	curpeer = NULL;
 	curgroup = NULL;
 	id = 1;
-	conf->opts = xconf->opts;
 
 	/* network list is always empty in the parent */
 	netconf = nc;
@@ -2055,6 +2209,7 @@ parse_config(char *filename, struct bgpd_config *xconf,
 
 	yyparse();
 	errors = file->errors;
+	popfile();
 
 	/* Free macros and check which have not been used. */
 	for (sym = TAILQ_FIRST(&symhead); sym != NULL; sym = next) {
@@ -2136,11 +2291,6 @@ parse_config(char *filename, struct bgpd_config *xconf,
 	free(filter_l);
 	free(peerfilter_l);
 	free(groupfilter_l);
-
-	TAILQ_REMOVE(&files, file, entry);
-	fclose(file->stream);
-	free(file->name);
-	free(file);
 
 	return (errors ? -1 : 0);
 }

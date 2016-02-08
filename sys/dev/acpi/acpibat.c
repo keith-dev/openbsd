@@ -1,4 +1,4 @@
-/* $OpenBSD: acpibat.c,v 1.40 2007/03/20 15:17:21 mk Exp $ */
+/* $OpenBSD: acpibat.c,v 1.46 2007/11/16 13:58:18 deraadt Exp $ */
 /*
  * Copyright (c) 2005 Marco Peereboom <marco@openbsd.org>
  *
@@ -80,14 +80,19 @@ acpibat_attach(struct device *parent, struct device *self, void *aux)
 	if ((sc->sc_bat_present = aml_val2int(&res) & STA_BATTERY) != 0) {
 		acpibat_getbif(sc);
 		acpibat_getbst(sc);
-		printf(": %s: model: %s serial: %s type: %s oem: %s\n",
-		    sc->sc_devnode->parent->name,
-		    sc->sc_bif.bif_model,
-		    sc->sc_bif.bif_serial,
-		    sc->sc_bif.bif_type,
-		    sc->sc_bif.bif_oem);
+
+		printf(": %s", sc->sc_devnode->parent->name);
+		if (sc->sc_bif.bif_model[0])
+			printf(" model \"%s\"", sc->sc_bif.bif_model);
+		if (sc->sc_bif.bif_serial[0])
+			printf(" serial %s", sc->sc_bif.bif_serial);
+		if (sc->sc_bif.bif_type[0])
+			printf(" type %s", sc->sc_bif.bif_type);
+		if (sc->sc_bif.bif_oem[0])
+			printf(" oem \"%s\"", sc->sc_bif.bif_oem);
+		printf("\n");
 	} else
-		printf(": %s: not present\n", sc->sc_devnode->parent->name);
+		printf(": %s not present\n", sc->sc_devnode->parent->name);
 
 	aml_freevalue(&res);
 
@@ -217,7 +222,7 @@ acpibat_refresh(void *arg)
 	sc->sc_sens[4].status = SENSOR_S_OK;
 	sc->sc_sens[4].flags = 0;
 	if (sc->sc_bif.bif_last_capacity == BIF_UNKNOWN ||
-	    sc->sc_bst.bst_capacity == BST_UNKNOWN) { 
+	    sc->sc_bst.bst_capacity == BST_UNKNOWN) {
 		sc->sc_sens[4].status = SENSOR_S_UNKNOWN;
 		sc->sc_sens[4].flags = SENSOR_FUNKNOWN;
 		strlcpy(sc->sc_sens[4].desc, "battery unknown",
@@ -225,7 +230,7 @@ acpibat_refresh(void *arg)
 	} else if (sc->sc_bst.bst_capacity >= sc->sc_bif.bif_last_capacity)
 		strlcpy(sc->sc_sens[4].desc, "battery full",
 		    sizeof(sc->sc_sens[4].desc));
-        else if (sc->sc_bst.bst_state & BST_DISCHARGE)
+	else if (sc->sc_bst.bst_state & BST_DISCHARGE)
 		strlcpy(sc->sc_sens[4].desc, "battery discharging",
 		    sizeof(sc->sc_sens[4].desc));
 	else if (sc->sc_bst.bst_state & BST_CHARGE)
@@ -267,7 +272,7 @@ acpibat_refresh(void *arg)
 			sc->sc_sens[6].status = SENSOR_S_OK;
 	}
 
-	if(sc->sc_bst.bst_voltage == BST_UNKNOWN) {
+	if (sc->sc_bst.bst_voltage == BST_UNKNOWN) {
 		sc->sc_sens[7].value = 0;
 		sc->sc_sens[7].status = SENSOR_S_UNKNOWN;
 		sc->sc_sens[7].flags = SENSOR_FUNKNOWN;
@@ -281,7 +286,7 @@ acpibat_refresh(void *arg)
 int
 acpibat_getbif(struct acpibat_softc *sc)
 {
-	struct aml_value        res;
+	struct aml_value	res;
 	int			rv = EINVAL;
 
 	if (aml_evalname(sc->sc_acpi, sc->sc_devnode, "_STA", 0, NULL, &res)) {
@@ -312,13 +317,13 @@ acpibat_getbif(struct acpibat_softc *sc)
 	sc->sc_bif.bif_cap_granu1 = aml_val2int(res.v_package[7]);
 	sc->sc_bif.bif_cap_granu2 = aml_val2int(res.v_package[8]);
 
-	strlcpy(sc->sc_bif.bif_model, aml_strval(res.v_package[9]),
+	strlcpy(sc->sc_bif.bif_model, aml_val_to_string(res.v_package[9]),
 		sizeof(sc->sc_bif.bif_model));
-	strlcpy(sc->sc_bif.bif_serial, aml_strval(res.v_package[10]),
+	strlcpy(sc->sc_bif.bif_serial, aml_val_to_string(res.v_package[10]),
 		sizeof(sc->sc_bif.bif_serial));
-	strlcpy(sc->sc_bif.bif_type, aml_strval(res.v_package[11]),
+	strlcpy(sc->sc_bif.bif_type, aml_val_to_string(res.v_package[11]),
 		sizeof(sc->sc_bif.bif_type));
-	strlcpy(sc->sc_bif.bif_oem, aml_strval(res.v_package[12]),
+	strlcpy(sc->sc_bif.bif_oem, aml_val_to_string(res.v_package[12]),
 		sizeof(sc->sc_bif.bif_oem));
 
 	dnprintf(60, "power_unit: %u capacity: %u last_cap: %u tech: %u "

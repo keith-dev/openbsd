@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvm_swap.c,v 1.72 2007/06/18 21:51:15 pedro Exp $	*/
+/*	$OpenBSD: uvm_swap.c,v 1.76 2007/12/18 11:05:52 thib Exp $	*/
 /*	$NetBSD: uvm_swap.c,v 1.40 2000/11/17 11:39:39 mrg Exp $	*/
 
 /*
@@ -344,29 +344,28 @@ uvm_swap_initcrypt(struct swapdev *sdp, int npages)
 	 * we may not call malloc with M_WAITOK.  This consumes only
 	 * 8KB memory for a 256MB swap partition.
 	 */
-	sdp->swd_decrypt = malloc(SWD_DCRYPT_SIZE(npages), M_VMSWAP, M_WAITOK);
-	memset(sdp->swd_decrypt, 0, SWD_DCRYPT_SIZE(npages));
+	sdp->swd_decrypt = malloc(SWD_DCRYPT_SIZE(npages), M_VMSWAP,
+	    M_WAITOK|M_ZERO);
 	sdp->swd_keys = malloc((npages >> SWD_KEY_SHIFT) * sizeof(struct swap_key),
-			       M_VMSWAP, M_WAITOK);
-	memset(sdp->swd_keys, 0, (npages >> SWD_KEY_SHIFT) * sizeof(struct swap_key));
+	    M_VMSWAP, M_WAITOK|M_ZERO);
 	sdp->swd_nkeys = 0;
 }
 
 boolean_t
 uvm_swap_allocpages(struct vm_page **pps, int npages)
 {
-	int i, s;
+	int i;
 	int minus, reserve;
 	boolean_t fail;
 
 	/* Estimate if we will succeed */
-	s = uvm_lock_fpageq();
+	uvm_lock_fpageq();
 
 	minus = uvmexp.free - npages;
 	reserve = uvmexp.reserve_kernel;
 	fail = uvmexp.free - npages < uvmexp.reserve_kernel;
 
-	uvm_unlock_fpageq(s);
+	uvm_unlock_fpageq();
 
 	if (fail)
 		return FALSE;
@@ -489,7 +488,7 @@ swaplist_insert(sdp, newspp, priority)
 			LIST_INSERT_HEAD(&swap_priority, spp, spi_swappri);
 	} else {
 	  	/* we don't need a new priority structure, free it */
-		FREE(newspp, M_VMSWAP);
+		free(newspp, M_VMSWAP);
 	}
 
 	/*
@@ -661,11 +660,7 @@ sys_swapctl(p, v, retval)
 	 * to grab the uvm.swap_data_lock because we may fault&sleep during 
 	 * copyout() and we don't want to be holding that lock then!
 	 */
-	if (SCARG(uap, cmd) == SWAP_STATS
-#if defined(COMPAT_13)
-	    || SCARG(uap, cmd) == SWAP_OSTATS
-#endif
-	    ) {
+	if (SCARG(uap, cmd) == SWAP_STATS) {
 		sep = (struct swapent *)SCARG(uap, arg);
 		count = 0;
 
@@ -681,23 +676,14 @@ sys_swapctl(p, v, retval)
 				    sizeof(struct swapent));
 
 				/* now copy out the path if necessary */
-#if defined(COMPAT_13)
-				if (error == 0 && SCARG(uap, cmd) == SWAP_STATS)
-#else
 				if (error == 0)
-#endif
 					error = copyout(sdp->swd_path,
 					    &sep->se_path, sdp->swd_pathlen);
 
 				if (error)
 					goto out;
 				count++;
-#if defined(COMPAT_13)
-				if (SCARG(uap, cmd) == SWAP_OSTATS)
-					((struct oswapent *)sep)++;
-				else
-#endif
-					sep++;
+				sep++;
 			}
 		}
 
@@ -799,9 +785,8 @@ sys_swapctl(p, v, retval)
 			simple_unlock(&uvm.swap_data_lock);
 			break;
 		}
-		sdp = malloc(sizeof *sdp, M_VMSWAP, M_WAITOK);
+		sdp = malloc(sizeof *sdp, M_VMSWAP, M_WAITOK|M_ZERO);
 		spp = malloc(sizeof *spp, M_VMSWAP, M_WAITOK);
-		memset(sdp, 0, sizeof(*sdp));
 		sdp->swd_flags = SWF_FAKE;	/* placeholder only */
 		sdp->swd_vp = vp;
 		sdp->swd_dev = (vp->v_type == VBLK) ? vp->v_rdev : NODEV;
@@ -2091,9 +2076,8 @@ swapmount()
 		return;
 	}
 
-	sdp = malloc(sizeof(*sdp), M_VMSWAP, M_WAITOK);
+	sdp = malloc(sizeof(*sdp), M_VMSWAP, M_WAITOK|M_ZERO);
 	spp = malloc(sizeof(*spp), M_VMSWAP, M_WAITOK);
-	memset(sdp, 0, sizeof(*sdp));
 
 	sdp->swd_flags = SWF_FAKE;
 	sdp->swd_dev = swap_dev;

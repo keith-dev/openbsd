@@ -1,4 +1,4 @@
-/* $OpenBSD: wsconsio.h,v 1.45 2007/05/08 20:38:20 robert Exp $ */
+/* $OpenBSD: wsconsio.h,v 1.47 2007/11/27 14:13:39 jsing Exp $ */
 /* $NetBSD: wsconsio.h,v 1.74 2005/04/28 07:15:44 martin Exp $ */
 
 /*
@@ -122,6 +122,7 @@ struct wscons_event {
 #define		WSKBD_TYPE_LUNA		15	/* OMRON Luna */
 #define		WSKBD_TYPE_ZAURUS	16	/* Sharp Zaurus */
 #define		WSKBD_TYPE_DOMAIN	17	/* Apollo Domain */
+#define		WSKBD_TYPE_BLUETOOTH	18	/* Bluetooth keyboard */
 
 /* Manipulate the keyboard bell. */
 struct wskbd_bell_data {
@@ -203,6 +204,7 @@ struct wskbd_map_data {
 #define		WSMOUSE_TYPE_HIL	10	/* HP HIL */
 #define		WSMOUSE_TYPE_LUNA	11	/* OMRON Luna */
 #define		WSMOUSE_TYPE_DOMAIN	12	/* Apollo Domain */
+#define		WSMOUSE_TYPE_BLUETOOTH	13	/* Bluetooth mouse */
 
 /* Set resolution.  Not applicable to all mouse types. */
 #define	WSMOUSEIO_SRES		_IOW('W', 33, u_int)
@@ -297,6 +299,7 @@ struct wsmouse_calibcoords {
 #define		WSDISPLAY_TYPE_TVRX	51	/* HP TurboVRX */
 #define		WSDISPLAY_TYPE_CFXGA	52	/* CF VoyagerVGA */
 #define		WSDISPLAY_TYPE_LCSPX	53	/* DEC LCSPX (VS4000) */
+#define		WSDISPLAY_TYPE_GBE	54	/* SGI GBE frame buffer */
 
 /* Basic display information.  Not applicable to all display types. */
 struct wsdisplay_fbinfo {

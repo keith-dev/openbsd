@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_udav.c,v 1.34 2007/06/14 10:11:15 mbalmer Exp $ */
+/*	$OpenBSD: if_udav.c,v 1.40 2007/11/23 15:43:02 mbalmer Exp $ */
 /*	$NetBSD: if_udav.c,v 1.3 2004/04/23 17:25:25 itojun Exp $	*/
 /*	$nabe: if_udav.c,v 1.3 2003/08/21 16:57:19 nabe Exp $	*/
 /*
@@ -165,7 +165,9 @@ static const struct udav_type {
 	{{ USB_VENDOR_DAVICOM, USB_PRODUCT_DAVICOM_DM9601 }, 0 },
 	{{ USB_VENDOR_DAVICOM, USB_PRODUCT_DAVICOM_WK668 }, 0 },
 	{{ USB_VENDOR_SHANTOU, USB_PRODUCT_SHANTOU_DM9601 }, 0 },
-	{{ USB_VENDOR_SHANTOU, USB_PRODUCT_SHANTOU_ST268 }, 0 }
+	{{ USB_VENDOR_SHANTOU, USB_PRODUCT_SHANTOU_ST268 }, 0 },
+	{{ USB_VENDOR_SHANTOU, USB_PRODUCT_SHANTOU_ZT6688 }, 0 },
+	{{ USB_VENDOR_SHANTOU, USB_PRODUCT_SHANTOU_ADM8515 }, 0 }
 };
 #define udav_lookup(v, p) ((struct udav_type *)usb_lookup(udav_devs, v, p))
 
@@ -194,21 +196,18 @@ udav_attach(struct device *parent, struct device *self, void *aux)
 	usbd_status err;
 	usb_interface_descriptor_t *id;
 	usb_endpoint_descriptor_t *ed;
-	char *devinfop;
 	char *devname = sc->sc_dev.dv_xname;
 	struct ifnet *ifp;
 	struct mii_data *mii;
 	u_char eaddr[ETHER_ADDR_LEN];
 	int i, s;
 
-	devinfop = usbd_devinfo_alloc(dev, 0);
-	printf("\n%s: %s", devname, devinfop);
-	usbd_devinfo_free(devinfop);
+	printf("%s: ", devname);
 
 	/* Move the device into the configured state. */
 	err = usbd_set_config_no(dev, UDAV_CONFIG_NO, 1);
 	if (err) {
-		printf(", setting config no failed\n");
+		printf("setting config no failed\n");
 		goto bad;
 	}
 
@@ -219,7 +218,7 @@ udav_attach(struct device *parent, struct device *self, void *aux)
 	/* get control interface */
 	err = usbd_device2interface_handle(dev, UDAV_IFACE_INDEX, &iface);
 	if (err) {
-		printf(", failed to get interface, err=%s\n", usbd_errstr(err));
+		printf("failed to get interface, err=%s\n", usbd_errstr(err));
 		goto bad;
 	}
 
@@ -235,7 +234,7 @@ udav_attach(struct device *parent, struct device *self, void *aux)
 	for (i = 0; i < id->bNumEndpoints; i++) {
 		ed = usbd_interface2endpoint_descriptor(sc->sc_ctl_iface, i);
 		if (ed == NULL) {
-			printf(", couldn't get endpoint %d\n", i);
+			printf("couldn't get endpoint %d\n", i);
 			goto bad;
 		}
 		if ((ed->bmAttributes & UE_XFERTYPE) == UE_BULK &&
@@ -251,7 +250,7 @@ udav_attach(struct device *parent, struct device *self, void *aux)
 
 	if (sc->sc_bulkin_no == -1 || sc->sc_bulkout_no == -1 ||
 	    sc->sc_intrin_no == -1) {
-		printf(", missing endpoint\n");
+		printf("missing endpoint\n");
 		goto bad;
 	}
 
@@ -263,13 +262,13 @@ udav_attach(struct device *parent, struct device *self, void *aux)
 	/* Get Ethernet Address */
 	err = udav_csr_read(sc, UDAV_PAR, (void *)eaddr, ETHER_ADDR_LEN);
 	if (err) {
-		printf(", read MAC address failed\n");
+		printf("read MAC address failed\n");
 		splx(s);
 		goto bad;
 	}
 
 	/* Print Ethernet Address */
-	printf(" address %s\n", ether_sprintf(eaddr));
+	printf("address %s\n", ether_sprintf(eaddr));
 
         bcopy(eaddr, (char *)&sc->sc_ac.ac_enaddr, ETHER_ADDR_LEN);
 
@@ -306,7 +305,7 @@ udav_attach(struct device *parent, struct device *self, void *aux)
 	if_attach(ifp);
 	ether_ifattach(ifp);
 
-	timeout_set(&sc->sc_stat_ch, NULL, NULL);
+	timeout_set(&sc->sc_stat_ch, udav_tick, sc);
 	sc->sc_attached = 1;
 	splx(s);
 
@@ -684,8 +683,6 @@ udav_init(struct ifnet *ifp)
 
 	splx(s);
 
-	timeout_del(&sc->sc_stat_ch);
-	timeout_set(&sc->sc_stat_ch, udav_tick, sc);
 	timeout_add(&sc->sc_stat_ch, hz);
 
 	return (0);
@@ -1500,8 +1497,6 @@ udav_tick_task(void *xsc)
 			   udav_start(ifp);
 	}
 
-	timeout_del(&sc->sc_stat_ch);
-	timeout_set(&sc->sc_stat_ch, udav_tick, sc);
 	timeout_add(&sc->sc_stat_ch, hz);
 
 	splx(s);

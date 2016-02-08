@@ -1,4 +1,4 @@
-/*	$OpenBSD: nfsnode.h,v 1.26 2007/06/21 22:59:49 thib Exp $	*/
+/*	$OpenBSD: nfsnode.h,v 1.29 2007/12/13 22:32:55 thib Exp $	*/
 /*	$NetBSD: nfsnode.h,v 1.16 1996/02/18 11:54:04 fvdl Exp $	*/
 
 /*
@@ -57,22 +57,6 @@ struct sillyrename {
 };
 
 /*
- * This structure is used to save the logical directory offset to
- * NFS cookie mappings.
- * The mappings are stored in a list headed
- * by n_cookies, as required.
- * There is one mapping for each NFS_DIRBLKSIZ bytes of directory information
- * stored in increasing logical offset byte order.
- */
-#define NFSNUMCOOKIES		31
-
-struct nfsdmap {
-	LIST_ENTRY(nfsdmap)	ndm_list;
-	int			ndm_eocookie;
-	nfsuint64		ndm_cookies[NFSNUMCOOKIES];
-};
-
-/*
  * The nfsnode is the nfs equivalent to ufs's inode. Any similarity
  * is purely coincidental.
  * There is a unique nfsnode allocated for each active file,
@@ -80,7 +64,7 @@ struct nfsdmap {
  * An nfsnode is 'named' by its file handle. (nget/nfs_node.c)
  * If this structure exceeds 256 bytes (it is currently 256 using 4.4BSD-Lite
  * type definitions), file handles of > 32 bytes should probably be split out
- * into a separate MALLOC()'d data structure. (Reduce the size of nfsfh_t by
+ * into a separate malloc()'d data structure. (Reduce the size of nfsfh_t by
  * changing the definition in sys/mount.h of NFS_SMALLFH.)
  * NB: Hopefully the current order of the fields is such that everything will
  *     be well aligned and, therefore, tightly packed.
@@ -88,13 +72,10 @@ struct nfsdmap {
 struct nfsnode {
 	LIST_ENTRY(nfsnode)	n_hash;		/* Hash chain */
 	u_quad_t		n_size;		/* Current size of file */
-	u_quad_t		n_brev;		/* Modify rev when cached */
-	u_quad_t		n_lrev;		/* Modify rev for lease */
 	struct vattr		n_vattr;	/* Vnode attribute cache */
 	time_t			n_attrstamp;	/* Attr. cache timestamp */
 	time_t			n_mtime;	/* Prev modify time. */
 	time_t			n_ctime;	/* Prev create time. */
-	time_t			n_expiry;	/* Lease expiry time */
 	nfsfh_t			*n_fhp;		/* NFS File Handle */
 	struct vnode		*n_vnode;	/* associated vnode */
 	struct lockf		*n_lockf;	/* Locking record of file */
@@ -107,22 +88,19 @@ struct nfsnode {
 		struct timespec	nf_mtim;
 		off_t		nd_direof;	/* Dir. EOF offset cache */
 	} n_un2;
-	union {
-		struct sillyrename *nf_silly;	/* Ptr to silly rename struct */
-		LIST_HEAD(, nfsdmap) nd_cook;	/* cookies */
-	} n_un3;
+	struct sillyrename	*n_sillyrename;	/* Ptr to silly rename struct */
 	short			n_fhsize;	/* size in bytes, of fh */
 	short			n_flag;		/* Flag for locking.. */
 	nfsfh_t			n_fh;		/* Small File Handle */
 	struct ucred		*n_rcred;
 	struct ucred		*n_wcred;
 
-	off_t                    n_pushedlo;    /* 1st blk in commited range */
-	off_t                    n_pushedhi;    /* Last block in range */
-	off_t                    n_pushlo;      /* 1st block in commit range */
-	off_t                    n_pushhi;      /* Last block in range */
-	struct rwlock            n_commitlock;  /* Serialize commits */
-	int                      n_commitflags;
+	off_t			n_pushedlo;	/* 1st blk in commited range */
+	off_t			n_pushedhi;	/* Last block in range */
+	off_t			n_pushlo;	/* 1st block in commit range */
+	off_t			n_pushhi;	/* Last block in range */
+	struct rwlock		n_commitlock;	/* Serialize commits */
+	int			n_commitflags;
 };
 
 /*
@@ -133,10 +111,8 @@ struct nfsnode {
 
 #define n_atim		n_un1.nf_atim
 #define n_mtim		n_un2.nf_mtim
-#define n_sillyrename	n_un3.nf_silly
 #define n_cookieverf	n_un1.nd_cookieverf
 #define n_direofoffset	n_un2.nd_direof
-#define n_cookies	n_un3.nd_cook
 
 /*
  * Flags for n_flag

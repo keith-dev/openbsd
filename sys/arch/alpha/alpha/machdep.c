@@ -1,4 +1,4 @@
-/* $OpenBSD: machdep.c,v 1.110 2007/06/06 17:15:11 deraadt Exp $ */
+/* $OpenBSD: machdep.c,v 1.113 2007/10/10 15:53:51 art Exp $ */
 /* $NetBSD: machdep.c,v 1.210 2000/06/01 17:12:38 thorpej Exp $ */
 
 /*-
@@ -865,17 +865,17 @@ cpu_startup()
 	 */
 	printf(version);
 	identifycpu();
-	printf("total memory = %ld (%ldK)\n", ptoa((u_long)totalphysmem),
-	    ptoa((u_long)totalphysmem) / 1024);
-	printf("(%ld reserved for PROM, ", ptoa((u_long)resvmem));
-	printf("%ld used by OpenBSD)\n", ptoa((u_long)physmem));
+	printf("total memory = %lu (%luK)\n", ptoa((psize_t)totalphysmem),
+	    ptoa((psize_t)totalphysmem) / 1024);
+	printf("(%lu reserved for PROM, ", ptoa((psize_t)resvmem));
+	printf("%lu used by OpenBSD)\n", ptoa((psize_t)physmem));
 	if (unusedmem) {
-		printf("WARNING: unused memory = %ld (%ldK)\n",
-		    ptoa((u_long)unusedmem), ptoa((u_long)unusedmem) / 1024);
+		printf("WARNING: unused memory = %lu (%luK)\n",
+		    ptoa((psize_t)unusedmem), ptoa((psize_t)unusedmem) / 1024);
 	}
 	if (unknownmem) {
-		printf("WARNING: %ld (%ldK) of memory with unknown purpose\n",
-		    ptoa((u_long)unknownmem), ptoa((u_long)unknownmem) / 1024);
+		printf("WARNING: %lu (%luK) of memory with unknown purpose\n",
+		    ptoa((psize_t)unknownmem), ptoa((psize_t)unknownmem) / 1024);
 	}
 
 	/*
@@ -902,8 +902,8 @@ cpu_startup()
 #if defined(DEBUG)
 	pmapdebug = opmapdebug;
 #endif
-	printf("avail memory = %ld (%ldK)\n", (long)ptoa(uvmexp.free),
-	    (long)ptoa(uvmexp.free) / 1024);
+	printf("avail memory = %lu (%luK)\n", ptoa((psize_t)uvmexp.free),
+	    ptoa((psize_t)uvmexp.free) / 1024);
 #if 0
 	{
 		extern u_long pmap_pages_stolen;
@@ -1493,7 +1493,7 @@ sendsig(catcher, sig, mask, code, type, val)
 		psp->ps_sigstk.ss_flags |= SS_ONSTACK;
 	} else
 		scp = (struct sigcontext *)(alpha_pal_rdusp() - rndfsize);
-	if ((u_long)scp <= USRSTACK - ctob(p->p_vmspace->vm_ssize))
+	if ((u_long)scp <= USRSTACK - ptoa(p->p_vmspace->vm_ssize))
 		(void)uvm_grow(p, (u_long)scp);
 #ifdef DEBUG
 	if ((sigdebug & SDB_KSTACK) && p->p_pid == sigpid)
@@ -1871,66 +1871,6 @@ spl0()
 	}
 
 	return (alpha_pal_swpipl(ALPHA_PSL_IPL_0));
-}
-
-/*
- * The following primitives manipulate the run queues.  _whichqs tells which
- * of the 32 queues _qs have processes in them.  Setrunqueue puts processes
- * into queues, Remrunqueue removes them from queues.  The running process is
- * on no queue, other processes are on a queue related to p->p_priority,
- * divided by 4 actually to shrink the 0-127 range of priorities into the 32
- * available queues.
- */
-/*
- * setrunqueue(p)
- *	proc *p;
- *
- * Call should be made at splclock(), and p->p_stat should be SRUN.
- */
-
-/* XXXART - grmble */
-#define sched_qs qs
-#define sched_whichqs whichqs
-
-void
-setrunqueue(p)
-	struct proc *p;
-{
-	int bit;
-
-	/* firewall: p->p_back must be NULL */
-	if (p->p_back != NULL)
-		panic("setrunqueue");
-
-	bit = p->p_priority >> 2;
-	sched_whichqs |= (1 << bit);
-	p->p_forw = (struct proc *)&sched_qs[bit];
-	p->p_back = sched_qs[bit].ph_rlink;
-	p->p_back->p_forw = p;
-	sched_qs[bit].ph_rlink = p;
-}
-
-/*
- * remrunqueue(p)
- *
- * Call should be made at splclock().
- */
-void
-remrunqueue(p)
-	struct proc *p;
-{
-	int bit;
-
-	bit = p->p_priority >> 2;
-	if ((sched_whichqs & (1 << bit)) == 0)
-		panic("remrunqueue");
-
-	p->p_back->p_forw = p->p_forw;
-	p->p_forw->p_back = p->p_back;
-	p->p_back = NULL;	/* for firewall checking. */
-
-	if ((struct proc *)&sched_qs[bit] == sched_qs[bit].ph_link)
-		sched_whichqs &= ~(1 << bit);
 }
 
 /*

@@ -1,4 +1,4 @@
-/*	$OpenBSD: fd.c,v 1.54 2007/06/20 18:15:47 deraadt Exp $	*/
+/*	$OpenBSD: fd.c,v 1.56 2007/11/27 16:22:13 martynas Exp $	*/
 /*	$NetBSD: fd.c,v 1.51 1997/05/24 20:16:19 pk Exp $	*/
 
 /*-
@@ -395,7 +395,7 @@ fdconf(fdc)
 	/* No result phase for the NE7CMD_CFG command */
 
 	if ((fdc->sc_flags & FDC_82077) != 0) {
-		/* Lock configuration accross soft resets. */
+		/* Lock configuration across soft resets. */
 		if (fdc_wrfifo(fdc, NE7CMD_LOCK | CFG_LOCK) != 0 ||
 		    fdcresult(fdc) != 1) {
 #ifdef FD_DEBUG
@@ -1889,11 +1889,10 @@ fdformat(dev, finfo, p)
 	struct buf *bp;
 
 	/* set up a buffer header for fdstrategy() */
-	bp = (struct buf *)malloc(sizeof(struct buf), M_TEMP, M_NOWAIT);
+	bp = malloc(sizeof(*bp), M_TEMP, M_NOWAIT | M_ZERO);
 	if (bp == 0)
 		return (ENOBUFS);
 
-	bzero((void *)bp, sizeof(struct buf));
 	bp->b_flags = B_BUSY | B_PHYS | B_FORMAT;
 	bp->b_proc = p;
 	bp->b_dev = dev;

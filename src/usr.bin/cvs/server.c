@@ -1,4 +1,4 @@
-/*	$OpenBSD: server.c,v 1.65 2007/07/03 13:22:43 joris Exp $	*/
+/*	$OpenBSD: server.c,v 1.84 2008/02/11 20:33:11 tobias Exp $	*/
 /*
  * Copyright (c) 2006 Joris Vink <joris@openbsd.org>
  *
@@ -15,11 +15,13 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
+#include <sys/types.h>
 #include <sys/stat.h>
 
 #include <errno.h>
 #include <fcntl.h>
 #include <libgen.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
@@ -74,7 +76,7 @@ static char *server_argv[CVS_CMD_MAXARG];
 static int server_argc = 1;
 
 struct cvs_cmd cvs_cmd_server = {
-	CVS_OP_SERVER, 0, "server", { "", "" },
+	CVS_OP_SERVER, CVS_USE_WDIR, "server", { "", "" },
 	"server mode",
 	NULL,
 	NULL,
@@ -88,6 +90,17 @@ cvs_server(int argc, char **argv)
 {
 	char *cmd, *data;
 	struct cvs_req *req;
+
+	if (argc > 1)
+		fatal("server does not take any extra arguments");
+
+	/* Be on server-side very verbose per default. */
+	verbosity = 2;
+
+	setvbuf(stdin, NULL, _IOLBF, 0);
+	setvbuf(stdout, NULL, _IOLBF, 0);
+
+	cvs_server_active = 1;
 
 	server_argv[0] = xstrdup("server");
 
@@ -145,7 +158,18 @@ cvs_server_send_response(char *fmt, ...)
 void
 cvs_server_root(char *data)
 {
-	fatal("duplicate Root request from client, violates the protocol");
+	if (data == NULL)
+		fatal("Missing argument for Root");
+
+	if (current_cvsroot != NULL)
+		return;
+
+	if (data[0] != '/' || (current_cvsroot = cvsroot_get(data)) == NULL)
+		fatal("Invalid Root specified!");
+
+	cvs_parse_configfile();
+	cvs_parse_modules();
+	umask(cvs_umask);
 }
 
 void
@@ -188,7 +212,7 @@ cvs_server_validreq(char *data)
 	int i, first;
 
 	first = 0;
-	bp = cvs_buf_alloc(512, BUF_AUTOEXT);
+	bp = cvs_buf_alloc(512);
 	for (i = 0; cvs_requests[i].supported != -1; i++) {
 		if (cvs_requests[i].hdlr == NULL)
 			continue;
@@ -262,14 +286,14 @@ cvs_server_globalopt(char *data)
 	if (!strcmp(data, "-Q"))
 		verbosity = 0;
 
+	if (!strcmp(data, "-q"))
+		verbosity = 1;
+
 	if (!strcmp(data, "-r"))
 		cvs_readonly = 1;
 
 	if (!strcmp(data, "-t"))
 		cvs_trace = 1;
-
-	if (!strcmp(data, "-V"))
-		verbosity = 2;
 }
 
 void
@@ -293,7 +317,10 @@ void
 cvs_server_directory(char *data)
 {
 	CVSENTRIES *entlist;
-	char *dir, *repo, *parent, entry[CVS_ENT_MAXLINELEN], *dirn, *p;
+	char *dir, *repo, *parent, *entry, *dirn, *p;
+
+	if (current_cvsroot == NULL)
+		fatal("No Root specified for Directory");
 
 	dir = cvs_remote_input();
 	STRIP_SLASH(dir);
@@ -324,11 +351,14 @@ cvs_server_directory(char *data)
 		fatal("cvs_server_directory: %s", strerror(errno));
 
 	if (strcmp(parent, ".")) {
-		entlist = cvs_ent_open(parent);
-		(void)xsnprintf(entry, CVS_ENT_MAXLINELEN, "D/%s////", dirn);
+		entry = xmalloc(CVS_ENT_MAXLINELEN);
+		cvs_ent_line_str(dirn, NULL, NULL, NULL, NULL, 1, 0,
+		    entry, CVS_ENT_MAXLINELEN);
 
+		entlist = cvs_ent_open(parent);
 		cvs_ent_add(entlist, entry);
 		cvs_ent_close(entlist, ENT_SYNC);
+		xfree(entry);
 	}
 
 	if (server_currentdir != NULL)
@@ -395,37 +425,34 @@ cvs_server_useunchanged(char *data)
 void
 cvs_server_unchanged(char *data)
 {
-	int fd;
 	char fpath[MAXPATHLEN];
 	CVSENTRIES *entlist;
 	struct cvs_ent *ent;
-	struct timeval tv[2];
+	char sticky[CVS_ENT_MAXLINELEN];
+	char rev[CVS_REV_BUFSZ], entry[CVS_ENT_MAXLINELEN];
 
 	if (data == NULL)
 		fatal("Missing argument for Unchanged");
 
 	(void)xsnprintf(fpath, MAXPATHLEN, "%s/%s", server_currentdir, data);
 
-	if ((fd = open(fpath, O_RDWR | O_CREAT | O_TRUNC)) == -1)
-		fatal("cvs_server_unchanged: %s: %s", fpath, strerror(errno));
-
 	entlist = cvs_ent_open(server_currentdir);
 	ent = cvs_ent_get(entlist, data);
 	if (ent == NULL)
 		fatal("received Unchanged request for non-existing file");
-	cvs_ent_close(entlist, ENT_NOSYNC);
 
-	tv[0].tv_sec = ent->ce_mtime;
-	tv[0].tv_usec = 0;
-	tv[1] = tv[0];
-	if (futimes(fd, tv) == -1)
-		fatal("cvs_server_unchanged: failed to set modified time");
+	sticky[0] = '\0';
+	if (ent->ce_tag != NULL)
+		(void)xsnprintf(sticky, sizeof(sticky), "T%s", ent->ce_tag);
 
-	if (fchmod(fd, 0600) == -1)
-		fatal("cvs_server_unchanged: failed to set mode");
+	rcsnum_tostr(ent->ce_rev, rev, sizeof(rev));
+	(void)xsnprintf(entry, sizeof(entry), "/%s/%s/%s/%s/%s",
+	    ent->ce_name, rev, CVS_SERVER_UNCHANGED, ent->ce_opts ?
+	    ent->ce_opts : "", sticky);
 
 	cvs_ent_free(ent);
-	(void)close(fd);
+	cvs_ent_add(entlist, entry);
+	cvs_ent_close(entlist, ENT_SYNC);
 }
 
 void
@@ -448,6 +475,18 @@ cvs_server_argument(char *data)
 void
 cvs_server_argumentx(char *data)
 {
+	int idx;
+	size_t len;
+
+	if (server_argc < 0)
+		fatal("Protocol Error: ArgumentX without previous argument");
+
+	idx = server_argc - 1;
+
+	len = strlen(server_argv[idx]) + strlen(data) + 2;
+	server_argv[idx] = xrealloc(server_argv[idx], len, sizeof(char));
+	strlcat(server_argv[idx], "\n", len);
+	strlcat(server_argv[idx], data, len);
 }
 
 void
@@ -469,6 +508,7 @@ cvs_server_add(char *data)
 		fatal("cvs_server_add: %s", strerror(errno));
 
 	cvs_cmdop = CVS_OP_ADD;
+	cmdp->cmd_flags = cvs_cmd_add.cmd_flags;
 	cvs_add(server_argc, server_argv);
 	cvs_server_send_response("ok");
 }
@@ -480,6 +520,7 @@ cvs_server_import(char *data)
 		fatal("cvs_server_import: %s", strerror(errno));
 
 	cvs_cmdop = CVS_OP_IMPORT;
+	cmdp->cmd_flags = cvs_cmd_import.cmd_flags;
 	cvs_import(server_argc, server_argv);
 	cvs_server_send_response("ok");
 }
@@ -491,6 +532,7 @@ cvs_server_admin(char *data)
 		fatal("cvs_server_admin: %s", strerror(errno));
 
 	cvs_cmdop = CVS_OP_ADMIN;
+	cmdp->cmd_flags = cvs_cmd_admin.cmd_flags;
 	cvs_admin(server_argc, server_argv);
 	cvs_server_send_response("ok");
 }
@@ -502,6 +544,19 @@ cvs_server_annotate(char *data)
 		fatal("cvs_server_annotate: %s", strerror(errno));
 
 	cvs_cmdop = CVS_OP_ANNOTATE;
+	cmdp->cmd_flags = cvs_cmd_annotate.cmd_flags;
+	cvs_annotate(server_argc, server_argv);
+	cvs_server_send_response("ok");
+}
+
+void
+cvs_server_rannotate(char *data)
+{
+	if (chdir(server_currentdir) == -1)
+		fatal("cvs_server_rannotate: %s", strerror(errno));
+
+	cvs_cmdop = CVS_OP_RANNOTATE;
+	cmdp->cmd_flags = cvs_cmd_rannotate.cmd_flags;
 	cvs_annotate(server_argc, server_argv);
 	cvs_server_send_response("ok");
 }
@@ -513,16 +568,19 @@ cvs_server_commit(char *data)
 		fatal("cvs_server_commit: %s", strerror(errno));
 
 	cvs_cmdop = CVS_OP_COMMIT;
+	cmdp->cmd_flags = cvs_cmd_commit.cmd_flags;
 	cvs_commit(server_argc, server_argv);
 	cvs_server_send_response("ok");
 }
 
 void
 cvs_server_checkout(char *data)
-{	if (chdir(server_currentdir) == -1)
+{
+	if (chdir(server_currentdir) == -1)
 		fatal("cvs_server_checkout: %s", strerror(errno));
 
 	cvs_cmdop = CVS_OP_CHECKOUT;
+	cmdp->cmd_flags = cvs_cmd_checkout.cmd_flags;
 	cvs_checkout(server_argc, server_argv);
 	cvs_server_send_response("ok");
 }
@@ -534,17 +592,49 @@ cvs_server_diff(char *data)
 		fatal("cvs_server_diff: %s", strerror(errno));
 
 	cvs_cmdop = CVS_OP_DIFF;
+	cmdp->cmd_flags = cvs_cmd_diff.cmd_flags;
 	cvs_diff(server_argc, server_argv);
+	cvs_server_send_response("ok");
+}
+
+void
+cvs_server_rdiff(char *data)
+{
+	if (chdir(server_currentdir) == -1)
+		fatal("cvs_server_rdiff: %s", strerror(errno));
+
+	cvs_cmdop = CVS_OP_RDIFF;
+	cmdp->cmd_flags = cvs_cmd_rdiff.cmd_flags;
+	cvs_diff(server_argc, server_argv);
+	cvs_server_send_response("ok");
+}
+
+void
+cvs_server_export(char *data)
+{
+	if (chdir(server_currentdir) == -1)
+		fatal("cvs_server_export: %s", strerror(errno));
+
+	cvs_cmdop = CVS_OP_EXPORT;
+	cmdp->cmd_flags = cvs_cmd_export.cmd_flags;
+	cvs_checkout(server_argc, server_argv);
 	cvs_server_send_response("ok");
 }
 
 void
 cvs_server_init(char *data)
 {
-	if (chdir(server_currentdir) == -1)
-		fatal("cvs_server_init: %s", strerror(errno));
+	if (data == NULL)
+		fatal("Missing argument for init");
+
+	if (current_cvsroot != NULL)
+		fatal("Root in combination with init is not supported");
+
+	if ((current_cvsroot = cvsroot_get(data)) == NULL)
+		fatal("Invalid argument for init");
 
 	cvs_cmdop = CVS_OP_INIT;
+	cmdp->cmd_flags = cvs_cmd_init.cmd_flags;
 	cvs_init(server_argc, server_argv);
 	cvs_server_send_response("ok");
 }
@@ -553,9 +643,10 @@ void
 cvs_server_release(char *data)
 {
 	if (chdir(server_currentdir) == -1)
-		fatal("cvs_server_init: %s", strerror(errno));
+		fatal("cvs_server_release: %s", strerror(errno));
 
 	cvs_cmdop = CVS_OP_RELEASE;
+	cmdp->cmd_flags = cvs_cmd_release.cmd_flags;
 	cvs_release(server_argc, server_argv);
 	cvs_server_send_response("ok");
 }
@@ -567,6 +658,7 @@ cvs_server_remove(char *data)
 		fatal("cvs_server_remove: %s", strerror(errno));
 
 	cvs_cmdop = CVS_OP_REMOVE;
+	cmdp->cmd_flags = cvs_cmd_remove.cmd_flags;
 	cvs_remove(server_argc, server_argv);
 	cvs_server_send_response("ok");
 }
@@ -578,6 +670,7 @@ cvs_server_status(char *data)
 		fatal("cvs_server_status: %s", strerror(errno));
 
 	cvs_cmdop = CVS_OP_STATUS;
+	cmdp->cmd_flags = cvs_cmd_status.cmd_flags;
 	cvs_status(server_argc, server_argv);
 	cvs_server_send_response("ok");
 }
@@ -589,25 +682,19 @@ cvs_server_log(char *data)
 		fatal("cvs_server_log: %s", strerror(errno));
 
 	cvs_cmdop = CVS_OP_LOG;
+	cmdp->cmd_flags = cvs_cmd_log.cmd_flags;
 	cvs_getlog(server_argc, server_argv);
 	cvs_server_send_response("ok");
 }
- 
+
 void
 cvs_server_rlog(char *data)
 {
-	char fpath[MAXPATHLEN];
-	struct cvsroot *cvsroot;
-
-	cvsroot = cvsroot_get(NULL);
-
-	(void)xsnprintf(fpath, MAXPATHLEN, "%s/%s",
-	    cvsroot->cr_dir, server_currentdir);
-
-	if (chdir(fpath) == -1)
-		fatal("cvs_server_log: %s", strerror(errno));
+	if (chdir(current_cvsroot->cr_dir) == -1)
+		fatal("cvs_server_rlog: %s", strerror(errno));
 
 	cvs_cmdop = CVS_OP_RLOG;
+	cmdp->cmd_flags = cvs_cmd_rlog.cmd_flags;
 	cvs_getlog(server_argc, server_argv);
 	cvs_server_send_response("ok");
 }
@@ -619,6 +706,19 @@ cvs_server_tag(char *data)
 		fatal("cvs_server_tag: %s", strerror(errno));
 
 	cvs_cmdop = CVS_OP_TAG;
+	cmdp->cmd_flags = cvs_cmd_tag.cmd_flags;
+	cvs_tag(server_argc, server_argv);
+	cvs_server_send_response("ok");
+}
+
+void
+cvs_server_rtag(char *data)
+{
+	if (chdir(current_cvsroot->cr_dir) == -1)
+		fatal("cvs_server_rtag: %s", strerror(errno));
+
+	cvs_cmdop = CVS_OP_RTAG;
+	cmdp->cmd_flags = cvs_cmd_rtag.cmd_flags;
 	cvs_tag(server_argc, server_argv);
 	cvs_server_send_response("ok");
 }
@@ -630,6 +730,7 @@ cvs_server_update(char *data)
 		fatal("cvs_server_update: %s", strerror(errno));
 
 	cvs_cmdop = CVS_OP_UPDATE;
+	cmdp->cmd_flags = cvs_cmd_update.cmd_flags;
 	cvs_update(server_argc, server_argv);
 	cvs_server_send_response("ok");
 }
@@ -638,6 +739,7 @@ void
 cvs_server_version(char *data)
 {
 	cvs_cmdop = CVS_OP_VERSION;
+	cmdp->cmd_flags = cvs_cmd_version.cmd_flags;
 	cvs_version(server_argc, server_argv);
 	cvs_server_send_response("ok");
 }
@@ -664,16 +766,19 @@ cvs_server_update_entry(const char *resp, struct cvs_file *cf)
 void
 cvs_server_set_sticky(char *dir, char *tag)
 {
-	char fpath[MAXPATHLEN], tbuf[CVS_ENT_MAXLINELEN];
+	char fpath[MAXPATHLEN];
 
-	(void)xsnprintf(fpath, MAXPATHLEN, "%s/%s",
-	    current_cvsroot->cr_dir, dir);
-
-	(void)xsnprintf(tbuf, MAXPATHLEN, "T%s", tag);
+	if (module_repo_root != NULL) {
+		(void)xsnprintf(fpath, MAXPATHLEN, "%s/%s/%s",
+		    current_cvsroot->cr_dir, module_repo_root, dir);
+	} else {
+		(void)xsnprintf(fpath, MAXPATHLEN, "%s/%s",
+		    current_cvsroot->cr_dir, dir);
+	}
 
 	cvs_server_send_response("Set-sticky %s", dir);
 	cvs_remote_output(fpath);
-	cvs_remote_output(tbuf);
+	cvs_remote_output(tag);
 }
 
 void
@@ -681,8 +786,13 @@ cvs_server_clear_sticky(char *dir)
 {
 	char fpath[MAXPATHLEN];
 
-	(void)xsnprintf(fpath, MAXPATHLEN, "%s/%s",
-	    current_cvsroot->cr_dir, dir);
+	if (module_repo_root != NULL) {
+		(void)xsnprintf(fpath, MAXPATHLEN, "%s/%s/%s",
+		    current_cvsroot->cr_dir, module_repo_root, dir);
+	} else {
+		(void)xsnprintf(fpath, MAXPATHLEN, "%s/%s",
+		    current_cvsroot->cr_dir, dir);
+	}
 
 	cvs_server_send_response("Clear-sticky %s", dir);
 	cvs_remote_output(fpath);

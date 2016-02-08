@@ -1,13 +1,9 @@
-#	$OpenBSD: RAMDISKC,v 1.77 2007/07/21 01:19:52 deraadt Exp $
+#	$OpenBSD: RAMDISKC,v 1.83 2007/12/05 19:17:13 deraadt Exp $
 
 machine		i386		# architecture, used by config; REQUIRED
 
 option		SCSITERSE
 option		APM_NOPRINT
-
-option		I486_CPU	# CPU classes; at least one is REQUIRED
-option		I586_CPU
-option		I686_CPU
 
 option		SMALL_KERNEL
 option		NO_PROPOLICE
@@ -38,7 +34,7 @@ config		bsd	root on rd0a swap on rd0b and wd0b and sd0b
 
 mainbus0 at root
 
-acpi0		at mainbus?	disable
+acpi0		at bios?
 #acpitimer*	at acpi?
 #acpihpet*	at acpi?
 #acpiac*	at acpi?
@@ -59,6 +55,8 @@ isa0	at mainbus0
 isa0	at pcib?
 isa0	at ichpcib?
 isa0	at gscpcib?
+isa0	at glxpcib?
+isa0	at amdpcib?
 #eisa0	at mainbus0
 pci*	at mainbus0
 
@@ -72,7 +70,9 @@ pci*	at pchb?
 pcib*	at pci?			# PCI-ISA bridge
 ichpcib* at pci?		# Intel ICHx/ICHx-M LPC bridges
 gscpcib* at pci?		# NS Geode SC1100 PCI-ISA bridge
+amdpcib* at pci?		# AMD 8111 LPC bridge
 geodesc* at pci?		# Geode SC1100/SCx200 IAOC
+glxpcib* at pci?		# AMD CS5536 PCI-ISA bridge
 
 # ISA PCMCIA controllers
 pcic0	at isa? port 0x3e0 iomem 0xd0000 iosiz 0x4000
@@ -295,16 +295,16 @@ ath*	at pci?				# Atheros AR5k (802.11a/b/g)
 ath*	at cardbus?			# Atheros AR5k (802.11a/b/g)
 #atw*	at pci?				# ADMtek ADM8211 (802.11)
 #atw*	at cardbus?			# ADMtek ADM8211 (802.11)
-#wi*	at pci?				# WaveLAN IEEE 802.11DS
-wi*	at pcmcia?			# WaveLAN IEEE 802.11DS
+wi*	at pci?				# WaveLAN IEEE 802.11DS
+#wi*	at pcmcia?			# WaveLAN IEEE 802.11DS
 #ipw*	at pci?				# Intel PRO/Wireless 2100
 #iwi*	at pci?				# Intel PRO/Wireless 2200BG/2915ABG
 #awi*	at pcmcia?			# Bay Networks IEEE 802.11FH
 #an*	at pcmcia?			# Aironet IEEE 802.11DS
 #cnw*	at pcmcia?			# Xircom Netwave
 #ray*	at pcmcia?			# Raylink Aviator2.4/Pro 802.11FH
-ral*	at pci?				# Ralink RT2500/RT2501/RT2600
-ral*	at cardbus?			# Ralink RT2500/RT2501/RT2600
+#ral*	at pci?				# Ralink RT2500/RT2501/RT2600
+#ral*	at cardbus?			# Ralink RT2500/RT2501/RT2600
 #rtw*	at pci?				# Realtek 8180
 #rtw*	at cardbus?			# Realtek 8180
 

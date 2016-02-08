@@ -1,4 +1,4 @@
-/*	$OpenBSD: ffs_vfsops.c,v 1.109 2007/08/04 03:33:31 art Exp $	*/
+/*	$OpenBSD: ffs_vfsops.c,v 1.112 2008/01/05 19:49:26 otto Exp $	*/
 /*	$NetBSD: ffs_vfsops.c,v 1.19 1996/02/09 22:22:26 christos Exp $	*/
 
 /*
@@ -309,9 +309,8 @@ ffs_mount(struct mount *mp, const char *path, void *data,
 				if (error)
 					goto error_1;
 			}
-			fs->fs_contigdirs=(u_int8_t*)malloc((u_long)fs->fs_ncg,
-							    M_UFSMNT, M_WAITOK);
-			bzero(fs->fs_contigdirs, fs->fs_ncg);
+			fs->fs_contigdirs = malloc((u_long)fs->fs_ncg,
+			     M_UFSMNT, M_WAITOK|M_ZERO);
 
 			ronly = 0;
 		}
@@ -555,7 +554,7 @@ ffs_reload(struct mount *mountp, struct ucred *cred, struct proc *p)
 
 	fs = VFSTOUFS(mountp)->um_fs;
 
-	error = bread(devvp, (daddr_t)(fs->fs_sblockloc / size), SBSIZE,
+	error = bread(devvp, (daddr64_t)(fs->fs_sblockloc / size), SBSIZE,
 	    NOCRED, &bp);
 	if (error) {
 		brelse(bp);
@@ -787,8 +786,7 @@ ffs_mountfs(struct vnode *devvp, struct mount *mp, struct proc *p)
 		goto out;
 	}
 
-	ump = malloc(sizeof *ump, M_UFSMNT, M_WAITOK);
-	bzero(ump, sizeof *ump);
+	ump = malloc(sizeof *ump, M_UFSMNT, M_WAITOK|M_ZERO);
 	ump->um_fs = malloc((u_long)fs->fs_sbsize, M_UFSMNT,
 	    M_WAITOK);
 
@@ -861,9 +859,8 @@ ffs_mountfs(struct vnode *devvp, struct mount *mp, struct proc *p)
 	if (ronly)
 		fs->fs_contigdirs = NULL;
 	else {
-		fs->fs_contigdirs = (u_int8_t*)malloc((u_long)fs->fs_ncg,
-						      M_UFSMNT, M_WAITOK);
-		bzero(fs->fs_contigdirs, fs->fs_ncg);
+		fs->fs_contigdirs = malloc((u_long)fs->fs_ncg,
+		    M_UFSMNT, M_WAITOK|M_ZERO);
 	}
 
 	/*
@@ -1033,10 +1030,11 @@ ffs_unmount(struct mount *mp, int mntflags, struct proc *p)
 	}
 	ump->um_devvp->v_specmountpoint = NULL;
 
+	vn_lock(ump->um_devvp, LK_EXCLUSIVE | LK_RETRY, p);
 	vinvalbuf(ump->um_devvp, V_SAVE, NOCRED, p, 0, 0);
 	error = VOP_CLOSE(ump->um_devvp, fs->fs_ronly ? FREAD : FREAD|FWRITE,
 		NOCRED, p);
-	vrele(ump->um_devvp);
+	vput(ump->um_devvp);
 	free(fs->fs_csp, M_UFSMNT);
 	free(fs, M_UFSMNT);
 	free(ump, M_UFSMNT);

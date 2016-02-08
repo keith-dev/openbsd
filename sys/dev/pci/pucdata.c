@@ -1,4 +1,4 @@
-/*	$OpenBSD: pucdata.c,v 1.48 2007/06/08 12:44:41 mbalmer Exp $	*/
+/*	$OpenBSD: pucdata.c,v 1.52 2007/11/09 02:05:16 fgsch Exp $	*/
 /*	$NetBSD: pucdata.c,v 1.6 1999/07/03 05:55:23 cgd Exp $	*/
 
 /*
@@ -551,6 +551,32 @@ const struct puc_device_description puc_devices[] = {
 	    },
 	},
 
+	/* SIIG Cyber 8S PCI 16C850 (20x family): 8S */
+	{   /* "SIIG Cyber 8S PCI 16C850 (20x family)", */
+	    {	PCI_VENDOR_OXFORD2, PCI_PRODUCT_OXFORD2_OX16PCI954,
+		PCI_VENDOR_SIIG, PCI_PRODUCT_SIIG_2082	},
+	    {	0xffff, 0xffff,	0xffff, 0xffff	},
+	    {
+		{ PUC_PORT_TYPE_COM, 0x10, 0x00, COM_FREQ * 10 },
+		{ PUC_PORT_TYPE_COM, 0x10, 0x08, COM_FREQ * 10 },
+		{ PUC_PORT_TYPE_COM, 0x10, 0x10, COM_FREQ * 10 },
+		{ PUC_PORT_TYPE_COM, 0x10, 0x18, COM_FREQ * 10 },
+	    },
+	},
+
+	/* Exsys EX-41098, second part of SIIG Cyber 8S PCI Card */
+	{   /* "Exsys EX-41098", */
+	    {	PCI_VENDOR_OXFORD2, PCI_PRODUCT_OXFORD2_EXSYS_EX41098,
+		PCI_VENDOR_SIIG, PCI_PRODUCT_SIIG_2082	},
+	    {	0xffff, 0xffff, 0xffff, 0xffff },
+	    {
+		{ PUC_PORT_TYPE_COM, 0x10, 0x00, COM_FREQ * 10 },
+		{ PUC_PORT_TYPE_COM, 0x10, 0x08, COM_FREQ * 10 },
+		{ PUC_PORT_TYPE_COM, 0x10, 0x10, COM_FREQ * 10 },
+		{ PUC_PORT_TYPE_COM, 0x10, 0x18, COM_FREQ * 10 },
+	    },
+	},
+
 	/*
 	 * VScom PCI-400S, based on PLX 9050 Chip, 16k buffer
 	 */
@@ -855,6 +881,17 @@ const struct puc_device_description puc_devices[] = {
 		{ PUC_PORT_TYPE_COM, 0x10, 0x08, COM_FREQ },
 		{ PUC_PORT_TYPE_COM, 0x10, 0x10, COM_FREQ },
 		{ PUC_PORT_TYPE_COM, 0x10, 0x18, COM_FREQ },
+	    },
+	},
+
+	/* Commell MP-954GPS, GPS and 2 COM */
+	{   /* "Oxford Semiconductor OX16mPCI954 UARTs", */
+	    {   PCI_VENDOR_OXFORD2, PCI_PRODUCT_OXFORD2_OXMPCI954,	0, 0 },
+	    {   0xffff, 0xffff,						0, 0 },
+	    {
+		{ PUC_PORT_TYPE_COM, 0x10, 0x00, COM_FREQ*4 },
+		{ PUC_PORT_TYPE_COM, 0x10, 0x08, COM_FREQ*4 },
+		{ PUC_PORT_TYPE_COM, 0x10, 0x10, COM_FREQ*4 },
 	    },
 	},
 
@@ -1179,6 +1216,16 @@ const struct puc_device_description puc_devices[] = {
 	    },
 	},
 
+	{   /* SUNIX 4036 2S */
+	    {	PCI_VENDOR_SUNIX, PCI_PRODUCT_SUNIX_40XX, 0x1409, 0x0002 },
+	    {	0xffff,	0xffff,	0xffff,	0xffff },
+	    {
+		{ PUC_PORT_TYPE_COM, 0x10, 0x00, COM_FREQ * 8},
+		{ PUC_PORT_TYPE_COM, 0x10, 0x08, COM_FREQ * 8},
+	    },
+	},
+
+
 	{   /* SUNIX 405X 4S */
 	    {	PCI_VENDOR_SUNIX, PCI_PRODUCT_SUNIX_40XX, 0x1409, 0x4050 },
 	    {	0xffff,	0xffff,	0xffff,	0xeff0 },
@@ -1340,6 +1387,58 @@ const struct puc_device_description puc_devices[] = {
 		{ PUC_PORT_TYPE_COM, 0x10, 0x0e00, COM_FREQ * 8 },
 	    },
 	},
+
+	/*
+	 * Multi-Tech ISI5634PCI/4 4-port modem board.
+	 * Has a 4-channel Exar XR17C154 UART, but with bogus product ID in its
+	 * config EEPROM.
+	 */
+	{
+	    {   PCI_VENDOR_EXAR, PCI_PRODUCT_EXAR_XR17C158, 0x2205, 0x2003 },
+	    {	0xffff,	0xffff,				    0xffff, 0xffff },
+	    {
+		{ PUC_PORT_TYPE_COM, 0x10, 0x0000, COM_FREQ * 8 },
+		{ PUC_PORT_TYPE_COM, 0x10, 0x0200, COM_FREQ * 8 },
+		{ PUC_PORT_TYPE_COM, 0x10, 0x0400, COM_FREQ * 8 },
+		{ PUC_PORT_TYPE_COM, 0x10, 0x0600, COM_FREQ * 8 },
+	    },
+	},
+
+	{   /* EXAR XR17C152 Dual UART */
+	    {   PCI_VENDOR_EXAR, PCI_PRODUCT_EXAR_XR17C152,	0, 0 },
+	    {   0xffff, 0xffff, 				0, 0 },
+	    {
+		{ PUC_PORT_TYPE_COM, 0x10, 0x0000, COM_FREQ * 8 },
+		{ PUC_PORT_TYPE_COM, 0x10, 0x0200, COM_FREQ * 8 },
+	    },
+	},
+
+	{   /* Exar XR17C154 Quad UART */
+	    {   PCI_VENDOR_EXAR, PCI_PRODUCT_EXAR_XR17C154,	0, 0 },
+	    {   0xffff, 0xffff,					0, 0 },
+	    {
+		{ PUC_PORT_TYPE_COM, 0x10, 0x0000, COM_FREQ * 8 },
+		{ PUC_PORT_TYPE_COM, 0x10, 0x0200, COM_FREQ * 8 },
+		{ PUC_PORT_TYPE_COM, 0x10, 0x0400, COM_FREQ * 8 },
+		{ PUC_PORT_TYPE_COM, 0x10, 0x0600, COM_FREQ * 8 },
+	    },
+	},
+
+	{   /* Exar XR17C158 Eight Channel UART */
+	    {   PCI_VENDOR_EXAR, PCI_PRODUCT_EXAR_XR17C158,	0, 0 },
+	    {   0xffff, 0xffff, 				0, 0 },
+	    {
+		{ PUC_PORT_TYPE_COM, 0x10, 0x0000, COM_FREQ * 8 },
+		{ PUC_PORT_TYPE_COM, 0x10, 0x0200, COM_FREQ * 8 },
+		{ PUC_PORT_TYPE_COM, 0x10, 0x0400, COM_FREQ * 8 },
+		{ PUC_PORT_TYPE_COM, 0x10, 0x0600, COM_FREQ * 8 },
+		{ PUC_PORT_TYPE_COM, 0x10, 0x0800, COM_FREQ * 8 },
+		{ PUC_PORT_TYPE_COM, 0x10, 0x0a00, COM_FREQ * 8 },
+		{ PUC_PORT_TYPE_COM, 0x10, 0x0c00, COM_FREQ * 8 },
+		{ PUC_PORT_TYPE_COM, 0x10, 0x0e00, COM_FREQ * 8 },
+	    },
+	},
+
 	{   /* NULL, */
 
 	    {	0,	0,		0, 0	},

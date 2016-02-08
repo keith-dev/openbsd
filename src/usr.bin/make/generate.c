@@ -1,5 +1,5 @@
 /*	$OpenPackages$ */
-/*	$OpenBSD: generate.c,v 1.7 2007/07/08 17:44:20 espie Exp $ */
+/*	$OpenBSD: generate.c,v 1.10 2007/09/17 09:28:36 espie Exp $ */
 
 /*
  * Copyright (c) 2001 Marc Espie.
@@ -35,6 +35,7 @@
 #include "ohash.h"
 #include "cond_int.h"
 #include "var_int.h"
+#include "node_int.h"
 
 #define M(x)	x, #x
 char *table_var[] = {
@@ -84,10 +85,46 @@ char *table_cond[] = {
 	NULL
 };
 
+char *table_nodes[] = {
+	M(NODE_DEFAULT),
+	M(NODE_EXEC),
+	M(NODE_IGNORE),
+	M(NODE_INCLUDES),
+	M(NODE_INVISIBLE),
+	M(NODE_JOIN),
+	M(NODE_LIBS),
+	M(NODE_MADE),
+	M(NODE_MAIN),
+	M(NODE_MAKE),
+	M(NODE_MAKEFLAGS),
+	M(NODE_MFLAGS),
+	M(NODE_NOTMAIN),
+	M(NODE_NOTPARALLEL),
+	M(NODE_NO_PARALLEL),
+	M(NODE_NULL),
+	M(NODE_OPTIONAL),
+	M(NODE_ORDER),
+	M(NODE_PARALLEL),
+	M(NODE_PATH),
+	M(NODE_PHONY),
+	M(NODE_PRECIOUS),
+	M(NODE_RECURSIVE),
+	M(NODE_SILENT),
+	M(NODE_SINGLESHELL),
+	M(NODE_SUFFIXES),
+	M(NODE_USE),
+	M(NODE_WAIT),
+	M(NODE_BEGIN),
+	M(NODE_END),
+	M(NODE_INTERRUPT),
+	NULL
+};
+
 
 char **table[] = {
 	table_var,
-	table_cond
+	table_cond,
+	table_nodes
 };
 
 int
@@ -112,7 +149,7 @@ main(int argc, char *argv[])
 	t = table[tn-1];
 	slots = atoi(argv[2]);
 	if (slots) {
-		occupied = malloc(sizeof(char *) * slots);
+		occupied = calloc(sizeof(char *), slots);
 		if (!occupied)
 			exit(1);
 		for (i = 0; i < slots; i++)
@@ -120,7 +157,7 @@ main(int argc, char *argv[])
 	} else
 		occupied = NULL;
 
-	printf("/* File created by generate %d %d, do not edit */\n", 
+	printf("/* File created by generate %d %d, do not edit */\n",
 	    tn, slots);
 	for (i = 0; t[i] != NULL; i++) {
 		e = NULL;
@@ -128,7 +165,7 @@ main(int argc, char *argv[])
 		if (slots) {
 			h = v % slots;
 			if (occupied[h]) {
-				fprintf(stderr, 
+				fprintf(stderr,
 				    "Collision: %s / %s (%d)\n", occupied[h],
 				    t[i], h);
 				exit(1);

@@ -1,4 +1,4 @@
-/*	$OpenBSD: atascsi.h,v 1.25 2007/04/12 13:08:34 jsg Exp $ */
+/*	$OpenBSD: atascsi.h,v 1.32 2008/01/01 03:09:15 dlg Exp $ */
 
 /*
  * Copyright (c) 2007 David Gwynne <dlg@openbsd.org>
@@ -33,7 +33,14 @@ struct atascsi;
 #define ATA_C_FLUSH_CACHE	0xe7
 #define ATA_C_FLUSH_CACHE_EXT	0xea /* lba48 */
 #define ATA_C_IDENTIFY		0xec
+#define ATA_C_SET_FEATURES	0xef
 #define ATA_C_SEC_FREEZE_LOCK	0xf5
+
+/*
+ * ATA SET FEATURES subcommands
+ */
+#define ATA_SF_WRITECACHE_EN	0x02
+#define ATA_SF_LOOKAHEAD_EN	0xaa
 
 struct ata_identify {
 	u_int16_t	config;		/*   0 */
@@ -86,6 +93,7 @@ struct ata_identify {
 	u_int16_t	features85;	/*  85 */
 	u_int16_t	features86;	/*  86 */
 	u_int16_t	features87;	/*  87 */
+#define ATA_ID_F87_WWN		(1<<8)
 	u_int16_t	ultradma;	/*  88 */
 	u_int16_t	erasetime;	/*  89 */
 	u_int16_t	erasetimex;	/*  90 */
@@ -121,6 +129,12 @@ struct ata_identify {
 	u_int16_t	padding4[48];	/* 207 */
 	u_int16_t	integrity;	/* 255 */
 } __packed;
+
+/*
+ * IDENTIFY DEVICE data
+ */
+#define ATA_IDENTIFY_WRITECACHE		(1 << 5)
+#define ATA_IDENTIFY_LOOKAHEAD		(1 << 6)
 
 /*
  * Frame Information Structures
@@ -234,6 +248,7 @@ struct ata_log_page_10h {
  */
 
 struct ata_port {
+	struct ata_identify	ap_identify;
 	struct atascsi		*ap_as;
 	int			ap_port;
 	int			ap_type;
@@ -251,7 +266,7 @@ struct ata_xfer {
 	u_int8_t		*packetcmd;
 	u_int8_t		tag;
 
-	u_int8_t		*data;
+	void			*data;
 	size_t			datalen;
 	size_t			resid;
 
@@ -267,6 +282,10 @@ struct ata_xfer {
 #define ATA_F_PIO			(1<<4)
 #define ATA_F_PACKET			(1<<5)
 #define ATA_F_NCQ			(1<<6)
+#define ATA_FMT_FLAGS			"\020" "\007NCQ" "\006PACKET" \
+					"\005PIO" "\004POLL" "\003NOWAIT" \
+					"\002WRITE" "\001READ"
+
 	volatile int		state;
 #define ATA_S_SETUP			0
 #define ATA_S_PENDING			1
@@ -291,6 +310,7 @@ struct ata_xfer {
 
 struct atascsi_methods {
 	int			(*probe)(void *, int);
+	void			(*free)(void *, int);
 	struct ata_xfer *	(*ata_get_xfer)(void *, int );
 	int			(*ata_cmd)(struct ata_xfer *);
 };
@@ -308,7 +328,7 @@ struct atascsi_attach_args {
 };
 
 struct atascsi	*atascsi_attach(struct device *, struct atascsi_attach_args *);
-int		atascsi_detach(struct atascsi *);
+int		atascsi_detach(struct atascsi *, int);
 
 int		atascsi_probe_dev(struct atascsi *, int);
-int		atascsi_detach_dev(struct atascsi *, int);
+int		atascsi_detach_dev(struct atascsi *, int, int);

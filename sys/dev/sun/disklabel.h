@@ -1,4 +1,4 @@
-/*	$OpenBSD: disklabel.h,v 1.4 2007/05/31 00:30:10 deraadt Exp $	*/
+/*	$OpenBSD: disklabel.h,v 1.6 2007/10/02 03:26:59 krw Exp $	*/
 /*	$NetBSD: disklabel.h,v 1.2 1998/08/22 14:55:28 mrg Exp $ */
 
 /*
@@ -43,15 +43,36 @@
 
 /*
  * SunOS disk label layout (only relevant portions discovered here).
+ * This describes the format typically found on SPARC systems, but not
+ * that usually seen on SunOS/x86 and SunOS/amd64 systems.
  */
 
 #define	SUN_DKMAGIC	55998
 
 /* partition info */
 struct sun_dkpart {
-	int	sdkp_cyloffset;		/* starting cylinder */
-	int	sdkp_nsectors;		/* number of sectors */
+	u_int	sdkp_cyloffset;		/* starting cylinder */
+	u_int	sdkp_nsectors;		/* number of sectors */
 };
+
+/* partition types */
+struct sun_partinfo {
+	u_short	spi_tag;		/* filesystem type */
+	u_short	spi_flag;		/* flags */
+};
+
+/* some spi_tag values */
+#define SPTAG_EMPTY		0x00
+#define SPTAG_BOOT		0x01
+#define SPTAG_SUNOS_ROOT	0x02
+#define SPTAG_SUNOS_SWAP	0x03
+#define SPTAG_SUNOS_USR		0x04
+#define SPTAG_WHOLE_DISK	0x05
+#define SPTAG_SUNOS_STAND	0x06
+#define SPTAG_SUNOS_VAR		0x07
+#define SPTAG_SUNOS_HOME	0x08
+#define SPTAG_LINUX_SWAP	0x82
+#define SPTAG_LINUX_EXT2	0x83
 
 #define	SUNXPART	8
 #define	SL_XPMAG	(0x199d1fe2+SUNXPART)
@@ -59,9 +80,9 @@ struct sun_dkpart {
 
 struct sun_disklabel {			/* total size = 512 bytes */
 	char		sl_text[128];
-	u_int		sl_xpsum;		/* additive cksum, [xl_xpmag,sl_xx1) */
-	u_int		sl_xpmag;		/* "extended" magic number */
-	struct sun_dkpart sl_xpart[SUNXPART];	/* "extended" partitions, i through p */
+	u_int		sl_xpsum;	/* additive cksum, [xl_xpmag,sl_xx1) */
+	u_int		sl_xpmag;	/* "extended" magic number */
+	struct sun_dkpart sl_xpart[SUNXPART];	/* "extended" partitions i..p */
 	u_char		sl_types[MAXPARTITIONS];
 	u_int8_t	sl_fragblock[MAXPARTITIONS];
 	u_int16_t	sl_cpg[MAXPARTITIONS];
@@ -72,7 +93,7 @@ struct sun_disklabel {			/* total size = 512 bytes */
 			    sizeof(u_int16_t) * MAXPARTITIONS];
 	u_short sl_rpm;			/* rotational speed */
 	u_short	sl_pcylinders;		/* number of physical cyls */
-#define	sl_pcyl	 sl_pcylinders		/* XXX: old sun3 */
+#define	sl_pcyl	sl_pcylinders		/* XXX: old sun3 */
 	u_short sl_sparespercyl;	/* spare sectors per cylinder */
 	char	sl_xxx3[4];
 	u_short sl_interleave;		/* interleave factor */
@@ -84,4 +105,14 @@ struct sun_disklabel {			/* total size = 512 bytes */
 	struct sun_dkpart sl_part[8];	/* partition layout */
 	u_short	sl_magic;		/* == SUN_DKMAGIC */
 	u_short	sl_cksum;		/* xor checksum of all shorts */
+};
+
+/* Sun standard fields, also used on Linux. */
+struct sun_preamble {
+	char	sl_text[128];
+	u_int	sl_version;	/* label version */
+	char	sl_volume[8];	/* short volume name */
+	u_short	sl_nparts;	/* partition count */
+
+	struct sun_partinfo sl_part[8];
 };

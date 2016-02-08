@@ -1,4 +1,4 @@
-/*	$OpenBSD: ripd.h,v 1.5 2007/01/08 13:01:10 claudio Exp $ */
+/*	$OpenBSD: ripd.h,v 1.10 2007/10/24 20:16:49 claudio Exp $ */
 
 /*
  * Copyright (c) 2004 Esben Norby <norby@openbsd.org>
@@ -184,7 +184,7 @@ enum iface_type {
 struct auth_md {
 	TAILQ_ENTRY(auth_md)	 entry;
 	u_int32_t		 seq_modulator;
-	char			 key[MD5_DIGEST_LENGTH];
+	u_int8_t		 key[MD5_DIGEST_LENGTH];
 	u_int8_t		 keyid;
 };
 
@@ -202,20 +202,20 @@ TAILQ_HEAD(packet_head, packet_entry);
 
 struct iface {
 	LIST_ENTRY(iface)	 entry;
-	LIST_HEAD(, nbr)         nbr_list;
+	LIST_HEAD(, nbr)	 nbr_list;
 	LIST_HEAD(, nbr_failed)	 failed_nbr_list;
-	char                     name[IF_NAMESIZE];
-	char			 auth_key[MAX_SIMPLE_AUTH_LEN];
-	struct in_addr           addr;
-	struct in_addr           dst;
-	struct in_addr           mask;
+	char			 name[IF_NAMESIZE];
+	u_int8_t		 auth_key[MAX_SIMPLE_AUTH_LEN];
+	struct in_addr		 addr;
+	struct in_addr		 dst;
+	struct in_addr		 mask;
 	struct packet_head	 rq_list;
 	struct packet_head	 rp_list;
 	struct auth_md_head	 auth_md_list;
 
+	u_int64_t		 baudrate;
 	time_t			 uptime;
-	u_long			 mtu;
-	u_long			 baudrate;
+	u_int			 mtu;
 	int			 fd; /* XXX */
 	int			 state;
 	u_short			 ifindex;
@@ -294,7 +294,7 @@ struct kroute {
 
 struct kif {
 	char		 ifname[IF_NAMESIZE];
-	u_long		 baudrate;
+	u_int64_t	 baudrate;
 	int		 flags;
 	int		 mtu;
 	u_short		 ifindex;
@@ -312,8 +312,7 @@ struct ctl_iface {
 	time_t			 uptime;
 	time_t			 report_timer;
 
-	u_int32_t		 baudrate;
-
+	u_int64_t		 baudrate;
 	unsigned int		 ifindex;
 	int			 state;
 	int			 mtu;
@@ -333,7 +332,7 @@ struct ctl_rt {
 	time_t			 uptime;
 	time_t			 expire;
 	u_int32_t		 metric;
-	u_int8_t		 flags;
+	u_int16_t		 flags;
 };
 
 struct ctl_nbr {

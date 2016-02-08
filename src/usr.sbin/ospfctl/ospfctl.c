@@ -1,4 +1,4 @@
-/*	$OpenBSD: ospfctl.c,v 1.37 2007/05/30 02:21:08 henning Exp $ */
+/*	$OpenBSD: ospfctl.c,v 1.41 2007/10/15 02:16:35 deraadt Exp $ */
 
 /*
  * Copyright (c) 2005 Claudio Jeker <claudio@openbsd.org>
@@ -66,7 +66,7 @@ int		 show_fib_msg(struct imsg *);
 void		 show_interface_head(void);
 const char *	 get_media_descr(int);
 const char *	 get_linkstate(int, int);
-void		 print_baudrate(u_long);
+void		 print_baudrate(u_int64_t);
 int		 show_fib_interface_msg(struct imsg *);
 
 struct imsgbuf	*ibuf;
@@ -130,6 +130,7 @@ main(int argc, char *argv[])
 		printf("%-11s %-18s %-6s %-10s %-10s %-8s %3s %3s\n",
 		    "Interface", "Address", "State", "HelloTimer", "Linkstate",
 		    "Uptime", "nc", "ac");
+		/*FALLTHROUGH*/
 	case SHOW_IFACE_DTAIL:
 		if (*res->ifname) {
 			ifidx = if_nametoindex(res->ifname);
@@ -142,6 +143,7 @@ main(int argc, char *argv[])
 	case SHOW_NBR:
 		printf("%-15s %-3s %-12s %-8s %-15s %-9s %s\n", "ID", "Pri",
 		    "State", "DeadTime", "Address", "Iface","Uptime");
+		/*FALLTHROUGH*/
 	case SHOW_NBR_DTAIL:
 		imsg_compose(ibuf, IMSG_CTL_SHOW_NBR, 0, 0, NULL, 0);
 		break;
@@ -173,6 +175,7 @@ main(int argc, char *argv[])
 	case SHOW_RIB:
 		printf("%-20s %-17s %-12s %-9s %-7s %-8s\n", "Destination",
 		    "Nexthop", "Path Type", "Type", "Cost", "Uptime");
+		/*FALLTHROUGH*/
 	case SHOW_RIB_DTAIL:
 		imsg_compose(ibuf, IMSG_CTL_SHOW_RIB, 0, 0, NULL, 0);
 		break;
@@ -295,8 +298,7 @@ show_summary_msg(struct imsg *imsg)
 	case IMSG_CTL_SHOW_SUM:
 		sum = imsg->data;
 		printf("Router ID: %s\n", inet_ntoa(sum->rtr_id));
-		printf("Uptime: %s\n", sum->uptime == 0 ? "00:00:00" :
-		    fmt_timeframe_core(sum->uptime));
+		printf("Uptime: %s\n", fmt_timeframe_core(sum->uptime));
 		printf("RFC1583 compatibility flag is ");
 		if (sum->rfc1583compat)
 			printf("enabled\n");
@@ -362,12 +364,10 @@ show_interface_msg(struct imsg *imsg)
 			err(1, NULL);
 		printf("%-11s %-18s %-6s %-10s %-10s %s %3d %3d\n",
 		    iface->name, netid, if_state_name(iface->state),
-		    iface->hello_timer < 0 ? "stopped" :
 		    fmt_timeframe_core(iface->hello_timer),
 		    get_linkstate(get_ifms_type(iface->mediatype),
-		    iface->linkstate), iface->uptime == 0 ? "00:00:00" :
-		    fmt_timeframe_core(iface->uptime), iface->nbr_cnt,
-		    iface->adj_cnt);
+		    iface->linkstate), fmt_timeframe_core(iface->uptime),
+		    iface->nbr_cnt, iface->adj_cnt);
 		free(netid);
 		break;
 	case IMSG_CTL_END:
@@ -421,8 +421,7 @@ show_interface_detail_msg(struct imsg *imsg)
 		else
 			printf("    Hello timer due in %s\n",
 			    fmt_timeframe_core(iface->hello_timer));
-		printf("    Uptime %s\n", iface->uptime == 0 ?
-		    "00:00:00" : fmt_timeframe_core(iface->uptime));
+		printf("    Uptime %s\n", fmt_timeframe_core(iface->uptime));
 		printf("  Neighbor count is %d, adjacent neighbor count is "
 		    "%d\n", iface->nbr_cnt, iface->adj_cnt);
 		if (iface->auth_type > 0) {
@@ -479,10 +478,10 @@ fmt_timeframe_core(time_t t)
 	char		*buf;
 	static char	 tfbuf[TF_BUFS][TF_LEN];	/* ring buffer */
 	static int	 idx = 0;
-	unsigned	 sec, min, hrs, day, week;
+	unsigned int	 sec, min, hrs, day, week;
 
 	if (t == 0)
-		return ("Stopped");
+		return ("00:00:00");
 
 	buf = tfbuf[idx++];
 	if (idx == TF_BUFS)
@@ -1205,16 +1204,16 @@ get_linkstate(int media_type, int link_state)
 }
 
 void
-print_baudrate(u_long baudrate)
+print_baudrate(u_int64_t baudrate)
 {
 	if (baudrate > IF_Gbps(1))
-		printf("%lu GBit/s", baudrate / IF_Gbps(1));
+		printf("%llu GBit/s", baudrate / IF_Gbps(1));
 	else if (baudrate > IF_Mbps(1))
-		printf("%lu MBit/s", baudrate / IF_Mbps(1));
+		printf("%llu MBit/s", baudrate / IF_Mbps(1));
 	else if (baudrate > IF_Kbps(1))
-		printf("%lu KBit/s", baudrate / IF_Kbps(1));
+		printf("%llu KBit/s", baudrate / IF_Kbps(1));
 	else
-		printf("%lu Bit/s", baudrate);
+		printf("%llu Bit/s", baudrate);
 }
 
 int

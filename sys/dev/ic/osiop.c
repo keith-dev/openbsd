@@ -1,4 +1,4 @@
-/*	$OpenBSD: osiop.c,v 1.29 2007/06/20 18:02:39 miod Exp $	*/
+/*	$OpenBSD: osiop.c,v 1.31 2007/11/05 00:21:36 krw Exp $	*/
 /*	$NetBSD: osiop.c,v 1.9 2002/04/05 18:27:54 bouyer Exp $	*/
 
 /*
@@ -277,13 +277,11 @@ osiop_attach(sc)
 	/*
 	 * Allocate (malloc) memory for acb's.
 	 */
-	acb = malloc(sizeof(struct osiop_acb) * OSIOP_NACB,
-	    M_DEVBUF, M_NOWAIT);
+	acb = malloc(sizeof(*acb) * OSIOP_NACB, M_DEVBUF, M_NOWAIT | M_ZERO);
 	if (acb == NULL) {
 		printf(": can't allocate memory for acb\n");
 		return;
 	}
-	bzero(acb, sizeof(struct osiop_acb) * OSIOP_NACB);
 	sc->sc_acb = acb;
 
 	sc->sc_cfflags = sc->sc_dev.dv_cfdata->cf_flags;
@@ -460,10 +458,10 @@ osiop_scsicmd(xs)
 		/* start expire timer */
 		timeout_add(&xs->stimeout, (xs->timeout/1000) * hz);
 
-	if ((xs->flags & ITSDONE) == 0)
-		return (SUCCESSFULLY_QUEUED);
-	else
+	if (xs->flags & (SCSI_POLL | ITSDONE))
 		return (COMPLETE);
+	else
+		return (SUCCESSFULLY_QUEUED);
 }
 
 void

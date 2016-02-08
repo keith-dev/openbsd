@@ -1,4 +1,4 @@
-/*	$OpenBSD: mkmakefile.c,v 1.21 2006/12/06 05:05:16 ray Exp $	*/
+/*	$OpenBSD: mkmakefile.c,v 1.27 2007/11/27 14:56:31 chl Exp $	*/
 /*	$NetBSD: mkmakefile.c,v 1.34 1997/02/02 21:12:36 thorpej Exp $	*/
 
 /*
@@ -43,6 +43,7 @@
 
 #include <sys/param.h>
 #include <ctype.h>
+#include <err.h>
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -141,6 +142,51 @@ bad:
 	return (1);
 }
 
+char *
+expandname(const char *_nam)
+{
+	char *ret = NULL, *nam, *n, *s, *e, *expand;
+	const char *var = NULL;
+
+	if ((nam = n = strdup(_nam)) == NULL)
+		errx(1, "out of memory");
+
+	while (*n) {
+		/* Search for a ${name} to expand */
+		if ((s = strchr(n, '$')) == NULL) {
+			if (ret == NULL)
+				break;
+			if (asprintf(&expand, "%s%s", ret, n) == -1)
+				errx(1, "out of memory");
+			free(ret);
+			ret = expand;
+			break;
+		}
+		*s++ = '\0';
+		if (*s != '{')
+			error("{");
+		e = strchr(++s, '}');
+		if (!e)
+			error("}");
+		*e = '\0';
+
+		if (strcmp(s, "MACHINE_ARCH") == 0)
+			var = machinearch ? machinearch : machine;
+		else if (strcmp(s, "MACHINE") == 0)
+			var = machine;
+		else
+			error("variable `%s' not supported", s);
+
+		if (asprintf(&expand, "%s%s", ret ? ret : nam, var) == -1)
+			errx(1, "out of memory");
+		free(ret);
+		ret = expand;
+		n = e + 1;
+	}
+	free(nam);
+	return (ret);
+}
+
 /*
  * Return (possibly in a static buffer) the name of the `source' for a
  * file.  If we have `options source', or if the file is marked `always
@@ -150,21 +196,45 @@ bad:
 static const char *
 srcpath(struct files *fi)
 {
-#if 1
 	/* Always have source, don't support object dirs for kernel builds. */
-	return (fi->fi_path);
-#else
-	static char buf[MAXPATHLEN];
+	struct nvlist *nv, *nv1;
+	char *expand, *source;
 
-	if (have_source || (fi->fi_flags & FI_ALWAYSSRC) != 0)
-		return (fi->fi_path);
-	if (objpath == NULL) {
-		error("obj-directory not set");
-		return (NULL);
+	/* Search path list for files we will want to use */
+	if (fi->fi_nvpath->nv_next == NULL) {
+		nv = fi->fi_nvpath;
+		goto onlyone;
 	}
-	(void)snprintf(buf, sizeof buf, "%s/%s.o", objpath, fi->fi_base);
-	return (buf);
-#endif
+
+	for (nv = fi->fi_nvpath; nv; nv = nv->nv_next) {
+		expand = expandname(nv->nv_name);
+		source = sourcepath(expand ? expand : nv->nv_name);
+		if (access(source, R_OK) == 0) {
+			/* XXX poolalloc() prevents freeing old nv_name */
+			if (expand)
+				nv->nv_name = intern(expand);
+			break;
+		}
+		free(expand);
+		free(source);
+	}
+	if (nv == NULL)
+		nv = fi->fi_nvpath;
+
+	/*
+	 * Now that we know which path is selected, delete all the
+	 * other paths to skip the access() checks next time.
+	 */
+	while ((nv1 = fi->fi_nvpath)) {
+		nv1 = nv1->nv_next;
+		if (fi->fi_nvpath != nv)
+			nvfree(fi->fi_nvpath);
+		fi->fi_nvpath = nv1;
+	}
+	fi->fi_nvpath = nv;
+	nv->nv_next = NULL;
+onlyone:
+	return (nv->nv_name);
 }
 
 static int

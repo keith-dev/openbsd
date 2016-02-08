@@ -1,4 +1,4 @@
-/*      $OpenBSD: if_malo.c,v 1.55 2007/08/14 22:33:17 mglocker Exp $ */
+/*      $OpenBSD: if_malo.c,v 1.61 2007/10/09 20:41:22 mglocker Exp $ */
 
 /*
  * Copyright (c) 2007 Marcus Glocker <mglocker@openbsd.org>
@@ -35,6 +35,7 @@
 #endif
 
 #include <net/if.h>
+#include <net/if_dl.h>
 #include <net/if_media.h>
 #include <net/if_llc.h>
 
@@ -73,6 +74,8 @@ int	malo_pcmcia_activate(struct device *, enum devact);
 
 void	cmalo_attach(void *);
 int	cmalo_ioctl(struct ifnet *, u_long, caddr_t);
+int	cmalo_fw_alloc(struct malo_softc *);
+void	cmalo_fw_free(struct malo_softc *);
 int	cmalo_fw_load_helper(struct malo_softc *);
 int	cmalo_fw_load_main(struct malo_softc *);
 int	cmalo_init(struct ifnet *);
@@ -91,6 +94,7 @@ void	cmalo_event(struct malo_softc *);
 void	cmalo_select_network(struct malo_softc *);
 void	cmalo_reflect_network(struct malo_softc *);
 int	cmalo_wep(struct malo_softc *);
+int	cmalo_rate2bitmap(int);
 
 void	cmalo_hexdump(void *, int);
 int	cmalo_cmd_get_hwspec(struct malo_softc *);
@@ -108,12 +112,13 @@ int	cmalo_cmd_set_channel(struct malo_softc *, uint16_t);
 int	cmalo_cmd_set_txpower(struct malo_softc *, int16_t);
 int	cmalo_cmd_set_antenna(struct malo_softc *, uint16_t);
 int	cmalo_cmd_set_macctrl(struct malo_softc *);
+int	cmalo_cmd_set_macaddr(struct malo_softc *, uint8_t *);
 int	cmalo_cmd_set_assoc(struct malo_softc *);
 int	cmalo_cmd_rsp_assoc(struct malo_softc *);
 int	cmalo_cmd_set_80211d(struct malo_softc *);
 int	cmalo_cmd_set_bgscan_config(struct malo_softc *);
 int	cmalo_cmd_set_bgscan_query(struct malo_softc *);
-int	cmalo_cmd_set_rate(struct malo_softc *);
+int	cmalo_cmd_set_rate(struct malo_softc *, int);
 int	cmalo_cmd_request(struct malo_softc *, uint16_t, int);
 int	cmalo_cmd_response(struct malo_softc *);
 
@@ -270,6 +275,8 @@ cmalo_attach(void *arg)
 	cmalo_intr_mask(sc, 0);
 
 	/* load firmware */
+	if (cmalo_fw_alloc(sc) != 0)
+		return;
 	if (cmalo_fw_load_helper(sc) != 0)
 		return;
 	if (cmalo_fw_load_main(sc) != 0)
@@ -312,8 +319,8 @@ cmalo_attach(void *arg)
 		ic->ic_channels[i].ic_freq =
 		    ieee80211_ieee2mhz(i, IEEE80211_CHAN_2GHZ);
 		ic->ic_channels[i].ic_flags =
-		    IEEE80211_CHAN_B |
-		    IEEE80211_CHAN_G;
+		    IEEE80211_CHAN_CCK | IEEE80211_CHAN_OFDM |
+		    IEEE80211_CHAN_DYN | IEEE80211_CHAN_2GHZ;
 	}
 
 	/* attach interface */
@@ -430,13 +437,55 @@ cmalo_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 }
 
 int
+cmalo_fw_alloc(struct malo_softc *sc)
+{
+	const char *name_h = "malo8385-h";
+	const char *name_m = "malo8385-m";
+	int error;
+
+	if (sc->sc_fw_h == NULL) {
+		/* read helper firmware image */
+		error = loadfirmware(name_h, &sc->sc_fw_h, &sc->sc_fw_h_size);
+		if (error != 0) {
+			printf("%s: error %d, could not read firmware %s\n",
+			    sc->sc_dev.dv_xname, error, name_h);
+			return (EIO);
+		}
+	}
+
+	if (sc->sc_fw_m == NULL) {
+		/* read main firmware image */
+		error = loadfirmware(name_m, &sc->sc_fw_m, &sc->sc_fw_m_size);
+		if (error != 0) {
+			printf("%s: error %d, could not read firmware %s\n",
+			    sc->sc_dev.dv_xname, error, name_m);
+			return (EIO);
+		}
+	}
+
+	return (0);
+}
+
+void
+cmalo_fw_free(struct malo_softc *sc)
+{
+	if (sc->sc_fw_h != NULL) {
+		free(sc->sc_fw_h, M_DEVBUF);
+		sc->sc_fw_h = NULL;
+	}
+
+	if (sc->sc_fw_m != NULL) {
+		free(sc->sc_fw_m, M_DEVBUF);
+		sc->sc_fw_m = NULL;
+	}
+}
+
+int
 cmalo_fw_load_helper(struct malo_softc *sc)
 {
-	const char *name = "malo8385-h";
-	size_t usize;
-	uint8_t val8, *ucode;
+	uint8_t val8;
 	uint16_t bsize, *uc;
-	int error, offset, i;
+	int offset, i;
 
 	/* verify if the card is ready for firmware download */
 	val8 = MALO_READ_1(sc, MALO_REG_SCRATCH);
@@ -450,25 +499,18 @@ cmalo_fw_load_helper(struct malo_softc *sc)
 		return (EIO);
 	}
 
-	/* read helper firmware image */
-	if ((error = loadfirmware(name, &ucode, &usize)) != 0) {
-		printf("%s: can't read microcode %s (error %d)!\n",
-		    sc->sc_dev.dv_xname, name, error);
-		return (EIO);
-	}
-
 	/* download the helper firmware */
-	for (offset = 0; offset < usize; offset += bsize) {
-		if (usize - offset >= MALO_FW_HELPER_BSIZE)
+	for (offset = 0; offset < sc->sc_fw_h_size; offset += bsize) {
+		if (sc->sc_fw_h_size - offset >= MALO_FW_HELPER_BSIZE)
 			bsize = MALO_FW_HELPER_BSIZE;
 		else
-			bsize = usize - offset;
+			bsize = sc->sc_fw_h_size - offset;
 
 		/* send a block in words and confirm it */
 		DPRINTF(3, "%s: download helper FW block (%d bytes, %d off)\n",
 		    sc->sc_dev.dv_xname, bsize, offset);
 		MALO_WRITE_2(sc, MALO_REG_CMD_WRITE_LEN, bsize);
-		uc = (uint16_t *)(ucode + offset);
+		uc = (uint16_t *)(sc->sc_fw_h + offset);
 		for (i = 0; i < bsize / 2; i++)
 			MALO_WRITE_2(sc, MALO_REG_CMD_WRITE, htole16(uc[i]));
 		MALO_WRITE_1(sc, MALO_REG_HOST_STATUS, MALO_VAL_CMD_DL_OVER);
@@ -485,11 +527,9 @@ cmalo_fw_load_helper(struct malo_softc *sc)
 		if (i == 50) {
 			printf("%s: timeout while helper FW block download!\n",
 			    sc->sc_dev.dv_xname);
-			free(ucode, M_DEVBUF);
 			return (EIO);
 		}
 	}
-	free(ucode, M_DEVBUF);
 
 	/* helper firmware download done */
 	MALO_WRITE_2(sc, MALO_REG_CMD_WRITE_LEN, 0);
@@ -503,18 +543,8 @@ cmalo_fw_load_helper(struct malo_softc *sc)
 int
 cmalo_fw_load_main(struct malo_softc *sc)
 {
-	const char *name = "malo8385-m";
-	size_t usize;
-	uint8_t *ucode;
 	uint16_t val16, bsize, *uc;
-	int error, offset, i, retry;
-
-	/* read main firmware image */
-	if ((error = loadfirmware(name, &ucode, &usize)) != 0) {
-		printf("%s: can't read microcode %s (error %d)!\n",
-		    sc->sc_dev.dv_xname, name, error);
-		return (EIO);
-	}
+	int offset, i, retry;
 
 	/* verify if the helper firmware has been loaded correctly */
 	for (i = 0; i < 10; i++) {
@@ -524,13 +554,12 @@ cmalo_fw_load_main(struct malo_softc *sc)
 	}
 	if (i == 10) {
 		printf("%s: helper FW not loaded!\n", sc->sc_dev.dv_xname);
-		free(ucode, M_DEVBUF);
 		return (EIO);
 	}
 	DPRINTF(1, "%s: helper FW loaded successfully\n", sc->sc_dev.dv_xname);
 
 	/* download the main firmware */
-	for (offset = 0; offset < usize; offset += bsize) {
+	for (offset = 0; offset < sc->sc_fw_m_size; offset += bsize) {
 		val16 = MALO_READ_2(sc, MALO_REG_RBAL);
 		/*
 		 * If the helper firmware serves us an odd integer then
@@ -541,7 +570,6 @@ cmalo_fw_load_main(struct malo_softc *sc)
 			if (retry > MALO_FW_MAIN_MAXRETRY) {
 				printf("%s: main FW download failed!\n",
 				    sc->sc_dev.dv_xname);
-				free(ucode, M_DEVBUF);
 				return (EIO);
 			}
 			retry++;
@@ -555,7 +583,7 @@ cmalo_fw_load_main(struct malo_softc *sc)
 		DPRINTF(3, "%s: download main FW block (%d bytes, %d off)\n",
 		    sc->sc_dev.dv_xname, bsize, offset);
 		MALO_WRITE_2(sc, MALO_REG_CMD_WRITE_LEN, bsize);
-		uc = (uint16_t *)(ucode + offset);
+		uc = (uint16_t *)(sc->sc_fw_m + offset);
 		for (i = 0; i < bsize / 2; i++)
 			MALO_WRITE_2(sc, MALO_REG_CMD_WRITE, htole16(uc[i]));
 		MALO_WRITE_1(sc, MALO_REG_HOST_STATUS, MALO_VAL_CMD_DL_OVER);
@@ -571,11 +599,9 @@ cmalo_fw_load_main(struct malo_softc *sc)
 		if (i == 5000) {
 			printf("%s: timeout while main FW block download!\n",
 			    sc->sc_dev.dv_xname);
-			free(ucode, M_DEVBUF);
 			return (EIO);
 		}
 	}
-	free(ucode, M_DEVBUF);
 
 	DPRINTF(1, "%s: main FW downloaded\n", sc->sc_dev.dv_xname);
 
@@ -640,13 +666,16 @@ cmalo_init(struct ifnet *ifp)
 		return (EIO);
 	if (cmalo_cmd_set_channel(sc, sc->sc_curchan) != 0)
 		return (EIO);
-	if (cmalo_cmd_set_rate(sc) != 0)
+	if (cmalo_cmd_set_rate(sc, ic->ic_fixed_rate) != 0)
 		return (EIO);
 	if (cmalo_cmd_set_snmp(sc, MALO_OID_RTSTRESH) != 0)
 		return (EIO);
 	if (cmalo_cmd_set_snmp(sc, MALO_OID_SHORTRETRY) != 0)
 		return (EIO);
 	if (cmalo_cmd_set_snmp(sc, MALO_OID_FRAGTRESH) != 0)
+		return (EIO);
+	IEEE80211_ADDR_COPY(ic->ic_myaddr, LLADDR(ifp->if_sadl));
+	if (cmalo_cmd_set_macaddr(sc, ic->ic_myaddr) != 0)
 		return (EIO);
 	if (sc->sc_ic.ic_flags & IEEE80211_F_WEPON) {
 		if (cmalo_wep(sc) != 0)
@@ -773,6 +802,9 @@ cmalo_detach(void *arg)
 	/* free data buffer */
 	if (sc->sc_data != NULL)
 		free(sc->sc_data, M_DEVBUF);
+
+	/* free firmware */
+	cmalo_fw_free(sc);
 
 	/* detach inferface */
 	ieee80211_ifdetach(ifp);
@@ -1117,6 +1149,31 @@ cmalo_wep(struct malo_softc *sc)
 	return (0);
 }
 
+int
+cmalo_rate2bitmap(int rate)
+{
+	switch (rate) {
+	/* CCK rates */
+	case  0:	return (MALO_RATE_BITMAP_DS1);
+	case  1:	return (MALO_RATE_BITMAP_DS2);
+	case  2:	return (MALO_RATE_BITMAP_DS5);
+	case  3:	return (MALO_RATE_BITMAP_DS11);
+
+	/* OFDM rates */
+	case  4:	return (MALO_RATE_BITMAP_OFDM6);
+	case  5:	return (MALO_RATE_BITMAP_OFDM9);
+	case  6:	return (MALO_RATE_BITMAP_OFDM12);
+	case  7:	return (MALO_RATE_BITMAP_OFDM18);
+	case  8:	return (MALO_RATE_BITMAP_OFDM24);
+	case  9:	return (MALO_RATE_BITMAP_OFDM36);
+	case 10:	return (MALO_RATE_BITMAP_OFDM48);
+	case 11:	return (MALO_RATE_BITMAP_OFDM54);
+
+	/* unknown rate: should not happen */
+	default:	return (0);
+	}
+}
+
 void
 cmalo_hexdump(void *buf, int len)
 {
@@ -1199,6 +1256,9 @@ cmalo_cmd_set_reset(struct malo_softc *sc)
 	/* process command request */
 	if (cmalo_cmd_request(sc, psize, 1) != 0)
 		return (EIO);
+
+	/* give the device some time to finish the reset */
+	delay(100);
 
 	return (0);
 }
@@ -1659,6 +1719,35 @@ cmalo_cmd_set_macctrl(struct malo_softc *sc)
 }
 
 int
+cmalo_cmd_set_macaddr(struct malo_softc *sc, uint8_t *macaddr)
+{
+	struct malo_cmd_header *hdr = sc->sc_cmd;
+	struct malo_cmd_body_macaddr *body;
+	uint16_t psize;
+
+	bzero(sc->sc_cmd, MALO_CMD_BUFFER_SIZE);
+	psize = sizeof(*hdr) + sizeof(*body);
+
+	hdr->cmd = htole16(MALO_CMD_MACADDR);
+	hdr->size = htole16(sizeof(*body));
+	hdr->seqnum = htole16(1);
+	hdr->result = 0;
+	body = (struct malo_cmd_body_macaddr *)(hdr + 1);
+
+	body->action = htole16(1);
+	bcopy(macaddr, body->macaddr, ETHER_ADDR_LEN);
+
+	/* process command request */
+	if (cmalo_cmd_request(sc, psize, 0) != 0)
+		return (EIO);
+
+	/* process command repsonse */
+	cmalo_cmd_response(sc);
+
+	return (0);
+}
+
+int
 cmalo_cmd_set_assoc(struct malo_softc *sc)
 {
 	struct malo_cmd_header *hdr = sc->sc_cmd;
@@ -1856,7 +1945,7 @@ cmalo_cmd_set_bgscan_query(struct malo_softc *sc)
 }
 
 int
-cmalo_cmd_set_rate(struct malo_softc *sc)
+cmalo_cmd_set_rate(struct malo_softc *sc, int rate)
 {
 	struct malo_cmd_header *hdr = sc->sc_cmd;
 	struct malo_cmd_body_rate *body;
@@ -1872,8 +1961,13 @@ cmalo_cmd_set_rate(struct malo_softc *sc)
 	body = (struct malo_cmd_body_rate *)(hdr + 1);
 
 	body->action = htole16(1);
-	body->hwauto = htole16(1);
-	body->ratebitmap = htole16(0x1fff);
+	if (rate == -1) {
+ 		body->hwauto = htole16(1);
+		body->ratebitmap = htole16(MALO_RATE_BITMAP_AUTO);
+	} else {
+ 		body->hwauto = 0;
+		body->ratebitmap = htole16(cmalo_rate2bitmap(rate));
+	}
 
 	/* process command request */
 	if (cmalo_cmd_request(sc, psize, 0) != 0)
@@ -2019,6 +2113,11 @@ cmalo_cmd_response(struct malo_softc *sc)
 	case MALO_CMD_MACCTRL:
 		/* do nothing */
 		DPRINTF(1, "%s: got macctrl cmd response\n",
+		    sc->sc_dev.dv_xname);
+		break;
+	case MALO_CMD_MACADDR:
+		/* do nothing */
+		DPRINTF(1, "%s: got macaddr cmd response\n",
 		    sc->sc_dev.dv_xname);
 		break;
 	case MALO_CMD_ASSOC:

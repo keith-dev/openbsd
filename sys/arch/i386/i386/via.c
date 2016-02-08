@@ -1,4 +1,4 @@
-/*	$OpenBSD: via.c,v 1.12 2007/08/14 20:10:05 henric Exp $	*/
+/*	$OpenBSD: via.c,v 1.18 2007/12/09 21:30:24 hshoexer Exp $	*/
 /*	$NetBSD: machdep.c,v 1.214 1996/11/10 03:16:17 thorpej Exp $	*/
 
 /*-
@@ -89,8 +89,8 @@ struct viac3_softc {
 static struct viac3_softc *vc3_sc;
 extern int i386_has_xcrypt;
 
-extern u_int8_t hmac_ipad_buffer[64];
-extern u_int8_t hmac_opad_buffer[64];
+extern const u_int8_t hmac_ipad_buffer[64];
+extern const u_int8_t hmac_opad_buffer[64];
 
 void viac3_crypto_setup(void);
 int viac3_crypto_newsession(u_int32_t *, struct cryptoini *);
@@ -107,9 +107,9 @@ viac3_crypto_setup(void)
 {
 	int algs[CRYPTO_ALGORITHM_MAX + 1];
 
-	if ((vc3_sc = malloc(sizeof(*vc3_sc), M_DEVBUF, M_NOWAIT)) == NULL)
+	if ((vc3_sc = malloc(sizeof(*vc3_sc), M_DEVBUF,
+	    M_NOWAIT|M_ZERO)) == NULL)
 		return;		/* YYY bitch? */
-	bzero(vc3_sc, sizeof(*vc3_sc));
 
 	bzero(algs, sizeof(algs));
 	algs[CRYPTO_AES_CBC] = CRYPTO_ALG_FLAG_SUPPORTED;
@@ -194,7 +194,7 @@ viac3_crypto_newsession(u_int32_t *sidp, struct cryptoini *cri)
 			cw0 |= C3_CRYPT_CWLO_ALG_AES | C3_CRYPT_CWLO_KEYGEN_SW |
 			    C3_CRYPT_CWLO_NORMAL;
 
-			get_random_bytes(ses->ses_iv, sizeof(ses->ses_iv));
+			arc4random_bytes(ses->ses_iv, sizeof(ses->ses_iv));
 			ses->ses_klen = c->cri_klen;
 			ses->ses_cw0 = cw0;
 
@@ -228,14 +228,12 @@ viac3_crypto_newsession(u_int32_t *sidp, struct cryptoini *cri)
 		case CRYPTO_SHA2_512_HMAC:
 			axf = &auth_hash_hmac_sha2_512_96;
 		authcommon:
-			MALLOC(swd, struct swcr_data *,
-			    sizeof(struct swcr_data), M_CRYPTO_DATA,
-			    M_NOWAIT);
+			swd = malloc(sizeof(struct swcr_data), M_CRYPTO_DATA,
+			    M_NOWAIT|M_ZERO);
 			if (swd == NULL) {
 				viac3_crypto_freesession(sesn);
 				return (ENOMEM);
 			}
-			bzero(swd, sizeof(struct swcr_data));
 			ses->swd = swd;
 
 			swd->sw_ictx = malloc(axf->ctxsize, M_CRYPTO_DATA,
@@ -313,7 +311,7 @@ viac3_crypto_freesession(u_int64_t tid)
 			bzero(swd->sw_octx, axf->ctxsize);
 			free(swd->sw_octx, M_CRYPTO_DATA);
 		}
-		FREE(swd, M_CRYPTO_DATA);
+		free(swd, M_CRYPTO_DATA);
 	}
 
 	bzero(&sc->sc_sessions[sesn], sizeof(sc->sc_sessions[sesn]));
@@ -473,6 +471,10 @@ viac3_crypto_process(struct cryptop *crp)
 		goto out;
 	}
 	ses = &sc->sc_sessions[sesn];
+	if (ses->ses_used == 0) {
+		err = EINVAL;
+		goto out;
+	}
 
 	for (crd = crp->crp_desc; crd; crd = crd->crd_next) {
 		switch (crd->crd_alg) {
@@ -506,7 +508,6 @@ out:
 
 #endif /* CRYPTO */
 
-#if defined(I686_CPU)
 /*
  * Note, the VIA C3 Nehemiah provides 4 internal 8-byte buffers, which
  * store random data, and can be accessed a lot quicker than waiting
@@ -565,5 +566,3 @@ viac3_rnd(void *v)
 
 	timeout_add(tmo, (hz > 100) ? (hz / 100) : 1);
 }
-
-#endif /* defined(I686_CPU) */

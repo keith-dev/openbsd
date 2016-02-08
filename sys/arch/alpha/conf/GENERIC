@@ -1,4 +1,4 @@
-#	$OpenBSD: GENERIC,v 1.194 2007/06/22 10:55:28 martin Exp $
+#	$OpenBSD: GENERIC,v 1.198 2008/02/24 21:49:36 uwe Exp $
 #
 # For further information on compiling OpenBSD kernels, see the config(8)
 # man page.
@@ -45,6 +45,7 @@ option	WSDISPLAY_COMPAT_PCVT		# emulate some ioctls; needed for X11
 
 option		APERTURE		# in-kernel aperture driver for XFree86
 option		USER_PCICONF		# user-space PCI configuration
+#option		NTFS			# Experimental NTFS support
 
 config		bsd	swap generic
 
@@ -84,6 +85,8 @@ uark*	at uhub?			# Arkmicro ARK3116 serial
 ucom*	at uark?
 uipaq*	at uhub?			# iPAQ serial adapter
 ucom*	at uipaq?
+uchcom*	at uhub?			# WinChipHead CH341/340 serial
+ucom*	at uchcom?
 uaudio* at uhub?			# USB Audio
 audio*	at uaudio?
 umidi*	at uhub?			# USB MIDI
@@ -129,6 +132,13 @@ onewire* at uow?
 
 # Bluetooth bus support
 #bthub*	at ubt?
+
+# Bluetooth HID support
+#bthidev* at bthub?
+#btkbd*	at bthidev?
+#btms*	at bthidev?
+#wskbd*	at btkbd? mux 1
+#wsmouse* at btms? mux 0
 
 # EV6 Tsunami Core Logic
 tsc*	at	mainbus0
@@ -304,6 +314,7 @@ lmenv*	at iic?				# National Semiconductor LM87
 lmtemp*	at iic?				# NS LM75/LM77 temperature sensor
 maxds*	at iic?				# Maxim DS1631
 maxtmp*	at iic?				# Maxim MAX6642/MAX6690
+spdmem* at iic?				# SPD memory eeproms
 
 # ISA/EISA bus support
 isa*	at	pceb?

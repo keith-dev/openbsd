@@ -1,4 +1,4 @@
-/*	$OpenBSD: rde_lsdb.c,v 1.38 2007/04/10 13:26:39 claudio Exp $ */
+/*	$OpenBSD: rde_lsdb.c,v 1.40 2008/02/11 12:37:37 norby Exp $ */
 
 /*
  * Copyright (c) 2004, 2005 Claudio Jeker <claudio@openbsd.org>
@@ -601,7 +601,7 @@ lsa_timeout(int fd, short event, void *bula)
 				tv.tv_sec = MAX_AGE - ntohs(v->lsa->hdr.age);
 
 			if (evtimer_add(&v->ev, &tv) != 0)
-				fatal("lsa_add");
+				fatal("lsa_timeout");
 		}
 		return;
 	}
@@ -677,7 +677,7 @@ lsa_merge(struct rde_nbr *nbr, struct lsa *lsa, struct vertex *v)
 	free(v->lsa);
 	v->lsa = lsa;
 	start_spf_timer();
-	if (lsa->hdr.type != LSA_TYPE_EXTERNAL)
+	if (v->type != LSA_TYPE_EXTERNAL)
 		nbr->area->dirty = 1;
 
 	/* set correct timeout for reflooding the LSA */
@@ -699,8 +699,8 @@ lsa_remove_invalid_sums(struct area *area)
 	/* XXX speed me up */
 	for (v = RB_MIN(lsa_tree, tree); v != NULL; v = nv) {
 		nv = RB_NEXT(lsa_tree, tree, v);
-		if ((v->lsa->hdr.type == LSA_TYPE_SUM_NETWORK ||
-		    v->lsa->hdr.type == LSA_TYPE_SUM_ROUTER) &&
+		if ((v->type == LSA_TYPE_SUM_NETWORK ||
+		    v->type == LSA_TYPE_SUM_ROUTER) &&
 		    v->self && v->cost == LS_INFINITY &&
 		    v->deleted == 0) {
 			/*

@@ -1,4 +1,4 @@
-/*	$OpenBSD: rlog.c,v 1.58 2007/06/30 08:23:49 xsa Exp $	*/
+/*	$OpenBSD: rlog.c,v 1.61 2008/02/02 19:26:24 xsa Exp $	*/
 /*
  * Copyright (c) 2005 Joris Vink <joris@openbsd.org>
  * Copyright (c) 2005, 2006 Xavier Santolaria <xsa@openbsd.org>
@@ -53,7 +53,7 @@ void
 rlog_usage(void)
 {
 	fprintf(stderr,
-	    "usage: rlog [-bhLNqRtV] [-ddates] [-l[lockers]] [-r[revs]]\n"
+	    "usage: rlog [-bhLNRtV] [-ddates] [-l[lockers]] [-r[revs]]\n"
 	    "            [-sstates] [-w[logins]] [-xsuffixes]\n"
 	    "            [-ztz] file ...\n");
 }
@@ -63,11 +63,11 @@ rlog_main(int argc, char **argv)
 {
 	RCSFILE *file;
 	int Rflag;
-	int i, ch, fd;
+	int i, ch, fd, status;
 	char fpath[MAXPATHLEN];
 
 	rcsnum_flags |= RCSNUM_NO_MAGIC;
-	hflag = Rflag = rflag = 0;
+	hflag = Rflag = rflag = status = 0;
 	while ((ch = rcs_getopt(argc, argv, RLOG_OPTSTRING)) != -1) {
 		switch (ch) {
 		case 'h':
@@ -144,12 +144,15 @@ rlog_main(int argc, char **argv)
 		fd = rcs_choosefile(argv[i], fpath, sizeof(fpath));
 		if (fd < 0) {
 			warn("%s", fpath);
+			status = 1;
 			continue;
 		}
 
 		if ((file = rcs_open(fpath, fd,
-		    RCS_READ|RCS_PARSE_FULLY)) == NULL)
+		    RCS_READ|RCS_PARSE_FULLY)) == NULL) {
+			status = 1;
 			continue;
+		}
 
 		if (Lflag == 1 && TAILQ_EMPTY(&(file->rf_locks))) {
 			rcs_close(file);
@@ -167,7 +170,7 @@ rlog_main(int argc, char **argv)
 		rcs_close(file);
 	}
 
-	return (0);
+	return (status);
 }
 
 static void
@@ -259,6 +262,8 @@ rlog_rev_print(struct rcs_delta *rdp)
 	struct tm t;
 	char *author, numb[RCS_REV_BUFSZ], *fmt, timeb[RCS_TIME_BUFSZ];
 	struct rcs_argvector *largv, *sargv, *wargv;
+	struct rcs_branch *rb;
+	struct rcs_delta *nrdp;
 
 	i = found = 0;
 	author = NULL;
@@ -344,10 +349,47 @@ rlog_rev_print(struct rcs_delta *rdp)
 		fmt = "%Y/%m/%d %H:%M:%S";
 	}
 
-	strftime(timeb, sizeof(timeb), fmt, &t);
+	(void)strftime(timeb, sizeof(timeb), fmt, &t);
 
-	printf("\ndate: %s;  author: %s;  state: %s;\n", timeb, rdp->rd_author,
+	printf("\ndate: %s;  author: %s;  state: %s;", timeb, rdp->rd_author,
 	    rdp->rd_state);
+
+	/*
+	 * If we are a branch revision, the diff of this revision is stored
+	 * in place.
+	 * Otherwise, it is stored in the previous revision as a reversed diff.
+	 */
+	if (RCSNUM_ISBRANCHREV(rdp->rd_num))
+		nrdp = rdp;
+	else
+		nrdp = TAILQ_NEXT(rdp, rd_list);
+ 	 
+	/*
+	 * We do not write diff stats for the first revision of the default
+	 * branch, since it was not a diff but a full text.
+	 */
+	if (nrdp != NULL && rdp->rd_num->rn_len == nrdp->rd_num->rn_len) {
+		int added, removed;
+
+		rcs_delta_stats(nrdp, &added, &removed);
+		if (RCSNUM_ISBRANCHREV(rdp->rd_num))
+			printf("  lines: +%d -%d", added, removed);
+		else
+			printf("  lines: +%d -%d", removed, added);
+	}
+	printf("\n");
+ 
+	if (!TAILQ_EMPTY(&(rdp->rd_branches))) {
+		printf("branches:");
+		TAILQ_FOREACH(rb, &(rdp->rd_branches), rb_list) {
+			RCSNUM *branch;
+			branch = rcsnum_revtobr(rb->rb_num);
+			(void)rcsnum_tostr(branch, numb, sizeof(numb));
+			printf("  %s;", numb);
+			rcsnum_free(branch);
+		}
+		printf("\n");
+	}
 
 	printf("%s", rdp->rd_log);
 }

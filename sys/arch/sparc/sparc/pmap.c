@@ -1,4 +1,4 @@
-/*	$OpenBSD: pmap.c,v 1.145 2007/06/06 17:15:12 deraadt Exp $	*/
+/*	$OpenBSD: pmap.c,v 1.147 2007/11/28 16:33:20 martin Exp $	*/
 /*	$NetBSD: pmap.c,v 1.118 1998/05/19 19:00:18 thorpej Exp $ */
 
 /*
@@ -818,7 +818,7 @@ pmap_page_upload(first_pa)
 	 */
 	physmem = 0;
 	for (n = 0; n < npmemarr; n++)
-		physmem += btoc(pmemarr[n].len);
+		physmem += atop(pmemarr[n].len);
 
 	for (n = 0; n < npmemarr; n++) {
 		start = (first_pa > pmemarr[n].addr) ? first_pa :
@@ -6151,6 +6151,25 @@ pmap_prefer(foff, vap)
 }
 
 void
+pmap_remove_holes(struct vm_map *map)
+{
+#if defined(SUN4) || defined(SUN4C)
+	if (mmu_has_hole) {
+		vaddr_t shole, ehole;
+
+		shole = max(vm_map_min(map), (vaddr_t)MMU_HOLE_START);
+		ehole = min(vm_map_max(map), (vaddr_t)MMU_HOLE_END);
+
+		if (ehole <= shole)
+			return;
+
+		uvm_map_reserve(map, ehole - shole, UVM_UNKNOWN_OFFSET,
+		    0, &shole);
+	}
+#endif
+}
+
+void
 pmap_redzone()
 {
 #if defined(SUN4M)
@@ -6375,7 +6394,7 @@ pmap_dumpsize()
 	if (CPU_ISSUN4OR4C)
 		sz += (seginval + 1) * NPTESG * sizeof(int);
 
-	return (btoc(sz));
+	return (atop(sz));
 }
 
 /*
@@ -6425,7 +6444,7 @@ pmap_dumpmmu(dump, blkno)
 	/* Fill in MI segment header */
 	ksegp = (kcore_seg_t *)bp;
 	CORE_SETMAGIC(*ksegp, KCORE_MAGIC, MID_MACHINE, CORE_CPU);
-	ksegp->c_size = ctob(pmap_dumpsize()) - ALIGN(sizeof(kcore_seg_t));
+	ksegp->c_size = ptoa(pmap_dumpsize()) - ALIGN(sizeof(kcore_seg_t));
 
 	/* Fill in MD segment header (interpreted by MD part of libkvm) */
 	kcpup = (cpu_kcore_hdr_t *)((int)bp + ALIGN(sizeof(kcore_seg_t)));

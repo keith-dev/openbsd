@@ -1,4 +1,4 @@
-/*	$OpenBSD: isp_sbus.c,v 1.8 2006/06/02 20:00:56 miod Exp $	*/
+/*	$OpenBSD: isp_sbus.c,v 1.11 2008/01/21 20:00:33 sobrado Exp $	*/
 /* $NetBSD: isp_sbus.c,v 1.46 2001/09/26 20:53:14 eeh Exp $ */
 
 /*
@@ -30,7 +30,7 @@
  * Please coordinate with Matthew Jacob on changes you wish to make here.
  */
 /*
- * SBus specific probe and attach routines for Qlogic ISP SCSI adapters.
+ * SBus specific probe and attach routines for QLogic ISP SCSI adapters.
  *
  * Copyright (c) 1997, 2001 by Matthew Jacob
  * NASA AMES Research Center
@@ -142,7 +142,7 @@ isp_match(struct device *parent, void *vcf, void *aux)
 #ifdef DEBUG
 	if (rv && oneshot) {
 		oneshot = 0;
-		printf("Qlogic ISP Driver, NetBSD (sbus) Platform Version "
+		printf("QLogic ISP Driver, NetBSD (sbus) Platform Version "
 		    "%d.%d Core Version %d.%d\n",
 		    ISP_PLATFORM_VERSION_MAJOR, ISP_PLATFORM_VERSION_MINOR,
 		    ISP_CORE_VERSION_MAJOR, ISP_CORE_VERSION_MINOR);
@@ -380,12 +380,12 @@ isp_sbus_mbxdma(struct ispsoftc *isp)
 		return (0);
 
 	n = isp->isp_maxcmds * sizeof (XS_T *);
-	isp->isp_xflist = (XS_T **) malloc(n, M_DEVBUF, M_WAITOK);
+	isp->isp_xflist = (XS_T **) malloc(n, M_DEVBUF, M_WAITOK | M_ZERO);
 	if (isp->isp_xflist == NULL) {
 		isp_prt(isp, ISP_LOGERR, "cannot alloc xflist array");
 		return (1);
 	}
-	MEMZERO(isp->isp_xflist, n);
+
 	n = sizeof (bus_dmamap_t) * isp->isp_maxcmds;
 	sbc->sbus_dmamap = (bus_dmamap_t *) malloc(n, M_DEVBUF, M_WAITOK);
 	if (sbc->sbus_dmamap == NULL) {

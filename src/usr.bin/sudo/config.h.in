@@ -81,6 +81,9 @@
 /* Define to 1 if your `DIR' contains dd_fd. */
 #undef HAVE_DD_FD
 
+/* Define to 1 if you have the `dgettext' function. */
+#undef HAVE_DGETTEXT
+
 /* Define to 1 if you have the <dirent.h> header file, and it defines `DIR'.
    */
 #undef HAVE_DIRENT_H
@@ -171,6 +174,9 @@
 /* Define to 1 if your Kerberos is Heimdal. */
 #undef HAVE_HEIMDAL
 
+/* Define to 1 if <netinet/in.h> contains struct in6_addr. */
+#undef HAVE_IN6_ADDR
+
 /* Define to 1 if you have the `initgroups' function. */
 #undef HAVE_INITGROUPS
 
@@ -215,8 +221,17 @@
 /* Define to 1 if you have the `ldap_initialize' function. */
 #undef HAVE_LDAP_INITIALIZE
 
+/* Define to 1 if you have the <ldap_ssl.h> header file. */
+#undef HAVE_LDAP_SSL_H
+
 /* Define to 1 if you have the `ldap_start_tls_s' function. */
 #undef HAVE_LDAP_START_TLS_S
+
+/* Define to 1 if you have the `ldapssl_init' function. */
+#undef HAVE_LDAPSSL_INIT
+
+/* Define to 1 if you have the `ldapssl_set_strength' function. */
+#undef HAVE_LDAPSSL_SET_STRENGTH
 
 /* Define to 1 if you have the `lockf' function. */
 #undef HAVE_LOCKF
@@ -253,6 +268,9 @@
 
 /* Define to 1 if you have the `mkstemp' function. */
 #undef HAVE_MKSTEMP
+
+/* Define to 1 if you have the <mps/ldap_ssl.h> header file. */
+#undef HAVE_MPS_LDAP_SSL_H
 
 /* Define to 1 if you have the <ndir.h> header file, and it defines `DIR'. */
 #undef HAVE_NDIR_H
@@ -364,6 +382,9 @@
 
 /* Define to 1 if your struct stat has an st_mtim member */
 #undef HAVE_ST_MTIM
+
+/* Define to 1 if your struct stat uses an st__tim union */
+#undef HAVE_ST__TIM
 
 /* Define to 1 if your struct stat has an st_mtimespec member */
 #undef HAVE_ST_MTIMESPEC
@@ -482,6 +503,9 @@
 /* Define to 1 if you don't want users to get the lecture the first they user
    sudo. */
 #undef NO_LECTURE
+
+/* Define to 1 if you don't want to use sudo's PAM session support. */
+#undef NO_PAM_SESSION
 
 /* Define to avoid runing the mailer as root. */
 #undef NO_ROOT_MAILER
@@ -609,6 +633,10 @@
 /* Define to `int' if <sys/types.h> doesn't define. */
 #undef uid_t
 
+/* Define to the type of elements in the array set by `getgroups'.
+   Usually this is either `int' or `gid_t'. */
+#undef GETGROUPS_T
+
 /* Define to empty if the keyword `volatile' does not work. Warning: valid
    code using `volatile' can become incorrect without. Disable with care. */
 #undef volatile
@@ -619,8 +647,13 @@
  * so the last 3 digits of tv_nsec are not significant.
  */
 #ifdef HAVE_ST_MTIM
-# define mtim_getsec(_x)	((_x).st_mtim.tv_sec)
-# define mtim_getnsec(_x)	(((_x).st_mtim.tv_nsec / 1000) * 1000)
+# ifdef HAVE_ST__TIM
+#  define mtim_getsec(_x)	((_x).st_mtim.st__tim.tv_sec)
+#  define mtim_getnsec(_x)	(((_x).st_mtim.st__tim.tv_nsec / 1000) * 1000)
+# else
+#  define mtim_getsec(_x)	((_x).st_mtim.tv_sec)
+#  define mtim_getnsec(_x)	(((_x).st_mtim.tv_nsec / 1000) * 1000)
+# endif
 #else
 # ifdef HAVE_ST_MTIMESPEC
 #  define mtim_getsec(_x)	((_x).st_mtimespec.tv_sec)

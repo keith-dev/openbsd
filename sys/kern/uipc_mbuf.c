@@ -1,4 +1,4 @@
-/*	$OpenBSD: uipc_mbuf.c,v 1.85 2007/07/20 09:59:19 claudio Exp $	*/
+/*	$OpenBSD: uipc_mbuf.c,v 1.88 2008/01/16 19:28:23 thib Exp $	*/
 /*	$NetBSD: uipc_mbuf.c,v 1.15.4.1 1996/06/13 17:11:44 cgd Exp $	*/
 
 /*
@@ -162,7 +162,7 @@ m_get(int nowait, int type)
 	int s;
 
 	s = splvm();
-	m = pool_get(&mbpool, nowait == M_WAIT ? PR_WAITOK|PR_LIMITFAIL : 0);
+	m = pool_get(&mbpool, nowait == M_WAIT ? PR_WAITOK : 0);
 	if (m) {
 		m->m_type = type;
 		mbstat.m_mtypes[type]++;
@@ -182,10 +182,12 @@ m_gethdr(int nowait, int type)
 	int s;
 
 	s = splvm();
-	m = pool_get(&mbpool, nowait == M_WAIT ? PR_WAITOK|PR_LIMITFAIL : 0);
+	m = pool_get(&mbpool, nowait == M_WAIT ? PR_WAITOK : 0);
 	if (m) {
 		m->m_type = type;
 		mbstat.m_mtypes[type]++;
+
+		/* keep in sync with m_inithdr */
 		m->m_next = (struct mbuf *)NULL;
 		m->m_nextpkt = (struct mbuf *)NULL;
 		m->m_data = m->m_pktdat;
@@ -201,6 +203,27 @@ m_gethdr(int nowait, int type)
 		m->m_pkthdr.pf.routed = 0;
 	}
 	splx(s);
+	return (m);
+}
+
+struct mbuf *
+m_inithdr(struct mbuf *m)
+{
+	/* keep in sync with m_gethdr */
+	m->m_next = (struct mbuf *)NULL;
+	m->m_nextpkt = (struct mbuf *)NULL;
+	m->m_data = m->m_pktdat;
+	m->m_flags = M_PKTHDR;
+	m->m_pkthdr.rcvif = NULL;
+	SLIST_INIT(&m->m_pkthdr.tags);
+	m->m_pkthdr.csum_flags = 0;
+	m->m_pkthdr.pf.hdr = NULL;
+	m->m_pkthdr.pf.rtableid = 0;
+	m->m_pkthdr.pf.qid = 0;
+	m->m_pkthdr.pf.tag = 0;
+	m->m_pkthdr.pf.flags = 0;
+	m->m_pkthdr.pf.routed = 0;
+
 	return (m);
 }
 
@@ -223,7 +246,7 @@ m_clget(struct mbuf *m, int how)
 
 	s = splvm();
 	m->m_ext.ext_buf =
-	    pool_get(&mclpool, how == M_WAIT ? (PR_WAITOK|PR_LIMITFAIL) : 0);
+	    pool_get(&mclpool, how == M_WAIT ? PR_WAITOK : 0);
 	splx(s);
 	if (m->m_ext.ext_buf != NULL) {
 		m->m_data = m->m_ext.ext_buf;
@@ -1013,4 +1036,24 @@ m_apply(struct mbuf *m, int off, int len,
 	}
 
 	return (0);
+}
+
+int
+m_leadingspace(struct mbuf *m)
+{
+	if (M_READONLY((m)))
+		return 0;
+	return ((m)->m_flags & M_EXT ? (m)->m_data - (m)->m_ext.ext_buf :
+	    (m)->m_flags & M_PKTHDR ? (m)->m_data - (m)->m_pktdat :
+	    (m)->m_data - (m)->m_dat);
+}
+
+int
+m_trailingspace(struct mbuf *m)
+{
+	if (M_READONLY(m))
+		return 0;
+	return ((m)->m_flags & M_EXT ? (m)->m_ext.ext_buf +
+	    (m)->m_ext.ext_size - ((m)->m_data + (m)->m_len) :
+	    &(m)->m_dat[MLEN] - ((m)->m_data + (m)->m_len));
 }

@@ -1,4 +1,4 @@
-/*	$OpenBSD: ffs_softdep.c,v 1.92 2007/07/11 15:32:22 millert Exp $	*/
+/*	$OpenBSD: ffs_softdep.c,v 1.94 2008/01/05 19:49:26 otto Exp $	*/
 
 /*
  * Copyright 1998, 2000 Marshall Kirk McKusick. All Rights Reserved.
@@ -139,7 +139,7 @@ STATIC	struct dirrem *newdirrem(struct buf *, struct inode *,
 STATIC	void free_diradd(struct diradd *);
 STATIC	void free_allocindir(struct allocindir *, struct inodedep *);
 STATIC	void free_newdirblk(struct newdirblk *);
-STATIC	int indir_trunc(struct inode *, daddr_t, int, daddr64_t, long *);
+STATIC	int indir_trunc(struct inode *, daddr64_t, int, daddr64_t, long *);
 STATIC	void deallocate_dependencies(struct buf *, struct inodedep *);
 STATIC	void free_allocdirect(struct allocdirectlst *,
 	    struct allocdirect *, int);
@@ -149,14 +149,14 @@ STATIC	void handle_workitem_freeblocks(struct freeblks *);
 STATIC	void merge_inode_lists(struct inodedep *);
 STATIC	void setup_allocindir_phase2(struct buf *, struct inode *,
 	    struct allocindir *);
-STATIC	struct allocindir *newallocindir(struct inode *, int, daddr_t,
-	    daddr_t);
+STATIC	struct allocindir *newallocindir(struct inode *, int, daddr64_t,
+	    daddr64_t);
 STATIC	void handle_workitem_freefrag(struct freefrag *);
-STATIC	struct freefrag *newfreefrag(struct inode *, daddr_t, long);
+STATIC	struct freefrag *newfreefrag(struct inode *, daddr64_t, long);
 STATIC	void allocdirect_merge(struct allocdirectlst *,
 	    struct allocdirect *, struct allocdirect *);
 STATIC	struct bmsafemap *bmsafemap_lookup(struct buf *);
-STATIC	int newblk_lookup(struct fs *, daddr_t, int,
+STATIC	int newblk_lookup(struct fs *, daddr64_t, int,
 	    struct newblk **);
 STATIC	int inodedep_lookup(struct fs *, ino_t, int, struct inodedep **);
 STATIC	int pagedep_lookup(struct inode *, daddr64_t, int, struct pagedep **);
@@ -1142,7 +1142,7 @@ STATIC struct sema newblk_in_progress;
 STATIC int
 newblk_lookup(fs, newblkno, flags, newblkpp)
 	struct fs *fs;
-	daddr_t newblkno;
+	daddr64_t newblkno;
 	int flags;
 	struct newblk **newblkpp;
 {
@@ -1352,7 +1352,7 @@ void
 softdep_setup_blkmapdep(bp, fs, newblkno)
 	struct buf *bp;		/* buffer for cylgroup block with block map */
 	struct fs *fs;		/* filesystem doing allocation */
-	daddr_t newblkno;	/* number of newly allocated block */
+	daddr64_t newblkno;	/* number of newly allocated block */
 {
 	struct newblk *newblk;
 	struct bmsafemap *bmsafemap;
@@ -1439,8 +1439,8 @@ void
 softdep_setup_allocdirect(ip, lbn, newblkno, oldblkno, newsize, oldsize, bp)
 	struct inode *ip;	/* inode to which block is being added */
 	daddr64_t lbn;		/* block pointer within inode */
-	daddr_t newblkno;	/* disk block number being added */
-	daddr_t oldblkno;	/* previous block number, 0 unless frag */
+	daddr64_t newblkno;	/* disk block number being added */
+	daddr64_t oldblkno;	/* previous block number, 0 unless frag */
 	long newsize;		/* size of new block */
 	long oldsize;		/* size of new block */
 	struct buf *bp;		/* bp for allocated block */
@@ -1619,7 +1619,7 @@ allocdirect_merge(adphead, newadp, oldadp)
 STATIC struct freefrag *
 newfreefrag(ip, blkno, size)
 	struct inode *ip;
-	daddr_t blkno;
+	daddr64_t blkno;
 	long size;
 {
 	struct freefrag *freefrag;
@@ -1695,8 +1695,8 @@ STATIC struct allocindir *
 newallocindir(ip, ptrno, newblkno, oldblkno)
 	struct inode *ip;	/* inode for file being extended */
 	int ptrno;		/* offset of pointer in indirect block */
-	daddr_t newblkno;	/* disk block number being added */
-	daddr_t oldblkno;	/* previous block number, 0 if none */
+	daddr64_t newblkno;	/* disk block number being added */
+	daddr64_t oldblkno;	/* previous block number, 0 if none */
 {
 	struct allocindir *aip;
 
@@ -1721,8 +1721,8 @@ softdep_setup_allocindir_page(ip, lbn, bp, ptrno, newblkno, oldblkno, nbp)
 	daddr64_t lbn;		/* allocated block number within file */
 	struct buf *bp;		/* buffer with indirect blk referencing page */
 	int ptrno;		/* offset of pointer in indirect block */
-	daddr_t newblkno;	/* disk block number being added */
-	daddr_t oldblkno;	/* previous block number, 0 if none */
+	daddr64_t newblkno;	/* disk block number being added */
+	daddr64_t oldblkno;	/* previous block number, 0 if none */
 	struct buf *nbp;	/* buffer holding allocated page */
 {
 	struct allocindir *aip;
@@ -1759,7 +1759,7 @@ softdep_setup_allocindir_meta(nbp, ip, bp, ptrno, newblkno)
 	struct inode *ip;	/* inode for file being extended */
 	struct buf *bp;		/* indirect block referencing allocated block */
 	int ptrno;		/* offset of pointer in indirect block */
-	daddr_t newblkno;	/* disk block number being added */
+	daddr64_t newblkno;	/* disk block number being added */
 {
 	struct allocindir *aip;
 
@@ -2342,7 +2342,7 @@ check_inode_unwritten(inodedep)
 	if (inodedep->id_state & ONWORKLIST)
 		WORKLIST_REMOVE(&inodedep->id_list);
 	if (inodedep->id_savedino1 != NULL) {
-		FREE(inodedep->id_savedino1, M_INODEDEP);
+		free(inodedep->id_savedino1, M_INODEDEP);
 		inodedep->id_savedino1 = NULL;
 	}
 	if (free_inodedep(inodedep) == 0) {
@@ -2388,7 +2388,7 @@ handle_workitem_freeblocks(freeblks)
 	struct freeblks *freeblks;
 {
 	struct inode tip;
-	daddr_t bn;
+	daddr64_t bn;
 	union {
 		struct ufs1_dinode di1;
 		struct ufs2_dinode di2;
@@ -2460,7 +2460,7 @@ handle_workitem_freeblocks(freeblks)
 STATIC int
 indir_trunc(ip, dbn, level, lbn, countp)
 	struct inode *ip;
-	daddr_t dbn;
+	daddr64_t dbn;
 	int level;
 	daddr64_t lbn;
 	long *countp;
@@ -3464,8 +3464,8 @@ initiate_write_inodeblock_ufs1(inodedep, bp)
 			panic("initiate_write_inodeblock: already doing I/O");
 		}
 		FREE_LOCK(&lk);
-		MALLOC(inodedep->id_savedino1, struct ufs1_dinode *,
-		    sizeof(struct ufs1_dinode), M_INODEDEP, M_WAITOK);
+		inodedep->id_savedino1 = malloc(sizeof(struct ufs1_dinode),
+		    M_INODEDEP, M_WAITOK);
 		ACQUIRE_LOCK(&lk);
 		*inodedep->id_savedino1 = *dp;
 		bzero((caddr_t)dp, sizeof(struct ufs1_dinode));
@@ -3606,8 +3606,8 @@ initiate_write_inodeblock_ufs2(inodedep, bp)
 	if ((inodedep->id_state & DEPCOMPLETE) == 0) {
 		if (inodedep->id_savedino2 != NULL)
 			panic("initiate_write_inodeblock_ufs2: I/O underway");
-		MALLOC(inodedep->id_savedino2, struct ufs2_dinode *,
-		    sizeof(struct ufs2_dinode), M_INODEDEP, M_WAITOK);
+		inodedep->id_savedino2 = malloc(sizeof(struct ufs2_dinode),
+		    M_INODEDEP, M_WAITOK);
 		*inodedep->id_savedino2 = *dp;
 		bzero((caddr_t)dp, sizeof(struct ufs2_dinode));
 		return;
@@ -4080,7 +4080,7 @@ handle_written_inodeblock(inodedep, bp)
 			*dp1 = *inodedep->id_savedino1;
 		else
 			*dp2 = *inodedep->id_savedino2;
-		FREE(inodedep->id_savedino1, M_INODEDEP);
+		free(inodedep->id_savedino1, M_INODEDEP);
 		inodedep->id_savedino1 = NULL;
 		if ((bp->b_flags & B_DELWRI) == 0)
 			stat_inode_bitmap++;

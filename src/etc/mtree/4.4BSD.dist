@@ -1,4 +1,4 @@
-#	$OpenBSD: 4.4BSD.dist,v 1.187 2007/08/01 21:23:26 miod Exp $
+#	$OpenBSD: 4.4BSD.dist,v 1.192 2008/02/15 11:15:59 bernd Exp $
 
 /set type=dir uname=root gname=wheel mode=0755
 # .
@@ -132,6 +132,12 @@ ppp
 
 # ./etc/skel
 skel
+
+# ./etc/skel/.ssh
+.ssh		uname=root mode=0700
+# ./etc/skel/.ssh
+..
+
 # ./etc/skel
 ..
 
@@ -2281,11 +2287,6 @@ nls
 # ./usr/share/nls
 ..
 
-# ./usr/share/pf
-pf
-# ./usr/share/pf
-..
-
 # ./usr/share/sendmail
 sendmail
 
@@ -2756,6 +2757,18 @@ logs  type=dir uname=root gname=daemon mode=755
 
 #./www/conf
 conf  type=dir uname=root gname=daemon mode=755
+#./www/conf
+
+#./www/conf/modules
+modules  type=dir uname=root gname=daemon mode=755
+#./www/conf/modules
+..
+
+#./www/conf/modules.sample
+modules.sample  type=dir uname=root gname=daemon mode=755
+#./www/conf/modules.sample
+..
+
 #./www/conf
 ..
 

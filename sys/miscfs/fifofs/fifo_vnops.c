@@ -1,4 +1,4 @@
-/*	$OpenBSD: fifo_vnops.c,v 1.24 2007/06/18 08:30:07 jasper Exp $	*/
+/*	$OpenBSD: fifo_vnops.c,v 1.26 2007/12/27 13:59:12 thib Exp $	*/
 /*	$NetBSD: fifo_vnops.c,v 1.18 1996/03/16 23:52:42 christos Exp $	*/
 
 /*
@@ -64,7 +64,7 @@ struct fifoinfo {
 int (**fifo_vnodeop_p)(void *);
 struct vnodeopv_entry_desc fifo_vnodeop_entries[] = {
 	{ &vop_default_desc, vn_default_error },
-	{ &vop_lookup_desc, fifo_lookup },		/* lookup */
+	{ &vop_lookup_desc, vop_generic_lookup },	/* lookup */
 	{ &vop_create_desc, fifo_create },		/* create */
 	{ &vop_mknod_desc, fifo_mknod },		/* mknod */
 	{ &vop_open_desc, fifo_open },			/* open */
@@ -124,19 +124,6 @@ struct filterops fifowrite_filtops =
 	{ 1, NULL, filt_fifowdetach, filt_fifowrite };
 
 /*
- * Trivial lookup routine that always fails.
- */
-/* ARGSUSED */
-int
-fifo_lookup(void *v)
-{
-	struct vop_lookup_args *ap = v;
-	
-	*ap->a_vpp = NULL;
-	return (ENOTDIR);
-}
-
-/*
  * Open called to set up a new instance of a fifo or
  * to find an active instance of a fifo.
  */
@@ -152,7 +139,7 @@ fifo_open(void *v)
 	int error;
 
 	if ((fip = vp->v_fifoinfo) == NULL) {
-		MALLOC(fip, struct fifoinfo *, sizeof(*fip), M_VNODE, M_WAITOK);
+		fip = malloc(sizeof(*fip), M_VNODE, M_WAITOK);
 		vp->v_fifoinfo = fip;
 		if ((error = socreate(AF_LOCAL, &rso, SOCK_STREAM, 0)) != 0) {
 			free(fip, M_VNODE);
@@ -392,7 +379,7 @@ fifo_close(void *v)
 	if (fip->fi_readers == 0 && fip->fi_writers == 0) {
 		error1 = soclose(fip->fi_readsock);
 		error2 = soclose(fip->fi_writesock);
-		FREE(fip, M_VNODE);
+		free(fip, M_VNODE);
 		vp->v_fifoinfo = NULL;
 	}
 	return (error1 ? error1 : error2);
@@ -410,7 +397,7 @@ fifo_reclaim(void *v)
 
 	soclose(fip->fi_readsock);
 	soclose(fip->fi_writesock);
-	FREE(fip, M_VNODE);
+	free(fip, M_VNODE);
 	vp->v_fifoinfo = NULL;
 
 	return (0);

@@ -1,4 +1,4 @@
-/*	$OpenBSD: xform.c,v 1.31 2007/05/27 05:43:17 tedu Exp $	*/
+/*	$OpenBSD: xform.c,v 1.33 2007/09/13 21:26:41 hshoexer Exp $	*/
 /*
  * The authors of this code are John Ioannidis (ji@tla.org),
  * Angelos D. Keromytis (kermit@csd.uch.gr) and
@@ -95,12 +95,12 @@ void null_decrypt(caddr_t, u_int8_t *);
 void aes_ctr_reinit(caddr_t, u_int8_t *);
 void aes_ctr_crypt(caddr_t, u_int8_t *);
 
-int MD5Update_int(void *, u_int8_t *, u_int16_t);
-int SHA1Update_int(void *, u_int8_t *, u_int16_t);
-int RMD160Update_int(void *, u_int8_t *, u_int16_t);
-int SHA256_Update_int(void *, u_int8_t *, u_int16_t);
-int SHA384_Update_int(void *, u_int8_t *, u_int16_t);
-int SHA512_Update_int(void *, u_int8_t *, u_int16_t);
+int MD5Update_int(void *, const u_int8_t *, u_int16_t);
+int SHA1Update_int(void *, const u_int8_t *, u_int16_t);
+int RMD160Update_int(void *, const u_int8_t *, u_int16_t);
+int SHA256_Update_int(void *, const u_int8_t *, u_int16_t);
+int SHA384_Update_int(void *, const u_int8_t *, u_int16_t);
+int SHA512_Update_int(void *, const u_int8_t *, u_int16_t);
 
 u_int32_t deflate_compress(u_int8_t *, u_int32_t, u_int8_t **);
 u_int32_t deflate_decompress(u_int8_t *, u_int32_t, u_int8_t **);
@@ -299,8 +299,7 @@ des1_decrypt(caddr_t key, u_int8_t *blk)
 int
 des1_setkey(u_int8_t **sched, u_int8_t *key, int len)
 {
-	MALLOC(*sched, u_int8_t *, 128, M_CRYPTO_DATA, M_WAITOK);
-	bzero(*sched, 128);
+	*sched = malloc(128, M_CRYPTO_DATA, M_WAITOK | M_ZERO);
 
 	if (des_set_key(key, *sched) < 0) {
 		des1_zerokey(sched);
@@ -314,7 +313,7 @@ void
 des1_zerokey(u_int8_t **sched)
 {
 	bzero(*sched, 128);
-	FREE(*sched, M_CRYPTO_DATA);
+	free(*sched, M_CRYPTO_DATA);
 	*sched = NULL;
 }
 
@@ -333,8 +332,7 @@ des3_decrypt(caddr_t key, u_int8_t *blk)
 int
 des3_setkey(u_int8_t **sched, u_int8_t *key, int len)
 {
-	MALLOC(*sched, u_int8_t *, 384, M_CRYPTO_DATA, M_WAITOK);
-	bzero(*sched, 384);
+	*sched = malloc(384, M_CRYPTO_DATA, M_WAITOK | M_ZERO);
 
 	if (des_set_key(key, *sched) < 0 || des_set_key(key + 8, *sched + 128)
 	    < 0 || des_set_key(key + 16, *sched + 256) < 0) {
@@ -349,7 +347,7 @@ void
 des3_zerokey(u_int8_t **sched)
 {
 	bzero(*sched, 384);
-	FREE(*sched, M_CRYPTO_DATA);
+	free(*sched, M_CRYPTO_DATA);
 	*sched = NULL;
 }
 
@@ -368,8 +366,7 @@ blf_decrypt(caddr_t key, u_int8_t *blk)
 int
 blf_setkey(u_int8_t **sched, u_int8_t *key, int len)
 {
-	MALLOC(*sched, u_int8_t *, sizeof(blf_ctx), M_CRYPTO_DATA, M_WAITOK);
-	bzero(*sched, sizeof(blf_ctx));
+	*sched = malloc(sizeof(blf_ctx), M_CRYPTO_DATA, M_WAITOK | M_ZERO);
 	blf_key((blf_ctx *)*sched, key, len);
 
 	return 0;
@@ -379,7 +376,7 @@ void
 blf_zerokey(u_int8_t **sched)
 {
 	bzero(*sched, sizeof(blf_ctx));
-	FREE(*sched, M_CRYPTO_DATA);
+	free(*sched, M_CRYPTO_DATA);
 	*sched = NULL;
 }
 
@@ -419,8 +416,7 @@ cast5_decrypt(caddr_t key, u_int8_t *blk)
 int
 cast5_setkey(u_int8_t **sched, u_int8_t *key, int len)
 {
-	MALLOC(*sched, u_int8_t *, sizeof(cast_key), M_CRYPTO_DATA, M_WAITOK);
-	bzero(*sched, sizeof(cast_key));
+	*sched = malloc(sizeof(cast_key), M_CRYPTO_DATA, M_WAITOK | M_ZERO);
 	cast_setkey((cast_key *)*sched, key, len);
 
 	return 0;
@@ -430,7 +426,7 @@ void
 cast5_zerokey(u_int8_t **sched)
 {
 	bzero(*sched, sizeof(cast_key));
-	FREE(*sched, M_CRYPTO_DATA);
+	free(*sched, M_CRYPTO_DATA);
 	*sched = NULL;
 }
 
@@ -449,9 +445,8 @@ skipjack_decrypt(caddr_t key, u_int8_t *blk)
 int
 skipjack_setkey(u_int8_t **sched, u_int8_t *key, int len)
 {
-	MALLOC(*sched, u_int8_t *, 10 * sizeof(u_int8_t *), M_CRYPTO_DATA,
-	    M_WAITOK);
-	bzero(*sched, 10 * sizeof(u_int8_t *));
+	*sched = malloc(10 * sizeof(u_int8_t *), M_CRYPTO_DATA, M_WAITOK |
+	    M_ZERO);
 	subkey_table_gen(key, (u_int8_t **) *sched);
 
 	return 0;
@@ -465,11 +460,11 @@ skipjack_zerokey(u_int8_t **sched)
 	for (k = 0; k < 10; k++) {
 		if (((u_int8_t **)(*sched))[k]) {
 			bzero(((u_int8_t **)(*sched))[k], 0x100);
-			FREE(((u_int8_t **)(*sched))[k], M_CRYPTO_DATA);
+			free(((u_int8_t **)(*sched))[k], M_CRYPTO_DATA);
 		}
 	}
 	bzero(*sched, 10 * sizeof(u_int8_t *));
-	FREE(*sched, M_CRYPTO_DATA);
+	free(*sched, M_CRYPTO_DATA);
 	*sched = NULL;
 }
 
@@ -488,9 +483,7 @@ rijndael128_decrypt(caddr_t key, u_int8_t *blk)
 int
 rijndael128_setkey(u_int8_t **sched, u_int8_t *key, int len)
 {
-	MALLOC(*sched, u_int8_t *, sizeof(rijndael_ctx), M_CRYPTO_DATA,
-	    M_WAITOK);
-	bzero(*sched, sizeof(rijndael_ctx));
+	*sched = malloc(sizeof(rijndael_ctx), M_CRYPTO_DATA, M_WAITOK | M_ZERO);
 
 	if (rijndael_set_key((rijndael_ctx *)*sched, (u_char *)key, len * 8)
 	    < 0) {
@@ -505,7 +498,7 @@ void
 rijndael128_zerokey(u_int8_t **sched)
 {
 	bzero(*sched, sizeof(rijndael_ctx));
-	FREE(*sched, M_CRYPTO_DATA);
+	free(*sched, M_CRYPTO_DATA);
 	*sched = NULL;
 }
 
@@ -557,9 +550,8 @@ aes_ctr_setkey(u_int8_t **sched, u_int8_t *key, int len)
 	if (len < AESCTR_NONCESIZE)
 		return -1;
 
-	MALLOC(*sched, u_int8_t *, sizeof(struct aes_ctr_ctx), M_CRYPTO_DATA,
-	    M_WAITOK);
-	bzero(*sched, sizeof(struct aes_ctr_ctx));
+	*sched = malloc(sizeof(struct aes_ctr_ctx), M_CRYPTO_DATA, M_WAITOK |
+	    M_ZERO);
 	ctx = (struct aes_ctr_ctx *)*sched;
 	ctx->ac_nr = rijndaelKeySetupEnc(ctx->ac_ek, (u_char *)key,
 	    (len - AESCTR_NONCESIZE) * 8);
@@ -575,7 +567,7 @@ void
 aes_ctr_zerokey(u_int8_t **sched)
 {
 	bzero(*sched, sizeof(struct aes_ctr_ctx));
-	FREE(*sched, M_CRYPTO_DATA);
+	free(*sched, M_CRYPTO_DATA);
 	*sched = NULL;
 }
 
@@ -584,42 +576,42 @@ aes_ctr_zerokey(u_int8_t **sched)
  */
 
 int
-RMD160Update_int(void *ctx, u_int8_t *buf, u_int16_t len)
+RMD160Update_int(void *ctx, const u_int8_t *buf, u_int16_t len)
 {
 	RMD160Update(ctx, buf, len);
 	return 0;
 }
 
 int
-MD5Update_int(void *ctx, u_int8_t *buf, u_int16_t len)
+MD5Update_int(void *ctx, const u_int8_t *buf, u_int16_t len)
 {
 	MD5Update(ctx, buf, len);
 	return 0;
 }
 
 int
-SHA1Update_int(void *ctx, u_int8_t *buf, u_int16_t len)
+SHA1Update_int(void *ctx, const u_int8_t *buf, u_int16_t len)
 {
 	SHA1Update(ctx, buf, len);
 	return 0;
 }
 
 int
-SHA256_Update_int(void *ctx, u_int8_t *buf, u_int16_t len)
+SHA256_Update_int(void *ctx, const u_int8_t *buf, u_int16_t len)
 {
 	SHA256_Update(ctx, buf, len);
 	return 0;
 }
 
 int
-SHA384_Update_int(void *ctx, u_int8_t *buf, u_int16_t len)
+SHA384_Update_int(void *ctx, const u_int8_t *buf, u_int16_t len)
 {
 	SHA384_Update(ctx, buf, len);
 	return 0;
 }
 
 int
-SHA512_Update_int(void *ctx, u_int8_t *buf, u_int16_t len)
+SHA512_Update_int(void *ctx, const u_int8_t *buf, u_int16_t len)
 {
 	SHA512_Update(ctx, buf, len);
 	return 0;

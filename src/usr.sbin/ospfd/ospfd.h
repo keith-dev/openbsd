@@ -1,4 +1,4 @@
-/*	$OpenBSD: ospfd.h,v 1.68 2007/06/19 16:45:15 reyk Exp $ */
+/*	$OpenBSD: ospfd.h,v 1.71 2007/10/11 12:19:31 claudio Exp $ */
 
 /*
  * Copyright (c) 2004 Esben Norby <norby@openbsd.org>
@@ -342,7 +342,7 @@ struct iface {
 	struct nbr		*self;
 	struct area		*area;
 
-	u_int32_t		 baudrate;
+	u_int64_t		 baudrate;
 	u_int32_t		 dead_interval;
 	u_int32_t		 ls_ack_cnt;
 	u_int32_t		 crypt_seq_num;
@@ -407,7 +407,6 @@ struct ospfd_conf {
 	int			spf_state;
 	int			ospf_socket;
 	int			flags;
-	int			options; /* OSPF options */
 	u_int8_t		rfc1583compat;
 	u_int8_t		border;
 	u_int8_t		redistribute;
@@ -438,7 +437,7 @@ struct kif_addr {
 
 struct kif {
 	char			 ifname[IF_NAMESIZE];
-	u_long			 baudrate;
+	u_int64_t		 baudrate;
 	int			 flags;
 	int			 mtu;
 	u_short			 ifindex;
@@ -472,7 +471,7 @@ struct ctl_iface {
 	struct in_addr		 bdr_addr;
 	time_t			 hello_timer;
 	time_t			 uptime;
-	u_int32_t		 baudrate;
+	u_int64_t		 baudrate;
 	u_int32_t		 dead_interval;
 	unsigned int		 ifindex;
 	int			 state;
@@ -555,6 +554,7 @@ int		 area_del(struct area *);
 struct area	*area_find(struct ospfd_conf *, struct in_addr);
 void		 area_track(struct area *, int);
 int		 area_border_router(struct ospfd_conf *);
+u_int8_t	 area_ospf_options(struct area *);
 
 /* buffer.c */
 struct buf	*buf_open(size_t);
@@ -600,7 +600,7 @@ u_int16_t	 iso_cksum(void *, u_int16_t, u_int16_t);
 /* kroute.c */
 int		 kif_init(void);
 int		 kr_init(int);
-int		 kr_change(struct kroute *);
+int		 kr_change(struct kroute *, int);
 int		 kr_delete(struct kroute *);
 void		 kr_shutdown(void);
 void		 kr_fib_couple(void);

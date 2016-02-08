@@ -1,4 +1,4 @@
-/*	$OpenBSD: vfs_subr.c,v 1.155 2007/08/07 04:32:45 beck Exp $	*/
+/*	$OpenBSD: vfs_subr.c,v 1.161 2007/12/13 18:22:36 blambert Exp $	*/
 /*	$NetBSD: vfs_subr.c,v 1.53 1996/04/22 01:39:13 christos Exp $	*/
 
 /*
@@ -199,8 +199,7 @@ vfs_rootmountalloc(char *fstypename, char *devname, struct mount **mpp)
 			break;
 	if (vfsp == NULL)
 		return (ENODEV);
-	mp = malloc(sizeof(struct mount), M_MOUNT, M_WAITOK);
-	bzero(mp, sizeof(struct mount));
+	mp = malloc(sizeof(struct mount), M_MOUNT, M_WAITOK|M_ZERO);
 	(void)vfs_busy(mp, VB_READ|VB_NOWAIT);
 	LIST_INIT(&mp->mnt_vnodelist);
 	mp->mnt_vfc = vfsp;
@@ -537,8 +536,8 @@ loop:
 	 * Common case is actually in the if statement
 	 */
 	if (vp == NULL || !(vp->v_tag == VT_NON && vp->v_type == VBLK)) {
-		MALLOC(nvp->v_specinfo, struct specinfo *,
-			sizeof(struct specinfo), M_VNODE, M_WAITOK);
+		nvp->v_specinfo = malloc(sizeof(struct specinfo), M_VNODE,
+			M_WAITOK);
 		nvp->v_rdev = nvp_rdev;
 		nvp->v_hashchain = vpp;
 		nvp->v_specnext = *vpp;
@@ -601,7 +600,7 @@ vget(struct vnode *vp, int flags, struct proc *p)
 		}
 
 		vp->v_flag |= VXWANT;
-		ltsleep(vp, PINOD | PNORELOCK, "vget", 0, NULL);
+		tsleep(vp, PINOD, "vget", 0);
 		return (ENOENT);
 	}
 
@@ -1007,8 +1006,6 @@ vgonel(struct vnode *vp, struct proc *p)
 {
 	struct vnode *vq;
 	struct vnode *vx;
-	struct mount *mp;
-	int flags;
 
 	/*
 	 * If a vgone (or vclean) is already in progress,
@@ -1016,7 +1013,7 @@ vgonel(struct vnode *vp, struct proc *p)
 	 */
 	if (vp->v_flag & VXLOCK) {
 		vp->v_flag |= VXWANT;
-		ltsleep(vp, PINOD | PNORELOCK, "vgone", 0, NULL);
+		tsleep(vp, PINOD, "vgone", 0);
 		return;
 	}
 
@@ -1062,21 +1059,7 @@ vgonel(struct vnode *vp, struct proc *p)
 				vx->v_flag &= ~VALIASED;
 			vp->v_flag &= ~VALIASED;
 		}
-
-		/*
-		 * If we have a mount point associated with the vnode, we must
-		 * flush it out now, as to not leave a dangling zombie mount
-		 * point laying around in VFS.
-		 */
-		mp = vp->v_specmountpoint;
-		if (mp != NULL) {
-			if (!vfs_busy(mp, VB_WRITE|VB_WAIT)) {
-				flags = MNT_FORCE | MNT_DOOMED;
-				dounmount(mp, flags, p, NULL);
-			}
-		}
-
-		FREE(vp->v_specinfo, M_VNODE);
+		free(vp->v_specinfo, M_VNODE);
 		vp->v_specinfo = NULL;
 	}
 	/*
@@ -1428,8 +1411,7 @@ vfs_hang_addrlist(struct mount *mp, struct netexport *nep,
 	    argp->ex_addrlen < 0 || argp->ex_masklen < 0)
 		return (EINVAL);
 	i = sizeof(struct netcred) + argp->ex_addrlen + argp->ex_masklen;
-	np = (struct netcred *)malloc(i, M_NETADDR, M_WAITOK);
-	bzero(np, i);
+	np = (struct netcred *)malloc(i, M_NETADDR, M_WAITOK|M_ZERO);
 	saddr = (struct sockaddr *)(np + 1);
 	error = copyin(argp->ex_addr, saddr, argp->ex_addrlen);
 	if (error)

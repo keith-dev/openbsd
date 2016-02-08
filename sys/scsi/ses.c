@@ -1,4 +1,4 @@
-/*	$OpenBSD: ses.c,v 1.45 2007/06/24 05:34:35 dlg Exp $ */
+/*	$OpenBSD: ses.c,v 1.47 2007/09/16 01:30:24 krw Exp $ */
 
 /*
  * Copyright (c) 2005 David Gwynne <dlg@openbsd.org>
@@ -271,11 +271,10 @@ ses_read_config(struct ses_softc *sc)
 
 	int				i, ntypes = 0, nelems = 0;
 
-	buf = malloc(SES_BUFLEN, M_DEVBUF, M_NOWAIT);
+	buf = malloc(SES_BUFLEN, M_DEVBUF, M_NOWAIT | M_ZERO);
 	if (buf == NULL)
 		return (1);
 
-	memset(buf, 0, SES_BUFLEN);
 	memset(&cmd, 0, sizeof(cmd));
 	cmd.opcode = RECEIVE_DIAGNOSTIC;
 	cmd.flags |= SES_DIAG_PCV;
@@ -427,12 +426,11 @@ ses_make_sensors(struct ses_softc *sc, struct ses_type_desc *types, int ntypes)
 			switch (types[i].type) {
 #if NBIO > 0
 			case SES_T_DEVICE:
-				slot = malloc(sizeof(struct ses_slot),
-				    M_DEVBUF, M_NOWAIT);
+				slot = malloc(sizeof(*slot), M_DEVBUF,
+				    M_NOWAIT | M_ZERO);
 				if (slot == NULL)
 					goto error;
 
-				memset(slot, 0, sizeof(struct ses_slot));
 				slot->sl_stat = status;
 
 				TAILQ_INSERT_TAIL(&sc->sc_slots, slot,
@@ -460,12 +458,11 @@ ses_make_sensors(struct ses_softc *sc, struct ses_type_desc *types, int ntypes)
 				continue;
 			}
 
-			sensor = malloc(sizeof(struct ses_sensor), M_DEVBUF,
-			    M_NOWAIT);
+			sensor = malloc(sizeof(*sensor), M_DEVBUF,
+			    M_NOWAIT | M_ZERO);
 			if (sensor == NULL)
 				goto error;
 
-			memset(sensor, 0, sizeof(struct ses_sensor));
 			sensor->se_type = types[i].type;
 			sensor->se_stat = status;
 			sensor->se_sensor.type = stype;

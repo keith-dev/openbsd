@@ -1,4 +1,4 @@
-/*	$OpenBSD: tcp_var.h,v 1.83 2007/06/25 12:17:43 markus Exp $	*/
+/*	$OpenBSD: tcp_var.h,v 1.86 2008/02/20 14:23:31 markus Exp $	*/
 /*	$NetBSD: tcp_var.h,v 1.17 1996/02/13 23:44:24 christos Exp $	*/
 
 /*
@@ -494,7 +494,8 @@ struct	tcpstat {
 #define	TCPCTL_REASS_LIMIT     18 /* max entries for tcp reass queues */
 #define	TCPCTL_DROP	       19 /* drop tcp connection */
 #define	TCPCTL_SACKHOLE_LIMIT  20 /* max entries for tcp sack queues */
-#define	TCPCTL_MAXID	       21
+#define	TCPCTL_STATS	       21 /* TCP statistics */
+#define	TCPCTL_MAXID	       22
 
 #define	TCPCTL_NAMES { \
 	{ 0, 0 }, \
@@ -518,6 +519,7 @@ struct	tcpstat {
 	{ "reasslimit", 	CTLTYPE_INT }, \
 	{ "drop", 	CTLTYPE_STRUCT }, \
 	{ "sackholelimit", 	CTLTYPE_INT }, \
+	{ "stats",	CTLTYPE_STRUCT } \
 }
 
 #define	TCPCTL_VARS { \
@@ -539,6 +541,7 @@ struct	tcpstat {
 	&tcp_syn_cache_limit, \
 	&tcp_syn_bucket_limit, \
 	&tcp_do_rfc3390, \
+	NULL, \
 	NULL, \
 	NULL, \
 	NULL \
@@ -613,7 +616,7 @@ int	 tcp_output(struct tcpcb *);
 void	 tcp_pulloutofband(struct socket *, u_int, struct mbuf *, int);
 int	 tcp_reass(struct tcpcb *, struct tcphdr *, struct mbuf *, int *);
 void	 tcp_rscale(struct tcpcb *, u_long);
-void	 tcp_respond(struct tcpcb *, caddr_t, struct mbuf *, tcp_seq,
+void	 tcp_respond(struct tcpcb *, caddr_t, struct tcphdr *, tcp_seq,
 		tcp_seq, int);
 void	 tcp_setpersist(struct tcpcb *);
 void	 tcp_slowtimo(void);
@@ -653,10 +656,6 @@ int	tcp_signature_apply(caddr_t, caddr_t, unsigned int);
 int	tcp_signature(struct tdb *, int, struct mbuf *, struct tcphdr *,
 	    int, int, char *);
 #endif /* TCP_SIGNATURE */
-void	tcp_rndiss_init(void);
-tcp_seq	tcp_rndiss_next(void);
-u_int16_t
-	tcp_rndiss_encrypt(u_int16_t);
 void     tcp_set_iss_tsm(struct tcpcb *);
 
 int	 syn_cache_add(struct sockaddr *, struct sockaddr *,

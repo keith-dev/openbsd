@@ -1,4 +1,4 @@
-/*	$OpenBSD: rf_configure.c,v 1.16 2007/02/18 20:16:04 ray Exp $	*/
+/*	$OpenBSD: rf_configure.c,v 1.20 2007/10/22 16:45:20 chl Exp $	*/
 /*	$NetBSD: rf_configure.c,v 1.14 2001/02/04 21:05:42 christos Exp $	*/
 
 /*
@@ -48,6 +48,7 @@
  *
  **************************************************************/
 
+#include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <errno.h>
@@ -333,10 +334,8 @@ rf_MakeLayoutSpecificDeclustered(FILE *configfp, RF_Config_t *cfgPtr, void *arg)
 	    "Can't find block design file name in config file\n"))
     return(EINVAL);
   bdfile = rf_find_non_white(buf);
-  if ((p = strchr(bdfile, '\n')) != NULL) {
-    /* strip newline char */
-    *p = '\0';
-  }
+  bdfile[strcspn(bdfile, "\n")] = '\0';
+
   /* open bd file, check validity of configuration */
   if ((fp = fopen(bdfile,"r"))==NULL) {
     RF_ERRORMSG1("RAID: config error: Can't open layout table file %s\n",bdfile);
@@ -360,10 +359,7 @@ rf_MakeLayoutSpecificDeclustered(FILE *configfp, RF_Config_t *cfgPtr, void *arg)
 		    "Can't find sparemap file name in config file\n"))
       return(EINVAL);
     smname = rf_find_non_white(smbuf);
-    if ((p = strchr(smname, '\n')) != NULL) {
-      /* strip newline char */
-      *p = '\0';
-    }
+    smname[strcspn(smname, "\n")] = '\0';
 	} else {
     smbuf[0] = '\0';
     smname = smbuf;
@@ -459,20 +455,24 @@ rf_search_file_for_start_of(const char *string, char *buf, int len, FILE *fp)
 
 /* reads from file fp into buf until it finds an interesting line */
 int
-rf_get_next_nonblank_line(char *buf, int len, FILE *fp,
-			  const char *errmsg)
+rf_get_next_nonblank_line(char *buf, int len, FILE *fp, const char *errmsg)
 {
-  char *p;
+	char *p;
+	int i;
 
-  while (fgets(buf,len,fp) != NULL) {
-    p = rf_find_non_white(buf);
+	while (fgets(buf,len,fp) != NULL) {
+		for(i = strlen(buf) - 1; i >= 0 && isspace(buf[i]); i--)
+			buf[i] = '\0';
+		p = rf_find_non_white(buf);
 		if (*p == '\n' || *p == '\0' || *p == '#')
 			continue;
-    return(0);
-  }
+		return(0);
+	}
+
 	if (errmsg)
 		RF_ERRORMSG1("%s", errmsg);
-  return(1);
+
+	return(1);
 }
 
 /*
@@ -494,7 +494,7 @@ rf_ReadSpareTable(RF_SparetWait_t *req, char *fname)
 {
 	int i, j, numFound, linecount, tableNum, tupleNum,
 	    spareDisk, spareBlkOffset;
-  char buf[1024], targString[100], errString[100], *p;
+  char buf[1024], targString[100], errString[100];
   RF_SpareTableEntry_t **table;
   FILE *fp;
 
@@ -520,8 +520,7 @@ rf_ReadSpareTable(RF_SparetWait_t *req, char *fname)
 	if (rf_get_next_nonblank_line(buf, 1024, fp,
 	    "Invalid sparemap file:  can't find header line\n"))
     return(NULL);
-  if ((p = strchr(buf, '\n')) != NULL)
-    *p = '\0';
+  buf[strcspn(buf, "\n")] = '\0';
 
 	snprintf(targString, sizeof targString, "fdisk %d\n", req->fcol);
 	snprintf(errString, sizeof errString,

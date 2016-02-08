@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.60 2007/08/02 16:40:27 deraadt Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.67 2007/12/11 17:53:18 deraadt Exp $	*/
 /*	$NetBSD: machdep.c,v 1.3 2003/05/07 22:58:18 fvdl Exp $	*/
 
 /*-
@@ -176,6 +176,12 @@ paddr_t lo32_paddr;
 
 int kbd_reset;
 
+#ifdef LKM
+vaddr_t lkm_start, lkm_end;
+static struct vm_map lkm_map_store;
+extern struct vm_map *lkm_map;
+#endif
+
 struct vm_map *exec_map = NULL;
 struct vm_map *phys_map = NULL;
 
@@ -215,9 +221,7 @@ typedef struct _boot_args32 {
 
 #define BOOTARGC_MAX	NBPG	/* one page */
 
-#ifdef NFSCLIENT
 bios_bootmac_t *bios_bootmac;
-#endif
 
 /* locore copies the arguments from /boot to here for us */
 char bootinfo[BOOTARGC_MAX];
@@ -249,6 +253,7 @@ int	cpu_dumpsize(void);
 u_long	cpu_dump_mempagecnt(void);
 void	dumpsys(void);
 void	init_x86_64(paddr_t);
+void	(*cpuresetfn)(void);
 
 #ifdef KGDB
 #ifndef KGDB_DEVNAME
@@ -295,10 +300,10 @@ cpu_startup(void)
 
 	printf("%s", version);
 
-	printf("real mem = %u (%uMB)\n", ctob(physmem),
-	    ctob(physmem)/1024/1024);
+	printf("real mem = %lu (%luMB)\n", ptoa((psize_t)physmem),
+	    ptoa((psize_t)physmem)/1024/1024);
 
-	if (physmem >= btoc(1ULL << 32)) {
+	if (physmem >= atop(1ULL << 32)) {
 		extern int amdgart_enable;
 
 		amdgart_enable = 1;
@@ -331,8 +336,14 @@ cpu_startup(void)
 	phys_map = uvm_km_suballoc(kernel_map, &minaddr, &maxaddr,
 				   VM_PHYS_SIZE, 0, FALSE, NULL);
 
-	printf("avail mem = %lu (%luMB)\n", ptoa(uvmexp.free),
-	    ptoa(uvmexp.free)/1024/1024);
+#ifdef LKM
+	uvm_map_setup(&lkm_map_store, lkm_start, lkm_end, VM_MAP_PAGEABLE);
+	lkm_map_store.pmap = pmap_kernel();
+	lkm_map = &lkm_map_store;
+#endif
+
+	printf("avail mem = %lu (%luMB)\n", ptoa((psize_t)uvmexp.free),
+	    ptoa((psize_t)uvmexp.free)/1024/1024);
 
 	bufinit();
 
@@ -536,6 +547,8 @@ cpu_sysctl(int *name, u_int namelen, void *oldp, size_t *oldlenp, void *newp,
 		    newp, newlen, p);
 	case CPU_CPUVENDOR:
 		return (sysctl_rdstring(oldp, oldlenp, newp, cpu_vendor));
+	case CPU_CPUID:
+		return (sysctl_rdint(oldp, oldlenp, newp, cpu_id));
 	case CPU_CPUFEATURE:
 		return (sysctl_rdint(oldp, oldlenp, newp, cpu_feature));
 	case CPU_KBDRESET:
@@ -758,6 +771,8 @@ boot(int howto)
 			printf("WARNING: not updating battery clock\n");
 		}
 	}
+
+	delay(4*1000000);	/* XXX */
 
 	/* Disable interrupts. */
 	splhigh();
@@ -1289,6 +1304,11 @@ init_x86_64(paddr_t first_avail)
 	first_avail = round_page(first_avail);
 	kern_end = KERNBASE + first_avail;
 
+#ifdef LKM
+	lkm_start = KERNTEXTOFF + first_avail;
+	lkm_end = KERNBASE + NKL2_KIMG_ENTRIES * NBPD_L2;
+#endif
+
 	/*
 	 * Now, load the memory clusters (which have already been
 	 * rounded and truncated) into the VM system.
@@ -1586,6 +1606,9 @@ cpu_reset(void)
 
 	disable_intr();
 
+	if (cpuresetfn)
+		(*cpuresetfn)();
+
 	/*
 	 * The keyboard controller has 4 random output pins, one of which is
 	 * connected to the RESET pin on the CPU in many PCs.  We tell the
@@ -1803,11 +1826,9 @@ getbootinfo(char *bootinfo, int bootinfo_size)
 				cnset(cdp->consdev);
 			}
 			break;
-#ifdef NFSCLIENT
 		case BOOTARG_BOOTMAC:
 			bios_bootmac = (bios_bootmac_t *)q->ba_arg;
 			break;
-#endif                 
 
 		default:
 #ifdef BOOTINFO_DEBUG

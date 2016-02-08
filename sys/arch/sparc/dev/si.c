@@ -1,4 +1,4 @@
-/*	$OpenBSD: si.c,v 1.27 2007/07/01 19:05:37 miod Exp $	*/
+/*	$OpenBSD: si.c,v 1.29 2007/12/29 03:04:19 dlg Exp $	*/
 /*	$NetBSD: si.c,v 1.38 1997/08/27 11:24:20 bouyer Exp $	*/
 
 /*-
@@ -85,7 +85,7 @@
  * reselection failing on Sun Shoebox-type configurations where
  * there are multiple non-SCSI devices behind Emulex or Adaptec
  * bridges.  These devices pre-date the SCSI-I spec, and might not
- * bahve the way the 5380 code expects.  For this reason, only
+ * behave the way the 5380 code expects.  For this reason, only
  * DMA is enabled by default in this driver.
  *
  *	Jason R. Thorpe <thorpej@NetBSD.ORG>
@@ -211,10 +211,10 @@ void si_obio_intr_on(struct ncr5380_softc *);
 void si_obio_intr_off(struct ncr5380_softc *);
 
 static struct scsi_adapter	si_ops = {
-	ncr5380_scsi_cmd,		/* scsi_cmd()		*/
-	si_minphys,			/* scsi_minphys()	*/
-	NULL,				/* open_target_lu()	*/
-	NULL,				/* close_target_lu()	*/
+	ncr5380_scsi_cmd,		/* scsi_cmd() */
+	si_minphys,			/* scsi_minphys() */
+	NULL,				/* probe_dev() */
+	NULL,				/* free_dev() */
 };
 
 /* This is copied from julian's bt driver */

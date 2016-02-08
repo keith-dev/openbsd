@@ -1,5 +1,5 @@
 # ex:ts=8 sw=4:
-# $OpenBSD: PackageRepository.pm,v 1.48 2007/06/23 17:55:12 espie Exp $
+# $OpenBSD: PackageRepository.pm,v 1.51 2008/03/04 19:18:37 ckuethe Exp $
 #
 # Copyright (c) 2003-2007 Marc Espie <espie@openbsd.org>
 #
@@ -121,7 +121,7 @@ sub close
 		waitpid($object->{pid2}, 0);
 		alarm(0);
 	}
-	$self->parse_problems($object->{errors}, $hint) 
+	$self->parse_problems($object->{errors}, $hint, $object) 
 	    if defined $object->{errors};
 	undef $object->{errors};
 	$object->deref;
@@ -184,7 +184,7 @@ sub grabPlist
 
 sub parse_problems
 {
-	my ($self, $filename, $hint) = @_;
+	my ($self, $filename, $hint, $object) = @_;
 	unlink $filename;
 }
 
@@ -440,17 +440,16 @@ our %distant = ();
 sub grab_object
 {
 	my ($self, $object) = @_;
-	my $ftp = $ENV{'FETCH_CMD'} || OpenBSD::Paths->ftp;
-	my @extra = ();
+	my ($ftp, @extra) = split(/\s+/, OpenBSD::Paths->ftp);
 	if (defined $ENV{'FTP_KEEPALIVE'}) {
 		push(@extra, "-k", $ENV{'FTP_KEEPALIVE'});
 	}
-	exec {OpenBSD::Paths->ftp} 
-	    "ftp", 
+	exec {$ftp} 
+	    $ftp,
 	    @extra,
 	    "-o", 
 	    "-", $self->url($object->{name})
-	or die "can't run ftp";
+	or die "can't run ".OpenBSD::Paths->ftp;
 }
 
 sub maxcount
@@ -493,7 +492,7 @@ sub try_until_success
 {
 	my ($self, $pkgname, $code) = @_;
 
-	for (my $retry = 5; $retry < 60; $retry *= 2) {
+	for (my $retry = 5; $retry <= 160; $retry *= 2) {
 		undef $self->{lasterror};
 		my $o = &$code;
 		if (defined $o) {
@@ -528,10 +527,14 @@ sub grabPlist
 
 sub parse_problems
 {
-	my ($self, $filename, $hint) = @_;
+	my ($self, $filename, $hint, $object) = @_;
 	CORE::open(my $fh, '<', $filename) or return;
 
 	my $baseurl = $self->url;
+	my $url = $baseurl;
+	if (defined $object) {
+		$url = $object->url;
+	}
 	local $_;
 	my $notyet = 1;
 	while(<$fh>) {
@@ -554,7 +557,7 @@ sub parse_problems
 			next if m/^421\s+/o;
 		}
 		if ($notyet) {
-			print STDERR "Error from $baseurl:\n" if $notyet;
+			print STDERR "Error from $url:\n" if $notyet;
 			$notyet = 0;
 		}
 		if (m/^421\s+/o ||
@@ -568,7 +571,7 @@ sub parse_problems
 		print STDERR  $_;
 	}
 	CORE::close($fh);
-	$self->SUPER::parse_problems($filename, $hint);
+	$self->SUPER::parse_problems($filename, $hint, $object);
 }
 
 sub list
@@ -590,7 +593,8 @@ sub get_http_list
 	my $fullname = $self->url;
 	my $l = [];
 	local $_;
-	open(my $fh, '-|', "ftp -o - $fullname 2>$error") or return;
+	open(my $fh, '-|', OpenBSD::Paths->ftp." -o - $fullname 2>$error")
+	    or return;
 	# XXX assumes a pkg HREF won't cross a line. Is this the case ?
 	while(<$fh>) {
 		chomp;
@@ -654,7 +658,8 @@ sub get_ftp_list
 	my ($self, $error) = @_;
 
 	my $fullname = $self->url;
-	return $self->_list("echo 'nlist *.tgz'|ftp -o - $fullname 2>$error");
+	return $self->_list("echo 'nlist *.tgz'| ".OpenBSD::Paths->ftp
+	    ." -o - $fullname 2>$error");
 }
 
 sub obtain_list

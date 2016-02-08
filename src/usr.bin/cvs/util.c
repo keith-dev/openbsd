@@ -1,4 +1,4 @@
-/*	$OpenBSD: util.c,v 1.113 2007/07/19 06:34:15 ray Exp $	*/
+/*	$OpenBSD: util.c,v 1.140 2008/03/01 15:10:20 joris Exp $	*/
 /*
  * Copyright (c) 2004 Jean-Francois Brousseau <jfb@openbsd.org>
  * Copyright (c) 2005, 2006 Joris Vink <joris@openbsd.org>
@@ -33,10 +33,13 @@
 #include <md5.h>
 #include <stdlib.h>
 #include <string.h>
+#include <paths.h>
 #include <unistd.h>
 
 #include "cvs.h"
 #include "remote.h"
+
+extern int print_stdout;
 
 /* letter -> mode type map */
 static const int cvs_modetypes[26] = {
@@ -224,14 +227,11 @@ cvs_cksum(const char *file, char *dst, size_t len)
 int
 cvs_getargv(const char *line, char **argv, int argvlen)
 {
-	size_t l;
 	u_int i;
 	int argc, error;
-	char linebuf[256], qbuf[128], *lp, *cp, *arg;
+	char *linebuf, *lp, *cp;
 
-	l = strlcpy(linebuf, line, sizeof(linebuf));
-	if (l >= sizeof(linebuf))
-		fatal("cvs_getargv: string truncation");
+	linebuf = xstrdup(line);
 
 	memset(argv, 0, argvlen * sizeof(char *));
 	argc = 0;
@@ -239,44 +239,18 @@ cvs_getargv(const char *line, char **argv, int argvlen)
 	/* build the argument vector */
 	error = 0;
 	for (lp = linebuf; lp != NULL;) {
-		if (*lp == '"') {
-			/* double-quoted string */
-			lp++;
-			i = 0;
-			memset(qbuf, 0, sizeof(qbuf));
-			while (*lp != '"') {
-				if (*lp == '\\')
-					lp++;
-				if (*lp == '\0') {
-					cvs_log(LP_ERR, "no terminating quote");
-					error++;
-					break;
-				}
-
-				qbuf[i++] = *lp++;
-				if (i == sizeof(qbuf) - 1) {
-					error++;
-					break;
-				}
-			}
-
-			arg = qbuf;
-		} else {
-			cp = strsep(&lp, " \t");
-			if (cp == NULL)
-				break;
-			else if (*cp == '\0')
-				continue;
-
-			arg = cp;
-		}
+		cp = strsep(&lp, " \t");
+		if (cp == NULL)
+			break;
+		else if (*cp == '\0')
+			continue;
 
 		if (argc == argvlen) {
 			error++;
 			break;
 		}
 
-		argv[argc] = xstrdup(arg);
+		argv[argc] = xstrdup(cp);
 		argc++;
 	}
 
@@ -287,6 +261,7 @@ cvs_getargv(const char *line, char **argv, int argvlen)
 		argc = -1;
 	}
 
+	xfree(linebuf);
 	return (argc);
 }
 
@@ -459,7 +434,7 @@ cvs_rmdir(const char *path)
 			}
 		}
 		switch (type) {
-		case CVS_DIR: 
+		case CVS_DIR:
 			if (cvs_rmdir(fpath) == -1)
 				goto done;
 			break;
@@ -491,78 +466,80 @@ cvs_get_repository_path(const char *dir, char *dst, size_t len)
 
 	cvs_get_repository_name(dir, buf, sizeof(buf));
 	(void)xsnprintf(dst, len, "%s/%s", current_cvsroot->cr_dir, buf);
+	cvs_validate_directory(dst);
 }
 
 void
 cvs_get_repository_name(const char *dir, char *dst, size_t len)
 {
 	FILE *fp;
-	char *s, fpath[MAXPATHLEN];
+	char fpath[MAXPATHLEN];
 
-	(void)xsnprintf(fpath, sizeof(fpath), "%s/%s",
-	    dir, CVS_PATH_REPOSITORY);
+	dst[0] = '\0';
 
-	if ((fp = fopen(fpath, "r")) != NULL) {
-		if ((fgets(dst, len, fp)) == NULL)
-			fatal("cvs_get_repository_name: bad repository file");
+	if (!(cmdp->cmd_flags & CVS_USE_WDIR)) {
+		if (strlcpy(dst, dir, len) >= len)
+			fatal("cvs_get_repository_name: truncation");
+		return;
+	}
 
-		if ((s = strchr(dst, '\n')) != NULL)
-			*s = '\0';
-
-		(void)fclose(fp);
-	} else {
-		dst[0] = '\0';
-
-		if (cvs_cmdop == CVS_OP_IMPORT) {
-			if (strlcpy(dst, import_repository, len) >= len)
+	switch (cvs_cmdop) {
+	case CVS_OP_EXPORT:
+		if (strcmp(dir, "."))
+			if (strlcpy(dst, dir, len) >= len)
 				fatal("cvs_get_repository_name: truncation");
-			if (strlcat(dst, "/", len) >= len)
-				fatal("cvs_get_repository_name: truncation");
+		break;
+	case CVS_OP_IMPORT:
+		if (strlcpy(dst, import_repository, len) >= len)
+			fatal("cvs_get_repository_name: truncation");
+		if (strlcat(dst, "/", len) >= len)
+			fatal("cvs_get_repository_name: truncation");
 
-			if (strcmp(dir, ".")) {
-				if (strlcat(dst, dir, len) >= len) {
-					fatal("cvs_get_repository_name: "
-					    "truncation");
-				}
-			}
-		} else {
-			if (cvs_cmdop != CVS_OP_CHECKOUT) {
-				if (strlcat(dst, dir, len) >= len)
-					fatal("cvs_get_repository_name: "
-					    "truncation");
-			}
-		}
+		if (strcmp(dir, "."))
+			if (strlcat(dst, dir, len) >= len)
+				fatal("cvs_get_repository_name: truncation");
+		break;
+	default:
+		(void)xsnprintf(fpath, sizeof(fpath), "%s/%s",
+		    dir, CVS_PATH_REPOSITORY);
+		if ((fp = fopen(fpath, "r")) != NULL) {
+			if ((fgets(dst, len, fp)) == NULL)
+				fatal("%s: bad repository file", fpath);
+			dst[strcspn(dst, "\n")] = '\0';
+			(void)fclose(fp);
+		} else if (cvs_cmdop != CVS_OP_CHECKOUT)
+			fatal("%s is missing", fpath);
+		break;
 	}
 }
 
 void
 cvs_mkadmin(const char *path, const char *root, const char *repo,
-    char *tag, char *date, int nb)
+    char *tag, char *date)
 {
 	FILE *fp;
-	struct stat st;
 	char buf[MAXPATHLEN];
 
 	if (cvs_server_active == 0)
-		cvs_log(LP_TRACE, "cvs_mkadmin(%s, %s, %s, %s, %s, %d)",
+		cvs_log(LP_TRACE, "cvs_mkadmin(%s, %s, %s, %s, %s)",
 		    path, root, repo, (tag != NULL) ? tag : "",
-		    (date != NULL) ? date : "", nb);
+		    (date != NULL) ? date : "");
 
 	(void)xsnprintf(buf, sizeof(buf), "%s/%s", path, CVS_PATH_CVSDIR);
-
-	if (stat(buf, &st) != -1)
-		return;
 
 	if (mkdir(buf, 0755) == -1 && errno != EEXIST)
 		fatal("cvs_mkadmin: %s: %s", buf, strerror(errno));
 
-	(void)xsnprintf(buf, sizeof(buf), "%s/%s", path, CVS_PATH_ROOTSPEC);
+	if (cvs_cmdop == CVS_OP_CHECKOUT) {
+		(void)xsnprintf(buf, sizeof(buf), "%s/%s",
+		    path, CVS_PATH_ROOTSPEC);
 
-	if ((fp = fopen(buf, "w")) == NULL)
-		fatal("cvs_mkadmin: %s: %s", buf, strerror(errno));
+		if ((fp = fopen(buf, "w")) == NULL)
+			fatal("cvs_mkadmin: %s: %s", buf, strerror(errno));
 
-	fprintf(fp, "%s\n", root);
-	(void)fclose(fp);
+		fprintf(fp, "%s\n", root);
+		(void)fclose(fp);
+	}
 
 	(void)xsnprintf(buf, sizeof(buf), "%s/%s", path, CVS_PATH_REPOSITORY);
 
@@ -572,21 +549,21 @@ cvs_mkadmin(const char *path, const char *root, const char *repo,
 	fprintf(fp, "%s\n", repo);
 	(void)fclose(fp);
 
-	(void)xsnprintf(buf, sizeof(buf), "%s/%s", path, CVS_PATH_ENTRIES);
-
-	if ((fp = fopen(buf, "w")) == NULL)
-		fatal("cvs_mkadmin: %s: %s", buf, strerror(errno));
-	(void)fclose(fp);
-
-	cvs_write_tagfile(path, tag, date, nb);
+	cvs_write_tagfile(path, tag, date);
 }
 
 void
 cvs_mkpath(const char *path, char *tag)
 {
+	CVSENTRIES *ent;
 	FILE *fp;
 	size_t len;
-	char *sp, *dp, *dir, rpath[MAXPATHLEN], repo[MAXPATHLEN];
+	char *entry, sticky[CVS_REV_BUFSZ];
+	char *sp, *dp, *dir, *p, rpath[MAXPATHLEN], repo[MAXPATHLEN];
+
+	if (current_cvsroot->cr_method != CVS_METHOD_LOCAL ||
+	    cvs_server_active == 1)
+		cvs_validate_directory(path);
 
 	dir = xstrdup(path);
 
@@ -598,12 +575,11 @@ cvs_mkpath(const char *path, char *tag)
 	repo[0] = '\0';
 	rpath[0] = '\0';
 
-	if (cvs_cmdop == CVS_OP_UPDATE) {
+	if (cvs_cmdop == CVS_OP_UPDATE || cvs_cmdop == CVS_OP_COMMIT) {
 		if ((fp = fopen(CVS_PATH_REPOSITORY, "r")) != NULL) {
 			if ((fgets(repo, sizeof(repo), fp)) == NULL)
 				fatal("cvs_mkpath: bad repository file");
-			if ((len = strlen(repo)) && repo[len - 1] == '\n')
-				repo[len - 1] = '\0';
+			repo[strcspn(repo, "\n")] = '\0';
 			(void)fclose(fp);
 		}
 	}
@@ -613,15 +589,21 @@ cvs_mkpath(const char *path, char *tag)
 		if (dp != NULL)
 			*(dp++) = '\0';
 
-		if (repo[0] != '\0') {
-			len = strlcat(repo, "/", sizeof(repo));
+		if (sp == dir && module_repo_root != NULL) {
+			len = strlcpy(repo, module_repo_root, sizeof(repo));
+			if (len >= (int)sizeof(repo))
+				fatal("cvs_mkpath: overflow");
+		} else if (strcmp(sp, ".")) {
+			if (repo[0] != '\0') {
+				len = strlcat(repo, "/", sizeof(repo));
+				if (len >= (int)sizeof(repo))
+					fatal("cvs_mkpath: overflow");
+			}
+
+			len = strlcat(repo, sp, sizeof(repo));
 			if (len >= (int)sizeof(repo))
 				fatal("cvs_mkpath: overflow");
 		}
-
-		len = strlcat(repo, sp, sizeof(repo));
-		if (len >= (int)sizeof(repo))
-			fatal("cvs_mkpath: overflow");
 
 		if (rpath[0] != '\0') {
 			len = strlcat(rpath, "/", sizeof(rpath));
@@ -636,12 +618,35 @@ cvs_mkpath(const char *path, char *tag)
 		if (mkdir(rpath, 0755) == -1 && errno != EEXIST)
 			fatal("cvs_mkpath: %s: %s", rpath, strerror(errno));
 
+		if (cvs_cmdop == CVS_OP_EXPORT && !cvs_server_active)
+			continue;
+
 		cvs_mkadmin(rpath, current_cvsroot->cr_str, repo,
-		    tag, NULL, 0);
+		    tag, NULL);
+
+		if (dp != NULL) {
+			if ((p = strchr(dp, '/')) != NULL)
+				*p = '\0';
+
+			entry = xmalloc(CVS_ENT_MAXLINELEN);
+			cvs_ent_line_str(dp, NULL, NULL, NULL, NULL, 1, 0,
+			    entry, CVS_ENT_MAXLINELEN);
+
+			ent = cvs_ent_open(rpath);
+			cvs_ent_add(ent, entry);
+			cvs_ent_close(ent, ENT_SYNC);
+			xfree(entry);
+
+			if (p != NULL)
+				*p = '/';
+		}
 
 		if (cvs_server_active == 1 && strcmp(rpath, ".")) {
-			if (tag != NULL)
-				cvs_server_set_sticky(rpath, tag);
+			if (tag != NULL) {
+				(void)xsnprintf(sticky, sizeof(sticky),
+				    "T%s", tag);
+				cvs_server_set_sticky(rpath, sticky);
+			}
 		}
 	}
 
@@ -659,20 +664,17 @@ cvs_splitlines(u_char *data, size_t len)
 	struct cvs_lines *lines;
 	struct cvs_line *lp;
 
-	lines = xmalloc(sizeof(*lines));
-	memset(lines, 0, sizeof(*lines));
+	lines = xcalloc(1, sizeof(*lines));
 	TAILQ_INIT(&(lines->l_lines));
 
-	lp = xmalloc(sizeof(*lp));
-	memset(lp, 0, sizeof(*lp));
+	lp = xcalloc(1, sizeof(*lp));
 	TAILQ_INSERT_TAIL(&(lines->l_lines), lp, l_list);
 
 	p = c = data;
 	for (i = 0; i < len; i++) {
 		if (*p == '\n' || (i == len - 1)) {
 			tlen = p - c + 1;
-			lp = xmalloc(sizeof(*lp));
-			memset(lp, 0, sizeof(*lp));
+			lp = xcalloc(1, sizeof(*lp));
 			lp->l_line = c;
 			lp->l_len = tlen;
 			lp->l_lineno = ++(lines->l_nblines);
@@ -698,38 +700,6 @@ cvs_freelines(struct cvs_lines *lines)
 	}
 
 	xfree(lines);
-}
-
-BUF *
-cvs_patchfile(u_char *data, size_t dlen, u_char *patch, size_t plen,
-    int (*p)(struct cvs_lines *, struct cvs_lines *))
-{
-	struct cvs_lines *dlines, *plines;
-	struct cvs_line *lp;
-	BUF *res;
-
-	if ((dlines = cvs_splitlines(data, dlen)) == NULL)
-		return (NULL);
-
-	if ((plines = cvs_splitlines(patch, plen)) == NULL)
-		return (NULL);
-
-	if (p(dlines, plines) < 0) {
-		cvs_freelines(dlines);
-		cvs_freelines(plines);
-		return (NULL);
-	}
-
-	res = cvs_buf_alloc(1024, BUF_AUTOEXT);
-	TAILQ_FOREACH(lp, &dlines->l_lines, l_list) {
-		if (lp->l_line == NULL)
-			continue;
-		cvs_buf_append(res, lp->l_line, lp->l_len);
-	}
-
-	cvs_freelines(dlines);
-	cvs_freelines(plines);
-	return (res);
 }
 
 /*
@@ -831,14 +801,12 @@ cvs_revision_select(RCSFILE *file, char *range)
 				nrev++;
 			}
 		}
+
+		rcsnum_free(lnum);
+		rcsnum_free(rnum);
 	}
 
 	cvs_argv_destroy(revargv);
-
-	if (lnum != NULL)
-		rcsnum_free(lnum);
-	if (rnum != NULL)
-		rcsnum_free(rnum);
 
 	return (nrev);
 }
@@ -860,4 +828,22 @@ cvs_yesno(void)
 			c = getchar();
 
 	return (ret);
+}
+
+void
+cvs_exec(const char *prog)
+{
+	pid_t pid;
+	char *argp[] = { "sh", "-c", NULL, NULL };
+
+	argp[2] = prog;
+
+	if ((pid = fork()) == -1) {
+		cvs_log(LP_ERR, "cvs_exec: fork failed");
+		return;
+	} else if (pid == 0) {
+		execv(_PATH_BSHELL, argp);
+		cvs_log(LP_ERR, "failed to run '%s'", prog);
+		_exit(127);
+	}
 }

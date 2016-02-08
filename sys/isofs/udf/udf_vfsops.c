@@ -1,4 +1,4 @@
-/*	$OpenBSD: udf_vfsops.c,v 1.23 2006/08/07 15:50:42 pedro Exp $	*/
+/*	$OpenBSD: udf_vfsops.c,v 1.26 2007/12/09 20:54:01 jmc Exp $	*/
 
 /*
  * Copyright (c) 2001, 2002 Scott Long <scottl@freebsd.org>
@@ -29,7 +29,7 @@
  */
 
 /*
- * Ported to OpenBSD by Pedro Martelletto <pedro@openbsd.org> in February 2005.
+ * Ported to OpenBSD by Pedro Martelletto in February 2005.
  */
 
 /*
@@ -248,9 +248,7 @@ udf_mountfs(struct vnode *devvp, struct mount *mp, uint32_t lb, struct proc *p)
 	if (error)
 		return (error);
 
-	MALLOC(ump, struct umount *, sizeof(struct umount), M_UDFMOUNT,
-	    M_WAITOK);
-	bzero(ump, sizeof(struct umount));
+	ump = malloc(sizeof(*ump), M_UDFMOUNT, M_WAITOK | M_ZERO);
 
 	mp->mnt_data = (qaddr_t) ump;
 	mp->mnt_stat.f_fsid.val[0] = devvp->v_rdev;
@@ -395,7 +393,7 @@ bail:
 		free(ump->um_hashtbl, M_UDFMOUNT);
 
 	if (ump != NULL) {
-		FREE(ump, M_UDFMOUNT);
+		free(ump, M_UDFMOUNT);
 		mp->mnt_data = NULL;
 		mp->mnt_flag &= ~MNT_LOCAL;
 	}
@@ -441,7 +439,7 @@ udf_unmount(struct mount *mp, int mntflags, struct proc *p)
 	if (ump->um_hashtbl != NULL)
 		free(ump->um_hashtbl, M_UDFMOUNT);
 
-	FREE(ump, M_UDFMOUNT);
+	free(ump, M_UDFMOUNT);
 
 	mp->mnt_data = (qaddr_t)0;
 	mp->mnt_flag &= ~MNT_LOCAL;

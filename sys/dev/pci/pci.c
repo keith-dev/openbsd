@@ -1,4 +1,4 @@
-/*	$OpenBSD: pci.c,v 1.50 2007/05/21 22:10:45 kettenis Exp $	*/
+/*	$OpenBSD: pci.c,v 1.56 2008/02/27 21:11:11 kettenis Exp $	*/
 /*	$NetBSD: pci.c,v 1.31 1997/06/06 23:48:04 thorpej Exp $	*/
 
 /*
@@ -46,6 +46,7 @@
 
 int pcimatch(struct device *, void *, void *);
 void pciattach(struct device *, struct device *, void *);
+int pcidetach(struct device *, int);
 void pcipower(int, void *);
 
 #define NMAPREG			((PCI_MAPREG_END - PCI_MAPREG_START) / \
@@ -65,7 +66,7 @@ extern int allowaperture;
 #endif
 
 struct cfattach pci_ca = {
-	sizeof(struct pci_softc), pcimatch, pciattach
+	sizeof(struct pci_softc), pcimatch, pciattach, pcidetach
 };
 
 struct cfdriver pci_cd = {
@@ -160,6 +161,12 @@ pciattach(struct device *parent, struct device *self, void *aux)
 	sc->sc_intrswiz = pba->pba_intrswiz;
 	sc->sc_intrtag = pba->pba_intrtag;
 	pci_enumerate_bus(sc, NULL, NULL);
+}
+
+int
+pcidetach(struct device *self, int flags)
+{
+	return pci_detach_devices((struct pci_softc *)self, flags);
 }
 
 /* save and restore the pci config space */
@@ -349,6 +356,26 @@ pci_probe_device(struct pci_softc *sc, pcitag_t tag,
 }
 
 int
+pci_detach_devices(struct pci_softc *sc, int flags)
+{
+	struct pci_dev *pd, *next;
+	int ret;
+
+	ret = config_detach_children(&sc->sc_dev, flags);
+	if (ret != 0)
+		return (ret);
+
+	for (pd = LIST_FIRST(&sc->sc_devs);
+	     pd != LIST_END(&sc->sc_devs); pd = next) {
+		next = LIST_NEXT(pd, pd_next);
+		free(pd, M_DEVBUF);
+	}
+	LIST_INIT(&sc->sc_devs);
+
+	return (0);
+}
+
+int
 pci_get_capability(pci_chipset_tag_t pc, pcitag_t tag, int capid,
     int *offset, pcireg_t *value)
 {
@@ -363,9 +390,10 @@ pci_get_capability(pci_chipset_tag_t pc, pcitag_t tag, int capid,
 	reg = pci_conf_read(pc, tag, PCI_BHLC_REG);
 	switch (PCI_HDRTYPE_TYPE(reg)) {
 	case 0:	/* standard device header */
+	case 1: /* PCI-PCI bridge header */
 		ofs = PCI_CAPLISTPTR_REG;
 		break;
-	case 2:	/* PCI-CardBus Bridge header */
+	case 2:	/* PCI-CardBus bridge header */
 		ofs = PCI_CARDBUS_CAPLISTPTR_REG;
 		break;
 	default:
@@ -408,6 +436,23 @@ pci_find_device(struct pci_attach_args *pa,
 			return (1);
 	}
 	return (0);
+}
+
+int
+pci_set_powerstate(pci_chipset_tag_t pc, pcitag_t tag, int state)
+{
+	pcireg_t reg;
+	int offset;
+
+	if (pci_get_capability(pc, tag, PCI_CAP_PWRMGMT, &offset, 0)) {
+		reg = pci_conf_read(pc, tag, offset + PCI_PMCSR);
+		if ((reg & PCI_PMCSR_STATE_MASK) != state) {
+			pci_conf_write(pc, tag, offset + PCI_PMCSR,
+			    (reg & ~PCI_PMCSR_STATE_MASK) | state);
+			return (reg & PCI_PMCSR_STATE_MASK);
+		}
+	}
+	return (state);
 }
 
 #ifndef PCI_MACHDEP_ENUMERATE_BUS
@@ -463,6 +508,83 @@ pci_enumerate_bus(struct pci_softc *sc,
 	return (0);
 }
 #endif /* PCI_MACHDEP_ENUMERATE_BUS */
+
+/*
+ * Vital Product Data (PCI 2.2)
+ */
+
+int
+pci_vpd_read(pci_chipset_tag_t pc, pcitag_t tag, int offset, int count,
+    pcireg_t *data)
+{
+	uint32_t reg;
+	int ofs, i, j;
+
+	KASSERT(data != NULL);
+	KASSERT((offset + count) < 0x7fff);
+
+	if (pci_get_capability(pc, tag, PCI_CAP_VPD, &ofs, &reg) == 0)
+		return (1);
+
+	for (i = 0; i < count; offset += sizeof(*data), i++) {
+		reg &= 0x0000ffff;
+		reg &= ~PCI_VPD_OPFLAG;
+		reg |= PCI_VPD_ADDRESS(offset);
+		pci_conf_write(pc, tag, ofs, reg);
+
+		/*
+		 * PCI 2.2 does not specify how long we should poll
+		 * for completion nor whether the operation can fail.
+		 */
+		j = 0;
+		do {
+			if (j++ == 20)
+				return (1);
+			delay(4);
+			reg = pci_conf_read(pc, tag, ofs);
+		} while ((reg & PCI_VPD_OPFLAG) == 0);
+		data[i] = pci_conf_read(pc, tag, PCI_VPD_DATAREG(ofs));
+	}
+
+	return (0);
+}
+
+int
+pci_vpd_write(pci_chipset_tag_t pc, pcitag_t tag, int offset, int count,
+    pcireg_t *data)
+{
+	pcireg_t reg;
+	int ofs, i, j;
+
+	KASSERT(data != NULL);
+	KASSERT((offset + count) < 0x7fff);
+
+	if (pci_get_capability(pc, tag, PCI_CAP_VPD, &ofs, &reg) == 0)
+		return (1);
+
+	for (i = 0; i < count; offset += sizeof(*data), i++) {
+		pci_conf_write(pc, tag, PCI_VPD_DATAREG(ofs), data[i]);
+
+		reg &= 0x0000ffff;
+		reg |= PCI_VPD_OPFLAG;
+		reg |= PCI_VPD_ADDRESS(offset);
+		pci_conf_write(pc, tag, ofs, reg);
+
+		/*
+		 * PCI 2.2 does not specify how long we should poll
+		 * for completion nor whether the operation can fail.
+		 */
+		j = 0;
+		do {
+			if (j++ == 20)
+				return (1);
+			delay(1);
+			reg = pci_conf_read(pc, tag, ofs);
+		} while (reg & PCI_VPD_OPFLAG);
+	}
+
+	return (0);
+}
 
 int
 pci_matchbyid(struct pci_attach_args *pa, const struct pci_matchid *ids,
@@ -547,20 +669,16 @@ pciioctl(dev_t dev, u_long cmd, caddr_t data, int flag, struct proc *p)
 		    pci->sc_bus == io->pi_sel.pc_bus)
 			break;
 	}
-	if (pci != NULL && pci->sc_bus == io->pi_sel.pc_bus) {
-		pc = pci->sc_pc;
-	} else {
-		error = ENXIO;
-		goto done;
-	}
+	if (i >= pci_cd.cd_ndevs)
+		return ENXIO;
+
 	/* Check bounds */
 	if (pci->sc_bus >= 256 || 
-	    io->pi_sel.pc_dev >= pci_bus_maxdevs(pc, pci->sc_bus) ||
-	    io->pi_sel.pc_func >= 8) {
-		error = EINVAL;
-		goto done;
-	}
+	    io->pi_sel.pc_dev >= pci_bus_maxdevs(pci->sc_pc, pci->sc_bus) ||
+	    io->pi_sel.pc_func >= 8)
+		return EINVAL;
 
+	pc = pci->sc_pc;
 	tag = pci_make_tag(pc, io->pi_sel.pc_bus, io->pi_sel.pc_dev,
 			   io->pi_sel.pc_func);
 
@@ -606,7 +724,7 @@ pciioctl(dev_t dev, u_long cmd, caddr_t data, int flag, struct proc *p)
 		error = ENOTTY;
 		break;
 	}
- done:
+
 	return (error);
 }
 

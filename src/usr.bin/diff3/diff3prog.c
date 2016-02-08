@@ -1,4 +1,4 @@
-/*	$OpenBSD: diff3prog.c,v 1.8 2005/11/22 16:00:49 markus Exp $	*/
+/*	$OpenBSD: diff3prog.c,v 1.10 2008/02/27 18:10:05 tobias Exp $	*/
 
 /*
  * Copyright (C) Caldera International Inc.  2001-2002.
@@ -71,7 +71,7 @@ static const char copyright[] =
 #endif /* not lint */
 
 #ifndef lint
-static const char rcsid[] = "$OpenBSD: diff3prog.c,v 1.8 2005/11/22 16:00:49 markus Exp $";
+static const char rcsid[] = "$OpenBSD: diff3prog.c,v 1.10 2008/02/27 18:10:05 tobias Exp $";
 #endif /* not lint */
 
 #include <stdio.h>
@@ -193,10 +193,8 @@ main(int argc, char **argv)
 	m = readin(argv[0], &d13);
 	n = readin(argv[1], &d23);
 	for (i = 0; i <= 2; i++) {
-		if ((fp[i] = fopen(argv[i + 2], "r")) == NULL) {
-			printf("diff3: can't open %s\n", argv[i + 2]);
-			exit(EXIT_FAILURE);
-		}
+		if ((fp[i] = fopen(argv[i + 2], "r")) == NULL)
+			err(EXIT_FAILURE, "can't open %s", argv[i + 2]);
 	}
 	merge(m, n);
 	exit(EXIT_SUCCESS);
@@ -215,6 +213,8 @@ readin(char *name, struct diff **dd)
 	char kind, *p;
 
 	fp[0] = fopen(name, "r");
+	if (fp[0] == NULL)
+		err(EXIT_FAILURE, "can't open %s", name);
 	for (i=0; (p = getchange(fp[0])); i++) {
 		if (i >= szchanges - 1)
 			increase();
@@ -514,7 +514,7 @@ repos(int nchar)
 	int i;
 
 	for (i = 0; i < 2; i++)
-		(void)fseek(fp[i], (long)-nchar, 1);
+		(void)fseek(fp[i], (long)-nchar, SEEK_CUR);
 }
 
 __dead void
@@ -554,7 +554,7 @@ edscript(int n)
 			prange(&de[n].old);
 		else
 			printf("%da\n=======\n", de[n].old.to -1);
-		(void)fseek(fp[2], (long)de[n].new.from, 0);
+		(void)fseek(fp[2], (long)de[n].new.from, SEEK_SET);
 		for (k = de[n].new.to-de[n].new.from; k > 0; k-= j) {
 			j = k > BUFSIZ ? BUFSIZ : k;
 			if (fread(block, 1, j, fp[2]) != j)

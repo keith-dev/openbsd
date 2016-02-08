@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_vrreg.h,v 1.17 2006/02/05 18:23:37 brad Exp $	*/
+/*	$OpenBSD: if_vrreg.h,v 1.20 2007/10/04 01:29:39 brad Exp $	*/
 
 /*
  * Copyright (c) 1997, 1998
@@ -332,13 +332,9 @@
 struct vr_desc {
 	u_int32_t		vr_status;
 	u_int32_t		vr_ctl;
-	u_int32_t		vr_ptr1;
-	u_int32_t		vr_ptr2;
+	u_int32_t		vr_data;
+	u_int32_t		vr_next;
 };
-
-#define vr_data		vr_ptr1
-#define vr_next		vr_ptr2
-
 
 #define VR_RXSTAT_RXERR		0x00000001
 #define VR_RXSTAT_CRCERR	0x00000002
@@ -393,7 +389,7 @@ struct vr_desc {
 #define VR_RX_LIST_CNT		64
 #define VR_TX_LIST_CNT		128
 #define VR_MIN_FRAMELEN		60
-#define VR_RXLEN		1520
+#define VR_RXLEN		1524
 
 #define VR_TXOWN(x)		x->vr_ptr->vr_status
 
@@ -587,7 +583,3 @@ struct vr_softc {
 #define VR_PSTATE_D3		0x0003
 #define VR_PME_EN		0x0010
 #define VR_PME_STATUS		0x8000
-
-#ifndef ETHER_CRC_LEN
-#define ETHER_CRC_LEN 4
-#endif

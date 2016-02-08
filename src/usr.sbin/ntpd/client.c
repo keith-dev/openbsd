@@ -1,4 +1,4 @@
-/*	$OpenBSD: client.c,v 1.76 2007/05/01 07:40:45 otto Exp $ */
+/*	$OpenBSD: client.c,v 1.79 2008/01/28 11:45:59 mpf Exp $ */
 
 /*
  * Copyright (c) 2003, 2004 Henning Brauer <henning@openbsd.org>
@@ -54,6 +54,7 @@ client_peer_init(struct ntp_peer *p)
 	p->shift = 0;
 	p->trustlevel = TRUSTLEVEL_PATHETIC;
 	p->lasterror = 0;
+	p->senderrors = 0;
 
 	return (client_addr_init(p));
 }
@@ -80,7 +81,7 @@ client_addr_init(struct ntp_peer *p)
 			p->state = STATE_DNS_DONE;
 			break;
 		default:
-			fatal("king bula sez: wrong AF in client_addr_init");
+			fatalx("king bula sez: wrong AF in client_addr_init");
 			/* not reached */
 		}
 	}
@@ -123,7 +124,8 @@ client_query(struct ntp_peer *p)
 	int	tos = IPTOS_LOWDELAY;
 
 	if (p->addr == NULL && client_nextaddr(p) == -1) {
-		set_next(p, scale_interval(INTERVAL_QUERY_AGGRESSIVE));
+		set_next(p, MAX(SETTIME_TIMEOUT,
+		    scale_interval(INTERVAL_QUERY_AGGRESSIVE)));
 		return (0);
 	}
 
@@ -140,8 +142,8 @@ client_query(struct ntp_peer *p)
 			if (errno == ECONNREFUSED || errno == ENETUNREACH ||
 			    errno == EHOSTUNREACH || errno == EADDRNOTAVAIL) {
 				client_nextaddr(p);
-				set_next(p,
-				    scale_interval(INTERVAL_QUERY_AGGRESSIVE));
+				set_next(p, MAX(SETTIME_TIMEOUT,
+				    scale_interval(INTERVAL_QUERY_AGGRESSIVE)));
 				return (-1);
 			} else
 				fatal("client_query connect");
@@ -171,11 +173,13 @@ client_query(struct ntp_peer *p)
 
 	if (ntp_sendmsg(p->query->fd, NULL, &p->query->msg,
 	    NTP_MSGSIZE_NOAUTH, 0) == -1) {
+		p->senderrors++;
 		set_next(p, INTERVAL_QUERY_PATHETIC);
 		p->trustlevel = TRUSTLEVEL_PATHETIC;
 		return (-1);
 	}
 
+	p->senderrors = 0;
 	p->state = STATE_QUERY_SENT;
 	set_deadline(p, QUERYTIME_MAX);
 

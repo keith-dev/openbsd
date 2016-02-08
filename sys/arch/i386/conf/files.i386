@@ -1,4 +1,4 @@
-#	$OpenBSD: files.i386,v 1.164 2007/07/04 08:16:13 mpf Exp $
+#	$OpenBSD: files.i386,v 1.172 2008/03/04 21:14:29 oga Exp $
 #
 # new style config file for i386 architecture
 #
@@ -18,22 +18,22 @@ file	arch/i386/i386/db_memrw.c	ddb | kgdb
 file	arch/i386/i386/db_trace.c	ddb
 file	arch/i386/i386/db_magic.s	ddb
 file	arch/i386/i386/disksubr.c	disk
-file	arch/i386/i386/est.c		!small_kernel & i686_cpu
+file	arch/i386/i386/est.c		!small_kernel
 file	arch/i386/i386/gdt.c
 file	arch/i386/i386/in_cksum.s	inet
 file	arch/i386/i386/machdep.c
-file	arch/i386/i386/via.c		i686_cpu
-file	arch/i386/i386/amd64errata.c	i686_cpu
+file	arch/i386/i386/via.c
+file	arch/i386/i386/amd64errata.c
 file	arch/i386/i386/kgdb_machdep.c	kgdb
-file	arch/i386/i386/longrun.c	!small_kernel & i586_cpu
+file	arch/i386/i386/longrun.c	!small_kernel
 file	arch/i386/i386/mem.c
 file	arch/i386/i386/i686_mem.c	mtrr
 file	arch/i386/i386/k6_mem.c		mtrr
-file	arch/i386/i386/p4tcc.c		!small_kernel & i686_cpu
+file	arch/i386/i386/p4tcc.c		!small_kernel
 file	arch/i386/i386/pmap.c
-file	arch/i386/i386/powernow.c	!small_kernel & i586_cpu
-file	arch/i386/i386/powernow-k7.c	!small_kernel & i686_cpu
-file	arch/i386/i386/powernow-k8.c	!small_kernel & i686_cpu
+file	arch/i386/i386/powernow.c	!small_kernel
+file	arch/i386/i386/powernow-k7.c	!small_kernel
+file	arch/i386/i386/powernow-k8.c	!small_kernel
 file	arch/i386/i386/process_machdep.c
 file	arch/i386/i386/procfs_machdep.c	procfs
 file	arch/i386/i386/random.s
@@ -96,19 +96,15 @@ file	arch/i386/i386/mainbus.c	mainbus
 #
 
 include "../../../dev/pci/files.pci"
+include "../../../dev/pci/files.agp"
 file	arch/i386/pci/pci_machdep.c		pci
-file	arch/i386/pci/agp_machdep.c		pciagp
-file	dev/pci/agp_ali.c			pciagp
-file	dev/pci/agp_amd.c			pciagp
-file	dev/pci/agp_i810.c			pciagp
-file	dev/pci/agp_intel.c			pciagp
-file	dev/pci/agp_sis.c			pciagp
-file	dev/pci/agp_via.c			pciagp
+file	arch/i386/pci/agp_machdep.c		agp
 file	arch/i386/pci/pciide_machdep.c		pciide
 file	arch/i386/pci/pcic_pci_machdep.c	pcic_pci
 
 # PCI-Host bridge chipsets
-device	pchb: pcibus
+device  pchb: pcibus, agpbus, agp_amd, agp_i810, agp_intel, agp_sis,
+              agp_via
 attach	pchb at pci
 file	arch/i386/pci/pchb.c		pchb
 
@@ -132,10 +128,15 @@ device	gscpm
 attach	gscpm at pci
 file	arch/i386/pci/gscpm.c		gscpm
 
+# AMD Geode CS5536 PCI-ISA bridge
+device	glxpcib: isabus, gpiobus
+attach	glxpcib at pci
+file	arch/i386/pci/glxpcib.c		glxpcib   
+
 # PCI-ISA bridge chipsets
 device	pcib: isabus
 attach	pcib at pci
-file	arch/i386/pci/pcib.c		pcib | ichpcib | gscpcib | piixpcib
+file	arch/i386/pci/pcib.c		pcib | ichpcib | gscpcib | glxpcib | piixpcib | amdpcib
 
 # Intel ICHx/ICHx-M LPC bridges
 device	ichpcib: isabus
@@ -151,6 +152,11 @@ file	arch/i386/pci/piixpcib.c	piixpcib
 device	gscpcib: isabus, gpiobus
 attach	gscpcib at pci
 file	arch/i386/pci/gscpcib.c		gscpcib
+
+# AMD 8111 LPC bridge
+device	amdpcib: isabus
+attach	amdpcib at pci
+file	dev/pci/amdpcib.c		amdpcib
 
 device	hme: ether, ifnet, mii, ifmedia
 file	dev/ic/hme.c			hme
@@ -289,6 +295,8 @@ device	apm
 attach	apm at bios
 file	arch/i386/i386/apm.c		apm needs-count
 file	arch/i386/i386/apmcall.S	apm
+
+file	arch/i386/i386/acpiapm.c
 
 # Intel SMP specification 1.4
 define	mpbios
@@ -438,3 +446,24 @@ file	arch/i386/i386/esm.c			esm needs-flag
 include "dev/vesa/files.vesa"
 
 #include "dev/rasops/files.rasops"
+
+# quad support is neccessary for 32 bit architectures
+file lib/libkern/adddi3.c
+file lib/libkern/anddi3.c
+file lib/libkern/ashldi3.c
+file lib/libkern/ashrdi3.c
+file lib/libkern/cmpdi2.c
+file lib/libkern/divdi3.c
+file lib/libkern/iordi3.c
+file lib/libkern/lshldi3.c
+file lib/libkern/lshrdi3.c
+file lib/libkern/moddi3.c
+file lib/libkern/muldi3.c
+file lib/libkern/negdi2.c
+file lib/libkern/notdi2.c
+file lib/libkern/qdivrem.c
+file lib/libkern/subdi3.c
+file lib/libkern/ucmpdi2.c
+file lib/libkern/udivdi3.c
+file lib/libkern/umoddi3.c
+file lib/libkern/xordi3.c

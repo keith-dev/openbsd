@@ -1,4 +1,4 @@
-/*	$OpenBSD: scsi_base.c,v 1.122 2007/06/23 19:19:49 krw Exp $	*/
+/*	$OpenBSD: scsi_base.c,v 1.124 2007/11/25 22:28:53 dlg Exp $	*/
 /*	$NetBSD: scsi_base.c,v 1.43 1997/04/02 02:29:36 mycroft Exp $	*/
 
 /*
@@ -41,7 +41,6 @@
 #include <sys/kernel.h>
 #include <sys/buf.h>
 #include <sys/uio.h>
-#include <sys/malloc.h>
 #include <sys/errno.h>
 #include <sys/device.h>
 #include <sys/proc.h>
@@ -1172,10 +1171,12 @@ scsi_interpret_sense(struct scsi_xfer *xs)
 void
 sc_print_addr(struct scsi_link *sc_link)
 {
+	struct device *adapter_device = sc_link->bus->sc_dev.dv_parent;
+
 	printf("%s(%s:%d:%d): ",
 	    sc_link->device_softc ?
 	    ((struct device *)sc_link->device_softc)->dv_xname : "probe",
-	    ((struct device *)sc_link->adapter_softc)->dv_xname,
+	    adapter_device->dv_xname,
 	    sc_link->target, sc_link->lun);
 }
 

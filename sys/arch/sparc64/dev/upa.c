@@ -1,4 +1,4 @@
-/*	$OpenBSD: upa.c,v 1.5 2007/03/05 18:58:30 kettenis Exp $	*/
+/*	$OpenBSD: upa.c,v 1.8 2008/01/17 22:53:18 kettenis Exp $	*/
 
 /*
  * Copyright (c) 2002 Jason L. Wright (jason@thought.net)
@@ -45,15 +45,6 @@
 #include <machine/autoconf.h>
 #include <machine/openfirm.h>
 
-#include <sparc64/dev/ebusreg.h>
-#include <sparc64/dev/ebusvar.h>
-
-#include "pckbd.h"
-#if NPCKBD > 0
-#include <dev/ic/pckbcvar.h>
-#include <dev/pckbc/pckbdvar.h>
-#endif
-
 struct upa_range {
 	u_int64_t	ur_space;
 	u_int64_t	ur_addr;
@@ -95,6 +86,7 @@ upa_match(struct device *parent, void *match, void *aux)
 
 	if (strcmp(ma->ma_name, "upa") == 0)
 		return (1);
+
 	return (0);
 }
 
@@ -154,7 +146,7 @@ upa_print(void *args, const char *name)
 	struct mainbus_attach_args *ma = args;
 
 	if (name)
-		printf("%s at %s", ma->ma_name, name);
+		printf("\"%s\" at %s", ma->ma_name, name);
 	return (UNCONF);
 }
 
@@ -163,11 +155,10 @@ upa_alloc_bus_tag(struct upa_softc *sc)
 {
 	struct sparc_bus_space_tag *bt;
 
-	bt = malloc(sizeof(*bt), M_DEVBUF, M_NOWAIT);
+	bt = malloc(sizeof(*bt), M_DEVBUF, M_NOWAIT | M_ZERO);
 	if (bt == NULL)
 		panic("upa: couldn't alloc bus tag");
 
-	bzero(bt, sizeof *bt);
 	snprintf(bt->name, sizeof(bt->name), "%s",
 			sc->sc_dev.dv_xname);
 	bt->cookie = sc;

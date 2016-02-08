@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.c,v 1.20 2007/05/02 18:46:07 kettenis Exp $	*/
+/*	$OpenBSD: cpu.c,v 1.33 2007/12/21 12:15:36 kettenis Exp $	*/
 /*	$NetBSD: cpu.c,v 1.13 2001/05/26 21:27:15 chs Exp $ */
 
 /*
@@ -62,7 +62,9 @@
 #include <machine/cpu.h>
 #include <machine/reg.h>
 #include <machine/trap.h>
+#include <machine/openfirm.h>
 #include <machine/pmap.h>
+#include <machine/sparc64.h>
 
 #include <sparc64/sparc64/cache.h>
 
@@ -74,14 +76,13 @@ struct cacheinfo cacheinfo = {
 /* Linked list of all CPUs in system. */
 struct cpu_info *cpus = NULL;
 
+struct cpu_info *alloc_cpuinfo(int);
+
 /* The following are used externally (sysctl_hw). */
 char	machine[] = MACHINE;		/* from <machine/param.h> */
 char	cpu_model[100];
 
-struct	proc *fpproc;
-int	foundfpu;
-int	want_ast;
-extern	int want_resched;
+void cpu_hatch(void);
 
 /* The CPU configuration driver. */
 static void cpu_attach(struct device *, struct device *, void *);
@@ -93,10 +94,78 @@ struct cfattach cpu_ca = {
 
 extern struct cfdriver cpu_cd;
 
-static char *fsrtoname(int, int, int, char *, size_t);
-
 #define	IU_IMPL(v)	((((u_int64_t)(v))&VER_IMPL) >> VER_IMPL_SHIFT)
 #define	IU_VERS(v)	((((u_int64_t)(v))&VER_MASK) >> VER_MASK_SHIFT)
+
+struct cpu_info *
+alloc_cpuinfo(int node)
+{
+	paddr_t pa0, pa;
+	vaddr_t va, va0;
+	vsize_t sz = 8 * PAGE_SIZE;
+	int portid;
+	struct cpu_info *cpi, *ci;
+	extern paddr_t cpu0paddr;
+
+	portid = getpropint(node, "portid", -1);
+	if (portid == -1)
+		portid = getpropint(node, "upa-portid", -1);
+	if (portid == -1)
+		panic("alloc_cpuinfo: portid");
+
+	for (cpi = cpus; cpi != NULL; cpi = cpi->ci_next)
+		if (cpi->ci_upaid == portid)
+			return cpi;
+
+	va = uvm_km_valloc_align(kernel_map, sz, 8 * PAGE_SIZE);
+	if (va == 0)
+		panic("alloc_cpuinfo: no virtual space");
+	va0 = va;
+
+	pa0 = cpu0paddr;
+	cpu0paddr += sz;
+
+	for (pa = pa0; pa < cpu0paddr; pa += PAGE_SIZE, va += PAGE_SIZE)
+		pmap_kenter_pa(va, pa, VM_PROT_READ | VM_PROT_WRITE);
+
+	pmap_update(pmap_kernel());
+
+	cpi = (struct cpu_info *)(va0 + CPUINFO_VA - INTSTACK);
+
+	memset((void *)va0, 0, sz);
+
+	/*
+	 * Initialize cpuinfo structure.
+	 *
+	 * Arrange pcb, idle stack and interrupt stack in the same
+	 * way as is done for the boot CPU in pmap.c.
+	 */
+	cpi->ci_next = NULL;
+	cpi->ci_curproc = NULL;
+	cpi->ci_number = ncpus++;
+	cpi->ci_upaid = portid;
+	cpi->ci_fpproc = NULL;
+#ifdef MULTIPROCESSOR
+	cpi->ci_spinup = cpu_hatch;				/* XXX */
+#else
+	cpi->ci_spinup = NULL;
+#endif
+
+	cpi->ci_initstack = (void *)EINTSTACK;
+	cpi->ci_paddr = pa0;
+	cpi->ci_self = cpi;
+	cpi->ci_node = node;
+
+	sched_init_cpu(cpi);
+
+	/*
+	 * Finally, add itself to the list of active cpus.
+	 */
+	for (ci = cpus; ci->ci_next != NULL; ci = ci->ci_next)
+		;
+	ci->ci_next = cpi;
+	return (cpi);
+}
 
 int
 cpu_match(parent, vcf, aux)
@@ -105,9 +174,33 @@ cpu_match(parent, vcf, aux)
 	void *aux;
 {
 	struct mainbus_attach_args *ma = aux;
-	struct cfdata *cf = (struct cfdata *)vcf;
+#ifndef MULTIPROCESSOR
+	int portid;
+#endif
+	char buf[32];
 
-	return (strcmp(cf->cf_driver->cd_name, ma->ma_name) == 0);
+	if (OF_getprop(ma->ma_node, "device_type", buf, sizeof(buf)) <= 0 ||
+	    strcmp(buf, "cpu") != 0)
+		return (0);
+
+#ifndef MULTIPROCESSOR
+	/*
+	 * On singleprocessor kernels, only match the CPU we're
+	 * running on.
+	 */
+	portid = getpropint(ma->ma_node, "upa-portid", -1);
+	if (portid == -1)
+		portid = getpropint(ma->ma_node, "portid", -1);
+	if (portid == -1)
+		portid = getpropint(ma->ma_node, "cpuid", -1);
+	if (portid == -1)
+		return (0);
+
+	if (portid != cpus->ci_upaid)
+		return (0);
+#endif
+
+	return (1);
 }
 
 /*
@@ -123,43 +216,25 @@ cpu_attach(parent, dev, aux)
 {
 	int node;
 	long clk;
-	int impl, vers, fver;
-	char *cpuname;
-	char *fpuname;
+	int impl, vers;
 	struct mainbus_attach_args *ma = aux;
-	struct fpstate64 *fpstate;
-	struct fpstate64 fps[2];
-	char *sep;
-	char fpbuf[40];
+	struct cpu_info *ci;
+	const char *sep;
 	register int i, l;
 	u_int64_t ver;
 	extern u_int64_t cpu_clockrate[];
 
-	/* This needs to be 64-bit aligned */
-	fpstate = ALIGNFPSTATE(&fps[1]);
-	/*
-	 * Get the FSR and clear any exceptions.  If we do not unload
-	 * the queue here and it is left over from a previous crash, we
-	 * will panic in the first loadfpstate(), due to a sequence error,
-	 * so we need to dump the whole state anyway.
-	 *
-	 * If there is no FPU, trap.c will advance over all the stores,
-	 * so we initialize fs_fsr here.
-	 */
-	fpstate->fs_fsr = 7 << FSR_VER_SHIFT;	/* 7 is reserved for "none" */
-	savefpstate(fpstate);
-	fver = (fpstate->fs_fsr >> FSR_VER_SHIFT) & (FSR_VER >> FSR_VER_SHIFT);
 	ver = getver();
 	impl = IU_IMPL(ver);
 	vers = IU_VERS(ver);
-	if (fver != 7) {
-		foundfpu = 1;
-		fpuname = fsrtoname(impl, vers, fver, fpbuf, sizeof fpbuf);
-	} else
-		fpuname = "no";
 
 	/* tell them what we have */
 	node = ma->ma_node;
+
+	/*
+	 * Allocate cpu_info structure if needed.
+	 */
+	ci = alloc_cpuinfo(node);
 
 	clk = getpropint(node, "clock-frequency", 0);
 	if (clk == 0) {
@@ -172,12 +247,8 @@ cpu_attach(parent, dev, aux)
 		cpu_clockrate[0] = clk; /* Tell OS what frequency we run on */
 		cpu_clockrate[1] = clk/1000000;
 	}
-	cpuname = getpropstring(node, "name");
-	if (strcmp(cpuname, "cpu") == 0)
-		cpuname = getpropstring(node, "compatible");
-	snprintf(cpu_model, sizeof cpu_model,
-		"%s (rev %d.%d) @ %s MHz, %s FPU", cpuname,
-		vers >> 4, vers & 0xf, clockfreq(clk), fpuname);
+	snprintf(cpu_model, sizeof cpu_model, "%s (rev %d.%d) @ %s MHz",
+	    ma->ma_name, vers >> 4, vers & 0xf, clockfreq(clk));
 	printf(": %s\n", cpu_model);
 
 	cacheinfo.c_physical = 1; /* Dunno... */
@@ -292,88 +363,64 @@ cpu_attach(parent, dev, aux)
 	}
 }
 
-/*
- * The following tables convert <IU impl, IU version, FPU version> triples
- * into names for the CPU and FPU chip.  In most cases we do not need to
- * inspect the FPU version to name the IU chip, but there is one exception
- * (for Tsunami), and this makes the tables the same.
- *
- * The table contents (and much of the structure here) are from Guy Harris.
- *
- */
-struct info {
-	u_char	valid;
-	u_char	iu_impl;
-	u_char	iu_vers;
-	u_char	fpu_vers;
-	char	*name;
-};
-
-#define	ANY	0xff	/* match any FPU version (or, later, IU version) */
-
-
-/* NB: table order matters here; specific numbers must appear before ANY. */
-static struct info fpu_types[] = {
-	/*
-	 * Vendor 0, IU Fujitsu0.
-	 */
-	{ 1, 0x0, ANY, 0, "MB86910 or WTL1164/5" },
-	{ 1, 0x0, ANY, 1, "MB86911 or WTL1164/5" },
-	{ 1, 0x0, ANY, 2, "L64802 or ACT8847" },
-	{ 1, 0x0, ANY, 3, "WTL3170/2" },
-	{ 1, 0x0, 4,   4, "on-chip" },		/* Swift */
-	{ 1, 0x0, ANY, 4, "L64804" },
-
-	/*
-	 * Vendor 1, IU ROSS0/1 or Pinnacle.
-	 */
-	{ 1, 0x1, 0xf, 0, "on-chip" },		/* Pinnacle */
-	{ 1, 0x1, ANY, 0, "L64812 or ACT8847" },
-	{ 1, 0x1, ANY, 1, "L64814" },
-	{ 1, 0x1, ANY, 2, "TMS390C602A" },
-	{ 1, 0x1, ANY, 3, "RT602 or WTL3171" },
-
-	/*
-	 * Vendor 2, IU BIT0.
-	 */
-	{ 1, 0x2, ANY, 0, "B5010 or B5110/20 or B5210" },
-
-	/*
-	 * Vendor 4, Texas Instruments.
-	 */
-	{ 1, 0x4, ANY, 0, "on-chip" },		/* Viking */
-	{ 1, 0x4, ANY, 4, "on-chip" },		/* Tsunami */
-
-	/*
-	 * Vendor 5, IU Matsushita0.
-	 */
-	{ 1, 0x5, ANY, 0, "on-chip" },
-
-	/*
-	 * Vendor 9, Weitek.
-	 */
-	{ 1, 0x9, ANY, 3, "on-chip" },
-
-	{ 0 }
-};
-
-static char *
-fsrtoname(impl, vers, fver, buf, buflen)
-	register int impl, vers, fver;
-	char *buf;
-	size_t buflen;
-{
-	register struct info *p;
-
-	for (p = fpu_types; p->valid; p++)
-		if (p->iu_impl == impl &&
-		    (p->iu_vers == vers || p->iu_vers == ANY) &&
-		    (p->fpu_vers == fver))
-			return (p->name);
-	snprintf(buf, buflen, "version %x", fver);
-	return (buf);
-}
-
 struct cfdriver cpu_cd = {
 	NULL, "cpu", DV_DULL
 };
+
+#ifdef MULTIPROCESSOR
+void cpu_mp_startup(void);
+
+void
+cpu_boot_secondary_processors(void)
+{
+	struct cpu_info *ci;
+	int cpuid, i;
+
+	for (ci = cpus; ci != NULL; ci = ci->ci_next) {
+		if (ci->ci_upaid == CPU_UPAID)
+			continue;
+
+		cpuid = getpropint(ci->ci_node, "cpuid", -1);
+		if (cpuid == -1) {
+			prom_start_cpu(ci->ci_node,
+			    (void *)cpu_mp_startup, ci->ci_paddr);
+		} else {
+			prom_start_cpu_by_cpuid(cpuid,
+			    (void *)cpu_mp_startup, ci->ci_paddr);
+		}
+
+		for (i = 0; i < 2000; i++) {
+			sparc_membar(Sync);
+			if (ci->ci_flags & CPUF_RUNNING)
+				break;
+			delay(10000);
+		}
+	}
+}
+
+void
+cpu_hatch(void)
+{
+	int s;
+
+	curcpu()->ci_flags |= CPUF_RUNNING;
+	sparc_membar(Sync);
+
+	s = splhigh();
+	microuptime(&curcpu()->ci_schedstate.spc_runtime);
+	splx(s);
+
+	tick_start();
+
+	SCHED_LOCK(s);
+	cpu_switchto(NULL, sched_chooseproc());
+}
+#endif
+
+void
+need_resched(struct cpu_info *ci)
+{
+	ci->ci_want_resched = 1;
+	if (ci->ci_curproc != NULL)
+		aston(ci->ci_curproc);
+}

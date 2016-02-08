@@ -1,4 +1,4 @@
-/*	$OpenBSD: recover.c,v 1.11 2006/12/11 20:50:55 deraadt Exp $	*/
+/*	$OpenBSD: recover.c,v 1.13 2007/09/14 14:29:20 chl Exp $	*/
 
 /*-
  * Copyright (c) 1993, 1994

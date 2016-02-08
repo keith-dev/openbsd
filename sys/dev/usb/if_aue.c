@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_aue.c,v 1.65 2007/06/14 10:11:15 mbalmer Exp $ */
+/*	$OpenBSD: if_aue.c,v 1.70 2007/12/31 19:33:37 deraadt Exp $ */
 /*	$NetBSD: if_aue.c,v 1.82 2003/03/05 17:37:36 shiba Exp $	*/
 /*
  * Copyright (c) 1997, 1998, 1999, 2000
@@ -84,7 +84,6 @@
 #include <sys/sockio.h>
 #include <sys/rwlock.h>
 #include <sys/mbuf.h>
-#include <sys/malloc.h>
 #include <sys/kernel.h>
 #include <sys/proc.h>
 #include <sys/socket.h>
@@ -175,12 +174,12 @@ const struct aue_type aue_devs[] = {
  {{ USB_VENDOR_DLINK,		USB_PRODUCT_DLINK_DSB650TX2},	  LSYS|PII },
  {{ USB_VENDOR_DLINK,		USB_PRODUCT_DLINK_DSB650},	  0 },
  {{ USB_VENDOR_ELCON,		USB_PRODUCT_ELCON_PLAN},	  PNA|PII },
+ {{ USB_VENDOR_ELECOM,		USB_PRODUCT_ELECOM_LDUSB20},	  PII },
  {{ USB_VENDOR_ELECOM,		USB_PRODUCT_ELECOM_LDUSBTX0},	  0 },
  {{ USB_VENDOR_ELECOM,		USB_PRODUCT_ELECOM_LDUSBTX1},	  LSYS },
  {{ USB_VENDOR_ELECOM,		USB_PRODUCT_ELECOM_LDUSBTX2},	  0 },
  {{ USB_VENDOR_ELECOM,		USB_PRODUCT_ELECOM_LDUSBTX3},	  LSYS },
  {{ USB_VENDOR_ELECOM,		USB_PRODUCT_ELECOM_LDUSBLTX},	  PII },
- {{ USB_VENDOR_ELECOM,		USB_PRODUCT_ELECOM_LDUSB20},	  PII },
  {{ USB_VENDOR_ELSA,		USB_PRODUCT_ELSA_USB2ETHERNET},	  0 },
  {{ USB_VENDOR_GIGABYTE,	USB_PRODUCT_GIGABYTE_GNBR402W},	  0 },
  {{ USB_VENDOR_HAWKING,		USB_PRODUCT_HAWKING_UF100},       PII },
@@ -207,6 +206,7 @@ const struct aue_type aue_devs[] = {
  {{ USB_VENDOR_SMC,		USB_PRODUCT_SMC_2206USB},	  PII },
  {{ USB_VENDOR_SOHOWARE,	USB_PRODUCT_SOHOWARE_NUB100},	  0 },
  {{ USB_VENDOR_SOHOWARE,	USB_PRODUCT_SOHOWARE_NUB110},	  PII },
+ {{ USB_VENDOR_LOGITEC,		USB_PRODUCT_LOGITEC_LANTX},	  PII },
 };
 #define aue_lookup(v, p) ((struct aue_type *)usb_lookup(aue_devs, v, p))
 
@@ -715,7 +715,6 @@ aue_attach(struct device *parent, struct device *self, void *aux)
 {
 	struct aue_softc	*sc = (struct aue_softc *)self;
 	struct usb_attach_arg	*uaa = aux;
-	char			*devinfop;
 	int			s;
 	u_char			eaddr[ETHER_ADDR_LEN];
 	struct ifnet		*ifp;
@@ -728,10 +727,6 @@ aue_attach(struct device *parent, struct device *self, void *aux)
 	int			i;
 
 	DPRINTFN(5,(" : aue_attach: sc=%p", sc));
-
-	devinfop = usbd_devinfo_alloc(uaa->device, 0);
-	printf("\n%s: %s\n", sc->aue_dev.dv_xname, devinfop);
-	usbd_devinfo_free(devinfop);
 
 	err = usbd_set_config_no(dev, AUE_CONFIG_NO, 1);
 	if (err) {
@@ -835,7 +830,7 @@ aue_attach(struct device *parent, struct device *self, void *aux)
 	if_attach(ifp);
 	ether_ifattach(ifp);
 
-	timeout_set(&sc->aue_stat_ch, NULL, NULL);
+	timeout_set(&sc->aue_stat_ch, aue_tick, sc);
 
 	sc->aue_attached = 1;
 	sc->sc_sdhook = shutdownhook_establish(aue_shutdown, sc);
@@ -1250,8 +1245,6 @@ aue_tick_task(void *xsc)
 			aue_start(ifp);
 	}
 
-	timeout_del(&sc->aue_stat_ch);
-	timeout_set(&sc->aue_stat_ch, aue_tick, sc);
 	timeout_add(&sc->aue_stat_ch, hz);
 
 	splx(s);
@@ -1422,8 +1415,6 @@ aue_init(void *xsc)
 
 	splx(s);
 
-	timeout_del(&sc->aue_stat_ch);
-	timeout_set(&sc->aue_stat_ch, aue_tick, sc);
 	timeout_add(&sc->aue_stat_ch, hz);
 }
 

@@ -1,4 +1,4 @@
-/*	$OpenBSD: config.h,v 1.1 2006/05/27 18:04:46 joris Exp $	*/
+/*	$OpenBSD: config.h,v 1.10 2008/03/02 11:58:45 joris Exp $	*/
 /*
  * Copyright (c) 2006 Joris Vink <joris@openbsd.org>
  *
@@ -18,6 +18,49 @@
 #ifndef CONFIG_H
 #define CONFIG_H
 
-void cvs_parse_configfile(void);
+void cvs_modules_list(void);
 
+void cvs_read_config(char *name, int (*cb)(char *, int));
+
+void cvs_parse_configfile(void);
+void cvs_parse_modules(void);
+
+int config_parse_line(char *, int);
+int modules_parse_line(char *, int);
+
+#include <sys/queue.h>
+#include "file.h"
+
+/* module stuff */
+
+#define MODULE_ALIAS		0x01
+#define MODULE_TARGETDIR	0x02
+#define MODULE_NORECURSE	0x04
+#define MODULE_RUN_ON_COMMIT	0x08
+#define MODULE_RUN_ON_CHECKOUT	0x10
+
+struct module_checkout {
+	char			*mc_name;
+	char			*mc_prog;
+
+	int			 mc_flags;
+	int			 mc_canfree;
+
+	struct cvs_flisthead	 mc_modules;
+	struct cvs_flisthead	 mc_ignores;
+};
+
+struct module_info {
+	char				*mi_name;
+	char				*mi_prog;
+	char				*mi_str;
+	int				 mi_flags;
+
+	struct cvs_flisthead		 mi_modules;
+	struct cvs_flisthead		 mi_ignores;
+
+	TAILQ_ENTRY(module_info)	 m_list;
+};
+
+struct module_checkout *cvs_module_lookup(char *);
 #endif

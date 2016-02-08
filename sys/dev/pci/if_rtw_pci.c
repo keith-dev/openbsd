@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_rtw_pci.c,v 1.7 2005/09/08 12:44:55 jsg Exp $	*/
+/*	$OpenBSD: if_rtw_pci.c,v 1.10 2007/10/22 23:00:45 fgsch Exp $	*/
 /*	$NetBSD: if_rtw_pci.c,v 1.1 2004/09/26 02:33:36 dyoung Exp $	*/
 
 /*-
@@ -108,8 +108,10 @@ struct cfattach rtw_pci_ca = {
 };
 
 const struct pci_matchid rtw_pci_products[] = {
-	{ PCI_VENDOR_REALTEK,	PCI_PRODUCT_REALTEK_RT8185 },
 	{ PCI_VENDOR_REALTEK,	PCI_PRODUCT_REALTEK_RT8180 },
+#ifdef RTW_DEBUG
+	{ PCI_VENDOR_REALTEK,	PCI_PRODUCT_REALTEK_RT8185 },
+#endif
 	{ PCI_VENDOR_BELKIN2,	PCI_PRODUCT_BELKIN2_F5D6001 },
 	{ PCI_VENDOR_DLINK,	PCI_PRODUCT_DLINK_DWL610 },
 };
@@ -160,8 +162,7 @@ rtw_pci_attach(struct device *parent, struct device *self, void *aux)
 	bus_space_tag_t iot, memt;
 	bus_space_handle_t ioh, memh;
 	int ioh_valid, memh_valid;
-	pcireg_t reg;
-	int pmreg;
+	int state;
 
 	psc->psc_pc = pa->pa_pc;
 	psc->psc_pcitag = pa->pa_tag;
@@ -187,29 +188,15 @@ rtw_pci_attach(struct device *parent, struct device *self, void *aux)
 	 * same place in the ADM8211, but the docs do not assign its bits
 	 * any meanings. -dcy
 	 */
-	if (pci_get_capability(pc, pa->pa_tag, PCI_CAP_PWRMGMT, &pmreg, 0)) {
-		reg = pci_conf_read(pc, pa->pa_tag, pmreg + PCI_PMCSR);
-		switch (reg & PCI_PMCSR_STATE_MASK) {
-		case PCI_PMCSR_STATE_D1:
-		case PCI_PMCSR_STATE_D2:
-			printf(": waking up from power state D%d\n",
-			    reg & PCI_PMCSR_STATE_MASK);
-			pci_conf_write(pc, pa->pa_tag, pmreg + PCI_PMCSR,
-			    (reg & ~PCI_PMCSR_STATE_MASK) |
-			    PCI_PMCSR_STATE_D0);
-			break;
-		case PCI_PMCSR_STATE_D3:
-			/*
-			 * The card has lost all configuration data in
-			 * this state, so punt.
-			 */
-			printf(": unable to wake up from power state D3, "
-			       "reboot required.\n");
-			pci_conf_write(pc, pa->pa_tag, pmreg + PCI_PMCSR,
-			    (reg & ~PCI_PMCSR_STATE_MASK) |
-			    PCI_PMCSR_STATE_D0);
-			return;
-		}
+	state = pci_set_powerstate(pc, pa->pa_tag, PCI_PMCSR_STATE_D0);
+	if (state == PCI_PMCSR_STATE_D3) {
+		/*
+		 * The card has lost all configuration data in
+		 * this state, so punt.
+		 */
+		printf(": unable to wake up from power state D3, "
+		    "reboot required.\n");
+		return;
 	}
 
 	/*

@@ -1,4 +1,4 @@
-/*	$OpenBSD: entries.c,v 1.79 2007/07/03 13:22:42 joris Exp $	*/
+/*	$OpenBSD: entries.c,v 1.95 2008/03/01 21:29:36 deraadt Exp $	*/
 /*
  * Copyright (c) 2006 Joris Vink <joris@openbsd.org>
  *
@@ -17,9 +17,11 @@
 
 #include <errno.h>
 #include <string.h>
+#include <time.h>
 #include <unistd.h>
 
 #include "cvs.h"
+#include "remote.h"
 
 #define CVS_ENTRIES_NFIELDS	6
 #define CVS_ENTRIES_DELIM	'/'
@@ -30,14 +32,12 @@ CVSENTRIES *
 cvs_ent_open(const char *dir)
 {
 	FILE *fp;
-	size_t len;
 	CVSENTRIES *ep;
 	char *p, buf[MAXPATHLEN];
 	struct cvs_ent *ent;
 	struct cvs_ent_line *line;
 
-	ep = (CVSENTRIES *)xmalloc(sizeof(*ep));
-	memset(ep, 0, sizeof(*ep));
+	ep = (CVSENTRIES *)xcalloc(1, sizeof(*ep));
 
 	(void)xsnprintf(buf, sizeof(buf), "%s/%s", dir, CVS_PATH_ENTRIES);
 
@@ -56,9 +56,7 @@ cvs_ent_open(const char *dir)
 
 	if ((fp = fopen(ep->cef_path, "r")) != NULL) {
 		while (fgets(buf, sizeof(buf), fp)) {
-			len = strlen(buf);
-			if (len > 0 && buf[len - 1] == '\n')
-				buf[len - 1] = '\0';
+			buf[strcspn(buf, "\n")] = '\0';
 
 			if (buf[0] == 'D' && buf[1] == '\0')
 				break;
@@ -73,11 +71,13 @@ cvs_ent_open(const char *dir)
 
 	if ((fp = fopen(ep->cef_lpath, "r")) != NULL) {
 		while (fgets(buf, sizeof(buf), fp)) {
-			len = strlen(buf);
-			if (len > 0 && buf[len - 1] == '\n')
-				buf[len - 1] = '\0';
+			buf[strcspn(buf, "\n")] = '\0';
 
-			p = &buf[1];
+			if (strlen(buf) < 2)
+				fatal("cvs_ent_open: %s: malformed line %s",
+				    ep->cef_lpath, buf);
+
+			p = &buf[2];
 
 			if (buf[0] == 'A') {
 				line = xmalloc(sizeof(*line));
@@ -107,7 +107,7 @@ struct cvs_ent *
 cvs_ent_parse(const char *entry)
 {
 	int i;
-	struct tm t;
+	struct tm t, dt;
 	struct cvs_ent *ent;
 	char *fields[CVS_ENTRIES_NFIELDS], *buf, *sp, *dp;
 
@@ -137,6 +137,8 @@ cvs_ent_parse(const char *entry)
 	ent->ce_status = CVS_ENT_REG;
 	ent->ce_name = fields[1];
 	ent->ce_rev = NULL;
+	ent->ce_date = -1;
+	ent->ce_tag = NULL;
 
 	if (ent->ce_type == CVS_ENT_FILE) {
 		if (*fields[2] == '-') {
@@ -154,9 +156,13 @@ cvs_ent_parse(const char *entry)
 		if (fields[3][0] == '\0' ||
 		    strncmp(fields[3], CVS_DATE_DUMMY, sizeof(CVS_DATE_DUMMY) - 1) == 0 ||
 		    strncmp(fields[3], "Initial ", 8) == 0 ||
-		    strncmp(fields[3], "Result of merge", 15) == 0)
+		    strncmp(fields[3], "Result of merge", 15) == 0) {
 			ent->ce_mtime = CVS_DATE_DMSEC;
-		else {
+		} else if (cvs_server_active == 1 &&
+		    strncmp(fields[3], CVS_SERVER_UNCHANGED,
+		    strlen(CVS_SERVER_UNCHANGED)) == 0) {
+			ent->ce_mtime = CVS_SERVER_UPTODATE;
+		} else {
 			/* Date field can be a '+=' with remote to indicate
 			 * conflict.  In this case do nothing. */
 			if (strptime(fields[3], "%a %b %d %T %Y", &t) != NULL) {
@@ -180,10 +186,25 @@ cvs_ent_parse(const char *entry)
 	else
 		ent->ce_opts = NULL;
 
-	if (strcmp(fields[5], ""))
-		ent->ce_tag = fields[5] + 1;
-	else
-		ent->ce_tag = NULL;
+	if (strcmp(fields[5], "")) {
+		switch (*fields[5]) {
+		case 'D':
+			if (sscanf(fields[5] + 1, "%d.%d.%d.%d.%d.%d",
+			    &dt.tm_year, &dt.tm_mon, &dt.tm_mday,
+			    &dt.tm_hour, &dt.tm_min, &dt.tm_sec) != 6)
+				fatal("wrong date specification");
+			dt.tm_year -= 1900;
+			dt.tm_mon -= 1;
+			ent->ce_date = timegm(&dt);
+			ent->ce_tag = NULL;
+			break;
+		case 'T':
+			ent->ce_tag = fields[5] + 1;
+			break;
+		default:
+			fatal("invalid sticky entry");
+		}
+	}
 
 	return (ent);
 }
@@ -202,23 +223,14 @@ cvs_ent_get(CVSENTRIES *ep, const char *name)
 	return (ent);
 }
 
-int
-cvs_ent_exists(CVSENTRIES *ep, const char *name)
-{
-	struct cvs_ent_line *l;
-
-	l = ent_get_line(ep, name);
-	if (l == NULL)
-		return (0);
-
-	return (1);
-}
-
 void
 cvs_ent_close(CVSENTRIES *ep, int writefile)
 {
 	FILE *fp;
 	struct cvs_ent_line *l;
+	int dflag;
+
+	dflag = 1;
 
 	if (writefile) {
 		if ((fp = fopen(ep->cef_bpath, "w")) == NULL)
@@ -228,6 +240,9 @@ cvs_ent_close(CVSENTRIES *ep, int writefile)
 
 	while ((l = TAILQ_FIRST(&(ep->cef_ent))) != NULL) {
 		if (writefile) {
+			if (l->buf[0] == 'D')
+				dflag = 0;
+
 			fputs(l->buf, fp);
 			fputc('\n', fp);
 		}
@@ -238,8 +253,10 @@ cvs_ent_close(CVSENTRIES *ep, int writefile)
 	}
 
 	if (writefile) {
-		fputc('D', fp);
-		fputc('\n', fp);
+		if (dflag) {
+			fputc('D', fp);
+			fputc('\n', fp);
+		}
 		(void)fclose(fp);
 
 		if (rename(ep->cef_bpath, ep->cef_path) == -1)
@@ -278,7 +295,7 @@ cvs_ent_add(CVSENTRIES *ep, const char *line)
 		fatal("cvs_ent_add: fopen: `%s': %s",
 		    ep->cef_lpath, strerror(errno));
 
-	fputc('A', fp);
+	fputs("A ", fp);
 	fputs(line, fp);
 	fputc('\n', fp);
 
@@ -306,7 +323,7 @@ cvs_ent_remove(CVSENTRIES *ep, const char *name)
 		fatal("cvs_ent_remove: fopen: `%s': %s", ep->cef_lpath,
 		    strerror(errno));
 
-	fputc('R', fp);
+	fputs("R ", fp);
 	fputs(l->buf, fp);
 	fputc('\n', fp);
 
@@ -315,6 +332,25 @@ cvs_ent_remove(CVSENTRIES *ep, const char *name)
 	TAILQ_REMOVE(&(ep->cef_ent), l, entries_list);
 	xfree(l->buf);
 	xfree(l);
+}
+
+/*
+ * cvs_ent_line_str()
+ *
+ * Build CVS/Entries line.
+ *
+ */
+void
+cvs_ent_line_str(const char *name, char *rev, char *tstamp, char *opts,
+    char *sticky, int isdir, int isremoved, char *buf, size_t len)
+{
+	if (isdir == 1) {
+		(void)xsnprintf(buf, len, "D/%s////", name);
+		return;
+	}
+
+	(void)xsnprintf(buf, len, "/%s/%s%s/%s/%s/%s",
+	    name, isremoved == 1 ? "-" : "", rev, tstamp, opts, sticky);
 }
 
 void
@@ -360,6 +396,7 @@ cvs_parse_tagfile(char *dir, char **tagp, char **datep, int *nbp)
 	FILE *fp;
 	int i, linenum;
 	size_t len;
+	struct tm datetm;
 	char linebuf[128], tagpath[MAXPATHLEN];
 
 	if (tagp != NULL)
@@ -401,6 +438,17 @@ cvs_parse_tagfile(char *dir, char **tagp, char **datep, int *nbp)
 				*tagp = xstrdup(linebuf + 1);
 			break;
 		case 'D':
+			if (sscanf(linebuf + 1, "%d.%d.%d.%d.%d.%d",
+			    &datetm.tm_year, &datetm.tm_mon, &datetm.tm_mday,
+			    &datetm.tm_hour, &datetm.tm_min, &datetm.tm_sec) !=
+			    6)
+				fatal("wrong date specification");
+			datetm.tm_year -= 1900;
+			datetm.tm_mon -= 1;
+
+			if (cvs_specified_date == -1)
+				cvs_specified_date = timegm(&datetm);
+
 			if (datep != NULL)
 				*datep = xstrdup(linebuf + 1);
 			break;
@@ -421,11 +469,17 @@ cvs_parse_tagfile(char *dir, char **tagp, char **datep, int *nbp)
 }
 
 void
-cvs_write_tagfile(const char *dir, char *tag, char *date, int nb)
+cvs_write_tagfile(const char *dir, char *tag, char *date)
 {
 	FILE *fp;
+	RCSNUM *rev;
 	char tagpath[MAXPATHLEN];
+	char sticky[CVS_REV_BUFSZ];
+	struct tm *datetm;
 	int i;
+
+	cvs_log(LP_TRACE, "cvs_write_tagfile(%s, %s, %s)", dir,
+	    tag != NULL ? tag : "", date != NULL ? date : "");
 
 	if (cvs_noexec == 1)
 		return;
@@ -434,7 +488,7 @@ cvs_write_tagfile(const char *dir, char *tag, char *date, int nb)
 	if (i < 0 || i >= MAXPATHLEN)
 		return;
 
-	if ((tag != NULL) || (date != NULL)) {
+	if (tag != NULL || cvs_specified_date != -1) {
 		if ((fp = fopen(tagpath, "w+")) == NULL) {
 			if (errno != ENOENT) {
 				cvs_log(LP_NOTICE, "failed to open `%s' : %s",
@@ -444,15 +498,24 @@ cvs_write_tagfile(const char *dir, char *tag, char *date, int nb)
 		}
 
 		if (tag != NULL) {
-			if (nb != 0)
-				(void)fprintf(fp, "N%s\n", tag);
-			else
-				(void)fprintf(fp, "T%s\n", tag);
-		} else
-			(void)fprintf(fp, "D%s\n", date);
+			if ((rev = rcsnum_parse(tag)) != NULL) {
+				(void)xsnprintf(sticky, sizeof(sticky),
+				    "N%s", tag);
+				rcsnum_free(rev);
+			} else {
+				(void)xsnprintf(sticky, sizeof(sticky),
+				    "T%s", tag);
+			}
+		} else {
+			datetm = gmtime(&cvs_specified_date);
+			(void)strftime(sticky, sizeof(sticky),
+			    "D"CVS_DATE_FMT, datetm);
+		}
 
+		if (cvs_server_active == 1)
+			cvs_server_set_sticky(dir, sticky);
+
+		(void)fprintf(fp, "%s\n", sticky);
 		(void)fclose(fp);
-	} else {
-		(void)cvs_unlink(tagpath);
 	}
 }

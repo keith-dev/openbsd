@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_tht.c,v 1.108 2007/07/22 03:54:15 dlg Exp $ */
+/*	$OpenBSD: if_tht.c,v 1.112 2008/02/02 20:34:42 brad Exp $ */
 
 /*
  * Copyright (c) 2007 David Gwynne <dlg@openbsd.org>
@@ -938,7 +938,6 @@ tht_up(struct tht_softc *sc)
 	struct ifnet			*ifp = &sc->sc_ac.ac_if;
 
 	if (ISSET(ifp->if_flags, IFF_RUNNING)) {
-		printf("%s: interface is already up\n", DEVNAME(sc));
 		return;
 	}
 
@@ -1080,7 +1079,6 @@ tht_down(struct tht_softc *sc)
 	struct ifnet			*ifp = &sc->sc_ac.ac_if;
 
 	if (!ISSET(ifp->if_flags, IFF_RUNNING)) {
-		printf("%s: interface is already down\n", DEVNAME(sc));
 		return;
 	}
 
@@ -1773,6 +1771,11 @@ tht_link_state(struct tht_softc *sc)
 		ifp->if_link_state = link_state;
 		if_link_state_change(ifp);
 	}
+
+	if (ifp->if_link_state == LINK_STATE_UP)
+		ifp->if_baudrate = IF_Gbps(10);
+	else
+		ifp->if_baudrate = 0;
 }
 
 u_int32_t
@@ -1837,8 +1840,7 @@ tht_dmamem_alloc(struct tht_softc *sc, bus_size_t size, bus_size_t align)
 	struct tht_dmamem		*tdm;
 	int				nsegs;
 
-	tdm = malloc(sizeof(struct tht_dmamem), M_DEVBUF, M_WAITOK);
-	bzero(tdm, sizeof(struct tht_dmamem));
+	tdm = malloc(sizeof(struct tht_dmamem), M_DEVBUF, M_WAITOK | M_ZERO);
 	tdm->tdm_size = size;
 
 	if (bus_dmamap_create(dmat, size, 1, size, 0,
@@ -1894,8 +1896,7 @@ tht_pkt_alloc(struct tht_softc *sc, struct tht_pkt_list *tpl, int npkts,
 	int				i;
 
 	tpl->tpl_pkts = malloc(sizeof(struct tht_pkt) * npkts, M_DEVBUF,
-	    M_WAITOK);
-	bzero(tpl->tpl_pkts, sizeof(struct tht_pkt) * npkts);
+	    M_WAITOK | M_ZERO);
 
 	TAILQ_INIT(&tpl->tpl_free);
 	TAILQ_INIT(&tpl->tpl_used);

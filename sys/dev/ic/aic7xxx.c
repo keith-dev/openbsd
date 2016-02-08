@@ -1,4 +1,4 @@
-/*	$OpenBSD: aic7xxx.c,v 1.76 2007/05/26 21:53:16 krw Exp $	*/
+/*	$OpenBSD: aic7xxx.c,v 1.80 2007/11/27 16:22:13 martynas Exp $	*/
 /*	$NetBSD: aic7xxx.c,v 1.108 2003/11/02 11:07:44 wiz Exp $	*/
 
 /*
@@ -40,7 +40,7 @@
  * IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  * POSSIBILITY OF SUCH DAMAGES.
  *
- * $Id: aic7xxx.c,v 1.76 2007/05/26 21:53:16 krw Exp $
+ * $Id: aic7xxx.c,v 1.80 2007/11/27 16:22:13 martynas Exp $
  */
 /*
  * Ported from FreeBSD by Pascal Renauld, Network Storage Solutions, Inc. - April 2003
@@ -463,6 +463,7 @@ ahc_handle_seqint(struct ahc_softc *ahc, u_int intstat)
 {
 	struct scb *scb;
 	struct ahc_devinfo devinfo;
+	u_int scb_index;
 	
 	ahc_fetch_devinfo(ahc, &devinfo);
 
@@ -476,7 +477,6 @@ ahc_handle_seqint(struct ahc_softc *ahc, u_int intstat)
 	switch (intstat & SEQINT_MASK) {
 	case BAD_STATUS:
 	{
-		u_int  scb_index;
 		struct hardware_scb *hscb;
 
 		/*
@@ -744,8 +744,6 @@ ahc_handle_seqint(struct ahc_softc *ahc, u_int intstat)
 		 * loop.
 		 */
 		if (ahc->msg_type == MSG_TYPE_NONE) {
-			struct scb *scb;
-			u_int scb_index;
 			u_int bus_phase;
 
 			bus_phase = ahc_inb(ahc, SCSISIGI) & PHASE_MASK;
@@ -848,9 +846,6 @@ ahc_handle_seqint(struct ahc_softc *ahc, u_int intstat)
 				ahc_outb(ahc, SXFRCTL1,
 					 ahc_inb(ahc, SXFRCTL1) & ~BITBUCKET);
 				if (wait == 0) {
-					struct	scb *scb;
-					u_int	scb_index;
-
 					ahc_print_devinfo(ahc, &devinfo);
 					printf("Unable to clear parity error.  "
 					       "Resetting bus.\n");
@@ -1229,7 +1224,7 @@ ahc_handle_scsiint(struct ahc_softc *ahc, u_int intstat)
 		/*
 		 * Although the driver does not care about the
 		 * 'Selection in Progress' status bit, the busy
-		 * LED does.  SELINGO is only cleared by a sucessfull
+		 * LED does.  SELINGO is only cleared by a successful
 		 * selection, so we must manually clear it to insure
 		 * the LED turns off just incase no future successful
 		 * selections occur (e.g. no devices on the bus).
@@ -1644,8 +1639,7 @@ ahc_alloc_tstate(struct ahc_softc *ahc, u_int scsi_id, char channel)
 	    && ahc->enabled_targets[scsi_id] != master_tstate)
 		panic("%s: ahc_alloc_tstate - Target already allocated",
 		      ahc_name(ahc));
-	tstate = (struct ahc_tmode_tstate*)malloc(sizeof(*tstate),
-						   M_DEVBUF, M_NOWAIT);
+	tstate = malloc(sizeof(*tstate), M_DEVBUF, M_NOWAIT | M_ZERO);
 	if (tstate == NULL)
 		return (NULL);
 
@@ -1665,8 +1659,7 @@ ahc_alloc_tstate(struct ahc_softc *ahc, u_int scsi_id, char channel)
 			memset(&tstate->transinfo[i].goal, 0,
 			      sizeof(tstate->transinfo[i].goal));
 		}
-	} else
-		memset(tstate, 0, sizeof(*tstate));
+	}
 	ahc->enabled_targets[scsi_id] = tstate;
 	return (tstate);
 }
@@ -3889,11 +3882,10 @@ ahc_softc_init(struct ahc_softc *ahc)
 	ahc->pause = ahc->unpause | PAUSE; 
 	/* XXX The shared scb data stuff should be deprecated */
 	if (ahc->scb_data == NULL) {
-		ahc->scb_data = malloc(sizeof(*ahc->scb_data),
-				       M_DEVBUF, M_NOWAIT);
+		ahc->scb_data = malloc(sizeof(*ahc->scb_data), M_DEVBUF,
+		    M_NOWAIT | M_ZERO);
 		if (ahc->scb_data == NULL)
 			return (ENOMEM);
-		memset(ahc->scb_data, 0, sizeof(*ahc->scb_data));
 	}
 
 	return (0);
@@ -4073,8 +4065,6 @@ ahc_reset(struct ahc_softc *ahc, int reinit)
 	ahc_pause(ahc);
 	sxfrctl1_b = 0;
 	if ((ahc->chip & AHC_CHIPID_MASK) == AHC_AIC7770) {
-		u_int sblkctl;
-
 		/*
 		 * Save channel B's settings in case this chip
 		 * is setup for TWIN channel operation.
@@ -4136,8 +4126,6 @@ ahc_reset(struct ahc_softc *ahc, int reinit)
 	 * by turning it on.
 	 */
 	if ((ahc->features & AHC_TWIN) != 0) {
-		u_int sblkctl;
-
 		sblkctl = ahc_inb(ahc, SBLKCTL);
 		ahc_outb(ahc, SBLKCTL, sblkctl | SELBUSB);
 		ahc_outb(ahc, SXFRCTL1, sxfrctl1_b);
@@ -4253,12 +4241,10 @@ ahc_init_scbdata(struct ahc_softc *ahc)
 	SLIST_INIT(&scb_data->sg_maps);
 
 	/* Allocate SCB resources */
-	scb_data->scbarray =
-	    (struct scb *)malloc(sizeof(struct scb) * AHC_SCB_MAX_ALLOC,
-				 M_DEVBUF, M_NOWAIT);
+	scb_data->scbarray = malloc(sizeof(struct scb) * AHC_SCB_MAX_ALLOC,
+	    M_DEVBUF, M_NOWAIT | M_ZERO);
 	if (scb_data->scbarray == NULL)
 		return (ENOMEM);
-	memset(scb_data->scbarray, 0, sizeof(struct scb) * AHC_SCB_MAX_ALLOC);
 
 	/* Determine the number of hardware SCBs and initialize them */
 
@@ -4319,7 +4305,7 @@ ahc_init_scbdata(struct ahc_softc *ahc)
 	ahc->next_queued_scb = ahc_get_scb(ahc);
 
 	/*
-	 * Note that we were successfull
+	 * Note that we were successful
 	 */
 	return (0); 
 
@@ -4418,11 +4404,10 @@ ahc_alloc_scbs(struct ahc_softc *ahc)
 		int error;
 
 		if (sizeof(*pdata) > 0) { 
-			pdata = (struct scb_platform_data *)
-			    malloc(sizeof(*pdata), M_DEVBUF, M_NOWAIT);
+			pdata = malloc(sizeof(*pdata), M_DEVBUF,
+			    M_NOWAIT | M_ZERO);
 			if (pdata == NULL)
 				break;
-			bzero(pdata, sizeof(*pdata));
 		}
 
 		next_scb->platform_data = pdata;
@@ -5942,8 +5927,6 @@ ahc_reset_channel(struct ahc_softc *ahc, char channel, int initiate_reset)
 		if (ahc->enabled_targets[target] == NULL)
 			continue;
 		for (initiator = 0; initiator <= max_scsiid; initiator++) {
-			struct ahc_devinfo devinfo;
-
 			ahc_compile_devinfo(&devinfo, target, initiator,
 					    CAM_LUN_WILDCARD,
 					    channel, ROLE_UNKNOWN);
@@ -6877,14 +6860,13 @@ ahc_handle_en_lun(struct ahc_softc *ahc, struct cam_sim *sim, union ccb *ccb)
 				return;
 			}
 		}
-		lstate = malloc(sizeof(*lstate), M_DEVBUF, M_NOWAIT);
+		lstate = malloc(sizeof(*lstate), M_DEVBUF, M_NOWAIT | M_ZERO);
 		if (lstate == NULL) {
 			xpt_print_path(ccb->ccb_h.path);
 			printf("Couldn't allocate lstate\n");
 			ccb->ccb_h.status = CAM_RESRC_UNAVAIL;
 			return;
 		}
-		memset(lstate, 0, sizeof(*lstate));
 		status = xpt_create_path(&lstate->path, /*periph*/NULL,
 					 xpt_path_path_id(ccb->ccb_h.path),
 					 xpt_path_target_id(ccb->ccb_h.path),

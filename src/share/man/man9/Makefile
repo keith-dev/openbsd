@@ -1,11 +1,11 @@
-#	$OpenBSD: Makefile,v 1.129 2007/06/16 13:21:44 damien Exp $
+#	$OpenBSD: Makefile,v 1.138 2008/03/02 21:29:06 djm Exp $
 #	$NetBSD: Makefile,v 1.4 1996/01/09 03:23:01 thorpej Exp $
 
 #	Makefile for section 9 (kernel function and variable) manual pages.
 
 MAN=	altq.9 aml_evalnode.9 atomic.9 audio.9 autoconf.9 bio_register.9 \
 	boot.9 \
-	buffercache.9 bus_dma.9 bus_space.9 copy.9 crypto.9 ctxsw.9 delay.9 \
+	buffercache.9 bus_dma.9 bus_space.9 copy.9 crypto.9 delay.9 \
 	disk.9 disklabel.9 dohooks.9 dopowerhooks.9 \
 	domountroothooks.9 doshutdownhooks.9 dostartuphooks.9 \
 	evcount.9 file.9 \
@@ -16,13 +16,13 @@ MAN=	altq.9 aml_evalnode.9 atomic.9 audio.9 autoconf.9 bio_register.9 \
 	ieee80211_radiotap.9 \
 	iic.9 intro.9 inittodr.9 \
 	kern.9 knote.9 kthread.9 ktrace.9 loadfirmware.9 lock.9 log.9 \
-	malloc.9 mbuf.9 mbuf_tags.9 md5.9 microtime.9 \
+	malloc.9 mbuf.9 mbuf_tags.9 md5.9 mi_switch.9 microtime.9 \
 	mountroothook_establish.9 mutex.9 namei.9 \
 	panic.9 pci_conf_read.9 pci_intr_map.9 pfind.9 physio.9 pmap.9 \
 	pool.9 powerhook_establish.9 ppsratecheck.9 printf.9 psignal.9 \
 	radio.9 random.9 rasops.9 ratecheck.9 resettodr.9 rssadapt.9 rwlock.9 \
 	sensor_attach.9 \
-	shutdownhook_establish.9 sleep.9 spl.9 startuphook_establish.9 \
+	shutdownhook_establish.9 tsleep.9 spl.9 startuphook_establish.9 \
 	style.9 syscall.9 systrace.9 sysctl_int.9 \
 	tc_init.9 time.9 timeout.9 tvtohz.9 uiomove.9 uvm.9 vfs.9 vfs_busy.9 \
 	vfs_cache.9 vaccess.9 vclean.9 vcount.9 vdevgone.9 vfinddev.9 vflush.9 \
@@ -112,7 +112,7 @@ MLINKS+=crypto.9 crypto_register.9 \
 	crypto.9 crypto_kdispatch.9 \
 	crypto.9 crypto_getreq.9 \
 	crypto.9 crypto_freereq.9
-MLINKS+=ctxsw.9 cpu_switch.9 ctxsw.9 mi_switch.9
+MLINKS+=mi_switch.9 cpu_switchto.9
 MLINKS+=disk.9 disk_init.9 disk.9 disk_attach.9 disk.9 disk_detatch.9 \
 	disk.9 disk_busy.9 disk.9 disk_unbusy.9
 MLINKS+=disklabel.9 readdisklabel.9 disklabel.9 writedisklabel.9 \
@@ -139,7 +139,9 @@ MLINKS+=ieee80211.9 ieee80211_ifattach.9 \
 	ieee80211.9 ieee80211_setmode.9 \
 	ieee80211.9 ieee80211_chan2mode.9 \
 	ieee80211.9 ieee80211_rate2media.9 \
-	ieee80211.9 ieee80211_media2rate.9
+	ieee80211.9 ieee80211_media2rate.9 \
+	ieee80211.9 ieee80211_rate2plcp.9 \
+	ieee80211.9 ieee80211_plcp2rate.9
 MLINKS+=ieee80211_crypto.9 ieee80211_crypto_attach.9 \
 	ieee80211_crypto.9 ieee80211_crypto_detach.9 \
 	ieee80211_crypto.9 ieee80211_wep_crypt.9
@@ -169,6 +171,9 @@ MLINKS+=ieee80211_proto.9 ieee80211_proto_attach.9 \
 	ieee80211_proto.9 ieee80211_print_essid.9 \
 	ieee80211_proto.9 ieee80211_dump_pkt.9 \
 	ieee80211_proto.9 ieee80211_fix_rate.9
+MLINKS+=iic.9 iic_acquire_bus.9 iic.9 iic_release_bus.9 iic.9 iic_exec.9 \
+	iic.9 iic_smbus_write_byte.9 iic.9 iic_smbus_read_byte.9 \
+	iic.9 iic_smbus_receive_byte.9
 MLINKS+=kern.9 imax.9 kern.9 imin.9 kern.9 lmax.9 kern.9 lmin.9 \
 	kern.9 max.9 kern.9 min.9 kern.9 ulmax.9 kern.9 ulmin.9 kern.9 abs.9 \
 	kern.9 assert.9 kern.9 KASSERT.9 kern.9 KDASSERT.9 \
@@ -249,7 +254,8 @@ MLINKS+=random.9 add_true_randomness.9 \
 	random.9 add_audio_randomness.9 \
 	random.9 get_random_bytes.9 \
 	random.9 arc4random.9 \
-	random.9 arc4random_bytes.9
+	random.9 arc4random_bytes.9 \
+	random.9 arc4random_uniform.9
 MLINKS+=rasops.9 rasops_init.9 rasops.9 rasops_reconfig.9
 MLINKS+=rssadapt.9 ieee80211_rssadapt_choose.9 \
 	rssadapt.9 ieee80211_rssadapt_input.9 \
@@ -268,7 +274,7 @@ MLINKS+=sensor_attach.9 sensordev_install.9 \
 	sensor_attach.9 sensor_task_register.9 \
 	sensor_attach.9 sensor_task_unregister.9
 MLINKS+=shutdownhook_establish.9 shutdownhook_disestablish.9
-MLINKS+=sleep.9 tsleep.9 sleep.9 wakeup.9
+MLINKS+=tsleep.9 wakeup.9 tsleep.9 msleep.9
 MLINKS+=spl.9 spl0.9 spl.9 splassert.9 spl.9 splbio.9 spl.9 splclock.9 \
 	spl.9 splhigh.9 spl.9 spllowersoftclock.9 \
 	spl.9 splnet.9 spl.9 splsched.9 spl.9 splserial.9 spl.9 splsoftclock.9 \

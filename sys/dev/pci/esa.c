@@ -1,4 +1,4 @@
-/*	$OpenBSD: esa.c,v 1.11 2006/01/25 23:54:21 brad Exp $	*/
+/*	$OpenBSD: esa.c,v 1.13 2007/10/22 03:16:35 fgsch Exp $	*/
 /* $NetBSD: esa.c,v 1.12 2002/03/24 14:17:35 jmcneill Exp $ */
 
 /*
@@ -159,7 +159,6 @@ int		esa_add_list(struct esa_voice *, struct esa_list *, u_int16_t,
 void		esa_remove_list(struct esa_voice *, struct esa_list *, int);
 
 /* power management */
-int		esa_power(struct esa_softc *, int);
 void		esa_powerhook(int, void *);
 int		esa_suspend(struct esa_softc *);
 int		esa_resume(struct esa_softc *);
@@ -1058,7 +1057,7 @@ esa_attach(struct device *parent, struct device *self, void *aux)
 	printf(": %s\n", intrstr);
 
 	/* Power up chip */
-	esa_power(sc, PCI_PMCSR_STATE_D0);
+	pci_set_powerstate(pc, tag, PCI_PMCSR_STATE_D0);
 
 	/* Init chip */
 	if (esa_init(sc) == -1) {
@@ -1072,7 +1071,7 @@ esa_attach(struct device *parent, struct device *self, void *aux)
 	/* create suspend save area */
 	len = sizeof(u_int16_t) * (ESA_REV_B_CODE_MEMORY_LENGTH
 	    + ESA_REV_B_DATA_MEMORY_LENGTH + 1);
-	sc->savemem = (u_int16_t *)malloc(len, M_DEVBUF, M_NOWAIT);
+	sc->savemem = malloc(len, M_DEVBUF, M_NOWAIT | M_ZERO);
 	if (sc->savemem == NULL) {
 		printf("%s: unable to allocate suspend buffer\n",
 		    sc->sc_dev.dv_xname);
@@ -1080,7 +1079,6 @@ esa_attach(struct device *parent, struct device *self, void *aux)
 		bus_space_unmap(sc->sc_iot, sc->sc_ioh, sc->sc_ios);
 		return;
 	}
-        bzero(sc->savemem, len);
 
 	/*
 	 * Every card I've seen has had their channels swapped with respect
@@ -1592,23 +1590,6 @@ esa_remove_list(struct esa_voice *vc, struct esa_list *el, int index)
 	return;
 }
 
-int
-esa_power(struct esa_softc *sc, int state)
-{
-	pcitag_t tag = sc->sc_tag;
-	pci_chipset_tag_t pc = sc->sc_pct;
-	pcireg_t data;
-	int pmcapreg;
-
-	if (pci_get_capability(pc, tag, PCI_CAP_PWRMGMT, &pmcapreg, 0)) {
-		data = pci_conf_read(pc, tag, pmcapreg + PCI_PMCSR);
-		if ((data & PCI_PMCSR_STATE_MASK) != state)
-			pci_conf_write(pc, tag, pmcapreg + PCI_PMCSR, state);
-	}
-
-	return (0);
-}
-
 void
 esa_powerhook(int why, void *hdl)
 {
@@ -1650,7 +1631,7 @@ esa_suspend(struct esa_softc *sc)
 		sc->savemem[index++] = esa_read_assp(sc,
 		    ESA_MEMTYPE_INTERNAL_DATA, i);
 
-	esa_power(sc, PCI_PMCSR_STATE_D3);
+	pci_set_powerstate(sc->sc_pct, sc->sc_tag, PCI_PMCSR_STATE_D3);
 
 	return (0);
 }
@@ -1664,7 +1645,7 @@ esa_resume(struct esa_softc *sc) {
 
 	index = 0;
 
-	esa_power(sc, PCI_PMCSR_STATE_D0);
+	pci_set_powerstate(sc->sc_pct, sc->sc_tag, PCI_PMCSR_STATE_D0);
 	delay(10000);
 
 	esa_config(sc);

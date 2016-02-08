@@ -1,4 +1,4 @@
-.\"	$OpenBSD: make.1,v 1.70 2007/07/09 14:47:29 jmc Exp $
+.\"	$OpenBSD: make.1,v 1.79 2008/03/03 23:04:33 jmc Exp $
 .\"	$OpenPackages$
 .\"	$NetBSD: make.1,v 1.18 1997/03/10 21:19:53 christos Exp $
 .\"
@@ -31,7 +31,7 @@
 .\"
 .\"	from: @(#)make.1	8.4 (Berkeley) 3/19/94
 .\"
-.Dd $Mdocdate: July 9 2007 $
+.Dd $Mdocdate: March 3 2008 $
 .Dt MAKE 1
 .Os
 .Sh NAME
@@ -163,6 +163,8 @@ Print the input graph before making anything.
 .It Ar "g2"
 Print the input graph after making everything, or before exiting
 on error.
+.It Ar J
+Print job tokens showing which output corresponds to what job.
 .It Ar j
 Print debugging information about running multiple shells.
 .It Ar l
@@ -172,6 +174,21 @@ Also known as loud behavior.
 .It Ar m
 Print debugging information about making targets, including modification
 dates.
+.It Ar p
+Help finding concurrency issues for parallel make by adding some
+randomization.
+If
+.Va RANDOM_ORDER
+is defined,
+targets will be shuffled before being built.
+If
+.Va RANDOM_DELAY
+is defined,
+.Nm
+will wait between 0 and ${RANDOM_DELAY} seconds at the start of each job.
+A given random seed can be forced by setting
+.Va RANDOM_SEED ,
+but this does not guarantee reproductibility.
 .It Ar s
 Print debugging information about suffix-transformation rules.
 .It Ar t
@@ -1410,6 +1427,22 @@ A+=$I
 .Sq A
 will evaluate to a b c d after the loop, not z b c d.
 .Pp
-The
-.Ql +
-command modificator is ignored in parallel make mode.
+.Ic ORDER
+is only used in parallel mode, so
+keep dependency ordered for sequential mode!
+.Pp
+Distinct target names are treated separately, even though they might
+correspond to the same file in the file system.
+This can cause excessive rebuilds of some targets, and bogus
+races in parallel mode.
+This can also prevent
+.Nm
+from finding a rule to solve a dependency if the target name is not
+exactly the same as the dependency.
+.Pp
+In parallel mode,
+.Fl j Ar n
+only limits the number of concurrent makes it knows about.
+During recursive invocations, each level will multiply the number
+of processes by
+.Ar n .

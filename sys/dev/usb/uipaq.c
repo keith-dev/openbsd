@@ -1,4 +1,4 @@
-/*	$OpenBSD: uipaq.c,v 1.12 2007/06/14 10:11:16 mbalmer Exp $	*/
+/*	$OpenBSD: uipaq.c,v 1.15 2007/10/22 19:40:19 deraadt Exp $	*/
 
 /*
  * Copyright (c) 2000 The NetBSD Foundation, Inc.
@@ -121,11 +121,13 @@ struct uipaq_type {
 };
 
 static const struct uipaq_type uipaq_devs[] = {
+	{{ USB_VENDOR_ASUS, USB_PRODUCT_ASUS_MYPAL_A730} , 0},
+	{{ USB_VENDOR_CASIO, USB_PRODUCT_CASIO_BE300} , 0},
+	{{ USB_VENDOR_COMPAQ, USB_PRODUCT_COMPAQ_IPAQPOCKETPC} , 0},
+	{{ USB_VENDOR_HTC, USB_PRODUCT_HTC_SMARTPHONE }, 0},
 	{{ USB_VENDOR_HP, USB_PRODUCT_HP_2215 }, 0 },
 	{{ USB_VENDOR_HP, USB_PRODUCT_HP_568J }, 0},
-	{{ USB_VENDOR_COMPAQ, USB_PRODUCT_COMPAQ_IPAQPOCKETPC} , 0},
-	{{ USB_VENDOR_CASIO, USB_PRODUCT_CASIO_BE300} , 0},
-	{{ USB_VENDOR_ASUS, USB_PRODUCT_ASUS_MYPAL_A730} , 0}
+	{{ USB_VENDOR_HTC, USB_PRODUCT_HTC_PPC6700MODEM }, 0}
 };
 
 #define uipaq_lookup(v, p) ((struct uipaq_type *)usb_lookup(uipaq_devs, v, p))
@@ -171,7 +173,6 @@ uipaq_attach(struct device *parent, struct device *self, void *aux)
 	usbd_interface_handle iface;
 	usb_interface_descriptor_t *id;
 	usb_endpoint_descriptor_t *ed;
-	char *devinfop;
 	char *devname = sc->sc_dev.dv_xname;
 	int i;
 	usbd_status err;
@@ -182,21 +183,17 @@ uipaq_attach(struct device *parent, struct device *self, void *aux)
 	/* Move the device into the configured state. */
 	err = usbd_set_config_no(dev, UIPAQ_CONFIG_NO, 1);
 	if (err) {
-		printf("\n%s: failed to set configuration, err=%s\n",
-		    devname, usbd_errstr(err));
+		printf(": failed to set configuration, err=%s\n",
+		    usbd_errstr(err));
 		goto bad;
 	}
 
 	err = usbd_device2interface_handle(dev, UIPAQ_IFACE_INDEX, &iface);
 	if (err) {
-		printf("\n%s: failed to get interface, err=%s\n",
-		    devname, usbd_errstr(err));
+		printf(": failed to get interface, err=%s\n",
+		    usbd_errstr(err));
 		goto bad;
 	}
-
-	devinfop = usbd_devinfo_alloc(dev, 0);
-	printf("\n%s: %s\n", devname, devinfop);
-	usbd_devinfo_free(devinfop);
 
 	sc->sc_flags = uipaq_lookup(uaa->vendor, uaa->product)->uv_flags;
 

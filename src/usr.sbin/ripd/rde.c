@@ -1,4 +1,4 @@
-/*	$OpenBSD: rde.c,v 1.6 2007/04/09 20:45:52 michele Exp $ */
+/*	$OpenBSD: rde.c,v 1.9 2007/10/24 20:38:03 claudio Exp $ */
 
 /*
  * Copyright (c) 2006 Michele Marchetto <mydecay@openbeer.it>
@@ -115,6 +115,7 @@ rde(struct ripd_conf *xconf, int pipe_parent2rde[2], int pipe_ripe2rde[2],
 	signal_add(&ev_sigint, NULL);
 	signal_add(&ev_sigterm, NULL);
 	signal(SIGPIPE, SIG_IGN);
+	signal(SIGHUP, SIG_IGN);
 
 	/* setup pipes */
 	close(pipe_ripe2rde[0]);
@@ -169,7 +170,6 @@ rde_shutdown(void)
 	_exit(0);
 }
 
-/* imesg */
 int
 rde_imsg_compose_ripe(int type, u_int32_t peerid, pid_t pid, void *data,
     u_int16_t datalen)
@@ -184,14 +184,15 @@ rde_dispatch_imsg(int fd, short event, void *bula)
 	struct imsgbuf		*ibuf = bula;
 	struct rip_route	 rr;
 	struct imsg		 imsg;
-	int			 n;
+	ssize_t			 n;
+	int			 shut = 0;
 
 	switch (event) {
 	case EV_READ:
 		if ((n = imsg_read(ibuf)) == -1)
 			fatal("imsg_read error");
 		if (n == 0)	/* connection closed */
-			fatalx("pipe closed");
+			shut = 1;
 		break;
 	case EV_WRITE:
 		if (msgbuf_write(&ibuf->w) == -1)
@@ -221,8 +222,9 @@ rde_dispatch_imsg(int fd, short event, void *bula)
 			break;
 		case IMSG_FULL_REQUEST:
 			bzero(&rr, sizeof(rr));
-			/* AFI == 0 && metric == INFINITY request the
-			   whole routing table
+			/*
+			 * AFI == 0 && metric == INFINITY request the
+			 * whole routing table
 			 */
 			rr.metric = INFINITY;
 			rde_imsg_compose_ripe(IMSG_REQUEST_ADD, 0,
@@ -264,7 +266,13 @@ rde_dispatch_imsg(int fd, short event, void *bula)
 		}
 		imsg_free(&imsg);
 	}
-	imsg_event_add(ibuf);
+	if (!shut)
+		imsg_event_add(ibuf);
+	else {
+		/* this pipe is dead, so remove the event handler */
+		event_del(&ibuf->ev);
+		event_loopexit(NULL);
+	}
 }
 
 /* ARGSUSED */
@@ -276,13 +284,14 @@ rde_dispatch_parent(int fd, short event, void *bula)
 	struct kroute		 kr;
 	struct imsgbuf		*ibuf = bula;
 	ssize_t			 n;
+	int			 shut = 0;
 
 	switch (event) {
 	case EV_READ:
 		if ((n = imsg_read(ibuf)) == -1)
 			fatal("imsg_read error");
 		if (n == 0)	/* connection closed */
-			fatalx("pipe closed");
+			shut = 1;
 		break;
 	case EV_WRITE:
 		if (msgbuf_write(&ibuf->w) == -1)
@@ -345,13 +354,19 @@ rde_dispatch_parent(int fd, short event, void *bula)
 		}
 		imsg_free(&imsg);
 	}
-	imsg_event_add(ibuf);
+	if (!shut)
+		imsg_event_add(ibuf);
+	else {
+		/* this pipe is dead, so remove the event handler */
+		event_del(&ibuf->ev);
+		event_loopexit(NULL);
+	}
 }
 
 void
 rde_send_change_kroute(struct rt_node *r)
 {
-	struct kroute    kr;
+	struct kroute	 kr;
 
 	bzero(&kr, sizeof(kr));
 	kr.prefix.s_addr = r->prefix.s_addr;
@@ -367,7 +382,7 @@ rde_send_change_kroute(struct rt_node *r)
 void
 rde_send_delete_kroute(struct rt_node *r)
 {
-	struct kroute    kr;
+	struct kroute	 kr;
 
 	bzero(&kr, sizeof(kr));
 	kr.prefix.s_addr = r->prefix.s_addr;
@@ -386,15 +401,11 @@ rde_check_route(struct rip_route *e)
 	struct timeval	 tv, now;
 	struct rt_node	*rn;
 	struct iface	*iface;
-	int		 metric;
+	u_int8_t	 metric;
 
 	if ((e->nexthop.s_addr & htonl(IN_CLASSA_NET)) ==
 	    htonl(INADDR_LOOPBACK & IN_CLASSA_NET) ||
-	    (e->nexthop.s_addr == INADDR_ANY))
-		return (-1);
-
-	if ((e->address.s_addr & htonl(IN_CLASSA_NET)) ==
-	    htonl(INADDR_LOOPBACK & IN_CLASSA_NET))
+	    e->nexthop.s_addr == INADDR_ANY)
 		return (-1);
 
 	if ((iface = if_find_index(e->ifindex)) == NULL)
@@ -425,7 +436,7 @@ rde_check_route(struct rip_route *e)
 			rde_send_change_kroute(rn);
 			triggered_update(rn);
 		} else if (e->nexthop.s_addr == rn->nexthop.s_addr &&
-		    metric > rn->metric) { 
+		    metric > rn->metric) {
 				rn->metric = metric;
 				rde_send_change_kroute(rn);
 				triggered_update(rn);

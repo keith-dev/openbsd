@@ -1,4 +1,4 @@
-/*	$OpenBSD: i2c_scan.c,v 1.97 2007/04/10 17:47:55 miod Exp $	*/
+/*	$OpenBSD: i2c_scan.c,v 1.112 2007/12/05 16:35:14 deraadt Exp $	*/
 
 /*
  * Copyright (c) 2005 Theo de Raadt <deraadt@openbsd.org>
@@ -20,6 +20,8 @@
  * I2C bus scanning.
  */
 
+#include "ipmi.h"
+
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/device.h>
@@ -30,7 +32,12 @@
 #undef I2C_DEBUG
 #define I2C_VERBOSE
 
-void	iic_probe(struct device *, struct i2cbus_attach_args *, u_int8_t);
+#define MAX_IGNORE 8
+u_int8_t ignore_addrs[MAX_IGNORE];
+
+struct iicprobelist {
+	u_int8_t start, end;
+};
 
 /*
  * Addresses at which to probe for sensors.  Skip address 0x4f, since
@@ -38,17 +45,34 @@ void	iic_probe(struct device *, struct i2cbus_attach_args *, u_int8_t);
  * few chips can actually sit at that address, and vendors seem to
  * place those at other addresses, so this isn't a big loss.
  */
-struct {
-	u_int8_t start, end;
-} probe_addrs[] = {
-	{ 0x18, 0x18 },
-	{ 0x1a, 0x1a },
+struct iicprobelist probe_addrs_sensor[] = {
+	{ 0x18, 0x1f },
 	{ 0x20, 0x2f },
-	{ 0x48, 0x4e }
+	{ 0x48, 0x4e },
+	{ 0, 0 }
 };
 
-#define MAX_IGNORE 8
-u_int8_t ignore_addrs[MAX_IGNORE];
+/*
+ * Addresses at which to probe for eeprom devices.
+ */
+struct iicprobelist probe_addrs_eeprom[] = {
+	{ 0x50, 0x57 },
+	{ 0, 0 }
+};
+
+char 	*iic_probe_sensor(struct device *, u_int8_t);
+char	*iic_probe_eeprom(struct device *, u_int8_t);
+
+#define PFLAG_SENSOR	1
+static struct {
+	struct iicprobelist *pl;
+	char	*(*probe)(struct device *, u_int8_t);
+	int	flags;
+} probes[] = {
+	{ probe_addrs_sensor, iic_probe_sensor, PFLAG_SENSOR },
+	{ probe_addrs_eeprom, iic_probe_eeprom, 0 },
+	{ NULL, NULL }
+};
 
 /*
  * Some Maxim 1617 clones MAY NOT even read cmd 0xfc!  When it is
@@ -376,7 +400,7 @@ iic_ignore_addr(u_int8_t addr)
 		}
 }
 
-#if defined(I2C_DEBUG) || defined(I2C_VERBOSE)
+#ifdef I2C_VERBOSE
 void
 iic_dump(struct device *dv, u_int8_t addr, char *name)
 {
@@ -406,31 +430,28 @@ iic_dump(struct device *dv, u_int8_t addr, char *name)
 			val = i;
 		}
 
-	if (cnt <= 254) {
-		printf("%s: addr 0x%x", dv->dv_xname, addr);
-		for (i = 0; i <= 0xff; i++) {
-			if (iicprobe(i) != val)
-				printf(" %02x=%02x", i, iicprobe(i));
-		}
-		if (name)
-			printf(": %s", name);
-		printf("\n");
+	if (cnt == 255)
+		return;
+
+	printf("%s: addr 0x%x", dv->dv_xname, addr);
+	for (i = 0; i <= 0xff; i++) {
+		if (iicprobe(i) != val)
+			printf(" %02x=%02x", i, iicprobe(i));
 	}
+	printf(" words", dv->dv_xname, addr);
+	for (i = 0; i < 16; i++)
+		printf(" %02x=%04x", i, iicprobew(i));
+	if (name)
+		printf(": %s", name);
+	printf("\n");
 }
-#endif /* defined(I2C_DEBUG) || defined(I2C_VERBOSE) */
+#endif /* I2C_VERBOSE */
 
-void
-iic_probe(struct device *self, struct i2cbus_attach_args *iba, u_int8_t addr)
+char *
+iic_probe_sensor(struct device *self, u_int8_t addr)
 {
-	struct i2c_attach_args ia;
 	char *name = NULL;
-	int i;
 
-	for (i = 0; i < sizeof(ignore_addrs); i++)
-		if (ignore_addrs[i] == addr)
-			return;
-
-	iicprobeinit(iba, addr);
 	skip_fc = 0;
 
 	/*
@@ -448,8 +469,9 @@ iic_probe(struct device *self, struct i2cbus_attach_args *iba, u_int8_t addr)
 		 * unique.
 		 */
 		if ((addr == 0x2c || addr == 0x2d || addr == 0x2e) &&
-		    iicprobe(0x3f) == 0x73)
-			name = "lm93";
+		    (iicprobe(0x3f) == 0x73 || iicprobe(0x3f) == 0x72) &&
+		    iicprobe(0x00) == 0x00)
+			name = "lm93";	/* product 0x72 is the prototype */
 		else if ((addr == 0x2c || addr == 0x2d || addr == 0x2e) &&
 		    iicprobe(0x3f) == 0x68)
 			name = "lm96000";	/* adt7460 compat? */
@@ -483,7 +505,7 @@ iic_probe(struct device *self, struct i2cbus_attach_args *iba, u_int8_t addr)
 			name = "adt7470";
 		else if ((addr == 0x2c || addr == 0x2d || addr == 0x2e) &&
 		    iicprobe(0x3d) == 0x76)
-			name = "adt7476";
+			name = "adt7476"; /* or adt7476a */
 		else if (addr == 0x2e && iicprobe(0x3d) == 0x75)
 			name = "adt7475";
 		else if (iicprobe(0x3d) == 0x27 &&
@@ -492,9 +514,12 @@ iic_probe(struct device *self, struct i2cbus_attach_args *iba, u_int8_t addr)
 		else if (iicprobe(0x3d) == 0x27 &&
 		    (iicprobe(0x3f) == 0x62 || iicprobe(0x3f) == 0x6a))
 			name = "adt7460";	/* complete check */
+		else if ((addr == 0x2c || addr == 0x2e) &&
+		    iicprobe(0x3d) == 0x62 && iicprobe(0x3f) == 0x04)
+			name = "adt7462";
 		else if (addr == 0x2e &&
 		    iicprobe(0x3d) == 0x68 && (iicprobe(0x3f) & 0xf0) == 0x70)
-			name = "adt7467";
+			name = "adt7467"; /* or adt7468 */
 		else if (iicprobe(0x3d) == 0x33)
 			name = "adm1033";
                 else if ((addr == 0x2c || addr == 0x2d || addr == 0x2e) &&
@@ -552,6 +577,9 @@ iic_probe(struct device *self, struct i2cbus_attach_args *iba, u_int8_t addr)
 		break;
 	case 0x5c:		/* SMSC */
 		if ((addr == 0x2c || addr == 0x2d || addr == 0x2e) &&
+		    (iicprobe(0x3f) == 0x69))
+			name = "sch5027";
+		else if ((addr == 0x2c || addr == 0x2d || addr == 0x2e) &&
 		    (iicprobe(0x3f) & 0xf0) == 0x60)
 			name = "emc6d100";   /* emc6d101, emc6d102, emc6d103 */
 		else if ((addr == 0x2c || addr == 0x2d || addr == 0x2e) &&
@@ -560,6 +588,11 @@ iic_probe(struct device *self, struct i2cbus_attach_args *iba, u_int8_t addr)
 		else if ((addr == 0x2c || addr == 0x2d || addr == 0x2e) &&
 		    (iicprobe(0x3f) & 0xf0) == 0xb0)
 			name = "emc6w201";
+		break;
+	case 0x61:		/* Andigilog */
+		if ((addr == 0x2c || addr == 0x2d || addr == 0x2e) &&
+		    iicprobe(0x3f) == 0x6c)
+			name = "asc7621";
 		break;
 	case 0xa1:		/* Philips */
 		if ((iicprobe(0x3f) & 0xf0) == 0x20 &&
@@ -677,6 +710,18 @@ iic_probe(struct device *self, struct i2cbus_attach_args *iba, u_int8_t addr)
 		    (iicprobe(0x03) & 0x0f) == 0)
 			name = "max6642";
 		break;
+	case 0x55:		/* Texas Instruments */
+		if (addr == 0x4c && iicprobe(0xff) == 0x11 &&
+		    (iicprobe(0x03) & 0x1b) == 0x00 &&
+		    (iicprobe(0x04) & 0xf0) == 0x00 &&
+		    (iicprobe(0x10) & 0x0f) == 0x00 &&
+		    (iicprobe(0x13) & 0x0f) == 0x00 &&
+		    (iicprobe(0x14) & 0x0f) == 0x00 &&
+		    (iicprobe(0x15) & 0x0f) == 0x00 &&
+		    (iicprobe(0x16) & 0x0f) == 0x00 &&
+		    (iicprobe(0x17) & 0x0f) == 0x00)
+			name = "tmp401";
+		break;
 	}
 
 	if (addr == iicprobe(0x48) &&
@@ -723,7 +768,7 @@ iic_probe(struct device *self, struct i2cbus_attach_args *iba, u_int8_t addr)
 			 */
 			name = "w83781d";
 		}
-	} else if (addr == iicprobe (0x4a) && iicprobe(0x4e) == 0x50 &&
+	} else if (addr == iicprobe(0x4a) && iicprobe(0x4e) == 0x50 &&
 	    iicprobe(0x4c) == 0xa3 && iicprobe(0x4d) == 0x5c) {
 		name = "w83l784r";
 	} else if (addr == 0x2d && iicprobe(0x4e) == 0x60 &&
@@ -732,6 +777,14 @@ iic_probe(struct device *self, struct i2cbus_attach_args *iba, u_int8_t addr)
 	} else if (addr == 0x2e && iicprobe(0x4e) == 0x70 &&
 	    iicprobe(0x4c) == 0xa3 && iicprobe(0x4d) == 0x5c) {
 		name = "w83l785ts-l";
+	} else if (addr >= 0x2c && addr <= 0x2f &&
+	    addr * 2 == iicprobe(0x0b) &&
+	    (iicprobe(0x0c) & 0x40) && !(iicprobe(0x0c) & 0x04) &&
+	    iicprobe(0x0e) == 0x7b &&
+	    (iicprobe(0x0f) == 0x11 || iicprobe(0x0f) == 0x12) &&
+	    ((iicprobe(0x0d) == 0x5c && (iicprobe(0x00) & 0x80)) ||
+	    (iicprobe(0x0d) == 0xa3 && !(iicprobe(0x00) & 0x80)))) {
+		name = "w83793g";
 	} else if (addr >= 0x28 && addr <= 0x2f &&
 	    iicprobe(0x4f) == 0x12 && (iicprobe(0x4e) & 0x80)) {
 		/*
@@ -796,9 +849,9 @@ iic_probe(struct device *self, struct i2cbus_attach_args *iba, u_int8_t addr)
 	 * dangerous writes.
 	 */
 	if (name == NULL && (addr & 0x7c) == 0x48 &&	/* addr 0b1001xxx */
- 	    (iicprobew(0xaa) & 0x0007) == 0x0000 &&
- 	    (iicprobew(0xa1) & 0x0007) == 0x0000 &&
- 	    (iicprobew(0xa2) & 0x0007) == 0x0000 &&
+	    (iicprobew(0xaa) & 0x0007) == 0x0000 &&
+	    (iicprobew(0xa1) & 0x0007) == 0x0000 &&
+	    (iicprobew(0xa2) & 0x0007) == 0x0000 &&
 	    (iicprobe(0xac) & 0x10) == 0x00) {
 		if ((iicprobe(0xac) & 0x7e) == 0x0a &&
 		    iicprobe(0xab) == 0x00 && iicprobe(0xa8) == 0x00)
@@ -827,54 +880,86 @@ iic_probe(struct device *self, struct i2cbus_attach_args *iba, u_int8_t addr)
 			skip_fc = 1;
 	}
 
-#ifdef I2C_DEBUG
-	iic_dump(self, addr, name);
-#endif /* I2C_DEBUG */
+	return (name);
+}
 
-#if !defined(I2C_VERBOSE) && !defined(I2C_DEBUG)
-	if (name == NULL)
-		name = "unknown";
-#endif
+char *
+iic_probe_eeprom(struct device *self, u_int8_t addr)
+{
+	int reg, csum = 0;
+	char *name = NULL;
 
-	if (name) {
-		memset(&ia, 0, sizeof(ia));
-		ia.ia_tag = iba->iba_tag;
-		ia.ia_addr = addr;
-		ia.ia_size = 1;
-		ia.ia_name = name;
-		if (config_found(self, &ia, iic_print))
-			return;
-	}
+	/* SPD EEPROMs should only set lower nibble for size (ie <= 32K) */
+	if ((iicprobe(0x01) & 0xf0) != 0)
+		return (name);
 
-#if defined(I2C_VERBOSE) && !defined(I2C_DEBUG)
-	iic_dump(self, addr, name);
-#endif /* defined(I2C_VERBOSE) && !defined(I2C_DEBUG) */
+	for (reg = 0; reg < 0x3f; reg++)
+		csum += iicprobe(reg);
+
+	if (iicprobe(0x3f) == (csum & 0xff))
+		name = "spd";
+	return (name);
 }
 
 void
 iic_scan(struct device *self, struct i2cbus_attach_args *iba)
 {
 	i2c_tag_t ic = iba->iba_tag;
+	struct i2c_attach_args ia;
+	struct iicprobelist *pl;
 	u_int8_t cmd = 0, addr;
-	int i;
+	char *name;
+	int i, j, k;
 
 	bzero(ignore_addrs, sizeof(ignore_addrs));
-	for (i = 0; i < sizeof(probe_addrs)/sizeof(probe_addrs[0]); i++) {
-		for (addr = probe_addrs[i].start; addr <= probe_addrs[i].end;
-		    addr++) {
-			/* Perform RECEIVE BYTE command */
-			iic_acquire_bus(ic, 0);
-			if (iic_exec(ic, I2C_OP_READ_WITH_STOP, addr,
-			    &cmd, 1, NULL, 0, 0) == 0) {
-				iic_release_bus(ic, 0);
 
-				/* Some device exists, so go scope it out */
-				iic_probe(self, iba, addr);
+	for (i = 0; probes[i].probe; i++) {
+#if NIPMI > 0
+		extern int ipmi_enabled;
 
+		if ((probes[i].flags & PFLAG_SENSOR) && ipmi_enabled) {
+			printf("%s: skipping sensors to avoid ipmi0 interactions\n",
+			    self->dv_xname);
+			continue;
+		}
+#endif
+		pl = probes[i].pl;
+		for (j = 0; pl[j].start && pl[j].end; j++) {
+			for (addr = pl[j].start; addr <= pl[j].end; addr++) {
+				for (k = 0; k < sizeof(ignore_addrs); k++)
+					if (ignore_addrs[k] == addr)
+						continue;
+
+				/* Perform RECEIVE BYTE command */
 				iic_acquire_bus(ic, 0);
+				if (iic_exec(ic, I2C_OP_READ_WITH_STOP, addr,
+				    &cmd, 1, NULL, 0, 0) == 0) {
+					iic_release_bus(ic, 0);
 
+					/* Some device exists */
+					iicprobeinit(iba, addr);
+					name = (*probes[i].probe)(self, addr);
+#ifndef I2C_VERBOSE
+					if (name == NULL)
+						name = "unknown";
+#endif /* !I2C_VERBOSE */
+					if (name) {
+						memset(&ia, 0, sizeof(ia));
+						ia.ia_tag = iba->iba_tag;
+						ia.ia_addr = addr;
+						ia.ia_size = 1;
+						ia.ia_name = name;
+						if (config_found(self,
+						    &ia, iic_print))
+							continue;
+					}
+#ifdef I2C_VERBOSE
+					if ((probes[i].flags & PFLAG_SENSOR))
+						iic_dump(self, addr, name);
+#endif /* I2C_VERBOSE */
+				} else
+					iic_release_bus(ic, 0);
 			}
-			iic_release_bus(ic, 0);
 		}
 	}
 }

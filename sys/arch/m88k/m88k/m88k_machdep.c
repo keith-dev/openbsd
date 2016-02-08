@@ -1,4 +1,4 @@
-/*	$OpenBSD: m88k_machdep.c,v 1.21 2007/05/29 18:10:42 miod Exp $	*/
+/*	$OpenBSD: m88k_machdep.c,v 1.41 2007/12/26 22:21:39 miod Exp $	*/
 /*
  * Copyright (c) 1998, 1999, 2000, 2001 Steve Murphree, Jr.
  * Copyright (c) 1996 Nivas Madhur
@@ -92,9 +92,9 @@ void	vector_init(m88k_exception_vector_area *, u_int32_t *);
  */
 
 #ifdef MULTIPROCESSOR
-__cpu_simple_lock_t cmmu_cpu_lock = __SIMPLELOCK_UNLOCKED;
 cpuid_t	master_cpu;
-struct __mp_lock sir_lock;
+__cpu_simple_lock_t __atomic_lock = __SIMPLELOCK_UNLOCKED;
+__cpu_simple_lock_t cmmu_cpu_lock = __SIMPLELOCK_UNLOCKED;
 #endif
 
 struct cpu_info m88k_cpus[MAX_CPUS];
@@ -133,14 +133,10 @@ setregs(p, pack, stack, retval)
 #ifdef M88110
 	if (CPU_IS88110) {
 		/*
-		 * user mode, serialize mem, interrupts enabled,
+		 * user mode, interrupts enabled,
 		 * graphics unit, fp enabled
 		 */
-		tf->tf_epsr = PSR_SRM | PSR_SFD;
-		/*
-		 * XXX disable OoO for now...
-		 */
-		tf->tf_epsr |= PSR_SER;
+		tf->tf_epsr = PSR_SFD;
 	}
 #endif
 #ifdef M88100
@@ -155,23 +151,39 @@ setregs(p, pack, stack, retval)
 
 	/*
 	 * We want to start executing at pack->ep_entry. The way to
-	 * do this is force the processor to fetch from ep_entry. Set
-	 * NIP to something bogus and invalid so that it will be a NOOP.
-	 * And set sfip to ep_entry with valid bit on so that it will be
-	 * fetched.  mc88110 - just set exip to pack->ep_entry.
+	 * do this is force the processor to fetch from ep_entry.
+	 *
+	 * However, since we will return throug m{88100,88110}_syscall(),
+	 * we need to setup registers so that the success return, when
+	 * ``incrementing'' the instruction pointers, will cause the
+	 * binary to start at the expected address.
+	 *
+	 * This relies on the fact that binaries start with
+	 *
+	 *	br.n	1f
+	 *	 or	r2, r0, r30
+	 * 1:
+	 *
+	 * So the first two instructions can be skipped.
 	 */
 #ifdef M88110
 	if (CPU_IS88110) {
+		/*
+		 * m88110_syscall() will resume at exip + 8... which
+		 * really is the first instruction we want to run.
+		 */
 		tf->tf_exip = pack->ep_entry & XIP_ADDR;
 	}
 #endif
 #ifdef M88100
 	if (CPU_IS88100) {
-		tf->tf_snip = pack->ep_entry & NIP_ADDR;
-		tf->tf_sfip = (pack->ep_entry & FIP_ADDR) | FIP_V;
+		/*
+		 * m88100_syscall() will resume at sfip / sfip + 4.
+		 */
+		tf->tf_sfip = ((pack->ep_entry + 8) & FIP_ADDR) | FIP_V;
 	}
 #endif
-	tf->tf_r[2] = stack;
+	tf->tf_r[2] = retval[0] = stack;
 	tf->tf_r[31] = stack;
 	retval[1] = 0;
 }
@@ -200,50 +212,6 @@ copystr(fromaddr, toaddr, maxlength, lencopied)
 		*lencopied = tally;
 
 	return (ENAMETOOLONG);
-}
-
-void
-setrunqueue(p)
-	struct proc *p;
-{
-	struct prochd *q;
-	struct proc *oldlast;
-	int which = p->p_priority >> 2;
-
-#ifdef DIAGNOSTIC
-	if (p->p_back != NULL)
-		panic("setrunqueue %p", p);
-#endif
-	q = &qs[which];
-	whichqs |= 1 << which;
-	p->p_forw = (struct proc *)q;
-	p->p_back = oldlast = q->ph_rlink;
-	q->ph_rlink = p;
-	oldlast->p_forw = p;
-}
-
-/*
- * Remove process p from its run queue, which should be the one
- * indicated by its priority.  Calls should be made at splstatclock().
- */
-void
-remrunqueue(vp)
-	struct proc *vp;
-{
-	struct proc *p = vp;
-	int which = p->p_priority >> 2;
-	struct prochd *q;
-
-#ifdef DIAGNOSTIC
-	if ((whichqs & (1 << which)) == 0)
-		panic("remrq %p", p);
-#endif
-	p->p_forw->p_back = p->p_back;
-	p->p_back->p_forw = p->p_forw;
-	p->p_back = NULL;
-	q = &qs[which];
-	if (q->ph_link == (struct proc *)q)
-		whichqs &= ~(1 << which);
 }
 
 #ifdef DDB
@@ -282,7 +250,7 @@ regdump(struct trapframe *f)
 		printf("dmt2 %x dmd2 %x dma2 %x\n",
 		    f->tf_dmt2, f->tf_dmd2, f->tf_dma2);
 		printf("fault type %d\n", (f->tf_dpfsr >> 16) & 0x7);
-		dae_print((unsigned *)f);
+		dae_print((u_int *)f);
 	}
 	if (CPU_IS88100 && longformat != 0) {
 		printf("fpsr %x fpcr %x epsr %x ssbr %x\n",
@@ -292,8 +260,8 @@ regdump(struct trapframe *f)
 		    f->tf_fphs2, f->tf_fpls2);
 		printf("fppt %x fprh %x fprl %x fpit %x\n",
 		    f->tf_fppt, f->tf_fprh, f->tf_fprl, f->tf_fpit);
-		printf("vector %d mask %x mode %x scratch1 %x cpu %p\n",
-		    f->tf_vector, f->tf_mask, f->tf_mode,
+		printf("vector %d mask %x flags %x scratch1 %x cpu %p\n",
+		    f->tf_vector, f->tf_mask, f->tf_flags,
 		    f->tf_scratch1, f->tf_cpu);
 	}
 #endif
@@ -305,8 +273,8 @@ regdump(struct trapframe *f)
 		    f->tf_dsap, f->tf_duap, f->tf_dsr, f->tf_dlar, f->tf_dpar);
 		printf("isap %x iuap %x isr %x ilar %x ipar %x\n",
 		    f->tf_isap, f->tf_iuap, f->tf_isr, f->tf_ilar, f->tf_ipar);
-		printf("vector %d mask %x mode %x scratch1 %x cpu %p\n",
-		    f->tf_vector, f->tf_mask, f->tf_mode,
+		printf("vector %d mask %x flags %x scratch1 %x cpu %p\n",
+		    f->tf_vector, f->tf_mask, f->tf_flags,
 		    f->tf_scratch1, f->tf_cpu);
 	}
 #endif
@@ -320,7 +288,6 @@ void
 set_cpu_number(cpuid_t number)
 {
 	struct cpu_info *ci;
-	extern struct pcb idle_u;
 
 #ifdef MULTIPROCESSOR
 	ci = &m88k_cpus[number];
@@ -331,23 +298,6 @@ set_cpu_number(cpuid_t number)
 
 	__asm__ __volatile__ ("stcr %0, cr17" :: "r" (ci));
 	flush_pipeline();
-
-#ifdef MULTIPROCESSOR
-	if (number == master_cpu)
-#endif
-	{
-		ci->ci_primary = 1;
-		ci->ci_idle_pcb = &idle_u;
-
-#ifdef MULTIPROCESSOR
-		/*
-		 * Specific initialization for the master processor.
-		 */
-		__mp_lock_init(&sir_lock);
-#endif
-	}
-
-	ci->ci_alive = 1;
 }
 
 /*
@@ -368,18 +318,22 @@ signotify(struct proc *p)
  * Soft interrupt interface
  */
 
-unsigned int ssir;
 int netisr;
 
 void
 dosoftint()
 {
+	struct cpu_info *ci = curcpu();
 	int sir, n;
 
-	if ((sir = ssir) == 0)
+	if ((sir = ci->ci_softintr) == 0)
 		return;
 
-	atomic_clearbits_int(&ssir, sir);
+#ifdef MULTIPROCESSOR
+	__mp_lock(&kernel_lock);
+#endif
+
+	atomic_clearbits_int(&ci->ci_softintr, sir);
 	uvmexp.softs++;
 
 	if (ISSET(sir, SIR_NET)) {
@@ -400,18 +354,29 @@ dosoftint()
 
 	if (ISSET(sir, SIR_CLOCK))
 		softclock();
+
+#ifdef MULTIPROCESSOR
+	__mp_unlock(&kernel_lock);
+#endif
 }
 
 int
 spl0()
 {
+	struct cpu_info *ci = curcpu();
 	int s;
 
-	s = setipl(IPL_SOFTCLOCK);
+	/*
+	 * Try to avoid potentially expensive setipl calls if nothing
+	 * seems to be pending.
+	 */
+	if (ci->ci_softintr != 0) {
+		s = setipl(IPL_SOFTCLOCK);
+		dosoftint();
+		setipl(IPL_NONE);
+	} else
+		s = setipl(IPL_NONE);
 
-	dosoftint();
-
-	setipl(IPL_NONE);
 	return (s);
 }
 
@@ -421,10 +386,16 @@ spl0()
 #define BRANCH(FROM, TO) \
 	(EMPTY_BR | ((vaddr_t)(TO) - (vaddr_t)(FROM)) >> 2)
 
-#define SET_VECTOR(NUM, VALUE) \
+#define SET_VECTOR_88100(NUM, VALUE) \
 	do { \
 		vbr[NUM].word_one = NO_OP; \
 		vbr[NUM].word_two = BRANCH(&vbr[NUM].word_two, VALUE); \
+	} while (0)
+
+#define SET_VECTOR_88110(NUM, VALUE) \
+	do { \
+		vbr[NUM].word_one = BRANCH(&vbr[NUM].word_one, VALUE); \
+		vbr[NUM].word_two = NO_OP; \
 	} while (0)
 
 /*
@@ -448,9 +419,6 @@ vector_init(m88k_exception_vector_area *vbr, u_int32_t *vector_init_list)
 	u_int num;
 	u_int32_t vec;
 
-	for (num = 0; (vec = vector_init_list[num]) != 0; num++)
-		SET_VECTOR(num, vec);
-
 	switch (cputyp) {
 	default:
 #ifdef M88110
@@ -462,13 +430,21 @@ vector_init(m88k_exception_vector_area *vbr, u_int32_t *vector_init_list)
 		extern void m88110_stepbpt(void);
 		extern void m88110_userbpt(void);
 
-		for (; num < 512; num++)
-			SET_VECTOR(num, m88110_sigsys);
+		for (num = 0; (vec = vector_init_list[num]) != 0; num++)
+			SET_VECTOR_88110(num, vec);
 
-		SET_VECTOR(450, m88110_syscall_handler);
-		SET_VECTOR(451, m88110_cache_flush_handler);
-		SET_VECTOR(504, m88110_stepbpt);
-		SET_VECTOR(511, m88110_userbpt);
+		for (; num < 512; num++)
+			SET_VECTOR_88110(num, m88110_sigsys);
+
+		SET_VECTOR_88110(450, m88110_syscall_handler);
+		SET_VECTOR_88110(451, m88110_cache_flush_handler);
+		/*
+		 * GCC will by default produce explicit trap 503
+		 * for division by zero
+		 */
+		SET_VECTOR_88110(503, vector_init_list[8]);
+		SET_VECTOR_88110(504, m88110_stepbpt);
+		SET_VECTOR_88110(511, m88110_userbpt);
 	    }
 		break;
 #endif
@@ -481,18 +457,94 @@ vector_init(m88k_exception_vector_area *vbr, u_int32_t *vector_init_list)
 		extern void stepbpt(void);
 		extern void userbpt(void);
 
-		for (; num < 512; num++)
-			SET_VECTOR(num, sigsys);
+		for (num = 0; (vec = vector_init_list[num]) != 0; num++)
+			SET_VECTOR_88100(num, vec);
 
-		SET_VECTOR(450, syscall_handler);
-		SET_VECTOR(451, cache_flush_handler);
-		SET_VECTOR(504, stepbpt);
-		SET_VECTOR(511, userbpt);
+		for (; num < 512; num++)
+			SET_VECTOR_88100(num, sigsys);
+
+		SET_VECTOR_88100(450, syscall_handler);
+		SET_VECTOR_88100(451, cache_flush_handler);
+		/*
+		 * GCC will by default produce explicit trap 503
+		 * for division by zero
+		 */
+		SET_VECTOR_88100(503, vector_init_list[8]);
+		SET_VECTOR_88100(504, stepbpt);
+		SET_VECTOR_88100(511, userbpt);
 	    }
 		break;
 #endif
 	}
-
-	/* GCC will by default produce explicit trap 503 for division by zero */
-	SET_VECTOR(503, vector_init_list[8]);
 }
+
+#ifdef MULTIPROCESSOR
+
+/*
+ * This function is invoked when it turns out one secondary processor is
+ * not usable.
+ * Be sure to put the process currently running on it in the run queues,
+ * so that another processor can take care of it.
+ */
+__dead void
+cpu_emergency_disable()
+{
+	struct cpu_info *ci = curcpu();
+	struct schedstate_percpu *spc = &ci->ci_schedstate;
+	struct proc *p = curproc;
+	int s;
+	extern void savectx(struct pcb *);
+
+	if (p != NULL && p != spc->spc_idleproc) {
+		savectx(curpcb);
+
+		/*
+		 * The following is an inline yield(), without the call
+		 * to mi_switch().
+		 */
+		SCHED_LOCK(s);
+		p->p_priority = p->p_usrpri;
+		p->p_stat = SRUN;
+		setrunqueue(p);
+		p->p_stats->p_ru.ru_nvcsw++;
+		SCHED_UNLOCK(s);
+	}
+
+	CLR(ci->ci_flags, CIF_ALIVE);
+	set_psr(get_psr() | PSR_IND);
+	splhigh();
+
+	for (;;) ;
+	/* NOTREACHED */
+}
+
+/*
+ * Emulate a compare-and-swap instruction for rwlocks, by using a
+ * __cpu_simple_lock as a critical section.
+ *
+ * Since we are only competing against other processors for rwlocks,
+ * it is not necessary in this case to disable interrupts to prevent
+ * reentrancy on the same processor.
+ *
+ * Updates need to be done with xmem to ensure they are atomic.
+ */
+
+__cpu_simple_lock_t rw_cas_spinlock = __SIMPLELOCK_UNLOCKED;
+
+int
+rw_cas_m88k(volatile unsigned long *p, unsigned long o, unsigned long n)
+{
+	int rc = 0;
+
+	__cpu_simple_lock(&rw_cas_spinlock);
+
+	if (*p != o)
+		rc = 1;
+	*p = n;
+
+	__cpu_simple_unlock(&rw_cas_spinlock);
+
+	return (rc);
+}
+
+#endif	/* MULTIPROCESSOR */

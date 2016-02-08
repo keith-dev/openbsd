@@ -1,4 +1,4 @@
-/*	$OpenBSD: getnetgrent.c,v 1.18 2007/03/05 20:29:14 millert Exp $	*/
+/*	$OpenBSD: getnetgrent.c,v 1.21 2007/09/17 07:07:23 moritz Exp $	*/
 
 /*
  * Copyright (c) 1994 Christos Zoulas
@@ -88,7 +88,7 @@ _ng_sl_init(void)
 
 	sl->sl_cur = 0;
 	sl->sl_max = 20;
-	sl->sl_str = malloc(sl->sl_max * sizeof(char *));
+	sl->sl_str = calloc(sl->sl_max, sizeof(char *));
 	if (sl->sl_str == NULL)
 		return NULL;
 	return sl;
@@ -217,8 +217,8 @@ getnetgroup(char **pp)
 #ifdef DEBUG_NG
 	{
 		char buf[1024];
-		(void) fprintf(stderr, "netgroup %s\n",
-		    _ng_print(buf, sizeof(buf), ng));
+		_ng_print(buf, sizeof(buf), ng);
+		fprintf(stderr, "netgroup %s\n", buf);
 	}
 #endif
 	return ng;
@@ -505,8 +505,16 @@ char *
 _ng_makekey(const char *s1, const char *s2, size_t len)
 {
 	char *buf = malloc(len);
-	if (buf != NULL)
-		(void) snprintf(buf, len, "%s.%s", _NG_STAR(s1), _NG_STAR(s2));
+	int ret;
+
+	if (buf == NULL)
+		return NULL;
+	ret = snprintf(buf, len, "%s.%s", _NG_STAR(s1), _NG_STAR(s2));
+	if (ret < 0 || ret >= len) {
+		free(buf);
+		return NULL;
+	}
+
 	return buf;
 }
 

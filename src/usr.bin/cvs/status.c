@@ -1,7 +1,7 @@
-/*	$OpenBSD: status.c,v 1.76 2007/07/03 12:29:52 xsa Exp $	*/
+/*	$OpenBSD: status.c,v 1.83 2008/02/13 17:05:13 joris Exp $	*/
 /*
  * Copyright (c) 2006 Joris Vink <joris@openbsd.org>
- * Copyright (c) 2005, 2006 Xavier Santolaria <xsa@openbsd.org>
+ * Copyright (c) 2005-2008 Xavier Santolaria <xsa@openbsd.org>
  *
  * Permission to use, copy, modify, and distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -27,7 +27,7 @@ void	cvs_status_local(struct cvs_file *);
 static int show_sym = 0;
 
 struct cvs_cmd cvs_cmd_status = {
-	CVS_OP_STATUS, 0, "status",
+	CVS_OP_STATUS, CVS_USE_WDIR, "status",
 	{ "st", "stat" },
 	"Display status information on checked out files",
 	"[-lRv]",
@@ -69,6 +69,7 @@ cvs_status(int argc, char **argv)
 			flags &= ~CR_RECURSE_DIRS;
 			break;
 		case 'R':
+			flags |= CR_RECURSE_DIRS;
 			break;
 		case 'v':
 			show_sym = 1;
@@ -124,12 +125,20 @@ cvs_status_local(struct cvs_file *cf)
 
 	cvs_log(LP_TRACE, "cvs_status_local(%s)", cf->file_path);
 
-	cvs_file_classify(cf, NULL);
+	cvs_file_classify(cf, cvs_directory_tag);
 
 	if (cf->file_type == CVS_DIR) {
 		if (verbosity > 1)
 			cvs_log(LP_NOTICE, "Examining %s", cf->file_path);
 		return;
+	}
+
+	if (cf->file_rcs != NULL) {
+		head = rcs_head_get(cf->file_rcs);
+		if (head == NULL && cf->file_status != FILE_REMOVE_ENTRY)
+			return;
+	} else {
+		head = NULL;
 	}
 
 	cvs_printf("%s\n", CVS_STATUS_SEP);
@@ -140,8 +149,8 @@ cvs_status_local(struct cvs_file *cf)
 		status = "File had conflicts on merge";
 
 	if (cf->file_status == FILE_LOST ||
-	    cf->file_status == FILE_UNKNOWN ||
-	    (cf->file_rcs != NULL && cf->in_attic == 1)) {
+	    cf->file_status == FILE_REMOVE_ENTRY ||
+	    (cf->file_rcs != NULL && cf->in_attic == 1 && cf->fd == -1)) {
 		(void)xsnprintf(buf, sizeof(buf), "no file %s\t",
 		    cf->file_name);
 	} else
@@ -153,7 +162,8 @@ cvs_status_local(struct cvs_file *cf)
 	if (cf->file_ent == NULL) {
 		(void)xsnprintf(buf, sizeof(buf),
 		    "No entry for %s", cf->file_name);
-	} else if (cf->file_status == FILE_ADDED) {
+	} else if (cf->file_status == FILE_ADDED ||
+		   cf->file_status == FILE_REMOVE_ENTRY) {
 		len = strlcpy(buf, "New file!", sizeof(buf));
 		if (len >= sizeof(buf))
 			fatal("cvs_status_local: truncation");
@@ -181,12 +191,11 @@ cvs_status_local(struct cvs_file *cf)
 	cvs_printf("   Working revision:\t%s\n", buf);
 
 	buf[0] = '\0';
-	if (cf->file_rcs == NULL) {
+	if (cf->file_rcs == NULL || head == NULL) {
 		len = strlcat(buf, "No revision control file", sizeof(buf));
 		if (len >= sizeof(buf))
 			fatal("cvs_status_local: truncation");
 	} else {
-		head = rcs_head_get(cf->file_rcs);
 		rcsnum_tostr(head, revbuf, sizeof(revbuf));
 		rcsnum_free(head);
 		(void)xsnprintf(buf, sizeof(buf), "%s\t%s", revbuf,
@@ -201,6 +210,18 @@ cvs_status_local(struct cvs_file *cf)
 			    cf->file_ent->ce_tag);
 		else if (verbosity > 0)
 			cvs_printf("   Sticky Tag:\t\t(none)\n");
+
+		if (cf->file_ent->ce_date != -1) {
+			struct tm *datetm;
+			char datetmp[CVS_TIME_BUFSZ];
+
+			datetm = gmtime(&(cf->file_ent->ce_date));
+                        (void)strftime(datetmp, sizeof(datetmp),
+			    CVS_DATE_FMT, datetm);
+
+			cvs_printf("   Sticky Date:\t\t%s\n", datetmp);
+		} else if (verbosity > 0)
+			cvs_printf("   Sticky Date:\t\t(none)\n");
 
 		if (cf->file_ent->ce_opts != NULL)
 			cvs_printf("   Sticky Options:\t%s\n",

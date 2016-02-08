@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_sf_pci.c,v 1.2 2006/12/06 22:43:38 martin Exp $	*/
+/*	$OpenBSD: if_sf_pci.c,v 1.5 2007/10/29 12:20:32 fgsch Exp $	*/
 /*	$NetBSD: if_sf_pci.c,v 1.10 2006/06/17 23:34:27 christos Exp $	*/
 
 /*-
@@ -112,30 +112,15 @@ sf_pci_attach(struct device *parent, struct device *self, void *aux)
 	const char *intrstr = NULL;
 	bus_space_tag_t iot, memt;
 	bus_space_handle_t ioh, memh;
+	int state, ioh_valid, memh_valid;
+	bus_size_t iosize, memsize;
 	pcireg_t reg;
-	int pmreg, ioh_valid, memh_valid;
 
-	if (pci_get_capability(pa->pa_pc, pa->pa_tag, PCI_CAP_PWRMGMT,
-	    &pmreg, 0)) {
-		reg = pci_conf_read(pa->pa_pc, pa->pa_tag, pmreg + PCI_PMCSR);
-		switch (reg & PCI_PMCSR_STATE_MASK) {
-		case PCI_PMCSR_STATE_D1:
-		case PCI_PMCSR_STATE_D2:
-			printf(": waking up from power state D%d\n%s",
-			    reg & PCI_PMCSR_STATE_MASK, sc->sc_dev.dv_xname);
-			pci_conf_write(pa->pa_pc, pa->pa_tag, pmreg + PCI_PMCSR,
-			    (reg & ~PCI_PMCSR_STATE_MASK) |
-			    PCI_PMCSR_STATE_D0);
-			break;
-
-		case PCI_PMCSR_STATE_D3:
-			printf("%s: unable to wake up from power state D3\n",
-			    sc->sc_dev.dv_xname);
-			pci_conf_write(pa->pa_pc, pa->pa_tag, pmreg + PCI_PMCSR,
-			    (reg & ~PCI_PMCSR_STATE_MASK) |
-			    PCI_PMCSR_STATE_D0);
-			return;
-		}
+	state = pci_set_powerstate(pa->pa_pc, pa->pa_tag, PCI_PMCSR_STATE_D0);
+	if (state == PCI_PMCSR_STATE_D3) {
+		printf(": unable to wake up from power state D3, "
+		    "reboot required.\n");
+		return;
 	}
 
 	/*
@@ -146,7 +131,7 @@ sf_pci_attach(struct device *parent, struct device *self, void *aux)
 	case PCI_MAPREG_TYPE_MEM | PCI_MAPREG_MEM_TYPE_32BIT:
 	case PCI_MAPREG_TYPE_MEM | PCI_MAPREG_MEM_TYPE_64BIT:
 		memh_valid = (pci_mapreg_map(pa, SF_PCI_MEMBA,
-		    reg, 0, &memt, &memh, NULL, NULL, 0) == 0);
+		    reg, 0, &memt, &memh, &memsize, NULL, 0) == 0);
 		break;
 	default:
 		memh_valid = 0;
@@ -156,7 +141,7 @@ sf_pci_attach(struct device *parent, struct device *self, void *aux)
 	    (reg == (PCI_MAPREG_TYPE_MEM | PCI_MAPREG_MEM_TYPE_64BIT)) ?
 		SF_PCI_IOBA : SF_PCI_IOBA - 0x04,
 	    PCI_MAPREG_TYPE_IO, 0,
-	    &iot, &ioh, NULL, NULL, 0) == 0);
+	    &iot, &ioh, &iosize, NULL, 0) == 0);
 
 	if (memh_valid) {
 		sc->sc_st = memt;
@@ -167,8 +152,7 @@ sf_pci_attach(struct device *parent, struct device *self, void *aux)
 		sc->sc_sh = ioh;
 		sc->sc_iomapped = 1;
 	} else {
-		printf("%s: unable to map device registers\n",
-		    sc->sc_dev.dv_xname);
+		printf(": unable to map device registers\n");
 		return;
 	}
 
@@ -183,18 +167,18 @@ sf_pci_attach(struct device *parent, struct device *self, void *aux)
 	 * Map and establish our interrupt.
 	 */
 	if (pci_intr_map(pa, &ih)) {
-		printf("%s: unable to map interrupt\n", sc->sc_dev.dv_xname);
-		return;
+		printf(": unable to map interrupt\n");
+		goto out;
 	}
 	intrstr = pci_intr_string(pa->pa_pc, ih);
 	psc->sc_ih = pci_intr_establish(pa->pa_pc, ih, IPL_NET, sf_intr, sc,
 	    self->dv_xname);
 	if (psc->sc_ih == NULL) {
-		printf("%s: unable to establish interrupt",
-		    sc->sc_dev.dv_xname);
+		printf(": unable to establish interrupt");
 		if (intrstr != NULL)
 			printf(" at %s", intrstr);
-		return;
+		printf("\n");
+		goto out;
 	}
 	printf(": %s", intrstr);
 
@@ -202,4 +186,11 @@ sf_pci_attach(struct device *parent, struct device *self, void *aux)
 	 * Finish off the attach.
 	 */
 	sf_attach(sc);
+	return;
+
+ out:
+	if (ioh_valid)
+		bus_space_unmap(iot, ioh, iosize);
+	if (memh_valid)
+		bus_space_unmap(memt, memh, memsize);
 }

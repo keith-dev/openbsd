@@ -1,4 +1,4 @@
-/*	$OpenBSD: installboot.c,v 1.6 2006/02/14 17:16:19 aaron Exp $	*/
+/*	$OpenBSD: installboot.c,v 1.8 2008/01/24 12:09:53 krw Exp $	*/
 /*	$NetBSD: installboot.c,v 1.5 1995/11/17 23:23:50 gwr Exp $ */
 
 /*
@@ -201,7 +201,7 @@ main(int argc, char *argv[])
 	if (dl.d_type != 0 && dl.d_type != DTYPE_FLOPPY &&
 	    dl.d_type != DTYPE_VND) {
 		if (lseek(devfd, (off_t)DOSBBSECTOR, SEEK_SET) < 0 ||
-		    read(devfd, &mbr, sizeof(mbr)) < sizeof(mbr))
+		    read(devfd, &mbr, sizeof(mbr)) != sizeof(mbr))
 			err(4, "can't read master boot record");
 
 		if (mbr.dmbr_sign != DOSMBR_SIGNATURE)
@@ -443,7 +443,7 @@ getbootparams(char *boot, int devfd, struct disklabel *dl)
 		fprintf(stderr, "%s is %d blocks x %d bytes\n",
 		    boot, ndb, fs->fs_bsize);
 		fprintf(stderr, "fs block shift %u; part offset %u; "
-		    "inode block %u, offset %u\n",
+		    "inode block %lld, offset %u\n",
 		    fs->fs_fsbtodb, pl->p_offset,
 		    ino_to_fsba(fs, statbuf.st_ino),
 		    (unsigned int)((((char *)ap) - buf) + INODEOFF));

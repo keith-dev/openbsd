@@ -1,4 +1,4 @@
-/*	$OpenBSD: malloc.h,v 1.85 2007/06/17 20:06:10 jasper Exp $	*/
+/*	$OpenBSD: malloc.h,v 1.90 2007/11/28 23:37:34 oga Exp $	*/
 /*	$NetBSD: malloc.h,v 1.39 1998/07/12 19:52:01 augustss Exp $	*/
 
 /*
@@ -55,6 +55,7 @@
 #define	M_WAITOK	0x0000
 #define	M_NOWAIT	0x0001
 #define M_CANFAIL	0x0002
+#define	M_ZERO		0x0004
 
 /*
  * Types of memory to be allocated
@@ -176,7 +177,13 @@
 #define M_UDFFENTRY	141	/* UDF file entry */
 #define M_UDFFID	142	/* UDF file id */
 
-#define	M_LAST		143	/* Must be last type + 1 */
+#define	M_BTHIDEV	143	/* Bluetooth HID */
+
+#define M_AGP		144	/* AGP Memory */
+
+#define M_DRM		145	/* Direct Rendering Manager */
+
+#define	M_LAST		146	/* Must be last type + 1 */
 
 #define	INITKMEMNAMES { \
 	"free",		/* 0 M_FREE */ \
@@ -307,6 +314,9 @@
 	"UDF mount",	/* 140 M_UDFMOUNT */ \
 	"UDF file entry",	/* 141 M_UDFFENTRY */ \
 	"UDF file id",	/* 142 M_UDFFID */ \
+	"Bluetooth HID",	/* 143 M_BTHIDEV */ \
+	"AGP Memory",	/* 144 M_AGP */ \
+	"Direct Rendering Manager",	/* 145 M_DRM */ \
 }
 
 struct kmemstats {
@@ -393,43 +403,9 @@ struct kmembuckets {
 /*
  * Macro versions for the usual cases of malloc/free
  */
-#if defined(KMEMSTATS) || defined(DIAGNOSTIC) || defined(_LKM) || defined(SMALL_KERNEL)
 #define	MALLOC(space, cast, size, type, flags) \
 	(space) = (cast)malloc((u_long)(size), type, flags)
 #define	FREE(addr, type) free((caddr_t)(addr), type)
-
-#else /* do not collect statistics */
-#define	MALLOC(space, cast, size, type, flags) do { \
-	u_long kbp_size = (u_long)(size); \
-	struct kmembuckets *kbp = &bucket[BUCKETINDX(kbp_size)]; \
-	int __s = splvm(); \
-	if (kbp->kb_next == NULL) { \
-		(space) = (cast)malloc(kbp_size, type, flags); \
-	} else { \
-		(space) = (cast)kbp->kb_next; \
-		kbp->kb_next = *(caddr_t *)(space); \
-	} \
-	splx(__s); \
-} while (0)
-
-#define	FREE(addr, type) do { \
-	struct kmembuckets *kbp; \
-	struct kmemusage *kup = btokup(addr); \
-	int __s = splvm(); \
-	if (1 << kup->ku_indx > MAXALLOCSAVE) { \
-		free((caddr_t)(addr), type); \
-	} else { \
-		kbp = &bucket[kup->ku_indx]; \
-		if (kbp->kb_next == NULL) \
-			kbp->kb_next = (caddr_t)(addr); \
-		else \
-			*(caddr_t *)(kbp->kb_last) = (caddr_t)(addr); \
-		*(caddr_t *)(addr) = NULL; \
-		kbp->kb_last = (caddr_t)(addr); \
-	} \
-	splx(__s); \
-} while(0)
-#endif /* do not collect statistics */
 
 extern struct kmemstats kmemstats[];
 extern struct kmemusage *kmemusage;

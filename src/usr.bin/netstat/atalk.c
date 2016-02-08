@@ -1,4 +1,4 @@
-/*	$OpenBSD: atalk.c,v 1.14 2005/03/30 06:45:34 deraadt Exp $	*/
+/*	$OpenBSD: atalk.c,v 1.16 2007/12/19 01:47:00 deraadt Exp $	*/
 /*	$NetBSD: atalk.c,v 1.2 1997/05/22 17:21:26 christos Exp $	*/
 
 /*
@@ -30,20 +30,13 @@
  * SUCH DAMAGE.
  */
 
-#ifndef lint
-#if 0
-static char sccsid[] = "from @(#)atalk.c	1.1 (Whistle) 6/6/96";
-#else
-static char rcsid[] = "$OpenBSD: atalk.c,v 1.14 2005/03/30 06:45:34 deraadt Exp $";
-#endif
-#endif /* not lint */
-
 #include <sys/param.h>
 #include <sys/queue.h>
 #include <sys/socket.h>
 #include <sys/socketvar.h>
 #include <sys/mbuf.h>
 #include <sys/protosw.h>
+#include <sys/sysctl.h>
 #include <netdb.h>
 
 #include <net/route.h>
@@ -305,14 +298,19 @@ atalkprotopr(u_long off, char *name)
  * Dump DDP statistics structure.
  */
 void
-ddp_stats(u_long off, char *name)
+ddp_stats(char *name)
 {
 	struct ddpstat  ddpstat;
+	int mib[] = { CTL_NET, AF_APPLETALK, ATPROTO_DDP, DDPCTL_STATS };
+	size_t len = sizeof(ddpstat);
 
-	if (off == 0)
+	if (sysctl(mib, sizeof(mib) / sizeof(mib[0]),
+	    &ddpstat, &len, NULL, 0) == -1) {
+		if (errno != ENOPROTOOPT)
+			warn(name);
 		return;
-	if (kread(off, &ddpstat, sizeof(ddpstat)) < 0)
-		return;
+	}
+
 	printf("%s:\n", name);
 	p(ddps_short, "\t%ld packet%s with short headers\n");
 	p(ddps_long, "\t%ld packet%s with long headers\n");

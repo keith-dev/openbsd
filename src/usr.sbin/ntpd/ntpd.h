@@ -1,4 +1,4 @@
-/*	$OpenBSD: ntpd.h,v 1.85 2007/08/04 02:58:02 ckuethe Exp $ */
+/*	$OpenBSD: ntpd.h,v 1.91 2008/01/28 11:45:59 mpf Exp $ */
 
 /*
  * Copyright (c) 2003, 2004 Henning Brauer <henning@openbsd.org>
@@ -26,6 +26,7 @@
 #include <netinet/ip.h>
 #include <arpa/inet.h>
 #include <netdb.h>
+#include <pwd.h>
 #include <stdarg.h>
 
 #include "ntp.h"
@@ -35,9 +36,6 @@
 #define DRIFTFILE	"/var/db/ntpd.drift"
 
 #define	READ_BUF_SIZE		8192
-
-#define	NTPD_OPT_VERBOSE	0x0001
-#define	NTPD_OPT_VERBOSE2	0x0002
 
 #define	INTERVAL_QUERY_NORMAL		30	/* sync to peers every n secs */
 #define	INTERVAL_QUERY_PATHETIC		60
@@ -61,6 +59,8 @@
 #define	LOG_NEGLIGEE		32	/* negligible drift to not log (ms) */
 #define	FREQUENCY_SAMPLES	8	/* samples for est. of permanent drift */
 #define	MAX_FREQUENCY_ADJUST	128e-5	/* max correction per iteration */
+#define REPORT_INTERVAL		(24*60*60) /* interval between status reports */
+#define MAX_SEND_ERRORS		3	/* max send errors before reconnect */
 
 
 #define	SENSOR_DATA_MAXAGE	(15*60)
@@ -131,6 +131,7 @@ struct ntp_peer {
 	u_int8_t			 trustlevel;
 	u_int8_t			 weight;
 	int				 lasterror;
+	int				 senderrors;
 };
 
 struct ntp_sensor {
@@ -141,6 +142,7 @@ struct ntp_sensor {
 	time_t				 last;
 	char				*device;
 	int				 sensordevid;
+	int				 correction;
 	u_int8_t			 weight;
 	u_int8_t			 shift;
 };
@@ -148,6 +150,7 @@ struct ntp_sensor {
 struct ntp_conf_sensor {
 	TAILQ_ENTRY(ntp_conf_sensor)		 entry;
 	char					*device;
+	int					 correction;
 	u_int8_t				 weight;
 };
 
@@ -170,6 +173,7 @@ struct ntpd_conf {
 	u_int8_t					settime;
 	u_int8_t					debug;
 	u_int32_t					scale;
+	u_int8_t					noaction;
 };
 
 struct buf {
@@ -258,7 +262,7 @@ int	 imsg_close(struct imsgbuf *, struct buf *);
 void	 imsg_free(struct imsg *);
 
 /* ntp.c */
-pid_t	 ntp_main(int[2], struct ntpd_conf *);
+pid_t	 ntp_main(int[2], struct ntpd_conf *, struct passwd *);
 int	 priv_adjtime(void);
 void	 priv_settime(double);
 void	 priv_host_dns(char *, u_int32_t);

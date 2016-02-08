@@ -1,4 +1,4 @@
-/*	$OpenBSD: xdr_stdio.c,v 1.9 2005/10/30 19:44:52 kettenis Exp $ */
+/*	$OpenBSD: xdr_stdio.c,v 1.11 2007/09/17 16:04:24 blambert Exp $ */
 /*
  * Sun RPC is a product of Sun Microsystems, Inc. and is provided for
  * unrestricted use provided that this legend is included on all tape
@@ -55,8 +55,8 @@ static void	xdrstdio_destroy(XDR *);
  * Ops vector for stdio type XDR
  */
 static struct xdr_ops	xdrstdio_ops = {
-	xdrstdio_getlong,	/* deseraialize a long int */
-	xdrstdio_putlong,	/* seraialize a long int */
+	xdrstdio_getlong,	/* deserialize a long int */
+	xdrstdio_putlong,	/* serialize a long int */
 	xdrstdio_getbytes,	/* deserialize counted bytes */
 	xdrstdio_putbytes,	/* serialize counted bytes */
 	xdrstdio_getpos,	/* get offset in the stream */
@@ -142,7 +142,7 @@ static bool_t
 xdrstdio_setpos(XDR *xdrs, u_int pos)
 { 
 
-	return ((fseek((FILE *)xdrs->x_private, (long)pos, 0) < 0) ?
+	return ((fseek((FILE *)xdrs->x_private, (long)pos, SEEK_SET) < 0) ?
 		FALSE : TRUE);
 }
 
@@ -152,7 +152,7 @@ xdrstdio_inline(XDR *xdrs, u_int len)
 {
 
 	/*
-	 * Must do some work to implement this: must insure
+	 * Must do some work to implement this: must ensure
 	 * enough data in the underlying stdio buffer,
 	 * that the buffer is aligned so that we can indirect through a
 	 * long *, and stuff this pointer in xdrs->x_buf.  Doing

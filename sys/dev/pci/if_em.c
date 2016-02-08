@@ -31,7 +31,7 @@ POSSIBILITY OF SUCH DAMAGE.
 
 ***************************************************************************/
 
-/* $OpenBSD: if_em.c,v 1.172 2007/05/31 01:04:57 henning Exp $ */
+/* $OpenBSD: if_em.c,v 1.180 2008/03/02 01:28:16 brad Exp $ */
 /* $FreeBSD: if_em.c,v 1.46 2004/09/29 18:28:28 mlaier Exp $ */
 
 #include <dev/pci/if_em.h>
@@ -100,6 +100,9 @@ const struct pci_matchid em_devices[] = {
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82571EB_QUAD_CPR_LP },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82571EB_QUAD_FBR },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82571EB_SERDES },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82571EB_SDS_DUAL },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82571EB_SDS_QUAD },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82571PT_QUAD_CPR },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82572EI_COPPER },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82572EI_FIBER },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82572EI_SERDES },
@@ -111,13 +114,18 @@ const struct pci_matchid em_devices[] = {
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82573L_PL_1 },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82573L_PL_2 },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82573V_PM },
-	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_ICH8_IGP_M_AMT },
-	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_ICH8_IGP_AMT },
-	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_ICH8_IGP_C },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_ICH8_IFE },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_ICH8_IFE_G },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_ICH8_IFE_GT },
-	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_ICH8_IGP_M }
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_ICH8_IGP_AMT },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_ICH8_IGP_C },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_ICH8_IGP_M },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_ICH8_IGP_M_AMT },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_ICH9_IFE },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_ICH9_IFE_G },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_ICH9_IFE_GT },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_ICH9_IGP_AMT },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_ICH9_IGP_C }
 };
 
 /*********************************************************************
@@ -135,6 +143,7 @@ void em_init(void *);
 void em_stop(void *);
 void em_media_status(struct ifnet *, struct ifmediareq *);
 int  em_media_change(struct ifnet *);
+int  em_flowstatus(struct em_softc *);
 void em_identify_hardware(struct em_softc *);
 int  em_allocate_pci_resources(struct em_softc *);
 void em_free_pci_resources(struct em_softc *);
@@ -298,6 +307,7 @@ em_attach(struct device *parent, struct device *self, void *aux)
 		}
 		case em_82571:
 		case em_82572:
+		case em_ich9lan:
 		case em_80003es2lan:	/* Limit Jumbo Frame size */
 			sc->hw.max_frame_size = 9234;
 			break;
@@ -329,8 +339,12 @@ em_attach(struct device *parent, struct device *self, void *aux)
 	}
 	sc->tx_desc_base = (struct em_tx_desc *)sc->txdma.dma_vaddr;
 
-	rsize = EM_ROUNDUP(sc->num_rx_desc * sizeof(struct em_rx_desc),
-	    EM_MAX_RXD * sizeof(struct em_rx_desc));
+	if (sc->hw.mac_type >= em_82544)
+	    rsize = EM_ROUNDUP(sc->num_rx_desc * sizeof(struct em_rx_desc),
+		EM_MAX_RXD * sizeof(struct em_rx_desc));
+	else
+	    rsize = EM_ROUNDUP(sc->num_rx_desc * sizeof(struct em_rx_desc),
+		EM_MAX_RXD_82543 * sizeof(struct em_rx_desc));
 	rsize = EM_ROUNDUP(rsize, PAGE_SIZE);
 
 	/* Allocate Receive Descriptor ring */
@@ -631,11 +645,13 @@ em_init(void *arg)
 	em_stop(sc);
 
 	if (ifp->if_flags & IFF_UP) {
-		if (sc->hw.mac_type >= em_82544)
+		if (sc->hw.mac_type >= em_82544) {
 		    sc->num_tx_desc = EM_MAX_TXD;
-		else
+		    sc->num_rx_desc = EM_MAX_RXD;
+		} else {
 		    sc->num_tx_desc = EM_MAX_TXD_82543;
-		sc->num_rx_desc = EM_MAX_RXD;
+		    sc->num_rx_desc = EM_MAX_RXD_82543;
+		}
 	} else {
 		sc->num_tx_desc = EM_MIN_TXD;
 		sc->num_rx_desc = EM_MIN_RXD;
@@ -675,6 +691,9 @@ em_init(void *arg)
 		break;
 	case em_ich8lan:
 		pba = E1000_PBA_8K;
+		break;
+	case em_ich9lan:
+		pba = E1000_PBA_10K;
 		break;
 	default:
 		/* Devices before 82547 had a Packet Buffer of 64K.   */
@@ -799,7 +818,7 @@ em_media_status(struct ifnet *ifp, struct ifmediareq *ifmr)
 {
 	struct em_softc *sc = ifp->if_softc;
 	u_char fiber_type = IFM_1000_SX;
-	u_int16_t ar, lpar, gsr;
+	u_int16_t gsr;
 
 	INIT_DEBUGOUT("em_media_status: begin");
 
@@ -835,24 +854,9 @@ em_media_status(struct ifnet *ifp, struct ifmediareq *ifmr)
 		}
 
 		if (sc->link_duplex == FULL_DUPLEX)
-			ifmr->ifm_active |= IFM_FDX;
+			ifmr->ifm_active |= em_flowstatus(sc) | IFM_FDX;
 		else
 			ifmr->ifm_active |= IFM_HDX;
-
-		if (ifmr->ifm_active & IFM_FDX) {
-			em_read_phy_reg(&sc->hw, PHY_AUTONEG_ADV, &ar);
-			em_read_phy_reg(&sc->hw, PHY_LP_ABILITY, &lpar);
-
-			if ((ar & NWAY_AR_PAUSE) && (lpar & NWAY_LPAR_PAUSE))
-				ifmr->ifm_active |= IFM_FLOW | IFM_ETH_TXPAUSE |
-						    IFM_ETH_RXPAUSE;
-			else if (!(ar & NWAY_AR_PAUSE) && (ar & NWAY_AR_ASM_DIR) &&
-			    (lpar & NWAY_LPAR_PAUSE) && (lpar & NWAY_LPAR_ASM_DIR))
-				ifmr->ifm_active |= IFM_FLOW | IFM_ETH_TXPAUSE;
-			else if ((ar & NWAY_AR_PAUSE) && (ar & NWAY_AR_ASM_DIR) &&
-			    !(lpar & NWAY_LPAR_PAUSE) && (lpar & NWAY_LPAR_ASM_DIR))
-				ifmr->ifm_active |= IFM_FLOW | IFM_ETH_RXPAUSE;
-		}
 
 		if (IFM_SUBTYPE(ifmr->ifm_active) == IFM_1000_T) {
 			em_read_phy_reg(&sc->hw, PHY_1000T_STATUS, &gsr);
@@ -919,6 +923,30 @@ em_media_change(struct ifnet *ifp)
 	sc->hw.phy_reset_disable = FALSE;
 
 	em_init(sc);
+
+	return (0);
+}
+
+int
+em_flowstatus(struct em_softc *sc)
+{
+	u_int16_t ar, lpar;
+
+	if (sc->hw.media_type == em_media_type_fiber ||
+	    sc->hw.media_type == em_media_type_internal_serdes)
+		return (0);
+
+	em_read_phy_reg(&sc->hw, PHY_AUTONEG_ADV, &ar);
+	em_read_phy_reg(&sc->hw, PHY_LP_ABILITY, &lpar);
+
+	if ((ar & NWAY_AR_PAUSE) && (lpar & NWAY_LPAR_PAUSE))
+		return (IFM_FLOW|IFM_ETH_TXPAUSE|IFM_ETH_RXPAUSE);
+	else if (!(ar & NWAY_AR_PAUSE) && (ar & NWAY_AR_ASM_DIR) &&
+		(lpar & NWAY_LPAR_PAUSE) && (lpar & NWAY_LPAR_ASM_DIR))
+		return (IFM_FLOW|IFM_ETH_TXPAUSE);
+	else if ((ar & NWAY_AR_PAUSE) && (ar & NWAY_AR_ASM_DIR) &&
+		!(lpar & NWAY_LPAR_PAUSE) && (lpar & NWAY_LPAR_ASM_DIR))
+		return (IFM_FLOW|IFM_ETH_RXPAUSE);
 
 	return (0);
 }
@@ -1471,8 +1499,9 @@ em_allocate_pci_resources(struct em_softc *sc)
 		sc->hw.io_base = 0;
 	}
 
-	/* for ICH8 we need to find the flash memory */
-	if (sc->hw.mac_type == em_ich8lan) {
+	/* for ICH8 and family we need to find the flash memory */
+	if (sc->hw.mac_type == em_ich8lan ||
+	    sc->hw.mac_type == em_ich9lan) {
 		val = pci_conf_read(pa->pa_pc, pa->pa_tag, EM_FLASH);
 		if (PCI_MAPREG_TYPE(val) != PCI_MAPREG_TYPE_MEM) {
 			printf(": flash is not mem space\n");
@@ -1841,17 +1870,12 @@ em_dma_free(struct em_softc *sc, struct em_dma_alloc *dma)
 int
 em_allocate_transmit_structures(struct em_softc *sc)
 {
-	if (!(sc->tx_buffer_area =
-	      (struct em_buffer *) malloc(sizeof(struct em_buffer) *
-					     sc->num_tx_desc, M_DEVBUF,
-					     M_NOWAIT))) {
+	if (!(sc->tx_buffer_area = malloc(sizeof(struct em_buffer) *
+	    sc->num_tx_desc, M_DEVBUF, M_NOWAIT | M_ZERO))) {
 		printf("%s: Unable to allocate tx_buffer memory\n", 
 		       sc->sc_dv.dv_xname);
 		return (ENOMEM);
 	}
-
-	bzero(sc->tx_buffer_area,
-	      sizeof(struct em_buffer) * sc->num_tx_desc);
 
 	return (0);
 }
@@ -2195,15 +2219,16 @@ em_txeof(struct em_softc *sc)
 	 * If there are no pending descriptors, clear the timeout. Otherwise,
 	 * if some descriptors have been freed, restart the timeout.
 	 */
-	if (num_avail > EM_TX_CLEANUP_THRESHOLD) {
+	if (num_avail > EM_TX_CLEANUP_THRESHOLD)
 		ifp->if_flags &= ~IFF_OACTIVE;
-		/* All clean, turn off the timer */
-		if (num_avail == sc->num_tx_desc)
-			ifp->if_timer = 0;
-		/* Some cleaned, reset the timer */
-		else if (num_avail != sc->num_tx_desc_avail)
-			ifp->if_timer = EM_TX_TIMEOUT;
-	}
+
+	/* All clean, turn off the timer */
+	if (num_avail == sc->num_tx_desc)
+		ifp->if_timer = 0;
+	/* Some cleaned, reset the timer */
+	else if (num_avail != sc->num_tx_desc_avail)
+		ifp->if_timer = EM_TX_TIMEOUT;
+
 	sc->num_tx_desc_avail = num_avail;
 }
 
@@ -2243,7 +2268,7 @@ em_get_buf(struct em_softc *sc, int i)
 	error = bus_dmamap_load_mbuf(sc->rxtag, sc->rx_sparemap,
 	    m, BUS_DMA_NOWAIT);
 	if (error) {
-		m_free(m);
+		m_freem(m);
 		return (error);
 	}
 
@@ -2279,17 +2304,12 @@ em_allocate_receive_structures(struct em_softc *sc)
 	int		i, error;
 	struct em_buffer *rx_buffer;
 
-	if (!(sc->rx_buffer_area =
-	      (struct em_buffer *) malloc(sizeof(struct em_buffer) *
-					     sc->num_rx_desc, M_DEVBUF,
-					     M_NOWAIT))) {
+	if (!(sc->rx_buffer_area = malloc(sizeof(struct em_buffer) *
+	    sc->num_rx_desc, M_DEVBUF, M_NOWAIT | M_ZERO))) {
 		printf("%s: Unable to allocate rx_buffer memory\n", 
 		       sc->sc_dv.dv_xname);
 		return (ENOMEM);
 	}
-
-	bzero(sc->rx_buffer_area,
-	      sizeof(struct em_buffer) * sc->num_rx_desc);
 
 	sc->rxtag = sc->osdep.em_pa.pa_dmat;
 

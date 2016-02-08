@@ -1,4 +1,4 @@
-/*	$OpenBSD: rtl81x9reg.h,v 1.41 2007/08/07 12:19:19 jsg Exp $	*/
+/*	$OpenBSD: rtl81x9reg.h,v 1.43 2008/02/17 05:29:25 brad Exp $	*/
 
 /*
  * Copyright (c) 1997, 1998
@@ -674,11 +674,6 @@ struct rl_mii_frame {
 #define	RL_UNKNOWN		0
 #define RL_8129			1
 #define RL_8139			2
-#define RL_8139CPLUS		3
-#define RL_8169			4
-
-#define RL_ISCPLUS(x)	((x)->rl_type == RL_8139CPLUS || \
-			 (x)->rl_type == RL_8169)
 
 struct rl_rxsoft {
 	struct mbuf		*rxs_mbuf;
@@ -724,6 +719,7 @@ struct rl_softc {
 	struct arpcom		sc_arpcom;	/* interface info */
 	struct mii_data		sc_mii;		/* MII information */
 	u_int8_t		rl_type;
+	u_int32_t		sc_hwrev;
 	int			rl_eecmd_read;
 	int			rl_eewidth;
 	void			*sc_sdhook;	/* shutdownhook */

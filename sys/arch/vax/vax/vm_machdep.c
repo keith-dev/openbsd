@@ -1,4 +1,4 @@
-/*	$OpenBSD: vm_machdep.c,v 1.34 2007/06/20 17:29:36 miod Exp $	*/
+/*	$OpenBSD: vm_machdep.c,v 1.37 2008/02/16 22:59:34 miod Exp $	*/
 /*	$NetBSD: vm_machdep.c,v 1.67 2000/06/29 07:14:34 mrg Exp $	     */
 
 /*
@@ -58,6 +58,13 @@
 
 #include <sys/syscallargs.h>
 
+void
+cpu_exit(struct proc *p)
+{
+	pmap_deactivate(p);
+	sched_exit(p);
+}
+
 /*
  * Finish a fork operation, with process p2 nearly set up.
  * Copy and update the pcb and trap frame, making the child ready to run.
@@ -109,13 +116,6 @@ cpu_fork(p1, p2, stack, stacksize, func, arg)
 	tf = (struct trapframe *)((u_int)p2->p_addr + USPACE) - 1;
 	p2->p_addr->u_pcb.framep = tf;
 	bcopy(p1->p_addr->u_pcb.framep, tf, sizeof(*tf));
-
-	/*
-	 * Activate address space for the new process.	The PTEs have
-	 * already been allocated by way of pmap_create().
-	 * This writes the page table registers to the PCB.
-	 */
-	pmap_activate(p2);
 
 	/* Mark guard page invalid in kernel stack */
 	*kvtopte((u_int)p2->p_addr + REDZONEADDR) &= ~PG_V;
@@ -271,10 +271,7 @@ vmapbuf(bp, len)
 	paddr_t pa;
 	struct proc *p;
 
-	if (vax_boardtype != VAX_BTYP_46
-	    && vax_boardtype != VAX_BTYP_48
-	    && vax_boardtype != VAX_BTYP_49
-	    && vax_boardtype != VAX_BTYP_1303)
+	if (phys_map == NULL)
 		return;
 	if ((bp->b_flags & B_PHYS) == 0)
 		panic("vmapbuf");
@@ -309,10 +306,7 @@ vunmapbuf(bp, len)
 #if VAX46 || VAX48 || VAX49 || VAX53
 	vaddr_t addr, off;
 
-	if (vax_boardtype != VAX_BTYP_46
-	    && vax_boardtype != VAX_BTYP_48
-	    && vax_boardtype != VAX_BTYP_49
-	    && vax_boardtype != VAX_BTYP_1303)
+	if (phys_map == NULL)
 		return;
 	if ((bp->b_flags & B_PHYS) == 0)
 		panic("vunmapbuf");

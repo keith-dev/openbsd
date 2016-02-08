@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_url.c,v 1.48 2007/06/14 10:11:15 mbalmer Exp $ */
+/*	$OpenBSD: if_url.c,v 1.50 2007/11/23 15:43:02 mbalmer Exp $ */
 /*	$NetBSD: if_url.c,v 1.6 2002/09/29 10:19:21 martin Exp $	*/
 /*
  * Copyright (c) 2001, 2002
@@ -196,16 +196,11 @@ url_attach(struct device *parent, struct device *self, void *aux)
 	usbd_status err;
 	usb_interface_descriptor_t *id;
 	usb_endpoint_descriptor_t *ed;
-	char *devinfop;
 	char *devname = sc->sc_dev.dv_xname;
 	struct ifnet *ifp;
 	struct mii_data *mii;
 	u_char eaddr[ETHER_ADDR_LEN];
 	int i, s;
-
-	devinfop = usbd_devinfo_alloc(dev, 0);
-	printf("\n%s: %s\n", devname, devinfop);
-	usbd_devinfo_free(devinfop);
 
 	/* Move the device into the configured state. */
 	err = usbd_set_config_no(dev, URL_CONFIG_NO, 1);
@@ -315,7 +310,7 @@ url_attach(struct device *parent, struct device *self, void *aux)
 	if_attach(ifp);
 	ether_ifattach(ifp);
 
-	timeout_set(&sc->sc_stat_ch, NULL, NULL);
+	timeout_set(&sc->sc_stat_ch, url_tick, sc);
 	sc->sc_attached = 1;
 	splx(s);
 
@@ -579,8 +574,6 @@ url_init(struct ifnet *ifp)
 
 	splx(s);
 
-	timeout_del(&sc->sc_stat_ch);
-	timeout_set(&sc->sc_stat_ch, url_tick, sc);
 	timeout_add(&sc->sc_stat_ch, hz);
 
 	return (0);
@@ -1388,8 +1381,6 @@ url_tick_task(void *xsc)
 			   url_start(ifp);
 	}
 
-	timeout_del(&sc->sc_stat_ch);
-	timeout_set(&sc->sc_stat_ch, url_tick, sc);
 	timeout_add(&sc->sc_stat_ch, hz);
 
 	splx(s);

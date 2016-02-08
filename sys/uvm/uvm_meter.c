@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvm_meter.c,v 1.22 2007/02/14 00:53:48 jsg Exp $	*/
+/*	$OpenBSD: uvm_meter.c,v 1.24 2007/12/15 03:42:57 deraadt Exp $	*/
 /*	$NetBSD: uvm_meter.c,v 1.21 2001/07/14 06:36:03 matt Exp $	*/
 
 /*
@@ -109,8 +109,10 @@ uvm_loadav(avg)
 				continue;
 		/* FALLTHROUGH */
 		case SRUN:
-		case SIDL:
 		case SONPROC:
+			if (p == p->p_cpu->ci_schedstate.spc_idleproc)
+				continue;
+		case SIDL:
 			nrun++;
 		}
 	}
@@ -135,6 +137,7 @@ uvm_sysctl(name, namelen, oldp, oldlenp, newp, newlen, p)
 	struct vmtotal vmtotals;
 	int rv, t;
 	struct _ps_strings _ps = { PS_STRINGS };
+	extern int uvm_km_pages_free;
 
 	switch (name[0]) {
 	case VM_SWAPENCRYPT:
@@ -215,6 +218,9 @@ uvm_sysctl(name, namelen, oldp, oldlenp, newp, newlen, p)
 
 	case VM_USPACE:
 		return (sysctl_rdint(oldp, oldlenp, newp, USPACE));
+
+	case VM_KMPAGESFREE:
+		return (sysctl_rdint(oldp, oldlenp, newp, uvm_km_pages_free));
 
 	default:
 		return (EOPNOTSUPP);

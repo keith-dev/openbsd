@@ -1,4 +1,4 @@
-/* $OpenBSD: wsemulvar.h,v 1.7 2006/12/09 20:06:48 miod Exp $ */
+/* $OpenBSD: wsemulvar.h,v 1.10 2007/11/27 16:37:27 miod Exp $ */
 /* $NetBSD: wsemulvar.h,v 1.6 1999/01/17 15:46:15 drochner Exp $ */
 
 /*
@@ -37,7 +37,8 @@ struct wsdisplay_emulops;
 enum wsemul_resetops {
 	WSEMUL_RESET,
 	WSEMUL_SYNCFONT,
-	WSEMUL_CLEARSCREEN
+	WSEMUL_CLEARSCREEN,
+	WSEMUL_CLEARCURSOR
 };
 
 struct wsemul_ops {
@@ -49,7 +50,7 @@ struct wsemul_ops {
 				int, int, void *, long);
 	void	(*output)(void *cookie, const u_char *data, u_int count,
 			       int);
-	int	(*translate)(void *, keysym_t, char **);
+	int	(*translate)(void *, keysym_t, const char **);
 	void	(*detach)(void *cookie, u_int *crow, u_int *ccol);
 	void    (*reset)(void *, enum wsemul_resetops);
 };
@@ -60,8 +61,8 @@ extern const struct wsemul_ops wsemul_vt100_ops;
 
 const struct wsemul_ops *wsemul_pick(const char *);
 
-/* 
+/*
  * Callbacks from the emulation code to the display interface driver.
- */     
+ */
 void	wsdisplay_emulbell(void *v);
 void	wsdisplay_emulinput(void *v, const u_char *, u_int);

@@ -1,4 +1,4 @@
-/*	$OpenBSD: uhidev.c,v 1.27 2007/06/14 10:11:16 mbalmer Exp $	*/
+/*	$OpenBSD: uhidev.c,v 1.31 2007/11/12 04:18:09 deraadt Exp $	*/
 /*	$NetBSD: uhidev.c,v 1.14 2003/03/11 16:44:00 augustss Exp $	*/
 
 /*
@@ -144,16 +144,10 @@ uhidev_attach(struct device *parent, struct device *self, void *aux)
 	void *desc;
 	const void *descptr;
 	usbd_status err;
-	char *devinfop;
 
 	sc->sc_udev = uaa->device;
 	sc->sc_iface = iface;
 	id = usbd_get_interface_descriptor(iface);
-
-	devinfop = usbd_devinfo_alloc(uaa->device, 0);
-	printf("\n%s: %s, iclass %d/%d\n", sc->sc_dev.dv_xname,
-	       devinfop, id->bInterfaceClass, id->bInterfaceSubClass);
-	usbd_devinfo_free(devinfop);
 
 	(void)usbd_set_idle(iface, 0, 0);
 #if 0
@@ -255,16 +249,19 @@ uhidev_attach(struct device *parent, struct device *self, void *aux)
 	nrepid = uhidev_maxrepid(desc, size);
 	if (nrepid < 0)
 		return;
+	printf("%s: iclass %d/%d", sc->sc_dev.dv_xname,
+	    id->bInterfaceClass, id->bInterfaceSubClass);
 	if (nrepid > 0)
-		printf("%s: %d report ids\n", sc->sc_dev.dv_xname, nrepid);
+		printf(", %d report id%s", nrepid,
+		    nrepid > 1 ? "s" : "");
+	printf("\n");
 	nrepid++;
 	sc->sc_subdevs = malloc(nrepid * sizeof(struct device *),
-	    M_USBDEV, M_NOWAIT);
+	    M_USBDEV, M_NOWAIT | M_ZERO);
 	if (sc->sc_subdevs == NULL) {
 		printf("%s: no memory\n", sc->sc_dev.dv_xname);
 		return;
 	}
-	bzero(sc->sc_subdevs, nrepid * sizeof(struct device *));
 	sc->sc_nrepid = nrepid;
 	sc->sc_isize = 0;
 

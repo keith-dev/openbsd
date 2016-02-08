@@ -1,4 +1,4 @@
-/*	$OpenBSD: bgplg.c,v 1.5 2007/04/13 15:31:02 claudio Exp $	*/
+/*	$OpenBSD: bgplg.c,v 1.7 2007/10/10 13:23:40 claudio Exp $	*/
 
 /*
  * Copyright (c) 2005, 2006 Reyk Floeter <reyk@vantronix.net>
@@ -109,16 +109,15 @@ lg_getenv(const char *name, int *lenp)
 		*lenp = len;
 
 #define allowed_in_string(_x)                                           \
-	((isalnum(_x) || isprint(_x)) &&				\
-	(_x != '%' && _x != '\\' && _x != ';' && _x != '|'))
+	(isalnum(_x) || strchr("-_.:/= ", _x))
 
 	for (i = 0; i < len; i++) {
+		if (ptr[i] == '&')
+			ptr[i] = '\0';
 		if (!allowed_in_string(ptr[i])) {
 			printf("invalid character in input\n");
 			return (NULL);
 		}
-		if (ptr[i] == '&')
-			ptr[i] = '\0';
 	}
 
 	return (ptr);
@@ -364,7 +363,7 @@ main(void)
  err:
 	fflush(stdout);
 
-	if (argv != NULL);
+	if (argv != NULL)
 		free(argv);
 
 	printf("</pre>\n");

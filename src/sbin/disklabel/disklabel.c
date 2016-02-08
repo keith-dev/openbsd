@@ -1,4 +1,4 @@
-/*	$OpenBSD: disklabel.c,v 1.118 2007/06/25 22:53:45 deraadt Exp $	*/
+/*	$OpenBSD: disklabel.c,v 1.122 2008/01/24 12:23:35 krw Exp $	*/
 
 /*
  * Copyright (c) 1987, 1993
@@ -39,7 +39,7 @@ static const char copyright[] =
 #endif /* not lint */
 
 #ifndef lint
-static const char rcsid[] = "$OpenBSD: disklabel.c,v 1.118 2007/06/25 22:53:45 deraadt Exp $";
+static const char rcsid[] = "$OpenBSD: disklabel.c,v 1.122 2008/01/24 12:23:35 krw Exp $";
 #endif /* not lint */
 
 #include <sys/param.h>
@@ -572,7 +572,7 @@ writelabel(int f, char *boot, struct disklabel *lp)
 		for (i = 1; i < 11 && i < lp->d_nsectors; i += 2) {
 			(void)lseek(f, (alt + i) * lp->d_secsize, SEEK_SET);
 			if (!donothing)
-				if (write(f, boot, lp->d_secsize) < lp->d_secsize)
+				if (write(f, boot, lp->d_secsize) != lp->d_secsize)
 					warn("alternate label %d write", i/2);
 		}
 	}
@@ -624,7 +624,7 @@ readmbr(int f)
 	 */
 	dp = (struct dos_partition *)mbr;
 	if (lseek(f, (off_t)DOSBBSECTOR * DEV_BSIZE, SEEK_SET) < 0 ||
-	    read(f, mbr, sizeof(mbr)) < sizeof(mbr))
+	    read(f, mbr, sizeof(mbr)) != sizeof(mbr))
 		return (NULL);
 	signature = *((u_char *)mbr + DOSMBR_SIGNATURE_OFF) |
 	    (*((u_char *)mbr + DOSMBR_SIGNATURE_OFF + 1) << 8);
@@ -694,7 +694,7 @@ readlabel(int f)
 			    sectoffset/DEV_BSIZE +
 			    (LABELSECTOR * DEV_BSIZE) + LABELOFFSET);
 		if (lseek(f, sectoffset, SEEK_SET) < 0 ||
-		    read(f, bootarea, BBSIZE) < BBSIZE)
+		    read(f, bootarea, BBSIZE) != BBSIZE)
 			err(4, "%s", specname);
 
 		lp = (struct disklabel *)(bootarea +
@@ -782,7 +782,7 @@ makebootarea(char *boot, struct disklabel *dp, int f)
 	if (!installboot) {
 #ifndef __i386__
 		if (rflag) {
-			if (read(f, boot, BBSIZE) < BBSIZE)
+			if (read(f, boot, BBSIZE) != BBSIZE)
 				err(4, "%s", specname);
 			memset(lp, 0, sizeof *lp);
 		}
@@ -1192,9 +1192,9 @@ int
 editit(const char *pathname)
 {
 	char *argp[] = {"sh", "-c", NULL, NULL}, *ed, *p;
-	sig_t sighup, sigint, sigquit;
+	sig_t sighup, sigint, sigquit, sigchld;
 	pid_t pid;
-	int saved_errno, st;
+	int saved_errno, st, ret = -1;
 
 	ed = getenv("VISUAL");
 	if (ed == NULL || ed[0] == '\0')
@@ -1208,6 +1208,7 @@ editit(const char *pathname)
 	sighup = signal(SIGHUP, SIG_IGN);
 	sigint = signal(SIGINT, SIG_IGN);
 	sigquit = signal(SIGQUIT, SIG_IGN);
+	sigchld = signal(SIGCHLD, SIG_DFL);
 	if ((pid = fork()) == -1)
 		goto fail;
 	if (pid == 0) {
@@ -1217,24 +1218,20 @@ editit(const char *pathname)
 	while (waitpid(pid, &st, 0) == -1)
 		if (errno != EINTR)
 			goto fail;
-	free(p);
-	(void)signal(SIGHUP, sighup);
-	(void)signal(SIGINT, sigint);
-	(void)signal(SIGQUIT, sigquit);
-	if (!WIFEXITED(st)) {
+	if (!WIFEXITED(st))
 		errno = EINTR;
-		return (-1);
-	}
-	return (WEXITSTATUS(st));
+	else
+		ret = WEXITSTATUS(st);
 
  fail:
 	saved_errno = errno;
 	(void)signal(SIGHUP, sighup);
 	(void)signal(SIGINT, sigint);
 	(void)signal(SIGQUIT, sigquit);
+	(void)signal(SIGCHLD, sigchld);
 	free(p);
 	errno = saved_errno;
-	return (-1);
+	return (ret);
 }
 
 char *
@@ -1490,7 +1487,7 @@ getasciilabel(FILE *f, struct disklabel *lp)
 			continue;
 		}
 		if ('a' <= *cp && *cp <= 'z' && cp[1] == '\0') {
-			unsigned part = *cp - 'a';
+			unsigned int part = *cp - 'a';
 
 			if (part >= lp->d_npartitions) {
 				if (part >= MAXPARTITIONS) {
@@ -1753,37 +1750,36 @@ void
 usage(void)
 {
 	char *boot = "";
-	char blank[] = "                             ";
+	char *blank = "       ";
 
 #if NUMBOOT == 1
 	boot = " [-b boot1]";
 #elif NUMBOOT == 2
 	boot = " [-b boot1] [-s boot2]";
+	blank = "  ";
 #endif
-	blank[strlen(boot)] = '\0';
 
-	fprintf(stderr, "usage:\n");
 	fprintf(stderr,
-	    "  disklabel [-c | -d | -r | -t] [-v] [-p unit] disk\t\t(read)\n");
+	    "usage: disklabel [-c | -d | -r | -t] [-v] [-p unit] disk\t(read)\n");
 	fprintf(stderr,
-	    "  disklabel -w [-c | -d | -r] [-nv] disk disktype [packid]\t(write)\n");
+	    "       disklabel -w [-c | -d | -r] [-nv] disk disktype [packid]\t(write)\n");
 	fprintf(stderr,
-	    "  disklabel -e [-c | -d | -r] [-nv] disk\t\t\t(edit)\n");
+	    "       disklabel -e [-c | -d | -r] [-nv] disk\t\t\t(edit)\n");
 	fprintf(stderr,
-	    "  disklabel -E [-c | -d | -r] [-nv] [-f tempfile] disk\t\t(simple editor)\n");
+	    "       disklabel -E [-c | -d | -r] [-nv] [-f tempfile] disk\t(simple editor)\n");
 	fprintf(stderr,
-	    "  disklabel -R [-nrv] disk protofile\t\t\t\t(restore)\n");
+	    "       disklabel -R [-nrv] disk protofile\t\t\t(restore)\n");
 	fprintf(stderr,
-	    "  disklabel -N | -W [-nv] disk\t\t\t\t\t(protect)\n\n");
+	    "       disklabel -N | -W [-nv] disk\t\t\t\t(protect)\n\n");
 	fprintf(stderr,
-	    "  disklabel -B  [-nv]%s disk [disktype]\t       (boot)\n",
-	    boot);
+	    "%sdisklabel -B  [-nv]%s disk [disktype]           (boot)\n",
+	    blank, boot);
 	fprintf(stderr,
-	    "  disklabel -Bw [-nv]%s disk disktype [packid]     (write)\n",
-	    boot);
+	    "%sdisklabel -Bw [-nv]%s disk disktype [packid]    (write)\n",
+	    blank, boot);
 	fprintf(stderr,
-	    "  disklabel -BR [-nv]%s disk protofile [disktype]  (restore)\n\n",
-	    boot);
+	    "%sdisklabel -BR [-nv]%s disk protofile [disktype] (restore)\n\n",
+	    blank, boot);
 	fprintf(stderr,
 	    "`disk' may be of the form: sd0 or /dev/rsd0%c.\n", 'a'+RAW_PART);
 	fprintf(stderr,
