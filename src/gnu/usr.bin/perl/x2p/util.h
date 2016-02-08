@@ -1,4 +1,4 @@
-/* $RCSfile: util.h,v $$Revision: 1.3 $$Date: 1999/04/29 22:52:59 $
+/* $RCSfile: util.h,v $$Revision: 1.4 $$Date: 2000/04/06 17:09:18 $
  *
  *    Copyright (c) 1991-1997, Larry Wall
  *
@@ -6,8 +6,8 @@
  *    License or the Artistic License, as specified in the README file.
  *
  * $Log: util.h,v $
- * Revision 1.3  1999/04/29 22:52:59  millert
- * perl5.005_03 (stock)
+ * Revision 1.4  2000/04/06 17:09:18  millert
+ * perl-5.6.0 + local changes
  *
  */
 
@@ -25,18 +25,18 @@
 char	*getwd();
 int	makedir();
 
-char * cpy2 _(( char *to, char *from, int delim ));
-char * cpytill _(( char *to, char *from, int delim ));
-void growstr _(( char **strptr, int *curlen, int newlen ));
-char * instr _(( char *big, char *little ));
-char * safecpy _(( char *to, char *from, int len ));
-char * savestr _(( char *str ));
-void croak _(( char *pat, ... ));
-void fatal _(( char *pat, ... ));
-void warn  _(( char *pat, ... ));
-int prewalk _(( int numit, int level, int node, int *numericptr ));
+char * cpy2 ( char *to, char *from, int delim );
+char * cpytill ( char *to, char *from, int delim );
+void growstr ( char **strptr, int *curlen, int newlen );
+char * instr ( char *big, char *little );
+char * safecpy ( char *to, char *from, int len );
+char * savestr ( char *str );
+void croak ( char *pat, ... );
+void fatal ( char *pat, ... );
+void warn  ( char *pat, ... );
+int prewalk ( int numit, int level, int node, int *numericptr );
 
-Malloc_t safemalloc _((MEM_SIZE nbytes));
-Malloc_t safecalloc _((MEM_SIZE elements, MEM_SIZE size));
-Malloc_t saferealloc _((Malloc_t where, MEM_SIZE nbytes));
-Free_t   safefree _((Malloc_t where));
+Malloc_t safemalloc (MEM_SIZE nbytes);
+Malloc_t safecalloc (MEM_SIZE elements, MEM_SIZE size);
+Malloc_t saferealloc (Malloc_t where, MEM_SIZE nbytes);
+Free_t   safefree (Malloc_t where);

@@ -1,5 +1,5 @@
 #!/bin/sh
-#	$OpenBSD: upgrade.sh,v 1.11 1999/10/08 03:54:14 millert Exp $
+#	$OpenBSD: upgrade.sh,v 1.15 2000/05/12 06:02:13 deraadt Exp $
 #	$NetBSD: upgrade.sh,v 1.2.4.5 1996/08/27 18:15:08 gwr Exp $
 #
 # Copyright (c) 1996 The NetBSD Foundation, Inc.
@@ -287,15 +287,26 @@ esac
 	rm -f /mnt/etc/localtime
 	ln -s /usr/share/zoneinfo/$TZ /mnt/etc/localtime
 
+	if [ -f /mnt/etc/sendmail.cf -a ! -f /mnt/etc/mail/sendmail.cf ]; then
+		echo "Moving /etc/sendmail.cf -> /etc/mail/sendmail.cf"
+		test -d /mnt/etc/mail || mkdir /mnt/etc/mail
+		mv /mnt/etc/sendmail.cf /mnt/etc/mail/sendmail.cf
+		ed - /mnt/etc/rc << \__rc_edit
+1,$s/etc\/sendmail.cf/etc\/mail\/sendmail.cf/g
+w
+q
+__rc_edit
+	fi
+
 	echo -n "Making devices..."
-	#_pid=`twiddle`
 	cd /mnt/dev
 	sh MAKEDEV all
-	#kill $_pid
 	echo "done."
 
 	md_installboot ${ROOTDISK}
 )
+populateusrlocal
+test -x /mnt/upgrade.site && /mnt/usr/sbin/chroot /mnt /upgrade.site
 
 unmount_fs /tmp/fstab.shadow
 

@@ -17,9 +17,9 @@
  * IMPLIED WARRANTIES, INCLUDING, WITHOUT LIMITATION, THE IMPLIED
  * WARRANTIES OF MERCHANTIBILITY AND FITNESS FOR A PARTICULAR PURPOSE.
  *
- * $Id: filter.c,v 1.10 1999/08/02 15:28:47 brian Exp $
+ * $OpenBSD: filter.c,v 1.15 2000/03/30 10:46:18 brian Exp $
  *
- *	TODO: Shoud send ICMP error message when we discard packets.
+ *	TODO: Should send ICMP error message when we discard packets.
  */
 
 #include <sys/param.h>
@@ -102,13 +102,18 @@ ParseAddr(struct ipcp *ipcp, const char *data,
     *paddr = ipcp->peer_ip;
   else if (ipcp && strncasecmp(data, "MYADDR", len) == 0)
     *paddr = ipcp->my_ip;
-  else if (len > 15)
-    log_Printf(LogWARN, "ParseAddr: %s: Bad address\n", data);
+  else if (ipcp && strncasecmp(data, "DNS0", len) == 0)
+    *paddr = ipcp->ns.dns[0];
+  else if (ipcp && strncasecmp(data, "DNS1", len) == 0)
+    *paddr = ipcp->ns.dns[1];
   else {
-    char s[16];
+    char *s;
+
+    s = (char *)alloca(len + 1);
     strncpy(s, data, len);
     s[len] = '\0';
-    if (inet_aton(s, paddr) == 0) {
+    *paddr = GetIpAddr(s);
+    if (paddr->s_addr == INADDR_NONE) {
       log_Printf(LogWARN, "ParseAddr: %s: Bad address\n", s);
       return 0;
     }
@@ -277,6 +282,24 @@ ParseIgmp(int argc, char const * const *argv, struct filterent *tgt)
   return 1;
 }
 
+#ifdef P_GRE
+static int
+ParseGRE(int argc, char const * const *argv, struct filterent *tgt)
+{
+  /*
+   * Filter currently is a catch-all. Requests are either permitted or
+   * dropped.
+   */
+  if (argc != 0) {
+    log_Printf(LogWARN, "ParseGRE: Too many parameters\n");
+    return 0;
+  } else
+    tgt->f_srcop = OP_NONE;
+
+  return 1;
+}
+#endif
+
 #ifdef P_OSPF
 static int
 ParseOspf(int argc, char const * const *argv, struct filterent *tgt)
@@ -302,6 +325,10 @@ addrtype(const char *addr)
     return T_MYADDR;
   if (!strncasecmp(addr, "HISADDR", 7) && (addr[7] == '\0' || addr[7] == '/'))
     return T_HISADDR;
+  if (!strncasecmp(addr, "DNS0", 4) && (addr[4] == '\0' || addr[4] == '/'))
+    return T_DNS0;
+  if (!strncasecmp(addr, "DNS1", 4) && (addr[4] == '\0' || addr[4] == '/'))
+    return T_DNS1;
 
   return T_ADDR;
 }
@@ -314,6 +341,10 @@ addrstr(struct in_addr addr, unsigned type)
       return "MYADDR";
     case T_HISADDR:
       return "HISADDR";
+    case T_DNS0:
+      return "DNS0";
+    case T_DNS1:
+      return "DNS1";
   }
   return inet_ntoa(addr);
 }
@@ -458,6 +489,11 @@ Parse(struct ipcp *ipcp, int argc, char const *const *argv,
     val = ParseOspf(argc, argv, &filterdata);
     break;
 #endif
+#ifdef P_GRE
+  case P_GRE:
+    val = ParseGRE(argc, argv, &filterdata);
+    break;
+#endif
   }
 
   log_Printf(LogDEBUG, "Parse: Src: %s\n", inet_ntoa(filterdata.f_src.ipaddr));
@@ -510,7 +546,7 @@ filter_Set(struct cmdargs const *arg)
 const char *
 filter_Action2Nam(int act)
 {
-  static const char *actname[] = { "  none ", "permit ", "  deny " };
+  static const char * const actname[] = { "  none ", "permit ", "  deny " };
   static char	buf[8];
 
   if (act >= 0 && act < MAXFILTERS) {
@@ -595,8 +631,8 @@ filter_Show(struct cmdargs const *arg)
   return 0;
 }
 
-static const char *protoname[] = {
-  "none", "tcp", "udp", "icmp", "ospf", "igmp"
+static const char * const protoname[] = {
+  "none", "tcp", "udp", "icmp", "ospf", "igmp", "gre"
 };
 
 const char *
@@ -622,7 +658,7 @@ filter_Nam2Proto(int argc, char const *const *argv)
   return proto;
 }
 
-static const char *opname[] = {"none", "eq", "gt", "unknown", "lt"};
+static const char * const opname[] = {"none", "eq", "gt", "lt"};
 
 const char *
 filter_Op2Nam(int op)
@@ -647,7 +683,7 @@ filter_Nam2Op(const char *cp)
 
 void
 filter_AdjustAddr(struct filter *filter, struct in_addr *my_ip,
-                  struct in_addr *peer_ip)
+                  struct in_addr *peer_ip, struct in_addr dns[2])
 {
   struct filterent *fp;
   int n;
@@ -665,6 +701,16 @@ filter_AdjustAddr(struct filter *filter, struct in_addr *my_ip,
           fp->f_src.ipaddr = *peer_ip;
         if (fp->f_dsttype == T_HISADDR)
           fp->f_dst.ipaddr = *peer_ip;
+      }
+      if (dns) {
+        if (fp->f_srctype == T_DNS0)
+          fp->f_src.ipaddr = dns[0];
+        if (fp->f_dsttype == T_DNS0)
+          fp->f_dst.ipaddr = dns[0];
+        if (fp->f_srctype == T_DNS1)
+          fp->f_src.ipaddr = dns[1];
+        if (fp->f_dsttype == T_DNS1)
+          fp->f_dst.ipaddr = dns[1];
       }
     }
 }

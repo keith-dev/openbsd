@@ -1,4 +1,4 @@
-.\"	$OpenBSD: wi.4,v 1.1 1999/07/13 14:25:30 niklas Exp $
+.\"	$OpenBSD: wi.4,v 1.6 2000/04/03 21:19:38 aaron Exp $
 .\"
 .\" Copyright (c) 1997, 1998, 1999
 .\"	Bill Paul <wpaul@ctr.columbia.edu>. All rights reserved.
@@ -37,15 +37,15 @@
 .Os
 .Sh NAME
 .Nm wi
-.Nd
-Lucent Technologies WaveLAN/IEEE 802.11 PCMCIA driver
+.Nd Lucent Technologies WaveLAN/IEEE 802.11DS PCMCIA driver
 .Sh SYNOPSIS
-.Cd "device wi0 at pcmcia?"
+.Cd "wi* at pcmcia? function ?"
 .Sh DESCRIPTION
 The
 .Nm
 driver provides support for WaveLAN/IEEE PCCARD adapters (also known
-as WaveLAN II cards). Note that while Lucent sells both ISA and PCMCIA
+as WaveLAN II cards) which support IEEE 802.11 Direct Sequence.
+Note that while Lucent sells both ISA and PCMCIA
 WaveLAN/IEEE devices, the ISA product is actually a PCMCIA card in an
 ISA to PCMCIA bridge adapter. Consequently, the
 .Nm
@@ -87,8 +87,9 @@ The WaveLAN failed to generate an interrupt to acknowledge a transmit
 command.
 .El
 .Sh SEE ALSO
+.Xr an 4 ,
 .Xr arp 4 ,
-.Xr netintro 4 , 
+.Xr netintro 4 ,
 .Xr ifconfig 8 ,
 .Xr wicontrol 8
 .Rs
@@ -100,12 +101,12 @@ The
 .Nm
 device driver first appeared in
 .Fx 3.0 .
-.Sh AUTHOR
+.Ox
+support was added in
+.Ox 2.6 .
+.Sh AUTHORS
 The
 .Nm
-driver was written by
-.An Bill Paul Aq wpaul@ctr.columbia.edu
-and ported to
+driver was written by Bill Paul <wpaul@ctr.columbia.edu> and ported to
 .Ox
-by
-.An Niklas Hallqvist Aq niklas@appli.se
+by Niklas Hallqvist <niklas@appli.se>.

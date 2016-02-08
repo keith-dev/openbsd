@@ -1,4 +1,4 @@
-.\"	$OpenBSD: xargs.1,v 1.7 1999/08/18 13:09:45 aaron Exp $
+.\"	$OpenBSD: xargs.1,v 1.9 2000/03/14 14:58:27 aaron Exp $
 .\"	$NetBSD: xargs.1,v 1.6 1994/11/14 06:51:40 jtc Exp $
 .\"
 .\" Copyright (c) 1990, 1991, 1993
@@ -123,7 +123,7 @@ The current default value for
 .Ar size
 is
 .Dv ARG_MAX
-- 2048.
+- 4096.
 .It Fl t
 Echo the command to be executed to standard error immediately before it
 is executed.
@@ -152,7 +152,7 @@ command line cannot be assembled,
 .Ar utility
 cannot be invoked, an invocation of the utility is terminated by a signal,
 or an invocation of the utility exits with a value of 255.
-.Sh DIAGNOSTICS
+.Pp
 .Nm
 exits with one of the following values:
 .Pp

@@ -1,4 +1,4 @@
-/*	$OpenBSD: table.c,v 1.4 1998/07/10 08:06:19 deraadt Exp $	*/
+/*	$OpenBSD: table.c,v 1.6 1999/11/29 22:22:57 d Exp $	*/
 
 /*
  * Copyright (c) 1983 Regents of the University of California.
@@ -35,7 +35,7 @@
 
 #ifndef lint
 /*static char sccsid[] = "from: @(#)table.c	5.7 (Berkeley) 2/26/91";*/
-static char rcsid[] = "$Id: table.c,v 1.4 1998/07/10 08:06:19 deraadt Exp $";
+static char rcsid[] = "$Id: table.c,v 1.6 1999/11/29 22:22:57 d Exp $";
 #endif /* not lint */
 
 /*

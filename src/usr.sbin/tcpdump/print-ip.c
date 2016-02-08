@@ -21,7 +21,7 @@
 
 #ifndef lint
 static const char rcsid[] =
-    "@(#) $Header: /cvs/src/usr.sbin/tcpdump/print-ip.c,v 1.8 1999/10/06 01:46:40 deraadt Exp $ (LBL)";
+    "@(#) $Header: /cvs/src/usr.sbin/tcpdump/print-ip.c,v 1.10 2000/04/26 21:35:40 jakob Exp $ (LBL)";
 #endif
 
 #include <sys/param.h>
@@ -456,6 +456,24 @@ ip_print(register const u_char *bp, register u_int length)
 			}
 			break;
 
+#ifdef INET6
+#ifndef IP6PROTO_ENCAP
+#define IP6PROTO_ENCAP 41
+#endif
+		case IP6PROTO_ENCAP:
+			/* ip6-in-ip encapsulation */
+			if (vflag)
+				(void)printf("%s > %s: ",
+					     ipaddr_string(&ip->ip_src),
+					     ipaddr_string(&ip->ip_dst));
+			ip6_print(cp, len);
+			if (! vflag) {
+ 				printf(" (encap)");
+ 				return;
+ 			}
+ 			break;
+#endif /*INET6*/
+
 #ifndef IPPROTO_GRE
 #define IPPROTO_GRE 47
 #endif
@@ -484,6 +502,21 @@ ip_print(register const u_char *bp, register u_int length)
 #endif
 		case IPPROTO_AH:
 			ah_print(cp, len, (const u_char *)ip);
+			break;
+
+#ifndef IPPROTO_MOBILE
+#define IPPROTO_MOBILE 55
+#endif
+		case IPPROTO_MOBILE:
+			if (vflag)
+				(void)printf("mobile %s > %s: ",
+					     ipaddr_string(&ip->ip_src),
+					     ipaddr_string(&ip->ip_dst));
+			mobile_print(cp, len);
+			if (! vflag) {
+				printf(" (mobile encap)");
+				return;
+			}
 			break;
 
 		default:

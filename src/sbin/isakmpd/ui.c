@@ -1,8 +1,8 @@
-/*	$OpenBSD: ui.c,v 1.11 1999/08/26 22:29:57 niklas Exp $	*/
-/*	$EOM: ui.c,v 1.36 1999/08/20 12:54:51 ho Exp $	*/
+/*	$OpenBSD: ui.c,v 1.16 2000/05/02 14:37:00 niklas Exp $	*/
+/*	$EOM: ui.c,v 1.41 2000/05/01 20:57:33 niklas Exp $	*/
 
 /*
- * Copyright (c) 1998, 1999 Niklas Hallqvist.  All rights reserved.
+ * Copyright (c) 1998, 1999, 2000 Niklas Hallqvist.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -77,18 +77,19 @@ ui_init ()
 	if ((st.st_mode & S_IFMT) == S_IFREG)
 	  {
 	    errno = EEXIST;
-	    log_fatal ("could not create FIFO \"%s\"", ui_fifo);
+	    log_fatal ("ui_init: could not create FIFO \"%s\"", ui_fifo);
 	  }
 
       /* No need to know about errors.  */
       unlink (ui_fifo);
       if (mkfifo (ui_fifo, 0600) == -1)
-	log_fatal ("mkfifo");
+	log_fatal ("ui_init: mkfifo (\"%s\", 0600) failed");
 
       /* XXX Is O_RDWR needed on some OSes?  Photurisd seems to imply that.  */
       ui_socket = open (ui_fifo, O_RDONLY | O_NONBLOCK, 0);
       if (ui_socket == -1)
-	log_fatal (ui_fifo);
+	log_fatal ("ui_init: open (\"%s\", O_RDONLY | O_NONBLOCK, 0) failed",
+		   ui_fifo);
     }
 }
 
@@ -146,15 +147,15 @@ ui_config (char *cmd)
       if (sscanf (cmd, "C %*s [%80[^]]]:%80[^=]=%80s %d", section, tag, value,
 		  &override) != 4)
 	goto fail;
-      conf_set (trans, section, tag, value, override);
+      conf_set (trans, section, tag, value, override, 0);
     }
-  else if (strcasecmp (cmd, "rm") == 0)
+  else if (strcasecmp (subcmd, "rm") == 0)
     {
       if (sscanf (cmd, "C %*s [%80[^]]]:%80s", section, tag) != 2)
 	goto fail;
       conf_remove (trans, section, tag);
     }
-  else if (strcasecmp (cmd, "rms") == 0)
+  else if (strcasecmp (subcmd, "rms") == 0)
     {
       if (sscanf (cmd, "C %*s [%80[^]]]", section) != 1)
 	goto fail;
@@ -208,6 +209,7 @@ ui_delete (char *cmd)
   sa_delete (sa, 1);
 }
 
+#ifdef USE_DEBUG
 /* Parse the debug command found in CMD.  */
 static void
 ui_debug (char *cmd)
@@ -221,6 +223,7 @@ ui_debug (char *cmd)
     }
   log_debug_cmd (cls, level);
 }
+#endif /* USE_DEBUG */
 
 /* Report SAs and ongoing exchanges.  */
 void
@@ -232,6 +235,7 @@ ui_report (char *cmd)
   transport_report ();
   connection_report ();
   timer_report ();
+  conf_report ();
 }
 
 /*
@@ -256,9 +260,11 @@ ui_handle_command (char *line)
       ui_delete (line);
       break;
 
+#ifdef USE_DEBUG
     case 'D':
       ui_debug (line);
       break;
+#endif
 
     case 'r':
       ui_report (line);
@@ -295,7 +301,7 @@ ui_handler ()
       buf = malloc (sz);
       if (!buf)
 	{
-	  log_print ("malloc (%d) failed", sz);
+	  log_print ("ui_handler: malloc (%d) failed", sz);
 	  return;
 	}
       p = buf;
@@ -308,7 +314,7 @@ ui_handler ()
       new_buf = realloc (buf, sz * 2);
       if (!new_buf)
 	{
-	  log_print ("realloc (%p, %d) failed", buf, sz * 2);
+	  log_print ("ui_handler: realloc (%p, %d) failed", buf, sz * 2);
 	  free (buf);
 	  buf = 0;
 	  return;
@@ -322,7 +328,7 @@ ui_handler ()
   n = read (ui_socket, p, resid);
   if (n == -1)
     {
-      log_error ("read (%d, %p, %d)", ui_socket, p, resid);
+      log_error ("ui_handler: read (%d, %p, %d)", ui_socket, p, resid);
       return;
     }
 

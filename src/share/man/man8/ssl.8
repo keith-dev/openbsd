@@ -64,8 +64,8 @@ does not involve RSA.
 .Pp
 For instance, another typical alternative
 is
-.Ar DSA
--- which is patent-free.
+.Ar DSA ,
+which is not encumbered by commercial patents (and lawyers).
 .Pp
 The
 .Ar https
@@ -91,7 +91,7 @@ States.
 Additionally
 .Ar RSA inc.
 permits non-licensed use of the algorithm by certain parties
-(ie. non-commercial use).
+(i.e., non-commercial use).
 If you are permitted to use the
 .Ar RSA
 algorithm, you can enable the full function of the
@@ -99,24 +99,49 @@ algorithm, you can enable the full function of the
 libraries by updating the shared libraries on your system,
 using a command like:
 .Bd -literal -offset xxx
-# pkg_add ftp://ftp.openbsd.org/pub/OpenBSD/2.6/packages/i386/ssl26.tgz
+# pkg_add ftp://ftp.openbsd.org/pub/OpenBSD/2.7/packages/i386/ssl27.tgz
 .Ed
 
 or
 .Bd -literal -offset xxx
-# pkg_add ftp://ftp.usa.openbsd.org/pub/OpenBSD/2.6/packages/i386/sslUSA26.tgz
+# pkg_add ftp://ftp.usa.openbsd.org/pub/OpenBSD/2.7/packages/i386/sslUSA27.tgz
 .Ed
 .Pp
 (Obviously, replace
-.Ar 2.6
+.Ar 2.7
 with the current release, and
 .Ar i386
 with your architecture name (see
-.Xr arch 1 ). see 
+.Xr arch 1 ).
+See
 .Xr afterboot 8
 for more details on adding RSA capable libraries.
 
 Once your ssl libraries are updated, the ssl libraries will be fully functional.
+.Sh RANDOM DATA SOURCE
+OpenBSD uses the 
+.Xr arandom 4
+device as the default source for random data when needed by the routines in
+libcrypto and libssl. If the
+.Xr arandom 4
+device does not exist or is not readable, many of the routines will fail.
+This is most commonly seen by users as the
+.Ar RSA
+routines failing in applications such as 
+.Xr ssh 1 ,
+and 
+.Xr httpd 8 ,
+even after the 
+.Ar RSA
+capable versions of the library have been added to the system.
+.Pp
+It is important to remember when using a random data source for certificate
+and key generation that the random data source should not be visible by
+people who could duplicate the process and come up with the same result.
+You should ensure that nobody who you don't trust is in a position to read
+the same random data used by you to generate keys and certificates. See
+.Xr openssl 1
+for more information on how to use different sources of random data. 
 .Sh SERVER CERTIFICATES
 The most common uses of
 .Ar SSL/TLS
@@ -253,13 +278,15 @@ services.
 .Pp
 According to "Applied Cryptography: Schneier"
 the RSA patent will expire September 20th, 2000.
-
-.Pp
-Patents can be renewed.
 .Sh SEE ALSO
 .Xr httpd 8 ,
 .Xr ssh 1 ,
-.Xr sshd 1 ,
+.Xr sshd 8 ,
+.Xr isakmpd 8 ,
+.Xr pkg_add 1 ,
+.Xr openssl 1 ,
+.Xr arandom 4,
+.Xr ssl 3 ,
 .Xr rc 8
 .Sh HISTORY
 This document first appeared in

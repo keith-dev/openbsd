@@ -1,7 +1,7 @@
-/*	$OpenBSD: util.c,v 1.6 1999/01/11 00:16:32 marc Exp $	*/
+/*	$OpenBSD: util.c,v 1.9 1999/12/04 21:00:03 provos Exp $	*/
 
 #ifndef lint
-static char rcsid[] = "$OpenBSD: util.c,v 1.6 1999/01/11 00:16:32 marc Exp $";
+static char rcsid[] = "$OpenBSD: util.c,v 1.9 1999/12/04 21:00:03 provos Exp $";
 #endif /* not lint */
 
 #include "EXTERN.h"
@@ -45,18 +45,21 @@ char *from, *to;
     }
 
     if (origprae) {
-	Strcpy(bakname, origprae);
-	Strcat(bakname, to);
+	if (strlcpy(bakname, origprae, sizeof(bakname)) >= sizeof(bakname) ||
+	    strlcat(bakname, to, sizeof(bakname)) >= sizeof(bakname))
+	    fatal2("filename %s too long for buffer\n", origprae);
     } else {
 #ifndef NODIR
 	char *backupname = find_backup_file_name(to);
 	if (backupname == (char *) 0)
 	    fatal1("out of memory\n");
-	Strcpy(bakname, backupname);
+	if (strlcpy(bakname, backupname, sizeof(bakname)) >= sizeof(bakname))
+	    fatal2("filename %s too long for buffer\n", backupname);
 	free(backupname);
 #else /* NODIR */
-	Strcpy(bakname, to);
-    	Strcat(bakname, simple_backup_suffix);
+	if (strlcpy(bakname, to, sizeof(bakname)) >= sizeof(bakname) ||
+	    strlcat(bakname, simple_backup_suffix, sizeof(bakname)) >= sizeof(bakname))
+	    fatal2("filename %s too long for buffer\n", to);
 #endif /* NODIR */
     }
 
@@ -79,7 +82,7 @@ char *from, *to;
 	    if (*s)
 		*s = toupper(*s);
 	    else
-		Strcpy(simplename, simplename+1);
+		strcpy(simplename, simplename+1);
 	}
 	while (unlink(bakname) >= 0) ;	/* while() is for benefit of Eunice */
 #ifdef DEBUGGING
@@ -325,45 +328,24 @@ makedirs(filename,striplast)
 Reg1 char *filename;
 bool striplast;
 {
-    char tmpbuf[256];
-    Reg2 char *s = tmpbuf;
-    char *dirv[20];		/* Point to the NULs between elements.  */
-    Reg3 int i;
-    Reg4 int dirvp = 0;		/* Number of finished entries in dirv. */
+    char *tmpbuf;
 
-    /* Copy `filename' into `tmpbuf' with a NUL instead of a slash
-       between the directories.  */
-    while (*filename) {
-	if (*filename == '/') {
-	    filename++;
-	    dirv[dirvp++] = s;
-	    *s++ = '\0';
-	}
-	else {
-	    *s++ = *filename++;
-	}
+    if ((tmpbuf = strdup(filename)) == NULL)
+        fatal1("out of memory\n");
+
+    if (striplast) {
+        char *s = strrchr(tmpbuf, '/');
+	if (s == NULL)
+	  return; /* nothing to be done */
+	*s = '\0';
     }
-    *s = '\0';
-    dirv[dirvp] = s;
-    if (striplast)
-	dirvp--;
-    if (dirvp < 0)
-	return;
 
-    strcpy(buf, "mkdir");
-    s = buf;
-    for (i=0; i<=dirvp; i++) {
-	struct stat sbuf;
+    strcpy(buf, "/bin/mkdir -p ");
+    if (strlcat(buf, tmpbuf, sizeof(buf)) >= sizeof(buf))
+      fatal2("buffer too small to hold %.20s...\n", tmpbuf);
 
-	if (stat(tmpbuf, &sbuf) && errno == ENOENT) {
-	    while (*s) s++;
-	    *s++ = ' ';
-	    strcpy(s, tmpbuf);
-	}
-	*dirv[i] = '/';
-    }
-    if (s != buf)
-	system(buf);
+    if (system(buf))
+      pfatal2("%.40s failed", buf);
 }
 
 /* Make filenames more reasonable. */

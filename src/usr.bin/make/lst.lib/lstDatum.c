@@ -1,4 +1,4 @@
-/*	$OpenBSD: lstDatum.c,v 1.4 1998/12/05 00:06:31 espie Exp $	*/
+/*	$OpenBSD: lstDatum.c,v 1.6 2000/03/26 16:21:33 espie Exp $	*/
 /*	$NetBSD: lstDatum.c,v 1.5 1996/11/06 17:59:35 christos Exp $	*/
 
 /*
@@ -41,7 +41,7 @@
 #if 0
 static char sccsid[] = "@(#)lstDatum.c	8.1 (Berkeley) 6/6/93";
 #else
-static char rcsid[] = "$OpenBSD: lstDatum.c,v 1.4 1998/12/05 00:06:31 espie Exp $";
+static char rcsid[] = "$OpenBSD: lstDatum.c,v 1.6 2000/03/26 16:21:33 espie Exp $";
 #endif
 #endif /* not lint */
 
@@ -58,7 +58,7 @@ static char rcsid[] = "$OpenBSD: lstDatum.c,v 1.4 1998/12/05 00:06:31 espie Exp 
  *	Return the datum stored in the given node.
  *
  * Results:
- *	The datum or (ick!) NIL if the node is invalid.
+ *	The datum or (ick!) NULL if the node is invalid.
  *
  * Side Effects:
  *	None.
@@ -66,13 +66,12 @@ static char rcsid[] = "$OpenBSD: lstDatum.c,v 1.4 1998/12/05 00:06:31 espie Exp 
  *-----------------------------------------------------------------------
  */
 ClientData
-Lst_Datum (ln)
+Lst_Datum(ln)
     LstNode	ln;
 {
-    if (ln != NILLNODE) {
-	return (((ListNode)ln)->datum);
-    } else {
-	return ((ClientData) NIL);
-    }
+    if (ln != NULL)
+	return ((ListNode)ln)->datum;
+    else
+	return NULL;
 }
 

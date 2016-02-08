@@ -37,12 +37,12 @@
       Type:         MANDATORY
 
    o  Package:      mod_ssl
-      Version:      2.4.x
+      Version:      2.6.x
       Description:  The Apache Interface to OpenSSL
       Reason:       The interface module for Apache
       Homepage:     http://www.modssl.org/
       Distribution: ftp://ftp.modssl.org/source/
-      Tarball:      mod_ssl-2.4.x-1.3.x.tar.gz
+      Tarball:      mod_ssl-2.6.x-1.3.x.tar.gz
       Location:     Zurich, Switzerland, Europe
       Author(s):    Ralf S. Engelschall <rse@engelschall.com>
       Type:         MANDATORY
@@ -63,9 +63,7 @@
       Description:  RSA Reference Implementation
       Reason:       Deprecated RSA library for US citizens
       Homepage:     -
-      Distribution: ftp://ftp.replay.com/pub/crypto/crypto/LIBS/rsa/
-                    ftp://utopia.hacktic.nl/pub/replay/pub/crypto/LIBS/rsa/
-                    Or ask http://ftpsearch.lycos.com/ for "rsaref20.tar.Z" !!
+      Distribution: Search on http://ftpsearch.lycos.com/ for "rsaref20.tar.Z" !!
       Tarball:      rsaref20.tar.Z
       Location:     Netherlands (because no longer distributed by RSA DSI)
       Author(s):    RSA DSI
@@ -129,7 +127,7 @@
   2. Extract the required packages:
 
      $ gzip -d -c apache_1.3.x.tar.gz | tar xvf -                          ALL
-     $ gzip -d -c mod_ssl-2.4.x-1.3.x.tar.gz | tar xvf -                   ALL
+     $ gzip -d -c mod_ssl-2.6.x-1.3.x.tar.gz | tar xvf -                   ALL
      $ gzip -d -c openssl-0.9.x.tar.gz | tar xvf -                         ALL
      $ gzip -d -c mm-1.0.x.tar.gz | tar xvf -                         OPTIONAL
      $ mkdir rsaref-2.0                                                     US
@@ -176,10 +174,11 @@
      $ cd ..                                                               ALL
 
      NOTE: OpenSSL understands a lot more options on the `config'
-           command line. For instance you can add some command line options
-           (like `-DSSL_FORBID_ENULL' for not allowing Null encryptions, etc)
-           to adjust the OpenSSL internals (see OpenSSL's top-level Makefile
-           for details).
+           command line. For instance you can add some command line
+           options (like `-DSSL_FORBID_ENULL' for not allowing Null
+           encryptions, or adding `-DSSL_ALLOW_ADH' for allowing
+           Anonymous Diffie-Hellman ciphers, etc) to adjust the OpenSSL
+           internals (see OpenSSL's top-level Makefile for details).
 
      NOTE: When your system already has OpenSSL installed (for instance some
            Linux distributions ship with OpenSSL installed out-of-the-box) in
@@ -232,7 +231,7 @@
         RSA_BASE variables but get no intermediate chance to add more
         third-party Apache modules (e.g. mod_perl, PHP3, etc).
 
-        $ cd mod_ssl-2.4.x-1.3.x                                           ALL
+        $ cd mod_ssl-2.6.x-1.3.x                                           ALL
         $ ./configure \                                                    ALL
               --with-apache=../apache_1.3.x \                              ALL
               --with-ssl=../openssl-0.9.x \                                ALL
@@ -271,7 +270,7 @@
               When this is the case for you, then try to recompile OpenSSL
               with Position Independent Code (PIC) by adding a `-fPIC' (for
               GCC) or `-KPIC' (for SVR4-style compilers) to the platform
-              configuration line in OpenSSL's `Configure' script.  The the
+              configuration line in OpenSSL's `Configure' script.  The
               -fPIC option above when you build OpenSSL.
 
         NOTE: The --disable-rule=SSL_COMPAT option disables the building of
@@ -305,7 +304,7 @@
         EAPI_MM variables manually and either copy your existing certificate
         manually to conf/ssl.crt/server.crt or use `make certificate':
 
-        $ cd mod_ssl-2.4.x-1.3.x                                           ALL
+        $ cd mod_ssl-2.6.x-1.3.x                                           ALL
         $ ./configure \                                                    ALL
               --with-apache=../apache_1.3.x \                              ALL
               --with-crt=/path/to/your/server.crt \                   OPTIONAL
@@ -349,7 +348,7 @@
               When this is the case for you, then try to recompile OpenSSL
               with Position Independent Code (PIC) by adding a `-fPIC' (for
               GCC) or `-KPIC' (for SVR4-style compilers) to the platform
-              configuration line in OpenSSL's `Configure' script.  The the
+              configuration line in OpenSSL's `Configure' script.  The
               -fPIC option above when you build OpenSSL.
 
         NOTE: The --disable-rule=SSL_COMPAT option disables the building of
@@ -379,7 +378,7 @@
         EAPI_MM variables manually and more important: you have to install the
         Apache package manually, too. But feel free to be masochistic ;-)
 
-        $ cd mod_ssl-2.4.x-1.3.x                                           ALL
+        $ cd mod_ssl-2.6.x-1.3.x                                           ALL
         $ ./configure \                                                    ALL
               --with-apache=../apache_1.3.x \                              ALL
               --with-crt=/path/to/your/server.crt \                   OPTIONAL
@@ -438,7 +437,7 @@
      o Read the mod_ssl user manual very carefully to
        understand the SSL-part of your Apache configuration:
 
-       $ netscape http://www.modssl.org/docs/2.4/                 (official)
+       $ netscape http://www.modssl.org/docs/2.6/                 (official)
        $ netscape http://localhost/manual/mod/mod_ssl/            (local copy)
        
      o Adjust your Apache configuration to your personal requirements.
@@ -465,7 +464,7 @@
   long as the Extended API (EAPI) didn't change and you've OpenSSL installed
   somewhere. For this you can use the following procedure:
 
-    $ cd mod_ssl-2.4.x-1.3.x                                               ALL
+    $ cd mod_ssl-2.6.x-1.3.x                                               ALL
     $ ./configure \                                                        ALL
           --with-apxs[=/path/to/apache/sbin/apxs] \                        ALL
           --with-ssl=/path/to/openssl \                                    ALL
@@ -505,11 +504,11 @@
 
     #   extract the packages
     $ gzip -d -c apache_1.3.x.tar.gz | tar xvf -
-    $ gzip -d -c mod_ssl-2.4.x-1.3.x.tar.gz | tar xvf -
+    $ gzip -d -c mod_ssl-2.6.x-1.3.x.tar.gz | tar xvf -
     $ gzip -d -c mod_perl-1.xx.tar.gz | tar xvf -
 
     #   apply mod_ssl to Apache source tree
-    $ cd mod_ssl-2.4.x-1.3.x
+    $ cd mod_ssl-2.6.x-1.3.x
     $ ./configure \
           --with-apache=../apache_1.3.x
     $ cd ..
@@ -542,7 +541,7 @@
 
     #   cleanup after work
     $ rm -rf mod_perl-1.xx
-    $ rm -rf mod_ssl-2.4.x-1.3.x
+    $ rm -rf mod_ssl-2.6.x-1.3.x
     $ rm -rf apache_1.3.x
 
   o Apache + mod_ssl/OpenSSL + PHP3/MySQL
@@ -560,11 +559,11 @@
 
     #   extract the packages
     $ gzip -d -c apache_1.3.x.tar.gz | tar xvf -
-    $ gzip -d -c mod_ssl-2.4.x-1.3.x.tar.gz | tar xvf -
+    $ gzip -d -c mod_ssl-2.6.x-1.3.x.tar.gz | tar xvf -
     $ gzip -d -c php-3.0.x.tar.gz | tar xvf -
 
     #   apply mod_ssl to Apache source tree
-    $ cd /mod_ssl-2.4.x-1.3.x
+    $ cd /mod_ssl-2.6.x-1.3.x
     $ ./configure \
           --with-apache=../apache_1.3.x
     $ cd ..
@@ -602,6 +601,6 @@
     
     #   cleanup after work
     $ rm -rf php-3.0.x
-    $ rm -rf mod_ssl-2.4.x-1.3.x
+    $ rm -rf mod_ssl-2.6.x-1.3.x
     $ rm -rf apache_1.3.x
 

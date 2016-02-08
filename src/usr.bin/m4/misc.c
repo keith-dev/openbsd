@@ -1,4 +1,4 @@
-/*	$OpenBSD: misc.c,v 1.12 1999/09/14 08:35:17 espie Exp $	*/
+/*	$OpenBSD: misc.c,v 1.18 2000/03/11 15:54:44 espie Exp $	*/
 /*	$NetBSD: misc.c,v 1.6 1995/09/28 05:37:41 tls Exp $	*/
 
 /*
@@ -41,7 +41,7 @@
 #if 0
 static char sccsid[] = "@(#)misc.c	8.1 (Berkeley) 6/6/93";
 #else
-static char rcsid[] = "$OpenBSD: misc.c,v 1.12 1999/09/14 08:35:17 espie Exp $";
+static char rcsid[] = "$OpenBSD: misc.c,v 1.18 2000/03/11 15:54:44 espie Exp $";
 #endif
 #endif /* not lint */
 
@@ -66,15 +66,15 @@ static size_t strsize = STRSPMAX;
 static size_t bufsize = BUFSIZE;
 static int low_sp = 0;
 
-pbent *buf;			/* push-back buffer	       */
-pbent *bufbase;			/* the base for current ilevel */
-pbent *bbase[MAXINP];		/* the base for each ilevel    */
-pbent *bp; 			/* first available character   */
-static pbent *endpbb;			/* end of push-back buffer     */
+char *buf;			/* push-back buffer	       */
+char *bufbase;			/* the base for current ilevel */
+char *bbase[MAXINP];		/* the base for each ilevel    */
+char *bp; 			/* first available character   */
+static char *endpbb;			/* end of push-back buffer     */
 
 
-static void enlarge_bufspace();
-static void enlarge_strspace();
+static void enlarge_bufspace __P((void));
+static void enlarge_strspace __P((void));
 /*
  * find the index of second str in the first str.
  */
@@ -96,8 +96,10 @@ indx(s1, s2)
  */
 void
 putback(c)
-	pbent c;
+	int c;
 {
+	if (c == EOF)
+		return;
 	if (bp >= endpbb)
 		enlarge_bufspace();
 	*bp++ = c;
@@ -110,7 +112,7 @@ putback(c)
  */
 void
 pbstr(s)
-	char *s;
+	const char *s;
 {
 	size_t n;
 
@@ -140,6 +142,18 @@ pbnum(n)
 		putback('-');
 }
 
+/*
+ *  pbunsigned - convert unsigned long to string, push back on input.
+ */
+void
+pbunsigned(n)
+	unsigned long n;
+{
+	do {
+		putback(n % 10 + '0');
+	}
+	while ((n /= 10) > 0);
+}
 
 void 
 initspaces()
@@ -149,7 +163,7 @@ initspaces()
 	strspace = xalloc(strsize+1);
 	ep = strspace;
 	endest = strspace+strsize;
-	buf = (pbent *)xalloc(bufsize * sizeof(pbent));
+	buf = (char *)xalloc(bufsize);
 	bufbase = buf;
 	bp = buf;
 	endpbb = buf + bufsize;
@@ -162,8 +176,8 @@ initspaces()
  * duplicate it transparently, and to reclaim the correct
  * space when the stack is unwound.
  */
-static
-void enlarge_strspace()
+static void 
+enlarge_strspace()
 {
 	char *newstrspace;
 
@@ -182,14 +196,14 @@ void enlarge_strspace()
 	endest = strspace + strsize;
 }
 
-static
-void enlarge_bufspace()
+static void 
+enlarge_bufspace()
 {
-	pbent *newbuf;
+	char *newbuf;
 	int i;
 
 	bufsize *= 2;
-	newbuf = realloc(buf, bufsize*sizeof(pbent));
+	newbuf = realloc(buf, bufsize);
 	if (!newbuf)
 		errx(1, "too many characters pushed back");
 	for (i = 0; i < MAXINP; i++)
@@ -205,7 +219,7 @@ void enlarge_bufspace()
  */
 void
 chrsave(c)
-	char c;
+	int c;
 {
 	if (ep >= endest) 
 		enlarge_strspace();
@@ -243,6 +257,7 @@ getdiv(n)
 	while ((c = getc(outfile[n])) != EOF)
 		putc(c, active);
 	(void) fclose(outfile[n]);
+	outfile[n] = NULL;
 }
 
 void
@@ -266,9 +281,9 @@ killdiv()
 		}
 }
 
-char *
+void *
 xalloc(n)
-	unsigned long n;
+	size_t n;
 {
 	char *p = malloc(n);
 
@@ -294,3 +309,54 @@ usage()
 	exit(1);
 }
 
+int 
+obtain_char(f)
+	struct input_file *f;
+{
+	if (f->c == EOF)
+		return EOF;
+	else if (f->c == '\n')
+		f->lineno++;
+
+	f->c = fgetc(f->file);
+	return f->c;
+}
+
+void 
+set_input(f, real, name)
+	struct input_file *f;
+	FILE *real;
+	const char *name;
+{
+	f->file = real;
+	f->lineno = 1;
+	f->c = 0;
+	f->name = xstrdup(name);
+}
+
+void 
+release_input(f)
+	struct input_file *f;
+{
+	if (f->file != stdin)
+	    fclose(f->file);
+	f->c = EOF;
+	/*
+	 * XXX can't free filename, as there might still be 
+	 * error information pointing to it.
+	 */
+}
+
+void
+doprintlineno(f)
+	struct input_file *f;
+{
+	pbunsigned(f->lineno);
+}
+
+void
+doprintfilename(f)
+	struct input_file *f;
+{
+	pbstr(f->name);
+}

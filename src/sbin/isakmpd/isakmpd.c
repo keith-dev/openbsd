@@ -1,8 +1,9 @@
-/*	$OpenBSD: isakmpd.c,v 1.15 1999/10/01 14:09:20 niklas Exp $	*/
-/*	$EOM: isakmpd.c,v 1.38 1999/09/20 19:57:50 angelos Exp $	*/
+/*	$OpenBSD: isakmpd.c,v 1.23 2000/05/03 13:47:27 niklas Exp $	*/
+/*	$EOM: isakmpd.c,v 1.51 2000/05/03 13:22:20 ho Exp $	*/
 
 /*
- * Copyright (c) 1998, 1999 Niklas Hallqvist.  All rights reserved.
+ * Copyright (c) 1998, 1999, 2000 Niklas Hallqvist.  All rights reserved.
+ * Copyright (c) 1999, 2000 Angelos D. Keromytis.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -36,6 +37,8 @@
 
 #include <errno.h>
 #include <sys/param.h>
+#include <sys/types.h>
+#include <sys/stat.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -48,14 +51,16 @@
 #include "conf.h"
 #include "connection.h"
 #include "init.h"
+#include "libcrypto.h"
 #include "log.h"
 #include "timer.h"
 #include "transport.h"
 #include "udp.h"
 #include "ui.h"
 #include "util.h"
+#include "cert.h"
 
-#if defined (USE_KEYNOTE) || defined (HAVE_DLOPEN)
+#ifdef USE_POLICY
 #include "policy.h"
 #endif
 
@@ -79,6 +84,9 @@ static int sighupped = 0;
 static int sigusr1ed = 0;
 static char *report_file = "/var/run/isakmpd.report";
 
+/* The default path of the PID file.  */
+static char *pid_file = "/var/run/isakmpd.pid";
+
 /*
  * If we receive a USR2 signal, this flag gets set to show we need to
  * rehash our SA soft expiration timers to a uniform distribution.
@@ -90,9 +98,9 @@ static void
 usage ()
 {
   fprintf (stderr,
-	   "usage: %s [-d] [-c config-file] [-D class=level] [-f fifo] [-n]\n"
-	   "          [-p listen-port] [-P local-port] [-r seed]\n"
-	   "          [-R report-file]\n",
+	   "usage: %s [-d] [-c config-file] [-D class=level] [-f fifo]\n"
+	   "          [-i pid-file] [-n] [-p listen-port] [-P local-port]\n"
+	   "          [-r seed] [-R report-file]\n",
 	   sysdep_progname ());
   exit (1);
 }
@@ -100,16 +108,22 @@ usage ()
 static void
 parse_args (int argc, char *argv[])
 {
-  int ch, cls, level;
+  int ch;
+#ifdef USE_DEBUG
+  int cls, level;
+#endif
 
-  while ((ch = getopt (argc, argv, "c:dD:f:np:P:r:")) != -1) {
+  while ((ch = getopt (argc, argv, "c:dD:f:i:np:P:r:")) != -1) {
     switch (ch) {
     case 'c':
       conf_path = optarg;
       break;
+
     case 'd':
       debug++;
       break;
+
+#ifdef USE_DEBUG
     case 'D':
       if (sscanf (optarg, "%d=%d", &cls, &level) != 2)
 	{
@@ -124,29 +138,41 @@ parse_args (int argc, char *argv[])
       else
 	log_debug_cmd (cls, level);
       break;
+#endif /* USE_DEBUG */
+
     case 'f':
       ui_fifo = optarg;
       break;
+
+    case 'i':
+      pid_file = optarg;
+      break;
+
     case 'n':
       app_none++;
       break;
+
     case 'p':
       udp_default_port = udp_decode_port (optarg);
       if (!udp_default_port)
 	exit (1);
       break;
+
     case 'P':
       udp_bind_port = udp_decode_port (optarg);
       if (!udp_bind_port)
 	exit (1);
       break;
+
     case 'r':
       srandom (strtoul (optarg, 0, 0));
       regrand = 1;
       break;
+
     case 'R':
       report_file = optarg;
       break;
+
     case '?':
     default:
       usage ();
@@ -177,12 +203,21 @@ reinit (void)
   /* Reread config file. */
   conf_reinit ();
 
-#if defined (USE_KEYNOTE) || defined (HAVE_DLOPEN)
+  /* Try again to link in libcrypto (good if we started without /usr).  */
+  libcrypto_init ();
+
+  /* Set timezone */
+  tzset ();
+
+#ifdef USE_POLICY
   /* Reread the policies. */
   policy_init ();
 #endif
 
-  /* Reinitalize our connection list. */
+  /* Reinitialize certificates */
+  cert_init();
+
+  /* Reinitialize our connection list. */
   connection_reinit ();
 
   /*
@@ -211,8 +246,12 @@ sighup (int sig)
 static void
 report (void)
 {
-  FILE *report = fopen (report_file, "w");
-  FILE *old;
+  FILE *report, *old;
+  mode_t old_umask;
+	
+  old_umask = umask (S_IRWXG | S_IRWXO);
+  report = fopen (report_file, "w");
+  umask (old_umask);
 
   if (!report)
     {
@@ -256,6 +295,26 @@ sigusr2 (int sig)
   sigusr2ed = 1;
 }
 
+/* Write pid file.  */
+static void
+write_pid_file (void)
+{
+  FILE *fp;
+
+  /* Ignore errors.  */
+  unlink (pid_file);
+
+  fp = fopen (pid_file, "w");
+  if (fp != NULL)
+    {
+      /* XXX Error checking!  */
+      fprintf (fp, "%d\n", getpid());
+      fclose (fp);
+    }
+  else
+    log_fatal ("main: fopen (\"%s\", \"w\") failed", pid_file);
+}
+
 int
 main (int argc, char *argv[])
 {
@@ -269,10 +328,12 @@ main (int argc, char *argv[])
   if (!debug)
     {
       if (daemon (0, 0))
-	log_fatal ("main: daemon");
+	log_fatal ("main: daemon (0, 0) failed");
       /* Switch to syslog.  */
       log_to (0);
     }
+  
+  write_pid_file ();
 
   /* Reinitialize on HUP reception.  */
   signal (SIGHUP, sighup);
@@ -288,10 +349,10 @@ main (int argc, char *argv[])
   mask_size = howmany (n, NFDBITS) * sizeof (fd_mask);
   rfds = (fd_set *)malloc (mask_size);
   if (!rfds)
-    log_fatal ("main: malloc (%d)", mask_size);
+    log_fatal ("main: malloc (%d) failed", mask_size);
   wfds = (fd_set *)malloc (mask_size);
   if (!wfds)
-    log_fatal ("main: malloc (%d)", mask_size);
+    log_fatal ("main: malloc (%d) failed", mask_size);
 
   while (1)
     {

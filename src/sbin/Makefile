@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.46 1999/09/21 04:58:14 csapuntz Exp $
+#	$OpenBSD: Makefile,v 1.50 2000/04/03 01:10:05 mickey Exp $
 
 # Not ported: XNSrouted enpload scsiformat startslip
 # Missing: icheck
@@ -7,7 +7,7 @@ SUBDIR= atactl badsect brconfig ccdconfig disklabel dmesg fsck ifconfig init \
 	ipf ipfstat ipnat ipsecadm isakmpd kbd mknod modload modunload \
 	mount mountd ncheck_ffs nfsd nfsiod nologin photurisd ping \
 	quotacheck raidctl reboot route routed savecore scan_ffs scsi \
-	shutdown slattach startkey swapctl ttyflags umount
+	shutdown slattach startkey swapctl sysctl ttyflags umount
 
 # support for various file systems
 SUBDIR+= mount_ados
@@ -26,11 +26,14 @@ SUBDIR+= mount_union
 SUBDIR+= mount_ext2fs fsck_ext2fs
 SUBDIR+= mount_xfs
 
+# IPv6
+SUBDIR+= ping6 rtsol
+
 .if   make(clean) || make(cleandir) || make(obj)
-SUBDIR+= bim edlabel fdisk wicontrol
+SUBDIR+= bim edlabel fdisk ancontrol wicontrol
 .elif ${MACHINE} == "i386"
 SUBDIR+= fdisk
-SUBDIR+= wicontrol
+SUBDIR+= ancontrol wicontrol
 .elif (${MACHINE} == "arc") || (${MACHINE} == "powerpc") || (${MACHINE} == "alpha")
 SUBDIR+= fdisk
 .elif ${MACHINE} == "pc532"

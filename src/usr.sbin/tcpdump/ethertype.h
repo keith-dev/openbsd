@@ -18,7 +18,7 @@
  * WARRANTIES, INCLUDING, WITHOUT LIMITATION, THE IMPLIED WARRANTIES OF
  * MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE.
  *
- * @(#) $Header: /cvs/src/usr.sbin/tcpdump/ethertype.h,v 1.6 1996/12/12 16:22:56 bitblt Exp $ (LBL)
+ * @(#) $Header: /cvs/src/usr.sbin/tcpdump/ethertype.h,v 1.8 2000/04/26 21:35:38 jakob Exp $ (LBL)
  */
 
 /* Types missing from some systems */

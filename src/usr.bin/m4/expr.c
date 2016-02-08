@@ -1,4 +1,4 @@
-/*	$OpenBSD: expr.c,v 1.8 1999/09/16 20:19:34 espie Exp $	*/
+/*	$OpenBSD: expr.c,v 1.11 2000/01/11 14:00:57 espie Exp $	*/
 /*	$NetBSD: expr.c,v 1.7 1995/09/28 05:37:31 tls Exp $	*/
 
 /*
@@ -41,14 +41,17 @@
 #if 0
 static char sccsid[] = "@(#)expr.c	8.2 (Berkeley) 4/29/95";
 #else
-static char rcsid[] = "$OpenBSD: expr.c,v 1.8 1999/09/16 20:19:34 espie Exp $";
+static char rcsid[] = "$OpenBSD: expr.c,v 1.11 2000/01/11 14:00:57 espie Exp $";
 #endif
 #endif /* not lint */
 
 #include <sys/cdefs.h>
-#include <stdio.h>
 #include <ctype.h>
+#include <err.h>
+#include <stddef.h>
+#include <stdio.h>
 #include "mdef.h"
+#include "extern.h"
 
 /*
  *      expression evaluator: performs a standard recursive
@@ -104,7 +107,8 @@ static char rcsid[] = "$OpenBSD: expr.c,v 1.8 1999/09/16 20:19:34 espie Exp $";
 #define DECIMAL 10
 #define HEX	16
 
-static char *nxtch;		       /* Parser scan pointer */
+static const char *nxtch;		       /* Parser scan pointer */
+static const char *where;
 
 static int query __P((void));
 static int lor __P((void));
@@ -121,7 +125,7 @@ static int constant __P((void));
 static int num __P((void));
 static int geteqrel __P((void));
 static int skipws __P((void));
-static void experr __P((char *));
+static void experr __P((const char *));
 
 /*
  * For longjmp
@@ -139,11 +143,12 @@ static jmp_buf expjump;
 
 int
 expr(expbuf)
-	char *expbuf;
+	const char *expbuf;
 {
 	int rval;
 
 	nxtch = expbuf;
+	where = expbuf;
 	if (setjmp(expjump) != 0)
 		return FALSE;
 
@@ -516,7 +521,7 @@ num()
 	for(;;) {
 		switch(c) {
 			case '8': case '9':
-				if (base != OCTAL) 
+				if (base == OCTAL) 
 					goto bad_digit;
 				/*FALLTHRU*/
 			case '0': case '1': case '2': case '3': 
@@ -611,8 +616,8 @@ skipws()
  */
 static void
 experr(msg)
-	char *msg;
+	const char *msg;
 {
-	printf("m4: %s in expr.\n", msg);
+	printf("m4: %s in expr %s.\n", msg, where);
 	longjmp(expjump, -1);
 }

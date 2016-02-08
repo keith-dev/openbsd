@@ -9,7 +9,7 @@
 */
 
 /* ====================================================================
- * Copyright (c) 1998-1999 Ralf S. Engelschall. All rights reserved.
+ * Copyright (c) 1998-2000 Ralf S. Engelschall. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -82,11 +82,15 @@
 #include <stdlib.h>
 #include <stdarg.h>
 #include <errno.h>
+#include <sys/types.h>
+#include <sys/stat.h>
 #include <time.h>
 #ifndef WIN32
 #include <sys/time.h>
 #endif
-#include <sys/stat.h>
+#ifdef WIN32
+#include <wincrypt.h>
+#endif
 
 /* OpenSSL headers */
 #include <openssl/ssl.h>
@@ -110,6 +114,7 @@
 #include "http_core.h"
 #include "http_log.h"
 #include "scoreboard.h"
+#include "util_md5.h"
 #include "fnmatch.h"
 #undef CORE_PRIVATE
 
@@ -256,8 +261,9 @@
 #define SSL_MUTEX_LOCK_MODE (_S_IREAD|_S_IWRITE )
 #endif
 #if defined(USE_SYSVSEM_SERIALIZED_ACCEPT) ||\
-    defined(__FreeBSD__) || defined(__NetBSD__) || defined(__OpenBSD__) ||\
-    (defined(LINUX) && defined(__GLIBC__) && defined(__GLIBC_MINOR__) && \
+    (defined(__FreeBSD__) && defined(__FreeBSD_version) &&\
+     __FreeBSD_version >= 300000) ||\
+    (defined(LINUX) && defined(__GLIBC__) && defined(__GLIBC_MINOR__) &&\
      LINUX >= 2 && __GLIBC__ >= 2 && __GLIBC_MINOR__ >= 1) ||\
     defined(SOLARIS2)
 #define SSL_CAN_USE_SEM
@@ -382,16 +388,31 @@ typedef int ssl_algo_t;
 #define SSL_AIDX_MAX     (2)
 
 /*
+ * Define IDs for the temporary RSA keys and DH params
+ */
+
+#define SSL_TKP_GEN        (0)
+#define SSL_TKP_ALLOC      (1)
+#define SSL_TKP_FREE       (2)
+
+#define SSL_TKPIDX_RSA512  (0)
+#define SSL_TKPIDX_RSA1024 (1)
+#define SSL_TKPIDX_DH512   (2)
+#define SSL_TKPIDX_DH1024  (3)
+#define SSL_TKPIDX_MAX     (4)
+
+/*
  * Define the SSL options
  */
 #define SSL_OPT_NONE           (0)
 #define SSL_OPT_RELSET         (1<<0)
-#define SSL_OPT_COMPATENVVARS  (1<<1)
-#define SSL_OPT_EXPORTCERTDATA (1<<2)
-#define SSL_OPT_FAKEBASICAUTH  (1<<3)
-#define SSL_OPT_STRICTREQUIRE  (1<<4)
-#define SSL_OPT_OPTRENEGOTIATE (1<<5)
-#define SSL_OPT_ALL            (SSL_OPT_COMPATENVVAR|SSL_OPT_EXPORTCERTDATA|SSL_OPT_FAKEBASICAUTH|SSL_OPT_STRICTREQUIRE|SSL_OPT_OPTRENEGOTIATE)
+#define SSL_OPT_STDENVVARS     (1<<1)
+#define SSL_OPT_COMPATENVVARS  (1<<2)
+#define SSL_OPT_EXPORTCERTDATA (1<<3)
+#define SSL_OPT_FAKEBASICAUTH  (1<<4)
+#define SSL_OPT_STRICTREQUIRE  (1<<5)
+#define SSL_OPT_OPTRENEGOTIATE (1<<6)
+#define SSL_OPT_ALL            (SSL_OPT_STDENVVARS|SSL_OPT_COMPATENVVAR|SSL_OPT_EXPORTCERTDATA|SSL_OPT_FAKEBASICAUTH|SSL_OPT_STRICTREQUIRE|SSL_OPT_OPTRENEGOTIATE)
 typedef int ssl_opt_t;
 
 /*
@@ -480,6 +501,9 @@ typedef enum {
     SSL_RSSRC_BUILTIN = 1,
     SSL_RSSRC_FILE    = 2,
     SSL_RSSRC_EXEC    = 3
+#if SSL_LIBRARY_VERSION >= 0x00905100
+   ,SSL_RSSRC_EGD     = 4
+#endif
 } ssl_rssrc_t;
 typedef struct {
     ssl_rsctx_t  nCtx;
@@ -505,10 +529,6 @@ typedef struct {
     pool           *pPool;
     BOOL            bFixed;
     int             nInitCount;
-    RSA            *pRSATmpKey512;
-    RSA            *pRSATmpKey1024;
-    DH             *pDHTmpParam512;
-    DH             *pDHTmpParam1024;
     int             nSessionCacheMode;
     char           *szSessionCacheDataFile;
     int             nSessionCacheDataSize;
@@ -519,6 +539,8 @@ typedef struct {
     int             nMutexFD;
     int             nMutexSEMID;
     array_header   *aRandSeed;
+    ssl_ds_table   *tTmpKeys;
+    void           *pTmpKeys[SSL_TKPIDX_MAX];
     ssl_ds_table   *tPublicCert;
     ssl_ds_table   *tPrivateKey;
     struct {
@@ -557,6 +579,19 @@ typedef struct {
     char        *szCARevocationPath;
     char        *szCARevocationFile;
     X509_STORE  *pRevocationStore;
+#ifdef SSL_EXPERIMENTAL
+    /* Configuration details for proxy operation */
+    ssl_proto_t  nProxyProtocol;
+    int          bProxyVerify;
+    int          nProxyVerifyDepth;
+    char        *szProxyCACertificatePath;
+    char        *szProxyCACertificateFile;
+    char        *szProxyClientCertificateFile;
+    char        *szProxyClientCertificatePath;
+    char        *szProxyCipherSuite;
+    SSL_CTX     *pSSLProxyCtx;
+    STACK_OF(X509_INFO) *skProxyClientCerts;
+#endif
 #ifdef SSL_VENDOR
     ap_ctx      *ctx;
 #endif
@@ -622,10 +657,21 @@ const char  *ssl_cmd_SSLProtocol(cmd_parms *, char *, const char *);
 const char  *ssl_cmd_SSLOptions(cmd_parms *, SSLDirConfigRec *, const char *);
 const char  *ssl_cmd_SSLRequireSSL(cmd_parms *, SSLDirConfigRec *, char *);
 const char  *ssl_cmd_SSLRequire(cmd_parms *, SSLDirConfigRec *, char *);
+#ifdef SSL_EXPERIMENTAL
+const char  *ssl_cmd_SSLProxyProtocol(cmd_parms *, char *, const char *);
+const char  *ssl_cmd_SSLProxyCipherSuite(cmd_parms *, char *, char *);
+const char  *ssl_cmd_SSLProxyVerify(cmd_parms *, char *, int);
+const char  *ssl_cmd_SSLProxyVerifyDepth(cmd_parms *, char *, char *);
+const char  *ssl_cmd_SSLProxyCACertificatePath(cmd_parms *, char *, char *);
+const char  *ssl_cmd_SSLProxyCACertificateFile(cmd_parms *, char *, char *);
+const char  *ssl_cmd_SSLProxyMachineCertificatePath(cmd_parms *, char *, char *);
+const char  *ssl_cmd_SSLProxyMachineCertificateFile(cmd_parms *, char *, char *);
+#endif
 
 /*  module initialization  */
 void         ssl_init_Module(server_rec *, pool *);
 void         ssl_init_SSLLibrary(void);
+void         ssl_init_TmpKeysHandle(int, server_rec *, pool *);
 void         ssl_init_ConfigureServer(server_rec *, pool *, SSLSrvConfigRec *);
 void         ssl_init_CheckServers(server_rec *, pool *);
 STACK_OF(X509_NAME) 
@@ -737,12 +783,12 @@ char        *ssl_var_lookup(pool *, server_rec *, conn_rec *, request_rec *, cha
 void         ssl_io_register(void);
 void         ssl_io_unregister(void);
 long         ssl_io_data_cb(BIO *, int, const char *, int, long, long);
-#ifdef SSL_EXPERIMENTAL
+#ifndef SSL_CONSERVATIVE
 void         ssl_io_suck(request_rec *, SSL *);
 #endif
 
 /*  PRNG  */
-int          ssl_rand_seed(server_rec *, pool *, ssl_rsctx_t);
+int          ssl_rand_seed(server_rec *, pool *, ssl_rsctx_t, char *);
 
 /*  Extensions  */
 void         ssl_ext_register(void);

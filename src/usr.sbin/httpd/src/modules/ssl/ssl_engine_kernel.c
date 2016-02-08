@@ -9,7 +9,7 @@
 */
 
 /* ====================================================================
- * Copyright (c) 1998-1999 Ralf S. Engelschall. All rights reserved.
+ * Copyright (c) 1998-2000 Ralf S. Engelschall. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -134,9 +134,9 @@ void ssl_hook_NewConnection(conn_rec *conn)
     SSL *ssl;
     char *cp;
     char *cpVHostID;
+    char *cpVHostMD5;
     X509 *xs;
     int rc;
-    int n;
 
     /*
      * Get context
@@ -163,13 +163,13 @@ void ssl_hook_NewConnection(conn_rec *conn)
      */
     cpVHostID = ssl_util_vhostid(conn->pool, srvr);
     ssl_log(srvr, SSL_LOG_INFO, "Connection to child %d established "
-            "(server %s, client %s)", conn->child_num, cpVHostID, conn->remote_ip);
+            "(server %s, client %s)", conn->child_num, cpVHostID, 
+            conn->remote_ip != NULL ? conn->remote_ip : "unknown");
 
     /*
      * Seed the Pseudo Random Number Generator (PRNG)
      */
-    n = ssl_rand_seed(srvr, conn->pool, SSL_RSCTX_CONNECT);
-    ssl_log(srvr, SSL_LOG_TRACE, "Seeding PRNG with %d bytes of entropy", n);
+    ssl_rand_seed(srvr, conn->pool, SSL_RSCTX_CONNECT, "");
 
     /*
      * Create a new SSL connection with the configured server SSL context and
@@ -185,7 +185,15 @@ void ssl_hook_NewConnection(conn_rec *conn)
         return;
     }
     SSL_clear(ssl);
-    SSL_set_session_id_context(ssl, (unsigned char *)cpVHostID, strlen(cpVHostID));
+    cpVHostMD5 = ap_md5(conn->pool, cpVHostID);
+    if (!SSL_set_session_id_context(ssl, (unsigned char *)cpVHostMD5, strlen(cpVHostMD5))) {
+        ssl_log(conn->server, SSL_LOG_ERROR|SSL_ADD_SSLERR,
+                "Unable to set session id context to `%s'", cpVHostMD5);
+        ap_ctx_set(fb->ctx, "ssl", NULL);
+        ap_bsetflag(fb, B_EOF|B_EOUT, 1);
+        conn->aborted = 1;
+        return;
+    }
     SSL_set_app_data(ssl, conn);
     apctx = ap_ctx_new(conn->pool);
     ap_ctx_set(apctx, "ssl::request_rec", NULL);
@@ -289,7 +297,7 @@ void ssl_hook_NewConnection(conn_rec *conn)
             else if (ap_ctx_get(ap_global_ctx, "ssl::handshake::timeout") == (void *)TRUE) {
                 ssl_log(srvr, SSL_LOG_ERROR,
                         "SSL handshake timed out (client %s, server %s)",
-                        conn->remote_ip, cpVHostID);
+                        conn->remote_ip != NULL ? conn->remote_ip : "unknown", cpVHostID);
                 SSL_set_shutdown(ssl, SSL_RECEIVED_SHUTDOWN);
                 SSL_smart_shutdown(ssl);
                 SSL_free(ssl);
@@ -322,8 +330,8 @@ void ssl_hook_NewConnection(conn_rec *conn)
                  * Ok, anything else is a fatal error
                  */
                 ssl_log(srvr, SSL_LOG_ERROR|SSL_ADD_SSLERR|SSL_ADD_ERRNO,
-                        "SSL handshake failed (client %s, server %s)",
-                        conn->remote_ip, cpVHostID);
+                        "SSL handshake failed (server %s, client %s)", cpVHostID, 
+                        conn->remote_ip != NULL ? conn->remote_ip : "unknown");
 
                 /*
                  * try to gracefully shutdown the connection:
@@ -507,7 +515,7 @@ void ssl_hook_CloseConnection(conn_rec *conn)
     ssl_log(conn->server, SSL_LOG_INFO,
             "Connection to child %d closed with %s shutdown (server %s, client %s)",
             conn->child_num, cpType, ssl_util_vhostid(conn->pool, conn->server),
-            conn->remote_ip);
+            conn->remote_ip != NULL ? conn->remote_ip : "unknown");
     return;
 }
 
@@ -640,8 +648,8 @@ int ssl_hook_Access(request_rec *r)
     X509_STORE *certstore;
     X509_STORE_CTX certstorectx;
     int depth;
-    STACK_OF(SSL_CIPHER)  *skCipherOld;
-    STACK_OF(SSL_CIPHER)  *skCipher;
+    STACK_OF(SSL_CIPHER) *skCipherOld;
+    STACK_OF(SSL_CIPHER) *skCipher;
     SSL_CIPHER *pCipher;
     ap_ctx *apctx;
     int nVerifyOld;
@@ -901,7 +909,7 @@ int ssl_hook_Access(request_rec *r)
     }
 #endif /* SSL_EXPERIMENTAL */
 
-#ifndef SSL_EXPERIMENTAL 
+#ifdef SSL_CONSERVATIVE 
     /* 
      *  SSL renegotiations in conjunction with HTTP
      *  requests using the POST method are not supported.
@@ -910,10 +918,10 @@ int ssl_hook_Access(request_rec *r)
         ssl_log(r->server, SSL_LOG_ERROR,
                 "SSL Re-negotiation in conjunction with POST method not supported!");
         ssl_log(r->server, SSL_LOG_INFO,
-                "There is only experimental support which has to be enabled first");
+                "You have to compile without -DSSL_CONSERVATIVE to enabled support for this.");
         return METHOD_NOT_ALLOWED;
     }
-#endif /* not SSL_EXPERIMENTAL */
+#endif /* SSL_CONSERVATIVE */
 
     /*
      * now do the renegotiation if anything was actually reconfigured
@@ -966,7 +974,7 @@ int ssl_hook_Access(request_rec *r)
                 SSL_set_session_id_context(ssl, (unsigned char *)&(r->main), sizeof(r->main));
             else
                 SSL_set_session_id_context(ssl, (unsigned char *)&r, sizeof(r));
-#ifdef SSL_EXPERIMENTAL
+#ifndef SSL_CONSERVATIVE
             ssl_io_suck(r, ssl);
 #endif
             SSL_renegotiate(ssl);
@@ -1168,19 +1176,31 @@ static const char *ssl_hook_Fixup_vars[] = {
     "SSL_CLIENT_V_END",
     "SSL_CLIENT_S_DN",
     "SSL_CLIENT_S_DN_C",
-    "SSL_CLIENT_S_DN_SP",
+    "SSL_CLIENT_S_DN_ST",
     "SSL_CLIENT_S_DN_L",
     "SSL_CLIENT_S_DN_O",
     "SSL_CLIENT_S_DN_OU",
     "SSL_CLIENT_S_DN_CN",
+    "SSL_CLIENT_S_DN_T",
+    "SSL_CLIENT_S_DN_I",
+    "SSL_CLIENT_S_DN_G",
+    "SSL_CLIENT_S_DN_S",
+    "SSL_CLIENT_S_DN_D",
+    "SSL_CLIENT_S_DN_UID",
     "SSL_CLIENT_S_DN_Email",
     "SSL_CLIENT_I_DN",
     "SSL_CLIENT_I_DN_C",
-    "SSL_CLIENT_I_DN_SP",
+    "SSL_CLIENT_I_DN_ST",
     "SSL_CLIENT_I_DN_L",
     "SSL_CLIENT_I_DN_O",
     "SSL_CLIENT_I_DN_OU",
     "SSL_CLIENT_I_DN_CN",
+    "SSL_CLIENT_I_DN_T",
+    "SSL_CLIENT_I_DN_I",
+    "SSL_CLIENT_I_DN_G",
+    "SSL_CLIENT_I_DN_S",
+    "SSL_CLIENT_I_DN_D",
+    "SSL_CLIENT_I_DN_UID",
     "SSL_CLIENT_I_DN_Email",
     "SSL_CLIENT_A_KEY",
     "SSL_CLIENT_A_SIG",
@@ -1190,19 +1210,31 @@ static const char *ssl_hook_Fixup_vars[] = {
     "SSL_SERVER_V_END",
     "SSL_SERVER_S_DN",
     "SSL_SERVER_S_DN_C",
-    "SSL_SERVER_S_DN_SP",
+    "SSL_SERVER_S_DN_ST",
     "SSL_SERVER_S_DN_L",
     "SSL_SERVER_S_DN_O",
     "SSL_SERVER_S_DN_OU",
     "SSL_SERVER_S_DN_CN",
+    "SSL_SERVER_S_DN_T",
+    "SSL_SERVER_S_DN_I",
+    "SSL_SERVER_S_DN_G",
+    "SSL_SERVER_S_DN_S",
+    "SSL_SERVER_S_DN_D",
+    "SSL_SERVER_S_DN_UID",
     "SSL_SERVER_S_DN_Email",
     "SSL_SERVER_I_DN",
     "SSL_SERVER_I_DN_C",
-    "SSL_SERVER_I_DN_SP",
+    "SSL_SERVER_I_DN_ST",
     "SSL_SERVER_I_DN_L",
     "SSL_SERVER_I_DN_O",
     "SSL_SERVER_I_DN_OU",
     "SSL_SERVER_I_DN_CN",
+    "SSL_SERVER_I_DN_T",
+    "SSL_SERVER_I_DN_I",
+    "SSL_SERVER_I_DN_G",
+    "SSL_SERVER_I_DN_S",
+    "SSL_SERVER_I_DN_D",
+    "SSL_SERVER_I_DN_UID",
     "SSL_SERVER_I_DN_Email",
     "SSL_SERVER_A_KEY",
     "SSL_SERVER_A_SIG",
@@ -1232,12 +1264,16 @@ int ssl_hook_Fixup(request_rec *r)
     /*
      * Annotate the SSI/CGI environment with standard SSL information
      */
-    ap_table_set(e, "HTTPS", "on"); /* the HTTPS (=HTTP over SSL) flag! */
-    for (i = 0; ssl_hook_Fixup_vars[i] != NULL; i++) {
-        var = (char *)ssl_hook_Fixup_vars[i];
-        val = ssl_var_lookup(r->pool, r->server, r->connection, r, var);
-        if (!strIsEmpty(val))
-            ap_table_set(e, var, val);
+    /* the always present HTTPS (=HTTP over SSL) flag! */
+    ap_table_set(e, "HTTPS", "on"); 
+    /* standard SSL environment variables */
+    if (dc->nOptions & SSL_OPT_STDENVVARS) {
+        for (i = 0; ssl_hook_Fixup_vars[i] != NULL; i++) {
+            var = (char *)ssl_hook_Fixup_vars[i];
+            val = ssl_var_lookup(r->pool, r->server, r->connection, r, var);
+            if (!strIsEmpty(val))
+                ap_table_set(e, var, val);
+        }
     }
 
     /*
@@ -1248,12 +1284,13 @@ int ssl_hook_Fixup(request_rec *r)
         ap_table_set(e, "SSL_SERVER_CERT", val);
         val = ssl_var_lookup(r->pool, r->server, r->connection, r, "SSL_CLIENT_CERT");
         ap_table_set(e, "SSL_CLIENT_CERT", val);
-        sk = SSL_get_peer_cert_chain(ssl);
-        for (i = 0; i < sk_X509_num(sk); i++) {
-            var = ap_psprintf(r->pool, "SSL_CLIENT_CERT_CHAIN_%d", i);
-            val = ssl_var_lookup(r->pool, r->server, r->connection, r, var);
-            if (val != NULL)
-                 ap_table_set(e, var, val);
+        if ((sk = SSL_get_peer_cert_chain(ssl)) != NULL) {
+            for (i = 0; i < sk_X509_num(sk); i++) {
+                var = ap_psprintf(r->pool, "SSL_CLIENT_CERT_CHAIN_%d", i);
+                val = ssl_var_lookup(r->pool, r->server, r->connection, r, var);
+                if (val != NULL)
+                     ap_table_set(e, var, val);
+            }
         }
     }
 
@@ -1306,7 +1343,6 @@ int ssl_hook_Fixup(request_rec *r)
  *
  * So we generated 512 and 1024 bit temporary keys on startup
  * which we now just handle out on demand....
- *
  */
 RSA *ssl_callback_TmpRSA(SSL *pSSL, int nExport, int nKeyLen)
 {
@@ -1317,16 +1353,16 @@ RSA *ssl_callback_TmpRSA(SSL *pSSL, int nExport, int nKeyLen)
     if (nExport) {
         /* It's because an export cipher is used */
         if (nKeyLen == 512)
-            rsa = mc->pRSATmpKey512;
+            rsa = (RSA *)mc->pTmpKeys[SSL_TKPIDX_RSA512];
         else if (nKeyLen == 1024)
-            rsa = mc->pRSATmpKey1024;
+            rsa = (RSA *)mc->pTmpKeys[SSL_TKPIDX_RSA1024];
         else
             /* it's too expensive to generate on-the-fly, so keep 1024bit */
-            rsa = mc->pRSATmpKey1024;
+            rsa = (RSA *)mc->pTmpKeys[SSL_TKPIDX_RSA1024];
     }
     else {
         /* It's because a sign-only certificate situation exists */
-        rsa = mc->pRSATmpKey1024;
+        rsa = (RSA *)mc->pTmpKeys[SSL_TKPIDX_RSA1024];
     }
     return rsa;
 }
@@ -1343,16 +1379,16 @@ DH *ssl_callback_TmpDH(SSL *pSSL, int nExport, int nKeyLen)
     if (nExport) {
         /* It's because an export cipher is used */
         if (nKeyLen == 512)
-            dh = mc->pDHTmpParam512;
+            dh = (DH *)mc->pTmpKeys[SSL_TKPIDX_DH512];
         else if (nKeyLen == 1024)
-            dh = mc->pDHTmpParam1024;
+            dh = (DH *)mc->pTmpKeys[SSL_TKPIDX_DH1024];
         else
             /* it's too expensive to generate on-the-fly, so keep 1024bit */
-            dh = mc->pDHTmpParam1024;
+            dh = (DH *)mc->pTmpKeys[SSL_TKPIDX_DH1024];
     }
     else {
         /* It's because a sign-only certificate situation exists */
-        dh = mc->pDHTmpParam1024;
+        dh = (DH *)mc->pTmpKeys[SSL_TKPIDX_DH1024];
     }
     return dh;
 }

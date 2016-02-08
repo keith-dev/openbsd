@@ -1,4 +1,4 @@
-# $OpenBSD: Makefile.in,v 1.6 1999/10/11 00:09:33 angelos Exp $
+# $OpenBSD: Makefile.in,v 1.10 2000/02/12 01:02:02 angelos Exp $
 #
 # The author of this code is Angelos D. Keromytis (angelos@dsl.cis.upenn.edu)
 #
@@ -18,9 +18,9 @@
 # MERCHANTABILITY OF THIS SOFTWARE OR ITS FITNESS FOR ANY PARTICULAR
 # PURPOSE.
 
-VERSION = 2.1
+VERSION = 2.2
 DISTFILE = keynote-${VERSION}.tar.gz
-KNSUBDIR = KeyNote-${VERSION}
+KNSUBDIR = keynote-${VERSION}
 
 LEX = @LEX@
 CC = @CC@
@@ -53,7 +53,7 @@ SSLKEY = testsuite/test.key.pem
 SIGN_ASSERT = testsuite/test-assertion1-signed
 
 # No-crypto compile/link flags and definitions
-NOCRYPTODEFS = @DEFS@
+NOCRYPTODEFS = @DEFS@ @CPPFLAGS@
 
 # Final compile/link flags and definitions
 DEFS = -DCRYPTO ${NOCRYPTODEFS}
@@ -62,11 +62,13 @@ LIBS = -L. -lkeynote @LIBS@
 
 TARGET = libkeynote.a
 TARGET2 = keynote
+TARGET3 = sample-app
 
 OBJS = 	k.tab.o lex.kn.o environment.o parse_assertion.o \
-	signature.o aux.o base64.o
+	signature.o auxil.o base64.o
 OBJS2 = z.tab.o lex.kv.o keynote-verify.o keynote-sign.o \
 	keynote-sigver.o keynote-keygen.o keynote-main.o @LIBOBJS@
+OBJS3 = sample-app.o
 
 crypto: all
 
@@ -99,7 +101,7 @@ lex.kv.c: keynote-ver.l z.tab.h keynote.h header.h config.h
 .c.o:
 	$(CC) $(CFLAGS) $(DEFS) $(INC) -c $<
 
-aux.c: header.h keynote.h assertion.h signature.h config.h
+auxil.c: header.h keynote.h assertion.h signature.h config.h
 parse_assertion.c: header.h keynote.h assertion.h signature.h config.h
 environment.c: header.h keynote.h assertion.h config.h
 keynote-verify.c: header.h keynote.h header.h config.h
@@ -120,13 +122,17 @@ cleandir: cleanall
 cleanall: clean
 	$(RM) $(RMFLAGS) *.o k.tab.c lex.kn.c k.tab.h z.tab.c z.tab.h
 	$(RM) $(RMFLAGS) lex.kv.c y.output z.output ${DISTFILE}
-	$(RM) $(RMFLAGS) $(TARGET) $(TARGET2) man/*.0 config.cache
+	$(RM) $(RMFLAGS) $(TARGET) $(TARGET2) $(TARGET3) man/*.0 config.cache
 	$(RM) $(RMFLAGS) config.log config.status config.h Makefile
+	$(RM) $(RMFLAGS) man/*.cat?
 
 $(SSLCERT) $(SSLKEY):
 	$(SSLEAY) req -config $(SSLCONF) \
 	-new -x509 -nodes -out $(SSLCERT) \
 	-keyout $(SSLKEY)
+
+test-sample: all $(OBJS3)
+	$(CC) $(CFLAGS) -o $(TARGET3) $(OBJS3) $(LIBS)
 
 test-sig: all $(SSLCERT) $(SSLKEY)
 	$(SED) -e 's/--.*//' < $(SSLCERT) > $(SSLCERT).1
@@ -150,19 +156,19 @@ test: all
 		-l testsuite/test-assertion6 \
 		-l testsuite/test-assertion7 || ${TRUE}
 
-manpages: mankeynote mansystem manutility mansyntax
-
-mankeynote:
-	${NROFF} ${NROFFFLAGS} man/keynote.3 > man/keynote-library.0
-
-mansystem:
-	${NROFF} ${NROFFFLAGS} man/keynote.4 > man/keynote-system.0
-
-manutility:
-	${NROFF} ${NROFFFLAGS} man/keynote.1 > man/keynote-utility.0
+manpages: mansyntax mankeynote mansystem manutility mansyntax
 
 mansyntax:
-	${NROFF} ${NROFFFLAGS} man/keynote.5 > man/keynote-syntax.0
+	${NROFF} ${NROFFFLAGS} man/keynote.5 > man/keynote.cat5
+
+mankeynote:
+	${NROFF} ${NROFFFLAGS} man/keynote.3 > man/keynote.cat3
+
+mansystem:
+	${NROFF} ${NROFFFLAGS} man/keynote.4 > man/keynote.cat4
+
+manutility:
+	${NROFF} ${NROFFFLAGS} man/keynote.1 > man/keynote.cat1
 
 distribution: test cleanall manpages
 	${MKDIR} ${KNSUBDIR}
@@ -170,6 +176,7 @@ distribution: test cleanall manpages
 	${RM} ${RMFLAGS2} ${KNSUBDIR}/CVS ${KNSUBDIR}/testsuite/CVS \
 			  ${KNSUBDIR}/Misc/CVS ${KNSUBDIR}/${KNSUBDIR} \
 			  ${KNSUBDIR}/.cvsignore ${KNSUBDIR}/man/CVS \
-			  ${KNSUBDIR}/man/.cvsignore ${KNSUBDIR}/doc/CVS
+			  ${KNSUBDIR}/man/.cvsignore ${KNSUBDIR}/doc/CVS \
+			  ${KNSUBDIR}/testsuite/.cvsignore
 	$(TAR) $(TARFLAGS) ${KNSUBDIR}
-	${RM} ${RMFLAGS2} ${KNSUBDIR} man/*.0
+	${RM} ${RMFLAGS2} ${KNSUBDIR} man/*.0 man/*.cat?

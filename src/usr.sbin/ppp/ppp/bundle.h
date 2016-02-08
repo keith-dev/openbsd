@@ -23,7 +23,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- *	$Id: bundle.h,v 1.8 1999/08/17 17:25:34 brian Exp $
+ *	$OpenBSD: bundle.h,v 1.14 2000/04/07 23:46:39 brian Exp $
  */
 
 #define	PHASE_DEAD		0	/* Link is dead */
@@ -61,15 +61,13 @@ struct prompt;
 struct iface;
 
 struct bundle {
-  struct descriptor desc;     /* really all our datalinks */
+  struct fdescriptor desc;    /* really all our datalinks */
   int unit;                   /* The device/interface unit number */
-  const char **argv;          /* From main() */
-  const char *argv0;          /* Original */
-  const char *argv1;          /* Original */
 
   struct {
     char Name[20];            /* The /dev/XXXX name */
     int fd;                   /* The /dev/XXXX descriptor */
+    unsigned header : 1;      /* Family header sent & received ? */
   } dev;
 
   u_long bandwidth;           /* struct tuninfo speed */
@@ -84,7 +82,7 @@ struct bundle {
   } phys_type;
 
   unsigned CleaningUp : 1;    /* Going to exit.... */
-  unsigned AliasEnabled : 1;  /* Are we using libalias ? */
+  unsigned NatEnabled : 1;    /* Are we using libalias ? */
 
   struct fsm_parent fsm;      /* Our callback functions */
   struct datalink *links;     /* Our data links */
@@ -142,7 +140,7 @@ struct bundle {
 #define descriptor2bundle(d) \
   ((d)->type == BUNDLE_DESCRIPTOR ? (struct bundle *)(d) : NULL)
 
-extern struct bundle *bundle_Create(const char *, int, const char **);
+extern struct bundle *bundle_Create(const char *, int, int);
 extern void bundle_Destroy(struct bundle *);
 extern const char *bundle_PhaseName(struct bundle *);
 #define bundle_Phase(b) ((b)->phase)
@@ -156,7 +154,6 @@ extern void bundle_Down(struct bundle *, int);
 extern void bundle_Open(struct bundle *, const char *, int, int);
 extern void bundle_LinkClosed(struct bundle *, struct datalink *);
 
-extern int bundle_FillQueues(struct bundle *);
 extern int bundle_ShowLinks(struct cmdargs const *);
 extern int bundle_ShowStatus(struct cmdargs const *);
 extern void bundle_StartIdleTimer(struct bundle *);
@@ -165,8 +162,8 @@ extern void bundle_StopIdleTimer(struct bundle *);
 extern int bundle_IsDead(struct bundle *);
 extern struct datalink *bundle2datalink(struct bundle *, const char *);
 
-extern void bundle_RegisterDescriptor(struct bundle *, struct descriptor *);
-extern void bundle_UnRegisterDescriptor(struct bundle *, struct descriptor *);
+extern void bundle_RegisterDescriptor(struct bundle *, struct fdescriptor *);
+extern void bundle_UnRegisterDescriptor(struct bundle *, struct fdescriptor *);
 
 extern void bundle_SetTtyCommandMode(struct bundle *, struct datalink *);
 
@@ -177,7 +174,8 @@ extern void bundle_CleanDatalinks(struct bundle *);
 extern void bundle_SetLabel(struct bundle *, const char *);
 extern const char *bundle_GetLabel(struct bundle *);
 extern void bundle_SendDatalink(struct datalink *, int, struct sockaddr_un *);
-extern void bundle_ReceiveDatalink(struct bundle *, int, struct sockaddr_un *);
+extern int bundle_LinkSize(void);
+extern void bundle_ReceiveDatalink(struct bundle *, int);
 extern int bundle_SetMode(struct bundle *, struct datalink *, int);
 extern int bundle_RenameDatalink(struct bundle *, struct datalink *,
                                  const char *);
@@ -187,6 +185,9 @@ extern int bundle_HighestState(struct bundle *);
 extern int bundle_Exception(struct bundle *, int);
 extern void bundle_AdjustFilters(struct bundle *, struct in_addr *,
                                  struct in_addr *);
+extern void bundle_AdjustDNS(struct bundle *, struct in_addr [2]);
 extern void bundle_CalculateBandwidth(struct bundle *);
 extern void bundle_AutoAdjust(struct bundle *, int, int);
 extern int bundle_WantAutoloadTimer(struct bundle *);
+extern void bundle_ChangedPID(struct bundle *);
+extern void bundle_Notify(struct bundle *, char);

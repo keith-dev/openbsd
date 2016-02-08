@@ -1,5 +1,5 @@
 %{
-/* $OpenBSD: keynote-ver.l,v 1.6 1999/10/09 19:47:32 angelos Exp $ */
+/* $OpenBSD: keynote-ver.l,v 1.8 2000/02/12 00:26:16 angelos Exp $ */
 /*
  * The author of this code is Angelos D. Keromytis (angelos@dsl.cis.upenn.edu)
  *
@@ -47,11 +47,13 @@
 #endif
 
 #include "z.tab.h"
-#include "keynote.h"
 #include "header.h"
+#include "keynote.h"
+
+static void mystrncpy(char *, char *, int);
 %}
 vstring		[a-zA-Z0-9][a-zA-Z0-9_]*
-litstring	\"(([^\"\n])|(\\[\"\n\f\r\t.]))*\"
+litstring	\"(([^\"\n])|(\\[\"\n.]))*\"
 comment         "#"[^\n]*
 %s FIRSTPART MIDDLEPART SECONDPART KEYSTATE
 %pointer
@@ -87,7 +89,7 @@ comment         "#"[^\n]*
                                  }
 <FIRSTPART,KEYSTATE>{comment} ;
 [ \t\n]		              ;
-.                             { keynote_errno = ERROR_SYNTAX; return -1; }
+.                           { keynote_errno = ERROR_SYNTAX; return -1; REJECT; }
 
 %%
 
@@ -260,6 +262,13 @@ read_environment(char *filename)
 		     "Syntax error in environment file <%s>, line %d\n",
 		     filename, kvlineno);
 	    return -1;
+    }
+
+    /* Used to avoid compiler (-Wall) warnings. Never reached */
+    if (0)
+    {
+	yyunput(0, NULL);
+	yy_flex_realloc(0, NULL);
     }
 }
 

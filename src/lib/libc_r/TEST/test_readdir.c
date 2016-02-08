@@ -1,3 +1,4 @@
+/*	$OpenBSD: test_readdir.c,v 1.4 2000/01/06 06:58:34 d Exp $	*/
 /* ==== test_readdir.c ========================================================
  * Copyright (c) 1993, 1994 by Chris Provenzano, proven@athena.mit.edu
  *
@@ -20,7 +21,7 @@ main()
 	DIR * dot_dir;
 	int found = 0;
 
-	CHECKen(dot_dir = opendir("."));
+	CHECKn(dot_dir = opendir("."));
 	while ((file = readdir(dot_dir)) != NULL)
 		if (strcmp("test_readdir", file->d_name) == 0)
 			found = 1;

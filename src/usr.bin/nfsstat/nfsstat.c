@@ -1,4 +1,4 @@
-/*	$OpenBSD: nfsstat.c,v 1.7 1998/07/05 18:42:43 deraadt Exp $	*/
+/*	$OpenBSD: nfsstat.c,v 1.10 2000/05/01 19:48:04 provos Exp $	*/
 /*	$NetBSD: nfsstat.c,v 1.7 1996/03/03 17:21:30 thorpej Exp $	*/
 
 /*
@@ -48,7 +48,7 @@ static char copyright[] =
 static char sccsid[] = "from: @(#)nfsstat.c	8.1 (Berkeley) 6/6/93";
 static char *rcsid = "$NetBSD: nfsstat.c,v 1.7 1996/03/03 17:21:30 thorpej Exp $";
 #else
-static char *rcsid = "$OpenBSD: nfsstat.c,v 1.7 1998/07/05 18:42:43 deraadt Exp $";
+static char *rcsid = "$OpenBSD: nfsstat.c,v 1.10 2000/05/01 19:48:04 provos Exp $";
 #endif
 #endif /* not lint */
 
@@ -79,23 +79,30 @@ static char *rcsid = "$OpenBSD: nfsstat.c,v 1.7 1998/07/05 18:42:43 deraadt Exp 
 struct nlist nl[] = {
 #define	N_NFSSTAT	0
 	{ "_nfsstats" },
-	"",
+	{ "" },
 };
 kvm_t *kd;
+u_char	signalled;			/* set if alarm goes off "early" */
+int nfs_id;
 
-void intpr(), printhdr(), sidewaysintpr(), usage();
+void getnfsstats __P((struct nfsstats *));
+void printhdr __P((void));
+void intpr __P((u_int));
+void sidewaysintpr __P((u_int, u_int));
+void usage __P((void));
 
+int
 main(argc, argv)
 	int argc;
 	char **argv;
 {
 	extern int optind;
 	extern char *optarg;
+	char *p;
 	u_int interval;
 	u_int display = SHOW_ALL;
-	int ch;
 	char *memf, *nlistf;
-	char errbuf[_POSIX2_LINE_MAX];
+	int ch;
 
 	interval = 0;
 	memf = nlistf = NULL;
@@ -108,7 +115,9 @@ main(argc, argv)
 			nlistf = optarg;
 			break;
 		case 'w':
-			interval = atoi(optarg);
+			interval = (u_int)strtol(optarg, &p, 0);
+			if (*optarg == '\0' || *p != '\0')
+				errx(1, "invalid interval");
 			break;
 		case 's':
 			display = SHOW_SERVER;
@@ -134,46 +143,83 @@ main(argc, argv)
 		}
 	}
 #endif
-	/*
-	 * Discard setgid privileges if not the running kernel so that bad
-	 * guys can't print interesting stuff from kernel memory.
-	 */
-	if (nlistf != NULL || memf != NULL) {
-		setegid(getgid());
-		setgid(getgid());
-	}
+	if (nlistf || memf) {
+		char errbuf[_POSIX2_LINE_MAX];
 
-	if ((kd = kvm_openfiles(nlistf, memf, NULL, O_RDONLY, errbuf)) == 0) {
-		fprintf(stderr, "nfsstat: kvm_openfiles: %s\n", errbuf);
-		exit(1);
-	}
-	if (kvm_nlist(kd, nl) != 0) {
-		fprintf(stderr, "nfsstat: kvm_nlist: can't get names\n");
-		exit(1);
+		if ((kd = kvm_openfiles(nlistf, memf, NULL, O_RDONLY, errbuf)) == 0)
+			errx(1, "nfsstat: %s", errbuf);
+		if (kvm_nlist(kd, nl) != 0)
+			errx(1, "kvm_nlist: can't get names");
+	} else {
+		int mib[3];
+		size_t len;
+
+		mib[0] = CTL_VFS;
+		mib[1] = VFS_GENERIC;
+		mib[2] = VFS_MAXTYPENUM;
+		len = sizeof(nfs_id);
+		if (sysctl(mib, 3, &nfs_id, &len, NULL, 0))
+			err(1, "sysctl: VFS_MAXTYPENUM");
+
+		while (nfs_id--) {
+			struct vfsconf vfsc;
+
+			mib[0] = CTL_VFS;
+			mib[1] = VFS_GENERIC;
+			mib[2] = VFS_CONF;
+			mib[3] = nfs_id;
+
+			len = sizeof(vfsc);
+			if (sysctl(mib, 4, &vfsc, &len, NULL, 0))
+				continue;
+
+			if (!strcmp(vfsc.vfc_name, MOUNT_NFS))
+				break;
+		}
+
+		if (nfs_id < 0)
+			errx(1, "cannot find nfs filesystem id");
 	}
 
 	if (interval)
-		sidewaysintpr(interval, nl[N_NFSSTAT].n_value, display);
+		sidewaysintpr(interval, display);
 	else
-		intpr(nl[N_NFSSTAT].n_value, display);
-	exit(0);
+		intpr(display);
+
+	return 0;
+}
+
+void
+getnfsstats(p)
+	struct nfsstats *p;
+{
+	if (kd) {
+		if (kvm_read(kd, nl[N_NFSSTAT].n_value, p, sizeof(*p)) != sizeof(*p))
+			errx(1, "kvm_read failed");
+	} else {
+		int mib[3];
+		size_t len = sizeof(*p);
+
+		mib[0] = CTL_VFS;
+		mib[1] = nfs_id; /* 2 */
+		mib[2] = NFS_NFSSTATS;
+
+		if (sysctl(mib, 3, p, &len, NULL, 0))
+			err(1, "sysctl");
+	}
 }
 
 /*
  * Print a description of the nfs stats.
  */
 void
-intpr(nfsstataddr, display)
-	u_long nfsstataddr;
+intpr(display)
 	u_int display;
 {
 	struct nfsstats nfsstats;
 
-	if (kvm_read(kd, (u_long)nfsstataddr, (char *)&nfsstats,
-	    sizeof(struct nfsstats)) != sizeof(struct nfsstats)) {
-		fprintf(stderr, "nfsstat: kvm_read failed\n");
-		exit(1);
-	}
+	getnfsstats(&nfsstats);
+
 	if (display & SHOW_CLIENT) {
 		printf("Client Info:\n");
 		printf("Rpc Counts:\n");
@@ -313,8 +359,6 @@ intpr(nfsstataddr, display)
 	}
 }
 
-u_char	signalled;			/* set if alarm goes off "early" */
-
 /*
  * Print a running summary of nfs statistics.
  * Repeat display every interval seconds, showing statistics
@@ -322,9 +366,8 @@ u_char	signalled;			/* set if alarm goes off "early" */
  * First line printed at top of screen is always cumulative.
  */
 void
-sidewaysintpr(interval, off, display)
+sidewaysintpr(interval, display)
 	u_int interval;
-	u_long off;
 	u_int display;
 {
 	struct nfsstats nfsstats, lastst;
@@ -341,11 +384,9 @@ sidewaysintpr(interval, off, display)
 			printhdr();
 			hdrcnt = 20;
 		}
-		if (kvm_read(kd, off, (char *)&nfsstats, sizeof nfsstats) !=
-		    sizeof nfsstats) {
-			fprintf(stderr, "nfsstat: kvm_read failed\n");
-			exit(1);
-		}
+
+		getnfsstats(&nfsstats);
+
 		if (display & SHOW_CLIENT)
 		  printf("Client: %8d %8d %8d %8d %8d %8d %8d %8d\n",
 		    nfsstats.rpccnt[NFSPROC_GETATTR]-lastst.rpccnt[NFSPROC_GETATTR],
@@ -402,7 +443,9 @@ catchalarm()
 void
 usage()
 {
-	(void)fprintf(stderr,
-	    "usage: nfsstat [-M core] [-N system] [-w interval]\n");
+	extern char *__progname;
+	fprintf(stderr,
+	    "usage: %s [-M core] [-N system] [-s] [-c] [-w interval]\n",
+	    __progname);
 	exit(1);
 }

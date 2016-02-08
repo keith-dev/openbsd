@@ -1,4 +1,4 @@
-/*	$OpenBSD: md.h,v 1.5 1998/05/16 07:44:26 niklas Exp $	*/
+/*	$OpenBSD: md.h,v 1.7 2000/04/30 03:53:35 bjc Exp $	*/
 /*	$NetBSD: md.h,v 1.1 1995/10/19 13:10:20 ragge Exp $	*/
 /*
  * Copyright (c) 1993 Paul Kranenburg
@@ -32,16 +32,16 @@
  */
 
 
-#if defined(CROSS_LINKER) && defined(XHOST) && XHOST==sparc
+#if defined(CROSS_LINKER) 
+#include <sys/endian.h>
+#if BYTE_ORDER != LITTLE_ENDIAN
 #define NEED_SWAP
 #endif
 
-/* Remove definitions from the host exec.h */
-#undef __LDPGSZ
-#ifdef relocation_info
-#undef relocation_info
 #endif
-#include <sys/arch/vax/include/exec.h>
+
+/* Remove definitions from the host exec.h */
+#include <machine/exec.h>
 
 #define	MAX_ALIGNMENT		4	/* (sizeof (long)) */
 

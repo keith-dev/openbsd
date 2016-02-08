@@ -1,4 +1,4 @@
-.\"	$OpenBSD: usb.4,v 1.2 1999/08/13 14:47:50 aaron Exp $
+.\"	$OpenBSD: usb.4,v 1.7 2000/04/11 20:39:05 deraadt Exp $
 .\"	$NetBSD: usb.4,v 1.15 1999/07/29 14:20:32 augustss Exp $
 .\"
 .\" Copyright (c) 1999 The NetBSD Foundation, Inc.
@@ -40,7 +40,7 @@
 .Os
 .Sh NAME
 .Nm usb
-.Nd Universal Serial Bus driver
+.Nd introduction to Universal Serial Bus support
 .Sh SYNOPSIS
 .Cd "uhci*   at pci? function ?"
 .Cd "ohci*   at pci? function ?"
@@ -52,7 +52,7 @@
 .Pp
 .Cd "#include <dev/usb/usb.h>"
 .Cd "#include <dev/usb/usbhid.h>"
-.Sh INTRODUCTION
+.Sh DESCRIPTION
 .Ox
 provides machine-independent bus support and drivers for Universal Serial Bus
 .Pq Tn USB
@@ -89,6 +89,37 @@ hubs and must always be present since there is at least one root hub in any
 .Tn USB
 system.
 .Pp
+.Sh SUPPORTED DEVICES
+.Ox
+includes machine-independent
+.Tn USB
+drivers, sorted by driver name:
+.Pp
+.Bl -tag -width speakerxx -offset ind -compact
+.It Xr aue 4
+AN986 Pegasus-based Ethernet interfaces.
+.It Xr cue 4
+CATC USB-EL1201A-based Ethernet interfaces.
+.It Xr kue 4
+Kawasaki LSI KL5KUSB101B-based Ethernet interfaces.
+.It Xr uaudio 4
+Audio devices.
+.It Xr ugen 4
+Generic driver for unknown
+.Tn USB
+devices.
+.It Xr uhid 4
+Generic driver for Human Interface Devices.
+.It Xr ulpt 4
+.Tn USB
+Printers.
+.It Xr umass 4
+.Tn USB
+Mass Storage Devices, i.e., external disk drives.
+.It Xr umodem 4
+.Tn USB
+Modems.
+.El
 .Sh INTRODUCTION TO USB
 The
 .Tn USB
@@ -131,7 +162,8 @@ and interfaces.
 Each device located on a hub has several
 .Xr config 8
 locators:
-.Bl -tag -compact -width xxxxxxx
+.Pp
+.Bl -tag -width configuration -compact
 .It Cd port
 Number of the port on closest upstream hub.
 .It Cd configuration
@@ -304,24 +336,17 @@ The include file
 similarly contains the definitions for
 Human Interface Devices
 .Pq Tn HID .
-.Sh BUGS
-There should be a serial number locator, but
-.Ox
-does not have string valued locators.
 .Sh SEE ALSO
-.Xr usb 3 ,
+.Xr cardbus 4 ,
+.Xr intro 4 ,
+.Xr isa 4 ,
+.Xr isapnp 4 ,
 .Xr pci 4 ,
-.\".Xr uaudio 4 ,
-.Xr ugen 4 ,
-.Xr uhid 4 ,
-.\".Xr ukbd 4 ,
-.\".Xr ulpt 4 ,
-.\".Xr ums 4 ,
-.Xr usbd 8 ,
+.Xr pcmcia 4 ,
 .Xr usbdevs 8
 .Pp
-The 
-.Tn USB 
+The
+.Tn USB
 specifications can be found at:
 .Pp
 .Dl http://www.usb.org/developers/docs.htm
@@ -332,3 +357,7 @@ The
 driver
 appeared in
 .Ox 2.6 .
+.Sh BUGS
+There should be a serial number locator, but
+.Ox
+does not have string valued locators.

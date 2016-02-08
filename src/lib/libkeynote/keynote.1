@@ -1,4 +1,4 @@
-.\" $OpenBSD: keynote.1,v 1.11 1999/10/11 00:08:28 angelos Exp $
+.\" $OpenBSD: keynote.1,v 1.15 2000/04/12 21:48:03 aaron Exp $
 .\"
 .\" The author of this code is Angelos D. Keromytis (angelos@dsl.cis.upenn.edu)
 .\"
@@ -6,7 +6,7 @@
 .\" in April-May 1998
 .\"
 .\" Copyright (C) 1998, 1999 by Angelos D. Keromytis.
-.\"      
+.\"
 .\" Permission to use, copy, and modify this software without fee
 .\" is hereby granted, provided that this entire notice is included in
 .\" all copies of any software which is or includes a copy or
@@ -27,7 +27,7 @@
 .Sh NAME
 .Nm keynote
 .Nd command line tool for
-.Xr KeyNote 3
+.Xr keynote 3
 operations
 .Sh SYNOPSIS
 .Nm keynote keygen
@@ -43,6 +43,8 @@ operations
 .Ar AlgorithmName
 .Ar AssertionFile
 .Ar PrivateKeyFile
+.Op print-offset
+.Op print-length
 
 .Nm keynote sigver
 .Op AssertionFile
@@ -160,10 +162,27 @@ signature using the
 .Fa Authorizer
 field key.
 .Pp
+The optional parameters
+.Fa print-offset
+and
+.Fa print-length
+specify the offset from the beginning of the line where the signature
+will be printed, and the number of characters of the signature that will
+be printed per line.
+.Fa print-length
+includes
+.Fa AlgorithmName
+for the first line and has to be longer (by at least 2) than
+.Fa AlgorithmName .
+.Fa print-length
+also accounts for the line-continuation character (backslash) at
+the end of each line, and the doublequotes at the beginning and end
+of the signature encoding.  Default values are 12 and 50 respectively.
+.Pp
 .Sh SIGNATURE VERIFICATION
-"keynote sigver" reads the assertion contained in
+"keynote sigver" reads the assertions contained in
 .Fa AssertionFile
-and verifies the public-key signature on it.
+and verifies the public-key signatures on all of them.
 .Pp
 .Sh QUERY TOOL
 For each operand that names a
@@ -231,10 +250,10 @@ flags should be given per invocation. If no flags are given,
 .Xr keynote 4 ,
 .Xr keynote 5
 .Bl -tag -width "AAAAAAA"
-.It ``The KeyNote Trust-Management System, Version 2'' 
+.It ``The KeyNote Trust-Management System, Version 2''
 M. Blaze, J. Feigenbaum, A. D. Keromytis,
 Internet Drafts, RFC 2704.
-.It ``Decentralized Trust Management'' 
+.It ``Decentralized Trust Management''
 M. Blaze, J. Feigenbaum, J. Lacy,
 1996 IEEE Conference on Privacy and Security
 .It ``Compliance-Checking in the PolicyMaker Trust Management System''

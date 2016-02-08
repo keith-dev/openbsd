@@ -1,4 +1,4 @@
-/*	$OpenBSD: rtld.c,v 1.10 1998/08/28 20:45:41 deraadt Exp $	*/
+/*	$OpenBSD: rtld.c,v 1.18 2000/04/27 19:33:09 espie Exp $	*/
 /*	$NetBSD: rtld.c,v 1.43 1996/01/14 00:35:17 pk Exp $	*/
 /*
  * Copyright (c) 1993 Paul Kranenburg
@@ -164,9 +164,9 @@ static int		ld_warn_non_pure_code;
 
 static int		ld_tracing;
 
-static void		*__dlopen __P((char *, int));
+static void		*__dlopen __P((const char *, int));
 static int		__dlclose __P((void *));
-static void		*__dlsym __P((void *, char *));
+static void		*__dlsym __P((void *, const char *));
 static int		__dlctl __P((void *, int, void *));
 static void		__dlexit __P((void));
 
@@ -193,9 +193,9 @@ static void		reloc_map __P((struct so_map *));
 static void		reloc_copy __P((struct so_map *));
 static void		call_map __P((struct so_map *, char *));
 static char		*rtfindlib __P((char *, int, int, int *, char *));
-static struct nzlist	*lookup __P((char *, struct so_map **, int));
-static inline struct rt_symbol	*lookup_rts __P((char *));
-static struct rt_symbol	*enter_rts __P((char *, long, int, caddr_t,
+static struct nzlist	*lookup __P((const char *, struct so_map **, int));
+static inline struct rt_symbol	*lookup_rts __P((const char *));
+static struct rt_symbol	*enter_rts __P((const char *, long, int, caddr_t,
 						long, struct so_map *));
 static void		maphints __P((void));
 static void		unmaphints __P((void));
@@ -247,12 +247,9 @@ rtld(version, crtp, dp)
 
 	
 	/* Relocate ourselves */
-	for (	reloc = (struct relocation_info *)(LD_REL(dp) + crtp->crt_ba);
-		nreloc;
-		nreloc--, reloc++) {
-
+	for (reloc = (struct relocation_info *)(LD_REL(dp) + crtp->crt_ba);
+	    nreloc; nreloc--, reloc++) {
 		register long	addr = reloc->r_address + crtp->crt_ba;
-
 		md_relocate_simple(reloc, crtp->crt_ba, addr);
 	}
 
@@ -720,6 +717,7 @@ init_maps(head)
 			continue;
 		call_map(smp, ".init");
 		call_map(smp, "__init");
+		call_map(smp, "__GLOBAL__DI");
 	}
 }
 
@@ -887,9 +885,9 @@ static struct rt_symbol 	*rt_symtab[RTC_TABSIZE];
  */
 static inline int
 hash_string(key)
-	char *key;
+	const char *key;
 {
-	register char *cp;
+	register const char *cp;
 	register int k;
 
 	cp = key;
@@ -906,7 +904,7 @@ hash_string(key)
 
 static inline struct rt_symbol *
 lookup_rts(key)
-	char *key;
+	const char *key;
 {
 	register int			hashval;
 	register struct rt_symbol	*rtsp;
@@ -926,7 +924,7 @@ lookup_rts(key)
 
 static struct rt_symbol *
 enter_rts(name, value, type, srcaddr, size, smp)
-	char		*name;
+	const char	*name;
 	long		value;
 	int		type;
 	caddr_t		srcaddr;
@@ -972,7 +970,7 @@ enter_rts(name, value, type, srcaddr, size, smp)
  */
 static struct nzlist *
 lookup(name, src_map, strong)
-	char		*name;
+	const char	*name;
 	struct so_map	**src_map;	/* IN/OUT */
 	int		strong;
 {
@@ -990,7 +988,7 @@ lookup(name, src_map, strong)
 		int		buckets;
 		long		hashval;
 		struct rrs_hash	*hp;
-		char		*cp;
+		const char	*cp;
 		struct	nzlist	*np;
 
 		/* Some local caching */
@@ -1103,10 +1101,10 @@ long
 binder(jsp)
 	jmpslot_t	*jsp;
 {
-	struct so_map	*smp, *src_map = NULL;
+	struct so_map	*smp, *src_map;
 	long		addr;
 	char		*sym;
-	struct nzlist	*np;
+	struct nzlist	*np = NULL;
 	int		index;
 
 	/*
@@ -1127,7 +1125,18 @@ binder(jsp)
 	sym = LM_STRINGS(smp) +
 		LM_SYMBOL(smp,RELOC_SYMBOL(&LM_REL(smp)[index]))->nz_strx;
 
-	np = lookup(sym, &src_map, 1);
+	/*
+	 * If this is a call from a dlopen(3) object, try to resolve locally
+	 * first
+	 */
+	if (LM_PRIVATE(smp)->spd_flags & RTLD_DL) {
+		src_map = smp;
+		np = lookup(sym, &src_map, 1);
+	}
+	if (np == NULL) {
+		src_map = NULL;
+		np = lookup(sym, &src_map, 1);
+	}
 	if (np == NULL)
 		errx(1, "Undefined symbol \"%s\" called from %s:%s at %#x",
 				sym, main_progname, smp->som_path, jsp);
@@ -1312,10 +1321,12 @@ rtfindlib(name, major, minor, usehints, ipath)
 				    ipath ? ipath : "");
 
 		while ((cp = strsep(&dp, ":")) != NULL) {
-			cp = findhint(name, major, minor, cp);
-			if (cp) {
-				free(lpath);
-				return cp;
+			if (*cp) {
+				cp = findhint(name, major, minor, cp);
+				if (cp) {
+					free(lpath);
+					return cp;
+				}
 			}
 		}
 		free(lpath);
@@ -1411,7 +1422,7 @@ static int dlerrno;
  */
 void
 build_sod(name, sodp)
-	char		*name;
+	const char	*name;
 	struct sod	*sodp;
 {
 	unsigned int	tuplet;
@@ -1423,8 +1434,12 @@ build_sod(name, sodp)
 	sodp->sod_library = 0;
 	sodp->sod_major = sodp->sod_minor = 0;
 
-	/* asking for lookup? */
+	/* does it look like /^lib/ ? */
 	if (strncmp((char *)sodp->sod_name, "lib", 3) != 0)
+		return;
+
+	/* is this a filename? */
+	if (strchr((char *)sodp->sod_name, '/'))
 		return;
 
 	/* skip over 'lib' */
@@ -1481,8 +1496,8 @@ backout:
 
 static void *
 __dlopen(name, mode)
-	char	*name;
-	int	mode;
+	const char	*name;
+	int		mode;
 {
 	struct sod	*sodp;
 	struct so_map	*smp;
@@ -1549,6 +1564,7 @@ xprintf("dlclose(%s): refcount = %d\n", smp->som_path, LM_PRIVATE(smp)->spd_refc
 
 	/* Dismantle shared object map and descriptor */
 	call_map(smp, "__fini");
+	call_map(smp, "__GLOBAL__DD");
 #if 0
 	unload_subs(smp);		/* XXX should unload implied objects */
 #endif
@@ -1559,8 +1575,8 @@ xprintf("dlclose(%s): refcount = %d\n", smp->som_path, LM_PRIVATE(smp)->spd_refc
 
 static void *
 __dlsym(fd, sym)
-	void	*fd;
-	char	*sym;
+	void		*fd;
+	const char	*sym;
 {
 	struct so_map	*smp = (struct so_map *)fd, *src_map = NULL;
 	struct nzlist	*np;
@@ -1613,6 +1629,7 @@ __dlexit()
 		if (LM_PRIVATE(smp)->spd_flags & RTLD_RTLD)
 			continue;
 		call_map(smp, ".fini");
+		call_map(smp, "__GLOBAL__DD");
 	}
 }
 

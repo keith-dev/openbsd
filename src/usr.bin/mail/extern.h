@@ -1,4 +1,4 @@
-/*	$OpenBSD: extern.h,v 1.12 1997/11/14 00:23:46 millert Exp $	*/
+/*	$OpenBSD: extern.h,v 1.14 2000/04/26 15:47:31 millert Exp $	*/
 /*	$NetBSD: extern.h,v 1.7 1997/07/09 05:22:00 mikel Exp $	*/
 
 /*-
@@ -34,7 +34,7 @@
  * SUCH DAMAGE.
  *
  *	@(#)extern.h	8.2 (Berkeley) 4/20/95
- *	$OpenBSD: extern.h,v 1.12 1997/11/14 00:23:46 millert Exp $
+ *	$OpenBSD: extern.h,v 1.14 2000/04/26 15:47:31 millert Exp $
  */
 
 struct name;
@@ -99,6 +99,7 @@ int	 blankline __P((char []));
 void	 brokpipe __P((int));
 int	 charcount __P((char *, int));
 int	 check __P((int, int));
+void	 clearnew __P((void));
 void	 clob1 __P((int));
 int	 clobber __P((void *));
 void	 close_all_files __P((void));
@@ -226,7 +227,7 @@ void	 scaninit __P((void));
 int	 schdir __P((void *));
 int	 screensize __P((void));
 int	 scroll __P((void *));
-int	 send __P((struct message *, FILE *, struct ignoretab *, char *));
+int	 sendmessage __P((struct message *, FILE *, struct ignoretab *, char *));
 int	 sendmail __P((void *));
 int	 set __P((void *));
 int	 setfile __P((char *));

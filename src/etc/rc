@@ -1,9 +1,28 @@
-#	$OpenBSD: rc,v 1.123 1999/10/18 01:46:24 deraadt Exp $
+#	$OpenBSD: rc,v 1.137 2000/05/12 06:10:26 deraadt Exp $
 
 # System startup script run by init on autoboot
 # or after single-user.
 # Output and error are redirected to console by init,
 # and the console is the controlling terminal.
+
+# Subroutines (have to come first).
+
+# Strip comments (and leading/trailing whitespace if IFS is set)
+# from a file and spew to stdout
+stripcom() {
+	local _file="$1"
+	local _line
+
+	{
+		while read _line ; do
+			_line=${_line%%#*}		# strip comments
+			test -z "$_line" && continue
+			echo $_line
+		done
+	} < $_file
+}
+
+# End subroutines
 
 stty status '^T'
 
@@ -105,6 +124,17 @@ else
 	    > /dev/null 2>&1
 fi
 
+if [ -f /etc/sysctl.conf ]; then
+(
+	# delete comments and blank lines
+	set -- `stripcom /etc/sysctl.conf`
+	while [ $# -ge 1 ] ; do
+		sysctl -w $1
+		shift
+	done
+)
+fi
+
 # set hostname, turn on network
 echo 'starting network'
 . /etc/netstart
@@ -136,7 +166,7 @@ syslogd ${syslogd_flags}
 if [ -f /etc/ifaliases ]; then
 (
 	# delete comments and blank lines
-	set -- `sed -e 's/#.*$//' /etc/ifaliases | grep -v '^$'`
+	set -- `stripcom /etc/ifaliases`
 	while [ $# -ge 3 ] ; do
 		ifconfig $1 inet alias $2 netmask $3
 		route -n add -host $2 localhost
@@ -176,9 +206,9 @@ if [ "X${photurisd_flags}" != X"NO" -a -e /etc/photuris/photuris.conf ]; then
 fi
 
 # $isakmpd_flags is imported from /etc/rc.conf;
-# If $isakmpd_flags == NO or /etc/isakmpd.conf doesn't exist, then
+# If $isakmpd_flags == NO or /etc/isakmpd/isakmpd.conf doesn't exist, then
 # isakmpd isn't run.
-if [ "X${isakmpd_flags}" != X"NO" -a -e /etc/isakmpd.conf ]; then
+if [ "X${isakmpd_flags}" != X"NO" -a -e /etc/isakmpd/isakmpd.conf ]; then
 	echo 'starting isakmpd';	isakmpd ${isakmpd_flags}
 fi
 
@@ -298,17 +328,6 @@ echo clearing /tmp
     find . ! -name . ! -name lost+found ! -name quota.user \
 	! -name quota.group -execdir rm -rf -- {} \; -type d -prune)
 
-if [ -f /etc/sysctl.conf ]; then
-(
-	# delete comments and blank lines
-	set -- `sed -e 's/#.*$//' /etc/sysctl.conf | grep -v '^$'`
-	while [ $# -ge 1 ] ; do
-		sysctl -w $1
-		shift 1
-	done
-)
-fi
-
 [ -f /etc/rc.securelevel ] && . /etc/rc.securelevel
 if [ X${securelevel} != X"" ]; then
 	echo -n 'setting kernel security level: '
@@ -319,7 +338,7 @@ fi
 if [ ! -f /etc/motd ]; then
 	install -c -o root -g wheel -m 664 /dev/null /etc/motd
 fi
-T=`mktemp /tmp/_motd.XXXXXXXXXX` 
+T=`mktemp /tmp/_motd.XXXXXXXXXX`
 if [ $? -eq 0 ]; then
 	sysctl -n kern.version | sed 1q > $T
 	echo "" >> $T
@@ -347,10 +366,18 @@ if [ -f /sbin/ldconfig ]; then
 	ldconfig $shlib_dirs
 fi
 
-if [ ! -f /etc/ssh_host_key -a -x /usr/bin/ssh-keygen ]; then
-	umask 022
-	echo -n "ssh-keygen: generating new host key... "
-	if /usr/bin/ssh-keygen -q -b 1024 -f /etc/ssh_host_key -N ''; then
+if [ ! -f /etc/ssh_host_dsa_key -a -x /usr/bin/ssh-keygen ]; then
+	echo -n "ssh-keygen: generating new DSA host key... "
+	if /usr/bin/ssh-keygen -q -d -f /etc/ssh_host_dsa_key -N ''; then
+		echo done.
+	else
+		echo failed.
+	fi
+fi
+if [ ! -f /etc/ssh_host_key -a -x /usr/bin/ssh-keygen ] && \
+    ssh-keygen -R; then
+	echo -n "ssh-keygen: generating new RSA host key... "
+	if /usr/bin/ssh-keygen -q -f /etc/ssh_host_key -N ''; then
 		echo done.
 	else
 		echo failed.
@@ -384,6 +411,36 @@ if [ "X${dhcpd_flags}" != X"NO" -a -f /etc/dhcpd.conf ]; then
 	echo -n ' dhcpd';	/usr/sbin/dhcpd ${dhcpd_flags} ${dhcpd_ifs}
 fi
 
+if ifconfig lo0 inet6 >/dev/null 2>&1; then
+	fw=`sysctl -n net.inet6.ip6.forwarding`
+	if [ "X${fw}" == X"0" ]; then
+		# $rtsold_flags is imported from /etc/rc.conf;
+		# If $rtsold_flags == NO, then rtsold isn't run.
+		if [ "X${rtsold_flags}" != X"NO" ]; then
+			echo -n ' rtsold'
+			/usr/sbin/rtsold ${rtsold_flags}
+		fi
+
+		if [ "X${ip6defaultif}" != X"NO" ]; then
+			/usr/sbin/ndp -I ${ip6defaultif}
+		fi
+	else
+		# $route6d_flags is imported from /etc/rc.conf;
+		# If $route6d_flags == NO, then route6d isn't run.
+		if [ "X${route6d_flags}" != X"NO" ]; then
+			echo -n ' route6d'
+			/usr/sbin/route6d ${route6d_flags}
+		fi
+		# $rtadvd_flags is imported from /etc/rc.conf;
+		# If $rtadvd_flags == NO or /etc/rtadvd.conf doesn't exist,
+		# then rtadvd isn't run.
+		if [ "X${rtadvd_flags}" != X"NO" -a -f /etc/rtadvd.conf ]; then
+			echo -n ' rtadvd'
+			/usr/sbin/rtadvd ${rtadvd_flags}
+		fi
+	fi
+fi
+
 # $rwhod is imported from /etc/rc.conf;
 # if $rwhod == YES, rwhod is run.
 if [ X${rwhod} = X"YES" ]; then
@@ -396,10 +453,10 @@ if [ X${lpd} = X"YES" ]; then
 fi
 
 # $sendmail_flags is imported from /etc/rc.conf;
-# If $sendmail_flags == NO or /etc/sendmail.cf doesn't exist, then
+# If $sendmail_flags == NO or /etc/mail/sendmail.cf doesn't exist, then
 # sendmail isn't run.  We call sendmail with a full path so that
 # SIGHUP works.
-if [ "X${sendmail_flags}" != X"NO" -a -s /etc/sendmail.cf ]; then
+if [ "X${sendmail_flags}" != X"NO" -a -s /etc/mail/sendmail.cf ]; then
 	echo -n ' sendmail';		/usr/sbin/sendmail ${sendmail_flags}
 fi
 
@@ -409,6 +466,10 @@ fi
 
 if [ "X${ftpd_flags}" != X"NO" ]; then
 	echo -n ' ftpd';		/usr/libexec/ftpd ${ftpd_flags}
+fi
+
+if [ "X${identd_flags}" != X"NO" ]; then
+	echo -n ' identd';		/usr/libexec/identd ${identd_flags}
 fi
 
 # $smtpfwdd_flags is imported from /etc/rc.conf;
@@ -452,12 +513,9 @@ fi
 
 if [ X"${sshd}" == X"YES" ]; then
 	if test -x /usr/sbin/sshd && /usr/sbin/sshd -Q ; then
-		echo -n ' sshd';
-		#echo -n ' sshd(2022)';	/usr/sbin/sshd -p 2022
-	elif [ -x /usr/local/sbin/sshd ]; then
-		/usr/local/sbin/sshd
-		echo -n ' sshd';
-		#echo -n ' sshd(2022)';	/usr/local/sbin/sshd -p 2022
+		echo -n ' sshd'
+	elif [ -x /usr/local/sbin/sshd && /usr/local/sbin/sshd ]; then
+		echo -n ' sshd'
 	fi
 fi
 
@@ -479,7 +537,7 @@ fi
 if [ X${kerberos_slave} = X"YES" ]; then
 	echo 'kerberos slave server'
 	/usr/libexec/kerberos -s >> /var/log/kerberos.log &
-	/usr/libexec/kpropd -i &
+	/usr/libexec/kpropd -i -p /usr/sbin/kdb_util &
 fi
 
 [ -f /etc/rc.local ] && . /etc/rc.local

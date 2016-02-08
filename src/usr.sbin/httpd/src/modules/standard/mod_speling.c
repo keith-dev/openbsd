@@ -244,7 +244,7 @@ static int check_speling(request_rec *r)
     }
 
     /* We've already got a file of some kind or another */
-    if (r->proxyreq || (r->finfo.st_mode != 0)) {
+    if (r->proxyreq != NOT_PROXY || (r->finfo.st_mode != 0)) {
         return DECLINED;
     }
 
@@ -408,10 +408,11 @@ static int check_speling(request_rec *r)
 	    && (candidates->nelts == 1
 		|| variant[0].quality != variant[1].quality)) {
 
-            nuri = ap_pstrcat(r->pool, url, variant[0].name, r->path_info,
-			      r->parsed_uri.query ? "?" : "",
-			      r->parsed_uri.query ? r->parsed_uri.query : "",
-			      NULL);
+            nuri = ap_escape_uri(r->pool, ap_pstrcat(r->pool, url,
+						     variant[0].name,
+						     r->path_info, NULL));
+	    if (r->parsed_uri.query)
+		nuri = ap_pstrcat(r->pool, nuri, "?", r->parsed_uri.query, NULL);
 
             ap_table_setn(r->headers_out, "Location",
 			  ap_construct_url(r->pool, nuri, r));
@@ -454,7 +455,7 @@ static int check_speling(request_rec *r)
 
 	    *(const char **)ap_push_array(t) =
 			  "The document name you requested (<code>";
-	    *(const char **)ap_push_array(t) = r->uri;
+	    *(const char **)ap_push_array(t) = ap_escape_html(sub_pool, r->uri);
 	    *(const char **)ap_push_array(t) =
 			   "</code>) could not be found on this server.\n"
 			   "However, we found documents with names similar "
@@ -473,15 +474,15 @@ static int check_speling(request_rec *r)
 				      ? r->parsed_uri.query : "",
 				  NULL);
 		*(const char **)ap_push_array(v) = "\"";
-		*(const char **)ap_push_array(v) = vuri;
+		*(const char **)ap_push_array(v) = ap_escape_uri(sub_pool, vuri);
 		*(const char **)ap_push_array(v) = "\";\"";
 		*(const char **)ap_push_array(v) = reason;
 		*(const char **)ap_push_array(v) = "\"";
 
 		*(const char **)ap_push_array(t) = "<li><a href=\"";
-		*(const char **)ap_push_array(t) = vuri;
+		*(const char **)ap_push_array(t) = ap_escape_uri(sub_pool, vuri);
 		*(const char **)ap_push_array(t) = "\">";
-		*(const char **)ap_push_array(t) = vuri;
+		*(const char **)ap_push_array(t) = ap_escape_html(sub_pool, vuri);
 		*(const char **)ap_push_array(t) = "</a> (";
 		*(const char **)ap_push_array(t) = reason;
 		*(const char **)ap_push_array(t) = ")\n";
@@ -508,7 +509,7 @@ static int check_speling(request_rec *r)
                 *(const char **)ap_push_array(t) =
 			       "Please consider informing the owner of the "
 			       "<a href=\"";
-                *(const char **)ap_push_array(t) = ref;
+		*(const char **)ap_push_array(t) = ap_escape_uri(sub_pool, ref);
                 *(const char **)ap_push_array(t) = "\">referring page</a> "
 			       "about the broken link.\n";
 	    }
@@ -556,3 +557,10 @@ module MODULE_VAR_EXPORT speling_module =
     NULL,                       /* child_exit */
     NULL                        /* post read-request */
 };
+
+#ifdef NETWARE
+int main(int argc, char *argv[]) 
+{
+    ExitThread(TSR_THREAD, 0);
+}
+#endif

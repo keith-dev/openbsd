@@ -1,4 +1,4 @@
-.\"	$OpenBSD: tput.1,v 1.8 1999/08/18 13:02:31 aaron Exp $
+.\"	$OpenBSD: tput.1,v 1.10 2000/03/11 21:40:05 aaron Exp $
 .\"	$NetBSD: tput.1,v 1.4 1994/12/07 08:49:10 jtc Exp $
 .\"
 .\" Copyright (c) 1989, 1990, 1993
@@ -84,7 +84,8 @@ If the
 is of type boolean,
 .Nm
 exits 0 if the terminal has the capability or 1 if it
-does not.  Each
+does not.
+Each
 .Ar attribute
 should be a string defined in either
 .Xr terminfo 5
@@ -151,11 +152,11 @@ goto line 6 column 11 and delete 6 characters
 .Sh SEE ALSO
 .Xr terminfo 3 ,
 .Xr terminfo 5
-.Sh BUGS
-.Nm
-can't really distinguish between different types of attributes.
 .Sh HISTORY
 The
 .Nm
 utility appeared in
 .Bx 4.4 .
+.Sh BUGS
+.Nm
+can't really distinguish between different types of attributes.

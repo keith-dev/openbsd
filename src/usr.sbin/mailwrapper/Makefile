@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.1 1999/08/02 19:50:07 jakob Exp $
+#	$OpenBSD: Makefile,v 1.3 2000/04/06 01:05:38 millert Exp $
 
 PROG=	mailwrapper
 MAN=	mailwrapper.8 mailer.conf.5

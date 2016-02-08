@@ -1,4 +1,5 @@
-.\" $OpenBSD: arc4random.3,v 1.11 1999/07/09 13:35:15 aaron Exp $
+.\" $OpenBSD: arc4random.3,v 1.16 2000/04/28 21:16:25 deraadt Exp $
+.\"
 .\" Copyright 1997 Niels Provos <provos@physnet.uni-hamburg.de>
 .\" All rights reserved.
 .\"
@@ -33,8 +34,8 @@
 .Dt ARC4RANDOM 3
 .Os
 .Sh NAME
-.Nm arc4random,
-.Nm arc4random_stir,
+.Nm arc4random ,
+.Nm arc4random_stir ,
 .Nm arc4random_addrandom
 .Nd arc4 random number generator
 .Sh SYNOPSIS
@@ -48,9 +49,29 @@
 .Sh DESCRIPTION
 The
 .Fn arc4random
-function uses the key stream generator employed by the
-arc4 cipher, which uses 8*8 8 bit S-Boxes. The S-Boxes
-can be in about (2**1700) states.
+function provides a high quality 32-bit pseudo-random
+number very quickly.
+.Fn arc4random
+seeds itself on a regular basis from the kernel strong random number
+subsystem described in
+.Xr random 4 .
+On each call, an ARC4 generator is used to generate a new result.
+The
+.Fn arc4random
+function uses the ARC4 ciper key stream generator,
+which uses 8*8 8 bit S-Boxes.
+The S-Boxes can be in about (2**1700) states.
+.Pp
+.Fn arc4random
+fits into a middle ground not covered by other subsystems such as
+the strong, slow, and resource expensive random
+devices described in
+.Xr random 4
+versus the fast but poor quality interfaces described in
+.Xr rand 3 ,
+.Xr random 3 ,
+and
+.Xr drand48 3 .
 .Pp
 The
 .Fn arc4random_stir
@@ -71,15 +92,19 @@ automatically initializes itself.
 .Xr rand48 3 ,
 .Xr random 3
 .Sh HISTORY
-An algorithm call
+An algorithm called
 .Pa RC4
-was designed by RSA Data Security, Inc.  It was considered a trade secret,
-but not trademarked.
-A clone of this was posted anonymously to the USENET and was confirmed to
+was designed by RSA Data Security, Inc.
+It was considered a trade secret, but not trademarked.
+Because it was a trade secret, it obviously could not be patented.
+A clone of this was posted anonymously to USENET and confirmed to
 be equivalent by several sources who had access to the original cipher.
 Because of the trade secret situation, RSA Data Security, Inc. can do
-nothing about the situation.
+nothing about the release of the ARC4 algorithm.
 Since
 .Pa RC4
 used to be a trade secret, the cipher is now referred to as
 .Pa ARC4 .
+.Pp
+These functions first appeared in
+.Ox 2.1 .

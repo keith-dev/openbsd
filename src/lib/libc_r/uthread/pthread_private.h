@@ -1,3 +1,4 @@
+/*	$OpenBSD: pthread_private.h,v 1.19 2000/01/06 07:13:56 d Exp $	*/
 /*
  * Copyright (c) 1995-1998 John Birrell <jb@cimlogic.com.au>.
  * All rights reserved.
@@ -20,7 +21,7 @@
  * THIS SOFTWARE IS PROVIDED BY JOHN BIRRELL AND CONTRIBUTORS ``AS IS'' AND
  * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
  * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
- * ARE DISCLAIMED.  IN NO EVENT SHALL THE REGENTS OR CONTRIBUTORS BE LIABLE
+ * ARE DISCLAIMED.  IN NO EVENT SHALL THE AUTHOR OR CONTRIBUTORS BE LIABLE
  * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
  * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
  * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
@@ -31,14 +32,11 @@
  *
  * Private thread definitions for the uthread kernel.
  *
- * $OpenBSD: pthread_private.h,v 1.17 1999/09/08 08:21:47 espie Exp $
- *
+ * $FreeBSD: pthread_private.h,v 1.27 1999/09/29 15:18:38 marcel Exp $
  */
 
 #ifndef _PTHREAD_PRIVATE_H
 #define _PTHREAD_PRIVATE_H
-
-#include <paths.h>
 
 /*
  * Include files.
@@ -51,9 +49,8 @@
 #include <sched.h>
 #include <spinlock.h>
 #include <pthread_np.h>
-#ifndef _NO_UTHREAD_MACHDEP
+#include "thread_private.h"
 #include "uthread_machdep.h"
-#endif
 
 /*
  * Kernel fatal error handler macro.
@@ -66,33 +63,88 @@
 
 
 /*
- * Priority queue manipulation macros:
+ * Priority queue manipulation macros (using pqe link):
  */
 #define PTHREAD_PRIOQ_INSERT_HEAD(thrd)	_pq_insert_head(&_readyq,thrd)
 #define PTHREAD_PRIOQ_INSERT_TAIL(thrd)	_pq_insert_tail(&_readyq,thrd)
 #define PTHREAD_PRIOQ_REMOVE(thrd)	_pq_remove(&_readyq,thrd)
-#define PTHREAD_PRIOQ_FIRST		_pq_first(&_readyq)
+#define PTHREAD_PRIOQ_FIRST()		_pq_first(&_readyq)
 
 /*
- * Waiting queue manipulation macros:
+ * Waiting queue manipulation macros (using pqe link):
  */
-#define PTHREAD_WAITQ_INSERT(thrd)	TAILQ_INSERT_TAIL(&_waitingq,thrd,pqe)
+#if defined(_PTHREADS_INVARIANTS)
+#define PTHREAD_WAITQ_REMOVE(thrd)	_waitq_remove(thrd)
+#define PTHREAD_WAITQ_INSERT(thrd)	_waitq_insert(thrd)
+#define PTHREAD_WAITQ_CLEARACTIVE()	_waitq_clearactive()
+#define PTHREAD_WAITQ_SETACTIVE()	_waitq_setactive()
+#else
 #define PTHREAD_WAITQ_REMOVE(thrd)	TAILQ_REMOVE(&_waitingq,thrd,pqe)
+#define PTHREAD_WAITQ_INSERT(thrd) do {					\
+	if ((thrd)->wakeup_time.tv_sec == -1)				\
+		TAILQ_INSERT_TAIL(&_waitingq,thrd,pqe);			\
+	else {								\
+		pthread_t tid = TAILQ_FIRST(&_waitingq);		\
+		while ((tid != NULL) && (tid->wakeup_time.tv_sec != -1) && \
+		    ((tid->wakeup_time.tv_sec < (thrd)->wakeup_time.tv_sec) ||	\
+		    ((tid->wakeup_time.tv_sec == (thrd)->wakeup_time.tv_sec) &&	\
+		    (tid->wakeup_time.tv_nsec <= (thrd)->wakeup_time.tv_nsec)))) \
+			tid = TAILQ_NEXT(tid, pqe);			\
+		if (tid == NULL)					\
+			TAILQ_INSERT_TAIL(&_waitingq,thrd,pqe);		\
+		else							\
+			TAILQ_INSERT_BEFORE(tid,thrd,pqe);		\
+	}								\
+} while (0)
+#define PTHREAD_WAITQ_CLEARACTIVE()
+#define PTHREAD_WAITQ_SETACTIVE()
+#endif
+
+/*
+ * Work queue manipulation macros (using qe link):
+ */
+#define PTHREAD_WORKQ_INSERT(thrd) do {					\
+	TAILQ_INSERT_TAIL(&_workq,thrd,qe);				\
+	(thrd)->flags |= PTHREAD_FLAGS_IN_WORKQ;			\
+} while (0)
+#define PTHREAD_WORKQ_REMOVE(thrd) do {					\
+	TAILQ_REMOVE(&_workq,thrd,qe);					\
+	(thrd)->flags &= ~PTHREAD_FLAGS_IN_WORKQ;			\
+} while (0)
+
 
 /*
  * State change macro without scheduling queue change:
  */
-#define PTHREAD_SET_STATE(thrd, newstate) {				\
+#define PTHREAD_SET_STATE(thrd, newstate) do {				\
 	(thrd)->state = newstate;					\
 	(thrd)->fname = __FILE__;					\
 	(thrd)->lineno = __LINE__;					\
-}
+} while (0)
 
 /*
  * State change macro with scheduling queue change - This must be
  * called with preemption deferred (see thread_kern_sched_[un]defer).
  */
-#define PTHREAD_NEW_STATE(thrd, newstate) {				\
+#if defined(_PTHREADS_INVARIANTS)
+#define PTHREAD_NEW_STATE(thrd, newstate) do {				\
+	if (_thread_kern_new_state != 0)				\
+		PANIC("Recursive PTHREAD_NEW_STATE");			\
+	_thread_kern_new_state = 1;					\
+	if ((thrd)->state != newstate) {				\
+		if ((thrd)->state == PS_RUNNING) {			\
+			PTHREAD_PRIOQ_REMOVE(thrd);			\
+			PTHREAD_WAITQ_INSERT(thrd);			\
+		} else if (newstate == PS_RUNNING) { 			\
+			PTHREAD_WAITQ_REMOVE(thrd);			\
+			PTHREAD_PRIOQ_INSERT_TAIL(thrd);		\
+		}							\
+	}								\
+	_thread_kern_new_state = 0;					\
+	PTHREAD_SET_STATE(thrd, newstate);				\
+} while (0)
+#else
+#define PTHREAD_NEW_STATE(thrd, newstate) do {				\
 	if ((thrd)->state != newstate) {				\
 		if ((thrd)->state == PS_RUNNING) {			\
 			PTHREAD_PRIOQ_REMOVE(thrd);			\
@@ -103,7 +155,8 @@
 		}							\
 	}								\
 	PTHREAD_SET_STATE(thrd, newstate);				\
-}
+} while (0)
+#endif
 
 /*
  * Define the signals to be used for scheduling.
@@ -116,14 +169,21 @@
 #define _SCHED_SIGNAL		SIGPROF
 #endif
 
-/*
- * Queue definitions.
- */
-struct pthread_queue {
-	struct pthread	*q_next;
-	struct pthread	*q_last;
-	void		*q_data;
-};
+/* Lists with volatile elements */
+#define V_TAILQ_HEAD(name, type)				\
+volatile struct name {						\
+	struct type * tqh_first;				\
+	struct type * volatile * tqh_last; 			\
+}
+
+#define V_TAILQ_ENTRY(type)					\
+volatile struct {						\
+	struct type * tqe_next;					\
+	struct type * volatile * tqe_prev; 			\
+}
+
+/* List of all threads: */
+typedef V_TAILQ_HEAD(, pthread)	_thread_list_t;
 
 /*
  * Priority queues.
@@ -131,7 +191,7 @@ struct pthread_queue {
  * XXX It'd be nice if these were contained in uthread_priority_queue.[ch].
  */
 typedef struct pq_list {
-	TAILQ_HEAD(, pthread)	pl_head; /* list of threads at this priority */
+	_thread_list_t		pl_head; /* list of threads at this priority */
 	TAILQ_ENTRY(pq_list)	pl_link; /* link for queue of priority lists */
 	int			pl_prio; /* the priority of this list */
 	int			pl_queued; /* is this in the priority queue */
@@ -145,14 +205,9 @@ typedef struct pq_queue {
 
 
 /*
- * Static queue initialization values. 
- */
-#define PTHREAD_QUEUE_INITIALIZER { NULL, NULL, NULL }
-
-/*
  * TailQ initialization values.
  */
-#define TAILQ_INITIALIZER { NULL, NULL }
+#define TAILQ_INITIALIZER	{ NULL, NULL }
 
 /* 
  * Mutex definitions.
@@ -162,10 +217,11 @@ union pthread_mutex_data {
 	int	m_count;
 };
 
+
 struct pthread_mutex {
 	enum pthread_mutextype		m_type;
 	int				m_protocol;
-	TAILQ_HEAD(mutex_head, pthread)	m_queue;
+	V_TAILQ_HEAD(mutex_head, pthread)	m_queue;
 	struct pthread			*m_owner;
 	union pthread_mutex_data	m_data;
 	long				m_flags;
@@ -188,7 +244,7 @@ struct pthread_mutex {
 	/*
 	 * Link for list of all mutexes a thread currently owns.
 	 */
-	TAILQ_ENTRY(pthread_mutex)	m_qe;
+	V_TAILQ_ENTRY(pthread_mutex volatile)	m_qe;
 
 	/*
 	 * Lock for accesses to this structure.
@@ -223,12 +279,12 @@ struct pthread_mutex_attr {
  */
 enum pthread_cond_type {
 	COND_TYPE_FAST,
-	COND_TYPE_MAX
+#define COND_TYPE_MAX	((int)COND_TYPE_FAST + 1)
 };
 
 struct pthread_cond {
 	enum pthread_cond_type		c_type;
-	TAILQ_HEAD(cond_head, pthread)	c_queue;
+	V_TAILQ_HEAD(cond_head, pthread) c_queue;
 	pthread_mutex_t			c_mutex;
 	void				*c_data;
 	long				c_flags;
@@ -255,8 +311,8 @@ struct pthread_cond_attr {
  * Static cond initialization values. 
  */
 #define PTHREAD_COND_STATIC_INITIALIZER    \
- 	{ COND_TYPE_FAST, PTHREAD_QUEUE_INITIALIZER, NULL, NULL, \
- 	0, _SPINLOCK_INITIALIZER }
+	{ COND_TYPE_FAST, TAILQ_INITIALIZER, NULL, NULL, \
+	0, _SPINLOCK_INITIALIZER }
 
 /*
  * Cleanup definitions.
@@ -290,6 +346,13 @@ struct pthread_attr {
  * Miscellaneous definitions.
  */
 #define PTHREAD_STACK_DEFAULT			65536
+/*
+ * Maximum size of initial thread's stack.  This perhaps deserves to be larger
+ * than the stacks of other threads, since many applications are likely to run
+ * almost entirely on this stack.
+ */
+#define PTHREAD_STACK_INITIAL			0x100000
+/* Address immediately beyond the beginning of the initial thread stack. */
 #define PTHREAD_DEFAULT_PRIORITY		64
 #define PTHREAD_MAX_PRIORITY			126
 #define PTHREAD_MIN_PRIORITY			0
@@ -299,12 +362,6 @@ struct pthread_attr {
  * Clock resolution in nanoseconds.
  */
 #define CLOCK_RES_NSEC				10000000
-
-/*
- * Number of microseconds between incremental priority updates for
- * threads that are ready to run, but denied being run.
- */
-#define INC_PRIO_USEC				500000
 
 /*
  * Time slice period in microseconds.
@@ -343,6 +400,7 @@ enum pthread_state {
 	PS_FDR_WAIT,
 	PS_FDW_WAIT,
 	PS_FILE_WAIT,
+	PS_POLL_WAIT,
 	PS_SELECT_WAIT,
 	PS_SLEEP_WAIT,
 	PS_WAIT_WAIT,
@@ -352,8 +410,8 @@ enum pthread_state {
 	PS_JOIN,
 	PS_SUSPENDED,
 	PS_DEAD,
-	PS_DEADLOCK,
-	PS_STATE_MAX
+	PS_DEADLOCK
+#define PS_STATE_MAX	((int)PS_DEADLOCK + 1)
 };
 
 
@@ -375,8 +433,8 @@ struct fd_table_entry {
 	 * state of the lock on the file descriptor.
 	 */
 	spinlock_t		lock;
-	struct pthread_queue	r_queue;	/* Read queue.                        */
-	struct pthread_queue	w_queue;	/* Write queue.                       */
+	_thread_list_t		r_queue;	/* Read queue.                        */
+	_thread_list_t		w_queue;	/* Write queue.                       */
 	struct pthread		*r_owner;	/* Ptr to thread owning read lock.    */
 	struct pthread		*w_owner;	/* Ptr to thread owning write lock.   */
 	const char		*r_fname;	/* Ptr to read lock source file name  */
@@ -388,11 +446,9 @@ struct fd_table_entry {
 	int			flags;		/* Flags used in open.                */
 };
 
-struct pthread_select_data {
+struct pthread_poll_data {
 	int	nfds;
-	fd_set	readfds;
-	fd_set	writefds;
-	fd_set	exceptfds;
+	struct pollfd *fds;
 };
 
 union pthread_wait_data {
@@ -404,9 +460,20 @@ union pthread_wait_data {
 		short	branch;		/* Line number, for debugging.    */
 		const char *fname;	/* Source file name for debugging.*/
 	} fd;
-	struct pthread_select_data * select_data;
+	struct pthread_poll_data * poll_data;
 	spinlock_t	*spinlock;
 };
+
+/* Spare thread stack. */
+struct stack {
+	SLIST_ENTRY(stack)	qe; /* Queue entry for this stack. */
+	void 			*base;		/* Bottom of useful stack */
+	size_t			size;		/* Size of useful stack */
+	void			*redzone;	/* Red zone location */
+	void 			*storage;	/* allocated storage */
+};
+
+typedef V_TAILQ_ENTRY(pthread) pthread_entry_t;
 
 /*
  * Thread structure.
@@ -425,15 +492,11 @@ struct pthread {
 	 */
 	spinlock_t		lock;
 
-	/*
-	 * Pointer to the next thread in the thread linked list.
-	 */
-	struct pthread	*nxt;
+	/* Queue entry for list of all threads: */
+	pthread_entry_t		tle;
 
-	/*
-	 * Pointer to the next thread in the dead thread linked list.
-	 */
-	struct pthread	*nxt_dead;
+	/* Queue entry for list of dead threads: */
+	pthread_entry_t		dle;
 
 	/*
 	 * Thread start routine, argument, stack pointer and thread
@@ -441,7 +504,7 @@ struct pthread {
 	 */
 	void			*(*start_routine)(void *);
 	void			*arg;
-	void			*stack;
+	struct stack		*stack;
 	struct pthread_attr	attr;
 
 	/*
@@ -449,6 +512,17 @@ struct pthread {
 	 * _thread_kern_sched if sig_saved is TRUE.
 	 */
 	struct  sigcontext saved_sigcontext;
+
+	/* 
+	 * Saved jump buffer used in call to longjmp by _thread_kern_sched
+	 * if sig_saved is FALSE.
+	 */
+	_machdep_jmp_buf	saved_jmp_buf;
+
+	/*
+	 * Further machine-dependent context, valid if sig_saved is FALSE.
+	 */
+	struct _machdep_struct	_machdep;
 
 	/*
 	 * TRUE if the last state saved was a signal context. FALSE if the
@@ -484,12 +558,6 @@ struct pthread {
 	long	slice_usec;
 
 	/*
-	 * Cumulative times spent in thread
-	 */
-	struct	timeval		ru_utime;
-	struct	timeval		ru_stime;
-
-	/*
 	 * Incremental priority accumulated by thread while it is ready to
 	 * run but is denied being run.
 	 */
@@ -510,34 +578,39 @@ struct pthread {
 	 */
 	int	error;
 
-	/* Join queue for waiting threads: */
-	struct pthread_queue	join_queue;
+	/* Join queue head and link for waiting threads: */
+	V_TAILQ_HEAD(join_head, pthread)	join_queue;
 
 	/*
-	 * The current thread can belong to only one scheduling queue
-	 * at a time (ready or waiting queue).  It can also belong to
-	 * a queue of threads waiting on mutexes or condition variables.
+	 * The current thread can belong to only one scheduling queue at
+	 * a time (ready or waiting queue).  It can also belong to (only)
+	 * one of:
+	 *
+	 *   o A queue of threads waiting for a mutex
+	 *   o A queue of threads waiting for a condition variable
+	 *   o A queue of threads waiting for another thread to terminate
+	 *     (the join queue above)
+	 *   o A queue of threads waiting for a file descriptor lock
+	 *   o A queue of threads needing work done by the kernel thread
+	 *     (waiting for a spinlock or file I/O)
+	 *
 	 * Use pqe for the scheduling queue link (both ready and waiting),
-	 * and qe for other links (mutexes and condition variables).
-	 *
-	 * Pointer to queue (if any) on which the current thread is waiting.
-	 *
-	 * XXX The queuing should be changed to use the TAILQ entry below.
-	 * XXX For the time being, it's hybrid.
+	 * and qe for other links.
 	 */
-	struct pthread_queue	*queue;
-
-	/* Pointer to next element in queue. */
-	struct pthread	*qnxt;
 
 	/* Priority queue entry for this thread: */
-	TAILQ_ENTRY(pthread)	pqe;
+	pthread_entry_t		pqe;
 
 	/* Queue entry for this thread: */
-	TAILQ_ENTRY(pthread)	qe;
+	pthread_entry_t		qe;
 
 	/* Wait data. */
 	union pthread_wait_data data;
+
+	/*
+	 * Allocated for converting select into poll.
+	 */
+	struct pthread_poll_data poll_data;
 
 	/*
 	 * Set to TRUE if a blocking operation was
@@ -549,25 +622,28 @@ struct pthread {
 	int		signo;
 
 	/*
-	 * Set to non-zero when this thread has deferred thread
-	 * scheduling.  We allow for recursive deferral.
+	 * Set to non-zero when this thread has deferred signals.
+	 * We allow for recursive deferral.
 	 */
-	int		sched_defer_count;
+	int		sig_defer_count;
 
 	/*
 	 * Set to TRUE if this thread should yield after undeferring
-	 * thread scheduling.
+	 * signals.
 	 */
-	int		yield_on_sched_undefer;
+	int		yield_on_sig_undefer;
 
 	/* Miscellaneous data. */
 	int		flags;
 #define PTHREAD_FLAGS_PRIVATE	0x0001
 #define PTHREAD_EXITING		0x0002
-#define PTHREAD_FLAGS_QUEUED	0x0004	/* in queue (qe is used) */
-#define PTHREAD_FLAGS_TRACE	0x0008
-#define PTHREAD_CANCELLING	0x0010	/* thread has been cancelled */
-#define PTHREAD_AT_CANCEL_POINT	0x0020	/* thread at cancel point */
+#define PTHREAD_FLAGS_IN_CONDQ	0x0004	/* in condition queue using qe link*/
+#define PTHREAD_FLAGS_IN_WORKQ	0x0008	/* in work queue using qe link */
+#define PTHREAD_FLAGS_IN_WAITQ	0x0010	/* in waiting queue using pqe link*/
+#define PTHREAD_FLAGS_IN_PRIOQ	0x0020	/* in priority queue using pqe link*/
+#define PTHREAD_FLAGS_TRACE	0x0040	/* for debugging purposes */
+#define PTHREAD_FLAGS_CANCELED	0x1000	/* thread has been cancelled */
+#define PTHREAD_FLAGS_CANCELPT	0x2000	/* thread at cancel point */
 
 	/*
 	 * Base priority is the user setable and retrievable priority
@@ -590,7 +666,7 @@ struct pthread {
 	/*
 	 * Active priority is always the maximum of the threads base
 	 * priority and inherited priority.  When there is a change
-	 * in either the real or inherited priority, the active
+	 * in either the base or inherited priority, the active
 	 * priority must be recalculated.
 	 */
 	char		active_priority;
@@ -601,7 +677,7 @@ struct pthread {
 	/*
 	 * Queue of currently owned mutexes.
 	 */
-	TAILQ_HEAD(, pthread_mutex)	mutexq;
+	V_TAILQ_HEAD(, pthread_mutex volatile)	mutexq;
 
 	void		*ret;
 	const void	**specific_data;
@@ -611,17 +687,6 @@ struct pthread {
 	struct pthread_cleanup *cleanup;
 	const char		*fname;	/* Ptr to source file name  */
 	int			lineno;	/* Source line number.      */
-
-	/* 
-	 * Saved jump buffer used in call to longjmp by _thread_kern_sched
-	 * if sig_saved is FALSE.
-	 */
-	_machdep_jmp_buf	saved_jmp_buf;
-
-#ifndef _UTHREAD_MACHDEP
-	/* Machine dependent information */
-	struct _machdep_struct	_machdep;
-#endif
 };
 
 /*
@@ -629,14 +694,13 @@ struct pthread {
  */
 
 /* Kernel thread structure used when there are no running threads: */
-extern struct pthread   volatile _thread_kern_thread;
-extern struct pthread   * volatile _thread_kern_threadp;
+extern struct pthread   _thread_kern_thread;
 
 /* Ptr to the thread structure for the running thread: */
 extern struct pthread   * volatile _thread_run;
 
 /* Ptr to the thread structure for the last user thread to run: */
-extern struct pthread	* volatile _last_user_thread;
+extern struct pthread   * volatile _last_user_thread;
 
 /*
  * Ptr to the thread running in single-threaded mode or NULL if
@@ -644,22 +708,21 @@ extern struct pthread	* volatile _last_user_thread;
  */
 extern struct pthread   * volatile _thread_single;
 
-/* Ptr to the first thread in the thread linked list: */
-extern struct pthread   * volatile _thread_link_list;
+extern _thread_list_t		_thread_list;
 
 /*
  * Array of kernel pipe file descriptors that are used to ensure that
  * no signals are missed in calls to _select.
  */
-extern int              _thread_kern_pipe[2];
-extern int              _thread_kern_in_select;
-extern int              _thread_kern_in_sched;
+extern int		_thread_kern_pipe[2];
+extern volatile int	_queue_signals;
+extern volatile int	_thread_kern_in_sched;
 
 /* Last time that an incremental priority update was performed: */
 extern struct timeval   kern_inc_prio_time;
 
 /* Dead threads: */
-extern struct pthread * volatile _thread_dead;
+extern _thread_list_t		_dead_list;
 
 /* Initial thread: */
 extern struct pthread *_thread_initial;
@@ -682,12 +745,18 @@ extern int	_pthread_stdio_flags[3];
 
 /* File table information: */
 extern struct fd_table_entry **_thread_fd_table;
+
+/* Table for polling file descriptors: */
+extern struct pollfd *_thread_pfd_table;
+
 extern const int dtablecount;
-extern int    _thread_dtablesize;
+extern int    _thread_dtablesize;       /* Descriptor table size.           */
+
+extern int    _clock_res_nsec;		/* Clock resolution in nsec.	*/
 
 /* Garbage collector mutex and condition variable. */
-extern pthread_mutex_t _gc_mutex;
-extern pthread_cond_t _gc_cond;
+extern	pthread_mutex_t _gc_mutex;
+extern	pthread_cond_t  _gc_cond;
 
 /*
  * Array of signal actions for this process.
@@ -698,29 +767,32 @@ extern struct  sigaction _thread_sigact[NSIG];
  * Scheduling queues:
  */
 extern pq_queue_t		_readyq;
-typedef TAILQ_HEAD(, pthread)	_waitingq_t;
-extern _waitingq_t		_waitingq;
-
-/* Indicates that the waitingq now has threads ready to run. */
-extern volatile int	_waitingq_check_reqd;
-
-/* Thread switch hook. */
-extern pthread_switch_routine_t _sched_switch_hook;
+extern _thread_list_t		_waitingq;
 
 /*
- * Where SIGINFO writes thread states when /dev/tty cannot be opened
+ * Work queue:
  */
-#define INFO_DUMP_FILE  "/tmp/uthread.dump"
+extern _thread_list_t		_workq;
 
-#ifdef	_LOCK_DEBUG
-#define	_FD_LOCK(_fd,_type,_ts)		_thread_fd_lock_debug(_fd, _type, \
-						_ts, __FILE__, __LINE__)
-#define _FD_UNLOCK(_fd,_type)		_thread_fd_unlock_debug(_fd, _type, \
-						__FILE__, __LINE__)
-#else
-#define	_FD_LOCK(_fd,_type,_ts)		_thread_fd_lock(_fd, _type, _ts)
-#define _FD_UNLOCK(_fd,_type)		_thread_fd_unlock(_fd, _type)
-#endif
+/* Tracks the number of threads blocked while waiting for a spinlock. */
+extern	volatile int	_spinblock_count;
+
+/* Indicates that the signal queue needs to be checked. */
+extern	volatile int	_sigq_check_reqd;
+
+/* Thread switch hook. */
+extern	pthread_switch_routine_t _sched_switch_hook;
+
+/*
+ * Spare stack queue.  Stacks of default size are cached in order to reduce
+ * thread creation time.  Spare stacks are used in LIFO order to increase cache
+ * locality.
+ */
+typedef SLIST_HEAD(, stack)	_stack_list_t;
+extern _stack_list_t		_stackq;
+
+/* Used for _PTHREADS_INVARIANTS checking. */
+extern int	_thread_kern_new_state;
 
 /*
  * Function prototype definitions.
@@ -729,56 +801,56 @@ __BEGIN_DECLS
 int     _find_dead_thread(pthread_t);
 int     _find_thread(pthread_t);
 int     _thread_create(pthread_t *,const pthread_attr_t *,void *(*start_routine)(void *),void *,pthread_t);
-int     _thread_fd_lock(int, int, struct timespec *);
-int     _thread_fd_lock_debug(int, int, struct timespec *,const char *fname,int lineno);
 void    _dispatch_signals(void);
 void    _thread_signal(pthread_t, int);
-void    _lock_thread(void);
-void    _lock_thread_list(void);
-void    _unlock_thread(void);
-void    _unlock_thread_list(void);
 int	_mutex_cv_lock(pthread_mutex_t *);
 int	_mutex_cv_unlock(pthread_mutex_t *);
+int	_mutex_reinit(pthread_mutex_t *);
 void	_mutex_notify_priochange(struct pthread *);
-int	_pq_init(struct pq_queue *pq, int, int);
+int	_cond_reinit(pthread_cond_t *);
+int	_pq_alloc(struct pq_queue *, int, int);
+int	_pq_init(struct pq_queue *);
 void	_pq_remove(struct pq_queue *pq, struct pthread *);
 void	_pq_insert_head(struct pq_queue *pq, struct pthread *);
 void	_pq_insert_tail(struct pq_queue *pq, struct pthread *);
 struct pthread *_pq_first(struct pq_queue *pq);
-void    _thread_exit(const char *, int, const char *)
-		__attribute__((noreturn));
-void    _thread_fd_unlock(int, int);
-void    _thread_fd_unlock_debug(int, int, char *, int);
+#if defined(_PTHREADS_INVARIANTS)
+void	_waitq_insert(pthread_t pthread);
+void	_waitq_remove(pthread_t pthread);
+void	_waitq_setactive(void);
+void	_waitq_clearactive(void);
+#endif
+__dead void _thread_exit(const char *, int, const char *) __attribute__((noreturn));
 void    *_thread_cleanup(pthread_t);
 void    _thread_cleanupspecific(void);
 void    _thread_dump_info(void);
 void    _thread_init(void);
 void    _thread_kern_sched(struct sigcontext *);
-void    _thread_kern_sched_state(enum pthread_state, const char *, int);
+void    _thread_kern_sched_state(enum pthread_state,const char *fname,int lineno);
 void	_thread_kern_sched_state_unlock(enum pthread_state state,
 	    spinlock_t *lock, char *fname, int lineno);
 void    _thread_kern_set_timeout(struct timespec *);
-void    _thread_kern_sched_defer(void);
-void    _thread_kern_sched_undefer(void);
+void    _thread_kern_sig_defer(void);
+void    _thread_kern_sig_undefer(void);
 void    _thread_sig_handler(int, int, struct sigcontext *);
+void    _thread_sig_handle(int, struct sigcontext *);
+void	_thread_sig_init(void);
 void    _thread_start(void);
 void    _thread_start_sig_handler(void);
 void	_thread_seterrno(pthread_t,int);
-void    _thread_queue_init(struct pthread_queue *);
-void    _thread_queue_enq(struct pthread_queue *, struct pthread *);
-int     _thread_queue_remove(struct pthread_queue *, struct pthread *);
 int     _thread_fd_table_init(int fd);
-struct pthread *_thread_queue_get(struct pthread_queue *);
-struct pthread *_thread_queue_deq(struct pthread_queue *);
 pthread_addr_t _thread_gc(pthread_addr_t);
 void	_thread_enter_cancellation_point(void);
 void	_thread_leave_cancellation_point(void);
 void	_thread_cancellation_point(void);
 int	_thread_slow_atomic_lock(volatile _spinlock_lock_t *);
 int	_thread_slow_atomic_is_locked(volatile _spinlock_lock_t *);
+struct stack * _thread_stack_alloc(void *, size_t);
+void	_thread_stack_free(struct stack *);
 
 /* #include <signal.h> */
 #ifdef _USER_SIGNAL_H
+int	_thread_sys_kill(pid_t, int);
 int     _thread_sys_sigaction(int, const struct sigaction *, struct sigaction *);
 int     _thread_sys_sigpending(sigset_t *);
 int     _thread_sys_sigprocmask(int, const sigset_t *, sigset_t *);
@@ -900,7 +972,8 @@ int     _thread_sys_fchdir(int);
 int     _thread_sys_fchown(int, uid_t, gid_t);
 int     _thread_sys_fsync(int);
 int     _thread_sys_ftruncate(int, off_t);
-long    _thread_sys_fpathconf(int, int);
+long	_thread_sys_fpathconf(int, int);
+pid_t	_thread_sys_getpid(void);
 int     _thread_sys_pause(void);
 int     _thread_sys_pipe(int *);
 int     _thread_sys_select(int, fd_set *, fd_set *, fd_set *, struct timeval *);
@@ -909,8 +982,7 @@ pid_t   _thread_sys_fork(void);
 pid_t   _thread_sys_tcgetpgrp(int);
 ssize_t _thread_sys_read(int, void *, size_t);
 ssize_t _thread_sys_write(int, const void *, size_t);
-void	_thread_sys__exit(int)
-		__attribute__((noreturn));
+__dead void	_thread_sys__exit(int) __attribute__((noreturn));
 #endif
 
 /* #include <fcntl.h> */
@@ -948,16 +1020,16 @@ ssize_t _thread_sys_writev(int, const struct iovec *, int);
 #endif
 
 /* #include <sys/wait.h> */
-#ifdef _SYS_WAIT_H_
+#ifdef  _SYS_WAIT_H_
 pid_t   _thread_sys_wait(int *);
 pid_t   _thread_sys_waitpid(pid_t, int *, int);
 pid_t   _thread_sys_wait3(int *, int, struct rusage *);
 pid_t   _thread_sys_wait4(pid_t, int *, int, struct rusage *);
 #endif
 
-/* #include <sys/poll.h> */
+/* #include <poll.h> */
 #ifdef _SYS_POLL_H_
-int	_thread_sys_poll(struct pollfd[], int, int);
+int 	_thread_sys_poll(struct pollfd *, unsigned, int);
 #endif
 
 /* #include <sys/mman.h> */

@@ -1,4 +1,5 @@
-.\"	$OpenBSD: ruptime.1,v 1.6 1999/10/17 20:24:35 aaron Exp $
+.\"	$OpenBSD: ruptime.1,v 1.8 2000/03/10 20:17:51 aaron Exp $
+.\"
 .\" Copyright (c) 1983, 1990 The Regents of the University of California.
 .\" All rights reserved.
 .\"
@@ -42,9 +43,9 @@
 .Nm ruptime
 .Op Fl alrtu
 .Sh DESCRIPTION
-.Nm ruptime
+.Nm
 gives a status line like
-.Ar uptime
+.Xr uptime 1
 for each machine on the local network; these are formed from packets
 broadcast by each host on the network once a minute.
 .Pp
@@ -79,6 +80,7 @@ data files
 .Xr uptime 1 ,
 .Xr rwhod 8
 .Sh HISTORY
-.Nm ruptime
-appeared in
+The
+.Nm
+command appeared in
 .Bx 4.2 .

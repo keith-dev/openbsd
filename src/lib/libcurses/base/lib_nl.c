@@ -1,7 +1,7 @@
-/*	$OpenBSD: lib_nl.c,v 1.1 1999/01/18 19:09:54 millert Exp $	*/
+/*	$OpenBSD: lib_nl.c,v 1.4 2000/03/10 01:35:02 millert Exp $	*/
 
 /****************************************************************************
- * Copyright (c) 1998 Free Software Foundation, Inc.                        *
+ * Copyright (c) 1998,1999,2000 Free Software Foundation, Inc.              *
  *                                                                          *
  * Permission is hereby granted, free of charge, to any person obtaining a  *
  * copy of this software and associated documentation files (the            *
@@ -33,7 +33,6 @@
  *     and: Eric S. Raymond <esr@snark.thyrsus.com>                         *
  ****************************************************************************/
 
-
 /*
  *	nl.c
  *
@@ -45,37 +44,38 @@
 
 #include <curses.priv.h>
 
-MODULE_ID("$From: lib_nl.c,v 1.3 1998/10/14 15:14:08 Alexander.V.Lukyanov Exp $")
+MODULE_ID("$From: lib_nl.c,v 1.6 2000/02/13 00:59:39 tom Exp $")
 
 #ifdef __EMX__
 #include <io.h>
-#include <fcntl.h>
 #endif
 
-int nl(void)
+int
+nl(void)
 {
-	T((T_CALLED("nl()")));
+    T((T_CALLED("nl()")));
 
-	SP->_nl = TRUE;
+    SP->_nl = TRUE;
 
 #ifdef __EMX__
-	fflush(SP->_ofp);
-	_fsetmode(SP->_ofp, "t");
+    _nc_flush();
+    _fsetmode(NC_OUTPUT, "t");
 #endif
 
-	returnCode(OK);
+    returnCode(OK);
 }
 
-int nonl(void)
+int
+nonl(void)
 {
-	T((T_CALLED("nonl()")));
+    T((T_CALLED("nonl()")));
 
-	SP->_nl = FALSE;
+    SP->_nl = FALSE;
 
 #ifdef __EMX__
-	fflush(SP->_ofp);
-	_fsetmode(SP->_ofp, "b");
+    _nc_flush();
+    _fsetmode(NC_OUTPUT, "b");
 #endif
 
-	returnCode(OK);
+    returnCode(OK);
 }

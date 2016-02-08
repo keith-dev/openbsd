@@ -1,14 +1,15 @@
 OpenBSD/MACHINE OSREV runs on ISA (AT-Bus), EISA, PCI, and VL-bus systems
 with 386-family processors, with or without math coprocessors.  It
 does NOT support MCA systems, such as some IBM PS/2 systems.  The
-minimal configuration is said to require 4M of RAM and 50M of disk space,
-though we do not know of anyone running with a system quite this minimal today.
-To install the entire system requires much more disk space, and to run X
-or compile the system, more RAM is recommended.  (4M of RAM will
-actually allow you to run X and/or compile, but it won't be speedy.
-Note that until you have around 16M of RAM, getting more RAM is more
-important than getting a faster CPU.)
-
+minimal configuration to install the system is 6M or 8M of RAM and
+perhaps 50M of disk space.  A custom kernel might be able to run
+with only 4MB, though we do not know of anyone running with a system
+quite this minimal today.  To install the entire system requires
+much more disk space, and to run X or compile the system, more RAM
+is recommended.  (8M of RAM will actually allow you to run X and/or
+compile but it won't be speedy.  Note that until you have around 16M
+of RAM, getting more RAM is more important than getting a faster CPU.)
+ 
 Supported devices {:-include-:}:
 	Floppy controllers.
 	MFM, ESDI, IDE, and RLL hard disk controllers.
@@ -28,6 +29,8 @@ Supported devices {:-include-:}:
 			PCI to PCI bridge.
 		Adaptec AIC-7770-based SCSI host adapters (including the
 			Adaptec AHA-274x, AHA-284x families).
+		AdvanSys PCI SCSI host adapters (including ABP-940 and
+			ASB-3940 families)
 		WD-7000 SCSI host adapters.
 		Buslogic 54x (Adaptec AHA-154x clones; driver on kcadp floppy)
 		BusLogic 445, 74x, 9xx  (But not the new "FlashPoint" series
@@ -88,7 +91,8 @@ Supported devices {:-include-:}:
 		SMC EtherPower II (EPIC 10/100)
 		Novell NE1000, NE2000
 		Digital DEFPA PCI FDDI adapters
-		Intel EtherExpress 100 Fast Ethernet adapters.
+		Intel EtherExpress 100 Fast Ethernet adapters
+		Intel Pro/1000 Gigabit Ethernet adapters
 		Texas Instruments ThunderLAN PCI Ethernet adapters, including:
 			Compaq Netelligent PCI Adapters
 			Compaq NetFlex 3/P
@@ -150,6 +154,9 @@ Supported devices {:-include-:}:
 		ProAudio Spectrum [*] [+]
 		ESS PnP audio cards [*] [+]
 		ESS Solo-1 PCI-based audio cards [*] [+]
+	Cryptography Accelerators
+		Hi/Fn 7751 based boards, including:
+			GTGI PowerCrypt Encryption Accelerator
 	Miscellaneous:
 		OPTi(82C929) chipset for multi-interface CD-ROM, and
 			sound ISA cards.
@@ -299,8 +306,8 @@ SMC EtherPower II (EPIC) 10/100 Ethernet boards
 		tx0	any	any 	[you must assign an interrupt in your
 					 PCI BIOS, or let it do so for you]
 
-Macronix 98713/98715/98725 Ethernet boards
-		mx0	any	any	[you must assign an interrupt in your
+DEC Tulip clones (Macronix, Lite-On, Davicom)
+		dc0	any	any	[you must assign an interrupt in your
 					 PCI BIOS, or let it do so for you]
 
 Alteon Tigon I/II PCI Gigabit Ethernet boards

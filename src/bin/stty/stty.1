@@ -1,4 +1,4 @@
-.\"	$OpenBSD: stty.1,v 1.17 1999/08/17 14:04:01 aaron Exp $
+.\"	$OpenBSD: stty.1,v 1.24 2000/04/15 11:45:54 aaron Exp $
 .\"	$NetBSD: stty.1,v 1.10 1995/09/07 06:57:14 jtc Exp $
 .\"
 .\" Copyright (c) 1990, 1993, 1994
@@ -78,8 +78,8 @@ formats.
 .It Fl f Ar file
 Open and use the terminal named by
 .Ar file
-rather than using standard input.  The file is opened
-using the
+rather than using standard input.
+The file is opened using the
 .Dv O_NONBLOCK
 flag of
 .Xr open 2 ,
@@ -98,7 +98,8 @@ The following arguments are available to set the terminal
 characteristics:
 .Ss Control modes
 Control mode flags affect hardware characteristics associated with the
-terminal.  This corresponds to the
+terminal.
+This corresponds to the
 .Li c_cflag
 in the termios structure.
 .Bl -tag -width Fl
@@ -226,12 +227,13 @@ to restart output.
 .It Cm imaxbel Pq Fl imaxbel
 The system imposes a limit of
 .Dv MAX_INPUT
-(currently 255) characters in the input queue.  If
+(currently 255) characters in the input queue.
+If
 .Cm imaxbel
 is set and the input queue limit has been reached,
 subsequent input causes the system to send an ASCII BEL
-character to the output queue (the terminal beeps at you).  Otherwise,
-if
+character to the output queue (the terminal beeps at you).
+Otherwise, if
 .Cm imaxbel
 is unset and the input queue is full, the next input character causes
 the entire input and output queues to be discarded.
@@ -261,6 +263,8 @@ Newline performs (does not perform) carriage return on output.
 Translate (do not translate) lower case to upper case on output.
 .It Cm oxtabs Pq Fl oxtabs
 Expand (do not expand) tabs to spaces on output.
+.It Cm onoeot Pq Fl onoeot
+Discard (do not discard) EOFs on output.
 .El
 .Ss Local modes
 Local mode flags (lflags) affect various and sundry characteristics of terminal
@@ -339,7 +343,8 @@ is set, echo control characters as
 .Ql ^X .
 Otherwise control characters echo as themselves.
 .It Cm echoprt Pq Fl echoprt
-For printing terminals. If set, echo erased characters backwards within
+For printing terminals.
+If set, echo erased characters backwards within
 .Ql \e
 and
 .Ql / .
@@ -350,7 +355,8 @@ Disable (enable) flush after
 .It Cm tostop Pq Fl tostop
 Send (do not send)
 .Dv SIGTTOU
-for background output.  This causes background jobs to stop if they attempt
+for background output.
+This causes background jobs to stop if they attempt
 terminal output.
 .It Cm altwerase Pq Fl altwerase
 Use (do not use) an alternate word erase algorithm when processing
@@ -364,7 +370,8 @@ erased with simply an
 .Dv ERASE
 character).
 .It Cm mdmbuf Pq Fl mdmbuf
-If set, flow control output based on condition of Carrier Detect.  Otherwise
+If set, flow control output based on condition of Carrier Detect.
+Otherwise
 writes return an error if Carrier Detect is low (and Carrier is not being
 ignored with the
 .Dv CLOCAL
@@ -399,7 +406,7 @@ or the string
 .Dq undef
 the control character
 is disabled (i.e., set to
-.Pf { Dv _POSIX_VDISABLE Ns } . )
+.Pf { Dv _POSIX_VDISABLE Ns } ) .
 .Pp
 Recognized control-characters:
 .Bd -ragged -offset indent
@@ -411,7 +418,7 @@ Recognized control-characters:
 .It eol Ta Dv VEOL	EOL No character
 .It eol2 Ta Dv VEOL2	EOL2 No character
 .It erase Ta Dv VERASE	ERASE No character
-.It werase Ta Dv VWERASE	WERASE No character 
+.It werase Ta Dv VWERASE	WERASE No character
 .It intr Ta Dv VINTR	INTR No character
 .It kill Ta Dv VKILL	KILL No character
 .It quit Ta Dv VQUIT	QUIT No character
@@ -452,7 +459,7 @@ Enable
 .Cm cs7 ,
 and
 .Cm parodd .
-.It Fl parity , evenp ,  oddp
+.It Fl parity , evenp , oddp
 Disable
 .Cm parenb
 and set
@@ -502,8 +509,8 @@ The terminal size is recorded as having
 .Ar number
 rows.
 .It Cm dec
-Set modes suitable for users of Digital Equipment Corporation systems (
-.Dv ERASE ,
+Set modes suitable for users of Digital Equipment Corporation systems
+.Pf ( Dv ERASE ,
 .Dv KILL ,
 and
 .Dv INTR
@@ -518,9 +525,10 @@ performed by either the terminal hardware or by the remote side connected
 to a pty.
 .It Cm raw Pq Fl raw
 If set, change the modes of the terminal so that no input or output processing
-is performed. If unset, change the modes of the terminal to some reasonable
-state that performs input and output processing.  Note that since the
-terminal driver no longer has a single
+is performed.
+If unset, change the modes of the terminal to some reasonable
+state that performs input and output processing.
+Note that since the terminal driver no longer has a single
 .Dv RAW
 bit, it is not possible to intuit what flags were set prior to setting
 .Cm raw .
@@ -633,7 +641,6 @@ is set.
 Performs a
 .Dq stop output
 operation, as normally done by an incoming
-incoming
 .Dv STOP
 character when
 .Cm ixon
@@ -650,7 +657,8 @@ The
 .Nm
 utility is expected to be
 .St -p1003.2
-compatible.  The flags
+compatible.
+The flags
 .Fl e
 and
 .Fl f

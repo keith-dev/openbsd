@@ -1,7 +1,7 @@
-/*	$OpenBSD: term_entry.h,v 1.8 1999/05/17 03:03:57 millert Exp $	*/
+/*	$OpenBSD: term_entry.h,v 1.10 2000/03/26 16:45:03 millert Exp $	*/
 
 /****************************************************************************
- * Copyright (c) 1998 Free Software Foundation, Inc.                        *
+ * Copyright (c) 1998,1999,2000 Free Software Foundation, Inc.              *
  *                                                                          *
  * Permission is hereby granted, free of charge, to any person obtaining a  *
  * copy of this software and associated documentation files (the            *
@@ -33,6 +33,7 @@
  *     and: Eric S. Raymond <esr@snark.thyrsus.com>                         *
  ****************************************************************************/
 
+/* $From: term_entry.h,v 1.29 2000/03/19 02:04:15 tom Exp $ */
 
 /*
  *	term_entry.h -- interface to entry-manipulation code
@@ -48,16 +49,20 @@ extern "C" {
 #include <term.h>
 
 #define MAX_USES	32
+#define MAX_CROSSLINKS	16
 
 typedef struct entry {
 	TERMTYPE	tterm;
 	int		nuses;
 	struct
         {
-	    void	*parent;	/* (char *) or (ENTRY *) */
+	    char		*name;
+	    struct entry	*link;
 	    long	line;
         }
 	uses[MAX_USES];
+	int		ncrosslinks;
+	struct entry	*crosslinks[MAX_CROSSLINKS];
 	long		cstart, cend;
 	long		startline;
 	struct entry	*next;
@@ -132,6 +137,7 @@ extern void _nc_init_acs(void);	/* corresponds to traditional 'init_acs()' */
 /* parse_entry.c: entry-parsing code */
 #if NCURSES_XNAMES
 extern bool _nc_user_definable;
+extern bool _nc_disable_period;
 #endif
 extern int _nc_parse_entry(ENTRY *, int, bool);
 extern int _nc_capcmp(const char *, const char *);
@@ -143,18 +149,12 @@ extern void _nc_write_entry(TERMTYPE *const);
 /* comp_parse.c: entry list handling */
 extern void _nc_read_entry_source(FILE*, char*, int, bool, bool (*)(ENTRY*));
 extern bool _nc_entry_match(char *, char *);
-extern int _nc_resolve_uses(void);
+extern int _nc_resolve_uses(bool);
 extern void _nc_free_entries(ENTRY *);
 extern void (*_nc_check_termtype)(TERMTYPE *);
 
 /* trace_xnames.c */
 extern void _nc_trace_xnames(TERMTYPE *);
-
-#ifdef __OpenBSD__
-/* read_bsd_terminfo.c: terminfo.db reading */
-extern int _nc_read_bsd_terminfo_entry(const char * const, char * const, TERMTYPE *const);
-extern int _nc_read_bsd_terminfo_file(const char * const, TERMTYPE *const);
-#endif /* __OpenBSD__ */
 
 #ifdef __cplusplus
 }

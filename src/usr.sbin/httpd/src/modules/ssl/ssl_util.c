@@ -9,7 +9,7 @@
 */
 
 /* ====================================================================
- * Copyright (c) 1998-1999 Ralf S. Engelschall. All rights reserved.
+ * Copyright (c) 1998-2000 Ralf S. Engelschall. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -241,7 +241,7 @@ int ssl_util_ppopen_child(void *cmd, child_info *pinfo)
     }
 #elif defined(OS2)
     /* IBM OS/2 */
-    execl(SHELL_PATH, SHELL_PATH, "/c", (char *)cmd, NULL);
+    spawnl(P_NOWAIT, SHELL_PATH, SHELL_PATH, "/c", (char *)cmd, NULL);
 #else
     /* Standard Unix */
     execl(SHELL_PATH, SHELL_PATH, "-c", (char *)cmd, NULL);
@@ -269,7 +269,7 @@ char *ssl_util_readfilter(server_rec *s, pool *p, char *cmd)
         return NULL;
     for (k = 0;    read(fileno(fp), &c, 1) == 1
                 && (k < MAX_STRING_LEN-1)       ; ) {
-        if (c == '\n')
+        if (c == '\n' || c == '\r')
             break;
         buf[k++] = c;
     }
@@ -415,7 +415,7 @@ void ssl_util_thread_setup(void)
 
     for (i = 0; i < CRYPTO_NUM_LOCKS; i++)
         lock_cs[i] = CreateMutex(NULL, FALSE, NULL);
-    CRYPTO_set_locking_callback((void(*)(int, int, char*, int))
+    CRYPTO_set_locking_callback((void(*)(int, int, const char *, int))
                                 win32_locking_callback);
 #endif /* WIN32 */
     return;

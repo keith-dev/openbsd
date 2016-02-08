@@ -1,4 +1,4 @@
-.\"	$OpenBSD: options.4,v 1.40 1999/10/05 19:41:27 aaron Exp $
+.\"	$OpenBSD: options.4,v 1.50 2000/04/03 21:19:37 aaron Exp $
 .\"	$NetBSD: options.4,v 1.21 1997/06/25 03:13:00 thorpej Exp $
 .\"
 .\" Copyright (c) 1998 Theo de Raadt
@@ -159,6 +159,9 @@ Compiles in a kernel debugger for diagnosing kernel problems. See
 for details.
 .Em NOTE:
 not available on all architectures.
+.It Cd option DDB_SAFE_CONSOLE
+Allows a break into the kernel debugger during boot. Useful when
+debugging problems that can cause init(8) to fail.
 .It Cd option KGDB
 Compiles in a remote kernel debugger stub for diagnosing kernel problems
 using the
@@ -248,8 +251,7 @@ This file system stores files in swappable memory, and produces
 notable performance improvements when it is used as the file store
 for
 .Pa /tmp
-or similar mount points.  Unfortunately, it is known to contain some bugs
-rendering it unstable, and it is not yet recommended for production.  See
+or similar mount points.  See
 .Xr mount_mfs 8
 for details.
 .It Cd option NFS
@@ -503,6 +505,18 @@ Adds support for the
 boot option (User Kernel Config).
 Allows modification of kernel settings (i.e., device parameters) before
 booting the system.
+.It Cd option UVM_SWAP_ENCRYPT
+Enables kernel support for encrypting pages that are written out to
+swap storage.  Swap encryption prevents sensitive data from remaining
+on the disk even after the operating system has been shut down.
+This option should be turned on if cryptographic filesystems are used.
+The sysctl variable
+.Em vm.swapencrypt
+controls its behaviour. See
+.Xr sysctl 8
+and
+.Xr sysctl 3
+for details.
 .El
 .Ss Networking Options
 .Bl -ohang
@@ -552,22 +566,20 @@ Includes support for the TCP/IP protocol stack.
 This option is currently required.  See
 .Xr inet 4
 for details.
-.It Cd option MCLSHIFT=value
-This option is the base-2 logarithm of the size of mbuf clusters.  The
-BSD networking stack keeps network packets in a linked list, or chain,
-of kernel buffer objects called mbufs.  The system provides larger mbuf
-clusters as an optimization for large packets, instead of using long
-chains for large packets.  The mbuf cluster size, or
-.Em MCLBYTES,
-must be a power of two, and is computed as two raised to the power
-.Em MCLSHIFT.
-On systems with Ethernet network adaptors,
-.Em	MCLSHIFT
-is often set to 11, giving 2048-byte mbuf clusters, large enough to
-hold a 1500-byte Ethernet frame in a single cluster.  Systems with
-networks supporting larger frame sizes like ATM, FDDI, or HIPPI may
-perform better with MCLSHIFT set to 12 or 13, giving mbuf cluster
-sizes of 4096 and 8192 bytes, respectively.
+.It Cd options INET6
+Includes support for the
+.Tn IPv6
+protocol stack.
+See
+.Xr inet6 4
+for details.
+Unlike
+.Em INET ,
+.Em INET6
+enables multicast routing code as well.
+This option requires
+.Em INET
+at this moment, but it should not.
 .It Cd option NS
 Include support for the Xerox XNS protocol stack.  See
 .Xr ns 4
@@ -610,31 +622,25 @@ the range 2^31 rather than the full unsigned range of 2^32.  Also, under
 .Bx 4.2 ,
 keepalive packets must contain at least one byte or else
 the remote end will not respond.
-.It Cd option TCP_NEWRENO
-Turns on NewReno fast recovery phase, which allows one lost segment
-to be recovered per round trip time. When more than
-one segment has been dropped per window, the transmission can continue
-without waiting for a retranmission timeout. This option cannot be used
-together with
-.Em TCP_SACK .
 .It Cd option TCP_SACK
 Turns on selective acknowledgements. Additional information about
 segments already received can be transmitted back to the sender,
 thus indicating segments that have been lost and allowing for
 a swifter recovery. Both communication endpoints need to support
 .Em SACK .
-The fallback behaviour is NewReno. This option cannot be used
-together with
-.Em TCP_NEWRENO .
+The fallback behaviour is NewReno fast recovery phase, which allows
+one lost segment to be recovered per round trip time. When more than
+one segment has been dropped per window, the transmission can continue
+without waiting for a retranmission timeout.
 .It Cd option TCP_FACK
 Turns on forward acknowledgements allowing a more precise estimate of
 outstanding data during the fast recovery phase by using
 .Em SACK
-information. This option can be used together with
+information. This option can only be used together with
 .Em TCP_SACK .
 .It Cd option TCP_SIGNATURE
 Turns on support for the TCP MD5 Signature option (RFC 2385). This is used by
-Internet backdone routers to provide per-packet authentication for the TCP
+Internet backbone routers to provide per-packet authentication for the TCP
 packets used to communicate BGP routing information. You will also need a
 routing daemon that supports this option in order to actually use it.
 .It Cd option IPFILTER
@@ -743,8 +749,8 @@ objects (i.e. BSS pages)).
 .It Cd option DEVPAGER
 Support for mmap()ing of devices.  (Specifically, this enables the
 virtual memory module responsible for handling page faults on mapped
-devices (
-.Dq cdev
+devices
+.Pf ( Dq cdev
 vnodes)).
 .Em MANDATORY
 -- the system cannot actually run without this

@@ -1,4 +1,4 @@
-/*	$OpenBSD: supfilesrv.c,v 1.15 1998/06/03 16:20:38 deraadt Exp $	*/
+/*	$OpenBSD: supfilesrv.c,v 1.17 2000/02/01 03:23:40 deraadt Exp $	*/
 
 /*
  * Copyright (c) 1992 Carnegie Mellon University
@@ -191,7 +191,6 @@
 #define MSGFILE
 #include "supmsg.h"
 
-extern int errno;
 int maxchildren;
 
 /*
@@ -1108,8 +1107,8 @@ sendfiles ()
 		cdprefix (tl->TLprefix);
 #ifdef CVS
                 if (candorcs) {
-                        cvs_root = getcwd(NULL, 256);
-                        if (access("CVSROOT", F_OK) < 0)
+                        cvs_root = getcwd(NULL, MAXPATHLEN);
+                        if (!cvs_root || access("CVSROOT", F_OK) < 0)
                                 dorcs = FALSE;
                         else {
                                 loginfo("is a CVSROOT \"%s\"\n", cvs_root);

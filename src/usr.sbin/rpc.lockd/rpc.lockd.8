@@ -1,4 +1,4 @@
-.\"	$OpenBSD: rpc.lockd.8,v 1.5 1997/08/10 21:06:41 millert Exp $
+.\"	$OpenBSD: rpc.lockd.8,v 1.8 2000/03/19 17:57:14 aaron Exp $
 .\"
 .\" Copyright (c) 1995 A.R.Gordon, andrew.gordon@net-tel.co.uk
 .\" All rights reserved.
@@ -46,22 +46,28 @@
 is a daemon which provides file- and record-locking services in an NFS
 environment.
 .Pp
-Options and operands available for
-.Nm rpc.lockd :
+The options are as follows:
 .Bl -tag -width Ds
-.It Fl d
-The
-.Fl d
-option causes debugging information to be written to syslog, recording
-all RPC transactions to the daemon.  These messages are logged with level
-LOG_DEBUG and facility LOG_DAEMON.  If debug_level is not specified,
-level 1 is assumed, giving one log line per protocol operation.  Higher
-debug levels can be specified, causing display of operation arguments
+.It Fl d Op Ar debug_level
+Write debugging information to syslog, recording
+all RPC transactions to the daemon.
+These messages are logged with level
+.Dv LOG_DEBUG
+and facility
+.Dv LOG_DAEMON .
+If
+.Ar debug_level
+is not specified,
+level 1 is assumed, giving one log line per protocol operation.
+Higher debug levels can be specified, causing display of operation arguments
 and internal operations of the daemon.
 .El
 .Pp
 Error conditions are logged to syslog, irrespective of the debug level,
-using log level LOG_ERR and facility LOG_DAEMON.
+using log level
+.Dv LOG_ERR
+and facility
+.Dv LOG_DAEMON .
 .Pp
 The
 .Nm rpc.lockd
@@ -82,10 +88,15 @@ RPC protocol specification for the network lock manager protocol.
 .Xr rpc.statd 8
 .Sh BUGS
 The current implementation provides only the server side of the protocol
-(ie. clients running other OS types can establish locks on a OpenBSD fileserver,
-but there is currently no means for a OpenBSD client to establish locks).
+(i.e., clients running other OS types can establish locks on an
+.Ox
+fileserver,
+but there is currently no means for an
+.Ox
+client to establish locks).
 .Pp
-Versions 1, 2 and 3 of the protocol are supported.  However, only versions
+Versions 1, 2 and 3 of the protocol are supported.
+However, only versions
 2 (Unix systems) and 3 (PC-NFS clients) seem to be in common use - the version
 1 support has not been tested due to the lack of version 1 clients against
 which to test.

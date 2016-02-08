@@ -1,5 +1,5 @@
 :
-#	$OpenBSD: ksh.kshrc,v 1.3 1998/03/22 03:39:10 marc Exp $
+#	$OpenBSD: ksh.kshrc,v 1.5 2000/01/27 02:36:06 millert Exp $
 #
 # NAME:
 #	ksh.kshrc - global initialization for ksh 
@@ -60,20 +60,9 @@ case "$-" in
 
 	alias ls='ls -CF'
 	alias h='fc -l | more'
-	_cd() { "cd" $*; }
 	# the PD ksh is not 100% compatible
 	case "$KSH_VERSION" in
 	*PD*)	# PD ksh
-		case "$TERM" in
-		pc3|pcvt*|xterm*)
-			# bind arrow keys
-			bind '^[['=prefix-2
-			bind '^XA'=up-history
-			bind '^XB'=down-history
-			bind '^XC'=forward-char
-			bind '^XD'=backward-char
-			;;
-		esac
 		;;
 	*)	# real ksh ?
 		[ -r $HOME/.functions ] && . $HOME/.functions
@@ -110,7 +99,7 @@ case "$-" in
 		alias istripe='ilabel "$USER@$HOST ($tty)"'
 
 		wftp () { ilabel "ftp $*"; "ftp" $*; eval istripe; }
-		wcd () { _cd $*; eval stripe; }
+		wcd () { \cd "$@"; eval stripe; }
 		wtelnet ()
 		{
 			"telnet" "$@"

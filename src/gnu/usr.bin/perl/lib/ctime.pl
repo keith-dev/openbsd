@@ -1,9 +1,17 @@
 ;# ctime.pl is a simple Perl emulation for the well known ctime(3C) function.
+#
+# This library is no longer being maintained, and is included for backward
+# compatibility with Perl 4 programs which may require it.
+#
+# In particular, this should not be used as an example of modern Perl
+# programming techniques.
+#
+# Suggested alternative: the POSIX ctime function
 ;#
 ;# Waldemar Kebsch, Federal Republic of Germany, November 1988
 ;# kebsch.pad@nixpbe.UUCP
 ;# Modified March 1990, Feb 1991 to properly handle timezones
-;#  $RCSfile: ctime.pl,v $$Revision: 1.3 $$Date: 1999/04/29 22:51:46 $
+;#  $RCSfile: ctime.pl,v $$Revision: 1.4 $$Date: 2000/04/06 17:06:09 $
 ;#   Marion Hakanson (hakanson@cse.ogi.edu)
 ;#   Oregon Graduate Institute of Science and Technology
 ;#

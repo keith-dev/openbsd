@@ -1,4 +1,4 @@
-/*	$OpenBSD: cmd.c,v 1.22 1999/08/21 22:49:25 niklas Exp $	*/
+/*	$OpenBSD: cmd.c,v 1.25 2000/04/18 22:40:15 kjell Exp $	*/
 
 /*
  * Copyright (c) 1997 Tobias Weingartner
@@ -80,7 +80,7 @@ Xdisk(cmd, disk, mbr, tt, offset)
 {
 	int maxcyl  = 1024;
 	int maxhead = 256;
-	int maxsec  = 64;
+	int maxsec  = 63;
 
 	/* Print out disk info */
 	DISK_printmetrics(disk);
@@ -169,6 +169,8 @@ Xedit(cmd, disk, mbr, tt, offset)
 		EDIT("BIOS Ending sector",     ASK_DEC, pp->esect, 1, maxsect, NULL);
 		/* Fix up off/size values */
 		PRT_fix_BN(disk, pp);
+		/* Fix up CHS values for LBA */
+		PRT_fix_CHS(disk, pp);
 	} else {
 		u_int m;
 
@@ -211,7 +213,8 @@ Xselect(cmd, disk, mbr, tt, offset)
 	off = mbr->part[pn].bs;
 
 	/* Sanity checks */
-	if (mbr->part[pn].id != DOSPTYP_EXTEND) {
+	if ((mbr->part[pn].id != DOSPTYP_EXTEND) &&
+	    (mbr->part[pn].id != DOSPTYP_EXTENDL)) {
 		printf("Partition %d is not an extended partition.\n", pn);
 		return (CMD_CONT);
 	}

@@ -1,4 +1,4 @@
-/*	$OpenBSD: arch.c,v 1.16 1999/10/05 22:06:23 espie Exp $	*/
+/*	$OpenBSD: arch.c,v 1.26 2000/03/26 16:21:32 espie Exp $	*/
 /*	$NetBSD: arch.c,v 1.17 1996/11/06 17:58:59 christos Exp $	*/
 
 /*
@@ -43,7 +43,7 @@
 #if 0
 static char sccsid[] = "@(#)arch.c	8.2 (Berkeley) 1/2/94";
 #else
-static char rcsid[] = "$OpenBSD: arch.c,v 1.16 1999/10/05 22:06:23 espie Exp $";
+static char rcsid[] = "$OpenBSD: arch.c,v 1.26 2000/03/26 16:21:32 espie Exp $";
 #endif
 #endif /* not lint */
 
@@ -73,9 +73,9 @@ static char rcsid[] = "$OpenBSD: arch.c,v 1.16 1999/10/05 22:06:23 espie Exp $";
  *	    	  	    	of the library's table of contents.
  *
  *	Arch_MTime	    	Find the modification time of a member of
- *	    	  	    	an archive *in the archive*. The time is also
- *	    	  	    	placed in the member's GNode. Returns the
- *	    	  	    	modification time.
+ *	    	  	    	an archive *in the archive*, return TRUE if
+ *				exists. The time is placed in the member's 
+ *				GNode. Returns the modification time.
  *
  *	Arch_MemTime	    	Find the modification time of a member of
  *	    	  	    	an archive. Called when the member doesn't
@@ -221,7 +221,7 @@ Arch_ParseArchive (linePtr, nodeLst, ctxt)
 	     * Variable spec, so call the Var module to parse the puppy
 	     * so we can safely advance beyond it...
 	     */
-	    int 	length;
+	    size_t 	length;
 	    Boolean	freeIt;
 	    char	*result;
 
@@ -241,7 +241,7 @@ Arch_ParseArchive (linePtr, nodeLst, ctxt)
 
     *cp++ = '\0';
     if (subLibName) {
-	libName = Var_Subst(NULL, libName, ctxt, TRUE);
+	libName = Var_Subst(libName, ctxt, TRUE);
     }
 
 
@@ -263,7 +263,7 @@ Arch_ParseArchive (linePtr, nodeLst, ctxt)
 		 * Variable spec, so call the Var module to parse the puppy
 		 * so we can safely advance beyond it...
 		 */
-		int 	length;
+		size_t 	length;
 		Boolean	freeIt;
 		char	*result;
 
@@ -320,7 +320,7 @@ Arch_ParseArchive (linePtr, nodeLst, ctxt)
 	    char    *sacrifice;
 	    char    *oldMemName = memName;
 
-	    memName = Var_Subst(NULL, memName, ctxt, TRUE);
+	    memName = Var_Subst(memName, ctxt, TRUE);
 
 	    /*
 	     * Now form an archive spec and recurse to deal with nested
@@ -339,12 +339,12 @@ Arch_ParseArchive (linePtr, nodeLst, ctxt)
 		 */
 		gn = Targ_FindNode(buf, TARG_CREATE);
 
-		if (gn == NILGNODE) {
+		if (gn == NULL) {
 		    free(buf);
 		    return(FAILURE);
 		} else {
 		    gn->type |= OP_ARCHV;
-		    (void)Lst_AtEnd(nodeLst, (ClientData)gn);
+		    Lst_AtEnd(nodeLst, gn);
 		}
 	    } else if (Arch_ParseArchive(&sacrifice, nodeLst, ctxt)!=SUCCESS) {
 		/*
@@ -359,17 +359,16 @@ Arch_ParseArchive (linePtr, nodeLst, ctxt)
 	     */
 	    free(buf);
 	} else if (Dir_HasWildcards(memName)) {
-	    Lst	  members = Lst_Init(FALSE);
+	    Lst	  members = Lst_Init();
 	    char  *member;
 
 	    Dir_Expand(memName, dirSearchPath, members);
-	    while (!Lst_IsEmpty(members)) {
-		member = (char *)Lst_DeQueue(members);
+	    while ((member = (char *)Lst_DeQueue(members)) != NULL) {
 
 		sprintf(nameBuf, "%s(%s)", libName, member);
 		free(member);
 		gn = Targ_FindNode (nameBuf, TARG_CREATE);
-		if (gn == NILGNODE) {
+		if (gn == NULL) {
 		    return (FAILURE);
 		} else {
 		    /*
@@ -380,14 +379,14 @@ Arch_ParseArchive (linePtr, nodeLst, ctxt)
 		     * end of the provided list.
 		     */
 		    gn->type |= OP_ARCHV;
-		    (void) Lst_AtEnd (nodeLst, (ClientData)gn);
+		    Lst_AtEnd(nodeLst, gn);
 		}
 	    }
 	    Lst_Destroy(members, NOFREE);
 	} else {
 	    sprintf(nameBuf, "%s(%s)", libName, memName);
 	    gn = Targ_FindNode (nameBuf, TARG_CREATE);
-	    if (gn == NILGNODE) {
+	    if (gn == NULL) {
 		return (FAILURE);
 	    } else {
 		/*
@@ -398,7 +397,7 @@ Arch_ParseArchive (linePtr, nodeLst, ctxt)
 		 * provided list.
 		 */
 		gn->type |= OP_ARCHV;
-		(void) Lst_AtEnd (nodeLst, (ClientData)gn);
+		Lst_AtEnd(nodeLst, gn);
 	    }
 	}
 	if (doSubst) {
@@ -497,8 +496,8 @@ ArchStatMember (archive, member, hash)
     if (cp != NULL)
 	member = cp + 1;
 
-    ln = Lst_Find (archives, (ClientData) archive, ArchFindArchive);
-    if (ln != NILLNODE) {
+    ln = Lst_Find(archives, ArchFindArchive, archive);
+    if (ln != NULL) {
 	ar = (Arch *) Lst_Datum (ln);
 
 	he = Hash_FindEntry (&ar->members, member);
@@ -636,7 +635,7 @@ ArchStatMember (archive, member, hash)
 #endif
 
 	    he = Hash_CreateEntry (&ar->members, memName, NULL);
-	    Hash_SetValue (he, (ClientData)emalloc (sizeof (struct ar_hdr)));
+	    Hash_SetValue (he, emalloc (sizeof (struct ar_hdr)));
 	    memcpy ((Address)Hash_GetValue (he), (Address)&arh,
 		sizeof (struct ar_hdr));
 	}
@@ -645,7 +644,7 @@ ArchStatMember (archive, member, hash)
 
     fclose (arch);
 
-    (void) Lst_AtEnd (archives, (ClientData) ar);
+    Lst_AtEnd(archives, ar);
 
     /*
      * Now that the archive has been read and cached, we can look into
@@ -941,13 +940,10 @@ Arch_Touch (gn)
 {
     FILE *	  arch;	  /* Stream open to archive, positioned properly */
     struct ar_hdr arh;	  /* Current header describing member */
-    char *p1, *p2;
 
-    arch = ArchFindMember(Var_Value (ARCHIVE, gn, &p1),
-			  Var_Value (MEMBER, gn, &p2),
+    arch = ArchFindMember(Var_Value(ARCHIVE, gn),
+			  Var_Value(MEMBER, gn),
 			  &arh, "r+");
-    efree(p1);
-    efree(p2);
     sprintf(arh.ar_date, "%-12ld", (long) now);
 
     if (arch != NULL) {
@@ -999,7 +995,7 @@ Arch_TouchLib (gn)
  *	Return the modification time of a member of an archive.
  *
  * Results:
- *	The modification time (seconds).
+ *	TRUE if found.
  *
  * Side Effects:
  *	The mtime field of the given node is filled in with the value
@@ -1007,28 +1003,23 @@ Arch_TouchLib (gn)
  *
  *-----------------------------------------------------------------------
  */
-time_t
+Boolean
 Arch_MTime (gn)
     GNode	  *gn;	      /* Node describing archive member */
 {
     struct ar_hdr *arhPtr;    /* Header of desired member */
     time_t	  modTime;    /* Modification time as an integer */
-    char *p1, *p2;
 
-    arhPtr = ArchStatMember (Var_Value (ARCHIVE, gn, &p1),
-			     Var_Value (MEMBER, gn, &p2),
+    arhPtr = ArchStatMember (Var_Value(ARCHIVE, gn),
+			     Var_Value(MEMBER, gn),
 			     TRUE);
-    efree(p1);
-    efree(p2);
-
     if (arhPtr != NULL) {
-	modTime = (time_t) strtol(arhPtr->ar_date, NULL, 10);
+	gn->mtime = (time_t) strtol(arhPtr->ar_date, NULL, 10);
+	return TRUE;
     } else {
-	modTime = 0;
+    	gn->mtime = OUT_OF_DATE;
+	return FALSE;
     }
-
-    gn->mtime = modTime;
-    return (modTime);
 }
 
 /*-
@@ -1038,14 +1029,14 @@ Arch_MTime (gn)
  *	time from its archived form, if it exists.
  *
  * Results:
- *	The modification time.
+ *	TRUE if found.
  *
  * Side Effects:
  *	The mtime field is filled in.
  *
  *-----------------------------------------------------------------------
  */
-time_t
+Boolean
 Arch_MemMTime (gn)
     GNode   	  *gn;
 {
@@ -1055,10 +1046,10 @@ Arch_MemMTime (gn)
 		  *nameEnd;
 
     if (Lst_Open (gn->parents) != SUCCESS) {
-	gn->mtime = 0;
-	return (0);
+	gn->mtime = OUT_OF_DATE;
+	return FALSE;
     }
-    while ((ln = Lst_Next (gn->parents)) != NILLNODE) {
+    while ((ln = Lst_Next (gn->parents)) != NULL) {
 	pgn = (GNode *) Lst_Datum (ln);
 
 	if (pgn->type & OP_ARCHV) {
@@ -1078,21 +1069,24 @@ Arch_MemMTime (gn)
 
 	    if (pgn->make && nameEnd != NULL &&
 		strncmp(nameStart, gn->name, nameEnd - nameStart) == 0) {
-				     gn->mtime = Arch_MTime(pgn);
+		    if (Arch_MTime(pgn))
+			gn->mtime = pgn->mtime;
+		    else
+		    	gn->mtime = OUT_OF_DATE;
 	    }
 	} else if (pgn->make) {
 	    /*
 	     * Something which isn't a library depends on the existence of
 	     * this target, so it needs to exist.
 	     */
-	    gn->mtime = 0;
+	    gn->mtime = OUT_OF_DATE;
 	    break;
 	}
     }
 
     Lst_Close (gn->parents);
 
-    return (gn->mtime);
+    return gn->mtime == OUT_OF_DATE;
 }
 
 /*-
@@ -1180,17 +1174,18 @@ Arch_LibOODate (gn)
 
     if (OP_NOP(gn->type) && Lst_IsEmpty(gn->children)) {
 	oodate = FALSE;
-    } else if ((gn->mtime > now) || (gn->mtime < gn->cmtime) || !gn->mtime) {
-	oodate = TRUE;
+    } else if (gn->mtime > now || gn->mtime < gn->cmtime || 
+    	gn->mtime == OUT_OF_DATE) {
+	    oodate = TRUE;
     } else {
 #ifdef RANLIBMAG
 	struct ar_hdr  	*arhPtr;    /* Header for __.SYMDEF */
-	int 	  	modTimeTOC; /* The table-of-contents's mod time */
+	time_t 	  	modTimeTOC; /* The table-of-contents's mod time */
 
 	arhPtr = ArchStatMember (gn->path, RANLIBMAG, FALSE);
 
 	if (arhPtr != NULL) {
-	    modTimeTOC = (int) strtol(arhPtr->ar_date, NULL, 10);
+	    modTimeTOC = (time_t) strtol(arhPtr->ar_date, NULL, 10);
 
 	    if (DEBUG(ARCH) || DEBUG(MAKE)) {
 		printf("%s modified %s...", RANLIBMAG, Targ_FmtTime(modTimeTOC));
@@ -1228,7 +1223,7 @@ Arch_LibOODate (gn)
 void
 Arch_Init ()
 {
-    archives = Lst_Init (FALSE);
+    archives = Lst_Init();
 }
 
 

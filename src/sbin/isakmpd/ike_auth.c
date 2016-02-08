@@ -1,9 +1,10 @@
-/*	$OpenBSD: ike_auth.c,v 1.19 1999/10/01 14:10:54 niklas Exp $	*/
-/*	$EOM: ike_auth.c,v 1.40 1999/09/28 16:35:48 angelos Exp $	*/
+/*	$OpenBSD: ike_auth.c,v 1.24 2000/04/07 22:07:44 niklas Exp $	*/
+/*	$EOM: ike_auth.c,v 1.48 2000/04/07 19:43:31 niklas Exp $	*/
 
 /*
- * Copyright (c) 1998, 1999 Niklas Hallqvist.  All rights reserved.
+ * Copyright (c) 1998, 1999, 2000 Niklas Hallqvist.  All rights reserved.
  * Copyright (c) 1999 Niels Provos.  All rights reserved.
+ * Copyright (c) 1999 Angelos D. Keromytis.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -60,32 +61,40 @@
 #include "transport.h"
 #include "util.h"
 
+#ifdef notyet
 static u_int8_t *enc_gen_skeyid (struct exchange *, size_t *);
+#endif
 static u_int8_t *pre_shared_gen_skeyid (struct exchange *, size_t *);
-static u_int8_t *sig_gen_skeyid (struct exchange *, size_t *);
 
 static int pre_shared_decode_hash (struct message *);
-static int rsa_sig_decode_hash (struct message *);
 static int pre_shared_encode_hash (struct message *);
-static int rsa_sig_encode_hash (struct message *);
 
-#if defined (USE_LIBCRYPTO) || defined (HAVE_DLOPEN)
-static int ike_auth_hash (struct exchange *, u_int8_t *);
+#ifdef USE_X509
+static u_int8_t *sig_gen_skeyid (struct exchange *, size_t *);
+static int rsa_sig_decode_hash (struct message *);
+static int rsa_sig_encode_hash (struct message *);
 #endif
+
+static int ike_auth_hash (struct exchange *, u_int8_t *);
 
 static struct ike_auth ike_auth[] = {
   {
     IKE_AUTH_PRE_SHARED, pre_shared_gen_skeyid, pre_shared_decode_hash,
     pre_shared_encode_hash
   },
+#ifdef notdef
   {
     IKE_AUTH_DSS, sig_gen_skeyid, pre_shared_decode_hash,
     pre_shared_encode_hash
   },
+#endif
+#ifdef USE_X509
   {
     IKE_AUTH_RSA_SIG, sig_gen_skeyid, rsa_sig_decode_hash,
     rsa_sig_encode_hash
   },
+#endif
+#ifdef notdef
   {
     IKE_AUTH_RSA_ENC, enc_gen_skeyid, pre_shared_decode_hash,
     pre_shared_encode_hash
@@ -94,6 +103,7 @@ static struct ike_auth ike_auth[] = {
     IKE_AUTH_RSA_ENC_REV, enc_gen_skeyid, pre_shared_decode_hash,
     pre_shared_encode_hash
   },
+#endif
 };
 
 struct ike_auth *
@@ -115,7 +125,7 @@ static void *
 ike_auth_get_key (int type, char *id, size_t *keylen)
 {
   char *key, *buf;
-#if defined (USE_LIBCRYPTO) || defined (HAVE_DLOPEN)
+#ifdef USE_X509
   char *keyfile;
   BIO *keyh;
   RSA *rsakey;
@@ -155,7 +165,7 @@ ike_auth_get_key (int type, char *id, size_t *keylen)
       break;
 
     case IKE_AUTH_RSA_SIG:
-#if defined (USE_LIBCRYPTO) || defined (HAVE_DLOPEN)
+#ifdef USE_X509
 #ifdef HAVE_DLOPEN
       if (!libcrypto)
 	return 0;
@@ -217,55 +227,63 @@ pre_shared_gen_skeyid (struct exchange *exchange, size_t *sz)
   key = ike_auth_get_key (IKE_AUTH_PRE_SHARED, exchange->name, &keylen);
 
   if (!key)
-  {
-      /* If we're the responder and have the initiator's ID (which is the
-	 case in Aggressive mode), try to find the preshared key in the
-	 section of the initiator's Phase I ID. This allows us to do mobile
-	 user support with preshared keys. */
-      if ((exchange->initiator == 0) && exchange->id_i)
+    {
+      /*
+       * If we're the responder and have the initiator's ID (which is the
+       * case in Aggressive mode), try to find the preshared key in the
+       * section of the initiator's Phase I ID.  This allows us to do mobile
+       * user support with preshared keys.
+       */
+      if (!exchange->initiator && exchange->id_i)
         {
-	    switch (exchange->id_i[0])
-	      {
-	      case IPSEC_ID_IPV4_ADDR:
-		  buf = calloc (16, sizeof (char));
-		  if (!buf)
-		    log_fatal ("pre_shared_gen_skeyid: failed to allocate 16 bytes for ID");
-		  addr = ntohl (decode_32 (exchange->id_i +
-					   ISAKMP_ID_DATA_OFF -
-					   ISAKMP_GEN_SZ));
-		  inet_ntop (AF_INET, &addr, buf, 16);
-		  break;
-		  
-	      case IPSEC_ID_FQDN:
-	      case IPSEC_ID_USER_FQDN:
-		  buf = calloc (exchange->id_i_len - ISAKMP_ID_DATA_OFF +
-				ISAKMP_GEN_SZ + 1, sizeof (char));
-		  if (!buf)
-		    log_fatal ("pre_shared_gen_skeyid: failed to allocate %d bytes for ID", exchange->id_i_len - ISAKMP_ID_DATA_OFF + ISAKMP_GEN_SZ + 1);
-		  memcpy (buf, exchange->id_i + ISAKMP_ID_DATA_OFF -
-			  ISAKMP_GEN_SZ, exchange->id_i_len -
-			  ISAKMP_ID_DATA_OFF + ISAKMP_GEN_SZ);
-		  break;
-
-		  /* XXX Support more ID types ? */
-	      default:
+	  switch (exchange->id_i[0])
+	    {
+	    case IPSEC_ID_IPV4_ADDR:
+	      buf = malloc (16);
+	      if (!buf)
+		{
+		  log_error ("pre_shared_gen_skeyid: malloc (16) failed");
 		  return 0;
-	      }
+		}
+	      addr = htonl (decode_32 (exchange->id_i + ISAKMP_ID_DATA_OFF -
+				       ISAKMP_GEN_SZ));
+	      inet_ntop (AF_INET, &addr, buf, 16);
+	      break;
+		  
+	    case IPSEC_ID_FQDN:
+	    case IPSEC_ID_USER_FQDN:
+	      buf = calloc (exchange->id_i_len - ISAKMP_ID_DATA_OFF +
+			    ISAKMP_GEN_SZ + 1, sizeof (char));
+	      if (!buf)
+		{
+		  log_print ("pre_shared_gen_skeyid: malloc (%d) failed",
+			     exchange->id_i_len - ISAKMP_ID_DATA_OFF
+			     + ISAKMP_GEN_SZ + 1);
+		  return 0;
+		}
+	      memcpy (buf, exchange->id_i + ISAKMP_ID_DATA_OFF - ISAKMP_GEN_SZ,
+		      exchange->id_i_len - ISAKMP_ID_DATA_OFF + ISAKMP_GEN_SZ);
+	      break;
 
-	    key = ike_auth_get_key (IKE_AUTH_PRE_SHARED, buf, &keylen);
-	    free (buf);
-	    if (!key)
+	      /* XXX Support more ID types ? */
+	    default:
 	      return 0;
+	    }
+
+	  key = ike_auth_get_key (IKE_AUTH_PRE_SHARED, buf, &keylen);
+	  free (buf);
+	  if (!key)
+	    return 0;
 	}
       else
 	return 0;
   }
 
-  /* Store the secret key for later policy processing */
+  /* Store the secret key for later policy processing.  */
   exchange->recv_cert = malloc (keylen);
   if (!exchange->recv_cert)
     {
-      log_error ("pre_shared_gen_skeyid: malloc (%d) failed", keylen + 1);
+      log_error ("pre_shared_gen_skeyid: malloc (%d) failed", keylen);
       return 0;
     }
   memcpy (exchange->recv_cert, key, keylen);
@@ -273,8 +291,6 @@ pre_shared_gen_skeyid (struct exchange *exchange, size_t *sz)
   exchange->recv_certtype = ISAKMP_CERTENC_NONE;
   
   prf = prf_alloc (ie->prf_type, ie->hash->type, key, keylen);
-  if (buf)
-    free (buf);
   if (!prf)
     return 0;
 
@@ -296,6 +312,7 @@ pre_shared_gen_skeyid (struct exchange *exchange, size_t *sz)
   return skeyid;
 }
 
+#ifdef USE_X509
 /* Both DSS & RSA signature authentication uses this algorithm.  */
 static u_int8_t *
 sig_gen_skeyid (struct exchange *exchange, size_t *sz)
@@ -332,7 +349,9 @@ sig_gen_skeyid (struct exchange *exchange, size_t *sz)
 
   return skeyid;
 }
+#endif /* USE_X509 */
 
+#ifdef notdef
 /*
  * Both standard and revised RSA encryption authentication uses this SKEYID
  * computation.
@@ -369,6 +388,7 @@ enc_gen_skeyid (struct exchange *exchange, size_t *sz)
 
   return skeyid;
 }
+#endif /* notdef */
 
 static int
 pre_shared_decode_hash (struct message *msg)
@@ -406,18 +426,18 @@ pre_shared_decode_hash (struct message *msg)
   memcpy (*hash_p, payload->p + ISAKMP_HASH_DATA_OFF, hashsize);
   snprintf (header, 80, "pre_shared_decode_hash: HASH_%c",
 	    initiator ? 'R' : 'I');
-  log_debug_buf (LOG_MISC, 80, header, *hash_p, hashsize);
+  LOG_DBG_BUF ((LOG_MISC, 80, header, *hash_p, hashsize));
 
   payload->flags |= PL_MARK;
 
   return 0;
 }
 
+#ifdef USE_X509
 /* Decrypt the HASH in SIG, we already need a parsed ID payload.  */
 static int
 rsa_sig_decode_hash (struct message *msg)
 {
-#if defined (USE_LIBCRYPTO) || defined (HAVE_DLOPEN)
   struct cert_handler *handler;
   struct exchange *exchange = msg->exchange;
   struct ipsec_exch *ie = exchange->data;
@@ -460,8 +480,8 @@ rsa_sig_decode_hash (struct message *msg)
     {
       cert = handler->cert_get (rawcert, rawlen);
       if (!cert)
-	log_debug (LOG_CRYPTO, 50,
-		   "rsa_sig_decode_hash: certificate malformed");
+	LOG_DBG ((LOG_CRYPTO, 50,
+		  "rsa_sig_decode_hash: certificate malformed"));
       else
 	{
 	  if (!handler->cert_get_key (cert, &key))
@@ -472,8 +492,8 @@ rsa_sig_decode_hash (struct message *msg)
 	  else
 	    {
 	      found++;
-	      log_debug (LOG_CRYPTO, 40,
-			 "rsa_sig_decode_hash: using cert from X509_STORE");
+	      LOG_DBG ((LOG_CRYPTO, 40,
+			"rsa_sig_decode_hash: using cert from X509_STORE"));
 	      exchange->recv_cert = cert;
 	      exchange->recv_certtype = handler->id;
 	    }
@@ -498,10 +518,10 @@ rsa_sig_decode_hash (struct message *msg)
       handler = cert_get (GET_ISAKMP_CERT_ENCODING (p->p));
       if (!handler)
 	{
-	  log_debug (LOG_MISC, 30,
-		     "rsa_sig_decode_hash: no handler for %s CERT encoding",
-		     constant_lookup (isakmp_certenc_cst,
-				      GET_ISAKMP_CERT_ENCODING (p->p)));
+	  LOG_DBG ((LOG_MISC, 30,
+		    "rsa_sig_decode_hash: no handler for %s CERT encoding",
+		    constant_lookup (isakmp_certenc_cst,
+				     GET_ISAKMP_CERT_ENCODING (p->p))));
 	  continue;
 	}
   
@@ -615,20 +635,17 @@ rsa_sig_decode_hash (struct message *msg)
     }
 
   snprintf (header, 80, "rsa_sig_decode_hash: HASH_%c", initiator ? 'R' : 'I');
-  log_debug_buf (LOG_MISC, 80, header, *hash_p, hashsize);
+  LOG_DBG_BUF ((LOG_MISC, 80, header, *hash_p, hashsize));
 
   p->flags |= PL_MARK;
 
   return 0;
-#else
-  return -1;
-#endif /* USE_LIBCRYPTO || HAVE_DLOPEN */
 }
+#endif /* USE_X509 */
 
 static int
 pre_shared_encode_hash (struct message *msg)
 {
-#if defined (USE_LIBCRYPTO) || defined (HAVE_DLOPEN)
   struct exchange *exchange = msg->exchange;
   struct ipsec_exch *ie = exchange->data;
   size_t hashsize = ie->hash->hashsize;
@@ -645,18 +662,15 @@ pre_shared_encode_hash (struct message *msg)
     
   snprintf (header, 80, "pre_shared_encode_hash: HASH_%c",
 	    initiator ? 'I' : 'R');
-  log_debug_buf (LOG_MISC, 80, header, buf + ISAKMP_HASH_DATA_OFF, hashsize);
+  LOG_DBG_BUF ((LOG_MISC, 80, header, buf + ISAKMP_HASH_DATA_OFF, hashsize));
   return 0;
-#else
-  return -1;
-#endif
 }
 
+#ifdef USE_X509
 /* Encrypt the HASH into a SIG type.  */
 static int
 rsa_sig_encode_hash (struct message *msg)
 {
-#if defined (USE_LIBCRYPTO) || defined (HAVE_DLOPEN)
   struct exchange *exchange = msg->exchange;
   struct ipsec_exch *ie = exchange->data;
   size_t hashsize = ie->hash->hashsize;
@@ -676,7 +690,7 @@ rsa_sig_encode_hash (struct message *msg)
   handler = cert_get (ISAKMP_CERTENC_X509_SIG);
   if (!handler)
     {
-      log_print ("rsa_sig_decode_hash: "
+      log_print ("rsa_sig_encode_hash: "
 		 "cert_get(ISAKMP_CERTENC_X509_SIG) failed");
       return -1;
     }
@@ -702,12 +716,12 @@ rsa_sig_encode_hash (struct message *msg)
 	}
     }
   else
-    log_debug (LOG_MISC, 10, "rsa_sig_decode_hash: no certificate to send");
+    LOG_DBG ((LOG_MISC, 10, "rsa_sig_encode_hash: no certificate to send"));
 
   key = ike_auth_get_key (IKE_AUTH_RSA_SIG, exchange->name, NULL);
   if (key == NULL)
     {
-      log_error ("rsa_sig_encode_hash: could not get private key");
+      log_print ("rsa_sig_encode_hash: could not get private key");
       return -1;
     }
 
@@ -728,7 +742,7 @@ rsa_sig_encode_hash (struct message *msg)
     }
     
   snprintf (header, 80, "rsa_sig_encode_hash: HASH_%c", initiator ? 'I' : 'R');
-  log_debug_buf (LOG_MISC, 80, header, buf, hashsize);
+  LOG_DBG_BUF ((LOG_MISC, 80, header, buf, hashsize));
 
   data = malloc (LC (RSA_size, (key)));
   if (!data)
@@ -763,7 +777,7 @@ rsa_sig_encode_hash (struct message *msg)
   memmove (buf + ISAKMP_SIG_SZ, buf, datalen);
 
   snprintf (header, 80, "rsa_sig_encode_hash: SIG_%c", initiator ? 'I' : 'R');
-  log_debug_buf (LOG_MISC, 80, header, buf + ISAKMP_SIG_DATA_OFF, datalen);
+  LOG_DBG_BUF ((LOG_MISC, 80, header, buf + ISAKMP_SIG_DATA_OFF, datalen));
   if (message_add_payload (msg, ISAKMP_PAYLOAD_SIG, buf,
 			   ISAKMP_SIG_SZ + datalen, 1))
     {
@@ -771,12 +785,9 @@ rsa_sig_encode_hash (struct message *msg)
       return -1;
     }
   return 0;
-#else 
-  return -1;
-#endif /* USE_LIBCRYPTO || HAVE_DLOPEN */
 }
+#endif /* USE_X509 */
 
-#if defined (USE_LIBCRYPTO) || defined (HAVE_DLOPEN)
 int
 ike_auth_hash (struct exchange *exchange, u_int8_t *buf)
 {
@@ -814,4 +825,3 @@ ike_auth_hash (struct exchange *exchange, u_int8_t *buf)
 
   return 0;
 }
-#endif

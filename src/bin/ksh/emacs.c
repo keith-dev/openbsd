@@ -1,4 +1,4 @@
-/*	$OpenBSD: emacs.c,v 1.11 1999/08/04 19:11:13 millert Exp $	*/
+/*	$OpenBSD: emacs.c,v 1.13 2000/01/24 03:12:12 millert Exp $	*/
 
 /*
  *  Emacs-like command line editing and history
@@ -144,6 +144,7 @@ static int	x_comment   ARGS((int c));
 static int	x_fold_case ARGS((int c));
 static char	*x_lastcp ARGS((void));
 static void	do_complete ARGS((int flags, Comp_type type));
+static int	x_emacs_putbuf	ARGS((const char *s, size_t len));
 
 
 /* The lines between START-FUNC-TAB .. END-FUNC-TAB are run through a
@@ -317,6 +318,7 @@ static	struct x_defbindings const x_defbindings[] = {
 	 * entries.
 	 */
         { XFUNC_meta2,			1,	'['  },
+        { XFUNC_meta2,			1,	'O'  },
 	{ XFUNC_prev_com,		2,	'A'  },
 	{ XFUNC_next_com,		2,	'B'  },
 	{ XFUNC_mv_forw,		2,	'C'  },
@@ -470,6 +472,21 @@ x_ins(s)
 
 	x_adj_ok = 1;
 	return 0;
+}
+
+/*
+ * this is used for x_escape() in do_complete()
+ */
+static int
+x_emacs_putbuf(s, len)
+	const char *s;
+	size_t len;
+{
+	int rval;
+
+	if ((rval = x_do_ins(s, len)) != 0)
+		return (rval);
+	return (rval);
 }
 
 static int
@@ -1832,8 +1849,8 @@ do_complete(flags, type)
 			if (nlen > 0) {
 				x_goto(xbuf + start);
 				x_delete(end - start, FALSE);
-				words[0][nlen] = '\0';
-				x_ins(words[0]);
+				x_escape(words[0], nlen, x_emacs_putbuf);
+				x_adjust();
 				/* If single match is not a directory, add a
 				 * space to the end...
 				 */

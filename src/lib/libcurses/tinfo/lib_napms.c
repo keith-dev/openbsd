@@ -1,7 +1,7 @@
-/*	$OpenBSD: lib_napms.c,v 1.2 1999/06/06 15:55:17 millert Exp $	*/
+/*	$OpenBSD: lib_napms.c,v 1.5 2000/03/10 01:35:03 millert Exp $	*/
 
 /****************************************************************************
- * Copyright (c) 1998 Free Software Foundation, Inc.                        *
+ * Copyright (c) 1998,1999,2000 Free Software Foundation, Inc.              *
  *                                                                          *
  * Permission is hereby granted, free of charge, to any person obtaining a  *
  * copy of this software and associated documentation files (the            *
@@ -46,8 +46,6 @@
 #if HAVE_NANOSLEEP
 #include <time.h>
 #elif USE_FUNC_POLL
-#include <stropts.h>
-#include <poll.h>
 #if HAVE_SYS_TIME_H
 #include <sys/time.h>
 #endif
@@ -60,7 +58,7 @@
 #endif
 #endif
 
-MODULE_ID("$From: lib_napms.c,v 1.5 1999/06/06 00:42:47 R.Lindsay.Todd Exp $")
+MODULE_ID("$From: lib_napms.c,v 1.8 2000/02/13 01:01:26 tom Exp $")
 
 int napms(int ms)
 {
@@ -73,8 +71,6 @@ int napms(int ms)
 		ts.tv_nsec = (ms % 1000) * 1000000;
 		nanosleep(&ts, NULL);
 	}
-#elif HAVE_USLEEP
-	usleep(1000*(unsigned)ms);
 #elif USE_FUNC_POLL
 	{
 		struct pollfd fds[1];

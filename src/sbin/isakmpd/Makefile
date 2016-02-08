@@ -1,8 +1,9 @@
-#	$OpenBSD: Makefile,v 1.22 1999/10/16 20:09:22 angelos Exp $
-#	$EOM: Makefile,v 1.58 1999/08/26 11:21:48 niklas Exp $
+#	$OpenBSD: Makefile,v 1.27 2000/05/02 14:36:37 niklas Exp $
+#	$EOM: Makefile,v 1.71 2000/05/02 10:31:01 niklas Exp $
 
 #
-# Copyright (c) 1998, 1999 Niklas Hallqvist.  All rights reserved.
+# Copyright (c) 1998, 1999, 2000 Niklas Hallqvist.  All rights reserved.
+# Copyright (c) 2000 Håkan Olsson.  All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted provided that the following conditions
@@ -41,25 +42,31 @@
 #
 
 # openbsd means 2.5 or newer, openbsd-encap is for older kernels with PF_ENCAP
-# linux is the name for Linux with FreeS/WAN integrated
+# linux is the name for Linux with FreeS/WAN integrated, freebsd/netbsd means
+# FreeBSD/NetBSD with KAME IPsec.
 OS=		openbsd
 #OS=		openbsd-encap
+#OS=		netbsd
+#OS=		freebsd
 #OS=		linux
+
+# Compile-time configuration of otherwise optional features
+#FEATURES=	tripledes blowfish cast policy x509 ec aggressive debug gmp
+FEATURES=	tripledes blowfish cast policy x509 ec aggressive debug
+#FEATURES=
 
 .PATH:		${.CURDIR}/sysdep/${OS}
 
 PROG=		isakmpd
 BINDIR?=	/sbin
 LDSTATIC?=	-static
-SRCS=		app.c attribute.c cert.c connection.c \
-		constants.c conf.c cookie.c crypto.c dh.c doi.c exchange.c \
-		exchange_num.c field.c gmp_util.c hash.c if.c ike_auth.c \
-		ike_aggressive.c ike_main_mode.c ike_phase_1.c \
-		ike_quick_mode.c init.c ipsec.c ipsec_fld.c ipsec_num.c \
-		isakmpd.c isakmp_doi.c isakmp_fld.c isakmp_num.c libcrypto.c \
-		log.c message.c math_2n.c math_ec2n.c math_group.c \
-		prf.c sa.c sysdep.c timer.c transport.c udp.c ui.c \
-		util.c
+SRCS=		app.c attribute.c cert.c connection.c constants.c conf.c \
+		cookie.c crypto.c dh.c doi.c exchange.c exchange_num.c \
+		field.c gmp_util.c hash.c if.c ike_auth.c ike_main_mode.c \
+		ike_phase_1.c ike_quick_mode.c init.c ipsec.c ipsec_fld.c \
+		ipsec_num.c isakmpd.c isakmp_doi.c isakmp_fld.c isakmp_num.c \
+		libcrypto.c log.c message.c math_2n.c math_group.c prf.c sa.c \
+		sysdep.c timer.c transport.c udp.c ui.c util.c
 
 GENERATED=	exchange_num.h ipsec_fld.h ipsec_num.h isakmp_fld.h \
 		isakmp_num.h
@@ -73,7 +80,7 @@ CFLAGS+=	-Wall -DNEED_SYSDEP_APP \
 # Different debugging & profiling suggestions
 
 # Include symbolic debugging info
-DEBUG=		-g
+#DEBUG=		-g
 
 # Do execution time profiles
 #CFLAGS+=	-pg
@@ -113,35 +120,55 @@ DEBUG=		-g
 #		})'
 
 SUBDIR=		apps
-.if !make(install)
-SUBDIR+=	regress
-.endif
 
 .include "sysdep/${OS}/Makefile.sysdep"
 
+.if ${FEATURES} != ""
+FEATURES_UC!=	echo ${FEATURES} | tr '[:lower:]' '[:upper:]'
+CFLAGS+=	${FEATURES_UC:S/^/-DUSE_/}
+.endif
+
+.if make(install)
+SUBDIR+=	samples
+.endif
+
+.if !make(install) && !defined(NO_REGRESS)
+SUBDIR+=	regress
+.endif
+
+.for FEATURE in ${FEATURES}
+.if exists(features/${FEATURE})
+.include "features/${FEATURE}"
+.endif
+.endfor
+
+.ifdef USE_GMP
+CFLAGS+=	-DMP_FLAVOUR=MP_FLAVOUR_GMP
+LDADD+=		-lgmp
+DPADD+=		${LIBGMP}
+.else
+CFLAGS+=	-DMP_FLAVOUR=MP_FLAVOUR_OPENSSL
+.endif
+
 .ifdef HAVE_DLOPEN
-X509=		x509.c
-POLICY=		policy.c
 CFLAGS+=	-DHAVE_DLOPEN
 SRCS+=		dyn.c
 .endif
 
 .ifdef USE_KEYNOTE
 USE_LIBCRYPTO=	yes
-POLICY=		policy.c
 LDADD+=		-lkeynote -lm
 DPADD+=		${LIBKEYNOTE} ${LIBM}
 CFLAGS+=	-DUSE_KEYNOTE
 .endif
 
 .ifdef USE_LIBCRYPTO
-X509=		x509.c
 CFLAGS+=	-DUSE_LIBCRYPTO
 LDADD+=		-lcrypto
 DPADD+=		${LIBCRYPTO}
 .endif
 
-SRCS+=		${IPSEC_SRCS} ${X509} ${POLICY}
+SRCS+=		${IPSEC_SRCS} ${X509} ${POLICY} ${EC} ${AGGRESSIVE}
 CFLAGS+=	${IPSEC_CFLAGS}
 
 LDADD+=		${DESLIB}

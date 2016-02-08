@@ -1,7 +1,7 @@
 #!/bin/sh
 ##
-##  mkcert.sh -- Make SSL Certificate Files for `make certificate' command
-##  Copyright (c) 1998-1999 Ralf S. Engelschall, All Rights Reserved. 
+##  mkcert.sh -- SSL Certificate Generation Utility
+##  Copyright (c) 1998-2000 Ralf S. Engelschall, All Rights Reserved. 
 ##
 
 #   parameters
@@ -53,7 +53,7 @@ esac
 
 #   display header
 echo "${T_MD}SSL Certificate Generation Utility${T_ME} (mkcert.sh)"
-echo "Copyright (c) 1998-1999 Ralf S. Engelschall, All Rights Reserved."
+echo "Copyright (c) 1998-2000 Ralf S. Engelschall, All Rights Reserved."
 
 #   on request view certificates only
 if [ ".$view" != . ]; then
@@ -63,7 +63,7 @@ if [ ".$view" != . ]; then
         echo "______________________________________________________________________"
         $openssl x509 -noout -text -in $sslcrtdir/ca.crt
         echo ""
-        if [ ".`$openssl x509 -noout -text -in $sslcrtdir/ca.crt | grep "Signature Algorithm" | grep -i RSA`" != . ]; then
+        if [ ".`$openssl x509 -noout -text -in $sslcrtdir/ca.crt | grep 'Signature Algorithm' | grep -i RSA`" != . ]; then
             echo "${T_MD}CA RSA Private Key${T_ME} [ca.key]"
             echo "______________________________________________________________________"
             $openssl rsa -noout -text -in $sslkeydir/ca.key
@@ -79,7 +79,7 @@ if [ ".$view" != . ]; then
         echo "______________________________________________________________________"
         $openssl x509 -noout -text -in $sslcrtdir/server.crt
         echo ""
-        if [ ".`$openssl x509 -noout -text -in $sslcrtdir/server.crt | grep "Signature Algorithm" | grep -i RSA`" != . ]; then
+        if [ ".`$openssl x509 -noout -text -in $sslcrtdir/server.crt | grep 'Signature Algorithm' | grep -i RSA`" != . ]; then
             echo "${T_MD}Server RSA Private Key${T_ME} [server.key]"
             echo "______________________________________________________________________"
             $openssl rsa -noout -text -in $sslkeydir/server.key
@@ -96,9 +96,8 @@ fi
 #   (do not use /dev/random here, because this device 
 #   doesn't work as expected on all platforms)
 randfiles=''
-for file in /var/log/messages /var/adm/messages \
-            /kernel /vmunix /vmlinuz \
-            /etc/hosts /etc/resolv.conf; do
+for file in /var/log/messages /var/adm/messages /var/log/system.log \
+            /kernel /vmunix /vmlinuz /mach /etc/hosts /etc/resolv.conf; do
     if [ -f $file ]; then
         if [ ".$randfiles" = . ]; then
             randfiles="$file"
@@ -107,6 +106,15 @@ for file in /var/log/messages /var/adm/messages \
         fi
     fi
 done
+
+#   initialize random file
+if [ -f $HOME/.rnd ]; then
+    RANDFILE="$HOME/.rnd"
+else
+    RANDFILE=".mkcert.rnd"
+    touch $RANDFILE
+fi
+export RANDFILE
 
 #   canonicalize parameters
 case "x$type" in
@@ -140,10 +148,10 @@ case $type in
         fi
         if [ ".$algo" = .RSA ]; then
             cp $sslcrtdir/snakeoil-rsa.crt $sslcrtdir/server.crt
-            cp $sslkeydir/snakeoil-rsa.key $sslkeydir/server.key
+            (umask 077; cp $sslkeydir/snakeoil-rsa.key $sslkeydir/server.key)
         else
             cp $sslcrtdir/snakeoil-dsa.crt $sslcrtdir/server.crt
-            cp $sslkeydir/snakeoil-dsa.key $sslkeydir/server.key
+            (umask 077; cp $sslkeydir/snakeoil-dsa.key $sslkeydir/server.key)
         fi
         echo "${T_MD}RESULT: Server Certification Files${T_ME}"
         echo ""
@@ -190,12 +198,18 @@ case $type in
                 fi
             done
         fi
+        if [ ".$algo" = ".DSA" ]; then
+            echo ""
+            echo "${T_MD}WARNING!${T_ME} You're generating a DSA based certificate/key pair."
+            echo "         This implies that RSA based ciphers won't be available later,"
+            echo "         which for your web server currently still means that mostly all"
+            echo "         popular web browsers cannot connect to it. At least not until"
+            echo "         you also generate an additional RSA based certificate/key pair"
+            echo "         and configure them in parallel."
+        fi
         echo "______________________________________________________________________"
         echo ""
         echo "${T_MD}STEP 1: Generating $algo private key (1024 bit) [server.key]${T_ME}"
-        if [ ! -f $HOME/.rnd ]; then
-            touch $HOME/.rnd
-        fi
         if [ ".$algo" = .RSA ]; then
             if [ ".$randfiles" != . ]; then
                 $openssl genrsa -rand $randfiles -out $sslkeydir/server.key 1024
@@ -209,9 +223,14 @@ case $type in
         else
             echo "Generating DSA private key via SnakeOil CA DSA parameters"
             if [ ".$randfiles" != . ]; then
-                $openssl gendsa -rand $randfiles -out $sslkeydir/server.key $sslprmdir/snakeoil-ca-dsa.prm
+                (umask 077
+                 $openssl gendsa -rand $randfiles \
+                                 -out $sslkeydir/server.key \
+                                 $sslprmdir/snakeoil-ca-dsa.prm)
             else
-                $openssl gendsa -out $sslkeydir/server.key $sslprmdir/snakeoil-ca-dsa.prm
+                (umask 077
+                 $openssl gendsa -out $sslkeydir/server.key \
+                                 $sslprmdir/snakeoil-ca-dsa.prm)
             fi
             if [ $? -ne 0 ]; then
                 echo "mkcert.sh:Error: Failed to generate DSA private key" 1>&2
@@ -254,6 +273,12 @@ EOT
             exit 1
         fi
         rm -f .mkcert.cfg
+        prompt="8. Certificate Validity     (days)          [365]:"
+        echo dummy | awk '{ printf("%s", prompt); }' "prompt=$prompt"
+        read days
+        if [ ".$days" = . ]; then
+            days=365
+        fi
         echo "______________________________________________________________________"
         echo ""
         echo "${T_MD}STEP 3: Generating X.509 certificate signed by Snake Oil CA [server.crt]${T_ME}"
@@ -275,7 +300,7 @@ EOT
         fi
         if [ ".$algo" = .RSA ]; then
             $openssl x509 $extfile \
-                          -days 365 \
+                          -days $days \
                           -CAserial .mkcert.serial \
                           -CA $sslcrtdir/snakeoil-ca-rsa.crt \
                           -CAkey $sslkeydir/snakeoil-ca-rsa.key \
@@ -283,7 +308,7 @@ EOT
                           -out $sslcrtdir/server.crt
         else
             $openssl x509 $extfile \
-                          -days 365 \
+                          -days $days \
                           -CAserial .mkcert.serial \
                           -CA $sslcrtdir/snakeoil-ca-dsa.crt \
                           -CAkey $sslkeydir/snakeoil-ca-dsa.key \
@@ -336,19 +361,21 @@ EOT
         done
         if [ ".$rc" = .y ]; then
             if [ ".$algo" = .RSA ]; then
-                $openssl rsa -des3 \
-                             -in  $sslkeydir/server.key \
-                             -out $sslkeydir/server.key.crypt
+                (umask 077
+                 $openssl rsa -des3 \
+                              -in  $sslkeydir/server.key \
+                              -out $sslkeydir/server.key.crypt)
             else
-                $openssl dsa -des3 \
-                             -in  $sslkeydir/server.key \
-                             -out $sslkeydir/server.key.crypt
+                (umask 077
+                 $openssl dsa -des3 \
+                              -in  $sslkeydir/server.key \
+                              -out $sslkeydir/server.key.crypt)
             fi
             if [ $? -ne 0 ]; then
                 echo "mkcert.sh:Error: Failed to encrypt $algo private key" 1>&2
                 exit 1
             fi
-            cp $sslkeydir/server.key.crypt $sslkeydir/server.key
+            (umask 077; cp $sslkeydir/server.key.crypt $sslkeydir/server.key)
             rm -f $sslkeydir/server.key.crypt
             echo "Fine, you're using an encrypted $algo private key."
         else
@@ -408,12 +435,18 @@ EOT
                 fi
             done
         fi
+        if [ ".$algo" = ".DSA" ]; then
+            echo ""
+            echo "${T_MD}WARNING!${T_ME} You're generating DSA based certificate/key pairs."
+            echo "         This implies that RSA based ciphers won't be available later,"
+            echo "         which for your web server currently still means that mostly all"
+            echo "         popular web browsers cannot connect to it. At least not until"
+            echo "         you also generate an additional RSA based certificate/key pair"
+            echo "         and configure them in parallel."
+        fi
         echo "______________________________________________________________________"
         echo ""
         echo "${T_MD}STEP 1: Generating $algo private key for CA (1024 bit) [ca.key]${T_ME}"
-        if [ ! -f $HOME/.rnd ]; then
-            touch $HOME/.rnd
-        fi
         if [ ".$algo" = .RSA ]; then
             if [ ".$randfiles" != . ]; then
                 $openssl genrsa -rand $randfiles -out $sslkeydir/ca.key 1024
@@ -428,11 +461,13 @@ EOT
             if [ ".$randfiles" != . ]; then
                 $openssl dsaparam -rand $randfiles -out $sslprmdir/ca.prm 1024
                 echo "Generating DSA private key:"
-                $openssl gendsa   -rand $randfiles -out $sslkeydir/ca.key $sslprmdir/ca.prm
+                (umask 077
+                 $openssl gendsa -rand $randfiles -out $sslkeydir/ca.key $sslprmdir/ca.prm)
             else
                 $openssl dsaparam -out $sslprmdir/ca.prm 1024
                 echo "Generating DSA private key:"
-                $openssl gendsa   -out $sslkeydir/ca.key $sslprmdir/ca.prm
+                (umask 077
+                 $openssl gendsa -out $sslkeydir/ca.key $sslprmdir/ca.prm)
             fi
             if [ $? -ne 0 ]; then
                 echo "mkcert.sh:Error: Failed to generate DSA private key" 1>&2
@@ -475,6 +510,12 @@ EOT
             exit 1
         fi
         rm -f .mkcert.cfg
+        prompt="8. Certificate Validity     (days)          [365]:"
+        echo dummy | awk '{ printf("%s", prompt); }' "prompt=$prompt"
+        read days
+        if [ ".$days" = . ]; then
+            days=365
+        fi
         echo "______________________________________________________________________"
         echo ""
         echo "${T_MD}STEP 3: Generating X.509 certificate for CA signed by itself [ca.crt]${T_ME}"
@@ -493,7 +534,7 @@ nsCertType       = sslCA
 EOT
         fi
         $openssl x509 $extfile \
-                      -days 365 \
+                      -days $days \
                       -signkey $sslkeydir/ca.key \
                       -in      $sslcsrdir/ca.csr -req \
                       -out     $sslcrtdir/ca.crt
@@ -522,9 +563,6 @@ EOT
         echo "______________________________________________________________________"
         echo ""
         echo "${T_MD}STEP 4: Generating $algo private key for SERVER (1024 bit) [server.key]${T_ME}"
-        if [ ! -f $HOME/.rnd ]; then
-            touch $HOME/.rnd
-        fi
         if [ ".$algo" = .RSA ]; then
             if [ ".$randfiles" != . ]; then
                 $openssl genrsa -rand $randfiles -out $sslkeydir/server.key 1024
@@ -537,9 +575,12 @@ EOT
             fi
         else
             if [ ".$randfiles" != . ]; then
-                $openssl gendsa -rand $randfiles -out $sslkeydir/server.key $sslprmdir/ca.prm
+                (umask 077
+                 $openssl gendsa -rand $randfiles \
+                                 -out $sslkeydir/server.key $sslprmdir/ca.prm)
             else
-                $openssl gendsa -out $sslkeydir/server.key $sslprmdir/ca.prm
+                (umask 077
+                 $openssl gendsa -out $sslkeydir/server.key $sslprmdir/ca.prm)
             fi
             if [ $? -ne 0 ]; then
                 echo "mkcert.sh:Error: Failed to generate DSA private key" 1>&2
@@ -582,6 +623,12 @@ EOT
             exit 1
         fi
         rm -f .mkcert.cfg
+        prompt="8. Certificate Validity     (days)          [365]:"
+        echo dummy | awk '{ printf("%s", prompt); }' "prompt=$prompt"
+        read days
+        if [ ".$days" = . ]; then
+            days=365
+        fi
         echo "______________________________________________________________________"
         echo ""
         echo "${T_MD}STEP 6: Generating X.509 certificate signed by own CA [server.crt]${T_ME}"
@@ -602,7 +649,7 @@ EOT
             echo '01' >.mkcert.serial
         fi
         $openssl x509 $extfile \
-                      -days 365 \
+                      -days $days \
                       -CAserial .mkcert.serial \
                       -CA    $sslcrtdir/ca.crt \
                       -CAkey $sslkeydir/ca.key \
@@ -650,19 +697,21 @@ EOT
         done
         if [ ".$rc" = .y ]; then
             if [ ".$algo" = .RSA ]; then
-                $openssl rsa -des3 \
-                             -in  $sslkeydir/ca.key \
-                             -out $sslkeydir/ca.key.crypt
+                (umask 077
+                 $openssl rsa -des3 \
+                              -in  $sslkeydir/ca.key \
+                              -out $sslkeydir/ca.key.crypt)
             else
-                $openssl dsa -des3 \
-                             -in  $sslkeydir/ca.key \
-                             -out $sslkeydir/ca.key.crypt
+                (umask 077
+                 $openssl dsa -des3 \
+                              -in  $sslkeydir/ca.key \
+                              -out $sslkeydir/ca.key.crypt)
             fi
             if [ $? -ne 0 ]; then
                 echo "mkcert.sh:Error: Failed to encrypt $algo private key" 1>&2
                 exit 1
             fi
-            cp $sslkeydir/ca.key.crypt $sslkeydir/ca.key
+            (umask 077; cp $sslkeydir/ca.key.crypt $sslkeydir/ca.key)
             rm -f $sslkeydir/ca.key.crypt
             echo "Fine, you're using an encrypted private key."
         else
@@ -689,19 +738,21 @@ EOT
         done
         if [ ".$rc" = .y ]; then
             if [ ".$algo" = .RSA ]; then
-                $openssl rsa -des3 \
-                             -in  $sslkeydir/server.key \
-                             -out $sslkeydir/server.key.crypt
+                (umask 077
+                 $openssl rsa -des3 \
+                              -in  $sslkeydir/server.key \
+                              -out $sslkeydir/server.key.crypt)
             else
-                $openssl dsa -des3 \
-                             -in  $sslkeydir/server.key \
-                             -out $sslkeydir/server.key.crypt
+                (umask 077
+                 $openssl dsa -des3 \
+                              -in  $sslkeydir/server.key \
+                              -out $sslkeydir/server.key.crypt)
             fi
             if [ $? -ne 0 ]; then
                 echo "mkcert.sh:Error: Failed to encrypt $algo private key" 1>&2
                 exit 1
             fi
-            cp $sslkeydir/server.key.crypt $sslkeydir/server.key
+            (umask 077; cp $sslkeydir/server.key.crypt $sslkeydir/server.key)
             rm -f $sslkeydir/server.key.crypt
             echo "Fine, you're using an encrypted $algo private key."
         else
@@ -762,9 +813,11 @@ EOT
                 exit 1
             fi
             cp $crt $sslcrtdir/server.crt
-            cp $key $sslkeydir/server.key
+            (umask 077; cp $key $sslkeydir/server.key)
         else
             key=$crt
+            umask 077
+            touch $sslkeydir/server.key
             sed -e '/-----BEGIN CERTIFICATE/,/-----END CERTIFICATE/p' -e '/.*/d' \
                 <$crt >$sslcrtdir/server.crt
             sed -e '/-----BEGIN ... PRIVATE KEY/,/-----END ... PRIVATE KEY/p' -e '/.*/d' \

@@ -1,4 +1,4 @@
-.\"	$OpenBSD: zic.8,v 1.9 1999/07/09 13:35:21 aaron Exp $
+.\"	$OpenBSD: zic.8,v 1.12 2000/04/16 16:24:04 d Exp $
 .Dd May 23, 1999
 .Dt ZIC 8
 .Os
@@ -67,8 +67,8 @@ when checking year types (see below).
 .El
 .Pp
 Input lines are made up of fields.
-Fields are separated from one another by any number of white space characters.
-Leading and trailing white space on input lines is ignored.
+Fields are separated from one another by any number of whitespace characters.
+Leading and trailing whitespace on input lines is ignored.
 An unquoted sharp character (#) in the input introduces a comment which extends
 to the end of the line the sharp character appears on.
 White space characters and sharp characters may be enclosed in double quotes
@@ -176,6 +176,8 @@ time in hours and minutes
 24-hour format time (for times after noon)
 .It 1:28:14
 time in hours, minutes, and seconds
+.It \&-
+equivalent to 0
 .El
 .Pp
 where hour 0 is midnight at the start of the day,
@@ -376,6 +378,8 @@ field of the earliest transition time's rule to ensure that
 the earliest transition time recorded in the compiled file is correct.
 .Sh FILES
 .Bl -tag -width "/usr/share/zoneinfo" -compact
+.It Pa /etc/localtime
+link to local time zone
 .It Pa /usr/share/zoneinfo
 standard directory used for created files
 .El
@@ -383,4 +387,4 @@ standard directory used for created files
 .Xr ctime 3 ,
 .Xr tzfile 5 ,
 .Xr zdump 8
-.\" @(#)zic.8	7.18
+.\" @(#)zic.8	7.19

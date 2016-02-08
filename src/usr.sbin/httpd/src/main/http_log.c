@@ -168,7 +168,10 @@ static int error_log_child(void *cmd, child_info *pinfo)
     /* No concept of a child process on Win32 */
     signal(SIGHUP, SIG_IGN);
 #endif /* ndef SIGHUP */
-#if defined(WIN32)
+#if defined(NETWARE)
+    child_pid = spawnlp(P_NOWAIT, SHELL_PATH, (char *)cmd);
+    return(child_pid);
+#elif defined(WIN32)
     child_pid = spawnl(_P_NOWAIT, SHELL_PATH, SHELL_PATH, "/c", (char *)cmd, NULL);
     return(child_pid);
 #elif defined(OS2)
@@ -407,7 +410,7 @@ static void log_error_core(const char *file, int line, int level,
 	    FORMAT_MESSAGE_FROM_SYSTEM,
 	    NULL,
 	    nErrorCode,
-	    MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT), // Default language
+	    MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT), /* Default language */
 	    (LPTSTR) errstr + len,
 	    sizeof(errstr) - len,
 	    NULL 
@@ -484,7 +487,8 @@ API_EXPORT(void) ap_log_rerror(const char *file, int line, int level,
     if (((level & APLOG_LEVELMASK) <= APLOG_WARNING)
 	&& (ap_table_get(r->notes, "error-notes") == NULL)) {
 	ap_table_setn(r->notes, "error-notes",
-		      ap_pvsprintf(r->pool, fmt, args));
+		      ap_escape_html(r->pool, ap_pvsprintf(r->pool, fmt, 
+		      args)));
     }
     va_end(args);
 }
@@ -495,6 +499,9 @@ void ap_log_pid(pool *p, char *fname)
     struct stat finfo;
     static pid_t saved_pid = -1;
     pid_t mypid;
+#ifndef WIN32
+    mode_t u;
+#endif
 
     if (!fname) 
 	return;
@@ -516,12 +523,19 @@ void ap_log_pid(pool *p, char *fname)
 		   );
     }
 
+#ifndef WIN32
+    u = umask(022);
+    (void) umask(u | 022);
+#endif
     if(!(pid_file = fopen(fname, "w"))) {
 	perror("fopen");
         fprintf(stderr, "%s: could not log pid to file %s\n",
 		ap_server_argv0, fname);
         exit(1);
     }
+#ifndef WIN32
+    (void) umask(u);
+#endif
     fprintf(pid_file, "%ld\n", (long)mypid);
     fclose(pid_file);
     saved_pid = mypid;
@@ -570,6 +584,7 @@ API_EXPORT(void) ap_log_assert(const char *szExp, const char *szFile, int nLine)
 
 /* piped log support */
 
+#ifndef NO_PIPED_LOGS
 #ifndef NO_RELIABLE_PIPED_LOGS
 /* forward declaration */
 static void piped_log_maintenance(int reason, void *data, ap_wait_t status);
@@ -725,7 +740,10 @@ static int piped_log_child(void *cmd, child_info *pinfo)
 #ifdef SIGHUP
     signal(SIGHUP, SIG_IGN);
 #endif
-#if defined(WIN32)
+#if defined(NETWARE)
+    child_pid = spawnlp(P_NOWAIT, SHELL_PATH, (char *)cmd);
+    return(child_pid);
+#elif defined(WIN32)
     child_pid = spawnl(_P_NOWAIT, SHELL_PATH, SHELL_PATH, "/c", (char *)cmd, NULL);
     return(child_pid);
 #elif defined(OS2)
@@ -746,18 +764,8 @@ API_EXPORT(piped_log *) ap_open_piped_log(pool *p, const char *program)
 {
     piped_log *pl;
     FILE *dummy;
-#ifdef TPF
-    TPF_FORK_CHILD cld;
-    cld.filename = (char *)program;
-    cld.subprocess_env = NULL;
-    cld.prog_type = FORK_NAME;
-
-    if (!ap_spawn_child (p, NULL, &cld,
-      kill_after_timeout, &dummy, NULL, NULL)){
-#else
     if (!ap_spawn_child(p, piped_log_child, (void *)program,
 			kill_after_timeout, &dummy, NULL, NULL)) {
-#endif /* TPF */
 	perror("ap_spawn_child");
 	fprintf(stderr, "Couldn't fork child for piped log process\n");
 	exit (1);
@@ -774,4 +782,5 @@ API_EXPORT(void) ap_close_piped_log(piped_log *pl)
 {
     ap_pfclose(pl->p, pl->write_f);
 }
+#endif
 #endif

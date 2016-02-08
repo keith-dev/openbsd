@@ -1,4 +1,5 @@
 #
+#	$OpenBSD: mr.profile,v 1.6 2000/05/02 21:46:11 miod Exp $
 #	$NetBSD: mr.profile,v 1.2.6.1 1996/08/29 03:21:13 gwr Exp $
 #
 # Copyright (c) 1995 Jason R. Thorpe
@@ -49,7 +50,7 @@ update
 # (nah, ansi is good enough)
 
 # run the installation script.
-echo 'To install NetBSD, enter the command:  install'
+echo 'To install OpenBSD, enter the command:  install'
 echo 'Otherwise, enter the command:  halt'
 # /install  XXX - Not yet...
 

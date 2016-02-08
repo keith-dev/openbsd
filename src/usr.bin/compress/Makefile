@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.9 1997/07/07 02:57:04 deraadt Exp $
+#	$OpenBSD: Makefile,v 1.11 1999/11/18 01:52:11 millert Exp $
 
 PROG=	compress
 SRCS=	main.c zopen.c gzopen.c

@@ -8,7 +8,7 @@
  */
 
 #if defined(LIBC_SCCS) && !defined(lint)
-static char rcsid[] = "$OpenBSD: malloc.c,v 1.36 1999/09/16 19:06:06 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: malloc.c,v 1.40 2000/04/10 19:36:29 deraadt Exp $";
 #endif /* LIBC_SCCS and not lint */
 
 /*
@@ -69,7 +69,7 @@ static char rcsid[] = "$OpenBSD: malloc.c,v 1.36 1999/09/16 19:06:06 deraadt Exp
 #endif /* __i386__ && __FreeBSD__ */
 
 #if defined(__sparc__) && !defined(__OpenBSD__)
-#   define malloc_pageshirt		12U
+#   define malloc_pageshift		12U
 #   define malloc_minsize		16U
 #   define MAP_ANON			(0)
 #   define USE_DEV_ZERO
@@ -1245,6 +1245,7 @@ free(void *ptr)
     if (malloc_active++) {
 	wrtwarning("recursive call.\n");
         malloc_active--;
+	THREAD_UNLOCK();
 	return;
     }
     ifree(ptr);

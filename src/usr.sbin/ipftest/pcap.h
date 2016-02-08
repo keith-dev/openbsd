@@ -1,11 +1,12 @@
-/*     $OpenBSD: pcap.h,v 1.6 1999/02/05 05:58:47 deraadt Exp $     */
+/*	$OpenBSD: pcap.h,v 1.10 2000/03/13 23:40:20 kjell Exp $	*/
+
 /*
  * Copyright (C) 1993-1998 by Darren Reed.
  *
  * Redistribution and use in source and binary forms are permitted
  * provided that this notice is preserved and due credit is given
  * to the original author and the contributors.
- * $Id: pcap.h,v 1.6 1999/02/05 05:58:47 deraadt Exp $
+ * $IPFilter: pcap.h,v 2.1 1999/08/04 17:30:17 darrenr Exp $
  */
 /*
  * This header file is constructed to match the version described by

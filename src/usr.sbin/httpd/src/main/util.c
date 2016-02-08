@@ -127,6 +127,8 @@ API_EXPORT(char *) ap_field_noparam(pool *p, const char *intype)
 {
     const char *semi;
 
+    if (intype == NULL) return NULL;
+
     semi = strchr(intype, ';');
     if (semi == NULL) {
 	return ap_pstrdup(p, intype);
@@ -301,6 +303,38 @@ API_EXPORT(int) ap_is_matchexp(const char *str)
     return 0;
 }
 
+/*
+ * Similar to standard strstr() but we ignore case in this version.
+ * Based on the strstr() implementation further below.
+ */
+API_EXPORT(char *) ap_strcasestr(const char *s1, const char *s2)
+{
+    char *p1, *p2;
+    if (*s2 == '\0') {
+	/* an empty s2 */
+        return((char *)s1);
+    }
+    while(1) {
+	for ( ; (*s1 != '\0') && (ap_tolower(*s1) != ap_tolower(*s2)); s1++);
+	if (*s1 == '\0') return(NULL);
+	/* found first character of s2, see if the rest matches */
+        p1 = (char *)s1;
+        p2 = (char *)s2;
+        while (ap_tolower(*++p1) == ap_tolower(*++p2)) {
+            if (*p1 == '\0') {
+                /* both strings ended together */
+                return((char *)s1);
+            }
+        }
+        if (*p2 == '\0') {
+            /* second string ended, a match */
+            break;
+        }
+	/* didn't find a match here, try starting at next character in s1 */
+        s1++;
+    }
+    return((char *)s1);
+}
 /* 
  * Apache stub function for the regex libraries regexec() to make sure the
  * whole regex(3) API is available through the Apache (exported) namespace.
@@ -807,7 +841,11 @@ API_EXPORT(configfile_t *) ap_pcfg_openfile(pool *p, const char *name)
         return NULL;
     }
 
+#ifdef FOPEN_REQUIRES_T
+    file = ap_pfopen(p, name, "rt");
+#else
     file = ap_pfopen(p, name, "r");
+#endif
 #ifdef DEBUG
     saved_errno = errno;
     ap_log_error(APLOG_MARK, APLOG_DEBUG | APLOG_NOERRNO, NULL,
@@ -1377,7 +1415,7 @@ API_EXPORT(char *) ap_escape_shell_cmd(pool *p, const char *str)
     s = (const unsigned char *)str;
     for (; *s; ++s) {
 
-#if defined(OS2) || defined(WIN32)
+#if defined(OS2) || defined(WIN32) || defined(NETWARE)
 	/* Don't allow '&' in parameters under OS/2. */
 	/* This can be used to send commands to the shell. */
 	if (*s == '&') {
@@ -1469,7 +1507,7 @@ API_EXPORT(char *) ap_construct_server(pool *p, const char *hostname,
 
 /* c2x takes an unsigned, and expects the caller has guaranteed that
  * 0 <= what < 256... which usually means that you have to cast to
- * unsigned char first, because (unsigned)(char)(x) fist goes through
+ * unsigned char first, because (unsigned)(char)(x) first goes through
  * signed extension to an int before the unsigned cast.
  *
  * The reason for this assumption is to assist gcc code generation --
@@ -1481,6 +1519,9 @@ static const char c2x_table[] = "0123456789abcdef";
 
 static ap_inline unsigned char *c2x(unsigned what, unsigned char *where)
 {
+#ifdef CHARSET_EBCDIC
+    what = os_toascii[what];
+#endif /*CHARSET_EBCDIC*/
     *where++ = '%';
     *where++ = c2x_table[what >> 4];
     *where++ = c2x_table[what & 0xf];
@@ -1637,7 +1678,7 @@ API_EXPORT(int) ap_can_exec(const struct stat *finfo)
 #ifdef MULTIPLE_GROUPS
     int cnt;
 #endif
-#if defined(OS2) || defined(WIN32)
+#if defined(OS2) || defined(WIN32) || defined(NETWARE)
     /* OS/2 dosen't have Users and Groups */
     return 1;
 #else
@@ -1746,7 +1787,7 @@ char *strstr(char *s1, char *s2)
 #ifdef NEED_INITGROUPS
 int initgroups(const char *name, gid_t basegid)
 {
-#if defined(QNX) || defined(MPE) || defined(BEOS) || defined(_OSD_POSIX) || defined(TPF) || defined(__TANDEM)
+#if defined(QNX) || defined(MPE) || defined(BEOS) || defined(TPF) || defined(__TANDEM) || defined(NETWARE)
 /* QNX, MPE and BeOS do not appear to support supplementary groups. */
     return 0;
 #else /* ndef QNX */
@@ -1826,7 +1867,7 @@ API_EXPORT(void) ap_str_tolower(char *str)
 
 API_EXPORT(uid_t) ap_uname2id(const char *name)
 {
-#ifdef WIN32
+#if defined(WIN32) || defined(NETWARE)
     return (1);
 #else
     struct passwd *ent;
@@ -1844,7 +1885,7 @@ API_EXPORT(uid_t) ap_uname2id(const char *name)
 
 API_EXPORT(gid_t) ap_gname2id(const char *name)
 {
-#ifdef WIN32
+#if defined(WIN32) || defined(NETWARE)
     return (1);
 #else
     struct group *ent;
@@ -1934,7 +1975,7 @@ char *ap_get_local_host(pool *a)
 #ifndef MAXHOSTNAMELEN
 #define MAXHOSTNAMELEN 256
 #endif
-    char str[MAXHOSTNAMELEN + 1];
+    char str[MAXHOSTNAMELEN];
     char *server_hostname;
     struct hostent *p;
 
@@ -1946,7 +1987,7 @@ char *ap_get_local_host(pool *a)
 	perror("Unable to gethostname");
 	exit(1);
     }
-    str[MAXHOSTNAMELEN] = '\0';
+    str[sizeof(str) - 1] = '\0';
     if ((!(p = gethostbyname(str))) || (!(server_hostname = find_fqdn(a, p)))) {
 	fprintf(stderr, "%s: cannot determine local host name.\n",
 		ap_server_argv0);

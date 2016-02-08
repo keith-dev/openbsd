@@ -1,11 +1,39 @@
 #include "includes.h"
-RCSID("$Id: auth-skey.c,v 1.2 1999/10/16 20:57:52 deraadt Exp $");
+RCSID("$Id: auth-skey.c,v 1.6 2000/04/14 10:30:29 markus Exp $");
 
 #include "ssh.h"
+#include "packet.h"
 #include <sha1.h>
 
-/* from %OpenBSD: skeylogin.c,v 1.32 1999/08/16 14:46:56 millert Exp % */
+/*
+ * try skey authentication,
+ * return 1 on success, 0 on failure, -1 if skey is not available
+ */
 
+int
+auth_skey_password(struct passwd * pw, const char *password)
+{
+	if (strncasecmp(password, "s/key", 5) == 0) {
+		char *skeyinfo = skey_keyinfo(pw->pw_name);
+		if (skeyinfo == NULL) {
+			debug("generating fake skeyinfo for %.100s.",
+			    pw->pw_name);
+			skeyinfo = skey_fake_keyinfo(pw->pw_name);
+		}
+		if (skeyinfo != NULL)
+			packet_send_debug(skeyinfo);
+		/* Try again. */
+		return 0;
+	} else if (skey_haskey(pw->pw_name) == 0 &&
+		   skey_passcheck(pw->pw_name, (char *) password) != -1) {
+		/* Authentication succeeded. */
+		return 1;
+	}
+	/* Fall back to ordinary passwd authentication. */
+	return -1;
+}
+
+/* from %OpenBSD: skeylogin.c,v 1.32 1999/08/16 14:46:56 millert Exp % */
 
 #define ROUND(x)   (((x)[0] << 24) + (((x)[1]) << 16) + (((x)[2]) << 8) + \
 		    ((x)[3]))
@@ -15,21 +43,22 @@ RCSID("$Id: auth-skey.c,v 1.2 1999/10/16 20:57:52 deraadt Exp $");
  */
 static u_int32_t
 hash_collapse(s)
-        u_char *s;
+	u_char *s;
 {
-        int len, target;
+	int len, target;
 	u_int32_t i;
 	
 	if ((strlen(s) % sizeof(u_int32_t)) == 0)
-  		target = strlen(s);    /* Multiple of 4 */
+		target = strlen(s);    /* Multiple of 4 */
 	else
 		target = strlen(s) - (strlen(s) % sizeof(u_int32_t));
-  
+
 	for (i = 0, len = 0; len < target; len += 4)
-        	i ^= ROUND(s + len);
+		i ^= ROUND(s + len);
 
 	return i;
 }
+
 char *
 skey_fake_keyinfo(char *username)
 {
@@ -75,6 +104,7 @@ skey_fake_keyinfo(char *username)
 		    SEEK_SET) != -1 && read(fd, hseed,
 		    SKEY_MAX_SEED_LEN) == SKEY_MAX_SEED_LEN) {
 			close(fd);
+			fd = -1;
 			secret = hseed;
 			secretlen = SKEY_MAX_SEED_LEN;
 			flg = 0;
@@ -84,6 +114,8 @@ skey_fake_keyinfo(char *username)
 			secretlen = strlen(secret);
 			flg = 0;
 		}
+		if (fd != -1)
+			close(fd);
 	}
 
 	/* Put that in your pipe and smoke it */

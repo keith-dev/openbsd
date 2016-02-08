@@ -60,7 +60,7 @@ The resources which are currently controllable are:
 .Bl -tag -width LIM_NORAISE
 .It Dv LIM_NORAISE
 A pseudo-limit; if set non-zero then the limits may not be raised.
-Only the super-user may remove the
+Only the superuser may remove the
 .Em noraise
 restriction.
 .It Dv LIM_CPU
@@ -81,7 +81,7 @@ the size of the largest core dump that will be created.
 a soft limit for the amount of physical memory (in bytes) to be given
 to the program.  If memory is tight, the system will prefer to take memory
 from processes which are exceeding their declared
-.Dv LIM_MAXRSS.
+.Dv LIM_MAXRSS .
 .El
 .Pp
 Because this information is stored in the per-process information

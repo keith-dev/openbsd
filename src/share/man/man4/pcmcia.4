@@ -1,9 +1,9 @@
-.\"	$OpenBSD: pcmcia.4,v 1.8 1999/08/23 21:42:59 fgsch Exp $
+.\"	$OpenBSD: pcmcia.4,v 1.12 2000/04/28 06:55:53 deraadt Exp $
 .\"	$NetBSD: pcmcia.4,v 1.4 1998/06/07 09:10:30 enami Exp $
+.\"
 .\" Copyright (c) 1997 The NetBSD Foundation, Inc.
 .\" All rights reserved.
 .\"
-
 .\" Redistribution and use in source and binary forms, with or without
 .\" modification, are permitted provided that the following conditions
 .\" are met:
@@ -55,58 +55,55 @@ The following devices are supported, sorted by function
 and driver name:
 .Pp
 .Ss Serial interfaces and modems
-.Bl -tag -width speaker -offset indent -compact
-.It com
+.Bl -tag -width speaker -offset ind -compact
+.It Xr com 4 , Xr pccom 4
 8250/16450/16550-compatible PCMCIA serial cards and modems.
-.It pccom
-8250/16450/16550-compatible PCMCIA serial cards and modems.
-i386-specific driver.
 .El
 .Pp
 .Ss Network interfaces
-.Bl -tag -width speaker -offset indent -compact
-.It cnw
+.Bl -tag -width speaker -offset ind -compact
+.It Xr an 4
+Aironet Communications 4500/4800 IEEE 802.11DS wireless controller.
+.It Xr awi 4
+BayStack 650 wireless 802.11FH wireless controller.
+.It Xr cnw 4
 Xircom Creditcard Netwave cards.
-.It ep
+.It Xr ep 4
 3com 3c589 Etherlink-III ethernet cards.
-.It ne
+.It Xr ne 4
 NE2000 compatible cards.
-.It rln
+.It Xr ray 4
+Raytheon Raylink / WebGear Aviator IEEE 802.11FH 2Mbps wireless controller.
+.It Xr rln 4
 Proxim RangeLAN2 PC-Card
-.It sm
+.It Xr sm 4
 Megahertz ethernet cards.
-.It xe
+.It Xr wi 4
+Lucent WaveLAN IEEE 802.11DS and compatible cards.
+.It Xr xe 4
 Xircom 16bit ethernet cards.
-.It wi
-WaveLAN IEEE 802.11-compatible cards.
 .El
 .Pp
 .Ss SCSI controllers
-.Bl -tag -width speaker -offset indent -compact
-.It aic
+.Bl -tag -width speaker -offset ind -compact
+.It Xr aic 4
 Adaptec APA-14[56]0 and NewMedia BusToaster SCSI controller cards.
 .El
 .Ss IDE controllers
-.Bl -tag -width speaker -offset indent -compact
-.It wdc
+.Bl -tag -width speaker -offset ind -compact
+.It Xr wdc 4
 Devices which implement an ATA/IDE interface, such as mini disk drives,
-CDROMS.  This includes flash cards which emulate a disk drive.
+CDROMS.  This includes Compact Flash cards which emulate a disk drive.
 .El
 .Pp
 The supported PCMCIA controllers are those that are i82365 compatible.
 .Sh SEE ALSO
-.Xr aic 4 ,
-.Xr com 4 ,
-.Xr cnw 4 ,
-.Xr ep 4 ,
+.Xr cardbus 4 ,
 .Xr intro 4 ,
 .Xr isa 4 ,
-.Xr ne 4 ,
-.Xr pccom 4 ,
-.Xr sm 4 ,
-.Xr wdc 4 ,
-.Xr wi 4 ,
-.Xr xe 4
+.Xr isapnp 4 ,
+.Xr pci 4 ,
+.Xr usb 4
 .Sh HISTORY
 The
 .Nm

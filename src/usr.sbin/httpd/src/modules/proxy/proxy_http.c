@@ -97,7 +97,8 @@ int ap_proxy_http_canon(request_rec *r, char *url, const char *scheme, int def_p
 	search = r->args;
 
 /* process path */
-    path = ap_proxy_canonenc(r->pool, url, strlen(url), enc_path, r->proxyreq);
+    path = ap_proxy_canonenc(r->pool, url, strlen(url), enc_path,
+			     r->proxyreq);
     if (path == NULL)
 	return HTTP_BAD_REQUEST;
 
@@ -188,6 +189,9 @@ int ap_proxy_http_handler(request_rec *r, cache_req *c, char *url,
     const char *urlptr = NULL;
     const char *datestr;
     struct tbl_do_args tdo;
+#ifdef EAPI
+    char *peer;
+#endif
 
     void *sconf = r->server->module_config;
     proxy_server_conf *conf =
@@ -248,12 +252,18 @@ int ap_proxy_http_handler(request_rec *r, cache_req *c, char *url,
 	err = ap_proxy_host2addr(proxyhost, &server_hp);
 	if (err != NULL)
 	    return DECLINED;	/* try another */
+#ifdef EAPI
+	peer = ap_psprintf(p, "%s:%u", proxyhost, proxyport);  
+#endif
     }
     else {
 	server.sin_port = htons(destport);
 	err = ap_proxy_host2addr(desthost, &server_hp);
 	if (err != NULL)
 	    return ap_proxyerror(r, HTTP_INTERNAL_SERVER_ERROR, err);
+#ifdef EAPI
+	peer =  ap_psprintf(p, "%s:%u", desthost, destport);  
+#endif
     }
 
     sock = ap_psocket(p, PF_INET, SOCK_STREAM, IPPROTO_TCP);
@@ -263,6 +273,7 @@ int ap_proxy_http_handler(request_rec *r, cache_req *c, char *url,
 	return HTTP_INTERNAL_SERVER_ERROR;
     }
 
+#ifndef TPF
     if (conf->recv_buffer_size) {
 	if (setsockopt(sock, SOL_SOCKET, SO_RCVBUF,
 		       (const char *) &conf->recv_buffer_size, sizeof(int))
@@ -271,6 +282,7 @@ int ap_proxy_http_handler(request_rec *r, cache_req *c, char *url,
 			 "setsockopt(SO_RCVBUF): Failed to set ProxyReceiveBufferSize, using default");
 	}
     }
+#endif
 
 #ifdef SINIX_D_RESOLVER_BUG
     {
@@ -312,9 +324,9 @@ int ap_proxy_http_handler(request_rec *r, cache_req *c, char *url,
     {
         char *errmsg = NULL;
         ap_hook_use("ap::mod_proxy::http::handler::new_connection", 
-                    AP_HOOK_SIG3(ptr,ptr,ptr), 
+                    AP_HOOK_SIG4(ptr,ptr,ptr,ptr), 
                     AP_HOOK_DECLINE(NULL),
-                    &errmsg, r, f);
+                    &errmsg, r, f, peer);
         if (errmsg != NULL)
             return ap_proxyerror(r, HTTP_BAD_GATEWAY, errmsg);
     }

@@ -1,4 +1,4 @@
-/*	$OpenBSD: cmd.c,v 1.1 1999/10/04 20:00:50 deraadt Exp $ */
+/*	$OpenBSD: cmd.c,v 1.3 2000/02/27 21:10:01 deraadt Exp $ */
 
 /*
  * Copyright (c) 1999 Mats O Jansson.  All rights reserved.
@@ -30,17 +30,22 @@
  */
 
 #ifndef LINT
-static char rcsid[] = "$OpenBSD: cmd.c,v 1.1 1999/10/04 20:00:50 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: cmd.c,v 1.3 2000/02/27 21:10:01 deraadt Exp $";
 #endif
 
+#include <sys/types.h>
+#include <sys/device.h>
+#include <sys/time.h>
+#include <ctype.h>
 #include <stdio.h>
 #include <limits.h>
 #include <nlist.h>
-#include <sys/device.h>
+#include <string.h>
 #include "misc.h"
 #define	CMD_NOEXTERN
 #include "cmd.h"
 #include "ukc.h"
+#include "exec.h"
 
 /* Our command table */
 cmd_table_t cmd_table[] = {
@@ -56,6 +61,7 @@ cmd_table_t cmd_table[] = {
 	{"show",   Xshow,	"[attr [val]]\t",	"Show attribute"},
 	{"exit",   Xexit,	"\t\t",		"Exit, without saving changes"},
 	{"quit",   Xquit,	"\t\t",		"Quit, saving current changes"},
+	{"timezone", Xtimezone,	"[mins [dst]]\t",	"Show/change timezone"},
 	{NULL,     NULL,	NULL,		NULL}
 };
 
@@ -253,4 +259,36 @@ Xexit(cmd)
 {
 	/* Nothing to do here */
 	return (CMD_EXIT);
+}
+
+int
+Xtimezone(cmd)
+	cmd_t *cmd;
+{
+	struct timezone *tz;
+	int	num;
+	char	*c;
+
+	tz = (struct timezone *)adjust((caddr_t)(nl[TZ_TZ].n_value));
+
+	if (strlen(cmd->args) == 0) {
+		printf("timezone = %d, dst = %d\n", 
+		    tz->tz_minuteswest, tz->tz_dsttime);
+	} else {
+		if (number(cmd->args, &num) == 0) {
+			tz->tz_minuteswest = num;
+			c = cmd->args; 
+			while ((*c != '\0') && !isspace(*c))
+				c++;
+			while ((*c != '\0') && isspace(*c))
+				c++;
+			if (strlen(c) != 0 && number(c, &num) == 0)
+				tz->tz_dsttime = num;
+			printf("timezone = %d, dst = %d\n", 
+			    tz->tz_minuteswest, tz->tz_dsttime);
+		} else 
+			printf("Unknown argument\n");
+	}
+
+	return (CMD_CONT);
 }

@@ -1,6 +1,6 @@
 #if defined(LIBC_SCCS) && !defined(lint) && !defined(NOID)
-static char elsieid[] = "@(#)zic.c	7.99";
-static char rcsid[] = "$OpenBSD: zic.c,v 1.10 1999/07/01 23:05:39 d Exp $";
+static char elsieid[] = "@(#)zic.c	7.100";
+static char rcsid[] = "$OpenBSD: zic.c,v 1.13 2000/04/16 16:24:04 d Exp $";
 #endif /* LIBC_SCCS and not lint */
 
 #include "private.h"
@@ -613,18 +613,8 @@ const char * const	tofile;
 
 		result = link(fromname, toname);
 #if (HAVE_SYMLINK - 0) 
-		if (result != 0) {
-		        char *s = (char *) tofile;
-		        register char * symlinkcontents = NULL;
-		        while ((s = strchr(s+1, '/')) != NULL)
-			        symlinkcontents = ecatalloc(symlinkcontents, "../");
-			symlinkcontents = ecatalloc(symlinkcontents, fromfile);
-
-			result = symlink(symlinkcontents, toname);
-			if (result == 0)
-warning(_("hard link failed, symbolic link used"));
-			ifree(symlinkcontents);
-		}
+		if (result != 0 && errno == EXDEV)
+			result = symlink(fromname, toname);
 #endif
 		if (result != 0) {
 			const char *e = strerror(errno);
@@ -1905,10 +1895,12 @@ const char * const	type;
 	buf = erealloc(buf, (int) (132 + strlen(yitcommand) + strlen(type)));
 	(void) sprintf(buf, "%s %d %s", yitcommand, year, type);
 	result = system(buf);
-	if (result == 0)
-		return TRUE;
-	if (result == (1 << 8))
-		return FALSE;
+	if (WIFEXITED(result)) switch (WEXITSTATUS(result)) {
+		case 0:
+			return TRUE;
+		case 1:
+			return FALSE;
+	}
 	error(_("Wild result from command execution"));
 	(void) fprintf(stderr, _("%s: command was '%s', result was %d\n"),
 		progname, buf, result);

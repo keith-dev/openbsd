@@ -17,7 +17,7 @@
  * IMPLIED WARRANTIES, INCLUDING, WITHOUT LIMITATION, THE IMPLIED
  * WARRANTIES OF MERCHANTIBILITY AND FITNESS FOR A PARTICULAR PURPOSE.
  *
- * $Id: timer.c,v 1.5 1999/05/12 19:11:06 brian Exp $
+ * $OpenBSD: timer.c,v 1.8 2000/02/27 01:38:29 brian Exp $
  *
  *  TODO:
  */
@@ -35,14 +35,19 @@
 #include "descriptor.h"
 #include "prompt.h"
 
-static struct pppTimer *TimerList = NULL;
+
+#define RESTVAL(t) \
+    ((t).it_value.tv_sec * SECTICKS + (t).it_value.tv_usec / TICKUNIT + \
+     ((((t).it_value.tv_usec % TICKUNIT) >= (TICKUNIT >> 1)) ? 1 : 0))
+
+static struct pppTimer *TimerList = NULL, *ExpiredList = NULL;
 
 static void StopTimerNoBlock(struct pppTimer *);
 
 static const char *
 tState2Nam(u_int state)
 {
-  static const char *StateNames[] = { "stopped", "running", "expired" };
+  static const char * const StateNames[] = { "stopped", "running", "expired" };
 
   if (state >= sizeof StateNames / sizeof StateNames[0])
     return "unknown";
@@ -62,6 +67,7 @@ timer_Stop(struct pppTimer *tp)
 void
 timer_Start(struct pppTimer *tp)
 {
+  struct itimerval itimer;
   struct pppTimer *t, *pt;
   u_long ticks = 0;
   int omask;
@@ -76,6 +82,11 @@ timer_Start(struct pppTimer *tp)
     sigsetmask(omask);
     return;
   }
+
+  /* Adjust our first delta so that it reflects what's really happening */
+  if (TimerList && getitimer(ITIMER_REAL, &itimer) == 0)
+    TimerList->rest = RESTVAL(itimer);
+
   pt = NULL;
   for (t = TimerList; t; t = t->next) {
     if (ticks + t->rest >= tp->load)
@@ -99,7 +110,7 @@ timer_Start(struct pppTimer *tp)
     pt->next = tp;
   } else {
     TimerList = tp;
-    timer_InitService(0);	/* Start the Timer Service */
+    timer_InitService(t != NULL);	/* [re]Start the Timer Service */
   }
   if (t)
     t->rest -= tp->rest;
@@ -117,28 +128,49 @@ StopTimerNoBlock(struct pppTimer *tp)
    * A STOPPED timer isn't in any list, but may have a bogus [e]next field.
    * An EXPIRED timer is in the ->enext list.
    */
-  if (tp->state != TIMER_RUNNING) {
-    tp->next = NULL;
-    tp->state = TIMER_STOPPED;
+
+  if (tp->state == TIMER_STOPPED)
     return;
-  }
+
   pt = NULL;
   for (t = TimerList; t != tp && t != NULL; t = t->next)
     pt = t;
+
   if (t) {
-    if (pt) {
+    if (pt)
       pt->next = t->next;
-    } else {
+    else {
       TimerList = t->next;
       if (TimerList == NULL)	/* Last one ? */
 	timer_TermService();	/* Terminate Timer Service */
     }
-    if (t->next)
-      t->next->rest += tp->rest;
-  } else
-    log_Printf(LogERROR, "Oops, %s timer not found!!\n", tp->name);
+    if (t->next) {
+      if (!pt) {		/* t (tp) was the first in the list */
+        struct itimerval itimer;
 
-  tp->next = NULL;
+        if (getitimer(ITIMER_REAL, &itimer) == 0)
+          t->rest = RESTVAL(itimer);
+      }
+      t->next->rest += t->rest;
+      if (!pt)			/* t->next is now the first in the list */
+        timer_InitService(1);
+    }
+  } else {
+    /* Search for any pending expired timers */
+    pt = NULL;
+    for (t = ExpiredList; t != tp && t != NULL; t = t->enext)
+      pt = t;
+
+    if (t) {
+      if (pt)
+        pt->enext = t->enext;
+      else
+        ExpiredList = t->enext;
+    } else if (tp->state == TIMER_RUNNING)
+      log_Printf(LogERROR, "Oops, %s timer not found!!\n", tp->name);
+  }
+
+  tp->next = tp->enext = NULL;
   tp->state = TIMER_STOPPED;
 }
 
@@ -178,11 +210,11 @@ TimerService(void)
   
     /* Process all expired timers */
     while (exp) {
-      next = exp->enext;
+      ExpiredList = exp->enext;
       exp->enext = NULL;
       if (exp->func)
         (*exp->func)(exp->arg);
-      exp = next;
+      exp = ExpiredList;
     }
   }
 }
@@ -196,8 +228,7 @@ timer_Show(int LogLevel, struct prompt *prompt)
 
   /* Adjust our first delta so that it reflects what's really happening */
   if (TimerList && getitimer(ITIMER_REAL, &itimer) == 0)
-    TimerList->rest = itimer.it_value.tv_sec * SECTICKS +
-                      itimer.it_value.tv_usec / TICKUNIT;
+    TimerList->rest = RESTVAL(itimer);
 
 #define SECS(val)	((val) / SECTICKS)
 #define HSECS(val)	(((val) % SECTICKS) * 100 / SECTICKS)

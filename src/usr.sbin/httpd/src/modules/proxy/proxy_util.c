@@ -134,8 +134,8 @@ void ap_proxy_c2hex(int ch, char *x)
  * and encodes those which must be encoded, and does not touch
  * those which must not be touched.
  */
-char *
-     ap_proxy_canonenc(pool *p, const char *x, int len, enum enctype t, int isenc)
+char *ap_proxy_canonenc(pool *p, const char *x, int len, enum enctype t,
+			enum proxyreqtype isenc)
 {
     int i, j, ch;
     char *y;
@@ -177,7 +177,7 @@ char *
 	    continue;
 	}
 /* decode it if not already done */
-	if (isenc && ch == '%') {
+	if (isenc != NOT_PROXY && ch == '%') {
 	    if (!ap_isxdigit(x[i + 1]) || !ap_isxdigit(x[i + 2]))
 		return NULL;
 	    ch = ap_proxy_hex2c(&x[i + 1]);
@@ -280,7 +280,7 @@ char *
 	if (!ap_isdigit(host[i]) && host[i] != '.')
 	    break;
     /* must be an IP address */
-#ifdef WIN32
+#if defined(WIN32) || defined(NETWARE) || defined(TPF)
     if (host[i] == '\0' && (inet_addr(host) == -1))
 #else
     if (host[i] == '\0' && (ap_inet_addr(host) == -1 || inet_network(host) == -1))
@@ -517,7 +517,7 @@ long int ap_proxy_send_fb(BUFF *f, request_rec *r, cache_req *c)
 
     ap_kill_timeout(r);
 
-#ifdef WIN32
+#if defined(WIN32) || defined(TPF)
     /* works fine under win32, so leave it */
     ap_hard_timeout("proxy send body", r);
     alternate_timeouts = 0;
@@ -600,7 +600,7 @@ long int ap_proxy_send_fb(BUFF *f, request_rec *r, cache_req *c)
                          (c->len * c->cache_completion < total_bytes_rcvd);
 
                     if (! ok) {
-                        ap_pclosef(c->req->pool, c->fp->fd);
+                        ap_pclosef(c->req->pool, ap_bfileno(c->fp, B_WR));
                         c->fp = NULL;
                         unlink(c->tempfile);
 			c = NULL;
@@ -831,7 +831,7 @@ cache_req *ap_proxy_cache_error(cache_req *c)
 {
     if (c != NULL) {
 	if (c->fp != NULL) {
-	    ap_pclosef(c->req->pool, c->fp->fd);
+	    ap_pclosef(c->req->pool, ap_bfileno(c->fp, B_WR));
 	    c->fp = NULL;
 	}
 	if (c->tempfile) unlink(c->tempfile);
@@ -844,11 +844,15 @@ int ap_proxyerror(request_rec *r, int statuscode, const char *message)
     ap_table_setn(r->notes, "error-notes",
 		  ap_pstrcat(r->pool, 
 			     "The proxy server could not handle the request "
-			     "<EM><A HREF=\"", r->uri, "\">",
-			     r->method, "&nbsp;", r->uri, "</A></EM>.<P>\n"
-			     "Reason: <STRONG>", message, "</STRONG>", NULL));
+			     "<EM><A HREF=\"", ap_escape_uri(r->pool, r->uri),
+			     "\">", ap_escape_html(r->pool, r->method),
+			     "&nbsp;", 
+			     ap_escape_html(r->pool, r->uri), "</A></EM>.<P>\n"
+			     "Reason: <STRONG>",
+			     ap_escape_html(r->pool, message), 
+			     "</STRONG>", NULL));
 
-    /* Allow the "error-notes" string to be printed by ap_send_error_response() */
+    /* Allow "error-notes" string to be printed by ap_send_error_response() */
     ap_table_setn(r->notes, "verbose-error-to", ap_pstrdup(r->pool, "*"));
 
     r->status_line = ap_psprintf(r->pool, "%3.3u Proxy Error", statuscode);
@@ -1242,7 +1246,7 @@ int ap_proxy_doconnect(int sock, struct sockaddr_in *addr, request_rec *r)
     ap_hard_timeout("proxy connect", r);
     do {
 	i = connect(sock, (struct sockaddr *) addr, sizeof(struct sockaddr_in));
-#ifdef WIN32
+#if defined(WIN32) || defined(NETWARE)
 	if (i == SOCKET_ERROR)
 	    errno = WSAGetLastError();
 #endif /* WIN32 */

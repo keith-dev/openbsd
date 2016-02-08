@@ -1,7 +1,7 @@
-/*	$OpenBSD: perform.c,v 1.10 1999/10/09 20:35:45 beck Exp $	*/
+/*	$OpenBSD: perform.c,v 1.15 2000/05/01 19:44:10 espie Exp $	*/
 
 #ifndef lint
-static const char *rcsid = "$OpenBSD: perform.c,v 1.10 1999/10/09 20:35:45 beck Exp $";
+static const char *rcsid = "$OpenBSD: perform.c,v 1.15 2000/05/01 19:44:10 espie Exp $";
 #endif
 
 /*
@@ -28,6 +28,7 @@ static const char *rcsid = "$OpenBSD: perform.c,v 1.10 1999/10/09 20:35:45 beck 
 #include "lib.h"
 #include "add.h"
 
+#include <ctype.h>
 #include <signal.h>
 #include <sys/wait.h>
 
@@ -82,13 +83,11 @@ pkg_do(char *pkg)
     int code;
     plist_t *p;
     struct stat sb;
-    int inPlace;
 
     code = 0;
     zapLogDir = 0;
     LogDir[0] = '\0';
     strcpy(playpen, FirstPen);
-    inPlace = 0;
     dbdir = (tmp = getenv(PKG_DBDIR)) ? tmp : DEF_LOG_DIR;
 
     /* Are we coming in for a second pass, everything already extracted? */
@@ -166,32 +165,6 @@ pkg_do(char *pkg)
 	    read_plist(&Plist, cfile);
 	    fclose(cfile);
 
-	    /* Extract directly rather than moving?  Oh goodie! */
-	    if (find_plist_option(&Plist, "extract-in-place")) {
-		if (Verbose)
-		    printf("Doing in-place extraction for `%s'\n", pkg_fullname);
-		p = find_plist(&Plist, PLIST_CWD);
-		if (p) {
-		    if (!(isdir(p->name) || islinktodir(p->name)) && !Fake) {
-			if (Verbose)
-			    printf("Desired prefix of `%s' does not exist, creating\n", p->name);
-			vsystem("mkdir -p %s", p->name);
-		    }
-		    if (chdir(p->name) == -1) {
-			warn("unable to change directory to `%s'", p->name);
-			goto bomb;
-		    }
-		    where_to = p->name;
-		    inPlace = 1;
-		}
-		else {
-		    warnx(
-		"no prefix specified in `%s' - this is a bad package!",
-			pkg_fullname);
-		    goto bomb;
-		}
-	    }
-
 	    /*
 	     * Apply a crude heuristic to see how much space the package will
 	     * take up once it's unpacked.  I've noticed that most packages
@@ -200,7 +173,7 @@ pkg_do(char *pkg)
 	     * extracted the full file, anyway.
 	     */
 
-	    if (!extract && !inPlace && min_free(playpen) < sb.st_size * 4) {
+	    if (!extract && min_free(playpen) < sb.st_size * 4) {
 		warnx("projected size of %ld exceeds available free space\n"
 		       "Please set your PKG_TMPDIR variable to point to a"
 		       "location with more\n"
@@ -209,10 +182,6 @@ pkg_do(char *pkg)
 		       where_to);
 		goto bomb;
 	    }
-
-	    /* If this is a direct extract and we didn't want it, stop now */
-	    if (inPlace && Fake)
-		goto success;
 
 	    /* Finally unpack the whole mess.  If extract is null we already
 	       did so so don't bother doing it again. */
@@ -263,13 +232,26 @@ pkg_do(char *pkg)
 
 	if ((s=strrchr(PkgName, '-')) != NULL){
 	    strcpy(buf, PkgName);
+	    /* try to find a better version number */
+	    if (!isdigit(s[1])) {
+	    	char *t;
+		for (t = s-1; t >= PkgName; t--) 
+			if (*t == '-' && isdigit(t[1])) {
+				s = t;
+				break;
+			}
+	    }
 	    buf[s-PkgName+1]='*';
 	    buf[s-PkgName+2]='\0';
 
             if (findmatchingname(dbdir, buf, check_if_installed, installed)) {
 		warnx("other version '%s' already installed", installed);
-		code = 1;
-		goto success;	/* close enough for government work */
+	    	if (find_plist_option(&Plist, "no-default-conflict") != NULL) {
+		    warnx("proceeding with installation anyway");
+		} else {
+		    code = 1;
+		    goto success;	/* close enough for government work */
+		}
 	    }
 	}	
     }
@@ -418,9 +400,7 @@ pkg_do(char *pkg)
 	}
     }
 
-    /* Now finally extract the entire show if we're not going direct */
-    if (!inPlace && !Fake)
-	extract_plist(".", &Plist);
+    extract_plist(".", &Plist);
 
     if (!Fake && fexists(MTREE_FNAME)) {
 	if (Verbose)
@@ -546,7 +526,7 @@ pkg_do(char *pkg)
 	    Pager = "/usr/bin/more";
 
 	snprintf(buf, sizeof buf, "%s/%s", LogDir, p->name);
-	if (!stat(buf,&sbuf) || vsystem("%s %s", Pager, buf)) 
+	if (stat(buf,&sbuf) == -1 || vsystem("%s %s", Pager, buf)) 
 	    warnx("cannot open `%s' as display file", buf);
     }
 

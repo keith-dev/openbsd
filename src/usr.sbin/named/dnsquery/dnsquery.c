@@ -1,4 +1,4 @@
-/*	$OpenBSD: dnsquery.c,v 1.3 1997/03/12 10:41:49 downsj Exp $	*/
+/*	$OpenBSD: dnsquery.c,v 1.5 2000/02/01 03:24:02 deraadt Exp $	*/
 
 #include <stdio.h>
 #include <sys/types.h>
@@ -11,7 +11,6 @@
 
 #include "../conf/portability.h"
 
-extern int errno;
 extern int h_errno;
 extern char *h_errlist[];
 
@@ -53,7 +52,12 @@ char *argv[];
 		case 'p' :	_res.retrans = atoi(optarg);
 				break;
 
-		case 'h' :	strcpy(name, optarg);
+		case 'h' :	if (strlen(optarg) > sizeof(name)-1) {
+				    fprintf(stderr,
+				    "Domain name too long (%s)\n", optarg);
+					exit(-1);
+				}
+				strlcpy(name, optarg, sizeof name);
 				break;
 
 		case 'c' : {
@@ -130,8 +134,14 @@ char *argv[];
 				exit(-1);
 		}
 	}
-	if (optind < argc)
-		strcpy(name, argv[optind]);
+	if (optind < argc) {
+		if (strlen(argv[optind]) > sizeof(name)-1) {
+		    fprintf(stderr,
+		    "Domain name too long (%s)\n", argv[optind]);
+			exit(-1);
+		}
+		strlcpy(name, argv[optind], sizeof name);
+	}
 
 	len = sizeof(answer);
 

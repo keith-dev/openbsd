@@ -1,5 +1,5 @@
-#	$OpenBSD: Makefile,v 1.8 1999/08/26 22:28:24 niklas Exp $
-#	$EOM: Makefile,v 1.7 1999/08/13 15:13:04 ho Exp $
+#	$OpenBSD: Makefile,v 1.10 2000/04/07 22:07:18 niklas Exp $
+#	$EOM: Makefile,v 1.10 2000/03/28 21:23:24 ho Exp $
 
 #
 # Copyright (c) 1999 Niels Provos.  All rights reserved.
@@ -43,7 +43,8 @@ TOPSRC=		${.CURDIR}/../..
 TOPOBJ!=	cd ${TOPSRC}; printf "all:\n\t@pwd\n" |${MAKE} -f-
 OS!=		awk '/^OS=/ { print $$2 }' ${.CURDIR}/../../Makefile
 .PATH:		${TOPSRC} ${TOPSRC}/sysdep/${OS} ${TOPOBJ}
-CFLAGS+=	-I${TOPSRC} -I${TOPSRC}/sysdep/${OS} -I${TOPOBJ} -Wall
+CFLAGS+=	-I${TOPSRC} -I${TOPSRC}/sysdep/${OS} -I${TOPOBJ} -Wall \
+		-DUSE_DEBUG
 NOMAN=
 DEBUG=		-g
 
@@ -65,6 +66,11 @@ DPADD+=		${LIBCRYPTO}
 	@echo RSA cannot be used in this environmet, skipping...
 
 PROG=
+.else
+# USE_X509 is required for libcrypto.h to include the correct headers, 
+# but it is not set by ${OS}/Makefile.sysdep - setting it manually here 
+# should be safe enough.
+CFLAGS+=	-DUSE_X509
 .endif
 
 LDADD+=		${DESLIB}

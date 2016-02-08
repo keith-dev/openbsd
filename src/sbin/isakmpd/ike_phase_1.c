@@ -1,8 +1,9 @@
-/*	$OpenBSD: ike_phase_1.c,v 1.8 1999/10/01 14:07:42 niklas Exp $	*/
-/*	$EOM: ike_phase_1.c,v 1.11 1999/09/29 22:05:38 ho Exp $	*/
+/*	$OpenBSD: ike_phase_1.c,v 1.18 2000/04/07 22:05:48 niklas Exp $	*/
+/*	$EOM: ike_phase_1.c,v 1.25 2000/04/07 19:01:39 niklas Exp $	*/
 
 /*
- * Copyright (c) 1999 Niklas Hallqvist.  All rights reserved.
+ * Copyright (c) 1999, 2000 Niklas Hallqvist.  All rights reserved.
+ * Copyright (c) 1999, 2000 Angelos D. Keromytis.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -233,6 +234,17 @@ ike_phase_1_initiator_send_SA (struct message *msg)
 	      goto bail_out;
 	    }
 	}
+
+      /* We need to check that we actually support our configuration.  */
+      if (attribute_map (transform[i] + ISAKMP_TRANSFORM_SA_ATTRS_OFF,
+			 transform_len[i] - ISAKMP_TRANSFORM_SA_ATTRS_OFF,
+			 exchange->doi->is_attribute_incompatible, msg))
+	{
+	  log_error ("ike_phase_1_initiator_send_SA: "
+		     "section [%s] has unsupported attribute(s)",
+		     xf->field);
+	  goto bail_out;
+	}
     }
 
   /* XXX I don't like exchange-specific stuff in here.  */
@@ -410,7 +422,7 @@ ike_phase_1_initiator_send_KE_NONCE (struct message *msg)
   return ike_phase_1_send_KE_NONCE (msg, 16);
 }
 
-/* Accept receptor's public DH value and nonce.  */
+/* Accept responder's public DH value and nonce.  */
 int
 ike_phase_1_initiator_recv_KE_NONCE (struct message *msg)
 {
@@ -577,8 +589,8 @@ ike_phase_1_post_exchange_KE_NONCE (struct message *msg)
 		 "dh_create_shared failed");
       return -1;
     }
-  log_debug_buf (LOG_MISC, 80, "ike_phase_1_post_exchange_KE_NONCE: g^xy",
-		 ie->g_xy, ie->g_x_len);
+  LOG_DBG_BUF ((LOG_MISC, 80, "ike_phase_1_post_exchange_KE_NONCE: g^xy",
+		ie->g_xy, ie->g_x_len));
 
   /* Compute the SKEYID depending on the authentication method.  */
   ie->skeyid = ie->ike_auth->gen_skeyid (exchange, &ie->skeyid_len);
@@ -587,8 +599,8 @@ ike_phase_1_post_exchange_KE_NONCE (struct message *msg)
       /* XXX Log and teardown?  */
       return -1;
     }
-  log_debug_buf (LOG_MISC, 80, "ike_phase_1_post_exchange_KE_NONCE: SKEYID",
-		 ie->skeyid, ie->skeyid_len);
+  LOG_DBG_BUF ((LOG_MISC, 80, "ike_phase_1_post_exchange_KE_NONCE: SKEYID",
+		ie->skeyid, ie->skeyid_len));
 
   /* SKEYID_d.  */
   ie->skeyid_d = malloc (ie->skeyid_len);
@@ -610,8 +622,8 @@ ike_phase_1_post_exchange_KE_NONCE (struct message *msg)
   prf->Update (prf->prfctx, exchange->cookies, ISAKMP_HDR_COOKIES_LEN);
   prf->Update (prf->prfctx, "\0", 1);
   prf->Final (ie->skeyid_d, prf->prfctx);
-  log_debug_buf (LOG_MISC, 80, "ike_phase_1_post_exchange_KE_NONCE: SKEYID_d",
-		 ie->skeyid_d, ie->skeyid_len);
+  LOG_DBG_BUF ((LOG_MISC, 80, "ike_phase_1_post_exchange_KE_NONCE: SKEYID_d",
+		ie->skeyid_d, ie->skeyid_len));
 
   /* SKEYID_a.  */
   ie->skeyid_a = malloc (ie->skeyid_len);
@@ -628,8 +640,8 @@ ike_phase_1_post_exchange_KE_NONCE (struct message *msg)
   prf->Update (prf->prfctx, exchange->cookies, ISAKMP_HDR_COOKIES_LEN);
   prf->Update (prf->prfctx, "\1", 1);
   prf->Final (ie->skeyid_a, prf->prfctx);
-  log_debug_buf (LOG_MISC, 80, "ike_phase_1_post_exchange_KE_NONCE: SKEYID_a",
-		 ie->skeyid_a, ie->skeyid_len);
+  LOG_DBG_BUF ((LOG_MISC, 80, "ike_phase_1_post_exchange_KE_NONCE: SKEYID_a",
+		ie->skeyid_a, ie->skeyid_len));
 
   /* SKEYID_e.  */
   ie->skeyid_e = malloc (ie->skeyid_len);
@@ -648,8 +660,8 @@ ike_phase_1_post_exchange_KE_NONCE (struct message *msg)
   prf->Update (prf->prfctx, "\2", 1);
   prf->Final (ie->skeyid_e, prf->prfctx);
   prf_free (prf);
-  log_debug_buf (LOG_MISC, 80, "ike_phase_1_post_exchange_KE_NONCE: SKEYID_e",
-		 ie->skeyid_e, ie->skeyid_len);
+  LOG_DBG_BUF ((LOG_MISC, 80, "ike_phase_1_post_exchange_KE_NONCE: SKEYID_e",
+		ie->skeyid_e, ie->skeyid_len));
 
   /* Key length determination.  */
   if (!exchange->key_length)
@@ -790,14 +802,18 @@ ike_phase_1_send_ID (struct message *msg)
       SET_ISAKMP_ID_TYPE (buf, id_type);
       switch (id_type)
 	{
-#ifdef notyet
 	case IPSEC_ID_IPV4_ADDR:
-	  /* XXX not implemented yet.  */
+      	  msg->transport->vtbl->get_src (msg->transport, &src, &src_len);
+
+      	  /* Already in network byteorder.  */
+      	  memcpy (buf + ISAKMP_ID_DATA_OFF,
+	      	  &((struct sockaddr_in *)src)->sin_addr.s_addr,
+	      	  sizeof (in_addr_t));
 	  break;
-#endif
 	case IPSEC_ID_FQDN:
 	case IPSEC_ID_USER_FQDN:
-	  memcpy (buf + ISAKMP_ID_DATA_OFF, conf_get_str (my_id, "Name"), sz);
+	  memcpy (buf + ISAKMP_ID_DATA_OFF, conf_get_str (my_id, "Name"), 
+		  sz - ISAKMP_ID_DATA_OFF);
 	  break;
 	default:
 	  log_print ("ike_phase_1_send_ID: unsupported ID type %d", id_type);
@@ -831,8 +847,8 @@ ike_phase_1_send_ID (struct message *msg)
   memcpy (*id, buf + ISAKMP_GEN_SZ, *id_len);
   snprintf (header, 80, "ike_phase_1_send_ID: %s",
 	    constant_name (ipsec_id_cst, GET_ISAKMP_ID_TYPE (buf)));
-  log_debug_buf (LOG_MISC, 40, header, buf + ISAKMP_ID_DATA_OFF,
-		 sz - ISAKMP_ID_DATA_OFF);
+  LOG_DBG_BUF ((LOG_MISC, 40, header, buf + ISAKMP_ID_DATA_OFF,
+		sz - ISAKMP_ID_DATA_OFF));
 
   return 0;
 }
@@ -897,8 +913,8 @@ ike_phase_1_recv_ID (struct message *msg)
   memcpy (*id, payload->p + ISAKMP_GEN_SZ, *id_len);
   snprintf (header, 80, "ike_phase_1_recv_ID: %s",
 	    constant_name (ipsec_id_cst, GET_ISAKMP_ID_TYPE (payload->p)));
-  log_debug_buf (LOG_MISC, 40, header, payload->p + ISAKMP_ID_DATA_OFF,
-		 *id_len + ISAKMP_GEN_SZ - ISAKMP_ID_DATA_OFF);
+  LOG_DBG_BUF ((LOG_MISC, 40, header, payload->p + ISAKMP_ID_DATA_OFF,
+		*id_len + ISAKMP_GEN_SZ - ISAKMP_ID_DATA_OFF));
   payload->flags |= PL_MARK;
 
   return 0;
@@ -954,7 +970,7 @@ ike_phase_1_recv_AUTH (struct message *msg)
   prf_free (prf);
   snprintf (header, 80, "ike_phase_1_recv_AUTH: computed HASH_%c",
 	    initiator ? 'R' : 'I');
-  log_debug_buf (LOG_MISC, 80, header, hash->digest, hashsize);
+  LOG_DBG_BUF ((LOG_MISC, 80, header, hash->digest, hashsize));
 
   /* Check that the hash we got matches the one we computed.  */
   if (memcmp (*hash_p, hash->digest, hashsize) != 0)
@@ -1039,7 +1055,7 @@ ike_phase_1_validate_prop (struct exchange *exchange, struct sa *sa,
 	}
 
       /* All protocols were OK, we succeeded.  */
-      log_debug (LOG_MISC, 20, "ike_phase_1_validate_prop: success");
+      LOG_DBG ((LOG_MISC, 20, "ike_phase_1_validate_prop: success"));
       conf_free_list (conf);
       if (vs.life)
 	free (vs.life);
@@ -1058,7 +1074,7 @@ ike_phase_1_validate_prop (struct exchange *exchange, struct sa *sa,
 	free (vs.life);
     }
 
-  log_debug (LOG_MISC, 20, "ike_phase_1_validate_prop: failure");
+  LOG_DBG ((LOG_MISC, 20, "ike_phase_1_validate_prop: failure"));
   conf_free_list (conf);
   return 0;
 }
@@ -1123,7 +1139,8 @@ attribute_unacceptable (u_int16_t type, u_int8_t *value, u_int16_t len,
 	  LIST_INSERT_HEAD (&vs->attrs, node, link);
 	  return 0;
 	}
-      log_print ("attribute_unacceptable: got %s, expected %s", map, str);
+      log_print ("attribute_unacceptable: %s: got %s, expected %s",
+		 tag, constant_lookup (map, decode_16 (value)), str);
       return 1;
 
     case IKE_ATTR_GROUP_PRIME:
@@ -1136,15 +1153,16 @@ attribute_unacceptable (u_int16_t type, u_int8_t *value, u_int16_t len,
 
     case IKE_ATTR_LIFE_TYPE:
     case IKE_ATTR_LIFE_DURATION:
-      if (!strcmp (conf_get_str (xf->field, "Life"), "ANY"))
+      life_conf = conf_get_list (xf->field, "Life");
+      if (life_conf && !strcmp (conf_get_str (xf->field, "Life"), "ANY"))
 	return 0;
 	
       rv = 1;
-      life_conf = conf_get_list (xf->field, "Life");
       if (!life_conf)
 	{
 	  /* Life attributes given, but not in our policy.  */
-	  log_print ("attribute_unacceptable: received unexpected life attribute");
+	  log_print ("attribute_unacceptable: "
+		     "received unexpected life attribute");
 	  return 1;
 	}
 

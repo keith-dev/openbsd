@@ -44,7 +44,7 @@ The routine returns the number of warnings issued.
 @ISA = qw(Exporter);
 @EXPORT = qw(validate);
 
-# $RCSfile: CheckTree.pm,v $$Revision: 1.3 $$Date: 1999/04/29 22:51:54 $
+# $RCSfile: CheckTree.pm,v $$Revision: 1.4 $$Date: 2000/04/06 17:06:34 $
 
 # The validate routine takes a single multiline string consisting of
 # lines containing a filename plus a file test to try on it.  (The
@@ -105,7 +105,7 @@ sub validate {
 
 sub valmess {
     local($disposition,$this) = @_;
-    $file = $cwd . '/' . $file unless $file =~ m|^/|;
+    $file = $cwd . '/' . $file unless $file =~ m|^/|s;
     if ($this =~ /^(!?)-(\w)\s+\$file\s*$/) {
 	$neg = $1;
 	$tmp = $2;

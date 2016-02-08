@@ -1,7 +1,9 @@
 # This is ssh server systemwide configuration file.
 
 Port 22
-ListenAddress 0.0.0.0
+#Protocol 2,1
+#ListenAddress 0.0.0.0
+#ListenAddress ::
 HostKey /etc/ssh_host_key
 ServerKeyBits 768
 LoginGraceTime 600
@@ -10,14 +12,19 @@ PermitRootLogin yes
 #
 # Don't read ~/.rhosts and ~/.shosts files
 IgnoreRhosts yes
+# Uncomment if you don't trust ~/.ssh/known_hosts for RhostsRSAAuthentication
+#IgnoreUserKnownHosts yes
 StrictModes yes
-QuietMode no
 X11Forwarding no
 X11DisplayOffset 10
-FascistLogging no
 PrintMotd yes
 KeepAlive yes
+
+# Logging
 SyslogFacility AUTH
+LogLevel INFO
+#obsoletes QuietMode and FascistLogging
+
 RhostsAuthentication no
 #
 # For this to work you will also need host keys in /etc/ssh_known_hosts

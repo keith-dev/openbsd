@@ -1,4 +1,4 @@
-#	$OpenBSD: bsd.own.mk,v 1.25 1999/06/22 12:54:05 art Exp $
+#	$OpenBSD: bsd.own.mk,v 1.31 2000/03/31 18:03:54 espie Exp $
 #	$NetBSD: bsd.own.mk,v 1.24 1996/04/13 02:08:09 thorpej Exp $
 
 # Host-specific overrides
@@ -9,7 +9,11 @@
 .endif
 
 # XXX - This is temporary until everyone uses UVM
+.if (${MACHINE_ARCH} == "sparc") || (${MACHINE_ARCH} == "i386")
+UVM?=		yes
+.else
 UVM?=		no
+.endif
 
 # Set `SKEY' to `yes' to build with support for S/key authentication.
 SKEY?=		yes
@@ -37,6 +41,7 @@ BINGRP?=	bin
 BINOWN?=	root
 BINMODE?=	555
 NONBINMODE?=	444
+DIRMODE?=	755
 
 # Define MANZ to have the man pages compressed (gzip)
 #MANZ=		1
@@ -104,3 +109,5 @@ NOPROFILE=
 
 # No lint, for now.
 NOLINT=
+
+BSD_OWN_MK=Done

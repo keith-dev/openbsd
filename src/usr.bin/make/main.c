@@ -1,4 +1,4 @@
-/*	$OpenBSD: main.c,v 1.15 1999/01/09 16:45:02 espie Exp $	*/
+/*	$OpenBSD: main.c,v 1.30 2000/04/03 02:58:46 espie Exp $	*/
 /*	$NetBSD: main.c,v 1.34 1997/03/24 20:56:36 gwr Exp $	*/
 
 /*
@@ -49,7 +49,7 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)main.c	8.3 (Berkeley) 3/19/94";
 #else
-static char rcsid[] = "$OpenBSD: main.c,v 1.15 1999/01/09 16:45:02 espie Exp $";
+static char rcsid[] = "$OpenBSD: main.c,v 1.30 2000/04/03 02:58:46 espie Exp $";
 #endif
 #endif /* not lint */
 
@@ -113,7 +113,7 @@ static char rcsid[] = "$OpenBSD: main.c,v 1.15 1999/01/09 16:45:02 espie Exp $";
 #define	MAKEFLAGS	".MAKEFLAGS"
 
 Lst			create;		/* Targets to be made */
-time_t			now;		/* Time at start of make */
+time_t			now = OUT_OF_DATE;/* Time at start of make */
 GNode			*DEFAULT;	/* .DEFAULT node */
 Boolean			allPrecious;	/* .PRECIOUS given on line by itself */
 
@@ -140,6 +140,7 @@ static void		MainParseArgs __P((int, char **));
 char *			chdir_verify_path __P((char *, char *));
 static int		ReadMakefile __P((ClientData, ClientData));
 static void		usage __P((void));
+int 			main __P((int, char **));
 
 static char *curdir;			/* startup directory */
 static char *objdir;			/* where we chdir'ed to */
@@ -188,7 +189,7 @@ rearg:	while((c = getopt(argc, argv, OPTFLAGS)) != -1) {
 			break;
 		case 'V':
 			printVars = TRUE;
-			(void)Lst_AtEnd(variables, (ClientData)optarg);
+			Lst_AtEnd(variables, (ClientData)optarg);
 			Var_Append(MAKEFLAGS, "-V", VAR_GLOBAL);
 			Var_Append(MAKEFLAGS, optarg, VAR_GLOBAL);
 			break;
@@ -279,7 +280,7 @@ rearg:	while((c = getopt(argc, argv, OPTFLAGS)) != -1) {
 			Var_Append(MAKEFLAGS, "-e", VAR_GLOBAL);
 			break;
 		case 'f':
-			(void)Lst_AtEnd(makefiles, (ClientData)optarg);
+			Lst_AtEnd(makefiles, (ClientData)optarg);
 			break;
 		case 'i':
 			ignoreErrors = TRUE;
@@ -370,7 +371,7 @@ rearg:	while((c = getopt(argc, argv, OPTFLAGS)) != -1) {
 					optind = 1;     /* - */
 				goto rearg;
 			}
-			(void)Lst_AtEnd(create, (ClientData)estrdup(*argv));
+			Lst_AtEnd(create, (ClientData)estrdup(*argv));
 		}
 }
 
@@ -396,8 +397,8 @@ Main_ParseArgLine(line)
 	char **argv;			/* Manufactured argument vector */
 	int argc;			/* Number of arguments in argv */
 	char *args;			/* Space used by the args */
-	char *buf, *p1;
-	char *argv0 = Var_Value(".MAKE", VAR_GLOBAL, &p1);
+	char *buf;
+	char *argv0 = Var_Value(".MAKE", VAR_GLOBAL);
 
 	if (line == NULL)
 		return;
@@ -408,7 +409,6 @@ Main_ParseArgLine(line)
 
 	buf = emalloc(strlen(line) + strlen(argv0) + 2);
 	(void)sprintf(buf, "%s %s", argv0, line);
-	efree(p1);
 
 	argv = brk_string(buf, &argc, TRUE, &args);
 	free(buf);
@@ -471,7 +471,7 @@ main(argc, argv)
 	Lst targs;	/* target nodes to create -- passed to Make_Init */
 	Boolean outOfDate = TRUE; 	/* FALSE if all targets up to date */
 	struct stat sb, sa;
-	char *p, *p1, *path, *pathp, *pwd;
+	char *p, *path, *pathp, *pwd;
 	char mdpath[MAXPATHLEN + 1];
 	char obpath[MAXPATHLEN + 1];
 	char cdpath[MAXPATHLEN + 1];
@@ -586,11 +586,12 @@ main(argc, argv)
 	}
 
 	setenv("PWD", objdir, 1);
+	unsetenv("CDPATH");
 
-	create = Lst_Init(FALSE);
-	makefiles = Lst_Init(FALSE);
+	create = Lst_Init();
+	makefiles = Lst_Init();
 	printVars = FALSE;
-	variables = Lst_Init(FALSE);
+	variables = Lst_Init();
 	beSilent = FALSE;		/* Print commands as executed */
 	ignoreErrors = FALSE;		/* Pay attention to non-zero returns */
 	noExecute = FALSE;		/* Execute all commands */
@@ -654,6 +655,7 @@ main(argc, argv)
 
 	MainParseArgs(argc, argv);
 
+
 	/*
 	 * Initialize archive, target and suffix modules in preparation for
 	 * parsing the makefile(s)
@@ -662,7 +664,7 @@ main(argc, argv)
 	Targ_Init();
 	Suff_Init();
 
-	DEFAULT = NILGNODE;
+	DEFAULT = NULL;
 	(void)time(&now);
 
 	/*
@@ -673,7 +675,7 @@ main(argc, argv)
 	if (!Lst_IsEmpty(create)) {
 		LstNode ln;
 
-		for (ln = Lst_First(create); ln != NILLNODE;
+		for (ln = Lst_First(create); ln != NULL;
 		    ln = Lst_Succ(ln)) {
 			char *name = (char *)Lst_Datum(ln);
 
@@ -709,20 +711,20 @@ main(argc, argv)
 	if (!noBuiltins) {
 		LstNode ln;
 
-		sysMkPath = Lst_Init (FALSE);
+		sysMkPath = Lst_Init();
 		Dir_Expand (_PATH_DEFSYSMK, sysIncPath, sysMkPath);
 		if (Lst_IsEmpty(sysMkPath))
 			Fatal("make: no system rules (%s).", _PATH_DEFSYSMK);
-		ln = Lst_Find(sysMkPath, (ClientData)NULL, ReadMakefile);
-		if (ln != NILLNODE)
+		ln = Lst_Find(sysMkPath, ReadMakefile, NULL);
+		if (ln != NULL)
 			Fatal("make: cannot open %s.", (char *)Lst_Datum(ln));
 	}
 
 	if (!Lst_IsEmpty(makefiles)) {
 		LstNode ln;
 
-		ln = Lst_Find(makefiles, (ClientData)NULL, ReadMakefile);
-		if (ln != NILLNODE)
+		ln = Lst_Find(makefiles, ReadMakefile, NULL);
+		if (ln != NULL)
 			Fatal("make: cannot open %s.", (char *)Lst_Datum(ln));
 	} else if (!ReadMakefile("BSDmakefile", NULL))
 		if (!ReadMakefile("makefile", NULL))
@@ -730,17 +732,15 @@ main(argc, argv)
 
 	(void)ReadMakefile(".depend", NULL);
 
-	Var_Append("MFLAGS", Var_Value(MAKEFLAGS, VAR_GLOBAL, &p1), VAR_GLOBAL);
-	efree(p1);
+	Var_Append("MFLAGS", Var_Value(MAKEFLAGS, VAR_GLOBAL), VAR_GLOBAL);
 
 	/* Install all the flags into the MAKE envariable. */
-	if (((p = Var_Value(MAKEFLAGS, VAR_GLOBAL, &p1)) != NULL) && *p)
+	if (((p = Var_Value(MAKEFLAGS, VAR_GLOBAL)) != NULL) && *p)
 #ifdef POSIX
 		setenv("MAKEFLAGS", p, 1);
 #else
 		setenv("MAKE", p, 1);
 #endif
-	efree(p1);
 
 	/*
 	 * For compatibility, look at the directories in the VPATH variable
@@ -757,7 +757,7 @@ main(argc, argv)
 		 */
 		static char VPATH[] = "${VPATH}";
 
-		vpath = Var_Subst(NULL, VPATH, VAR_CMD, FALSE);
+		vpath = Var_Subst(VPATH, VAR_CMD, FALSE);
 		path = vpath;
 		do {
 			/* skip to end of directory */
@@ -788,13 +788,12 @@ main(argc, argv)
 	if (printVars) {
 		LstNode ln;
 
-		for (ln = Lst_First(variables); ln != NILLNODE;
+		for (ln = Lst_First(variables); ln != NULL;
 		    ln = Lst_Succ(ln)) {
 			char *value = Var_Value((char *)Lst_Datum(ln),
-					  VAR_GLOBAL, &p1);
+					  VAR_GLOBAL);
 
 			printf("%s\n", value ? value : "");
-			efree(p1);
 		}
 	}
 
@@ -930,9 +929,10 @@ Cmd_Exec(cmd, err)
     int 	pid;	    	/* PID from wait() */
     char	*res;		/* result */
     int		status;		/* command exit status */
-    Buffer	buf;		/* buffer to store the result */
+    BUFFER	buf;		/* buffer to store the result */
     char	*cp;
-    int		cc;
+    ssize_t	cc;
+    size_t 	length;
 
 
     *err = NULL;
@@ -985,13 +985,13 @@ Cmd_Exec(cmd, err)
 	 */
 	(void) close(fds[1]);
 
-	buf = Buf_Init (MAKE_BSIZE);
+	Buf_Init(&buf, MAKE_BSIZE);
 
 	do {
 	    char   result[BUFSIZ];
 	    cc = read(fds[0], result, sizeof(result));
 	    if (cc > 0)
-		Buf_AddBytes(buf, cc, (Byte *) result);
+		Buf_AddChars(&buf, cc, result);
 	}
 	while (cc > 0 || (cc == -1 && errno == EINTR));
 
@@ -1006,10 +1006,10 @@ Cmd_Exec(cmd, err)
 	while(((pid = wait(&status)) != cpid) && (pid >= 0))
 	    continue;
 
-	res = (char *)Buf_GetAll (buf, &cc);
-	Buf_Destroy (buf, FALSE);
+	res = Buf_Retrieve(&buf);
+	length = Buf_Size(&buf);
 
-	if (cc == 0)
+	if (cc == -1)
 	    *err = "Couldn't read shell's output for \"%s\"";
 
 	if (status)
@@ -1019,8 +1019,8 @@ Cmd_Exec(cmd, err)
 	 * Null-terminate the result, convert newlines to spaces and
 	 * install it in the variable.
 	 */
-	res[cc] = '\0';
-	cp = &res[cc] - 1;
+	res[length] = '\0';
+	cp = res + length - 1;
 
 	if (*cp == '\n') {
 	    /*
@@ -1194,81 +1194,6 @@ Finish(errors)
 	int errors;	/* number of errors encountered in Make_Make */
 {
 	Fatal("%d error%s", errors, errors == 1 ? "" : "s");
-}
-
-/*
- * emalloc --
- *	malloc, but die on error.
- */
-void *
-emalloc(len)
-	size_t len;
-{
-	void *p;
-
-	if ((p = malloc(len)) == NULL)
-		enomem();
-	return(p);
-}
-
-/*
- * estrdup --
- *	strdup, but die on error.
- */
-char *
-estrdup(str)
-	const char *str;
-{
-	char *p;
-
-	if ((p = strdup(str)) == NULL)
-		enomem();
-	return(p);
-}
-
-/*
- * erealloc --
- *	realloc, but die on error.
- */
-void *
-erealloc(ptr, size)
-	void *ptr;
-	size_t size;
-{
-	if ((ptr = realloc(ptr, size)) == NULL)
-		enomem();
-	return(ptr);
-}
-
-/*
- * enomem --
- *	die when out of memory.
- */
-void
-enomem()
-{
-	(void)fprintf(stderr, "make: %s.\n", strerror(errno));
-	exit(2);
-}
-
-/*
- * enunlink --
- *	Remove a file carefully, avoiding directories.
- */
-int
-eunlink(file)
-	const char *file;
-{
-	struct stat st;
-
-	if (lstat(file, &st) == -1)
-		return -1;
-
-	if (S_ISDIR(st.st_mode)) {
-		errno = EISDIR;
-		return -1;
-	}
-	return unlink(file);
 }
 
 /*

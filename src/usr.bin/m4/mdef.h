@@ -1,4 +1,4 @@
-/*	$OpenBSD: mdef.h,v 1.7 1999/09/14 08:35:17 espie Exp $	*/
+/*	$OpenBSD: mdef.h,v 1.14 2000/03/11 15:54:44 espie Exp $	*/
 /*	$NetBSD: mdef.h,v 1.7 1996/01/13 23:25:27 pk Exp $	*/
 
 /*
@@ -72,8 +72,19 @@
 #define SYSVTYPE        31
 #define EXITTYPE        32
 #define DEFNTYPE        33
+#define SELFTYPE	34
+#define INDIRTYPE	35
+#define BUILTINTYPE	36
+#define PATSTYPE	37
+#define FILENAMETYPE	38
+#define LINETYPE	39
+#define REGEXPTYPE	40
  
-#define STATIC          128
+#define TYPEMASK	63	/* Keep bits really corresponding to a type. */
+#define STATIC          128	/* Name is statically allocated, don't free. */
+#define RECDEF		256	/* Pure recursive def, don't expand it */
+#define NOARGS		512	/* builtin needs no args */
+#define NEEDARGS	1024	/* mark builtin that need args with this */
 
 /*
  * m4 special characters
@@ -120,11 +131,12 @@
  
 typedef struct ndblock *ndptr;
  
-struct ndblock {                /* hastable structure         */
-        char    *name;          /* entry name..               */
-        char    *defn;          /* definition..               */
-        int     type;           /* type of the entry..        */
-        ndptr   nxtptr;         /* link to next entry..       */
+struct ndblock {		/* hastable structure         */
+	char		*name;	/* entry name..               */
+	char		*defn;	/* definition..               */
+	unsigned int	type;	/* type of the entry..        */
+	unsigned int 	hv;	/* hash function value..      */
+	ndptr		nxtptr;	/* link to next entry..       */
 };
  
 #define nil     ((ndptr) 0)
@@ -139,8 +151,15 @@ typedef union {			/* stack structure */
 	char 	*sstr;		/* string entry */
 } stae;
 
-typedef short pbent;		/* pushback entry; needs to hold chars + EOF */
+struct input_file {
+	FILE 		*file;
+	char 		*name;
+	unsigned long 	lineno;
+	int 		c;
+};
 
+#define CURRENT_NAME	(infile[ilevel].name)
+#define CURRENT_LINE	(infile[ilevel].lineno)
 /*
  * macros for readibility and/or speed
  *
@@ -148,7 +167,7 @@ typedef short pbent;		/* pushback entry; needs to hold chars + EOF */
  *      pushf() - push a call frame entry onto stack
  *      pushs() - push a string pointer onto stack
  */
-#define gpbc() 	 (bp > bufbase) ? *--bp : getc(infile[ilevel])
+#define gpbc() 	 (bp > bufbase) ? *--bp : obtain_char(infile+ilevel)
 #define pushf(x) if (sp < STACKMAX) mstack[++sp].sfra = (x)
 #define pushs(x) if (sp < STACKMAX) mstack[++sp].sstr = (x)
 

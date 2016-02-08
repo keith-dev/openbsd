@@ -1,3 +1,4 @@
+/*	$OpenBSD: uthread_seterrno.c,v 1.4 1999/11/27 01:30:11 d Exp $	*/
 /*
  * Copyright (c) 1995 John Birrell <jb@cimlogic.com.au>.
  * All rights reserved.
@@ -20,7 +21,7 @@
  * THIS SOFTWARE IS PROVIDED BY JOHN BIRRELL AND CONTRIBUTORS ``AS IS'' AND
  * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
  * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
- * ARE DISCLAIMED.  IN NO EVENT SHALL THE REGENTS OR CONTRIBUTORS BE LIABLE
+ * ARE DISCLAIMED.  IN NO EVENT SHALL THE AUTHOR OR CONTRIBUTORS BE LIABLE
  * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
  * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
  * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
@@ -29,7 +30,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $OpenBSD: uthread_seterrno.c,v 1.2 1999/01/06 05:29:26 d Exp $
+ * $FreeBSD: uthread_seterrno.c,v 1.4 1999/08/28 00:03:46 peter Exp $
  */
 #ifdef _THREAD_SAFE
 #include <pthread.h>
@@ -40,22 +41,28 @@
  * normally hidden from the user. 
  */
 #ifdef errno
-#undef errno;
+#undef errno
 #endif
 extern int      errno;
 
 void
 _thread_seterrno(pthread_t thread, int error)
 {
-	/* Check for the initial thread: */
-	if (thread == _thread_initial)
-		/* The initial thread always uses the global error variable: */
+
+	/* Don't allow _thread_run to change: */
+	_thread_kern_sig_defer();
+
+	/* Check for the current thread: */
+	if (thread == _thread_run)
+		/* The current thread always uses the global error variable: */
 		errno = error;
 	else
 		/*
-		 * Threads other than the initial thread always use the error
-		 * field in the thread structureL 
+		 * Threads other than the current thread will keep the error
+		 * field in the thread structure: 
 		 */
 		thread->error = error;
+
+	_thread_kern_sig_undefer();
 }
 #endif

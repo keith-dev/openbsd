@@ -1,8 +1,9 @@
-/*	$OpenBSD: libcrypto.c,v 1.2 1999/10/01 14:09:04 niklas Exp $	*/
-/*	$EOM: libcrypto.c,v 1.7 1999/09/30 13:40:38 niklas Exp $	*/
+/*	$OpenBSD: libcrypto.c,v 1.6 2000/04/07 22:06:20 niklas Exp $	*/
+/*	$EOM: libcrypto.c,v 1.13 2000/03/31 15:29:03 ho Exp $	*/
 
 /*
  * Copyright (c) 1999 Niklas Hallqvist.  All rights reserved.
+ * Copyright (c) 1999, 2000 Angelos D. Keromytis.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -41,6 +42,8 @@
 
 void *libcrypto = 0;
 
+#ifdef USE_X509
+
 #ifdef HAVE_DLOPEN
 
 /*
@@ -67,9 +70,14 @@ int (*lc_RSA_private_encrypt) (int, unsigned char *, unsigned char *, RSA *,
 int (*lc_RSA_public_decrypt) (int, unsigned char *, unsigned char *, RSA *,
 			      int);
 int (*lc_RSA_size) (RSA *);
+#if OPENSSL_VERSION_NUMBER >= 0x00905100L
+void (*lc_OpenSSL_add_all_algorithms) (void);
+#else
 void (*lc_SSLeay_add_all_algorithms) (void);
+#endif
 int (*lc_X509_NAME_cmp) (X509_NAME *, X509_NAME *);
 void (*lc_X509_STORE_CTX_cleanup) (X509_STORE_CTX *);
+void (*lc_X509_OBJECT_free_contents) (X509_OBJECT *);
 
 #if SSLEAY_VERSION_NUMBER >= 0x00904100L
 void (*lc_X509_STORE_CTX_init) (X509_STORE_CTX *, X509_STORE *, X509 *,
@@ -81,6 +89,7 @@ void (*lc_X509_STORE_CTX_init) (X509_STORE_CTX *, X509_STORE *, X509 *,
 
 int (*lc_X509_STORE_add_cert) (X509_STORE *, X509 *);
 X509_STORE *(*lc_X509_STORE_new) (void);
+void (*lc_X509_STORE_free) (X509_STORE *);
 X509 *(*lc_X509_dup) (X509 *);
 void (*lc_X509_free) (X509 *);
 X509_EXTENSION *(*lc_X509_get_ext) (X509 *, int);
@@ -94,6 +103,7 @@ int (*lc_X509_verify_cert) (X509_STORE_CTX *);
 RSA *(*lc_d2i_RSAPrivateKey) (RSA **, unsigned char **, long);
 RSA *(*lc_d2i_RSAPublicKey) (RSA **, unsigned char **, long);
 X509 *(*lc_d2i_X509) (X509 **, unsigned char **, long);
+char *(*lc_X509_NAME_oneline) (X509_NAME *, char *, int);
 int (*lc_i2d_RSAPublicKey) (RSA *, unsigned char **);
 int (*lc_i2d_RSAPrivateKey) (RSA *, unsigned char **);
 int (*lc_i2d_X509) (X509 *, unsigned char **);
@@ -110,6 +120,9 @@ X509 *(*lc_X509_find_by_subject) (STACK_OF (X509) *, X509_NAME *);
 #else
 X509 *(*lc_X509_find_by_subject) (STACK *, X509_NAME *);
 #endif
+
+int (*lc_X509_STORE_get_by_subject) (X509_STORE_CTX *, int, X509_NAME *,
+				     X509_OBJECT *);
 
 #define SYMENTRY(x) { SYM, SYM (x), (void **)&lc_ ## x }
 
@@ -131,12 +144,17 @@ static struct dynload_script libcrypto_script[] = {
   SYMENTRY (RSA_private_encrypt),
   SYMENTRY (RSA_public_decrypt),
   SYMENTRY (RSA_size),
+#if OPENSSL_VERSION_NUMBER >= 0x00905100L
+  SYMENTRY (OpenSSL_add_all_algorithms),
+#else
   SYMENTRY (SSLeay_add_all_algorithms),
+#endif
   SYMENTRY (X509_NAME_cmp),
   SYMENTRY (X509_STORE_CTX_cleanup),
   SYMENTRY (X509_STORE_CTX_init),
   SYMENTRY (X509_STORE_add_cert),
   SYMENTRY (X509_STORE_new),
+  SYMENTRY (X509_STORE_free),
   SYMENTRY (X509_dup),
   SYMENTRY (X509_find_by_subject),
   SYMENTRY (X509_free),
@@ -148,6 +166,9 @@ static struct dynload_script libcrypto_script[] = {
   SYMENTRY (X509_new),
   SYMENTRY (X509_verify),
   SYMENTRY (X509_verify_cert),
+  SYMENTRY (X509_STORE_get_by_subject),
+  SYMENTRY (X509_OBJECT_free_contents),
+  SYMENTRY (X509_NAME_oneline),
   SYMENTRY (d2i_RSAPrivateKey),
   SYMENTRY (d2i_RSAPublicKey),
   SYMENTRY (d2i_X509),
@@ -165,9 +186,12 @@ static struct dynload_script libcrypto_script[] = {
 };
 #endif
 
+#endif /* USE_X509 */
+
 void
 libcrypto_init (void)
 {
+#ifdef USE_X509
 #ifdef HAVE_DLOPEN
   dyn_load (libcrypto_script);
 #elif !defined (USE_LIBCRYPTO)
@@ -182,6 +206,12 @@ libcrypto_init (void)
 
 #if defined (USE_LIBCRYPTO)
   /* Add all algorithms known by SSL */
+#if OPENSSL_VERSION_NUMBER >= 0x00905100L
+  LC (OpenSSL_add_all_algorithms, ());
+#else
   LC (SSLeay_add_all_algorithms, ());
 #endif
+#endif
+#endif /* USE_X509 */
 }
+

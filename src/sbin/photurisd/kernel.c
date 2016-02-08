@@ -39,7 +39,7 @@
  */
 
 #ifndef lint
-static char rcsid[] = "$Id: kernel.c,v 1.4 1999/07/02 23:37:33 deraadt Exp $";
+static char rcsid[] = "$Id: kernel.c,v 1.6 2000/01/27 08:06:38 angelos Exp $";
 #endif
 
 #include <time.h>
@@ -533,8 +533,7 @@ kernel_ah(attrib_t *ob, struct spiob *SPI, u_int8_t *secrets, int hmac)
      sa.sadb_msg_version = PF_KEY_V2;
      sa.sadb_msg_type = SPI->flags & SPI_OWNER ? 
 	  SADB_UPDATE : SADB_ADD;
-     sa.sadb_msg_satype = !hmac ?
-	  SADB_X_SATYPE_AH_OLD : SADB_SATYPE_AH;
+     sa.sadb_msg_satype = SADB_SATYPE_AH;
      sa.sadb_msg_seq = pfkey_seq++;
      sa.sadb_msg_pid = pfkey_pid;
      iov[cnt].iov_base = &sa;
@@ -577,6 +576,8 @@ kernel_ah(attrib_t *ob, struct spiob *SPI, u_int8_t *secrets, int hmac)
      sr.sadb_sa_encrypt = 0;
      if (SPI->flags & SPI_TUNNEL)
 	  sr.sadb_sa_flags |= SADB_X_SAFLAGS_TUNNEL;
+     if (!hmac)
+	  sr.sadb_sa_flags |= SADB_X_SAFLAGS_NOREPLAY;
      sa.sadb_msg_len += sr.sadb_sa_len;
 
      iov[cnt].iov_base = &sr;
@@ -677,8 +678,7 @@ kernel_esp(attrib_t *ob, attrib_t *ob2, struct spiob *SPI, u_int8_t *secrets)
      sa.sadb_msg_version = PF_KEY_V2;
      sa.sadb_msg_type = SPI->flags & SPI_OWNER ?
 	  SADB_UPDATE : SADB_ADD;
-     sa.sadb_msg_satype = xf_enc->flags & ESP_OLD ?
-	  SADB_X_SATYPE_ESP_OLD : SADB_SATYPE_ESP;
+     sa.sadb_msg_satype = SADB_SATYPE_ESP;
      sa.sadb_msg_seq = pfkey_seq++;
      sa.sadb_msg_pid = pfkey_pid;
      iov[cnt].iov_base = &sa;
@@ -692,7 +692,11 @@ kernel_esp(attrib_t *ob, attrib_t *ob2, struct spiob *SPI, u_int8_t *secrets)
      sr.sadb_sa_auth = attauth ? xf_auth->kernel_id : 0;
      sr.sadb_sa_encrypt = xf_enc->kernel_id;
      if (xf_enc->flags & ESP_OLD)
+     {
 	  sr.sadb_sa_flags |= SADB_X_SAFLAGS_HALFIV;
+	  sr.sadb_sa_flags |= SADB_X_SAFLAGS_RANDOMPADDING;
+	  sr.sadb_sa_flags |= SADB_X_SAFLAGS_NOREPLAY;
+     }
      if (SPI->flags & SPI_TUNNEL)
 	  sr.sadb_sa_flags |= SADB_X_SAFLAGS_TUNNEL;
      sa.sadb_msg_len += sr.sadb_sa_len;
@@ -1354,7 +1358,7 @@ kernel_insert_spi(struct stateob *st, struct spiob *SPI)
 	       if (kernel_enable_spi(SPI->isrc, SPI->ismask,
 				     SPI->idst, SPI->idmask,
 				     SPI->address, spi, proto, 
-				     SADB_X_SAFLAGS_REPLACEFLOW | SADB_X_SAFLAGS_LOCALFLOW |
+				     SADB_X_SAFLAGS_REPLACEFLOW |
 				     (vpn_mode ? /*ENABLE_FLAG_MODIFY*/ : 0)) == -1)
 		    log_error(0, "kernel_enable_spi() in kernel_insert_spi()");
 	  } else {
@@ -1414,7 +1418,7 @@ kernel_unlink_spi(struct spiob *ospi)
 			AT_AH_ATTRIB);
      
      if (esp != NULL) {
-	  int flag = (vpn_mode ? /*ENABLE_FLAG_MODIFY*/ : 0) | SADB_X_SAFLAGS_LOCALFLOW;
+	  int flag = (vpn_mode ? /*ENABLE_FLAG_MODIFY*/ : 0);
 	  if (!(ospi->flags & SPI_OWNER) && 
 	      kernel_disable_spi(ospi->isrc, ospi->ismask,
 				 ospi->idst, ospi->idmask,
@@ -1428,8 +1432,7 @@ kernel_unlink_spi(struct spiob *ospi)
 	  
      if (ah != NULL) {
 	  if (esp == NULL) {
-	       int flag = (vpn_mode ? /*ENABLE_FLAG_MODIFY*/ : 0) | 
-					SADB_X_SAFLAGS_LOCALFLOW;
+	       int flag = (vpn_mode ? /*ENABLE_FLAG_MODIFY*/ : 0);
 	       if (!(ospi->flags & SPI_OWNER) &&
 		   kernel_disable_spi(ospi->isrc, ospi->ismask,
 				      ospi->idst, ospi->idmask,

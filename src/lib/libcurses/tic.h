@@ -1,7 +1,7 @@
-/*	$OpenBSD: tic.h,v 1.5 1999/03/12 04:36:02 millert Exp $	*/
+/*	$OpenBSD: tic.h,v 1.9 2000/03/26 16:45:03 millert Exp $	*/
 
 /****************************************************************************
- * Copyright (c) 1998 Free Software Foundation, Inc.                        *
+ * Copyright (c) 1998-2000 Free Software Foundation, Inc.                   *
  *                                                                          *
  * Permission is hereby granted, free of charge, to any person obtaining a  *
  * copy of this software and associated documentation files (the            *
@@ -99,8 +99,21 @@ extern "C" {
 /* location of user's personal info directory */
 #define PRIVATE_INFO	"%s/.terminfo"	/* plug getenv("HOME") into %s */
 
+/*
+ * Some traces are designed to be used via tic's verbose option (and similar in
+ * infocmp and toe) rather than the 'trace()' function.  So we use the bits
+ * above the normal trace() parameter as a debug-level.
+ */
+
+#define MAX_DEBUG_LEVEL 15
+#define DEBUG_LEVEL(n)	((n) << 12)	/* see TRACE_MAXIMUM */
+
+#define set_trace_level(n) \
+ 	_nc_tracing &= DEBUG_LEVEL(MAX_DEBUG_LEVEL), \
+	_nc_tracing |= DEBUG_LEVEL(n)
+
 #ifdef TRACE
-#define DEBUG(n, a)	if (_nc_tracing & (1 << (n - 1))) _tracef a
+#define DEBUG(n, a)	if (_nc_tracing >= DEBUG_LEVEL(n)) _tracef a
 #else
 #define DEBUG(n, a)	/*nothing*/
 #endif
@@ -159,7 +172,16 @@ struct tinfo_fkeys {
 	chtype code;
 	};
 
+#if	BROKEN_LINKER
+
+#define	_nc_tinfo_fkeys	_nc_tinfo_fkeysf()
+extern struct tinfo_fkeys *_nc_tinfo_fkeysf(void);
+
+#else
+
 extern struct tinfo_fkeys _nc_tinfo_fkeys[];
+
+#endif
 
 	/*
 	 * The file comp_captab.c contains an array of these structures, one
@@ -251,7 +273,7 @@ extern bool _nc_suppress_warnings;
 extern char *_nc_tic_expand(const char *, bool, int);
 
 /* comp_scan.c: decode string from readable form */
-extern char _nc_trans_string(char *);
+extern char _nc_trans_string(char *, char *);
 
 /* captoinfo.c: capability conversion */
 extern char *_nc_captoinfo(const char *, const char *, int const);

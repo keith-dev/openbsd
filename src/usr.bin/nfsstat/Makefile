@@ -1,10 +1,8 @@
-#	$OpenBSD: Makefile,v 1.3 1997/09/21 11:50:17 deraadt Exp $
+#	$OpenBSD: Makefile,v 1.5 2000/04/18 20:17:53 mickey Exp $
 
 PROG=	nfsstat
 CFLAGS+=-DNFS
-DPADD=  ${LIBKVM}
-LDADD= -lkvm
-BINGRP=	kmem
-BINMODE=2555
+DPADD=	${LIBKVM}
+LDADD=	-lkvm
 
 .include <bsd.prog.mk>

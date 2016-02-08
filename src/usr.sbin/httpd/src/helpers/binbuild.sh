@@ -6,12 +6,14 @@
 # This script falls under the Apache License.
 # See http://www.apache.org/docs/LICENSE
 
-
-CONFIGPARAM="--with-layout=BinaryDistribution --enable-module=most --enable-shared=max"
+OS=`src/helpers/GuessOS`
+case "x$OS" in
+  x*390*) CONFIGPARAM="--with-layout=BinaryDistribution --enable-module=most";;
+      *) CONFIGPARAM="--with-layout=BinaryDistribution --enable-module=most --enable-shared=max";;
+esac
 APDIR=`pwd`
 APDIR=`basename $APDIR`
 VER=`echo $APDIR |sed s/apache_//`
-OS=`src/helpers/GuessOS`
 TAR="`src/helpers/PrintPath tar`"
 GTAR="`src/helpers/PrintPath gtar`"
 GZIP="`src/helpers/PrintPath gzip`"
@@ -227,7 +229,7 @@ cp README.bindist ../apache_$VER-$OS.README
   echo " " && \
   echo "echo \"Ready.\"" && \
   echo "echo \" +--------------------------------------------------------+\"" && \
-  echo "echo \" | You now have successfully installed the Apache $VER   |\"" && \
+  echo "echo \" | You now have successfully installed the Apache $VER  |\"" && \
   echo "echo \" | HTTP server. To verify that Apache actually works      |\"" && \
   echo "echo \" | correctly you should first check the (initially        |\"" && \
   echo "echo \" | created or preserved) configuration files:             |\"" && \
@@ -269,7 +271,10 @@ else
   else
     if [ "x$TAR" != "x" ]
     then
-      $TAR -cf ../apache_$VER-$OS.tar -C .. apache_$VER
+      case "x$OS" in
+        x*390*) $TAR -cfU ../apache_$VER-$OS.tar -C .. apache_$VER;;
+	    *) $TAR -cf ../apache_$VER-$OS.tar -C .. apache_$VER;;
+      esac
       if [ "x$GZIP" != "x" ]
       then
         $GZIP ../apache_$VER-$OS.tar

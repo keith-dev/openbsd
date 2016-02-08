@@ -1,4 +1,4 @@
-/*	$OpenBSD: cond.c,v 1.4 1998/12/05 00:06:27 espie Exp $	*/
+/*	$OpenBSD: cond.c,v 1.16 2000/04/17 23:50:45 espie Exp $	*/
 /*	$NetBSD: cond.c,v 1.7 1996/11/06 17:59:02 christos Exp $	*/
 
 /*
@@ -43,7 +43,7 @@
 #if 0
 static char sccsid[] = "@(#)cond.c	8.2 (Berkeley) 1/2/94";
 #else
-static char rcsid[] = "$OpenBSD: cond.c,v 1.4 1998/12/05 00:06:27 espie Exp $";
+static char rcsid[] = "$OpenBSD: cond.c,v 1.16 2000/04/17 23:50:45 espie Exp $";
 #endif
 #endif /* not lint */
 
@@ -102,12 +102,12 @@ typedef enum {
  * last two fields are stored in condInvert and condDefProc, respectively.
  */
 static void CondPushBack __P((Token));
-static int CondGetArg __P((char **, char **, char *, Boolean));
-static Boolean CondDoDefined __P((int, char *));
+static Boolean CondGetArg __P((char **, char **, size_t *, char *, Boolean));
+static Boolean CondDoDefined __P((size_t, char *));
 static int CondStrMatch __P((ClientData, ClientData));
-static Boolean CondDoMake __P((int, char *));
-static Boolean CondDoExists __P((int, char *));
-static Boolean CondDoTarget __P((int, char *));
+static Boolean CondDoMake __P((size_t, char *));
+static Boolean CondDoExists __P((size_t, char *));
+static Boolean CondDoTarget __P((size_t, char *));
 static Boolean CondCvtArg __P((char *, double *));
 static Token CondToken __P((Boolean));
 static Token CondT __P((Boolean));
@@ -118,7 +118,7 @@ static struct If {
     char	*form;	      /* Form of if */
     int		formlen;      /* Length of form */
     Boolean	doNot;	      /* TRUE if default function should be negated */
-    Boolean	(*defProc) __P((int, char *)); /* Default function to apply */
+    Boolean	(*defProc) __P((size_t, char *)); /* Default function to apply */
 } ifs[] = {
     { "ifdef",	  5,	  FALSE,  CondDoDefined },
     { "ifndef",	  6,	  TRUE,	  CondDoDefined },
@@ -130,14 +130,18 @@ static struct If {
 
 static Boolean	  condInvert;	    	/* Invert the default function */
 static Boolean	  (*condDefProc)	/* Default function to apply */
-		    __P((int, char *));
+		    __P((size_t, char *));
 static char 	  *condExpr;	    	/* The expression to parse */
 static Token	  condPushBack=None;	/* Single push-back token used in
 					 * parsing */
 
 #define	MAXIF		30	  /* greatest depth of #if'ing */
 
-static Boolean	  condStack[MAXIF]; 	/* Stack of conditionals's values */
+static struct {
+	Boolean 	value;
+	unsigned long 	lineno;
+	const char 	*filename;
+} condStack[MAXIF]; 			/* Stack of conditionals */
 static int  	  condTop = MAXIF;  	/* Top-most conditional */
 static int  	  skipIfLevel=0;    	/* Depth of skipped conditionals */
 static Boolean	  skipLine = FALSE; 	/* Whether the parse module is skipping
@@ -170,24 +174,23 @@ CondPushBack (t)
  *	Find the argument of a built-in function.
  *
  * Results:
- *	The length of the argument and the address of the argument.
+ *	TRUE if evaluation went okay
  *
  * Side Effects:
- *	The pointer is set to point to the closing parenthesis of the
- *	function call.
- *
+ *	The line pointer is set to point to the closing parenthesis of the
+ *	function call. The argument and argument length are filled.
  *-----------------------------------------------------------------------
  */
-static int
-CondGetArg (linePtr, argPtr, func, parens)
+static Boolean
+CondGetArg(linePtr, argPtr, argLen, func, parens)
     char    	  **linePtr;
     char    	  **argPtr;
+    size_t    	  *argLen;
     char    	  *func;
     Boolean 	  parens;   	/* TRUE if arg should be bounded by parens */
 {
     register char *cp;
-    int	    	  argLen;
-    register Buffer buf;
+    BUFFER buf;
 
     cp = *linePtr;
     if (parens) {
@@ -207,7 +210,7 @@ CondGetArg (linePtr, argPtr, func, parens)
 	 * the word 'make' or 'defined' at the beginning of a symbol...
 	 */
 	*argPtr = cp;
-	return (0);
+	return FALSE;
     }
 
     while (*cp == ' ' || *cp == '\t') {
@@ -218,7 +221,7 @@ CondGetArg (linePtr, argPtr, func, parens)
      * Create a buffer for the argument and start it out at 16 characters
      * long. Why 16? Why not?
      */
-    buf = Buf_Init(16);
+    Buf_Init(&buf, 16);
 
     while ((strchr(" \t)&|", *cp) == (char *)NULL) && (*cp != '\0')) {
 	if (*cp == '$') {
@@ -229,25 +232,24 @@ CondGetArg (linePtr, argPtr, func, parens)
 	     * though perhaps we should...
 	     */
 	    char  	*cp2;
-	    int		len;
+	    size_t	len;
 	    Boolean	doFree;
 
 	    cp2 = Var_Parse(cp, VAR_CMD, TRUE, &len, &doFree);
 
-	    Buf_AddBytes(buf, strlen(cp2), (Byte *)cp2);
+	    Buf_AddString(&buf, cp2);
 	    if (doFree) {
 		free(cp2);
 	    }
 	    cp += len;
 	} else {
-	    Buf_AddByte(buf, (Byte)*cp);
+	    Buf_AddChar(&buf, *cp);
 	    cp++;
 	}
     }
 
-    Buf_AddByte(buf, (Byte)'\0');
-    *argPtr = (char *)Buf_GetAll(buf, &argLen);
-    Buf_Destroy(buf, FALSE);
+    *argPtr = Buf_Retrieve(&buf);
+    *argLen = Buf_Size(&buf);
 
     while (*cp == ' ' || *cp == '\t') {
 	cp++;
@@ -255,7 +257,7 @@ CondGetArg (linePtr, argPtr, func, parens)
     if (parens && *cp != ')') {
 	Parse_Error (PARSE_WARNING, "Missing closing parenthesis for %s()",
 		     func);
-	return (0);
+	return FALSE;
     } else if (parens) {
 	/*
 	 * Advance pointer past close parenthesis.
@@ -264,7 +266,7 @@ CondGetArg (linePtr, argPtr, func, parens)
     }
 
     *linePtr = cp;
-    return (argLen);
+    return TRUE;
 }
 
 /*-
@@ -281,21 +283,18 @@ CondGetArg (linePtr, argPtr, func, parens)
  *-----------------------------------------------------------------------
  */
 static Boolean
-CondDoDefined (argLen, arg)
-    int	    argLen;
+CondDoDefined(argLen, arg)
+    size_t  argLen;
     char    *arg;
 {
     char    savec = arg[argLen];
-    char    *p1;
     Boolean result;
 
     arg[argLen] = '\0';
-    if (Var_Value (arg, VAR_CMD, &p1) != (char *)NULL) {
+    if (Var_Value(arg, VAR_CMD) != NULL)
 	result = TRUE;
-    } else {
+    else
 	result = FALSE;
-    }
-    efree(p1);
     arg[argLen] = savec;
     return (result);
 }
@@ -337,14 +336,14 @@ CondStrMatch(string, pattern)
  */
 static Boolean
 CondDoMake (argLen, arg)
-    int	    argLen;
+    size_t  argLen;
     char    *arg;
 {
     char    savec = arg[argLen];
     Boolean result;
 
     arg[argLen] = '\0';
-    if (Lst_Find (create, (ClientData)arg, CondStrMatch) == NILLNODE) {
+    if (Lst_Find(create, CondStrMatch, arg) == NULL) {
 	result = FALSE;
     } else {
 	result = TRUE;
@@ -368,7 +367,7 @@ CondDoMake (argLen, arg)
  */
 static Boolean
 CondDoExists (argLen, arg)
-    int	    argLen;
+    size_t  argLen;
     char    *arg;
 {
     char    savec = arg[argLen];
@@ -401,8 +400,8 @@ CondDoExists (argLen, arg)
  *-----------------------------------------------------------------------
  */
 static Boolean
-CondDoTarget (argLen, arg)
-    int	    argLen;
+CondDoTarget(argLen, arg)
+    size_t  argLen;
     char    *arg;
 {
     char    savec = arg[argLen];
@@ -411,7 +410,7 @@ CondDoTarget (argLen, arg)
 
     arg[argLen] = '\0';
     gn = Targ_FindNode(arg, TARG_NOCREATE);
-    if ((gn != NILGNODE) && !OP_NOP(gn->type)) {
+    if ((gn != NULL) && !OP_NOP(gn->type)) {
 	result = TRUE;
     } else {
 	result = FALSE;
@@ -525,7 +524,7 @@ CondToken(doEval)
 		char	*lhs;
 		char	*rhs;
 		char	*op;
-		int	varSpecLen;
+		size_t	varSpecLen;
 		Boolean	doFree;
 
 		/*
@@ -545,24 +544,20 @@ CondToken(doEval)
 
 		if (!isspace((unsigned char) *condExpr) &&
 		    strchr("!=><", *condExpr) == NULL) {
-		    Buffer buf;
-		    char *cp;
+		    BUFFER buf;
 
-		    buf = Buf_Init(0);
+		    Buf_Init(&buf, 0);
 
-		    for (cp = lhs; *cp; cp++)
-			Buf_AddByte(buf, (Byte)*cp);
+		    Buf_AddString(&buf, lhs);
 
 		    if (doFree)
 			free(lhs);
 
 		    for (;*condExpr && !isspace((unsigned char) *condExpr);
 			 condExpr++)
-			Buf_AddByte(buf, (Byte)*condExpr);
+			Buf_AddChar(&buf, *condExpr);
 
-		    Buf_AddByte(buf, (Byte)'\0');
-		    lhs = (char *)Buf_GetAll(buf, &varSpecLen);
-		    Buf_Destroy(buf, FALSE);
+		    lhs = Buf_Retrieve(&buf);
 
 		    doFree = TRUE;
 		}
@@ -614,7 +609,7 @@ do_compare:
 		    char    *string;
 		    char    *cp, *cp2;
 		    int	    qt;
-		    Buffer  buf;
+		    BUFFER  buf;
 
 do_string_compare:
 		    if (((*op != '!') && (*op != '=')) || (op[1] != '=')) {
@@ -623,7 +618,7 @@ do_string_compare:
 			goto error;
 		    }
 
-		    buf = Buf_Init(0);
+		    Buf_Init(&buf, 0);
 		    qt = *rhs == '"' ? 1 : 0;
 
 		    for (cp = &rhs[qt];
@@ -636,30 +631,27 @@ do_string_compare:
 			     * character, if it exists.
 			     */
 			    cp++;
-			    Buf_AddByte(buf, (Byte)*cp);
+			    Buf_AddChar(&buf, *cp);
 			} else if (*cp == '$') {
-			    int	len;
+			    size_t  len;
 			    Boolean freeIt;
 
 			    cp2 = Var_Parse(cp, VAR_CMD, doEval,&len, &freeIt);
 			    if (cp2 != var_Error) {
-				Buf_AddBytes(buf, strlen(cp2), (Byte *)cp2);
+				Buf_AddString(&buf, cp2);
 				if (freeIt) {
 				    free(cp2);
 				}
 				cp += len - 1;
 			    } else {
-				Buf_AddByte(buf, (Byte)*cp);
+				Buf_AddChar(&buf, *cp);
 			    }
 			} else {
-			    Buf_AddByte(buf, (Byte)*cp);
+			    Buf_AddChar(&buf, *cp);
 			}
 		    }
 
-		    Buf_AddByte(buf, (Byte)0);
-
-		    string = (char *)Buf_GetAll(buf, (int *)0);
-		    Buf_Destroy(buf, FALSE);
+		    string = Buf_Retrieve(&buf);
 
 		    if (DEBUG(COND)) {
 			printf("lhs = \"%s\", rhs = \"%s\", op = %.2s\n",
@@ -678,6 +670,8 @@ do_string_compare:
 		    if (rhs == condExpr) {
 		    	if (!qt && *cp == ')')
 			    condExpr = cp;
+			else if (*cp == '\0')
+			    condExpr = cp;
 			else
 			    condExpr = cp + 1;
 		    }
@@ -692,7 +686,7 @@ do_string_compare:
 		    if (!CondCvtArg(lhs, &left))
 			goto do_string_compare;
 		    if (*rhs == '$') {
-			int 	len;
+			size_t 	len;
 			Boolean	freeIt;
 
 			string = Var_Parse(rhs, VAR_CMD, doEval,&len,&freeIt);
@@ -766,10 +760,10 @@ error:
 		break;
 	    }
 	    default: {
-		Boolean (*evalProc) __P((int, char *));
+		Boolean (*evalProc) __P((size_t, char *));
 		Boolean invert = FALSE;
 		char	*arg;
-		int	arglen;
+		size_t	arglen;
 
 		if (strncmp (condExpr, "defined", 7) == 0) {
 		    /*
@@ -779,11 +773,11 @@ error:
 		     */
 		    evalProc = CondDoDefined;
 		    condExpr += 7;
-		    arglen = CondGetArg (&condExpr, &arg, "defined", TRUE);
-		    if (arglen == 0) {
-			condExpr -= 7;
-			goto use_default;
-		    }
+		    if (!CondGetArg(&condExpr, &arg, &arglen, 
+		    	"defined", TRUE)) {
+			    condExpr -= 7;
+			    goto use_default;
+ 		    }
 		} else if (strncmp (condExpr, "make", 4) == 0) {
 		    /*
 		     * Use CondDoMake to evaluate the argument and
@@ -792,11 +786,11 @@ error:
 		     */
 		    evalProc = CondDoMake;
 		    condExpr += 4;
-		    arglen = CondGetArg (&condExpr, &arg, "make", TRUE);
-		    if (arglen == 0) {
-			condExpr -= 4;
-			goto use_default;
-		    }
+		    if (!CondGetArg(&condExpr, &arg, &arglen, 
+		    	"make", TRUE)) {
+			    condExpr -= 4;
+			    goto use_default;
+ 		    }
 		} else if (strncmp (condExpr, "exists", 6) == 0) {
 		    /*
 		     * Use CondDoExists to evaluate the argument and
@@ -805,17 +799,17 @@ error:
 		     */
 		    evalProc = CondDoExists;
 		    condExpr += 6;
-		    arglen = CondGetArg(&condExpr, &arg, "exists", TRUE);
-		    if (arglen == 0) {
-			condExpr -= 6;
-			goto use_default;
+		    if (!CondGetArg(&condExpr, &arg, &arglen,
+		    	"exists", TRUE)) {
+			    condExpr -= 6;
+			    goto use_default;
 		    }
 		} else if (strncmp(condExpr, "empty", 5) == 0) {
 		    /*
 		     * Use Var_Parse to parse the spec in parens and return
 		     * True if the resulting string is empty.
 		     */
-		    int	    length;
+		    size_t  length;
 		    Boolean doFree;
 		    char    *val;
 
@@ -863,10 +857,10 @@ error:
 		     */
 		    evalProc = CondDoTarget;
 		    condExpr += 6;
-		    arglen = CondGetArg(&condExpr, &arg, "target", TRUE);
-		    if (arglen == 0) {
-			condExpr -= 6;
-			goto use_default;
+		    if (!CondGetArg(&condExpr, &arg, &arglen, 
+		    	"target", TRUE)) {
+			    condExpr -= 6;
+			    goto use_default;
 		    }
 		} else {
 		    /*
@@ -879,7 +873,8 @@ error:
 		use_default:
 		    invert = condInvert;
 		    evalProc = condDefProc;
-		    arglen = CondGetArg(&condExpr, &arg, "", FALSE);
+		    /* XXX should we ignore problems now ? */
+		    CondGetArg(&condExpr, &arg, &arglen, "", FALSE);
 		}
 
 		/*
@@ -1137,7 +1132,7 @@ Cond_Eval (line)
 		Parse_Error (level, "if-less else");
 		return (COND_INVALID);
 	    } else if (skipIfLevel == 0) {
-		value = !condStack[condTop];
+		value = !condStack[condTop].value;
 	    } else {
 		return (COND_SKIP);
 	    }
@@ -1210,7 +1205,7 @@ Cond_Eval (line)
     }
     if (!isElse) {
 	condTop -= 1;
-    } else if ((skipIfLevel != 0) || condStack[condTop]) {
+    } else if ((skipIfLevel != 0) || condStack[condTop].value) {
 	/*
 	 * If this is an else-type conditional, it should only take effect
 	 * if its corresponding if was evaluated and FALSE. If its if was
@@ -1230,7 +1225,9 @@ Cond_Eval (line)
 	Parse_Error (PARSE_FATAL, "Too many nested if's. %d max.", MAXIF);
 	return (COND_INVALID);
     } else {
-	condStack[condTop] = value;
+	condStack[condTop].value = value;
+	condStack[condTop].lineno = Parse_Getlineno();
+	condStack[condTop].filename = Parse_Getfilename();
 	skipLine = !value;
 	return (value ? COND_PARSE : COND_SKIP);
     }
@@ -1252,9 +1249,15 @@ Cond_Eval (line)
 void
 Cond_End()
 {
+    int i;
+
     if (condTop != MAXIF) {
 	Parse_Error(PARSE_FATAL, "%d open conditional%s", MAXIF-condTop,
 		    MAXIF-condTop == 1 ? "" : "s");
+	for (i = MAXIF-1; i >= condTop; i--) {
+	    fprintf(stderr, "\t at line %lu of %s\n", condStack[i].lineno,
+		condStack[i].filename);
+	}
     }
     condTop = MAXIF;
 }

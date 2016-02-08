@@ -12,7 +12,7 @@
 test "$usemymalloc" || usemymalloc='n'
 
 # Currently, vfork(2) is not a real win over fork(2) but this will
-# change in a future release.
+# change starting with OpenBSD 2.7.
 usevfork='true'
 
 # setre?[ug]id() have been replaced by the _POSIX_SAVED_IDS versions
@@ -37,7 +37,17 @@ alpha|mips|powerpc|vax)
 	# we use -fPIC here because -fpic is *NOT* enough for some of the
 	# extensions like Tk on some OpenBSD platforms (ie: sparc)
 	cccdlflags="-DPIC -fPIC $cccdlflags"
-	lddlflags="-Bforcearchive -Bshareable $lddlflags"
+	lddlflags="-Bshareable $lddlflags"
+	;;
+esac
+
+#
+# Tweaks for various versions of OpenBSD
+#
+case "$osvers" in
+2.5)
+	# OpenBSD 2.5 has broken odbm support
+	i_dbm=$undef
 	;;
 esac
 
@@ -58,7 +68,11 @@ cat > UU/usethreads.cbu <<'EOCBU'
 case "$usethreads" in
 $define|true|[yY]*)
 	# any openbsd version dependencies with pthreads?
+	ccflags="-pthread $ccflags"
+	ldflags="-pthread $ldflags"
 	libswanted="$libswanted pthread"
+	# This is strange.
+	usevfork="$undef"
 esac
 EOCBU
 
@@ -71,16 +85,16 @@ case "$openbsd_distribution" in
 	prefix='/usr'
 	prefixexp='/usr'
 	sysman='/usr/share/man/man1'
-	# Never look for things in /usr/local
-	glibpth='/usr/lib'
 	libpth='/usr/lib'
-	locincpth=''
-	loclibpth=''
+	glibpth='/usr/lib'
+	# Ports installs non-std libs in /usr/local/lib so look there too
+	locincpth='/usr/local/include'
+	loclibpth='/usr/local/lib'
 	# Link perl with shared libperl
-	#if [ "$usedl" = "$define" -a -r shlib_version ]; then
-	#	useshrplib=true
-	#	libperl=`. ./shlib_version; echo libperl.so.${major}.${minor}`
-	#fi
+	if [ "$usedl" = "$define" -a -r shlib_version ]; then
+		useshrplib=true
+		libperl=`. ./shlib_version; echo libperl.so.${major}.${minor}`
+	fi
 	;;
 esac
 

@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.6 1998/07/24 00:11:09 millert Exp $
+#	$OpenBSD: Makefile,v 1.8 2000/04/15 05:22:14 millert Exp $
 
 PROG=	window
 SRCS=	char.c cmd.c cmd1.c cmd2.c cmd3.c cmd4.c cmd5.c cmd6.c cmd7.c \

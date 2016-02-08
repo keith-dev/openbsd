@@ -1,4 +1,4 @@
-static char *rcs_id = "$Id: use_adf.c,v 1.3 1999/05/23 17:19:23 aaron Exp $";
+static char *rcs_id = "$Id: use_adf.c,v 1.5 2000/02/01 03:24:14 deraadt Exp $";
 /*
  * Copyright (c) 1995 Kenneth Stailey
  * All rights reserved.
@@ -35,7 +35,7 @@ static char *rcs_id = "$Id: use_adf.c,v 1.3 1999/05/23 17:19:23 aaron Exp $";
  * use_adf.c: make the scanner use the ADF as the next paper source
  */
 
-#include <sys/types.h>
+#include <sys/param.h>
 #if defined(__NetBSD__) || defined(__OpenBSD__)
 # include <sys/ioctl.h>
 #endif
@@ -58,13 +58,12 @@ main(int argc, char *argv[])
 {
   int sfd;
   char *logical_name = "scan0";
-  char device[255];
+  char device[MAXPATHLEN];
 
   int c;
   extern int optind;
   extern char *optarg;
 
-  extern int errno;
 
   while ((c = getopt(argc, argv, "l:")) != -1) {
     switch (c) {
@@ -78,6 +77,12 @@ main(int argc, char *argv[])
     }
   }
 
+  if (snprintf(device, sizeof device, "/dev/%s", logical_name) >=
+    sizeof device) {
+    fprintf(stderr, "%s: name to long", device);
+    exit(1);
+  }
+	
   strcpy(device, "/dev/");
   strcat(device, logical_name);
 

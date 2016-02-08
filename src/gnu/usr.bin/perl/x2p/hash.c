@@ -1,4 +1,4 @@
-/* $RCSfile: hash.c,v $$Revision: 1.3 $$Date: 1999/04/29 22:52:58 $
+/* $RCSfile: hash.c,v $$Revision: 1.4 $$Date: 2000/04/06 17:09:16 $
  *
  *    Copyright (c) 1991-1997, Larry Wall
  *
@@ -6,8 +6,8 @@
  *    License or the Artistic License, as specified in the README file.
  *
  * $Log: hash.c,v $
- * Revision 1.3  1999/04/29 22:52:58  millert
- * perl5.005_03 (stock)
+ * Revision 1.4  2000/04/06 17:09:16  millert
+ * perl-5.6.0 + local changes
  *
  */
 
@@ -92,9 +92,7 @@ hstore(register HASH *tb, char *key, STR *val)
 
 #ifdef NOTUSED
 bool
-hdelete(tb,key)
-register HASH *tb;
-char *key;
+hdelete(register HASH *tb, char *key)
 {
     register char *s;
     register int i;
@@ -181,8 +179,7 @@ hnew(void)
 }
 
 #ifdef NOTUSED
-hshow(tb)
-register HASH *tb;
+hshow(register HASH *tb)
 {
     fprintf(stderr,"%5d %4d (%2d%%)\n",
 	tb->tbl_max+1,

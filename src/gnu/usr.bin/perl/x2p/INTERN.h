@@ -1,4 +1,4 @@
-/* $RCSfile: INTERN.h,v $$Revision: 1.3 $$Date: 1999/04/29 22:52:56 $
+/* $RCSfile: INTERN.h,v $$Revision: 1.4 $$Date: 2000/04/06 17:09:13 $
  *
  *    Copyright (c) 1991-1997, Larry Wall
  *
@@ -6,8 +6,8 @@
  *    License or the Artistic License, as specified in the README file.
  *
  * $Log: INTERN.h,v $
- * Revision 1.3  1999/04/29 22:52:56  millert
- * perl5.005_03 (stock)
+ * Revision 1.4  2000/04/06 17:09:13  millert
+ * perl-5.6.0 + local changes
  *
  */
 

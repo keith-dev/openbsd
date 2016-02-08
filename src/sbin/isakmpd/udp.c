@@ -1,8 +1,9 @@
-/*	$OpenBSD: udp.c,v 1.16 1999/10/01 14:08:05 niklas Exp $	*/
-/*	$EOM: udp.c,v 1.42 1999/09/30 12:59:27 niklas Exp $	*/
+/*	$OpenBSD: udp.c,v 1.21 2000/04/07 22:04:58 niklas Exp $	*/
+/*	$EOM: udp.c,v 1.49 2000/03/14 19:42:32 ho Exp $	*/
 
 /*
  * Copyright (c) 1998, 1999 Niklas Hallqvist.  All rights reserved.
+ * Copyright (c) 2000 Angelos D. Keromytis.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -37,7 +38,9 @@
 #include <sys/types.h>
 #include <sys/ioctl.h>
 #include <sys/socket.h>
+#ifndef linux
 #include <sys/sockio.h>
+#endif
 #include <net/if.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
@@ -128,8 +131,7 @@ static struct transport *
 udp_make (struct sockaddr_in *laddr)
 {
   struct udp_transport *t = 0;
-  int s;
-  int on;
+  int s, on;
 
   t = malloc (sizeof *t);
   if (!t)
@@ -164,8 +166,8 @@ udp_make (struct sockaddr_in *laddr)
     {
       log_error ("udp_make: setsockopt (%d, %d, %d, %p, %d)", s, SOL_SOCKET,
 		 (laddr->sin_addr.s_addr == INADDR_ANY
-		   && conf_get_str ("General", "Listen-on"))
-		  ? SO_REUSEPORT : SO_REUSEADDR,
+		  && conf_get_str ("General", "Listen-on"))
+		 ? SO_REUSEPORT : SO_REUSEADDR,
 		 &on, sizeof on);
       goto err;
     }
@@ -362,6 +364,11 @@ udp_create (char *name)
   port = htons (port);
 
   addr_str = conf_get_str (name, "Address");
+  if (!addr_str)
+    {
+      log_print ("udp_create: no address configured for \"%s\"", name);
+      return 0;
+    }
   addr = inet_addr (addr_str);
   if (addr == INADDR_NONE)
     {
@@ -422,7 +429,8 @@ udp_report (struct transport *t)
 
   snprintf (src, 16, "%s", inet_ntoa (u->src.sin_addr));
   snprintf (dst, 16, "%s", inet_ntoa (u->dst.sin_addr));
-  log_debug (LOG_REPORT, 0, "udp_report: fd %d src %s dst %s", u->s, src, dst);
+  LOG_DBG ((LOG_REPORT, 0, "udp_report: fd %d src %s dst %s", u->s, src,
+	    dst));
 }
 
 /*

@@ -17,11 +17,409 @@
   _INTENTIONALLY_ no contributor names attached to the entries. Instead all
   contributors are listed in the CREDITS file.
 
+      ____    __   
+     |___ \  / /_  
+       __) || '_ \ 
+      / __/ | (_) |
+  __ |_____(_)___/____________________________________________
+
+  Changes with mod_ssl 2.6.2 (29-Feb-2000 to 02-Mar-2000)
+
+   *) Updated the conf/ssl.crt/ca-bundle.crt file (containing the CA
+      Root Certificates of over 60 popular CAs) to the contents extracted
+      from Netscape Communicator 4.72's cert7.db file.
+
+   *) Fixed compilation of the new HTTPS proxy code (SSL_EXPERIMENTAL):
+      The SSL_VENDOR was required without need if SSL_EXPERIMENTAL was
+      enabled. This is now fixed and only SSL_EXPERIMENTAL is requied again
+      for the new HTTPS proxy stuff.
+
+   *) Added an FAQ entry about the "less entropy for the PRNG"
+      problem which now becomes "popular" ;) with OpenSSL 0.9.5.
+
+   *) Fixed conf/ssl.crl/Makefile: the files which have to be
+      checked for existance are named foo.rNNN and not just foo.NNN
+
+   *) Fixed a typo related to a RAND_status call in ssl_engine_rand.c
+      which was introduced in 2.6.1 and which caused mod_ssl fail to
+      compile if OpenSSL >= 0.9.5 was used [Sorry, my gcc hasn't catched
+      this typo :-(...]
+
+   *) Added also some random files which exists under Mach/Rhapshody
+      platforms to the list of files in src/support/mkcert.sh to make
+      sure enough entropy is available on these platforms under "make
+      certificate" with OpenSSL 0.9.5
+
+   *) Enhanced SSLRequire (SH2) -> SSLRequireSSL (mod_ssl)
+      directive compatibility mapping.
+
+  Changes with mod_ssl 2.6.1 (25-Feb-2000 to 29-Feb-2000)
+
+   *) Added support for OpenSSL 0.9.5's RAND_egd() which is now used
+      to read entropy from the EGD Unix domain socket if `SSLRandSeed
+      egd:/path/to/socket' is configured. 
+
+   *) Extended builtin PRNG seeding with a run-time stack based source.
+      This way the builtin source now creates more entropy and usually
+      enough to make OpenSSL >= 0.9.5 happy again. If OpenSSL is still not
+      happy (i.e. still not sufficient entropy exists), a warning message
+      is logged by mod_ssl now.
+
+   *) Fixed Tanenbaum's name on the quote in ssl_intro.wml
+
+   *) Updated Thawte's sxnet stuff for latest OpenSSL.
+
+   *) Allow mod_ssl to compile also under Win32 & VC++ 6.0
+   
+   *) Fix OS/2 support and this way make mod_ssl again work
+      also under this platform.
+
+  Changes with mod_ssl 2.6.0 (24-Feb-2000 to 25-Feb-2000)
+
+   *) Merged in enhanced HTTPS Proxy Support which is derived from
+      Stronghold 2.x and was originally contributed by C2Net over one
+      year ago. This is still _EXPERIMENTAL_ stuff, so it is entirely
+      wrapped with SSL_EXPERIMENTAL sections and has to be abled under
+      built-time with --enable-rule=SSL_EXPERIMENTAL. Then the following
+      new configuration directives are provided to fine-tune the HTTPS
+      proxy support:
+
+          o  SSLProxyProtocol [+-][SSLv2|SSLv3|TLSv1] ...
+             (enable or disable SSL protocol flavors)
+          o  SSLProxyCipherSuite XXX:...:XXX
+             (colon-delimited list of permitted SSL ciphers)
+          o  SSLProxyVerify on|off
+             (whether to verify the remote certificate)
+          o  SSLProxyVerifyDepth N
+             (maximum certificate verification depth)
+          o  SSLProxyCACertificateFile /path/to/file
+             (file containing server certificates)
+          o  SSLProxyCACertificatePath /path/to/dir
+             (directory containing server certificates)
+          o  SSLProxyMachineCertificateFile /path/to/file
+             (file containing client certificates)
+          o  SSLProxyMachineCertificatePath /path/to/dir
+             (directory containing client certificates)
+
+      This stuff is declared experimental, because it was still _NOT_
+      tested in depth and is still _UNDOCUMENTED_. So keep in mind what
+      SSL_EXPERIMENTAL means and use this with care!
+
+   *) Extended the EAPI patches to mod_proxy to allow the new
+      HTTPS proxy support to be merged in.
+
+   *) Fixed ssl_io_suck() prototype scope in mod_ssl.h by changing
+      the old #ifdef SSL_EXPERIMENTAL to the now correct #ifndef
+      SSL_CONSERVATIVE.
+
+   *) Added "cons" and "nocons" development target to
+      src/modules/ssl/Makefile.tmpl.
+
+   *) Upgraded to Apache version 1.3.12.
+
+
+      ____    ____  
+     |___ \  | ___| 
+       __) | |___ \ 
+      / __/ _ ___) |
+  __ |_____(_)____/___________________________________________
+               
+  Changes with mod_ssl 2.5.1 (22-Jan-2000 to 24-Feb-2000)
+
+   *) Made sure OpenSSL's Pseudo Random Number Generator (PRNG) is
+      seeded already before the temporary RSA keys are generated.
+
+   *) Fixed possible security hole in mkcert.sh script (make
+      certificate) by making sure we already generate the foo.key files
+      with proper umask instead of chmod them later (and this way
+      perhaps too late).
+
+   *) Fixed memory leak caused by not-freed SSL_CTX in the HTTPS proxy
+      support (ssl_engine_ext.c/mod_proxy).
+
+   *) Fixed quotation author in ssl_glossary.html: it's Richard Nixon,
+      as Lukas Bradley pointed out.
+
+   *) Use "/usr/local/ssl" as the default for $SSL_BASE only if this
+      path really exists. Else use "SYSTEM" and this way be more
+      flexible. This is especially interesting for RedHat/RPM users
+      where OpenSSL stays often directly under /usr.
+
+   *) Make sure libssl.module also detects OpenSSL correctly
+      if OpenSSL was built as shared libraries (.so)
+   
+   *) Let configure script more accurately check for -h, -v and
+      -q options on command line.
+
+   *) Make `SSLSessionCache none' really work as expected.
+
+   *) Added support for the latest OpenSSL snapshot (>= version 0.9.4).
+
+   *) Removed the removal of "#ifdef lint.. #endif" lines from
+      src/modules/ssl/Makefile.tmpl to make the life of the 
+      OpenBSD guys easier in the future.
+
+   *) Removed Unix Bourne-Shell construct "2>&1" from Win32's
+      configure.bat script because Win32 hates this.
+   
+   *) Fixed ApacheCore.def for Win32: Some numbers occured 
+      multiple times.
+
+  Changes with mod_ssl 2.5.0 (08-Jan-2000 to 22-Jan-2000)
+
+   *) Switched the old "POST for HTTPS" support code from
+      defined(SSL_EXPERIMENTAL) to !defined(SSL_CONSERVATIVE), because this
+      code is both already stable (even it's not a conservative approach) and
+      important. This way POST support is now available per default, but still
+      can be disabled/removed by very conservative people with an easy
+      --enable-rule=SSL_CONSERVATIVE.
+
+   *) Added SSL_CONSERVATIVE rule to src/Configuration.tmpl which
+      complements SSL_EXPERIMENTAL. Both rules are per default set
+      to "no", i.e. disabled. But while SSL_EXPERIMENTAL still enables
+      experimental code, enables SSL_CONSERVATIVE conservative code.  That is,
+      actually per default some non-conservative things might be enabled which
+      can be _disabled_ by forcing mod_ssl to use only conservative
+      approaches.
+
+   *) Added entry about "no shared ciphers" to FAQ.
+
+   *) Upgraded to the new Apache version: 1.3.11 (BTW, Apache 1.3.10
+      was never released). This moves the mod_ssl community to the
+      latest Apache state and this way implicitly provides them over 70
+      bugfixes and cleanups which 1.3.11 provides over 1.3.9.
+
       ____   _  _   
      |___ \ | || |  
        __) || || |_ 
       / __/ |__   _|
   __ |_____(_) |_| ___________________________________________
+
+  Changes with mod_ssl 2.4.10 (24-Nov-1999 to 08-Jan-2000)
+
+   *) Mentioned MD5-encrypted password in ssl_reference.wml in addition
+      to DES-encrypted password.
+   
+   *) Added a new FAQ entry about the path internally pre-defined by
+      EAPI_MM_CORE_PATH.
+
+   *) Adjust the name-based-vhost complain: Talk say "you should not
+      use" instead of "you cannot use", because first there are
+      situations where it can be reasonable to use name-based vhosts with
+      SSL and second there is no technical restriction on the mod_ssl side,
+      of course.
+
+   *) Changed the license on mod_define.c from the BSD/Apache-style
+      license to a even less restrictive MIT-style license to allow
+      everyone to do with this module what they want.
+
+   *) Fixed a compile-time warning under very strict compilers by using
+      a more correct `ssl_verify_t' (enum based) instead of `int' in
+      ssl_engine_config.c.
+
+   *) Various minor documentation updates.
+
+   *) Made the EAPI-vs-plain-API complain in mod_so more clear.
+
+   *) Adjusted all copyright messages to contain the new year 2000 ;)
+
+   *) Fixed INSTALL.W32 document for latest OpenSSL versions.
+
+   *) Fixed SSL session id context configuration: the value is now an
+      MD5 of `server:port' and this way always a string of just 32 bytes,
+      so OpenSSL's SSL_set_session_id_context() doesn't fail.
+
+   *) Removed old CVS informations from etc/patch.tar tarball.
+
+  Changes with mod_ssl 2.4.9 (05-Nov-1999 to 24-Nov-1999)
+
+   *) Fixed SSLRequire expression evaluation for number strings.
+      Expressions like `SSLRequire %{SSL_CIPHER_USEKEYSIZE} >= 128'
+      didn't work if SSL_CIPHER_USEKEYSIZE was "40" because the evaluation
+      used strcmp(3) and this fails to compare numbers of different length.
+      An own comparison function is now used to avoid this problem.
+
+   *) Now on Win32 a warning is logged once on startup that mod_ssl is
+      NOT officially supported under Win32 and people have to use it there on
+      their own risk (and so shouldn't complain if it doesn't work). Because
+      only the Unix platform is officially supported and mod_ssl is checked
+      for security issues only related this platform.
+
+   *) For performance reasons it is unreasonable to create the SSL_*
+      CGI/SSI variables _all the time_, because their creation is
+      a rather expensive operation which slows down the server
+      noticeable. Instead it is more reasonable to let them create for
+      CGI and SSI requests _only_. For consistency reason with other
+      `SSLOptions' variables (which all have positive names) and to
+      avoid necessary cleanups changes in the future, I decided to make
+      the incompatibility change _NOW_ (sorry).
+
+      In short: With mod_ssl 2.4.9 per default no SSI/CGI variables
+      SSL_* are created any longer (only the special "HTTPS" variable is
+      always created). Instead one has to use `SSLOptions +StdEnvVars'
+      to switch the creation on.
+
+   *) Added an `SSLOptions' variable `StdEnvVars' which now controls 
+      the creation of the numerious SSL_* CGI/SSI variables.
+
+   *) Renamed old variable SSL_{CLIENT,SERVER}_{S,I}_DN_SP to more
+      correct SSL_{CLIENT,SERVER}_{S,I}_DN_ST variable to conform to
+      RFC2156 and current OpenSSL state (which also prints this OID as
+      "ST" and no longer "SP").
+
+   *) Added support for SSL_{CLIENT,SERVER}_{S,I}_DN_{T,I,G,S,D,UID}
+      variables (corresponding to X.509 title, initials, givenName, surname,
+      description and uniqueIdentifier OIDs) to allow the checking of more
+      X.509 certificate ingredients.
+
+   *) Allow mod_rewrite to also lookup the "HTTPS" variable, for instance
+      via ``RewriteCond %{HTTPS} !=on''.
+
+   *) Removed old URL references to rsaref20.tar.Z from INSTALL document.
+
+   *) Now an explicit error message is logged also if an SSL session cannot be
+      stored to the DBM file via dbm_store (and not just if dbm_open failed).
+
+   *) Now the pass phrase dialog no longer uses the hard-coded
+      filedescriptor 10 as the storage for stderr while the pass phrase dialog
+      is displayed. Instead (at least under Unix) it tries to open /dev/null
+      and uses this filedescriptor instead. And when this fails (or always
+      under Win32) it uses the hard-coded filedescriptor 50 (a lot higher than
+      10 to avoid problems with logfile rotation programs and other things
+      Apache could have started).
+
+   *) Fixed SSL_make_ciphersuite() function: it calculated the required string
+      length incorrectly and could segfault. BUT THIS FUNCTION IS STILL NOT
+      USED IN MOD_SSL AT ALL, so don't panic. This function is for debugging
+      purposes only.
+
+   *) Fixed a filedescriptor leak which happened if encrypted private keys
+      were used. Here the pass phrase dialog forgot to close a temporary
+      filedescriptor.
+
+   *) Added three new OpenSSL log entry annotations: First, "*no start
+      line*" now triggers "Bad file contents or format - or even just
+      a forgotten SSLCertificate KeyFile?" and "*bad password read*"
+      triggers "You entered an incorrect pass phrase!?". Additionally
+      "*bad mac decode*" now triggers "Browser still remembered details
+      of a re-created server certificate?" because people often get "bad
+      data" dialog boxes while (re-)testing with Snake Oil certs.
+
+   *) Added hint about possibly blocking /dev/random devices also to
+      httpd.conf-default to make sure people don't overlook this subtle
+      platform-dependent problem. Additionally a new FAQ entry was
+      made about this, too.
+
+   *) Added an entry to the FAQ about GIDs and their intermediate
+      certificate which has to be configured with SSLCertificateChainFile.
+
+   *) Fixed some external URLs in the FAQ.
+
+  Changes with mod_ssl 2.4.8 (02-Nov-1999 to 05-Nov-1999)
+
+   *) ** IMPORTANT BUGFIX **
+      If (and only if)...
+         1. a server restart at least once happened
+         2. a HTTPS request occurs from a 40-bit/export browser
+         3. the underlaying Unix flavor doesn't map DSOs always
+            to the same memory address on each restart
+      ...then a segfault was very likely to occur for usually
+      all previous mod_ssl version. 
+      
+      The reason was that mod_ssl's temporary RSA keys and DH parameters
+      were stored in the persistent memory pool directly as OpenSSL's
+      RSA and DH structures. But although these structures successfully
+      survived restarts, the contained pointers, which were placed there
+      by OpenSSL and which were referencing _static_ parts of OpenSSL,
+      pointed to Nirvana after restarts. So on the next need for RSA
+      temporary keys or DH parameters (usually caused by 40bit clients)
+      the OpenSSL library internally segfaulted while processing these
+      structures.
+
+      This was a very long-standing bug and is now fixed by storing the
+      RSA keys and DH parameters as raw (and this way safe) DER-encoded
+      ASN.1 dats streams (and not structures) in the persistent memory
+      pool.
+
+   *) Added an FAQ entry about Verisign GIDs and the intermediate CA
+      certificate which is required to fill the gap in the server certificate
+      chain or browsers will complain.
+
+   *) The configure.bat for Win32 now tries to complain if patches were
+      rejected while they are applied to the Apache source tree.
+
+   *) Updated ANNOUNCE and README documents.
+
+  Changes with mod_ssl 2.4.7 (22-Oct-1999 to 02-Nov-1999)
+
+   *) Added a check to mod_so to complain with a warning if one loads
+      a plain Apache 1.3 DSO under EAPI (which might work, but can also
+      segfault).
+
+   *) Added more defensive programming checks in the cert/key handling.
+
+   *) Added an entry to the FAQ about the commercial alternatives.
+
+   *) Disabled SysV IPC semaphore based mutex variant for FreeBSD < 3.0 and
+      any OpenBSD and NetBSD platforms because of conflicts with their
+      non-POSIX conforming semctl(2) prototypes.
+
+   *) Added an FAQ entry on how to enable Anonymous 
+      Diffie-Hellman (ADH) ciphers.
+
+   *) Now `make certificate' allows one to also change the
+      certificate validity time (default is still 365 days).
+
+   *) Recreated the ssl.crt/ca-bundle.crt file with all CA certs found in
+      Netscape Communicator 4.7's cert7.db file.
+
+  Changes with mod_ssl 2.4.6 (01-Oct-1999 to 22-Oct-1999)
+
+   *) Re-created RSA and DSA certificates and private keys for both SnakeOil
+      CA and SnakeOil Server, because the RSA certificate already expired
+      recently.  The cert/keys are now valid for the next 2 years.
+
+   *) Freshed up the test welcome page htdocs/index.html with a feather
+      background image (just for fun ;) and with a few other cosmetic
+      cleanups. 
+
+   *) Fixed a few compile warnings under Win32 environment.
+
+   *) Fixed interactive terminal based pass phrase dialog on Win32 platform by
+      explicitly opening `con' (the console) instead of trying to use stdout
+      (which seems to be no longer connected to the console under Win32).
+
+   *) Fixed expiration checks for the session cache. The
+      calculation and time comparsions were incorrect.
+
+   *) Now `httpd -V' also shows the value of EAPI_MM_CORE_PATH
+      (the path to the MM temporary files) if EAPI_MM is activated.
+
+   *) Made sure that `httpd -t' correctly dies, i.e. including a
+      cleanup of the global MM shared memory pool. Same for
+      `httpd -V'. This is important to not let temporary files
+      stay around which confuse `apachectl'.
+
+   *) Changed a few checks in ssl_engine_scache.c to be even more
+      conservative in order to prevent problems in advance.
+   
+   *) Reduced the size check for DBM session caching from 1024 to 950 bytes,
+      because most DBM libraries have a limit of 1022. This should make sure
+      we do not break some requirements some DBM libraries implicitly assume
+      (even they do not explicitly document it).
+
+   *) Fixed SSL_EXPERIMENTAL code related to the POST problem.  We now do a
+      more careful memory management and a segfault-situation was removed,
+      too.
+
+   *) Now the PID is appended to the global MM based shared memory pool
+      alloc.c allocates. This avoids problems with multiple server instances
+      run from the same installation.
+
+   *) Fixed a few typos in the INSTALL document.
+
+   *) Fixed a nasty bug in the fixup phase which caused ``SSLOptions
+      +ExportCertChain'' to dump core if no client certificates were present.
 
   Changes with mod_ssl 2.4.5 (28-Sep-1999 to 01-Oct-1999)
 

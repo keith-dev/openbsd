@@ -1,4 +1,4 @@
-.\" $OpenBSD: keynote.3,v 1.16 1999/10/11 04:39:00 angelos Exp $
+.\" $OpenBSD: keynote.3,v 1.22 2000/04/15 02:15:27 aaron Exp $
 .\"
 .\" The author of this code is Angelos D. Keromytis (angelos@dsl.cis.upenn.edu)
 .\"
@@ -6,7 +6,7 @@
 .\" in April-May 1998
 .\"
 .\" Copyright (C) 1998, 1999 by Angelos D. Keromytis.
-.\"      
+.\"
 .\" Permission to use, copy, and modify this software without fee
 .\" is hereby granted, provided that this entire notice is included in
 .\" all copies of any software which is or includes a copy or
@@ -63,7 +63,7 @@ struct keynote_keylist
 };
 .Ed
 .Ft int
-.Fd keynote_errno;
+.Fd keynote_errno ;
 .Ft int
 .Fn kn_init "void"
 .Ft int
@@ -121,7 +121,7 @@ see RFC 2704.
 .Va keynote_errno
 contains an error code if some library call failed. Failed calls
 return \-1 (if their return value is integer), or
-.Dv NULL 
+.Dv NULL
 (if their return value is a pointer) and set
 .Va keynote_errno .
 The defined error codes are:
@@ -171,7 +171,7 @@ session, and performs any necessary initializations. On success, this
 function returns the new session ID, which is used by all subsequent
 calls with a
 .Fa sessid
-argument. 
+argument.
 On failure, it returns \-1 and sets
 .Va keynote_errno
 to
@@ -443,13 +443,20 @@ parses the string
 .Fa array
 of length
 .Fa arraylen
-and returns an array of strings containing the assertions found in
+and returns an array of pointers to strings containing copies of
+the assertions found in
 .Fa array .
+Both the array of pointers and the strings are allocated by
+.Fn kn_read_asserts
+dynamically, and thus should be freed by the programmer when they are
+no longer needed.
 .Fa numassertions
 contains the number of assertions (and thus strings in the returned
 array) found in
 .Fa array .
-On failure, this function returns \-1 and sets
+On failure, this function returns
+.Dv NULL
+and sets
 .Va keynote_errno
 to
 .Er ERROR_MEMORY
@@ -459,6 +466,12 @@ if
 .Fa array
 was
 .Dv NULL .
+Note that if there were no assertions found in
+.Fa array ,
+a valid pointer will be returned, but
+.Fa numassertions
+will contain the value zero on return. The returned pointer should be
+freed by the programmer.
 .Pp
 .Fn kn_keycompare
 compares
@@ -477,10 +490,10 @@ in session
 It also sets the
 .Fa algorithm
 argument to the algorithm of the authorizer key.
-On failure, 
+On failure,
 .Fn kn_get_authorizer
 returns
-.Fv NULL ,
+.Dv NULL ,
 and sets
 .Va keynote_errno
 to
@@ -493,11 +506,11 @@ in session
 .Fa sessid .
 The keys are returned in a linked list of
 .Fa struct keynote_keylist
-structures. 
-On failure, 
+structures.
+On failure,
 .Fn kn_get_licensees
 returns
-.Fv NULL .
+.Dv NULL .
 and sets
 .Va keynote_errno
 to
@@ -509,21 +522,21 @@ takes as arguments a list of action attributes in
 a list of return values in
 .Fa returnvalues
 (the number of returnvalues in indicated by
-.Fa numvalues ),
-a number (
-.Fa numtrusted )
+.Fa numvalues ) ,
+a number
+.Pf ( Fa numtrusted )
 of locally-trusted assertions in
 .Fa trusted
 (the length of each assertion is given by the respective element of
-.Fa trustedlen ),
-a number (
-.Fa numuntrusted )
+.Fa trustedlen ) ,
+a number
+.Pf ( Fa numuntrusted )
 of assertions that need to be cryptographically verified in
 .Fa untrusted
 (the length of each assertion is given by the respective element of
-.Fa untrustedlen ),
-and a number (
-.Fa numauthorizers )
+.Fa untrustedlen ) ,
+and a number
+.Pf ( Fa numauthorizers )
 of action authorizers in
 .Fa authorizers .
 .Fa env
@@ -717,7 +730,7 @@ The result is placed in
 with
 .Fa dec_algorithm
 describing the algorithm (see
-.Xr kn_encode_key 3 ),
+.Xr kn_encode_key 3 ) ,
 and
 .Fa dec_key
 pointing to an algorithm-dependent structure. In this implementation,
@@ -779,7 +792,7 @@ and sets
 to
 .Er ERROR_NOTFOUND
 if one of the arguments was
-.Dv NULL,
+.Dv NULL ,
 .Er ERROR_MEMORY
 if necessary memory could not be allocated, or
 .Er ERROR_SYNTAX
@@ -810,33 +823,35 @@ if the assertion contained a syntactic error, or the cryptographic
 algorithm was not supported.
 .Pp
 .Sh FILES
-.Fd keynote.h
-.Fd libkeynote.a
+.Bl -tag -width libkeynote.a -compact
+.It Pa keynote.h
+.It Pa libkeynote.a
+.El
 .Sh SEE ALSO
 .Xr keynote 1 ,
 .Xr keynote 4 ,
 .Xr keynote 5
 .Bl -tag -width "AAAAAAA"
-.It ``The KeyNote Trust-Management System, Version 2'' 
+.It ``The KeyNote Trust-Management System, Version 2''
 M. Blaze, J. Feigenbaum, A. D. Keromytis,
 Internet Drafts, RFC 2704.
-.It ``Decentralized Trust Management'' 
+.It ``Decentralized Trust Management''
 M. Blaze, J. Feigenbaum, J. Lacy,
 1996 IEEE Conference on Privacy and Security
 .It ``Compliance-Checking in the PolicyMaker Trust Management System''
 M. Blaze, J. Feigenbaum, M. Strauss,
 1998 Financial Crypto Conference
+.It Web Page
+http://www.cis.upenn.edu/~keynote
 .El
 .Sh AUTHOR
 Angelos D. Keromytis (angelos@dsl.cis.upenn.edu)
-.Sh WEB PAGE
-http://www.cis.upenn.edu/~keynote
 .Sh DIAGNOSTICS
 The return values of all the functions have been given along with the
 function description above.
 .Sh BUGS
 None that we know of.
-If you find any, please report them at
+If you find any, please report them to
 .Bd -literal -offset indent -compact
 keynote@research.att.com
 .Ed

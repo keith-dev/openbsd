@@ -19,6 +19,8 @@
              Very minor changes to conform with
              local/global/function naming conventions
              withing the packet alising module.
+
+    $OpenBSD: alias_irc.c,v 1.3 2000/02/27 01:38:24 brian Exp $
 */
 
 /* Includes */

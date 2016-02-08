@@ -1,4 +1,4 @@
-.\"	$OpenBSD: routed.8,v 1.27 1999/10/07 18:58:37 wvdputte Exp $
+.\"	$OpenBSD: routed.8,v 1.30 2000/04/15 02:15:17 aaron Exp $
 .\"
 .\" Copyright (c) 1983, 1991, 1993
 .\"	The Regents of the University of California.  All rights reserved.
@@ -91,7 +91,7 @@ non-static routes in the kernel table.
 Static routes in the kernel table are preserved and
 included in RIP responses if they have a valid RIP metric
 (see
-.Xr route 8 ).
+.Xr route 8 ) .
 .Pp
 If more than one interface is present (not counting the loopback interface),
 it is assumed that the host should forward packets among the
@@ -116,7 +116,7 @@ with a "hop count" metric (a count of 16 or greater is
 considered "infinite").
 Advertised metrics reflect the metric associated with interface
 (see
-.Xr ifconfig 8 ),
+.Xr ifconfig 8 ) ,
 so setting the metric on an interface
 is an effective way to steer traffic.
 .Pp
@@ -184,7 +184,7 @@ support multicasting.
 If no response is received on a remote interface, if there are errors
 while sending responses,
 or if there are more errors than input or output (see
-.Xr netstat 1 ),
+.Xr netstat 1 ) ,
 then the cable or some other part of the interface is assumed to be
 disconnected or broken, and routes are adjusted appropriately.
 .Pp
@@ -209,10 +209,10 @@ is received), there is a single default route and a variable number of
 redirected host routes in the kernel table.
 .Pp
 The Router Discover standard requires that advertisements
-have a default "lifetime" of 30 minutes.  That means should
-something happen, a client can be without a good route for
-30 minutes.  It is a good idea to reduce the default to 45
-seconds using
+have a default "lifetime" of 30 minutes.
+That means should something happen, a client can be without a good route for
+30 minutes.
+It is a good idea to reduce the default to 45 seconds using
 .Fl P Cm rdisc_interval=45
 on the command line or
 .Cm rdisc_interval=45
@@ -226,11 +226,9 @@ facility described below to support "legacy" systems
 that can handle neither RIPv2 nor Router Discovery.
 .Pp
 By default, neither Router Discovery advertisements nor solicitations
-are sent over point to point links (e.g. PPP).
-
+are sent over point to point links (e.g., PPP).
 .Pp
-Options supported by
-.Nm routed :
+The options are as follows:
 .Bl -tag -width Ds
 .It Fl s
 Forces
@@ -266,7 +264,8 @@ This is typically used on a gateway to the Internet,
 or on a gateway that uses another routing protocol whose routes
 are not reported to other local routers.
 Notice that because a metric of 1 is used, this feature is
-dangerous.  It is more commonly accidentally used to create chaos with a routing
+dangerous.
+It is more commonly accidentally used to create chaos with a routing
 loop than to solve problems.
 .It Fl h
 Causes host or point-to-point routes to not be advertised,
@@ -446,7 +445,7 @@ or
 is the name of the destination network or host.
 It may be a symbolic network name or an Internet address
 specified in "dot" notation (see
-.Xr inet 3 ).
+.Xr inet 3 ) .
 (If it is a name, then it must either be defined in
 .Pa /etc/networks
 or
@@ -469,7 +468,7 @@ be forwarded.
 is the hop count to the destination host or network.
 .Ar " host hname "
 is equivalent to
-.Ar " net  nname/32 ".
+.Ar " net  nname/32 " .
 .Pp
 One of the keywords
 .Cm passive ,
@@ -502,7 +501,8 @@ and the supplied metric (default 1).
 This is useful for filling "holes" in CIDR allocations.
 This parameter must appear by itself on a line.
 .Pp
-Do not use this feature unless necessary.  It is dangerous.
+Do not use this feature unless necessary.
+It is dangerous.
 .It Cm passwd Ns \&= Ns Ar XXX
 Specifies a RIPv2 password that will be included on all RIPv2
 responses sent and checked on all RIPv2 responses received.

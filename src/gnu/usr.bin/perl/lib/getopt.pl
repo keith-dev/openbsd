@@ -1,5 +1,13 @@
-;# $RCSfile: getopt.pl,v $$Revision: 1.3 $$Date: 1999/04/29 22:51:46 $
-
+;# $RCSfile: getopt.pl,v $$Revision: 1.4 $$Date: 2000/04/06 17:06:11 $
+#
+# This library is no longer being maintained, and is included for backward
+# compatibility with Perl 4 programs which may require it.
+#
+# In particular, this should not be used as an example of modern Perl
+# programming techniques.
+#
+# Suggested alternatives: Getopt::Long or Getopt::Std
+#
 ;# Process single-character switches with switch clustering.  Pass one argument
 ;# which is a string containing all switches that take an argument.  For each
 ;# switch found, sets $opt_x (where x is the switch name) to the value of the

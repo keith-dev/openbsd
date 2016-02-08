@@ -1,8 +1,6 @@
 #!./perl
 
-# $RCSfile: write.t,v $$Revision: 1.3 $$Date: 1999/04/29 22:52:40 $
-
-print "1..6\n";
+print "1..8\n";
 
 my $CAT = ($^O eq 'MSWin32') ? 'type' : 'cat';
 
@@ -190,3 +188,16 @@ if (`$CAT Op_write.tmp` eq $right)
 else
     { print "not ok 6\n"; }
 
+# test lexicals and globals
+{
+    my $this = "ok";
+    our $that = 7;
+    format LEX =
+@<<@|
+$this,$that
+.
+    open(LEX, ">&STDOUT") or die;
+    write LEX;
+    $that = 8;
+    write LEX;
+}

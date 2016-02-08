@@ -1,5 +1,5 @@
 %{
-/* $OpenBSD: keynote.l,v 1.5 1999/10/09 19:47:32 angelos Exp $ */
+/* $OpenBSD: keynote.l,v 1.8 2000/02/18 13:36:13 angelos Exp $ */
 /*
  * The author of this code is Angelos D. Keromytis (angelos@dsl.cis.upenn.edu)
  *
@@ -47,6 +47,7 @@
 #endif
 
 #include "k.tab.h"
+#include "header.h"
 #include "keynote.h"
 #include "assertion.h"
 
@@ -65,11 +66,10 @@ static int    first_tok = 0;
 %}
 digit		[0-9]
 specnumber      [1-9][0-9]*
-number		({digit}+)
-flt		({digit}+"."{digit}+)
+number		{digit}+
+flt		{digit}+"."{digit}+
 vstring		[a-zA-Z_][a-zA-Z0-9_]*
-white           ((\\[\n][[:space:]]*))
-litstring	\"(([^\"\n])|(\\[\"\n\f\r\t.]))*\"
+litstring	\"(([^\"\n])|(\\[\"\n.]))*\"
 variable	{vstring}
 comment		"#"[^\n]*
 %s ACTIONSTRING LOCALINIT KEYPREDICATE SIGNERINIT KEYNOTEVERSION
@@ -207,6 +207,7 @@ comment		"#"[^\n]*
 [ \t\n]
 .                             { keynote_errno = ERROR_SYNTAX; 
                                 return -1;
+				REJECT; /* Avoid -Wall warning. Not reached */
                               }
 %%
 
@@ -297,6 +298,7 @@ keynote_lex_add(void *s, int type)
 		break;
 	}
 
+        keynote_max_lex_list /= 2;
 	keynote_errno = ERROR_MEMORY;
         return -1;
     }
@@ -749,6 +751,13 @@ keynote_get_envlist(char *buf, char *bufend, int whichfield)
 	  en = keynote_init_list;
 
     	keynote_init_list = (struct environment *) NULL;
+    }
+
+    /* Avoid compiler (-Wall) warnings. Never reached. */
+    if (0)
+    {
+	yyunput(0, NULL);
+	yy_flex_realloc(0, NULL);
     }
 
     return en;

@@ -1,19 +1,23 @@
-#	$OpenBSD: Makefile.bsd-wrapper,v 1.5 1999/06/07 00:45:37 deraadt Exp $
+#	$OpenBSD: Makefile.bsd-wrapper,v 1.9 2000/04/30 21:45:01 maja Exp $
 
 MAN=	lynx.1
+COPTS+=	-DUSE_SSL
 CLEANFILES=	lynx.1
+DPADD=	${LIBSSL} ${LIBCRYPTO}
+LDADD=	-lssl -lcrypto
 GNUCFLAGS=	CC="${CC}" CFLAGS="${CFLAGS} ${COPTS}"
 HTMLDIR=	/usr/share/doc/html
-HELPFILES=	keystrokes/bookmark_help.html keystrokes/cookie_help.html \
-		keystrokes/dired_help.html keystrokes/edit_help.html \
+HELPFILES=	keystrokes/alt_edit_help.html keystrokes/bookmark_help.html \
+		keystrokes/cookie_help.html keystrokes/dired_help.html \
+		keystrokes/edit_help.html keystrokes/environments.html \
 		keystrokes/follow_help.html keystrokes/gopher_types_help.html \
 		keystrokes/history_help.html keystrokes/keystroke_help.html \
 		keystrokes/movement_help.html keystrokes/option_help.html \
 		keystrokes/other_help.html keystrokes/print_help.html \
-		keystrokes/scrolling_help.html keystrokes/visited_help.html \
-		keystrokes/xterm_help.html Lynx_users_guide.html \
-		about_lynx.html lynx-dev.html lynx_help_main.html \
-		lynx_url_support.html
+		keystrokes/scrolling_help.html keystrokes/test_display.html \
+		keystrokes/visited_help.html keystrokes/xterm_help.html \
+		Lynx_users_guide.html about_lynx.html lynx-dev.html \
+		lynx_help_main.html lynx_url_support.html
 
 .include <bsd.own.mk>
 
@@ -41,7 +45,7 @@ config: .FORCE
 	PATH="/bin:/usr/bin:/sbin:/usr/sbin" \
 	${GNUCFLAGS} \
 	INSTALL_PROGRAM="${INSTALL} ${INSTALL_COPY} ${INSTALL_STRIP}" \
-	sh ${.CURDIR}/configure --prefix=/usr --libdir=/etc ${CF}
+	sh ${.CURDIR}/configure --prefix=/usr --libdir=/etc 
 
 config.status:
 	PATH="/bin:/usr/bin:/sbin:/usr/sbin" \
@@ -66,8 +70,8 @@ helpinstall:
 	done
 
 install: maninstall helpinstall
-	${INSTALL} ${INSTALL_COPY} -o ${BINOWN} -g ${BINGRP} -m ${BINMODE} \
-	    lynx ${DESTDIR}/usr/bin/lynx
+	${INSTALL} ${INSTALL_COPY} ${INSTALL_STRIP} -o ${BINOWN} \
+	    -g ${BINGRP} -m ${BINMODE} lynx ${DESTDIR}/usr/bin/lynx
 
 distribution:
 	${INSTALL} ${INSTALL_COPY} -o ${BINOWN} -g ${BINGRP} -m ${NONBINMODE} \

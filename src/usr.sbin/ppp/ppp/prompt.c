@@ -23,7 +23,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- *	$Id: prompt.c,v 1.4 1999/05/08 11:06:39 brian Exp $
+ *	$OpenBSD: prompt.c,v 1.7 2000/02/27 01:38:28 brian Exp $
  */
 
 #include <sys/param.h>
@@ -120,7 +120,7 @@ prompt_Display(struct prompt *p)
 }
 
 static int
-prompt_UpdateSet(struct descriptor *d, fd_set *r, fd_set *w, fd_set *e, int *n)
+prompt_UpdateSet(struct fdescriptor *d, fd_set *r, fd_set *w, fd_set *e, int *n)
 {
   struct prompt *p = descriptor2prompt(d);
   int sets;
@@ -151,7 +151,7 @@ prompt_UpdateSet(struct descriptor *d, fd_set *r, fd_set *w, fd_set *e, int *n)
 }
 
 static int
-prompt_IsSet(struct descriptor *d, const fd_set *fdset)
+prompt_IsSet(struct fdescriptor *d, const fd_set *fdset)
 {
   struct prompt *p = descriptor2prompt(d);
   return p->fd_in >= 0 && FD_ISSET(p->fd_in, fdset);
@@ -170,9 +170,10 @@ prompt_ShowHelp(struct prompt *p)
 }
 
 static void
-prompt_Read(struct descriptor *d, struct bundle *bundle, const fd_set *fdset)
+prompt_Read(struct fdescriptor *d, struct bundle *bundle, const fd_set *fdset)
 {
   struct prompt *p = descriptor2prompt(d);
+  struct prompt *op;
   int n;
   char ch;
   char linebuff[LINE_LEN];
@@ -186,8 +187,13 @@ prompt_Read(struct descriptor *d, struct bundle *bundle, const fd_set *fdset)
         linebuff[n] = '\0';
       p->nonewline = 1;		/* Maybe command_Decode does a prompt */
       prompt_Required(p);
-      if (n)
-        command_Decode(bundle, linebuff, n, p, p->src.from);
+      if (n) {
+        if ((op = log_PromptContext) == NULL)
+          log_PromptContext = p;
+        if (!command_Decode(bundle, linebuff, n, p, p->src.from))
+          prompt_Printf(p, "Syntax error\n");
+        log_PromptContext = op;
+      }
     } else if (n <= 0) {
       log_Printf(LogPHASE, "%s: Client connection closed.\n", p->src.from);
       if (!p->owner)
@@ -285,7 +291,7 @@ prompt_Read(struct descriptor *d, struct bundle *bundle, const fd_set *fdset)
 }
 
 static int
-prompt_Write(struct descriptor *d, struct bundle *bundle, const fd_set *fdset)
+prompt_Write(struct fdescriptor *d, struct bundle *bundle, const fd_set *fdset)
 {
   /* We never want to write here ! */
   log_Printf(LogALERT, "prompt_Write: Internal error: Bad call !\n");

@@ -9,7 +9,7 @@
 */
 
 /* ====================================================================
- * Copyright (c) 1998-1999 Ralf S. Engelschall. All rights reserved.
+ * Copyright (c) 1998-2000 Ralf S. Engelschall. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -377,7 +377,7 @@ BOOL ssl_scache_dbm_store(server_rec *s, ssl_scinfo_t *SCI)
     if ((SCI->nKey + SCI->nData) >= PAIRMAX)
         return FALSE;
 #else
-    if ((SCI->nKey + SCI->nData) >= 1024)
+    if ((SCI->nKey + SCI->nData) >= 950 /* at least less than approx. 1KB */)
         return FALSE;
 #endif
 
@@ -386,7 +386,7 @@ BOOL ssl_scache_dbm_store(server_rec *s, ssl_scinfo_t *SCI)
     dbmkey.dsize = SCI->nKey;
 
     /* create DBM value */
-    dbmval.dsize = sizeof(time_t)+SCI->nData;
+    dbmval.dsize = sizeof(time_t) + SCI->nData;
     dbmval.dptr  = (char *)malloc(dbmval.dsize);
     if (dbmval.dptr == NULL)
         return FALSE;
@@ -400,11 +400,19 @@ BOOL ssl_scache_dbm_store(server_rec *s, ssl_scinfo_t *SCI)
         ssl_log(s, SSL_LOG_ERROR|SSL_ADD_ERRNO,
                 "Cannot open SSLSessionCache DBM file `%s' for writing (store)",
                 mc->szSessionCacheDataFile);
-        free(dbmval.dptr);
         ssl_mutex_off(s);
+        free(dbmval.dptr);
         return FALSE;
     }
-    ssl_dbm_store(dbm, dbmkey, dbmval, DBM_INSERT);
+    if (ssl_dbm_store(dbm, dbmkey, dbmval, DBM_INSERT) < 0) {
+        ssl_log(s, SSL_LOG_ERROR|SSL_ADD_ERRNO,
+                "Cannot store SSL session to DBM file `%s'",
+                mc->szSessionCacheDataFile);
+        ssl_dbm_close(dbm);
+        ssl_mutex_off(s);
+        free(dbmval.dptr);
+        return FALSE;
+    }
     ssl_dbm_close(dbm);
     ssl_mutex_off(s);
 
@@ -445,7 +453,7 @@ void ssl_scache_dbm_retrieve(server_rec *s, ssl_scinfo_t *SCI)
     ssl_mutex_off(s);
 
     /* immediately return if not found */
-    if (dbmval.dptr == NULL || dbmval.dsize < sizeof(time_t))
+    if (dbmval.dptr == NULL || dbmval.dsize <= sizeof(time_t))
         return;
 
     /* copy over the information to the SCI */
@@ -541,11 +549,11 @@ void ssl_scache_dbm_expire(server_rec *s, time_t tNow)
             nElements++;
             bDelete = FALSE;
             dbmval = ssl_dbm_fetch(dbm, dbmkey);
-            if (dbmval.dsize < sizeof(time_t) || dbmval.dptr == NULL)
+            if (dbmval.dsize <= sizeof(time_t) || dbmval.dptr == NULL)
                 bDelete = TRUE;
             else {
                 memcpy(&tExpiresAt, dbmval.dptr, sizeof(time_t));
-                if (tExpiresAt >= tNow)
+                if (tExpiresAt <= tNow)
                     bDelete = TRUE;
             }
             if (bDelete) {
@@ -833,7 +841,7 @@ void ssl_scache_shm_expire(server_rec *s, time_t tNow)
                 bDelete = TRUE;
             else {
                 memcpy(&tExpiresAt, vpData, sizeof(time_t));
-                if (tExpiresAt >= tNow)
+                if (tExpiresAt <= tNow)
                    bDelete = TRUE;
             }
             vpKeyThis = vpKey;

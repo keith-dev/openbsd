@@ -1,4 +1,4 @@
-.\"	$OpenBSD: pciide.4,v 1.4 1999/10/06 22:18:55 chris Exp $
+.\"	$OpenBSD: pciide.4,v 1.8 2000/04/03 21:19:37 aaron Exp $
 .\"	$NetBSD: pciide.4,v 1.8 1999/03/16 01:19:17 garbled Exp $
 .\"
 .\" Copyright (c) 1998 Manuel Bouyer.
@@ -49,34 +49,36 @@ driver supports the PCI IDE controllers as specified in the
 functions for the
 .Xr wd 4
 and
-.Xr atapi 4
+.Xr atapiscsi 4
 drivers. This driver includes specific, enhanced support for the CMD Tech
-PCI0640 controller and IDE DMA/UltraDMA support for the following
+PCI0640 controller and IDE DMA/UltraDMA support for the following PCI IDE
 controllers:
 .Pp
 .Bl -item -compact -offset indent
 .It
-Acer Labs M5229 IDE controller
+Acer Labs M5229
 .It
-CMD Tech PCI0643 and PCI0646 IDE controllers
+Advanced Micro Devices AMD-756
 .It
-Contaq Microsystems/Cypress CY82C693 IDE controller
+CMD Tech PCI0643 and PCI0646
 .It
-Intel PIIX, PIIX3, and PIIX4 IDE controllers
+Contaq Microsystems/Cypress CY82C693
 .It
-Intel 82801 (ICH/ICH0) IDE controllers
+Intel PIIX, PIIX3, and PIIX4
 .It
-Promise PDC20246 (Ultra/33) and PDC20262 (Ultra/66) PCI IDE controllers
+Intel 82801 (ICH/ICH0)
 .It
-Silicon Integrated System 5597/5598 IDE controller
+Promise PDC20246 (Ultra/33) and PDC20262 (Ultra/66)
 .It
-VIA Technologies VT82C586 and VT82C586A IDE controllers
-.El 
+Silicon Integrated System 5513 (5597/5598)
+.It
+VIA Technologies VT82C586 and VT82C586A
+.El
 .Pp
 Some of these controllers are only available in multifunction PCI chips.
 .Pp
 The 0x0001 flag forces the
-.Nm 
+.Nm
 driver to use DMA when there is no explicit DMA mode setting support for
 the controller but DMA is present. If the BIOS didn't configure the controller
 properly, this can cause a machine hang.
@@ -94,6 +96,7 @@ The timings used for the PIO and DMA modes for controllers listed above
 are for a PCI bus running at 30 or 33 Mhz. This driver may not
 work properly on overclocked systems.
 .Sh SEE ALSO
+.Xr atapiscsi 4 ,
 .Xr intro 4 ,
 .Xr scsi 4 ,
 .Xr wd 4 ,

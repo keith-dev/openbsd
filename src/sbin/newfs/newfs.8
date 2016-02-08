@@ -1,4 +1,4 @@
-.\"	$OpenBSD: newfs.8,v 1.18 1999/09/29 13:50:44 aaron Exp $
+.\"	$OpenBSD: newfs.8,v 1.23 2000/04/17 02:32:48 aaron Exp $
 .\"	$NetBSD: newfs.8,v 1.12 1995/03/18 14:58:41 cgd Exp $
 .\"
 .\" Copyright (c) 1983, 1987, 1991, 1993, 1994
@@ -42,7 +42,7 @@
 .Nd construct a new file system
 .Sh SYNOPSIS
 .Nm newfs
-.Op Fl NO
+.Op Fl NOU
 .Op Fl S Ar sector-size
 .Op Fl a Ar maxcontig
 .Op Fl b Ar block-size
@@ -67,7 +67,7 @@
 .Ar special
 .Pp
 .Nm mount_mfs
-.Op Fl N
+.Op Fl NU
 .Op Fl a Ar maxcontig
 .Op Fl b Ar block-size
 .Op Fl c Ar cylinders
@@ -80,10 +80,6 @@
 .Op Fl s Ar size
 .Ar special node
 .Sh DESCRIPTION
-.Nm
-replaces the more obtuse
-.Xr mkfs 8
-program.
 Before running
 .Nm
 or
@@ -120,10 +116,12 @@ a set of configuration parameters for the memory based file system.
 The special file is typically that of the primary swap area,
 since that is where the file system will be backed up when
 free memory gets low and the memory supporting
-the file system has to be paged.  If the keyword
+the file system has to be paged.
+If the keyword
 .Dq swap
 is used instead of a special file name, default configuration parameters
-will be used.  (This option is useful when trying to use
+will be used.
+(This option is useful when trying to use
 .Nm mount_mfs
 on a machine without any disks.)
 .Pp
@@ -149,8 +147,11 @@ Creates a
 format filesystem.
 This options is primarily used to build root filesystems
 that can be understood by older boot ROMs.
+.It Fl U
+Enables soft updates on the new filesystem.
 .It Fl q
-Operate in quiet mode.  With this option,
+Operate in quiet mode.
+With this option,
 .Nm
 will not print extraneous information like superblock backups.
 .It Fl a Ar maxcontig
@@ -197,7 +198,8 @@ See
 .Xr tunefs 8
 for more details on how to set this option.
 .It Fl n Ar number of rotational positions
-The number of distinct rotational positions.  The default is 1.
+The number of distinct rotational positions.
+The default is 1.
 .It Fl o Ar optimization\ preference
 .Ar space
 or
@@ -263,7 +265,7 @@ system.
 This does not include sectors reserved at the end of each track for bad
 block replacement (see the
 .Fl p
-option.)
+option).
 .It Fl x Ar spare sectors per cylinder
 Spare sectors (bad sector replacements) are physical sectors that occupy
 space at the end of the last track in the cylinder.
@@ -296,7 +298,6 @@ man page for possible options and their meanings.
 .Xr fs 5 ,
 .Xr disklabel 8 ,
 .Xr dumpfs 8 ,
-.Xr format 8 ,
 .Xr fsck 8 ,
 .Xr fsirand 8 ,
 .Xr mount 8 ,

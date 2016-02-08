@@ -17,7 +17,7 @@
  * IMPLIED WARRANTIES, INCLUDING, WITHOUT LIMITATION, THE IMPLIED
  * WARRANTIES OF MERCHANTIBILITY AND FITNESS FOR A PARTICULAR PURPOSE.
  *
- * $Id: slcompress.c,v 1.9 1999/10/13 07:51:38 brian Exp $
+ * $OpenBSD: slcompress.c,v 1.12 2000/03/03 21:52:57 brian Exp $
  *
  *	Van Jacobson (van@helios.ee.lbl.gov), Dec 31, 1989:
  *	- Initial distribution.
@@ -153,9 +153,9 @@ sl_compress_tcp(struct mbuf * m,
    * (i.e., ACK isn't set or some other control bit is set).  (We assume that
    * the caller has already made sure the packet is IP proto TCP).
    */
-  if ((ip->ip_off & htons(0x3fff)) || m->cnt < 40) {
-    log_Printf(LogDEBUG, "??? 1 ip_off = %x, cnt = %d\n",
-	      ip->ip_off, m->cnt);
+  if ((ip->ip_off & htons(0x3fff)) || m->m_len < 40) {
+    log_Printf(LogDEBUG, "??? 1 ip_off = %x, m_len = %lu\n",
+	      ip->ip_off, (unsigned long)m->m_len);
     log_DumpBp(LogDEBUG, "", m);
     return (TYPE_IP);
   }
@@ -213,7 +213,7 @@ sl_compress_tcp(struct mbuf * m,
 #define	THOFFSET(th)	(th->th_off)
     hlen += th->th_off;
     hlen <<= 2;
-    if (hlen > m->cnt)
+    if (hlen > m->m_len)
       return (TYPE_IP);
     goto uncompressed;
 
@@ -245,7 +245,7 @@ found:
   deltaS = hlen;
   hlen += th->th_off;
   hlen <<= 2;
-  if (hlen > m->cnt)
+  if (hlen > m->m_len)
     return (TYPE_IP);
 
   if (((u_short *) ip)[0] != ((u_short *) & cs->cs_ip)[0] ||
@@ -384,8 +384,8 @@ found:
     *cp++ = changes | NEW_C;
     *cp++ = cs->cs_id;
   }
-  m->cnt -= hlen;
-  m->offset += hlen;
+  m->m_len -= hlen;
+  m->m_offset += hlen;
   *cp++ = deltaA >> 8;
   *cp++ = deltaA;
   memcpy(cp, new_seq, deltaS);

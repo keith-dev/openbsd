@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.10 1999/03/22 18:53:11 millert Exp $
+#	$OpenBSD: Makefile,v 1.15 2000/02/17 19:58:34 millert Exp $
 #
 # Take termcap/terminfo master file and generate termcap/terminfo .db files
 # master: http://www.tuxedo.org/~esr/terminfo/termtypes.master.gz
@@ -9,28 +9,38 @@ CLEANFILES+= terminfo.src termcap.src terminfo.db termcap.db
 all: terminfo.db termcap.db
 
 terminfo.src: termtypes.master
-	tic -I ${.ALLSRC} | sed \
+	${TIC} -I -x ${.ALLSRC} | sed \
 	    -e 's,/usr/share/lib/tabset,/usr/share/tabset,g' \
 	    -e 's,/usr/lib/tabset,/usr/share/tabset,g' \
 	    > ${.TARGET}
 	@if [ ! -s ${.TARGET} ]; then \
-	    echo ${.TARGET} is zero length!  You need to update /usr/bin/tic ;\
+	    echo ${.TARGET} is zero length!  You need to update ${TIC} ;\
+	    rm -f ${.TARGET} ;\
 	    exit 1 ;\
+	else case `sed 1q ${.TARGET}` in \
+	    Usage*) echo ${.TARGET} is corrupt!  You need to update ${TIC} ;\
+		    rm -f ${.TARGET} ;\
+		    exit 1 ;;\
+	    esac ;\
 	fi
 
 terminfo.db: terminfo.src
 	cap_mkdb -i -f terminfo terminfo.src
 
-# Note the disgusting ed hack to remove three lines from xterm
 termcap.src: termtypes.master
-	tic -C ${.ALLSRC} | sed \
+	${TIC} -C -x ${.ALLSRC} | sed \
 	    -e 's,/usr/share/lib/tabset,/usr/share/tabset,g' \
 	    -e 's,/usr/lib/tabset,/usr/share/tabset,g' \
 	    > ${.TARGET}
-	echo "1\n/^xterm|\n\nd\nd\nd\n.\nw\nq\n" | ed - ${.OBJDIR}/termcap.src >/dev/null 2>&1
 	@if [ ! -s ${.TARGET} ]; then \
-	    echo ${.TARGET} is zero length!  You need to update /usr/bin/tic ;\
+	    echo ${.TARGET} is zero length!  You need to update ${TIC} ;\
+	    rm -f ${.TARGET} ;\
 	    exit 1 ;\
+	else case `sed 1q ${.TARGET}` in \
+	    Usage*) echo ${.TARGET} is corrupt!  You need to update ${TIC} ;\
+		    rm -f ${.TARGET} ;\
+		    exit 1 ;;\
+	    esac ;\
 	fi
 
 termcap.db: termcap.src
@@ -48,3 +58,12 @@ realinstall:
 	ln -fs ${BINDIR}/misc/termcap ${DESTDIR}/etc/termcap
 
 .include <bsd.prog.mk>
+
+# Use the tic we just built if possible
+.if exists(${.CURDIR}/../../usr.bin/tic/${__objdir}/tic)
+TIC=	${.CURDIR}/../../usr.bin/tic/${__objdir}/tic
+.elif exists(../../usr.bin/tic/tic)
+TIC=	../../usr.bin/tic/tic
+.else
+TIC=	/usr/bin/tic
+.endif

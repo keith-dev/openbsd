@@ -1,6 +1,6 @@
 #! /bin/sh
 #
-# $Id: configure.gnu,v 1.2 1999/04/29 22:50:57 millert Exp $
+# $Id: configure.gnu,v 1.3 2000/04/06 17:03:47 millert Exp $
 #
 # GNU configure-like front end to metaconfig's Configure.
 #
@@ -16,8 +16,8 @@
 # include this script in your own package.
 #
 # $Log: configure.gnu,v $
-# Revision 1.2  1999/04/29 22:50:57  millert
-# perl5.005_03 (stock)
+# Revision 1.3  2000/04/06 17:03:47  millert
+# perl-5.6.0 + local changes
 #
 # Revision 3.0.1.1  1995/07/25  14:16:21  ram
 # patch56: created
@@ -113,6 +113,14 @@ esac
 case "$ccflags" in
 '') ;;
 *) opts="$opts -Dccflags='$ccflags'";;
+esac
+case "$LDFLAGS" in
+'') ;;
+*) ldflags="$ldflags $LDFLAGS";;
+esac
+case "$ldflags" in
+'') ;;
+*) opts="$opts -Dldflags='$ldflags'";;
 esac
 
 # Don't use -s if they want verbose mode

@@ -1,17 +1,17 @@
 /*
-
-includes.h
-
-Author: Tatu Ylonen <ylo@cs.hut.fi>
-
-Copyright (c) 1995 Tatu Ylonen <ylo@cs.hut.fi>, Espoo, Finland
-                   All rights reserved
-
-Created: Thu Mar 23 16:29:37 1995 ylo
-
-This file includes most of the needed system headers.
-
-*/
+ *
+ * includes.h
+ *
+ * Author: Tatu Ylonen <ylo@cs.hut.fi>
+ *
+ * Copyright (c) 1995 Tatu Ylonen <ylo@cs.hut.fi>, Espoo, Finland
+ *                    All rights reserved
+ *
+ * Created: Thu Mar 23 16:29:37 1995 ylo
+ *
+ * This file includes most of the needed system headers.
+ *
+ */
 
 #ifndef INCLUDES_H
 #define INCLUDES_H
@@ -43,7 +43,6 @@ static /**/const char *const rcsid[] = { (char *)rcsid, "\100(#)" msg }
 #include <ctype.h>
 #include <errno.h>
 #include <fcntl.h>
-#include <assert.h>
 #include <signal.h>
 #include <termios.h>
 #include <stdlib.h>
@@ -61,8 +60,10 @@ static /**/const char *const rcsid[] = { (char *)rcsid, "\100(#)" msg }
 /* Define this to be the path of the xauth program. */
 #define XAUTH_PATH "/usr/X11R6/bin/xauth"
 
-/* Define this to use pipes instead of socketpairs for communicating with the
-   client program.  Socketpairs do not seem to work on all systems. */
+/*
+ * Define this to use pipes instead of socketpairs for communicating with the
+ * client program.  Socketpairs do not seem to work on all systems.
+ */
 #define USE_PIPES 1
 
-#endif /* INCLUDES_H */
+#endif				/* INCLUDES_H */

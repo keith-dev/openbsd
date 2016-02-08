@@ -1,10 +1,9 @@
-#	$OpenBSD: changelist,v 1.9 1999/09/25 21:48:28 pjanzen Exp $
+#	$OpenBSD: changelist,v 1.13 2000/05/02 19:11:02 markus Exp $
 #
 # List of files which the security script backs up and checks
 # for modifications.
 
 /etc/Distfile
-/etc/aliases
 /etc/bootparams
 /etc/bootptab
 /etc/ccd.conf
@@ -54,6 +53,7 @@
 /etc/rbootd.conf
 /etc/rc
 /etc/rc.conf
+/etc/rc.conf.local
 /etc/rc.local
 /etc/rc.securelevel
 /etc/rc.shutdown
@@ -61,19 +61,24 @@
 /etc/resolv.conf
 /etc/rpc
 /etc/security
-/etc/sendmail.cf
-/etc/sendmail.cw
 /etc/services
 /etc/shells
 /etc/shosts.equiv
 /etc/slip.hosts
 /etc/slip.login
+/etc/ssh_host_dsa_key
+/etc/ssh_host_dsa_key.pub
+/etc/ssh_host_key
+/etc/ssh_host_key.pub
 /etc/sshd_config
 /etc/syslog.conf
 /etc/sysctl.conf
 /etc/ttys
 /etc/weekly
 /etc/weekly.local
+/etc/mail/aliases
+/etc/mail/sendmail.cf
+/etc/mail/local-host-names
 /root/.cshrc
 /root/.klogin
 /root/.login

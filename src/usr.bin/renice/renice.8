@@ -1,4 +1,5 @@
-.\"	$OpenBSD: renice.8,v 1.8 1999/06/05 01:21:38 aaron Exp $
+.\"	$OpenBSD: renice.8,v 1.11 2000/04/15 11:45:55 aaron Exp $
+.\"
 .\" Copyright (c) 1983, 1991, 1993
 .\"	The Regents of the University of California.  All rights reserved.
 .\"
@@ -55,8 +56,7 @@
 .Oc
 .Sh DESCRIPTION
 .Nm
-alters the
-scheduling
+alters the scheduling
 .Ar priority
 (an integer) of one or more running processes.
 The following
@@ -72,8 +72,7 @@ their scheduling priority altered.
 By default, the processes to be affected are specified by
 their process IDs.
 .Pp
-Options supported by
-.Nm renice :
+The options are as follows:
 .Bl -tag -width Ds
 .It Fl g
 Force
@@ -97,14 +96,15 @@ renice +1 987 -u daemon root -p 32
 would change the priority of process IDs 987 and 32, and
 all processes owned by users daemon and root.
 .Pp
-Users other than the super-user may only alter the priority of
+Users other than the superuser may only alter the priority of
 processes they own,
-and can only monotonically increase their ``nice value''
+and can only monotonically increase their
+.Dq nice value
 within the range 0 to
 .Dv PRIO_MAX
 (20).
 (This prevents overriding administrative fiats.)
-The super-user
+The superuser
 may alter the priority of any process
 and set the priority to any value in the range
 .Dv PRIO_MIN
@@ -114,19 +114,21 @@ to
 Useful priorities are:
 20 (the affected processes will run only when nothing else
 in the system wants to),
-0 (the ``base'' scheduling priority),
+0 (the
+.Dq base
+scheduling priority),
 anything negative (to make things go very fast).
 .Sh FILES
 .Bl -tag -width /etc/passwd -compact
 .It Pa /etc/passwd
-to map user names to user IDs
+for mapping user names to user IDs
 .El
 .Sh SEE ALSO
 .Xr nice 1 ,
 .Xr getpriority 2 ,
 .Xr setpriority 2
 .Sh BUGS
-Non-super-users cannot increase scheduling priorities of their own processes,
+Non-superusers cannot increase scheduling priorities of their own processes,
 even if they were the ones that decreased the priorities in the first place.
 .Sh HISTORY
 The

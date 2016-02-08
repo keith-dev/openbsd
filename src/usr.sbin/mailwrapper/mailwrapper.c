@@ -1,4 +1,4 @@
-/*	$OpenBSD: mailwrapper.c,v 1.5 1999/09/28 15:25:45 ho Exp $	*/
+/*	$OpenBSD: mailwrapper.c,v 1.8 2000/01/10 05:34:32 imp Exp $	*/
 /*	$NetBSD: mailwrapper.c,v 1.2 1999/02/20 22:10:07 thorpej Exp $	*/
 
 /*
@@ -89,7 +89,7 @@ addarg(al, arg, copy)
 	}
 	if (copy) {
 		if ((al->argv[al->argc++] = strdup(arg)) == NULL)
-			err(1, "mailwrapper:");
+			err(1, "mailwrapper");
 	} else
 		al->argv[al->argc++] = (char *)arg;
 }
@@ -122,6 +122,7 @@ main(argc, argv, envp)
 		addarg(&al, argv[len], 0);
 
 	if ((config = fopen(_PATH_MAILERCONF, "r")) == NULL) {
+		addarg(&al, NULL, 0);
 		openlog("mailwrapper", LOG_PID, LOG_MAIL);
 		syslog(LOG_INFO, "can't open %s, using %s as default MTA",
 		    _PATH_MAILERCONF, _PATH_DEFAULTMTA);
@@ -171,6 +172,8 @@ main(argc, argv, envp)
 	}
 
 	(void)fclose(config);
+
+	addarg(&al, NULL, 0);
 
 	execve(to, al.argv, envp);
 	freearg(&al, 0);

@@ -1,4 +1,4 @@
-.\"	$OpenBSD: passwd.5,v 1.11 1998/11/29 15:47:24 aaron Exp $
+.\"	$OpenBSD: passwd.5,v 1.14 2000/03/19 19:25:31 aaron Exp $
 .\"	$NetBSD: passwd.5,v 1.4 1995/07/28 06:46:05 phil Exp $
 .\"
 .\" Copyright (c) 1988, 1991, 1993
@@ -43,11 +43,12 @@
 .Nd format of the password file
 .Sh DESCRIPTION
 The
-.Nm
-files are files consisting of newline separated records, one per user,
-containing ten colon
+.Nm master.passwd
+file, readable only by root, consists of
+newline-separated records, one per user, containing ten colon
 .Pq Sq \&:
-separated fields.  These fields are as follows:
+separated fields.
+These fields are as follows:
 .Pp
 .Bl -tag -width password -offset indent -compact
 .It name
@@ -74,28 +75,37 @@ User's home directory.
 User's login shell.
 .El
 .Pp
+The publically-readable
+.Nm
+file is generated from the
+.Nm master.passwd
+file by
+.Xr pwd_mkdb 8
+and has the class, change, and expire fields removed.
+Also, the encrypted password field is replaced by an asterisk
+.Pq Ql \&* .
+.Pp
 The
 .Ar name
 field is the login used to access the computer account, and the
 .Ar uid
-field is the number associated with it.  They should both be unique
-across the system (and often across a group of systems) since they
-control file access.
+field is the number associated with it.
+They should both be unique across the system (and often across a group of
+systems) since they control file access.
 .Pp
 While it is possible to have multiple entries with identical login names
-and/or identical user IDs, it is usually a mistake to do so.  Routines
-that manipulate these files will often return only one of the multiple
-entries, and that one by random selection.
+and/or identical user IDs, it is usually a mistake to do so.
+Routines that manipulate these files will often return only one of the
+multiple entries, and that one by random selection.
 .Pp
 The login name must never begin with a hyphen
-.Pq Sq \&- ;
+.Pq Ql \&- ;
 also, it is strongly
 suggested that neither uppercase characters nor dots
-.Pq Sq \&.
+.Pq Ql \&.
 be part
-of the name, as this tends to confuse mailers.  No field may contain a
-colon
-.Pq Sq \&:
+of the name, as this tends to confuse mailers.
+No field may contain a colon
 as this has been used historically to separate the fields
 in the user database.
 .Pp
@@ -105,8 +115,11 @@ form of the password.
 If the
 .Ar password
 field is empty, no password will be required to gain access to the
-machine.  This is almost invariably a mistake.
-Because these files contain the encrypted user passwords, they should
+machine.
+This is almost invariably a mistake.
+Because
+.Nm master.passwd
+contains the encrypted user passwords, it should
 not be readable by anyone without appropriate privileges.
 .Pp
 Which type of cipher is used to encrypt the password information
@@ -123,31 +136,27 @@ this field currently has little special meaning.
 .Pp
 The
 .Ar class
-field is currently unused.  In the near future it will be a key to
-a
+field is currently unused.
+In the near future it will be a key to a
 .Xr termcap 5
 style database of user attributes.
 .Pp
 The
 .Ar change
-field is the number in seconds,
-.Dv GMT ,
-from the epoch, until the
+field is the number in seconds, GMT, from the epoch, until the
 password for the account must be changed.
 This field may be left empty to turn off the password aging feature.
 .Pp
 The
 .Ar expire
-field is the number in seconds,
-.Dv GMT ,
-from the epoch, until the
+field is the number in seconds, GMT, from the epoch, until the
 account expires.
 This field may be left empty to turn off the account aging feature.
 .Pp
 The
 .Ar gecos
 field normally contains comma
-.Pq Sq \&,
+.Pq Ql \&,
 separated subfields as follows:
 .Pp
 .Bl -tag -width office -offset indent -compact
@@ -161,14 +170,21 @@ User's work phone number.
 User's home phone number.
 .El
 .Pp
-This information is used by the
+The full name may contain an ampersand
+.Pq Sq \&& ,
+which will be replaced by the capitalized login name when the gecos field
+is displayed or used by various programs such as
+.Xr finger 1 ,
+.Xr sendmail 8 ,
+etc.
+.Pp
+The office and phone number subfields, if they exist, are used by the
 .Xr finger 1
-program.
+program and possibly by other applications.
 .Pp
 The user's home directory is the full
 .Tn UNIX
-path name where the user
-will be placed on login.
+path name where the user will be placed on login.
 .Pp
 The
 .Ar shell
@@ -185,17 +201,16 @@ file also supports standard YP exclusions and inclusions, based on user
 names and netgroups.
 .Pp
 Lines beginning with a
-.Dq \&-
+.Ql \&-
 (minus sign) are entries marked as being excluded
 from any following inclusions, which are marked with a
-.Dq +
+.Ql +
 (plus sign).
 .Pp
 If the second character of the line is a
-.Dq @
-(at sign), the operation
-involves the user fields of all entries in the netgroup specified by the
-remaining characters of the
+.Ql @
+(at sign), the operation involves the user fields of all entries in the
+netgroup specified by the remaining characters of the
 .Ar name
 field.
 Otherwise, the remainder of the
@@ -203,7 +218,7 @@ Otherwise, the remainder of the
 field is assumed to be a specific user name.
 .Pp
 The
-.Dq +
+.Ql +
 token may also be alone in the
 .Ar name
 field, which causes all users from the
@@ -217,16 +232,17 @@ If the entry contains non-empty
 or
 .Ar gid
 fields, the specified numbers will override the information retrieved
-from the YP maps. As well, if the
+from the YP maps.
+As well, if the
 .Ar gecos ,
-.Ar dir
+.Ar dir ,
 or
 .Ar shell
 entries contain text, it will override the information included via YP.
 On some systems, the
 .Ar passwd
-field may also be overridden.  It is recommended that the standard
-way to enable YP passwd support in
+field may also be overridden.
+It is recommended that the standard way to enable YP passwd support in
 .Pa /etc/master.passwd
 is:
 .Pp
@@ -239,7 +255,6 @@ will result in
 containing:
 .Pp
 +:*:0:0:::
-.Pp
 .Sh SEE ALSO
 .Xr chpass 1 ,
 .Xr login 1 ,
@@ -268,7 +283,7 @@ script can be used to convert your old-style password
 file into a new style password file.
 The additional fields
 .Dq class ,
-.Dq change
+.Dq change ,
 and
 .Dq expire
 are added, but are turned off by default.

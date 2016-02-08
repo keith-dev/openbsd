@@ -52,7 +52,7 @@
  */
 
 #if defined(LIBC_SCCS) && !defined(lint)
-static char rcsid[] = "$OpenBSD: gethostnamadr.c,v 1.37 1999/09/03 18:12:31 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: gethostnamadr.c,v 1.41 2000/01/06 08:24:17 d Exp $";
 #endif /* LIBC_SCCS and not lint */
 
 #include <sys/param.h>
@@ -490,7 +490,7 @@ gethostbyaddr_r(addr, len, af, he, buf, buflen, errorp)
 /* XXX RFC2133 expects a gethostbyname2_r() -- unimplemented */
 #endif
 
-_THREAD_PRIVATE_MUTEX(gethostnamadr)
+_THREAD_PRIVATE_MUTEX(gethostnamadr);
 
 struct hostent *
 gethostbyname(name)
@@ -664,8 +664,6 @@ gethostbyaddr(addr, len, af)
 	int len, af;
 {
 	const u_char *uaddr = (const u_char *)addr;
-	static const u_char mapped[] = { 0,0, 0,0, 0,0, 0,0, 0,0, 0xff,0xff };
-	static const u_char tunnelled[] = { 0,0, 0,0, 0,0, 0,0, 0,0, 0,0 };
 	int n, size, i;
 	querybuf buf;
 	register struct hostent *hp;
@@ -682,11 +680,11 @@ gethostbyaddr(addr, len, af)
 	}
 
 	if (af == AF_INET6 && len == IN6ADDRSZ &&
-	    (!bcmp(uaddr, mapped, sizeof mapped) ||
-	     !bcmp(uaddr, tunnelled, sizeof tunnelled))) {
+	    (IN6_IS_ADDR_V4MAPPED((struct in6_addr *)uaddr) ||
+	     IN6_IS_ADDR_V4COMPAT((struct in6_addr *)uaddr))) {
 		/* Unmap. */
-		addr += sizeof mapped;
-		uaddr += sizeof mapped;
+		addr += IN6ADDRSZ - INADDRSZ;
+		uaddr += IN6ADDRSZ - INADDRSZ;
 		af = AF_INET;
 		len = INADDRSZ;
 	}
@@ -827,8 +825,7 @@ _gethtent()
 	if (!(cp = strpbrk(p, " \t")))
 		goto again;
 	*cp++ = '\0';
-	if ((_res.options & RES_USE_INET6) &&
-	    inet_pton(AF_INET6, p, host_addr) > 0) {
+	if (inet_pton(AF_INET6, p, host_addr) > 0) {
 		af = AF_INET6;
 		len = IN6ADDRSZ;
 	} else if (inet_pton(AF_INET, p, host_addr) > 0) {
@@ -843,6 +840,11 @@ _gethtent()
 	} else {
 		goto again;
 	}
+	/* if this is not something we're looking for, skip it. */
+	if (host.h_addrtype != af)
+		goto again;
+	if (host.h_length != len)
+		goto again;
 	h_addr_ptrs[0] = (char *)host_addr;
 	h_addr_ptrs[1] = NULL;
 	host.h_addr_list = h_addr_ptrs;
@@ -919,6 +921,9 @@ _gethtbyaddr(addr, len, af)
 	int len, af;
 {
 	register struct hostent *p;
+
+	host.h_length = len;
+	host.h_addrtype = af;
 
 	_sethtent(0);
 	while ((p = _gethtent()))

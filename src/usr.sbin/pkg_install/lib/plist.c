@@ -1,6 +1,6 @@
-/*	$OpenBSD: plist.c,v 1.5 1998/10/13 23:09:54 marc Exp $	*/
+/*	$OpenBSD: plist.c,v 1.9 2000/04/28 22:13:55 espie Exp $	*/
 #ifndef lint
-static const char *rcsid = "$OpenBSD: plist.c,v 1.5 1998/10/13 23:09:54 marc Exp $";
+static const char *rcsid = "$OpenBSD: plist.c,v 1.9 2000/04/28 22:13:55 espie Exp $";
 #endif
 
 /*
@@ -294,10 +294,8 @@ delete_package(Boolean ign_err, Boolean nukedirs, package_t *pkg)
     plist_t *p;
     char *Where = ".", *last_file = "";
     int fail = SUCCESS;
-    Boolean preserve;
     char tmp[FILENAME_MAX], *name = NULL;
 
-    preserve = find_plist_option(pkg, "preserve") ? TRUE : FALSE;
     for (p = pkg->head; p; p = p->next) {
 	switch (p->type)  {
 	case PLIST_NAME:
@@ -315,12 +313,16 @@ delete_package(Boolean ign_err, Boolean nukedirs, package_t *pkg)
 	    break;
 
 	case PLIST_UNEXEC:
-	    format_cmd(tmp, sizeof(tmp), p->name, Where, last_file);
-	    if (Verbose)
-		printf("Execute `%s'\n", tmp);
-	    if (!Fake && system(tmp)) {
-		warnx("unexec command for `%s' failed", tmp);
+	    if (!format_cmd(tmp, sizeof(tmp), p->name, Where, last_file)) {
+	    	warnx("unexec command `%s' could not expand", p->name);
 		fail = FAIL;
+	    } else {
+		if (Verbose)
+		    printf("Execute `%s'\n", tmp);
+		if (!Fake && system(tmp)) {
+		    warnx("unexec command for `%s' failed", tmp);
+		    fail = FAIL;
+		}
 	    }
 	    break;
 
@@ -338,8 +340,7 @@ delete_package(Boolean ign_err, Boolean nukedirs, package_t *pkg)
 		    if ((cp = MD5File(tmp, buf)) != NULL) {
 			/* Mismatch? */
 			if (strcmp(cp, p->next->name + 4)) {
-			    if (Verbose)
-				printf("%s fails original MD5 checksum - %s\n",
+			    printf("%s fails original MD5 checksum - %s\n",
 				       tmp, Force ? "deleted anyway." : "not deleted.");
 			    if (!Force) {
 				fail = FAIL;
@@ -353,17 +354,6 @@ delete_package(Boolean ign_err, Boolean nukedirs, package_t *pkg)
 		if (!Fake) {
 		    if (delete_hierarchy(tmp, ign_err, nukedirs))
 		    fail = FAIL;
-		    if (preserve && name) {
-			char tmp2[FILENAME_MAX];
-			    
-			if (make_preserve_name(tmp2, FILENAME_MAX, name, tmp)) {
-			    if (fexists(tmp2)) {
-				if (rename(tmp2, tmp))
-				   warn("preserve: unable to restore %s as %s",
-					tmp2, tmp);
-			    }
-			}
-		    }
 		}
 	    }
 	    break;
@@ -371,8 +361,13 @@ delete_package(Boolean ign_err, Boolean nukedirs, package_t *pkg)
 	case PLIST_DIR_RM:
 	    (void) snprintf(tmp, sizeof(tmp), "%s/%s", Where, p->name);
 	    if (!isdir(tmp)) {
-		warnx("attempting to delete file `%s' as a directory\n"
-	"this packing list is incorrect - ignoring delete request", tmp);
+	    	if (fexists(tmp)) {
+			warnx("attempting to delete file `%s' as a directory\n"
+		"this packing list is incorrect - ignoring delete request", tmp);
+		} else {
+			warnx("attempting to delete non-existent directory `%s'\n"
+		"this packing list is incorrect - ignoring delete request", tmp);
+		}
 	    }
 	    else {
 		if (Verbose)

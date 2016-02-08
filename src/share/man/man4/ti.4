@@ -1,4 +1,4 @@
-.\"	$OpenBSD: ti.4,v 1.2 1999/08/04 17:18:45 deraadt Exp $
+.\"	$OpenBSD: ti.4,v 1.5 2000/04/03 21:19:37 aaron Exp $
 .\"
 .\" Copyright (c) 1997, 1998, 1999
 .\"	Bill Paul <wpaul@ctr.columbia.edu>. All rights reserved.
@@ -61,19 +61,21 @@ vendors that use the Tigon chipset under OEM contract. The
 driver has been tested with the following Tigon-based adapters:
 .Bl -bullet -offset indent
 .It
-The Alteon AceNIC V gigabit ethernet adapter
+The Alteon AceNIC V
 .It
-The 3Com 3C985-SX gigabit ethernet adapter
+The 3Com 3C985-SX
 .It
-The Netgear GA620 gigabit ethernet adapter
+The Netgear GA620
+.It
+Farallon PN9000SX
 .El
 .Pp
 The following should also be supported but have not yet been tested:
 .Bl -bullet -offset indent
 .It
-The Digital EtherWORKS 1000SX PCI Gigabit Adapter
+The Digital EtherWORKS 1000SX PCI
 .It
-Silicon Graphics PCI gigabit ethernet adapter
+Silicon Graphics PCI
 .El
 .Pp
 While the Tigon chipset supports 10, 100 and 1000Mbps speeds, support for
@@ -116,7 +118,7 @@ or
 .Ar half-duplex
 modes.
 .It 1000baseSX
-Set 1000Mbps (gigabit ethernet) operation. Only full
+Set 1000Mbps (gigabit ethernet) operation. Only
 .Ar full-duplex
 mode is supported at this speed.
 .El
@@ -169,7 +171,7 @@ the network connection (cable).
 .Sh SEE ALSO
 .Xr arp 4 ,
 .Xr ifmedia 4 ,
-.Xr netintro 4 , 
+.Xr netintro 4 ,
 .Xr ifconfig 8
 .Rs
 .%T Alteon Gigabit Ethernet/PCI NIC manuals

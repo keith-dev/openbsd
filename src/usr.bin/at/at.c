@@ -1,4 +1,4 @@
-/*	$OpenBSD: at.c,v 1.16 1998/07/09 20:40:58 mickey Exp $	*/
+/*	$OpenBSD: at.c,v 1.19 2000/04/23 16:32:07 millert Exp $	*/
 /*	$NetBSD: at.c,v 1.4 1995/03/25 18:13:31 glass Exp $	*/
 
 /*
@@ -74,7 +74,7 @@ enum { ATQ, ATRM, AT, BATCH, CAT };	/* what program we want to run */
 
 /* File scope variables */
 #ifndef lint
-static char rcsid[] = "$OpenBSD: at.c,v 1.16 1998/07/09 20:40:58 mickey Exp $";
+static char rcsid[] = "$OpenBSD: at.c,v 1.19 2000/04/23 16:32:07 millert Exp $";
 #endif
 
 char *no_export[] =
@@ -197,7 +197,7 @@ writefile(runtimer, queue)
 
 	sigaction(SIGINT, &act, NULL);
 
-	(void)strcpy(atfile, _PATH_ATJOBS);
+	(void)strlcpy(atfile, _PATH_ATJOBS, sizeof atfile);
 	ppos = atfile + strlen(atfile);
 
 	/*
@@ -280,8 +280,8 @@ writefile(runtimer, queue)
 		panic("Cannot reopen atjob file");
 
 	/*
-	 * Get the userid to mail to, first by trying getlogin(), which reads
-	 * /etc/utmp, then from $LOGNAME or $USER, finally from getpwuid().
+	 * Get the userid to mail to, first by trying getlogin(), which asks
+	 * the kernel, then from $LOGNAME or $USER, finally from getpwuid().
 	 */
 	mailname = getlogin();
 	if (mailname == NULL && (mailname = getenv("LOGNAME")) == NULL)
@@ -316,7 +316,7 @@ writefile(runtimer, queue)
 		char *eqp;
 
 		eqp = strchr(*atenv, '=');
-		if (ap == NULL)
+		if (eqp == NULL)
 			eqp = *atenv;
 		else {
 			int i;
@@ -361,8 +361,10 @@ writefile(runtimer, queue)
 	 * Cd to the directory at the time and write out all the
 	 * commands the user supplies from stdin.
 	 */
+	if ((ap = cwdname()) == NULL)
+		perr("Cannot get current working directory");
 	(void)fputs("cd ", fp);
-	for (ap = cwdname(); *ap != '\0'; ap++) {
+	for (; *ap != '\0'; ap++) {
 		if (*ap == '\n')
 			fprintf(fp, "\"\n\"");
 		else {

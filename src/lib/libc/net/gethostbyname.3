@@ -1,4 +1,4 @@
-.\"	$OpenBSD: gethostbyname.3,v 1.12 1999/07/05 04:40:59 aaron Exp $
+.\"	$OpenBSD: gethostbyname.3,v 1.15 2000/04/18 03:01:31 aaron Exp $
 .\"
 .\" Copyright (c) 1983, 1987, 1991, 1993
 .\"	The Regents of the University of California.  All rights reserved.
@@ -75,7 +75,7 @@ referenced by name or by address, respectively.
 This structure contains either information obtained from the name server (i.e.,
 .Xr resolver 3
 and
-.Xr named 8 ),
+.Xr named 8 ) ,
 broken-out fields from a line in
 .Pa /etc/hosts ,
 or database entries supplied by the
@@ -166,12 +166,14 @@ connection.
 .Pp
 The
 .Fn herror
-function prints an error message describing the failure.  If its argument
+function prints an error message describing the failure.
+If its argument
 .Fa string
 is non-null,
 it is prepended to the message string and separated from it by a colon
 .Pq Ql \&:
-and a space.  The error message is printed with a trailing newline.
+and a space.
+The error message is printed with a trailing newline.
 The contents of the error message is the same as that returned by
 .Fn hstrerror
 with argument
@@ -218,6 +220,8 @@ for example, a mail-forwarder may be registered for this domain.
 .El
 .Sh SEE ALSO
 .Xr resolver 3 ,
+.Xr getaddrinfo 3 ,
+.Xr getnameinfo 3 ,
 .Xr hosts 5 ,
 .Xr resolv.conf 5 ,
 .Xr hostname 7 ,

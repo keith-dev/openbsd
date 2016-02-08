@@ -1,5 +1,5 @@
 #!/bin/sh
-#	$OpenBSD: install.sub,v 1.145 1999/10/18 05:25:26 deraadt Exp $
+#	$OpenBSD: install.sub,v 1.153 2000/05/08 21:28:03 millert Exp $
 #	$NetBSD: install.sub,v 1.5.2.8 1996/09/02 23:25:02 pk Exp $
 #
 # Copyright (c) 1997,1998 Todd Miller, Theo de Raadt
@@ -69,13 +69,14 @@
 #	OpenBSD installation/upgrade script - common subroutines.
 
 ROOTDISK=				# filled in below
-VERSION=26
+VERSION=27
 VERSION_MAJOR=$(( $VERSION / 10 ))
 VERSION_MINOR=$(( $VERSION % 10 ))
 export VERSION VERSION_MAJOR VERSION_MINOR
 
-ALLSETS="base etc misc comp man game xbase xshare xfont xserv"	# install
-UPGRSETS="base misc comp man game xbase xshare xfont xserv"	# upgrade
+# extra "site" set can be provided by person doing install
+ALLSETS="base etc misc comp man game xbase xshare xfont xserv site"	# install
+UPGRSETS="base misc comp man game xbase xshare xfont xserv site"	# upgrade
 SNAPSETS="bin dev etc games man misc sbin \
 	  usr.bin usr.binutils usr.games usr.include \
 	  usr.lib usr.libexec usr.misc usr.sbin usr.share var"
@@ -98,10 +99,16 @@ fi
 # get a reponse with default[s]
 getresp() {
 	local _shell_aware=0
+	local _no_shell=0
 
 	# -s option means exit after a shell (caller is shell-aware)
 	if [ "$1" = "-s" ]; then
 		_shell_aware=1
+		shift
+	fi
+	# -n option means don't try to run shell commands
+	if [ "$1" = "-n" ]; then
+		_no_shell=1
 		shift
 	fi
 
@@ -109,18 +116,22 @@ getresp() {
 	valid="false"
 	while [ "X$valid" = "Xfalse" ]; do
 		read resp
-		case "$resp" in
-			"")	resp=$1
-				;;
-			!)	echo "Type 'exit' to return to install."
-				sh
-				test $_shell_aware -eq 0 && continue
-				;;
-			!*)
-				eval ${resp#?}
-				test $_shell_aware -eq 0 && continue
-				;;
-		esac
+		if [ ${_no_shell} -eq 1 ]; then
+			test -z "$resp" && resp=$1
+		else
+			case "$resp" in
+				"")	resp=$1
+					;;
+				!)	echo "Type 'exit' to return to install."
+					sh
+					test $_shell_aware -eq 0 && continue
+					;;
+				!*)
+					eval ${resp#?}
+					test $_shell_aware -eq 0 && continue
+					;;
+			esac
+		fi
 		if [ $# -gt 1 ]; then
 			for i in $@; do
 				if [ "X$resp" = "X$i" ]; then
@@ -251,7 +262,7 @@ isnumeric() {
 
 get_ifdevs() {
 	# return available network devices
-	/sbin/ifconfig -a | egrep -v '^([[:space:]]|(lo|enc|ppp|sl|tun|bridge)[[:digit:]])' | cutword -t: 1
+	/sbin/ifconfig -a | egrep -v '^([[:space:]]|(lo|enc|gre|ppp|sl|tun|bridge)[[:digit:]])' | cutword -t: 1
 }
 
 dir_has_sets() {
@@ -505,6 +516,7 @@ configure_ifs() {
 
 	local _up _if_name=$1 _if_ip _if_mask
 	local _if_symname _if_extra _hostname
+	local _dhcp_prompt
 
 	set -- `ifconfig $_if_name | sed -n '
 		1s/.*<UP,.*$/UP/p
@@ -524,11 +536,21 @@ configure_ifs() {
 		ifconfig $_if_name delete down
 	fi
 
+	if [ ! -x /sbin/dhclient ]; then
+		echo "DHCP install not supported"
+		echo
+	else
+		_dhcp_prompt=" (or 'dhcp')"
+	fi
+
 	# Get IP address
 	resp=		# force one iteration
 	while [ "X${resp}" = X"" ]; do
-		echo -n "IP address (or 'dhcp') ? [$_if_ip] "
+		echo -n "IP address${_dhcp_prompt} ? [$_if_ip] "
 		getresp "$_if_ip"
+		if [ ! -x /sbin/dhclient -a "X$resp" == "Xdhcp" ]; then
+			resp=
+		fi
 		_if_ip=$resp
 	done
 
@@ -566,7 +588,7 @@ configure_ifs() {
 			s/^	//
 			/media/p'
 		echo "If the default is not satisfactory, and you wish to use another"
-		echo "media, copy that line from above (ie. \"media 100baseTX\")"
+		echo "media, copy that line from above (e.g. \"media 100baseTX\")"
 		echo -n "Media directives? [$_if_extra] "
 		getresp "$_if_extra"
 		if [ "X${resp}" != X"" ]; then
@@ -850,7 +872,7 @@ if [ X"$_reuse" = X ]; then
 	if [ "X${_proxy_host}" = X"" ]; then
 		_proxy_host=none
 	fi
-	echo -n "HTTP/FTP proxy URL? (ie. \"http://proxy:8080\", or \"none\") [${_proxy_host}] "
+	echo -n "HTTP/FTP proxy URL? (e.g. \"http://proxy:8080\", or \"none\") [${_proxy_host}] "
 	getresp "${_proxy_host}"
 	if [ "X${resp}" = X"none" ]; then
 		unset _proxy_host ftp_proxy http_proxy
@@ -966,7 +988,7 @@ if [ X"$_reuse" = X ]; then
 			while [ "X${resp}" = X"" ]; do
 				echo -n "Password (will not echo): "
 				stty -echo
-				getresp "${_ftp_server_password}"
+				getresp -n "${_ftp_server_password}"
 				stty echo
 				echo
 				_ftp_server_password=$resp
@@ -1111,8 +1133,8 @@ while test -n "${_get_files}" ; do
 	echo
 	for _f in $_get_files ; do
 		echo "Getting ${_f} ..."
-		if [ "X${_f}" = "Xssl${VERSION}.tar.gz" -o \
-		    "X${_f}" = "XsslUSA${VERSION}.tar.gz" ]; then
+		if [ "X${_f}" = "Xssl${VERSION}.tgz" -o \
+		    "X${_f}" = "XsslUSA${VERSION}.tgz" ]; then
 			( cd /mnt ; ftp ${_ftp_active} -o - -V -m ${_url_base}/${_f} | /mnt/usr/sbin/chroot /mnt /usr/sbin/pkg_add -I -)
 		elif [ "X${_f}" = "X${_kernel}" ]; then
 			( cd /mnt ; ftp ${_ftp_active} -V -m ${_url_base}/${_f} )
@@ -1123,8 +1145,8 @@ while test -n "${_get_files}" ; do
 			# Mark xfer as having failed,.
 			_setsdone=`rmel $_f $_setsdone`
 			_failed_files="${_failed_files} ${_f}"
-		elif [ "X${_f}" = "Xssl${VERSION}.tar.gz" -o \
-		    "X${_f}" = "XsslUSA${VERSION}.tar.gz" ]; then
+		elif [ "X${_f}" = "Xssl${VERSION}.tgz" -o \
+		    "X${_f}" = "XsslUSA${VERSION}.tz" ]; then
 			ssl=1
 		fi
 	done
@@ -1270,8 +1292,8 @@ while test -n "${_get_files}" ; do
 	echo
 	for _f in $_get_files ; do
 		echo "$1/${_f}:"
-		if [ "X${_f}" = "Xssl${VERSION}.tar.gz" -o \
-		    "X${_f}" = "XsslUSA${VERSION}.tar.gz" ]; then
+		if [ "X${_f}" = "Xssl${VERSION}.tgz" -o \
+		    "X${_f}" = "XsslUSA${VERSION}.tgz" ]; then
 			( cd /mnt ; ftp -o - -V -m file:$1/${_f} | /mnt/usr/sbin/chroot /mnt /usr/sbin/pkg_add -I -)
 		elif [ "X${_f}" = "X${_kernel}" ]; then
 			ftp -V -m -o /mnt/$_f file:$1/$_f
@@ -1282,8 +1304,8 @@ while test -n "${_get_files}" ; do
 			# Mark xfer as having failed,.
 			_setsdone=`rmel $_f $_setsdone`
 			_failed_files="${_failed_files} ${_f}"
-		elif [ "X${_f}" = "Xssl${VERSION}.tar.gz" -o \
-		    "X${_f}" = "XsslUSA${VERSION}.tar.gz" ]; then
+		elif [ "X${_f}" = "Xssl${VERSION}.tgz" -o \
+		    "X${_f}" = "XsslUSA${VERSION}.tgz" ]; then
 			ssl=1
 		fi
 	done
@@ -1314,20 +1336,27 @@ done
 }
 
 install_cdrom() {
-local _drive _partition_range _partition _fstype _directory
+local _drive _range _part _fstype _directory _n
 
 # Get the cdrom device info
+_CDDEVS=`md_get_cddevs`
+if [ "X${_CDDEVS}" = X"" ]; then
+	echo "No CD-ROM devices were found.  Aborting."
+	return
+fi
+
 cat << __EOT
 
-The following CD-ROM devices are installed on your system; please select
-the CD-ROM device containing the partition with the installation sets:
+The following CD-ROM devices are installed on your system.
+Please make sure the CD is in the CD-ROM drive and select
+the device containing the CD with the installation sets:
+
+$_CDDEVS
 
 __EOT
-_CDDEVS=`md_get_cddevs`
-echo    "$_CDDEVS"
-echo
-echo -n	"Which is the CD-ROM with the installation media? [abort] "
-getresp "abort"
+_drive=`echo $_CDDEVS | cutword 1`
+echo -n	"Which CD-ROM contains the installation media? [$_drive] "
+getresp "$_drive"
 case "$resp" in
 	abort)
 		echo "Aborting."
@@ -1346,51 +1375,75 @@ case "$resp" in
 		;;
 esac
 
-# Get partition
-_partition_range=`md_get_partition_range`
-resp=		# force one iteration
-while [ "X${resp}" = X"" ]; do
-	echo -n "CD-ROM partition to mount (normally \"c\")? [c] "
-	getresp "c"
-	case "$resp" in
-		$_partition_range)
-			_partition=$resp
-			;;
-
-		*)
-			echo "Invalid response: $resp"
-			resp=		# force loop to repeat
-			;;
-	esac
+# If it is an ISO9660 CD-ROM, we don't need to ask any other questions
+_n=0
+until disklabel $_drive >/tmp/label.$_drive 2>&1; do
+	# Try up to 6 times to access the CD
+	if egrep -q '(Input/output error)|(sector size 0)' /tmp/label.$_drive; then
+		_n=$(( $_n + 1 ))
+		if [ _n -le 5 ]; then
+			echo "I/O error accessing $_drive; retrying"
+			sleep 10
+		else
+			echo "Cannot access $_drive.  Aborting."
+			return
+		fi
+	else
+		break
+	fi
 done
+echo
+if grep -q '^ *c: .*ISO9660' /tmp/label.$_drive; then
+	_fstype=cd9660
+	_part=c
+else
+	# Get partition from user
+	_range=`md_get_partition_range`
+	resp=		# force one iteration
+	while [ "X${resp}" = X"" ]; do
+		echo -n 'CD-ROM partition to mount (normally "c")? [c] '
+		getresp c
+		case "$resp" in
+			$_range)
+				_part=$resp
+				;;
 
-# Ask for filesystem type
-cat << __EOT
+			*)
+				echo "Invalid response: $resp"
+				resp=		# force loop to repeat
+				;;
+		esac
+	done
+
+	# Ask for filesystem type
+	cat << __EOT
 
 There are two CD-ROM filesystem types currently supported by this program:
 cd9660		ISO-9660
 ffs		Berkeley Fast Filesystem
 
 __EOT
-resp=		# force one iteration
-while [ "X${resp}" = X"" ]; do
-	echo -n "Which filesystem type (Official OpenBSD CD-ROM is cd9660)? [cd9660] "
-	getresp "cd9660"
-	case "$resp" in
-		cd9660|ffs)
-			_fstype=$resp
-			;;
+	resp=		# force one iteration
+	while [ "X${resp}" = X"" ]; do
+		echo -n "Which filesystem type? [cd9660] "
+		getresp "cd9660"
+		case "$resp" in
+			cd9660|ffs)
+				_fstype=$resp
+				;;
 
-		*)
-			echo "Invalid response: $resp"
-			resp=		# force loop to repeat
-			;;
-	esac
-done
+			*)
+				echo "Invalid response: $resp"
+				resp=		# force loop to repeat
+				;;
+		esac
+	done
+fi
+rm -f /tmp/label.$_drive
 
 # Mount the CD-ROM
 if ! mount -t ${_fstype} -o ro \
-    /dev/${_drive}${_partition} /mnt2 ; then
+    /dev/${_drive}${_part} /mnt2 ; then
 	echo "Cannot mount CD-ROM drive.  Aborting."
 	return
 fi
@@ -1782,7 +1835,7 @@ __EOT
 	elif [ ! -f /mnt/bin/cat ]; then
 		cat << __EOT
 
-You still do not have a /bin/cat in your filesystem (ie. a sample random file
+You still do not have a /bin/cat in your filesystem (i.e. a sample random file
 which you probably want).  This seems to indicate that you are still missing
 important distribution files.
 __EOT
@@ -2061,7 +2114,7 @@ donetconfig() {
 		_nam=`cat /tmp/myname`
 	fi
 	while [ "X${resp}" = X"" ]; do
-		echo -n "Enter system hostname (short form, ie. \"foo\"): [$_nam] "
+		echo -n "Enter system hostname (short form, e.g. \"foo\"): [$_nam] "
 		getresp "$_nam"
 	done
 	hostname $resp
@@ -2073,7 +2126,7 @@ donetconfig() {
 		    sed -e 's/^domain //'`
 	fi
 	while [ "X${resp}" = X"" ]; do
-		echo -n "Enter DNS domain name (ie. \"bar.com\"): [$FQDN] "
+		echo -n "Enter DNS domain name (e.g. \"bar.com\"): [$FQDN] "
 		getresp "$FQDN"
 	done
 	FQDN=$resp
@@ -2192,4 +2245,10 @@ __network_config_2
 		*)
 			;;
 	esac
+}
+
+populateusrlocal() {
+	if [ -f /mnt/etc/mtree/BSD.local.dist ]; then
+		/mnt/usr/sbin/chroot /mnt /usr/sbin/mtree -Uedqn -p /usr/local -f /etc/mtree/BSD.local.dist >/dev/null
+	fi
 }

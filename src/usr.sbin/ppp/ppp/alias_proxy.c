@@ -21,6 +21,8 @@
 
 
     Initial development: April, 1998 (cjm)
+
+    $OpenBSD: alias_proxy.c,v 1.5 2000/02/27 01:38:24 brian Exp $
 */
 
 

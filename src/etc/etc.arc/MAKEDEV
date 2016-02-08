@@ -1,5 +1,5 @@
 #!/bin/sh -
-#	$OpenBSD: MAKEDEV,v 1.32 1999/08/20 17:00:34 downsj Exp $
+#	$OpenBSD: MAKEDEV,v 1.34 2000/03/22 08:08:52 niklas Exp $
 #	@(#)MAKEDEV	8.1 (Berkeley) 6/9/93
 #
 
@@ -40,6 +40,7 @@
 # Call units:
 #
 # Special purpose devices:
+#	ch*	SCSI media changer
 #	bpf*	Berkeley Packet Filter
 #	lkm	loadable kernel modules interface
 #	tun*	network tunnel driver
@@ -204,13 +205,23 @@ st*)
 		mknod nr${name}h${unit} c $chr $unit3
 		chown root.operator r${name}${unit} nr${name}${unit} \
 			r${name}h${unit} nr${name}h${unit}
-		chmod 640 r${name}${unit} nr${name}${unit} \
+		chmod 660 r${name}${unit} nr${name}${unit} \
 			r${name}h${unit} nr${name}h${unit}
 		;;
 	*)
 		echo bad unit for tape in: $1
 		;;
 	esac
+	umask 77
+	;;
+
+ch*)
+	umask 2
+	name=ch; chr=36
+	rm -f $name$unit
+	mknod ${name}${unit}	c $chr $unit
+	chown root.operator ${name}${unit}
+	chmod 660 ${name}${unit}
 	umask 77
 	;;
 

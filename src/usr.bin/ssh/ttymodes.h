@@ -1,33 +1,36 @@
 /*
+ *
+ * ttymodes.h
+ *
+ * Author: Tatu Ylonen <ylo@cs.hut.fi>
+ * 	SGTTY stuff contributed by Janne Snabb <snabb@niksula.hut.fi>
+ *
+ * Copyright (c) 1995 Tatu Ylonen <ylo@cs.hut.fi>, Espoo, Finland
+ *                    All rights reserved
+ *
+ * Created: Tue Mar 21 15:42:09 1995 ylo
+ *
+ */
 
-ttymodes.h
-
-Author: Tatu Ylonen <ylo@cs.hut.fi>
-	SGTTY stuff contributed by Janne Snabb <snabb@niksula.hut.fi>
-
-Copyright (c) 1995 Tatu Ylonen <ylo@cs.hut.fi>, Espoo, Finland
-                   All rights reserved
-
-Created: Tue Mar 21 15:42:09 1995 ylo
-
-*/
-
-/* RCSID("$Id: ttymodes.h,v 1.4 1999/10/03 04:12:21 deraadt Exp $"); */
+/* RCSID("$Id: ttymodes.h,v 1.7 2000/04/14 10:30:34 markus Exp $"); */
 
 /* The tty mode description is a stream of bytes.  The stream consists of
-   opcode-arguments pairs.  It is terminated by opcode TTY_OP_END (0).
-   Opcodes 1-127 have one-byte arguments.  Opcodes 128-159 have integer
-   arguments.  Opcodes 160-255 are not yet defined, and cause parsing to
-   stop (they should only be used after any other data).
+ * opcode-arguments pairs.  It is terminated by opcode TTY_OP_END (0).
+ * Opcodes 1-127 have one-byte arguments.  Opcodes 128-159 have integer
+ * arguments.  Opcodes 160-255 are not yet defined, and cause parsing to
+ * stop (they should only be used after any other data).
+ *
+ * The client puts in the stream any modes it knows about, and the
+ * server ignores any modes it does not know about.  This allows some degree
+ * of machine-independence, at least between systems that use a posix-like
+ * tty interface.  The protocol can support other systems as well, but might
+ * require reimplementing as mode names would likely be different.
+ */
 
-   The client puts in the stream any modes it knows about, and the
-   server ignores any modes it does not know about.  This allows some degree
-   of machine-independence, at least between systems that use a posix-like
-   tty interface.  The protocol can support other systems as well, but might
-   require reimplementing as mode names would likely be different. */
-     
-/* Some constants and prototypes are defined in packet.h; this file
-   is only intended for including from ttymodes.h. */
+/*
+ * Some constants and prototypes are defined in packet.h; this file
+ * is only intended for including from ttymodes.c.
+ */
 
 /* termios macro */		/* sgtty macro */
 /* name, op */

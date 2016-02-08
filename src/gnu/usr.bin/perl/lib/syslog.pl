@@ -2,8 +2,8 @@
 # syslog.pl
 #
 # $Log: syslog.pl,v $
-# Revision 1.3  1999/04/29 22:51:48  millert
-# perl5.005_03 (stock)
+# Revision 1.4  2000/04/06 17:06:17  millert
+# perl-5.6.0 + local changes
 #
 # 
 # tom christiansen <tchrist@convex.com>
@@ -32,10 +32,12 @@
 
 package syslog;
 
+use warnings::register;
+
 $host = 'localhost' unless $host;	# set $syslog'host to change
 
-if ($] >= 5) {
-    warn "You should 'use Sys::Syslog' instead; continuing" # if $^W
+if ($] >= 5 && warnings::enabled()) {
+    warnings::warn "You should 'use Sys::Syslog' instead; continuing";
 } 
 
 require 'syslog.ph';

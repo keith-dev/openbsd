@@ -1,8 +1,9 @@
-/*	$OpenBSD: ipsec.h,v 1.11 1999/08/05 22:41:31 niklas Exp $	*/
-/*	$EOM: ipsec.h,v 1.38 1999/07/25 09:12:36 niklas Exp $	*/
+/*	$OpenBSD: ipsec.h,v 1.13 2000/02/01 02:46:18 niklas Exp $	*/
+/*	$EOM: ipsec.h,v 1.40 2000/01/31 22:33:46 niklas Exp $	*/
 
 /*
  * Copyright (c) 1998, 1999 Niklas Hallqvist.  All rights reserved.
+ * Copyright (c) 1999 Angelos D. Keromytis.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -59,6 +60,7 @@ struct ipsec_exch {
   struct ike_auth *ike_auth;
   struct group *group;
   u_int16_t prf_type;
+  u_int8_t  pfs;	/* 0 if no KEY_EXCH was proposed, 1 otherwise */
 
   /*
    * A copy of the initiator SA payload body for later computation of hashes.

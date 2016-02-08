@@ -1,4 +1,4 @@
-/*	$OpenBSD: main.c,v 1.14 1998/05/18 20:36:14 deraadt Exp $	*/
+/*	$OpenBSD: main.c,v 1.19 2000/05/01 18:30:52 deraadt Exp $	*/
 /*	$NetBSD: main.c,v 1.3 1995/03/21 09:04:44 cgd Exp $	*/
 
 /* main.c: This file contains the main control and user-interface routines
@@ -39,7 +39,7 @@ char *copyright =
 #if 0
 static char *rcsid = "@(#)main.c,v 1.1 1994/02/01 00:34:42 alm Exp";
 #else
-static char rcsid[] = "$OpenBSD: main.c,v 1.14 1998/05/18 20:36:14 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: main.c,v 1.19 2000/05/01 18:30:52 deraadt Exp $";
 #endif
 #endif /* not lint */
 
@@ -64,6 +64,7 @@ static char rcsid[] = "$OpenBSD: main.c,v 1.14 1998/05/18 20:36:14 deraadt Exp $
 #include <sys/wait.h>
 #include <ctype.h>
 #include <setjmp.h>
+#include <unistd.h>
 #include <pwd.h>
 
 #include "ed.h"
@@ -105,9 +106,6 @@ char *prompt;			/* command-line prompt */
 char *dps = "*";		/* default command-line prompt */
 
 char *usage = "usage: %s [-] [-sx] [-p string] [name]\n";
-
-extern int optind;
-extern char *optarg;
 
 /* ed: line editor */
 int
@@ -460,7 +458,7 @@ next_addr()
 
 int patlock = 0;	/* if set, pattern not freed by get_compiled_pattern() */
 
-long rows = 22;		/* scroll length: ws_row - 2 */
+int rows = 22;		/* scroll length: ws_row - 2 */
 
 /* exec_command: execute the next command in command buffer; return print
    request, if any */
@@ -960,7 +958,6 @@ get_filename()
 {
 	static char *file = NULL;
 	static int filesz = 0;
-
 	int n;
 
 	if (*ibufp != '\n') {
@@ -976,7 +973,7 @@ get_filename()
 				return NULL;
 			if (n) printf("%s\n", shcmd + 1);
 			return shcmd;
-		} else if (n - 1 > MAXPATHLEN) {
+		} else if (n >= MAXPATHLEN) {
 			strcpy(errmsg, "filename too long");
 			return  NULL;
 		}
@@ -987,7 +984,7 @@ get_filename()
 		return  NULL;
 	}
 #endif
-	REALLOC(file, filesz, MAXPATHLEN + 1, NULL);
+	REALLOC(file, filesz, MAXPATHLEN, NULL);
 	for (n = 0; *ibufp != '\n';)
 		file[n++] = *ibufp++;
 	file[n] = '\0';
@@ -1374,10 +1371,12 @@ strip_escapes(s)
 
 	int i = 0;
 
-	REALLOC(file, filesz, MAXPATHLEN + 1, NULL);
+	REALLOC(file, filesz, MAXPATHLEN, NULL);
 	/* assert: no trailing escape */
-	while ((file[i++] = (*s == '\\') ? *++s : *s) != '\0')
+	while ((file[i++] = (*s == '\\') ? *++s : *s) != '\0' && 
+	       i < MAXPATHLEN-1)
 		s++;
+	file[MAXPATHLEN-1] = '\0';
 	return file;
 }
 

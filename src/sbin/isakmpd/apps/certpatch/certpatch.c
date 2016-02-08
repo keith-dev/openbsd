@@ -1,8 +1,9 @@
-/*	$OpenBSD: certpatch.c,v 1.4 1999/10/01 14:08:54 niklas Exp $	*/
-/*	$EOM: certpatch.c,v 1.4 1999/09/28 21:26:47 angelos Exp $	*/
+/*	$OpenBSD: certpatch.c,v 1.8 2000/03/08 08:42:27 niklas Exp $	*/
+/*	$EOM: certpatch.c,v 1.7 2000/03/08 02:47:45 ho Exp $	*/
 
 /*
  * Copyright (c) 1999 Niels Provos.  All rights reserved.
+ * Copyright (c) 1999, 2000 Angelos D. Keromytis.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -57,9 +58,19 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 
-#include <ssl/rsa.h>
-#include <ssl/x509.h>
-#include <ssl/pem.h>
+#include "sysdep.h"
+
+#ifdef KAME
+#  ifdef CRYPTO
+#    include <openssl/rsa.h>
+#  endif
+#  include <openssl/x509.h>
+#  include <openssl/pem.h>
+#else
+#  include <ssl/rsa.h>
+#  include <ssl/x509.h>
+#  include <ssl/pem.h>
+#endif
 
 #include "conf.h"
 #include "log.h"
@@ -223,8 +234,8 @@ main (int argc, char **argv)
       else
         new_id[0] = 0x81; /* IDTYPE_UFQDN */
 
+      memcpy (new_id + 2, id, strlen(id));
       new_id[1] = strlen (id);
-      memcpy (data + 2, id, strlen(id));
 #if SSLEAY_VERSION_NUMBER >= 0x00904100L
       str.length = strlen (id) + 2;
       str.type = V_ASN1_OCTET_STRING;

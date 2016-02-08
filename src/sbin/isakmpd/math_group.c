@@ -1,9 +1,9 @@
-/*	$OpenBSD: math_group.c,v 1.9 1999/07/13 15:46:43 niklas Exp $	*/
-/*	$EOM: math_group.c,v 1.20 1999/07/13 15:43:21 niklas Exp $	*/
+/*	$OpenBSD: math_group.c,v 1.12 2000/04/07 22:04:44 niklas Exp $	*/
+/*	$EOM: math_group.c,v 1.25 2000/04/07 19:53:26 niklas Exp $	*/
 
 /*
  * Copyright (c) 1998 Niels Provos.  All rights reserved.
- * Copyright (c) 1999 Niklas Hallqvist.  All rights reserved.
+ * Copyright (c) 1999, 2000 Niklas Hallqvist.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -36,7 +36,6 @@
  */
 
 #include <sys/param.h>
-#include <gmp.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -47,13 +46,14 @@
 #include "math_2n.h"
 #include "math_ec2n.h"
 #include "math_group.h"
+#include "math_mp.h"
 
 /* We do not want to export these definitions.  */
 int modp_getlen (struct group *);
-void modp_getraw (struct group *, mpz_ptr, u_int8_t *);
-int modp_setraw (struct group *, mpz_ptr, u_int8_t *, int);
-int modp_setrandom (struct group *, mpz_ptr);
-int modp_operation (struct group *, mpz_ptr, mpz_ptr, mpz_ptr);
+void modp_getraw (struct group *, math_mp_t, u_int8_t *);
+int modp_setraw (struct group *, math_mp_t, u_int8_t *, int);
+int modp_setrandom (struct group *, math_mp_t);
+int modp_operation (struct group *, math_mp_t, math_mp_t, math_mp_t);
 
 int ec2n_getlen (struct group *);
 void ec2n_getraw (struct group *, ec2np_ptr, u_int8_t *);
@@ -68,9 +68,9 @@ struct ec2n_group {
 };
 
 struct modp_group {
-  mpz_t gen;				/* Generator */
-  mpz_t p;				/* Prime */
-  mpz_t a, b, c, d;
+  math_mp_t gen;			/* Generator */
+  math_mp_t p;				/* Prime */
+  math_mp_t a, b, c, d;
 };
 
 /*
@@ -123,6 +123,7 @@ struct modp_dscr oakley_modp[] =
   }
 };
 
+#ifdef USE_EC
 /* Describe preconfigured EC2N groups */
 
 /*
@@ -142,6 +143,7 @@ struct ec2n_dscr oakley_ec2n[] = {
     "0x00",
     "0x1ee9" },
 };
+#endif /* USE_EC */
 
 /* XXX I want to get rid of the casting here.  */
 struct group groups[] = {
@@ -161,6 +163,7 @@ struct group groups[] = {
     (int (*) (struct group *, void *))modp_setrandom,
     (int (*) (struct group *, void *, void *, void *))modp_operation
   },
+#ifdef USE_EC
   {
     EC2N, OAKLEY_GRP_3, 0, &oakley_ec2n[0], 0, 0, 0, 0, 0,
     (int (*) (struct group *))ec2n_getlen,
@@ -177,6 +180,7 @@ struct group groups[] = {
     (int (*) (struct group *, void *))ec2n_setrandom,
     (int (*) (struct group *, void *, void *, void *))ec2n_operation
   },
+#endif /* USE_EC */
   {
     MODP, OAKLEY_GRP_5, 0, &oakley_modp[2], 0, 0, 0, 0, 0,
     (int (*) (struct group *))modp_getlen,
@@ -200,9 +204,11 @@ group_init (void)
   for (i = sizeof (groups) / sizeof (groups[0]) - 1; i >= 0; i--)
     switch (groups[i].type)
       {
+#ifdef USE_EC
       case EC2N:		/* Initalize an Elliptic Curve over GF(2**n) */
 	ec2n_init (&groups[i]);
 	break;
+#endif
 
       case MODP:		/* Initalize an over GF(p) */
 	modp_init (&groups[i]);
@@ -237,9 +243,11 @@ group_get (int id)
 
   switch (clone->type)
     {
+#ifdef USE_EC
     case EC2N:
       new = ec2n_clone (new, clone);
       break;
+#endif
     case MODP:
       new = modp_clone (new, clone);
       break;
@@ -248,8 +256,8 @@ group_get (int id)
       free (new);
       return 0;
     }
-  log_debug (LOG_MISC, 70, "group_get: returning %p of group %d", new,
-	     new->id);
+  LOG_DBG ((LOG_MISC, 70, "group_get: returning %p of group %d", new,
+	    new->id));
   return new;
 }
 
@@ -258,9 +266,11 @@ group_free (struct group *grp)
 {
   switch (grp->type)
     {
+#ifdef USE_EC
     case EC2N:
       ec2n_free (grp);
       break;
+#endif
     case MODP:
       modp_free (grp);
       break;
@@ -287,13 +297,21 @@ modp_clone (struct group *new, struct group *clone)
   memcpy (new, clone, sizeof (struct group));
 
   new->group = new_grp;
+#if MP_FLAVOUR == MP_FLAVOUR_GMP
   mpz_init_set (new_grp->p, clone_grp->p);
-
   mpz_init_set (new_grp->gen, clone_grp->gen);
 
   mpz_init (new_grp->a);
   mpz_init (new_grp->b);
   mpz_init (new_grp->c);
+#elif MP_FLAVOUR == MP_FLAVOUR_OPENSSL
+  new_grp->p = BN_dup (clone_grp->p);
+  new_grp->gen = BN_dup (clone_grp->gen);
+
+  new_grp->a = BN_new ();
+  new_grp->b = BN_new ();
+  new_grp->c = BN_new ();
+#endif
 
   new->gen = new_grp->gen;
   new->a = new_grp->a;
@@ -308,11 +326,19 @@ modp_free (struct group *old)
 {
   struct modp_group *grp = old->group;
 
+#if MP_FLAVOUR == MP_FLAVOUR_GMP
   mpz_clear (grp->p);
   mpz_clear (grp->gen);
   mpz_clear (grp->a);
   mpz_clear (grp->b);
   mpz_clear (grp->c);
+#elif MP_FLAVOUR == MP_FLAVOUR_OPENSSL
+  BN_clear_free (grp->p);
+  BN_clear_free (grp->gen);
+  BN_clear_free (grp->a);
+  BN_clear_free (grp->b);
+  BN_clear_free (grp->c);
+#endif
 
   free (grp);
 }
@@ -329,13 +355,23 @@ modp_init (struct group *group)
 
   group->bits = dscr->bits;
 
+#if MP_FLAVOUR == MP_FLAVOUR_GMP
   mpz_init_set_str (grp->p, dscr->prime, 0);
-
   mpz_init_set_str (grp->gen, dscr->gen, 0);
 
   mpz_init (grp->a);
   mpz_init (grp->b);
   mpz_init (grp->c);
+#elif MP_FLAVOUR == MP_FLAVOUR_OPENSSL
+  grp->p = BN_new ();
+  BN_hex2bn (&grp->p, dscr->prime + 2);
+  grp->gen = BN_new ();
+  BN_hex2bn (&grp->gen, dscr->gen + 2);
+
+  grp->a = BN_new ();
+  grp->b = BN_new ();
+  grp->c = BN_new ();
+#endif
 
   group->gen = grp->gen;
   group->a = grp->a;
@@ -345,6 +381,7 @@ modp_init (struct group *group)
   group->group = grp;
 }
 
+#ifdef USE_EC
 struct group *
 ec2n_clone (struct group *new, struct group *clone)
 {
@@ -452,6 +489,7 @@ ec2n_init (struct group *group)
  fail:
   log_fatal ("ec2n_init: general failure");
 }
+#endif /* USE_EC */
 
 int
 modp_getlen (struct group *group)
@@ -462,47 +500,63 @@ modp_getlen (struct group *group)
 }
 
 void
-modp_getraw (struct group *grp, mpz_ptr v, u_int8_t *d)
+modp_getraw (struct group *grp, math_mp_t v, u_int8_t *d)
 {
   mpz_getraw (d, v, grp->getlen (grp));
 }
 
 int
-modp_setraw (struct group *grp, mpz_ptr d, u_int8_t *s, int l)
+modp_setraw (struct group *grp, math_mp_t d, u_int8_t *s, int l)
 {
   mpz_setraw (d, s, l);
   return 0;
 }
 
 int
-modp_setrandom (struct group *grp, mpz_ptr d)
+modp_setrandom (struct group *grp, math_mp_t d)
 {
   int i, l = grp->getlen (grp);
   u_int32_t tmp = 0;
 
+#if MP_FLAVOUR == MP_FLAVOUR_GMP
   mpz_set_ui (d, 0);
+#elif MP_FLAVOUR == MP_FLAVOUR_OPENSSL
+  BN_set_word (d, 0);
+#endif
 
   for (i = 0; i < l; i++)
     {
       if (i % 4)
 	tmp = sysdep_random();
 
+#if MP_FLAVOUR == MP_FLAVOUR_GMP
       mpz_mul_2exp (d, d, 8);
       mpz_add_ui (d, d, tmp & 0xFF);
+#elif MP_FLAVOUR == MP_FLAVOUR_OPENSSL
+      BN_lshift (d, d, 8);
+      BN_add_word (d, tmp & 0xFF);
+#endif
       tmp >>= 8;
     }
   return 0;
 }
 
 int
-modp_operation (struct group *group, mpz_ptr d, mpz_ptr a, mpz_ptr e)
+modp_operation (struct group *group, math_mp_t d, math_mp_t a, math_mp_t e)
 {
   struct modp_group *grp = (struct modp_group *)group->group;
 
+#if MP_FLAVOUR == MP_FLAVOUR_GMP
   mpz_powm (d, a, e, grp->p);
+#elif MP_FLAVOUR == MP_FLAVOUR_OPENSSL
+  BN_CTX *ctx = BN_CTX_new ();
+  BN_mod_exp (d, a, e, grp->p, ctx);
+  BN_CTX_free (ctx);
+#endif
   return 0;
 }
 
+#ifdef USE_EC
 int
 ec2n_getlen (struct group *group)
 {
@@ -590,3 +644,4 @@ ec2n_operation (struct group *grp, ec2np_ptr d, ec2np_ptr a, ec2np_ptr e)
 
   return ec2np_mul (d, a, ex, group->grp);
 }
+#endif /* USE_EC */

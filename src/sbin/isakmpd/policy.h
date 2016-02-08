@@ -1,5 +1,5 @@
-/*	$OpenBSD: policy.h,v 1.2 1999/08/26 22:28:33 niklas Exp $	*/
-/*	$EOM: policy.h,v 1.4 1999/08/26 11:36:47 niklas Exp $ */
+/*	$OpenBSD: policy.h,v 1.5 2000/05/02 14:36:43 niklas Exp $	*/
+/*	$EOM: policy.h,v 1.7 2000/04/29 15:07:16 angelos Exp $ */
 
 /*
  * Copyright (c) 1999 Angelos D. Keromytis.  All rights reserved.
@@ -37,10 +37,14 @@
 #ifndef _POLICY_H_
 #define _POLICY_H_
 
+#ifndef POLICY_FILE_DEFAULT
+#define POLICY_FILE_DEFAULT "/etc/isakmpd/isakmpd.policy"
+#endif /* POLICY_FILE_DEFAULT */
+
 #if defined (USE_KEYNOTE)
 #define LK(sym, args) sym args
 #define LKV(sym) sym
-#elif defined (HAVE_DLOPEN)
+#elif defined (HAVE_DLOPEN) && 0
 #define LK(sym, args) lk_ ## sym args
 #define LKV(sym) *lk_ ## sym
 #else
@@ -48,7 +52,7 @@
 #define LKV(sym) !!libkeynote called but no USE_KEYNOTE nor HAVE_DLOPEN!!
 #endif
 
-#if defined(HAVE_DLOPEN) && !defined(USE_KEYNOTE)
+#if defined(HAVE_DLOPEN) && !defined(USE_KEYNOTE) && 0
 struct keynote_deckey;
 
 extern void *libkeynote;
@@ -68,6 +72,8 @@ extern int (*lk_kn_init) (void);
 extern char **(*lk_kn_read_asserts) (char *, int, int *);
 extern int (*lk_kn_remove_authorizer) (int, char *);
 #endif /* HAVE_DLOPEN && !USE_KEYNOTE */
+
+extern int keynote_sessid;
 
 extern void policy_init (void);
 

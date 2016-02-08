@@ -1,6 +1,6 @@
 #!./perl
 
-# $RCSfile: split.t,v $$Revision: 1.3 $$Date: 1999/04/29 22:52:38 $
+# $RCSfile: split.t,v $$Revision: 1.4 $$Date: 2000/04/06 17:08:32 $
 
 print "1..25\n";
 
@@ -48,11 +48,9 @@ print $_ eq '1:2:3:4:5:6:::' ? "ok 10\n" : "not ok 10 $_\n";
 
 # Does assignment to a list imply split to one more field than that?
 if ($^O eq 'MSWin32') { $foo = `.\\perl -D1024 -e "(\$a,\$b) = split;" 2>&1` }
+elsif ($^O eq 'VMS')  { $foo = `./perl "-D1024" -e "(\$a,\$b) = split;" 2>&1` }
 else                  { $foo = `./perl -D1024 -e '(\$a,\$b) = split;' 2>&1` }
-if ($foo =~ /DCL-W-NOCOMD/) {
-  $foo = `\$ mcr sys\$disk:[]perl. "-D1024" -e "(\$a,\$b) = split;"`;
-}
-print $foo =~ /DEBUGGING/ || $foo =~ /SV = IV\(3\)/ ? "ok 11\n" : "not ok 11\n";
+print $foo =~ /DEBUGGING/ || $foo =~ /SV = (VOID|IV\(3\))/ ? "ok 11\n" : "not ok 11\n";
 
 # Can we say how many fields to split to when assigning to a list?
 ($a,$b) = split(' ','1 2 3 4 5 6', 2);

@@ -99,6 +99,8 @@ extern "C" {
 #define HTTPD_ROOT "/apache"
 #elif defined(BEOS)
 #define HTTPD_ROOT "/boot/home/apache"
+#elif defined(NETWARE)
+#define HTTPD_ROOT "sys:/apache"
 #else
 #define HTTPD_ROOT "/usr/local/apache"
 #endif
@@ -252,7 +254,7 @@ extern "C" {
 
 /* The default path for CGI scripts if none is currently set */
 #ifndef DEFAULT_PATH
-#define DEFAULT_PATH "/bin:/usr/bin:local/bin"
+#define DEFAULT_PATH "/bin:/usr/bin:/usr/ucb:/usr/bsd:/usr/local/bin"
 #endif
 
 /* The path to the shell interpreter, for parsed docs */
@@ -267,7 +269,7 @@ extern "C" {
 
 /* The path to the suExec wrapper, can be overridden in Configuration */
 #ifndef SUEXEC_BIN
-#define SUEXEC_BIN  HTTPD_ROOT "/sbin/suexec"
+#define SUEXEC_BIN  HTTPD_ROOT "/bin/suexec"
 #endif
 
 /* The default string lengths */
@@ -437,6 +439,12 @@ extern "C" {
 #endif /* default limit on number of request header fields */
 
 /*
+ * The default default character set name to add if AddDefaultCharset is 
+ * enabled.  Overridden with AddDefaultCharsetName.
+ */
+#define DEFAULT_ADD_DEFAULT_CHARSET_NAME "iso-8859-1"
+
+/*
  * The below defines the base string of the Server: header. Additional
  * tokens can be added via the ap_add_version_component() API call.
  *
@@ -449,7 +457,7 @@ extern "C" {
  * Example: "Apache/1.1.0 MrWidget/0.1-alpha" 
  */
 
-#define SERVER_BASEVERSION "Apache/1.3.9"	/* SEE COMMENTS ABOVE */
+#define SERVER_BASEVERSION "Apache/1.3.12"	/* SEE COMMENTS ABOVE */
 #define SERVER_VERSION  SERVER_BASEVERSION
 enum server_token_type {
     SrvTk_MIN,		/* eg: Apache/1.3.0 */
@@ -468,7 +476,7 @@ API_EXPORT(void) ap_add_config_define(const char *define);
  * Always increases along the same track as the source branch.
  * For example, Apache 1.4.2 would be '10402100', 2.5b7 would be '20500007'.
  */
-#define APACHE_RELEASE 10309100
+#define APACHE_RELEASE 10312100
 
 #define SERVER_PROTOCOL "HTTP/1.1"
 #ifndef SERVER_SUPPORT
@@ -630,6 +638,8 @@ API_EXPORT(void) ap_add_config_define(const char *define);
 #ifndef CHARSET_EBCDIC
 #define LF 10
 #define CR 13
+#define CRLF "\015\012"
+#define OS_ASC(c) (c)
 #else /* CHARSET_EBCDIC */
 #include "ebcdic.h"
 /* OSD_POSIX uses the EBCDIC charset. The transition ASCII->EBCDIC is done in
@@ -641,6 +651,8 @@ API_EXPORT(void) ap_add_config_define(const char *define);
  */
 #define CR '\r'
 #define LF '\n'
+#define CRLF "\r\n"
+#define OS_ASC(c) (os_toascii[c])
 #endif /* CHARSET_EBCDIC */
 
 /* Possible values for request_rec.read_body (set by handling module):
@@ -685,6 +697,12 @@ typedef struct listen_rec listen_rec;
 
 #include "util_uri.h"
 
+enum proxyreqtype {
+    NOT_PROXY=0,
+    STD_PROXY,
+    PROXY_PASS
+};
+
 struct request_rec {
 
     ap_pool *pool;
@@ -708,7 +726,7 @@ struct request_rec {
 
     char *the_request;		/* First line of request, so we can log it */
     int assbackwards;		/* HTTP/0.9, "simple" request */
-    int proxyreq;		/* A proxy request (calculated during
+    enum proxyreqtype proxyreq;/* A proxy request (calculated during
 				 * post_read_request or translate_name) */
     int header_only;		/* HEAD request, as opposed to GET */
     char *protocol;		/* Protocol, as given to us, or HTTP/0.9 */
@@ -972,7 +990,7 @@ struct listen_rec {
     listen_rec *next;
     struct sockaddr_in local_addr;	/* local IP address and port */
     int fd;
-    int used;			/* Only used during restart */
+    int used;			/* Only used during restart */        
 /* more stuff here, like which protocol is bound to the port */
 };
 
@@ -1034,6 +1052,7 @@ API_EXPORT(char *) ap_make_full_path(pool *a, const char *dir, const char *f);
 API_EXPORT(int) ap_is_matchexp(const char *str);
 API_EXPORT(int) ap_strcmp_match(const char *str, const char *exp);
 API_EXPORT(int) ap_strcasecmp_match(const char *str, const char *exp);
+API_EXPORT(char *) ap_strcasestr(const char *s1, const char *s2);
 API_EXPORT(char *) ap_pbase64decode(pool *p, const char *bufcoded);
 API_EXPORT(char *) ap_pbase64encode(pool *p, char *string); 
 API_EXPORT(char *) ap_uudecode(pool *p, const char *bufcoded);

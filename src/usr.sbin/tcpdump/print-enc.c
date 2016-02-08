@@ -21,7 +21,7 @@
 
 #ifndef lint
 static const char rcsid[] =
-    "@(#) $Header: /cvs/src/usr.sbin/tcpdump/print-enc.c,v 1.1 1998/06/11 00:01:25 provos Exp $ (LBL)";
+    "@(#) $Header: /cvs/src/usr.sbin/tcpdump/print-enc.c,v 1.5 2000/04/18 06:06:17 angelos Exp $ (LBL)";
 #endif
 
 #include <sys/param.h>
@@ -35,6 +35,7 @@ static const char rcsid[] =
 struct rtentry;
 #endif
 #include <net/if.h>
+#include <netinet/ip_ipsp.h>
 #include <net/if_enc.h>
 
 #include <netinet/in.h>
@@ -82,11 +83,15 @@ enc_if_print(u_char *user, const struct pcap_pkthdr *h,
 	snapend = p + caplen;
 	
 	hdr = (struct enchdr *)p;
-	printf("SPI 0x%08x (", ntohl(hdr->spi));
 	flags = hdr->flags;
+	if (flags == 0)
+	  printf("(unprotected): ");
+	else
+	  printf("(");
 	ENC_PRINT_TYPE(flags, M_AUTH, "authentic");
 	ENC_PRINT_TYPE(flags, M_CONF, "confidential");
-	ENC_PRINT_TYPE(flags, M_TUNNEL, "tunnel");
+	/* ENC_PRINT_TYPE(flags, M_TUNNEL, "tunnel"); */
+	printf("SPI 0x%08x: ", ntohl(hdr->spi));
 
 	length -= ENC_HDRLEN;
 	ip = (struct ip *)(p + ENC_HDRLEN);

@@ -1,4 +1,4 @@
-/*	$OpenBSD: edit.c,v 1.16 1999/08/06 20:41:06 deraadt Exp $	*/
+/*	$OpenBSD: edit.c,v 1.19 2000/03/05 19:20:37 aaron Exp $	*/
 /*	$NetBSD: edit.c,v 1.6 1996/05/15 21:50:45 jtc Exp $	*/
 
 /*-
@@ -38,7 +38,7 @@
 #if 0
 static char sccsid[] = "@(#)edit.c	8.3 (Berkeley) 4/2/94";
 #else
-static char rcsid[] = "$OpenBSD: edit.c,v 1.16 1999/08/06 20:41:06 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: edit.c,v 1.19 2000/03/05 19:20:37 aaron Exp $";
 #endif
 #endif /* not lint */
 
@@ -71,15 +71,13 @@ edit(tempname, pw)
 		pw_edit(1, tempname);
 		if (lstat(tempname, &end) == -1 || S_ISLNK(end.st_mode))
 			pw_error(tempname, 1, 1);
-		if (begin.st_mtime == end.st_mtime) {
+		if (begin.st_mtime == end.st_mtime &&
+		    begin.st_size == end.st_size) {
 			warnx("no changes made");
-			unlink(tempname);
 			pw_error(NULL, 0, 0);
 		}
-		if (verify(tempname, pw)) {
-			unlink(tempname);
+		if (verify(tempname, pw))
 			break;
-		}
 		pw_prompt();
 	}
 }
@@ -132,7 +130,7 @@ display(tempname, fd, pw)
 	p = strsep(&bp, ",");
 	(void)fprintf(fp, "Full Name: %s\n", p ? p : "");
 	p = strsep(&bp, ",");
-	(void)fprintf(fp, "Location: %s\n", p ? p : "");
+	(void)fprintf(fp, "Office Location: %s\n", p ? p : "");
 	p = strsep(&bp, ",");
 	(void)fprintf(fp, "Office Phone: %s\n", p ? p : "");
 	p = strsep(&bp, ",");

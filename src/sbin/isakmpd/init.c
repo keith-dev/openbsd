@@ -1,8 +1,9 @@
-/*	$OpenBSD: init.c,v 1.10 1999/08/26 22:30:58 niklas Exp $	*/
-/*	$EOM: init.c,v 1.18 1999/08/26 11:21:49 niklas Exp $	*/
+/*	$OpenBSD: init.c,v 1.15 2000/04/07 22:05:08 niklas Exp $	*/
+/*	$EOM: init.c,v 1.25 2000/03/30 14:27:24 ho Exp $	*/
 
 /*
- * Copyright (c) 1998, 1999 Niklas Hallqvist.  All rights reserved.
+ * Copyright (c) 1998, 1999, 2000 Niklas Hallqvist.  All rights reserved.
+ * Copyright (c) 2000 Angelos D. Keromytis.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -49,6 +50,7 @@
 #include "ipsec.h"
 #include "isakmp_doi.h"
 #include "libcrypto.h"
+#include "log.h"
 #include "math_group.h"
 #include "sa.h"
 #include "timer.h"
@@ -56,13 +58,14 @@
 #include "udp.h"
 #include "ui.h"
 
-#if defined (USE_KEYNOTE) || defined (HAVE_DLOPEN)
+#ifdef USE_POLICY
 #include "policy.h"
 #endif
 
 void
 init ()
 {
+  log_init ();
   app_init ();
   doi_init ();
   exchange_init ();
@@ -70,6 +73,9 @@ init ()
   ipsec_init ();
   isakmp_doi_init ();
   libcrypto_init ();
+
+  tzset ();
+
   timer_init ();
 
   /* The following group are depending on timer_init having run.  */
@@ -77,16 +83,16 @@ init ()
   connection_init ();
   cookie_init ();
 
-  /* Depends on conf_init having run */
+#ifdef USE_POLICY
+  /* policy_init depends on conf_init having run.  */
+  policy_init ();
+#endif
+
+  /* Depends on conf_init and policy_init having run */
   cert_init ();
 
   sa_init ();
   transport_init ();
   udp_init ();
   ui_init ();
-
-#if defined (USE_KEYNOTE) || defined (HAVE_DLOPEN)
-  /* policy_init depends on conf_init having run.  */
-  policy_init ();
-#endif
 }

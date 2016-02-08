@@ -46,7 +46,7 @@ files:
 	$(PERL) $(TOP)/util/files.pl Makefile.ssl >> $(TOP)/MINFO
 
 links:
-	@$(TOP)/util/point.sh Makefile.ssl Makefile
+	@$(SHELL) $(TOP)/util/point.sh Makefile.ssl Makefile
 	@$(PERL) $(TOP)/util/mklink.pl ../../include/openssl $(EXHEADER)
 	@$(PERL) $(TOP)/util/mklink.pl ../../test $(TEST)
 	@$(PERL) $(TOP)/util/mklink.pl ../../apps $(APPS)
@@ -82,4 +82,5 @@ stack.o: ../../include/openssl/bio.h ../../include/openssl/buffer.h
 stack.o: ../../include/openssl/crypto.h ../../include/openssl/e_os.h
 stack.o: ../../include/openssl/e_os2.h ../../include/openssl/err.h
 stack.o: ../../include/openssl/opensslconf.h ../../include/openssl/opensslv.h
-stack.o: ../../include/openssl/stack.h ../cryptlib.h
+stack.o: ../../include/openssl/safestack.h ../../include/openssl/stack.h
+stack.o: ../cryptlib.h

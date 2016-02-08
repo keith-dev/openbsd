@@ -1,7 +1,7 @@
-/*	$OpenBSD: perform.c,v 1.6 1999/10/09 20:35:45 beck Exp $	*/
+/*	$OpenBSD: perform.c,v 1.8 2000/04/28 21:08:16 espie Exp $	*/
 
 #ifndef lint
-static const char *rcsid = "$OpenBSD: perform.c,v 1.6 1999/10/09 20:35:45 beck Exp $";
+static const char *rcsid = "$OpenBSD: perform.c,v 1.8 2000/04/28 21:08:16 espie Exp $";
 #endif
 
 /*
@@ -24,6 +24,8 @@ static const char *rcsid = "$OpenBSD: perform.c,v 1.6 1999/10/09 20:35:45 beck E
  *
  */
 
+#include <sys/param.h>
+#include <sys/mount.h>
 #include <err.h>
 #include "lib.h"
 #include "delete.h"
@@ -69,6 +71,46 @@ trim_end(char *name)
    return 0;
 }
 
+/* remove all links to the package as well */
+static void
+delete_pkg_links(const char *dir, const char *pkg)
+{
+    int base;
+    int len;
+    DIR *d;
+    struct dirent *dp;
+    struct stat sb;
+    char name[FILENAME_MAX+1];
+
+    base = open(".", O_RDONLY);
+    if (base == -1)
+    	return;
+    if (chdir(dir) == -1) {
+    	close(base);
+	return;
+    }
+    d = opendir(".");
+    if (d == NULL) {
+    	fchdir(base);
+	close(base);
+	return;
+    }
+    while ((dp = readdir(d)) != NULL) {
+    	if (lstat(dp->d_name, &sb) == -1 || !S_ISLNK(sb.st_mode))
+	    continue;
+	len = readlink(dp->d_name, name, FILENAME_MAX);
+	if (len == -1)
+	    continue;
+	name[len] = 0;
+	if (strcmp(name, pkg))
+	    continue;
+	unlink(dp->d_name);
+    }
+    closedir(d);
+    fchdir(base);
+    close(base);
+}
+
 /* This is seriously ugly code following.  Written very fast! */
 static int
 pkg_do(char *pkg)
@@ -76,17 +118,17 @@ pkg_do(char *pkg)
     FILE *cfile;
     char home[FILENAME_MAX];
     plist_t *p;
-    char *tmp;
+    char *dbdir;
 
     /* Reset some state */
     if (Plist.head)
 	free_plist(&Plist);
 
-    tmp = getenv(PKG_DBDIR);
-    if (!tmp)
-	tmp = DEF_LOG_DIR;
+    dbdir = getenv(PKG_DBDIR);
+    if (!dbdir)
+	dbdir = DEF_LOG_DIR;
 try_again:
-    (void) snprintf(LogDir, sizeof(LogDir), "%s/%s", tmp, pkg);
+    (void) snprintf(LogDir, sizeof(LogDir), "%s/%s", dbdir, pkg);
     if (!fexists(LogDir)) {
 	if (trim_end(pkg))
 	    goto try_again;
@@ -134,6 +176,20 @@ try_again:
 	warnx("package '%s' doesn't have a prefix", pkg);
 	return 1;
     }
+    {
+	struct statfs buffer;
+
+	if (statfs(p->name, &buffer) == -1) {
+	    warnx("package '%s' prefix (%s) does not exist", pkg, p->name);
+	    return 1;
+	}
+	if (buffer.f_flags & MNT_RDONLY) {
+	    warnx("package'%s' mount point %s is read-only", pkg,
+		buffer.f_mntonname);
+	    return 1;
+	}
+    }
+
     setenv(PKG_PREFIX_VNAME, p->name, 1);
     if (fexists(REQUIRE_FNAME)) {
 	if (Verbose)
@@ -173,6 +229,7 @@ try_again:
 	    if (!Force)
 		return 1;
 	}
+	delete_pkg_links(dbdir, pkg);
     }
     for (p = Plist.head; p ; p = p->next) {
 	if (p->type != PLIST_PKGDEP)
@@ -180,8 +237,7 @@ try_again:
 	if (Verbose)
 	    printf("Attempting to remove dependency on package `%s'\n", p->name);
 	if (!Fake)
-	    findmatchingname((tmp = getenv(PKG_DBDIR)) ? tmp : DEF_LOG_DIR,
-			     p->name, undepend, pkg);
+	    findmatchingname(dbdir, p->name, undepend, pkg);
     }
     return 0;
 }

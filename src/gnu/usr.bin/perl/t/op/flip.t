@@ -1,6 +1,6 @@
 #!./perl
 
-# $RCSfile: flip.t,v $$Revision: 1.3 $$Date: 1999/04/29 22:52:35 $
+# $RCSfile: flip.t,v $$Revision: 1.4 $$Date: 2000/04/06 17:08:22 $
 
 print "1..9\n";
 

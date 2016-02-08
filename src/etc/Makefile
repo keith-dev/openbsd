@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.103 1999/10/08 11:33:51 espie Exp $
+#	$OpenBSD: Makefile,v 1.111 2000/04/29 22:04:55 deraadt Exp $
 
 TZDIR=		/usr/share/zoneinfo
 LOCALTIME=	US/Pacific
@@ -12,14 +12,15 @@ NOOBJ=	oobj
 # -rw-r--r--
 BINOWN= root
 BINGRP= wheel
-BIN1=	aliases bootptab changelist ccd.conf csh.cshrc csh.login csh.logout \
+BIN1=	bootptab changelist ccd.conf csh.cshrc csh.login csh.logout \
 	daily dhcpd.conf dhcpd.interfaces dm.conf exports ftpusers \
 	ftpchroot gettytab group hosts hosts.lpd ifaliases inetd.conf \
 	ipf.rules ksh.kshrc locate.rc man.conf monthly motd mrouted.conf \
 	myname ipnat.rules netstart networks newsyslog.conf passwd.conf \
 	phones printcap protocols rbootd.conf rc rc.conf rc.local \
-	rc.securelevel rc.shutdown remote rpc security services shells \
-	syslog.conf weekly etc.${MACHINE}/disktab dhclient.conf mailer.conf
+	rc.securelevel rc.shutdown remote rpc rtadvd.conf security services \
+	shells syslog.conf weekly etc.${MACHINE}/disktab dhclient.conf \
+	mailer.conf
 
 # -rw-rw-r--
 BIN2=	motd
@@ -82,6 +83,17 @@ distribution-etc-root-var: distrib-dirs
 		rm -f ${DESTDIR}/.cshrc ${DESTDIR}/.profile; \
 		ln ${DESTDIR}/root/.cshrc ${DESTDIR}/.cshrc; \
 		ln ${DESTDIR}/root/.profile ${DESTDIR}/.profile)
+	(cd skel; \
+		${INSTALL} -c -o root -g wheel -m 644 dot.cshrc \
+		    ${DESTDIR}/etc/skel/.cshrc; \
+		${INSTALL} -c -o root -g wheel -m 644 dot.login \
+		    ${DESTDIR}/etc/skel/.login; \
+		${INSTALL} -c -o root -g wheel -m 644 dot.mailrc \
+		    ${DESTDIR}/etc/skel/.mailrc; \
+		${INSTALL} -c -o root -g wheel -m 644 dot.profile \
+		    ${DESTDIR}/etc/skel/.profile; \
+		${INSTALL} -c -o root -g wheel -m 600 dot.rhosts \
+		    ${DESTDIR}/etc/skel/.rhosts)
 	(cd kerberosIV; \
 		${INSTALL} -c -o root -g wheel -m 644 README \
 		    ${DESTDIR}/etc/kerberosIV; \
@@ -161,36 +173,36 @@ distribution-etc-root-var: distrib-dirs
 		${DESTDIR}/var/at/at.deny
 	${INSTALL} -c -o root -g wheel -m 600 /dev/null \
 		${DESTDIR}/var/cron/log
-	${INSTALL} -c -o nobody -g ${BINGRP} -m 664 /dev/null \
+	${INSTALL} -c -o root -g wheel -m 444 /dev/null \
 		${DESTDIR}/var/db/locate.database
-	${INSTALL} -c -o ${BINOWN} -g ${BINGRP} -m 640 /dev/null \
+	${INSTALL} -c -o ${BINOWN} -g wheel -m 640 /dev/null \
 		${DESTDIR}/var/log/authlog
-	${INSTALL} -c -o ${BINOWN} -g ${BINGRP} -m 664 /dev/null \
+	${INSTALL} -c -o ${BINOWN} -g wheel -m 640 /dev/null \
 		${DESTDIR}/var/log/daemon
-	${INSTALL} -c -o ${BINOWN} -g ${BINGRP} -m 664 /dev/null \
+	${INSTALL} -c -o ${BINOWN} -g wheel -m 640 /dev/null \
 		${DESTDIR}/var/log/ftpd
-	${INSTALL} -c -o ${BINOWN} -g ${BINGRP} -m 664 /dev/null \
+	${INSTALL} -c -o ${BINOWN} -g wheel -m 640 /dev/null \
 		${DESTDIR}/var/log/ipflog
-	${INSTALL} -c -o ${BINOWN} -g ${BINGRP} -m 644 /dev/null \
+	${INSTALL} -c -o ${BINOWN} -g wheel -m 644 /dev/null \
 		${DESTDIR}/var/log/lastlog
-	${INSTALL} -c -o ${BINOWN} -g ${BINGRP} -m 664 /dev/null \
+	${INSTALL} -c -o ${BINOWN} -g wheel -m 640 /dev/null \
 		${DESTDIR}/var/log/lpd-errs
-	${INSTALL} -c -o ${BINOWN} -g ${BINGRP} -m 664 /dev/null \
+	${INSTALL} -c -o ${BINOWN} -g wheel -m 600 /dev/null \
 		${DESTDIR}/var/log/maillog
-	${INSTALL} -c -o ${BINOWN} -g ${BINGRP} -m 664 /dev/null \
+	${INSTALL} -c -o ${BINOWN} -g wheel -m 640 /dev/null \
 		${DESTDIR}/var/log/messages
-	${INSTALL} -c -o ${BINOWN} -g ${BINGRP} -m 600 /dev/null \
+	${INSTALL} -c -o ${BINOWN} -g wheel -m 600 /dev/null \
 		${DESTDIR}/var/log/secure
-	${INSTALL} -c -o ${BINOWN} -g ${BINGRP} -m 644 /dev/null \
+	${INSTALL} -c -o ${BINOWN} -g wheel -m 644 /dev/null \
 		${DESTDIR}/var/log/wtmp
-	${INSTALL} -c -o ${BINOWN} -g ${BINGRP} -m 664 /dev/null \
+	${INSTALL} -c -o ${BINOWN} -g wheel -m 640 /dev/null \
 		${DESTDIR}/var/log/xferlog
 	${INSTALL} -c -o daemon -g staff -m 664 /dev/null \
 		${DESTDIR}/var/msgs/bounds
 	${INSTALL} -c -o ${BINOWN} -g utmp -m 664 /dev/null \
 		${DESTDIR}/var/run/utmp
 .if (${MACHINE_ARCH} == "mips")
-	(cd etc.${MACHINE}; ${INSTALL} -c -o ${BINOWN} -g ${BINGRP} -m 444 \
+	(cd etc.${MACHINE}; ${INSTALL} -c -o ${BINOWN} -g wheel -m 444 \
 	    ld.so.conf ${DESTDIR}/etc)
 .endif
 	(cd ${DESTDIR}/dev; ./MAKEDEV all)
@@ -198,14 +210,17 @@ distribution-etc-root-var: distrib-dirs
 	(cd etc.vax; ${INSTALL} -c -o ${BINOWN} -g ${BINGRP} -m 444 ${PCS} \
 	    ${DESTDIR}/)
 .endif
-	(cd ../usr.sbin/sendmail/cf/cf; ${MAKE} distribution)
+	(cd ../gnu/usr.sbin/sendmail/cf/cf; ${MAKE} distribution)
 	(cd ../usr.sbin/ypserv/ypinit; ${MAKE} distribution)
 	(cd ../usr.bin/ssh; ${MAKE} distribution)
 	(cd ../usr.sbin/httpd; ${MAKE} -f Makefile.bsd-wrapper distribution)
 	(cd ../lib/libssl; ${MAKE} -f Makefile.bsd-wrapper distribution)
 	(cd ../gnu/usr.bin/lynx; ${MAKE} -f Makefile.bsd-wrapper distribution)
 	(cd ../usr.bin/mail; ${MAKE} distribution)
-	/usr/sbin/sendmail -C${DESTDIR}/etc/sendmail.cf -bi -O AliasFile=${DESTDIR}/etc/aliases
+	${INSTALL} -c -o root -g ${BINGRP} -m 644 aliases \
+	    ${DESTDIR}/etc/mail/aliases
+	/usr/libexec/sendmail/sendmail -C${DESTDIR}/etc/mail/sendmail.cf \
+	    -bi -O AliasFile=${DESTDIR}/etc/mail/aliases
 	${INSTALL} -c -o root -g wheel -m 600 root/root.mail \
 		${DESTDIR}/var/mail/root
 
@@ -234,9 +249,9 @@ release: distribution snap_pre snap_md
 	-cp ${DESTDIR}/snapshot/INSTALL.* ${RELEASEDIR}
 	-cp ${DESTDIR}/snapshot/*.fs ${DESTDIR}/snapshot/*.fs.gz ${RELEASEDIR}
 	-cd ${RELEASEDIR}; \
-		md5 bsd!(*.gz) *boot* *BOOT* INSTALL.* *.fs *.gz > MD5
+		md5 bsd!(*.gz) *boot* *BOOT* INSTALL.* *.fs *.gz *.tgz > MD5
 	-cd ${RELEASEDIR}; \
-		cksum bsd!(*.gz) *boot* *BOOT* INSTALL.* *.fs *.gz > CKSUM
+		cksum bsd!(*.gz) *boot* *BOOT* INSTALL.* *.fs *.gz *.tgz > CKSUM
 .if defined(MACHINE_HAS_TOOLS)
 	mkdir -p ${RELEASEDIR}/tools
 	cp ${DESTDIR}/snapshot/tools/* ${RELEASEDIR}/tools

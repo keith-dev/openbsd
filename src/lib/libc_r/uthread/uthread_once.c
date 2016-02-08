@@ -1,3 +1,4 @@
+/*	$OpenBSD: uthread_once.c,v 1.4 2000/01/06 07:20:01 d Exp $	*/
 /*
  * Copyright (c) 1995 John Birrell <jb@cimlogic.com.au>.
  * All rights reserved.
@@ -20,7 +21,7 @@
  * THIS SOFTWARE IS PROVIDED BY JOHN BIRRELL AND CONTRIBUTORS ``AS IS'' AND
  * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
  * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
- * ARE DISCLAIMED.  IN NO EVENT SHALL THE REGENTS OR CONTRIBUTORS BE LIABLE
+ * ARE DISCLAIMED.  IN NO EVENT SHALL THE AUTHOR OR CONTRIBUTORS BE LIABLE
  * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
  * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
  * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
@@ -29,7 +30,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $OpenBSD: uthread_once.c,v 1.2 1999/01/06 05:29:25 d Exp $
+ * $FreeBSD: uthread_once.c,v 1.3 1999/08/28 00:03:42 peter Exp $
  */
 #ifdef _THREAD_SAFE
 #include <pthread.h>
@@ -38,8 +39,11 @@
 int
 pthread_once(pthread_once_t * once_control, void (*init_routine) (void))
 {
+	int ret;
+
 	if (once_control->state == PTHREAD_NEEDS_INIT) {
-		pthread_mutex_lock(&(once_control->mutex));
+		if ((ret = pthread_mutex_lock(&(once_control->mutex))) != 0)
+			return ret;
 		if (once_control->state == PTHREAD_NEEDS_INIT) {
 			init_routine();
 			once_control->state = PTHREAD_DONE_INIT;

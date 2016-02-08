@@ -1,4 +1,4 @@
-/*	$OpenBSD: tip.c,v 1.9 1998/07/12 05:27:04 todd Exp $	*/
+/*	$OpenBSD: tip.c,v 1.11 2000/04/20 06:19:33 deraadt Exp $	*/
 /*	$NetBSD: tip.c,v 1.13 1997/04/20 00:03:05 mellon Exp $	*/
 
 /*
@@ -44,7 +44,7 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)tip.c	8.1 (Berkeley) 6/6/93";
 #endif
-static char rcsid[] = "$OpenBSD: tip.c,v 1.9 1998/07/12 05:27:04 todd Exp $";
+static char rcsid[] = "$OpenBSD: tip.c,v 1.11 2000/04/20 06:19:33 deraadt Exp $";
 #endif /* not lint */
 
 /*
@@ -207,6 +207,17 @@ cucommon:
 	 * From here down the code is shared with
 	 * the "cu" version of tip.
 	 */
+
+	i = fcntl(FD, F_GETFL);
+	if (i == -1) {
+		perror("fcntl");
+		cleanup();
+	}
+	i = fcntl(FD, F_SETFL, i & ~O_NONBLOCK);
+	if (i == -1) {
+		perror("fcntl");
+		cleanup();
+	}
 
 	tcgetattr(0, &defterm);
 	term = defterm;
@@ -384,7 +395,7 @@ tipin()
 			continue;
 		} else if (gch == '\r') {
 			bol = 1;
-			pwrite(FD, &gch, 1);
+			parwrite(FD, &gch, 1);
 			if (boolean(value(HALFDUPLEX)))
 				printf("\r\n");
 			continue;
@@ -393,7 +404,7 @@ tipin()
 		bol = any(gch, value(EOL));
 		if (boolean(value(RAISE)) && islower(gch))
 			gch = toupper(gch);
-		pwrite(FD, &gch, 1);
+		parwrite(FD, &gch, 1);
 		if (boolean(value(HALFDUPLEX)))
 			printf("%c", gch);
 	}
@@ -423,7 +434,7 @@ escape()
 		}
 	/* ESCAPE ESCAPE forces ESCAPE */
 	if (c != gch)
-		pwrite(FD, &c, 1);
+		parwrite(FD, &c, 1);
 	return (gch);
 }
 
@@ -574,7 +585,7 @@ static char partab[0200];
  * with the right parity and output it.
  */
 void
-pwrite(fd, buf, n)
+parwrite(fd, buf, n)
 	int fd;
 	char *buf;
 	register int n;

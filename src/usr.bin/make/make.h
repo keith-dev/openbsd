@@ -1,4 +1,4 @@
-/*	$OpenBSD: make.h,v 1.13 1998/12/05 00:06:28 espie Exp $	*/
+/*	$OpenBSD: make.h,v 1.18 2000/04/17 23:54:47 espie Exp $	*/
 /*	$NetBSD: make.h,v 1.15 1997/03/10 21:20:00 christos Exp $	*/
 
 /*
@@ -84,6 +84,8 @@
 #include "config.h"
 #include "buf.h"
 
+#define OUT_OF_DATE INT_MIN
+
 /*-
  * The structure for an individual graph node. Each node has several
  * pieces of data associated with it.
@@ -159,6 +161,8 @@ typedef struct GNode {
     Lst	    	    preds;  	/* Nodes that must be made before this one */
 
     Lst             context;   	/* The local variables */
+    unsigned long   lineno;	/* First line number of commands.  */
+    const char *    fname;	/* File name of commands.  */
     Lst             commands;  	/* Creation commands */
 
     struct _Suff    *suffix;	/* Suffix for the node (determined by
@@ -169,7 +173,6 @@ typedef struct GNode {
 /*
  * Manifest constants
  */
-#define NILGNODE	((GNode *) NIL)
 
 /*
  * The OP_ constants are used when parsing a dependency line as a way of
@@ -238,7 +241,7 @@ typedef struct GNode {
  * do if the desired node(s) is (are) not found. If the TARG_CREATE constant
  * is given, a new, empty node will be created for the target, placed in the
  * table of all targets and its address returned. If TARG_NOCREATE is given,
- * a NIL pointer will be returned.
+ * a NULL pointer will be returned.
  */
 #define TARG_CREATE	0x01	  /* create node if not found */
 #define TARG_NOCREATE	0x00	  /* don't create it */
@@ -374,17 +377,6 @@ extern int debug;
 
 #define	DEBUG(module)	(debug & CONCAT(DEBUG_,module))
 
-/*
- * Since there are so many, all functions that return non-integer values are
- * extracted by means of a sed script or two and stuck in the file "nonints.h"
- */
-#include "nonints.h"
-
-int Make_TimeStamp __P((GNode *, GNode *));
-Boolean Make_OODate __P((GNode *));
-int Make_HandleUse __P((GNode *, GNode *));
-void Make_Update __P((GNode *));
-void Make_DoAllVar __P((GNode *));
-Boolean Make_Run __P((Lst));
+#include "extern.h"
 
 #endif /* _MAKE_H_ */

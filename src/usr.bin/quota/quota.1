@@ -1,4 +1,5 @@
-.\"	$OpenBSD: quota.1,v 1.8 1999/10/17 20:24:35 aaron Exp $
+.\"	$OpenBSD: quota.1,v 1.11 2000/04/15 11:45:55 aaron Exp $
+.\"
 .\" Copyright (c) 1983, 1990, 1993
 .\"	The Regents of the University of California.  All rights reserved.
 .\"
@@ -84,12 +85,12 @@ and
 displays both the user quotas and the group quotas (for
 the user).
 .Pp
-Only the super-user may use the
+Only the superuser may use the
 .Fl u
 flag and the optional
 .Ar user
 argument to view the limits of other users.
-Non-super-users can use the
+Non-superusers can use the
 .Fl g
 flag and optional
 .Ar group
@@ -124,11 +125,6 @@ located at the filesystem root with group quotas
 .It Pa /etc/fstab
 to find filesystem names and locations
 .El
-.Sh HISTORY
-The
-.Nm quota
-command appeared in
-.Bx 4.2 .
 .Sh SEE ALSO
 .Xr quotactl 2 ,
 .Xr fstab 5 ,
@@ -137,3 +133,8 @@ command appeared in
 .Xr quotaon 8 ,
 .Xr repquota 8 ,
 .Xr rpc.rquotad 8
+.Sh HISTORY
+The
+.Nm quota
+command appeared in
+.Bx 4.2 .

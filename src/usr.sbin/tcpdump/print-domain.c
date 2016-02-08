@@ -21,7 +21,7 @@
 
 #ifndef lint
 static const char rcsid[] =
-    "@(#) $Header: /cvs/src/usr.sbin/tcpdump/print-domain.c,v 1.8 1999/09/16 20:58:46 brad Exp $ (LBL)";
+    "@(#) $Header: /cvs/src/usr.sbin/tcpdump/print-domain.c,v 1.10 2000/04/26 21:35:40 jakob Exp $ (LBL)";
 #endif
 
 #include <sys/param.h>
@@ -42,7 +42,6 @@ struct rtentry;
 #include <netinet/udp.h>
 #include <netinet/udp_var.h>
 #include <netinet/tcp.h>
-#include <netinet/tcpip.h>
 
 #ifdef NOERROR
 #undef NOERROR					/* Solaris sucks */
@@ -53,6 +52,7 @@ struct rtentry;
 #include <arpa/nameser.h>
 
 #include <stdio.h>
+#include <string.h>
 
 #include "interface.h"
 #include "addrtoname.h"
@@ -100,6 +100,27 @@ struct rtentry;
 #endif
 #ifndef T_LOC
 #define T_LOC		29		/* Location Information */
+#endif
+#ifndef T_NXT
+#define T_NXT		30		/* Next Valid Name in Zone */
+#endif
+#ifndef T_EID
+#define T_EID		31		/* Endpoint identifier */
+#endif
+#ifndef T_NIMLOC
+#define T_NIMLOC	32		/* Nimrod locator */
+#endif
+#ifndef T_SRV
+#define T_SRV		33		/* Server selection */
+#endif
+#ifndef T_ATMA
+#define T_ATMA		34		/* ATM Address */
+#endif
+#ifndef T_NAPTR
+#define T_NAPTR		35		/* Naming Authority PoinTeR */
+#endif
+#ifndef T_A6
+#define T_A6		38		/* IP6 address (ipngwg-dns-lookups) */
 #endif
 
 #ifndef T_UNSPEC
@@ -151,8 +172,11 @@ ns_nprint(register const u_char *cp, register const u_char *bp)
 	register u_int i;
 	register const u_char *rp;
 	register int compress;
+	int chars_processed;
+	int data_size = snapend - bp;
 
 	i = *cp++;
+	chars_processed = 1;
 	rp = cp + i;
 	if ((i & INDIR_MASK) == INDIR_MASK) {
 		rp = cp + 1;
@@ -164,13 +188,29 @@ ns_nprint(register const u_char *cp, register const u_char *bp)
 			if ((i & INDIR_MASK) == INDIR_MASK) {
 				cp = bp + (((i << 8) | *cp) & 0x3fff);
 				i = *cp++;
+				chars_processed++;
+
+				/*
+				 * If we've looked at every character in
+				 * the message, this pointer will make
+				 * us look at some character again,
+				 * which means we're looping.
+				 */
+				if (chars_processed >= data_size) {
+					fn_printn(cp, 6, "<LOOP>");
+					if (!compress)
+						rp += i + 1;
+					return (rp);
+				}
 				continue;
 			}
 			if (fn_printn(cp, i, snapend))
 				break;
 			cp += i;
+			chars_processed += i;
 			putchar('.');
 			i = *cp++;
+			chars_processed++;
 			if (!compress)
 				rp += i + 1;
 		}
@@ -219,7 +259,14 @@ static struct tok type2str[] = {
 	{ T_PX,		"PX" },
 	{ T_GPOS,	"GPOS" },
 	{ T_AAAA,	"AAAA" },
-	{ T_LOC ,	"LOC " },
+	{ T_LOC,	"LOC " },
+	{ T_NXT,	"NXT " },
+	{ T_EID,	"EID " },
+	{ T_NIMLOC,	"NIMLOC " },
+	{ T_SRV,	"SRV " },
+	{ T_ATMA,	"ATMA " },
+	{ T_NAPTR,	"NAPTR " },
+	{ T_A6,		"A6 " },
 #ifndef T_UINFO
 #define T_UINFO 100
 #endif
@@ -317,6 +364,9 @@ ns_rprint(register const u_char *cp, register const u_char *bp)
 	case T_NS:
 	case T_CNAME:
 	case T_PTR:
+#ifdef T_DNAME
+	case T_DNAME:	/*XXX not checked as there's no server support yet*/
+#endif
 		putchar(' ');
 		(void)ns_nprint(cp, bp);
 		break;
@@ -331,6 +381,25 @@ ns_rprint(register const u_char *cp, register const u_char *bp)
 		putchar(' ');
 		(void)ns_cprint(cp, bp);
 		break;
+
+#ifdef INET6
+	case T_AAAA:
+		printf(" %s", ip6addr_string(cp));
+		break;
+
+	case T_A6:	/*XXX not checked as there's no server support yet*/
+	    {
+		struct in6_addr a;
+		int pbyte;
+
+		pbyte = (*cp + 7) / 8;
+		memset(&a, 0, sizeof(a));
+		memcpy(&a, cp + 1, pbyte);
+		printf(" %u %s ", *cp, ip6addr_string(&a));
+		(void)ns_nprint(cp + 1 + pbyte, bp);
+		break;
+	    }
+#endif /*INET6*/
 
 	case T_UNSPECA:		/* One long string */
 	        printf(" %.*s", len, cp);

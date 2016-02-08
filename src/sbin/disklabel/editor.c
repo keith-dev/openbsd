@@ -1,7 +1,7 @@
-/*	$OpenBSD: editor.c,v 1.66 1999/07/14 23:16:26 deraadt Exp $	*/
+/*	$OpenBSD: editor.c,v 1.70 2000/05/05 19:10:35 millert Exp $	*/
 
 /*
- * Copyright (c) 1997-1999 Todd C. Miller <Todd.Miller@courtesan.com>
+ * Copyright (c) 1997-2000 Todd C. Miller <Todd.Miller@courtesan.com>
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -28,7 +28,7 @@
  */
 
 #ifndef lint
-static char rcsid[] = "$OpenBSD: editor.c,v 1.66 1999/07/14 23:16:26 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: editor.c,v 1.70 2000/05/05 19:10:35 millert Exp $";
 #endif /* not lint */
 
 #include <sys/types.h>
@@ -91,7 +91,7 @@ char	*getstring __P((char *, char *, char *));
 u_int32_t getuint __P((struct disklabel *, int, char *, char *, u_int32_t, u_int32_t, u_int32_t, int));
 int	has_overlap __P((struct disklabel *, u_int32_t *, int));
 void	make_contiguous __P((struct disklabel *));
-u_int32_t next_offset __P((struct disklabel *, struct partition *));
+u_int32_t next_offset __P((struct disklabel *, u_int32_t *));
 int	partition_cmp __P((const void *, const void *));
 struct partition **sort_partitions __P((struct disklabel *, u_int16_t *));
 void	getdisktype __P((struct disklabel *, char *, char *));
@@ -114,6 +114,7 @@ void	set_geometry __P((struct disklabel *, struct disklabel *, struct disklabel 
 
 static u_int32_t starting_sector;
 static u_int32_t ending_sector;
+static int expert;
 
 /* from disklabel.c */
 int	checklabel __P((struct disklabel *));
@@ -406,6 +407,12 @@ editor(lp, f, dev, fstabfile)
 				*lp = label;
 			break;
 
+		case 'X':
+			expert = !expert;
+			printf("%s expert mode\n", expert ? "Entering" :
+			    "Exiting");
+			break;
+
 		case 'x':
 			return(1);
 			break;
@@ -505,19 +512,12 @@ editor_add(lp, mp, freep, p)
 	if (partno >= lp->d_npartitions)
 		lp->d_npartitions = partno + 1;
 	memset(pp, 0, sizeof(*pp));
+	pp->p_size = *freep;
+	pp->p_offset = next_offset(lp, &pp->p_size);
 	pp->p_fstype = partno == 1 ? FS_SWAP : FS_BSDFFS;
 	pp->p_fsize = 1024;
 	pp->p_frag = 8;
 	pp->p_cpg = 16;
-	pp->p_size = *freep;
-	pp->p_offset = next_offset(lp, pp);	/* must be computed last */
-#if NUMBOOT == 1
-	/* Don't clobber boot blocks */
-	if (pp->p_offset == 0) {
-		pp->p_offset = lp->d_secpercyl;
-		pp->p_size -= lp->d_secpercyl;
-	}
-#endif
 	old_offset = pp->p_offset;
 	old_size = pp->p_size;
 
@@ -562,7 +562,7 @@ getoff1:
 		return;
 	}
 
-	if (pp->p_fstype == FS_BSDFFS) {
+	if (expert && pp->p_fstype == FS_BSDFFS) {
 		/* Get fsize, bsize, and cpg */
 		if (get_fsize(lp, partno) != 0 || get_bsize(lp, partno) != 0 ||
 		    get_cpg(lp, partno) != 0) {
@@ -707,7 +707,7 @@ getoff2:
 		return;
 	}
 
-	if (pp->p_fstype == FS_BSDFFS || pp->p_fstype == FS_UNUSED) {
+	if (expert && (pp->p_fstype == FS_BSDFFS || pp->p_fstype == FS_UNUSED)){
 		/* get fsize */
 		if (get_fsize(lp, partno) != 0) {
 			*pp = origpart;		/* undo changes */
@@ -841,9 +841,9 @@ editor_display(lp, mp, freep, unit)
  * Assumes there is a least one free sector left (returns 0 if not).
  */
 u_int32_t
-next_offset(lp, pp)
+next_offset(lp, sizep)
 	struct disklabel *lp;
-	struct partition *pp;
+	u_int32_t *sizep;
 {
 	struct partition **spp;
 	struct diskchunk *chunks;
@@ -853,14 +853,10 @@ next_offset(lp, pp)
 
 	/* Get a sorted list of the partitions */
 	if ((spp = sort_partitions(lp, &npartitions)) == NULL)
-		return(0);
+		return(starting_sector);
 	
 	new_offset = starting_sector;
 	for (i = 0; i < npartitions; i++ ) {
-		/* Skip the partition for which we are finding an offset */
-		if (pp == spp[i])
-			continue;
-
 		/*
 		 * Is new_offset inside this partition?  If so,
 		 * make it the next sector after the partition ends.
@@ -868,15 +864,15 @@ next_offset(lp, pp)
 		if (spp[i]->p_offset + spp[i]->p_size < ending_sector &&
 		    ((new_offset >= spp[i]->p_offset &&
 		    new_offset < spp[i]->p_offset + spp[i]->p_size) ||
-		    (new_offset + pp->p_size >= spp[i]->p_offset && new_offset
-		    + pp->p_size <= spp[i]->p_offset + spp[i]->p_size)))
+		    (new_offset + *sizep >= spp[i]->p_offset && new_offset
+		    + *sizep <= spp[i]->p_offset + spp[i]->p_size)))
 			new_offset = spp[i]->p_offset + spp[i]->p_size;
 	}
 
 	/* Did we find a suitable offset? */
 	for (good_offset = 1, i = 0; i < npartitions; i++ ) {
-		if (new_offset + pp->p_size >= spp[i]->p_offset &&
-		    new_offset + pp->p_size <= spp[i]->p_offset + spp[i]->p_size) {
+		if (new_offset + *sizep >= spp[i]->p_offset &&
+		    new_offset + *sizep <= spp[i]->p_offset + spp[i]->p_size) {
 			/* Nope */
 			good_offset = 0;
 			break;
@@ -894,7 +890,7 @@ next_offset(lp, pp)
 			}
 		}
 		/* XXX - should do something intelligent if new_size == 0 */
-		pp->p_size = new_size;
+		*sizep = new_size;
 	}
 
 	(void)free(spp);
@@ -1633,7 +1629,7 @@ free_chunks(lp)
 
 	/* If there are no partitions, it's all free. */
 	if (spp == NULL) {
-		chunks[0].start = 0;
+		chunks[0].start = starting_sector;
 		chunks[0].stop = ending_sector;
 		chunks[1].start = chunks[1].stop = 0;
 		return(chunks);
@@ -1642,7 +1638,7 @@ free_chunks(lp)
 	/* Find chunks of free space */
 	numchunks = 0;
 	if (spp && spp[0]->p_offset > 0) {
-		chunks[0].start = 0;
+		chunks[0].start = starting_sector;
 		chunks[0].stop = spp[0]->p_offset;
 		numchunks++;
 	}
@@ -1727,23 +1723,6 @@ find_bounds(lp, bios_lp)
 			}
 			if (new_end > ending_sector)
 				ending_sector = new_end;
-
-			/*
-			 * If we are honoring the fdisk partitions, we should
-			 * use the BIOS geometry unless ending_sector is beyond
-			 * the end of the BIOS geometry, in which case we know
-			 * the BIOS geometry is bogus.
-			 */
-			if (bios_lp != NULL && ending_sector <= bios_lp->d_secperunit) {
-				lp->d_secsize = bios_lp->d_secsize;
-				lp->d_nsectors = bios_lp->d_nsectors;
-				lp->d_ntracks = bios_lp->d_ntracks;
-				lp->d_ncylinders = bios_lp->d_ncylinders;
-				lp->d_secpercyl = bios_lp->d_secpercyl;
-				lp->d_secperunit = bios_lp->d_secperunit;
-				puts("Using BIOS geometry...\nYou can use the "
-				    "'g' command to change this.");
-			}
 		} else {
 			/* Don't trounce the MBR */
 			starting_sector = 63;
@@ -1753,6 +1732,11 @@ find_bounds(lp, bios_lp)
 		    "disk.\nYou can use the 'b' command to change this.\n",
 		    starting_sector, ending_sector);
 	}
+#elif (NUMBOOT == 1)
+	/* Boot blocks take up the first cylinder */
+	starting_sector = lp->d_secpercyl;
+	printf("\nReserving the first data cylinder for boot blocks.\n"
+	    "You can use the 'b' command to change this.\n");
 #endif
 }
 
@@ -1919,6 +1903,7 @@ editor_help(arg)
 		puts("\tw         - write label to disk.");
 		puts("\tq         - quit and save changes.");
 		puts("\tx         - exit without saving changes.");
+		puts("\tX         - toggle expert mode.");
 		puts("\t? [cmnd]  - this message or command specific help.");
 		puts(
 "Numeric parameters may use suffixes to indicate units:\n\t"
@@ -2057,7 +2042,7 @@ get_offset(lp, partno)
 #ifdef AAT0
 		else if (partno == 0 && ui != 0)
 			fprintf(stderr, "This architecture requires that "
-			    "partition 'a' start at sector 0.");
+			    "partition 'a' start at sector 0.\n");
 #endif
 		else
 			break;

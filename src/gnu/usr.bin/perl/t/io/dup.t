@@ -1,6 +1,6 @@
 #!./perl
 
-# $RCSfile: dup.t,v $$Revision: 1.3 $$Date: 1999/04/29 22:52:27 $
+# $RCSfile: dup.t,v $$Revision: 1.4 $$Date: 2000/04/06 17:08:00 $
 
 print "1..6\n";
 
@@ -37,3 +37,4 @@ else                  { system 'cat Io.dup' }
 unlink 'Io.dup';
 
 print STDOUT "ok 6\n";
+

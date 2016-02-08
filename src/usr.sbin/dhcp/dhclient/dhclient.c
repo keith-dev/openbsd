@@ -56,7 +56,7 @@
 
 #ifndef lint
 static char copyright[] =
-"$Id: dhclient.c,v 1.5 1999/06/06 19:09:05 deraadt Exp $ Copyright (c) 1995, 1996 The Internet Software Consortium.  All rights reserved.\n";
+"$Id: dhclient.c,v 1.7 1999/12/04 00:15:09 angelos Exp $ Copyright (c) 1995, 1996 The Internet Software Consortium.  All rights reserved.\n";
 #endif /* not lint */
 
 #include "dhcpd.h"
@@ -138,7 +138,7 @@ int main (argc, argv, envp)
  			error ("Insufficient memory to %s %s",
  			       "record interface", argv [i]);
  		    memset (tmp, 0, sizeof *tmp);
- 		    strcpy (tmp -> name, argv [i]);
+ 		    strlcpy (tmp -> name, argv [i], IFNAMSIZ);
  		    tmp -> next = interfaces;
  		    tmp -> flags = INTERFACE_REQUESTED;
 		    interfaces_requested = 1;
@@ -1926,15 +1926,13 @@ void script_write_params (ip, prefix, lease)
 						goto supersede;
 					}
 					dp = dbuf;
-					memcpy (dp,
+					memcpy (dp, lease -> options [i].data,
+						lease -> options [i].len);
+					memcpy (dp + lease -> options [i].len,
 						ip -> client -> 
 						config -> defaults [i].data,
 						ip -> client -> 
 						config -> defaults [i].len);
-					memcpy (dp + ip -> client -> 
-						config -> defaults [i].len,
-						lease -> options [i].data,
-						lease -> options [i].len);
 				}
 			} else {
 				dp = ip -> client ->

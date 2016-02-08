@@ -9,7 +9,7 @@
 */
 
 /* ====================================================================
- * Copyright (c) 1998-1999 Ralf S. Engelschall. All rights reserved.
+ * Copyright (c) 1998-2000 Ralf S. Engelschall. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -141,13 +141,15 @@ X509 *SSL_read_X509(FILE *fp, X509 **x509, int (*cb)())
     return rc;
 }
 
-static EVP_PKEY *d2i_PrivateKey_bio(BIO *bio, EVP_PKEY *key)
+#if SSL_LIBRARY_VERSION <= 0x00904100
+static EVP_PKEY *d2i_PrivateKey_bio(BIO *bio, EVP_PKEY **key)
 {
      return ((EVP_PKEY *)ASN1_d2i_bio(
              (char *(*)())EVP_PKEY_new, 
              (char *(*)())d2i_PrivateKey, 
              (bio), (unsigned char **)(key)));
 }
+#endif
 
 EVP_PKEY *SSL_read_PrivateKey(FILE *fp, EVP_PKEY **key, int (*cb)())
 {
@@ -279,14 +281,15 @@ char *SSL_make_ciphersuite(pool *p, SSL *ssl)
 
     if (ssl == NULL) 
         return "";
-    sk = SSL_get_ciphers(ssl);
-    if (sk == NULL) 
+    if ((sk = SSL_get_ciphers(ssl)) == NULL)
         return "";
     l = 0;
     for (i = 0; i < sk_SSL_CIPHER_num(sk); i++) {
         c = sk_SSL_CIPHER_value(sk, i);
-        l += strlen(c->name+2+1);
+        l += strlen(c->name)+2+1;
     }
+    if (l == 0)
+        return "";
     cpCipherSuite = (char *)ap_palloc(p, l+1);
     cp = cpCipherSuite;
     for (i = 0; i < sk_SSL_CIPHER_num(sk); i++) {
@@ -298,7 +301,7 @@ char *SSL_make_ciphersuite(pool *p, SSL *ssl)
         *cp++ = (c->valid == 1 ? '1' : '0');
         *cp++ = ':';
     }
-    *cp = NUL;
+    *(cp-1) = NUL;
     return cpCipherSuite;
 }
 
@@ -386,6 +389,65 @@ BOOL SSL_X509_getCN(pool *p, X509 *xs, char **cppCN)
     }
     return FALSE;
 }
+
+/*  _________________________________________________________________
+**
+**  Low-Level CA Certificate Loading
+**  _________________________________________________________________
+*/
+
+#ifdef SSL_EXPERIMENTAL
+
+BOOL SSL_load_CrtAndKeyInfo_file(pool *p, STACK_OF(X509_INFO) *sk, char *filename)
+{
+    BIO *in;
+
+    if ((in = BIO_new(BIO_s_file())) == NULL)
+        return FALSE;
+    if (BIO_read_filename(in, filename) <= 0) {
+        BIO_free(in);
+        return FALSE;
+    }
+    ERR_clear_error();
+#if SSL_LIBRARY_VERSION < 0x00904000
+    PEM_X509_INFO_read_bio(in, sk, NULL);
+#else
+    PEM_X509_INFO_read_bio(in, sk, NULL, NULL);
+#endif
+    BIO_free(in);
+    return TRUE;
+}
+
+BOOL SSL_load_CrtAndKeyInfo_path(pool *p, STACK_OF(X509_INFO) *sk, char *pathname)
+{
+    struct stat st;
+    DIR *dir;
+    pool *sp;
+    struct dirent *nextent;
+    char *fullname;
+    BOOL ok;
+
+    sp = ap_make_sub_pool(p);
+    if ((dir = ap_popendir(sp, pathname)) == NULL) {
+        ap_destroy_pool(sp);
+        return FALSE;
+    }
+    ok = FALSE;
+    while ((nextent = readdir(dir)) != NULL) {
+        fullname = ap_pstrcat(sp, pathname, "/", nextent->d_name, NULL);
+        if (stat(fullname, &st) != 0)
+            continue;
+        if (!S_ISREG(st.st_mode))
+            continue;
+        if (SSL_load_CrtAndKeyInfo_file(sp, sk, fullname))
+            ok = TRUE;
+    }
+    ap_pclosedir(p, dir);
+    ap_destroy_pool(sp);
+    return ok;
+}              
+
+#endif /* SSL_EXPERIMENTAL */
 
 /*  _________________________________________________________________
 **

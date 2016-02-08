@@ -1,4 +1,4 @@
-/*	$OpenBSD: str.c,v 1.7 1998/12/05 00:06:29 espie Exp $	*/
+/*	$OpenBSD: str.c,v 1.11 1999/12/09 18:18:24 espie Exp $	*/
 /*	$NetBSD: str.c,v 1.13 1996/11/06 17:59:23 christos Exp $	*/
 
 /*-
@@ -43,7 +43,7 @@
 #if 0
 static char     sccsid[] = "@(#)str.c	5.8 (Berkeley) 6/1/90";
 #else
-static char rcsid[] = "$OpenBSD: str.c,v 1.7 1998/12/05 00:06:29 espie Exp $";
+static char rcsid[] = "$OpenBSD: str.c,v 1.11 1999/12/09 18:18:24 espie Exp $";
 #endif
 #endif				/* not lint */
 
@@ -223,44 +223,6 @@ brk_string(str, store_argc, expand, buffer)
 done:	argv[argc] = (char *)NULL;
 	*store_argc = argc;
 	return(argv);
-}
-
-/*
- * Str_FindSubstring -- See if a string contains a particular substring.
- *
- * Results: If string contains substring, the return value is the location of
- * the first matching instance of substring in string.  If string doesn't
- * contain substring, the return value is NULL.  Matching is done on an exact
- * character-for-character basis with no wildcards or special characters.
- *
- * Side effects: None.
- */
-char *
-Str_FindSubstring(string, substring)
-	register char *string;		/* String to search. */
-	char *substring;		/* Substring to find in string */
-{
-	register char *a, *b;
-
-	/*
-	 * First scan quickly through the two strings looking for a single-
-	 * character match.  When it's found, then compare the rest of the
-	 * substring.
-	 */
-
-	for (b = substring; *string != 0; string += 1) {
-		if (*string != *b)
-			continue;
-		a = string;
-		for (;;) {
-			if (*b == 0)
-				return(string);
-			if (*a++ != *b++)
-				break;
-		}
-		b = substring;
-	}
-	return((char *) NULL);
 }
 
 /*
@@ -450,14 +412,27 @@ Str_SYSVSubst(buf, pat, src, len)
 
     if ((m = strchr(pat, '%')) != NULL) {
 	/* Copy the prefix */
-	Buf_AddBytes(buf, m - pat, (Byte *) pat);
+	Buf_AddInterval(buf, pat, m);
 	/* skip the % */
 	pat = m + 1;
     }
 
     /* Copy the pattern */
-    Buf_AddBytes(buf, len, (Byte *) src);
+    Buf_AddChars(buf, len, src);
 
     /* append the rest */
-    Buf_AddBytes(buf, strlen(pat), (Byte *) pat);
+    Buf_AddString(buf, pat);
+}
+
+char *
+interval_dup(begin, end)
+    const char *begin;
+    const char *end;
+{
+    char *s;
+
+    s = emalloc(end - begin + 1);
+    memcpy(s, begin, end - begin);
+    s[end-begin] = '\0';
+    return s;
 }

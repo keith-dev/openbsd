@@ -15,7 +15,7 @@
  * IMPLIED WARRANTIES, INCLUDING, WITHOUT LIMITATION, THE IMPLIED
  * WARRANTIES OF MERCHANTIBILITY AND FITNESS FOR A PARTICULAR PURPOSE.
  *
- * $Id: filter.h,v 1.7 1999/08/02 15:28:47 brian Exp $
+ * $OpenBSD: filter.h,v 1.10 2000/03/19 10:33:33 brian Exp $
  *
  *	TODO:
  */
@@ -29,6 +29,9 @@
 #define	P_OSPF	4
 #endif
 #define	P_IGMP	5
+#ifdef IPPROTO_GRE
+#define P_GRE   6
+#endif
 
 /* Operations - f_srcop, f_dstop */
 #define	OP_NONE	0
@@ -40,6 +43,8 @@
 #define T_ADDR		0
 #define T_MYADDR	1
 #define T_HISADDR	2
+#define T_DNS0		3
+#define T_DNS1		4
 
 /*
  * There's a struct filterent for each possible filter rule.  The
@@ -60,8 +65,8 @@ struct filterent {
   unsigned f_proto : 8;		/* Protocol: P_... */
   unsigned f_srcop : 2;		/* Source port operation: OP_... */
   unsigned f_dstop : 2;		/* Destination port operation: OP_... */
-  unsigned f_srctype : 2;	/* T_ value of src */
-  unsigned f_dsttype : 2;	/* T_ value of dst */
+  unsigned f_srctype : 3;	/* T_ value of src */
+  unsigned f_dsttype : 3;	/* T_ value of dst */
   unsigned f_estab : 1;		/* Check TCP ACK bit */
   unsigned f_syn : 1;		/* Check TCP SYN bit */
   unsigned f_finrst : 1;	/* Check TCP FIN/RST bits */
@@ -104,4 +109,4 @@ extern const char *filter_Proto2Nam(int);
 extern const char *filter_Op2Nam(int);
 extern struct in_addr bits2mask(int);
 extern void filter_AdjustAddr(struct filter *, struct in_addr *,
-                              struct in_addr *);
+                              struct in_addr *, struct in_addr [2]);

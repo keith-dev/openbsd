@@ -15,7 +15,7 @@
  * IMPLIED WARRANTIES, INCLUDING, WITHOUT LIMITATION, THE IMPLIED
  * WARRANTIES OF MERCHANTIBILITY AND FITNESS FOR A PARTICULAR PURPOSE.
  *
- * $Id: ipcp.h,v 1.6 1999/05/08 11:06:36 brian Exp $
+ * $OpenBSD: ipcp.h,v 1.9 2000/03/19 10:33:33 brian Exp $
  *
  *	TODO:
  */
@@ -40,6 +40,12 @@ struct in_range {
   struct in_addr ipaddr;
   struct in_addr mask;
   int width;
+};
+
+struct port_range {
+  unsigned nports;		/* How many ports */
+  unsigned maxports;		/* How many allocated (malloc) ports */
+  u_short *port;		/* The actual ports */
 };
 
 struct ipcp {
@@ -69,6 +75,10 @@ struct ipcp {
       struct in_addr nbns[2];		/* NetBIOS NS addresses offered */
     } ns;
 
+    struct {
+      struct port_range tcp, udp;	/* The range of urgent ports */
+    } urgent;
+
     struct fsm_retry fsm;	/* How often/frequently to resend requests */
   } cfg;
 
@@ -76,6 +86,14 @@ struct ipcp {
     struct slcompress cslc;		/* VJ state */
     struct slstat slstat;		/* VJ statistics */
   } vj;
+
+  struct {
+    unsigned resolver : 1;		/* Found resolv.conf ? */
+    unsigned writable : 1;		/* Can write resolv.conf ? */
+    struct in_addr dns[2];		/* Current DNS addresses */
+    char *resolv;			/* Contents of resolv.conf */
+    char *resolv_nons;			/* Contents of resolv.conf without ns */
+  } ns;
 
   struct sticky_route *route;		/* List of dynamic routes */
 
@@ -89,14 +107,17 @@ struct ipcp {
   struct in_addr my_ip;			/* IP address I'm willing to use */
   u_int32_t my_compproto;		/* VJ params I'm willing to use */
 
+  struct in_addr dns[2];		/* DNSs to REQ/ACK */
+
   u_int32_t peer_reject;		/* Request codes rejected by peer */
   u_int32_t my_reject;			/* Request codes I have rejected */
 
   struct pppThroughput throughput;	/* throughput statistics */
-  struct mqueue Queue[PRI_FAST + 1];	/* Output packet queues */
+  struct mqueue Queue[3];		/* Output packet queues */
 };
 
 #define fsm2ipcp(fp) (fp->proto == PROTO_IPCP ? (struct ipcp *)fp : NULL)
+#define IPCP_QUEUES(ipcp) (sizeof ipcp->Queue / sizeof ipcp->Queue[0])
 
 struct bundle;
 struct link;
@@ -104,6 +125,7 @@ struct cmdargs;
 
 extern void ipcp_Init(struct ipcp *, struct bundle *, struct link *,
                       const struct fsm_parent *);
+extern void ipcp_Destroy(struct ipcp *);
 extern void ipcp_Setup(struct ipcp *, u_int32_t);
 extern void ipcp_SetLink(struct ipcp *, struct link *);
 
@@ -116,4 +138,28 @@ extern int  ipcp_UseHisaddr(struct bundle *, const char *, int);
 extern int  ipcp_vjset(struct cmdargs const *);
 extern void ipcp_CleanInterface(struct ipcp *);
 extern int  ipcp_InterfaceUp(struct ipcp *);
+extern int  ipcp_IsUrgentPort(struct port_range *, u_short, u_short);
+extern void ipcp_AddUrgentPort(struct port_range *, u_short);
+extern void ipcp_RemoveUrgentPort(struct port_range *, u_short);
+extern void ipcp_ClearUrgentPorts(struct port_range *);
 extern struct in_addr addr2mask(struct in_addr);
+extern int ipcp_WriteDNS(struct ipcp *);
+extern void ipcp_RestoreDNS(struct ipcp *);
+extern void ipcp_LoadDNS(struct ipcp *);
+
+#define ipcp_IsUrgentTcpPort(ipcp, p1, p2) \
+          ipcp_IsUrgentPort(&(ipcp)->cfg.urgent.tcp, p1, p2)
+#define ipcp_IsUrgentUdpPort(ipcp, p1, p2) \
+          ipcp_IsUrgentPort(&(ipcp)->cfg.urgent.udp, p1, p2)
+#define ipcp_AddUrgentTcpPort(ipcp, p) \
+          ipcp_AddUrgentPort(&(ipcp)->cfg.urgent.tcp, p)
+#define ipcp_AddUrgentUdpPort(ipcp, p) \
+          ipcp_AddUrgentPort(&(ipcp)->cfg.urgent.udp, p)
+#define ipcp_RemoveUrgentTcpPort(ipcp, p) \
+          ipcp_RemoveUrgentPort(&(ipcp)->cfg.urgent.tcp, p)
+#define ipcp_RemoveUrgentUdpPort(ipcp, p) \
+          ipcp_RemoveUrgentPort(&(ipcp)->cfg.urgent.udp, p)
+#define ipcp_ClearUrgentTcpPorts(ipcp) \
+          ipcp_ClearUrgentPorts(&(ipcp)->cfg.urgent.tcp)
+#define ipcp_ClearUrgentUdpPorts(ipcp) \
+          ipcp_ClearUrgentPorts(&(ipcp)->cfg.urgent.udp)

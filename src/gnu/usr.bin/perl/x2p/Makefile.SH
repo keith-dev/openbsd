@@ -1,4 +1,4 @@
-case $CONFIG in
+case $CONFIGDOTSH in
 '')
 	if test -f config.sh; then TOP=.;
 	elif test -f ../config.sh; then TOP=..;
@@ -27,11 +27,11 @@ esac
 echo "Extracting x2p/Makefile (with variable substitutions)"
 rm -f Makefile
 cat >Makefile <<!GROK!THIS!
-# $RCSfile: Makefile.SH,v $$Revision: 1.5 $$Date: 1999/04/29 22:52:56 $
+# $RCSfile: Makefile.SH,v $$Revision: 1.6 $$Date: 2000/04/06 17:09:13 $
 #
 # $Log: Makefile.SH,v $
-# Revision 1.5  1999/04/29 22:52:56  millert
-# perl5.005_03 (stock)
+# Revision 1.6  2000/04/06 17:09:13  millert
+# perl-5.6.0 + local changes
 #
 
 CC = $cc
@@ -88,6 +88,7 @@ pl = find2perl.PL s2p.PL
 plextract = find2perl s2p
 plexe = find2perl.exe s2p.exe
 plc   = find2perl.c s2p.c
+plm   = a2p.loadmap
 
 addedbyconf = $(shextract) $(plextract)
 
@@ -122,6 +123,8 @@ run_byacc:	FORCE
 	rm -f a2p.c
 	mv y.tab.c a2p.c
 
+FORCE:
+
 # We don't want to regenerate a2p.c, but it might appear out-of-date
 # after a patch is applied or a new distribution is made.
 a2p.c: a2p.y
@@ -132,7 +135,7 @@ a2p$(OBJ_EXT): a2p.c a2py.c a2p.h EXTERN.h util.h INTERN.h \
 	$(CCCMD) $(LARGE) a2p.c
 
 clean:
-	rm -f a2p *$(OBJ_EXT) $(plexe) $(plc)
+	rm -f a2p *$(OBJ_EXT) $(plexe) $(plc) $(plm)
 
 realclean: clean
 	rm -f *.orig core $(addedbyconf) all malloc.c

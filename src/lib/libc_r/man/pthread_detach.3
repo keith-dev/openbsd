@@ -1,3 +1,4 @@
+.\" $OpenBSD: pthread_detach.3,v 1.7 2000/03/04 15:39:43 aaron Exp $
 .\" Copyright (c) 1996-1998 John Birrell <jb@cimlogic.com.au>.
 .\" All rights reserved.
 .\"
@@ -28,6 +29,8 @@
 .\" OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
 .\" SUCH DAMAGE.
 .\"
+.\" $FreeBSD: pthread_detach.3,v 1.5 1999/08/28 00:03:05 peter Exp $
+.\"
 .Dd April 4, 1996
 .Dt PTHREAD_DETACH 3
 .Os
@@ -56,7 +59,9 @@ If successful,  the
 .Fn pthread_detach
 function will return zero. Otherwise an error number will be returned to
 indicate the error. Note that the function does not change the value
-of errno as it did for some drafts of the standard. These early drafts
+of
+.Va errno
+as it did for some drafts of the standard. These early drafts
 also passed a pointer to pthread_t as the argument. Beware!
 .Sh ERRORS
 .Fn pthread_detach

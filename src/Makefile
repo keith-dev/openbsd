@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.50 1999/09/27 04:04:52 deraadt Exp $
+#	$OpenBSD: Makefile,v 1.56 2000/04/21 00:10:40 millert Exp $
 
 #
 # For more information on building in tricky environments, please see
@@ -83,14 +83,16 @@ build:
 	    ${SUDO} ${MAKE} install)
 	(cd ${.CURDIR}/gnu/lib && ${MAKE} depend && ${MAKE} && \
 	    ${SUDO} ${MAKE} install)
-.if (${MACHINE_ARCH} == "mips")
-	ldconfig
-.endif
 .if (${KERBEROS} == "yes")
-	(cd ${.CURDIR}/kerberosIV && ${MAKE} SUDO=${SUDO} build)
-.if (${MACHINE_ARCH} == "mips")
-	ldconfig
+	(cd ${.CURDIR}/kerberosIV/lib && ${MAKE} depend && ${MAKE} && \
+	    ${SUDO} ${MAKE} install)
 .endif
+	(cd ${.CURDIR}/gnu/usr.bin/perl && \
+	    ${MAKE} -f Makefile.bsd-wrapper depend && \
+	    ${MAKE} -f Makefile.bsd-wrapper perl.lib && \
+	    ${SUDO} ${MAKE} -f Makefile.bsd-wrapper install.lib)
+.if (${MACHINE_ARCH} == "mips")
+	ldconfig -R
 .endif
 	${MAKE} depend && ${MAKE} && ${SUDO} ${MAKE} install
 
@@ -169,7 +171,7 @@ cross-binutils-new:	cross-dirs
 	    --target `cat ${CROSSDIR}/TARGET_CANON` && \
 	    ${MAKE} CFLAGS=${CFLAGS} && ${MAKE} DESTDIR=${CROSSDIR} install)
 	${INSTALL} -c -o ${BINOWN} -g ${BINGRP} -m 755 \
-	    ${.CURDIR}/usr.bin/lorder/lorder.sh.gnm \
+	    ${.CURDIR}/usr.bin/lorder/lorder.sh \
 	    ${CROSSDIR}/usr/bin/`cat ${CROSSDIR}/TARGET_CANON`-lorder
 	ln -sf ${CROSSDIR}/usr/bin/`cat ${CROSSDIR}/TARGET_CANON`-as \
 	    ${CROSSDIR}/usr/bin/as
@@ -284,12 +286,12 @@ cross-nm:	cross-dirs
 	    ${CROSSDIR}/usr/`cat ${CROSSDIR}/TARGET_CANON`/bin/nm
 
 cross-gcc:	cross-dirs
-	cd ${.CURDIR}/gnu/usr.bin/gcc; \
+	cd ${.CURDIR}/gnu/egcs/gcc; \
 	    BSDOBJDIR=${CROSSDIR}/usr/obj BSDSRCDIR=${.CURDIR} \
 	    MAKEOBJDIR=obj.${MACHINE}.${TARGET} \
 	    ${MAKE} -f Makefile.bsd-wrapper obj
-	(cd ${CROSSDIR}/usr/obj/gnu/usr.bin/gcc; \
-	    /bin/sh ${.CURDIR}/gnu/usr.bin/gcc/configure \
+	(cd ${CROSSDIR}/usr/obj/gnu/egcs/gcc; \
+	    /bin/sh ${.CURDIR}/gnu/egcs/gcc/configure \
 	    --prefix ${CROSSDIR}/usr \
 	    --target `cat ${CROSSDIR}/TARGET_CANON` && \
 	    ${MAKE} BISON=yacc LANGUAGES=c LDFLAGS=${LDSTATIC} \

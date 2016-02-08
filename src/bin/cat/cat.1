@@ -1,4 +1,4 @@
-.\"	$OpenBSD: cat.1,v 1.15 1999/10/17 19:59:45 aaron Exp $
+.\"	$OpenBSD: cat.1,v 1.18 2000/03/17 18:15:11 aaron Exp $
 .\"	$NetBSD: cat.1,v 1.12 1995/09/27 05:38:55 cgd Exp $
 .\"
 .\" Copyright (c) 1989, 1990, 1993
@@ -69,14 +69,16 @@ Number the output lines, starting at 1.
 .It Fl b
 Implies the
 .Fl n
-option but doesn't number blank lines.
+option but doesn't count blank lines.
 .It Fl v
 Displays non-printing characters so they are visible.
 Control characters print as
 .Ql ^X
-for control-X. The only exception is the tab character, control-I (see the
+for control-X.
+The only exception is the tab character, control-I (see the
 .Fl t
-option). The
+option).
+The
 .Tn DEL
 character (octal 0177) prints as
 .Ql ^? .
@@ -99,9 +101,7 @@ option and also prints tab characters as
 Squeeze multiple adjacent empty lines, causing the output to be
 single spaced.
 .It Fl u
-The
-.Fl u
-option guarantees that the output is unbuffered (see
+The output is guaranteed to be unbuffered (see
 .Xr setbuf 3 ) .
 .El
 .Pp
@@ -131,11 +131,9 @@ to the file
 .Ar file3 ,
 truncating
 .Ar file3
-if it already exists. See the manual page for your shell
-.Po
-i.e.,
-.Xr sh 1
-.Pc
+if it already exists.
+See the manual page for your shell (i.e.,
+.Xr sh 1 )
 for more information on redirection.
 .Pp
 The command:

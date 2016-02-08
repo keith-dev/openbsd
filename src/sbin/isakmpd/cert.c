@@ -1,9 +1,9 @@
-/*	$OpenBSD: cert.c,v 1.11 1999/08/26 22:30:46 niklas Exp $	*/
-/*	$EOM: cert.c,v 1.12 1999/08/12 22:34:26 niklas Exp $	*/
+/*	$OpenBSD: cert.c,v 1.14 2000/04/07 22:07:07 niklas Exp $	*/
+/*	$EOM: cert.c,v 1.16 2000/03/14 19:43:31 ho Exp $	*/
 
 /*
  * Copyright (c) 1998, 1999 Niels Provos.  All rights reserved.
- * Copyright (c) 1999 Niklas Hallqvist.  All rights reserved.
+ * Copyright (c) 1999, 2000 Niklas Hallqvist.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -40,17 +40,23 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include <ssl/ssl.h>
-
 #include "sysdep.h"
 
-#include "cert.h"
 #include "isakmp_num.h"
 #include "log.h"
+#include "cert.h"
+
+#ifdef USE_X509
 #include "x509.h"
+#ifdef KAME
+#  include <openssl/ssl.h>
+#else
+#  include <ssl/ssl.h>
+#endif
+#endif
 
 struct cert_handler cert_handler[] = {
-#if defined (USE_LIBCRYPTO) || defined (USE_DLOPEN)
+#ifdef USE_X509
   {
     ISAKMP_CERTENC_X509_SIG, 
     x509_cert_init, x509_cert_get, x509_cert_validate, 

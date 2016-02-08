@@ -1,4 +1,4 @@
-/* $RCSfile: walk.c,v $$Revision: 1.3 $$Date: 1999/04/29 22:52:59 $
+/* $RCSfile: walk.c,v $$Revision: 1.4 $$Date: 2000/04/06 17:09:18 $
  *
  *    Copyright (c) 1991-1997, Larry Wall
  *
@@ -6,8 +6,8 @@
  *    License or the Artistic License, as specified in the README file.
  *
  * $Log: walk.c,v $
- * Revision 1.3  1999/04/29 22:52:59  millert
- * perl5.005_03 (stock)
+ * Revision 1.4  2000/04/06 17:09:18  millert
+ * perl-5.6.0 + local changes
  *
  */
 
@@ -29,14 +29,14 @@ char *limit;
 STR *subs;
 STR *curargs = Nullstr;
 
-static void addsemi _(( STR *str ));
-static void emit_split _(( STR *str, int level ));
-static void fixtab _(( STR *str, int lvl ));
-static void numericize _(( int node ));
-static void tab _(( STR *str, int lvl ));
+static void addsemi ( STR *str );
+static void emit_split ( STR *str, int level );
+static void fixtab ( STR *str, int lvl );
+static void numericize ( int node );
+static void tab ( STR *str, int lvl );
 
-int prewalk _(( int numit, int level, int node, int *numericptr ));
-STR * walk _(( int useval, int level, int node, int *numericptr, int minprec ));
+int prewalk ( int numit, int level, int node, int *numericptr );
+STR * walk ( int useval, int level, int node, int *numericptr, int minprec );
 
 
 STR *
@@ -866,7 +866,7 @@ sub Pick {\n\
 	    str_scat(tmp3str,tmp2str);
 	    str_cat(tmp3str,").'\"') =~ s/&/\\$&/g, ");
 	    str_set(tmp2str,"eval $s_");
-	    s = (*s == 'g' ? "ge" : "e");
+	    s = (char*)(*s == 'g' ? "ge" : "e");
 	    i++;
 	}
 	type = ops[ops[node+1].ival].ival;
@@ -1222,7 +1222,7 @@ sub Pick {\n\
 	}
 	tmpstr = walk(1+(type==OPRINT),level,ops[node+1].ival,&numarg,P_MIN);
 	if (!*tmpstr->str_ptr && lval_field) {
-	    t = saw_OFS ? "$," : "' '";
+	    t = (char*)(saw_OFS ? "$," : "' '");
 	    if (split_to_array) {
 		sprintf(tokenbuf,"join(%s,@Fld)",t);
 		str_cat(tmpstr,tokenbuf);
@@ -1295,10 +1295,10 @@ sub Pick {\n\
 	if (len > 0)
 	    tmpstr = walk(1,level,ops[node+1].ival,&numarg,P_MIN);
 	else
-	    tmpstr = str_new(0);;
+	    tmpstr = str_new(0);
 	if (!tmpstr->str_ptr || !*tmpstr->str_ptr) {
 	    if (lval_field) {
-		t = saw_OFS ? "$," : "' '";
+		t = (char*)(saw_OFS ? "$," : "' '");
 		if (split_to_array) {
 		    sprintf(tokenbuf,"join(%s,@Fld)",t);
 		    str_cat(tmpstr,tokenbuf);
@@ -1420,7 +1420,7 @@ sub Pick {\n\
 	str_scat(str,fstr=walk(1,level,ops[node+1].ival,&numarg,P_MIN));
 	str_free(fstr);
 	if (str->str_ptr[str->str_cur - 1] == '\n')
-	    --str->str_cur;;
+	    --str->str_cur;
 	str_cat(str," while (");
 	str_scat(str,fstr=walk(0,level,ops[node+2].ival,&numarg,P_MIN));
 	str_free(fstr);

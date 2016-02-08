@@ -1,4 +1,4 @@
-.\"	$OpenBSD: hier.7,v 1.14 1999/10/07 20:50:48 aaron Exp $
+.\"	$OpenBSD: hier.7,v 1.20 2000/05/01 21:02:36 millert Exp $
 .\"	$NetBSD: hier.7,v 1.7 1994/11/30 19:07:10 jtc Exp $
 .\"
 .\" Copyright (c) 1990, 1993
@@ -46,7 +46,9 @@ A sketch of the filesystem hierarchy.
 .It Li /
 Root directory.
 .It Li /altroot
-Alternate (backup) location for the root user's home directory.
+Alternate (backup) location for the root
+.Pq Sq /
+filesystem.
 .It Li /bin/
 User utilities fundamental to both single and multi-user environments.
 These programs are statically compiled and therefore do not depend on any
@@ -88,18 +90,22 @@ Backup disklabels (see
 .It Li kerberosIV/
 Configuration files for the Kerberos version IV system (see
 .Xr kerberos 1 ) .
+.It Li mail/
+.Xr sendmail 8
+configuration files (including
+.Xr aliases 5 ).
 .It Li mtree/
 .Xr mtree
 configuration files (see
 .Xr mtree 8 ) .
-.It Li namedb/
-.Xr named
-configuration files (see
-.Xr named 8 ) .
 .It Li ppp/
 .Xr pppd
 configuration files (see
 .Xr pppd 8 ) .
+.It Li skel/
+Example
+.Dq \&.
+(dot) files for new accounts.
 .It Li uucp/
 .Xr uucp
 configuration files (see
@@ -111,7 +117,7 @@ Default location for user home directories.
 Empty directory commonly used by
 system administrators as a temporary mount point.
 .It Li /root/
-Default home directory for the super-user.
+Default home directory for the superuser.
 .It Li /sbin/
 System programs and administration utilities
 fundamental to both single and multi-user environments.
@@ -155,6 +161,9 @@ C include files for IMP protocols (see
 .It Li netinet/
 C include files for Internet standard protocols (see
 .Xr inet 4 ) .
+.It Li netinet6/
+C include files for Internet protocol version 6 (see
+.Xr inet6 4 ) .
 .It Li netiso/
 C include files for ISO standard protocols (see
 .Xr iso 4 ) .
@@ -246,10 +255,6 @@ Templates for
 .Xr make 1 ) .
 .It Li ms/
 Macros for use with the ms macro package.
-.It Li skel/
-Example
-.Dq \&.
-(dot) files for new accounts.
 .It Li tabset/
 Tab description files for a variety of terminals; used in
 the termcap file (see
@@ -343,6 +348,10 @@ Login/logout log (see
 .Pp
 .It Li mail/
 User mailbox files.
+.It Li namedb/
+.Xr named
+configuration files (see
+.Xr named 8 ) .
 .It Li preserve/
 Temporary home of files preserved after an accidental death
 of an editor (see

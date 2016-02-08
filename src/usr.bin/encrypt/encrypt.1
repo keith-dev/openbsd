@@ -1,4 +1,4 @@
-.\"	$OpenBSD: encrypt.1,v 1.12 1999/07/04 11:53:53 aaron Exp $
+.\"	$OpenBSD: encrypt.1,v 1.15 2000/03/23 21:10:15 aaron Exp $
 .\"
 .\" Copyright (c) 1996, Jason Downs.  All rights reserved.
 .\"
@@ -41,10 +41,10 @@
 .Nm
 prints the encrypted form of
 .Ar string
-to the standard output.  This is mostly useful for encrypting passwords
-from within scripts.
+to the standard output.
+This is mostly useful for encrypting passwords from within scripts.
 .Pp
-The following options are supported:
+The options are as follows:
 .Bl -tag -width XxXXXXXXX
 .It Fl k
 Run in
@@ -69,7 +69,8 @@ If no
 is specified,
 .Nm
 reads one string per line from standard input, encrypting each one
-with the chosen algorithm from above. In case that no specific algorithm
+with the chosen algorithm from above.
+In case that no specific algorithm
 was given as a command line option, the default will be looked up from
 .Pa /etc/passwd.conf .
 .Pp

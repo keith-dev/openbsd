@@ -1,5 +1,5 @@
 # BeOS hints file
-# $Id: beos.sh,v 1.2 1999/04/29 22:51:37 millert Exp $
+# $Id: beos.sh,v 1.3 2000/04/06 17:05:42 millert Exp $
 
 if [ ! -f beos/nm ]; then mwcc -w all -o beos/nm beos/nm.c 2>/dev/null; fi
 # If this fails, that's all right - it's only for PPC.
@@ -51,3 +51,7 @@ ld='gcc'
 # Of course, this may also change with R5.
 
 export PATH="$PATH:$PWD/beos"
+
+case "$ldlibpthname" in
+'') ldlibpthname=LIBRARY_PATH ;;
+esac

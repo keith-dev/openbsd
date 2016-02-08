@@ -1,4 +1,5 @@
-/*    $OpenBSD: ipt.c,v 1.13 1999/02/05 05:58:47 deraadt Exp $     */
+/*	$OpenBSD: ipt.c,v 1.17 2000/03/13 23:40:20 kjell Exp $	*/
+
 /*
  * Copyright (C) 1993-1998 by Darren Reed.
  *
@@ -46,19 +47,17 @@
 #include <arpa/inet.h>
 #include <resolv.h>
 #include <ctype.h>
-#if defined(__OpenBSD__)
-# include <netinet/ip_fil_compat.h>
-#else
-# include <netinet/ip_compat.h>
-#endif
+#include <netinet/ip_fil_compat.h>
 #include <netinet/tcpip.h>
 #include <netinet/ip_fil.h>
+#include <netinet/ip_nat.h>
+#include <netinet/ip_state.h>
 #include "ipf.h"
 #include "ipt.h"
 
 #if !defined(lint)
 static const char sccsid[] = "@(#)ipt.c	1.19 6/3/96 (C) 1993-1996 Darren Reed";
-static const char rcsid[] = "@(#)$Id: ipt.c,v 1.13 1999/02/05 05:58:47 deraadt Exp $";
+static const char rcsid[] = "@(#)$IPFilter: ipt.c,v 2.1.2.1 2000/01/24 14:49:11 darrenr Exp $";
 #endif
 
 extern	char	*optarg;
@@ -66,6 +65,8 @@ extern	struct frentry	*ipfilter[2][2];
 extern	struct ipread	snoop, etherf, tcpd, pcap, iptext, iphex;
 extern	struct ifnet	*get_unit __P((char *));
 extern	void	init_ifp __P((void));
+extern	ipnat_t	*natparse __P((char *, int));
+extern	int	fr_running;
 
 int	opts = 0;
 int	main __P((int, char *[]));
@@ -75,13 +76,13 @@ int argc;
 char *argv[];
 {
 	struct	ipread	*r = &iptext;
-	u_long	buf[64];
+	u_long	buf[2048];
 	struct	ifnet	*ifp;
 	char	*rules = NULL, *datain = NULL, *iface = NULL;
 	ip_t	*ip;
 	int	fd, i, dir = 0, c;
 
-	while ((c = getopt(argc, argv, "bdEHi:I:oPr:STvX")) != -1)
+	while ((c = getopt(argc, argv, "bdEHi:I:NoPr:STvX")) != -1)
 		switch (c)
 		{
 		case 'b' :
@@ -111,6 +112,9 @@ char *argv[];
 		case 'H' :
 			r = &iphex;
 			break;
+		case 'N' :
+			opts |= OPT_NAT;
+			break;
 		case 'P' :
 			r = &pcap;
 			break;
@@ -130,12 +134,16 @@ char *argv[];
 		exit(-1);
 	}
 
+	nat_init();
+	fr_stateinit();
 	initparse();
+	fr_running = 1;
 
 	if (rules) {
-		struct	frentry *fr;
 		char	line[513], *s;
+		void	*fr;
 		FILE	*fp;
+		int     linenum = 0;
 
 		if (!strcmp(rules, "-"))
 			fp = stdin;
@@ -146,6 +154,7 @@ char *argv[];
 		if (!(opts & OPT_BRIEF))
 			(void)printf("opening rule file \"%s\"\n", rules);
 		while (fgets(line, sizeof(line)-1, fp)) {
+		        linenum++;
 			/*
 			 * treat both CR and LF as EOL
 			 */
@@ -162,14 +171,27 @@ char *argv[];
 			if (!*line)
 				continue;
 
-			if (!(fr = parse(line)))
-				continue;
 			/* fake an `ioctl' call :) */
-			i = IPL_EXTERN(ioctl)(0, SIOCADDFR, (caddr_t)fr, FWRITE|FREAD);
-			if (opts & OPT_DEBUG)
-				fprintf(stderr,
-					"iplioctl(SIOCADDFR,%p,1) = %d\n",
-					fr, i);
+
+			if ((opts & OPT_NAT) != 0) {
+				if (!(fr = natparse(line, linenum)))
+					continue;
+				i = IPL_EXTERN(ioctl)(IPL_LOGNAT, SIOCADNAT,
+						      fr, FWRITE|FREAD);
+				if (opts & OPT_DEBUG)
+					fprintf(stderr,
+						"iplioctl(ADNAT,%p,1) = %d\n",
+						fr, i);
+			} else {
+				if (!(fr = parse(line, linenum)))
+					continue;
+				i = IPL_EXTERN(ioctl)(0, SIOCADDFR, fr,
+						      FWRITE|FREAD);
+				if (opts & OPT_DEBUG)
+					fprintf(stderr,
+						"iplioctl(ADDFR,%p,1) = %d\n",
+						fr, i);
+			}
 		}
 		(void)fclose(fp);
 	}
@@ -191,26 +213,30 @@ char *argv[];
 		ifp = iface ? get_unit(iface) : NULL;
 		ip->ip_off = ntohs(ip->ip_off);
 		ip->ip_len = ntohs(ip->ip_len);
-		switch (fr_check(ip, ip->ip_hl << 2, ifp, dir, (mb_t **)&buf))
-		{
-		case -2 :
-			(void)printf("auth");
-			break;
-		case -1 :
-			(void)printf("block");
-			break;
-		case 0 :
-			(void)printf("pass");
-			break;
-		case 1 :
-			(void)printf("nomatch");
-			break;
-		}
+		i = fr_check(ip, ip->ip_hl << 2, ifp, dir, (mb_t **)&buf);
+		if ((opts & OPT_NAT) == 0)
+			switch (i)
+			{
+			case -2 :
+				(void)printf("auth");
+				break;
+			case -1 :
+				(void)printf("block");
+				break;
+			case 0 :
+				(void)printf("pass");
+				break;
+			case 1 :
+				(void)printf("nomatch");
+				break;
+			}
+
 		if (!(opts & OPT_BRIEF)) {
 			putchar(' ');
 			printpacket((ip_t *)buf);
 			printf("--------------");
-		}
+		} else if ((opts & (OPT_BRIEF|OPT_NAT)) == (OPT_NAT|OPT_BRIEF))
+			printpacket((ip_t *)buf);
 #ifndef	linux
 		if (dir && ifp && ip->ip_v)
 # ifdef __sgi
@@ -219,7 +245,8 @@ char *argv[];
 			(*ifp->if_output)(ifp, (void *)buf, NULL, 0);
 # endif
 #endif
-		putchar('\n');
+		if ((opts & (OPT_BRIEF|OPT_NAT)) != (OPT_NAT|OPT_BRIEF))
+			putchar('\n');
 		dir = 0;
 	}
 	(*r->r_close)();

@@ -39,7 +39,7 @@ static char copyright[] =
 
 #ifndef lint
 /* from: static char sccsid[] = "@(#)rlogind.c	8.1 (Berkeley) 6/4/93"; */
-static char *rcsid = "$Id: rlogind.c,v 1.21 1999/07/20 22:40:40 deraadt Exp $";
+static char *rcsid = "$Id: rlogind.c,v 1.24 2000/03/09 15:03:29 deraadt Exp $";
 #endif /* not lint */
 
 /*
@@ -106,12 +106,12 @@ int	check_all = 1;
 
 struct	passwd *pwd;
 
-void	doit __P((int, struct sockaddr_in *));
+void	doit __P((int, struct sockaddr *));
 int	control __P((int, char *, int));
 void	protocol __P((int, int));
 void	cleanup __P((int));
 void	fatal __P((int, char *, int));
-int	do_rlogin __P((struct sockaddr_in *));
+int	do_rlogin __P((struct sockaddr *));
 void	getstr __P((char *, int, char *));
 void	setup_term __P((int));
 int	do_krb_login __P((struct sockaddr_in *));
@@ -125,7 +125,7 @@ main(argc, argv)
 	char *argv[];
 {
 	extern int __check_rhosts_file;
-	struct sockaddr_in from;
+	struct sockaddr_storage from;
 	int ch, fromlen, on;
 
 	openlog("rlogind", LOG_PID | LOG_CONS, LOG_AUTH);
@@ -169,17 +169,21 @@ main(argc, argv)
 #endif
 	fromlen = sizeof (from);
 	if (getpeername(0, (struct sockaddr *)&from, &fromlen) < 0) {
-		syslog(LOG_ERR,"Can't get peer name of remote host: %m");
+		/* syslog(LOG_ERR,"Can't get peer name of remote host: %m"); */
 		fatal(STDERR_FILENO, "Can't get peer name of remote host", 1);
 	}
 	on = 1;
 	if (keepalive &&
 	    setsockopt(0, SOL_SOCKET, SO_KEEPALIVE, &on, sizeof (on)) < 0)
 		syslog(LOG_WARNING, "setsockopt (SO_KEEPALIVE): %m");
-	on = IPTOS_LOWDELAY;
-	if (setsockopt(0, IPPROTO_IP, IP_TOS, (char *)&on, sizeof(int)) < 0)
-		syslog(LOG_WARNING, "setsockopt (IP_TOS): %m");
-	doit(0, &from);
+	if (from.ss_family == AF_INET) {
+		on = IPTOS_LOWDELAY;
+		if (setsockopt(0, IPPROTO_IP, IP_TOS, (char *)&on,
+		    sizeof(int)) < 0) {
+			syslog(LOG_WARNING, "setsockopt (IP_TOS): %m");
+		}
+	}
+	doit(0, (struct sockaddr *)&from);
 }
 
 int	child;
@@ -193,14 +197,24 @@ struct winsize win = { 0, 0, 0, 0 };
 void
 doit(f, fromp)
 	int f;
-	struct sockaddr_in *fromp;
+	struct sockaddr *fromp;
 {
 	int master, pid, on = 1;
 	int authenticated = 0;
-	register struct hostent *hp;
 	char hostname[MAXHOSTNAMELEN];
 	int good = 0;
 	char c;
+	char naddr[NI_MAXHOST];
+	char saddr[NI_MAXHOST];
+	char raddr[NI_MAXHOST];
+	u_int16_t *portp;
+	struct addrinfo hints, *res, *res0;
+	int gaierror;
+#ifdef NI_WITHSCOPEID
+	const int niflags = NI_NUMERICHOST | NI_NUMERICSERV | NI_WITHSCOPEID;
+#else
+	const int niflags = NI_NUMERICHOST | NI_NUMERICSERV;
+#endif
 
 	alarm(60);
 	read(f, &c, 1);
@@ -213,34 +227,62 @@ doit(f, fromp)
 #endif
 
 	alarm(0);
-	fromp->sin_port = ntohs((u_short)fromp->sin_port);
-	hp = gethostbyaddr((char *)&fromp->sin_addr, sizeof(struct in_addr),
-	    fromp->sin_family);
-	if (hp) {
-		strncpy(hostname, hp->h_name, sizeof(hostname)-1);
+	switch (fromp->sa_family) {
+	case AF_INET:
+		portp = &((struct sockaddr_in *)fromp)->sin_port;
+		break;
+	case AF_INET6:
+		portp = &((struct sockaddr_in6 *)fromp)->sin6_port;
+		break;
+	default:
+		syslog(LOG_ERR, "malformed \"from\" address (af %d)\n",
+		    fromp->sa_family);
+		exit(1);
+	}
+	if (getnameinfo((struct sockaddr *)fromp, fromp->sa_len,
+	    naddr, sizeof(naddr), NULL, 0, niflags) != 0) {
+		syslog(LOG_ERR, "malformed \"from\" address (af %d)\n",
+		    fromp->sa_family);
+		exit(1);
+	}
+
+	if (getnameinfo((struct sockaddr *)fromp, fromp->sa_len,
+	    saddr, sizeof(saddr), NULL, 0, NI_NAMEREQD) == 0) {
+		strncpy(hostname, saddr, sizeof(hostname)-1);
 		if (check_all) {
-			hp = gethostbyname(hostname);
-			if (hp) {
-				for (; good == 0 && hp->h_addr_list[0] != NULL;
-				    hp->h_addr_list++)
-					if (!bcmp(hp->h_addr_list[0],
-					    (caddr_t)&fromp->sin_addr,
-					    sizeof(fromp->sin_addr)))
-						good = 1;
+			good = 0;
+			memset(&hints, 0, sizeof(hints));
+			hints.ai_family = fromp->sa_family;
+			hints.ai_socktype = SOCK_STREAM;
+			hints.ai_flags = AI_CANONNAME;
+			gaierror = getaddrinfo(hostname, "0", &hints, &res0);
+			if (gaierror)
+				res0 = NULL;
+			for (res = res0; good == 0 && res; res = res->ai_next) {
+				if (res->ai_family != fromp->sa_family)
+					continue;
+				if (res->ai_addrlen != fromp->sa_len)
+					continue;
+				if (getnameinfo(res->ai_addr, res->ai_addrlen,
+				    raddr, sizeof(raddr), NULL, 0, niflags) == 0
+				 && strcmp(naddr, raddr) == 0)
+					good = 1;
 			}
-	
+			if (res0)
+				freeaddrinfo(res0);
 		} else
 			good = 1;
-	}
+	} else
+		good = 0;
 	/* aha, the DNS looks spoofed */
-	if (hp == NULL || good == 0)
-		strncpy(hostname, inet_ntoa(fromp->sin_addr), sizeof(hostname)-1);
+	if (good == 0)
+		strncpy(hostname, naddr, sizeof(hostname)-1);
 	hostname[sizeof(hostname)-1] = '\0';
 
 
 #ifdef	KERBEROS
 	if (use_kerberos) {
-		retval = do_krb_login(fromp);
+		retval = do_krb_login((struct sockaddr_in *)fromp);
 		if (retval == 0)
 			authenticated++;
 		else if (retval > 0)
@@ -250,36 +292,35 @@ doit(f, fromp)
 	} else
 #endif
 	{
-		if (fromp->sin_family != AF_INET ||
-		    fromp->sin_port >= IPPORT_RESERVED ||
-		    fromp->sin_port < IPPORT_RESERVED/2) {
+		if (ntohs(*portp) >= IPPORT_RESERVED ||
+		    ntohs(*portp) < IPPORT_RESERVED/2) {
 			syslog(LOG_NOTICE, "Connection from %s on illegal port",
-				inet_ntoa(fromp->sin_addr));
+				naddr);
 			fatal(f, "Permission denied", 0);
 		}
 #ifdef IP_OPTIONS
-		{
-		struct ipoption opts;
-		int optsize = sizeof(opts), ipproto, i;
-		struct protoent *ip;
+		if (fromp->sa_family == AF_INET) {
+			struct ipoption opts;
+			int optsize = sizeof(opts), ipproto, i;
+			struct protoent *ip;
 
-		if ((ip = getprotobyname("ip")) != NULL)
-			ipproto = ip->p_proto;
-		else
-			ipproto = IPPROTO_IP;
-		if (getsockopt(0, ipproto, IP_OPTIONS, (char *)&opts,
-		    &optsize) == 0 && optsize != 0) {
-			for (i = 0; (void *)&opts.ipopt_list[i] - (void *)&opts <
-			    optsize; ) {
-				u_char c = (u_char)opts.ipopt_list[i];
-				if (c == IPOPT_LSRR || c == IPOPT_SSRR)
-					exit(1);
-				if (c == IPOPT_EOL)
-					break;
-				i += (c == IPOPT_NOP) ? 1 :
-				    (u_char)opts.ipopt_list[i+1];
+			if ((ip = getprotobyname("ip")) != NULL)
+				ipproto = ip->p_proto;
+			else
+				ipproto = IPPROTO_IP;
+			if (getsockopt(0, ipproto, IP_OPTIONS, (char *)&opts,
+			    &optsize) == 0 && optsize != 0) {
+				for (i = 0; (void *)&opts.ipopt_list[i] -
+				    (void *)&opts < optsize; ) {
+					u_char c = (u_char)opts.ipopt_list[i];
+					if (c == IPOPT_LSRR || c == IPOPT_SSRR)
+						exit(1);
+					if (c == IPOPT_EOL)
+						break;
+					i += (c == IPOPT_NOP) ? 1 :
+					    (u_char)opts.ipopt_list[i+1];
+				}
 			}
-		}
 		}
 #endif
 		if (do_rlogin(fromp) == 0)
@@ -569,7 +610,7 @@ fatal(f, msg, syserr)
 
 int
 do_rlogin(dest)
-	struct sockaddr_in *dest;
+	struct sockaddr *dest;
 {
 	getstr(rusername, sizeof(rusername), "remuser too long");
 	getstr(lusername, sizeof(lusername), "locuser too long");
@@ -581,7 +622,7 @@ do_rlogin(dest)
 	if (pwd->pw_uid == 0)
 		return (-1);
 	/* XXX why don't we syslog() failure? */
-	return (iruserok(dest->sin_addr.s_addr, 0, rusername, lusername));
+	return (iruserok_sa(dest, dest->sa_len, 0, rusername, lusername));
 }
 
 void

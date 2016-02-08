@@ -1,4 +1,4 @@
-/*	$OpenBSD: script.c,v 1.10 1998/12/19 23:52:03 deraadt Exp $	*/
+/*	$OpenBSD: script.c,v 1.12 2000/04/16 20:28:54 espie Exp $	*/
 /*	$NetBSD: script.c,v 1.3 1994/12/21 08:55:43 jtc Exp $	*/
 
 /*
@@ -44,7 +44,7 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)script.c	8.1 (Berkeley) 6/6/93";
 #endif
-static char rcsid[] = "$OpenBSD: script.c,v 1.10 1998/12/19 23:52:03 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: script.c,v 1.12 2000/04/16 20:28:54 espie Exp $";
 #endif /* not lint */
 
 #include <sys/types.h>
@@ -75,12 +75,14 @@ char	*fname;
 
 struct	termios tt;
 
-__dead	void done __P((void));
+__dead	void done __P((int));
 	void dooutput __P((void));
 	void doshell __P((void));
 	void fail __P((void));
 	void finish __P((int));
 	void scriptflush __P((int));
+	void handlesigwinch __P((int));
+
 
 int
 main(argc, argv)
@@ -126,6 +128,7 @@ main(argc, argv)
 	rtt.c_lflag &= ~ECHO;
 	(void)tcsetattr(STDIN_FILENO, TCSAFLUSH, &rtt);
 
+	(void)signal(SIGWINCH, handlesigwinch);
 	(void)signal(SIGCHLD, finish);
 	child = fork();
 	if (child < 0) {
@@ -147,8 +150,7 @@ main(argc, argv)
 	(void)fclose(fscript);
 	while ((cc = read(STDIN_FILENO, ibuf, BUFSIZ)) > 0)
 		(void)write(master, ibuf, cc);
-	done();
-	exit(0);
+	done(0);
 }
 
 void
@@ -157,15 +159,36 @@ finish(signo)
 {
 	register int die, pid;
 	int save_errno = errno;
-	int status;
+	int status, e;
 
-	die = 0;
+	die = e = 0;
 	while ((pid = wait3(&status, WNOHANG, 0)) > 0)
-		if (pid == child)
+		if (pid == child) {
 			die = 1;
+			if (WIFEXITED(status))
+                                e = WEXITSTATUS(status);
+                        else
+                                e = 1;
+		}
 
 	if (die)
-		done();
+		done(e);
+	errno = save_errno;
+}
+
+void
+handlesigwinch(signo)
+	int signo;
+{
+	struct winsize win;
+	pid_t pgrp;
+	int save_errno = errno;
+
+	if (ioctl(STDIN_FILENO, TIOCGWINSZ, &win) != -1) {
+	    ioctl(slave, TIOCSWINSZ, &win);
+	    if (ioctl(slave, TIOCGPGRP, &pgrp) != -1)
+	    	killpg(pgrp, SIGWINCH);
+	}
 	errno = save_errno;
 }
 
@@ -194,7 +217,7 @@ dooutput()
 		(void)fwrite(obuf, 1, cc, fscript);
 		outcc += cc;
 	}
-	done();
+	done(0);
 }
 
 void
@@ -232,11 +255,12 @@ fail()
 {
 
 	(void)kill(0, SIGTERM);
-	done();
+	done(1);
 }
 
 void
-done()
+done(eval)
+	int eval;
 {
 	time_t tvec;
 
@@ -249,6 +273,6 @@ done()
 		(void)tcsetattr(STDIN_FILENO, TCSAFLUSH, &tt);
 		(void)printf("Script done, output file is %s\n", fname);
 	}
-	exit(0);
+	exit(eval);
 }
 

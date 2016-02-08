@@ -1,4 +1,4 @@
-.\"	$OpenBSD: chpass.1,v 1.13 1999/08/21 19:34:40 niklas Exp $
+.\"	$OpenBSD: chpass.1,v 1.18 2000/04/15 11:45:55 aaron Exp $
 .\"	$NetBSD: chpass.1,v 1.7 1996/05/15 21:50:40 jtc Exp $
 .\"
 .\" Copyright (c) 1988, 1990, 1993
@@ -38,7 +38,9 @@
 .Dt CHPASS 1
 .Os
 .Sh NAME
-.Nm chpass
+.Nm chpass ,
+.Nm chfn ,
+.Nm chsh
 .Nd add or change user database information
 .Sh SYNOPSIS
 .Nm chpass
@@ -47,7 +49,7 @@
 .Op Fl s Ar newshell
 .Op Ar user
 .Sh DESCRIPTION
-.Nm
+.Nm chpass
 allows editing of the user database information associated
 with
 .Ar user ,
@@ -59,10 +61,16 @@ Only the information that the user is allowed to change is displayed.
 If YP in enabled change requests are first tried in the local database,
 and then in the YP database, if there was no entry to change locally.
 .Pp
+.Nm chfn
+and
+.Nm chsh
+are synonyms for
+.Nm chpass .
+.Pp
 The options are as follows:
 .Bl -tag -width Ds
 .It Fl a Ar list
-The super-user is allowed to directly supply a user database
+The superuser is allowed to directly supply a user database
 entry, in the format specified by
 .Xr passwd 5 ,
 as an argument.
@@ -87,7 +95,7 @@ is a modification request and there is a local entry for the specified user.
 .Pp
 Possible display items are as follows:
 .Pp
-.Bl -tag -width "Home Directory:" -compact -offset indent
+.Bl -tag -width "Office Location:" -compact -offset indent
 .It Login:
 user's login name
 .It Password:
@@ -108,12 +116,12 @@ user's home directory
 user's login shell
 .It Full Name:
 user's real name
-.It Location:
-user's normal location
-.It Home Phone:
-user's home phone
+.It Office Location:
+user's office location
 .It Office Phone:
 user's office phone
+.It Home Phone:
+user's home phone
 .El
 .Pp
 The
@@ -133,8 +141,8 @@ Both of these fields should be unique across the system (and often
 across a group of systems) as they control file access.
 .Pp
 While it is possible to have multiple entries with identical login names
-and/or identical user IDs, it is usually a mistake to do so.  Routines
-that manipulate these files will often return only one of the multiple
+and/or identical user IDs, it is usually a mistake to do so.
+Routines that manipulate these files will often return only one of the multiple
 entries, and that one by random selection.
 .Pp
 The
@@ -168,8 +176,8 @@ is the year.
 .Pp
 The
 .Ar class
-field is currently unused.  In the near future it will be a key to
-a
+field is currently unused.
+In the near future it will be a key to a
 .Xr termcap 5
 style database of user attributes.
 .Pp
@@ -186,7 +194,7 @@ If the
 field is empty, the Bourne shell
 .Pq Pa /bin/sh
 is assumed.
-When altering a login shell, and not the super-user, the user
+When altering a login shell, and not the superuser, the user
 may not change from a non-standard shell or to a non-standard
 shell.
 Non-standard is defined as a shell not found in
@@ -214,7 +222,7 @@ is set to
 an alternate editor.
 When the editor terminates, the information is re-read and used to
 update the user database itself.
-Only the user, or the super-user, may edit the information associated
+Only the user, or the superuser, may edit the information associated
 with the user.
 .Sh FILES
 .Bl -tag -width /var/tmp/pw.XXXXXXXX -compact
@@ -242,10 +250,10 @@ list of approved shells
 .%A Ken Thompson
 .%T "UNIX Password Security"
 .Re
-.Sh BUGS
-User information should (and eventually will) be stored elsewhere.
 .Sh HISTORY
 The
 .Nm
 command appeared in
 .Bx 4.3 Reno .
+.Sh BUGS
+User information should (and eventually will) be stored elsewhere.

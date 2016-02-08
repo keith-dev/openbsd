@@ -1,4 +1,4 @@
-/*	$OpenBSD: compat.c,v 1.12 1998/12/05 00:06:27 espie Exp $	*/
+/*	$OpenBSD: compat.c,v 1.24 2000/04/17 23:54:47 espie Exp $	*/
 /*	$NetBSD: compat.c,v 1.14 1996/11/06 17:59:01 christos Exp $	*/
 
 /*
@@ -43,7 +43,7 @@
 #if 0
 static char sccsid[] = "@(#)compat.c	8.2 (Berkeley) 3/19/94";
 #else
-static char rcsid[] = "$OpenBSD: compat.c,v 1.12 1998/12/05 00:06:27 espie Exp $";
+static char rcsid[] = "$OpenBSD: compat.c,v 1.24 2000/04/17 23:54:47 espie Exp $";
 #endif
 #endif /* not lint */
 
@@ -71,7 +71,6 @@ static char rcsid[] = "$OpenBSD: compat.c,v 1.12 1998/12/05 00:06:27 espie Exp $
 #include    "hash.h"
 #include    "dir.h"
 #include    "job.h"
-extern int errno;
 
 /*
  * The following array is used to make a fast determination of which
@@ -82,11 +81,12 @@ extern int errno;
 
 static char 	    meta[256];
 
-static GNode	    *curTarg = NILGNODE;
+static GNode	    *curTarg = NULL;
 static GNode	    *ENDNode;
 static void CompatInterrupt __P((int));
 static int CompatRunCommand __P((ClientData, ClientData));
 static int CompatMake __P((ClientData, ClientData));
+static int shellneed __P((char **av));
 
 /*-
  *-----------------------------------------------------------------------
@@ -109,22 +109,20 @@ CompatInterrupt (signo)
 {
     GNode   *gn;
 
-    if ((curTarg != NILGNODE) && !Targ_Precious (curTarg)) {
-	char	  *p1;
-	char 	  *file = Var_Value (TARGET, curTarg, &p1);
+    if ((curTarg != NULL) && !Targ_Precious (curTarg)) {
+	char 	  *file = Var_Value(TARGET, curTarg);
 
 	if (!noExecute && eunlink(file) != -1) {
 	    Error("*** %s removed\n", file);
 	}
-	efree(p1);
 
 	/*
 	 * Run .INTERRUPT only if hit with interrupt signal
 	 */
 	if (signo == SIGINT) {
 	    gn = Targ_FindNode(".INTERRUPT", TARG_NOCREATE);
-	    if (gn != NILGNODE) {
-		Lst_ForEach(gn->commands, CompatRunCommand, (ClientData)gn);
+	    if (gn != NULL) {
+		Lst_ForEach(gn->commands, CompatRunCommand, gn);
 	    }
 	}
 
@@ -234,8 +232,8 @@ CompatRunCommand (cmdp, gnp)
     silent = gn->type & OP_SILENT;
     errCheck = !(gn->type & OP_IGNORE);
 
-    cmdNode = Lst_Member (gn->commands, (ClientData)cmd);
-    cmdStart = Var_Subst (NULL, cmd, gn, FALSE);
+    cmdNode = Lst_Member(gn->commands, cmd);
+    cmdStart = Var_Subst(cmd, gn, FALSE);
 
     /*
      * brk_string will return an argv with a NULL in av[0], thus causing
@@ -251,10 +249,10 @@ CompatRunCommand (cmdp, gnp)
     } else {
 	cmd = cmdStart;
     }
-    Lst_Replace (cmdNode, (ClientData)cmdStart);
+    Lst_Replace(cmdNode, cmdStart);
 
     if ((gn->type & OP_SAVE_CMDS) && (gn != ENDNode)) {
-	(void)Lst_AtEnd(ENDNode->commands, (ClientData)cmdStart);
+	Lst_AtEnd(ENDNode->commands, cmdStart);
 	return(0);
     } else if (strcmp(cmdStart, "...") == 0) {
 	gn->type |= OP_SAVE_CMDS;
@@ -328,6 +326,9 @@ CompatRunCommand (cmdp, gnp)
 		shargv[1] = (errCheck ? "-ec" : "-c");
 		shargv[2] = cmd;
 		shargv[3] = (char *)NULL;
+		free(bp);
+		free(av);
+		bp = NULL;
 		av = shargv;
 		argc = 0;
 		break;
@@ -348,8 +349,10 @@ CompatRunCommand (cmdp, gnp)
     if (cpid == 0) {
 	if (local) {
 	    execvp(av[0], av);
-	    (void) write (2, av[0], strlen (av[0]));
-	    (void) write (2, ": not found\n", sizeof(": not found"));
+	    if (errno == ENOENT)
+	    	fprintf(stderr, "%s: not found\n", av[0]);
+	    else
+		perror(av[0]);
 	} else {
 	    (void)execv(av[0], av);
 	}
@@ -360,7 +363,7 @@ CompatRunCommand (cmdp, gnp)
 	free(bp);
     }
     free(cmdStart);
-    Lst_Replace (cmdNode, (ClientData) NULL);
+    Lst_Replace(cmdNode, NULL);
 
     /*
      * The child is off and running. Now all we can do is wait...
@@ -456,17 +459,15 @@ CompatMake (gnp, pgnp)
 	gn->make = TRUE;
 	gn->made = BEINGMADE;
 	Suff_FindDeps (gn);
-	Lst_ForEach (gn->children, CompatMake, (ClientData)gn);
+	Lst_ForEach(gn->children, CompatMake, gn);
 	if (!gn->make) {
 	    gn->made = ABORTED;
 	    pgn->make = FALSE;
 	    return (0);
 	}
 
-	if (Lst_Member (gn->iParents, pgn) != NILLNODE) {
-	    char *p1;
-	    Var_Set (IMPSRC, Var_Value(TARGET, gn, &p1), pgn);
-	    efree(p1);
+	if (Lst_Member (gn->iParents, pgn) != NULL) {
+	    Var_Set(IMPSRC, Var_Value(TARGET, gn), pgn);
 	}
 
 	/*
@@ -521,8 +522,8 @@ CompatMake (gnp, pgnp)
 	     */
 	    if (!touchFlag) {
 		curTarg = gn;
-		Lst_ForEach (gn->commands, CompatRunCommand, (ClientData)gn);
-		curTarg = NILGNODE;
+		Lst_ForEach(gn->commands, CompatRunCommand, gn);
+		curTarg = NULL;
 	    } else {
 		Job_Touch (gn, gn->type & OP_SILENT);
 	    }
@@ -587,7 +588,7 @@ CompatMake (gnp, pgnp)
 	     * ok.
 	     * -- ardeb 1/12/88
 	     */
-	    if (noExecute || Dir_MTime(gn) == 0) {
+	    if (noExecute || Dir_MTime(gn) == FALSE) {
 		gn->mtime = now;
 	    }
 	    if (gn->cmtime > gn->mtime)
@@ -603,10 +604,13 @@ CompatMake (gnp, pgnp)
 	} else if (keepgoing) {
 	    pgn->make = FALSE;
 	} else {
-	    char *p1;
-
-	    printf ("\n\nStop in %s.\n", Var_Value(".CURDIR", gn, &p1));
-	    efree(p1);
+	    if (gn->lineno)
+		printf("\n\nStop in %s (line %lu of %s).\n", 
+			Var_Value(".CURDIR", gn), 
+			(unsigned long)gn->lineno,
+			gn->fname);
+	    else
+		printf("\n\nStop in %s.\n", Var_Value(".CURDIR", gn));
 	    exit (1);
 	}
     } else if (gn->made == ERROR) {
@@ -616,11 +620,8 @@ CompatMake (gnp, pgnp)
 	 */
 	pgn->make = FALSE;
     } else {
-	if (Lst_Member (gn->iParents, pgn) != NILLNODE) {
-	    char *p1;
-	    Var_Set (IMPSRC, Var_Value(TARGET, gn, &p1), pgn);
-	    efree(p1);
-	}
+	if (Lst_Member (gn->iParents, pgn) != NULL)
+	    Var_Set (IMPSRC, Var_Value(TARGET, gn), pgn);
 	switch(gn->made) {
 	    case BEINGMADE:
 		Error("Graph cycles through %s\n", gn->name);
@@ -695,8 +696,8 @@ Compat_Run(targs)
      */
     if (!queryFlag) {
 	gn = Targ_FindNode(".BEGIN", TARG_NOCREATE);
-	if (gn != NILGNODE) {
-	    Lst_ForEach(gn->commands, CompatRunCommand, (ClientData)gn);
+	if (gn != NULL) {
+	    Lst_ForEach(gn->commands, CompatRunCommand, gn);
             if (gn->made == ERROR) {
                 printf("\n\nStop.\n");
                 exit(1);
@@ -715,8 +716,7 @@ Compat_Run(targs)
      *	    	  	    could not be made due to errors.
      */
     errors = 0;
-    while (!Lst_IsEmpty (targs)) {
-	gn = (GNode *) Lst_DeQueue (targs);
+    while ((gn = (GNode *)Lst_DeQueue(targs)) != NULL) {
 	CompatMake (gn, gn);
 
 	if (gn->made == UPTODATE) {
@@ -731,6 +731,6 @@ Compat_Run(targs)
      * If the user has defined a .END target, run its commands.
      */
     if (errors == 0) {
-	Lst_ForEach(ENDNode->commands, CompatRunCommand, (ClientData)gn);
+	Lst_ForEach(ENDNode->commands, CompatRunCommand, gn);
     }
 }

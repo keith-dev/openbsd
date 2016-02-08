@@ -1,4 +1,4 @@
-/*	$OpenBSD: inet.c,v 1.11 1999/07/20 04:49:55 deraadt Exp $	*/
+/*	$OpenBSD: inet.c,v 1.13 2000/04/26 21:25:53 jakob Exp $	*/
 
 /*
  * Copyright (c) 1994, 1995, 1996, 1997, 1998
@@ -35,7 +35,7 @@
 
 #ifndef lint
 static const char rcsid[] =
-    "@(#) $Header: /cvs/src/lib/libpcap/inet.c,v 1.11 1999/07/20 04:49:55 deraadt Exp $ (LBL)";
+    "@(#) $Header: /cvs/src/lib/libpcap/inet.c,v 1.13 2000/04/26 21:25:53 jakob Exp $ (LBL)";
 #endif
 
 #include <sys/param.h>
@@ -62,6 +62,9 @@ struct rtentry;
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#ifdef HAVE_IFADDRS_H
+#include <ifaddrs.h>
+#endif
 
 #include "pcap-int.h"
 
@@ -86,13 +89,59 @@ char *
 pcap_lookupdev(errbuf)
 	register char *errbuf;
 {
+#ifdef HAVE_IFADDRS_H
+	struct ifaddrs *ifap, *ifa, *mp;
+	int n, minunit;
+	char *cp;
+	static char device[IF_NAMESIZE + 1];
+
+	if (getifaddrs(&ifap) != 0) {
+		(void)snprintf(errbuf, PCAP_ERRBUF_SIZE,
+		    "getifaddrs: %s", pcap_strerror(errno));
+		return NULL;
+	}
+
+	mp = NULL;
+	minunit = 666;
+	for (ifa = ifap; ifa; ifa = ifa->ifa_next) {
+		if ((ifa->ifa_flags & IFF_UP) == 0)
+			continue;
+#ifdef IFF_LOOPBACK
+		if ((ifa->ifa_flags & IFF_LOOPBACK) != 0)
+			continue;
+#else
+		if (strncmp(ifa->ifa_name, "lo", 2) == 0 &&
+		    (ifa->ifa_name[2] == '\0' || isdigit(ifa->ifa_name[2]))) {
+			continue;
+		}
+#endif
+
+		for (cp = ifa->ifa_name; !isdigit(*cp); ++cp)
+			continue;
+		n = atoi(cp);
+		if (n < minunit) {
+			minunit = n;
+			mp = ifa;
+		}
+	}
+	if (mp == NULL) {
+		(void)strncpy(errbuf, "no suitable device found",
+		    PCAP_ERRBUF_SIZE);
+		freeifaddrs(ifap);
+		return (NULL);
+	}
+
+	(void)strncpy(device, mp->ifa_name, sizeof(device) - 1);
+	device[sizeof(device) - 1] = '\0';
+	freeifaddrs(ifap);
+	return (device);
+#else
 	register int fd, minunit, n;
-	register char *cp, *ibuf = NULL, *nibuf;
+	register char *cp;
 	register struct ifreq *ifrp, *ifend, *ifnext, *mp;
 	struct ifconf ifc;
-	struct ifreq ifr;
+	struct ifreq ibuf[16], ifr;
 	static char device[sizeof(ifrp->ifr_name) + 1];
-	int len = 8192;
 
 	fd = socket(AF_INET, SOCK_DGRAM, 0);
 	if (fd < 0) {
@@ -100,33 +149,24 @@ pcap_lookupdev(errbuf)
 		    pcap_strerror(errno));
 		return (NULL);
 	}
-	while (1) {
-		ifc.ifc_len = len;
-		nibuf = realloc(ibuf, len);
-		if (nibuf == NULL) {
-			if (ibuf)
-				free(ibuf);
-			close(fd);
-			return (NULL);
-		}
-		ifc.ifc_buf = ibuf = nibuf;
-		if (ioctl(fd, SIOCGIFCONF, (char *)&ifc) < 0) {
-			(void)close(fd);
-			free(ibuf);
-			return (NULL);
-		}
-		if (ifc.ifc_len + sizeof(ifr) < len)
-			break;
-		len *= 2;
-	}
+	ifc.ifc_len = sizeof ibuf;
+	ifc.ifc_buf = (caddr_t)ibuf;
 
-	ifrp = (struct ifreq *)ibuf;
+	memset((char *)ibuf, 0, sizeof(ibuf));
+	if (ioctl(fd, SIOCGIFCONF, (char *)&ifc) < 0 ||
+	    ifc.ifc_len < sizeof(struct ifreq)) {
+		(void)snprintf(errbuf, PCAP_ERRBUF_SIZE, "SIOCGIFCONF: %s",
+		    pcap_strerror(errno));
+		(void)close(fd);
+		return (NULL);
+	}
+	ifrp = ibuf;
 	ifend = (struct ifreq *)((char *)ibuf + ifc.ifc_len);
 
 	mp = NULL;
 	minunit = 666;
 	for (; ifrp < ifend; ifrp = ifnext) {
-#if BSD - 0 >= 199006
+#ifdef HAVE_SOCKADDR_SA_LEN
 		n = ifrp->ifr_addr.sa_len + sizeof(ifrp->ifr_name);
 		if (n < sizeof(*ifrp))
 			ifnext = ifrp + 1;
@@ -152,7 +192,6 @@ pcap_lookupdev(errbuf)
 			    (int)sizeof(ifr.ifr_name), ifr.ifr_name,
 			    pcap_strerror(errno));
 			(void)close(fd);
-			free(ibuf);
 			return (NULL);
 		}
 
@@ -172,14 +211,13 @@ pcap_lookupdev(errbuf)
 	if (mp == NULL) {
 		(void)strlcpy(errbuf, "no suitable device found",
 		    PCAP_ERRBUF_SIZE);
-		free(ibuf);
 		return (NULL);
 	}
 
 	(void)strncpy(device, mp->ifr_name, sizeof(device) - 1);
 	device[sizeof(device) - 1] = '\0';
-	free(ibuf);
 	return (device);
+#endif
 }
 
 int
@@ -205,16 +243,22 @@ pcap_lookupnet(device, netp, maskp, errbuf)
 #endif
 	(void)strncpy(ifr.ifr_name, device, sizeof(ifr.ifr_name));
 	if (ioctl(fd, SIOCGIFADDR, (char *)&ifr) < 0) {
-		(void)snprintf(errbuf, PCAP_ERRBUF_SIZE, "SIOCGIFADDR: %s: %s",
-		    device, pcap_strerror(errno));
+		if (errno == EADDRNOTAVAIL) {
+			(void)snprintf(errbuf, PCAP_ERRBUF_SIZE,
+			    "%s: no IPv4 address assigned", device);
+		} else {
+			(void)snprintf(errbuf, PCAP_ERRBUF_SIZE,
+			    "SIOCGIFADDR: %s: %s",
+			    device, pcap_strerror(errno));
+		}
 		(void)close(fd);
 		return (-1);
 	}
 	sin = (struct sockaddr_in *)&ifr.ifr_addr;
 	*netp = sin->sin_addr.s_addr;
 	if (ioctl(fd, SIOCGIFNETMASK, (char *)&ifr) < 0) {
-		(void)snprintf(errbuf, PCAP_ERRBUF_SIZE, "SIOCGIFNETMASK: %s: %s",
-		    device, pcap_strerror(errno));
+		(void)snprintf(errbuf, PCAP_ERRBUF_SIZE,
+		    "SIOCGIFNETMASK: %s: %s", device, pcap_strerror(errno));
 		(void)close(fd);
 		return (-1);
 	}

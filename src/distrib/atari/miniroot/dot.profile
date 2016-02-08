@@ -1,3 +1,4 @@
+#	$OpenBSD: dot.profile,v 1.5 2000/03/01 22:10:02 todd Exp $
 #	$NetBSD: dot.profile,v 1.1.1.1.4.2 1996/07/15 06:33:30 leo Exp $
 #
 # Copyright (c) 1995 Jason R. Thorpe
@@ -37,6 +38,7 @@ export TERM=vt220
 umask 022
 
 set -o emacs # emacs-style command line editing
+alias dmesg="cat /kern/msgbuf"
 
 if [ "X${DONEPROFILE}" = "X" ]; then
 	DONEPROFILE=YES

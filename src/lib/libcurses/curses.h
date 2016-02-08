@@ -1,7 +1,7 @@
-/*	$OpenBSD: curses.h,v 1.37 1999/08/22 17:42:44 millert Exp $	*/
+/*	$OpenBSD: curses.h,v 1.50 2000/04/04 16:49:58 millert Exp $	*/
 
 /****************************************************************************
- * Copyright (c) 1998 Free Software Foundation, Inc.                        *
+ * Copyright (c) 1998,1999,2000 Free Software Foundation, Inc.              *
  *                                                                          *
  * Permission is hereby granted, free of charge, to any person obtaining a  *
  * copy of this software and associated documentation files (the            *
@@ -33,7 +33,7 @@
  *     and: Eric S. Raymond <esr@snark.thyrsus.com>                         *
  ****************************************************************************/
 
-/* $From: curses.h.in,v 1.84 1999/07/24 20:15:42 tom Exp $ */
+/* $From: curses.h.in,v 1.90 2000/02/19 22:15:43 tom Exp $ */
 
 #ifndef __NCURSES_H
 #define __NCURSES_H
@@ -50,7 +50,7 @@
 /* These are defined only in curses.h, and are used for conditional compiles */
 #define NCURSES_VERSION_MAJOR 5
 #define NCURSES_VERSION_MINOR 0
-#define NCURSES_VERSION_PATCH 990821
+#define NCURSES_VERSION_PATCH 20000401
 
 /* This is defined in more than one ncurses header, for identification */
 #undef  NCURSES_VERSION
@@ -89,7 +89,7 @@ typedef unsigned long chtype;
 
 #if !defined(__cplusplus)
 #undef bool
-typedef char bool;
+typedef unsigned char bool;
 #endif
 
 #ifdef __cplusplus
@@ -313,15 +313,20 @@ extern int	TABSIZE;
  */
 extern int ESCDELAY;	/* ESC expire time in milliseconds */
 
+extern char ttytype[];		/* needed for backward compatibility */
+
+/*
+ * These functions are extensions - not in XSI Curses.
+ */
 extern char *keybound (int, int);
+extern const char *curses_version (void);
+extern int assume_default_colors (int, int);
 extern int define_key (char *, int);
 extern int keyok (int, bool);
 extern int resizeterm (int, int);
 extern int use_default_colors (void);
 extern int use_extended_names (bool);
 extern int wresize (WINDOW *, int, int);
-
-extern char ttytype[];		/* needed for backward compatibility */
 
 /*
  * GCC (and some other compilers) define '__attribute__'; we're using this
@@ -434,6 +439,7 @@ extern int doupdate(void);				/* implemented */
 extern WINDOW *dupwin(WINDOW *);			/* implemented */
 extern int echo(void);					/* implemented */
 extern int echochar(const chtype);			/* generated */
+extern int erase(void);					/* generated */
 #ifdef _XOPEN_SOURCE_EXTENDED
 extern int echo_wchar(const cchar_t *);			/* missing */
 extern int erasewchar(wchar_t*);			/* missing */
@@ -1330,6 +1336,7 @@ extern void trace(const unsigned int);
 #define TRACE_BITS	0x0100	/* trace state of TTY control bits */
 #define TRACE_ICALLS	0x0200	/* trace internal/nested calls */
 #define TRACE_CCALLS	0x0400	/* trace per-character calls */
+#define TRACE_DATABASE	0x0800	/* trace read/write of terminfo/termcap data */
 #define TRACE_MAXIMUM	0xffff	/* maximum trace level */
 
 #if defined(TRACE) || defined(NCURSES_TEST)
@@ -1342,6 +1349,14 @@ extern const char *_nc_visbuf(const char *);
 #endif
 
 #ifdef __cplusplus
+
+/* these names conflict with STL */
+#undef box
+#undef clear
+#undef erase
+#undef move
+#undef refresh
+
 }
 #endif
 

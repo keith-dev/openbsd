@@ -34,6 +34,8 @@
          withing the packet alising module.
 
     See HISTORY file for record of revisions.
+
+    $OpenBSD: alias_ftp.c,v 1.4 2000/02/27 01:38:24 brian Exp $
 */
 
 /* Includes */

@@ -23,7 +23,7 @@
  */
 #ifndef lint
 static const char rcsid[] =
-    "@(#) $Header: /cvs/src/usr.sbin/tcpdump/addrtoname.c,v 1.9 1999/10/06 01:46:40 deraadt Exp $ (LBL)";
+    "@(#) $Header: /cvs/src/usr.sbin/tcpdump/addrtoname.c,v 1.13 2000/04/30 05:23:28 ericj Exp $ (LBL)";
 #endif
 
 #include <sys/types.h>
@@ -39,13 +39,19 @@ struct rtentry;
 #include <netinet/in.h>
 #include <netinet/if_ether.h>
 
+#ifdef INET6
+#include <netinet/ip6.h>
+#endif
+
 #include <arpa/inet.h>
 
 #include <ctype.h>
 #include <netdb.h>
 #include <pcap.h>
 #include <pcap-namedb.h>
+#ifdef HAVE_MEMORY_H
 #include <memory.h>
+#endif
 #include <signal.h>
 #include <stdio.h>
 #include <string.h>
@@ -80,17 +86,29 @@ struct hnamemem eprototable[HASHNAMESIZE];
 struct hnamemem dnaddrtable[HASHNAMESIZE];
 struct hnamemem llcsaptable[HASHNAMESIZE];
 
+#ifdef INET6
+struct h6namemem {
+	struct in6_addr addr;
+	char *name;
+	struct h6namemem *nxt;
+};
+
+struct h6namemem h6nametable[HASHNAMESIZE];
+#endif /* INET6 */
+
 struct enamemem {
 	u_short e_addr0;
 	u_short e_addr1;
 	u_short e_addr2;
 	char *e_name;
 	u_char *e_nsap;			/* used only for nsaptable[] */
+#define e_bs e_nsap			/* for bytestringtable */
 	struct enamemem *e_nxt;
 };
 
 struct enamemem enametable[HASHNAMESIZE];
 struct enamemem nsaptable[HASHNAMESIZE];
+struct enamemem bytestringtable[HASHNAMESIZE];
 
 struct protoidmem {
 	u_int32_t p_oui;
@@ -176,7 +194,7 @@ getname(const u_char *ap)
 		break;
 
 	case 2:
-#if BYTE_ORDER == BIG_ENDIAN
+#ifdef WORDS_BIGENDIAN
 		addr = ((u_int32_t)*(u_short *)ap << 16) |
 			(u_int32_t)*(u_short *)(ap + 2);
 #else
@@ -186,7 +204,7 @@ getname(const u_char *ap)
 		break;
 
 	default:
-#if BYTE_ORDER == BIG_ENDIAN
+#ifdef WORDS_BIGENDIAN
 		addr = ((u_int32_t)ap[0] << 24) |
 			((u_int32_t)ap[1] << 16) |
 			((u_int32_t)ap[2] << 8) |
@@ -244,6 +262,71 @@ getname(const u_char *ap)
 	return (p->name);
 }
 
+#ifdef INET6
+/*
+ * Return a name for the IP6 address pointed to by ap.  This address
+ * is assumed to be in network byte order.
+ */
+char *
+getname6(const u_char *ap)
+{
+	register struct hostent *hp;
+	struct in6_addr addr;
+	static struct h6namemem *p;		/* static for longjmp() */
+	register char *cp;
+	char ntop_buf[INET6_ADDRSTRLEN];
+
+	memcpy(&addr, ap, sizeof(addr));
+	p = &h6nametable[*(u_int16_t *)&addr.s6_addr[14] & (HASHNAMESIZE-1)];
+	for (; p->nxt; p = p->nxt) {
+		if (memcmp(&p->addr, &addr, sizeof(addr)) == 0)
+			return (p->name);
+	}
+	p->addr = addr;
+	p->nxt = newh6namemem();
+
+	/*
+	 * Only print names when:
+	 *	(1) -n was not given.
+	 *      (2) Address is foreign and -f was given. (If -f was not
+	 *	    give, f_netmask and f_local are 0 and the test
+	 *	    evaluates to true)
+	 *      (3) -a was given or the host portion is not all ones
+	 *          nor all zeros (i.e. not a network or broadcast address)
+	 */
+	if (!nflag
+#if 0
+	&&
+	    (addr & f_netmask) == f_localnet &&
+	    (aflag ||
+	    !((addr & ~netmask) == 0 || (addr | netmask) == 0xffffffff))
+#endif
+	    ) {
+		if (!setjmp(getname_env)) {
+			(void)setsignal(SIGALRM, nohostname);
+			(void)alarm(20);
+			hp = gethostbyaddr((char *)&addr, sizeof(addr), AF_INET6);
+			(void)alarm(0);
+			if (hp) {
+				char *dotp;
+
+				p->name = savestr(hp->h_name);
+				if (Nflag) {
+					/* Remove domain qualifications */
+					dotp = strchr(p->name, '.');
+					if (dotp)
+						*dotp = '\0';
+				}
+				return (p->name);
+			}
+		}
+	}
+	cp = (char *)inet_ntop(AF_INET6, &addr, ntop_buf, sizeof(ntop_buf));
+	p->name = savestr(cp);
+	return (p->name);
+}
+#endif /* INET6 */
+
 static char hex[] = "0123456789abcdef";
 
 
@@ -273,6 +356,51 @@ lookup_emem(const u_char *ep)
 	tp->e_nxt = (struct enamemem *)calloc(1, sizeof(*tp));
 	if (tp->e_nxt == NULL)
 		error("lookup_emem: calloc");
+
+	return tp;
+}
+
+/*
+ * Find the hash node that corresponds to the bytestring 'bs' 
+ * with length 'nlen'
+ */
+
+static inline struct enamemem *
+lookup_bytestring(register const u_char *bs, const int nlen)
+{
+	struct enamemem *tp;
+	register u_int i, j, k;
+
+	if (nlen >= 6) {
+		k = (bs[0] << 8) | bs[1];
+		j = (bs[2] << 8) | bs[3];
+		i = (bs[4] << 8) | bs[5];
+	} else if (nlen >= 4) {
+		k = (bs[0] << 8) | bs[1];
+		j = (bs[2] << 8) | bs[3];
+		i = 0;
+	} else
+		i = j = k = 0;
+
+	tp = &bytestringtable[(i ^ j) & (HASHNAMESIZE-1)];
+	while (tp->e_nxt)
+		if (tp->e_addr0 == i &&
+		    tp->e_addr1 == j &&
+		    tp->e_addr2 == k &&
+		    bcmp((char *)bs, (char *)(tp->e_bs), nlen) == 0)
+			return tp;
+		else
+			tp = tp->e_nxt;
+
+	tp->e_addr0 = i;
+	tp->e_addr1 = j;
+	tp->e_addr2 = k;
+
+	tp->e_bs = (u_char *) calloc(1, nlen + 1);
+	bcopy(bs, tp->e_bs, nlen);
+	tp->e_nxt = (struct enamemem *)calloc(1, sizeof(*tp));
+	if (tp->e_nxt == NULL)
+		error("lookup_bytestring: calloc");
 
 	return tp;
 }
@@ -361,7 +489,7 @@ etheraddr_string(register const u_char *ep)
 		return (tp->e_name);
 #ifdef HAVE_ETHER_NTOHOST
 	if (!nflag) {
-		char buf[128];
+		char buf[MAXHOSTNAMELEN + 1];
 		if (ether_ntohost(buf, (struct ether_addr *)ep) == 0) {
 			tp->e_name = savestr(buf);
 			return (tp->e_name);
@@ -380,6 +508,36 @@ etheraddr_string(register const u_char *ep)
 	}
 	*cp = '\0';
 	tp->e_name = savestr(buf);
+	return (tp->e_name);
+}
+
+char *
+linkaddr_string(const u_char *ep, const int len)
+{
+	register u_int i, j;
+	register char *cp;
+	register struct enamemem *tp;
+
+	if (len == 6)	/* XXX not totally correct... */
+		return etheraddr_string(ep);
+	
+	tp = lookup_bytestring(ep, len);
+	if (tp->e_name)
+		return (tp->e_name);
+
+	tp->e_name = cp = (char *)malloc(len*3);
+	if (tp->e_name == NULL)
+		error("linkaddr_string: malloc");
+	if ((j = *ep >> 4) != 0)
+		*cp++ = hex[j];
+	*cp++ = hex[*ep++ & 0xf];
+	for (i = len-1; i > 0 ; --i) {
+		*cp++ = ':';
+		if ((j = *ep >> 4) != 0)
+			*cp++ = hex[j];
+		*cp++ = hex[*ep++ & 0xf];
+	}
+	*cp = '\0';
 	return (tp->e_name);
 }
 
@@ -439,7 +597,6 @@ protoid_string(register const u_char *pi)
 char *
 llcsap_string(u_char sap)
 {
-	register char *cp;
 	register struct hnamemem *tp;
 	register u_int32_t i = sap;
 	char buf[sizeof("sap 00")];
@@ -451,12 +608,7 @@ llcsap_string(u_char sap)
 	tp->addr = i;
 	tp->nxt = newhnamemem();
 
-	cp = buf;
-	(void)strcpy(cp, "sap ");
-	cp += strlen(cp);
-	*cp++ = hex[sap >> 4 & 0xf];
-	*cp++ = hex[sap & 0xf];
-	*cp++ = '\0';
+	snprintf(buf, sizeof(buf), "sap %02x", sap & 0xff);
 	tp->name = savestr(buf);
 	return (tp->name);
 }
@@ -629,7 +781,7 @@ init_etherarray(void)
 	register struct etherlist *el;
 	register struct enamemem *tp;
 #ifdef HAVE_ETHER_NTOHOST
-	char name[256];
+	char name[MAXHOSTNAMELEN + 1];
 #else
 	register struct pcap_etherent *ep;
 	register FILE *fp;
@@ -759,3 +911,24 @@ newhnamemem(void)
 	p = ptr++;
 	return (p);
 }
+
+#ifdef INET6
+/* Return a zero'ed h6namemem struct and cuts down on calloc() overhead */
+struct h6namemem *
+newh6namemem(void)
+{
+	register struct h6namemem *p;
+	static struct h6namemem *ptr = NULL;
+	static u_int num = 0;
+
+	if (num  <= 0) {
+		num = 64;
+		ptr = (struct h6namemem *)calloc(num, sizeof (*ptr));
+		if (ptr == NULL)
+			error("newh6namemem: calloc");
+	}
+	--num;
+	p = ptr++;
+	return (p);
+}
+#endif /* INET6 */

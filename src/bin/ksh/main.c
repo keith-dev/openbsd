@@ -1,4 +1,4 @@
-/*	$OpenBSD: main.c,v 1.17 1999/08/04 19:11:13 millert Exp $	*/
+/*	$OpenBSD: main.c,v 1.19 1999/11/14 18:18:39 millert Exp $	*/
 
 /*
  * startup, main loop, environments and error handling
@@ -457,7 +457,6 @@ include(name, argc, argv, intr_ok)
 	int intr_ok;
 {
 	register Source *volatile s = NULL;
-	Source *volatile sold;
 	struct shf *shf;
 	char **volatile old_argv;
 	volatile int old_argc;
@@ -474,11 +473,9 @@ include(name, argc, argv, intr_ok)
 		old_argv = (char **) 0;
 		old_argc = 0;
 	}
-	sold = source;
 	newenv(E_INCL);
 	i = ksh_sigsetjmp(e->jbuf, 0);
 	if (i) {
-		source = sold;
 		if (s) /* Do this before quitenv(), which frees the memory */
 			shf_close(s->u.shf);
 		quitenv();
@@ -515,7 +512,6 @@ include(name, argc, argv, intr_ok)
 	s->u.shf = shf;
 	s->file = str_save(name, ATEMP);
 	i = shell(s, FALSE);
-	source = sold;
 	shf_close(s->u.shf);
 	quitenv();
 	if (old_argv) {
@@ -548,6 +544,7 @@ shell(s, toplevel)
 	volatile int wastty = s->flags & SF_TTY;
 	volatile int attempts = 13;
 	volatile int interactive = Flag(FTALKING) && toplevel;
+	Source *volatile old_source = source;
 	int i;
 
 	newenv(E_PARSE);
@@ -555,7 +552,6 @@ shell(s, toplevel)
 		really_exit = 0;
 	i = ksh_sigsetjmp(e->jbuf, 0);
 	if (i) {
-		s->start = s->str = null;
 		switch (i) {
 		  case LINTR: /* we get here if SIGINT not caught or ignored */
 		  case LERROR:
@@ -575,16 +571,20 @@ shell(s, toplevel)
 				 * a tty, but to have stopped jobs, one only
 				 * needs FMONITOR set (not FTALKING/SF_TTY)...
 				 */
+				/* toss any input we have so far */
+				s->start = s->str = null;
 				break;
 			}
 			/* fall through... */
 		  case LEXIT:
 		  case LLEAVE:
 		  case LRETURN:
+			source = old_source;
 			quitenv();
 			unwind(i);	/* keep on going */
 			/*NOREACHED*/
 		  default:
+			source = old_source;
 			quitenv();
 			internal_errorf(1, "shell: %d", i);
 			/*NOREACHED*/
@@ -641,6 +641,7 @@ shell(s, toplevel)
 		reclaim();
 	}
 	quitenv();
+	source = old_source;
 	return exstat;
 }
 

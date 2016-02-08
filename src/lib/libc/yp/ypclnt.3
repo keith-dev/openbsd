@@ -1,4 +1,4 @@
-.\"	$OpenBSD: ypclnt.3,v 1.9 1999/07/09 13:35:21 aaron Exp $
+.\"	$OpenBSD: ypclnt.3,v 1.11 2000/03/14 21:31:45 aaron Exp $
 .\"
 .\" Copyright (c) 1996 The NetBSD Foundation, Inc.
 .\" All rights reserved.
@@ -52,6 +52,7 @@
 .Nd Interface to the YP subsystem
 .Sh SYNOPSIS
 .Fd #include <sys/types.h>
+.Fd #include <rpc/rpc.h>
 .Fd #include <rpcsvc/ypclnt.h>
 .Fd #include <rpcsvc/yp_prot.h>
 .Ft int
@@ -136,7 +137,7 @@ to a YP server process.  The client process need not explicitly bind to
 the server, as it happens automatically whenever a lookup occurs.
 The function
 .Fn yp_bind
-is provided for a backup strategy, e.g. a local file, when a YP server process
+is provided for a backup strategy, e.g., a local file, when a YP server process
 is not available.  Each binding uses one socket descriptor on the client
 process, which may be explicitly freed using
 .Fn yp_unbind ,
