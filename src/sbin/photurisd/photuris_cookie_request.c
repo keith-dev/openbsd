@@ -1,5 +1,7 @@
+/*	$OpenBSD: photuris_cookie_request.c,v 1.4 2001/01/28 22:45:13 niklas Exp $	*/
+
 /*
- * Copyright 1997 Niels Provos <provos@physnet.uni-hamburg.de>
+ * Copyright 1997-2000 Niels Provos <provos@citi.umich.edu>
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -34,7 +36,7 @@
  */
 
 #ifndef lint
-static char rcsid[] = "$Id: photuris_cookie_request.c,v 1.1 1998/11/14 23:37:26 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: photuris_cookie_request.c,v 1.4 2001/01/28 22:45:13 niklas Exp $";
 #endif
 
 #include <stdio.h>
@@ -62,14 +64,13 @@ photuris_cookie_request(struct stateob *st, u_char *buffer, int *size)
 	*size = COOKIE_REQUEST_PACKET_SIZE;	/* fixed size */
 	
 	if (st->counter == 0) {
-	     prev_st = state_find(st->address);
 	     old_st = NULL;
-	     while (prev_st != NULL) {
+	     for (prev_st = state_find(st->address); prev_st;
+		  prev_st = TAILQ_NEXT(prev_st, next)) {
 		  if (prev_st->lifetime >= timeout) {
 		       timeout = prev_st->lifetime;
 		       old_st = prev_st;
 		  }
-		  prev_st = prev_st->next;
 	     }
 	     
 	     /* Check if we have an exchange going already */

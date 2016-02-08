@@ -1,3 +1,6 @@
+/*	$OpenBSD: strdup.c,v 1.3 2001/04/02 23:11:21 drahn Exp $	*/
+
+#include <string.h>
 
 void * _dl_malloc(int);
 

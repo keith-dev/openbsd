@@ -1,4 +1,4 @@
-#	$OpenBSD: install.md,v 1.8 2000/06/23 18:53:24 mickey Exp $
+#	$OpenBSD: install.md,v 1.12 2001/03/13 21:22:50 deraadt Exp $
 #
 #
 # Copyright rc) 1996 The NetBSD Foundation, Inc.
@@ -45,8 +45,8 @@ MDSETS=kernel
 
 md_set_term() {
 	test -n "$TERM" && return
-	echo -n "Specify terminal type [pcvt25]: "
-	getresp pcvt25
+	echo -n "Specify terminal type [vt220]: "
+	getresp vt220
 	TERM=$resp
 	export TERM
 }
@@ -61,12 +61,12 @@ md_machine_arch() {
 
 md_get_diskdevs() {
 	# return available disk devices
-	bsort `cat /kern/msgbuf | egrep "^[sw]d[0-9]+ " | cutword 1`
+	bsort `egrep -a "^[sw]d[0-9]+ " /kern/msgbuf | cutword 1`
 }
 
 md_get_cddevs() {
 	# return available CDROM devices
-	bsort `cat /kern/msgbuf | egrep "^cd[0-9]+ " | cutword 1`
+	bsort `egrep -a "^cd[0-9]+ " /kern/msgbuf | cutword 1`
 }
 
 md_get_partition_range() {
@@ -96,7 +96,7 @@ md_installboot() {
 	if [ "$xfree86" = y ]; then
 		echo
 		echo "Enabling machdep.allowaperture. Read xf86(4) for more information."
-		echo '1,$s/^#machdep\.allowaperture=1/machdep\.allowaperture=1	/
+		echo '1,$s/^#machdep\.allowaperture=2/machdep\.allowaperture=2	/
 w
 q' | ed /mnt/etc/sysctl.conf 2> /dev/null
 		echo
@@ -108,7 +108,7 @@ md_native_fstype() {
 }
 
 md_native_fsopts() {
-    echo ro
+    echo "ro,-l"
 }
 
 md_checkfordisklabel() {

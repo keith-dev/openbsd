@@ -1,4 +1,4 @@
-#	$OpenBSD: list,v 1.14 2000/07/02 18:18:02 millert Exp $
+#	$OpenBSD: list,v 1.19 2001/04/19 02:17:32 deraadt Exp $
 
 # copy the crunched binary, link to it, and kill it
 COPY	${OBJDIR}/instbin	instbin
@@ -33,8 +33,8 @@ LINK	instbin			sbin/mount_ffs
 LINK	instbin			sbin/mount_msdos
 LINK	instbin			sbin/mount_kernfs
 LINK	instbin			sbin/mount_ext2fs
-LINK	instbin			sbin/newfs sbin/mount_mfs
 LINK	instbin			sbin/ping
+LINK	instbin			sbin/newfs
 LINK	instbin			sbin/restore
 LINK	instbin			sbin/route
 #LINK	instbin			sbin/scsi
@@ -77,13 +77,13 @@ SYMLINK	/tmp/hosts			etc/hosts
 COPY	${DESTDIR}/sbin/dhclient-script sbin/dhclient-script
 
 # and the common installation tools
-COPY	${CURDIR}/../common/termcap.pcvt	usr/share/misc/termcap
+COPY	${CURDIR}/../common/termcap.vt		usr/share/misc/termcap
 #COPY	${DESTDIR}/usr/share/misc/scsi_modes	usr/share/misc/scsi_modes
 
 # and the installation tools
-COPY	${CURDIR}/../common/dot.profile			.profile
-COPY	${CURDIR}/../common/install.md			install.md
-COPY	${CURDIR}/../../../miniroot/install.sh		install
-COPY	${CURDIR}/../../../miniroot/upgrade.sh		upgrade
-SPECIAL sed "/^VERSION=/s/=.*/=${REV}/" < ${CURDIR}/../../../miniroot/install.sub > install.sub
+SPECIAL sed -e '/^#[ 	].*$/d' < ${CURDIR}/../common/dot.profile	 > .profile
+SPECIAL sed -e '/^#[ 	].*$/d' < ${CURDIR}/../common/install.md	 > install.md
+SPECIAL	sed -e '/^#[ 	].*$/d' < ${CURDIR}/../../../miniroot/upgrade.sh > upgrade
+SPECIAL	sed -e '/^#[ 	].*$/d' < ${CURDIR}/../../../miniroot/install.sh > install
+SPECIAL sed -e '/^#[ 	].*$/d' -e "/^VERSION=/s/=.*/=${REV}/" < ${CURDIR}/../../../miniroot/install.sub > install.sub
 SPECIAL	chmod 755 install upgrade

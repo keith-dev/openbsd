@@ -1,5 +1,7 @@
+/*	$OpenBSD: compute_secrets.c,v 1.5 2001/01/28 22:45:07 niklas Exp $	*/
+
 /*
- * Copyright 1997,1998 Niels Provos <provos@physnet.uni-hamburg.de>
+ * Copyright 1997-2000 Niels Provos <provos@citi.umich.edu>
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -34,7 +36,7 @@
  */
 
 #ifndef lint 
-static char rcsid[] = "$Id: compute_secrets.c,v 1.1 1998/11/14 23:37:22 deraadt Exp $"; 
+static char rcsid[] = "$OpenBSD: compute_secrets.c,v 1.5 2001/01/28 22:45:07 niklas Exp $"; 
 #endif 
 
 #define _SECRETS_C_
@@ -46,7 +48,7 @@ static char rcsid[] = "$Id: compute_secrets.c,v 1.1 1998/11/14 23:37:22 deraadt 
 #include <sys/socket.h> 
 #include <netinet/in.h> 
 #include <arpa/inet.h> 
-#include <gmp.h>
+#include <ssl/bn.h>
 #include <md5.h>
 #include "state.h"
 #include <sha1.h>
@@ -59,58 +61,58 @@ static char rcsid[] = "$Id: compute_secrets.c,v 1.1 1998/11/14 23:37:22 deraadt 
 #include "spi.h"
 #include "exchange.h"
 #include "scheme.h"
-#include "errlog.h"
+#include "log.h"
 
 int privacykey(struct stateob *st, struct idxform *hash, u_int8_t *key, 
 	       u_int8_t *packet, u_int16_t bytes, u_int16_t *order, int owner);
+
 int
 compute_shared_secret(struct stateob *st, 
-		      u_int8_t **shared, u_int16_t *sharedsize)
+		      u_int8_t **shared, size_t *sharedsize)
 {
      struct moduli_cache *mod;
-     int header;
+     int header, res;
+     BIGNUM *tmp, *tex;
+     BN_CTX *ctx;
 
-     mpz_t tmp, bits, tex;
-
-     mpz_init(tmp);
-     mpz_init(bits);
-
-     if((mod=mod_find_modgen(st->modulus, st->generator)) == NULL) {
-	  log_error(0, "Can't find exchange information in cache in compute_shared_secret()");
-	  return -1;
+     if ((mod = mod_find_modgen(st->modulus, st->generator)) == NULL) {
+	  log_print("Can't find exchange information in cache in compute_shared_secret()");
+	  return (-1);
      }
 
      /* Compute Diffie-Hellmann a^(xy) (mod n) */
+     tex = BN_new();
+     BN_varpre2bn(st->texchange, st->texchangesize, tex);
 
-     mpz_init_set_varpre(tex, st->texchange);
-     mpz_powm(tmp, tex, mod->private_value, mod->modulus);
+     tmp = BN_new();
+     ctx = BN_CTX_new();
+     BN_mod_exp(tmp, tex, mod->private_value, mod->modulus, ctx);
+     BN_CTX_free(ctx);
 
-     mpz_clear(tex);
-
-     varpre_get_number_bits(bits, scheme_get_mod(st->scheme));
+     BN_clear_free(tex);
 
      *sharedsize = BUFFER_SIZE;
-     if(mpz_to_varpre(buffer, sharedsize, tmp, bits) == -1)   
+     res = BN_bn2varpre(tmp, buffer, sharedsize);
+     BN_clear_free(tmp);
+
+     if (res == -1)
           return -1;
-     mpz_clear(bits);
-     mpz_clear(tmp);
 
      /* The shared secret is not used with the size part */
-     if (buffer[0] == 255 && buffer[1] == 255)
-	  header = 8;
-     else if (buffer[0] == 255)
+     if (buffer[0] == 255)
 	  header = 4;
      else
 	  header = 2;
 
      *sharedsize -= header;
 
-     if((*shared = calloc(*sharedsize,sizeof(u_int8_t))) == NULL) {
-          log_error(0, "Not enough memory for shared secret in compute_shared_secret()");
-          return -1;
+     if ((*shared = calloc(*sharedsize,sizeof(u_int8_t))) == NULL) {
+          log_print("Not enough memory for shared secret in compute_shared_secret()");
+          return (-1);
      }
-     bcopy(buffer+header, *shared, *sharedsize);
-     return 0;
+     bcopy(buffer + header, *shared, *sharedsize);
+
+     return (0);
 }
 
 /*
@@ -138,14 +140,14 @@ make_session_keys(struct stateob *st, struct spiob *spi)
 	  if (p[i] != AT_AH_ATTRIB && p[i] != AT_ESP_ATTRIB) {
 	       bits = get_session_key_length(p+i);
 	       if (bits == -1) {
-		    log_error(0, "Invalid attribute choice for SPI in make_session_keys()");
+		    log_print("Invalid attribute choice for SPI in make_session_keys()");
 		    return -1;
 	       }
 	       count += bits & 7 ? (bits >> 3) + 1 : bits >> 3;
 	  }
      }
      if ((*secret = calloc(count, sizeof(u_int8_t))) == NULL) {
-	  log_error(1, "calloc() in make_session_keys()");
+	  log_error("calloc() in make_session_keys()");
 	  return -1;
      }
      *secretsize = count;
@@ -192,7 +194,7 @@ get_session_key_length(u_int8_t *attribute)
      attrib_t *ob;
 
      if ((ob = getattrib(*attribute)) == NULL) {
-	  log_error(0, "Unknown attribute %d in get_session_key_length()", 
+	  log_print("Unknown attribute %d in get_session_key_length()", 
 		    *attribute);
 	  return -1;
      }
@@ -234,7 +236,7 @@ compute_session_key(struct stateob *st, u_int8_t *key,
 	  hash = get_hash(HASH_SHA1);
 	  break;
      default:
-	  log_error(0, "Unkown scheme %d in compute_session_key()",
+	  log_print("Unkown scheme %d in compute_session_key()",
 		    ntohs(*((u_int16_t *)st->scheme)));
 	  return -1;
      }	  
@@ -331,7 +333,7 @@ init_privacy_key(struct stateob *st, int owner)
 	  hash = get_hash(HASH_SHA1);
 	  break;
      default:  
-          log_error(0, "Unknown exchange scheme in init_privacy_key()");
+          log_print("Unknown exchange scheme in init_privacy_key()");
           return -1;  
      }  
 
@@ -342,7 +344,7 @@ init_privacy_key(struct stateob *st, int owner)
 	  free(*ctx);
 
      if ((*ctx = calloc(hash->ctxsize, sizeof(char))) == NULL) {
-	  log_error(1, "calloc() in init_privacy_key()");
+	  log_error("calloc() in init_privacy_key()");
 	  return -1;
      }
      hash->Init(*ctx);
@@ -381,7 +383,7 @@ compute_privacy_key(struct stateob *st, u_int8_t *key, u_int8_t *packet,
 	  hash = get_hash(HASH_SHA1);
 	  break;
      default:  
-          log_error(0, "Unknown exchange scheme in compute_privacy_key()");
+          log_print("Unknown exchange scheme in compute_privacy_key()");
           return -1;  
      }  
 

@@ -1,4 +1,4 @@
-.\"	$OpenBSD: find.1,v 1.29 2000/07/10 14:32:41 millert Exp $
+.\"	$OpenBSD: find.1,v 1.31 2001/03/14 22:08:33 deraadt Exp $
 .\" Copyright (c) 1990, 1993
 .\"	The Regents of the University of California.  All rights reserved.
 .\"
@@ -492,7 +492,7 @@ The following examples are shown as given to the shell:
 .Bl -tag -width findx
 .It Li "find  /  \e!  -name  \*q*.c\*q  -print"
 Print out a list of all the files whose names do not end in
-.Dq .c .
+.Dq \&.c .
 .It Li "find  /  -newer  ttt  -user  wnj  -print"
 Print out a list of all the files owned by user
 .Dq wnj
@@ -594,6 +594,11 @@ in the utility name or the
 utility arguments if it had preceding or following non-whitespace characters.
 This version replaces it no matter where in the utility name or arguments
 it appears.
+.Sh HISTORY
+A
+.Nm
+command appeared in
+.At v1 .
 .Sh BUGS
 The special characters used by
 .Nm
@@ -629,8 +634,3 @@ The
 .Fl W
 option is probably not the most elegant way to handle whiteouts.
 It may be replaced by a more sophisticated algorithm eventually.
-.Sh HISTORY
-A
-.Nm
-command appeared in
-.At v1 .

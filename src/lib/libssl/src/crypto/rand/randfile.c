@@ -61,8 +61,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "openssl/e_os.h"
-
 #ifdef VMS
 #include <unixio.h>
 #endif
@@ -75,6 +73,7 @@
 # include <sys/stat.h>
 #endif
 
+#include <openssl/e_os.h>
 #include <openssl/crypto.h>
 #include <openssl/rand.h>
 
@@ -139,7 +138,7 @@ err:
 int RAND_write_file(const char *file)
 	{
 	unsigned char buf[BUFSIZE];
-	int i,ret=0,err=0;
+	int i,ret=0,rand_err=0;
 	FILE *out = NULL;
 	int n;
 	struct stat sb;
@@ -156,18 +155,18 @@ int RAND_write_file(const char *file)
 	  }
 	}
 
-#if defined(O_CREAT) && defined(O_EXCL) && !defined(WIN32)
+#if defined(O_CREAT) && !defined(WIN32)
 	/* For some reason Win32 can't write to files created this way */
-
-        /* chmod(..., 0600) is too late to protect the file,
-         * permissions should be restrictive from the start */
-        int fd = open(file, O_CREAT | O_EXCL, 0600);
-        if (fd != -1)
-                out = fdopen(fd, "wb");
+	
+	/* chmod(..., 0600) is too late to protect the file,
+	 * permissions should be restrictive from the start */
+	int fd = open(file, O_CREAT, 0600);
+	if (fd != -1)
+		out = fdopen(fd, "wb");
 #endif
-        if (out == NULL)
-                out = fopen(file,"wb");
-        if (out == NULL) goto err;
+	if (out == NULL)
+		out = fopen(file,"wb");
+	if (out == NULL) goto err;
 
 #ifndef NO_CHMOD
 	chmod(file,0600);
@@ -178,7 +177,7 @@ int RAND_write_file(const char *file)
 		i=(n > BUFSIZE)?BUFSIZE:n;
 		n-=BUFSIZE;
 		if (RAND_bytes(buf,i) <= 0)
-			err=1;
+			rand_err=1;
 		i=fwrite(buf,1,i,out);
 		if (i <= 0)
 			{
@@ -194,7 +193,7 @@ int RAND_write_file(const char *file)
 	{
 	char *tmpf;
 
-	tmpf = Malloc(strlen(file) + 4);  /* to add ";-1" and a nul */
+	tmpf = OPENSSL_malloc(strlen(file) + 4);  /* to add ";-1" and a nul */
 	if (tmpf)
 		{
 		strcpy(tmpf, file);
@@ -211,39 +210,37 @@ int RAND_write_file(const char *file)
 	fclose(out);
 	memset(buf,0,BUFSIZE);
 err:
-	return(err ? -1 : ret);
+	return (rand_err ? -1 : ret);
 	}
 
 const char *RAND_file_name(char *buf, int size)
 	{
-	char *s;
+	char *s = NULL;
 	char *ret=NULL;
 	struct stat sb;
 
-	s=getenv("RANDFILE");
-	if (s != NULL)
+	if (issetugid() == 0)
+		s = getenv("RANDFILE");
+	if (s != NULL && *s && strlen(s) + 1 < size)
 		{
-		strncpy(buf,s,size-1);
-		buf[size-1]='\0';
+		strlcpy(buf,s,size);
 		ret=buf;
 		}
 	else
 		{
-		s=getenv("HOME");
-		if (s == NULL || *s == '\0') 
-		  ret = RFILE;
-		if (((int)(strlen(s)+strlen(RFILE)+2)) > size) 
-			ret=RFILE;
-		else 
+		if (issetugid() == 0)
+			s=getenv("HOME");
+		if (s && *s && strlen(s)+strlen(RFILE)+2 < size)
 			{
-			 strlcpy(buf,s,size);
+			strlcpy(buf,s,size);
 #ifndef VMS
-			 strcat(buf,"/");
+			strcat(buf,"/");
 #endif
-			 strlcat(buf,RFILE,size);
-			 ret=buf;
+			strlcat(buf,RFILE,size);
+			ret=buf;
 			}
 		}
+
 #ifdef DEVRANDOM
 	/* given that all random loads just fail if the file can't be 
 	 * seen on a stat, we stat the file we're returning, if it
@@ -252,9 +249,11 @@ const char *RAND_file_name(char *buf, int size)
 	 * to something hopefully decent if that isn't available. 
 	 */
 
+	if (ret == NULL)
+		ret = DEVRANDOM;
+
 	if (stat(ret,&sb) == -1)
-	  ret = DEVRANDOM;
+		ret = DEVRANDOM;
 #endif
 	return(ret);
 	}
-

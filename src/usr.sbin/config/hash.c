@@ -1,4 +1,4 @@
-/*	$OpenBSD: hash.c,v 1.7 2000/01/04 14:23:43 angelos Exp $	*/
+/*	$OpenBSD: hash.c,v 1.9 2000/11/15 01:49:52 angelos Exp $	*/
 /*	$NetBSD: hash.c,v 1.4 1996/11/07 22:59:43 gwr Exp $	*/
 
 /*
@@ -264,7 +264,7 @@ ht_remove(ht, nam)
 	hp = ht->ht_tab[h & ht->ht_mask];
 	while (hp && hp->h_name == nam)	{
 	        ht->ht_tab[h & ht->ht_mask] = hp->h_next;
-		/* XXX Free hp ? */
+		/* XXX free hp ? */
 		hp = ht->ht_tab[h & ht->ht_mask];
 	}
 
@@ -274,7 +274,7 @@ ht_remove(ht, nam)
 	for (thp = hp->h_next; thp != NULL; thp = hp->h_next) {
 	        if (thp->h_name == nam) {
 		        hp->h_next = thp->h_next;
-			/* XXX Free hp ? */
+			/* XXX free thp ? */
 		} else
 		        hp = thp;
 	}

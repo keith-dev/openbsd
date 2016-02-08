@@ -1,4 +1,4 @@
-/*	$OpenBSD: ftpcmd.y,v 1.21 2000/06/17 19:42:18 deraadt Exp $	*/
+/*	$OpenBSD: ftpcmd.y,v 1.24 2000/11/14 20:27:01 itojun Exp $	*/
 /*	$NetBSD: ftpcmd.y,v 1.7 1996/04/08 19:03:11 jtc Exp $	*/
 
 /*
@@ -47,7 +47,7 @@
 #if 0
 static char sccsid[] = "@(#)ftpcmd.y	8.3 (Berkeley) 4/6/94";
 #else
-static char rcsid[] = "$OpenBSD: ftpcmd.y,v 1.21 2000/06/17 19:42:18 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: ftpcmd.y,v 1.24 2000/11/14 20:27:01 itojun Exp $";
 #endif
 #endif /* not lint */
 
@@ -135,7 +135,7 @@ char	*fromname;
 %token	<s> ALL
 %token	<i> NUMBER
 
-%type	<i> check_login octal_number byte_size
+%type	<i> check_login check_login_epsvall octal_number byte_size
 %type	<i> struct_code mode_code type_code form_code
 %type	<s> pathstring pathname password username
 %type	<i> host_port host_long_port4 host_long_port6
@@ -166,7 +166,7 @@ cmd
 			memset($3, 0, strlen($3));
 			free($3);
 		}
-	| PORT check_login SP host_port CRLF
+	| PORT check_login_epsvall SP host_port CRLF
 		{
 			if ($2) {
 				if ($4) {
@@ -195,173 +195,76 @@ cmd
 				}
 			}
 		}
-	| LPRT check_login SP host_long_port4 CRLF
-		{
-			/* reject invalid host_long_port4 */
-			if ($4) {
-				reply(500, "Illegal LPRT command rejected");
-				usedefault = 1;
-			} else if (epsvall) {
-				reply(501, "LPRT disallowed after EPSV ALL");
-				usedefault = 1;
-			} else {
-				usedefault = 0;
-				if (pdata >= 0) {
-					(void) close(pdata);
-					pdata = -1;
-				}
-				reply(200, "LPRT command successful.");
-			}
-		}
-
-	| LPRT check_login SP host_long_port6 CRLF
-		{
-			/* reject invalid host_long_port6 */
-			if ($4) {
-				reply(500, "Illegal LPRT command rejected");
-				usedefault = 1;
-			} else if (epsvall) {
-				reply(501, "LPRT disallowed after EPSV ALL");
-				usedefault = 1;
-			} else {
-				usedefault = 0;
-				if (pdata >= 0) {
-					(void) close(pdata);
-					pdata = -1;
-				}
-				reply(200, "LPRT command successful.");
-			}
-		}
-
-	| EPRT check_login SP STRING CRLF
-		{
-			char *tmp = NULL;
-			char *result[3];
-			char *p, *q;
-			char delim;
-			struct addrinfo hints;
-			struct addrinfo *res;
-			int i;
-
-			if (epsvall) {
-				reply(501, "EPRT disallowed after EPSV ALL");
-				goto eprt_done;
-			}
-			usedefault = 0;
-			if (pdata >= 0) {
-				(void) close(pdata);
-				pdata = -1;
-			}
-
-			/*XXX checks for login */
-
-			tmp = strdup($4);
-			if (!tmp) {
-				fatal("not enough core.");
-				/*NOTREACHED*/
-			}
-			p = tmp;
-			delim = p[0];
-			p++;
-			memset(result, 0, sizeof(result));
-			for (i = 0; i < 3; i++) {
-				q = strchr(p, delim);
-				if (!q || *q != delim) {
-		parsefail:
-					reply(500, "Invalid argument, rejected.");
-					if (tmp)
-						free(tmp);
-					usedefault = 1;
-					goto eprt_done;
-				}
-				*q++ = '\0';
-				result[i] = p;
-				p = q;
-			}
-
-			/* some more sanity check */
-			p = result[0];
-			while (*p) {
-				if (!isdigit(*p))
-					goto parsefail;
-				p++;
-			}
-			p = result[2];
-			while (*p) {
-				if (!isdigit(*p))
-					goto parsefail;
-				p++;
-			}
-
-			memset(&hints, 0, sizeof(hints));
-			if (atoi(result[0]) == 1)
-				hints.ai_family = PF_INET;
-			if (atoi(result[0]) == 2)
-				hints.ai_family = PF_INET6;
-			else
-				hints.ai_family = PF_UNSPEC;	/*XXX*/
-			hints.ai_socktype = SOCK_STREAM;
-			if (getaddrinfo(result[1], result[2], &hints, &res))
-				goto parsefail;
-			memcpy(&data_dest, res->ai_addr, res->ai_addrlen);
-			if (his_addr.su_family == AF_INET6 &&
-			    data_dest.su_family == AF_INET6) {
-				/* XXX more sanity checks! */
-				data_dest.su_sin6.sin6_scope_id =
-				    his_addr.su_sin6.sin6_scope_id;
-			}
-			free(tmp);
-			tmp = NULL;
-			if (pdata >= 0) {
-				(void) close(pdata);
-				pdata = -1;
-			}
-			reply(200, "EPRT command successful.");
-		eprt_done:;
-		}
-
-	| PASV check_login CRLF
+	| LPRT check_login_epsvall SP host_long_port4 CRLF
 		{
 			if ($2) {
-				passive();
+				/* reject invalid host_long_port4 */
+				if ($4) {
+					reply(500,
+					    "Illegal LPRT command rejected");
+					usedefault = 1;
+				} else {
+					usedefault = 0;
+					if (pdata >= 0) {
+						(void) close(pdata);
+						pdata = -1;
+					}
+					reply(200, "LPRT command successful.");
+				}
 			}
 		}
-	| LPSV CRLF
+
+	| LPRT check_login_epsvall SP host_long_port6 CRLF
 		{
-			if (epsvall)
-				reply(501, "LPSV disallowed after EPSV ALL");
-			else
+			if ($2) {
+				/* reject invalid host_long_port6 */
+				if ($4) {
+					reply(500,
+					    "Illegal LPRT command rejected");
+					usedefault = 1;
+				} else {
+					usedefault = 0;
+					if (pdata >= 0) {
+						(void) close(pdata);
+						pdata = -1;
+					}
+					reply(200, "LPRT command successful.");
+				}
+			}
+		}
+
+	| EPRT check_login_epsvall SP STRING CRLF
+		{
+			if ($2)
+				extended_port($4);
+		}
+
+	| PASV check_login_epsvall CRLF
+		{
+			if ($2)
+				passive();
+		}
+	| LPSV check_login_epsvall CRLF
+		{
+			if ($2)
 				long_passive("LPSV", PF_UNSPEC);
 		}
-	| EPSV SP NUMBER CRLF
+	| EPSV check_login SP NUMBER CRLF
 		{
-			int pf;
-			switch ($3) {
-			case 1:
-				pf = PF_INET;
-				break;
-			case 2:
-				pf = PF_INET6;
-				break;
-			default:
-				pf = -1;	/*junk*/
-				break;
-			}
-			long_passive("EPSV", pf);
+			if ($2)
+				long_passive("EPSV", epsvproto2af($4));
 		}
-	| EPSV SP ALL CRLF
+	| EPSV check_login SP ALL CRLF
 		{
-			if (!logged_in) {
-				syslog(LOG_NOTICE, "long passive but not logged in");
-				reply(503, "Login with USER first.");
-			} else {
+			if ($2) {
 				reply(200, "EPSV ALL command successful.");
 				epsvall++;
 			}
 		}
-	| EPSV CRLF
+	| EPSV check_login CRLF
 		{
-			long_passive("EPSV", PF_UNSPEC);
+			if ($2)
+				long_passive("EPSV", PF_UNSPEC);
 		}
 	| TYPE check_login SP type_code CRLF
 		{
@@ -1052,6 +955,22 @@ check_login
 				reply(530, "Please login with USER and PASS.");
 				$$ = 0;
 			}
+		}
+	;
+
+check_login_epsvall
+	: /* empty */
+		{
+			if (!logged_in) {
+				reply(530, "Please login with USER and PASS.");
+				$$ = 0;
+			} else if (epsvall) {
+				reply(501, "the command is disallowed "
+				    "after EPSV ALL");
+				usedefault = 1;
+				$$ = 0;
+			} else
+				$$ = 1;
 		}
 	;
 

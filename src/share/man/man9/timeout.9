@@ -1,4 +1,4 @@
-.\"	$OpenBSD: timeout.9,v 1.11 2000/10/12 18:06:03 aaron Exp $
+.\"	$OpenBSD: timeout.9,v 1.14 2001/04/23 15:30:27 aaron Exp $
 .\"
 .\" Copyright (c) 2000 Artur Grabowski <art@openbsd.org>
 .\" All rights reserved.
@@ -39,11 +39,18 @@
 .Sh SYNOPSIS
 .Fd #include <sys/types.h>
 .Fd #include <sys/timeout.h>
+.Ft void
 .Fn "timeout_set" "struct timeout *to" "void (*fn)(void *)" "void *arg"
+.Ft void
 .Fn "timeout_add" "struct timeout *to" "int ticks"
+.Ft void
 .Fn "timeout_del" "struct timeout *to"
+.Ft int
 .Fn "timeout_pending" "struct timeout *to"
+.Ft int
 .Fn "timeout_initialized" "struct timeout *to"
+.Ft int
+.Fn "timeout_triggered" "struct timeout *to"
 .Sh DESCRIPTION
 The
 .Nm timeout
@@ -132,6 +139,15 @@ The
 .Fn timeout_initialized
 macro can be used to check if a timeout has been initialized.
 .Pp
+The
+.Fn timeout_triggered
+macro can be used to check if a timeout is running or has been run.
+The 
+.Fn timeout_add
+and
+.Fn timeout_del
+functions clear the triggered state for that timeout.
+.Pp
 The old
 .Fn timeout
 and
@@ -143,6 +159,7 @@ These functions are implemented in the file
 .Pa sys/kern/kern_timeout.c .
 .Sh SEE ALSO
 .Xr hz 9 ,
+.Xr hzto 9 ,
 .Xr sleep 9 ,
 .Xr splclock 9
 .Sh BUGS

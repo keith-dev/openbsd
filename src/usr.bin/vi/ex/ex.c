@@ -1,3 +1,5 @@
+/*	$OpenBSD: ex.c,v 1.10 2001/01/29 01:58:41 niklas Exp $	*/
+
 /*-
  * Copyright (c) 1992, 1993, 1994
  *	The Regents of the University of California.  All rights reserved.
@@ -2307,7 +2309,7 @@ ex_badaddr(sp, cp, ba, nret)
 	 * underlying file, that's the real problem.
 	 */
 	if (sp->ep == NULL) {
-		ex_emsg(sp, cp->name, EXM_NOFILEYET);
+		ex_emsg(sp, cp != NULL ? cp->name : NULL, EXM_NOFILEYET);
 		return;
 	}
 

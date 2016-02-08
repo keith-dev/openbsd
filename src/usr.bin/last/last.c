@@ -1,4 +1,4 @@
-/*	$OpenBSD: last.c,v 1.11 1998/07/13 02:11:33 millert Exp $	*/
+/*	$OpenBSD: last.c,v 1.14 2001/02/06 22:10:09 fgsch Exp $	*/
 /*	$NetBSD: last.c,v 1.6 1994/12/24 16:49:02 cgd Exp $	*/
 
 /*
@@ -44,7 +44,7 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)last.c	8.2 (Berkeley) 4/2/94";
 #endif
-static char rcsid[] = "$OpenBSD: last.c,v 1.11 1998/07/13 02:11:33 millert Exp $";
+static char rcsid[] = "$OpenBSD: last.c,v 1.14 2001/02/06 22:10:09 fgsch Exp $";
 #endif /* not lint */
 
 #include <sys/param.h>
@@ -106,6 +106,9 @@ int	 want __P((struct utmp *, int));
 void	 wtmp __P((void));
 void 	 checkargs __P((void));
 
+#define NAME_WIDTH	8
+#define HOST_WIDTH	24
+
 int
 main(argc, argv)
 	int argc;
@@ -162,7 +165,7 @@ main(argc, argv)
 		default:
 			(void)fprintf(stderr,
 			    "usage: last [-#] [-cns] [-f file] [-T] [-t tty]"
-			    " [-h host] [-d [[yy]yy[mm[dd[hh]]]]mm[.ss]]"
+			    " [-h host] [-d [[CC]YY][MMDD]hhmm[.SS]"
 			    " [user ...]\n");
 			exit(1);
 		}
@@ -286,18 +289,18 @@ wtmp()
 				if (want(bp, NO)) {
 					if (seconds) {
 				printf("%-*.*s %-*.*s %-*.*s %ld \n",
-						UT_NAMESIZE, UT_NAMESIZE,
+						NAME_WIDTH, UT_NAMESIZE,
 						bp->ut_name, UT_LINESIZE,
 						UT_LINESIZE, bp->ut_line,
-						UT_HOSTSIZE, UT_HOSTSIZE,
+						HOST_WIDTH, UT_HOSTSIZE,
 						bp->ut_host, bp->ut_time);
 					} else {
 						ct = ctime(&bp->ut_time);
 				printf("%-*.*s  %-*.*s %-*.*s %10.10s %*.*s \n",
-						UT_NAMESIZE, UT_NAMESIZE,
+						NAME_WIDTH, UT_NAMESIZE,
 						bp->ut_name, UT_LINESIZE,
 						UT_LINESIZE, bp->ut_line,
-						UT_HOSTSIZE, UT_HOSTSIZE,
+						HOST_WIDTH, UT_HOSTSIZE,
 						bp->ut_host, ct, timesize,
 						timesize, ct + 11);
 					}
@@ -315,16 +318,16 @@ wtmp()
 				if (want(bp, NO)) {
 					if (seconds) {
 				printf("%-*.*s %-*.*s %-*.*s %ld \n",
-					UT_NAMESIZE, UT_NAMESIZE, bp->ut_name,
+					NAME_WIDTH, UT_NAMESIZE, bp->ut_name,
 					UT_LINESIZE, UT_LINESIZE, bp->ut_line,
-					UT_HOSTSIZE, UT_HOSTSIZE, bp->ut_host,
+					HOST_WIDTH, UT_HOSTSIZE, bp->ut_host,
 					bp->ut_time);
 				    	} else {
 						ct = ctime(&bp->ut_time);
 				printf("%-*.*s  %-*.*s %-*.*s %10.10s %*.*s \n",
-					UT_NAMESIZE, UT_NAMESIZE, bp->ut_name,
+					NAME_WIDTH, UT_NAMESIZE, bp->ut_name,
 					UT_LINESIZE, UT_LINESIZE, bp->ut_line,
-					UT_HOSTSIZE, UT_HOSTSIZE, bp->ut_host,
+					HOST_WIDTH, UT_HOSTSIZE, bp->ut_host,
 					ct, timesize, timesize, ct + 11);
 				    	}
 					if (maxrec && !--maxrec)
@@ -354,16 +357,16 @@ wtmp()
 				snapfound = 1;
 				if (seconds) {
 				printf("%-*.*s %-*.*s %-*.*s %ld ",
-					UT_NAMESIZE, UT_NAMESIZE, bp->ut_name,
+					NAME_WIDTH, UT_NAMESIZE, bp->ut_name,
 					UT_LINESIZE, UT_LINESIZE, bp->ut_line,
-					UT_HOSTSIZE, UT_HOSTSIZE, bp->ut_host,
+					HOST_WIDTH, UT_HOSTSIZE, bp->ut_host,
 					bp->ut_time);
 				} else {
 					ct = ctime(&bp->ut_time);
 				printf("%-*.*s  %-*.*s %-*.*s %10.10s %*.*s ",
-					UT_NAMESIZE, UT_NAMESIZE, bp->ut_name,
+					NAME_WIDTH, UT_NAMESIZE, bp->ut_name,
 					UT_LINESIZE, UT_LINESIZE, bp->ut_line,
-					UT_HOSTSIZE, UT_HOSTSIZE, bp->ut_host,
+					HOST_WIDTH, UT_HOSTSIZE, bp->ut_host,
 					ct, timesize, timesize, ct + 11);
 				}
 				if (!T->logout)
@@ -566,7 +569,7 @@ ttyconv(arg)
 /* 
  * dateconv --
  * 	Convert the snapshot time in command line given in the format
- * 	[[yy]yy][mmdd]hhmm[.ss]] to a time_t.
+ * 	[[CC]YY][MMDD]hhmm[.ss]] to a time_t.
  * 	Derived from atime_arg1() in usr.bin/touch/touch.c
  */
 time_t

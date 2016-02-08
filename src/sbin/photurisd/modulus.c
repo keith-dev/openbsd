@@ -1,5 +1,7 @@
+/*	$OpenBSD: modulus.c,v 1.5 2001/01/28 22:45:12 niklas Exp $	*/
+
 /*
- * Copyright 1997 Niels Provos <provos@physnet.uni-hamburg.de>
+ * Copyright 1997-2000 Niels Provos <provos@citi.umich.edu>
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -40,51 +42,34 @@
 
 #include <stdlib.h>
 #include <time.h>
-#include <gmp.h>
+#include <ssl/bn.h>
 #include "config.h"
 #include "modulus.h"
-#include "errlog.h"
+#include "log.h"
 
-static struct moduli_cache *modob = NULL;
+TAILQ_HEAD(modlist, moduli_cache) modhead;
+
+void
+mod_init(void)
+{
+	TAILQ_INIT(&modhead);
+}
 
 int
 mod_insert(struct moduli_cache *ob)
 {
-     struct moduli_cache *tmp;
+	TAILQ_INSERT_TAIL(&modhead, ob, next);
 
-     ob->next = NULL;
-
-     if(modob == NULL) {
-	  modob = ob;
-	  return 1;
-     }
-     
-     tmp=modob;
-     while(tmp->next!=NULL)
-	  tmp = tmp->next;
-
-     tmp->next = ob;
-     return 1;
+	return (1);
 }
 
 int
 mod_unlink(struct moduli_cache *ob)
 {
-     struct moduli_cache *tmp;
-     if(modob == ob) {
-	  modob = ob->next;
-	  free(ob);
-	  return 1;
-     }
+	TAILQ_REMOVE(&modhead, ob, next);
+	free(ob);
 
-     for(tmp=modob; tmp!=NULL; tmp=tmp->next) {
-	  if(tmp->next==ob) {
-	       tmp->next=ob->next;
-	       free(ob);
-	       return 1;
-	  }
-     }
-     return 0;
+	return (0);
 }
 
 /* 
@@ -96,77 +81,78 @@ mod_unlink(struct moduli_cache *ob)
 void
 mod_check_prime(int iter, int tm)
 {
-     struct moduli_cache *p = modob, *tmp;
-     time_t now;
-     int flag;
+	struct moduli_cache *p, *tmp, *next;
+	time_t now;
+	int flag;
+	BN_CTX *ctx;
 
-#ifdef DEBUG 
-     char *hex; 
-#endif 
+	ctx = BN_CTX_new();
 
-     now = time(NULL);
-     while(p != NULL && (tm == 0 || (time(NULL) - now < tm))) {
-	  if (p->iterations < MOD_PRIME_MAX &&
-	      (p->status == MOD_UNUSED || p->status == MOD_COMPUTING)) {
-#ifdef DEBUG 
-	       hex = mpz_get_str(NULL, 16, p->modulus); 
-	       printf(" Checking 0x%s for primality: ", hex);  
-	       fflush(stdout); 
-	       free(hex); 
-#endif 
-	       flag = mpz_probab_prime_p(p->modulus, iter);
-	       if (!flag)
-		    log_error(0, "found a non prime in mod_check_prime()");
+	now = time(NULL);
+	for (p = TAILQ_FIRST(&modhead);
+	     p != NULL && (tm == 0 || (time(NULL) - now < tm)); p = next) {
+		next = TAILQ_NEXT(p, next);
 
-	       tmp = mod_find_modulus(p->modulus);
-	       while(tmp != NULL) {
-		    if (!flag) {
-			 tmp->status = MOD_NOTPRIME;
-			 tmp->lifetime = now + 2*MOD_TIMEOUT;
-		    } else {
-			 tmp->iterations += iter;
-			 if (tmp->iterations >= MOD_PRIME_MAX)
-			      tmp->status = MOD_PRIME;
-			 else
-			      tmp->status = MOD_COMPUTING;
-		    }
-		    tmp = mod_find_modulus_next(tmp, p->modulus);
-	       }
-#ifdef DEBUG
-	       if (!flag)
-		    printf("not prime\n");
-	       else if (p->iterations >= MOD_PRIME_MAX)
-		    printf("probably prime.\n");
-	       else
-		    printf("undecided.\n");
+		if (p->iterations < MOD_PRIME_MAX &&
+		    (p->status == MOD_UNUSED || p->status == MOD_COMPUTING)) {
+			flag = BN_is_prime(p->modulus, iter, NULL, ctx, NULL);
+			if (!flag)
+				log_print(__FUNCTION__": found a non prime");
+
+			tmp = mod_find_modulus(p->modulus);
+			while (tmp != NULL) {
+				if (!flag) {
+					tmp->status = MOD_NOTPRIME;
+					tmp->lifetime = now + 2*MOD_TIMEOUT;
+				} else {
+					tmp->iterations += iter;
+					if (tmp->iterations >= MOD_PRIME_MAX)
+						tmp->status = MOD_PRIME;
+					else
+						tmp->status = MOD_COMPUTING;
+				}
+				tmp = mod_find_modulus_next(tmp, p->modulus);
+			}
+#ifdef USE_DEBUG 
+			{
+				char *hex, *msg;
+				if (!flag)
+					msg = "not prime.";
+				else if (p->iterations >= MOD_PRIME_MAX)
+					msg = "probably prime.";
+				else
+					msg = "undecided.";
+				hex = BN_bn2hex(p->modulus); 
+				LOG_DBG((LOG_CRYPTO, 50, __FUNCTION__
+					 ": check prime: %s: %s", 
+					 hex, msg));
+				free(hex); 
+			}
 #endif
-	  }  
+		}  
 
-	  if (p->status == MOD_NOTPRIME && p->lifetime < now) {
-	       struct moduli_cache *tmp;
-#ifdef DEBUG
-	       printf("Unlinking non prime modulus.\n");
-#endif
-	       tmp = p;
-	       p = p->next;
-	       mod_value_reset(tmp);
-	       mod_unlink(tmp);
-	  }
-	  p = p->next;
-     }
+		if (p->status == MOD_NOTPRIME && p->lifetime < now) {
+			LOG_DBG((LOG_CRYPTO, 40, __FUNCTION__
+				 ": unlinking non prime modulus"));
+			mod_value_reset(tmp);
+			mod_unlink(tmp);
+		}
+	}
+
+	BN_CTX_free(ctx);
 }
 
 struct moduli_cache *
-mod_new_modgen(mpz_t m, mpz_t g)
+mod_new_modgen(BIGNUM *m, BIGNUM *g)
 {
      struct moduli_cache *p;
 
      if((p = calloc(1, sizeof(struct moduli_cache)))==NULL)
 	  return NULL;
 
-     mpz_init_set(p->modulus,m);
-     mpz_init_set(p->generator,g);
-     mpz_init(p->private_value);
+     p->modulus = BN_new(); BN_copy(p->modulus, m);
+     p->generator = BN_new(); BN_copy(p->generator, g);
+     p->private_value = BN_new();
 
      /* XXX - change lifetime later */
      p->lifetime = time(NULL) + MOD_TIMEOUT;
@@ -176,29 +162,29 @@ mod_new_modgen(mpz_t m, mpz_t g)
 }
 
 struct moduli_cache * 
-mod_new_modulus(mpz_t m) 
+mod_new_modulus(BIGNUM *m) 
 { 
      struct moduli_cache *tmp;
 
-     mpz_t generator;
-     mpz_init(generator);
+     BIGNUM *generator;
+     generator = BN_new();
      tmp = mod_new_modgen(m, generator);
-     mpz_clear(generator);
+     BN_clear_free(generator);
 
-     return tmp;
+     return (tmp);
 }
 
 int
 mod_value_reset(struct moduli_cache *ob)
 { 
-     mpz_clear(ob->private_value);
-     mpz_clear(ob->modulus);
-     mpz_clear(ob->generator);
+     BN_clear_free(ob->private_value);
+     BN_clear_free(ob->modulus);
+     BN_clear_free(ob->generator);
 
      if (ob->exchangevalue != NULL)
 	  free(ob->exchangevalue);
 
-     return 1;
+     return (1);
 }
 
 /* Find a proper modulus and generator in the queue.
@@ -206,95 +192,104 @@ mod_value_reset(struct moduli_cache *ob)
  */
 
 struct moduli_cache *
-mod_find_modgen_next(struct moduli_cache *ob, mpz_t modulus, mpz_t generator)
+mod_find_modgen_next(struct moduli_cache *ob, BIGNUM *modulus,
+		     BIGNUM *generator)
 {
-     struct moduli_cache *tmp = ob; 
-
-     if (tmp == NULL)
-	  tmp = modob;
+     if (ob != NULL)
+	     ob = TAILQ_NEXT(ob, next);
      else
-	  tmp = tmp->next;
+	     ob = TAILQ_FIRST(&modhead);
 
-     while(tmp!=NULL) { 
-          if((!mpz_cmp_ui(generator,0) ||  
-              !mpz_cmp(tmp->generator,generator)) && 
-             (!mpz_cmp_ui(modulus,0) || !mpz_cmp(modulus,tmp->modulus))) 
-               return tmp; 
-          tmp = tmp->next; 
+     for ( ; ob; ob = TAILQ_NEXT(ob, next)) { 
+          if ((BN_is_zero(generator) ||  
+	       !BN_cmp(ob->generator, generator)) && 
+	      (BN_is_zero(modulus) || !BN_cmp(modulus, ob->modulus))) 
+		  break; 
      } 
-     return NULL; 
+
+     return (ob); 
 }
 
 struct moduli_cache *
-mod_find_modgen(mpz_t modulus, mpz_t generator)
+mod_find_modgen(BIGNUM *modulus, BIGNUM *generator)
 {
-     return mod_find_modgen_next(NULL, modulus, generator);
+     return (mod_find_modgen_next(NULL, modulus, generator));
 }
 
 struct moduli_cache *   
-mod_find_generator_next(struct moduli_cache *ob, mpz_t generator)
+mod_find_generator_next(struct moduli_cache *ob, BIGNUM *generator)
 {
      struct moduli_cache *tmp;
-     mpz_t modulus;  
+     BIGNUM *modulus;  
   
-     mpz_init(modulus);                     /* Is set to zero by init */  
+     modulus = BN_new();
+     BN_zero(modulus);
+
      tmp = mod_find_modgen_next(ob, modulus, generator);  
-     mpz_clear(modulus);  
+
+     BN_free(modulus);  
   
-     return tmp;  
+     return (tmp);  
 }  
 
 struct moduli_cache *  
-mod_find_generator(mpz_t generator)  
+mod_find_generator(BIGNUM *generator)  
 { 
      struct moduli_cache *tmp;
-     mpz_t modulus; 
+     BIGNUM *modulus; 
  
-     mpz_init(modulus);                     /* Is set to zero by init */ 
+     modulus = BN_new();
+     BN_zero(modulus);
+
      tmp = mod_find_modgen(modulus,generator); 
-     mpz_clear(modulus); 
+
+     BN_free(modulus); 
  
-     return tmp; 
+     return (tmp); 
 } 
 
 struct moduli_cache *  
-mod_find_modulus_next(struct moduli_cache *ob, mpz_t modulus)  
+mod_find_modulus_next(struct moduli_cache *ob, BIGNUM *modulus)  
 { 
      struct moduli_cache *tmp;
-     mpz_t generator; 
+     BIGNUM *generator; 
  
-     mpz_init(generator);                    /* Is set to zero by init */ 
+     generator = BN_new();
+     BN_zero(generator);
+
      tmp = mod_find_modgen_next(ob, modulus, generator); 
-     mpz_clear(generator); 
+
+     BN_free(generator); 
  
-     return tmp; 
+     return (tmp); 
 } 
 
 struct moduli_cache * 
-mod_find_modulus(mpz_t modulus) 
+mod_find_modulus(BIGNUM *modulus) 
 {
      struct moduli_cache *tmp;
-     mpz_t generator;
+     BIGNUM *generator;
 
-     mpz_init(generator);                    /* Is set to zero by init */
+     generator = BN_new();
+     BN_zero(generator);
+
      tmp = mod_find_modgen(modulus,generator);
-     mpz_clear(generator);
 
-     return tmp;
+     BN_free(generator);
+
+     return (tmp);
 }
 
 
 void
-mod_cleanup()
+mod_cleanup(void)
 {
      struct moduli_cache *p;
-     struct moduli_cache *tmp = modob;
-     while(tmp!=NULL) {
-	  p = tmp;
-	  mod_value_reset(tmp);
-	  tmp = tmp->next;
-	  free(p);
+
+     while ((p = TAILQ_FIRST(&modhead))) {
+	     TAILQ_REMOVE(&modhead, p, next);
+	     mod_value_reset(p);
+	     free(p);
      }
-     modob = NULL;
 }
 

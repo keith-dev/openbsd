@@ -1,4 +1,4 @@
-/* $OpenBSD: sample-app.c,v 1.1 1999/11/05 00:27:18 angelos Exp $ */
+/* $OpenBSD: sample-app.c,v 1.4 2001/03/22 18:20:01 millert Exp $ */
 /*
  * The author of this code is Angelos D. Keromytis (angelos@dsl.cis.upenn.edu)
  *
@@ -128,7 +128,7 @@ main(int argc, char **argv)
     if (sessionid == -1)
     {
 	fprintf(stderr, "Failed to create a new session.\n");
-	exit(-1);
+	exit(1);
     }
 
     /*
@@ -142,7 +142,7 @@ main(int argc, char **argv)
     if (decomposed == NULL)
     {
 	fprintf(stderr, "Failed to allocate memory for policy assertions.\n");
-	exit(-1);
+	exit(1);
     }
 
     /*
@@ -154,7 +154,7 @@ main(int argc, char **argv)
     {
 	free(decomposed);
 	fprintf(stderr, "No policy assertions provided.\n");
-	exit(-1);
+	exit(1);
     }
 
     /*
@@ -222,7 +222,7 @@ main(int argc, char **argv)
     {
 	fprintf(stderr, "Failed to allocate memory for credential "
 		"assertions.\n");
-	exit(-1);
+	exit(1);
     }
 
     /*
@@ -363,7 +363,7 @@ main(int argc, char **argv)
 		break;
 
 	    case ERROR_NOTFOUND:
-		fprintf(stderr, "Session %d not found while addiing action "
+		fprintf(stderr, "Session %d not found while adding action "
 			"attribute [app_domain = \"test application\"]\n",
 			sessionid);
 		break;
@@ -391,7 +391,7 @@ main(int argc, char **argv)
 		break;
 
 	    case ERROR_NOTFOUND:
-		fprintf(stderr, "Session %d not found while addiing action "
+		fprintf(stderr, "Session %d not found while adding action "
 			"attribute [some_num = \"1\"]\n", sessionid);
 		break;
 
@@ -418,7 +418,7 @@ main(int argc, char **argv)
 		break;
 
 	    case ERROR_NOTFOUND:
-		fprintf(stderr, "Session %d not found while addiing action "
+		fprintf(stderr, "Session %d not found while adding action "
 			"attribute [some_var = \"some other value\"]\n",
 			sessionid);
 		break;
@@ -446,7 +446,7 @@ main(int argc, char **argv)
 		break;
 
 	    case ERROR_NOTFOUND:
-		fprintf(stderr, "Session %d not found while addiing action "
+		fprintf(stderr, "Session %d not found while adding action "
 			"attribute [another_var = \"foo\"]\n", sessionid);
 		break;
 
@@ -466,7 +466,7 @@ main(int argc, char **argv)
     j = kn_do_query(sessionid, returnvalues, NUM_RETURN_VALUES);
     if (j == -1)
     {
-	switch (j)
+	switch (keynote_errno)
 	{
 	    case ERROR_MEMORY:
 		fprintf(stderr, "Out of memory while performing authorization "

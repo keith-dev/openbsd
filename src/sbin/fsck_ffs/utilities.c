@@ -1,4 +1,4 @@
-/*	$OpenBSD: utilities.c,v 1.8 2000/09/30 16:06:34 aaron Exp $	*/
+/*	$OpenBSD: utilities.c,v 1.12 2001/04/13 02:39:05 gluk Exp $	*/
 /*	$NetBSD: utilities.c,v 1.18 1996/09/27 22:45:20 christos Exp $	*/
 
 /*
@@ -38,7 +38,7 @@
 #if 0
 static char sccsid[] = "@(#)utilities.c	8.1 (Berkeley) 6/5/93";
 #else
-static char rcsid[] = "$OpenBSD: utilities.c,v 1.8 2000/09/30 16:06:34 aaron Exp $";
+static char rcsid[] = "$OpenBSD: utilities.c,v 1.12 2001/04/13 02:39:05 gluk Exp $";
 #endif
 #endif /* not lint */
 
@@ -54,6 +54,7 @@ static char rcsid[] = "$OpenBSD: utilities.c,v 1.8 2000/09/30 16:06:34 aaron Exp
 #include <string.h>
 #include <ctype.h>
 #include <unistd.h>
+#include <errno.h>
 #include <fcntl.h>
 #include <paths.h>
 
@@ -100,6 +101,7 @@ reply(question)
 	printf("\n");
 	if (!persevere && (nflag || fswritefd < 0)) {
 		printf("%s? no\n\n", question);
+		resolved = 0;
 		return (0);
 	}
 	if (yflag || (persevere && nflag)) {
@@ -110,13 +112,17 @@ reply(question)
 		printf("%s? [yn] ", question);
 		(void) fflush(stdout);
 		c = getc(stdin);
-		while (c != '\n' && getc(stdin) != '\n')
-			if (feof(stdin))
+		while (c != '\n' && getc(stdin) != '\n') {
+			if (feof(stdin)) {
+				resolved = 0;
 				return (0);
+			}
+		}
 	} while (c != 'y' && c != 'Y' && c != 'n' && c != 'N');
 	printf("\n");
 	if (c == 'y' || c == 'Y')
 		return (1);
+	resolved = 0;
 	return (0);
 }
 
@@ -227,7 +233,7 @@ flush(fd, bp)
 	if (bp != &sblk)
 		return;
 	for (i = 0, j = 0; i < sblock.fs_cssize; i += sblock.fs_bsize, j++) {
-		bwrite(fswritefd, (char *)sblock.fs_csp[j],
+		bwrite(fswritefd, (char *)sblock.fs_csp + i,
 		    fsbtodb(&sblock, sblock.fs_csaddr + j * sblock.fs_frag),
 		    sblock.fs_cssize - i < sblock.fs_bsize ?
 		    sblock.fs_cssize - i : sblock.fs_bsize);
@@ -378,7 +384,8 @@ int
 allocblk(frags)
 	long frags;
 {
-	register int i, j, k;
+	int i, j, k, cg, baseblk;
+	struct cg *cgp = &cgrp;
 
 	if (frags <= 0 || frags > sblock.fs_frag)
 		return (0);
@@ -393,9 +400,21 @@ allocblk(frags)
 				j += k;
 				continue;
 			}
-			for (k = 0; k < frags; k++)
+			cg = dtog(&sblock, i + j);
+			getblk(&cgblk, cgtod(&sblock, cg), sblock.fs_cgsize);
+			if (!cg_chkmagic(cgp))
+				pfatal("CG %d: BAD MAGIC NUMBER\n", cg);
+			baseblk = dtogd(&sblock, i + j);
+
+			for (k = 0; k < frags; k++) {
 				setbmap(i + j + k);
+				clrbit(cg_blksfree(cgp), baseblk + k);
+			}
 			n_blks += frags;
+			if (frags == sblock.fs_frag)
+				cgp->cg_cs.cs_nbfree--;
+			else
+				cgp->cg_cs.cs_nffree -= frags;
 			return (i + j);
 		}
 	}
@@ -480,6 +499,7 @@ void
 catch(n)
 	int n;
 {
+	/* XXX signal race */
 	if (!doinglevel2)
 		ckfini(0);
 	exit(12);
@@ -496,6 +516,7 @@ catchquit(n)
 {
 	extern int returntosingle;
 
+	/* XXX signal race */
 	printf("returning to single-user after filesystem check\n");
 	returntosingle = 1;
 	(void)signal(SIGQUIT, SIG_DFL);
@@ -510,6 +531,7 @@ voidquit(n)
 	int n;
 {
 
+	/* XXX signal race */
 	sleep(1);
 	(void)signal(SIGQUIT, SIG_IGN);
 	(void)signal(SIGQUIT, SIG_DFL);
@@ -563,6 +585,7 @@ void
 catchinfo(n)
 	int n;
 {
+	int save_errno = errno;
 	char buf[1024];
 	struct iovec iov[4];
 	int fd;
@@ -583,5 +606,6 @@ catchinfo(n)
 			close(fd);
 		}
 	}
+	errno = save_errno;
 }
 

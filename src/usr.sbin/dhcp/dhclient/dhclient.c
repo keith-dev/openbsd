@@ -56,7 +56,7 @@
 
 #ifndef lint
 static char copyright[] =
-"$Id: dhclient.c,v 1.11 2000/10/30 02:35:33 deraadt Exp $ Copyright (c) 1995, 1996 The Internet Software Consortium.  All rights reserved.\n";
+"$Id: dhclient.c,v 1.16 2001/02/23 16:51:16 beck Exp $ Copyright (c) 1995, 1996 The Internet Software Consortium.  All rights reserved.\n";
 #endif /* not lint */
 
 #include "dhcpd.h"
@@ -82,7 +82,6 @@ struct tree_cache *global_options [256];
 
 char *path_dhclient_conf = _PATH_DHCLIENT_CONF;
 char *path_dhclient_db = _PATH_DHCLIENT_DB;
-char *path_dhclient_pid = _PATH_DHCLIENT_PID;
 
 int interfaces_requested = 0;
 
@@ -118,7 +117,7 @@ int main (argc, argv, envp)
 	int argc;
 	char **argv, **envp;
 {
-	int i;
+	int i, fd;
 	struct servent *ent;
 	struct interface_info *ip;
 
@@ -181,11 +180,19 @@ int main (argc, argv, envp)
 	/* Parse the dhclient.conf file. */
 	read_client_conf ();
 
+	/* Lock the leases file */
+	fd = open (path_dhclient_db, O_RDONLY | O_EXLOCK | O_CREAT, 0);
+	if (fd < 0)
+		error ("can't open and lock %s: %m", path_dhclient_db);
+
 	/* Parse the lease database. */
 	read_client_leases ();
 
 	/* Rewrite the lease database... */
 	rewrite_client_leases ();
+
+	/* Close and unlock */
+	close(fd);
 
 	/* If no broadcast interfaces were discovered, call the script
 	   and tell it so. */
@@ -243,7 +250,7 @@ static void usage ()
 void cleanup ()
 {
 	/* Make sure the pidfile is gone. */
-	(void) unlink (path_dhclient_pid);
+	(void) unlink (_PATH_DHCLIENT_PID);
 }
 
 /* Individual States:
@@ -458,9 +465,12 @@ void dhcpack (packet)
 	cancel_timeout (send_request, ip);
 
 	/* Figure out the lease time. */
-	ip -> client -> new -> expiry =
-		getULong (ip -> client ->
-			  new -> options [DHO_DHCP_LEASE_TIME].data);
+        if (ip -> client -> new -> options [DHO_DHCP_LEASE_TIME].data)
+		ip -> client -> new -> expiry =
+			getULong (ip -> client ->
+			  	  new -> options [DHO_DHCP_LEASE_TIME].data);
+	else
+		ip -> client -> new -> expiry = default_lease_time;
 
 	/* Take the server-provided renewal time if there is one;
 	   otherwise figure it out according to the spec. */
@@ -493,11 +503,21 @@ void dhcpack (packet)
 void bind_lease (ip)
 	struct interface_info *ip;
 {
+	int fd;
+
 	/* Remember the medium. */
 	ip -> client -> new -> medium = ip -> client -> medium;
 
+	/* Lock the leases file */
+	fd = open (path_dhclient_db, O_RDONLY | O_EXLOCK | O_CREAT, 0);
+	if (fd < 0)
+		error ("can't open and lock %s: %m", path_dhclient_db);
+
 	/* Write out the new lease. */
 	write_client_lease (ip, ip -> client -> new);
+
+	/* Close and unlock lease file */
+	close(fd);
 
 	/* Run the client script with the new parameters. */
 	script_init (ip, (ip -> client -> state == S_REQUESTING
@@ -1701,7 +1721,7 @@ void rewrite_client_leases ()
 		fclose (leaseFile);
 	leaseFile = fopen (path_dhclient_db, "w");
 	if (!leaseFile)
-		error ("can't create /var/db/dhclient.leases: %m");
+		error ("can't create %s: %m", path_dhclient_db);
 
 	/* Write out all the leases attached to configured interfaces that
 	   we know about. */
@@ -1740,7 +1760,7 @@ void write_client_lease (ip, lease)
 	if (!leaseFile) {	/* XXX */
 		leaseFile = fopen (path_dhclient_db, "w");
 		if (!leaseFile)
-			error ("can't create /var/db/dhclient.leases: %m");
+			error ("can't create %s: %m", path_dhclient_db);
 	}
 
 	fprintf (leaseFile, "lease {\n");
@@ -2070,7 +2090,7 @@ void go_daemon ()
 
 	/* Don't become a daemon if the user requested otherwise. */
 	if (no_daemon) {
-		write_client_pid_file ();
+		write_pidfile(_PATH_DHCLIENT_PID, getpid());
 		return;
 	}
 
@@ -2090,28 +2110,7 @@ void go_daemon ()
 	/* Become session leader and get pid... */
 	pid = setsid ();
 
-	write_client_pid_file ();
-}
-
-void write_client_pid_file ()
-{
-	FILE *pf;
-	int pfdesc;
-
-	pfdesc = open (path_dhclient_pid, O_CREAT | O_TRUNC | O_WRONLY, 0644);
-
-	if (pfdesc < 0) {
-		warn ("Can't create %s: %m", path_dhclient_pid);
-		return;
-	}
-
-	pf = fdopen (pfdesc, "w");
-	if (!pf)
-		warn ("Can't fdopen %s: %m", path_dhclient_pid);
-	else {
-		fprintf (pf, "%ld\n", (long)getpid ());
-		fclose (pf);
-	}
+	write_pidfile(_PATH_DHCLIENT_PID, getpid());
 }
 
 int check_option (struct client_lease *l, int option) {

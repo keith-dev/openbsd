@@ -1,4 +1,4 @@
-.\"	$OpenBSD: ftpd.8,v 1.35 2000/09/08 18:03:27 aaron Exp $
+.\"	$OpenBSD: ftpd.8,v 1.39 2001/04/24 12:54:42 aaron Exp $
 .\"	$NetBSD: ftpd.8,v 1.8 1996/01/14 20:55:23 thorpej Exp $
 .\"
 .\" Copyright (c) 1985, 1988, 1991, 1993
@@ -153,7 +153,9 @@ seconds (the default is 15 minutes).
 .It Fl u Ar mask
 Force the umask to
 .Ar mask .
-instead of the default 027.
+instead of the default specified in
+.Pa /etc/login.conf
+(usually 022).
 Also disallows chmod.
 .El
 .Pp
@@ -287,8 +289,8 @@ S/Key is a Trademark of Bellcore.
 The login name must not appear in the file
 .Pa /etc/ftpusers .
 .It
-The user must have a standard shell returned by
-.Xr getusershell 3 .
+The user must have a standard shell as described by
+.Xr shells 5 .
 .It
 If the user name appears in the file
 .Pa /etc/ftpchroot
@@ -423,7 +425,7 @@ The virtual host that the connection was made to.
 .Pp
 Although fields exist for logging information on real users, this file is
 only used for anonymous downloads.
-Unused fields exist only for compatility with other
+Unused fields exist only for compatibility with other
 .Nm
 implementations.
 .Sh LOGIN.CONF VARIABLES
@@ -438,6 +440,11 @@ directory for the user.
 .It Pa ftp-dir
 A path to a directory.
 This value overrides the login directory for the users of this class.
+A leading tilde
+.Pq Ql ~
+in
+.Pa ftp-dir
+will be expanded based on the contents of the password database.
 .El
 .Sh FILES
 .Bl -tag -width /var/run/ftpd.pid -compact
@@ -462,7 +469,7 @@ log file for anonymous downloads
 .Xr ftp 1 ,
 .Xr skey 1 ,
 .Xr who 1 ,
-.Xr getusershell 3 ,
+.Xr shells 5 ,
 .Xr syslogd 8
 .Sh HISTORY
 The

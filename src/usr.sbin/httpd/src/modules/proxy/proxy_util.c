@@ -1,58 +1,59 @@
 /* ====================================================================
- * Copyright (c) 1996-1999 The Apache Group.  All rights reserved.
+ * The Apache Software License, Version 1.1
+ *
+ * Copyright (c) 2000 The Apache Software Foundation.  All rights
+ * reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
  * are met:
  *
  * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer. 
+ *    notice, this list of conditions and the following disclaimer.
  *
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in
  *    the documentation and/or other materials provided with the
  *    distribution.
  *
- * 3. All advertising materials mentioning features or use of this
- *    software must display the following acknowledgment:
- *    "This product includes software developed by the Apache Group
- *    for use in the Apache HTTP server project (http://www.apache.org/)."
+ * 3. The end-user documentation included with the redistribution,
+ *    if any, must include the following acknowledgment:
+ *       "This product includes software developed by the
+ *        Apache Software Foundation (http://www.apache.org/)."
+ *    Alternately, this acknowledgment may appear in the software itself,
+ *    if and wherever such third-party acknowledgments normally appear.
  *
- * 4. The names "Apache Server" and "Apache Group" must not be used to
- *    endorse or promote products derived from this software without
- *    prior written permission. For written permission, please contact
- *    apache@apache.org.
+ * 4. The names "Apache" and "Apache Software Foundation" must
+ *    not be used to endorse or promote products derived from this
+ *    software without prior written permission. For written
+ *    permission, please contact apache@apache.org.
  *
- * 5. Products derived from this software may not be called "Apache"
- *    nor may "Apache" appear in their names without prior written
- *    permission of the Apache Group.
+ * 5. Products derived from this software may not be called "Apache",
+ *    nor may "Apache" appear in their name, without prior written
+ *    permission of the Apache Software Foundation.
  *
- * 6. Redistributions of any form whatsoever must retain the following
- *    acknowledgment:
- *    "This product includes software developed by the Apache Group
- *    for use in the Apache HTTP server project (http://www.apache.org/)."
- *
- * THIS SOFTWARE IS PROVIDED BY THE APACHE GROUP ``AS IS'' AND ANY
- * EXPRESSED OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
- * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
- * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE APACHE GROUP OR
+ * THIS SOFTWARE IS PROVIDED ``AS IS'' AND ANY EXPRESSED OR IMPLIED
+ * WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
+ * OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+ * DISCLAIMED.  IN NO EVENT SHALL THE APACHE SOFTWARE FOUNDATION OR
  * ITS CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
- * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
- * NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
- * LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
- * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT,
- * STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
- * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED
- * OF THE POSSIBILITY OF SUCH DAMAGE.
+ * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+ * LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF
+ * USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
+ * ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+ * OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT
+ * OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+ * SUCH DAMAGE.
  * ====================================================================
  *
  * This software consists of voluntary contributions made by many
- * individuals on behalf of the Apache Group and was originally based
- * on public domain software written at the National Center for
- * Supercomputing Applications, University of Illinois, Urbana-Champaign.
- * For more information on the Apache Group and the Apache HTTP server
- * project, please see <http://www.apache.org/>.
+ * individuals on behalf of the Apache Software Foundation.  For more
+ * information on the Apache Software Foundation, please see
+ * <http://www.apache.org/>.
  *
+ * Portions of this software are based upon public domain software
+ * originally written at the National Center for Supercomputing Applications,
+ * University of Illinois, Urbana-Champaign.
  */
 
 /* Utility routines for Apache proxy */
@@ -68,7 +69,7 @@ static int proxy_match_ipaddr(struct dirconn_entry *This, request_rec *r);
 static int proxy_match_domainname(struct dirconn_entry *This, request_rec *r);
 static int proxy_match_hostname(struct dirconn_entry *This, request_rec *r);
 static int proxy_match_word(struct dirconn_entry *This, request_rec *r);
-
+static struct per_thread_data *get_per_thread_data(void);
 /* already called in the knowledge that the characters are hex digits */
 int ap_proxy_hex2c(const char *x)
 {
@@ -116,10 +117,10 @@ void ap_proxy_c2hex(int ch, char *x)
 	x[2] = '0' + i;
 #else /*CHARSET_EBCDIC*/
     static const char ntoa[] = { "0123456789ABCDEF" };
-    ch &= 0xFF;
+    ch = os_toascii[ch & 0xFF];
     x[0] = '%';
-    x[1] = ntoa[(os_toascii[ch]>>4)&0x0F];
-    x[2] = ntoa[os_toascii[ch]&0x0F];
+    x[1] = ntoa[(ch>>4)&0x0F];
+    x[2] = ntoa[ch&0x0F];
     x[3] = '\0';
 #endif /*CHARSET_EBCDIC*/
 }
@@ -239,12 +240,12 @@ char *
 	strp = strchr(user, ':');
 	if (strp != NULL) {
 	    *strp = '\0';
-	    password = ap_proxy_canonenc(p, strp + 1, strlen(strp + 1), enc_user, 1);
+	    password = ap_proxy_canonenc(p, strp + 1, strlen(strp + 1), enc_user, STD_PROXY);
 	    if (password == NULL)
 		return "Bad %-escape in URL (password)";
 	}
 
-	user = ap_proxy_canonenc(p, user, strlen(user), enc_user, 1);
+	user = ap_proxy_canonenc(p, user, strlen(user), enc_user, STD_PROXY);
 	if (user == NULL)
 	    return "Bad %-escape in URL (username)";
     }
@@ -280,7 +281,7 @@ char *
 	if (!ap_isdigit(host[i]) && host[i] != '.')
 	    break;
     /* must be an IP address */
-#if defined(WIN32) || defined(NETWARE) || defined(TPF)
+#if defined(WIN32) || defined(NETWARE) || defined(TPF) || defined(BEOS)
     if (host[i] == '\0' && (inet_addr(host) == -1))
 #else
     if (host[i] == '\0' && (ap_inet_addr(host) == -1 || inet_network(host) == -1))
@@ -517,7 +518,7 @@ long int ap_proxy_send_fb(BUFF *f, request_rec *r, cache_req *c)
 
     ap_kill_timeout(r);
 
-#if defined(WIN32) || defined(TPF)
+#if defined(WIN32) || defined(TPF) || defined(NETWARE)
     /* works fine under win32, so leave it */
     ap_hard_timeout("proxy send body", r);
     alternate_timeouts = 0;
@@ -740,7 +741,7 @@ void ap_proxy_hash(const char *it, char *val, int ndepth, int nlength)
     char tmp[22];
     int i, k, d;
     unsigned int x;
-#if defined(AIX) && defined(__ps2__)
+#if defined(MPE) || (defined(AIX) && defined(__ps2__))
     /* Believe it or not, AIX 1.x does not allow you to name a file '@',
      * so hack around it in the encoding. */
     static const char enc_table[64] =
@@ -867,9 +868,7 @@ const char *
 {
     int i;
     struct hostent *hp;
-    static APACHE_TLS struct hostent hpbuf;
-    static APACHE_TLS u_long ipaddr;
-    static APACHE_TLS char *charpbuf[2];
+    struct per_thread_data *ptd = get_per_thread_data();
 
     for (i = 0; host[i] != '\0'; i++)
 	if (!ap_isdigit(host[i]) && host[i] != '.')
@@ -881,17 +880,17 @@ const char *
 	    return "Host not found";
     }
     else {
-	ipaddr = ap_inet_addr(host);
-	hp = gethostbyaddr((char *) &ipaddr, sizeof(u_long), AF_INET);
+	ptd->ipaddr = ap_inet_addr(host);
+	hp = gethostbyaddr((char *) &ptd->ipaddr, sizeof(ptd->ipaddr), AF_INET);
 	if (hp == NULL) {
-	    memset(&hpbuf, 0, sizeof(hpbuf));
-	    hpbuf.h_name = 0;
-	    hpbuf.h_addrtype = AF_INET;
-	    hpbuf.h_length = sizeof(u_long);
-	    hpbuf.h_addr_list = charpbuf;
-	    hpbuf.h_addr_list[0] = (char *) &ipaddr;
-	    hpbuf.h_addr_list[1] = 0;
-	    hp = &hpbuf;
+	    memset(&ptd->hpbuf, 0, sizeof(ptd->hpbuf));
+	    ptd->hpbuf.h_name = 0;
+	    ptd->hpbuf.h_addrtype = AF_INET;
+	    ptd->hpbuf.h_length = sizeof(ptd->ipaddr);
+	    ptd->hpbuf.h_addr_list = ptd->charpbuf;
+	    ptd->hpbuf.h_addr_list[0] = (char *) &ptd->ipaddr;
+	    ptd->hpbuf.h_addr_list[1] = 0;
+	    hp = &ptd->hpbuf;
 	}
     }
     *reqhp = *hp;
@@ -1290,3 +1289,44 @@ unsigned ap_proxy_bputs2(const char *data, BUFF *client, cache_req *cache)
     return len;
 }
 
+#if defined WIN32
+
+static DWORD tls_index;
+
+BOOL WINAPI DllMain (HINSTANCE dllhandle, DWORD reason, LPVOID reserved)
+{
+    LPVOID memptr;
+
+    switch (reason) {
+    case DLL_PROCESS_ATTACH:
+	tls_index = TlsAlloc();
+    case DLL_THREAD_ATTACH: /* intentional no break */
+	TlsSetValue (tls_index, malloc (sizeof (struct per_thread_data)));
+	break;
+    case DLL_THREAD_DETACH:
+	memptr = TlsGetValue (tls_index);
+	if (memptr) {
+	    free (memptr);
+	    TlsSetValue (tls_index, 0);
+	}
+	break;
+    }
+
+    return TRUE;
+}
+
+#endif
+
+static struct per_thread_data *get_per_thread_data(void)
+{
+#if defined(WIN32)
+
+    return (struct per_thread_data *) TlsGetValue (tls_index);
+
+#else
+
+    static APACHE_TLS struct per_thread_data sptd;
+    return &sptd;
+
+#endif
+}

@@ -17,7 +17,7 @@
  * IMPLIED WARRANTIES, INCLUDING, WITHOUT LIMITATION, THE IMPLIED
  * WARRANTIES OF MERCHANTIBILITY AND FITNESS FOR A PARTICULAR PURPOSE.
  *
- * $OpenBSD: command.c,v 1.52 2000/09/06 21:03:38 brian Exp $
+ * $OpenBSD: command.c,v 1.58 2001/04/05 02:24:05 brian Exp $
  *
  */
 #include <sys/param.h>
@@ -127,6 +127,7 @@
 #define VAR_URGENTPORTS	33
 #define	VAR_LOGOUT	34
 #define	VAR_IFQUEUE	35
+#define	VAR_KEYBITS	36
 
 /* ``accept|deny|disable|enable'' masks */
 #define NEG_HISMASK (1)
@@ -147,8 +148,10 @@
 #define NEG_PROTOCOMP	51
 #define NEG_SHORTSEQ	52
 #define NEG_VJCOMP	53
+#define NEG_MPPE	54
+#define NEG_CHAP81	55
 
-const char Version[] = "2.27";
+const char Version[] = "2.3.1";
 
 static int ShowCommand(struct cmdargs const *);
 static int TerminalCommand(struct cmdargs const *);
@@ -1283,15 +1286,38 @@ SetServer(struct cmdargs const *arg)
                    arg->argv[arg->argn - 2], arg->argv[arg->argn - 1], mask);
         return -1;
       }
-    } else if (strcasecmp(port, "none") == 0) {
+    } else if (arg->argc != arg->argn + 1)
+      return -1;
+    else if (strcasecmp(port, "none") == 0) {
+      if (server_Clear(arg->bundle))
+        log_Printf(LogPHASE, "Disabled server socket\n");
+      return 0;
+    } else if (strcasecmp(port, "open") == 0) {
+      switch (server_Reopen(arg->bundle)) {
+        case SERVER_OK:
+          return 0;
+        case SERVER_FAILED:
+          log_Printf(LogWARN, "Failed to reopen server port\n");
+          return 1;
+        case SERVER_UNSET:
+          log_Printf(LogWARN, "Cannot reopen unset server socket\n");
+          return 1;
+        default:
+          break;
+      }
+      return -1;
+    } else if (strcasecmp(port, "closed") == 0) {
       if (server_Close(arg->bundle))
-        log_Printf(LogPHASE, "Disabled server port.\n");
+        log_Printf(LogPHASE, "Closed server socket\n");
+      else
+        log_Printf(LogWARN, "Server socket not open\n");
+
       return 0;
     } else
       return -1;
 
-    strncpy(server.passwd, passwd, sizeof server.passwd - 1);
-    server.passwd[sizeof server.passwd - 1] = '\0';
+    strncpy(server.cfg.passwd, passwd, sizeof server.cfg.passwd - 1);
+    server.cfg.passwd[sizeof server.cfg.passwd - 1] = '\0';
 
     if (*port == '/') {
       mode_t imask;
@@ -1573,6 +1599,24 @@ SetVariable(struct cmdargs const *arg)
       log_Printf(LogWARN, err);
     }
     break;
+
+#ifdef HAVE_DES
+  case VAR_KEYBITS:
+    if (arg->argc > arg->argn) {
+      l->ccp.cfg.mppe.keybits = atoi(arg->argv[arg->argn]);
+      if (l->ccp.cfg.mppe.keybits != 40 &&
+          l->ccp.cfg.mppe.keybits != 56 &&
+          l->ccp.cfg.mppe.keybits != 128 ) {
+        log_Printf(LogWARN, "%d: Invalid bits number\n",
+                  l->ccp.cfg.mppe.keybits);
+        l->ccp.cfg.mppe.keybits = 40;
+      }
+    } else {
+      err = "No bits number pecified\n";
+      log_Printf(LogWARN, err);
+    }
+    break;
+#endif
 
   case VAR_DEVICE:
     physical_SetDeviceList(cx->physical, arg->argc - arg->argn,
@@ -1968,6 +2012,11 @@ static struct cmdtab const SetCommands[] = {
   {"deflate", NULL, SetVariable, LOCAL_AUTH | LOCAL_CX_OPT,
   "deflate window sizes", "set deflate out-winsize in-winsize",
   (const void *) VAR_WINSIZE},
+#ifdef HAVE_DES
+  {"mppe", NULL, SetVariable, LOCAL_AUTH | LOCAL_CX_OPT,
+  "MPPE key size", "set mppe {40|56|128}", 
+  (const void *) VAR_KEYBITS},
+#endif
   {"device", "line", SetVariable, LOCAL_AUTH | LOCAL_CX,
   "physical device name", "set device|line device-name[,device-name]",
   (const void *) VAR_DEVICE},
@@ -1994,7 +2043,7 @@ static struct cmdtab const SetCommands[] = {
   {"lcpretry", "lcpretries", SetVariable, LOCAL_AUTH | LOCAL_CX, "LCP retries",
    "set lcpretry value [attempts]", (const void *)VAR_LCPRETRY},
   {"log", NULL, log_SetLevel, LOCAL_AUTH, "log level",
-  "set log [local] [+|-]async|cbcp|ccp|chat|command|connect|debug|dns|hdlc|"
+  "set log [local] [+|-]all|async|cbcp|ccp|chat|command|connect|debug|dns|hdlc|"
   "id0|ipcp|lcp|lqm|phase|physical|sync|tcp/ip|timer|tun..."},
   {"login", NULL, SetVariable, LOCAL_AUTH | LOCAL_CX,
   "login script", "set login chat-script", (const void *) VAR_LOGIN},
@@ -2034,8 +2083,8 @@ static struct cmdtab const SetCommands[] = {
   "Redial timeout", "set redial secs[+inc[-incmax]][.next] [attempts]"},
   {"sendpipe", NULL, SetVariable, LOCAL_AUTH,
   "SENDPIPE value", "set sendpipe value", (const void *)VAR_SENDPIPE},
-  {"server", "socket", SetServer, LOCAL_AUTH,
-  "server port", "set server|socket TcpPort|LocalName|none password [mask]"},
+  {"server", "socket", SetServer, LOCAL_AUTH, "diagnostic port",
+  "set server|socket TcpPort|LocalName|none|open|closed [password [mask]]"},
   {"speed", NULL, SetModemSpeed, LOCAL_AUTH | LOCAL_CX,
   "physical speed", "set speed value|sync"},
   {"stopped", NULL, SetStoppedTimeout, LOCAL_AUTH | LOCAL_CX,
@@ -2132,7 +2181,7 @@ AddCommand(struct cmdargs const *arg)
     }
   }
 
-  if (bundle_SetRoute(arg->bundle, RTM_ADD, dest, gateway, netmask,
+  if (rt_Set(arg->bundle, RTM_ADD, dest, gateway, netmask,
                   arg->cmd->args ? 1 : 0, (addrs & ROUTE_GWHISADDR) ? 1 : 0)
       && addrs != ROUTE_STATIC)
     route_Add(&arg->bundle->ncp.ipcp.route, addrs, dest, netmask, gateway);
@@ -2173,7 +2222,7 @@ DeleteCommand(struct cmdargs const *arg)
         addrs = ROUTE_STATIC;
       }
       none.s_addr = INADDR_ANY;
-      bundle_SetRoute(arg->bundle, RTM_DELETE, dest, none, none,
+      rt_Set(arg->bundle, RTM_DELETE, dest, none, none,
                       arg->cmd->args ? 1 : 0, 0);
       route_Delete(&arg->bundle->ncp.ipcp.route, addrs, dest);
     }
@@ -2414,6 +2463,14 @@ NegotiateSet(struct cmdargs const *arg)
       cx->physical->link.lcp.cfg.chap80lm &= keep;
       cx->physical->link.lcp.cfg.chap80lm |= add;
       break;
+    case NEG_CHAP81:
+      cx->physical->link.lcp.cfg.chap81 &= keep;
+      cx->physical->link.lcp.cfg.chap81 |= add;
+      break;
+    case NEG_MPPE:
+      l->ccp.cfg.neg[CCP_NEG_MPPE] &= keep;
+      l->ccp.cfg.neg[CCP_NEG_MPPE] |= add;
+      break;
 #endif
     case NEG_DEFLATE:
       l->ccp.cfg.neg[CCP_NEG_DEFLATE] &= keep;
@@ -2497,12 +2554,14 @@ static struct cmdtab const NegotiateCommands[] = {
   "disable|enable", (const void *)OPT_PROXYALL},
   {"sroutes", NULL, OptSet, LOCAL_AUTH, "Use sticky routes",
   "disable|enable", (const void *)OPT_SROUTES},
+  {"tcpmssfixup", "mssfixup", OptSet, LOCAL_AUTH, "Modify MSS options",
+  "disable|enable", (const void *)OPT_TCPMSSFIXUP},
   {"throughput", NULL, OptSet, LOCAL_AUTH, "Rolling throughput",
   "disable|enable", (const void *)OPT_THROUGHPUT},
   {"utmp", NULL, OptSet, LOCAL_AUTH, "Log connections in utmp",
   "disable|enable", (const void *)OPT_UTMP},
 
-#define OPT_MAX 10	/* accept/deny allowed below and not above */
+#define OPT_MAX 11	/* accept/deny allowed below and not above */
 
   {"acfcomp", NULL, NegotiateSet, LOCAL_AUTH | LOCAL_CX,
   "Address & Control field compression", "accept|deny|disable|enable",
@@ -2517,6 +2576,12 @@ static struct cmdtab const NegotiateCommands[] = {
   {"LANMan", "chap80lm", NegotiateSet, LOCAL_AUTH | LOCAL_CX,
   "Microsoft (NT) CHAP", "accept|deny|disable|enable",
   (const void *)NEG_CHAP80LM},
+  {"mschapv2", "chap81", NegotiateSet, LOCAL_AUTH | LOCAL_CX,
+  "Microsoft CHAP v2", "accept|deny|disable|enable",
+  (const void *)NEG_CHAP81},
+  {"mppe", NULL, NegotiateSet, LOCAL_AUTH | LOCAL_CX_OPT,
+  "MPPE encryption", "accept|deny|disable|enable",
+  (const void *)NEG_MPPE},
 #endif
   {"deflate", NULL, NegotiateSet, LOCAL_AUTH | LOCAL_CX_OPT,
   "Deflate compression", "accept|deny|disable|enable",

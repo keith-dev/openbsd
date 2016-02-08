@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile.inc,v 1.38 2000/10/17 17:44:38 deraadt Exp $
+#	$OpenBSD: Makefile.inc,v 1.43 2001/03/14 04:01:59 aaron Exp $
 #	$NetBSD: Makefile.inc,v 1.35 1995/10/16 23:49:07 jtc Exp $
 #	@(#)Makefile.inc	8.1 (Berkeley) 6/17/93
 
@@ -42,12 +42,12 @@ ASM=	accept.o access.o acct.o adjtime.o bind.o chdir.o chflags.o chmod.o \
 	getpgrp.o getpid.o getppid.o getpriority.o getrlimit.o getrusage.o \
 	getsid.o \
 	getsockname.o getsockopt.o gettimeofday.o getuid.o issetugid.o \
-	ioctl.o kill.o \
+	ioctl.o kill.o kevent.o kqueue.o \
 	ktrace.o lchown.o lfs_bmapv.o lfs_markv.o lfs_segclean.o lfs_segwait.o \
 	link.o listen.o lstat.o madvise.o mincore.o minherit.o mkdir.o \
-	mkfifo.o mknod.o mlock.o \
+	mkfifo.o mknod.o mlock.o mlockall.o \
 	mount.o mprotect.o msgctl.o msgget.o msgrcv.o msgsnd.o msync.o \
-	munlock.o munmap.o nanosleep.o nfssvc.o \
+	munlock.o munlockall.o munmap.o nanosleep.o nfssvc.o \
 	ntp_gettime.o ntp_adjtime.o \
 	open.o pathconf.o pipe.o poll.o profil.o quotactl.o \
 	read.o readlink.o readv.o reboot.o recvfrom.o recvmsg.o rename.o \
@@ -172,9 +172,9 @@ MAN+=	accept.2 access.2 acct.2 adjtime.2 bind.2 brk.2 chdir.2 chflags.2 \
 	getgid.2 getgroups.2 getitimer.2 getlogin.2 getpeername.2 getpgrp.2 \
 	getpid.2 getpriority.2 getrlimit.2 getrusage.2 getsid.2 getsockname.2 \
 	getsockopt.2 gettimeofday.2 getuid.2 intro.2 issetugid.2 ioctl.2 \
-	kill.2 ktrace.2 link.2 \
+	kill.2 kqueue.2 ktrace.2 link.2 \
 	listen.2 lseek.2 mkdir.2 mkfifo.2 mknod.2 madvise.2 mincore.2 \
-	minherit.2 mlock.2 \
+	minherit.2 mlock.2 mlockall.2 \
 	mmap.2 mount.2 mprotect.2 msync.2 munmap.2 nanosleep.2 \
 	nfssvc.2 open.2 pathconf.2 \
 	pipe.2 profil.2 poll.2 ptrace.2 quotactl.2 read.2 readlink.2 reboot.2 \
@@ -197,9 +197,15 @@ MLINKS+=chown.2 fchown.2
 MLINKS+=chown.2 lchown.2
 MLINKS+=clock_gettime.2 clock_settime.2
 MLINKS+=clock_gettime.2 clock_getres.2
+MLINKS+=execve.2 exect.2
 MLINKS+=fhopen.2 fhstat.2 fhopen.2 fhstatfs.2
 MLINKS+=getgid.2 getegid.2
 MLINKS+=getitimer.2 setitimer.2
+MLINKS+=getitimer.2 timeradd.3
+MLINKS+=getitimer.2 timerclear.3
+MLINKS+=getitimer.2 timercmp.3
+MLINKS+=getitimer.2 timerisset.3
+MLINKS+=getitimer.2 timersub.3
 MLINKS+=getlogin.2 setlogin.2
 MLINKS+=getpgrp.2 getpgid.2
 MLINKS+=getpid.2 getppid.2
@@ -208,8 +214,10 @@ MLINKS+=getrlimit.2 setrlimit.2
 MLINKS+=getsockopt.2 setsockopt.2
 MLINKS+=gettimeofday.2 settimeofday.2
 MLINKS+=getuid.2 geteuid.2
+MLINKS+=kqueue.2 kevent.2
 MLINKS+=intro.2 errno.2
 MLINKS+=mlock.2 munlock.2
+MLINKS+=mlockall.2 munlockall.2
 MLINKS+=mount.2 unmount.2
 MLINKS+=pathconf.2 fpathconf.2
 MLINKS+=read.2 readv.2 read.2 pread.2 read.2 preadv.2
@@ -225,3 +233,5 @@ MLINKS+=truncate.2 ftruncate.2
 MLINKS+=utimes.2 futimes.2
 MLINKS+=wait.2 wait3.2 wait.2 wait4.2 wait.2 waitpid.2
 MLINKS+=write.2 writev.2 write.2 pwrite.2 write.2 pwritev.2
+MLINKS+=select.2 FD_SET.3 select.2 FD_CLR.3
+MLINKS+=select.2 FD_ISSET.3 select.2 FD_ZERO.3

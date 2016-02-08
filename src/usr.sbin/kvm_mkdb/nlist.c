@@ -1,4 +1,4 @@
-/*	$OpenBSD: nlist.c,v 1.19 2000/06/30 16:00:25 millert Exp $	*/
+/*	$OpenBSD: nlist.c,v 1.21 2001/02/03 03:03:07 art Exp $	*/
 
 /*-
  * Copyright (c) 1990, 1993
@@ -37,7 +37,7 @@
 #if 0
 static char sccsid[] = "from: @(#)nlist.c	8.1 (Berkeley) 6/6/93";
 #else
-static char *rcsid = "$OpenBSD: nlist.c,v 1.19 2000/06/30 16:00:25 millert Exp $";
+static char *rcsid = "$OpenBSD: nlist.c,v 1.21 2001/02/03 03:03:07 art Exp $";
 #endif
 #endif /* not lint */
 
@@ -298,14 +298,15 @@ __elf_knlist(fd, db)
 	register u_long symsize;
 	register u_long kernvma, kernoffs;
 	register int i;
-	Elf32_Sym sbuf;
+	Elf_Sym sbuf;
 	size_t symstrsize;
 	char *shstr, buf[1024];
-	Elf32_Ehdr eh;
-	Elf32_Shdr *sh = NULL;
+	Elf_Ehdr eh;
+	Elf_Shdr *sh = NULL;
 	DBT data, key;
 	NLIST nbuf;
 	FILE *fp;
+	int usemalloc = 0;
 
 	if ((fp = fdopen(fd, "r")) < 0)
 		err(1, "%s", kfile);
@@ -315,17 +316,17 @@ __elf_knlist(fd, db)
 	    !IS_ELF(eh))
 		return (1);
 
-	sh = (Elf32_Shdr *)malloc(sizeof(Elf32_Shdr) * eh.e_shnum);
+	sh = (Elf_Shdr *)malloc(sizeof(Elf_Shdr) * eh.e_shnum);
 	if (sh == NULL)
 		errx(1, "cannot allocate %d bytes for symbol header",
-		    sizeof(Elf32_Shdr) * eh.e_shnum);
+		    sizeof(Elf_Shdr) * eh.e_shnum);
 
 	if (fseek (fp, eh.e_shoff, SEEK_SET) < 0) {
 		fmterr = "no exec header";
 		return (-1);
 	}
 
-	if (fread(sh, sizeof(Elf32_Shdr) * eh.e_shnum, 1, fp) != 1) {
+	if (fread(sh, sizeof(Elf_Shdr) * eh.e_shnum, 1, fp) != 1) {
 		fmterr = "no exec header";
 		return (-1);
 	}
@@ -370,12 +371,28 @@ __elf_knlist(fd, db)
 	 * an easy way to randomly access all the strings, without
 	 * making the memory allocation permanent as with malloc/free
 	 * (i.e., munmap will return it to the system).
+	 *
+	 * XXX - we really want to check if this is a regular file.
+	 *	 then we probably want a MAP_PRIVATE here.
 	 */
 	strtab = mmap(NULL, (size_t)symstrsize, PROT_READ,
-	    MAP_PRIVATE|MAP_FILE, fileno(fp), symstroff);
-	if (strtab == (char *)-1) {
-		fmterr = "corrupt file";
-		return (-1);
+	    MAP_SHARED|MAP_FILE, fileno(fp), symstroff);
+	if (strtab == MAP_FAILED) {
+		usemalloc = 1;
+		if ((strtab = malloc(symstrsize)) == NULL) {
+			fmterr = "out of memory";
+			return (-1);
+		}
+		if (fseek(fp, symstroff, SEEK_SET) == -1) {
+			free(strtab);
+			fmterr = "corrupt file";
+			return (-1);
+		}
+		if (fread(strtab, symstrsize, 1, fp) != 1) {
+			free(strtab);
+			fmterr = "corrupt file";
+			return (-1);
+		}
 	}
 
 	if (fseek(fp, symoff, SEEK_SET) == -1) {
@@ -388,7 +405,7 @@ __elf_knlist(fd, db)
 
 	/* Read each symbol and enter it into the database. */
 	while (symsize > 0) {
-		symsize -= sizeof(Elf32_Sym);
+		symsize -= sizeof(Elf_Sym);
 		if (fread((char *)&sbuf, sizeof(sbuf), 1, fp) != 1) {
 			if (feof(fp))
 				fmterr = "corrupted symbol table";
@@ -402,7 +419,7 @@ __elf_knlist(fd, db)
 		nbuf.n_value = sbuf.st_value;
 
 		/*XXX type conversion is pretty rude... */
-		switch(ELF32_ST_TYPE(sbuf.st_info)) {
+		switch(ELF_ST_TYPE(sbuf.st_info)) {
 		case STT_NOTYPE:
 			nbuf.n_type = N_UNDF;
 			break;
@@ -413,7 +430,7 @@ __elf_knlist(fd, db)
 			nbuf.n_type = N_DATA;
 			break;
 		}
-		if(ELF32_ST_BIND(sbuf.st_info) == STB_LOCAL)
+		if(ELF_ST_BIND(sbuf.st_info) == STB_LOCAL)
 			nbuf.n_type = N_EXT;
 
 		if(eh.e_machine == EM_MIPS) {
@@ -468,7 +485,10 @@ __elf_knlist(fd, db)
 			}
 		}
 	}
-	munmap(strtab, symstrsize);
+	if (usemalloc)
+		free(strtab);
+	else
+		munmap(strtab, symstrsize);
 	(void)fclose(fp);
 	return (0);
 }

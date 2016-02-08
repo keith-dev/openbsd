@@ -1,8 +1,8 @@
 
   APACHE INSTALLATION
 
-  NOTE: Windows users please read the documents README.NT and
-        http://www.apache.org/docs/windows.html, (or the
+  NOTE: Windows users please read the documents README-WIN.txt and
+        http://httpd.apache.org/docs/windows.html, (or the
         htdocs/manual/windows.html file included with Apache). 
         The following applies only to Unix users.
 
@@ -79,10 +79,10 @@
         platform-dependent. The current state is this:
 
         o Out-of-the-box supported platforms are:
-           - Linux     - SunOS         - UnixWare     - Mac OS X Server
-           - FreeBSD   - Solaris       - AIX          - Mac OS
-           - OpenBSD   - IRIX          - SCO          - OpenStep/Mach
-           - NetBSD    - HPUX          - ReliantUNIX  - DYNIX/ptx
+           - Linux     - SunOS         - UnixWare     - Darwin/Mac OS
+           - FreeBSD   - Solaris       - AIX          - OpenStep/Mach
+           - OpenBSD   - IRIX          - SCO          - DYNIX/ptx
+           - NetBSD    - HPUX          - ReliantUNIX
            - BSDI      - Digital Unix  - DGUX
 
         o Entirely unsupported platforms are:

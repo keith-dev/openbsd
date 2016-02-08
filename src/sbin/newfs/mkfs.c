@@ -1,4 +1,4 @@
-/*	$OpenBSD: mkfs.c,v 1.14 2000/09/22 19:21:30 millert Exp $	*/
+/*	$OpenBSD: mkfs.c,v 1.18 2001/04/19 16:22:17 gluk Exp $	*/
 /*	$NetBSD: mkfs.c,v 1.25 1995/06/18 21:35:38 cgd Exp $	*/
 
 /*
@@ -38,7 +38,7 @@
 #if 0
 static char sccsid[] = "@(#)mkfs.c	8.3 (Berkeley) 2/3/94";
 #else
-static char rcsid[] = "$OpenBSD: mkfs.c,v 1.14 2000/09/22 19:21:30 millert Exp $";
+static char rcsid[] = "$OpenBSD: mkfs.c,v 1.18 2001/04/19 16:22:17 gluk Exp $";
 #endif
 #endif /* not lint */
 
@@ -83,7 +83,6 @@ static char rcsid[] = "$OpenBSD: mkfs.c,v 1.14 2000/09/22 19:21:30 millert Exp $
 extern int	mfs;		/* run as the memory based filesystem */
 extern int	Nflag;		/* run mkfs without writing file system */
 extern int	Oflag;		/* format as an 4.3BSD file system */
-extern int	Uflag;		/* enable soft updates for file system */
 extern int	fssize;		/* file system size */
 extern int	ntracks;	/* # tracks/cylinder */
 extern int	nsectors;	/* # sectors/track */
@@ -106,6 +105,8 @@ extern int	maxbpg;		/* maximum blocks per file in a cyl group */
 extern int	nrpos;		/* # of distinguished rotational positions */
 extern int	bbsize;		/* boot block size */
 extern int	sbsize;		/* superblock size */
+extern int	avgfilesize;	/* expected average file size */
+extern int	avgfilesperdir;	/* expected number of files per directory */
 extern int	quiet;		/* quiet flag */
 extern u_long	memleft;	/* virtual memory available */
 extern caddr_t	membase;	/* start address of memory based filesystem */
@@ -189,9 +190,6 @@ mkfs(pp, fsys, fi, fo)
 		sblock.fs_inodefmt = FS_44INODEFMT;
 		sblock.fs_maxsymlinklen = MAXSYMLINKLEN;
 	}
-	if (Uflag) {
-		sblock.fs_flags |= FS_DOSOFTDEP;
-	}
 	/*
 	 * Validate the given file system size.
 	 * Verify that its last block can actually be accessed.
@@ -209,6 +207,17 @@ recalc:
 		printf("preposterous ntrak %d\n", sblock.fs_ntrak), exit(14);
 	if (sblock.fs_nsect <= 0)
 		printf("preposterous nsect %d\n", sblock.fs_nsect), exit(15);
+	/*
+	 * collect and verify the filesystem density info
+	 */
+	sblock.fs_avgfilesize = avgfilesize;
+	sblock.fs_avgfpdir = avgfilesperdir;
+	if (sblock.fs_avgfilesize <= 0)
+		printf("illegal expected average file size %d\n",
+		    sblock.fs_avgfilesize), exit(14);
+	if (sblock.fs_avgfpdir <= 0)
+		printf("illegal expected number of files per directory %d\n",
+		    sblock.fs_avgfpdir), exit(15);
 	/*
 	 * collect and verify the block and fragment sizes
 	 */
@@ -580,6 +589,12 @@ next:
 	sblock.fs_csaddr = cgdmin(&sblock, 0);
 	sblock.fs_cssize =
 	    fragroundup(&sblock, sblock.fs_ncg * sizeof(struct csum));
+
+	/*
+	 * The superblock fields 'fs_csmask' and 'fs_csshift' are no
+	 * longer used. However, we still initialise them so that the
+	 * filesystem remains compatible with old kernels.
+	 */
 	i = sblock.fs_bsize / sizeof(struct csum);
 	sblock.fs_csmask = ~(i - 1);
 	for (sblock.fs_csshift = 0; i > 1; i >>= 1)
@@ -1062,7 +1077,7 @@ void
 started()
 {
 
-	exit(0);
+	_exit(0);
 }
 
 /*

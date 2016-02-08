@@ -1,4 +1,4 @@
-.\" $OpenBSD: packages.7,v 1.5 2000/10/13 04:09:21 aaron Exp $
+.\" $OpenBSD: packages.7,v 1.8 2001/04/10 17:48:10 espie Exp $
 .\"
 .\" Copyright (c) 2000 Marc Espie
 .\"
@@ -48,9 +48,7 @@ a package will also hold a description, a complete list of the files
 installed by the package, a list of prerequisite packages, along with
 shell script fragments to finish the actual installation.
 .Sh SECURITY CAVEAT
-Apart from
-.Nm ssl ,
-the packages are not as thoroughly audited as the main
+The packages are not as thoroughly audited as the main
 .Ox
 source tree (in many cases, they have not been audited at all).
 This is in part a scale issue: the source tree is under 100MB, compressed,
@@ -93,10 +91,7 @@ japanese dictionaries, which install under
 .Pa /var/dict ,
 .Nm bind8 ,
 which installs under
-.Pa / , and
-.Nm FreeBSD_libs ,
-which installs under
-.Pa /emul/freebsd .
+.Pa / .
 .Pp
 Some packages installation scripts will also create new configuration
 files in
@@ -182,9 +177,7 @@ A few packages are specifically designed to replace existing files, and
 should contain proper shell-fragments to handle those problems gracefully
 (for instance, the
 .Nm ghostscript_encrypt
-packages, or the
-.Nm ssl
-packages).
+package).
 .Pp
 Packages that are distinct but rely on a common subset of files usually
 install a basic
@@ -289,4 +282,5 @@ functional.
 .Xr pkg_info 1 ,
 .Xr pkg_delete 1 ,
 .Xr tar 1 ,
+.Xr packages-specs 7 ,
 .Xr ports 7

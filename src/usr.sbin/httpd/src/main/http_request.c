@@ -1,5 +1,8 @@
 /* ====================================================================
- * Copyright (c) 1995-1999 The Apache Group.  All rights reserved.
+ * The Apache Software License, Version 1.1
+ *
+ * Copyright (c) 2000 The Apache Software Foundation.  All rights
+ * reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -13,46 +16,44 @@
  *    the documentation and/or other materials provided with the
  *    distribution.
  *
- * 3. All advertising materials mentioning features or use of this
- *    software must display the following acknowledgment:
- *    "This product includes software developed by the Apache Group
- *    for use in the Apache HTTP server project (http://www.apache.org/)."
+ * 3. The end-user documentation included with the redistribution,
+ *    if any, must include the following acknowledgment:
+ *       "This product includes software developed by the
+ *        Apache Software Foundation (http://www.apache.org/)."
+ *    Alternately, this acknowledgment may appear in the software itself,
+ *    if and wherever such third-party acknowledgments normally appear.
  *
- * 4. The names "Apache Server" and "Apache Group" must not be used to
- *    endorse or promote products derived from this software without
- *    prior written permission. For written permission, please contact
- *    apache@apache.org.
+ * 4. The names "Apache" and "Apache Software Foundation" must
+ *    not be used to endorse or promote products derived from this
+ *    software without prior written permission. For written
+ *    permission, please contact apache@apache.org.
  *
- * 5. Products derived from this software may not be called "Apache"
- *    nor may "Apache" appear in their names without prior written
- *    permission of the Apache Group.
+ * 5. Products derived from this software may not be called "Apache",
+ *    nor may "Apache" appear in their name, without prior written
+ *    permission of the Apache Software Foundation.
  *
- * 6. Redistributions of any form whatsoever must retain the following
- *    acknowledgment:
- *    "This product includes software developed by the Apache Group
- *    for use in the Apache HTTP server project (http://www.apache.org/)."
- *
- * THIS SOFTWARE IS PROVIDED BY THE APACHE GROUP ``AS IS'' AND ANY
- * EXPRESSED OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
- * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
- * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE APACHE GROUP OR
+ * THIS SOFTWARE IS PROVIDED ``AS IS'' AND ANY EXPRESSED OR IMPLIED
+ * WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
+ * OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+ * DISCLAIMED.  IN NO EVENT SHALL THE APACHE SOFTWARE FOUNDATION OR
  * ITS CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
- * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
- * NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
- * LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
- * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT,
- * STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
- * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED
- * OF THE POSSIBILITY OF SUCH DAMAGE.
+ * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+ * LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF
+ * USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
+ * ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+ * OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT
+ * OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+ * SUCH DAMAGE.
  * ====================================================================
  *
  * This software consists of voluntary contributions made by many
- * individuals on behalf of the Apache Group and was originally based
- * on public domain software written at the National Center for
- * Supercomputing Applications, University of Illinois, Urbana-Champaign.
- * For more information on the Apache Group and the Apache HTTP server
- * project, please see <http://www.apache.org/>.
+ * individuals on behalf of the Apache Software Foundation.  For more
+ * information on the Apache Software Foundation, please see
+ * <http://www.apache.org/>.
  *
+ * Portions of this software are based upon public domain software
+ * originally written at the National Center for Supercomputing Applications,
+ * University of Illinois, Urbana-Champaign.
  */
 
 /*
@@ -178,7 +179,7 @@ static int get_path_info(request_rec *r)
     char *end = &path[strlen(path)];
     char *last_cp = NULL;
     int rv;
-#ifdef HAVE_DRIVE_LETTERS
+#if defined(HAVE_DRIVE_LETTERS) || defined(HAVE_UNC_PATHS)
     char bStripSlash=1;
 #endif
 
@@ -193,8 +194,10 @@ static int get_path_info(request_rec *r)
      */
     if (strlen(path) == 3 && path[1] == ':' && path[2] == '/')
         bStripSlash = 0;
+#endif
 
 
+#ifdef HAVE_UNC_PATHS
     /* If UNC name == //machine/share/, do not 
      * advance over the trailing slash.  Any other
      * UNC name is OK to strip the slash.
@@ -213,7 +216,9 @@ static int get_path_info(request_rec *r)
         if (iCount == 4)
             bStripSlash = 0;
     }
+#endif
 
+#if defined(HAVE_DRIVE_LETTERS) || defined(HAVE_UNC_PATHS)
     if (bStripSlash)
 #endif
         /* Advance over trailing slashes ... NOT part of filename 
@@ -221,7 +226,6 @@ static int get_path_info(request_rec *r)
          */
         for (cp = end; cp > path && cp[-1] == '/'; --cp)
             continue;
-
 
     while (cp > path) {
 
@@ -243,6 +247,9 @@ static int get_path_info(request_rec *r)
         else {
             errno = 0;
             rv = stat(path, &r->finfo);
+#ifdef OS2
+            r->finfo.st_ino = 0;
+#endif
         }
 
         if (cp != end)
@@ -325,8 +332,11 @@ static int directory_walk(request_rec *r)
     char *test_filename;
     char *test_dirname;
     int res;
-    unsigned i, num_dirs, iStart;
+    unsigned i, num_dirs;
     int j, test_filename_len;
+#if defined(HAVE_UNC_PATHS) || defined(NETWARE)
+    unsigned iStart = 1;
+#endif
 
     /*
      * Are we dealing with a file? If not, we can (hopefuly) safely assume we
@@ -398,6 +408,8 @@ static int directory_walk(request_rec *r)
         return res;
     }
 
+    r->case_preserved_filename = r->filename;
+
     r->filename   = ap_os_canonical_filename(r->pool, r->filename);
 
     test_filename = ap_pstrdup(r->pool, r->filename);
@@ -431,18 +443,46 @@ static int directory_walk(request_rec *r)
      */
     test_dirname = ap_palloc(r->pool, test_filename_len + 2);
 
-    iStart = 1;
-#ifdef WIN32
-    /* If the name is a UNC name, then do not walk through the
-     * machine and share name (e.g. \\machine\share\)
+#if defined(HAVE_UNC_PATHS)
+    /* If the name is a UNC name, then do not perform any true file test
+     * against the machine name (start at //machine/share/)
+     * This is optimized to use the normal walk (skips the redundant '/' root)
      */
     if (num_dirs > 3 && test_filename[0] == '/' && test_filename[1] == '/')
         iStart = 4;
 #endif
 
+#if defined(NETWARE)
+    /* If the name is a fully qualified volume name, then do not perform any
+     * true file test on the machine name (start at machine/share:/)
+     * XXX: The implementation eludes me at this moment... 
+     *      Does this make sense?  Please test!
+     */
+    if (num_dirs > 1 && strchr(test_filename, '/') < strchr(test_filename, ':'))
+        iStart = 2;
+#endif
+
+#if defined(HAVE_DRIVE_LETTERS) || defined(NETWARE)
+    /* Should match <Directory> sections starting from '/', not 'e:/' 
+     * (for example).  WIN32/OS2/NETWARE do not have a single root directory,
+     * they have one for each filesystem.  Traditionally, Apache has treated 
+     * <Directory /> permissions as the base for the whole server, and this 
+     * tradition should probably be preserved. 
+     *
+     * NOTE: MUST SYNC WITH ap_make_dirstr_prefix() CHANGE IN src/main/util.c
+     */
+    if (test_filename[0] == '/')
+        i = 1;
+    else
+        i = 0;
+#else
+    /* Normal File Systems are rooted at / */
+    i = 1;
+#endif /* def HAVE_DRIVE_LETTERS || NETWARE */
+
     /* j keeps track of which section we're on, see core_reorder_directories */
     j = 0;
-    for (i = iStart; i <= num_dirs; ++i) {
+    for (; i <= num_dirs; ++i) {
         int overrides_here;
         core_dir_config *core_dir = (core_dir_config *)
             ap_get_module_config(per_dir_defaults, &core_module);
@@ -458,6 +498,10 @@ static int directory_walk(request_rec *r)
          * permissions appropriate to the *parent* directory...
          */
 
+#if defined(HAVE_UNC_PATHS) || defined(NETWARE)
+        /* Test only legal names against the real filesystem */
+        if (i >= iStart)
+#endif
         if ((res = check_symlinks(test_dirname, core_dir->opts))) {
             ap_log_rerror(APLOG_MARK, APLOG_NOERRNO|APLOG_ERR, r,
                         "Symbolic link not allowed: %s", test_dirname);
@@ -481,7 +525,15 @@ static int directory_walk(request_rec *r)
 
             if (entry_core->r
 		|| !ap_os_is_path_absolute(entry_dir)
+#if defined(HAVE_DRIVE_LETTERS) || defined(NETWARE)
+    /* To account for the top-level "/" directory when i == 0 
+     * XXX: I think the net test is wrong... may fail ap_os_is_path_absolute
+     */
+                || (entry_core->d_components > 1
+                    && entry_core->d_components > i))
+#else
                 || entry_core->d_components > i)
+#endif /* def HAVE_DRIVE_LETTERS || NETWARE */                  
                 break;
 
             this_conf = NULL;
@@ -500,11 +552,24 @@ static int directory_walk(request_rec *r)
                 core_dir = (core_dir_config *)
                            ap_get_module_config(per_dir_defaults, &core_module);
             }
+#if defined(HAVE_DRIVE_LETTERS) || defined(NETWARE)
+            /* So that other top-level directory sections (e.g. "e:/") aren't
+             * skipped when i == 0
+             * XXX: I don't get you here, Tim... That's a level 1 section, but
+             *      we are at level 0. Did you mean fast-forward to the next?
+             */
+            else if (!i)
+                break;
+#endif /* def HAVE_DRIVE_LETTERS || NETWARE */
         }
         overrides_here = core_dir->override;
 
         /* If .htaccess files are enabled, check for one. */
 
+#if defined(HAVE_UNC_PATHS) || defined(NETWARE)
+        /* Test only legal names against the real filesystem */
+        if (i >= iStart)
+#endif
         if (overrides_here) {
             void *htaccess_conf = NULL;
 
@@ -842,6 +907,23 @@ API_EXPORT(request_rec *) ap_sub_req_lookup_file(const char *new_file,
         ap_parse_uri(rnew, rnew->uri);    /* fill in parsed_uri values */
         if (stat(rnew->filename, &rnew->finfo) < 0) {
             rnew->finfo.st_mode = 0;
+#ifdef ENAMETOOLONG
+            /* Special case for filenames which exceed the maximum limit
+	     * imposed by the operating system (~1024). These should
+	     * NOT be treated like "file not found", because there is
+	     * a difference between "the file is not there" and
+	     * "the file exists, but you tried to access it using a
+	     * path which exceeds the path length limit".
+	     * The idea here is to handle DoS attacks with long
+	     * runs of //////'s in a graceful and secure manner.
+	     */
+            if (errno == ENAMETOOLONG) {
+                ap_log_rerror(APLOG_MARK, APLOG_CRIT, r,
+                              "Possible DoS attempt? URL=%s", r->filename);
+                rnew->status = HTTP_FORBIDDEN;
+                return rnew;
+            }
+#endif
         }
 
         if ((res = check_safe_file(rnew))) {
@@ -1033,8 +1115,14 @@ API_EXPORT(void) ap_die(int type, request_rec *r)
             if ((error_notes = ap_table_get(r->notes, "error-notes")) != NULL) {
 		ap_table_setn(r->subprocess_env, "ERROR_NOTES", error_notes);
 	    }
-            r->method = ap_pstrdup(r->pool, "GET");
-            r->method_number = M_GET;
+	    /* 
+	     * If it is already a GET or a HEAD, don't change it 
+	     * (method_number for GET and HEAD is the same) 
+	     */
+	    if(r->method_number!=M_GET) { 
+            	r->method = ap_pstrdup(r->pool, "GET");
+            	r->method_number = M_GET;
+	    }
             ap_internal_redirect(custom_response, r);
             return;
         }

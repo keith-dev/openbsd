@@ -1,4 +1,4 @@
-/* $OpenBSD: netcat.c,v 1.17 2000/09/26 18:53:13 ericj Exp $ */
+/* $OpenBSD: netcat.c,v 1.19 2001/01/16 20:20:48 ericj Exp $ */
 
 /* Netcat 1.10 RELEASE 960320
  *
@@ -37,6 +37,7 @@
 #include <netinet/in_systm.h>
 #include <netinet/ip.h>
 #include <arpa/inet.h>
+#include <arpa/nameser.h>
 #include <netdb.h>		/* hostent, gethostby*, getservby* */
 #include <stdio.h>
 #include <string.h>
@@ -45,6 +46,7 @@
 #include <setjmp.h>
 #include <signal.h>
 #include <fcntl.h>
+#include <resolv.h>
 #include <stdarg.h>
 #include <stdlib.h>
 #include <unistd.h>
@@ -686,6 +688,7 @@ dol_err:
  * trick for getting the RTT.  [I got that idea from pluvius, and warped it.]
  * Return either the original fd, or clean up and return -1. 
  */
+int
 udptest(fd, where)
 	int     fd;
 	struct in_addr     *where;
@@ -936,7 +939,7 @@ readwrite(fd)
 				netretry--;	/* we actually try a coupla
 						 * times. */
 			if (!netretry) {
-				if (o_verbose)	/* normally we don't
+				if (o_verbose > 1)	/* normally we don't
 							 * care */
 					nlog(0, "net timeout");
 				close(fd);
@@ -1293,7 +1296,7 @@ main(argc, argv)
 				if (o_zero && o_udpmode)
 					netfd = udptest(netfd, themaddr);
 			if (netfd > 0) {
-				x = 0;
+				x = errno = 0;
 				if (o_verbose) {
 					nlog(0, "%s [%s] %d (%s) open",
 				    		whereto->name, 
@@ -1304,7 +1307,7 @@ main(argc, argv)
 					x = readwrite(netfd);
 			} else {
 				x = 1;
-				if ((Single || (o_verbose)) 
+				if ((Single || (o_verbose > 1)) 
 				   || (errno != ECONNREFUSED)) {
 					nlog(0, "%s [%s] %d (%s)",
 					     whereto->name, whereto->addrs[0], 
@@ -1321,8 +1324,9 @@ main(argc, argv)
 		    }
 		optind++;
 	}
-
-	nlog(0, "Sent %i Rcvd %i", wrote_net, wrote_out);
+	errno = 0;
+	if (o_verbose > 1)
+		nlog(0, "Sent %i Rcvd %i", wrote_net, wrote_out);
 	if (Single)
 		exit(x);
 	exit(0);
@@ -1335,6 +1339,7 @@ main(argc, argv)
  */
 void
 nlog(doexit, fmt)
+	int doexit;
 	char *fmt;
 {
 	va_list args;
@@ -1359,6 +1364,7 @@ nlog(doexit, fmt)
 
 void
 usage(doexit)
+	int doexit;
 {
 	fprintf(stderr, "netcat - [v1.10]\n");
 	fprintf(stderr, "nc [-lnrtuvz] [-e command] [-g intermediates]\n");

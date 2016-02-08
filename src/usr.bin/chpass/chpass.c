@@ -1,4 +1,4 @@
-/*	$OpenBSD: chpass.c,v 1.14 1999/12/05 20:18:35 millert Exp $	*/
+/*	$OpenBSD: chpass.c,v 1.16 2000/11/26 01:29:43 millert Exp $	*/
 /*	$NetBSD: chpass.c,v 1.8 1996/05/15 21:50:43 jtc Exp $	*/
 
 /*-
@@ -44,7 +44,7 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)chpass.c	8.4 (Berkeley) 4/2/94";
 #else 
-static char rcsid[] = "$OpenBSD: chpass.c,v 1.14 1999/12/05 20:18:35 millert Exp $";
+static char rcsid[] = "$OpenBSD: chpass.c,v 1.16 2000/11/26 01:29:43 millert Exp $";
 #endif
 #endif /* not lint */
 
@@ -219,7 +219,7 @@ main(argc, argv)
 		pw_copy(pfd, tfd, pw);
 
 		/* Now finish the passwd file update. */
-		if (pw_mkdb() == -1)
+		if (pw_mkdb(pw->pw_name) == -1)
 			pw_error(NULL, 0, 1);
 	}
 
@@ -245,10 +245,11 @@ usage()
 {
 
 #ifdef	YP
-	(void)fprintf(stderr, "usage: %s [-a list] [-s shell] [-l]%s [user]\n",
-	    __progname, use_yp?" [-y]":"");
+	(void)fprintf(stderr,
+	    "usage: %s [-l%s] [-a list] [-s newshell] [user]\n",
+	    __progname, use_yp ? "y" : "");
 #else
-	(void)fprintf(stderr, "usage: %s [-a list] [-s shell] [user]\n",
+	(void)fprintf(stderr, "usage: %s [-a list] [-s newshell] [user]\n",
 	    __progname);
 #endif
 	exit(1);

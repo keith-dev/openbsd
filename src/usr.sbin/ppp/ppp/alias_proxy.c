@@ -22,7 +22,7 @@
 
     Initial development: April, 1998 (cjm)
 
-    $OpenBSD: alias_proxy.c,v 1.6 2000/09/02 22:12:26 brian Exp $
+    $OpenBSD: alias_proxy.c,v 1.8 2001/03/25 12:34:34 brian Exp $
 */
 
 
@@ -533,6 +533,7 @@ PacketAliasProxyRule(const char *cmd)
     struct proxy_entry *proxy_entry;
 
 /* Copy command line into a buffer */
+    cmd += strspn(cmd, " \t");
     cmd_len = strlen(cmd);
     if (cmd_len > (sizeof(buffer) - 1))
         return -1;
@@ -703,7 +704,6 @@ PacketAliasProxyRule(const char *cmd)
                 }
                 else
                 {
-                    int n;
                     int nbits;
                     char s[sizeof(buffer)];
 

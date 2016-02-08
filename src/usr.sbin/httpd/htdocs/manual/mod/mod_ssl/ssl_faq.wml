@@ -69,7 +69,7 @@ author.
     <a name="<get-var ref>"></a>
     <strong id="faq">%body</strong>\
     &nbsp;&nbsp;
-    [<a href="http://www.modssl.org/docs/2.6/ssl_faq.html#<get-var ref>"><b>L</b></a>]
+    [<a href="http://www.modssl.org/docs/2.8/ssl_faq.html#<get-var ref>"><b>L</b></a>]
     <p>
 <restore toc>
 <restore ref>
@@ -146,14 +146,15 @@ What are the major differences between mod_ssl and
 the commercial alternatives like Raven or Stronghold?
 </faq>
 
-    As of this writing (end of the year 1999) the major difference is
-    the RSA license which one receives (very cheaply in contrast to
+    In the past (until September 20th, 2000) the major difference was
+    the RSA license which one received (very cheaply in contrast to
     a direct licensing from RSA DSI) with the commercial Apache SSL
-    products. On the other hand, one needs this license only in the
-    US, of course. So for non-US citizens this point is useless. And
-    even for US citizens the situations is at least solved next year
-    (September 20th, 2000) when the RSA patent expires.
-        
+    products. On the other hand, one needed this license only in the US,
+    of course. So for non-US citizens this point was useless. But now
+    even for US citizens the situations changed because the RSA patent
+    expired on September 20th, 2000 and RSA DSI also placed the RSA
+    algorithm explicitly into the public domain.
+
     <p>
     Second, there is the point that one has guaranteed support from
     the commercial vendors. On the other hand, if you monitored the
@@ -184,13 +185,11 @@ the commercial alternatives like Raven or Stronghold?
     
     <p>
     So, in short: There are lots of commercial versions of the popular
-    Apache+mod_ssl+OpenSSL server combination available. And until the
-    RSA patent expires in the year 2000, US citizens have no choice,
-    of course. They have to buy one of the commercial versions. Non-US
-    citizens are not forced into this situation and should decide
-    carefully whether they really need to buy a commercial version or
-    whether it would not be sufficient to directly use the free and
-    official versions of the Apache, mod_ssl and OpenSSL packages.
+    Apache+mod_ssl+OpenSSL server combination available. Every user
+    should decide carefully whether they really need to buy a commercial
+    version or whether it would not be sufficient to directly use the
+    free and official versions of the Apache, mod_ssl and OpenSSL
+    packages.
 
 <faq ref="what-version" toc="mod_ssl/Apache versions?">
 How do I know which mod_ssl version is for which Apache version?
@@ -923,6 +922,16 @@ browsers complain that they cannot verify the server certificate?
 
 <ul>
 
+<faq ref="random-errors" toc="Random SSL errors under heavy load?">
+Why do I get lots of random SSL protocol errors under heavy server load?
+</faq>
+
+    There can be a number of reasons for this, but the main one
+    is problems with the SSL session Cache specified by the
+    <tt>SSLSessionCache</tt> directive. The DBM session cache is most
+    likely the source of the problem, so trying the SHM session cache or
+    no cache at all may help.
+
 <faq ref="load" toc="Why has the server a higher load?">
 Why has my webserver a higher load now that I run SSL there?
 </faq>
@@ -1088,6 +1097,13 @@ Explorer (MSIE) I get various I/O errors. What is the reason?
     qualified domain name (FQDN) of the website in hyperlinks instead, because
     MSIE 5.x has an error in the way it handles the SGC negotiation.
 
+    <p>
+    And finally there are versions of MSIE which seem to require that
+    an SSL session can be reused (a totally non standard-conforming
+    behaviour, of course). Connection with those MSIE versions only work
+    if a SSL session cache is used. So, as a work-around, make sure you
+    are using a session cache (see <tt>SSLSessionCache</tt> directive).
+
 <faq ref="io-ns" toc="Why do I get I/O errors with NS clients?">
 When I connect via HTTPS to an Apache+mod_ssl server with Netscape Navigator I
 get I/O errors and the message "Netscape has encountered bad data from the
@@ -1119,14 +1135,14 @@ In case of problems you should search here first.
 <p>
 <ol>
 <li><em>Answers in the User Manual's F.A.Q. List (this)</em><br>
-    <a href="http://www.modssl.org/docs/2.6/ssl_faq.html">
-    http://www.modssl.org/docs/2.6/ssl_faq.html</a><br>
+    <a href="http://www.modssl.org/docs/2.8/ssl_faq.html">
+    http://www.modssl.org/docs/2.8/ssl_faq.html</a><br>
     First look inside the F.A.Q. (this text), perhaps your problem is such
     popular that it was already answered a lot of times in the past.
 <p>
 <li><em>Postings from the modssl-users Support Mailing List</em>
-    <a href="http://www.modssl.org/news/list.html">
-    http://www.modssl.org/news/list.html</a><br>
+    <a href="http://www.modssl.org/support/">
+    http://www.modssl.org/support/</a><br>
     Second search for your problem in one of the existing archives of the
     modssl-users mailing list.  Perhaps your problem popped up at least once for
     another user, too.

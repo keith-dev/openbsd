@@ -23,7 +23,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- *	$OpenBSD: tun.c,v 1.9 2000/02/27 01:38:29 brian Exp $
+ *	$OpenBSD: tun.c,v 1.11 2001/03/24 01:06:08 brian Exp $
  */
 
 #include <sys/param.h>
@@ -43,15 +43,16 @@
 #if defined(__OpenBSD__) || defined(__NetBSD__)
 #include <sys/ioctl.h>
 #endif
+#include <stdio.h>
 #include <termios.h>
 #ifdef __NetBSD__
-#include <stdio.h>
 #include <unistd.h>
 #endif
 
 #include "layer.h"
 #include "mbuf.h"
 #include "log.h"
+#include "id.h"
 #include "timer.h"
 #include "lqr.h"
 #include "hdlc.h"
@@ -74,7 +75,7 @@
 #include "tun.h"
 
 void
-tun_configure(struct bundle *bundle, int mtu)
+tun_configure(struct bundle *bundle)
 {
 #ifdef __NetBSD__
   struct ifreq ifr;
@@ -88,7 +89,7 @@ tun_configure(struct bundle *bundle, int mtu)
   }
 
   sprintf(ifr.ifr_name, "tun%d", bundle->unit);
-  ifr.ifr_mtu = mtu;
+  ifr.ifr_mtu = bundle->mtu;
   if (ioctl(s, SIOCSIFMTU, &ifr) < 0)
       log_Printf(LogERROR, "tun_configure: ioctl(SIOCSIFMTU): %s\n",
              strerror(errno));
@@ -99,13 +100,13 @@ tun_configure(struct bundle *bundle, int mtu)
 
   memset(&info, '\0', sizeof info);
   info.type = IFT_PPP;
-  info.mtu = mtu;
+  info.mtu = bundle->mtu;
   
   info.baudrate = bundle->bandwidth;
 #ifdef __OpenBSD__
   info.flags = IFF_UP|IFF_POINTOPOINT;                             
 #endif
-  if (ioctl(bundle->dev.fd, TUNSIFINFO, &info) < 0)
+  if (ID0ioctl(bundle->dev.fd, TUNSIFINFO, &info) < 0)
     log_Printf(LogERROR, "tun_configure: ioctl(TUNSIFINFO): %s\n",
 	      strerror(errno));
 #endif

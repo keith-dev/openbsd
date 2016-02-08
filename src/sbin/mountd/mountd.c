@@ -1,4 +1,4 @@
-/*	$OpenBSD: mountd.c,v 1.32 2000/07/05 23:41:10 deraadt Exp $	*/
+/*	$OpenBSD: mountd.c,v 1.35 2001/01/17 19:27:11 deraadt Exp $	*/
 /*	$NetBSD: mountd.c,v 1.31 1996/02/18 11:57:53 fvdl Exp $	*/
 
 /*
@@ -193,6 +193,7 @@ int	xdr_dir __P((XDR *, char *));
 int	xdr_explist __P((XDR *, caddr_t));
 int	xdr_fhs __P((XDR *, caddr_t));
 int	xdr_mlist __P((XDR *, caddr_t));
+void	mountd_svc_run __P((void));
 
 struct exportlist *exphead;
 struct mountlist *mlhead;
@@ -216,6 +217,9 @@ int opt_flags;
 #define	OP_ALLDIRS	0x40
 
 int debug = 0;
+
+sig_atomic_t gothup;
+sig_atomic_t gotterm;
 
 /*
  * Mountd server for NFS mount protocol as described in:
@@ -308,9 +312,60 @@ main(argc, argv)
 		syslog(LOG_ERR, "Can't register mount");
 		exit(1);
 	}
-	svc_run();
+	mountd_svc_run();
 	syslog(LOG_ERR, "Mountd died");
 	exit(1);
+}
+
+void
+mountd_svc_run()
+{
+	fd_set *fds = NULL;
+	int fds_size = 0;
+	extern fd_set *__svc_fdset;
+	extern int __svc_fdsetsize;
+
+	for (;;) {
+		if (__svc_fdset) {
+			int bytes = howmany(__svc_fdsetsize, NFDBITS) *
+			    sizeof(fd_mask);
+			if (fds_size != __svc_fdsetsize) {
+				if (fds)
+					free(fds);
+				fds = (fd_set *)malloc(bytes);  /* XXX */
+				fds_size = __svc_fdsetsize;
+			}
+			memcpy(fds, __svc_fdset, bytes);
+		} else {
+			if (fds)
+				free(fds);
+			fds = NULL;
+		}
+		switch (select(svc_maxfd+1, fds, 0, 0, (struct timeval *)0)) {
+		case -1:
+			if (errno == EINTR)
+				break;
+			perror("mountd_svc_run: - select failed");
+			if (fds)
+				free(fds);
+			return;
+		case 0:
+			break;
+		default:
+			svc_getreqset2(fds, svc_maxfd+1);
+			break;
+		}
+		if (gothup) {
+			get_exportlist();
+			gothup = 0;
+		}
+		if (gotterm) {
+			(void) clnt_broadcast(RPCPROG_MNT, RPCMNT_VER1,
+			    RPCMNT_UMNTALL, xdr_void, (caddr_t)0, xdr_void,
+			    (caddr_t)0, umntall_each);
+			exit(0);
+		}
+	}
 }
 
 /*
@@ -646,10 +701,8 @@ FILE *exp_file;
 void
 new_exportlist()
 {
-	int save_errno = errno;
+	gothup = 1;
 
-	get_exportlist();
-	errno = save_errno;
 }
 
 /*
@@ -1678,14 +1731,10 @@ get_net(cp, net, maskflg)
 	struct in_addr inetaddr, inetaddr2;
 	char *name;
 
-	if ((np = getnetbyname(cp)))
-		inetaddr = inet_makeaddr(np->n_net, 0);
-	else if (isdigit(*cp)) {
-		if ((netaddr = inet_network(cp)) == -1)
-			return (1);
+	if ((netaddr = inet_network(cp)) != INADDR_NONE) {
 		inetaddr = inet_makeaddr(netaddr, 0);
 		/*
-		 * Due to arbritrary subnet masks, you don't know how many
+		 * Due to arbitrary subnet masks, you don't know how many
 		 * bits to shift the address to make it into a network,
 		 * however you do know how to make a network address into
 		 * a host with host == 0 and then compare them.
@@ -1700,8 +1749,12 @@ get_net(cp, net, maskflg)
 			}
 			endnetent();
 		}
-	} else
-		return (1);
+	} else {
+		if ((np = getnetbyname(cp)))
+			inetaddr = inet_makeaddr(np->n_net, 0);
+		else
+			return (1);
+	}
 	if (maskflg)
 		net->nt_mask = inetaddr.s_addr;
 	else {
@@ -1974,9 +2027,7 @@ add_mlist(hostp, dirp)
 void
 send_umntall()
 {
-	(void) clnt_broadcast(RPCPROG_MNT, RPCMNT_VER1, RPCMNT_UMNTALL,
-		xdr_void, (caddr_t)0, xdr_void, (caddr_t)0, umntall_each);
-	exit(0);
+	gotterm = 1;
 }
 
 int

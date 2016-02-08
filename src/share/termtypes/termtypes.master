@@ -1,13 +1,13 @@
 ######## TERMINAL TYPE DESCRIPTIONS SOURCE FILE
 #
-# $OpenBSD: termtypes.master,v 1.27 2000/10/08 22:11:32 millert Exp $
+# $OpenBSD: termtypes.master,v 1.30 2001/02/22 04:10:29 millert Exp $
 #
 # This version of terminfo.src is distributed with ncurses.
 # Report bugs to
 #	bug-ncurses@gnu.org
 #
 #	Version 10.2.1
-#	Date: 2000/09/24 02:29:16
+#	Date: 2001/02/11 01:36:18
 #	terminfo syntax
 #
 #	Eric S. Raymond		(current maintainer)
@@ -806,30 +806,44 @@ pmcons|pmconsole|PMAX console,
 #	F13-F24 are shifted F1-F12
 #	F25-F36 are control F1-F12
 #	F37-F48 are shift+control F1-F12
+#
+# hpa/vpa work in the console, but not in scoterm:
+#	hpa=\E[%p1%dG,
+#	vpa=\E[%p1%dd,
+#
+# SCO's terminfo uses
+#	kLFT=\E[d,
+#	kRIT=\E[c,
+# which do not work (console or scoterm).
+#
+# Console documents only 3 attributes can be set with SGR (so we don't use sgr).
 scoansi|SCO Extended ANSI standard crt, 
-	OTbs, am, eo, xon, 
+	OTbs, am, bce, eo, xon, 
 	colors#8, cols#80, it#8, lines#25, pairs#64, 
 	acsc=0[5566778899\:\:;;<<==>>FFGGHHIIJJKKLLMMNNOOPPQQRRSSTTUUVVWWXX`ja0fxgqh2jYk?lZm@nEqDtCu4vAwBx3~y, 
-	blink=\E[5m, bold=\E[1m, cbt=\E[Z, clear=\E[H\E[2J, 
+	bel=^G, blink=\E[5m, bold=\E[1m, cbt=\E[Z, 
+	civis=\E[=14;12C, clear=\E[2J\E[H, cnorm=\E[=10;12C, 
 	cub1=\E[D, cud1=\E[B, cuf1=\E[C, cup=\E[%i%p1%d;%p2%dH, 
-	cuu1=\E[A, dch1=\E[P, dl1=\E[M, ed=\E[J, el=\E[K, home=\E[H, 
-	ht=^I, ich1=\E[@, il1=\E[L, ind=\E[S, invis=\E[8m, kbeg=\E[E, 
-	kbs=^H, kcbt=\E[Z, kcub1=\E[D, kcud1=\E[B, kcuf1=\E[C, 
-	kcuu1=\E[A, kend=\E[F, kf1=\E[M, kf10=\E[V, kf11=\E[W, 
-	kf12=\E[X, kf13=\E[Y, kf15=\E[a, kf16=\E[b, kf17=\E[c, 
-	kf18=\E[d, kf19=\E[e, kf2=\E[N, kf20=\E[f, kf21=\E[g, 
-	kf22=\E[h, kf23=\E[i, kf24=\E[j, kf25=\E[k, kf26=\E[l, 
-	kf27=\E[m, kf28=\E[n, kf29=\E[o, kf3=\E[O, kf30=\E[p, 
-	kf31=\E[q, kf32=\E[r, kf33=\E[s, kf34=\E[t, kf35=\E[u, 
-	kf36=\E[v, kf37=\E[w, kf38=\E[x, kf39=\E[y, kf4=\E[P, 
-	kf40=\E[z, kf41=\E[@, kf42=\E[[, kf43=\E[\\, kf44=\E[], 
-	kf45=\E[\^, kf46=\E[_, kf47=\E[`, kf48=\E[{, kf5=\E[Q, 
-	kf6=\E[R, kf7=\E[S, kf8=\E[T, kf9=\E[U, khome=\E[H, 
-	kich1=\E[L, knp=\E[G, kpp=\E[I, op=\E[37;40m, rev=\E[7m, 
-	ri=\E[T, rmacs=\E[10m, rmso=\E[m, rmul=\E[m, 
-	setab=\E[4%p1%dm, setaf=\E[3%p1%dm, 
-	sgr=\E[0;10%?%p1%t;7%;%?%p2%t;4%;%?%p3%t;7%;%?%p4%t;5%;%?%p6%t;1%;%?%p7%t;8%;%?%p9%t;12%;m, 
-	sgr0=\E[0;10m, smacs=\E[12m, smso=\E[7m, smul=\E[4m, 
+	cuu1=\E[A, cvvis=\E[=0;12C, dch1=\E[P, dl=\E[%p1%dM, 
+	dl1=\E[M, ed=\E[m\E[J, el=\E[m\E[K, home=\E[H, ht=^I, 
+	ich1=\E[@, il=\E[%p1%dL, il1=\E[L, ind=\E[S, 
+	indn=\E[%p1%dS, invis=\E[8m, kbeg=\E[E, kbs=^H, kcbt=\E[Z, 
+	kcub1=\E[D, kcud1=\E[B, kcuf1=\E[C, kcuu1=\E[A, kdch1=^_, 
+	kend=\E[F, kf1=\E[M, kf10=\E[V, kf11=\E[W, kf12=\E[X, 
+	kf13=\E[Y, kf15=\E[a, kf16=\E[b, kf17=\E[c, kf18=\E[d, 
+	kf19=\E[e, kf2=\E[N, kf20=\E[f, kf21=\E[g, kf22=\E[h, 
+	kf23=\E[i, kf24=\E[j, kf25=\E[k, kf26=\E[l, kf27=\E[m, 
+	kf28=\E[n, kf29=\E[o, kf3=\E[O, kf30=\E[p, kf31=\E[q, 
+	kf32=\E[r, kf33=\E[s, kf34=\E[t, kf35=\E[u, kf36=\E[v, 
+	kf37=\E[w, kf38=\E[x, kf39=\E[y, kf4=\E[P, kf40=\E[z, 
+	kf41=\E[@, kf42=\E[[, kf43=\E[\\, kf44=\E[], kf45=\E[\^, 
+	kf46=\E[_, kf47=\E[`, kf48=\E[{, kf5=\E[Q, kf6=\E[R, 
+	kf7=\E[S, kf8=\E[T, kf9=\E[U, khome=\E[H, kich1=\E[L, 
+	knp=\E[G, kpp=\E[I, op=\E[37;40m, rev=\E[7m, ri=\E[T, 
+	rin=\E[%p1%dT, rmacs=\E[10m, rmam=\E[?7l, rmso=\E[m, 
+	rmul=\E[m, setab=\E[4%p1%dm, setaf=\E[3%p1%dm, 
+	sgr0=\E[0;10m, smacs=\E[12m, smam=\E[?7h, smso=\E[7m, 
+	smul=\E[4m, 
 
 # This actually describes the generic SVr4 display driver for Intel boxes.
 # The <dim=\E[2m> isn't documented and therefore may not be reliable.
@@ -1918,8 +1932,8 @@ vt220|vt200|DEC VT220 in vt100 emulation mode,
 	cup=\E[%i%p1%d;%p2%dH$<10>, cuu1=\E[A, dch1=\E[P, 
 	dl1=\E[M, ed=\E[J$<50>, el=\E[K$<3>, home=\E[H, ht=^I, 
 	if=/usr/share/tabset/vt100, il1=\E[L, ind=\ED$<20/>, 
-	is2=\E[1;24r\E[24;1H, kbs=\177, kcub1=\EOD, kcud1=\EOB, 
-	kcuf1=\EOC, kcuu1=\EOA, kdch1=\E[3~, kend=\E[4~, kf1=\EOP, 
+	is2=\E[1;24r\E[24;1H, kbs=\177, kcub1=\E[D, kcud1=\E[B, 
+	kcuf1=\E[C, kcuu1=\E[A, kdch1=\E[3~, kend=\E[4~, kf1=\EOP, 
 	kf10=\E[29~, kf2=\EOQ, kf3=\EOR, kf4=\EOS, kf5=\E[17~, 
 	kf6=\E[18~, kf7=\E[19~, kf8=\E[20~, kf9=\E[21~, 
 	khome=\E[1~, kich1=\E[2~, knp=\E[6~, kpp=\E[5~, rc=\E8, 
@@ -1945,8 +1959,8 @@ vt220-new|vt200-new|dec vt220,
 	flash=\E[?5h$<200/>\E[?5l, home=\E[H, ht=^I, hts=\EH, 
 	ich=\E[%p1%d@, if=/usr/share/tabset/vt100, 
 	il=\E[%p1%dL, il1=\E[L, ind=\ED, 
-	is2=\E[?7h\E[>\E[?1h\E F\E[?4l, kbs=\177, kcub1=\EOD, 
-	kcud1=\EOB, kcuf1=\EOC, kcuu1=\EOA, kf1=\EOP, kf10=\E[21~, 
+	is2=\E[?7h\E[>\E[?1h\E F\E[?4l, kbs=\177, kcub1=\E[D, 
+	kcud1=\E[B, kcuf1=\E[C, kcuu1=\E[A, kf1=\EOP, kf10=\E[21~, 
 	kf11=\E[23~, kf12=\E[24~, kf13=\E[25~, kf14=\E[26~, 
 	kf17=\E[31~, kf18=\E[32~, kf19=\E[33~, kf2=\EOQ, 
 	kf20=\E[34~, kf3=\EOR, kf4=\EOS, kf6=\E[17~, kf7=\E[18~, 
@@ -1954,8 +1968,8 @@ vt220-new|vt200-new|dec vt220,
 	khome=\E[H, kich1=\E[2~, knp=\E[6~, kpp=\E[5~, krdo=\E[29~, 
 	kslt=\E[4~, lf1=pf1, lf2=pf2, lf3=pf3, lf4=pf4, mc0=\E[i, 
 	mc4=\E[4i, mc5=\E[5i, nel=\EE, rc=\E8, rev=\E[7m, ri=\EM, 
-	rmacs=^O, rmam=\E[?7l, rmir=\E[4l, rmso=\E[27m, 
-	rmul=\E[24m, rs1=\E[?3l, sc=\E7, sgr0=\E[m, smacs=^N, 
+	rmacs=\E(B$<4>, rmam=\E[?7l, rmir=\E[4l, rmso=\E[27m, 
+	rmul=\E[24m, rs1=\E[?3l, sc=\E7, sgr0=\E[m, smacs=\E(0$<2>, 
 	smam=\E[?7h, smir=\E[4h, smso=\E[7m, smul=\E[4m, tbc=\E[3g, 
 vt220-w|vt200-w|DEC vt220 in wide mode, 
 	cols#132, 
@@ -2822,10 +2836,13 @@ xterm-bold|xterm terminal emulator (X11R6 Window System) standout w/bold,
 # (kterm: this had extension capabilities ":KJ:TY=ascii:" -- esr)
 # (kterm should not invoke DEC Graphics as the alternate character set
 #  -- Kenji Rikitake)
+# (proper setting of enacs, smacs, rmacs makes kterm to use DEC Graphics
+#  -- MATSUMOTO Shoji)
 kterm|kterm kanji terminal emulator (X window system), 
 	eslok, hs, 
-	acsc@, csr=\E[%i%p1%d;%p2%dr, dsl=\E[?H, enacs@, fsl=\E[?F, 
-	kmous=\E[M, rc=\E8, rmacs@, sc=\E7, smacs@, 
+	acsc=++\,\,--..00II``aaffgghhjjkkllmmnnooppqqrrssttuuvvwwxxyyzz{{||}}~~, 
+	csr=\E[%i%p1%d;%p2%dr, dsl=\E[?H, enacs=, fsl=\E[?F, 
+	kmous=\E[M, rc=\E8, rmacs=\E(B, sc=\E7, smacs=\E(0, 
 	tsl=\E[?E\E[?%i%dT, use=xterm-r6, use=ecma+color, 
 kterm-color|kterm-co|kterm with ANSI colors, 
 	ncv@, use=kterm, use=ecma+color, 
@@ -3205,12 +3222,12 @@ screen|VT 100/ANSI X3.64 virtual terminal,
 	kcud1=\EOB, kcuf1=\EOC, kcuu1=\EOA, kdch1=\E[3~, kf1=\EOP, 
 	kf10=\E[21~, kf11=\E[23~, kf12=\E[24~, kf2=\EOQ, kf3=\EOR, 
 	kf4=\EOS, kf5=\E[15~, kf6=\E[17~, kf7=\E[18~, kf8=\E[19~, 
-	kf9=\E[20~, khome=\E[1~, kich1=\E[2~, kll=\E[4~, knp=\E[6~, 
-	kpp=\E[5~, nel=\EE, rc=\E8, rev=\E[7m, ri=\EM, rmacs=^O, 
-	rmir=\E[4l, rmkx=\E[?1l\E>, rmso=\E[23m, rmul=\E[24m, 
-	rs2=\Ec, sc=\E7, sgr0=\E[m, smacs=^N, smir=\E[4h, 
-	smkx=\E[?1h\E=, smso=\E[3m, smul=\E[4m, tbc=\E[3g, E0=\E(B, 
-	S0=\E(%p1%c, use=ecma+color, 
+	kf9=\E[20~, khome=\E[1~, kich1=\E[2~, kll=\E[4~, 
+	kmous=\E[M, knp=\E[6~, kpp=\E[5~, nel=\EE, rc=\E8, rev=\E[7m, 
+	ri=\EM, rmacs=^O, rmir=\E[4l, rmkx=\E[?1l\E>, rmso=\E[23m, 
+	rmul=\E[24m, rs2=\Ec, sc=\E7, sgr0=\E[m, smacs=^N, 
+	smir=\E[4h, smkx=\E[?1h\E=, smso=\E[3m, smul=\E[4m, 
+	tbc=\E[3g, E0=\E(B, S0=\E(%p1%c, use=ecma+color, 
 
 screen-w|VT 100/ANSI X3.64 virtual terminal with 132 cols, 
 	cols#132, use=screen, 
@@ -3763,7 +3780,7 @@ mono-emx|stupid monochrome ansi terminal with only one kind of emphasis,
 # Use this for cygwin32 (tested with beta 19.1)
 # underline is colored bright magenta
 # shifted kf1-kf12 are kf11-kf22
-cygwin|ansi emulation for cygwin32, 
+cygwinB19|ansi emulation for cygwin32, 
 	kcub1=\E[D, kcud1=\E[B, kcuf1=\E[C, kcuu1=\E[A, 
 	kdch1=\E[3~, kend=\E[4~, kf1=\E[[A, kf10=\E[21~, 
 	kf11=\E[23~, kf12=\E[24~, kf13=\E[25~, kf14=\E[26~, 
@@ -3772,6 +3789,36 @@ cygwin|ansi emulation for cygwin32,
 	kf5=\E[[E, kf6=\E[17~, kf7=\E[18~, kf8=\E[19~, kf9=\E[20~, 
 	khome=\E[1~, kich1=\E[2~, knp=\E[6~, kpp=\E[5~, rmam@, smam@, 
 	use=ansi.sys, 
+
+# Use this for cygwin (tested with version 1.1.0).
+# I've combined pcansi and linux.  Some values of course were different and
+# I've indicated which of these were and which I used.
+# Cheers, earnie_boyd@yahoo.com
+# several changes based on running with tack and comparing with older entry -TD
+cygwin|ansi emulation for Cygwin, 
+	am, eo, in, msgr, xon, 
+	colors#8, cols#80, it#8, lines#25, ncv#3, pairs#64, 
+	acsc=+\020\,\021-\030.^Y0\333`\004a\261f\370g\361h\260j\331k\277l\332m\300n\305o~p\304q\304r\304s_t\303u\264v\301w\302x\263y\363z\362{\343|\330}\234~\376, 
+	bel=^G, bold=\E[1m, clear=\E[H\E[J, cr=^M, cub1=^H, 
+	cud1=\E[B, cuf1=\E[C, cup=\E[%i%p1%d;%p2%dH, cuu1=\E[A, 
+	dch=\E[%p1%dP, dch1=\E[P, dl=\E[%p1%dM, dl1=\E[M, ed=\E[J, 
+	el=\E[K, el1=\E[1K, home=\E[H, hpa=\E[%i%p1%dG, ht=^I, 
+	hts=\EH, ich=\E[%p1%d@, ich1=\E[@, il=\E[%p1%dL, il1=\E[L, 
+	ind=^J, invis=\E[8m, kbs=^H, kcub1=\E[D, kcud1=\E[B, 
+	kcuf1=\E[C, kcuu1=\E[A, kdch1=\E[3~, kend=\E[4~, kf1=\E[[A, 
+	kf10=\E[21~, kf11=\E[23~, kf12=\E[24~, kf13=\E[25~, 
+	kf14=\E[26~, kf15=\E[28~, kf16=\E[29~, kf17=\E[31~, 
+	kf18=\E[32~, kf19=\E[33~, kf2=\E[[B, kf20=\E[34~, 
+	kf3=\E[[C, kf4=\E[[D, kf5=\E[[E, kf6=\E[17~, kf7=\E[18~, 
+	kf8=\E[19~, kf9=\E[20~, khome=\E[1~, kich1=\E[2~, 
+	knp=\E[6~, kpp=\E[5~, kspd=^Z, nel=^M^J, op=\E[39;49m, 
+	rc=\E8, rev=\E[7m, ri=\EM, rmir=\E[4l, rmpch=\E[10m, 
+	rmso=\E[27m, rmul=\E[24m, rs1=\Ec\E]R, sc=\E7, 
+	setab=\E[4%p1%dm, setaf=\E[3%p1%dm, 
+	sgr=\E[0;10%?%p1%t;7%;%?%p2%t;4%;%?%p3%t;7%;%?%p4%t;5%;%?%p6%t;1%;%?%p7%t;8%;%?%p9%t;11%;m, 
+	sgr0=\E[0;10m, smir=\E[4h, smpch=\E[11m, smso=\E[7m, 
+	smul=\E[4m, u6=\E[%i%d;%dR, u7=\E[6n, u9=\E[c, 
+	vpa=\E[%i%p1%dd, 
 
 # This entry fits the Windows NT console when the _POSIX_TERM environment
 # variable is set to 'on'.  While the Windows NT POSIX console is seldom used,
@@ -18596,6 +18643,19 @@ v3220|LANPAR Vision II model 3220/3221/3222,
 #	* modify xterm-r6 and similar rs2 sequences which had \E7...\E8
 #	  bracketing sequences that reset video attributes (\E8 would restore
 #	  them) -TD
+#
+# 2000-11-11
+#	* rename cygwin to cygwinB19, adapt newer entry from Earnie Boyd -TD
+#
+# 2000-12-16
+#	* improved scoansi, based on SCO man-page, and testing console,
+#	  scoterm with tack -TD
+#
+# 2001-01-27
+#	* modify kterm to use acsc via SCS controls.
+#
+# 2001-02-10
+#	* screen 3.9.8 allows xterm mouse controls to pass-through
 #
 # The following sets edit modes for GNU EMACS.
 # Local Variables:

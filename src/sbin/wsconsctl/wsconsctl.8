@@ -1,4 +1,4 @@
-.\" $OpenBSD: wsconsctl.8,v 1.2 2000/07/02 21:00:44 aaron Exp $
+.\" $OpenBSD: wsconsctl.8,v 1.5 2001/03/09 16:07:20 aaron Exp $
 .\" $NetBSD: wsconsctl.8,v 1.5 1999/09/12 18:47:11 kleink Exp $
 .\"
 .\" Copyright (c) 1998 The NetBSD Foundation, Inc.
@@ -122,18 +122,16 @@ control and cursor control, which are not applicable to
 all display types, and to text emulation and graphics
 (mapped) modes.
 .Pp
-There are currently keyboard encodings for the following
-countries: user-defined, US, German, Danish, Italian,
-French, British and Japanese.
+Use the
+.Xr kbd 8
+utility to determine which keyboard encodings are available for your
+country.
 .Sh EXAMPLES
-The following examples demonstrate the functionality of
-.Nm wsconsctl .
-.Pp
-.Dl wsconsctl -w encoding=uk
+.Cm wsconsctl -w encoding=uk
 .Pp
 Sets a UK keyboard encoding.
 .Pp
-.Dl wsconsctl -w map+="keysym Caps_Lock = Control_L"
+.Cm wsconsctl -w map+="keysym Caps_Lock = Control_L"
 .Pp
 Modifies the current keyboard encoding so that, when the
 .Ar Caps Lock
@@ -145,7 +143,7 @@ to the
 .Ar /usr/include/dev/wscons/wsksymdef.h
 file.
 .Pp
-.Dl wsconsctl -w encoding=us.swapctrlcaps
+.Cm wsconsctl -w encoding=us.swapctrlcaps
 .Pp
 Sets a US keyboard encoding, with the
 .Ar Caps Lock
@@ -160,11 +158,11 @@ by the
 .Ar Caps Lock
 key is enough - see the previous example for details.
 .Pp
-.Dl wsconsctl -w bell.pitch=1200
+.Cm wsconsctl -w bell.pitch=1200
 .Pp
 Sets the bell pitch to be 1200.
 .Pp
-.Dl wsconsctl -w bell.pitch+=200
+.Cm wsconsctl -w bell.pitch+=200
 .Pp
 Adds 200 to the current pitch of the bell.
 .Sh FILES
@@ -173,7 +171,7 @@ Adds 200 to the current pitch of the bell.
 keyboard control device
 .It Pa /dev/wsmouse0
 mouse control device
-.It Pa /dev/ttyE0
+.It Pa /dev/ttyC0
 display control device
 .It Pa /usr/include/dev/wscons/wsconsio.h
 keyboard/mouse/display definitions
@@ -181,6 +179,7 @@ keyboard/mouse/display definitions
 .Sh SEE ALSO
 .Xr pckbd 4 ,
 .Xr wscons 4 ,
+.Xr kbd 8 ,
 .Xr wsconscfg 8 ,
 .Xr wsfontload 8
 .Sh HISTORY

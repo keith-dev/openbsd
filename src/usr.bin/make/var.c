@@ -1,4 +1,4 @@
-/*	$OpenBSD: var.c,v 1.49 2000/10/13 08:29:21 espie Exp $	*/
+/*	$OpenBSD: var.c,v 1.52 2001/03/02 16:57:26 espie Exp $	*/
 /*	$NetBSD: var.c,v 1.18 1997/03/18 19:24:46 christos Exp $	*/
 
 /*
@@ -93,6 +93,11 @@
  *	    	  	    third argument is non-zero, Parse_Error is
  *	    	  	    called if any variables are undefined.
  *
+ *	Var_SubstVar 	    Substitute a named variable in a string using
+ *	    	  	    the given context as the top-most one,
+ *	    	  	    accumulating the result into a user-supplied
+ *	    	  	    buffer.
+ *
  *	Var_Parse 	    Parse a variable expansion from a string and
  *	    	  	    return the result and the number of characters
  *	    	  	    consumed.
@@ -126,7 +131,7 @@
 static char sccsid[] = "@(#)var.c	8.3 (Berkeley) 3/19/94";
 #else
 UNUSED
-static char rcsid[] = "$OpenBSD: var.c,v 1.49 2000/10/13 08:29:21 espie Exp $";
+static char rcsid[] = "$OpenBSD: var.c,v 1.52 2001/03/02 16:57:26 espie Exp $";
 #endif
 #endif /* not lint */
 
@@ -190,7 +195,7 @@ typedef struct Var_ {
     char          name[1];	/* the variable's name */
 }  Var;
 
-static struct hash_info var_info = { 
+static struct ohash_info var_info = { 
 	offsetof(Var, name), 
     NULL, hash_alloc, hash_free, element_alloc };
 static int quick_lookup __P((const char *, const char **, u_int32_t *));
@@ -233,7 +238,7 @@ quick_lookup(name, end, pk)
 {
     size_t len;
 
-    *pk = hash_interval(name, end);
+    *pk = ohash_interval(name, end);
     len = *end - name;
 	/* substitute short version for long local name */
     switch (*pk % MAGICSLOTS) {		    /* MAGICSLOTS should be the    */
@@ -393,7 +398,7 @@ new_var(name, val)
     Var *v;
     const char *end = NULL;
 
-    v = hash_create_entry(&var_info, name, &end);
+    v = ohash_create_entry(&var_info, name, &end);
 
     if (val != NULL) {
     	size_t len = strlen(val);
@@ -412,7 +417,7 @@ getvar(ctxt, name, end, k)
     const char	*end;
     u_int32_t	k;
 {
-    return hash_find(ctxt, hash_lookup_interval(ctxt, name, end, k));
+    return ohash_find(ctxt, ohash_lookup_interval(ctxt, name, end, k));
 }
 
 /*-
@@ -542,7 +547,7 @@ VarAdd(name, val, ctxt)
     	Parse_Error(PARSE_FATAL, "Trying to set dynamic variable %s",
 	    v->name);
     else
-	hash_insert(ctxt, hash_lookup_interval(ctxt, name, end, k), v);
+	ohash_insert(ctxt, ohash_lookup_interval(ctxt, name, end, k), v);
     return v;
 }
 
@@ -586,7 +591,7 @@ Var_Delete(name, ctxt)
     if (DEBUG(VAR))
 	printf("%s:delete %s\n", context_name(ctxt), name);
     (void)quick_lookup(name, &end, &k);
-    v = hash_remove(ctxt, hash_lookup_interval(ctxt, name, end, k));
+    v = ohash_remove(ctxt, ohash_lookup_interval(ctxt, name, end, k));
 
     if (v != NULL)
 	VarDelete(v);
@@ -768,6 +773,7 @@ var_name_with_dollar(str, pos, ctxt, err, endc)
 	str = *pos;
 	for (; **pos != '$'; (*pos)++) {
 	    if (**pos == '\0' || **pos == endc || **pos == ':') {
+	    	Buf_AddInterval(&buf, str, *pos);
 		v = VarFind(Buf_Retrieve(&buf), ctxt, FIND_ENV | FIND_MINE);
 		Buf_Destroy(&buf);
 		return v;
@@ -1007,84 +1013,93 @@ Var_Subst(str, ctxt, undefErr)
  * Var_SubstVar  --
  *	Substitute for one variable in the given string in the given context
  *	If undefErr is TRUE, Parse_Error will be called when an undefined
- *	variable is encountered.
- *
- * Side Effects:
- *	Append the result to the buffer
+ *	variable is encountered. Returns the string with substitutions.
  *-----------------------------------------------------------------------
  */
-void
-Var_SubstVar(buf, str, var, ctxt)
-    Buffer	buf;		/* Where to store the result */
-    char	*str;	        /* The string in which to substitute */
+char *
+Var_SubstVar(str, var, val, estimate)
+    const char	*str;	        /* The string in which to substitute */
     const char	*var;		/* Named variable */
-    GSymT	*ctxt;		/* The context wherein to find variables */
+    const char	*val;		/* Its value */
+    size_t	estimate;	/* Size estimate for the result buffer */
 {
-    char	*val;		/* Value substituted for a variable */
-    size_t	length;		/* Length of the variable invocation */
-    Boolean	doFree;		/* Set true if val should be freed */
+    BUFFER	buf;		/* Where to store the result */
 
+    Buf_Init(&buf, estimate);
     for (;;) {
-	const char *cp;
-	/* copy uninteresting stuff */
-	for (cp = str; *str != '\0' && *str != '$'; str++)
+	const char *start;
+	/* Copy uninteresting stuff */
+	for (start = str; *str != '\0' && *str != '$'; str++)
 	    ;
-	Buf_AddInterval(buf, cp, str);
-	if (*str == '\0')
+	Buf_AddInterval(&buf, start, str);
+
+	start = str;
+	if (*str++ == '\0')
 	    break;
-	if (str[1] == '$') {
-	    Buf_AddString(buf, "$$");
-	    str += 2;
+	str++;
+	/* and escaped dollars */
+	if (start[1] == '$') {
+	    Buf_AddInterval(&buf, start, start+2);
 	    continue;
 	}
-	if (str[1] != '(' && str[1] != '{') {
-	    if (str[1] != *var || var[1] != '\0') {
-		Buf_AddChars(buf, 2, str);
-		str += 2;
+	/* Simple variable, if it's not us, copy.  */
+	if (start[1] != '(' && start[1] != '{') {
+	    if (start[1] != *var || var[1] != '\0') {
+		Buf_AddChars(&buf, 2, start);
 		continue;
 	    }
 	} else {
-	    char *p;
+	    const char *p;
 	    char endc;
 
-	    if (str[1] == '(')
+	    if (start[1] == '(')
 		endc = ')';
-	    else if (str[1] == '{')
+	    else 
 		endc = '}';
 
 	    /* Find the end of the variable specification.  */
-	    p = str+2;
+	    p = str;
 	    while (*p != '\0' && *p != ':' && *p != endc && *p != '$')
 		p++;
 	    /* A variable inside the variable.  We don't know how to
 	     * expand the external variable at this point, so we try 
 	     * again with the nested variable.  */
 	    if (*p == '$') {
-		Buf_AddInterval(buf, str, p);
+		Buf_AddInterval(&buf, start, p);
 		str = p;
 		continue;
 	    }
 
-	    if (strncmp(var, str + 2, p - str - 2) != 0 ||
-		var[p - str - 2] != '\0') {
+	    if (strncmp(var, str, p - str) != 0 ||
+		var[p - str] != '\0') {
 		/* Not the variable we want to expand.  */
-		Buf_AddInterval(buf, str, p);
+		Buf_AddInterval(&buf, start, p);
 		str = p;
 		continue;
 	    } 
-	}
-	/* okay, so we've found the variable we want to expand.  */
-	val = Var_Parse(str, (SymTable *)ctxt, FALSE, &length, &doFree);
-	/* We've now got a variable structure to store in. But first,
-	 * advance the string pointer.  */
-	str += length;
+	    if (*p == ':') {
+		size_t	length;		/* Length of the variable invocation */
+		Boolean	doFree;		/* Set true if val should be freed */
+		char	*newval;	/* Value substituted for a variable */
 
-	/* Copy all the characters from the variable value straight
-	 * into the new string.  */
-	Buf_AddString(buf, val);
-	if (doFree)
-	    free(val);
+	    	length = p - str + 1;
+		doFree = FALSE;
+
+		/* val won't be freed since doFree == FALSE, but
+		 * VarModifiers_Apply doesn't know that, hence the cast. */
+		newval = VarModifiers_Apply((char *)val, NULL, FALSE, 
+		    &doFree, p+1, endc, &length);
+		Buf_AddString(&buf, newval);
+		if (doFree)
+		    free(newval);
+		str += length;
+		continue;
+	    } else
+	    	str = p+1;
+	}
+	Buf_AddString(&buf, val);
     }
+    return Buf_Retrieve(&buf);
 }
 
 /*-
@@ -1104,9 +1119,9 @@ Var_Init()
     VAR_GLOBAL = &global_vars;
     VAR_CMD = &cmd_vars;
     VAR_ENV = &env_vars;
-    hash_init(VAR_GLOBAL, 10, &var_info);
-    hash_init(VAR_CMD, 5, &var_info);
-    hash_init(VAR_ENV, 5, &var_info);
+    ohash_init(VAR_GLOBAL, 10, &var_info);
+    ohash_init(VAR_CMD, 5, &var_info);
+    ohash_init(VAR_ENV, 5, &var_info);
     CTXT_GLOBAL = (SymTable *)VAR_GLOBAL;
     CTXT_CMD = (SymTable *)VAR_CMD;
     CTXT_ENV = (SymTable *)VAR_ENV;
@@ -1120,14 +1135,14 @@ Var_End()
     Var *v;
     unsigned int i;
 
-    for (v = hash_first(VAR_GLOBAL, &i); v != NULL; 
-	v = hash_next(VAR_GLOBAL, &i))
+    for (v = ohash_first(VAR_GLOBAL, &i); v != NULL; 
+	v = ohash_next(VAR_GLOBAL, &i))
 	    VarDelete(v);
-    for (v = hash_first(VAR_CMD, &i); v != NULL; 
-	v = hash_next(VAR_CMD, &i))
+    for (v = ohash_first(VAR_CMD, &i); v != NULL; 
+	v = ohash_next(VAR_CMD, &i))
 	    VarDelete(v);
-    for (v = hash_first(VAR_ENV, &i); v != NULL; 
-	v = hash_next(VAR_ENV, &i))
+    for (v = ohash_first(VAR_ENV, &i); v != NULL; 
+	v = ohash_next(VAR_ENV, &i))
 	    VarDelete(v);
 #endif
 }
@@ -1156,8 +1171,8 @@ Var_Dump(ctxt)
 	Var *v;
 	unsigned int i;
 
-	for (v = hash_first(ctxt, &i); v != NULL; 
-	    v = hash_next(ctxt, &i))
+	for (v = ohash_first(ctxt, &i); v != NULL; 
+	    v = ohash_next(ctxt, &i))
 		VarPrintVar(v);
 }
 
@@ -1180,8 +1195,8 @@ Var_AddCmdline(name)
 
     Buf_Init(&buf, MAKE_BSIZE);
 
-    for (v = hash_first(VAR_CMD, &i); v != NULL; 
-    	v = hash_next(VAR_CMD, &i)) {
+    for (v = ohash_first(VAR_CMD, &i); v != NULL; 
+    	v = ohash_next(VAR_CMD, &i)) {
 		/* We assume variable names don't need quoting */
 		Buf_AddString(&buf, v->name);
 		Buf_AddChar(&buf, '=');

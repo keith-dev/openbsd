@@ -1,7 +1,7 @@
-/*	$OpenBSD: perform.c,v 1.8 2000/04/10 18:44:31 espie Exp $	*/
+/*	$OpenBSD: perform.c,v 1.10 2001/04/18 14:34:31 espie Exp $	*/
 
 #ifndef lint
-static const char *rcsid = "$OpenBSD: perform.c,v 1.8 2000/04/10 18:44:31 espie Exp $";
+static const char *rcsid = "$OpenBSD: perform.c,v 1.10 2001/04/18 14:34:31 espie Exp $";
 #endif
 
 /* This is OpenBSD pkg_install, based on:
@@ -78,6 +78,9 @@ pkg_do(char *pkg)
 	char           *cp = NULL;
 	int             code = 0;
 	char           *pkg2 = 0; /* hold full name of package, storage to free */
+	int             len;
+
+	set_pkg(pkg);
 
 	if (isURL(pkg)) {
 		if ((cp = fileGetURL(NULL, pkg)) != NULL) {
@@ -85,7 +88,6 @@ pkg_do(char *pkg)
 			isTMP = TRUE;
 		}
 	} else if (fexists(pkg) && isfile(pkg)) {
-		int             len;
 
 		if (*pkg != '/') {
 			if (!getcwd(fname, FILENAME_MAX)) {
@@ -98,8 +100,17 @@ pkg_do(char *pkg)
 			strcpy(fname, pkg);
 		cp = fname;
 	} else {
-		if ((cp = fileFindByPath(NULL, pkg)) != NULL)
-			strncpy(fname, cp, FILENAME_MAX);
+		if ((cp = fileFindByPath(NULL, pkg)) != NULL) {
+		    strncpy(fname, cp, FILENAME_MAX);
+		    if (*cp != '/') {
+			if (!getcwd(fname, FILENAME_MAX)) {
+			    cleanup(0);
+			    err(1, "fatal error during execution: getcwd");
+			}
+			len = strlen(fname);
+			snprintf(&fname[len], FILENAME_MAX - len, "/%s", cp);
+		    }
+		}
 	}
 	if (cp) {
 		if (isURL(pkg)) {
@@ -113,13 +124,13 @@ pkg_do(char *pkg)
 			 * be very optimistic.
 			 */
 			if (stat(fname, &sb) == FAIL) {
-				warnx("can't stat package file '%s'", fname);
+				pwarnx("can't stat package file '%s'", fname);
 				code = 1;
 				goto bail;
 			}
 			Home = make_playpen(PlayPen, PlayPenSize, sb.st_size / 2);
 			if (unpack(fname, "+*")) {
-				warnx("error during unpacking, no info for '%s' available", pkg);
+				pwarnx("error during unpacking, no info for '%s' available", pkg);
 				code = 1;
 				goto bail;
 			}
@@ -139,13 +150,13 @@ pkg_do(char *pkg)
 			pkg);
 		if (!fexists(log_dir) && 
 			! (pkg2 = find_prefix(log_dir, sizeof(log_dir), tmp, pkg))) {
-			warnx("can't find package `%s' installed or in a file!", pkg);
+			pwarnx("can't find package `%s' installed or in a file!", pkg);
 			return 1;
 		}
 		if (pkg2) 
 			pkg = pkg2;
 		if (chdir(log_dir) == FAIL) {
-			warnx("can't change directory to '%s'!", log_dir);
+			pwarnx("can't change directory to '%s'!", log_dir);
 			free(pkg2);
 			return 1;
 		}
@@ -163,7 +174,7 @@ pkg_do(char *pkg)
 		plist.head = plist.tail = NULL;
 		fp = fopen(CONTENTS_FNAME, "r");
 		if (!fp) {
-			warnx("unable to open %s file", CONTENTS_FNAME);
+			pwarnx("unable to open %s file", CONTENTS_FNAME);
 			code = 1;
 			goto bail;
 		}
@@ -268,7 +279,9 @@ pkg_perform(char **pkgs)
 
 		if (!(isdir(tmp) || islinktodir(tmp)))
 			return 1;
-		if ((dirp = opendir(tmp)) != (DIR *) NULL) {
+		if (chdir(tmp) != 0)
+			return 1;
+		if ((dirp = opendir(".")) != (DIR *) NULL) {
 			while ((dp = readdir(dirp)) != (struct dirent *) NULL) {
 				if (strcmp(dp->d_name, ".") && strcmp(dp->d_name, "..")) {
 					err_cnt += pkg_do(dp->d_name);

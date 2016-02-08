@@ -1,4 +1,4 @@
-.\"	$OpenBSD: doc-common,v 1.21 2000/08/21 21:13:38 deraadt Exp $
+.\"	$OpenBSD: doc-common,v 1.24 2001/04/15 02:35:09 deraadt Exp $
 .\"
 .\" Copyright (c) 1991, 1993
 .\"	The Regents of the University of California.  All rights reserved.
@@ -181,6 +181,7 @@
 .	if "\\$3"mvme88k" .as vT \ (MVME88K)
 .	if "\\$3"pc532" .as vT \ (PC532)
 .	if "\\$3"pmax"  .as vT \ (PMAX)
+.	if "\\$3"powerpc"  .as vT \ (PowerPC)
 .	if "\\$3"sparc" .as vT \ (SPARC)
 .	if "\\$3"sun3"  .as vT \ (Sun3)
 .	if "\\$3"tahoe" .as vT \ (Tahoe)
@@ -197,7 +198,7 @@
 .de Os
 .ds oS Null
 .if "\\$1"" \{\
-.	ds oS OpenBSD 2.8
+.	ds oS OpenBSD 2.9
 .\}
 .if "\\$2"" \{\
 .	ds aa Non-Null
@@ -235,6 +236,7 @@
 .	if "\\$2"1.0"  .as oS \01.0
 .	if "\\$2"1.0a" .as oS \01.0A
 .	if "\\$2"1.1"  .as oS \01.1
+.	if "\\$2"1.1a" .as oS \01.1A
 .	if "\\$2"1.2"  .as oS \01.2
 .	if "\\$2"1.2a" .as oS \01.2A
 .	if "\\$2"1.2b" .as oS \01.2B
@@ -242,6 +244,10 @@
 .	if "\\$2"1.2d" .as oS \01.2D
 .	if "\\$2"1.2e" .as oS \01.2E
 .	if "\\$2"1.3"  .as oS \01.3
+.	if "\\$2"1.3a" .as oS \01.3A
+.	if "\\$2"1.4"  .as oS \01.4
+.	if "\\$2"1.5"  .as oS \01.5
+.	if "\\$2"1.6"  .as oS \01.6
 .\}
 .if "\\$1"OpenBSD" \{\
 .	ds oS OpenBSD
@@ -255,6 +261,7 @@
 .	if "\\$2"2.6"  .as oS \02.6
 .	if "\\$2"2.7"  .as oS \02.7
 .	if "\\$2"2.8"  .as oS \02.8
+.	if "\\$2"2.9"  .as oS \02.9
 .\}
 .if "\\*(oS"Null" .ds oS \0\\$1
 .if "\\*(aa"Non-Null" .as oS \0\\$2

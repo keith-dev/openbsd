@@ -1,4 +1,4 @@
-/*	$OpenBSD: main.c,v 1.36 2000/07/27 17:44:33 espie Exp $	*/
+/*	$OpenBSD: main.c,v 1.39 2001/03/05 15:09:20 espie Exp $	*/
 /*	$NetBSD: main.c,v 1.12 1997/02/08 23:54:49 cgd Exp $	*/
 
 /*-
@@ -47,7 +47,7 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)main.c	8.1 (Berkeley) 6/6/93";
 #else
-static char rcsid[] = "$OpenBSD: main.c,v 1.36 2000/07/27 17:44:33 espie Exp $";
+static char rcsid[] = "$OpenBSD: main.c,v 1.39 2001/03/05 15:09:20 espie Exp $";
 #endif
 #endif /* not lint */
 
@@ -162,7 +162,7 @@ static void dump_stack __P((struct position *, int));
 
 static void macro __P((void));
 static void initkwds __P((void));
-static ndptr inspect __P((char, char *));
+static ndptr inspect __P((int, char *));
 static int do_look_ahead __P((int, const char *));
 
 static void enlarge_stack __P((void));
@@ -213,7 +213,9 @@ main(argc,argv)
 		case 'g':
 			mimic_gnu = 1;
 			break;
-		case 'o':		/* specific output   */
+		case 'o':
+                        /* XXX accept -o for compatibility  */
+                        break;
 		case '?':
 			usage();
 		}
@@ -490,7 +492,7 @@ outputstr(s)
  */
 static ndptr
 inspect(c, tp) 
-	char c;
+	int c;
 	char *tp;
 {
 	char *name = tp;
@@ -599,7 +601,7 @@ static void
 enlarge_stack()
 {
 	STACKMAX *= 2;
-	fprintf(stderr, "%u\n", STACKMAX);
+	fprintf(stderr, "%lu\n", (unsigned long)STACKMAX);
 	mstack = realloc(mstack, sizeof(stae) * STACKMAX);
 	sstack = realloc(sstack, STACKMAX);
 	if (mstack == NULL || sstack == NULL)

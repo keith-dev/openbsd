@@ -1,58 +1,59 @@
 /* ====================================================================
- * Copyright (c) 1995-1999 The Apache Group.  All rights reserved.
+ * The Apache Software License, Version 1.1
+ *
+ * Copyright (c) 2000 The Apache Software Foundation.  All rights
+ * reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
  * are met:
  *
  * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer. 
+ *    notice, this list of conditions and the following disclaimer.
  *
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in
  *    the documentation and/or other materials provided with the
  *    distribution.
  *
- * 3. All advertising materials mentioning features or use of this
- *    software must display the following acknowledgment:
- *    "This product includes software developed by the Apache Group
- *    for use in the Apache HTTP server project (http://www.apache.org/)."
+ * 3. The end-user documentation included with the redistribution,
+ *    if any, must include the following acknowledgment:
+ *       "This product includes software developed by the
+ *        Apache Software Foundation (http://www.apache.org/)."
+ *    Alternately, this acknowledgment may appear in the software itself,
+ *    if and wherever such third-party acknowledgments normally appear.
  *
- * 4. The names "Apache Server" and "Apache Group" must not be used to
- *    endorse or promote products derived from this software without
- *    prior written permission. For written permission, please contact
- *    apache@apache.org.
+ * 4. The names "Apache" and "Apache Software Foundation" must
+ *    not be used to endorse or promote products derived from this
+ *    software without prior written permission. For written
+ *    permission, please contact apache@apache.org.
  *
- * 5. Products derived from this software may not be called "Apache"
- *    nor may "Apache" appear in their names without prior written
- *    permission of the Apache Group.
+ * 5. Products derived from this software may not be called "Apache",
+ *    nor may "Apache" appear in their name, without prior written
+ *    permission of the Apache Software Foundation.
  *
- * 6. Redistributions of any form whatsoever must retain the following
- *    acknowledgment:
- *    "This product includes software developed by the Apache Group
- *    for use in the Apache HTTP server project (http://www.apache.org/)."
- *
- * THIS SOFTWARE IS PROVIDED BY THE APACHE GROUP ``AS IS'' AND ANY
- * EXPRESSED OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
- * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
- * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE APACHE GROUP OR
+ * THIS SOFTWARE IS PROVIDED ``AS IS'' AND ANY EXPRESSED OR IMPLIED
+ * WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
+ * OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+ * DISCLAIMED.  IN NO EVENT SHALL THE APACHE SOFTWARE FOUNDATION OR
  * ITS CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
- * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
- * NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
- * LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
- * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT,
- * STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
- * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED
- * OF THE POSSIBILITY OF SUCH DAMAGE.
+ * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+ * LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF
+ * USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
+ * ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+ * OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT
+ * OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+ * SUCH DAMAGE.
  * ====================================================================
  *
  * This software consists of voluntary contributions made by many
- * individuals on behalf of the Apache Group and was originally based
- * on public domain software written at the National Center for
- * Supercomputing Applications, University of Illinois, Urbana-Champaign.
- * For more information on the Apache Group and the Apache HTTP server
- * project, please see <http://www.apache.org/>.
+ * individuals on behalf of the Apache Software Foundation.  For more
+ * information on the Apache Software Foundation, please see
+ * <http://www.apache.org/>.
  *
+ * Portions of this software are based upon public domain software
+ * originally written at the National Center for Supercomputing Applications,
+ * University of Illinois, Urbana-Champaign.
  */
 
 /*
@@ -300,6 +301,14 @@ static struct {
  */
 static handler_func *method_ptrs;
 
+
+void ap_cleanup_method_ptrs()
+{
+    if (method_ptrs) {
+        free(method_ptrs);
+    }
+}
+
 /* routine to reconstruct all these shortcuts... called after every
  * add_module.
  * XXX: this breaks if modules dink with their methods pointers
@@ -544,7 +553,11 @@ API_EXPORT(void) ap_add_module(module *m)
 	fprintf(stderr, "%s: module \"%s\" is not compatible with this "
 		"version of Apache.\n", ap_server_argv0, m->name);
 	fprintf(stderr, "Please contact the vendor for the correct version.\n");
+#ifdef NETWARE
+        clean_parent_exit(1);
+#else    
 	exit(1);
+#endif
     }
 
     if (m->next == NULL) {
@@ -560,7 +573,11 @@ API_EXPORT(void) ap_add_module(module *m)
 		    " the dynamic\n", ap_server_argv0, m->name);
 	    fprintf(stderr, "module limit was reached. Please increase "
 		    "DYNAMIC_MODULE_LIMIT and recompile.\n");
+#ifdef NETWARE
+            clean_parent_exit(1);
+#else
 	    exit(1);
+#endif
 	}
     }
 
@@ -708,7 +725,7 @@ API_EXPORT(void) ap_remove_loaded_module(module *mod)
     *m = NULL;
 }
 
-void ap_setup_prelinked_modules()
+void ap_setup_prelinked_modules(void)
 {
     module **m;
     module **m2;
@@ -727,7 +744,11 @@ void ap_setup_prelinked_modules()
         sizeof(module *)*(total_modules+DYNAMIC_MODULE_LIMIT+1));
     if (ap_loaded_modules == NULL) {
 	fprintf(stderr, "Ouch!  Out of memory in ap_setup_prelinked_modules()!\n");
+#ifdef NETWARE
+        clean_parent_exit(1);
+#else
 	exit(1);
+#endif
     }
     for (m = ap_preloaded_modules, m2 = ap_loaded_modules; *m != NULL; )
         *m2++ = *m++;
@@ -1120,6 +1141,9 @@ API_EXPORT_NONSTD(const char *) ap_set_file_slot(cmd_parms *cmd, char *struct_pt
        so the server can be moved or mirrored with less pain.  */
     char *p;
     int offset = (int) (long) cmd->info;
+#ifndef OS2
+    arg = ap_os_canonical_filename(cmd->pool, arg);
+#endif
     if (ap_os_is_path_absolute(arg))
 	p = arg;
     else
@@ -1138,6 +1162,9 @@ static cmd_parms default_parms =
 
 API_EXPORT(char *) ap_server_root_relative(pool *p, char *file)
 {
+#ifndef OS2
+    file = ap_os_canonical_filename(p, file);
+#endif
     if(ap_os_is_path_absolute(file))
 	return file;
     return ap_make_full_path(p, ap_server_root, file);
@@ -1207,10 +1234,26 @@ static void process_command_config(server_rec *s, array_header *arr, pool *p,
 
     if (errmsg) {
         fprintf(stderr, "Syntax error in -C/-c directive:\n%s\n", errmsg);
+#ifdef NETWARE
+        clean_parent_exit(1);
+#else
         exit(1);
+#endif
     }
 
     ap_cfg_closefile(parms.config_file);
+}
+
+typedef struct {
+    char *fname;
+} fnames;
+
+static int fname_alphasort(const void *fn1, const void *fn2)
+{
+    const fnames *f1 = fn1;
+    const fnames *f2 = fn2;
+
+    return strcmp(f1->fname,f2->fname);
 }
 
 void ap_process_resource_config(server_rec *s, char *fname, pool *p, pool *ptemp)
@@ -1234,6 +1277,62 @@ void ap_process_resource_config(server_rec *s, char *fname, pool *p, pool *ptemp
 	    return;
     }
 
+    /* 
+     * here we want to check if the candidate file is really a
+     * directory, and most definitely NOT a symlink (to prevent
+     * horrible loops).  If so, let's recurse and toss it back into
+     * the function.
+     */
+    if (ap_is_rdirectory(fname)) {
+	DIR *dirp;
+	struct DIR_TYPE *dir_entry;
+	int current;
+	array_header *candidates = NULL;
+	fnames *fnew;
+
+	/*
+	 * first course of business is to grok all the directory
+	 * entries here and store 'em away. Recall we need full pathnames
+	 * for this.
+	 */
+	fprintf(stderr, "Processing config directory: %s\n", fname);
+	dirp = ap_popendir(p, fname);
+	if (dirp == NULL) {
+	    perror("fopen");
+	    fprintf(stderr, "%s: could not open config directory %s\n",
+		ap_server_argv0, fname);
+#ifdef NETWARE
+	    clean_parent_exit(1);
+#else
+	    exit(1);
+#endif
+	}
+	candidates = ap_make_array(p, 1, sizeof(fnames));
+	while ((dir_entry = readdir(dirp)) != NULL) {
+	    /* strip out '.' and '..' */
+	    if (strcmp(dir_entry->d_name, ".") &&
+		strcmp(dir_entry->d_name, "..")) {
+		fnew = (fnames *) ap_push_array(candidates);
+		fnew->fname = ap_make_full_path(p, fname, dir_entry->d_name);
+	    }
+	}
+	ap_pclosedir(p, dirp);
+	if (candidates->nelts != 0) {
+            qsort((void *) candidates->elts, candidates->nelts,
+              sizeof(fnames), fname_alphasort);
+	    /*
+	     * Now recurse these... we handle errors and subdirectories
+	     * via the recursion, which is nice
+	     */
+	    for (current = 0; current < candidates->nelts; ++current) {
+	        fnew = &((fnames *) candidates->elts)[current];
+		fprintf(stderr, " Processing config file: %s\n", fnew->fname);
+		ap_process_resource_config(s, fnew->fname, p, ptemp);
+	    }
+	}
+	return;
+    }
+    
     /* GCC's initialization extensions are soooo nice here... */
 
     parms = default_parms;
@@ -1246,7 +1345,11 @@ void ap_process_resource_config(server_rec *s, char *fname, pool *p, pool *ptemp
 	perror("fopen");
 	fprintf(stderr, "%s: could not open document config file %s\n",
 		ap_server_argv0, fname);
+#ifdef NETWARE
+        clean_parent_exit(1);
+#else
 	exit(1);
+#endif
     }
 
     errmsg = ap_srm_command_loop(&parms, s->lookup_defaults);
@@ -1255,12 +1358,15 @@ void ap_process_resource_config(server_rec *s, char *fname, pool *p, pool *ptemp
 	fprintf(stderr, "Syntax error on line %d of %s:\n",
 		parms.config_file->line_number, parms.config_file->name);
 	fprintf(stderr, "%s\n", errmsg);
+#ifdef NETWARE
+        clean_parent_exit(1);
+#else
 	exit(1);
+#endif
     }
 
     ap_cfg_closefile(parms.config_file);
 }
-
 
 int ap_parse_htaccess(void **result, request_rec *r, int override,
 		   const char *d, const char *access_name)
@@ -1672,9 +1778,9 @@ static void show_overrides(const command_rec *pc, module *pm)
 
 /* Show the preloaded configuration directives, the help string explaining
  * the directive arguments, in what module they are handled, and in
- * what parts of the configuration they are allowed.  Used for httpd -h.
+ * what parts of the configuration they are allowed.  Used for httpd -L.
  */
-void ap_show_directives()
+void ap_show_directives(void)
 {
     const command_rec *pc;
     int n;
@@ -1689,7 +1795,7 @@ void ap_show_directives()
 }
 
 /* Show the preloaded module names.  Used for httpd -l. */
-void ap_show_modules()
+void ap_show_modules(void)
 {
     int n;
 
@@ -1697,8 +1803,10 @@ void ap_show_modules()
     for (n = 0; ap_loaded_modules[n]; ++n) {
 	printf("  %s\n", ap_loaded_modules[n]->name);
     }
+#if !defined(WIN32) && !defined(NETWARE)
     printf("suexec: %s\n",
 	   ap_suexec_enabled
 	       ? "enabled; valid wrapper " SUEXEC_BIN
 	       : "disabled; invalid wrapper " SUEXEC_BIN);
+#endif
 }

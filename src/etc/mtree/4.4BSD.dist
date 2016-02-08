@@ -1,4 +1,4 @@
-#	$OpenBSD: 4.4BSD.dist,v 1.99 2000/10/16 14:28:11 deraadt Exp $
+#	$OpenBSD: 4.4BSD.dist,v 1.105 2001/03/30 08:12:39 beck Exp $
 
 /set type=dir uname=root gname=wheel mode=0755
 # .
@@ -216,6 +216,11 @@ protocols		gname=bin uname=root mode=0755
 # ./usr/include/protocols
 ..
 
+# ./usr/include/readline
+readline	gname=bin uname=root mode=0755
+# ./usr/include/readline
+..
+
 # ./usr/include/rpc
 rpc		gname=bin uname=root mode=0755
 # ./usr/include/rpc
@@ -292,6 +297,16 @@ site_perl
 
 # ./usr/libexec
 libexec
+
+# ./usr/libexec/auth
+auth		type=dir uname=root gname=auth mode=0750
+# ./usr/libexec/auth
+..
+
+# ./usr/libexec/sm.bin
+sm.bin
+# ./usr/libexec/sm.bin
+..
 
 # ./usr/libexec/lpr
 lpr
@@ -1278,6 +1293,243 @@ vax
 # ./usr/share/man/cat9
 ..
 
+# ./usr/share/man/ps1
+ps1
+
+alpha
+..
+amiga
+..
+arc
+..
+hp300
+..
+hppa
+..
+i386
+..
+mac68k
+..
+mvme68k
+..
+mvme88k
+..
+pmax
+..
+powerpc
+..
+sparc
+..
+sun3
+..
+vax
+..
+
+# ./usr/share/man/ps1
+..
+
+# ./usr/share/man/ps2
+ps2
+
+# ./usr/share/man/ps2/i386
+i386
+
+# ./usr/share/man/ps2/i386
+..
+
+# ./usr/share/man/ps2
+..
+
+# ./usr/share/man/ps3
+ps3
+
+alpha
+..
+amiga
+..
+arc
+..
+hp300
+..
+hppa
+..
+i386
+..
+mac68k
+..
+mvme68k
+..
+mvme88k
+..
+pmax
+..
+powerpc
+..
+sparc
+..
+sun3
+..
+vax
+..
+
+# ./usr/share/man/ps3
+..
+
+# ./usr/share/man/ps3p
+ps3p
+# ./usr/share/man/ps3p
+..
+
+# ./usr/share/man/ps4
+ps4
+
+alpha
+..
+amiga
+..
+arc
+..
+hp300
+..
+hppa
+..
+i386
+..
+mac68k
+..
+mvme68k
+..
+mvme88k
+..
+pmax
+..
+powerpc
+..
+sparc
+..
+sun3
+..
+vax
+..
+
+# ./usr/share/man/ps4
+..
+
+# ./usr/share/man/ps5
+ps5
+
+alpha
+..
+amiga
+..
+arc
+..
+hp300
+..
+hppa
+..
+i386
+..
+mac68k
+..
+mvme68k
+..
+mvme88k
+..
+pmax
+..
+powerpc
+..
+sparc
+..
+sun3
+..
+vax
+..
+
+# ./usr/share/man/ps5
+..
+
+# ./usr/share/man/ps6
+ps6
+# ./usr/share/man/ps6
+..
+
+# ./usr/share/man/ps7
+ps7
+# ./usr/share/man/ps7
+..
+
+# ./usr/share/man/ps8
+ps8
+
+alpha
+..
+amiga
+..
+arc
+..
+hp300
+..
+hppa
+..
+i386
+..
+mac68k
+..
+mvme68k
+..
+mvme88k
+..
+pmax
+..
+powerpc
+..
+sparc
+..
+sun3
+..
+vax
+..
+
+# ./usr/share/man/ps8
+..
+
+# ./usr/share/man/ps9
+ps9
+
+alpha
+..
+amiga
+..
+arc
+..
+hp300
+..
+hppa
+..
+i386
+..
+mac68k
+..
+mvme68k
+..
+mvme88k
+..
+pmax
+..
+powerpc
+..
+sparc
+..
+sun3
+..
+vax
+..
+
+# ./usr/share/man/ps9
+..
+
 # ./usr/share/man/man1
 man1
 
@@ -1870,6 +2122,16 @@ misc  type=dir uname=root gname=daemon mode=755
 #./www/htdocs/manual/search
 search  type=dir uname=root gname=daemon mode=755
 #./www/htdocs/manual/search
+..
+
+#./www/htdocs/manual/howto
+howto  type=dir uname=root gname=daemon mode=755
+#./www/htdocs/manual/howto
+..
+
+#./www/htdocs/manual/programs
+programs  type=dir uname=root gname=daemon mode=755
+#./www/htdocs/manual/programs
 ..
 
 #./www/htdocs/manual

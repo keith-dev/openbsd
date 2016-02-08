@@ -1,3 +1,4 @@
+/*	$OpenBSD: extern.h,v 1.6 2001/01/28 19:34:27 niklas Exp $	*/
 /*	$NetBSD: extern.h,v 1.2 1995/04/11 02:44:49 cgd Exp $	*/
 
 /*
@@ -79,7 +80,13 @@ void	makedir __P((char *));
 void	nack __P((char *));
 void	pass __P((char *));
 void	passive __P((void));
+int	lpsvproto2af __P((int));
+int	af2lpsvproto __P((int));
+int	epsvproto2af __P((int));
+int	af2epsvproto __P((int));
 void	long_passive __P((char *, int));
+int	extended_port __P((const char *));
+void	epsv_protounsupp __P((const char *));
 void	perror_reply __P((int, char *));
 void	pwd __P((void));
 void	removedir __P((char *));

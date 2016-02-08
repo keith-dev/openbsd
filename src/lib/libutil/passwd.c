@@ -1,4 +1,4 @@
-/*	$OpenBSD: passwd.c,v 1.22 2000/08/01 22:10:16 provos Exp $	*/
+/*	$OpenBSD: passwd.c,v 1.24 2001/01/02 18:22:32 millert Exp $	*/
 
 /*
  * Copyright (c) 1987, 1993, 1994, 1995
@@ -34,7 +34,7 @@
  */
 
 #if defined(LIBC_SCCS) && !defined(lint)
-static char rcsid[] = "$OpenBSD: passwd.c,v 1.22 2000/08/01 22:10:16 provos Exp $";
+static char rcsid[] = "$OpenBSD: passwd.c,v 1.24 2001/01/02 18:22:32 millert Exp $";
 #endif /* LIBC_SCCS and not lint */
 
 #include <sys/types.h>
@@ -273,7 +273,8 @@ pw_lock(retries)
 }
 
 int
-pw_mkdb()
+pw_mkdb(username)
+	char *username;
 {
 	int pstat;
 	pid_t pid;
@@ -291,9 +292,14 @@ pw_mkdb()
 	if (pid == -1)
 		return (-1);
 	if (pid == 0) {
-		if (pw_lck)
-			execl(_PATH_PWD_MKDB, "pwd_mkdb", "-p", "-d", pw_dir,
-			    pw_lck, NULL);
+		if (pw_lck) {
+			if (username)
+				execl(_PATH_PWD_MKDB, "pwd_mkdb", "-p", "-d",
+				    pw_dir, "-u", username, pw_lck, NULL);
+			else
+				execl(_PATH_PWD_MKDB, "pwd_mkdb", "-p", "-d",
+				    pw_dir, pw_lck, NULL);
+		}
 		_exit(1);
 	}
 	pid = waitpid(pid, &pstat, 0);
@@ -582,8 +588,12 @@ pw_error(name, err, eval)
 {
 	char   *master = pw_file(_PATH_MASTERPASSWD);
 
-	if (err)
-		warn("%s", name);
+	if (err) {
+		if (name)
+			warn("%s", name);
+		else
+			warn(NULL);
+	}
 	if (master)
 		warnx("%s: unchanged", master);
 	pw_abort();

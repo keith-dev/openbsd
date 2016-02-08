@@ -1,4 +1,4 @@
-/*	$OpenBSD: display.c,v 1.6 1999/03/23 17:00:38 millert Exp $	*/
+/*	$OpenBSD: display.c,v 1.8 2000/12/31 00:24:51 hugh Exp $	*/
 /*	$NetBSD: display.c,v 1.3 1994/12/09 02:14:13 jtc Exp $	*/
 
 /*
@@ -38,7 +38,7 @@
 #if 0
 static char sccsid[] = "@(#)display.c	8.1 (Berkeley) 6/6/93";
 #endif
-static char rcsid[] = "$OpenBSD: display.c,v 1.6 1999/03/23 17:00:38 millert Exp $";
+static char rcsid[] = "$OpenBSD: display.c,v 1.8 2000/12/31 00:24:51 hugh Exp $";
 #endif /* not lint */
 
 /*
@@ -53,6 +53,7 @@ xwin_t	his_win;
 WINDOW	*line_win;
 
 int	curses_initialized = 0;
+int	high_print = 0;
 
 /*
  * max HAS to be a function, it is called with
@@ -149,7 +150,8 @@ display(win, text, size)
 			/* check for wraparound */
 			xscroll(win, 0);
 		}
-		if (!isprint(*text) && *text != '\t') {
+		if (*text != '\t' &&
+		    ((!high_print && !isprint(*text)) || iscntrl(*text))) {
 			waddch(win->x_win, '^');
 			getyx(win->x_win, win->x_line, win->x_col);
 			if (win->x_col == COLS-1) /* check for wraparound */
@@ -157,7 +159,7 @@ display(win, text, size)
 			cch = (*text & 63) + 64;
 			waddch(win->x_win, cch);
 		} else
-			waddch(win->x_win, *text);
+			waddch(win->x_win, (unsigned char)(*text));
 		getyx(win->x_win, win->x_line, win->x_col);
 		text++;
 	}

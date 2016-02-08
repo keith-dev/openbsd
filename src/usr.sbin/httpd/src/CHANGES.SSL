@@ -17,6 +17,155 @@
   _INTENTIONALLY_ no contributor names attached to the entries. Instead all
   contributors are listed in the CREDITS file.
 
+      ____    ___  
+     |___ \  ( _ ) 
+       __) | / _ \ 
+      / __/ | (_) |
+  __ |_____(_)___/ ___________________________________________
+              
+  Changes with mod_ssl 2.8.2 (03-Mar-2001 to 30-Mar-2001)
+
+   *) Moved the Shared Memory Cyclic Buffer (SHMCB) session cache
+      variant from "experimental" state to "production" by removing the
+      `#ifdef SSL_EXPERIMENTAL_SHMCB ...#endif' wrappers. This means
+      that now `SSLSessionCache shmcb:...' is unconditionally available.
+
+   *) Modified (only) Win32's specific function SSL_recvwithtimeout()
+      to use the same retry logic as SSL_writewithtimeout(). This
+      fixes some problems with MSIE 5.x clients.
+
+   *) Made the mutex handling more robust by retrying the
+      semaphore-based operations in interrupt situations 
+      (errno == EINTR).
+
+   *) Also log the OpenSSL error message if the RSA temporary
+      key(s) cannot be generated.
+
+   *) Mention in INSTALL document that building OpenSSL with
+      `no-threads' increased performance without negative side-effects
+      because Apache 1.3 is never multi-threaded.
+
+   *) Fixed mod_ssl Auth handler: it now returns DECLINED instead of
+      OK if authentication is passed successfully to allow other modules
+      (usually mod_auth) to still deny the request.
+
+   *) Allow IPC semaphore support also under Tru64 5.x.
+
+   *) Fixed certificate DN handling under EBCDIC platforms.
+
+   *) Try to avoid casting warnings by using "unsigned long" type
+      instead of "unsigned int" in the EAPI macros AP_CTX_XXXX.
+
+   *) Make sure that the default path /usr/include is never added to
+      CFLAGS with an explicit -I options to avoid conflicts with vendor
+      include paths.
+
+   *) Make extra sure the ssl_expr_parse.[ch] and ssl_expr_scan.c
+      files are not regenerated for regular users by timestamping
+      them in a little bit more conservative way.
+
+   *) More fixes to configure.bat and Makefile.win32 to
+      make mod_ssl work again under Win32.
+
+  Changes with mod_ssl 2.8.1 (30-Jan-2001 to 03-Mar-2001)
+
+   *) Conditionally adjusted source to build quietly also under
+      latest OpenSSL 0.9.7-dev versions.
+
+   *) Added a bunch of (untested!) adjustments and fixes for 
+      the Win32 platform as posted to modssl-users some time
+      ago by various people.
+
+   *) Fixed SSLCipherSuite example in httpd.conf-dist: 
+      The string EXP56 is actually EXPORT56, although OpenSSL
+      internally the variable is named SSL_TXT_EXP56.
+
+   *) Upgraded to Apache 1.3.19 as base version.
+
+   *) Extended FAQ entry for MSIE problems.
+
+   *) Added FAQ entry for questions "Why do I get lots of random SSL
+      errors under heavy load?"
+
+  Changes with mod_ssl 2.8.0 (14-Oct-2000 to 30-Jan-2001)
+   
+   *) Upgraded to Apache 1.3.17 as base version.
+   
+   *) Changed ApacheModuleSSL.dll to mod_ssl.so in Makefile.Win32 to
+      make mod_ssl not too broken after Apache 1.3.16's Win32 changes.
+
+   *) Enhanced ApacheCore.def patch for Win32 folks.
+
+   *) Upgraded to Apache 1.3.16 as base version.
+    
+   *) Fixed ssl_intro.wml: DES uses 56 bit, not 54 bit.
+
+   *) Allow %{ENV:variable} in SSLRequire expressions, too.
+
+   *) Fixed version parsing for APXS stuff in configure.
+
+   *) Fixed Geoff Thorpe's Email addresses in various places.
+
+   *) Fixed typo in INSTALL document.
+
+   *) Make sure the user is not able to fake the client certificate
+      based authentication by just entering an X.509 Subject DN
+      ("/XX=YYY/XX=YYY/..") as the username and "password" as the
+      password if "SSLVerifyClient optional" is used in combination
+      with "SSLOptions +FakeBasicAuth".
+
+   *) Fixed URLs in FAQ.
+
+   *) Various fixes for the Win32 world:
+      reflect renaming of "makefile.nt" to "makefile.win"; scache
+      reorganisation adjustments; etc.
+
+      ____   _____ 
+     |___ \ |___  |
+       __) |   / / 
+      / __/ _ / /  
+  __ |_____(_)_/______________________________________________
+              
+  Changes with mod_ssl 2.7.1 (13-Oct-2000 to 14-Oct-2000)
+
+   *) Fixed the parsing of SSLSessionCache directives. The prefixes were
+      incorrectly skipped and leaded to "unable to open semaphore file"
+      errors.
+
+  Changes with mod_ssl 2.7.0 (12-Aug-2000 to 13-Oct-2000)
+
+   *) Upgraded to Apache 1.3.14 as base version.
+
+   *) Added new Cyclic Buffer based Shared Memory Session Cache
+      as ssl_scache_shmcb.c. This was contributed by Geoff Thorpe
+      <geoff@geoffthorpe.net> and is derived from the "c2shm" variant
+      used in Stronghold V3. It uses a fixed size cyclic buffer placed
+      over a shared memory segment for storing SSL session ids. This
+      way it is even more efficient and faster than the old hash table
+      based shared memory cache (ssl_scache_shmht.c). It can be used
+      by building mod_ssl with --enable-rule=SSL_EXPERIMENTAL and then
+      using "SSLSessionCache shmcb:<path-to-temp-file>(<bytes>)".
+
+   *) Cleaned up and restructured the session cache implementation.
+      ssl_engine_scache.c was split into ssl_scache.c (the abstraction
+      layer), ssl_scache_dbm.c (the DBM-based implementation) and
+      ssl_scache_shmht.c (the shared memory based implementation which
+      uses a hash table).
+
+   *) Added experimental support for the ENGINE branch of OpenSSL 0.9.6.
+      A new SSLCryptoDevice configuration directive is available if the
+      OpenSSL-ENGINE 0.9.6 package and --enable-rule=SSL_EXPERIMENTAL
+      is used. The default is "SSLCryptoDevice builtin". To enable
+      to use of a crypto device use "SSLCryptoDevice <name>",
+      where <name> is its ID as used with the OpenSSL command line
+      option "-engine <name>". 
+
+   *) Completely removed RSAref support to make sure US residents no
+      longer try to use this ancient piece of restricted/buggy code.
+
+   *) mod_ssl failed to start if two certificate keys are encrypted 
+      with different pass phrases and SSLProxyVerify was specified.  
+
       ____    __   
      |___ \  / /_  
        __) || '_ \ 

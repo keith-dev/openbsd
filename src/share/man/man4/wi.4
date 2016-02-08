@@ -1,4 +1,4 @@
-.\"	$OpenBSD: wi.4,v 1.2 2000/09/09 17:15:56 deraadt Exp $
+.\"	$OpenBSD: wi.4,v 1.8 2001/04/24 00:08:33 mickey Exp $
 .\"
 .\" Copyright (c) 1997, 1998, 1999
 .\"	Bill Paul <wpaul@ctr.columbia.edu>. All rights reserved.
@@ -43,15 +43,38 @@
 .Sh DESCRIPTION
 The
 .Nm
-driver provides support for WaveLAN/IEEE PCCARD adapters (also known
-as WaveLAN II cards) which support IEEE 802.11 Direct Sequence.
+driver provides support for WaveLAN/IEEE and compatible pcmcia adapters
+(also known as WaveLAN II cards) which support IEEE 802.11 Direct Sequence.
+The compatible cards supported are:
+.Pp
+.Bl -tag -width -offset indent -compact
+.It 3Com AirConnect Wireless LAN
+.It Corega Wireless LAN PCC-11
+.It Corega Wireless LAN PCCA-11
+.It Intersil Prism II
+.It Samsung MagicLAN SWL-2000N
+.It SMC 2632 EZ Connect Wireless PC Card
+.It NANOSPEED ROOT-RZ2000 WLAN Card
+.It XI300 Wireless LAN
+.It Compaq Agency NC5004 Wireless Card
+.It Contec FLEXLAN/FX-DS110-PCC
+.It TDK LAK-CD011WL
+.It NEC Wireless Card CMZ-RT-WP
+.It NTT-ME 11Mbps Wireless LAN PC Card
+.It Addtron AWP-100
+.It Cabletron RoamAbout
+.It I-O DATA WN-B11/PCM
+.It Linksys WPC11
+.El
+.Pp
 Note that while Lucent sells both ISA and PCMCIA
 WaveLAN/IEEE devices, the ISA product is actually a PCMCIA card in an
 ISA to PCMCIA bridge adapter. Consequently, the
 .Nm
-driver is required for both the ISA and PCMCIA NICs. Both the original
-2Mbps WaveLAN/IEEE cards and the newer 6Mbps WaveLAN/IEEE Turbo
-adapters are supported.
+driver is required for both the ISA and PCMCIA NICs. The original
+WaveLAN/IEEE cards (2Mbps), the WaveLAN/IEEE Turbo (6Mbps), the
+WaveLAN/IEEE Bronze Turbo (8Mbps), and the
+WaveLAN/IEEE Silver/Gold (11Mbps) adapters are supported.
 .Pp
 The core of the WaveLAN/IEEE is the Lucent Hermes controller. All
 host/device interaction is via programmed I/O with the Hermes. The
@@ -60,12 +83,17 @@ and ad-hoc operation modes. The
 .Nm
 driver encapsulates all IP and ARP traffic as 802.11 frames, however
 it can receive either 802.11 or 802.3 frames. Transmit speed is
-selectable between 1Mbps fixed, 2Mbps fixed or 2Mbps with auto fallback.
-For WaveLAN/IEEE Turbo adapters, speeds up to 6Mbps are available.
+selectable between 1Mbps fixed, 2Mbps fixed, 2Mbps with auto fallback,
+6Mbps, 8Mbps, or 11Mbps depending on your hardware (see above).  The
+Gold and Silver cards also have support for encryption.  Silver adapters
+will do 64bit encryption and Gold adapters will do 128bit encryption.
+To enable the encryption, use the
+.Xr wicontrol 8
+utility to set your keys.
 .Pp
 By default, the
 .Nm
-driver configures the WaveLAN card for ad-hoc operation. In this mode,
+driver configures the WaveLAN card for BSS operation. In this mode,
 stations can communicate among each other without the aid of an access
 point. To join a service set, the driver must be set for BSS mode using
 the
@@ -110,3 +138,12 @@ The
 driver was written by Bill Paul <wpaul@ctr.columbia.edu> and ported to
 .Ox
 by Niklas Hallqvist <niklas@appli.se>.
+.Sh CAVEATS
+Lucent WaveLAN cards are usually default to channel 3 for operation,
+while some non-Lucent cards have different default channel (11 for
+Addtron cards, for example). See
+.Xr wicontrol 8
+for information on how to change the channel.
+.Sh BUGS
+Addtron cards do not seem to work in infrastructure mode with
+Lucent base station with current driver source.

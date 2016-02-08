@@ -1,4 +1,4 @@
-/*	$OpenBSD: print-tcp.c,v 1.12 2000/10/03 14:21:56 ho Exp $	*/
+/*	$OpenBSD: print-tcp.c,v 1.14 2000/12/07 22:36:46 mickey Exp $	*/
 
 /*
  * Copyright (c) 1988, 1989, 1990, 1991, 1992, 1993, 1994, 1995, 1996, 1997
@@ -23,7 +23,7 @@
 
 #ifndef lint
 static const char rcsid[] =
-    "@(#) $Header: /cvs/src/usr.sbin/tcpdump/print-tcp.c,v 1.12 2000/10/03 14:21:56 ho Exp $ (LBL)";
+    "@(#) $Header: /cvs/src/usr.sbin/tcpdump/print-tcp.c,v 1.14 2000/12/07 22:36:46 mickey Exp $ (LBL)";
 #endif
 
 #include <sys/param.h>
@@ -119,6 +119,11 @@ struct tcp_seq_hash {
 
 static struct tcp_seq_hash tcp_seq_hash[TSEQ_HASHSIZE];
 
+#ifndef BGP_PORT
+#define BGP_PORT        179
+#endif
+#define NETBIOS_SSN_PORT 139
+
 static int tcp_cksum(register const struct ip *ip,
 		     register const struct tcphdr *tp,
 		     register int len)
@@ -205,26 +210,6 @@ tcp_print(register const u_char *bp, register u_int length,
 	urp = ntohs(tp->th_urp);
 	hlen = tp->th_off * 4;
 
-	/*
-	 * If data present and NFS port used, assume NFS.
-	 * Pass offset of data plus 4 bytes for RPC TCP msg length
-	 * to NFS print routines.
-	 */
-	if (!qflag) {
-		u_int len = length - hlen;
-		if ((u_char *)tp + 4 + sizeof(struct rpc_msg) <= snapend &&
-		    dport == NFS_PORT) {
-			nfsreq_print((u_char *)tp + hlen + 4, len,
-				     (u_char *)ip);
-			return;
-		}
-		else if ((u_char *)tp + 4 + sizeof(struct rpc_msg) <= snapend &&
-		    sport == NFS_PORT) {
-			nfsreply_print((u_char *)tp + hlen + 4, len,
-				       (u_char *)ip);
-			return;
-		}
-	}
 
 #ifdef INET6
 	if (ip6) {
@@ -256,6 +241,24 @@ tcp_print(register const u_char *bp, register u_int length,
 	if (qflag) {
 		(void)printf("tcp %d", length - tp->th_off * 4);
 		return;
+	} else {
+		/*
+		 * If data present and NFS port used, assume NFS.
+		 * Pass offset of data plus 4 bytes for RPC TCP msg length
+		 * to NFS print routines.
+		 */
+		u_int len = length - hlen;
+		if ((u_char *)tp + 4 + sizeof(struct rpc_msg) <= snapend &&
+		    dport == NFS_PORT) {
+			nfsreq_print((u_char *)tp + hlen + 4, len,
+				     (u_char *)ip);
+			return;
+		} else if ((u_char *)tp + 4 + 
+		    sizeof(struct rpc_msg) <= snapend && sport == NFS_PORT) {
+			nfsreply_print((u_char *)tp + hlen + 4, len,
+				       (u_char *)ip);
+			return;
+		}
 	}
 	if ((flags = tp->th_flags) & (TH_SYN|TH_FIN|TH_RST|TH_PUSH|
 				      TH_ECNECHO|TH_CWR)) {
@@ -558,12 +561,11 @@ tcp_print(register const u_char *bp, register u_int length,
 	/*
 	 * Decode payload if necessary.
 	*/
-#ifndef BGP_PORT
-#define BGP_PORT	179
-#endif
 	bp += (tp->th_off * 4);
 	if (sport == BGP_PORT || dport == BGP_PORT)
 		bgp_print(bp, length);
+	else if (sport == NETBIOS_SSN_PORT || dport == NETBIOS_SSN_PORT)
+		nbt_tcp_print(bp, length);
 	return;
 bad:
 	fputs("[bad opt]", stdout);

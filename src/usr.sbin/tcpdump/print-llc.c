@@ -1,4 +1,4 @@
-/*	$OpenBSD: print-llc.c,v 1.10 2000/10/19 16:31:42 jason Exp $	*/
+/*	$OpenBSD: print-llc.c,v 1.12 2001/04/08 22:45:53 jakob Exp $	*/
 
 /*
  * Copyright (c) 1992, 1993, 1994, 1995, 1996, 1997
@@ -26,7 +26,7 @@
 
 #ifndef lint
 static const char rcsid[] =
-    "@(#) $Header: /cvs/src/usr.sbin/tcpdump/print-llc.c,v 1.10 2000/10/19 16:31:42 jason Exp $";
+    "@(#) $Header: /cvs/src/usr.sbin/tcpdump/print-llc.c,v 1.12 2001/04/08 22:45:53 jakob Exp $";
 #endif
 
 #include <sys/param.h>
@@ -68,6 +68,7 @@ llc_print(const u_char *p, u_int length, u_int caplen,
 {
 	struct llc llc;
 	register u_short et;
+	u_short control;
 	register int ret;
 
 	if (caplen < 3) {
@@ -87,6 +88,15 @@ llc_print(const u_char *p, u_int length, u_int caplen,
 	else if (p[0] == 0xf0 && p[1] == 0xf0)
 		netbios_print(p, length);
 #endif
+
+	/* Cisco Discovery Protocol  - SNAP & ether type 0x2000 */
+	if(llc.ssap == LLCSAP_SNAP && llc.dsap == LLCSAP_SNAP &&
+		llc.llcui == LLC_UI && 
+		llc.ethertype[0] == 0x20 && llc.ethertype[1] == 0x00 ) {
+		    cdp_print( p, length, caplen, esrc, edst);
+		    return (1);
+	}
+
 	if (llc.ssap == LLCSAP_ISONS && llc.dsap == LLCSAP_ISONS
 	    && llc.llcui == LLC_UI) {
 		isoclns_print(p + 3, length - 3, caplen - 3, esrc, edst);
@@ -133,6 +143,42 @@ llc_print(const u_char *p, u_int length, u_int caplen,
 
 	if (llc.ssap == LLCSAP_8021D && llc.dsap == LLCSAP_8021D) {
 		stp_print(p, length);
+		return (1);
+	}
+
+	if (llc.ssap == 0xf0 && llc.dsap == 0xf0) {
+		/*
+		 * we don't actually have a full netbeui parser yet, but the
+		 * smb parser can handle many smb-in-netbeui packets, which
+		 * is very useful, so we call that
+		 */
+
+		/*
+		 * Skip the DSAP and LSAP.
+		 */
+		p += 2;
+		length -= 2;
+		caplen -= 2;
+
+		/*
+		 * OK, what type of LLC frame is this?  The length
+		 * of the control field depends on that - S or I
+		 * frames have a two-byte control field, and U frames
+		 * have a one-byte control field.
+		 */
+		if ((llc.llcu & LLC_U_FMT) == LLC_U_FMT) {
+			control = llc.llcu;
+			p += 1;
+			length -= 1;
+			caplen -= 1;
+		} else {
+			control = llc.llcis;
+			p += 2;
+			length -= 2;
+			caplen -= 2;
+		}
+
+		netbeui_print(control, p, p + min(caplen, length));
 		return (1);
 	}
 
@@ -187,6 +233,15 @@ llc_print(const u_char *p, u_int length, u_int caplen,
 			caplen -= 3;
 		    }
 		}
+
+		if (!strcmp(m,"ui") && f=='C') {
+			/*
+			 * we don't have a proper ipx decoder yet, but there
+			 * is a partial one in the smb code
+			 */
+			ipx_netbios_print(p,p+min(caplen,length));
+		}
+
 	} else {
 		char f;
 		llc.llcis = ntohs(llc.llcis);

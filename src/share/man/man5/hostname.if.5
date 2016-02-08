@@ -1,4 +1,4 @@
-.\"	$OpenBSD: hostname.if.5,v 1.22 2000/10/26 00:37:04 aaron Exp $
+.\"	$OpenBSD: hostname.if.5,v 1.25 2001/03/01 16:11:21 aaron Exp $
 .\"	$NetBSD: hosts.5,v 1.4 1994/11/30 19:31:20 jtc Exp $
 .\"
 .\" Copyright (c) 1983, 1991, 1993
@@ -99,7 +99,7 @@ or
 .It Va addr
 The optional address that belongs to the interface, such as
 190.191.192.1 or fe80:2::1 .
-It is also feasable to use a hostname as specified in
+It is also feasible to use a hostname as specified in
 .Pa /etc/hosts .
 It is recommended that an address be used instead of symbolic information
 which might activate
@@ -125,11 +125,11 @@ Optional miscellaneous options to set on the interface, i.e.,
 .It Li dest
 If the interface needs a destination address set, this is the literal text
 .Dq dest .
-As shown in the example, this declaration should start on a seperate line.
+As shown in the example, this declaration should start on a separate line.
 .It Va dest_addr
 The destination address to be set on the interface, such as
 190.191.192.2.
-It is also feasable to use a hostname as specified in
+It is also feasible to use a hostname as specified in
 .Pa /etc/hosts .
 It is recommended that an address be used instead of symbolic information
 which might activate
@@ -148,7 +148,7 @@ Useful for doing interface specific configuration using commands like
 setting up custom routes using
 .Xr route 8 ,
 or establishing tunnels using
-.Xr gifconfig 8 .
+.Xr ifconfig 8 .
 It is worth noting that
 .Dq \e$if
 in a command line will be replaced by the interface name.
@@ -212,7 +212,7 @@ Optional miscellaneous options to set on the interface, i.e.,
 An addressless network interface setup (useful for
 .Xr bridge 4
 member interfaces and interfaces to be used with
-.Xr pppoe 4 )
+.Xr pppoe 8 )
 consists of
 .Pp
 .Bd -literal -offset xxxx
@@ -247,6 +247,8 @@ add fxp0
 add ep1
 -learn fxp0
 #
+!ipsecadm flush
+#
 static fxp0 8:0:20:1e:2f:2b
 up    # and finally enable it
 .Ed
@@ -258,6 +260,9 @@ The options are as follows:
 is called for each successive line.
 Comments starting with
 .Ql #
+and commands to be executed
+prefixed by
+.Ql !
 are permitted.
 .El
 .Sh SEE ALSO

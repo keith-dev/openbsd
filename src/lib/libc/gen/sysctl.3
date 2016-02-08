@@ -1,4 +1,4 @@
-.\"	$OpenBSD: sysctl.3,v 1.56 2000/10/18 05:12:07 aaron Exp $
+.\"	$OpenBSD: sysctl.3,v 1.66 2001/03/22 22:08:47 deraadt Exp $
 .\"
 .\" Copyright (c) 1993
 .\"	The Regents of the University of California.  All rights reserved.
@@ -301,6 +301,7 @@ information.
 .It Dv KERN_VDISABLE No "	integer	no"
 .It Dv KERN_VERSION No "	string	no"
 .It Dv KERN_VNODE No "	struct vnode	no"
+.It Dv KERN_MALLOCSTATS No "	node	not applicable"
 .El
 .Pp
 .Bl -tag -width "123456"
@@ -403,6 +404,34 @@ The third and fourth level names are as follows:
 .It Dv KERN_PROC_UID No "	A user ID"
 .It Dv KERN_PROC_RUID No "	A real user ID"
 .El
+.It Dv KERN_MALLOCSTATS
+Return kernel memory bucket statistics.
+The third level names are detailed below.
+There are no changeable values in this branch.
+.Bl -column "KERN_MALLOC_HIGH_WATERMARK" "string" -offset indent
+.It Sy Third level name	Type
+.It Dv KERN_MALLOC_BUCKETS	string
+.It Dv KERN_MALLOC_BUCKET	node
+.El
+.Pp
+The variables are as follows:
+.Bl -tag -width "123456"
+.It Dv KERN_MALLOC_BUCKETS
+Return a comma-separated list of the bucket sizes used by the kernel.
+.It Dv KERN_MALLOC_BUCKET.<size>
+A node containing the statistics for the memory bucket of the
+specified size (in decimal notation, the number of bytes per bucket
+element, e.g., 16, 32, 128).
+Each node returns a
+.Li struct kmembuckets .
+.Pp
+If a value is specified that does not correspond directly to a
+bucket size, the statistics for the closest larger bucket size will be
+returned instead.
+.Pp
+Note that bucket sizes are typically powers of 2.
+.El
+.Pp
 .It Dv KERN_PROF
 Return profiling information about the kernel.
 If the kernel is not compiled for profiling,
@@ -614,22 +643,6 @@ If the kernel has been compiled with the
 .Dv ENCDEBUG
 option,
 then debugging information will also be reported when this variable is set.
-.It Li ip.ipsec-acl
-If set to any non-zero value, incoming IPsec packets that are successfully
-decrypted/authenticated are further validated against a list of acceptable
-packet classes per Security Association.
-When using automated key management, such as
-.Xr isakmpd 8
-or
-.Xr photurisd 8 ,
-the acceptable packet classes should be set up automatically.
-When using manual keying, the appropriate entries have to be configured on a
-per-SA basis via
-.Xr ipsecadm 8 .
-If this value is set to any non-zero value and no access control is
-configured, IPsec packets will be dropped.
-If set to 0, no testing of ingress packets will occur.
-The default value is 1.
 .It Li ip.ipsec-invalid-life
 The lifetime of embryonic Security Associations (SAs that key management
 daemons have reserved but not fully established yet) in seconds.
@@ -739,11 +752,15 @@ The default value is 60 seconds.
 Returns 1 if Path MTU Discovery is enabled.
 .It Li ip.mtudisctimeout
 Returns the number of seconds in which a route added by the Path MTU
-Discovery engine will time out.  When the route times out, the Path
-MTU Discovery engine will attempt to probe a larger path MTU.
+Discovery engine will time out.
+When the route times out, the Path MTU Discovery engine will attempt
+to probe a larger path MTU.
 .It Li ipip.allow
 If set to 0, incoming IP-in-IP packets will not be processed.
-If set to any other value, processing will occur.
+If set to any other value, processing will occur; furthermore, if set
+to 2, no checks for spoofing of loopback addresses will be done.
+This is useful only for debugging purposes, and should never be used
+in production systems.
 .It Li gre.allow
 If set to 0, incoming GRE packets will not be processed.
 If set to any other value, processing will occur.
@@ -758,7 +775,7 @@ Returns 1 if
 .Tn ICMP
 network mask requests are to be answered.
 .It Li icmp.errppslimit
-The variable specifies the maximum number of outgoing ICMP error messages,
+The variable specifies the maximum number of outgoing ICMP error messages
 per second.
 ICMP error messages that exceeded the value are subject to rate limitation
 and will not go out from the node.
@@ -811,7 +828,7 @@ Returns 1 if RFC2018 Selective Acknowledgements are enabled.
 The maximum segment size that is used as default for non-local connections.
 The default value is 512.
 .It Li tcp.rstppslimit
-The variable specifies the maximum number of outgoing TCP RST packets,
+The variable specifies the maximum number of outgoing TCP RST packets
 per second.
 TCP RST packet that exceeded the value are subject to rate limitation
 and will not go out from the node.
@@ -870,6 +887,9 @@ The currently defined protocols and names are:
 .It icmp6	nodeinfo	integer	yes
 .It icmp6	errppslimit	integer	yes
 .It icmp6	nd6_maxnudhint	integer	yes
+.It icmp6	mtudisc_hiwat	integer	yes
+.It icmp6	mtudisc_lowat	integer	yes
+.It icmp6	nd6_debug	integer	yes
 .El
 .Pp
 The variables are as follows:
@@ -879,14 +899,13 @@ Returns 1 when IPv6 forwarding is enabled for the node,
 meaning that the node is acting as a router.
 Returns 0 when IPv6 forwarding is disabled for the node,
 meaning that the node is acting as a host.
-IPv6 specification defines node behavior for
+Note that IPv6 defines node behavior for the
 .Dq router
-case and
+and
 .Dq host
-case quite differently, and changing this variable during operation
+cases quite differently, and changing this variable during operation
 may cause serious trouble.
-It is recommended to configure the variable at bootstrap time,
-and bootstrap time only.
+Hence, this variable should only be set at bootstrap time.
 .It Li ip6.redirect
 Returns 1 when ICMPv6 redirects may be sent by the node.
 This option is ignored unless the node is routing IP packets,
@@ -894,7 +913,7 @@ and should normally be enabled on all systems.
 .It Li ip6.hlim
 The default hop limit value for an IPv6 unicast packet sourced by the node.
 This value applies to all the transport protocols on top of IPv6.
-There are APIs to override the value, as documented in
+Methods for overriding this value are documented in
 .Xr ip6 4 .
 .It Li ip6.maxfragpackets
 The maximum number of fragmented packets the node will accept.
@@ -906,54 +925,56 @@ If set to non-zero, the node will accept ICMPv6 router advertisement packets
 and autoconfigures address prefixes and default routers.
 The node must be a host
 .Pq not a router
-for the option to be meaningful.
+for the option to be meaningful (see
+.Li ip6.forwarding Ns ).
 .It Li ip6.keepfaith
-If set to non-zero, it enables
+If set to non-zero, enables the
 .Dq FAITH
 TCP relay IPv6-to-IPv4 translator code in the kernel.
-Refer
+Refer to
 .Xr faith 4
 and
 .Xr faithd 8
-for detail.
+for more details.
 .It Li ip6.log_interval
-The variable controls amount of logs generated by IPv6 packet
-forwarding engine, by seting interval between log output
-.Pq in seconds .
+This variable permits adjusting the amount of logs generated by the
+IPv6 packet forwarding engine.  The value indicates the number of
+seconds of interval which must elapse between log output.
 .It Li ip6.hdrnestlimit
 The number of IPv6 extension headers permitted on incoming IPv6 packets.
 If set to 0, the node will accept as many extension headers as possible.
 .It Li ip6.dad_count
-The variable cofigures number of IPv6 DAD
+The variable configures the number of IPv6 DAD
 .Pq duplicated address detection
 probe packets.
-The packets will be generated when IPv6 interface addresses are configured.
+These packets are generated when IPv6 interfaces are first brought up.
 .It Li ip6.auto_flowlabel
 On connected transport protocol packets,
-fill IPv6 flowlabel field to help intermediate routers to identify packet flows.
+fill IPv6 flowlabel field to help intermediate routers identify
+packet flows.
 .It Li ip6.defmcasthlim
 The default hop limit value for an IPv6 multicast packet sourced by the node.
 This value applies to all the transport protocols on top of IPv6.
-There are APIs to override the value, as documented in
+Methods for overriding this value are documented in
 .Xr ip6 4 .
 .It Li ip6.kame_version
-The string identifies the version of KAME IPv6 stack implemented in the kernel.
+The string identifies the version of the KAME IPv6 stack implemented
+in the kernel.
 .It Li ip6.use_deprecated
-The variable controls use of deprecated address, specified in RFC2462 5.5.4.
+The variable controls use of deprecated addresses, specified in
+RFC2462 5.5.4.
 .It Li ip6.rr_prune
 The variable specifies interval between IPv6 router renumbering prefix
-babysitting, in seconds.
+babysitting in seconds.
 .It Li icmp6.rediraccept
 If set to non-zero, the host will accept ICMPv6 redirect packets.
 Note that IPv6 routers will never accept ICMPv6 redirect packets,
-and the variable is meaningful on IPv6 hosts
-.Pq non-router
-only.
+so the variable is only meaningful on IPv6 hosts, not on routers.
 .It Li icmp6.redirtimeout
-The variable specifies lifetime of routing entries generated by incoming
-ICMPv6 redirect.
+The variable specifies the lifetime of routing entries generated by
+incoming ICMPv6 redirects.
 .It Li icmp6.nd6_prune
-The variable specifies interval between IPv6 neighbor cache babysitting,
+The variable specifies interval between IPv6 neighbor cache babysitting
 in seconds.
 .It Li icmp6.nd6_delay
 The variable specifies
@@ -972,26 +993,57 @@ The variable specifies
 constant in IPv6 neighbor discovery specification
 .Pq RFC2461 .
 .It Li icmp6.nd6_useloopback
-If set to non-zero, kernel IPv6 stack will use loopback interface for
-local traffic.
+If set to non-zero, IPv6 will use the loopback interface for local traffic.
 .It Li icmp6.nodeinfo
-The variable enables, or disables, kernel support for
-ICMPv6 node information query/reply.
+The variable enables responses to ICMPv6 node information queries.
+If you set the variable to 0, reponses will not be generated for
+ICMPv6 node information queries.
+Since node information queries can have a security impact, it is
+possible to fine tune which responses should be answered.
+Two seperate bits can be set.
+.Bl -tag -width "12345"
+.It 1
+Respond to ICMPv6 FQDN queries, e.g.
+.Li ping6 -w .
+.It 2
+Respond to ICMPv6 node addresses queries, e.g.
+.Li ping6 -a .
+.El
 .It Li icmp6.errppslimit
-The variable specifies the maximum number of outgoing ICMPv6 error messages,
+The variable specifies the maximum number of outgoing ICMPv6 error messages
 per second.
 ICMPv6 error messages that exceeded the value is subject to rate limitation
 and will not go out from the node.
-Negative value disables rate limitation.
+A negative value will disable the rate limitation.
 .It Li icmp6.nd6_maxnudhint
 IPv6 neighbor discovery permits upper layer protocols to supply reachability
 hints, to avoid unnecessary neighbor discovery exchanges.
 The variable defines the number of consecutive hints the neighbor discovery
 layer will take.
-For example, by setting the variable to 3, neighbor discovery layer
-will take 3 consecutive hints in maximum.
-After receiving 3 hints, neighbor discovery layer will perform
-normal neighbor discovery process.
+For example, by setting the variable to 3, neighbor discovery can take
+take a maximum of 3 consecutive hints.
+After receiving 3 hints, the neighbor discovery layer will instead perform
+the normal neighbor discovery process.
+.It Li icmp6.mtudisc_hiwat
+.It Li icmp6.mtudisc_lowat
+These variables define the maximum number of routing table entries,
+created due to path MTU discovery
+.Pq preventing denial-of-service attacks with ICMPv6 too big messages .
+After IPv6 path MTU discovery happens, path MTU information is kept in
+the routing table.
+If the number of routing table entries exceed the value,
+the kernel will not attempt to keep the path MTU information.
+.Li icmp6.mtudisc_hiwat
+is used when we have verified ICMPv6 too big messages.
+.Li icmp6.mtudisc_lowat
+is used when we have unverified ICMPv6 too big messages.
+Verification is performed by using address/port pairs kept in connected pcbs.
+Negative value disables the upper limit.
+.It Li icmp6.nd6_debug
+If set to non-zero, IPv6 neighbor discovery will generate debugging
+messages.
+The debug outputs are useful for diagnosing IPv6 interoperability issues.
+The flag must be set to 0 for normal operation.
 .El
 .Pp
 We reuse

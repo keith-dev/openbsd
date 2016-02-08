@@ -1,5 +1,6 @@
+/* $OpenBSD: state.h,v 1.7 2001/01/28 22:45:18 niklas Exp $ */
 /*
- * Copyright 1997,1998 Niels Provos <provos@physnet.uni-hamburg.de>
+ * Copyright 1997-2000 Niels Provos <provos@citi.umich.edu>
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -27,7 +28,6 @@
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
-/* $Id: state.h,v 1.2 1999/12/17 18:57:03 deraadt Exp $ */
 /*
  * state.h: 
  * state object
@@ -36,9 +36,10 @@
 #ifndef _STATE_H_
 #define _STATE_H_
 
+#include <sys/queue.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
-#include <gmp.h>
+#include <ssl/bn.h>
 #include <time.h>
 #include "userdefs.h"
 #ifdef NEED_UTYPES
@@ -50,7 +51,6 @@
 /* Possible values of flags */
 #define IPSEC_OPT_ENC		0x0001  /* Negotiate encryption */
 #define IPSEC_OPT_AUTH		0x0002  /* Negotiate authentication */
-#define IPSEC_OPT_TUNNEL	0x0004  /* Negotiate tunne mode */
 #define IPSEC_OPT_REPLAY	0x0100  /* Encryption with replay protection */
 #define IPSEC_OPT_ENC_AUTH	0x0200  /* Encryption with authentication */
 #define IPSEC_OPT_XOR		0x0400  /* Encryption with XOR */
@@ -58,15 +58,13 @@
 #define IPSEC_NOTIFY		0x1000  /* State created by kernel notify */
 
 struct stateob {
-  struct stateob *next;            /* Linked list */
+  TAILQ_ENTRY(stateob) next;	   /* Linked list */
 
   int initiator;                   /* Boolean */
   int phase;                       /* Actual phase in the exchange */
 
   char *user;                      /* User name for which do the exchange */
   int flags;                       /* Possible flags for this exchange */
-  in_addr_t isrc, ismask;          /* Accept source for tunnel */
-  in_addr_t idst, idmask;          /* Accept destination for tunnel */
   
   char address[16];                /* Remote address */
   u_int16_t port;                  /* Remote port for Photuris daemon */
@@ -119,18 +117,18 @@ struct stateob {
   void *uSPIprivacyctx;
   time_t ulifetime;                 /* User SPI lifetime */
 
-  mpz_t modulus;                    /* Modulus for look up in cache */
-  mpz_t generator;                  /* Generator for look up in cache */
+  BIGNUM *modulus;			/* Modulus for look up in cache */
+  BIGNUM *generator;			/* Generator for look up in cache */
   u_int8_t *texchange;              /* Their exchange value */
-  u_int16_t texchangesize;
+  size_t texchangesize;
   u_int8_t *exchangevalue;          /* Our exchange value */
-  u_int16_t exchangesize;
+  size_t exchangesize;
   u_int8_t *shared;                 /* Shared secret */
-  u_int16_t sharedsize;
+  size_t sharedsize;
 
   int retries;                      /* Number of retransmits */
   u_int8_t *packet;                 /* Buffer for retransmits */
-  u_int16_t packetlen;
+  size_t packetlen;
   u_int8_t packetsig[16];           /* MD5 hash of an old packet */
 
   time_t lifetime;                  /* Lifetime for the exchange */
@@ -139,6 +137,8 @@ struct stateob {
 };
 
 /* Prototypes */
+void state_init(void);
+
 int state_insert(struct stateob *);
 int state_unlink(struct stateob *);
 struct stateob *state_new(void);
@@ -146,6 +146,7 @@ int state_value_reset(struct stateob *);
 struct stateob *state_root(void);
 struct stateob *state_find(char *);
 struct stateob *state_find_next(struct stateob *, char *);
+struct stateob *state_find_icookie(u_int8_t *);
 struct stateob *state_find_cookies(char *, u_int8_t *, u_int8_t *);
 int state_save_verification(struct stateob *st, u_int8_t *buf, u_int16_t len);
 void state_copy_flags(struct stateob *src, struct stateob *dst);

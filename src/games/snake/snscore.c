@@ -1,4 +1,4 @@
-/*	$OpenBSD: snscore.c,v 1.1 1999/03/13 02:08:10 pjanzen Exp $	*/
+/*	$OpenBSD: snscore.c,v 1.3 2001/02/18 16:03:03 pjanzen Exp $	*/
 /*	$NetBSD: snscore.c,v 1.5 1995/04/24 12:25:43 cgd Exp $	*/
 
 /*
@@ -44,7 +44,7 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)snscore.c	8.1 (Berkeley) 7/19/93";
 #else
-static char rcsid[] = "$OpenBSD: snscore.c,v 1.1 1999/03/13 02:08:10 pjanzen Exp $";
+static char rcsid[] = "$OpenBSD: snscore.c,v 1.3 2001/02/18 16:03:03 pjanzen Exp $";
 #endif
 #endif /* not lint */
 
@@ -85,7 +85,7 @@ snscore(fd, topn)
 	}
 
 	lseek(fd, 0, SEEK_SET);
-	printf("%sSnake scores to date\n", topn > 0 ? "Top " : "");
+	printf("%sSnake scores to date:\n", topn > 0 ? "Top " : "");
 	/* read(fd, &whoallbest, sizeof(uid_t));
 	 * read(fd, &allbest, sizeof(short));   SCOREFILE FORMAT CHANGE
 	 */
@@ -102,9 +102,9 @@ snscore(fd, topn)
 			if (p == NULL)
 				continue;
 			q = p -> pw_name;
-			if ((players[noplayers].name = malloc(strlen(q) + 1)) == NULL)
-				errx(1, "malloc");
-			strcpy(players[noplayers].name, q);
+			if ((players[noplayers].name = strdup(q)) == NULL)
+				err(1, "strdup");
+
 			noplayers++;
 		}
 	}

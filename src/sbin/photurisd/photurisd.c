@@ -1,5 +1,7 @@
+/*	$OpenBSD: photurisd.c,v 1.11 2001/03/08 21:41:47 deraadt Exp $	*/
+
 /*
- * Copyright 1997,1998 Niels Provos <provos@physnet.uni-hamburg.de>
+ * Copyright 1997-2000 Niels Provos <provos@citi.umich.edu>
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -32,7 +34,7 @@
  */
 
 #ifndef lint 
-static char rcsid[] = "$Id: photurisd.c,v 1.4 1999/12/17 18:57:03 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: photurisd.c,v 1.11 2001/03/08 21:41:47 deraadt Exp $";
 #endif 
 
 #define _PHOTURIS_C_
@@ -55,7 +57,7 @@ static char rcsid[] = "$Id: photurisd.c,v 1.4 1999/12/17 18:57:03 deraadt Exp $"
 #include "spi.h"
 #include "packet.h"
 #include "schedule.h"
-#include "errlog.h"
+#include "log.h"
 #ifdef IPSEC
 #include "attributes.h"
 #include "kernel.h"
@@ -71,7 +73,6 @@ usage(void)
 
      fprintf(f, "usage: photurisd [-cvi] [-d directory] [-p port]\n");
      fprintf(f, "\t-c  check primes on startup\n");
-     fprintf(f, "\t-v  start in VPN mode\n");
      fprintf(f, "\t-i  ignore startup file %s\n", PHOTURIS_STARTUP);
      fprintf(f, "\t-d  specifies the startup dir\n");
      fprintf(f, "\t-p  specifies the local port to bind to\n");
@@ -89,15 +90,15 @@ init_vars(void)
      attrib_file = NULL;
 
      if ((config_file = calloc(1, sizeof(PHOTURIS_CONFIG))) == NULL)
-	  crit_error(1, "no memory in init_vars()" );
+	  log_fatal("no memory in init_vars()" );
      strcpy(config_file, PHOTURIS_CONFIG);
 
      if ((secret_file = calloc(1, sizeof(PHOTURIS_SECRET))) == NULL)
-	  crit_error(1, "no memory in init_vars()" );
+	  log_fatal("no memory in init_vars()" );
      strcpy(secret_file, PHOTURIS_SECRET);
 
      if ((attrib_file = calloc(1, sizeof(PHOTURIS_ATTRIB))) == NULL)
-	  crit_error(1, "no memory in init_vars()");
+	  log_fatal("no memory in init_vars()");
      strcpy(attrib_file, PHOTURIS_ATTRIB);
 
      reset_secret();
@@ -116,20 +117,32 @@ main(int argc, char **argv)
 {
      int ch;
      int primes = 0, ignore = 0;
+     int cls, level;
      char *dir = PHOTURIS_DIR;
 
      daemon_mode = 0;
      global_port = 0;
-     vpn_mode = 0;
 
-     while ((ch = getopt(argc, argv, "vcid:p:")) != -1)
+     log_init();
+
+     while ((ch = getopt(argc, argv, "D:cid:p:")) != -1)
 	  switch((char)ch) {
 	  case 'c':
 	       primes = 1;
 	       break;
-	  case 'v':
-	       vpn_mode = 1;
-	       break;
+#ifdef USE_DEBUG
+	  case 'D':
+		  if (sscanf(optarg, "%d=%d", &cls, &level) != 2) {
+			  if (sscanf(optarg, "A=%d", &level) == 1) {
+				  for (cls = 0; cls < LOG_ENDCLASS; cls++)
+					  log_debug_cmd(cls, level);
+			  } else
+				  log_print("parse_args: -D argument unparseable: %s", optarg);
+		  }
+		  else
+			  log_debug_cmd(cls, level);
+      break;
+#endif /* USE_DEBUG */
 	  case 'i':
 	       ignore = 1;
 	       break;
@@ -145,12 +158,15 @@ main(int argc, char **argv)
 	  }
 
      if (chdir(dir) == -1)
-	  crit_error(1, "chdir(\"%s\") in main()", dir);
+	  log_fatal("chdir(\"%s\") in main()", dir);
 	  
 
      argc -= optind;
      argv += optind;
      
+     spi_init();
+     state_init();
+
      init_vars();
 
      init_times();
@@ -159,12 +175,12 @@ main(int argc, char **argv)
 
      init_schemes();
 
-#ifndef DEBUG
+#ifndef USE_DEBUG
      init_signals();
      if (fork())
           exit(0);
      daemon_mode = 1;
-#endif
+#endif /* USE_DEBUG */
 
 #ifdef IPSEC
      init_kernel();
@@ -174,14 +190,14 @@ main(int argc, char **argv)
      init_attributes(); 
 
      if (init_identities(NULL,NULL) == -1)
-	  exit(-1);
+	  exit(1);
      
      init_schedule();
 
      init_server();
 
      /* Startup preconfigured exchanges */
-     if( !ignore && !vpn_mode)
+     if(!ignore)
 	  init_startup();
 
      server();

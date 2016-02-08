@@ -1,3 +1,5 @@
+/*	$OpenBSD: timed.c,v 1.9 2001/04/07 19:58:07 ho Exp $	*/
+
 /*-
  * Copyright (c) 1985, 1993 The Regents of the University of California.
  * All rights reserved.
@@ -42,7 +44,7 @@ static char sccsid[] = "@(#)timed.c	5.1 (Berkeley) 5/11/93";
 #endif /* not lint */
 
 #ifdef sgi
-#ident "$Revision: 1.7 $"
+#ident "$Revision: 1.9 $"
 #endif /* sgi */
 
 #define TSPTYPES
@@ -55,6 +57,9 @@ static char sccsid[] = "@(#)timed.c	5.1 (Berkeley) 5/11/93";
 #include <math.h>
 #include <sys/types.h>
 #include <sys/times.h>
+#ifdef HAVENIS
+#include <netgroup.h>
+#endif /* HAVENIS */
 #ifdef sgi
 #include <unistd.h>
 #include <sys/syssgi.h>
@@ -100,7 +105,7 @@ static struct goodhost {		/* hosts that we trust */
 static char *goodgroup;			/* net group of trusted hosts */
 static void checkignorednets(void);
 static void pickslavenet(struct netinfo *);
-static void add_good_host(char*,char);
+static void add_good_host(const char*,char);
 
 #ifdef sgi
 char *timetrim_fn;
@@ -167,9 +172,7 @@ main(int argc, char **argv)
 #endif /* HAVENIS */
 #endif /* sgi */
 
-#ifdef lint
 	ntip = NULL;
-#endif
 
 	on = 1;
 	nflag = OFF;
@@ -477,7 +480,7 @@ main(int argc, char **argv)
 			if (ntohl(ntp->net.s_addr) == nt->net)
 				break;
 		}
-		if (nflag && !nt || iflag && nt)
+		if ((nflag && !nt) || (iflag && nt))
 			continue;
 
 		ntp->next = NULL;
@@ -591,9 +594,7 @@ main(int argc, char **argv)
 		slave();
 	}
 	/* NOTREACHED */
-#ifdef lint
 	return(0);
-#endif
 }
 
 
@@ -780,8 +781,8 @@ setstatus()
 	status &= ~IGNORE;
 	if (trace)
 		fprintf(fd,
-			"\tnets=%d masters=%d slaves=%d ignored=%d delay2=%d\n",
-			nnets, nmasternets, nslavenets, nignorednets, delay2);
+		    "\tnets=%d masters=%d slaves=%d ignored=%d delay2=%ld\n",
+		    nnets, nmasternets, nslavenets, nignorednets, delay2);
 }
 
 void
@@ -888,7 +889,7 @@ addnetname(char *name)
 
 /* note a host as trustworthy */
 static void
-add_good_host(char* name,
+add_good_host(const char* name,
 	      char perm)		/* 1=not part of the netgroup */
 {
 	register struct goodhost *ghp;
@@ -920,9 +921,11 @@ get_goodgroup(int force)
 # define NG_DELAY (30*60*CLK_TCK)	/* 30 minutes */
 	static unsigned long last_update = -NG_DELAY;
 	unsigned long new_update;
+#ifdef HAVENIS
 	struct hosttbl *htp;
 	struct goodhost *ghp, **ghpp;
-	char *mach, *usr, *dom;
+	const char *mach, *usr, *dom;
+#endif
 	struct tms tm;
 
 

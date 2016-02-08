@@ -1,5 +1,7 @@
+/*	$OpenBSD: handle_value_request.c,v 1.7 2001/01/28 22:45:10 niklas Exp $	*/
+
 /*
- * Copyright 1997 Niels Provos <provos@physnet.uni-hamburg.de>
+ * Copyright 1997-2000 Niels Provos <provos@citi.umich.edu>
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -29,12 +31,12 @@
  */
 /*
  * handle_value_request:
- * receive a VALUE_REQUEST packet; return -1 on failure, 0 on success
+ * receive a VALUE_REQUEST packet; return (-1) on failure, 0 on success
  *
  */
 
 #ifndef lint
-static char rcsid[] = "$Id: handle_value_request.c,v 1.2 1999/12/17 18:57:03 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: handle_value_request.c,v 1.7 2001/01/28 22:45:10 niklas Exp $";
 #endif
 
 #include <stdio.h>
@@ -44,6 +46,7 @@ static char rcsid[] = "$Id: handle_value_request.c,v 1.2 1999/12/17 18:57:03 der
 #include <sys/time.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
+#include <ssl/bn.h>
 #include "config.h"
 #include "photuris.h"
 #include "packets.h"
@@ -56,7 +59,7 @@ static char rcsid[] = "$Id: handle_value_request.c,v 1.2 1999/12/17 18:57:03 der
 #include "exchange.h"
 #include "secrets.h"
 #include "server.h"
-#include "errlog.h"
+#include "log.h"
 
 int
 handle_value_request(u_char *packet, int size,
@@ -75,18 +78,19 @@ handle_value_request(u_char *packet, int size,
 	};
 	struct value_request *header;
 	struct stateob *st;
-	mpz_t test, gen, mod;
+	BIGNUM *test, *gen, *mod;
 	u_int8_t *p, *modp, *refp, *genp = NULL;
-	u_int16_t sstart, vsize, modsize, modflag;
+	size_t sstart, vsize, modsize, modpsize, refpsize;
+	int modflag;
 	u_int8_t scheme_ref[2];
 	u_int8_t rcookie[COOKIE_SIZE];
 
 	if (size < VALUE_REQUEST_MIN)
-	     return -1;	/* packet too small  */
+	     return (-1);	/* packet too small  */
 
 	if (packet_check(packet, size, &vr_msg) == -1) {
-	     log_error(0, "bad packet structure in handle_value_request()");
-	     return -1;
+	     log_print("bad packet structure in handle_value_request()");
+	     return (-1);
 	}
 
 	header = (struct value_request *) packet;
@@ -110,7 +114,7 @@ handle_value_request(u_char *packet, int size,
 					 header->icookie, header->rcookie,
 					 header->counter, BAD_COOKIE);
 		  send_packet();
-		  return 0;
+		  return (0);
 	     }
 
 	     /* Check exchange value - XXX doesn't check long form */
@@ -121,50 +125,66 @@ handle_value_request(u_char *packet, int size,
 	     modflag = 0;
 	     refp = modp = NULL;
 	     *(u_int16_t *)scheme_ref = htons(scheme_get_ref(header->scheme));
-	     while(sstart < ssize) {
-		  p = scheme_get_mod(schemes+sstart);
+	     while (sstart < ssize) {
+		  p = scheme_get_mod(schemes + sstart);
 		  modsize = varpre2octets(p);
 		  if (!bcmp(header->scheme, schemes + sstart, 2)) {
 		       modflag = 1;
 		       if (modsize == vsize) {
 			    genp = scheme_get_gen(schemes+sstart);
 			    modp = p;
+			    modpsize = modsize;
 			    break;  /* On right scheme + right size */
 		       } else if (modsize <= 2 && refp != NULL) {
-			    modp =  refp;
+			    modp = refp;
+			    modpsize = refpsize;
 			    break;
 		       }
-		  } else if (!bcmp(scheme_ref, schemes + sstart,2 ) && modsize == vsize) {
-		       genp = scheme_get_gen(schemes+sstart);
+		  } else if (!bcmp(scheme_ref, schemes + sstart, 2) &&
+			     modsize == vsize) {
+		       genp = scheme_get_gen(schemes + sstart);
 		       if (modflag) {
 			    modp = p;
+			    modpsize = modsize;
 			    break;
 		       }
 		       refp = p;
+		       refpsize = modsize;
 		  }
 		  
 		  sstart += scheme_get_len(schemes+sstart);
 	     }
 	     if (sstart >= ssize)
-		  return -1;   /* Did not find a scheme - XXX log */
+		  return (-1);   /* Did not find a scheme - XXX log */
 
 	     /* now check the exchange value */
-	     mpz_init_set_varpre(test, parts[0].where);
-	     mpz_init_set_varpre(mod, modp);
-	     mpz_init(gen);
+	     test = BN_new();
+	     if (BN_varpre2bn(parts[0].where, parts[0].size, test) == NULL) {
+		     BN_free(test);
+		     return (-1);
+	     }
+
+	     mod = BN_new();
+	     if (BN_varpre2bn(modp, modpsize, mod) == NULL) {
+		     BN_free(test);
+		     BN_free(mod);
+		     return (-1);
+	     }
+
+	     gen = BN_new();
 	     if (exchange_set_generator(gen, header->scheme, genp) == -1 ||
 		 !exchange_check_value(test, gen, mod)) {
-		  mpz_clear(test);
-		  mpz_clear(gen);
-		  mpz_clear(mod);
+		  BN_free(test);
+		  BN_free(gen);
+		  BN_free(mod);
 		  return 0;
 	     }
-	     mpz_clear(test);
-	     mpz_clear(gen);
-	     mpz_clear(mod);
+	     BN_free(test);
+	     BN_free(gen);
+	     BN_free(mod);
 
 	     if ((st = state_new()) == NULL)
-		  return -1;
+		     goto resourcefail;
 
 	     /* Default options */
 	     st->flags = IPSEC_OPT_ENC|IPSEC_OPT_AUTH;
@@ -173,7 +193,7 @@ handle_value_request(u_char *packet, int size,
 	     st->uSPIoattrib = calloc(parts[1].size, sizeof(u_int8_t));
              if (st->uSPIoattrib == NULL) {
                   state_value_reset(st);
-		  return -1;
+		  goto resourcefail;
 	     }
              bcopy(parts[1].where, st->uSPIoattrib, parts[1].size);  
              st->uSPIoattribsize = parts[1].size;  
@@ -188,7 +208,7 @@ handle_value_request(u_char *packet, int size,
 	     st->scheme = calloc(vsize, sizeof(u_int8_t));
 	     if (st->scheme == NULL) {
                   state_value_reset(st); 
-                  return -1; 
+                  goto resourcefail; 
              } 
              bcopy(header->scheme, st->scheme, 2);
 	     if (genp != NULL) {
@@ -213,8 +233,9 @@ handle_value_request(u_char *packet, int size,
 	     st->texchangesize = parts[0].size;
 	     st->texchange = calloc(st->texchangesize, sizeof(u_int8_t));
 	     if (st->texchange == NULL) {
-		  log_error(1, "calloc() in handle_value_request()");
-		  return -1;
+		  log_error("calloc() in handle_value_request()");
+		  state_value_reset(st);
+		  goto resourcefail;
 	     }
 	     bcopy(parts[0].where, st->texchange, st->texchangesize);
 
@@ -228,8 +249,9 @@ handle_value_request(u_char *packet, int size,
 	     bcopy(&header->counter, st->uSPITBV, 3);
 
 	     if ((st->roschemes = calloc(ssize, sizeof(u_int8_t))) == NULL) {
+		  log_error("calloc() in handle_value_request()");
 		  state_value_reset(st);
-		  return -1;
+		  goto resourcefail;
 	     }
 	     bcopy(schemes, st->roschemes, ssize);
 	     st->roschemesize = ssize;
@@ -237,18 +259,23 @@ handle_value_request(u_char *packet, int size,
 	     if (pick_attrib(st, &(st->oSPIoattrib), 
 			     &(st->oSPIoattribsize)) == -1) {
 		  state_value_reset(st);
-		  return -1;
+		  goto resourcefail;
 	     }
 
 	     st->lifetime = exchange_timeout + time(NULL);
 
 	     /* Now put the filled state object in the chain */
 	     state_insert(st);
+	} else if (st->phase != VALUE_RESPONSE) {
+		LOG_DBG((LOG_PROTOCOL, 55, __FUNCTION__
+			 ": value request from %s, but we are in state %d",
+			 st->address, st->phase));
+		return (-1);
 	}
 	     
 	packet_size = PACKET_BUFFER_SIZE;
 	if (photuris_value_response(st, packet_buffer, &packet_size) == -1)
-	     return -1;
+	     return (-1);
 
 	send_packet();
 
@@ -270,5 +297,13 @@ handle_value_request(u_char *packet, int size,
 
 	st->retries = 0;
 	st->phase = VALUE_RESPONSE;
-	return 0;
+	return (0);
+
+ resourcefail:
+	packet_size = PACKET_BUFFER_SIZE;
+	photuris_error_message(st, packet_buffer, &packet_size,
+			       header->icookie, header->rcookie,
+			       header->counter, RESOURCE_LIMIT);
+	send_packet();
+	return (0);
 }

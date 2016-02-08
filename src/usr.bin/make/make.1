@@ -1,4 +1,4 @@
-.\"	$OpenBSD: make.1,v 1.36 2000/07/31 21:01:40 espie Exp $
+.\"	$OpenBSD: make.1,v 1.39 2001/03/29 17:15:47 aaron Exp $
 .\"	$NetBSD: make.1,v 1.18 1997/03/10 21:19:53 christos Exp $
 .\"
 .\" Copyright (c) 1990, 1993
@@ -108,7 +108,6 @@ Print debugging information about conditional evaluation.
 Print debugging information about directory searching and caching.
 .It Ar f
 Print debugging information about the execution of for loops.
-Currently a no-op.
 .It Ar "g1"
 Print the input graph before making anything.
 .It Ar "g2"
@@ -208,7 +207,7 @@ Do not build any targets.
 Multiple instances of this option may be specified;
 the variables will be printed one per line,
 with a blank line for each null or undefined variable.
-.It Ar variable=value
+.It Ar variable Ns No = Ns Ar value
 Set the value of the variable
 .Ar variable
 to
@@ -700,7 +699,7 @@ potentially affected, the latter whether multiple substitutions can
 potentially occur within each affected word.
 .It Cm T
 Replaces each word in the variable with its last component.
-.It Ar old_string=new_string
+.It Ar old_string Ns No = Ns Ar new_string
 This is the
 .At V
 style variable substitution.
@@ -1141,23 +1140,6 @@ Each source specifies a suffix to
 .Nm make .
 If no sources are specified, any previous specified suffices are deleted.
 .El
-.Sh COMPATIBILITY
-Older versions of
-.Nm
-used
-.Ev MAKE
-instead of
-.Ev MAKEFLAGS .
-This was removed for POSIX compatibility.
-The internal variable
-.Va MAKE
-is set to the same value as
-.Va .MAKE ,
-support for this may be removed in the future.
-.Pp
-Most of the more esoteric features of
-.Nm
-should probably be avoided for greater compatibility.
 .Sh ENVIRONMENT
 .Nm
 uses the following environment variables, if they exist:
@@ -1189,6 +1171,32 @@ system makefile directory
 default
 .Ev MAKEOBJDIRPREFIX directory.
 .El
+.Sh SEE ALSO
+.Xr mkdep 1
+.Pp
+.%T "Make \- A Tutorial" .
+.Sh COMPATIBILITY
+Older versions of
+.Nm
+used
+.Ev MAKE
+instead of
+.Ev MAKEFLAGS .
+This was removed for POSIX compatibility.
+The internal variable
+.Va MAKE
+is set to the same value as
+.Va .MAKE ,
+support for this may be removed in the future.
+.Pp
+Most of the more esoteric features of
+.Nm
+should probably be avoided for greater compatibility.
+.Sh HISTORY
+A
+.Nm
+command appeared in
+.At v7 .
 .Sh BUGS
 The determination of
 .Va .OBJDIR
@@ -1272,12 +1280,3 @@ A will evaluate to a b c d after the loop, not z b c d.
 The 
 .Ql +
 command modificator is ignored in parallel make mode.
-.Sh SEE ALSO
-.Xr mkdep 1
-.Pp
-.%T "Make \- A Tutorial" .
-.Sh HISTORY
-A
-.Nm
-command appeared in
-.At v7 .

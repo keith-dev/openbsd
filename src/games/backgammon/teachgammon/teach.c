@@ -1,4 +1,4 @@
-/*	$OpenBSD: teach.c,v 1.6 1999/07/31 21:57:41 pjanzen Exp $	*/
+/*	$OpenBSD: teach.c,v 1.8 2001/03/08 21:18:32 deraadt Exp $	*/
 
 /*
  * Copyright (c) 1980, 1993
@@ -43,7 +43,7 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)teach.c	8.1 (Berkeley) 5/31/93";
 #else
-static char rcsid[] = "$OpenBSD: teach.c,v 1.6 1999/07/31 21:57:41 pjanzen Exp $";
+static char rcsid[] = "$OpenBSD: teach.c,v 1.8 2001/03/08 21:18:32 deraadt Exp $";
 #endif
 #endif /* not lint */
 
@@ -81,14 +81,14 @@ main(argc, argv)
 		errexit("teachgammon(gtty)");
 	noech = old;
 	noech.c_lflag &= ~ECHO;
-	raw = noech;
-	raw.c_lflag &= ~ICANON;	/* set up modes */
+	traw = noech;
+	traw.c_lflag &= ~ICANON;	/* set up modes */
 	ospeed = cfgetospeed(&old);	/* for termlib */
 	tflag = getcaps(getenv("TERM"));
 	getarg(argc, argv);
 	if (tflag) {
 		noech.c_oflag &= ~(ONLCR | OXTABS);
-		raw.c_oflag &= ~(ONLCR | OXTABS);
+		traw.c_oflag &= ~(ONLCR | OXTABS);
 		clear();
 	}
 	text(hello);
@@ -156,5 +156,5 @@ leave()
 	fixtty(&old);
 	execl(EXEC, "backgammon", "-n", args, 0);
 	writel("Help! Backgammon program is missing\007!!\n");
-	exit(-1);
+	exit(1);
 }

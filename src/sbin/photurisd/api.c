@@ -1,5 +1,7 @@
+/*	$OpenBSD: api.c,v 1.5 2001/01/28 22:45:06 niklas Exp $	*/
+
 /*
- * Copyright 1997 Niels Provos <provos@physnet.uni-hamburg.de>
+ * Copyright 1997-2000 Niels Provos <provos@citi.umich.edu>
  * All rights reserved.
  *
  * Parts derived from code by Angelos D. Keromytis, kermit@forthnet.gr
@@ -37,7 +39,7 @@
  */
 
 #ifndef lint
-static char rcsid[] = "$Id: api.c,v 1.1 1998/11/14 23:37:22 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: api.c,v 1.5 2001/01/28 22:45:06 niklas Exp $";
 #endif
 
 #define _API_C_
@@ -55,7 +57,7 @@ static char rcsid[] = "$Id: api.c,v 1.1 1998/11/14 23:37:22 deraadt Exp $";
 #include "photuris.h"
 #include "config.h"
 #include "api.h"
-#include "errlog.h"
+#include "log.h"
 #include "buffer.h"
 #include "schedule.h"
 #include "server.h"
@@ -80,7 +82,7 @@ process_api(int fd, int sendsock)
 	bzero(buffer, BUFFER_SIZE);
 
 	if ((sz = read(fd, buffer, BUFFER_SIZE)) == -1)
-	     crit_error(1, "read() in process_api()");
+	     log_fatal("read() in process_api()");
 
 	buffer[sz >= BUFFER_SIZE ? BUFFER_SIZE -1 : sz] = 0;
 
@@ -89,7 +91,7 @@ process_api(int fd, int sendsock)
 
 	/* Set up a new state object */
 	if ((st = state_new()) == NULL) {
-	     log_error(1, "state_new() in process_api()");
+	     log_error("state_new() in process_api()");
 	     return;
 	}
 
@@ -97,12 +99,12 @@ process_api(int fd, int sendsock)
 
 #ifndef DEBUG
 	if (addresses != (char **) NULL && strlen(st->address))
-	     for (i = 0; i<num_ifs; i++) {
+	     for (i = 0; i < num_ifs; i++) {
 		  if (addresses[i] == (char *)NULL)
 		       continue;
 		  if (!strcmp(addresses[i], st->address)) {
 		       /* XXX Code to notify kernel of failure here */
-		       log_error(0, "discarded request to initiate KES with localhost");
+		       log_print("discarded request to initiate KES with localhost");
 		       state_value_reset(st);
 		       free(st);
 		       return;
@@ -136,7 +138,7 @@ start_exchange(int sd, struct stateob *st, char *address, int port)
 
      packet_size = PACKET_BUFFER_SIZE;
      if (photuris_cookie_request(st, packet_buffer, &packet_size) == -1) {
-	  log_error(0, "photuris_cookie_request() in start_exchange() "
+	  log_print("photuris_cookie_request() in start_exchange() "
 		    "for %s:%d", st->address, st->port);
 	  return -1;
      }
@@ -147,7 +149,7 @@ start_exchange(int sd, struct stateob *st, char *address, int port)
      if (sendto(sd, packet_buffer, packet_size, 0, 
 		(struct sockaddr *) &sin, sizeof(sin)) != packet_size) {
 	  /* XXX Code to notify kernel of failure */
-	  log_error(1, "sendto() in start_exchange() for %s:%d",
+	  log_error("sendto() in start_exchange() for %s:%d",
 		    st->address, st->port);
 	  return -1;
      }

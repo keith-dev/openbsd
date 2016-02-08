@@ -473,6 +473,7 @@ int warn PROTO ((char *, ...));
 int note PROTO ((char *, ...));
 int debug PROTO ((char *, ...));
 int parse_warn PROTO ((char *, ...));
+void write_pidfile PROTO((char *, pid_t));
 
 /* dhcpd.c */
 extern TIME cur_time;
@@ -844,7 +845,7 @@ void db_startup PROTO ((void));
 void new_lease_file PROTO ((void));
 
 /* packet.c */
-u_int32_t checksum PROTO ((unsigned char *, int, u_int32_t));
+u_int32_t checksum PROTO ((unsigned char *, unsigned, u_int32_t));
 u_int32_t wrapsum PROTO ((u_int32_t));
 void assemble_hw_header PROTO ((struct interface_info *, unsigned char *,
 				int *, struct hardware *));

@@ -1,5 +1,6 @@
+/* $OpenBSD: modulus.h,v 1.4 2001/01/28 22:45:12 niklas Exp $ */
 /*
- * Copyright 1997 Niels Provos <provos@physnet.uni-hamburg.de>
+ * Copyright 1997-2000 Niels Provos <provos@citi.umich.edu>
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -27,7 +28,6 @@
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
-/* $Id: modulus.h,v 1.1 1998/11/14 23:37:25 deraadt Exp $ */
 /* 
  * modulus.h: 
  * modulus handling functions
@@ -35,16 +35,7 @@
 
 #ifndef _MODULUS_H_
 #define _MODULUS_H_
-
-#undef EXTERN
-
-#ifdef _MODULUS_C_
-#define EXTERN
-#else
-#define EXTERN extern
-#endif
-
-#include "gmp.h"
+#include <sys/queue.h>
 
 /* Possible values for the status field */
 
@@ -60,32 +51,36 @@
 #define MOD_TIMEOUT    120
 
 struct moduli_cache {
-     struct moduli_cache *next;             /* Link to next member */
-     mpz_t modulus;                         /* Modulus for computation */
-     mpz_t generator;                       /* Used generator */
-     mpz_t private_value;                   /* Our own private value */
-     u_int8_t *exchangevalue;               /* Our own exchange value */
-     u_int16_t exchangesize;
-     int iterations;                        /* primality check iterations */
-     int status;                            /* Status of the modulus */
-     time_t lifetime;                       /* For modulus + exchange value */
+     TAILQ_ENTRY(moduli_cache) next;	/* Link to next member */
+
+     BIGNUM *modulus;			/* Modulus for computation */
+     BIGNUM *generator;			/* Used generator */
+     BIGNUM *private_value;		/* Our own private value */
+     u_int8_t *exchangevalue;		/* Our own exchange value */
+     size_t exchangesize;
+     int iterations;			/* primality check iterations */
+     int status;			/* Status of the modulus */
+     time_t lifetime;			/* For modulus + exchange value */
 };
 
 /* Prototypes */
+void mod_init(void);
+
 int mod_insert(struct moduli_cache *ob);
 int mod_unlink(struct moduli_cache *ob);
 
-struct moduli_cache *mod_new_modgen(mpz_t m, mpz_t g);
-struct moduli_cache *mod_new_modulus(mpz_t m);
+struct moduli_cache *mod_new_modgen(BIGNUM *, BIGNUM *);
+struct moduli_cache *mod_new_modulus(BIGNUM *);
 
 int mod_value_reset(struct moduli_cache *ob);
 
-struct moduli_cache *mod_find_modgen(mpz_t modulus, mpz_t generator);
-struct moduli_cache *mod_find_modgen_next(struct moduli_cache *ob, mpz_t modulus, mpz_t generator);
-struct moduli_cache *mod_find_modulus(mpz_t modulus);
-struct moduli_cache *mod_find_generator(mpz_t generator);
-struct moduli_cache *mod_find_modulus_next(struct moduli_cache *ob, mpz_t modulus);
-struct moduli_cache *mod_find_generator_next(struct moduli_cache *ob, mpz_t generator);
+struct moduli_cache *mod_find_modgen(BIGNUM *, BIGNUM *);
+struct moduli_cache *mod_find_modgen_next(struct moduli_cache *, BIGNUM *,
+					  BIGNUM *);
+struct moduli_cache *mod_find_modulus(BIGNUM *);
+struct moduli_cache *mod_find_generator(BIGNUM *);
+struct moduli_cache *mod_find_modulus_next(struct moduli_cache *, BIGNUM *);
+struct moduli_cache *mod_find_generator_next(struct moduli_cache *, BIGNUM *);
 
 void mod_check_prime(int iter, int tm);
 

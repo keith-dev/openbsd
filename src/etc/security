@@ -1,6 +1,6 @@
 #!/bin/sh -
 #
-#	$OpenBSD: security,v 1.41 2000/10/20 16:27:16 millert Exp $
+#	$OpenBSD: security,v 1.48 2001/04/06 17:13:37 brad Exp $
 #	from: @(#)security	8.1 (Berkeley) 6/9/93
 #
 
@@ -39,8 +39,8 @@ awk -F: '{
 		printf("Line %d has an empty login field:\n%s\n", NR, $0);
 	else if ($1 !~ /^[A-Za-z0-9][A-Za-z0-9_-]*$/)
 		printf("Login %s has non-alphanumeric characters.\n", $1);
-	if (length($1) > 8)
-		printf("Login %s has more than 8 characters.\n", $1);
+	if (length($1) > 31)
+		printf("Login %s has more than 31 characters.\n", $1);
 	if ($2 == "")
 		printf("Login %s has no password.\n", $1);
 	if ($2 != "" && length($2) != 13 && ($10 ~ /.*sh$/ || $10 == "") &&
@@ -70,7 +70,7 @@ if [ -s $OUTPUT ] ; then
 	column $OUTPUT
 fi
 
-awk -F: '{ print $1 " " $3 }' $MP | sort -n +1 | tee $TMP1 |
+awk -F: '/^[^\+]/ { print $1 " " $3 }' $MP | sort -n +1 | tee $TMP1 |
 uniq -d -f 1 | awk '{ print $2 }' > $TMP2
 if [ -s $TMP2 ] ; then
 	echo "\n${MP} has duplicate user ID's."
@@ -114,8 +114,8 @@ awk -F: '{
 		printf("Line %d has the wrong number of fields:\n%s\n", NR, $0);
 	if ($1 !~ /^[A-za-z0-9][A-za-z0-9_-]*$/)
 		printf("Group %s has non-alphanumeric characters.\n", $1);
-	if (length($1) > 8)
-		printf("Group %s has more than 8 characters.\n", $1);
+	if (length($1) > 31)
+		printf("Group %s has more than 31 characters.\n", $1);
 	if ($3 !~ /[0-9]*/)
 		printf("Login %s has a negative group ID.\n", $1);
 }' < $GRP > $OUTPUT
@@ -373,7 +373,8 @@ if [ -s $OUTPUT ] ; then
 fi
 
 # Files that should not be owned by someone else or readable.
-list=".netrc .rhosts .pgp/secring.pgp .shosts .ssh/identity .ssh/random_seed"
+list=".netrc .rhosts .gnupg/secring.gpg .gnupg/random_seed \
+	.pgp/secring.pgp .shosts .ssh/identity .ssh/id_dsa .ssh/id_rsa"
 awk -F: '/^[^+-]/ { print $1 " " $6 }' /etc/passwd | \
 while read uid homedir; do
 	for f in $list ; do
@@ -398,8 +399,9 @@ awk '$1 != $5 && $5 != "root" \
 list=".bashrc .bash_profile .bash_login .bash_logout .cshrc \
       .emacs .exrc .forward .fvwmrc .inputrc .klogin .kshrc .login \
       .logout .nexrc .profile .screenrc .ssh .ssh/config \
-      .ssh/authorized_keys .ssh/environment .ssh/known_hosts .ssh/rc \
-      .tcshrc .twmrc .xsession .xinitrc .Xdefaults .Xauthority"
+      .ssh/authorized_keys .ssh/authorized_keys2 .ssh/environment \
+      .ssh/known_hosts .ssh/rc .tcshrc .twmrc .xsession .xinitrc \
+      .Xdefaults .Xauthority"
 awk -F: '/^[^+-]/ { print $1 " " $6 }' /etc/passwd | \
 while read uid homedir; do
 	for f in $list ; do
@@ -639,14 +641,14 @@ _fnchg() {
 	echo "$1" | sed 's/^\///;s/\//_/g'
 }
 if [ -s /etc/changelist ] ; then
-	for file in `egrep -v "^#|$MP" /etc/changelist`; do
+	for file in `egrep -v "^(#|\+|$MP)" /etc/changelist`; do
 		CUR=/var/backups/$(_fnchg  "$file").current
 		BACK=/var/backups/$(_fnchg "$file").backup
 		if [ -s $file -a ! -d $file ] ; then
 			if [ -s $CUR ] ; then
-				diff $CUR $file > $OUTPUT
+				diff -u $CUR $file > $OUTPUT
 				if [ -s $OUTPUT ] ; then
-		echo "\n======\n${file} diffs (OLD < > NEW)\n======"
+		echo "\n======\n${file} diffs (-OLD  +NEW)\n======"
 					cat $OUTPUT
 					cp -p $CUR $BACK
 					cp -p $file $CUR
@@ -655,6 +657,30 @@ if [ -s /etc/changelist ] ; then
 			else
 				cp -p $file $CUR
 				chown root.wheel $CUR
+			fi
+		fi
+	done
+	for file in `egrep "^\+" /etc/changelist`; do
+		file="${file#+}"
+		CUR=/var/backups/$(_fnchg  "$file").current.md5
+		BACK=/var/backups/$(_fnchg "$file").backup.md5
+		if [ -s $file -a ! -d $file ] ; then
+			MD5_NEW=`md5 $file | sed 's/^.* //'`
+			if [ -s $CUR ] ; then
+				MD5_OLD="`cat $CUR`"
+				if [ "$MD5_NEW" != "$MD5_OLD" ]; then
+		echo "\n======\n${file} MD5 checksums\n======"
+					echo "OLD: $MD5_OLD"
+					echo "NEW: $MD5_NEW"
+					cp -p $CUR $BACK
+					echo $MD5_NEW > $CUR
+					chown root.wheel $CUR $BACK
+					chmod 600 $CUR
+				fi
+			else
+				echo $MD5_NEW > $CUR
+				chown root.wheel $CUR
+				chmod 600 $CUR
 			fi
 		fi
 	done

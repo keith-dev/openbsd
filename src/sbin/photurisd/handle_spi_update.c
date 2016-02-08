@@ -1,5 +1,7 @@
+/*	$OpenBSD: handle_spi_update.c,v 1.7 2001/01/28 22:45:10 niklas Exp $	*/
+
 /*
- * Copyright 1997,1998 Niels Provos <provos@physnet.uni-hamburg.de>
+ * Copyright 1997-2000 Niels Provos <provos@citi.umich.edu>
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -34,7 +36,7 @@
  */
 
 #ifndef lint
-static char rcsid[] = "$Id: handle_spi_update.c,v 1.2 1999/03/27 21:18:00 provos Exp $";
+static char rcsid[] = "$OpenBSD: handle_spi_update.c,v 1.7 2001/01/28 22:45:10 niklas Exp $";
 #endif
 
 #include <stdio.h>
@@ -53,7 +55,7 @@ static char rcsid[] = "$Id: handle_spi_update.c,v 1.2 1999/03/27 21:18:00 provos
 #include "secrets.h"
 #include "schedule.h"
 #include "scheme.h"
-#include "errlog.h"
+#include "log.h"
 #include "spi.h"
 #ifdef IPSEC
 #include "kernel.h"
@@ -101,19 +103,19 @@ handle_spi_update(u_char *packet, int size, char *address,
 	/* Decrypt message */
 	tmp = size - SPI_UPDATE_MIN;
 	if (packet_decrypt(st, SPI_UPDATE_VERIFICATION(header), &tmp) == -1) {
-	     log_error(0, "packet_decrypt() in handle_spi_update()");
+	     log_print("packet_decrypt() in handle_spi_update()");
 	     goto verification_failed;
 	}
 
 	/* Verify message structure*/
 	if (packet_check((u_int8_t *)header, size - packet[size-1], &spi_msg) == -1) {
-	     log_error(0, "bad packet structure in handle_spi_update()");
+	     log_print("bad packet structure in handle_spi_update()");
 	     return -1;
 	}
 
 	i = get_validity_verification_size(st);
 	if (!i || i != parts[0].size || i > sizeof(signature)) {
-	     log_error(0, "verification size mismatch in handle_spi_update()");
+	     log_print("verification size mismatch in handle_spi_update()");
 	     goto verification_failed;
 	}
 	bcopy(parts[0].where, signature, i);
@@ -123,13 +125,13 @@ handle_spi_update(u_char *packet, int size, char *address,
 
 	if (!isattribsubset(st->oSPIoattrib,st->oSPIoattribsize,
 			    attributes, attribsize)) {
-	     log_error(0, "attributes are not a subset in handle_spi_update()");
+	     log_print("attributes are not a subset in handle_spi_update()");
 	     return 0;
 	}
 
 	if (!verify_validity_verification(st, signature, packet, size)) {
 	verification_failed:
-	     log_error(0, "verification failed in handle_spi_update()");
+	     log_print("verification failed in handle_spi_update()");
 	     packet_size = PACKET_BUFFER_SIZE;
 	     photuris_error_message(st, packet_buffer, &packet_size,
 				    header->icookie, header->rcookie,
@@ -144,14 +146,14 @@ handle_spi_update(u_char *packet, int size, char *address,
 	if (lifetime == 0) {
 	     /* Delete specified security association */
 	     if ((spi = spi_find(st->address, header->SPI)) == NULL) {
-		  log_error(0, "spi_find() in handle_spi_update()");
+		  log_print("spi_find() in handle_spi_update()");
 		  return -1;
 	     }
 #ifdef IPSEC
 	     kernel_unlink_spi(spi);
 #endif
-	     spi_unlink(spi);
 	     spi_value_reset(spi);
+	     spi_unlink(spi);
 	     return 0;
 	} 
 
@@ -159,15 +161,15 @@ handle_spi_update(u_char *packet, int size, char *address,
 	bcopy(header->SPI, st->uSPI, SPI_SIZE);
 
 	if ((spi = spi_new(st->address, header->SPI)) == NULL) {
-	     log_error(0, "spi_new() in handle_spi_update()"); 
+	     log_print("spi_new() in handle_spi_update()"); 
 	     return -1; 
 	}
 	if ((spi->local_address = strdup(local_address)) == NULL) {
-	     log_error(1, "strdup() in handle_spi_update()");
+	     log_error("strdup() in handle_spi_update()");
 	     return -1;
 	}
 	if((spi->attributes = calloc(attribsize, sizeof(u_int8_t))) == NULL) {
-	     log_error(1, "calloc() in handle_spi_update()");
+	     log_error("calloc() in handle_spi_update()");
 	     return -1;
 	}
 	spi->flags |= st->flags & IPSEC_NOTIFY ? SPI_NOTIFY : 0;
@@ -175,8 +177,6 @@ handle_spi_update(u_char *packet, int size, char *address,
 	spi->attribsize = attribsize;
 	bcopy(st->icookie, spi->icookie, COOKIE_SIZE);
 	spi->lifetime = time(NULL) + lifetime;
-
-	spi_set_tunnel(st, spi);
 
 	make_session_keys(st, spi);
 

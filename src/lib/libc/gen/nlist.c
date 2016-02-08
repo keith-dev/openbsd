@@ -32,7 +32,7 @@
  */
 
 #if defined(LIBC_SCCS) && !defined(lint)
-static char rcsid[] = "$OpenBSD: nlist.c,v 1.34 2000/10/12 12:47:58 art Exp $";
+static char rcsid[] = "$OpenBSD: nlist.c,v 1.36 2001/02/03 02:37:27 art Exp $";
 #endif /* LIBC_SCCS and not lint */
 
 #include <sys/types.h>
@@ -279,13 +279,13 @@ out:
  */
 int
 __elf_is_okay__(ehdr)
-	register Elf32_Ehdr *ehdr;
+	register Elf_Ehdr *ehdr;
 {
 	register int retval = 0;
 	/*
 	 * We need to check magic, class size, endianess,
 	 * and version before we look at the rest of the
-	 * Elf32_Ehdr structure.  These few elements are
+	 * Elf_Ehdr structure.  These few elements are
 	 * represented in a machine independant fashion.
 	 */
 	if ((IS_ELF(*ehdr) || IS_OLF(*ehdr)) &&
@@ -298,6 +298,7 @@ __elf_is_okay__(ehdr)
 		    ehdr->e_version == ELF_TARG_VER)
 			retval = 1;
 	}
+
 	return retval;
 }
 
@@ -308,19 +309,20 @@ __elf_fdnlist(fd, list)
 {
 	register struct nlist *p;
 	register caddr_t strtab;
-	register Elf32_Off symoff = 0, symstroff = 0;
-	register Elf32_Word symsize = 0, symstrsize = 0;
-	register Elf32_Sword nent, cc, i;
-	Elf32_Sym sbuf[1024];
-	Elf32_Sym *s;
-	Elf32_Ehdr ehdr;
-	Elf32_Shdr *shdr = NULL;
-	Elf32_Word shdr_size;
+	register Elf_Off symoff = 0, symstroff = 0;
+	register Elf_Word symsize = 0, symstrsize = 0;
+	register Elf_Sword nent, cc, i;
+	Elf_Sym sbuf[1024];
+	Elf_Sym *s;
+	Elf_Ehdr ehdr;
+	Elf_Shdr *shdr = NULL;
+	Elf_Word shdr_size;
 	struct stat st;
+	int usemalloc = 0;
 
 	/* Make sure obj is OK */
 	if (lseek(fd, (off_t)0, SEEK_SET) == -1 ||
-	    read(fd, &ehdr, sizeof(Elf32_Ehdr)) != sizeof(Elf32_Ehdr) ||
+	    read(fd, &ehdr, sizeof(Elf_Ehdr)) != sizeof(Elf_Ehdr) ||
 	    !__elf_is_okay__(&ehdr) ||
 	    fstat(fd, &st) < 0)
 		return (-1);
@@ -335,10 +337,17 @@ __elf_fdnlist(fd, list)
 	}
 
 	/* mmap section header table */
-	shdr = (Elf32_Shdr *)mmap(NULL, (size_t)shdr_size, PROT_READ,
+	shdr = (Elf_Shdr *)mmap(NULL, (size_t)shdr_size, PROT_READ,
 	    MAP_COPY|MAP_FILE, fd, (off_t) ehdr.e_shoff);
-	if (shdr == MAP_FAILED)
-		return (-1);
+	if (shdr == MAP_FAILED) {
+		usemalloc = 1;
+		if ((shdr = malloc(shdr_size)) == NULL)
+			return (-1);
+		if (pread(fd, shdr, shdr_size, ehdr.e_shoff) != shdr_size) {
+			free(shdr);
+			return (-1);
+		}
+	}
 
 	/*
 	 * Find the symbol table entry and it's corresponding
@@ -357,7 +366,10 @@ __elf_fdnlist(fd, list)
 	}
 
 	/* Flush the section header table */
-	munmap((caddr_t)shdr, shdr_size);
+	if (usemalloc)
+		free(shdr);
+	else
+		munmap((caddr_t)shdr, shdr_size);
 
 	/* Check for files too large to mmap. */
 	/* XXX is this really possible? */
@@ -371,10 +383,19 @@ __elf_fdnlist(fd, list)
 	 * making the memory allocation permanent as with malloc/free
 	 * (i.e., munmap will return it to the system).
 	 */
-	strtab = mmap(NULL, (size_t)symstrsize, PROT_READ, MAP_COPY|MAP_FILE,
-	    fd, (off_t) symstroff);
-	if (strtab == MAP_FAILED)
-		return (-1);
+	if (usemalloc) {
+		if ((strtab = malloc(symstrsize)) == NULL)
+			return (-1);
+		if (pread(fd, strtab, symstrsize, symstroff) != symstrsize) {
+			free(strtab);
+			return (-1);
+		}
+	} else {
+		strtab = mmap(NULL, (size_t)symstrsize, PROT_READ,
+		    MAP_COPY|MAP_FILE, fd, (off_t) symstroff);
+		if (strtab == MAP_FAILED)
+			return (-1);
+	}
 	/*
 	 * clean out any left-over information for all valid entries.
 	 * Type and value defined to be 0 if not found; historical
@@ -409,53 +430,65 @@ __elf_fdnlist(fd, list)
 		if (read(fd, sbuf, cc) != cc)
 			break;
 		symsize -= cc;
+		symoff += cc;
 		for (s = sbuf; cc > 0; ++s, cc -= sizeof(*s)) {
 			register int soff = s->st_name;
 
 			if (soff == 0)
 				continue;
 			for (p = list; !ISLAST(p); p++) {
-				/*
-				 * XXX - ABI crap, they
-				 * really fucked this up
-				 * for MIPS and PowerPC
-				 */
-				if (!strcmp(&strtab[soff],
-				    ((ehdr.e_machine == EM_MIPS) ||
-				     (ehdr.e_machine == EM_PPC)) ?
-				    p->n_un.n_name+1 :
-				    p->n_un.n_name)) {
-					p->n_value = s->st_value;
+				char *sym;
+				int again = 0;
 
-					/* XXX - type conversion */
-					/*	 is pretty rude. */
-					switch(ELF32_ST_TYPE(s->st_info)) {
-					case STT_NOTYPE:
-						p->n_type = N_UNDF;
-						break;
-					case STT_OBJECT:
-						p->n_type = N_DATA;
-						break;
-					case STT_FUNC:
-						p->n_type = N_TEXT;
-						break;
-					case STT_FILE:
-						p->n_type = N_FN;
-						break;
-					}
-					if (ELF32_ST_BIND(s->st_info) ==
-					    STB_LOCAL)
-						p->n_type = N_EXT;
-					p->n_desc = 0;
-					p->n_other = 0;
-					if (--nent <= 0)
-						break;
+				/*
+				 * First we check for the symbol as it was
+				 * provided by the user. If that fails,
+				 * skip the first char if it's an '_' and
+				 * try again.
+				 * XXX - What do we do when the user really
+				 *       wants '_foo' and the are symbols
+				 *       for both 'foo' and '_foo' in the
+				 *	 table and 'foo' is first?
+				 */
+				sym = p->n_un.n_name;
+				if (strcmp(&strtab[soff], sym) != 0 &&
+				    ((sym[0] == '_') &&
+				     strcmp(&strtab[soff], sym + 1) != 0))
+					continue;
+
+				p->n_value = s->st_value;
+
+				/* XXX - type conversion */
+				/*	 is pretty rude. */
+				switch(ELF_ST_TYPE(s->st_info)) {
+				case STT_NOTYPE:
+					p->n_type = N_UNDF;
+					break;
+				case STT_OBJECT:
+					p->n_type = N_DATA;
+					break;
+				case STT_FUNC:
+					p->n_type = N_TEXT;
+					break;
+				case STT_FILE:
+					p->n_type = N_FN;
+					break;
 				}
+				if (ELF_ST_BIND(s->st_info) ==
+				    STB_LOCAL)
+					p->n_type = N_EXT;
+				p->n_desc = 0;
+				p->n_other = 0;
+				if (--nent <= 0)
+					break;
 			}
 		}
 	}
 elf_done:
-	munmap(strtab, symstrsize);
+	if (usemalloc)
+		free(strtab);
+	else
+		munmap(strtab, symstrsize);
 	return (nent);
 }
 #endif /* _NLIST_DO_ELF */

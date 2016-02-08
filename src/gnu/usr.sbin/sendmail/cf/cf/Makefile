@@ -1,8 +1,8 @@
-#	$OpenBSD: Makefile,v 1.6 2000/06/18 03:13:08 itojun Exp $
+#	$OpenBSD: Makefile,v 1.9 2001/02/02 06:41:18 tholo Exp $
 #
 #  Makefile for configuration files.
 #
-#	$Sendmail: Makefile,v 8.40 2000/02/01 22:07:15 gshapiro Exp $
+#	$Sendmail: Makefile,v 8.40.8.4 2000/10/26 18:27:44 gshapiro Exp $
 #
 
 #
@@ -26,9 +26,8 @@ RM=	rm -f
 	$(CHMOD) $(ROMODE) $@
 
 ALL=	clientproto.cf openbsd-proto.cf courtesan.cf courtesan-nonet.cf \
-	courtesan-lists.cf  openbsd-lists.cf gandalf.cf saruman.cf alatar.cf \
-	nettan.cf waldorf.cf lucifier.cf elbereth.cf corpse.cf knecht.cf \
-	openbsd-proto-IPv4only.cf 
+	courtesan-lists.cf  openbsd-lists.cf gandalf.cf alatar.cf \
+	nettan.cf waldorf.cf lucifier.cf elbereth.cf corpse.cf knecht.cf
 
 all: $(ALL)
 
@@ -37,11 +36,9 @@ clean cleandir:
 
 depend install:
 
-distribution: openbsd-proto.cf openbsd-proto-IPv4only.cf
+distribution: openbsd-proto.cf
 	${INSTALL} ${INSTALL_COPY} -o root -g wheel -m 644 openbsd-proto.cf \
 	    ${DESTDIR}/etc/mail/sendmail.cf
-	${INSTALL} ${INSTALL_COPY} -o root -g wheel -m 644 \
-	    openbsd-proto-IPv4only.cf ${DESTDIR}/etc/mail/sendmail-IPv4only.cf
 
 # this is overkill, but....
 M4FILES=\

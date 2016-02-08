@@ -1,4 +1,4 @@
-/*	$OpenBSD: sem.c,v 1.17 2000/10/28 21:51:38 angelos Exp $	*/
+/*	$OpenBSD: sem.c,v 1.21 2001/01/24 20:13:00 art Exp $	*/
 /*	$NetBSD: sem.c,v 1.10 1996/11/11 23:40:11 gwr Exp $	*/
 
 /*
@@ -50,6 +50,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <err.h>
 #include "config.h"
 #include "sem.h"
 
@@ -734,6 +735,56 @@ newdevi(name, unit, d)
 }
 
 /*
+ * Enable an already declared but disabled device.
+ */
+void
+enabledev(name, at)
+	const char *name, *at;
+{
+	struct devbase *ib, *ab;
+	char atbuf[NAMESIZE];
+	struct attr *attr;
+	struct nvlist *nv;
+	struct devi *i;
+	const char *cp;
+	int atunit;
+
+	i = ht_lookup(devitab, name);
+	if (i == NULL) {
+		error("invalid device `%s'", name);
+		return;
+	}
+	ib = i->i_base;
+
+	if (split(at, strlen(at), atbuf, sizeof atbuf, &atunit)) {
+		error("invalid attachment name `%s'", at);
+		return;
+	}
+	cp = intern(atbuf);
+	ab = ht_lookup(devbasetab, cp);
+	if (ab == NULL) {
+		error("invalid attachment device `%s'", cp);
+		return;
+	}
+	for (nv = ab->d_attrs; nv != NULL; nv = nv->nv_next) {
+		attr = nv->nv_ptr;
+		if (onlist(attr->a_devs, ib))
+			goto foundattachment;
+	}
+	error("%s's cannot attach to %s's", ib->d_name, atbuf);
+	return;
+
+foundattachment:
+	while (i && i->i_atdev != ab)
+		i = i->i_alias;
+	if (i == NULL) {
+		error("%s at %s not found", name, at);
+		return;
+	} else
+		i->i_disable = 0; /* Enable */
+}
+
+/*
  * Add the named device as attaching to the named attribute (or perhaps
  * another device instead) plus unit number.
  */
@@ -894,8 +945,8 @@ addpseudo(name, number)
 	}
 	if (ht_lookup(devitab, name) != NULL) {
 		warnx("warning: duplicate definition of `%s', will use latest definition", name);
-		ht_remove(devitab, name);
-		d->d_umax = 0;
+		d->d_umax = number;
+		return;
 	}
 	i = newdevi(name, number - 1, d);	/* foo 16 => "foo0..foo15" */
 	if (ht_insert(devitab, name, i))

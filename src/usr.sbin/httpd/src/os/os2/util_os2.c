@@ -5,7 +5,7 @@
 #include "http_log.h"
 
 
-API_EXPORT(char *)ap_os_canonical_filename(pool *pPool, const char *szFile)
+API_EXPORT(char *)ap_os_case_canonical_filename(pool *pPool, const char *szFile)
 {
     char buf[HUGE_STRING_LEN];
     char buf2[HUGE_STRING_LEN];
@@ -18,26 +18,84 @@ API_EXPORT(char *)ap_os_canonical_filename(pool *pPool, const char *szFile)
     
     if (len > 3 && buf[len-1] == '/')
         buf[--len] = 0;
-      
+
+    if (buf[0] == '/' && buf[1] == '/') {
+        /* A UNC path */
+        if (strchr(buf+2, '/') == NULL) {  /* Allow // or //server */
+            return ap_pstrdup(pPool, buf);
+        }
+    }
+
     rc = DosQueryPathInfo(buf, FIL_QUERYFULLNAME, buf2, HUGE_STRING_LEN);
 
     if (rc) {
         if ( rc != ERROR_INVALID_NAME ) {
             ap_log_error(APLOG_MARK, APLOG_ERR|APLOG_NOERRNO, NULL, "OS/2 error %d for file %s", rc, szFile);
-            return ap_pstrdup(pPool, "");
-        } else {
-            return ap_pstrdup(pPool, szFile);
         }
+
+        return ap_pstrdup(pPool, szFile);
     }
 
-    strlwr(buf2);
-    
 /* Switch backslashes to forward */
     for (pos=buf2; *pos; pos++)
         if (*pos == '\\')
             *pos = '/';
     
     return ap_pstrdup(pPool, buf2);
+}
+
+
+
+static void fix_component(char *path, char *lastcomp)
+{
+    FILEFINDBUF3 fb3;
+    HDIR hDir = HDIR_CREATE;
+    ULONG numNames = 1;
+    ULONG rc = DosFindFirst( (UCHAR *)path, &hDir, FILE_NORMAL|FILE_DIRECTORY, &fb3, sizeof(fb3), &numNames, FIL_STANDARD );
+
+    if (rc == 0)
+        strcpy(lastcomp, fb3.achName);
+
+    DosFindClose(hDir);
+}
+
+
+
+char *ap_os_systemcase_canonical_filename(pool *pPool, const char *szFile)
+{
+    char *szCanonicalFile = ap_os_case_canonical_filename(pPool, szFile);
+    int startslash = 2, slashnum=0;
+    char *pos, *prevslash = NULL;
+
+    if (szCanonicalFile[0] == '/' && szCanonicalFile[1] == '/') /* a UNC name */
+        startslash = 5;
+
+    for (pos = szCanonicalFile; *pos; pos++) {
+        if (*pos == '/') {
+            slashnum++;
+            if (slashnum >= startslash) {
+                *pos = 0;
+                fix_component(szCanonicalFile, prevslash+1);
+                *pos = '/';
+            }
+            prevslash = pos;
+        }
+    }
+
+    if (slashnum >= startslash) {
+        fix_component(szCanonicalFile, prevslash+1);
+    }
+
+    return szCanonicalFile;
+}
+
+
+
+API_EXPORT(char *)ap_os_canonical_filename(pool *pPool, const char *szFile)
+{
+    char *szCanonicalFile = ap_os_systemcase_canonical_filename(pPool, szFile);
+    strlwr(szCanonicalFile);
+    return szCanonicalFile;
 }
 
 
@@ -82,9 +140,9 @@ char *ap_os_error_message(int err)
         len = sizeof(result-1);
 
       for (c=0; c<len; c++) {
-          while (isspace(message[c]) && isspace(message[c+1])) /* skip multiple whitespace */
+          while (ap_isspace(message[c]) && ap_isspace(message[c+1])) /* skip multiple whitespace */
               c++;
-          *(pos++) = isspace(message[c]) ? ' ' : message[c];
+          *(pos++) = ap_isspace(message[c]) ? ' ' : message[c];
       }
   
       *pos = 0;

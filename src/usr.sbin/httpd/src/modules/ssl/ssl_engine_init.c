@@ -9,7 +9,7 @@
 */
 
 /* ====================================================================
- * Copyright (c) 1998-2000 Ralf S. Engelschall. All rights reserved.
+ * Copyright (c) 1998-2001 Ralf S. Engelschall. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -266,6 +266,13 @@ void ssl_init_Module(server_rec *s, pool *p)
 #endif
 
     /*
+     * SSL external crypto device ("engine") support
+     */
+#ifdef SSL_EXPERIMENTAL_ENGINE
+    ssl_init_Engine(s, p);
+#endif
+
+    /*
      * Warn the user that he should use the session cache.
      * But we can operate without it, of course.
      */
@@ -351,6 +358,35 @@ void ssl_init_SSLLibrary(void)
 }
 
 /*
+ * Support for external a Crypto Device ("engine"), usually
+ * a hardware accellerator card for crypto operations.
+ */
+#ifdef SSL_EXPERIMENTAL_ENGINE
+void ssl_init_Engine(server_rec *s, pool *p)
+{
+    SSLModConfigRec *mc = myModConfig();
+    ENGINE *e;
+
+    if (mc->szCryptoDevice != NULL) {
+        if ((e = ENGINE_by_id(mc->szCryptoDevice)) == NULL) {
+            ssl_log(s, SSL_LOG_ERROR, "Init: Failed to load Crypto Device API `%s'",
+                    mc->szCryptoDevice);
+            ssl_die();
+        }
+        if (strEQ(mc->szCryptoDevice, "chil")) 
+            ENGINE_ctrl(e, ENGINE_CTRL_CHIL_SET_FORKCHECK, 1, 0, 0);
+        if (!ENGINE_set_default(e, ENGINE_METHOD_ALL)) {
+            ssl_log(s, SSL_LOG_ERROR, "Init: Failed to enable Crypto Device API `%s'",
+                    mc->szCryptoDevice);
+            ssl_die();
+        }
+        ENGINE_free(e);
+    }
+    return;
+}
+#endif
+
+/*
  * Handle the Temporary RSA Keys and DH Params
  */
 void ssl_init_TmpKeysHandle(int action, server_rec *s, pool *p)
@@ -429,7 +465,11 @@ void ssl_init_TmpKeysHandle(int action, server_rec *s, pool *p)
         if ((asn1 = (ssl_asn1_t *)ssl_ds_table_get(mc->tTmpKeys, "RSA:512")) != NULL) {
             ucp = asn1->cpData;
             if ((mc->pTmpKeys[SSL_TKPIDX_RSA512] = 
+#if SSL_LIBRARY_VERSION >= 0x00907000
+                 (void *)d2i_RSAPrivateKey(NULL, (const unsigned char **)&ucp, asn1->nData)) == NULL) {
+#else
                  (void *)d2i_RSAPrivateKey(NULL, &ucp, asn1->nData)) == NULL) {
+#endif
                 ssl_log(s, SSL_LOG_ERROR, "Init: Failed to load temporary 512 bit RSA private key");
                 ssl_die();
             }
@@ -439,7 +479,11 @@ void ssl_init_TmpKeysHandle(int action, server_rec *s, pool *p)
         if ((asn1 = (ssl_asn1_t *)ssl_ds_table_get(mc->tTmpKeys, "RSA:1024")) != NULL) {
             ucp = asn1->cpData;
             if ((mc->pTmpKeys[SSL_TKPIDX_RSA1024] = 
+#if SSL_LIBRARY_VERSION >= 0x00907000
+                 (void *)d2i_RSAPrivateKey(NULL, (const unsigned char **)&ucp, asn1->nData)) == NULL) {
+#else
                  (void *)d2i_RSAPrivateKey(NULL, &ucp, asn1->nData)) == NULL) {
+#endif
                 ssl_log(s, SSL_LOG_ERROR, "Init: Failed to load temporary 1024 bit RSA private key");
                 ssl_die();
             }
@@ -451,7 +495,11 @@ void ssl_init_TmpKeysHandle(int action, server_rec *s, pool *p)
         if ((asn1 = (ssl_asn1_t *)ssl_ds_table_get(mc->tTmpKeys, "DH:512")) != NULL) {
             ucp = asn1->cpData;
             if ((mc->pTmpKeys[SSL_TKPIDX_DH512] = 
+#if SSL_LIBRARY_VERSION >= 0x00907000
+                 (void *)d2i_DHparams(NULL, (const unsigned char **)&ucp, asn1->nData)) == NULL) {
+#else
                  (void *)d2i_DHparams(NULL, &ucp, asn1->nData)) == NULL) {
+#endif
                 ssl_log(s, SSL_LOG_ERROR, "Init: Failed to load temporary 512 bit DH parameters");
                 ssl_die();
             }
@@ -461,7 +509,11 @@ void ssl_init_TmpKeysHandle(int action, server_rec *s, pool *p)
         if ((asn1 = (ssl_asn1_t *)ssl_ds_table_get(mc->tTmpKeys, "DH:1024")) != NULL) {
             ucp = asn1->cpData;
             if ((mc->pTmpKeys[SSL_TKPIDX_DH1024] = 
+#if SSL_LIBRARY_VERSION >= 0x00907000
+                 (void *)d2i_DHparams(NULL, (const unsigned char **)&ucp, asn1->nData)) == NULL) {
+#else
                  (void *)d2i_DHparams(NULL, &ucp, asn1->nData)) == NULL) {
+#endif
                 ssl_log(s, SSL_LOG_ERROR, "Init: Failed to load temporary 1024 bit DH parameters");
                 ssl_die();
             }

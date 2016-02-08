@@ -1,4 +1,4 @@
-/*	$OpenBSD: cmd.c,v 1.26 2000/07/01 21:49:12 mickey Exp $	*/
+/*	$OpenBSD: cmd.c,v 1.28 2001/01/28 00:56:07 weingart Exp $	*/
 
 /*
  * Copyright (c) 1997 Tobias Weingartner
@@ -193,6 +193,46 @@ Xedit(cmd, disk, mbr, tt, offset)
 }
 
 int
+Xsetpid(cmd, disk, mbr, tt, offset)
+	cmd_t *cmd;
+	disk_t *disk;
+	mbr_t *mbr;
+	mbr_t *tt;
+	int offset;
+{
+	int pn, num, ret;
+	prt_t *pp;
+
+	ret = CMD_CONT;
+
+	if (!isdigit(cmd->args[0])) {
+		printf("Invalid argument: %s <partition number>\n", cmd->cmd);
+		return (ret);
+	}
+	pn = atoi(cmd->args);
+
+	if (pn < 0 || pn > 3) {
+		printf("Invalid partition number.\n");
+		return (ret);
+	}
+
+	/* Print out current table entry */
+	pp = &mbr->part[pn];
+	PRT_print(0, NULL);
+	PRT_print(pn, pp);
+
+#define	EDIT(p, f, v, n, m, h)				\
+	if ((num = ask_num(p, f, v, n, m, h)) != v)	\
+		ret = CMD_DIRTY;			\
+	v = num;
+
+	/* Ask for partition type */
+	EDIT("Partition id ('0' to disable) ", ASK_HEX, pp->id, 0, 0xFF, PRT_printall);
+
+#undef EDIT
+	return (ret);
+}
+int
 Xselect(cmd, disk, mbr, tt, offset)
 	cmd_t *cmd;
 	disk_t *disk;
@@ -200,7 +240,7 @@ Xselect(cmd, disk, mbr, tt, offset)
 	mbr_t *tt;
 	int offset;
 {
-	static firstoff = 0;
+	static int firstoff = 0;
 	int off;
 	int pn;
 
@@ -388,10 +428,11 @@ Xmanual(cmd, disk, mbr, tt, offset)
 {
 	char *pager = "/usr/bin/less";
 	char *p;
-	sig_t opipe = signal(SIGPIPE, SIG_IGN);
+	sig_t opipe;
 	extern char manpage[];
 	FILE *f;
 
+	opipe = signal(SIGPIPE, SIG_IGN);
 	if ((p = getenv("PAGER")) != NULL && (*p != '\0'))
 		pager = p;
 	f = popen(pager, "w");
@@ -403,3 +444,4 @@ Xmanual(cmd, disk, mbr, tt, offset)
 	(void)signal(SIGPIPE, opipe);
 	return (CMD_CONT);
 }
+

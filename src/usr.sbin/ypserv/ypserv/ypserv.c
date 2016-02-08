@@ -1,4 +1,4 @@
-/*	$OpenBSD: ypserv.c,v 1.13 2000/06/28 23:58:48 deraadt Exp $ */
+/*	$OpenBSD: ypserv.c,v 1.15 2001/01/11 23:37:01 deraadt Exp $ */
 
 /*
  * Copyright (c) 1994 Mats O Jansson <moj@stacken.kth.se>
@@ -32,7 +32,7 @@
  */
 
 #ifndef LINT
-static char rcsid[] = "$OpenBSD: ypserv.c,v 1.13 2000/06/28 23:58:48 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: ypserv.c,v 1.15 2001/01/11 23:37:01 deraadt Exp $";
 #endif
 
 #include "yp.h"
@@ -99,17 +99,14 @@ static void
 closedown()
 {
 	if (_rpcsvcdirty == 0) {
-		extern fd_set svc_fdset;
-		static int size;
+		extern fd_set *__svc_fdset;
+		extern int __svc_fdsetsize;
 		int i, openfd;
 
 		if (_rpcfdtype == SOCK_DGRAM)
 			exit(0);
-		if (size == 0) {
-			size = getdtablesize();
-		}
-		for (i = 0, openfd = 0; i < size && openfd < 2; i++)
-			if (FD_ISSET(i, &svc_fdset))
+		for (i = 0, openfd = 0; i < __svc_fdsetsize && openfd < 2; i++)
+			if (FD_ISSET(i, __svc_fdset))
 				openfd++;
 		if (openfd <= (_rpcpmstart?0:1))
 			exit(0);
@@ -521,9 +518,20 @@ sig_child()
 	errno = save_errno;
 }
 
+/*
+ * XXX
+ * This is calling illegal functions inside a signal routine.
+ * It's a massive race.
+ */
 void
 sig_hup()
 {
+	int save_errno = errno;
+
+	/* Handle the log. */
+	ypcloselog();
+	ypopenlog();
+
 	acl_reset();
 	if (aclfile != NULL) {
 		yplog("sig_hup: reread %s",aclfile);
@@ -532,4 +540,6 @@ sig_hup()
 		yplog("sig_hup: reread %s",YP_SECURENET_FILE);
 		(void)acl_securenet(YP_SECURENET_FILE);
 	}
+
+	errno = save_errno;
 }

@@ -23,7 +23,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- *	$OpenBSD: radius.h,v 1.4 2000/08/28 22:44:42 brian Exp $
+ *	$OpenBSD: radius.h,v 1.6 2001/04/01 22:41:23 brian Exp $
  */
 
 struct radius {
@@ -41,7 +41,7 @@ struct radius {
   unsigned long mtu;            /* FRAMED MTU */
   struct sticky_route *routes;  /* FRAMED Routes */
   struct {
-    char file[MAXPATHLEN];	/* Radius config file */
+    char file[PATH_MAX];	/* Radius config file */
   } cfg;
 };
 
@@ -65,7 +65,8 @@ extern void radius_Destroy(struct radius *);
 
 extern void radius_Show(struct radius *, struct prompt *);
 extern void radius_Authenticate(struct radius *, struct authinfo *,
-                                const char *, const char *, const char *);
+                                const char *, const char *, int,
+                                const char *, int);
 extern void radius_Account(struct radius *, struct radacct *, 
                            struct datalink *, int, struct in_addr *,
                            struct in_addr *, struct pppThroughput *);

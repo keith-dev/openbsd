@@ -1,6 +1,6 @@
 #!/bin/sh -
 #
-#	$OpenBSD: netstart,v 1.72 2000/09/02 15:59:29 todd Exp $
+#	$OpenBSD: netstart,v 1.77 2001/03/13 21:15:09 deraadt Exp $
 
 # Returns true if $1 contains only alphanumerics
 isalphanumeric() {
@@ -50,7 +50,7 @@ if ifconfig lo0 inet6 >/dev/null 2>&1; then
 	# disallow link-local unicast dest without outgoing scope identifiers.
 	route add -inet6 fe80:: -prefixlen 10 ::1 -reject > /dev/null
 
-	# disallow site-local unicast dest without outgoing scope identifiers..
+	# disallow site-local unicast dest without outgoing scope identifiers.
 	# If you configure site-locals without scope id (it is permissible
 	# config for routers that are not on scope boundary), you may want
 	# to comment the line out.
@@ -74,15 +74,15 @@ if ifconfig lo0 inet6 >/dev/null 2>&1; then
 	# Completely disallow packets to IPv4 compatible prefix.
 	# This may conflict with RFC1933 under following circumstances:
 	# (1) An IPv6-only KAME node tries to originate packets to IPv4
-	#     comatible destination.  The KAME node has no IPv4 compatible
+	#     compatible destination.  The KAME node has no IPv4 compatible
 	#     support.  Under RFC1933, it should transmit native IPv6
 	#     packets toward IPv4 compatible destination, hoping it would
 	#     reach a router that forwards the packet toward auto-tunnel
 	#     interface.
-	# (2) An IPv6-only node originates a packet to IPv4 compatible
+	# (2) An IPv6-only node originates a packet to an IPv4 compatible
 	#     destination.  A KAME node is acting as an IPv6 router, and
 	#     asked to forward it.
-	# Due to rare use of IPv4 compatible address, and security issues
+	# Due to rare use of IPv4 compatible addresses, and security issues
 	# with it, we disable it by default.
 	route add -inet6 ::0.0.0.0 -prefixlen 96 ::1 -reject > /dev/null
 
@@ -112,8 +112,10 @@ for hn in /etc/hostname.*; do
 	if [ "$cmd2" ]; then
 	    # we are carrying over from the 'read dt dtaddr' last time
 	    set -- $cmd2
-	    af="$1" name="$2" mask="$3" bcaddr="$4" ext1="$5" ext2="$6"
-	    cmd2=
+	    af="$1" name="$2" mask="$3" bcaddr="$4" ext1="$5" cmd2=
+	    # make sure and get any remaining args in ext2, like the read below
+	    i=1; while [ i -lt 6 -a -n "$1" ]; do shift; let i=i+1; done
+	    ext2="$@"
 	else
 	    # read the next line or exit the while loop
 	    read af name mask bcaddr ext1 ext2 || break
@@ -121,7 +123,7 @@ for hn in /etc/hostname.*; do
 	# $af can be "dhcp", "up", "rtsol", an address family, commands, or
 	# a comment.
 	case "$af" in
-	"#"*) # skip comments
+	"#"*|"") # skip comments and empty lines
 	    continue
 	    ;;
 	"!"*) # parse commands
@@ -229,7 +231,15 @@ for bn in /etc/bridgename.*; do
 	while read line ; do
 	    line=${line%%#*}		# strip comments
 	    test -z "$line" && continue
-	    brconfig $if $line
+	    case "$line" in
+	    "!"*)
+		cmd="${line#*!}"
+		;;
+	    *)
+		cmd="brconfig $if $line"
+		;;
+	    esac
+	    eval "$cmd"
 	done
     } < /etc/bridgename.$if
 done

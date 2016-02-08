@@ -1,7 +1,7 @@
-/*	$OpenBSD: ukcutil.c,v 1.3 2000/08/08 21:42:40 deraadt Exp $ */
+/*	$OpenBSD: ukcutil.c,v 1.6 2001/02/04 20:42:12 maja Exp $ */
 
 /*
- * Copyright (c) 1999 Mats O Jansson.  All rights reserved.
+ * Copyright (c) 1999-2001 Mats O Jansson.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -30,7 +30,7 @@
  */
 
 #ifndef LINT
-static char rcsid[] = "$OpenBSD: ukcutil.c,v 1.3 2000/08/08 21:42:40 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: ukcutil.c,v 1.6 2001/02/04 20:42:12 maja Exp $";
 #endif
 
 #include <sys/types.h>
@@ -46,6 +46,8 @@ static char rcsid[] = "$OpenBSD: ukcutil.c,v 1.3 2000/08/08 21:42:40 deraadt Exp
 #include "exec.h"
 #include "ukc.h"
 #include "misc.h"
+
+extern int ukc_mod_kernel;
 
 struct cfdata *
 get_cfdata(idx)
@@ -79,6 +81,26 @@ get_extraloc(idx)
 		       idx*sizeof(int)));
 }
 
+caddr_t *
+get_pdevnames(idx)
+	int	idx;
+{
+	caddr_t *p;
+
+	p = (caddr_t *)adjust((caddr_t)nl[P_PDEVNAMES].n_value +
+			   idx*sizeof(caddr_t));
+	return(caddr_t *)adjust((caddr_t)*p);
+
+}
+
+struct pdevinit *
+get_pdevinit(idx)
+	int	idx;
+{
+	return((struct pdevinit *)(adjust((caddr_t)nl[S_PDEVINIT].n_value) +
+				 idx*sizeof(struct pdevinit)));
+}
+
 int
 more()
 {
@@ -91,10 +113,10 @@ more()
 			fflush(stdout);
 			ask_cmd(&cmd);
 			cnt = 0;
+			if (cmd.cmd[0] == 'q' || cmd.cmd[0] == 'Q')
+				quit = 1;
 		}
 		cnt++;
-		if (cmd.cmd[0] == 'q' || cmd.cmd[0] == 'Q')
-			quit = 1;
 	}
 	
 	return (quit);
@@ -167,8 +189,23 @@ pdev(devno)
 	int	*i;
 	caddr_t	*p;
 	char	c;
+	struct pdevinit *pi;
 
-	if (devno >  maxdev) {
+	if (nopdev == 0) { 
+		if ((devno > maxdev) && (devno <= totdev)) {
+			printf("%3d free slot (for add)\n", devno);
+			return;
+		}
+		if ((devno > totdev) && (devno <= (totdev+maxpseudo))) {
+			pi = get_pdevinit(devno-totdev-1);
+			printf("%3d %s count %d (pseudo device)\n", devno, 
+				get_pdevnames(devno-totdev-1),
+				pi->pdev_count);
+			return;
+		}
+	}
+
+	if (devno > maxdev) {
 		printf("Unknown devno (max is %d)\n", maxdev);
 		return;
 	}
@@ -341,6 +378,8 @@ modify(item, val)
 	cmd_t cmd;
 	int a;
 
+	ukc_mod_kernel = 1;
+
 	while(1) {
 		printf("%s [", item);
 		pnum(*val);
@@ -370,8 +409,11 @@ change(devno)
 {
 	struct cfdata *cd,*c;
 	caddr_t	*p;
+	struct pdevinit *pi;
 	int	 i,share = 0,*j,*k,*l;
 	short	*ln,*lk;
+
+	ukc_mod_kernel = 1;
 
 	j = k = NULL;
 
@@ -446,9 +488,31 @@ change(devno)
 			printf(" changed\n");
 			pdev(devno);
 		}
-	} else {
-		printf("Unknown devno (max is %d)\n", maxdev);
+		return;
 	}
+
+	if (nopdev == 0) {
+		if ((devno > maxdev) && (devno <= totdev)) {
+			printf("%3d can't change free slot\n", devno);
+			return;
+		}
+		if ((devno > totdev) && (devno <= (totdev+maxpseudo))) {
+			
+			pdev(devno);
+			
+			if (ask_yn("change")) {
+
+				pi = get_pdevinit(devno-totdev-1);
+
+				modify("count", &pi->pdev_count);
+				printf("%3d %s changed\n", devno, get_pdevnames(devno-totdev-1));
+				pdev(devno);
+			}
+			return;
+		}
+	}
+
+	printf("Unknown devno (max is %d)\n", totdev+maxpseudo);
 }
 
 void
@@ -458,8 +522,11 @@ change_history(devno,str)
 {
 	struct cfdata *cd,*c;
 	caddr_t	*p;
+	struct pdevinit *pi;
 	int	 i,share = 0,*j,*k,*l;
 	short	*ln,*lk;
+
+	ukc_mod_kernel = 1;
 
 	j = k = NULL;
 
@@ -541,9 +608,35 @@ change_history(devno,str)
 		printf(" changed\n");
 		pdev(devno);
 		
-	} else {
-		printf("Unknown devno (max is %d)\n", maxdev);
+		return;
 	}
+
+	if (nopdev == 0) {
+		if ((devno > maxdev) && (devno <= totdev)) {
+			printf("%3d can't change free slot\n", devno);
+			return;
+		}
+		if ((devno > totdev) && (devno <= (totdev+maxpseudo))) {
+			
+			pdev(devno);
+			
+			pi = get_pdevinit(devno-totdev-1);
+
+			if (*str) {
+				pi->pdev_count = atoi(str);
+				if (*str == '-') str++;
+				while ((*str >= '0') && (*str <= '9')) str++;
+				if (*str == ' ') str++;
+			}
+
+			printf("%3d %s changed\n", devno, get_pdevnames(devno-totdev-1));
+			pdev(devno);
+
+			return;
+		}
+	}
+
+	printf("Unknown devno (max is %d)\n", totdev+maxpseudo);
 }
 
 void
@@ -552,6 +645,8 @@ disable(devno)
 {
 	struct cfdata *cd;
 	int done = 0;
+
+	ukc_mod_kernel = 1;
 
 	if (devno <= maxdev) {
 		
@@ -578,9 +673,24 @@ disable(devno)
 		if (done)
 			printf(" already");
 		printf(" disabled\n");
-	} else {
-		printf("Unknown devno (max is %d)\n", maxdev);
+
+		return;
 	}
+
+	if (nopdev == 0) {
+		if ((devno > maxdev) && (devno <= totdev)) {
+			printf("%3d can't disable free slot\n", devno);
+			return;
+		}
+		if ((devno > totdev) && (devno <= (totdev+maxpseudo))) {
+			printf("%3d %s can't disable pseudo device\n", devno, 
+				get_pdevnames(devno-totdev-1));
+			return;
+		}
+	}
+
+	printf("Unknown devno (max is %d)\n", totdev+maxpseudo);
+
 }
 
 void
@@ -590,6 +700,8 @@ enable(devno)
 	struct cfdata *cd;
 	int done = 0;
 	
+	ukc_mod_kernel = 1;
+
 	if (devno <= maxdev) {
 		
 		cd = get_cfdata(devno);
@@ -615,9 +727,23 @@ enable(devno)
 		if (done)
 			printf(" already");
 		printf(" enabled\n");
-	} else {
-		printf("Unknown devno (max is %d)\n", maxdev);
+		
+		return;
 	}
+
+	if (nopdev == 0) {
+		if ((devno > maxdev) && (devno <= totdev)) {
+			printf("%3d can't enable free slot\n", devno);
+			return;
+		}
+		if ((devno > totdev) && (devno <= (totdev+maxpseudo))) {
+			printf("%3d %s can't enable pseudo device\n", devno, 
+				get_pdevnames(devno-totdev-1));
+			return;
+		}
+	}
+
+	printf("Unknown devno (max is %d)\n", totdev+maxpseudo);
 }
 
 void
@@ -815,6 +941,31 @@ common_dev(dev, len, unit, state, routine)
 		cd++;
 	}
 
+	if (nopdev == 0) {
+		for (i = 0; i < maxpseudo; i++) {
+			if ((strncasecmp(dev,(char *)get_pdevnames(i),
+			     len) == 0) && (state == FSTATE_FOUND)) {
+				switch(routine) {
+				case UC_CHANGE:
+					change(totdev+1+i);
+					break;
+				case UC_ENABLE:
+					enable(totdev+1+i);
+					break;
+				case UC_DISABLE:
+					disable(totdev+1+i);
+					break;
+				case UC_FIND:
+					pdev(totdev+1+i);
+					break;
+				default:
+					printf("Unknown pseudo routine /%c/\n",routine);
+					break;
+				}
+			}
+		}
+	}
+
 	switch (routine) {
 	case UC_CHANGE:
 		break;
@@ -921,6 +1072,8 @@ add(dev, len, unit, state)
 	struct cfdriver *cdrv;
 	int  val, max_unit;
 
+	ukc_mod_kernel = 1;
+
 	bzero(&new, sizeof(struct cfdata));
 
 	if (maxdev == totdev) {
@@ -929,7 +1082,7 @@ add(dev, len, unit, state)
 	}
 
 	if (state == FSTATE_FOUND) {
-		printf("Device not complete number or * is missing/n");
+		printf("Device not complete number or * is missing\n");
 		return;
 	}
 
@@ -1062,6 +1215,8 @@ add_history(devno, unit, state, newno)
 	int  val, max_unit;
 	int  len;
 	char *dev;
+
+	ukc_mod_kernel = 1;
 
 	bzero(&new, sizeof(struct cfdata));
 
@@ -1281,6 +1436,7 @@ process_history(len,buf)
 			while (*c != ' ') c++; c++;
 			tz->tz_dsttime = atoi(c);
 			while (*c != '\n') c++; c++;
+			ukc_mod_kernel = 1;
 			break;
 		case 'q':
 			while (*c != NULL) c++;

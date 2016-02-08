@@ -1,4 +1,4 @@
-.\"	$OpenBSD: options.4,v 1.55 2000/10/22 15:00:11 aaron Exp $
+.\"	$OpenBSD: options.4,v 1.63 2001/04/05 04:01:56 aaron Exp $
 .\"	$NetBSD: options.4,v 1.21 1997/06/25 03:13:00 thorpej Exp $
 .\"
 .\" Copyright (c) 1998 Theo de Raadt
@@ -137,7 +137,9 @@ See
 .Xr compat_osf1 8 .
 .It Cd option COMPAT_NOMID
 Enable compatibility with a.out executables that lack a machine ID.
-On the i386, this includes NetBSD 0.8's ZMAGIC format, 386BSD and BSDI's
+On the i386, this includes
+.Nx
+0.8's ZMAGIC format, 386BSD and BSDI's
 QMAGIC, NMAGIC, and OMAGIC a.out formats.
 On the hp300 and other m68k architectures this permits certain old
 .Bx 4.3
@@ -406,10 +408,9 @@ With soft updates, you gain the performance of asynchronous writes while
 retaining the safety of synchronous metadata updates.
 .Pp
 Soft updates must be enabled on a per-filesystem basis.
-To do this, boot into single user mode and run
-.Ic tunefs -s enable special
-on each character special device you want to enable soft updates on, then run
-.Ic reboot -n .
+See
+.Xr mount 8
+for details.
 .Pp
 Processors with a small kernel address space, such as the sun4 and sun4c, do
 not have enough kernel memory to support soft updates.
@@ -468,7 +469,7 @@ A reasonable way to derive a value of
 should a large number of namei cache misses be noticed with a tool such as
 .Xr systat 1 ,
 is to examine the system's current computed value with
-.Xr sysctl 1 ,
+.Xr sysctl 8 ,
 (which calls this parameter "kern.maxvnodes") and to increase this value
 until either the namei cache hit rate improves or it is determined that
 the system does not benefit substantially from an increase in the size of
@@ -506,6 +507,13 @@ See
 for details.
 .Em Note:
 This option is not yet available on all architectures.
+.It Cd option CRYPTO
+Enables support for the kernel cryptographic framework.
+See
+.Xr crypto 9
+for details.
+While not IP specific, this option is usually used in conjunction with option
+.Em IPSEC .
 .It Cd option INSECURE
 Hardwires the kernel security level at \-1.
 This means that the system always runs in securelevel 0 mode, even when
@@ -662,6 +670,12 @@ enables multicast routing code as well.
 This option requires
 .Em INET
 at this moment, but it should not.
+.It Cd options ND6_DEBUG
+The option sets the default value of net.inet6.icmp6.nd6_debug to 1,
+for debugging IPv6 neighbor discovery protocol handling.
+See
+.Xr sysctl 3
+for details.
 .It Cd option NS
 Include support for the Xerox XNS protocol stack.
 See
@@ -720,7 +734,7 @@ Both communication endpoints need to support
 The fallback behaviour is NewReno fast recovery phase, which allows
 one lost segment to be recovered per round trip time.
 When more then one segment has been dropped per window, the transmission can
-continue without waiting for a retranmission timeout.
+continue without waiting for a retransmission timeout.
 .It Cd option TCP_FACK
 Turns on forward acknowledgements allowing a more precise estimate of
 outstanding data during the fast recovery phase by using
@@ -746,7 +760,7 @@ enables logging of IP packets using ip-filter.
 This option sets the default policy of ip-filter to block packets that
 exit the rule-set unmatched.
 Otherwise they are silently passed. See
-.Xr ipf 1
+.Xr ipf 8
 for details.
 .It Cd option PPP_FILTER
 This option turns on
@@ -774,7 +788,7 @@ The option
 .Em IPSEC
 is required along with this option.
 Debug logging can be turned on/off through the use of the
-.Em net.ipsec.encap.encdebug
+.Em net.inet.ip.encdebug
 sysctl variable.
 If
 .Em net.ipsec.encap.encdebug
@@ -828,7 +842,7 @@ See
 .Xr shmctl 2 ,
 .Xr shmdt 2 ,
 .Xr shmget 2 .
-.It Cd option SHMPAXPGS=value
+.It Cd option SHMMAXPGS=value
 Sets the maximum number of
 .At V
 style shared memory pages that are available through the
@@ -918,8 +932,6 @@ and/or
 .Xr msgget 2 ,
 .Xr msgrcv 2 ,
 .Xr msgsnd 2 ,
-.Xr ntp_adjtime 2 ,
-.Xr ntp_gettime 2 ,
 .Xr semctl 2 ,
 .Xr semget 2 ,
 .Xr semop 2 ,

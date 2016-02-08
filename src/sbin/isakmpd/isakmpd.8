@@ -1,4 +1,4 @@
-.\" $OpenBSD: isakmpd.8,v 1.19 2000/05/02 14:36:51 niklas Exp $
+.\" $OpenBSD: isakmpd.8,v 1.24 2001/04/09 21:21:57 ho Exp $
 .\" $EOM: isakmpd.8,v 1.23 2000/05/02 00:30:23 niklas Exp $
 .\"
 .\" Copyright (c) 1998, 1999 Niklas Hallqvist.  All rights reserved.
@@ -43,12 +43,14 @@
 .Nm isakmpd
 .Op Fl c Ar config-file
 .Op Fl d
-.Op Fl D Ar debug-class=level
+.Op Fl D Ar class=level
 .Op Fl f Ar fifo
 .Op Fl i Ar pid-file
 .Op Fl n
 .Op Fl p Ar listen-port
 .Op Fl P Ar local-port
+.Op Fl L
+.Op Fl l Ar packetlog-file
 .Op Fl r Ar seed
 .Op Fl R Ar report-file
 .Sh DESCRIPTION
@@ -93,8 +95,9 @@ The
 .Fl d
 option is used to make the daemon run in the foreground, logging to stderr.
 .It Xo Fl D
-.Ar debug-class Ns No = Ns Ar level
+.Ar class Ns No = Ns Ar level
 .Xc
+Debugging class.
 This argument is possible to specify many times.
 It takes a parameter of the form
 .Ar class Ns No = Ns Ar level
@@ -113,6 +116,35 @@ If
 .Ar class
 is set to 'A',
 then all debugging classes are set to the specified level.
+.Pp
+Valid values for
+.Ar class
+are as follows:
+.Pp
+.Bl -tag -width 1n -compact -offset indent
+.It 0
+Misc
+.It 1
+Transport
+.It 2
+Message
+.It 3
+Crypto
+.It 4
+Timer
+.It 5
+Sysdep
+.It 6
+SA
+.It 7
+Exchange
+.It 8
+Negotiation
+.It 9
+Policy
+.It A
+All
+.El
 .It Fl f Ar fifo
 The
 .Fl f
@@ -143,7 +175,20 @@ option specifies the listen port the daemon will bind to.
 .It Fl P Ar local-port
 On the other hand, the port specified to capital
 .Fl P
-will be what the daemon binds its local end to when acting as initiator.
+will be what the daemon binds its local end to when acting as
+initiator.
+.It Fl L
+Enable IKE packet capture. When this option is given, 
+.Nm
+will capture to file an unencrypted copy of the negotiation packets it
+is sending and receiveing. This file can later be read by 
+.Xr tcpdump 8
+and other utilities using 
+.Xr pcap 3 .
+.It Fl l Ar packetlog-file
+As option
+.Fl L
+above, but capture to a specified file.
 .It Fl r Ar seed
 If given a deterministic random number sequence will be used internally.
 This is useful for setting up regression tests.
@@ -253,16 +298,20 @@ The directory where IKE certificates can be found, both the local
 certificate(s) and those of the peers, if a choice to have them kept
 permanently has been made.
 .It Pa /etc/isakmpd/isakmpd.conf
-The configuration file.
+The configuration file. As this file can contain sensitive information
+it must not be readable by anyone but the user running isakmpd.
 .It Pa /etc/isakmpd/isakmpd.policy
-The keynote policy configuration file.
+The keynote policy configuration file. Same mode requirements as
+for isakmpd.conf.
 .It Pa /etc/isakmpd/private/local.key
 A local private key for certificate based authentication.  There has
-to be a certificate for this key in the cerifcate directory mentioned
-above.
+to be a certificate for this key in the certificate directory mentioned
+above. Same mode requirements as isakmpd.conf.
 .It Pa /var/run/isakmpd.fifo
 The FIFO used to manually control
 .Nm isakmpd .
+.It Pa /var/run/isakmpd.pcap
+The default IKE packet capture file.
 .It Pa /var/run/isakmpd.report
 The report file written when
 .Dv SIGUSR1
@@ -273,8 +322,10 @@ is received.
 .Xr isakmpd.conf 5 ,
 .Xr isakmpd.policy 5 ,
 .Xr openssl 8 ,
+.Xr pcap 3 ,
 .Xr photurisd 8 ,
 .Xr ssl 8 ,
+.Xr tcpdump 8 ,
 .Xr vpn 8
 .Sh HISTORY
 The ISAKMP/Oakley key management protocol is described in the RFCs

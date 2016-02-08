@@ -1,58 +1,59 @@
 /* ====================================================================
- * Copyright (c) 1996-1999 The Apache Group.  All rights reserved.
+ * The Apache Software License, Version 1.1
+ *
+ * Copyright (c) 2000 The Apache Software Foundation.  All rights
+ * reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
  * are met:
  *
  * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer. 
+ *    notice, this list of conditions and the following disclaimer.
  *
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in
  *    the documentation and/or other materials provided with the
  *    distribution.
  *
- * 3. All advertising materials mentioning features or use of this
- *    software must display the following acknowledgment:
- *    "This product includes software developed by the Apache Group
- *    for use in the Apache HTTP server project (http://www.apache.org/)."
+ * 3. The end-user documentation included with the redistribution,
+ *    if any, must include the following acknowledgment:
+ *       "This product includes software developed by the
+ *        Apache Software Foundation (http://www.apache.org/)."
+ *    Alternately, this acknowledgment may appear in the software itself,
+ *    if and wherever such third-party acknowledgments normally appear.
  *
- * 4. The names "Apache Server" and "Apache Group" must not be used to
- *    endorse or promote products derived from this software without
- *    prior written permission. For written permission, please contact
- *    apache@apache.org.
+ * 4. The names "Apache" and "Apache Software Foundation" must
+ *    not be used to endorse or promote products derived from this
+ *    software without prior written permission. For written
+ *    permission, please contact apache@apache.org.
  *
- * 5. Products derived from this software may not be called "Apache"
- *    nor may "Apache" appear in their names without prior written
- *    permission of the Apache Group.
+ * 5. Products derived from this software may not be called "Apache",
+ *    nor may "Apache" appear in their name, without prior written
+ *    permission of the Apache Software Foundation.
  *
- * 6. Redistributions of any form whatsoever must retain the following
- *    acknowledgment:
- *    "This product includes software developed by the Apache Group
- *    for use in the Apache HTTP server project (http://www.apache.org/)."
- *
- * THIS SOFTWARE IS PROVIDED BY THE APACHE GROUP ``AS IS'' AND ANY
- * EXPRESSED OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
- * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
- * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE APACHE GROUP OR
+ * THIS SOFTWARE IS PROVIDED ``AS IS'' AND ANY EXPRESSED OR IMPLIED
+ * WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
+ * OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+ * DISCLAIMED.  IN NO EVENT SHALL THE APACHE SOFTWARE FOUNDATION OR
  * ITS CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
- * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
- * NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
- * LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
- * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT,
- * STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
- * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED
- * OF THE POSSIBILITY OF SUCH DAMAGE.
+ * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+ * LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF
+ * USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
+ * ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+ * OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT
+ * OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+ * SUCH DAMAGE.
  * ====================================================================
  *
  * This software consists of voluntary contributions made by many
- * individuals on behalf of the Apache Group and was originally based
- * on public domain software written at the National Center for
- * Supercomputing Applications, University of Illinois, Urbana-Champaign.
- * For more information on the Apache Group and the Apache HTTP server
- * project, please see <http://www.apache.org/>.
+ * individuals on behalf of the Apache Software Foundation.  For more
+ * information on the Apache Software Foundation, please see
+ * <http://www.apache.org/>.
  *
+ * Portions of this software are based upon public domain software
+ * originally written at the National Center for Supercomputing Applications,
+ * University of Illinois, Urbana-Champaign.
  */
 
 /* Cache and garbage collection routines for Apache proxy */
@@ -195,8 +196,8 @@ cmp_long61 (long61_t *left, long61_t *right)
 /* Compare two gc_ent's, sort them by expiration date */
 static int gcdiff(const void *ap, const void *bp)
 {
-    const struct gc_ent *a = (const struct gc_ent * const) ap;
-    const struct gc_ent *b = (const struct gc_ent * const) bp;
+    const struct gc_ent *a = (const struct gc_ent *) ap;
+    const struct gc_ent *b = (const struct gc_ent *) bp;
 
     if (a->expire > b->expire)
 	return 1;
@@ -385,7 +386,7 @@ static void help_proxy_garbage_coll(request_rec *r)
     for (i = 0; i < files->nelts; i++) {
 	fent = &((struct gc_ent *) files->elts)[i];
 	sprintf(filename, "%s%s", cachedir, fent->file);
-	Explain3("GC Unlinking %s (expiry %ld, garbage_now %ld)", filename, fent->expire, garbage_now);
+	Explain3("GC Unlinking %s (expiry %ld, garbage_now %ld)", filename, (long)fent->expire, (long)garbage_now);
 #if TESTING
 	fprintf(stderr, "Would unlink %s\n", filename);
 #else
@@ -499,7 +500,19 @@ static int sub_garbage_coll(request_rec *r, array_header *files,
 #endif
 
 /* read the file */
-	fd = open(filename, O_RDONLY | O_BINARY);
+#if defined(WIN32)
+        /* On WIN32 open does not work for directories, 
+         * so we us stat instead of fstat to determine 
+         * if the file is a directory 
+         */
+        if (stat(filename, &buf) == -1) {
+            ap_log_error(APLOG_MARK, APLOG_ERR, r->server,
+        		 "proxy gc: stat(%s)", filename);
+            continue;
+        }
+        fd = -1;
+#else
+ 	fd = open(filename, O_RDONLY | O_BINARY);
 	if (fd == -1) {
 	    if (errno != ENOENT)
 		ap_log_error(APLOG_MARK, APLOG_ERR, r->server,
@@ -512,12 +525,16 @@ static int sub_garbage_coll(request_rec *r, array_header *files,
 	    close(fd);
 	    continue;
 	}
+#endif
 
 /* In OS/2 and TPF this has already been done above */
 #if !defined(OS2) && !defined(TPF)
 	if (S_ISDIR(buf.st_mode)) {
 	    char newcachedir[HUGE_STRING_LEN];
-	    close(fd);
+#if !defined(WIN32)
+            /* Win32 used stat, no file to close */
+            close(fd);
+#endif
 	    ap_snprintf(newcachedir, sizeof(newcachedir),
 			"%s%s/", cachesubdir, ent->d_name);
 	    if (!sub_garbage_coll(r, files, cachebasedir, newcachedir)) {
@@ -537,6 +554,19 @@ static int sub_garbage_coll(request_rec *r, array_header *files,
 	}
 #endif
 
+#if defined(WIN32)
+        /* Since we have determined above that the file is not a directory,
+         * it should be safe to open it now 
+         */
+        fd = open(filename, O_RDONLY | O_BINARY);
+        if (fd == -1) {
+            if (errno != ENOENT)
+	        ap_log_error(APLOG_MARK, APLOG_ERR, r->server,
+		             "proxy gc: open(%s) = %d", filename, errno);
+            continue;
+        }
+#endif
+ 
 	i = read(fd, line, 26);
 	close(fd);
 	if (i == -1) {
@@ -710,7 +740,7 @@ int ap_proxy_cache_check(request_rec *r, char *url, struct cache_conf *conf,
     pragma = ap_table_get(r->headers_in, "Pragma");
     auth = ap_table_get(r->headers_in, "Authorization");
     Explain5("Request for %s, pragma=%s, auth=%s, ims=%ld, imstr=%s", url,
-	     pragma, auth, c->ims, imstr);
+	     pragma, auth, (long)c->ims, imstr);
     if (c->filename != NULL && r->method_number == M_GET &&
 	strlen(url) < 1024 && !ap_proxy_liststr(pragma, "no-cache") &&
 	auth == NULL) {
@@ -947,7 +977,7 @@ int ap_proxy_cache_update(cache_req *c, table *resp_hdrs,
  *   else
  *      expire date = now + defaultexpire
  */
-    Explain1("Expiry date is %ld", expc);
+    Explain1("Expiry date is %ld", (long)expc);
     if (expc == BAD_DATE) {
 	if (lmod != BAD_DATE) {
 	    double x = (double) (date - lmod) * conf->cache.lmfactor;
@@ -958,7 +988,7 @@ int ap_proxy_cache_update(cache_req *c, table *resp_hdrs,
 	}
 	else
 	    expc = now + conf->cache.defaultexpire;
-	Explain1("Expiry date calculated %ld", expc);
+	Explain1("Expiry date calculated %ld", (long)expc);
     }
 
 /* get the content-length header */
@@ -1042,7 +1072,7 @@ int ap_proxy_cache_update(cache_req *c, table *resp_hdrs,
     buff[35] = ' ';
 
 /* open temporary file */
-#ifndef TPF
+#if !defined(TPF) && !defined(NETWARE)
 #define TMPFILESTR	"/tmpXXXXXX"
     if (conf->cache.root == NULL)
 	return DECLINED;
@@ -1177,7 +1207,7 @@ void ap_proxy_cache_tidy(cache_req *c)
 	    *p = '/';
 	    ++p;
 	}
-#if defined(OS2) || defined(WIN32) || defined(NETWARE)
+#if defined(OS2) || defined(WIN32) || defined(NETWARE) || defined(MPE)
 	/* Under OS/2 use rename. */
 	if (rename(c->tempfile, c->filename) == -1)
 	    ap_log_error(APLOG_MARK, APLOG_ERR, s,

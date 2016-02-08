@@ -166,7 +166,7 @@ main(argc, argv)
      * Open sudoers, lock it and stat it.  
      * sudoers_fd must remain open throughout in order to hold the lock.
      */
-    sudoers_fd = open(sudoers, O_RDWR | O_CREAT);
+    sudoers_fd = open(sudoers, O_RDWR | O_CREAT, SUDOERS_MODE);
     if (sudoers_fd == -1) {
 	(void) fprintf(stderr, "%s: %s: %s\n", Argv[0], sudoers,
 	    strerror(errno));
@@ -308,9 +308,11 @@ main(argc, argv)
 	 */
 	if (parse_error == TRUE) {
 	    switch (whatnow()) {
-		case 'q' :	parse_error = FALSE;	/* ignore parse error */
+		case 'Q' :	parse_error = FALSE;	/* ignore parse error */
 				break;
-		case 'x' :	Exit(0);
+		case 'x' :	if (sudoers_sb.st_size == 0)
+				    unlink(sudoers);
+				Exit(0);
 				break;
 	    }
 	    yyrestart(yyin);	/* reset lexer */
@@ -505,10 +507,10 @@ Exit(sig)
 {
     (void) unlink(stmp);
 
-    if (sig > 0)
+    if (sig > 0)	/* XXX signal race */
 	(void) fprintf(stderr, "%s exiting, caught signal %d.\n", Argv[0], sig);
 
-    exit(-sig);
+    exit(-sig);		/* XXX for signal case, should be _exit() */
 }
 
 static void

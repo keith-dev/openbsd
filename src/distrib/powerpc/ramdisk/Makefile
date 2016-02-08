@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.14 2000/10/19 20:54:36 drahn Exp $
+#	$OpenBSD: Makefile,v 1.16 2001/04/13 01:29:24 krw Exp $
 
 TOP=		${.CURDIR}/..
 
@@ -9,7 +9,7 @@ CBIN?=		instbin
 LISTS=		${.CURDIR}/list
 UTILS?=		${.CURDIR}/../../miniroot
 
-MOUNT_POINT=	/mnt2
+MOUNT_POINT=	/mnt
 MTREE=		${.CURDIR}/mtree.conf
 
 VND?=		svnd0
@@ -26,7 +26,7 @@ NEWFSARGS= -m 0 -o space -c 16 -i 4096
 
 .ifndef DESTDIR
 all ${IMAGE}:
-	@echo setenv DESTDIR before makeing a ramdisk!
+	@echo setenv DESTDIR before making a ramdisk!
 	@false
 .else
 

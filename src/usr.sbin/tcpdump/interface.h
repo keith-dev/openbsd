@@ -1,4 +1,4 @@
-/*	$OpenBSD: interface.h,v 1.18 2000/10/19 16:31:42 jason Exp $	*/
+/*	$OpenBSD: interface.h,v 1.26 2001/04/09 21:44:40 ho Exp $	*/
 
 /*
  * Copyright (c) 1988, 1989, 1990, 1991, 1992, 1993, 1994, 1995, 1996, 1997
@@ -20,7 +20,7 @@
  * WARRANTIES, INCLUDING, WITHOUT LIMITATION, THE IMPLIED WARRANTIES OF
  * MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE.
  *
- * @(#) $Header: /cvs/src/usr.sbin/tcpdump/interface.h,v 1.18 2000/10/19 16:31:42 jason Exp $ (LBL)
+ * @(#) $Header: /cvs/src/usr.sbin/tcpdump/interface.h,v 1.26 2001/04/09 21:44:40 ho Exp $ (LBL)
  */
 
 #ifndef tcpdump_interface_h
@@ -144,8 +144,11 @@ extern void ts_print(const struct timeval *);
 
 extern int fn_print(const u_char *, const u_char *);
 extern int fn_printn(const u_char *, u_int, const u_char *);
+extern void relts_print(int);
 extern const char *tok2str(const struct tok *, const char *, int);
 extern char *dnaddr_string(u_short);
+extern void safeputs(const char *);
+extern void safeputchar(int);
 
 extern void wrapup(int);
 
@@ -198,7 +201,15 @@ extern void ipx_print(const u_char *, u_int);
 extern void isoclns_print(const u_char *, u_int, u_int, const u_char *,
 	const u_char *);
 extern void krb_print(const u_char *, u_int);
+extern void netbeui_print(u_short, const u_char *, const u_char *);
+extern void ipx_netbios_print(const u_char *, const u_char *);
+extern void nbt_tcp_print(const u_char *, int);
+extern void nbt_udp137_print(const u_char *data, int);
+extern void nbt_udp138_print(const u_char *data, int);
+extern char *smb_errstr(int, int);
+extern void print_data(const unsigned char *, int);
 extern void l2tp_print(const u_char *dat, u_int length);
+extern void vrrp_print(const u_char *bp, u_int len, int ttl);
 extern void nfsreply_print(const u_char *, u_int, const u_char *);
 extern void nfsreq_print(const u_char *, u_int, const u_char *);
 extern void ns_print(const u_char *, u_int);
@@ -218,13 +229,19 @@ extern void sunrpcrequest_print(const u_char *, u_int, const u_char *);
 extern void cnfp_print(const u_char *, u_int, const u_char *);
 extern void tcp_print(const u_char *, u_int, const u_char *);
 extern void tftp_print(const u_char *, u_int);
+extern void timed_print(const u_char *, u_int);
 extern void udp_print(const u_char *, u_int, const u_char *);
 extern void wb_print(const void *, u_int);
-extern void isakmp_print(const u_char *, u_int);
+extern void ike_print(const u_char *, u_int);
 extern void ah_print(const u_char *, u_int, const u_char *);
 extern void esp_print(const u_char *, u_int, const u_char *);
+extern void cdp_print(const u_char *, u_int, u_int, const u_char *,
+	const u_char *);
 extern void stp_print(const u_char *, u_int);
 extern void radius_print(const u_char *, u_int);
+extern void lwres_print(const u_char *, u_int);
+extern void ether_print(const u_char *, u_int);
+extern void etherip_print(const u_char *, u_int, const u_char *);
 
 #ifdef INET6
 extern void ip6_print(const u_char *, int);
@@ -238,3 +255,5 @@ extern int rt6_print(const u_char *, const u_char *);
 extern void ospf6_print(const u_char *, u_int);
 extern void dhcp6_print(const u_char *, u_int, u_short, u_short);
 #endif /*INET6*/
+
+extern u_short in_cksum(const u_short *addr, register int len, u_short csum);

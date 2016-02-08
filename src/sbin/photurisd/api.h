@@ -1,5 +1,7 @@
+/*	$OpenBSD: api.h,v 1.3 2001/01/28 22:45:06 niklas Exp $	*/
+
 /*
- * Copyright 1997 Niels Provos <provos@physnet.uni-hamburg.de>
+ * Copyright 1997-2000 Niels Provos <provos@citi.umich.edu>
  * All rights reserved.
  *
  * This code is originally from Angelos D. Keromytis, kermit@forthnet.gr

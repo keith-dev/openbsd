@@ -1,4 +1,4 @@
-/*	$OpenBSD: ps.c,v 1.14 2000/06/18 17:59:54 niklas Exp $	*/
+/*	$OpenBSD: ps.c,v 1.19 2001/04/17 21:12:07 millert Exp $	*/
 /*	$NetBSD: ps.c,v 1.15 1995/05/18 20:33:25 mycroft Exp $	*/
 
 /*-
@@ -44,7 +44,7 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)ps.c	8.4 (Berkeley) 4/2/94";
 #else
-static char rcsid[] = "$OpenBSD: ps.c,v 1.14 2000/06/18 17:59:54 niklas Exp $";
+static char rcsid[] = "$OpenBSD: ps.c,v 1.19 2001/04/17 21:12:07 millert Exp $";
 #endif
 #endif /* not lint */
 
@@ -83,7 +83,7 @@ int	sumrusage;		/* -S */
 int	termwidth;		/* width of screen (0 == infinity) */
 int	totwidth;		/* calculated width of requested variables */
 
-int	needuser, needcomm, needenv, commandonly;
+int	needcomm, needenv, commandonly;
 
 enum sort { DEFAULT, SORTMEM, SORTCPU } sortby = DEFAULT;
 
@@ -329,8 +329,7 @@ main(argc, argv)
 		err(1, NULL);
 	for (i = nentries; --i >= 0; ++kp) {
 		kinfo[i].ki_p = kp;
-		if (needuser)
-			saveuser(&kinfo[i]);
+		saveuser(&kinfo[i]);
 	}
 	/*
 	 * print header
@@ -379,8 +378,6 @@ scanvars()
 		if (v->width < i)
 			v->width = i;
 		totwidth += v->width + 1;	/* +1 for space */
-		if (v->flag & USER)
-			needuser = 1;
 		if (v->flag & COMM)
 			needcomm = 1;
 	}
@@ -418,6 +415,8 @@ pscomp(a, b)
 	int i;
 #define VSIZE(k) (KI_EPROC(k)->e_vm.vm_dsize + KI_EPROC(k)->e_vm.vm_ssize + \
 		  KI_EPROC(k)->e_vm.vm_tsize)
+#define STARTTIME(k) (k->ki_u.u_start.tv_sec)
+#define STARTuTIME(k) (k->ki_u.u_start.tv_usec)
 
 	if (sortby == SORTCPU)
 		return (getpcpu((KINFO *)b) - getpcpu((KINFO *)a));
@@ -425,7 +424,9 @@ pscomp(a, b)
 		return (VSIZE((KINFO *)b) - VSIZE((KINFO *)a));
 	i =  KI_EPROC((KINFO *)a)->e_tdev - KI_EPROC((KINFO *)b)->e_tdev;
 	if (i == 0)
-		i = KI_PROC((KINFO *)a)->p_pid - KI_PROC((KINFO *)b)->p_pid;
+		i = STARTTIME(((KINFO *)a)) - STARTTIME(((KINFO *)b));
+		if (i == 0)
+			i = STARTuTIME(((KINFO *)a)) - STARTuTIME(((KINFO *)b));
 	return (i);
 }
 
@@ -495,7 +496,7 @@ usage()
 
 	(void)fprintf(stderr,
 	    "usage:\t%s\n\t   %s\n\t%s\n",
-	    "ps [-aChjlmrSTuvwx] [-O|o fmt] [-p pid] [-t tty] [-U user]",
+	    "ps [-][aChjlmrSTuvwx] [-O|o fmt] [-p pid] [-t tty] [-U user]",
 	    "[-M core] [-N system] [-W swap]",
 	    "ps [-L]");
 	exit(1);

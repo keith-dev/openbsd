@@ -1,4 +1,4 @@
-/* $OpenBSD: ipsecadm.c,v 1.48 2000/10/25 19:08:57 jason Exp $ */
+/* $OpenBSD: ipsecadm.c,v 1.53 2001/04/19 20:12:45 niklas Exp $ */
 /*
  * The authors of this code are John Ioannidis (ji@tla.org),
  * Angelos D. Keromytis (kermit@csd.uch.gr) and 
@@ -95,14 +95,14 @@ transform xf[] = {
     {"blf", SADB_X_EALG_BLF,   XF_ENC |        ESP_NEW},
     {"cast", SADB_X_EALG_CAST, XF_ENC |        ESP_NEW},
     {"skipjack", SADB_X_EALG_SKIPJACK, XF_ENC |        ESP_NEW},
-    {"md5", SADB_AALG_MD5HMAC96,  XF_AUTH|AH_NEW|ESP_NEW},
-    {"sha1", SADB_AALG_SHA1HMAC96,XF_AUTH|AH_NEW|ESP_NEW},
+    {"md5", SADB_AALG_MD5HMAC,  XF_AUTH|AH_NEW|ESP_NEW},
+    {"sha1", SADB_AALG_SHA1HMAC,XF_AUTH|AH_NEW|ESP_NEW},
     {"md5", SADB_X_AALG_MD5,  XF_AUTH|AH_OLD},
     {"sha1", SADB_X_AALG_SHA1,XF_AUTH|AH_OLD},
-    {"rmd160", SADB_X_AALG_RIPEMD160HMAC96, XF_AUTH|AH_NEW|ESP_NEW},
+    {"rmd160", SADB_AALG_RIPEMD160HMAC, XF_AUTH|AH_NEW|ESP_NEW},
 };
 
-#define ROUNDUP(x) (x % 8 ? (x + 8) - (x % 8) : x)
+#define ROUNDUP(x) (((x) + sizeof(u_int64_t) - 1) & ~(sizeof(u_int64_t) - 1))
 
 void
 xf_set(struct iovec *iov, int cnt, int len)
@@ -154,7 +154,7 @@ x2i(char *s)
     if (!isxdigit(s[0]) || !isxdigit(s[1]))
     {
 	fprintf(stderr, "Keys should be specified in hex digits.\n");
-	exit(-1);
+	exit(1);
     }
 
     return strtoul(ss, NULL, 16);
@@ -666,14 +666,14 @@ main(int argc, char **argv)
 	if (!strcmp(argv[i] + 1, "spi") && spi == SPI_LOCAL_USE &&
 	    (i + 1 < argc) && !bypass && !deny)
 	{
-	    spi = htonl(strtoul(argv[i + 1], NULL, 16));
+	    spi = strtoul(argv[i + 1], NULL, 16);
 	    if (spi >= SPI_RESERVED_MIN && spi <= SPI_RESERVED_MAX)
 	    {
 		fprintf(stderr, "%s: invalid spi %s\n", argv[0], argv[i + 1]);
 		exit(1);
 	    }
 
-	    sa.sadb_sa_spi = spi;
+	    sa.sadb_sa_spi = htonl(spi);
 	    i++;
 	    continue;
 	}
@@ -681,7 +681,7 @@ main(int argc, char **argv)
 	if (!strcmp(argv[i] + 1, "spi2") && spi2 == SPI_LOCAL_USE && 
 	    iscmd(mode, GRP_SPI) && (i + 1 < argc))
 	{
-	    spi2 = htonl(strtoul(argv[i + 1], NULL, 16));
+	    spi2 = strtoul(argv[i + 1], NULL, 16);
 	    if (spi2 == SPI_LOCAL_USE ||
 		(spi2 >= SPI_RESERVED_MIN && spi2 <= SPI_RESERVED_MAX))
 	    {
@@ -689,7 +689,7 @@ main(int argc, char **argv)
 		exit(1);
 	    }
 
-	    sa2.sadb_sa_spi = spi2;
+	    sa2.sadb_sa_spi = htonl(spi2);
 	    i++;
 	    continue;
 	}
@@ -863,7 +863,8 @@ main(int argc, char **argv)
 	    continue;
 	}
 
-	if (!strcmp(argv[i] + 1, "srcid") && iscmd(mode, FLOW) &&
+	if (!strcmp(argv[i] + 1, "srcid") && (iscmd(mode, FLOW) ||
+					      isencauth(mode)) &&
 	    (i + 1 < argc))
 	{
 	    if (srcid != NULL)
@@ -873,19 +874,20 @@ main(int argc, char **argv)
 		exit(1);
 	    }
 
-	    srcid = calloc(ROUNDUP(strlen(argv[i + 1])), sizeof(char));
+	    srcid = calloc(ROUNDUP(strlen(argv[i + 1]) + 1), sizeof(char));
             if (srcid == NULL)
             {
                 fprintf(stderr, "%s: malloc failed\n", argv[0]);
                 exit(1);
             }
             strcpy(srcid, argv[i + 1]);
-	    sid1.sadb_ident_len += ROUNDUP(strlen(srcid)) / sizeof(u_int64_t);
+	    sid1.sadb_ident_len += ROUNDUP(strlen(srcid) + 1) / sizeof(u_int64_t);
 	    i++;
 	    continue;
 	}
 
-	if (!strcmp(argv[i] + 1, "dstid") && iscmd(mode, FLOW) &&
+	if (!strcmp(argv[i] + 1, "dstid") && (iscmd(mode, FLOW) ||
+					      isencauth(mode)) &&
 	    (i + 1 < argc))
 	{
 	    if (dstid != NULL)
@@ -895,19 +897,20 @@ main(int argc, char **argv)
 		exit(1);
 	    }
 
-	    dstid = calloc(ROUNDUP(strlen(argv[i + 1])), sizeof(char));
+	    dstid = calloc(ROUNDUP(strlen(argv[i + 1]) + 1), sizeof(char));
             if (dstid == NULL)
             {
                 fprintf(stderr, "%s: malloc failed\n", argv[0]);
                 exit(1);
             }
             strcpy(dstid, argv[i + 1]);
-	    sid2.sadb_ident_len += ROUNDUP(strlen(dstid)) / sizeof(u_int64_t);
+	    sid2.sadb_ident_len += ROUNDUP(strlen(dstid) + 1) / sizeof(u_int64_t);
 	    i++;
 	    continue;
 	}
 
-	if (!strcmp(argv[i] + 1, "srcid_type") && iscmd(mode, FLOW) &&
+	if (!strcmp(argv[i] + 1, "srcid_type") && (iscmd(mode, FLOW) ||
+						   isencauth(mode)) &&
 	    (i + 1 < argc))
 	{
 	    if (sid1.sadb_ident_type != 0)
@@ -936,7 +939,8 @@ main(int argc, char **argv)
 	    continue;
 	}
 
-	if (!strcmp(argv[i] + 1, "dstid_type") && iscmd(mode, FLOW) &&
+	if (!strcmp(argv[i] + 1, "dstid_type") && (iscmd(mode, FLOW) ||
+						   isencauth(mode)) &&
 	    (i + 1 < argc))
 	{
 	    if (sid2.sadb_ident_type != 0)
@@ -1507,6 +1511,26 @@ main(int argc, char **argv)
 	iov[cnt++].iov_len = ROUNDUP(dst->sa.sa_len);
 	smsg.sadb_msg_len += sad2.sadb_address_len;
 
+	if (srcid)
+	{
+	    iov[cnt].iov_base = &sid1;
+	    iov[cnt++].iov_len = sizeof(sid1);
+	    /* SRC identity */
+	    iov[cnt].iov_base = srcid;
+	    iov[cnt++].iov_len = ROUNDUP(strlen(srcid) + 1);
+	    smsg.sadb_msg_len += sid1.sadb_ident_len;
+	}
+
+	if (dstid)
+	{
+	    iov[cnt].iov_base = &sid2;
+	    iov[cnt++].iov_len = sizeof(sid2);
+	    /* DST identity */
+	    iov[cnt].iov_base = dstid;
+	    iov[cnt++].iov_len = ROUNDUP(strlen(dstid) + 1);
+	    smsg.sadb_msg_len += sid2.sadb_ident_len;
+	}
+
 	if (sad1.sadb_address_exttype)
 	{
 	    /* Source address header */
@@ -1746,7 +1770,7 @@ main(int argc, char **argv)
 		     iov[cnt++].iov_len = sizeof(sid1);
 		     /* SRC identity */
 		     iov[cnt].iov_base = srcid;
-		     iov[cnt++].iov_len = ROUNDUP(strlen(srcid));
+		     iov[cnt++].iov_len = ROUNDUP(strlen(srcid) + 1);
 		     smsg.sadb_msg_len += sid1.sadb_ident_len;
 		 }
 
@@ -1757,7 +1781,7 @@ main(int argc, char **argv)
 		     iov[cnt++].iov_len = sizeof(sid2);
 		     /* DST identity */
 		     iov[cnt].iov_base = dstid;
-		     iov[cnt++].iov_len = ROUNDUP(strlen(dstid));
+		     iov[cnt++].iov_len = ROUNDUP(strlen(dstid) + 1);
 		     smsg.sadb_msg_len += sid2.sadb_ident_len;
 		 }
 

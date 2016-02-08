@@ -1,7 +1,7 @@
-/*	$OpenBSD: ukc.c,v 1.2 1999/10/16 13:13:27 aaron Exp $ */
+/*	$OpenBSD: ukc.c,v 1.5 2001/02/04 20:42:12 maja Exp $ */
 
 /*
- * Copyright (c) 1999 Mats O Jansson.  All rights reserved.
+ * Copyright (c) 1999-2001 Mats O Jansson.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -30,7 +30,7 @@
  */
 
 #ifndef LINT
-static char rcsid[] = "$OpenBSD: ukc.c,v 1.2 1999/10/16 13:13:27 aaron Exp $";
+static char rcsid[] = "$OpenBSD: ukc.c,v 1.5 2001/02/04 20:42:12 maja Exp $";
 #endif
 
 #include <sys/types.h>
@@ -53,6 +53,8 @@ static char rcsid[] = "$OpenBSD: ukc.c,v 1.2 1999/10/16 13:13:27 aaron Exp $";
 
 void	init __P((void));
 void	usage __P((void));
+
+int	ukc_mod_kernel = 0;
 
 int
 ukc(file, outfile, uflag, force)
@@ -122,8 +124,6 @@ ukc(file, outfile, uflag, force)
 	if (force == 0 && outfile == NULL)
 		printf("warning: no output file specified\n");
 
-	init();
-	
 	if ((nl[IA_EXTRALOC].n_type == 0) ||
 	    (nl[I_NEXTRALOC].n_type == 0) ||
 	    (nl[I_UEXTRALOC].n_type == 0) ||
@@ -134,6 +134,16 @@ WARNING this kernel doesn't contain all information needed!\n\
 WARNING the commands add and change might not work.\n");
 		oldkernel = 1;
 	}
+	
+	if ((nl[P_PDEVNAMES].n_type == 0) ||
+	    (nl[I_PDEVSIZE].n_type == 0) ||
+	    (nl[S_PDEVINIT].n_type == 0)) {
+		printf("\
+WARNING this kernel doesn't support pseudo devices.\n");
+		nopdev = 1;
+	}
+
+	init();
 	
 	if (uflag) {
 		if (ok) {
@@ -157,7 +167,13 @@ WARNING the commands add and change might not work.\n");
 		}
 		if (outfile == NULL)
 			outfile = file;
-		savekernel(outfile);
+		if (ukc_mod_kernel == 0) {
+			fprintf(stderr, "Kernel not modified\n");
+			exit(1);
+		} else {
+			printf ("Saving modified kernel.\n");
+			savekernel(outfile);
+		}
 	}
 
 	return(0);
@@ -169,6 +185,7 @@ init()
 	int i = 0,fd;
 	struct cfdata *cd;
 	short	*ln;
+	int	*p;
 #ifdef NOTDEF
 	struct winsize w;
 #endif
@@ -196,6 +213,11 @@ init()
 	}
 
 	totdev = totdev - 1;
+
+	if (nopdev == 0) {
+		p = (int *)adjust((caddr_t)nl[I_PDEVSIZE].n_value);
+		maxpseudo = *p;
+	}
 
 	if ((fd = open("/dev/tty", O_RDWR)) < 0)
 		fd = 2;

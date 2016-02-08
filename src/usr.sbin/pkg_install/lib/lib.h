@@ -1,4 +1,4 @@
-/* $OpenBSD: lib.h,v 1.6 2000/03/24 00:20:04 espie Exp $ */
+/* $OpenBSD: lib.h,v 1.8 2001/04/08 16:45:47 espie Exp $ */
 
 /*
  * FreeBSD install - a package for the installation and maintainance
@@ -103,7 +103,8 @@ typedef enum pl_ent_t {
 	PLIST_DIR_RM,
 	PLIST_IGNORE_INST,
 	PLIST_OPTION,
-	PLIST_PKGCFL
+	PLIST_PKGCFL,
+	PLIST_NEWDEP
 } pl_ent_t;
 
 /* Types */
@@ -203,6 +204,10 @@ int		delete_package(Boolean, Boolean, package_t *);
 
 /* For all */
 int		pkg_perform(char **);
+
+
+void		set_pkg(const char *);
+void 		pwarnx(const char *, ...);
 
 /* Externs */
 extern Boolean	Verbose;

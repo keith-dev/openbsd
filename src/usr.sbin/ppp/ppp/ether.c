@@ -23,7 +23,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- *	$OpenBSD: ether.c,v 1.5 2000/10/09 21:18:56 brian Exp $
+ *	$OpenBSD: ether.c,v 1.9 2001/03/28 09:52:54 brian Exp $
  */
 
 #include <sys/param.h>
@@ -34,6 +34,8 @@
 #include <netdb.h>
 #include <netgraph.h>
 #include <net/ethernet.h>
+#include <net/if.h>
+#include <net/route.h>
 #include <netinet/in_systm.h>
 #include <netinet/ip.h>
 #include <netgraph/ng_ether.h>
@@ -51,6 +53,7 @@
 #include <sys/linker.h>
 #include <sys/module.h>
 #endif
+#include <sys/stat.h>
 #include <sys/uio.h>
 #include <termios.h>
 #include <sys/time.h>
@@ -87,6 +90,7 @@
 #endif
 #include "bundle.h"
 #include "id.h"
+#include "iface.h"
 #include "ether.h"
 
 
@@ -398,9 +402,12 @@ ether_Create(struct physical *p)
   struct ng_mesg *resp;
   const struct hooklist *hlist;
   const struct nodeinfo *ninfo;
-  int f;
+  char *path;
+  int ifacelen, f;
 
   dev = NULL;
+  path = NULL;
+  ifacelen = 0;
   if (p->fd < 0 && !strncasecmp(p->name.full, NG_PPPOE_NODE_TYPE,
                                 PPPOE_NODE_TYPE_LEN) &&
       p->name.full[PPPOE_NODE_TYPE_LEN] == ':') {
@@ -409,8 +416,8 @@ ether_Create(struct physical *p)
     struct ngm_mkpeer mkp;
     struct ngm_connect ngc;
     const char *iface, *provider;
-    char *path, etherid[12];
-    int ifacelen, providerlen;
+    char etherid[12];
+    int providerlen;
     char connectpath[sizeof dev->hook + 2];	/* .:<hook> */
 
     p->fd--;				/* We own the device - change fd */
@@ -584,10 +591,9 @@ ether_Create(struct physical *p)
 
     /* And finally, request a connection to the given provider */
 
-    data = (struct ngpppoe_init_data *)alloca(sizeof *data + providerlen + 1);
-
+    data = (struct ngpppoe_init_data *)alloca(sizeof *data + providerlen);
     snprintf(data->hook, sizeof data->hook, "%s", dev->hook);
-    strcpy(data->data, provider);
+    memcpy(data->data, provider, providerlen);
     data->data_len = providerlen;
 
     snprintf(connectpath, sizeof connectpath, ".:%s", dev->hook);
@@ -624,29 +630,40 @@ ether_Create(struct physical *p)
 
   } else {
     /* See if we're a netgraph socket */
-    struct sockaddr_ng ngsock;
-    struct sockaddr *sock = (struct sockaddr *)&ngsock;
-    int sz;
+    struct stat st;
 
-    sz = sizeof ngsock;
-    if (getsockname(p->fd, sock, &sz) != -1 && sock->sa_family == AF_NETGRAPH) {
-      /*
-       * It's a netgraph node... We can't determine hook names etc, so we
-       * stay pretty impartial....
-       */
-      log_Printf(LogPHASE, "%s: Link is a netgraph node\n", p->link.name);
+    if (fstat(p->fd, &st) != -1 && (st.st_mode & S_IFSOCK)) {
+      struct sockaddr_storage ssock;
+      struct sockaddr *sock = (struct sockaddr *)&ssock;
+      int sz;
 
-      if ((dev = malloc(sizeof *dev)) == NULL) {
-        log_Printf(LogWARN, "%s: Cannot allocate an ether device: %s\n",
-                   p->link.name, strerror(errno));
+      sz = sizeof ssock;
+      if (getsockname(p->fd, sock, &sz) == -1) {
+        log_Printf(LogPHASE, "%s: Link is a closed socket !\n", p->link.name);
+        close(p->fd);
+        p->fd = -1;
         return NULL;
       }
 
-      memcpy(&dev->dev, &baseetherdevice, sizeof dev->dev);
-      dev->cs = -1;
-      dev->timeout = 0;
-      dev->connected = CARRIER_OK;
-      *dev->hook = '\0';
+      if (sock->sa_family == AF_NETGRAPH) {
+        /*
+         * It's a netgraph node... We can't determine hook names etc, so we
+         * stay pretty impartial....
+         */
+        log_Printf(LogPHASE, "%s: Link is a netgraph node\n", p->link.name);
+
+        if ((dev = malloc(sizeof *dev)) == NULL) {
+          log_Printf(LogWARN, "%s: Cannot allocate an ether device: %s\n",
+                     p->link.name, strerror(errno));
+          return NULL;
+        }
+
+        memcpy(&dev->dev, &baseetherdevice, sizeof dev->dev);
+        dev->cs = -1;
+        dev->timeout = 0;
+        dev->connected = CARRIER_OK;
+        *dev->hook = '\0';
+      }
     }
   }
 
@@ -661,6 +678,15 @@ ether_Create(struct physical *p)
     if (p->dl->bundle->cfg.mtu > 1492) {
       log_Printf(LogWARN, "%s: Reducing MTU to 1492\n", p->link.name);
       p->dl->bundle->cfg.mtu = 1492;
+    }
+
+    if (path != NULL) {
+      /* Mark the interface as UP if it's not already */
+
+      path[ifacelen] = '\0';		/* Remove the trailing ':' */
+      if (!iface_SetFlags(path, IFF_UP))
+        log_Printf(LogWARN, "%s: Failed to set the IFF_UP flag on %s\n",
+                   p->link.name, path);
     }
 
     return &dev->dev;

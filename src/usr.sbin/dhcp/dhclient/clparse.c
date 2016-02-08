@@ -42,7 +42,7 @@
 
 #ifndef lint
 static char copyright[] =
-"$Id: clparse.c,v 1.5 1999/12/04 00:15:08 angelos Exp $ Copyright (c) 1997 The Internet Software Consortium.  All rights reserved.\n";
+"$Id: clparse.c,v 1.7 2001/01/06 22:02:23 angelos Exp $ Copyright (c) 1997 The Internet Software Consortium.  All rights reserved.\n";
 #endif /* not lint */
 
 #include "dhcpd.h"
@@ -751,10 +751,8 @@ struct option *parse_option_decl (cfile, options)
 			skip_to_semi (cfile);
 		return (struct option *)0;
 	}
-	vendor = malloc (strlen (val) + 1);
-	if (!vendor)
+	if ((vendor = (char *)strdup (val)) == NULL)
 		error ("no memory for vendor information.");
-	strcpy (vendor, val);
 	token = peek_token (&val, cfile);
 	if (token == DOT) {
 		/* Go ahead and take the DOT token... */

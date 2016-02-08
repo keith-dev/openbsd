@@ -1,4 +1,4 @@
-#	$OpenBSD: bsd.own.mk,v 1.35 2000/10/29 07:33:45 hugh Exp $
+#	$OpenBSD: bsd.own.mk,v 1.41 2001/04/03 23:00:09 espie Exp $
 #	$NetBSD: bsd.own.mk,v 1.24 1996/04/13 02:08:09 thorpej Exp $
 
 # Host-specific overrides
@@ -9,7 +9,7 @@
 .endif
 
 # XXX - This is temporary until everyone uses UVM
-.if (${MACHINE_ARCH} == "sparc") || (${MACHINE_ARCH} == "i386") || (${MACHINE_ARCH} == "vax")
+.if (${MACHINE_ARCH} == "sparc") || (${MACHINE_ARCH} == "i386") || (${MACHINE_ARCH} == "vax") || (${MACHINE} == "amiga") || (${MACHINE_ARCH} == "alpha") || (${MACHINE_ARCH} == "powerpc") || (${MACHINE_ARCH} == "m88k")
 UVM?=		yes
 .else
 UVM?=		no
@@ -49,6 +49,9 @@ DIRMODE?=	755
 # Define MANZ to have the man pages compressed (gzip)
 #MANZ=		1
 
+# Define MANPS to have PostScript manual pages generated
+#MANPS=		1
+
 SHAREDIR?=	/usr/share
 SHAREGRP?=	bin
 SHAREOWN?=	root
@@ -58,6 +61,11 @@ MANDIR?=	/usr/share/man/cat
 MANGRP?=	bin
 MANOWN?=	root
 MANMODE?=	${NONBINMODE}
+
+PSDIR?=		/usr/share/man/ps
+PSGRP?=		bin
+PSOWN?=		root
+PSMODE?=	${NONBINMODE}
 
 LIBDIR?=	/usr/lib
 LINTLIBDIR?=	/usr/libdata/lint
@@ -113,3 +121,8 @@ NOPROFILE=
 NOLINT=
 
 BSD_OWN_MK=Done
+
+.PHONY: spell clean cleandir obj manpages print all \
+	depend beforedepend afterdepend cleandepend \
+	all lint cleanman nlsinstall cleannls includes \
+	beforeinstall realinstall maninstall afterinstall install

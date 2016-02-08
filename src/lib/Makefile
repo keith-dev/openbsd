@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.37 2000/01/30 01:22:59 mickey Exp $
+#	$OpenBSD: Makefile,v 1.39 2001/02/04 21:41:41 deraadt Exp $
 #	$NetBSD: Makefile,v 1.20.4.1 1996/06/14 17:22:38 cgd Exp $
 
 SUBDIR=	csu libarch libc libc_r libcom_err libcompat libcurses libdes libedit \

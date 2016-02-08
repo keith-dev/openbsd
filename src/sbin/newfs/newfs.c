@@ -1,4 +1,4 @@
-/*	$OpenBSD: newfs.c,v 1.22 2000/04/30 05:07:46 bjc Exp $	*/
+/*	$OpenBSD: newfs.c,v 1.27 2001/04/19 16:22:18 gluk Exp $	*/
 /*	$NetBSD: newfs.c,v 1.20 1996/05/16 07:13:03 thorpej Exp $	*/
 
 /*
@@ -44,7 +44,7 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)newfs.c	8.8 (Berkeley) 4/18/94";
 #else
-static char rcsid[] = "$OpenBSD: newfs.c,v 1.22 2000/04/30 05:07:46 bjc Exp $";
+static char rcsid[] = "$OpenBSD: newfs.c,v 1.27 2001/04/19 16:22:18 gluk Exp $";
 #endif
 #endif /* not lint */
 
@@ -151,7 +151,6 @@ void	fatal();
 int	mfs;			/* run as the memory based filesystem */
 int	Nflag;			/* run without writing file system */
 int	Oflag;			/* format as an 4.3BSD file system */
-int	Uflag;			/* enable soft updates for file system */
 int	fssize;			/* file system size */
 int	ntracks;		/* # tracks/cylinder */
 int	nsectors;		/* # sectors/track */
@@ -176,6 +175,8 @@ int	maxcontig = 8;		/* max contiguous blocks to allocate */
 int	rotdelay = ROTDELAY;	/* rotational delay between blocks */
 int	maxbpg;			/* maximum blocks per file in a cyl group */
 int	nrpos = NRPOS;		/* # of distinguished rotational positions */
+int	avgfilesize = AVFILESIZ;/* expected average file size */
+int	avgfilesperdir = AFPDIR;/* expected number of files per directory */
 int	bbsize = BBSIZE;	/* boot block size */
 int	sbsize = SBSIZE;	/* superblock size */
 int	mntflags = MNT_ASYNC;	/* flags to be passed to mount */
@@ -218,8 +219,8 @@ main(argc, argv)
 		fatal("insane maxpartitions value %d", maxpartitions);
 
 	opstring = mfs ?
-	    "NT:Ua:b:c:d:e:f:i:m:o:s:" :
-	    "NOS:UT:a:b:c:d:e:f:i:k:l:m:n:o:p:qr:s:t:u:x:z:";
+	    "NT:a:b:c:d:e:f:i:m:o:s:" :
+	    "NOS:T:a:b:c:d:e:f:g:h:i:k:l:m:n:o:p:qr:s:t:u:x:z:";
 	while ((ch = getopt(argc, argv, opstring)) != -1) {
 		switch (ch) {
 		case 'N':
@@ -237,9 +238,6 @@ main(argc, argv)
 			disktype = optarg;
 			break;
 #endif
-		case 'U':
-			Uflag = 1;
-			break;
 		case 'a':
 			if ((maxcontig = atoi(optarg)) <= 0)
 				fatal("%s: bad maximum contiguous blocks\n",
@@ -266,6 +264,14 @@ main(argc, argv)
 		case 'f':
 			if ((fsize = atoi(optarg)) <= 0)
 				fatal("%s: bad fragment size", optarg);
+			break;
+		case 'g':
+			if ((avgfilesize = atoi(optarg)) <= 0)
+			       fatal("%s: bad average file size", optarg);
+			break;
+		case 'h':
+			if ((avgfilesperdir = atoi(optarg)) <= 0)
+				fatal("%s: bad average files per dir", optarg);
 			break;
 		case 'i':
 			if ((density = atoi(optarg)) <= 0)
@@ -398,9 +404,11 @@ main(argc, argv)
 		/*
 		 * No path prefix; try /dev/r%s then /dev/%s.
 		 */
-		(void)sprintf(device, "%sr%s", _PATH_DEV, special);
+		(void)snprintf(device, sizeof(device), "%sr%s",
+			       _PATH_DEV, special);
 		if (stat(device, &st) == -1)
-			(void)sprintf(device, "%s%s", _PATH_DEV, special);
+			(void)snprintf(device, sizeof(device), "%s%s",
+				       _PATH_DEV, special);
 		special = device;
 	}
 	if (Nflag) {
@@ -658,7 +666,8 @@ rewritelabel(s, fd, lp)
 		/*
 		 * Make name for 'c' partition.
 		 */
-		strcpy(specname, s);
+		strncpy(specname, s, sizeof(specname) - 1);
+		specname[sizeof(specname) - 1] = '\0';
 		cp = specname + strlen(specname) - 1;
 		if (!isdigit(*cp))
 			*cp = 'c';
@@ -713,8 +722,44 @@ fatal(fmt, va_alist)
 	/*NOTREACHED*/
 }
 
+struct fsoptions {
+	char *str;
+	int mfs_too;
+} fsopts[] = {
+	{ "-N do not create file system, just print out parameters", 1 },
+	{ "-O create a 4.3BSD format filesystem", 0 },
+	{ "-S sector size", 0 },
+#ifdef COMPAT
+	{ "-T disktype", 0 },
+#endif
+	{ "-a maximum contiguous blocks", 1 },
+	{ "-b block size", 1 },
+	{ "-c cylinders/group", 1 },
+	{ "-d rotational delay between contiguous blocks", 1 },
+	{ "-e maximum blocks per file in a cylinder group", 1 },
+	{ "-f frag size", 1 },
+	{ "-g average file size", 0 },
+	{ "-h average files per directory", 0 },
+	{ "-i number of bytes per inode", 1 },
+	{ "-k sector 0 skew, per track", 0 },
+	{ "-l hardware sector interleave", 0 },
+	{ "-m minimum free space %%", 1 },
+	{ "-n number of distinguished rotational positions", 0 },
+	{ "-o optimization preference (`space' or `time')", 1 },
+	{ "-p spare sectors per track", 0 },
+	{ "-r revolutions/minute", 0 },
+	{ "-s file system size (sectors)", 1 },
+	{ "-t file system type", 0 },
+	{ "-u sectors/track", 0 },
+	{ "-x spare sectors per cylinder", 0 },
+	{ "-z tracks/cylinder", 0 },
+	{ NULL, NULL }
+};
+
 usage()
 {
+	struct fsoptions *fsopt;
+
 	if (mfs) {
 		fprintf(stderr,
 		    "usage: %s [ -fsoptions ] special-device mount-point\n",
@@ -724,32 +769,9 @@ usage()
 		    "usage: %s [ -fsoptions ] special-device\n", __progname);
 	}
 	fprintf(stderr, "where fsoptions are:\n");
-	fprintf(stderr,
-	    "\t-N do not create file system, just print out parameters\n");
-	fprintf(stderr, "\t-O create a 4.3BSD format filesystem\n");
-	fprintf(stderr, "\t-S sector size\n");
-#ifdef COMPAT
-	fprintf(stderr, "\t-T disktype\n");
-#endif
-	fprintf(stderr, "\t-U enable soft updates\n");
-	fprintf(stderr, "\t-a maximum contiguous blocks\n");
-	fprintf(stderr, "\t-b block size\n");
-	fprintf(stderr, "\t-c cylinders/group\n");
-	fprintf(stderr, "\t-d rotational delay between contiguous blocks\n");
-	fprintf(stderr, "\t-e maximum blocks per file in a cylinder group\n");
-	fprintf(stderr, "\t-f frag size\n");
-	fprintf(stderr, "\t-i number of bytes per inode\n");
-	fprintf(stderr, "\t-k sector 0 skew, per track\n");
-	fprintf(stderr, "\t-l hardware sector interleave\n");
-	fprintf(stderr, "\t-m minimum free space %%\n");
-	fprintf(stderr, "\t-n number of distinguished rotational positions\n");
-	fprintf(stderr, "\t-o optimization preference (`space' or `time')\n");
-	fprintf(stderr, "\t-p spare sectors per track\n");
-	fprintf(stderr, "\t-r revolutions/minute\n");
-	fprintf(stderr, "\t-s file system size (sectors)\n");
-	fprintf(stderr, "\t-t file system type\n");
-	fprintf(stderr, "\t-u sectors/track\n");
-	fprintf(stderr, "\t-x spare sectors per cylinder\n");
-	fprintf(stderr, "\t-z tracks/cylinder\n");
+	for (fsopt = fsopts; fsopt->str; fsopt++) {
+		if (!mfs || fsopt->mfs_too)
+			fprintf(stderr, "\t%s\n", fsopt->str);
+	}
 	exit(1);
 }

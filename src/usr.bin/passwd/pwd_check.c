@@ -1,4 +1,4 @@
-/*	$OpenBSD: pwd_check.c,v 1.1 2000/08/01 22:27:51 provos Exp $	*/
+/*	$OpenBSD: pwd_check.c,v 1.3 2000/11/24 21:07:04 millert Exp $	*/
 /*
  * Copyright 2000 Niels Provos <provos@citi.umich.edu>
  * All rights reserved.
@@ -29,17 +29,21 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include <stdio.h>
 #include <sys/types.h>
 #include <sys/wait.h>
+
+#include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <unistd.h>
 #include <limits.h>
+#include <errno.h>
+#include <err.h>
 #include <regex.h>
 #include <grp.h>
 #include <paths.h>
 #include <pwd.h>
-#include <sys/errno.h>
+#include <util.h>
 
 struct pattern {
 	char *match;

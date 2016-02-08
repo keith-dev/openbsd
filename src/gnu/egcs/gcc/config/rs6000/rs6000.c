@@ -1,5 +1,6 @@
 /* Subroutines used for code generation on IBM RS/6000.
-   Copyright (C) 1991, 93-8, 1999 Free Software Foundation, Inc.
+   Copyright (C) 1991, 1993, 1994, 1995, 1996, 1997, 1998, 1999, 2000, 2001
+   Free Software Foundation, Inc.
    Contributed by Richard Kenner (kenner@vlsi1.ultra.nyu.edu)
 
 This file is part of GNU CC.
@@ -3406,7 +3407,11 @@ first_reg_to_save ()
 
   /* Find lowest numbered live register.  */
   for (first_reg = 13; first_reg <= 31; first_reg++)
-    if (regs_ever_live[first_reg])
+    if (regs_ever_live[first_reg]
+	&& (! call_used_regs[first_reg]
+	    || (first_reg == PIC_OFFSET_TABLE_REGNUM
+		&& (DEFAULT_ABI == ABI_V4 || DEFAULT_ABI == ABI_SOLARIS)
+		&& flag_pic == 1)))
       break;
 
   if (profile_flag)

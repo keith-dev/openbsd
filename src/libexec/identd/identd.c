@@ -1,3 +1,5 @@
+/*	$OpenBSD: identd.c,v 1.18 2001/04/15 23:48:15 hugh Exp $	*/
+
 /*
  * This program is in the public domain and may be used freely by anyone
  * who wants to.
@@ -18,6 +20,7 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <poll.h>
 #include <string.h>
 #include <ctype.h>
 #include <errno.h>
@@ -38,16 +41,18 @@ int     verbose_flag = 0;
 int     debug_flag = 0;
 int     syslog_flag = 0;
 int     multi_flag = 0;
-int     other_flag = 0;
 int     unknown_flag = 0;
 int     number_flag = 0;
 int     noident_flag = 0;
+int	userident_flag = 0;
 int	token_flag = 0;
 
 int     lport = 0;
 int     fport = 0;
 
-char   *charset_name = NULL;
+const  char *opsys_name = "UNIX";
+const  char *charset_sep = "";
+char   *charset_name = "";
 char   *indirect_host = NULL;
 char   *indirect_password = NULL;
 
@@ -62,7 +67,7 @@ usage()
 {
 	syslog(LOG_ERR,
 	    "identd [-i | -w | -b] [-t seconds] [-u uid] [-g gid] [-p port] "
-	    "[-a address] [-c charset] [-noelVvmNdh]");
+	    "[-a address] [-c charset] [-noelVvmNUdh]");
 	exit(2);
 }
 
@@ -108,15 +113,15 @@ gethost6(addr)
 	return(hbuf[bb]);
 }
 
+sig_atomic_t alarm_fired;
+
 /*
  * Exit cleanly after our time's up.
  */
 static void
 alarm_handler()
 {
-	if (syslog_flag)
-		syslog(LOG_DEBUG, "SIGALRM triggered, exiting");
-	exit(0);
+	alarm_fired = 1;
 }
 
 /*
@@ -134,7 +139,6 @@ main(argc, argv)
 	struct sockaddr_in6 * sin6;
 	struct in_addr laddr, faddr;
 	struct in6_addr laddr6, faddr6;
-	struct timeval tv;
 	struct passwd *pwd;
 	struct group *grp;
 	int     background_flag = 0;
@@ -150,7 +154,7 @@ main(argc, argv)
 	/*
 	 * Parse the command line arguments
 	 */
-	while ((ch = getopt(argc, argv, "hbwit:p:a:u:g:c:r:loenVvdmN")) != -1) {
+	while ((ch = getopt(argc, argv, "hbwit:p:a:u:g:c:r:loenVvdmNU")) != -1) {
 		switch (ch) {
 		case 'h':
 			token_flag = 1;
@@ -200,6 +204,7 @@ main(argc, argv)
 			break;
 		case 'c':
 			charset_name = optarg;
+			charset_sep = " , ";
 			break;
 		case 'r':
 			indirect_host = optarg;
@@ -208,7 +213,7 @@ main(argc, argv)
 			syslog_flag++;
 			break;
 		case 'o':
-			other_flag = 1;
+			opsys_name = "OTHER";
 			break;
 		case 'e':
 			unknown_flag = 1;
@@ -217,7 +222,7 @@ main(argc, argv)
 			number_flag = 1;
 			break;
 		case 'V':	/* Give version of this daemon */
-			printf("[in.identd, version %s]\r\n", version);
+			printf("[identd version %s]\r\n", version);
 			exit(0);
 			break;
 		case 'v':	/* Be verbose */
@@ -231,6 +236,9 @@ main(argc, argv)
 			break;
 		case 'N':	/* Enable users ".noident" files */
 			noident_flag++;
+			break;
+		case 'U':	/* Enable user ".ident" files */
+			userident_flag++;
 			break;
 		default:
 			usage();
@@ -313,7 +321,7 @@ main(argc, argv)
 	 */
 	if (background_flag) {
 		int     nfds, fd;
-		fd_set  read_set;
+		struct	pollfd pfd[1];
 
 		/*
 		 * Loop and dispatch client handling processes
@@ -326,20 +334,26 @@ main(argc, argv)
 				signal(SIGALRM, alarm_handler);
 				alarm(timeout);
 			}
+			
 			/*
 			 * Wait for a connection request to occur.
 			 * Ignore EINTR (Interrupted System Call).
 			 */
 			do {
-				FD_ZERO(&read_set);
-				FD_SET(0, &read_set);
+				if (alarm_fired) {
+					if (syslog_flag)
+						syslog(LOG_DEBUG,
+						    "SIGALRM triggered, exiting");
+					exit(0);
+				}
 
-				if (timeout) {
-					tv.tv_sec = timeout;
-					tv.tv_usec = 0;
-					nfds = select(1, &read_set, NULL, NULL, &tv);
-				} else
-					nfds = select(1, &read_set, NULL, NULL, NULL);
+				pfd[0].fd = 0;
+				pfd[0].events = POLLIN;
+
+				if (timeout)
+					nfds = poll(pfd, 1, timeout * 1000);
+				else
+					nfds = poll(pfd, 1, -1);
 			} while (nfds < 0 && errno == EINTR);
 
 			/*

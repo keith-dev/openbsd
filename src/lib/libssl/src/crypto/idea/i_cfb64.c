@@ -64,9 +64,9 @@
  * 64bit block we have used is contained in *num;
  */
 
-void idea_cfb64_encrypt(unsigned char *in, unsigned char *out, long length,
-	     IDEA_KEY_SCHEDULE *schedule, unsigned char *ivec, int *num,
-	     int encrypt)
+void idea_cfb64_encrypt(const unsigned char *in, unsigned char *out,
+			long length, IDEA_KEY_SCHEDULE *schedule,
+			unsigned char *ivec, int *num, int encrypt)
 	{
 	  /* body of routine replaced for OpenBSD due to IDEA patent */
 

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1999 Sendmail, Inc. and its suppliers.
+ * Copyright (c) 1999-2001 Sendmail, Inc. and its suppliers.
  *	All rights reserved.
  *
  * By using this file, you agree to the terms and conditions set
@@ -11,8 +11,12 @@
  */
 
 #ifndef lint
-static char id[] = "@(#)$Sendmail: bf_torek.c,v 8.19 1999/10/11 23:37:26 ca Exp $";
+static char id[] = "@(#)$Sendmail: bf_torek.c,v 8.19.18.4 2001/02/14 04:07:27 gshapiro Exp $";
 #endif /* ! lint */
+
+#if SFIO
+   ERROR README: Can not use bf_torek.c with SFIO.
+#endif /* SFIO */
 
 #include <sys/types.h>
 #include <sys/uio.h>
@@ -374,6 +378,51 @@ bftruncate(fp)
 	}
 	else
 		return ftruncate(fileno(fp), 0);
+}
+
+/*
+**  BFFSYNC -- fsync the fd associated with the FILE *
+**
+**	Parameters:
+**		fp -- FILE * to fsync
+**
+**	Returns:
+**		0 on success, -1 on error
+**
+**	Sets errno:
+**		EINVAL if FILE * not bfcommitted yet.
+**		any value of errno specified by fsync()
+*/
+
+int
+bffsync(fp)
+	FILE *fp;
+{
+	int fd;
+	struct bf *bfp;
+
+	if (bftest(fp))
+	{
+		/* Get bf structure */
+		bfp = (struct bf *)fp->_cookie;
+
+		if (bfp->bf_ondisk && bfp->bf_committed)
+			fd = bfp->bf_disk_fd;
+		else
+			fd = -1;
+	}
+	else
+		fd = fileno(fp);
+
+	if (tTd(58, 10))
+		dprintf("bffsync: fd = %d\n", fd);
+
+	if (fd < 0)
+	{
+		errno = EINVAL;
+		return -1;
+	}
+	return fsync(fd);
 }
 
 /*

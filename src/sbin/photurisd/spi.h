@@ -1,5 +1,6 @@
+/* $OpenBSD: spi.h,v 1.7 2001/01/28 22:45:17 niklas Exp $ */
 /*
- * Copyright 1997 Niels Provos <provos@physnet.uni-hamburg.de>
+ * Copyright 1997-2000 Niels Provos <provos@citi.umich.edu>
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -27,7 +28,6 @@
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
-/* $Id: spi.h,v 1.2 1999/03/27 21:18:02 provos Exp $ */
 /*
  * spi.h: 
  * security paramter index creation.
@@ -35,7 +35,7 @@
  
 #ifndef _SPI_H_
 #define _SPI_H_
-
+#include <sys/queue.h>
 #include "state.h"
 
 #undef EXTERN
@@ -48,17 +48,16 @@
 
 #define SPI_LIFETIME   1800            /* 30 minutes default lifetime */
 
-#define SPI_OWNER      1
-#define SPI_NOTIFY     2
-#define SPI_TUNNEL     4
-#define SPI_ESP	       8	       /* Is used for ESP */
+#define SPI_OWNER	0x0001
+#define SPI_NOTIFY	0x0002
+#define SPI_UPDATED	0x0004
+#define SPI_ESP		0x0008	       /* Is used for ESP */
 
 struct spiob {
-     struct spiob *next;            /* Linked list */
+     TAILQ_ENTRY(spiob) next;          /* Linked list */
+
      char *address;
      char *local_address;
-     in_addr_t isrc, ismask;
-     in_addr_t idst, idmask;
      int flags;
      u_int8_t SPI[SPI_SIZE];           /* SPI */ 
      u_int8_t icookie[COOKIE_SIZE];    /* Initator cookie */
@@ -69,12 +68,12 @@ struct spiob {
      time_t lifetime;                  /* Lifetime for the SPI */
 };
 
+EXTERN void spi_init(void);
 EXTERN time_t getspilifetime(struct stateob *st);
 EXTERN int make_spi(struct stateob *st, char *local_address,
 		    u_int8_t *SPI, time_t *lifetime, 
 		    u_int8_t **attributes, u_int16_t *attribsize);
 
-EXTERN int spi_set_tunnel(struct stateob *st, struct spiob *spi);
 EXTERN int spi_insert(struct spiob *);
 EXTERN int spi_unlink(struct spiob *);
 EXTERN struct spiob *spi_new(char *, u_int8_t *);
@@ -82,8 +81,8 @@ EXTERN int spi_value_reset(struct spiob *);
 EXTERN struct spiob *spi_find_attrib(char *address,
 				     u_int8_t *attrib, u_int16_t attribsize);
 EXTERN struct spiob *spi_find(char *, u_int8_t *);
-EXTERN struct spiob *spi_root(void);
-EXTERN void spi_cleanup(void);
 EXTERN void spi_expire(void);
+EXTERN void spi_update(int, u_int8_t *);
+EXTERN void spi_update_insert(struct spiob *);
 
 #endif /* _SPI_H */

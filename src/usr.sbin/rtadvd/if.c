@@ -1,5 +1,5 @@
-/*	$OpenBSD: if.c,v 1.6 2000/09/01 01:24:04 itojun Exp $	*/
-/*	$KAME: if.c,v 1.12 2000/08/31 16:35:29 itojun Exp $	*/
+/*	$OpenBSD: if.c,v 1.9 2001/01/21 15:42:35 itojun Exp $	*/
+/*	$KAME: if.c,v 1.17 2001/01/21 15:27:30 itojun Exp $	*/
 
 /*
  * Copyright (C) 1995, 1996, 1997, and 1998 WIDE Project.
@@ -147,42 +147,44 @@ if_nametosdl(char *name)
 int
 if_getmtu(char *name)
 {
-#ifdef SIOCGIFMTU
-	struct ifreq ifr;
-	int s;
-
-	if ((s = socket(AF_INET6, SOCK_DGRAM, 0)) < 0)
-		return(0);
-
-	ifr.ifr_addr.sa_family = AF_INET6;
-	strncpy(ifr.ifr_name, name, sizeof(ifr.ifr_name));
-	if (ioctl(s, SIOCGIFMTU, (caddr_t)&ifr) < 0) {
-		close(s);
-		return(0);
-	}
-
-	close(s);
-
-	return(ifr.ifr_mtu);
-#else
 	struct ifaddrs *ifap, *ifa;
 	struct if_data *ifd;
+	u_long mtu = 0;
 
 	if (getifaddrs(&ifap) < 0)
 		return(0);
 	for (ifa = ifap; ifa; ifa = ifa->ifa_next) {
 		if (strcmp(ifa->ifa_name, name) == 0) {
 			ifd = ifa->ifa_data;
-			freeifaddrs(ifap);
 			if (ifd)
-				return ifd->ifi_mtu;
-			else
-				return 0;
+				mtu = ifd->ifi_mtu;
+			break;
 		}
 	}
 	freeifaddrs(ifap);
-	return 0;
+
+#ifdef SIOCGIFMTU		/* XXX: this ifdef may not be necessary */
+	if (mtu == 0) {
+		struct ifreq ifr;
+		int s;
+
+		if ((s = socket(AF_INET6, SOCK_DGRAM, 0)) < 0)
+			return(0);
+
+		ifr.ifr_addr.sa_family = AF_INET6;
+		strncpy(ifr.ifr_name, name,
+			sizeof(ifr.ifr_name));
+		if (ioctl(s, SIOCGIFMTU, (caddr_t)&ifr) < 0) {
+			close(s);
+			return(0);
+		}
+		close(s);
+
+		mtu = ifr.ifr_mtu;
+	}
 #endif
+
+	return(mtu);
 }
 
 /* give interface index and its old flags, then new flags returned */
@@ -255,17 +257,6 @@ rtbuf_len()
 		return(-1);
 
 	return(len);
-}
-
-int
-get_rtinfo(char *buf, size_t *len)
-{
-	int mib[6] = {CTL_NET, AF_ROUTE, 0, AF_INET6, NET_RT_DUMP, 0};
-
-	if (sysctl(mib, 6, buf, len, NULL, 0) < 0)
-		return(-1);
-
-	return(0);
 }
 
 #define FILTER_MATCH(type, filter) ((0x1 << type) & filter)
@@ -355,7 +346,7 @@ get_next_msg(char *buf, char *lim, int ifindex, size_t *lenp, int filter)
 
 	return (char *)rtm;
 }
-#undef FILTER_MATCH(type, filter)
+#undef FILTER_MATCH
 
 struct in6_addr *
 get_addr(char *buf)
@@ -410,7 +401,6 @@ get_prefixlen(char *buf)
 {
 	struct rt_msghdr *rtm = (struct rt_msghdr *)buf;
 	struct sockaddr *sa, *rti_info[RTAX_MAX];
-	int masklen;
 	u_char *p, *lim;
 	
 	sa = (struct sockaddr *)(rtm + 1);
@@ -419,6 +409,14 @@ get_prefixlen(char *buf)
 
 	p = (u_char *)(&SIN6(sa)->sin6_addr);
 	lim = (u_char *)sa + sa->sa_len;
+	return prefixlen(p, lim);
+}
+
+int
+prefixlen(u_char *p, u_char *lim)
+{
+	int masklen;
+
 	for (masklen = 0; p < lim; p++) {
 		switch (*p) {
 		case 0xff:

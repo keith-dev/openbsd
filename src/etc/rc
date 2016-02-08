@@ -1,4 +1,4 @@
-#	$OpenBSD: rc,v 1.157 2000/10/27 06:36:35 deraadt Exp $
+#	$OpenBSD: rc,v 1.167 2001/04/19 04:00:15 deraadt Exp $
 
 # System startup script run by init on autoboot
 # or after single-user.
@@ -60,6 +60,7 @@ fi
 for dev in 0 1 2 3; do
 	if [ -f /etc/raid$dev.conf ]; then
 		raidctl -c /etc/raid$dev.conf raid$dev
+		raidctl -v -P raid$dev
 	fi
 done
 
@@ -251,7 +252,7 @@ if [ X${nfs_server} = X"YES" -a -s /etc/exports -a \
 	fi
 fi
 
-if [ X${amd} = X"YES" -a -d ${amd_dir} -a -e ${amd_master} ]; then
+if [ X${amd} = X"YES" -a -e ${amd_master} ]; then
 	echo -n ' amd'
 	(cd /etc/amd; amd -l syslog -x error,noinfo,nostats -p \
 	    -a ${amd_dir} `cat ${amd_master}` > /var/run/amd.pid )
@@ -356,7 +357,15 @@ fi
 
 if [ ! -f /etc/ssh_host_dsa_key ]; then
 	echo -n "ssh-keygen: generating new DSA host key... "
-	if /usr/bin/ssh-keygen -q -d -f /etc/ssh_host_dsa_key -N ''; then
+	if /usr/bin/ssh-keygen -q -t dsa -f /etc/ssh_host_dsa_key -N ''; then
+		echo done.
+	else
+		echo failed.
+	fi
+fi
+if [ ! -f /etc/ssh_host_rsa_key ]; then
+	echo -n "ssh-keygen: generating new RSA host key... "
+	if /usr/bin/ssh-keygen -q -t rsa -f /etc/ssh_host_rsa_key -N ''; then
 		echo done.
 	else
 		echo failed.
@@ -364,7 +373,7 @@ if [ ! -f /etc/ssh_host_dsa_key ]; then
 fi
 if [ ! -f /etc/ssh_host_key ]; then
 	echo -n "ssh-keygen: generating new RSA host key... "
-	if /usr/bin/ssh-keygen -q -f /etc/ssh_host_key -N ''; then
+	if /usr/bin/ssh-keygen -q -t rsa1 -f /etc/ssh_host_key -N ''; then
 		echo done.
 	else
 		echo failed.
@@ -464,7 +473,7 @@ if [ "X${smtpfwdd_flags}" != X"NO" ]; then
 fi
 
 
-if [ X${inetd} = X"YES" ]; then
+if [ X${inetd} = X"YES" -a -e /etc/inetd.conf ]; then
 	echo -n ' inetd';		inetd
 fi
 
@@ -496,8 +505,8 @@ if [ "X${mopd_flags}" != X"NO" -a -d /tftpboot/mop ]; then
 	echo -n ' mopd';		mopd ${mopd_flags}
 fi
 
-if [ X"${sshd}" == X"YES" ]; then
-	/usr/sbin/sshd;			echo -n ' sshd'
+if [ X"${sshd_flags}" != X"NO" ]; then
+	/usr/sbin/sshd ${sshd_flags};	echo -n ' sshd'
 fi
 
 echo '.'

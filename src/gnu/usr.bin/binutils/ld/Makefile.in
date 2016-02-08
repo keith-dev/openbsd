@@ -203,6 +203,7 @@ ALL_EMULATIONS = \
 	eaixppc.o \
 	eaixrs6.o \
 	ealpha.o \
+	ealphabsd.o \
 	earcelf.o \
 	earmelf.o \
 	earmelf_oabi.o \
@@ -369,7 +370,7 @@ GEN_DEPENDS = $(srcdir)/genscripts.sh stringify.sed
 ld_new_SOURCES = ldgram.y ldlex.l lexsup.c ldlang.c mri.c ldctor.c ldmain.c \
 	ldwrite.c ldexp.c ldemul.c ldver.c ldmisc.c ldfile.c ldcref.c
 
-ld_new_DEPENDENCIES = $(EMULATION_OFILES) $(EMUL_EXTRA_OFILES) $(BFDLIB) $(LIBIBERTY) $(INTLDEPS)
+ld_new_DEPENDENCIES = $(EMULATION_OFILES) $(EMUL_EXTRA_OFILES) $(BFDLIB) $(INTLDEPS)
 ld_new_LDADD = $(EMULATION_OFILES) $(EMUL_EXTRA_OFILES) $(BFDLIB) $(LIBIBERTY) $(INTLLIBS)
 
 # This is the real libbfd.a created by libtool.
@@ -999,6 +1000,9 @@ eaixrs6.c: $(srcdir)/emulparams/aixrs6.sh \
 ealpha.c: $(srcdir)/emulparams/alpha.sh \
   $(srcdir)/emultempl/generic.em $(srcdir)/scripttempl/alpha.sc ${GEN_DEPENDS}
 	${GENSCRIPTS} alpha "$(tdir_alpha)"
+ealphabsd.c: $(srcdir)/emulparams/alphabsd.sh \
+  $(srcdir)/emultempl/generic.em $(srcdir)/scripttempl/alphabsd.sc ${GEN_DEPENDS}
+	${GENSCRIPTS} alphabsd "$(tdir_alphabsd)"
 earcelf.c: $(srcdir)/emulparams/arcelf.sh \
   $(srcdir)/emultempl/generic.em $(srcdir)/scripttempl/elf.sc ${GEN_DEPENDS}
 	${GENSCRIPTS} arcelf "$(tdir_arcelf)"

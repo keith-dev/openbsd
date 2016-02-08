@@ -1,5 +1,5 @@
-.\"	$OpenBSD: ping6.8,v 1.12 2000/08/13 20:17:00 itojun Exp $
-.\"     $KAME: ping6.8,v 1.27 2000/08/11 04:38:35 itojun Exp $
+.\"	$OpenBSD: ping6.8,v 1.15 2001/03/19 06:54:15 itojun Exp $
+.\"	$KAME: ping6.8,v 1.37 2001/03/19 06:54:22 itojun Exp $
 .\"
 .\" Copyright (C) 1995, 1996, 1997, and 1998 WIDE Project.
 .\" All rights reserved.
@@ -183,13 +183,13 @@ option.
 If
 .Ar preload
 is specified,
-.Nm ping
+.Nm
 sends that many packets as fast as possible before falling into its normal
 mode of behavior.
 Only the super-user may use this option.
 .It Fl n
 Numeric output only.
-No attempt will be made to lookup symbolic names for host addresses.
+No attempt will be made to lookup symbolic names from addresses in the reply.
 .It Fl N
 Probe node information multicast group
 .Pq Li ff02::2:xxxx:xxxx .
@@ -212,11 +212,6 @@ For example,
 .Dq Li \-p ff
 will cause the sent packet to be filled with all
 ones.
-.Fl Q
-flag,
-.Nm
-prints out any ICMP error messages caused by its own ECHO_REQUEST
-messages.
 .\" new ipsec
 .\".It Fl P Ar policy
 .\".Ar policy
@@ -341,7 +336,7 @@ during normal operations or from automated scripts.
 .\" If less than eight bytes of pad are specified, no round trip times are
 .\" given.
 .Sh DUPLICATE AND DAMAGED PACKETS
-.Nm Ping6
+.Nm
 will report duplicate and damaged packets.
 Duplicate packets should never occur when pinging a unicast address,
 and seem to be caused by
@@ -356,7 +351,7 @@ to the same request.
 .Pp
 Damaged packets are obviously serious cause for alarm and often
 indicate broken hardware somewhere in the
-.Nm ping
+.Nm
 packet's path
 .Pq in the network or in the hosts .
 .Sh TRYING DIFFERENT DATA PATTERNS
@@ -392,6 +387,34 @@ option of
 .Nm
 returns 0 on success (the host is alive),
 and non-zero if the arguments are incorrect or the host is not responding.
+.Sh EXAMPLES
+Normally,
+.Xr ping6 8
+works just like
+.Xr ping 8
+would work; the following will send ICMPv6 echo request to
+.Li dst.foo.com .
+.Bd -literal -offset indent
+ping6 -n dst.foo.com
+.Ed
+.Pp
+The following will probe hostnames for all nodes on the network link attached to
+.Li wi0
+interface.
+The address
+.Li ff02::1
+is named the link-local all-node multicast address, and the packet would
+reach every node on the network link.
+.Bd -literal -offset indent
+ping6 -w ff02::1%wi0
+.Ed
+.Pp
+The following will probe addresses assigned to the destination node,
+.Li dst.foo.com .
+.Bd -literal -offset indent
+ping6 -a agl dst.foo.com
+.Ed
+.Pp
 .Sh SEE ALSO
 .Xr netstat 1 ,
 .Xr ifconfig 8 ,
@@ -415,7 +438,7 @@ and non-zero if the arguments are incorrect or the host is not responding.
 .Re
 .Sh HISTORY
 The
-.Nm ping
+.Xr ping 8
 command appeared in
 .Bx 4.3 .
 The

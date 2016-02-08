@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile.inc,v 1.9 2000/09/03 18:41:12 espie Exp $
+#	$OpenBSD: Makefile.inc,v 1.11 2001/04/09 06:55:40 deraadt Exp $
 
 TOP=		${.CURDIR}/..
 
@@ -10,7 +10,7 @@ CRUNCHCONF?=    ${.CURDIR}/../common/${CBIN}.conf
 .else
 CRUNCHCONF?=    ${.CURDIR}/../common/${CBIN}-nokrb.conf
 .endif
-LISTS=		${.CURDIR}/../common/list
+LISTS?=		${.CURDIR}/../common/list ${.CURDIR}
 
 MOUNT_POINT=	/mnt
 MTREE=		${.CURDIR}/../common/mtree.conf
@@ -66,9 +66,7 @@ bsd.rd:	${IMAGE} bsd rdsetroot
 bsd:
 	cd ${.CURDIR}/../../../../sys/arch/i386/conf && config ${RAMDISK}
 	cd ${.CURDIR}/../../../../sys/arch/i386/compile/${RAMDISK} && \
-	    make clean && COPTS=-Os make
-#	cd ${.CURDIR}/../../../../sys/arch/i386/compile/${RAMDISK} && \
-#	    make clean && make
+	    make clean && make depend && COPTS=-Os make
 	cp ${.CURDIR}/../../../../sys/arch/i386/compile/${RAMDISK}/bsd bsd
 
 ${IMAGE}: ${CBIN} rd_setup do_files rd_teardown

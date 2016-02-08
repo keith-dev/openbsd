@@ -9,7 +9,7 @@
 */
 
 /* ====================================================================
- * Copyright (c) 1998-2000 Ralf S. Engelschall. All rights reserved.
+ * Copyright (c) 1998-2001 Ralf S. Engelschall. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -800,7 +800,7 @@ int ssl_hook_Access(request_rec *r)
     if (dc->nVerifyDepth != UNSET) {
         apctx = SSL_get_app_data2(ssl);
         if ((vp = ap_ctx_get(apctx, "ssl::verify::depth")) != NULL)
-            n = AP_CTX_PTR2NUM(vp);
+            n = (int)AP_CTX_PTR2NUM(vp);
         else
             n = sc->nVerifyDepth;
         ap_ctx_set(apctx, "ssl::verify::depth",
@@ -1071,10 +1071,12 @@ int ssl_hook_Access(request_rec *r)
     }
 
     /*
-     * Else access is granted...
-     * (except vendor handlers override)
+     * Else access is granted from our point of view (except vendor
+     * handlers override). But we have to return DECLINED here instead
+     * of OK, because mod_auth and other modules still might want to
+     * deny access.
      */
-    rc = OK;
+    rc = DECLINED;
 #ifdef SSL_VENDOR
     ap_hook_use("ap::mod_ssl::vendor::access_handler",
                 AP_HOOK_SIG2(int,ptr), AP_HOOK_DECLINE(DECLINED),
@@ -1098,6 +1100,9 @@ int ssl_hook_Auth(request_rec *r)
     SSLDirConfigRec *dc = myDirConfig(r);
     char b1[MAX_STRING_LEN], b2[MAX_STRING_LEN];
     char *clientdn;
+    const char *cpAL;
+    const char *cpUN;
+    const char *cpPW;
 
     /*
      * Additionally forbid access (again)
@@ -1106,6 +1111,24 @@ int ssl_hook_Auth(request_rec *r)
     if (   (dc->nOptions & SSL_OPT_STRICTREQUIRE)
         && (ap_table_get(r->notes, "ssl-access-forbidden") != NULL))
         return FORBIDDEN;
+
+    /*
+     * Make sure the user is not able to fake the client certificate
+     * based authentication by just entering an X.509 Subject DN
+     * ("/XX=YYY/XX=YYY/..") as the username and "password" as the
+     * password.
+     */
+    if ((cpAL = ap_table_get(r->headers_in, "Authorization")) != NULL) {
+        if (strcEQ(ap_getword(r->pool, &cpAL, ' '), "Basic")) {
+            while (*cpAL == ' ' || *cpAL == '\t')
+                cpAL++;
+            cpAL = ap_pbase64decode(r->pool, cpAL);
+            cpUN = ap_getword_nulls(r->pool, &cpAL, ':');
+            cpPW = cpAL;
+            if (cpUN[0] == '/' && strEQ(cpPW, "password"))
+                return FORBIDDEN;
+        }
+    }
 
     /*
      * We decline operation in various situations...
@@ -1708,7 +1731,7 @@ int ssl_callback_NewSessionCacheEntry(SSL *ssl, SSL_SESSION *pNew)
      * same expire time, so it expires automatically there, too.
      */
     t = (SSL_get_time(pNew) + sc->nSessionCacheTimeout);
-    rc = ssl_scache_store(s, pNew, t);
+    rc = ssl_scache_store(s, pNew->session_id, pNew->session_id_length, t, pNew);
 
     /*
      * Log this cache operation
@@ -1716,7 +1739,7 @@ int ssl_callback_NewSessionCacheEntry(SSL *ssl, SSL_SESSION *pNew)
     ssl_log(s, SSL_LOG_TRACE, "Inter-Process Session Cache: "
             "request=SET status=%s id=%s timeout=%ds (session caching)",
             rc == TRUE ? "OK" : "BAD",
-            ssl_scache_id2sz(pNew->session_id, pNew->session_id_length),
+            SSL_SESSION_id2sz(pNew->session_id, pNew->session_id_length),
             t-time(NULL));
 
     /*
@@ -1757,11 +1780,11 @@ SSL_SESSION *ssl_callback_GetSessionCacheEntry(
     if (pSession != NULL)
         ssl_log(s, SSL_LOG_TRACE, "Inter-Process Session Cache: "
                 "request=GET status=FOUND id=%s (session reuse)",
-                ssl_scache_id2sz(id, idlen));
+                SSL_SESSION_id2sz(id, idlen));
     else
         ssl_log(s, SSL_LOG_TRACE, "Inter-Process Session Cache: "
                 "request=GET status=MISSED id=%s (session renewal)",
-                ssl_scache_id2sz(id, idlen));
+                SSL_SESSION_id2sz(id, idlen));
 
     /*
      * Return NULL or the retrieved SSL_SESSION. But indicate (by
@@ -1794,14 +1817,14 @@ void ssl_callback_DelSessionCacheEntry(
     /*
      * Remove the SSL_SESSION from the inter-process cache
      */
-    ssl_scache_remove(s, pSession);
+    ssl_scache_remove(s, pSession->session_id, pSession->session_id_length);
 
     /*
      * Log this cache operation
      */
     ssl_log(s, SSL_LOG_TRACE, "Inter-Process Session Cache: "
             "request=REM status=OK id=%s (session dead)",
-            ssl_scache_id2sz(pSession->session_id,
+            SSL_SESSION_id2sz(pSession->session_id,
             pSession->session_id_length));
 
     return;

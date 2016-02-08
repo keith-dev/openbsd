@@ -321,7 +321,7 @@ list_options()
 		default:
 		    p = strrchr(cur->desc, ':');
 		    if (p)
-			(void) printf("%s: %.*s\n", cur->name, p - cur->desc,
+			(void) printf("%s: %.*s\n", cur->name, (int)(p - cur->desc),
 			    cur->desc);
 		    else
 			(void) printf("%s: %s\n", cur->name, cur->desc);
@@ -408,7 +408,7 @@ set_default(var, val, op)
 		    return(FALSE);
 		}
 	    }
-	    if ((cur->type & T_PATH) && *val != '/') {
+	    if ((cur->type & T_PATH) && val && *val != '/') {
 		(void) fprintf(stderr,
 		    "%s: values for `%s' must start with a '/'\n", Argv[0],
 		    var);
@@ -731,7 +731,7 @@ store_mode(val, def, op)
 	def->sd_un.mode = (mode_t)0777;
     } else {
 	l = strtol(val, &endp, 8);
-	if (*endp != '\0' || l < 0 || l >= 0777)
+	if (*endp != '\0' || l < 0 || l > 0777)
 	    return(FALSE);
 	def->sd_un.mode = (mode_t)l;
     }

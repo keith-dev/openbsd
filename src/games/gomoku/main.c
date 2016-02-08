@@ -1,4 +1,4 @@
-/*	$OpenBSD: main.c,v 1.8 1998/03/26 21:16:49 pjanzen Exp $	*/
+/*	$OpenBSD: main.c,v 1.11 2001/03/30 04:40:07 pjanzen Exp $	*/
 /*
  * Copyright (c) 1994
  *	The Regents of the University of California.  All rights reserved.
@@ -45,17 +45,19 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)main.c	8.4 (Berkeley) 5/4/95";
 #else
-static char rcsid[] = "$OpenBSD: main.c,v 1.8 1998/03/26 21:16:49 pjanzen Exp $";
+static char rcsid[] = "$OpenBSD: main.c,v 1.11 2001/03/30 04:40:07 pjanzen Exp $";
 #endif
 #endif /* not lint */
 
-#include "gomoku.h"
+#include <sys/param.h>
 #include <curses.h>
 #include <err.h>
 #include <signal.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+
+#include "gomoku.h"
 
 #define USER	0		/* get input from standard input */
 #define PROGRAM	1		/* get input from program */
@@ -80,7 +82,7 @@ int	movelog[BSZ * BSZ];		/* log of all the moves */
 int	movenum;			/* current move number */
 char	*plyr[2];			/* who's who */
 
-static char you[9] = "you\0\0\0\0\0\0";	/* username */
+static char you[MAXLOGNAME];	/* username */
 
 int
 main(argc, argv)
@@ -88,6 +90,7 @@ main(argc, argv)
 	char **argv;
 {
 	char buf[128];
+	char fname[MAXPATHLEN];
 	int color = BLACK, curmove = 0, i, ch;
 	int input[2];
 	static char *fmt[2] = {
@@ -106,8 +109,10 @@ main(argc, argv)
 	else
 		prog = argv[0];
 
-	if ((tmpname = getlogin()) != 0)
-		strncpy(you,tmpname,8);
+	if ((tmpname = getlogin()) != NULL)
+		strlcpy(you, tmpname, sizeof(you));
+	else
+		strlcpy(you, "you", sizeof(you));
 
 	while ((ch = getopt(argc, argv, "bcdD:hu")) != -1) {
 		switch (ch) {
@@ -249,8 +254,8 @@ again:
 				input[WHITE] = PROGRAM;
 				break;
 			}
-			plyr[BLACK] = input[BLACK] == USER ? "you" : prog;
-			plyr[WHITE] = input[WHITE] == USER ? "you" : prog;
+			plyr[BLACK] = input[BLACK] == USER ? you : prog;
+			plyr[WHITE] = input[WHITE] == USER ? you : prog;
 			bdwho(1);
 			goto top;
 
@@ -263,8 +268,8 @@ again:
 					FILE *fp;
 
 					ask("save file name? ");
-					(void)getline(buf, sizeof(buf));
-					if ((fp = fopen(buf, "w")) == NULL) {
+					(void)getline(fname, sizeof(fname));
+					if ((fp = fopen(fname, "w")) == NULL) {
 						log("cannot create save file");
 						goto getinput;
 					}

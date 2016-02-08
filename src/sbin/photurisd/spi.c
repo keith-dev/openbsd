@@ -1,5 +1,7 @@
+/*	$OpenBSD: spi.c,v 1.8 2001/01/28 22:45:17 niklas Exp $	*/
+
 /*
- * Copyright 1997,1998 Niels Provos <provos@physnet.uni-hamburg.de>
+ * Copyright 1997-2000 Niels Provos <provos@citi.umich.edu>
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -33,11 +35,13 @@
  */
 
 #ifndef lint
-static char rcsid[] = "$Id: spi.c,v 1.2 1999/03/27 21:18:02 provos Exp $";
+static char rcsid[] = "$OpenBSD: spi.c,v 1.8 2001/01/28 22:45:17 niklas Exp $";
 #endif
 
 #define _SPI_C_
 
+#include <sys/types.h>
+#include <sys/queue.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -51,20 +55,27 @@ static char rcsid[] = "$Id: spi.c,v 1.2 1999/03/27 21:18:02 provos Exp $";
 #include "attributes.h"
 #include "buffer.h"
 #include "spi.h"
+#include "secrets.h"
 #include "schedule.h"
-#include "errlog.h"
+#include "log.h"
 #ifdef IPSEC
 #include "kernel.h"
 #endif
 
 
-static struct spiob *spiob = NULL;
+TAILQ_HEAD(spilist, spiob) spihead;
+
+void
+spi_init(void)
+{
+	TAILQ_INIT(&spihead);
+}
 
 time_t
 getspilifetime(struct stateob *st)
 {
      /* XXX - destination depend lifetimes */
-     return st->spi_lifetime;
+     return (st->spi_lifetime);
 }
 
 int
@@ -77,8 +88,8 @@ make_spi(struct stateob *st, char *local_address,
 
      if(*attributes == NULL) {           /* We are in need of attributes */
 	  if (select_attrib(st, attributes, attribsize) == -1) {
-	       log_error(0, "select_attrib() in make_spi()");
-	       return -1;
+	       log_print("select_attrib() in make_spi()");
+	       return (-1);
 	  }
      }
 	
@@ -102,122 +113,96 @@ make_spi(struct stateob *st, char *local_address,
 	  
      *lifetime = getspilifetime(st) + (arc4random() & 0x1F);
 
-     return 0;
-}
-
-int
-spi_set_tunnel(struct stateob *st, struct spiob *spi)
-{
-     if (st->flags & IPSEC_OPT_TUNNEL) {
-	  spi->flags |= SPI_TUNNEL;
-	  spi->isrc = st->isrc;
-	  spi->ismask = st->ismask;
-	  spi->idst = st->idst;
-	  spi->idmask = st->idmask;
-     } else {
-	  spi->isrc = inet_addr(spi->local_address);
-	  spi->ismask = inet_addr("255.255.255.255");
-	  spi->idst = inet_addr(spi->address);
-	  spi->idmask = inet_addr("255.255.255.255");
-     }
-     return 1;
+     return (0);
 }
 
 
 int
 spi_insert(struct spiob *ob)
 {
-     struct spiob *tmp;
+	TAILQ_INSERT_TAIL(&spihead, ob, next);
 
-     ob->next = NULL;
-
-     if(spiob == NULL) {
-	  spiob = ob;
-	  return 1;
-     }
-     
-     tmp=spiob;
-     while(tmp->next!=NULL)
-	  tmp = tmp->next;
-
-     tmp->next = ob;
-     return 1;
+	return (1);
 }
 
 int
 spi_unlink(struct spiob *ob)
 {
-     struct spiob *tmp;
-     if(spiob == ob) {
-	  spiob = ob->next;
-	  free(ob);
-	  return 1;
-     }
+	LOG_DBG((LOG_SPI, 45, __FUNCTION__": unlinking %s spi %x",
+		 ob->flags & SPI_OWNER ? "Owner" : "User",
+		 ntohl(*(u_int32_t *)ob->SPI)));
 
-     for(tmp=spiob; tmp!=NULL; tmp=tmp->next) {
-	  if(tmp->next==ob) {
-	       tmp->next=ob->next;
-	       free(ob);
-	       return 1;
-	  }
-     }
-     return 0;
+	TAILQ_REMOVE(&spihead, ob, next);
+	free(ob);
+	
+	return (1);
 }
 
 struct spiob *
 spi_new(char *address, u_int8_t *spi)
 {
      struct spiob *p;
+
      if (spi_find(address, spi) != NULL)
-	  return NULL;
+	  return (NULL);
      if ((p = calloc(1, sizeof(struct spiob))) == NULL)
-	  return NULL;
+	  return (NULL);
 
      if ((p->address = strdup(address)) == NULL) {
 	  free(p);
-	  return NULL;
+	  return (NULL);
      }
      bcopy(spi, p->SPI, SPI_SIZE);
      
-     return p;
+     return (p);
 }
 
 int
 spi_value_reset(struct spiob *ob)
 { 
-     if (ob->address != NULL)
-	  free(ob->address);
-     if (ob->local_address != NULL)
-	  free(ob->local_address);
-     if (ob->attributes != NULL)
-	  free(ob->attributes);
-     if (ob->sessionkey != NULL)
-	  free(ob->sessionkey);
+	if (ob->address != NULL) {
+		free(ob->address);
+		ob->address = NULL;
+	}
+	if (ob->local_address != NULL) {
+		free(ob->local_address);
+		ob->local_address = NULL;
+	}
+	if (ob->attributes != NULL) {
+		free(ob->attributes);
+		ob->attributes = NULL;
+	}
+	if (ob->sessionkey != NULL) {
+		memset(ob->sessionkey, 0, ob->sessionkeysize);
+		free(ob->sessionkey);
+		ob->sessionkey = NULL;
+	}
 
-     return 1;
+	return (1);
 }
 
 
 struct spiob * 
 spi_find_attrib(char *address, u_int8_t *attrib, u_int16_t attribsize) 
 { 
-     struct spiob *tmp = spiob; 
+     struct spiob *tmp; 
      u_int16_t i;
 
-     while(tmp!=NULL) { 
-          if(!strcmp(address, tmp->address)) {
-	       for(i=0;i<attribsize; i += attrib[i+1]+2) {
-		    if (attrib[i] == AT_AH_ATTRIB || attrib[i] == AT_ESP_ATTRIB)
-			 continue;
+     for (tmp = TAILQ_FIRST(&spihead); tmp; tmp = TAILQ_NEXT(tmp, next)) { 
+          if (!strcmp(address, tmp->address)) {
+	       for (i = 0; i < attribsize; i += attrib[i + 1] + 2) {
+		    if (attrib[i] == AT_AH_ATTRIB || 
+			attrib[i] == AT_ESP_ATTRIB)
+			    continue;
 		    if (!isinattrib(tmp->attributes, tmp->attribsize, attrib[i]))
 			 break;
 	       }
 	       if (i == attribsize)
-		    return tmp;
+		    return (tmp);
 	  }
-          tmp = tmp->next; 
      } 
-     return NULL; 
+
+     return (NULL); 
 } 
 
 /* 
@@ -229,67 +214,166 @@ spi_find_attrib(char *address, u_int8_t *attrib, u_int16_t attribsize)
 struct spiob *
 spi_find(char *address, u_int8_t *spi)
 {
-     struct spiob *tmp = spiob;
-     while(tmp!=NULL) {
-          if ((address == NULL || (tmp->flags & SPI_OWNER ? 
-	      !strcmp(address, tmp->local_address) :
-	      !strcmp(address, tmp->address))) &&
-	     !bcmp(spi, tmp->SPI, SPI_SIZE))
-	       return tmp;
-	  tmp = tmp->next;
-     }
-     return NULL;
-}
+	struct spiob *tmp;
 
-struct spiob *
-spi_root(void)
-{
-     return spiob;
-}
+	for (tmp = TAILQ_FIRST(&spihead); tmp; tmp = TAILQ_NEXT(tmp, next)) {
+		if (bcmp(spi, tmp->SPI, SPI_SIZE))
+			continue;
 
-void
-spi_cleanup()
-{
-     struct spiob *p;
-     struct spiob *tmp = spiob;
-     while(tmp!=NULL) {
-	  p = tmp;
-	  tmp = tmp->next;
-	  spi_value_reset(p);
-	  free(p);
-     }
-     spiob = NULL;
+		if (address == NULL)
+			break;
+
+		if (tmp->flags & SPI_OWNER ?
+		    !strcmp(address, tmp->local_address) :
+		    !strcmp(address, tmp->address))
+			break;
+	}
+
+	return (tmp);
 }
 
 void
 spi_expire(void)
 {
-     struct spiob *tmp = spiob, *p;
-     time_t tm;
+	struct spiob *tmp, *next;
+	time_t tm;
 
-     tm = time(NULL);
-     while (tmp != NULL) {
-	  if (tmp->lifetime == -1 || 
-	      tmp->lifetime + (tmp->flags & SPI_OWNER ? 
-			       CLEANUP_TIMEOUT : 0) > tm) {
-	       tmp = tmp->next;
-	       continue;
-	  }
-#ifdef DEBUG
-	  {
-	       int i = BUFFER_SIZE;
-	       bin2hex(buffer, &i, tmp->SPI, 4);
-	       printf("Expiring %s spi %s to %s\n", 
-		      tmp->flags & SPI_OWNER ? "Owner" : "User",
-		      buffer, tmp->address);
-	  }
-#endif
+	tm = time(NULL);
+	for (tmp = TAILQ_FIRST(&spihead); tmp; tmp = next) {
+		next = TAILQ_NEXT(tmp, next);
+
+		if (tmp->lifetime == -1 || tmp->lifetime > tm)
+			continue;
+
+		LOG_DBG((LOG_SPI, 30, __FUNCTION__
+			 ": expiring %s spi %x to %s",
+			 tmp->flags & SPI_OWNER ? "Owner" : "User",
+			 ntohl(*(u_int32_t *)tmp->SPI), tmp->address));
+
 #ifdef IPSEC
-	  kernel_unlink_spi(tmp);
+		kernel_unlink_spi(tmp);
 #endif
-	  p = tmp;
-	  tmp = tmp->next;
-	  spi_value_reset(p);
-	  spi_unlink(p);
-     }
+		spi_value_reset(tmp);
+		spi_unlink(tmp);
+	}
+}
+
+void
+spi_update_insert(struct spiob *spi)
+{
+	time_t tm = time(NULL);
+	int seconds;
+
+	seconds = spi->lifetime - tm;
+	if (seconds < 0)
+		seconds = 0;
+	seconds = seconds * 9 / 10;
+
+	schedule_insert(UPDATE, seconds, spi->SPI, SPI_SIZE);
+}
+
+void
+spi_update(int sock, u_int8_t *spinr)
+{
+	struct stateob *st;
+	struct spiob *spi, *nspi;
+	struct sockaddr_in sin;
+	
+	/* We are to create a new SPI */
+	if ((spi = spi_find(NULL, spinr)) == NULL) {
+		log_print("spi_find() in schedule_process()");
+		return;
+	}
+
+	if (!(spi->flags & SPI_OWNER))
+		return;
+
+	if (spi->flags & SPI_UPDATED) {
+		LOG_DBG((LOG_SPI, 55, __FUNCTION__": SPI %x already updated",
+			 ntohl(*(u_int32_t *)spinr)));
+		return;
+	}
+
+	LOG_DBG((LOG_SPI, 45, __FUNCTION__": updating SPI %x",
+		 ntohl(*(u_int32_t *)spinr)));
+
+
+	if ((st = state_find_cookies(spi->address, spi->icookie, NULL)) == NULL) {
+		/* 
+		 * This happens always when an exchange expires but
+		 * updates are still scheduled for it.
+		 */
+		LOG_DBG((LOG_SPI, 65, __FUNCTION__": state_find_cookies()"));
+		return;
+	}
+
+	if (st->oSPIattrib != NULL)
+		free(st->oSPIattrib);
+	if ((st->oSPIattrib = calloc(spi->attribsize, sizeof(u_int8_t))) == NULL) {
+		log_error("calloc() in schedule_process()");
+		return;
+	}
+	st->oSPIattribsize = spi->attribsize;
+	bcopy(spi->attributes, st->oSPIattrib, st->oSPIattribsize);
+
+	/* We can keep our old attributes, this is only an update */
+	if (make_spi(st, spi->local_address, st->oSPI, &(st->olifetime),
+		     &(st->oSPIattrib), &(st->oSPIattribsize)) == -1) {
+		log_print(__FUNCTION__": make_spi()");
+		return;
+	}
+
+	packet_size = PACKET_BUFFER_SIZE; 
+	if (photuris_spi_update(st, packet_buffer, &packet_size) == -1) {
+		log_print(__FUNCTION__": photuris_spi_update()");
+		return;
+	}
+
+	/* Send the packet */
+	sin.sin_port = htons(st->port); 
+	sin.sin_family = AF_INET; 
+	sin.sin_addr.s_addr = inet_addr(st->address);
+		    
+	if (sendto(sock, packet_buffer, packet_size, 0,
+		   (struct sockaddr *) &sin, sizeof(sin)) != packet_size) {
+		log_error("sendto() in schedule_process()");
+		return;
+	}
+	       
+#ifdef DEBUG
+	printf("Sending SPI UPDATE to %s.\n", st->address);
+#endif
+	/* Insert Owner SPI */
+	if ((nspi = spi_new(st->address, st->oSPI)) == NULL) {
+		log_error("spi_new() in handle_spi_needed()");
+		return;
+	}
+	if ((nspi->local_address = strdup(spi->local_address)) == NULL) {
+		log_error("strdup() in handle_spi_needed()");
+		spi_value_reset(nspi);
+		return;
+	}
+	bcopy(st->icookie, nspi->icookie, COOKIE_SIZE);
+	nspi->flags |= SPI_OWNER;
+	nspi->attribsize = st->oSPIattribsize;
+	nspi->attributes = calloc(nspi->attribsize, sizeof(u_int8_t));
+	if (nspi->attributes == NULL) {
+		log_error("calloc() in handle_spi_needed()");
+		spi_value_reset(nspi);
+		return;
+	}
+	bcopy(st->oSPIattrib, nspi->attributes, nspi->attribsize);
+	nspi->lifetime = time(NULL) + st->olifetime;
+
+	make_session_keys(st, nspi);
+
+	spi_insert(nspi);
+	spi_update_insert(nspi);
+
+#ifdef IPSEC
+	kernel_insert_spi(st, nspi);
+#endif
+
+	/* Our old SPI has been updated, dont update it again */
+	spi->flags |= SPI_UPDATED;
 }

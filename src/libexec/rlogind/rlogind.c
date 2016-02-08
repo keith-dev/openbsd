@@ -1,3 +1,5 @@
+/*	$OpenBSD: rlogind.c,v 1.27 2001/01/28 19:34:31 niklas Exp $	*/
+
 /*-
  * Copyright (c) 1983, 1988, 1989, 1993
  *	The Regents of the University of California.  All rights reserved.
@@ -39,7 +41,7 @@ static char copyright[] =
 
 #ifndef lint
 /* from: static char sccsid[] = "@(#)rlogind.c	8.1 (Berkeley) 6/4/93"; */
-static char *rcsid = "$Id: rlogind.c,v 1.24 2000/03/09 15:03:29 deraadt Exp $";
+static char *rcsid = "$OpenBSD: rlogind.c,v 1.27 2001/01/28 19:34:31 niklas Exp $";
 #endif /* not lint */
 
 /*
@@ -255,9 +257,8 @@ doit(f, fromp)
 			hints.ai_family = fromp->sa_family;
 			hints.ai_socktype = SOCK_STREAM;
 			hints.ai_flags = AI_CANONNAME;
+			res0 = NULL;
 			gaierror = getaddrinfo(hostname, "0", &hints, &res0);
-			if (gaierror)
-				res0 = NULL;
 			for (res = res0; good == 0 && res; res = res->ai_next) {
 				if (res->ai_family != fromp->sa_family)
 					continue;
@@ -581,7 +582,10 @@ cleanup(signo)
 	(void)chmod(line, 0666);
 	(void)chown(line, 0, 0);
 	shutdown(netf, 2);
-	exit(1);
+	if (signo)
+		_exit(1);
+	else
+		exit(1);
 }
 
 void

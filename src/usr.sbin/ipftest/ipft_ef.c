@@ -1,7 +1,7 @@
-/*	$OpenBSD: ipft_ef.c,v 1.14 2000/03/13 23:40:20 kjell Exp $	*/
+/*	$OpenBSD: ipft_ef.c,v 1.16 2001/01/30 04:31:01 kjell Exp $	*/
 
 /*
- * Copyright (C) 1993-1998 by Darren Reed.
+ * Copyright (C) 1993-2000 by Darren Reed.
  *
  * Redistribution and use in source and binary forms are permitted
  * provided that this notice is preserved and due credit is given
@@ -53,7 +53,7 @@ etherfind -n -t
 
 #if !defined(lint)
 static const char sccsid[] = "@(#)ipft_ef.c	1.6 2/4/96 (C)1995 Darren Reed";
-static const char rcsid[] = "@(#)$IPFilter: ipft_ef.c,v 2.1 1999/08/04 17:30:02 darrenr Exp $";
+static const char rcsid[] = "@(#)$IPFilter: ipft_ef.c,v 2.2 2000/03/13 22:10:24 darrenr Exp $";
 #endif
 
 static	int	etherf_open __P((char *));

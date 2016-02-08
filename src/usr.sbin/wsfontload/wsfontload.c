@@ -1,4 +1,4 @@
-/* $OpenBSD: wsfontload.c,v 1.1 2000/07/02 01:29:44 mickey Exp $ */
+/* $OpenBSD: wsfontload.c,v 1.4 2001/03/14 02:51:36 mickey Exp $ */
 /* $NetBSD: wsfontload.c,v 1.2 2000/01/05 18:46:43 ad Exp $ */
 
 /*
@@ -39,11 +39,12 @@
 #include <unistd.h>
 #include <sys/types.h>
 #include <sys/ioctl.h>
+#include <string.h>
 #include <err.h>
 
 #include <dev/wscons/wsconsio.h>
 
-#define DEFDEV		"/dev/ttyEcfg"
+#define DEFDEV		"/dev/ttyCcfg"
 #define DEFWIDTH	8
 #define DEFHEIGHT	16
 #define DEFENC		WSDISPLAY_FONTENC_ISO
@@ -60,52 +61,73 @@ usage()
 	extern char *__progname;
 
 	(void)fprintf(stderr,
-		"Usage: %s [-f wsdev] [-w width] [-h height] [-e encoding]"
-		" [-N name] [-b] [-B] [fontfile]\n",
-		      __progname);
+		"Usage: %s [-f wsdev] -l\n"
+		"       %s [-f wsdev] -d name\n"
+		"       %s [-w width] [-h height] [-e encoding] "
+		"[-N name] [-b] [-B] [fontfile]\n",
+		      __progname, __progname, __progname);
 	exit(1);
 }
+
+static const
+struct {
+	const char *name;
+	int val;
+} encodings[] = {
+	{"iso",  WSDISPLAY_FONTENC_ISO},
+	{"ibm",  WSDISPLAY_FONTENC_IBM},
+	{"pcvt", WSDISPLAY_FONTENC_PCVT},
+	{"iso7", WSDISPLAY_FONTENC_ISO7},
+	{"sony", WSDISPLAY_FONTENC_SONY},
+};
 
 int
 main(argc, argv)
 	int argc;
 	char **argv;
 {
-	char *wsdev;
+	char *wsdev, *p;
 	struct wsdisplay_font f;
-	int c, res, wsfd, ffd;
+	int c, res, wsfd, ffd, list, i;
 	size_t len;
 	void *buf;
 
 	wsdev = DEFDEV;
+	f.index = -1;
 	f.fontwidth = DEFWIDTH;
 	f.fontheight = DEFHEIGHT;
 	f.firstchar = 0;
 	f.numchars = 256;
 	f.stride = 0;
 	f.encoding = DEFENC;
-	f.name = 0;
+	f.name[0] = 0;
 	f.bitorder = DEFBITORDER;
 	f.byteorder = DEFBYTEORDER;
 
-	while ((c = getopt(argc, argv, "f:w:h:e:N:bB")) != -1) {
+	list = 0;
+	while ((c = getopt(argc, argv, "bB:e:f:h:lN:w:")) != -1) {
 		switch (c) {
 		case 'f':
 			wsdev = optarg;
 			break;
 		case 'w':
 			if (sscanf(optarg, "%d", &f.fontwidth) != 1)
-				errx(1, "invalid font width");
+				errx(1, "invalid font width of %d",
+				    f.fontwidth);
 			break;
 		case 'h':
 			if (sscanf(optarg, "%d", &f.fontheight) != 1)
-				errx(1, "invalid font height");
+				errx(1, "invalid font height of %d",
+				    f.fontheight);
 			break;
 		case 'e':
 			f.encoding = getencoding(optarg);
 			break;
+		case 'l':
+			list++;
+			break;
 		case 'N':
-			f.name = optarg;
+			strlcpy(f.name, optarg, WSFONT_NAME_SIZE);
 			break;
 		case 'b':
 			f.bitorder = WSDISPLAY_FONTORDER_R2L;
@@ -122,19 +144,46 @@ main(argc, argv)
 	argc -= optind;
 	argv += optind;
 
+	if (list && argc)
+		usage();
+
 	if (argc > 1)
 		usage();
 
 	wsfd = open(wsdev, O_RDWR, 0);
 	if (wsfd < 0)
-		err(2, "open ws");
+		err(2, "open %s", wsdev);
+
+	if (list) {
+		i = 0;
+		p = " # Name             Encoding  W  H";
+		do {
+			f.index = i;
+			res = ioctl(wsfd, WSDISPLAYIO_LSFONT, &f);
+			if (res == 0) {
+				if (f.name[0]) {
+					if (p) {
+						puts(p);
+						p = NULL;
+					}
+					printf("%2d %-16s %8s %2d %2d\n",
+					    f.index, f.name,
+					    encodings[f.encoding].name,
+					    f.fontwidth, f.fontheight);
+				}
+			}
+			i++;
+		} while(res == 0);
+
+		return (0);
+	}
 
 	if (argc > 0) {
 		ffd = open(argv[0], O_RDONLY, 0);
 		if (ffd < 0)
-			err(4, "open font");
-		if (!f.name)
-			f.name = argv[0];
+			err(4, "open %s", argv[0]);
+		if (!*f.name)
+			strlcpy(f.name, argv[0], WSFONT_NAME_SIZE);
 	} else
 		ffd = 0;
 
@@ -149,9 +198,9 @@ main(argc, argv)
 		errx(1, "malloc");
 	res = read(ffd, buf, len);
 	if (res < 0)
-		err(4, "read font");
+		err(4, "read %s", argv[0]);
 	if (res != len)
-		errx(4, "short read");
+		errx(4, "short read on %s", argv[0]);
 
 	f.data = buf;
 
@@ -161,15 +210,6 @@ main(argc, argv)
 
 	return (0);
 }
-
-static struct {
-	char *name;
-	int val;
-} encodings[] = {
-	{"iso", WSDISPLAY_FONTENC_ISO},
-	{"ibm", WSDISPLAY_FONTENC_IBM},
-	{"pcvt", WSDISPLAY_FONTENC_PCVT},
-};
 
 static int
 getencoding(name)

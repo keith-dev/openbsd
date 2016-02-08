@@ -1,5 +1,5 @@
 #!/bin/sh
-#	$OpenBSD: install.sh,v 1.74 2000/06/16 03:19:42 deraadt Exp $
+#	$OpenBSD: install.sh,v 1.77 2001/04/20 01:55:51 krw Exp $
 #	$NetBSD: install.sh,v 1.5.2.8 1996/08/27 18:15:05 gwr Exp $
 #
 # Copyright (c) 1997,1998 Todd Miller, Theo de Raadt
@@ -70,7 +70,7 @@
 #	In a perfect world, this would be a nice C program, with a reasonable
 #	user interface.
 
-FILESYSTEMS="/tmp/filesystems"		# used thoughout
+FILESYSTEMS="/tmp/filesystems"		# used throughout
 FQDN=					# domain name
 
 trap "umount /tmp > /dev/null 2>&1" 0
@@ -329,31 +329,6 @@ if [ "`df /`" = "`df /mnt`" ]; then
 		done
 	) < ${FILESYSTEMS} > /tmp/fstab
 
-# XXX We no longer do the following. It is not neccessary. It can be done
-# XXX after the install is complete.
-#
-#	echo	"The fstab is configured as follows:"
-#	echo
-#	cat /tmp/fstab
-#	cat << \__fstab_config_1
-#
-#You may wish to edit the fstab.  You may also wish to take this opportunity to
-#place NFS mounts in the fstab  (this would be especially useful if you plan to
-#keep '/usr' on an NFS server.
-#__fstab_config_1
-#	echo -n	"Edit the fstab with ${EDITOR}? [n] "
-#	getresp "n"
-#	case "$resp" in
-#		y*|Y*)
-#			${EDITOR} /tmp/fstab
-#			;;
-#
-#		*)
-#			;;
-#	esac
-#
-#	echo
-
 	munge_fstab /tmp/fstab /tmp/fstab.shadow
 	mount_fs /tmp/fstab.shadow "-o async"
 fi
@@ -406,12 +381,12 @@ cd /tmp
 echo -n "Copying "
 for file in fstab hostname.* hosts myname mygate resolv.conf; do
 	if [ -f $file ]; then
-		echo -n "$file, "
+		echo -n "$file "
 		cp $file /mnt/etc/$file
 		rm -f $file
 	fi
 done
-echo " ...done."
+echo "...done."
 
 if [ -f /etc/dhclient.conf ]; then
 	echo -n "Modifying dhclient.conf..."

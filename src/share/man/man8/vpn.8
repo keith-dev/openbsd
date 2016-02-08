@@ -1,4 +1,5 @@
-.\" $OpenBSD: vpn.8,v 1.46 2000/10/18 16:50:22 deraadt Exp $
+.\" $OpenBSD: vpn.8,v 1.50 2001/03/01 16:11:24 aaron Exp $
+.\"
 .\" Copyright 1998 Niels Provos <provos@physnet.uni-hamburg.de>
 .\" All rights reserved.
 .\"
@@ -75,14 +76,6 @@ manual (symmetric shared secret)
 .It
 .Xr photurisd 8
 .El
-.Pp
-At present,
-.Xr photurisd 8
-has a limitation in that the IP adress of the security gateway must
-fall within the range of adresses being tunnelled to, making VPNs
-between (non-routable) private (RFC 1918) networks difficult.
-This does not apply to
-.Xr isakmpd 8 .
 .Ss Enabling the Appropriate Kernel Operations
 Make sure that the following options and devices are enabled in the kernel:
 .Bd -literal
@@ -204,7 +197,7 @@ On the security gateway of subnet A:
 	    -addr B_EXTERNAL_IP 255.255.255.255
 	          A_EXTERNAL_IP 255.255.255.255 
 	    -require -in -src A_EXTERNAL_IP
-	# ipsecadm flow -dst A_EXTERNAL_IP -proto esp
+	# ipsecadm flow -dst B_EXTERNAL_IP -proto esp
 	    -addr B_INTERNAL_NETWORK B_INTERNAL_NETMASK
 	          A_INTERNAL_NETWORK A_INTERNAL_NETMASK
 	    -require -in -src A_EXTERNAL_IP
@@ -212,7 +205,7 @@ On the security gateway of subnet A:
 	    -addr B_EXTERNAL_IP 255.255.255.255
 	          A_INTERNAL_NETWORK A_INTERNAL_NETMASK
 	    -require -in -src A_EXTERNAL_IP
-	# ipsecadm flow -dst A_EXTERNAL_IP -proto esp
+	# ipsecadm flow -dst B_EXTERNAL_IP -proto esp
 	    -addr B_INTERNAL_NETWORK B_INTERNAL_NETMASK
 	          A_EXTERNAL_IP 255.255.255.255
 	    -require -in -src A_EXTERNAL_IP
@@ -274,7 +267,7 @@ trust management system.
 needs to be configured such that all packets from the outside are blocked
 by default.
 Only successfully IPsec-processed packets (from the
-.Xr enc0 4
+.Xr enc 4
 interface), or key management packets (for
 .Xr photurisd 8 ,
 .Tn UDP
@@ -312,7 +305,7 @@ If there are no other
 .Xr ipf 5
 rules, the "quick" clause can be added to the last four rules.
 NAT rules can also be used on the
-.Xr enc0 4
+.Xr enc 4
 interface.
 Note that it is strongly encouraged that instead of detailed IPF
 rules, the SPD (IPsec flow database) be utilized to specify security

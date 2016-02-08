@@ -1,4 +1,4 @@
-.\" $OpenBSD: bsd.port.mk.5,v 1.17 2000/10/26 00:37:04 aaron Exp $
+.\" $OpenBSD: bsd.port.mk.5,v 1.35 2001/04/18 14:48:29 espie Exp $
 .\"
 .\" Copyright (c) 2000 Marc Espie
 .\"
@@ -43,15 +43,24 @@ Other BSD variants, as well as older versions of
 include other targets and variables.
 Conversion methods are outlined here.
 .Pp
-This is an incomplete draft; some variables and targets are not yet documented.
+This is still incomplete; some variables and targets are not yet documented.
+Mostly because undocumented stuff has fuzzy semantics, and it hasn't been
+decided yet how to define it.
 .Sh TARGETS
 .Bl -tag -width do-configure
+.It Ar addsum
+Complete the ${CHECKSUM_FILE} record of checksums with files that have been
+added since
+.Ar makesum .
+Complain if anything does not match.
 .It Ar build , Ar all
 Default target.
 Build the port.
 Essentially invoke
 .Bd -literal
-env -i ${MAKE_ENV} ${MAKE_PROGRAM} ${MAKE_FLAGS} \\\&\ 
+env -i ${MAKE_ENV} ${MAKE_PROGRAM} ${MAKE_FLAGS} \\
+.Ed
+.Bd -literal
 	-f ${MAKE_FILE} ${ALL_TARGET}
 .Ed
 .It Ar checkpatch
@@ -59,9 +68,22 @@ Debugging version of the
 .Ar patch
 target that simulates invoking
 .Xr patch 1 .
+.It Ar checksum
+Check distribution archives and distribution patches control sum against
+the results recorded in ${CHECKSUM_FILE},
+using the cryptographic signature utilities listed in ${PREFERRED_CIPHERS}.
+Normally ${ALLFILES}
+are checksummed, unless
+.Ev IGNOREFILES
+is set to a list of files to ignore.
+Invoking
+.Ar checksum
+with REFETCH=true
+will try to fetch a version of with mismatched checksums off the OpenBSD
+main archive site.
 .It Ar configure
 Configure the port.
-Might be a no operation.
+Might be a void operation.
 Unless overridden, configure creates the ${WRKBUILD}
 directory (see SEPARATE_BUILD), runs ${SCRIPTDIR}/configure if it exists,
 and runs whatever configuration methods are recorded in
@@ -79,18 +101,100 @@ needs to invoke
 .Ar distpatch
 directly for historical reasons.
 .It Ar extract
-Extract the distfiles (but see
+Extract the distfiles under
+.Pa ${WRKDIST}
+(but see
 .Ev EXTRACT_ONLY ) .
+Refer to
+.Ev EXTRACT_CASES
+for a complete description.
 .It Ar fake
 Do a fake port installation, that is, simulate the port installation under
 ${WRKINST}.
 Described in a separate section below.
 .It Ar fetch
 Fetch the distfiles and patchfiles.
+Each file of the
+.Ev DISTFILES
+and
+.Ev PATCHFILES
+lists is retrieved, if necessary, from the list of sites in
+.Ev MASTER_SITES ,
+with %SUBDIR% substituted with
+.Ev MASTER_SITE_SUBDIR .
+If a filename ends with a
+.Sq :0
+to
+.Sq :9
+extension, it will be retrieved from
+.Ev MASTER_SITES0
+to
+.Ev MASTER_SITES9
+instead.
+The ports framework uses
+.Pa ${DISTDIR}/${DIST_SUBDIR}
+(aliased to
+.Pa ${FULLDISTDIR} )
+to cache the ports distribution files and patch files.
+Note that this framework is also used by mirroring scripts,
+which will also retrieve
+.Ev SUPDISTFILES ,
+to fill with supplementary distribution files which are not needed for
+every configuration.
+See
+.Ev ALLFILES ,
+.Ev CDROM_SITE ,
+.Ev DISTDIR ,
+.Ev DISTFILES ,
+.Ev DIST_SUBDIR ,
+.Ev FETCH_SYMLINK_DISTFILES ,
+.Ev FULL_DISTDIR ,
+.Ev MASTER_SITES ,
+.Ev MASTER_SITES0 , ... ,
+.Ev MASTER_SITES9 ,
+.Ev PATCH_FILES ,
+.Ev SUPDISTFILES ,
+.Ev REFETCH .
+.It Ar makesum
+Create the ${CHECKSUM_FILE} list of recorded checksums by running the
+cryptographic fingerprints sha1, md5 and rmd160 on ${ALLFILES} minus
+${IGNOREFILES}.
 .It Ar patch
 Apply distribution and
 .Ox
 specific patches.
+Because of historical accident,
+.Ar patch
+does not follow the exact same scheme other standard targets do.
+Namely,
+.Ar patch
+invokes
+.Ar pre-patch
+(if defined),
+.Ar do-patch ,
+and
+.Ar post-patch ,
+but the default
+.Ar do-patch
+target recurses through
+.Ar distpatch
+So, if the
+.Ar do-patch
+target is overridden, it should still begin by calling
+make distpatch, before applying
+.Ox
+specific patches.
+See
+.Ar distpatch
+for the distribution patches-specific description.
+If
+.Pa ${PATCHDIR}
+exists, the files described under
+.Ev PATCH_LIST
+will be applied under
+.Ev WRKDIST .
+.It Ar rebuild
+Force rebuild of the port.
 .It Ar show
 Invoked with VARNAME=name, show the contents of VARNAME.
 Mostly used from recursive makes, or to know the contents of another
@@ -98,6 +202,12 @@ port's variables without guessing wrong.
 .El
 .Sh VARIABLES
 .Bl -tag -width MASTER_SITES
+.It Ev show
+Invoked as make show=name, show the contents of variable name.
+.It Ev ALLFILES
+List of all files that need to be retrieved by
+.Ar fetch ,
+with master site selection extension removed. Read-only.
 .It Ev ALL_TARGET
 Target used to build software.
 Default is
@@ -118,7 +228,7 @@ Set based on corresponding INSTALL_* variables.
 .It Ev BUILD_DEPENDS
 List of other ports the current port needs to build correctly.
 Each item has the form
-.Sq file_to_test::directory[:target] .
+.Sq file_to_test::directory[,-subpackage][,flavor ...][:target] .
 The double :: is designed to allow wedging a package specification in the
 near future.
 .Sq target
@@ -132,22 +242,48 @@ The special name /nonexistent can be used to force a build
 dependency (see the ghostscript port for an example).
 .Sq directory
 is set relative to ${PORTSDIR}.
+.Sq subpackage
+is an optional subpackage name, to install instead of the default main
+package name.
+.Sq flavor ...
+is a comma separated list of flavors.
+By default, the dependency will build the default flavor.
 Build dependencies are checked at the beginning of the extract stage.
 .It Ev BZIP2
 Name of the bzip2 binary.
+.It Ev CATEGORIES
+List of descriptive categories into which this port fails.
+Mandatory.
+See
+.Ar link-categories ,
+.Ar unlink-categories .
 .It Ev CDROM_PACKAGES
 Base location where packages suitable for a CDROM (see
 PERMIT_PACKAGE_CDROM) will be placed
 (default: ${PORTSDIR}/cdrom-packages/${ARCH})
+.It Ev CDROM_SITE
+Path to a local database that holds distribution files (usually a CD-Rom
+or other similar media), used to retrieve distribution files before going
+to the network.
+Defaults to
+.Pa /cdrom/distfiles
+if this path exists.
+Distribution files are still copied or linked (see
+.Ev FETCH_SYMLINK_DISFILES )
+into
+.Ev DISTDIR
+if they are found under CDROM_SITE.
 .It Ev CFLAGS
 Default flags passed to the compiler for building.
 Many ports ignore it.
 See also
 .Ev COPTS .
 .It Ev CHECKSUM_FILE
-Location for this port checksums, used at
-.Ar checksum
-stage.
+Location for this port checksums, used by
+.Ar addsum ,
+.Ar checksum ,
+and
+.Ar makesum .
 Defaults to ${FILESDIR}/md5.
 .It Ev CLEANDEPENDS
 If set to
@@ -156,12 +292,21 @@ If set to
 will also clean dependencies.
 Note that distclean never recurses down to dependencies.
 .It Ev COMMENT
-File used as a comment for the package, and in the INDEX.
-Set to
-${PKGDIR}/COMMENT by default (with corrections for multi-packages and flavors).
-If COMMENT starts with a dash, this is a literal string instead.
-This can be used to leave a stub Makefile for removed ports and have a complete
-INDEX entry without needing more files.
+Comment used for the package, and in the INDEX.
+.It Ev COMMENT-foo
+Comment used for sub package foo in a multi-package set up.
+.It Ev COMMENT-vanilla
+Comment used for a flavored package, if the non-flavored comment is
+unappropriate.
+.It Ev COMMENT-foo-vanilla
+Comment used for a sub-, flavored package.
+.It Ev CONFIGURE_ARGS
+Arguments to pass to configure script.
+Defaults are empty, except for
+gnu-style configure, where prefix and sysconfdir are set.
+.It Ev CONFIGURE_ENV
+Basic environment passed to configure script (path and libtool setup).
+gnu-style configure adds a lot more variables.
 .It Ev CONFIGURE_SCRIPT
 Set to name of script invoked by
 .Ar configure
@@ -170,8 +315,8 @@ Should be relative to ${WRKSRC}.
 .It Ev CONFIGURE_SHARED
 Set to --enable-shared or --disable-shared, depending whether the
 architecture supports shared libraries.
-Append to CONFIGURE_ARGS, for ports that build dynamic libraries and
-whose configure script supports those options.
+Should be appended to CONFIGURE_ARGS, for ports that build dynamic libraries 
+and whose configure script supports these options.
 .It Ev CONFIGURE_STYLE
 Set to style of configuration that needs to happen.
 If
@@ -216,12 +361,39 @@ time.
 Default is 022.
 Don't override.
 .It Ev DISTDIR
-Directory where all ports distfiles are stashed.
+Directory where all ports distfiles and patchfiles are stashed.
 Defaults to
 .Pa ${PORTSDIR}/distfiles.
-Override if distfiles are stored elsewhere, but use
+Override if distfiles are stored elsewhere.
+Always use
 .Ev FULLDISTDIR
-to refer to ports's distfiles location instead.
+to refer to ports's distfiles location, as it takes an eventual
+.Ev DIST_SUBDIR
+into account.
+.It Ev DISTFILES
+The main port distribution files (the actual software source, except
+for binary-only ports).
+Will be retrieved from the MASTER_SITES (see
+.Ar fetch ) ,
+checksummed and extracted (see
+.Ar checksum ,
+.Ar extract ) .
+normally holds a list of files, possibly with :0
+.Ev DISTFILES
+normally holds a list of files, possibly with
+.Sq 0
+to
+.Sq 9
+appended to select a different
+.Ev MASTER_SITES .
+See also
+.Ev SUPDISTFILES .
+.It Ev DISTNAME
+Name used to identify the port.
+See
+.Ev DISTFILES
+and
+.Ev PKGNAME .
 .It Ev DISTORIG
 Suffix used by
 .Ar distpatch
@@ -259,6 +431,10 @@ do
 	  unzip -q ${FULLDISTDIR}/$$archive -d ${WRKDIR};;
 	*.tar.bz2)
 	  bzip2 -dc ${FULLDISTDIR}/$$archive| tar xf -;;
+	*.shar.gz|*.shar.Z|*.sh.Z|*.sh.gz)
+	  gzcat ${FULLDISTDIR}/$$archive | /bin/sh;;
+	*.shar|*.sh)
+	  /bin/sh ${FULLDISTDIR}/$$archive;;
 	*.tar)
 	  tar xf ${FULLDISTDIR}/$$archive;;
 	*)
@@ -297,6 +473,12 @@ No current port overrides the default.
 See BUILD_DEPENDS for specification.
 Fetch dependencies are checked at the beginning of the extract stage.
 No current port uses FETCH_DEPENDS.
+.It Ev FETCH_SYMLINK_DISTFILES
+Set to
+.Sq Yes
+to link distribution files off
+.Ev CDROM_DISTSITE
+instead of copying them.
 .It Ev FILESDIR
 Location of other files related to the current ports.
 Holds at least the checksum file, sometimes other files
@@ -308,13 +490,27 @@ Set by the user, and tested by the port to activate wanted functionalities.
 List of all flavors keywords a port may match.
 Used to sort FLAVOR into a canonical order to build the package name,
 or to select the packing-list, and as a quick validity check.
+.It Ev FLAVOR_EXT
+Canonical list of flavors being set for the current build, dash-separated.
+See
+.Ev FULLPKGNAME .
 .It Ev FTP_PACKAGES
 Base location where packages suitable for ftp (see
 PERMIT_PACKAGE_FTP) will be placed
 (default: ${PORTSDIR}/ftp-packages/${ARCH})
+.It Ev FULLPKGNAME
+Full name of the created package, taking flavors into account.
+Defaults to ${PKGNAME}${FLAVOR_EXT}.
+.It Ev FULLPKGNAME-foo
+Full package name for sub-package foo, if the default value is not
+appropriate.
 .It Ev GMAKE
 Location of the gnu make binary, if needed.
 Defaults to gmake.
+.It Ev IGNOREFILES
+Set to the list of files that cannot be checksummed.
+For use by ports which
+fetch dynamically generated archives that can't be checksummed.
 .It Ev LIB_DEPENDS
 Libraries this port depends upon.
 Similar to BUILD_DEPENDS, except that
@@ -358,7 +554,7 @@ to ${LIBTOOL} ${LIBTOOL_FLAGS}.
 .It Ev LOCALBASE
 where other ports have already been installed (default: /usr/local)
 .It Ev MAINTAINER
-E-mail address of the port's maintainer.
+E-mail address with full name of the port's maintainer.
 Defaults to ports@openbsd.org.
 .It Ev MAKE_ENV
 Environment variables passed to make invocations.
@@ -380,12 +576,25 @@ File recorded in the package and displayed during installation.
 Defaults to ${PKGDIR}/MESSAGE if this file exists.
 Leave empty if no message is needed.
 .It Ev MTREE_FILE
-.Xr mtree 1
+.Xr mtree 8
 specification to check when creating a PLIST with the
 .Ar plist
 target.
-By default,
-.Pa ${PORTSDIR}/infrastructure/db/fake.mtree.
+.Ev MTREE_FILE
+can hold a list of file names, to which
+.Pa ${PORTSDIR}/infrastructure/db/fake.mtree
+is always appended.
+These specifications are rooted at
+.Pa ${WRKINST} ,
+and are subject to
+.Ev SUBST_VARS
+substitution, to ease
+.Pa ${PREFIX}
+independence.
+This feature is primarily intended for large, interconnected ports,
+such as the kde suite, where a base package sets up a large, extra
+directory hierarchy that would make the manual checking of packing lists
+tedious.
 .It Ev MULTI_PACKAGES
 Set to a list of package extensions for ports that create multiple packages.
 See
@@ -399,6 +608,22 @@ needed by this ports tree.
 Usually set to the current version of
 .Nm
 when port was built, and updated by port maintainers when needed.
+.It Ev NOT_FOR_ARCHS
+List of architectures on which this port does not build.
+See also
+.Ev ONLY_FOR_ARCHS .
+.It Ev NO_BUILD
+Port does not need any build stage.
+.It Ev NO_DEPENDS
+Don't verify build of dependencies.
+Do not use in any ports Makefile.
+This is only meant as a user convenience when, e.g., you just want to browse
+through a given port's source and do not wish to trigger the build of
+dependencies.
+.It Ev NO_SHARED_ARCHS
+Set to the list of platforms that do not support shared libraries.
+Use with
+.Ev NOT_FOR_ARCHS .
 .It Ev NO_SHARED_LIBS
 Set to
 .Sq Yes
@@ -406,9 +631,13 @@ if platform does not support shared libraries.
 To be tested after including
 .Nm bsd.port.mk ,
 if neither PFRAG.SHARED nor CONFIGURE_SHARED are enough.
+.It Ev ONLY_FOR_ARCHS
+List of architectures on which this port builds.
+Can hold both processor-specific information (e.g., m68k), and more
+specific model information (e.g., amiga).
 .It Ev OPSYS
 Always
-.Ox OpenBSD
+.Ox
 (read-only).
 .It Ev OPSYS_VER
 Revision number of
@@ -423,6 +652,15 @@ Defaults to
 .It Ev PATCHDIR
 Location for patches applied by patch target (default: patches.${ARCH} or
 patches).
+.It Ev PATCHFILES
+Files to fetch from the master sites like
+.Ev DISTFILES ,
+but serving a different purpose, as they hold distribution patches that
+will be applied at the
+.Ar patch
+stage.
+See also
+.Ev SUPDISTFILES .
 .It Ev PATCH_ARGS
 Full list of options used while applying port's patches.
 .It Ev PATCH_CHECK_ONLY
@@ -465,8 +703,13 @@ Default: pkg.${ARCH} or pkg.
 Name of the created package.
 Default is ${DISTNAME} for the main package,
 and ${DISTNAME}${SUBPACKAGE} for multi-packages ports.
-This is automatically altered to include flavors, so it is unwise to
-base other variables on it.
+This does not take flavors into account.
+See
+.Ev FULLPKGNAME
+for that.
+.It Ev PKGNAME-foo
+Package name for sub-package foo, if the default value
+of ${PKGNAME}${SUBPACKAGE} is not appropriate.
 .It Ev PKGPATH
 Path to the current port's directory, relative to ${PORTSDIR}.
 Read-only.
@@ -479,6 +722,12 @@ The first cipher that matches in ${CHECKSUM_FILE} is verified.
 Base directory for the current port installation.
 Usually ${LOCALBASE}, though some ports may elect a location under /var,
 and some multi-package ports may install under several locations.
+.It Ev REFETCH
+If set to true,
+.Ar checksum
+will analyze ${CHECKSUM_FILE}, and try retrieving files with the correct
+checksum off ftp.openbsd.org, in the directory
+.Pa /pub/OpenBSD/distfiles/$cipher/$value/$file .
 .It Ev RUN_DEPENDS
 Specification of ports this port needs installed to be functional.
 Same format as BUILD_DEPENDS.
@@ -527,8 +776,30 @@ Always holds
 .Ev PREFIX ,
 and
 .Ev SYSCONFDIR .
+The special construct
+.Sq ${FLAVORS}
+can be used in the packing-list to specify the current list of dash
+separated flavors the port is compiled with (useful for cross-dependencies
+in
+.Ev MULTI_PACKAGES ) .
 Add other
 variables as needed.
+.It Ev SUPDISTFILES
+Supplementary files that need to be retrieved under some specific
+circumstances. For instance, a port might need architecture-specific files.
+.Ev SUPDISTFILES
+should hold a list of all distfiles and patchfiles that are not always
+needed, so that a mirror will be able to grab all files, or that
+.Ar makesum
+will work.
+Having an overlap between
+.Ev SUPDISTFILES
+and
+.Ev DISTFILES ,
+.Ev PATCHFILES
+is admissible, and in fact, expected, as it is much simpler to build
+an error-free list of files to retrieve in that way.
+See the xanim port for an example.
 .It Ev SYSCONFDIR
 Location for ports system configuration files.
 Defaults to
@@ -543,12 +814,6 @@ Base location for the templates used in the
 target.
 .It Ev UNZIP
 Name of the unzip binary.
-.It Ev USE_ZIP
-Set to Yes if port needs zip to build properly.
-This is automatic if EXTRACT_ONLY holds files matching *.zip.
-.It Ev USE_BZIP2
-Set to Yes if port needs bzip2 to build properly.
-This is automatic if EXTRACT_ONLY holds files matching *.bzip2.
 .It Ev WRKBUILD
 Subdirectory of ${WRKDIR} where the actual build occurs.
 Defaults to ${WRKSRC}, unless SEPARATE_BUILD is involved, in which case
@@ -596,21 +861,38 @@ Add correct dependencies, and passes LIBTOOL environment variable to
 scripts invocations.
 .It Ev USE_MOTIF
 Set to
-.Sq Yes
-if lesstif is needed for correct behavior of this port.
+.Sq any
+if port works with any version of motif;
+.Sq lesstif
+if port requires lesstif to work;
+.Sq openmotif
+if ports requires openmotif to work.
+The
+.Sq any
+setting creates an extra flavor choice of 
+.Sq lesstif .
 .It Ev XMKMF
 Invocation of xmkmf for CONFIGURE_STYLE=imake port.
 Defaults to xmkf -a -DPorts.
 The -DPorts is specific to
 .Ox
 and is always appended.
+.It Ev YACC
+Name of yacc program to pass to gnu-configure, defaults to yacc.
+(gnu-configure would always try to use bison otherwise, which leads to
+unreproducible builds.)
+Set to bison if needed.
 .El
 .Sh FILES
 .Bl -tag -width files/md5
 .It Pa ../Makefile.inc
 Common Makefile fragment for a set of ports, included automatically.
+.It Pa /cdrom/distfiles
+Default path to a CD-Rom (or other media) full of distribution files.
 .It Pa Makefile.${ARCH}
 Arch-dependent Makefile fragment, included automatically.
+.It Pa ${DISTDIR}
+cache of all distribution files.
 .It Pa ${FILESDIR}/md5
 Checksum file.
 Holds the output of
@@ -619,6 +901,8 @@ Holds the output of
 and
 .Xr rmd160 1
 for the ports ${DISTFILES} and ${PATCHFILES}.
+.It Pa ${FULLDISTDIR}/${ALLFILES}
+cache of distribution files for a given port.
 .It Pa ${PKGDIR}/DESCR
 Description for the port.
 Variables such as ${HOMEPAGE} will be expanded
@@ -646,21 +930,17 @@ Set
 to nothing and override
 .Ar post-extract
 instead.
-.It Ar fetch-list
-Use the more powerful
-.Ar mirror-maker
-and
-.Ar fetch-makefile
-targets instead.
-.It Ar mirror-distfiles
-Use the more powerful
-.Ar mirror-maker
-and
-.Ar fetch-makefile
-targets instead.
+.It Ar fetch-all , Ar fetch-list , Ar mirror-distfiles
+See
+.Xr mirroring-ports 7
+for more efficient and flexible ways to build mirrors.
 .El
 .Sh OBSOLETE VARIABLES
 .Bl -tag -width MASTER_SITES
+.It Ev COMMENT
+Used to be the name of the comment file for a package.
+It now holds the comment itself.
+Some magic has been put in to allow for a seamless transition.
 .It Ev DESCR_SRC
 From
 .Nx .
@@ -680,6 +960,18 @@ Likewise, use
 instead.
 .It Ev EXTRACT_CMD
 Likewise, use
+.Ev EXTRACT_CASES
+instead.
+.It Ev USE_BZIP2
+Use
+.Ev EXTRACT_SUFX
+or
+.Ev EXTRACT_CASES
+instead.
+.It Ev USE_ZIP
+Use
+.Ev EXTRACT_SUFX
+or
 .Ev EXTRACT_CASES
 instead.
 .It Ev GNU_CONFIGURE
@@ -724,7 +1016,7 @@ Starting with
 the operating system installation script runs the /usr/local specification
 globally, instead of embedding it in each package.
 So packages no longer record an
-.Xr mtree 1
+.Xr mtree 8
 specification.
 Use an explicit
 .Sq @exec
@@ -744,7 +1036,7 @@ Use CLEANDEPENDS instead.
 ships with compressed man pages, and uses this variable to control
 that behavior.
 .It Ev PATCH_SITES
-.Ev PATCH_FILES
+.Ev PATCHFILES
 used to be retrieved from a separate site list.
 For greater flexibility, all files are now retrieved from
 .Ev MASTER_SITES ,
@@ -772,6 +1064,13 @@ This is PLIST.
 .Ox
 does not give a specific name to the generated file.
 It is not recommended to try to access them directly.
+.It Ev PKGNAME
+Used to refer to the full package name, has been superseded by
+.Ev FULLPKGNAME .
+.Ev PKGNAME
+now holds the package name, not taking multi-packages nor flavors
+into account.
+Most ports are not concerned by this change.
 .It Ev PLIST_SUBST
 From
 .Nx
@@ -843,7 +1142,7 @@ process after tweaking a few variables.
 .Pp
 .Ar fake
 first creates a skeleton tree under ${WRKINST}, using the
-.Xr mtree 1
+.Xr mtree 8
 specification
 .Pa ${PORTSDIR}/infrastructure/db/fake.mtree .
 .Pp
@@ -880,13 +1179,10 @@ ${FAKE_FLAGS} is used to set variables on
 .Xr make 1
 command line, which will override the port Makefile contents.
 Thus, a port that mentions DESTDIR= does not need any patch to work with fake.
-.Pp
-Recursive makes are a problem, and will often need FAKE_FLAGS to be changed
-to ensure that the right values are passed down to submakes.
 .Sh FLAVORS AND MULTI_PACKAGES
 Starting with
 .Ox 2.7 ,
-each port can generate several packages through two orthogonal mechanims:
+each port can generate several packages through two orthogonal mechanisms:
 FLAVORS and MULTI_PACKAGES.
 .Pp
 If a port can be compiled with several options, set FLAVORS to the list of
@@ -920,7 +1216,7 @@ This is not yet supported for dependencies.
 .Pp
 Finally, packing information will use templates with the canonical package
 extension if they are available: if FLAVOR='option1 option2' and both
-DESCR and DESCR-option1-option2 are available, DESCR-option1-option2 will
+COMMENT and COMMENT-option1-option2 are available, COMMENT-option1-option2 will
 be used.
 .Pp
 If a port can generate several useful packages, set MULTI_PACKAGES
@@ -931,19 +1227,18 @@ MULTI_PACKAGES only affects the actual package building step (and the
 describe step, since a MULTI_PACKAGES port will produce several
 descriptions).
 .Pp
-Apart from the main package, created by default, each element of
-MULTI_PACKAGES triggers a recursive make package, with SUBPACKAGE set to the
-right value.
+If MULTI_PACKAGES is set, each element of MULTI_PACKAGES triggers a
+recursive make package, with SUBPACKAGE set to the right value.
 For instance, if MULTI_PACKAGES=-lib -server,
 make package will work as follows:
 .Pp
 .Bl -bullet -compact
 .It
+Run make package SUBPACKAGE=,
+.It
 Run make package SUBPACKAGE=-lib,
 .It
 Run make package SUBPACKAGE=-server,
-.It
-Build the main package, by running make package SUBPACKAGE=''
 .El
 .Pp
 The port's Makefile can test the value of SUBPACKAGE to specialize
@@ -952,11 +1247,6 @@ All packing information is derived from
 templates with SUBPACKAGE appended.
 In the preceding example, the packing-list template for pkgname-foo
 must be in PLIST-foo.
-.Pp
-It is currently not possible to have a subpackage depend on the main
-package, except by inserting an explicit
-.Li "@pkgdep"
-command into the packing-list.
 .Sh THE GENERATION OF PACKING INFORMATION
 Starting after
 .Ox 2.7
@@ -965,7 +1255,7 @@ generated from templates in ${PKGDIR}.
 .Pp
 .Bl -bullet -compact
 .It
-If not overriden by the user, determine which set of templates to use,
+If not overridden by the user, determine which set of templates to use,
 depending on the current SUBPACKAGE and FLAVOR information.
 Set ${PLIST}, ${DESCR}, ${COMMENT}, ${MESSAGE} accordingly.
 .It
@@ -1068,3 +1358,5 @@ improvements.
 .\" HAVE_MOTIF, REQUIRE_MOTIF: need to revisit what these should mean.
 .\"
 .\" Todo: OBJMACHINE
+.Sh SEE ALSO
+.Xr packages-specs 7

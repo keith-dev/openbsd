@@ -1,4 +1,4 @@
-/*	$OpenBSD: print-udp.c,v 1.14 2000/10/03 14:21:57 ho Exp $	*/
+/*	$OpenBSD: print-udp.c,v 1.19 2001/04/09 21:44:41 ho Exp $	*/
 
 /*
  * Copyright (c) 1988, 1989, 1990, 1991, 1992, 1993, 1994, 1995, 1996
@@ -23,7 +23,7 @@
 
 #ifndef lint
 static const char rcsid[] =
-    "@(#) $Header: /cvs/src/usr.sbin/tcpdump/print-udp.c,v 1.14 2000/10/03 14:21:57 ho Exp $ (LBL)";
+    "@(#) $Header: /cvs/src/usr.sbin/tcpdump/print-udp.c,v 1.19 2001/04/09 21:44:41 ho Exp $ (LBL)";
 #endif
 
 #include <sys/param.h>
@@ -349,12 +349,14 @@ static int udp_cksum(register const struct ip *ip,
 #define KERBEROS_SEC_PORT 750	/*XXX*/
 #define L2TP_PORT 1701		/*XXX*/
 #define ISAKMP_PORT   500	/*XXX*/
+#define TIMED_PORT 525		/*XXX*/
 #define NETBIOS_NS_PORT    137	/*XXX*/
 #define NETBIOS_DGRAM_PORT 138	/*XXX*/
 #define OLD_RADIUS_AUTH_PORT 1645
 #define OLD_RADIUS_ACCT_PORT 1646
 #define RADIUS_AUTH_PORT     1812
 #define RADIUS_ACCT_PORT     1813
+#define LWRES_PORT 921
 
 #ifdef INET6
 #define RIPNG_PORT 521		/*XXX*/
@@ -423,6 +425,11 @@ udp_print(register const u_char *bp, u_int length, register const u_char *bp2)
 			break;
 
 		case PT_RPC:
+			(void)printf("%s.%s > %s.%s: ",
+				ipaddr_string(&ip->ip_src),
+				udpport_string(sport),
+				ipaddr_string(&ip->ip_dst),
+				udpport_string(dport));
 			rp = (struct rpc_msg *)(up + 1);
 			direction = (enum msg_type)ntohl(rp->rm_direction);
 			if (direction == CALL)
@@ -466,17 +473,32 @@ udp_print(register const u_char *bp, u_int length, register const u_char *bp2)
 		if (TTEST(rp->rm_direction)) {
 			direction = (enum msg_type)ntohl(rp->rm_direction);
 			if (dport == NFS_PORT && direction == CALL) {
+				(void)printf("%s.%s > %s.%s: ",
+					ipaddr_string(&ip->ip_src),
+					udpport_string(sport),
+					ipaddr_string(&ip->ip_dst),
+					udpport_string(dport));
 				nfsreq_print((u_char *)rp, length,
 				    (u_char *)ip);
 				return;
 			}
 			if (sport == NFS_PORT && direction == REPLY) {
+				(void)printf("%s.%s > %s.%s: ",
+					ipaddr_string(&ip->ip_src),
+					udpport_string(sport),
+					ipaddr_string(&ip->ip_dst),
+					udpport_string(dport));
 				nfsreply_print((u_char *)rp, length,
 				    (u_char *)ip);
 				return;
 			}
 #ifdef notdef
 			if (dport == SUNRPC_PORT && direction == CALL) {
+				(void)printf("%s.%s > %s.%s: ",
+					ipaddr_string(&ip->ip_src),
+					udpport_string(sport),
+					ipaddr_string(&ip->ip_dst),
+					udpport_string(dport));
 				sunrpcrequest_print((u_char *)rp, length, (u_char *)ip);
 				return;
 			}
@@ -541,6 +563,10 @@ udp_print(register const u_char *bp, u_int length, register const u_char *bp2)
 #define ISPORT(p) (dport == (p) || sport == (p))
 		if (ISPORT(NAMESERVER_PORT))
 			ns_print((const u_char *)(up + 1), length);
+		else if (ISPORT(LWRES_PORT))
+			lwres_print((const u_char *)(up + 1), length);
+		else if (ISPORT(TIMED_PORT))
+			timed_print((const u_char *)(up + 1), length);
 		else if (ISPORT(TFTP_PORT))
 			tftp_print((const u_char *)(up + 1), length);
 		else if (ISPORT(IPPORT_BOOTPC) || ISPORT(IPPORT_BOOTPS))
@@ -557,7 +583,11 @@ udp_print(register const u_char *bp, u_int length, register const u_char *bp2)
 		else if (ISPORT(L2TP_PORT))
 			l2tp_print((const u_char *)(up + 1), length);
 		else if (ISPORT(ISAKMP_PORT))
-			isakmp_print((const u_char *)(up + 1), length);
+			ike_print((const u_char *)(up + 1), length);
+		else if (ISPORT(NETBIOS_NS_PORT))
+			nbt_udp137_print((const u_char *)(up + 1), length);
+		else if (ISPORT(NETBIOS_DGRAM_PORT))
+			nbt_udp138_print((const u_char *)(up + 1), length);
                 else if (ISPORT(OLD_RADIUS_AUTH_PORT) ||
                          ISPORT(OLD_RADIUS_ACCT_PORT) ||
                          ISPORT(RADIUS_AUTH_PORT)     ||

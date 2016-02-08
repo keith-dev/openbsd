@@ -1,5 +1,7 @@
+/*	$OpenBSD: tic.c,v 1.25 2001/02/22 04:16:36 millert Exp $	*/
+
 /****************************************************************************
- * Copyright (c) 1998,1999,2000 Free Software Foundation, Inc.              *
+ * Copyright (c) 1998,1999,2000,2001 Free Software Foundation, Inc.         *
  *                                                                          *
  * Permission is hereby granted, free of charge, to any person obtaining a  *
  * copy of this software and associated documentation files (the            *
@@ -44,7 +46,7 @@
 #include <term_entry.h>
 #include <transform.h>
 
-MODULE_ID("$From: tic.c,v 1.83 2000/10/14 17:30:26 tom Exp $")
+MODULE_ID("$From: tic.c,v 1.85 2001/02/03 23:31:45 tom Exp $")
 
 const char *_nc_progname = "tic";
 
@@ -292,12 +294,12 @@ put_translate(int c)
 static char *
 stripped(char *src)
 {
-    while (isspace(*src))
+    while (isspace(CharOf(*src)))
 	src++;
     if (*src != '\0') {
 	char *dst = strcpy(malloc(strlen(src) + 1), src);
 	size_t len = strlen(dst);
-	while (--len != 0 && isspace(dst[len]))
+	while (--len != 0 && isspace(CharOf(dst[len])))
 	    dst[len] = '\0';
 	return dst;
     }
@@ -705,7 +707,7 @@ main(int argc, char *argv[])
 			printf("# length=%d\n", len);
 		}
 	    }
-	    if (!namelst) {
+	    if (!namelst && _nc_tail) {
 		int c, oldc = '\0';
 		bool in_comment = FALSE;
 		bool trailing_comment = FALSE;

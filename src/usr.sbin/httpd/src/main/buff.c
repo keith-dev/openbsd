@@ -1,58 +1,59 @@
 /* ====================================================================
- * Copyright (c) 1996-1999 The Apache Group.  All rights reserved.
+ * The Apache Software License, Version 1.1
+ *
+ * Copyright (c) 2000 The Apache Software Foundation.  All rights
+ * reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
  * are met:
  *
  * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer. 
+ *    notice, this list of conditions and the following disclaimer.
  *
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in
  *    the documentation and/or other materials provided with the
  *    distribution.
  *
- * 3. All advertising materials mentioning features or use of this
- *    software must display the following acknowledgment:
- *    "This product includes software developed by the Apache Group
- *    for use in the Apache HTTP server project (http://www.apache.org/)."
+ * 3. The end-user documentation included with the redistribution,
+ *    if any, must include the following acknowledgment:
+ *       "This product includes software developed by the
+ *        Apache Software Foundation (http://www.apache.org/)."
+ *    Alternately, this acknowledgment may appear in the software itself,
+ *    if and wherever such third-party acknowledgments normally appear.
  *
- * 4. The names "Apache Server" and "Apache Group" must not be used to
- *    endorse or promote products derived from this software without
- *    prior written permission. For written permission, please contact
- *    apache@apache.org.
+ * 4. The names "Apache" and "Apache Software Foundation" must
+ *    not be used to endorse or promote products derived from this
+ *    software without prior written permission. For written
+ *    permission, please contact apache@apache.org.
  *
- * 5. Products derived from this software may not be called "Apache"
- *    nor may "Apache" appear in their names without prior written
- *    permission of the Apache Group.
+ * 5. Products derived from this software may not be called "Apache",
+ *    nor may "Apache" appear in their name, without prior written
+ *    permission of the Apache Software Foundation.
  *
- * 6. Redistributions of any form whatsoever must retain the following
- *    acknowledgment:
- *    "This product includes software developed by the Apache Group
- *    for use in the Apache HTTP server project (http://www.apache.org/)."
- *
- * THIS SOFTWARE IS PROVIDED BY THE APACHE GROUP ``AS IS'' AND ANY
- * EXPRESSED OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
- * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
- * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE APACHE GROUP OR
+ * THIS SOFTWARE IS PROVIDED ``AS IS'' AND ANY EXPRESSED OR IMPLIED
+ * WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
+ * OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+ * DISCLAIMED.  IN NO EVENT SHALL THE APACHE SOFTWARE FOUNDATION OR
  * ITS CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
- * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
- * NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
- * LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
- * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT,
- * STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
- * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED
- * OF THE POSSIBILITY OF SUCH DAMAGE.
+ * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+ * LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF
+ * USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
+ * ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+ * OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT
+ * OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+ * SUCH DAMAGE.
  * ====================================================================
  *
  * This software consists of voluntary contributions made by many
- * individuals on behalf of the Apache Group and was originally based
- * on public domain software written at the National Center for
- * Supercomputing Applications, University of Illinois, Urbana-Champaign.
- * For more information on the Apache Group and the Apache HTTP server
- * project, please see <http://www.apache.org/>.
+ * individuals on behalf of the Apache Software Foundation.  For more
+ * information on the Apache Software Foundation, please see
+ * <http://www.apache.org/>.
  *
+ * Portions of this software are based upon public domain software
+ * originally written at the National Center for Supercomputing Applications,
+ * University of Illinois, Urbana-Champaign.
  */
 
 #include "httpd.h"
@@ -82,6 +83,7 @@
 #define CHUNK_HEADER_SIZE (5)
 #endif
 
+#define ascii_CRLF "\015\012" /* A CRLF which won't pass the conversion machinery */
 
 /* bwrite()s of greater than this size can result in a large_write() call,
  * which can result in a writev().  It's a little more work to set up the
@@ -208,6 +210,7 @@ int recvwithtimeout(int sock, char *buf, int len, int flags)
     struct timeval tv;
     int err = WSAEWOULDBLOCK;
     int rv;
+    int retry;
 
     if (!(tv.tv_sec = ap_check_alarm()))
 	return (recv(sock, buf, len, flags));
@@ -220,24 +223,38 @@ int recvwithtimeout(int sock, char *buf, int len, int flags)
     if (rv == SOCKET_ERROR) {
 	err = WSAGetLastError();
 	if (err == WSAEWOULDBLOCK) {
-	    FD_ZERO(&fdset);
-	    FD_SET(sock, &fdset);
-	    tv.tv_usec = 0;
-	    rv = select(FD_SETSIZE, &fdset, NULL, NULL, &tv);
-	    if (rv == SOCKET_ERROR)
-		err = WSAGetLastError();
-	    else if (rv == 0) {
-		ioctlsocket(sock, FIONBIO, (u_long*)&iostate);
-		ap_check_alarm();
-		WSASetLastError(WSAEWOULDBLOCK);
-		return (SOCKET_ERROR);
-	    }
-	    else {
-		rv = recv(sock, buf, len, flags);
-		if (rv == SOCKET_ERROR)
-		    err = WSAGetLastError();
-	    }
-	}
+            do {
+                retry = 0;
+                FD_ZERO(&fdset);
+                FD_SET(sock, &fdset);
+                tv.tv_usec = 0;
+                rv = select(FD_SETSIZE, &fdset, NULL, NULL, &tv);
+                if (rv == SOCKET_ERROR)
+                    err = WSAGetLastError();
+                else if (rv == 0) {
+                    ioctlsocket(sock, FIONBIO, (u_long*)&iostate);
+                    ap_check_alarm();
+                    WSASetLastError(WSAEWOULDBLOCK);
+                    return (SOCKET_ERROR);
+                }
+                else {
+                    rv = recv(sock, buf, len, flags);
+                    if (rv == SOCKET_ERROR) {
+                        err = WSAGetLastError();
+                        if (err == WSAEWOULDBLOCK) {
+                            ap_log_error(APLOG_MARK, APLOG_DEBUG, NULL,
+                                         "select claimed we could read, but in fact we couldn't.");
+                            retry = 1;
+#ifdef NETWARE
+                            ThreadSwitchWithDelay();
+#else
+                            Sleep(100);
+#endif
+                        }
+                    }
+                }
+            } while (retry);
+        }
     }
 
     ioctlsocket(sock, FIONBIO, (u_long*)&iostate);
@@ -1183,7 +1200,7 @@ static int bcwrite(BUFF *fb, const void *buf, int nbyte)
 	return -1;
     if (write_it_all(fb, buf, nbyte) == -1)
 	return -1;
-    if (write_it_all(fb, CRLF, 2) == -1)
+    if (write_it_all(fb, ascii_CRLF, 2) == -1)
 	return -1;
     return nbyte;
 #else
@@ -1196,7 +1213,7 @@ static int bcwrite(BUFF *fb, const void *buf, int nbyte)
 #endif /*CHARSET_EBCDIC*/
     vec[1].iov_base = (void *) buf;	/* cast is to avoid const warning */
     vec[1].iov_len = nbyte;
-    vec[2].iov_base = CRLF;
+    vec[2].iov_base = ascii_CRLF;
     vec[2].iov_len = 2;
 
     return writev_it_all(fb, vec, (sizeof(vec) / sizeof(vec[0]))) ? -1 : nbyte;
@@ -1237,7 +1254,7 @@ static int large_write(BUFF *fb, const void *buf, int nbyte)
 	vec[nvec].iov_base = (void *) buf;
 	vec[nvec].iov_len = nbyte;
 	++nvec;
-	vec[nvec].iov_base = CRLF;
+	vec[nvec].iov_base = ascii_CRLF;
 	vec[nvec].iov_len = 2;
 	++nvec;
     }

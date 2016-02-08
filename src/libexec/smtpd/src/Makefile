@@ -1,3 +1,5 @@
+#	$OpenBSD: Makefile,v 1.4 2001/01/28 19:34:33 niklas Exp $
+
 ##########################################################
 ## Where do I get installed? #############################
 ##########################################################
@@ -93,7 +95,7 @@ STRIP_QUOTES = 0
 # smtpfwdd. 
 # N.B. MAXARGS must be at least 6, or 5 if SENDMAIL_OITRUE (above) is 1.
 # You may wish to change this to be 6 if you want your sendmail to be
-# invoked seperately for each receipient.  
+# invoked separately for each receipient.  
 MAXARGS = 100
 
 # How long (in seconds) should smtpd block on a read() call to a 
@@ -333,7 +335,7 @@ CFLAGS = -g -O -Wall -DUSE_FLOCK -DUSE_MKSTEMP $(OPTIONS)
 #LD_LIBS = -lsocket -lnsl -lresolv
 
 #SunOS 4.X. No regex lib here, so you will have to set USE_REGEX to 0
-#above unless you have built the regex lib seperately.
+#above unless you have built the regex lib separately.
 #CFLAGS = -g -O -DUSE_FLOCK -DNO_MEMMOVE -DBSD_SIGNAL -DSUNOS_GETOPT $(OPTIONS)
 
 #Irix 

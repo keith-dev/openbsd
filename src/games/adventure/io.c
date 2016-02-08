@@ -1,4 +1,4 @@
-/*	$OpenBSD: io.c,v 1.7 1998/11/29 19:45:10 pjanzen Exp $	*/
+/*	$OpenBSD: io.c,v 1.9 2001/03/22 22:32:39 pjanzen Exp $	*/
 /*	$NetBSD: io.c,v 1.3 1995/04/24 12:21:37 cgd Exp $	*/
 
 /*-
@@ -43,7 +43,7 @@
 #if 0
 static char sccsid[] = "@(#)io.c	8.1 (Berkeley) 5/31/93";
 #else
-static char rcsid[] = "$OpenBSD: io.c,v 1.7 1998/11/29 19:45:10 pjanzen Exp $";
+static char rcsid[] = "$OpenBSD: io.c,v 1.9 2001/03/22 22:32:39 pjanzen Exp $";
 #endif
 #endif /* not lint */
 
@@ -143,7 +143,8 @@ yes(x, y, z)			/* confirm with rspeak		*/
 			printf("user closed input stream, quitting...\n");
 			exit(0);
 		}
-		FLUSHLINE;
+		if (ch != '\n')
+			FLUSHLINE;
 		if (ch == 'y' || ch == 'n')
 			break;
 		printf("Please answer the question.\n");
@@ -166,13 +167,14 @@ yesm(x, y, z)			/* confirm with mspeak		*/
 		mspeak(x);	/* tell him what we want	*/
 		if ((ch = getchar()) == 'y')
 			result = TRUE;
-		else if (ch=='n')
+		else if (ch == 'n')
 			result = FALSE;
 		else if (ch == EOF) {
 			printf("user closed input stream, quitting...\n");
 			exit(0);
 		}
-		FLUSHLINE;
+		if (ch != '\n')
+			FLUSHLINE;
 		if (ch == 'y' || ch == 'n')
 			break;
 		printf("Please answer the question.\n");
@@ -389,7 +391,7 @@ rtrav()				/* read travel table		*/
 		if (locc != oldloc) {	/* getting a new entry		*/
 			t = travel[locc] = (struct travlist *) malloc(sizeof (struct travlist));
 			if (t == NULL)
-				errx(1, "Out of memory!");
+				err(1, NULL);
 		/*	printf("New travel list for %d\n", locc);	*/
 			entries = 0;
 			oldloc = locc;
@@ -412,7 +414,7 @@ rtrav()				/* read travel table		*/
 			if (entries++) {
 				t = t->next = (struct travlist *) malloc(sizeof (struct travlist));
 				if (t == NULL)
-					errx(1, "Out of memory!");
+					err(1, NULL);
 			}
 			t->tverb = rnum();/* get verb from the file	*/
 			t->tloc = n;	/* table entry mod 1000		*/
@@ -588,7 +590,7 @@ pspeak(m, skip) /* read, decrypt an print a ptext message	      */
 
 	msg = &ptext[m];
 	if ((tbuf = (char *) malloc(msg->txtlen + 1)) == 0)
-		errx(1, "Out of memory!");
+		err(1, NULL);
 	memcpy(tbuf, msg->seekadr, msg->txtlen + 1);	/* Room to null */
 	s = tbuf;
 

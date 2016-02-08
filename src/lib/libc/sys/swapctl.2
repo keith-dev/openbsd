@@ -94,7 +94,7 @@ struct swapent {
 	int	se_nblks;		/* total blocks */
 	int	se_inuse;		/* blocks in use */
 	int	se_priority;		/* priority */
-	char	se_path[PATH_MAX+1];	/* path to entry */
+	char	se_path[MAXPATHLEN];	/* path to entry */
 };
 .Ed
 .Pp
@@ -142,7 +142,7 @@ case, except that they change the priority of a currently enabled swap device.
 .El
 .Pp
 When swapping is enabled on a block device, the first portion of the disk is
-left unused to prevent any disklable present from being overwritten.
+left unused to prevent any disklabel present from being overwritten.
 This space is allocated from the swap device when the
 .Dv SWAP_ON
 command is used.

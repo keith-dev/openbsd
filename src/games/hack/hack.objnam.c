@@ -1,9 +1,11 @@
+/*	$OpenBSD: hack.objnam.c,v 1.4 2001/01/28 23:41:45 niklas Exp $	*/
+
 /*
  * Copyright (c) Stichting Mathematisch Centrum, Amsterdam, 1985.
  */
 
 #ifndef lint
-static char rcsid[] = "$NetBSD: hack.objnam.c,v 1.3 1995/03/23 08:31:10 cgd Exp $";
+static char rcsid[] = "$OpenBSD: hack.objnam.c,v 1.4 2001/01/28 23:41:45 niklas Exp $";
 #endif /* not lint */
 
 #include	"hack.h"
@@ -95,7 +97,7 @@ register char *an = objects[obj->otyp].oc_name;
 register char *dn = objects[obj->otyp].oc_descr;
 register char *un = objects[obj->otyp].oc_uname;
 register int pl = (obj->quan != 1);
-	if(!obj->dknown && !Blind) obj->dknown = 1; /* %% doesnt belong here */
+	if(!obj->dknown && !Blind) obj->dknown = 1; /* %% doesn't belong here */
 	switch(obj->olet) {
 	case AMULET_SYM:
 		Strcpy(buf, (obj->spe < 0 && obj->known)

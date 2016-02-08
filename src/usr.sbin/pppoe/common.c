@@ -1,4 +1,4 @@
-/*	$OpenBSD: common.c,v 1.2 2000/10/09 22:52:18 brian Exp $	*/
+/*	$OpenBSD: common.c,v 1.4 2001/04/24 05:04:51 jason Exp $	*/
 
 /*
  * Copyright (c) 2000 Network Security Technologies, Inc. http://www.netsec.net
@@ -119,7 +119,7 @@ runppp(bpffd, sysname)
 	execlp(PPP_PROG, "ppp", "-direct", sysname, NULL);
 	perror("execlp");
 	syslog(LOG_INFO, "%s exec failed: %m", PPP_PROG);
-	_exit(-1);
+	_exit(1);
 }
 
 int
@@ -173,9 +173,6 @@ ppp_to_bpf(bfd, pppfd, myea, rmea, id)
 	if (r <= 0)
 		return (-1);
 	r -= 2;
-
-	iov[0].iov_len = 2;
-	iov[1].iov_len = r;
 
 	ph.vertype = PPPOE_VERTYPE(1, 1);
 	ph.code = PPPOE_CODE_SESSION;

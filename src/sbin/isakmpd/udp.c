@@ -1,8 +1,8 @@
-/*	$OpenBSD: udp.c,v 1.23 2000/10/16 23:27:23 niklas Exp $	*/
-/*	$EOM: udp.c,v 1.52 2000/10/15 22:02:55 niklas Exp $	*/
+/*	$OpenBSD: udp.c,v 1.29 2001/04/09 22:09:53 ho Exp $	*/
+/*	$EOM: udp.c,v 1.57 2001/01/26 10:09:57 niklas Exp $	*/
 
 /*
- * Copyright (c) 1998, 1999 Niklas Hallqvist.  All rights reserved.
+ * Copyright (c) 1998, 1999, 2001 Niklas Hallqvist.  All rights reserved.
  * Copyright (c) 2000 Angelos D. Keromytis.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -63,7 +63,6 @@
 #include "udp.h"
 #include "util.h"
 
-#define BACKLOG 16
 #define UDP_SIZE 65536
 
 /* If a system doesn't have SO_REUSEPORT, SO_REUSEADDR will have to do.  */
@@ -334,8 +333,8 @@ udp_bind_if (struct ifreq *ifrp, void *arg)
   t = udp_bind (if_addr, port);
   if (!t)
     {
-      log_print ("udp_bind_if: failed to create a socket on %x:%d",
-		 htons (if_addr), port);
+      log_print ("udp_bind_if: failed to create a socket on %s:%d",
+		 inet_ntoa (*((struct in_addr *)&if_addr)), port);
       return;
     }
   LIST_INSERT_HEAD (&udp_listen_list, (struct udp_transport *)t, link);
@@ -343,7 +342,7 @@ udp_bind_if (struct ifreq *ifrp, void *arg)
 
 /*
  * NAME is a section name found in the config database.  Setup and return
- * a transport useable to talk to the peer specified by that name
+ * a transport useable to talk to the peer specified by that name.
  */
 static struct transport *
 udp_create (char *name)
@@ -406,11 +405,12 @@ udp_create (char *name)
       log_print ("udp_create: inet_addr (\"%s\") failed", addr_str);
       return 0;
     }
-  u = udp_listen_lookup (addr, port);
+  u = udp_listen_lookup (addr, (udp_default_port ? htons (udp_default_port) :
+						   htons (UDP_DEFAULT_PORT)));
   if (!u)
     {
       log_print ("udp_create: %s:%d must exist as a listener too", addr_str,
-		 port);
+		 udp_default_port);
       return 0;
     } 
   return udp_clone (u, &dst);
@@ -454,13 +454,13 @@ udp_init ()
     port = htons (udp_default_port);
   else
     {
-      s = getservbyname("isakmp", "udp");
+      s = getservbyname ("isakmp", "udp");
       port = s ? s->s_port : htons (UDP_DEFAULT_PORT);
     }
 
   LIST_INIT (&udp_listen_list);
 
-  /* Bind the ISAKMP UDP port on all network interfaces we have. */
+  /* Bind the ISAKMP UDP port on all network interfaces we have.  */
   /* XXX need to check errors */
   if_map (udp_bind_if, &port);
 
@@ -619,7 +619,7 @@ udp_decode_ids (struct transport *t)
     }
 #else
   strcpy (idsrc, inet_ntoa (((struct udp_transport *)t)->src.sin_addr));
-  strcpy (iddst, inet_ntoa (((struct udp_transport *)t)->src.sin_addr));
+  strcpy (iddst, inet_ntoa (((struct udp_transport *)t)->dst.sin_addr));
 #endif /* HAVE_GETNAMEINFO */
 
   sprintf (result, "src: %s dst: %s", idsrc, iddst);
@@ -646,7 +646,7 @@ udp_decode_port (char *port_str)
 	  log_print ("udp_decode_port: service \"%s\" unknown", port_str);
 	  return 0;
 	}
-      return service->s_port;
+      return ntohs (service->s_port);
     }
   else if (port_long < 1 || port_long > 65535)
     {

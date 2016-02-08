@@ -1,4 +1,4 @@
-.\"	$OpenBSD: apply.1,v 1.11 2000/01/08 01:14:35 aaron Exp $
+.\"	$OpenBSD: apply.1,v 1.14 2000/12/24 11:22:53 aaron Exp $
 .\"	$NetBSD: apply.1,v 1.4 1996/03/18 23:16:57 jtc Exp $
 .\"
 .\" Copyright (c) 1983, 1990, 1993
@@ -42,8 +42,8 @@
 .Nd apply a command to a set of arguments
 .Sh SYNOPSIS
 .Nm apply
-.Op Fl a Ns Ar c
-.Op Fl Ns Ar #
+.Op Fl Ar #
+.Op Fl a Ar magic
 .Op Fl d
 .Ar command argument
 .Op Ar ...
@@ -70,7 +70,7 @@ each execution of
 .Ar command .
 .Pp
 The options are as follows:
-.Bl -tag -width "-ac"
+.Bl -tag -width Ds
 .It Fl Ns Ar #
 Normally arguments are taken singly; the optional number
 .Fl Ns Ar #
@@ -88,22 +88,14 @@ occur in
 the
 .Fl Ns Ar #
 option is ignored.
-.It Fl a Ns Ar c
+.It Fl a Ar magic
 Use
-.Ar c
+.Ar magic
 as the magic character instead of the default
 .Ql % .
 .It Fl d
 Debug mode.
 Print commands to the standard output but do not actually execute them.
-.El
-.Sh ENVIRONMENT
-The following environment variable affects the execution of
-.Nm apply :
-.Bl -tag -width SHELL
-.It Ev SHELL
-Pathname of shell to use.
-If this variable is not defined, the Bourne shell is used.
 .El
 .Sh EXAMPLES
 .Bl -tag -width apply
@@ -124,6 +116,14 @@ runs
 links all files in the current directory to the directory
 .Pa /usr/joe .
 .El
+.Sh ENVIRONMENT
+The following environment variable affects the execution of
+.Nm apply :
+.Bl -tag -width SHELL
+.It Ev SHELL
+Pathname of shell to use.
+If this variable is not defined, the Bourne shell is used.
+.El
 .Sh FILES
 .Bl -tag -width /bin/sh -compact
 .It Pa /bin/sh
@@ -133,14 +133,14 @@ default shell
 .Xr xargs 1
 .Sh AUTHOR
 Rob Pike
+.Sh HISTORY
+The
+.Nm
+command appeared in
+.Bx 4.2 .
 .Sh BUGS
 Shell metacharacters in
 .Ar command
 may have bizarre effects; it is best to enclose complicated
 commands in single quotes
 .Pq '' .
-.Sh HISTORY
-The
-.Nm
-command appeared in
-.Bx 4.2 .

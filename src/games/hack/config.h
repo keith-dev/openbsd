@@ -1,3 +1,4 @@
+/* *	$OpenBSD: config.h,v 1.5 2001/01/28 23:41:42 niklas Exp $*/
 /*
  * Copyright (c) Stichting Mathematisch Centrum, Amsterdam, 1985.
  *
@@ -6,7 +7,7 @@
 
 #include "pathnames.h"
 
-#ifndef CONFIG	/* make sure the compiler doesnt see the typedefs twice */
+#ifndef CONFIG	/* make sure the compiler doesn't see the typedefs twice */
 
 #define	CONFIG
 #define	UNIX		/* delete if no fork(), exec() available */
@@ -132,7 +133,7 @@ typedef	xchar	boolean;		/* 0 or 1 */
 
 /*
  * Declaration of bitfields in various structs; if your C compiler
- * doesnt handle bitfields well, e.g., if it is unable to initialize
+ * doesn't handle bitfields well, e.g., if it is unable to initialize
  * structs containing bitfields, then you might use
  *	#define Bitfield(x,n)	uchar x
  * since the bitfields used never have more than 7 bits. (Most have 1 bit.)

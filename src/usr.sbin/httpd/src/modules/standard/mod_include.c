@@ -1,58 +1,59 @@
 /* ====================================================================
- * Copyright (c) 1995-1999 The Apache Group.  All rights reserved.
+ * The Apache Software License, Version 1.1
+ *
+ * Copyright (c) 2000 The Apache Software Foundation.  All rights
+ * reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
  * are met:
  *
  * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer. 
+ *    notice, this list of conditions and the following disclaimer.
  *
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in
  *    the documentation and/or other materials provided with the
  *    distribution.
  *
- * 3. All advertising materials mentioning features or use of this
- *    software must display the following acknowledgment:
- *    "This product includes software developed by the Apache Group
- *    for use in the Apache HTTP server project (http://www.apache.org/)."
+ * 3. The end-user documentation included with the redistribution,
+ *    if any, must include the following acknowledgment:
+ *       "This product includes software developed by the
+ *        Apache Software Foundation (http://www.apache.org/)."
+ *    Alternately, this acknowledgment may appear in the software itself,
+ *    if and wherever such third-party acknowledgments normally appear.
  *
- * 4. The names "Apache Server" and "Apache Group" must not be used to
- *    endorse or promote products derived from this software without
- *    prior written permission. For written permission, please contact
- *    apache@apache.org.
+ * 4. The names "Apache" and "Apache Software Foundation" must
+ *    not be used to endorse or promote products derived from this
+ *    software without prior written permission. For written
+ *    permission, please contact apache@apache.org.
  *
- * 5. Products derived from this software may not be called "Apache"
- *    nor may "Apache" appear in their names without prior written
- *    permission of the Apache Group.
+ * 5. Products derived from this software may not be called "Apache",
+ *    nor may "Apache" appear in their name, without prior written
+ *    permission of the Apache Software Foundation.
  *
- * 6. Redistributions of any form whatsoever must retain the following
- *    acknowledgment:
- *    "This product includes software developed by the Apache Group
- *    for use in the Apache HTTP server project (http://www.apache.org/)."
- *
- * THIS SOFTWARE IS PROVIDED BY THE APACHE GROUP ``AS IS'' AND ANY
- * EXPRESSED OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
- * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
- * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE APACHE GROUP OR
+ * THIS SOFTWARE IS PROVIDED ``AS IS'' AND ANY EXPRESSED OR IMPLIED
+ * WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
+ * OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+ * DISCLAIMED.  IN NO EVENT SHALL THE APACHE SOFTWARE FOUNDATION OR
  * ITS CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
- * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
- * NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
- * LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
- * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT,
- * STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
- * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED
- * OF THE POSSIBILITY OF SUCH DAMAGE.
+ * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+ * LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF
+ * USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
+ * ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+ * OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT
+ * OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+ * SUCH DAMAGE.
  * ====================================================================
  *
  * This software consists of voluntary contributions made by many
- * individuals on behalf of the Apache Group and was originally based
- * on public domain software written at the National Center for
- * Supercomputing Applications, University of Illinois, Urbana-Champaign.
- * For more information on the Apache Group and the Apache HTTP server
- * project, please see <http://www.apache.org/>.
+ * individuals on behalf of the Apache Software Foundation.  For more
+ * information on the Apache Software Foundation, please see
+ * <http://www.apache.org/>.
  *
+ * Portions of this software are based upon public domain software
+ * originally written at the National Center for Supercomputing Applications,
+ * University of Illinois, Urbana-Champaign.
  */
 
 /*
@@ -113,7 +114,7 @@ module MODULE_VAR_EXPORT includes_module;
 /* XXX: could use ap_table_overlap here */
 static void add_include_vars(request_rec *r, char *timefmt)
 {
-#ifndef WIN32
+#if !defined(WIN32) && !defined(NETWARE)
     struct passwd *pw;
 #endif /* ndef WIN32 */
     table *e = r->subprocess_env;
@@ -611,7 +612,7 @@ static int include_cgi(char *s, request_rec *r)
     }
 
     ap_destroy_sub_req(rr);
-#ifndef WIN32
+#if !defined(WIN32) && !defined(NETWARE)
     ap_chdir_file(r->filename);
 #endif
 
@@ -622,11 +623,16 @@ static int include_cgi(char *s, request_rec *r)
  * ensentially ensure that it does not match the regex:
  * (^/|(^|/)\.\.(/|$))
  * XXX: this needs os abstraction... consider c:..\foo in win32
+ * ???: No, c:../foo is not relative to ., it's potentially on another volume
  */
 static int is_only_below(const char *path)
 {
 #ifdef HAVE_DRIVE_LETTERS
     if (path[1] == ':')
+	return 0;
+#endif
+#ifdef NETWARE
+    if (strchr(path, ':'))
 	return 0;
 #endif
     if (path[0] == '/') {
@@ -733,7 +739,7 @@ static int handle_include(FILE *in, request_rec *r, const char *error, int noexe
             if (!error_fmt && ap_run_sub_req(rr)) {
                 error_fmt = "unable to include \"%s\" in parsed file %s";
             }
-#ifndef WIN32
+#if !defined(WIN32) && !defined(NETWARE)
             ap_chdir_file(r->filename);
 #endif
             if (error_fmt) {
@@ -889,7 +895,7 @@ static int handle_exec(FILE *in, request_rec *r, const char *error)
                 ap_rputs(error, r);
             }
             /* just in case some stooge changed directories */
-#ifndef WIN32
+#if !defined(WIN32) && !defined(NETWARE)
             ap_chdir_file(r->filename);
 #endif
         }
@@ -901,7 +907,7 @@ static int handle_exec(FILE *in, request_rec *r, const char *error)
                 ap_rputs(error, r);
             }
             /* grumble groan */
-#ifndef WIN32
+#if !defined(WIN32) && !defined(NETWARE)
             ap_chdir_file(r->filename);
 #endif
         }
@@ -1536,6 +1542,7 @@ static int parse_expr(request_rec *r, const char *expr, const char *error)
                     goto RETURN;
                 }
                 break;
+            /* NOTREACHED */
             }
             if (current == (struct parse_node *) NULL) {
                 new->left = root;
@@ -1660,6 +1667,7 @@ static int parse_expr(request_rec *r, const char *expr, const char *error)
                     goto RETURN;
                 }
                 break;
+            /* NOTREACHED */
             }
             if (current == (struct parse_node *) NULL) {
                 new->left = root;
@@ -2178,7 +2186,7 @@ static void send_parsed_content(FILE *f, request_rec *r)
     printing = conditional_status = 1;
     if_nesting = 0;
 
-#ifndef WIN32
+#if !defined(WIN32) && !defined(NETWARE)
     ap_chdir_file(r->filename);
 #endif
     if (r->args) {              /* add QUERY stuff to env cause it ain't yet */
@@ -2375,7 +2383,7 @@ static int send_parsed_file(request_rec *r)
     }
 
     if ((*state == xbithack_full)
-#if !defined(OS2) && !defined(WIN32)
+#if !defined(OS2) && !defined(WIN32) && !defined(NETWARE)
     /*  OS/2 dosen't support Groups. */
         && (r->finfo.st_mode & S_IXGRP)
 #endif
@@ -2500,7 +2508,7 @@ static int send_shtml_file(request_rec *r)
 
 static int xbithack_handler(request_rec *r)
 {
-#if defined(OS2) || defined(WIN32)
+#if defined(OS2) || defined(WIN32) || defined(NETWARE)
     /* OS/2 dosen't currently support the xbithack. This is being worked on. */
     return DECLINED;
 #else

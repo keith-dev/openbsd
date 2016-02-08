@@ -1,58 +1,59 @@
 /* ====================================================================
- * Copyright (c) 1995-1999 The Apache Group.  All rights reserved.
+ * The Apache Software License, Version 1.1
+ *
+ * Copyright (c) 2000 The Apache Software Foundation.  All rights
+ * reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
  * are met:
  *
  * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer. 
+ *    notice, this list of conditions and the following disclaimer.
  *
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in
  *    the documentation and/or other materials provided with the
  *    distribution.
  *
- * 3. All advertising materials mentioning features or use of this
- *    software must display the following acknowledgment:
- *    "This product includes software developed by the Apache Group
- *    for use in the Apache HTTP server project (http://www.apache.org/)."
+ * 3. The end-user documentation included with the redistribution,
+ *    if any, must include the following acknowledgment:
+ *       "This product includes software developed by the
+ *        Apache Software Foundation (http://www.apache.org/)."
+ *    Alternately, this acknowledgment may appear in the software itself,
+ *    if and wherever such third-party acknowledgments normally appear.
  *
- * 4. The names "Apache Server" and "Apache Group" must not be used to
- *    endorse or promote products derived from this software without
- *    prior written permission. For written permission, please contact
- *    apache@apache.org.
+ * 4. The names "Apache" and "Apache Software Foundation" must
+ *    not be used to endorse or promote products derived from this
+ *    software without prior written permission. For written
+ *    permission, please contact apache@apache.org.
  *
- * 5. Products derived from this software may not be called "Apache"
- *    nor may "Apache" appear in their names without prior written
- *    permission of the Apache Group.
+ * 5. Products derived from this software may not be called "Apache",
+ *    nor may "Apache" appear in their name, without prior written
+ *    permission of the Apache Software Foundation.
  *
- * 6. Redistributions of any form whatsoever must retain the following
- *    acknowledgment:
- *    "This product includes software developed by the Apache Group
- *    for use in the Apache HTTP server project (http://www.apache.org/)."
- *
- * THIS SOFTWARE IS PROVIDED BY THE APACHE GROUP ``AS IS'' AND ANY
- * EXPRESSED OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
- * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
- * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE APACHE GROUP OR
+ * THIS SOFTWARE IS PROVIDED ``AS IS'' AND ANY EXPRESSED OR IMPLIED
+ * WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
+ * OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+ * DISCLAIMED.  IN NO EVENT SHALL THE APACHE SOFTWARE FOUNDATION OR
  * ITS CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
- * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
- * NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
- * LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
- * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT,
- * STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
- * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED
- * OF THE POSSIBILITY OF SUCH DAMAGE.
+ * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+ * LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF
+ * USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
+ * ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+ * OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT
+ * OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+ * SUCH DAMAGE.
  * ====================================================================
  *
  * This software consists of voluntary contributions made by many
- * individuals on behalf of the Apache Group and was originally based
- * on public domain software written at the National Center for
- * Supercomputing Applications, University of Illinois, Urbana-Champaign.
- * For more information on the Apache Group and the Apache HTTP server
- * project, please see <http://www.apache.org/>.
+ * individuals on behalf of the Apache Software Foundation.  For more
+ * information on the Apache Software Foundation, please see
+ * <http://www.apache.org/>.
  *
+ * Portions of this software are based upon public domain software
+ * originally written at the National Center for Supercomputing Applications,
+ * University of Illinois, Urbana-Champaign.
  */
 
 #ifndef APACHE_HTTPD_H
@@ -72,10 +73,10 @@ extern "C" {
 #ifdef EAPI
 #include "ap_mm.h"
 #endif
-#include "alloc.h"
+#include "ap_alloc.h"
 /*
  * Include the Extended API headers.
- * Don't move the position. It has to be after alloc.h because it uses the
+ * Don't move the position. It has to be after ap_alloc.h because it uses the
  * pool stuff but before buff.h because the buffer stuff uses the EAPI, too. 
  */
 #ifdef EAPI
@@ -97,7 +98,7 @@ extern "C" {
 #elif defined(WIN32)
 /* Set default for Windows file system */
 #define HTTPD_ROOT "/apache"
-#elif defined(BEOS)
+#elif defined(BEOS) || defined(BONE)
 #define HTTPD_ROOT "/boot/home/apache"
 #elif defined(NETWARE)
 #define HTTPD_ROOT "sys:/apache"
@@ -457,12 +458,19 @@ extern "C" {
  * Example: "Apache/1.1.0 MrWidget/0.1-alpha" 
  */
 
-#define SERVER_BASEVERSION "Apache/1.3.12"	/* SEE COMMENTS ABOVE */
-#define SERVER_VERSION  SERVER_BASEVERSION
+#define SERVER_BASEVENDOR   "Apache Group"
+#define SERVER_BASEPRODUCT  "Apache"
+#define SERVER_BASEREVISION "1.3.19"
+#define SERVER_BASEVERSION  SERVER_BASEPRODUCT "/" SERVER_BASEREVISION
+
+#define SERVER_PRODUCT  SERVER_BASEPRODUCT
+#define SERVER_REVISION SERVER_BASEREVISION
+#define SERVER_VERSION  SERVER_PRODUCT "/" SERVER_REVISION
 enum server_token_type {
     SrvTk_MIN,		/* eg: Apache/1.3.0 */
     SrvTk_OS,		/* eg: Apache/1.3.0 (UNIX) */
-    SrvTk_FULL		/* eg: Apache/1.3.0 (UNIX) PHP/3.0 FooBar/1.2b */
+    SrvTk_FULL,		/* eg: Apache/1.3.0 (UNIX) PHP/3.0 FooBar/1.2b */
+    SrvTk_PRODUCT_ONLY	/* eg: Apache */
 };
 
 API_EXPORT(const char *) ap_get_server_version(void);
@@ -476,7 +484,7 @@ API_EXPORT(void) ap_add_config_define(const char *define);
  * Always increases along the same track as the source branch.
  * For example, Apache 1.4.2 would be '10402100', 2.5b7 would be '20500007'.
  */
-#define APACHE_RELEASE 10312100
+#define APACHE_RELEASE 10319100
 
 #define SERVER_PROTOCOL "HTTP/1.1"
 #ifndef SERVER_SUPPORT
@@ -847,6 +855,17 @@ struct request_rec {
  */
     const struct htaccess_result *htaccess;
 
+    /* On systems with case insensitive file systems (Windows, OS/2, etc.), 
+     * r->filename is case canonicalized (folded to either lower or upper 
+     * case, depending on the specific system) to accomodate file access
+     * checking. case_preserved_filename is the same as r->filename 
+     * except case is preserved. There is at least one instance where Apache 
+     * needs access to the case preserved filename: Java class files published 
+     * with WebDAV need to preserve filename case to make the Java compiler 
+     * happy.
+     */
+    char *case_preserved_filename;
+
 /* Things placed at the end of the record to avoid breaking binary
  * compatibility.  It would be nice to remember to reorder the entire
  * record to improve 64bit alignment the next time we need to break
@@ -1052,6 +1071,7 @@ API_EXPORT(char *) ap_make_full_path(pool *a, const char *dir, const char *f);
 API_EXPORT(int) ap_is_matchexp(const char *str);
 API_EXPORT(int) ap_strcmp_match(const char *str, const char *exp);
 API_EXPORT(int) ap_strcasecmp_match(const char *str, const char *exp);
+API_EXPORT(char *) ap_stripprefix(const char *bigstring, const char *prefix);
 API_EXPORT(char *) ap_strcasestr(const char *s1, const char *s2);
 API_EXPORT(char *) ap_pbase64decode(pool *p, const char *bufcoded);
 API_EXPORT(char *) ap_pbase64encode(pool *p, char *string); 
@@ -1076,6 +1096,7 @@ API_EXPORT(int) ap_ind(const char *, char);	/* Sigh... */
 API_EXPORT(int) ap_rind(const char *, char);
 
 API_EXPORT(char *) ap_escape_quotes (pool *p, const char *instring);
+API_EXPORT(void) ap_remove_spaces(char *dest, char *src);
 
 /* Common structure for reading of config files / passwd files etc. */
 typedef struct {
@@ -1115,6 +1136,7 @@ char *strerror(int err);
 API_EXPORT(uid_t) ap_uname2id(const char *name);
 API_EXPORT(gid_t) ap_gname2id(const char *name);
 API_EXPORT(int) ap_is_directory(const char *name);
+API_EXPORT(int) ap_is_rdirectory(const char *name);
 API_EXPORT(int) ap_can_exec(const struct stat *);
 API_EXPORT(void) ap_chdir_file(const char *file);
 
@@ -1128,6 +1150,9 @@ API_EXPORT(void) ap_chdir_file(const char *file);
 #else
 API_EXPORT(char *) ap_os_canonical_filename(pool *p, const char *file);
 #ifdef WIN32
+API_EXPORT(char *) ap_os_case_canonical_filename(pool *pPool, const char *szFile);
+API_EXPORT(char *) ap_os_systemcase_filename(pool *pPool, const char *szFile);
+#elif defined(OS2)
 API_EXPORT(char *) ap_os_case_canonical_filename(pool *pPool, const char *szFile);
 API_EXPORT(char *) ap_os_systemcase_filename(pool *pPool, const char *szFile);
 #else

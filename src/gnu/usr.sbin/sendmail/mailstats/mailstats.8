@@ -6,9 +6,9 @@
 .\" the sendmail distribution.
 .\"
 .\"
-.\"	$Sendmail: mailstats.8,v 8.16 2000/02/01 05:49:53 gshapiro Exp $
+.\"	$Sendmail: mailstats.8,v 8.17.4.3 2000/12/29 18:12:20 gshapiro Exp $
 .\"
-.Dd April 25, 1996
+.Dd December 29, 2000
 .Dt MAILSTATS 1
 .Os
 .Sh NAME
@@ -52,11 +52,12 @@ The name of the mailer.
 .El
 .Pp
 After this display, a line totaling the values for all of the mailers
-is displayed,
+is displayed (preceded with a
+.Dq T ) ,
 separated from the previous information by a line containing only equals
 .Pq Dq \&=
 characters.
-Another line preceeded with a
+Another line preceded with a
 .Dq C
 lists the number of connections.
 .Pp
@@ -65,14 +66,12 @@ The options are as follows:
 .It Fl C
 Read the specified file instead of the default
 .Nm sendmail
-.Dq cf
-file.
+configuration file.
 .It Fl f
 Read the specified statistics file instead of the statistics file
 specified in the
 .Nm sendmail
-.Dq cf
-file.
+configuration file.
 .It Fl p
 Output information in program-readable mode and clear statistics.
 .It Fl o

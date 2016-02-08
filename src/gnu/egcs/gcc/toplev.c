@@ -1,5 +1,6 @@
 /* Top level of GNU C compiler
-   Copyright (C) 1987, 88, 89, 92-99, 2000 Free Software Foundation, Inc.
+   Copyright (C) 1987, 1988, 1989, 1992, 1993, 1994, 1995, 1996, 1997, 1998,
+   1999, 2000, 2001 Free Software Foundation, Inc.
 
 This file is part of GNU CC.
 
@@ -3816,7 +3817,7 @@ rest_of_compilation (decl)
 
   /* Copy any shared structure that should not be shared.  */
 
-  unshare_all_rtl (insns);
+  unshare_all_rtl (current_function_decl, insns);
 
 #ifdef SETJMP_VIA_SAVE_AREA
   /* This must be performed before virutal register instantiation.  */
@@ -4685,7 +4686,8 @@ check_lang_option (option, lang_option)
 {
   lang_independent_options * indep_options;
   int    len;
-  long    k;
+  int    numopts;
+  long   k;
   char * space;
   
   /* Ignore NULL entries.  */
@@ -4715,8 +4717,14 @@ check_lang_option (option, lang_option)
   
   switch (option[1])
     {
-    case 'f': indep_options = f_options; break;
-    case 'W': indep_options = W_options; break;
+    case 'f':
+      indep_options = f_options;
+      numopts = NUM_ELEM (f_options);
+      break;
+    case 'W':
+      indep_options = W_options;
+      numopts = NUM_ELEM (W_options);
+      break;
     default:  return 1;
     }
   
@@ -4728,7 +4736,7 @@ check_lang_option (option, lang_option)
   if (option[0] == 'n' && option[1] == 'o' && option[2] == '-')
     option += 3;
   
-  for (k = NUM_ELEM (indep_options); k--;)
+  for (k = numopts; k--;)
     {
       if (!strcmp (option, indep_options[k].string))
 	{

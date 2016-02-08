@@ -1,4 +1,4 @@
-/* $OpenBSD: user.c,v 1.17 2000/07/15 08:31:54 ho Exp $ */
+/* $OpenBSD: user.c,v 1.23 2001/03/24 19:27:18 jakob Exp $ */
 /* $NetBSD: user.c,v 1.17 2000/04/14 06:26:55 simonb Exp $ */
 
 /*
@@ -132,8 +132,7 @@ typedef struct user_t {
 enum {
 	MaxShellNameLen = 256,
 	MaxFileNameLen = MAXPATHLEN,
-	MaxUserNameLen = 32,
-	MaxFieldNameLen = 32,
+	MaxUserNameLen = MAXLOGNAME,
 	MaxCommandLen = 2048,
 	MaxEntryLen = 2048,
 	MaxPasswordEntryLen = 1024,
@@ -528,7 +527,7 @@ save_range(user_t *up, char *cp)
 		RENEW(range_t, up->u_rv, up->u_rsize, return(0));
 	}
 	if (up->u_rv && sscanf(cp, "%d..%d", &from, &to) == 2) {
-		for (i = 0 ; i < up->u_rc ; i++) {
+		for (i = up->u_defrc ; i < up->u_rc ; i++) {
 			if (up->u_rv[i].r_from == from && up->u_rv[i].r_to == to) {
 				break;
 			}
@@ -607,6 +606,7 @@ read_defaults(user_t *up)
 	memsave(&up->u_shell, DEF_SHELL, strlen(DEF_SHELL));
 	memsave(&up->u_comment, DEF_COMMENT, strlen(DEF_COMMENT));
 	up->u_rsize = 16;
+	up->u_defrc = 0;
 	NEWARRAY(range_t, up->u_rv, up->u_rsize, exit(1));
 	up->u_inactive = DEF_INACTIVE;
 	up->u_expire = DEF_EXPIRE;
@@ -854,7 +854,7 @@ adduser(char *login, user_t *up)
 		    "failed to modify secondary groups for login %s", login);
 	}
 	(void) close(ptmpfd);
-	if (pw_mkdb() < 0) {
+	if (pw_mkdb(login) < 0) {
 		err(EXIT_FAILURE, "pw_mkdb failed");
 	}
 	return 1;
@@ -1024,7 +1024,11 @@ moduser(char *login, char *newlogin, user_t *up)
 		err(EXIT_FAILURE, "can't move `%s' to `%s'", oldhome, home);
 	}
 	(void) close(ptmpfd);
-	if (pw_mkdb() < 0) {
+	if (up != (user_t *) NULL && strcmp(login, newlogin) == 0)
+		cc = pw_mkdb(login);
+	else
+		cc = pw_mkdb(NULL);
+	if (cc < 0) {
 		err(EXIT_FAILURE, "pw_mkdb failed");
 	}
 	return 1;
@@ -1111,6 +1115,8 @@ usermgmt_usage(char *prog)
 	} else if (strcmp(prog, "groupinfo") == 0) {
 		(void) fprintf(stderr, "usage: %s [-e] [-v] group\n", prog);
 #endif
+	} else {
+		(void) fprintf(stderr, "This program must be called as {user,group}{add,del,mod,info},\n%s is not an understood name.\n", prog);
 	}
 	exit(EXIT_FAILURE);
 	/* NOTREACHED */
@@ -1142,7 +1148,7 @@ useradd(int argc, char **argv)
 			bigD = 1;
 			break;
 		case 'G':
-		        strlcpy (buf, optarg, strlen (optarg) + 1);
+		        strlcpy (buf, optarg, sizeof(buf));
 			p = buf;
 			while ((s = strsep (&p, ",")) != NULL &&
 			       u.u_groupc < NGROUPS_MAX - 2)
@@ -1261,7 +1267,7 @@ usermod(int argc, char **argv)
 	while ((c = getopt(argc, argv, "G:c:d:e:f:g:l:mos:u:" MOD_OPT_EXTENSIONS)) != -1) {
 		switch(c) {
 		case 'G':
-		        strlcpy (buf, optarg, strlen (optarg) + 1);
+		        strlcpy (buf, optarg, sizeof(buf));
 			p = buf;
 			while ((s = strsep (&p, ",")) != NULL &&
 			       u.u_groupc < NGROUPS_MAX - 2)

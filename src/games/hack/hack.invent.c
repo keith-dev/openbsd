@@ -1,9 +1,11 @@
+/*	$OpenBSD: hack.invent.c,v 1.4 2001/01/28 23:41:44 niklas Exp $	*/
+
 /*
  * Copyright (c) Stichting Mathematisch Centrum, Amsterdam, 1985.
  */
 
 #ifndef lint
-static char rcsid[] = "$NetBSD: hack.invent.c,v 1.4 1995/03/23 08:30:25 cgd Exp $";
+static char rcsid[] = "$OpenBSD: hack.invent.c,v 1.4 2001/01/28 23:41:44 niklas Exp $";
 #endif /* not lint */
 
 #include	"hack.h"
@@ -634,7 +636,7 @@ register char *lets;
 }
 
 dotypeinv ()				/* free after Robert Viduya */
-/* Changed to one type only, so he doesnt have to type cr */
+/* Changed to one type only, so he doesn't have to type cr */
 {
     char c, ilet;
     char stuff[BUFSZ];

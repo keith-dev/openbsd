@@ -1,4 +1,4 @@
-/*	$OpenBSD: ftpd.c,v 1.79 2000/09/15 07:13:45 deraadt Exp $	*/
+/*	$OpenBSD: ftpd.c,v 1.95 2001/03/18 17:20:13 deraadt Exp $	*/
 /*	$NetBSD: ftpd.c,v 1.15 1995/06/03 22:46:47 mycroft Exp $	*/
 
 /*
@@ -148,6 +148,8 @@ union sockunion data_dest;
 union sockunion his_addr;
 union sockunion pasv_addr;
 
+sigset_t allsigs;
+
 int	daemon_mode = 0;
 int	data;
 jmp_buf	errcatch, urgcatch;
@@ -178,7 +180,7 @@ off_t	file_size;
 off_t	byte_count;
 #if !defined(CMASK) || CMASK == 0
 #undef CMASK
-#define CMASK 027
+#define CMASK 022
 #endif
 int	defumask = CMASK;		/* default umask value */
 int	umaskchange = 1;		/* allow user to change umask value. */
@@ -246,6 +248,7 @@ static void	 myoob __P((int));
 static int	 checkuser __P((char *, char *));
 static FILE	*dataconn __P((char *, off_t, char *));
 static void	 dolog __P((struct sockaddr *));
+static char	*copy_dir __P((char *, struct passwd *));
 static char	*curdir __P((void));
 static void	 end_login __P((void));
 static FILE	*getdatasock __P((char *));
@@ -298,7 +301,8 @@ main(argc, argv, envp)
 	FILE *fp;
 	struct hostent *hp;
 
-	tzset();	/* in case no timezone database in ~ftp */
+	tzset();		/* in case no timezone database in ~ftp */
+	sigfillset(&allsigs);	/* used to block signals while root */
 
 	while ((ch = getopt(argc, argv, argstr)) != -1) {
 		switch (ch) {
@@ -625,6 +629,7 @@ lostconn(signo)
 	int signo;
 {
 
+	sigprocmask(SIG_BLOCK, &allsigs, NULL);
 	if (debug)
 		syslog(LOG_DEBUG, "lost connection");
 	dologout(1);
@@ -634,8 +639,9 @@ static void
 sigquit(signo)
 	int signo;
 {
-	syslog(LOG_ERR, "got signal %s", strerror(signo));
-
+	
+	sigprocmask(SIG_BLOCK, &allsigs, NULL);
+	syslog(LOG_ERR, "got signal %s", sys_signame[signo]);
 	dologout(1);
 }
 
@@ -692,7 +698,7 @@ sgetpwnam(name)
 
 static int login_attempts;	/* number of failed login attempts */
 static int askpasswd;		/* had user command, ask for passwd */
-static char curname[16];	/* current USER name */
+static char curname[MAXLOGNAME];	/* current USER name */
 
 /*
  * USER command.
@@ -769,10 +775,8 @@ user(name)
 		}
 		lc = login_getclass(pw->pw_class);
 	}
-	if (logging) {
-		strncpy(curname, name, sizeof(curname)-1);
-		curname[sizeof(curname)-1] = '\0';
-	}
+	if (logging)
+		strlcpy(curname, name, sizeof(curname));
 #ifdef SKEY
 	if (!skey_haskey(name)) {
 		char *myskey, *skey_keyinfo __P((char *name));
@@ -828,8 +832,7 @@ checkuser(fname, name)
 static void
 end_login()
 {
-	sigset_t allsigs;
-	sigfillset (&allsigs);
+
 	sigprocmask (SIG_BLOCK, &allsigs, NULL);
 	(void) seteuid((uid_t)0);
 	if (logged_in) {
@@ -838,8 +841,9 @@ end_login()
 			logout(utmp.ut_line);
 	}
 	pw = NULL;
+	/* umask is restored in ftpcmd.y */
 	setusercontext(NULL, getpwuid(0), (uid_t)0,
-	    LOGIN_SETPRIORITY|LOGIN_SETRESOURCES|LOGIN_SETUMASK);
+	    LOGIN_SETPRIORITY|LOGIN_SETRESOURCES);
 	logged_in = 0;
 	guest = 0;
 	dochroot = 0;
@@ -849,11 +853,10 @@ void
 pass(passwd)
 	char *passwd;
 {
-	int rval;
+	int rval, flags;
 	FILE *fp;
 	static char homedir[MAXPATHLEN];
 	char *dir, rootdir[MAXPATHLEN];
-	sigset_t allsigs;
 
 	if (logged_in || askpasswd == 0) {
 		reply(503, "Login with USER first.");
@@ -922,9 +925,13 @@ skip:
 		reply(550, "Can't set gid.");
 		return;
 	}
-	(void) umask(defumask);		/* may be overridden by login.conf */
-	setusercontext(lc, pw, (uid_t)0,
-	    LOGIN_SETGROUP|LOGIN_SETPRIORITY|LOGIN_SETRESOURCES|LOGIN_SETUMASK);
+	/* set umask via setusercontext() unless -u flag was given. */
+	flags = LOGIN_SETGROUP|LOGIN_SETPRIORITY|LOGIN_SETRESOURCES;
+	if (umaskchange)
+		flags |= LOGIN_SETUMASK;
+	else
+		(void) umask(defumask);
+	setusercontext(lc, pw, (uid_t)0, flags);
 
 	/* open wtmp before chroot */
 	ftpdlogwtmp(ttyline, pw->pw_name, remotehost);
@@ -949,8 +956,16 @@ skip:
 	dochroot = login_getcapbool(lc, "ftp-chroot", 0) ||
 	    checkuser(_PATH_FTPCHROOT, pw->pw_name);
 	if ((dir = login_getcapstr(lc, "ftp-dir", NULL, NULL))) {
+		char *newdir;
+
+		newdir = copy_dir(dir, pw);
+		if (newdir == NULL) {
+			perror_reply(421, "Local resource failure: malloc");
+			dologout(1);
+			/* NOTREACHED */
+		}
 		free(pw->pw_dir);
-		pw->pw_dir = sgetsave(dir);
+		pw->pw_dir = newdir;
 	}
 	if (guest || dochroot) {
 		if (multihome && guest) {
@@ -1003,7 +1018,6 @@ skip:
 		reply(550, "Can't set uid.");
 		goto bad;
 	}
-	sigfillset(&allsigs);
 	sigprocmask(SIG_UNBLOCK, &allsigs, NULL);
 
 	/*
@@ -1131,7 +1145,7 @@ retrieve(cmd, name)
 	send_data(fin, dout, st.st_blksize, st.st_size,
 		  (restart_point == 0 && cmd == 0 && S_ISREG(st.st_mode)));
 	if ((cmd == 0) && stats)
-		logxfer(name, st.st_size, start);
+		logxfer(name, byte_count, start);
 	(void) fclose(dout);
 	data = -1;
 done:
@@ -1228,11 +1242,9 @@ getdatasock(mode)
 	char *mode;
 {
 	int on = 1, s, t, tries;
-	sigset_t allsigs;
 
 	if (data >= 0)
 		return (fdopen(data, mode));
-	sigfillset(&allsigs);
 	sigprocmask (SIG_BLOCK, &allsigs, NULL);
 	(void) seteuid((uid_t)0);
 	s = socket(ctrl_addr.su_family, SOCK_STREAM, 0);
@@ -1253,7 +1265,6 @@ getdatasock(mode)
 		sleep(tries);
 	}
 	(void) seteuid((uid_t)pw->pw_uid);
-	sigfillset(&allsigs);
 	sigprocmask (SIG_UNBLOCK, &allsigs, NULL);
 
 #ifdef IP_TOS
@@ -1286,7 +1297,6 @@ bad:
 	/* Return the real value of errno (close may change it) */
 	t = errno;
 	(void) seteuid((uid_t)pw->pw_uid);
-	sigfillset (&allsigs);
 	sigprocmask (SIG_UNBLOCK, &allsigs, NULL);
 	(void) close(s);
 	errno = t;
@@ -1355,7 +1365,7 @@ dataconn(name, size, mode)
 			pdata = -1;
 			return (NULL);
 		}
-		if (memcmp(fa, ha, alen) != 0) {
+		if (portcheck && memcmp(fa, ha, alen) != 0) {
 			perror_reply(435, "Can't build data connection"); 
 			(void) close(pdata);
 			(void) close(s);
@@ -1420,7 +1430,7 @@ dataconn(name, size, mode)
 		data = -1;
 		return NULL;
 	}
-	if (memcmp(fa, ha, alen) != 0) {
+	if (portcheck && memcmp(fa, ha, alen) != 0) {
 		perror_reply(435, "Can't build data connection");
 		(void) fclose(file);
 		data = -1;
@@ -1959,15 +1969,24 @@ void
 replydirname(name, message)
 	const char *name, *message;
 {
-	char npath[MAXPATHLEN];
-	int i;
+	char *p, *ep;
+	char npath[MAXPATHLEN * 2];
 
-	for (i = 0; *name != '\0' && i < sizeof(npath) - 1; i++, name++) {
-		npath[i] = *name;
-		if (*name == '"')
-			npath[++i] = '"';
+	p = npath;
+	ep = &npath[sizeof(npath) - 1];
+	while (*name) {
+		if (*name == '"') {
+			if (ep - p < 2)
+				break;
+			*p++ = *name++;
+			*p++ = '"';
+		} else {
+			if (ep - p < 1)
+				break;
+			*p++ = *name++;
+		}
 	}
-	npath[i] = '\0';
+	*p = '\0';
 	reply(257, "\"%s\" %s", npath, message);
 }
 
@@ -2039,9 +2058,8 @@ dolog(sa)
 	char hbuf[sizeof(remotehost)];
 
 	getnameinfo(sa, sa->sa_len, hbuf, sizeof(hbuf), NULL, 0, 0);
-	(void) strncpy(remotehost, hbuf, sizeof(remotehost)-1);
+	(void) strlcpy(remotehost, hbuf, sizeof(remotehost));
 
-	remotehost[sizeof(remotehost)-1] = '\0';
 #ifdef HASSETPROCTITLE
 	snprintf(proctitle, sizeof(proctitle), "%s: connected", remotehost);
 	setproctitle("%s", proctitle);
@@ -2059,12 +2077,10 @@ void
 dologout(status)
 	int status;
 {
-	sigset_t allsigs;
 
 	transflag = 0;
 
 	if (logged_in) {
-		sigfillset(&allsigs);
 		sigprocmask(SIG_BLOCK, &allsigs, NULL);
 		(void) seteuid((uid_t)0);
 		ftpdlogwtmp(ttyline, "", "");
@@ -2179,6 +2195,61 @@ pasv_error:
 }
 
 /*
+ * convert protocol identifier to/from AF
+ */
+int
+lpsvproto2af(int proto)
+{
+
+	switch (proto) {
+	case 4:	return AF_INET;
+#ifdef INET6
+	case 6:	return AF_INET6;
+#endif
+	default: return -1;
+	}
+}
+
+int
+af2lpsvproto(int af)
+{
+
+	switch (af) {
+	case AF_INET:	return 4;
+#ifdef INET6
+	case AF_INET6:	return 6;
+#endif
+	default:	return -1;
+	}
+}
+
+int
+epsvproto2af(int proto)
+{
+
+	switch (proto) {
+	case 1:	return AF_INET;
+#ifdef INET6
+	case 2:	return AF_INET6;
+#endif
+	default: return -1;
+	}
+}
+
+int
+af2epsvproto(int af)
+{
+
+	switch (af) {
+	case AF_INET:	return 1;
+#ifdef INET6
+	case AF_INET6:	return 2;
+#endif
+	default:	return -1;
+	}
+}
+
+/*
  * 228 Entering Long Passive Mode (af, hal, h1, h2, h3,..., pal, p1, p2...)
  * 229 Entering Extended Passive Mode (|||port|)
  */
@@ -2194,31 +2265,17 @@ long_passive(char *cmd, int pf)
 		return;
 	}
 
-	if (pf != PF_UNSPEC) {
-		if (ctrl_addr.su_family != pf) {
-			switch (ctrl_addr.su_family) {
-			case AF_INET:
-				pf = 1;
-				break;
-			case AF_INET6:
-				pf = 2;
-				break;
-			default:
-				pf = 0;
-				break;
-			}
-			/*
-			 * XXX
-			 * only EPRT/EPSV ready clients will understand this
-			 */
-			if (strcmp(cmd, "EPSV") == 0 && pf) {
-				reply(522, "Network protocol mismatch, "
-				    "use (%d)", pf);
-			} else
-				reply(501, "Network protocol mismatch"); /*XXX*/
+	if (pf != PF_UNSPEC && ctrl_addr.su_family != pf) {
+		/*
+		 * XXX
+		 * only EPRT/EPSV ready clients will understand this
+		 */
+		if (strcmp(cmd, "EPSV") != 0)
+			reply(501, "Network protocol mismatch"); /*XXX*/
+		else
+			epsv_protounsupp("Network protocol mismatch");
 
-			return;
-		}
+		return;
 	}
  		
 	if (pdata >= 0)
@@ -2288,7 +2345,7 @@ long_passive(char *cmd, int pf)
 			    "%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u)",
 				6, 16, a[0], a[1], a[2], a[3], a[4],
 				a[5], a[6], a[7], a[8], a[9], a[10],
-				a[11], a[12], a[13], a[14], a[15], 2,
+				a[11], a[12], a[13], a[14], a[15],
 				2, p[0], p[1]);
 			return;
 		}
@@ -2309,6 +2366,128 @@ long_passive(char *cmd, int pf)
 	pdata = -1;
 	perror_reply(425, "Can't open passive connection");
 	return;
+}
+
+/*
+ * EPRT |proto|addr|port|
+ */
+int
+extended_port(const char *arg)
+{
+	char *tmp = NULL;
+	char *result[3];
+	char *p, *q;
+	char delim;
+	struct addrinfo hints;
+	struct addrinfo *res = NULL;
+	int i;
+	unsigned long proto;
+
+	if (epsvall) {
+		reply(501, "EPRT disallowed after EPSV ALL");
+		return -1;
+	}
+
+	usedefault = 0;
+	if (pdata >= 0) {
+		(void) close(pdata);
+		pdata = -1;
+	}
+
+	tmp = strdup(arg);
+	if (!tmp) {
+		fatal("not enough core.");
+		/*NOTREACHED*/
+	}
+	p = tmp;
+	delim = p[0];
+	p++;
+	memset(result, 0, sizeof(result));
+	for (i = 0; i < 3; i++) {
+		q = strchr(p, delim);
+		if (!q || *q != delim)
+			goto parsefail;
+		*q++ = '\0';
+		result[i] = p;
+		p = q;
+	}
+
+	/* some more sanity check */
+	p = NULL;
+	(void)strtoul(result[2], &p, 10);
+	if (!*result[2] || *p)
+		goto protounsupp;
+	p = NULL;
+	proto = strtoul(result[0], &p, 10);
+	if (!*result[0] || *p)
+		goto protounsupp;
+
+	memset(&hints, 0, sizeof(hints));
+	hints.ai_family = epsvproto2af((int)proto);
+	if (hints.ai_family < 0)
+		goto protounsupp;
+	hints.ai_socktype = SOCK_STREAM;
+	hints.ai_flags = AI_NUMERICHOST;	/*no DNS*/
+	if (getaddrinfo(result[1], result[2], &hints, &res))
+		goto parsefail;
+	if (res->ai_next)
+		goto parsefail;
+	if (sizeof(data_dest) < res->ai_addrlen)
+		goto parsefail;
+	memcpy(&data_dest, res->ai_addr, res->ai_addrlen);
+	if (his_addr.su_family == AF_INET6 &&
+	    data_dest.su_family == AF_INET6) {
+		/* XXX more sanity checks! */
+		data_dest.su_sin6.sin6_scope_id =
+		    his_addr.su_sin6.sin6_scope_id;
+	}
+	if (pdata >= 0) {
+		(void) close(pdata);
+		pdata = -1;
+	}
+	reply(200, "EPRT command successful.");
+
+	if (tmp)
+		free(tmp);
+	if (res)
+		freeaddrinfo(res);
+	return 0;
+
+parsefail:
+	reply(500, "Invalid argument, rejected.");
+	usedefault = 1;
+	if (tmp)
+		free(tmp);
+	if (res)
+		freeaddrinfo(res);
+	return -1;
+
+protounsupp:
+	epsv_protounsupp("Protocol not supported");
+	usedefault = 1;
+	if (tmp)
+		free(tmp);
+	if (res)
+		freeaddrinfo(res);
+	return -1;
+}
+
+/*
+ * 522 Protocol not supported (proto,...)
+ * as we assume address family for control and data connections are the same, 
+ * we do not return the list of address families we support - instead, we 
+ * return the address family of the control connection.  
+ */
+void
+epsv_protounsupp(const char *message)
+{
+	int proto;
+
+	proto = af2epsvproto(ctrl_addr.su_family);
+	if (proto < 0)
+		reply(501, "%s", message);	/*XXX*/
+	else
+		reply(522, "%s, use (%d)", message, proto);
 }
 
 /*
@@ -2335,8 +2514,7 @@ guniquefd(local, nam)
 	}
 	if (cp)
 		*cp = '/';
-	(void) strncpy(new, local, sizeof(new)-1);
-	new[sizeof(new)-1] = '\0';
+	(void) strlcpy(new, local, sizeof(new));
 	len = strlen(new);
 	if (len+2+1 >= sizeof(new)-1)
 		return (-1);
@@ -2386,11 +2564,11 @@ send_file_list(whichf)
 	glob_t gl;
 
 	if (strpbrk(whichf, "~{[*?") != NULL) {
-		int flags = GLOB_BRACE|GLOB_NOCHECK|GLOB_QUOTE|GLOB_TILDE;
-
 		memset(&gl, 0, sizeof(gl));
 		freeglob = 1;
-		if (glob(whichf, flags, 0, &gl)) {
+		if (glob(whichf,
+		    GLOB_BRACE|GLOB_NOCHECK|GLOB_QUOTE|GLOB_TILDE|GLOB_LIMIT,
+		    0, &gl)) {
 			reply(550, "not found");
 			goto out;
 		} else if (gl.gl_pathc == 0) {
@@ -2538,10 +2716,8 @@ logxfer(name, size, start)
 			return;
 
 		snprintf(path, sizeof path, "%s/%s", dir, name);
-		if (realpath(path, rpath) == NULL) {
-			strncpy(rpath, path, sizeof rpath-1);
-			rpath[sizeof rpath-1] = '\0';
-		}
+		if (realpath(path, rpath) == NULL)
+			strlcpy(rpath, path, sizeof rpath);
 		strvis(vpath, rpath, VIS_SAFE|VIS_NOSLASH);
 
 		strvis(vremotehost, remotehost, VIS_SAFE|VIS_NOSLASH);
@@ -2591,3 +2767,58 @@ check_host(sa)
 	return (1);
 }
 #endif	/* TCPWRAPPERS */
+
+/*
+ * Allocate space and return a copy of the specified dir.
+ * If 'dir' begins with a tilde (~), expand it.
+ */
+char *
+copy_dir(dir, pw)
+	char *dir;
+	struct passwd *pw;
+{
+	char *cp;
+	char *newdir;
+	char *user = NULL;
+	size_t dirsiz;
+
+	/* Nothing to expand */
+	if (dir[0] !=  '~')
+		return (strdup(dir));
+
+	/* "dir" is of form ~user/some/dir, lookup user. */
+	if (dir[1] != '/' && dir[1] != '\0') {
+		if ((cp = strchr(dir + 1, '/')) == NULL)
+		    cp = dir + strlen(dir);
+		if ((user = malloc(cp - dir)) == NULL)
+			return (NULL);
+		strlcpy(user, dir + 1, cp - dir);
+
+		/* Only do lookup if it is a different user. */
+		if (strcmp(user, pw->pw_name) != 0) {
+			if ((pw = getpwnam(user)) == NULL) {
+				/* No such user, interpret literally */
+				free(user);
+				return(strdup(dir));
+			}
+		}
+	}
+
+	/*
+	 * If there is no directory separator (/) then it is just pw_dir.
+	 * Otherwise, replace ~foo with  pw_dir.
+	 */
+	if ((cp = strchr(dir + 1, '/')) == NULL) {
+		newdir = strdup(pw->pw_dir);
+	} else {
+		dirsiz = strlen(cp) + strlen(pw->pw_dir) + 1;
+		if ((newdir = malloc(dirsiz)) == NULL)
+			return (NULL);
+		strcpy(newdir, pw->pw_dir);
+		strcat(newdir, cp);
+	}
+
+	if (user)
+		free(user);
+	return(newdir);
+}

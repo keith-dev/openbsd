@@ -1,17 +1,54 @@
-#	$OpenBSD: Makefile,v 1.26 2000/10/16 14:43:35 mickey Exp $
-#       $NetBSD: Makefile,v 1.4 1996/01/09 03:23:01 thorpej Exp $
+#	$OpenBSD: Makefile,v 1.35 2001/03/16 02:32:48 csapuntz Exp $
+#	$NetBSD: Makefile,v 1.4 1996/01/09 03:23:01 thorpej Exp $
 
 #	Makefile for section 9 (kernel function and variable) manual pages.
 
-MAN=	audio.9 boot.9 copy.9 crypto.9 ctxsw.9 disk.9 disklabel.9 \
+MAN=	audio.9 boot.9 bus_dma.9 bus_space.9 \
+	copy.9 crypto.9 ctxsw.9 disk.9 disklabel.9 \
 	dopowerhooks.9 doshutdownhooks.9 fetch.9 fork1.9 \
 	extent.9 hz.9 hzto.9 intro.9 inittodr.9 log.9 kthread.9 \
 	malloc.9 md5.9 microtime.9 panic.9 pfind.9 pool.9 \
-        powerhook_establish.9 ppsratecheck.9 printf.9 psignal.9 \
-        ratecheck.9 resettodr.9 random.9 shutdownhook_establish.9 \
-        sleep.9 spl.9 store.9 style.9 time.9 timeout.9 vm_allocate.9 \
-        vm_map_copy.9 vm_deallocate.9 vm_map_inherit.9 vm_map_protect.9
+	powerhook_establish.9 ppsratecheck.9 printf.9 psignal.9 \
+	ratecheck.9 resettodr.9 random.9 shutdownhook_establish.9 \
+	sleep.9 spl.9 store.9 style.9 time.9 timeout.9 uvm.9 \
+	vm_allocate.9 vm_map_copy.9 vm_deallocate.9 \
+	vm_map_inherit.9 vm_map_protect.9 vnode.9 vn_lock.9 \
+	vwaitforio.9 vwaitforio.9
 
+MLINKS+=bus_dma.9 bus_dmamap_create.9 bus_dma.9 bus_dmamap_destroy.9 \
+	bus_dma.9 bus_dmamap_load.9 bus_dma.9 bus_dmamap_load_mbuf.9 \
+	bus_dma.9 bus_dmamap_load_uio.9 bus_dma.9 bus_dmamap_load_raw.9 \
+	bus_dma.9 bus_dmamap_unload.9 bus_dma.9 bus_dmamap_sync.9 \
+	bus_dma.9 bus_dmamem_alloc.9 bus_dma.9 bus_dmamem_free.9 \
+	bus_dma.9 bus_dmamem_map.9 bus_dma.9 bus_dmamem_unmap.9 \
+	bus_dma.9 bus_dmamem_mmap.9
+MLINKS+=bus_space.9 bus_space_alloc.9 bus_space.9 bus_space_barrier.9 \
+	bus_space.9 bus_space_copy_1.9 bus_space.9 bus_space_copy_2.9 \
+	bus_space.9 bus_space_copy_4.9 bus_space.9 bus_space_copy_8.9 \
+	bus_space.9 bus_space_free.9 bus_space.9 bus_space_map.9 \
+	bus_space.9 bus_space_read_1.9 bus_space.9 bus_space_read_2.9 \
+	bus_space.9 bus_space_read_4.9 bus_space.9 bus_space_read_8.9 \
+	bus_space.9 bus_space_read_multi_1.9 bus_space.9 bus_space_read_multi_2.9 \
+	bus_space.9 bus_space_read_multi_4.9 bus_space.9 bus_space_read_multi_8.9 \
+	bus_space.9 bus_space_read_raw_multi_2.9 bus_space.9 bus_space_read_raw_multi_4.9 \
+	bus_space.9 bus_space_read_raw_multi_8.9 bus_space.9 bus_space_read_region_1.9 \
+	bus_space.9 bus_space_read_region_2.9 bus_space.9 bus_space_read_region_4.9 \
+	bus_space.9 bus_space_read_region_8.9 bus_space.9 bus_space_read_raw_region_2.9 \
+	bus_space.9 bus_space_read_raw_region_4.9 bus_space.9 bus_space_read_raw_region_8.9 \
+	bus_space.9 bus_space_set_multi_1.9 bus_space.9 bus_space_set_multi_2.9 \
+	bus_space.9 bus_space_set_multi_4.9 bus_space.9 bus_space_set_multi_8.9 \
+	bus_space.9 bus_space_set_region_1.9 bus_space.9 bus_space_set_region_2.9 \
+	bus_space.9 bus_space_set_region_4.9 bus_space.9 bus_space_set_region_8.9 \
+	bus_space.9 bus_space_subregion.9 bus_space.9 bus_space_unmap.9 \
+	bus_space.9 bus_space_write_1.9 bus_space.9 bus_space_write_2.9 \
+	bus_space.9 bus_space_write_4.9 bus_space.9 bus_space_write_8.9 \
+	bus_space.9 bus_space_write_multi_1.9 bus_space.9 bus_space_write_multi_2.9 \
+	bus_space.9 bus_space_write_multi_4.9 bus_space.9 bus_space_write_multi_8.9 \
+	bus_space.9 bus_space_write_raw_multi_2.9 bus_space.9 bus_space_write_raw_multi_4.9 \
+	bus_space.9 bus_space_write_raw_multi_8.9 bus_space.9 bus_space_write_region_1.9 \
+	bus_space.9 bus_space_write_region_2.9 bus_space.9 bus_space_write_region_4.9 \
+	bus_space.9 bus_space_write_region_8.9 bus_space.9 bus_space_write_raw_region_2.9 \
+	bus_space.9 bus_space_write_raw_region_4.9 bus_space.9 bus_space_write_raw_region_8.9
 MLINKS+=copy.9 copyin.9 copy.9 copyout.9 copy.9 copystr.9 \
 	copy.9 copyinstr.9 copy.9 copyoutstr.9
 MLINKS+=ctxsw.9 cpu_switch.9 ctxsw.9 mi_switch.9
@@ -49,9 +86,12 @@ MLINKS+=store.9 subyte.9 store.9 suibyte.9 store.9 susword.9 \
 	store.9 suswintr.9 store.9 suword.9 store.9 suiword.9
 MLINKS+=time.9 boottime.9 time.9 mono_time.9 time.9 runtime.9
 MLINKS+=timeout.9 timeout_add.9 timeout.9 timeout_set.9 \
-	timeout.9 timeout_del.9 timeout.9 untimeout.9
+	timeout.9 timeout_pending.9 timeout.9 timeout_del.9 \
+	timeout.9 timeout_initialized.9 timeout.9 untimeout.9 \
+	timeout.9 timeout_triggered.9
 MLINKS+=vm_map_copy.9 vm_copy.9
 MLINKS+=vm_map_inherit.9 vm_inherit.9
 MLINKS+=vm_map_protect.9 vm_protect.9
+MLINKS+=malloc.9 MALLOC.9 malloc.9 free.9 malloc.9 FREE.9
 
 .include <bsd.prog.mk>

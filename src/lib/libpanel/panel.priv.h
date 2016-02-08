@@ -1,4 +1,4 @@
-/*	$OpenBSD: panel.priv.h,v 1.6 2000/10/08 22:47:07 millert Exp $	*/
+/*	$OpenBSD: panel.priv.h,v 1.8 2001/02/28 22:58:53 millert Exp $	*/
 
 /****************************************************************************
  * Copyright (c) 2000 Free Software Foundation, Inc.                        *
@@ -28,7 +28,7 @@
  * authorization.                                                           *
  ****************************************************************************/
 
-/* $From: panel.priv.h,v 1.14 2000/09/02 18:22:23 tom Exp $ */
+/* $From: panel.priv.h,v 1.17 2001/02/24 23:47:05 tom Exp $ */
 
 #ifndef _PANEL_PRIV_H
 #define _PANEL_PRIV_H
@@ -49,8 +49,8 @@
 #  include <dbmalloc.h>   /* Conor Cahill's library */
 #endif
 
-#include <nc_panel.h>
 #include "panel.h"
+#include <nc_panel.h>
 
 #if ( CC_HAS_INLINE_FUNCS && !defined(TRACE) )
 #  define INLINE inline
@@ -66,18 +66,18 @@
 
 
 #ifdef TRACE
-   extern const char *_nc_my_visbuf(const void *);
+   extern NCURSES_EXPORT(const char *) _nc_my_visbuf (const void *);
 #  ifdef TRACE_TXT
 #    define USER_PTR(ptr) _nc_visbuf((const char *)ptr)
 #  else
 #    define USER_PTR(ptr) _nc_my_visbuf((const char *)ptr)
 #  endif
 
-   extern void _nc_dPanel(const char*, const PANEL*);
-   extern void _nc_dStack(const char*, int, const PANEL*);
-   extern void _nc_Wnoutrefresh(const PANEL*);
-   extern void _nc_Touchpan(const PANEL*);
-   extern void _nc_Touchline(const PANEL*, int, int);
+   extern NCURSES_EXPORT(void) _nc_dPanel (const char*, const PANEL*);
+   extern NCURSES_EXPORT(void) _nc_dStack (const char*, int, const PANEL*);
+   extern NCURSES_EXPORT(void) _nc_Wnoutrefresh (const PANEL*);
+   extern NCURSES_EXPORT(void) _nc_Touchpan (const PANEL*);
+   extern NCURSES_EXPORT(void) _nc_Touchline (const PANEL*, int, int);
 
 #  define dBug(x) _tracef x
 #  define dPanel(text,pan) _nc_dPanel(text,pan)
@@ -152,10 +152,8 @@
         If the "touch" flag is set, the panel gets touched before it is
         updated. 
 ---------------------------------------------------------------------------*/
-#define PANEL_UPDATE(pan,panstart,touch)\
+#define PANEL_UPDATE(pan,panstart)\
 {  PANEL* pan2 = ((panstart) ? (panstart) : _nc_bottom_panel);\
-   if (touch)\
-      Touchpan(pan);\
    while(pan2) {\
       if ((pan2 != pan) && PANELS_OVERLAPPED(pan,pan2)) {\
         int y,ix1,ix2,iy1,iy2;\
@@ -194,12 +192,12 @@
 
 #define HIDE_PANEL(pan,err,err_if_unlinked)\
   if (IS_LINKED(pan)) {\
-    PANEL_UPDATE(pan,(PANEL*)0,TRUE);\
+    Touchpan(pan);\
+    PANEL_UPDATE(pan,(PANEL*)0);\
     PANEL_UNLINK(pan,err);\
   } \
   else {\
-    if (err_if_unlinked)\
-      err = ERR;\
+      err = err_if_unlinked;\
   }
 
 #endif /* _PANEL_PRIV_H */

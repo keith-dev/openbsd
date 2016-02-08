@@ -55,7 +55,6 @@
 ./etc/isakmpd/private
 ./etc/kerberosIV
 ./etc/mail
-./etc/mail/sendmail-IPv4only.cf
 ./etc/mtree
 ./etc/photuris
 ./etc/ppp
@@ -117,7 +116,6 @@
 ./sbin/mount_portal
 ./sbin/mount_procfs
 ./sbin/mount_tcfs
-./sbin/mount_ufs
 ./sbin/mount_umap
 ./sbin/mount_union
 ./sbin/mount_xfs
@@ -397,6 +395,7 @@
 ./usr/bin/sdiff
 ./usr/bin/sed
 ./usr/bin/sendbug
+./usr/bin/sftp
 ./usr/bin/shar
 ./usr/bin/showmount
 ./usr/bin/size
@@ -414,6 +413,7 @@
 ./usr/bin/ssh-add
 ./usr/bin/ssh-agent
 ./usr/bin/ssh-keygen
+./usr/bin/ssh-keyscan
 ./usr/bin/strings
 ./usr/bin/su
 ./usr/bin/sudo
@@ -1026,6 +1026,7 @@
 ./usr/libexec
 ./usr/libexec/afsd
 ./usr/libexec/atrun
+./usr/libexec/auth
 ./usr/libexec/comsat
 ./usr/libexec/cpp
 ./usr/libexec/cvs
@@ -1076,6 +1077,7 @@
 ./usr/libexec/sendmail
 ./usr/libexec/sendmail/sendmail
 ./usr/libexec/sftp-server
+./usr/libexec/sm.bin
 ./usr/libexec/smrsh
 ./usr/libexec/smtpd
 ./usr/libexec/smtpfwdd
@@ -1151,7 +1153,6 @@
 ./usr/sbin/ext_srvtab
 ./usr/sbin/faithd
 ./usr/sbin/fs
-./usr/sbin/fsinfo
 ./usr/sbin/getencstat
 ./usr/sbin/group
 ./usr/sbin/groupadd
@@ -1163,6 +1164,7 @@
 ./usr/sbin/ifmcstat
 ./usr/sbin/inetd
 ./usr/sbin/iostat
+./usr/sbin/ipfs
 ./usr/sbin/ipftest
 ./usr/sbin/ipmon
 ./usr/sbin/ipresend
@@ -1209,6 +1211,7 @@
 ./usr/sbin/nslookup
 ./usr/sbin/openssl
 ./usr/sbin/pac
+./usr/sbin/pkg
 ./usr/sbin/pkg_add
 ./usr/sbin/pkg_create
 ./usr/sbin/pkg_delete
@@ -1734,12 +1737,10 @@
 ./usr/share/sendmail/cf/mailspool.cs.mc
 ./usr/share/sendmail/cf/nettan.mc
 ./usr/share/sendmail/cf/openbsd-lists.mc
-./usr/share/sendmail/cf/openbsd-proto-IPv4only.mc
 ./usr/share/sendmail/cf/openbsd-proto.mc
 ./usr/share/sendmail/cf/python.cs.mc
 ./usr/share/sendmail/cf/s2k-osf1.mc
 ./usr/share/sendmail/cf/s2k-ultrix4.mc
-./usr/share/sendmail/cf/saruman.mc
 ./usr/share/sendmail/cf/tcpproto.mc
 ./usr/share/sendmail/cf/ucbarpa.mc
 ./usr/share/sendmail/cf/ucbvax.mc
@@ -1821,6 +1822,7 @@
 ./usr/share/sendmail/ostype/aix2.m4
 ./usr/share/sendmail/ostype/aix3.m4
 ./usr/share/sendmail/ostype/aix4.m4
+./usr/share/sendmail/ostype/aix5.m4
 ./usr/share/sendmail/ostype/altos.m4
 ./usr/share/sendmail/ostype/amdahl-uts.m4
 ./usr/share/sendmail/ostype/aux.m4
@@ -1829,6 +1831,7 @@
 ./usr/share/sendmail/ostype/bsdi.m4
 ./usr/share/sendmail/ostype/bsdi1.0.m4
 ./usr/share/sendmail/ostype/bsdi2.0.m4
+./usr/share/sendmail/ostype/darwin.m4
 ./usr/share/sendmail/ostype/dgux.m4
 ./usr/share/sendmail/ostype/domainos.m4
 ./usr/share/sendmail/ostype/dynix3.2.m4
@@ -1856,6 +1859,7 @@
 ./usr/share/sendmail/ostype/solaris2.m4
 ./usr/share/sendmail/ostype/solaris2.ml.m4
 ./usr/share/sendmail/ostype/solaris2.pre5.m4
+./usr/share/sendmail/ostype/solaris8.m4
 ./usr/share/sendmail/ostype/sunos3.5.m4
 ./usr/share/sendmail/ostype/sunos4.1.m4
 ./usr/share/sendmail/ostype/svr4.m4
@@ -2035,6 +2039,7 @@
 ./usr/share/zoneinfo/America/Detroit
 ./usr/share/zoneinfo/America/Dominica
 ./usr/share/zoneinfo/America/Edmonton
+./usr/share/zoneinfo/America/Eirunepe
 ./usr/share/zoneinfo/America/El_Salvador
 ./usr/share/zoneinfo/America/Ensenada
 ./usr/share/zoneinfo/America/Fort_Wayne
@@ -2062,6 +2067,9 @@
 ./usr/share/zoneinfo/America/Jamaica
 ./usr/share/zoneinfo/America/Jujuy
 ./usr/share/zoneinfo/America/Juneau
+./usr/share/zoneinfo/America/Kentucky
+./usr/share/zoneinfo/America/Kentucky/Louisville
+./usr/share/zoneinfo/America/Kentucky/Monticello
 ./usr/share/zoneinfo/America/Knox_IN
 ./usr/share/zoneinfo/America/La_Paz
 ./usr/share/zoneinfo/America/Lima
@@ -2097,7 +2105,9 @@
 ./usr/share/zoneinfo/America/Puerto_Rico
 ./usr/share/zoneinfo/America/Rainy_River
 ./usr/share/zoneinfo/America/Rankin_Inlet
+./usr/share/zoneinfo/America/Recife
 ./usr/share/zoneinfo/America/Regina
+./usr/share/zoneinfo/America/Rio_Branco
 ./usr/share/zoneinfo/America/Rosario
 ./usr/share/zoneinfo/America/Santiago
 ./usr/share/zoneinfo/America/Santo_Domingo
@@ -2130,6 +2140,7 @@
 ./usr/share/zoneinfo/Antarctica/Palmer
 ./usr/share/zoneinfo/Antarctica/South_Pole
 ./usr/share/zoneinfo/Antarctica/Syowa
+./usr/share/zoneinfo/Antarctica/Vostok
 ./usr/share/zoneinfo/Arctic
 ./usr/share/zoneinfo/Arctic/Longyearbyen
 ./usr/share/zoneinfo/Asia
@@ -2139,6 +2150,7 @@
 ./usr/share/zoneinfo/Asia/Anadyr
 ./usr/share/zoneinfo/Asia/Aqtau
 ./usr/share/zoneinfo/Asia/Aqtobe
+./usr/share/zoneinfo/Asia/Ashgabat
 ./usr/share/zoneinfo/Asia/Ashkhabad
 ./usr/share/zoneinfo/Asia/Baghdad
 ./usr/share/zoneinfo/Asia/Bahrain
@@ -2152,6 +2164,7 @@
 ./usr/share/zoneinfo/Asia/Colombo
 ./usr/share/zoneinfo/Asia/Dacca
 ./usr/share/zoneinfo/Asia/Damascus
+./usr/share/zoneinfo/Asia/Dhaka
 ./usr/share/zoneinfo/Asia/Dili
 ./usr/share/zoneinfo/Asia/Dubai
 ./usr/share/zoneinfo/Asia/Dushanbe
@@ -2199,6 +2212,7 @@
 ./usr/share/zoneinfo/Asia/Tehran
 ./usr/share/zoneinfo/Asia/Tel_Aviv
 ./usr/share/zoneinfo/Asia/Thimbu
+./usr/share/zoneinfo/Asia/Thimphu
 ./usr/share/zoneinfo/Asia/Tokyo
 ./usr/share/zoneinfo/Asia/Ujung_Pandang
 ./usr/share/zoneinfo/Asia/Ulaanbaatar
@@ -2333,6 +2347,7 @@
 ./usr/share/zoneinfo/Europe/Minsk
 ./usr/share/zoneinfo/Europe/Monaco
 ./usr/share/zoneinfo/Europe/Moscow
+./usr/share/zoneinfo/Europe/Nicosia
 ./usr/share/zoneinfo/Europe/Oslo
 ./usr/share/zoneinfo/Europe/Paris
 ./usr/share/zoneinfo/Europe/Prague
@@ -2536,10 +2551,12 @@
 ./var/www/conf
 ./var/www/htdocs
 ./var/www/htdocs/manual
+./var/www/htdocs/manual/howto
 ./var/www/htdocs/manual/images
 ./var/www/htdocs/manual/misc
 ./var/www/htdocs/manual/mod
 ./var/www/htdocs/manual/mod/mod_ssl
+./var/www/htdocs/manual/programs
 ./var/www/htdocs/manual/search
 ./var/www/htdocs/manual/vhosts
 ./var/www/icons

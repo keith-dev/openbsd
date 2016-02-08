@@ -1,4 +1,4 @@
-.\"	$OpenBSD: syslog.3,v 1.9 2000/08/25 17:43:14 aaron Exp $
+.\"	$OpenBSD: syslog.3,v 1.11 2001/02/17 17:15:23 pjanzen Exp $
 .\"
 .\" Copyright (c) 1985, 1991, 1993
 .\"	The Regents of the University of California.  All rights reserved.
@@ -57,8 +57,7 @@
 .Sh DESCRIPTION
 The
 .Fn syslog
-function
-writes
+function writes
 .Fa message
 to the system message logger.
 The message is then written to the system console, log files,
@@ -78,8 +77,7 @@ A trailing newline is added if none is present.
 .Pp
 The
 .Fn vsyslog
-function
-is an alternate form in which the arguments have already been captured
+function is an alternate form in which the arguments have already been captured
 using the variable-length argument facilities of
 .Xr varargs 3 .
 .Pp
@@ -119,9 +117,7 @@ normally of use only when debugging a program.
 .Pp
 The
 .Fn openlog
-function
-provides for more specialized processing of the messages sent
-by
+function provides for more specialized processing of the messages sent by
 .Fn syslog
 and
 .Fn vsyslog .
@@ -215,13 +211,11 @@ through
 .Pp
 The
 .Fn closelog
-function
-can be used to close the log file.
+function can be used to close the log file.
 .Pp
 The
 .Fn setlogmask
-function
-sets the log priority mask to
+function sets the log priority mask to
 .Fa maskpri
 and returns the previous mask.
 Calls to
@@ -270,7 +264,7 @@ These
 functions appeared in
 .Bx 4.2 .
 .Sh CAVEATS
-It is important to never pass a string with user-supplied data as a
+It is important never to pass a string with user-supplied data as a
 format without using
 .Ql %s .
 An attacker can put format specifiers in the string to mangle your stack,
@@ -283,7 +277,7 @@ as the resulting string may still contain user-supplied conversion specifiers
 for later interpolation by
 .Fn syslog .
 .Pp
-Be sure to always use the proper secure idiom:
+Always be sure to use the proper secure idiom:
 .Bd -literal -offset indent
 syslog("%s", string);
 .Ed

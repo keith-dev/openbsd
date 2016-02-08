@@ -1,4 +1,4 @@
-.\"	$OpenBSD: disklabel.8,v 1.37 2000/06/04 18:19:45 millert Exp $
+.\"	$OpenBSD: disklabel.8,v 1.40 2001/02/04 15:06:05 deraadt Exp $
 .\"	$NetBSD: disklabel.8,v 1.9 1995/03/18 14:54:38 cgd Exp $
 .\"
 .\" Copyright (c) 1987, 1988, 1991, 1993
@@ -126,7 +126,7 @@ It is used by the operating system to optimize disk I/O and
 locate the filesystems resident on the disk.
 .Pp
 The options are as follows:
-.Bl -tag -width -indent
+.Bl -tag -width Ds
 .It Fl n
 Make no permanent changes to the disklabel (useful for debugging
 purposes).
@@ -539,7 +539,8 @@ The bootstrap code comes from the file
 .El
 .Sh SEE ALSO
 .Xr disklabel 5 ,
-.Xr disktab 5
+.Xr disktab 5 ,
+.Xr scan_ffs 5
 .Sh DIAGNOSTICS
 The kernel device drivers will not allow the size of a disk partition
 to be decreased or the offset of a partition to be changed while
@@ -589,6 +590,9 @@ option to
 .Nm
 can still be used to install old style boot code,
 but this usage is deprecated.
+.Pp
+On some machines, such as the sparc and amiga, partition tables
+may not exhibit the full functionality that is described above.
 .Sh BUGS
 When a disk name is given without a full pathname, the constructed
 device name uses the

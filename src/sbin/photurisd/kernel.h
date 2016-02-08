@@ -1,5 +1,6 @@
+/* $OpenBSD: kernel.h,v 1.12 2001/01/28 22:45:11 niklas Exp $ */
 /*
- * Copyright 1997,1998 Niels Provos <provos@physnet.uni-hamburg.de>
+ * Copyright 1997-2000 Niels Provos <provos@citi.umich.edu>
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -27,7 +28,6 @@
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
-/* $Id: kernel.h,v 1.4 1999/07/02 23:37:33 deraadt Exp $ */
 /*
  * kernel.h: 
  * security paramter index creation.
@@ -64,9 +64,9 @@ typedef struct {
 transform xf[] = {
      {  5, SADB_X_AALG_MD5, XF_AUTH|AH_OLD},
      {  6, SADB_X_AALG_SHA1, XF_AUTH|AH_OLD},
-     {  5, SADB_AALG_MD5HMAC96, XF_AUTH|AH_NEW|ESP_NEW},
-     {  6, SADB_AALG_SHA1HMAC96, XF_AUTH|AH_NEW|ESP_NEW},
-     {  7, SADB_X_AALG_RIPEMD160HMAC96, XF_AUTH|AH_NEW|ESP_NEW},
+     {  5, SADB_AALG_MD5HMAC, XF_AUTH|AH_NEW|ESP_NEW},
+     {  6, SADB_AALG_SHA1HMAC, XF_AUTH|AH_NEW|ESP_NEW},
+     {  7, SADB_AALG_RIPEMD160HMAC, XF_AUTH|AH_NEW|ESP_NEW},
      {  8, SADB_EALG_DESCBC, XF_ENC|ESP_OLD},
      { 18, SADB_EALG_3DESCBC, XF_ENC|ESP_NEW},
      { 16, SADB_X_EALG_BLF, XF_ENC|ESP_NEW},
@@ -90,15 +90,12 @@ int kernel_esp(attrib_t *ob, attrib_t *ob2, struct spiob *SPI,
 int kernel_group_spi(char *address, u_int8_t *spi);
 int kernel_bind_spis(struct spiob *spi1, struct spiob *spi2);
 
-int kernel_enable_spi(in_addr_t isrc, in_addr_t ismask, 
-		      in_addr_t idst, in_addr_t idmask, 
-		      char *address, u_int8_t *spi, int proto, int flags);
-int kernel_disable_spi(in_addr_t isrc, in_addr_t ismask, 
-		       in_addr_t idst, in_addr_t idmask, 
-		       char *address, u_int8_t *spi, int proto, int flags);
 int kernel_delete_spi(char *address, u_int32_t spi, int proto);
 
-int kernel_request_sa(void *em /* struct encap_msghdr *em */);
+struct sadb_msg;
+int kernel_request_sa(struct sadb_msg *);
+int kernel_handle_expire(struct sadb_msg *);
+int kernel_new_exchange(char *, int);
 #else
 #define EXTERN extern
 #endif
@@ -119,5 +116,6 @@ EXTERN int kernel_get_socket(void);
 EXTERN void kernel_set_socket_policy(int sd);
 EXTERN void kernel_handle_notify(int sd);
 EXTERN void kernel_notify_result(struct stateob *, struct spiob *, int);
+EXTERN void kernel_handle_queue(void);
 
 #endif /* _KERNEL_H */

@@ -60,7 +60,7 @@
 #include "idea_lcl.h"
 
 static IDEA_INT inverse(unsigned int xin);
-void idea_set_encrypt_key(unsigned char *key, IDEA_KEY_SCHEDULE *ks)
+void idea_set_encrypt_key(const unsigned char *key, IDEA_KEY_SCHEDULE *ks)
 	{
 	  /* body of routine removed for OpenBSD due to IDEA patent */
 	}

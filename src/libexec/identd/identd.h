@@ -1,5 +1,6 @@
+/*	$OpenBSD: identd.h,v 1.8 2001/04/15 23:48:16 hugh Exp $*/
+
 /*
-**	$Id: identd.h,v 1.5 2000/06/18 04:43:28 beck Exp $
 **
 ** identd.h		    Common variables for the Pidentd daemon
 **
@@ -23,12 +24,14 @@ extern int verbose_flag;
 extern int debug_flag;
 extern int syslog_flag;
 extern int multi_flag;
-extern int other_flag;
 extern int unknown_flag;
 extern int number_flag;
 extern int noident_flag;
 extern int token_flag;
+extern int userident_flag;
 
+extern const char *opsys_name;
+extern const char *charset_sep;
 extern char *charset_name;
 extern char *indirect_host;
 extern char *indirect_password;

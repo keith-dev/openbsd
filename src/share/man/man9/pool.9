@@ -1,4 +1,4 @@
-.\"	$OpenBSD: pool.9,v 1.4 2000/10/12 18:06:01 aaron Exp $
+.\"	$OpenBSD: pool.9,v 1.7 2001/03/26 05:37:52 aaron Exp $
 .\"	$NetBSD: pool.9,v 1.13 1999/04/03 14:50:21 msaitoh Exp $
 .\"
 .\" Copyright (c) 1997, 1998 The NetBSD Foundation, Inc.
@@ -100,11 +100,11 @@ The arguments are:
 .It Fa size
 Specifies the size of the memory items managed by the pool.
 .It Fa align
-Specifies the memory address aligment of the items returned by
+Specifies the memory address alignment of the items returned by
 .Fn pool_get .
 This argument must be a power of two.
 If zero,
-the alignment defaults to a architecture-specific natural aligment.
+the alignment defaults to a architecture-specific natural alignment.
 .It Fa align_offset
 The offset within an item to which the
 .Fa align
@@ -332,8 +332,6 @@ The pool manager is implemented in the file
 .Xr malloc 9 ,
 .Xr free 9
 .\" .Xr uvm 9
-.Sh BUGS
-Pool will not work with old VM and is only used by UVM.
 .Sh HISTORY
 The pool manager first appeared in
 .Nx 1.4

@@ -1,5 +1,7 @@
+/*	$OpenBSD: handle_cookie_response.c,v 1.6 2001/01/28 22:45:08 niklas Exp $	*/
+
 /*
- * Copyright 1997 Niels Provos <provos@physnet.uni-hamburg.de>
+ * Copyright 1997-2000 Niels Provos <provos@citi.umich.edu>
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -34,7 +36,7 @@
  */
 
 #ifndef lint
-static char rcsid[] = "$Id: handle_cookie_response.c,v 1.1 1998/11/14 23:37:23 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: handle_cookie_response.c,v 1.6 2001/01/28 22:45:08 niklas Exp $";
 #endif
 
 #include <stdio.h>
@@ -49,7 +51,7 @@ static char rcsid[] = "$Id: handle_cookie_response.c,v 1.1 1998/11/14 23:37:23 d
 #include "scheme.h"
 #include "packet.h"
 #include "schedule.h"
-#include "errlog.h"
+#include "log.h"
 #include "config.h"
 
 int
@@ -68,12 +70,7 @@ handle_cookie_response(u_char *packet, int size,
 	header = (struct cookie_response *) packet;
 
 	/* Take multi home hosts into account */
-	st = state_root();
-	while(st != NULL) {
-	     if (!bcmp(header->icookie,st->icookie,COOKIE_SIZE))
-		  break;
-	     st = st->next;
-	}
+	st = state_find_icookie(header->icookie);
 	if (st == NULL)
 	     return -1;    /* Silently discard - XXX log perhaps ? */
 		
@@ -82,7 +79,7 @@ handle_cookie_response(u_char *packet, int size,
 
 	if (strcmp(address, st->address)) {
 	     /* XXX - is this a sane thing to do ? */
-	     log_error(0, "Response from multihomed host, address %s will "
+	     log_print("Response from multihomed host, address %s will "
 		       "be changed to %s.", st->address, address);
 	     strncpy(st->address, address, 15);
 	     st->address[15] = '\0';
@@ -91,15 +88,15 @@ handle_cookie_response(u_char *packet, int size,
 	/* Check scheme size */
 	p = COOKIE_RESPONSE_SCHEMES(header);
 	i = 0;
-	while(i<size-COOKIE_RESPONSE_MIN) {
+	while (i < size - COOKIE_RESPONSE_MIN) {
 	     if ((n = scheme_get_len(p + i)) == 0)
 		  break;
 	     i += n;
 	}
 
-	if (i != size-COOKIE_RESPONSE_MIN) {
-	     log_error(0, "schemes corrupt in handle_cookie_response()");
-	     return -1;    /* Size didn't match UDP size */
+	if (i != size - COOKIE_RESPONSE_MIN) {
+	     log_print("schemes corrupt in handle_cookie_response()");
+	     return (-1);    /* Size didn't match UDP size */
 	}
 
 	/* Copy responder cookies and offered schemes */

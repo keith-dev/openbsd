@@ -1,4 +1,4 @@
-/*	$OpenBSD: cmd3.c,v 1.13 2000/08/02 04:10:48 millert Exp $	*/
+/*	$OpenBSD: cmd3.c,v 1.15 2001/01/19 04:11:28 millert Exp $	*/
 /*	$NetBSD: cmd3.c,v 1.8 1997/07/09 05:29:49 mikel Exp $	*/
 
 /*
@@ -38,7 +38,7 @@
 #if 0
 static char sccsid[] = "@(#)cmd3.c	8.2 (Berkeley) 4/20/95";
 #else
-static char rcsid[] = "$OpenBSD: cmd3.c,v 1.13 2000/08/02 04:10:48 millert Exp $";
+static char rcsid[] = "$OpenBSD: cmd3.c,v 1.15 2001/01/19 04:11:28 millert Exp $";
 #endif
 #endif /* not lint */
 
@@ -69,9 +69,8 @@ shell(v)
 	cmd[sizeof(cmd) - 1] = '\0';
 	if (bangexp(cmd, sizeof(cmd)) < 0)
 		return(1);
-	if ((shell = value("SHELL")) == NULL)
-		shell = _PATH_CSHELL;
-	(void)run_command(shell, 0, -1, -1, "-c", cmd, NULL);
+	shell = value("SHELL");
+	(void)run_command(shell, 0, 0, -1, "-c", cmd, NULL);
 	(void)signal(SIGINT, sigint);
 	puts("!");
 	return(0);
@@ -88,9 +87,8 @@ dosh(v)
 	sig_t sigint = signal(SIGINT, SIG_IGN);
 	char *shell;
 
-	if ((shell = value("SHELL")) == NULL)
-		shell = _PATH_CSHELL;
-	(void)run_command(shell, 0, -1, -1, NULL, NULL, NULL);
+	shell = value("SHELL");
+	(void)run_command(shell, 0, 0, -1, NULL, NULL, NULL);
 	(void)signal(SIGINT, sigint);
 	putchar('\n');
 	return(0);
@@ -154,21 +152,12 @@ overf:
 /*
  * Print out a nice help message from some file or another.
  */
-
 int
 help(v)
 	void *v;
 {
-	int c;
-	FILE *f;
 
-	if ((f = Fopen(_PATH_HELP, "r")) == NULL) {
-		warn(_PATH_HELP);
-		return(1);
-	}
-	while ((c = getc(f)) != EOF)
-		putchar(c);
-	(void)Fclose(f);
+	(void)run_command(value("PAGER"), 0, -1, -1, _PATH_HELP, NULL);
 	return(0);
 }
 
@@ -295,6 +284,25 @@ reedit(subj)
 }
 
 /*
+ * Mark new the named messages, so that they will be left in the system
+ * mailbox as unread.
+ */
+int
+marknew(v)
+	void *v;
+{
+	int *msgvec = v;
+	int *ip;
+
+	for (ip = msgvec; *ip != NULL; ip++) {
+		dot = &message[*ip-1];
+		dot->m_flag &= ~(MBOX|MREAD|MTOUCH);
+		dot->m_flag |= MNEW|MSTATUS;
+	}
+	return(0);
+}
+
+/*
  * Preserve the named messages, so that they will be sent
  * back to the system mailbox.
  */
@@ -327,7 +335,7 @@ int
 unread(v)
 	void *v;
 {
-	int	*msgvec = v;
+	int *msgvec = v;
 	int *ip;
 
 	for (ip = msgvec; *ip != NULL; ip++) {

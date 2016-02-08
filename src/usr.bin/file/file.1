@@ -1,4 +1,4 @@
-.\" $OpenBSD: file.1,v 1.10 2000/07/26 16:55:05 ian Exp $
+.\" $OpenBSD: file.1,v 1.13 2001/02/16 02:00:22 smart Exp $
 .\" $FreeBSD: src/usr.bin/file/file.1,v 1.16 2000/03/01 12:19:39 sheldonh Exp $
 .Dd July 30, 1997
 .Dt FILE 1
@@ -116,7 +116,7 @@ or
 .Dq data .
 .Pp
 The options are as follows:
-.Bl -tag -width indent
+.Bl -tag -width Ds
 .It Fl v
 Print the version of the program and exit.
 .It Fl m Ar list
@@ -147,18 +147,18 @@ Cause symlinks to be followed, as the like-named option in
 .Xr ls 1 .
 (on systems that support symbolic links).
 .El
-.Sh FILES
-.Bl -tag -width /etc/magic -compact
-.It Pa /etc/magic
-default list of magic numbers
-.El
 .Sh ENVIRONMENT
 The following environment varibles affect the execution of
 .Nm file :
 .Pp
 .Bl -tag -width indent
-.Ev MAGIC
+.It Ev MAGIC
 Default magic number files.
+.El
+.Sh FILES
+.Bl -tag -width /etc/magic -compact
+.It Pa /etc/magic
+default list of magic numbers
 .El
 .Sh SEE ALSO
 .Xr hexdump 1 ,
@@ -390,4 +390,3 @@ on
 .Em ftp.deshaw.com
 in the directory
 .Pa /pub/file/file-X.YY.tar.gz
-

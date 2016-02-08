@@ -80,6 +80,7 @@ int background = FALSE;
 int identify = ID_NONE;
 char *pidfile = "/var/run/moused.pid";
 static sigjmp_buf env;
+static jmp_buf restart_env;
 
 /*
  * Most of the structures are from the Xfree Project
@@ -412,14 +413,24 @@ freedev(int sig)
    *  own purpose. 
    */
   close(mouse.mfd);
+  mouse.mfd = -1;
   sigpause(0);
   errno = save_errno;
 }
 
+static void mouse_init(void);
+
 static void
 opendev(int sig)
 {
-    siglongjmp(env, 1);
+	/* re-open the mouse device */
+	if ((mouse.mfd = open(mouse.portname, O_RDWR | O_NONBLOCK, 0)) == -1) {
+		logerr(1, "unable to open %s", mouse.portname);	/* XXX race */
+		_exit(1);
+	}
+	/* re-init the mouse */
+	mouse_init();
+	longjmp(restart_env, 1);	/* XXX signal/longjmp re-entrancy */
 }
 
 static void 
@@ -428,7 +439,7 @@ cleanup(int sig)
     char moused_flag = MOUSED_OFF;
   
     ioctl(mouse.cfd, PCVT_MOUSED, &moused_flag);
-    exit(0);
+    _exit(0);
 }
 
 /*
@@ -1754,7 +1765,10 @@ moused(void)
 	    }
 	}
     }
-	
+
+    /* restart point when coming from X */
+    setjmp(restart_env);
+    
     /* display initial cursor */
     mouse_infos.operation = MOUSE_INIT;
 
@@ -2032,7 +2046,6 @@ main(int argc, char **argv)
 			signal(SIGINT , cleanup);
 			signal(SIGQUIT, cleanup);
 			signal(SIGTERM, cleanup);
-			signal(SIGKILL, cleanup);
 			if ((mouse.mfd = open(mouse.portname, 
 			    O_RDWR | O_NONBLOCK, 0)) == -1) 
 				logerr(1, "unable to open %s", mouse.portname);

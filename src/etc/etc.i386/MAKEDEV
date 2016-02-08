@@ -1,6 +1,6 @@
 #!/bin/sh -
 #
-#	$OpenBSD: MAKEDEV,v 1.84 2000/10/16 14:57:56 aaron Exp $
+#	$OpenBSD: MAKEDEV,v 1.91 2001/04/17 16:20:24 todd Exp $
 #	$NetBSD: MAKEDEV,v 1.40 1996/03/31 00:50:47 perry Exp $
 #
 # Copyright (c) 1990 The Regents of the University of California.
@@ -48,11 +48,10 @@
 #	raid*	RAIDframe disk devices
 #
 # Console ports:
-#	ttyC0	pccons or pcvt screen 0
-#	ttyC*	pcvt
-#	pcvtctl	userland <-> kernel mouse communication for pcvt
+#	ttyC0	pccons or wscons screen 0
+#	ttyC*	wscons
 #
-# Pointing devices:
+# Pointing devices: XXX no longer necessary with wsmouse drivers XXX
 #	mms*	Microsoft bus mouse
 #	lms*	Logitech bus mouse
 #	pms*	PS/2 mouse
@@ -85,14 +84,14 @@
 #	bpf*	packet filter
 #	speaker	pc speaker				(XXX - installed)
 #	lkm	loadable kernel modules interface
-#	audio	audio device
+#	audio*	audio device
 #	apm	power management device
 #	tun*	network tunnel driver
 #	joy*	joystick driver
 #	pcmcia*	PCMCIA card drivers
 #	*random	inkernel random number generator
 #	uk*	"unknown SCSI" devices
-#	ses*	SES/SAF-TE SCSI devives
+#	ses*	SES/SAF-TE SCSI devices
 #	ss*	SCSI scanners
 #	xfs*	XFS filesystem devices
 #	bktr0	video capturing
@@ -159,18 +158,18 @@ dodisk ()
 
 unt()
 {
-        # XXX pdksh can't seem to deal with locally scoped variables
-        # in ${foo#$bar} expansions
-        arg="$1"
-        tmp="${arg#[a-zA-Z]*}"
-        tmp="${tmp%*[a-zA-Z]}"
-        while [ "$tmp" != "$arg" ]
-        do
-                arg=$tmp
-                tmp="${arg#[a-zA-Z]*}"
-                tmp="${tmp%*[a-zA-Z]}"
-        done
-        echo $arg
+	# XXX pdksh can't seem to deal with locally scoped variables
+	# in ${foo#$bar} expansions
+	arg="$1"
+	tmp="${arg#[a-zA-Z]*}"
+	tmp="${tmp%*[a-zA-Z]}"
+	while [ "$tmp" != "$arg" ]
+	do
+		arg=$tmp
+		tmp="${arg#[a-zA-Z]*}"
+		tmp="${tmp%*[a-zA-Z]}"
+	done
+	echo $arg
 }
 
 for i
@@ -187,10 +186,12 @@ all)
 	sh $this ttyc0 ttyc1 ttyc2 ttyc3 ttyc4 ttyc5 ttyc6 ttyc7
 	sh $this mcd0 vnd0 vnd1 lpa0 lpa1 ccd0 ccd1 ccd2 ccd3
 	sh $this raid0 raid1 raid2 raid3 lpt0 lpt1 lpt2
-	sh $this ttyC0 ttyC1 ttyC2 ttyC3 ttyC4 ttyC5 pcvtctl
+	sh $this ttyC0 ttyC1 ttyC2 ttyC3 ttyC4 ttyC5 ttyC6 ttyC7 ttyC8 ttyC9
+	sh $this ttyCa ttyCb
+	sh $this wscons
 	sh $this ipl tun0 tun1 tun2
 	sh $this bpf0 bpf1 bpf2 bpf3 bpf4 bpf5 bpf6 bpf7 bpf8 bpf9
-	sh $this speaker lkm mms0 lms0 pms0 audio joy0 joy1 apm local
+	sh $this speaker lkm audio0 joy0 joy1 apm local
 	sh $this random ses0 uk0 uk1 ss0 ss1 pctr bktr0 tuner0 wdt0
 	sh $this fd0 fd0B fd0C fd0D fd0E fd0F fd0G fd0H 
 	sh $this fd1 fd1B fd1C fd1D fd1E fd1F fd1G fd1H
@@ -227,7 +228,7 @@ std)
 	mknod kmem		c 2 1	; chmod 640 kmem ; chown root.kmem kmem
 	mknod mem		c 2 0	; chmod 640 mem	; chown root.kmem mem
 	mknod null		c 2 2	; chmod 666 null
-	mknod xf86              c 2 4   ; chmod 600 xf86 ; chown root xf86
+	mknod xf86		c 2 4   ; chmod 600 xf86 ; chown root xf86
 	mknod zero		c 2 12	; chmod 666 zero
 	mknod io		c 2 14	; chmod 640 io ; chown root.kmem io
 	mknod tty		c 1 0	; chmod 666 tty
@@ -283,17 +284,49 @@ utty*)
 	chmod 660 utty$unit
 	;;
 
+ttyCcfg)
+	rm -f ttyCcfg
+	mknod ttyCcfg c 12 255
+	chown root.wheel ttyCcfg
+	;;
+
 ttyC*)
+	unit=${i##ttyC}
+	case $unit in
+	[0123456789abcdef])	;;
+	*)			echo bad unit $unit for $i; exit 1;;
+	esac
+	num=$(( 16#$unit ))
 	rm -f ttyC$unit
-	mknod ttyC$unit c 12 $unit
+	mknod ttyC$unit c 12 $num
 	chown root.wheel ttyC$unit
 	;;
 
-pcvtctl)
-	rm -f pcvtctl
-	mknod pcvtctl c 12 255
-	chown root.wheel pcvtctl
-	chmod 600 pcvtctl
+wscons)
+	sh $this wskbd0 wskbd1 wskbd2 wskbd3
+	sh $this wsmouse0 wsmouse1 wsmouse2 wsmouse3
+	sh $this ttyCcfg
+	sh $this wsmux
+	;;
+
+wskbd*)
+	rm -f wskbd$unit
+	mknod wskbd$unit c 67 $unit
+	chown root.wheel wskbd$unit
+	;;
+
+wsmouse*)
+	rm -f wsmouse$unit
+	mknod wsmouse$unit c 68 $unit
+	chown root.wheel wsmouse$unit
+	;;
+
+wsmux|wsmouse|wskbd)
+	rm -f wsmouse wskbd
+	mknod wsmouse c 69 0
+	mknod wskbd c 69 1
+	chown root.wheel wsmouse wskbd
+	chmod 600 wsmouse wskbd
 	;;
 
 ttyc*)
@@ -302,7 +335,7 @@ ttyc*)
 	mknod cuac$unit c 38 $(( $unit + 128 ))
 	chown uucp.dialer ttyc$unit cuac$unit
 	chmod 660 ttyc$unit cuac$unit
-        ;;
+	;;
 
 fd)
 	rm -f fd/*
@@ -331,9 +364,9 @@ wt*)
 
 fd*)
 	umask 2
-        unit=${i##fd}
+	unit=${i##fd}
 	typnam=${unit#?}
-        unit=${unit%%[!0-9]}
+	unit=${unit%%[!0-9]}
 	case $typnam in
 	"")	typnum=0;;	# no type specified, assume A
 	A)	typnam=; typnum=0;;
@@ -445,8 +478,8 @@ pty*)
 	do
 		nam=$name`hex $n`
 		rm -f {tty,pty}$nam
-                mknod tty$nam c 5 "$(( $offset + $n ))"
-                mknod pty$nam c 6 "$(( $offset + $n ))"
+		mknod tty$nam c 5 "$(( $offset + $n ))"
+		mknod pty$nam c 6 "$(( $offset + $n ))"
 		let n=n+1
 	done
 	umask 77
@@ -546,48 +579,47 @@ lkm)
 	chmod 640 lkm
 	;;
 
-mms*|lms*)
-	case $i in
-	mms*) name=mms; chr=35;;
-	lms*) name=lms; chr=36;;
-	esac
-	rm -f $name$unit
-	mknod $name$unit c $chr $unit
-	chown root.wheel $name$unit
-	;;
+#mms*|lms*)
+#	case $i in
+#	mms*) name=mms; chr=35;;
+#	lms*) name=lms; chr=36;;
+#	esac
+#	rm -f $name$unit
+#	mknod $name$unit c $chr $unit
+#	chown root.wheel $name$unit
+#	;;
 
-pms*)
-	rm -f pms${unit}
-	rm -f psm${unit}
-	mknod pms${unit} c 37 0
-	mknod psm${unit} c 37 1
-	chown root.wheel pms${unit}
-	chown root.wheel psm${unit}
-	;;
+#pms*)
+#	rm -f pms${unit}
+#	rm -f psm${unit}
+#	mknod pms${unit} c 37 0
+#	mknod psm${unit} c 37 1
+#	chown root.wheel pms${unit}
+#	chown root.wheel psm${unit}
+#	;;
 
-mouse*)					# (XXX)
-	case $i in
-	mouse-*)
-		name=${i##mouse-}
-		if [ ! -c $name ]; then
-			/bin/sh $0 $name	# make the appropriate device
-		fi
-		rm -f mouse
-		ln -s $name mouse
-		;;
-	*)
-		echo no such device: use mouse-\${dev}, e.g. mouse-cua00
-		;;
-	esac
-	;;
+#mouse*)					# (XXX)
+#	case $i in
+#	mouse-*)
+#		name=${i##mouse-}
+#		if [ ! -c $name ]; then
+#			/bin/sh $0 $name	# make the appropriate device
+#		fi
+#		rm -f mouse
+#		ln -s $name mouse
+#		;;
+#	*)
+#		echo no such device: use mouse-\${dev}, e.g. mouse-cua00
+#		;;
+#	esac
+#	;;
 
 audio*)
-	[ "$unit" = "0" ] && n= || n=$unit
+	major=42
 	audio=audio$n
 	sound=sound$n
 	mixer=mixer$n
 	audioctl=audioctl$n
-	major=42
 	rm -f $audio $sound $mixer $audioctl
 	mknod $sound    c $major $unit
 	mknod $audio    c $major $(( $unit + 128 ))
@@ -595,6 +627,10 @@ audio*)
 	mknod $audioctl c $major $(( $unit + 192 ))
 	chown root.wheel $audio $sound $mixer $audioctl
 	chmod 666 $audio $sound $mixer $audioctl
+	[ -e audio ] || ln -s $audio audio
+	[ -e mixer ] || ln -s $mixer mixer
+	[ -e sound ] || ln -s $sound sound
+	[ -e audioctl ] || ln -s $audioctl audioctl
 	;;
 
 joy*)

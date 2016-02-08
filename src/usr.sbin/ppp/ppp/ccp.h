@@ -15,7 +15,7 @@
  * IMPLIED WARRANTIES, INCLUDING, WITHOUT LIMITATION, THE IMPLIED
  * WARRANTIES OF MERCHANTIBILITY AND FITNESS FOR A PARTICULAR PURPOSE.
  *
- * $OpenBSD: ccp.h,v 1.5 2000/02/27 01:38:25 brian Exp $
+ * $OpenBSD: ccp.h,v 1.8 2001/02/04 22:53:12 brian Exp $
  *
  *	TODO:
  */
@@ -29,6 +29,7 @@
 #define	TY_HWPPC	16	/* Hewlett-Packard PPC */
 #define	TY_STAC		17	/* Stac Electronics LZS */
 #define	TY_MSPPC	18	/* Microsoft PPC */
+#define	TY_MPPE		18	/* Microsoft PPE */
 #define	TY_GAND		19	/* Gandalf FZA */
 #define	TY_V42BIS	20	/* V.42bis compression */
 #define	TY_BSD		21	/* BSD LZW Compress */
@@ -38,7 +39,12 @@
 #define CCP_NEG_DEFLATE		0
 #define CCP_NEG_PRED1		1
 #define CCP_NEG_DEFLATE24	2
+#ifdef HAVE_DES
+#define CCP_NEG_MPPE		3
+#define CCP_NEG_TOTAL		4
+#else
 #define CCP_NEG_TOTAL		3
+#endif
 
 struct mbuf;
 struct link;
@@ -49,6 +55,11 @@ struct ccp_config {
       int winsize;
     } in, out;
   } deflate;
+#ifdef HAVE_DES
+  struct {
+    int keybits;
+  } mppe;
+#endif
   struct fsm_retry fsm;	/* How often/frequently to resend requests */
   unsigned neg[CCP_NEG_TOTAL];
 };
@@ -71,13 +82,13 @@ struct ccp {
   struct {
     int algorithm;		/* Algorithm in use */
     void *state;		/* Returned by implementations Init() */
-    struct lcp_opt opt;		/* Set by implementations OptInit() */
+    struct lcp_opt opt;		/* Set by implementation's OptInit() */
   } in;
 
   struct {
     int algorithm;		/* Algorithm in use */
     void *state;		/* Returned by implementations Init() */
-    struct ccp_opt *opt;	/* Set by implementations OptInit() */
+    struct ccp_opt *opt;	/* Set by implementation's OptInit() */
   } out;
 
   u_int32_t his_reject;		/* Request codes rejected by peer */
@@ -95,6 +106,7 @@ struct ccp_algorithm {
   int id;
   int Neg;					/* ccp_config neg array item */
   const char *(*Disp)(struct lcp_opt *);	/* Use result immediately !  */
+  int (*Usable)(struct fsm *);			/* Ok to negotiate ? */
   struct {
     int (*Set)(struct lcp_opt *, const struct ccp_config *);
     void *(*Init)(struct lcp_opt *);
@@ -124,5 +136,6 @@ extern int ccp_ReportStatus(struct cmdargs const *);
 extern u_short ccp_Proto(struct ccp *);
 extern void ccp_SetupCallbacks(struct ccp *);
 extern int ccp_SetOpenMode(struct ccp *);
+extern int ccp_IsUsable(struct fsm *);
 
 extern struct layer ccplayer;

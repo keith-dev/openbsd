@@ -1,5 +1,7 @@
+/*	$OpenBSD: handle_verification_failure.c,v 1.4 2001/01/28 22:45:10 niklas Exp $	*/
+
 /*
- * Copyright 1997 Niels Provos <provos@physnet.uni-hamburg.de>
+ * Copyright 1997-2000 Niels Provos <provos@citi.umich.edu>
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -34,7 +36,7 @@
  */
 
 #ifndef lint
-static char rcsid[] = "$Id: handle_verification_failure.c,v 1.1 1998/11/14 23:37:24 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: handle_verification_failure.c,v 1.4 2001/01/28 22:45:10 niklas Exp $";
 #endif
 
 #include <stdio.h>
@@ -48,7 +50,7 @@ static char rcsid[] = "$Id: handle_verification_failure.c,v 1.1 1998/11/14 23:37
 #include "buffer.h"
 #include "packet.h"
 #include "schedule.h"
-#include "errlog.h"
+#include "log.h"
 
 int
 handle_verification_failure(u_char *packet, int size, char *address)
@@ -63,12 +65,12 @@ handle_verification_failure(u_char *packet, int size, char *address)
 
 	if ((st = state_find_cookies(address, header->icookie, 
 				     header->rcookie)) == NULL) {
-	     log_error(0, "No state for VERIFICATION_FAILURE message from %s", 
+	     log_print("No state for VERIFICATION_FAILURE message from %s", 
 		       address);
 	     return -1;
 	}
 	
-	log_error(0, "Received VERIFICATION_FAILURE from %s", address);
+	log_print("Received VERIFICATION_FAILURE from %s", address);
 
 	return 0;
 }

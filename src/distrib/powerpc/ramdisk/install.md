@@ -1,4 +1,4 @@
-#	$OpenBSD: install.md,v 1.16 2000/10/17 15:21:59 deraadt Exp $
+#	$OpenBSD: install.md,v 1.24 2001/04/17 13:06:24 brad Exp $
 #
 #
 # Copyright rc) 1996 The NetBSD Foundation, Inc.
@@ -45,8 +45,8 @@ MDSETS="kernel"
 
 md_set_term() {
 	test -n "$TERM" && return
-	echo -n "Specify terminal type [vt100]: "
-	getresp vt100
+	echo -n "Specify terminal type [vt220]: "
+	getresp vt220
 	TERM=$resp
 	export TERM
 }
@@ -61,12 +61,12 @@ md_machine_arch() {
 
 md_get_diskdevs() {
 	# return available disk devices
-	bsort `cat /kern/msgbuf | egrep "^[sw]d[0-9]+ " | cutword 1`
+	bsort `cat /kern/msgbuf | egrep -a "^[sw]d[0-9]+ " | cutword 1`
 }
 
 md_get_cddevs() {
 	# return available CDROM devices
-	bsort `cat /kern/msgbuf | egrep "^cd[0-9]+ " | cutword 1`
+	bsort `cat /kern/msgbuf | egrep -a "^cd[0-9]+ " | cutword 1`
 }
 
 md_get_partition_range() {
@@ -79,12 +79,19 @@ md_questions() {
 }
 
 md_installboot() {
-	echo "Installing boot in the msdos partition /dev/${1}i"
-	if mount -t msdos /dev/${1}i /mnt2 ; then
-		cp /usr/mdec/ofwboot /mnt2
-		umount /mnt2
-	else
-		echo "Failed, you will not be able to boot from /dev/${1}."
+	if [[ $disklabeltype = "HFS" ]] 
+	then
+		echo "the 'ofwboot' program needs to be copied to the first HFS partition"
+		echo "of the disk to allow booting of OpenBSD"
+	elif [[ $disklabeltype = "MBR" ]] 
+	then
+		echo "Installing boot in the msdos partition /dev/${1}i"
+		if mount -t msdos /dev/${1}i /mnt2 ; then
+			cp /usr/mdec/ofwboot /mnt2
+			umount /mnt2
+		else
+			echo "Failed, you will not be able to boot from /dev/${1}."
+		fi
 	fi
 }
 
@@ -108,9 +115,9 @@ md_init_mbr() {
 	echo
 	echo "If you choose to manually setup the MSDOS partition, "
 	echo "consult your PowerPC OpenFirmware manual -and- the"
-	echo "PowerPC BSD Installation Guide for doing setup this way."
+	echo "PowerPC OpenBSD Installation Guide for doing setup this way."
 	echo
-	echo -n "Do you want to init the MBR and the MSDOS partition? [y]"
+	echo -n "Do you want to init the MBR and the MSDOS partition? [y] "
 	getresp "y"
 	case "$resp" in
 	n*|N*)
@@ -138,19 +145,57 @@ md_init_mbr() {
 	esac
 }
 
+md_init_hfs() {
+	pdisk /dev/${1}c
+}
 md_checkfordisklabel() {
 	# $1 is the disk to check
 	local rval
 
 	echo
-	echo "Power.4e systems need an MBR and MSDOS partition on the boot disk."
-	echo "This is necessary because the OpenFirmware doesn't know about"
-	echo "OpenBSD, or how to boot the system from a BSD partition."
-	echo
-	echo "Install will put a boot program with the name 'ofwboot' "
-	echo "that you will configure OpenFirmware to use when booting OpenBSD."
-	echo
-	echo -n "Have you initialized an MSDOS partition using OpenFirmware? [n]"
+	echo "Apple systems have two methods to label/partition a boot disk."
+	echo "Either the disk can be partitioned with Apple HFS partition"
+	echo "tools to contain an \"Unused\" partition, or without any"
+	echo "MacOS tools, the disk can be labled using an MBR partition table"
+	echo "If the HFS (DPME) partition table is used, after the disk is"
+	echo "partitioned with the Apple software, the \"Unused\" section"
+	echo "must be changed to type \"OpenBSD\" name \"OpenBSD\" using the"
+	echo "pdisk tool contained on this ramdisk. The disklabel can"
+	echo "then be edited normally"
+	echo "WARNING: the MBR partitioning code will HAPPILY overwrite/destroy"
+	echo "any HFS partitions on the disk, including the partition table."
+	echo "Choose the MBR option carefully, knowing this fact."
+
+	echo -n "Do you want to choose (H)FS labeling or (M)BR labeling [H] "
+	getresp "h"
+	case "$resp" in
+	m*|M*)
+		export disklabeltype=MBR
+		md_checkforMBRdisklabel $1
+		rval=$?
+		;;
+	*)
+		export disklabeltype=HFS
+		md_init_hfs $1
+		rval=$?
+		;;
+	esac
+	return $rval
+}
+md_checkforMBRdisklabel() {
+
+	echo "You have chosen to put a MBR disklabel on the disk."
+	echo -n "Is this correct? [n] "
+	getresp "n"
+	case "$resp" in
+	n*|N*)
+		echo "aborting install"
+		exit 0;;
+	*)
+		;;
+	esac
+
+	echo -n "Have you initialized an MSDOS partition using OpenFirmware? [n] "
 	getresp "n"
 	case "$resp" in
 	n*|N*)
@@ -160,7 +205,7 @@ md_checkfordisklabel() {
 		echo "You may keep your current setup if you want to be able to use any"
 		echo "already loaded OS. However you will be asked to prepare an empty"
 		echo "partition for OpenBSD later. There must also be at least ~0.5Mb free space"
-		echo "in the boot partition to hold the OpenBSD kernel boot."
+		echo "in the boot partition to hold the OpenBSD bootloader."
 		echo
 		echo "Also note that the boot partition must be included as partition"
 		echo "'i' in the OpenBSD disklabel."
@@ -175,7 +220,6 @@ md_checkfordisklabel() {
 		esac
 	;;
 	esac
-
 
 	disklabel -r $1 > /dev/null 2> /tmp/checkfordisklabel
 	if grep "no disk label" /tmp/checkfordisklabel; then
@@ -273,16 +317,16 @@ md_prep_disklabel()
 	md_checkfordisklabel $_disk
 	case $? in
 	0)
-		echo -n "Do you wish to edit the disklabel on $_disk? [y]"
+		echo -n "Do you wish to edit the disklabel on $_disk? [y] "
 		;;
 	1)
 		md_prep_fdisk ${_disk}
 		echo "WARNING: Disk $_disk has no label"
-		echo -n "Do you want to create one with the disklabel editor? [y]"
+		echo -n "Do you want to create one with the disklabel editor? [y] "
 		;;
 	2)
 		echo "WARNING: Label on disk $_disk is corrupted"
-		echo -n "Do you want to try and repair the damage using the disklabel editor? [y]"
+		echo -n "Do you want to try and repair the damage using the disklabel editor? [y] "
 		;;
 
 	esac
@@ -322,11 +366,19 @@ Do not change any parameters except the partition layout and the label name.
 __md_prep_disklabel_1
 	echo -n "Press [Enter] to continue "
 	getresp ""
-	disklabel -W ${_disk}
-	disklabel ${_disk} >/tmp/label.$$
-	disklabel -r -R ${_disk} /tmp/label.$$
-	rm -f /tmp/label.$$
-	disklabel -f /tmp/fstab.${_disk} -E ${_disk}
+	if [[ $disklabeltype = "HFS" ]] 
+	then
+		disklabel -c -f /tmp/fstab.${_disk} -E ${_disk}
+	elif [[ $disklabeltype = "MBR" ]] 
+	then
+		disklabel -W ${_disk}
+		disklabel ${_disk} >/tmp/label.$$
+		disklabel -r -R ${_disk} /tmp/label.$$
+		rm -f /tmp/label.$$
+		disklabel -f /tmp/fstab.${_disk} -E ${_disk}
+	else
+		echo "unknown disk label type"
+	fi
 }
 
 md_welcome_banner() {

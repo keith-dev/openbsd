@@ -1,4 +1,4 @@
-/*	$OpenBSD: ftree.c,v 1.9 1998/06/09 07:28:41 deraadt Exp $	*/
+/*	$OpenBSD: ftree.c,v 1.13 2001/02/09 23:01:00 millert Exp $	*/
 /*	$NetBSD: ftree.c,v 1.4 1995/03/21 09:07:21 cgd Exp $	*/
 
 /*-
@@ -42,7 +42,7 @@
 #if 0
 static char sccsid[] = "@(#)ftree.c	8.2 (Berkeley) 4/18/94";
 #else
-static char rcsid[] = "$OpenBSD: ftree.c,v 1.9 1998/06/09 07:28:41 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: ftree.c,v 1.13 2001/02/09 23:01:00 millert Exp $";
 #endif
 #endif /* not lint */
 
@@ -171,7 +171,7 @@ ftree_add(str, chflg)
 	 * simple check for bad args
 	 */
 	if ((str == NULL) || (*str == '\0')) {
-		paxwarn(0, "Invalid file name arguement");
+		paxwarn(0, "Invalid file name argument");
 		return(-1);
 	}
 
@@ -321,7 +321,7 @@ ftree_arg()
 				*pt = '\0';
 		} else {
 			/*
-			 * the user supplied the file args as arguements to pax
+			 * the user supplied the file args as arguments to pax
 			 */
 			if (ftcur == NULL)
 				ftcur = fthead;

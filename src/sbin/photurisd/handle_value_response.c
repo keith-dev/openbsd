@@ -1,5 +1,7 @@
+/*	$OpenBSD: handle_value_response.c,v 1.5 2001/01/28 22:45:10 niklas Exp $	*/
+
 /*
- * Copyright 1997 Niels Provos <provos@physnet.uni-hamburg.de>
+ * Copyright 1997-2000 Niels Provos <provos@citi.umich.edu>
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -34,7 +36,7 @@
  */
 
 #ifndef lint
-static char rcsid[] = "$Id: handle_value_response.c,v 1.1 1998/11/14 23:37:24 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: handle_value_response.c,v 1.5 2001/01/28 22:45:10 niklas Exp $";
 #endif
 
 #include <stdlib.h>
@@ -52,7 +54,7 @@ static char rcsid[] = "$Id: handle_value_response.c,v 1.1 1998/11/14 23:37:24 de
 #include "exchange.h"
 #include "secrets.h"
 #include "spi.h"
-#include "errlog.h"
+#include "log.h"
 #ifdef DEBUG
 #include "config.h"
 #endif
@@ -73,13 +75,13 @@ handle_value_response(u_char *packet, int size, char *address,
 	};
 	struct value_response *header;
 	struct stateob *st;
-	mpz_t test;
+	BIGNUM *test;
 
 	if (size < VALUE_RESPONSE_MIN)
 	     return -1;	/* packet too small  */
 
 	if (packet_check(packet, size, &vr_msg) == -1) {
-	     log_error(0, "bad packet structure in handle_value_response()");
+	     log_print("bad packet structure in handle_value_response()");
 	     return -1;
 	}
 
@@ -93,12 +95,13 @@ handle_value_response(u_char *packet, int size, char *address,
 	     return -1;     /* We don't want this packet */
 
 	/* Now check the exchange value for defects */
-	mpz_init_set_varpre(test, parts[0].where);
+	test = BN_new();
+	BN_varpre2bn(parts[0].where, parts[0].size, test);
 	if (!exchange_check_value(test, st->generator, st->modulus)) {
-	     mpz_clear(test);
+	     BN_clear_free(test);
 	     return 0;
 	}
-	mpz_clear(test);
+	BN_clear_free(test);
 
 	/* Reserved Field for TBV */
 	bcopy(header->reserved, st->uSPITBV, 3);
@@ -125,7 +128,7 @@ handle_value_response(u_char *packet, int size, char *address,
 	st->texchangesize = parts[0].size;
 	st->texchange = calloc(st->texchangesize, sizeof(u_int8_t));
 	if (st->texchange == NULL) {
-	     log_error(1, "calloc() in handle_value_response()");
+	     log_error("calloc() in handle_value_response()");
 	     return -1;
 	}
 	bcopy(parts[0].where, st->texchange, st->texchangesize);
@@ -143,7 +146,7 @@ handle_value_response(u_char *packet, int size, char *address,
 	/* Create SPI + choice of attributes */
 	if (make_spi(st, local_address, st->oSPI, &(st->olifetime),
 		     &(st->oSPIattrib), &(st->oSPIattribsize)) == -1) {
-	     log_error(0, "make_spi() in handle_value_response()");
+	     log_print("make_spi() in handle_value_response()");
 	     return -1;
 	}
 	
