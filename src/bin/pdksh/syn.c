@@ -1,4 +1,4 @@
-/*	$OpenBSD: syn.c,v 1.2 1996/08/19 20:08:59 downsj Exp $	*/
+/*	$OpenBSD: syn.c,v 1.5 1996/11/21 07:59:35 downsj Exp $	*/
 
 /*
  * shell parser (C version)
@@ -36,6 +36,7 @@ static void	syntaxerr	ARGS((const char *what))
 static void	multiline_push ARGS((struct multiline_state *save, int tok));
 static void	multiline_pop ARGS((struct multiline_state *saved));
 static int	assign_command ARGS((char *s));
+static int	inalias ARGS((struct source *s));
 #ifdef KSH
 static int	dbtestp_isa ARGS((Test_env *te, Test_meta meta));
 static const char *dbtestp_getopnd ARGS((Test_env *te, Test_op op,
@@ -122,8 +123,11 @@ c_list()
 
 	t = andor();
 	if (t != NULL) {
+		/* Token has always been read/rejected at this point, so
+		 * we don't worray about what flags to pass token()
+		 */
 		while ((c = token(0)) == ';' || c == '&' || c == COPROC ||
-		       (c == '\n' && (multiline.on || source->type == SALIAS)))
+		       (c == '\n' && (multiline.on || inalias(source))))
 		{
 			if (c == '&' || c == COPROC) {
 				int type = c == '&' ? TASYNC : TCOPROC;
@@ -207,7 +211,10 @@ get_command(cf)
 	XPinit(args, 16);
 	XPinit(vars, 16);
 
-	if (multiline.on)
+	/* Don't want to pass CONTIN if reading interactively as just hitting
+	 * return would print PS2 instead of PS1.
+	 */
+	if (multiline.on || inalias(source))
 		cf = CONTIN;
 	syniocf = KEYWORD|ALIAS;
 	switch (c = token(cf|KEYWORD|ALIAS|VARASN)) {
@@ -810,6 +817,17 @@ assign_command(s)
 		|| (c == 'e' && strcmp(s, "export") == 0)
 		|| (c == 'r' && strcmp(s, "readonly") == 0)
 		|| (c == 't' && strcmp(s, "typeset") == 0);
+}
+
+/* Check if we are in the middle of reading an alias */
+static int
+inalias(s)
+	struct source *s;
+{
+	for (; s && s->type == SALIAS; s = s->next)
+		if (!(s->flags & SF_ALIASEND))
+			return 1;
+	return 0;
 }
 
 

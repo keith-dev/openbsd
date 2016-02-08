@@ -1,4 +1,4 @@
-/*	$OpenBSD: route.c,v 1.4 1996/08/06 18:35:09 deraadt Exp $	*/
+/*	$OpenBSD: route.c,v 1.8 1997/01/25 23:26:42 tholo Exp $	*/
 /*	$NetBSD: route.c,v 1.15 1996/05/07 02:55:06 thorpej Exp $	*/
 
 /*
@@ -38,7 +38,7 @@
 #if 0
 static char sccsid[] = "from: @(#)route.c	8.3 (Berkeley) 3/9/94";
 #else
-static char *rcsid = "$OpenBSD: route.c,v 1.4 1996/08/06 18:35:09 deraadt Exp $";
+static char *rcsid = "$OpenBSD: route.c,v 1.8 1997/01/25 23:26:42 tholo Exp $";
 #endif
 #endif /* not lint */
 
@@ -95,8 +95,8 @@ struct bits {
 };
 
 static union {
-	struct	sockaddr u_sa;
-	u_short	u_data[128];
+	struct		sockaddr u_sa;
+	u_int32_t	u_data[64];
 } pt_u;
 
 int	do_rtent = 0;
@@ -497,7 +497,7 @@ routename(in)
 	if (first) {
 		first = 0;
 		if (gethostname(domain, MAXHOSTNAMELEN) == 0 &&
-		    (cp = index(domain, '.')))
+		    (cp = strchr(domain, '.')))
 			(void) strcpy(domain, cp + 1);
 		else
 			domain[0] = 0;
@@ -507,7 +507,7 @@ routename(in)
 		hp = gethostbyaddr((char *)&in, sizeof (struct in_addr),
 			AF_INET);
 		if (hp) {
-			if ((cp = index(hp->h_name, '.')) &&
+			if ((cp = strchr(hp->h_name, '.')) &&
 			    !strcmp(cp + 1, domain))
 				*cp = 0;
 			cp = hp->h_name;
@@ -541,30 +541,33 @@ netname(in, mask)
 	in = ntohl(in);
 	mask = ntohl(mask);
 	if (!nflag && in != INADDR_ANY) {
-		if (mask == INADDR_ANY) {
-			if (IN_CLASSA(in)) {
-				mask = IN_CLASSA_NET;
-				subnetshift = 8;
-			} else if (IN_CLASSB(in)) {
-				mask = IN_CLASSB_NET;
-				subnetshift = 8;
-			} else {
-				mask = IN_CLASSC_NET;
-				subnetshift = 4;
+		np = getnetbyaddr(in, AF_INET);
+		if (np == NULL) {
+			if (mask == INADDR_ANY) {
+				if (IN_CLASSA(in)) {
+					mask = IN_CLASSA_NET;
+					subnetshift = 8;
+				} else if (IN_CLASSB(in)) {
+					mask = IN_CLASSB_NET;
+					subnetshift = 8;
+				} else {
+					mask = IN_CLASSC_NET;
+					subnetshift = 4;
+				}
+				/*
+			 	* If there are more bits than the standard mask
+			 	* would suggest, subnets must be in use.
+			 	* Guess at the subnet mask, assuming reasonable
+			 	* width subnet fields.
+			 	*/
+				while (in &~ mask)
+					mask = (long)mask >> subnetshift;
 			}
-			/*
-			 * If there are more bits than the standard mask
-			 * would suggest, subnets must be in use.
-			 * Guess at the subnet mask, assuming reasonable
-			 * width subnet fields.
-			 */
-			while (in &~ mask)
-				mask = (long)mask >> subnetshift;
+			net = in & mask;
+			while ((mask & 1) == 0)
+				mask >>= 1, net >>= 1;
+			np = getnetbyaddr(net, AF_INET);
 		}
-		net = in & mask;
-		while ((mask & 1) == 0)
-			mask >>= 1, net >>= 1;
-		np = getnetbyaddr(net, AF_INET);
 		if (np)
 			cp = np->n_name;
 	}

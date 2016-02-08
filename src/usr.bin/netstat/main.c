@@ -1,4 +1,4 @@
-/*	$OpenBSD: main.c,v 1.3 1996/06/26 05:37:22 deraadt Exp $	*/
+/*	$OpenBSD: main.c,v 1.9 1997/02/22 04:35:24 angelos Exp $	*/
 /*	$NetBSD: main.c,v 1.9 1996/05/07 02:55:02 thorpej Exp $	*/
 
 /*
@@ -44,7 +44,7 @@ char copyright[] =
 #if 0
 static char sccsid[] = "from: @(#)main.c	8.4 (Berkeley) 3/1/94";
 #else
-static char *rcsid = "$OpenBSD: main.c,v 1.3 1996/06/26 05:37:22 deraadt Exp $";
+static char *rcsid = "$OpenBSD: main.c,v 1.9 1997/02/22 04:35:24 angelos Exp $";
 #endif
 #endif /* not lint */
 
@@ -141,6 +141,12 @@ struct nlist nl[] = {
 	{ "_spx_istat"},
 #define N_IPXERR	35
 	{ "_ipx_errstat"},
+#define N_AHSTAT	36
+	{ "_ahstat"},
+#define N_ESPSTAT	37
+	{ "_espstat"},
+#define N_IP4STAT	38
+	{ "_ip4stat"},
 	"",
 };
 
@@ -162,6 +168,12 @@ struct protox {
 	  icmp_stats,	"icmp" },
 	{ -1,		N_IGMPSTAT,	1,	0,
 	  igmp_stats,	"igmp" },
+	{ -1,		N_AHSTAT,	1,	0,
+	  ah_stats,	"sipp-ah" },
+	{ -1,		N_ESPSTAT,	1,	0,
+	  esp_stats,	"sipp-esp" },
+	{ -1,		N_IP4STAT,	1,	0,
+	  ip4_stats,	"ipencap" },
 	{ -1,		-1,		0,	0,
 	  0,		0 }
 };
@@ -226,7 +238,7 @@ main(argc, argv)
 
 	af = AF_UNSPEC;
 
-	while ((ch = getopt(argc, argv, "Aadf:ghI:iM:mN:np:rstuw:")) != EOF)
+	while ((ch = getopt(argc, argv, "Aadf:ghI:iM:mN:np:rstuw:")) != -1)
 		switch(ch) {
 		case 'A':
 			Aflag = 1;
@@ -240,6 +252,8 @@ main(argc, argv)
 		case 'f':
 			if (strcmp(optarg, "inet") == 0)
 				af = AF_INET;
+			else if (strcmp(optarg, "local") == 0)
+				af = AF_LOCAL;
 			else if (strcmp(optarg, "unix") == 0)
 				af = AF_UNIX;
 			else if (strcmp(optarg, "ipx") == 0)
@@ -331,8 +345,10 @@ main(argc, argv)
 	 * Discard setgid privileges if not the running kernel so that bad
 	 * guys can't print interesting stuff from kernel memory.
 	 */
-	if (nlistf != NULL || memf != NULL)
+	if (nlistf != NULL || memf != NULL) {
+		setegid(getgid());
 		setgid(getgid());
+	}
 
 	if ((kvmd = kvm_openfiles(nlistf, memf, NULL, O_RDONLY,
 	    buf)) == NULL) {

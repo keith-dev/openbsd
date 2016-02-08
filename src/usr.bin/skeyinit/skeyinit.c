@@ -1,4 +1,4 @@
-/*	$OpenBSD: skeyinit.c,v 1.13 1996/10/02 18:11:30 millert Exp $	*/
+/*	$OpenBSD: skeyinit.c,v 1.17 1996/11/03 18:57:46 millert Exp $	*/
 /*	$NetBSD: skeyinit.c,v 1.6 1995/06/05 19:50:48 pk Exp $	*/
 
 /* S/KEY v1.1b (skeyinit.c)
@@ -27,14 +27,8 @@
 #include <ctype.h>
 #include <skey.h>
 
-#ifndef SKEY_MAXSEQ
-#define SKEY_MAXSEQ	10000
-#endif
 #ifndef SKEY_NAMELEN
-#define SKEY_NAMELEN	4
-#endif
-#ifndef SKEY_MIN_PW_LEN
-#define SKEY_MIN_PW_LEN	10
+#define SKEY_NAMELEN    4
 #endif
 
 void	usage __P((char *));
@@ -44,11 +38,12 @@ main(argc, argv)
 	int     argc;
 	char   *argv[];
 {
-	int     rval, n, nn, i, l, defaultsetup=1, zerokey=0, hexmode=0;
+	int     rval, nn, i, l, n=0, defaultsetup=1, zerokey=0, hexmode=0;
 	time_t  now;
 	char	hostname[MAXHOSTNAMELEN];
-	char    seed[18], tmp[80], key[8], defaultseed[17];
-	char    passwd[256], passwd2[256], tbuf[27], buf[60];
+	char    passwd[SKEY_MAX_PW_LEN+2], passwd2[SKEY_MAX_PW_LEN+2];
+	char	seed[SKEY_MAX_SEED_LEN+2], defaultseed[SKEY_MAX_SEED_LEN+1];
+	char    tbuf[27], buf[80], key[SKEY_BINKEY_SIZE];
 	char    lastc, me[UT_NAMESIZE+1], *salt, *p, *pw, *ht=NULL;
 	struct skey skey;
 	struct passwd *pp;
@@ -57,13 +52,12 @@ main(argc, argv)
 	if (geteuid() != 0)
 		errx(1, "must be setuid root.");
 
-	(void)time(&now);
-	(void)sprintf(tbuf, "%05ld", (long) (now % 100000));
-
 	if (gethostname(hostname, sizeof(hostname)) < 0)
 		err(1, "gethostname");
 	(void)strncpy(defaultseed, hostname, sizeof(defaultseed) - 1);
 	defaultseed[SKEY_NAMELEN] = '\0';
+	(void)time(&now);
+	(void)sprintf(tbuf, "%05ld", (long) (now % 100000));
 	(void)strncat(defaultseed, tbuf, sizeof(defaultseed) - 5);
 
 	if ((pp = getpwuid(getuid())) == NULL)
@@ -72,6 +66,7 @@ main(argc, argv)
 
 	if ((pp = getpwnam(me)) == NULL)
 		err(1, "Who are you?");
+	salt = pp->pw_passwd;
 
 	for (i = 1; i < argc && argv[i][0] == '-' && strcmp(argv[i], "--");) {
 		if (argv[i][2] == '\0') {
@@ -85,6 +80,13 @@ main(argc, argv)
 				break;
 			case 'z':
 				zerokey = 1;
+				break;
+			case 'n':
+				if (argv[++i][0] == '\0')
+					usage(argv[0]);
+				if ((n = atoi(argv[i])) < 1 || n >= SKEY_MAX_SEQ)
+					errx(1, "count must be > 0 and < %d",
+					     SKEY_MAX_SEQ);
 				break;
 			default:
 				usage(argv[0]);
@@ -103,17 +105,23 @@ main(argc, argv)
 	if (argc - i  > 1) {
 		usage(argv[0]);
 	} else if (argv[i]) {
-		if ((pp = getpwnam(argv[i])) == NULL)
-			err(1, "User unknown");
+		if ((pp = getpwnam(argv[i])) == NULL) {
+			if (getuid() == 0) {
+				static struct passwd _pp;
 
-		if (strcmp(pp->pw_name, me) != 0) {
+				_pp.pw_name = argv[i];
+				pp = &_pp;
+				warnx("Warning, user unknown: %s", argv[i]);
+			} else {
+				errx(1, "User unknown: %s", argv[i]);
+			}
+		} else if (strcmp(pp->pw_name, me) != 0) {
 			if (getuid() != 0) {
 				/* Only root can change other's passwds */
 				errx(1, "Permission denied.");
 			}
 		}
 	}
-	salt = pp->pw_passwd;
 
 	if (getuid() != 0) {
 		pw = getpass("Password (or `s/key'):");
@@ -145,7 +153,7 @@ main(argc, argv)
 				     skey.seed);
 
 			/*
-			 * Lets be nice if they have a skey.seed that
+			 * Let's be nice if they have an skey.seed that
 			 * ends in 0-8 just add one
 			 */
 			l = strlen(skey.seed);
@@ -169,7 +177,8 @@ main(argc, argv)
 			(void)printf("[Adding %s]\n", pp->pw_name);
 			break;
 	}
-	n = 99;
+	if (n == 0)
+		n = 99;
 
 	/* Set hash type if asked to */
 	if (ht) {
@@ -180,18 +189,18 @@ main(argc, argv)
 
 	if (!defaultsetup) {
 		(void)printf("You need the 6 english words generated from the \"skey\" command.\n");
-		for (i = 0;; i++) {
+		for (i = 0; ; i++) {
 			if (i >= 2)
 				exit(1);
 
 			(void)printf("Enter sequence count from 1 to %d: ",
-				     SKEY_MAXSEQ);
-			(void)fgets(tmp, sizeof(tmp), stdin);
-			n = atoi(tmp);
-			if (n > 0 && n < SKEY_MAXSEQ)
+				     SKEY_MAX_SEQ);
+			(void)fgets(buf, sizeof(buf), stdin);
+			n = atoi(buf);
+			if (n > 0 && n < SKEY_MAX_SEQ)
 				break;	/* Valid range */
 			(void)printf("Error: Count must be > 0 and < %d\n",
-				     SKEY_MAXSEQ);
+				     SKEY_MAX_SEQ);
 		}
 
 		for (i = 0;; i++) {
@@ -214,11 +223,11 @@ main(argc, argv)
 			if (*p == '\0')
 				break;  /* Valid seed */
 		}
-		if (strlen(seed) > 16) {
-			(void)puts("Notice: Seed truncated to 16 characters.");
-			seed[16] = '\0';
-		}
-		if (seed[0] == '\0')
+		if (strlen(seed) > SKEY_MAX_SEED_LEN) {
+			(void)printf("Notice: Seed truncated to %d characters.\n",
+				     SKEY_MAX_SEED_LEN);
+			seed[SKEY_MAX_SEED_LEN] = '\0';
+		} else if (seed[0] == '\0')
 			(void)strcpy(seed, defaultseed);
 
 		for (i = 0;; i++) {
@@ -227,16 +236,16 @@ main(argc, argv)
 
 			(void)printf("otp-%s %d %s\nS/Key access password: ",
 				     skey_get_algorithm(), n, seed);
-			(void)fgets(tmp, sizeof(tmp), stdin);
-			rip(tmp);
-			backspace(tmp);
+			(void)fgets(buf, sizeof(buf), stdin);
+			rip(buf);
+			backspace(buf);
 
-			if (tmp[0] == '?') {
+			if (buf[0] == '?') {
 				(void)puts("Enter 6 English words from secure S/Key calculation.");
 				continue;
-			} else if (tmp[0] == '\0')
+			} else if (buf[0] == '\0')
 				exit(1);
-			if (etob(key, tmp) == 1 || atob8(key, tmp) == 0)
+			if (etob(key, buf) == 1 || atob8(key, buf) == 0)
 				break;	/* Valid format */
 			(void)puts("Invalid format - try again with 6 English words.");
 		}
@@ -261,8 +270,6 @@ main(argc, argv)
 
 			(void)fputs("Again secret password: ", stderr);
 			readpass(passwd2, sizeof(passwd));
-			if (passwd2[0] == '\0')
-				exit(1);
 
 			if (strcmp(passwd, passwd2) == 0)
 				break;
@@ -292,7 +299,6 @@ main(argc, argv)
 		/* Re-open keys file and seek to the end */
 		if (skeylookup(&skey, pp->pw_name) == -1)
 			err(1, "cannot open database");
-		skey_set_algorithm(ht);
 	}
 
 	btoa8(skey.val, key);
@@ -320,6 +326,6 @@ usage(s)
 	char *s;
 {
 	(void)fprintf(stderr,
-		"Usage: %s [-s] [-x] [-z] [-md4|-md5|-sha1] [user]\n", s);
+		"Usage: %s [-s] [-x] [-z] [-n count] [-md4|-md5|-sha1] [user]\n", s);
 	exit(1);
 }

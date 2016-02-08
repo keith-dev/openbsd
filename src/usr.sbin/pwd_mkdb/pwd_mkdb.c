@@ -1,4 +1,5 @@
-/*	$OpenBSD$	*/
+/*	$OpenBSD: pwd_mkdb.c,v 1.10 1997/01/16 03:58:23 millert Exp $	*/
+
 /*-
  * Copyright (c) 1991, 1993, 1994
  *	The Regents of the University of California.  All rights reserved.
@@ -40,8 +41,11 @@ static char copyright[] =
 #endif /* not lint */
 
 #ifndef lint
-/*static char sccsid[] = "from: @(#)pwd_mkdb.c	8.5 (Berkeley) 4/20/94";*/
-static char *rcsid = "$Id: pwd_mkdb.c,v 1.7 1996/09/28 05:44:33 downsj Exp $";
+#if 0
+static char sccsid[] = "from: @(#)pwd_mkdb.c	8.5 (Berkeley) 4/20/94";
+#else
+static char *rcsid = "$OpenBSD: pwd_mkdb.c,v 1.10 1997/01/16 03:58:23 millert Exp $";
+#endif
 #endif /* not lint */
 
 #include <sys/param.h>
@@ -64,9 +68,6 @@ static char *rcsid = "$Id: pwd_mkdb.c,v 1.7 1996/09/28 05:44:33 downsj Exp $";
 #define	SECURE		2
 #define	PERM_INSECURE	(S_IRUSR|S_IWUSR|S_IRGRP|S_IROTH)
 #define	PERM_SECURE	(S_IRUSR|S_IWUSR)
-
-/* pull this out of the C library. */
-extern const char __yp_token[];
 
 HASHINFO openinfo = {
 	4096,		/* bsize */
@@ -106,7 +107,7 @@ main(argc, argv)
 	DBT ypdata, ypkey;
 
 	makeold = 0;
-	while ((ch = getopt(argc, argv, "cpvd:")) != EOF)
+	while ((ch = getopt(argc, argv, "cpvd:")) != -1)
 		switch(ch) {
 		case 'c':			/* verify only */
 			cflag = 1;
@@ -207,6 +208,14 @@ main(argc, argv)
 		if((pwd.pw_name[0] == '+') || (pwd.pw_name[0] == '-'))
 			hasyp++;
 
+		/* Warn about potentially unsafe uid/gid overrides. */
+		if (pwd.pw_name[0] == '+') {
+			if ((flags & _PASSWORD_NOUID) == 0 && pwd.pw_uid == 0)
+				warnx("line %d: superuser override in YP inclusion", cnt);
+			if ((flags & _PASSWORD_NOGID) == 0 && pwd.pw_gid == 0)
+				warnx("line %d: wheel override in YP inclusion", cnt);
+		}
+
 		/* Create insecure data. */
 		p = buf;
 		COMPACT(pwd.pw_name);
@@ -259,8 +268,8 @@ main(argc, argv)
 
 	/* Store YP token, if needed. */
 	if(hasyp) {
-		ypkey.data = (u_char *)__yp_token;
-		ypkey.size = strlen(__yp_token);
+		ypkey.data = (u_char *)_PW_YPTOKEN;
+		ypkey.size = strlen(_PW_YPTOKEN);
 		ypdata.data = (u_char *)NULL;
 		ypdata.size = 0;
 
@@ -333,8 +342,8 @@ main(argc, argv)
 
 	/* Store YP token, if needed. */
 	if(hasyp) {
-		ypkey.data = (u_char *)__yp_token;
-		ypkey.size = strlen(__yp_token);
+		ypkey.data = (u_char *)_PW_YPTOKEN;
+		ypkey.size = strlen(_PW_YPTOKEN);
 		ypdata.data = (u_char *)NULL;
 		ypdata.size = 0;
 

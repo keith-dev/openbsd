@@ -1,5 +1,5 @@
 /*	$NetBSD: vmstat.c,v 1.29.4.1 1996/06/05 00:21:05 cgd Exp $	*/
-/*	$OpenBSD: vmstat.c,v 1.12 1996/06/22 17:38:14 tholo Exp $	*/
+/*	$OpenBSD: vmstat.c,v 1.18 1997/02/22 17:20:30 kstailey Exp $	*/
 
 /*
  * Copyright (c) 1980, 1986, 1991, 1993
@@ -191,7 +191,7 @@ main(argc, argv)
 
 	memf = nlistf = NULL;
 	interval = reps = todo = 0;
-	while ((c = getopt(argc, argv, "c:fiM:mN:stw:")) != EOF) {
+	while ((c = getopt(argc, argv, "c:fiM:mN:stw:")) != -1) {
 		switch (c) {
 		case 'c':
 			reps = atoi(optarg);
@@ -235,8 +235,10 @@ main(argc, argv)
 	 * Discard setgid privileges if not the running kernel so that bad
 	 * guys can't print interesting stuff from kernel memory.
 	 */
-	if (nlistf != NULL || memf != NULL)
+	if (nlistf != NULL || memf != NULL) {
+		setegid(getgid());
 		setgid(getgid());
+	}
 
         kd = kvm_openfiles(nlistf, memf, NULL, O_RDONLY, errbuf);
 	if (kd == 0) {
@@ -437,7 +439,7 @@ dovmstat(interval, reps)
 		 * We round upward to avoid losing low-frequency events
 		 * (i.e., >= 1 per interval but < 1 per second).
 		 */
-		halfuptime = (uptime + 1) / 2;
+		halfuptime = uptime == 1 ? 0 : (uptime + 1) / 2;
 		(void)sleep(interval);
 	}
 }
@@ -841,18 +843,32 @@ domem()
 	struct kmembuckets buckets[MINBUCKET + 16];
 
 	kread(X_KMEMBUCKETS, buckets, sizeof(buckets));
-	(void)printf("Memory statistics by bucket size\n");
-	(void)printf(
-	    "    Size   In Use   Free   Requests  HighWater  Couldfree\n");
-	for (i = MINBUCKET, kp = &buckets[i]; i < MINBUCKET + 16; i++, kp++) {
+	for (first = 1, i = MINBUCKET, kp = &buckets[i]; i < MINBUCKET + 16;
+	     i++, kp++) {
 		if (kp->kb_calls == 0)
 			continue;
+		if (first) {
+			(void)printf("Memory statistics by bucket size\n");
+			(void)printf(
+	    	"    Size   In Use   Free   Requests  HighWater  Couldfree\n");
+			first = 0;
+		}
 		size = 1 << i;
 		(void)printf("%8d %8ld %6ld %10ld %7ld %10ld\n", size, 
 			kp->kb_total - kp->kb_totalfree,
 			kp->kb_totalfree, kp->kb_calls,
 			kp->kb_highwat, kp->kb_couldfree);
 		totfree += size * kp->kb_totalfree;
+	}
+
+	/*
+	 * If kmem statistics are not being gathered by the kernel,
+	 * first will still be 1.
+	 */
+	if (first) {
+		printf(
+		    "Kmem statistics are not being gathered by the kernel.\n");
+		return;
 	}
 
 	kread(X_KMEMSTAT, kmemstats, sizeof(kmemstats));
@@ -887,13 +903,13 @@ domem()
 	}
 
 	(void)printf(
-	    "\nMemory statistics by type                        Type  Kern\n");
+	   "\nMemory statistics by type                          Type  Kern\n");
 	(void)printf(
-"       Type  InUse MemUse HighUse  Limit Requests Limit Limit Size(s)\n");
+"         Type InUse MemUse HighUse  Limit Requests Limit Limit Size(s)\n");
 	for (i = 0, ks = &kmemstats[0]; i < M_LAST; i++, ks++) {
 		if (ks->ks_calls == 0)
 			continue;
-		(void)printf("%12s%6ld%6ldK%7ldK%6ldK%9ld%5u%6u",
+		(void)printf("%13s%6ld%6ldK%7ldK%6ldK%9ld%5u%6u",
 		    kmemnames[i] ? kmemnames[i] : "undefined",
 		    ks->ks_inuse, (ks->ks_memuse + 1023) / 1024,
 		    (ks->ks_maxused + 1023) / 1024,

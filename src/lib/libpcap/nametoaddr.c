@@ -1,4 +1,4 @@
-/*	$OpenBSD: nametoaddr.c,v 1.4 1996/07/12 13:19:09 mickey Exp $	*/
+/*	$OpenBSD: nametoaddr.c,v 1.5 1996/09/16 02:33:06 tholo Exp $	*/
 
 /*
  * Copyright (c) 1990, 1991, 1992, 1993, 1994, 1995, 1996

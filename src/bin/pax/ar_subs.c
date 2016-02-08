@@ -1,4 +1,4 @@
-/*	$OpenBSD: ar_subs.c,v 1.5 1995/03/21 09:07:06 cgd Exp $	*/
+/*	$OpenBSD: ar_subs.c,v 1.6 1997/02/27 23:32:57 michaels Exp $	*/
 /*	$NetBSD: ar_subs.c,v 1.5 1995/03/21 09:07:06 cgd Exp $	*/
 
 /*-
@@ -42,7 +42,7 @@
 #if 0
 static char sccsid[] = "@(#)ar_subs.c	8.2 (Berkeley) 4/18/94";
 #else
-static char rcsid[] = "$OpenBSD: ar_subs.c,v 1.5 1995/03/21 09:07:06 cgd Exp $";
+static char rcsid[] = "$OpenBSD: ar_subs.c,v 1.6 1997/02/27 23:32:57 michaels Exp $";
 #endif
 #endif /* not lint */
 
@@ -134,7 +134,7 @@ list()
 			if ((res = mod_name(arcn)) < 0)
 				break;
 			if (res == 0)
-				ls_list(arcn, now);
+				ls_list(arcn, now, stdout);
 		}
 
 		/*
@@ -175,6 +175,7 @@ extract()
 	ARCHD archd;
 	struct stat sb;
 	int fd;
+	time_t now;
 
 	arcn = &archd;
 	/*
@@ -192,6 +193,8 @@ extract()
 	 */
 	if (iflag && (name_start() < 0))
 		return;
+
+	now = time((time_t *)NULL);
 
 	/*
 	 * step through each entry on the archive until the format read routine
@@ -280,9 +283,21 @@ extract()
 		}
 
 		if (vflag) {
-			(void)fputs(arcn->name, stderr);
-			vfpart = 1;
+			if (vflag > 1)
+				ls_list(arcn, now, stderr);
+			else {
+				(void)fputs(arcn->name, stderr);
+				vfpart = 1;
+			}
 		}
+
+		/*
+		 * if required, chdir around.
+		 */
+		if ((arcn->pat != NULL) && (arcn->pat->chdname != NULL))
+			if (chdir(arcn->pat->chdname) != 0)
+				syswarn(1, errno, "Cannot chdir to %s",
+				    arcn->pat->chdname);
 
 		/*
 		 * all ok, extract this member based on type
@@ -329,6 +344,13 @@ extract()
 		}
 		if (!res)
 			(void)rd_skip(cnt + arcn->pad);
+
+		/*
+		 * if required, chdir around.
+		 */
+		if ((arcn->pat != NULL) && (arcn->pat->chdname != NULL))
+			if (chdir(cwdpt) != 0)
+				syswarn(1, errno, "Can't chdir to %s", cwdpt);
 	}
 
 	/*
@@ -365,6 +387,7 @@ wr_archive(arcn, is_app)
 	off_t cnt;
 	int (*wrf)();
 	int fd = -1;
+	time_t now;
 
 	/*
 	 * if this format supports hard link storage, start up the database
@@ -391,6 +414,8 @@ wr_archive(arcn, is_app)
 	 * if this not append, and there are no files, we do no write a trailer
 	 */
 	wr_one = is_app;
+
+	now = time((time_t *)NULL);
 
 	/*
 	 * while there are files to archive, process them one at at time
@@ -461,8 +486,12 @@ wr_archive(arcn, is_app)
 		}
 
 		if (vflag) {
-			(void)fputs(arcn->name, stderr);
-			vfpart = 1;
+			if (vflag > 1)
+				ls_list(arcn, now, stderr);
+			else {
+				(void)fputs(arcn->name, stderr);
+				vfpart = 1;
+			}
 		}
 		++flcnt;
 

@@ -1,4 +1,4 @@
-/*	$OpenBSD$	*/
+/*	$OpenBSD: kvm_file.c,v 1.1 1996/03/19 23:15:30 niklas Exp $	*/
 
 /*-
  * Copyright (c) 1989, 1992, 1993

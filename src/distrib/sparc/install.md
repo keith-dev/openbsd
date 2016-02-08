@@ -1,3 +1,4 @@
+#	$OpenBSD: install.md,v 1.12 1997/05/22 17:01:23 johns Exp $
 #	$NetBSD: install.md,v 1.3.2.5 1996/08/26 15:45:28 gwr Exp $
 #
 #
@@ -42,6 +43,21 @@
 
 # Machine-dependent install sets
 MDSETS="xbin xman xinc xcon"
+MSGBUF=/kern/msgbuf
+HOSTNAME=/kern/hostname
+
+# an alias for hostname(1)
+hostname() {
+	if [ -x /bin/hostname ]; then
+		/bin/hostname $1
+	else
+		if [ -z "$1" ]; then
+			cat $HOSTNAME
+		else
+			echo $1 > $HOSTNAME
+		fi
+	fi
+}
 
 md_set_term() {
 	if [ ! -z "$TERM" ]; then
@@ -58,38 +74,48 @@ md_makerootwritable() {
 	# /tmp is the mount point
 	# 2048 is the size in DEV_BIZE blocks
 
-	umount /tmp > /dev/null 2>&1
-	if ! mount_mfs -s 2048 swap /tmp ; then
-		cat << \__mfs_failed_1
+	if [ ! -w /tmp ]; then
+		umount /tmp > /dev/null 2>&1
+		if ! mount_mfs -s 2048 swap /tmp ; then
+			cat << \__mfs_failed_1
 
 FATAL ERROR: Can't mount the memory filesystem.
 
 __mfs_failed_1
-		exit
-	fi
+			exit
+		fi
 
-	# Bleh.  Give mount_mfs a chance to DTRT.
-	sleep 2
+		# Bleh.  Give mount_mfs a chance to DTRT.
+		sleep 2
+	fi
+}
+
+md_machine_arch() {
+	cat /kern/machine
 }
 
 md_get_diskdevs() {
 	# return available disk devices
-	dmesg | egrep "(^sd[0-9] |^x[dy][0-9] )" | cut -d" " -f1 | sort -u
+	# dmesg | egrep "(^sd[0-9] |^x[dy][0-9] )" | cut -d" " -f1 | sort -u
+	sed -n -e '1,/^OpenBSD /d' -e '/^sd[0-9] /{s/ .*//;p;}' \
+				-e '/^x[dy][0-9] /{s/ .*//;p;}' <  $MSGBUF
 }
 
 md_get_cddevs() {
 	# return available CDROM devices
-	dmesg | grep "^cd[0-9] " | cut -d" " -f1 | sort -u
+	# dmesg | grep "^cd[0-9] " | cut -d" " -f1 | sort -u
+	sed -n -e '1,/^OpenBSD /d' -e '/^cd[0-9] /{s/ .*//;p;}' < $MSGBUF
 }
 
 md_get_ifdevs() {
 	# return available network devices
-	dmesg | egrep "(^le[0-9] |^ie[0-9] )" | cut -d" " -f1 | sort -u
+	# dmesg | egrep "(^le[0-9] |^ie[0-9] )" | cut -d" " -f1 | sort -u
+	sed -n -e '1,/^OpenBSD /d' -e '/^le[0-9] /{s/ .*//;p;}'< $MSGBUF
 }
 
 md_get_partition_range() {
     # return range of valid partition letters
-    echo "[a-h]"
+    echo "[a-p]"
 }
 
 md_installboot() {
@@ -151,22 +177,36 @@ md_prep_disklabel()
 
 Here is an example of what the partition information will look like once
 you have entered the disklabel editor. Disk partition sizes and offsets
-are in sector (most likely 512 bytes) units. Make sure these size/offset
-pairs are on cylinder boundaries (the number of sector per cylinder is
-given in the `sectors/cylinder' entry, which is not shown here).
+are in sector (most likely 512 bytes) units.
+
+Make sure these size/offset pairs are on cylinder boundaries (the number
+of sector per cylinder is given in the `sectors/cylinder' entry.
+
+If this disk is previously un-labeled, only the "c" partition will show up
+in the editor and you will have to enter lines similar to those shown in the
+example for the other paritions.  If you are uncertain about the syntax or
+space requirements, this is a good time to review the installation notes.
 
 Do not change any parameters except the partition layout and the label name.
-It's probably also wisest not to touch the `8 partitions:' line, even
-in case you have defined less than eight partitions.
+It's probably also wisest not to touch the `16 partitions:' line, even
+in case you have defined less than sixteen partitions.
 
-[Example]
-8 partitions:
+[** EXAMPLE **]
+disk: p4200s
+bytes/sector: 512
+sectors/track: 40
+tracks/cylinder: 8
+sectors/cylinder: 320
+cylinders: 1280
+total sectors: 409600
+
+16 partitions:
 #        size   offset    fstype   [fsize bsize   cpg]
-  a:    50176        0    4.2BSD     1024  8192    16   # (Cyl.    0 - 111)
-  b:    64512    50176      swap                        # (Cyl.  112 - 255)
-  c:   640192        0   unknown                        # (Cyl.    0 - 1428)
-  d:   525504   114688    4.2BSD     1024  8192    16   # (Cyl.  256 - 1428)
-[End of example]
+  a:    51200        0    4.2BSD     1024  8192    16 	# (Cyl.    0 - 159)
+  b:    51200    51200      swap                    	# (Cyl.  160 - 319)
+  c:   409600        0    unused        0     0       	# (Cyl.    0 - 1279)
+  d:   307200   102400    4.2BSD     1024  8192    16 	# (Cyl.  320 - 1279)
+[End of **EXAMPLE**]
 
 __md_prep_disklabel_1
 	echo -n "Press [Enter] to continue "
@@ -177,7 +217,7 @@ __md_prep_disklabel_1
 
 md_copy_kernel() {
 	echo -n "Copying kernel..."
-	cp -p /netbsd /mnt/netbsd
+	cp -p /bsd /mnt/bsd
 	echo "done."
 }
 
@@ -185,10 +225,10 @@ md_welcome_banner() {
 {
 	if [ "$MODE" = "install" ]; then
 		echo ""
-		echo "Welcome to the NetBSD/sparc ${VERSION} installation program."
+		echo "Welcome to the OpenBSD/sparc ${VERSION} installation program."
 		cat << \__welcome_banner_1
 
-This program is designed to help you put NetBSD on your disk,
+This program is designed to help you put OpenBSD on your disk,
 in a simple and rational way.  You'll be asked several questions,
 and it would probably be useful to have your disk's hardware
 manual, the installation notes, and a calculator handy.
@@ -196,10 +236,10 @@ __welcome_banner_1
 
 	else
 		echo ""
-		echo "Welcome to the NetBSD/sparc ${VERSION} upgrade program."
+		echo "Welcome to the OpenBSD/sparc ${VERSION} upgrade program."
 		cat << \__welcome_banner_2
 
-This program is designed to help you upgrade your NetBSD system in a
+This program is designed to help you upgrade your OpenBSD system in a
 simple and rational way.
 
 As a reminder, installing the `etc' binary set is NOT recommended.
@@ -243,7 +283,7 @@ md_congrats() {
 	fi
 	cat << __congratulations_1
 
-CONGRATULATIONS!  You have successfully $what NetBSD!
+CONGRATULATIONS!  You have successfully $what OpenBSD!
 To boot the installed system, enter halt at the command prompt. Once the
 system has halted, reset the machine and boot from the disk.
 

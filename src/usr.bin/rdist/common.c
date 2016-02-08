@@ -1,4 +1,4 @@
-/*	$OpenBSD$	*/
+/*	$OpenBSD: common.c,v 1.4 1997/04/27 13:01:28 downsj Exp $	*/
 
 /*
  * Copyright (c) 1983 Regents of the University of California.
@@ -35,7 +35,7 @@
 
 #ifndef lint
 static char RCSid[] = 
-"$OpenBSD: common.c,v 1.2 1996/03/05 03:15:58 dm Exp $";
+"$OpenBSD: common.c,v 1.4 1997/04/27 13:01:28 downsj Exp $";
 
 static char sccsid[] = "@(#)common.c";
 
@@ -141,7 +141,7 @@ extern int init(argc, argv, envp)
 	for (i = 0; i < argc; i++)
 		realargv[i] = strdup(argv[i]);
 
-#if	defined(SETARGS)
+#if	defined(SETARGS) && !defined(__OpenBSD__)
 	setargs_settup(argc, argv, envp);
 #endif	/* SETARGS */
 

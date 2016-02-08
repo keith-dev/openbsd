@@ -33,10 +33,16 @@
  * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
+ *
+ *	@(#)regexec.c	8.3 (Berkeley) 3/20/94
  */
 
 #if defined(LIBC_SCCS) && !defined(lint)
-static char rcsid[] = "$OpenBSD: regexec.c,v 1.3 1996/08/19 08:31:15 tholo Exp $";
+#if 0
+static char sccsid[] = "@(#)regexec.c	8.3 (Berkeley) 3/20/94";
+#else
+static char rcsid[] = "$OpenBSD: regexec.c,v 1.7 1997/04/30 05:51:10 tholo Exp $";
+#endif
 #endif /* LIBC_SCCS and not lint */
 
 /*
@@ -72,13 +78,13 @@ static char rcsid[] = "$OpenBSD: regexec.c,v 1.3 1996/08/19 08:31:15 tholo Exp $
 #define	SETUP(v)	((v) = 0)
 #define	onestate	long
 #define	INIT(o, n)	((o) = (unsigned long)1 << (n))
-#define	INC(o)		((o) = (unsigned long)(o) << 1)
+#define	INC(o)		((o) <<= 1)
 #define	ISSTATEIN(v, o)	(((v) & (o)) != 0)
 /* some abbreviations; note that some of these know variable names! */
 /* do "if I'm here, I can also be there" etc without branches */
 #define	FWD(dst, src, n)	((dst) |= ((unsigned long)(src)&(here)) << (n))
 #define	BACK(dst, src, n)	((dst) |= ((unsigned long)(src)&(here)) >> (n))
-#define	ISSETBACK(v, n)	(((v) & ((unsigned long)here >> (n))) != 0)
+#define	ISSETBACK(v, n)		(((v) & ((unsigned long)here >> (n))) != 0)
 /* function names */
 #define SNAMES			/* engine.c looks after details */
 

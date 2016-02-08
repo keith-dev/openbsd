@@ -1,4 +1,4 @@
-/*	$OpenBSD: mv.c,v 1.3 1996/07/30 12:26:46 deraadt Exp $	*/
+/*	$OpenBSD: mv.c,v 1.8 1997/04/12 17:30:23 michaels Exp $	*/
 /*	$NetBSD: mv.c,v 1.9 1995/03/21 09:06:52 cgd Exp $	*/
 
 /*
@@ -47,7 +47,7 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)mv.c	8.2 (Berkeley) 4/2/94";
 #else
-static char rcsid[] = "$OpenBSD: mv.c,v 1.3 1996/07/30 12:26:46 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: mv.c,v 1.8 1997/04/12 17:30:23 michaels Exp $";
 #endif
 #endif /* not lint */
 
@@ -55,6 +55,7 @@ static char rcsid[] = "$OpenBSD: mv.c,v 1.3 1996/07/30 12:26:46 deraadt Exp $";
 #include <sys/time.h>
 #include <sys/wait.h>
 #include <sys/stat.h>
+#include <sys/mount.h>
 
 #include <err.h>
 #include <errno.h>
@@ -63,6 +64,8 @@ static char rcsid[] = "$OpenBSD: mv.c,v 1.3 1996/07/30 12:26:46 deraadt Exp $";
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <pwd.h>
+#include <grp.h>
 
 #include "pathnames.h"
 
@@ -120,8 +123,10 @@ main(argc, argv)
 	(void)strcpy(path, argv[argc - 1]);
 	baselen = strlen(path);
 	endp = &path[baselen];
-	*endp++ = '/';
-	++baselen;
+	if (*(endp - 1) != '/') {
+		*endp++ = '/';
+		++baselen;
+	}
 	for (rval = 0; --argc; ++argv) {
 		if ((p = strrchr(*argv, '/')) == NULL)
 			p = *argv;
@@ -197,7 +202,20 @@ do_move(from, to)
 	if (!rename(from, to))
 		return (0);
 
-	if (errno != EXDEV) {
+	if (errno == EXDEV) {
+		struct statfs sfs;
+		char path[MAXPATHLEN];
+
+		/* Can't mv(1) a mount point. */
+		if (realpath(from, path) == NULL) {
+			warnx("cannot resolve %s: %s", from, path);
+			return (1);
+		}
+		if (!statfs(path, &sfs) && !strcmp(path, sfs.f_mntonname)) {
+			warnx("cannot rename a mount point");
+			return (1);
+		}
+	} else {
 		warn("rename %s to %s", from, to);
 		return (1);
 	}
@@ -236,7 +254,7 @@ fastcopy(from, to, sbp)
 	static u_int blen;
 	static char *bp;
 	register int nread, from_fd, to_fd;
-	int badchown = 0;
+	int badchown = 0, serrno;
 
 	if ((from_fd = open(from, O_RDONLY, 0)) < 0) {
 		warn("%s", from);
@@ -248,8 +266,10 @@ fastcopy(from, to, sbp)
 		return (1);
 	}
 
-	if (fchown(to_fd, sbp->st_uid, sbp->st_gid))
+	if (fchown(to_fd, sbp->st_uid, sbp->st_gid)) {
+		serrno = errno;
 		badchown = 1;
+	}
 	(void) fchmod(to_fd, sbp->st_mode & ~(S_ISUID|S_ISGID));
 
 	if (!blen && !(bp = malloc(blen = sbp->st_blksize))) {
@@ -272,11 +292,12 @@ err:		if (unlink(to))
 	(void)close(from_fd);
 
 	if (badchown) {
+		errno = serrno;
 		if ((sbp->st_mode & (S_ISUID|S_ISGID)))  {
 			warn("%s: set owner/group; not setting setuid/setgid",
 			    to);
 			sbp->st_mode &= ~(S_ISUID|S_ISGID);
-		} else
+		} else if (!fflg)
 			warn("%s: set owner/group", to);
 	}
 	if (fchmod(to_fd, sbp->st_mode))

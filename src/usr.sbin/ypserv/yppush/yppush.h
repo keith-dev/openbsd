@@ -1,4 +1,4 @@
-/*	$OpenBSD$ */
+/*	$OpenBSD: yppush.h,v 1.2 1996/05/30 09:53:20 deraadt Exp $ */
 
 /*
  * Copyright (c) 1996 Mats O Jansson <moj@stacken.kth.se>

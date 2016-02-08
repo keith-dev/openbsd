@@ -64,7 +64,7 @@ in_tkt(pname, pinst)
     metoo = geteuid();
     if (lstat(file,&buf) == 0) {
 	if (buf.st_uid != me || !(buf.st_mode & S_IFREG) ||
-	    buf.st_mode & 077) {
+	    buf.st_mode & 077 || buf.st_nlink != 1) {
 	    if (krb_debug)
 		fprintf(stderr,"Error initializing %s",file);
 	    return(KFAILURE);
@@ -76,14 +76,12 @@ in_tkt(pname, pinst)
 	bzero(charbuf, sizeof(charbuf));
 
 	for (i = 0; i < buf.st_size; i += sizeof(charbuf))
-	    if (write(fd, charbuf, sizeof(charbuf)) != sizeof(charbuf)) {
-		(void) fsync(fd);
-		(void) close(fd);
-		goto out;
-	    }
+	    if (write(fd, charbuf, sizeof(charbuf)) != sizeof(charbuf))
+	      break;
 	
 	(void) fsync(fd);
 	(void) close(fd);
+	(void) unlink (file);
     }
  out:
     /* arrange so the file is owned by the ruid
@@ -100,7 +98,7 @@ in_tkt(pname, pinst)
 	    if (krb_debug)
 		printf("swapped UID's %d and %d\n",(int)metoo,(int)me);
     }
-    if ((tktfile = creat(file,0600)) < 0) {
+    if ((tktfile = open (file,O_CREAT|O_EXCL|O_WRONLY,0600)) < 0) {
 	if (krb_debug)
 	    fprintf(stderr,"Error initializing %s",TKT_FILE);
         return(KFAILURE);

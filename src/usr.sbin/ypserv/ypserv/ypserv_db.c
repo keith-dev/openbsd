@@ -1,4 +1,4 @@
-/*	$OpenBSD: ypserv_db.c,v 1.6 1996/06/27 20:25:54 deraadt Exp $ */
+/*	$OpenBSD: ypserv_db.c,v 1.12 1997/05/01 22:14:48 niklas Exp $ */
 
 /*
  * Copyright (c) 1994 Mats O Jansson <moj@stacken.kth.se>
@@ -34,7 +34,7 @@
  */
 
 #ifndef LINT
-static char rcsid[] = "$OpenBSD: ypserv_db.c,v 1.6 1996/06/27 20:25:54 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: ypserv_db.c,v 1.12 1997/05/01 22:14:48 niklas Exp $";
 #endif
 
 /*
@@ -75,6 +75,7 @@ struct opt_map {
 	DBM	*db;			/* database */
 	struct opt_domain *dom;		/* back ptr to our domain */
 	int	host_lookup;		/* host lookup */
+	int	secure;			/* secure map? */
 	CIRCLEQ_ENTRY(opt_map) mapsq;	/* map queue pointers */
 	LIST_ENTRY(opt_map) mapsl;	/* map list pointers */
 };
@@ -117,28 +118,32 @@ yp_private(key,ypprivate)
 {
 	int	result;
 
-  	if (ypprivate) return (FALSE);
+  	if (ypprivate)
+	    return (FALSE);
+
+	if (key.dsize == 0 || key.dptr == NULL)
+		return (FALSE);
 
 	if (key.dsize == YP_LAST_LEN &&
-			strncmp(key.dptr,YP_LAST_KEY,YP_LAST_LEN) == 0)
+	    strncmp(key.dptr,YP_LAST_KEY,YP_LAST_LEN) == 0)
 		return(TRUE);
 	if (key.dsize == YP_INPUT_LEN &&
-			strncmp(key.dptr,YP_INPUT_KEY,YP_INPUT_LEN) == 0)
+	    strncmp(key.dptr,YP_INPUT_KEY,YP_INPUT_LEN) == 0)
 		return(TRUE);
 	if (key.dsize == YP_OUTPUT_LEN &&
-			strncmp(key.dptr,YP_OUTPUT_KEY,YP_OUTPUT_LEN) == 0)
+	    strncmp(key.dptr,YP_OUTPUT_KEY,YP_OUTPUT_LEN) == 0)
 		return(TRUE);
 	if (key.dsize == YP_MASTER_LEN &&
-			strncmp(key.dptr,YP_MASTER_KEY,YP_MASTER_LEN) == 0)
+	    strncmp(key.dptr,YP_MASTER_KEY,YP_MASTER_LEN) == 0)
 		return(TRUE);
 	if (key.dsize == YP_DOMAIN_LEN &&
-			strncmp(key.dptr,YP_DOMAIN_KEY,YP_DOMAIN_LEN) == 0)
+	    strncmp(key.dptr,YP_DOMAIN_KEY,YP_DOMAIN_LEN) == 0)
 		return(TRUE);
 	if (key.dsize == YP_INTERDOMAIN_LEN &&
-		strncmp(key.dptr,YP_INTERDOMAIN_KEY,YP_INTERDOMAIN_LEN) == 0)
+	    strncmp(key.dptr,YP_INTERDOMAIN_KEY,YP_INTERDOMAIN_LEN) == 0)
 		return(TRUE);
 	if (key.dsize == YP_SECURE_LEN &&
-			strncmp(key.dptr,YP_SECURE_KEY,YP_SECURE_LEN) == 0)
+	    strncmp(key.dptr,YP_SECURE_KEY,YP_SECURE_LEN) == 0)
 		return(TRUE);
 	
 	return(FALSE);
@@ -222,6 +227,7 @@ ypdb_open_db(domain, map, status, map_info)
 {
 	char map_path[MAXPATHLEN];
 	static char   *domain_key = YP_INTERDOMAIN_KEY;
+	static char   *secure_key = YP_SECURE_KEY;
 	struct	stat finfo;
 	DBM	*db;
 	int	fd;
@@ -267,6 +273,15 @@ ypdb_open_db(domain, map, status, map_info)
 		ypdb_close_last();
 	else
 		close(fd);
+
+	if (strchr(domain, '/')) {
+		*status = YP_NODOM;
+		return (NULL);
+	}
+	if (strchr(domain, '/')) {
+		*status = YP_NOMAP;
+		return (NULL);
+	}
 
 	/*
 	 * check for domain, file.   
@@ -355,11 +370,16 @@ ypdb_open_db(domain, map, status, map_info)
 			m->host_lookup = TRUE;
 		}
 	}
+	m->secure = FALSE;
+	k.dptr = secure_key;
+	k.dsize = YP_SECURE_LEN;
+	v = ypdb_fetch(db,k);
+	if (v.dptr) m->secure = TRUE;
 	*status = YP_TRUE;
 	if (map_info) *map_info = m;
 #ifdef DEBUG
-	     yplog("  ypdb_open_db: NEW MAP domain=%s, map=%s, hl=%d, db=0x%x", 
-			domain, map, m->host_lookup, m->db);
+	     yplog("  ypdb_open_db: NEW MAP domain=%s, map=%s, hl=%d, s=%d, db=0x%x", 
+			domain, map, m->host_lookup, m->secure, m->db);
 #endif
 	return(m->db);
 }
@@ -489,7 +509,7 @@ ypdb_get_record(domain, map, key, ypprivate)
 		res.stat = YP_NOKEY;
 		if ((hn = strcmp(map, YP_HOSTNAME)) != 0 &&
 				strcmp(map, YP_HOSTADDR) != 0) 
-			return(res);
+			goto done;
 		/* note: lookup_host needs null terminated string */
 		strncpy(keystr, key.keydat_val, key.keydat_len);
 		keystr[key.keydat_len] = '\0';
@@ -632,7 +652,7 @@ ypdb_get_order(domain, map)
 	  } else {
 	    strncpy(order, v.dptr, v.dsize);
 	    order[v.dsize] = '\0';
-	    res.ordernum = (u_int) atol(order);
+	    res.ordernum = (u_int32_t)atol(order);
 	  }
 	}
 
@@ -746,3 +766,27 @@ ypdb_xdr_get_all(xdrs, req)
 	
 	return (TRUE);
 }
+
+int
+ypdb_secure(domain, map)
+	domainname	domain;
+	mapname		map;
+{
+	static	ypresp_val res;
+	DBM	*db;
+	int	secure;
+	struct opt_map *map_info = NULL;
+
+	bzero((char *)&res, sizeof(res));
+	secure = FALSE;
+
+	db = ypdb_open_db(domain, map, &res.stat, &map_info);
+	if (!db || res.stat < 0) 
+		return(secure);			/* ? */
+	if (map_info)
+		secure = map_info->secure;
+
+	ypdb_close_db(db);
+	return(secure);
+}
+

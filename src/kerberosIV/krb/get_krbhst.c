@@ -71,10 +71,12 @@ krb_get_krbhst(h, r, n)
 
     if ((cnffile = fopen(KRB_CONF,"r")) == NULL) {
         char tbuf[128];
-        char *tdir = (char *) getenv("KRBCONFDIR");
-        strncpy(tbuf, tdir ? tdir : "/etc", sizeof(tbuf));
-        strncat(tbuf, "/krb.conf", sizeof(tbuf));
+        char *tdir = NULL;
+	if (issetugid() == 0)
+	   tdir = (char *) getenv("KRBCONFDIR");
+        strncpy(tbuf, tdir ? tdir : "/etc", sizeof(tbuf)-1);
         tbuf[sizeof(tbuf)-1] = 0;
+        strncat(tbuf, "/krb.conf", sizeof(tbuf)-strlen(tbuf));
         if ((cnffile = fopen(tbuf,"r")) == NULL)
             return(KFAILURE);
     }

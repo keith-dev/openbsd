@@ -1,4 +1,4 @@
-/*	$OpenBSD$	*/
+/*	$OpenBSD: auth.c,v 1.2 1996/03/19 23:15:48 niklas Exp $	*/
 
 /*-
  * Copyright (c) 1991, 1993
@@ -36,7 +36,7 @@
 #ifndef lint
 /* from: static char sccsid[] = "@(#)auth.c	8.3 (Berkeley) 5/30/95" */
 /* from: static char *rcsid = "$NetBSD: auth.c,v 1.5 1996/02/24 01:15:17 jtk Exp $"; */
-static char *rcsid = "$OpenBSD$";
+static char *rcsid = "$OpenBSD: auth.c,v 1.2 1996/03/19 23:15:48 niklas Exp $";
 #endif /* not lint */
 
 /*

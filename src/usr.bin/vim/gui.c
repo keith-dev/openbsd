@@ -1,4 +1,4 @@
-/*	$OpenBSD: gui.c,v 1.1.1.1 1996/09/07 21:40:28 downsj Exp $	*/
+/*	$OpenBSD: gui.c,v 1.3 1996/10/15 08:22:08 downsj Exp $	*/
 /* vi:set ts=4 sw=4:
  *
  * VIM - Vi IMproved			by Bram Moolenaar
@@ -277,6 +277,10 @@ gui_init()
 #endif
 				)
 			i = do_source((char_u *)GVIMRC_FILE, FALSE);
+
+		if (secure == 2)
+			need_wait_return = TRUE;
+		secure = 0;
 	}
 
 	/*

@@ -1,8 +1,8 @@
-#	$OpenBSD: Makefile,v 1.5 1996/06/21 23:13:15 deraadt Exp $
+#	$OpenBSD: Makefile,v 1.7 1997/04/18 07:27:41 deraadt Exp $
 
-SUBDIR= kc inst upgr
+SUBDIR= ramdisk
 
 unconfig:
-	cd kc; ${MAKE} unconfig
+	cd ramdisk; ${MAKE} unconfig
 
 .include <bsd.subdir.mk>

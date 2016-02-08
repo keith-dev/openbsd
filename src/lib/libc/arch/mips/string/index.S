@@ -38,7 +38,7 @@
 
 #if defined(LIBC_SCCS)
 	.text
-	.asciz "$OpenBSD$"
+	.asciz "$OpenBSD: index.S,v 1.4 1996/08/19 08:16:15 tholo Exp $"
 #endif /* LIBC_SCCS */
 
 LEAF(index)

@@ -1,4 +1,4 @@
-	$OpenBSD$
+	$OpenBSD: README,v 1.2 1996/03/27 19:32:56 niklas Exp $
 
 This is a distribution of both client and server telnet.  These programs
 have been compiled on:

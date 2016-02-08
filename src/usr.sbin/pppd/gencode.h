@@ -1,4 +1,4 @@
-/*	$OpenBSD$	*/
+/*	$OpenBSD: gencode.h,v 1.1 1996/03/25 15:55:41 niklas Exp $	*/
 /*	$NetBSD: gencode.h,v 1.1 1996/03/15 03:09:12 paulus Exp $	*/
 
 /*

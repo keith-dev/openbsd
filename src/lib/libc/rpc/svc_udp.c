@@ -28,7 +28,7 @@
  */
 
 #if defined(LIBC_SCCS) && !defined(lint)
-static char *rcsid = "$OpenBSD: svc_udp.c,v 1.3 1996/08/19 08:31:59 tholo Exp $";
+static char *rcsid = "$OpenBSD: svc_udp.c,v 1.6 1997/03/29 06:08:56 deraadt Exp $";
 #endif /* LIBC_SCCS and not lint */
 
 /*
@@ -127,16 +127,25 @@ svcudp_bufcreate(sock, sendsz, recvsz)
 	xprt = (SVCXPRT *)mem_alloc(sizeof(SVCXPRT));
 	if (xprt == NULL) {
 		(void)fprintf(stderr, "svcudp_create: out of memory\n");
+		if (madesock)
+			(void)close(sock);
 		return (NULL);
 	}
 	su = (struct svcudp_data *)mem_alloc(sizeof(*su));
 	if (su == NULL) {
 		(void)fprintf(stderr, "svcudp_create: out of memory\n");
+		if (madesock)
+			(void)close(sock);
+		free(xprt);
 		return (NULL);
 	}
 	su->su_iosz = ((MAX(sendsz, recvsz) + 3) / 4) * 4;
 	if ((rpc_buffer(xprt) = mem_alloc(su->su_iosz)) == NULL) {
 		(void)fprintf(stderr, "svcudp_create: out of memory\n");
+		if (madesock)
+			(void)close(sock);
+		free(xprt);
+		free(su);
 		return (NULL);
 	}
 	xdrmem_create(

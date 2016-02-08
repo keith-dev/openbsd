@@ -1,4 +1,4 @@
-/*	$OpenBSD: talkd.c,v 1.5 1996/07/18 00:18:54 deraadt Exp $	*/
+/*	$OpenBSD: talkd.c,v 1.6 1996/07/19 03:09:41 millert Exp $	*/
 
 /*
  * Copyright (c) 1983 Regents of the University of California.

@@ -1,4 +1,4 @@
-/*	$OpenBSD: local.h,v 1.5 1995/02/02 02:10:05 jtc Exp $	*/
+/*	$OpenBSD: local.h,v 1.2 1996/08/19 08:32:54 tholo Exp $	*/
 
 /*-
  * Copyright (c) 1990, 1993

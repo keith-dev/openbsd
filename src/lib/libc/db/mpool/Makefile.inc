@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile.inc,v 1.4 1995/02/27 13:23:53 cgd Exp $
+#	$OpenBSD: Makefile.inc,v 1.2 1996/08/19 08:20:49 tholo Exp $
 
 .PATH: ${.CURDIR}/db/mpool
 

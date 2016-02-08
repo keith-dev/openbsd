@@ -30,12 +30,13 @@
  */
 
 #ifndef LINT
-static char rcsid[] = "$Id: yppasswdd_mkpw.c,v 1.8 1996/08/31 13:54:13 deraadt Exp $";
+static char rcsid[] = "$Id: yppasswdd_mkpw.c,v 1.12 1997/02/18 23:38:58 provos Exp $";
 #endif
 
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <stdio.h>
+#include <fcntl.h>
 #include <rpc/rpc.h>
 #include <rpcsvc/yppasswd.h>
 #include <pwd.h>
@@ -117,6 +118,10 @@ make_passwd(argp)
 		return (1);
 	}
 
+	pfd = open(_PATH_MASTERPASSWD, O_RDONLY, 0);
+	if (pfd < 0)
+		pw_error(_PATH_MASTERPASSWD, 1, 1);
+
 	pw_init();
 	tfd = pw_lock(0);
 
@@ -143,7 +148,10 @@ do_mkdb()
 	(void)fflush(stdout);
 	if (!(pid = vfork())) {
 		execl(_PATH_PWD_MKDB, "pwd_mkdb", "-p", tempname, NULL);
-		pw_error(_PATH_PWD_MKDB, 1, 1);
+		warn(_PATH_PWD_MKDB);
+		warnx("%s: unchanged", _PATH_MASTERPASSWD);
+		pw_abort();
+		_exit(1);
 	}
 	pid = waitpid(pid, &pstat, 0);
 	if (pid == -1 || !WIFEXITED(pstat) || WEXITSTATUS(pstat) != 0)

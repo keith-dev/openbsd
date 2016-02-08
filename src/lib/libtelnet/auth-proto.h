@@ -31,7 +31,7 @@
  * SUCH DAMAGE.
  *
  *	from: @(#)auth-proto.h	8.1 (Berkeley) 6/4/93
- *	$OpenBSD$
+ *	$OpenBSD: auth-proto.h,v 1.2 1996/03/19 23:15:47 niklas Exp $
  *	$NetBSD: auth-proto.h,v 1.5 1996/02/24 01:15:16 jtk Exp $
  */
 

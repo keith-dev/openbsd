@@ -30,7 +30,7 @@
  */
 
 #if defined(LIBC_SCCS) && !defined(lint)
-static char *rcsid = "$OpenBSD: yp_all.c,v 1.3 1996/07/01 07:09:09 deraadt Exp $";
+static char *rcsid = "$OpenBSD: yp_all.c,v 1.5 1996/12/14 06:49:46 tholo Exp $";
 #endif /* LIBC_SCCS and not lint */
 
 #include <sys/param.h>
@@ -64,7 +64,7 @@ u_long *objp;
 	while(1) {
 		if( !xdr_ypresp_all(xdrs, &out)) {
 			xdr_free(xdr_ypresp_all, (char *)&out);
-			*objp = YP_YPERR;
+			*objp = (u_long)YP_YPERR;
 			return FALSE;
 		}
 		if(out.more == 0) {

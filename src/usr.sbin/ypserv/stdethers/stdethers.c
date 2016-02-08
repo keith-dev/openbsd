@@ -1,4 +1,4 @@
-/*	$OpenBSD$ */
+/*	$OpenBSD: stdethers.c,v 1.2 1996/05/30 09:53:12 deraadt Exp $ */
 
 /*
  * Copyright (c) 1995 Mats O Jansson <moj@stacken.kth.se>
@@ -32,7 +32,7 @@
  */
 
 #ifndef LINT
-static char rcsid[] = "$OpenBSD$";
+static char rcsid[] = "$OpenBSD: stdethers.c,v 1.2 1996/05/30 09:53:12 deraadt Exp $";
 #endif
 
 #include <sys/types.h>

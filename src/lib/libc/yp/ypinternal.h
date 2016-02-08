@@ -1,4 +1,4 @@
-/*	$OpenBSD: yplib.c,v 1.4 1996/03/09 02:43:01 niklas Exp $	 */
+/*	$OpenBSD: ypinternal.h,v 1.2 1996/09/15 09:32:00 tholo Exp $	 */
 
 /*
  * Copyright (c) 1992, 1993, 1996 Theo de Raadt <deraadt@theos.com>

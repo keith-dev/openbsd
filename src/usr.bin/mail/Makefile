@@ -1,8 +1,8 @@
-#	$OpenBSD: Makefile,v 1.8 1996/06/08 19:48:09 christos Exp $
+#	$OpenBSD: Makefile,v 1.6 1997/04/27 20:56:49 millert Exp $
 #	$NetBSD: Makefile,v 1.8 1996/06/08 19:48:09 christos Exp $
 
 PROG=	mail
-SRCS=	version.c aux.c cmd1.c cmd2.c cmd3.c cmdtab.c collect.c dotlock.c \
+SRCS=	version.c aux.c cmd1.c cmd2.c cmd3.c cmdtab.c collect.c \
 	edit.c fio.c getname.c head.c v7.local.c lex.c list.c main.c names.c \
 	popen.c quit.c send.c strings.c temp.c tty.c vars.c
 SFILES=	mail.help mail.tildehelp
@@ -11,9 +11,9 @@ LINKS=	${BINDIR}/mail ${BINDIR}/Mail ${BINDIR}/mail ${BINDIR}/mailx
 MLINKS=	mail.1 Mail.1 mail.1 mailx.1
 
 beforeinstall:
-	cd ${.CURDIR}/misc; install -c -o ${BINOWN} -g ${BINGRP} \
+	cd ${.CURDIR}/misc; ${INSTALL} ${INSTALL_COPY} -o ${BINOWN} -g ${BINGRP} \
 	    -m 444 ${SFILES} ${DESTDIR}/usr/share/misc
-	cd ${.CURDIR}/misc; install -c -o root -g wheel \
+	cd ${.CURDIR}/misc; ${INSTALL} ${INSTALL_COPY} -o root -g wheel \
 	    -m 644 ${EFILES} ${DESTDIR}/etc
 
 .if make(install)

@@ -1,8 +1,7 @@
-#	$OpenBSD: Makefile,v 1.1.1.1 1995/10/18 08:45:51 deraadt Exp $
+#	$OpenBSD: Makefile,v 1.3 1997/04/27 13:48:54 downsj Exp $
 
 PROG=	newsyslog
 
-CFLAGS+= -DOSF
 CFLAGS+= -DCONF=\"/etc/newsyslog.conf\"
 CFLAGS+= -DPIDFILE=\"/var/run/syslog.pid\"
 CFLAGS+= -DCOMPRESS=\"/usr/bin/gzip\"

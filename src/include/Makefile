@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.25 1996/09/29 23:52:34 millert Exp $
+#	$OpenBSD: Makefile,v 1.40 1997/04/27 20:55:58 millert Exp $
 #	$NetBSD: Makefile,v 1.59 1996/05/15 21:36:43 jtc Exp $
 
 #	@(#)Makefile	5.45.1.1 (Berkeley) 5/6/91
@@ -8,14 +8,15 @@
 
 # Missing: mp.h
 
-FILES=	a.out.h ar.h assert.h bitstring.h bm.h cpio.h ctype.h db.h dirent.h \
-	disktab.h elf_abi.h err.h fnmatch.h fstab.h fts.h glob.h \
+FILES=	a.out.h ar.h assert.h bitstring.h blf.h bm.h cpio.h ctype.h db.h \
+	dirent.h disktab.h elf_abi.h err.h fnmatch.h fstab.h fts.h glob.h \
 	grp.h ieeefp.h iso646.h kvm.h langinfo.h limits.h locale.h \
 	malloc.h math.h md4.h md5.h memory.h mpool.h ndbm.h netdb.h \
-	netgroup.h nlist.h nl_types.h paths.h poll.h pwd.h ranlib.h re_comp.h \
-	regex.h resolv.h search.h setjmp.h sgtty.h sha1.h signal.h stab.h \
-	stddef.h stdio.h stdlib.h string.h strings.h struct.h sysexits.h \
-	tar.h time.h ttyent.h tzfile.h unistd.h utime.h utmp.h vis.h
+	netgroup.h nlist.h nl_types.h olf_abi.h paths.h poll.h pwd.h \
+	ranlib.h re_comp.h regex.h resolv.h search.h setjmp.h sgtty.h \
+	sha1.h signal.h stab.h stddef.h stdio.h stdlib.h string.h \
+	strings.h struct.h sysexits.h tar.h time.h ttyent.h tzfile.h \
+	unistd.h utime.h utmp.h vis.h
 
 .if (${MACHINE_ARCH} != "alpha") && (${MACHINE_ARCH} != "mips")
 FILES+=	dlfcn.h link.h
@@ -29,35 +30,37 @@ MFILES+= link.h dlfcn.h
 .endif
 
 DIRS=	arpa protocols rpc rpcsvc
-LDIRS=	dev net netinet netccitt netiso netns netipx nfs sys ufs vm ddb scsi
+LDIRS=	dev net netinet netccitt netiso netns netipx nfs sys ufs vm ddb \
+	scsi gnu/ext2fs
 
-RDIRS=	../lib/libcompat ../lib/libcurses ../lib/libform ../lib/libmenu \
-	../lib/libocurses ../lib/libpanel ../lib/librpcsvc ../lib/libskey \
-	../lib/libtermlib ../lib/libedit ../lib/libpcap ../lib/libutil \
-	../lib/libz ../sys/arch/${MACHINE}
+RDIRS=	../lib/libcom_err ../lib/libcompat ../lib/libcurses ../lib/libform \
+	../lib/libmenu ../lib/libocurses ../lib/libpanel ../lib/librpcsvc \
+	../lib/libskey ../lib/libss ../lib/libtermlib ../lib/libedit \
+	../lib/libpcap ../lib/libutil ../lib/libwrap ../lib/libz \
+	../sys/arch/${MACHINE}
 
 NOOBJ=	noobj
 
 # Change SYS_INCLUDE in bsd.own.mk to "symlinks" if you don't want copies
 .include <bsd.own.mk>
 SYS_INCLUDE?=	copies
-.if defined(KERBEROS)
-RDIRS+=	../kerberosIV/include ../kerberosIV/kadm ../kerberosIV/krb ../kerberosIV/ss
+.if (${KERBEROS} == "yes")
+RDIRS+=	../kerberosIV/include ../kerberosIV/kadm ../kerberosIV/krb
 .endif
 
 includes:
 	@echo installing ${FILES}
 	@-for i in ${FILES}; do \
 		cmp -s $$i ${DESTDIR}/usr/include/$$i || \
-		    install -c -m 444 $$i ${DESTDIR}/usr/include/$$i; \
+		    ${INSTALL} ${INSTALL_COPY} -m 444 $$i ${DESTDIR}/usr/include/$$i; \
 	done
 	@echo installing ${DIRS}
 	@-for i in ${DIRS}; do \
-		install -d -o ${BINOWN} -g ${BINGRP} -m 755 \
+		${INSTALL} -d -o ${BINOWN} -g ${BINGRP} -m 755 \
 			${DESTDIR}/usr/include/$$i; \
 		(cd $$i; for j in *.[ih]; do \
 			cmp -s $$j ${DESTDIR}/usr/include/$$i/$$j || \
-			install -c -m 444 $$j ${DESTDIR}/usr/include/$$i/$$j; \
+			${INSTALL} ${INSTALL_COPY} -m 444 $$j ${DESTDIR}/usr/include/$$i/$$j; \
 		done); \
 	done
 	@echo installing ${LFILES}
@@ -84,7 +87,7 @@ copies:
 	@echo copies: ${LDIRS}
 	@-for i in ${LDIRS}; do \
 		rm -rf ${DESTDIR}/usr/include/$$i; \
-		install -d -o ${BINOWN} -g ${BINGRP} -m 755 \
+		${INSTALL} -d -o ${BINOWN} -g ${BINGRP} -m 755 \
 			${DESTDIR}/usr/include/$$i ; \
 	done
 	cd ../sys; \
@@ -92,7 +95,7 @@ copies:
 	    `find ${LDIRS} -follow -type f -name '*.h' '!' -path \
 	    'netiso/xebec/*' -print` ${DESTDIR}/usr/include
 	rm -rf ${DESTDIR}/usr/include/machine
-	install -d -o ${BINOWN} -g ${BINGRP} -m 755 \
+	${INSTALL} -d -o ${BINOWN} -g ${BINGRP} -m 755 \
 		${DESTDIR}/usr/include/machine
 	pax -rw -pa -s "|../sys/arch/${MACHINE}/include||" \
 	    ../sys/arch/${MACHINE}/include/*.h \
@@ -100,7 +103,7 @@ copies:
 	rm -rf ${DESTDIR}/usr/include/${MACHINE_ARCH}
 	if test ${MACHINE} != ${MACHINE_ARCH} -a \
 	    -d ../sys/arch/${MACHINE_ARCH}/include; then \
-		install -d -o ${BINOWN} -g ${BINGRP} -m 755 \
+		${INSTALL} -d -o ${BINOWN} -g ${BINGRP} -m 755 \
     	    	    ${DESTDIR}/usr/include/${MACHINE_ARCH}; \
 		pax -rw -pa -s "|../sys/arch/${MACHINE_ARCH}/include||" \
 		    ../sys/arch/${MACHINE_ARCH}/include/*.h \

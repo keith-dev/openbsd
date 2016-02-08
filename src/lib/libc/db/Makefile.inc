@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile.inc,v 1.5 1995/02/27 13:19:23 cgd Exp $
+#	$OpenBSD: Makefile.inc,v 1.2 1996/08/19 08:19:54 tholo Exp $
 #
 CFLAGS+=-D__DBINTERFACE_PRIVATE
 

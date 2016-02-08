@@ -1,4 +1,4 @@
-/*	$OpenBSD: ps.c,v 1.4 1996/08/02 12:41:02 deraadt Exp $	*/
+/*	$OpenBSD: ps.c,v 1.7 1996/12/22 02:57:50 tholo Exp $	*/
 /*	$NetBSD: ps.c,v 1.15 1995/05/18 20:33:25 mycroft Exp $	*/
 
 /*-
@@ -44,7 +44,7 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)ps.c	8.4 (Berkeley) 4/2/94";
 #else
-static char rcsid[] = "$OpenBSD: ps.c,v 1.4 1996/08/02 12:41:02 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: ps.c,v 1.7 1996/12/22 02:57:50 tholo Exp $";
 #endif
 #endif /* not lint */
 
@@ -267,8 +267,10 @@ main(argc, argv)
 	 * Discard setgid privileges if not the running kernel so that bad
 	 * guys can't print interesting stuff from kernel memory.
 	 */
-	if (nlistf != NULL || memf != NULL || swapf != NULL)
+	if (nlistf != NULL || memf != NULL || swapf != NULL) {
+		setegid(getgid());
 		setgid(getgid());
+	}
 
 	kd = kvm_openfiles(nlistf, memf, swapf, O_RDONLY, errbuf);
 	if (kd == 0)
@@ -466,8 +468,8 @@ kludge_oldps_options(s)
 	 * if there's a trailing number, and not a preceding 'p' (pid) or
 	 * 't' (tty) flag, then assume it's a pid and insert a 'p' flag.
 	 */
-	if (isdigit(*cp) && (cp == s || cp[-1] != 't' && cp[-1] != 'p' &&
-	    (cp - 1 == s || cp[-2] != 't')))
+	if (isdigit(*cp) && (cp == s || (cp[-1] != 't' && cp[-1] != 'p' &&
+	    (cp - 1 == s || cp[-2] != 't'))))
 		*ns++ = 'p';
 	(void)strcpy(ns, cp);		/* and append the number */
 

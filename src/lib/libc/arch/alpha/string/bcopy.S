@@ -1,3 +1,6 @@
+/*	$OpenBSD: bcopy.S,v 1.4 1996/11/13 23:24:27 etheisen Exp $	*/
+/*	$NetBSD: bcopy.S,v 1.3 1996/10/17 03:08:11 cgd Exp $	*/
+
 /*
  * Copyright (c) 1995 Carnegie-Mellon University.
  * All rights reserved.
@@ -28,10 +31,10 @@
 
 #if defined(LIBC_SCCS)
 	.text
-	.asciz "$OpenBSD$"
+	.asciz "$OpenBSD: bcopy.S,v 1.4 1996/11/13 23:24:27 etheisen Exp $"
 #endif
 
-#include "DEFS.h"
+#include <machine/asm.h>
 
 #if defined(MEMCOPY) || defined(MEMMOVE)
 #ifdef MEMCOPY

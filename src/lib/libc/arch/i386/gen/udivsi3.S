@@ -38,7 +38,7 @@
 
 #if defined(LIBC_SCCS)
 	.text
-	.asciz "$OpenBSD: udivsi3.S,v 1.2 1995/12/30 08:15:43 deraadt Exp $"
+	.asciz "$OpenBSD: udivsi3.S,v 1.3 1996/08/19 08:12:35 tholo Exp $"
 #endif
 
 ENTRY(__udivsi3)

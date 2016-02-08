@@ -1,4 +1,4 @@
-/*	$OpenBSD$	*/
+/*	$OpenBSD: afs_ops.c,v 1.2 1996/03/25 15:54:43 niklas Exp $	*/
 
 /*
  * Copyright (c) 1990 Jan-Simon Pendry

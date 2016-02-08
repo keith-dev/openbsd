@@ -1,4 +1,4 @@
-/*	$OpenBSD: main.c,v 1.4 1996/09/01 15:27:29 deraadt Exp $	*/
+/*	$OpenBSD: main.c,v 1.7 1997/04/16 04:07:37 millert Exp $	*/
 /*	$NetBSD: main.c,v 1.11 1996/03/15 22:39:39 scottr Exp $	*/
 
 /*
@@ -57,12 +57,12 @@ static char rcsid[] = "$NetBSD: main.c,v 1.11 1996/03/15 22:39:39 scottr Exp $";
 
 #include <err.h>
 #include <errno.h>
+#include <paths.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-#include "pathnames.h"
 #include "restore.h"
 #include "extern.h"
 
@@ -102,7 +102,7 @@ main(argc, argv)
 	if ((inputdev = getenv("TAPE")) == NULL)
 		inputdev = _PATH_DEFTAPE;
 	obsolete(&argc, &argv);
-	while ((ch = getopt(argc, argv, "b:cdf:himNRrs:tvxy")) != EOF)
+	while ((ch = getopt(argc, argv, "b:cdf:himNRrs:tvxy")) != -1)
 		switch(ch) {
 		case 'b':
 			/* Change default tape blocksize. */

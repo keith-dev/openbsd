@@ -1,4 +1,4 @@
-/*	$OpenBSD: regexp.h,v 1.2 1996/07/24 05:39:12 downsj Exp $	*/
+/*	$OpenBSD: regexp.h,v 1.3 1996/07/24 05:56:57 downsj Exp $	*/
 /*	$NetBSD: regexp.h,v 1.3 1994/10/26 00:56:15 cgd Exp $	*/
 
 /*

@@ -1,4 +1,4 @@
-# $Id: Makefile,v 1.2 1996/09/27 15:38:57 millert Exp $
+# $Id: Makefile,v 1.4 1997/04/27 20:56:15 millert Exp $
 
 LIB=	skey
 SRCS=	skeylogin.c skeysubr.c put.c
@@ -8,7 +8,7 @@ HDRS=	skey.h
 includes:
 	@cd ${.CURDIR}; for i in $(HDRS); do \
 	    j="cmp -s $$i ${DESTDIR}/usr/include/`basename $$i` || \
-		install -c -o ${BINOWN} -g ${BINGRP} -m 444 $$i \
+		${INSTALL} ${INSTALL_COPY} -o ${BINOWN} -g ${BINGRP} -m 444 $$i \
 		${DESTDIR}/usr/include"; \
 	    echo $$j; \
 	    eval "$$j"; \

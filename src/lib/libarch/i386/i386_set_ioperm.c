@@ -1,4 +1,4 @@
-/*	$OpenBSD$	*/
+/*	$OpenBSD: i386_set_ioperm.c,v 1.2 1996/03/19 23:15:01 niklas Exp $	*/
 /*	$NetBSD: i386_set_ioperm.c,v 1.2 1996/02/27 22:57:31 jtc Exp $	*/
 
 /*-

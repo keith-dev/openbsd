@@ -1,4 +1,4 @@
-/*	$OpenBSD$	*/
+/*	$OpenBSD: locate.h,v 1.8 1997/01/21 21:22:56 rahnds Exp $	*/
 
 /*
  * Copyright (c) 1989, 1993
@@ -41,11 +41,14 @@
 #define	OFFSET		14		/* abs value of max likely diff */
 #define	PARITY		0200		/* parity bit */
 #define	SWITCH		30		/* switch code */
+#define UMLAUT          31              /* an 8 bit char followed */
 
 /* 	0-28	likeliest differential counts + offset to make nonnegative */
 #define LDC_MIN         0
 #define LDC_MAX        28
 
+#undef CHAR_MAX
+#define CHAR_MAX 127
 /*	128-255 bigram codes (128 most common, as determined by 'updatedb') */
 #define BIGRAM_MIN    (UCHAR_MAX - CHAR_MAX) 
 #define BIGRAM_MAX    UCHAR_MAX
@@ -67,3 +70,6 @@ u_char myctype[UCHAR_MAX + 1];
 #endif
 
 #define INTSIZE (sizeof(int))
+
+#define LOCATE_REG "*?[]\\"  /* fnmatch(3) meta characters */
+

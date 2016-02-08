@@ -1,3 +1,5 @@
+/*	$OpenBSD: netgroup_mkdb.c,v 1.5 1997/02/03 00:13:04 millert Exp $	*/
+
 /*
  * Copyright (c) 1994 Christos Zoulas
  * All rights reserved.
@@ -29,7 +31,7 @@
  * SUCH DAMAGE.
  */
 #ifndef lint
-static char *rcsid = "$Id: netgroup_mkdb.c,v 1.2 1996/05/01 13:32:21 deraadt Exp $";
+static char *rcsid = "$OpenBSD: netgroup_mkdb.c,v 1.5 1997/02/03 00:13:04 millert Exp $";
 #endif
 
 #include <sys/types.h>
@@ -104,7 +106,7 @@ main(argc, argv)
 	char		 *fname = _PATH_NETGROUP;
 
 
-	while ((ch = getopt(argc, argv, "do:")) != EOF)
+	while ((ch = getopt(argc, argv, "do:")) != -1)
 		switch (ch) {
 #ifdef DEBUG_NG
 		case 'd':

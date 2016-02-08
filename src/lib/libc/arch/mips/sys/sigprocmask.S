@@ -38,7 +38,7 @@
 
 #if defined(SYSLIBC_SCCS)
 	.text
-	.asciz "$OpenBSD$"
+	.asciz "$OpenBSD: sigprocmask.S,v 1.4 1996/08/19 08:16:27 tholo Exp $"
 #endif /* SYSLIBC_SCCS */
 
 LEAF(sigprocmask)	# sigprocmask(how, new, old) sigset_t *new, *old;

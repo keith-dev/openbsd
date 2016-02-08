@@ -5,7 +5,9 @@ static char rcsid[] = "$NetBSD: main.c,v 1.7.6.1 1996/05/27 15:54:26 mrg Exp $";
 /*	main.c		*/
 #include <sys/types.h>
 #include "header.h"
+#include <errno.h>
 #include <pwd.h>
+#include <stdio.h>
 #include <string.h>
 
 static char copyright[]="\nLarn is copyrighted 1986 by Noah Morgan.\n";
@@ -62,8 +64,8 @@ main(argc,argv)
 	  if (pwe=getpwuid(getuid())) /* can we get it from /etc/passwd? */
 		ptr = pwe->pw_name;
 	  else
-	  if ((ptr = getenv("USER")) == 0)
-		if ((ptr = getenv("LOGNAME")) == 0)
+	  if ((ptr = getenv("LOGNAME")) == 0)
+		if ((ptr = getenv("USER")) == 0)
 		  {
 		  noone: write(2, "Can't find your logname.  Who Are You?\n",39);
 		 		 exit();
@@ -76,9 +78,20 @@ main(argc,argv)
 	strcpy(loginname,ptr); /* save loginname of the user for logging purposes */
 	strcpy(logname,ptr);	/* this will be overwritten with the players name */
 	if ((ptr = getenv("HOME")) == 0) ptr = ".";
-	strcpy(savefilename, ptr);
-	strcat(savefilename, "/Larn.sav");	/* save file name in home directory */
-	sprintf(optsfile, "%s/.larnopts",ptr);	/* the .larnopts filename */
+	if (strlen(ptr) + 9 < sizeof(savefilename)) {
+		strcpy(savefilename, ptr);
+		strcat(savefilename, "/Larn.sav");	/* save file name in home directory */
+	} else {
+		fprintf(stderr, "%s/Larn.sav: %s\n", ptr, strerror(ENAMETOOLONG));
+		exit();
+	}
+	if (strlen(ptr) + 10 < sizeof(savefilename)) {
+		strcpy(optsfile, ptr);
+		strcat(optsfile, "/.larnopts");		/* the .larnopts filename */
+	} else {
+		fprintf(stderr, "%s/.larnopts: %s\n", ptr, strerror(ENAMETOOLONG));
+		exit();
+	}
 
 /*
  *	now malloc the memory for the dungeon 
@@ -145,7 +158,9 @@ main(argc,argv)
 						write(1,cmdhelp,sizeof(cmdhelp));  exit();
 
 			case 'o':	/* specify a .larnopts filename */
-						strncpy(optsfile,argv[i]+2,127);  break;
+						strncpy(optsfile,argv[i]+2,127);
+						optsfile[127] = '\0';
+						break;
 
 			default:	printf("Unknown option <%s>\n",argv[i]);  exit();
 			};

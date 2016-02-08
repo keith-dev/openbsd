@@ -1,4 +1,4 @@
-/*	$OpenBSD$	*/
+/*	$OpenBSD: quot.c,v 1.4 1996/06/10 08:32:15 deraadt Exp $	*/
 /*	$NetBSD: quot.c,v 1.7.4.1 1996/05/31 18:06:36 jtc Exp $	*/
 
 /*

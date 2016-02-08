@@ -35,7 +35,7 @@
  */
 
 #if defined(LIBC_SCCS) && !defined(lint)
-static char rcsid[] = "$OpenBSD: catopen.c,v 1.7 1996/09/05 12:32:33 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: catopen.c,v 1.8 1996/09/15 09:31:23 tholo Exp $";
 #endif /* LIBC_SCCS and not lint */
 
 #define _NLS_PRIVATE

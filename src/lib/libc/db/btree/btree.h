@@ -33,7 +33,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- *	$OpenBSD$
+ *	$OpenBSD: btree.h,v 1.3 1996/08/19 08:20:19 tholo Exp $
  */
 
 /* Macros to set/clear/test flags. */

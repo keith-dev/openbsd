@@ -1,7 +1,7 @@
-/*	$OpenBSD: file.c,v 1.1 1996/06/04 07:56:11 niklas Exp $	*/
+/*	$OpenBSD: file.c,v 1.4 1997/01/17 07:14:15 millert Exp $	*/
 
 #ifndef lint
-static const char *rcsid = "$OpenBSD: file.c,v 1.1 1996/06/04 07:56:11 niklas Exp $";
+static const char *rcsid = "$OpenBSD: file.c,v 1.4 1997/01/17 07:14:15 millert Exp $";
 #endif
 
 /*
@@ -274,7 +274,7 @@ fileGetURL(char *base, char *spec)
 	    tpid = fork();
 	    if (!tpid) {
 		dup2(fd, 0);
-		i = execl("/usr/bin/tar", "tar", Verbose ? "-xzvf" : "-xzf", "-", 0);
+		i = execl("/bin/tar", "tar", Verbose ? "-xzvf" : "-xzf", "-", 0);
 		if (Verbose)
 		    printf("tar command returns %d status\n", i);
 		exit(i);
@@ -440,10 +440,10 @@ unpack(char *pkg, char *flist)
      * compressed.
      */
     if (strcmp(pkg, "-")) {
-	cp = rindex(pkg, '.');
+	cp = strrchr(pkg, '.');
 	if (cp) {
 	    strcpy(suffix, cp + 1);
-	    if (index(suffix, 'z') || index(suffix, 'Z'))
+	    if (strchr(suffix, 'z') || strchr(suffix, 'Z'))
 		strcpy(args, "-z");
 	}
     }

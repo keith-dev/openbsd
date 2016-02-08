@@ -1,4 +1,4 @@
-$OpenBSD: BUG-REPORTS,v 1.2 1996/08/19 20:08:39 downsj Exp $
+$OpenBSD: BUG-REPORTS,v 1.5 1996/11/21 07:59:24 downsj Exp $
 
 List of reported problems (problems reported and fixed before 5.0.4 not
 included).  Unresolved problems (may or may not still exist) marked by *,
@@ -83,6 +83,10 @@ problems believed to be fixed marked by x.
   [see Mail.XXX:XXX]
 
 * pdksh 5.2.8, - : extended pattern globing doesn't handle nested parens ().
+
+* pdksh 5.2.10, - (reported by Simon J. Gerraty): in emacs, <ESC><ESC> applied
+  to a word with a macro does not complete the word (only expands the macro).
+  [see Mail.XXX]
 
 --------------------- put fixed problems below this line ---------------------
 
@@ -1067,4 +1071,47 @@ x pdksh 5.2.9, - (reported by Loris Talpo): long prompts are messed up in
   vi mode.
   [see Mail.XXX]
   [fixed in 5.2.9: lex.c(pprompt) was broken]
+
+x pdksh 5.2.9, - (reported by Will Renkel): a double backslash followed
+  by a newline in an unquoted here document results in one of the backslashes
+  and the newline being stripped.
+  [see Mail.XXX]
+  [fixed in 5.2.10: fixed backslash-newline processing in lex.c]
+
+x pdksh 5.2.9, - (reported by Han Holl): read x?prompt doesn't work 
+  on non-interactive shells when the input is from a tty.
+  [see Mail.XXX]
+  [fixed in 5.2.10: changed test in c_read() from FTALKING to isatty]
+
+x pdksh 5.2.10, - (reported by Dale DePriest): expanding aliases causes
+  extra input.
+  [see Mail.XXX]
+  [fixed in 5.2.11: fixed syn.c(c_list).]
+
+x pdksh 5.2.10, - (reported by John Rochester): window size changes don't
+  happen on Dec unix (osf) because TIOCGWINSZ is defined in <sys/ioctl.h>
+  not in <termios.h>.
+  [see Mail.XXX]
+  [fixed in 5.2.12: sys/ioctl.h included with termios.h/termio.h if possible]
+
+x pdksh 5.2.11, - (reported by Randy Bouzane): aliases in command substitutions
+  result in code dumps.
+  [see Mail.XXX]
+  [fixed in 5.2.12: lex.c(getsc__): break if eof is read]
+
+x pdksh 5.2.11, - (reported by Will Renkel): aliases containing ;<newline>
+  or <newline><newline> aren't fully read/executed.
+  [see Mail.XXX]
+  [fixed in 5.2.12: syn.c(get_command): call inalias()]
+
+x pdksh 5.2.11, SGI/IRIX 5.2 (reported by bert@xpilot.com): pipelines
+  containing built in commands hang forever.
+  [see Mail.XXX]
+  [fixed in 5.2.12: fixed pgrp sync code in jobs.c]
+
+x pdksh 5.2.11, - (reported by Herbert Thielen via Larry Daffner): shell leaves
+  temp files around when executing shell scripts that have functions with
+  here documents which end in an exec.
+  [see Mail.XXX]
+  [fixed in 5.2.12: call main.c(cleanup_proc_env()) from exec.c(execute()).]
 

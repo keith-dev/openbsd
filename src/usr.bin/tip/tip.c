@@ -1,5 +1,5 @@
-/*	$OpenBSD: tip.c,v 1.8 1995/10/29 00:49:42 pk Exp $	*/
-/*	$NetBSD: tip.c,v 1.8 1995/10/29 00:49:42 pk Exp $	*/
+/*	$OpenBSD: tip.c,v 1.5 1997/04/20 23:29:33 millert Exp $	*/
+/*	$NetBSD: tip.c,v 1.13 1997/04/20 00:03:05 mellon Exp $	*/
 
 /*
  * Copyright (c) 1983, 1993
@@ -44,7 +44,7 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)tip.c	8.1 (Berkeley) 6/6/93";
 #endif
-static char rcsid[] = "$OpenBSD: tip.c,v 1.8 1995/10/29 00:49:42 pk Exp $";
+static char rcsid[] = "$OpenBSD: tip.c,v 1.5 1997/04/20 23:29:33 millert Exp $";
 #endif /* not lint */
 
 /*
@@ -136,7 +136,7 @@ main(argc, argv)
 	for (p = system; *p; p++)
 		*p = '\0';
 	PN = PNbuf;
-	(void)sprintf(sbuf, "tip%d", BR);
+	(void)snprintf(sbuf, sizeof(sbuf), "tip%d", BR);
 	system = sbuf;
 
 notnumber:
@@ -304,6 +304,7 @@ prompt(s, p)
 	char *s;
 	register char *p;
 {
+	register int c;
 	register char *b = p;
 	sig_t oint, oquit;
 
@@ -313,7 +314,7 @@ prompt(s, p)
 	unraw();
 	printf("%s", s);
 	if (setjmp(promptbuf) == 0)
-		while ((*p = getchar()) != EOF && *p != '\n')
+		while ((c = getchar()) != EOF && (*p = c) != '\n')
 			p++;
 	*p = '\0';
 
@@ -361,7 +362,7 @@ tipin()
 			if (!(gch = escape()))
 				continue;
 		} else if (!cumode && gch == character(value(RAISECHAR))) {
-			boolean(value(RAISE)) = !boolean(value(RAISE));
+			setboolean(value(RAISE), !boolean(value(RAISE)));
 			continue;
 		} else if (gch == '\r') {
 			bol = 1;
@@ -511,6 +512,8 @@ ttysetup(speed)
 	cfsetispeed(&cntrl, speed);
 	cntrl.c_cflag &= ~(CSIZE|PARENB);
 	cntrl.c_cflag |= CS8;
+	if (boolean(value(DC)))
+		cntrl.c_cflag |= CLOCAL;
 	cntrl.c_iflag &= ~(ISTRIP|ICRNL);
 	cntrl.c_oflag &= ~OPOST;
 	cntrl.c_lflag &= ~(ICANON|ISIG|IEXTEN|ECHO);
@@ -575,7 +578,7 @@ setparity(defparity)
 {
 	register int i, flip, clr, set;
 	char *parity;
-	extern char evenpartab[];
+	extern const unsigned char evenpartab[];
 
 	if (value(PARITY) == NOSTR)
 		value(PARITY) = defparity;

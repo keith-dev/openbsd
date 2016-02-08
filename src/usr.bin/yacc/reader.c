@@ -1,4 +1,4 @@
-/*	$OpenBSD: reader.c,v 1.4 1996/03/31 04:56:01 etheisen Exp $	*/
+/*	$OpenBSD: reader.c,v 1.5 1996/04/21 23:45:19 deraadt Exp $	*/
 
 /*	$NetBSD: reader.c,v 1.5 1996/03/19 03:21:43 jtc Exp $	*/
 

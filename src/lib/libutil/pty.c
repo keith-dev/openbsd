@@ -1,4 +1,4 @@
-/*	$OpenBSD: pty.c,v 1.4 1996/06/29 18:44:17 deraadt Exp $	*/
+/*	$OpenBSD: pty.c,v 1.5 1996/08/09 00:26:15 deraadt Exp $	*/
 /*-
  * Copyright (c) 1990, 1993
  *	The Regents of the University of California.  All rights reserved.

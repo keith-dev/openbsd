@@ -37,7 +37,7 @@
 
 #if defined(LIBC_SCCS)
 	.text
-	.asciz "$OpenBSD: sigsetjmp.S,v 1.1 1995/05/03 03:43:07 briggs Exp $"
+	.asciz "$OpenBSD: sigsetjmp.S,v 1.2 1996/08/19 08:14:41 tholo Exp $"
 #endif /* LIBC_SCCS */
 
 /*

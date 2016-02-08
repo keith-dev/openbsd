@@ -1,4 +1,4 @@
-/*	$OpenBSD: w.c,v 1.9 1996/08/22 06:46:36 deraadt Exp $	*/
+/*	$OpenBSD: w.c,v 1.16 1997/04/01 07:58:40 millert Exp $	*/
 
 /*-
  * Copyright (c) 1980, 1991, 1993, 1994
@@ -141,7 +141,7 @@ main(argc, argv)
 	}
 
 	memf = nlistf = NULL;
-	while ((ch = getopt(argc, argv, p)) != EOF)
+	while ((ch = getopt(argc, argv, p)) != -1)
 		switch (ch) {
 		case 'h':
 			header = 0;
@@ -173,8 +173,10 @@ main(argc, argv)
 	 * Discard setgid privileges if not the running kernel so that bad
 	 * guys can't print interesting stuff from kernel memory.
 	 */
-	if (nlistf != NULL || memf != NULL)
+	if (nlistf != NULL || memf != NULL) {
+		setegid(getgid());
 		setgid(getgid());
+	}
 
 	if ((kd = kvm_openfiles(nlistf, memf, NULL, O_RDONLY, errbuf)) == NULL)
 		errx(1, "%s", errbuf);
@@ -298,8 +300,12 @@ main(argc, argv)
 
 	for (ep = ehead; ep != NULL; ep = ep->next) {
 		p = *ep->utmp.ut_host ? ep->utmp.ut_host : "-";
-		if ((x = strchr(p, ':')) != NULL)
-			*x++ = '\0';
+		for (x = NULL, i = 0; p[i] != '\0' && i < UT_HOSTSIZE; i++)
+			if (p[i] == ':') {
+				x = &p[i];
+				*x++ = '\0';
+				break;
+			}
 		if (!nflag && isdigit(*p) &&
 		    (long)(l = inet_addr(p)) != -1 &&
 		    (hp = gethostbyaddr((char *)&l, sizeof(l), AF_INET))) {
@@ -382,8 +388,9 @@ pr_header(nowp, nusers)
 	 * SCCS forces the string manipulation below, as it replaces
 	 * %, M, and % in a character string with the file name.
 	 */
-	(void)strftime(buf, sizeof(buf),
+	(void)strftime(buf, sizeof(buf) - 1,
 	    __CONCAT("%l:%","M%p"), localtime(nowp));
+	buf[sizeof buf -1] = '\0';
 	(void)printf("%s ", buf);
 
 	/*
@@ -455,7 +462,7 @@ usage(wcmd)
 {
 	if (wcmd)
 		(void)fprintf(stderr,
-		    "usage: w: [-hin] [-M core] [-N system] [user]\n");
+		    "usage: w: [-hia] [-M core] [-N system] [user]\n");
 	else
 		(void)fprintf(stderr, "uptime\n");
 	exit (1);

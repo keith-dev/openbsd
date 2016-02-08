@@ -1,4 +1,4 @@
-/*	$OpenBSD: yylex.c,v 1.2 1996/06/26 05:35:44 deraadt Exp $	*/
+/*	$OpenBSD: yylex.c,v 1.3 1996/07/13 22:22:15 millert Exp $	*/
 
 /* yylex - scanner front-end for flex */
 

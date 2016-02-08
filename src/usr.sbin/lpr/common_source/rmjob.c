@@ -1,3 +1,5 @@
+/*	$OpenBSD: rmjob.c,v 1.5 1997/01/17 16:11:37 millert Exp $	*/
+
 /*
  * Copyright (c) 1983, 1993
  *	The Regents of the University of California.  All rights reserved.
@@ -32,7 +34,11 @@
  */
 
 #ifndef lint
+#if 0
 static char sccsid[] = "@(#)rmjob.c	8.2 (Berkeley) 4/28/95";
+#else
+static char rcsid[] = "$OpenBSD: rmjob.c,v 1.5 1997/01/17 16:11:37 millert Exp $";
+#endif
 #endif /* not lint */
 
 #include <sys/param.h>
@@ -327,12 +333,12 @@ rmremote()
 
 	(void)snprintf(buf, sizeof(buf), "\5%s %s", RP, all ? "-all" : person);
 	cp = buf;
-	for (i = 0; i < users; i++) {
+	for (i = 0; i < users && cp-buf+1+strlen(user[i]) < sizeof buf; i++) {
 		cp += strlen(cp);
 		*cp++ = ' ';
 		strcpy(cp, user[i]);
 	}
-	for (i = 0; i < requests; i++) {
+	for (i = 0; i < requests && cp-buf+10 < sizeof buf; i++) {
 		cp += strlen(cp);
 		(void) sprintf(cp, " %d", requ[i]);
 	}

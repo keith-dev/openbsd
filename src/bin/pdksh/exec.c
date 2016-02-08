@@ -1,4 +1,4 @@
-/*	$OpenBSD: exec.c,v 1.3 1996/08/25 12:38:00 downsj Exp $	*/
+/*	$OpenBSD: exec.c,v 1.7 1997/01/02 17:37:25 downsj Exp $	*/
 
 /*
  * execute command tree
@@ -34,7 +34,7 @@ static int	dbteste_eval ARGS((Test_env *te, Test_op op, const char *opnd1,
 static void	dbteste_error ARGS((Test_env *te, int offset, const char *msg));
 #endif /* KSH */
 #ifdef OS2
-static int	search_access1 ARGS((const char *path, int mode));
+static int	search_access1 ARGS((const char *path, int mode, int *errnop));
 #endif /* OS2 */
 
 
@@ -417,6 +417,7 @@ execute(t, flags)
 			}
 #endif
 		restoresigs();
+		cleanup_proc_env();
 		ksh_execve(t->str, t->args, ap);
 		if (errno == ENOEXEC)
 			scriptexec(t, ap);
@@ -462,7 +463,7 @@ comexec(t, tp, ap, flags)
 	 * functions/dot scripts, but in interactive and scipt) -
 	 * perhaps save last arg here and set it in shell()?.
 	 */
-	if (*(lastp = ap)) {
+	if (!Flag(FSH) && *(lastp = ap)) {
 		while (*++lastp)
 			;
 		setstr(typeset("_", LOCAL, 0, 0, 0), *--lastp);
@@ -697,8 +698,10 @@ comexec(t, tp, ap, flags)
 			break;
 		}
 
-		/* set $_ to program's full path */
-		setstr(typeset("_", LOCAL|EXPORT, 0, 0, 0), tp->val.s);
+		if (!Flag(FSH)) {
+			/* set $_ to program's full path */
+			setstr(typeset("_", LOCAL|EXPORT, 0, 0, 0), tp->val.s);
+		}
 
 		if (flags&XEXEC) {
 			j_exit();

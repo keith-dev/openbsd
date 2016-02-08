@@ -53,7 +53,7 @@ Options and operands available for
 The
 .Fl d
 option causes debugging information to be written to syslog, recording
-all RPC transations to the daemon.  These messages are logged with level
+all RPC transactions to the daemon.  These messages are logged with level
 LOG_DEBUG and facility LOG_DAEMON.  If debug_level is not specified,
 level 1 is assumed, giving one log line per protocol operation.  Higher
 debug levels can be specified, causing display of operation arguments
@@ -82,8 +82,8 @@ RPC protocol specification for the network lock manager protocol.
 .Xr syslog 3
 .Sh BUGS
 The current implementation provides only the server side of the protocol
-(ie. clients running other OS types can establish locks on a FreeBSD fileserver,
-but there is currently no means for a FreeBSD client to establish locks).
+(ie. clients running other OS types can establish locks on a OpenBSD fileserver,
+but there is currently no means for a OpenBSD client to establish locks).
 .Pp
 Versions 1, 2 and 3 of the protocol are supported.  However, only versions
 2 (Unix systems) and 3 (PC-NFS clients) seem to be in common use - the version

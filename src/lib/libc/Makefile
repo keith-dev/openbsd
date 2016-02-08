@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.9 1996/09/15 10:09:06 tholo Exp $
+#	$OpenBSD: Makefile,v 1.13 1997/04/27 20:56:07 millert Exp $
 #
 # All library objects contain sccsid strings by default; they may be
 # excluded as a space-saving measure.  To produce a library that does
@@ -17,7 +17,7 @@
 
 LIB=c
 CFLAGS+=-DNLS -DLIBC_SCCS -DSYSLIBC_SCCS -I${.CURDIR}/include
-.if defined(YP)
+.if (${YP} == "yes")
 CFLAGS+=-DYP -I${.CURDIR}/yp
 .endif
 LINTFLAGS=-z
@@ -54,7 +54,7 @@ CLEANFILES+=tags
 .include "${.CURDIR}/termios/Makefile.inc"
 .include "${.CURDIR}/time/Makefile.inc"
 .include "${.CURDIR}/sys/Makefile.inc"
-.if defined(YP)
+.if (${YP} == "yes")
 .include "${.CURDIR}/yp/Makefile.inc"
 .endif
 
@@ -101,7 +101,7 @@ tags: ${SRCS}
 	    >> tags; sort -o tags tags
 
 beforeinstall:
-	install -c -o ${BINOWN} -g ${BINGRP} -m 444 tags \
+	${INSTALL} ${INSTALL_COPY} -o ${BINOWN} -g ${BINGRP} -m 444 tags \
 		${DESTDIR}/var/db/libc.tags
 
 .include <bsd.lib.mk>

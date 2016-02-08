@@ -39,7 +39,7 @@ char copyright[] =
 
 #ifndef lint
 /*static char sccsid[] = "from: @(#)mail.local.c	5.6 (Berkeley) 6/19/91";*/
-static char rcsid[] = "$Id: mail.local.c,v 1.7 1996/08/30 12:04:13 deraadt Exp $";
+static char rcsid[] = "$Id: mail.local.c,v 1.15 1997/04/04 18:41:27 deraadt Exp $";
 #endif /* not lint */
 
 #include <sys/param.h>
@@ -86,7 +86,7 @@ main(argc, argv)
 	openlog("mail.local", LOG_PERROR, LOG_MAIL);
 
 	from = NULL;
-	while ((ch = getopt(argc, argv, "lLdf:r:")) != EOF)
+	while ((ch = getopt(argc, argv, "lLdf:r:H")) != -1)
 		switch(ch) {
 		case 'd':		/* backward compatible */
 			break;
@@ -112,7 +112,7 @@ main(argc, argv)
 	argc -= optind;
 	argv += optind;
 
-	if (!*argv)
+	if (!*argv && !holdme)
 		usage();
 
 	if (holdme)
@@ -166,8 +166,11 @@ dohold()
 	}
 
 	holdfd = getlock(from, pw);
-	if (holdfd == -1)
+	if (holdfd == -1) {
+		write(STDOUT_FILENO, "0\n", 2);
 		return (1);
+	}
+	write(STDOUT_FILENO, "1\n", 2);
 
 	while (read(0, &c, 1) == -1 && errno == EINTR)
 		;
@@ -184,7 +187,8 @@ store(from)
 	int fd, eline;
 	char *tn, line[2048];
 
-	tn = strdup(_PATH_LOCTMP);
+	if ((tn = strdup(_PATH_LOCTMP)) == NULL)
+		err(FATAL, "unable to allocate memory");
 	if ((fd = mkstemp(tn)) == -1 || !(fp = fdopen(fd, "w+")))
 		err(FATAL, "unable to open temporary file");
 	(void)unlink(tn);
@@ -208,7 +212,7 @@ store(from)
 	}
 
 	/* If message not newline terminated, need an extra. */
-	if (!index(line, '\n'))
+	if (!strchr(line, '\n'))
 		(void)putc('\n', fp);
 	/* Output a newline; note, empty messages are allowed. */
 	(void)putc('\n', fp);
@@ -227,12 +231,13 @@ baditem(path)
 
 	if (unlink(path) == 0)
 		return;
-	snprintf(npath, sizeof npath, "%s/XXXXXXXXX", _PATH_MAILDIR);
+	snprintf(npath, sizeof npath, "%s/mailXXXXXXXXXX", _PATH_MAILDIR);
 	if (mktemp(npath) == NULL)
 		return;
 	if (rename(path, npath) != -1)
 		err(NOTFATAL, "nasty spool item %s renamed to %s",
 		    path, npath);
+	/* XXX if we fail to rename, another attempt will happen later */
 }
 
 char lpath[MAXPATHLEN];
@@ -315,16 +320,20 @@ again:
 		/*
 		 * Only root can write the spool directory.
 		 */
- 		if ((lfd = open(lpath, O_CREAT|O_WRONLY|O_EXCL,
- 		    S_IRUSR|S_IWUSR)) < 0) {
- 			err(NOTFATAL, "%s: %s", lpath, strerror(errno));
- 			return(-1);
+		while (1) {
+			if ((lfd = open(lpath, O_CREAT|O_WRONLY|O_EXCL,
+			    S_IRUSR|S_IWUSR)) != -1)
+				break;
+			if (tries > 9) {
+				err(NOTFATAL, "%s: %s", lpath, strerror(errno));
+				return(-1);
+			}
+			sleep(1 << tries);
+			tries++;
 		}
 	}
 	return (lfd);
 }
-
-
 
 int
 deliver(fd, name, lockfile)
@@ -483,7 +492,7 @@ notifybiff(msg)
 void
 usage()
 {
-	err(FATAL, "usage: mail.local [-f from] user ...");
+	err(FATAL, "usage: mail.local [-lLH] [-f from] user ...");
 }
 
 #if __STDC__

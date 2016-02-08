@@ -1,4 +1,4 @@
-/*	$OpenBSD$	*/
+/*	$OpenBSD: pcap-namedb.h,v 1.4 1996/07/12 13:19:11 mickey Exp $	*/
 
 /*
  * Copyright (c) 1994, 1996

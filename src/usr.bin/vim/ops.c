@@ -1,4 +1,4 @@
-/*	$OpenBSD: ops.c,v 1.1.1.1 1996/09/07 21:40:25 downsj Exp $	*/
+/*	$OpenBSD: ops.c,v 1.3 1996/10/14 03:55:22 downsj Exp $	*/
 /* vi:set ts=4 sw=4:
  *
  * VIM - Vi IMproved		by Bram Moolenaar
@@ -755,7 +755,10 @@ do_delete()
 		/* replace the line */
 			ml_replace(curwin->w_cursor.lnum, newp, FALSE);
 		}
+
 		curwin->w_cursor.lnum = lnum;
+		adjust_cursor();
+
 		CHANGED;
 		updateScreen(VALID_TO_CURSCHAR);
 		op_line_count = 0;		/* no lines deleted */

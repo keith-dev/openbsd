@@ -1,4 +1,4 @@
-/*	$OpenBSD: pppstats.c,v 1.2 1996/03/25 15:56:05 niklas Exp $	*/
+/*	$OpenBSD: pppstats.c,v 1.3 1996/04/21 23:41:32 deraadt Exp $	*/
 
 /*
  * print PPP statistics:
@@ -30,7 +30,7 @@
  */
 
 #ifndef lint
-static char rcsid[] = "$OpenBSD: pppstats.c,v 1.2 1996/03/25 15:56:05 niklas Exp $";
+static char rcsid[] = "$OpenBSD: pppstats.c,v 1.3 1996/04/21 23:41:32 deraadt Exp $";
 #endif
 
 #include <stdio.h>

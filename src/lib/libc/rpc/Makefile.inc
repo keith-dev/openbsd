@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile.inc,v 1.3 1996/08/19 08:31:19 tholo Exp $
+#	$OpenBSD: Makefile.inc,v 1.4 1996/09/02 05:34:45 tholo Exp $
 
 # librpc sources
 .PATH:	${.CURDIR}/arch/${MACHINE}/rpc ${.CURDIR}/rpc

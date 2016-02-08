@@ -1,4 +1,4 @@
-/*	$OpenBSD: fdformat.c,v 1.1 1996/06/20 08:22:46 downsj Exp $	*/
+/*	$OpenBSD: fdformat.c,v 1.2 1996/06/28 00:53:38 downsj Exp $	*/
 
 /*
  * Copyright (C) 1992-1994 by Joerg Wunsch, Dresden

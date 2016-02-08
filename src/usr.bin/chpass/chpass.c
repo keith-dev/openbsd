@@ -1,4 +1,4 @@
-/*	$OpenBSD: chpass.c,v 1.4 1996/08/31 01:55:32 deraadt Exp $	*/
+/*	$OpenBSD: chpass.c,v 1.8 1997/02/13 17:28:39 deraadt Exp $	*/
 /*	$NetBSD: chpass.c,v 1.8 1996/05/15 21:50:43 jtc Exp $	*/
 
 /*-
@@ -44,7 +44,7 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)chpass.c	8.4 (Berkeley) 4/2/94";
 #else 
-static char rcsid[] = "$OpenBSD: chpass.c,v 1.4 1996/08/31 01:55:32 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: chpass.c,v 1.8 1997/02/13 17:28:39 deraadt Exp $";
 #endif
 #endif /* not lint */
 
@@ -95,7 +95,7 @@ main(argc, argv)
 #endif
 
 	op = EDITENTRY;
-	while ((ch = getopt(argc, argv, "a:s:ly")) != EOF)
+	while ((ch = getopt(argc, argv, "a:s:ly")) != -1)
 		switch(ch) {
 		case 'a':
 			op = LOADENTRY;
@@ -179,8 +179,12 @@ main(argc, argv)
 	/* Get the passwd lock file and open the passwd file for reading. */
 	pw_init();
 	tfd = pw_lock(0);
-	if (tfd < 0)
-		errx(1, "the passwd file is busy.");
+	if (tfd < 0) {
+		if (errno == EEXIST)
+			errx(1, "the passwd file is busy.");
+		else
+			err(1, "can't open passwd temp file");
+	}
 	pfd = open(_PATH_MASTERPASSWD, O_RDONLY, 0);
 	if (pfd < 0)
 		pw_error(_PATH_MASTERPASSWD, 1, 1);
@@ -206,13 +210,14 @@ main(argc, argv)
 		}
 	} else
 #endif	/* YP */
+	{
+		/* Copy the passwd file to the lock file, updating pw. */
+		pw_copy(pfd, tfd, pw);
 
-	/* Copy the passwd file to the lock file, updating pw. */
-	pw_copy(pfd, tfd, pw);
-
-	/* Now finish the passwd file update. */
-	if (pw_mkdb() < 0)
-		pw_error((char *)NULL, 0, 1);
+		/* Now finish the passwd file update. */
+		if (pw_mkdb() < 0)
+			pw_error((char *)NULL, 0, 1);
+	}
 
 	exit(0);
 }

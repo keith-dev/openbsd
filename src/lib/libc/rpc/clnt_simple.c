@@ -1,3 +1,4 @@
+
 /*
  * Sun RPC is a product of Sun Microsystems, Inc. and is provided for
  * unrestricted use provided that this legend is included on all tape
@@ -28,7 +29,7 @@
  */
 
 #if defined(LIBC_SCCS) && !defined(lint)
-static char *rcsid = "$OpenBSD: clnt_simple.c,v 1.3 1996/08/19 08:31:28 tholo Exp $";
+static char *rcsid = "$OpenBSD: clnt_simple.c,v 1.7 1997/04/06 09:13:02 deraadt Exp $";
 #endif /* LIBC_SCCS and not lint */
 
 /* 
@@ -71,7 +72,7 @@ callrpc(host, prognum, versnum, procnum, inproc, in, outproc, out)
 		callrpc_private = crp;
 	}
 	if (crp->oldhost == NULL) {
-		crp->oldhost = malloc(256);
+		crp->oldhost = malloc(MAXHOSTNAMELEN);
 		crp->oldhost[0] = 0;
 		crp->socket = RPC_ANYSOCK;
 	}
@@ -80,7 +81,8 @@ callrpc(host, prognum, versnum, procnum, inproc, in, outproc, out)
 		/* reuse old client */		
 	} else {
 		crp->valid = 0;
-		(void)close(crp->socket);
+		if (crp->socket != -1)
+			(void)close(crp->socket);
 		crp->socket = RPC_ANYSOCK;
 		if (crp->client) {
 			clnt_destroy(crp->client);
@@ -101,7 +103,8 @@ callrpc(host, prognum, versnum, procnum, inproc, in, outproc, out)
 		crp->valid = 1;
 		crp->oldprognum = prognum;
 		crp->oldversnum = versnum;
-		(void) strcpy(crp->oldhost, host);
+		(void) strncpy(crp->oldhost, host, MAXHOSTNAMELEN-1);
+		crp->oldhost[MAXHOSTNAMELEN-1] = '\0';
 	}
 	tottimeout.tv_sec = 25;
 	tottimeout.tv_usec = 0;

@@ -1,4 +1,4 @@
-/*	$OpenBSD: vacation.c,v 1.7 1995/04/29 05:58:27 cgd Exp $	*/
+/*	$OpenBSD: vacation.c,v 1.5 1997/01/17 07:13:48 millert Exp $	*/
 /*	$NetBSD: vacation.c,v 1.7 1995/04/29 05:58:27 cgd Exp $	*/
 
 /*
@@ -44,7 +44,7 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)vacation.c	8.2 (Berkeley) 1/26/94";
 #endif
-static char rcsid[] = "$OpenBSD: vacation.c,v 1.7 1995/04/29 05:58:27 cgd Exp $";
+static char rcsid[] = "$OpenBSD: vacation.c,v 1.5 1997/01/17 07:13:48 millert Exp $";
 #endif /* not lint */
 
 /*
@@ -114,7 +114,7 @@ main(argc, argv)
 
 	opterr = iflag = 0;
 	interval = -1;
-	while ((ch = getopt(argc, argv, "a:Iir:")) != EOF)
+	while ((ch = getopt(argc, argv, "a:Iir:")) != -1)
 		switch((char)ch) {
 		case 'a':			/* alias */
 			if (!(cur = (ALIAS *)malloc((u_int)sizeof(ALIAS))))
@@ -216,7 +216,7 @@ readheaders()
 				for (p = buf + 5; *p && *p != ' '; ++p);
 				*p = '\0';
 				(void)strcpy(from, buf + 5);
-				if (p = index(from, '\n'))
+				if (p = strchr(from, '\n'))
 					*p = '\0';
 				if (junkmail())
 					exit(0);
@@ -227,7 +227,7 @@ readheaders()
 			if (strncasecmp(buf, "Precedence", 10) ||
 			    buf[10] != ':' && buf[10] != ' ' && buf[10] != '\t')
 				break;
-			if (!(p = index(buf, ':')))
+			if (!(p = strchr(buf, ':')))
 				break;
 			while (*++p && isspace(*p));
 			if (!*p)
@@ -305,9 +305,9 @@ junkmail()
 	 *
 	 * From site!site!SENDER%site.domain%site.domain@site.domain
 	 */
-	if (!(p = index(from, '%')))
-		if (!(p = index(from, '@'))) {
-			if (p = rindex(from, '!'))
+	if (!(p = strchr(from, '%')))
+		if (!(p = strchr(from, '@'))) {
+			if (p = strrchr(from, '!'))
 				++p;
 			else
 				p = from;
@@ -424,7 +424,7 @@ sendmessage(myname)
 		execl(_PATH_SENDMAIL, "sendmail", "-f", myname, from, NULL);
 		syslog(LOG_ERR, "vacation: can't exec %s: %s",
 			_PATH_SENDMAIL, strerror(errno));
-		exit(1);
+		_exit(1);
 	}
 	close(pvect[0]);
 	sfp = fdopen(pvect[1], "w");

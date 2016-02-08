@@ -1,4 +1,4 @@
-/*	$OpenBSD$ */
+/*	$OpenBSD: yplog.h,v 1.3 1996/05/30 09:53:04 deraadt Exp $ */
 
 /*
  * Copyright (c) 1994 Mats O Jansson <moj@stacken.kth.se>

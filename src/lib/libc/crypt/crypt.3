@@ -1,4 +1,4 @@
-.\" $OpenBSD$
+.\" $OpenBSD: crypt.3,v 1.6 1997/03/31 02:38:44 deraadt Exp $
 .\"
 .\" FreeSec: libcrypt
 .\"
@@ -52,7 +52,7 @@
 .Ft int
 .Fn des_setkey "const char *key"
 .Ft int
-.Fn des_cipher "const char *in" "char *out" "long salt" "int count"
+.Fn des_cipher "const char *in" "char *out" "int32_t salt" "int count"
 .Sh DESCRIPTION
 The
 .Fn crypt
@@ -61,13 +61,13 @@ function performs password encryption, based on the
 Data Encryption Standard (DES).
 Additional code has been added to deter key search attempts.
 The first argument to
-.Nm crypt
+.Fn crypt
 is a
 .Dv null Ns -terminated
 string, typically a user's typed password.
 The second is in one of two forms:
 if it begins with an underscore (``_'') then an extended format is used
-in interpreting both the the key and the setting, as outlined below.
+in interpreting both the key and the setting, as outlined below.
 .Ss Extended crypt:
 .Pp
 The
@@ -231,8 +231,14 @@ first appeared in
 This library (FreeSec 1.0) was developed outside the United States of America
 as an unencumbered replacement for the U.S.-only libcrypt encryption
 library.
-Programs linked against the crypt() interface may be exported from the U.S.A.
-only if they use crypt() solely for authentication purposes and avoid use of
-the other programmer interfaces listed above.
+Programs linked against the 
+.Fn crypt
+interface may be exported from the U.S.A. only if they use 
+.Fn crypt
+solely for authentication purposes and avoid use of
+the other programmer interfaces listed above. Special care has been taken
+in the library so that programs which only use the 
+.Fn crypt
+interface do not pull in the other components.
 .Sh AUTHOR
 David Burren <davidb@werj.com.au>

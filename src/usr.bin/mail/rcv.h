@@ -1,4 +1,4 @@
-/*	$OpenBSD: rcv.h,v 1.4 1996/06/08 19:48:38 christos Exp $	*/
+/*	$OpenBSD: rcv.h,v 1.2 1996/06/11 12:53:48 deraadt Exp $	*/
 /*	$NetBSD: rcv.h,v 1.4 1996/06/08 19:48:38 christos Exp $	*/
 
 /*

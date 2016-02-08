@@ -31,7 +31,7 @@
  * SUCH DAMAGE.
  *
  *	from: @(#)encrypt.h	8.1 (Berkeley) 6/4/93
- *	$OpenBSD$
+ *	$OpenBSD: encrypt.h,v 1.2 1996/03/19 23:15:51 niklas Exp $
  *	$NetBSD: encrypt.h,v 1.4 1996/02/24 01:15:20 jtk Exp $
  */
 

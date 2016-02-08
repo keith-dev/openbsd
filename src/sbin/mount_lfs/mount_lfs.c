@@ -1,4 +1,4 @@
-/*	$OpenBSD: mount_lfs.c,v 1.4 1996/04/13 05:35:44 cgd Exp $	*/
+/*	$OpenBSD: mount_lfs.c,v 1.5 1997/01/15 23:41:22 millert Exp $	*/
 /*	$NetBSD: mount_lfs.c,v 1.4 1996/04/13 05:35:44 cgd Exp $	*/
 
 /*-
@@ -44,12 +44,14 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)mount_lfs.c	8.3 (Berkeley) 3/27/94";
 #else
-static char rcsid[] = "$OpenBSD: mount_lfs.c,v 1.4 1996/04/13 05:35:44 cgd Exp $";
+static char rcsid[] = "$OpenBSD: mount_lfs.c,v 1.5 1997/01/15 23:41:22 millert Exp $";
 #endif
 #endif /* not lint */
 
+#include <sys/types.h>
 #include <sys/param.h>
 #include <sys/mount.h>
+#include <errno.h>
 
 #include <err.h>
 #include <stdio.h>
@@ -79,10 +81,11 @@ main(argc, argv)
 	struct ufs_args args;
 	int ch, mntflags, noclean;
 	char *fs_name, *options;
+	char *errcause;
 
 	options = NULL;
 	mntflags = noclean = 0;
-	while ((ch = getopt(argc, argv, "dno:s")) != EOF)
+	while ((ch = getopt(argc, argv, "dno:s")) != -1)
 		switch (ch) {
 		case 'd':
 			cleaner_debug = 1;
@@ -116,8 +119,24 @@ main(argc, argv)
 	else
 		args.export.ex_flags = 0;
 
-	if (mount(MOUNT_LFS, fs_name, mntflags, &args))
-		err(1, NULL);
+	if (mount(MOUNT_LFS, fs_name, mntflags, &args) == -1) {
+		switch (errno) {
+		case EMFILE:
+			errcause = "mount table full";
+			break;
+		case EINVAL:
+			if (mntflags & MNT_UPDATE)
+				errcause =
+			    "specified device does not match mounted device";
+			else 
+				errcause = "incorrect super block";
+			break;
+		default:
+			errcause = strerror(errno);
+			break;
+		}
+		errx(1, "%s on %s: %s", args.fspec, fs_name, errcause);
+	}
 
 	if (!noclean)
 		invoke_cleaner(fs_name);

@@ -1,3 +1,4 @@
+/*	$OpenBSD: ipft_tx.c,v 1.8 1997/02/26 14:59:30 kstailey Exp $	*/
 /*
  * (C)opyright 1995 by Darren Reed.
  *
@@ -29,17 +30,18 @@
 #include <netinet/tcp.h>
 #include <netinet/ip_icmp.h>
 #include <netinet/tcpip.h>
+#include <arpa/inet.h>
 #include <net/if.h>
-#include "ip_fil_compat.h"
 #include <netdb.h>
 #include <arpa/nameser.h>
 #include <resolv.h>
+#include "ip_fil_compat.h"
 #include "ipf.h"
 #include "ipt.h"
 
-#ifndef	lint
+#if !defined(lint) && defined(LIBC_SCCS)
 static	char	sccsid[] = "@(#)ipft_tx.c	1.7 6/5/96 (C) 1993 Darren Reed";
-static	char	rcsid[] = "$Id: ipft_tx.c,v 1.4 1996/07/18 04:59:24 dm Exp $";
+static  char    rcsid[] = "$DRId: ipft_tx.c,v 2.0.1.3 1997/02/20 09:47:47 darrenr Exp $"
 #endif
 
 extern	int	opts;
@@ -65,7 +67,7 @@ static	u_short	tx_portnum();
  * returns an ip address as a long var as a result of either a DNS lookup or
  * straight inet_addr() call
  */
-u_long	tx_hostnum(host, resolved)
+static	u_long	tx_hostnum(host, resolved)
 char	*host;
 int	*resolved;
 {
@@ -94,7 +96,7 @@ int	*resolved;
  * find the port number given by the name, either from getservbyname() or
  * straight atoi()
  */
-u_short	tx_portnum(name)
+static	u_short	tx_portnum(name)
 char	*name;
 {
 	struct	servent	*sp, *sp2;
@@ -210,6 +212,8 @@ int	*out;
 	char	*cps[20], **cpp, c, ipopts[68];
 	int	i, r;
 
+	if (*ifn)
+		free(*ifn);
 	bzero((char *)ip, MAX(sizeof(*tcp), sizeof(*ic)) + sizeof(*ip));
 	bzero((char *)tcp, sizeof(*tcp));
 	bzero((char *)ic, sizeof(*ic));
@@ -235,7 +239,7 @@ int	*out;
 		cpp++;
 		if (!*cpp)
 			return 1;
-		*ifn = *cpp++;
+		*ifn = strdup(*cpp++);
 	}
 
 	c = **cpp;

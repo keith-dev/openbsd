@@ -1,7 +1,8 @@
+#	$OpenBSD: Makefile,v 1.16 1997/05/23 18:31:28 deraadt Exp $
 #	$NetBSD: Makefile,v 1.2.4.3 1996/07/04 07:05:32 leo Exp $
 
-# Revision is 1.2
-REV=		20
+# Revision is 2.1
+REV=		21
 
 CBIN=		instbin
 ARCHDIR=	${.CURDIR}/../${MACHINE}/miniroot
@@ -11,18 +12,22 @@ ARCHDIR=	${.CURDIR}/../${MACHINE}/miniroot
 .endif
 
 MOUNT_POINT?=	/mnt
-VND?=		vnd0a
-VND_DEV=	/dev/${VND}
-VND_RDEV=	/dev/r${VND}
+VND?=		svnd0
+VND_DEV=	/dev/${VND}a
+VND_RDEV=	/dev/r${VND}a
+DISKTYPE=	miniroot
 PID!=		echo $$$$
-REALIMAGE!=	echo /tmp/image.${PID}
+REALIMAGE!=	echo /var/tmp/image.${PID}
 IMAGE?=		miniroot${REV}.fs
 IMAGESIZE?=	10240 # 5Mb in 512 byte blocks
 NEWFSOPTS?=
+NEWFS_WILL_FAIL?=false
+CRUNCHGENOPTS?=
 
 LISTS=		${.CURDIR}/list ${ARCHDIR}/list
 CRUNCHCONF=	${CBIN}.conf
 MTREE=		${.CURDIR}/mtree.conf
+RAWLABEL?=	-r
 
 .ifndef DESTDIR
 all:
@@ -31,15 +36,17 @@ all:
 .else
 
 bsd:
-	cd ${.CURDIR}/../../../../sys/arch/${MACHINE}/conf && config GENERIC
-	cd ${.CURDIR}/../../../../sys/arch/${MACHINE}/compile/GENERIC &&
-	    make clean && make depend && make &&
-	cp ${.CURDIR}/../../../../sys/arch/${MACHINE}/compile/GENERIC/bsd bsd
+	cd ${.CURDIR}/../../sys/arch/${MACHINE}/conf && config GENERIC
+	cd ${.CURDIR}/../../sys/arch/${MACHINE}/compile/GENERIC && \
+	    make clean && make depend && make
+	cp ${.CURDIR}/../../sys/arch/${MACHINE}/compile/GENERIC/bsd bsd
 
 all: ${CBIN} bsd
 	dd if=/dev/zero of=${REALIMAGE} count=${IMAGESIZE}
-	vnconfig -v -c ${VND_DEV} ${REALIMAGE}
-	newfs -m 0 -o space ${NEWFSOPTS} ${VND_RDEV} miniroot
+	vnconfig -v -c ${VND} ${REALIMAGE}
+	disklabel -w ${RAWLABEL} ${VND} ${DISKTYPE}
+	newfs -m 0 -o space ${NEWFSOPTS} ${VND_RDEV} ${DISKTYPE} || \
+	    ${NEWFS_WILL_FAIL}
 	mount ${VND_DEV} ${MOUNT_POINT}
 	mtree -def ${MTREE} -p ${MOUNT_POINT}/ -u
 	REV=${REV} CURDIR=${.CURDIR} OBJDIR=${.OBJDIR} ARCHDIR=${ARCHDIR} \
@@ -49,27 +56,32 @@ all: ${CBIN} bsd
 	@echo ""
 	umount ${MOUNT_POINT}
 	vnconfig -u ${VND_DEV}
-	cat /*bin/* > /dev/null
 	cp ${REALIMAGE} ${IMAGE}
-
-unconfig:
-	-umount -f ${MOUNT_POINT}
-	-vnconfig -u ${VND_DEV}
-	-/bin/rm -f ${IMAGE}
+	rm ${REALIMAGE}
 
 ${CBIN}.conf: ${LISTS}
 	awk -f ${.CURDIR}/makeconf.awk CBIN=${CBIN} ${LISTS} > ${CBIN}.conf
 
 ${CBIN}.mk ${CBIN}.cache ${CBIN}.c: ${CRUNCHCONF}
-	crunchgen -D ${.CURDIR}/../.. -L ${DESTDIR}/usr/lib ${CRUNCHCONF}
+	crunchgen ${CRUNCHGENOPTS} -D ${.CURDIR}/../.. -L ${DESTDIR}/usr/lib \
+	    ${CRUNCHCONF}
 
 ${CBIN}: ${CBIN}.mk ${CBIN}.cache ${CBIN}.c
 	make -f ${CBIN}.mk all
 
 clean cleandir:
-	/bin/rm -f core ${IMAGE} ${CBIN} ${CBIN}.mk ${CBIN}.cache \
+	/bin/rm -f *.core ${IMAGE} ${CBIN} ${CBIN}.mk ${CBIN}.cache \
 	${CBIN}.conf *.o *.lo *.c
 
+beforeinstall:
+	cp ${IMAGE} ${DESTDIR}/snapshot
+
 .endif	# DESTDIR check
+
+unconfig:
+	-umount -f ${MOUNT_POINT}
+	-vnconfig -u ${VND}
+	-/bin/rm -f ${IMAGE}
+
 .include <bsd.obj.mk>
 .include <bsd.subdir.mk>

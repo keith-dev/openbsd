@@ -1,4 +1,4 @@
-/*	$OpenBSD: extern.h,v 1.4 1996/06/23 14:20:33 deraadt Exp $	*/
+/*	$OpenBSD: extern.h,v 1.12 1997/04/05 22:36:12 millert Exp $	*/
 /*	$NetBSD: extern.h,v 1.5 1996/03/26 23:54:16 mrg Exp $	*/
 
 /*-
@@ -50,6 +50,7 @@
  * ar_io.c
  */
 extern char *arcname;
+extern char *gzip_program;
 int ar_open __P((char *));
 void ar_close __P((void));
 void ar_drain __P((void));
@@ -147,6 +148,7 @@ int unlnk_exist __P((register char *, register int));
 int chk_path __P((register char *, uid_t, gid_t));
 void set_ftime __P((char *fnm, time_t mtime, time_t atime, int frc));
 int set_ids __P((char *, uid_t, gid_t));
+int set_lids __P((char *, uid_t, gid_t));
 void set_pmode __P((char *, mode_t));
 int file_write __P((int, char *, register int, int *, int *, int, char *));
 void file_flush __P((int, char *, int));
@@ -157,7 +159,7 @@ int set_crc __P((register ARCHD *, register int));
  * ftree.c
  */
 int ftree_start __P((void));
-int ftree_add __P((register char *));
+int ftree_add __P((register char *, int));
 void ftree_sel __P((register ARCHD *));
 void ftree_chk __P((void));
 int next_file __P((register ARCHD *));
@@ -165,7 +167,7 @@ int next_file __P((register ARCHD *));
 /*
  * gen_subs.c
  */
-void ls_list __P((register ARCHD *, time_t));
+void ls_list __P((register ARCHD *, time_t, FILE *));
 void ls_tty __P((register ARCHD *));
 void zf_strncpy __P((register char *, register char *, int));
 int l_strncpy __P((register char *, register char *, int));
@@ -190,12 +192,13 @@ void options __P((register int, register char **));
 OPLIST * opt_next __P((void));
 int opt_add __P((register char *));
 int bad_opt __P((void));
+char *chdname;
 
 /*
  * pat_rep.c
  */
 int rep_add __P((register char *));
-int pat_add __P((char *));
+int pat_add __P((char *, char *));
 void pat_chk __P((void));
 int pat_sel __P((register ARCHD *));
 int pat_match __P((register ARCHD *));
@@ -226,13 +229,16 @@ extern int Zflag;
 extern int vfpart;
 extern int patime;
 extern int pmtime;
+extern int nodirs;
 extern int pmode;
 extern int pids;
+extern int rmleadslash;
 extern int exit_val;
 extern int docrc;
 extern char *dirptr;
 extern char *ltmfrmt;
 extern char *argv0;
+extern char *cwdpt;
 int main __P((int, char **));
 void sig_cleanup __P((int));
 

@@ -1,3 +1,6 @@
+/*	$OpenBSD: parse.h,v 1.3 1997/03/14 05:12:56 millert Exp $	*/
+/*	$NetBSD: parse.h,v 1.2 1997/01/11 06:48:03 lukem Exp $	*/
+
 /*-
  * Copyright (c) 1992, 1993
  *	The Regents of the University of California.  All rights reserved.

@@ -1,4 +1,4 @@
-/*	$OpenBSD: utils.h,v 1.5 1995/02/27 13:29:59 cgd Exp $	*/
+/*	$OpenBSD: utils.h,v 1.3 1997/04/28 20:45:02 millert Exp $	*/
 
 /*-
  * Copyright (c) 1992, 1993, 1994 Henry Spencer.
@@ -35,6 +35,8 @@
  * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
+ *
+ *	@(#)utils.h	8.3 (Berkeley) 3/20/94
  */
 
 /* utility definitions */

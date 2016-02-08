@@ -1,5 +1,7 @@
+/*	$OpenBSD: portmap.c,v 1.14 1997/04/15 15:18:49 deraadt Exp $	*/
+
 /*-
- * Copyright (c) 1996 Theo de Raadt (OpenBSD). All rights reserved.
+ * Copyright (c) 1996, 1997 Theo de Raadt (OpenBSD). All rights reserved.
  * Copyright (c) 1990 The Regents of the University of California.
  * All rights reserved.
  *
@@ -39,8 +41,11 @@ char copyright[] =
 #endif /* not lint */
 
 #ifndef lint
-/*static char sccsid[] = "from: @(#)portmap.c	5.4 (Berkeley) 4/19/91";*/
-static char rcsid[] = "$Id: portmap.c,v 1.11 1996/10/06 04:13:12 deraadt Exp $";
+#if 0
+static char sccsid[] = "from: @(#)portmap.c	5.4 (Berkeley) 4/19/91";
+#else
+static char rcsid[] = "$OpenBSD: portmap.c,v 1.14 1997/04/15 15:18:49 deraadt Exp $";
+#endif
 #endif /* not lint */
 
 /*
@@ -121,7 +126,7 @@ main(argc, argv)
 	int len = sizeof(struct sockaddr_in);
 	register struct pmaplist *pml;
 
-	while ((c = getopt(argc, argv, "d")) != EOF) {
+	while ((c = getopt(argc, argv, "d")) != -1) {
 		switch (c) {
 
 		case 'd':
@@ -638,6 +643,7 @@ reap()
 #define	YPPROG			((u_long) 100004)
 #define	YPPROC_DOMAIN_NONACK	((u_long) 2)
 #define	MOUNTPROC_MNT		((u_long) 1)
+#define XXXPROC_NOP		((u_long) 0)
 
 int
 check_callit(addr, proc, prog, aproc)
@@ -646,9 +652,9 @@ check_callit(addr, proc, prog, aproc)
 	u_long  prog;
 	u_long  aproc;
 {
-	if (prog == PMAPPROG ||
-	    prog == NFSPROG ||
-	    prog == YPXPROG ||
+	if ((prog == PMAPPROG && aproc != XXXPROC_NOP) ||
+	    (prog == NFSPROG && aproc != XXXPROC_NOP) ||
+	    (prog == YPXPROG && aproc != XXXPROC_NOP) ||
 	    (prog == MOUNTPROG && aproc == MOUNTPROC_MNT) ||
 	    (prog == YPPROG && aproc != YPPROC_DOMAIN_NONACK)) {
 		syslog(LOG_WARNING,

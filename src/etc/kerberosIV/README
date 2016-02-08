@@ -1,5 +1,5 @@
 #	from @(#)README	8.1 (Berkeley) 6/9/93
-#	$OpenBSD$
+#	$OpenBSD: README,v 1.2 1996/06/02 05:08:51 tholo Exp $
 
 Notes about the contents of the /etc/kerberosIV directory:
 

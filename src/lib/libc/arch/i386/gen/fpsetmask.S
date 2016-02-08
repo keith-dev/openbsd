@@ -7,7 +7,7 @@
 
 #if defined(LIBC_SCCS)
 	.text
-	.asciz "$OpenBSD$"
+	.asciz "$OpenBSD: fpsetmask.S,v 1.2 1996/08/19 08:12:25 tholo Exp $"
 #endif
 
 ENTRY(fpsetmask)

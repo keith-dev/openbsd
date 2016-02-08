@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.3 1996/09/01 15:31:01 deraadt Exp $
+#	$OpenBSD: Makefile,v 1.6 1997/02/04 10:06:18 deraadt Exp $
 #	$NetBSD: Makefile,v 1.16 1995/03/18 14:54:53 cgd Exp $
 
 #	dump.h			header file

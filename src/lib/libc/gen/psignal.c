@@ -32,7 +32,7 @@
  */
 
 #if defined(LIBC_SCCS) && !defined(lint)
-static char rcsid[] = "$OpenBSD: psignal.c,v 1.8 1995/02/27 04:35:42 cgd Exp $";
+static char rcsid[] = "$OpenBSD: psignal.c,v 1.2 1996/08/19 08:25:24 tholo Exp $";
 #endif /* LIBC_SCCS and not lint */
 
 /*

@@ -1,4 +1,4 @@
-/*	$OpenBSD: etherent.c,v 1.4 1996/07/12 13:19:07 mickey Exp $	*/
+/*	$OpenBSD: etherent.c,v 1.5 1996/09/16 02:33:04 tholo Exp $	*/
 
 /*
  * Copyright (c) 1990, 1993, 1994, 1995

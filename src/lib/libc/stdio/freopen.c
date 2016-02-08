@@ -35,7 +35,7 @@
  */
 
 #if defined(LIBC_SCCS) && !defined(lint)
-static char rcsid[] = "$OpenBSD: freopen.c,v 1.5 1996/05/04 19:25:19 mycroft Exp $";
+static char rcsid[] = "$OpenBSD: freopen.c,v 1.3 1996/08/19 08:32:45 tholo Exp $";
 #endif /* LIBC_SCCS and not lint */
 
 #include <sys/types.h>

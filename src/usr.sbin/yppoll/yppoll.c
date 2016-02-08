@@ -1,4 +1,4 @@
-/*	$OpenBSD$ */
+/*	$OpenBSD: yppoll.c,v 1.2 1996/05/22 12:13:00 deraadt Exp $ */
 /*	$NetBSD: yppoll.c,v 1.5 1996/05/13 02:46:36 thorpej Exp $	*/
 
 /*

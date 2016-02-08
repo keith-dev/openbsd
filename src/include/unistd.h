@@ -1,4 +1,4 @@
-/*	$OpenBSD: unistd.h,v 1.7 1996/08/22 20:36:59 millert Exp $ */
+/*	$OpenBSD: unistd.h,v 1.12 1997/01/26 05:11:16 downsj Exp $ */
 /*	$NetBSD: unistd.h,v 1.26.4.1 1996/05/28 02:31:51 mrg Exp $	*/
 
 /*-
@@ -69,7 +69,7 @@ int	 execv __P((const char *, char * const *));
 int	 execve __P((const char *, char * const *, char * const *));
 int	 execvp __P((const char *, char * const *));
 pid_t	 fork __P((void));
-long	 fpathconf __P((int, int));		/* not yet */
+long	 fpathconf __P((int, int));
 char	*getcwd __P((char *, size_t));
 gid_t	 getegid __P((void));
 uid_t	 geteuid __P((void));
@@ -83,7 +83,7 @@ uid_t	 getuid __P((void));
 int	 isatty __P((int));
 int	 link __P((const char *, const char *));
 off_t	 lseek __P((int, off_t, int));
-long	 pathconf __P((const char *, int));	/* not yet */
+long	 pathconf __P((const char *, int));
 int	 pause __P((void));
 int	 pipe __P((int *));
 ssize_t	 read __P((int, void *, size_t));
@@ -93,7 +93,7 @@ int	 setpgid __P((pid_t, pid_t));
 pid_t	 setsid __P((void));
 int	 setuid __P((uid_t));
 unsigned sleep __P((unsigned));
-long	 sysconf __P((int));			/* not yet */
+long	 sysconf __P((int));
 pid_t	 tcgetpgrp __P((int));
 int	 tcsetpgrp __P((int, pid_t));
 char	*ttyname __P((int));
@@ -120,6 +120,7 @@ int	 fsync __P((int));
 int	 ftruncate __P((int, off_t));
 int	 getdomainname __P((char *, int));
 int	 getdtablesize __P((void));
+int	 getgrouplist __P((const char *, gid_t, gid_t *, int *));
 long	 gethostid __P((void));
 int	 gethostname __P((char *, int));
 mode_t	 getmode __P((const void *, mode_t));
@@ -129,6 +130,7 @@ char	*getusershell __P((void));
 char	*getwd __P((char *));			/* obsoleted by getcwd() */
 int	 initgroups __P((const char *, gid_t));
 int	 iruserok __P((u_int32_t, int, const char *, const char *));
+int	 lchown __P((const char *, uid_t, gid_t));
 int	 mknod __P((const char *, mode_t, dev_t));
 int	 mkstemp __P((char *));
 char	*mktemp __P((char *));
@@ -149,6 +151,7 @@ int	 revoke __P((const char *));
 int	 rfork __P((int opts));
 int	 rresvport __P((int *));
 int	 ruserok __P((const char *, int, const char *, const char *));
+int	 quotactl __P((const char *, int, int, char *));
 char	*sbrk __P((int));
 int	 select __P((int, fd_set *, fd_set *, fd_set *, struct timeval *));
 int	 setdomainname __P((const char *, int));

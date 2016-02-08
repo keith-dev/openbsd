@@ -30,7 +30,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- *	$OpenBSD$
+ *	$OpenBSD: extern.h,v 1.3 1996/08/19 08:20:29 tholo Exp $
  */
 
 BUFHEAD	*__add_ovflpage __P((HTAB *, BUFHEAD *));

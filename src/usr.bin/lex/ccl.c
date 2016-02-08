@@ -1,4 +1,4 @@
-/*	$OpenBSD: ccl.c,v 1.2 1996/06/26 05:35:28 deraadt Exp $	*/
+/*	$OpenBSD: ccl.c,v 1.3 1996/07/13 22:21:56 millert Exp $	*/
 
 /* ccl - routines for character classes */
 

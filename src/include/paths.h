@@ -1,3 +1,4 @@
+/*	$OpenBSD: paths.h,v 1.6 1997/04/16 03:41:52 millert Exp $	*/
 /*	$NetBSD: paths.h,v 1.7 1994/10/26 00:56:12 cgd Exp $	*/
 
 /*
@@ -41,15 +42,16 @@
 /* Default search path. */
 #define	_PATH_DEFPATH	"/usr/bin:/bin"
 /* All standard utilities path. */
-#define	_PATH_STDPATH \
-	"/usr/bin:/bin:/usr/sbin:/sbin:/usr/contrib/bin:/usr/old/bin"
+#define	_PATH_STDPATH	"/usr/bin:/bin:/usr/sbin:/sbin"
 
 #define	_PATH_BSHELL	"/bin/sh"
 #define	_PATH_CONSOLE	"/dev/console"
 #define	_PATH_CSHELL	"/bin/csh"
+#define	_PATH_DEFTAPE	"/dev/rst0"
 #define	_PATH_DEVDB	"/var/run/dev.db"
 #define	_PATH_DEVNULL	"/dev/null"
 #define	_PATH_DRUM	"/dev/drum"
+#define	_PATH_FSIRAND	"/sbin/fsirand"
 #define	_PATH_KMEM	"/dev/kmem"
 #define	_PATH_LOCALE	"/usr/share/locale"
 #define	_PATH_MAILDIR	"/var/mail"

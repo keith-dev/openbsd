@@ -1,3 +1,5 @@
+/*	$OpenBSD: recvjob.c,v 1.7 1997/01/17 16:12:42 millert Exp $	*/
+
 /*
  * Copyright (c) 1983, 1993
  *	The Regents of the University of California.  All rights reserved.
@@ -39,7 +41,11 @@ static char copyright[] =
 #endif /* not lint */
 
 #ifndef lint
+#if 0
 static char sccsid[] = "@(#)recvjob.c	8.2 (Berkeley) 4/27/95";
+#else
+static char rcsid[] = "$OpenBSD: recvjob.c,v 1.7 1997/01/17 16:12:42 millert Exp $";
+#endif
 #endif /* not lint */
 
 /*
@@ -150,7 +156,9 @@ readjob()
 					    printer);
 				return(nfiles);
 			}
-		} while (*cp++ != '\n');
+		} while (*cp++ != '\n' && (cp - line + 1) < sizeof line);
+		if (cp - line + 1 >= sizeof line)
+			frecverr("readjob overflow");
 		*--cp = '\0';
 		cp = line;
 		switch (*cp++) {
@@ -201,7 +209,7 @@ readjob()
 			}
 			(void) strncpy(dfname, cp, sizeof dfname-1);
 			dfname[sizeof dfname-1] = '\0';
-			if (index(dfname, '/'))
+			if (strchr(dfname, '/'))
 				frecverr("readjob: %s: illegal path name",
 					dfname);
 			(void) readfile(dfname, size);

@@ -1,4 +1,4 @@
-/*	$OpenBSD: optimize.c,v 1.4 1996/07/12 13:19:10 mickey Exp $	*/
+/*	$OpenBSD: optimize.c,v 1.5 1996/09/16 02:33:07 tholo Exp $	*/
 
 /*
  * Copyright (c) 1988, 1989, 1990, 1991, 1993, 1994, 1995, 1996

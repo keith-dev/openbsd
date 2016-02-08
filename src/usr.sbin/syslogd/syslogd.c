@@ -216,7 +216,7 @@ main(argc, argv)
 	FILE *fp;
 	char *p, line[MSG_BSIZE + 1];
 
-	while ((ch = getopt(argc, argv, "duf:m:p:")) != EOF)
+	while ((ch = getopt(argc, argv, "duf:m:p:")) != -1)
 		switch(ch) {
 		case 'd':		/* debug */
 			Debug++;
@@ -306,10 +306,12 @@ main(argc, argv)
 	}
 
 	/* tuck my process id away */
-	fp = fopen(PidFile, "w");
-	if (fp != NULL) {
-		fprintf(fp, "%d\n", getpid());
-		(void) fclose(fp);
+	if (!Debug) {
+		fp = fopen(PidFile, "w");
+		if (fp != NULL) {
+			fprintf(fp, "%d\n", getpid());
+			(void) fclose(fp);
+		}
 	}
 
 	dprintf("off & running....\n");
@@ -480,7 +482,7 @@ logmsg(pri, msg, from, flags)
 	int fac, msglen, omask, prilev;
 	char *timestamp;
 
-	dprintf("logmsg: pri %o, flags %x, from %s, msg %s\n",
+	dprintf("logmsg: pri 0%o, flags 0x%x, from %s, msg %s\n",
 	    pri, flags, from, msg);
 
 	omask = sigblock(sigmask(SIGHUP)|sigmask(SIGALRM));

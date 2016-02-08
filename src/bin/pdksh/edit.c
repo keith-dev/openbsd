@@ -1,4 +1,4 @@
-/*	$OpenBSD: edit.c,v 1.2 1996/08/19 20:08:47 downsj Exp $	*/
+/*	$OpenBSD: edit.c,v 1.4 1996/12/14 12:18:07 mickey Exp $	*/
 
 /*
  * Command line editing - common code
@@ -17,6 +17,7 @@
 # include <sys/stream.h>	/* needed for <sys/ptem.h> */
 # include <sys/ptem.h>		/* needed for struct winsize */
 #endif /* OS_SCO */
+#include <sys/ioctl.h>
 #include <ctype.h>
 #include "ksh_stat.h"
 

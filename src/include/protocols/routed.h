@@ -1,4 +1,4 @@
-/*	$OpenBSD$	*/
+/*	$OpenBSD: routed.h,v 1.2 1996/09/05 11:13:18 mickey Exp $	*/
 
 /*-
  * Copyright (c) 1983, 1989, 1993

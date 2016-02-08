@@ -1,4 +1,4 @@
-/*	$OpenBSD: crunchgen.c,v 1.5 1996/09/27 06:06:58 etheisen Exp $	*/
+/*	$OpenBSD: crunchgen.c,v 1.10 1997/04/04 21:52:40 mickey Exp $	*/
 /*
  * Copyright (c) 1994 University of Maryland
  * All Rights Reserved.
@@ -100,7 +100,7 @@ int goterror = 0;
 
 char *pname = "crunchgen";
 
-int verbose, readcache;	/* options */
+int verbose, readcache, elf_names;	/* options */
 int reading_cache;
 
 /* general library routines */
@@ -131,7 +131,7 @@ int main(int argc, char **argv)
     
     if(argc > 0) pname = argv[0];
 
-    while((optc = getopt(argc, argv, "m:c:e:fqD:L:")) != -1) {
+    while((optc = getopt(argc, argv, "m:c:e:fqD:EL:")) != -1) {
 	switch(optc) {
 	case 'f':	readcache = 0; break;
 	case 'q':	verbose = 0; break;
@@ -141,6 +141,7 @@ int main(int argc, char **argv)
 	case 'e':	strcpy(execfname, optarg); break;
 
 	case 'D':	strcpy(topdir, optarg); break;
+	case 'E' :	elf_names = 1; break;
 	case 'L':	strcpy(libdir, optarg); break;
 
 	case '?':
@@ -339,7 +340,7 @@ void add_prog(char *progname)
     for(p1 = NULL, p2 = progs; p2 != NULL; p1 = p2, p2 = p2->next)
 	if(!strcmp(p2->name, progname)) return;
 
-    p2 = malloc(sizeof(prog_t));
+    p2 = calloc(1, sizeof(prog_t));
     if(p2) p2->name = strdup(progname);
     if(!p2 || !p2->name) 
 	out_of_memory();
@@ -402,6 +403,11 @@ void add_special(int argc, char **argv)
     else if(!strcmp(argv[2], "srcdir")) {
 	if(argc != 4) goto argcount;
 	if((p->srcdir = strdup(argv[3])) == NULL)
+	    out_of_memory();
+    }
+    else if(!strcmp(argv[2], "mf_name")) {
+	if(argc != 4) goto argcount;
+	if((p->mf_name = strdup(argv[3])) == NULL)
 	    out_of_memory();
     }
     else if(!strcmp(argv[2], "objdir")) {
@@ -649,6 +655,8 @@ void gen_specials_cache(void)
 	fprintf(cachef, "\n");
 	if(p->srcdir)
 	    fprintf(cachef, "special %s srcdir %s\n", p->name, p->srcdir);
+	if(p->mf_name)
+	    fprintf(cachef, "special %s mf_name %s\n", p->name, p->mf_name);
 	if(p->objdir)
 	    fprintf(cachef, "special %s objdir %s\n", p->name, p->objdir);
 	if(p->objs) {
@@ -823,10 +831,10 @@ void prog_makefile_rules(FILE *outmk, prog_t *p)
 	    p->ident, p->name);
     fprintf(outmk, "%s.lo: %s_stub.o $(%s_OBJPATHS)\n",
 	    p->name, p->name, p->ident);
-    fprintf(outmk, "\tld -dc -r -o %s.lo %s_stub.o $(%s_OBJPATHS)\n", 
+    fprintf(outmk, "\t${LD} -dc -r -o %s.lo %s_stub.o $(%s_OBJPATHS)\n", 
 	    p->name, p->name, p->ident);
-    fprintf(outmk, "\tcrunchide -k __crunched_%s_stub %s.lo\n", 
-	    p->ident, p->name);
+    fprintf(outmk, "\tcrunchide -k %s_crunched_%s_stub %s.lo\n", 
+	    elf_names ? "" : "_", p->ident, p->name);
 }
 
 void output_strlst(FILE *outf, strlst_t *lst)
@@ -876,7 +884,7 @@ void add_string(strlst_t **listp, char *str)
     for(p1 = NULL, p2 = *listp; p2 != NULL; p1 = p2, p2 = p2->next)
 	if(!strcmp(p2->str, str)) return;
 
-    p2 = malloc(sizeof(strlst_t));
+    p2 = calloc(1,sizeof(strlst_t));
     if(p2) p2->str = strdup(str);
     if(!p2 || !p2->str)
 	out_of_memory();

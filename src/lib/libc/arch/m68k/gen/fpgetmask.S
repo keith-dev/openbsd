@@ -5,7 +5,7 @@
 
 #if defined(LIBC_SCCS)
 	.text
-	.asciz "$OpenBSD$"
+	.asciz "$OpenBSD: fpgetmask.S,v 1.2 1996/08/19 08:14:16 tholo Exp $"
 #endif /* LIBC_SCCS */
 
 #include <machine/asm.h>

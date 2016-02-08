@@ -1,4 +1,4 @@
-/* * $OpenBSD: os-openbsd.h,v 1.2 1996/03/05 03:16:09 dm Exp $*/
+/* * $OpenBSD: os-openbsd.h,v 1.5 1997/04/27 13:01:29 downsj Exp $*/
 /*
  * Copyright (c) 1993 Michael A. Cooper
  * Copyright (c) 1993 Regents of the University of California.
@@ -150,10 +150,12 @@ typedef void POINTER;
  * Things we need
  */
 #define NEED_UNISTD_H			/* Need <unistd.h> */
+#define NEED_STDLIB_H			/* Need <stdlib.h> */
+#define NEED_STRING_H			/* Need <string.h> */
 
 /*
  * Path to the remote shell command.
  * Define this only if the pathname is different than
  * that which appears in "include/paths.h".
  */
-#define _PATH_REMSH	"/usr/bin/rsh"			/**/
+#define _PATH_REMSH	"/usr/local/bin/ssh"			/**/

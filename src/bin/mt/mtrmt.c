@@ -1,4 +1,4 @@
-/*	$OpenBSD: mtrmt.c,v 1.4 1996/09/02 05:37:11 deraadt Exp $	*/
+/*	$OpenBSD: mtrmt.c,v 1.5 1996/09/15 20:14:18 millert Exp $	*/
 /*	$NetBSD: mtrmt.c,v 1.2 1996/03/06 06:22:07 scottr Exp $	*/
 
 /*-

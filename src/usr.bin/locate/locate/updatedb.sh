@@ -1,6 +1,6 @@
 #!/bin/sh
 #
-#	$OpenBSD: updatedb.sh,v 1.2 1996/09/15 16:50:41 michaels Exp $
+#	$OpenBSD: updatedb.sh,v 1.9 1997/04/03 00:57:49 michaels Exp $
 #
 # Copyright (c) September 1995 Wolfram Schneider <wosch@FreeBSD.org>. Berlin.
 # All rights reserved.
@@ -28,7 +28,7 @@
 #
 # updatedb - update locate database for local mounted filesystems
 #
-# $Id: updatedb.sh,v 1.3 1996/09/15 23:38:39 deraadt Exp $
+# $Id: updatedb.sh,v 1.9 1997/04/03 00:57:49 michaels Exp $
 
 LOCATE_CONFIG="/etc/locate.rc"
 if [ -f "$LOCATE_CONFIG" -a -r "$LOCATE_CONFIG" ]; then
@@ -37,16 +37,39 @@ fi
 
 # The directory containing locate subprograms
 : ${LIBEXECDIR=/usr/libexec}; export LIBEXECDIR
+: ${TMPDIR=/tmp}; export TMPDIR
 
 PATH=$LIBEXECDIR:/bin:/usr/bin:$PATH; export PATH
 
+USAGE="Usage: $0 [--tmpdir=dir] [--fcodes=dbfile] [--searchpaths='dir1 dir2...'] [--prunepaths='dir1 dir2...'] [--filesystems='type1 type2...']"
 
 : ${mklocatedb=locate.mklocatedb}	 # make locate database program
 : ${FCODES=/var/db/locate.database}	 # the database
-: ${SEARCHPATHS="/"}		# directories to be put in the database
+: ${SEARCHPATHS="/"}			 # directories to be put in the database
 : ${PRUNEPATHS="/tmp /usr/tmp /var/tmp"} # unwanted directories
-: ${FILESYSTEMS="ufs"}			 # allowed filesystems 
+: ${FILESYSTEMS="ffs ufs"}		 # allowed filesystems 
 : ${find=find}
+
+# Command line args override rc file and defaults
+while test $# != 0; do
+	option=`echo $1 | sed 's/^\([^=]*\).*$/\1/'`
+	optarg=`echo $1 | sed 's/^[^=]*=\(.*$\)/\1/'`
+
+	# All options take an argument
+	if [ "$option" = "$optarg" ]; then
+		echo "$USAGE"
+		exit 1
+	fi
+
+	case "$option" in
+		--tmpdir) TMPDIR="$optarg";;
+		--fcodes) FCODES="$optarg";;
+		--searchpaths) SEARCHPATHS="$optarg";;
+		--prunepaths) PRUNEPATHS="$optarg";;
+		--filesystems) FILESYSTEMS="$optarg";;
+	esac
+	shift
+done
 
 case X"$SEARCHPATHS" in 
 	X) echo "$0: empty variable SEARCHPATHS"; exit 1;; esac
@@ -70,16 +93,8 @@ case X"$PRUNEPATHS" in
 	   done;;
 esac
 
-um=`umask`
-umask 022
-DTMP=${TMPDIR=/tmp}/_updatedb$$
-tmp=$DTMP/updatedb
-if ! mkdir $DTMP ; then
-	echo failed to create tmp dir $DTMP
-	exit 1
-fi
-umask $um
-trap 'rm -rf $DTMP' 0 1 2 3 5 10 15
+tmp=`mktemp ${TMPDIR=/tmp}/_updatedb.XXXXXXXXXX` || exit 1
+trap 'rm -rf $tmp' 0 1 2 3 5 10 15
 		
 # search locally
 # echo $find $SEARCHPATHS $excludes -or -print && exit
@@ -87,10 +102,12 @@ if $find $SEARCHPATHS $excludes -or -print 2>/dev/null |
         $mklocatedb > $tmp
 then
 	case X"`$find $tmp -size -257c -print`" in
-		X) cat $tmp > $FCODES;;
+		X) if [ "$FCODES" = "-" ]; then
+			cat $tmp
+		   else
+			cat $tmp > $FCODES
+		   fi;;
 		*) echo "updatedb: locate database $tmp is empty"
-		   rm -rf $DTMP
 		   exit 1
 	esac
 fi
-rm -rf $DTMP

@@ -1,4 +1,4 @@
-/*	$OpenBSD: strip.c,v 1.3 1996/09/03 06:54:43 deraadt Exp $	*/
+/*	$OpenBSD: strip.c,v 1.8 1997/04/03 19:33:50 mickey Exp $	*/
 
 /*
  * Copyright (c) 1988 Regents of the University of California.
@@ -41,7 +41,7 @@ char copyright[] =
 
 #ifndef lint
 /*static char sccsid[] = "from: @(#)strip.c	5.8 (Berkeley) 11/6/91";*/
-static char rcsid[] = "$OpenBSD: strip.c,v 1.3 1996/09/03 06:54:43 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: strip.c,v 1.8 1997/04/03 19:33:50 mickey Exp $";
 #endif /* not lint */
 
 #include <sys/param.h>
@@ -55,13 +55,13 @@ static char rcsid[] = "$OpenBSD: strip.c,v 1.3 1996/09/03 06:54:43 deraadt Exp $
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <err.h>
 
 typedef struct exec EXEC;
 typedef struct nlist NLIST;
 
 #define	strx	n_un.n_strx
 
-void err __P((const char *fmt, ...));
 int s_stab __P((const char *, int, EXEC *, struct stat *));
 int s_sym __P((const char *, int, EXEC *, struct stat *));
 void usage __P((void));
@@ -80,7 +80,7 @@ main(argc, argv)
 	char *fn;
 
 	sfcn = s_sym;
-	while ((ch = getopt(argc, argv, "dx")) != EOF)
+	while ((ch = getopt(argc, argv, "dx")) != -1)
 		switch(ch) {
                 case 'x':
                         xflag = 1;
@@ -96,7 +96,7 @@ main(argc, argv)
 	argv += optind;
 
 	errors = 0;
-#define	ERROR(x) errors |= 1; err("%s: %s", fn, strerror(x)); continue;
+#define	ERROR(x) errors |= 1; warnx("%s: %s", fn, strerror(x)); continue;
 	while (fn = *argv++) {
 		if ((fd = open(fn, O_RDWR)) < 0) {
 			ERROR(errno);
@@ -114,7 +114,12 @@ main(argc, argv)
 			(void)close(fd);
 			ERROR(errno);
 		}
+#if (MID_MACHINE == MID_M68K)
+		if (N_BADMAG(*ep) || ((N_GETMID(*ep) != MID_MACHINE) &&
+		    (N_GETMID(*ep) != MID_M68K4K))) {
+#else
 		if (N_BADMAG(*ep) || N_GETMID(*ep) != MID_MACHINE) {
+#endif
 			munmap((caddr_t)ep, sb.st_size);
 			(void)close(fd);
 			ERROR(EFTYPE);
@@ -188,7 +193,7 @@ s_sym(fn, fd, ep, sp)
 
 	/* Truncate the file. */
 	if (ftruncate(fd, neweof - (char *)ep)) {
-		err("%s: %s", fn, strerror(errno));
+		warn(fn);
 		return 1;
 	}
 
@@ -212,7 +217,7 @@ s_stab(fn, fd, ep, sp)
 		return 0;
 
 	if (N_SYMOFF(*ep) >= sp->st_size) {
-		err("%s: bad symbol table", fn);
+		warnx("%s: bad symbol table", fn);
 		return 1;
 	}
 
@@ -230,7 +235,7 @@ s_stab(fn, fd, ep, sp)
 	 */
 	strbase = (char *)ep + N_STROFF(*ep);
 	if ((nstrbase = malloc((u_int)*(u_long *)strbase)) == NULL) {
-		err("%s", strerror(ENOMEM));
+		warnx("%s", strerror(ENOMEM));
 		return 1;
 	}
 	nstr = nstrbase + sizeof(u_long);
@@ -274,7 +279,7 @@ s_stab(fn, fd, ep, sp)
 
 	/* Truncate to the current length. */
 	if (ftruncate(fd, (char *)nsym + len - (char *)ep)) {
-		err("%s: %s", fn, strerror(errno));
+		warn(fn);
 		return 1;
 	}
 
@@ -288,29 +293,3 @@ usage()
 	exit(1);
 }
 
-#if __STDC__
-#include <stdarg.h>
-#else
-#include <varargs.h>
-#endif
-
-void
-#if __STDC__
-err(const char *fmt, ...)
-#else
-err(fmt, va_alist)
-	char *fmt;
-        va_dcl
-#endif
-{
-	va_list ap;
-#if __STDC__
-	va_start(ap, fmt);
-#else
-	va_start(ap);
-#endif
-	(void)fprintf(stderr, "strip: ");
-	(void)vfprintf(stderr, fmt, ap);
-	va_end(ap);
-	(void)fprintf(stderr, "\n");
-}

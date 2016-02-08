@@ -301,7 +301,7 @@ main(argc, argv)
 	struct hostent *hp;
 	struct protoent *pe;
 	struct sockaddr_in from, to;
-	int ch, i, lsrr, on, probe, seq, tos, ttl;
+	int ch, i, lsrr, on, probe, seq, tos, ttl, ttl_flag;
 	struct ip *ip;
 
 	if ((pe = getprotobyname("icmp")) == NULL) {
@@ -312,12 +312,16 @@ main(argc, argv)
 		err(5, "icmp socket");
 	if ((sndsock = socket(AF_INET, SOCK_RAW, IPPROTO_RAW)) < 0)
 		err(5, "raw socket");
+
+	/* revoke privs */
+	seteuid(getuid());
 	setuid(getuid());
 
+	ttl_flag = 0;
 	lsrr = 0;
 	on = 1;
 	seq = tos = 0;
-	while ((ch = getopt(argc, argv, "dDg:m:np:q:rs:t:w:v")) != -1)
+	while ((ch = getopt(argc, argv, "dDg:m:np:q:rs:t:w:vl")) != -1)
 		switch (ch) {
 		case 'd':
 			options |= SO_DEBUG;
@@ -337,6 +341,9 @@ main(argc, argv)
 			if (++lsrr == 1)
 				lsrrlen = 4;
 			lsrrlen += 4;
+			break;
+		case 'l':
+			ttl_flag++;
 			break;
 		case 'm':
 			max_ttl = atoi(optarg);
@@ -400,7 +407,8 @@ main(argc, argv)
 			errx(1, "unknown host %s", *argv);
 		to.sin_family = hp->h_addrtype;
 		memcpy(&to.sin_addr, hp->h_addr, hp->h_length);
-		hostname = strdup(hp->h_name);
+		if ((hostname = strdup(hp->h_name)) == NULL)
+			err(1, "malloc");
 	}
 	if (*++argv)
 		datalen = atoi(*argv);
@@ -428,7 +436,7 @@ main(argc, argv)
 		ip->ip_dst = gateway[0];
 	} else
 		ip->ip_dst = to.sin_addr;
-	ip->ip_off = 0;
+	ip->ip_off = htons(0);
 	ip->ip_hl = (sizeof(struct ip) + lsrrlen) >> 2;
 	ip->ip_p = IPPROTO_UDP;
 	ip->ip_v = IPVERSION;
@@ -482,6 +490,7 @@ main(argc, argv)
 		u_long lastaddr = 0;
 		int got_there = 0;
 		int unreachable = 0;
+		int timeout = 0;
 
 		Printf("%2d ", ttl);
 		for (probe = 0; probe < nprobes; ++probe) {
@@ -502,7 +511,10 @@ main(argc, argv)
 						print(packet, cc, &from);
 						lastaddr = from.sin_addr.s_addr;
 					}
+					ip = (struct ip *)packet;
 					Printf("  %g ms", deltaT(&t1, &t2));
+					if (ttl_flag)
+						Printf(" (%d)", ip->ip_ttl);
 					switch(i - 1) {
 					case ICMP_UNREACH_PORT:
 #ifndef ARCHAIC
@@ -532,7 +544,8 @@ main(argc, argv)
 						++unreachable;
 						Printf(" !S");
 						break;
-					case ICMP_UNREACH_NET_PROHIB:
+					case ICMP_UNREACH_FILTER_PROHIB:
+					case ICMP_UNREACH_NET_PROHIB: /*misuse*/
 						++unreachable;
 						Printf(" !A");
 						break;
@@ -544,12 +557,14 @@ main(argc, argv)
 					break;
 				}
 			}
-			if (cc == 0)
+			if (cc == 0) {
 				Printf(" *");
+				timeout++;
+			}
 			(void) fflush(stdout);
 		}
 		putchar('\n');
-		if (got_there || unreachable >= nprobes)
+		if (got_there || (unreachable && (unreachable + timeout) >= nprobes))
 			exit(0);
 	}
 }
@@ -610,7 +625,7 @@ send_probe(seq, ttl, to)
 	struct packetdata *op = (struct packetdata *)(up + 1);
 	int i;
 
-	ip->ip_len = datalen;
+	ip->ip_len = htons(datalen);
 	ip->ip_ttl = ttl;
 	ip->ip_id = htons(ident+seq);
 
@@ -810,7 +825,7 @@ inetname(in)
 	if (first && !nflag) {
 		first = 0;
 		if (gethostname(domain, MAXHOSTNAMELEN) == 0 &&
-		    (cp = index(domain, '.')))
+		    (cp = strchr(domain, '.')))
 			(void) strcpy(domain, cp + 1);
 		else
 			domain[0] = 0;
@@ -819,7 +834,7 @@ inetname(in)
 	if (!nflag && in.s_addr != INADDR_ANY) {
 		hp = gethostbyaddr((char *)&in, sizeof (in), AF_INET);
 		if (hp) {
-			if ((cp = index(hp->h_name, '.')) &&
+			if ((cp = strchr(hp->h_name, '.')) &&
 			    !strcmp(cp + 1, domain))
 				*cp = 0;
 			cp = hp->h_name;

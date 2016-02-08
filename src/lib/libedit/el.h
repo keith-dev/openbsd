@@ -1,3 +1,6 @@
+/*	$OpenBSD: el.h,v 1.3 1997/03/14 05:12:46 millert Exp $	*/
+/*	$NetBSD: el.h,v 1.2 1997/01/11 06:47:53 lukem Exp $	*/
+
 /*-
  * Copyright (c) 1992, 1993
  *	The Regents of the University of California.  All rights reserved.

@@ -32,7 +32,7 @@
  */
 
 #if defined(LIBC_SCCS) && !defined(lint)
-static char rcsid[] = "$OpenBSD: siginterrupt.c,v 1.7 1996/04/03 19:49:03 jtc Exp $";
+static char rcsid[] = "$OpenBSD: siginterrupt.c,v 1.3 1996/08/19 08:26:03 tholo Exp $";
 #endif /* LIBC_SCCS and not lint */
 
 #include <signal.h>

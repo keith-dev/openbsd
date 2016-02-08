@@ -1,4 +1,4 @@
-#	$Id: list,v 1.1 1995/10/27 22:39:51 deraadt Exp $
+#	$OpenBSD: list,v 1.6 1997/05/11 22:47:31 grr Exp $
 
 # the disktab explanation file
 COPY	disktab.preinstall		etc/disktab.preinstall
@@ -7,5 +7,10 @@ COPY	disktab.preinstall		etc/disktab.preinstall
 COPY	dot.profile			.profile
 COPY	dot.instutils			.instutils
 COPY	install.sh			install
-#COPY	dot.hdprofile			tmp/.hdprofile
+COPY	dot.hdprofile			tmp/.hdprofile
+
+# we need the contents of /usr/mdec
+COPYDIR	${DESTDIR}/usr/mdec	usr/mdec
+
+# make install executable
 SPECIAL	chmod 755 install

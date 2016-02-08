@@ -1,4 +1,4 @@
-/*	$OpenBSD: pcap-bpf.c,v 1.6 1996/07/12 13:19:10 mickey Exp $	*/
+/*	$OpenBSD: pcap-bpf.c,v 1.7 1996/09/16 02:33:08 tholo Exp $	*/
 
 /*
  * Copyright (c) 1993, 1994, 1995, 1996

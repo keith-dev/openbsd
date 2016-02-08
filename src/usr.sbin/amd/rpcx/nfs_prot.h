@@ -1,4 +1,4 @@
-/*	$OpenBSD$	*/
+/*	$OpenBSD: nfs_prot.h,v 1.2 1996/03/25 15:54:58 niklas Exp $	*/
 
 /*
  * Copyright (c) 1990 Jan-Simon Pendry

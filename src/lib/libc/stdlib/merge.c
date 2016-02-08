@@ -35,7 +35,7 @@
  */
 
 #if defined(LIBC_SCCS) && !defined(lint)
-static char *rcsid = "$OpenBSD: merge.c,v 1.2 1996/08/19 08:33:38 tholo Exp $";
+static char *rcsid = "$OpenBSD: merge.c,v 1.3 1996/09/15 09:31:50 tholo Exp $";
 #endif /* LIBC_SCCS and not lint */
 
 /*

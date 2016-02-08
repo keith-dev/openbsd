@@ -1,4 +1,4 @@
-/*	$OpenBSD: main.c,v 1.3 1996/09/22 01:18:02 downsj Exp $	*/
+/*	$OpenBSD: main.c,v 1.6 1996/10/15 08:22:12 downsj Exp $	*/
 /* vi:set ts=4 sw=4:
  *
  * VIM - Vi IMproved		by Bram Moolenaar
@@ -154,7 +154,6 @@ main(argc, argv)
 	int				check_version = FALSE;	/* check .vimrc version number */
 	int				argv_idx;				/* index in argv[n][] */
 	int             invoked_as_ex = FALSE;  /* argv[0] is "ex" */
-	int				term_inited = FALSE;
 
 #if defined(MSDOS) || defined(WIN32) || defined(OS2)
 	static struct initmap
@@ -476,6 +475,16 @@ main(argc, argv)
 		}
 	}
 
+	/* note that we may use mch_windexit() before mch_windinit()! */
+	mch_windinit();				/* inits Rows and Columns */
+/*
+ * Set the default values for the options that use Rows and Columns.
+ */
+	set_init_2();
+
+	firstwin->w_height = Rows - 1;
+	cmdline_row = Rows - 1;
+
 	/*
 	 * Process the other command line arguments.
 	 * -e[errorfile]	quickfix mode
@@ -539,24 +548,6 @@ main(argc, argv)
 		}
 		else				/* must be a file name */
 		{
-			if (!term_inited)
-			{
-#ifdef USE_GUI
-				if (!gui.starting)
-#endif
-					termcapinit(term);
-
-	            /* note that we may use mch_windexit() before mch_windinit()! */
-	            mch_windinit();				/* inits Rows and Columns */
-				/*
- 				 * Set the default values for the options that use Rows and
-				 * Columns.
- 				 */
-	            set_init_2();
-
-				term_inited = TRUE;
-			}
-
 			/*
 			 * Skip a single "--" argument, used in front of a file name that
 			 * starts with '-'.
@@ -586,23 +577,6 @@ main(argc, argv)
 			}
 		}
 	}
-	if (!term_inited)
-	{
-#ifdef USE_GUI
-		if (!gui.starting)
-#endif
-			termcapinit(term);
-
-        /* note that we may use mch_windexit() before mch_windinit()! */
-        mch_windinit();				/* inits Rows and Columns */
-		/*
- 		 * Set the default values for the options that use Rows and
-		 * Columns.
- 		 */
-        set_init_2();
-
-		term_inited = TRUE;
- 	}
 
 	RedrawingDisabled = TRUE;
 
@@ -639,7 +613,7 @@ main(argc, argv)
 	curbuf->b_nwindows = 1;		/* there is one window */
 	win_init(curwin);			/* init current window */
 	init_yank();				/* init yank buffers */
-	if (full_screen && !term_inited)
+	if (full_screen)
 		termcapinit(term);		/* set terminal name and get terminal
 								   capabilities */
 	screenclear();				/* clear screen (just inits screen structures,
@@ -753,8 +727,11 @@ main(argc, argv)
 #endif
 					)
 				i = do_source((char_u *)VIMRC_FILE, TRUE);
+
+			if (i != FAIL)
+				check_version = TRUE;
 #ifdef UNIX
-			if (i == FAIL)
+			else
 			{
 				struct stat s;
 
@@ -764,13 +741,14 @@ main(argc, argv)
 				else
 					secure = 0;
 			}
-			else
-				check_version = TRUE;
 #endif
 			if (i == FAIL && fullpathcmp((char_u *)USR_EXRC_FILE,
 											 (char_u *)EXRC_FILE) != FPC_SAME)
 				(void)do_source((char_u *)EXRC_FILE, FALSE);
 		}
+		if (secure == 2)
+			need_wait_return = TRUE;
+		secure = 0;
 	}
 
 	/*
@@ -886,7 +864,7 @@ main(argc, argv)
  * by termcapinit and redifined in .exrc.
  */
 	settmode(1);
-	if (secure == 2 || need_wait_return || msg_didany)
+	if (need_wait_return || msg_didany)
 		wait_return(TRUE);
 
 	starttermcap();			/* start termcap if not done by wait_return() */
@@ -895,8 +873,6 @@ main(argc, argv)
 #endif
 	if (scroll_region)
 		scroll_region_reset();			/* In case Rows changed */
-
-	secure = 0;
 
 	scroll_start();
 
@@ -1074,7 +1050,7 @@ ex */
 			}
 		}
 		dont_wait_return = FALSE;
-		if (got_int)
+		if (got_int && !global_busy)
 		{
 			(void)vgetc();				/* flush all buffers */
 			got_int = FALSE;

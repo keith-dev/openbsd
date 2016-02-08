@@ -1,4 +1,4 @@
-#	$OpenBSD$
+#	$OpenBSD: Makefile,v 1.2 1996/07/24 16:15:04 mickey Exp $
 #	@(#)Makefile	8.24 (Berkeley) 6/12/96
 
 CAT=	dutch english german ru_SU.KOI8-R swedish

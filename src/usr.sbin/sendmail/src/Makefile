@@ -1,4 +1,4 @@
-#	$OpenBSD$
+#	$OpenBSD: Makefile,v 1.13 1997/04/27 20:57:06 millert Exp $
 #
 #  OpenBSD Makefile
 #
@@ -18,7 +18,7 @@ PROG=	sendmail
 # spiral snail, but it will work.
 DBMDEF=	-DNEWDB
 
-.if defined(YP)
+.if (${YP} == "yes")
 DBMDEF+=-DNIS
 .endif
 
@@ -30,20 +30,19 @@ SRCS=	alias.c arpadate.c clock.c collect.c conf.c convtime.c daemon.c \
 	srvrsmtp.c stab.c stats.c sysexits.c trace.c udb.c usersmtp.c \
 	util.c version.c
 MAN=	aliases.5 mailstats.8 mailq.1 newaliases.1 sendmail.8
-LINKS=	/usr/sbin/sendmail /usr/bin/newaliases \
-	/usr/sbin/sendmail /usr/bin/mailq
-INSTALL=install
-BINDIR=	/usr/sbin
+LINKS=	${BINDIR}/sendmail /usr/bin/newaliases \
+	${BINDIR}/sendmail /usr/bin/mailq
 BINOWN=	root
-BINGRP=	kmem
-BINMODE=6555
+BINGRP=	bin
+BINMODE=4555
 
 beforeinstall:
-#	${INSTALL} -c -o ${BINOWN} -g ${BINGRP} -m 644 /dev/null \
+#	${INSTALL} ${INSTALL_COPY} -o ${BINOWN} -g ${BINGRP} -m 644 /dev/null \
 #	    ${DESTDIR}/etc/sendmail.fc
-	${INSTALL} -c -o ${BINOWN} -g ${BINGRP} -m 644 /dev/null \
+	${INSTALL} ${INSTALL_COPY} -o ${BINOWN} -g ${BINGRP} -m 644 /dev/null \
 	    ${DESTDIR}/var/log/sendmail.st
-	${INSTALL} -c -o ${BINOWN} -g ${BINGRP} -m 444 ${.CURDIR}/sendmail.hf \
-	    ${DESTDIR}/usr/share/misc
+	${INSTALL} ${INSTALL_COPY} -o ${BINOWN} -g ${BINGRP} -m 444 \
+	    ${.CURDIR}/sendmail.hf ${DESTDIR}/usr/share/misc
 
+.include "../../Makefile.inc"
 .include <bsd.prog.mk>

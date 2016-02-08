@@ -1,4 +1,5 @@
 #!/bin/sh
+#	$OpenBSD: upgrade.sh,v 1.7 1997/05/14 21:22:07 millert Exp $
 #	$NetBSD: upgrade.sh,v 1.2.4.5 1996/08/27 18:15:08 gwr Exp $
 #
 # Copyright (c) 1996 The NetBSD Foundation, Inc.
@@ -36,7 +37,7 @@
 # POSSIBILITY OF SUCH DAMAGE.
 #
 
-#	NetBSD installation script.
+#	OpenBSD installation script.
 #	In a perfect world, this would be a nice C program, with a reasonable
 #	user interface.
 
@@ -58,6 +59,7 @@ MODE="upgrade"
 #	md_welcome_banner()	- display friendly message
 #	md_not_going_to_install() - display friendly message
 #	md_congrats()		- display friendly message
+#	md_machine_arch()	- get machine architecture
 
 # include machine dependent subroutines
 . install.md
@@ -66,7 +68,7 @@ MODE="upgrade"
 . install.sub
 
 # which sets?
-THESETS="$UPGRSETS"
+THESETS="$UPGRSETS $MDSETS"
 
 # Good {morning,afternoon,evening,night}.
 md_welcome_banner
@@ -92,6 +94,9 @@ ls -l /dev > /dev/null 2>&1
 # This might make an MFS mount on /tmp, or it may
 # just re-mount the root with read-write enabled.
 md_makerootwritable
+
+# Get the machine architecture (must be done after md_makerootwritable)
+ARCH=`md_machine_arch`
 
 while [ "X${ROOTDISK}" = "X" ]; do
 	getrootdisk
@@ -204,7 +209,7 @@ this fstab is only for installation purposes, and will not be copied into
 the root filesystem.
 
 __fstab_config_1
-echo -n	"Edit the fstab? [n] "
+echo -n	"Edit the fstab with ${EDITOR}? [n] "
 getresp "n"
 case "$resp" in
 	y*|Y*)
@@ -240,7 +245,7 @@ case "$resp" in
 esac
 
 # Install sets.
-install_sets
+install_sets $THESETS
 
 # Get timezone info
 get_timezone
@@ -258,7 +263,7 @@ echo -n	"Converting ufs to ffs in /etc/fstab..."
 	done
 ) < /mnt/etc/fstab
 echo	"done."
-echo -n	"Would you like to edit the resulting fstab? [y] "
+echo -n	"Would you like to edit the resulting fstab with ${EDITOR}? [y] "
 getresp "y"
 case "$resp" in
 	y*|Y*)
@@ -286,10 +291,10 @@ esac
 	echo "done."
 
 	echo -n "Making devices..."
-	_pid=`twiddle`
+	#_pid=`twiddle`
 	cd /mnt/dev
 	sh MAKEDEV all
-	kill $_pid
+	#kill $_pid
 	echo "done."
 
 	md_copy_kernel

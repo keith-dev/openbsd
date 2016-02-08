@@ -1,5 +1,5 @@
 /*	$NetBSD: archive.c,v 1.7 1995/03/26 03:27:46 glass Exp $	*/
-/*	$OpenBSD$	*/
+/*	$OpenBSD: archive.c,v 1.2 1996/03/02 00:40:57 tholo Exp $	*/
 
 /*-
  * Copyright (c) 1990, 1993, 1994

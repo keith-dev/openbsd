@@ -1,4 +1,4 @@
-/*	$OpenBSD: ftpd.c,v 1.20 1996/09/22 09:49:58 deraadt Exp $	*/
+/*	$OpenBSD: ftpd.c,v 1.35 1997/05/01 14:45:37 deraadt Exp $	*/
 /*	$NetBSD: ftpd.c,v 1.15 1995/06/03 22:46:47 mycroft Exp $	*/
 
 /*
@@ -97,7 +97,7 @@ static char rcsid[] = "$NetBSD: ftpd.c,v 1.15 1995/06/03 22:46:47 mycroft Exp $"
 #include <varargs.h>
 #endif
 
-static char version[] = "Version 6.1/OpenBSD";
+static char version[] = "Version 6.2/OpenBSD";
 
 extern	off_t restart_point;
 extern	char cbuf[];
@@ -119,6 +119,7 @@ int	timeout = 900;    /* timeout after 15 minutes of inactivity */
 int	maxtimeout = 7200;/* don't allow idle time to be set beyond 2 hours */
 int	logging;
 int	high_data_ports = 0;
+int	anon_only = 0;
 int	multihome = 0;
 int	guest;
 int	stats;
@@ -198,7 +199,7 @@ static void	 dolog __P((struct sockaddr_in *));
 static char	*curdir __P((void));
 static void	 end_login __P((void));
 static FILE	*getdatasock __P((char *));
-static char	*gunique __P((char *));
+static int	guniquefd __P((char *, char **));
 static void	 lostconn __P((int));
 static void	 sigquit __P((int));
 static int	 receive_data __P((FILE *, FILE *));
@@ -232,7 +233,7 @@ main(argc, argv, envp)
 	int addrlen, ch, on = 1, tos;
 	char *cp, line[LINE_MAX];
 	FILE *fd;
-	char *argstr = "dDhlMSt:T:u:Uv";
+	char *argstr = "AdDhlMSt:T:u:Uv";
 	struct hostent *hp;
 
 	tzset();	/* in case no timezone database in ~ftp */
@@ -240,8 +241,12 @@ main(argc, argv, envp)
 	/* set this here so klogin can use it... */
 	(void)snprintf(ttyline, sizeof(ttyline), "ftp%d", getpid());
 
-	while ((ch = getopt(argc, argv, argstr)) != EOF) {
+	while ((ch = getopt(argc, argv, argstr)) != -1) {
 		switch (ch) {
+		case 'A':
+			anon_only = 1;
+			break;
+
 		case 'd':
 			debug = 1;
 			break;
@@ -529,6 +534,7 @@ sgetpwnam(name)
 		return (p);
 	if (save.pw_name) {
 		free(save.pw_name);
+		memset(save.pw_passwd, 0, strlen(save.pw_passwd));
 		free(save.pw_passwd);
 		free(save.pw_gecos);
 		free(save.pw_dir);
@@ -592,6 +598,11 @@ user(name)
 			    "ANONYMOUS FTP LOGIN REFUSED FROM %s", remotehost);
 		return;
 	}
+	if (anon_only && !checkuser(_PATH_FTPCHROOT, name)) {
+		reply(530, "Sorry, only anonymous ftp allowed.");
+		return;
+	}
+
 	if (pw = sgetpwnam(name)) {
 		if ((shell = pw->pw_shell) == NULL || *shell == 0)
 			shell = _PATH_BSHELL;
@@ -669,7 +680,9 @@ checkuser(fname, name)
 static void
 end_login()
 {
-
+	sigset_t allsigs;
+	sigfillset (&allsigs);
+	sigprocmask (SIG_BLOCK, &allsigs, NULL);
 	(void) seteuid((uid_t)0);
 	if (logged_in) {
 		logwtmp(ttyline, "", "");
@@ -690,6 +703,7 @@ pass(passwd)
 	FILE *fd;
 	static char homedir[MAXPATHLEN];
 	char rootdir[MAXPATHLEN];
+	sigset_t allsigs;
 
 	if (logged_in || askpasswd == 0) {
 		reply(503, "Login with USER first.");
@@ -821,6 +835,8 @@ skip:
 		reply(550, "Can't set uid.");
 		goto bad;
 	}
+	sigfillset(&allsigs);
+	sigprocmask(SIG_UNBLOCK,&allsigs,NULL);
 
 	/*
 	 * Set home directory so that use of ~ (tilde) works correctly.
@@ -956,18 +972,25 @@ store(name, mode, unique)
 	int unique;
 {
 	FILE *fout, *din;
-	struct stat st;
 	int (*closefunc) __P((FILE *));
+	struct stat st;
+	int fd;
 
-	if (unique && stat(name, &st) == 0 &&
-	    (name = gunique(name)) == NULL) {
-		LOGCMD(*mode == 'w' ? "put" : "append", name);
-		return;
-	}
+	if (unique && stat(name, &st) == 0) {
+		char *nam;
 
-	if (restart_point)
-		mode = "r+";
-	fout = fopen(name, mode);
+		fd = guniquefd(name, &nam);
+		if (fd == -1) {
+			LOGCMD(*mode == 'w' ? "put" : "append", name);
+			return;
+		}
+		name = nam;
+		if (restart_point)
+			mode = "r+";
+		fout = fdopen(fd, mode);
+	} else
+		fout = fopen(name, mode);
+
 	closefunc = fclose;
 	if (fout == NULL) {
 		perror_reply(553, name);
@@ -1027,9 +1050,12 @@ getdatasock(mode)
 	char *mode;
 {
 	int on = 1, s, t, tries;
+	sigset_t allsigs;
 
 	if (data >= 0)
 		return (fdopen(data, mode));
+	sigfillset(&allsigs);
+	sigprocmask (SIG_BLOCK, &allsigs, NULL);
 	(void) seteuid((uid_t)0);
 	s = socket(AF_INET, SOCK_STREAM, 0);
 	if (s < 0)
@@ -1050,6 +1076,9 @@ getdatasock(mode)
 		sleep(tries);
 	}
 	(void) seteuid((uid_t)pw->pw_uid);
+	sigfillset(&allsigs);
+	sigprocmask (SIG_UNBLOCK, &allsigs, NULL);
+
 #ifdef IP_TOS
 	on = IPTOS_THROUGHPUT;
 	if (setsockopt(s, IPPROTO_IP, IP_TOS, (char *)&on, sizeof(int)) < 0)
@@ -1077,6 +1106,8 @@ bad:
 	/* Return the real value of errno (close may change it) */
 	t = errno;
 	(void) seteuid((uid_t)pw->pw_uid);
+	sigfillset (&allsigs);
+	sigprocmask (SIG_UNBLOCK, &allsigs, NULL);
 	(void) close(s);
 	errno = t;
 	return (NULL);
@@ -1103,7 +1134,10 @@ dataconn(name, size, mode)
 		struct sockaddr_in from;
 		int s, fromlen = sizeof(from);
 
+		signal (SIGALRM, toolong);
+		(void) alarm ((unsigned) timeout);
 		s = accept(pdata, (struct sockaddr *)&from, &fromlen);
+		(void) alarm (0);
 		if (s < 0) {
 			reply(425, "Can't open data connection.");
 			(void) close(pdata);
@@ -1157,7 +1191,8 @@ dataconn(name, size, mode)
 	 * attempt to connect to reserved port on client machine;
 	 * this looks like an attack
 	 */
-	if (ntohs(data_dest.sin_port) < IPPORT_RESERVED) {
+	if (ntohs(data_dest.sin_port) < IPPORT_RESERVED ||
+	    ntohs(data_dest.sin_port) == 2049) {		/* XXX */
 		perror_reply(425, "Can't build data connection");
 		(void) fclose(file);
 		data = -1;
@@ -1589,11 +1624,24 @@ void
 cwd(path)
 	char *path;
 {
+	FILE *message;
 
 	if (chdir(path) < 0)
 		perror_reply(550, path);
-	else
+	else {
+		if ((message = fopen(_PATH_CWDMESG, "r")) != NULL) {
+			char *cp, line[LINE_MAX];
+
+			while (fgets(line, sizeof(line), message) != NULL) {
+				if ((cp = strchr(line, '\n')) != NULL)
+					*cp = '\0';
+				lreply(250, "%s", line);
+			}
+			(void) fflush(stdout);
+			(void) fclose(message);
+		}
 		ack("CWD");
+	}
 }
 
 void
@@ -1687,8 +1735,13 @@ void
 dologout(status)
 	int status;
 {
+	sigset_t allsigs;
+
+	transflag = 0;
 
 	if (logged_in) {
+		sigfillset(&allsigs);
+		sigprocmask(SIG_BLOCK, &allsigs, NULL);
 		(void) seteuid((uid_t)0);
 		logwtmp(ttyline, "", "");
 		if (doutmp)
@@ -1749,6 +1802,8 @@ passive()
 		reply(530, "Please login with USER and PASS");
 		return;
 	}
+	if (pdata >= 0)
+		close(pdata);
 	pdata = socket(AF_INET, SOCK_STREAM, 0);
 	if (pdata < 0) {
 		perror_reply(425, "Can't open passive connection");
@@ -1794,13 +1849,14 @@ pasv_error:
  * The file named "local" is already known to exist.
  * Generates failure reply on error.
  */
-static char *
-gunique(local)
+static int
+guniquefd(local, nam)
 	char *local;
+	char **nam;
 {
 	static char new[MAXPATHLEN];
 	struct stat st;
-	int count, len;
+	int count, len, fd;
 	char *cp;
 
 	cp = strrchr(local, '/');
@@ -1808,7 +1864,7 @@ gunique(local)
 		*cp = '\0';
 	if (stat(cp ? local : ".", &st) < 0) {
 		perror_reply(553, cp ? local : ".");
-		return ((char *) 0);
+		return (-1);
 	}
 	if (cp)
 		*cp = '/';
@@ -1816,16 +1872,20 @@ gunique(local)
 	new[sizeof(new)-1] = '\0';
 	len = strlen(new);
 	if (len+2+1 >= sizeof(new)-1)
-		return (NULL);
+		return (-1);
 	cp = new + len;
 	*cp++ = '.';
 	for (count = 1; count < 100; count++) {
 		(void)snprintf(cp, sizeof(new) - (cp - new), "%d", count);
-		if (stat(new, &st) < 0)
-			return (new);
+		fd = open(new, O_RDWR|O_CREAT|O_EXCL, 0666);
+		if (fd == -1)
+			continue;
+		if (nam)
+			*nam = new;
+		return (fd);
 	}
 	reply(452, "Unique file name cannot be created.");
-	return (NULL);
+	return (-1);
 }
 
 /*

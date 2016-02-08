@@ -1,3 +1,4 @@
+/*	$OpenBSD: ipf.c,v 1.10 1997/02/26 04:35:39 kstailey Exp $	*/
 /*
  * (C)opyright 1993,1994,1995 by Darren Reed.
  *
@@ -13,7 +14,7 @@
 #if !defined(__SVR4) && !defined(__GNUC__)
 #include <strings.h>
 #endif
-#if !defined(__SVR4) && defined(__GNUC__)
+#if !defined(__SVR4) && defined(__GNUC__) && !defined(__OpenBSD__)
 extern	char	*index();
 #endif
 #include <sys/types.h>
@@ -35,13 +36,13 @@ extern	char	*index();
 #include <resolv.h>
 #include "ipf.h"
 
-#ifndef	lint
+#if !defined(lint) && defined(LIBC_SCCS)
 static	char	sccsid[] = "@(#)ipf.c	1.23 6/5/96 (C) 1993-1995 Darren Reed";
-static	char	rcsid[] = "$Id: ipf.c,v 1.7 1996/10/08 07:33:31 niklas Exp $";
+static	char	rcsid[] = "$DRId: ipf.c,v 2.0.1.2 1997/02/04 14:37:46 darrenr Exp $";
 #endif
 
 #if	SOLARIS
-void	frsync();
+void	frsync(), blockunknown();
 #endif
 void	zerostats();
 
@@ -53,6 +54,7 @@ static	int	fd = -1;
 
 static	void	procfile(), flushfilter(), set_state();
 static	void	packetlogon(), swapactive(), showstats();
+static	char   *getline();
 
 int main(argc,argv)
 int argc;
@@ -60,7 +62,7 @@ char *argv[];
 {
 	char	c;
 
-	while ((c = getopt(argc, argv, "AsInopvdryf:F:l:EDzZ")) != -1) {
+	while ((c = getopt(argc, argv, "AdDEf:F:Il:noprsUvyzZ")) != -1) {
 		switch (c)
 		{
 		case 'E' :
@@ -102,6 +104,11 @@ char *argv[];
 		case 's' :
 			swapactive();
 			break;
+#if SOLARIS
+		case 'U' :
+			blockunknown();
+			break;
+#endif
 		case 'v' :
 			opts |= OPT_VERBOSE;
 			break;
@@ -171,23 +178,23 @@ char	*name, *file;
 	if (!strcmp(file, "-"))
 		fp = stdin;
 	else if (!(fp = fopen(file, "r"))) {
-		fprintf(stderr, "%s: fopen(%s) failed: %s", name, file,
+		fprintf(stderr, "%s: fopen(%s) failed: %s\n", name, file,
 			STRERROR(errno));
 		exit(1);
 	}
 
-	while (fgets(line, sizeof(line)-1, fp)) {
+	while (getline(line, sizeof(line)-1, fp)) {
 		/*
 		 * treat both CR and LF as EOL
 		 */
-		if ((s = index(line, '\n')))
+		if ((s = strchr(line, '\n')))
 			*s = '\0';
-		if ((s = index(line, '\r')))
+		if ((s = strchr(line, '\r')))
 			*s = '\0';
 		/*
 		 * # is comment marker, everything after is a ignored
 		 */
-		if ((s = index(line, '#')))
+		if ((s = strchr(line, '#')))
 			*s = '\0';
 
 		if (!*line)
@@ -220,9 +227,11 @@ char	*name, *file;
 			    !(opts & OPT_DONOTHING)) {
 				if (ioctl(fd, add, fr) == -1)
 					perror("ioctl(SIOCZRLST)");
-				else
-					printf("hits %d bytes %d\n",
+				else {
+					printf("hits %ld bytes %ld ",
 						fr->fr_hits, fr->fr_bytes);
+					printfr(fr);
+				}
 			} else if ((opts & OPT_REMOVE) &&
 				   !(opts & OPT_DONOTHING)) {
 				if (ioctl(fd, del, fr) == -1)
@@ -236,11 +245,33 @@ char	*name, *file;
 	(void)fclose(fp);
 }
 
+/*
+ * Similar to fgets(3) but can handle '\\'
+ */
+static char *getline(str, size, file)
+register char	*str;
+size_t	size;
+FILE	*file;
+{
+	register char *p;
+
+	do {
+		for (p = str;; p+= strlen(p) - 1) {
+			if (!fgets(p, size, file))
+				return(NULL);
+			p[strlen(p) -1] = '\0';
+			if (p[strlen(p) - 1] != '\\')
+				break;
+		}
+	} while (*str == '\0' || *str == '\n');
+	return(str);
+}
+
 
 static void packetlogon(opt)
 char	*opt;
 {
-	int	err, flag;
+	int	err, flag = 0;
 
 	if ((opts & (OPT_DONOTHING|OPT_VERBOSE)) == OPT_VERBOSE) {
 		if ((err = ioctl(fd, SIOCGETFF, &flag)))
@@ -249,19 +280,19 @@ char	*opt;
 		printf("log flag is currently %#x\n", flag);
 	}
 
-	flag = 0;
+	flag &= ~(FF_LOGPASS|FF_LOGNOMATCH|FF_LOGBLOCK);
 
-	if (index(opt, 'p')) {
+	if (strchr(opt, 'p')) {
 		flag |= FF_LOGPASS;
 		if (opts & OPT_VERBOSE)
 			printf("set log flag: pass\n");
 	}
-	if (index(opt, 'm') && (*opt == 'n' || *opt == 'N')) {
+	if (strchr(opt, 'm') && (*opt == 'n' || *opt == 'N')) {
 		flag |= FF_LOGNOMATCH;
 		if (opts & OPT_VERBOSE)
 			printf("set log flag: nomatch\n");
 	}
-	if (index(opt, 'b') || index(opt, 'd')) {
+	if (strchr(opt, 'b') || strchr(opt, 'd')) {
 		flag |= FF_LOGBLOCK;
 		if (opts & OPT_VERBOSE)
 			printf("set log flag: block\n");
@@ -373,3 +404,33 @@ friostat_t	*fp;
 			fp->f_st[0].fr_pkl, fp->f_st[0].fr_skip,
 			fp->f_st[1].fr_pkl, fp->f_st[1].fr_skip);
 }
+
+
+#if SOLARIS
+void blockunknown()
+{
+	int	flag;
+
+	if (opendevice() == -1)
+		return;
+
+	if ((opts & (OPT_DONOTHING|OPT_VERBOSE)) == OPT_VERBOSE) {
+		if (ioctl(fd, SIOCGETFF, &flag))
+			perror("ioctl(SIOCGETFF)");
+
+		printf("log flag is currently %#x\n", flag);
+	}
+
+	flag ^= FF_BLOCKNONIP;
+
+	if (opendevice() != -2 && ioctl(fd, SIOCSETFF, &flag))
+		perror("ioctl(SIOCSETFF)");
+
+	if ((opts & (OPT_DONOTHING|OPT_VERBOSE)) == OPT_VERBOSE) {
+		if (ioctl(fd, SIOCGETFF, &flag))
+			perror("ioctl(SIOCGETFF)");
+
+		printf("log flag is now %#x\n", flag);
+	}
+}
+#endif

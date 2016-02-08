@@ -12,7 +12,7 @@
  */
 
 #if defined(LIBC_SCCS) && !defined(lint)
-static char rcsid[] = "$OpenBSD$";
+static char rcsid[] = "$OpenBSD: lrand48.c,v 1.2 1996/08/19 08:33:36 tholo Exp $";
 #endif /* LIBC_SCCS and not lint */
 
 #include "rand48.h"

@@ -1,4 +1,4 @@
-/*	$OpenBSD: lpd.c,v 1.8 1996/09/21 21:02:15 deraadt Exp $ */
+/*	$OpenBSD: lpd.c,v 1.13 1997/01/17 16:12:41 millert Exp $ */
 /*	$NetBSD: lpd.c,v 1.7 1996/04/24 14:54:06 mrg Exp $	*/
 
 /*
@@ -42,7 +42,11 @@ static char copyright[] =
 #endif /* not lint */
 
 #ifndef lint
+#if 0
 static char sccsid[] = "@(#)lpd.c	8.7 (Berkeley) 5/10/95";
+#else
+static char rcsid[] = "$OpenBSD: lpd.c,v 1.13 1997/01/17 16:12:41 millert Exp $";
+#endif
 #endif /* not lint */
 
 /*
@@ -126,7 +130,13 @@ main(argc, argv)
 	uid = getuid();
 	options = 0;
 	gethostname(host, sizeof(host));
-	name = argv[0];
+
+	name = "lpd";
+
+	if (euid != 0) {
+		fprintf(stderr,"lpd: must run as root\n");
+		exit(1);
+	}
 
 	while (--argc > 0) {
 		argv++;
@@ -289,9 +299,9 @@ static void
 reapchild(signo)
 	int signo;
 {
-	union wait status;
+	int status;
 
-	while (wait3((int *)&status, WNOHANG, 0) > 0)
+	while (waitpid((pid_t)-1, &status, WNOHANG) > 0)
 		;
 }
 
@@ -508,11 +518,6 @@ chkhost(f)
 	int first = 1;
 	extern char *inet_ntoa();
 	int good = 0;
-
-	f->sin_port = ntohs(f->sin_port);
-	if (f->sin_family != AF_INET || f->sin_port >= IPPORT_RESERVED ||
-	    f->sin_port == 20)
-		fatal("Malformed from address");
 
 	/* Need real hostname for temporary filenames */
 	hp = gethostbyaddr((char *)&f->sin_addr,

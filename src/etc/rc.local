@@ -1,6 +1,11 @@
-#	$OpenBSD: rc.local,v 1.6 1996/09/06 09:47:35 deraadt Exp $
+#	$OpenBSD: rc.local,v 1.11 1997/05/04 20:46:07 millert Exp $
 
-# site-specific startup actions, daemons
+# site-specific startup actions, daemons, and other things which
+# can be done AFTER your system goes into securemode.  For actions
+# which should be done BEFORE your system has gone into securemode
+# please see /etc/rc.securelevel
+
+# site-specific startup actions, daemons which can be run
 # Add your local changes additions to this file
 
 echo -n 'starting local daemons:'
@@ -13,13 +18,9 @@ echo -n 'starting local daemons:'
 #	echo -n ' sshd';	/usr/local/sbin/sshd
 #fi
 
+# Alternatively, xdm may be started in /etc/ttys.
 #if [ -x /usr/X11R6/bin/xdm ]; then
 #	echo -n ' xdm';		/usr/X11R6/bin/xdm
-#fi
-
-#if [ -x /usr/local/bin/xntpd ]; then
-#	/usr/local/sbin/tickadj -Aq
-#	echo -n ' xntpd';	/usr/local/sbin/xntpd
-#fi
+#fi                                                                            
 
 echo '.'

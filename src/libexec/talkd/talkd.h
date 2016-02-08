@@ -1,4 +1,4 @@
-/*	$OpenBSD$	*/
+/*	$OpenBSD: talkd.h,v 1.2 1996/07/15 05:10:12 mickey Exp $	*/
 
 /*
  * Copyright (c) 1983 Regents of the University of California.

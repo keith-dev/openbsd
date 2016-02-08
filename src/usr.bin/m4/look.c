@@ -1,4 +1,4 @@
-/*	$OpenBSD$	*/
+/*	$OpenBSD: look.c,v 1.2 1996/06/26 05:36:12 deraadt Exp $	*/
 
 /*
  * Copyright (c) 1989, 1993

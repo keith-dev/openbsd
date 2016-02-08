@@ -37,7 +37,7 @@
 
 #if defined(LIBC_SCCS)
 	.text
-	.asciz "$OpenBSD: truncdfsf2.S,v 1.1.1.1 1995/10/18 08:41:29 deraadt Exp $"
+	.asciz "$OpenBSD: truncdfsf2.S,v 1.2 1996/08/19 08:14:45 tholo Exp $"
 #endif /* LIBC_SCCS */
 
 #include "DEFS.h"

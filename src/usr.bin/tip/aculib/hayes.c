@@ -1,5 +1,5 @@
-/*	$OpenBSD: hayes.c,v 1.4 1995/10/29 00:49:54 pk Exp $	*/
-/*	$NetBSD: hayes.c,v 1.4 1995/10/29 00:49:54 pk Exp $	*/
+/*	$OpenBSD: hayes.c,v 1.6 1997/04/02 01:47:06 millert Exp $	*/
+/*	$NetBSD: hayes.c,v 1.6 1997/02/11 09:24:17 mrg Exp $	*/
 
 /*
  * Copyright (c) 1983, 1993
@@ -38,7 +38,7 @@
 #if 0
 static char sccsid[] = "@(#)hayes.c	8.1 (Berkeley) 6/6/93";
 #endif
-static char rcsid[] = "$OpenBSD: hayes.c,v 1.4 1995/10/29 00:49:54 pk Exp $";
+static char rcsid[] = "$OpenBSD: hayes.c,v 1.6 1997/04/02 01:47:06 millert Exp $";
 #endif /* not lint */
 
 /*
@@ -108,6 +108,9 @@ hay_dialer(num, acu)
 	gobble("\r");
 	gobble("\r");
 	write(FD, "ATTD", 4);	/* send dial command */
+	for (cp = num; *cp; cp++)
+		if (*cp == '=')
+			*cp = ',';
 	write(FD, num, strlen(num));
 	state = DIALING;
 	write(FD, "\r", 1);
@@ -127,7 +130,7 @@ hay_dialer(num, acu)
 	tcflush(FD, TCIOFLUSH);
 #ifdef ACULOG
 	if (timeout) {
-		sprintf(line, "%d second dial timeout",
+		(void)sprintf(line, "%d second dial timeout",
 			number(value(DIALTIMEOUT)));
 		logent(value(HOST), num, "hayes", line);
 	}
@@ -301,8 +304,8 @@ hay_sync()
 		ioctl(FD, FIONREAD, &len);
 		if (len) {
 			len = read(FD, dumbuf, min(len, DUMBUFLEN));
-			if (index(dumbuf, '0') || 
-		   	(index(dumbuf, 'O') && index(dumbuf, 'K')))
+			if (strchr(dumbuf, '0') || 
+		   	(strchr(dumbuf, 'O') && strchr(dumbuf, 'K')))
 				return(1);
 #ifdef DEBUG
 			dumbuf[len] = '\0';

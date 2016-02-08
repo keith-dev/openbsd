@@ -18,7 +18,7 @@
 
 #if defined(SYSLIBC_SCCS)
 	.text
-	.asciz "$OpenBSD$"
+	.asciz "$OpenBSD: setlogin.S,v 1.2 1996/08/19 08:17:13 tholo Exp $"
 #endif /* SYSLIBC_SCCS */
 
 	.globl  ___logname_valid         /* in getlogin() */

@@ -1,4 +1,4 @@
-/*	$OpenBSD$	*/
+/*	$OpenBSD: rpc_main.c,v 1.2 1996/03/27 19:32:51 niklas Exp $	*/
 /*	$NetBSD: rpc_main.c,v 1.9 1996/02/19 11:12:43 pk Exp $	*/
 /*
  * Sun RPC is a product of Sun Microsystems, Inc. and is provided for
@@ -32,7 +32,7 @@
 
 #ifndef lint
 static char sccsid[] = "@(#)rpc_main.c 1.30 89/03/30 (C) 1987 SMI";
-static char cvsid[] = "$OpenBSD$";
+static char cvsid[] = "$OpenBSD: rpc_main.c,v 1.2 1996/03/27 19:32:51 niklas Exp $";
 #endif
 
 /*

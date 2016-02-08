@@ -1,6 +1,6 @@
 #!/bin/sh -
 #
-#	$OpenBSD: MAKEDEV,v 1.7 1996/08/28 08:55:24 deraadt Exp $
+#	$OpenBSD: MAKEDEV,v 1.15 1997/05/25 18:50:16 millert Exp $
 #
 # Copyright (c) 1990 The Regents of the University of California.
 # All rights reserved.
@@ -59,10 +59,24 @@
 #	tun*	network tunnel driver
 #	lkm	Device to for loadable kernel modules
 #	*random	random data source
+#	uk*	unknown SCSI
+#	ss*	SCSI scanners
 #
 
 PATH=/sbin:/bin/:/usr/bin:/usr/sbin
 umask 77
+add ()
+{
+	echo "$(( $1 + $2 ))"
+}
+hex ()
+{
+	case $1 in
+	[0-9])  echo -n $1 ;;
+	1[0-5]) echo -n -e "\\$(( $1 + 131 ))" ;;
+	esac
+}
+
 for i
 do
 case $i in
@@ -79,6 +93,8 @@ all)
 	sh MAKEDEV tun0 tun1 tun2 tun3
 	sh MAKEDEV lkm
 	sh MAKEDEV random
+	sh MAKEDEV uk0 uk1
+	sh MAKEDEV ss0
 	sh MAKEDEV local
 	;;
 
@@ -109,19 +125,17 @@ std)
 fd)
 	rm -f fd/*
 	mkdir fd > /dev/null 2>&1
-	(cd fd && eval `echo "" | awk ' BEGIN { \
-		for (i = 0; i < 64; i++) \
-	 		printf("mknod %d c 21 %d;", i, i)}'`)
-	chown -R bin.bin fd
+	n=0
+	(cd fd && while [ $n -lt 64 ]; do mknod $n c 24 $n; n=`add $n 1`; done)
+	chown -R root.wheel fd
 	chmod 555 fd
 	chmod 666 fd/*
 	;;
 
-sd*|vnd*|ccd*)
+sd*|ccd*)
 	umask 2 ; unit=`expr $i : '.*[^0-9]\([0-9]*\)'`
 	case $i in
 	sd*) name=sd; blk=4; chr=13;;
-	vnd*) name=vnd; blk=8; chr=19;;
 	ccd*) name=ccd; blk=9; chr=20;;
 	esac
 	rm -f $name$unit? r$name$unit?
@@ -150,6 +164,37 @@ sd*|vnd*|ccd*)
 		echo bad unit for disk in: $i
 		;;
 	esac
+	umask 77
+	;;
+
+vnd*)
+	umask 2 ; unit=`expr $i : 'vnd\(.*\)'`
+	for name in vnd svnd; do
+		blk=8; chr=19;
+		case $name in
+		vnd)	off=0;;
+		svnd)	off=128;;
+		esac
+		rm -f $name$unit? r$name$unit?
+		mknod ${name}${unit}a	b $blk `expr $unit '*' 8 + $off + 0`
+		mknod ${name}${unit}b	b $blk `expr $unit '*' 8 + $off + 1`
+		mknod ${name}${unit}c	b $blk `expr $unit '*' 8 + $off + 2`
+		mknod ${name}${unit}d	b $blk `expr $unit '*' 8 + $off + 3`
+		mknod ${name}${unit}e	b $blk `expr $unit '*' 8 + $off + 4`
+		mknod ${name}${unit}f	b $blk `expr $unit '*' 8 + $off + 5`
+		mknod ${name}${unit}g	b $blk `expr $unit '*' 8 + $off + 6`
+		mknod ${name}${unit}h	b $blk `expr $unit '*' 8 + $off + 7`
+		mknod r${name}${unit}a	c $chr `expr $unit '*' 8 + $off + 0`
+		mknod r${name}${unit}b	c $chr `expr $unit '*' 8 + $off + 1`
+		mknod r${name}${unit}c	c $chr `expr $unit '*' 8 + $off + 2`
+		mknod r${name}${unit}d	c $chr `expr $unit '*' 8 + $off + 3`
+		mknod r${name}${unit}e	c $chr `expr $unit '*' 8 + $off + 4`
+		mknod r${name}${unit}f	c $chr `expr $unit '*' 8 + $off + 5`
+		mknod r${name}${unit}g	c $chr `expr $unit '*' 8 + $off + 6`
+		mknod r${name}${unit}h	c $chr `expr $unit '*' 8 + $off + 7`
+		chown root.operator ${name}${unit}[a-h] r${name}${unit}[a-h]
+		chmod 640 ${name}${unit}[a-h] r${name}${unit}[a-h]
+	done
 	umask 77
 	;;
 
@@ -195,11 +240,15 @@ pty*)
 	case $class in
 	0|1|2|3|4)
 		umask 0
-		eval `echo $offset $name | awk ' { b=$1; n=$2 } END {
-			for (i = 0; i < 16; i++)
-				printf("rm -f tty%s%x; mknod tty%s%x c 4 %d;" \
-				    "rm -f pty%s%x; mknod pty%s%x c 5 %d; ", \
-				    n, i, n, i, b+i, n, i, n, i, b+i); }'`
+		n=0
+		while [ $n -lt 16 ]
+		do
+			nam=$name`hex $n`
+			rm -rf {tty,pty}$n
+			mknod tty$nam c 4 `add $offset $n`
+			mknod pty$nam c 5 `add $offset $n`
+			n=`add $n 1`
+		done
 		umask 77
 		;;
 	esac
@@ -326,18 +375,37 @@ lkm)
 
 random|srandom|urandom|prandom|arandom)
 	rm -f random urandom srandom prandom arandom
-	mknod  random c 33 0
-	mknod srandom c 33 1
-	mknod urandom c 33 2
-	mknod prandom c 33 3
-	mknod arandom c 33 4
+	mknod  random c 32 0
+	mknod srandom c 32 1
+	mknod urandom c 32 2
+	mknod prandom c 32 3
+	mknod arandom c 32 4
 	chown root.wheel random srandom urandom prandom arandom
 	chmod 644 random srandom urandom prandom arandom
 	;;
 
+uk*)
+	unit=`expr $i : 'uk\(.*\)'`
+	rm -f uk$unit
+	mknod uk$unit c 34 $unit
+	chown root.operator uk$unit
+	chmod 640 uk$unit
+	;;
+
+ss*)
+	unit=`expr $i : 'ss\(.*\)'`
+	rm -f ss$unit
+	mknod ss$unit c 35 $unit
+	chown root.operator ss$unit
+	chmod 440 ss$unit
+#	backwards compatibility with older PINTs
+	rm -f scan$unit
+	ln -s ss$unit scan$unit
+	;;
+
 local)
 	umask 0
-	sh MAKEDEV.local
+	test -s MAKEDEV.local && sh MAKEDEV.local
 	;;
 
 *)

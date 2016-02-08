@@ -1,4 +1,4 @@
-/*	$OpenBSD: cd.c,v 1.6 1996/06/23 14:21:09 deraadt Exp $	*/
+/*	$OpenBSD: cd.c,v 1.9 1996/11/03 23:16:09 bitblt Exp $	*/
 /*	$NetBSD: cd.c,v 1.15 1996/03/01 01:58:58 jtc Exp $	*/
 
 /*-
@@ -41,15 +41,18 @@
 #if 0
 static char sccsid[] = "@(#)cd.c	8.2 (Berkeley) 5/4/95";
 #else
-static char rcsid[] = "$OpenBSD: cd.c,v 1.6 1996/06/23 14:21:09 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: cd.c,v 1.9 1996/11/03 23:16:09 bitblt Exp $";
 #endif
 #endif /* not lint */
 
 #include <sys/types.h>
 #include <sys/stat.h>
+#include <sys/param.h>
 #include <stdlib.h>
+#include <string.h>
 #include <unistd.h>
 #include <errno.h>
+
 
 /*
  * The cd and pwd commands.
@@ -63,6 +66,7 @@ static char rcsid[] = "$OpenBSD: cd.c,v 1.6 1996/06/23 14:21:09 deraadt Exp $";
 #include "output.h"
 #include "memalloc.h"
 #include "error.h"
+#include "exec.h"
 #include "redir.h"
 #include "mystring.h"
 #include "show.h"
@@ -85,15 +89,18 @@ cdcmd(argc, argv)
 	char *path;
 	char *p;
 	struct stat statb;
-	char *padvance();
 	int print = 0;
 
 	nextopt(nullstr);
 	if ((dest = *argptr) == NULL && (dest = bltinlookup("HOME", 1)) == NULL)
 		error("HOME not set");
+	if (*dest == '\0')
+		dest = ".";
 	if (dest[0] == '-' && dest[1] == '\0') {
 		dest = prevdir ? prevdir : curdir;
 		print = 1;
+		if (!dest)
+			dest = ".";
 	}
 	if (*dest == '/' || (path = bltinlookup("CDPATH", 1)) == NULL)
 		path = nullstr;
@@ -126,6 +133,7 @@ cdcmd(argc, argv)
 STATIC int
 docd(dest, print)
 	char *dest;
+	int print;
 {
 
 	TRACE(("docd(\"%s\", %d) called\n", dest, print));
@@ -232,7 +240,7 @@ pwdcmd(argc, argv)
 
 
 
-#define MAXPWD 256
+#define MAXPWD MAXPATHLEN
 
 /*
  * Find out what the current directory is. If we already know the current
@@ -259,7 +267,7 @@ getpwd()
 	 */
 #if defined(__NetBSD__) || defined(__OpenBSD__) || defined(__svr4__)
 	if (getcwd(buf, sizeof(buf)) == NULL)
-		error("getcwd() failed");
+		error("getcwd() failed: %s", strerror(errno));
 	curdir = savestr(buf);
 #else
 	{

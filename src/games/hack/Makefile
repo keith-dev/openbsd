@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.2 1996/03/09 01:33:28 niklas Exp $
+#	$OpenBSD: Makefile,v 1.8 1997/04/27 20:55:44 millert Exp $
 #	@(#)Makefile	8.1 (Berkeley) 5/31/93
 
 PROG=	hack
@@ -17,7 +17,7 @@ SRCS+=	alloc.c hack.Decl.c hack.apply.c hack.bones.c hack.c hack.cmd.c \
 	hack.wizard.c hack.worm.c hack.worn.c hack.zap.c rnd.c
 MAN=	hack.6
 DPADD+=	${LIBTERMCAP} ${LIBCOMPAT}
-LDADD+=	-ltermcap -lcompat
+LDADD+=	-ltermcap
 HIDEGAME=hidegame
 CLEANFILES+=hack.onames.h makedefs
 
@@ -30,11 +30,11 @@ makedefs: makedefs.c
 	${HOSTCC} ${CFLAGS} ${LDFLAGS} ${LDSTATIC} -o ${.TARGET} ${.CURDIR}/${.PREFIX}.c ${LDADD}
 
 beforeinstall: 
-	install -c -o games -g games -m 600 /dev/null \
+	${INSTALL} ${INSTALL_COPY} -o root -g games -m 660 /dev/null \
 	    ${DESTDIR}/var/games/hackdir/perm
-	install -c -o games -g games -m 600 /dev/null \
+	${INSTALL} ${INSTALL_COPY} -o root -g games -m 660 /dev/null \
 	    ${DESTDIR}/var/games/hackdir/record
-	install -c -o ${BINOWN} -g ${BINGRP} -m 444 ${.CURDIR}/help \
+	${INSTALL} ${INSTALL_COPY} -o ${BINOWN} -g ${BINGRP} -m 444 ${.CURDIR}/help \
 	    ${.CURDIR}/hh ${.CURDIR}/data ${DESTDIR}/var/games/hackdir
 	rm -f ${DESTDIR}/var/games/hackdir/bones*
 

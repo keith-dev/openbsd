@@ -1,3 +1,4 @@
+#	$OpenBSD: list2sh.awk,v 1.5 1997/05/05 16:31:36 grr Exp $
 #	$NetBSD: list2sh.awk,v 1.2 1996/05/04 15:45:31 pk Exp $
 
 BEGIN {
@@ -50,11 +51,16 @@ $1 == "COPYDIR" {
 	next;
 }
 $1 == "SPECIAL" {
-	printf("echo '%s'\n", $0);
-	printf("(cd ${TARGDIR};");
-	for (i = 2; i <= NF; i++)
-		printf(" %s", $i);
-	printf(")\n");
+# escaping shell quotation is ugly whether you use " or ', use cat <<'!' ...
+	work=$0;
+	gsub("[\\\\]", "\\\\", work);
+	gsub("[\"]", "\\\"", work);
+	gsub("[$]", "\\$", work);
+	gsub("[`]", "\\`", work);
+	printf("echo \"%s\"\n", work);
+	work=$0;
+	sub("^[ 	]*" $1 "[ 	]*", "", work);
+	printf("(cd ${TARGDIR}; %s)\n", work);
 	next;
 }
 {

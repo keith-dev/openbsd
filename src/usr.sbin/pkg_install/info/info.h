@@ -1,4 +1,4 @@
-/* $OpenBSD: info.h,v 1.8 1995/10/25 15:38:27 jkh Exp $ */
+/* $OpenBSD: info.h,v 1.1 1996/06/04 07:56:09 niklas Exp $ */
 
 /*
  * FreeBSD install - a package for the installation and maintainance

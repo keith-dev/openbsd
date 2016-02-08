@@ -1,5 +1,5 @@
 #!/bin/sh -
-#	$OpenBSD: lorder.sh,v 1.3 1996/09/16 01:16:27 deraadt Exp $
+#	$OpenBSD: lorder.sh,v 1.7 1997/01/25 21:16:44 deraadt Exp $
 #	$NetBSD: lorder.sh,v 1.3 1995/04/24 07:38:52 cgd Exp $
 #
 # Copyright (c) 1990, 1993
@@ -36,9 +36,6 @@
 #	@(#)lorder.sh	8.1 (Berkeley) 6/6/93
 #
 
-PATH=/bin:/usr/bin
-export PATH
-
 # only one argument is a special case, just output the name twice
 case $# in
 	0)
@@ -63,7 +60,7 @@ fi
 umask $um
 
 # remove temporary files on HUP, INT, QUIT, PIPE, TERM
-trap "rm rf $TDIR; exit 1" 1 2 3 13 15
+trap "rm -rf $TDIR; exit 1" 1 2 3 13 15
 
 # if the line ends in a colon, assume it's the first occurrence of a new
 # object file.  Echo it twice, just to make sure it gets into the output.
@@ -73,7 +70,7 @@ trap "rm rf $TDIR; exit 1" 1 2 3 13 15
 #
 # if the line has " U " it's a globally undefined symbol, put it into
 # the reference file.
-nm -go $* | sed "
+${NM:-nm} -go $* | sed "
 	/:$/ {
 		s/://
 		s/.*/& &/

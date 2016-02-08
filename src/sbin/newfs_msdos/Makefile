@@ -1,7 +1,9 @@
-#	$OpenBSD$
+#	$OpenBSD: Makefile,v 1.2 1997/01/10 19:04:08 kstailey Exp $
 
 PROG=	newfs_msdos
 MAN=	newfs_msdos.8
+DPADD=	${LIBUTIL}
+LDADD=	-lutil
 
 ###################################################################
 #

@@ -1,4 +1,4 @@
-/*	$OpenBSD: disklabel.c,v 1.22 1996/10/01 09:23:38 maja Exp $	*/
+/*	$OpenBSD: disklabel.c,v 1.31 1997/05/21 16:02:33 deraadt Exp $	*/
 /*	$NetBSD: disklabel.c,v 1.30 1996/03/14 19:49:24 ghudson Exp $	*/
 
 /*
@@ -44,7 +44,7 @@ static char copyright[] =
 #endif /* not lint */
 
 #ifndef lint
-static char rcsid[] = "$OpenBSD: disklabel.c,v 1.22 1996/10/01 09:23:38 maja Exp $";
+static char rcsid[] = "$OpenBSD: disklabel.c,v 1.31 1997/05/21 16:02:33 deraadt Exp $";
 #endif /* not lint */
 
 #include <sys/param.h>
@@ -88,7 +88,6 @@ static char rcsid[] = "$OpenBSD: disklabel.c,v 1.22 1996/10/01 09:23:38 maja Exp
 
 char	*dkname, *specname;
 char	tmpfil[] = _PATH_TMPFILE;
-
 char	namebuf[BBSIZE], *np = namebuf;
 struct	disklabel lab;
 char	bootarea[BBSIZE];
@@ -919,10 +918,20 @@ edit(lp, f)
 	FILE *fp;
 
 	if ((fd = mkstemp(tmpfil)) == -1 || (fp = fdopen(fd, "w")) == NULL) {
+		if (fd != -1)
+			close(fd);
 		warn("%s", tmpfil);
 		return (1);
 	}
 	display(fp, lp);
+	fprintf(fp, "\n# Notes:\n");
+	fprintf(fp,
+"# Up to 16 partitions are valid, named from 'a' to 'p'.  Partition 'a' is\n"
+"# your root filesystem, 'b' is your swap, and 'c' should cover your whole\n"
+"# disk. Any other partition is free for any use.  'size' and 'offset' are\n"
+"# in 512-byte blocks. fstype should be '4.2BSD', 'swap', or 'none' or some\n"
+"# other values.  fsize/bsize/cpg should typically be '1024 8192 16' for a\n"
+"# 4.2BSD filesystem (or '512 4096 16' except on alpha, sun4, amiga, sun3...)\n");
 	fclose(fp);
 	for (;;) {
 		if (!editit())
@@ -960,7 +969,6 @@ editit()
 	int pid, xpid;
 	int stat;
 	extern char *getenv();
-	sigset_t sigset, osigset;
 	char *argp[] = {"sh", "-c", NULL, NULL};
 	char *ed, *p;
 
@@ -974,24 +982,20 @@ editit()
 	sprintf(p, "%s %s", ed, tmpfil);
 	argp[2] = p;
 
-	sigemptyset(&sigset);
-	sigaddset(&sigset, SIGINT);
-	sigaddset(&sigset, SIGQUIT);
-	sigaddset(&sigset, SIGHUP);
-	sigprocmask(SIG_BLOCK, &sigset, &osigset);
+	/* Turn off signals. */
+	(void)signal(SIGHUP, SIG_IGN);
+	(void)signal(SIGINT, SIG_IGN);
+	(void)signal(SIGQUIT, SIG_IGN);
 	while ((pid = fork()) < 0) {
 		if (errno != EAGAIN) {
-			sigprocmask(SIG_SETMASK, &osigset, (sigset_t *)0);
 			warn("fork");
 			free(p);
-			return (0);
+			stat = 1;
+			goto bail;
 		}
 		sleep(1);
 	}
 	if (pid == 0) {
-		sigprocmask(SIG_SETMASK, &osigset, (sigset_t *)0);
-		setgid(getgid());
-		setuid(getuid());
 		execv(_PATH_BSHELL, argp);
 		_exit(127);
 	}
@@ -1003,7 +1007,10 @@ editit()
 		else if (WIFEXITED(stat))
 			break;
 	}
-	sigprocmask(SIG_SETMASK, &osigset, (sigset_t *)0);
+bail:
+	(void)signal(SIGHUP, SIG_DFL);
+	(void)signal(SIGINT, SIG_DFL);
+	(void)signal(SIGQUIT, SIG_DFL);
 	return (!stat);
 }
 
@@ -1237,11 +1244,15 @@ getasciilabel(f, lp)
 		if ('a' <= *cp && *cp <= 'z' && cp[1] == '\0') {
 			unsigned part = *cp - 'a';
 
-			if (part > lp->d_npartitions) {
-				warnx("line %d: bad partition name: %s",
-				    lineno, cp);
-				errors++;
-				continue;
+			if (part >= lp->d_npartitions) {
+				if (part >= MAXPARTITIONS) {
+					warnx("line %d: bad partition name: %s",
+					    lineno, cp);
+					errors++;
+					continue;
+				} else {
+					lp->d_npartitions = part + 1;
+				}
 			}
 			pp = &lp->d_partitions[part];
 #define NXTNUM(n) { \
@@ -1266,10 +1277,14 @@ getasciilabel(f, lp)
 				errors++;
 			} else
 				pp->p_offset = v;
+			if (tp == NULL) {
+				pp->p_fstype = FS_UNUSED;
+				goto gottype;
+			}
 			cp = tp, tp = word(cp);
 			cpp = fstypenames;
 			for (; cpp < &fstypenames[FSMAXTYPES]; cpp++)
-				if ((s = *cpp) && !strcmp(s, cp)) {
+				if ((s = *cpp) && !strcasecmp(s, cp)) {
 					pp->p_fstype = cpp - fstypenames;
 					goto gottype;
 				}
@@ -1287,6 +1302,8 @@ getasciilabel(f, lp)
 			switch (pp->p_fstype) {
 
 			case FS_UNUSED:				/* XXX */
+				if (tp == NULL)	/* ok to skip fsize/bsize */
+					break;
 				NXTNUM(pp->p_fsize);
 				if (pp->p_fsize == 0)
 					break;
@@ -1380,7 +1397,7 @@ checklabel(lp)
 		if (pp->p_size == 0 && pp->p_offset != 0)
 			warnx("warning, partition %c: size 0, but offset %d",
 			    part, pp->p_offset);
-#ifdef notdef
+#ifdef CYLCHECK
 		if (pp->p_size % lp->d_secpercyl)
 			warnx("warning, partition %c: size %% cylinder-size != 0",
 			    part);
@@ -1395,6 +1412,10 @@ checklabel(lp)
 		if (pp->p_offset + pp->p_size > lp->d_secperunit) {
 			warnx("partition %c: partition extends past end of unit",
 			    part);
+			errors++;
+		}
+		if (pp->p_frag == 0 && pp->p_fsize != 0) {
+			warnx("partition %c: block size < fragment size", part);
 			errors++;
 		}
 	}

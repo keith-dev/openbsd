@@ -1,4 +1,4 @@
-/*	$OpenBSD: savecore.c,v 1.5 1996/06/23 13:16:21 deraadt Exp $	*/
+/*	$OpenBSD: savecore.c,v 1.8 1996/12/29 12:21:26 graichen Exp $	*/
 /*	$NetBSD: savecore.c,v 1.26 1996/03/18 21:16:05 leo Exp $	*/
 
 /*-
@@ -357,6 +357,9 @@ save_core()
 	register FILE *fp;
 	register int bounds, ifd, nr, nw, ofd;
 	char *rawp, path[MAXPATHLEN];
+	mode_t um;
+
+	um = umask(S_IRWXG|S_IRWXO);
 
 	/*
 	 * Get the current number and update the bounds file.  Do the update
@@ -382,7 +385,7 @@ err1:			syslog(LOG_WARNING, "%s: %s", path, strerror(errno));
 	(void)fclose(fp);
 
 	/* Create the core file. */
-	(void)snprintf(path, sizeof(path), "%s/%s.%d.core%s",
+	(void)snprintf(path, sizeof(path), "%s%s.%d.core%s",
 	    dirname, _PATH_UNIX, bounds, compress ? ".Z" : "");
 	if (compress) {
 		if ((fp = zopen(path, "w", 0)) == NULL) {
@@ -444,7 +447,7 @@ err2:			syslog(LOG_WARNING,
 
 	/* Copy the kernel. */
 	ifd = Open(kernel ? kernel : _PATH_UNIX, O_RDONLY);
-	(void)snprintf(path, sizeof(path), "%s/%s.%d%s",
+	(void)snprintf(path, sizeof(path), "%s%s.%d%s",
 	    dirname, _PATH_UNIX, bounds, compress ? ".Z" : "");
 	if (compress) {
 		if ((fp = zopen(path, "w", 0)) == NULL) {
@@ -479,6 +482,7 @@ err2:			syslog(LOG_WARNING,
 		(void)fclose(fp);
 	else
 		(void)close(ofd);
+	(void)umask(um);
 }
 
 char *

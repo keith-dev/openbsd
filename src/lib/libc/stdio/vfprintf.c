@@ -35,7 +35,7 @@
  */
 
 #if defined(LIBC_SCCS) && !defined(lint)
-static char *rcsid = "$OpenBSD: vfprintf.c,v 1.1.1.1 1995/10/18 08:42:15 deraadt Exp $";
+static char *rcsid = "$OpenBSD: vfprintf.c,v 1.6 1996/12/14 06:49:43 tholo Exp $";
 #endif /* LIBC_SCCS and not lint */
 
 /*
@@ -49,6 +49,7 @@ static char *rcsid = "$OpenBSD: vfprintf.c,v 1.1.1.1 1995/10/18 08:42:15 deraadt
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <errno.h>
 
 #if __STDC__
 #include <stdarg.h>
@@ -59,9 +60,9 @@ static char *rcsid = "$OpenBSD: vfprintf.c,v 1.1.1.1 1995/10/18 08:42:15 deraadt
 #include "local.h"  
 #include "fvwrite.h"  
 
-static void __find_arguments(const char *fmt0, va_list ap, void ***argtable);
-static void __grow_type_table(int nextarg, unsigned char **typetable
-			     ,int *tablesize);
+static void __find_arguments(const char *fmt0, va_list ap, va_list **argtable);
+static int __grow_type_table(unsigned char **typetable,
+			      int *tablesize);
 
 /*
  * Flush out all the vectors defined by the given uio,
@@ -200,8 +201,8 @@ vfprintf(fp, fmt0, ap)
 	struct __siov iov[NIOV];/* ... and individual io vectors */
 	char buf[BUF];		/* space for %c, %[diouxX], %[eEfgG] */
 	char ox[2];		/* space for 0x hex-prefix */
-	void **argtable;        /* args, built due to positional arg */
-	void *statargtable [STATIC_ARG_TBL_SIZE];
+	va_list *argtable;        /* args, built due to positional arg */
+	va_list statargtable[STATIC_ARG_TBL_SIZE];
 	int nextarg;            /* 1-based argument index */
 	va_list orgap;          /* original argument pointer */
 
@@ -293,12 +294,14 @@ vfprintf(fp, fmt0, ap)
 * argument (and arguments must be gotten sequentially).
 */
 #define GETARG(type) \
-	((argtable != NULL) ? \
-	*((type*)(argtable[nextarg++])) : (nextarg++, va_arg(ap, type)))
+	(((argtable != NULL) ? (void)(ap = argtable[nextarg]) : (void)0), \
+	 nextarg++, va_arg(ap, type))
  
 	/* sorry, fprintf(read_only_file, "") returns EOF, not 0 */
-	if (cantwrite(fp))
+	if (cantwrite(fp)) {
+		errno = EBADF;
 		return (EOF);
+	}
 
 	/* optimise fprintf(stderr) (and other unbuffered Unix files) */
 	if ((fp->_flags & (__SNBF|__SWR|__SRW)) == (__SNBF|__SWR) &&
@@ -387,7 +390,8 @@ reswitch:	switch (ch) {
 				nextarg = n;
 				if (argtable == NULL) {
 					argtable = statargtable;
-					__find_arguments(fmt0, orgap, &argtable);
+					__find_arguments(fmt0, orgap,
+					    &argtable);
 				}
 				goto rflag;
 			}
@@ -411,9 +415,9 @@ reswitch:	switch (ch) {
                        	if (ch == '$') {
 				nextarg = n;
 			   	if (argtable == NULL) {
-			   	argtable = statargtable;
-			   	__find_arguments (fmt0, orgap,
-			   	&argtable);
+			   		argtable = statargtable;
+			   		__find_arguments (fmt0, orgap,
+					    &argtable);
 			  	}
 				goto rflag; 
 			}
@@ -761,13 +765,14 @@ done:
 	FLUSH();
 error:
 	if ((argtable != NULL) && (argtable != statargtable))
-	free (argtable);
+		free (argtable);
 	return (__sferror(fp) ? EOF : ret);
 	/* NOTREACHED */
 }
+
 /*
  * Type ids for argument type table.
-*/
+ */
 #define T_UNUSED	0
 #define T_SHORT		1
 #define T_U_SHORT	2
@@ -796,16 +801,15 @@ static void
 __find_arguments (fmt0, ap, argtable)
 	const char *fmt0;
 	va_list ap;
-	void ***argtable;
+	va_list **argtable;
 {
 	register char *fmt;	/* format string */
 	register int ch;	/* character from fmt */
 	register int n, n2;	/* handy integer (short term usage) */
 	register char *cp;	/* handy char pointer (short term usage) */
 	register int flags;	/* flags as above */
-	int width;		/* width from format (%8d), or 0 */
 	unsigned char *typetable; /* table of types */
-	unsigned char stattypetable [STATIC_ARG_TBL_SIZE];
+	unsigned char stattypetable[STATIC_ARG_TBL_SIZE];
 	int tablesize;		/* current size of type table */
 	int tablemax;		/* largest used index in table */
 	int nextarg;		/* 1-based argument index */
@@ -815,7 +819,7 @@ __find_arguments (fmt0, ap, argtable)
 	 */
 #define ADDTYPE(type) \
 	((nextarg >= tablesize) ? \
-		__grow_type_table(nextarg, &typetable, &tablesize) : 0, \
+		__grow_type_table(&typetable, &tablesize) : 0, \
 	typetable[nextarg++] = type, \
 	(nextarg > tablemax) ? tablemax = nextarg : 0)
 
@@ -864,7 +868,6 @@ __find_arguments (fmt0, ap, argtable)
 		fmt++;		/* skip over '%' */
 
 		flags = 0;
-		width = 0;
 
 rflag:		ch = *fmt++;
 reswitch:	switch (ch) {
@@ -899,7 +902,6 @@ reswitch:	switch (ch) {
 				nextarg = n;
 				goto rflag;
 			}
-			width = n;
 			goto reswitch;
 #ifdef FLOATING_POINT
 		case 'L':
@@ -993,11 +995,14 @@ done:
 	 * Build the argument table.
 	 */
 	if (tablemax >= STATIC_ARG_TBL_SIZE) {
-		*argtable = (void **)
-		    malloc (sizeof (void *) * (tablemax + 1));
+		*argtable = (va_list *)
+		    malloc (sizeof (va_list) * (tablemax + 1));
 	}
 
+#if 0
+	/* XXX is this required? */
 	(*argtable) [0] = NULL;
+#endif
 	for (n = 1; n <= tablemax; n++) {
 		(*argtable) [n] = ap;
 		switch (typetable [n]) {
@@ -1062,9 +1067,8 @@ done:
 /*
  * Increase the size of the type table.
  */
-static void
-__grow_type_table (nextarg, typetable, tablesize)
-	int nextarg;
+static int
+__grow_type_table (typetable, tablesize)
 	unsigned char **typetable;
 	int *tablesize;
 {
@@ -1083,6 +1087,7 @@ __grow_type_table (nextarg, typetable, tablesize)
 	memset (&typetable [*tablesize], T_UNUSED, (newsize - *tablesize));
 
 	*tablesize = newsize;
+	return(0);
 }
 
   

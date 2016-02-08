@@ -1,4 +1,4 @@
-/*	$OpenBSD: state.c,v 1.4 1996/08/16 23:32:44 deraadt Exp $	*/
+/*	$OpenBSD: state.c,v 1.5 1996/08/24 09:03:42 deraadt Exp $	*/
 /*	$NetBSD: state.c,v 1.9 1996/02/28 20:38:19 thorpej Exp $	*/
 
 /*
@@ -39,7 +39,7 @@
 static char sccsid[] = "@(#)state.c	8.5 (Berkeley) 5/30/95";
 static char rcsid[] = "$NetBSD: state.c,v 1.9 1996/02/28 20:38:19 thorpej Exp $";
 #else
-static char rcsid[] = "$OpenBSD: state.c,v 1.4 1996/08/16 23:32:44 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: state.c,v 1.5 1996/08/24 09:03:42 deraadt Exp $";
 #endif
 #endif /* not lint */
 

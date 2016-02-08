@@ -38,7 +38,7 @@
 
 #if defined(LIBC_SCCS)
 	.text
-	.asciz "$OpenBSD$"
+	.asciz "$OpenBSD: ntohs.S,v 1.2 1996/08/19 08:12:42 tholo Exp $"
 #endif
 
 /* hostorder = ntohs(netorder) */

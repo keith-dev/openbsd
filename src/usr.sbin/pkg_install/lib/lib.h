@@ -1,4 +1,4 @@
-/* $OpenBSD: lib.h,v 1.19 1995/10/25 15:38:34 jkh Exp $ */
+/* $OpenBSD: lib.h,v 1.1 1996/06/04 07:56:13 niklas Exp $ */
 
 /*
  * FreeBSD install - a package for the installation and maintainance

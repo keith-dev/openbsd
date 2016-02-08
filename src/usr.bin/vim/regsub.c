@@ -1,4 +1,4 @@
-/*	$OpenBSD$	*/
+/*	$OpenBSD: regsub.c,v 1.1.1.1 1996/09/07 21:40:25 downsj Exp $	*/
 /* vi:set ts=4 sw=4:
  * NOTICE NOTICE NOTICE NOTICE NOTICE NOTICE NOTICE NOTICE NOTICE NOTICE
  *
@@ -41,6 +41,7 @@
  * On the other hand, vim lacks a non-visual ex mode, in addition to open mode.
  *
  * This includes the GUI (X11) code, but doesn't try to compile it.
+ *
  *
  * Revision 1.2  88/04/28  08:11:25  tony
  * First modification of the regexp library. Added an external variable

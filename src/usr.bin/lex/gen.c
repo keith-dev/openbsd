@@ -1,4 +1,4 @@
-/*	$OpenBSD: gen.c,v 1.2 1996/06/26 05:35:34 deraadt Exp $	*/
+/*	$OpenBSD: gen.c,v 1.3 1996/07/13 22:22:01 millert Exp $	*/
 
 /* gen - actual generation (writing) of flex scanners */
 

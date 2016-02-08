@@ -1,6 +1,6 @@
 #!/bin/sh -
 #
-#	$OpenBSD: MAKEDEV,v 1.8 1996/08/28 08:55:29 deraadt Exp $
+#	$OpenBSD: MAKEDEV,v 1.17 1997/05/17 19:12:03 kstailey Exp $
 #	$NetBSD: MAKEDEV,v 1.8 1996/03/03 16:54:17 thorpej Exp $
 #
 # Copyright (c) 1990 The Regents of the University of California.
@@ -59,6 +59,8 @@
 #	tun*	network tunnel driver
 #	rd*	RAM-disk
 #	*random	random data source
+#	uk*	unknown SCSI
+#	ss*	SCSI scanners
 
 # XXX - Keep /usr/etc so SunOS can find chown
 PATH=/sbin:/bin:/usr/sbin:/usr/bin:/usr/etc
@@ -69,6 +71,7 @@ eo=
 
 # mk name b/c major minor [mode] [group]
 mk() {
+	$eo rm -f $1
 	$eo mknod $1 $2 $3 $4
 	$eo chmod ${5-666} $1
 	test -n "$6" && $eo chgrp $6 $1
@@ -84,7 +87,7 @@ unit=`expr $arg : '[a-z][a-z]*\([0-9][0-9]*\)'`
 case $arg in
 
 all)
-      sh MAKEDEV std fd sd0 sd1 sd2 sd3 st0 st1 pty0 random
+	sh MAKEDEV std fd sd0 sd1 sd2 sd3 st0 st1 pty0 random ss0 uk0
 	;;
 
 std)
@@ -105,6 +108,7 @@ std)
 	mk klog		c 16 0 600
 	mk fb		c 22 0
 	mk kbd		c 29 0
+	mk leds		c 3 13 644
 	mk stdin        c 23 0
 	mk stdout       c 23 1
 	mk stderr       c 23 2
@@ -124,8 +128,7 @@ bpf*)
 	;;
 
 ipl)
-	mknod ipl c 72 0
-	chown root.wheel ipl
+	mk ipl c 75 0 600
 	;;
 
 tun*)
@@ -156,13 +159,14 @@ pty*)
 	done
 	;;
 
-cd*|sd*|xy*|vnd*|ccd*)
+cd*|sd*|xy*|ccd*|rd*|vnd*)
 	case $arg in
 	  cd*) name=cd; blk=18; chr=58;;
 	  sd*) name=sd; blk=7; chr=17;;
 	  xy*) name=xy; blk=3; chr=9 ;;
-	  vnd*) name=vnd; blk=5; chr=19;;
 	  ccd*) name=ccd; blk=9; chr=33;;
+	  rd*) name=rd; blk=13; chr=52;;
+	  vnd*) name=vnd; blk=5; chr=19;
 	esac
 	case $unit in
 	  0|1|2|3|4) offset=`expr $unit \* 8`;;
@@ -177,6 +181,11 @@ cd*|sd*|xy*|vnd*|ccd*)
 		minor=`expr $offset + $2`
 		mk  $name$unit$1 b $blk $minor 640 operator
 		mk r$name$unit$1 c $chr $minor 640 operator
+		if [ $name = vnd ]; then
+		    sminor=`expr $minor + 128`
+		    mk  s$name$unit$1 b $blk $sminor 640 operator
+		    mk rs$name$unit$1 c $chr $sminor 640 operator
+		fi
 	)
 	done
 	;;
@@ -210,18 +219,27 @@ rd*)
 
 random|srandom|urandom|prandom|arandom)
 	rm -f random urandom srandom prandom arandom
-	mknod  random c 72 0
-	mknod srandom c 72 1
-	mknod urandom c 72 2
-	mknod prandom c 72 3
-	mknod arandom c 72 4
-	chown root.wheel random srandom urandom prandom arandom
-	chmod 644 random srandom urandom prandom arandom
+	mk  random c 72 0
+	mk srandom c 72 1
+	mk urandom c 72 2
+	mk prandom c 72 3
+	mk arandom c 72 4
+	;;
+
+uk*)
+	mk uk$unit c 98 $unit 640 operator
+	;;
+
+ss*)
+	mk ss$unit c 99 $unit 440 operator
+#	backwards compatibility with older PINTs
+	rm -f scan$unit
+	ln -s ss$unit scan$unit
 	;;
 
 local)
 	umask 0
-	sh MAKEDEV.local
+	test -s MAKEDEV.local && sh MAKEDEV.local
 	;;
 *)
 	echo $arg: unknown device
@@ -229,4 +247,3 @@ local)
 
 esac
 done
-

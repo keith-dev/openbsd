@@ -50,7 +50,7 @@
  */
 
 #if defined(LIBC_SCCS) && !defined(lint)
-static char rcsid[] = "$OpenBSD$";
+static char rcsid[] = "$OpenBSD: crypt.c,v 1.10 1997/03/30 20:24:46 deraadt Exp $";
 #endif /* LIBC_SCCS and not lint */
 
 #include <sys/types.h>
@@ -572,24 +572,14 @@ des_cipher(in, out, salt, count)
 
 	setup_salt(salt);
 
-#if 0
-	rawl = ntohl(*((u_int32_t *) in)++);
-	rawr = ntohl(*((u_int32_t *) in));
-#else
 	memcpy(x, in, sizeof x);
 	rawl = ntohl(x[0]);
 	rawr = ntohl(x[1]);
-#endif
 	retval = do_des(rawl, rawr, &l_out, &r_out, count);
 
-#if 0
-	*((u_int32_t *) out)++ = htonl(l_out);
-	*((u_int32_t *) out) = htonl(r_out);
-#else
 	x[0] = htonl(l_out);
 	x[1] = htonl(r_out);
 	memcpy(out, x, sizeof x);
-#endif
 	return(retval);
 }
 
@@ -603,9 +593,15 @@ crypt(key, setting)
 	u_char		*p, *q;
 	static u_char	output[21];
 	extern char	*md5crypt __P((const char *, const char *));
+	extern char	*bcrypt __P((const char *, const char *));
 
-	if (strncmp(setting, "$1$", sizeof("$1")) == 0)
-		return (md5crypt(key, setting));
+	if( setting[0] == '$' )
+		switch(setting[1]) {
+			case '1':
+				return (md5crypt(key, setting));
+			default:
+				return bcrypt(key, setting);
+		}
 
 	if (!des_initialised)
 		des_init();
@@ -615,7 +611,7 @@ crypt(key, setting)
 	 * and padding with zeros.
 	 */
 	q = (u_char *) keybuf;
-	while (q - (u_char *) keybuf - 8) {
+	while ((q - (u_char *) keybuf) < sizeof(keybuf)) {
 		if (*q++ = *key << 1)
 			key++;
 	}
@@ -644,7 +640,8 @@ crypt(key, setting)
 			 * And XOR with the next 8 characters of the key.
 			 */
 			q = (u_char *) keybuf;
-			while (q - (u_char *) keybuf - 8 && *key)
+			while (((q - (u_char *) keybuf) < sizeof(keybuf)) &&
+					*key)
 				*q++ ^= *key++ << 1;
 
 			if (des_setkey((u_char *) keybuf))

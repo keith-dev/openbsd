@@ -37,7 +37,7 @@
 
 #if defined(LIBC_SCCS)
 	.text
-	.asciz "$OpenBSD: abs.S,v 1.1.1.1 1995/10/18 08:41:30 deraadt Exp $"
+	.asciz "$OpenBSD: abs.S,v 1.2 1996/08/19 08:15:03 tholo Exp $"
 #endif /* LIBC_SCCS */
 
 /* abs - int absolute value */

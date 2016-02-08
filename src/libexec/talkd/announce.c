@@ -1,4 +1,4 @@
-/*	$OpenBSD: announce.c,v 1.5 1996/07/18 00:05:33 deraadt Exp $	*/
+/*	$OpenBSD: announce.c,v 1.6 1996/07/18 00:18:53 deraadt Exp $	*/
 
 /*
  * Copyright (c) 1983 Regents of the University of California.

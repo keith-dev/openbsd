@@ -1,4 +1,4 @@
-/*	$OpenBSD: ttyflags.c,v 1.3 1996/06/23 14:32:48 deraadt Exp $	*/
+/*	$OpenBSD: ttyflags.c,v 1.7 1997/03/04 05:48:00 tholo Exp $	*/
 /*	$NetBSD: ttyflags.c,v 1.8 1996/04/09 05:20:30 cgd Exp $	*/
 
 /*
@@ -39,7 +39,7 @@ char copyright[] =
 #endif /* not lint */
 
 #ifndef lint
-static char rcsid[] = "$OpenBSD: ttyflags.c,v 1.3 1996/06/23 14:32:48 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: ttyflags.c,v 1.7 1997/03/04 05:48:00 tholo Exp $";
 #endif /* not lint */
 
 #include <sys/types.h>
@@ -77,7 +77,7 @@ main(argc, argv)
 	int aflag, ch, rval, pflag = 0;
 
 	aflag = nflag = vflag = 0;
-	while ((ch = getopt(argc, argv, "panv")) != EOF)
+	while ((ch = getopt(argc, argv, "panv")) != -1)
 		switch (ch) {
 		case 'a':
 			aflag = 1;
@@ -169,9 +169,15 @@ ttyflags(tep, print)
 	struct ttyent *tep;
 	int print;
 {
-	int fd, flags = 0, rval, st = 0, sep = 0;
+	int fd, flags = 0, rval = 0, st, sep = 0;
 	char path[PATH_MAX];
-	char strflags[256] = "";
+	char strflags[256];
+
+	st = tep->ty_status;
+	strflags[0] = '\0';
+
+	/* Find the full device path name. */
+	(void)snprintf(path, sizeof path, "%s%s", _PATH_DEV, tep->ty_name);
 
 	if (print == 0) {
 		/* Convert ttyent.h flags into ioctl flags. */
@@ -202,9 +208,6 @@ ttyflags(tep, print)
 			printf("%s setting flags to: %s\n", path, strflags);
 	}
 
-	/* Find the full device path name. */
-	(void)snprintf(path, sizeof path, "%s%s", _PATH_DEV, tep->ty_name);
-
 	if (nflag)
 		return (0);
 
@@ -226,7 +229,7 @@ ttyflags(tep, print)
 	} else {
 		if (ioctl(fd, TIOCGFLAGS, &flags) == -1)
 			if (errno != ENOTTY || vflag) {
-				warn("TIOCSFLAGS on %s", path);
+				warn("TIOCGFLAGS on %s", path);
 				rval = (errno != ENOTTY);
 			}
 		if (flags & TIOCFLAG_CLOCAL) {

@@ -1,4 +1,4 @@
-/*	$OpenBSD: ipcs.c,v 1.4 1996/06/26 05:34:37 deraadt Exp $	*/
+/*	$OpenBSD: ipcs.c,v 1.7 1997/01/15 23:42:37 millert Exp $	*/
 /*	$NetBSD: ipcs.c,v 1.10.6.1 1996/06/07 01:53:47 thorpej Exp $	*/
 
 /*
@@ -138,7 +138,7 @@ main(argc, argv)
 	char	errbuf[_POSIX2_LINE_MAX];
 	int     i;
 
-	while ((i = getopt(argc, argv, "MmQqSsabC:cN:optT")) != EOF)
+	while ((i = getopt(argc, argv, "MmQqSsabC:cN:optT")) != -1)
 		switch (i) {
 		case 'M':
 			display = SHMTOTAL;
@@ -192,8 +192,10 @@ main(argc, argv)
 	 * Discard setgid privileges if not the running kernel so that bad
 	 * guys can't print interesting stuff from kernel memory.
 	 */
-	if (namelist != NULL || core != NULL)
+	if (namelist != NULL || core != NULL) {
+		setegid(getgid());
 		setgid(getgid());
+	}
 	if ((kd = kvm_open(namelist, core, NULL, O_RDONLY, "ipcs")) == NULL)
 		exit(1);
 

@@ -1,4 +1,4 @@
-/*	$OpenBSD$	*/
+/*	$OpenBSD: proc_compare.c,v 1.2 1996/06/26 05:42:43 deraadt Exp $	*/
 
 /*-
  * Copyright (c) 1990, 1993

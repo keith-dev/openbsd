@@ -8,7 +8,7 @@
  *
  * S/KEY verification check, lookups, and authentication.
  * 
- * $Id: skeylogin.c,v 1.8 1996/10/02 03:49:36 millert Exp $
+ * $Id: skeylogin.c,v 1.11 1996/11/03 18:57:29 millert Exp $
  */
 
 #include <sys/param.h>
@@ -21,6 +21,7 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <unistd.h>
 #include <string.h>
 #include <ctype.h>
 #include <sys/types.h>
@@ -30,7 +31,9 @@
 
 #include "skey.h"
 
+#ifndef _PATH_KEYFILE
 #define	_PATH_KEYFILE	"/etc/skeykeys"
+#endif
 
 char *skipspace __P((char *));
 int skeylookup __P((struct skey *, char *));
@@ -57,8 +60,9 @@ getskeyprompt(mp, name, prompt)
 	case -1:	/* File error */
 		return -1;
 	case 0:		/* Lookup succeeded, return challenge */
-		(void)sprintf(prompt, "otp-%s %d %s\n", skey_get_algorithm(),
-			      mp->n - 1, mp->seed);
+		(void)sprintf(prompt, "otp-%.*s %d %.*s\n",
+			      SKEY_MAX_HASHNAME_LEN, skey_get_algorithm(),
+			      mp->n - 1, SKEY_MAX_SEED_LEN, mp->seed);
 		return 0;
 	case 1:		/* User not found */
 		(void)fclose(mp->keyfile);
@@ -87,8 +91,9 @@ skeychallenge(mp, name, ss)
 	case -1:	/* File error */
 		return -1;
 	case 0:		/* Lookup succeeded, issue challenge */
-		(void)sprintf(ss, "otp-%s %d %s", skey_get_algorithm(),
-			      mp->n - 1, mp->seed);
+		(void)sprintf(ss, "otp-%.*s %d %.*s", SKEY_MAX_HASHNAME_LEN,
+			      skey_get_algorithm(), mp->n - 1,
+			      SKEY_MAX_SEED_LEN, mp->seed);
 		return 0;
 	case 1:		/* User not found */
 		(void)fclose(mp->keyfile);
@@ -110,7 +115,7 @@ skeylookup(mp, name)
 {
 	int found = 0;
 	long recstart = 0;
-	char *cp;
+	char *cp, *ht;
 	struct stat statbuf;
 
 	/* See if _PATH_KEYFILE exists, and create it if not */
@@ -129,9 +134,8 @@ skeylookup(mp, name)
 	while (!feof(mp->keyfile)) {
 		recstart = ftell(mp->keyfile);
 		mp->recstart = recstart;
-		if (fgets(mp->buf, sizeof(mp->buf), mp->keyfile) != mp->buf) {
+		if (fgets(mp->buf, sizeof(mp->buf), mp->keyfile) != mp->buf)
 			break;
-		}
 		rip(mp->buf);
 		if (mp->buf[0] == '#')
 			continue;	/* Comment */
@@ -139,17 +143,13 @@ skeylookup(mp, name)
 			continue;
 		if ((cp = strtok(NULL, " \t")) == NULL)
 			continue;
-		/* Set hash type if specified, else use md4 */
+		/* Save hash type if specified, else use md4 */
 		if (isalpha(*cp)) {
-			if (skey_set_algorithm(cp) == NULL)
-				warnx("Unknown hash algorithm %s, using %s",
-				      cp, skey_get_algorithm());
+			ht = cp;
 			if ((cp = strtok(NULL, " \t")) == NULL)
 				continue;
 		} else {
-			if (skey_set_algorithm("md4") == NULL)
-				warnx("Unknown hash algorithm md4, using %s",
-				      skey_get_algorithm());
+			ht = "md4";
 		}
 		mp->n = atoi(cp);
 		if ((mp->seed = strtok(NULL, " \t")) == NULL)
@@ -163,9 +163,15 @@ skeylookup(mp, name)
 	}
 	if (found) {
 		(void)fseek(mp->keyfile, recstart, SEEK_SET);
+		/* Set hash type */
+		if (skey_set_algorithm(ht) == NULL) {
+			warnx("Unknown hash algorithm %s, using %s", ht,
+			      skey_get_algorithm());
+		}
 		return 0;
-	} else
+	} else {
 		return 1;
+	}
 }
 
 /* Verify response to a s/key challenge.
@@ -182,9 +188,9 @@ skeyverify(mp, response)
 	struct skey *mp;
 	char *response;
 {
-	char key[8];
-	char fkey[8];
-	char filekey[8];
+	char key[SKEY_BINKEY_SIZE];
+	char fkey[SKEY_BINKEY_SIZE];
+	char filekey[SKEY_BINKEY_SIZE];
 	time_t now;
 	struct tm *tm;
 	char tbuf[27];
@@ -238,7 +244,7 @@ skeyverify(mp, response)
 	atob8(filekey, mp->val);
 
 	/* Do actual comparison */
-	if (memcmp(filekey, fkey, 8) != 0){
+	if (memcmp(filekey, fkey, SKEY_BINKEY_SIZE) != 0){
 		/* Wrong response */
 		(void)setpriority(PRIO_PROCESS, 0, 0);
 		(void)fclose(mp->keyfile);
@@ -295,7 +301,7 @@ skey_keyinfo(username)
 	char *username;
 {
 	int i;
-	static char str[50];
+	static char str[SKEY_MAX_CHALLENGE];
 	struct skey skey;
 
 	i = skeychallenge(&skey, username, str);
@@ -345,21 +351,47 @@ skey_authenticate(username)
 	char *username;
 {
 	int i;
-	char pbuf[256], skeyprompt[50];
+	char pbuf[SKEY_MAX_PW_LEN+1], skeyprompt[SKEY_MAX_CHALLENGE+1];
 	struct skey skey;
 
 	/* Attempt an S/Key challenge */
 	i = skeychallenge(&skey, username, skeyprompt);
 
-	if (i == -2)
-		return 0;
+	/* Cons up a fake prompt if no entry in keys file */
+	if (i != 0) {
+		char *p, *u;
+
+		/* Base first 4 chars of seed on hostname */
+		if (gethostname(pbuf, sizeof(pbuf)) < 0)
+			strcpy(pbuf, "asjd");
+		p = &pbuf[4];
+		*p = '\0';
+
+		/* Base last 8 chars of seed on username */
+		u = username;
+		i = 8;
+		do {
+			if (*u == 0) {
+				/* Pad remainder with zeros */
+				while (--i >= 0)
+					*p++ = '0';
+				break;
+			}
+
+			*p++ = (*u++ % 10) + '0';
+		} while (--i != 0);
+		pbuf[12] = '\0';
+
+		(void)sprintf(skeyprompt, "otp-%.*s %d %.*s",
+			      SKEY_MAX_HASHNAME_LEN, skey_get_algorithm(),
+			      99, SKEY_MAX_SEED_LEN, pbuf);
+	}
 
 	(void)fprintf(stderr, "%s\n", skeyprompt);
 	(void)fflush(stderr);
 
 	(void)fputs("Response: ", stderr);
 	readskey(pbuf, sizeof(pbuf));
-	rip(pbuf);
 
 	/* Is it a valid response? */
 	if (i == 0 && skeyverify(&skey, pbuf) == 0) {

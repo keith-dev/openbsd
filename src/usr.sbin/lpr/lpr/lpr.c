@@ -1,4 +1,4 @@
-/*	$OpenBSD: lpr.c,v 1.8 1996/08/13 17:51:39 millert Exp $ */
+/*	$OpenBSD: lpr.c,v 1.12 1997/01/17 16:12:46 millert Exp $ */
 /*	$NetBSD: lpr.c,v 1.10 1996/03/21 18:12:25 jtc Exp $	*/
 
 /*
@@ -47,7 +47,11 @@ static char copyright[] =
 #endif /* not lint */
 
 #ifndef lint
+#if 0
 static char sccsid[] = "@(#)lpr.c	8.4 (Berkeley) 4/28/95";
+#else
+static char rcsid[] = "$OpenBSD: lpr.c,v 1.12 1997/01/17 16:12:46 millert Exp $";
+#endif
 #endif /* not lint */
 
 /*
@@ -320,7 +324,7 @@ main(argc, argv)
 			if (argc == 1)
 				jobname = "stdin";
 			else
-				jobname = (arg = rindex(argv[1], '/')) ? arg+1 : argv[1];
+				jobname = (arg = strrchr(argv[1], '/')) ? arg+1 : argv[1];
 		}
 		card('J', jobname);
 		card('C', class);
@@ -474,7 +478,7 @@ linked(file)
 				continue;
 			case '.':
 				if (file[2] == '/') {
-					if ((cp = rindex(buf, '/')) != NULL)
+					if ((cp = strrchr(buf, '/')) != NULL)
 						*cp = '\0';
 					file += 3;
 					continue;
@@ -592,11 +596,11 @@ test(file)
 	register int fd;
 	register char *cp;
 
-	if (access(file, 4) < 0) {
-		printf("%s: cannot access %s\n", name, file);
+	if ((fd = open(file, O_RDONLY)) < 0) {
+		printf("%s: cannot open %s\n", name, file);
 		goto bad;
 	}
-	if (stat(file, &statb) < 0) {
+	if (fstat(fd, &statb) < 0) {
 		printf("%s: cannot stat %s\n", name, file);
 		goto bad;
 	}
@@ -608,10 +612,6 @@ test(file)
 		printf("%s: %s is an empty file\n", name, file);
 		goto bad;
  	}
-	if ((fd = open(file, O_RDONLY)) < 0) {
-		printf("%s: cannot open %s\n", name, file);
-		goto bad;
-	}
 	if (read(fd, &execb, sizeof(execb)) == sizeof(execb) &&
 	    !N_BADMAG(execb)) {
 			printf("%s: %s is an executable program and is unprintable",
@@ -621,7 +621,7 @@ test(file)
 	}
 	(void) close(fd);
 	if (rflag) {
-		if ((cp = rindex(file, '/')) == NULL) {
+		if ((cp = strrchr(file, '/')) == NULL) {
 			if (access(".", 2) == 0)
 				return(1);
 		} else {

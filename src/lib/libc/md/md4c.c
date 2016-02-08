@@ -22,7 +22,7 @@
  */
 
 #if defined(LIBC_SCCS) && !defined(lint)
-static char rcsid[] = "$OpenBSD: md4c.c,v 1.3 1996/09/29 14:55:25 millert Exp $";
+static char rcsid[] = "$OpenBSD: md4c.c,v 1.9 1997/04/30 05:56:05 tholo Exp $";
 #endif /* LIBC_SCCS and not lint */
 
 #include <string.h>
@@ -53,10 +53,8 @@ static void MD4Transform __P ((u_int32_t [4], const unsigned char [64]));
 #define Encode memcpy
 #define Decode memcpy                       
 #else /* BIG_ENDIAN */
-static void Encode __P
-  ((unsigned char *, u_int32_t *, unsigned int));
-static void Decode __P
-  ((u_int32_t *, const unsigned char *, unsigned int));
+static void Encode __P ((void *, const void *, size_t));
+static void Decode __P ((void *, const void *, size_t));
 #endif /* LITTLE_ENDIAN */
 
 static unsigned char PADDING[64] = {
@@ -94,12 +92,14 @@ static unsigned char PADDING[64] = {
 /* Encodes input (u_int32_t) into output (unsigned char). Assumes len is
      a multiple of 4.
  */
-static void Encode (output, input, len)
-unsigned char *output;
-u_int32_t *input;
-unsigned int len;
+static void Encode (out, in, len)
+void *out;
+const void *in;
+size_t len;
 {
-  unsigned int i, j;
+  const u_int32_t *input = in;
+  unsigned char *output = out;
+  size_t i, j;
 
   for (i = 0, j = 0; j < len; i++, j += 4) {
     output[j] = (unsigned char)(input[i] & 0xff);
@@ -112,12 +112,14 @@ unsigned int len;
 /* Decodes input (unsigned char) into output (u_int32_t). Assumes len is
      a multiple of 4.
  */
-static void Decode (output, input, len)
-u_int32_t *output;
-const unsigned char *input;
-unsigned int len;
+static void Decode (out, in, len)
+void *out;
+const void *in;
+size_t len;
 {
-  unsigned int i, j;
+  u_int32_t *output = out;
+  const unsigned char *input = in;
+  size_t i, j;
 
   for (i = 0, j = 0; j < len; i++, j += 4)
     output[i] = ((u_int32_t)input[j]) | (((u_int32_t)input[j+1]) << 8) |
@@ -130,7 +132,7 @@ unsigned int len;
 void MD4Init (context)
 MD4_CTX *context;                                        /* context */
 {
-  context->count[0] = context->count[1] = 0;
+  context->count = 0;
 
   /* Load magic initialization constants.
    */
@@ -147,21 +149,18 @@ MD4_CTX *context;                                        /* context */
 void MD4Update (context, input, inputLen)
 MD4_CTX *context;                                        /* context */
 const unsigned char *input;                                /* input block */
-unsigned int inputLen;                     /* length of input block */
+size_t inputLen;                     /* length of input block */
 {
   unsigned int i, index, partLen;
 
   /* Compute number of bytes mod 64 */
-  index = (unsigned int)((context->count[0] >> 3) & 0x3F);
+  index = (unsigned int)((context->count >> 3) & 0x3F);
+
   /* Update number of bits */
-  if ((context->count[0] += ((u_int32_t)inputLen << 3))
-      < ((u_int32_t)inputLen << 3))
-    context->count[1]++;
-  context->count[1] += ((u_int32_t)inputLen >> 29);
+  context->count += ((u_int64_t)inputLen << 3);
 
   partLen = 64 - index;
-  /* Transform as many times as possible.
-   */
+  /* Transform as many times as possible.  */
   if (inputLen >= partLen) {
     memcpy
       ((POINTER)&context->buffer[index], (POINTER)input, partLen);
@@ -190,13 +189,17 @@ MD4_CTX *context;                                        /* context */
 {
   unsigned char bits[8];
   unsigned int index, padLen;
+  u_int32_t hi, lo;
 
   /* Save number of bits */
-  Encode (bits, context->count, 8);
+  hi = context->count >> 32;
+  lo = (u_int32_t)context->count & 0xffffffff;
+  Encode (bits, &lo, 4);
+  Encode (bits + 4, &hi, 4);
 
   /* Pad out to 56 mod 64.
    */
-  index = (unsigned int)((context->count[0] >> 3) & 0x3f);
+  index = (unsigned int)((context->count >> 3) & 0x3f);
   padLen = (index < 56) ? (56 - index) : (120 - index);
   MD4Update (context, PADDING, padLen);
 

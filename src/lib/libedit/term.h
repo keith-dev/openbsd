@@ -1,3 +1,6 @@
+/*	$OpenBSD: term.h,v 1.3 1997/03/14 05:13:06 millert Exp $	*/
+/*	$NetBSD: term.h,v 1.4 1997/01/11 06:48:14 lukem Exp $	*/
+
 /*-
  * Copyright (c) 1992, 1993
  *	The Regents of the University of California.  All rights reserved.

@@ -1,4 +1,4 @@
-/*	$OpenBSD$	*/
+/*	$OpenBSD: table.c,v 1.3 1996/07/15 05:10:11 mickey Exp $	*/
 
 /*
  * Copyright (c) 1983 Regents of the University of California.

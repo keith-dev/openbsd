@@ -32,17 +32,25 @@
  */
 
 #if defined(LIBC_SCCS) && !defined(lint)
-static char *rcsid = "$OpenBSD: abort.c,v 1.1.1.1 1995/10/18 08:42:16 deraadt Exp $";
+static char *rcsid = "$OpenBSD: abort.c,v 1.4 1996/10/25 07:06:37 downsj Exp $";
 #endif /* LIBC_SCCS and not lint */
 
 #include <signal.h>
 #include <stdlib.h>
 #include <unistd.h>
 
+void (*__cleanup)();
+
 void
 abort()
 {
 	sigset_t mask;
+
+	/*
+	 * POSIX requires we flush stdio buffers on abort
+	 */
+	if (__cleanup)
+		(*__cleanup)();
 
 	sigfillset(&mask);
 	/*

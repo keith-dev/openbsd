@@ -36,7 +36,7 @@
  */
 
 #if defined(LIBC_SCCS) && !defined(lint)
-static char rcsid[] = "$OpenBSD: udivdi3.c,v 1.2 1995/02/27 17:31:09 cgd Exp $";
+static char rcsid[] = "$OpenBSD: udivdi3.c,v 1.2 1996/08/19 08:30:47 tholo Exp $";
 #endif /* LIBC_SCCS and not lint */
 
 #include "quad.h"

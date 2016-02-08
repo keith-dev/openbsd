@@ -1,4 +1,4 @@
-/*	$OpenBSD$	*/
+/*	$OpenBSD: api.c,v 1.2 1996/06/26 05:41:15 deraadt Exp $	*/
 
 /*-
  * Copyright (c) 1988 The Regents of the University of California.
@@ -35,7 +35,7 @@
 
 #ifndef lint
 /*static char sccsid[] = "from: @(#)api.c	4.5 (Berkeley) 4/26/91";*/
-static char rcsid[] = "$OpenBSD: api.c,v 1.1.1.1 1995/10/18 08:46:20 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: api.c,v 1.2 1996/06/26 05:41:15 deraadt Exp $";
 #endif /* not lint */
 
 /*

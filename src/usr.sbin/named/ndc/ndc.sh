@@ -1,6 +1,5 @@
 #!/bin/sh
-#
-#	$NetBSD: ndc.sh,v 1.1 1996/02/02 15:29:52 mrg Exp $
+#	$OpenBSD: ndc.sh,v 1.5 1997/03/12 14:51:57 downsj Exp $
 
 USAGE='echo \
 	"usage: $0 \

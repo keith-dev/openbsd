@@ -1,4 +1,4 @@
-/*	$OpenBSD: pax.c,v 1.5 1996/03/26 23:54:20 mrg Exp $	*/
+/*	$OpenBSD: pax.c,v 1.7 1997/04/05 22:36:17 millert Exp $	*/
 /*	$NetBSD: pax.c,v 1.5 1996/03/26 23:54:20 mrg Exp $	*/
 
 /*-
@@ -48,7 +48,7 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)pax.c	8.2 (Berkeley) 4/18/94";
 #else
-static char rcsid[] = "$OpenBSD: pax.c,v 1.5 1996/03/26 23:54:20 mrg Exp $";
+static char rcsid[] = "$OpenBSD: pax.c,v 1.7 1997/04/05 22:36:17 millert Exp $";
 #endif
 #endif /* not lint */
 
@@ -94,13 +94,16 @@ int	Zflag;			/* same as uflg except after name mode */
 int	vfpart;			/* is partial verbose output in progress */
 int	patime = 1;		/* preserve file access time */
 int	pmtime = 1;		/* preserve file modification times */
+int	nodirs;			/* do not create directories as needed */
 int	pmode;			/* preserve file mode bits */
 int	pids;			/* preserve file uid/gid */
+int	rmleadslash = 0;	/* remove leading '/' from pathnames */
 int	exit_val;		/* exit value */
 int	docrc;			/* check/create file crc */
 char	*dirptr;		/* destination dir in a copy */
 char	*ltmfrmt;		/* -v locale time format (if any) */
 char	*argv0;			/* root of argv[0] */
+char	*cwdpt;			/* starting cwd */
 sigset_t s_mask;		/* signal mask for cleanup critical sect */
 
 /*
@@ -233,6 +236,15 @@ main(argc, argv)
 	char **argv;
 #endif
 {
+	/*
+	 * Keep a reference to cwd, so we can always come back home.
+	 */
+	cwdpt = getcwd(NULL, 0);
+	if (cwdpt == NULL) {
+		syswarn(0, errno, "Can't get current working directory.");
+		return(exit_val);
+	}
+
 	/*
 	 * parse options, determine operational mode, general init
 	 */

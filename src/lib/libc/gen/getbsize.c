@@ -32,7 +32,7 @@
  */
 
 #if defined(LIBC_SCCS) && !defined(lint)
-static char rcsid[] = "$OpenBSD: getbsize.c,v 1.8 1996/01/22 16:34:08 mycroft Exp $";
+static char rcsid[] = "$OpenBSD: getbsize.c,v 1.3 1996/08/19 08:23:04 tholo Exp $";
 #endif /* not lint */
 
 #include <err.h>

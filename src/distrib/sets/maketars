@@ -1,6 +1,6 @@
 #!/bin/csh -f
 
-set RELEASE=20
+set RELEASE=21
 
 if (! $?RELEASEDIR) then
 	echo RELEASEDIR must be set
@@ -12,14 +12,14 @@ if (! $?DESTDIR) then
 	exit 1
 endif
 
-set arch=`uname -m`
+set arch=`machine`
 set listsdir=`pwd`/lists
 set tardir=$RELEASEDIR
 set fsdir=$DESTDIR
 
 cd $fsdir
 
-set lists=(base comp etc games text)
+set lists=(base comp etc game text)
 # SPECIAL: man misc
 # EXTRA SPECIAL (not done here): secr
 

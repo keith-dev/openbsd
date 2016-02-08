@@ -1,4 +1,4 @@
-/*	$OpenBSD: mkpar.c,v 1.3 1996/03/31 04:56:02 etheisen Exp $	*/
+/*	$OpenBSD: mkpar.c,v 1.4 1996/04/21 23:45:15 deraadt Exp $	*/
 
 /*	$NetBSD: mkpar.c,v 1.4 1996/03/19 03:21:39 jtc Exp $	*/
 

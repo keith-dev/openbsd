@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.2 1995/12/16 22:20:35 tholo Exp $
+#	$OpenBSD: Makefile,v 1.4 1997/04/19 21:26:29 millert Exp $
 
 PROG=	rsh
 SRCS=	rsh.c
@@ -7,7 +7,7 @@ BINMODE=4555
 
 .include <bsd.own.mk>	# For KERBEROS
 
-.if defined(KERBEROS)
+.if (${KERBEROS} == "yes")
 SRCS+=	des_rw.c
 .PATH:	${.CURDIR}/../rlogin
 CFLAGS+=-DKERBEROS

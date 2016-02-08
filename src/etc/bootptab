@@ -1,4 +1,4 @@
-#	$OpenBSD$
+#	$OpenBSD: bootptab,v 1.2 1996/05/26 10:25:17 deraadt Exp $
 #
 # /etc/bootptab: database for bootp server (/etc/bootpd)
 # Last update Mon 11/7/88 18:03

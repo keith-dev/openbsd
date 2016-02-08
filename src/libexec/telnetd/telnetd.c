@@ -1,4 +1,4 @@
-/*	$OpenBSD: telnetd.c,v 1.2 1996/03/28 23:22:03 niklas Exp $	*/
+/*	$OpenBSD: telnetd.c,v 1.6 1997/01/15 23:41:05 millert Exp $	*/
 /*	$NetBSD: telnetd.c,v 1.6 1996/03/20 04:25:57 tls Exp $	*/
 
 /*
@@ -45,7 +45,7 @@ static char copyright[] =
 static char sccsid[] = "@(#)telnetd.c	8.4 (Berkeley) 5/30/95";
 static char rcsid[] = "$NetBSD: telnetd.c,v 1.5 1996/02/28 20:38:23 thorpej Exp $";
 #else
-static char rcsid[] = "$OpenBSD: telnetd.c,v 1.2 1996/03/28 23:22:03 niklas Exp $";
+static char rcsid[] = "$OpenBSD: telnetd.c,v 1.6 1997/01/15 23:41:05 millert Exp $";
 #endif
 #endif /* not lint */
 
@@ -196,7 +196,7 @@ main(argc, argv)
 	highpty = getnpty();
 #endif /* CRAY */
 
-	while ((ch = getopt(argc, argv, valid_opts)) != EOF) {
+	while ((ch = getopt(argc, argv, valid_opts)) != -1) {
 		switch(ch) {
 
 #ifdef	AUTHENTICATION
@@ -383,7 +383,7 @@ main(argc, argv)
 		usage();
 		/* NOT REACHED */
 	    } else if (argc == 1) {
-		    if (sp = getservbyname(*argv, "tcp")) {
+		    if ((sp = getservbyname(*argv, "tcp"))) {
 			sin.sin_port = sp->s_port;
 		    } else {
 			sin.sin_port = atoi(*argv);

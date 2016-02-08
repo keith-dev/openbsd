@@ -1,4 +1,4 @@
-/*	$OpenBSD: mount.c,v 1.24 1995/11/18 03:34:29 cgd Exp $	*/
+/*	$OpenBSD: mount.c,v 1.16 1997/03/10 04:27:42 millert Exp $	*/
 /*	$NetBSD: mount.c,v 1.24 1995/11/18 03:34:29 cgd Exp $	*/
 
 /*
@@ -44,7 +44,7 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)mount.c	8.19 (Berkeley) 4/19/94";
 #else
-static char rcsid[] = "$OpenBSD: mount.c,v 1.24 1995/11/18 03:34:29 cgd Exp $";
+static char rcsid[] = "$OpenBSD: mount.c,v 1.16 1997/03/10 04:27:42 millert Exp $";
 #endif
 #endif /* not lint */
 
@@ -60,6 +60,7 @@ static char rcsid[] = "$OpenBSD: mount.c,v 1.24 1995/11/18 03:34:29 cgd Exp $";
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <util.h>
 
 #include "pathnames.h"
 
@@ -76,6 +77,7 @@ void	mangle __P((char *, int *, const char **));
 int	mountfs __P((const char *, const char *, const char *,
 			int, const char *, const char *, int));
 void	prmount __P((struct statfs *));
+int	disklabelcheck __P((struct fstab *));
 void	usage __P((void));
 
 /* Map from mount otions to printable formats. */
@@ -91,6 +93,8 @@ static struct opt {
 	{ MNT_EXPORTANON,	1,	"anon uid mapping" },
 	{ MNT_EXRDONLY,		1,	"exported read-only" },
 	{ MNT_LOCAL,		0,	"local" },
+	{ MNT_NOATIME,		0,	"noatime" },
+	{ MNT_NOATIME,		0,	"noaccesstime" },
 	{ MNT_NODEV,		0,	"nodev" },
 	{ MNT_NOEXEC,		0,	"noexec" },
 	{ MNT_NOSUID,		0,	"nosuid" },
@@ -118,7 +122,7 @@ main(argc, argv)
 	all = forceall = init_flags = 0;
 	options = NULL;
 	vfstype = "ffs";
-	while ((ch = getopt(argc, argv, "Aadfo:rwt:uv")) != EOF)
+	while ((ch = getopt(argc, argv, "Aadfo:rwt:uv")) != -1)
 		switch (ch) {
 		case 'A':
 			all = forceall = 1;
@@ -177,6 +181,8 @@ main(argc, argv)
 					continue;
 				if (hasopt(fs->fs_mntops, "noauto"))
 					continue;
+				if (disklabelcheck(fs))
+					continue;
 				if (mountfs(fs->fs_vfstype, fs->fs_spec,
 				    fs->fs_file, init_flags, options,
 				    fs->fs_mntops, !forceall))
@@ -225,10 +231,19 @@ main(argc, argv)
 		/*
 		 * If -t flag has not been specified, and spec contains either
 		 * a ':' or a '@' then assume that an NFS filesystem is being
-		 * specified ala Sun.
+		 * specified ala Sun.  If not, check the disklabel for a
+		 * known filesystem type.
 		 */
-		if (typelist == NULL && strpbrk(argv[0], ":@") != NULL)
-			vfstype = "nfs";
+		if (typelist == NULL) {
+			if (strpbrk(argv[0], ":@") != NULL)
+				vfstype = "nfs";
+			else {
+				char *labelfs = readlabelfs(argv[0], 0);
+				if (labelfs != NULL)
+					vfstype = labelfs;
+			}
+		}
+
 		rval = mountfs(vfstype,
 		    argv[0], argv[1], init_flags, options, NULL, 0);
 		break;
@@ -292,7 +307,7 @@ mountfs(vfstype, spec, name, flags, options, mntopts, skipmounted)
 	struct statfs sf;
 	pid_t pid;
 	int argc, i, status;
-	char *optbuf, execname[MAXPATHLEN + 1], mntpath[MAXPATHLEN];
+	char *optbuf, execname[MAXPATHLEN], mntpath[MAXPATHLEN];
 	char mountname[MAXPATHLEN];
 
 	if (realpath(name, mntpath) == NULL) {
@@ -345,8 +360,11 @@ mountfs(vfstype, spec, name, flags, options, mntopts, skipmounted)
 	if (flags & MNT_UPDATE)
 		optbuf = catopt(optbuf, "update");
 
+	(void)snprintf(mountname,
+	    sizeof(mountname), "mount_%s", vfstype);
+
 	argc = 0;
-	argv[argc++] = vfstype;
+	argv[argc++] = mountname;
 	mangle(optbuf, &argc, argv);
 	argv[argc++] = spec;
 	argv[argc++] = name;
@@ -360,9 +378,9 @@ mountfs(vfstype, spec, name, flags, options, mntopts, skipmounted)
 		return (0);
 	}
 
-	switch (pid = vfork()) {
+	switch (pid = fork()) {
 	case -1:				/* Error. */
-		warn("vfork");
+		warn("fork");
 		free(optbuf);
 		return (1);
 	case 0:					/* Child. */
@@ -371,9 +389,6 @@ mountfs(vfstype, spec, name, flags, options, mntopts, skipmounted)
 		do {
 			(void)snprintf(execname,
 			    sizeof(execname), "%s/mount_%s", *edir, vfstype);
-			(void)snprintf(mountname,
-			    sizeof(mountname), "mount_%s", vfstype);
-			argv[0] = mountname;
 			execv(execname, (char * const *)argv);
 			if (errno != ENOENT)
 				warn("exec %s for %s", execname, name);
@@ -566,3 +581,23 @@ usage()
 		"[-dfruvw] special | node");
 	exit(1);
 }
+
+int
+disklabelcheck(fs)
+	struct fstab *fs;
+{
+	char *labelfs;
+
+	if (strcmp(fs->fs_vfstype, "nfs") != 0 ||
+	    strpbrk(fs->fs_spec, ":@") == NULL) {
+		labelfs = readlabelfs(fs->fs_spec, 0);
+		if (labelfs == NULL ||
+		    strcmp(labelfs, fs->fs_vfstype) == 0)
+			return (0);
+		warnx("%s: fstab type %s != disklabel type %s",
+		    fs->fs_spec, fs->fs_vfstype, labelfs);
+		return (1);
+	}
+	return (0);
+}
+

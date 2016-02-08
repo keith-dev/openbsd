@@ -1,4 +1,4 @@
-/*	$OpenBSD: histedit.c,v 1.4 1996/09/15 22:43:50 millert Exp $	*/
+/*	$OpenBSD: histedit.c,v 1.7 1997/01/15 23:40:28 millert Exp $	*/
 /*	$NetBSD: histedit.c,v 1.8 1995/05/11 21:29:12 christos Exp $	*/
 
 /*-
@@ -41,7 +41,7 @@
 #if 0
 static char sccsid[] = "@(#)histedit.c	8.2 (Berkeley) 5/4/95";
 #else
-static char rcsid[] = "$OpenBSD: histedit.c,v 1.4 1996/09/15 22:43:50 millert Exp $";
+static char rcsid[] = "$OpenBSD: histedit.c,v 1.7 1997/01/15 23:40:28 millert Exp $";
 #endif
 #endif /* not lint */
 
@@ -97,7 +97,7 @@ histedit()
 			INTON;
 
 			if (hist != NULL)
-				sethistsize();
+				sethistsize(histsizeval());
 			else
 				out2str("sh: can't initialize history\n");
 		}
@@ -150,15 +150,14 @@ bad:
 
 
 void
-sethistsize()
+sethistsize(hs)
+	const char *hs;
 {
-	char *cp;
 	int histsize;
 
 	if (hist != NULL) {
-		cp = lookupvar("HISTSIZE");
-		if (cp == NULL || *cp == '\0' || 
-		   (histsize = atoi(cp)) < 0)
+		if (hs == NULL || *hs == '\0' ||
+		    (histsize = atoi(hs)) < 0)
 			histsize = 100;
 		history(hist, H_EVENT, histsize);
 	}
@@ -212,7 +211,7 @@ histcmd(argc, argv)
 
 	optreset = 1; optind = 1; /* initialize getopt */
 	while (not_fcnumber(argv[optind]) &&
-	      (ch = getopt(argc, argv, ":e:lnrs")) != EOF)
+	      (ch = getopt(argc, argv, ":e:lnrs")) != -1)
 		switch ((char)ch) {
 		case 'e':
 			editor = optarg;
@@ -231,6 +230,7 @@ histcmd(argc, argv)
 			break;
 		case ':':
 			error("option -%c expects argument", optopt);
+		case '?':
 		default:
 			error("unknown option: -%c", optopt);
 		}
@@ -332,7 +332,7 @@ histcmd(argc, argv)
 			error("can't create temporary file %s", editfile);
 		if ((efp = fdopen(fd, "w")) == NULL) {
 			close(fd);
-			error("can't allocate stdio buffer for temp\n");
+			error("can't allocate stdio buffer for temp");
 		}
 	}
 

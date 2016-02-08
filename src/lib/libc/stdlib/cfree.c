@@ -1,4 +1,4 @@
-/*	$OpenBSD$	*/
+/*	$OpenBSD: cfree.c,v 1.1 1996/08/21 03:47:22 tholo Exp $	*/
 
 /*
  * Copyright (c) 1996 SigmaSoft, Th. Lockert <tholo@sigmasoft.com>
@@ -31,7 +31,7 @@
  */
 
 #if defined(LIBC_SCCS) && !defined(lint)
-static char rcsid[] = "$OpenBSD$";
+static char rcsid[] = "$OpenBSD: cfree.c,v 1.1 1996/08/21 03:47:22 tholo Exp $";
 #endif /* LIBC_SCCS and not lint */
 
 #include <sys/cdefs.h>

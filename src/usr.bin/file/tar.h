@@ -1,4 +1,5 @@
-/* * $OpenBSD: tar.h,v 1.1.1.1 1995/10/18 08:45:09 deraadt Exp $ # checkin only*/
+/*	$OpenBSD: tar.h,v 1.3 1997/02/09 23:58:37 millert Exp $	*/
+
 /*
  * Header file for public domain tar (tape archive) program.
  *

@@ -1,3 +1,5 @@
+/*	$OpenBSD: lpc.c,v 1.5 1997/01/17 16:12:37 millert Exp $	*/
+
 /*
  * Copyright (c) 1983, 1993
  *	The Regents of the University of California.  All rights reserved.
@@ -39,7 +41,11 @@ static char copyright[] =
 #endif /* not lint */
 
 #ifndef lint
+#if 0
 static char sccsid[] = "@(#)lpc.c	8.3 (Berkeley) 4/28/95";
+#else
+static char rcsid[] = "$OpenBSD: lpc.c,v 1.5 1997/01/17 16:12:37 millert Exp $";
+#endif
 #endif /* not lint */
 
 #include <sys/param.h>
@@ -213,7 +219,8 @@ makeargv()
 	register int n = 0;
 
 	margc = 0;
-	for (cp = cmdline; *cp && n < MAX_MARGV; n++) {
+	for (cp = cmdline; *cp && (cp - cmdline) < sizeof(cmdline) &&
+	    n < MAX_MARGV; n++) {
 		while (isspace(*cp))
 			cp++;
 		if (*cp == '\0')

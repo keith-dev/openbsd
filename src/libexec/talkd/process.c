@@ -1,4 +1,4 @@
-/*	$OpenBSD: process.c,v 1.7 1996/07/02 04:11:15 deraadt Exp $	*/
+/*	$OpenBSD: process.c,v 1.8 1996/07/19 03:09:41 millert Exp $	*/
 
 /*
  * Copyright (c) 1983 Regents of the University of California.

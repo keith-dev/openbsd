@@ -1,4 +1,4 @@
-/*	$OpenBSD: temp.c,v 1.2 1996/06/11 12:53:51 deraadt Exp $	*/
+/*	$OpenBSD: temp.c,v 1.5 1997/03/29 03:01:47 millert Exp $	*/
 /*	$NetBSD: temp.c,v 1.5 1996/06/08 19:48:42 christos Exp $	*/
 
 /*
@@ -38,7 +38,7 @@
 #if 0
 static char sccsid[] = "@(#)temp.c	8.1 (Berkeley) 6/6/93";
 #else
-static char rcsid[] = "$OpenBSD: temp.c,v 1.2 1996/06/11 12:53:51 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: temp.c,v 1.5 1997/03/29 03:01:47 millert Exp $";
 #endif
 #endif /* not lint */
 
@@ -64,8 +64,16 @@ tinit()
 {
 	register char *cp;
 
-	if ((tmpdir = getenv("TMPDIR")) == NULL) {
+	if ((tmpdir = getenv("TMPDIR")) == NULL || *tmpdir == '\0')
 		tmpdir = _PATH_TMP;
+	if ((tmpdir = strdup(tmpdir)) == NULL)
+		panic("Out of memory");
+
+	/* Strip trailing '/' if necesary */
+	cp = tmpdir + strlen(tmpdir) - 1;
+	while (cp > tmpdir && *cp == '/') {
+		*cp = '\0';
+		cp--;
 	}
 
 	tempMail  = tempnam(tmpdir, "Rs");
@@ -92,7 +100,7 @@ tinit()
 		} else
 			myname = savestr(cp);
 	}
-	if ((cp = getenv("HOME")) == NOSTR)
+	if ((cp = getenv("HOME")) == NOSTR || strlen(getenv("HOME")) >= PATHSIZE)
 		cp = ".";
 	homedir = savestr(cp);
 	if (debug)

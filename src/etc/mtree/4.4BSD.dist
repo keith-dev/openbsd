@@ -1,4 +1,4 @@
-#	$OpenBSD: 4.4BSD.dist,v 1.25 1996/09/06 17:27:02 deraadt Exp $
+#	$OpenBSD: 4.4BSD.dist,v 1.36 1997/05/02 22:26:15 graichen Exp $
 
 /set type=dir uname=root gname=wheel mode=0755
 # .
@@ -18,7 +18,7 @@ bin
 dev
 
 # ./dev/fd
-fd		gname=bin uname=root mode=0555
+fd		mode=0555
 # ./dev/fd
 ..
 
@@ -113,7 +113,7 @@ bin
 games
 
 # ./usr/games/hide
-hide            gname=games uname=games mode=0700
+hide            gname=games uname=root mode=0550
 # ./usr/games/hide
 ..
 
@@ -136,9 +136,9 @@ gen		gname=bin uname=root mode=0755
 # ./usr/include/g++/gen
 ..
 
-# ./include/g++/std
+# ./usr/include/g++/std
 std             gname=bin uname=root mode=0555
-# ./include/g++/std
+# ./usr/include/g++/std
 ..
 
 # ./usr/include/g++
@@ -252,11 +252,6 @@ cat3
 
 # ./usr/local/man/cat4
 cat4
-
-# ./usr/local/man/cat4/i386
-i386
-# ./usr/local/man/cat4/i386
-..
 
 # ./usr/local/man/cat4
 ..
@@ -505,17 +500,6 @@ smm
 
 # ./usr/share/doc/smm/01.setup
 01.setup
-
-# ./usr/share/doc/smm/01.setup/tahoe
-tahoe
-# ./usr/share/doc/smm/01.setup/tahoe
-..
-
-# ./usr/share/doc/smm/01.setup/vax
-vax
-# ./usr/share/doc/smm/01.setup/vax
-..
-
 # ./usr/share/doc/smm/01.setup
 ..
 
@@ -919,11 +903,6 @@ cat3
 # ./usr/share/man/cat3
 ..
 
-# ./usr/share/man/cat3f
-cat3f
-# ./usr/share/man/cat3f
-..
-
 # ./usr/share/man/cat4
 cat4
 
@@ -982,11 +961,6 @@ sun3
 # ./usr/share/man/cat4/sun3
 ..
 
-# ./usr/share/man/cat4/tahoe
-tahoe
-# ./usr/share/man/cat4/tahoe
-..
-
 # ./usr/share/man/cat4/vax
 vax
 # ./usr/share/man/cat4/vax
@@ -1018,6 +992,11 @@ cat7
 # ./usr/share/man/cat8
 cat8
 
+# ./usr/share/man/cat8/alpha
+alpha
+# ./usr/share/man/cat8/alpha
+..
+
 # ./usr/share/man/cat8/amiga
 amiga
 # ./usr/share/man/cat8/amiga
@@ -1026,6 +1005,11 @@ amiga
 # ./usr/share/man/cat8/arm32
 arm32
 # ./usr/share/man/cat8/arm32
+..
+
+# ./usr/share/man/cat8/arc
+arc
+# ./usr/share/man/cat8/arc
 ..
 
 # ./usr/share/man/cat8/atari
@@ -1063,6 +1047,16 @@ pc532
 # ./usr/share/man/cat8/pc532
 ..
 
+# ./usr/share/man/cat8/pmax
+pmax
+# ./usr/share/man/cat8/pmax
+..
+
+# ./usr/share/man/cat8/powerpc
+powerpc
+# ./usr/share/man/cat8/powerpc
+..
+
 # ./usr/share/man/cat8/sparc
 sparc
 # ./usr/share/man/cat8/sparc
@@ -1073,19 +1067,14 @@ sun3
 # ./usr/share/man/cat8/sun3
 ..
 
-# ./usr/share/man/cat8/tahoe
-tahoe
-# ./usr/share/man/cat8/tahoe
-..
-
 # ./usr/share/man/cat8/vax
 vax
 # ./usr/share/man/cat8/vax
 ..
 
-# ./usr/share/man/cat8/x68k
-x68k
-# ./usr/share/man/cat8/x68k
+# ./usr/share/man/cat8/wgrisc
+wgrisc
+# ./usr/share/man/cat8/wgrisc
 ..
 
 # ./usr/share/man/cat8
@@ -1109,11 +1098,6 @@ man2
 # ./usr/share/man/man3
 man3
 # ./usr/share/man/man3
-..
-
-# ./usr/share/man/man3f
-man3f
-# ./usr/share/man/man3f
 ..
 
 # ./usr/share/man/man4
@@ -1174,11 +1158,6 @@ sun3
 # ./usr/share/man/man4/sun3
 ..
 
-# ./usr/share/man/man4/tahoe
-tahoe
-# ./usr/share/man/man4/tahoe
-..
-
 # ./usr/share/man/man4/vax
 vax
 # ./usr/share/man/man4/vax
@@ -1211,8 +1190,18 @@ man7
 man8
 
 # ./usr/share/man/man8/amiga
+alpha
+# ./usr/share/man/man8/amiga
+..
+
+# ./usr/share/man/man8/amiga
 amiga
 # ./usr/share/man/man8/amiga
+..
+
+# ./usr/share/man/man8/arc
+arc
+# ./usr/share/man/man8/arc
 ..
 
 # ./usr/share/man/man8/arm32
@@ -1255,6 +1244,16 @@ pc532
 # ./usr/share/man/man8/pc532
 ..
 
+# ./usr/share/man/man8/pmax
+pmax
+# ./usr/share/man/man8/pmax
+..
+
+# ./usr/share/man/man8/powerpc
+powerpc
+# ./usr/share/man/man8/powerpc
+..
+
 # ./usr/share/man/man8/sparc
 sparc
 # ./usr/share/man/man8/sparc
@@ -1265,19 +1264,14 @@ sun3
 # ./usr/share/man/man8/sun3
 ..
 
-# ./usr/share/man/man8/tahoe
-tahoe
-# ./usr/share/man/man8/tahoe
-..
-
 # ./usr/share/man/man8/vax
 vax
 # ./usr/share/man/man8/vax
 ..
 
-# ./usr/share/man/man8/x68k
-x68k
-# ./usr/share/man/man8/x68k
+# ./usr/share/man/man8/wgrisc
+wgrisc
+# ./usr/share/man/man8/wgrisc
 ..
 
 # ./usr/share/man/man8
@@ -1404,7 +1398,7 @@ account
 ..
 
 # ./var/at
-at
+at		gname=daemon
 
 # ./var/at/jobs
 jobs		mode=0700
@@ -1425,7 +1419,7 @@ backups
 ..
 
 # ./var/yp
-yp		mode=775
+yp		mode=755
 # ./var/yp
 ..
 
@@ -1435,7 +1429,7 @@ crash		mode=770
 ..
 
 # ./var/cron
-cron
+cron		mode=0555
 
 # ./var/cron/tabs
 tabs		mode=0700
@@ -1457,13 +1451,13 @@ ns
 ..
 
 # ./var/games
-games            uname=games gname=games mode=0775
+games            uname=root gname=games mode=0775
 
 # ./var/games/hackdir
-hackdir          uname=games gname=games mode=0775
+hackdir          uname=root gname=games mode=0775
 
 # ./var/games/hackdir/save
-save		 uname=games gname=games mode=0770
+save		 uname=root gname=games mode=0770
 # ./var/games/hackdir/save
 ..
 
@@ -1471,17 +1465,17 @@ save		 uname=games gname=games mode=0770
 ..
 
 # ./var/games/hackdir/save		XXX
-save		uname=games gname=games mode=0775
+save		uname=root gname=games mode=0775
 # ./var/games/hackdir/save		XXX
 ..
 
 # ./var/games/larn
-larn             uname=games gname=games mode=0775
+larn             uname=root gname=games mode=0775
 # ./var/games/larn
 ..
 
 # ./var/games/phantasia
-phantasia        uname=games gname=games mode=0775
+phantasia        uname=root gname=games mode=0775
 # ./var/games/phantasia
 ..
 

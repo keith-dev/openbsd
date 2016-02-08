@@ -1,4 +1,4 @@
-/*	$OpenBSD: getterm.c,v 1.10 1996/09/03 05:11:11 tholo Exp $	*/
+/*	$OpenBSD: getterm.c,v 1.13 1996/12/14 07:18:47 tholo Exp $	*/
 
 /*
  * Copyright (c) 1996 SigmaSoft, Th. Lockert <tholo@sigmasoft.com>
@@ -31,7 +31,7 @@
  */
 
 #ifndef lint
-static char rcsid[] = "$OpenBSD: getterm.c,v 1.10 1996/09/03 05:11:11 tholo Exp $";
+static char rcsid[] = "$OpenBSD: getterm.c,v 1.13 1996/12/14 07:18:47 tholo Exp $";
 #endif
 
 #include <stdlib.h>
@@ -143,13 +143,19 @@ _ti_gettermcap(name)
 	char *s;
 
 	if ((s = home = strchr(dummy, ':')) == NULL) {
-	    cur_term->name = strdup(name);
+	    cur_term->name = cur_term->names = strdup(name);
 	    strncpy(ttytype, name, MAXSIZE - 1);
 	    ttytype[MAXSIZE - 1] = '\0';
 	}
 	else {
+	    size_t n;
+
+	    n = s - dummy - (dummy[2] == '|' ? 3 : 0);
+	    cur_term->names = malloc(n + 1);
+	    strncpy(cur_term->names, dummy + (dummy[2] == '|' ? 3 : 0), n);
+	    cur_term->names[n] = '\0';
 	    strncpy(ttytype, dummy + (dummy[2] == '|' ? 3 : 0),
-		    MIN(MAXSIZE - 1, s - dummy));
+		    (size_t)MIN(MAXSIZE - 1, s - dummy));
 	    ttytype[MAXSIZE - 1] = '\0';
 	    *home = '\0';
 	    while (s > dummy && *s != '|')
@@ -286,13 +292,19 @@ _ti_getterminfo(name)
 	char *s;
 
 	if ((s = home = strchr(dummy, ':')) == NULL) {
-	    cur_term->name = strdup(name);
+	    cur_term->name = cur_term->names = strdup(name);
 	    strncpy(ttytype, name, MAXSIZE - 1);
 	    ttytype[MAXSIZE - 1] = '\0';
 	}
 	else {
+	    size_t n;
+
+	    n = s - dummy - (dummy[2] == '|' ? 3 : 0);
+	    cur_term->names = malloc(n + 1);
+	    strncpy(cur_term->names, dummy + (dummy[2] == '|' ? 3 : 0), n);
+	    cur_term->names[n] = '\0';
 	    strncpy(ttytype, dummy + (dummy[2] == '|' ? 3 : 0),
-		    MIN(MAXSIZE - 1, s - dummy));
+		    (size_t)MIN(MAXSIZE - 1, s - dummy));
 	    ttytype[MAXSIZE - 1] = '\0';
 	    *home = '\0';
 	    while (s > dummy && *s != '|')

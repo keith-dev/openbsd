@@ -1,4 +1,4 @@
-/*	$OpenBSD$	*/
+/*	$OpenBSD: aptest.c,v 1.2 1996/12/21 22:23:39 millert Exp $	*/
 /* 
  * Copyright 1994  	Doug Anson, danson@lgc.com & David Holland, davidh@use.com
  *
@@ -108,7 +108,7 @@ int main(int argc,char **argv)
 			printf("%c",addr[i]);
         	/* printf("addr[%d]=%c\n",i,addr[i]);
 			 */
-		printf("\nDONE displaying memory contents (%d bytes)\n",stop);
+		printf("\nDONE displaying memory contents (%ld bytes)\n",stop);
 
 		/* unmap and close */
 		printf("UNMAPPING [0x%x ,size=%d) to addr=0x%x... and closing...",

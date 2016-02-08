@@ -1,4 +1,4 @@
-%Start A strng sc reg comment
+%Start A str sc reg comment
 
 %{
 /****************************************************************
@@ -29,15 +29,13 @@ USE OR PERFORMANCE OF THIS SOFTWARE.
    may not be preserved in other implementations of lex.
 */
 
-#ifndef FLEX_SCANNER
 #undef	input	/* defeat lex */
 #undef	unput
-#endif /* !FLEX_SCANNER */
 
 #include <stdlib.h>
 #include <string.h>
 #include "awk.h"
-#include "awkgram.h"
+#include "ytab.h"
 
 extern YYSTYPE	yylval;
 extern int	infunc;
@@ -62,20 +60,6 @@ int	parencnt = 0;
 char	*s;
 Gstring	*gs = 0;	/* initialized in main() */
 int	cflag;
-
-#ifdef FLEX_SCANNER
-static	int	my_input( YY_CHAR *buf, int max_size );
-
-#undef YY_INPUT
-#define YY_INPUT(buf,result,max_size) result = my_input(buf, max_size);
-
-#undef YY_USER_INIT
-#define YY_USER_INIT init_input_source();
-
-#define	FIRST	((yy_start - 1) / 2)
-#else /* FLEX_SCANNER */
-#define	FIRST	(yybgin - yysvec - 1)
-#endif /* FLEX_SCANNER */
 %}
 
 A	[a-zA-Z_]
@@ -86,7 +70,7 @@ H	[0-9a-fA-F]
 WS	[ \t]
 
 %%
-	switch (FIRST) {	/* witchcraft */
+	switch (yybgin-yysvec-1) {	/* witchcraft */
 	case 0:
 		BEGIN A;
 		break;
@@ -132,20 +116,14 @@ WS	[ \t]
 
 <A>"$"{D}+	{ yylval.cp = fieldadr(atoi(yytext+1)); RET(FIELD); }
 <A>"$NF"	{ unputstr("(NF)"); return(INDIRECT); }
-<A>"$"{A}{B}*	{
-		  int c;
-		  char *yytext_copy = strdup(yytext);
-		  c = input(); unput(c);	/* look for '(' or '[' */
-		  if (c == '(' || c == '[' ||
-		      infunc && isarg(yytext_copy+1) >= 0) {
-			  unputstr(yytext_copy+1);
-			  free(yytext_copy);
-			  return(INDIRECT);
+<A>"$"{A}{B}*	{ int c, n;
+		  c = input(); unput(c);
+		  if (c == '(' || c == '[' || (infunc && (n=isarg(yytext+1)) >= 0)) {
+			unputstr(yytext+1);
+			return(INDIRECT);
 		  } else {
-			  yylval.cp =
-				setsymtab(yytext_copy+1,"",0.0,STR|NUM,symtab);
-			  free(yytext_copy);
-			  RET(IVAR);
+			yylval.cp = setsymtab(yytext+1, "", 0.0, STR|NUM, symtab);
+			RET(IVAR);
 		  }
 		}
 <A>"$"		{ RET(INDIRECT); }
@@ -195,15 +173,12 @@ WS	[ \t]
 <A>fflush	{ yylval.i = FFLUSH; RET(BLTIN); }
 
 <A>{A}{B}*	{ int n, c;
-		  char *yytext_copy = strdup(yytext);
 		  c = input(); unput(c);	/* look for '(' */
-		  if (c != '(' && infunc && (n=isarg(yytext_copy)) >= 0) {
+		  if (c != '(' && infunc && (n=isarg(yytext)) >= 0) {
 			yylval.i = n;
-			free(yytext_copy);
 			RET(ARG);
 		  } else {
-			yylval.cp = setsymtab(yytext_copy, "", 0.0, STR|NUM, symtab);
-			free(yytext_copy);
+			yylval.cp = setsymtab(yytext, "", 0.0, STR|NUM, symtab);
 			if (c == '(') {
 				RET(CALL);
 			} else {
@@ -211,7 +186,7 @@ WS	[ \t]
 			}
 		  }
 		}
-<A>\"		{ BEGIN strng; caddreset(gs); }
+<A>\"		{ BEGIN str; caddreset(gs); }
 
 <A>"}"		{ if (--bracecnt < 0) ERROR "extra }" SYNTAX; BEGIN sc; RET(';'); }
 <A>"]"		{ if (--brackcnt < 0) ERROR "extra ]" SYNTAX; RET(']'); }
@@ -231,28 +206,28 @@ WS	[ \t]
 		  RET(REGEXPR); }
 <reg>.		{ CADD; }
 
-<strng>\"	{ BEGIN A;
+<str>\"		{ BEGIN A;
 		  cadd(gs, 0); s = tostring(gs->cbuf);
 		  cunadd(gs);
 		  cadd(gs, ' '); cadd(gs, 0);
 		  yylval.cp = setsymtab(gs->cbuf, s, 0.0, CON|STR, symtab);
 		  RET(STRING); }
-<strng>\n	{ ERROR "newline in string %.10s...", gs->cbuf SYNTAX; lineno++; BEGIN A; }
-<strng>"\\\""	{ cadd(gs, '"'); }
-<strng>"\\"n	{ cadd(gs, '\n'); }
-<strng>"\\"t	{ cadd(gs, '\t'); }
-<strng>"\\"f	{ cadd(gs, '\f'); }
-<strng>"\\"r	{ cadd(gs, '\r'); }
-<strng>"\\"b	{ cadd(gs, '\b'); }
-<strng>"\\"v	{ cadd(gs, '\v'); }	/* these ANSIisms may not be known by */
-<strng>"\\"a	{ cadd(gs, '\007'); }	/* your compiler. hence 007 for bell */
-<strng>"\\\\"	{ cadd(gs, '\\'); }
-<strng>"\\"({O}{O}{O}|{O}{O}|{O}) { int n;
+<str>\n		{ ERROR "newline in string %.10s...", gs->cbuf SYNTAX; lineno++; BEGIN A; }
+<str>"\\\""	{ cadd(gs, '"'); }
+<str>"\\"n	{ cadd(gs, '\n'); }
+<str>"\\"t	{ cadd(gs, '\t'); }
+<str>"\\"f	{ cadd(gs, '\f'); }
+<str>"\\"r	{ cadd(gs, '\r'); }
+<str>"\\"b	{ cadd(gs, '\b'); }
+<str>"\\"v	{ cadd(gs, '\v'); }	/* these ANSIisms may not be known by */
+<str>"\\"a	{ cadd(gs, '\007'); }	/* your compiler. hence 007 for bell */
+<str>"\\\\"	{ cadd(gs, '\\'); }
+<str>"\\"({O}{O}{O}|{O}{O}|{O}) { int n;
 		  sscanf(yytext+1, "%o", &n); cadd(gs, n); }
-<strng>"\\"x({H}+) { int n;	/* ANSI permits any number! */
+<str>"\\"x({H}+) { int n;	/* ANSI permits any number! */
 		  sscanf(yytext+2, "%x", &n); cadd(gs, n); }
-<strng>"\\".	{ cadd(gs, yytext[1]); }
-<strng>.	{ CADD; }
+<str>"\\".	{ cadd(gs, yytext[1]); }
+<str>.		{ CADD; }
 
 %%
 
@@ -262,32 +237,6 @@ void startreg(void)	/* start parsing a regular expression */
 	caddreset(gs);
 }
 
-#ifdef FLEX_SCANNER
-static int my_input( YY_CHAR *buf, int max_size )
-{
-	extern uschar *lexprog;
-
-	if ( lexprog ) {		/* awk '...' */
-		int num_chars = strlen( lexprog );
-		if ( num_chars > max_size )
-			{
-			num_chars = max_size;
-			strncpy( buf, lexprog, num_chars );
-			}
-		else
-			strcpy( buf, lexprog );
-		lexprog += num_chars;
-		return num_chars;
-
-	} else {			/* awk -f ... */
-		int c = pgetc();
-		if (c == EOF)
-			return 0;
-		buf[0] = c;
-		return 1;
-	}
-}
-#else /* FLEX_SCANNER */
 /* input() and unput() are transcriptions of the standard lex
    macros for input and output with additions for error message
    printing.  God help us all if someone changes how lex works.
@@ -326,7 +275,7 @@ void unput(int c)	/* put lexical character back on input */
 	if (--ep < ebuf)
 		ep = ebuf + sizeof(ebuf) - 1;
 }
-#endif /* FLEX_SCANNER */
+
 
 void unputstr(char *s)	/* put a string back on input */
 {
@@ -334,11 +283,6 @@ void unputstr(char *s)	/* put a string back on input */
 
 	for (i = strlen(s)-1; i >= 0; i--)
 		unput(s[i]);
-}
-
-int lex_input()
-{
-	return input();
 }
 
 /* growing-string code */
@@ -386,20 +330,3 @@ void delGstring(Gstring *gs)
 	free((void *) gs->cbuf);
 	free((void *) gs);
 }
-
-#ifdef FLEX_SCANNER
-void init_input_source(void)
-{
-	extern int curpfile;
-	extern char *pfile[];
-
-	if (yyin == NULL) {
-		if (pfile[curpfile] == 0)
-			return;
-		if (strcmp((char *) pfile[curpfile], "-") == 0)
-			yyin = stdin;
-		else if ((yyin = fopen((char *) pfile[curpfile], "r")) == NULL)
-			ERROR "can't open file %s", pfile[curpfile] FATAL;
-	}
-}
-#endif

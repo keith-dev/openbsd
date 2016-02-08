@@ -1,4 +1,4 @@
-/*	$OpenBSD$	*/
+/*	$OpenBSD: head.c,v 1.3 1997/01/15 23:42:33 millert Exp $	*/
 
 /*
  * Copyright (c) 1980, 1987 Regents of the University of California.
@@ -41,7 +41,7 @@ char copyright[] =
 
 #ifndef lint
 /*static char sccsid[] = "from: @(#)head.c	5.5 (Berkeley) 6/1/90";*/
-static char rcsid[] = "$OpenBSD: head.c,v 1.1.1.1 1995/10/18 08:45:23 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: head.c,v 1.3 1997/01/15 23:42:33 millert Exp $";
 #endif /* not lint */
 
 #include <stdio.h>
@@ -73,7 +73,7 @@ main(argc, argv)
 		argc--; argv++;
 	}
 
-	while ((ch = getopt (argc, argv, "n:")) != EOF)
+	while ((ch = getopt (argc, argv, "n:")) != -1)
 		switch (ch) {
 		case 'n':
 			if ((linecnt = atoi(optarg)) < 0)

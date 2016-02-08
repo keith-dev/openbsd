@@ -1,3 +1,5 @@
+/*	$OpenBSD: lpq.c,v 1.7 1997/01/17 16:12:44 millert Exp $	*/
+
 /*
  * Copyright (c) 1983, 1993
  *	The Regents of the University of California.  All rights reserved.
@@ -39,7 +41,11 @@ static char copyright[] =
 #endif /* not lint */
 
 #ifndef lint
+#if 0
 static char sccsid[] = "@(#)lpq.c	8.3 (Berkeley) 5/10/95";
+#else
+static char rcsid[] = "$OpenBSD: lpq.c,v 1.7 1997/01/17 16:12:44 millert Exp $";
+#endif
 #endif /* not lint */
 
 /*
@@ -95,7 +101,7 @@ main(argc, argv)
 	openlog("lpd", 0, LOG_LPR);
 
 	aflag = lflag = 0;
-	while ((ch = getopt(argc, argv, "alP:")) != EOF)
+	while ((ch = getopt(argc, argv, "alP:")) != -1)
 		switch((char)ch) {
 		case 'a':
 			++aflag;

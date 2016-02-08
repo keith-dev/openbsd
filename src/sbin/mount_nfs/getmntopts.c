@@ -1,4 +1,4 @@
-/*	$OpenBSD$	*/
+/*	$OpenBSD: getmntopts.c,v 1.1 1996/03/21 00:15:58 niklas Exp $	*/
 
 /*-
  * Copyright (c) 1994

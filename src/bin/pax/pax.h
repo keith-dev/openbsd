@@ -1,4 +1,4 @@
-/*	$OpenBSD: pax.h,v 1.3 1996/06/23 14:20:40 deraadt Exp $	*/
+/*	$OpenBSD: pax.h,v 1.8 1997/04/06 06:11:14 millert Exp $	*/
 /*	$NetBSD: pax.h,v 1.3 1995/03/21 09:07:41 cgd Exp $	*/
 
 /*-
@@ -44,9 +44,10 @@
  * BSD PAX global data structures and constants.
  */
 
-#define	MAXBLK		32256	/* MAX blocksize supported (posix SPEC) */
+#define	MAXBLK		64512	/* MAX blocksize supported (posix SPEC) */
 				/* WARNING: increasing MAXBLK past 32256 */
 				/* will violate posix spec. */
+#define	MAXBLK_POSIX	32256	/* MAX blocksize supported as per POSIX */
 #define BLKMULT		512	/* blocksize must be even mult of 512 bytes */
 				/* Don't even think of changing this */
 #define DEVBLK		8192	/* default read blksize for devices */
@@ -74,12 +75,6 @@
 #define ISPIPE		4	/* pipe/socket */
 
 /*
- * Compression types
- */
-#define	GZIP_CMP	1	/* gzip format */
-#define	COMPRESS_CMP	2	/* compress format */
-
-/*
  * Format Specific Routine Table
  *
  * The format specific routine table allows new archive formats to be quickly
@@ -95,7 +90,7 @@ typedef struct {
 	int bsz;		/* default block size. used when the user */
 				/* does not specify a blocksize for writing */
 				/* Appends continue to with the blocksize */
-				/* the archive is currently using.*/
+				/* the archive is currently using. */
 	int hsz;		/* Header size in bytes. this is the size of */
 				/* the smallest header this format supports. */
 				/* Headers are assumed to fit in a BLKMULT. */
@@ -172,6 +167,7 @@ typedef struct {
 typedef struct pattern {
 	char		*pstr;		/* pattern to match, user supplied */
 	char		*pend;		/* end of a prefix match */
+	char		*chdname;	/* the dir to change to if not NULL.  */
 	int		plen;		/* length of pstr */
 	int		flgs;		/* processing/state flags */
 #define MTCH		0x1		/* pattern has been matched */

@@ -1,4 +1,4 @@
-/*	$OpenBSD: rcmdsh.c,v 1.2 1996/09/01 20:28:22 millert Exp $	*/ 
+/*	$OpenBSD: rcmdsh.c,v 1.3 1996/09/15 09:31:17 tholo Exp $	*/ 
 
 /*
  * This is an rcmd() replacement originally by 
@@ -6,7 +6,7 @@
  */
 
 #if defined(LIBC_SCCS) && !defined(lint)
-static char *rcsid = "$OpenBSD: rcmdsh.c,v 1.2 1996/09/01 20:28:22 millert Exp $";
+static char *rcsid = "$OpenBSD: rcmdsh.c,v 1.3 1996/09/15 09:31:17 tholo Exp $";
 #endif /* LIBC_SCCS and not lint */
 
 #include      <sys/types.h>

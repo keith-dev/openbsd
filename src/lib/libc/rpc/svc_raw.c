@@ -28,7 +28,7 @@
  */
 
 #if defined(LIBC_SCCS) && !defined(lint)
-static char *rcsid = "$OpenBSD: svc_raw.c,v 1.3 1996/08/19 08:31:54 tholo Exp $";
+static char *rcsid = "$OpenBSD: svc_raw.c,v 1.4 1996/09/15 09:31:39 tholo Exp $";
 #endif /* LIBC_SCCS and not lint */
 
 /*

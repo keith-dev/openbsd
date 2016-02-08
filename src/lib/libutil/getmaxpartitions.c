@@ -1,4 +1,4 @@
-/*	$OpenBSD$	*/
+/*	$OpenBSD: getmaxpartitions.c,v 1.2 1996/06/17 07:46:01 downsj Exp $	*/
 /*	$NetBSD: getmaxpartitions.c,v 1.1 1996/05/16 07:03:31 thorpej Exp $	*/
 
 /*-

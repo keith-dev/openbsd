@@ -1,4 +1,4 @@
-/*	$OpenBSD: ipcp.h,v 1.2 1996/03/25 15:55:44 niklas Exp $	*/
+/*	$OpenBSD: ipcp.h,v 1.3 1996/07/20 12:02:09 joshd Exp $	*/
 
 /*
  * ipcp.h - IP Control Protocol definitions.

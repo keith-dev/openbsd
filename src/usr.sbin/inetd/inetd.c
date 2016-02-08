@@ -1,4 +1,4 @@
-/*	$OpenBSD: inetd.c,v 1.20 1996/08/28 09:55:00 deraadt Exp $	*/
+/*	$OpenBSD: inetd.c,v 1.25 1997/02/24 12:48:06 deraadt Exp $	*/
 /*	$NetBSD: inetd.c,v 1.11 1996/02/22 11:14:41 mycroft Exp $	*/
 /*
  * Copyright (c) 1983,1991 The Regents of the University of California.
@@ -41,7 +41,7 @@ char copyright[] =
 
 #ifndef lint
 /*static char sccsid[] = "from: @(#)inetd.c	5.30 (Berkeley) 6/3/91";*/
-static char rcsid[] = "$OpenBSD: inetd.c,v 1.20 1996/08/28 09:55:00 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: inetd.c,v 1.25 1997/02/24 12:48:06 deraadt Exp $";
 #endif /* not lint */
 
 /*
@@ -151,10 +151,10 @@ static char rcsid[] = "$OpenBSD: inetd.c,v 1.20 1996/08/28 09:55:00 deraadt Exp 
 
 extern	int errno;
 
-void	config __P((void));
-void	reapchild __P((void));
-void	retry __P((void));
-void	goaway __P((void));
+void	config __P((int));
+void	reapchild __P((int));
+void	retry __P((int));
+void	goaway __P((int));
 
 int	debug = 0;
 int	nsock, maxsock;
@@ -289,7 +289,7 @@ main(argc, argv, envp)
 	progname = strrchr(argv[0], '/');
 	progname = progname ? progname + 1 : argv[0];
 
-	while ((ch = getopt(argc, argv, "d")) != EOF)
+	while ((ch = getopt(argc, argv, "d")) != -1)
 		switch(ch) {
 		case 'd':
 			debug = 1;
@@ -319,6 +319,14 @@ main(argc, argv, envp)
 		if (uid == 0)
 			(void) setlogin("");
 	}
+
+	if (uid == 0) {
+		gid_t gid = getgid();
+
+		/* If run by hand, ensure groups vector gets trashed */
+		setgroups(1, &gid);
+	}
+
 	openlog(progname, LOG_PID | LOG_NOWAIT, LOG_DAEMON);
 	logpid();
 
@@ -336,7 +344,7 @@ main(argc, argv, envp)
 	sv.sv_mask = SIGBLOCK;
 	sv.sv_handler = retry;
 	sigvec(SIGALRM, &sv, (struct sigvec *)0);
-	config();
+	config(0);
 	sv.sv_handler = config;
 	sigvec(SIGHUP, &sv, (struct sigvec *)0);
 	sv.sv_handler = reapchild;
@@ -400,8 +408,7 @@ main(argc, argv, envp)
 				continue;
 			}
 			if (ntohs(peer.sin_port) == 20) {
-				syslog(LOG_INFO, "Connect to %s from port %d",
-				    sep->se_service, ntohs(peer.sin_port));
+				/* XXX ftp bounce */
 				close(ctrl);
 				continue;
 			}
@@ -494,7 +501,8 @@ main(argc, argv, envp)
 					initgroups(pwd->pw_name, pwd->pw_gid);
 					(void) setuid((uid_t)pwd->pw_uid);
 				} else if (sep->se_group) {
-					(void) setgid((gid_t)grp->gr_gid);
+					(void) setgid(grp->gr_gid);
+					(void) setgroups(1, &grp->gr_gid);
 				}
 				if (debug)
 					fprintf(stderr, "%d execl %s\n",
@@ -536,8 +544,6 @@ dg_badinput(sin)
 {
 	if (ntohs(sin->sin_port) < IPPORT_RESERVED)
 		return (1);
-	if (ntohs(sin->sin_port) == 6667)	/* XXX IRC version */
-		return (1);
 	if (sin->sin_addr.s_addr == htonl(INADDR_BROADCAST))
 		return (1);
 	/* XXX compare against broadcast addresses in SIOCGIFCONF list? */
@@ -545,7 +551,8 @@ dg_badinput(sin)
 }
 
 void
-reapchild()
+reapchild(sig)
+	int sig;
 {
 	int status;
 	int pid;
@@ -589,7 +596,8 @@ struct servtab *getconfigent __P((void));
 struct servtab *enter __P((struct servtab *));
 
 void
-config()
+config(sig)
+	int sig;
 {
 	register struct servtab *sep, *cp, **sepp;
 	long omask;
@@ -736,7 +744,8 @@ config()
 }
 
 void
-retry()
+retry(sig)
+	int sig;
 {
 	register struct servtab *sep;
 
@@ -756,7 +765,8 @@ retry()
 }
 
 void
-goaway()
+goaway(sig)
+	int sig;
 {
 	register struct servtab *sep;
 
@@ -1516,16 +1526,14 @@ print_service(action, sep)
 	struct servtab *sep;
 {
 	if (isrpcservice(sep))
-		fprintf(stderr,
-		    "%s: %s rpcprog=%d, rpcvers = %d/%d, proto=%s, wait.max=%d.%d, user.group=%s.%s builtin=%lx server=%s\n",
-		    action, sep->se_service,
-		    sep->se_rpcprog, sep->se_rpcversh, sep->se_rpcversl, sep->se_proto,
-		    sep->se_wait, sep->se_max, sep->se_user, sep->se_group,
-		    (long)sep->se_bi, sep->se_server);
+		fprintf(stderr, "%s: %s rpcprog=%d, rpcvers=%d/%d, proto=%s,",
+		    action, sep->se_service, sep->se_rpcprog,
+		    sep->se_rpcversh, sep->se_rpcversl, sep->se_proto);
 	else
+		fprintf(stderr, "%s: %s proto=%s,",
+		    action, sep->se_service, sep->se_proto);
 		fprintf(stderr,
-		    "%s: %s proto=%s, wait.max=%d.%d, user.group=%s.%s builtin=%lx server=%s\n",
-		    action, sep->se_service, sep->se_proto,
+	    " wait.max=%d.%d user.group=%s.%s builtin=%lx server=%s\n",
 		    sep->se_wait, sep->se_max, sep->se_user, sep->se_group,
 		    (long)sep->se_bi, sep->se_server);
 }

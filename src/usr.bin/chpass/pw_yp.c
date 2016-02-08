@@ -1,4 +1,4 @@
-/*	$OpenBSD: pw_yp.c,v 1.4 1996/08/31 01:55:33 deraadt Exp $	*/
+/*	$OpenBSD: pw_yp.c,v 1.7 1997/02/14 11:05:11 niklas Exp $	*/
 /*	$NetBSD: pw_yp.c,v 1.5 1995/03/26 04:55:33 glass Exp $	*/
 
 /*
@@ -37,7 +37,7 @@
 #if 0
 static char sccsid[] = "@(#)pw_yp.c	1.0 2/2/93";
 #else
-static char rcsid[] = "$OpenBSD: pw_yp.c,v 1.4 1996/08/31 01:55:33 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: pw_yp.c,v 1.7 1997/02/14 11:05:11 niklas Exp $";
 #endif
 #endif /* not lint */
 
@@ -49,6 +49,7 @@ static char rcsid[] = "$OpenBSD: pw_yp.c,v 1.4 1996/08/31 01:55:33 deraadt Exp $
 #include <time.h>
 #include <pwd.h>
 #include <errno.h>
+#include <stdlib.h>
 #include <rpc/rpc.h>
 #include <rpcsvc/yp_prot.h>
 #include <rpcsvc/ypclnt.h>
@@ -149,7 +150,7 @@ pw_yp(pw, uid)
 	if (client==NULL) {
 		fprintf(stderr, "can't contact yppasswdd on %s: Reason: %s\n",
 		    master, yperr_string(YPERR_YPBIND));
-		return(0);
+		return(1);
 	}
 	client->cl_auth = authunix_create_default();
 	tv.tv_sec = 5;
@@ -159,16 +160,16 @@ pw_yp(pw, uid)
 	if (r) {
 		fprintf(stderr, "%s: rpc to yppasswdd failed. %d\n", progname, r);
 		clnt_destroy(client);
-		return(0);
+		return(1);
 	} else if (status) {
 		printf("Couldn't change YP password information.\n");
 		clnt_destroy(client);
-		return(0);
+		return(1);
 	}
 	printf("The YP password information has been changed on %s, the master YP passwd server.\n", master);
 
 	clnt_destroy(client);
-	return(1);
+	return(0);
 }
 
 static char *

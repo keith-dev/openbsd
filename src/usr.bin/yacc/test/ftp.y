@@ -1,4 +1,4 @@
-/*	$OpenBSD: ftp.y,v 1.1.1.2 1996/04/17 15:40:57 niklas Exp $	*/
+/*	$OpenBSD: ftp.y,v 1.2 1996/04/21 23:45:35 deraadt Exp $	*/
 
 /*
  * Copyright (c) 1985, 1988 Regents of the University of California.

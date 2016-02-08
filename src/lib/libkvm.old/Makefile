@@ -1,4 +1,4 @@
-#	$OpenBSD$
+#	$OpenBSD: Makefile,v 1.2 1996/05/26 01:04:39 deraadt Exp $
 #	$NetBSD: Makefile,v 1.4 1996/05/13 02:30:20 thorpej Exp $
 
 LIB=	kvm

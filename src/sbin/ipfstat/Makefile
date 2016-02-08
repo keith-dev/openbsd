@@ -1,4 +1,4 @@
-#	$OpenBSD$
+#	$OpenBSD: Makefile,v 1.3 1996/06/23 14:30:56 deraadt Exp $
 
 PROG=	ipfstat
 MAN=	ipfstat.8

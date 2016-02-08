@@ -1,4 +1,4 @@
-.\"	$OpenBSD: ypserv.8,v 1.5 1996/06/30 19:46:06 maja Exp $
+.\"	$OpenBSD: ypserv.8,v 1.8 1997/04/12 00:14:28 deraadt Exp $
 .\" Copyright (c) 1994 Mats O Jansson <moj@stacken.kth.se>
 .\" All rights reserved.
 .\"
@@ -36,6 +36,7 @@
 .Nd YP server daemon
 .Sh SYNOPSIS
 .Nm ypserv
+.Op Fl 1
 .Op Fl a Ar aclfile
 .Op Fl d
 .Op Fl x
@@ -85,6 +86,8 @@ exists then messages will be written to the file.
 .Pp
 The options are as follows:
 .Bl -tag -width indent
+.It Fl 1
+Allow ypserv to answer old YP version 1 requests.
 .It Fl a Ar aclfile
 Don't use 
 .Ar /var/yp/securenet .
@@ -97,6 +100,11 @@ Use Internet Domain Name System. If a query to map
 or
 .Ar hosts.byaddr
 fails, make a DNS query and return the result if successful.
+Alternately, if these maps were built on the YP master using
+.Nm makedbm
+.Fl b
+then DNS queries will be done without needing to specify
+.Fl d . 
 .It Fl x
 Terminate the server after processing
 .Ar aclfile

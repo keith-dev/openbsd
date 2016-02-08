@@ -1,4 +1,4 @@
-/*	$OpenBSD: dumprmt.c,v 1.5 1996/09/02 22:15:02 millert Exp $	*/
+/*	$OpenBSD: dumprmt.c,v 1.6 1996/09/15 20:14:08 millert Exp $	*/
 /*	$NetBSD: dumprmt.c,v 1.10 1996/03/15 22:39:26 scottr Exp $	*/
 
 /*-

@@ -1,4 +1,4 @@
-/* * $OpenBSD: skey.c,v 1.4 1996/09/29 04:33:58 millert Exp $*/
+/* * $OpenBSD: skey.c,v 1.9 1996/11/22 03:24:36 millert Exp $*/
 /*
  * S/KEY v1.1b (skey.c)
  *
@@ -36,12 +36,18 @@ main(argc, argv)
 	char	*argv[];
 {
 	int     n, i, cnt = 1, pass = 0, hexmode = 0;
-	char    passwd[256], key[8], buf[33], *seed, *slash;
+	char    passwd[SKEY_MAX_PW_LEN+1], key[SKEY_BINKEY_SIZE];
+	char	buf[33], *seed, *slash;
 
 	/* If we were called as otp-METHOD, set algorithm based on that */
-	if (strncmp(argv[0], "otp-", 4) == 0) {
-		if (skey_set_algorithm(&argv[0][4]) == NULL)
-			errx(1, "Unknown hash algorithm %s", &argv[0][4]);
+	if ((slash = strrchr(argv[0], '/')))
+	    slash++;
+	else
+	    slash = argv[0];
+	if (strncmp(slash, "otp-", 4) == 0) {
+		slash += 4;
+		if (skey_set_algorithm(slash) == NULL)
+			errx(1, "Unknown hash algorithm %s", slash);
 	}
 
 	for (i = 1; i < argc && argv[i][0] == '-' && strcmp(argv[i], "--");) {
@@ -75,6 +81,9 @@ main(argc, argv)
 		i++;
 	}
 
+	if (argc > i + 2)
+		usage(argv[0]);
+
 	/* Could be in the form <number>/<seed> */
 	if (argc <= i + 1) {
 		/* look for / in it */
@@ -87,12 +96,18 @@ main(argc, argv)
 		seed = slash;
 
 		if ((n = atoi(argv[i])) < 0) {
-			warnx("%s not positive", argv[i]);
+			warnx("%d not positive", n);
+			usage(argv[0]);
+		} else if (n > SKEY_MAX_SEQ) {
+			warnx("%d is larger than max (%d)", n, SKEY_MAX_SEQ);
 			usage(argv[0]);
 		}
 	} else {
 		if ((n = atoi(argv[i])) < 0) {
-			warnx("%s not positive", argv[i]);
+			warnx("%d not positive", n);
+			usage(argv[0]);
+		} else if (n > SKEY_MAX_SEQ) {
+			warnx("%d is larger than max (%d)", n, SKEY_MAX_SEQ);
 			usage(argv[0]);
 		}
 		seed = argv[++i];
@@ -103,8 +118,9 @@ main(argc, argv)
 		(void)fputs("Reminder - Do not use this program while logged in via telnet or rlogin.\n", stderr);
 		(void)fputs("Enter secret password: ", stderr);
 		readpass(passwd, sizeof(passwd));
+		if (passwd[0] == '\0') 
+			exit(1);
 	}
-	rip(passwd);
 
 	/* Crunch seed and password into starting key */
 	if (keycrunch(key, seed, passwd) != 0)

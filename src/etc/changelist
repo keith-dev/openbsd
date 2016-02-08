@@ -1,4 +1,4 @@
-#	$OpenBSD$
+#	$OpenBSD: changelist,v 1.4 1997/04/15 23:49:01 niklas Exp $
 #
 # List of files which the security script backs up and checks
 # for modifications.
@@ -16,6 +16,7 @@
 /etc/ftpusers
 /etc/group
 /etc/hosts.equiv
+/etc/shosts.equiv
 /etc/mail.rc
 /etc/master.passwd
 /etc/monthly
@@ -28,6 +29,7 @@
 /etc/protocols
 /etc/rc
 /etc/rc.local
+/etc/rc.securelevel
 /etc/remote
 /etc/security
 /etc/sendmail.cf
@@ -45,3 +47,4 @@
 /root/.login
 /root/.profile
 /root/.rhosts
+/root/.shosts

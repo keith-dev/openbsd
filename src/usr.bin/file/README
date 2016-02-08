@@ -1,4 +1,4 @@
-@(#) $OpenBSD: README,v 1.1.1.1 1995/10/18 08:45:08 deraadt Exp $
+@(#) $OpenBSD: README,v 1.2 1996/06/26 05:32:53 deraadt Exp $
 ** README for file(1) Command **
 
 This is Release 3.x of Ian Darwin's (copyright but distributable)

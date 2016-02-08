@@ -1,5 +1,5 @@
-/*    $OpenBSD: ls.c,v 1.3 1996/06/23 14:20:19 deraadt Exp $      */
-/*    $NetBSD: ls.c,v 1.16 1996/02/14 05:58:53 jtc Exp $      */
+/*	$OpenBSD: ls.c,v 1.7 1997/04/01 22:59:38 deraadt Exp $	*/
+/*	$NetBSD: ls.c,v 1.18 1996/07/09 09:16:29 mycroft Exp $	*/
 
 /*
  * Copyright (c) 1989, 1993, 1994
@@ -47,7 +47,7 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)ls.c	8.7 (Berkeley) 8/5/94";
 #else
-static char rcsid[] = "$OpenBSD: ls.c,v 1.3 1996/06/23 14:20:19 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: ls.c,v 1.7 1997/04/01 22:59:38 deraadt Exp $";
 #endif
 #endif /* not lint */
 
@@ -96,6 +96,7 @@ int f_longform;			/* long listing format */
 int f_newline;			/* if precede with newline */
 int f_nonprint;			/* show unprintables as ? */
 int f_nosort;			/* don't sort output */
+int f_numericonly;		/* don't expand uid to symbolic name */
 int f_recursive;		/* ls subdirectories also */
 int f_reversesort;		/* reverse whatever sort is used */
 int f_sectime;			/* print the real time for all files */
@@ -119,10 +120,10 @@ main(argc, argv)
 
 	/* Terminal defaults to -Cq, non-terminal defaults to -1. */
 	if (isatty(STDOUT_FILENO)) {
-              if ((p = getenv("COLUMNS")) != NULL)
-                      termwidth = atoi(p);
-              else if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &win) == 0 &&
-                  win.ws_col > 0)
+		if ((p = getenv("COLUMNS")) != NULL)
+			termwidth = atoi(p);
+		else if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &win) == 0 &&
+		    win.ws_col > 0)
 			termwidth = win.ws_col;
 		f_column = f_nonprint = 1;
 	} else
@@ -133,7 +134,7 @@ main(argc, argv)
 		f_listdot = 1;
 
 	fts_options = FTS_PHYSICAL;
-	while ((ch = getopt(argc, argv, "1ACFLRSTWacdfgikloqrstu")) != -1) {
+	while ((ch = getopt(argc, argv, "1ACFLRSTWacdfgiklnoqrstu")) != -1) {
 		switch (ch) {
 		/*
 		 * The -1, -C and -l options all override each other so shell
@@ -149,6 +150,12 @@ main(argc, argv)
 			break;
 		case 'l':
 			f_longform = 1;
+			f_numericonly = 0;
+			f_column = f_singlecol = 0;
+			break;
+		case 'n':
+			f_longform = 1;
+			f_numericonly = 1;
 			f_column = f_singlecol = 0;
 			break;
 		/* The -c and -u options override each other. */
@@ -391,7 +398,9 @@ display(p, list)
 	u_long btotal, maxblock, maxinode, maxlen, maxnlink;
 	int bcfile, flen, glen, ulen, maxflags, maxgroup, maxuser;
 	int entries, needstats;
-	char *user, *group, *flags, buf[20];	/* 32 bits == 10 digits */
+	char *user, *group, buf[20];	/* 32 bits == 10 digits */
+	char nuser[12], ngroup[12];
+	char *flags = NULL;
 
 	/*
 	 * If list is NULL there are two possibilities: that the parent
@@ -451,10 +460,17 @@ display(p, list)
 
 			btotal += sp->st_blocks;
 			if (f_longform) {
-				user = user_from_uid(sp->st_uid, 0);
+				if (f_numericonly) {
+					snprintf(nuser, 12, "%u", sp->st_uid);
+					snprintf(ngroup, 12, "%u", sp->st_gid);
+					user = nuser;
+					group = ngroup;
+				} else {
+					user = user_from_uid(sp->st_uid, 0);
+					group = group_from_gid(sp->st_gid, 0);
+				}
 				if ((ulen = strlen(user)) > maxuser)
 					maxuser = ulen;
-				group = group_from_gid(sp->st_gid, 0);
 				if ((glen = strlen(group)) > maxgroup)
 					maxgroup = glen;
 				if (f_flags) {
@@ -538,7 +554,12 @@ mastercmp(a, b)
 		return (0);
 
 	if (a_info == FTS_NS || b_info == FTS_NS)
-		return (namecmp(*a, *b));
+		if (b_info != FTS_NS)
+			return (1);
+		else if (a_info != FTS_NS)
+			return (-1);
+		else
+			return (namecmp(*a, *b));
 
 	if (a_info == b_info)
 		return (sortfcn(*a, *b));

@@ -1,4 +1,4 @@
-/*	$OpenBSD$ */
+/*	$OpenBSD: kvm_sun3.c,v 1.3 1996/05/10 12:58:33 deraadt Exp $ */
 /*	$NetBSD: kvm_sun3.c,v 1.4 1996/05/05 04:32:18 gwr Exp $	*/
 
 /*-

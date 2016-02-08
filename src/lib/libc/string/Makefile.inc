@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile.inc,v 1.2 1996/03/25 23:31:46 tholo Exp $
+#	$OpenBSD: Makefile.inc,v 1.3 1996/08/19 08:33:54 tholo Exp $
 
 # string sources
 .PATH: ${.CURDIR}/arch/${MACHINE_ARCH}/string ${.CURDIR}/string

@@ -1,4 +1,4 @@
-#	$Id: Makefile,v 1.9 1996/09/25 17:03:58 deraadt Exp $
+#	$OpenBSD: Makefile,v 1.15 1997/05/14 18:38:59 niklas Exp $
 
 TOP=		${.CURDIR}/..
 
@@ -6,12 +6,12 @@ TOP=		${.CURDIR}/..
 IMAGE=		kc${REV}.fs
 CBIN=		kcbin
 MOUNT_POINT?=	/mnt
-VND?=		vnd0
+VND?=		svnd0
 VND_DEV=	/dev/${VND}a
 VND_RDEV=	/dev/r${VND}a
 IMAGE?=		xxx-${REV}.fs
 PID!=		echo $$$$
-REALIMAGE!=	echo /tmp/image.${PID}
+REALIMAGE!=	echo /var/tmp/image.${PID}
 MDEC=		${DESTDIR}/usr/mdec
 
 LIST=		${.CURDIR}/list
@@ -23,6 +23,7 @@ bsd:
 	cd ${.CURDIR}/../../../../sys/arch/i386/compile/INST && \
 	    make clean && make depend && make
 	cp ${.CURDIR}/../../../../sys/arch/i386/compile/INST/bsd bsd
+	strip bsd
 
 all: bsd ${CBIN}
 .ifndef FLOPPY3
@@ -30,13 +31,13 @@ all: bsd ${CBIN}
 .endif
 .ifndef FLOPPY3
 	dd if=/dev/zero of=${REALIMAGE} bs=10k count=120
-	disklabel -w -B -b /usr/mdec/fdboot -s /usr/mdec/bootfd ${REALIMAGE} floppy5
-	vnconfig -v -c ${VND_DEV} ${REALIMAGE}
+	vnconfig -v -c ${VND} ${REALIMAGE}
+	disklabel -w -B -b /usr/mdec/fdboot -s /usr/mdec/bootfd ${VND} floppy5
 	newfs -O -m 0 -o space -i 8192 -c 80 ${VND_RDEV} floppy5
 .else
 	dd if=/dev/zero of=${REALIMAGE} bs=10k count=144
-	disklabel -w -B -b /usr/mdec/fdboot -s /usr/mdec/bootfd ${REALIMAGE} floppy3
-	vnconfig -v -c ${VND_DEV} ${REALIMAGE}
+	vnconfig -v -c ${VND} ${REALIMAGE}
+	disklabel -w -B -b /usr/mdec/fdboot -s /usr/mdec/bootfd ${VND} floppy3
 	newfs -O -m 0 -o space -i 6500 -c 80 ${VND_RDEV} floppy3
 .endif
 	mount ${VND_DEV} ${MOUNT_POINT}
@@ -47,14 +48,13 @@ all: bsd ${CBIN}
 	@df -i ${MOUNT_POINT}
 	@echo ""
 	umount ${MOUNT_POINT}
-	vnconfig -u ${VND_DEV}
-	cat /*bin/* > /dev/null
+	vnconfig -u ${VND}
 	cp ${REALIMAGE} ${IMAGE}
 	rm ${REALIMAGE}
 
 unconfig:
 	-umount -f ${MOUNT_POINT}
-	-vnconfig -u ${VND_DEV}
+	-vnconfig -u ${VND}
 	-/bin/rm -f ${IMAGE}
 
 ${CBIN}.mk ${CBIN}.cache ${CBIN}.c: ${CRUNCHCONF}

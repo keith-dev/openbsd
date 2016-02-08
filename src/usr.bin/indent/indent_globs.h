@@ -1,4 +1,4 @@
-/* *	$OpenBSD: indent_globs.h,v 1.1.1.1 1995/10/18 08:45:25 deraadt Exp $*/
+/* *	$OpenBSD: indent_globs.h,v 1.2 1996/06/26 05:34:30 deraadt Exp $*/
 /*
  * Copyright (c) 1985 Sun Microsystems, Inc.
  * Copyright (c) 1980 The Regents of the University of California.

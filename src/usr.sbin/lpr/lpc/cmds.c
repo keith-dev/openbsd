@@ -1,3 +1,5 @@
+/*	$OpenBSD: cmds.c,v 1.8 1997/01/17 16:12:35 millert Exp $	*/
+
 /*
  * Copyright (c) 1983, 1993
  *	The Regents of the University of California.  All rights reserved.
@@ -39,7 +41,11 @@ static char copyright[] =
 #endif /* not lint */
 
 #ifndef lint
+#if 0
 static char sccsid[] = "@(#)cmds.c	8.2 (Berkeley) 4/28/95";
+#else
+static char rcsid[] = "$OpenBSD: cmds.c,v 1.8 1997/01/17 16:12:35 millert Exp $";
+#endif
 #endif /* not lint */
 
 /*
@@ -104,7 +110,8 @@ doabort(argc, argv)
 		while (cgetnext(&bp, printcapdb) > 0) {
 			cp1 = prbuf;
 			cp2 = bp;
-			while ((c = *cp2++) && c != '|' && c != ':')
+			while ((c = *cp2++) && c != '|' && c != ':' &&
+			    (cp1 - prbuf) < sizeof(prbuf))
 				*cp1++ = c;
 			*cp1 = '\0';
 			abortpr(1);
@@ -137,7 +144,7 @@ abortpr(dis)
 		SD = _PATH_DEFSPOOL;
 	if (cgetstr(bp, "lo", &LO) == -1)
 		LO = DEFLOCK;
-	(void) sprintf(line, "%s/%s", SD, LO);
+	(void) snprintf(line, sizeof(line), "%s/%s", SD, LO);
 	printf("%s:\n", printer);
 
 	/*
@@ -180,9 +187,12 @@ abortpr(dis)
 		goto out;
 	}
 	(void) fclose(fp);
-	if (kill(pid = atoi(line), SIGTERM) < 0)
-		printf("\tWarning: daemon (pid %d) not killed\n", pid);
-	else
+	if (kill(pid = atoi(line), SIGTERM) < 0) {
+		if (errno == ESRCH)
+			printf("\tno daemon to abort\n");
+		else
+			printf("\tWarning: daemon (pid %d) not killed\n", pid);
+	} else
 		printf("\tdaemon (pid %d) killed\n", pid);
 out:
 	seteuid(uid);
@@ -196,11 +206,11 @@ upstat(msg)
 	char *msg;
 {
 	register int fd;
-	char statfile[BUFSIZ];
+	char statfile[MAXPATHLEN];
 
 	if (cgetstr(bp, "st", &ST) == -1)
 		ST = DEFSTAT;
-	(void) sprintf(statfile, "%s/%s", SD, ST);
+	(void) snprintf(statfile, sizeof(statfile), "%s/%s", SD, ST);
 	umask(0);
 	fd = open(statfile, O_WRONLY|O_CREAT, 0664);
 	if (fd < 0 || flock(fd, LOCK_EX) < 0) {
@@ -236,7 +246,8 @@ clean(argc, argv)
 		while (cgetnext(&bp, printcapdb) > 0) {
 			cp1 = prbuf;
 			cp2 = bp;
-			while ((c = *cp2++) && c != '|' && c != ':')
+			while ((c = *cp2++) && c != '|' && c != ':' &&
+			    (cp1 - prbuf) < sizeof(prbuf))
 				*cp1++ = c;
 			*cp1 = '\0';
 			cleanpr();
@@ -310,7 +321,7 @@ cleanpr()
 		SD = _PATH_DEFSPOOL;
 	printf("%s:\n", printer);
 
-	for (lp = line, cp = SD; (*lp++ = *cp++); )
+	for (lp = line, cp = SD; (lp - line) < sizeof(line) && (*lp++ = *cp++);)
 		;
 	lp[-1] = '/';
 
@@ -336,7 +347,8 @@ cleanpr()
 				n++;
 			}
 			if (n == 0) {
-				strcpy(lp, cp);
+				strncpy(lp, cp, sizeof(line) - strlen(line) - 1);
+				line[sizeof(line) - 1] = '\0';
 				unlinkf(line);
 			}
 		} else {
@@ -345,7 +357,8 @@ cleanpr()
 			 * been skipped above) or a tf file (which can always
 			 * be removed).
 			 */
-			strcpy(lp, cp);
+			strncpy(lp, cp, sizeof(line) - strlen(line) - 1);
+			line[sizeof(line) - 1] = '\0';
 			unlinkf(line);
 		}
      	} while (++i < nitems);
@@ -384,7 +397,8 @@ enable(argc, argv)
 		while (cgetnext(&bp, printcapdb) > 0) {
 			cp1 = prbuf;
 			cp2 = bp;
-			while ((c = *cp2++) && c != '|' && c != ':')
+			while ((c = *cp2++) && c != '|' && c != ':' &&
+			    (cp1 - prbuf) < sizeof(prbuf))
 				*cp1++ = c;
 			*cp1 = '\0';
 			enablepr();
@@ -415,7 +429,7 @@ enablepr()
 		SD = _PATH_DEFSPOOL;
 	if (cgetstr(bp, "lo", &LO) == -1)
 		LO = DEFLOCK;
-	(void) sprintf(line, "%s/%s", SD, LO);
+	(void) snprintf(line, sizeof(line), "%s/%s", SD, LO);
 	printf("%s:\n", printer);
 
 	/*
@@ -452,7 +466,8 @@ disable(argc, argv)
 		while (cgetnext(&bp, printcapdb) > 0) {
 			cp1 = prbuf;
 			cp2 = bp;
-			while ((c = *cp2++) && c != '|' && c != ':')
+			while ((c = *cp2++) && c != '|' && c != ':' &&
+			    (cp1 - prbuf) < sizeof(prbuf))
 				*cp1++ = c;
 			*cp1 = '\0';
 			disablepr();
@@ -484,7 +499,7 @@ disablepr()
 		SD = _PATH_DEFSPOOL;
 	if (cgetstr(bp, "lo", &LO) == -1)
 		LO = DEFLOCK;
-	(void) sprintf(line, "%s/%s", SD, LO);
+	(void) snprintf(line, sizeof(line), "%s/%s", SD, LO);
 	printf("%s:\n", printer);
 	/*
 	 * Turn on the group execute bit of the lock file to disable queuing.
@@ -529,7 +544,8 @@ down(argc, argv)
 		while (cgetnext(&bp, printcapdb) > 0) {
 			cp1 = prbuf;
 			cp2 = bp;
-			while ((c = *cp2++) && c != '|' && c != ':')
+			while ((c = *cp2++) && c != '|' && c != ':' &&
+			    (cp1 - prbuf) < sizeof(prbuf))
 				*cp1++ = c;
 			*cp1 = '\0';
 			putmsg(argc - 2, argv + 2);
@@ -570,7 +586,7 @@ putmsg(argc, argv)
 	 * Turn on the group execute bit of the lock file to disable queuing and
 	 * turn on the owner execute bit of the lock file to disable printing.
 	 */
-	(void) sprintf(line, "%s/%s", SD, LO);
+	(void) snprintf(line, sizeof(line), "%s/%s", SD, LO);
 	seteuid(euid);
 	if (stat(line, &stbuf) >= 0) {
 		if (chmod(line, (stbuf.st_mode & 0777) | 0110) < 0)
@@ -591,7 +607,7 @@ putmsg(argc, argv)
 	/*
 	 * Write the message into the status file.
 	 */
-	(void) sprintf(line, "%s/%s", SD, ST);
+	(void) snprintf(line, sizeof(line), "%s/%s", SD, ST);
 	fd = open(line, O_WRONLY|O_CREAT, 0664);
 	if (fd < 0 || flock(fd, LOCK_EX) < 0) {
 		printf("\tcannot create status file\n");
@@ -608,7 +624,7 @@ putmsg(argc, argv)
 	cp1 = buf;
 	while (--argc >= 0) {
 		cp2 = *argv++;
-		while ((*cp1++ = *cp2++))
+		while ((cp1 - buf) < sizeof(buf) && (*cp1++ = *cp2++))
 			;
 		cp1[-1] = ' ';
 	}
@@ -650,7 +666,8 @@ restart(argc, argv)
 		while (cgetnext(&bp, printcapdb) > 0) {
 			cp1 = prbuf;
 			cp2 = bp;
-			while ((c = *cp2++) && c != '|' && c != ':')
+			while ((c = *cp2++) && c != '|' && c != ':' &&
+			    (cp1 - prbuf) < sizeof(prbuf))
 				*cp1++ = c;
 			*cp1 = '\0';
 			abortpr(0);
@@ -695,7 +712,8 @@ startcmd(argc, argv)
 		while (cgetnext(&bp, printcapdb) > 0) {
 			cp1 = prbuf;
 			cp2 = bp;
-			while ((c = *cp2++) && c != '|' && c != ':')
+			while ((c = *cp2++) && c != '|' && c != ':' &&
+			    (cp1 - prbuf) < sizeof(prbuf))
 				*cp1++ = c;
 			*cp1 = '\0';
 			startpr(1);
@@ -727,7 +745,7 @@ startpr(enable)
 		SD = _PATH_DEFSPOOL;
 	if (cgetstr(bp, "lo", &LO) == -1)
 		LO = DEFLOCK;
-	(void) sprintf(line, "%s/%s", SD, LO);
+	(void) snprintf(line, sizeof(line), "%s/%s", SD, LO);
 	printf("%s:\n", printer);
 
 	/*
@@ -764,7 +782,8 @@ status(argc, argv)
 		while (cgetnext(&bp, printcapdb) > 0) {
 			cp1 = prbuf;
 			cp2 = bp;
-			while ((c = *cp2++) && c != '|' && c != ':')
+			while ((c = *cp2++) && c != '|' && c != ':' &&
+			    (cp1 - prbuf) < sizeof(prbuf))
 				*cp1++ = c;
 			*cp1 = '\0';
 			prstat();
@@ -804,7 +823,7 @@ prstat()
 	if (cgetstr(bp, "st", &ST) == -1)
 		ST = DEFSTAT;
 	printf("%s:\n", printer);
-	(void) sprintf(line, "%s/%s", SD, LO);
+	(void) snprintf(line, sizeof(line), "%s/%s", SD, LO);
 	if (stat(line, &stbuf) >= 0) {
 		printf("\tqueuing is %s\n",
 			(stbuf.st_mode & 010) ? "disabled" : "enabled");
@@ -838,7 +857,7 @@ prstat()
 	}
 	(void) close(fd);
 	putchar('\t');
-	(void) sprintf(line, "%s/%s", SD, ST);
+	(void) snprintf(line, sizeof(line), "%s/%s", SD, ST);
 	fd = open(line, O_RDONLY);
 	if (fd >= 0) {
 		(void) flock(fd, LOCK_SH);
@@ -870,7 +889,8 @@ stop(argc, argv)
 		while (cgetnext(&bp, printcapdb) > 0) {
 			cp1 = prbuf;
 			cp2 = bp;
-			while ((c = *cp2++) && c != '|' && c != ':')
+			while ((c = *cp2++) && c != '|' && c != ':' &&
+			    (cp1 - prbuf) < sizeof(prbuf))
 				*cp1++ = c;
 			*cp1 = '\0';
 			stoppr();
@@ -902,7 +922,7 @@ stoppr()
 		SD = _PATH_DEFSPOOL;
 	if (cgetstr(bp, "lo", &LO) == -1)
 		LO = DEFLOCK;
-	(void) sprintf(line, "%s/%s", SD, LO);
+	(void) snprintf(line, sizeof(line), "%s/%s", SD, LO);
 	printf("%s:\n", printer);
 
 	/*
@@ -1042,7 +1062,7 @@ doarg(job)
 	 * Look for a job item consisting of system name, colon, number 
 	 * (example: ucbarpa:114)  
 	 */
-	if ((cp = index(job, ':')) != NULL) {
+	if ((cp = strchr(job, ':')) != NULL) {
 		machine = job;
 		*cp++ = '\0';
 		job = cp;
@@ -1118,7 +1138,8 @@ up(argc, argv)
 		while (cgetnext(&bp, printcapdb) > 0) {
 			cp1 = prbuf;
 			cp2 = bp;
-			while ((c = *cp2++) && c != '|' && c != ':')
+			while ((c = *cp2++) && c != '|' && c != ':' &&
+			    (cp1 - prbuf) < sizeof(prbuf))
 				*cp1++ = c;
 			*cp1 = '\0';
 			startpr(2);

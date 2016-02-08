@@ -1,4 +1,4 @@
-/*	$OpenBSD: kbd_i386.c,v 1.4 1996/06/30 00:37:09 maja Exp $	*/
+/*	$OpenBSD: kbd_i386.c,v 1.5 1996/09/01 16:48:07 deraadt Exp $	*/
 
 /*
  * Copyright (c) 1996 Juergen Hannken-Illjes

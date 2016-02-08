@@ -1,4 +1,4 @@
-/*	$OpenBSD: rdate.c,v 1.3 1996/03/25 15:56:10 niklas Exp $	*/
+/*	$OpenBSD: rdate.c,v 1.10 1997/04/27 13:11:38 downsj Exp $	*/
 /*	$NetBSD: rdate.c,v 1.4 1996/03/16 12:37:45 pk Exp $	*/
 
 /*
@@ -42,7 +42,7 @@
 #if 0
 from: static char rcsid[] = "$NetBSD: rdate.c,v 1.3 1996/02/22 06:59:18 thorpej Exp $";
 #else
-static char rcsid[] = "$OpenBSD: rdate.c,v 1.3 1996/03/25 15:56:10 niklas Exp $";
+static char rcsid[] = "$OpenBSD: rdate.c,v 1.10 1997/04/27 13:11:38 downsj Exp $";
 #endif
 #endif				/* lint */
 
@@ -50,11 +50,15 @@ static char rcsid[] = "$OpenBSD: rdate.c,v 1.3 1996/03/25 15:56:10 niklas Exp $"
 #include <sys/param.h>
 #include <stdio.h>
 #include <ctype.h>
+#include <err.h>
 #include <string.h>
 #include <sys/time.h>
 #include <sys/socket.h>
 #include <netdb.h>
 #include <netinet/in.h>
+#include <unistd.h>
+#include <util.h>
+#include <time.h>
 
 /* seconds from midnight Jan 1900 - 1970 */
 #if __STDC__
@@ -117,8 +121,7 @@ main(argc, argv)
 	hname = argv[optind];
 
 	if ((hp = gethostbyname(hname)) == NULL) {
-		(void) fprintf(stderr, "%s: ", __progname);
-		herror(hname);
+		warnx("%s: %s", hname, hstrerror(h_errno));
 		return 1;
 	}
 
@@ -138,7 +141,7 @@ main(argc, argv)
 	sa.sin_family = AF_INET;
 	sa.sin_port = sp->s_port;
 
-	memcpy(&(sa.sin_addr.s_addr), hp->h_addr, hp->h_length);
+	(void) memcpy(&(sa.sin_addr.s_addr), hp->h_addr, hp->h_length);
 
 	if (connect(s, (struct sockaddr *) & sa, sizeof(sa)) == -1)
 		err(1, "Could not connect socket");
@@ -150,29 +153,37 @@ main(argc, argv)
 	tim = ntohl(tim) - DIFFERENCE;
 
 	if (!pr) {
-	    struct timeval  tv;
-	    if (!slidetime) {
-		    tv.tv_sec = tim;
-		    tv.tv_usec = 0;
-		    if (settimeofday(&tv, NULL) == -1)
-			    err(1, "Could not set time of day");
-	    } else {
-		    struct timeval tv_current;
-		    if (gettimeofday(&tv_current, NULL) == -1)
-			    err(1, "Could not get local time of day");
-		    adjustment = tv.tv_sec = tim - tv_current.tv_sec;
-		    tv.tv_usec = 0;
-		    if (adjtime(&tv, NULL) == -1)
-			    err(1, "Could not adjust time of day");
-	    }
+		struct timeval  tv;
+		if (!slidetime) {
+			logwtmp("|", "date", "");
+			tv.tv_sec = tim;
+			tv.tv_usec = 0;
+			if (settimeofday(&tv, NULL) == -1)
+				err(1, "Could not set time of day");
+			logwtmp("{", "date", "");
+		} else {
+			struct timeval tv_current;
+			if (gettimeofday(&tv_current, NULL) == -1)
+				err(1, "Could not get local time of day");
+			adjustment = tv.tv_sec = tim - tv_current.tv_sec;
+			tv.tv_usec = 0;
+			if (adjtime(&tv, NULL) == -1)
+				err(1, "Could not adjust time of day");
+		}
 	}
 
 	if (!silent) {
-		(void) fputs(ctime(&tim), stdout);
+		struct tm      *ltm;
+		char		buf[80];
+
+		ltm = localtime(&tim);
+		(void) strftime(buf, 80, "%a %b %e %H:%M:%S %Z %Y\n", ltm);
+		(void) fputs(buf, stdout);
+
 		if (slidetime)
-		    (void) fprintf(stdout, 
-				   "%s: adjust local clock by %d seconds\n",
-				   __progname, adjustment);
+			(void) fprintf(stdout, 
+			   "%s: adjust local clock by %d seconds\n",
+			   __progname, adjustment);
 	}
 	return 0;
 }

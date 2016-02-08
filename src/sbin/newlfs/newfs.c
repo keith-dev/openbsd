@@ -1,4 +1,4 @@
-/*	$OpenBSD: newfs.c,v 1.3 1996/06/23 14:31:54 deraadt Exp $	*/
+/*	$OpenBSD: newfs.c,v 1.6 1997/01/15 23:41:33 millert Exp $	*/
 /*	$NetBSD: newfs.c,v 1.5 1996/05/16 07:17:50 thorpej Exp $	*/
 
 /*-
@@ -44,7 +44,7 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)newfs.c	8.5 (Berkeley) 5/24/95";
 #else
-static char rcsid[] = "$OpenBSD: newfs.c,v 1.3 1996/06/23 14:31:54 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: newfs.c,v 1.6 1997/01/15 23:41:33 millert Exp $";
 #endif
 #endif /* not lint */
 
@@ -151,12 +151,12 @@ main(argc, argv)
 		fatal("insane maxpartitions value %d", maxpartitions);
 
 	/* -F is mfs only and MUST come first! */
-	opstring = "F:B:DLNS:T:a:b:c:d:e:f:i:k:l:m:n:o:p:r:s:t:u:x:";
+	opstring = "F:B:DLNS:T:a:b:c:d:e:f:i:k:l:t:m:n:o:p:r:s:z:u:x:";
 	if (!mfs)
 		opstring += 2;
 
 	debug = lfs = segsize = 0;
-	while ((ch = getopt(argc, argv, opstring)) != EOF)
+	while ((ch = getopt(argc, argv, opstring)) != -1)
 		switch(ch) {
 		case 'B':	/* LFS segment size */
 			if ((segsize = atoi(optarg)) < LFS_MINSEGSIZE)
@@ -254,7 +254,9 @@ main(argc, argv)
 			if ((fssize = atoi(optarg)) <= 0)
 				fatal("%s: bad file system size", optarg);
 			break;
-		case 't':
+		case 't':	/* compat with "-t fstype" in newfs */
+			break;
+		case 'z':
 			if ((ntracks = atoi(optarg)) <= 0)
 				fatal("%s: bad total tracks", optarg);
 			break;
@@ -441,7 +443,7 @@ usage()
 		    "usage: mfs [ -fsoptions ] special-device mount-point\n");
 	} else
 		fprintf(stderr,
-		    "usage: newlfs [ -fsoptions ] special-device%s\n",
+		    "usage: newfs_lfs [ -fsoptions ] special-device%s\n",
 #ifdef COMPAT
 		    " [device-type]");
 #else
@@ -473,8 +475,8 @@ usage()
 	fprintf(stderr, "\t-p spare sectors per track\n");
 	fprintf(stderr, "\t-r revolutions/minute\n");
 	fprintf(stderr, "\t-s file system size (sectors)\n");
-	fprintf(stderr, "\t-t tracks/cylinder\n");
 	fprintf(stderr, "\t-u sectors/track\n");
 	fprintf(stderr, "\t-x spare sectors per cylinder\n");
+	fprintf(stderr, "\t-z tracks/cylinder\n");
 	exit(1);
 }

@@ -359,6 +359,9 @@ cmd
 					help(sitetab, (char *) 0);
 			} else
 				help(cmdtab, $3);
+
+		        if ($3 != NULL)
+		        	free ($3);
 		}
 	| NOOP CRLF
 		{
@@ -395,6 +398,9 @@ cmd
 	| SITE SP HELP SP STRING CRLF
 		{
 			help(sitetab, $5);
+
+			if ($5 != NULL)
+				free ($5);
 		}
 	| SITE SP UMASK check_login CRLF
 		{
@@ -442,9 +448,9 @@ cmd
 	       		    "Current IDLE time limit is %d seconds; max %d",
 				timeout, maxtimeout);
 		}
-	| SITE SP IDLE check_login SP NUMBER CRLF
+	| SITE SP check_login IDLE SP NUMBER CRLF
 		{
-			if ($4) {
+			if ($3) {
 				if ($6 < 30 || $6 > maxtimeout) {
 				reply(501,
 	       		 "Maximum IDLE time must be between 30 and %d seconds",
@@ -839,7 +845,6 @@ static void	 help __P((struct tab *, char *));
 static struct tab *
 		 lookup __P((struct tab *, char *));
 static void	 sizecmd __P((char *));
-static void	 toolong __P((int));
 static int	 yylex __P((void));
 
 static struct tab *
@@ -935,7 +940,7 @@ getline(s, n, iop)
 	return (s);
 }
 
-static void
+void
 toolong(signo)
 	int signo;
 {

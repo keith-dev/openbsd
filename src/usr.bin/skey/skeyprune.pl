@@ -4,7 +4,7 @@
 # Usage: skeyprune [days]
 #
 # Todd C. Miller <Todd.Miller@courtesan.com>
-# $OpenBSD: $
+# $OpenBSD: skeyprune.pl,v 1.1 1996/09/28 00:00:41 millert Exp $
 
 # We need to be able convert to time_t
 require 'timelocal.pl';

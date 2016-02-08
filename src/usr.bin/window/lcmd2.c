@@ -1,4 +1,4 @@
-/*	$OpenBSD: lcmd2.c,v 1.7 1995/09/29 00:44:04 cgd Exp $	*/
+/*	$OpenBSD: lcmd2.c,v 1.4 1997/02/25 00:04:08 downsj Exp $	*/
 /*	$NetBSD: lcmd2.c,v 1.7 1995/09/29 00:44:04 cgd Exp $	*/
 
 /*
@@ -41,7 +41,7 @@
 #if 0
 static char sccsid[] = "@(#)lcmd2.c	8.1 (Berkeley) 6/6/93";
 #else
-static char rcsid[] = "$OpenBSD: lcmd2.c,v 1.7 1995/09/29 00:44:04 cgd Exp $";
+static char rcsid[] = "$OpenBSD: lcmd2.c,v 1.4 1997/02/25 00:04:08 downsj Exp $";
 #endif
 #endif /* not lint */
 
@@ -285,7 +285,7 @@ l_def_shell(v, a)
 			break;
 		}
 	if (default_shellfile = *default_shell)
-		if (*default_shell = rindex(default_shellfile, '/'))
+		if (*default_shell = strrchr(default_shellfile, '/'))
 			(*default_shell)++;
 		else
 			*default_shell = default_shellfile;

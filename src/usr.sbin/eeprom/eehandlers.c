@@ -1,4 +1,4 @@
-/*	$OpenBSD: eehandlers.c,v 1.4 1996/08/31 12:42:49 deraadt Exp $	*/
+/*	$OpenBSD: eehandlers.c,v 1.5 1996/08/31 12:56:06 deraadt Exp $	*/
 /*	$NetBSD: eehandlers.c,v 1.2 1996/02/28 01:13:22 thorpej Exp $	*/
 
 /*-

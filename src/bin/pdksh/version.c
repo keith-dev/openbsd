@@ -1,4 +1,4 @@
-/*	$OpenBSD: version.c,v 1.2 1996/08/19 20:09:03 downsj Exp $	*/
+/*	$OpenBSD: version.c,v 1.5 1996/11/21 07:59:37 downsj Exp $	*/
 
 /*
  * value of $KSH_VERSION (or $SH_VERSION)
@@ -7,4 +7,4 @@
 #include "sh.h"
 
 const char ksh_version [] =
-	"@(#)PD KSH v5.2.9 96/09/30";
+	"@(#)PD KSH v5.2.12 96/10/29";

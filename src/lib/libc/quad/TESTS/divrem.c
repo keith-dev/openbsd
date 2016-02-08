@@ -42,7 +42,7 @@ static char copyright[] =
 #endif /* not lint */
 
 #ifndef lint
-static char rcsid[] = "$OpenBSD: divrem.c,v 1.2 1995/02/27 17:31:30 cgd Exp $";
+static char rcsid[] = "$OpenBSD: divrem.c,v 1.2 1996/08/19 08:30:57 tholo Exp $";
 #endif /* not lint */
 
 #include <stdio.h>

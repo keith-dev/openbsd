@@ -1,4 +1,4 @@
-/*	$OpenBSD$	*/
+/*	$OpenBSD: telnet.c,v 1.2 1996/03/27 19:33:10 niklas Exp $	*/
 /*	$NetBSD: telnet.c,v 1.7 1996/02/28 21:04:15 thorpej Exp $	*/
 
 /*
@@ -39,7 +39,7 @@
 static char sccsid[] = "@(#)telnet.c	8.4 (Berkeley) 5/30/95";
 static char rcsid[] = "$NetBSD: telnet.c,v 1.7 1996/02/28 21:04:15 thorpej Exp $";
 #else
-static char rcsid[] = "$OpenBSD$";
+static char rcsid[] = "$OpenBSD: telnet.c,v 1.2 1996/03/27 19:33:10 niklas Exp $";
 #endif
 #endif /* not lint */
 

@@ -1,4 +1,4 @@
-/*	$OpenBSD: glob.h,v 1.4 1996/06/08 19:48:25 christos Exp $	*/
+/*	$OpenBSD: glob.h,v 1.2 1996/06/11 12:53:41 deraadt Exp $	*/
 /*	$NetBSD: glob.h,v 1.4 1996/06/08 19:48:25 christos Exp $	*/
 
 /*

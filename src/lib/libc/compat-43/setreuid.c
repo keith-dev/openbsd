@@ -32,7 +32,7 @@
  */
 
 #if defined(LIBC_SCCS) && !defined(lint)
-static char *rcsid = "$OpenBSD$";
+static char *rcsid = "$OpenBSD: setreuid.c,v 1.4 1997/01/20 07:46:51 graichen Exp $";
 #endif /* LIBC_SCCS and not lint */
 
 #include <sys/types.h>

@@ -1,4 +1,4 @@
-/*	$OpenBSD$	*/
+/*	$OpenBSD: odsyntax.c,v 1.3 1997/01/15 23:42:34 millert Exp $	*/
 
 /*-
  * Copyright (c) 1990 The Regents of the University of California.
@@ -35,7 +35,7 @@
 
 #ifndef lint
 /*static char sccsid[] = "from: @(#)odsyntax.c	5.4 (Berkeley) 3/8/91";*/
-static char rcsid[] = "$OpenBSD: odsyntax.c,v 1.1.1.1 1995/10/18 08:45:23 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: odsyntax.c,v 1.3 1997/01/15 23:42:34 millert Exp $";
 #endif /* not lint */
 
 #include <sys/types.h>
@@ -59,7 +59,7 @@ oldsyntax(argc, argvp)
 
 	deprecated = 1;
 	argv = *argvp;
-	while ((ch = getopt(argc, argv, "aBbcDdeFfHhIiLlOoPpswvXx")) != EOF)
+	while ((ch = getopt(argc, argv, "aBbcDdeFfHhIiLlOoPpswvXx")) != -1)
 		switch (ch) {
 		case 'a':
 			odprecede();

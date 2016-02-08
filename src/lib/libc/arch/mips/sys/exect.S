@@ -38,7 +38,7 @@
 
 #if defined(SYSLIBC_SCCS)
 	.text
-	.asciz "$OpenBSD$"
+	.asciz "$OpenBSD: exect.S,v 1.4 1996/08/19 08:16:21 tholo Exp $"
 #endif /* SYSLIBC_SCCS */
 
 LEAF(exect)

@@ -1,4 +1,4 @@
-/*	$OpenBSD$	*/
+/*	$OpenBSD: kdump.c,v 1.8 1997/02/28 07:09:08 millert Exp $	*/
 
 /*-
  * Copyright (c) 1988, 1993
@@ -43,11 +43,10 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)kdump.c	8.4 (Berkeley) 4/28/95";
 #endif
-static char *rcsid = "$OpenBSD: kdump.c,v 1.13 1996/05/13 21:12:25 christos Exp $";
+static char *rcsid = "$OpenBSD: kdump.c,v 1.8 1997/02/28 07:09:08 millert Exp $";
 #endif /* not lint */
 
 #include <sys/param.h>
-#include <sys/errno.h>
 #include <sys/time.h>
 #include <sys/uio.h>
 #include <sys/ktrace.h>
@@ -84,6 +83,13 @@ struct ktr_header ktr_header;
 #include "../../sys/compat/ultrix/ultrix_syscall.h"
 
 #define KTRACE
+#define NFSCLIENT
+#define NFSSERVER
+#define SYSVSEM
+#define SYSVMSG
+#define SYSVSHM
+#define LFS
+#define NTP
 #include "../../sys/kern/syscalls.c"
 
 #include "../../sys/compat/hpux/hpux_syscalls.c"
@@ -94,6 +100,13 @@ struct ktr_header ktr_header;
 #include "../../sys/compat/svr4/svr4_syscalls.c"
 #include "../../sys/compat/ultrix/ultrix_syscalls.c"
 #undef KTRACE
+#undef NFSCLIENT
+#undef NFSSERVER
+#undef SYSVSEM
+#undef SYSVMSG
+#undef SYSVSHM
+#undef LFS
+#undef NTP
 
 struct emulation {
 	char *name;		/* Emulation name */
@@ -167,10 +180,7 @@ main(argc, argv)
 		default:
 			usage();
 		}
-	argv += optind;
-	argc -= optind;
-
-	if (argc > 1)
+	if (argc > optind)
 		usage();
 
 	m = (void *)malloc(size = 1025);
@@ -286,9 +296,9 @@ ioctldecode(cmd)
 {
 	char dirbuf[4], *dir = dirbuf;
 
-	if (cmd & IOC_OUT)
-		*dir++ = 'W';
 	if (cmd & IOC_IN)
+		*dir++ = 'W';
+	if (cmd & IOC_OUT)
 		*dir++ = 'R';
 	*dir = '\0';
 

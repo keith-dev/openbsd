@@ -1,5 +1,5 @@
 #!/usr/local/bin/wish -f
-#$OpenBSD: tkpkg,v 1.2 1994/12/06 00:51:21 jkh Exp $
+#$OpenBSD: tkpkg,v 1.1 1996/06/04 07:56:02 niklas Exp $
 #
 #$Log: tkpkg,v $
 #Revision 1.1  1996/06/04 07:56:02  niklas

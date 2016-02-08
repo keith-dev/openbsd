@@ -1,4 +1,4 @@
-/*	$OpenBSD: look_up.c,v 1.3 1994/12/09 02:14:21 jtc Exp $	*/
+/*	$OpenBSD: look_up.c,v 1.3 1996/06/26 05:40:24 deraadt Exp $	*/
 /*	$NetBSD: look_up.c,v 1.3 1994/12/09 02:14:21 jtc Exp $	*/
 
 /*
@@ -38,7 +38,7 @@
 #if 0
 static char sccsid[] = "@(#)look_up.c	8.1 (Berkeley) 6/6/93";
 #endif
-static char rcsid[] = "$OpenBSD: look_up.c,v 1.3 1994/12/09 02:14:21 jtc Exp $";
+static char rcsid[] = "$OpenBSD: look_up.c,v 1.3 1996/06/26 05:40:24 deraadt Exp $";
 #endif /* not lint */
 
 #include <sys/types.h>

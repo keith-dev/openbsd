@@ -1,4 +1,4 @@
-/*	$OpenBSD$	*/
+/*	$OpenBSD: clean.h,v 1.2 1996/07/01 11:04:55 downsj Exp $	*/
 
 /*-
  * Copyright (c) 1992, 1993

@@ -1,4 +1,4 @@
-/*	$OpenBSD$	*/
+/*	$OpenBSD: authenc.c,v 1.2 1996/03/27 19:32:57 niklas Exp $	*/
 /*	$NetBSD: authenc.c,v 1.5 1996/02/28 21:03:52 thorpej Exp $	*/
 
 /*-
@@ -39,7 +39,7 @@
 static char sccsid[] = "@(#)authenc.c	8.1 (Berkeley) 6/6/93";
 static char rcsid[] = "$NetBSD: authenc.c,v 1.5 1996/02/28 21:03:52 thorpej Exp $";
 #else
-static char rcsid[] = "$OpenBSD$";
+static char rcsid[] = "$OpenBSD: authenc.c,v 1.2 1996/03/27 19:32:57 niklas Exp $";
 #endif
 #endif /* not lint */
 

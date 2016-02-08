@@ -33,7 +33,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- *      $OpenBSD: SYS.h,v 1.3 1996/07/30 20:27:48 pefo Exp $ 
+ *      $OpenBSD: SYS.h,v 1.4 1996/08/19 08:15:49 tholo Exp $ 
  */
 
 #include <sys/syscall.h>

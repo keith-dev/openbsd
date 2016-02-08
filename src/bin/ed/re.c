@@ -1,4 +1,4 @@
-/*	$OpenBSD: re.c,v 1.2 1996/06/23 14:20:03 deraadt Exp $	*/
+/*	$OpenBSD: re.c,v 1.5 1996/12/14 12:17:57 mickey Exp $	*/
 /*	$NetBSD: re.c,v 1.14 1995/03/21 09:04:48 cgd Exp $	*/
 
 /* re.c: This file contains the regular expression interface routines for
@@ -33,7 +33,7 @@
 #if 0
 static char *rcsid = "@(#)re.c,v 1.6 1994/02/01 00:34:43 alm Exp";
 #else
-static char rcsid[] = "$OpenBSD: re.c,v 1.2 1996/06/23 14:20:03 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: re.c,v 1.5 1996/12/14 12:17:57 mickey Exp $";
 #endif
 #endif /* not lint */
 
@@ -56,11 +56,11 @@ get_compiled_pattern()
 	int n;
 
 	if ((delimiter = *ibufp) == ' ') {
-		snprintf(errmsg, sizeof(errmsg), "invalid pattern delimiter");
+		strcpy(errmsg, "invalid pattern delimiter");
 		return NULL;
 	} else if (delimiter == '\n' || *++ibufp == '\n' || *ibufp == delimiter) {
 		if (!exp)
-			snprintf(errmsg, sizeof(errmsg), "no previous pattern");
+			strcpy(errmsg, "no previous pattern");
 		return exp;
 	} else if ((exps = extract_pattern(delimiter)) == NULL)
 		return NULL;
@@ -68,12 +68,12 @@ get_compiled_pattern()
 	if (exp && !patlock)
 		regfree(exp);
 	else if ((exp = (pattern_t *) malloc(sizeof(pattern_t))) == NULL) {
-		fprintf(stderr, "%s\n", strerror(errno));
-		snprintf(errmsg, sizeof(errmsg), "out of memory");
+		perror(NULL);
+		strcpy(errmsg, "out of memory");
 		return NULL;
 	}
 	patlock = 0;
-	if (n = regcomp(exp, exps, 0)) {
+	if ((n = regcomp(exp, exps, 0)) != 0) {
 		regerror(n, exp, errmsg, sizeof errmsg);
 		free(exp);
 		return exp = NULL;
@@ -100,15 +100,13 @@ extract_pattern(delimiter)
 			break;
 		case '[':
 			if ((nd = parse_char_class(++nd)) == NULL) {
-				snprintf(errmsg, sizeof(errmsg),
-					 "unbalanced brackets ([])");
+				strcpy(errmsg, "unbalanced brackets ([])");
 				return NULL;
 			}
 			break;
 		case '\\':
 			if (*++nd == '\n') {
-				snprintf(errmsg, sizeof(errmsg),
-					 "trailing backslash (\\)");
+				strcpy(errmsg, "trailing backslash (\\)");
 				return NULL;
 			}
 			break;

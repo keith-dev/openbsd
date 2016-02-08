@@ -1,3 +1,4 @@
+/*	$OpenBSD: pwd.h,v 1.5 1997/02/16 20:54:28 provos Exp $	*/
 /*	$NetBSD: pwd.h,v 1.9 1996/05/15 21:36:45 jtc Exp $	*/
 
 /*-
@@ -8,7 +9,7 @@
  * to the University of California by American Telephone and Telegraph
  * Co. or Unix System Laboratories, Inc. and are reproduced herein with
  * the permission of UNIX System Laboratories, Inc.
- * Portions Copyright(C) 1995, Jason Downs.  All rights reserved.
+ * Portions Copyright(C) 1995, 1996, Jason Downs.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -48,6 +49,7 @@
 
 #ifndef _POSIX_SOURCE
 #define	_PATH_PASSWD		"/etc/passwd"
+#define _PATH_PASSWDCONF	"/etc/passwd.conf"
 #define	_PATH_MASTERPASSWD	"/etc/master.passwd"
 #define	_PATH_MASTERPASSWD_LOCK	"/etc/ptmp"
 
@@ -59,6 +61,8 @@
 #define	_PW_KEYBYNAME		'1'	/* stored by name */
 #define	_PW_KEYBYNUM		'2'	/* stored by entry in the "file" */
 #define	_PW_KEYBYUID		'3'	/* stored by uid */
+
+#define _PW_YPTOKEN		"__YP!"
 
 #define	_PASSWORD_EFMT1		'_'	/* extended encryption format */
 

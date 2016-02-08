@@ -39,7 +39,7 @@ char copyright[] =
 
 #ifndef lint
 /*static char sccsid[] = "from: @(#)rexecd.c	5.12 (Berkeley) 2/25/91";*/
-static char rcsid[] = "$Id: rexecd.c,v 1.4 1996/07/28 06:33:16 deraadt Exp $";
+static char rcsid[] = "$Id: rexecd.c,v 1.8 1997/04/06 09:14:35 deraadt Exp $";
 #endif /* not lint */
 
 #include <sys/param.h>
@@ -61,7 +61,7 @@ static char rcsid[] = "$Id: rexecd.c,v 1.4 1996/07/28 06:33:16 deraadt Exp $";
 #include <arpa/inet.h>
 
 /*VARARGS1*/
-int error();
+void error __P(());
 
 char	username[20] = "USER=";
 char	homedir[MAXPATHLEN] = "HOME=";
@@ -74,6 +74,9 @@ char	*remote;
 
 struct	sockaddr_in asin = { AF_INET };
 
+void doit __P((int, struct sockaddr_in *));
+void getstr __P((char *buf, int cnt, char *err));
+
 /*
  * remote execute server:
  *	username\0
@@ -82,6 +85,7 @@ struct	sockaddr_in asin = { AF_INET };
  *	data
  */
 /*ARGSUSED*/
+int
 main(argc, argv)
 	int argc;
 	char **argv;
@@ -103,8 +107,10 @@ main(argc, argv)
 	remote = strdup(hp ? hp->h_name : inet_ntoa(from.sin_addr));
 
 	doit(0, &from);
+	exit(0);
 }
 
+void
 doit(f, fromp)
 	int f;
 	struct sockaddr_in *fromp;
@@ -229,15 +235,17 @@ doit(f, fromp)
 	if (f > 2)
 		(void) close(f);
 	setlogin(pwd->pw_name);
+	(void) setegid((gid_t)pwd->pw_gid);
 	(void) setgid((gid_t)pwd->pw_gid);
 	initgroups(pwd->pw_name, pwd->pw_gid);
+	(void) seteuid((uid_t)pwd->pw_uid);
 	(void) setuid((uid_t)pwd->pw_uid);
 	(void)strcat(path, _PATH_DEFPATH);
 	environ = envinit;
 	strncat(homedir, pwd->pw_dir, sizeof(homedir)-6);
 	strncat(shell, pwd->pw_shell, sizeof(shell)-7);
 	strncat(username, pwd->pw_name, sizeof(username)-6);
-	cp = rindex(pwd->pw_shell, '/');
+	cp = strrchr(pwd->pw_shell, '/');
 	if (cp)
 		cp++;
 	else
@@ -249,6 +257,7 @@ doit(f, fromp)
 }
 
 /*VARARGS1*/
+void
 error(fmt, a1, a2, a3)
 	char *fmt;
 	int a1, a2, a3;
@@ -256,10 +265,11 @@ error(fmt, a1, a2, a3)
 	char buf[BUFSIZ];
 
 	buf[0] = 1;
-	(void) sprintf(buf+1, fmt, a1, a2, a3);
+	(void) snprintf(buf+1, sizeof buf-1, fmt, a1, a2, a3);
 	(void) write(2, buf, strlen(buf));
 }
 
+void
 getstr(buf, cnt, err)
 	char *buf;
 	int cnt;

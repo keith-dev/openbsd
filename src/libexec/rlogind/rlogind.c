@@ -39,7 +39,7 @@ static char copyright[] =
 
 #ifndef lint
 /* from: static char sccsid[] = "@(#)rlogind.c	8.1 (Berkeley) 6/4/93"; */
-static char *rcsid = "$Id: rlogind.c,v 1.9 1996/08/27 10:26:59 deraadt Exp $";
+static char *rcsid = "$Id: rlogind.c,v 1.19 1997/02/13 22:33:11 deraadt Exp $";
 #endif /* not lint */
 
 /*
@@ -62,6 +62,7 @@ static char *rcsid = "$Id: rlogind.c,v 1.9 1996/08/27 10:26:59 deraadt Exp $";
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
 #include <netinet/ip.h>
+#include <netinet/ip_var.h>
 #include <arpa/inet.h>
 #include <netdb.h>
 
@@ -130,7 +131,7 @@ main(argc, argv)
 	openlog("rlogind", LOG_PID | LOG_CONS, LOG_AUTH);
 
 	opterr = 0;
-	while ((ch = getopt(argc, argv, ARGSTR)) != EOF)
+	while ((ch = getopt(argc, argv, ARGSTR)) != -1)
 		switch (ch) {
 		case 'a':
 			/* check_all = 1; */
@@ -258,28 +259,25 @@ doit(f, fromp)
 		}
 #ifdef IP_OPTIONS
 		{
-		u_char optbuf[BUFSIZ/3], *cp;
-		char lbuf[BUFSIZ], *lp;
-		int optsize = sizeof(optbuf), ipproto;
+		struct ipoption opts;
+		int optsize = sizeof(opts), ipproto, i;
 		struct protoent *ip;
 
 		if ((ip = getprotobyname("ip")) != NULL)
 			ipproto = ip->p_proto;
 		else
 			ipproto = IPPROTO_IP;
-		if (getsockopt(0, ipproto, IP_OPTIONS, (char *)optbuf,
+		if (getsockopt(0, ipproto, IP_OPTIONS, (char *)&opts,
 		    &optsize) == 0 && optsize != 0) {
-			lp = lbuf;
-			for (cp = optbuf; optsize > 0; cp++, optsize--, lp += 3)
-				sprintf(lp, " %2.2x", *cp);
-			syslog(LOG_NOTICE,
-			    "Connection received using IP options (ignored):%s",
-			    lbuf);
-			if (setsockopt(0, ipproto, IP_OPTIONS,
-			    (char *)NULL, optsize) != 0) {
-				syslog(LOG_ERR,
-				    "setsockopt IP_OPTIONS NULL: %m");
-				exit(1);
+			for (i = 0; (void *)&opts.ipopt_list[i] - (void *)&opts <
+			    optsize; ) {
+				u_char c = (u_char)opts.ipopt_list[i];
+				if (c == IPOPT_LSRR || c == IPOPT_SSRR)
+					exit(1);
+				if (c == IPOPT_EOL)
+					break;
+				i += (c == IPOPT_NOP) ? 1 :
+				    (u_char)opts.ipopt_list[i+1];
 			}
 		}
 		}
@@ -317,11 +315,11 @@ doit(f, fromp)
 				    hostname);
 #endif
 
-			execl(_PATH_LOGIN, "login", "-p", "-h", hostname, "-f",
-			    "--", lusername, (char *)NULL);
+			execl(_PATH_LOGIN, "login", "-p", "-h", hostname, "-u",
+			    rusername, "-f", "--", lusername, (char *)NULL);
 		} else
 			execl(_PATH_LOGIN, "login", "-p", "-h", hostname,
-			    "--", lusername, (char *)NULL);
+			    "-u", rusername, "--", lusername, (char *)NULL);
 		fatal(STDERR_FILENO, _PATH_LOGIN, 1);
 		/*NOTREACHED*/
 	}
@@ -609,7 +607,7 @@ void
 setup_term(fd)
 	int fd;
 {
-	register char *cp = index(term+ENVSIZE, '/');
+	register char *cp = strchr(term+ENVSIZE, '/');
 	char *speed;
 	struct termios tt;
 
@@ -618,7 +616,7 @@ setup_term(fd)
 	if (cp) {
 		*cp++ = '\0';
 		speed = cp;
-		cp = index(speed, '/');
+		cp = strchr(speed, '/');
 		if (cp)
 			*cp++ = '\0';
 		cfsetspeed(&tt, atoi(speed));
@@ -632,7 +630,7 @@ setup_term(fd)
 	if (cp) {
 		*cp++ = '\0';
 		speed = cp;
-		cp = index(speed, '/');
+		cp = strchr(speed, '/');
 		if (cp)
 			*cp++ = '\0';
 		tcgetattr(fd, &tt);
@@ -689,7 +687,7 @@ do_krb_login(dest)
 			authopts, 0,
 			ticket, "rcmd",
 			instance, dest, (struct sockaddr_in *) 0,
-			kdata, "", (bit_64 *) 0, version);
+			kdata, "", (struct des_ks_struct *) 0, version);
 
 	if (rc != KSUCCESS)
 		return (rc);

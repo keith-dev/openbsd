@@ -37,7 +37,7 @@
  */
 
 #if defined(LIBC_SCCS) && !defined(lint)
-static char rcsid[] = "$OpenBSD: isctype.c,v 1.13 1995/02/27 04:34:43 cgd Exp $";
+static char rcsid[] = "$OpenBSD: isctype.c,v 1.2 1996/08/19 08:24:38 tholo Exp $";
 #endif /* LIBC_SCCS and not lint */
 
 #define _ANSI_LIBRARY

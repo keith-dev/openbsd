@@ -1,4 +1,4 @@
-/*	$OpenBSD: sh.h,v 1.2 1996/08/19 20:08:58 downsj Exp $	*/
+/*	$OpenBSD: sh.h,v 1.5 1997/01/02 09:34:10 downsj Exp $	*/
 
 /*
  * Public Domain Bourne/Korn shell
@@ -334,7 +334,7 @@ typedef int bool_t;
 /* Table flag type - needs > 16 and < 32 bits */
 typedef INT32 Tflag;
 
-#define	NUFILE	10		/* Number of user-accessible files */
+#define	NUFILE	32		/* Number of user-accessible files */
 #define	FDBASE	10		/* First file usable by Shell */
 
 /* you're not going to run setuid shell scripts, are you? */
@@ -472,6 +472,7 @@ enum sh_flag {
 	FPOSIX,		/* -o posix: be posixly correct */
 	FPRIVILEGED,	/* -p: use suid_profile */
 	FRESTRICTED,	/* -r: restricted shell */
+	FSH,		/* -o sh: favor sh behavour */
 	FSTDIN,		/* -s: (invocation) parse stdin */
 	FTRACKALL,	/* -h: create tracked aliases for all commands */
 	FVERBOSE,	/* -v: echo input */

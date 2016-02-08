@@ -1,4 +1,4 @@
-/*	$OpenBSD: pat_rep.c,v 1.3 1996/06/23 14:20:38 deraadt Exp $	*/
+/*	$OpenBSD: pat_rep.c,v 1.8 1997/04/05 22:36:15 millert Exp $	*/
 /*	$NetBSD: pat_rep.c,v 1.4 1995/03/21 09:07:33 cgd Exp $	*/
 
 /*-
@@ -42,7 +42,7 @@
 #if 0
 static char sccsid[] = "@(#)pat_rep.c	8.2 (Berkeley) 4/18/94";
 #else
-static char rcsid[] = "$OpenBSD: pat_rep.c,v 1.3 1996/06/23 14:20:38 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: pat_rep.c,v 1.8 1997/04/05 22:36:15 millert Exp $";
 #endif
 #endif /* not lint */
 
@@ -54,6 +54,7 @@ static char rcsid[] = "$OpenBSD: pat_rep.c,v 1.3 1996/06/23 14:20:38 deraadt Exp
 #include <string.h>
 #include <unistd.h>
 #include <stdlib.h>
+#include <errno.h>
 #ifdef NET2_REGEX
 #include <regexp.h>
 #else
@@ -233,11 +234,12 @@ rep_add(str)
 
 #if __STDC__
 int
-pat_add(char *str)
+pat_add(char *str, char *chdname)
 #else
 int
-pat_add(str)
+pat_add(str, chdname)
 	char *str;
+	char *chdname;
 #endif
 {
 	register PATTERN *pt;
@@ -265,6 +267,8 @@ pat_add(str)
 	pt->plen = strlen(str);
 	pt->fow = NULL;
 	pt->flgs = 0;
+	pt->chdname = chdname;
+
 	if (pathead == NULL) {
 		pattail = pathead = pt;
 		return(0);
@@ -668,6 +672,38 @@ mod_name(arcn)
 	register int res = 0;
 
 	/*
+	 * Strip off leading '/' if appropriate.
+	 * Currently, this option is only set for the tar format.
+	 */
+	if (rmleadslash && arcn->name[0] == '/') {
+		if (arcn->name[1] == '\0') {
+			arcn->name[0] = '.';
+		} else {
+			(void)memmove(arcn->name, &arcn->name[1],
+			    strlen(arcn->name));
+			arcn->nlen--;
+		}
+		if (rmleadslash < 2) {
+			rmleadslash = 2;
+			paxwarn(0, "Removing leading / from absolute path names in the archive");
+		}
+	}
+	if (rmleadslash && arcn->ln_name[0] == '/' &&
+	    (arcn->type == PAX_HLK || arcn->type == PAX_HRG)) {
+		if (arcn->ln_name[1] == '\0') {
+			arcn->ln_name[0] = '.';
+		} else {
+			(void)memmove(arcn->ln_name, &arcn->ln_name[1],
+			    strlen(arcn->ln_name));
+			arcn->ln_nlen--;
+		}
+		if (rmleadslash < 2) {
+			rmleadslash = 2;
+			paxwarn(0, "Removing leading / from absolute path names in the archive");
+		}
+	}
+
+	/*
 	 * IMPORTANT: We have a problem. what do we do with symlinks?
 	 * Modifying a hard link name makes sense, as we know the file it
 	 * points at should have been seen already in the archive (and if it
@@ -1007,7 +1043,7 @@ rep_name(name, nlen, prnt)
 #			ifdef NET2_REGEX
 			inpt = pt->rcmp->endp[0];
 #			else
-			inpt += pm[0].rm_eo;
+			inpt += pm[0].rm_eo - pm[0].rm_so;
 #			endif
 
 			if ((outpt == endpt) || (*inpt == '\0'))

@@ -7,7 +7,7 @@
 
 #if defined(LIBC_SCCS)
 	.text
-	.asciz "$OpenBSD$"
+	.asciz "$OpenBSD: bzero.S,v 1.2 1996/08/19 08:12:56 tholo Exp $"
 #endif
 
 ENTRY(bzero)

@@ -1,4 +1,4 @@
-/*	$OpenBSD$ */
+/*	$OpenBSD: kvm_getloadavg.c,v 1.2 1996/05/05 14:57:12 deraadt Exp $ */
 /*	$NetBSD: kvm_getloadavg.c,v 1.2 1996/03/18 22:33:31 thorpej Exp $	*/
 
 /*-
@@ -38,7 +38,7 @@
 #if 0
 static char sccsid[] = "@(#)kvm_getloadavg.c	8.1 (Berkeley) 6/4/93";
 #else
-static char *rcsid = "$OpenBSD$";
+static char *rcsid = "$OpenBSD: kvm_getloadavg.c,v 1.2 1996/05/05 14:57:12 deraadt Exp $";
 #endif
 #endif /* LIBC_SCCS and not lint */
 

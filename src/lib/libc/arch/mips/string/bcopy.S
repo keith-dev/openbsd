@@ -38,7 +38,7 @@
 
 #if defined(LIBC_SCCS)
 	.text
-	.asciz "$OpenBSD$"
+	.asciz "$OpenBSD: bcopy.S,v 1.4 1996/08/19 08:16:12 tholo Exp $"
 #endif /* LIBC_SCCS */
 
 /* bcopy(s1, s2, n) */

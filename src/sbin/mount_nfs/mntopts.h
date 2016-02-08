@@ -1,4 +1,4 @@
-/*	$OpenBSD$	*/
+/*	$OpenBSD: mntopts.h,v 1.1 1996/03/21 00:16:00 niklas Exp $	*/
 
 /*-
  * Copyright (c) 1994

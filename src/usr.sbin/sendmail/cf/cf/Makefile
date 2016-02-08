@@ -1,10 +1,11 @@
-#	@(#)Makefile	8.17 (Berkeley) 9/12/95
+#	$OpenBSD: Makefile,v 1.10 1997/04/27 20:57:06 millert Exp $
+#	@(#)Makefile	8.19 (Berkeley) 1/14/97
 
 #
 #  This Makefile uses the new Berkeley "make" program.  See Makefile.dist
 #  for a more vanilla version.
 #
-#  Configuration files are created using "m4 file.mc > file.cf";
+#  Create configuration files using "m4 ../m4/cf.m4 file.mc > file.cf";
 #  this may be easier than tweaking the Makefile.  You do need to
 #  have a fairly modern M4 available (GNU m4 works).  On SunOS, use
 #  /usr/5bin/m4.
@@ -22,9 +23,9 @@ RM=	rm -f
 	(cd ${.CURDIR} && $(M4) ${@:R}.mc > ${.OBJDIR}/$@)
 	$(CHMOD) $(ROMODE) $@
 
-ALL=	boat-anchor.cf chimera.cf pain.cf sun-lamp.cf trinity.cf \
-	clientproto.cf netbsd-proto.cf tcpproto.cf uucpproto.cf \
-	gandalf.cf
+ALL=	boat-anchor.cf trinity.cf \
+	clientproto.cf openbsd-proto.cf tcpproto.cf uucpproto.cf \
+	gandalf.cf saruman.cf alatar.cf nettan.cf waldorf.cf
 
 all: $(ALL)
 
@@ -34,7 +35,7 @@ clean cleandir:
 depend install: 
 
 distribution:
-	install -c -o root -g wheel -m 444 netbsd-proto.cf \
+	${INSTALL} ${INSTALL_COPY} -o root -g wheel -m 444 openbsd-proto.cf \
 	    ${DESTDIR}/etc/sendmail.cf
 
 # this is overkill, but....

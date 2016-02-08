@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.1 1996/04/22 20:21:54 hannken Exp $
+#	$OpenBSD: Makefile,v 1.3 1996/09/28 08:49:07 pefo Exp $
 #	@(#)Makefile	8.1 (Berkeley) 6/5/93
 
 PROG=	kbd

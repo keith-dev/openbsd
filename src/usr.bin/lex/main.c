@@ -1,4 +1,4 @@
-/*	$OpenBSD: main.c,v 1.2 1996/06/26 05:35:38 deraadt Exp $	*/
+/*	$OpenBSD: main.c,v 1.3 1996/07/13 22:22:08 millert Exp $	*/
 
 /* flex - tool to generate fast lexical analyzers */
 

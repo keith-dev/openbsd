@@ -1,4 +1,4 @@
-/*	$OpenBSD: rsh.c,v 1.8 1996/08/30 02:20:57 millert Exp $	*/
+/*	$OpenBSD: rsh.c,v 1.12 1997/03/26 19:41:59 deraadt Exp $	*/
 
 /*-
  * Copyright (c) 1983, 1990 The Regents of the University of California.
@@ -41,7 +41,7 @@ char copyright[] =
 
 #ifndef lint
 /*static char sccsid[] = "from: @(#)rsh.c	5.24 (Berkeley) 7/1/91";*/
-static char rcsid[] = "$OpenBSD: rsh.c,v 1.8 1996/08/30 02:20:57 millert Exp $";
+static char rcsid[] = "$OpenBSD: rsh.c,v 1.12 1997/03/26 19:41:59 deraadt Exp $";
 #endif /* not lint */
 
 #include <sys/types.h>
@@ -121,7 +121,7 @@ main(argc, argv)
 #else
 #define	OPTIONS	"8KLdel:nw"
 #endif
-	while ((ch = getopt(argc - argoff, argv + argoff, OPTIONS)) != EOF)
+	while ((ch = getopt(argc - argoff, argv + argoff, OPTIONS)) != -1)
 		switch(ch) {
 		case 'K':
 #ifdef KERBEROS
@@ -168,6 +168,7 @@ main(argc, argv)
 	if (!argv[optind]) {
 		if (asrsh)
 			*argv = "rlogin";
+		seteuid(getuid());
 		setuid(getuid());
 		execv(_PATH_RLOGIN, argv);
 		(void)fprintf(stderr, "rsh: can't exec %s.\n", _PATH_RLOGIN);
@@ -274,6 +275,7 @@ try_connect:
 			    strerror(errno));
 	}
 
+	(void)seteuid(uid);
 	(void)setuid(uid);
 	omask = sigblock(sigmask(SIGINT)|sigmask(SIGQUIT)|sigmask(SIGTERM));
 	if (signal(SIGINT, SIG_IGN) != SIG_IGN)
@@ -326,7 +328,7 @@ reread:		errno = 0;
 		bp = buf;
 
 rewrite:	rembits = 1 << rem;
-		if (select(16, 0, &rembits, 0, 0) < 0) {
+		if (select(rem + 1, 0, &rembits, 0, 0) < 0) {
 			if (errno != EINTR) {
 				(void)fprintf(stderr,
 				    "rsh: select: %s.\n", strerror(errno));
@@ -361,7 +363,7 @@ done:
 	readfrom = (1 << rfd2) | (1 << rem);
 	do {
 		ready = readfrom;
-		if (select(16, &ready, 0, 0, 0) < 0) {
+		if (select(MAX(rfd2, rem) + 1, &ready, 0, 0, 0) < 0) {
 			if (errno != EINTR) {
 				(void)fprintf(stderr,
 				    "rsh: select: %s.\n", strerror(errno));

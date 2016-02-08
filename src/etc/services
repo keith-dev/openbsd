@@ -1,4 +1,4 @@
-#	$OpenBSD: services,v 1.3 1996/03/28 18:24:34 niklas Exp $
+#	$OpenBSD: services,v 1.9 1997/02/11 04:16:35 gene Exp $
 #
 # Network services, Internet style
 #
@@ -159,6 +159,8 @@ ingreslock	1524/tcp
 ingreslock	1524/udp
 prospero-np	1525/tcp		# Prospero non-privileged
 prospero-np	1525/udp
+nfsd		2049/udp	nfs	# NFS server
+nfsd		2049/tcp	nfs	# NFS server
 rfe		5002/tcp		# Radio Free Ethernet
 rfe		5002/udp		# Actually uses UDP only
 #
@@ -172,8 +174,8 @@ kshell		544/tcp		krcmd	# Kerberos `rsh'
 kerberos-adm	749/tcp			# Kerberos `kadmin' (v5)
 kerberos	750/udp		kdc	# Kerberos (server) udp
 kerberos	750/tcp		kdc	# Kerberos (server) tcp
-kerberos-master	751/udp			# Kerberos admin server udp
-kerberos-master	751/tcp			# Kerberos admin server tcp
+kerberos_master	751/udp	kerberos-master	# Kerberos admin server udp
+kerberos_master	751/tcp	kerberos-master # Kerberos admin server tcp
 krbupdate	760/tcp		kreg	# BSD Kerberos registration
 kpasswd		761/tcp		kpwd	# BSD Kerberos `passwd'
 eklogin		2105/tcp		# Kerberos encrypted `rlogin'
@@ -182,3 +184,6 @@ eklogin		2105/tcp		# Kerberos encrypted `rlogin'
 #
 supfilesrv	871/tcp			# SUP server
 supfiledbg	1127/tcp		# SUP debugging
+radius		1645/udp		# radius authentication
+radacct		1646/udp		# radius accounting
+icb		7326/tcp		# Internet Citizen's Band

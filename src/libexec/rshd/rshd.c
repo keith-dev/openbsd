@@ -39,7 +39,7 @@ static char copyright[] =
 
 #ifndef lint
 /* from: static char sccsid[] = "@(#)rshd.c	8.2 (Berkeley) 4/6/94"; */
-static char *rcsid = "$Id: rshd.c,v 1.6 1996/07/23 19:27:42 deraadt Exp $";
+static char *rcsid = "$Id: rshd.c,v 1.16 1997/02/13 22:32:46 deraadt Exp $";
 #endif /* not lint */
 
 /*
@@ -55,7 +55,10 @@ static char *rcsid = "$Id: rshd.c,v 1.6 1996/07/23 19:27:42 deraadt Exp $";
 #include <sys/time.h>
 #include <sys/socket.h>
 
+#include <netinet/in_systm.h>
 #include <netinet/in.h>
+#include <netinet/ip.h>
+#include <netinet/ip_var.h>
 #include <arpa/inet.h>
 #include <netdb.h>
 
@@ -109,7 +112,7 @@ main(argc, argv)
 	openlog("rshd", LOG_PID | LOG_ODELAY, LOG_DAEMON);
 
 	opterr = 0;
-	while ((ch = getopt(argc, argv, OPTIONS)) != EOF)
+	while ((ch = getopt(argc, argv, OPTIONS)) != -1)
 		switch (ch) {
 		case 'a':
 			check_all = 1;
@@ -179,11 +182,12 @@ main(argc, argv)
 }
 
 char	username[20] = "USER=";
+char	logname[23] = "LOGNAME=";
 char	homedir[64] = "HOME=";
 char	shell[64] = "SHELL=";
 char	path[100] = "PATH=";
 char	*envinit[] =
-	    {homedir, shell, path, username, 0};
+	    {homedir, shell, path, logname, username, 0};
 char	**environ;
 
 void
@@ -235,27 +239,24 @@ doit(fromp)
 	}
 #ifdef IP_OPTIONS
       {
-	u_char optbuf[BUFSIZ/3], *cp;
-	char lbuf[BUFSIZ], *lp;
-	int optsize = sizeof(optbuf), ipproto;
+	struct ipoption opts;
+	int optsize = sizeof(opts), ipproto, i;
 	struct protoent *ip;
 
 	if ((ip = getprotobyname("ip")) != NULL)
 		ipproto = ip->p_proto;
 	else
 		ipproto = IPPROTO_IP;
-	if (!getsockopt(0, ipproto, IP_OPTIONS, (char *)optbuf, &optsize) &&
+	if (!getsockopt(0, ipproto, IP_OPTIONS, (char *)&opts, &optsize) &&
 	    optsize != 0) {
-		lp = lbuf;
-		for (cp = optbuf; optsize > 0; cp++, optsize--, lp += 3)
-			sprintf(lp, " %2.2x", *cp);
-		syslog(LOG_NOTICE,
-		    "Connection received from %s using IP options (ignored):%s",
-		    inet_ntoa(fromp->sin_addr), lbuf);
-		if (setsockopt(0, ipproto, IP_OPTIONS,
-		    (char *)NULL, optsize) != 0) {
-			syslog(LOG_ERR, "setsockopt IP_OPTIONS NULL: %m");
-			exit(1);
+		for (i = 0; (void *)&opts.ipopt_list[i] - (void *)&opts <
+		    optsize; ) {	
+			u_char c = (u_char)opts.ipopt_list[i];
+			if (c == IPOPT_LSRR || c == IPOPT_SSRR)
+				exit(1);
+			if (c == IPOPT_EOL)
+				break;
+			i += (c == IPOPT_NOP) ? 1 : (u_char)opts.ipopt_list[i+1];
 		}
 	}
       }
@@ -405,7 +406,8 @@ doit(fromp)
 			rc = krb_recvauth(authopts, 0, ticket, "rcmd",
 				instance, &fromaddr,
 				(struct sockaddr_in *) 0,
-				kdata, "", (bit_64 *) 0, version);
+				kdata, "", (struct des_ks_struct *) 0,
+				version);
 		if (rc != KSUCCESS) {
 			error("Kerberos authentication failure: %s\n",
 				  krb_err_txt[rc]);
@@ -658,13 +660,16 @@ fail:
 	if (setlogin(pwd->pw_name) < 0)
 		syslog(LOG_ERR, "setlogin() failed: %m");
 #endif
+	(void) setegid((gid_t)pwd->pw_gid);
 	(void) setgid((gid_t)pwd->pw_gid);
 	initgroups(pwd->pw_name, pwd->pw_gid);
+	(void) seteuid((uid_t)pwd->pw_uid);
 	(void) setuid((uid_t)pwd->pw_uid);
 	environ = envinit;
 	strncat(homedir, pwd->pw_dir, sizeof(homedir)-6);
 	strcat(path, _PATH_DEFPATH);
 	strncat(shell, pwd->pw_shell, sizeof(shell)-7);
+	strncat(logname, pwd->pw_name, sizeof(logname)-9);
 	strncat(username, pwd->pw_name, sizeof(username)-6);
 	cp = strrchr(pwd->pw_shell, '/');
 	if (cp)

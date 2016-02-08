@@ -1,5 +1,5 @@
-/*	$OpenBSD: symtab.c,v 1.8 1995/03/18 14:59:54 cgd Exp $	*/
-/*	$NetBSD: symtab.c,v 1.8 1995/03/18 14:59:54 cgd Exp $	*/
+/*	$OpenBSD: symtab.c,v 1.4 1997/02/09 18:55:16 deraadt Exp $	*/
+/*	$NetBSD: symtab.c,v 1.9 1996/11/30 18:04:47 cgd Exp $	*/
 
 /*
  * Copyright (c) 1983, 1993
@@ -38,7 +38,7 @@
 #if 0
 static char sccsid[] = "@(#)symtab.c	8.2 (Berkeley) 9/13/94";
 #else
-static char rcsid[] = "$OpenBSD: symtab.c,v 1.8 1995/03/18 14:59:54 cgd Exp $";
+static char rcsid[] = "$OpenBSD: symtab.c,v 1.4 1997/02/09 18:55:16 deraadt Exp $";
 #endif
 #endif /* not lint */
 
@@ -157,8 +157,11 @@ lookupname(name)
 
 	cp = name;
 	for (ep = lookupino(ROOTINO); ep != NULL; ep = ep->e_entries) {
-		for (np = buf; *cp != '/' && *cp != '\0'; )
+		for (np = buf;
+		    *cp != '/' && *cp != '\0' && np < &buf[sizeof(buf)]; )
 			*np++ = *cp++;
+		if (np == &buf[sizeof(buf)])
+			break;
 		*np = '\0';
 		for ( ; ep != NULL; ep = ep->e_sibling)
 			if (strcmp(ep->e_name, buf) == 0)
@@ -440,13 +443,13 @@ freename(name)
  * Useful quantities placed at the end of a dumped symbol table.
  */
 struct symtableheader {
-	long	volno;
-	long	stringsize;
-	long	entrytblsize;
+	int32_t	volno;
+	int32_t	stringsize;
+	int32_t	entrytblsize;
 	time_t	dumptime;
 	time_t	dumpdate;
 	ino_t	maxino;
-	long	ntrec;
+	int32_t	ntrec;
 };
 
 /*

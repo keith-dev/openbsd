@@ -1,7 +1,7 @@
-/*	$OpenBSD: main.c,v 1.1 1996/06/04 07:56:05 niklas Exp $	*/
+/*	$OpenBSD: main.c,v 1.4 1997/01/15 23:44:10 millert Exp $	*/
 
 #ifndef lint
-static const char *rcsid = "$OpenBSD: main.c,v 1.1 1996/06/04 07:56:05 niklas Exp $";
+static const char *rcsid = "$OpenBSD: main.c,v 1.4 1997/01/15 23:44:10 millert Exp $";
 #endif
 
 /*
@@ -43,7 +43,7 @@ main(int argc, char **argv)
     char *prog_name = argv[0];
 
     pkgs = start = argv;
-    while ((ch = getopt(argc, argv, Options)) != EOF)
+    while ((ch = getopt(argc, argv, Options)) != -1)
 	switch(ch) {
 	case 'v':
 	    Verbose = TRUE;
@@ -94,6 +94,10 @@ main(int argc, char **argv)
 	    break;
 
 	case 'X':
+	  /* XXX this won't work until someone adds the gtar -X option
+	     (--exclude-from-file) to paxtar - so long it is disabled
+	     in perform.c */
+	    printf("WARNING: the -X option is not supported in OpenBSD\n");
 	    ExcludeFrom = optarg;
 	    break;
 

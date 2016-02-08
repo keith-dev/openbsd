@@ -1,4 +1,4 @@
-/*	$OpenBSD$	*/
+/*	$OpenBSD: elf_abi.h,v 1.4 1996/05/22 07:46:22 etheisen Exp $	*/
 /*
  * Copyright (c) 1996 Erik Theisen
  * All rights reserved.

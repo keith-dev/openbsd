@@ -1,4 +1,4 @@
-/*	$OpenBSD: dfa.c,v 1.2 1996/06/26 05:35:29 deraadt Exp $	*/
+/*	$OpenBSD: dfa.c,v 1.3 1996/07/13 22:21:57 millert Exp $	*/
 
 /* dfa - DFA construction routines */
 

@@ -1,6 +1,6 @@
-/*	$OpenBSD$	*/
+/*	$OpenBSD: regerror.c,v 1.2 1996/07/24 05:39:11 downsj Exp $	*/
 #ifndef lint
-static char *rcsid = "$OpenBSD$";
+static char *rcsid = "$OpenBSD: regerror.c,v 1.2 1996/07/24 05:39:11 downsj Exp $";
 #endif /* not lint */
 
 #include <regexp.h>

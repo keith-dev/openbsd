@@ -1,5 +1,5 @@
-/*	$OpenBSD: mount_msdos.c,v 1.14 1996/04/13 05:35:47 cgd Exp $	*/
-/*	$NetBSD: mount_msdos.c,v 1.14 1996/04/13 05:35:47 cgd Exp $	*/
+/*	$OpenBSD: mount_msdos.c,v 1.9 1997/01/15 23:41:22 millert Exp $	*/
+/*	$NetBSD: mount_msdos.c,v 1.16 1996/10/24 00:12:50 cgd Exp $	*/
 
 /*
  * Copyright (c) 1994 Christopher G. Demetriou
@@ -32,7 +32,7 @@
  */
 
 #ifndef lint
-static char rcsid[] = "$OpenBSD: mount_msdos.c,v 1.14 1996/04/13 05:35:47 cgd Exp $";
+static char rcsid[] = "$OpenBSD: mount_msdos.c,v 1.9 1997/01/15 23:41:22 millert Exp $";
 #endif /* not lint */
 
 #include <sys/cdefs.h>
@@ -47,11 +47,13 @@ static char rcsid[] = "$OpenBSD: mount_msdos.c,v 1.14 1996/04/13 05:35:47 cgd Ex
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <errno.h>
 
 #include "mntopts.h"
 
 const struct mntopt mopts[] = {
 	MOPT_STDOPTS,
+	MOPT_UPDATE,
 	{ NULL }
 };
 
@@ -69,11 +71,12 @@ main(argc, argv)
 	struct stat sb;
 	int c, mntflags, set_gid, set_uid, set_mask;
 	char *dev, *dir, ndir[MAXPATHLEN+1];
+	char *errcause;
 
 	mntflags = set_gid = set_uid = set_mask = 0;
 	(void)memset(&args, '\0', sizeof(args));
 
-	while ((c = getopt(argc, argv, "Gsl9u:g:m:o:")) != EOF) {
+	while ((c = getopt(argc, argv, "Gsl9u:g:m:o:")) != -1) {
 		switch (c) {
 		case 'G':
 			args.flags |= MSDOSFSMNT_GEMDOSFS;
@@ -118,8 +121,8 @@ main(argc, argv)
 		warnx("\"%s\" is a relative path.", dir);
 		if (getcwd(ndir, sizeof(ndir)) == NULL)
 			err(1, "getcwd");
-		strncat(ndir, "/", sizeof(ndir) - strlen(ndir) - 1);
-		strncat(ndir, dir, sizeof(ndir) - strlen(ndir) - 1);
+		strncat(ndir, "/", sizeof(ndir) - strlen(ndir));
+		strncat(ndir, dir, sizeof(ndir) - strlen(ndir));
 		dir = ndir;
 		warnx("using \"%s\" instead.", dir);
 	}
@@ -142,8 +145,24 @@ main(argc, argv)
 			args.mask = sb.st_mode & (S_IRWXU | S_IRWXG | S_IRWXO);
 	}
 
-	if (mount(MOUNT_MSDOS, dir, mntflags, &args) < 0)
-		err(1, "mount");
+	if (mount(MOUNT_MSDOS, dir, mntflags, &args) < 0) {
+		switch (errno) {
+		case EMFILE:
+			errcause = "mount table full";
+			break;
+		case EINVAL:
+			if (mntflags & MNT_UPDATE)
+				errcause =
+			    "specified device does not match mounted device";
+			else 
+				errcause = "incorrect super block";
+			break;
+		default:
+			errcause = strerror(errno);
+			break;
+		}
+		errx(1, "%s on %s: %s", args.fspec, dir, errcause);
+	}
 
 	exit (0);
 }

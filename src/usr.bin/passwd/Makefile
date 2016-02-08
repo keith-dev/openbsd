@@ -1,26 +1,26 @@
-#	$OpenBSD: Makefile,v 1.8 1996/09/04 22:52:06 deraadt Exp $
+#	$OpenBSD: Makefile,v 1.15 1997/04/19 21:26:27 millert Exp $
 
 .include <bsd.own.mk>
 
 PROG=	passwd
-SRCS=	local_passwd.c yp_passwd.c passwd.c getpwent.c
+SRCS=	local_passwd.c yp_passwd.c passwd.c getpwent.c pwd_gensalt.c
 .PATH:  ${.CURDIR}/../../lib/libc/gen
-DPADD+= ${LIBRPCSVC} ${LIBCRYPT} ${LIBUTIL}
-LDADD+= -lrpcsvc -lcrypt -lutil
-CFLAGS+=-I${.CURDIR}
+DPADD+= ${LIBRPCSVC} ${LIBUTIL}
+LDADD+= -lrpcsvc -lutil
+CFLAGS+= -I${.CURDIR}
 
-.if defined(YP)
+.if (${YP} == "yes")
 CFLAGS+=-DYP -I${.CURDIR}/../../lib/libc/yp
 .endif
 
 .include <bsd.own.mk>	# For Kerberos
 
-.if defined(KERBEROS5)
-SRCS+= krb5_passwd.c
+.if (${KERBEROS5} == "yes")
+#SRCS+= krb5_passwd.c XXX fix the /tmp/tkt_cpw_%d race first + others
 CFLAGS+= -DKERBEROS5
 DPADD+=	${LIBKRB5} ${LIBCRYPTO}
 LDADD+=	-lkrb5 -lcrypto
-.elif defined(KERBEROS)
+.elif (${KERBEROS} == "yes")
 .PATH:  ${.CURDIR}/../rlogin
 SRCS+= krb_passwd.c des_rw.c
 CFLAGS+= -DKERBEROS

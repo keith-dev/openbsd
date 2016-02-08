@@ -1,4 +1,4 @@
-/*	$OpenBSD: makedbm.c,v 1.3 1996/05/30 09:53:06 deraadt Exp $ */
+/*	$OpenBSD: makedbm.c,v 1.7 1997/04/04 18:41:46 deraadt Exp $ */
 
 /*
  * Copyright (c) 1994 Mats O Jansson <moj@stacken.kth.se>
@@ -32,7 +32,7 @@
  */
 
 #ifndef LINT
-static char rcsid[] = "$OpenBSD: makedbm.c,v 1.3 1996/05/30 09:53:06 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: makedbm.c,v 1.7 1997/04/04 18:41:46 deraadt Exp $";
 #endif
 
 #include <stdio.h>
@@ -185,7 +185,7 @@ create_database(infile,database,
 	char	*p,*k,*v;
 	char	*slash;
 	DBM	*new_db;
-	static	char mapname[] = "ypdbXXXXXX";
+	static	char mapname[] = "ypdbXXXXXXXXXX";
 	char	db_mapname[MAXPATHLEN],db_outfile[MAXPATHLEN],
 		db_tempname[MAXPATHLEN];
 	char	empty_str[] = "";
@@ -208,7 +208,7 @@ create_database(infile,database,
 	}
 	snprintf(db_outfile, sizeof(db_outfile), "%s%s", database, YPDB_SUFFIX);
 
-	slash = rindex(database, '/');
+	slash = strrchr(database, '/');
 	if (slash != NULL) 
 		slash[1] = 0; 			/* truncate to dir */
 	else
@@ -327,7 +327,7 @@ main (argc,argv)
 	aflag = uflag = bflag = lflag = sflag = 0;
 	infile = outfile = NULL;
 	
-	while ((ch = getopt(argc, argv, "blsui:o:m:d:")) != EOF)
+	while ((ch = getopt(argc, argv, "blsui:o:m:d:")) != -1)
 		switch (ch) {
 			case 'b':
 		  		bflag++;

@@ -1,5 +1,5 @@
 /*	$NetBSD: rcp.c,v 1.9 1995/03/21 08:19:06 cgd Exp $	*/
-/*	$OpenBSD: rcp.c,v 1.5 1996/08/02 12:17:04 deraadt Exp $	*/
+/*	$OpenBSD: rcp.c,v 1.10 1997/03/26 01:19:49 deraadt Exp $	*/
 
 /*
  * Copyright (c) 1983, 1990, 1992, 1993
@@ -101,6 +101,10 @@ char cmd[CMDNEEDS];		/* must hold "rcp -r -p -d\0" */
 #ifdef KERBEROS
 int	 kerberos __P((char **, char *, char *, char *));
 void	 oldw __P((const char *, ...));
+/* XXX from ../../usr.bin/rlogin/krcmd.c */
+int krcmd __P((char **, u_short, char *, char *, int *, char *));
+int krcmd_mutual __P((char **, u_short, char *, char *, int *, 
+		       char *, CREDENTIALS *, Key_schedule));
 #endif
 int	 response __P((void));
 void	 rsource __P((char *, struct stat *));
@@ -120,7 +124,7 @@ main(argc, argv)
 	char *targ, *shell;
 
 	fflag = tflag = 0;
-	while ((ch = getopt(argc, argv, OPTIONS)) != EOF)
+	while ((ch = getopt(argc, argv, OPTIONS)) != -1)
 		switch(ch) {			/* User-visible flags. */
 		case 'K':
 #ifdef KERBEROS
@@ -130,7 +134,8 @@ main(argc, argv)
 #ifdef	KERBEROS
 		case 'k':
 			dest_realm = dst_realm_buf;
-			(void)strncpy(dst_realm_buf, optarg, REALM_SZ);
+			(void)strncpy(dst_realm_buf, optarg, REALM_SZ-1);
+			dst_realm_buf[REALM_SZ-1] = '\0';
 			break;
 		case 'x':
 			doencrypt = 1;
@@ -185,12 +190,14 @@ main(argc, argv)
 
 	if (fflag) {			/* Follow "protocol", send data. */
 		(void)response();
+		(void)seteuid(userid);
 		(void)setuid(userid);
 		source(argc, argv);
 		exit(errs);
 	}
 
 	if (tflag) {			/* Receive data. */
+		(void)seteuid(userid);
 		(void)setuid(userid);
 		sink(argc, argv);
 		exit(errs);
@@ -216,7 +223,7 @@ main(argc, argv)
 
 	(void)signal(SIGPIPE, lostconn);
 
-	if (targ = colon(argv[argc - 1]))	/* Dest is remote host. */
+	if ((targ = colon(argv[argc - 1])))	/* Dest is remote host. */
 		toremote(targ, argc, argv);
 	else {
 		tolocal(argc, argv);		/* Dest is local host. */
@@ -238,7 +245,7 @@ toremote(targ, argc, argv)
 	if (*targ == 0)
 		targ = ".";
 
-	if (thost = strchr(argv[argc - 1], '@')) {
+	if ((thost = strchr(argv[argc - 1], '@'))) {
 		/* user@host */
 		*thost++ = 0;
 		tuser = argv[argc - 1];
@@ -309,6 +316,7 @@ toremote(targ, argc, argv)
 				if (response() < 0)
 					exit(1);
 				(void)free(bp);
+				(void)seteuid(userid);
 				(void)setuid(userid);
 			}
 			source(1, argv+i);
@@ -499,7 +507,7 @@ rsource(name, statp)
 		closedir(dirp);
 		return;
 	}
-	while (dp = readdir(dirp)) {
+	while ((dp = readdir(dirp)) != NULL) {
 		if (dp->d_ino == 0)
 			continue;
 		if (!strcmp(dp->d_name, ".") || !strcmp(dp->d_name, ".."))
@@ -529,7 +537,7 @@ sink(argc, argv)
 	BUF *bp;
 	off_t i, j;
 	int amt, count, exists, first, mask, mode, ofd, omode;
-	int setimes, size, targisdir, wrerrno;
+	int setimes, size, targisdir, wrerrno = 0;
 	char ch, *cp, *np, *targ, *why, *vect[1], buf[BUFSIZ];
 
 #define	atime	tv[0]

@@ -1,4 +1,4 @@
-/*	$OpenBSD$	*/
+/*	$OpenBSD: savefile.c,v 1.4 1996/07/12 13:19:13 mickey Exp $	*/
 
 /*
  * Copyright (c) 1993, 1994, 1995

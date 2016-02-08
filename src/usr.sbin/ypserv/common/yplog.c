@@ -1,4 +1,4 @@
-/*	$OpenBSD$ */
+/*	$OpenBSD: yplog.c,v 1.3 1996/05/30 09:53:03 deraadt Exp $ */
 
 /*
  * Copyright (c) 1996 Charles D. Cranor

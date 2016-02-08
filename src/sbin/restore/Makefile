@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.2 1996/06/23 14:32:13 deraadt Exp $
+#	$OpenBSD: Makefile,v 1.3 1996/09/01 15:27:28 deraadt Exp $
 #	$NetBSD: Makefile,v 1.14 1995/03/18 14:59:39 cgd Exp $
 
 PROG=	restore

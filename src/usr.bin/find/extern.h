@@ -1,4 +1,4 @@
-/* *      $OpenBSD: extern.h,v 1.4 1996/09/01 04:30:15 tholo Exp $*/
+/* *      $OpenBSD: extern.h,v 1.7 1996/12/23 04:58:08 millert Exp $*/
 /*-
  * Copyright (c) 1991, 1993
  *	The Regents of the University of California.  All rights reserved.
@@ -48,12 +48,14 @@ PLAN	*paren_squish __P((PLAN *));
 struct stat;
 void	 printlong __P((char *, char *, struct stat *));
 int	 queryuser __P((char **));
+void	 show_path __P((int));
 
 PLAN	*c_atime __P((char *));
 PLAN	*c_ctime __P((char *));
 PLAN	*c_depth __P((void));
 PLAN	*c_empty __P((void));
 PLAN	*c_exec __P((char ***, int));
+PLAN	*c_execdir __P((char ***));
 PLAN	*c_follow __P((void));
 PLAN	*c_fstype __P((char *));
 PLAN	*c_group __P((char *));

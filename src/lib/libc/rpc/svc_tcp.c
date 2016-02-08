@@ -28,7 +28,7 @@
  */
 
 #if defined(LIBC_SCCS) && !defined(lint)
-static char *rcsid = "$OpenBSD: svc_tcp.c,v 1.6 1996/08/19 08:31:57 tholo Exp $";
+static char *rcsid = "$OpenBSD: svc_tcp.c,v 1.14 1997/04/30 05:50:17 tholo Exp $";
 #endif /* LIBC_SCCS and not lint */
 
 /*
@@ -48,6 +48,11 @@ static char *rcsid = "$OpenBSD: svc_tcp.c,v 1.6 1996/08/19 08:31:57 tholo Exp $"
 #include <rpc/rpc.h>
 #include <sys/socket.h>
 #include <errno.h>
+
+#include <netinet/in_systm.h>
+#include <netinet/in.h>
+#include <netinet/ip.h>
+#include <netinet/ip_var.h>
 
 /*
  * Ops vector for TCP/IP based rpc service handle
@@ -148,19 +153,24 @@ svctcp_create(sock, sendsize, recvsize)
 	    (listen(sock, 2) != 0)) {
 		perror("svctcp_.c - cannot getsockname or listen");
 		if (madesock)
-		       (void)close(sock);
+			(void)close(sock);
 		return ((SVCXPRT *)NULL);
 	}
 	r = (struct tcp_rendezvous *)mem_alloc(sizeof(*r));
 	if (r == NULL) {
-		(void) fprintf(stderr, "svctcp_create: out of memory\n");
+		(void)fprintf(stderr, "svctcp_create: out of memory\n");
+		if (madesock)
+			(void)close(sock);
 		return (NULL);
 	}
 	r->sendsize = sendsize;
 	r->recvsize = recvsize;
 	xprt = (SVCXPRT *)mem_alloc(sizeof(SVCXPRT));
 	if (xprt == NULL) {
-		(void) fprintf(stderr, "svctcp_create: out of memory\n");
+		(void)fprintf(stderr, "svctcp_create: out of memory\n");
+		if (madesock)
+			(void)close(sock);
+		free(r);
 		return (NULL);
 	}
 	xprt->xp_p2 = NULL;
@@ -241,14 +251,39 @@ rendezvous_request(xprt)
 			goto again;
 	       return (FALSE);
 	}
+
+#ifdef IP_OPTIONS
+	{
+		struct ipoption opts;
+		int optsize = sizeof(opts), i;
+
+		if (!getsockopt(sock, IPPROTO_IP, IP_OPTIONS, (char *)&opts,
+		    &optsize) && optsize != 0) {
+			for (i = 0; (char *)&opts.ipopt_list[i] - (char *)&opts <
+			    optsize; ) {	
+				u_char c = (u_char)opts.ipopt_list[i];
+				if (c == IPOPT_LSRR || c == IPOPT_SSRR) {
+					close(sock);
+					return (FALSE);
+				}
+				if (c == IPOPT_EOL)
+					break;
+				i += (c == IPOPT_NOP) ? 1 :
+				    (u_char)opts.ipopt_list[i+1];
+			}
+		}
+	}
+#endif
+
 	/*
 	 * XXX careful for ftp bounce attacks. If discovered, close the
 	 * socket and look for another connection.
 	 */
 	if (addr.sin_port == htons(20)) {
 		close(sock);
-		goto again;
+		return (FALSE);
 	}
+
 	/*
 	 * make a new transporter (re-uses xprt)
 	 */

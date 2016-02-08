@@ -1,4 +1,4 @@
-$OpenBSD: CHANGES,v 1.3 1996/06/10 07:23:23 deraadt Exp $
+$OpenBSD: CHANGES,v 1.4 1996/07/12 13:19:06 mickey Exp $
 $NetBSD: CHANGES,v 1.2 1995/03/06 11:37:58 mycroft Exp $
 @(#) $Header: /cvs/src/lib/libpcap/CHANGES,v 1.4 1996/07/12 13:19:06 mickey Exp $ (LBL)
 

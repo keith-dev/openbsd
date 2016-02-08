@@ -1,4 +1,4 @@
-/*	$OpenBSD: rlogin.c,v 1.7 1996/07/27 10:34:31 deraadt Exp $	*/
+/*	$OpenBSD: rlogin.c,v 1.12 1997/01/17 07:13:13 millert Exp $	*/
 /*	$NetBSD: rlogin.c,v 1.8 1995/10/05 09:07:22 mycroft Exp $	*/
 
 /*
@@ -44,7 +44,7 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)rlogin.c	8.1 (Berkeley) 6/6/93";
 #else
-static char rcsid[] = "$OpenBSD: rlogin.c,v 1.7 1996/07/27 10:34:31 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: rlogin.c,v 1.12 1997/01/17 07:13:13 millert Exp $";
 #endif
 #endif /* not lint */
 
@@ -85,7 +85,7 @@ static char rcsid[] = "$OpenBSD: rlogin.c,v 1.7 1996/07/27 10:34:31 deraadt Exp 
 #include <kerberosIV/krb.h>
 
 CREDENTIALS cred;
-Key_schedule schedule;
+des_key_schedule schedule;
 int use_kerberos = 1, doencrypt;
 char dst_realm_buf[REALM_SZ], *dest_realm = NULL;
 #endif
@@ -140,6 +140,7 @@ void		writeroob __P((int));
 
 #ifdef	KERBEROS
 void		warning __P((const char *, ...));
+void		desrw_set_key __P((des_cblock *, des_key_schedule *));
 #endif
 #ifdef OLDSUN
 int		get_window_size __P((int, struct winsize *));
@@ -163,7 +164,7 @@ main(argc, argv)
 	one = 1;
 	host = user = NULL;
 
-	if (p = rindex(argv[0], '/'))
+	if (p = strrchr(argv[0], '/'))
 		++p;
 	else
 		p = argv[0];
@@ -182,7 +183,7 @@ main(argc, argv)
 #else
 #define	OPTIONS	"8EKLde:l:"
 #endif
-	while ((ch = getopt(argc - argoff, argv + argoff, OPTIONS)) != EOF)
+	while ((ch = getopt(argc - argoff, argv + argoff, OPTIONS)) != -1)
 		switch(ch) {
 		case '8':
 			eight = 1;
@@ -214,7 +215,7 @@ main(argc, argv)
 #ifdef KERBEROS
 		case 'x':
 			doencrypt = 1;
-			desrw_set_key(&cred.session, schedule);
+			desrw_set_key(&cred.session, &schedule);
 			break;
 #endif
 		case '?':
@@ -348,6 +349,7 @@ try_connect:
 	if (setsockopt(rem, IPPROTO_IP, IP_TOS, (char *)&one, sizeof(int)) < 0)
 		perror("rlogin: setsockopt TOS (ignored)");
 
+	(void)seteuid(uid);
 	(void)setuid(uid);
 	doit(omask);
 	/*NOTREACHED*/

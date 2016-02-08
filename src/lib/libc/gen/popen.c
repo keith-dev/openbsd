@@ -35,7 +35,7 @@
  */
 
 #if defined(LIBC_SCCS) && !defined(lint)
-static char rcsid[] = "$OpenBSD: popen.c,v 1.11 1995/06/16 07:05:33 jtc Exp $";
+static char rcsid[] = "$OpenBSD: popen.c,v 1.4 1997/04/16 21:59:04 millert Exp $";
 #endif /* LIBC_SCCS and not lint */
 
 #include <sys/param.h>
@@ -86,9 +86,15 @@ popen(program, type)
 		/* NOTREACHED */
 	case 0:				/* Child. */
 		if (*type == 'r') {
-			if (pdes[1] != STDOUT_FILENO) {
-				(void)dup2(pdes[1], STDOUT_FILENO);
-				(void)close(pdes[1]);
+			/*
+			 * We must NOT modify pdes, due to the
+			 * semantics of vfork.
+			 */
+			int tpdes1 = pdes[1];
+			if (tpdes1 != STDOUT_FILENO) {
+				(void)dup2(tpdes1, STDOUT_FILENO);
+				(void)close(tpdes1);
+				tpdes1 = STDOUT_FILENO;
 			}
 			(void) close(pdes[0]);
 		} else {

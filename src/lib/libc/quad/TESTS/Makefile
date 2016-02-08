@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.2 1995/02/27 17:31:26 cgd Exp $
+#	$OpenBSD: Makefile,v 1.2 1996/08/19 08:30:55 tholo Exp $
 
 all: mul divrem
 

@@ -1,3 +1,6 @@
+/*	$OpenBSD: sigreturn.S,v 1.3 1996/11/13 22:05:15 niklas Exp $	*/
+/*	$NetBSD: sigreturn.S,v 1.1 1995/02/10 17:50:42 cgd Exp $	*/
+
 /*
  * Copyright (c) 1994, 1995 Carnegie-Mellon University.
  * All rights reserved.
@@ -29,7 +32,7 @@
 
 #if defined(SYSLIBC_SCCS)
 	.text
-	.asciz "$OpenBSD$"
+	.asciz "$OpenBSD: sigreturn.S,v 1.3 1996/11/13 22:05:15 niklas Exp $"
 #endif /* SYSLIBC_SCCS */
 
 /*

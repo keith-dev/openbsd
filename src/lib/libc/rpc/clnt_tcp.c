@@ -28,7 +28,7 @@
  */
 
 #if defined(LIBC_SCCS) && !defined(lint)
-static char *rcsid = "$OpenBSD: clnt_tcp.c,v 1.8 1996/09/02 05:01:09 deraadt Exp $";
+static char *rcsid = "$OpenBSD: clnt_tcp.c,v 1.14 1997/04/29 08:52:31 deraadt Exp $";
 #endif /* LIBC_SCCS and not lint */
  
 /*
@@ -119,10 +119,6 @@ clnttcp_create(raddr, prog, vers, sockp, sendsz, recvsz)
 	register struct ct_data *ct;
 	struct timeval now;
 	struct rpc_msg call_msg;
-	static u_int32_t disrupt;
-
-	if (disrupt == 0)
-		disrupt = (u_int32_t)raddr;
 
 	h  = (CLIENT *)mem_alloc(sizeof(*h));
 	if (h == NULL) {
@@ -163,7 +159,8 @@ clnttcp_create(raddr, prog, vers, sockp, sendsz, recvsz)
 		    sizeof(*raddr)) < 0)) {
 			rpc_createerr.cf_stat = RPC_SYSTEMERROR;
 			rpc_createerr.cf_error.re_errno = errno;
-			(void)close(*sockp);
+			if (*sockp != -1)
+				(void)close(*sockp);
 			goto fooy;
 		}
 		ct->ct_closeit = TRUE;
@@ -183,7 +180,7 @@ clnttcp_create(raddr, prog, vers, sockp, sendsz, recvsz)
 	 * Initialize call message
 	 */
 	(void)gettimeofday(&now, (struct timezone *)0);
-	call_msg.rm_xid = (++disrupt) ^ getpid() ^ now.tv_sec ^ now.tv_usec;
+	call_msg.rm_xid = arc4random();
 	call_msg.rm_direction = CALL;
 	call_msg.rm_call.cb_rpcvers = RPC_MSG_VERSION;
 	call_msg.rm_call.cb_prog = prog;

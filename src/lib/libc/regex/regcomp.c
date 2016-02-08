@@ -33,10 +33,16 @@
  * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
+ *
+ *	@(#)regcomp.c	8.5 (Berkeley) 3/20/94
  */
 
 #if defined(LIBC_SCCS) && !defined(lint)
-static char rcsid[] = "$OpenBSD: regcomp.c,v 1.2 1996/08/19 08:31:10 tholo Exp $";
+#if 0
+static char sccsid[] = "@(#)regcomp.c	8.5 (Berkeley) 3/20/94";
+#else
+static char rcsid[] = "$OpenBSD: regcomp.c,v 1.5 1997/04/30 05:51:09 tholo Exp $";
+#endif
 #endif /* LIBC_SCCS and not lint */
 
 #include <sys/types.h>

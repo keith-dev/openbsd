@@ -1,4 +1,4 @@
-/*	$OpenBSD$	*/
+/*	$OpenBSD: pcap.h,v 1.6 1996/07/12 13:19:12 mickey Exp $	*/
 
 /*
  * Copyright (c) 1993, 1994, 1995, 1996

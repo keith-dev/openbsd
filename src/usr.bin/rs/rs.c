@@ -1,4 +1,4 @@
-/*	$OpenBSD$	*/
+/*	$OpenBSD: rs.c,v 1.3 1996/06/26 05:38:47 deraadt Exp $	*/
 
 /*-
  * Copyright (c) 1993

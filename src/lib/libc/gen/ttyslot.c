@@ -32,7 +32,7 @@
  */
 
 #if defined(LIBC_SCCS) && !defined(lint)
-static char rcsid[] = "$OpenBSD: ttyslot.c,v 1.5 1995/02/27 05:55:04 cgd Exp $";
+static char rcsid[] = "$OpenBSD: ttyslot.c,v 1.2 1996/08/19 08:27:04 tholo Exp $";
 #endif /* LIBC_SCCS and not lint */
 
 #include <ttyent.h>

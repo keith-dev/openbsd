@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile.inc,v 1.6 1996/08/19 08:21:17 tholo Exp $
+#	$OpenBSD: Makefile.inc,v 1.9 1997/02/03 00:10:08 millert Exp $
 
 # gen sources
 .PATH: ${.CURDIR}/arch/${MACHINE_ARCH}/gen ${.CURDIR}/gen

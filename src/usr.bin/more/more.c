@@ -1,4 +1,4 @@
-/*	$OpenBSD$	*/
+/*	$OpenBSD: more.c,v 1.7 1997/01/17 07:12:53 millert Exp $	*/
 /*-
  * Copyright (c) 1980 The Regents of the University of California.
  * All rights reserved.
@@ -194,14 +194,14 @@ char *argv[];
 	else noscroll = 1;
     }
     if (dlines == 0)
-	dlines = Lpp - (noscroll ? 1 : 2);
+//	dlines = Lpp - (noscroll ? 1 : 2);
+	dlines = Lpp - 1;			/* XXX - maybe broken on dumb
+						         terminals. */
     left = dlines;
     if (nfiles > 1)
 	prnames++;
     if (!no_intty && nfiles == 0) {
-	char *rindex();
-
-	p = rindex(argv[0], '/');
+	p = strrchr(argv[0], '/');
 	fputs("usage: ",stderr);
 	fputs(p ? p + 1 : argv[0],stderr);
 	fputs(" [-dfln] [+linenum | +/pattern] name1 name2 ...\n",stderr);
@@ -712,7 +712,12 @@ char *filename;
 	}
 	if (clreol)
 	    cleareol ();
-	pr("--More--");
+	/* XXX - evil global vars */
+	if(fnames[fnum] != NULL) {
+                promptlen += prtf ("%s ", fnames[fnum]);
+        }
+        else
+                pr("--More--");
 	if (filename != NULL) {
 	    promptlen += prtf ("(Next file: %s)", filename);
 	}
@@ -970,6 +975,9 @@ register FILE *f;
     FILE *helpf;
     int done;
     char comchar, cmdbuf[80], *p;
+    char option[8];
+    char *EDITOR;
+    char *editor;
 
 #define ret(val) retval=val;done++;break
 
@@ -1039,17 +1047,21 @@ register FILE *f;
 		Fseek(f, 0L);
 		Currline = 0;	/* skiplns() will make Currline correct */
 		skiplns(initline, f);
-		if (! noscroll) {
+		/* if (! noscroll) {
 		    ret(dlines + 1);
-		}
-		else {
+		 }
+		 else {
 		    ret(dlines);
-		}
+		 } */ 
+		ret(dlines);			/* XXX - Maybe broken on dumb
+							 terminals */
 	    }
+	/* 4.3BSD more - Display next [count] lines of text  */
 	case ' ':
 	case 'z':
 	    if (nlines == 0) nlines = dlines;
-	    else if (comchar == 'z') dlines = nlines;
+	    else if (comchar == 'z')
+		dlines = nlines;
 	    ret (nlines);
 	case 'd':
 	case ctrl('D'):
@@ -1059,7 +1071,9 @@ register FILE *f;
 	case 'Q':
 	    end_it ();
 	case 's':
-	case 'f':
+	/* POSIX.2 Move forward one screenfull */
+	case 'f': 				/* POSIX.2 [count]f */
+	case ctrl('F'):				/*         [count]control-F */
 	    if (nlines == 0) nlines++;
 	    if (comchar == 'f')
 		nlines *= dlines;
@@ -1153,14 +1167,35 @@ register FILE *f;
 	    fclose (helpf);
 	    prompt (filename);
 	    break;
+	/* Run Editor */
 	case 'v':	/* This case should go right before default */
 	    if (!no_intty) {
 		kill_line ();
-		cmdbuf[0] = '+';
+		strcpy(cmdbuf, "-c");
 		scanstr (Currline - dlines < 0 ? 0
-				: Currline - (dlines + 1) / 2, &cmdbuf[1]);
-		pr ("vi "); pr (cmdbuf); putchar (' '); pr (fnames[fnum]);
-		execute (filename, _PATH_VI, "vi", cmdbuf, fnames[fnum], 0);
+				: Currline - (dlines + 1) / 2, option);
+
+		/* POSIX.2 more EDITOR env. var. behavior */
+		if ((EDITOR = getenv("EDITOR")) != NULL) {
+
+		    /* Need to look for vi or ex as
+		     * we need to tell them the current
+		     * line number
+		     */ 
+		    if ((editor = strrchr(EDITOR, '/')) == NULL) 
+			editor = EDITOR;
+		    else
+			editor++;
+		    if ((strcmp(editor, "vi") == 0) ||
+			(strcmp(editor, "ex") == 0)) 
+			execute (filename, EDITOR, EDITOR, cmdbuf, option, fnames[fnum], 0);
+		    else /* must be some other editor */
+			execute (filename, EDITOR, EDITOR, fnames[fnum], 0);
+		}
+		else { /* default editor */
+			execute (filename, _PATH_VI, _PATH_VI, cmdbuf, option, fnames[fnum], 0);
+		}
+
 		break;
 	    }
 	default:
@@ -1401,7 +1436,7 @@ va_dcl
 		open("/dev/tty", 0);
 	    }
 	    va_start(argp);
-	    execv (cmd, argp);
+	    execvp (cmd, argp);
 	    write (2, "exec failed\n", 12);
 	    exit (1);
 	    va_end(argp);	/* balance {}'s for some UNIX's */
@@ -1419,7 +1454,7 @@ va_dcl
 	} else
 	    write(2, "can't fork\n", 11);
 	set_tty ();
-	pr ("------------------------\n");
+	/* pr ("------------------------\n"); */
 	prompt (filename);
 }
 /*

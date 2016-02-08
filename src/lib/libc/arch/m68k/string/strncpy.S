@@ -39,7 +39,7 @@
 
 #if defined(LIBC_SCCS)
 	.text
-	.asciz "$OpenBSD$"
+	.asciz "$OpenBSD: strncpy.S,v 1.3 1996/08/19 08:15:27 tholo Exp $"
 #endif /* LIBC_SCCS */
 
 ENTRY(strncpy)

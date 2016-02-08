@@ -39,7 +39,7 @@
 
 #if defined(LIBC_SCCS)
 	.text
-	.asciz "$OpenBSD$"
+	.asciz "$OpenBSD: memcmp.S,v 1.3 1996/08/19 08:15:12 tholo Exp $"
 #endif /* LIBC_SCCS */
 
 /* memcmp(s1, s2, n) */

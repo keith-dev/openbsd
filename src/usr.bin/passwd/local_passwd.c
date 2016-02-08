@@ -1,4 +1,4 @@
-/*	$OpenBSD: local_passwd.c,v 1.3 1996/06/26 05:37:46 deraadt Exp $	*/
+/*	$OpenBSD: local_passwd.c,v 1.8 1997/04/07 06:43:09 millert Exp $	*/
 
 /*-
  * Copyright (c) 1990 The Regents of the University of California.
@@ -35,24 +35,25 @@
 
 #ifndef lint
 /*static char sccsid[] = "from: @(#)local_passwd.c	5.5 (Berkeley) 5/6/91";*/
-static char rcsid[] = "$OpenBSD: local_passwd.c,v 1.3 1996/06/26 05:37:46 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: local_passwd.c,v 1.8 1997/04/07 06:43:09 millert Exp $";
 #endif /* not lint */
 
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <pwd.h>
+#include <err.h>
 #include <errno.h>
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
+#include <ctype.h>
 #include <fcntl.h>
 #include <util.h>
 
-uid_t uid;
+static uid_t uid;
 
-char *progname = "passwd";
-char *tempname;
 
+int
 local_passwd(uname)
 	char *uname;
 {
@@ -65,13 +66,13 @@ local_passwd(uname)
 		extern int use_yp;
 		if (!use_yp)
 #endif
-		(void)fprintf(stderr, "passwd: unknown user %s.\n", uname);
+		warnx("unknown user %s.", uname);
 		return(1);
 	}
 
 	uid = getuid();
 	if (uid && uid != pw->pw_uid) {
-		(void)fprintf(stderr, "passwd: %s\n", strerror(EACCES));
+		warnx("login/uid mismatch, username argument required.");
 		return(1);
 	}
 
@@ -107,7 +108,8 @@ getnewpasswd(pw)
 {
 	register char *p, *t;
 	int tries;
-	char buf[_PASSWORD_LEN+1], salt[9], *crypt(), *getpass();
+	char buf[_PASSWORD_LEN+1], salt[_PASSWORD_LEN], *crypt(), *getpass();
+	int pwd_gensalt __P(( char *, int, struct passwd *, char));
 
 	(void)printf("Changing local password for %s.\n", pw->pw_name);
 
@@ -138,28 +140,9 @@ getnewpasswd(pw)
 			break;
 		(void)printf("Mismatch; try again, EOF to quit.\n");
 	}
-	/* grab a random printable character that isn't a colon */
-	(void)srandom((int)time((time_t *)NULL));
-#ifdef NEWSALT
-	salt[0] = _PASSWORD_EFMT1;
-	to64(&salt[1], (long)(29 * 25), 4);
-	to64(&salt[5], random(), 4);
-#else
-	to64(&salt[0], random(), 2);
-#endif
-	return(crypt(buf, salt));
-}
-
-static unsigned char itoa64[] =		/* 0 ... 63 => ascii - 64 */
-	"./0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
-
-to64(s, v, n)
-	register char *s;
-	register long v;
-	register int n;
-{
-	while (--n >= 0) {
-		*s++ = itoa64[v&0x3f];
-		v >>= 6;
+	if( !pwd_gensalt( salt, _PASSWORD_LEN, pw, 'l' )) {
+		(void)printf("Couldn't generate salt.\n");
+		pw_error(NULL, 0, 0);
 	}
+	return(crypt(buf, salt));
 }

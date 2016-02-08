@@ -1,4 +1,4 @@
-/* * $OpenBSD: config.h,v 1.4 1996/06/26 05:38:10 deraadt Exp $*/
+/* * $OpenBSD: config.h,v 1.5 1996/07/25 05:31:01 millert Exp $*/
 /*
  * Copyright (c) 1993 Michael A. Cooper
  * Copyright (c) 1993 Regents of the University of California.

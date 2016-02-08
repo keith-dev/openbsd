@@ -1,4 +1,4 @@
-/* *	$OpenBSD: hexdump.h,v 1.1.1.1 1995/10/18 08:45:23 deraadt Exp $*/
+/* *	$OpenBSD: hexdump.h,v 1.2 1996/06/26 05:34:19 deraadt Exp $*/
 /*
  * Copyright (c) 1989 The Regents of the University of California.
  * All rights reserved.

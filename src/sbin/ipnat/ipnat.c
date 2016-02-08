@@ -1,3 +1,4 @@
+/*	$OpenBSD: ipnat.c,v 1.13 1997/02/14 11:02:05 niklas Exp $	*/
 /*
  * (C)opyright 1993,1994,1995 by Darren Reed.
  *
@@ -41,7 +42,7 @@
 #include <netinet/tcp.h>
 #include <net/if.h>
 #include "ip_fil_compat.h"
-#include "ip_fil.h"
+#include "ip_fil.h"		/* XXX needed? */
 #include <netdb.h>
 #include <arpa/nameser.h>
 #include <arpa/inet.h>
@@ -50,9 +51,9 @@
 #include <ctype.h>
 
 
-#ifndef lint
+#if !defined(lint) && defined(LIBC_SCCS)
 static  char    sccsid[] ="@(#)ipnat.c	1.9 6/5/96 (C) 1993 Darren Reed";
-static	char	rcsid[] = "$Id: ipnat.c,v 1.4 1996/10/08 07:33:33 niklas Exp $";
+static	char	rcsid[] = "Id: ipnat.c,v 2.0.1.7 1997/01/30 12:02:32 darrenr Exp";
 #endif
 
 #if	SOLARIS
@@ -62,13 +63,21 @@ static	char	rcsid[] = "$Id: ipnat.c,v 1.4 1996/10/08 07:33:33 niklas Exp $";
 extern	char	*optarg;
 extern	int	kmemcpy();
 
-void	dostats(), printnat(), parsefile();
+void	dostats(), printnat(), parsefile(), flushtable();
+
+#define	OPT_REM		1
+#define	OPT_NODO	2
+#define	OPT_STAT	4
+#define	OPT_LIST	8
+#define	OPT_VERBOSE	16
+#define	OPT_FLUSH	32
+#define	OPT_CLEAR	64
 
 
 void usage(name)
 char *name;
 {
-	fprintf(stderr, "%s: [-lnrsv] [-f filename]\n", name);
+	fprintf(stderr, "%s: [-CFlnrsv] [-f filename]\n", name);
 	exit(1);
 }
 
@@ -80,40 +89,48 @@ char *argv[];
 	char	*file = NULL, c;
 	int	fd, opts = 1;
 
-	while ((c = getopt(argc, argv, "f:lnrsv")) != -1)
+	while ((c = getopt(argc, argv, "CFf:lnrsv")) != -1)
 		switch (c)
 		{
+		case 'C' :
+			opts |= OPT_CLEAR;
+			break;
 		case 'f' :
 			file = optarg;
 			break;
+		case 'F' :
+			opts |= OPT_FLUSH;
+			break;
 		case 'l' :
-			opts |= 8;
+			opts |= OPT_LIST;
 			break;
 		case 'n' :
-			opts |= 2;
+			opts |= OPT_NODO;
 			break;
 		case 'r' :
-			opts &= ~1;
+			opts &= ~OPT_REM;
 			break;
 		case 's' :
-			opts |= 4;
+			opts |= OPT_STAT;
 			break;
 		case 'v' :
-			opts |= 16;
+			opts |= OPT_VERBOSE;
 			break;
 		default :
 			usage(argv[0]);
 		}
 
-	if (((fd = open(IPL_NAME, O_RDWR)) == -1) &&
+	if (!(opts & OPT_NODO) && ((fd = open(IPL_NAME, O_RDWR)) == -1) &&
 	    ((fd = open(IPL_NAME, O_RDONLY)) == -1)) {
 		perror("open");
 		exit(-1);
 	}
 
+	if (opts & (OPT_FLUSH|OPT_CLEAR))
+		flushtable(fd, opts);
 	if (file)
 		parsefile(fd, file, opts);
-	if (opts & 12)
+	if (opts & (OPT_LIST|OPT_STAT))
 		dostats(fd, opts);
 	return 0;
 }
@@ -148,9 +165,10 @@ u_long	ip;
 }
 
 
-void printnat(np, verbose)
+void printnat(np, verbose, ptr)
 ipnat_t *np;
 int verbose;
+void *ptr;
 {
 	int	bits;
 
@@ -163,14 +181,20 @@ int verbose;
 			printf("/%s ", inet_ntoa(np->in_out[1]));
 		if (np->in_pmin)
 			printf("port %d ", ntohs(np->in_pmin));
-		printf("-> %s", inet_ntoa(np->in_in[0]),
-		       ntohs(np->in_pnext));
-		if (np->in_pmax)
-			printf(" port %d", ntohs(np->in_pmax));
+		printf("-> %s", inet_ntoa(np->in_in[0]));
+		if (np->in_pnext)
+			printf(" port %d", ntohs(np->in_pnext));
+		if (np->in_flags & IPN_TCPUDP)
+			printf(" tcp/udp");
+		else if (np->in_flags & IPN_TCP)
+			printf(" tcp");
+		else if (np->in_flags & IPN_UDP)
+			printf(" udp");
 		printf("\n");
 		if (verbose)
-			printf("\t%x %u %x %u", (u_int)np->in_ifp,
-			       np->in_space, np->in_flags, np->in_pnext);
+			printf("\t%p %u %x %u %p %d\n", np->in_ifp,
+			       np->in_space, np->in_flags, np->in_pnext, np,
+			       np->in_use);
 	} else {
 		np->in_nextip.s_addr = htonl(np->in_nextip.s_addr);
 		printf("map %s %s/", np->in_ifname, inet_ntoa(np->in_in[0]));
@@ -185,23 +209,38 @@ int verbose;
 			printf("%d ", bits);
 		else
 			printf("%s", inet_ntoa(np->in_out[1]));
-		if (np->in_port[0] || np->in_port[1]) {
+		if (np->in_pmin || np->in_pmax) {
 			printf(" portmap");
-			if (np->in_flags & IPN_TCP)
+			if ((np->in_flags & IPN_TCPUDP) == IPN_TCPUDP)
+				printf(" tcp/udp");
+			else if (np->in_flags & IPN_TCP)
 				printf(" tcp");
 			else if (np->in_flags & IPN_UDP)
 				printf(" udp");
-			else if (np->in_flags & IPN_TCPUDP)
-				printf(" tcpudp");
-			printf(" %d:%d", ntohs(np->in_port[0]),
-			       ntohs(np->in_port[1]));
+			printf(" %d:%d", ntohs(np->in_pmin),
+			       ntohs(np->in_pmax));
 		}
 		printf("\n");
 		if (verbose)
-			printf("\t%x %u %s %d %x\n", (u_int)np->in_ifp,
+			printf("\t%p %u %s %d %x\n", np->in_ifp,
 			       np->in_space, inet_ntoa(np->in_nextip),
 			       np->in_pnext, np->in_flags);
 	}
+}
+
+
+/*
+ * Get a nat filter type given its kernel address.
+ */
+char *getnattype(ipnat)
+ipnat_t *ipnat;
+{
+	ipnat_t ipnatbuff;
+
+	if (ipnat && kmemcpy(&ipnatbuff, ipnat, sizeof(ipnatbuff)))
+		return "???";
+
+	return (ipnatbuff.in_redir == NAT_MAP) ? "MAP" : "RDR";
 }
 
 
@@ -210,53 +249,66 @@ int fd, opts;
 {
 	natstat_t ns;
 	ipnat_t	ipn;
-	nat_t	**nt, *np, nat;
-	int	i;
+	nat_t	**nt[2], *np, nat;
+	int	i = 0;
 
-	if (ioctl(fd, SIOCGNATS, &ns) == -1) {
+	bzero((char *)&ns, sizeof(ns));
+
+	if (!(opts & OPT_NODO) && ioctl(fd, SIOCGNATS, &ns) == -1) {
 		perror("ioctl(SIOCGNATS)");
 		return;
 	}
-	if (opts & 4) {
+
+	if (opts & OPT_STAT) {
 		printf("mapped\tin\t%lu\tout\t%lu\n",
 			ns.ns_mapped[0], ns.ns_mapped[1]);
 		printf("added\t%lu\texpired\t%lu\n",
 			ns.ns_added, ns.ns_expire);
 		printf("inuse\t%lu\n", ns.ns_inuse);
-		if (opts & 16)
-			printf("table %#x list %#x\n",
-				(u_int)ns.ns_table, (u_int)ns.ns_list);
+		if (opts & OPT_VERBOSE)
+			printf("table %p list %p\n", ns.ns_table, ns.ns_list);
 	}
-	if (opts & 8) {
+	if (opts & OPT_LIST) {
+		printf("List of active MAP/Redirect filters:\n");
 		while (ns.ns_list) {
 			if (kmemcpy(&ipn, ns.ns_list, sizeof(ipn))) {
 				perror("kmemcpy");
 				break;
 			}
-			printnat(&ipn, opts & 16);
+			printnat(&ipn, opts & OPT_VERBOSE, (void *)ns.ns_list);
 			ns.ns_list = ipn.in_next;
 		}
 
-		nt = (nat_t **)malloc(sizeof(*nt) * NAT_SIZE);
-		if (kmemcpy(nt, ns.ns_table, sizeof(*nt) * NAT_SIZE)) {
+		nt[0] = (nat_t **)malloc(sizeof(*nt) * NAT_SIZE);
+		if (kmemcpy(nt[0], ns.ns_table[0], sizeof(**nt) * NAT_SIZE)) {
 			perror("kmemcpy");
 			return;
 		}
+
+		printf("\nList of active sessions:\n");
+
 		for (i = 0; i < NAT_SIZE; i++)
-			for (np = nt[i]; np; np = nat.nat_next) {
+			for (np = nt[0][i]; np; np = nat.nat_hnext[0]) {
 				if (kmemcpy(&nat, np, sizeof(nat)))
 					break;
-				printf("%s %hu <- -> ",
+
+				printf("%s %-15s %-5hu <- ->",
+					getnattype(nat.nat_ptr),
 					inet_ntoa(nat.nat_inip),
 					ntohs(nat.nat_inport));
-				printf("%s %hu %hu %hu %lx [",
+				printf(" %-15s %-5hu",
 					inet_ntoa(nat.nat_outip),
-					ntohs(nat.nat_outport),
-					nat.nat_age, nat.nat_use,
-					nat.nat_sumd);
-				printf("%s %hu]\n", inet_ntoa(nat.nat_oip),
+					ntohs(nat.nat_outport));
+				printf(" [%s %hu]", inet_ntoa(nat.nat_oip),
 					ntohs(nat.nat_oport));
+				printf(" %d %hu %lx", nat.nat_age,
+					nat.nat_use, nat.nat_sumd);
+#if SOLARIS
+				printf(" %lx", nat.nat_ipsumd);
+#endif
+				putchar('\n');
 			}
+		free(nt[0]);
 	}
 }
 
@@ -320,6 +372,65 @@ char	*msk;
 	return mask;
 }
 
+/* 
+ * get_if_addr(): given a string containing an interface name (e.g. "ppp0")
+ *		  return the IP address it represents as an unsigned long
+ */
+u_long	if_addr(name)
+char	*name;
+{
+	struct ifconf ifc;
+	struct ifreq ifreq, *ifr;
+	char *inbuf = NULL;
+	int s, i, len = 8192;
+
+	if ((s = socket(AF_INET, SOCK_DGRAM, 0)) < 0) {
+		warn("socket");
+		return INADDR_NONE;
+	}
+	
+	while (1) {
+		ifc.ifc_len = len;
+		ifc.ifc_buf = inbuf = realloc(inbuf, len);
+		if (inbuf == NULL)
+			err(1, "malloc");
+		if (ioctl(s, SIOCGIFCONF, &ifc) < 0) {
+			warn("SIOCGIFCONF");
+			goto if_addr_lose;
+		}
+		if (ifc.ifc_len + sizeof(ifreq) < len)
+			break;
+		len *= 2;
+	}
+	ifr = ifc.ifc_req;
+	ifreq.ifr_name[0] = '\0';
+	for (i = 0; i < ifc.ifc_len; ) {
+		ifr = (struct ifreq *)((caddr_t)ifc.ifc_req + i);
+		i += sizeof(ifr->ifr_name) +
+			(ifr->ifr_addr.sa_len > sizeof(struct sockaddr)
+				? ifr->ifr_addr.sa_len
+				: sizeof(struct sockaddr));
+		if (!strncmp(ifreq.ifr_name, ifr->ifr_name,
+			     sizeof(ifr->ifr_name)))
+			continue;
+		ifreq = *ifr;
+		if (ioctl(s, SIOCGIFADDR, (caddr_t)ifr) < 0)
+			continue;
+		if (ifr->ifr_addr.sa_family != AF_INET)
+			continue;
+		if (!strcmp(name, ifr->ifr_name)) {
+			struct sockaddr_in *sin;
+			close(s);
+			free(inbuf);
+			sin = (struct sockaddr_in *)&ifr->ifr_addr;
+			return (sin->sin_addr.s_addr);
+		}
+	}
+if_addr_lose:
+	close(s);
+	free(inbuf);
+	return INADDR_NONE;
+}
 
 /*
  * returns an ip address as a long var as a result of either a DNS lookup or
@@ -333,13 +444,16 @@ int	*resolved;
 	struct	netent	*np;
 
 	*resolved = 0;
-	if (!strcasecmp("any",host))
+	if (!strcasecmp("any", host))
 		return 0L;
 	if (isdigit(*host))
 		return inet_addr(host);
 
 	if (!(hp = gethostbyname(host))) {
 		if (!(np = getnetbyname(host))) {
+			u_long addr;
+			if ((addr = if_addr(host)) != INADDR_NONE)
+				return addr;
 			*resolved = -1;
 			fprintf(stderr, "can't resolve hostname: %s\n", host);
 			return 0;
@@ -355,7 +469,8 @@ char *line;
 {
 	static ipnat_t ipn;
 	char *s, *t;
-	char *shost, *snetm, *dhost, *dnetm, *proto, *dport, *tport;
+	char *shost, *snetm, *dhost, *proto;
+	char *dnetm = NULL, *dport = NULL, *tport = NULL;
 	int resolved;
 
 	bzero((char *)&ipn, sizeof(ipn));
@@ -497,13 +612,21 @@ char *line;
 
 	if (ipn.in_redir == NAT_MAP) {
 		ipn.in_inip = hostnum(shost, &resolved);
+		if (resolved == -1)
+			return NULL;
 		ipn.in_inmsk = hostmask(snetm);
 		ipn.in_outip = hostnum(dhost, &resolved);
+		if (resolved == -1)
+			return NULL;
 		ipn.in_outmsk = hostmask(dnetm);
 	} else {
 		ipn.in_inip = hostnum(dhost, &resolved); /* Inside is target */
+		if (resolved == -1)
+			return NULL;
 		ipn.in_inmsk = hostmask("255.255.255.255");
 		ipn.in_outip = hostnum(shost, &resolved);
+		if (resolved == -1)
+			return NULL;
 		ipn.in_outmsk = hostmask(snetm);
 		if (!(s = strtok(NULL, " \t"))) {
 			ipn.in_flags = IPN_TCP; /* XXX- TCP only by default */
@@ -513,6 +636,8 @@ char *line;
 				ipn.in_flags = IPN_TCP;
 			else if (!strcasecmp(s, "udp"))
 				ipn.in_flags = IPN_UDP;
+			else if (!strcasecmp(s, "tcp/udp"))
+				ipn.in_flags = IPN_TCPUDP;
 			else if (!strcasecmp(s, "tcpudp"))
 				ipn.in_flags = IPN_TCPUDP;
 			else {
@@ -521,6 +646,12 @@ char *line;
 				return NULL;
 			}
 			proto = s;
+			if ((s = strtok(NULL, " \t"))) {
+				fprintf(stderr,
+					"extra junk at the end of rdr: %s\n",
+					s);
+				return NULL;
+			}
 		}
 		ipn.in_pmin = portnum(dport, proto); /* dest port */
 		ipn.in_pmax = ipn.in_pmin; /* NECESSARY of removing nats */
@@ -540,6 +671,8 @@ char *line;
 	else if (!strcasecmp(s, "udp"))
 		ipn.in_flags = IPN_UDP;
 	else if (!strcasecmp(s, "tcpudp"))
+		ipn.in_flags = IPN_TCPUDP;
+	else if (!strcasecmp(s, "tcp/udp"))
 		ipn.in_flags = IPN_TCPUDP;
 	else {
 		fprintf(stderr, "expected protocol name - got \"%s\"\n", s);
@@ -584,10 +717,10 @@ int opts;
 			if (*line)
 				fprintf(stderr, "%d: syntax error in \"%s\"\n",
 					linenum, line);
-		} else if (!(opts & 2)) {
-			if ((opts &16) && np)
-				printnat(np, opts & 16);
-			if (opts & 1) {
+		} else if (!(opts & OPT_NODO)) {
+			if ((opts & OPT_VERBOSE) && np)
+				printnat(np, opts &  OPT_VERBOSE, NULL);
+			if (opts & OPT_REM) {
 				if (ioctl(fd, SIOCADNAT, np) == -1)
 					perror("ioctl(SIOCADNAT)");
 			} else if (ioctl(fd, SIOCRMNAT, np) == -1)
@@ -596,4 +729,27 @@ int opts;
 		linenum++;
 	}
 	fclose(stdin);
+}
+
+
+void flushtable(fd, opts)
+int fd, opts;
+{
+	int n = 0;
+
+	if (opts & OPT_FLUSH) {
+		n = 0;
+		if (!(opts & OPT_NODO) && ioctl(fd, SIOCFLNAT, &n) == -1)
+			perror("ioctl(SIOCFLNAT)");
+		else
+			printf("%d entries flushed from NAT table\n", n);
+	}
+
+	if (opts & OPT_CLEAR) {
+		n = 0;
+		if (!(opts & OPT_NODO) && ioctl(fd, SIOCCNATL, &n) == -1)
+			perror("ioctl(SIOCCNATL)");
+		else
+			printf("%d entries flushed from NAT list\n", n);
+	}
 }

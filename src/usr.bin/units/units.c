@@ -1,4 +1,4 @@
-/*	$OpenBSD: units.c,v 1.3 1996/06/26 05:42:15 deraadt Exp $	*/
+/*	$OpenBSD: units.c,v 1.4 1996/08/11 00:17:31 deraadt Exp $	*/
 /*	$NetBSD: units.c,v 1.6 1996/04/06 06:01:03 thorpej Exp $	*/
 
 /*

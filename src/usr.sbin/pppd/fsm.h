@@ -1,4 +1,4 @@
-/*	$OpenBSD$	*/
+/*	$OpenBSD: fsm.h,v 1.2 1996/03/25 15:55:39 niklas Exp $	*/
 
 /*
  * fsm.h - {Link, IP} Control Protocol Finite State Machine definitions.

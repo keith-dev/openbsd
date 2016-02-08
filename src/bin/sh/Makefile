@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.4 1996/06/23 14:21:05 deraadt Exp $
+#	$OpenBSD: Makefile,v 1.8 1997/01/05 08:17:31 deraadt Exp $
 #	$NetBSD: Makefile,v 1.23 1996/02/18 12:29:18 mycroft Exp $
 
 STATIC=	-static
@@ -16,12 +16,12 @@ CFLAGS+=-DSHELL -I. -I${.CURDIR}
 .PATH:	${.CURDIR}/bltin ${.CURDIR}/../../usr.bin/printf
 CLEANFILES+=\
 	arith.c arith_lex.c builtins.c builtins.h init.c mkinit mknodes \
-	mksyntax nodes.c nodes.h printf.o syntax.c syntax.h token.def \
+	mksyntax nodes.c nodes.h printf.o syntax.c syntax.h token.h \
 	y.tab.c y.tab.h
 
-.depend parser.o: token.def
+.depend parser.o: token.h
 
-token.def: mktokens
+token.h: mktokens
 	sh ${.CURDIR}/mktokens
 
 builtins.h builtins.c: ${.CURDIR}/mkbuiltins ${.CURDIR}/builtins.def
@@ -31,18 +31,18 @@ init.c: mkinit ${SRCS}
 	./mkinit ${.ALLSRC:S/^mkinit$//}
 
 mkinit: ${.CURDIR}/mkinit.c
-	${CC} ${CFLAGS} ${.CURDIR}/mkinit.c -o $@
+	${HOSTCC} ${CFLAGS} ${.CURDIR}/mkinit.c -o $@
 
 nodes.c nodes.h: mknodes ${.CURDIR}/nodetypes ${.CURDIR}/nodes.c.pat
 	./mknodes ${.CURDIR}/nodetypes ${.CURDIR}/nodes.c.pat
 
 mknodes: ${.CURDIR}/mknodes.c
-	${CC} ${CFLAGS} ${.CURDIR}/mknodes.c -o $@
+	${HOSTCC} ${CFLAGS} ${.CURDIR}/mknodes.c -o $@
 
 syntax.c syntax.h: mksyntax
 	./mksyntax
 
 mksyntax: ${.CURDIR}/mksyntax.c ${.CURDIR}/parser.h
-	${CC} ${CFLAGS} ${.CURDIR}/mksyntax.c -o $@
+	${HOSTCC} ${CFLAGS} ${.CURDIR}/mksyntax.c -o $@
 
 .include <bsd.prog.mk>

@@ -1,5 +1,5 @@
-/*	$OpenBSD: utils.c,v 1.4 1995/08/02 07:17:02 jtc Exp $	*/
-/*	$NetBSD: utils.c,v 1.4 1995/08/02 07:17:02 jtc Exp $	*/
+/*	$OpenBSD: utils.c,v 1.6 1997/04/05 04:37:40 tholo Exp $	*/
+/*	$NetBSD: utils.c,v 1.6 1997/02/26 14:40:51 cgd Exp $	*/
 
 /*-
  * Copyright (c) 1991, 1993, 1994
@@ -38,7 +38,7 @@
 #if 0
 static char sccsid[] = "@(#)utils.c	8.3 (Berkeley) 4/1/94";
 #else
-static char rcsid[] = "$OpenBSD: utils.c,v 1.4 1995/08/02 07:17:02 jtc Exp $";
+static char rcsid[] = "$OpenBSD: utils.c,v 1.6 1997/04/05 04:37:40 tholo Exp $";
 #endif
 #endif /* not lint */
 
@@ -200,7 +200,7 @@ copy_link(p, exists)
 		warn("symlink: %s", link);
 		return (1);
 	}
-	return (0);
+	return (pflag ? setlink(p->fts_statp) : 0);
 }
 
 int
@@ -238,7 +238,7 @@ copy_special(from_stat, exists)
 
 int
 setfile(fs, fd)
-	register struct stat *fs;
+	struct stat *fs;
 	int fd;
 {
 	static struct timeval tv[2];
@@ -272,13 +272,37 @@ setfile(fs, fd)
 		rval = 1;
 	}
 
-	if (fd ?
-	    fchflags(fd, fs->st_flags) : chflags(to.p_path, fs->st_flags)) {
-		warn("chflags: %s", to.p_path);
-		rval = 1;
-	}
+	/*
+	 * XXX
+	 * NFS doesn't support chflags; ignore errors unless there's reason
+	 * to believe we're losing bits.  (Note, this still won't be right
+	 * if the server supports flags and we were trying to *remove* flags
+	 * on a file that we copied, i.e., that we didn't create.)
+	 */
+	errno = 0;
+	if (fd ? fchflags(fd, fs->st_flags) : chflags(to.p_path, fs->st_flags))
+		if (errno != EOPNOTSUPP || fs->st_flags != 0) {
+			warn("chflags: %s", to.p_path);
+			rval = 1;
+		}
 	return (rval);
 }
+
+
+int
+setlink(fs)
+	register struct stat *fs;
+{
+
+	if (lchown(to.p_path, fs->st_uid, fs->st_gid)) {
+		if (errno != EPERM) {
+			warn("lchown: %s", to.p_path);
+			return (1);
+		}
+	}
+	return (0);
+}
+
 
 void
 usage()

@@ -1,4 +1,4 @@
-/*	$OpenBSD: pcap-int.h,v 1.5 1996/07/26 03:43:43 deraadt Exp $	*/
+/*	$OpenBSD: pcap-int.h,v 1.6 1996/08/03 12:38:44 niklas Exp $	*/
 
 /*
  * Copyright (c) 1994, 1995

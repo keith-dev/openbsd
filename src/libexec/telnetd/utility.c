@@ -1,4 +1,4 @@
-/*	$OpenBSD: utility.c,v 1.2 1996/03/28 23:22:06 niklas Exp $	*/
+/*	$OpenBSD: utility.c,v 1.6 1996/12/23 13:10:10 robin Exp $	*/
 /*	$NetBSD: utility.c,v 1.9 1996/02/28 20:38:29 thorpej Exp $	*/
 
 /*
@@ -39,7 +39,7 @@
 static char sccsid[] = "@(#)utility.c	8.4 (Berkeley) 5/30/95";
 static char rcsid[] = "$NetBSD: utility.c,v 1.9 1996/02/28 20:38:29 thorpej Exp $";
 #else
-static char rcsid[] = "$OpenBSD: utility.c,v 1.2 1996/03/28 23:22:06 niklas Exp $";
+static char rcsid[] = "$OpenBSD: utility.c,v 1.6 1996/12/23 13:10:10 robin Exp $";
 #endif
 #endif /* not lint */
 
@@ -95,13 +95,14 @@ ttloop()
 stilloob(s)
     int	s;		/* socket number */
 {
-    static struct timeval timeout = { 0 };
+    struct timeval timeout;
     fd_set	excepts;
     int value;
 
     do {
 	FD_ZERO(&excepts);
 	FD_SET(s, &excepts);
+	memset((char *)&timeout, 0, sizeof timeout);
 	value = select(s+1, (fd_set *)0, (fd_set *)0, &excepts, &timeout);
     } while ((value == -1) && (errno == EINTR));
 
@@ -933,7 +934,6 @@ printsub(direction, pointer, length)
 			    break;
 
 			default:
-			def_case:
 			    if (isprint(pointer[i]) && pointer[i] != '"') {
 				if (noquote) {
 				    *nfrontp++ = '"';

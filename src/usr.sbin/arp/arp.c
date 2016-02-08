@@ -97,7 +97,13 @@ main(argc, argv)
 	int ch;
 
 	pid = getpid();
-	while ((ch = getopt(argc, argv, "andsf")) != EOF)
+	while ((ch = getopt(argc, argv, "andsf")) != -1)
+		if (ch == 'n')
+			nflag = 1;
+
+	optind = 1;
+	optreset = 1;
+	while ((ch = getopt(argc, argv, "andsf")) != -1)
 		switch((char)ch) {
 		case 'a':
 			dump(0);
@@ -108,7 +114,6 @@ main(argc, argv)
 			(void)delete(argv[2], argv[3]);
 			return (0);
 		case 'n':
-			nflag = 1;
 			break;
 		case 's':
 			if (argc < 4 || argc > 7)
@@ -508,14 +513,12 @@ getinetaddr(host, inap)
 	const char *host;
 	struct in_addr *inap;
 {
-	extern char *__progname;	/* Program name, from crt0. */
 	struct hostent *hp;
 
 	if (inet_aton(host, inap) == 1)
 		return (0);
 	if ((hp = gethostbyname(host)) == NULL) {
-		(void)fprintf(stderr, "%s: %s: ", __progname, host);
-		herror(NULL);
+		warnx("%s: %s\n", host, hstrerror(h_errno));
 		return (-1);
 	}
 	(void)memcpy(inap, hp->h_addr, sizeof(*inap));

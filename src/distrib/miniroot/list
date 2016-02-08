@@ -1,3 +1,4 @@
+#	$OpenBSD: list,v 1.10 1997/05/05 05:33:17 grr Exp $
 #	$NetBSD: list,v 1.4.4.1 1996/06/20 20:30:26 pk Exp $
 
 SRCDIRS usr.bin bin sbin usr.sbin gnu/usr.bin
@@ -18,9 +19,10 @@ LINK	instbin			bin/kill
 LINK	instbin			bin/mkdir
 LINK	instbin			bin/mt
 LINK	instbin			bin/mv
+LINK	instbin			bin/pax bin/tar bin/cpio
 LINK	instbin			bin/pwd
 LINK	instbin			bin/rm
-LINK	instbin			bin/sh
+LINK	instbin			bin/pdksh bin/sh
 LINK	instbin			bin/stty
 LINK	instbin			bin/sleep
 LINK	instbin			bin/sync
@@ -34,6 +36,7 @@ LINK	instbin			sbin/mount
 LINK	instbin			sbin/mount_cd9660
 LINK	instbin			sbin/mount_ffs
 LINK	instbin			sbin/mount_nfs
+LINK	instbin			sbin/mount_kernfs
 LINK	instbin			sbin/newfs sbin/mount_mfs
 LINK	instbin			sbin/ping
 LINK	instbin			sbin/route
@@ -47,15 +50,14 @@ SYMLINK	../../instbin		usr/bin/ftp
 SYMLINK	../../instbin		usr/bin/gzip usr/bin/gunzip usr/bin/gzcat
 SYMLINK	../../instbin		usr/bin/sed
 SYMLINK	../../instbin		usr/bin/sort
-SYMLINK	../../instbin		usr/bin/pax
-SYMLINK	usr/bin/pax		usr/bin/tar
 SYMLINK	../../instbin		usr/bin/tip
+SYMLINK	../../instbin		usr/bin/vim usr/bin/vi
 
 # `internal' crunchgen links
 ARGVLINK mount_ffs	ffs
 ARGVLINK mount_nfs	nfs
 ARGVLINK mount_cd9660	cd9660
-ARGVLINK sh		-sh
+ARGVLINK pdksh		-sh
 
 # various files that we need in /etc for the install
 COPY	${DESTDIR}/etc/group		etc/group
@@ -65,6 +67,7 @@ COPY	${DESTDIR}/etc/protocols	etc/protocols
 COPY	${DESTDIR}/etc/pwd.db		etc/pwd.db
 COPY	${DESTDIR}/etc/services		etc/services
 COPY	${DESTDIR}/etc/spwd.db		etc/spwd.db
+COPY	${DESTDIR}/etc/virc		etc/virc
 
 # and the installation scripts
 COPY	${CURDIR}/install.sub		install.sub

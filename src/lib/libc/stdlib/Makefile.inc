@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile.inc,v 1.5 1996/08/21 03:17:55 downsj Exp $
+#	$OpenBSD: Makefile.inc,v 1.6 1996/08/21 03:47:21 tholo Exp $
 
 # stdlib sources
 .PATH: ${.CURDIR}/arch/${MACHINE_ARCH}/stdlib ${.CURDIR}/stdlib

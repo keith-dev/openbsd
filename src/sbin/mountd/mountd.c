@@ -1,4 +1,4 @@
-/*	$OpenBSD: mountd.c,v 1.10 1996/09/19 06:12:08 deraadt Exp $	*/
+/*	$OpenBSD: mountd.c,v 1.16 1997/05/04 21:05:28 millert Exp $	*/
 /*	$NetBSD: mountd.c,v 1.31 1996/02/18 11:57:53 fvdl Exp $	*/
 
 /*
@@ -75,6 +75,7 @@ static char rcsid[] = "$NetBSD: mountd.c,v 1.31 1996/02/18 11:57:53 fvdl Exp $";
 #include <errno.h>
 #include <grp.h>
 #include <netdb.h>
+#include <netgroup.h>
 #include <pwd.h>
 #include <signal.h>
 #include <stdio.h>
@@ -199,11 +200,6 @@ int	xdr_explist __P((XDR *, caddr_t));
 int	xdr_fhs __P((XDR *, caddr_t));
 int	xdr_mlist __P((XDR *, caddr_t));
 
-/* C library */
-int	getnetgrent();
-void	endnetgrent();
-void	setnetgrent();
-
 #ifdef ISO
 struct iso_addr *iso_addr();
 #endif
@@ -249,7 +245,7 @@ main(argc, argv)
 	SVCXPRT *udptransp, *tcptransp;
 	int c;
 
-	while ((c = getopt(argc, argv, "dnr")) != EOF)
+	while ((c = getopt(argc, argv, "dnr")) != -1)
 		switch (c) {
 		case 'd':
 			debug = 1;
@@ -276,26 +272,37 @@ main(argc, argv)
 		strcpy(exname, _PATH_EXPORTS);
 	openlog("mountd", LOG_PID, LOG_DAEMON);
 	if (debug)
-		fprintf(stderr,"Getting export list.\n");
+		fprintf(stderr, "Getting export list.\n");
 	get_exportlist();
 	if (debug)
-		fprintf(stderr,"Getting mount list.\n");
+		fprintf(stderr, "Getting mount list.\n");
 	get_mountlist();
 	if (debug)
-		fprintf(stderr,"Here we go.\n");
+		fprintf(stderr, "Here we go.\n");
 	if (debug == 0) {
 		daemon(0, 0);
 		signal(SIGINT, SIG_IGN);
 		signal(SIGQUIT, SIG_IGN);
 	}
+	/* Store pid in file unless mountd is already running */
+	{
+	    FILE *pidfile = fopen(_PATH_MOUNTDPID, "r");
+	    if (pidfile != NULL) {
+		if (fscanf(pidfile, "%d\n", &c) > 0 && c > 0) {
+		    if (kill(c, 0) == 0) {
+			syslog(LOG_ERR, "Already running (pid %d)", c);
+			exit(1);
+		    }
+		}
+		pidfile = freopen(_PATH_MOUNTDPID, "w", pidfile);
+	    } else {
+		pidfile = fopen(_PATH_MOUNTDPID, "w");
+	    }
+	    fprintf(pidfile, "%d\n", getpid());
+	    fclose(pidfile);
+	}
 	signal(SIGHUP, (void (*) __P((int))) get_exportlist);
 	signal(SIGTERM, (void (*) __P((int))) send_umntall);
-	{ FILE *pidfile = fopen(_PATH_MOUNTDPID, "w");
-	  if (pidfile != NULL) {
-		fprintf(pidfile, "%d\n", getpid());
-		fclose(pidfile);
-	  }
-	}
 	if ((udptransp = svcudp_create(RPC_ANYSOCK)) == NULL ||
 	    (tcptransp = svctcp_create(RPC_ANYSOCK, 0, 0)) == NULL) {
 		syslog(LOG_ERR, "Can't create socket");
@@ -336,7 +343,7 @@ mntsrv(rqstp, transp)
 	u_long saddr;
 	u_short sport;
 	char rpcpath[RPCMNT_PATHLEN+1], dirpath[MAXPATHLEN];
-	long bad = ENOENT;
+	long bad = 0;
 	int defset, hostset;
 	sigset_t sighup_mask;
 
@@ -371,9 +378,7 @@ mntsrv(rqstp, transp)
 			chdir("/");	/* Just in case realpath doesn't */
 			if (debug)
 				fprintf(stderr, "stat failed on %s\n", dirpath);
-			if (!svc_sendreply(transp, xdr_long, (caddr_t)&bad))
-				syslog(LOG_ERR, "Can't send reply");
-			return;
+			bad = ENOENT;	/* We will send error reply later */
 		}
 
 		/* Check in the exports list */
@@ -385,6 +390,13 @@ mntsrv(rqstp, transp)
 		     chk_host(dp, saddr, &defset, &hostset)) ||
 		     (defset && scan_tree(ep->ex_defdir, saddr) == 0 &&
 		      scan_tree(ep->ex_dirl, saddr) == 0))) {
+			if (bad) {
+				if (!svc_sendreply(transp, xdr_long,
+				    (caddr_t)&bad))
+					syslog(LOG_ERR, "Can't send reply");
+				sigprocmask(SIG_UNBLOCK, &sighup_mask, NULL);
+				return;
+			}
 			if (hostset & DP_HOSTSET)
 				fhr.fhr_flag = hostset;
 			else
@@ -412,12 +424,12 @@ mntsrv(rqstp, transp)
 				add_mlist(inet_ntoa(transp->xp_raddr.sin_addr),
 					dirpath);
 			if (debug)
-				fprintf(stderr,"Mount successful.\n");
-		} else {
+				fprintf(stderr, "Mount successful.\n");
+		} else
 			bad = EACCES;
-			if (!svc_sendreply(transp, xdr_long, (caddr_t)&bad))
-				syslog(LOG_ERR, "Can't send reply");
-		}
+
+		if (bad && !svc_sendreply(transp, xdr_long, (caddr_t)&bad))
+			syslog(LOG_ERR, "Can't send reply");
 		sigprocmask(SIG_UNBLOCK, &sighup_mask, NULL);
 		return;
 	case RPCMNT_DUMP:
@@ -652,8 +664,8 @@ get_exportlist()
 	struct statfs fsb, *fsp;
 	struct hostent *hpe;
 	struct ucred anon;
-	char *cp, *endcp, *dirp, *hst, *usr, *dom, savedc;
-	int len, has_host, exflags, got_nondir, dirplen, num, i, netgrp;
+	char *cp, *endcp, *dirp = NULL, *hst, *usr, *dom, savedc;
+	int len, has_host, exflags, got_nondir, dirplen = 0, num, i, netgrp;
 
 	/*
 	 * First, get rid of the old list
@@ -718,7 +730,7 @@ get_exportlist()
 	dirhead = (struct dirlist *)NULL;
 	while (get_line()) {
 		if (debug)
-			fprintf(stderr,"Got line %s\n",line);
+			fprintf(stderr, "Got line %s\n",line);
 		cp = line;
 		nextfield(&cp, &endcp);
 		if (*cp == '#')
@@ -824,7 +836,8 @@ get_exportlist()
 			     * Get the host or netgroup.
 			     */
 			    setnetgrent(cp);
-			    netgrp = getnetgrent(&hst, &usr, &dom);
+			    netgrp = getnetgrent((const char **)&hst,
+			    	(const char **)&usr, (const char **)&dom);
 			    do {
 				if (has_host) {
 				    grp->gr_next = get_grp();
@@ -842,7 +855,8 @@ get_exportlist()
 				    goto nextline;
 				}
 				has_host = TRUE;
-			    } while (netgrp && getnetgrent(&hst, &usr, &dom));
+			    } while (netgrp && getnetgrent((const char **)&hst,
+				(const char **)&usr, (const char **)&dom));
 			    endnetgrent();
 			    *endcp = savedc;
 			}
@@ -857,14 +871,14 @@ get_exportlist()
 		if (!has_host) {
 			grp->gr_type = GT_HOST;
 			if (debug)
-				fprintf(stderr,"Adding a default entry\n");
+				fprintf(stderr, "Adding a default entry\n");
 			/* add a default group and make the grp list NULL */
 			hpe = (struct hostent *)malloc(sizeof(struct hostent));
 			if (hpe == (struct hostent *)NULL)
 				out_of_mem();
 			hpe->h_name = strdup("Default");
 			hpe->h_addrtype = AF_INET;
-			hpe->h_length = sizeof (u_long);
+			hpe->h_length = sizeof (u_int32_t);
 			hpe->h_addr_list = (char **)NULL;
 			grp->gr_ptr.gt_hostent = hpe;
 
@@ -884,11 +898,24 @@ get_exportlist()
 		 */
 		grp = tgrp;
 		do {
-		    if (do_mount(ep, grp, exflags, &anon, dirp,
-			dirplen, &fsb)) {
-			getexp_err(ep, tgrp);
-			goto nextline;
-		    }
+			/*
+			 * Non-zero return indicates an error.  Return
+			 * val of 1 means line is invalid (not just entry).
+			 */
+			i = do_mount(ep, grp, exflags, &anon, dirp, dirplen,
+			    &fsb);
+			if (i == 1) {
+				getexp_err(ep, tgrp);
+				goto nextline;
+			} else if (i == 2) {
+				syslog(LOG_ERR,
+				    "Bad exports list entry (%s) in line %s",
+				    (grp->gr_type == GT_HOST)
+				    ? grp->gr_ptr.gt_hostent->h_name
+				    : (grp->gr_type == GT_NET)
+				    ? grp->gr_ptr.gt_net.nt_name
+				    : "Unknown", line);
+			}
 		} while (grp->gr_next && (grp = grp->gr_next));
 
 		/*
@@ -1150,7 +1177,7 @@ chk_host(dp, saddr, defsetp, hostsetp)
 {
 	struct hostlist *hp;
 	struct grouplist *grp;
-	u_long **addrp;
+	u_int32_t **addrp;
 
 	if (dp) {
 		if (dp->dp_flag & DP_DEFSET)
@@ -1160,7 +1187,7 @@ chk_host(dp, saddr, defsetp, hostsetp)
 			grp = hp->ht_grp;
 			switch (grp->gr_type) {
 			case GT_HOST:
-			    addrp = (u_long **)
+			    addrp = (u_int32_t **)
 				grp->gr_ptr.gt_hostent->h_addr_list;
 			    while (*addrp) {
 				if (**addrp == saddr) {
@@ -1236,7 +1263,7 @@ do_opt(cpp, endcpp, ep, grp, has_hostp, exflagsp, cr)
 	struct ucred *cr;
 {
 	char *cpoptarg, *cpoptend;
-	char *cp, *endcp, *cpopt, savedc, savedc2;
+	char *cp, *endcp, *cpopt, savedc, savedc2 = 0;
 	int allflag, usedarg;
 
 	cpopt = *cpp;
@@ -1247,12 +1274,12 @@ do_opt(cpp, endcpp, ep, grp, has_hostp, exflagsp, cr)
 	while (cpopt && *cpopt) {
 		allflag = 1;
 		usedarg = -2;
-		if (cpoptend = strchr(cpopt, ',')) {
+		if ((cpoptend = strchr(cpopt, ','))) {
 			*cpoptend++ = '\0';
-			if (cpoptarg = strchr(cpopt, '='))
+			if ((cpoptarg = strchr(cpopt, '=')))
 				*cpoptarg++ = '\0';
 		} else {
-			if (cpoptarg = strchr(cpopt, '='))
+			if ((cpoptarg = strchr(cpopt, '=')))
 				*cpoptarg++ = '\0';
 			else {
 				*cp = savedc;
@@ -1357,7 +1384,7 @@ get_host(cp, grp, tgrp)
 		if (isdigit(*cp)) {
 			saddr = inet_addr(cp);
 			if (saddr == -1) {
-				syslog(LOG_ERR, "Inet_addr failed for %s.",cp);
+				syslog(LOG_ERR, "inet_addr failed for %s", cp);
 				return (1);
 			}
 			if ((hp = gethostbyaddr((caddr_t)&saddr, sizeof (saddr),
@@ -1365,13 +1392,14 @@ get_host(cp, grp, tgrp)
 				hp = &t_host;
 				hp->h_name = cp;
 				hp->h_addrtype = AF_INET;
-				hp->h_length = sizeof (u_long);
+				hp->h_length = sizeof (u_int32_t);
 				hp->h_addr_list = aptr;
 				aptr[0] = (char *)&saddr;
 				aptr[1] = (char *)NULL;
 			}
 		} else {
-			syslog(LOG_ERR, "Gethostbyname failed for %s.",cp);
+			syslog(LOG_ERR, "gethostbyname; failed for %s: %s", cp,
+			    hstrerror(h_errno));
 			return (1);
 		}
 	}
@@ -1513,7 +1541,8 @@ out_of_mem()
 
 /*
  * Do the mount syscall with the update flag to push the export info into
- * the kernel.
+ * the kernel.  Returns 0 on success, 1 for fatal error, and 2 for error
+ * that only invalidates the specific entry/host.
  */
 int
 do_mount(ep, grp, exflags, anoncrp, dirp, dirplen, fsb)
@@ -1526,7 +1555,7 @@ do_mount(ep, grp, exflags, anoncrp, dirp, dirplen, fsb)
 	struct statfs *fsb;
 {
 	char *cp = (char *)NULL;
-	u_long **addrp;
+	u_int32_t **addrp;
 	int done;
 	char savedc = '\0';
 	struct sockaddr_in sin, imask;
@@ -1549,9 +1578,9 @@ do_mount(ep, grp, exflags, anoncrp, dirp, dirplen, fsb)
 	imask.sin_family = AF_INET;
 	imask.sin_len = sizeof(sin);
 	if (grp->gr_type == GT_HOST)
-		addrp = (u_long **)grp->gr_ptr.gt_hostent->h_addr_list;
+		addrp = (u_int32_t **)grp->gr_ptr.gt_hostent->h_addr_list;
 	else
-		addrp = (u_long **)NULL;
+		addrp = (u_int32_t **)NULL;
 	done = FALSE;
 	while (!done) {
 		switch (grp->gr_type) {
@@ -1626,13 +1655,13 @@ do_mount(ep, grp, exflags, anoncrp, dirp, dirplen, fsb)
 				    ?grp->gr_ptr.gt_net.nt_name
 				    :"Unknown");
 			      /* XXX: Get address from sockaddr_iso? */
-				return (1);
+				return (2);
 			}
 			if (opt_flags & OP_ALLDIRS) {
 #if 0
 				syslog(LOG_ERR, "Could not remount %s: %m",
 					dirp);
-				return (1);
+				return (2);
 #endif
 			}
 			/* back up over the last component */
@@ -1642,16 +1671,16 @@ do_mount(ep, grp, exflags, anoncrp, dirp, dirplen, fsb)
 				cp--;
 			if (cp == dirp) {
 				if (debug)
-					fprintf(stderr,"mnt unsucc\n");
+					fprintf(stderr, "mnt unsucc\n");
 				syslog(LOG_ERR, "Can't export %s", dirp);
-				return (1);
+				return (2);
 			}
 			savedc = *cp;
 			*cp = '\0';
 		}
 		if (addrp) {
 			++addrp;
-			if (*addrp == (u_long *)NULL)
+			if (*addrp == (u_int32_t *)NULL)
 				done = TRUE;
 		} else
 			done = TRUE;
@@ -1675,7 +1704,7 @@ get_net(cp, net, maskflg)
 	struct in_addr inetaddr, inetaddr2;
 	char *name;
 
-	if (np = getnetbyname(cp))
+	if ((np = getnetbyname(cp)))
 		inetaddr = inet_makeaddr(np->n_net, 0);
 	else if (isdigit(*cp)) {
 		if ((netaddr = inet_network(cp)) == -1)
@@ -1690,7 +1719,7 @@ get_net(cp, net, maskflg)
 		 */
 		if (!maskflg) {
 			setnetent(0);
-			while (np = getnetent()) {
+			while ((np = getnetent())) {
 				inetaddr2 = inet_makeaddr(np->n_net, 0);
 				if (inetaddr2.s_addr == inetaddr.s_addr)
 					break;
@@ -1874,7 +1903,7 @@ get_mountlist()
 	FILE *mlfile;
 
 	if ((mlfile = fopen(_PATH_RMOUNTLIST, "r")) == NULL) {
-		syslog(LOG_ERR, "Can't open %s", _PATH_RMOUNTLIST);
+		syslog(LOG_ERR, "Can't open %s: %m", _PATH_RMOUNTLIST);
 		return;
 	}
 	mlpp = &mlhead;
@@ -1921,7 +1950,8 @@ del_mlist(hostp, dirp)
 	}
 	if (fnd) {
 		if ((mlfile = fopen(_PATH_RMOUNTLIST, "w")) == NULL) {
-			syslog(LOG_ERR,"Can't update %s", _PATH_RMOUNTLIST);
+			syslog(LOG_ERR, "Can't update %s: %m",
+			    _PATH_RMOUNTLIST);
 			return;
 		}
 		mlp = mlhead;
@@ -1956,7 +1986,7 @@ add_mlist(hostp, dirp)
 	mlp->ml_next = (struct mountlist *)NULL;
 	*mlpp = mlp;
 	if ((mlfile = fopen(_PATH_RMOUNTLIST, "a")) == NULL) {
-		syslog(LOG_ERR, "Can't update %s", _PATH_RMOUNTLIST);
+		syslog(LOG_ERR, "Can't update %s: %m", _PATH_RMOUNTLIST);
 		return;
 	}
 	fprintf(mlfile, "%s %s\n", mlp->ml_host, mlp->ml_dirp);

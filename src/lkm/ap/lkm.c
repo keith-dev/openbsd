@@ -1,4 +1,4 @@
-/*	$OpenBSD$	*/
+/*	$OpenBSD: lkm.c,v 1.1 1996/03/05 11:25:34 mickey Exp $	*/
 /*
  * Copyright (c) 1994 The XFree86 Project Inc.
  */

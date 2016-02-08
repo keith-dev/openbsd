@@ -1,6 +1,6 @@
 #!/usr/bin/perl
 #
-#	$OpenBSD$
+#	$OpenBSD: adduser.perl,v 1.4 1997/02/25 00:01:52 downsj Exp $
 #
 # Copyright (c) 1995-1996 Wolfram Schneider <wosch@FreeBSD.org>. Berlin.
 # All rights reserved.
@@ -26,7 +26,7 @@
 # OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
 # SUCH DAMAGE.
 #
-# $From: adduser.perl,v 1.19 1996/09/17 19:34:56 wosch Exp $
+# $From: adduser.perl,v 1.22 1996/12/07 21:25:12 ache Exp $
 
 
 # read variables
@@ -120,11 +120,11 @@ sub shells_read {
 
 # Allow /nonexistent and /bin/date as a valid shell for system utils
     push(@list, "/nonexistent");
-    push(@shellpref, "no");
+    &shell_pref_add("no");
     $shell{"no"} = "/nonexistent";
 
     push(@list, "/bin/date");
-    push(@shellpref, "date");
+    &shell_pref_add("date");
     $shell{"date"} = "/bin/date";
 
     return $err;
@@ -145,7 +145,7 @@ sub shells_add {
 		    # found shell
 		    if (&confirm_yn("Found shell: $dir/$sh. Add to $etc_shells?", "yes")) {
 			push(@list, "$dir/$sh");
-			push(@shellpref, "$sh");
+			&shell_pref_add("$sh");
 			$shell{&basename("$dir/$sh")} = "$dir/$sh";
 			$changes++;
 		    }
@@ -154,6 +154,17 @@ sub shells_add {
 	}
     }
     &append_file($etc_shells, @list) if $#list >= 0;
+}
+
+# add shell to preference list without duplication
+sub shell_pref_add {
+    local($new_shell) = @_;
+    local($shell);
+
+    foreach $shell (@shellpref) {
+	return if ($shell eq $new_shell);
+    }
+    push(@shellpref, $new_shell);
 }
 
 # choose your favourite shell and return the shell
@@ -257,7 +268,7 @@ sub passwd_read {
 	print "User $p_username: illegal shell: ``$sh''\n"
 	    if ($verbose && $sh &&
 		!$shell{&basename($sh)} &&
-		$p_username !~ /^(bin|uucp|falcon|nobody)$/ &&
+		$p_username !~ /^(news|xten|bin|nobody|uucp)$/ &&
 		$sh !~ /\/(pppd|sliplogin)$/);
 	$uid{$p_uid} = $p_username;
 	$pwgid{$p_gid} = $p_username;
@@ -309,7 +320,7 @@ sub new_users_name {
     local($name);
 
     while(1) {
-	$name = &confirm_list("Enter username", 1, "a-z0-9", "");
+	$name = &confirm_list("Enter username", 1, "A-Za-z0-9_", "");
 	if (length($name) > 8) {
 	    warn "Username is longer than 8 chars\a\n";
 	    next;
@@ -1188,8 +1199,8 @@ sub message_create {
 
 \$fullname,
 
-your account ``\$name'' was created. Your password is ``\$password''.
-Please expire your password. Have fun!
+your account ``\$name'' was created.
+Have fun!
 
 See also chpass(1), finger(1), passwd(1)
 EOF
@@ -1281,6 +1292,7 @@ sub config_read {
 	    eval $_;
 	    #warn "$_";
 	}
+	next if /^$/;
 	# lines with '^##' are not saved
 	push(@user_variable_list, $_)
 	    if $user_flag && !/^##/ && (s/^[\$\@]// || /^[#\s]/);
@@ -1358,18 +1370,17 @@ shellpref = ($shpref)
 # defaultshell if not empty ("bash")
 defaultshell = "$defaultshell"
 
-# defaultgroup ('USER' for same as username or any other valid group
+# defaultgroup ('USER' for same as username or any other valid group)
 defaultgroup = $defaultgroup
 
-# new users get this uid (1000)
-uid_start = 1000
+# new users get this uid
+uid_start = $uid_start
 
 $do_not_delete
 ## your own variables, see /etc/adduser.message
-$user_var
-
-## end
 EOF
+    print C "$user_var\n" if ($user_var ne '');
+    print C "\n## end\n";
     close C;
 }
 

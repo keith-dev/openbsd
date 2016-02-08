@@ -1,4 +1,4 @@
-/*	$OpenBSD: version.h,v 1.1.1.1 1996/09/07 21:40:27 downsj Exp $	*/
+/*	$OpenBSD: version.h,v 1.4 1996/10/15 08:08:02 downsj Exp $	*/
 /* vi:set ts=4 sw=4:
  *
  * VIM - Vi IMproved		by Bram Moolenaar
@@ -22,11 +22,11 @@
 #define VIM_VERSION_MAJOR			   4
 #define VIM_VERSION_MAJOR_STR		  "4"
 
-#define VIM_VERSION_MINOR			   4
-#define VIM_VERSION_MINOR_STR		  "4"
+#define VIM_VERSION_MINOR			   5
+#define VIM_VERSION_MINOR_STR		  "5"
 
-#define VIM_VERSION_BUILD			   1
-#define VIM_VERSION_BUILD_STR		  "1"
+#define VIM_VERSION_BUILD			   2
+#define VIM_VERSION_BUILD_STR		  "2"
 
 #define VIM_VERSION_PATCHLEVEL		   0
 #define VIM_VERSION_PATCHLEVEL_STR	  "0"

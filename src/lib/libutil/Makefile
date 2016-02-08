@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.7 1996/07/31 17:44:20 deraadt Exp $
+#	$OpenBSD: Makefile,v 1.13 1997/04/27 20:56:18 millert Exp $
 #	$NetBSD: Makefile,v 1.8 1996/05/16 07:03:28 thorpej Exp $
 
 LIB=	util
@@ -6,11 +6,11 @@ CFLAGS+=-DLIBC_SCCS
 
 HDRS=	util.h scsi.h
 SRCS=	getmaxpartitions.c getrawpartition.c login.c login_tty.c logout.c \
-	logwtmp.c opendev.c passwd.c pty.c scsi.c login_fbtab.c
+	logwtmp.c opendev.c passwd.c pty.c readlabel.c scsi.c login_fbtab.c
 
 # XXX need login_fbtab.3
 MAN=	getmaxpartitions.3 getrawpartition.3 login.3 opendev.3 openpty.3 \
-	pw_init.3 pw_lock.3 scsi.3
+	pw_init.3 pw_lock.3 readlabelfs.3 scsi.3 pw_getconf.3
 
 MLINKS+=login.3 logout.3
 MLINKS+=login.3 logwtmp.3
@@ -38,7 +38,7 @@ MLINKS+=scsi.3 scsi_debug_output.3
 includes:
 	@cd ${.CURDIR}; for i in $(HDRS); do \
 	    j="cmp -s $$i ${DESTDIR}/usr/include/$$i || \
-		install -c -o ${BINOWN} -g ${BINGRP} -m 444 $$i \
+		${INSTALL} ${INSTALL_COPY} -o ${BINOWN} -g ${BINGRP} -m 444 $$i \
 		${DESTDIR}/usr/include"; \
 	    echo $$j; \
 	    eval "$$j"; \

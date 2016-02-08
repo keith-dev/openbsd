@@ -1,5 +1,5 @@
 #!/bin/sh -
-#	$OpenBSD$
+#	$OpenBSD: pagesize.sh,v 1.2 1996/06/26 05:37:43 deraadt Exp $
 
 #
 # Copyright (c) 1994

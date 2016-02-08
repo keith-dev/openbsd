@@ -1,6 +1,7 @@
 ./usr/bin/addftinfo
 ./usr/bin/afmtodit
 ./usr/bin/checknr
+./usr/bin/deroff
 ./usr/bin/eqn
 ./usr/bin/grodvi
 ./usr/bin/groff
@@ -280,7 +281,6 @@
 ./usr/share/tmac/mm/ms.cov
 ./usr/share/tmac/mm/se_locale
 ./usr/share/tmac/mm/se_ms.cov
-./usr/share/tmac/tmac.
 ./usr/share/tmac/tmac.X
 ./usr/share/tmac/tmac.Xps
 ./usr/share/tmac/tmac.an
@@ -292,6 +292,8 @@
 ./usr/share/tmac/tmac.e
 ./usr/share/tmac/tmac.latin1
 ./usr/share/tmac/tmac.lj4
+./usr/share/tmac/tmac.m
+./usr/share/tmac/tmac.mse
 ./usr/share/tmac/tmac.pic
 ./usr/share/tmac/tmac.ps
 ./usr/share/tmac/tmac.psatk
@@ -300,7 +302,6 @@
 ./usr/share/tmac/tmac.pspic
 ./usr/share/tmac/tmac.s
 ./usr/share/tmac/tmac.safer
-./usr/share/tmac/tmac.se
 ./usr/share/tmac/tmac.tty
 ./usr/share/tmac/tmac.tty-char
 ./usr/share/tmac/tmac.vgrind

@@ -1,4 +1,4 @@
-/*	$OpenBSD: ypcat.c,v 1.4 1996/05/21 21:32:40 deraadt Exp $ */
+/*	$OpenBSD: ypcat.c,v 1.5 1996/05/24 09:15:39 deraadt Exp $ */
 
 /*
  * Copyright (c) 1992, 1993, 1996 Theo de Raadt <deraadt@theos.com>
@@ -33,7 +33,7 @@
  */
 
 #ifndef LINT
-static char rcsid[] = "$OpenBSD: ypcat.c,v 1.4 1996/05/21 21:32:40 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: ypcat.c,v 1.5 1996/05/24 09:15:39 deraadt Exp $";
 #endif
 
 #include <sys/param.h>

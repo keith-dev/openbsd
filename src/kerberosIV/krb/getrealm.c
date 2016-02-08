@@ -75,33 +75,28 @@ krb_realmofhost(host)
 
 	/* prepare default */
 	if (domain) {
-		char *cp;
-
-		strncpy(ret_realm, &domain[1], REALM_SZ);
-		ret_realm[REALM_SZ] = '\0';
-		/* Upper-case realm */
-		for (cp = ret_realm; *cp; cp++)
-			if (islower(*cp))
-				*cp = toupper(*cp);
+		ret_realm[0] = '\0';
 	} else {
 		krb_get_lrealm(ret_realm, 1);
 	}
 
 	if ((trans_file = fopen(KRB_RLM_TRANS, "r")) == (FILE *) 0) {
 	        char tbuf[128];
-		char *tdir = (char *) getenv("KRBCONFDIR");
-		strncpy(tbuf, tdir ? tdir : "/etc", sizeof(tbuf));
-		strncat(tbuf, "/krb.realms", sizeof(tbuf));
-		tbuf[sizeof(tbuf)-1] = 0;
+		char *tdir = NULL;
+		if (issetugid() == 0) 
+			tdir = (char *) getenv("KRBCONFDIR");
+		strncpy(tbuf, tdir ? tdir : "/etc", sizeof(tbuf)-1);
+		tbuf[sizeof(tbuf)-1] = '\0';
+		strncat(tbuf, "/krb.realms", sizeof(tbuf) - strlen(tbuf));
 		if ((trans_file = fopen(tbuf,"r")) == NULL)
-                        return(ret_realm); /* krb_errno = KRB_NO_TRANS */
+                        return(ret_realm[0] ? ret_realm : NULL); /* krb_errno = KRB_NO_TRANS */
 	}
 	while (1) {
 		if ((retval = fscanf(trans_file, "%s %s",
 				     trans_host, trans_realm)) != 2) {
 			if (retval == EOF) {
 				fclose(trans_file);
-				return(ret_realm);
+				return(ret_realm[0] ? ret_realm : NULL);
 			}
 			continue;	/* ignore broken lines */
 		}
@@ -111,7 +106,7 @@ krb_realmofhost(host)
 			/* exact match of hostname, so return the realm */
 			(void) strcpy(ret_realm, trans_realm);
 			fclose(trans_file);
-			return(ret_realm);
+			return(ret_realm[0] ? ret_realm : NULL);
 		}
 		if ((trans_host[0] == '.') && domain) { 
 #if     MATCH_SUBDOMAINS

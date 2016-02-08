@@ -1,4 +1,4 @@
-/*	$OpenBSD: context.c,v 1.3 1995/09/28 10:34:15 tls Exp $	*/
+/*	$OpenBSD: context.c,v 1.3 1997/02/25 00:04:02 downsj Exp $	*/
 /*	$NetBSD: context.c,v 1.3 1995/09/28 10:34:15 tls Exp $	*/
 
 /*
@@ -41,7 +41,7 @@
 #if 0
 static char sccsid[] = "@(#)context.c	8.1 (Berkeley) 6/6/93";
 #else
-static char rcsid[] = "$OpenBSD: context.c,v 1.3 1995/09/28 10:34:15 tls Exp $";
+static char rcsid[] = "$OpenBSD: context.c,v 1.3 1997/02/25 00:04:02 downsj Exp $";
 #endif
 #endif /* not lint */
 

@@ -1,4 +1,4 @@
-/*	$OpenBSD$	*/
+/*	$OpenBSD: types.h,v 1.2 1996/03/27 19:33:13 niklas Exp $	*/
 /*	$NetBSD: types.h,v 1.5 1996/02/28 21:04:20 thorpej Exp $	*/
 
 /*

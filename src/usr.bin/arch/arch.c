@@ -29,7 +29,7 @@
  */
 
 #ifndef lint
-static char rcsid[] = "$OpenBSD: arch.c,v 1.1 1996/06/23 04:22:36 tholo Exp $";
+static char rcsid[] = "$OpenBSD: arch.c,v 1.2 1996/06/29 20:29:34 tholo Exp $";
 #endif /* not lint */
 
 #include <stdio.h>

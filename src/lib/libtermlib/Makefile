@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.2 1996/08/31 02:36:59 tholo Exp $
+#	$OpenBSD: Makefile,v 1.7 1997/04/27 20:56:17 millert Exp $
 #
 # Copyright (c) 1996 SigmaSoft, Th. Lockert <tholo@sigmasoft.com>
 # All rights reserved.
@@ -31,7 +31,8 @@
 
 LIB=		termlib
 SRCS=		captoinfo.c def_prog_mode.c def_shell_mode.c del_curterm.c \
-		fillcap.c findcap.c findinfo.c getterm.c globals.c mvcur.c \
+		fillcap.c findcap.c findinfo.c getterm.c globals.c \
+		mvcur.c _mvcur.c \
 		outc.c putp.c reset_prog_mode.c reset_shell_mode.c \
 		restartterm.c setterm.c setupterm.c set_curterm.c tgetent.c \
 		tgetflag.c tgetnum.c tgetstr.c tgoto.c tigetflag.c tigetnum.c \
@@ -67,10 +68,13 @@ binaries.h:	mkinfo Capabilities
 includes:	${HDRS}
 	@for i in ${HDRS}; do \
 	    cmp -s $$i ${DESTDIR}/usr/include/$$i || \
-		install -c -o ${BINOWN} -g ${BINGRP} -m 444 $$i \
+		${INSTALL} ${INSTALL_COPY} -o ${BINOWN} -g ${BINGRP} -m 444 $$i \
 		${DESTDIR}/usr/include; \
 	done
 
 .include <bsd.lib.mk>
+
+mkinfo:	mkinfo.c
+	${HOSTCC} ${CFLAGS} -I${.CURDIR} -o mkinfo $>
 
 .depend:	mkinfo.c

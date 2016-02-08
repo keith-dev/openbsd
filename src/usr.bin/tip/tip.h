@@ -1,5 +1,5 @@
-/*	$OpenBSD: tip.h,v 1.4 1995/10/29 00:49:43 pk Exp $	*/
-/*	$NetBSD: tip.h,v 1.4 1995/10/29 00:49:43 pk Exp $	*/
+/*	$OpenBSD: tip.h,v 1.6 1997/04/20 23:29:33 millert Exp $	*/
+/*	$NetBSD: tip.h,v 1.7 1997/04/20 00:02:46 mellon Exp $	*/
 
 /*
  * Copyright (c) 1989, 1993
@@ -42,7 +42,6 @@
  */
 
 #include <sys/types.h>
-#include <machine/endian.h>
 #include <sys/file.h>
 #include <sys/time.h>
 
@@ -78,8 +77,8 @@ char	*HO;			/* host name */
 long	BR;			/* line speed for conversation */
 long	FS;			/* frame size for transfers */
 
-char	DU;			/* this host is dialed up */
-char	HW;			/* this device is hardwired, see hunt.c */
+short	DU;			/* this host is dialed up */
+short	HW;			/* this device is hardwired, see hunt.c */
 char	*ES;			/* escape character */
 char	*EX;			/* exceptions */
 char	*FO;			/* force (literal next) char*/
@@ -89,7 +88,8 @@ char	*PR;			/* remote prompt */
 long	DL;			/* line delay for file transfers to remote */
 long	CL;			/* char delay for file transfers to remote */
 long	ET;			/* echocheck timeout */
-char	HD;			/* this host is half duplex - do local echo */
+short	HD;			/* this host is half duplex - do local echo */
+short	DC;			/* this host is directly connected. */
 
 /*
  * String value table
@@ -145,30 +145,18 @@ typedef
  *   initialize it in vars.c, so we cast it as needed to keep lint
  *   happy.
  */
-typedef
-	union {
-		int	zz_number;
-		short	zz_boolean[2];
-		char	zz_character[4];
-		int	*zz_address;
-	}
-	zzhack;
 
 #define value(v)	vtable[v].v_value
 
-#define number(v)	((((zzhack *)(&(v))))->zz_number)
+#define	number(v)	((long)(v))
+#define	boolean(v)      ((short)(long)(v))
+#define	character(v)    ((char)(long)(v))
+#define	address(v)      ((long *)(v))
 
-#if BYTE_ORDER == LITTLE_ENDIAN
-#define boolean(v)	((((zzhack *)(&(v))))->zz_boolean[0])
-#define character(v)	((((zzhack *)(&(v))))->zz_character[0])
-#endif
-
-#if BYTE_ORDER == BIG_ENDIAN
-#define boolean(v)	((((zzhack *)(&(v))))->zz_boolean[1])
-#define character(v)	((((zzhack *)(&(v))))->zz_character[3])
-#endif
-
-#define address(v)	((((zzhack *)(&(v))))->zz_address)
+#define	setnumber(v,n)		do { (v) = (char *)(long)(n); } while (0)
+#define	setboolean(v,n)		do { (v) = (char *)(long)(n); } while (0)
+#define	setcharacter(v,n)	do { (v) = (char *)(long)(n); } while (0)
+#define	setaddress(v,n)		do { (v) = (char *)(n); } while (0)
 
 /*
  * Escape command table definitions --

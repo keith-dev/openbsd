@@ -1,4 +1,4 @@
-/* *	$OpenBSD: declare.h,v 1.1.1.1 1995/10/18 08:46:20 deraadt Exp $*/
+/* *	$OpenBSD: declare.h,v 1.2 1996/06/26 05:41:16 deraadt Exp $*/
 /*-
  * Copyright (c) 1988 The Regents of the University of California.
  * All rights reserved.

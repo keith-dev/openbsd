@@ -33,7 +33,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- *	$OpenBSD$
+ *	$OpenBSD: hash.h,v 1.3 1996/08/19 08:20:32 tholo Exp $
  */
 
 /* Operations */

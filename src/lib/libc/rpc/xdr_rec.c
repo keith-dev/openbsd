@@ -27,7 +27,7 @@
  * Mountain View, California  94043
  */
 #if defined(LIBC_SCCS) && !defined(lint) 
-static char *rcsid = "$OpenBSD: xdr_rec.c,v 1.3 1996/07/20 06:12:51 deraadt Exp $";
+static char *rcsid = "$OpenBSD: xdr_rec.c,v 1.4 1996/08/19 08:32:06 tholo Exp $";
 #endif /* LIBC_SCCS and not lint */
 
 /*

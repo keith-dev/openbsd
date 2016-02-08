@@ -27,7 +27,7 @@
 .\" (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
 .\" THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 .\"
-.\"	$OpenBSD: tar.1,v 1.1 1996/06/11 18:07:13 tholo Exp $
+.\"	$OpenBSD: tar.1,v 1.12 1997/04/16 03:50:24 millert Exp $
 .\"
 .Dd June 11, 1996
 .Dt TAR 1
@@ -36,15 +36,22 @@
 .Nm tar
 .Nd tape archiver
 .Sh SYNOPSIS
-.Nm tar
+.Nm
 .No [-]{crtux}[befhmopvwzHLPXZ014578]
 .Op Ar archive
 .Op Ar blocksize
+.\" XXX how to do this right?
+.No [-C
+.Ar directory
+.No ]
+.No [-s
+.Ar replstr
+.No ]
 .Ar file1
 .Op Ar file2...
 .Sh DESCRIPTION
 The
-.Nm tar
+.Nm
 command creates, adds files to, or extracts files from an
 archive file in \*Qtar\*U format.  A tar archive is often
 stored on a magnetic tape, but can be a floppy or a regular
@@ -76,36 +83,98 @@ extration.
 In addition to the flags mentioned above, any of the following
 flags may be used:
 .Bl -tag -width Ar
-.It Fl b Ar blocksize
-Set block size to use for archive.  Any multiple of 512 between
-10240 and 32256 may be used.
+.It Fl b Ar "blocking factor"
+Set blocking factor to use for the archive,
+.Nm
+uses 512 byte blocks.  The default is 20, the maximum is 126.
+Archives with a blocking factor larger 63 violate the
+.Tn POSIX
+standard and will not be portable to all systems.
 .It Fl e
 Stop after first error.
 .It Fl f Ar archive
 Filename where the archive is stored.  Defaults to
-.Pa /dev/rmt8
+.Pa /dev/rst0
 .It Fl h
 Follow symbolic links as if they were normal files
 or directories.
 .It Fl m
 Do not preserve modification time.
 .It Fl o
-Do not create directories.
+Don't write directory information that the older (V7) style
+.Nm
+is unable to decode.
 .It Fl p
 Preserve user id, group id, file mode, access and modification
-times.
+times if possible.  The user id and group id will only be set
+if the user is the superuser (unless these values correspond
+to the user's user and group ids).
+.It Fl s Ar replstr
+Modify the file or archive member names specified by the
+.Ar pattern
+or
+.Ar file
+operands according to the substitution expression
+.Ar replstr ,
+using the syntax of the
+.Xr ed 1
+utility regular expressions.
+The format of these regular expressions are:
+.Dl /old/new/[gp]
+As in
+.Xr ed 1 ,
+.Cm old
+is a basic regular expression and
+.Cm new
+can contain an ampersand (&), \\n (where n is a digit) back-references,
+or subexpression matching.
+The
+.Cm old
+string may also contain
+.Dv <newline>
+characters.
+Any non-null character can be used as a delimiter (/ is shown here).
+Multiple
+.Fl s
+expressions can be specified.
+The expressions are applied in the order they are specified on the
+command line, terminating with the first successful substitution.
+The optional trailing
+.Cm g
+continues to apply the substitution expression to the pathname substring
+which starts with the first character following the end of the last successful
+substitution. The first unsuccessful substitution stops the operation of the
+.Cm g
+option.
+The optional trailing
+.Cm p
+will cause the final result of a successful substitution to be written to
+.Dv standard error
+in the following format:
+.Dl <original pathname> >> <new pathname>
+File or archive member names that substitute to the empty string
+are not selected and will be skipped.
 .It Fl v
 Verbose operation mode.
 .It Fl w
-Interactively rename files.
+Interactively rename files.  This option causes
+.Nm
+to prompt the user for the filename to use when storing or
+extracting files in an archive.
 .It Fl z
 Compress archive using gzip.
+.It Fl C Ar directory
+This is a positional argument which sets the working directory for the
+following files.  When extracting, files will be extracted into
+the specified directory; when creating, the specified files will be matched
+from the directory.
 .It Fl H
 Follow symlinks given on command line only.
 .It Fl L
 Follow all symlinks.
 .It Fl P
-Do not follow any symlinks.
+Do not strip leading slashes (``/'') from pathnames.
+The default is to strip leading slashes.
 .It Fl X
 Do not cross mount points in the file system.
 .It Fl Z
@@ -114,11 +183,11 @@ Compress archive using compress.
 .Pp
 The options
 .Op Fl 014578
-can be use to select one of the compiled-in backup devices,
-.Pa /dev/rmtN .
+can be used to select one of the compiled-in backup devices,
+.Pa /dev/rstN .
 .Sh FILES
-.Bl -tag -width "/dev/rmt8"
-.It Pa /dev/rmt8
+.Bl -tag -width "/dev/rst0"
+.It Pa /dev/rst0
 The default archive name
 .El
 .Sh SEE ALSO
@@ -127,7 +196,7 @@ The default archive name
 .Sh AUTHOR
 Keith Muller at the University of California, San Diego
 .Sh ERRORS
-.Nm tar
+.Nm
 will exit with one of the following values:
 .Bl -tag -width 2n
 .It 0
@@ -137,7 +206,7 @@ An error occured.
 .El
 .Pp
 Whenever
-.Nm tar
+.Nm
 cannot create a file or a link when extracting an archive or cannot
 find a file while writing an archive, or cannot preserve the user
 ID, group ID, file mode or access and modification times when the
@@ -145,14 +214,14 @@ ID, group ID, file mode or access and modification times when the
 options is specified, a diagnostic message is written to standard
 error and a non-zero exit value will be returned, but processing
 will continue.  In the case where
-.Nm tar
+.Nm
 cannot create a link to a file,
-.Nm tar
+.Nm
 will not create a second copy of the file.
 .Pp
 If the extraction of a file from an archive is prematurely terminated
 by a signal or error,
-.Nm tar
+.Nm
 may have only partially extracted the file the user wanted.
 Additionally, the file modes of extracted files and directories may
 have incorrect file bits, and the modification and access times may
@@ -160,6 +229,6 @@ be wrong.
 .Pp
 If the creation of an archive is prematurely terminated by a signal
 or error,
-.Nm tar
+.Nm
 may have only partially created the archive which may violate the
 specific archive format specification.

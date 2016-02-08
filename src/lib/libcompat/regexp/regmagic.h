@@ -1,4 +1,4 @@
-/*	$OpenBSD$	*/
+/*	$OpenBSD: regmagic.h,v 1.2 1996/07/24 05:39:12 downsj Exp $	*/
 /*	$Id: regmagic.h,v 1.2 1996/07/24 05:39:12 downsj Exp $ */
 
 /*

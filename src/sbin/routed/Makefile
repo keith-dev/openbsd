@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.4 1996/09/05 14:31:10 mickey Exp $
+#	$OpenBSD: Makefile,v 1.5 1996/09/06 13:05:51 deraadt Exp $
 #	@(#)Makefile	8.1 (Berkeley) 6/19/93
 
 PROG=	routed

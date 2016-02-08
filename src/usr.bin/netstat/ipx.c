@@ -1,4 +1,4 @@
-/*	$OpenBSD$	*/
+/*	$OpenBSD: ipx.c,v 1.1 1996/08/16 09:29:32 mickey Exp $	*/
 
 /*
  * Copyright (c) 1996 Michael Shalayeff
@@ -38,7 +38,7 @@
 #if 0
 static char sccsid[] = "from: @(#)ns.c	8.1 (Berkeley) 6/6/93";
 #else
-static char *rcsid = "$OpenBSD$";
+static char *rcsid = "$OpenBSD: ipx.c,v 1.1 1996/08/16 09:29:32 mickey Exp $";
 #endif
 #endif /* not lint */
 

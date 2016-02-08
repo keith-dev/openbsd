@@ -1,4 +1,4 @@
-/*	$OpenBSD: init.c,v 1.6 1996/07/12 10:16:15 deraadt Exp $	*/
+/*	$OpenBSD: init.c,v 1.9 1997/03/25 23:12:23 deraadt Exp $	*/
 /*	$NetBSD: init.c,v 1.22 1996/05/15 23:29:33 jtc Exp $	*/
 
 /*-
@@ -45,9 +45,9 @@ static char copyright[] =
 
 #ifndef lint
 #if 0
-static char sccsid[] = "@(#)init.c	8.1 (Berkeley) 7/15/93";
+static char sccsid[] = "@(#)init.c	8.2 (Berkeley) 4/28/95";
 #else
-static char rcsid[] = "$OpenBSD: init.c,v 1.6 1996/07/12 10:16:15 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: init.c,v 1.9 1997/03/25 23:12:23 deraadt Exp $";
 #endif
 #endif /* not lint */
 
@@ -359,6 +359,7 @@ stall(va_alist)
 
 	vsyslog(LOG_ALERT, message, ap);
 	va_end(ap);
+	closelog();
 	sleep(STALL_TIMEOUT);
 }
 
@@ -387,6 +388,7 @@ warning(va_alist)
 
 	vsyslog(LOG_ALERT, message, ap);
 	va_end(ap);
+	closelog();
 }
 
 /*
@@ -413,6 +415,7 @@ emergency(va_alist)
 
 	vsyslog(LOG_EMERG, message, ap);
 	va_end(ap);
+	closelog();
 }
 
 /*

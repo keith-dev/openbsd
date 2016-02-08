@@ -1,4 +1,4 @@
-/*	$OpenBSD: scsi.c,v 1.1 1996/06/12 11:21:35 deraadt Exp $	*/
+/*	$OpenBSD: scsi.c,v 1.2 1996/07/31 09:25:48 niklas Exp $	*/
 
 /* Copyright (c) 1994 HD Associates
  * (contact: dufault@hda.com)

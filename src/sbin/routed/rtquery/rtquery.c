@@ -1,4 +1,4 @@
-/*	$OpenBSD: $	*/
+/*	$OpenBSD: rtquery.c,v 1.5 1997/01/17 07:12:25 millert Exp $	*/
 
 /*-
  * Copyright (c) 1982, 1986, 1993
@@ -114,7 +114,7 @@ main(int argc,
 	OMSG.rip_nets[0].n_metric = htonl(HOPCNT_INFINITY);
 
 	pgmname = argv[0];
-	while ((ch = getopt(argc, argv, "np1w:r:t:")) != EOF)
+	while ((ch = getopt(argc, argv, "np1w:r:t:")) != -1)
 		switch (ch) {
 		case 'n':
 			not_trace = 1;
@@ -616,7 +616,7 @@ getnet(char *name,
 
 	/* Detect and separate "1.2.3.4/24"
 	 */
-	if (0 != (mname = rindex(name,'/'))) {
+	if (0 != (mname = strrchr(name,'/'))) {
 		i = (int)(mname - name);
 		if (i > sizeof(hname)-1)	/* name too long */
 			return 0;

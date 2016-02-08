@@ -1,4 +1,4 @@
-/*	$OpenBSD: misc.c,v 1.2 1996/06/26 05:35:38 deraadt Exp $	*/
+/*	$OpenBSD: misc.c,v 1.3 1996/07/13 22:22:09 millert Exp $	*/
 
 /* misc - miscellaneous flex routines */
 

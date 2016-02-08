@@ -1,4 +1,4 @@
-/*	$OpenBSD: ping.c,v 1.7 1996/07/23 10:31:28 deraadt Exp $	*/
+/*	$OpenBSD: ping.c,v 1.16 1997/02/04 16:44:14 kstailey Exp $	*/
 /*	$NetBSD: ping.c,v 1.20 1995/08/11 22:37:58 cgd Exp $	*/
 
 /*
@@ -47,7 +47,7 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)ping.c	8.1 (Berkeley) 6/5/93";
 #else
-static char rcsid[] = "$OpenBSD: ping.c,v 1.7 1996/07/23 10:31:28 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: ping.c,v 1.16 1997/02/04 16:44:14 kstailey Exp $";
 #endif
 #endif /* not lint */
 
@@ -164,6 +164,7 @@ void catcher(), finish();
 int in_cksum __P((u_short *, int));
 void pinger();
 char *pr_addr __P((u_long));
+int check_icmph __P((struct ip *));
 void pr_icmph __P((struct icmp *));
 void pr_pack __P((char *, int, struct sockaddr_in *));
 void pr_retip __P((struct ip *));
@@ -183,6 +184,7 @@ main(argc, argv)
 	struct in_addr saddr;
 	register int i;
 	int ch, fdmask, hold = 1, packlen, preload;
+	int maxsize, maxsizelen;
 	u_char *datap, *packet;
 	char *target, hnamebuf[MAXHOSTNAMELEN];
 	u_char ttl = MAXTTL, loop = 1, df = 0;
@@ -197,11 +199,12 @@ main(argc, argv)
 		err(1, "socket");
 
 	/* revoke privs */
+	seteuid(getuid());
 	setuid(getuid());
 
 	preload = 0;
 	datap = &outpack[8 + sizeof(struct timeval)];
-	while ((ch = getopt(argc, argv, "DI:LRS:c:dfh:i:l:np:qrs:T:t:vw:")) != EOF)
+	while ((ch = getopt(argc, argv, "DI:LRS:c:dfh:i:l:np:qrs:T:t:vw:")) != -1)
 		switch(ch) {
 		case 'c':
 			npackets = strtol(optarg, 0, NULL);
@@ -374,7 +377,7 @@ main(argc, argv)
 		ip->ip_hl = sizeof(struct ip) >> 2;
 		ip->ip_tos = tos;
 		ip->ip_id = 0;  
-		ip->ip_off = (df?IP_DF:0);
+		ip->ip_off = htons(df?IP_DF:0);
 		ip->ip_ttl = ttl;
 		ip->ip_p = proto->p_proto;
 		ip->ip_src.s_addr = INADDR_ANY;
@@ -411,6 +414,17 @@ main(argc, argv)
 	    setsockopt(s, IPPROTO_IP, IP_MULTICAST_IF, &saddr,
 		       sizeof(saddr)) < 0)
 		err(1, "setsockopt IP_MULTICAST_IF");
+
+	/* 
+	 * When trying to send large packets, you must increase the
+	 * size of both the send and receive buffers...
+	 */
+	maxsizelen = sizeof maxsize;
+	if (getsockopt(s, SOL_SOCKET, SO_SNDBUF, &maxsize, &maxsizelen) < 0)
+		err(1, "getsockopt");
+	if (maxsize < packlen &&
+	    setsockopt(s, SOL_SOCKET, SO_SNDBUF, &packlen, sizeof(maxsize)) < 0)
+		err(1, "setsockopt");
 
 	/*
 	 * When pinging the broadcast address, you can get a lot of answers.
@@ -539,7 +553,7 @@ pinger()
 
 		packet = (char*)ip;
 		cc += sizeof(struct ip);
-		ip->ip_len = cc;
+		ip->ip_len = htons(cc);
 		ip->ip_sum = in_cksum((u_short *)outpackhdr, cc);
 	}
 
@@ -575,11 +589,11 @@ pr_pack(buf, cc, from)
 	register u_char *cp,*dp;
 	static int old_rrlen;
 	static char old_rr[MAX_IPOPTLEN];
-	struct ip *ip;
+	struct ip *ip, *ip2;
 	struct timeval tv, tp;
 	char *pkttime;
 	double triptime;
-	int hlen, dupflag;
+	int hlen, hlen2, dupflag;
 
 	(void)gettimeofday(&tv, (struct timezone *)NULL);
 
@@ -661,6 +675,11 @@ pr_pack(buf, cc, from)
 	} else {
 		/* We've got something other than an ECHOREPLY */
 		if (!(options & F_VERBOSE))
+			return;
+		ip2 = (struct ip *) (buf + hlen + sizeof (struct icmp));
+		hlen2 = ip2->ip_hl << 2; 
+		if (cc >= hlen2 + 8 && check_icmph((struct ip *)(icp +
+		    sizeof (struct icmp))) != 1)
 			return;
 		(void)printf("%d bytes from %s: ", cc,
 		    pr_addr(from->sin_addr.s_addr));
@@ -867,6 +886,9 @@ pr_icmph(icp)
 			break;
 		case ICMP_UNREACH_SRCFAIL:
 			(void)printf("Source Route Failed\n");
+			break;
+		case ICMP_UNREACH_FILTER_PROHIB:
+			(void)printf("Route administratively prohibited\n");
 			break;
 		default:
 			(void)printf("Dest Unreachable, Bad Code: %d\n",
@@ -1080,6 +1102,38 @@ fill(bp, patp)
 			(void)printf("%02x", bp[jj] & 0xFF);
 		(void)printf("\n");
 	}
+}
+
+/* 
+ * when we get types of ICMP message with parts of the orig. datagram
+ * we want to try to assure ourselves that it is from this instance
+ * of ping, and not say, a refused finger connection or something
+ */
+int
+check_icmph(iph)
+	struct ip *iph;
+{
+	struct icmp *icmph;
+
+	/* only allow IP version 4 */
+	if (iph->ip_v != 4)
+		return 0;
+
+	/* Only allow ICMP */
+	if (iph->ip_p != IPPROTO_ICMP)
+		return 0;
+
+	icmph = (struct icmp *) (iph + (4 * iph->ip_hl));
+
+	/* make sure it is in response to an ECHO request */
+	if (icmph->icmp_type != 8)
+		return 0;
+
+	/* ok, make sure it has the right id on it */
+	if (icmph->icmp_hun.ih_idseq.icd_id != ident)
+		return 0;
+
+	return 1;
 }
 
 void

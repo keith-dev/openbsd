@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.3 1996/09/07 23:41:00 downsj Exp $
+#	$OpenBSD: Makefile,v 1.8 1997/04/27 20:56:58 millert Exp $
 
 .PATH:	${.CURDIR}/doc
 
@@ -29,14 +29,14 @@ DOCS=	vim_40.txt vim_ami.txt vim_arch.txt vim_diff.txt vim_digr.txt \
 # I haven't tried this, but it's a start...
 # Use the following to build Motif vim:
 #SRCS+=	gui.c gui_motif.c gui_x11.c pty_openbsd.c
-#LDADD+=	-L/some/where/motif/lib -L/some/where/X11/lib -lXm -lXt -lutil
-#CFLAGS+=	-I/some/where/motif/include -I/some/where/X11/include -DHAVE_X11 -DUSE_GUI_MOTIF
+#LDADD+=	-L/usr/local/LessTiff/lib -L/usr/local/X11R6.1/lib -lXm -lXt -lX11 -lutil
+#CFLAGS+=	-I/usr/local/LessTiff/include -I/usr/local/X11R6.1/include -DHAVE_X11 -DUSE_GUI_MOTIF
 # Use the following to build Athena vim:
 #SRCS+=	gui.c gui_athena.c gui_x11.c pty_openbsd.c gui_at_sb.c
-#LDADD+=	-L/some/where/X11/lib -lXaw -lXt -lXmu -lutil
+#LDADD+=	-L/some/where/X11/lib -lXaw -lXt -lXmu -lX11 -lutil
 #CFLAGS+=	-I/some/where/X11/include -DHAVE_X11 -DUSE_GUI_ATHENA
 
-CLEANFILES+=	mkcmdtab cmdtab.h
+CLEANFILES+=	mkcmdtab mkcmdtab.o cmdtab.h
 
 .depend cmdline.o: cmdtab.h
 
@@ -47,10 +47,10 @@ mkcmdtab: mkcmdtab.o
 	${CC} mkcmdtab.o -o mkcmdtab
 
 afterinstall:
-	install -d -m 555 -o ${BINOWN} -g ${BINGRP} ${DESTDIR}/usr/share/vim
+	${INSTALL} -d -m 555 -o ${BINOWN} -g ${BINGRP} ${DESTDIR}/usr/share/vim
 	cd ${.CURDIR}/doc; for i in ${DOCS}; do \
 		cmp -s $$i ${DESTDIR}/usr/share/vim/$$i || \
-		install -c -m 444 -o ${BINOWN} -g ${BINGRP} $$i \
+		${INSTALL} ${INSTALL_COPY} -m 444 -o ${BINOWN} -g ${BINGRP} $$i \
 		${DESTDIR}/usr/share/vim; done
 
 .include <bsd.prog.mk>

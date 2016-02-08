@@ -1,4 +1,4 @@
-/*	$OpenBSD: FlexLexer.h,v 1.2 1996/06/26 05:35:27 deraadt Exp $	*/
+/*	$OpenBSD: FlexLexer.h,v 1.3 1996/07/13 22:21:55 millert Exp $	*/
 
 // $Header: /cvs/src/usr.bin/lex/FlexLexer.h,v 1.3 1996/07/13 22:21:55 millert Exp $
 

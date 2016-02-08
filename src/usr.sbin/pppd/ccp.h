@@ -1,4 +1,4 @@
-/*	$OpenBSD: ccp.h,v 1.2 1996/03/25 15:55:33 niklas Exp $	*/
+/*	$OpenBSD: ccp.h,v 1.3 1996/07/20 12:02:05 joshd Exp $	*/
 
 /*
  * ccp.h - Definitions for PPP Compression Control Protocol.

@@ -1,7 +1,5 @@
-/*	$OpenBSD$	*/
-
 /*
- * Header: nfsfh.h,v 1.4 95/10/19 20:27:44 leres Exp
+ * $Header: /cvs/src/usr.sbin/tcpdump/nfsfh.h,v 1.5 1996/12/12 16:22:48 bitblt Exp $
  *
  * nfsfh.h - NFS file handle definitions (for portable use)
  *
@@ -26,7 +24,7 @@ typedef struct {
  * our internal representation of that.
  */
 typedef	struct {
-	my_devt	fsid_dev;
+	my_devt	Fsid_dev;		/* XXX avoid name conflict with AIX */
 	u_int32_t fsid_code;
 } my_fsid;
 

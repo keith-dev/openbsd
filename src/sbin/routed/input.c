@@ -1,4 +1,4 @@
-/*	$OpenBSD: input.c,v 1.6 1996/09/06 13:22:07 deraadt Exp $	*/
+/*	$OpenBSD: input.c,v 1.7 1996/10/02 06:51:44 mickey Exp $	*/
 
 /*
  * Copyright (c) 1983, 1988, 1993
@@ -36,7 +36,7 @@
 #if !defined(lint)
 static char sccsid[] = "@(#)input.c	8.1 (Berkeley) 6/5/93";
 #else
-static char rcsid[] = "$OpenBSD: input.c,v 1.6 1996/09/06 13:22:07 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: input.c,v 1.7 1996/10/02 06:51:44 mickey Exp $";
 #endif
 
 #include "defs.h"

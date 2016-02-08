@@ -1,4 +1,4 @@
-.\" $OpenBSD: cdio.1,v 1.4 1996/08/26 08:22:00 deraadt Exp $
+.\" $OpenBSD: cdio.1,v 1.8 1997/03/09 01:34:26 angelos Exp $
 .Dd July 3, 1995
 .Dt CDIO 1
 .Os OpenBSD 2.0
@@ -73,6 +73,12 @@ using
 logical blocks.
 .It Cm pause
 Stop playing. Do not stop the disc.
+.It Cm next
+Play the next track. If we're at the last track, stop.
+.It Cm previous
+Play the previous track. If we're at the first track, restart.
+.It Cm replay
+Replay the current track again.
 .It Cm resume
 Resume playing. Used after the
 .Nm pause
@@ -100,7 +106,7 @@ Play the left subtrack on both left and right channels.
 .It Cm volume Ar right
 Play the right subtrack on both left and right channels.
 .It Cm info
-Print the the table of contents.
+Print the table of contents.
 .It Cm status
 Print the information about the disc:
 the current playing status and position,

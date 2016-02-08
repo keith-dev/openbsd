@@ -1,4 +1,4 @@
-/*	$OpenBSD: wwinit.c,v 1.11 1996/02/08 21:49:07 mycroft Exp $	*/
+/*	$OpenBSD: wwinit.c,v 1.6 1997/02/25 01:18:27 downsj Exp $	*/
 /*	$NetBSD: wwinit.c,v 1.11 1996/02/08 21:49:07 mycroft Exp $	*/
 
 /*
@@ -41,14 +41,16 @@
 #if 0
 static char sccsid[] = "@(#)wwinit.c	8.2 (Berkeley) 4/28/95";
 #else
-static char rcsid[] = "$OpenBSD: wwinit.c,v 1.11 1996/02/08 21:49:07 mycroft Exp $";
+static char rcsid[] = "$OpenBSD: wwinit.c,v 1.6 1997/02/25 01:18:27 downsj Exp $";
 #endif
 #endif /* not lint */
 
+#include <stdlib.h>
 #include "ww.h"
 #include "tt.h"
 #include <sys/signal.h>
 #include <fcntl.h>
+#include <term.h>
 #include "char.h"
 
 wwinit()
@@ -197,7 +199,7 @@ wwinit()
 		break;
 #ifdef B57600
 	case B57600:
-		wwbaud= 57600;
+		wwbaud = 57600;
 		break;
 #endif
 #ifdef B115200

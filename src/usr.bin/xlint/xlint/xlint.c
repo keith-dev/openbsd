@@ -1,4 +1,4 @@
-/*	$OpenBSD: xlint.c,v 1.3 1995/10/23 14:29:30 jpo Exp $	*/
+/*	$OpenBSD: xlint.c,v 1.5 1997/04/04 18:41:36 deraadt Exp $	*/
 /*	$NetBSD: xlint.c,v 1.3 1995/10/23 14:29:30 jpo Exp $	*/
 
 /*
@@ -33,7 +33,7 @@
  */
 
 #ifndef lint
-static char rcsid[] = "$OpenBSD: xlint.c,v 1.3 1995/10/23 14:29:30 jpo Exp $";
+static char rcsid[] = "$OpenBSD: xlint.c,v 1.5 1997/04/04 18:41:36 deraadt Exp $";
 #endif
 
 #include <sys/param.h>
@@ -303,8 +303,8 @@ main(argc, argv)
 		tmpdir = s;
 	}
 
-	cppout = xmalloc(strlen(tmpdir) + sizeof ("lint0.XXXXXX"));
-	(void)sprintf(cppout, "%slint0.XXXXXX", tmpdir);
+	cppout = xmalloc(strlen(tmpdir) + sizeof ("lint0.XXXXXXXXXX"));
+	(void)sprintf(cppout, "%slint0.XXXXXXXXXX", tmpdir);
 	if (mktemp(cppout) == NULL) {
 		warn("can't make temp");
 		terminate(-1);
@@ -326,7 +326,7 @@ main(argc, argv)
 	appcstrg(&cppflags, "-$");
 	appcstrg(&cppflags, "-C");
 	appcstrg(&cppflags, "-Wcomment");
-	appcstrg(&cppflags, "-D__NetBSD__");
+	appcstrg(&cppflags, "-D__OpenBSD__");
 	appcstrg(&cppflags, "-Dlint");		/* XXX don't def. with -s */
 	appdef(&cppflags, "lint");
 	appdef(&cppflags, "unix");
@@ -556,8 +556,8 @@ fname(name, last)
 		(void)sprintf(ofn, "%.*s", (int)len, bn);
 		(void)strcat(ofn, ".ln");
 	} else {
-		ofn = xmalloc(strlen(tmpdir) + sizeof ("lint1.XXXXXX"));
-		(void)sprintf(ofn, "%slint1.XXXXXX", tmpdir);
+		ofn = xmalloc(strlen(tmpdir) + sizeof ("lint1.XXXXXXXXXX"));
+		(void)sprintf(ofn, "%slint1.XXXXXXXXXX", tmpdir);
 		if (mktemp(ofn) == NULL) {
 			warn("can't make temp");
 			terminate(-1);

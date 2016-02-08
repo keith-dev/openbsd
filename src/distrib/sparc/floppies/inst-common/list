@@ -1,4 +1,4 @@
-#	$Id: list,v 1.4.2.1 1996/10/11 22:27:32 niklas Exp $
+#	$OpenBSD: list,v 1.13 1997/05/11 22:47:33 grr Exp $
 
 # copy the crunched binary, link to it, and kill it
 COPY	${OBJDIR}/instbin	instbin
@@ -31,34 +31,36 @@ LINK	instbin			sbin/mknod
 LINK	instbin			sbin/mount
 LINK	instbin			sbin/mount_cd9660
 LINK	instbin			sbin/mount_ffs
-LINK	instbin			sbin/mount_msdos
+#LINK	instbin			sbin/mount_msdos
 LINK	instbin			sbin/mount_nfs
+LINK	instbin			sbin/mount_kernfs
 LINK	instbin			sbin/newfs
 LINK	instbin			sbin/ping
 LINK	instbin			sbin/reboot
 LINK	instbin			sbin/route
-LINK	instbin			sbin/shutdown
-LINK	instbin			sbin/slattach
+#LINK	instbin			sbin/shutdown
+#LINK	instbin			sbin/slattach
 LINK	instbin			sbin/umount
-SYMLINK	/bin/cat		usr/bin/awk
 SYMLINK	/bin/cat		usr/bin/chgrp
 SYMLINK	/bin/cat		usr/bin/ftp
 SYMLINK	/bin/cat		usr/bin/less
+SYMLINK	/bin/cat		usr/bin/getopt
 SYMLINK	/bin/cat		usr/bin/gzip
 SYMLINK	/bin/cat		usr/bin/more
 SYMLINK	/bin/cat		usr/bin/sed
-SYMLINK	/bin/cat		usr/bin/strings
-SYMLINK	/bin/cat		usr/bin/tip
+SYMLINK	/bin/cat		usr/bin/tset
+#SYMLINK /bin/cat		usr/bin/tip
 #SYMLINK /bin/cat		usr/sbin/bad144
 SYMLINK	/bin/cat		usr/sbin/chown
 SYMLINK	/bin/cat		usr/sbin/chroot
-SPECIAL	/bin/rm instbin
+SYMLINK	/bin/cat		usr/sbin/installboot
+# it's less confusing to leave instbin there and takes essentially no room.
+# SPECIAL	/bin/rm instbin
 SPECIAL sync
 
 # copy the MAKEDEV script and make some devices
-#COPY	${DESTDIR}/dev/MAKEDEV	dev/MAKEDEV
-SPECIAL	cd dev; sh ${DESTDIR}/dev/MAKEDEV std fd0
-#SPECIAL	/bin/rm dev/MAKEDEV
+COPY	${DESTDIR}/dev/MAKEDEV	dev/MAKEDEV
+SPECIAL	cd dev; sh ${DESTDIR}/dev/MAKEDEV floppy
 
 # we need the contents of /usr/mdec
 #COPY	/usr/mdec/boot	usr/mdec/boot
@@ -67,13 +69,15 @@ SPECIAL	cd dev; sh ${DESTDIR}/dev/MAKEDEV std fd0
 
 # various files that we need in /etc for the install
 COPY	${DESTDIR}/etc/group		etc/group
-COPY	${DESTDIR}/etc/master.passwd	etc/master.passwd
-COPY	${DESTDIR}/etc/passwd		etc/passwd
+#COPY	${DESTDIR}/etc/master.passwd	etc/master.passwd
+#COPY	${DESTDIR}/etc/passwd		etc/passwd
 COPY	${DESTDIR}/etc/protocols	etc/protocols
-COPY	${DESTDIR}/etc/pwd.db		etc/pwd.db
+#COPY	${DESTDIR}/etc/pwd.db		etc/pwd.db
 COPY	${DESTDIR}/etc/services		etc/services
-COPY	${DESTDIR}/etc/spwd.db		etc/spwd.db
+#COPY	${DESTDIR}/etc/spwd.db		etc/spwd.db
 
 # and the common installation tools
 COPY	${TOPDIR}/inst-common/dot.commonutils	.commonutils
-COPY	${TOPDIR}/inst-common/termcap.pc3	usr/share/misc/termcap
+# and a few useful bits of the termcap file (sun*, basic vt100, dumb, unknown)
+# COPY	${TOPDIR}/inst-common/termcap.pc3	usr/share/misc/termcap
+SPECIAL sed -n -e '/^dumb|/,/:[ 	]*$/p' -e '/^unknown|/,/:[ 	]*$/p' -e '/^sun.*|/,/:[ 	]*$/p' -e '/^vt100|/,/:[ 	]*$/p' ${CURDIR}/../../../../share/termcap/termcap.src > usr/share/misc/termcap

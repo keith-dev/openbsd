@@ -1,5 +1,5 @@
 #	from: @(#)Makefile	8.2 (Berkeley) 12/15/93
-#	$OpenBSD$
+#	$OpenBSD: Makefile,v 1.2 1996/03/19 23:15:46 niklas Exp $
 #	$NetBSD: Makefile,v 1.6 1996/02/24 01:15:15 jtk Exp $
 
 LIB=	telnet

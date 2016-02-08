@@ -1,5 +1,5 @@
 #!/bin/sh
-#	$OpenBSD: install.sh,v 1.15 1996/10/09 02:27:34 deraadt Exp $
+#	$OpenBSD: install.sh,v 1.18 1997/04/23 19:52:16 gvf Exp $
 #
 # Copyright (c) 1994 Christopher G. Demetriou
 # All rights reserved.
@@ -153,7 +153,7 @@ echo	""
 echo	"You will now need to provide some information about your disk's"
 echo	"geometry.  This should either be in the User's Manual for your disk,"
 echo	"or you should have written down what OpenBSD printed when booting."
-echo	"(Note that he geometry that's printed at boot time is preferred.)"
+echo	"(Note that the geometry that's printed at boot time is preferred.)"
 echo	""
 echo    "You may choose to view the initial boot messages for your system"
 echo    "again right now if you like."
@@ -171,20 +171,32 @@ esac
 echo	"You will now enter the disk geometry information"
 echo	""
 
-echo -n	"Number of bytes per disk sector? [512] "
-getresp 512
+bytes_per_sect=`cat /kern/msgbuf \
+	         | sed -n -e /^${drivename}:/p -e /^${drivename}:/q \
+	         | awk '{ print $9 }'`
+echo -n	"Number of bytes per disk sector? [$bytes_per_sect] "
+getresp $bytes_per_sect
 bytes_per_sect="$resp"
 
-echo -n "Number of disk cylinders? "
-getresp
+cyls_per_disk=`cat /kern/msgbuf \
+	       | sed -n -e /^${drivename}:/p -e /^${drivename}:/q \
+	       | awk '{ print $3 }'`
+echo -n "Number of disk cylinders? [$cyls_per_disk]"
+getresp $cyls_per_disk
 cyls_per_disk="$resp"
 
-echo -n	"Number of disk tracks (heads) per disk cylinder? "
-getresp
+tracks_per_cyl=`cat /kern/msgbuf \
+	        | sed -n -e /^${drivename}:/p -e /^${drivename}:/q \
+	        | awk '{ print $5 }'`
+echo -n	"Number of disk tracks (heads) per disk cylinder? [$tracks_per_cyl]"
+getresp $tracks_per_cyl
 tracks_per_cyl="$resp"
 
-echo -n	"Number of disk sectors per disk track? "
-getresp
+sects_per_track=`cat /kern/msgbuf \
+	         | sed -n -e /^${drivename}:/p -e /^${drivename}:/q \
+	         | awk '{ print $7 }'`
+echo -n	"Number of disk sectors per disk track? [$sects_per_track]"
+getresp $sects_per_track
 sects_per_track="$resp"
 
 cylindersize=`expr $sects_per_track \* $tracks_per_cyl`
@@ -293,6 +305,7 @@ echo	""
 
 fragsize=1024
 blocksize=8192
+$DONTDOIT fsck -t ffs /dev/rfd0a
 $DONTDOIT mount -u /dev/fd0a /
 cat /etc/disktab.preinstall > $DT
 echo	"" >> $DT

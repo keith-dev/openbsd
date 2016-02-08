@@ -1,4 +1,4 @@
-/*	$OpenBSD$	*/
+/*	$OpenBSD: defines.h,v 1.2 1996/03/27 19:33:00 niklas Exp $	*/
 /*	$NetBSD: defines.h,v 1.5 1996/02/28 21:03:55 thorpej Exp $	*/
 
 /*

@@ -38,7 +38,7 @@
 
 #if defined(LIBC_SCCS) 
 	.text
-	.asciz "$OpenBSD$"
+	.asciz "$OpenBSD: ldexp.S,v 1.4 1996/08/19 08:16:03 tholo Exp $"
 #endif /* LIBC_SCCS */
 
 #define DEXP_INF	0x7ff

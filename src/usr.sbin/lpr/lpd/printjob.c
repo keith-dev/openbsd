@@ -1,4 +1,4 @@
-/*	$OpenBSD: printjob.c,v 1.7 1996/09/21 07:55:35 deraadt Exp $ */
+/*	$OpenBSD: printjob.c,v 1.11 1997/04/04 18:41:44 deraadt Exp $ */
 /*	$NetBSD: printjob.c,v 1.9.4.3 1996/07/12 22:31:39 jtc Exp $	*/
 
 /*
@@ -111,7 +111,7 @@ static char	length[10] = "-l";	/* page length in lines */
 static char	logname[32];		/* user's login name */
 static char	pxlength[10] = "-y";	/* page length in pixels */
 static char	pxwidth[10] = "-x";	/* page width in pixels */
-static char	tempfile[] = "errsXXXXXX"; /* file name for filter output */
+static char	tempfile[] = "errsXXXXXXXXXX"; /* file name for filter output */
 static char	width[10] = "-w";	/* page width in static characters */
 
 static void       abortpr __P((int));
@@ -219,7 +219,7 @@ again:
 		errcnt = 0;
 	restart:
 		(void) lseek(lfd, pidoff, 0);
-		(void) sprintf(line, "%s\n", q->q_name);
+		(void) snprintf(line, sizeof line, "%s\n", q->q_name);
 		i = strlen(line);
 		if (write(lfd, line, i) != i)
 			syslog(LOG_ERR, "%s: %s: %m", printer, LO);
@@ -266,7 +266,7 @@ again:
 			syslog(LOG_WARNING, "%s: job could not be %s (%s)", printer,
 				remote ? "sent to remote host" : "printed", q->q_name);
 			if (i == REPRINT) {
-				/* insure we don't attempt this job again */
+				/* ensure we don't attempt this job again */
 				(void) unlink(q->q_name);
 				q->q_name[0] = 'd';
 				(void) unlink(q->q_name);
@@ -377,13 +377,17 @@ printit(file)
 	while (getline(cfp))
 		switch (line[0]) {
 		case 'H':
-			strcpy(fromhost, line+1);
-			if (class[0] == '\0')
+			strncpy(fromhost, line+1, sizeof(fromhost)-1);
+			fromhost[sizeof(fromhost)-1] = '\0';
+			if (class[0] == '\0') {
 				strncpy(class, line+1, sizeof(class)-1);
+				class[sizeof(class)-1] = '\0';
+			}
 			continue;
 
 		case 'P':
 			strncpy(logname, line+1, sizeof(logname)-1);
+			logname[sizeof(logname)-1] = '\0';
 			if (RS) {			/* restricted */
 				if (getpwnam(logname) == NULL) {
 					bombed = NOACCT;
@@ -407,9 +411,10 @@ printit(file)
 			continue;
 
 		case 'J':
-			if (line[1] != '\0')
+			if (line[1] != '\0') {
 				strncpy(jobname, line+1, sizeof(jobname)-1);
-			else
+				jobname[sizeof(jobname)-1] = '\0';
+			} else
 				strcpy(jobname, " ");
 			continue;
 
@@ -418,10 +423,12 @@ printit(file)
 				strncpy(class, line+1, sizeof(class)-1);
 			else if (class[0] == '\0')
 				gethostname(class, sizeof(class));
+			class[sizeof(class)-1] = '\0';
 			continue;
 
 		case 'T':	/* header title for pr */
 			strncpy(title, line+1, sizeof(title)-1);
+			title[sizeof(title)-1] = '\0';
 			continue;
 
 		case 'L':	/* identification line */
@@ -433,16 +440,21 @@ printit(file)
 		case '2':
 		case '3':
 		case '4':
-			if (line[1] != '\0')
-				strcpy(fonts[line[0]-'1'], line+1);
+			if (line[1] != '\0') {
+				strncpy(fonts[line[0]-'1'], line+1,
+				    50-1);
+				fonts[line[0]-'1'][50-1] = '\0';
+			}
 			continue;
 
 		case 'W':	/* page width */
 			strncpy(width+2, line+1, sizeof(width)-3);
+			width[2+sizeof(width)-3] = '\0';
 			continue;
 
 		case 'I':	/* indent amount */
 			strncpy(indent+2, line+1, sizeof(indent)-3);
+			indent[2+sizeof(indent)-3] = '\0';
 			continue;
 
 		default:	/* some file to print */
@@ -562,7 +574,7 @@ print(format, file)
 			dup2(fi, 0);		/* file is stdin */
 			dup2(p[1], 1);		/* pipe is stdout */
 			closelog();
-			for (n = 3, nofile = getdtablesize(); n < nofile; n++)
+			for (n = 3, nofile = sysconf(_SC_OPEN_MAX); n < nofile; n++)
 				(void) close(n);
 			execl(_PATH_PR, "pr", width, length,
 			    "-h", *title ? title : " ", 0);
@@ -651,7 +663,7 @@ print(format, file)
 		   printer, format);
 		return(ERROR);
 	}
-	if ((av[0] = rindex(prog, '/')) != NULL)
+	if ((av[0] = strrchr(prog, '/')) != NULL)
 		av[0]++;
 	else
 		av[0] = prog;
@@ -664,14 +676,14 @@ print(format, file)
 	fo = pfd;
 	if (ofilter > 0) {		/* stop output filter */
 		write(ofd, "\031\1", 2);
-		while ((pid =
-		    wait3((int *)&status, WUNTRACED, 0)) > 0 && pid != ofilter)
+		while ((pid = waitpid((pid_t)-1, (int *)&status, WUNTRACED)) > 0
+		    && pid != ofilter)
 			;
 		if (status.w_stopval != WSTOPPED) {
 			(void) close(fi);
 			syslog(LOG_WARNING,
-				"%s: output filter died (retcode=%d termsig=%d)",
-				printer, status.w_retcode, status.w_termsig);
+			    "%s: output filter died (retcode=%d termsig=%d)",
+			    printer, status.w_retcode, status.w_termsig);
 			return(REPRINT);
 		}
 		stopped++;
@@ -684,7 +696,7 @@ start:
 		if (n >= 0)
 			dup2(n, 2);
 		closelog();
-		for (n = 3, nofile = getdtablesize(); n < nofile; n++)
+		for (n = 3, nofile = sysconf(_SC_OPEN_MAX); n < nofile; n++)
 			(void) close(n);
 		execv(prog, av);
 		syslog(LOG_ERR, "cannot execv %s", prog);
@@ -844,7 +856,9 @@ sendfile(type, file)
 	if ((stb.st_mode & S_IFMT) == S_IFLNK && fstat(f, &stb) == 0 &&
 	    (stb.st_dev != fdev || stb.st_ino != fino))
 		return(ACCESS);
-	(void) sprintf(buf, "%c%qd %s\n", type, stb.st_size, file);
+	if (snprintf(buf, sizeof buf, "%c%qd %s\n", type,
+	    stb.st_size, file) > sizeof buf-1)
+		return (ACCESS);		/* XXX hack */
 	amt = strlen(buf);
 	for (i = 0;  ; i++) {
 		if (write(pfd, buf, amt) != amt ||
@@ -874,9 +888,6 @@ sendfile(type, file)
 			return(REPRINT);
 		}
 	}
-
-
-
 
 	(void) close(f);
 	if (sizerr) {
@@ -1043,13 +1054,13 @@ sendmail(user, bombed)
 	if ((s = dofork(DORETURN)) == 0) {		/* child */
 		dup2(p[0], 0);
 		closelog();
-		for (i = 3, nofile = getdtablesize(); i < nofile; i++)
+		for (i = 3, nofile = sysconf(_SC_OPEN_MAX); i < nofile; i++)
 			(void) close(i);
-		if ((cp = rindex(_PATH_SENDMAIL, '/')) != NULL)
+		if ((cp = strrchr(_PATH_SENDMAIL, '/')) != NULL)
 			cp++;
 	else
 			cp = _PATH_SENDMAIL;
-		sprintf(buf, "%s@%s", user, fromhost);
+		snprintf(buf, sizeof buf, "%s@%s", user, fromhost);
 		execl(_PATH_SENDMAIL, cp, buf, 0);
 		exit(0);
 	} else if (s > 0) {				/* parent */
@@ -1252,7 +1263,7 @@ openpr()
 	char *cp;
 
 	if (!remote && *LP) {
-		if (cp = index(LP, '@'))
+		if (cp = strchr(LP, '@'))
 			opennet(cp);
 		else
 			opentty();
@@ -1276,9 +1287,9 @@ openpr()
 			dup2(p[0], 0);		/* pipe is std in */
 			dup2(pfd, 1);		/* printer is std out */
 			closelog();
-			for (i = 3, nofile = getdtablesize(); i < nofile; i++)
+			for (i = 3, nofile = sysconf(_SC_OPEN_MAX); i < nofile; i++)
 				(void) close(i);
-			if ((cp = rindex(OF, '/')) == NULL)
+			if ((cp = strrchr(OF, '/')) == NULL)
 				cp = OF;
 			else
 				cp++;
@@ -1382,7 +1393,7 @@ openrem()
 		resp = -1;
 		pfd = getport(RM, 0);
 		if (pfd >= 0) {
-			(void) sprintf(line, "\2%s\n", RP);
+			(void) snprintf(line, sizeof line, "\2%s\n", RP);
 			n = strlen(line);
 			if (write(pfd, line, n) == n &&
 			    (resp = response()) == '\0')
@@ -1480,7 +1491,10 @@ setty()
 		p = strdup(MS);
 		ap = argv;
 		while ((val = strsep(&p, " \t,")) != NULL) {
-			*ap++ = strdup(val);
+			if ((*ap++ = strdup(val)) == NULL) {
+				syslog(LOG_ERR, "%s: strdup: %m", printer);
+				exit(1);
+			}
 		}
 
 		for (; *argv; ++argv) {

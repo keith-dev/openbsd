@@ -34,7 +34,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- *	$OpenBSD$
+ *	$OpenBSD: quad.h,v 1.2 1996/08/19 08:30:44 tholo Exp $
  */
 
 /*

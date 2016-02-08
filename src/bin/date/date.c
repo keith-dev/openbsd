@@ -1,4 +1,4 @@
-/*	$OpenBSD: date.c,v 1.11 1995/09/07 06:21:05 jtc Exp $	*/
+/*	$OpenBSD: date.c,v 1.4 1997/04/16 20:58:09 deraadt Exp $	*/
 /*	$NetBSD: date.c,v 1.11 1995/09/07 06:21:05 jtc Exp $	*/
 
 /*
@@ -44,7 +44,7 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)date.c	8.2 (Berkeley) 4/28/95";
 #else
-static char rcsid[] = "$OpenBSD: date.c,v 1.11 1995/09/07 06:21:05 jtc Exp $";
+static char rcsid[] = "$OpenBSD: date.c,v 1.4 1997/04/16 20:58:09 deraadt Exp $";
 #endif
 #endif /* not lint */
 
@@ -60,6 +60,7 @@ static char rcsid[] = "$OpenBSD: date.c,v 1.11 1995/09/07 06:21:05 jtc Exp $";
 #include <locale.h>
 #include <syslog.h>
 #include <unistd.h>
+#include <util.h>
 
 #include "extern.h"
 
@@ -69,8 +70,6 @@ int retval, nflag;
 static void setthetime __P((char *));
 static void badformat __P((void));
 static void usage __P((void));
-
-int logwtmp __P((char *, char *, char *));
 
 int
 main(argc, argv)
@@ -117,7 +116,7 @@ main(argc, argv)
 
 	/*
 	 * If -d or -t, set the timezone or daylight savings time; this
-	 * doesn't belong here, there kernel should not know about either.
+	 * doesn't belong here, the kernel should not know about either.
 	 */
 	if ((tz.tz_minuteswest || tz.tz_dsttime) &&
 	    settimeofday(NULL, &tz))

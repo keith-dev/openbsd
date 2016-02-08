@@ -34,7 +34,7 @@
 
 #if defined(LIBC_SCCS)
 	.text
-	.asciz "$OpenBSD$"
+	.asciz "$OpenBSD: setjmp.S,v 1.3 1996/08/19 08:11:45 tholo Exp $"
 #endif
 
 	.text
