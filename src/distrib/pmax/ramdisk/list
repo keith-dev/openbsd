@@ -1,11 +1,11 @@
 #
-#	$OpenBSD: list,v 1.1 1998/11/09 06:16:12 millert Exp $
+#	$OpenBSD: list,v 1.3 2000/07/15 02:21:01 deraadt Exp $
 #
 
 # copy the crunched binary, link to it, and kill it
 COPY	${OBJDIR}/raminst		raminst
 LINK	raminst			bin/cat
-LINK	raminst			bin/chmod
+LINK	raminst			bin/chmod bin/chgrp sbin/chown
 LINK	raminst			bin/cp
 LINK	raminst			bin/cpio
 LINK	raminst			bin/dd
@@ -39,7 +39,6 @@ LINK	raminst			sbin/newfs
 LINK	raminst			sbin/reboot
 LINK	raminst			sbin/route
 LINK	raminst			sbin/umount
-LINK	raminst			usr/bin/chgrp
 LINK	raminst			usr/bin/ftp
 LINK	raminst			usr/bin/egrep
 LINK	raminst			usr/bin/fgrep
@@ -49,7 +48,6 @@ LINK	raminst			usr/bin/less
 LINK	raminst			usr/bin/more
 LINK	raminst			usr/bin/sed
 LINK	raminst			usr/bin/pax
-LINK	raminst			usr/sbin/chown
 SPECIAL	/bin/rm raminst
 
 # copy the MAKEDEV script and make some devices

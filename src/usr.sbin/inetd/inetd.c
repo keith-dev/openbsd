@@ -1,4 +1,4 @@
-/*	$OpenBSD: inetd.c,v 1.61 2000/03/04 01:10:06 deraadt Exp $	*/
+/*	$OpenBSD: inetd.c,v 1.69 2000/08/22 14:47:54 millert Exp $	*/
 /*	$NetBSD: inetd.c,v 1.11 1996/02/22 11:14:41 mycroft Exp $	*/
 /*
  * Copyright (c) 1983,1991 The Regents of the University of California.
@@ -41,7 +41,7 @@ char copyright[] =
 
 #ifndef lint
 /*static char sccsid[] = "from: @(#)inetd.c	5.30 (Berkeley) 6/3/91";*/
-static char rcsid[] = "$OpenBSD: inetd.c,v 1.61 2000/03/04 01:10:06 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: inetd.c,v 1.69 2000/08/22 14:47:54 millert Exp $";
 #endif /* not lint */
 
 /*
@@ -163,8 +163,10 @@ static char rcsid[] = "$OpenBSD: inetd.c,v 1.61 2000/03/04 01:10:06 deraadt Exp 
 #include <stdlib.h>
 #include <unistd.h>
 #include <string.h>
+#include <login_cap.h>
 #include <rpc/rpc.h>
 #include <rpc/pmap_clnt.h>
+#include <rpcsvc/nfs_prot.h>
 #include "pathnames.h"
 
 #define	TOOMANY		256		/* don't start more than TOOMANY */
@@ -225,11 +227,13 @@ struct	servtab {
 		struct	sockaddr_in se_un_ctrladdr_in;
 		struct	sockaddr_in6 se_un_ctrladdr_in6;
 		struct	sockaddr_un se_un_ctrladdr_un;
+		struct	sockaddr_storage se_un_ctrladdr_storage;
 	} se_un;			/* bound address */
 #define se_ctrladdr	se_un.se_un_ctrladdr
 #define se_ctrladdr_in	se_un.se_un_ctrladdr_in
 #define se_ctrladdr_in6	se_un.se_un_ctrladdr_in6
 #define se_ctrladdr_un	se_un.se_un_ctrladdr_un
+#define se_ctrladdr_storage	se_un.se_un_ctrladdr_storage
 	int	se_ctrladdr_size;
 	int	se_max;			/* max # of instances of this service */
 	int	se_count;		/* number started since se_time */
@@ -557,19 +561,21 @@ main(argc, argv, envp)
 					/* a user running private inetd */
 					if (uid != pwd->pw_uid)
 						_exit(1);
-				} else if (pwd->pw_uid) {
-					if (setlogin(sep->se_user) < 0)
-						syslog(LOG_ERR,
-						    "%s: setlogin: %m",
-						    sep->se_service);
-					if (sep->se_group)
+				} else {
+					tmpint = LOGIN_SETALL &
+					    ~(LOGIN_SETGROUP|LOGIN_SETLOGIN);
+					if (pwd->pw_uid)
+						tmpint |= LOGIN_SETGROUP|LOGIN_SETLOGIN;
+					if (sep->se_group) {
 						pwd->pw_gid = grp->gr_gid;
-					(void) setgid((gid_t)pwd->pw_gid);
-					initgroups(pwd->pw_name, pwd->pw_gid);
-					(void) setuid((uid_t)pwd->pw_uid);
-				} else if (sep->se_group) {
-					(void) setgid(grp->gr_gid);
-					(void) setgroups(1, &grp->gr_gid);
+						tmpint |= LOGIN_SETGROUP;
+					}
+					if (setusercontext(0, pwd, pwd->pw_uid,
+					    tmpint) < 0)
+						syslog(LOG_ERR,
+						    "%s/%s: setusercontext: %m",
+						    sep->se_service,
+						    sep->se_proto);
 				}
 				if (debug)
 					fprintf(stderr, "%d execl %s\n",
@@ -582,13 +588,6 @@ main(argc, argv, envp)
 				close(ctrl);
 				dup2(0, 1);
 				dup2(0, 2);
-#ifdef RLIMIT_NOFILE
-				if (rlim_ofile.rlim_cur != rlim_ofile_cur) {
-					if (setrlimit(RLIMIT_NOFILE,
-					    &rlim_ofile) < 0)
-						syslog(LOG_ERR,"setrlimit: %m");
-				}
-#endif
 				closelog();
 				for (tmpint = rlim_ofile_cur-1; --tmpint > 2; )
 					(void)close(tmpint);
@@ -607,15 +606,60 @@ main(argc, argv, envp)
 }
 
 int
-dg_badinput(sin)
-	struct sockaddr_in *sin;
+dg_badinput(sa)
+	struct sockaddr *sa;
 {
-	if (ntohs(sin->sin_port) < IPPORT_RESERVED)
-		return (1);
-	if (sin->sin_addr.s_addr == htonl(INADDR_BROADCAST))
-		return (1);
-	/* XXX compare against broadcast addresses in SIOCGIFCONF list? */
+	struct in_addr in;
+#ifdef INET6
+	struct in6_addr *in6;
+#endif
+	u_int16_t port;
+	int i;
+
+	switch (sa->sa_family) {
+	case AF_INET:
+		in.s_addr = ntohl(((struct sockaddr_in *)sa)->sin_addr.s_addr);
+		port = ntohs(((struct sockaddr_in *)sa)->sin_port);
+	v4chk:
+		if (IN_MULTICAST(in.s_addr))
+			goto bad;
+		switch ((in.s_addr & 0xff000000) >> 24) {
+		case 0: case 127: case 255:
+			goto bad;
+		}
+		/* XXX check for subnet broadcast using getifaddrs(3) */
+		break;
+#ifdef INET6
+	case AF_INET6:
+		in6 = &((struct sockaddr_in6 *)sa)->sin6_addr;
+		port = ntohs(((struct sockaddr_in6 *)sa)->sin6_port);
+		if (IN6_IS_ADDR_MULTICAST(in6) || IN6_IS_ADDR_UNSPECIFIED(in6))
+			goto bad;
+		/*
+		 * OpenBSD does not support IPv4 mapped adderss (RFC2553
+		 * inbound behavior) at all.  We should drop it.
+		 */
+		if (IN6_IS_ADDR_V4MAPPED(in6))
+			goto bad;
+		if (IN6_IS_ADDR_V4COMPAT(in6)) {
+			memcpy(&in, &in6->s6_addr[12], sizeof(in));
+			in.s_addr = ntohl(in.s_addr);
+			goto v4chk;
+		}
+		break;
+#endif
+	default:
+		/* XXX unsupported af, is it safe to assume it to be safe? */
+		return 0;
+	}
+
+	if (port < IPPORT_RESERVED || port == NFS_PORT)
+		goto bad;
+
 	return (0);
+
+bad:
+	return (1);
 }
 
 void
@@ -1117,6 +1161,10 @@ matchconf (old, new)
 	    &new->se_ctrladdr_in6.sin6_addr,
 	    sizeof(new->se_ctrladdr_in6.sin6_addr)) != 0)
 		return (0);
+	if (old->se_family == AF_INET6 && new->se_family == AF_INET6 &&
+	    old->se_ctrladdr_in6.sin6_scope_id !=
+	    new->se_ctrladdr_in6.sin6_scope_id)
+		return (0);
 
 	return (1);
 }
@@ -1223,7 +1271,11 @@ more:
 	hostdelim = strrchr(arg, ':');
 	if (hostdelim) {
 		*hostdelim = '\0';
-		sep->se_hostaddr = newstr(arg);
+		if (arg[0] == '[' && hostdelim > arg && hostdelim[-1] == ']') {
+			hostdelim[-1] = '\0';
+			sep->se_hostaddr = newstr(arg + 1);
+		} else
+			sep->se_hostaddr = newstr(arg);
 		arg = hostdelim + 1;
 		/*
 		 * If the line is of the form `host:', then just change the
@@ -1400,55 +1452,73 @@ more:
 	nsep = sep;
 	while (nsep != NULL) {
 		nsep->se_checked = 1;
-		if (nsep->se_family == AF_INET) {
-			if (!strcmp(nsep->se_hostaddr,"*"))
-				nsep->se_ctrladdr_in.sin_addr.s_addr =
-				    INADDR_ANY;
-			else if (!inet_aton(nsep->se_hostaddr,
-			    &nsep->se_ctrladdr_in.sin_addr)) {
-				struct hostent *hp;
+		switch (nsep->se_family) {
+		case AF_INET:
+		case AF_INET6:
+		    {
+			struct addrinfo hints, *res0, *res;
+			char *host, *port;
+			int error;
+			int s;
 
-				hp = gethostbyname(nsep->se_hostaddr);
-				if (hp == 0) {
-					syslog(LOG_ERR, "%s: unknown host",
-					    nsep->se_hostaddr);
-					nsep->se_checked = 0;
-					goto skip;
-				} else if (hp->h_addrtype != AF_INET) {
-					syslog(LOG_ERR,
-					    "%s: address isn't an Internet "
-					    "address",
-					    nsep->se_hostaddr);
-					nsep->se_checked = 0;
-					goto skip;
-				} else {
-					int i = 1;
-
-					memmove(&nsep->se_ctrladdr_in.sin_addr,
-					    hp->h_addr_list[0],
-					    sizeof(struct in_addr));
-					while (hp->h_addr_list[i] != NULL) {
-						psep = dupconfig(nsep);
-						psep->se_hostaddr = newstr(
-						    nsep->se_hostaddr);
-						psep->se_checked = 1;
-						memmove(&psep->se_ctrladdr_in.sin_addr,
-						    hp->h_addr_list[i],
-						    sizeof(struct in_addr));
-						psep->se_ctrladdr_size =
-						    sizeof(psep->se_ctrladdr_in);
-						i++;
-
-						/*
-						 * Prepend to list, don't
-						 * want to look up its
-						 * hostname again.
-						 */
-						psep->se_next = sep;
-						sep = psep;
-					}
-				}
+			/* check if the family is supported */
+			s = socket(nsep->se_family, SOCK_DGRAM, 0);
+			if (s < 0) {
+				syslog(LOG_WARNING,
+"%s/%s: %s: the address family is not supported by the kernel",
+				    nsep->se_service, nsep->se_proto,
+				    nsep->se_hostaddr);
+				nsep->se_checked = 0;
+				goto skip;
 			}
+			close(s);
+
+			memset(&hints, 0, sizeof(hints));
+			hints.ai_family = nsep->se_family;
+			hints.ai_socktype = nsep->se_socktype;
+			hints.ai_flags = AI_PASSIVE;
+			if (!strcmp(nsep->se_hostaddr, "*"))
+				host = NULL;
+			else
+				host = nsep->se_hostaddr;
+			port = "0";
+			/* XXX shortened IPv4 syntax is now forbidden */
+			error = getaddrinfo(host, port, &hints, &res0);
+			if (error) {
+				syslog(LOG_ERR, "%s/%s: %s: %s",
+				    nsep->se_service, nsep->se_proto,
+				    nsep->se_hostaddr,
+				    gai_strerror(error));
+				nsep->se_checked = 0;
+				goto skip;
+			}
+			for (res = res0; res; res = res->ai_next) {
+				if (res->ai_addrlen >
+				    sizeof(nsep->se_ctrladdr_storage))
+					continue;
+				if (res == res0) {
+					memcpy(&nsep->se_ctrladdr_storage,
+					    res->ai_addr, res->ai_addrlen);
+					continue;
+				}
+
+				psep = dupconfig(nsep);
+				psep->se_hostaddr = newstr(nsep->se_hostaddr);
+				psep->se_checked = 1;
+				memcpy(&psep->se_ctrladdr_storage, res->ai_addr,
+				    res->ai_addrlen);
+				psep->se_ctrladdr_size = res->ai_addrlen;
+
+				/*
+				 * Prepend to list, don't want to look up its
+				 * hostname again.
+				 */
+				psep->se_next = sep;
+				sep = psep;
+			}
+			freeaddrinfo(res0);
+			break;
+		    }
 		}
 skip:
 		nsep = nsep->se_next;
@@ -1714,14 +1784,15 @@ echo_dg(s, sep)			/* Echo service -- echo data back */
 {
 	char buffer[BUFSIZE];
 	int i, size;
-	struct sockaddr sa;
+	struct sockaddr_storage ss;
 
-	size = sizeof(sa);
-	if ((i = recvfrom(s, buffer, sizeof(buffer), 0, &sa, &size)) < 0)
+	size = sizeof(ss);
+	if ((i = recvfrom(s, buffer, sizeof(buffer), 0, (struct sockaddr *)&ss,
+	    &size)) < 0)
 		return;
-	if (dg_badinput((struct sockaddr_in *)&sa))
+	if (dg_badinput((struct sockaddr *)&ss))
 		return;
-	(void) sendto(s, buffer, i, 0, &sa, sizeof(sa));
+	(void) sendto(s, buffer, i, 0, (struct sockaddr *)&ss, size);
 }
 
 /* ARGSUSED */
@@ -1807,7 +1878,7 @@ chargen_dg(s, sep)		/* Character generator */
 	int s;
 	struct servtab *sep;
 {
-	struct sockaddr sa;
+	struct sockaddr_storage ss;
 	static char *rs;
 	int len, size;
 	char text[LINESIZ+2];
@@ -1817,10 +1888,11 @@ chargen_dg(s, sep)		/* Character generator */
 		rs = ring;
 	}
 
-	size = sizeof(sa);
-	if (recvfrom(s, text, sizeof(text), 0, &sa, &size) < 0)
+	size = sizeof(ss);
+	if (recvfrom(s, text, sizeof(text), 0, (struct sockaddr *)&ss,
+	    &size) < 0)
 		return;
-	if (dg_badinput((struct sockaddr_in *)&sa))
+	if (dg_badinput((struct sockaddr *)&ss))
 		return;
 
 	if ((len = endring - rs) >= LINESIZ)
@@ -1833,7 +1905,7 @@ chargen_dg(s, sep)		/* Character generator */
 		rs = ring;
 	text[LINESIZ] = '\r';
 	text[LINESIZ + 1] = '\n';
-	(void) sendto(s, text, sizeof(text), 0, &sa, sizeof(sa));
+	(void) sendto(s, text, sizeof(text), 0, (struct sockaddr *)&ss, size);
 }
 
 /*
@@ -1875,19 +1947,18 @@ machtime_dg(s, sep)
 	struct servtab *sep;
 {
 	u_int result;
-	struct sockaddr sa;
-	struct sockaddr_in *sin;
+	struct sockaddr_storage ss;
 	int size;
 
-	size = sizeof(sa);
-	if (recvfrom(s, (char *)&result, sizeof(result), 0, &sa, &size) < 0)
+	size = sizeof(ss);
+	if (recvfrom(s, (char *)&result, sizeof(result), 0,
+	    (struct sockaddr *)&ss, &size) < 0)
 		return;
-	sin = (struct sockaddr_in *)&sa;
-	if (sin->sin_addr.s_addr == htonl(INADDR_BROADCAST) || 
-	    ntohs(sin->sin_port) < IPPORT_RESERVED/2)
+	if (dg_badinput((struct sockaddr *)&ss))
 		return;
 	result = machtime();
-	(void) sendto(s, (char *) &result, sizeof(result), 0, &sa, sizeof(sa));
+	(void) sendto(s, (char *) &result, sizeof(result), 0,
+	    (struct sockaddr *)&ss, size);
 }
 
 /* ARGSUSED */
@@ -1913,18 +1984,20 @@ daytime_dg(s, sep)		/* Return human-readable time of day */
 {
 	char buffer[256];
 	time_t time(), clock;
-	struct sockaddr sa;
+	struct sockaddr_storage ss;
 	int size;
 
 	clock = time((time_t *) 0);
 
-	size = sizeof(sa);
-	if (recvfrom(s, buffer, sizeof(buffer), 0, &sa, &size) < 0)
+	size = sizeof(ss);
+	if (recvfrom(s, buffer, sizeof(buffer), 0, (struct sockaddr *)&ss,
+	    &size) < 0)
 		return;
-	if (dg_badinput((struct sockaddr_in *)&sa))
+	if (dg_badinput((struct sockaddr *)&ss))
 		return;
 	(void) sprintf(buffer, "%.24s\r\n", ctime(&clock));
-	(void) sendto(s, buffer, strlen(buffer), 0, &sa, sizeof(sa));
+	(void) sendto(s, buffer, strlen(buffer), 0, (struct sockaddr *)&ss,
+	    size);
 }
 
 /*

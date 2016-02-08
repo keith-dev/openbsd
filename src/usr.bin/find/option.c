@@ -1,4 +1,4 @@
-/*	$OpenBSD: option.c,v 1.9 1999/12/04 22:42:32 millert Exp $	*/
+/*	$OpenBSD: option.c,v 1.12 2000/07/08 16:09:34 millert Exp $	*/
 
 /*-
  * Copyright (c) 1990, 1993
@@ -38,7 +38,7 @@
 
 #ifndef lint
 /*static char sccsid[] = "from: @(#)option.c	8.1 (Berkeley) 6/6/93";*/
-static char rcsid[] = "$OpenBSD: option.c,v 1.9 1999/12/04 22:42:32 millert Exp $";
+static char rcsid[] = "$OpenBSD: option.c,v 1.12 2000/07/08 16:09:34 millert Exp $";
 #endif /* not lint */
 
 #include <sys/types.h>
@@ -59,8 +59,8 @@ static OPTION options[] = {
 	{ ")",		N_CLOSEPAREN,	c_closeparen,	O_ZERO },
 	{ "-a",		N_AND,		NULL,		O_NONE },
 	{ "-amin",	N_AMIN,		c_amin,		O_ARGV },
-	{ "-anewer",	N_ANEWER,	c_anewer,	O_ARGV },
 	{ "-and",	N_AND,		NULL,		O_NONE },
+	{ "-anewer",	N_ANEWER,	c_anewer,	O_ARGV },
 	{ "-atime",	N_ATIME,	c_atime,	O_ARGV },
 	{ "-cmin",	N_CMIN,		c_cmin,		O_ARGV },
 	{ "-cnewer",	N_CNEWER,	c_cnewer,	O_ARGV },
@@ -69,9 +69,11 @@ static OPTION options[] = {
 	{ "-empty",	N_EMPTY,	c_empty,	O_ZERO },
 	{ "-exec",	N_EXEC,		c_exec,		O_ARGVP },
 	{ "-execdir",	N_EXECDIR,	c_execdir,	O_ARGVP },
+	{ "-flags",	N_FLAGS,	c_flags,	O_ARGV },
 	{ "-follow",	N_FOLLOW,	c_follow,	O_ZERO },
 	{ "-fstype",	N_FSTYPE,	c_fstype,	O_ARGV },
 	{ "-group",	N_GROUP,	c_group,	O_ARGV },
+	{ "-iname",	N_INAME,	c_iname,	O_ARGV },
 	{ "-inum",	N_INUM,		c_inum,		O_ARGV },
 	{ "-links",	N_LINKS,	c_links,	O_ARGV },
 	{ "-ls",	N_LS,		c_ls,		O_ZERO },

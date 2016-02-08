@@ -1,4 +1,4 @@
-/*	$OpenBSD: lib_tracebits.c,v 1.5 2000/03/10 01:35:05 millert Exp $	*/
+/*	$OpenBSD: lib_tracebits.c,v 1.7 2000/10/08 22:47:04 millert Exp $	*/
 
 /****************************************************************************
  * Copyright (c) 1998,1999,2000 Free Software Foundation, Inc.              *
@@ -36,9 +36,9 @@
 #include <curses.priv.h>
 #include <term.h>		/* cur_term */
 
-MODULE_ID("$From: lib_tracebits.c,v 1.5 2000/02/13 01:01:55 tom Exp $")
+MODULE_ID("$From: lib_tracebits.c,v 1.7 2000/09/02 18:08:37 tom Exp $")
 
-#if defined(SVR4_TERMIO) && !defined(_POSIX_SOURCE)
+#if SVR4_TERMIO && !defined(_POSIX_SOURCE)
 #define _POSIX_SOURCE
 #endif
 
@@ -155,30 +155,41 @@ _nc_tracebits(void)
 	lookup_bits(buf, cflags, "cflags", cur_term->Nttyb.c_cflag);
 
 #if defined(CS5) && defined(CS8)
-    switch (cur_term->Nttyb.c_cflag & CSIZE) {
-#if defined(CS5) && (CS5 != 0)
-    case CS5:
-	strcat(buf, "CS5 ");
-	break;
+    {
+	static struct {
+	    char *name;
+	    int value;
+	} csizes[] = {
+	    {
+		"CS5 ", CS5
+	    },
+#ifdef CS6
+	    {
+		"CS6 ", CS6
+	    },
 #endif
-#if defined(CS6) && (CS6 != 0)
-    case CS6:
-	strcat(buf, "CS6 ");
-	break;
+#ifdef CS7
+	    {
+		"CS7 ", CS7
+	    },
 #endif
-#if defined(CS7) && (CS7 != 0)
-    case CS7:
-	strcat(buf, "CS7 ");
-	break;
-#endif
-#if defined(CS8) && (CS8 != 0)
-    case CS8:
-	strcat(buf, "CS8 ");
-	break;
-#endif
-    default:
-	strcat(buf, "CSIZE? ");
-	break;
+	    {
+		"CS8 ", CS8
+	    },
+	};
+	char *result = "CSIZE? ";
+	int value = (cur_term->Nttyb.c_cflag & CSIZE);
+	unsigned n;
+
+	if (value != 0) {
+	    for (n = 0; n < SIZEOF(csizes); n++) {
+		if (csizes[n].value == value) {
+		    result = csizes[n].name;
+		    break;
+		}
+	    }
+	}
+	strcat(buf, result);
     }
 #endif
 

@@ -1,4 +1,4 @@
-/*  $OpenBSD: environment.c,v 1.9 1999/10/26 22:31:38 angelos Exp $ */
+/* $OpenBSD: environment.c,v 1.15 2000/10/03 01:33:56 angelos Exp $ */
 /*
  * The author of this code is Angelos D. Keromytis (angelos@dsl.cis.upenn.edu)
  *
@@ -209,7 +209,8 @@ keynote_free_env(struct environment *en)
  * argument specifies case-insensitivity.
  */
 char *
-keynote_env_lookup(char *name, struct environment **table, u_int hashsize)
+keynote_env_lookup(char *name, struct environment **table,
+                   unsigned int hashsize)
 {
     struct environment *en;
 
@@ -235,10 +236,11 @@ keynote_env_lookup(char *name, struct environment **table, u_int hashsize)
  * successful, and RESULT_FALSE if the variable was not found.
  */
 int
-keynote_env_delete(char *name, struct environment **table, u_int hashsize)
+keynote_env_delete(char *name, struct environment **table,
+                   unsigned int hashsize)
 {
     struct environment *en, *en2;
-    u_int h;
+    unsigned int h;
     
     h = keynote_stringhash(name, hashsize);
     
@@ -274,10 +276,10 @@ keynote_env_delete(char *name, struct environment **table, u_int hashsize)
  */
 int
 keynote_env_add(char *name, char *value, struct environment **table,
-		u_int hashsize, int flags)
+		unsigned int hashsize, int flags)
 {
     struct environment *en;
-    u_int h, i;
+    unsigned int h, i;
     
     en = calloc(1, sizeof(struct environment));
     if (en == (struct environment *) NULL)
@@ -344,7 +346,7 @@ keynote_env_add(char *name, char *value, struct environment **table,
  * Cleanup an environment table.
  */
 void
-keynote_env_cleanup(struct environment **table, u_int hashsize)
+keynote_env_cleanup(struct environment **table, unsigned int hashsize)
 {
     struct environment *en2;
 
@@ -370,21 +372,6 @@ keynote_env_cleanup(struct environment **table, u_int hashsize)
 static int
 keynote_init_environment(void)
 {
-#ifdef CRYPTO
-    int cnt = KEYNOTE_RAND_INIT_LEN, i;
-
-    do
-    {
-        if ((i = RAND_load_file(KEYNOTERNDFILENAME, cnt)) <= 0)
-        {
-            keynote_errno = ERROR_MEMORY;
-	    return -1;
-        }
-    
-        cnt -= i;   
-    } while (cnt > 0);
-#endif /* CRYPTO */
-
     memset(keynote_current_session->ks_env_table, 0,
 	   HASHTABLESIZE * sizeof(struct environment *));
     memset(keynote_current_session->ks_assertion_table, 0,
@@ -935,7 +922,7 @@ kn_read_asserts(char *buffer, int bufferlen, int *numassertions)
 	else
 	  flag = 0;
 
-	if (!isspace(buffer[i]))
+	if (!isspace((int) buffer[i]))
 	  valid = 1;
     }
 
@@ -970,7 +957,7 @@ kn_get_authorizer(int sessid, int assertid, int *algorithm)
     struct assertion *as;
     int i;
 
-    keynote_errno = 0;
+    keynote_errno = *algorithm = 0;
     if ((keynote_current_session == (struct keynote_session *) NULL) ||
 	(keynote_current_session->ks_id != sessid))
     {
@@ -988,13 +975,18 @@ kn_get_authorizer(int sessid, int assertid, int *algorithm)
 	   as != (struct assertion *) NULL;
 	   as = as->as_next)
 	if (as->as_id == assertid)
-	  break;
+	  goto out;
 
+ out:
     if (as == (struct assertion *) NULL)
     {
 	keynote_errno = ERROR_NOTFOUND;
 	return (void *) NULL;
     }
+
+    if (as->as_authorizer == NULL)
+      if (keynote_evaluate_authorizer(as, 1) != RESULT_TRUE)
+	return NULL;
 
     *algorithm = as->as_signeralgorithm;
     return as->as_authorizer;
@@ -1027,13 +1019,18 @@ kn_get_licensees(int sessid, int assertid)
 	   as != (struct assertion *) NULL;
 	   as = as->as_next)
 	if (as->as_id == assertid)
-	  break;
+	  goto out;
 
+ out:
     if (as == (struct assertion *) NULL)
     {
 	keynote_errno = ERROR_NOTFOUND;
 	return (struct keynote_keylist *) NULL;
     }
+
+    if (as->as_keylist == NULL)
+      if (keynote_parse_keypred(as, 1) != RESULT_TRUE)
+	return (struct keynote_keylist *) NULL;
 
     return (struct keynote_keylist *) as->as_keylist;
 }

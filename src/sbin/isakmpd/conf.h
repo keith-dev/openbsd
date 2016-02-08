@@ -1,8 +1,9 @@
-/*	$OpenBSD: conf.h,v 1.10 2000/05/02 14:37:00 niklas Exp $	*/
-/*	$EOM: conf.h,v 1.11 2000/05/01 20:57:33 niklas Exp $	*/
+/*	$OpenBSD: conf.h,v 1.12 2000/10/07 07:00:06 niklas Exp $	*/
+/*	$EOM: conf.h,v 1.13 2000/09/18 00:01:47 ho Exp $	*/
 
 /*
  * Copyright (c) 1998, 1999 Niklas Hallqvist.  All rights reserved.
+ * Copyright (c) 2000 Håkan Olsson.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -62,6 +63,7 @@
 #define CONF_DFLT_X509_CERT_DIR        "/etc/isakmpd/certs/"
 #define CONF_DFLT_X509_PRIVATE_KEY     "/etc/isakmpd/private/local.key"
 
+#define CONF_DFLT_KEYNOTE_CRED_DIR     "/etc/isakmpd/keynote/"
 struct conf_list_node {
   TAILQ_ENTRY (conf_list_node) link;
   char *field;

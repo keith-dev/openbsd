@@ -1,5 +1,5 @@
-/*	$OpenBSD: transport.c,v 1.10 2000/02/25 17:23:42 niklas Exp $	*/
-/*	$EOM: transport.c,v 1.41 2000/02/20 19:58:42 niklas Exp $	*/
+/*	$OpenBSD: transport.c,v 1.12 2000/10/10 13:35:12 niklas Exp $	*/
+/*	$EOM: transport.c,v 1.43 2000/10/10 12:36:39 provos Exp $	*/
 
 /*
  * Copyright (c) 1998, 1999 Niklas Hallqvist.  All rights reserved.
@@ -276,9 +276,11 @@ transport_send_messages (fd_set *fds)
 			    "transport_send_messages: message %p "
 			    "scheduled for retransmission %d in %d secs",
 			    msg, msg->xmits, expiry));
+		  if (msg->retrans)
+		    timer_remove_event (msg->retrans);
 		  msg->retrans
-		    = timer_add_event ("message_send",
-				       (void (*) (void *))message_send,
+		    = timer_add_event ("message_send_expire",
+				       (void (*) (void *))message_send_expire,
 				       msg, &expiration);
 		  /* If we cannot retransmit, we cannot...  */
 		  exchange->last_sent = msg->retrans ? msg : 0;

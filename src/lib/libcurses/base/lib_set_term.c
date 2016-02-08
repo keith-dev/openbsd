@@ -1,4 +1,4 @@
-/*	$OpenBSD: lib_set_term.c,v 1.8 2000/03/26 16:45:03 millert Exp $	*/
+/*	$OpenBSD: lib_set_term.c,v 1.11 2000/10/08 22:46:59 millert Exp $	*/
 
 /****************************************************************************
  * Copyright (c) 1998,1999,2000 Free Software Foundation, Inc.              *
@@ -45,7 +45,7 @@
 #include <term.h>		/* cur_term */
 #include <tic.h>
 
-MODULE_ID("$From: lib_set_term.c,v 1.51 2000/03/26 01:03:36 tom Exp $")
+MODULE_ID("$From: lib_set_term.c,v 1.58 2000/10/04 22:05:48 tom Exp $")
 
 SCREEN *
 set_term(SCREEN * screenp)
@@ -111,6 +111,18 @@ delscreen(SCREEN * sp)
 
     del_curterm(sp->_term);
 
+    /*
+     * If the associated output stream has been closed, we can discard the
+     * set-buffer.  Limit the error check to EBADF, since fflush may fail
+     * for other reasons than trying to operate upon a closed stream.
+     */
+    if (sp->_ofp != 0
+	&& sp->_setbuf != 0
+	&& fflush(sp->_ofp) != 0
+	&& errno == EBADF) {
+	free(sp->_setbuf);
+    }
+
     free(sp);
 
     /*
@@ -138,24 +150,48 @@ no_mouse_event(SCREEN * sp GCC_UNUSED)
 {
     return FALSE;
 }
+
 static bool
 no_mouse_inline(SCREEN * sp GCC_UNUSED)
 {
     return FALSE;
 }
+
 static bool
 no_mouse_parse(int code GCC_UNUSED)
 {
     return TRUE;
 }
+
 static void
 no_mouse_resume(SCREEN * sp GCC_UNUSED)
 {
 }
+
 static void
 no_mouse_wrap(SCREEN * sp GCC_UNUSED)
 {
 }
+
+#if NCURSES_EXT_FUNCS && USE_COLORFGBG
+static char *
+extract_fgbg(char *src, int *result)
+{
+    char *dst = 0;
+    long value = strtol(src, &dst, 0);
+
+    if (dst == 0) {
+	dst = src;
+    } else if (value >= 0) {
+	*result = value % max_colors;
+    }
+    while (*dst != 0 && *dst != ';')
+	dst++;
+    if (*dst == ';')
+	dst++;
+    return dst;
+}
+#endif
 
 int
 _nc_setupscreen(short slines, short const scolumns, FILE * output)
@@ -186,15 +222,58 @@ _nc_setupscreen(short slines, short const scolumns, FILE * output)
     SP->_endwin = TRUE;
     SP->_ofp = output;
     SP->_cursor = -1;		/* cannot know real cursor shape */
-#ifdef NCURSES_NO_PADDING
+
+#if NCURSES_NO_PADDING
     SP->_no_padding = getenv("NCURSES_NO_PADDING") != 0;
+    TR(TRACE_CHARPUT | TRACE_MOVE, ("padding will%s be used",
+	    SP->_no_padding ? " not" : ""));
 #endif
-#ifdef NCURSES_EXT_FUNCS
+
+#if NCURSES_EXT_FUNCS
     SP->_default_color = FALSE;
     SP->_has_sgr_39_49 = FALSE;
+
+    /*
+     * Set our assumption of the terminal's default foreground and background
+     * colors.  The curs_color man-page states that we can assume that the
+     * background is black.  The origin of this assumption appears to be
+     * terminals that displayed colored text, but no colored backgrounds, e.g.,
+     * the first colored terminals around 1980.  More recent ones with better
+     * technology can display not only colored backgrounds, but all
+     * combinations.  So a terminal might be something other than "white" on
+     * black (green/black looks monochrome too), but black on white or even
+     * on ivory.
+     *
+     * White-on-black is the simplest thing to use for monochrome.  Almost
+     * all applications that use color paint both text and background, so
+     * the distinction is moot.  But a few do not - which is why we leave this
+     * configurable (a better solution is to use assume_default_colors() for
+     * the rare applications that do require that sort of appearance, since
+     * is appears that more users expect to be able to make a white-on-black
+     * or black-on-white display under control of the application than not).
+     */
+#ifdef USE_ASSUMED_COLOR
     SP->_default_fg = COLOR_WHITE;
     SP->_default_bg = COLOR_BLACK;
+#else
+    SP->_default_fg = C_MASK;
+    SP->_default_bg = C_MASK;
 #endif
+
+#if USE_COLORFGBG
+    /*
+     * If rxvt's $COLORFGBG variable is set, use it to specify the assumed
+     * default colors.  Note that rxvt (mis)uses bold colors, equating a bold
+     * color to that value plus 8.  We'll only use the non-bold color for now -
+     * decide later if it is worth having default attributes as well.
+     */
+    if (getenv("COLORFGBG") != 0) {
+	char *p = getenv("COLORFGBG");
+	p = extract_fgbg(p, &(SP->_default_fg));
+	p = extract_fgbg(p, &(SP->_default_bg));
+    }
+#endif
+#endif /* NCURSES_EXT_FUNCS */
 
     SP->_maxclick = DEFAULT_MAXCLICK;
     SP->_mouse_event = no_mouse_event;

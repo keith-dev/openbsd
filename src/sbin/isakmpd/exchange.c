@@ -1,9 +1,10 @@
-/*	$OpenBSD: exchange.c,v 1.29 2000/04/07 22:07:30 niklas Exp $	*/
-/*	$EOM: exchange.c,v 1.119 2000/04/07 19:16:44 niklas Exp $	*/
+/*	$OpenBSD: exchange.c,v 1.34 2000/10/16 23:27:33 niklas Exp $	*/
+/*	$EOM: exchange.c,v 1.134 2000/10/16 18:16:58 provos Exp $	*/
 
 /*
  * Copyright (c) 1998, 1999, 2000 Niklas Hallqvist.  All rights reserved.
  * Copyright (c) 1999 Angelos D. Keromytis.  All rights reserved.
+ * Copyright (c) 1999, 2000 Håkan Olsson.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -59,6 +60,7 @@
 #include "message.h"
 #include "timer.h"
 #include "transport.h"
+#include "ipsec.h"
 #include "sa.h"
 #include "util.h"
 #ifdef USE_X509
@@ -610,6 +612,7 @@ exchange_create (int phase, int initiator, int doi, int type)
   memset (exchange->message_id, 0, ISAKMP_HDR_MESSAGE_ID_LEN);
   exchange->doi = doi_lookup (doi);
   exchange->type = type;
+  exchange->policy_id = -1;
   exchange->exch_pc = exchange_script (exchange);
   exchange->last_sent = exchange->last_received = 0;
   TAILQ_INIT (&exchange->sa_list);
@@ -722,8 +725,7 @@ exchange_establish_p1 (struct transport *t, u_int8_t type, u_int32_t doi,
 	  tag = conf_get_str (name, "Configuration");
 	  if (!tag)
 	    {
-	      /* XXX I am not sure a default should be used.  */
-#if 0
+	      /* Use default setting */
 	      tag = conf_get_str ("Phase 1", "Default");
 	      if (!tag)
 		{
@@ -731,7 +733,7 @@ exchange_establish_p1 (struct transport *t, u_int8_t type, u_int32_t doi,
 			     "no \"Default\" tag in [Phase 1] section");
 		  return;
 		}
-#else
+#if 0
 	      log_print ("exchange_establish_p1: "
 			 "no configuration found for peer \"%s\"",
 			 name);
@@ -740,16 +742,10 @@ exchange_establish_p1 (struct transport *t, u_int8_t type, u_int32_t doi,
 
 	  /* Figure out the DOI.  XXX Factor out?  */
 	  str = conf_get_str (tag, "DOI");
-	  if (!str)
-	    {
-	      log_print ("exchange_establish_p1: "
-			 "no \"DOI\" tag in [%s] section", tag);
-	      return;
-	    }
-	  if (strcasecmp (str, "ISAKMP") == 0)
-	    doi = ISAKMP_DOI_ISAKMP;
-	  else if (strcasecmp (str, "IPSEC") == 0)
+	  if (!str || strcasecmp (str, "IPSEC") == 0)
 	    doi = IPSEC_DOI_IPSEC;
+	  else if (strcasecmp (str, "ISAKMP") == 0)
+	    doi = ISAKMP_DOI_ISAKMP;
 	  else
 	    {
 	      log_print ("exchange_establish_p1: DOI \"%s\" unsupported", str);
@@ -791,7 +787,11 @@ exchange_establish_p1 (struct transport *t, u_int8_t type, u_int32_t doi,
 	  return;
 	}
     }
+
   exchange->policy = name ? conf_get_str (name, "Configuration") : 0;
+  if ((exchange->policy == NULL) && name)
+    exchange->policy = conf_get_str ("Phase 1", "Default");
+
   exchange->finalize = finalize;
   exchange->finalize_arg = arg;
   cookie_gen (t, exchange, exchange->cookies, ISAKMP_HDR_ICOOKIE_LEN);
@@ -817,6 +817,8 @@ exchange_establish_p1 (struct transport *t, u_int8_t type, u_int32_t doi,
 	  exchange_free (exchange);
 	  return;
 	}
+      else
+        sa_reference (msg->isakmp_sa);
     }
 
   msg->extra = args;
@@ -853,17 +855,16 @@ exchange_establish_p2 (struct sa *isakmp_sa, u_int8_t type, char *name,
 
       /* Figure out the DOI.  */
       str = conf_get_str (tag, "DOI");
-      if (str)
+      if (!str || strcasecmp (str, "IPSEC") == 0)
+	doi = IPSEC_DOI_IPSEC;
+      else if (strcasecmp (str, "ISAKMP") == 0)
+	doi = ISAKMP_DOI_ISAKMP;
+      else
 	{
-	  if (strcasecmp (str, "IPSEC") == 0)
-	    doi = IPSEC_DOI_IPSEC;
-	  else
-	    {
-	      log_print ("exchange_establish_p2: DOI \"%s\" unsupported", str);
-	      return;
-	    }
+	  log_print ("exchange_establish_p2: DOI \"%s\" unsupported", str);
+	  return;
 	}
-
+      
       /* What exchange type do we want?  */
       if (!type)
 	{
@@ -927,6 +928,7 @@ exchange_establish_p2 (struct sa *isakmp_sa, u_int8_t type, char *name,
     }
 
   msg = message_alloc (isakmp_sa->transport, 0, ISAKMP_HDR_SZ);
+  sa_reference (isakmp_sa);
   msg->isakmp_sa = isakmp_sa;
   
   msg->extra = args;
@@ -997,16 +999,10 @@ exchange_setup_p1 (struct message *msg, u_int32_t doi)
 
       /* Figure out the DOI.  */
       str = conf_get_str (policy, "DOI");
-      if (!str)
-	{
-	  log_print ("exchange_setup_p1: no \"DOI\" tag in [%s] section",
-		     policy);
-	  return 0;
-	}
-      if (strcasecmp (str, "ISAKMP") == 0)
-	want_doi = ISAKMP_DOI_ISAKMP;
-      else if (strcasecmp (str, "IPSEC") == 0)
+      if (!str || strcasecmp (str, "IPSEC") == 0)
 	want_doi = IPSEC_DOI_IPSEC;
+      else if (strcasecmp (str, "ISAKMP") == 0)
+	want_doi = ISAKMP_DOI_ISAKMP;
       else
 	{
 	  log_print ("exchange_setup_p1: DOI \"%s\" unsupported", str);
@@ -1185,6 +1181,14 @@ exchange_free_aux (void *v_exch)
       else if (exchange->recv_certtype == ISAKMP_CERTENC_NONE)
 	free (exchange->recv_cert);
     }
+  if (exchange->recv_key)
+    free (exchange->recv_key);
+
+#if defined(POLICY) || defined(KEYNOTE)
+  if (exchange->policy_id != -1)
+    LK (kn_close, (exchange->policy_id));
+#endif
+
   exchange_free_aca_list (exchange);
   LIST_REMOVE (exchange, link);
 
@@ -1317,34 +1321,19 @@ exchange_finalize (struct message *msg)
 
       msg->isakmp_sa->recv_certtype = exchange->recv_certtype;
       msg->isakmp_sa->recv_certlen = exchange->recv_certlen;
+      msg->isakmp_sa->recv_key = exchange->recv_key;
+      exchange->recv_key = NULL; /* Reset */
+      msg->isakmp_sa->policy_id = exchange->policy_id;
+      exchange->policy_id = -1; /* Reset */
       msg->isakmp_sa->id_i_len = exchange->id_i_len;
       msg->isakmp_sa->id_r_len = exchange->id_r_len;
       msg->isakmp_sa->initiator = exchange->initiator;
 
-      msg->isakmp_sa->id_i = malloc (exchange->id_i_len);
-      if (!msg->isakmp_sa->id_i)
-	{
-	  log_error ("exchange_finalize: malloc (%d) failed",
-		     exchange->id_i_len);
-	  /* XXX How to cleanup?  */
-	  return;
-	}
-      msg->isakmp_sa->id_r = malloc (exchange->id_r_len);
-      if (!msg->isakmp_sa->id_r)
-	{
-	  log_error ("exchange_finalize: malloc (%d) failed",
-		     exchange->id_r_len);
-	  /* XXX How to cleanup?  */
-	  return;
-	}
-
-      memcpy (msg->isakmp_sa->id_i, exchange->id_i, exchange->id_i_len);
-      memcpy (msg->isakmp_sa->id_r, exchange->id_r, exchange->id_r_len);
-
       switch (exchange->recv_certtype)
         {
         case ISAKMP_CERTENC_NONE:
-	    msg->isakmp_sa->recv_cert = strdup (exchange->recv_cert);
+	case ISAKMP_CERTENC_KEYNOTE: /* No need for special handling */
+	    msg->isakmp_sa->recv_cert = malloc (exchange->recv_certlen);
 	    if (!msg->isakmp_sa->recv_cert)
 	      {
 		log_error ("exchange_finalize: strdup (\"%s\") failed",
@@ -1352,6 +1341,8 @@ exchange_finalize (struct message *msg)
 		/* XXX How to cleanup?  */
 		return;
 	      }
+	    memcpy (msg->isakmp_sa->recv_cert, exchange->recv_cert,
+		    msg->isakmp_sa->recv_certlen);
 	    break;
 
 	case ISAKMP_CERTENC_X509_SIG:
@@ -1378,14 +1369,44 @@ exchange_finalize (struct message *msg)
 	case ISAKMP_CERTENC_ARL:
 	case ISAKMP_CERTENC_SPKI:
 	case ISAKMP_CERTENC_X509_ATTR:
-/*      case ISAKMP_CERTENC_KEYNOTE: */
 	}
+
+      LOG_DBG ((LOG_EXCHANGE, 10,
+		"exchange_finalize: phase 1 done: %s, %s",
+		exchange->doi == NULL ? "<no doi>" :
+		exchange->doi->decode_ids ("initiator id %s, responder id %s",
+					   exchange->id_i, exchange->id_i_len,
+					   exchange->id_r, exchange->id_r_len,
+					   0),
+		msg->isakmp_sa == NULL || msg->isakmp_sa->transport == NULL
+		? "<no transport>"
+		: msg->isakmp_sa->transport->vtbl->decode_ids (msg->isakmp_sa->transport)));
     }
 
   exchange->doi->finalize_exchange (msg);
   if (exchange->finalize)
     exchange->finalize (exchange, exchange->finalize_arg, 0);
   exchange->finalize = 0;
+
+  /* copy the ID from phase 1 to exchange or phase 2 SA */
+  if (msg->isakmp_sa) 
+    {
+      if (exchange->id_i && exchange->id_r) 
+	{
+	  ipsec_clone_id (&msg->isakmp_sa->id_i, &msg->isakmp_sa->id_i_len,
+			  exchange->id_i, exchange->id_i_len);
+	  ipsec_clone_id (&msg->isakmp_sa->id_r, &msg->isakmp_sa->id_r_len,
+			  exchange->id_r, exchange->id_r_len);
+	}
+      else if (msg->isakmp_sa->id_i && msg->isakmp_sa->id_r)
+	{
+	  ipsec_clone_id (&exchange->id_i, &exchange->id_i_len,
+			  msg->isakmp_sa->id_i, msg->isakmp_sa->id_i_len);
+	  ipsec_clone_id (&exchange->id_r, &exchange->id_r_len,
+			  msg->isakmp_sa->id_r, msg->isakmp_sa->id_r_len);
+	}
+    }
+
 
   /*
    * There is no reason to keep the SAs connected to us anymore, in fact
@@ -1394,7 +1415,17 @@ exchange_finalize (struct message *msg)
    * references to freed SAs can occur.
    */
   while (TAILQ_FIRST (&exchange->sa_list))
-    TAILQ_REMOVE (&exchange->sa_list, TAILQ_FIRST (&exchange->sa_list), next);
+    {
+      struct sa *sa = TAILQ_FIRST (&exchange->sa_list);
+
+      ipsec_clone_id (&sa->id_i, &sa->id_i_len, exchange->id_i,
+		      exchange->id_i_len);
+      ipsec_clone_id (&sa->id_r, &sa->id_r_len, exchange->id_r,
+		      exchange->id_r_len);
+
+      TAILQ_REMOVE (&exchange->sa_list, sa, next);
+      sa_release (sa);
+    }
 
   /* If we have nothing to retransmit we can safely remove ourselves.  */
   if (!exchange->last_sent)
@@ -1608,9 +1639,8 @@ exchange_establish (char *name,
       trpt = conf_get_str (name, "Transport");
       if (!trpt)
 	{
-	  log_print ("exchange_establish: No transport given for peer \"%s\"",
-		     name);
-	  return;
+	  /* Phase 1 transport defaults to "udp". */
+	  trpt = ISAKMP_DEFAULT_TRANSPORT;
 	}
 
       transport = transport_create (trpt, name);

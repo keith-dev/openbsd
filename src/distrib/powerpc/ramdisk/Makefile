@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.8 2000/01/24 03:46:55 rahnds Exp $
+#	$OpenBSD: Makefile,v 1.14 2000/10/19 20:54:36 drahn Exp $
 
 TOP=		${.CURDIR}/..
 
@@ -31,11 +31,21 @@ all ${IMAGE}:
 .else
 
 # mix config is not needed.
-all:	${BSD_RD}
+all:	${BSD_RD} cd
 
 ${BSD_RD}: ${CBIN} ${IMAGE} bsd rdsetroot
 	cp bsd ${BSD_RD}
 	${.OBJDIR}/rdsetroot ${BSD_RD} < ${IMAGE}
+
+cd: ${BSD_RD}
+	-rm -rf ${.OBJDIR}/cd-dir/
+	-@mkdir -p ${.OBJDIR}/cd-dir/${OSREV}/powerpc/
+	cp bsd.rd ${.OBJDIR}/cd-dir/${OSREV}/powerpc/bsd.rd
+	strip ${.OBJDIR}/cd-dir/${OSREV}/powerpc/bsd.rd
+	gzip -9 ${.OBJDIR}/cd-dir/${OSREV}/powerpc/bsd.rd
+	mv ${.OBJDIR}/cd-dir/${OSREV}/powerpc/bsd.rd.gz ${.OBJDIR}/cd-dir/${OSREV}/powerpc/bsd.rd
+	cp ${DESTDIR}/usr/mdec/ofwboot ${.OBJDIR}/cd-dir/
+	mkhybrid -r -part -hfs -o ${.OBJDIR}/cd${OSrev}.fs ${.OBJDIR}/cd-dir
 
 
 ${IMAGE}: rd_setup do_files rd_teardown
@@ -43,10 +53,10 @@ ${IMAGE}: rd_setup do_files rd_teardown
 .endif
 
 bsd:
-	cd ${TOP}/../../sys/arch/powerpc/conf && config RAMDISKMAC
-	cd ${TOP}/../../sys/arch/powerpc/compile/RAMDISKMAC && \
+	cd ${TOP}/../../sys/arch/powerpc/conf && config RAMDISK
+	cd ${TOP}/../../sys/arch/powerpc/compile/RAMDISK && \
 	    make clean && make
-	cp ${TOP}/../../sys/arch/powerpc/compile/RAMDISKMAC/bsd bsd
+	cp ${TOP}/../../sys/arch/powerpc/compile/RAMDISK/bsd bsd
 
 rd_setup: 
 	dd if=/dev/zero of=${IMAGE} bs=512 count=${NBLKS}
@@ -71,13 +81,10 @@ unconfig:
 .PRECIOUS:	${IMAGE}
 
 install:
-	cp ${BSD_RD} ${DESTDIR}/snapshot/${BSD_RD}
-
-${CBIN}.conf: ${LISTS}
-	awk -f ${UTILS}/makeconf.awk CBIN=${CBIN} ${LISTS} > ${CBIN}.conf
+	cp ${BSD_RD} cd${REV}.fs ${DESTDIR}/snapshot/
 
 ${CBIN}.mk ${CBIN}.cache ${CBIN}.c: ${CBIN}.conf
-	crunchgen -E -D ${.CURDIR}/../../.. -L ${DESTDIR}/usr/lib ${CBIN}.conf
+	crunchgen -E -D ${.CURDIR}/../../.. -L ${DESTDIR}/usr/lib ${.ALLSRC}
 
 ${CBIN}: ${CBIN}.mk ${CBIN}.cache ${CBIN}.c
 	make -f ${CBIN}.mk all
@@ -93,7 +100,7 @@ clean cleandir:
 	rdsetroot
 
 beforeinstall:
-	cp ${BSD.RD} ${DESTDIR}/snapshot
+	cp ${BSD.RD} cd${REV}.fs ${DESTDIR}/snapshot
 
 .include <bsd.obj.mk>
 .include <bsd.subdir.mk>

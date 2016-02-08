@@ -1,9 +1,10 @@
-/*	$OpenBSD: isakmpd.c,v 1.23 2000/05/03 13:47:27 niklas Exp $	*/
-/*	$EOM: isakmpd.c,v 1.51 2000/05/03 13:22:20 ho Exp $	*/
+/*	$OpenBSD: isakmpd.c,v 1.25 2000/10/07 06:58:37 niklas Exp $	*/
+/*	$EOM: isakmpd.c,v 1.54 2000/10/05 09:28:22 niklas Exp $	*/
 
 /*
  * Copyright (c) 1998, 1999, 2000 Niklas Hallqvist.  All rights reserved.
  * Copyright (c) 1999, 2000 Angelos D. Keromytis.  All rights reserved.
+ * Copyright (c) 1999, 2000 Håkan Olsson.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -98,7 +99,7 @@ static void
 usage ()
 {
   fprintf (stderr,
-	   "usage: %s [-d] [-c config-file] [-D class=level] [-f fifo]\n"
+	   "usage: %s [-c config-file] [-d] [-D class=level] [-f fifo]\n"
 	   "          [-i pid-file] [-n] [-p listen-port] [-P local-port]\n"
 	   "          [-r seed] [-R report-file]\n",
 	   sysdep_progname ());
@@ -113,7 +114,7 @@ parse_args (int argc, char *argv[])
   int cls, level;
 #endif
 
-  while ((ch = getopt (argc, argv, "c:dD:f:i:np:P:r:")) != -1) {
+  while ((ch = getopt (argc, argv, "c:dD:f:i:np:P:r:R:")) != -1) {
     switch (ch) {
     case 'c':
       conf_path = optarg;

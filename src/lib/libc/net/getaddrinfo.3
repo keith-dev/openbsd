@@ -1,4 +1,5 @@
-.\"	$OpenBSD: getaddrinfo.3,v 1.7 2000/02/14 13:23:54 itojun Exp $
+.\"	$OpenBSD: getaddrinfo.3,v 1.12 2000/08/13 07:23:48 deraadt Exp $
+.\"	$KAME: getaddrinfo.3,v 1.22 2000/08/09 21:16:17 itojun Exp $
 .\"
 .\" Copyright (c) 1983, 1987, 1991, 1993
 .\"	The Regents of the University of California.  All rights reserved.
@@ -32,7 +33,6 @@
 .\" SUCH DAMAGE.
 .\"
 .\"     From: @(#)gethostbyname.3	8.4 (Berkeley) 5/25/95
-.\"     KAME Id: getaddrinfo.3,v 1.8 2000/01/17 08:13:03 itojun Exp
 .\"
 .Dd May 25, 1995
 .Dt GETADDRINFO 3
@@ -88,7 +88,7 @@ The
 .Fa nodename
 and
 .Fa servname
-arguments are pointers to null-terminated strings or
+arguments are pointers to NUL-terminated strings or
 .Dv NULL .
 One or both of these two arguments must be a non-null pointer.
 In the normal client scenario, both the
@@ -102,7 +102,7 @@ is specified.
 A non-null
 .Fa nodename
 string can be either a node name or a numeric host address string
-(i.e., a dotted-decimal IPv4 address or an IPv6 hex address)
+(i.e., a dotted-decimal IPv4 address or an IPv6 hex address).
 A non-null
 .Fa servname
 string can be either a service name or a decimal port number.
@@ -232,7 +232,7 @@ structure, then upon successful return the
 .Fa ai_canonname
 member of the first
 .Li addrinfo
-structure in the linked list will point to a null-terminated string
+structure in the linked list will point to a NUL-terminated string
 containing the canonical name of the specified
 .Fa nodename .
 .Pp
@@ -250,6 +250,67 @@ Otherwise an error of
 is returned.
 This flag prevents any type of name resolution service (e.g., the DNS)
 from being called.
+.Pp
+The arguments to
+.Fn getaddrinfo
+must sufficiently be consistent and unambiguous.
+Here are pitfall cases you may encounter:
+.Bl -bullet
+.It
+.Fn getaddrinfo
+will raise error if members in 
+.Fa hints
+structure is not consistent.
+For example, for internet address families,
+.Fn getaddrinfo
+will raise error if you specify
+.Dv SOCK_STREAM
+to
+.Fa ai_socktype
+while you specify
+.Dv IPPROTO_UDP
+to
+.Fa ai_protocol .
+.It
+If you specify a
+.Fa servname
+which is defined only for certain
+.Fa ai_socktype ,
+.Fn getaddrinfo
+will raise error because the arguments are not consistent.
+For example,
+.Fn getaddrinfo
+will raise error if you ask for
+.Dq Li tftp
+service on
+.Dv SOCK_STREAM .
+.It
+For internet address families, if you specify
+.Fa servname
+while you set
+.Fa ai_socktype
+to
+.Dv SOCK_RAW ,
+.Fn getaddrinfo
+will raise error, because service names are not defined for the internet
+.Dv SOCK_RAW
+space.
+.It
+If you specify numeric
+.Fa servname ,
+while leaving
+.Fa ai_socktype
+and
+.Fa ai_protocol
+unspecified,
+.Fn getaddrinfo
+will raise error.
+This is because the numeric
+.Fa servname
+does not identify any socket type, and
+.Fn getaddrinfo
+is not allowed to glob the argument in such case.
+.El
 .Pp
 All of the information returned by
 .Fn getaddrinfo
@@ -303,7 +364,7 @@ such as
 .Li ne0
 .Pc .
 Example would be like
-.Dq Li fe80::1@ne0 ,
+.Dq Li fe80::1%ne0 ,
 which means
 .Do
 .Li fe80::1
@@ -498,8 +559,14 @@ indicate an unknown error.
 .%A Atsushi Onoe
 .%T "An Extension of Format for IPv6 Scoped Addresses"
 .%R internet draft
-.%N draft-ietf-ipngwg-scopedaddr-format-00.txt
+.%N draft-ietf-ipngwg-scopedaddr-format-02.txt
 .%O work in progress material
+.Re
+.Rs
+.%A Craig Metz
+.%T Protocol Independence Using the Sockets API
+.%B "Proceedings of the freenix track: 2000 USENIX annual technical conference"
+.%D June 2000
 .Re
 .\"
 .Sh HISTORY
@@ -511,12 +578,9 @@ The
 function is defined IEEE POSIX 1003.1g draft specification,
 and documented in
 .Dq Basic Socket Interface Extensions for IPv6
-.Pq RFC2533 .
+.Pq RFC2553 .
 .\"
 .Sh BUGS
-The text was shamelessly copied from RFC2553.
+The current implementation is not thread-safe.
 .Pp
-.Nm
-can mistakingly query databases in different order than
-.Xr resolv.conf 5
-suggests.
+The text was shamelessly copied from RFC2553.

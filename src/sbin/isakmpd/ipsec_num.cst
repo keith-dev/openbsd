@@ -1,5 +1,5 @@
-#	$OpenBSD: ipsec_num.cst,v 1.5 1999/06/02 06:32:06 niklas Exp $
-#	$EOM: ipsec_num.cst,v 1.3 1999/05/27 15:17:54 niklas Exp $
+#	$OpenBSD: ipsec_num.cst,v 1.7 2000/10/16 23:27:55 niklas Exp $
+#	$EOM: ipsec_num.cst,v 1.5 2000/10/13 17:56:52 angelos Exp $
 
 #
 # Copyright (c) 1998 Niklas Hallqvist.  All rights reserved.
@@ -73,6 +73,10 @@ IPSEC_AUTH
   HMAC_SHA				2
   DES_MAC				3
   KPDK					4
+  HMAC_SHA2_256                         5
+  HMAC_SHA2_384                         6
+  HMAC_SHA2_512                         7
+  HMAC_RIPEMD                           8
 .
 
 # IPSEC ID types.
@@ -120,6 +124,7 @@ IKE_ENCRYPT
   RC5_R16_B64_CBC			4
   3DES_CBC				5
   CAST_CBC				6
+  AES_CBC                               7
 .
 
 # IKE hash algorithm.
@@ -127,6 +132,9 @@ IKE_HASH
   MD5					1
   SHA					2
   TIGER					3
+  SHA2_256                              4
+  SHA2_384                              5
+  SHA2_512                              6
 .
 
 # IKE authentication method.
@@ -188,6 +196,10 @@ IPSEC_AH
   MD5					2
   SHA					3
   DES					4
+  SHA2_256                              5
+  SHA2_384                              6
+  SHA2_512                              7
+  RIPEMD                                8
 .
 
 # IPSEC ESP transform IDs.
@@ -203,6 +215,7 @@ IPSEC_ESP
   DES_IV32				9
   RC4					10
   NULL					11
+  AES                                   12
 .
 
 # IPSEC IPCOMP transform IDs

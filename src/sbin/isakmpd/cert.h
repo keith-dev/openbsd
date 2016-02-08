@@ -1,8 +1,9 @@
-/*	$OpenBSD: cert.h,v 1.4 1999/07/17 21:54:39 niklas Exp $	*/
-/*	$EOM: cert.h,v 1.6 1999/07/17 20:44:09 niklas Exp $	*/
+/*	$OpenBSD: cert.h,v 1.6 2000/10/07 06:57:08 niklas Exp $	*/
+/*	$EOM: cert.h,v 1.8 2000/09/28 12:53:27 niklas Exp $	*/
 
 /*
  * Copyright (c) 1998, 1999 Niels Provos.  All rights reserved.
+ * Copyright (c) 2000 Niklas Hallqvist.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -56,14 +57,14 @@ struct cert_handler {
   int (*cert_init) (void);		
   void *(*cert_get) (u_int8_t *, u_int32_t); 
   int (*cert_validate) (void *);
-  int (*cert_insert) (void *);
+  int (*cert_insert) (int, void *);
   void (*cert_free) (void *);
   int (*certreq_validate) (u_int8_t *, u_int32_t);
   void *(*certreq_decode) (u_int8_t *, u_int32_t);
   void (*free_aca) (void *);
   int (*cert_obtain) (u_int8_t *, size_t, void *, u_int8_t **, u_int32_t *);
   int (*cert_get_key) (void *, void *);
-  int (*cert_get_subject) (void *, u_int8_t **, u_int32_t *);
+  int (*cert_get_subjects) (void *, int *, u_int8_t ***, u_int32_t **);
 };
 
 /* the acceptable authority of cert request */
@@ -76,8 +77,9 @@ struct certreq_aca {
   void *data;			/* if NULL everything is acceptable */
 };
 
-struct cert_handler *cert_get (u_int16_t);
 struct certreq_aca *certreq_decode (u_int16_t, u_int8_t *, u_int32_t);
+void cert_free_subjects (int, u_int8_t **, u_int32_t *);
+struct cert_handler *cert_get (u_int16_t);
 int cert_init (void);
 
 #endif /* _CERT_H_ */

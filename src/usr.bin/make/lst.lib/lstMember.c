@@ -1,4 +1,4 @@
-/*	$OpenBSD: lstMember.c,v 1.5 1999/12/18 21:53:34 espie Exp $	*/
+/*	$OpenBSD: lstMember.c,v 1.8 2000/09/14 13:32:09 espie Exp $	*/
 /*	$NetBSD: lstMember.c,v 1.5 1996/11/06 17:59:48 christos Exp $	*/
 
 /*
@@ -37,40 +37,31 @@
  * SUCH DAMAGE.
  */
 
-#ifndef lint
-#if 0
-static char sccsid[] = "@(#)lstMember.c	8.1 (Berkeley) 6/6/93";
-#else
-static char rcsid[] = "$OpenBSD: lstMember.c,v 1.5 1999/12/18 21:53:34 espie Exp $";
-#endif
-#endif /* not lint */
-
 /*-
  * lstMember.c --
  *	See if a given datum is on a given list.
  */
 
 #include    "lstInt.h"
+#ifndef lint
+#if 0
+static char sccsid[] = "@(#)lstMember.c	8.1 (Berkeley) 6/6/93";
+#else
+UNUSED
+static char rcsid[] = "$OpenBSD: lstMember.c,v 1.8 2000/09/14 13:32:09 espie Exp $";
+#endif
+#endif /* not lint */
+
 
 LstNode
-Lst_Member (l, d)
+Lst_Member(l, d)
     Lst	    	  	l;
-    ClientData	  	d;
+    void		*d;
 {
-    List    	  	list = (List) l;
-    register ListNode	lNode;
+    LstNode	lNode;
 
-    lNode = list->firstPtr;
-    if (lNode == NULL) {
-	return NULL;
-    }
-
-    do {
-	if (lNode->datum == d) {
-	    return (LstNode)lNode;
-	}
-	lNode = lNode->nextPtr;
-    } while (lNode != NULL && lNode != list->firstPtr);
-
+    for (lNode = l->firstPtr; lNode != NULL; lNode = lNode->nextPtr)
+	if (lNode->datum == d)
+	    return lNode;
     return NULL;
 }

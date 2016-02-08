@@ -1,5 +1,5 @@
-.\" $OpenBSD: isakmpd.policy.5,v 1.9 2000/05/02 14:35:40 niklas Exp $
-.\" $EOM: isakmpd.policy.5,v 1.16 2000/04/25 06:49:19 angelos Exp $
+.\" $OpenBSD: isakmpd.policy.5,v 1.14 2000/10/29 00:01:41 aaron Exp $
+.\" $EOM: isakmpd.policy.5,v 1.22 2000/10/13 17:56:52 angelos Exp $
 .\"
 .\" Copyright (c) 1999, Angelos D. Keromytis.  All rights reserved.
 .\"
@@ -32,7 +32,7 @@
 .\" Manual page, using -mandoc macros
 .\"
 .Dd October 10, 1998
-.Dt isakmpd.policy 5
+.Dt ISAKMPD.POLICY 5
 .Os
 .Sh NAME
 .Nm isakmpd.policy
@@ -129,6 +129,15 @@ is simply a flat
 .Xr ascii 7
 file containing KeyNote policy assertions, separated by blank lines
 (note that KeyNote assertions may not contain blank lines).
+.Nm isakmpd.policy
+is read when
+.Xr isakmpd 8
+is first started, and every time it receives a
+.Dv SIGHUP
+signal. The new policies read will be used for all new Phase 2 (IPsec)
+SAs established from that point on (even if the associated Phase 1 SA
+was already established when the new policies were loaded). The policy
+change will not affect already established Phase 2 SAs.
 .Pp
 For more details on KeyNote assertion format, please see
 .Xr keynote 5 .
@@ -188,6 +197,9 @@ Credentials are used to build chains of delegation of authority.
 They can be exchanged during an IKE exchange,
 or can be retrieved through some out-of-band mechanism (no such
 mechanism is currently supported in this implementation however).
+See
+.Xr isakmpd.conf 5
+on how to specify what credentials to send in an IKE exchange.
 .Pp
 Passphrases that appear in the Licensees field are encoded as the
 string "passphrase:", followed by the passphrase itself
@@ -288,6 +300,7 @@ otherwise.
 One of
 .Va md5 ,
 .Va sha ,
+.Va ripemd ,
 or
 .Va des ,
 based on the hash algorithm specified in the AH proposal.
@@ -305,8 +318,9 @@ One of
 .Va 3idea ,
 .Va des-iv32 ,
 .Va rc4 ,
-or
 .Va null ,
+or
+.Va aes ,
 based on the encryption algorithm specified in the ESP proposal.
 .It comp_alg
 One of
@@ -322,16 +336,18 @@ One of
 .Va hmac-md5 ,
 .Va hmac-sha ,
 .Va des-mac ,
-or
 .Va kpdk ,
+or
+.Va hmac-ripemd .
 based on the authentication method specified in the AH proposal.
 .It esp_auth_alg
 One of
 .Va hmac-md5 ,
 .Va hmac-sha ,
 .Va des-mac ,
-or
 .Va kpdk ,
+or
+.Va hmac-ripemd
 based on the authentication method specified in the ESP proposal.
 .It ah_life_seconds, esp_life_seconds, comp_life_seconds
 Set to the lifetime of the AH, ESP, and compression proposal, in
@@ -369,6 +385,12 @@ proposal, used for PFS during Quick Mode (see the pfs attribute
 above).
 If more than one of these attributes are set to a value other
 than zero, they should have the same value (in valid IKE proposals).
+Valid values are 1 (768-bit MODP), 2 (1024-bit MODP), 3 (155-bit EC),
+4 (185-bit EC), and 5 (1536-bit MODP).
+.It phase1_group_desc
+The Diffie-Hellman group identifier used in IKE Phase 1.
+Takes the same values as
+.Va ah_group_desc .
 .It remote_filter_type, local_filter_type, remote_id_type
 Set to
 .Va IPv4 address ,
@@ -572,5 +594,3 @@ addresses (single, range, or subnet), FQDN, and User FQDN.
 
 The \*_addr_upper and \*_addr_lower attributes are not currently set
 for IPv6 addresses (single, range, or subnet).
-
-No KeyNote credentials can be exchanged during an IKE negotiation yet.

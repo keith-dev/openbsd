@@ -1,5 +1,5 @@
-/*	$OpenBSD: sa.c,v 1.28 2000/05/02 14:36:04 niklas Exp $	*/
-/*	$EOM: sa.c,v 1.102 2000/04/12 03:10:57 provos Exp $	*/
+/*	$OpenBSD: sa.c,v 1.32 2000/10/16 23:27:43 niklas Exp $	*/
+/*	$EOM: sa.c,v 1.110 2000/10/16 18:16:59 provos Exp $	*/
 
 /*
  * Copyright (c) 1998, 1999, 2000 Niklas Hallqvist.  All rights reserved.
@@ -375,6 +375,13 @@ sa_dump (char *header, struct sa *sa)
 		"%s: spi_sz[0] %d spi[0] %p spi_sz[1] %d spi[1] %p", header,
 		proto->spi_sz[0], proto->spi[0], proto->spi_sz[1],
 		proto->spi[1]));
+      LOG_DBG ((LOG_REPORT, 0, "%s: %s, %s", header,
+		sa->doi == NULL ? "<nodoi>"
+		: sa->doi->decode_ids ("initiator id: %s, responder id: %s", 
+				     sa->id_i, sa->id_i_len, 
+				     sa->id_r, sa->id_r_len, 0),
+		sa->transport == NULL ? "<no transport>" :
+		sa->transport->vtbl->decode_ids (sa->transport)));
       for (i = 0; i < 2; i++)
 	if (proto->spi[i])
 	  {
@@ -430,9 +437,17 @@ void
 sa_free (struct sa *sa)
 {
   if (sa->death)
-    timer_remove_event (sa->death);
+    {
+      timer_remove_event (sa->death);
+      sa->death = 0;
+      sa->refcnt--;
+    }
   if (sa->soft_death)
-    timer_remove_event (sa->soft_death);
+    {
+      timer_remove_event (sa->soft_death);
+      sa->soft_death = 0;
+      sa->refcnt--;
+    }
   sa_free_aux (sa);
 }
 
@@ -489,6 +504,12 @@ sa_release (struct sa *sa)
 	else if (sa->recv_certtype == ISAKMP_CERTENC_NONE)
 	  free (sa->recv_cert);
     }
+  if (sa->recv_key)
+    free (sa->recv_key);
+#if defined(POLICY) || defined(KEYNOTE)
+  if (sa->policy_id != -1)
+    LK (kn_close, (sa->policy-id));
+#endif
   if (sa->name)
     free (sa->name);
   if (sa->keystate)
@@ -626,6 +647,8 @@ sa_soft_expire (void *v_sa)
      * happen as soon as it is shown to be alive.
      */
     sa->flags |= SA_FLAG_FADING;
+
+  sa_release (sa);
 }
 
 /* SA has passed its best before date.  */
@@ -653,7 +676,9 @@ sa_flag (char *attr)
     char *name;
     int flag;
   } sa_flag_map[] = {
-    { "active-only", SA_FLAG_ACTIVE_ONLY }
+    { "active-only", SA_FLAG_ACTIVE_ONLY },
+    /* Below this point are flags that are internal to the implementation.  */
+    { "__ondemand", SA_FLAG_ONDEMAND }
   };
   int i;
 
@@ -711,6 +736,7 @@ sa_setup_expirations (struct sa *sa)
 	  sa_delete (sa, 1);
 	  return -1;
 	}
+      sa_reference (sa);
     }
 
   if (!sa->death)
@@ -728,6 +754,7 @@ sa_setup_expirations (struct sa *sa)
 	  sa_delete (sa, 1);
 	  return -1;
 	}
+      sa_reference (sa);
     }
   return 0;
 }

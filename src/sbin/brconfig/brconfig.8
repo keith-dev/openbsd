@@ -1,4 +1,4 @@
-.\"	$OpenBSD: brconfig.8,v 1.11 2000/05/02 18:51:04 jason Exp $
+.\"	$OpenBSD: brconfig.8,v 1.17 2000/10/28 16:17:26 aaron Exp $
 .\"
 .\" Copyright (c) 1999, 2000 Jason L. Wright (jason@thought.net)
 .\" All rights reserved.
@@ -53,6 +53,15 @@ The
 .Nm brconfig
 utility retrieves kernel state of bridge interfaces and allows
 user control of these bridges.
+Bridge devices create a logical link between two or more Ethernet interfaces
+or encapsulation interfaces (see
+.Xr enc 4 ),
+which will selectively forward frames from each interface on the bridge
+to every other interface on the bridge.
+This can be used to isolate traffic between sets of machines on the same
+segment and to provide a transparent filter for
+.Xr ip 4
+datagrams.
 .Pp
 In the first synopsis, the command
 will list the status of all bridges in the system.
@@ -160,7 +169,7 @@ flag on the bridge interface.
 .It Cm link1
 Setting this flags stops all IP multicast packets from
 being forwarded by the bridge.
-.It Cm -link0
+.It Cm -link1
 Clear the
 .Cm link1
 flag on the bridge interface.
@@ -252,22 +261,22 @@ Create Security Associations (SAs) between the external IP address of each
 bridge:
 .Bd -literal
 # ipsecadm new esp -spi 4242 -dst 4.3.2.1 -src 1.2.3.4 \e\ 
-	-enc 3des -auth md5 -keyfile keyfile -authkey authkeyfile
+	-enc 3des -auth md5 -keyfile keyfile -authkeyfile authkeyfile
 .Ed
 .Pp
 .Bd -literal
 # ipsecadm new esp -spi 4243 -dst 1.2.3.4 -src 4.3.2.1 \e\ 
-	-enc 3des -auth md5 -keyfile keyfile -authkey authkeyfile
+	-enc 3des -auth md5 -keyfile keyfile -authkeyfile authkeyfile
 .Ed
 .Pp
 Setup ingress flows so that traffic is allowed between the two bridges
 for the above associations:
 .Bd -literal
-(on bridge1) # ipsecadm flow -dst 1.2.3.4 -spi 4243 -ingress \e\ 
-	-transport etherip \e\ 
+(on bridge1) # ipsecadm flow -dst 1.2.3.4 -in \e\ 
+	-transport etherip -require \e\ 
 	-addr 4.3.2.1 255.255.255.255 1.2.3.4 255.255.255.255
-(on bridge2) # ipsecadm flow -dst 4.3.2.1 -spi 4242 -ingress \e\ 
-	-transport etherip \e\ 
+(on bridge2) # ipsecadm flow -dst 4.3.2.1 -in \e\ 
+	-transport etherip -require \e\ 
 	-addr 1.2.3.4 255.255.255.255 4.3.2.1 255.255.255.255
 .Ed
 .Pp
@@ -283,7 +292,7 @@ start allowing traffic on the interface:
 Bring up the internal interface (if not already up) and encapsulation
 interface:
 .Bd -literal
-# ifconfig fxp0 up
+# ifconfig fxp1 up
 # ifconfig enc1 up
 .Ed
 .Pp
@@ -293,10 +302,10 @@ frames:
 # brconfig bridge0 up
 .Ed
 .Pp
-The internal interface, ie. fxp0, on each bridge need not have an IP
+The internal interface, ie. fxp1, on each bridge need not have an IP
 address; the bridge can function without it.
 .Pp
-Note:  It is possible to put all the following commands the
+Note:  It is possible to put all the following commands in the
 .Xr hostname.if 8
 and
 .Xr bridgename.if 8

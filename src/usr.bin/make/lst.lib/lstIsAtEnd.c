@@ -1,4 +1,4 @@
-/*	$OpenBSD: lstIsAtEnd.c,v 1.4 1998/12/05 00:06:32 espie Exp $	*/
+/*	$OpenBSD: lstIsAtEnd.c,v 1.7 2000/09/14 13:32:09 espie Exp $	*/
 /*	$NetBSD: lstIsAtEnd.c,v 1.5 1996/11/06 17:59:45 christos Exp $	*/
 
 /*
@@ -37,14 +37,6 @@
  * SUCH DAMAGE.
  */
 
-#ifndef lint
-#if 0
-static char sccsid[] = "@(#)lstIsAtEnd.c	8.1 (Berkeley) 6/6/93";
-#else
-static char rcsid[] = "$OpenBSD: lstIsAtEnd.c,v 1.4 1998/12/05 00:06:32 espie Exp $";
-#endif
-#endif /* not lint */
-
 /*-
  * LstIsAtEnd.c --
  *	Tell if the current node is at the end of the list.
@@ -56,6 +48,15 @@ static char rcsid[] = "$OpenBSD: lstIsAtEnd.c,v 1.4 1998/12/05 00:06:32 espie Ex
  */
 
 #include	"lstInt.h"
+#ifndef lint
+#if 0
+static char sccsid[] = "@(#)lstIsAtEnd.c	8.1 (Berkeley) 6/6/93";
+#else
+UNUSED
+static char rcsid[] = "$OpenBSD: lstIsAtEnd.c,v 1.7 2000/09/14 13:32:09 espie Exp $";
+#endif
+#endif /* not lint */
+
 
 /*-
  *-----------------------------------------------------------------------
@@ -70,19 +71,12 @@ static char rcsid[] = "$OpenBSD: lstIsAtEnd.c,v 1.4 1998/12/05 00:06:32 espie Ex
  *	    while (!Lst_IsAtEnd (l)) {
  *	    	  ...
  *	    }
- *
- * Side Effects:
- *	None.
- *
  *-----------------------------------------------------------------------
  */
 Boolean
-Lst_IsAtEnd (l)
+Lst_IsAtEnd(l)
     Lst	    l;
 {
-    register List list = (List) l;
-
-    return (!LstValid (l) || !list->isOpen ||
-	    (list->atEnd == Head) || (list->atEnd == Tail));
+    return !l->isOpen || l->atEnd == Head || l->atEnd == Tail;
 }
 

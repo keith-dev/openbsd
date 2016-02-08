@@ -1,4 +1,4 @@
-/*	$OpenBSD: arp.c,v 1.14 1999/05/16 00:43:44 ho Exp $ */
+/*	$OpenBSD: arp.c,v 1.16 2000/10/23 14:55:12 aaron Exp $ */
 /*	$NetBSD: arp.c,v 1.12 1995/04/24 13:25:18 cgd Exp $ */
 
 /*
@@ -95,7 +95,7 @@ main(argc, argv)
 	int argc;
 	char **argv;
 {
-	int ch;
+	int ch, argstart;
 
 	pid = getpid();
 	opterr = 0;
@@ -103,6 +103,7 @@ main(argc, argv)
 		if (ch == 'n')
 			nflag = 1;
 
+	argstart = optind;
 	optind = 1;
 	optreset = 1;
 	opterr = 1;
@@ -112,9 +113,9 @@ main(argc, argv)
 			dump(0);
 			return (0);
 		case 'd':
-			if (argc < 3 || argc > 4)
+			if (argc < (argstart + 1) || argc > (argstart +2))
 				usage();
-			(void)delete(argv[2], argv[3]);
+			(void)delete(argv[argstart], argv[argstart + 1]);
 			return (0);
 		case 'n':
 			break;
@@ -435,7 +436,7 @@ dump(addr)
 			if (sin->sin_addr.s_addr == 0xffffffff)
 				(void)printf(" published");
 			if (sin->sin_len != 8)
-				(void)printf("(wierd)");
+				(void)printf("(weird)");
 		}
 		(void)printf("\n");
 	}

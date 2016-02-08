@@ -1,4 +1,4 @@
-.\" $OpenBSD: ppp.8,v 1.83 2000/04/12 21:47:56 aaron Exp $
+.\" $OpenBSD: ppp.8,v 1.95 2000/09/02 22:12:54 brian Exp $
 .Dd 20 September 1995
 .nr XX \w'\fC00'
 .Dt PPP 8
@@ -470,7 +470,7 @@ operation, you should configure your resolver so that it works correctly.
 This can be done by configuring a local DNS
 .Pq using Xr named 8
 or by adding the correct
-.Sq name-server
+.Sq nameserver
 lines to the file
 .Pa /etc/resolv.conf .
 Refer to the
@@ -1541,6 +1541,7 @@ set filter
 .Op estab
 .Op syn
 .Op finrst
+.Op timeout Ar secs
 .Oc
 .Bl -enum
 .It
@@ -1644,6 +1645,15 @@ flags are only allowed when
 is set to
 .Sq tcp ,
 and represent the TH_ACK, TH_SYN and TH_FIN or TH_RST TCP flags respectively.
+.It
+The timeout value adjusts the current idle timeout to at least
+.Ar secs
+seconds.
+If a timeout is given in the alive filter as well as in the in/out
+filter, the in/out value is used.  If no timeout is given, the default
+timeout (set using
+.Ic set timeout
+and defaulting to 180 seconds) is used.
 .El
 .Pp
 .It
@@ -1651,8 +1661,17 @@ Each filter can hold up to 40 rules, starting from rule 0.
 The entire rule set is not effective until rule 0 is defined,
 i.e., the default is to allow everything through.
 .It
-If no rule is matched to a packet, that packet will be discarded
-(blocked).
+If no rule in a defined set of rules matches a packet, that packet will
+be discarded (blocked).
+If there are no rules in a given filter, the packet will be permitted.
+.It
+It's possible to filter based on the payload of UDP frames where those
+frames contain a
+.Em PROTO_IP
+.Em PPP
+frame header.  See the
+.Ar filter-decapsulation
+option below for further details.
 .It
 Use
 .Dq set filter Ar name No -1
@@ -2147,6 +2166,8 @@ Log Chat lines containing the string "CONNECT".
 Log debug information.
 .It Li DNS
 Log DNS QUERY packets.
+.It Li Filter
+Log packets permitted by the dial filter and denied by any filter.
 .It Li HDLC
 Dump HDLC packet in hex.
 .It Li ID0
@@ -2722,6 +2743,30 @@ This option determines if Van Jacobson header compression will be used.
 The following options are not actually negotiated with the peer.
 Therefore, accepting or denying them makes no sense.
 .Bl -tag -width XX
+.It filter-decapsulation
+Default: Disabled.
+When this option is enabled,
+.Nm
+will examine UDP frames to see if they actually contain a
+.Em PPP
+frame as their payload.  If this is the case, all filters will operate
+on the payload rather than the actual packet.
+.Pp
+This is useful if you want to send PPPoUDP traffic over a
+.Em PPP
+link, but want that link to do smart things with the real data rather than
+the UDP wrapper.
+.Pp
+The UDP frame payload must not be compressed in any way, otherwise
+.Nm
+will not be able to interpret it.  It's therefore recommended that
+you
+.Ic disable vj pred1 deflate
+and
+.Ic deny vj pred1 deflate
+in the configuration for the
+.Nm
+invocation with the udp link.
 .It idcheck
 Default: Enabled.
 When
@@ -2823,6 +2868,8 @@ and the
 address of the local network in which
 .Dv HISADDR
 appears.
+This allows other machines connecteed to the LAN to talk to
+the peer as if the peer itself was connected to the LAN.
 The proxy entry cannot be made unless
 .Dv HISADDR
 is an address from a LAN.
@@ -3020,10 +3067,11 @@ The
 .Sq default
 section is always checked first (even though it is only ever automatically
 loaded at startup).
-Each successive
 .Dq allow users
-command overrides the previous one, so it's possible to allow users access
-to everything except a given label by specifying default users in the
+commands are cumulative in a given section, but users allowed in any given
+section override users allowed in the default section, so it's possible to
+allow users access to everything except a given label by specifying default
+users in the
 .Sq default
 section, and then specifying a new user list for that label.
 .Pp
@@ -3101,7 +3149,6 @@ This command gives a summary of available nat commands.
 This option causes various NAT statistics and information to
 be logged to the file
 .Pa /var/log/alias.log .
-This file name is likely to change in the near future.
 .It nat port Ar proto Ar targetIP Ns Xo
 .No : Ns Ar targetPort Ns
 .Oo
@@ -3144,30 +3191,6 @@ or a range of ports the same size as the other ranges.
 This option is useful if you wish to run things like Internet phone on
 machines behind your gateway, but is limited in that connections to only
 one interior machine per source machine and target port are possible.
-.It nat pptp Op Ar addr
-This tells
-.Nm
-to translate any
-.Em G Ns No eneral
-.Em R Ns No outing
-.Em E Ns No encapsulated
-.Pq Dv IPPROTO_GRE
-packets using
-.Ar addr
-rather than the local interface address.
-This allows the uses of the
-.Em P Ns No oint
-to
-.Em P Ns No oint
-.Em T Ns No unneling
-.Em P Ns No rotocol
-on a machine on the internal network.
-.Pp
-If
-.Ar addr
-is not specified,
-.Dv PPTP
-address translation is disabled.
 .It "nat proxy cmd" Ar arg Ns No ...
 This command tells
 .Nm
@@ -3184,10 +3207,17 @@ This is useful
 if you want to support protocols such as RPC and LPD which require
 connections to come from a well known port.
 .It nat target Op Ar address
-Set the given target address or clear it if no address is given.  The target
-address is used by libalias to specify how to NAT incoming packets by default.
-If a target address is not set, the alias address (that of the tun interface)
-is used.
+Set the given target address or clear it if no address is given.
+The target address is used by libalias to specify how to NAT incoming
+packets by default.
+If a target address is not set or if
+.Dq default
+is given, packets are not altered and are allowed to route to the internal
+network.
+.Pp
+The target address may be set to
+.Dq MYADDR ,
+in which case libalias will redirect all packets to the interface address.
 .It nat use_sockets yes|no
 When enabled, this option tells the network address translation engine to
 create a socket so that it can guarantee a correct incoming ftp data or
@@ -3216,6 +3246,13 @@ value.
 See the
 .Dq set authname
 command below.
+.It Li COMPILATIONDATE
+This is replaced with the date on which
+.Nm
+was compiled.
+.It Li DNS0 No " & " Li DNS1
+These are replaced with the primary and secondary nameserver IP numbers.
+If nameservers are negotiated by IPCP, the values of these macros will change.
 .It Li ENDDISC
 This is replaced with the local endpoint discriminator value.
 See the
@@ -3242,14 +3279,14 @@ This is replaced with the IP number assigned to the local interface.
 This is replaced with the value of the peers endpoint discriminator.
 .It Li PROCESSID
 This is replaced with the current process id.
+.It Li VERSION
+This is replaced with the current version number of
+.Nm ppp .
 .It Li USER
 This is replaced with the username that has been authenticated with PAP or
 CHAP.
 Normally, this variable is assigned only in -direct mode.
 This value is available irrespective of whether utmp logging is enabled.
-.It Li DNS0 No " & " Li DNS1
-These are replaced with the primary and secondary nameserver IP numbers.
-If nameservers are negotiated by IPCP, the values of these macros will change.
 .El
 .Pp
 These substitutions are also done by the
@@ -3376,6 +3413,20 @@ Show a list of available commands.
 If
 .Ar command
 is specified, show the usage string for that command.
+.It ident Op Ar text Ns No ...
+Identify the link to the peer using
+.Ar text .
+If
+.Ar text
+is empty, link identification is disabled.
+It is possible to use any of the words described for the
+.Ic bg
+command above.
+Refer to the
+.Ic sendident
+command for details of when
+.Nm
+identifies itself to the peer.
 .It iface Ar command Op args
 This command is used to control the interface used by
 .Nm ppp .
@@ -3669,6 +3720,24 @@ command.
 .El
 .It save
 This option is not (yet) implemented.
+.It sendident
+This command tells
+.Nm
+to identify itself to the peer.  The link must be in LCP state or higher.
+If no identity has been set (via the
+.Ic ident
+command),
+.Ic sendident
+will fail.
+.Pp
+When an identity has been set,
+.Nm
+will automatically identify itself when it sends or receives a configure
+reject, when negotiation fails or when LCP reaches the opened state.
+.Pp
+Received identification packets are logged to the LCP log (see
+.Ic set log
+for details) and are never responded to.
 .It set Ns Xo
 .No Op up
 .Ar var value
@@ -3715,7 +3784,13 @@ and
 .Dq authkey
 values.
 .Pp
-Ignoring the
+If the
+.Dq \&!
+is doubled up
+.Pq to Dq \&!! ,
+it is treated as a single literal
+.Dq \&! ,
+otherwise, ignoring the
 .Dq \&! ,
 .Ar value
 is parsed as a program to execute in the same was as the
@@ -3787,9 +3862,10 @@ percent or less of the total bundle bandwidth for
 .Ar period
 seconds, a
 .Ar demand-dial
-link will be brought down as long as it's not the last active
-.Ar demand-dial
-link.
+link will be brought down as long as it's not the last active link.
+.Pp
+Bundle throughput is measured as the maximum of inbound and outbound
+traffic.
 .Pp
 The default values cause
 .Ar demand-dial
@@ -4121,7 +4197,17 @@ will attempt to create a
 .Em PPP
 over Ethernet connection using the given
 .Ar iface
-interface.
+interface by using
+.Xr netgraph 4 .
+If
+.Xr netgraph 4
+is not available,
+.Nm
+will attempt to loaded it using
+.Xr kldload 2 .
+If this fails, an external program must be used such as the
+.Xr pppoe 8
+program available under OpenBSD.
 The given
 .Ar provider
 is passed as the service name in the PPPoE Discovery Initiation (PADI)
@@ -4222,6 +4308,10 @@ It is also possible to execute external commands from the chat script.
 To do this, the first character of the expect or send string is an
 exclamation mark
 .Pq Dq \&! .
+If a literal exclaimation mark is required, double it up to
+.Dq \&!!
+and it will be treated as a single literal
+.Dq \&! .
 When the command is executed, standard input and standard output are
 directed to the open device (see the
 .Dq set device
@@ -4369,6 +4459,7 @@ as they travel across the link.
 .Op estab
 .Op syn
 .Op finrst
+.Op timeout Ar secs
 .Oc
 .Xc
 .Nm
@@ -4394,7 +4485,7 @@ filter specifies packets that are allowed out of the machine.
 Filtering is done prior to any IP alterations that might be done by the
 NAT engine on outgoing packets and after any IP alterations that might
 be done by the NAT engine on incoming packets.
-By default all filter sets allow all packets to pass.
+By default all empty filter sets allow all packets to pass.
 Rules are processed in order according to
 .Ar rule-no
 (unless skipped by specifying a rule number as the
@@ -4409,8 +4500,12 @@ and
 filters, this means that the packet is dropped.
 In the case of
 .Em alive
-filters it means that the packet will not reset the idle timer and in
-the case of
+filters it means that the packet will not reset the idle timer (even if
+the
+.Ar in Ns No / Ns Ar out
+filter has a
+.Dq timeout
+value) and in the case of
 .Em dial
 filters it means that the packet will not trigger a dial.
 A packet failing to trigger a dial will be dropped rather than queued.
@@ -4523,6 +4618,26 @@ In all cases, if the interface is already configured,
 .Nm
 will try to maintain the interface IP numbers so that any existing
 bound sockets will remain valid.
+.It set ifqueue Ar packets
+Set the maximum number of packets that
+.Nm
+will read from the tunnel interface while data cannot be sent to any of
+the available links.
+This queue limit is necessary to flow control outgoing data as the tunnel
+interface is likely to be far faster than the combined links available to
+.Nm ppp .
+.Pp
+If
+.Ar packets
+is set to a value less than the number of links,
+.Nm
+will read up to that value regardless.
+This prevents any possible latency problems.
+.Pp
+The default value for
+.Ar packets
+is
+.Dq 30 .
 .It set ccpretry|ccpretries Oo Ar timeout
 .Op Ar reqtries Op Ar trmtries
 .Oc
@@ -5004,7 +5119,7 @@ is specified,
 will never idle out before the link has been up for at least that number
 of seconds.
 .It set urgent Xo
-.Op tcp|udp
+.Op tcp|udp|none
 .Oo Op +|- Ns
 .Ar port
 .Oc No ...
@@ -5046,6 +5161,12 @@ the current list is adjusted, otherwise the list is reassigned.
 prefixed with a plus or not prefixed at all are added to the list and
 .Ar port Ns No s
 prefixed with a minus are removed from the list.
+.Pp
+If
+.Dq none
+is specified, all priority port lists are disabled and even
+.Dv IPTOS_LOWDELAY
+packets are not prioritised.
 .It set vj slotcomp on|off
 This command tells
 .Nm
@@ -5255,6 +5376,7 @@ This socket is used to pass links between different instances of
 .Xr login 1 ,
 .Xr tcpdump 1 ,
 .Xr telnet 1 ,
+.Xr kldload 2 ,
 .Xr libalias 3 ,
 .Xr syslog 3 ,
 .Xr uucplock 3 ,
@@ -5276,6 +5398,7 @@ This socket is used to pass links between different instances of
 .Xr ping 8 ,
 .Xr pppctl 8 ,
 .Xr pppd 8 ,
+.Xr pppoe 8 ,
 .Xr route 8 ,
 .Xr sshd 8 ,
 .Xr syslogd 8 ,

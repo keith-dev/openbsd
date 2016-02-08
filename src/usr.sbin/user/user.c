@@ -1,4 +1,4 @@
-/* $OpenBSD: user.c,v 1.13 2000/05/05 23:54:51 ho Exp $ */
+/* $OpenBSD: user.c,v 1.17 2000/07/15 08:31:54 ho Exp $ */
 /* $NetBSD: user.c,v 1.17 2000/04/14 06:26:55 simonb Exp $ */
 
 /*
@@ -144,7 +144,7 @@ enum {
 };
 
 /* Full paths of programs used here */
-#define CHOWN		"/usr/sbin/chown"
+#define CHOWN		"/sbin/chown"
 #define MKDIR		"/bin/mkdir"
 #define MV		"/bin/mv"
 #define NOLOGIN		"/sbin/nologin"
@@ -817,12 +817,12 @@ adduser(char *login, user_t *up)
 			up->u_comment,
 			home,
 			up->u_shell);
-	if (cc > MaxPasswordEntryLen ||
+	if (cc >= MaxPasswordEntryLen ||
 	    (strchr(up->u_comment, '&') != NULL &&
-	     cc + strlen(login) > MaxPasswordEntryLen)) {
+	     cc + strlen(login) >= MaxPasswordEntryLen)) {
 		(void) close(ptmpfd);
 		(void) pw_abort();
-		err(EXIT_FAILURE, "can't add `%s', line too long", buf);
+		errx(EXIT_FAILURE, "can't add `%s', line too long", buf);
 	}
 	if (write(ptmpfd, buf, (size_t) cc) != cc) {
 		(void) close(ptmpfd);
@@ -911,8 +911,10 @@ moduser(char *login, char *newlogin, user_t *up)
 		if (up->u_uid == -1) {
 			up->u_uid = pwp->pw_uid;
 		}
-		/* if -g=uid was specified, check gid is unused */
-		if (strcmp(up->u_primgrp, "=uid") == 0) {
+		if (up->u_primgrp == NULL) {
+			gid = pwp->pw_gid;
+		} else if (strcmp(up->u_primgrp, "=uid") == 0) {
+		  	/* if -g=uid was specified, check gid is unused */
 			if (getgrgid((gid_t)(up->u_uid)) != (struct group *) NULL) {
 				(void) close(ptmpfd);
 				(void) pw_abort();
@@ -937,7 +939,9 @@ moduser(char *login, char *newlogin, user_t *up)
 		}
 		/* if home directory hasn't been given, use the old one */
 		if (!up->u_homeset) {
-			(void) strlcpy(home, pwp->pw_dir, strlen(home));
+			(void) strlcpy(home, pwp->pw_dir, sizeof(home));
+		} else {
+		  	(void) strlcpy(home, up->u_home, sizeof(home));
 		}
 		expire = 0;
 		if (up->u_expire != NULL) {
@@ -981,12 +985,12 @@ moduser(char *login, char *newlogin, user_t *up)
 					up->u_comment,
 					home,
 					up->u_shell);
-				if (cc > MaxPasswordEntryLen ||
+				if (cc >= MaxPasswordEntryLen ||
 				    (strchr(up->u_comment, '&') != NULL &&
-				     cc + strlen(newlogin) > MaxPasswordEntryLen)) {
+				     cc + strlen(newlogin) >= MaxPasswordEntryLen)) {
 					(void) close(ptmpfd);
 					(void) pw_abort();
-					err(EXIT_FAILURE, "can't add `%s', line too long", buf);
+					errx(EXIT_FAILURE, "can't add `%s', line too long (%d bytes)", buf, cc + strlen(newlogin));
 				}
 				if (write(ptmpfd, buf, (size_t) cc) != cc) {
 					(void) close(ptmpfd);
@@ -1251,6 +1255,8 @@ usermod(int argc, char **argv)
 	(void) memset(newuser, 0, sizeof(newuser));
 	read_defaults(&u);
 	u.u_uid = -1;
+	free(u.u_primgrp);
+	u.u_primgrp = NULL;
 	have_new_user = 0;
 	while ((c = getopt(argc, argv, "G:c:d:e:f:g:l:mos:u:" MOD_OPT_EXTENSIONS)) != -1) {
 		switch(c) {

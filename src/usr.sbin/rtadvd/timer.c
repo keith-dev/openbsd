@@ -1,4 +1,5 @@
-/*	$OpenBSD: timer.c,v 1.2 1999/12/11 10:33:30 itojun Exp $	*/
+/*	$OpenBSD: timer.c,v 1.4 2000/07/06 10:14:49 itojun Exp $	*/
+/*	$KAME: timer.c,v 1.4 2000/05/27 11:30:43 jinmei Exp $	*/
 
 /*
  * Copyright (C) 1998 WIDE Project.
@@ -35,7 +36,7 @@
 #include <syslog.h>
 #include <stdlib.h>
 #include <string.h>
-#ifdef __NetBSD__
+#if defined(__NetBSD__) || defined(__OpenBSD__)
 #include <search.h>
 #endif
 #include "timer.h"
@@ -43,6 +44,8 @@
 static struct rtadvd_timer timer_head;
 
 #define MILLION 1000000
+#define TIMEVAL_EQUAL(t1,t2) ((t1)->tv_sec == (t2)->tv_sec &&\
+ (t1)->tv_usec == (t2)->tv_usec) 
 
 static struct timeval tm_max = {0x7fffffff, 0x7fffffff};
 
@@ -93,6 +96,14 @@ rtadvd_add_timer(void (*timeout) __P((void *)),
 }
 
 void
+rtadvd_remove_timer(struct rtadvd_timer **timer)
+{
+	remque(*timer);
+	free(*timer);
+	*timer = NULL;
+}
+
+void
 rtadvd_set_timer(struct timeval *tm, struct rtadvd_timer *timer)
 {
 	struct timeval now;
@@ -138,7 +149,11 @@ rtadvd_check_timer()
 		tm = tm->next;
 	}
 
-	if (TIMEVAL_LT(timer_head.tm, now)) {
+	if (TIMEVAL_EQUAL(&tm_max, &timer_head.tm)) {
+		/* no need to timeout */
+		return(NULL);
+	}
+	else if (TIMEVAL_LT(timer_head.tm, now)) {
 		/* this may occur when the interval is too small */
 		returnval.tv_sec = returnval.tv_usec = 0;
 	}

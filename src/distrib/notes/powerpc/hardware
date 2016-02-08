@@ -1,15 +1,15 @@
-OpenBSD/MACHINE OSREV runs on iMac and possibly some other G3 Macintosh 
-systems. Older Adb based system are unlikely to work. This is partially
-firmware issues and partially driver issues.
+OpenBSD/MACHINE OSREV runs on iMac and possibly some other G3 and G4 Power
+Macintosh systems.  Older ADB-based systems are unlikely to work.  This is
+partially due to firmware issues and partially drive issues.
 
-Has been tested on iMac  Rev A 233Mhz and Rev C 333Mhz machines,
-Some success has been reported on a PowerBook, however this is
-not well supported.
+Has been tested on iMac Rev A/233MHz and Rev C/333MHz machines as well as
+several Power Macintosh G4 systems (single and dual processor).  Some
+success has been reported on a PowerBook, however this is not well
+supported.
 
-This version will likely not work on any of the B&W G3 or any G4 machines.
-Some code has been rewritten to work better on the B&W G3, but never
-has been retested. Hardware availability is currently limiting development
-on those systems.
+Some code has been written to work better on the B&W G3, but has never
+been retested.  Hardware availability is currently limiting development on
+these systems.
 
 Supported devices {:-include-:}:
 
@@ -18,8 +18,6 @@ Supported devices {:-include-:}:
 		Symbios Logic (NCR) 53C8xx-based PCI SCSI host adapters
 
 	VGA, SVGA Display Adapters. 
-		An X Server is not yet available.
-		currently will only function as console
 
 	Serial ports:
 		None.

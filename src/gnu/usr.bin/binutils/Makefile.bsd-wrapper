@@ -1,39 +1,52 @@
-#	$OpenBSD: Makefile.bsd-wrapper,v 1.32 1999/12/22 19:45:32 mickey Exp $
+#	$OpenBSD: Makefile.bsd-wrapper,v 1.41 2000/09/21 15:15:57 espie Exp $
+
+NEW_BINUTILS=alpha mips powerpc hppa
 
 SUBDIRS=	opcodes bfd
-MAN=
+ALL_X11_MODULES=
+INSTALL_X11_MODULES=
 
-# gdb not ready yet
-.if (${MACHINE_ARCH} != "unknown")
-SUBDIRS+=	gdb mmalloc readline 
-MAN+=		gdb/gdb.1 
+
+# This allows moving the whole binutils installation around for 
+# testing purposes
+PREFIX=/usr
+.if ${PREFIX} != "/usr"
+MANDIR=${PREFIX}/share/man/cat
 .endif
 
-# some ports use all of binutils, some do not.
-.if (${MACHINE_ARCH} == "alpha") || (${MACHINE_ARCH} == "mips") || \
-	(${MACHINE_ARCH} == "powerpc") || (${MACHINE_ARCH} == "hppa")
+MAN=		binutils/objdump.1
+
+.if ${MACHINE_ARCH} != "unknown"
+SUBDIRS+=	gdb mmalloc readline 
+MAN+=		gdb/gdb.1
+ALL_X11_MODULES+=all-gdb
+INSTALL_X11_MODULES+=install-gdb
+.endif
+
+.for _arch in ${MACHINE_ARCH}
+.  if !empty(NEW_BINUTILS:M${_arch})
 SUBDIRS+=	binutils ld gas gprof
 MAN+=		binutils/ar.1 binutils/nm.1 \
-		binutils/objcopy.1 binutils/objdump.1 binutils/ranlib.1 \
+		binutils/objcopy.1 binutils/ranlib.1 \
 		binutils/size.1 binutils/strings.1 binutils/strip.1 \
 		gas/doc/as.1 gprof/gprof.1 ld/ld.1
-.else
-MAN+= binutils/objdump.1
-.endif
+.  endif
+.endfor
 
 # Used by the GNU Makefile
 ALL_MODULES=${SUBDIRS:S/^/all-/g}
 INSTALL_MODULES=${SUBDIRS:S/^/install-/g}
 	
 all:	config.status
-	${MAKE} CC="${CC}" CFLAGS="${CFLAGS} ${COPTS}" LDFLAGS=${LDSTATIC} \
-		SUBDIRS="${SUBDIRS}" ALL_MODULES="${ALL_MODULES}" \
-		INSTALL_MODULES="${INSTALL_MODULES}"
+	SUBDIRS='${SUBDIRS}' ${MAKE} CC="${CC}" \
+	    CFLAGS="${CFLAGS} ${COPTS}" LDFLAGS=${LDSTATIC} \
+	    scriptdir=${PREFIX}/libdata \
+	    tooldir=${PREFIX} \
+	    ALL_MODULES="${ALL_MODULES}" \
+	    ALL_X11_MODULES="${ALL_X11_MODULES}"
 	cd ${.OBJDIR}/binutils && \
-	${MAKE} CC="${CC}" CFLAGS="${CFLAGS} ${COPTS}" LDFLAGS=${LDSTATIC} \
-		objdump
-
-.FORCE:	.IGNORE
+	    ${MAKE} CC="${CC}" CFLAGS="${CFLAGS} ${COPTS}" \
+	    LDFLAGS=${LDSTATIC} objdump
 
 .include <bsd.own.mk>
 
@@ -43,32 +56,33 @@ CF=	--cache-file=${GLOBAL_AUTOCONF_CACHE}
 CF=
 .endif
 
-config: .FORCE
+do-config: .USE
+	PATH="/bin:/usr/bin:/sbin:/usr/sbin" \
+	sh ${.CURDIR}/configure --prefix=${PREFIX} \
+	    --infodir='$${prefix}/share/info' \
+	    --disable-nls --disable-gdbtk --disable-commonbfdlib ${CF}
+	cd ${.OBJDIR} && \
+	    sed -e 's,SUBDIRS *=,SUBDIRS ?=,' <Makefile >Makefile.tmp && \
+	    mv -f Makefile.tmp Makefile
+
+config: do-config
 .ifndef GLOBAL_AUTOCONF_CACHE
 	-rm -f config.cache
 .endif
-	PATH="/bin:/usr/bin:/sbin:/usr/sbin" \
-	sh ${.CURDIR}/configure --prefix=/usr --infodir=/usr/share/info \
-	--disable-gdbtk --disable-commonbfdlib ${CF}
 
-config.status:
-	PATH="/bin:/usr/bin:/sbin:/usr/sbin" \
-	sh ${.CURDIR}/configure --prefix=/usr --infodir=/usr/share/info \
-	--disable-gdbtk --disable-commonbfdlib ${CF}
+config.status: do-config
 
-.ifdef NOMAN
-maninstall:
-	@echo NOMAN is set
-.endif
-
+# Need to pass SUBDIRS because of install-info
 install: maninstall
-	${MAKE} prefix=${DESTDIR}/usr infodir=${DESTDIR}/usr/share/info \
-		bindir=${DESTDIR}/usr/bin INSTALL_MAN= SUBDIRS="${SUBDIRS}" \
-		ALL_MODULES="${ALL_MODULES}" INSTALL_MODULES="${INSTALL_MODULES}" \
-		install install-info
+	SUBDIRS='${SUBDIRS}' ${MAKE} DESTDIR='${DESTDIR}' \
+	    INSTALL_X11_MODULES="${INSTALL_X11_MODULES}" \
+	    INSTALL_MAN= \
+	    scriptdir=${PREFIX}/libdata \
+	    tooldir=${PREFIX} \
+	    INSTALL_MODULES='${INSTALL_MODULES}' install install-info
 	cd ${.OBJDIR}/binutils && \
 		${INSTALL} ${INSTALL_COPY} ${INSTALL_STRIP} -o ${BINOWN} -g ${BINGRP} \
-			-m ${BINMODE} objdump ${DESTDIR}/usr/bin
+			-m ${BINMODE} objdump ${DESTDIR}${PREFIX}/bin
 
 clean cleandir:
 	-@if [ -e Makefile ]; then ${MAKE} distclean; fi
@@ -82,8 +96,14 @@ lint:
 tags:
 	# Nothing here so far...
 
+.PHONY: config
+
 .include <bsd.obj.mk>
 .include <bsd.subdir.mk>
-.ifndef NOMAN
+
+.ifdef NOMAN
+maninstall:
+	@echo NOMAN is set
+.else
 .include <bsd.man.mk>
 .endif

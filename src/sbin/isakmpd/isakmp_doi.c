@@ -1,5 +1,5 @@
-/*	$OpenBSD: isakmp_doi.c,v 1.9 2000/02/25 17:23:40 niklas Exp $	*/
-/*	$EOM: isakmp_doi.c,v 1.40 2000/02/20 19:58:39 niklas Exp $	*/
+/*	$OpenBSD: isakmp_doi.c,v 1.11 2000/10/07 06:59:24 niklas Exp $	*/
+/*	$EOM: isakmp_doi.c,v 1.42 2000/09/12 16:29:41 ho Exp $	*/
 
 /*
  * Copyright (c) 1998, 1999 Niklas Hallqvist.  All rights reserved.
@@ -47,6 +47,7 @@
 #include "doi.h"
 #include "exchange.h"
 #include "isakmp.h"
+#include "ipsec.h"
 #include "log.h"
 #include "message.h"
 #include "sa.h"
@@ -103,7 +104,10 @@ static struct doi isakmp_doi = {
   isakmp_validate_situation,
   isakmp_validate_transform_id,
   isakmp_initiator,
-  isakmp_responder
+  isakmp_responder,
+#ifdef USE_DEBUG
+  ipsec_decode_ids
+#endif
 };
 
 /* Requires doi_init to already have been called.  */

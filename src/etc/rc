@@ -1,4 +1,4 @@
-#	$OpenBSD: rc,v 1.137 2000/05/12 06:10:26 deraadt Exp $
+#	$OpenBSD: rc,v 1.157 2000/10/27 06:36:35 deraadt Exp $
 
 # System startup script run by init on autoboot
 # or after single-user.
@@ -112,18 +112,6 @@ rm -f /fastboot		# XXX (root now writeable)
 echo 'setting tty flags'
 ttyflags -a
 
-# if there's no /var/db/host.random, make one through /dev/urandom
-if [ ! -f /var/db/host.random ]; then
-	dd if=/dev/urandom of=/var/db/host.random bs=1024 count=64 \
-		>/dev/null 2>&1
-	chmod 600 /var/db/host.random >/dev/null 2>&1
-else
-	dd if=/var/db/host.random of=/dev/urandom bs=1024 count=64 \
-	    > /dev/null 2>&1
-	dd if=/var/db/host.random of=/dev/arandom bs=1024 count=64 \
-	    > /dev/null 2>&1
-fi
-
 if [ -f /etc/sysctl.conf ]; then
 (
 	# delete comments and blank lines
@@ -142,6 +130,23 @@ echo 'starting network'
 mount /usr >/dev/null 2>&1
 mount /var >/dev/null 2>&1
 
+# if there's no /var/db/host.random, make one through /dev/urandom
+if [ ! -f /var/db/host.random ]; then
+	dd if=/dev/urandom of=/var/db/host.random bs=1024 count=64 \
+		>/dev/null 2>&1
+	chmod 600 /var/db/host.random >/dev/null 2>&1
+else
+	dd if=/var/db/host.random of=/dev/urandom bs=1024 count=64 \
+	    > /dev/null 2>&1
+	dd if=/var/db/host.random of=/dev/arandom bs=1024 count=64 \
+	    > /dev/null 2>&1
+fi
+
+# reset seed file, so that if a shutdown-less reboot occurs,
+# the next seed is not a repeat
+dd if=/dev/urandom of=/var/db/host.random bs=1024 count=64 \
+    > /dev/null 2>&1
+
 # clean up left-over files
 rm -f /etc/nologin
 rm -f /var/spool/lock/LCK.*
@@ -158,22 +163,6 @@ if [ "X${named_flags}" != X"NO" -a "X${named_chroot}" != "X" ]; then
 	syslogd_flags="${syslogd_flags} -a ${named_chroot}/dev/log"
 fi
 syslogd ${syslogd_flags}
-
-# /etc/ifaliases, if it exists, contains the names of additional IP
-# addresses for each interface. It is formatted as a series of lines
-# that contain
-#	interface address netmask
-if [ -f /etc/ifaliases ]; then
-(
-	# delete comments and blank lines
-	set -- `stripcom /etc/ifaliases`
-	while [ $# -ge 3 ] ; do
-		ifconfig $1 inet alias $2 netmask $3
-		route -n add -host $2 localhost
-		shift 3
-	done
-)
-fi
 
 # $named_flags, $named_user, and $named_chroot are imported from /etc/rc.conf;
 # if $named_flags != NO, named is run.
@@ -252,7 +241,7 @@ fi
 # $nfs_server is imported from /etc/rc.conf;
 # if $nfs_server == YES, the machine is setup for being an nfs server
 if [ X${nfs_server} = X"YES" -a -s /etc/exports -a \
-    `cat /etc/exports | sed -e '/^#/d' | wc -l` -ne 0 ]; then
+    `sed -e '/^#/d' < /etc/exports | wc -l` -ne 0 ]; then
 	rm -f /var/db/mountdtab
 	echo -n > /var/db/mountdtab
 	echo -n ' mountd';		mountd
@@ -262,16 +251,15 @@ if [ X${nfs_server} = X"YES" -a -s /etc/exports -a \
 	fi
 fi
 
-# $nfs_client is imported from /etc/rc.conf;
-# if $nfs_client == YES, the machine is setup for being an nfs client
-if [ X${nfs_client} = X"YES" ]; then
-	echo -n ' nfsiod';		nfsiod ${nfsiod_flags}
-fi
-
 if [ X${amd} = X"YES" -a -d ${amd_dir} -a -e ${amd_master} ]; then
 	echo -n ' amd'
 	(cd /etc/amd; amd -l syslog -x error,noinfo,nostats -p \
 	    -a ${amd_dir} `cat ${amd_master}` > /var/run/amd.pid )
+fi
+
+# run rdate before timed
+if [ X"${rdate_flags}" != X"NO" ]; then
+        echo -n ' rdate';     rdate -s ${rdate_flags}
 fi
 
 # $timed_flags is imported from /etc/rc.conf;
@@ -366,7 +354,7 @@ if [ -f /sbin/ldconfig ]; then
 	ldconfig $shlib_dirs
 fi
 
-if [ ! -f /etc/ssh_host_dsa_key -a -x /usr/bin/ssh-keygen ]; then
+if [ ! -f /etc/ssh_host_dsa_key ]; then
 	echo -n "ssh-keygen: generating new DSA host key... "
 	if /usr/bin/ssh-keygen -q -d -f /etc/ssh_host_dsa_key -N ''; then
 		echo done.
@@ -374,8 +362,7 @@ if [ ! -f /etc/ssh_host_dsa_key -a -x /usr/bin/ssh-keygen ]; then
 		echo failed.
 	fi
 fi
-if [ ! -f /etc/ssh_host_key -a -x /usr/bin/ssh-keygen ] && \
-    ssh-keygen -R; then
+if [ ! -f /etc/ssh_host_key ]; then
 	echo -n "ssh-keygen: generating new RSA host key... "
 	if /usr/bin/ssh-keygen -q -f /etc/ssh_host_key -N ''; then
 		echo done.
@@ -390,7 +377,7 @@ echo -n starting network daemons:
 # If $gated == YES, gated is used; otherwise routed.
 # If $routed_flags == NO, routed isn't run.
 if [ X${gated} = X"YES" -a -e /etc/gated.conf ]; then
-	echo -n ' gated';		gated $gated_flags
+	echo -n ' gated';		/usr/local/sbin/gated $gated_flags
 elif [ "X${routed_flags}" != X"NO" ]; then
 	echo -n ' routed';		routed $routed_flags
 fi
@@ -406,7 +393,7 @@ fi
 if [ "X${dhcpd_flags}" != X"NO" -a -f /etc/dhcpd.conf ]; then
 	touch /var/db/dhcpd.leases
 	if [ -f /etc/dhcpd.interfaces ]; then
-		dhcpd_ifs=`cat /etc/dhcpd.interfaces | awk -F\# '{ print $1; }'`
+		dhcpd_ifs=`awk -F\# '{ print $1; }' < /etc/dhcpd.interfaces`
 	fi
 	echo -n ' dhcpd';	/usr/sbin/dhcpd ${dhcpd_flags} ${dhcpd_ifs}
 fi
@@ -420,10 +407,6 @@ if ifconfig lo0 inet6 >/dev/null 2>&1; then
 			echo -n ' rtsold'
 			/usr/sbin/rtsold ${rtsold_flags}
 		fi
-
-		if [ "X${ip6defaultif}" != X"NO" ]; then
-			/usr/sbin/ndp -I ${ip6defaultif}
-		fi
 	else
 		# $route6d_flags is imported from /etc/rc.conf;
 		# If $route6d_flags == NO, then route6d isn't run.
@@ -432,9 +415,8 @@ if ifconfig lo0 inet6 >/dev/null 2>&1; then
 			/usr/sbin/route6d ${route6d_flags}
 		fi
 		# $rtadvd_flags is imported from /etc/rc.conf;
-		# If $rtadvd_flags == NO or /etc/rtadvd.conf doesn't exist,
-		# then rtadvd isn't run.
-		if [ "X${rtadvd_flags}" != X"NO" -a -f /etc/rtadvd.conf ]; then
+		# If $rtadvd_flags == NO, then rtadvd isn't run.
+		if [ "X${rtadvd_flags}" != X"NO" ]; then
 			echo -n ' rtadvd'
 			/usr/sbin/rtadvd ${rtadvd_flags}
 		fi
@@ -453,14 +435,17 @@ if [ X${lpd} = X"YES" ]; then
 fi
 
 # $sendmail_flags is imported from /etc/rc.conf;
-# If $sendmail_flags == NO or /etc/mail/sendmail.cf doesn't exist, then
+# If $sendmail_flags == NO or /etc/mailer.conf doesn't exist, then
 # sendmail isn't run.  We call sendmail with a full path so that
-# SIGHUP works.
-if [ "X${sendmail_flags}" != X"NO" -a -s /etc/mail/sendmail.cf ]; then
-	echo -n ' sendmail';		/usr/sbin/sendmail ${sendmail_flags}
+# SIGHUP works.  Note that /usr/sbin/sendmail may actually call a
+# mailer other than sendmail, depending on /etc/mailer.conf.
+if [ "X${sendmail_flags}" != X"NO" -a -s /etc/mailer.conf ]; then
+	echo -n ' sendmail';		( /usr/sbin/sendmail ${sendmail_flags} >/dev/null 2>&1 & )
 fi
 
 if [ "X${httpd_flags}" != X"NO"  ]; then
+	# Clean up left-over httpd locks
+	rm -f /var/www/logs/{ssl_mutex,httpd.lock,accept.lock}.*
 	echo -n ' httpd';		/usr/sbin/httpd ${httpd_flags}
 fi
 
@@ -512,11 +497,7 @@ if [ "X${mopd_flags}" != X"NO" -a -d /tftpboot/mop ]; then
 fi
 
 if [ X"${sshd}" == X"YES" ]; then
-	if test -x /usr/sbin/sshd && /usr/sbin/sshd -Q ; then
-		echo -n ' sshd'
-	elif [ -x /usr/local/sbin/sshd && /usr/local/sbin/sshd ]; then
-		echo -n ' sshd'
-	fi
+	/usr/sbin/sshd;			echo -n ' sshd'
 fi
 
 echo '.'
@@ -526,7 +507,7 @@ if [ -f /sbin/kbd -a -f /etc/kbdtype ]; then
 fi
 
 # Kerberos runs ONLY on the Kerberos servers
-# Kadmin is runs only on the main server
+# Kadmin runs only on the main server
 if [ X${kerberos_server} = X"YES" ]; then
 	echo 'kerberos server'
 	/usr/libexec/kerberos >> /var/log/kerberos.log &
@@ -537,7 +518,7 @@ fi
 if [ X${kerberos_slave} = X"YES" ]; then
 	echo 'kerberos slave server'
 	/usr/libexec/kerberos -s >> /var/log/kerberos.log &
-	/usr/libexec/kpropd -i -p /usr/sbin/kdb_util &
+	/usr/libexec/kpropd -i &
 fi
 
 [ -f /etc/rc.local ] && . /etc/rc.local
@@ -559,6 +540,10 @@ echo -n ' cron';		cron
 echo '.'
 
 date
+
+if [ "X${moused_flags}" != X"NO" -a -x /usr/sbin/moused ]; then
+	echo 'starting moused...';	/usr/sbin/moused ${moused_flags}
+fi
 
 # Alternatively, on some architectures, xdm may be started in /etc/ttys.
 if [ "X${xdm_flags}" != X"NO" ]; then

@@ -1,4 +1,4 @@
-/*	$OpenBSD: ftp.c,v 1.35 2000/05/03 19:50:41 deraadt Exp $	*/
+/*	$OpenBSD: ftp.c,v 1.39 2000/10/18 06:53:24 itojun Exp $	*/
 /*	$NetBSD: ftp.c,v 1.27 1997/08/18 10:20:23 lukem Exp $	*/
 
 /*
@@ -67,7 +67,7 @@
 #if 0
 static char sccsid[] = "@(#)ftp.c	8.6 (Berkeley) 10/27/94";
 #else
-static char rcsid[] = "$OpenBSD: ftp.c,v 1.35 2000/05/03 19:50:41 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: ftp.c,v 1.39 2000/10/18 06:53:24 itojun Exp $";
 #endif
 #endif /* not lint */
 
@@ -138,6 +138,8 @@ hookup(host, port)
 	char hbuf[MAXHOSTNAMELEN];
 	char *cause = "unknown";
 
+	epsv4bad = 0;
+
 	memset((char *)&hisctladdr, 0, sizeof (hisctladdr));
 	memset(&hints, 0, sizeof(hints));
 	hints.ai_flags = AI_CANONNAME;
@@ -163,7 +165,10 @@ hookup(host, port)
 			error = getaddrinfo(host, pbuf, &hints, &res0);
 	}
 	if (error) {
-		warn(gai_strerror(error));
+		if (error == EAI_SERVICE)
+			warnx("%s: bad port number `%s'", host, port);
+		else
+			warnx("%s: %s", host, gai_strerror(error));
 		code = -1;
 		return (0);
 	}
@@ -214,7 +219,7 @@ hookup(host, port)
 		break;
 	}
 	if (s < 0) {
-		warn(cause);
+		warn("%s", cause);
 		code = -1;
 		freeaddrinfo(res0);
 		return 0;
@@ -1191,7 +1196,7 @@ int
 initconn()
 {
 	char *p, *a;
-	int result, len, tmpno = 0;
+	int result = ERROR, len, tmpno = 0;
 	int on = 1;
 	int error;
 	u_int addr[16], port[2];
@@ -1217,12 +1222,22 @@ reinit:
 			warn("setsockopt (ignored)");
 		switch (data_addr.su_family) {
 		case AF_INET:
-			result = command(pasvcmd = "EPSV");
-			if (code / 10 == 22 && code != 229) {
-				fputs(
+			if (epsv4 && !epsv4bad) {
+				result = command(pasvcmd = "EPSV");
+				if (code / 10 == 22 && code != 229) {
+					fputs(
 "wrong server: return code must be 229\n",
-					ttyout);
-				result = COMPLETE + 1;
+						ttyout);
+					result = COMPLETE + 1;
+				}
+				if (result != COMPLETE) {
+					epsv4bad = 1;
+					if (debug) {
+						fputs(
+"disabling epsv4 for this connection\n",
+						    ttyout);
+					}
+				}
 			}
 			if (result != COMPLETE)
 				result = command(pasvcmd = "PASV");
@@ -1264,6 +1279,8 @@ reinit:
 		 * What we've got at this point is a string of comma separated
 		 * one-byte unsigned integer values, separated by commas.
 		 */
+		if (!pasvcmd)
+			goto bad;
 		if (strcmp(pasvcmd, "PASV") == 0) {
 			if (data_addr.su_family != AF_INET) {
 				fputs(
@@ -1464,6 +1481,11 @@ noport:
 
 		switch (data_addr.su_family) {
 		case AF_INET:
+			if (!epsv4 || epsv4bad) {
+				result = COMPLETE +1;
+				break;
+			}
+			/*FALLTHROUGH*/
 		case AF_INET6:
 			af = (data_addr.su_family == AF_INET) ? 1 : 2;
 			if (getnameinfo((struct sockaddr *)&data_addr,
@@ -1473,6 +1495,14 @@ noport:
 			} else {
 				result = command("EPRT |%d|%s|%d|",
 					af, hname, ntohs(data_addr.su_port));
+				if (result != COMPLETE) {
+					epsv4bad = 1;
+					if (debug) {
+						fputs(
+"disabling epsv4 for this connection\n",
+						    ttyout);
+					}
+				}
 			}
 			break;
 		default:

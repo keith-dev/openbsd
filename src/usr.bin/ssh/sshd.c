@@ -2,26 +2,51 @@
  * Author: Tatu Ylonen <ylo@cs.hut.fi>
  * Copyright (c) 1995 Tatu Ylonen <ylo@cs.hut.fi>, Espoo, Finland
  *                    All rights reserved
- * Created: Fri Mar 17 17:09:28 1995 ylo
- * This program is the ssh daemon.  It listens for connections from clients, and
- * performs authentication, executes use commands or shell, and forwards
+ * This program is the ssh daemon.  It listens for connections from clients,
+ * and performs authentication, executes use commands or shell, and forwards
  * information to/from the application to the user client over an encrypted
- * connection.  This can also handle forwarding of X11, TCP/IP, and authentication
- * agent connections.
+ * connection.  This can also handle forwarding of X11, TCP/IP, and
+ * authentication agent connections.
  *
- * SSH2 implementation,
- * Copyright (c) 2000 Markus Friedl. All rights reserved.
+ * As far as I am concerned, the code I have written for this software
+ * can be used freely for any purpose.  Any derived versions of this
+ * software must be clearly marked as such, and if the derived work is
+ * incompatible with the protocol description in the RFC file, it must be
+ * called by a name other than "ssh" or "Secure Shell".
+ *
+ * SSH2 implementation:
+ *
+ * Copyright (c) 2000 Markus Friedl.  All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
+ * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
+ * OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
+ * IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
+ * NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+ * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+ * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+ * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
+ * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
 #include "includes.h"
-RCSID("$OpenBSD: sshd.c,v 1.115 2000/05/03 10:21:49 markus Exp $");
+RCSID("$OpenBSD: sshd.c,v 1.132 2000/10/13 18:34:46 markus Exp $");
 
 #include "xmalloc.h"
 #include "rsa.h"
 #include "ssh.h"
 #include "pty.h"
 #include "packet.h"
-#include "cipher.h"
 #include "mpaux.h"
 #include "servconf.h"
 #include "uidswap.h"
@@ -37,6 +62,7 @@ RCSID("$OpenBSD: sshd.c,v 1.115 2000/05/03 10:21:49 markus Exp $");
 #include <openssl/rsa.h>
 #include "key.h"
 #include "dsa.h"
+#include "dh.h"
 
 #include "auth.h"
 #include "myproposal.h"
@@ -134,9 +160,15 @@ unsigned char session_id[16];
 unsigned char *session_id2 = NULL;
 int session_id2_len = 0;
 
+/* record remote hostname or ip */
+unsigned int utmp_len = MAXHOSTNAMELEN;
+
 /* Prototypes for various functions defined later in this file. */
 void do_ssh1_kex();
 void do_ssh2_kex();
+
+void ssh_dh1_server(Kex *, Buffer *_kexinit, Buffer *);
+void ssh_dhgex_server(Kex *, Buffer *_kexinit, Buffer *);
 
 /*
  * Close all listening sockets
@@ -258,21 +290,6 @@ key_regeneration_alarm(int sig)
 	errno = save_errno;
 }
 
-char *
-chop(char *s)
-{
-	char *t = s;
-	while (*t) {
-		if(*t == '\n' || *t == '\r') {
-			*t = '\0';
-			return s;
-		}
-		t++;
-	}
-	return s;
-
-}
-
 void
 sshd_exchange_identification(int sock_in, int sock_out)
 {
@@ -307,13 +324,17 @@ sshd_exchange_identification(int sock_in, int sock_out)
 
 		/* Read other side\'s version identification. */
 		for (i = 0; i < sizeof(buf) - 1; i++) {
-			if (read(sock_in, &buf[i], 1) != 1) {
+			if (atomicio(read, sock_in, &buf[i], 1) != 1) {
 				log("Did not receive ident string from %s.", get_remote_ipaddr());
 				fatal_cleanup();
 			}
 			if (buf[i] == '\r') {
 				buf[i] = '\n';
 				buf[i + 1] = 0;
+				/* Kludge for F-Secure Macintosh < 1.0.2 */
+				if (i == 12 &&
+				    strncmp(buf, "SSH-1.5-W1.0", 12) == 0)
+					break;
 				continue;
 			}
 			if (buf[i] == '\n') {
@@ -360,7 +381,7 @@ sshd_exchange_identification(int sock_in, int sock_out)
 			break;
 		}
 		if (remote_minor < 3) {
-			packet_disconnect("Your ssh version is too old and"
+			packet_disconnect("Your ssh version is too old and "
 			    "is no longer supported.  Please install a newer version.");
 		} else if (remote_minor == 3) {
 			/* note that this disables agent-forwarding */
@@ -400,12 +421,47 @@ void
 destroy_sensitive_data(void)
 {
 	/* Destroy the private and public keys.  They will no longer be needed. */
-	RSA_free(public_key);
-	RSA_free(sensitive_data.private_key);
-	RSA_free(sensitive_data.host_key);
+	if (public_key)
+		RSA_free(public_key);
+	if (sensitive_data.private_key)
+		RSA_free(sensitive_data.private_key);
+	if (sensitive_data.host_key)
+		RSA_free(sensitive_data.host_key);
 	if (sensitive_data.dsa_host_key != NULL)
 		key_free(sensitive_data.dsa_host_key);
 }
+
+/*
+ * returns 1 if connection should be dropped, 0 otherwise.
+ * dropping starts at connection #max_startups_begin with a probability
+ * of (max_startups_rate/100). the probability increases linearly until
+ * all connections are dropped for startups > max_startups
+ */
+int
+drop_connection(int startups)
+{
+	double p, r;
+
+	if (startups < options.max_startups_begin)
+		return 0;
+	if (startups >= options.max_startups)
+		return 1;
+	if (options.max_startups_rate == 100)
+		return 1;
+
+	p  = 100 - options.max_startups_rate;
+	p *= startups - options.max_startups_begin;
+	p /= (double) (options.max_startups - options.max_startups_begin);
+	p += options.max_startups_rate;
+	p /= 100.0;
+	r = arc4random() / (double) UINT_MAX;
+
+	debug("drop_connection: p %g, r %g", p, r);
+	return (r < p) ? 1 : 0;
+}
+
+int *startup_pipes = NULL;	/* options.max_startup sized array of fd ints */
+int startup_pipe;		/* in child */
 
 /*
  * Main program for the daemon.
@@ -415,7 +471,7 @@ main(int ac, char **av)
 {
 	extern char *optarg;
 	extern int optind;
-	int opt, sock_in = 0, sock_out = 0, newsock, i, fdsetsz, on = 1;
+	int opt, sock_in = 0, sock_out = 0, newsock, j, i, fdsetsz, on = 1;
 	pid_t pid;
 	socklen_t fromlen;
 	int silent = 0;
@@ -428,6 +484,8 @@ main(int ac, char **av)
 	struct addrinfo *ai;
 	char ntop[NI_MAXHOST], strport[NI_MAXSERV];
 	int listen_sock, maxfd;
+	int startup_p[2];
+	int startups = 0;
 
 	/* Save argv[0]. */
 	saved_argv = av;
@@ -440,7 +498,7 @@ main(int ac, char **av)
 	initialize_server_options(&options);
 
 	/* Parse command-line arguments. */
-	while ((opt = getopt(ac, av, "f:p:b:k:h:g:V:diqQ46")) != EOF) {
+	while ((opt = getopt(ac, av, "f:p:b:k:h:g:V:u:diqQ46")) != EOF) {
 		switch (opt) {
 		case '4':
 			IPv4or6 = AF_INET;
@@ -452,8 +510,15 @@ main(int ac, char **av)
 			config_file_name = optarg;
 			break;
 		case 'd':
-			debug_flag = 1;
-			options.log_level = SYSLOG_LEVEL_DEBUG;
+			if (0 == debug_flag) {
+				debug_flag = 1;
+				options.log_level = SYSLOG_LEVEL_DEBUG1;
+			} else if (options.log_level < SYSLOG_LEVEL_DEBUG3) {
+				options.log_level++;
+			} else {
+				fprintf(stderr, "Too high debugging level.\n");
+				exit(1);
+			}
 			break;
 		case 'i':
 			inetd_flag = 1;
@@ -469,8 +534,10 @@ main(int ac, char **av)
 			break;
 		case 'p':
 			options.ports_from_cmdline = 1;
-			if (options.num_ports >= MAX_PORTS)
-				fatal("too many ports.\n");
+			if (options.num_ports >= MAX_PORTS) {
+				fprintf(stderr, "too many ports.\n");
+				exit(1);
+			}
 			options.ports[options.num_ports++] = atoi(optarg);
 			break;
 		case 'g':
@@ -487,13 +554,16 @@ main(int ac, char **av)
 			/* only makes sense with inetd_flag, i.e. no listen() */
 			inetd_flag = 1;
 			break;
+		case 'u':
+			utmp_len = atoi(optarg);
+			break;
 		case '?':
 		default:
 			fprintf(stderr, "sshd version %s\n", SSH_VERSION);
 			fprintf(stderr, "Usage: %s [options]\n", av0);
 			fprintf(stderr, "Options:\n");
 			fprintf(stderr, "  -f file    Configuration file (default %s)\n", SERVER_CONFIG_FILE);
-			fprintf(stderr, "  -d         Debugging mode\n");
+			fprintf(stderr, "  -d         Debugging mode (multiple -d means more debugging)\n");
 			fprintf(stderr, "  -i         Started from inetd\n");
 			fprintf(stderr, "  -q         Quiet (no logging)\n");
 			fprintf(stderr, "  -p port    Listen on the specified port (default: 22)\n");
@@ -502,6 +572,7 @@ main(int ac, char **av)
 			fprintf(stderr, "  -b bits    Size of server RSA key (default: 768 bits)\n");
 			fprintf(stderr, "  -h file    File from which to read host key (default: %s)\n",
 			    HOST_KEY_FILE);
+			fprintf(stderr, "  -u len     Maximum hostname length for utmp recording\n");
 			fprintf(stderr, "  -4         Use IPv4 only\n");
 			fprintf(stderr, "  -6         Use IPv6 only\n");
 			exit(1);
@@ -641,6 +712,7 @@ main(int ac, char **av)
 		s2 = dup(s1);
 		sock_in = dup(0);
 		sock_out = dup(1);
+		startup_pipe = -1;
 		/*
 		 * We intentionally do not close the descriptors 0, 1, and 2
 		 * as our code for setting the descriptors won\'t work if
@@ -749,6 +821,7 @@ main(int ac, char **av)
 
 		/* Arrange to restart on SIGHUP.  The handler needs listen_sock. */
 		signal(SIGHUP, sighup_handler);
+
 		signal(SIGTERM, sigterm_handler);
 		signal(SIGQUIT, sigterm_handler);
 
@@ -756,12 +829,15 @@ main(int ac, char **av)
 		signal(SIGCHLD, main_sigchld_handler);
 
 		/* setup fd set for listen */
+		fdset = NULL;
 		maxfd = 0;
 		for (i = 0; i < num_listen_socks; i++)
 			if (listen_socks[i] > maxfd)
 				maxfd = listen_socks[i];
-		fdsetsz = howmany(maxfd, NFDBITS) * sizeof(fd_mask);
-		fdset = (fd_set *)xmalloc(fdsetsz);
+		/* pipes connected to unauthenticated childs */
+		startup_pipes = xmalloc(options.max_startups * sizeof(int));
+		for (i = 0; i < options.max_startups; i++)
+			startup_pipes[i] = -1;
 
 		/*
 		 * Stay listening for connections until the system crashes or
@@ -770,80 +846,130 @@ main(int ac, char **av)
 		for (;;) {
 			if (received_sighup)
 				sighup_restart();
-			/* Wait in select until there is a connection. */
+			if (fdset != NULL)
+				xfree(fdset);
+			fdsetsz = howmany(maxfd, NFDBITS) * sizeof(fd_mask);
+			fdset = (fd_set *)xmalloc(fdsetsz);
 			memset(fdset, 0, fdsetsz);
+
 			for (i = 0; i < num_listen_socks; i++)
 				FD_SET(listen_socks[i], fdset);
+			for (i = 0; i < options.max_startups; i++)
+				if (startup_pipes[i] != -1)
+					FD_SET(startup_pipes[i], fdset);
+
+			/* Wait in select until there is a connection. */
 			if (select(maxfd + 1, fdset, NULL, NULL, NULL) < 0) {
 				if (errno != EINTR)
 					error("select: %.100s", strerror(errno));
 				continue;
 			}
+			for (i = 0; i < options.max_startups; i++)
+				if (startup_pipes[i] != -1 &&
+				    FD_ISSET(startup_pipes[i], fdset)) {
+					/*
+					 * the read end of the pipe is ready
+					 * if the child has closed the pipe
+					 * after successfull authentication
+					 * or if the child has died
+					 */
+					close(startup_pipes[i]);
+					startup_pipes[i] = -1;
+					startups--;
+				}
 			for (i = 0; i < num_listen_socks; i++) {
 				if (!FD_ISSET(listen_socks[i], fdset))
 					continue;
-			fromlen = sizeof(from);
-			newsock = accept(listen_socks[i], (struct sockaddr *)&from,
-			    &fromlen);
-			if (newsock < 0) {
-				if (errno != EINTR && errno != EWOULDBLOCK)
-					error("accept: %.100s", strerror(errno));
-				continue;
-			}
-			if (fcntl(newsock, F_SETFL, 0) < 0) {
-				error("newsock del O_NONBLOCK: %s", strerror(errno));
-				continue;
-			}
-			/*
-			 * Got connection.  Fork a child to handle it, unless
-			 * we are in debugging mode.
-			 */
-			if (debug_flag) {
+				fromlen = sizeof(from);
+				newsock = accept(listen_socks[i], (struct sockaddr *)&from,
+				    &fromlen);
+				if (newsock < 0) {
+					if (errno != EINTR && errno != EWOULDBLOCK)
+						error("accept: %.100s", strerror(errno));
+					continue;
+				}
+				if (fcntl(newsock, F_SETFL, 0) < 0) {
+					error("newsock del O_NONBLOCK: %s", strerror(errno));
+					continue;
+				}
+				if (drop_connection(startups) == 1) {
+					debug("drop connection #%d", startups);
+					close(newsock);
+					continue;
+				}
+				if (pipe(startup_p) == -1) {
+					close(newsock);
+					continue;
+				}
+
+				for (j = 0; j < options.max_startups; j++)
+					if (startup_pipes[j] == -1) {
+						startup_pipes[j] = startup_p[0];
+						if (maxfd < startup_p[0])
+							maxfd = startup_p[0];
+						startups++;
+						break;
+					}
+				
 				/*
-				 * In debugging mode.  Close the listening
-				 * socket, and start processing the
-				 * connection without forking.
+				 * Got connection.  Fork a child to handle it, unless
+				 * we are in debugging mode.
 				 */
-				debug("Server will not fork when running in debugging mode.");
-				close_listen_socks();
-				sock_in = newsock;
-				sock_out = newsock;
-				pid = getpid();
-				break;
-			} else {
-				/*
-				 * Normal production daemon.  Fork, and have
-				 * the child process the connection. The
-				 * parent continues listening.
-				 */
-				if ((pid = fork()) == 0) {
+				if (debug_flag) {
 					/*
-					 * Child.  Close the listening socket, and start using the
-					 * accepted socket.  Reinitialize logging (since our pid has
-					 * changed).  We break out of the loop to handle the connection.
+					 * In debugging mode.  Close the listening
+					 * socket, and start processing the
+					 * connection without forking.
 					 */
+					debug("Server will not fork when running in debugging mode.");
 					close_listen_socks();
 					sock_in = newsock;
 					sock_out = newsock;
-					log_init(av0, options.log_level, options.log_facility, log_stderr);
+					startup_pipe = -1;
+					pid = getpid();
 					break;
+				} else {
+					/*
+					 * Normal production daemon.  Fork, and have
+					 * the child process the connection. The
+					 * parent continues listening.
+					 */
+					if ((pid = fork()) == 0) {
+						/*
+						 * Child.  Close the listening and max_startup
+						 * sockets.  Start using the accepted socket.
+						 * Reinitialize logging (since our pid has
+						 * changed).  We break out of the loop to handle
+						 * the connection.
+						 */
+						startup_pipe = startup_p[1];
+						for (j = 0; j < options.max_startups; j++)
+							if (startup_pipes[j] != -1)
+								close(startup_pipes[j]);
+						close_listen_socks();
+						sock_in = newsock;
+						sock_out = newsock;
+						log_init(av0, options.log_level, options.log_facility, log_stderr);
+						break;
+					}
 				}
+
+				/* Parent.  Stay in the loop. */
+				if (pid < 0)
+					error("fork: %.100s", strerror(errno));
+				else
+					debug("Forked child %d.", pid);
+
+				close(startup_p[1]);
+
+				/* Mark that the key has been used (it was "given" to the child). */
+				key_used = 1;
+
+				arc4random_stir();
+
+				/* Close the new socket (the child is now taking care of it). */
+				close(newsock);
 			}
-
-			/* Parent.  Stay in the loop. */
-			if (pid < 0)
-				error("fork: %.100s", strerror(errno));
-			else
-				debug("Forked child %d.", pid);
-
-			/* Mark that the key has been used (it was "given" to the child). */
-			key_used = 1;
-
-			arc4random_stir();
-
-			/* Close the new socket (the child is now taking care of it). */
-			close(newsock);
-			} /* for (i = 0; i < num_listen_socks; i++) */
 			/* child process check (or debug mode) */
 			if (num_listen_socks < 0)
 				break;
@@ -1013,7 +1139,7 @@ do_ssh1_kex()
 	packet_put_int(SSH_PROTOFLAG_HOST_IN_FWD_OPEN);
 
 	/* Declare which ciphers we support. */
-	packet_put_int(cipher_mask1());
+	packet_put_int(cipher_mask_ssh1(0));
 
 	/* Declare supported authentication types. */
 	auth_mask = 0;
@@ -1054,7 +1180,7 @@ do_ssh1_kex()
 	/* Get cipher type and check whether we accept this. */
 	cipher_type = packet_get_char();
 
-	if (!(cipher_mask() & (1 << cipher_type)))
+	if (!(cipher_mask_ssh1(0) & (1 << cipher_type)))
 		packet_disconnect("Warning: client selects unsupported cipher.");
 
 	/* Get check bytes from the packet.  These must match those we
@@ -1158,22 +1284,10 @@ do_ssh2_kex()
 {
 	Buffer *server_kexinit;
 	Buffer *client_kexinit;
-	int payload_len, dlen;
-	int slen;
-	unsigned int klen, kout;
-	char *ptr;
-	unsigned char *signature = NULL;
-	unsigned char *server_host_key_blob = NULL;
-	unsigned int sbloblen;
-	DH *dh;
-	BIGNUM *dh_client_pub = 0;
-	BIGNUM *shared_secret = 0;
+	int payload_len;
 	int i;
-	unsigned char *kbuf;
-	unsigned char *hash;
 	Kex *kex;
 	char *cprop[PROPOSAL_MAX];
-	char *sprop[PROPOSAL_MAX];
 
 /* KEXINIT */
 
@@ -1181,49 +1295,73 @@ do_ssh2_kex()
 		myproposal[PROPOSAL_ENC_ALGS_CTOS] =
 		myproposal[PROPOSAL_ENC_ALGS_STOC] = options.ciphers;
 	}
-
-	debug("Sending KEX init.");
-
-	for (i = 0; i < PROPOSAL_MAX; i++)
-		sprop[i] = xstrdup(myproposal[i]);
-	server_kexinit = kex_init(sprop);
-	packet_start(SSH2_MSG_KEXINIT);
-	packet_put_raw(buffer_ptr(server_kexinit), buffer_len(server_kexinit));	
-	packet_send();
-	packet_write_wait();
-
-	debug("done");
-
-	packet_read_expect(&payload_len, SSH2_MSG_KEXINIT);
-
-	/*
-	 * save raw KEXINIT payload in buffer. this is used during
-	 * computation of the session_id and the session keys.
-	 */
+	server_kexinit = kex_init(myproposal);
 	client_kexinit = xmalloc(sizeof(*client_kexinit));
 	buffer_init(client_kexinit);
-	ptr = packet_get_raw(&payload_len);
-	buffer_append(client_kexinit, ptr, payload_len);
 
-	/* skip cookie */
-	for (i = 0; i < 16; i++)
-		(void) packet_get_char();
-	/* save kex init proposal strings */
-	for (i = 0; i < PROPOSAL_MAX; i++) {
-		cprop[i] = packet_get_string(NULL);
-		debug("got kexinit string: %s", cprop[i]);
+	/* algorithm negotiation */
+	kex_exchange_kexinit(server_kexinit, client_kexinit, cprop);
+	kex = kex_choose_conf(cprop, myproposal, 1);
+	for (i = 0; i < PROPOSAL_MAX; i++)
+		xfree(cprop[i]);
+
+	switch (kex->kex_type) {
+	case DH_GRP1_SHA1:
+		ssh_dh1_server(kex, client_kexinit, server_kexinit);
+		break;
+	case DH_GEX_SHA1:
+		ssh_dhgex_server(kex, client_kexinit, server_kexinit);
+		break;
+	default:
+		fatal("Unsupported key exchange %d", kex->kex_type);
 	}
 
-	i = (int) packet_get_char();
-	debug("first kex follow == %d", i);
-	i = packet_get_int();
-	debug("reserved == %d", i);
+	debug("send SSH2_MSG_NEWKEYS.");
+	packet_start(SSH2_MSG_NEWKEYS);
+	packet_send();
+	packet_write_wait();
+	debug("done: send SSH2_MSG_NEWKEYS.");
 
-	debug("done read kexinit");
-	kex = kex_choose_conf(cprop, sprop, 1);
+	debug("Wait SSH2_MSG_NEWKEYS.");
+	packet_read_expect(&payload_len, SSH2_MSG_NEWKEYS);
+	debug("GOT SSH2_MSG_NEWKEYS.");
+
+#ifdef DEBUG_KEXDH
+	/* send 1st encrypted/maced/compressed message */
+	packet_start(SSH2_MSG_IGNORE);
+	packet_put_cstring("markus");
+	packet_send();
+	packet_write_wait();
+#endif
+
+	debug("done: KEX2.");
+}
+
+/*
+ * SSH2 key exchange
+ */
+
+/* diffie-hellman-group1-sha1 */
+
+void
+ssh_dh1_server(Kex *kex, Buffer *client_kexinit, Buffer *server_kexinit)
+{
+#ifdef DEBUG_KEXDH
+	int i;
+#endif
+	int payload_len, dlen;
+	int slen;
+	unsigned char *signature = NULL;
+	unsigned char *server_host_key_blob = NULL;
+	unsigned int sbloblen;
+	unsigned int klen, kout;
+	unsigned char *kbuf;
+	unsigned char *hash;
+	BIGNUM *shared_secret = 0;
+	DH *dh;
+	BIGNUM *dh_client_pub = 0;
 
 /* KEXDH */
-
 	debug("Wait SSH2_MSG_KEXDH_INIT.");
 	packet_read_expect(&payload_len, SSH2_MSG_KEXDH_INIT);
 
@@ -1235,7 +1373,7 @@ do_ssh2_kex()
 
 #ifdef DEBUG_KEXDH
 	fprintf(stderr, "\ndh_client_pub= ");
-	bignum_print(dh_client_pub);
+	BN_print_fp(stderr, dh_client_pub);
 	fprintf(stderr, "\n");
 	debug("bits %d", BN_num_bits(dh_client_pub));
 #endif
@@ -1245,12 +1383,13 @@ do_ssh2_kex()
 
 #ifdef DEBUG_KEXDH
 	fprintf(stderr, "\np= ");
-	bignum_print(dh->p);
+	BN_print_fp(stderr, dh->p);
 	fprintf(stderr, "\ng= ");
-	bignum_print(dh->g);
+	bn_print(dh->g);
 	fprintf(stderr, "\npub= ");
-	bignum_print(dh->pub_key);
+	BN_print_fp(stderr, dh->pub_key);
 	fprintf(stderr, "\n");
+        DHparams_print_fp(stderr, dh);
 #endif
 	if (!dh_pub_is_valid(dh, dh_client_pub))
 		packet_disconnect("bad client public DH value");
@@ -1273,7 +1412,8 @@ do_ssh2_kex()
 	xfree(kbuf);
 
 	/* XXX precompute? */
-	dsa_make_key_blob(sensitive_data.dsa_host_key, &server_host_key_blob, &sbloblen);
+	dsa_make_key_blob(sensitive_data.dsa_host_key,
+			  &server_host_key_blob, &sbloblen);
 
 	/* calc H */			/* XXX depends on 'kex' */
 	hash = kex_hash(
@@ -1323,23 +1463,139 @@ do_ssh2_kex()
 
 	/* have keys, free DH */
 	DH_free(dh);
+}
 
-	debug("send SSH2_MSG_NEWKEYS.");
-	packet_start(SSH2_MSG_NEWKEYS);
+/* diffie-hellman-group-exchange-sha1 */
+
+void
+ssh_dhgex_server(Kex *kex, Buffer *client_kexinit, Buffer *server_kexinit)
+{
+#ifdef DEBUG_KEXDH
+	int i;
+#endif
+	int payload_len, dlen;
+	int slen, nbits;
+	unsigned char *signature = NULL;
+	unsigned char *server_host_key_blob = NULL;
+	unsigned int sbloblen;
+	unsigned int klen, kout;
+	unsigned char *kbuf;
+	unsigned char *hash;
+	BIGNUM *shared_secret = 0;
+	DH *dh;
+	BIGNUM *dh_client_pub = 0;
+
+/* KEXDHGEX */
+	debug("Wait SSH2_MSG_KEX_DH_GEX_REQUEST.");
+	packet_read_expect(&payload_len, SSH2_MSG_KEX_DH_GEX_REQUEST);
+	nbits = packet_get_int();
+	dh = choose_dh(nbits);
+
+	debug("Sending SSH2_MSG_KEX_DH_GEX_GROUP.");
+	packet_start(SSH2_MSG_KEX_DH_GEX_GROUP);
+	packet_put_bignum2(dh->p);
+	packet_put_bignum2(dh->g);
 	packet_send();
 	packet_write_wait();
-	debug("done: send SSH2_MSG_NEWKEYS.");
 
-	debug("Wait SSH2_MSG_NEWKEYS.");
-	packet_read_expect(&payload_len, SSH2_MSG_NEWKEYS);
-	debug("GOT SSH2_MSG_NEWKEYS.");
+	debug("Wait SSH2_MSG_KEX_DH_GEX_INIT.");
+	packet_read_expect(&payload_len, SSH2_MSG_KEX_DH_GEX_INIT);
+
+	/* key, cert */
+	dh_client_pub = BN_new();
+	if (dh_client_pub == NULL)
+		fatal("dh_client_pub == NULL");
+	packet_get_bignum2(dh_client_pub, &dlen);
 
 #ifdef DEBUG_KEXDH
-	/* send 1st encrypted/maced/compressed message */
-	packet_start(SSH2_MSG_IGNORE);
-	packet_put_cstring("markus");
-	packet_send();
-	packet_write_wait();
+	fprintf(stderr, "\ndh_client_pub= ");
+	BN_print_fp(stderr, dh_client_pub);
+	fprintf(stderr, "\n");
+	debug("bits %d", BN_num_bits(dh_client_pub));
 #endif
-	debug("done: KEX2.");
+
+#ifdef DEBUG_KEXDH
+	fprintf(stderr, "\np= ");
+	BN_print_fp(stderr, dh->p);
+	fprintf(stderr, "\ng= ");
+	bn_print(dh->g);
+	fprintf(stderr, "\npub= ");
+	BN_print_fp(stderr, dh->pub_key);
+	fprintf(stderr, "\n");
+        DHparams_print_fp(stderr, dh);
+#endif
+	if (!dh_pub_is_valid(dh, dh_client_pub))
+		packet_disconnect("bad client public DH value");
+
+	klen = DH_size(dh);
+	kbuf = xmalloc(klen);
+	kout = DH_compute_key(kbuf, dh_client_pub, dh);
+
+#ifdef DEBUG_KEXDH
+	debug("shared secret: len %d/%d", klen, kout);
+	fprintf(stderr, "shared secret == ");
+	for (i = 0; i< kout; i++)
+		fprintf(stderr, "%02x", (kbuf[i])&0xff);
+	fprintf(stderr, "\n");
+#endif
+	shared_secret = BN_new();
+
+	BN_bin2bn(kbuf, kout, shared_secret);
+	memset(kbuf, 0, klen);
+	xfree(kbuf);
+
+	/* XXX precompute? */
+	dsa_make_key_blob(sensitive_data.dsa_host_key,
+			  &server_host_key_blob, &sbloblen);
+
+	/* calc H */			/* XXX depends on 'kex' */
+	hash = kex_hash_gex(
+	    client_version_string,
+	    server_version_string,
+	    buffer_ptr(client_kexinit), buffer_len(client_kexinit),
+	    buffer_ptr(server_kexinit), buffer_len(server_kexinit),
+	    (char *)server_host_key_blob, sbloblen,
+	    nbits, dh->p, dh->g,
+	    dh_client_pub,
+	    dh->pub_key,
+	    shared_secret
+	);
+	buffer_free(client_kexinit);
+	buffer_free(server_kexinit);
+	xfree(client_kexinit);
+	xfree(server_kexinit);
+#ifdef DEBUG_KEXDH
+	fprintf(stderr, "hash == ");
+	for (i = 0; i< 20; i++)
+		fprintf(stderr, "%02x", (hash[i])&0xff);
+	fprintf(stderr, "\n");
+#endif
+	/* save session id := H */
+	/* XXX hashlen depends on KEX */
+	session_id2_len = 20;
+	session_id2 = xmalloc(session_id2_len);
+	memcpy(session_id2, hash, session_id2_len);
+
+	/* sign H */
+	/* XXX hashlen depends on KEX */
+	dsa_sign(sensitive_data.dsa_host_key, &signature, &slen, hash, 20);
+
+	destroy_sensitive_data();
+
+	/* send server hostkey, DH pubkey 'f' and singed H */
+	packet_start(SSH2_MSG_KEX_DH_GEX_REPLY);
+	packet_put_string((char *)server_host_key_blob, sbloblen);
+	packet_put_bignum2(dh->pub_key);	/* f */
+	packet_put_string((char *)signature, slen);
+	packet_send();
+	xfree(signature);
+	xfree(server_host_key_blob);
+	packet_write_wait();
+
+	kex_derive_keys(kex, hash, shared_secret);
+	packet_set_kex(kex);
+
+	/* have keys, free DH */
+	DH_free(dh);
 }
+

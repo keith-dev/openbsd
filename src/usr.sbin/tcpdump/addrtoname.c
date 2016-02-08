@@ -1,3 +1,5 @@
+/*	$OpenBSD: addrtoname.c,v 1.16 2000/10/31 16:06:46 deraadt Exp $	*/
+
 /*
  * Copyright (c) 1990, 1991, 1992, 1993, 1994, 1995, 1996, 1997
  *	The Regents of the University of California.  All rights reserved.
@@ -23,7 +25,7 @@
  */
 #ifndef lint
 static const char rcsid[] =
-    "@(#) $Header: /cvs/src/usr.sbin/tcpdump/addrtoname.c,v 1.13 2000/04/30 05:23:28 ericj Exp $ (LBL)";
+    "@(#) $Header: /cvs/src/usr.sbin/tcpdump/addrtoname.c,v 1.16 2000/10/31 16:06:46 deraadt Exp $ (LBL)";
 #endif
 
 #include <sys/types.h>
@@ -194,7 +196,7 @@ getname(const u_char *ap)
 		break;
 
 	case 2:
-#ifdef WORDS_BIGENDIAN
+#if BYTE_ORDER == BIG_ENDIAN
 		addr = ((u_int32_t)*(u_short *)ap << 16) |
 			(u_int32_t)*(u_short *)(ap + 2);
 #else
@@ -204,7 +206,7 @@ getname(const u_char *ap)
 		break;
 
 	default:
-#ifdef WORDS_BIGENDIAN
+#if BYTE_ORDER == BIG_ENDIAN
 		addr = ((u_int32_t)ap[0] << 24) |
 			((u_int32_t)ap[1] << 16) |
 			((u_int32_t)ap[2] << 8) |
@@ -652,7 +654,7 @@ tcpport_string(u_short port)
 	tp->addr = i;
 	tp->nxt = newhnamemem();
 
-	(void)sprintf(buf, "%u", i);
+	(void)snprintf(buf, sizeof(buf), "%u", i);
 	tp->name = savestr(buf);
 	return (tp->name);
 }
@@ -697,7 +699,7 @@ init_servarray(void)
 		while (table->name)
 			table = table->nxt;
 		if (nflag) {
-			(void)sprintf(buf, "%d", port);
+			(void)snprintf(buf, sizeof(buf), "%d", port);
 			table->name = savestr(buf);
 		} else
 			table->name = savestr(sv->s_name);

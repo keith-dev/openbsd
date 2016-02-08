@@ -1,4 +1,4 @@
-/*	$OpenBSD: lstInsert.c,v 1.7 1999/12/18 21:58:08 espie Exp $	*/
+/*	$OpenBSD: lstInsert.c,v 1.11 2000/09/14 13:32:09 espie Exp $	*/
 /*	$NetBSD: lstInsert.c,v 1.5 1996/11/06 17:59:44 christos Exp $	*/
 
 /*
@@ -37,20 +37,21 @@
  * SUCH DAMAGE.
  */
 
-#ifndef lint
-#if 0
-static char sccsid[] = "@(#)lstInsert.c	8.1 (Berkeley) 6/6/93";
-#else
-static char rcsid[] = "$OpenBSD: lstInsert.c,v 1.7 1999/12/18 21:58:08 espie Exp $";
-#endif
-#endif /* not lint */
-
 /*-
  * LstInsert.c --
  *	Insert a new datum before an old one
  */
 
 #include	"lstInt.h"
+#ifndef lint
+#if 0
+static char sccsid[] = "@(#)lstInsert.c	8.1 (Berkeley) 6/6/93";
+#else
+UNUSED
+static char rcsid[] = "$OpenBSD: lstInsert.c,v 1.11 2000/09/14 13:32:09 espie Exp $";
+#endif
+#endif /* not lint */
+
 
 /*-
  *-----------------------------------------------------------------------
@@ -65,47 +66,42 @@ static char rcsid[] = "$OpenBSD: lstInsert.c,v 1.7 1999/12/18 21:58:08 espie Exp
  *-----------------------------------------------------------------------
  */
 void
-Lst_Insert (l, ln, d)
+Lst_Insert(l, ln, d)
     Lst	    	  	l;	/* list to manipulate */
     LstNode	  	ln;	/* node before which to insert d */
-    ClientData	  	d;	/* datum to be inserted */
+    void		*d;	/* datum to be inserted */
 {
-    register ListNode	nLNode;	/* new lnode for d */
-    register ListNode	lNode = (ListNode)ln;
-    register List 	list = (List)l;
+    LstNode	nLNode;	/* new lnode for d */
 
 
     /*
      * check validity of arguments
      */
-    if (LstValid (l) && (LstIsEmpty (l) && ln == NULL))
+    if (LstIsEmpty(l) && ln == NULL)
 	goto ok;
 
-    if (!LstValid (l) || LstIsEmpty (l) || !LstNodeValid (ln, l)) {
+    if (LstIsEmpty(l) || !LstNodeValid(ln, l))
 	return;
-    }
 
     ok:
-    PAlloc (nLNode, ListNode);
+    PAlloc(nLNode, LstNode);
 
     nLNode->datum = d;
     nLNode->useCount = nLNode->flags = 0;
 
     if (ln == NULL) {
 	nLNode->prevPtr = nLNode->nextPtr = NULL;
-	list->firstPtr = list->lastPtr = nLNode;
+	l->firstPtr = l->lastPtr = nLNode;
     } else {
-	nLNode->prevPtr = lNode->prevPtr;
-	nLNode->nextPtr = lNode;
+	nLNode->prevPtr = ln->prevPtr;
+	nLNode->nextPtr = ln;
 
-	if (nLNode->prevPtr != NULL) {
+	if (nLNode->prevPtr != NULL)
 	    nLNode->prevPtr->nextPtr = nLNode;
-	}
-	lNode->prevPtr = nLNode;
+	ln->prevPtr = nLNode;
 
-	if (lNode == list->firstPtr) {
-	    list->firstPtr = nLNode;
-	}
+	if (ln == l->firstPtr)
+	    l->firstPtr = nLNode;
     }
 }
 

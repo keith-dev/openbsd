@@ -1,17 +1,16 @@
-#	$OpenBSD: Makefile.inc,v 1.2 2000/04/04 18:08:27 millert Exp $
+#	$OpenBSD: Makefile.inc,v 1.5 2000/09/03 18:41:12 espie Exp $
 
 .include <bsd.own.mk>
 .include <bsd.obj.mk>
 
-ENVDEF= -DNEWDB -DMAP_REGEX
-# XXX - IPv6 support breaks IPv4 support since we don't do RFC2553
-#ENVDEF+= -DNETINET6 -DNEEDSGETIPNODE
-.if (${YP} == "yes")
+ENVDEF+= -DNEWDB -DMAP_REGEX
+ENVDEF+= -DNETINET6 -DNEEDSGETIPNODE
+.if (${YP:L} == "yes")
 ENVDEF+=-DNIS
 .endif
 
 .if defined(WANT_LIBWRAP)
-.if (${TCP_WRAPPERS} == "yes")
+.if (${TCP_WRAPPERS:L} == "yes")
 ENVDEF+=-DTCPWRAPPERS
 DPADD+= ${LIBWRAP}
 LDADD+= -lwrap

@@ -1,4 +1,4 @@
-/*	$OpenBSD: comp_parse.c,v 1.6 2000/03/26 16:45:03 millert Exp $	*/
+/*	$OpenBSD: comp_parse.c,v 1.9 2000/10/22 18:27:23 millert Exp $	*/
 
 /****************************************************************************
  * Copyright (c) 1998,1999,2000 Free Software Foundation, Inc.              *
@@ -54,7 +54,7 @@
 #include <tic.h>
 #include <term_entry.h>
 
-MODULE_ID("$From: comp_parse.c,v 1.39 2000/03/25 17:07:30 tom Exp $")
+MODULE_ID("$From: comp_parse.c,v 1.42 2000/10/14 17:50:45 Bernhard.Rosenkraenzer Exp $")
 
 static void sanity_check(TERMTYPE *);
 void (*_nc_check_termtype) (TERMTYPE *) = sanity_check;
@@ -124,29 +124,30 @@ _nc_free_entries(ENTRY * headp)
     }
 }
 
+static char *
+force_bar(char *dst, char *src, size_t siz)
+{
+    if (strchr(src, '|') == 0) {
+	size_t len;
+
+	len = strlcpy(dst, src, siz);
+	if (len >= siz - 2)
+	    len = siz - 2;;
+	(void) strcpy(dst + len, "|");
+	src = dst;
+    }
+    return src;
+}
+
 bool
 _nc_entry_match(char *n1, char *n2)
 /* do any of the aliases in a pair of terminal names match? */
 {
     char *pstart, *qstart, *pend, *qend;
-    char nc1[MAX_NAME_SIZE + 1], nc2[MAX_NAME_SIZE + 1];
-    size_t n;
+    char nc1[MAX_NAME_SIZE + 2], nc2[MAX_NAME_SIZE + 2];
 
-    if (strchr(n1, '|') == NULL) {
-	if ((n = strlcpy(nc1, n1, sizeof(nc1))) > sizeof(nc1) - 2)
-	    n = sizeof(nc1) - 2;
-	nc1[n++] = '|';
-	nc1[n] = '\0';
-	n1 = nc1;
-    }
-
-    if (strchr(n2, '|') == NULL) {
-	if ((n = strlcpy(nc2, n2, sizeof(nc2))) > sizeof(nc2) - 2)
-	    n = sizeof(nc2) - 2;
-	nc2[n++] = '|';
-	nc2[n] = '\0';
-	n2 = nc2;
-    }
+    n1 = force_bar(nc1, n1, sizeof(nc1));
+    n2 = force_bar(nc2, n2, sizeof(nc2));
 
     for (pstart = n1; (pend = strchr(pstart, '|')); pstart = pend + 1)
 	for (qstart = n2; (qend = strchr(qstart, '|')); qstart = qend + 1)
@@ -461,26 +462,26 @@ sanity_check(TERMTYPE * tp)
     }
 
     /* listed in structure-member order of first argument */
-    PAIRED(enter_alt_charset_mode, exit_alt_charset_mode)
-	ANDMISSING(enter_alt_charset_mode, acs_chars)
-	ANDMISSING(exit_alt_charset_mode, acs_chars)
-	ANDMISSING(enter_blink_mode, exit_attribute_mode)
-	ANDMISSING(enter_bold_mode, exit_attribute_mode)
-	PAIRED(exit_ca_mode, enter_ca_mode)
-	PAIRED(enter_delete_mode, exit_delete_mode)
-	ANDMISSING(enter_dim_mode, exit_attribute_mode)
-	PAIRED(enter_insert_mode, exit_insert_mode)
-	ANDMISSING(enter_secure_mode, exit_attribute_mode)
-	ANDMISSING(enter_protected_mode, exit_attribute_mode)
-	ANDMISSING(enter_reverse_mode, exit_attribute_mode)
-	PAIRED(from_status_line, to_status_line)
-	PAIRED(meta_off, meta_on)
+    PAIRED(enter_alt_charset_mode, exit_alt_charset_mode);
+    ANDMISSING(enter_alt_charset_mode, acs_chars);
+    ANDMISSING(exit_alt_charset_mode, acs_chars);
+    ANDMISSING(enter_blink_mode, exit_attribute_mode);
+    ANDMISSING(enter_bold_mode, exit_attribute_mode);
+    PAIRED(exit_ca_mode, enter_ca_mode);
+    PAIRED(enter_delete_mode, exit_delete_mode);
+    ANDMISSING(enter_dim_mode, exit_attribute_mode);
+    PAIRED(enter_insert_mode, exit_insert_mode);
+    ANDMISSING(enter_secure_mode, exit_attribute_mode);
+    ANDMISSING(enter_protected_mode, exit_attribute_mode);
+    ANDMISSING(enter_reverse_mode, exit_attribute_mode);
+    PAIRED(from_status_line, to_status_line);
+    PAIRED(meta_off, meta_on);
 
-	PAIRED(prtr_on, prtr_off)
-	PAIRED(save_cursor, restore_cursor)
-	PAIRED(enter_xon_mode, exit_xon_mode)
-	PAIRED(enter_am_mode, exit_am_mode)
-	ANDMISSING(label_off, label_on)
-	PAIRED(display_clock, remove_clock)
-	ANDMISSING(set_color_pair, initialize_pair)
+    PAIRED(prtr_on, prtr_off);
+    PAIRED(save_cursor, restore_cursor);
+    PAIRED(enter_xon_mode, exit_xon_mode);
+    PAIRED(enter_am_mode, exit_am_mode);
+    ANDMISSING(label_off, label_on);
+    PAIRED(display_clock, remove_clock);
+    ANDMISSING(set_color_pair, initialize_pair);
 }

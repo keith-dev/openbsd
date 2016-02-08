@@ -1,9 +1,10 @@
-#	$OpenBSD: list,v 1.11 1999/12/05 19:37:47 mickey Exp $
+#	$OpenBSD: list,v 1.14 2000/07/02 18:18:02 millert Exp $
 
 # copy the crunched binary, link to it, and kill it
 COPY	${OBJDIR}/instbin	instbin
 LINK	instbin			bin/cat
 LINK	instbin			bin/chmod
+LINK	instbin			bin/chgrp
 LINK	instbin			bin/cp
 LINK	instbin			bin/cpio bin/pax bin/tar
 LINK	instbin			bin/dd
@@ -17,6 +18,7 @@ LINK	instbin			bin/rm
 LINK	instbin			bin/sh bin/ksh
 LINK	instbin			bin/sleep
 LINK	instbin			bin/stty
+LINK	instbin			sbin/chown
 LINK	instbin			sbin/disklabel
 LINK	instbin			sbin/dhclient
 LINK	instbin			sbin/fdisk
@@ -29,7 +31,6 @@ LINK	instbin			sbin/mount
 LINK	instbin			sbin/mount_cd9660
 LINK	instbin			sbin/mount_ffs
 LINK	instbin			sbin/mount_msdos
-LINK	instbin			sbin/mount_nfs
 LINK	instbin			sbin/mount_kernfs
 LINK	instbin			sbin/mount_ext2fs
 LINK	instbin			sbin/newfs sbin/mount_mfs
@@ -45,8 +46,6 @@ LINK	instbin			usr/bin/gzip usr/bin/gunzip usr/bin/gzcat
 LINK	instbin			usr/bin/less usr/bin/more
 LINK	instbin			usr/bin/rsh
 LINK	instbin			usr/bin/sed
-LINK	instbin			usr/bin/sort
-LINK	instbin			usr/sbin/chown usr/sbin/chgrp
 LINK	instbin			usr/mdec/installboot
 SPECIAL	/bin/rm instbin
 

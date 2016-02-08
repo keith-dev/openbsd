@@ -1,11 +1,11 @@
-#	$OpenBSD: Makefile,v 1.50 2000/04/03 01:10:05 mickey Exp $
+#	$OpenBSD: Makefile,v 1.55 2000/10/13 16:42:50 chris Exp $
 
 # Not ported: XNSrouted enpload scsiformat startslip
 # Missing: icheck
 
 SUBDIR= atactl badsect brconfig ccdconfig disklabel dmesg fsck ifconfig init \
-	ipf ipfstat ipnat ipsecadm isakmpd kbd mknod modload modunload \
-	mount mountd ncheck_ffs nfsd nfsiod nologin photurisd ping \
+	ipf ipfstat ipnat ipsecadm isakmpd kbd lmccontrol mknod modload \
+	modunload mount mountd ncheck_ffs nfsd nologin photurisd ping \
 	quotacheck raidctl reboot route routed savecore scan_ffs scsi \
 	shutdown slattach startkey swapctl sysctl ttyflags umount
 
@@ -25,22 +25,14 @@ SUBDIR+= mount_umap
 SUBDIR+= mount_union
 SUBDIR+= mount_ext2fs fsck_ext2fs
 SUBDIR+= mount_xfs
+SUBDIR+= mount_tcfs
 
 # IPv6
 SUBDIR+= ping6 rtsol
 
-.if   make(clean) || make(cleandir) || make(obj)
-SUBDIR+= bim edlabel fdisk ancontrol wicontrol
-.elif ${MACHINE} == "i386"
-SUBDIR+= fdisk
-SUBDIR+= ancontrol wicontrol
-.elif (${MACHINE} == "arc") || (${MACHINE} == "powerpc") || (${MACHINE} == "alpha")
-SUBDIR+= fdisk
-.elif ${MACHINE} == "pc532"
-SUBDIR+= bim
-.elif (${MACHINE} == "sun3") || (${MACHINE} == "atari") || \
-      (${MACHINE} == "sparc")
-SUBDIR+= edlabel
-.endif
+# Man pages (and manpages to do)
+SUBDIR+= fdisk ancontrol wicontrol edlabel wsconsctl
+
+# Add bim if we resurrect pc532
 
 .include <bsd.subdir.mk>

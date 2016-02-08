@@ -1,4 +1,4 @@
-/*	$OpenBSD: route.c,v 1.35 2000/02/05 18:46:50 itojun Exp $	*/
+/*	$OpenBSD: route.c,v 1.38 2000/09/19 03:18:46 angelos Exp $	*/
 /*	$NetBSD: route.c,v 1.15 1996/05/07 02:55:06 thorpej Exp $	*/
 
 /*
@@ -38,7 +38,7 @@
 #if 0
 static char sccsid[] = "from: @(#)route.c	8.3 (Berkeley) 3/9/94";
 #else
-static char *rcsid = "$OpenBSD: route.c,v 1.35 2000/02/05 18:46:50 itojun Exp $";
+static char *rcsid = "$OpenBSD: route.c,v 1.38 2000/09/19 03:18:46 angelos Exp $";
 #endif
 #endif /* not lint */
 
@@ -268,7 +268,7 @@ pr_encaphdr()
 		printf("%-*s ", PLEN, "Address");
 	printf("%-18s %-5s %-18s %-5s %-5s %-22s\n",
 	    "Source", "Port", "Destination", 
-	    "Port", "Proto", "SA(Address/SPI/Proto)");
+	    "Port", "Proto", "SA(Address/Proto/Type/Direction)");
 }
 
 static struct sockaddr *
@@ -433,7 +433,7 @@ p_sockaddr(sa, mask, flags, width)
 	register char *cp = workbuf;
 	size_t n;
 
-	switch(sa->sa_family) {
+	switch (sa->sa_family) {
 	case AF_INET:
 	    {
 		register struct sockaddr_in *sin = (struct sockaddr_in *)sa;
@@ -719,65 +719,69 @@ netname6(sa6, mask)
 #else
 	int flag = 0;
 #endif
+	int error;
 
 	sin6 = *sa6;
 	
 	masklen = 0;
 	lim = (u_char *)(mask + 1);
 	i = 0;
-	for (p = (u_char *)mask; p < lim; p++) {
-		if (final && *p) {
-			illegal++;
-			sin6.sin6_addr.s6_addr[i++] = 0x00;
-			continue;
-		}
+	if (mask) {
+		for (p = (u_char *)mask; p < lim; p++) {
+			if (final && *p) {
+				illegal++;
+				sin6.sin6_addr.s6_addr[i++] = 0x00;
+				continue;
+			}
 
-		switch (*p & 0xff) {
-		case 0xff:
-			masklen += 8;
-			break;
-		case 0xfe:
-			masklen += 7;
-			final++;
-			break;
-		case 0xfc:
-			masklen += 6;
-			final++;
-			break;
-		case 0xf8:
-			masklen += 5;
-			final++;
-			break;
-		case 0xf0:
-			masklen += 4;
-			final++;
-			break;
-		case 0xe0:
-			masklen += 3;
-			final++;
-			break;
-		case 0xc0:
-			masklen += 2;
-			final++;
-			break;
-		case 0x80:
-			masklen += 1;
-			final++;
-			break;
-		case 0x00:
-			final++;
-			break;
-		default:
-			final++;
-			illegal++;
-			break;
-		}
+			switch (*p & 0xff) {
+			case 0xff:
+				masklen += 8;
+				break;
+			case 0xfe:
+				masklen += 7;
+				final++;
+				break;
+			case 0xfc:
+				masklen += 6;
+				final++;
+				break;
+			case 0xf8:
+				masklen += 5;
+				final++;
+				break;
+			case 0xf0:
+				masklen += 4;
+				final++;
+				break;
+			case 0xe0:
+				masklen += 3;
+				final++;
+				break;
+			case 0xc0:
+				masklen += 2;
+				final++;
+				break;
+			case 0x80:
+				masklen += 1;
+				final++;
+				break;
+			case 0x00:
+				final++;
+				break;
+			default:
+				final++;
+				illegal++;
+				break;
+			}
 
-		if (!illegal)
-			sin6.sin6_addr.s6_addr[i++] &= *p;
-		else
-			sin6.sin6_addr.s6_addr[i++] = 0x00;
-	}
+			if (!illegal)
+				sin6.sin6_addr.s6_addr[i++] &= *p;
+			else
+				sin6.sin6_addr.s6_addr[i++] = 0x00;
+		}
+	} else
+		masklen = 128;
 
 	if (masklen == 0 && IN6_IS_ADDR_UNSPECIFIED(&sin6.sin6_addr))
 		return("default");
@@ -787,8 +791,11 @@ netname6(sa6, mask)
 
 	if (nflag)
 		flag |= NI_NUMERICHOST;
-	getnameinfo((struct sockaddr *)&sin6, sin6.sin6_len, hbuf, sizeof(hbuf),
-		    NULL, 0, flag);
+	error = getnameinfo((struct sockaddr *)&sin6, sin6.sin6_len,
+	    hbuf, sizeof(hbuf), NULL, 0, flag);
+	if (error)
+		snprintf(hbuf, sizeof(hbuf), "invalid");
+
 	snprintf(line, sizeof(line), "%s/%d", hbuf, masklen);
 	return line;
 }
@@ -978,6 +985,8 @@ encap_print(rt)
 	register struct rtentry *rt;
 {
 	struct sockaddr_encap sen1, sen2, sen3;
+        struct ipsec_policy ipo;
+
 #ifdef INET6
 	struct sockaddr_in6 s61, s62;
 	char ip6addr[64];
@@ -1024,18 +1033,61 @@ encap_print(rt)
 #endif /* INET6 */
 
 	if (sen3.sen_type == SENT_IPSP)
-	  printf("%s/%08x/%-u\n", inet_ntoa(sen3.sen_ipsp_dst),
-	         ntohl(sen3.sen_ipsp_spi), sen3.sen_ipsp_sproto);
+        {
+            char hostn[NI_MAXHOST];
 
-#ifdef INET6
-	if (sen3.sen_type == SENT_IPSP6)
-	{
-	    inet_ntop(AF_INET6, &sen3.sen_ipsp6_dst,
-		      ip6addr, sizeof(ip6addr));
-	    printf("%s/%08x/%-u\n", ip6addr, ntohl(sen3.sen_ipsp6_spi),
-		   sen3.sen_ipsp6_sproto);
-	}
-#endif /* INET6 */
+	    kget(sen3.sen_ipsp, ipo);
+
+            getnameinfo(&ipo.ipo_dst.sa, ipo.ipo_dst.sa.sa_len,
+                        hostn, NI_MAXHOST, NULL, 0, NI_NUMERICHOST);
+	    printf("%s", hostn);
+
+            printf("/%-u", ipo.ipo_sproto);
+
+            switch (ipo.ipo_type)
+            {
+                case IPSP_IPSEC_REQUIRE:
+                    printf("/require");
+                    break;
+
+                case IPSP_IPSEC_ACQUIRE:
+                    printf("/acquire");
+                    break;
+
+                case IPSP_IPSEC_USE:
+                    printf("/use");
+                    break;
+
+                case IPSP_IPSEC_DONTACQ:
+                    printf("/dontacq");
+                    break;
+
+                case IPSP_PERMIT:
+                    printf("/permit");
+                    break;
+
+                case IPSP_DENY:
+                    printf("/deny");
+                    break;
+
+                default:
+                    printf("/<unknown type!>");
+            }
+
+            if ((ipo.ipo_addr.sen_type == SENT_IP4 &&
+                 ipo.ipo_addr.sen_direction == IPSP_DIRECTION_IN) ||
+                (ipo.ipo_addr.sen_type == SENT_IP6 &&
+                 ipo.ipo_addr.sen_ip6_direction == IPSP_DIRECTION_IN))
+              printf("/in\n");
+            else
+              if ((ipo.ipo_addr.sen_type == SENT_IP4 &&
+                   ipo.ipo_addr.sen_direction == IPSP_DIRECTION_OUT) ||
+                  (ipo.ipo_addr.sen_type == SENT_IP6 &&
+                   ipo.ipo_addr.sen_ip6_direction == IPSP_DIRECTION_OUT))
+                printf("/out\n");
+              else
+                printf("/<unknown>\n");
+        }
 }
 
 void

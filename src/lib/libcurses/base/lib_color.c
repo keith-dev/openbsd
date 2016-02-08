@@ -1,4 +1,4 @@
-/*	$OpenBSD: lib_color.c,v 1.7 2000/03/26 16:45:03 millert Exp $	*/
+/*	$OpenBSD: lib_color.c,v 1.9 2000/10/08 22:46:58 millert Exp $	*/
 
 /****************************************************************************
  * Copyright (c) 1998,1999,2000 Free Software Foundation, Inc.              *
@@ -43,7 +43,7 @@
 #include <term.h>
 #include <tic.h>
 
-MODULE_ID("$From: lib_color.c,v 1.49 2000/03/26 03:12:12 tom Exp $")
+MODULE_ID("$From: lib_color.c,v 1.53 2000/09/02 18:02:15 tom Exp $")
 
 /*
  * These should be screen structure members.  They need to be globals for
@@ -87,7 +87,7 @@ static const color_t hls_palette[] =
 };
 /* *INDENT-ON* */
 
-#ifdef NCURSES_EXT_FUNCS
+#if NCURSES_EXT_FUNCS
 /*
  * These are called from _nc_do_color(), which in turn is called from
  * vidattr - so we have to assume that SP may be null.
@@ -267,7 +267,7 @@ init_pair(short pair, short f, short b)
 
     if ((pair < 0) || (pair >= COLOR_PAIRS))
 	returnCode(ERR);
-#ifdef NCURSES_EXT_FUNCS
+#if NCURSES_EXT_FUNCS
     if (SP->_default_color) {
 	if (f < 0)
 	    f = C_MASK;
@@ -314,7 +314,7 @@ init_pair(short pair, short f, short b)
 	}
     }
     SP->_color_pairs[pair] = result;
-    if ((int)(SP->_current_attr & A_COLOR) == COLOR_PAIR(pair))
+    if ((int) (SP->_current_attr & A_COLOR) == COLOR_PAIR(pair))
 	SP->_current_attr |= A_COLOR;	/* force attribute update */
 
     if (initialize_pair) {
@@ -421,10 +421,12 @@ pair_content(short pair, short *f, short *b)
 void
 _nc_do_color(int old_pair, int pair, bool reverse, int (*outc) (int))
 {
-    short fg = C_MASK, bg = C_MASK;
-    short old_fg, old_bg;
+    NCURSES_COLOR_T fg = C_MASK, bg = C_MASK;
+    NCURSES_COLOR_T old_fg, old_bg;
 
-    if (pair != 0) {
+    if (pair < 0 || pair >= COLOR_PAIRS) {
+	return;
+    } else if (pair != 0) {
 	if (set_color_pair) {
 	    TPUTS_TRACE("set_color_pair");
 	    tputs(tparm(set_color_pair, pair), 1, outc);
@@ -438,7 +440,7 @@ _nc_do_color(int old_pair, int pair, bool reverse, int (*outc) (int))
 	pair_content(old_pair, &old_fg, &old_bg);
 	if ((fg == C_MASK && old_fg != C_MASK)
 	    || (bg == C_MASK && old_bg != C_MASK)) {
-#ifdef NCURSES_EXT_FUNCS
+#if NCURSES_EXT_FUNCS
 	    /*
 	     * A minor optimization - but extension.  If "AX" is specified in
 	     * the terminal description, treat it as screen's indicator of ECMA
@@ -458,7 +460,7 @@ _nc_do_color(int old_pair, int pair, bool reverse, int (*outc) (int))
 	    return;
     }
 
-#ifdef NCURSES_EXT_FUNCS
+#if NCURSES_EXT_FUNCS
     if (fg == C_MASK)
 	fg = default_fg();
     if (bg == C_MASK)
@@ -466,12 +468,12 @@ _nc_do_color(int old_pair, int pair, bool reverse, int (*outc) (int))
 #endif
 
     if (reverse) {
-	short xx = fg;
+	NCURSES_COLOR_T xx = fg;
 	fg = bg;
 	bg = xx;
     }
 
-    T(("setting colors: pair = %d, fg = %d, bg = %d", pair, fg, bg));
+    TR(TRACE_ATTRS, ("setting colors: pair = %d, fg = %d, bg = %d", pair, fg, bg));
 
     if (fg != C_MASK) {
 	set_foreground_color(fg, outc);

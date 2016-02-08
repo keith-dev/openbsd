@@ -1,4 +1,4 @@
-#	$OpenBSD: list,v 1.11 2000/01/24 03:46:55 rahnds Exp $
+#	$OpenBSD: list,v 1.17 2000/10/13 12:21:17 deraadt Exp $
 
 SRCDIRS distrib/special
 SRCDIRS usr.bin bin sbin usr.sbin gnu/usr.bin
@@ -8,7 +8,7 @@ SRCDIRS usr.sbin/pppd
 # copy the crunched binary, link to it, and kill it
 COPY	${OBJDIR}/instbin	instbin
 LINK	instbin			bin/cat
-LINK	instbin			bin/chmod
+LINK	instbin			bin/chmod bin/chgrp sbin/chown
 LINK	instbin			bin/cp
 LINK	instbin			bin/dd
 LINK	instbin			bin/df
@@ -60,7 +60,6 @@ LINK	instbin			usr/bin/sed
 LINK	instbin			usr/bin/sort
 LINK	instbin			usr/bin/tip
 LINK	instbin			usr/sbin/chat
-LINK	instbin			usr/sbin/chown usr/sbin/chgrp
 LINK	instbin			usr/sbin/pppd
 #SYMLINK ../../instbin           usr/bin/build usr/bin/vi
 
@@ -94,10 +93,9 @@ COPY    ${TOPDIR}/common/termcap.vt        usr/share/misc/termcap
 
 # and the installation tools
 COPY	dot.profile			.profile
-COPY	dot.instutils			.instutils
 COPY	install.md			install.md
 COPY	${CURDIR}/../../miniroot/install.sh		install
 COPY	${CURDIR}/../../miniroot/upgrade.sh		upgrade
 #SPECIAL sed "/^VERSION=/s/=.*/=${REV}/" < ${CURDIR}/install.sub > install.sub
 SPECIAL sed "/^VERSION=/s/=.*/=${REV}/" < ${CURDIR}/../../miniroot/install.sub > install.sub
-SPECIAL	chmod 755 install
+SPECIAL	chmod 755 install upgrade

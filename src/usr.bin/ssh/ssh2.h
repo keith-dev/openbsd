@@ -1,5 +1,29 @@
 /*
- * draft-ietf-secsh-architecture-04.txt
+ * Copyright (c) 2000 Markus Friedl.  All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
+ * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
+ * OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
+ * IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
+ * NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+ * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+ * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+ * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
+ * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ */
+
+/*
+ * draft-ietf-secsh-architecture-05.txt
  *
  *   Transport layer protocol:
  *
@@ -28,6 +52,7 @@
  *
  *     192-255  Local extensions
  */
+/* RCSID("$OpenBSD: ssh2.h,v 1.5 2000/10/11 04:02:17 provos Exp $"); */
 
 /* transport layer: generic */
 
@@ -47,6 +72,12 @@
 
 #define SSH2_MSG_KEXDH_INIT				30
 #define SSH2_MSG_KEXDH_REPLY				31
+
+/* dh-group-exchange */
+#define SSH2_MSG_KEX_DH_GEX_REQUEST			30
+#define SSH2_MSG_KEX_DH_GEX_GROUP			31
+#define SSH2_MSG_KEX_DH_GEX_INIT			32
+#define SSH2_MSG_KEX_DH_GEX_REPLY			33
 
 /* user authentication: generic */
 
@@ -88,6 +119,7 @@
 #define SSH2_DISCONNECT_PROTOCOL_ERROR			2
 #define SSH2_DISCONNECT_KEY_EXCHANGE_FAILED		3
 #define SSH2_DISCONNECT_HOST_AUTHENTICATION_FAILED	4
+#define SSH2_DISCONNECT_RESERVED			4
 #define SSH2_DISCONNECT_MAC_ERROR			5
 #define SSH2_DISCONNECT_COMPRESSION_ERROR		6
 #define SSH2_DISCONNECT_SERVICE_NOT_AVAILABLE		7
@@ -95,6 +127,10 @@
 #define SSH2_DISCONNECT_HOST_KEY_NOT_VERIFIABLE		9
 #define SSH2_DISCONNECT_CONNECTION_LOST			10
 #define SSH2_DISCONNECT_BY_APPLICATION			11
+#define SSH2_DISCONNECT_TOO_MANY_CONNECTIONS		12
+#define SSH2_DISCONNECT_AUTH_CANCELLED_BY_USER		13
+#define SSH2_DISCONNECT_NO_MORE_AUTH_METHODS_AVAILABLE	14
+#define SSH2_DISCONNECT_ILLEGAL_USER_NAME		15
 
 /* misc */
 

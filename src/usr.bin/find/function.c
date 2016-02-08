@@ -1,4 +1,4 @@
-/*	$OpenBSD: function.c,v 1.17 1999/12/04 22:42:32 millert Exp $	*/
+/*	$OpenBSD: function.c,v 1.20 2000/07/19 19:30:10 mickey Exp $	*/
 
 /*-
  * Copyright (c) 1990, 1993
@@ -38,7 +38,7 @@
 
 #ifndef lint
 /*static char sccsid[] = "from: @(#)function.c	8.1 (Berkeley) 6/6/93";*/
-static char rcsid[] = "$OpenBSD: function.c,v 1.17 1999/12/04 22:42:32 millert Exp $";
+static char rcsid[] = "$OpenBSD: function.c,v 1.20 2000/07/19 19:30:10 mickey Exp $";
 #endif /* not lint */
 
 #include <sys/param.h>
@@ -545,6 +545,54 @@ c_execdir(argvp)
 	*argvp = argv + 1;
 	return (new);
 }
+
+/*
+ * -flags functions --
+ *
+ *	The flags argument is used to represent file flags bits.
+ */
+int
+f_flags(plan, entry)
+	PLAN *plan;
+	FTSENT *entry;
+{
+	u_int flags;
+
+	flags = entry->fts_statp->st_flags &
+	    (UF_NODUMP | UF_IMMUTABLE | UF_APPEND | UF_OPAQUE |
+	     SF_ARCHIVED | SF_IMMUTABLE | SF_APPEND);
+	if (plan->flags == F_ATLEAST)
+		/* note that plan->fl_flags always is a subset of
+		   plan->fl_mask */
+		return ((flags & plan->fl_mask) == plan->fl_flags);
+	else
+		return (flags == plan->fl_flags);
+	/* NOTREACHED */
+}
+
+PLAN *
+c_flags(flags_str)
+	char *flags_str;
+{
+	PLAN *new;
+	u_int32_t flags, notflags;
+
+	ftsoptions &= ~FTS_NOSTAT;
+
+	new = palloc(N_FLAGS, f_flags);
+
+	if (*flags_str == '-') {
+		new->flags = F_ATLEAST;
+		++flags_str;
+	}
+
+	if (strtofflags(&flags_str, &flags, &notflags) == 1)
+		errx(1, "-flags: %s: illegal flags string", flags_str);
+
+	new->fl_flags = flags;
+	new->fl_mask = flags | notflags;
+	return (new);
+}
  
 /*
  * -follow functions --
@@ -910,6 +958,31 @@ c_name(pattern)
 	new->c_data = pattern;
 	return (new);
 }
+
+/*
+ * -iname functions --
+ *
+ *	Similar to -name, but does case insensitive matching
+ *	
+ */
+int
+f_iname(plan, entry)
+	PLAN *plan;
+	FTSENT *entry;
+{
+	return (!fnmatch(plan->c_data, entry->fts_name, FNM_CASEFOLD));
+}
+ 
+PLAN *
+c_iname(pattern)
+	char *pattern;
+{
+	PLAN *new;
+
+	new = palloc(N_INAME, f_iname);
+	new->c_data = pattern;
+	return (new);
+}
  
 /*
  * -newer file functions --
@@ -1126,7 +1199,7 @@ c_perm(perm)
 	}
 
 	if ((set = setmode(perm)) == NULL)
-		err(1, "-perm: %s: illegal mode string", perm);
+		errx(1, "-perm: %s: illegal mode string", perm);
 
 	new->m_data = getmode(set, 0);
 	free(set);

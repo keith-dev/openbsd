@@ -1,5 +1,5 @@
-.\"	$OpenBSD: route6d.8,v 1.7 2000/03/04 20:02:24 aaron Exp $
-.\"	$KAME: route6d.8,v 1.5 2000/02/25 06:15:05 itojun Exp $
+.\"	$OpenBSD: route6d.8,v 1.10 2000/10/06 02:46:58 itojun Exp $
+.\"	$KAME: route6d.8,v 1.9 2000/07/24 12:39:46 itojun Exp $
 .\"
 .\" Copyright (c) 1996 WIDE Project. All rights reserved.
 .\"
@@ -23,20 +23,34 @@
 .Sh SYNOPSIS
 .Nm route6d
 .Op Fl adDhlqsS
+.Bk -words
 .Op Fl R Ar routelog
+.Ek
+.Bk -words
 .Op Fl A Ar prefix/preflen,if1[,if2...]
+.Ek
+.Bk -words
 .Op Fl L Ar prefix/preflen,if1[,if2...]
+.Ek
+.Bk -words
 .Op Fl N Ar if1[,if2...]
+.Ek
+.Bk -words
 .Op Fl O Ar prefix/preflen,if1[,if2...]
+.Ek
+.Bk -words
 .Op Fl T Ar if1[,if2...]
+.Ek
+.Bk -words
 .Op Fl t Ar tag
+.Ek
 .\"
 .Sh DESCRIPTION
 The
 .Nm
 is a routing daemon which supports RIP over IPv6.
 .Pp
-The options are as follows:
+Options are:
 .Bl -tag -width indent
 .\"
 .It Fl a
@@ -44,7 +58,7 @@ Enables aging of the statically defined routes.
 With this option, any
 statically defined routes will be removed unless corresponding updates
 arrive as if the routes are received at the startup of
-.Nm route6d .
+.Nm Ns .
 .\"
 .It Fl R Ar routelog
 This option makes the
@@ -92,7 +106,8 @@ Disables the split horizon processing.
 By default,
 .Nm
 will not exchange site local routes for safety reasons.
-This is because semantics of site local address space is rather vague,
+This is because semantics of site local address space is rather vague
+.Pq specification is still in being worked ,
 and there is no good way to define site local boundary.
 With
 .Fl l
@@ -206,7 +221,7 @@ or
 .Re
 .\"
 .Sh NOTE
-.Nm Route6d
+.Nm
 uses IPv6 advanced API,
 defined in RFC2292,
 for communicating with peers using link-local addresses.

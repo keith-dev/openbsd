@@ -23,7 +23,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- *	$OpenBSD: bundle.h,v 1.14 2000/04/07 23:46:39 brian Exp $
+ *	$OpenBSD: bundle.h,v 1.18 2000/08/28 22:44:41 brian Exp $
  */
 
 #define	PHASE_DEAD		0	/* Link is dead */
@@ -33,16 +33,17 @@
 #define	PHASE_TERMINATE		4	/* Terminating link */
 
 /* cfg.opt bit settings */
-#define OPT_IDCHECK	0x0001
-#define OPT_IFACEALIAS	0x0002
-#define OPT_KEEPSESSION	0x0004
-#define OPT_LOOPBACK	0x0008
-#define OPT_PASSWDAUTH	0x0010
-#define OPT_PROXY	0x0020
-#define OPT_PROXYALL	0x0040
-#define OPT_SROUTES	0x0080
-#define OPT_THROUGHPUT	0x0100
-#define OPT_UTMP	0x0200
+#define OPT_FILTERDECAP	0x0001
+#define OPT_IDCHECK	0x0002
+#define OPT_IFACEALIAS	0x0004
+#define OPT_KEEPSESSION	0x0008
+#define OPT_LOOPBACK	0x0010
+#define OPT_PASSWDAUTH	0x0020
+#define OPT_PROXY	0x0040
+#define OPT_PROXYALL	0x0080
+#define OPT_SROUTES	0x0100
+#define OPT_THROUGHPUT	0x0200
+#define OPT_UTMP	0x0400
 
 #define MAX_ENDDISC_CLASS 5
 
@@ -101,6 +102,7 @@ struct bundle {
     unsigned opt;             /* Uses OPT_ bits from above */
     char label[50];           /* last thing `load'ed */
     u_short mtu;              /* Interface mtu */
+    u_short ifqueue;          /* Interface queue size */
 
     struct {
       int timeout;            /* How long to leave the output queue choked */
@@ -134,6 +136,7 @@ struct bundle {
 
 #ifndef NORADIUS
   struct radius radius;       /* Info retrieved from radius server */
+  struct radacct radacct;
 #endif
 };
 
@@ -156,7 +159,7 @@ extern void bundle_LinkClosed(struct bundle *, struct datalink *);
 
 extern int bundle_ShowLinks(struct cmdargs const *);
 extern int bundle_ShowStatus(struct cmdargs const *);
-extern void bundle_StartIdleTimer(struct bundle *);
+extern void bundle_StartIdleTimer(struct bundle *, unsigned secs);
 extern void bundle_SetIdleTimer(struct bundle *, int, int);
 extern void bundle_StopIdleTimer(struct bundle *);
 extern int bundle_IsDead(struct bundle *);

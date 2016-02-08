@@ -1,4 +1,4 @@
-/*	$OpenBSD: lstAtFront.c,v 1.5 1999/12/18 21:58:08 espie Exp $	*/
+/*	$OpenBSD: lstAtFront.c,v 1.7 2000/09/14 13:32:08 espie Exp $	*/
 /*	$NetBSD: lstAtFront.c,v 1.5 1996/11/06 17:59:33 christos Exp $	*/
 
 /*
@@ -37,20 +37,21 @@
  * SUCH DAMAGE.
  */
 
-#ifndef lint
-#if 0
-static char sccsid[] = "@(#)lstAtFront.c	8.1 (Berkeley) 6/6/93";
-#else
-static char rcsid[] = "$OpenBSD: lstAtFront.c,v 1.5 1999/12/18 21:58:08 espie Exp $";
-#endif
-#endif /* not lint */
-
 /*-
  * LstAtFront.c --
  *	Add a node at the front of the list
  */
 
 #include	"lstInt.h"
+#ifndef lint
+#if 0
+static char sccsid[] = "@(#)lstAtFront.c	8.1 (Berkeley) 6/6/93";
+#else
+UNUSED
+static char rcsid[] = "$OpenBSD: lstAtFront.c,v 1.7 2000/09/14 13:32:08 espie Exp $";
+#endif
+#endif /* not lint */
+
 
 /*-
  *-----------------------------------------------------------------------
@@ -64,9 +65,9 @@ static char rcsid[] = "$OpenBSD: lstAtFront.c,v 1.5 1999/12/18 21:58:08 espie Ex
  *-----------------------------------------------------------------------
  */
 void
-Lst_AtFront (l, d)
+Lst_AtFront(l, d)
     Lst		l;
-    ClientData	d;
+    void	*d;
 {
     Lst_Insert(l, Lst_First(l), d);
 }

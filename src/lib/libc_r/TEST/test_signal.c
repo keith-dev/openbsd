@@ -1,4 +1,4 @@
-/* $OpenBSD: test_signal.c,v 1.1 2000/01/04 00:17:46 d Exp $ */
+/* $OpenBSD: test_signal.c,v 1.3 2000/10/04 05:50:58 d Exp $ */
 
 /*
  * This program tests signal handler re-entrancy.
@@ -21,7 +21,7 @@ sleeper(arg)
 	sigfillset(&mask);
 	CHECKe(sigprocmask(SIG_SETMASK, &mask, NULL));
 
-	ASSERT(sleep(10) == 0);
+	ASSERT(sleep(2) == 0);
 	SUCCEED;
 }
 
@@ -41,7 +41,7 @@ main()
 
 	ASSERT(signal(SIGALRM, handler) != SIG_ERR);
 	CHECKe(alarm(1));
-	/* CHECKr(pthread_create(&slpr, NULL, sleeper, NULL)); */
+	CHECKr(pthread_create(&slpr, NULL, sleeper, NULL));
 	/* ASSERT(sleep(1) == 0); */
 	for (;;)
 		CHECKe(write(STDOUT_FILENO, ".", 1));

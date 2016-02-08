@@ -1,10 +1,10 @@
-/*	$OpenBSD: getnameinfo.c,v 1.14 2000/04/26 16:08:12 itojun Exp $	*/
-/*	$KAME: getnameinfo.c,v 1.38 2000/04/26 15:58:50 itojun Exp $	*/
+/*	$OpenBSD: getnameinfo.c,v 1.18 2000/09/25 22:52:57 itojun Exp $	*/
+/*	$KAME: getnameinfo.c,v 1.45 2000/09/25 22:43:56 itojun Exp $	*/
 
 /*
  * Copyright (C) 1995, 1996, 1997, and 1998 WIDE Project.
  * All rights reserved.
- * 
+ *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
  * are met:
@@ -16,7 +16,7 @@
  * 3. Neither the name of the project nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
- * 
+ *
  * THIS SOFTWARE IS PROVIDED BY THE PROJECT AND CONTRIBUTORS ``AS IS'' AND
  * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
  * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
@@ -33,11 +33,9 @@
 /*
  * Issues to be discussed:
  * - Thread safe-ness must be checked
- * - Return values.  There seems to be no standard for return value (RFC2553)
- *   but INRIA implementation returns EAI_xxx defined for getaddrinfo().
  * - RFC2553 says that we should raise error on short buffer.  X/Open says
  *   we need to truncate the result.  We obey RFC2553 (and X/Open should be
- *   modified).
+ *   modified).  ipngwg rough consensus seems to follow RFC2553.
  * - What is "local" in NI_FQDN?
  * - NI_NAMEREQD and NI_NUMERICHOST conflict with each other.
  * - (KAME extension) NI_WITHSCOPEID when called with global address,
@@ -89,20 +87,21 @@ struct sockinet {
 static int ip6_parsenumeric __P((const struct sockaddr *, const char *, char *,
 				 size_t, int));
 static int ip6_sa2str __P((const struct sockaddr_in6 *, char *, size_t, int));
-#endif 
+#endif
 
-#define ENI_NOSOCKET 	0
-#define ENI_NOSERVNAME	1
-#define ENI_NOHOSTNAME	2
-#define ENI_MEMORY	3
-#define ENI_SYSTEM	4
-#define ENI_FAMILY	5
-#define ENI_SALEN	6
+/* 2553bis: use EAI_xx for getnameinfo */
+#define ENI_NOSOCKET 	EAI_FAIL		/*XXX*/
+#define ENI_NOSERVNAME	EAI_NONAME
+#define ENI_NOHOSTNAME	EAI_NONAME
+#define ENI_MEMORY	EAI_MEMORY
+#define ENI_SYSTEM	EAI_SYSTEM
+#define ENI_FAMILY	EAI_FAMILY
+#define ENI_SALEN	EAI_FAMILY
 
 int
 getnameinfo(sa, salen, host, hostlen, serv, servlen, flags)
 	const struct sockaddr *sa;
-	size_t salen;
+	socklen_t salen;
 	char *host;
 	size_t hostlen;
 	char *serv;
@@ -157,12 +156,12 @@ getnameinfo(sa, salen, host, hostlen, serv, servlen, flags)
 				(flags & NI_DGRAM) ? "udp" : "tcp");
 		}
 		if (sp) {
-			if (strlen(sp->s_name) > servlen)
+			if (strlen(sp->s_name) + 1 > servlen)
 				return ENI_MEMORY;
 			strcpy(serv, sp->s_name);
 		} else {
 			snprintf(numserv, sizeof(numserv), "%d", ntohs(port));
-			if (strlen(numserv) > servlen)
+			if (strlen(numserv) + 1 > servlen)
 				return ENI_MEMORY;
 			strcpy(serv, numserv);
 		}
@@ -257,7 +256,7 @@ getnameinfo(sa, salen, host, hostlen, serv, servlen, flags)
 					*p = '\0';
 			}
 #endif
-			if (strlen(hp->h_name) > hostlen) {
+			if (strlen(hp->h_name) + 1 > hostlen) {
 				return ENI_MEMORY;
 			}
 			strcpy(host, hp->h_name);
@@ -319,7 +318,7 @@ ip6_parsenumeric(sa, addr, host, hostlen, flags)
 			/* ip6_sa2str never fails */
 			scopelen = ip6_sa2str((const struct sockaddr_in6 *)sa,
 					      scopebuf, sizeof(scopebuf),
-					      0);
+					      flags);
 			if (scopelen + 1 + numaddrlen + 1 > hostlen)
 				return ENI_MEMORY;
 			/*
@@ -352,7 +351,7 @@ ip6_sa2str(sa6, buf, bufsiz, flags)
 		return(snprintf(buf, bufsiz, "%d", sa6->sin6_scope_id));
 	}
 #endif
- 
+
 	/* if_indextoname() does not take buffer size.  not a good api... */
 	if ((IN6_IS_ADDR_LINKLOCAL(a6) || IN6_IS_ADDR_MC_LINKLOCAL(a6)) &&
 	    bufsiz >= IF_NAMESIZE) {

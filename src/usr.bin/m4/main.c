@@ -1,4 +1,4 @@
-/*	$OpenBSD: main.c,v 1.32 2000/03/18 01:06:56 espie Exp $	*/
+/*	$OpenBSD: main.c,v 1.36 2000/07/27 17:44:33 espie Exp $	*/
 /*	$NetBSD: main.c,v 1.12 1997/02/08 23:54:49 cgd Exp $	*/
 
 /*-
@@ -47,7 +47,7 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)main.c	8.1 (Berkeley) 6/6/93";
 #else
-static char rcsid[] = "$OpenBSD: main.c,v 1.32 2000/03/18 01:06:56 espie Exp $";
+static char rcsid[] = "$OpenBSD: main.c,v 1.36 2000/07/27 17:44:33 espie Exp $";
 #endif
 #endif /* not lint */
 
@@ -66,6 +66,7 @@ static char rcsid[] = "$OpenBSD: main.c,v 1.32 2000/03/18 01:06:56 espie Exp $";
 #include <ctype.h>
 #include <string.h>
 #include <stddef.h>
+#include <stdlib.h>
 #include <err.h>
 #include "mdef.h"
 #include "stdd.h"
@@ -73,11 +74,14 @@ static char rcsid[] = "$OpenBSD: main.c,v 1.32 2000/03/18 01:06:56 espie Exp $";
 #include "pathnames.h"
 
 ndptr hashtab[HASHSIZE];	/* hash table for macros etc.  */
-stae mstack[STACKMAX+1]; 	/* stack of m4 machine         */
+stae *mstack;		 	/* stack of m4 machine         */
+char *sstack;		 	/* shadow stack, for string space extension */
+static size_t STACKMAX;		/* current maximum size of stack */
 int sp; 			/* current m4  stack pointer   */
 int fp; 			/* m4 call frame pointer       */
 struct input_file infile[MAXINP];/* input file stack (0=stdin)  */
-FILE *outfile[MAXOUT];		/* diversion array(0=bitbucket)*/
+FILE **outfile;			/* diversion array(0=bitbucket)*/
+int maxout;
 FILE *active;			/* active output file pointer  */
 int ilevel = 0; 		/* input file stack pointer    */
 int oindex = 0; 		/* diversion index..	       */
@@ -114,6 +118,7 @@ struct keyblk keywrds[] = {	/* m4 keywords to be installed */
 	{ "builtin",      BUILTINTYPE},
 	{ "patsubst",	  PATSTYPE},
 	{ "regexp",	  REGEXPTYPE},
+	{ "esyscmd",	  ESYSCMDTYPE},
 	{ "__file__",	  FILENAMETYPE | NOARGS},
 	{ "__line__",	  LINETYPE | NOARGS},
 #endif
@@ -160,6 +165,8 @@ static void initkwds __P((void));
 static ndptr inspect __P((char, char *));
 static int do_look_ahead __P((int, const char *));
 
+static void enlarge_stack __P((void));
+
 int main __P((int, char *[]));
 
 int
@@ -177,6 +184,14 @@ main(argc,argv)
 
 	initkwds();
 	initspaces();
+	STACKMAX = INITSTACKMAX;
+
+	mstack = (stae *)xalloc(sizeof(stae) * STACKMAX);
+	sstack = (char *)xalloc(STACKMAX);
+
+	maxout = 0;
+	outfile = NULL;
+	resizedivs(MAXOUT);
 
 	while ((c = getopt(argc, argv, "gtD:U:o:I:")) != -1)
 		switch(c) {
@@ -236,7 +251,7 @@ main(argc,argv)
 
 	if (active != stdout)
 		active = stdout;	/* reset output just in case */
-	for (n = 1; n < MAXOUT; n++)	/* default wrap-up: undivert */
+	for (n = 1; n < maxout; n++)	/* default wrap-up: undivert */
 		if (outfile[n] != NULL)
 			getdiv(n);
 					/* remove bitbucket if used  */
@@ -283,7 +298,7 @@ do_look_ahead(t, token)
 static void
 macro()
 {
-	char token[MAXTOK];
+	char token[MAXTOK+1];
 	int t, l;
 	ndptr p;
 	int  nlpar;
@@ -308,9 +323,9 @@ macro()
 		/*
 		 * now push the string arguments:
 		 */
-				pushs(p->defn);	      /* defn string */
-				pushs(p->name);	      /* macro name  */
-				pushs(ep);	      /* start next..*/
+				pushs1(p->defn);	/* defn string */
+				pushs1(p->name);	/* macro name  */
+				pushs(ep);	      	/* start next..*/
 
 				if (l != LPAREN)  {   /* add bracks  */
 					putback(RPAREN);
@@ -488,10 +503,20 @@ inspect(c, tp)
 	while ((isalnum(c = gpbc()) || c == '_') && tp < etp)
 		h = (h << 5) + h + (*tp++ = c);
 	putback(c);
-	if (tp == etp)
-		errx(1, "token too long");
-
 	*tp = EOS;
+	/* token is too long, it won't match anything, but it can still
+	 * be output. */
+	if (tp == ep) {
+		outputstr(name);
+		while (isalnum(c = gpbc()) || c == '_') {
+			if (sp < 0)
+				putc(c, active);
+			else
+				chrsave(c);
+		}
+		*name = EOS;
+		return nil;
+	}
 
 	for (p = hashtab[h % HASHSIZE]; p != nil; p = p->nxtptr)
 		if (h == p->hv && STREQ(name, p->name))
@@ -567,4 +592,17 @@ dump_stack(t, lev)
 		fprintf(stderr, "   %s at line %lu\n", 
 			t[i].name, t[i].line);
 	}
+}
+
+
+static void 
+enlarge_stack()
+{
+	STACKMAX *= 2;
+	fprintf(stderr, "%u\n", STACKMAX);
+	mstack = realloc(mstack, sizeof(stae) * STACKMAX);
+	sstack = realloc(sstack, STACKMAX);
+	if (mstack == NULL || sstack == NULL)
+		errx(1, "Evaluation stack overflow (%lu)", 
+		    (unsigned long)STACKMAX);
 }

@@ -1288,8 +1288,6 @@ static int argbuf_index;
 
 #ifdef MKTEMP_EACH_FILE
 
-extern char *make_temp_file PROTO((const char *));
-
 /* This is the list of suffixes and codes (%g/%u/%U) and the associated
    temp file.  */
 
@@ -4963,7 +4961,7 @@ main (argc, argv)
       if (! verbose_flag)
 	{
 	  printf ("\nFor bug reporting instructions, please see:\n");
-	  printf ("<URL:http://www.gnu.org/software/gcc/faq.html#bugreport>.\n");
+	  printf ("%s.\n", GCCBUGURL);
 	  
 	  exit (0);
 	}
@@ -5156,7 +5154,7 @@ main (argc, argv)
   if (print_help_list)
     {
       printf ("\nFor bug reporting instructions, please see:\n");
-      printf ("<URL:http://www.gnu.org/software/gcc/faq.html#bugreport>\n");
+      printf ("%s\n", GCCBUGURL);
     }
   
   exit (error_count > 0 ? (signal_count ? 2 : 1) : 0);

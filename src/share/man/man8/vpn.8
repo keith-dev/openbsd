@@ -1,4 +1,4 @@
-.\" $OpenBSD: vpn.8,v 1.38 2000/05/02 22:33:26 ho Exp $
+.\" $OpenBSD: vpn.8,v 1.46 2000/10/18 16:50:22 deraadt Exp $
 .\" Copyright 1998 Niels Provos <provos@physnet.uni-hamburg.de>
 .\" All rights reserved.
 .\"
@@ -54,10 +54,10 @@ Choose a key exchange method: manual keyed, or automated via
 or
 .Xr photurisd 8 .
 .It
-For manual keying, create the Security Associations (SA), one for 
+For manual keying, create the Security Associations (SA), one for
 each endpoint.
 .It
-For manual keying, create the appropriate IPSec flows.
+For manual keying, create the appropriate IPsec flows.
 .It
 For automated keying, create a configuration file for the keying
 daemon.
@@ -76,14 +76,22 @@ manual (symmetric shared secret)
 .Xr photurisd 8
 .El
 .Pp
-At present, 
+At present,
 .Xr photurisd 8
 has a limitation in that the IP adress of the security gateway must
 fall within the range of adresses being tunnelled to, making VPNs
 between (non-routable) private (RFC 1918) networks difficult.
-This does not apply to 
+This does not apply to
 .Xr isakmpd 8 .
 .Ss Enabling the Appropriate Kernel Operations
+Make sure that the following options and devices are enabled in the kernel:
+.Bd -literal
+option    CRYPTO          # Cryptographic Framework
+option    IPSEC           # IPSEC VPN
+#option   KEY             # KEY implied by IPSEC
+pseudo-device enc 4       # Encapsulation device used by IPSEC
+.Ed
+.Pp
 .Xr ipsec 4
 operations must be first enabled using
 .Xr sysctl 8 .
@@ -91,21 +99,14 @@ Before doing either manual or automated keying, or performing
 encryption (ESP) or authentication (AH) operations, ensure the appropriate
 kernel operation has been enabled:
 .Bd -literal
-sysctl -w net.inet.esp.enable=1
-sysctl -w net.inet.ah.enable=1
+	# sysctl -w net.inet.esp.enable=1
+	# sysctl -w net.inet.ah.enable=1
 .Ed
-.Pp
-and
-.Bd -literal
-sysctl -w net.inet.ip.ipsec-acl=1
-.Ed
-.Pp
-if inbound packet verification is desired (strongly recommended).
 .Pp
 For security gateways, enabling packet forwarding is often
 required:
 .Bd -literal
-sysctl -w net.inet.ip.forwarding=1
+	# sysctl -w net.inet.ip.forwarding=1
 .Ed
 .Pp
 For more permanent operation, these options should be enabled in your
@@ -122,12 +123,12 @@ is by using the
 .Xr random 4
 device. To produce 160 bits (20 bytes) of randomness, for example, do:
 .Bd -literal
-   openssl rand 20 | hexdump -e '20/1 "%02x"'
+	# openssl rand 20 | hexdump -e '20/1 "%02x"'
 .Ed
 .Pp
 or:
 .Bd -literal
-   openssl rand 20 | perl -pe 's/./unpack("H2",$&)/ges'
+	# openssl rand 20 | perl -pe 's/./unpack("H2",$&)/ges'
 .Ed
 .Pp
 Different cipher types may require different sized keys.
@@ -137,7 +138,7 @@ Different cipher types may require different sized keys.
 .It Li DES Ta "56 bits"
 .It Li 3DES Ta "168 bits"
 .It Li BLF Ta "Variable (160 bits recommended)"
-.It Li CAST Ta "Variable (160 bits recommended)"
+.It Li CAST Ta "Variable (128 bits maximum and recommended)"
 .It Li SKIPJACK Ta "80 bits"
 .El
 .Pp
@@ -150,18 +151,17 @@ Note that DES requires 8 bytes to form a 56-bit key and 3DES requires 24 bytes
 to form its 168-bit key. This is because the most significant bit of each byte
 is ignored by both algorithms.
 .Ss Creating Security Associations [manual keying]
-Before the IPSec flows can be defined, two Security Associations (SAs)
+Before the IPsec flows can be defined, two Security Associations (SAs)
 must be defined on each end of the VPN, e.g.:
 .Bd -literal
-ipsecadm new esp -spi SPI_OUT -src A_EXTERNAL_IP
-         -dst B_EXTERNAL_IP -forcetunnel
-         -enc 3des -auth sha1
-         -keyfile ENCRYPTION_KEY_FILE -authkeyfile AUTHENTICATION_KEY_FILE
-
-ipsecadm new esp -spi SPI_IN -src B_EXTERNAL_IP
-         -dst A_EXTERNAL_IP -forcetunnel
-         -enc 3des -auth sha1
-         -keyfile ENCRYPTION_KEY_FILE -authkeyfile AUTHENTICATION_KEY_FILE
+	# ipsecadm new esp -spi SPI_AB -src A_EXTERNAL_IP \e
+	    -dst B_EXTERNAL_IP -forcetunnel -enc 3des -auth sha1 \e
+	    -keyfile ENCRYPTION_KEY_FILE \e
+	    -authkeyfile AUTHENTICATION_KEY_FILE
+	# ipsecadm new esp -spi SPI_BA -src B_EXTERNAL_IP \e
+	    -dst A_EXTERNAL_IP -forcetunnel -enc 3des -auth sha1 \e
+	    -keyfile ENCRYPTION_KEY_FILE \e
+	    -authkeyfile AUTHENTICATION_KEY_FILE
 .Ed
 .Pp
 Note that the
@@ -174,7 +174,7 @@ command line.  However, another user could view the keys by using the
 .Xr ps 1
 command at the appropriate time (or use a program for doing so).
 .Pp
-.Ss Creating IPSec Flows [manual keying]
+.Ss Creating IPsec Flows [manual keying]
 Both IPsec gateways need to configure
 .Xr ipsec 4
 routes with the
@@ -183,64 +183,80 @@ tool:
 .Pp
 On the security gateway of subnet A:
 .Bd -literal
-ipsecadm flow -dst B_EXTERNAL_IP -spi SPI_OUT -proto esp
-         -addr A_EXTERNAL_IP 255.255.255.255
-               B_EXTERNAL_IP 255.255.255.255
-ipsecadm flow -dst B_EXTERNAL_IP -spi SPI_OUT -proto esp
-         -addr A_INTERNAL_NETWORK A_INTERNAL_NETMASK
-               B_INTERNAL_NETWORK B_INTERNAL_NETMASK
-ipsecadm flow -dst B_EXTERNAL_IP -spi SPI_OUT -proto esp
-         -addr A_EXTERNAL_IP 255.255.255.255
-               B_INTERNAL_NETWORK B_INTERNAL_NETMASK
-ipsecadm flow -dst B_EXTERNAL_IP -spi SPI_OUT -proto esp
-         -addr A_INTERNAL_NETWORK A_INTERNAL_NETMASK
-               B_EXTERNAL_IP 255.255.255.255
-
-ipsecadm flow -dst A_EXTERNAL_IP -spi SPI_IN -proto esp
-         -addr B_EXTERNAL_IP 255.255.255.255
-               A_EXTERNAL_IP 255.255.255.255 -ingress
-ipsecadm flow -dst A_EXTERNAL_IP -spi SPI_IN -proto esp
-         -addr B_INTERNAL_NETWORK B_INTERNAL_NETMASK
-               A_INTERNAL_NETWORK A_INTERNAL_NETMASK -ingress
-ipsecadm flow -dst A_EXTERNAL_IP -spi SPI_OUT -proto esp
-         -addr B_EXTERNAL_IP 255.255.255.255
-               A_INTERNAL_NETWORK A_INTERNAL_NETMASK -ingress
-ipsecadm flow -dst A_EXTERNAL_IP -spi SPI_OUT -proto esp
-         -addr B_INTERNAL_NETWORK B_INTERNAL_NETMASK
-               A_EXTERNAL_IP 255.255.255.255 -ingress
+	# ipsecadm flow -dst B_EXTERNAL_IP -proto esp
+	    -addr A_EXTERNAL_IP 255.255.255.255
+	          B_EXTERNAL_IP 255.255.255.255
+	    -require -out -src A_EXTERNAL_IP
+	# ipsecadm flow -dst B_EXTERNAL_IP -proto esp
+	    -addr A_INTERNAL_NETWORK A_INTERNAL_NETMASK
+	          B_INTERNAL_NETWORK B_INTERNAL_NETMASK
+	    -require -out -src A_EXTERNAL_IP
+	# ipsecadm flow -dst B_EXTERNAL_IP -proto esp
+	    -addr A_EXTERNAL_IP 255.255.255.255
+	          B_INTERNAL_NETWORK B_INTERNAL_NETMASK
+	    -require -out -src A_EXTERNAL_IP
+	# ipsecadm flow -dst B_EXTERNAL_IP -proto esp
+	    -addr A_INTERNAL_NETWORK A_INTERNAL_NETMASK
+	          B_EXTERNAL_IP 255.255.255.255
+	    -require -out -src A_EXTERNAL_IP
+	
+	# ipsecadm flow -dst B_EXTERNAL_IP -proto esp
+	    -addr B_EXTERNAL_IP 255.255.255.255
+	          A_EXTERNAL_IP 255.255.255.255 
+	    -require -in -src A_EXTERNAL_IP
+	# ipsecadm flow -dst A_EXTERNAL_IP -proto esp
+	    -addr B_INTERNAL_NETWORK B_INTERNAL_NETMASK
+	          A_INTERNAL_NETWORK A_INTERNAL_NETMASK
+	    -require -in -src A_EXTERNAL_IP
+	# ipsecadm flow -dst A_EXTERNAL_IP -proto esp
+	    -addr B_EXTERNAL_IP 255.255.255.255
+	          A_INTERNAL_NETWORK A_INTERNAL_NETMASK
+	    -require -in -src A_EXTERNAL_IP
+	# ipsecadm flow -dst A_EXTERNAL_IP -proto esp
+	    -addr B_INTERNAL_NETWORK B_INTERNAL_NETMASK
+	          A_EXTERNAL_IP 255.255.255.255
+	    -require -in -src A_EXTERNAL_IP
 .Ed
 .Pp
 and on the security gateway of subnet B:
 .Bd -literal
-ipsecadm flow -dst A_EXTERNAL_IP -spi SPI_IN -proto esp
-         -addr B_EXTERNAL_IP 255.255.255.255
-               A_EXTERNAL_IP 255.255.255.255
-ipsecadm flow -dst A_EXTERNAL_IP -spi SPI_IN -proto esp
-         -addr B_INTERNAL_NETWORK B_INTERNAL_NETMASK
-               A_INTERNAL_NETWORK A_INTERNAL_NETMASK
-ipsecadm flow -dst A_EXTERNAL_IP -spi SPI_OUT -proto esp
-         -addr B_EXTERNAL_IP 255.255.255.255
-               A_INTERNAL_NETWORK A_INTERNAL_NETMASK
-ipsecadm flow -dst A_EXTERNAL_IP -spi SPI_OUT -proto esp
-         -addr B_INTERNAL_NETWORK B_INTERNAL_NETMASK
-               A_EXTERNAL_IP 255.255.255.255
-
-ipsecadm flow -dst B_EXTERNAL_IP -spi SPI_OUT -proto esp
-         -addr A_EXTERNAL_IP 255.255.255.255
-               B_EXTERNAL_IP 255.255.255.255 -ingress
-ipsecadm flow -dst B_EXTERNAL_IP -spi SPI_OUT -proto esp
-         -addr A_INTERNAL_NETWORK A_INTERNAL_NETMASK
-               B_INTERNAL_NETWORK B_INTERNAL_NETMASK -ingress
-ipsecadm flow -dst B_EXTERNAL_IP -spi SPI_OUT -proto esp
-         -addr A_EXTERNAL_IP 255.255.255.255
-               B_INTERNAL_NETWORK B_INTERNAL_NETMASK -ingress
-ipsecadm flow -dst B_EXTERNAL_IP -spi SPI_OUT -proto esp
-         -addr A_INTERNAL_NETWORK A_INTERNAL_NETMASK
-               B_EXTERNAL_IP 255.255.255.255 -ingress
+	# ipsecadm flow -dst A_EXTERNAL_IP -proto esp
+	    -addr B_EXTERNAL_IP 255.255.255.255
+	          A_EXTERNAL_IP 255.255.255.255
+	    -out -require -src B_EXTERNAL_IP
+	# ipsecadm flow -dst A_EXTERNAL_IP -proto esp
+	    -addr B_INTERNAL_NETWORK B_INTERNAL_NETMASK
+	          A_INTERNAL_NETWORK A_INTERNAL_NETMASK
+	    -out -require -src B_EXTERNAL_IP
+	# ipsecadm flow -dst A_EXTERNAL_IP -proto esp
+	    -addr B_EXTERNAL_IP 255.255.255.255
+	          A_INTERNAL_NETWORK A_INTERNAL_NETMASK
+	    -out -require -src B_EXTERNAL_IP
+	# ipsecadm flow -dst A_EXTERNAL_IP -proto esp
+	    -addr B_INTERNAL_NETWORK B_INTERNAL_NETMASK
+	          A_EXTERNAL_IP 255.255.255.255
+	    -out -require -src B_EXTERNAL_IP
+	
+	# ipsecadm flow -dst A_EXTERNAL_IP -proto esp
+	    -addr A_EXTERNAL_IP 255.255.255.255
+	          B_EXTERNAL_IP 255.255.255.255
+	    -in -require -src B_EXTERNAL_IP
+	# ipsecadm flow -dst A_EXTERNAL_IP -proto esp
+	    -addr A_INTERNAL_NETWORK A_INTERNAL_NETMASK
+	          B_INTERNAL_NETWORK B_INTERNAL_NETMASK
+	    -in -require -src B_EXTERNAL_IP
+	# ipsecadm flow -dst A_EXTERNAL_IP -proto esp
+	    -addr A_EXTERNAL_IP 255.255.255.255
+	          B_INTERNAL_NETWORK B_INTERNAL_NETMASK
+	    -in -require -src B_EXTERNAL_IP
+	# ipsecadm flow -dst A_EXTERNAL_IP -proto esp
+	    -addr A_INTERNAL_NETWORK A_INTERNAL_NETMASK
+	          B_EXTERNAL_IP 255.255.255.255
+	    -in -require -src B_EXTERNAL_IP
 .Ed
 .Pp
 .Ss Configure and run the keying daemon [automated keying]
-Unless manual keying is used, both security gateways need to start 
+Unless manual keying is used, both security gateways need to start
 either the
 .Xr isakmpd 8
 or
@@ -256,7 +272,8 @@ trust management system.
 .Ss Configuring Firewall Rules
 .Xr ipf 8
 needs to be configured such that all packets from the outside are blocked
-by default. Only successfully IPSec-processed packets (from the
+by default.
+Only successfully IPsec-processed packets (from the
 .Xr enc0 4
 interface), or key management packets (for
 .Xr photurisd 8 ,
@@ -276,6 +293,7 @@ on security gateway A might look like this:
 block in log on ne0 from any to any
 block out log on ne0 from any to any
 block in log on enc0 from any to any
+block out log on enc0 from any to any
 
 # Passing in encrypted traffic from security gateways
 pass in proto esp from gatewB/32 to gatewA/32
@@ -283,6 +301,7 @@ pass out proto esp from gatewA/32 to gatewB/32
 
 # Passing in traffic from the designated subnets.
 pass in on enc0 from netB/netBmask to netA/netAmask
+pass out on enc0 from natA/netAmask to netB/netBmask
 
 # Passing in Photuris traffic from the security gateways
 pass in on ne0 proto udp from gatewB/32 port = 468 to gatewA/32 port = 468
@@ -291,7 +310,13 @@ pass out on ne0 proto udp from gatewA/32 port = 468 to gatewB/32 port = 468
 .Pp
 If there are no other
 .Xr ipf 5
-rules, the "quick" clause can be added to the last three rules.
+rules, the "quick" clause can be added to the last four rules.
+NAT rules can also be used on the
+.Xr enc0 4
+interface.
+Note that it is strongly encouraged that instead of detailed IPF
+rules, the SPD (IPsec flow database) be utilized to specify security
+policy, if only to avoid filtering conflicts.
 .Sh EXAMPLES
 .Ss Manual keying
 To create a manual keyed VPN between two class C networks using
@@ -306,8 +331,8 @@ To create a manual keyed VPN between two class C networks using
 .Pp
 .Bl -enum
 .It
-Choose the shared secrets using a suitably random method. 
-The 3DES encryption key needs 192 bits (3x64), or 24 bytes. 
+Choose the shared secrets using a suitably random method.
+The 3DES encryption key needs 192 bits (3x64), or 24 bytes.
 The SHA-1 authentication key for needs 160 bits, or 20 bytes.
 .Pp
 .Bd -literal
@@ -335,65 +360,78 @@ outbound flows, the latter four are the ingress filters for the
 incoming security association):
 .Pp
 .Bd -literal
-# /sbin/ipsecadm flow -dst 192.168.2.1 -spi 1001 -proto esp \e\ 
+# /sbin/ipsecadm flow -dst 192.168.2.1 -proto esp \e\ 
     -addr 192.168.1.254 255.255.255.255 \e\ 
-          192.168.2.1 255.255.255.255
+          192.168.2.1 255.255.255.255 -out \e\ 
+    -require -src 192.168.1.254
 
-# /sbin/ipsecadm flow -dst 192.168.2.1 -spi 1001 -proto esp \e\ 
-    -addr 10.0.50.0 255.255.255.0 10.0.99.0 255.255.255.0
+# /sbin/ipsecadm flow -dst 192.168.2.1 -proto esp \e\ 
+    -addr 10.0.50.0 255.255.255.0 10.0.99.0 255.255.255.0 \e\ 
+    -require -out -src 192.168.1.254
 
-# /sbin/ipsecadm flow -dst 192.168.2.1 -spi 1001 -proto esp \e\ 
+# /sbin/ipsecadm flow -dst 192.168.2.1 -proto esp \e\ 
     -addr 192.168.1.254 255.255.255.255 \e\ 
-          10.0.99.0 255.255.255.0
+          10.0.99.0 255.255.255.0  \e\ 
+    -require -out -src 192.168.1.254
 
-# /sbin/ipsecadm flow -dst 192.168.2.1 -spi 1001 -proto esp \e\ 
-    -addr 10.0.50.0 255.255.255.0 192.168.2.1 255.255.255.255
+# /sbin/ipsecadm flow -dst 192.168.2.1 -proto esp \e\ 
+    -addr 10.0.50.0 255.255.255.0 192.168.2.1 255.255.255.255 \e\ 
+    -require -out -src 192.168.1.254
 
-# /sbin/ipsecadm flow -dst 192.168.1.254 -spi 1000 -proto esp \e\ 
+# /sbin/ipsecadm flow -dst 192.168.2.1 -proto esp \e\ 
     -addr 192.168.2.1 255.255.255.255 \e\ 
-          192.168.1.254 255.255.255.255 -ingress
+          192.168.1.254 255.255.255.255  \e\ 
+    -require -in -src 192.168.1.254
 
-# /sbin/ipsecadm flow -dst 192.168.1.254 -spi 1000 -proto esp \e\ 
-    -addr 10.0.99.0 255.255.255.0 10.0.50.0 255.255.255.0 -ingress
+# /sbin/ipsecadm flow -dst 192.168.2.1 -proto esp \e\ 
+    -addr 10.0.99.0 255.255.255.0 10.0.50.0 255.255.255.0 \e\ 
+    -require -in -src 192.168.1.254
 
-# /sbin/ipsecadm flow -dst 192.168.1.254 -spi 1000 -proto esp \e\ 
-     -addr 192.168.2.1 255.255.255.255 \e\ 
-           10.0.50.0 255.255.255.0 -ingress
+# /sbin/ipsecadm flow -dst 192.168.2.1 -proto esp \e\ 
+    -addr 192.168.2.1 255.255.255.255 \e\ 
+           10.0.50.0 255.255.255.0  \e\ 
+    -require -in -src 192.168.1.254
 
-# /sbin/ipsecadm flow -dst 192.168.1.254 -spi 1000 -proto esp \e\ 
-     -addr 10.0.99.0 255.255.255.0 \e\ 
-	   192.168.1.254 255.255.255.255 -ingress
+# /sbin/ipsecadm flow -dst 192.168.2.1 -proto esp \e\ 
+    -addr 10.0.99.0 255.255.255.0 \e\ 
+	   192.168.1.254 255.255.255.255  \e\ 
+    -require -in -src 192.168.1.254
 .Ed
 .It
 Create the ipsec flows on machine B:
 .Bd -literal
-# /sbin/ipsecadm flow -dst 192.168.1.254 -spi 1000 -proto esp \e\ 
+# /sbin/ipsecadm flow -dst 192.168.1.254 -proto esp \e\ 
     -addr 192.168.2.1 255.255.255.255 \e\ 
-          192.168.1.254 255.255.255.255
+          192.168.1.254 255.255.255.255 \e\ 
+    -require -out -src 192.168.2.1
 
-# /sbin/ipsecadm flow -dst 192.168.1.254 -spi 1000 -proto esp \e\ 
-    -addr 10.0.99.0 255.255.255.0 10.0.50.0 255.255.255.0
+# /sbin/ipsecadm flow -dst 192.168.1.254 -proto esp \e\ 
+    -addr 10.0.99.0 255.255.255.0 10.0.50.0 255.255.255.0 \e\ 
+    -require -out -src 192.168.2.1
 
-# /sbin/ipsecadm flow -dst 192.168.1.254 -spi 1000 -proto esp \e\ 
-     -addr 192.168.2.1 255.255.255.255 \e\ 
-           10.0.50.0 255.255.255.0
+# /sbin/ipsecadm flow -dst 192.168.1.254 -proto esp \e\ 
+    -addr 192.168.2.1 255.255.255.255 \e\ 
+           10.0.50.0 255.255.255.0 -require -out -src 192.168.2.1
 
-# /sbin/ipsecadm flow -dst 192.168.1.254 -spi 1000 -proto esp \e\ 
-     -addr 10.0.99.0 255.255.255.0 192.168.1.254 255.255.255.255
+# /sbin/ipsecadm flow -dst 192.168.1.254 -proto esp \e\ 
+    -addr 10.0.99.0 255.255.255.0 192.168.1.254 255.255.255.255 \e\ 
+    -require -out -src 192.168.2.1
 
-# /sbin/ipsecadm flow -dst 192.168.2.1 -spi 1001 -proto esp \e\ 
+# /sbin/ipsecadm flow -dst 192.168.1.254 -proto esp \e\ 
     -addr 192.168.1.254 255.255.255.255 \e\ 
-          192.168.2.1 255.255.255.255 -ingress
+          192.168.2.1 255.255.255.255 -require -in -src 192.168.2.1
 
-# /sbin/ipsecadm flow -dst 192.168.2.1 -spi 1001 -proto esp \e\ 
-    -addr 10.0.50.0 255.255.255.0 10.0.99.0 255.255.255.0 -ingress
+# /sbin/ipsecadm flow -dst 192.168.1.254 -proto esp \e\ 
+    -addr 10.0.50.0 255.255.255.0 10.0.99.0 255.255.255.0 \e\ 
+    -require -in -src 192.168.2.1
 
-# /sbin/ipsecadm flow -dst 192.168.2.1 -spi 1001 -proto esp \e\ 
+# /sbin/ipsecadm flow -dst 192.168.1.254 -proto esp \e\ 
     -addr 192.168.1.254 255.255.255.255 \e\ 
-          10.0.99.0 255.255.255.0 -ingress
+          10.0.99.0 255.255.255.0 -require -in -src 192.168.2.1
 
-# /sbin/ipsecadm flow -dst 192.168.2.1 -spi 1001 -proto esp \e\ 
-    -addr 10.0.50.0 255.255.255.0 192.168.2.1 255.255.255.255 -ingress
+# /sbin/ipsecadm flow -dst 192.168.1.254 -proto esp \e\ 
+    -addr 10.0.50.0 255.255.255.0 192.168.2.1 255.255.255.255 \e\ 
+    -require -in -src 192.168.2.1
 .Ed
 .It
 Configure the firewall rules on machine A:
@@ -402,6 +440,7 @@ Configure the firewall rules on machine A:
 block in log on ne0 from any to any
 block out log on ne0 from any to any
 block in log on enc0 from any to any
+block out log on enc0 from any to any
 
 # Passing in encrypted traffic from security gateways
 pass in proto esp from 192.168.2.1/32 to 192.168.1.254/32
@@ -409,6 +448,7 @@ pass out proto esp from 192.168.1.254/32 to 192.168.2.1/32
 
 # Passing in traffic from the designated subnets.
 pass in quick on enc0 from 10.0.99.0/24 to 10.0.50.0/24
+pass out quick on enc0 from 10.0.50.0/24 to 10.0.99.0/24 
 .Ed
 .It
 Configure the firewall rules on machine B:
@@ -417,6 +457,7 @@ Configure the firewall rules on machine B:
 block in log on ne0 from any to any
 block out log on ne0 from any to any
 block in log on enc0 from any to any
+block out log on enc0 from any to any
 
 # Passing in encrypted traffic from security gateways
 pass in proto esp from 192.168.1.254/32 to 192.168.2.1/32
@@ -424,6 +465,7 @@ pass out proto esp from 192.168.2.1/32 to 192.168.1.254/32
 
 # Passing in traffic from the designated subnets.
 pass in quick on enc0 from 10.0.50.0/24 to 10.0.99.0/24
+pass out quick on enc0 from 10.0.99.0/24 to 10.0.50.0/24
 .Ed
 .El
 .Ss Automated keying
@@ -432,15 +474,15 @@ above, using
 .Xr isakmpd 8 :
 .Pp
 .Bl -enum
-.It 
-Create 
-.Pa /etc/isakmpd/isakmpd.conf 
+.It
+Create
+.Pa /etc/isakmpd/isakmpd.conf
 for machine A:
 .Pp
 .Bd -literal
 
 # Incoming phase 1 negotiations are multiplexed on the source IP
-# address. Phase 1 is used to setup a protected channel just 
+# address. Phase 1 is used to setup a protected channel just
 # between the two gateway machines. This channel is then used for
 # the phase 2 negotiation traffic (i.e encrypted & authenticated).
 
@@ -497,13 +539,13 @@ Suites=			QM-ESP-3DES-SHA-SUITE
 .Ed
 .Pp
 .It
-Create 
-.Pa /etc/isakmpd/isakmpd.conf 
+Create
+.Pa /etc/isakmpd/isakmpd.conf
 for machine B:
 .Bd -literal
 
 # Incoming phase 1 negotiations are multiplexed on the source IP
-# address. Phase 1 is used to setup a protected channel just 
+# address. Phase 1 is used to setup a protected channel just
 # between the two gateway machines. This channel is then used for
 # the phase 2 negotiation traffic (i.e encrypted & authenticated).
 
@@ -561,7 +603,7 @@ Suites=			QM-ESP-3DES-SHA-SUITE
 .Pp
 .It
 Read through the configuration one more time. The only real
-differences between the two files in this example is 
+differences between the two files in this example is
 the IP-addresses, and ordering of Local- and Remote-ID for the VPN
 itself. Note that the shared secret (the
 .Em Authentication
@@ -603,11 +645,11 @@ Conditions: app_domain == "IPsec policy" &&
 Configure the firewall rules on machines A and B:
 .Pp
 Use the same ruleset as the manual keying example, but add permission
-for the 
+for the
 .Xr isakmpd 8
-control traffic, on 
-.Tn UDP 
-port 500. 
+control traffic, on
+.Tn UDP
+port 500.
 .Pp
 For machineA, add:
 .Bd -literal
@@ -624,7 +666,7 @@ pass out proto udp from 192.168.2.1/32 to 193.127.1.254/32 port = 500
 .Ed
 .Pp
 .It
-Start 
+Start
 .Xr isakmpd 8
 .Pp
 On both machines, run:
@@ -654,7 +696,7 @@ Firewall configuration file
 can not be used in VPN mode unless both of the security gateway IP addresses
 lie within the network ranges being tunnelled to.
 In situations where the gateway IP is outside the desired netrange, such
-as with private (RFC 1918) networks, 
+as with private (RFC 1918) networks,
 .Xr isakmpd 8
 or manual keying must be used.
 .Sh SEE ALSO

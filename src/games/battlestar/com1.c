@@ -1,4 +1,4 @@
-/*	$OpenBSD: com1.c,v 1.7 1999/09/25 20:30:45 pjanzen Exp $	*/
+/*	$OpenBSD: com1.c,v 1.11 2000/09/26 04:42:55 pjanzen Exp $	*/
 /*	$NetBSD: com1.c,v 1.3 1995/03/21 15:06:51 cgd Exp $	*/
 
 /*
@@ -38,14 +38,14 @@
 #if 0
 static char sccsid[] = "@(#)com1.c	8.2 (Berkeley) 4/28/95";
 #else
-static char rcsid[] = "$OpenBSD: com1.c,v 1.7 1999/09/25 20:30:45 pjanzen Exp $";
+static char rcsid[] = "$OpenBSD: com1.c,v 1.11 2000/09/26 04:42:55 pjanzen Exp $";
 #endif
 #endif /* not lint */
 
 #include "extern.h"
 
 int
-move(thataway, token)
+moveplayer(thataway, token)
 	int     thataway, token;
 {
 	wordnumber++;
@@ -126,10 +126,10 @@ news()
 			convert(TONIGHT);
 			ClearBit(location[POOLS].objects, BATHGOD);
 			if (OUTSIDE && ourtime - rythmn - CYCLE < 10) {
-				puts("The dying sun sinks into the ocean, leaving a blood stained sunset.");
+				puts("The dying sun sinks into the ocean, leaving a blood-stained sunset.");
 				puts("The sky slowly fades from orange to violet to black.  A few stars");
 				puts("flicker on, and it is night.");
-				puts("The world seems completly different at night.");
+				puts("The world seems completely different at night.");
 			}
 		}
 		rythmn = ourtime - ourtime % CYCLE;
@@ -212,11 +212,17 @@ news()
 				WEIGHT = 0;
 		}
 	if (injuries[ARM] == 2) {
-		CUMBER -= 5;
+		if (CUMBER > 5)
+			CUMBER -= 5;
+		else
+			CUMBER = 0;
 		injuries[ARM]++;
 	}
 	if (injuries[RIBS] == 2) {
-		CUMBER -= 2;
+		if (CUMBER > 2)
+			CUMBER -= 2;
+		else
+			CUMBER = 0;
 		injuries[RIBS]++;
 	}
 	if (injuries[SPINE] == 2) {
@@ -262,4 +268,25 @@ crash()
 		printf("I'm afraid you have suffered %s and %s.\n",
 		    ouch[hurt1], ouch[hurt2]);
 	}
+}
+
+void
+newlocation()
+{
+	news();
+	if (beenthere[position] <= ROOMDESC)
+	     beenthere[position]++;
+	if (notes[LAUNCHED])
+		crash();	/* decrements fuel & crash */
+	if (matchlight) {
+		puts("Your match splutters out.");
+		matchlight = 0;
+	}
+	if (!notes[CANTSEE] || TestBit(inven, LAMPON) ||
+	    TestBit(location[position].objects, LAMPON)) {
+		writedes();
+		printobjs();
+	} else
+		puts("It's too dark to see anything in here!");
+	whichway(location[position]);
 }

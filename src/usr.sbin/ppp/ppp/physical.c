@@ -16,7 +16,7 @@
  * IMPLIED WARRANTIES, INCLUDING, WITHOUT LIMITATION, THE IMPLIED
  * WARRANTIES OF MERCHANTIBILITY AND FITNESS FOR A PARTICULAR PURPOSE.
  *
- *  $OpenBSD: physical.c,v 1.21 2000/03/03 21:52:57 brian Exp $
+ *  $OpenBSD: physical.c,v 1.27 2000/10/09 22:50:57 brian Exp $
  *
  */
 
@@ -29,6 +29,9 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <paths.h>
+#ifdef NOSUID
+#include <signal.h>
+#endif
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -93,7 +96,9 @@
 #ifndef NONETGRAPH
 #include "ether.h"
 #endif
-
+#ifndef NOATM
+#include "atm.h"
+#endif
 
 #define PPPOTCPLINE "ppp"
 
@@ -119,6 +124,10 @@ struct {
 #ifndef NONETGRAPH
   /* This must come before ``udp'' & ``tcp'' */
   { ether_Create, ether_iov2device, ether_DeviceSize },
+#endif
+#ifndef NOATM
+  /* and so must this */
+  { atm_Create, atm_iov2device, atm_DeviceSize },
 #endif
   { tcp_Create, tcp_iov2device, tcp_DeviceSize },
   { udp_Create, udp_iov2device, udp_DeviceSize },
@@ -158,7 +167,10 @@ physical_Create(struct datalink *dl, int type)
   p->link.len = sizeof *p;
 
   /* The sample period is fixed - see physical2iov() & iov2physical() */
-  throughput_init(&p->link.throughput, SAMPLE_PERIOD);
+  throughput_init(&p->link.stats.total, SAMPLE_PERIOD);
+  p->link.stats.parent = dl->bundle->ncp.mp.active ?
+    &dl->bundle->ncp.mp.link.stats.total : NULL;
+  p->link.stats.gather = 1;
 
   memset(p->link.Queue, '\0', sizeof p->link.Queue);
   memset(p->link.proto_in, '\0', sizeof p->link.proto_in);
@@ -336,10 +348,12 @@ physical_Close(struct physical *p)
   p->fd = -1;
   log_SetTtyCommandMode(p->dl);
 
-  throughput_stop(&p->link.throughput);
-  throughput_log(&p->link.throughput, LogPHASE, p->link.name);
+  throughput_stop(&p->link.stats.total);
+  throughput_log(&p->link.stats.total, LogPHASE, p->link.name);
 
   if (p->session_owner != (pid_t)-1) {
+    log_Printf(LogPHASE, "%s: HUPing %d\n", p->link.name,
+               (int)p->session_owner);
     ID0kill(p->session_owner, SIGHUP);
     p->session_owner = (pid_t)-1;
   }
@@ -369,7 +383,7 @@ void
 physical_Destroy(struct physical *p)
 {
   physical_Close(p);
-  throughput_destroy(&p->link.throughput);
+  throughput_destroy(&p->link.stats.total);
   free(p);
 }
 
@@ -394,12 +408,13 @@ physical_DescriptorWrite(struct fdescriptor *d, struct bundle *bundle,
 	p->out = m_free(p->out);
       result = 1;
     } else if (nw < 0) {
-      if (errno != EAGAIN) {
+      if (errno == EAGAIN)
+        result = 1;
+      else if (errno != ENOBUFS) {
 	log_Printf(LogPHASE, "%s: write (%d): %s\n", p->link.name,
                    p->fd, strerror(errno));
         datalink_Down(p->dl, CLOSE_NORMAL);
       }
-      result = 1;
     }
     /* else we shouldn't really have been called !  select() is broken ! */
   }
@@ -490,7 +505,7 @@ physical_ShowStatus(struct cmdargs const *arg)
   }
   prompt_Printf(arg->prompt, "\n\n");
 
-  throughput_disp(&p->link.throughput, arg->prompt);
+  throughput_disp(&p->link.stats.total, arg->prompt);
 
   return 0;
 }
@@ -595,7 +610,11 @@ iov2physical(struct datalink *dl, struct iovec *iov, int *niov, int maxiov,
   p->hdlc.lqm.timer.state = TIMER_STOPPED;
 
   p->fd = fd;
-  p->link.throughput.SampleOctets = (long long *)iov[(*niov)++].iov_base;
+  p->link.stats.total.in.SampleOctets = (long long *)iov[(*niov)++].iov_base;
+  p->link.stats.total.out.SampleOctets = (long long *)iov[(*niov)++].iov_base;
+  p->link.stats.parent = dl->bundle->ncp.mp.active ?
+    &dl->bundle->ncp.mp.link.stats.total : NULL;
+  p->link.stats.gather = 1;
 
   type = (long)p->handler;
   p->handler = NULL;
@@ -614,7 +633,7 @@ iov2physical(struct datalink *dl, struct iovec *iov, int *niov, int maxiov,
     lqr_reStart(&p->link.lcp);
   hdlc_StartTimer(&p->hdlc);
 
-  throughput_restart(&p->link.throughput, "physical throughput",
+  throughput_restart(&p->link.stats.total, "physical throughput",
                      Enabled(dl->bundle, OPT_THROUGHPUT));
 
   return p;
@@ -663,7 +682,7 @@ physical2iov(struct physical *p, struct iovec *iov, int *niov, int maxiov,
       p->session_owner = getpid();      /* So I'll eventually get HUP'd */
     else
       p->session_owner = (pid_t)-1;
-    timer_Stop(&p->link.throughput.Timer);
+    timer_Stop(&p->link.stats.total.Timer);
   }
 
   if (*niov + 2 >= maxiov) {
@@ -678,7 +697,10 @@ physical2iov(struct physical *p, struct iovec *iov, int *niov, int maxiov,
   iov[*niov].iov_len = sizeof *p;
   (*niov)++;
 
-  iov[*niov].iov_base = p ? (void *)p->link.throughput.SampleOctets : NULL;
+  iov[*niov].iov_base = p ? (void *)p->link.stats.total.in.SampleOctets : NULL;
+  iov[*niov].iov_len = SAMPLE_PERIOD * sizeof(long long);
+  (*niov)++;
+  iov[*niov].iov_base = p ? (void *)p->link.stats.total.out.SampleOctets : NULL;
   iov[*niov].iov_len = SAMPLE_PERIOD * sizeof(long long);
   (*niov)++;
 
@@ -943,7 +965,7 @@ physical_Found(struct physical *p)
 #endif
   }
 
-  throughput_start(&p->link.throughput, "physical throughput",
+  throughput_start(&p->link.stats.total, "physical throughput",
                    Enabled(p->dl->bundle, OPT_THROUGHPUT));
   p->connect_count++;
   p->input.sz = 0;

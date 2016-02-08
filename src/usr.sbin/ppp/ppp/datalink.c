@@ -23,7 +23,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- *	$OpenBSD: datalink.c,v 1.30 2000/04/07 23:46:39 brian Exp $
+ *	$OpenBSD: datalink.c,v 1.32 2000/07/19 11:06:32 brian Exp $
  */
 
 #include <sys/param.h>
@@ -45,10 +45,10 @@
 #include "defs.h"
 #include "timer.h"
 #include "fsm.h"
-#include "lcp.h"
 #include "descriptor.h"
 #include "lqr.h"
 #include "hdlc.h"
+#include "lcp.h"
 #include "async.h"
 #include "throughput.h"
 #include "ccp.h"
@@ -969,8 +969,10 @@ datalink_Up(struct datalink *dl, int runscripts, int packetmode)
     case DATALINK_READY:
       if (!dl->script.packetmode && packetmode) {
         dl->script.packetmode = 1;
-        if (dl->state == DATALINK_READY)
-          datalink_LoginDone(dl);
+        if (dl->state == DATALINK_READY) {
+          dl->script.run = 0;
+          datalink_NewState(dl, DATALINK_CARRIER);
+        }
       }
       break;
   }

@@ -1,4 +1,4 @@
-/*	$OpenBSD: init.c,v 1.18 2000/01/22 20:24:58 deraadt Exp $	*/
+/*	$OpenBSD: init.c,v 1.20 2000/08/20 18:42:39 millert Exp $	*/
 /*	$NetBSD: init.c,v 1.22 1996/05/15 23:29:33 jtc Exp $	*/
 
 /*-
@@ -47,7 +47,7 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)init.c	8.2 (Berkeley) 4/28/95";
 #else
-static char rcsid[] = "$OpenBSD: init.c,v 1.18 2000/01/22 20:24:58 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: init.c,v 1.20 2000/08/20 18:42:39 millert Exp $";
 #endif
 #endif /* not lint */
 
@@ -79,6 +79,10 @@ static char rcsid[] = "$OpenBSD: init.c,v 1.18 2000/01/22 20:24:58 deraadt Exp $
 #include <pwd.h>
 #endif
 
+#ifdef LOGIN_CAP
+#include <login_cap.h>
+#endif
+
 #include "pathnames.h"
 
 /*
@@ -89,6 +93,17 @@ static char rcsid[] = "$OpenBSD: init.c,v 1.18 2000/01/22 20:24:58 deraadt Exp $
 #define	WINDOW_WAIT		 3	/* wait N secs after starting window */
 #define	STALL_TIMEOUT		30	/* wait N secs after warning */
 #define	DEATH_WATCH		10	/* wait N secs for procs to die */
+
+/*
+ * User-based resource limits.
+ */
+#define RESOURCE_RC		"daemon"
+#define RESOURCE_WINDOW		"default"
+#define RESOURCE_GETTY		"default"
+
+#ifndef DEFAULT_STATE
+#define DEFAULT_STATE		runcom
+#endif
 
 void handle __P((sig_t, ...));
 void delset __P((sigset_t *, ...));
@@ -119,7 +134,7 @@ state_func_t nice_death __P((void));
 enum { AUTOBOOT, FASTBOOT } runcom_mode = AUTOBOOT;
 
 void transition __P((state_t));
-state_t requested_transition = runcom;
+state_t requested_transition = DEFAULT_STATE;
 
 void setctty __P((char *));
 
@@ -154,6 +169,12 @@ void setsecuritylevel __P((int));
 int getsecuritylevel __P((void));
 int setupargv __P((session_t *, struct ttyent *));
 int clang;
+
+#ifdef LOGIN_CAP
+void setprocresources __P((char *));
+#else
+#define setprocresources(p)
+#endif
 
 void clear_session_logs __P((session_t *));
 
@@ -739,6 +760,8 @@ runcom()
 
 		sigprocmask(SIG_SETMASK, &sa.sa_mask, NULL);
 
+		setprocresources(RESOURCE_RC);
+
 		execv(_PATH_BSHELL, argv);
 		stall("can't exec %s for %s: %m", _PATH_BSHELL, _PATH_RUNCOM);
 		_exit(1);	/* force single user mode */
@@ -1056,6 +1079,8 @@ start_window_system(sp)
 	if (setsid() < 0)
 		emergency("setsid failed (window) %m");
 
+	setprocresources(RESOURCE_WINDOW);
+
 	execv(sp->se_window_argv[0], sp->se_window_argv);
 	stall("can't exec window system '%s' for port %s: %m",
 		sp->se_window_argv[0], sp->se_device);
@@ -1141,6 +1166,8 @@ start_getty(sp)
 
 	sigemptyset(&mask);
 	sigprocmask(SIG_SETMASK, &mask, NULL);
+
+	setprocresources(RESOURCE_GETTY);
 
 	execv(sp->se_getty_argv[0], sp->se_getty_argv);
 	stall("can't exec getty '%s' for port %s: %m",
@@ -1460,3 +1487,18 @@ death()
 
 	return (state_func_t) single_user;
 }
+
+#ifdef LOGIN_CAP
+void
+setprocresources(class)
+	char *class;
+{
+	login_cap_t *lc;
+
+	if ((lc = login_getclass(class)) != NULL) {
+		setusercontext(lc, NULL, 0,
+		    LOGIN_SETPRIORITY|LOGIN_SETRESOURCES|LOGIN_SETUMASK);
+		login_close(lc);
+	}
+}
+#endif

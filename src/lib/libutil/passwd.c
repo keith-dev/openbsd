@@ -1,4 +1,4 @@
-/*	$OpenBSD: passwd.c,v 1.20 1998/11/16 07:10:32 deraadt Exp $	*/
+/*	$OpenBSD: passwd.c,v 1.22 2000/08/01 22:10:16 provos Exp $	*/
 
 /*
  * Copyright (c) 1987, 1993, 1994, 1995
@@ -34,7 +34,7 @@
  */
 
 #if defined(LIBC_SCCS) && !defined(lint)
-static char rcsid[] = "$OpenBSD: passwd.c,v 1.20 1998/11/16 07:10:32 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: passwd.c,v 1.22 2000/08/01 22:10:16 provos Exp $";
 #endif /* LIBC_SCCS and not lint */
 
 #include <sys/types.h>
@@ -263,6 +263,10 @@ pw_lock(retries)
 		fd = open(pw_lck, O_WRONLY|O_CREAT|O_EXCL, 0600);
 	}
 	save_errno = errno;
+	if (fd != -1 && fcntl(fd, F_SETFD, 1) == -1) {
+		close(fd);
+		fd = -1;
+	}
 	(void) umask(old_mode);
 	errno = save_errno;
 	return (fd);
@@ -579,7 +583,7 @@ pw_error(name, err, eval)
 	char   *master = pw_file(_PATH_MASTERPASSWD);
 
 	if (err)
-		warn(name);
+		warn("%s", name);
 	if (master)
 		warnx("%s: unchanged", master);
 	pw_abort();

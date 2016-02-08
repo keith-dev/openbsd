@@ -1,4 +1,4 @@
-/*	$OpenBSD: fetch.c,v 1.30 2000/05/03 19:50:41 deraadt Exp $	*/
+/*	$OpenBSD: fetch.c,v 1.33 2000/06/30 16:00:15 millert Exp $	*/
 /*	$NetBSD: fetch.c,v 1.14 1997/08/18 10:20:20 lukem Exp $	*/
 
 /*-
@@ -38,7 +38,7 @@
  */
 
 #ifndef lint
-static char rcsid[] = "$OpenBSD: fetch.c,v 1.30 2000/05/03 19:50:41 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: fetch.c,v 1.33 2000/06/30 16:00:15 millert Exp $";
 #endif /* not lint */
 
 /*
@@ -338,7 +338,7 @@ again:
 	}
 	freeaddrinfo(res0);
 	if (s < 0) {
-		warn(cause);
+		warn("%s", cause);
 		goto cleanup_url_get;
 	}
 
@@ -346,23 +346,36 @@ again:
 	 * Construct and send the request.  We're expecting a return
 	 * status of "200". Proxy requests don't want leading /.
 	 */
-	if (verbose) {
-		if (!proxy)
-			fprintf(ttyout, "Requesting %s\n", origline);
-		else
+	if (proxy) {
+		/*
+		 * Host: directive must use the destination host address for
+		 * the original URI (path).  We do not attach it at this moment.
+		 */
+		if (verbose)
 			fprintf(ttyout, "Requesting %s (via %s)\n",
 			    origline, proxyenv);
-	}
-	if (strchr(host, ':')) {
-		snprintf(buf, sizeof(buf),
-		    "GET %s%s HTTP/1.0\r\nHost: [%s]%s%s\r\n\r\n",
-		    proxy ? "" : "/", path, host,
-		    port ? ":" : "", port ? port : "");
+		snprintf(buf, sizeof(buf), "GET %s HTTP/1.0\r\n\r\n", path);
 	} else {
-		snprintf(buf, sizeof(buf),
-		    "GET %s%s HTTP/1.0\r\nHost: %s%s%s\r\n\r\n",
-		    proxy ? "" : "/", path, host,
-		    port ? ":" : "", port ? port : "");
+		if (verbose)
+			fprintf(ttyout, "Requesting %s\n", origline);
+		if (strchr(host, ':')) {
+			char *h, *p;
+
+			/* strip off scoped address portion, since it's local to node */
+			h = strdup(host);
+			if (h == NULL)
+				errx(1, "Can't allocate memory.");
+			if ((p = strchr(h, '%')) != NULL)
+				*p = '\0';
+			snprintf(buf, sizeof(buf),
+			    "GET /%s HTTP/1.0\r\nHost: [%s]%s%s\r\n\r\n",
+			    path, h, port ? ":" : "", port ? port : "");
+			free(h);
+		} else {
+			snprintf(buf, sizeof(buf),
+			    "GET /%s HTTP/1.0\r\nHost: %s%s%s\r\n\r\n",
+			    path, host, port ? ":" : "", port ? port : "");
+		}
 	}
 	len = strlen(buf);
 	if (write(s, buf, len) < len) {
@@ -619,6 +632,8 @@ auto_fetch(argc, argv, outfile)
 		 */
 		host = line;
 		if (strncasecmp(line, FTP_URL, sizeof(FTP_URL) - 1) == 0) {
+			char *passend, *userend;
+
 			if (ftpproxy) {
 				if (url_get(line, ftpproxy, outfile) == -1)
 					rval = argpos + 1;
@@ -628,50 +643,67 @@ auto_fetch(argc, argv, outfile)
 			dir = strchr(host, '/');
 
 			/* Look for [user:pass@]host[:port] */
-			pass = strpbrk(host, ":@/");
-			if (pass == NULL || *pass == '/') {
-				pass = NULL;
-				goto parsed_url;
-			}
-			if (pass == host || *pass == '@') {
-bad_ftp_url:
-				warnx("Invalid URL: %s", argv[argpos]);
-				rval = argpos + 1;
-				continue;
-			}
-			*pass++ = '\0';
-			/* XXX - assumes no '@' in pathname */
-			if ((cp = strrchr(pass, '@')) == NULL)
-				cp = strpbrk(pass, ":@/");
-			if (cp == NULL || *cp == '/') {
-				portnum = pass;
-				pass = NULL;
-				goto parsed_url;
-			}
-			if (EMPTYSTRING(cp) || *cp == ':')
-				goto bad_ftp_url;
-			*cp++ = '\0';
-			user = host;
-			if (EMPTYSTRING(user))
-				goto bad_ftp_url;
-			host = cp;
 
-#if 0
-			/* look for IPv6 address URL */
-			if (host == '[' && (cp = strrchr(host, ']'))) {
-				host++;
-				*cp++ = '\0';
+			/* check if we have "user:pass@" */
+			passend = strchr(host, '@');
+			userend = strchr(host, ':');
+			if (passend && userend && userend < passend &&
+			    (!dir || passend < dir)) {
+				user = host;
+				pass = userend + 1;
+				host = passend + 1;
+				*userend = *passend = '\0';
+
+				if (EMPTYSTRING(user) || EMPTYSTRING(pass)) {
+bad_ftp_url:
+					warnx("Invalid URL: %s", argv[argpos]);
+					rval = argpos + 1;
+					continue;
+				}
+			}
+
+#ifdef INET6
+			/* check [host]:port, or [host] */
+			if (host[0] == '[') {
+				cp = strchr(host, ']');
+				if (cp && (!dir || cp < dir)) {
+					if (cp + 1 == dir || cp[1] == ':') {
+						host++;
+						*cp++ = '\0';
+					} else
+						cp = NULL;
+				} else
+					cp = host;
 			} else
 				cp = host;
+#else
+			cp = host;
 #endif
-		
-			portnum = strrchr(cp, ':');
-			if (portnum != NULL)
-				*portnum++ = '\0';
+
+			/* split off host[:port] if there is */
+			if (cp) {
+				portnum = strchr(cp, ':');
+				if (!portnum)
+					;
+				else {
+					if (!dir)
+						;
+					else if (portnum + 1 < dir) {
+						*portnum++ = '\0';
+						/*
+						 * XXX should check if portnum
+						 * is decimal number
+						 */
+					} else {
+						/* empty portnum */
+						goto bad_ftp_url;
+					}
+				}
+			} else
+				portnum = NULL;
 		} else {			/* classic style `host:file' */
 			dir = strchr(host, ':');
 		}
-parsed_url:
 		if (EMPTYSTRING(host)) {
 			rval = argpos + 1;
 			continue;

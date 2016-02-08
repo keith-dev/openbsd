@@ -23,7 +23,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- *	$OpenBSD: mp.c,v 1.15 2000/02/27 01:38:27 brian Exp $
+ *	$OpenBSD: mp.c,v 1.20 2000/08/17 14:14:55 brian Exp $
  */
 
 #include <sys/param.h>
@@ -189,7 +189,9 @@ mp_UpDown(void *v)
   struct mp *mp = (struct mp *)v;
   int percent;
 
-  percent = mp->link.throughput.OctetsPerSecond * 800 / mp->bundle->bandwidth;
+  percent = MAX(mp->link.stats.total.in.OctetsPerSecond,
+                mp->link.stats.total.out.OctetsPerSecond) * 800 /
+            mp->bundle->bandwidth;
   if (percent >= mp->cfg.autoload.max) {
     log_Printf(LogDEBUG, "%d%% saturation - bring a link up ?\n", percent);
     bundle_AutoAdjust(mp->bundle, percent, AUTO_UP);
@@ -202,20 +204,20 @@ mp_UpDown(void *v)
 void
 mp_StopAutoloadTimer(struct mp *mp)
 {
-  throughput_stop(&mp->link.throughput);
+  throughput_stop(&mp->link.stats.total);
 }
 
 void
 mp_CheckAutoloadTimer(struct mp *mp)
 {
-  if (mp->link.throughput.SamplePeriod != mp->cfg.autoload.period) {
-    throughput_destroy(&mp->link.throughput);
-    throughput_init(&mp->link.throughput, mp->cfg.autoload.period);
-    throughput_callback(&mp->link.throughput, mp_UpDown, mp);
+  if (mp->link.stats.total.SamplePeriod != mp->cfg.autoload.period) {
+    throughput_destroy(&mp->link.stats.total);
+    throughput_init(&mp->link.stats.total, mp->cfg.autoload.period);
+    throughput_callback(&mp->link.stats.total, mp_UpDown, mp);
   }
 
   if (bundle_WantAutoloadTimer(mp->bundle))
-    throughput_start(&mp->link.throughput, "MP throughput", 1);
+    throughput_start(&mp->link.stats.total, "MP throughput", 1);
   else
     mp_StopAutoloadTimer(mp);
 }
@@ -223,10 +225,10 @@ mp_CheckAutoloadTimer(struct mp *mp)
 void
 mp_RestartAutoloadTimer(struct mp *mp)
 {
-  if (mp->link.throughput.SamplePeriod != mp->cfg.autoload.period)
+  if (mp->link.stats.total.SamplePeriod != mp->cfg.autoload.period)
     mp_CheckAutoloadTimer(mp);
   else
-    throughput_clear(&mp->link.throughput, THROUGHPUT_OVERALL, NULL);
+    throughput_clear(&mp->link.stats.total, THROUGHPUT_OVERALL, NULL);
 }
 
 void
@@ -250,8 +252,10 @@ mp_Init(struct mp *mp, struct bundle *bundle)
 
   mp->cfg.autoload.period = SAMPLE_PERIOD;
   mp->cfg.autoload.min = mp->cfg.autoload.max = 0;
-  throughput_init(&mp->link.throughput, mp->cfg.autoload.period);
-  throughput_callback(&mp->link.throughput, mp_UpDown, mp);
+  throughput_init(&mp->link.stats.total, mp->cfg.autoload.period);
+  throughput_callback(&mp->link.stats.total, mp_UpDown, mp);
+  mp->link.stats.parent = NULL;
+  mp->link.stats.gather = 0;	/* Let the physical links gather stats */
   memset(mp->link.Queue, '\0', sizeof mp->link.Queue);
   memset(mp->link.proto_in, '\0', sizeof mp->link.proto_in);
   memset(mp->link.proto_out, '\0', sizeof mp->link.proto_out);
@@ -292,6 +296,12 @@ mp_Up(struct mp *mp, struct datalink *dl)
     /* We're adding a link - do a last validation on our parameters */
     if (!peerid_Equal(&dl->peer, &mp->peer)) {
       log_Printf(LogPHASE, "%s: Inappropriate peer !\n", dl->name);
+      log_Printf(LogPHASE, "  Attached to peer %s/%s\n", mp->peer.authname,
+                 mp_Enddisc(mp->peer.enddisc.class, mp->peer.enddisc.address,
+                            mp->peer.enddisc.len));
+      log_Printf(LogPHASE, "  New link is peer %s/%s\n", dl->peer.authname,
+                 mp_Enddisc(dl->peer.enddisc.class, dl->peer.enddisc.address,
+                            dl->peer.enddisc.len));
       return MP_FAILED;
     }
     if (mp->local_mrru != lcp->want_mrru ||
@@ -312,12 +322,15 @@ mp_Up(struct mp *mp, struct datalink *dl)
     mp->peer_is12bit = lcp->his_shortseq;
     mp->peer = dl->peer;
 
-    throughput_destroy(&mp->link.throughput);
-    throughput_init(&mp->link.throughput, mp->cfg.autoload.period);
-    throughput_callback(&mp->link.throughput, mp_UpDown, mp);
+    throughput_destroy(&mp->link.stats.total);
+    throughput_init(&mp->link.stats.total, mp->cfg.autoload.period);
+    throughput_callback(&mp->link.stats.total, mp_UpDown, mp);
     memset(mp->link.Queue, '\0', sizeof mp->link.Queue);
     memset(mp->link.proto_in, '\0', sizeof mp->link.proto_in);
     memset(mp->link.proto_out, '\0', sizeof mp->link.proto_out);
+
+    /* Tell the link who it belongs to */
+    dl->physical->link.stats.parent = &mp->link.stats.total;
 
     mp->out.seq = 0;
     mp->out.link = 0;
@@ -436,26 +449,32 @@ mp_Assemble(struct mp *mp, struct mbuf *m, struct physical *p)
    * the queue.
    */
 
-  if (!mp->inbufs) {
-    mp->inbufs = m;
-    m = NULL;
-  }
-
   last = NULL;
   seq = mp->seq.next_in;
   q = mp->inbufs;
-  while (q) {
-    mp_ReadHeader(mp, q, &h);
-    if (m && isbefore(mp->local_is12bit, mh.seq, h.seq)) {
-      /* Our received fragment fits in before this one, so link it in */
+  while (q || m) {
+    if (!q) {
       if (last)
         last->m_nextpkt = m;
       else
         mp->inbufs = m;
-      m->m_nextpkt = q;
       q = m;
-      h = mh;
       m = NULL;
+      h = mh;
+    } else {
+      mp_ReadHeader(mp, q, &h);
+
+      if (m && isbefore(mp->local_is12bit, mh.seq, h.seq)) {
+        /* Our received fragment fits in before this one, so link it in */
+        if (last)
+          last->m_nextpkt = m;
+        else
+          mp->inbufs = m;
+        m->m_nextpkt = q;
+        q = m;
+        h = mh;
+        m = NULL;
+      }
     }
 
     if (h.seq != seq) {
@@ -674,45 +693,91 @@ mp_FillQueues(struct bundle *bundle)
       continue;
 
     add = link_QueueLen(&dl->physical->link);
-    total += add;
-    if (add)
+    if (add) {
       /* this link has got stuff already queued.  Let it continue */
+      total += add;
       continue;
+    }
 
-    if (!link_QueueLen(&mp->link) && !ip_PushPacket(&mp->link, bundle))
-      /* Nothing else to send */
-      break;
+    if (!link_QueueLen(&mp->link)) {
+      struct datalink *other;
+      int mrutoosmall;
 
-    m = link_Dequeue(&mp->link);
-    len = m_length(m);
-    begin = 1;
-    end = 0;
+      /*
+       * If there's only a single open link in our bundle and we haven't got
+       * MP level link compression, queue outbound traffic directly via that
+       * link's protocol stack rather than using the MP link.  This results
+       * in the outbound traffic going out as PROTO_IP rather than PROTO_MP.
+       */
+      for (other = dl->next; other; other = other->next)
+        if (other->state == DATALINK_OPEN)
+          break;
 
-    while (!end) {
-      if (dl->state == DATALINK_OPEN) {
-        /* Write at most his_mru bytes to the physical link */
-        if (len <= dl->physical->link.lcp.his_mru) {
-          mo = m;
-          end = 1;
-          m_settype(mo, MB_MPOUT);
-        } else {
-          /* It's > his_mru, chop the packet (`m') into bits */
-          mo = m_get(dl->physical->link.lcp.his_mru, MB_MPOUT);
-          len -= mo->m_len;
-          m = mbuf_Read(m, MBUF_CTOP(mo), mo->m_len);
+      mrutoosmall = 0;
+      if (!other) {
+        if (dl->physical->link.lcp.his_mru < mp->peer_mrru) {
+          /*
+           * Actually, forget it.  This test is done against the MRRU rather
+           * than the packet size so that we don't end up sending some data
+           * in MP fragments and some data in PROTO_IP packets.  That's just
+           * too likely to upset some ppp implementations.
+           */
+          mrutoosmall = 1;
+          other = dl;
         }
-        mp_Output(mp, bundle, &dl->physical->link, mo, begin, end);
-        begin = 0;
       }
 
-      if (!end) {
-        nlinks--;
-        dl = dl->next;
-        if (!dl) {
-          dl = bundle->links;
-          thislink = 0;
-        } else
-          thislink++;
+      if (!ip_PushPacket(other ? &mp->link : &dl->physical->link, bundle))
+        /* Nothing else to send */
+        break;
+
+      if (mrutoosmall)
+        log_Printf(LogDEBUG, "Don't send data as PROTO_IP, MRU < MRRU\n");
+      else if (!other)
+        log_Printf(LogDEBUG, "Sending data as PROTO_IP, not PROTO_MP\n");
+
+      if (!other) {
+        add = link_QueueLen(&dl->physical->link);
+        if (add) {
+          /* this link has got stuff already queued.  Let it continue */
+          total += add;
+          continue;
+        }
+      }
+    }
+
+    m = link_Dequeue(&mp->link);
+    if (m) {
+      len = m_length(m);
+      begin = 1;
+      end = 0;
+
+      while (!end) {
+        if (dl->state == DATALINK_OPEN) {
+          /* Write at most his_mru bytes to the physical link */
+          if (len <= dl->physical->link.lcp.his_mru) {
+            mo = m;
+            end = 1;
+            m_settype(mo, MB_MPOUT);
+          } else {
+            /* It's > his_mru, chop the packet (`m') into bits */
+            mo = m_get(dl->physical->link.lcp.his_mru, MB_MPOUT);
+            len -= mo->m_len;
+            m = mbuf_Read(m, MBUF_CTOP(mo), mo->m_len);
+          }
+          mp_Output(mp, bundle, &dl->physical->link, mo, begin, end);
+          begin = 0;
+        }
+
+        if (!end) {
+          nlinks--;
+          dl = dl->next;
+          if (!dl) {
+            dl = bundle->links;
+            thislink = 0;
+          } else
+            thislink++;
+        }
       }
     }
   }
@@ -728,7 +793,7 @@ mp_SetDatalinkBandwidth(struct cmdargs const *arg)
 
   if (arg->argc != arg->argn+1)
     return -1;
-  
+
   val = atoi(arg->argv[arg->argn]);
   if (val <= 0) {
     log_Printf(LogWARN, "The link bandwidth must be greater than zero\n");
@@ -799,7 +864,7 @@ mp_ShowStatus(struct cmdargs const *arg)
                            mp->peer.enddisc.len));
 
   prompt_Printf(arg->prompt, "\nDefaults:\n");
-  
+
   prompt_Printf(arg->prompt, " MRRU:          ");
   if (mp->cfg.mrru)
     prompt_Printf(arg->prompt, "%d (multilink enabled)\n", mp->cfg.mrru);

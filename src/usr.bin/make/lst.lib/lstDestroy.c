@@ -1,4 +1,4 @@
-/*	$OpenBSD: lstDestroy.c,v 1.5 1999/12/18 21:53:33 espie Exp $	*/
+/*	$OpenBSD: lstDestroy.c,v 1.11 2000/09/14 13:32:09 espie Exp $	*/
 /*	$NetBSD: lstDestroy.c,v 1.6 1996/11/06 17:59:37 christos Exp $	*/
 
 /*
@@ -37,20 +37,21 @@
  * SUCH DAMAGE.
  */
 
-#ifndef lint
-#if 0
-static char sccsid[] = "@(#)lstDestroy.c	8.1 (Berkeley) 6/6/93";
-#else
-static char rcsid[] = "$OpenBSD: lstDestroy.c,v 1.5 1999/12/18 21:53:33 espie Exp $";
-#endif
-#endif /* not lint */
-
 /*-
  * LstDestroy.c --
  *	Nuke a list and all its resources
  */
 
 #include	"lstInt.h"
+#ifndef lint
+#if 0
+static char sccsid[] = "@(#)lstDestroy.c	8.1 (Berkeley) 6/6/93";
+#else
+UNUSED
+static char rcsid[] = "$OpenBSD: lstDestroy.c,v 1.11 2000/09/14 13:32:09 espie Exp $";
+#endif
+#endif /* not lint */
+
 
 /*-
  *-----------------------------------------------------------------------
@@ -59,51 +60,29 @@ static char rcsid[] = "$OpenBSD: lstDestroy.c,v 1.5 1999/12/18 21:53:33 espie Ex
  *	given, it is called with the datum from each node in turn before
  *	the node is freed.
  *
- * Results:
- *	None.
- *
  * Side Effects:
  *	The given list is freed in its entirety.
  *
  *-----------------------------------------------------------------------
  */
 void
-Lst_Destroy (l, freeProc)
+Lst_Destroy(l, freeProc)
     Lst	    	  	l;
-    register void	(*freeProc) __P((ClientData));
+    SimpleProc		freeProc;
 {
-    register ListNode	ln;
-    register ListNode	tln = NULL;
-    register List 	list = (List)l;
-
-    if (l == NULL) {
-	/*
-	 * Note the check for l == (Lst)0 to catch uninitialized static Lst's.
-	 * Gross, but useful.
-	 */
-	return;
-    }
-
-    /* To ease scanning */
-    if (list->lastPtr != NULL)
-	list->lastPtr->nextPtr = NULL;
-    else {
-	free ((Address)l);
-	return;
-    }
+    LstNode	ln;
+    LstNode	tln;
 
     if (freeProc) {
-	for (ln = list->firstPtr; ln != NULL; ln = tln) {
+	for (ln = l->firstPtr; ln != NULL; ln = tln) {
 	     tln = ln->nextPtr;
-	     (*freeProc) (ln->datum);
-	     free ((Address)ln);
+	     (*freeProc)(ln->datum);
+	     free(ln);
 	}
     } else {
-	for (ln = list->firstPtr; ln != NULL; ln = tln) {
+	for (ln = l->firstPtr; ln != NULL; ln = tln) {
 	     tln = ln->nextPtr;
-	     free ((Address)ln);
+	     free(ln);
 	}
     }
-
-    free ((Address)l);
 }

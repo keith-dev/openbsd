@@ -1,22 +1,20 @@
 /*
- *
- * auth-rsa.c
- *
  * Author: Tatu Ylonen <ylo@cs.hut.fi>
- *
  * Copyright (c) 1995 Tatu Ylonen <ylo@cs.hut.fi>, Espoo, Finland
  *                    All rights reserved
- *
- * Created: Mon Mar 27 01:46:52 1995 ylo
- *
  * RSA-based authentication.  This code determines whether to admit a login
  * based on RSA authentication.  This file also contains functions to check
  * validity of the host key.
  *
+ * As far as I am concerned, the code I have written for this software
+ * can be used freely for any purpose.  Any derived versions of this
+ * software must be clearly marked as such, and if the derived work is
+ * incompatible with the protocol description in the RFC file, it must be
+ * called by a name other than "ssh" or "Secure Shell".
  */
 
 #include "includes.h"
-RCSID("$Id: auth-rsa.c,v 1.23 2000/04/29 18:11:51 markus Exp $");
+RCSID("$OpenBSD: auth-rsa.c,v 1.32 2000/10/14 12:19:45 markus Exp $");
 
 #include "rsa.h"
 #include "packet.h"
@@ -26,17 +24,14 @@ RCSID("$Id: auth-rsa.c,v 1.23 2000/04/29 18:11:51 markus Exp $");
 #include "uidswap.h"
 #include "match.h"
 #include "servconf.h"
+#include "auth-options.h"
 
 #include <openssl/rsa.h>
 #include <openssl/md5.h>
 
-/* Flags that may be set in authorized_keys options. */
-extern int no_port_forwarding_flag;
-extern int no_agent_forwarding_flag;
-extern int no_x11_forwarding_flag;
-extern int no_pty_flag;
-extern char *forced_command;
-extern struct envstring *custom_environment;
+
+/* import */
+extern ServerOptions options;
 
 /*
  * Session identifier that is used to bind key exchange and authentication
@@ -125,7 +120,6 @@ auth_rsa_challenge_dialog(RSA *pk)
 int
 auth_rsa(struct passwd *pw, BIGNUM *client_n)
 {
-	extern ServerOptions options;
 	char line[8192], file[1024];
 	int authenticated;
 	unsigned int bits;
@@ -133,6 +127,10 @@ auth_rsa(struct passwd *pw, BIGNUM *client_n)
 	unsigned long linenum = 0;
 	struct stat st;
 	RSA *pk;
+
+	/* no user given */
+	if (pw == NULL)
+		return 0;
 
 	/* Temporarily use the user's uid. */
 	temporarily_use_uid(pw->pw_uid);
@@ -186,8 +184,8 @@ auth_rsa(struct passwd *pw, BIGNUM *client_n)
 		}
 		if (fail) {
 			fclose(f);
-			log(buf);
-			packet_send_debug(buf);
+			log("%s",buf);
+			packet_send_debug("%s",buf);
 			restore_uid();
 			return 0;
 		}
@@ -233,6 +231,12 @@ auth_rsa(struct passwd *pw, BIGNUM *client_n)
 			}
 		} else
 			options = NULL;
+		/*
+		 * If our options do not allow this key to be used,
+		 * do not send challenge.
+		 */
+		if (!auth_parse_options(pw, options, linenum))
+			continue;
 
 		/* Parse the key from the line. */
 		if (!auth_rsa_read_key(&cp, &bits, pk->e, pk->n)) {
@@ -268,190 +272,11 @@ auth_rsa(struct passwd *pw, BIGNUM *client_n)
 		 * authenticated. Note that we have not yet processed the
 		 * options; this will be reset if the options cause the
 		 * authentication to be rejected.
-		 */
-		authenticated = 1;
-
-		/* RSA part of authentication was accepted.  Now process the options. */
-		if (options) {
-			while (*options && *options != ' ' && *options != '\t') {
-				cp = "no-port-forwarding";
-				if (strncmp(options, cp, strlen(cp)) == 0) {
-					packet_send_debug("Port forwarding disabled.");
-					no_port_forwarding_flag = 1;
-					options += strlen(cp);
-					goto next_option;
-				}
-				cp = "no-agent-forwarding";
-				if (strncmp(options, cp, strlen(cp)) == 0) {
-					packet_send_debug("Agent forwarding disabled.");
-					no_agent_forwarding_flag = 1;
-					options += strlen(cp);
-					goto next_option;
-				}
-				cp = "no-X11-forwarding";
-				if (strncmp(options, cp, strlen(cp)) == 0) {
-					packet_send_debug("X11 forwarding disabled.");
-					no_x11_forwarding_flag = 1;
-					options += strlen(cp);
-					goto next_option;
-				}
-				cp = "no-pty";
-				if (strncmp(options, cp, strlen(cp)) == 0) {
-					packet_send_debug("Pty allocation disabled.");
-					no_pty_flag = 1;
-					options += strlen(cp);
-					goto next_option;
-				}
-				cp = "command=\"";
-				if (strncmp(options, cp, strlen(cp)) == 0) {
-					int i;
-					options += strlen(cp);
-					forced_command = xmalloc(strlen(options) + 1);
-					i = 0;
-					while (*options) {
-						if (*options == '"')
-							break;
-						if (*options == '\\' && options[1] == '"') {
-							options += 2;
-							forced_command[i++] = '"';
-							continue;
-						}
-						forced_command[i++] = *options++;
-					}
-					if (!*options) {
-						debug("%.100s, line %lu: missing end quote",
-						      SSH_USER_PERMITTED_KEYS, linenum);
-						packet_send_debug("%.100s, line %lu: missing end quote",
-								  SSH_USER_PERMITTED_KEYS, linenum);
-						continue;
-					}
-					forced_command[i] = 0;
-					packet_send_debug("Forced command: %.900s", forced_command);
-					options++;
-					goto next_option;
-				}
-				cp = "environment=\"";
-				if (strncmp(options, cp, strlen(cp)) == 0) {
-					int i;
-					char *s;
-					struct envstring *new_envstring;
-					options += strlen(cp);
-					s = xmalloc(strlen(options) + 1);
-					i = 0;
-					while (*options) {
-						if (*options == '"')
-							break;
-						if (*options == '\\' && options[1] == '"') {
-							options += 2;
-							s[i++] = '"';
-							continue;
-						}
-						s[i++] = *options++;
-					}
-					if (!*options) {
-						debug("%.100s, line %lu: missing end quote",
-						      SSH_USER_PERMITTED_KEYS, linenum);
-						packet_send_debug("%.100s, line %lu: missing end quote",
-								  SSH_USER_PERMITTED_KEYS, linenum);
-						continue;
-					}
-					s[i] = 0;
-					packet_send_debug("Adding to environment: %.900s", s);
-					debug("Adding to environment: %.900s", s);
-					options++;
-					new_envstring = xmalloc(sizeof(struct envstring));
-					new_envstring->s = s;
-					new_envstring->next = custom_environment;
-					custom_environment = new_envstring;
-					goto next_option;
-				}
-				cp = "from=\"";
-				if (strncmp(options, cp, strlen(cp)) == 0) {
-					char *patterns = xmalloc(strlen(options) + 1);
-					int i;
-					options += strlen(cp);
-					i = 0;
-					while (*options) {
-						if (*options == '"')
-							break;
-						if (*options == '\\' && options[1] == '"') {
-							options += 2;
-							patterns[i++] = '"';
-							continue;
-						}
-						patterns[i++] = *options++;
-					}
-					if (!*options) {
-						debug("%.100s, line %lu: missing end quote",
-						      SSH_USER_PERMITTED_KEYS, linenum);
-						packet_send_debug("%.100s, line %lu: missing end quote",
-								  SSH_USER_PERMITTED_KEYS, linenum);
-						continue;
-					}
-					patterns[i] = 0;
-					options++;
-					if (!match_hostname(get_canonical_hostname(), patterns,
-						     strlen(patterns)) &&
-					    !match_hostname(get_remote_ipaddr(), patterns,
-						     strlen(patterns))) {
-						log("RSA authentication tried for %.100s with correct key but not from a permitted host (host=%.200s, ip=%.200s).",
-						    pw->pw_name, get_canonical_hostname(),
-						    get_remote_ipaddr());
-						packet_send_debug("Your host '%.200s' is not permitted to use this key for login.",
-						get_canonical_hostname());
-						xfree(patterns);
-						/* key invalid for this host, reset flags */
-						authenticated = 0;
-						no_agent_forwarding_flag = 0;
-						no_port_forwarding_flag = 0;
-						no_pty_flag = 0;
-						no_x11_forwarding_flag = 0;
-						while (custom_environment) {
-							struct envstring *ce = custom_environment;
-							custom_environment = ce->next;
-							xfree(ce->s);
-							xfree(ce);
-						}
-						if (forced_command) {
-							xfree(forced_command);
-							forced_command = NULL;
-						}
-						break;
-					}
-					xfree(patterns);
-					/* Host name matches. */
-					goto next_option;
-				}
-		bad_option:
-				log("Bad options in %.100s file, line %lu: %.50s",
-				    SSH_USER_PERMITTED_KEYS, linenum, options);
-				packet_send_debug("Bad options in %.100s file, line %lu: %.50s",
-						  SSH_USER_PERMITTED_KEYS, linenum, options);
-				authenticated = 0;
-				break;
-
-		next_option:
-				/*
-				 * Skip the comma, and move to the next option
-				 * (or break out if there are no more).
-				 */
-				if (!*options)
-					fatal("Bugs in auth-rsa.c option processing.");
-				if (*options == ' ' || *options == '\t')
-					break;		/* End of options. */
-				if (*options != ',')
-					goto bad_option;
-				options++;
-				/* Process the next option. */
-				continue;
-			}
-		}
-		/*
 		 * Break out of the loop if authentication was successful;
 		 * otherwise continue searching.
 		 */
-		if (authenticated)
-			break;
+		authenticated = 1;
+		break;
 	}
 
 	/* Restore the privileged uid. */
@@ -464,6 +289,8 @@ auth_rsa(struct passwd *pw, BIGNUM *client_n)
 
 	if (authenticated)
 		packet_send_debug("RSA authentication accepted.");
+	else
+		auth_clear_options();
 
 	/* Return authentication result. */
 	return authenticated;

@@ -1,4 +1,4 @@
-/*	$OpenBSD: lstConcat.c,v 1.7 1999/12/18 21:58:08 espie Exp $	*/
+/*	$OpenBSD: lstConcat.c,v 1.11 2000/09/14 13:32:08 espie Exp $	*/
 /*	$NetBSD: lstConcat.c,v 1.6 1996/11/06 17:59:34 christos Exp $	*/
 
 /*
@@ -37,85 +37,48 @@
  * SUCH DAMAGE.
  */
 
-#ifndef lint
-#if 0
-static char sccsid[] = "@(#)lstConcat.c	8.1 (Berkeley) 6/6/93";
-#else
-static char rcsid[] = "$OpenBSD: lstConcat.c,v 1.7 1999/12/18 21:58:08 espie Exp $";
-#endif
-#endif /* not lint */
-
 /*-
  * listConcat.c --
  *	Function to concatentate two lists.
  */
 
 #include    "lstInt.h"
+#ifndef lint
+#if 0
+static char sccsid[] = "@(#)lstConcat.c	8.1 (Berkeley) 6/6/93";
+#else
+UNUSED
+static char rcsid[] = "$OpenBSD: lstConcat.c,v 1.11 2000/09/14 13:32:08 espie Exp $";
+#endif
+#endif /* not lint */
+
 
 /*-
  *-----------------------------------------------------------------------
  * Lst_Concat --
  *	Concatenate two lists. New elements are created to hold the data
- *	elements, if specified, but the elements themselves are not copied.
+ *	elements, but the elements themselves are not copied.
  *	If the elements should be duplicated to avoid confusion with another
  *	list, the Lst_Duplicate function should be called first.
- *	If LST_CONCLINK is specified, the second list is destroyed since
- *	its pointers have been corrupted and the list is no longer useable.
  *
  * Results:
  *	SUCCESS if all went well. FAILURE otherwise.
  *
  * Side Effects:
- *	New elements are created and appended the the first list.
+ *	New elements are created and appended to the first list.
  *-----------------------------------------------------------------------
  */
 void
-Lst_Concat (l1, l2, flags)
+Lst_Concat(l1, l2)
     Lst    	  	l1; 	/* The list to which l2 is to be appended */
     Lst    	  	l2; 	/* The list to append to l1 */
-    int	   	  	flags;  /* LST_CONCNEW if LstNode's should be duplicated
-				 * LST_CONCLINK if should just be relinked */
 {
-    register ListNode  	ln;     /* original LstNode */
-    register ListNode  	nln;    /* new LstNode */
-    register ListNode  	last;   /* the last element in the list. Keeps
+    LstNode  	ln;     	/* original LstNode */
+    LstNode  	nln;    	/* new LstNode */
+    LstNode  	last;   	/* the last element in the list. Keeps
 				 * bookkeeping until the end */
-    register List 	list1 = (List)l1;
-    register List 	list2 = (List)l2;
 
-    if (!LstValid (l1) || !LstValid (l2)) {
-	return;
-    }
-
-    if (flags == LST_CONCLINK) {
-	if (list2->firstPtr != NULL) {
-	    /*
-	     * We set the nextPtr of the
-	     * last element of list two to be NULL to make the loop easier and
-	     * so we don't need an extra case should the first list turn
-	     * out to be non-circular -- the final element will already point
-	     * to NULL space and the first element will be untouched if it
-	     * existed before and will also point to NULL space if it didn't.
-	     */
-	    list2->lastPtr->nextPtr = NULL;
-	    /*
-	     * So long as the second list isn't empty, we just link the
-	     * first element of the second list to the last element of the
-	     * first list. If the first list isn't empty, we then link the
-	     * last element of the list to the first element of the second list
-	     * The last element of the second list, if it exists, then becomes
-	     * the last element of the first list.
-	     */
-	    list2->firstPtr->prevPtr = list1->lastPtr;
-	    if (list1->lastPtr != NULL) {
- 		list1->lastPtr->nextPtr = list2->firstPtr;
-	    } else {
-		list1->firstPtr = list2->firstPtr;
-	    }
-	    list1->lastPtr = list2->lastPtr;
-	}
-	free ((Address)l2);
-    } else if (list2->firstPtr != NULL) {
+    if (l2->firstPtr != NULL) {
 	/*
 	 * We set the nextPtr of the last element of list 2 to be NULL to make
 	 * the loop less difficult. The loop simply goes through the entire
@@ -128,18 +91,15 @@ Lst_Concat (l1, l2, flags)
 	 * the first list must have been empty so the newly-created node is
 	 * made the first node of the list.
 	 */
-	list2->lastPtr->nextPtr = NULL;
-	for (last = list1->lastPtr, ln = list2->firstPtr;
-	     ln != NULL;
-	     ln = ln->nextPtr)
-	{
-	    PAlloc (nln, ListNode);
+	l2->lastPtr->nextPtr = NULL;
+	for (last = l1->lastPtr, ln = l2->firstPtr; ln != NULL;
+	     ln = ln->nextPtr) {
+	    PAlloc(nln, LstNode);
 	    nln->datum = ln->datum;
-	    if (last != NULL) {
+	    if (last != NULL)
 		last->nextPtr = nln;
-	    } else {
-		list1->firstPtr = nln;
-	    }
+	    else
+		l1->firstPtr = nln;
 	    nln->prevPtr = last;
 	    nln->flags = nln->useCount = 0;
 	    last = nln;
@@ -149,11 +109,11 @@ Lst_Concat (l1, l2, flags)
 	 * Finish bookkeeping. The last new element becomes the last element
 	 * of list one.
 	 */
-	list1->lastPtr = last;
+	l1->lastPtr = last;
 
 	last->nextPtr = NULL;
 
-	list2->lastPtr->nextPtr = list2->firstPtr;
+	l2->lastPtr->nextPtr = l2->firstPtr;
     }
 }
 

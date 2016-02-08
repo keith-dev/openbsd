@@ -1,4 +1,4 @@
-/*	$OpenBSD: lstFindFrom.c,v 1.6 1999/12/19 00:04:26 espie Exp $	*/
+/*	$OpenBSD: lstFindFrom.c,v 1.9 2000/09/14 13:32:09 espie Exp $	*/
 /*	$NetBSD: lstFindFrom.c,v 1.6 1996/11/06 17:59:40 christos Exp $	*/
 
 /*
@@ -37,20 +37,21 @@
  * SUCH DAMAGE.
  */
 
-#ifndef lint
-#if 0
-static char sccsid[] = "@(#)lstFindFrom.c	8.1 (Berkeley) 6/6/93";
-#else
-static char *rcsid = "$OpenBSD: lstFindFrom.c,v 1.6 1999/12/19 00:04:26 espie Exp $";
-#endif
-#endif /* not lint */
-
 /*-
  * LstFindFrom.c --
  *	Find a node on a list from a given starting point. Used by Lst_Find.
  */
 
 #include	"lstInt.h"
+#ifndef lint
+#if 0
+static char sccsid[] = "@(#)lstFindFrom.c	8.1 (Berkeley) 6/6/93";
+#else
+UNUSED
+static char *rcsid = "$OpenBSD: lstFindFrom.c,v 1.9 2000/09/14 13:32:09 espie Exp $";
+#endif
+#endif /* not lint */
+
 
 /*-
  *-----------------------------------------------------------------------
@@ -70,12 +71,12 @@ LstNode
 Lst_FindFrom(ln, cProc, d)
     LstNode    	ln;
     FindProc	cProc;
-    ClientData 	d;
+    void	*d;
 {
-    ListNode	tln;
+    LstNode	tln;
 
-    for (tln = (ListNode)ln; tln != NULL; tln = tln->nextPtr)
+    for (tln = ln; tln != NULL; tln = tln->nextPtr)
 	if ((*cProc)(tln->datum, d) == 0) 
-	    return (LstNode)tln;
+	    return tln;
     return NULL;
 }

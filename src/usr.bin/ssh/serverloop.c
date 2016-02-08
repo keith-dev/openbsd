@@ -2,15 +2,41 @@
  * Author: Tatu Ylonen <ylo@cs.hut.fi>
  * Copyright (c) 1995 Tatu Ylonen <ylo@cs.hut.fi>, Espoo, Finland
  *                    All rights reserved
- * Created: Sun Sep 10 00:30:37 1995 ylo
  * Server main loop for handling the interactive session.
- */
-/*
+ *
+ * As far as I am concerned, the code I have written for this software
+ * can be used freely for any purpose.  Any derived versions of this
+ * software must be clearly marked as such, and if the derived work is
+ * incompatible with the protocol description in the RFC file, it must be
+ * called by a name other than "ssh" or "Secure Shell".
+ *
  * SSH2 support by Markus Friedl.
  * Copyright (c) 2000 Markus Friedl. All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
+ * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
+ * OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
+ * IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
+ * NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+ * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+ * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+ * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
+ * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
 #include "includes.h"
+RCSID("$OpenBSD: serverloop.c,v 1.34 2000/10/27 07:32:18 markus Exp $");
+
 #include "xmalloc.h"
 #include "ssh.h"
 #include "packet.h"
@@ -23,6 +49,9 @@
 #include "ssh2.h"
 #include "session.h"
 #include "dispatch.h"
+#include "auth-options.h"
+
+extern ServerOptions options;
 
 static Buffer stdin_buffer;	/* Buffer for stdin data. */
 static Buffer stdout_buffer;	/* Buffer for stdout data. */
@@ -159,33 +188,37 @@ retry_select:
 
 	/* Initialize select() masks. */
 	FD_ZERO(readset);
+	FD_ZERO(writeset);
 
-	/*
-	 * Read packets from the client unless we have too much buffered
-	 * stdin or channel data.
-	 */
 	if (compat20) {
 		/* wrong: bad condition XXX */
 		if (channel_not_very_much_buffered_data())
 			FD_SET(connection_in, readset);
 	} else {
-		if (buffer_len(&stdin_buffer) < 4096 &&
+		/*
+		 * Read packets from the client unless we have too much
+		 * buffered stdin or channel data.
+		 */
+		if (buffer_len(&stdin_buffer) < buffer_high &&
 		    channel_not_very_much_buffered_data())
 			FD_SET(connection_in, readset);
+		/*
+		 * If there is not too much data already buffered going to
+		 * the client, try to get some more data from the program.
+		 */
+		if (packet_not_very_much_data_to_write()) {
+			if (!fdout_eof)
+				FD_SET(fdout, readset);
+			if (!fderr_eof)
+				FD_SET(fderr, readset);
+		}
+		/*
+		 * If we have buffered data, try to write some of that data
+		 * to the program.
+		 */
+		if (fdin != -1 && buffer_len(&stdin_buffer) > 0)
+			FD_SET(fdin, writeset);
 	}
-
-	/*
-	 * If there is not too much data already buffered going to the
-	 * client, try to get some more data from the program.
-	 */
-	if (!compat20 && packet_not_very_much_data_to_write()) {
-		if (!fdout_eof)
-			FD_SET(fdout, readset);
-		if (!fderr_eof)
-			FD_SET(fderr, readset);
-	}
-	FD_ZERO(writeset);
-
 	/* Set masks for channel descriptors. */
 	channel_prepare_select(readset, writeset);
 
@@ -195,11 +228,6 @@ retry_select:
 	 */
 	if (packet_have_data_to_write())
 		FD_SET(connection_out, writeset);
-
-	/* If we have buffered data, try to write some of that data to the
-	   program. */
-	if (!compat20 && fdin != -1 && buffer_len(&stdin_buffer) > 0)
-		FD_SET(fdin, writeset);
 
 	/* Update the maximum descriptor number if appropriate. */
 	if (channel_max_fd() > max_fd)
@@ -250,20 +278,15 @@ process_input(fd_set * readset)
 		if (len == 0) {
 			verbose("Connection closed by remote host.");
 			fatal_cleanup();
+		} else if (len < 0) {
+			if (errno != EINTR && errno != EAGAIN) {
+				verbose("Read error from remote host: %.100s", strerror(errno));
+				fatal_cleanup();
+			}
+		} else {
+			/* Buffer any received data. */
+			packet_process_incoming(buf, len);
 		}
-		/*
-		 * There is a kernel bug on Solaris that causes select to
-		 * sometimes wake up even though there is no data available.
-		 */
-		if (len < 0 && errno == EAGAIN)
-			len = 0;
-
-		if (len < 0) {
-			verbose("Read error from remote host: %.100s", strerror(errno));
-			fatal_cleanup();
-		}
-		/* Buffer any received data. */
-		packet_process_incoming(buf, len);
 	}
 	if (compat20)
 		return;
@@ -271,9 +294,11 @@ process_input(fd_set * readset)
 	/* Read and buffer any available stdout data from the program. */
 	if (!fdout_eof && FD_ISSET(fdout, readset)) {
 		len = read(fdout, buf, sizeof(buf));
-		if (len <= 0)
+		if (len < 0 && (errno == EINTR || errno == EAGAIN)) {
+			/* do nothing */
+		} else if (len <= 0) {
 			fdout_eof = 1;
-		else {
+		} else {
 			buffer_append(&stdout_buffer, buf, len);
 			fdout_bytes += len;
 		}
@@ -281,10 +306,13 @@ process_input(fd_set * readset)
 	/* Read and buffer any available stderr data from the program. */
 	if (!fderr_eof && FD_ISSET(fderr, readset)) {
 		len = read(fderr, buf, sizeof(buf));
-		if (len <= 0)
+		if (len < 0 && (errno == EINTR || errno == EAGAIN)) {
+			/* do nothing */
+		} else if (len <= 0) {
 			fderr_eof = 1;
-		else
+		} else {
 			buffer_append(&stderr_buffer, buf, len);
+		}
 	}
 }
 
@@ -300,7 +328,9 @@ process_output(fd_set * writeset)
 	if (!compat20 && fdin != -1 && FD_ISSET(fdin, writeset)) {
 		len = write(fdin, buffer_ptr(&stdin_buffer),
 		    buffer_len(&stdin_buffer));
-		if (len <= 0) {
+		if (len < 0 && (errno == EINTR || errno == EAGAIN)) {
+			/* do nothing */
+		} else if (len <= 0) {
 #ifdef USE_PIPES
 			close(fdin);
 #else
@@ -354,7 +384,7 @@ drain_output()
 void
 process_buffered_input_packets()
 {
-	dispatch_run(DISPATCH_NONBLOCK, NULL);
+	dispatch_run(DISPATCH_NONBLOCK, NULL, NULL);
 }
 
 /*
@@ -367,6 +397,7 @@ process_buffered_input_packets()
 void
 server_loop(pid_t pid, int fdin_arg, int fdout_arg, int fderr_arg)
 {
+	fd_set readset, writeset;
 	int wait_status;	/* Status returned by wait(). */
 	pid_t wait_pid;		/* pid returned by wait(). */
 	int waiting_termination = 0;	/* Have displayed waiting close message. */
@@ -386,6 +417,14 @@ server_loop(pid_t pid, int fdin_arg, int fdout_arg, int fderr_arg)
 	fdin = fdin_arg;
 	fdout = fdout_arg;
 	fderr = fderr_arg;
+
+	/* nonblocking IO */
+	set_nonblock(fdin);
+	set_nonblock(fdout);
+	/* we don't have stderr for interactive terminal sessions, see below */
+	if (fderr != -1)
+		set_nonblock(fderr);
+
 	connection_in = packet_get_connection_in();
 	connection_out = packet_get_connection_out();
 
@@ -426,7 +465,6 @@ server_loop(pid_t pid, int fdin_arg, int fdout_arg, int fderr_arg)
 
 	/* Main loop of the server for the interactive session mode. */
 	for (;;) {
-		fd_set readset, writeset;
 
 		/* Process buffered packets from the client. */
 		process_buffered_input_packets();
@@ -639,7 +677,7 @@ server_loop2(void)
 }
 
 void
-server_input_stdin_data(int type, int plen)
+server_input_stdin_data(int type, int plen, void *ctxt)
 {
 	char *data;
 	unsigned int data_len;
@@ -656,7 +694,7 @@ server_input_stdin_data(int type, int plen)
 }
 
 void
-server_input_eof(int type, int plen)
+server_input_eof(int type, int plen, void *ctxt)
 {
 	/*
 	 * Eof from the client.  The stdin descriptor to the
@@ -669,7 +707,7 @@ server_input_eof(int type, int plen)
 }
 
 void
-server_input_window_size(int type, int plen)
+server_input_window_size(int type, int plen, void *ctxt)
 {
 	int row = packet_get_int();
 	int col = packet_get_int();
@@ -694,18 +732,28 @@ input_direct_tcpip(void)
 	originator = packet_get_string(NULL);
 	originator_port = packet_get_int();
 	packet_done();
+
+	debug("open direct-tcpip: from %s port %d to %s port %d",
+	   originator, originator_port, target, target_port);
+
 	/* XXX check permission */
+	if (no_port_forwarding_flag || !options.allow_tcp_forwarding) {
+		xfree(target);
+		xfree(originator);
+		return -1;
+	}
 	sock = channel_connect_to(target, target_port);
 	xfree(target);
 	xfree(originator);
 	if (sock < 0)
 		return -1;
 	return channel_new("direct-tcpip", SSH_CHANNEL_OPEN,
-	    sock, sock, -1, 4*1024, 32*1024, 0, xstrdup("direct-tcpip"));
+	    sock, sock, -1, CHAN_TCP_WINDOW_DEFAULT,
+	    CHAN_TCP_PACKET_DEFAULT, 0, xstrdup("direct-tcpip"), 1);
 }
 
 void
-server_input_channel_open(int type, int plen)
+server_input_channel_open(int type, int plen, void *ctxt)
 {
 	Channel *c = NULL;
 	char *ctype;
@@ -720,7 +768,7 @@ server_input_channel_open(int type, int plen)
 	rwindow = packet_get_int();
 	rmaxpack = packet_get_int();
 
-	debug("channel_input_open: ctype %s rchan %d win %d max %d",
+	debug("server_input_channel_open: ctype %s rchan %d win %d max %d",
 	    ctype, rchan, rwindow, rmaxpack);
 
 	if (strcmp(ctype, "session") == 0) {
@@ -734,7 +782,8 @@ server_input_channel_open(int type, int plen)
 		 * CHANNEL_REQUEST messages is registered.
 		 */
 		id = channel_new(ctype, SSH_CHANNEL_LARVAL,
-		    -1, -1, -1, 0, 32*1024, 0, xstrdup("server-session"));
+		    -1, -1, -1, 0, CHAN_SES_PACKET_DEFAULT,
+		    0, xstrdup("server-session"), 1);
 		if (session_open(id) == 1) {
 			channel_register_callback(id, SSH2_MSG_CHANNEL_REQUEST,
 			    session_input_channel_req, (void *)0);
@@ -745,7 +794,6 @@ server_input_channel_open(int type, int plen)
 			channel_free(id);
 		}
 	} else if (strcmp(ctype, "direct-tcpip") == 0) {
-		debug("open direct-tcpip");
 		id = input_direct_tcpip();
 		if (id >= 0)
 			c = channel_lookup(id);

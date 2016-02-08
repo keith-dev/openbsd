@@ -1,4 +1,4 @@
-.\"	@(#) $OpenBSD: m4.1,v 1.16 2000/04/17 02:32:43 aaron Exp $
+.\"	@(#) $OpenBSD: m4.1,v 1.19 2000/07/27 17:44:33 espie Exp $
 .\"
 .\"
 .Dd January 26, 1993
@@ -70,7 +70,9 @@ to the include path.
 Activate GNU-m4 compatibility mode.
 In this mode, changequote with
 two empty parameters deactivates quotes, translit handles simple character
-ranges (e.g., a-z) and regular expressions mimic emacs behavior.
+ranges (e.g., a-z), regular expressions mimic emacs behavior,
+and the number of diversions is unlimited.
+.El
 .Sh SYNTAX
 .Nm m4
 provides the following built-in macros.
@@ -138,6 +140,10 @@ Prints the names and definitions for the named items, or for everything
 if no arguments are passed.
 .It Ic errprint
 Prints the first argument on the standard error output stream.
+.It Ic esyscmd
+Pass its first argument to a shell and returns the shell's standard output.
+Note that the shell shares its standard input and standard error with
+.Nm
 .It Ic eval
 Computes the first argument as an arithmetic expression using 32-bit
 arithmetic.

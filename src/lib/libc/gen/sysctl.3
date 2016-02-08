@@ -1,4 +1,4 @@
-.\"	$OpenBSD: sysctl.3,v 1.42 2000/04/18 03:01:27 aaron Exp $
+.\"	$OpenBSD: sysctl.3,v 1.56 2000/10/18 05:12:07 aaron Exp $
 .\"
 .\" Copyright (c) 1993
 .\"	The Regents of the University of California.  All rights reserved.
@@ -190,7 +190,28 @@ int dospecialcheck = 1;
 struct ctldebug debug5 = { "dospecialcheck", &dospecialcheck };
 .Ed
 .Ss CTL_FS
-There are currently no second level names for the file system.
+The string and integer information available for the
+.Dv CTL_FS
+level is detailed below.
+The changeable column shows whether a process with appropriate
+privileges may change the value.
+.Bl -column "Second level nameXXXXXX" integerXXX -offset indent
+.It Sy Second level name	Type	Changeable
+.It Dv FS_POSIX_SETUID No "	integer	yes"
+.El
+.Pp
+.Bl -tag -width "123456"
+.It Dv FS_POSIX_SETUID
+When this variable is set, ownership changes on a file will cause
+the
+.Va S_ISUID
+and
+.Va S_ISGID
+bits to be cleared.
+As detailed in
+.Xr securelevel 7 ,
+this variable may not be changed if the securelevel is > 0.
+.El
 .Ss CTL_HW
 The string and integer information available for the
 .Dv CTL_HW
@@ -218,7 +239,7 @@ The machine model
 .It Dv HW_NCPU
 The number of CPUs.
 .It Dv HW_BYTEORDER
-The byteorder (4,321 or 1,234).
+The byteorder (4321 or 1234).
 .It Dv HW_PHYSMEM
 The bytes of physical memory.
 .It Dv HW_USERMEM
@@ -261,7 +282,7 @@ information.
 .It Dv KERN_NAME_MAX No "	integer	no"
 .It Dv KERN_NGROUPS No "	integer	no"
 .It Dv KERN_NO_TRUNC No "	integer	no"
-.It Dv KERN_NOSUIDCOREDUMP No "	integer yes"
+.It Dv KERN_NOSUIDCOREDUMP No "	integer	yes"
 .It Dv KERN_OSRELEASE No "	string	no"
 .It Dv KERN_OSREV No "	integer	no"
 .It Dv KERN_OSTYPE No "	string	no"
@@ -503,27 +524,59 @@ Get or set various global information about IPv4
 The third level name is the protocol.
 The fourth level name is the variable name.
 The currently defined protocols and names are:
-.Bl -column "Protocol name" "Variable name" "integer" -offset indent
+.Bl -column "Protocol name" "ipsec-soft-bytes" "integer" -offset indent
 .It Sy Protocol name	Variable name	Type	Changeable
 .It ip	forwarding	integer	yes
 .It ip	redirect	integer	yes
 .It ip	ttl	integer	yes
+.It ip	sourceroute	integer	yes
+.It ip	directed-broadcast	integer	yes
+.It ip	portfirst	integer	yes
+.It ip	portlast	integer	yes
+.It ip	porthifirst	integer	yes
+.It ip	porthilast	integer	yes
+.It ip	maxqueue	integer	yes
 .It ip	encdebug	integer	yes
-.It ipip	allow	integer	yes
-.It gre	allow	integer	yes
-.It mobileip	allow	integer	yes
-.It etherip	allow	integer	yes
+.It ip	ipsec-invalid-life	integer	yes
+.It ip	ipsec-pfs	integer	yes
+.It ip	ipsec-soft-allocs	integer	yes
+.It ip	ipsec-allocs	integer	yes
+.It ip	ipsec-soft-bytes	integer	yes
+.It ip	ipsec-bytes	integer	yes
+.It ip	ipsec-timeout	integer	yes
+.It ip	ipsec-soft-timeout	integer	yes
+.It ip	ipsec-soft-firstuse	integer	yes
+.It ip	ipsec-firstuse	integer	yes
+.It ip	ipsec-enc-alg	string	yes
+.It ip	ipsec-auth-alg	string	yes
+.It ip	ipsec-expire-acquire	integer	yes
+.It ip	mtudisc	integer	yes
+.It ip	mtudisctimeout	integer	yes
 .It icmp	maskrepl	integer	yes
+.It icmp	bmcastecho	integer	yes
+.It icmp	errppslimit	integer	yes
+.It ipip	allow	integer	yes
 .It tcp	rfc1323	integer	yes
-.It tcp	baddynamic	array	yes
 .It tcp	ident	structure	no
+.It tcp	keepinittime	integer	yes
 .It tcp	keepidle	integer	yes
 .It tcp	keepintvl	integer	yes
 .It tcp	slowhz	integer	yes
+.It tcp	baddynamic	array	yes
+.It tcp	recvspace	integer	yes
+.It tcp	sendspace	integer	yes
 .It tcp	sack	integer	yes
 .It tcp	mssdflt	integer	yes
+.It tcp	rstppslimit	integer	yes
 .It udp	checksum	integer	yes
 .It udp	baddynamic	array	yes
+.It udp	recvspace	integer	yes
+.It udp	sendspace	integer	yes
+.It gre	allow	integer	yes
+.It esp	enable	integer	yes
+.It ah	enable	integer	yes
+.It mobileip	allow	integer	yes
+.It etherip	allow	integer	yes
 .El
 .Pp
 The variables are as follows:
@@ -548,6 +601,13 @@ packet sourced by
 the system.
 This value applies to normal transport protocols, not to
 .Tn ICMP .
+.It Li ip.sourceroute
+Returns 1 when forwarding of source-routed packets is enabled for
+the host.
+This value may only be changed if the kernel security
+level is less than 1.
+.It Li ip.directed-broadcast
+Returns 1 if directed broadcast behavior is enabled for the host.
 .It Li ip.encdebug
 Returns 1 when error message reporting is enabled for the host.
 If the kernel has been compiled with the
@@ -569,7 +629,7 @@ per-SA basis via
 If this value is set to any non-zero value and no access control is
 configured, IPsec packets will be dropped.
 If set to 0, no testing of ingress packets will occur.
-The default value (for now) is 0.
+The default value is 1.
 .It Li ip.ipsec-invalid-life
 The lifetime of embryonic Security Associations (SAs that key management
 daemons have reserved but not fully established yet) in seconds.
@@ -667,6 +727,20 @@ Supported values are hmac-md5, hmac-sha1, and hmac-ripemd160.
 If set to any other value, it is left to the key management daemons to
 select an authentiction algorithm for the security association.
 The default value is hmac-sha1.
+.It Li ip.ipsec-expire-acquire
+How long should the kernel allow key management to dynamically acquire
+security associations, before re-sending a request.
+The default value is 30 seconds.
+.It Li ip.ipsec-keep-invalid
+How long half-created security associations should be kept by the kernel
+(these are created by key management daemons while negotiating).
+The default value is 60 seconds.
+.It Li ip.mtudisc
+Returns 1 if Path MTU Discovery is enabled.
+.It Li ip.mtudisctimeout
+Returns the number of seconds in which a route added by the Path MTU
+Discovery engine will time out.  When the route times out, the Path
+MTU Discovery engine will attempt to probe a larger path MTU.
 .It Li ipip.allow
 If set to 0, incoming IP-in-IP packets will not be processed.
 If set to any other value, processing will occur.
@@ -683,6 +757,12 @@ If set to any other value, processing will occur.
 Returns 1 if
 .Tn ICMP
 network mask requests are to be answered.
+.It Li icmp.errppslimit
+The variable specifies the maximum number of outgoing ICMP error messages,
+per second.
+ICMP error messages that exceeded the value are subject to rate limitation
+and will not go out from the node.
+Negative value disables rate limitation.
 .It Li tcp.rfc1323
 Returns 1 if RFC1323 extensions to
 .Tn TCP
@@ -717,11 +797,25 @@ The units for tcp.keepidle and tcp.keepintvl; those variables are in ticks
 of a clock that ticks tcp.slowhz times per second.
 (That is, their values must be divided by the tcp.slowhz value to get times
 in seconds.)
+.It Li tcp.sendspace
+Returns the default
+.Tn TCP
+send buffer size.
+.It Li tcp.recvspace
+Returns the default
+.Tn TCP
+receive buffer size.
 .It Li tcp.sack
 Returns 1 if RFC2018 Selective Acknowledgements are enabled.
 .It Li tcp.mssdflt
 The maximum segment size that is used as default for non-local connections.
 The default value is 512.
+.It Li tcp.rstppslimit
+The variable specifies the maximum number of outgoing TCP RST packets,
+per second.
+TCP RST packet that exceeded the value are subject to rate limitation
+and will not go out from the node.
+Negative value disables rate limitation.
 .It Li udp.checksum
 Returns 1 when
 .Tn UDP
@@ -735,6 +829,14 @@ Analogous to
 but for
 .Tn UDP
 sockets.
+.It Li udp.sendspace
+Returns the default
+.Tn UDP
+send buffer size.
+.It Li udp.recvspace
+Returns the default
+.Tn UDP
+receive buffer size.
 .El
 .It Dv PF_INET6
 Get or set various global information about IPv6
@@ -755,20 +857,19 @@ The currently defined protocols and names are:
 .It ip6	dad_count	integer	yes
 .It ip6	auto_flowlabel	integer	yes
 .It ip6	defmcasthlim	integer	yes
-.It ip6	gif_hlim	integer	yes
 .It ip6	kame_version	string	no
 .It ip6	use_deprecated	integer	yes
 .It ip6	rr_prune	integer	yes
 .It icmp6	rediraccept	integer	yes
 .It icmp6	redirtimeout	integer	yes
-.It icmp6	errratelimit	integer	yes
 .It icmp6	nd6_prune	integer	yes
 .It icmp6	nd6_delay	integer	yes
 .It icmp6	nd6_umaxtries	integer	yes
 .It icmp6	nd6_mmaxtries	integer	yes
 .It icmp6	nd6_useloopback	integer	yes
-.It icmp6	nd6_proxyall	integer	yes
 .It icmp6	nodeinfo	integer	yes
+.It icmp6	errppslimit	integer	yes
+.It icmp6	nd6_maxnudhint	integer	yes
 .El
 .Pp
 The variables are as follows:
@@ -835,10 +936,6 @@ The default hop limit value for an IPv6 multicast packet sourced by the node.
 This value applies to all the transport protocols on top of IPv6.
 There are APIs to override the value, as documented in
 .Xr ip6 4 .
-.It Li ip6.gif_hlim
-The maximum hop limit value for an IPv6 packet generated by
-.Xr gif 4
-tunnel interface.
 .It Li ip6.kame_version
 The string identifies the version of KAME IPv6 stack implemented in the kernel.
 .It Li ip6.use_deprecated
@@ -855,9 +952,6 @@ only.
 .It Li icmp6.redirtimeout
 The variable specifies lifetime of routing entries generated by incoming
 ICMPv6 redirect.
-.It Li icmp6.errratelimit
-The variable specifies minimum interval between ICMPv6 error messages,
-in microseconds.
 .It Li icmp6.nd6_prune
 The variable specifies interval between IPv6 neighbor cache babysitting,
 in seconds.
@@ -880,12 +974,34 @@ constant in IPv6 neighbor discovery specification
 .It Li icmp6.nd6_useloopback
 If set to non-zero, kernel IPv6 stack will use loopback interface for
 local traffic.
-.It Li icmp6.nd6_proxyall
-The variable enables proxy neighbor advertisements.
 .It Li icmp6.nodeinfo
 The variable enables, or disables, kernel support for
 ICMPv6 node information query/reply.
+.It Li icmp6.errppslimit
+The variable specifies the maximum number of outgoing ICMPv6 error messages,
+per second.
+ICMPv6 error messages that exceeded the value is subject to rate limitation
+and will not go out from the node.
+Negative value disables rate limitation.
+.It Li icmp6.nd6_maxnudhint
+IPv6 neighbor discovery permits upper layer protocols to supply reachability
+hints, to avoid unnecessary neighbor discovery exchanges.
+The variable defines the number of consecutive hints the neighbor discovery
+layer will take.
+For example, by setting the variable to 3, neighbor discovery layer
+will take 3 consecutive hints in maximum.
+After receiving 3 hints, neighbor discovery layer will perform
+normal neighbor discovery process.
 .El
+.Pp
+We reuse
+.Li net.inet.tcp
+and
+.Li net.inet.udp
+for
+.Tn TCP/UDP
+over
+.Tn IPv6 .
 .El
 .Ss CTL_USER
 The string and integer information available for the
@@ -986,6 +1102,49 @@ at any one time.
 The minimum maximum number of types supported for the name of a
 timezone.
 .El
+.Ss CTL_DDB
+Integer information and settable variables are available for the
+.Dv CTL_DDB level, as described below.
+More information is also available in
+.Xr ddb 4 .
+.Bl -column "Second level nameXXXXXX" "struct loadavgXXX" -offset indent
+.It Sy Second level name	Type	Changeable
+.It Dv DBCTL_RADIX No "	integer	yes"
+.It Dv DBCTL_MAXWIDTH No "	integer	yes"
+.It Dv DBCTL_TABSTOP No "	integer	yes"
+.It Dv DBCTL_PANIC No "	integer	yes"
+.It Dv DBCTL_CONSOLE No "	integer	yes"
+.El
+.Pp
+.Bl -tag -width "123456"
+.It Dv DBCTL_RADIX
+Determines the default radix or base for non-prefixed numbers
+entered into
+.Xr ddb 4 .
+This variable is also available as the ddb $radix variable.
+.It Dv DBCTL_MAXWIDTH
+Determines the maximum width of a line in
+.Xr ddb 4 .
+This variable is also available as the ddb $maxwidth variable.
+.It Dv DBCTL_TABSTOP
+Width of a tab stop in
+.Xr ddb 4 .
+This variable is also available as the ddb $tabstops variable.
+.It Dv DBCTL_PANIC
+When this variable is set, system panics may drop into the
+kernel debugger.
+As described in
+.Xr securelevel 7 ,
+a security level greater than 1 blocks modification of this variable.
+.Xr ddb 4 .
+.It Dv DBCTL_CONSOLE
+When this variable is set, an architecture dependent magic key sequence
+on the console or a debugger button will permit entry into the
+kernel debugger.
+As described in
+.Xr securelevel 7 ,
+a security level greater than 1 blocks modification of this variable.
+.El
 .Ss CTL_VM
 The string and integer information available for the
 .Dv CTL_VM
@@ -996,7 +1155,7 @@ privileges may change the value.
 .It Sy Second level name	Type	Changeable
 .It Dv VM_LOADAVG No "	struct loadavg	no"
 .It Dv VM_METER No "	struct vmtotal	no"
-.It Dv VM_SWAPENCRYPT No "	integer	yes"
+.It Dv VM_SWAPENCRYPT No "	swap encrypt values	yes"
 .El
 .Pp
 .Bl -tag -width "123456"
@@ -1009,10 +1168,84 @@ Return the system wide virtual memory statistics.
 The returned data consists of a
 .Li struct vmtotal .
 .It Dv VM_SWAPENCRYPT
+Contains statistics about swap encryption.
+The string and integer information available for the third level is
+detailed below.
+.Bl -column "Third level nameXXXXXX" "struct loadavgXXX" -offset indent
+.It Sy Third level name	Type	Changeable
+.It Dv SWPENC_ENABLE No "	integer	yes"
+.It Dv SWPENC_CREATED No "	integer	no"
+.It Dv SWPENC_DELETED No "	integer	no"
+.El
+.Pp
+.Bl -tag -width "123456"
+.It Dv SWPENC_ENABLE
 Set to 1 to enable swap encryption for all processes.
 A 0 disables swap encryption.
 Pages still on swap receive a grandfather clause.
+Turning this option on does not affect legacy swap data already on the disk,
+but all newly written data will be encrypted.
+When swap encryption is turned on, automatic
+.Xr crash 8
+dumps are disabled.
+.It Dv SWPENC_CREATED
+The number of encryption keys that have been randomly created.
+The swap partition is divided into sections of normally 512KB.
+Each section has its own encryption key.
+.It Dv SWPENC_DELETED
+The number of encryption keys that have been deleted, thus effectivly
+erasing the data that has been encrypted with them.
+Encryption keys are deleted when their reference counter reaches zero.
 .El
+.El
+.Ss CTL_VFS
+The string and integer information available for the
+.Dv CTL_VFS
+level is detailed below.
+The changeable column shows whether a process with appropriate
+privileges may change the value.
+.Bl -column "Second level nameXXXXXX" "struct loadavgXXX" -offset indent
+.It Sy Second level name	Type	Changeable
+.It Dv VFS_GENERIC No "	vm generic info	no"
+.It Dv filesystem # No "	filesystem info	no"
+.El
+.Pp
+.Bl -tag -width "123456"
+.It Dv VFS_GENERIC
+This second level identifier requests generic information about the
+vfs layer.
+Within it, the following third level identifiers exist:
+.Pp
+.Bl -column "Third level nameXXXXXX" "struct loadavgXXX" -offset indent
+.It Sy Third level name	Type	Changeable
+.It Dv VFS_MAXTYPENUM No "	int	no"
+.It Dv VFS_CONF No "	struct vfsconf	no"
+.El
+.It filesystem #
+After finding the filesystem dependent vfc_typenum using
+.Dv VFS_GENERIC
+with
+.Dv VFS_CONF ,
+it is possible to access filesystem dependent information.
+.Pp
+Some filesystems may contain settings.
+.Bl -tag -width "123"
+.It ffs
+.Bl -column "Third level nameXXX" "struct loadavgXXX" -offset ind
+.It Sy Third level name	Type	Changeable
+.It Dv FFS_CLUSTERREAD No "	int	yes"
+.It Dv FFS_CLUSTERWRITE No "	int	yes"
+.It Dv FFS_REALLOCBLOCKS No "	int	yes"
+.It Dv FFS_ASYNCFREE No "	int	yes"
+.El
+.It nfs
+.Bl -column "Third level nameXXX" "struct loadavgXXX" -offset ind
+.It Sy Third level name	Type	Changeable
+.It Dv NFS_NFSSTATS No "	struct nfsstats	yes"
+.It Dv NFS_NIOTHREADS No "	int	yes"
+.El
+.El
+.Pp
 .Sh RETURN VALUES
 If the call to
 .Fn sysctl
@@ -1062,7 +1295,7 @@ An attempt to change a value protected by the current kernel security
 level is made.
 .El
 .Sh FILES
-.Bl -tag -width <netinet/icmpXvar.h> -compact
+.Bl -tag -width <uvm/uvmXswapXencrypt.h> -compact
 .It Aq Pa sys/sysctl.h
 definitions for top level identifiers, second level kernel and hardware
 identifiers, and user level identifiers
@@ -1072,6 +1305,8 @@ definitions for second level network identifiers
 definitions for third level profiling identifiers
 .It Aq Pa vm/vm_param.h
 definitions for second level virtual memory identifiers
+.It Aq Pa uvm/uvm_swap_encrypt.h
+definitions for third level virtual memory identifiers
 .It Aq Pa netinet/in.h
 definitions for third level IPv4/v6 identifiers and
 fourth level

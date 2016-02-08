@@ -1,4 +1,4 @@
-/*	$OpenBSD: forward.c,v 1.8 1999/08/04 18:24:10 mickey Exp $	*/
+/*	$OpenBSD: forward.c,v 1.10 2000/10/12 10:18:38 art Exp $	*/
 /*	$NetBSD: forward.c,v 1.7 1996/02/13 16:49:10 ghudson Exp $	*/
 
 /*-
@@ -41,7 +41,7 @@
 #if 0
 static char sccsid[] = "@(#)forward.c	8.1 (Berkeley) 6/6/93";
 #endif
-static char rcsid[] = "$OpenBSD: forward.c,v 1.8 1999/08/04 18:24:10 mickey Exp $";
+static char rcsid[] = "$OpenBSD: forward.c,v 1.10 2000/10/12 10:18:38 art Exp $";
 #endif /* not lint */
 
 #include <sys/types.h>
@@ -142,8 +142,10 @@ forward(fp, style, off, sbp)
 				ierr();
 				return;
 			}
-		} else
-			bytes(fp, off);
+		} else {
+			if (bytes(fp, off))
+				return;
+		}
 		break;
 	case RLINES:
 		if (S_ISREG(sbp->st_mode)) {
@@ -161,8 +163,10 @@ forward(fp, style, off, sbp)
 				ierr();
 				return;
 			}
-		} else
-			lines(fp, off);
+		} else {
+			if (lines(fp, off))
+				return;
+		}
 		break;
 	}
 
@@ -218,7 +222,7 @@ rlines(fp, off, sbp)
 		return (1);
 
 	if ((start = mmap(NULL, (size_t)size, PROT_READ, MAP_PRIVATE,
-	    fileno(fp), (off_t)0)) == (caddr_t)-1)
+	    fileno(fp), (off_t)0)) == MAP_FAILED)
 		return (1);
 
 	/* Last char is special, ignore whether newline or not. */

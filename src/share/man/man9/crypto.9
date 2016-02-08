@@ -1,4 +1,4 @@
-.\"	$OpenBSD: crypto.9,v 1.3 2000/04/28 14:03:45 aaron Exp $
+.\"	$OpenBSD: crypto.9,v 1.6 2000/06/20 05:48:41 angelos Exp $
 .\"
 .\" The author of this man page is Angelos D. Keromytis (angelos@cis.upenn.edu)
 .\"
@@ -29,6 +29,8 @@
 .Fn crypto_register "u_int32_t" "int" "int (*)(u_int32_t *, struct cryptoini *)" "int (*)(u_int64_t)" "int (*)(struct cryptop *)"
 .Ft int
 .Fn crypto_unregister "u_int32_t" "int"
+.Ft void
+.Fn crypto_done "struct cryptop *"
 .Ft int
 .Fn crypto_newsession "u_int64_t *" "struct cryptoini *"
 .Ft int
@@ -72,10 +74,7 @@ struct cryptop
     int                crp_etype;
     int                crp_flags;
     caddr_t            crp_buf;
-    caddr_t            crp_opaque1;
-    caddr_t            crp_opaque2;
-    caddr_t            crp_opaque3;
-    caddr_t            crp_opaque4;
+    caddr_t            crp_opaque;
     struct cryptodesc *crp_desc;
     int              (*crp_callback) (struct cryptop *);
 };
@@ -203,9 +202,15 @@ buffer for the result (or for re-formatting the input).
 .It Fa crp_callback
 This routine is invoked upon completion of the request, whether
 successful or not.
+It is invoked through the
+.Fn crypto_done
+routine.
 If the request was not successful, an error code is set in the
 .Fa crp_etype
 field.
+It is the responsibility of the callback routine to set the appropriate
+.Xr spl 9
+level.
 .It Fa crp_etype
 Contains the error type, if any errors were encountered, or zero if
 the request was successfully processed.
@@ -248,8 +253,8 @@ chain or a contiguous buffer (of a type identified by
 .Fa crp_alloctype ) ,
 depending on
 .Fa crp_flags .
-.It Fa crp_opaque1 , crp_opaque2 , crp_opaque3 , crp_opaque4
-These are passed through the crypto framework untouched and are
+.It Fa crp_opaque
+This is passed through the crypto framework untouched and is
 intended for the invoking application's use.
 .It Fa crp_desc
 This is a linked list of descriptors.
@@ -349,7 +354,7 @@ and any
 structures linked to it.
 Note that it is the responsibility of the
 callback routine to do the necessary cleanups associated with the
-opaque fields in the
+opaque field in the
 .Fa cryptop
 structure.
 .Pp
@@ -357,8 +362,9 @@ structure.
 The
 .Fn crypto_get_driverid ,
 .Fn crypto_register ,
+.Fn crypto_unregister ,
 and
-.Fn crypto_unregister
+.Fn crypto_done
 routines are used by drivers that provide support for cryptographic
 primitives to register and unregister with the kernel crypto services
 framework.
@@ -417,8 +423,11 @@ In case of error, the error indication must be placed in the
 .Fa crp_etype
 field of the
 .Fa cryptop
-structure, and the callback routine invoked as well, to perform the
-necessary cleanup or to re-issue the request.
+structure.
+When the request is completed, or an error is detected, the
+.Fn process
+routine should invoked
+.Fn crypto_done .
 Session migration may be performed, as mentioned previously.
 .Pp
 .Sh RETURN VALUES

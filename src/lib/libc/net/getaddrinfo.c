@@ -1,5 +1,5 @@
-/*	$OpenBSD: getaddrinfo.c,v 1.22 2000/04/27 05:30:23 itojun Exp $	*/
-/*	$KAME: getaddrinfo.c,v 1.16 2000/04/27 03:37:43 itojun Exp $	*/
+/*	$OpenBSD: getaddrinfo.c,v 1.27 2000/08/31 17:41:51 itojun Exp $	*/
+/*	$KAME: getaddrinfo.c,v 1.31 2000/08/31 17:36:43 itojun Exp $	*/
 
 /*
  * Copyright (C) 1995, 1996, 1997, and 1998 WIDE Project.
@@ -103,8 +103,9 @@
 
 #ifdef YP
 #include <rpc/rpc.h>
-#include <rpcsvc/yp_prot.h>
+#include <rpcsvc/yp.h>
 #include <rpcsvc/ypclnt.h>
+#include "ypinternal.h"
 #endif
 
 #define SUCCESS 0
@@ -192,7 +193,7 @@ typedef union {
 struct res_target {
 	struct res_target *next;
 	const char *name;	/* domain name */
-	int class, type;	/* class and type of query */
+	int qclass, qtype;	/* class and type of query */
 	u_char *answer;		/* buffer to put answer */
 	int anslen;		/* size of answer buffer */
 	int n;			/* result length */
@@ -288,13 +289,16 @@ static int
 str_isnumber(p)
 	const char *p;
 {
-	const char *q = (const char *)p;
-	while (*q) {
-		if (!isdigit(*q))
-			return NO;
-		q++;
-	}
-	return YES;
+	char *ep;
+
+	if (*p == '\0')
+		return NO;
+	ep = NULL;
+	(void)strtoul(p, &ep, 10);
+	if (ep && *ep == '\0')
+		return YES;
+	else
+		return NO;
 }
 
 int
@@ -435,9 +439,9 @@ getaddrinfo(hostname, servname, hints, res)
 		goto good;
 
 	if (pai->ai_flags & AI_NUMERICHOST)
-		ERR(EAI_NONAME);
+		ERR(EAI_NODATA);
 	if (hostname == NULL)
-		ERR(EAI_NONAME);
+		ERR(EAI_NODATA);
 
 	/*
 	 * hostname as alphabetical name.
@@ -558,6 +562,31 @@ explore_fqdn(pai, hostname, servname, res)
 		}
 		*res = result;
 		return 0;
+	} else {
+		/* translate error code */
+		switch (h_errno) {
+		case NETDB_SUCCESS:
+			error = EAI_FAIL;	/*XXX strange */
+			break;
+		case HOST_NOT_FOUND:
+			error = EAI_NODATA;
+			break;
+		case TRY_AGAIN:
+			error = EAI_AGAIN;
+			break;
+		case NO_RECOVERY:
+			error = EAI_FAIL;
+			break;
+		case NO_DATA:
+#if NO_ADDRESS != NO_DATA
+		case NO_ADDRESS:
+#endif
+			error = EAI_NODATA;
+			break;
+		default:			/* unknown ones */
+			error = EAI_FAIL;
+			break;
+		}
 	}
 
 free:
@@ -758,7 +787,7 @@ explore_numeric_scope(pai, hostname, servname, res)
 			sin6 = (struct sockaddr_in6 *)(void *)cur->ai_addr;
 			if ((scopeid = ip6_str2scopeid(scope, sin6)) == -1) {
 				free(hostname2);
-				return(EAI_NONAME); /* XXX: is return OK? */
+				return(EAI_NODATA); /* XXX: is return OK? */
 			}
 			sin6->sin6_scope_id = scopeid;
 		}
@@ -947,6 +976,10 @@ ip6_str2scopeid(scope, sin6)
 	int scopeid;
 	struct in6_addr *a6 = &sin6->sin6_addr;
 	char *ep;
+
+	/* empty scopeid portion is invalid */
+	if (*scope == '\0')
+		return -1;
 
 	if (IN6_IS_ADDR_LINKLOCAL(a6) || IN6_IS_ADDR_MC_LINKLOCAL(a6)) {
 		/*
@@ -1189,25 +1222,25 @@ _dns_getaddrinfo(name, pai)
 	switch (pai->ai_family) {
 	case AF_UNSPEC:
 		/* prefer IPv6 */
-		q.class = C_IN;
-		q.type = T_AAAA;
+		q.qclass = C_IN;
+		q.qtype = T_AAAA;
 		q.answer = buf.buf;
 		q.anslen = sizeof(buf);
 		q.next = &q2;
-		q2.class = C_IN;
-		q2.type = T_A;
+		q2.qclass = C_IN;
+		q2.qtype = T_A;
 		q2.answer = buf2.buf;
 		q2.anslen = sizeof(buf2);
 		break;
 	case AF_INET:
-		q.class = C_IN;
-		q.type = T_A;
+		q.qclass = C_IN;
+		q.qtype = T_A;
 		q.answer = buf.buf;
 		q.anslen = sizeof(buf);
 		break;
 	case AF_INET6:
-		q.class = C_IN;
-		q.type = T_AAAA;
+		q.qclass = C_IN;
+		q.qtype = T_AAAA;
 		q.answer = buf.buf;
 		q.anslen = sizeof(buf);
 		break;
@@ -1216,14 +1249,14 @@ _dns_getaddrinfo(name, pai)
 	}
 	if (res_searchN(name, &q) < 0)
 		return NULL;
-	ai = getanswer(&buf, q.n, q.name, q.type, pai);
+	ai = getanswer(&buf, q.n, q.name, q.qtype, pai);
 	if (ai) {
 		cur->ai_next = ai;
 		while (cur && cur->ai_next)
 			cur = cur->ai_next;
 	}
 	if (q.next) {
-		ai = getanswer(&buf2, q2.n, q2.name, q2.type, pai);
+		ai = getanswer(&buf2, q2.n, q2.name, q2.qtype, pai);
 		if (ai)
 			cur->ai_next = ai;
 	}
@@ -1256,7 +1289,7 @@ _gethtent(name, pai)
 	const struct addrinfo *pai;
 {
 	char *p;
-	char *cp, *tname;
+	char *cp, *tname, *cname;
 	struct addrinfo hints, *res0, *res;
 	int error;
 	const char *addr;
@@ -1277,11 +1310,14 @@ _gethtent(name, pai)
 	*cp++ = '\0';
 	addr = p;
 	/* if this is not something we're looking for, skip it. */
+	cname = NULL;
 	while (cp && *cp) {
 		if (*cp == ' ' || *cp == '\t') {
 			cp++;
 			continue;
 		}
+		if (!cname)
+			cname = cp;
 		tname = cp;
 		if ((cp = strpbrk(cp, " \t")) != NULL)
 			*cp++ = '\0';
@@ -1301,7 +1337,7 @@ found:
 		res->ai_flags = pai->ai_flags;
 
 		if (pai->ai_flags & AI_CANONNAME) {
-			if (get_canonname(pai, res, name) != 0) {
+			if (get_canonname(pai, res, cname) != 0) {
 				freeaddrinfo(res0);
 				goto again;
 			}
@@ -1515,8 +1551,8 @@ res_queryN(name, target)
 		hp->rcode = NOERROR;	/* default */
 
 		/* make it easier... */
-		class = t->class;
-		type = t->type;
+		class = t->qclass;
+		type = t->qtype;
 		answer = t->answer;
 		anslen = t->anslen;
 #ifdef DEBUG

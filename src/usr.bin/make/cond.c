@@ -1,4 +1,4 @@
-/*	$OpenBSD: cond.c,v 1.16 2000/04/17 23:50:45 espie Exp $	*/
+/*	$OpenBSD: cond.c,v 1.22 2000/09/14 13:46:44 espie Exp $	*/
 /*	$NetBSD: cond.c,v 1.7 1996/11/06 17:59:02 christos Exp $	*/
 
 /*
@@ -39,14 +39,6 @@
  * SUCH DAMAGE.
  */
 
-#ifndef lint
-#if 0
-static char sccsid[] = "@(#)cond.c	8.2 (Berkeley) 1/2/94";
-#else
-static char rcsid[] = "$OpenBSD: cond.c,v 1.16 2000/04/17 23:50:45 espie Exp $";
-#endif
-#endif /* not lint */
-
 /*-
  * cond.c --
  *	Functions to handle conditionals in a makefile.
@@ -56,12 +48,22 @@ static char rcsid[] = "$OpenBSD: cond.c,v 1.16 2000/04/17 23:50:45 espie Exp $";
  *
  */
 
+#include    <stddef.h>
 #include    <ctype.h>
 #include    <math.h>
 #include    "make.h"
-#include    "hash.h"
+#include    "ohash.h"
 #include    "dir.h"
 #include    "buf.h"
+
+#ifndef lint
+#if 0
+static char sccsid[] = "@(#)cond.c	8.2 (Berkeley) 1/2/94";
+#else
+UNUSED
+static char rcsid[] = "$OpenBSD: cond.c,v 1.22 2000/09/14 13:46:44 espie Exp $";
+#endif
+#endif /* not lint */
 
 /*
  * The parsing of conditional expressions is based on this grammar:
@@ -104,7 +106,7 @@ typedef enum {
 static void CondPushBack __P((Token));
 static Boolean CondGetArg __P((char **, char **, size_t *, char *, Boolean));
 static Boolean CondDoDefined __P((size_t, char *));
-static int CondStrMatch __P((ClientData, ClientData));
+static int CondStrMatch __P((void *, void *));
 static Boolean CondDoMake __P((size_t, char *));
 static Boolean CondDoExists __P((size_t, char *));
 static Boolean CondDoTarget __P((size_t, char *));
@@ -235,7 +237,7 @@ CondGetArg(linePtr, argPtr, argLen, func, parens)
 	    size_t	len;
 	    Boolean	doFree;
 
-	    cp2 = Var_Parse(cp, VAR_CMD, TRUE, &len, &doFree);
+	    cp2 = Var_Parse(cp, NULL, TRUE, &len, &doFree);
 
 	    Buf_AddString(&buf, cp2);
 	    if (doFree) {
@@ -291,7 +293,7 @@ CondDoDefined(argLen, arg)
     Boolean result;
 
     arg[argLen] = '\0';
-    if (Var_Value(arg, VAR_CMD) != NULL)
+    if (Var_Value(arg, NULL) != NULL)
 	result = TRUE;
     else
 	result = FALSE;
@@ -307,18 +309,14 @@ CondDoDefined(argLen, arg)
  *
  * Results:
  *	0 if string matches pattern
- *
- * Side Effects:
- *	None
- *
  *-----------------------------------------------------------------------
  */
 static int
 CondStrMatch(string, pattern)
-    ClientData    string;
-    ClientData    pattern;
+    void *string;
+    void *pattern;
 {
-    return(!Str_Match((char *) string,(char *) pattern));
+    return !Str_Match((char *)string,(char *)pattern);
 }
 
 /*-
@@ -343,7 +341,7 @@ CondDoMake (argLen, arg)
     Boolean result;
 
     arg[argLen] = '\0';
-    if (Lst_Find(create, CondStrMatch, arg) == NULL) {
+    if (Lst_Find(&create, CondStrMatch, arg) == NULL) {
 	result = FALSE;
     } else {
 	result = TRUE;
@@ -375,7 +373,7 @@ CondDoExists (argLen, arg)
     char    *path;
 
     arg[argLen] = '\0';
-    path = Dir_FindFile(arg, dirSearchPath);
+    path = Dir_FindFile(arg, &dirSearchPath);
     if (path != (char *)NULL) {
 	result = TRUE;
 	free(path);
@@ -532,7 +530,7 @@ CondToken(doEval)
 		 * value in lhs.
 		 */
 		t = Err;
-		lhs = Var_Parse(condExpr, VAR_CMD, doEval,&varSpecLen,&doFree);
+		lhs = Var_Parse(condExpr, NULL, doEval,&varSpecLen,&doFree);
 		if (lhs == var_Error) {
 		    /*
 		     * Even if !doEval, we still report syntax errors, which
@@ -636,7 +634,7 @@ do_string_compare:
 			    size_t  len;
 			    Boolean freeIt;
 
-			    cp2 = Var_Parse(cp, VAR_CMD, doEval,&len, &freeIt);
+			    cp2 = Var_Parse(cp, NULL, doEval,&len, &freeIt);
 			    if (cp2 != var_Error) {
 				Buf_AddString(&buf, cp2);
 				if (freeIt) {
@@ -689,7 +687,7 @@ do_string_compare:
 			size_t 	len;
 			Boolean	freeIt;
 
-			string = Var_Parse(rhs, VAR_CMD, doEval,&len,&freeIt);
+			string = Var_Parse(rhs, NULL, doEval,&len,&freeIt);
 			if (string == var_Error) {
 			    right = 0.0;
 			} else {
@@ -821,7 +819,7 @@ error:
 			continue;
 
 		    if (condExpr[arglen] != '\0') {
-			val = Var_Parse(&condExpr[arglen - 1], VAR_CMD,
+			val = Var_Parse(&condExpr[arglen - 1], NULL,
 					doEval, &length, &doFree);
 			if (val == var_Error) {
 			    t = Err;
@@ -1187,13 +1185,13 @@ Cond_Eval (line)
 		    break;
 		}
 		goto err;
-		/*FALLTHRU*/
+		/* FALLTHROUGH */
 	    case False:
 		if (CondToken(TRUE) == EndOfFile) {
 		    value = FALSE;
 		    break;
 		}
-		/*FALLTHRU*/
+		/* FALLTHROUGH */
 	    case Err:
 	    err:
 		Parse_Error (level, "Malformed conditional (%s)",

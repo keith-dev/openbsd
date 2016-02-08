@@ -1,4 +1,4 @@
-.\"	$OpenBSD: nc.1,v 1.7 2000/03/10 19:07:22 aaron Exp $
+.\"	$OpenBSD: nc.1,v 1.11 2000/09/26 01:41:44 ericj Exp $
 .\"
 .\" Copyright (c) 1996 David Sacerdote
 .\" All rights reserved.
@@ -33,11 +33,11 @@
 .Nd "arbitrary TCP and UDP connections and listens"
 .Sh SYNOPSIS
 .Nm nc
+.Op Fl lnrtuvz
 .Op Fl e Ar command
 .Op Fl g Ar intermediates
 .Op Fl G Ar hopcount
 .Op Fl i Ar interval
-.Op Fl lnrtuvz
 .Op Fl o Ar filename
 .Op Fl p Ar source port
 .Op Fl s Ar ip address
@@ -85,13 +85,6 @@ and much, much more
 .Pp
 The options are as follows:
 .Bl -tag -width Ds
-.It Fl e Ar command
-Execute the specified command, using data from the network for stdin,
-and sending stdout and stderr to the network.
-This option is only present if
-.Nm
-was compiled with the GAPING_SECURITY_HOLE compile time option, since it
-allows users to make arbitrary programs available to anyone on the network.
 .It Fl g Ar intermediate-host
 Specifies a hop along a loose source routed path.
 Can be used more than once to build a chain of hop points.
@@ -179,14 +172,15 @@ Specifies that
 .Nm
 should just scan for listening
 daemons, without sending any data to them.
-Diagnostic messages about refused connections with not be displayed unless
+Diagnostic messages about refused connections will not be displayed unless
 .Fl v
 is specified twice.
+.El
 .Sh EXAMPLES
 .Bl -tag -width x
 .It Li "nc"
 Wait for the user to type what would normally be command-line
-arguments in at stdin.
+arguments on stdin.
 .It Li "nc example.host 42"
 Open a TCP connection to port 42 of example.host.
 If the connection

@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.16 2000/03/01 17:27:28 deraadt Exp $
+#	$OpenBSD: Makefile,v 1.18 2000/09/03 18:41:14 espie Exp $
 #	$NetBSD: Makefile,v 1.13 1996/02/16 02:07:41 cgd Exp $
 #	@(#)Makefile	8.2 (Berkeley) 4/4/94
 
@@ -14,19 +14,19 @@ CLEANFILES+=ftpcmd.c y.tab.h
 
 LSDIR	= ${.CURDIR}/../../bin/ls
 .PATH:	${LSDIR}
-SRCS	+= ls.c cmp.c print.c stat_flags.c util.c
+SRCS	+= ls.c cmp.c print.c util.c
 CFLAGS	+= -I${LSDIR}
 
 # not really used
 CPPFLAGS+=-DINET6
 
-.if (${SKEY} == "yes")
+.if (${SKEY:L} == "yes")
 CFLAGS+=-DSKEY
 LDADD+= -lskey
 DPADD+= ${LIBSKEY}
 .endif
 
-.if (${KERBEROS} == "yes")
+.if (${KERBEROS:L} == "yes")
 SRCS+= klogin.c
 .PATH:	${.CURDIR}/../../usr.bin/login
 CFLAGS+= -DKERBEROS
@@ -34,7 +34,7 @@ LDADD+= -lkafs -lkrb -ldes
 DPADD+= ${LIBKRB} ${LIBKRB} ${LIBKAFS}
 .endif
 
-.if (${TCP_WRAPPERS} == "yes")
+.if (${TCP_WRAPPERS:L} == "yes")
 CFLAGS+=-DTCPWRAPPERS
 LDADD+=	-lwrap
 DPADD+=	${LIBWRAP}

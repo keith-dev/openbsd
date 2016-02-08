@@ -1,4 +1,4 @@
-/*	$OpenBSD: curses.priv.h,v 1.26 2000/03/26 16:45:03 millert Exp $	*/
+/*	$OpenBSD: curses.priv.h,v 1.30 2000/10/10 15:10:29 millert Exp $	*/
 
 /****************************************************************************
  * Copyright (c) 1998,1999,2000 Free Software Foundation, Inc.              *
@@ -35,7 +35,7 @@
 
 
 /*
- * $From: curses.priv.h,v 1.157 2000/03/26 01:01:14 tom Exp $
+ * $From: curses.priv.h,v 1.168 2000/10/08 01:24:59 tom Exp $
  *
  *	curses.priv.h
  *
@@ -101,7 +101,7 @@ extern int errno;
 /* Some systems have a broken 'select()', but workable 'poll()'.  Use that */
 #if HAVE_WORKING_POLL
 #define USE_FUNC_POLL 1
-#ifdef HAVE_POLL_H
+#if HAVE_POLL_H
 #include <poll.h>
 #else
 #include <sys/poll.h>
@@ -136,7 +136,7 @@ extern int errno;
  * If we don't have signals to support it, don't add a sigwinch handler.
  * In any case, resizing is an extended feature.  Use it if we've got it.
  */
-#ifndef NCURSES_EXT_FUNCS
+#if !NCURSES_EXT_FUNCS
 #undef HAVE_SIZECHANGE
 #endif
 
@@ -144,6 +144,21 @@ extern int errno;
 #define USE_SIZECHANGE 1
 #else
 #undef USE_SIGWINCH
+#endif
+
+/*
+ * If desired, one can configure this, disabling environment variables that
+ * point to custom terminfo/termcap locations.
+ */
+#ifdef USE_ROOT_ENVIRON
+#ifdef __OpenBSD__
+#define use_terminfo_vars() (!issetugid())
+#else
+#define use_terminfo_vars() 1
+#endif
+#else
+#define use_terminfo_vars() _nc_env_access()
+extern int _nc_env_access(void);
 #endif
 
 /*
@@ -290,7 +305,7 @@ struct screen {
 	SLK             *_slk;          /* ptr to soft key struct / NULL    */
         int             slk_format;     /* selected format for this screen  */
 	/* cursor movement costs; units are 10ths of milliseconds */
-#ifdef NCURSES_NO_PADDING
+#if NCURSES_NO_PADDING
 	int             _no_padding;    /* flag to set if padding disabled  */
 #endif
 	int             _char_padding;  /* cost of character put            */
@@ -312,7 +327,7 @@ struct screen {
 	int             _cuu_cost;      /* cost of (parm_cursor_up)         */
 	int             _hpa_cost;      /* cost of (column_address)         */
 	int             _vpa_cost;      /* cost of (row_address)            */
-	/* used in lib_doupdate.c, must be chars */
+	/* used in tty_update.c, must be chars */
 	int             _ed_cost;       /* cost of (clr_eos)                */
 	int             _el_cost;       /* cost of (clr_eol)                */
 	int             _el1_cost;      /* cost of (clr_bol)                */
@@ -324,14 +339,14 @@ struct screen {
 	int             _rep_cost;      /* cost of (repeat_char)            */
 	int             _hpa_ch_cost;   /* cost of (column_address)         */
 	int             _cup_ch_cost;   /* cost of (cursor_address)         */
+	int             _cuf_ch_cost;   /* cost of (parm_cursor_right)      */
+	int             _inline_cost;   /* cost of inline-move              */
 	int             _smir_cost;	/* cost of (enter_insert_mode)      */
 	int             _rmir_cost;	/* cost of (exit_insert_mode)       */
 	int             _ip_cost;       /* cost of (insert_padding)         */
 	/* used in lib_mvcur.c */
 	char *          _address_cursor;
-	int             _carriage_return_length;
-	int             _cursor_home_length;
-	int             _cursor_to_ll_length;
+	/* used in tty_update.c */
 	int             _scrolling;     /* 1 if terminal's smart enough to  */
 
 	/* used in lib_color.c */
@@ -339,7 +354,7 @@ struct screen {
 	int             _color_count;   /* count of colors in palette        */
 	unsigned short  *_color_pairs;  /* screen's color pair list          */
 	int             _pair_count;    /* count of color pairs              */
-#ifdef NCURSES_EXT_FUNCS
+#if NCURSES_EXT_FUNCS
 	bool            _default_color; /* use default colors                */
 	bool            _has_sgr_39_49; /* has ECMA default color support    */
 	int             _default_fg;    /* assumed default foreground        */
@@ -402,11 +417,12 @@ struct screen {
 	unsigned long	*oldhash, *newhash;
 
 	bool            _cleanup;	/* cleanup after int/quit signal */
+	int             (*_outch)(int);	/* output handler if not putc */
 };
 
 extern SCREEN *_nc_screen_chain;
 
-#ifdef NCURSES_NOMACROS
+#if NCURSES_NOMACROS
 #include <nomacros.h>
 #endif
 
@@ -505,10 +521,6 @@ typedef	struct {
 
 #define SIZEOF(v) (sizeof(v)/sizeof(v[0]))
 
-#define typeMalloc(type,elts) (type *)malloc((elts)*sizeof(type))
-#define typeCalloc(type,elts) (type *)calloc((elts),sizeof(type))
-#define typeRealloc(type,elts,ptr) (type *)_nc_doalloc(ptr, (elts)*sizeof(type))
-
 #define FreeIfNeeded(p)  if ((p) != 0) free(p)
 
 /* FreeAndNull() is not a comma-separated expression because some compilers
@@ -533,12 +545,14 @@ typedef	struct {
 #define TPUTS_TRACE(s)	_nc_tputs_trace = s;
 #define TRACE_RETURN(value,type) return _nc_retrace_##type(value)
 #define returnAttr(code) TRACE_RETURN(code,attr_t)
+#define returnChar(code) TRACE_RETURN(code,chtype)
 #define returnCode(code) TRACE_RETURN(code,int)
 #define returnPtr(code)  TRACE_RETURN(code,ptr)
 #define returnVoid       T((T_RETURN(""))); return
 #define returnWin(code)  TRACE_RETURN(code,win)
 extern WINDOW * _nc_retrace_win(WINDOW *);
 extern attr_t _nc_retrace_attr_t(attr_t);
+extern attr_t _nc_retrace_chtype(chtype);
 extern char *_nc_retrace_ptr(char *);
 extern const char *_nc_tputs_trace;
 extern int _nc_retrace_int(int);
@@ -549,6 +563,7 @@ extern void _nc_fifo_dump(void);
 #define TR(n, a)
 #define TPUTS_TRACE(s)
 #define returnAttr(code) return code
+#define returnChar(code) return code
 #define returnCode(code) return code
 #define returnPtr(code)  return code
 #define returnVoid       return
@@ -571,7 +586,7 @@ extern const char *_nc_visbuf2(int, const char *);
       (S) = ((S) & ALL_BUT_COLOR) | (at);\
    else\
       (S) |= (at);\
-   T(("new attribute is %s", _traceattr((S))));}
+   TR(TRACE_ATTRS, ("new attribute is %s", _traceattr((S))));}
 
 
 #define toggle_attr_off(S,at) {\
@@ -586,7 +601,7 @@ extern const char *_nc_visbuf2(int, const char *);
       else /* leave color alone */\
 	 (S) &= ~(at);\
    }\
-   T(("new attribute is %s", _traceattr((S))));}
+   TR(TRACE_ATTRS, ("new attribute is %s", _traceattr((S))));}
 
 #define DelCharCost(count) \
 		((parm_dch != 0) \
@@ -610,7 +625,8 @@ extern const char *_nc_visbuf2(int, const char *);
 				vidattr(AttrOf(c)); \
 				if (magic_cookie_glitch > 0 \
 				 && XMC_CHANGES((chg ^ SP->_current_attr))) { \
-					T(("%s @%d before glitch %d,%d", \
+					TR(TRACE_ATTRS, \
+						("%s @%d before glitch %d,%d", \
 						__FILE__, __LINE__, \
 						SP->_cursrow, \
 						SP->_curscol)); \
@@ -622,7 +638,7 @@ extern const char *_nc_visbuf2(int, const char *);
 				vidattr(AttrOf(c))
 #endif
 
-#if defined(NCURSES_EXPANDED) && defined(NCURSES_EXT_FUNCS)
+#if NCURSES_EXPANDED && NCURSES_EXT_FUNCS
 
 #undef  toggle_attr_on
 #define toggle_attr_on(S,at) _nc_toggle_attr_on(&(S), at)
@@ -654,13 +670,6 @@ extern void _nc_expanded(void);
 #define getcwd(buf,len) getwd(buf)
 #endif
 
-/* doalloc.c */
-extern void *_nc_doalloc(void *, size_t);
-#if !HAVE_STRDUP
-#define strdup _nc_strdup
-extern char *_nc_strdup(const char *);
-#endif
-
 /* doupdate.c */
 #if USE_XMC_SUPPORT
 extern void _nc_do_xmc_glitch(attr_t);
@@ -688,13 +697,39 @@ extern void _nc_screen_init(void);
 extern void _nc_screen_resume(void);
 extern void _nc_screen_wrap(void);
 
+/* lib_mouse.c */
+extern int _nc_has_mouse(void);
+
+/* lib_mvcur.c */
+#define INFINITY	1000000	/* cost: too high to use */
+
+typedef struct {
+    char *s_head;
+    char *s_tail;
+    size_t s_size;
+} string_desc;
+
+/* strings.c */
+extern string_desc *_nc_str_init(string_desc * dst, char *src, size_t len);
+extern string_desc *_nc_str_null(string_desc * dst, size_t len);
+extern string_desc *_nc_str_copy(string_desc * dst, string_desc * src);
+extern bool _nc_safe_strcat(string_desc * dst, const char *src);
+extern bool _nc_safe_strcpy(string_desc * dst, const char *src);
+
+extern void _nc_mvcur_init(void);
+extern void _nc_mvcur_resume(void);
+extern void _nc_mvcur_wrap(void);
+
+extern int _nc_scrolln(int, int, int, int);
+
+extern void _nc_screen_init(void);
+extern void _nc_screen_resume(void);
+extern void _nc_screen_wrap(void);
+
 #if !HAVE_STRSTR
 #define strstr _nc_strstr
 extern char *_nc_strstr(const char *, const char *);
 #endif
-
-/* lib_mouse.c */
-extern int _nc_has_mouse(void);
 
 /* safe_sprintf.c */
 extern char * _nc_printf_string(const char *fmt, va_list ap);
@@ -727,17 +762,22 @@ extern void _nc_hash_map(void);
 extern void _nc_init_keytry(void);
 extern void _nc_keep_tic_dir(const char *);
 extern void _nc_make_oldhash(int i);
+extern void _nc_flush(void);
 extern void _nc_outstr(const char *str);
 extern void _nc_scroll_oldhash(int n, int top, int bot);
 extern void _nc_scroll_optimize(void);
 extern void _nc_scroll_window(WINDOW *, int const, short const, short const, chtype);
-extern void _nc_set_buffer(FILE *ofp, bool buffered);
+extern void _nc_set_buffer(FILE *, bool);
 extern void _nc_signal_handler(bool);
 extern void _nc_synchook(WINDOW *win);
 extern void _nc_trace_tries(struct tries *tree);
 
 #if USE_SIZECHANGE
 extern void _nc_update_screensize(void);
+#endif
+
+#if USE_WIDEC_SUPPORT
+extern int _nc_utf8_outch(int);
 #endif
 
 /* scroll indices */
@@ -750,16 +790,11 @@ extern int *_nc_oldnums;
 		_nc_set_buffer(SP->_ofp, flag)
 
 #define NC_OUTPUT ((SP != 0) ? SP->_ofp : stdout)
-#define _nc_flush() (void)fflush(NC_OUTPUT)
 
 /*
  * On systems with a broken linker, define 'SP' as a function to force the
  * linker to pull in the data-only module with 'SP'.
  */
-#ifndef BROKEN_LINKER
-#define BROKEN_LINKER 0
-#endif
-
 #if BROKEN_LINKER
 #define SP _nc_screen()
 extern SCREEN *_nc_screen(void);

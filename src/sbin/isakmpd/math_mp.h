@@ -1,5 +1,5 @@
-/*	$OpenBSD: math_mp.h,v 1.2 2000/04/07 22:10:30 niklas Exp $	*/
-/*	$EOM: math_mp.h,v 1.2 2000/04/07 22:05:57 niklas Exp $	*/
+/*	$OpenBSD: math_mp.h,v 1.4 2000/10/07 07:00:44 niklas Exp $	*/
+/*	$EOM: math_mp.h,v 1.4 2000/09/16 09:41:43 ho Exp $	*/
 
 /*
  * Copyright (c) 1999, 2000 Niklas Hallqvist.  All rights reserved.
@@ -44,11 +44,11 @@
 
 #include <gmp.h>
 
-#define mpz_t math_mp_t;
+#define math_mp_t mpz_t
 
 #elif MP_FLAVOUR == MP_FLAVOUR_OPENSSL
 
-#include <ssl/bn.h>
+#include <openssl/bn.h>
 
 typedef BIGNUM *math_mp_t;
 

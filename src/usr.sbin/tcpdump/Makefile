@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.21 2000/04/26 21:35:36 jakob Exp $
+#	$OpenBSD: Makefile,v 1.23 2000/10/19 16:31:41 jason Exp $
 #
 #  Copyright (c) 1988, 1989, 1990, 1991, 1992, 1993, 1994
 # 	The Regents of the University of California.  All rights reserved.
@@ -23,6 +23,8 @@
 PROG=	tcpdump
 MAN=	tcpdump.8
 
+CFLAGS+=-Wall -Werror
+
 CFLAGS+=-DCSLIP -DPPP -DHAVE_FDDI -DETHER_SERVICE -DRETSIGTYPE=void -DHAVE_NET_SLIP_H -DHAVE_ETHER_NTOHOST -DINET6
 .if (${MACHINE_ARCH} == "alpha") || (${MACHINE_ARCH} == "mips") || (${MACHINE_ARCH} == "sparc")
 CFLAGS+=-DLBL_ALIGN
@@ -43,7 +45,7 @@ SRCS=	tcpdump.c addrtoname.c \
 	print-gre.c print-radius.c print-enc.c print-cnfp.c \
 	print-ipsec.c print-ike.c print-raw.c print-l2tp.c print-mobile.c \
 	print-ip6.c print-ip6opts.c print-icmp6.c print-dhcp6.c print-frag6.c \
-	print-bgp.c print-ospf6.c print-ripng.c print-rt6.c \
+	print-bgp.c print-ospf6.c print-ripng.c print-rt6.c print-stp.c \
 	gmt2local.c savestr.c setsignal.c
 
 AWKS =	atime.awk packetdat.awk send-ack.awk stime.awk

@@ -1,17 +1,17 @@
-#	$OpenBSD: Makefile,v 1.62 1999/11/18 16:36:50 millert Exp $
+#	$OpenBSD: Makefile,v 1.67 2000/09/03 18:41:17 espie Exp $
 
 .include <bsd.own.mk>
 
 SUBDIR= apply apropos arch asa at aucat audioctl awk banner basename bdes \
-	biff cal calendar cap_mkdb cdio checknr chflags chpass cksum cmp col \
+	biff cal calendar cap_mkdb cdio checknr chpass cksum cmp col \
 	colcrt colrm column comm compile_et compress cpp crontab ctags cut \
 	dirname du elf2olf encrypt env error expand false file file2c find \
 	finger fmt fold from fsplit fstat ftp gencat getconf getopt gprof \
 	head hexdump id indent infocmp ipcrm ipcs join jot kdump keynote \
 	ktrace lam last lastcomm leave less lex lndir locate lock logger \
-	login logname look lorder m4 mail make man mesg midiplay mixerctl \
+	login logname look lorder m4 mail make man mesg mg midiplay mixerctl \
 	mkdep mkstr mktemp modstat msgs nc netstat newsyslog nfsstat nice \
-	nohup oldrdist pagesize passwd paste patch pr printenv printf quota \
+	nohup oldrdist pagesize passwd paste patch pctr pr printenv printf quota \
 	rdist rdistd readlink renice rev rlogin rpcgen rpcinfo rs rsh rup \
 	ruptime rusers rwall rwho script sed shar showmount skey skeyaudit \
 	skeyinfo skeyinit sort split ssh su sup systat sudo tail talk tcopy \
@@ -20,7 +20,7 @@ SUBDIR= apply apropos arch asa at aucat audioctl awk banner basename bdes \
 	uuencode vacation vgrind vi vis vmstat w wall wc what whatis which \
 	who whois window write xargs xinstall xlint xstr yacc yes
 
-.if (${YP} == "yes")
+.if (${YP:L} == "yes")
 SUBDIR+=ypcat ypmatch ypwhich
 .endif
 
@@ -30,9 +30,7 @@ SUBDIR+= ar nm ranlib size strip strings
 .endif
 
 .if   make(clean) || make(cleandir) || make(obj)
-SUBDIR+= pctr elf2ecoff elf2aout
-.elif ${MACHINE_ARCH} == "i386"
-SUBDIR+= pctr
+SUBDIR+= elf2ecoff elf2aout
 .elif ${MACHINE_ARCH} == "mips"
 SUBDIR+= elf2ecoff elf2aout
 .endif

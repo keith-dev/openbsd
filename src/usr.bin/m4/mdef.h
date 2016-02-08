@@ -1,4 +1,4 @@
-/*	$OpenBSD: mdef.h,v 1.14 2000/03/11 15:54:44 espie Exp $	*/
+/*	$OpenBSD: mdef.h,v 1.17 2000/07/24 23:08:25 espie Exp $	*/
 /*	$NetBSD: mdef.h,v 1.7 1996/01/13 23:25:27 pk Exp $	*/
 
 /*
@@ -79,6 +79,7 @@
 #define FILENAMETYPE	38
 #define LINETYPE	39
 #define REGEXPTYPE	40
+#define ESYSCMDTYPE	41
  
 #define TYPEMASK	63	/* Keep bits really corresponding to a type. */
 #define STATIC          128	/* Name is statically allocated, don't free. */
@@ -112,7 +113,7 @@
 #define MAXOUT          10              /* maximum # of diversions 	    */
 #define MAXSTR          512             /* maximum size of string  	    */
 #define BUFSIZE         4096            /* starting size of pushback buffer */
-#define STACKMAX        4096            /* size of call stack      	    */
+#define INITSTACKMAX    4096           	/* starting size of call stack      */
 #define STRSPMAX        4096            /* starting size of string space    */
 #define MAXTOK          MAXSTR          /* maximum chars in a tokn 	    */
 #define HASHSIZE        199             /* maximum size of hashtab 	    */
@@ -168,8 +169,29 @@ struct input_file {
  *      pushs() - push a string pointer onto stack
  */
 #define gpbc() 	 (bp > bufbase) ? *--bp : obtain_char(infile+ilevel)
-#define pushf(x) if (sp < STACKMAX) mstack[++sp].sfra = (x)
-#define pushs(x) if (sp < STACKMAX) mstack[++sp].sstr = (x)
+#define pushf(x) 			\
+	do {				\
+		if (++sp == STACKMAX) 	\
+			enlarge_stack();\
+		mstack[sp].sfra = (x);	\
+		sstack[sp] = 0; \
+	} while (0);
+
+#define pushs(x) 			\
+	do {				\
+		if (++sp == STACKMAX) 	\
+			enlarge_stack();\
+		mstack[sp].sstr = (x);	\
+		sstack[sp] = 1; \
+	} while (0);
+
+#define pushs1(x) 			\
+	do {				\
+		if (++sp == STACKMAX) 	\
+			enlarge_stack();\
+		mstack[sp].sstr = (x);	\
+		sstack[sp] = 0; \
+	} while (0);
 
 /*
  *	    .				   .
@@ -196,6 +218,6 @@ struct input_file {
  */
 #define PARLEV  (mstack[fp].sfra)
 #define CALTYP  (mstack[fp-1].sfra)
-#define PREVEP	compute_prevep() 
+#define PREVEP	(mstack[fp+3].sstr)
 #define PREVSP	(fp-3)
 #define PREVFP	(mstack[fp-2].sfra)

@@ -1,4 +1,4 @@
-/*	$OpenBSD: job.h,v 1.6 1999/12/18 21:53:32 espie Exp $	*/
+/*	$OpenBSD: job.h,v 1.8 2000/09/14 13:32:07 espie Exp $	*/
 /*	$NetBSD: job.h,v 1.5 1996/11/06 17:59:10 christos Exp $	*/
 
 /*
@@ -213,25 +213,25 @@ extern GNode	*lastNode;  	/* Last node for which a banner was printed.
 				 * for which the banner was printed */
 extern int  	nJobs;	    	/* Number of jobs running (local and remote) */
 extern int  	nLocal;	    	/* Number of jobs running locally */
-extern Lst  	jobs;	    	/* List of active job descriptors */
-extern Lst  	stoppedJobs;	/* List of jobs that are stopped or didn't
+extern LIST  	jobs;	    	/* List of active job descriptors */
+extern LIST  	stoppedJobs;	/* List of jobs that are stopped or didn't
 				 * quite get started */
 extern Boolean	jobFull;    	/* Non-zero if no more jobs should/will start*/
 
 
-void Job_Touch __P((GNode *, Boolean));
-Boolean Job_CheckCommands __P((GNode *, void (*abortProc )(char *, ...)));
-void Job_CatchChildren __P((Boolean));
-void Job_CatchOutput __P((void));
-void Job_Make __P((GNode *));
-void Job_Init __P((int, int));
-Boolean Job_Full __P((void));
-Boolean Job_Empty __P((void));
-ReturnStatus Job_ParseShell __P((char *));
-int Job_Finish __P((void));
-void Job_End __P((void));
-void Job_Wait __P((void));
-void Job_AbortAll __P((void));
-void JobFlagForMigration __P((int));
+extern void Job_Touch __P((GNode *, Boolean));
+extern Boolean Job_CheckCommands __P((GNode *, void (*abortProc )(char *, ...)));
+extern void Job_CatchChildren __P((Boolean));
+extern void Job_CatchOutput __P((void));
+extern void Job_Make __P((GNode *));
+extern void Job_Init __P((int, int));
+extern Boolean Job_Full __P((void));
+extern Boolean Job_Empty __P((void));
+extern ReturnStatus Job_ParseShell __P((char *));
+extern int Job_Finish __P((void));
+extern void Job_End __P((void));
+extern void Job_Wait __P((void));
+extern void Job_AbortAll __P((void));
+extern void JobFlagForMigration __P((int));
 
 #endif /* _JOB_H_ */

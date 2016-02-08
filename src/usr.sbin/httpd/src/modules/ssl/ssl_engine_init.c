@@ -123,6 +123,9 @@ void ssl_init_Module(server_rec *s, pool *p)
     SSLSrvConfigRec *sc;
     server_rec *s2;
     char *cp;
+#ifdef __OpenBSD__    
+    int SSLenabled = 0;
+#endif
 
     mc->nInitCount++;
 
@@ -151,7 +154,7 @@ void ssl_init_Module(server_rec *s, pool *p)
             sc->nVerifyClient = SSL_CVERIFY_NONE;
         if (sc->nVerifyDepth == UNSET)
             sc->nVerifyDepth = 1;
-#ifdef SSL_EXPERIMENTAL
+#ifdef SSL_EXPERIMENTAL_PROXY
         if (sc->nProxyVerifyDepth == UNSET)
             sc->nProxyVerifyDepth = 1;
 #endif
@@ -243,11 +246,24 @@ void ssl_init_Module(server_rec *s, pool *p)
 #endif
     if (mc->nInitCount == 1) {
         ssl_pphrase_Handle(s, p);
+#ifndef __OpenBSD__
         ssl_init_TmpKeysHandle(SSL_TKP_GEN, s, p);
+#endif
 #ifndef WIN32
         return;
 #endif
     }
+
+#ifdef __OpenBSD__
+    for (s2 = s; s2 != NULL; s2 = s2->next) {
+        sc = mySrvConfig(s2);
+	/* find out if anyone's actually doing ssl */
+        if (sc->bEnabled)
+            SSLenabled = 1;
+    }
+    if (SSLenabled) /* skip expensive bits if we're not doing ssl */
+      ssl_init_TmpKeysHandle(SSL_TKP_GEN, s, p);
+#endif
 
     /*
      * Warn the user that he should use the session cache.
@@ -273,11 +289,15 @@ void ssl_init_Module(server_rec *s, pool *p)
     /*
      *  allocate the temporary RSA keys and DH params
      */
+#ifdef __OpenBSD__    
+    if (SSLenabled)  /* skip expensive bits if we're not doing ssl */
+#endif
     ssl_init_TmpKeysHandle(SSL_TKP_ALLOC, s, p);
 
     /*
      *  initialize servers
      */
+
     ssl_log(s, SSL_LOG_INFO, "Init: Initializing (virtual) servers for SSL");
     for (s2 = s; s2 != NULL; s2 = s2->next) {
         sc = mySrvConfig(s2);
@@ -353,10 +373,10 @@ void ssl_init_TmpKeysHandle(int action, server_rec *s, pool *p)
             ssl_log(s, SSL_LOG_ERROR, "Init: Failed to generate temporary 512 bit RSA private key");
 #if 0
             ssl_die();
-#else 
+#else
 	    ssl_log(s, SSL_LOG_ERROR, "Init: You probably have no RSA support in libcrypto. See ssl(8)");
 	    return;
-#endif	
+#endif
         }
         asn1 = (ssl_asn1_t *)ssl_ds_table_push(mc->tTmpKeys, "RSA:512");
         asn1->nData  = i2d_RSAPrivateKey(rsa, NULL);
@@ -826,6 +846,12 @@ void ssl_init_ConfigureServer(server_rec *s, pool *p, SSLSrvConfigRec *sc)
                 n, n == 1 ? "" : "s");
     }
 
+#ifdef SSL_VENDOR
+    ap_hook_use("ap::mod_ssl::vendor::configure_server",
+                AP_HOOK_SIG4(void,ptr,ptr,ptr), AP_HOOK_ALL, 
+                s, p, sc);
+#endif
+
     return;
 }
 
@@ -1020,6 +1046,16 @@ void ssl_init_ModuleKill(void *data)
             sc->pSSLCtx = NULL;
         }
     }
+
+    /*
+     * Try to kill the internals of the SSL library.
+     */
+#ifdef SHARED_MODULE
+    ERR_free_strings();
+    ERR_remove_state(0);
+    EVP_cleanup();
+#endif
+
     return;
 }
 

@@ -17,7 +17,7 @@
  * IMPLIED WARRANTIES, INCLUDING, WITHOUT LIMITATION, THE IMPLIED
  * WARRANTIES OF MERCHANTIBILITY AND FITNESS FOR A PARTICULAR PURPOSE.
  *
- * $OpenBSD: command.c,v 1.41 2000/04/02 01:36:25 brian Exp $
+ * $OpenBSD: command.c,v 1.52 2000/09/06 21:03:38 brian Exp $
  *
  */
 #include <sys/param.h>
@@ -33,11 +33,6 @@
 #include <ctype.h>
 #include <errno.h>
 #include <fcntl.h>
-#ifdef __OpenBSD__
-#include <util.h>
-#else
-#include <libutil.h>
-#endif
 #include <paths.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -61,12 +56,12 @@
 #include "log.h"
 #include "timer.h"
 #include "fsm.h"
-#include "lcp.h"
 #include "iplist.h"
 #include "throughput.h"
 #include "slcompress.h"
 #include "lqr.h"
 #include "hdlc.h"
+#include "lcp.h"
 #include "ipcp.h"
 #ifndef NONAT
 #include "nat_cmd.h"
@@ -131,6 +126,7 @@
 #define VAR_CRTSCTS	32
 #define VAR_URGENTPORTS	33
 #define	VAR_LOGOUT	34
+#define	VAR_IFQUEUE	35
 
 /* ``accept|deny|disable|enable'' masks */
 #define NEG_HISMASK (1)
@@ -152,7 +148,7 @@
 #define NEG_SHORTSEQ	52
 #define NEG_VJCOMP	53
 
-const char Version[] = "2.26";
+const char Version[] = "2.27";
 
 static int ShowCommand(struct cmdargs const *);
 static int TerminalCommand(struct cmdargs const *);
@@ -238,6 +234,31 @@ HelpCommand(struct cmdargs const *arg)
     prompt_Printf(arg->prompt, "\n");
 
   return 0;
+}
+
+static int
+IdentCommand(struct cmdargs const *arg)
+{
+  int f, pos;
+
+  *arg->cx->physical->link.lcp.cfg.ident = '\0';
+
+  for (pos = 0, f = arg->argn; f < arg->argc; f++)
+    pos += snprintf(arg->cx->physical->link.lcp.cfg.ident + pos,
+                    sizeof arg->cx->physical->link.lcp.cfg.ident - pos, "%s%s",
+                    f == arg->argn ? "" : " ", arg->argv[f]);
+
+  return 0;
+}
+
+static int
+SendIdentification(struct cmdargs const *arg)
+{
+  if (arg->cx->state < DATALINK_LCP) {
+    log_Printf(LogWARN, "sendident: link has not reached LCP\n");
+    return 2;
+  }
+  return lcp_SendIdentification(&arg->cx->physical->link.lcp) ? 0 : 1;
 }
 
 static int
@@ -440,6 +461,8 @@ command_Expand(char **nargv, int argc, char const *const *oargv,
                        inet_ntoa(bundle->ncp.ipcp.ns.dns[0]));
     nargv[arg] = subst(nargv[arg], "DNS1",
                        inet_ntoa(bundle->ncp.ipcp.ns.dns[1]));
+    nargv[arg] = subst(nargv[arg], "VERSION", Version);
+    nargv[arg] = subst(nargv[arg], "COMPILATIONDATE", __DATE__);
   }
   nargv[arg] = NULL;
 }
@@ -496,7 +519,9 @@ ShellCommand(struct cmdargs const *arg, int bg)
     for (i = getdtablesize(); i > STDERR_FILENO; i--)
       fcntl(i, F_SETFD, 1);
 
+#ifndef NOSUID
     setuid(ID0realuid());
+#endif
     if (arg->argc > arg->argn) {
       /* substitute pseudo args */
       char *argv[MAXARGS];
@@ -596,7 +621,6 @@ static struct cmdtab const NatCommands[] =
    (const void *) PKT_ALIAS_LOG},
   {"port", NULL, nat_RedirectPort, LOCAL_AUTH, "port redirection",
    "nat port proto localaddr:port[-port] aliasport[-aliasport]"},
-  {"pptp", NULL, nat_Pptp, LOCAL_AUTH, "Set the PPTP address", "nat pptp IP"},
   {"proxy", NULL, nat_ProxyRule, LOCAL_AUTH,
    "proxy control", "nat proxy server host[:port] ..."},
   {"same_ports", NULL, NatOption, LOCAL_AUTH,
@@ -681,6 +705,8 @@ static struct cmdtab const Commands[] = {
   "Generate a down event", "down [ccp|lcp]"},
   {"enable", NULL, NegotiateCommand, LOCAL_AUTH | LOCAL_CX_OPT,
   "Enable option", "enable option .."},
+  {"ident", NULL, IdentCommand, LOCAL_AUTH | LOCAL_CX,
+  "Set the link identity", "ident text..."},
   {"iface", "interface", RunListCommand, LOCAL_AUTH,
   "interface control", "iface option ...", IfaceCommands},
   {"link", "datalink", LinkCommand, LOCAL_AUTH,
@@ -705,6 +731,8 @@ static struct cmdtab const Commands[] = {
   "Manipulate resolv.conf", "resolv readonly|reload|restore|rewrite|writable"},
   {"save", NULL, SaveCommand, LOCAL_AUTH,
   "Save settings", "save"},
+  {"sendident", NULL, SendIdentification, LOCAL_AUTH | LOCAL_CX,
+  "Transmit the link identity", "sendident"},
   {"set", "setup", SetCommand, LOCAL_AUTH | LOCAL_CX_OPT,
   "Set parameters", "set[up] var value"},
   {"shell", "!", FgShellCommand, LOCAL_AUTH,
@@ -1646,6 +1674,11 @@ SetVariable(struct cmdargs const *arg)
     cx->cfg.script.hangup[sizeof cx->cfg.script.hangup - 1] = '\0';
     break;
 
+  case VAR_IFQUEUE:
+    long_val = atol(argp);
+    arg->bundle->cfg.ifqueue = long_val < 0 ? 0 : long_val;
+    break;
+
   case VAR_LOGOUT:
     strncpy(cx->cfg.script.logout, argp, sizeof cx->cfg.script.logout - 1);
     cx->cfg.script.logout[sizeof cx->cfg.script.logout - 1] = '\0';
@@ -1855,9 +1888,11 @@ SetVariable(struct cmdargs const *arg)
 
   case VAR_URGENTPORTS:
     if (arg->argn == arg->argc) {
+      ipcp_SetUrgentTOS(&arg->bundle->ncp.ipcp);
       ipcp_ClearUrgentTcpPorts(&arg->bundle->ncp.ipcp);
       ipcp_ClearUrgentUdpPorts(&arg->bundle->ncp.ipcp);
     } else if (!strcasecmp(arg->argv[arg->argn], "udp")) {
+      ipcp_SetUrgentTOS(&arg->bundle->ncp.ipcp);
       if (arg->argn == arg->argc - 1)
         ipcp_ClearUrgentUdpPorts(&arg->bundle->ncp.ipcp);
       else for (f = arg->argn + 1; f < arg->argc; f++)
@@ -1871,7 +1906,13 @@ SetVariable(struct cmdargs const *arg)
             ipcp_ClearUrgentUdpPorts(&arg->bundle->ncp.ipcp);
           ipcp_AddUrgentUdpPort(&arg->bundle->ncp.ipcp, atoi(arg->argv[f]));
         }
+    } else if (arg->argn == arg->argc - 1 &&
+               !strcasecmp(arg->argv[arg->argn], "none")) {
+      ipcp_ClearUrgentTcpPorts(&arg->bundle->ncp.ipcp);
+      ipcp_ClearUrgentUdpPorts(&arg->bundle->ncp.ipcp);
+      ipcp_ClearUrgentTOS(&arg->bundle->ncp.ipcp);
     } else {
+      ipcp_SetUrgentTOS(&arg->bundle->ncp.ipcp);
       first = arg->argn;
       if (!strcasecmp(arg->argv[first], "tcp") && ++first == arg->argc)
         ipcp_ClearUrgentTcpPorts(&arg->bundle->ncp.ipcp);
@@ -1946,6 +1987,8 @@ static struct cmdtab const SetCommands[] = {
   "hangup script", "set hangup chat-script", (const void *) VAR_HANGUP},
   {"ifaddr", NULL, SetInterfaceAddr, LOCAL_AUTH, "destination address",
   "set ifaddr [src-addr [dst-addr [netmask [trg-addr]]]]"},
+  {"ifqueue", NULL, SetVariable, LOCAL_AUTH, "interface queue",
+  "set ifqueue packets", (const void *)VAR_IFQUEUE},
   {"ipcpretry", "ipcpretries", SetVariable, LOCAL_AUTH, "IPCP retries",
    "set ipcpretry value [attempts]", (const void *)VAR_IPCPRETRY},
   {"lcpretry", "lcpretries", SetVariable, LOCAL_AUTH | LOCAL_CX, "LCP retries",
@@ -2065,8 +2108,14 @@ AddCommand(struct cmdargs const *arg)
     } else if (strcasecmp(arg->argv[arg->argn], "DNS1") == 0) {
       addrs = ROUTE_DSTDNS1;
       dest = arg->bundle->ncp.ipcp.ns.dns[1];
-    } else
+    } else {
       dest = GetIpAddr(arg->argv[arg->argn]);
+      if (dest.s_addr == INADDR_NONE) {
+        log_Printf(LogWARN, "%s: Invalid destination address\n",
+                   arg->argv[arg->argn]);
+        return -1;
+      }
+    }
     netmask = GetIpAddr(arg->argv[arg->argn+1]);
     gw = 2;
   }
@@ -2074,8 +2123,14 @@ AddCommand(struct cmdargs const *arg)
   if (strcasecmp(arg->argv[arg->argn+gw], "HISADDR") == 0) {
     gateway = arg->bundle->ncp.ipcp.peer_ip;
     addrs |= ROUTE_GWHISADDR;
-  } else
+  } else {
     gateway = GetIpAddr(arg->argv[arg->argn+gw]);
+    if (gateway.s_addr == INADDR_NONE) {
+      log_Printf(LogWARN, "%s: Invalid gateway address\n",
+                 arg->argv[arg->argn + gw]);
+      return -1;
+    }
+  }
 
   if (bundle_SetRoute(arg->bundle, RTM_ADD, dest, gateway, netmask,
                   arg->cmd->args ? 1 : 0, (addrs & ROUTE_GWHISADDR) ? 1 : 0)
@@ -2422,11 +2477,14 @@ NegotiateSet(struct cmdargs const *arg)
 }
 
 static struct cmdtab const NegotiateCommands[] = {
+  {"filter-decapsulation", NULL, OptSet, LOCAL_AUTH,
+  "filter on PPPoUDP payloads", "disable|enable",
+  (const void *)OPT_FILTERDECAP},
   {"idcheck", NULL, OptSet, LOCAL_AUTH, "Check FSM reply ids",
   "disable|enable", (const void *)OPT_IDCHECK},
   {"iface-alias", NULL, IfaceAliasOptSet, LOCAL_AUTH,
-   "retain interface addresses", "disable|enable",
-   (const void *)OPT_IFACEALIAS},
+  "retain interface addresses", "disable|enable",
+  (const void *)OPT_IFACEALIAS},
   {"keep-session", NULL, OptSet, LOCAL_AUTH, "Retain device session leader",
   "disable|enable", (const void *)OPT_KEEPSESSION},
   {"loopback", NULL, OptSet, LOCAL_AUTH, "Loop packets for local iface",
@@ -2550,7 +2608,7 @@ ClearCommand(struct cmdargs const *arg)
       log_Printf(LogWARN, "A link must be specified for ``clear physical''\n");
       return 1;
     }
-    t = &cx->physical->link.throughput;
+    t = &cx->physical->link.stats.total;
   } else if (strcasecmp(arg->argv[arg->argn], "ipcp") == 0)
     t = &arg->bundle->ncp.ipcp.throughput;
   else
@@ -2578,6 +2636,16 @@ static int
 RunListCommand(struct cmdargs const *arg)
 {
   const char *cmd = arg->argc ? arg->argv[arg->argc - 1] : "???";
+
+#ifndef NONAT
+  if (arg->cmd->args == NatCommands &&
+      tolower(*arg->argv[arg->argn - 1]) == 'a') {
+    if (arg->prompt)
+      prompt_Printf(arg->prompt, "The alias command is deprecated\n");
+    else
+      log_Printf(LogWARN, "The alias command is deprecated\n");
+  }
+#endif
 
   if (arg->argc > arg->argn)
     FindExec(arg->bundle, arg->cmd->args, arg->argc, arg->argn, arg->argv,
@@ -2682,7 +2750,7 @@ SetProcTitle(struct cmdargs const *arg)
   int len, remaining, f, argc = arg->argc - arg->argn;
 
   if (arg->argc == arg->argn) {
-    ID0setproctitle(NULL);
+    SetTitle(NULL);
     return 0;
   }
 
@@ -2708,7 +2776,7 @@ SetProcTitle(struct cmdargs const *arg)
   }
   *ptr = '\0';
 
-  ID0setproctitle(title);
+  SetTitle(title);
 
   return 0;
 }

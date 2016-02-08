@@ -1,8 +1,8 @@
-#	$OpenBSD: list,v 1.1 1999/06/13 10:33:31 downsj Exp $
+#	$OpenBSD: list,v 1.3 2000/07/15 02:21:00 deraadt Exp $
 
 COPY	${OBJDIR}/raminst		raminst
 LINK	raminst			bin/cat
-LINK	raminst			bin/chmod
+LINK	raminst			bin/chmod bin/chgrp sbin/chown
 LINK	raminst			bin/cp
 LINK	raminst			bin/df
 LINK	raminst			bin/dd
@@ -41,7 +41,6 @@ LINK	raminst			sbin/reboot
 LINK	raminst			sbin/route
 LINK	raminst			sbin/slattach
 LINK	raminst			sbin/umount
-LINK	raminst			usr/bin/chgrp
 LINK	raminst			usr/bin/ftp
 LINK	raminst			usr/bin/egrep
 LINK	raminst			usr/bin/grep
@@ -53,7 +52,6 @@ LINK	raminst			bin/pax
 LINK	raminst			usr/bin/tar
 LINK	raminst			usr/bin/tip
 LINK	raminst			usr/sbin/chat
-LINK	raminst			usr/sbin/chown
 LINK	raminst			usr/sbin/pppd
 LINK	raminst			usr/bin/vi
 SPECIAL	/bin/rm raminst

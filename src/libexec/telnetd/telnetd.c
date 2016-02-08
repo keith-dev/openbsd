@@ -1,4 +1,4 @@
-/*	$OpenBSD: telnetd.c,v 1.21 1999/12/20 15:51:52 itojun Exp $	*/
+/*	$OpenBSD: telnetd.c,v 1.26 2000/10/24 21:52:37 millert Exp $	*/
 /*	$NetBSD: telnetd.c,v 1.6 1996/03/20 04:25:57 tls Exp $	*/
 
 /*
@@ -45,11 +45,12 @@ static char copyright[] =
 static char sccsid[] = "@(#)telnetd.c	8.4 (Berkeley) 5/30/95";
 static char rcsid[] = "$NetBSD: telnetd.c,v 1.5 1996/02/28 20:38:23 thorpej Exp $";
 #else
-static char rcsid[] = "$OpenBSD: telnetd.c,v 1.21 1999/12/20 15:51:52 itojun Exp $";
+static char rcsid[] = "$OpenBSD: telnetd.c,v 1.26 2000/10/24 21:52:37 millert Exp $";
 #endif
 #endif /* not lint */
 
-#include "curses.h"
+#include <curses.h>
+#include <term.h>
 #include "telnetd.h"
 #include "pathnames.h"
 
@@ -153,6 +154,7 @@ extern void usage P((void));
  */
 char valid_opts[] = {
 	'd', ':', 'g', ':', 'h', 'k', 'n', 'S', ':', 'u', ':', 'U',
+	'4', '6',
 #ifdef	AUTHENTICATION
 	'a', ':', 'X', ':',
 #endif
@@ -173,6 +175,8 @@ char valid_opts[] = {
 #endif
 	'\0'
 };
+
+int family = AF_INET;
 
 	int
 main(argc, argv)
@@ -368,6 +372,14 @@ main(argc, argv)
 			break;
 #endif	/* AUTHENTICATION */
 
+		case '4':
+			family = AF_INET;
+			break;
+			
+		case '6':
+			family = AF_INET6;
+			break;
+			
 		default:
 			fprintf(stderr, "telnetd: %c: unknown option\n", ch);
 			/* FALLTHROUGH */
@@ -381,42 +393,36 @@ main(argc, argv)
 	argv += optind;
 
 	if (debug) {
-	    int s, ns, foo;
-	    struct servent *sp;
-	    static struct sockaddr_in sin = { AF_INET };
+	    int s, ns, foo, error;
+	    char *service = "telnet";
+	    struct addrinfo hints, *res;
 
 	    if (argc > 1) {
 		usage();
 		/* NOT REACHED */
-	    } else if (argc == 1) {
-		    if ((sp = getservbyname(*argv, "tcp"))) {
-			sin.sin_port = sp->s_port;
-		    } else {
-			sin.sin_port = atoi(*argv);
-			if ((int)sin.sin_port <= 0) {
-			    fprintf(stderr, "telnetd: %s: bad port #\n", *argv);
-			    usage();
-			    /* NOT REACHED */
-			}
-			sin.sin_port = htons((u_short)sin.sin_port);
-		   }
-	    } else {
-		sp = getservbyname("telnet", "tcp");
-		if (sp == 0) {
-		    fprintf(stderr, "telnetd: tcp/telnet: unknown service\n");
-		    exit(1);
-		}
-		sin.sin_port = sp->s_port;
+	    } else if (argc == 1)
+		service = *argv;
+
+	    memset(&hints, 0, sizeof(hints));
+	    hints.ai_flags = AI_PASSIVE;
+	    hints.ai_family = family;
+	    hints.ai_socktype = SOCK_STREAM;
+	    hints.ai_protocol = 0;
+	    error = getaddrinfo(NULL, service, &hints, &res);
+
+	    if (error) {
+		fprintf(stderr, "tcp/%s: %s\n", service, gai_strerror(error));
+		exit(1);
 	    }
 
-	    s = socket(AF_INET, SOCK_STREAM, 0);
+	    s = socket(res->ai_family, res->ai_socktype, res->ai_protocol);
 	    if (s < 0) {
-		    perror("telnetd: socket");;
-		    exit(1);
+		perror("telnetd: socket");
+		exit(1);
 	    }
 	    (void) setsockopt(s, SOL_SOCKET, SO_REUSEADDR,
 				(char *)&on, sizeof(on));
-	    if (bind(s, (struct sockaddr *)&sin, sizeof sin) < 0) {
+	    if (bind(s, res->ai_addr, res->ai_addrlen) < 0) {
 		perror("bind");
 		exit(1);
 	    }
@@ -424,8 +430,8 @@ main(argc, argv)
 		perror("listen");
 		exit(1);
 	    }
-	    foo = sizeof sin;
-	    ns = accept(s, (struct sockaddr *)&sin, &foo);
+	    foo = res->ai_addrlen;
+	    ns = accept(s, res->ai_addr, &foo);
 	    if (ns < 0) {
 		perror("accept");
 		exit(1);
@@ -547,9 +553,6 @@ usage()
 	" [-debug]"
 #ifdef DIAGNOSTICS
 	" [-D (options|report|exercise|netdata|ptydata)]\n\t"
-#endif
-#ifdef	AUTHENTICATION
-	" [-edebug]"
 #endif
 	" [-h]"
 #if	defined(CRAY) && defined(NEWINIT)
@@ -761,21 +764,17 @@ _gettermname()
 terminaltypeok(s)
     char *s;
 {
-    char buf[1024];
+    int errret;
 
     if (terminaltype == NULL)
 	return(1);
 
     /*
-     * tgetent() will return 1 if the type is known, and
-     * 0 if it is not known.  If it returns -1, it couldn't
-     * open the database.  But if we can't open the database,
-     * it won't help to say we failed, because we won't be
-     * able to verify anything else.  So, we treat -1 like 1.
+     * setupterm() will return OK if the type is known, and
+     * ERR if it is not known.
+     * We return 1 on success and 0 on failure.
      */
-    if (tgetent(buf, s) == 0)
-	return(0);
-    return(1);
+    return(setupterm(s, STDOUT_FILENO, &errret) != ERR);
 }
 
 #ifndef	MAXHOSTNAMELEN
@@ -902,7 +901,7 @@ doit(who)
 	 */
 	*user_name = 0;
 	level = getterminaltype(user_name);
-	setenv("TERM", terminaltype ? terminaltype : "network", 1);
+	setenv("TERM", terminaltype ? terminaltype : "network", 1);	/* XXX mem */
 
 	/*
 	 * Start up the login process on the slave side of the terminal

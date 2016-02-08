@@ -1,8 +1,9 @@
-/*	$OpenBSD: util.c,v 1.6 1999/08/05 22:40:37 niklas Exp $	*/
-/*	$EOM: util.c,v 1.15 1999/08/05 15:00:04 niklas Exp $	*/
+/*	$OpenBSD: util.c,v 1.10 2000/10/27 19:22:36 niklas Exp $	*/
+/*	$Id: util.c,v 1.10 2000/10/27 19:22:36 niklas Exp $	*/
 
 /*
  * Copyright (c) 1998, 1999 Niklas Hallqvist.  All rights reserved.
+ * Copyright (c) 2000 Håkan Olsson.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -35,7 +36,10 @@
  */
 
 #include <sys/types.h>
+#include <sys/stat.h>
 #include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
 
 #include "sysdep.h"
 
@@ -67,6 +71,29 @@ decode_32 (u_int8_t *cp)
   return cp[0] << 24 | cp[1] << 16 | cp[2] << 8 | cp[3];
 }
 
+u_int64_t
+decode_64 (u_int8_t *cp)
+{
+  return ((u_int64_t) cp[0] << 56) | ((u_int64_t) cp[1] << 48) |
+         ((u_int64_t) cp[2] << 40) | ((u_int64_t) cp[3] << 32) |
+         cp[4] << 24 | cp[5] << 16 | cp[6] << 8 | cp[7];
+}
+
+void
+decode_128 (u_int8_t *cp, u_int8_t *cpp)
+{
+  int i;
+
+#if BYTE_ORDER == LITTLE_ENDIAN
+  for (i = 0; i < 16; i++)
+    cpp[i] = cp[15 - i];
+#elif BYTE_ORDER == BIG_ENDIAN
+  bcopy (cp, cpp, 16);
+#else
+#error "Byte order unknown!"
+#endif
+}
+
 void
 encode_16 (u_int8_t *cp, u_int16_t x)
 {
@@ -83,12 +110,41 @@ encode_32 (u_int8_t *cp, u_int32_t x)
   *cp = x & 0xff;
 }
 
+void
+encode_64 (u_int8_t *cp, u_int64_t x)
+{
+  *cp++ = x >> 56;
+  *cp++ = (x >> 48) & 0xff;
+  *cp++ = (x >> 40) & 0xff;
+  *cp++ = (x >> 32) & 0xff;
+  *cp++ = (x >> 24) & 0xff;
+  *cp++ = (x >> 16) & 0xff;
+  *cp++ = (x >> 8) & 0xff;
+  *cp = x & 0xff;
+}
+
+void
+encode_128 (u_int8_t *cp, u_int8_t *cpp)
+{
+    decode_128 (cpp, cp);
+}
+
 /* Check a buffer for all zeroes.  */
 int
 zero_test (const u_int8_t *p, size_t sz)
 {
   while (sz-- > 0)
     if (*p++ != 0)
+      return 0;
+  return 1;
+}
+
+/* Check a buffer for all ones.  */
+int
+ones_test (const u_int8_t *p, size_t sz)
+{
+  while (sz-- > 0)
+    if (*p++ != 0xff)
       return 0;
   return 1;
 }
@@ -159,3 +215,38 @@ hex2raw (char *s, u_int8_t *buf, size_t sz)
     }
   return 0;
 }
+
+/*
+ * Perform sanity check on files containing secret information.
+ * Returns -1 on failure, 0 otherwise.
+ * Also, if *file_size != NULL, store file size here.
+ */
+int
+check_file_secrecy (char *name, off_t *file_size)
+{
+  struct stat st;
+  
+  if (stat (name, &st) == -1)
+    {
+      log_error ("check_file_secrecy: stat (\"%s\") failed", name);
+      return -1;
+    }
+  if (st.st_uid != geteuid () && st.st_uid != getuid ())
+    {
+      log_print ("check_file_secrecy: "
+		 "not loading %s - file owner is not process user", name);
+      return -1;
+    }
+  if ((st.st_mode & (S_IRWXG | S_IRWXO)) != 0)
+    {
+      log_print ("conf_file_secrecy: not loading %s - too open permissions",
+		 name);
+      return -1;
+    }
+  
+  if (file_size)
+    *file_size = st.st_size;
+
+  return 0;
+}
+

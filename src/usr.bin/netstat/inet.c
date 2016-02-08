@@ -1,4 +1,4 @@
-/*	$OpenBSD: inet.c,v 1.46 2000/03/20 02:38:35 angelos Exp $	*/
+/*	$OpenBSD: inet.c,v 1.48 2000/06/30 20:04:01 itojun Exp $	*/
 /*	$NetBSD: inet.c,v 1.14 1995/10/03 21:42:37 thorpej Exp $	*/
 
 /*
@@ -38,7 +38,7 @@
 #if 0
 static char sccsid[] = "from: @(#)inet.c	8.4 (Berkeley) 4/20/94";
 #else
-static char *rcsid = "$OpenBSD: inet.c,v 1.46 2000/03/20 02:38:35 angelos Exp $";
+static char *rcsid = "$OpenBSD: inet.c,v 1.48 2000/06/30 20:04:01 itojun Exp $";
 #endif
 #endif /* not lint */
 
@@ -91,6 +91,8 @@ struct	inpcb inpcb;
 struct	tcpcb tcpcb;
 struct	socket sockb;
 
+static void protopr0 __P((u_long, char *, int));
+
 char	*inetname __P((struct in_addr *));
 void	inetprint __P((struct in_addr *, int, char *, int));
 #ifdef INET6
@@ -108,6 +110,25 @@ void
 protopr(off, name)
 	u_long off;
 	char *name;
+{
+	protopr0(off, name, AF_INET);
+}
+
+#ifdef INET6
+void
+ip6protopr(off, name)
+	u_long off;
+	char *name;
+{
+	protopr0(off, name, AF_INET6);
+}
+#endif
+
+static void
+protopr0(off, name, af)
+	u_long off;
+	char *name;
+	int af;
 {
 	struct inpcbtable table;
 	register struct inpcb *head, *next, *prev;
@@ -134,6 +155,19 @@ protopr(off, name)
 		}
 		prev = next;
 		next = inpcb.inp_queue.cqe_next;
+
+		switch (af) {
+		case AF_INET:
+			if ((inpcb.inp_flags & INP_IPV6) != 0)
+				continue;
+			break;
+		case AF_INET6:
+			if ((inpcb.inp_flags & INP_IPV6) == 0)
+				continue;
+			break;
+		default:
+			break;
+		}
 
 		if (!aflag &&
 		    inet_lnaof(inpcb.inp_laddr) == INADDR_ANY)
@@ -752,7 +786,7 @@ esp_stats(off, name)
         p(esps_qfull, "\t%u packet%s were dropped due to full output queue\n");
         p(esps_wrap, "\t%u packet%s where counter wrapping was detected\n");
         p(esps_replay, "\t%u possibly replayed packet%s received\n"); 
-        p(esps_badilen, "\t%u packet%s with payload not a multiple of 8 received\n");
+        p(esps_badilen, "\t%u packet%s with bad payload size or padding received\n");
 	p(esps_invalid, "\t%u packet%s attempted to use an invalid tdb\n");
 	p(esps_toobig, "\t%u packet%s got larger than max IP packet size\n");
 	p(esps_crypto, "\t%u packet%s that failed crypto processing\n");

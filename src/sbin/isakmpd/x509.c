@@ -1,5 +1,5 @@
-/*	$OpenBSD: x509.c,v 1.27 2000/04/07 22:04:16 niklas Exp $	*/
-/*	$EOM: x509.c,v 1.38 2000/04/07 19:22:34 niklas Exp $	*/
+/*	$OpenBSD: x509.c,v 1.29 2000/10/07 07:00:34 niklas Exp $	*/
+/*	$EOM: x509.c,v 1.43 2000/09/28 12:53:27 niklas Exp $	*/
 
 /*
  * Copyright (c) 1998, 1999 Niels Provos.  All rights reserved.
@@ -56,6 +56,7 @@
 
 #include "sysdep.h"
 
+#include "cert.h"
 #include "conf.h"
 #include "dyn.h"
 #include "exchange.h"
@@ -165,7 +166,7 @@ x509_generate_kn (X509 *cert)
     {
       log_print ("x509_generate_kn: "
 		 "missing certificates, cannot construct X509 chain");
-      free(ikey);
+      free (ikey);
       return 0;
     }
 
@@ -220,8 +221,18 @@ x509_generate_kn (X509 *cert)
     }
   free (buf);
 
-  LC (X509_NAME_oneline, (issuer, isname, 256));
-  LC (X509_NAME_oneline, (subject, subname, 256));
+  if (!LC (X509_NAME_oneline, (issuer, isname, 256)))
+    {
+      log_print ("x509_generate_kn: X509_NAME_oneline (issuer, ...) failed");
+      return 0;
+    }
+
+  if (!LC (X509_NAME_oneline, (subject, subname, 256)))
+    {
+      log_print ("x509_generate_kn: X509_NAME_oneline (subject, ...) failed");
+      return 0;
+    }
+
 
   buf = malloc (strlen (fmt2) + strlen (isname) + strlen (subname));
   if (!buf)
@@ -240,7 +251,48 @@ x509_generate_kn (X509 *cert)
       free (buf);
       return 0;
     }
-  free (buf);
+
+  /* Store the X509-derived assertion so we can use it as a policy */
+  if (x509_policy_asserts_num == 0)
+    {
+	x509_policy_asserts = calloc (4, sizeof(char *));
+	if (x509_policy_asserts == NULL)
+	  {
+	    log_error ("x509_generate_kn: failed to allocate %d bytes",
+		       4 * sizeof(char *));
+	    free (buf);
+	    return 0;
+	  }
+
+	x509_policy_asserts_num_alloc = 4;
+	x509_policy_asserts_num = 1;
+	x509_policy_asserts[0] = buf;
+    }
+  else
+    {
+	if (x509_policy_asserts_num + 1 > x509_policy_asserts_num_alloc)
+	  {
+	    char **foo;
+
+	    x509_policy_asserts_num_alloc *= 2;
+	    foo = realloc (x509_policy_asserts,
+			   x509_policy_asserts_num_alloc * sizeof(char *));
+	    if (foo == NULL)
+	      {
+		x509_policy_asserts_num_alloc /= 2;
+		log_error ("x509_generate_kn: failed to allocate %d bytes",
+			   x509_policy_asserts_num_alloc * sizeof(char *));
+		free (buf);
+		return 0;
+	      }
+
+	    free (x509_policy_asserts);
+	    x509_policy_asserts = foo;
+	  }
+
+	/* Assign to the next available */
+	x509_policy_asserts[x509_policy_asserts_num++] = buf;
+    }
 
   /* 
    * XXX
@@ -297,7 +349,7 @@ x509_hash_init ()
               free (certh);
 	    }
 
-      free(x509_tab);
+      free (x509_tab);
     }
 
   x509_tab = malloc ((bucket_mask + 1) * sizeof (struct x509_list));
@@ -315,21 +367,26 @@ X509 *
 x509_hash_find (u_int8_t *id, size_t len)
 {
   struct x509_hash *cert;
-  u_int8_t *cid;
-  size_t clen;
+  u_int8_t **cid;
+  size_t *clen;
+  int n, i, id_found;
 
   for (cert = LIST_FIRST (&x509_tab[x509_hash (id, len)]); cert;
        cert = LIST_NEXT (cert, link))
     {
-      if (!x509_cert_get_subject (cert->cert, &cid, &clen))
+      if (!x509_cert_get_subjects (cert->cert, &n, &cid, &clen))
 	continue;
 
-      if (clen != len || memcmp (id, cid, len) != 0)
-	{
-	  free (cid);
-	  continue;
-	}
-      free (cid);
+      id_found = 0;
+      for (i = 0; i < n; i++)
+	if (clen[i] == len && memcmp (id, cid[i], len) == 0)
+	  {
+	    id_found++;
+	    break;
+	  }
+      cert_free_subjects (n, cid, clen);
+      if (!id_found)
+	continue;
 
       LOG_DBG ((LOG_CRYPTO, 70, "x509_hash_find: return X509 %p",
 		cert->cert));
@@ -344,20 +401,21 @@ int
 x509_hash_enter (X509 *cert)
 {
   u_int16_t bucket = 0;
-  u_int8_t *id;
-  u_int32_t len;
+  u_int8_t **id;
+  u_int32_t *len;
   struct x509_hash *certh;
+  int n, i;
 
-  if (!x509_cert_get_subject (cert, &id, &len))
+  if (!x509_cert_get_subjects (cert, &n, &id, &len))
     {
-      log_print ("x509_hash_enter: can not retrieve subjectAltName");
+      log_print ("x509_hash_enter: can not retrieve subjects");
       return 0;
     }
 
   certh = malloc (sizeof *certh);
   if (!certh)
     {
-      free (id);
+      cert_free_subjects (n, id, len);
       log_error ("x509_hash_enter: malloc (%d) failed", sizeof *certh);
       return 0;
     }
@@ -365,12 +423,16 @@ x509_hash_enter (X509 *cert)
 
   certh->cert = cert;
 
-  bucket = x509_hash (id, len);
-  free (id);
+  for (i = 0; i < n; i++)
+    {
+      bucket = x509_hash (id[i], len[i]);
 
-  LIST_INSERT_HEAD (&x509_tab[bucket], certh, link);
-  LOG_DBG ((LOG_CRYPTO, 70, "x509_hash_enter: cert %p added to bucket %d", 
-	    cert, bucket));
+      LIST_INSERT_HEAD (&x509_tab[bucket], certh, link);
+      LOG_DBG ((LOG_CRYPTO, 70, "x509_hash_enter: cert %p added to bucket %d", 
+		cert, bucket));
+    }
+  cert_free_subjects (n, id, len);
+
   return 1;
 }
 
@@ -489,6 +551,9 @@ int
 x509_cert_init (void)
 {
   char *dirname;
+#if defined(USE_KEYNOTE) || defined(USE_POLICY)
+  int i;
+#endif
 
   x509_hash_init ();
 
@@ -535,6 +600,21 @@ x509_cert_init (void)
       log_print ("x509_cert_init: creating new X509_STORE failed");
       return 0;
     }
+
+#if defined(USE_KEYNOTE) || defined(USE_POLICY)
+  /* Cleanup */
+  if (x509_policy_asserts)
+    {
+      for (i = 0; i < x509_policy_asserts_num; i++)
+        if (x509_policy_asserts[i])
+          free (x509_policy_asserts[i]);
+
+      free (x509_policy_asserts);
+    }
+
+  x509_policy_asserts = NULL;
+  x509_policy_asserts_num = x509_policy_asserts_num_alloc = 0;
+#endif
 
   if (!x509_read_from_dir (x509_certs, dirname, 1))
     {
@@ -598,7 +678,7 @@ x509_cert_validate (void *scert)
 }
 
 int
-x509_cert_insert (void *scert)
+x509_cert_insert (int id, void *scert)
 {
   X509 *cert;
   int res;
@@ -785,7 +865,7 @@ x509_check_subjectaltname (u_char *id, u_int id_len, X509 *scert)
   switch (idtype)
     {
     case IPSEC_ID_IPV4_ADDR:
-      if (type == X509v3_IPV4_ADDR) 
+      if (type == X509v3_IP_ADDR) 
 	ret = 1;
       break;
     case IPSEC_ID_FQDN:
@@ -912,88 +992,137 @@ x509_cert_subjectaltname (X509 *scert, u_int8_t **altname, u_int32_t *len)
 }
 
 int
-x509_cert_get_subject (void *scert, u_int8_t **id, u_int32_t *id_len)
+x509_cert_get_subjects (void *scert, int *cnt, u_int8_t ***id,
+			u_int32_t **id_len)
 {
   X509 *cert = scert;
+  X509_NAME *subject;
   int type;
   u_int8_t *altname;
   u_int32_t altlen;
+  char *buf = 0;
+  unsigned char *ubuf;
+  int i;
 
+  *id = 0;
+  *id_len = 0;
+
+  /*
+   * XXX I *think* the subjectAltName can be a collection, but for now
+   * I only return the subjectName and a single subjectAltName.
+   */
+  *cnt = 2;
+
+  *id = calloc(*cnt, sizeof **id);
+  if (!*id)
+    {
+      log_print ("x509_cert_get_subject: malloc (%d) failed",
+		 *cnt * sizeof **id);
+      goto fail;
+    }
+
+  *id_len = malloc(*cnt * sizeof **id_len);
+  if (!*id_len)
+    {
+      log_print ("x509_cert_get_subject: malloc (%d) failed",
+		 *cnt * sizeof **id_len);
+      goto fail;
+    }
+
+  /* Stash the subjectName into the first slot.  */
+  subject = LC (X509_get_subject_name, (cert));
+  if (!subject)
+    goto fail;
+
+  
+  (*id_len)[0] =
+    ISAKMP_ID_DATA_OFF + LC (i2d_X509_NAME, (subject, NULL)) - ISAKMP_GEN_SZ;
+  (*id)[0] = malloc ((*id_len)[0]);
+  if (!(*id)[0]) 
+    {
+      log_print ("x509_cert_get_subject: malloc (%d) failed", (*id_len)[0]);
+      goto fail;
+    }
+  SET_ISAKMP_ID_TYPE ((*id)[0] - ISAKMP_GEN_SZ, IPSEC_ID_DER_ASN1_DN);
+  ubuf = (*id)[0] + ISAKMP_ID_DATA_OFF - ISAKMP_GEN_SZ;
+  LC (i2d_X509_NAME, (subject, &ubuf));
+
+  /* Stash the subjectAltName into the second slot.  */
   type = x509_cert_subjectaltname (cert, &altname, &altlen);
+  if (!type)
+    goto fail;
+
+  buf = malloc (altlen + ISAKMP_ID_DATA_OFF);
+  if (!buf)
+    {
+      log_print ("x509_cert_get_subject: malloc (%d) failed",
+		 altlen + ISAKMP_ID_DATA_OFF);
+      goto fail;
+    }
 
   switch (type)
     {
     case X509v3_DNS_NAME:
+      SET_ISAKMP_ID_TYPE (buf, IPSEC_ID_FQDN);
+      break;
+
     case X509v3_RFC_NAME:
-      {
-	char *buf;
-	  
-	buf = malloc (altlen + ISAKMP_ID_DATA_OFF);
-	if (!buf)
-	  {
-	    log_print ("x509_cert_get_subject: malloc (%d) failed",
-		       altlen + ISAKMP_ID_DATA_OFF);
-	    return 0;
-	  }
-
-	if (type == X509v3_DNS_NAME)
-	  SET_ISAKMP_ID_TYPE (buf, IPSEC_ID_FQDN);
-	else
-	  SET_ISAKMP_ID_TYPE (buf, IPSEC_ID_USER_FQDN);
-
-	SET_IPSEC_ID_PROTO (buf + ISAKMP_ID_DOI_DATA_OFF, 0);
-	SET_IPSEC_ID_PORT (buf + ISAKMP_ID_DOI_DATA_OFF, 0);
-	memcpy (buf + ISAKMP_ID_DATA_OFF, altname, altlen);
-
-	*id_len = ISAKMP_ID_DATA_OFF + altlen - ISAKMP_GEN_SZ;
-	*id = malloc (*id_len);
-	if (!*id) 
-	  {
-	    log_print ("x509_cert_get_subject: malloc (%d) failed", *id_len);
-	    free (buf);
-	    return 0;
-	  }
-	memcpy (*id, buf + ISAKMP_GEN_SZ, *id_len);
-	free (buf);
-      }
+      SET_ISAKMP_ID_TYPE (buf, IPSEC_ID_USER_FQDN);
       break;
-	 
-    case X509v3_IPV4_ADDR:
-      {
-	char buf[ISAKMP_ID_DATA_OFF + 4];
-	
-	/* XXX sizeof IPV4_ADDR, how any better?  */
-	if (altlen != 4)
-	  {
-	    log_print ("x509_cert_get_subject: length != IP4addr: %d",
-		       altlen);
-	    return 0;
-	  }
 
-	SET_ISAKMP_ID_TYPE (buf, IPSEC_ID_IPV4_ADDR);
-	SET_IPSEC_ID_PROTO (buf + ISAKMP_ID_DOI_DATA_OFF, 0);
-	SET_IPSEC_ID_PORT (buf + ISAKMP_ID_DOI_DATA_OFF, 0);
-	memcpy (buf + ISAKMP_ID_DATA_OFF, altname, altlen);
+    case X509v3_IP_ADDR:
+      /*
+       * XXX I dislike the numeric constants, but I don't know what we
+       * should use otherwise.
+       */
+      switch (altlen)
+	{
+	case 4:
+	  SET_ISAKMP_ID_TYPE (buf, IPSEC_ID_IPV4_ADDR);
+	  break;
 
-	*id_len = ISAKMP_ID_DATA_OFF + 4 - ISAKMP_GEN_SZ;
-	*id = malloc (*id_len);
-	if (!*id) 
-	  {
-	    log_print ("x509_cert_get_subject: malloc (%d) failed", *id_len);
-	    return 0;
-	  }
-	memcpy (*id, buf + ISAKMP_GEN_SZ, *id_len);
-      }
+	case 16:
+	  SET_ISAKMP_ID_TYPE (buf, IPSEC_ID_IPV6_ADDR);
+	  break;
+
+	default:
+	  log_print ("x509_cert_get_subject: "
+		     "invalid subjectAltName iPAdress length %d ", altlen);
+	  goto fail;
+	}
       break;
-    default:
-      log_print ("x509_cert_get_subject: unsupported subjectAltName type: %d",
-		 type);
-      return 0;
     }
 
-  return 1;
-}
+  SET_IPSEC_ID_PROTO (buf + ISAKMP_ID_DOI_DATA_OFF, 0);
+  SET_IPSEC_ID_PORT (buf + ISAKMP_ID_DOI_DATA_OFF, 0);
+  memcpy (buf + ISAKMP_ID_DATA_OFF, altname, altlen);
 
+  (*id_len)[1] = ISAKMP_ID_DATA_OFF + altlen - ISAKMP_GEN_SZ;
+  (*id)[1] = malloc ((*id_len)[1]);
+  if (!(*id)[1]) 
+    {
+      log_print ("x509_cert_get_subject: malloc (%d) failed", (*id_len)[1]);
+      goto fail;
+    }
+  memcpy ((*id)[1], buf + ISAKMP_GEN_SZ, (*id_len)[1]);
+
+  free (buf);
+  buf = 0;
+  return 1;
+
+ fail:
+  for (i = 0; i < *cnt; i++)
+    if ((*id)[i])
+      free ((*id)[i]);
+  if (*id)
+    free (*id);
+  if (*id_len)
+    free (*id_len);
+  if (buf)
+    free (buf);
+  return 0;
+}
+ 
 int
 x509_cert_get_key (void *scert, void *keyp)
 {

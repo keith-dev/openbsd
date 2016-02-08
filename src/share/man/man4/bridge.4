@@ -1,4 +1,4 @@
-.\"	$OpenBSD: bridge.4,v 1.22 2000/05/02 18:43:49 jason Exp $
+.\"	$OpenBSD: bridge.4,v 1.26 2000/10/19 18:21:27 hin Exp $
 .\"
 .\" Copyright (c) 1999, 2000 Jason L. Wright (jason@thought.net)
 .\" All rights reserved.
@@ -39,10 +39,10 @@
 .Cd pseudo-device bridge 2
 .Sh DESCRIPTION
 The
-.Nm bridge
+.Nm
 device creates a logical link between two or more Ethernet interfaces or
 encapsulation interfaces (see
-.Xr enc 4 ).
+.Xr enc 4 ) .
 This link between the interfaces selectively forwards frames from
 each interface on the bridge to every other interface on the bridge.
 A bridge can serve several services, including, isolation of traffic between
@@ -91,7 +91,7 @@ input rules for the source interface are checked with the datagram;
 output rules have no effect.
 .Sh IOCTLS
 A
-.Nm bridge
+.Nm
 interface responds to all of the
 .Xr ioctl 2
 calls specific to other interfaces listed in
@@ -99,7 +99,7 @@ calls specific to other interfaces listed in
 The following
 .Xr ioctl 2
 calls are specific to
-.Nm bridge
+.Nm
 devices.
 They are defined in
 .Aq Pa sys/sockio.h .
@@ -308,7 +308,6 @@ should be set to
 to flush all addresses from the cache or
 .Ar IFBF_FLUSHDYN
 to flush only the dynamically learned addresses from the cache.
-<<<<<<< bridge.4
 .It Dv SIOCBRDGARL
 .Pq Li "struct ifbrlreq"
 Add a Ethernet address filtering rule to the bridge on a specific
@@ -408,7 +407,7 @@ or
 .Ar BRL_FLAG_OUT
 must be set.
 .Pp
-The source ethernet address in
+The source Ethernet address in
 .Ar ifbr_src
 is checked if the
 .Ar BRL_FLAG_SRCVALID
@@ -465,7 +464,6 @@ struct ifbrlconf {
 #define ifbrl_req ifbrl_ifbrlu.ifbrlu_req
 };
 .Ed
->>>>>>> 1.17
 .El
 .Sh ERRORS
 If the

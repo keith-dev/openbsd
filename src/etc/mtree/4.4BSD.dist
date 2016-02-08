@@ -1,4 +1,4 @@
-#	$OpenBSD: 4.4BSD.dist,v 1.90 2000/05/02 10:18:23 niklas Exp $
+#	$OpenBSD: 4.4BSD.dist,v 1.99 2000/10/16 14:28:11 deraadt Exp $
 
 /set type=dir uname=root gname=wheel mode=0755
 # .
@@ -56,6 +56,11 @@ certs
 # ./etc/isakmpd/certs
 ..
 
+# ./etc/isakmpd/keynote
+keynote
+# ./etc/isakmpd/keynote
+..
+
 # ./etc/isakmpd/private
 private		uname=root mode=0700
 # ./etc/isakmpd/private
@@ -77,6 +82,11 @@ mail
 # ./etc/mtree
 mtree
 # ./etc/mtree
+..
+
+# ./etc/photuris
+photuris
+# ./etc/photuris
 ..
 
 # ./etc/ppp
@@ -110,14 +120,14 @@ lib
 # ./etc/ssl
 ..
 
+# ./etc/tcfs
+tcfs
+# ./etc/tcfs
+..
+
 # ./etc/uucp
 uucp
 # ./etc/uucp
-..
-
-# ./etc/photuris
-photuris
-# ./etc/photuris
 ..
 
 # ./etc
@@ -134,7 +144,7 @@ mnt
 ..
 
 # ./root
-root
+root		mode=0700
 # ./root
 ..
 
@@ -248,6 +258,11 @@ xml		gname=bin uname=root mode=0755
 ..
 
 # ./usr/lib/apache
+..
+
+# ./usr/lib/debug
+debug		gname=bin uname=root mode=0755
+# ./usr/lib/debug
 ..
 
 # ./usr/lib
@@ -1028,6 +1043,36 @@ man
 
 # ./usr/share/man/cat1
 cat1
+
+alpha
+..
+amiga
+..
+arc
+..
+hp300
+..
+hppa
+..
+i386
+..
+mac68k
+..
+mvme68k
+..
+mvme88k
+..
+pmax
+..
+powerpc
+..
+sparc
+..
+sun3
+..
+vax
+..
+
 # ./usr/share/man/cat1
 ..
 
@@ -1045,6 +1090,36 @@ i386
 
 # ./usr/share/man/cat3
 cat3
+
+alpha
+..
+amiga
+..
+arc
+..
+hp300
+..
+hppa
+..
+i386
+..
+mac68k
+..
+mvme68k
+..
+mvme88k
+..
+pmax
+..
+powerpc
+..
+sparc
+..
+sun3
+..
+vax
+..
+
 # ./usr/share/man/cat3
 ..
 
@@ -1056,54 +1131,33 @@ cat3p
 # ./usr/share/man/cat4
 cat4
 
-# ./usr/share/man/cat4/alpha
 alpha
-# ./usr/share/man/cat4/alpha
 ..
-
-# ./usr/share/man/cat4/amiga
 amiga
-# ./usr/share/man/cat4/amiga
 ..
-
-# ./usr/share/man/cat4/hp300
+arc
+..
 hp300
-# ./usr/share/man/cat4/hp300
 ..
-
-# ./usr/share/man/cat4/i386
+hppa
+..
 i386
-# ./usr/share/man/cat4/i386
 ..
-
-# ./usr/share/man/cat4/mac68k
 mac68k
-# ./usr/share/man/cat4/mac68k
 ..
-
-# ./usr/share/man/cat4/mvme68k
 mvme68k
-# ./usr/share/man/cat4/mvme68k
 ..
-
-# ./usr/share/man/cat4/mvme88k
 mvme88k
-# ./usr/share/man/cat4/mvme88k
 ..
-
-# ./usr/share/man/cat4/pmax
 pmax
-# ./usr/share/man/cat4/pmax
 ..
-
-# ./usr/share/man/cat4/powerpc
 powerpc
-# ./usr/share/man/cat4/powerpc
 ..
-
-# ./usr/share/man/cat4/sparc
 sparc
-# ./usr/share/man/cat4/sparc
+..
+sun3
+..
+vax
 ..
 
 # ./usr/share/man/cat4
@@ -1111,6 +1165,36 @@ sparc
 
 # ./usr/share/man/cat5
 cat5
+
+alpha
+..
+amiga
+..
+arc
+..
+hp300
+..
+hppa
+..
+i386
+..
+mac68k
+..
+mvme68k
+..
+mvme88k
+..
+pmax
+..
+powerpc
+..
+sparc
+..
+sun3
+..
+vax
+..
+
 # ./usr/share/man/cat5
 ..
 
@@ -1127,54 +1211,33 @@ cat7
 # ./usr/share/man/cat8
 cat8
 
-# ./usr/share/man/cat8/alpha
 alpha
-# ./usr/share/man/cat8/alpha
 ..
-
-# ./usr/share/man/cat8/amiga
 amiga
-# ./usr/share/man/cat8/amiga
 ..
-
-# ./usr/share/man/cat8/hp300
+arc
+..
 hp300
-# ./usr/share/man/cat8/hp300
 ..
-
-# ./usr/share/man/cat8/i386
+hppa
+..
 i386
-# ./usr/share/man/cat8/i386
 ..
-
-# ./usr/share/man/cat8/mac68k
 mac68k
-# ./usr/share/man/cat8/mac68k
 ..
-
-# ./usr/share/man/cat8/mvme68k
 mvme68k
-# ./usr/share/man/cat8/mvme68k
 ..
-
-# ./usr/share/man/cat8/mvme88k
 mvme88k
-# ./usr/share/man/cat8/mvme88k
 ..
-
-# ./usr/share/man/cat8/pmax
 pmax
-# ./usr/share/man/cat8/pmax
 ..
-
-# ./usr/share/man/cat8/powerpc
 powerpc
-# ./usr/share/man/cat8/powerpc
 ..
-
-# ./usr/share/man/cat8/sparc
 sparc
-# ./usr/share/man/cat8/sparc
+..
+sun3
+..
+vax
 ..
 
 # ./usr/share/man/cat8
@@ -1183,9 +1246,33 @@ sparc
 # ./usr/share/man/cat9
 cat9
 
-# ./usr/share/man/cat9/i386
+alpha
+..
+amiga
+..
+arc
+..
+hp300
+..
+hppa
+..
 i386
-# ./usr/share/man/cat9/i386
+..
+mac68k
+..
+mvme68k
+..
+mvme88k
+..
+pmax
+..
+powerpc
+..
+sparc
+..
+sun3
+..
+vax
 ..
 
 # ./usr/share/man/cat9
@@ -1193,6 +1280,36 @@ i386
 
 # ./usr/share/man/man1
 man1
+
+alpha
+..
+amiga
+..
+arc
+..
+hp300
+..
+hppa
+..
+i386
+..
+mac68k
+..
+mvme68k
+..
+mvme88k
+..
+pmax
+..
+powerpc
+..
+sparc
+..
+sun3
+..
+vax
+..
+
 # ./usr/share/man/man1
 ..
 
@@ -1214,54 +1331,33 @@ man3p
 # ./usr/share/man/man4
 man4
 
-# ./usr/share/man/man4/alpha
 alpha
-# ./usr/share/man/man4/alpha
 ..
-
-# ./usr/share/man/man4/amiga
 amiga
-# ./usr/share/man/man4/amiga
 ..
-
-# ./usr/share/man/man4/hp300
+arc
+..
 hp300
-# ./usr/share/man/man4/hp300
 ..
-
-# ./usr/share/man/man4/i386
+hppa
+..
 i386
-# ./usr/share/man/man4/i386
 ..
-
-# ./usr/share/man/man4/mac68k
 mac68k
-# ./usr/share/man/man4/mac68k
 ..
-
-# ./usr/share/man/man4/mvme68k
 mvme68k
-# ./usr/share/man/man4/mvme68k
 ..
-
-# ./usr/share/man/man4/mvme88k
 mvme88k
-# ./usr/share/man/man4/mvme88k
 ..
-
-# ./usr/share/man/man4/pmax
 pmax
-# ./usr/share/man/man4/pmax
 ..
-
-# ./usr/share/man/man4/powerpc
 powerpc
-# ./usr/share/man/man4/powerpc
 ..
-
-# ./usr/share/man/man4/sparc
 sparc
-# ./usr/share/man/man4/sparc
+..
+sun3
+..
+vax
 ..
 
 # ./usr/share/man/man4
@@ -1285,54 +1381,33 @@ man7
 # ./usr/share/man/man8
 man8
 
-# ./usr/share/man/man8/alpha
 alpha
-# ./usr/share/man/man8/alpha
 ..
-
-# ./usr/share/man/man8/amiga
 amiga
-# ./usr/share/man/man8/amiga
 ..
-
-# ./usr/share/man/man8/hp300
+arc
+..
 hp300
-# ./usr/share/man/man8/hp300
 ..
-
-# ./usr/share/man/man8/i386
+hppa
+..
 i386
-# ./usr/share/man/man8/i386
 ..
-
-# ./usr/share/man/man8/mac68k
 mac68k
-# ./usr/share/man/man8/mac68k
 ..
-
-# ./usr/share/man/man8/mvme68k
 mvme68k
-# ./usr/share/man/man8/mvme68k
 ..
-
-# ./usr/share/man/man8/mvme88k
 mvme88k
-# ./usr/share/man/man8/mvme88k
 ..
-
-# ./usr/share/man/man8/pmax
 pmax
-# ./usr/share/man/man8/pmax
 ..
-
-# ./usr/share/man/man8/powerpc
 powerpc
-# ./usr/share/man/man8/powerpc
 ..
-
-# ./usr/share/man/man8/sparc
 sparc
-# ./usr/share/man/man8/sparc
+..
+sun3
+..
+vax
 ..
 
 # ./usr/share/man/man8

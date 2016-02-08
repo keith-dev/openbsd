@@ -1,4 +1,4 @@
-.\"	$OpenBSD: printf.3,v 1.27 2000/04/25 15:15:10 espie Exp $
+.\"	$OpenBSD: printf.3,v 1.31 2000/08/25 17:43:15 aaron Exp $
 .\"
 .\" Copyright (c) 1990, 1991, 1993
 .\"	The Regents of the University of California.  All rights reserved.
@@ -122,7 +122,18 @@ are converted for output.
 These functions return the number of characters printed
 (not including the trailing
 .Ql \e0
-used to end output to strings).
+used to end output to strings),
+except for
+.Fn snprintf
+and
+.Fn vsnprintf ,
+which return the number of characters that would have been printed if the
+.Fa size
+were unlimited
+.Po
+again, not including the final
+.Ql \e0
+.Pc .
 .Pp
 .Fn asprintf
 and
@@ -135,16 +146,6 @@ This pointer should be passed to
 to release the allocated storage when it is no longer needed.
 If sufficient space cannot be allocated, these functions
 will return \-1 and set
-.Fa ret
-to be a null pointer.
-.Pp
-If
-.Fn asprintf
-or
-.Fn vasprintf
-are given a
-.Fa size
-of 0, they set
 .Fa ret
 to be a null pointer.
 .Pp
@@ -685,13 +686,22 @@ systems and the
 .Fn asprintf
 interface is not portable.
 .Pp
-Never print a user-supplied string directly as a format without using
-.Cm %s ,
-as an attacker can put format specifiers in that string to mangle
-your stack.
+It is important to never pass a string with user-supplied data as a
+format without using
+.Ql %s .
+An attacker can put format specifiers in the string to mangle your stack,
+leading to a possible security hole.
+This holds true even if you have built the string
+.Dq by hand
+using a function like
+.Fn snprintf ,
+as the resulting string may still contain user-supplied conversion specifiers
+for later interpolation by
+.Fn printf .
+.Pp
 Be sure to use the proper secure idiom:
 .Bd -literal -offset indent
-snprintf(buffer, sizeof(buffer), "%s", string)
+snprintf(buffer, sizeof(buffer), "%s", string);
 .Ed
 .Pp
 There is no way for printf to know the size of each argument passed.

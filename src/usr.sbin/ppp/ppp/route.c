@@ -17,7 +17,7 @@
  * IMPLIED WARRANTIES, INCLUDING, WITHOUT LIMITATION, THE IMPLIED
  * WARRANTIES OF MERCHANTIBILITY AND FITNESS FOR A PARTICULAR PURPOSE.
  *
- * $OpenBSD: route.c,v 1.8 2000/03/19 10:33:34 brian Exp $
+ * $OpenBSD: route.c,v 1.10 2000/09/02 22:12:41 brian Exp $
  *
  */
 
@@ -488,7 +488,7 @@ route_IfDelete(struct bundle *bundle, int all)
     for (cp = sp; cp < ep; cp += rtm->rtm_msglen) {
       rtm = (struct rt_msghdr *)cp;
       route_ParseHdr(rtm, sa);
-      if (sa[RTAX_DST]) {
+      if (sa[RTAX_DST] && sa[RTAX_DST]->sa_family == AF_INET) {
         log_Printf(LogDEBUG, "route_IfDelete: addrs: %x, Netif: %d (%s),"
                   " flags: %x, dst: %s ?\n", rtm->rtm_addrs, rtm->rtm_index,
                   Index2Nam(rtm->rtm_index), rtm->rtm_flags,
@@ -566,18 +566,6 @@ route_Change(struct bundle *bundle, struct sticky_route *r,
     } else if ((r->type & ROUTE_GWHISADDR) && r->gw.s_addr != peer.s_addr)
       r->gw = peer;
     bundle_SetRoute(bundle, RTM_ADD, r->dst, r->gw, r->mask, 1, 0);
-  }
-}
-
-void
-route_Clean(struct bundle *bundle, struct sticky_route *r)
-{
-  struct in_addr none, del;
-
-  none.s_addr = INADDR_ANY;
-  for (; r; r = r->next) {
-    del.s_addr = r->dst.s_addr & r->mask.s_addr;
-    bundle_SetRoute(bundle, RTM_DELETE, del, none, none, 1, 0);
   }
 }
 

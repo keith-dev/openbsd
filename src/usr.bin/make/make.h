@@ -1,4 +1,4 @@
-/*	$OpenBSD: make.h,v 1.18 2000/04/17 23:54:47 espie Exp $	*/
+/*	$OpenBSD: make.h,v 1.27 2000/09/14 13:52:42 espie Exp $	*/
 /*	$NetBSD: make.h,v 1.15 1997/03/10 21:20:00 christos Exp $	*/
 
 /*
@@ -55,6 +55,12 @@
 #include <string.h>
 #include <ctype.h>
 
+#ifdef __GNUC__
+#define UNUSED	__attribute__((unused))
+#else
+#define UNUSED
+#endif
+
 #if !defined(MAKE_BOOTSTRAP) && defined(BSD4_4)
 # include <sys/cdefs.h>
 #else
@@ -84,8 +90,46 @@
 #include "config.h"
 #include "buf.h"
 
+typedef time_t TIMESTAMP;
+#define is_out_of_date(t)	((t) == INT_MIN)
+#define set_out_of_date(t)	(t) = INT_MIN
+#define grab_stat(s, t)	\
+do { \
+	(t) = (s).st_mtime; \
+	if (is_out_of_date(t)) \
+		(t)++; \
+} while (0)
+#define is_before(t1, t2)	((t1) < (t2))
+#define grab_date(d, t) \
+do { \
+	(t) = d; \
+	if (is_out_of_date(t)) \
+		(t)++; \
+} while (0)
+#define grab(n) time(&(n))
+#define timestamp2time_t(t)	(t)
+
 #define OUT_OF_DATE INT_MIN
 
+/* Variables that are kept in local GNodes.  */
+#define TARGET_INDEX	0
+#define OODATE_INDEX	1
+#define ALLSRC_INDEX	2
+#define IMPSRC_INDEX	3
+#define PREFIX_INDEX	4
+#define ARCHIVE_INDEX   5
+#define MEMBER_INDEX    6
+
+#define LOCAL_SIZE	7
+
+/* SymTable is private to var.c, but is declared here to allow for
+   local declaration of context tables
+ */
+typedef struct {
+	struct Var_ *locals[LOCAL_SIZE];
+} SymTable;
+
+typedef struct hash GSymT;
 /*-
  * The structure for an individual graph node. Each node has several
  * pieces of data associated with it.
@@ -114,8 +158,7 @@
  *	17) a Lst of strings that are commands to be given to a shell
  *	   to create this target.
  */
-typedef struct GNode {
-    char            *name;     	/* The target's name */
+typedef struct GNode_ {
     char    	    *path;     	/* The full pathname of the file */
     int             type;      	/* Its type (see the OP flags, below) */
     int		    order;	/* Its wait weight */
@@ -152,22 +195,23 @@ typedef struct GNode {
     time_t     	    cmtime;    	/* The modification time of its youngest
 				 * child */
 
-    Lst     	    iParents;  	/* Links to parents for which this is an
+    LIST     	    iParents;  	/* Links to parents for which this is an
 				 * implied source, if any */
-    Lst	    	    cohorts;  	/* Other nodes for the :: operator */
-    Lst             parents;   	/* Nodes that depend on this one */
-    Lst             children;  	/* Nodes on which this one depends */
-    Lst	    	    successors;	/* Nodes that must be made after this one */
-    Lst	    	    preds;  	/* Nodes that must be made before this one */
+    LIST    	    cohorts;  	/* Other nodes for the :: operator */
+    LIST            parents;   	/* Nodes that depend on this one */
+    LIST            children;  	/* Nodes on which this one depends */
+    LIST    	    successors;	/* Nodes that must be made after this one */
+    LIST    	    preds;  	/* Nodes that must be made before this one */
 
-    Lst             context;   	/* The local variables */
+    SymTable        context;   	/* The local variables */
     unsigned long   lineno;	/* First line number of commands.  */
     const char *    fname;	/* File name of commands.  */
-    Lst             commands;  	/* Creation commands */
+    LIST            commands;  	/* Creation commands */
 
     struct _Suff    *suffix;	/* Suffix for the node (determined by
 				 * Suff_FindDeps and opaque to everyone
 				 * but the Suff module) */
+    char      name[1];     	/* The target's name */
 } GNode;
 
 /*
@@ -236,12 +280,12 @@ typedef struct GNode {
 #define OP_NOTARGET (OP_NOTMAIN|OP_USE|OP_EXEC|OP_TRANSFORM)
 
 /*
- * The TARG_ constants are used when calling the Targ_FindNode and
- * Targ_FindList functions in targ.c. They simply tell the functions what to
- * do if the desired node(s) is (are) not found. If the TARG_CREATE constant
- * is given, a new, empty node will be created for the target, placed in the
- * table of all targets and its address returned. If TARG_NOCREATE is given,
- * a NULL pointer will be returned.
+ * The TARG_ constants are used when calling the Targ_FindNode function in 
+ * targ.c. They simply tell the function what to do if the desired node(s) 
+ * is (are) not found. 
+ * If the TARG_CREATE constant is given, a new, empty node will be created 
+ * for the target, placed in the table of all targets and its address returned. 
+ * If TARG_NOCREATE is given, a NULL pointer will be returned.
  */
 #define TARG_CREATE	0x01	  /* create node if not found */
 #define TARG_NOCREATE	0x00	  /* don't create it */
@@ -295,6 +339,14 @@ typedef struct GNode {
 #define PREFIX	  	  "*" 	/* Common prefix */
 #define ARCHIVE	  	  "!" 	/* Archive in "archive(member)" syntax */
 #define MEMBER	  	  "%" 	/* Member in "archive(member)" syntax */
+#define LONGTARGET	".TARGET"
+#define LONGOODATE	".OODATE"
+#define LONGALLSRC	".ALLSRC"
+#define LONGIMPSRC	".IMPSRC"
+#define LONGPREFIX	".PREFIX"
+#define LONGARCHIVE	".ARCHIVE"
+#define LONGMEMBER	".MEMBER"
+
 
 #define FTARGET           "@F"  /* file part of TARGET */
 #define DTARGET           "@D"  /* directory part of TARGET */
@@ -306,10 +358,10 @@ typedef struct GNode {
 /*
  * Global Variables
  */
-extern Lst  	create;	    	/* The list of target names specified on the
+extern LIST  	create;	    	/* The list of target names specified on the
 				 * command line. used to resolve #if
 				 * make(...) statements */
-extern Lst     	dirSearchPath; 	/* The list of directories to search when
+extern LIST    	dirSearchPath; 	/* The list of directories to search when
 				 * looking for targets */
 
 extern Boolean	compatMake;	/* True if we are make compatible */
@@ -335,9 +387,9 @@ extern Boolean	checkEnvFirst;	/* TRUE if environment should be searched for
 
 extern GNode    *DEFAULT;    	/* .DEFAULT rule */
 
-extern GNode    *VAR_GLOBAL;   	/* Variables defined in a global context, e.g
+extern GSymT	*VAR_GLOBAL;   	/* Variables defined in a global context, e.g
 				 * in the Makefile itself */
-extern GNode    *VAR_CMD;    	/* Variables defined on the command line */
+extern GSymT	*VAR_CMD;    	/* Variables defined on the command line */
 extern char    	var_Error[];   	/* Value returned by Var_Parse when an error
 				 * is encountered. It actually points to
 				 * an empty string, so naive callers needn't
@@ -348,7 +400,7 @@ extern time_t 	now;	    	/* The time at the start of this whole
 
 extern Boolean	oldVars;    	/* Do old-style variable substitution */
 
-extern Lst	sysIncPath;	/* The system include path. */
+extern LIST	sysIncPath;	/* The system include path. */
 
 /*
  * debug control:

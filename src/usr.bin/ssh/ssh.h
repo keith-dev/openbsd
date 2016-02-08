@@ -1,33 +1,24 @@
 /*
- *
- * ssh.h
- *
  * Author: Tatu Ylonen <ylo@cs.hut.fi>
- *
  * Copyright (c) 1995 Tatu Ylonen <ylo@cs.hut.fi>, Espoo, Finland
  *                    All rights reserved
  *
- * Created: Fri Mar 17 17:09:37 1995 ylo
- *
  * Generic header file for ssh.
  *
+ * As far as I am concerned, the code I have written for this software
+ * can be used freely for any purpose.  Any derived versions of this
+ * software must be clearly marked as such, and if the derived work is
+ * incompatible with the protocol description in the RFC file, it must be
+ * called by a name other than "ssh" or "Secure Shell".
  */
 
-/* RCSID("$Id: ssh.h,v 1.45 2000/05/08 17:12:16 markus Exp $"); */
+/* RCSID("$OpenBSD: ssh.h,v 1.54 2000/10/11 20:27:24 markus Exp $"); */
 
 #ifndef SSH_H
 #define SSH_H
 
 #include "rsa.h"
 #include "cipher.h"
-
-/*
- * XXX
- * The default cipher used if IDEA is not supported by the remote host. It is
- * recommended that this be one of the mandatory ciphers (DES, 3DES), though
- * that is not required.
- */
-#define SSH_FALLBACK_CIPHER	SSH_CIPHER_3DES
 
 /* Cipher used for encrypting authentication files. */
 #define SSH_AUTHFILE_CIPHER	SSH_CIPHER_3DES
@@ -82,6 +73,7 @@
 #define SERVER_CONFIG_FILE	ETCDIR "/sshd_config"
 #define HOST_CONFIG_FILE	ETCDIR "/ssh_config"
 #define HOST_DSA_KEY_FILE	ETCDIR "/ssh_host_dsa_key"
+#define DH_PRIMES		ETCDIR "/primes"
 
 #define SSH_PROGRAM		"/usr/bin/ssh"
 
@@ -381,7 +373,7 @@ int     auth_rsa_challenge_dialog(RSA *pk);
  * passphrase (allocated with xmalloc).  Exits if EOF is encountered. If
  * from_stdin is true, the passphrase will be read from stdin instead.
  */
-char   *read_passphrase(const char *prompt, int from_stdin);
+char   *read_passphrase(char *prompt, int from_stdin);
 
 
 /*------------ Definitions for logging. -----------------------*/
@@ -407,7 +399,9 @@ typedef enum {
 	SYSLOG_LEVEL_ERROR,
 	SYSLOG_LEVEL_INFO,
 	SYSLOG_LEVEL_VERBOSE,
-	SYSLOG_LEVEL_DEBUG
+	SYSLOG_LEVEL_DEBUG1,
+	SYSLOG_LEVEL_DEBUG2,
+	SYSLOG_LEVEL_DEBUG3
 }       LogLevel;
 /* Initializes logging. */
 void    log_init(char *av0, LogLevel level, SyslogFacility facility, int on_stderr);
@@ -425,6 +419,8 @@ void    error(const char *fmt,...) __attribute__((format(printf, 1, 2)));
 void    log(const char *fmt,...) __attribute__((format(printf, 1, 2)));
 void    verbose(const char *fmt,...) __attribute__((format(printf, 1, 2)));
 void    debug(const char *fmt,...) __attribute__((format(printf, 1, 2)));
+void    debug2(const char *fmt,...) __attribute__((format(printf, 1, 2)));
+void    debug3(const char *fmt,...) __attribute__((format(printf, 1, 2)));
 
 /* same as fatal() but w/o logging */
 void    fatal_cleanup(void);
@@ -447,6 +443,15 @@ void    fatal_remove_cleanup(void (*proc) (void *context), void *context);
  */
 char   *tilde_expand_filename(const char *filename, uid_t my_uid);
 
+/* remove newline at end of string */
+char	*chop(char *s);
+
+/* return next token in configuration line */
+char	*strdelim(char **s);
+
+/* set filedescriptor to non-blocking */
+void	set_nonblock(int fd);
+
 /*
  * Performs the interactive session.  This handles data transmission between
  * the client and the program.  Note that the notion of stdin, stdout, and
@@ -458,7 +463,7 @@ void    server_loop(pid_t pid, int fdin, int fdout, int fderr);
 void    server_loop2(void);
 
 /* Client side main loop for the interactive session. */
-int     client_loop(int have_pty, int escape_char);
+int     client_loop(int have_pty, int escape_char, int id);
 
 /* Linked list of custom environment strings (see auth-rsa.c). */
 struct envstring {

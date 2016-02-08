@@ -1,4 +1,4 @@
-/*	$OpenBSD: com7.c,v 1.7 1999/09/25 20:30:45 pjanzen Exp $	*/
+/*	$OpenBSD: com7.c,v 1.9 2000/09/26 04:42:56 pjanzen Exp $	*/
 /*	$NetBSD: com7.c,v 1.3 1995/03/21 15:07:12 cgd Exp $	*/
 
 /*
@@ -38,7 +38,7 @@
 #if 0
 static char sccsid[] = "@(#)com7.c	8.2 (Berkeley) 4/28/95";
 #else
-static char rcsid[] = "$OpenBSD: com7.c,v 1.7 1999/09/25 20:30:45 pjanzen Exp $";
+static char rcsid[] = "$OpenBSD: com7.c,v 1.9 2000/09/26 04:42:56 pjanzen Exp $";
 #endif
 #endif /* not lint */
 
@@ -55,6 +55,7 @@ fight(enemy, strength)
 	int     i;
 	int     exhaustion;
 
+	stop_cypher = 1;	/* Don't parse the existing input line further */
 fighton:
 	ourtime++;
 	snooze -= 5;
@@ -66,8 +67,8 @@ fighton:
 	}
 	if (snooze - ourtime < 20)
 		puts("You look tired! I hope you're able to fight.");
-	next = getcom(auxbuf, LINELENGTH, "<fight!>-: ", 0);
-	for (i = 0; next && i < 10; i++)
+	next = getcom(auxbuf, LINELENGTH, "<fight!>-: ", NULL);
+	for (i = 0; next && i < NWORD - 1; i++)
 		next = getword(next, words[i], -1);
 	parse();
 	switch (wordvalue[wordnumber]) {
@@ -149,7 +150,7 @@ fighton:
 				puts("His arm swings lifeless at his side.");
 				break;
 			case 2:
-				puts("Clutching his blood drenched shirt, he collapses stunned.");
+				puts("Clutching his blood-drenched shirt, he collapses, stunned.");
 				break;
 			}
 			lifeline += 20;
@@ -203,15 +204,15 @@ fighton:
 			puts("You escape stunned and disoriented from the fight.");
 			puts("A victorious bellow echoes from the battlescene.");
 			if (back && position != back)
-				move(back, BACK);
+				moveplayer(back, BACK);
 			else if (ahead &&position != ahead)
-				move(ahead, AHEAD);
+				moveplayer(ahead, AHEAD);
 			else if (left && position != left)
-				move(left, LEFT);
+				moveplayer(left, LEFT);
 			else if (right && position != right)
-				move(right, RIGHT);
+				moveplayer(right, RIGHT);
 			else
-				move(location[position].down, AHEAD);
+				moveplayer(location[position].down, AHEAD);
 			return (0);
 		}
 
@@ -233,6 +234,7 @@ fighton:
 
 	case DROP:
 	case DRAW:
+		/* One call to cypher() does only the first command on the line */
 		cypher();
 		ourtime--;
 		break;

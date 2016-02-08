@@ -1,4 +1,4 @@
-.\" $OpenBSD: keynote.3,v 1.22 2000/04/15 02:15:27 aaron Exp $
+.\" $OpenBSD: keynote.3,v 1.26 2000/09/17 02:11:12 aaron Exp $
 .\"
 .\" The author of this code is Angelos D. Keromytis (angelos@dsl.cis.upenn.edu)
 .\"
@@ -21,7 +21,7 @@
 .\" PURPOSE.
 .\"
 .Dd April 29, 1999
-.Dt keynote 3
+.Dt KEYNOTE 3
 .\" .TH KeyNote 3 local
 .Os
 .Sh NAME
@@ -112,6 +112,10 @@ struct keynote_keylist
 .Fn kn_sign_assertion "char *assertion" "int len" "char *key" "char *algorithm" "int vflag"
 .Ft int
 .Fn kn_verify_assertion "char *assertion" "int len"
+.Ft void
+.Fn kn_free_key "struct keynote_deckey *"
+.Ft char *
+.Fn kn_get_string "char *"
 .Fd Link options: -lkeynote -lm -lcrypto
 .Sh DESCRIPTION
 For more details on
@@ -685,7 +689,7 @@ in this implementation.
 .Fa iencoding
 describes how the key should be binary-encoded. This implementation
 supports
-.DV INTERNAL_ENC_PKCS1
+.Dv INTERNAL_ENC_PKCS1
 for RSA keys,
 .Dv INTERNAL_ENC_ASN1
 for DSA keys, and
@@ -821,6 +825,14 @@ if necessary memory could not be allocated, or
 .Er ERROR_SYNTAX
 if the assertion contained a syntactic error, or the cryptographic
 algorithm was not supported.
+.Pp
+.Fn kn_free_key
+frees a cryptographic key.
+.Pp
+.Fn kn_get_string
+parses the argument, treating it as a
+.Xr keynote 4
+(quoted) string. This is useful for parsing key files.
 .Pp
 .Sh FILES
 .Bl -tag -width libkeynote.a -compact

@@ -1,4 +1,4 @@
-/* $OpenBSD: error.c,v 1.2 2000/01/08 19:07:13 millert Exp $ */
+/* $OpenBSD: error.c,v 1.4 2000/10/13 08:29:20 espie Exp $ */
 
 /*
  * Copyright (c) 1988, 1989, 1990, 1993
@@ -108,6 +108,32 @@ ecalloc(s1, s2)
 	return p;
 }
 
+/* Support routines for hash tables.  */
+void *
+hash_alloc(s, u)
+	size_t s;
+	void *u;
+{
+	return ecalloc(s, 1);
+}
+
+void
+hash_free(p, s, u)
+	void *p;
+	size_t s;
+	void *u;
+{
+	free(p);
+}
+
+void *
+element_alloc(s, u)
+	size_t s;
+	void *u;
+{
+	return emalloc(s);
+}
+	
 /*
  * enomem --
  *	die when out of memory.
@@ -116,9 +142,23 @@ void
 enomem(size)
 	size_t size;
 {
-	int myerr = errno;
+	fprintf(stderr, "make: %s (%lu)\n", strerror(errno), (u_long)size);
+	exit(2);
+}
 
-	fprintf(stderr, "make: %s (%lu)\n", strerror(myerr), (u_long)size);
+/*
+ * esetenv --
+ *	change environment, die on error.
+ */
+void
+esetenv(name, value)
+	const char *name;
+	const char *value;
+{
+	if (setenv(name, value, 1) == 0)
+	    return;
+
+	fprintf(stderr, "make: setenv failed (%s)\n", strerror(errno));
 	exit(2);
 }
 

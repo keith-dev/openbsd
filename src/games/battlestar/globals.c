@@ -1,4 +1,4 @@
-/*	$OpenBSD: globals.c,v 1.5 1999/09/25 20:30:45 pjanzen Exp $	*/
+/*	$OpenBSD: globals.c,v 1.10 2000/09/26 04:42:56 pjanzen Exp $	*/
 /*	$NetBSD: globals.c,v 1.3 1995/03/21 15:07:32 cgd Exp $	*/
 
 /*
@@ -38,7 +38,7 @@
 #if 0
 static char sccsid[] = "@(#)globals.c	8.2 (Berkeley) 4/28/95";
 #else
-static char rcsid[] = "$OpenBSD: globals.c,v 1.5 1999/09/25 20:30:45 pjanzen Exp $";
+static char rcsid[] = "$OpenBSD: globals.c,v 1.10 2000/09/26 04:42:56 pjanzen Exp $";
 #endif
 #endif /* not lint */
 
@@ -48,9 +48,9 @@ int     WEIGHT = MAXWEIGHT;
 int     CUMBER = MAXCUMBER;
 
 const char   *const objdes[NUMOFOBJECTS] = {
-	"There is a knife here",
+	"There is a knife here.",
 	"There are an exquisitely crafted sword and scabbard here.",
-	0,			/* can land from here */
+	NULL,			/* can land from here */
 	"There is a fierce woodsman here brandishing a heavy mallet.",
 	"There is an unwieldy two-handed sword here.",
 	"There is a bloody meat cleaver here.",
@@ -62,7 +62,7 @@ const char   *const objdes[NUMOFOBJECTS] = {
 	"There is a Viper ready for launch here.",
 	"A kerosene lantern is burning luridly here.",
 	"An old pair of shoes has been discarded here.",
-	0,			/* cylon */
+	NULL,			/* cylon */
 	"There is a pair of pajamas here.",
 	"A kingly robe of royal purple and spun gold is draped here.",
 	"There is a strange golden amulet on the floor here.",
@@ -73,14 +73,14 @@ const char   *const objdes[NUMOFOBJECTS] = {
 	"There is a laser pistol here.",
 	"A flower-like young goddess is bathing in the hot mineral pools. She is \nwatching you, but continues to steep and sing softly.",
 	"The goddess is reclining on a bed of ferns and studying you intently.",
-	"There is a grenade here",
+	"There is a grenade here.",
 	"There is a length of heavy chain here.",
 	"There is a stout rope here.",
 	"There is a pair of Levi's here.",
 	"A bloody mace is lying on the ground here.",
 	"There is a shovel here.",
 	"A long, sharp halberd is propped up here.",
-	"There is a compass here",
+	"There is a compass here.",
 	"Wreckage and smoldering debris from a crash litter the ground here.",
 	"A woodland Elf armed with a shield and deadly halberd lunges toward you!",
 	"I think I hear footsteps behind us.",
@@ -118,7 +118,7 @@ const char   *const objdes[NUMOFOBJECTS] = {
 const char   *const objsht[NUMOFOBJECTS] = {
 	"knife",
 	"fine sword",
-	0,
+	NULL,			/* can land from here */
 	"Woodsman",
 	"two-handed sword",
 	"meat cleaver",
@@ -130,7 +130,7 @@ const char   *const objsht[NUMOFOBJECTS] = {
 	"viper",
 	"lantern",
 	"shoes",
-	0,
+	NULL,			/* cylon */
 	"pajamas",
 	"robe",
 	"amulet",
@@ -139,8 +139,8 @@ const char   *const objsht[NUMOFOBJECTS] = {
 	"woodsman's body",
 	"wooden mallet",
 	"laser",
-	0,
-	0,
+	NULL,			/* bathing goddess */
+	NULL,			/* goddess */
 	"grenade",
 	"chain",
 	"rope",
@@ -149,12 +149,12 @@ const char   *const objsht[NUMOFOBJECTS] = {
 	"shovel",
 	"halberd",
 	"compass",
-	0,
+	NULL,			/* crash debris */
 	"Elf",
-	0,
+	NULL,			/* footsteps */
 	"coins",
 	"match book",
-	0,
+	NULL,			/* man and dwarf */
 	"papayas",
 	"pineapple",
 	"kiwi",
@@ -163,18 +163,18 @@ const char   *const objsht[NUMOFOBJECTS] = {
 	"ring",
 	"potion",
 	"bracelet",
-	0,
-	0,
+	NULL,			/* swarthy woman */
+	NULL,			/* swarthy woman (with message) */
 	"Dark Lord",
-	0,
-	0,
-	0,
-	0,
+	NULL,			/* old-timer */
+	NULL,			/* asteroid field */
+	NULL,			/* nearby planet */
+	NULL,			/* charred ground */
 	"warhead",
 	"goddess's body",
 	"old-timer's body",
 	"girl's body",
-	0,
+	NULL,			/* native girl */
 	"stallion",
 	"car",
 	"pot of jewels",
@@ -220,6 +220,25 @@ const int     objcumber[NUMOFOBJECTS] = {
 	10,	8,	8,	10,	10,	3,	1,	2
 };
 
+const int objflags[NUMOFOBJECTS] = {
+	0,		0,	    OBJ_NONOBJ,	    OBJ_PERSON,
+	0,		0,		0,		0,
+	0,		0,		0,		0,
+	0,	    OBJ_PLURAL,	    OBJ_NONOBJ,	    OBJ_PLURAL,
+	0,	      OBJ_AN,		0,		0,
+	0,		0,		0,	    OBJ_PERSON,
+    OBJ_PERSON,		0,		0,		0,
+    OBJ_PLURAL,		0,		0,		0,
+	0,	OBJ_NONOBJ,	OBJ_AN | OBJ_PERSON, OBJ_NONOBJ,
+    OBJ_PLURAL,		0,	    OBJ_PERSON,	    OBJ_PLURAL,
+	0,		0,	    OBJ_PLURAL,		0,
+	0,		0,		0,	    OBJ_PERSON,
+    OBJ_PERSON,	    OBJ_PERSON,	    OBJ_PERSON,	    OBJ_NONOBJ,
+    OBJ_NONOBJ,	    OBJ_NONOBJ,		0,		0,
+      OBJ_AN,		0,	    OBJ_PERSON,		0,
+	0,		0,		0,		0
+};
+
 int     win = 1;
 int     matchcount = 20;
 int     followgod = -1;
@@ -228,10 +247,11 @@ int     followfight = -1;
 struct room *location;
 
  /* current input line */
-char    words[NWORD][15];
+char    words[NWORD][WORDLEN];
 int     wordvalue[NWORD];
 int     wordtype[NWORD];
 int     wordcount, wordnumber;
+int     stop_cypher;	/* continue parsing the current line? */
 
  /* state of the game */
 int     ourtime;
@@ -256,7 +276,6 @@ unsigned int inven[NUMOFWORDS];
 unsigned int wear[NUMOFWORDS];
 char    beenthere[NUMOFROOMS + 1];
 char    injuries[NUMOFINJURIES];
+int     verbose = 0;
 
-char    username[LOGIN_NAME_MAX + 1];
-
-struct wlist *hashtab[HASHSIZE];
+const char *username;

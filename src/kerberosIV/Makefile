@@ -1,5 +1,12 @@
-# $OpenBSD: Makefile,v 1.29 2000/03/10 22:04:18 niklas Exp $
+# $OpenBSD: Makefile,v 1.31 2000/09/04 18:02:42 hin Exp $
 
-SUBDIR	= lib usr.bin usr.sbin libexec
+SUBDIR	= lib usr.bin usr.sbin libexec doc
+
+build:
+	${MAKE} includes
+	${MAKE} depend
+	( cd ${.CURDIR}/lib && ${MAKE} && ${MAKE} install )
+	${MAKE}
+	${MAKE} install
 
 .include <bsd.subdir.mk>

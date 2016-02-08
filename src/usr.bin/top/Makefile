@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.4 1998/08/21 13:55:22 kstailey Exp $
+#	$OpenBSD: Makefile,v 1.6 2000/09/03 18:41:20 espie Exp $
 #
 # Makefile for OpenBSD top-3.4.
 
@@ -20,3 +20,7 @@ sigdesc.h:	sigconv.awk
 	awk -f ${.CURDIR}/sigconv.awk /usr/include/sys/signal.h > sigdesc.h
 
 .include <bsd.prog.mk>
+
+.if (${UVM:L} == "yes")
+CFLAGS+=-DUVM
+.endif

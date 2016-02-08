@@ -1,4 +1,4 @@
-/*	$OpenBSD: print-ppp.c,v 1.10 2000/02/18 14:39:35 jason Exp $	*/
+/*	$OpenBSD: print-ppp.c,v 1.13 2000/10/03 14:21:56 ho Exp $	*/
 
 /*
  * Copyright (c) 1990, 1991, 1993, 1994, 1995, 1996, 1997
@@ -23,7 +23,7 @@
 
 #ifndef lint
 static const char rcsid[] =
-    "@(#) $Header: /cvs/src/usr.sbin/tcpdump/print-ppp.c,v 1.10 2000/02/18 14:39:35 jason Exp $ (LBL)";
+    "@(#) $Header: /cvs/src/usr.sbin/tcpdump/print-ppp.c,v 1.13 2000/10/03 14:21:56 ho Exp $ (LBL)";
 #endif
 
 #ifdef PPP
@@ -207,11 +207,11 @@ static char *papcode[] = {
 #define IPCP_CP		2
 #define IPCP_ADDR	3
 
-static int handle_lcp(const u_char *p, int length);
 static int print_lcp_config_options(u_char *p);
-static int handle_chap(const u_char *p, int length);
-static int handle_ipcp(const u_char *p, int length);
-static int handle_pap(const u_char *p, int length);
+static void handle_lcp(const u_char *p, int length);
+static void handle_chap(const u_char *p, int length);
+static void handle_ipcp(const u_char *p, int length);
+static void handle_pap(const u_char *p, int length);
 
 struct pppoe_header {
 	u_int8_t vertype;	/* PPPoE version/type */
@@ -274,7 +274,7 @@ ppp_hdlc_print(p, length)
 
 /* print LCP frame */
 
-static int
+static void
 handle_lcp(p, length)
 	const u_char *p;
 	int length;
@@ -394,7 +394,7 @@ print_lcp_config_options(p)
 
 /* CHAP */
 
-static int
+static void
 handle_chap(p, length)
 	const u_char *p;
 	int length;
@@ -431,7 +431,7 @@ handle_chap(p, length)
 
 /* PAP */
 
-static int
+static void
 handle_pap(p, length)
 	const u_char *p;
 	int length;
@@ -470,7 +470,7 @@ handle_pap(p, length)
 
 /* IPCP */
 
-static int
+static void
 handle_ipcp(p, length)
 	const u_char *p;
 	int length;
@@ -674,12 +674,15 @@ pppoe_if_print(ethertype, p, length, caplen)
 			default:
 				printf("Unknown(0x%04x)", t_type);
 			}
-			printf(", length %u", t_len);
+			printf(", length %u%s", t_len, t_len ? " " : "");
 
 			if (t_len) {
-				printf(", value %02x", p[0]);
-				for (t_type = 1; t_type < t_len; t_type++)
-					printf(":%02x", p[t_type]);
+				for (t_type = 0; t_type < t_len; t_type++) {
+					if (isprint(p[t_type]))
+						printf("%c", p[t_type]);
+					else
+						printf("\\%03o", p[t_type]);
+				}
 			}
 			pppoe_len -= t_len;
 			p += t_len;

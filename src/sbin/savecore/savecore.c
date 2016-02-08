@@ -1,4 +1,4 @@
-/*	$OpenBSD: savecore.c,v 1.19 1999/08/16 18:38:50 art Exp $	*/
+/*	$OpenBSD: savecore.c,v 1.22 2000/10/25 23:37:38 deraadt Exp $	*/
 /*	$NetBSD: savecore.c,v 1.26 1996/03/18 21:16:05 leo Exp $	*/
 
 /*-
@@ -44,7 +44,7 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)savecore.c	8.3 (Berkeley) 1/2/94";
 #else
-static char rcsid[] = "$OpenBSD: savecore.c,v 1.19 1999/08/16 18:38:50 art Exp $";
+static char rcsid[] = "$OpenBSD: savecore.c,v 1.22 2000/10/25 23:37:38 deraadt Exp $";
 #endif
 #endif /* not lint */
 
@@ -112,7 +112,7 @@ int	dumpmag;			/* magic number in dump */
 int	dumpsize;			/* amount of memory dumped */
 
 char	*kernel;
-char	*dirname;			/* directory to save dumps in */
+char	*dirn;			/* directory to save dumps in */
 char	*ddname;			/* name of dump device */
 dev_t	dumpdev;			/* dump device */
 int	dumpfd;				/* read/write descriptor on block dev */
@@ -185,7 +185,7 @@ main(argc, argv)
 	if (!clear) {
 		if (argc != 1 && argc != 2)
 			usage();
-		dirname = argv[0];
+		dirn = argv[0];
 	}
 	if (argc == 2)
 		kernel = argv[1];
@@ -294,8 +294,10 @@ kmem_setup()
 		}
 	hdrsz = kvm_dump_mkheader(kd_dump, (off_t)dumplo);
 	if (hdrsz == -1) {
-		syslog(LOG_ERR, "%s: kvm_dump_mkheader: %s", dump_sys,
-			kvm_geterr(kd_dump));
+		if(verbose)
+			syslog(LOG_ERR, "%s: kvm_dump_mkheader: %s", dump_sys,
+				kvm_geterr(kd_dump));
+		syslog(LOG_WARNING, "no core dump");
 		exit(1);
 	}
 	dumplo += hdrsz;
@@ -333,20 +335,22 @@ check_kmem()
 	KREAD(kd_dump, dump_nl[X_PANICSTR].n_value, &panicstr);
 	if (panicstr) {
 		char	c, visout[5];
+		size_t	vislen;
 
 		cp       = panic_mesg;
 		panicloc = panicstr;
-		do {
-			KREAD(kd_dump, panicloc, &c);
+		for (;;) {
+			if (KREAD(kd_dump, panicloc, &c) != 0 || c == '\0')
+				break;
 			panicloc++;
 
 			vis(visout, c, VIS_SAFE|VIS_NOSLASH, 0);
-			if (c && cp + strlen(visout) <
-			    &panic_mesg[sizeof(panic_mesg)]) {
-				strcat(cp, visout);
-				cp += strlen(visout);
-			}
-		} while (c && cp < &panic_mesg[sizeof(panic_mesg)]);
+			vislen = strlen(visout);
+			if (cp - panic_mesg + vislen >= sizeof(panic_mesg))
+				break;
+			strcat(cp, visout);
+			cp += vislen;
+		}
 	}
 }
 
@@ -401,7 +405,7 @@ save_core()
 	 * Get the current number and update the bounds file.  Do the update
 	 * now, because may fail later and don't want to overwrite anything.
 	 */
-	(void)snprintf(path, sizeof(path), "%s/bounds", dirname);
+	(void)snprintf(path, sizeof(path), "%s/bounds", dirn);
 	if ((fp = fopen(path, "r")) == NULL)
 		goto err1;
 	if (fgets(buf, sizeof(buf), fp) == NULL) {
@@ -421,7 +425,7 @@ err1:			syslog(LOG_WARNING, "%s: %s", path, strerror(errno));
 
 	/* Create the core file. */
 	(void)snprintf(path, sizeof(path), "%s%s.%d.core%s",
-	    dirname, _PATH_UNIX, bounds, compress ? ".Z" : "");
+	    dirn, _PATH_UNIX, bounds, compress ? ".Z" : "");
 	if (compress) {
 		if ((fp = zopen(path, "w", 0)) == NULL) {
 			syslog(LOG_ERR, "%s: %s", path, strerror(errno));
@@ -483,7 +487,7 @@ err2:			syslog(LOG_WARNING,
 	/* Copy the kernel. */
 	ifd = Open(kernel ? kernel : _PATH_UNIX, O_RDONLY);
 	(void)snprintf(path, sizeof(path), "%s%s.%d%s",
-	    dirname, _PATH_UNIX, bounds, compress ? ".Z" : "");
+	    dirn, _PATH_UNIX, bounds, compress ? ".Z" : "");
 	if (compress) {
 		if ((fp = zopen(path, "w", 0)) == NULL) {
 			syslog(LOG_ERR, "%s: %s", path, strerror(errno));
@@ -612,13 +616,13 @@ check_space()
 		exit(1);
 	}
 	kernelsize = st.st_blocks * S_BLKSIZE;
-	if (statfs(dirname, &fsbuf) < 0) {
-		syslog(LOG_ERR, "%s: %m", dirname);
+	if (statfs(dirn, &fsbuf) < 0) {
+		syslog(LOG_ERR, "%s: %m", dirn);
 		exit(1);
 	}
  	spacefree = (fsbuf.f_bavail * fsbuf.f_bsize) / 1024;
 
-	(void)snprintf(path, sizeof(path), "%s/minfree", dirname);
+	(void)snprintf(path, sizeof(path), "%s/minfree", dirn);
 	if ((fp = fopen(path, "r")) == NULL)
 		minfree = 0;
 	else {

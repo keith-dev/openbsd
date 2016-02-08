@@ -1,5 +1,5 @@
-/*	$OpenBSD: udp.c,v 1.21 2000/04/07 22:04:58 niklas Exp $	*/
-/*	$EOM: udp.c,v 1.49 2000/03/14 19:42:32 ho Exp $	*/
+/*	$OpenBSD: udp.c,v 1.23 2000/10/16 23:27:23 niklas Exp $	*/
+/*	$EOM: udp.c,v 1.52 2000/10/15 22:02:55 niklas Exp $	*/
 
 /*
  * Copyright (c) 1998, 1999 Niklas Hallqvist.  All rights reserved.
@@ -92,6 +92,7 @@ static struct transport *udp_make (struct sockaddr_in *);
 static int udp_send_message (struct message *);
 static void udp_get_dst (struct transport *, struct sockaddr **, int *);
 static void udp_get_src (struct transport *, struct sockaddr **, int *);
+static char *udp_decode_ids (struct transport *);
 
 static struct transport_vtbl udp_transport_vtbl = {
   { 0 }, "udp",
@@ -103,7 +104,8 @@ static struct transport_vtbl udp_transport_vtbl = {
   udp_handle_message,
   udp_send_message,
   udp_get_dst,
-  udp_get_src
+  udp_get_src,
+  udp_decode_ids
 };
 
 /* A list of UDP transports we listen for messages on.  */
@@ -297,7 +299,7 @@ udp_bind_if (struct ifreq *ifrp, void *arg)
   /*
    * If we are explicit about what addresses we can listen to, be sure
    * to respect that option.
-   * XXX This is quite wasteful redoing the list-run for every interface,
+   * This is quite wasteful redoing the list-run for every interface,
    * but who cares?  This is not an operation that needs to be fast.
    */
   listen_on = conf_get_list ("General", "Listen-on");
@@ -593,6 +595,37 @@ udp_get_src (struct transport *t, struct sockaddr **src, int *src_len)
   *src_len = sizeof ((struct udp_transport *)t)->src;
 }
 
+static char *
+udp_decode_ids (struct transport *t)
+{
+  static char result[1024];
+  char idsrc[256], iddst[256];
+
+#ifdef HAVE_GETNAMEINFO
+  if (getnameinfo ((struct sockaddr *)&((struct udp_transport *)t)->src,
+		   sizeof ((struct udp_transport *)t)->src,
+		   idsrc, sizeof idsrc, NULL, 0, NI_NUMERICHOST) != 0)
+    {
+      log_print ("udp_decode_ids: getnameinfo () failed");
+      strcpy (idsrc, "<error>");
+    }
+
+  if (getnameinfo ((struct sockaddr *)&((struct udp_transport *)t)->dst,
+		   sizeof ((struct udp_transport *)t)->dst,
+		   iddst, sizeof iddst, NULL, 0, NI_NUMERICHOST) != 0)
+    {
+      log_error ("udp_decode_ids: getnameinfo () failed");
+      strcpy (iddst, "<error>");
+    }
+#else
+  strcpy (idsrc, inet_ntoa (((struct udp_transport *)t)->src.sin_addr));
+  strcpy (iddst, inet_ntoa (((struct udp_transport *)t)->src.sin_addr));
+#endif /* HAVE_GETNAMEINFO */
+
+  sprintf (result, "src: %s dst: %s", idsrc, iddst);
+
+  return result;
+}
 /*
  * Take a string containing an ext representation of port and return a
  * binary port number.  Return zero if anything goes wrong.

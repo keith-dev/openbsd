@@ -1,5 +1,5 @@
 %{
-/* $OpenBSD: keynote.l,v 1.8 2000/02/18 13:36:13 angelos Exp $ */
+/* $OpenBSD: keynote.l,v 1.12 2000/08/11 20:51:38 angelos Exp $ */
 /*
  * The author of this code is Angelos D. Keromytis (angelos@dsl.cis.upenn.edu)
  *
@@ -69,14 +69,13 @@ specnumber      [1-9][0-9]*
 number		{digit}+
 flt		{digit}+"."{digit}+
 vstring		[a-zA-Z_][a-zA-Z0-9_]*
-litstring	\"(([^\"\n])|(\\[\"\n.]))*\"
+litstring	\"(((\\\n)|(\\.)|([^\\\n\"]))*)\"
 variable	{vstring}
 comment		"#"[^\n]*
 %s ACTIONSTRING LOCALINIT KEYPREDICATE SIGNERINIT KEYNOTEVERSION
 %pointer
 %option noyywrap never-interactive yylineno
 %%
-
 %{
     /*
      * Return a preset token, so we can have more than one grammars
@@ -421,7 +420,7 @@ mystrncpy(char *s1, char *s2, int len)
 
 	    if (*s2 == '\n')
 	    {
-		while (isspace(*(++s2)) && (len-- > 0))
+		while (isspace((int) *(++s2)) && (len-- > 0))
 		  ;
 	    }
 	    else
@@ -526,7 +525,7 @@ keynote_evaluate_assertion(struct assertion *as)
 
 /* 
  * Parse/evaluate a key predicate field. 
- * Store keys in key predicate as keylist in as->as_keylist, if third
+ * Store keys in key predicate as keylist in as->as_keylist, if second
  * argument is true.
  */
 int
@@ -581,7 +580,9 @@ keynote_parse_keypred(struct assertion *as, int record)
 		keynote_used_variable = 0;
 		as->as_internalflags |= ASSERT_IFLAG_WEIRDLICS;
 	    }
-	    
+
+	    if (as->as_keylist)
+              keynote_keylist_free(as->as_keylist);
 	    as->as_keylist = keynote_keypred_keylist;
 	    keynote_keypred_keylist = (struct keylist *) NULL;
 	    return RESULT_TRUE;
@@ -672,7 +673,16 @@ keynote_evaluate_authorizer(struct assertion *as, int flag)
 }
 
 /*
- * Parse a private key.
+ * Exportable front-end to keynote_get_private_key().
+ */
+char *
+kn_get_string(char *buf)
+{
+    return keynote_get_private_key(buf);
+}
+
+/*
+ * Parse a private key -- actually, it can deal with any kind of string.
  */
 char *
 keynote_get_private_key(char *buf)

@@ -1,4 +1,4 @@
-/*	$OpenBSD: show.c,v 1.16 2000/01/14 19:59:17 deraadt Exp $	*/
+/*	$OpenBSD: show.c,v 1.18 2000/09/24 01:02:24 millert Exp $	*/
 /*	$NetBSD: show.c,v 1.1 1996/11/15 18:01:41 gwr Exp $	*/
 
 /*
@@ -38,7 +38,7 @@
 #if 0
 static char sccsid[] = "from: @(#)route.c	8.3 (Berkeley) 3/9/94";
 #else
-static char *rcsid = "$OpenBSD: show.c,v 1.16 2000/01/14 19:59:17 deraadt Exp $";
+static char *rcsid = "$OpenBSD: show.c,v 1.18 2000/09/24 01:02:24 millert Exp $";
 #endif
 #endif /* not lint */
 
@@ -104,9 +104,7 @@ static void p_rtentry __P((struct rt_msghdr *));
 static void p_sockaddr __P((struct sockaddr *, int, int));
 static void p_flags __P((int, char *));
 static void pr_rthdr __P((void));
-static void pr_encaphdr __P((void));
 static void pr_family __P((int));
-static void encap_print __P((struct rt_msghdr *));                   
 
 /*
  * Print routing tables.
@@ -116,7 +114,7 @@ show(argc, argv)
 	int argc;
 	char **argv;
 {
-	register struct rt_msghdr *rtm;
+	struct rt_msghdr *rtm;
 	char *buf = NULL, *next, *lim;
 	size_t needed;
 	int mib[6];
@@ -175,9 +173,9 @@ pr_rthdr()
  */
 static void
 p_rtentry(rtm)
-	register struct rt_msghdr *rtm;
+	struct rt_msghdr *rtm;
 {
-	register struct sockaddr *sa = (struct sockaddr *)(rtm + 1);
+	struct sockaddr *sa = (struct sockaddr *)(rtm + 1);
 #ifdef notdef
 	static int masks_done, banner_printed;
 #endif
@@ -201,14 +199,7 @@ p_rtentry(rtm)
 	if (old_af != af) {
 		old_af = af;
 		pr_family(af);
-		if (af != PF_KEY)
-			pr_rthdr();
-		else
-			pr_encaphdr();
-	}
-	if (af == PF_KEY) {
-		encap_print(rtm);
-		return;
+		pr_rthdr();
 	}
 	if (rtm->rtm_addrs == RTA_DST)
 		p_sockaddr(sa, 0, 36);
@@ -219,19 +210,6 @@ p_rtentry(rtm)
 	}
 	p_flags(rtm->rtm_flags & interesting, "%-6.6s ");
 	putchar('\n');
-}
-
-/*                    
- * Print header for PF_KEY entries.
- */                              
-void                  
-pr_encaphdr()             
-{
-/*
-        printf("%-40s %-15s %s\n",
-               "Source/Destination Networks", "Protocol/Ports",
-               "SA(Address/SPI/Proto)");
-*/
 }
 
 /*
@@ -264,9 +242,6 @@ pr_family(af)
 	case AF_CCITT:
 		afname = "X.25";
 		break;
-	case PF_KEY:
-		afname = "IPsec";
-		break;
 	case AF_APPLETALK:
 		afname = "AppleTalk";
 		break;
@@ -287,13 +262,13 @@ p_sockaddr(sa, flags, width)
 	int flags, width;
 {
 	char workbuf[128], *cplim;
-	register char *cp = workbuf;
+	char *cp = workbuf;
 
 	switch(sa->sa_family) {
 
 	case AF_LINK:
 	    {
-		register struct sockaddr_dl *sdl = (struct sockaddr_dl *)sa;
+		struct sockaddr_dl *sdl = (struct sockaddr_dl *)sa;
 
 		if (sdl->sdl_nlen == 0 && sdl->sdl_alen == 0 &&
 		    sdl->sdl_slen == 0)
@@ -301,8 +276,8 @@ p_sockaddr(sa, flags, width)
 		else switch (sdl->sdl_type) {
 		case IFT_ETHER:
 		    {
-			register int i;
-			register u_char *lla = (u_char *)sdl->sdl_data +
+			int i;
+			u_char *lla = (u_char *)sdl->sdl_data +
 			    sdl->sdl_nlen;
 
 			cplim = "";
@@ -322,7 +297,7 @@ p_sockaddr(sa, flags, width)
 
 	case AF_INET:
 	    {
-		register struct sockaddr_in *sin = (struct sockaddr_in *)sa;
+		struct sockaddr_in *sin = (struct sockaddr_in *)sa;
 
 		if (sin->sin_addr.s_addr == 0)
 			cp = "default";
@@ -352,7 +327,7 @@ p_sockaddr(sa, flags, width)
 
 	default:
 	    {
-		register u_char *s = (u_char *)sa->sa_data, *slim;
+		u_char *s = (u_char *)sa->sa_data, *slim;
 
 		slim =  sa->sa_len + (u_char *) sa;
 		cplim = cp + sizeof(workbuf) - 6;
@@ -377,84 +352,15 @@ p_sockaddr(sa, flags, width)
 
 static void
 p_flags(f, format)
-	register int f;
+	int f;
 	char *format;
 {
 	char name[33], *flags;
-	register const struct bits *p = bits;
+	const struct bits *p = bits;
 
 	for (flags = name; p->b_mask && flags < &name[sizeof name-2]; p++)
 		if (p->b_mask & f)
 			*flags++ = p->b_val;
 	*flags = '\0';
 	printf(format, name);
-}
-
-static void
-encap_print(rtm)
-        register struct rt_msghdr *rtm;
-{
-        struct sockaddr_encap *sen1 = (struct sockaddr_encap *)(rtm + 1);
-	struct protoent *prnt = NULL;
-        struct sockaddr_encap *sen3;
-	struct sockaddr_encap *sen2;
-
-        u_char buffer[40];
-
-        bzero(buffer, sizeof(buffer));
-
-	sen3 = (struct sockaddr_encap *) (ROUNDUP(sen1->sen_len) +
-					  (char *)sen1);
-	sen2 = (struct sockaddr_encap *) (ROUNDUP(sen3->sen_len) +
-					  (char *)sen3);
-
-	if (sen1->sen_type == SENT_IP4) {
-		inet_ntop(AF_INET, &sen1->sen_ip_src, buffer, sizeof(buffer));
-        	printf("%s/", buffer);
-		inet_ntop(AF_INET, &sen2->sen_ip_src, buffer, sizeof(buffer));
-        	printf("%s:%u -> ", buffer, ntohs(sen1->sen_sport));
-		inet_ntop(AF_INET, &sen1->sen_ip_dst, buffer, sizeof(buffer));
-        	printf("%s/", buffer);
-		inet_ntop(AF_INET, &sen2->sen_ip_dst, buffer, sizeof(buffer));
-        	printf("%s:%u ", buffer, ntohs(sen1->sen_dport));
-
-		if (sen1->sen_proto) {
-			prnt = getprotobynumber(sen1->sen_proto);
-			if (prnt)
-				printf("(%s) ", prnt->p_name);
-			else
-				printf("(%u) ", sen1->sen_proto);
-		}
-		else
-			printf("(all) ");
-	}
-
-#ifdef INET6
-	if (sen1->sen_type == SENT_IP6) {
-		inet_ntop(AF_INET6, &sen1->sen_ip6_src, buffer, sizeof(buffer));
-        	printf("%s:%d ->", buffer, ntohs(sen1->sen_ip6_sport));
-		inet_ntop(AF_INET6, &sen1->sen_ip6_dst, buffer, sizeof(buffer));
-        	printf("%s:%d ", buffer, ntohs(sen1->sen_ip6_dport));
-
-		if (sen1->sen_ip6_proto) {
-			prnt = getprotobynumber(sen1->sen_ip6_proto);
-			if (prnt)
-				printf("(%s) ", prnt->p_name);
-			else
-				printf("(%u) ", sen1->sen_ip6_proto);
-		}
-		else
-			printf("(all) ");
-	}
-
-	if (sen3->sen_type == SENT_IPSP6)
-		printf("%s/%08x/%-lu\n",
-		       inet_ntop(AF_INET6, &sen3->sen_ipsp6_dst, buffer,
-		       sizeof(buffer)),
-		       ntohl(sen3->sen_ipsp6_spi), sen3->sen_ipsp6_sproto);
-#endif /* INET6 */
-
-	if (sen3->sen_type == SENT_IPSP)
-		printf("%s/%08x/%-lu\n", inet_ntoa(sen3->sen_ipsp_dst),
-		       ntohl(sen3->sen_ipsp_spi), sen3->sen_ipsp_sproto);
 }

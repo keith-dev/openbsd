@@ -1,4 +1,4 @@
-/* $OpenBSD: gnum4.c,v 1.6 2000/04/10 17:16:30 espie Exp $ */
+/* $OpenBSD: gnum4.c,v 1.8 2000/07/24 23:08:25 espie Exp $ */
 
 /*
  * Copyright (c) 1999 Marc Espie
@@ -31,13 +31,17 @@
 
 #include <sys/param.h>
 #include <sys/types.h>
+#include <sys/wait.h>
 #include <ctype.h>
+#include <paths.h>
 #include <regex.h>
 #include <stddef.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
 #include <err.h>
+#include <errno.h>
+#include <unistd.h>
 #include "mdef.h"
 #include "stdd.h"
 #include "extern.h"
@@ -445,7 +449,8 @@ dopatsubst(argv, argc)
 		exit_regerror(error, &re);
 	
 	pmatch = xalloc(sizeof(regmatch_t) * (re.re_nsub+1));
-	do_subst(argv[2], &re, argv[4] != NULL ? argv[4] : "", pmatch);
+	do_subst(argv[2], &re, 
+	    argc != 4 && argv[4] != NULL ? argv[4] : "", pmatch);
 	pbstr(getstring());
 	free(pmatch);
 	regfree(&re);
@@ -461,7 +466,7 @@ doregexp(argv, argc)
 	regmatch_t *pmatch;
 
 	if (argc <= 3) {
-		warnx("Too few arguments to patsubst");
+		warnx("Too few arguments to regexp");
 		return;
 	}
 	error = regcomp(&re, mimic_gnu ? twiddle(argv[3]) : argv[3], 
@@ -470,10 +475,59 @@ doregexp(argv, argc)
 		exit_regerror(error, &re);
 	
 	pmatch = xalloc(sizeof(regmatch_t) * (re.re_nsub+1));
-	if (argv[4] == NULL)
+	if (argv[4] == NULL || argc == 4)
 		do_regexpindex(argv[2], &re, pmatch);
 	else
 		do_regexp(argv[2], &re, argv[4], pmatch);
 	free(pmatch);
 	regfree(&re);
+}
+
+void
+doesyscmd(cmd)
+	const char *cmd;
+{
+	int p[2];
+	pid_t pid, cpid;
+	char *argv[4];
+	int cc;
+	int status;
+
+	/* Follow gnu m4 documentation: first flush buffers. */
+	fflush(NULL);
+
+	argv[0] = "sh";
+	argv[1] = "-c";
+	argv[2] = (char *)cmd;
+	argv[3] = NULL;
+
+	/* Just set up standard output, share stderr and stdin with m4 */
+	if (pipe(p) == -1)
+		err(1, "bad pipe");
+	switch(cpid = fork()) {
+	case -1:
+		err(1, "bad fork");
+		/* NOTREACHED */
+	case 0:
+		(void) close(p[0]);
+		(void) dup2(p[1], 1);
+		(void) close(p[1]);
+		execv(_PATH_BSHELL, argv);
+		exit(1);
+	default:
+		/* Read result in two stages, since m4's buffer is
+		 * pushback-only. */
+		(void) close(p[1]);
+		do {
+			char result[BUFSIZE];
+			cc = read(p[0], result, sizeof result);
+			if (cc > 0)
+				addchars(result, cc);
+		} while (cc > 0 || (cc == -1 && errno == EINTR));
+
+		(void) close(p[0]);
+		while ((pid = wait(&status)) != cpid && pid >= 0)
+			continue;
+		pbstr(getstring());
+	}
 }

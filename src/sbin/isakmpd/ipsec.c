@@ -1,5 +1,5 @@
-/*	$OpenBSD: ipsec.c,v 1.25 2000/02/25 17:23:40 niklas Exp $	*/
-/*	$EOM: ipsec.c,v 1.118 2000/02/20 19:58:38 niklas Exp $	*/
+/*	$OpenBSD: ipsec.c,v 1.30 2000/10/16 23:26:33 niklas Exp $	*/
+/*	$EOM: ipsec.c,v 1.139 2000/10/16 06:01:34 niklas Exp $	*/
 
 /*
  * Copyright (c) 1998, 1999, 2000 Niklas Hallqvist.  All rights reserved.
@@ -36,6 +36,7 @@
 
 #include <sys/types.h>
 #include <sys/socket.h>
+#include <netdb.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <stdlib.h>
@@ -66,6 +67,11 @@
 #include "timer.h"
 #include "transport.h"
 #include "util.h"
+
+/* Backwards compatibility.  */
+#ifndef NI_MAXHOST
+#define NI_MAXHOST 1025
+#endif
 
 /* The replay window size used for all IPSec protocols if not overridden.  */
 #define DEFAULT_REPLAY_WINDOW 16
@@ -150,7 +156,10 @@ static struct doi ipsec_doi = {
   ipsec_validate_situation,
   ipsec_validate_transform_id,
   ipsec_initiator,
-  ipsec_responder
+  ipsec_responder,
+#ifdef USE_DEBUG
+  ipsec_decode_ids
+#endif
 };
 
 int16_t script_quick_mode[] = {
@@ -323,7 +332,12 @@ ipsec_finalize_exchange (struct message *msg)
 			ntohl (isa->src_net), ntohl (isa->src_mask),
 			ntohl (isa->dst_net), ntohl (isa->dst_mask)));
 
-	      if (sysdep_ipsec_enable_sa (sa))
+	      /*
+	       * If this is not an SA acquired by the kernel, it needs
+	       * to have a SPD entry (a.k.a. flow) set up.
+	       */
+	      if (!(sa->flags & SA_FLAG_ONDEMAND)
+		  && sysdep_ipsec_enable_sa (sa))
 		/* XXX Tear down this exchange.  */
 		return;
 
@@ -479,6 +493,12 @@ ipsec_get_keystate (struct message *msg)
    * the ISAKMP SA concatenated with the message ID, and use that as an
    * IV for further cryptographic operations.
    */
+  if (!msg->isakmp_sa->keystate)
+    {
+      log_print ("ipsec_get_keystate: no keystate in ISAKMP SA %p",
+		 msg->isakmp_sa);
+      return 0;
+    }
   ks = crypto_clone_keystate (msg->isakmp_sa->keystate);
   if (!ks)
     return 0;
@@ -549,7 +569,7 @@ ipsec_validate_id_information (u_int8_t type, u_int8_t *extra, u_int8_t *buf,
   u_int8_t proto = GET_IPSEC_ID_PROTO (extra);
   u_int16_t port = GET_IPSEC_ID_PORT (extra);
 
-  LOG_DBG ((LOG_MESSAGE, 0, 
+  LOG_DBG ((LOG_MESSAGE, 0,
 	    "ipsec_validate_id_information: proto %d port %d type %d",
 	    proto, port, type));
   if (type < IPSEC_ID_IPV4_ADDR || type > IPSEC_ID_KEY_ID)
@@ -660,7 +680,7 @@ ipsec_validate_transform_id (u_int8_t proto, u_int8_t transform_id)
 	transform_id < IPSEC_AH_MD5 || transform_id > IPSEC_AH_DES ? -1 : 0;
     case IPSEC_PROTO_IPSEC_ESP:
       return transform_id < IPSEC_ESP_DES_IV64
-	|| transform_id > IPSEC_ESP_NULL ? -1 : 0;
+	|| transform_id > IPSEC_ESP_AES ? -1 : 0;
     case IPSEC_PROTO_IPCOMP:
       return transform_id < IPSEC_IPCOMP_OUI
 	|| transform_id > IPSEC_IPCOMP_V42BIS ? -1 : 0;
@@ -684,7 +704,7 @@ ipsec_initiator (struct message *msg)
 		 exchange->type, exchange->phase);
       return -1;
     }
-    
+
   switch (exchange->type)
     {
     case ISAKMP_EXCH_ID_PROT:
@@ -701,7 +721,7 @@ ipsec_initiator (struct message *msg)
       script = ike_quick_mode_initiator;
       break;
     default:
-      log_print ("ipsec_initiator: unuspported exchange type %d",
+      log_print ("ipsec_initiator: unsupported exchange type %d",
 		 exchange->type);
       return -1;
     }
@@ -730,7 +750,7 @@ ipsec_responder (struct message *msg)
       message_drop (msg, ISAKMP_NOTIFY_UNSUPPORTED_EXCHANGE_TYPE, 0, 1, 0);
       return -1;
     }
-    
+
   LOG_DBG ((LOG_MISC, 30,
 	    "ipsec_responder: phase %d exchange %d step %d", exchange->phase,
 	    exchange->type, exchange->step));
@@ -846,7 +866,7 @@ ipsec_is_attribute_incompatible (u_int16_t type, u_int8_t *value,
 	  return decode_16 (value) < IKE_DURATION_SECONDS
 	    || decode_16 (value) > IKE_DURATION_KILOBYTES;
 	case IKE_ATTR_LIFE_DURATION:
-	  return 0;
+	  return len != 2 && len != 4;
 	case IKE_ATTR_PRF:
 	  return 1;
 	case IKE_ATTR_KEY_LENGTH:
@@ -854,7 +874,7 @@ ipsec_is_attribute_incompatible (u_int16_t type, u_int8_t *value,
 	   * Our crypto routines only allows key-lengths which are multiples
 	   * of an octet.
 	   */
-	  return decode_16 (value) % 8 != 0; 
+	  return decode_16 (value) % 8 != 0;
 	case IKE_ATTR_FIELD_SIZE:
 	  return 1;
 	case IKE_ATTR_GROUP_ORDER:
@@ -869,7 +889,7 @@ ipsec_is_attribute_incompatible (u_int16_t type, u_int8_t *value,
 	  return decode_16 (value) < IPSEC_DURATION_SECONDS
 	    || decode_16 (value) > IPSEC_DURATION_KILOBYTES;
 	case IPSEC_ATTR_SA_LIFE_DURATION:
-	  return 0;
+	  return len != 2 && len != 4;
 	case IPSEC_ATTR_GROUP_DESCRIPTION:
 	  return decode_16 (value) < IKE_GROUP_DESC_MODP_768
 	    || decode_16 (value) > IKE_GROUP_DESC_MODP_1536;
@@ -1254,6 +1274,7 @@ ipsec_handle_leftover_payload (struct message *msg, u_int8_t type,
   struct sockaddr *dst;
   socklen_t dstlen;
   struct sa *sa;
+  int flag = 0;
 
   /* So far, the only thing we handle is an INITIAL-CONTACT NOTIFY.  */
   switch (type)
@@ -1270,6 +1291,19 @@ ipsec_handle_leftover_payload (struct message *msg, u_int8_t type,
 	  msg->transport->vtbl->get_dst (msg->transport, &dst, &dstlen);
 	  while ((sa = sa_lookup_by_peer (dst, dstlen)) != 0)
 	    {
+	      /*
+	       * Don't delete the current SA -- we received the notification
+	       * over it, so it's obviously still active. We temporarily need
+               * to remove the SA from the list to avoid an endless loop.
+	       */
+
+	      if (sa == msg->isakmp_sa)
+	        {
+                  LIST_REMOVE (sa, link);
+                  flag = 1;
+		  continue;
+		}
+
 	      LOG_DBG ((LOG_SA, 30,
 			"ipsec_handle_leftover_payload: "
 			"INITIAL-CONTACT made us delete SA %p",
@@ -1277,6 +1311,8 @@ ipsec_handle_leftover_payload (struct message *msg, u_int8_t type,
 	      sa_delete (sa, 0);
 	    }
 
+          if (flag)
+            sa_enter (msg->isakmp_sa);
 	  payload->flags |= PL_MARK;
 	  return 0;
 	  break;
@@ -1302,6 +1338,10 @@ ipsec_esp_enckeylength (struct proto *proto)
       return 24;
     case IPSEC_ESP_CAST:
       if (!iproto->keylen)
+        return 32;
+      return iproto->keylen / 8;
+    case IPSEC_ESP_AES:
+      if (!iproto->keylen)
 	return 16;
       /* Fallthrough */
     default:
@@ -1320,6 +1360,7 @@ ipsec_esp_authkeylength (struct proto *proto)
     case IPSEC_AUTH_HMAC_MD5:
       return 16;
     case IPSEC_AUTH_HMAC_SHA:
+    case IPSEC_AUTH_HMAC_RIPEMD:
       return 20;
     default:
       return 0;
@@ -1335,6 +1376,7 @@ ipsec_ah_keylength (struct proto *proto)
     case IPSEC_AH_MD5:
       return 16;
     case IPSEC_AH_SHA:
+    case IPSEC_AH_RIPEMD:
       return 20;
     default:
       return -1;
@@ -1467,6 +1509,97 @@ ipsec_get_id (char *section, int *id, struct in_addr *addr,
   return 0;
 }
 
+#ifdef USE_DEBUG
+static void
+ipsec_ipv4toa (char *buf, size_t size, u_int8_t *addr)
+{
+#ifdef HAVE_GETNAMEINFO
+  struct sockaddr_storage from;
+  struct sockaddr_in *sfrom = (struct sockaddr_in *)&from;
+  socklen_t fromlen = sizeof from;
+
+  memset (&from, 0, fromlen);
+  sfrom->sin_len = sizeof *sfrom;
+  sfrom->sin_family = AF_INET;
+  memcpy (&sfrom->sin_addr.s_addr, addr, sizeof sfrom->sin_addr.s_addr);
+
+  if (getnameinfo ((struct sockaddr *)sfrom, sfrom->sin_len, buf, size, NULL,
+		   0, NI_NUMERICHOST) != 0)
+    {
+      log_print ("ipsec_ipv4toa: getnameinfo () failed");
+      strcpy (buf, "<error>");
+    }
+#else
+  strncpy (buf, inet_ntoa (*(struct in_addr *)addr), size - 1);
+  buf[size - 1] = '\0';
+#endif /* HAVE_GETNAMEINFO */
+}
+
+static void
+ipsec_decode_id (u_int8_t *buf, int size, u_int8_t *id, size_t id_len,
+		 int isakmpform)
+{
+  int id_type;
+  char ntop[NI_MAXHOST], ntop2[NI_MAXHOST];
+
+  if (id)
+    {
+      if (!isakmpform)
+	{
+	  /* exchanges and SA's dont carry the IDs in ISAKMP form */
+	  id -= ISAKMP_ID_TYPE_OFF;
+	  id_len += ISAKMP_ID_TYPE_OFF;
+	}
+
+      id_type = GET_ISAKMP_ID_TYPE (id);
+      switch (id_type)
+	{
+	case IPSEC_ID_IPV4_ADDR:
+	  ipsec_ipv4toa (ntop, sizeof ntop, id + ISAKMP_ID_DATA_OFF);
+	  snprintf (buf, size, "%08x: %s",
+		    decode_32 (id + ISAKMP_ID_DATA_OFF), ntop);
+	  break;
+	case IPSEC_ID_IPV4_ADDR_SUBNET:
+	  ipsec_ipv4toa (ntop, sizeof ntop, id + ISAKMP_ID_DATA_OFF);
+	  ipsec_ipv4toa (ntop2, sizeof ntop2, id + ISAKMP_ID_DATA_OFF + 4);
+	  snprintf (buf, size, "%08x/%08x: %s/%s",
+		    decode_32 (id + ISAKMP_ID_DATA_OFF),
+		    decode_32 (id + ISAKMP_ID_DATA_OFF + 4),
+		    ntop, ntop2);
+	  break;
+	case IPSEC_ID_FQDN:
+	case IPSEC_ID_USER_FQDN:
+	  /* String is not NUL terminated, be careful */
+	  id_len -= ISAKMP_ID_DATA_OFF;
+	  id_len = MIN(id_len, size - 1);
+	  memcpy (buf, id + ISAKMP_ID_DATA_OFF, id_len);
+	  buf[id_len] = '\0';
+	  break;
+	  /* XXX - IPV6 et al */
+	default:
+	  snprintf (buf, size, "<type unknown: %x>", id_type);
+	  break;
+	}
+    }
+  else
+    snprintf (buf, size, "<no id>");
+}
+
+char *
+ipsec_decode_ids (char *fmt, u_int8_t *id1, size_t id1_len,
+		  u_int8_t *id2, size_t id2_len, int isakmpform)
+{
+  static char result[1024];
+  char s_id1[256], s_id2[256];
+
+  ipsec_decode_id(s_id1, sizeof s_id1, id1, id1_len, isakmpform);
+  ipsec_decode_id(s_id2, sizeof s_id2, id2, id2_len, isakmpform);
+
+  snprintf (result, sizeof result, fmt, s_id1, s_id2);
+  return result;
+}
+#endif /* USE_DEBUG */
+
 /*
  * Out of a named section SECTION in the configuration file build an
  * ISAKMP ID payload.  Ths payload size should be stashed in SZ.
@@ -1502,7 +1635,7 @@ ipsec_build_id (char *section, size_t *sz)
 
   SET_ISAKMP_ID_TYPE (p, id);
   SET_ISAKMP_ID_DOI_DATA (p, "\000\000\000");
-  
+
   switch (id)
     {
     case IPSEC_ID_IPV4_ADDR:
@@ -1515,6 +1648,37 @@ ipsec_build_id (char *section, size_t *sz)
     }
 
   return p;
+}
+
+/*
+ * copy an ISAKMPD id
+ */
+
+int
+ipsec_clone_id (u_int8_t **did, size_t *did_len, u_int8_t *id, size_t id_len)
+{
+  if (*did)
+    free (*did);
+
+  if (!id_len || id == NULL)
+    {
+      *did = NULL;
+      *did_len = 0;
+      return 0;
+    }
+
+  *did = malloc (id_len);
+  if (*did == NULL)
+    {
+      *did_len = 0;
+      log_error ("ipsec_clone_id: malloc(%d) failed", id_len);
+      return -1;
+    }
+
+  *did_len = id_len;
+  memcpy (*did, id, id_len);
+
+  return 0;
 }
 
 /*

@@ -2,12 +2,17 @@
  * Author: Tatu Ylonen <ylo@cs.hut.fi>
  * Copyright (c) 1994 Tatu Ylonen <ylo@cs.hut.fi>, Espoo, Finland
  *                    All rights reserved
- * Created: Mon Mar 27 02:26:40 1995 ylo
  * Identity and host key generation and maintenance.
+ *
+ * As far as I am concerned, the code I have written for this software
+ * can be used freely for any purpose.  Any derived versions of this
+ * software must be clearly marked as such, and if the derived work is
+ * incompatible with the protocol description in the RFC file, it must be
+ * called by a name other than "ssh" or "Secure Shell".
  */
 
 #include "includes.h"
-RCSID("$Id: ssh-keygen.c,v 1.25 2000/05/08 18:23:07 markus Exp $");
+RCSID("$OpenBSD: ssh-keygen.c,v 1.32 2000/10/09 21:30:44 markus Exp $");
 
 #include <openssl/evp.h>
 #include <openssl/pem.h>
@@ -16,12 +21,14 @@ RCSID("$Id: ssh-keygen.c,v 1.25 2000/05/08 18:23:07 markus Exp $");
 
 #include "ssh.h"
 #include "xmalloc.h"
-#include "fingerprint.h"
 #include "key.h"
 #include "rsa.h"
 #include "dsa.h"
 #include "authfile.h"
 #include "uuencode.h"
+
+#include "buffer.h"
+#include "bufaux.h"
 
 /* Number of bits in the RSA/DSA key.  This value can be changed on the command line. */
 int bits = 1024;
@@ -100,8 +107,10 @@ try_load_key(char *filename, Key *k)
 	return success;
 }
 
-#define SSH_COM_MAGIC_BEGIN "---- BEGIN SSH2 PUBLIC KEY ----"
-#define SSH_COM_MAGIC_END   "---- END SSH2 PUBLIC KEY ----"
+#define SSH_COM_PUBLIC_BEGIN		"---- BEGIN SSH2 PUBLIC KEY ----"
+#define SSH_COM_PUBLIC_END  		"---- END SSH2 PUBLIC KEY ----"
+#define SSH_COM_PRIVATE_BEGIN		"---- BEGIN SSH2 ENCRYPTED PRIVATE KEY ----"
+#define	SSH_COM_PRIVATE_KEY_MAGIC	0x3f6ff9eb                                          
 
 void
 do_convert_to_ssh2(struct passwd *pw)
@@ -123,16 +132,81 @@ do_convert_to_ssh2(struct passwd *pw)
 		exit(1);
 	}
 	dsa_make_key_blob(k, &blob, &len);
-	fprintf(stdout, SSH_COM_MAGIC_BEGIN "\n");
+	fprintf(stdout, "%s\n", SSH_COM_PUBLIC_BEGIN);
 	fprintf(stdout,
-	    "Comment: \"%d-bit DSA, converted from openssh by %s@%s\"\n",
-	    BN_num_bits(k->dsa->p),
+	    "Comment: \"%d-bit %s, converted from OpenSSH by %s@%s\"\n",
+	    key_size(k), key_type(k),
 	    pw->pw_name, hostname);
 	dump_base64(stdout, blob, len);
-	fprintf(stdout, SSH_COM_MAGIC_END "\n");
+	fprintf(stdout, "%s\n", SSH_COM_PUBLIC_END);
 	key_free(k);
 	xfree(blob);
 	exit(0);
+}
+
+void
+buffer_get_bignum_bits(Buffer *b, BIGNUM *value)
+{
+	int bits = buffer_get_int(b);
+	int bytes = (bits + 7) / 8;
+	if (buffer_len(b) < bytes)
+		fatal("buffer_get_bignum_bits: input buffer too small");
+	BN_bin2bn((unsigned char *)buffer_ptr(b), bytes, value);
+	buffer_consume(b, bytes);
+}
+
+Key *
+do_convert_private_ssh2_from_blob(char *blob, int blen)
+{
+	Buffer b;
+	DSA *dsa;
+	Key *key = NULL;
+	int ignore, magic, rlen;
+	char *type, *cipher;
+
+	buffer_init(&b);
+	buffer_append(&b, blob, blen);
+
+	magic  = buffer_get_int(&b);
+	if (magic != SSH_COM_PRIVATE_KEY_MAGIC) {
+		error("bad magic 0x%x != 0x%x", magic, SSH_COM_PRIVATE_KEY_MAGIC);
+		buffer_free(&b);
+		return NULL;
+	}
+	ignore = buffer_get_int(&b);
+	type   = buffer_get_string(&b, NULL);
+	cipher = buffer_get_string(&b, NULL);
+	ignore = buffer_get_int(&b);
+	ignore = buffer_get_int(&b);
+	ignore = buffer_get_int(&b);
+	xfree(type);
+
+	if (strcmp(cipher, "none") != 0) {
+		error("unsupported cipher %s", cipher);
+		xfree(cipher);
+		buffer_free(&b);
+		return NULL;
+	}
+	xfree(cipher);
+
+	key = key_new(KEY_DSA);
+	dsa = key->dsa;
+	dsa->priv_key = BN_new();
+	if (dsa->priv_key == NULL) {
+		error("alloc priv_key failed");
+		key_free(key);
+		return NULL;
+	}
+	buffer_get_bignum_bits(&b, dsa->p);
+	buffer_get_bignum_bits(&b, dsa->g);
+	buffer_get_bignum_bits(&b, dsa->q);
+	buffer_get_bignum_bits(&b, dsa->pub_key);
+	buffer_get_bignum_bits(&b, dsa->priv_key);
+	rlen = buffer_len(&b);
+	if(rlen != 0)
+		error("do_convert_private_ssh2_from_blob: remaining bytes in key blob %d", rlen);
+	buffer_free(&b);
+	return key;
 }
 
 void
@@ -144,7 +218,7 @@ do_convert_from_ssh2(struct passwd *pw)
 	char blob[8096];
 	char encoded[8096];
 	struct stat st;
-	int escaped = 0;
+	int escaped = 0, private = 0, ok;
 	FILE *fp;
 
 	if (!have_identity)
@@ -168,6 +242,8 @@ do_convert_from_ssh2(struct passwd *pw)
 			escaped++;
 		if (strncmp(line, "----", 4) == 0 ||
 		    strstr(line, ": ") != NULL) {
+			if (strstr(line, SSH_COM_PRIVATE_BEGIN) != NULL)
+				private = 1;
 			fprintf(stderr, "ignore: %s", line);
 			continue;
 		}
@@ -184,9 +260,20 @@ do_convert_from_ssh2(struct passwd *pw)
 		fprintf(stderr, "uudecode failed.\n");
 		exit(1);
 	}
-	k = dsa_key_from_blob(blob, blen);
-	if (!key_write(k, stdout))
-		fprintf(stderr, "key_write failed");
+	k = private ?
+	    do_convert_private_ssh2_from_blob(blob, blen) :
+	    dsa_key_from_blob(blob, blen);
+	if (k == NULL) {
+		fprintf(stderr, "decode blob failed.\n");
+		exit(1);
+	}
+	ok = private ?
+	    PEM_write_DSAPrivateKey(stdout, k->dsa, NULL, NULL, 0, NULL, NULL) :
+	    key_write(k, stdout);
+	if (!ok) {
+		fprintf(stderr, "key write failed");
+		exit(1);
+	}
 	key_free(k);
 	fprintf(stdout, "\n");
 	fclose(fp);
@@ -224,8 +311,9 @@ do_print_public(struct passwd *pw)
 void
 do_fingerprint(struct passwd *pw)
 {
+	/* XXX RSA1 only */
+
 	FILE *f;
-	BIGNUM *e, *n;
 	Key *public;
 	char *comment = NULL, *cp, *ep, line[16*1024];
 	int i, skip = 0, num = 1, invalid = 1;
@@ -245,13 +333,9 @@ do_fingerprint(struct passwd *pw)
 		key_free(public);
 		exit(0);
 	}
-	key_free(public);
 
-	/* XXX */
 	f = fopen(identity_file, "r");
 	if (f != NULL) {
-		n = BN_new();
-		e = BN_new();
 		while (fgets(line, sizeof(line), f)) {
 			i = strlen(line) - 1;
 			if (line[i] != '\n') {
@@ -286,18 +370,17 @@ do_fingerprint(struct passwd *pw)
 				*cp++ = '\0';
 			}
 			ep = cp;
-			if (auth_rsa_read_key(&cp, &ignore, e, n)) {
+			if (auth_rsa_read_key(&cp, &ignore, public->rsa->e, public->rsa->n)) {
 				invalid = 0;
 				comment = *cp ? cp : comment;
-				printf("%d %s %s\n", BN_num_bits(n),
-				    fingerprint(e, n),
+				printf("%d %s %s\n", key_size(public),
+				    key_fingerprint(public),
 				    comment ? comment : "no comment");
 			}
 		}
-		BN_free(e);
-		BN_free(n);
 		fclose(f);
 	}
+	key_free(public);
 	if (invalid) {
 		printf("%s is not a valid key file.\n", identity_file);
 		exit(1);
@@ -516,7 +599,7 @@ main(int ac, char **av)
 	extern int optind;
 	extern char *optarg;
 
-	OpenSSL_add_all_algorithms();
+	SSLeay_add_all_algorithms();
 
 	/* we need this for the home * directory.  */
 	pw = getpwuid(getuid());
@@ -654,7 +737,7 @@ main(int ac, char **av)
 	snprintf(dotsshdir, sizeof dotsshdir, "%s/%s", pw->pw_dir, SSH_USER_DIR);
 	if (strstr(identity_file, dotsshdir) != NULL &&
 	    stat(dotsshdir, &st) < 0) {
-		if (mkdir(dotsshdir, 0755) < 0)
+		if (mkdir(dotsshdir, 0700) < 0)
 			error("Could not create directory '%s'.", dotsshdir);
 		else if (!quiet)
 			printf("Created directory '%s'.\n", dotsshdir);

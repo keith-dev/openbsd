@@ -1,8 +1,9 @@
-/*	$OpenBSD: conf.c,v 1.15 2000/05/03 13:47:15 niklas Exp $	*/
-/*	$EOM: conf.c,v 1.28 2000/05/03 13:24:45 niklas Exp $	*/
+/*	$OpenBSD: conf.c,v 1.24 2000/10/27 19:22:36 niklas Exp $	*/
+/*	$EOM: conf.c,v 1.46 2000/10/26 16:17:19 ho Exp $	*/
 
 /*
  * Copyright (c) 1998, 1999, 2000 Niklas Hallqvist.  All rights reserved.
+ * Copyright (c) 2000 Håkan Olsson.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -44,12 +45,14 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <errno.h>
 
 #include "sysdep.h"
 
 #include "app.h"
 #include "conf.h"
 #include "log.h"
+#include "util.h"
 
 struct conf_trans {
   TAILQ_ENTRY (conf_trans) link;
@@ -172,7 +175,7 @@ conf_remove_section_now (char *section)
  * into SECTION of our configuration database.
  */
 static int
-conf_set_now (char *section, char *tag, char *value, int override, 
+conf_set_now (char *section, char *tag, char *value, int override,
 	      int is_default)
 {
   struct conf_binding *node = 0;
@@ -181,7 +184,7 @@ conf_set_now (char *section, char *tag, char *value, int override,
     conf_remove_now (section, tag);
   else if (conf_get_str (section, tag))
     {
-      if (is_default == 0)
+      if (!is_default)
 	log_print ("conf_set: duplicate tag [%s]:%s, ignoring...\n", section,
 		   tag);
       return 1;
@@ -193,9 +196,9 @@ conf_set_now (char *section, char *tag, char *value, int override,
       log_error ("conf_set: calloc (1, %d) failed", sizeof *node);
       return 1;
     }
-  node->section = section;
-  node->tag = tag;
-  node->value = value;
+  node->section = strdup (section);
+  node->tag = strdup (tag);
+  node->value = strdup (value);
   node->is_default = is_default;
 
   LIST_INSERT_HEAD (&conf_bindings[conf_hash (section)], node, link);
@@ -235,6 +238,8 @@ conf_parse_line (int trans, char *line, size_t sz)
 	  section = 0;
 	  return;
 	}
+      if (section)
+	free (section);
       section = malloc (i);
       strncpy (section, line + 1, i - 1);
       section[i - 1] = '\0';
@@ -296,15 +301,15 @@ conf_parse (int trans, char *buf, size_t sz)
     log_print ("conf_parse: last line non-terminated, ignored.");
 }
 
-/* 
+/*
  * Auto-generate default configuration values for the transforms and
- * suites the user wants. 
+ * suites the user wants.
  *
  * Resulting section names can be:
- *  For main mode: 
+ *  For main mode:
  *     {DES,BLF,3DES,CAST}-{MD5,SHA}[-{DSS,RSA_SIG}]
  *  For quick mode:
- *     QM-{ESP,AH}[-TRP]-{DES,3DES,CAST,BLF}[-{MD5,SHA}][-PFS]-SUITE
+ *     QM-{ESP,AH}[-TRP]-{DES,3DES,CAST,BLF,AES}[-{MD5,SHA,RIPEMD}][-PFS]-SUITE
  * DH groups; currently always MODP_768 for MD5, and MODP_1024 for SHA.
  *
  * XXX We may want to support USE_BLOWFISH, USE_TRIPLEDES, etc...
@@ -318,15 +323,15 @@ conf_find_trans_xf (int phase, char *xf)
   char *p;
 
   /* Find the relevant transforms and suites, if any. */
-  for (node = TAILQ_FIRST (&conf_trans_queue); node; 
+  for (node = TAILQ_FIRST (&conf_trans_queue); node;
        node = TAILQ_NEXT (node, link))
     if (( phase == 1 && !strcmp ("Transforms", node->tag)) ||
 	( phase == 2 && !strcmp ("Suites", node->tag)))
       {
 	p = node->value;
 	while ((p = strstr (p, xf)) != NULL)
-	  if ( *(p + strlen (p)) && *(p + strlen(p)) != ',')
-	    p += strlen(p);
+	  if (*(p + strlen (p)) && *(p + strlen (p)) != ',')
+	    p += strlen (p);
 	  else
 	    return 1;
       }
@@ -337,22 +342,22 @@ void
 conf_load_defaults (int tr)
 {
   int enc, auth, hash, proto, mode, pfs;
-  char sect[256];
+  char sect[256], *dflt;
 
   char *mm_auth[]   = { "PRE_SHARED", "DSS", "RSA_SIG", NULL };
   char *mm_hash[]   = { "MD5", "SHA", NULL };
-  char *mm_enc[]    = { "DES_CBC", "BLOWFISH_CBC", "3DES_CBC", 
+  char *mm_enc[]    = { "DES_CBC", "BLOWFISH_CBC", "3DES_CBC",
 			"CAST_CBC", NULL };
   char *dh_group[]  = { "MODP_768", "MODP_1024", "MODP_1536", NULL };
-  char *qm_enc[]    = { "DES", "3DES", "CAST", "BLOWFISH", NULL };
-  char *qm_hash[]   = { "HMAC_MD5", "HMAC_SHA", "NONE", NULL };
-  
+  char *qm_enc[]    = { "DES", "3DES", "CAST", "BLOWFISH", "AES", NULL };
+  char *qm_hash[]   = { "HMAC_MD5", "HMAC_SHA", "HMAC_RIPEMD", "NONE", NULL };
+
   /* Abbreviations to make section names a bit shorter.  */
   char *mm_auth_p[] = { "", "-DSS", "-RSA_SIG", NULL };
   char *mm_enc_p[]  = { "DES", "BLF", "3DES", "CAST", NULL };
-  char *qm_enc_p[]  = { "-DES", "-3DES", "-CAST", "-BLF", NULL };
-  char *qm_hash_p[] = { "-MD5", "-SHA", "", NULL };
-  
+  char *qm_enc_p[]  = { "-DES", "-3DES", "-CAST", "-BLF", "-AES", NULL };
+  char *qm_hash_p[] = { "-MD5", "-SHA", "-RIPEMD", "", NULL };
+
   /* Helper #defines, incl abbreviations.  */
 #define PROTO(x)  ((x) ? "AH" : "ESP")
 #define PFS(x)    ((x) ? "-PFS" : "")
@@ -373,26 +378,33 @@ conf_load_defaults (int tr)
 	    0, 1);
 #endif
 
+#ifdef USE_KEYNOTE
+  conf_set (tr, "KeyNote", "Credential-directory", CONF_DFLT_KEYNOTE_CRED_DIR,
+	    0, 1);
+#endif
+
   /* Main modes */
   for (enc = 0; mm_enc[enc]; enc ++)
     for (hash = 0; mm_hash[hash]; hash ++)
       for (auth = 0; mm_auth[auth]; auth ++)
 	{
-	  sprintf (sect, "%s-%s%s", mm_enc_p[enc], mm_hash[hash], 
+	  sprintf (sect, "%s-%s%s", mm_enc_p[enc], mm_hash[hash],
 		   mm_auth_p[auth]);
-	  
+
+#if 0
 	  if (!conf_find_trans_xf (1, sect))
 	    continue;
+#endif
 
 	  LOG_DBG ((LOG_MISC, 40, "conf_load_defaults : main mode %s", sect));
 
 	  conf_set (tr, sect, "ENCRYPTION_ALGORITHM", mm_enc[enc], 0, 1);
 	  if (!strcmp (mm_enc[enc], "BLOWFISH_CBC"))
 	    conf_set (tr, sect, "KEY_LENGTH", CONF_DFLT_VAL_BLF_KEYLEN, 0, 1);
-	  
+
 	  conf_set (tr, sect, "HASH_ALGORITHM", mm_hash[hash], 0, 1);
 	  conf_set (tr, sect, "AUTHENTICATION_METHOD", mm_auth[auth], 0, 1);
-	  
+
 	  /* XXX Assumes md5 -> modp768 and sha -> modp1024 */
 	  conf_set (tr, sect, "GROUP_DESCRIPTION", dh_group[hash], 0, 1);
 
@@ -412,14 +424,16 @@ conf_load_defaults (int tr)
 	      {
 		char tmp[256];
 
-		sprintf (tmp, "QM-%s%s%s%s%s", PROTO (proto), MODE_p (mode), 
+		sprintf (tmp, "QM-%s%s%s%s%s", PROTO (proto), MODE_p (mode),
 			 qm_enc_p[enc], qm_hash_p[hash], PFS (pfs));
 
 		strcpy (sect, tmp);
 		strcat (sect, "-SUITE");
 
+#if 0
 		if (!conf_find_trans_xf (2, sect))
 		  continue;
+#endif
 
 		LOG_DBG ((LOG_MISC, 40, "conf_load_defaults : quick mode %s",
 			  sect));
@@ -434,41 +448,43 @@ conf_load_defaults (int tr)
 		conf_set (tr, tmp, "Transforms", sect, 0, 1);
 
                 /* XXX For now, defaults contain just one xf per protocol.  */
-		
+
 		conf_set (tr, sect, "TRANSFORM_ID", qm_enc[enc], 0, 1);
 
                 if (!strcmp (qm_enc[enc], "BLOWFISH"))
-		  conf_set (tr, sect, "KEY_LENGTH", CONF_DFLT_VAL_BLF_KEYLEN, 
+		  conf_set (tr, sect, "KEY_LENGTH", CONF_DFLT_VAL_BLF_KEYLEN,
 			    0, 1);
-                
+
 		conf_set (tr, sect, "ENCAPSULATION_MODE", MODE (mode), 0, 1);
 
                 if (strcmp (qm_hash[hash], "NONE"))
                 {
-		  conf_set (tr, sect, "AUTHENTICATION_ALGORITHM", 
+		  conf_set (tr, sect, "AUTHENTICATION_ALGORITHM",
 			    qm_hash[hash], 0, 1);
-                  
+
                   /* XXX Another shortcut -- to keep length down.  */
                   if (pfs)
-		    conf_set (tr, sect, "GROUP_DESCRIPTION", 
+		    conf_set (tr, sect, "GROUP_DESCRIPTION",
 			      dh_group[ ((hash<2) ? hash : 1) ], 0, 1);
                 }
 
                 /* XXX Lifetimes depending on enc/auth strength?  */
-		conf_set (tr, sect, "Life", CONF_DFLT_TAG_LIFE_QUICK_MODE, 0, 
+		conf_set (tr, sect, "Life", CONF_DFLT_TAG_LIFE_QUICK_MODE, 0,
 			  1);
 	      }
 
-  /* Lifetimes */
-  conf_set (tr, CONF_DFLT_TAG_LIFE_MAIN_MODE, "LIFE_TYPE", 
+  /* Lifetimes. XXX p1/p2 vs main/quick mode may be unclear.  */
+  dflt = conf_get_str ("General", "Default-phase-1-lifetime");
+  conf_set (tr, CONF_DFLT_TAG_LIFE_MAIN_MODE, "LIFE_TYPE",
 	    CONF_DFLT_TYPE_LIFE_MAIN_MODE, 0, 1);
-  conf_set (tr, CONF_DFLT_TAG_LIFE_MAIN_MODE, "LIFE_DURATION", 
-	    CONF_DFLT_VAL_LIFE_MAIN_MODE, 0, 1);
+  conf_set (tr, CONF_DFLT_TAG_LIFE_MAIN_MODE, "LIFE_DURATION",
+	    (dflt ? dflt : CONF_DFLT_VAL_LIFE_MAIN_MODE), 0, 1);
 
-  conf_set (tr, CONF_DFLT_TAG_LIFE_QUICK_MODE, "LIFE_TYPE", 
+  dflt = conf_get_str ("General", "Default-phase-2-lifetime");
+  conf_set (tr, CONF_DFLT_TAG_LIFE_QUICK_MODE, "LIFE_TYPE",
 	    CONF_DFLT_TYPE_LIFE_QUICK_MODE, 0, 1);
-  conf_set (tr, CONF_DFLT_TAG_LIFE_QUICK_MODE, "LIFE_DURATION", 
-	    CONF_DFLT_VAL_LIFE_QUICK_MODE, 0, 1);
+  conf_set (tr, CONF_DFLT_TAG_LIFE_QUICK_MODE, "LIFE_DURATION",
+	    (dflt ? dflt : CONF_DFLT_VAL_LIFE_QUICK_MODE), 0, 1);
 
   return;
 }
@@ -490,55 +506,45 @@ conf_reinit (void)
 {
   struct conf_binding *cb = 0;
   int fd, i, trans;
-  struct stat st;
   off_t sz;
   char *new_conf_addr = 0;
+  struct stat sb;
 
-  fd = open (conf_path, O_RDONLY);
-  if (fd == -1)
+  if ((stat (conf_path, &sb) == 0) || (errno != ENOENT))
     {
-      log_error ("conf_reinit: open (\"%s\", O_RDONLY) failed", conf_path);
-      return;
-    }
-  if (fstat (fd, &st) == -1)
-    {
-      log_error ("conf_reinit: fstat (%d, &st) failed", fd);
-      goto fail;
-    }
-  if (st.st_uid != geteuid () && st.st_uid != getuid ())
-    {
-      log_print ("conf_reinit: not loading %s - file owner is not process "
-		 "user", conf_path);
+      if (check_file_secrecy (conf_path, &sz))
+	return;
+
+      fd = open (conf_path, O_RDONLY);
+      if (fd == -1)
+        {
+	  log_error ("conf_reinit: open (\"%s\", O_RDONLY) failed", conf_path);
+	  return;
+	}
+
+      new_conf_addr = malloc (sz);
+      if (!new_conf_addr)
+        {
+	  log_error ("conf_reinit: malloc (%d) failed", sz);
+	  goto fail;
+	}
+
+      /* XXX I assume short reads won't happen here.  */
+      if (read (fd, new_conf_addr, sz) != sz)
+        {
+	    log_error ("conf_reinit: read (%d, %p, %d) failed",
+		       fd, new_conf_addr, sz);
+	    goto fail;
+	}
       close (fd);
-      return;
-    } 
-  if ((st.st_mode & (S_IRWXG | S_IRWXO)) != 0)
-    {
-      log_print ("conf_reinit: not loading %s - too open permissions",
-		 conf_path);
-      close (fd);
-      return;
-    }
-  sz = st.st_size;
-  new_conf_addr = malloc (sz);
-  if (!new_conf_addr)
-    {
-      log_error ("conf_reinit: malloc (%d) failed", sz);
-      goto fail;
-    }
-  /* XXX I assume short reads won't happen here.  */
-  if (read (fd, new_conf_addr, sz) != sz)
-    {
-      log_error ("conf_reinit: read (%d, %p, %d) failed", fd, new_conf_addr,
-		 sz);
-      goto fail;
-    }
-  close (fd);
 
-  trans = conf_begin ();
+      trans = conf_begin ();
 
-  /* XXX Should we not care about errors and rollback?  */
-  conf_parse (trans, new_conf_addr, sz);
+      /* XXX Should we not care about errors and rollback?  */
+      conf_parse (trans, new_conf_addr, sz);
+    }
+  else
+    trans = conf_begin ();
 
   /* Load default configuration values.  */
   conf_load_defaults (trans);
@@ -708,7 +714,7 @@ conf_get_tag_list (char *section)
   return 0;
 }
 
-/* Decode a PEM encoded buffer.  */ 
+/* Decode a PEM encoded buffer.  */
 int
 conf_decode_base64 (u_int8_t *out, u_int32_t *len, u_char *buf)
 {
@@ -747,7 +753,7 @@ conf_decode_base64 (u_int8_t *out, u_int32_t *len, u_char *buf)
 	    {
 	      c4 = 0;
 	      c += 2;
-	      
+
 	      /* Check last two bit */
 	      if (c3 & 3)
 		return 0;
@@ -755,10 +761,10 @@ conf_decode_base64 (u_int8_t *out, u_int32_t *len, u_char *buf)
 	      if (strcmp (buf, "="))
 		return 0;
 
-	    } 
+	    }
 	  else if (*buf > 127 || (c4 = asc2bin[*buf]) == 255)
 	      return 0;
-	  else 
+	  else
 	      c += 3;
 	}
 
@@ -777,7 +783,7 @@ conf_decode_base64 (u_int8_t *out, u_int32_t *len, u_char *buf)
 int
 conf_get_line (FILE *stream, char *buf, u_int32_t len)
 {
-  char c;
+  int c;
 
   while (len-- > 1)
     {
@@ -962,6 +968,12 @@ conf_end (int transaction, int commit)
 		log_print ("conf_end: unknown operation: %d", node->op);
 	      }
 	  TAILQ_REMOVE (&conf_trans_queue, node, link);
+	  if (node->section)
+	    free (node->section);
+	  if (node->tag)
+	    free (node->tag);
+	  if (node->value)
+	    free (node->value);
 	  free (node);
 	}
     }
@@ -979,19 +991,19 @@ static void
 conf_report_dump (struct dumper *node)
 {
   /* Recursive, cleanup when we're done. */
-  
+
   if (node->next)
     conf_report_dump (node->next);
 
   if (node->v)
     LOG_DBG ((LOG_REPORT, 0, "%s=\t%s", node->s, node->v));
-  else 
+  else if (node->s)
     {
       LOG_DBG ((LOG_REPORT, 0, "%s", node->s));
       if (strlen (node->s) > 0)
 	free (node->s);
     }
-  
+
   free (node);
 }
 
@@ -1006,7 +1018,7 @@ conf_report (void)
   dumper = dnode = (struct dumper *)calloc (1, sizeof *dumper);
   if (!dumper)
     goto mem_fail;
-  
+
   LOG_DBG ((LOG_REPORT, 0, "conf_report: dumping running configuration"));
 
   for (i = 0; i < sizeof conf_bindings / sizeof conf_bindings[0]; i++)
@@ -1036,7 +1048,7 @@ conf_report (void)
 		      = (struct dumper *)calloc (1, sizeof (struct dumper));
 		    dnode = dnode->next;
 		    if (!dnode)
-		      goto mem_fail;		  
+		      goto mem_fail;
 		  }
 		current_section = cb->section;
 	      }

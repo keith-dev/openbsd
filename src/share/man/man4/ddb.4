@@ -1,4 +1,4 @@
-.\"	$OpenBSD: ddb.4,v 1.18 2000/04/15 11:45:51 aaron Exp $
+.\"	$OpenBSD: ddb.4,v 1.24 2000/07/29 00:58:24 marc Exp $
 .\"	$NetBSD: ddb.4,v 1.5 1994/11/30 16:22:09 jtc Exp $
 .\"
 .\" Mach Operating System
@@ -34,10 +34,10 @@
 .Sh DESCRIPTION
 The kernel debugger has most of the features of the old kdb,
 but with a more rational
-.No ( Xr gdb 1
-\&- like) syntax.
+.Pf ( Xr gdb 1 No Ns \&-like )
+syntax.
 .Pp
-.Nm ddb
+.Nm
 prompts for commands on the console with:
 .Pp
 .Bd -literal -offset indent
@@ -45,7 +45,7 @@ ddb>
 .Ed
 .Pp
 The general syntax of a
-.Nm ddb
+.Nm
 command is:
 .Pp
 .Bd -ragged -offset indent
@@ -56,7 +56,7 @@ command is:
 .Ed
 .Pp
 To save typing,
-.Nm ddb
+.Nm
 makes use of a context inferred from previous commands.
 In this context,
 the current location is called
@@ -67,7 +67,7 @@ the current location is called
 .\" a hexadecimal format at a prompt.
 The
 .Ic examine ,
-.Ic search
+.Ic search ,
 and
 .Ic write
 commands update
@@ -110,17 +110,20 @@ a
 .Ar count
 of 1, and no modifiers.
 .Pp
-.Nm ddb
+.Nm
 has a feature like
 .Xr more 1
-for the output.  If the number of lines output in response to
-one command exceeds the number set in the
+for the output.
+If the number of lines output in response to one command exceeds the number
+set in the
 .Va \&$lines
 variable, it displays the message
 .Ql "--db_more--"
 and waits for a response.
+.Pp
 The valid responses are:
-.Bl -tag -width 10n -compact -offset indent
+.Pp
+.Bl -tag -width 10n -offset indent -compact
 .It <space>
 One more page.
 .It <return>
@@ -130,7 +133,8 @@ Abort the current command, and return to the command input mode.
 .El
 .Pp
 The following command line editing keys are provided:
-.Bl -tag -width 10n -compact -offset indent
+.Pp
+.Bl -tag -width 10n -offset indent -compact
 .It Ic \&^b
 back up one character
 .It Ic \&^f
@@ -169,14 +173,29 @@ redraw line
 .\" abort command (even if paused)
 .\" .El
 .Pp
-.Nm ddb
+.Nm
 is only available if the kernel was configured with the DDB option.
+.Nm
+will be invoked upon a kernel panic when the
+.Xr sysctl 8
+name
+.Va ddb.panic
+is set to 1.
+.Nm
+may be invoked from the console by the key sequence
+.Li Ctl-Alt-Esc
+when the
+.Xr sysctl 8
+name
+.Va ddb.console
+is set to 1.
 .Sh COMMANDS
 The following commands may be typed at the
 .Ql ddb>
-prompt. Some commands consist of more than one word, and if
-only the first word or words are entered, the possible alternatives
-to complete the command are displayed and no other action is performed.
+prompt.
+Some commands consist of more than one word, and if only the first word
+or words are entered, the possible alternatives to complete the command
+are displayed and no other action is performed.
 .Bl -tag -width 10n
 .\" --------------------
 .It Ic help
@@ -197,6 +216,7 @@ If no format is specified, the last formats specified for this command
 is used.
 .Pp
 The format characters are:
+.Pp
 .Bl -tag -width 4n -compact
 .It Cm /b
 look at by bytes (8 bits)
@@ -222,7 +242,7 @@ display in unsigned decimal
 display in current radix, signed
 .It Cm /c
 display low 8 bits as a character.
-Non-printing characters are displayed as an octal escape code (e.g. '\\000').
+Non-printing characters are displayed as an octal escape code (e.g., '\\000').
 .It Cm /s
 display the null-terminated string at the location.
 Non-printing characters are displayed as octal escapes.
@@ -234,6 +254,7 @@ display as an instruction
 .It Cm /I
 display as an alternate format instruction depending on the
 machine:
+.Pp
 .Bl -tag -width powerpc_ -compact
 .It vax
 Don't assume that each external label is a procedure entry mask.
@@ -283,10 +304,13 @@ is used.
 The
 .Ar addr
 argument
-can be a string, and it is printed as a literal.  For example,
+can be a string, and it is printed as a literal.
+.Pp
+For example,
 .Bd -literal -offset indent
 print/x "eax = " $eax "\enecx = " $ecx "\en"
 .Ed
+.Pp
 will print something like this:
 .Bd -literal -offset indent
 eax = xxxxxx
@@ -308,7 +332,8 @@ Write the value of each
 expression at succeeding locations start at
 .Ar addr .
 The write unit size can be specified using one of the modifiers:
-.Bl -tag -width 4n -compact -offset indent
+.Pp
+.Bl -tag -width 4n -offset indent -compact
 .It Cm /b
 byte (8 bits)
 .It Cm /h
@@ -345,7 +370,7 @@ Sync disks and reboot.
 .It Ic boot crash
 Dump core and reboot.
 .It Ic boot dump
-Dump core, sync disks and reboot.
+Sync disks, dump core and reboot.
 .El
 .\" --------------------
 .It Xo
@@ -359,7 +384,7 @@ Set a break point at
 If
 .Ar count
 is supplied,
-.Nm ddb
+.Nm
 allows the breakpoint to be silently hit
 .Ar ( count No \&- 1 )
 times before stopping at the
@@ -375,17 +400,19 @@ When the
 .Cm /u
 modifier is specified,
 .Ar addr
-is taken as a user space address. Without it,
-the address is considered in the kernel space. Wrong space addresses
-are rejected with an error message.  The
+is taken as a user space address.
+Without it, the address is considered in the kernel space.
+Wrong space addresses are rejected with an error message.
+The
 .Cm /u
 modifier can be used only if it is supported by machine dependent
 routines.
 .Pp
 .Sy Warning:
 if a user text is shadowed by a normal user space debugger,
-user space break points may not work correctly.  Setting a break
-point at the low-level code paths may also cause strange behavior.
+user space break points may not work correctly.
+Setting a breakpoint at the low-level code paths may also cause strange
+behavior.
 .\" --------------------
 .\" .It Xo Ic d
 .\" .Op Ar addr | Ic # Ns Ar number
@@ -446,7 +473,7 @@ Some machines (e.g., pmax) also count loads and stores.
 .Sy Warning:
 when counting with
 .Cm /c ,
-.Nm ddb
+.Nm
 is really silently single-stepping.
 This means that single-stepping on low-level code may cause strange
 behavior.
@@ -459,7 +486,7 @@ behavior.
 Set a watchpoint for the region starting at
 .Ar addr .
 Execution stops and control returns to
-.Nm ddb
+.Nm
 when an attempt is made to modify a watched region.
 The
 .Ar size
@@ -487,7 +514,8 @@ command.
 This is tiny and handy tool for random kernel hangs analysis, of which its
 depth is controlled by the optional argument of the default value of five.
 It uses some sophisticated heuristics to spot the global symbol that
-caused the hang. Since the discovering algorithm is a probabilistic one
+caused the hang.
+Since the discovering algorithm is a probabilistic one
 you may spend substantial time to figure the exact symbol name.
 This smart thing requires a little of your attention, the input it accepts
 is mostly of the same format as that of the famous
@@ -509,20 +537,20 @@ instruction.
 If
 .Cm /p
 modifier is specified,
-.Nm ddb
+.Nm
 prints the call nesting depth and the
-cumulative instruction count at each call or return.  Otherwise,
-it stays silent until the matching return is hit.
+cumulative instruction count at each call or return.
+Otherwise, it stays silent until the matching return is hit.
 .\" --------------------
 .It Ic match Op Cm /p
 Stop at the next matching return instruction.
 If the
 .Cm /p
 modifier is specified,
-.Nm ddb
+.Nm
 prints the call nesting depth and the
-cumulative instruction count at each call or return.  Otherwise, it remains
-mostly quiet.
+cumulative instruction count at each call or return.
+Otherwise, it remains mostly quiet.
 .\" --------------------
 .It Ic next Op Cm /p
 The
@@ -536,7 +564,8 @@ command is a synonym for
 .Op Ar frameaddr Ns
 .Op Ic \&, Ns Ar count
 .Xc
-Show the stack trace. The
+Show the stack trace.
+The
 .Cm /u
 modifier shows the stack trace of user space;
 If omitted, the kernel stack is traced instead.
@@ -562,11 +591,14 @@ only if the machine dependent code supports it.
 Search memory for a value beginning at
 .Ar addr .
 This command might fail in interesting
-ways if it doesn't find the searched-for value.  This is because
-.Nm ddb
-doesn't always recover from touching bad memory.  The optional
+ways if it doesn't find the searched-for value.
+This is because
+.Nm
+doesn't always recover from touching bad memory.
+The optional
 .Ar count
-argument limits the search. The modifiers are the same as those of the
+argument limits the search.
+The modifiers are the same as those of the
 .Ic write
 command.
 .Pp
@@ -577,12 +609,12 @@ address is set to the address where
 is found, or just after where the search area finishes.
 .\" --------------------
 .It Ic show Ar what
-The show command displays different things, depending on
+Displays various things, depending on
 .Ar what :
-.Bl -tag -width 4n -compact
+.Bl -tag -width 4n
 .\" --------------------
 .It Ic show breaks
-Prints a list of all the breakpoints that have been set with the
+Prints a list of all breakpoints that have been set with the
 .Ic break
 command.
 .\" --------------------
@@ -594,20 +626,34 @@ Prints a detailed list of all extents.
 .Op Cm /f
 .Ar addr
 .Xc
-Prints the vm_map at
+Prints the
+.Li vm_map
+at
 .Ar addr .
 If the
 .Cm /f
-modifieris specified the
-complete map is printed.
+modifier is specified the complete map is printed.
+.\" --------------------
+.It Xo
+.Ic show malloc
+.Op Ar addr
+.Xc
+Prints malloc debugging information if available.
+If an optional address is specified, only information about that address
+is printed.
 .\" --------------------
 .It Xo
 .Ic show object
 .Op Cm /f
 .Ar addr
 .Xc
-Prints the vm_object at 'addr'. If the 'f' option is specified the
-complete object is printed.
+Prints the
+.Li vm_object
+at
+.Ar addr .
+If the
+.Cm /f
+modifier is specified the complete object is printed.
 .\" --------------------
 .It Xo
 .Ic show registers
@@ -633,17 +679,21 @@ command.
 .Op Cm /anw
 .Xc
 Display information on all processes.
+.Pp
 .Bl -tag -width foo -compact
 .It Cm /n
 (Default) Show process information in a
-.Xr ps 1 Ns
-\&-like format.  Information printed includes process ID, parent
+.Xr ps 1 No Ns \&-like
+format.
+Information printed includes process ID, parent
 process ID, process group, UID, process status, process flags, process
 command name, and process wait channel message.
 .It Cm /a
 Shows the kernel virtual addesses of each process'
-proc structure, u-area, and vmspace structure.   The vmspace
-address is also the address of the process' vm_map structure
+proc structure, u-area, and vmspace structure.
+The vmspace address is also the address of the process'
+.Li vm_map
+structure
 and can be used in the
 .Ic show map
 command.
@@ -669,7 +719,7 @@ A synonym for
 .\" --------------------
 .El
 .Sh VARIABLES
-.Nm ddb
+.Nm
 denotes registers and variables by
 .Ic $ Ns Va name .
 Register names can be found with the
@@ -681,7 +731,7 @@ following a colon immediately after the variable name.
 For example, register variables can have the
 .Ql :u
 modifier to indicate a
-user register (e.g.
+user register (e.g.,
 .Ql \&$eax:u ) .
 .Pp
 Built-in debugger variables currently supported are:
@@ -717,7 +767,7 @@ Almost all expression operators in C are supported except for
 and unary
 .Ql \&& .
 Special rules for expressions in
-.Nm ddb
+.Nm
 are:
 .Bl -tag -width 15n -compact -offset indent
 .It Ar identifier
@@ -791,10 +841,12 @@ It may be followed by a ':' and  modifiers as described above.
 .Sh SEE ALSO
 .Xr gdb 1 ,
 .Xr nm 1 ,
+.Xr sysctl.conf 5 ,
 .Xr hangman 6 ,
+.Xr sysctl 8 ,
 .Xr extent 9
 .Sh HISTORY
 This kernel facility first appeared in MACH 2 operating system
 developed by CMU.
-Hangman (wich stands for "hangs maniacal analyzer") first appeared in
+Hangman (which stands for "hangs maniacal analyzer") first appeared in
 .Ox 1.2 .

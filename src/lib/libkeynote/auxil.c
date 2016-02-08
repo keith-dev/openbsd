@@ -1,4 +1,4 @@
-/* $OpenBSD: auxil.c,v 1.3 2000/02/01 03:17:36 angelos Exp $ */
+/* $OpenBSD: auxil.c,v 1.5 2000/10/03 01:33:55 angelos Exp $ */
 /*
  * The author of this code is Angelos D. Keromytis (angelos@dsl.cis.upenn.edu)
  *
@@ -295,6 +295,16 @@ keynote_keylist_free(struct keylist *kl)
 }
 
 /*
+ * Free a key.
+ */
+void
+kn_free_key(struct keynote_deckey *dc)
+{
+    if (dc)
+      keynote_free_key(dc->dec_key, dc->dec_algorithm);
+}
+
+/*
  * Find the num-th assertion given the authorizer. Return NULL if not found.
  */
 struct assertion *
@@ -333,7 +343,7 @@ int
 keynote_add_htable(struct assertion *as, int which)
 {
     char *hashname;
-    u_int i;
+    unsigned int i;
 
     if (as == (struct assertion *) NULL)
     {
@@ -505,8 +515,8 @@ keynote_free_assertion(struct assertion *as)
     free(as);
 }
 
-u_int 
-keynote_stringhash(char *name, u_int size)
+unsigned int 
+keynote_stringhash(char *name, unsigned int size)
 {
     unsigned int hash_val = 0;
     unsigned int i;

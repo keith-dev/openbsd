@@ -1,4 +1,4 @@
-/*	$OpenBSD: for.c,v 1.15 2000/03/26 16:21:32 espie Exp $	*/
+/*	$OpenBSD: for.c,v 1.22 2000/09/14 13:35:38 espie Exp $	*/
 /*	$NetBSD: for.c,v 1.4 1996/11/06 17:59:05 christos Exp $	*/
 
 /*
@@ -82,7 +82,8 @@
 #if 0
 static char sccsid[] = "@(#)for.c	8.1 (Berkeley) 6/6/93";
 #else
-static char rcsid[] = "$OpenBSD: for.c,v 1.15 2000/03/26 16:21:32 espie Exp $";
+UNUSED
+static char rcsid[] = "$OpenBSD: for.c,v 1.22 2000/09/14 13:35:38 espie Exp $";
 #endif
 #endif /* not lint */
 
@@ -104,14 +105,14 @@ static char rcsid[] = "$OpenBSD: for.c,v 1.15 2000/03/26 16:21:32 espie Exp $";
 struct For_ {
     char		*text;		/* unexpanded text       	*/
     char		*var;		/* Index name		 	*/
-    Lst  		lst;		/* List of items	 	*/
+    LIST  		lst;		/* List of items	 	*/
     size_t		guess;		/* Estimated expansion size	*/
     BUFFER		buf;		/* Accumulating text	 	*/
     unsigned long	lineno;		/* Line number at start of loop */
     unsigned long	level;		/* Nesting level		*/
 };
 
-static int ForExec __P((ClientData, ClientData));
+static void ForExec __P((void *, void *));
 static void build_words_list __P((Lst, const char *));
 
 /* Cut a string into words, stuff that into list.  */
@@ -120,19 +121,12 @@ build_words_list(lst, s)
     Lst lst;
     const char *s;
 {
-    const char *wrd;
+    const char *end, *wrd;
 
-    for (;;) {
-	for (; *s != '\0' && isspace(*s); s++)
-	    continue;
-	if (*s == '\0')
-	    break;
-	for (wrd = s; *s != '\0' && !isspace(*s); s++)
-	    continue;
-    	/* note that we fill the list backward, since 
-     	 * Parse_FromString stacks strings.  */
-	Lst_AtFront(lst, interval_dup(wrd, s));
-    }
+    end = s;
+
+    while ((wrd = iterate_words(&end)) != NULL)
+    	Lst_AtFront(lst, escape_dup(wrd, end, "\"'"));
 }
 
 /*
@@ -198,12 +192,12 @@ For_Eval(line)
     arg->var = interval_dup(wrd, endVar);
 
     /* Make a list with the remaining words.  */
-    sub = Var_Subst(ptr, VAR_GLOBAL, FALSE);
+    sub = Var_Subst(ptr, NULL, FALSE);
     if (DEBUG(FOR))
 	(void)fprintf(stderr, "For: Iterator %s List %s\n", arg->var, sub);
 
-    arg->lst = Lst_Init();
-    build_words_list(arg->lst, sub);
+    Lst_Init(&arg->lst);
+    build_words_list(&arg->lst, sub);
     free(sub);
     arg->lineno = Parse_Getlineno();
     arg->level = 1;
@@ -268,10 +262,10 @@ For_Accumulate(arg, line)
  *	Expand the for loop for this index and push it in the Makefile
  *-----------------------------------------------------------------------
  */
-static int
+static void
 ForExec(namep, argp)
-    ClientData namep;
-    ClientData argp;
+    void *namep;
+    void *argp;
 {
     char *name = (char *)namep;
     For *arg = (For *)argp;
@@ -286,7 +280,6 @@ ForExec(namep, argp)
     
     Parse_FromString(Buf_Retrieve(&arg->buf), arg->lineno);
     Var_Delete(arg->var, VAR_GLOBAL);
-    return 0;
 }
 
 
@@ -304,9 +297,9 @@ For_Run(arg)
     arg->text = Buf_Retrieve(&arg->buf);
     arg->guess = Buf_Size(&arg->buf) + GUESS_EXPANSION;
 
-    Lst_ForEach(arg->lst, ForExec, arg);
+    Lst_ForEach(&arg->lst, ForExec, arg);
     free(arg->var);
     free(arg->text);
-    Lst_Destroy(arg->lst, (void (*) __P((ClientData)))free);
+    Lst_Destroy(&arg->lst, (SimpleProc)free);
     free(arg);
 }

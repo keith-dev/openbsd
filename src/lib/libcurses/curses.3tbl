@@ -1,5 +1,5 @@
 '\" t
-.\" $OpenBSD: curses.3tbl,v 1.13 1999/12/28 15:57:59 millert Exp $
+.\" $OpenBSD: curses.3tbl,v 1.17 2000/10/10 15:10:29 millert Exp $
 .\"
 .\"***************************************************************************
 .\" Copyright (c) 1998,1999 Free Software Foundation, Inc.                   *
@@ -29,7 +29,7 @@
 .\" authorization.                                                           *
 .\"***************************************************************************
 .\"
-.\" $From: ncurses.3x,v 1.39 1999/12/19 01:53:04 tom Exp $
+.\" $From: ncurses.3x,v 1.44 2000/10/08 01:39:26 tom Exp $
 .TH ncurses 3 ""
 .ds n 5
 .ds d /usr/share/terminfo
@@ -194,11 +194,13 @@ l l
 l l .
 \fBcurses\fR Routine Name/Manual Page Name
 =
+COLOR_PAIR/\fBcurs_color\fR(3)
+PAIR_NUMBER/\fBcurs_attr\fR(3)
 addch/\fBcurs_addch\fR(3)
 addchnstr/\fBcurs_addchstr\fR(3)
 addchstr/\fBcurs_addchstr\fR(3)
 addnstr/\fBcurs_addstr\fR(3)
-assume_default_colors/\fBdft_fgbg\fR(3)*
+assume_default_colors/\fBdefault_colors\fR(3)*
 attr_get/\fBcurs_attr\fR(3)
 attr_off/\fBcurs_attr\fR(3)
 attr_on/\fBcurs_attr\fR(3)
@@ -291,6 +293,7 @@ leaveok/\fBcurs_outopts\fR(3)
 longname/\fBcurs_termattrs\fR(3)
 mcprint/\fBcurs_print\fR(3)*
 meta/\fBcurs_inopts\fR(3)
+mouse_trafo/\fBcurs_mouse\fR(3)*
 mouseinterval/\fBcurs_mouse\fR(3)*
 mousemask/\fBcurs_mouse\fR(3)*
 move/\fBcurs_move\fR(3)
@@ -317,6 +320,7 @@ mvinsstr/\fBcurs_insstr\fR(3)
 mvinstr/\fBcurs_instr\fR(3)
 mvprintw/\fBcurs_printw\fR(3)
 mvscanw/\fBcurs_scanw\fR(3)
+mvvline/\fBcurs_border\fR(3)
 mvwaddch/\fBcurs_addch\fR(3)
 mvwaddchnstr/\fBcurs_addchstr\fR(3)
 mvwaddchstr/\fBcurs_addchstr\fR(3)
@@ -429,7 +433,7 @@ unctrl/\fBcurs_util\fR(3)
 ungetch/\fBcurs_getch\fR(3)
 ungetmouse/\fBcurs_mouse\fR(3)*
 untouchwin/\fBcurs_touch\fR(3)
-use_default_colors/\fBdft_fgbg\fR(3)*
+use_default_colors/\fBdefault_colors\fR(3)*
 use_env/\fBcurs_util\fR(3)
 use_extended_names/\fBcurs_extend\fR(3)*
 vidattr/\fBterminfo\fR(3)
@@ -691,6 +695,10 @@ the TERMPATH symbol.
 This is a list of filenames separated by colons (i.e., ":").
 If the TERMPATH symbol is not set, \fBcurses\fR looks in the files
 /etc/termcap, /usr/share/termcap and $HOME/.termcap, in that order.
+.PP  
+The library will disregard the following variables when the
+application uses setuid or setgid permissions:
+$TERMCAP, $TERMINFO, $TERMINFO_DIRS, $TERMPATH, as well as $HOME.
 .SH FILES
 .TP 5
 /usr/share/tabset

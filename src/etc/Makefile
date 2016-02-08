@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.111 2000/04/29 22:04:55 deraadt Exp $
+#	$OpenBSD: Makefile,v 1.116 2000/10/10 15:34:31 provos Exp $
 
 TZDIR=		/usr/share/zoneinfo
 LOCALTIME=	US/Pacific
@@ -14,7 +14,7 @@ BINOWN= root
 BINGRP= wheel
 BIN1=	bootptab changelist ccd.conf csh.cshrc csh.login csh.logout \
 	daily dhcpd.conf dhcpd.interfaces dm.conf exports ftpusers \
-	ftpchroot gettytab group hosts hosts.lpd ifaliases inetd.conf \
+	ftpchroot gettytab group hosts hosts.lpd inetd.conf \
 	ipf.rules ksh.kshrc locate.rc man.conf monthly motd mrouted.conf \
 	myname ipnat.rules netstart networks newsyslog.conf passwd.conf \
 	phones printcap protocols rbootd.conf rc rc.conf rc.local \
@@ -59,7 +59,7 @@ distribution-etc-root-var: distrib-dirs
 	cat sysctl.conf etc.${MACHINE}/sysctl.conf > ${DESTDIR}/etc/sysctl.conf && \
 	    chown ${BINOWN} ${DESTDIR}/etc/sysctl.conf && \
 	    chgrp ${BINGRP} ${DESTDIR}/etc/sysctl.conf && \
-	    chmod 644 ${DESTDIR}/etc/ttys
+	    chmod 644 ${DESTDIR}/etc/sysctl.conf
 	cat fbtab.head etc.${MACHINE}/fbtab fbtab.tail > ${DESTDIR}/etc/fbtab && \
 	    chown ${BINOWN} ${DESTDIR}/etc/fbtab && \
 	    chgrp ${BINGRP} ${DESTDIR}/etc/fbtab && \
@@ -67,8 +67,10 @@ distribution-etc-root-var: distrib-dirs
 	${INSTALL} -c -o ${BINOWN} -g ${BINGRP} -m 664 ${BIN2} ${DESTDIR}/etc
 	${INSTALL} -c -o root -g wheel -m 600 hosts.equiv ${DESTDIR}/etc
 	${INSTALL} -c -o root -g wheel -m 600 crontab ${DESTDIR}/var/cron/tabs/root
+	${INSTALL} -c -o root -g wheel -m 644 login.conf ${DESTDIR}/etc
 	${INSTALL} -c -o root -g wheel -m 600 master.passwd ${DESTDIR}/etc
 	pwd_mkdb -p -d ${DESTDIR}/etc /etc/master.passwd
+	${INSTALL} -c -o root -g wheel -m 644 primes ${DESTDIR}/etc
 	${INSTALL} -c -o ${BINOWN} -g ${BINGRP} -m 555 \
 	     MAKEDEV.local etc.${MACHINE}/MAKEDEV ${DESTDIR}/dev
 	(cd root; \
@@ -205,7 +207,9 @@ distribution-etc-root-var: distrib-dirs
 	(cd etc.${MACHINE}; ${INSTALL} -c -o ${BINOWN} -g wheel -m 444 \
 	    ld.so.conf ${DESTDIR}/etc)
 .endif
+.ifndef NOMAKEDEV
 	(cd ${DESTDIR}/dev; ./MAKEDEV all)
+.endif
 .if ${MACHINE} == "vax"
 	(cd etc.vax; ${INSTALL} -c -o ${BINOWN} -g ${BINGRP} -m 444 ${PCS} \
 	    ${DESTDIR}/)
@@ -220,7 +224,8 @@ distribution-etc-root-var: distrib-dirs
 	${INSTALL} -c -o root -g ${BINGRP} -m 644 aliases \
 	    ${DESTDIR}/etc/mail/aliases
 	/usr/libexec/sendmail/sendmail -C${DESTDIR}/etc/mail/sendmail.cf \
-	    -bi -O AliasFile=${DESTDIR}/etc/mail/aliases
+	    -bi -O AliasFile=${DESTDIR}/etc/mail/aliases \
+	    -O DontBlameSendmail=mapinunsafedirpath
 	${INSTALL} -c -o root -g wheel -m 600 root/root.mail \
 		${DESTDIR}/var/mail/root
 

@@ -1,4 +1,4 @@
-/*	$OpenBSD: ancontrol.c,v 1.1 2000/04/03 01:08:09 mickey Exp $	*/
+/*	$OpenBSD: ancontrol.c,v 1.8 2000/10/13 18:58:09 chris Exp $	*/
 /*
  * Copyright 1997, 1998, 1999
  *	Bill Paul <wpaul@ee.columbia.edu>.  All rights reserved.
@@ -129,7 +129,7 @@ an_getval(iface, areq)
 
 	bzero((char *)&ifr, sizeof(ifr));
 
-	strcpy(ifr.ifr_name, iface);
+	strlcpy(ifr.ifr_name, iface, sizeof(ifr.ifr_name));
 	ifr.ifr_data = (caddr_t)areq;
 
 	s = socket(AF_INET, SOCK_DGRAM, 0);
@@ -155,7 +155,7 @@ an_setval(iface, areq)
 
 	bzero((char *)&ifr, sizeof(ifr));
 
-	strcpy(ifr.ifr_name, iface);
+	strlcpy(ifr.ifr_name, iface, sizeof(ifr.ifr_name));
 	ifr.ifr_data = (caddr_t)areq;
 
 	s = socket(AF_INET, SOCK_DGRAM, 0);
@@ -418,7 +418,7 @@ an_dumpstats(iface)
 	    stats->an_retry_long);
 	printf("Short retries:\t\t\t\t\t[ %d ]\n",
 	    stats->an_retry_short);
-	printf("Retries exchausted:\t\t\t\t[ %d ]\n",
+	printf("Retries exhausted:\t\t\t\t[ %d ]\n",
 	    stats->an_retry_max);
 	printf("Bad ACK:\t\t\t\t\t[ %d ]\n",
 	    stats->an_no_ack);
@@ -452,9 +452,9 @@ an_dumpstats(iface)
 	    stats->an_tx_multi_cols);
 	printf("Transmits without deferrals:\t\t\t[ %d ]\n",
 	    stats->an_tx_defers_no);
-	printf("Transmits defered due to protocol:\t\t[ %d ]\n",
+	printf("Transmits deferred due to protocol:\t\t[ %d ]\n",
 	    stats->an_tx_defers_prot);
-	printf("Transmits defered due to energy detect:\t\t[ %d ]\n",
+	printf("Transmits deferred due to energy detect:\t\t[ %d ]\n",
 	    stats->an_tx_defers_energy);
 	printf("RX duplicate frames/frags:\t\t\t[ %d ]\n",
 	    stats->an_rx_dups);
@@ -786,34 +786,16 @@ void
 usage(p)
 	char			*p;
 {
-	fprintf(stderr, "usage:  %s -i iface -A (show specified APs)\n", p);
-	fprintf(stderr, "\t%s -i iface -N (show specified SSIDss)\n", p);
-	fprintf(stderr, "\t%s -i iface -S (show NIC status)\n", p);
-	fprintf(stderr, "\t%s -i iface -I (show NIC capabilities)\n", p);
-	fprintf(stderr, "\t%s -i iface -T (show stats counters)\n", p);
-	fprintf(stderr, "\t%s -i iface -C (show current config)\n", p);
-	fprintf(stderr, "\t%s -i iface -t 0|1|2|3|4 (set TX speed)\n", p);
-	fprintf(stderr, "\t%s -i iface -s 0|1|2|3 (set power same mode)\n", p);
-	fprintf(stderr, "\t%s -i iface [-v 1|2|3|4] -a AP (specify AP)\n", p);
-	fprintf(stderr, "\t%s -i iface -b val (set beacon period)\n", p);
-	fprintf(stderr, "\t%s -i iface [-v 0|1] -d val (set diversity)\n", p);
-	fprintf(stderr, "\t%s -i iface -j val (set netjoin timeout)\n", p);
-	fprintf(stderr, "\t%s -i iface -l val (set station name)\n", p);
-	fprintf(stderr, "\t%s -i iface -m val (set MAC address)\n", p);
-	fprintf(stderr, "\t%s -i iface [-v 1|2|3] -n SSID "
-	    "(specify SSID)\n", p);
-	fprintf(stderr, "\t%s -i iface -o 0|1 (set operating mode)\n", p);
-	fprintf(stderr, "\t%s -i iface -c val (set ad-hoc channel)\n", p);
-	fprintf(stderr, "\t%s -i iface -f val (set frag threshold)\n", p);
-	fprintf(stderr, "\t%s -i iface -r val (set RTS threshold)\n", p);
+	fprintf(stderr,
+	    "usage: ancontrol interface [-A] [-N] [-S] [-I] [-T] [-C] [-t 0|1|2|3|4]\n"
+	    "       [-s 0|1|2|3] [-a AP] [-v 1|2|3|4] [-b beacon period] [-d 0|1|2|3]\n"
+	    "       [-v 0|1] [-j netjoin timeout] [-l station name] [-m macaddress]\n"
+	    "       [-n SSID] [-v 1|2|3] [-o 0|1] [-p tx power] [-c channel number]\n"
+	    "       [-f fragmentation threshold] [-r RTS threshold]\n");
 #ifdef ANCACHE
-	fprintf(stderr, "\t%s -i iface -Q print signal quality cache\n", p);
-	fprintf(stderr, "\t%s -i iface -Z zero out signal cache\n", p);
+	fprintf(stderr,
+	    "       [-Q] [-Z]\n");
 #endif
-
-	fprintf(stderr, "\t%s -h (display this message)\n", p);
-
-
 	exit(1);
 }
 
@@ -1042,24 +1024,21 @@ an_setssid(iface, act, arg)
 	an_getval(iface, &areq);
 	ssid = (struct an_ltv_ssidlist *)&areq;
 
-	switch(act) {
+	switch (act) {
 	case ACT_SET_SSID1:
 		bzero(ssid->an_ssid1, sizeof(ssid->an_ssid1));
-		bcopy((char *)arg, (char *)&ssid->an_ssid1,
-		    strlen((char *)arg));
-		ssid->an_ssid1_len = strlen((char *)arg);
+		strlcpy(ssid->an_ssid1, (char *)arg, sizeof(ssid->an_ssid1));
+		ssid->an_ssid1_len = strlen(ssid->an_ssid1);
 		break;
 	case ACT_SET_SSID2:
 		bzero(ssid->an_ssid2, sizeof(ssid->an_ssid2));
-		bcopy((char *)arg, (char *)&ssid->an_ssid2,
-		    strlen((char *)arg));
-		ssid->an_ssid2_len = strlen((char *)arg);
+		strlcpy(ssid->an_ssid2, (char *)arg, sizeof(ssid->an_ssid2));
+		ssid->an_ssid2_len = strlen(ssid->an_ssid2);
 		break;
 	case ACT_SET_SSID3:
 		bzero(ssid->an_ssid3, sizeof(ssid->an_ssid3));
-		bcopy((char *)arg, (char *)&ssid->an_ssid3,
-		    strlen((char *)arg));
-		ssid->an_ssid3_len = strlen((char *)arg);
+		strlcpy(ssid->an_ssid3, (char *)arg, sizeof(ssid->an_ssid3));
+		ssid->an_ssid3_len = strlen(ssid->an_ssid3);
 		break;
 	default:
 		errx(1, "unknown action");
@@ -1141,14 +1120,21 @@ main(argc, argv)
 	char			*argv[];
 {
 	int			ch;
-	int			act = 0;
-	char			*iface = NULL;
+	int			act = 0, ifspecified = 0;
+	char			*iface = "an0";
 	int			modifier = 0;
 	void			*arg = NULL;
 	char			*p = argv[0];
 
+	if (argc > 1 && argv[1][0] != '-') {
+		iface = argv[1];
+		memcpy(&argv[1], &argv[2], argc * sizeof(char *));
+		argc--;
+		ifspecified = 1;
+	}
+
 	while ((ch = getopt(argc, argv,
-	    "i:ANISCTht:a:o:s:n:v:d:j:b:c:r:p:w:m:l:QZ")) != -1) {
+	    "i:ANISCTt:a:o:s:n:v:d:f:j:b:c:r:p:w:m:l:QZ")) != -1) {
 		switch(ch) {
 		case 'Z':
 #ifdef ANCACHE
@@ -1165,7 +1151,8 @@ main(argc, argv)
 #endif
 			break;
 		case 'i':
-			iface = optarg;
+			if (!ifspecified)
+				iface = optarg;
 			break;
 		case 'A':
 			act = ACT_DUMPAP;
@@ -1298,7 +1285,6 @@ main(argc, argv)
 			act = ACT_SET_WAKE_DURATION;
 			arg = optarg;
 			break;
-		case 'h':
 		default:
 			usage(p);
 		}

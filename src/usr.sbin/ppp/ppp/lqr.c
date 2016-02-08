@@ -17,7 +17,7 @@
  * IMPLIED WARRANTIES, INCLUDING, WITHOUT LIMITATION, THE IMPLIED
  * WARRANTIES OF MERCHANTIBILITY AND FITNESS FOR A PARTICULAR PURPOSE.
  *
- * $OpenBSD: lqr.c,v 1.9 2000/02/27 01:38:27 brian Exp $
+ * $OpenBSD: lqr.c,v 1.11 2000/07/19 11:06:35 brian Exp $
  *
  *	o LQR based on RFC1333
  *
@@ -40,9 +40,9 @@
 #include "fsm.h"
 #include "acf.h"
 #include "proto.h"
-#include "lcp.h"
 #include "lqr.h"
 #include "hdlc.h"
+#include "lcp.h"
 #include "async.h"
 #include "throughput.h"
 #include "ccp.h"
@@ -85,8 +85,9 @@ lqr_RecvEcho(struct fsm *fp, struct mbuf *bp)
   struct lcp *lcp = fsm2lcp(fp);
   struct echolqr lqr;
 
-  if (m_length(bp) == sizeof lqr) {
-    bp = mbuf_Read(bp, &lqr, sizeof lqr);
+  if (m_length(bp) >= sizeof lqr) {
+    m_freem(mbuf_Read(bp, &lqr, sizeof lqr));
+    bp = NULL;
     lqr.magic = ntohl(lqr.magic);
     lqr.signature = ntohl(lqr.signature);
     lqr.sequence = ntohl(lqr.sequence);

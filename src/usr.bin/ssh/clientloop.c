@@ -1,28 +1,70 @@
 /*
- *
- * clientloop.c
- *
  * Author: Tatu Ylonen <ylo@cs.hut.fi>
- *
  * Copyright (c) 1995 Tatu Ylonen <ylo@cs.hut.fi>, Espoo, Finland
  *                    All rights reserved
- *
- *
- * Created: Sat Sep 23 12:23:57 1995 ylo
- *
  * The main loop for the interactive session (client side).
  *
+ * As far as I am concerned, the code I have written for this software
+ * can be used freely for any purpose.  Any derived versions of this
+ * software must be clearly marked as such, and if the derived work is
+ * incompatible with the protocol description in the RFC file, it must be
+ * called by a name other than "ssh" or "Secure Shell".
+ *
+ *
+ * Copyright (c) 1999 Theo de Raadt.  All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
+ * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
+ * OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
+ * IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
+ * NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+ * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+ * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+ * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
+ * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ *
+ *
  * SSH2 support added by Markus Friedl.
+ * Copyright (c) 1999,2000 Markus Friedl.  All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
+ * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
+ * OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
+ * IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
+ * NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+ * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+ * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+ * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
+ * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
 #include "includes.h"
-RCSID("$Id: clientloop.c,v 1.26 2000/05/08 17:42:24 markus Exp $");
+RCSID("$OpenBSD: clientloop.c,v 1.39 2000/10/27 07:48:22 markus Exp $");
 
 #include "xmalloc.h"
 #include "ssh.h"
 #include "packet.h"
 #include "buffer.h"
-#include "authfd.h"
 #include "readconf.h"
 
 #include "ssh2.h"
@@ -30,6 +72,12 @@ RCSID("$Id: clientloop.c,v 1.26 2000/05/08 17:42:24 markus Exp $");
 #include "channels.h"
 #include "dispatch.h"
 
+#include "buffer.h"
+#include "bufaux.h"
+
+
+/* import options */
+extern Options options;
 
 /* Flag indicating that stdin should be redirected from /dev/null. */
 extern int stdin_null_flag;
@@ -62,6 +110,8 @@ static int in_raw_mode = 0;
 static int in_non_blocking_mode = 0;
 
 /* Common data for the client loop code. */
+static int quit_pending;	/* Set to non-zero to quit the client loop. */
+static int escape_char;		/* Escape character. */
 static int escape_pending;	/* Last character was the escape character */
 static int last_was_cr;		/* Last character was a newline. */
 static int exit_status;		/* Used to store the exit status of the command. */
@@ -69,13 +119,11 @@ static int stdin_eof;		/* EOF has been encountered on standard error. */
 static Buffer stdin_buffer;	/* Buffer for stdin data. */
 static Buffer stdout_buffer;	/* Buffer for stdout data. */
 static Buffer stderr_buffer;	/* Buffer for stderr data. */
+static unsigned long stdin_bytes, stdout_bytes, stderr_bytes;
 static unsigned int buffer_high;/* Soft max buffer size. */
 static int max_fd;		/* Maximum file descriptor number in select(). */
 static int connection_in;	/* Connection to server (input). */
 static int connection_out;	/* Connection to server (output). */
-static unsigned long stdin_bytes, stdout_bytes, stderr_bytes;
-static int quit_pending;	/* Set to non-zero to quit the client loop. */
-static int escape_char;		/* Escape character. */
 
 
 void	client_init_dispatch(void);
@@ -289,7 +337,7 @@ client_check_window_change()
 	if (ioctl(fileno(stdin), TIOCGWINSZ, &ws) < 0)
 		return;
 
-	debug("client_check_window_change: changed");
+	debug2("client_check_window_change: changed");
 
 	if (compat20) {
 		channel_request_start(session_ident, "window-change", 0);
@@ -316,8 +364,6 @@ client_check_window_change()
 void
 client_wait_until_can_do_something(fd_set * readset, fd_set * writeset)
 {
-	/*debug("client_wait_until_can_do_something"); */
-
 	/* Initialize select masks. */
 	FD_ZERO(readset);
 	FD_ZERO(writeset);
@@ -381,17 +427,15 @@ client_wait_until_can_do_something(fd_set * readset, fd_set * writeset)
 }
 
 void
-client_suspend_self()
+client_suspend_self(Buffer *bin, Buffer *bout, Buffer *berr)
 {
 	struct winsize oldws, newws;
 
 	/* Flush stdout and stderr buffers. */
-	if (buffer_len(&stdout_buffer) > 0)
-		atomicio(write, fileno(stdout), buffer_ptr(&stdout_buffer),
-		    buffer_len(&stdout_buffer));
-	if (buffer_len(&stderr_buffer) > 0)
-		atomicio(write, fileno(stderr), buffer_ptr(&stderr_buffer),
-		    buffer_len(&stderr_buffer));
+	if (buffer_len(bout) > 0)
+		atomicio(write, fileno(stdout), buffer_ptr(bout), buffer_len(bout));
+	if (buffer_len(berr) > 0)
+		atomicio(write, fileno(stderr), buffer_ptr(berr), buffer_len(berr));
 
 	leave_raw_mode();
 
@@ -399,9 +443,9 @@ client_suspend_self()
 	 * Free (and clear) the buffer to reduce the amount of data that gets
 	 * written to swap.
 	 */
-	buffer_free(&stdin_buffer);
-	buffer_free(&stdout_buffer);
-	buffer_free(&stderr_buffer);
+	buffer_free(bin);
+	buffer_free(bout);
+	buffer_free(berr);
 
 	/* Save old window size. */
 	ioctl(fileno(stdin), TIOCGWINSZ, &oldws);
@@ -418,9 +462,9 @@ client_suspend_self()
 		received_window_change_signal = 1;
 
 	/* OK, we have been continued by the user. Reinitialize buffers. */
-	buffer_init(&stdin_buffer);
-	buffer_init(&stdout_buffer);
-	buffer_init(&stderr_buffer);
+	buffer_init(bin);
+	buffer_init(bout);
+	buffer_init(berr);
 
 	enter_raw_mode();
 }
@@ -438,7 +482,6 @@ client_process_net_input(fd_set * readset)
 	if (FD_ISSET(connection_in, readset)) {
 		/* Read as much as possible. */
 		len = read(connection_in, buf, sizeof(buf));
-/*debug("read connection_in len %d", len); XXX */
 		if (len == 0) {
 			/* Received EOF.  The remote host has closed the connection. */
 			snprintf(buf, sizeof buf, "Connection to %.300s closed by remote host.\r\n",
@@ -468,12 +511,155 @@ client_process_net_input(fd_set * readset)
 	}
 }
 
+/* process the characters one by one */
+int
+process_escapes(Buffer *bin, Buffer *bout, Buffer *berr, char *buf, int len)
+{
+	char string[1024];
+	pid_t pid;
+	int bytes = 0;
+	unsigned int i;
+	unsigned char ch;
+	char *s;
+
+	for (i = 0; i < len; i++) {
+		/* Get one character at a time. */
+		ch = buf[i];
+
+		if (escape_pending) {
+			/* We have previously seen an escape character. */
+			/* Clear the flag now. */
+			escape_pending = 0;
+
+			/* Process the escaped character. */
+			switch (ch) {
+			case '.':
+				/* Terminate the connection. */
+				snprintf(string, sizeof string, "%c.\r\n", escape_char);
+				buffer_append(berr, string, strlen(string));
+				/*stderr_bytes += strlen(string); XXX*/
+
+				quit_pending = 1;
+				return -1;
+
+			case 'Z' - 64:
+				/* Suspend the program. */
+				/* Print a message to that effect to the user. */
+				snprintf(string, sizeof string, "%c^Z [suspend ssh]\r\n", escape_char);
+				buffer_append(berr, string, strlen(string));
+				/*stderr_bytes += strlen(string); XXX*/
+
+				/* Restore terminal modes and suspend. */
+				client_suspend_self(bin, bout, berr);
+
+				/* We have been continued. */
+				continue;
+
+			case '&':
+				/* XXX does not work yet with proto 2 */
+				if (compat20)
+					continue;
+				/*
+				 * Detach the program (continue to serve connections,
+				 * but put in background and no more new connections).
+				 */
+				if (!stdin_eof) {
+					/*
+					 * Sending SSH_CMSG_EOF alone does not always appear
+					 * to be enough.  So we try to send an EOF character
+					 * first.
+					 */
+					packet_start(SSH_CMSG_STDIN_DATA);
+					packet_put_string("\004", 1);
+					packet_send();
+					/* Close stdin. */
+					stdin_eof = 1;
+					if (buffer_len(bin) == 0) {
+						packet_start(SSH_CMSG_EOF);
+						packet_send();
+					}
+				}
+				/* Restore tty modes. */
+				leave_raw_mode();
+
+				/* Stop listening for new connections. */
+				channel_stop_listening();
+
+				printf("%c& [backgrounded]\n", escape_char);
+
+				/* Fork into background. */
+				pid = fork();
+				if (pid < 0) {
+					error("fork: %.100s", strerror(errno));
+					continue;
+				}
+				if (pid != 0) {	/* This is the parent. */
+					/* The parent just exits. */
+					exit(0);
+				}
+				/* The child continues serving connections. */
+				continue; /*XXX ? */
+
+			case '?':
+				snprintf(string, sizeof string,
+"%c?\r\n\
+Supported escape sequences:\r\n\
+~.  - terminate connection\r\n\
+~^Z - suspend ssh\r\n\
+~#  - list forwarded connections\r\n\
+~&  - background ssh (when waiting for connections to terminate)\r\n\
+~?  - this message\r\n\
+~~  - send the escape character by typing it twice\r\n\
+(Note that escapes are only recognized immediately after newline.)\r\n",
+					 escape_char);
+				buffer_append(berr, string, strlen(string));
+				continue;
+
+			case '#':
+				snprintf(string, sizeof string, "%c#\r\n", escape_char);
+				buffer_append(berr, string, strlen(string));
+				s = channel_open_message();
+				buffer_append(berr, s, strlen(s));
+				xfree(s);
+				continue;
+
+			default:
+				if (ch != escape_char) {
+					buffer_put_char(bin, escape_char);
+					bytes++;
+				}
+				/* Escaped characters fall through here */
+				break;
+			}
+		} else {
+			/*
+			 * The previous character was not an escape char. Check if this
+			 * is an escape.
+			 */
+			if (last_was_cr && ch == escape_char) {
+				/* It is. Set the flag and continue to next character. */
+				escape_pending = 1;
+				continue;
+			}
+		}
+
+		/*
+		 * Normal character.  Record whether it was a newline,
+		 * and append it to the buffer.
+		 */
+		last_was_cr = (ch == '\r' || ch == '\n');
+		buffer_put_char(bin, ch);
+		bytes++;
+	}
+	return bytes;
+}
+
 void
 client_process_input(fd_set * readset)
 {
+	int ret;
 	int len;
-	pid_t pid;
-	char buf[8192], *s;
+	char buf[8192];
 
 	/* Read input from stdin. */
 	if (FD_ISSET(fileno(stdin), readset)) {
@@ -515,145 +701,10 @@ client_process_input(fd_set * readset)
 			 * Normal, successful read.  But we have an escape character
 			 * and have to process the characters one by one.
 			 */
-			unsigned int i;
-			for (i = 0; i < len; i++) {
-				unsigned char ch;
-				/* Get one character at a time. */
-				ch = buf[i];
-
-				if (escape_pending) {
-					/* We have previously seen an escape character. */
-					/* Clear the flag now. */
-					escape_pending = 0;
-					/* Process the escaped character. */
-					switch (ch) {
-					case '.':
-						/* Terminate the connection. */
-						snprintf(buf, sizeof buf, "%c.\r\n", escape_char);
-						buffer_append(&stderr_buffer, buf, strlen(buf));
-						stderr_bytes += strlen(buf);
-						quit_pending = 1;
-						return;
-
-					case 'Z' - 64:
-						/* Suspend the program. */
-						/* Print a message to that effect to the user. */
-						snprintf(buf, sizeof buf, "%c^Z\r\n", escape_char);
-						buffer_append(&stderr_buffer, buf, strlen(buf));
-						stderr_bytes += strlen(buf);
-
-						/* Restore terminal modes and suspend. */
-						client_suspend_self();
-
-						/* We have been continued. */
-						continue;
-
-					case '&':
-						/*
-						 * Detach the program (continue to serve connections,
-						 * but put in background and no more new connections).
-						 */
-						if (!stdin_eof) {
-							/*
-							 * Sending SSH_CMSG_EOF alone does not always appear
-							 * to be enough.  So we try to send an EOF character
-							 * first.
-							 */
-							packet_start(SSH_CMSG_STDIN_DATA);
-							packet_put_string("\004", 1);
-							packet_send();
-							/* Close stdin. */
-							stdin_eof = 1;
-							if (buffer_len(&stdin_buffer) == 0) {
-								packet_start(SSH_CMSG_EOF);
-								packet_send();
-							}
-						}
-						/* Restore tty modes. */
-						leave_raw_mode();
-
-						/* Stop listening for new connections. */
-						channel_stop_listening();
-
-						printf("%c& [backgrounded]\n", escape_char);
-
-						/* Fork into background. */
-						pid = fork();
-						if (pid < 0) {
-							error("fork: %.100s", strerror(errno));
-							continue;
-						}
-						if (pid != 0) {	/* This is the parent. */
-							/* The parent just exits. */
-							exit(0);
-						}
-						/* The child continues serving connections. */
-						continue;
-
-					case '?':
-						snprintf(buf, sizeof buf,
-"%c?\r\n\
-Supported escape sequences:\r\n\
-~.  - terminate connection\r\n\
-~^Z - suspend ssh\r\n\
-~#  - list forwarded connections\r\n\
-~&  - background ssh (when waiting for connections to terminate)\r\n\
-~?  - this message\r\n\
-~~  - send the escape character by typing it twice\r\n\
-(Note that escapes are only recognized immediately after newline.)\r\n",
-							 escape_char);
-						buffer_append(&stderr_buffer, buf, strlen(buf));
-						continue;
-
-					case '#':
-						snprintf(buf, sizeof buf, "%c#\r\n", escape_char);
-						buffer_append(&stderr_buffer, buf, strlen(buf));
-						s = channel_open_message();
-						buffer_append(&stderr_buffer, s, strlen(s));
-						xfree(s);
-						continue;
-
-					default:
-						if (ch != escape_char) {
-							/*
-							 * Escape character followed by non-special character.
-							 * Append both to the input buffer.
-							 */
-							buf[0] = escape_char;
-							buf[1] = ch;
-							buffer_append(&stdin_buffer, buf, 2);
-							stdin_bytes += 2;
-							continue;
-						}
-						/*
-						 * Note that escape character typed twice
-						 * falls through here; the latter gets processed
-						 * as a normal character below.
-						 */
-						break;
-					}
-				} else {
-					/*
-					 * The previous character was not an escape char. Check if this
-					 * is an escape.
-					 */
-					if (last_was_cr && ch == escape_char) {
-						/* It is. Set the flag and continue to next character. */
-						escape_pending = 1;
-						continue;
-					}
-				}
-
-				/*
-				 * Normal character.  Record whether it was a newline,
-				 * and append it to the buffer.
-				 */
-				last_was_cr = (ch == '\r' || ch == '\n');
-				buf[0] = ch;
-				buffer_append(&stdin_buffer, buf, 1);
-				stdin_bytes += 1;
-				continue;
-			}
+			ret = process_escapes(&stdin_buffer, &stdout_buffer, &stderr_buffer, buf, len);
+			if (ret == -1)
+				return;
+			stdout_bytes += ret;
 		}
 	}
 }
@@ -721,7 +772,16 @@ client_process_output(fd_set * writeset)
 void
 client_process_buffered_input_packets()
 {
-	dispatch_run(DISPATCH_NONBLOCK, &quit_pending);
+	dispatch_run(DISPATCH_NONBLOCK, &quit_pending, NULL);
+}
+
+/* scan buf[] for '~' before sending data to the peer */
+
+int
+simple_escape_filter(Channel *c, char *buf, int len)
+{
+	/* XXX we assume c->extended is writeable */
+	return process_escapes(&c->input, &c->output, &c->extended, buf, len);
 }
 
 /*
@@ -732,9 +792,8 @@ client_process_buffered_input_packets()
  */
 
 int
-client_loop(int have_pty, int escape_char_arg)
+client_loop(int have_pty, int escape_char_arg, int ssh2_chan_id)
 {
-	extern Options options;
 	double start_time, total_time;
 	int len;
 	char buf[100];
@@ -778,9 +837,12 @@ client_loop(int have_pty, int escape_char_arg)
 	if (have_pty)
 		enter_raw_mode();
 
-	/* Check if we should immediately send of on stdin. */
+	/* Check if we should immediately send eof on stdin. */
 	if (!compat20)
 		client_check_initial_eof_on_stdin();
+
+	if (compat20 && escape_char != -1)
+		channel_register_filter(ssh2_chan_id, simple_escape_filter);
 
 	/* Main loop of the client for the interactive session mode. */
 	while (!quit_pending) {
@@ -790,7 +852,7 @@ client_loop(int have_pty, int escape_char_arg)
 		client_process_buffered_input_packets();
 
 		if (compat20 && !channel_still_open()) {
-			debug("!channel_still_open.");
+			debug2("!channel_still_open.");
 			break;
 		}
 
@@ -916,7 +978,7 @@ client_loop(int have_pty, int escape_char_arg)
 /*********/
 
 void
-client_input_stdout_data(int type, int plen)
+client_input_stdout_data(int type, int plen, void *ctxt)
 {
 	unsigned int data_len;
 	char *data = packet_get_string(&data_len);
@@ -927,7 +989,7 @@ client_input_stdout_data(int type, int plen)
 	xfree(data);
 }
 void
-client_input_stderr_data(int type, int plen)
+client_input_stderr_data(int type, int plen, void *ctxt)
 {
 	unsigned int data_len;
 	char *data = packet_get_string(&data_len);
@@ -938,7 +1000,7 @@ client_input_stderr_data(int type, int plen)
 	xfree(data);
 }
 void
-client_input_exit_status(int type, int plen)
+client_input_exit_status(int type, int plen, void *ctxt)
 {
 	packet_integrity_check(plen, 4, type);
 	exit_status = packet_get_int();
@@ -956,7 +1018,7 @@ client_input_exit_status(int type, int plen)
 
 /* XXXX move to generic input handler */
 void
-client_input_channel_open(int type, int plen)
+client_input_channel_open(int type, int plen, void *ctxt)
 {
 	Channel *c = NULL;
 	char *ctype;
@@ -974,13 +1036,13 @@ client_input_channel_open(int type, int plen)
 	debug("client_input_channel_open: ctype %s rchan %d win %d max %d",
 	    ctype, rchan, rwindow, rmaxpack);
 
-	if (strcmp(ctype, "x11") == 0) {
+	if (strcmp(ctype, "x11") == 0 && options.forward_x11) {
 		int sock;
 		char *originator;
 		int originator_port;
 		originator = packet_get_string(NULL);
 		if (datafellows & SSH_BUG_X11FWD) {
-			debug("buggy server: x11 request w/o originator_port");
+			debug2("buggy server: x11 request w/o originator_port");
 			originator_port = 0;
 		} else {
 			originator_port = packet_get_int();
@@ -992,8 +1054,8 @@ client_input_channel_open(int type, int plen)
 		sock = x11_connect_display();
 		if (sock >= 0) {
 			id = channel_new("x11", SSH_CHANNEL_X11_OPEN,
-			    sock, sock, -1, 4*1024, 32*1024, 0,
-			    xstrdup("x11"));
+			    sock, sock, -1, CHAN_X11_WINDOW_DEFAULT,
+			    CHAN_X11_PACKET_DEFAULT, 0, xstrdup("x11"), 1);
 			c = channel_lookup(id);
 		}
 	}
@@ -1046,11 +1108,14 @@ client_init_dispatch_13()
 	dispatch_set(SSH_MSG_CHANNEL_OPEN_CONFIRMATION, &channel_input_open_confirmation);
 	dispatch_set(SSH_MSG_CHANNEL_OPEN_FAILURE, &channel_input_open_failure);
 	dispatch_set(SSH_MSG_PORT_OPEN, &channel_input_port_open);
-	dispatch_set(SSH_SMSG_AGENT_OPEN, &auth_input_open_request);
 	dispatch_set(SSH_SMSG_EXITSTATUS, &client_input_exit_status);
 	dispatch_set(SSH_SMSG_STDERR_DATA, &client_input_stderr_data);
 	dispatch_set(SSH_SMSG_STDOUT_DATA, &client_input_stdout_data);
-	dispatch_set(SSH_SMSG_X11_OPEN, &x11_input_open);
+
+	dispatch_set(SSH_SMSG_AGENT_OPEN, options.forward_agent ?
+	    &auth_input_open_request : &deny_input_open);
+	dispatch_set(SSH_SMSG_X11_OPEN, options.forward_x11 ?
+	    &x11_input_open : &deny_input_open);
 }
 void
 client_init_dispatch_15()
@@ -1086,7 +1151,7 @@ client_input_channel_req(int id, void *arg)
 
 	c = channel_lookup(id);
 	if (c == NULL)
-		fatal("session_input_channel_req: channel %d: bad channel", id);
+		fatal("client_input_channel_req: channel %d: bad channel", id);
 
 	if (session_ident == -1) {
 		error("client_input_channel_req: no channel %d", id);
@@ -1110,7 +1175,7 @@ client_input_channel_req(int id, void *arg)
 void
 client_set_session_ident(int id)
 {
-	debug("client_set_session_ident: id %d", id);
+	debug2("client_set_session_ident: id %d", id);
 	session_ident = id;
 	channel_register_callback(id, SSH2_MSG_CHANNEL_REQUEST,
 	    client_input_channel_req, (void *)0);

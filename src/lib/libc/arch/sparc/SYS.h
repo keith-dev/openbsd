@@ -34,7 +34,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- *	$OpenBSD: SYS.h,v 1.3 1999/01/06 06:12:02 d Exp $
+ *	$OpenBSD: SYS.h,v 1.7 2000/10/17 17:44:38 deraadt Exp $
  */
 
 #include <machine/asm.h>

@@ -1,5 +1,5 @@
 #!/bin/sh -
-#	$OpenBSD: MAKEDEV,v 1.29 2000/03/22 07:34:30 niklas Exp $
+#	$OpenBSD: MAKEDEV,v 1.34 2000/10/13 21:31:15 deraadt Exp $
 #
 # Copyright (c) 1990 The Regents of the University of California.
 # All rights reserved.
@@ -42,10 +42,17 @@
 #	vnd*	"file" pseudo-disks
 #	rd*	"ramdisk" pseudo-disks
 #	ccd*	concatenated disk devices
+#	raid*	RAIDframe disk devices
 #
 # Terminal ports:
-#	ttye*	ite bitmapped consoles
+#	ttyE*	wscons
 #	tty*	standard built-in serial ports (2)
+#
+# Pointing devices:
+#	wsmouse* wscons mouse events
+#
+# Keyboard devices:
+#	wskbd* wscons keyboard events
 #
 # Pseudo terminals:
 #	pty*	set of 16 master and slave pseudo terminals
@@ -54,6 +61,14 @@
 #	grf*	custom chip (grf0), Retina Z2/Z3 (grf1/grf2),
 #		Cirrus boards (grf3), A2410 (grf4) video or
 #		CyberVision 64 (grf5)
+#
+# USB devices:
+#	usb*	Bus control devices used by usbd for attach/detach
+#	uhid*	Generic HID devices
+#	ulpt*	Printer devices
+#	urio*	Diamond Multimedia Rio 500
+#	ugen*	Generic device
+#	utty*	Serial ports
 #
 # Special purpose devices:
 #	ch*	SCSI media changer
@@ -134,18 +149,18 @@ all)
 	sh $this std fd
 	sh $this wd0 wd1 wd2 wd3 
 	sh $this sd0 sd1 sd2 sd3 st0 st1 cd0 cd1
-	sh $this ofdisk0 ofdisk1 ofdisk2 ofdisk3 ofdisk4 
-	sh $this ofdisk5 ofdisk6 ofdisk7 ofdisk8 ofdisk9 
 	sh $this vnd0 vnd1 vnd2 vnd3
 	sh $this ccd0 ccd1 ccd2 ccd3
+	sh $this raid0 raid1 raid2 raid3
 	sh $this rd0 ipl
 	sh $this ttyo0 ttyE0
-	sh $this tty00 tty01 tty02 tty03 pty0
+	sh $this tty00 tty01 tty02 tty03 pty0 pty1
 	sh $this bpf0 bpf1 bpf2 bpf3 bpf4 bpf5 bpf6 bpf7 bpf8 bpf9
 	sh $this tun0 tun1 tun2 tun3
 	sh $this random uk0 uk1 ss0 ss1
-	sh $this kbd mouse
+	sh $this wscons0
 	sh $this lkm xfs0
+	sh $this usbs
 	sh $this local
 	;;
 
@@ -153,11 +168,11 @@ ramdisk)
 	sh $this std
 	sh $this wd0 wd1 wd2 wd3 
 	sh $this sd0 sd1 sd2 sd3 sd4 st0 st1 cd0 cd1
-	sh $this ofdisk0 ofdisk1 ofdisk2 ofdisk3 ofdisk4 
 	sh $this rd0
-	sh $this ttyo0 ttyE0
+	sh $this ttyo0 
 	sh $this random
 	sh $this tty00 tty01 pty0
+	sh $this wscons0
 	;;
 
 std)
@@ -178,6 +193,14 @@ std)
 #	mknod ksyms		c 43 0  ; chmod 640 ksyms ; chown root.kmem ksyms
 	;;
 
+usbs)
+	sh $this usb0 usb1
+	sh $this uhid0 uhid1 uhid2 uhid3
+	sh $this ulpt0 ulpt1
+	sh $this urio0
+	sh $this utty0 utty1
+	;;
+
 fd)
 	rm -f fd/*
 	mkdir fd > /dev/null 2>&1
@@ -188,13 +211,14 @@ fd)
 	chmod 666 fd/*
 	;;
 
-sd*|wd*|ccd*|ofdisk*)
+sd*|wd*|ccd*|ofdisk*|raid*)
 	umask 2 ; unit=${i##*[a-z]}
 	case $i in
-	sd*) name=sd; blk=2; chr=8;;
-	wd*) name=wd; blk=0; chr=11;;
-	ofdisk*) name=ofdisk; blk=4; chr=13;;
-	ccd*) name=ccd; blk=16; chr=18;;
+	sd*) name=sd;		blk=2;	chr=8;;
+	wd*) name=wd;		blk=0;	chr=11;;
+	ofdisk*) name=ofdisk;	blk=4;	chr=13;;
+	ccd*) name=ccd; 	blk=16;	chr=18;;
+	raid*) name=raid;	blk=19;	chr=54;;
 	esac
 	rm -f $name$unit? r$name$unit?
 	case $unit in
@@ -423,12 +447,66 @@ cd*)
 	umask 77
 	;;
 
+usb*)
+	rm -f usb$unit
+	mknod usb$unit c 61 $unit
+	chown root.wheel usb$unit
+	chmod 660 usb$unit
+	;;
+
+uhid*)
+	rm -f uhid$unit
+	mknod uhid$unit c 62 $unit
+	chown root.wheel uhid$unit
+	chmod 660 uhid$unit
+	;;
+
+ugen*)
+	for j in 00 01 02 03 04 05 06 07 08 09 10 11 12 13 14 15
+	do
+		rm -f ugen$unit.$j
+		mknod ugen$unit.$j c 63 $(( $unit * 16 + $j ))
+		chown root.wheel ugen$unit.$j
+		chmod 660 ugen$unit.$j
+	done
+	;;
+
+ulpt*)
+	rm -f ulpt$unit
+	mknod ulpt$unit c 64 $unit
+	chown root.wheel ulpt$unit
+	chmod 660 ulpt$unit
+	;;
+
+urio*)
+	rm -f urio$unit
+	mknod urio$unit c 65 $unit
+	chown root.wheel urio$unit
+	chmod 660 urio$unit
+	;;
+
+utty*)
+	rm -f utty$unit
+	mknod utty$unit c 66 $unit
+	chown root.wheel utty$unit
+	chmod 660 utty$unit
+	;;
+
+ttyEcfg)
+	type=Ecfg
+	major=67
+	minor=255 
+	unit=${i##ttyE}
+        rm -f tty$type$unit
+        mknod tty$type$unit c $major $minor
+        chown root.wheel tty$type$unit
+        ;;
+
 ttyE*)
-		  type=E
-		  unit=${i##ttyE}
-	case $type in
-	E)	major=25; minor=$unit ;;
-	esac
+	type=E
+	unit=${i##ttyE}
+	major=67
+	minor=$unit
         rm -f tty$type$unit
         mknod tty$type$unit c $major $minor
         chown root.wheel tty$type$unit
@@ -478,18 +556,6 @@ lkm)
 	chmod 640 lkm
 	;;
 
-kbd)
-	rm -f kbd
-	mknod kbd c 29 0
-	chmod 666 kbd
-	;;
-
-mouse)
-	rm -f mouse
-	mknod mouse c 30 0
-	chmod 666 mouse
-	;;
-
 random|srandom|urandom|prandom|arandom)
 	rm -f random urandom srandom prandom arandom
 	mknod  random c 40 0
@@ -518,6 +584,27 @@ ss*)
 	rm -f scan$unit
 	ln -s ss$unit scan$unit
 	;;
+wscons*)
+	unit=${i##*[a-z]}
+	sh $this ttyE${unit} wskbd${unit} wsmouse${unit}
+	;;
+wskbd*)
+	unit=${i##*[a-z]}
+	rm -f wskbd${unit} 
+	mknod wskbd${unit} c 68 ${unit}
+	# XXX
+	chmod 660 wskbd${unit}
+	chown root.wheel wskbd${unit}
+	;;
+wsmouse*)
+	unit=${i##*[a-z]}
+	rm -f wsmouse${unit} 
+	mknod wsmouse${unit} c 69 ${unit}
+	# XXX
+	chmod 660 wsmouse${unit}
+	chown root.wheel wsmouse${unit}
+	;;
+
 xfs*)
 	rm -f xfs$unit
 	mknod xfs$unit c 51 $unit 

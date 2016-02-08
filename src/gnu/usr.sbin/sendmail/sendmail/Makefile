@@ -1,9 +1,12 @@
-#	$OpenBSD: Makefile,v 1.6 2000/04/06 15:45:44 millert Exp $
+#	$OpenBSD: Makefile,v 1.9 2000/10/09 23:45:00 millert Exp $
 
 PROG=	sendmail
 
 WANT_LIBWRAP=1
 WANT_LIBSMUTIL=1
+
+# To casue sendmail to drop privs in test mode (-bt) uncomment the following
+#ENVDEF+= -D_FFR_TESTMODE_DROP_PRIVS
 
 SRCS=	main.c alias.c arpadate.c bf_torek.c clock.c collect.c \
 	conf.c control.c convtime.c daemon.c deliver.c domain.c \
@@ -11,7 +14,7 @@ SRCS=	main.c alias.c arpadate.c bf_torek.c clock.c collect.c \
 	mime.c parseaddr.c queue.c readcf.c recipient.c savemail.c \
 	sfsasl.c shmticklib.c srvrsmtp.c stab.c stats.c sysexits.c \
 	timers.c trace.c udb.c usersmtp.c util.c version.c
-MAN=	aliases.5 mailq.1 newaliases.1 sendmail.8
+MAN=	aliases.5 mailq.1 newaliases.8 sendmail.8
 MLINKS=	sendmail.8 hoststat.1 sendmail.8 purgestat.1
 BINDIR=	/usr/libexec/sendmail
 BINOWN=	root
@@ -28,8 +31,8 @@ beforeinstall:
 			echo "Warning: both /etc/mail/sendmail.cf and /etc/sendmail.cf exist.  Sendmail will use /etc/mail/sendmail.cf."; \
 		fi ; \
 	fi
-	@if test -f /etc/netstart && grep -q /etc/sendmail.cf /etc/netstart; \
-	    then echo "Error: /etc/netstart must check for /etc/mail/sendmail.cf, not /etc/sendmail.cf"; \
+	@if test -f /etc/rc && grep -q /etc/sendmail.cf /etc/rc; \
+	    then echo "Error: /etc/rc must check for /etc/mail/sendmail.cf, not /etc/sendmail.cf"; \
 	    false; \
 	fi
 	${INSTALL} ${INSTALL_COPY} -o ${BINOWN} -g ${BINGRP} -m 444 \

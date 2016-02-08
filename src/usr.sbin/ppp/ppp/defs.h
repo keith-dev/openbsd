@@ -15,7 +15,7 @@
  * IMPLIED WARRANTIES, INCLUDING, WITHOUT LIMITATION, THE IMPLIED
  * WARRANTIES OF MERCHANTIBILITY AND FITNESS FOR A PARTICULAR PURPOSE.
  *
- * $OpenBSD: defs.h,v 1.14 2000/04/07 23:46:39 brian Exp $
+ * $OpenBSD: defs.h,v 1.18 2000/10/09 21:18:56 brian Exp $
  *
  *	TODO:
  */
@@ -59,6 +59,7 @@
 #define DEF_FSMRETRY 3		/* FSM retry frequency */
 #define DEF_FSMTRIES 5		/* Default max retries */
 #define DEF_FSMAUTHTRIES 3	/* Default max auth retries */
+#define DEF_IFQUEUE 30		/* Default interface queue size */
 
 #define	CONFFILE 	"ppp.conf"
 #define	LINKUPFILE 	"ppp.linkup"
@@ -101,7 +102,13 @@
 
 #define ROUNDUP(x) ((x) ? (1 + (((x) - 1) | (sizeof(long) - 1))) : sizeof(long))
 
+#if defined(__NetBSD__) || __FreeBSD__ < 3
 extern void randinit(void);
+#else
+#define random arc4random
+#define randinit()
+#endif
+
 extern ssize_t fullread(int, void *, size_t);
 extern const char *mode2Nam(int);
 extern int Nam2mode(const char *);
@@ -113,3 +120,6 @@ extern int MakeArgs(char *, char **, int, int);
 extern const char *NumStr(long, char *, size_t);
 extern const char *HexStr(long, char *, size_t);
 extern const char *ex_desc(int);
+extern void SetTitle(const char *);
+extern fd_set *mkfdset(void);
+extern void zerofdset(fd_set *);

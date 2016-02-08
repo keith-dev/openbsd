@@ -1,4 +1,4 @@
-/*	$OpenBSD: part.c,v 1.15 2000/03/29 01:53:01 krw Exp $	*/
+/*	$OpenBSD: part.c,v 1.18 2000/07/01 21:49:12 mickey Exp $	*/
 
 /*
  * Copyright (c) 1997 Tobias Weingartner
@@ -56,7 +56,7 @@ static struct part_type {
 	{ 0x04, "DOS FAT-16  ", "Primary DOS with 16 bit FAT"},
 	{ 0x05, "Extended DOS", "Extended DOS"},
 	{ 0x06, "DOS > 32MB  ", "Primary 'big' DOS (> 32MB)"},
-	{ 0x07, "HPFS/QNX/AUX", "OS/2 HPFS, QNX or Advanced UNIX"},
+	{ 0x07, "HPFS/QNX/AUX", "OS/2 HPFS, QNX-2 or Advanced UNIX"},
 	{ 0x08, "AIX fs      ", "AIX filesystem"},
 	{ 0x09, "AIX/Coherent", "AIX boot partition or Coherent"},
 	{ 0x0A, "OS/2 Bootmgr", "OS/2 Boot Manager or OPUS"},
@@ -66,7 +66,11 @@ static struct part_type {
 	{ 0x0F, "Extended LBA", "Extended DOS LBA-mapped"},
 	{ 0x10, "OPUS        ", "OPUS"},
 	{ 0x12, "Compaq Diag.", "Compaq Diagnostics"},
+	{ 0x39, "Plan 9      ",	"Plan 9"},
 	{ 0x40, "VENIX 286   ", "VENIX 286"},
+	{ 0x4d, "QNX 4.2 Pri ", "QNX 4.2 Primary"},
+	{ 0x4e, "QNX 4.2 Sec ", "QNX 4.2 Secondary"},
+	{ 0x4f, "QNX 4.2 Ter ", "QNX 4.2 Tertiary"},
 	{ 0x50, "DM          ", "DM"},
 	{ 0x51, "DM          ", "DM"},
 	{ 0x52, "CP/M or SysV", "CP/M or Microport SysV/AT"},
@@ -140,12 +144,13 @@ PRT_ascii_id(id)
 }
 
 void
-PRT_parse(disk, prt, offset, reloff, partn)
+PRT_parse(disk, prt, offset, reloff, partn, pn)
 	disk_t *disk;
 	void *prt;
 	off_t offset;
 	off_t reloff;
 	prt_t *partn;
+	int pn;
 {
 	unsigned char *p = prt;
 	off_t off;
@@ -171,7 +176,7 @@ PRT_parse(disk, prt, offset, reloff, partn)
 	partn->bs = getlong(p) + off;
 	partn->ns = getlong(p+4);
 
-	PRT_fix_CHS(disk, partn);
+	PRT_fix_CHS(disk, partn, pn);
 }
 
 int
@@ -271,9 +276,10 @@ PRT_print(num, partn)
 }
 
 void
-PRT_fix_BN(disk, part)
+PRT_fix_BN(disk, part, pn)
 	disk_t *disk;
 	prt_t *part;
+	int pn;
 {
 	int spt, tpc, spc;
 	int start = 0;
@@ -294,16 +300,17 @@ PRT_fix_BN(disk, part)
 
 	/* XXX - Should handle this... */
 	if (start > end)
-		warn("Start of partition after end!");
+		warn("Start of partition #%d after end!", pn);
 
 	part->bs = start;
 	part->ns = (end - start) + 1;
 }
 
 void
-PRT_fix_CHS(disk, part)
+PRT_fix_CHS(disk, part, pn)
 	disk_t *disk;
 	prt_t *part;
+	int pn;
 {
 	int spt, tpc, spc;
 	int start, end, size;
@@ -325,7 +332,7 @@ PRT_fix_CHS(disk, part)
 
 	if (cyl > 1023) {
 		cyl = 1023;
-		printf("Only LBA values are valid in starting cylinder.\n");
+		printf("Only LBA values are valid in starting cylinder for partition #%d.\n", pn);
 	}
 	part->scyl = cyl;
 	part->shead = head;
@@ -338,7 +345,7 @@ PRT_fix_CHS(disk, part)
 
 	if (cyl > 1023) {
 		cyl = 1023;
-		printf("Only LBA values are valid in ending cylinder.\n");
+		printf("Only LBA values are valid in ending cylinder for partition #%d.\n", pn);
 	}
 	part->ecyl = cyl;
 	part->ehead = head;

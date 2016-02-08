@@ -1,4 +1,4 @@
-/*	$OpenBSD: mbr.c,v 1.9 1999/08/21 22:49:25 niklas Exp $	*/
+/*	$OpenBSD: mbr.c,v 1.11 2000/07/07 13:37:00 rahnds Exp $	*/
 
 /*
  * Copyright (c) 1997 Tobias Weingartner
@@ -68,7 +68,7 @@ MBR_init(disk_t *disk, mbr_t *mbr)
 	mbr->part[3].esect = disk->real->sectors;
 
 	/* Fix up start/length fields */
-	PRT_fix_BN(disk, &mbr->part[3]);
+	PRT_fix_BN(disk, &mbr->part[3], 3);
 
 #if defined(__powerpc__) || defined(__mips__)
 	/* Now fix up for the MS-DOS boot partition on PowerPC. */
@@ -77,7 +77,7 @@ MBR_init(disk_t *disk, mbr_t *mbr)
 	mbr->part[3].ns += mbr->part[3].bs;
 	mbr->part[3].bs = mbr->part[0].bs + mbr->part[0].ns;
 	mbr->part[3].ns -= mbr->part[3].bs;
-	PRT_fix_CHS(disk, &mbr->part[3]);
+	PRT_fix_CHS(disk, &mbr->part[3], 3);
 	if ((mbr->part[3].shead != 1) || (mbr->part[3].ssect != 1)) {
 		/* align the partition on a cylinder boundary */
 		mbr->part[3].shead = 0;
@@ -85,7 +85,7 @@ MBR_init(disk_t *disk, mbr_t *mbr)
 		mbr->part[3].scyl += 1;
 	}
 	/* Fix up start/length fields */
-	PRT_fix_BN(disk, &mbr->part[3]);
+	PRT_fix_BN(disk, &mbr->part[3], 3);
 #endif
 }
 
@@ -108,8 +108,7 @@ MBR_parse(disk, mbr_buf, offset, reloff, mbr)
 
 	for (i = 0; i < NDOSPART; i++)
 		PRT_parse(disk, &mbr_buf[MBR_PART_OFF + MBR_PART_SIZE * i], 
-		    offset, reloff,
-		    &mbr->part[i]);
+		    offset, reloff, &mbr->part[i], i);
 }
 
 void

@@ -1,5 +1,5 @@
-/*	$OpenBSD: sa.h,v 1.15 2000/02/01 02:46:18 niklas Exp $	*/
-/*	$EOM: sa.h,v 1.54 2000/01/31 22:33:49 niklas Exp $	*/
+/*	$OpenBSD: sa.h,v 1.18 2000/10/10 13:35:24 niklas Exp $	*/
+/*	$EOM: sa.h,v 1.58 2000/10/10 12:39:01 provos Exp $	*/
 
 /*
  * Copyright (c) 1998, 1999 Niklas Hallqvist.  All rights reserved.
@@ -121,7 +121,7 @@ struct sa {
   u_int8_t phase;
 
   /* A reference counter for this structure.  */
-  u_int8_t refcnt;
+  u_int16_t refcnt;
 
   /* Various flags, look below for descriptions.  */
   u_int32_t flags;
@@ -143,9 +143,13 @@ struct sa {
   /* Set if we were the initiator of the SA/exchange in Phase 1 */
   int initiator;
 
+  /* Policy session ID, where applicable, copied over from the exchange */
+  int policy_id;
+
   /* Certs or other information from Phase 1 */  
-  int recv_certtype, recv_certlen;
+  int recv_certtype, recv_certlen, recv_certid;
   void *recv_cert;
+  void *recv_key; /* Key used to authenticate, in KeyNote */
     
   /* DOI-specific opaque data.  */
   void *data;
@@ -181,6 +185,7 @@ extern void proto_free (struct proto *proto);
 extern int sa_add_transform (struct sa *, struct payload *, int,
 			     struct proto **);
 extern int sa_create (struct exchange *, struct transport *);
+extern int sa_enter (struct sa *);
 extern void sa_delete (struct sa *, int);
 extern struct sa *sa_find (int (*) (struct sa *, void *), void *);
 extern int sa_flag (char *);

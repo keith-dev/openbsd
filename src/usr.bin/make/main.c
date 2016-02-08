@@ -1,4 +1,4 @@
-/*	$OpenBSD: main.c,v 1.30 2000/04/03 02:58:46 espie Exp $	*/
+/*	$OpenBSD: main.c,v 1.44 2000/10/13 08:29:20 espie Exp $	*/
 /*	$NetBSD: main.c,v 1.34 1997/03/24 20:56:36 gwr Exp $	*/
 
 /*
@@ -39,20 +39,6 @@
  * SUCH DAMAGE.
  */
 
-#ifndef lint
-static char copyright[] =
-"@(#) Copyright (c) 1988, 1989, 1990, 1993\n\
-	The Regents of the University of California.  All rights reserved.\n";
-#endif /* not lint */
-
-#ifndef lint
-#if 0
-static char sccsid[] = "@(#)main.c	8.3 (Berkeley) 3/19/94";
-#else
-static char rcsid[] = "$OpenBSD: main.c,v 1.30 2000/04/03 02:58:46 espie Exp $";
-#endif
-#endif /* not lint */
-
 /*-
  * main.c --
  *	The main file for this entire program. Exit routines etc
@@ -92,6 +78,7 @@ static char rcsid[] = "$OpenBSD: main.c,v 1.30 2000/04/03 02:58:46 espie Exp $";
 #include <sys/wait.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <time.h>
@@ -101,10 +88,27 @@ static char rcsid[] = "$OpenBSD: main.c,v 1.30 2000/04/03 02:58:46 espie Exp $";
 #include <varargs.h>
 #endif
 #include "make.h"
-#include "hash.h"
+#include "ohash.h"
 #include "dir.h"
 #include "job.h"
 #include "pathnames.h"
+
+#ifndef lint
+UNUSED
+static char copyright[] =
+"@(#) Copyright (c) 1988, 1989, 1990, 1993\n\
+	The Regents of the University of California.  All rights reserved.\n";
+#endif /* not lint */
+
+#ifndef lint
+#if 0
+static char sccsid[] = "@(#)main.c	8.3 (Berkeley) 3/19/94";
+#else
+UNUSED
+static char rcsid[] = "$OpenBSD: main.c,v 1.44 2000/10/13 08:29:20 espie Exp $";
+#endif
+#endif /* not lint */
+
 
 #ifndef	DEFMAXLOCAL
 #define	DEFMAXLOCAL DEFMAXJOBS
@@ -112,15 +116,15 @@ static char rcsid[] = "$OpenBSD: main.c,v 1.30 2000/04/03 02:58:46 espie Exp $";
 
 #define	MAKEFLAGS	".MAKEFLAGS"
 
-Lst			create;		/* Targets to be made */
+LIST			create;		/* Targets to be made */
 time_t			now = OUT_OF_DATE;/* Time at start of make */
 GNode			*DEFAULT;	/* .DEFAULT node */
 Boolean			allPrecious;	/* .PRECIOUS given on line by itself */
 
 static Boolean		noBuiltins;	/* -r flag */
-static Lst		makefiles;	/* ordered list of makefiles to read */
+static LIST		makefiles;	/* ordered list of makefiles to read */
 static Boolean		printVars;	/* print value of one or more vars */
-static Lst		variables;	/* list of variables to print */
+static LIST		variables;	/* list of variables to print */
 int			maxJobs;	/* -j argument */
 static int		maxLocal;	/* -L argument */
 Boolean			compatMake;	/* -B argument */
@@ -138,12 +142,69 @@ static Boolean		jobsRunning;	/* TRUE if the jobs might be running */
 
 static void		MainParseArgs __P((int, char **));
 char *			chdir_verify_path __P((char *, char *));
-static int		ReadMakefile __P((ClientData, ClientData));
+static int		ReadMakefile __P((void *, void *));
+static void		add_dirpath __P((Lst, const char *));
 static void		usage __P((void));
+static void 		posixParseOptLetter __P((char));
 int 			main __P((int, char **));
 
 static char *curdir;			/* startup directory */
 static char *objdir;			/* where we chdir'ed to */
+
+static void
+posixParseOptLetter(c)
+    char c;
+{
+	switch(c) {
+	case 'B':
+		compatMake = TRUE;
+		break;
+	case 'P':
+		usePipes = FALSE;
+		Var_Append(MAKEFLAGS, "-P", VAR_GLOBAL);
+		break;
+	case 'S':
+		keepgoing = FALSE;
+		Var_Append(MAKEFLAGS, "-S", VAR_GLOBAL);
+		break;
+	case 'e':
+		checkEnvFirst = TRUE;
+		Var_Append(MAKEFLAGS, "-e", VAR_GLOBAL);
+		break;
+	case 'i':
+		ignoreErrors = TRUE;
+		Var_Append(MAKEFLAGS, "-i", VAR_GLOBAL);
+		break;
+	case 'k':
+		keepgoing = TRUE;
+		Var_Append(MAKEFLAGS, "-k", VAR_GLOBAL);
+		break;
+	case 'n':
+		noExecute = TRUE;
+		Var_Append(MAKEFLAGS, "-n", VAR_GLOBAL);
+		break;
+	case 'q':
+		queryFlag = TRUE;
+		/* Kind of nonsensical, wot? */
+		Var_Append(MAKEFLAGS, "-q", VAR_GLOBAL);
+		break;
+	case 'r':
+		noBuiltins = TRUE;
+		Var_Append(MAKEFLAGS, "-r", VAR_GLOBAL);
+		break;
+	case 's':
+		beSilent = TRUE;
+		Var_Append(MAKEFLAGS, "-s", VAR_GLOBAL);
+		break;
+	case 't':
+		touchFlag = TRUE;
+		Var_Append(MAKEFLAGS, "-t", VAR_GLOBAL);
+		break;
+	default:
+	case '?':
+		usage();
+	}
+}
 
 /*-
  * MainParseArgs --
@@ -175,6 +236,7 @@ MainParseArgs(argc, argv)
 #else
 # define OPTFLAGS "BD:I:PSV:d:ef:ij:km:nqrst"
 #endif
+# define OPTLETTERS "BPSiknqrst"
 rearg:	while((c = getopt(argc, argv, OPTFLAGS)) != -1) {
 		switch(c) {
 		case 'D':
@@ -189,12 +251,9 @@ rearg:	while((c = getopt(argc, argv, OPTFLAGS)) != -1) {
 			break;
 		case 'V':
 			printVars = TRUE;
-			Lst_AtEnd(variables, (ClientData)optarg);
+			Lst_AtEnd(&variables, optarg);
 			Var_Append(MAKEFLAGS, "-V", VAR_GLOBAL);
 			Var_Append(MAKEFLAGS, optarg, VAR_GLOBAL);
-			break;
-		case 'B':
-			compatMake = TRUE;
 			break;
 #ifdef REMOTE
 		case 'L': {
@@ -212,14 +271,6 @@ rearg:	while((c = getopt(argc, argv, OPTFLAGS)) != -1) {
 			break;
 		}
 #endif
-		case 'P':
-			usePipes = FALSE;
-			Var_Append(MAKEFLAGS, "-P", VAR_GLOBAL);
-			break;
-		case 'S':
-			keepgoing = FALSE;
-			Var_Append(MAKEFLAGS, "-S", VAR_GLOBAL);
-			break;
 		case 'd': {
 			char *modules = optarg;
 
@@ -275,16 +326,8 @@ rearg:	while((c = getopt(argc, argv, OPTFLAGS)) != -1) {
 			Var_Append(MAKEFLAGS, optarg, VAR_GLOBAL);
 			break;
 		}
-		case 'e':
-			checkEnvFirst = TRUE;
-			Var_Append(MAKEFLAGS, "-e", VAR_GLOBAL);
-			break;
 		case 'f':
-			Lst_AtEnd(makefiles, (ClientData)optarg);
-			break;
-		case 'i':
-			ignoreErrors = TRUE;
-			Var_Append(MAKEFLAGS, "-i", VAR_GLOBAL);
+			Lst_AtEnd(&makefiles, optarg);
 			break;
 		case 'j': {
 		   char *endptr;
@@ -305,39 +348,13 @@ rearg:	while((c = getopt(argc, argv, OPTFLAGS)) != -1) {
 			Var_Append(MAKEFLAGS, optarg, VAR_GLOBAL);
 			break;
 		}
-		case 'k':
-			keepgoing = TRUE;
-			Var_Append(MAKEFLAGS, "-k", VAR_GLOBAL);
-			break;
 		case 'm':
-			Dir_AddDir(sysIncPath, optarg);
+			Dir_AddDir(&sysIncPath, optarg, NULL);
 			Var_Append(MAKEFLAGS, "-m", VAR_GLOBAL);
 			Var_Append(MAKEFLAGS, optarg, VAR_GLOBAL);
 			break;
-		case 'n':
-			noExecute = TRUE;
-			Var_Append(MAKEFLAGS, "-n", VAR_GLOBAL);
-			break;
-		case 'q':
-			queryFlag = TRUE;
-			/* Kind of nonsensical, wot? */
-			Var_Append(MAKEFLAGS, "-q", VAR_GLOBAL);
-			break;
-		case 'r':
-			noBuiltins = TRUE;
-			Var_Append(MAKEFLAGS, "-r", VAR_GLOBAL);
-			break;
-		case 's':
-			beSilent = TRUE;
-			Var_Append(MAKEFLAGS, "-s", VAR_GLOBAL);
-			break;
-		case 't':
-			touchFlag = TRUE;
-			Var_Append(MAKEFLAGS, "-t", VAR_GLOBAL);
-			break;
 		default:
-		case '?':
-			usage();
+			posixParseOptLetter(c);
 		}
 	}
 
@@ -371,7 +388,7 @@ rearg:	while((c = getopt(argc, argv, OPTFLAGS)) != -1) {
 					optind = 1;     /* - */
 				goto rearg;
 			}
-			Lst_AtEnd(create, (ClientData)estrdup(*argv));
+			Lst_AtEnd(&create, estrdup(*argv));
 		}
 }
 
@@ -398,7 +415,8 @@ Main_ParseArgLine(line)
 	int argc;			/* Number of arguments in argv */
 	char *args;			/* Space used by the args */
 	char *buf;
-	char *argv0 = Var_Value(".MAKE", VAR_GLOBAL);
+	char *argv0;
+	char *s;
 
 	if (line == NULL)
 		return;
@@ -407,6 +425,18 @@ Main_ParseArgLine(line)
 	if (!*line)
 		return;
 
+	/* POSIX rule: MAKEFLAGS can hold a set of option letters without
+	 * any blanks or dashes. */
+	for (s = line;; s++) {
+		if (*s == '\0') {
+			while (line != s) 
+				posixParseOptLetter(*line++);
+			return;
+	    	}
+		if (strchr(OPTLETTERS, *s) == NULL)
+			break;
+	}
+	argv0 = Var_Value(".MAKE", VAR_GLOBAL);
 	buf = emalloc(strlen(line) + strlen(argv0) + 2);
 	(void)sprintf(buf, "%s %s", argv0, line);
 
@@ -445,6 +475,26 @@ chdir_verify_path(path, obpath)
 	return 0;
 }
 
+/* Add a :-separated path to a Lst of directories.  */
+static void
+add_dirpath(l, n)
+    Lst 	l;
+    const char 	*n;
+{
+    const char *start;
+    const char *cp;
+
+    for (start = n;;) {
+	for (cp = start; *cp != '\0' && *cp != ':';)
+	    cp++;
+	Dir_AddDir(l, start, cp);
+	if (*cp == '\0')
+	    break;
+	else
+	    start= cp+1;
+    }
+}
+
 
 /*-
  * main --
@@ -468,7 +518,7 @@ main(argc, argv)
 	int argc;
 	char **argv;
 {
-	Lst targs;	/* target nodes to create -- passed to Make_Init */
+	LIST targs;	/* target nodes to create -- passed to Make_Init */
 	Boolean outOfDate = TRUE; 	/* FALSE if all targets up to date */
 	struct stat sb, sa;
 	char *p, *path, *pathp, *pwd;
@@ -477,8 +527,6 @@ main(argc, argv)
 	char cdpath[MAXPATHLEN + 1];
     	char *machine = getenv("MACHINE");
 	char *machine_arch = getenv("MACHINE_ARCH");
-	Lst sysMkPath;			/* Path of sys.mk */
-	char *cp = NULL, *start;
 					/* avoid faults on read-only strings */
 	static char syspath[] = _PATH_DEFSYSPATH;
 
@@ -585,13 +633,13 @@ main(argc, argv)
 			objdir = curdir;
 	}
 
-	setenv("PWD", objdir, 1);
+	esetenv("PWD", objdir);
 	unsetenv("CDPATH");
 
-	create = Lst_Init();
-	makefiles = Lst_Init();
+	Lst_Init(&create);
+	Lst_Init(&makefiles);
 	printVars = FALSE;
-	variables = Lst_Init();
+	Lst_Init(&variables);
 	beSilent = FALSE;		/* Print commands as executed */
 	ignoreErrors = FALSE;		/* Pay attention to non-zero returns */
 	noExecute = FALSE;		/* Execute all commands */
@@ -625,7 +673,7 @@ main(argc, argv)
 	Var_Init();		/* As well as the lists of variables for
 				 * parsing arguments */
 	if (objdir != curdir)
-		Dir_AddDir(dirSearchPath, curdir);
+		Dir_AddDir(&dirSearchPath, curdir, NULL);
 	Var_Set(".CURDIR", curdir, VAR_GLOBAL);
 	Var_Set(".OBJDIR", objdir, VAR_GLOBAL);
 
@@ -655,6 +703,9 @@ main(argc, argv)
 
 	MainParseArgs(argc, argv);
 
+#ifdef POSIX
+	Var_AddCmdline(MAKEFLAGS);
+#endif
 
 	/*
 	 * Initialize archive, target and suffix modules in preparation for
@@ -672,11 +723,10 @@ main(argc, argv)
 	 * created. If none specified, make the variable empty -- the parser
 	 * will fill the thing in with the default or .MAIN target.
 	 */
-	if (!Lst_IsEmpty(create)) {
+	if (!Lst_IsEmpty(&create)) {
 		LstNode ln;
 
-		for (ln = Lst_First(create); ln != NULL;
-		    ln = Lst_Succ(ln)) {
+		for (ln = Lst_First(&create); ln != NULL; ln = Lst_Adv(ln)) {
 			char *name = (char *)Lst_Datum(ln);
 
 			Var_Append(".TARGETS", name, VAR_GLOBAL);
@@ -690,18 +740,8 @@ main(argc, argv)
 	 * add the directories from the DEFSYSPATH (more than one may be given
 	 * as dir1:...:dirn) to the system include path.
 	 */
-	if (Lst_IsEmpty(sysIncPath)) {
-		for (start = syspath; *start != '\0'; start = cp) {
-			for (cp = start; *cp != '\0' && *cp != ':'; cp++)
-				continue;
-			if (*cp == '\0') {
-				Dir_AddDir(sysIncPath, start);
-			} else {
-				*cp++ = '\0';
-				Dir_AddDir(sysIncPath, start);
-			}
-		}
-	}
+	if (Lst_IsEmpty(&sysIncPath))
+	    add_dirpath(&sysIncPath, syspath);
 
 	/*
 	 * Read in the built-in rules first, followed by the specified
@@ -710,20 +750,24 @@ main(argc, argv)
 	 */
 	if (!noBuiltins) {
 		LstNode ln;
+		LIST sysMkPath;		/* Path of sys.mk */
 
-		sysMkPath = Lst_Init();
-		Dir_Expand (_PATH_DEFSYSMK, sysIncPath, sysMkPath);
-		if (Lst_IsEmpty(sysMkPath))
+		Lst_Init(&sysMkPath);
+		Dir_Expand(_PATH_DEFSYSMK, &sysIncPath, &sysMkPath);
+		if (Lst_IsEmpty(&sysMkPath))
 			Fatal("make: no system rules (%s).", _PATH_DEFSYSMK);
-		ln = Lst_Find(sysMkPath, ReadMakefile, NULL);
+		ln = Lst_Find(&sysMkPath, ReadMakefile, NULL);
 		if (ln != NULL)
 			Fatal("make: cannot open %s.", (char *)Lst_Datum(ln));
+#ifdef CLEANUP
+		Lst_Destroy(&sysMkPath, (SimpleProc)free);
+#endif
 	}
 
-	if (!Lst_IsEmpty(makefiles)) {
+	if (!Lst_IsEmpty(&makefiles)) {
 		LstNode ln;
 
-		ln = Lst_Find(makefiles, ReadMakefile, NULL);
+		ln = Lst_Find(&makefiles, ReadMakefile, NULL);
 		if (ln != NULL)
 			Fatal("make: cannot open %s.", (char *)Lst_Datum(ln));
 	} else if (!ReadMakefile("BSDmakefile", NULL))
@@ -737,9 +781,9 @@ main(argc, argv)
 	/* Install all the flags into the MAKE envariable. */
 	if (((p = Var_Value(MAKEFLAGS, VAR_GLOBAL)) != NULL) && *p)
 #ifdef POSIX
-		setenv("MAKEFLAGS", p, 1);
+		esetenv("MAKEFLAGS", p);
 #else
-		setenv("MAKE", p, 1);
+		esetenv("MAKE", p);
 #endif
 
 	/*
@@ -749,7 +793,7 @@ main(argc, argv)
 	 * <directory>:<directory>:<directory>...
 	 */
 	if (Var_Exists("VPATH", VAR_CMD)) {
-		char *vpath, *path, *cp, savec;
+		char *vpath;
 		/*
 		 * GCC stores string constants in read-only memory, but
 		 * Var_Subst will want to write this thing, so store it
@@ -757,21 +801,9 @@ main(argc, argv)
 		 */
 		static char VPATH[] = "${VPATH}";
 
-		vpath = Var_Subst(VPATH, VAR_CMD, FALSE);
-		path = vpath;
-		do {
-			/* skip to end of directory */
-			for (cp = path; *cp != ':' && *cp != '\0'; cp++)
-				continue;
-			/* Save terminator character so know when to stop */
-			savec = *cp;
-			*cp = '\0';
-			/* Add directory to search path */
-			Dir_AddDir(dirSearchPath, path);
-			*cp = savec;
-			path = cp + 1;
-		} while (savec == ':');
-		(void)free((Address)vpath);
+		vpath = Var_Subst(VPATH, (SymTable *)VAR_CMD, FALSE);
+		add_dirpath(&dirSearchPath, vpath);
+		(void)free(vpath);
 	}
 
 	/*
@@ -788,8 +820,7 @@ main(argc, argv)
 	if (printVars) {
 		LstNode ln;
 
-		for (ln = Lst_First(variables); ln != NULL;
-		    ln = Lst_Succ(ln)) {
+		for (ln = Lst_First(&variables); ln != NULL; ln = Lst_Adv(ln)) {
 			char *value = Var_Value((char *)Lst_Datum(ln),
 					  VAR_GLOBAL);
 
@@ -802,10 +833,11 @@ main(argc, argv)
 	 * to create. If none was given on the command line, we consult the
 	 * parsing module to find the main target(s) to create.
 	 */
-	if (Lst_IsEmpty(create))
-		targs = Parse_MainName();
+	Lst_Init(&targs);
+	if (!Lst_IsEmpty(&create))
+		Targ_FindList(&targs, &create);
 	else
-		targs = Targ_FindList(create, TARG_CREATE);
+		Parse_MainName(&targs);
 
 	if (!compatMake && !printVars) {
 		/*
@@ -822,19 +854,19 @@ main(argc, argv)
 		}
 
 		/* Traverse the graph, checking on all the targets */
-		outOfDate = Make_Run(targs);
+		outOfDate = Make_Run(&targs);
 	} else if (!printVars) {
 		/*
 		 * Compat_Init will take care of creating all the targets as
 		 * well as initializing the module.
 		 */
-		Compat_Run(targs);
+		Compat_Run(&targs);
 	}
 
-	Lst_Destroy(targs, NOFREE);
-	Lst_Destroy(variables, NOFREE);
-	Lst_Destroy(makefiles, NOFREE);
-	Lst_Destroy(create, (void (*) __P((ClientData))) free);
+	Lst_Destroy(&targs, NOFREE);
+	Lst_Destroy(&variables, NOFREE);
+	Lst_Destroy(&makefiles, NOFREE);
+	Lst_Destroy(&create, (SimpleProc)free);
 
 	/* print the graph now it's been processed if the user requested it */
 	if (DEBUG(GRAPH2))
@@ -866,15 +898,16 @@ main(argc, argv)
  */
 static Boolean
 ReadMakefile(p, q)
-	ClientData p, q;
+	void *p; 
+	void *q;
 {
 	char *fname = p;		/* makefile to read */
-	extern Lst parseIncPath;
+	extern LIST parseIncPath;
 	FILE *stream;
 	char *name, path[MAXPATHLEN + 1];
 
 	if (!strcmp(fname, "-")) {
-		Parse_File("(stdin)", stdin);
+		Parse_File(estrdup("(stdin)"), stdin);
 		Var_Set("MAKEFILE", "", VAR_GLOBAL);
 	} else {
 		if ((stream = fopen(fname, "r")) != NULL)
@@ -883,14 +916,14 @@ ReadMakefile(p, q)
 		if (curdir != objdir && *fname != '/') {
 			(void)sprintf(path, "%s/%s", curdir, fname);
 			if ((stream = fopen(path, "r")) != NULL) {
-				fname = path;
+				fname = estrdup(path);
 				goto found;
 			}
 		}
 		/* look in -I and system include directories. */
-		name = Dir_FindFile(fname, parseIncPath);
+		name = Dir_FindFile(fname, &parseIncPath);
 		if (!name)
-			name = Dir_FindFile(fname, sysIncPath);
+			name = Dir_FindFile(fname, &sysIncPath);
 		if (!name || !(stream = fopen(name, "r")))
 			return(FALSE);
 		fname = name;
@@ -1211,11 +1244,9 @@ usage()
 }
 
 
-int
-PrintAddr(a, b)
-    ClientData a;
-    ClientData b;
+void
+PrintAddr(a)
+    void *a;
 {
     printf("%lx ", (unsigned long) a);
-    return b ? 0 : 0;
 }

@@ -1,4 +1,4 @@
-/*	$OpenBSD: ld.c,v 1.15 2000/02/21 16:56:56 art Exp $	*/
+/*	$OpenBSD: ld.c,v 1.17 2000/09/21 12:03:12 espie Exp $	*/
 /*	$NetBSD: ld.c,v 1.52 1998/02/20 03:12:51 jonathan Exp $	*/
 
 /*-
@@ -284,6 +284,9 @@ main(argc, argv)
 	int	argc;
 	char	*argv[];
 {
+
+	if (atexit(cleanup))
+		err(1, "atexit");
 
 	/* Added this to stop ld core-dumping on very large .o files.    */
 #ifdef RLIMIT_STACK
@@ -1469,7 +1472,7 @@ enter_global_ref(lsp, name, entry)
 			if (com)
 				common_defined_global_count--;
 			sp->common_size = 0;
-			if (sp != dynamic_symbol)
+			if (sp != dynamic_symbol && sp != got_symbol)
 				sp->defined = 0;
 		}
 
@@ -2631,9 +2634,6 @@ write_output()
 	outstream = fopen(output_filename, "w");
 	if (outstream == NULL)
 		err(1, "open: %s", output_filename);
-
-	if (atexit(cleanup))
-		err(1, "atexit");
 
 	if (fstat(fileno(outstream), &statbuf) < 0)
 		err(1, "fstat: %s", output_filename);
@@ -3814,6 +3814,8 @@ static void
 cleanup()
 {
 	struct stat	statbuf;
+
+	rrs_summarize_warnings();
 
 	if (outstream == 0)
 		return;

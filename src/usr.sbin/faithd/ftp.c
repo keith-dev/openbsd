@@ -1,9 +1,10 @@
-/*	$OpenBSD: ftp.c,v 1.2 1999/12/20 16:32:53 itojun Exp $	*/
+/*	$OpenBSD: ftp.c,v 1.4 2000/09/16 10:33:45 itojun Exp $	*/
+/*	$KAME: ftp.c,v 1.10 2000/09/14 00:23:39 itojun Exp $	*/
 
 /*
  * Copyright (C) 1997 and 1998 WIDE Project.
  * All rights reserved.
- * 
+ *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
  * are met:
@@ -15,7 +16,7 @@
  * 3. Neither the name of the project nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
- * 
+ *
  * THIS SOFTWARE IS PROVIDED BY THE PROJECT AND CONTRIBUTORS ``AS IS'' AND
  * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
  * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
@@ -447,7 +448,10 @@ ftp_copyresult(int src, int dst, enum state state)
 #endif
 	case LPSV:
 	case EPSV:
-		/* expecting "227 Entering Passive Mode (x,x,x,x,x,x,x)" */
+		/*
+		 * expecting "227 Entering Passive Mode (x,x,x,x,x,x,x)"
+		 * (in some cases result comes without paren)
+		 */
 		if (code != 227) {
 passivefail0:
 			close(wport6);
@@ -467,11 +471,12 @@ passivefail0:
 		 * PASV result -> LPSV/EPSV result
 		 */
 		p = param;
-		while (*p && *p != '(')
+		while (*p && *p != '(' && !isdigit(*p))	/*)*/
 			p++;
 		if (!*p)
 			goto passivefail0;	/*XXX*/
-		p++;
+		if (*p == '(')	/*)*/
+			p++;
 		n = sscanf(p, "%u,%u,%u,%u,%u,%u",
 			&ho[0], &ho[1], &ho[2], &ho[3], &po[0], &po[1]);
 		if (n != 6)
@@ -508,7 +513,7 @@ passivefail:
 		error = setsockopt(wport6, IPPROTO_IPV6, IPV6_FAITH,
 			&on, sizeof(on));
 		if (error == -1)
-			exit_error("setsockopt(IPV6_FAITH): %s", ERRSTR);
+			exit_failure("setsockopt(IPV6_FAITH): %s", ERRSTR);
 	    }
 #endif
 		error = bind(wport6, (struct sockaddr *)sin6, sin6->sin6_len);
@@ -555,10 +560,10 @@ passivefail:
 			p = (char *)&sin6->sin6_port;
 			n = snprintf(sbuf, sizeof(sbuf),
 "228 Entering Long Passive Mode (%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d)\r\n",
-				6, 16, UC(a[0]), UC(a[1]), UC(a[2]), UC(a[3]), 
-				UC(a[4]), UC(a[5]), UC(a[6]), UC(a[7]), 
-				UC(a[8]), UC(a[9]), UC(a[10]), UC(a[11]), 
-				UC(a[12]), UC(a[13]), UC(a[14]), UC(a[15]), 
+				6, 16, UC(a[0]), UC(a[1]), UC(a[2]), UC(a[3]),
+				UC(a[4]), UC(a[5]), UC(a[6]), UC(a[7]),
+				UC(a[8]), UC(a[9]), UC(a[10]), UC(a[11]),
+				UC(a[12]), UC(a[13]), UC(a[14]), UC(a[15]),
 				2, UC(p[0]), UC(p[1]));
 			write(dst, sbuf, n);
 			passivemode = 1;
@@ -593,7 +598,7 @@ passivefail1:
 		 * EPSV result -> PORT result
 		 */
 		p = param;
-		while (*p && *p != '(')
+		while (*p && *p != '(')	/*)*/
 			p++;
 		if (!*p)
 			goto passivefail1;	/*XXX*/
@@ -676,7 +681,7 @@ passivefail2:
 			p = (char *)&sin->sin_port;
 			n = snprintf(sbuf, sizeof(sbuf),
 "227 Entering Passive Mode (%d,%d,%d,%d,%d,%d)\r\n",
-				UC(a[0]), UC(a[1]), UC(a[2]), UC(a[3]), 
+				UC(a[0]), UC(a[1]), UC(a[2]), UC(a[3]),
 				UC(p[0]), UC(p[1]));
 			write(dst, sbuf, n);
 			passivemode = 1;
@@ -918,6 +923,7 @@ eprtparamfail:
 		}
 		memset(&hints, 0, sizeof(hints));
 		hints.ai_family = AF_UNSPEC;
+		hints.ai_socktype = SOCK_STREAM;
 		error = getaddrinfo(hostp, portp, &hints, &res);
 		if (error) {
 			n = snprintf(sbuf, sizeof(sbuf),

@@ -23,7 +23,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- *	$OpenBSD: id.c,v 1.5 2000/02/27 01:38:26 brian Exp $
+ *	$OpenBSD: id.c,v 1.7 2000/08/16 09:07:27 brian Exp $
  */
 
 #include <sys/param.h>
@@ -38,7 +38,6 @@
 #include <signal.h>
 #include <stdarg.h>
 #include <stdio.h>
-#include <stdlib.h>     /* setproctitle() under OpenBSD (+NetBSD ?)*/
 #include <string.h>
 #include <sysexits.h>
 #if defined(__FreeBSD__) && !defined(NOKLDLOAD)
@@ -271,20 +270,6 @@ ID0kill(pid_t pid, int sig)
   log_Printf(LogID0, "%d = kill(%d, %d)\n", result, (int)pid, sig);
   ID0setuser();
   return result;
-}
-
-void
-ID0setproctitle(const char *title)
-{
-  ID0set0();
-  if (title == NULL) {
-    setproctitle(NULL);
-    log_Printf(LogID0, "setproctitle(NULL)\n");
-  } else {
-    setproctitle("%s", title);
-    log_Printf(LogID0, "setproctitle(\"%%s\", \"%s\")\n", title);
-  }
-  ID0setuser();
 }
 
 #if defined(__FreeBSD__) && !defined(NOKLDLOAD)

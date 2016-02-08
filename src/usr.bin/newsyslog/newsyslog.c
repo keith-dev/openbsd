@@ -1,4 +1,4 @@
-/*	$OpenBSD: newsyslog.c,v 1.30 1999/11/11 22:24:14 millert Exp $	*/
+/*	$OpenBSD: newsyslog.c,v 1.34 2000/06/30 16:00:19 millert Exp $	*/
 
 /*
  * Copyright (c) 1999 Todd C. Miller <Todd.Miller@courtesan.com>
@@ -88,7 +88,7 @@ provided "as is" without express or implied warranty.
  */
 
 #ifndef lint
-static char rcsid[] = "$OpenBSD: newsyslog.c,v 1.30 1999/11/11 22:24:14 millert Exp $";
+static char rcsid[] = "$OpenBSD: newsyslog.c,v 1.34 2000/06/30 16:00:19 millert Exp $";
 #endif /* not lint */
 
 #ifndef CONF
@@ -157,7 +157,7 @@ struct pidinfo {
 int     verbose = 0;            /* Print out what's going on */
 int     needroot = 1;           /* Root privs are necessary */
 int     noaction = 0;           /* Don't do anything, just show it */
-int	monitor = 0;		/* Don't do monitoring by default */
+int	monitormode = 0;	/* Don't do monitoring by default */
 char    *conf = CONF;           /* Configuration file to use */
 time_t  timenow;
 #define MIN_PID		4
@@ -229,6 +229,7 @@ main(argc, argv)
 					pl->file = q->pidfile;
 					pl->signal = q->signal;
 				}
+				pl++;
 			}
 		}
                 q = q->next;
@@ -279,9 +280,9 @@ do_entry(ent)
                         printf("size (Kb): %d [%d] ", size, ent->size);
                 if (verbose && (ent->hours > 0))
                         printf(" age (hr): %d [%d] ", modtime, ent->hours);
-		if (monitor && ent->flags & CE_MONITOR)
+		if (monitormode && ent->flags & CE_MONITOR)
 			domonitor(ent->log, ent->whom);
-                if (!monitor && (((ent->size > 0) && (size >= ent->size)) ||
+                if (!monitormode && (((ent->size > 0) && (size >= ent->size)) ||
                     ((ent->hours > 0) && ((modtime >= ent->hours)
                                         || (modtime < 0))))) {
                         if (verbose)
@@ -375,7 +376,7 @@ PRS(argc, argv)
                         conf = optarg;
                         break;
 		case 'm':
-			monitor++;
+			monitormode++;
 			break;
                 default:
                         usage();
@@ -493,20 +494,33 @@ parse_file(nentries)
                 else
                         working->hours = -1;
 
-                q = parse = sob(++parse); /* Optional field */
-                *(parse = son(parse)) = '\0';
                 working->flags = 0;
-                while (q && *q && !isspace(*q)) {
-                        if ((*q == 'Z') || (*q == 'z'))
-                                working->flags |= CE_COMPACT;
-                        else if ((*q == 'B') || (*q == 'b'))
-                                working->flags |= CE_BINARY;
-			else if ((*q == 'M') || (*q == 'm'))
-				working->flags |= CE_MONITOR;
-                        else
-				errx(1, "Illegal flag in config file: %c", *q);
-                        q++;
-                }
+                q = sob(++parse);	/* Optional field */
+		if (*q == 'Z' || *q == 'z' || *q == 'B' || *q == 'b' ||
+		    *q == 'M' || *q == 'm') {
+			*(parse = son(q)) = '\0';
+			while (*q) {
+				switch (*q) {
+				case 'Z':
+				case 'z':
+					working->flags |= CE_COMPACT;
+					break;
+				case 'B':
+				case 'b':
+					working->flags |= CE_BINARY;
+					break;
+				case 'M':
+				case 'm':
+					working->flags |= CE_MONITOR;
+					break;
+				default:
+					errx(1, "Illegal flag in config file: %c", *q);
+					break;
+				}
+				q++;
+			}
+		} else
+		    parse--;	/* no flags so undo */
 
 		working->whom = NULL;
 		if (working->flags & CE_MONITOR) {	/* Optional field */
@@ -806,7 +820,7 @@ domonitor(log, whom)
 
 	fp = fopen(fname, "r");
 	if (fp == NULL) {
-		warn(fname);
+		warn("%s", fname);
 		goto cleanup;
 	}
 #ifdef QUAD_OFF_T
@@ -833,7 +847,7 @@ domonitor(log, whom)
 		/* Open logfile, seek. */
 		fp = fopen(log, "r");
 		if (fp == NULL) {
-			warn(log);
+			warn("%s", log);
 			goto cleanup;
 		}
 		fseek(fp, osize, SEEK_SET);
@@ -863,7 +877,7 @@ update:
 	/* Reopen for writing and update file. */
 	fp = fopen(fname, "w");
 	if (fp == NULL) {
-		warn(fname);
+		warn("%s", fname);
 		goto cleanup;
 	}
 #ifdef QUAD_OFF_T

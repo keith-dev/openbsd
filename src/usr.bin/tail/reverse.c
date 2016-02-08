@@ -1,4 +1,4 @@
-/*	$OpenBSD: reverse.c,v 1.6 1999/08/04 18:24:10 mickey Exp $	*/
+/*	$OpenBSD: reverse.c,v 1.8 2000/10/12 10:18:37 art Exp $	*/
 /*	$NetBSD: reverse.c,v 1.6 1994/11/23 07:42:10 jtc Exp $	*/
 
 /*-
@@ -41,7 +41,7 @@
 #if 0
 static char sccsid[] = "@(#)reverse.c	8.1 (Berkeley) 6/6/93";
 #endif
-static char rcsid[] = "$OpenBSD: reverse.c,v 1.6 1999/08/04 18:24:10 mickey Exp $";
+static char rcsid[] = "$OpenBSD: reverse.c,v 1.8 2000/10/12 10:18:37 art Exp $";
 #endif /* not lint */
 
 #include <sys/param.h>
@@ -93,11 +93,11 @@ reverse(fp, style, off, sbp)
 		switch(style) {
 		case FBYTES:
 		case RBYTES:
-			bytes(fp, off);
+			(void)bytes(fp, off);
 			break;
 		case FLINES:
 		case RLINES:
-			lines(fp, off);
+			(void)lines(fp, off);
 			break;
 		case REVERSE:
 			r_buf(fp);
@@ -127,7 +127,7 @@ r_reg(fp, style, off, sbp)
 		return (1);
 
 	if ((start = mmap(NULL, (size_t)size, PROT_READ, MAP_PRIVATE,
-	    fileno(fp), (off_t)0)) == (caddr_t)-1)
+	    fileno(fp), (off_t)0)) == MAP_FAILED)
 		return (1);
 	p = start + size - 1;
 

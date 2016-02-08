@@ -1,5 +1,3 @@
-/*	$OpenBSD: read_termcap.c,v 1.8 2000/04/14 19:14:02 millert Exp $	 */
-
 /****************************************************************************
  * Copyright (c) 1998,1999,2000 Free Software Foundation, Inc.              *
  *                                                                          *
@@ -57,9 +55,9 @@
 #include <tic.h>
 #include <term_entry.h>
 
-MODULE_ID("$From: read_termcap.c,v 1.46 2000/03/18 21:53:26 tom Exp $")
+MODULE_ID("$From: read_termcap.c,v 1.51 2000/10/21 00:34:11 Philip.Guenther Exp $")
 
-#ifndef PURE_TERMINFO
+#if !PURE_TERMINFO
 
 #ifdef __EMX__
 #define is_pathname(s) ((((s) != 0) && ((s)[0] == '/')) \
@@ -83,7 +81,8 @@ MODULE_ID("$From: read_termcap.c,v 1.46 2000/03/18 21:53:26 tom Exp $")
 #define _nc_cgetset   cgetset
 #else
 static int _nc_cgetmatch(char *, const char *);
-static int _nc_getent(char **, unsigned *, int *, int, char **, int, const char *, int, char *);
+static int _nc_getent(char **, unsigned *, int *, int, char **, int, const char
+		      *, int, char *);
 static int _nc_nfcmp(const char *, char *);
 
 /*-
@@ -259,15 +258,15 @@ _nc_cgetent(char **buf, int *oline, char **db_array, const char *name)
 #define DOALLOC(size) typeRealloc(char, size, record)
 static int
 _nc_getent(
-    char **cap,			/* termcap-content */
-    unsigned *len,		/* length, needed for recursion */
-    int *beginning,		/* line-number at match */
-    int in_array,		/* index in 'db_array[] */
-    char **db_array,		/* list of files to search */
-    int fd,
-    const char *name,
-    int depth,
-    char *nfield)
+	      char **cap,	/* termcap-content */
+	      unsigned *len,	/* length, needed for recursion */
+	      int *beginning,	/* line-number at match */
+	      int in_array,	/* index in 'db_array[] */
+	      char **db_array,	/* list of files to search */
+	      int fd,
+	      const char *name,
+	      int depth,
+	      char *nfield)
 {
     register char *r_end, *rp;
     int myfd = FALSE;
@@ -320,7 +319,7 @@ _nc_getent(
 	    if (fd >= 0) {
 		(void) lseek(fd, (off_t) 0, SEEK_SET);
 	    } else if ((_nc_access(db_array[current], R_OK) < 0)
-		|| (fd = open(db_array[current], O_RDONLY, 0)) < 0) {
+		       || (fd = open(db_array[current], O_RDONLY, 0)) < 0) {
 		/* No error on unfound file. */
 		if (errno == ENOENT)
 		    continue;
@@ -483,7 +482,7 @@ _nc_getent(
 	    tcend = s;
 
 	    iret = _nc_getent(&icap, &ilen, &oline, current, db_array, fd,
-		tc, depth + 1, 0);
+			      tc, depth + 1, 0);
 	    newicap = icap;	/* Put into a register. */
 	    newilen = ilen;
 	    if (iret != TC_SUCCESS) {
@@ -771,7 +770,7 @@ _nc_tgetent(char *bp, char **sourcename, int *lineno, const char *name)
 
     register char *p;
     register char *cp;
-    char *dummy;
+    char *dummy = NULL;
     char **fname;
     char *home;
     int i;
@@ -779,12 +778,13 @@ _nc_tgetent(char *bp, char **sourcename, int *lineno, const char *name)
     char *pathvec[PVECSIZ];	/* to point to names in pathbuf */
     char **pvec;		/* holds usable tail of path vector */
     char *termpath;
+    string_desc desc;
 
     fname = pathvec;
     pvec = pathvec;
     tbuf = bp;
     p = pathbuf;
-    cp = getenv("TERMCAP");
+    cp = use_terminfo_vars() ? getenv("TERMCAP") : NULL;
 
     /*
      * TERMCAP can have one of two things in it.  It can be the name of a file
@@ -795,24 +795,29 @@ _nc_tgetent(char *bp, char **sourcename, int *lineno, const char *name)
      * instead.  The path is found in the TERMPATH variable, or becomes
      * "$HOME/.termcap /etc/termcap" if no TERMPATH exists.
      */
-#define	MY_PATH_DEF	"/etc/termcap /usr/share/misc/termcap"
-    if (issetugid())
-	strlcpy(pathbuf, MY_PATH_DEF, PBUFSIZ);
-    else if (!is_pathname(cp)) {	/* no TERMCAP or it holds an entry */
+    _nc_str_init(&desc, pathbuf, sizeof(pathbuf));
+    if (cp == NULL) {
+	_nc_safe_strcpy(&desc, "/usr/share/misc/termcap /etc/termcap");
+    } else if (!is_pathname(cp)) {	/* TERMCAP holds an entry */
 	if ((termpath = getenv("TERMPATH")) != 0) {
-	    strlcpy(pathbuf, termpath, PBUFSIZ);
+	    _nc_safe_strcat(&desc, termpath);
 	} else {
-	    if ((home = getenv("HOME")) != 0 &&
-		strlen(home) < PBUFSIZ) {	/* setup path */
-		p += strlen(home);	/* path, looking in */
-		strcpy(pathbuf, home);	/* $HOME first */
-		*p++ = '/';
-	    }			/* if no $HOME look in current directory */
-	    strlcpy(p, ".termcap " MY_PATH_DEF,
-		(size_t) (PBUFSIZ - (p - pathbuf)));
+	    char temp[PBUFSIZ];
+	    size_t len;
+	    temp[0] = 0;
+	    if ((home = getenv("HOME")) != 0 && *home != '\0'
+	     && strchr(home, ' ') == 0) { /* setup path */
+		len = snprintf(temp, sizeof(temp), "%s/.termcap", home);
+		if (len < sizeof(temp)) {
+		    _nc_safe_strcat(&desc, temp);
+		}
+	    }
+	    _nc_safe_strcat(&desc, " /usr/share/misc/termcap");
+	    _nc_safe_strcat(&desc, " /etc/termcap");
 	}
-    } else			/* user-defined name in TERMCAP */
-	strlcpy(pathbuf, cp, PBUFSIZ);	/* still can be tokenized */
+    } else {			/* user-defined name in TERMCAP */
+	_nc_safe_strcat(&desc, cp);	/* still can be tokenized */
+    }
 
     *fname++ = pathbuf;		/* tokenize path into vector of names */
     while (*++p) {
@@ -925,9 +930,9 @@ _nc_read_termcap_entry(const char *const tn, TERMTYPE * const tp)
     static char *source;
     static int lineno;
 
-    if (!issetugid() && (p = getenv("TERMCAP")) != 0 && !is_pathname(p) &&
-	_nc_name_match(p, tn, "|:")) {
-
+    if (use_terminfo_vars() && (p = getenv("TERMCAP")) != 0
+	&& !is_pathname(p) && _nc_name_match(p, tn, "|:")) {
+	/* TERMCAP holds a termcap entry */
 	strlcpy(tc, p, sizeof(tc));
 	_nc_set_source("TERMCAP");
     } else {
@@ -974,7 +979,7 @@ _nc_read_termcap_entry(const char *const tn, TERMTYPE * const tp)
     char pathbuf[PATH_MAX];
 
     termpaths[filecount] = 0;
-    if ((tc = getenv("TERMCAP")) != 0 && (!issetugid() || !is_pathname(tc))) {
+    if (use_terminfo_vars() && (tc = getenv("TERMCAP")) != 0) {
 	if (is_pathname(tc)) {	/* interpret as a filename */
 	    ADD_TC(tc, 0);
 	} else if (_nc_name_match(tc, tn, "|:")) {	/* treat as a capability file */
@@ -1007,7 +1012,7 @@ _nc_read_termcap_entry(const char *const tn, TERMTYPE * const tp)
 
 #define PRIVATE_CAP "%s/.termcap"
 
-	if (!issetugid() && (h = getenv("HOME")) != NULL
+	if (use_terminfo_vars() && (h = getenv("HOME")) != NULL && *h != '\0'
 	    && (strlen(h) + sizeof(PRIVATE_CAP)) < PATH_MAX) {
 	    /* user's .termcap, if any, should override it */
 	    (void) strcpy(envhome, h);

@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.56 2000/04/21 00:10:40 millert Exp $
+#	$OpenBSD: Makefile,v 1.58 2000/09/03 18:41:11 espie Exp $
 
 #
 # For more information on building in tricky environments, please see
@@ -38,7 +38,7 @@ SUBDIR+= gnu
 
 SUBDIR+= sys lkm
 
-.if (${KERBEROS} == "yes")
+.if (${KERBEROS:L} == "yes")
 SUBDIR+= kerberosIV
 .endif
 
@@ -80,12 +80,12 @@ build:
 	(cd ${.CURDIR}/include; ${MAKE} prereq; ${SUDO} ${MAKE} includes)
 	${SUDO} ${MAKE} cleandir
 	(cd ${.CURDIR}/lib && ${MAKE} depend && ${MAKE} && \
-	    ${SUDO} ${MAKE} install)
+	    NOMAN=1 ${SUDO} ${MAKE} install)
 	(cd ${.CURDIR}/gnu/lib && ${MAKE} depend && ${MAKE} && \
-	    ${SUDO} ${MAKE} install)
-.if (${KERBEROS} == "yes")
+	    NOMAN=1 ${SUDO} ${MAKE} install)
+.if (${KERBEROS:L} == "yes")
 	(cd ${.CURDIR}/kerberosIV/lib && ${MAKE} depend && ${MAKE} && \
-	    ${SUDO} ${MAKE} install)
+	    NOMAN=1 ${SUDO} ${MAKE} install)
 .endif
 	(cd ${.CURDIR}/gnu/usr.bin/perl && \
 	    ${MAKE} -f Makefile.bsd-wrapper depend && \
@@ -333,7 +333,7 @@ cross-lib:	cross-dirs
 	    ${CROSSENV} MAKEOBJDIR=obj.${MACHINE}.${TARGET} \
 	    DESTDIR=${CROSSDIR} SKIPDIR=libocurses/PSD.doc \
 	    ${MAKE} NOMAN= install)
-.if (${KERBEROS} == "yes")
+.if (${KERBEROS:L} == "yes")
 	(cd kerberosIV; \
 	    BSDOBJDIR=${CROSSDIR}/usr/obj \
 	    BSDSRCDIR=${.CURDIR} MAKEOBJDIR=obj.${MACHINE}.${TARGET} \

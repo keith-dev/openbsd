@@ -1,4 +1,4 @@
-#	$OpenBSD: bsd.own.mk,v 1.31 2000/03/31 18:03:54 espie Exp $
+#	$OpenBSD: bsd.own.mk,v 1.35 2000/10/29 07:33:45 hugh Exp $
 #	$NetBSD: bsd.own.mk,v 1.24 1996/04/13 02:08:09 thorpej Exp $
 
 # Host-specific overrides
@@ -9,7 +9,7 @@
 .endif
 
 # XXX - This is temporary until everyone uses UVM
-.if (${MACHINE_ARCH} == "sparc") || (${MACHINE_ARCH} == "i386")
+.if (${MACHINE_ARCH} == "sparc") || (${MACHINE_ARCH} == "i386") || (${MACHINE_ARCH} == "vax")
 UVM?=		yes
 .else
 UVM?=		no
@@ -32,6 +32,9 @@ AFS?=		no
 .else
 AFS?=		yes
 .endif
+# Set `DEBUGLIBS' to `yes' to build libraries with debugging symbols
+DEBUGLIBS?=	no
+
 # where the system object and source trees are kept; can be configurable
 # by the user in case they want them in ~/foosrc and ~/fooobj, for example
 BSDSRCDIR?=	/usr/src
@@ -93,9 +96,8 @@ STATIC?=	-static
 
 # don't try to generate PIC versions of libraries on machines
 # which don't support PIC.
-.if (${MACHINE_ARCH} == "alpha") || (${MACHINE_ARCH} == "powerpc") || \
-    (${MACHINE_ARCH} == "vax") || (${MACHINE_ARCH} == "hppa") || \
-    (${MACHINE_ARCH} == "m88k")
+.if (${MACHINE_ARCH} == "alpha") || (${MACHINE_ARCH} == "vax") || \
+    (${MACHINE_ARCH} == "hppa") || (${MACHINE_ARCH} == "m88k")
 NOPIC=
 .endif
 

@@ -1,4 +1,4 @@
-/*	$OpenBSD: test_close.c,v 1.1 2000/01/06 06:51:20 d Exp $	*/
+/*	$OpenBSD: test_close.c,v 1.3 2000/10/04 06:03:10 d Exp $	*/
 
 /*
  * Test the semantics of close() while a select() is happening.
@@ -40,6 +40,7 @@ main()
 	pthread_t thread;
 	pthread_attr_t attr;
 	struct sockaddr_in addr;
+	int ret;
 
 	/* Open up a TCP connection to the local discard port */
 	addr.sin_family = AF_INET;
@@ -48,7 +49,10 @@ main()
 
 	CHECKe(fd = socket(AF_INET, SOCK_STREAM, 0));
 	printf("main: connecting to discard port with fd %d\n", fd);
-	CHECKe(connect(fd, (struct sockaddr *)&addr, sizeof addr));
+	ret = connect(fd, (struct sockaddr *)&addr, sizeof addr);
+	if (ret == -1)
+		fprintf(stderr, "connect() failed: ensure that the discard port is enabled for inetd(8)\n");
+	CHECKe(ret);
 	printf("main: connected on fd %d\n", fd);
 
 	CHECKr(pthread_attr_init(&attr));

@@ -1,4 +1,4 @@
-/* $OpenBSD: keynote.h,v 1.11 1999/10/26 22:31:38 angelos Exp $ */
+/* $OpenBSD: keynote.h,v 1.14 2000/05/18 08:31:02 angelos Exp $ */
 /*
  * The author of this code is Angelos D. Keromytis (angelos@dsl.cis.upenn.edu)
  *
@@ -151,6 +151,8 @@ int    kn_do_query(int, char **, int);
 int    kn_get_failed(int, int, int);
 int    kn_cleanup_action_environment(int);
 int    kn_close(int);
+void   kn_free_key(struct keynote_deckey *);
+char  *kn_get_string(char *);
 
 /* Simple API */
 int    kn_query(struct environment *, char **, int, char **, int *, int,

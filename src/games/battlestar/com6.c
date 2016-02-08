@@ -1,4 +1,4 @@
-/*	$OpenBSD: com6.c,v 1.11 1999/09/25 20:30:45 pjanzen Exp $	*/
+/*	$OpenBSD: com6.c,v 1.15 2000/09/24 21:55:23 pjanzen Exp $	*/
 /*	$NetBSD: com6.c,v 1.5 1995/04/27 21:30:23 mycroft Exp $	*/
 
 /*
@@ -38,7 +38,7 @@
 #if 0
 static char sccsid[] = "@(#)com6.c	8.2 (Berkeley) 4/28/95";
 #else
-static char rcsid[] = "$OpenBSD: com6.c,v 1.11 1999/09/25 20:30:45 pjanzen Exp $";
+static char rcsid[] = "$OpenBSD: com6.c,v 1.15 2000/09/24 21:55:23 pjanzen Exp $";
 #endif
 #endif /* not lint */
 
@@ -149,7 +149,8 @@ rate()
 			return ("junior voyeur");
 		else if (score < 35)
 			return ("Don Juan");
-		else return ("Marquis De Sade");
+		else
+			return ("Marquis De Sade");
 	} else
 		if (score == power) {
 			if (score < 5)
@@ -160,7 +161,8 @@ rate()
 				return ("Klingon");
 			else if (score < 22)
 				return ("Darth Vader");
-			else return ("Sauron the Great");
+			else
+				return ("Sauron the Great");
 		} else{
 			if (score < 5)
 				return ("Polyanna");
@@ -168,7 +170,8 @@ rate()
 				return ("philanthropist");
 			else if (score < 20)
 				return ("Tattoo");
-			else return ("Mr. Roarke");
+			else
+				return ("Mr. Roarke");
 		}
 }
 
@@ -196,7 +199,8 @@ ride()
 		puts("You climb onto the stallion and kick it in the guts.  The stupid steed launches");
 		puts("forward through bush and fern.  You are thrown and the horse gallops off.");
 		ClearBit(location[position].objects, HORSE);
-		while (!(position = rnd(NUMOFROOMS + 1)) || !OUTSIDE || !beenthere[position] || location[position].flyhere);
+		while (!(position = rnd(NUMOFROOMS + 1)) || !OUTSIDE || !beenthere[position] || location[position].flyhere)
+			;
 		SetBit(location[position].objects, HORSE);
 		if (location[position].north)
 			position = location[position].north;
@@ -226,4 +230,37 @@ light()
 		}
 	} else
 		puts("You're out of matches.");
+}
+
+void
+dooropen()
+{				/* synonyms = {open, unlock} */
+	wordnumber++;
+	if (wordnumber <= wordcount && wordtype[wordnumber] == NOUNS
+	    && wordvalue[wordnumber] == DOOR) {
+		switch(position) {
+		case 189:
+		case 231:
+			if (location[189].north == 231)
+				puts("The door is already open.");
+			else
+				puts("The door does not budge.");
+			break;
+		case 30:
+			if (location[30].west == 25)
+				puts("The door is gone.");
+			else
+				puts("The door is locked tight.");
+			break;
+		case 31:
+			puts("That's one immovable door.");
+			break;
+		case 20:
+			puts("The door is already ajar.");
+			break;
+		default:
+			puts("What door?");
+		}
+	} else
+		puts("That doesn't open.");
 }

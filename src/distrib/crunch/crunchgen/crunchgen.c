@@ -1,4 +1,4 @@
-/*	$OpenBSD: crunchgen.c,v 1.15 1999/12/06 01:47:58 deraadt Exp $	*/
+/*	$OpenBSD: crunchgen.c,v 1.17 2000/07/09 19:20:40 marc Exp $	*/
 /*
  * Copyright (c) 1994 University of Maryland
  * All Rights Reserved.
