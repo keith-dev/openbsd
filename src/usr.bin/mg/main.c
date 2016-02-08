@@ -1,4 +1,4 @@
-/*	$OpenBSD: main.c,v 1.25 2003/06/26 23:04:10 vincent Exp $	*/
+/*	$OpenBSD: main.c,v 1.29 2004/02/02 20:21:14 vincent Exp $	*/
 
 /*
  *	Mainline.
@@ -19,7 +19,7 @@ int		 lastflag;			/* flags, last command	*/
 int		 curgoal;			/* goal column		*/
 int		 startrow;			/* row to start         */
 BUFFER		*curbp;				/* current buffer	*/
-BUFFER		*bheadp;			/* BUFFER listhead	*/
+BUFFER		*bheadp;			/* BUFFER list head */
 MGWIN		*curwp;				/* current window	*/
 MGWIN		*wheadp;			/* MGWIN listhead	*/
 char		 pat[NPAT];			/* pattern		*/
@@ -31,7 +31,7 @@ main(int argc, char **argv)
 {
 	char	*cp, *init_fcn_name = NULL;
 	PF init_fcn = NULL;
-	int o;
+	int o, i, nfiles;
 
 	while ((o = getopt(argc, argv, "f:")) != -1)
 		switch (o) {
@@ -86,14 +86,15 @@ main(int argc, char **argv)
 	if ((cp = startupfile(NULL)) != NULL)
 		(void)load(cp);
 #endif	/* !NO_STARTUP */
-	while (argc > 0) {
-		if (argv[0][0] == '+' && strlen(argv[0]) >= 2) {
+
+	for (nfiles = 0, i = 0; i < argc; i++) {
+		if (argv[i][0] == '+' && strlen(argv[i]) >= 2) {
 			long lval;
 			char *ep;
 
 			errno = 0;
-			lval = strtoul(&argv[0][1], &ep, 10);
-			if (argv[0][1] == '\0' || *ep != '\0')
+			lval = strtoul(&argv[i][1], &ep, 10);
+			if (argv[i][1] == '\0' || *ep != '\0')
 				goto notnum;
 			if ((errno == ERANGE &&
 			    (lval == LONG_MAX || lval == LONG_MIN)) ||
@@ -102,18 +103,23 @@ main(int argc, char **argv)
 			startrow = (int)lval;
 		} else {
 notnum:
-			cp = adjustname(*argv);
+			cp = adjustname(argv[i]);
 			if (cp != NULL) {
+				if (nfiles == 1) {
+					splitwind(0, 1);
+				}
 				curbp = findbuffer(cp);
 				(void)showbuffer(curbp, curwp, 0);
 				(void)readin(cp);
 				if (init_fcn_name)
 					init_fcn(0, 1);
+				nfiles++;
 			}
 		}
-		argc--;
-		argv++;
 	}
+
+	if (nfiles > 2)
+		listbuffers(0, 1);
 
 	/* fake last flags */
 	thisflag = 0;
@@ -157,7 +163,7 @@ edinit(PF init_fcn)
 
 	bheadp = NULL;
 	bp = bfind("*scratch*", TRUE);		/* Text buffer.		 */
-	wp = (MGWIN *)malloc(sizeof(MGWIN));	/* Initial window.	 */
+	wp = new_window(bp);
 	if (wp == NULL)
 		panic("Out of memory");
 	if (bp == NULL || wp == NULL)
@@ -166,16 +172,9 @@ edinit(PF init_fcn)
 	wheadp = wp;
 	curwp = wp;
 	wp->w_wndp = NULL;			/* Initialize window.	 */
-	wp->w_bufp = bp;
-	bp->b_nwnd = 1;				/* Displayed.		 */
 	wp->w_linep = wp->w_dotp = bp->b_linep;
-	wp->w_doto = 0;
-	wp->w_markp = NULL;
-	wp->w_marko = 0;
-	wp->w_toprow = 0;
-	wp->w_ntrows = nrow - 2;		/* 2 = mode, echo.	 */
-	wp->w_force = 0;
-	wp->w_flag = WFMODE | WFHARD;		/* Full.		 */
+	wp->w_ntrows = nrow - 2;		/* 2 = mode, echo. */
+	wp->w_flag = WFMODE | WFHARD;		/* Full. */
 
 	if (init_fcn)
 		init_fcn(0, 1);

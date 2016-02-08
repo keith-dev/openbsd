@@ -1,9 +1,11 @@
-/*	$OpenBSD: main.c,v 1.47 2003/09/05 21:03:36 henning Exp $	*/
+/*	$OpenBSD: main.c,v 1.54 2004/02/29 13:59:15 markus Exp $	*/
 
+#ifndef SMALL
 static const char copyright[] =
 "@(#) Copyright (c) 1992, 1993\n\
 	The Regents of the University of California.  All rights reserved.\n"
 "Copyright (c) 1997-2002 Michael Shalayeff\n";
+#endif
 
 #ifndef SMALL
 static const char license[] =
@@ -33,13 +35,9 @@ static const char license[] =
 " THE POSSIBILITY OF SUCH DAMAGE.\n";
 #endif /* SMALL */
 
-#ifndef lint
-#if 0
-static char sccsid[] = "@(#)compress.c	8.2 (Berkeley) 1/7/94";
-#else
-static const char main_rcsid[] = "$OpenBSD: main.c,v 1.47 2003/09/05 21:03:36 henning Exp $";
+#ifndef SMALL
+static const char main_rcsid[] = "$OpenBSD: main.c,v 1.54 2004/02/29 13:59:15 markus Exp $";
 #endif
-#endif /* not lint */
 
 #include <sys/param.h>
 #include <sys/time.h>
@@ -99,9 +97,9 @@ const struct compressor null_method =
 int permission(const char *);
 void setfile(const char *, struct stat *);
 __dead void usage(int);
-int compress(const char *, char *, const struct compressor *,
+int docompress(const char *, char *, const struct compressor *,
     int, struct stat *);
-int decompress(const char *, char *, const struct compressor *,
+int dodecompress(const char *, char *, const struct compressor *,
     int, struct stat *);
 const struct compressor *check_method(int);
 const char *check_suffix(const char *);
@@ -148,7 +146,8 @@ main(int argc, char *argv[])
 	char *nargv[512];	/* some estimate based on ARG_MAX */
 	int bits, exists, oreg, ch, error, i, rc, oflag;
 
-	bits = cat = oflag = decomp = 0;
+	exists = 0;
+	bits = oflag = 0;
 	nosave = -1;
 	p = __progname;
 	if (p[0] == 'g') {
@@ -276,19 +275,18 @@ main(int argc, char *argv[])
 			testmode = 1;
 			decomp++;
 			break;
-		case 'V':
-			printf("%s\n%s\n%s\n", main_rcsid,
 #ifndef SMALL
-			    z_rcsid,
+		case 'V':
+			printf("%s\n%s\n", main_rcsid, gz_rcsid);
+			printf("%s\n%s\n", z_rcsid, null_rcsid);
 #endif
-			    gz_rcsid);
 			exit (0);
 		case 'v':
 			verbose++;
 			break;
+#ifndef SMALL
 		case 'L':
 			fputs(copyright, stderr);
-#ifndef SMALL
 			fputs(license, stderr);
 #endif
 			exit (0);
@@ -389,9 +387,11 @@ main(int argc, char *argv[])
 			if (decomp) {
 				if (set_outfile(infile, outfile,
 				    sizeof outfile) == NULL) {
-					if (!recurse)
+					if (!recurse) {
 						warnx("%s: unknown suffix: "
 						    "ignored", infile);
+						rc = rc ? rc : WARNING;
+					}
 					continue;
 				}
 			} else {
@@ -399,12 +399,14 @@ main(int argc, char *argv[])
 				    "%s%s", infile, suffix) >= sizeof(outfile)) {
 					warnx("%s%s: name too long",
 					    infile, suffix);
+					rc = rc ? rc : WARNING;
 					continue;
 				}
 			}
 		}
 
-		exists = !stat(outfile, &osb);
+		if (!testmode)
+			exists = !stat(outfile, &osb);
 		if (!force && exists && S_ISREG(osb.st_mode) &&
 		    !permission(outfile)) {
 			rc = rc ? rc : WARNING;
@@ -416,7 +418,7 @@ main(int argc, char *argv[])
 		if (verbose > 0 && !pipin && !list)
 			fprintf(stderr, "%s:\t", infile);
 
-		error = (decomp ? decompress : compress)
+		error = (decomp ? dodecompress : docompress)
 			(infile, outfile, method, bits, entry->fts_statp);
 
 		switch (error) {
@@ -449,7 +451,7 @@ main(int argc, char *argv[])
 }
 
 int
-compress(const char *in, char *out, const struct compressor *method,
+docompress(const char *in, char *out, const struct compressor *method,
     int bits, struct stat *sb)
 {
 	u_char buf[Z_BUFSIZE];
@@ -562,7 +564,7 @@ check_method(int fd)
 }
 
 int
-decompress(const char *in, char *out, const struct compressor *method,
+dodecompress(const char *in, char *out, const struct compressor *method,
     int bits, struct stat *sb)
 {
 	u_char buf[Z_BUFSIZE];
@@ -786,25 +788,27 @@ list_stats(const char *name, const struct compressor *method,
 	static u_int nruns;
 	char *timestr;
 
-	if (name != NULL && strcmp(name, "/dev/stdout") == 0)
-		name += 5;
-
 	if (nruns == 0) {
 		if (verbose >= 0) {
 			if (verbose > 0)
-				fputs("method  crc     date  time  ", stdout);
-			puts("compressed  uncompr. ratio uncompressed_name");
+				fputs("method  crc      date   time  ", stdout);
+			puts("compressed  uncompressed  ratio  uncompressed_name");
 		}
 	}
 	nruns++;
 
 	if (name != NULL) {
+		if (strcmp(name, "/dev/stdout") == 0)
+			name += 5;
 		if (verbose > 0) {
 			timestr = ctime(&info->mtime) + 4;
 			timestr[12] = '\0';
-			printf("%.5s %08x %s ", method->name, info->crc, timestr);
+			if (timestr[4] == ' ')
+				timestr[4] = '0';
+			printf("%-7.7s %08x %s ", method->name, info->crc,
+				timestr);
 		}
-		printf("%9lld %9lld  %4.1f%% %s\n",
+		printf("%10lld    %10lld  %4.1f%%  %s\n",
 		    (long long)(info->total_in + info->hlen),
 		    (long long)info->total_out,
 		    (info->total_out - info->total_in) *
@@ -816,8 +820,8 @@ list_stats(const char *name, const struct compressor *method,
 		if (nruns < 3)		/* only do totals for > 1 files */
 			return;
 		if (verbose > 0)
-			fputs("                            ", stdout);
-		printf("%9lld %9lld  %4.1f%% (totals)\n",
+			fputs("                              ", stdout);
+		printf("%10lld    %10lld  %4.1f%%  (totals)\n",
 		    (long long)(compressed_total + header_total),
 		    (long long)uncompressed_total,
 		    (uncompressed_total - compressed_total) *

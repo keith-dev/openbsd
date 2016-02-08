@@ -1,4 +1,4 @@
-/* $OpenBSD: wsmoused.c,v 1.14 2003/04/13 11:20:47 jmc Exp $ */
+/* $OpenBSD: wsmoused.c,v 1.18 2004/01/04 21:41:12 drahn Exp $ */
 
 /*
  * Copyright (c) 2001 Jean-Baptiste Marchand, Julien Montagne and Jerome Verdon
@@ -69,7 +69,6 @@
 #include <string.h>
 #include <stdlib.h>
 #include <syslog.h>
-#include <varargs.h>
 
 #include "mouse_protocols.h"
 #include "wsmoused.h"
@@ -489,9 +488,9 @@ wsmoused(void)
 static void
 usage(void)
 {
-	fprintf(stderr, "usage: %s [-2df] [-t protocol] [-C threshold] [-I file] \
-[-M N=M] [-p port]", __progname);
-	fprintf(stderr, "       %s -i [-p port]\n", __progname);
+	fprintf(stderr, "usage: %s [-2df] [-C thresh] [-I file] [-M N=M] \
+[-p device] [-t type]\n", __progname);
+	fprintf(stderr, "       %s -i [-p device]\n", __progname);
 	exit(1);
 }
 
@@ -521,7 +520,8 @@ main(int argc, char **argv)
 			identify = TRUE;
 			break;
 		case 'p':
-			mouse.portname = strdup(optarg);
+			if ((mouse.portname = strdup(optarg)) == NULL)
+				logerr(1, "out of memory");
 			break;
 		case 't':
 			if (strcmp(optarg, "auto") == 0) {
@@ -574,7 +574,6 @@ main(int argc, char **argv)
 		signal(SIGINT , terminate);
 		signal(SIGQUIT, terminate);
 		signal(SIGTERM, terminate);
-		signal(SIGKILL, terminate);
 		if ((mouse.mfd = open(mouse.portname,
 		    O_RDONLY | O_NONBLOCK, 0)) == -1)
 			logerr(1, "unable to open %s", mouse.portname);

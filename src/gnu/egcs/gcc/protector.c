@@ -73,6 +73,7 @@ static int current_function_defines_short_string;
 static int current_function_has_variable_string;
 static int current_function_defines_vsized_array;
 static int current_function_is_inlinable;
+static int is_array;
 
 static rtx guard_area, _guard;
 static rtx function_first_insn, prologue_insert_point;
@@ -139,7 +140,8 @@ prepare_stack_protection (inlinable)
 
   current_function_defines_vulnerable_string = search_string_from_argsandvars (0);
 
-  if (current_function_defines_vulnerable_string)
+  if (current_function_defines_vulnerable_string
+      || flag_stack_protection)
     {
       HOST_WIDE_INT offset;
       function_first_insn = get_insns ();
@@ -388,6 +390,10 @@ search_string_def (type)
 
 	  current_function_defines_short_string = TRUE;
 	}
+      
+      /* to protect every functions, sweep any arrays to the frame top */
+      is_array = TRUE;
+
       return search_string_def(TREE_TYPE(type));
 	
     case UNION_TYPE:
@@ -751,7 +757,7 @@ static void
 rtl_epilogue (insn)
      rtx insn;
 {
-  rtx if_false_label;
+  rtx if_false_label, end_label = 0;
   rtx _val;
   rtx funcname;
   tree funcstr;
@@ -869,7 +875,18 @@ rtl_epilogue (insn)
 	emit_move_insn (current_function_return_rtx, return_reg);
 	emit_insn (gen_rtx_USE (VOIDmode, current_function_return_rtx));
       }
+
+      end_label = gen_label_rtx ();
+      emit_jump (end_label);
     }
+
+  /* Mark the end of the function body.
+     If control reaches this insn, the function can drop through
+     without returning a value.  */
+  emit_note (SSP_DUMMY_FILE, NOTE_INSN_FUNCTION_END);
+  
+  if (end_label)
+    emit_label (end_label);
 
 #ifdef HAVE_return
   if (HAVE_return && flag_have_return)
@@ -908,7 +925,10 @@ arrange_var_order (block)
 	      && DECL_RTL (types)
 	      && GET_CODE (DECL_RTL (types)) == MEM)
 	    {
-	      if (search_string_def (TREE_TYPE (types)))
+	      is_array = 0;
+	      if (search_string_def (TREE_TYPE (types))
+		  || (! current_function_defines_vulnerable_string
+		      && is_array))
 		{
 		  rtx home = DECL_RTL (types);
 
@@ -1040,6 +1060,10 @@ copy_args_for_protection (void)
 		    
 		    MEM_IN_STRUCT_P (temp_rtx) = AGGREGATE_TYPE_P (TREE_TYPE (parms));
 		    MEM_ALIAS_SET (temp_rtx) = get_alias_set (parms);
+
+		    /* move_arg_location may change the contents of
+		       DECL_RTL (parms). to avoid this, copies the contents */
+		    DECL_RTL (parms) = copy_rtx (DECL_RTL (parms));
 
 		    /* generate codes for copying the content */
 		    store_expr (parms, temp_rtx, 0);

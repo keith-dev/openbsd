@@ -1,4 +1,4 @@
-#	$OpenBSD: bsd.own.mk,v 1.70 2003/09/06 18:20:23 miod Exp $
+#	$OpenBSD: bsd.own.mk,v 1.81 2004/03/02 18:18:27 miod Exp $
 #	$NetBSD: bsd.own.mk,v 1.24 1996/04/13 02:08:09 thorpej Exp $
 
 # Host-specific overrides
@@ -20,20 +20,27 @@ YP?=		yes
 # integrated support for libwrap.
 TCP_WRAPPERS?=	yes
 # Set `AFS` to `yes' to build with AFS support.
-.if (${MACHINE_ARCH} == "m88k")
-AFS?=		no
-.else
 AFS?=		yes
-.endif
 # Set `DEBUGLIBS' to `yes' to build libraries with debugging symbols
 DEBUGLIBS?=	no
 # Set toolchain to be able to know differences.
-.if (${MACHINE_ARCH} == "alpha" || ${MACHINE_ARCH} == "powerpc" || \
-     ${MACHINE_ARCH} == "hppa" || ${MACHINE_ARCH} == "sparc64" || \
-     ${MACHINE_ARCH} == "sparc" || ${MACHINE_ARCH} == "i386")
+.if ( ${MACHINE_ARCH} == "alpha" || ${MACHINE_ARCH} == "arm" || \
+     ${MACHINE_ARCH} == "hppa" || ${MACHINE_ARCH} == "i386" || \
+     ${MACHINE_ARCH} == "powerpc" || ${MACHINE_ARCH} == "sparc" || \
+     ${MACHINE_ARCH} == "sparc64" || ${MACHINE_ARCH} == "x86_64") || \
+     ${MACHINE} == "amd64"
 ELF_TOOLCHAIN?=	yes
 .else
 ELF_TOOLCHAIN?=	no
+.endif
+
+# do the dew
+.if (${MACHINE_ARCH} == "arm" || ${MACHINE_ARCH} == "hppa64" || \
+    ${MACHINE_ARCH} == "x86_64" || ${MACHINE_ARCH} == "sparc64") || \
+    ${MACHINE} == "amd64"
+USE_GCC3?=yes
+.else
+USE_GCC3?=no
 .endif
 
 # where the system object and source trees are kept; can be configurable
@@ -108,8 +115,8 @@ STATIC?=	-static
 
 # don't try to generate PIC versions of libraries on machines
 # which don't support PIC.
-.if (${MACHINE_ARCH} == "vax") || \
-    (${MACHINE_ARCH} == "hppa") || (${MACHINE_ARCH} == "m88k")
+.if (${MACHINE_ARCH} == "vax") || (${MACHINE_ARCH} == "hppa") || \
+    (${MACHINE_ARCH} == "m88k")
 NOPIC=
 .endif
 

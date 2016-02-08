@@ -1,4 +1,4 @@
-/*	$OpenBSD: cdio.c,v 1.30 2003/06/10 22:20:45 deraadt Exp $	*/
+/*	$OpenBSD: cdio.c,v 1.33 2004/01/16 12:10:55 espie Exp $	*/
 
 /*  Copyright (c) 1995 Serge V. Vakulenko
  * All rights reserved.
@@ -214,7 +214,7 @@ usage(void)
 int
 main(int argc, char **argv)
 {
-	int cmd;
+	int ch, cmd;
 	char *arg;
 
 	cdname = getenv("DISC");
@@ -225,27 +225,24 @@ main(int argc, char **argv)
 	if (!cddb_host)
 		cddb_host = "freedb.freedb.org";
 
-	for (;;) {
-		switch (getopt(argc, argv, "svd:f:")) {
-		case -1:
-			break;
+	while ((ch = getopt(argc, argv, "svd:f:")) != -1)
+		switch (ch) {
 		case 's':
 			verbose = 0;
-			continue;
+			break;
 		case 'v':
 			verbose = 2;
-			continue;
+			break;
 		case 'f':
 			cdname = optarg;
-			continue;
+			break;
 	    	case 'd':
 			cddb_host = optarg;
-			continue;
+			break;
 		default:
 			usage();
 		}
-		break;
-	}
+	
 	argc -= optind;
 	argv += optind;
 
@@ -554,64 +551,64 @@ play(char *arg)
 		unsigned char tm, ts, tf;
 
 		tr2 = m2 = s2 = f2 = f1 = 0;
-		if (8 == sscanf(arg, "%d %d:%d.%d %d %d:%d.%d",
+		if (8 == sscanf(arg, "%d %u:%u.%u %d %u:%u.%u",
 		    &tr1, &m1, &s1, &f1, &tr2, &m2, &s2, &f2))
 			goto Play_Relative_Addresses;
 
 		tr2 = m2 = s2 = f2 = f1 = 0;
-		if (7 == sscanf(arg, "%d %d:%d %d %d:%d.%d",
+		if (7 == sscanf(arg, "%d %u:%u %d %u:%u.%u",
 		    &tr1, &m1, &s1, &tr2, &m2, &s2, &f2))
 			goto Play_Relative_Addresses;
 
 		tr2 = m2 = s2 = f2 = f1 = 0;
-		if (7 == sscanf(arg, "%d %d:%d.%d %d %d:%d",
+		if (7 == sscanf(arg, "%d %u:%u.%u %d %u:%u",
 		    &tr1, &m1, &s1, &f1, &tr2, &m2, &s2))
 			goto Play_Relative_Addresses;
 
 		tr2 = m2 = s2 = f2 = f1 = 0;
-		if (7 == sscanf(arg, "%d %d:%d.%d %d:%d.%d",
+		if (7 == sscanf(arg, "%d %u:%u.%u %u:%u.%u",
 		    &tr1, &m1, &s1, &f1, &m2, &s2, &f2))
 			goto Play_Relative_Addresses;
 
 		tr2 = m2 = s2 = f2 = f1 = 0;
-		if (6 == sscanf(arg, "%d %d:%d.%d %d:%d",
+		if (6 == sscanf(arg, "%d %u:%u.%u %u:%u",
 		    &tr1, &m1, &s1, &f1, &m2, &s2))
 			goto Play_Relative_Addresses;
 
 		tr2 = m2 = s2 = f2 = f1 = 0;
-		if (6 == sscanf(arg, "%d %d:%d %d:%d.%d",
+		if (6 == sscanf(arg, "%d %u:%u %u:%u.%u",
 		    &tr1, &m1, &s1, &m2, &s2, &f2))
 			goto Play_Relative_Addresses;
 
 		tr2 = m2 = s2 = f2 = f1 = 0;
-		if (6 == sscanf(arg, "%d %d:%d.%d %d %d",
+		if (6 == sscanf(arg, "%d %u:%u.%u %d %u",
 		    &tr1, &m1, &s1, &f1, &tr2, &m2))
 			goto Play_Relative_Addresses;
 
 		tr2 = m2 = s2 = f2 = f1 = 0;
-		if (5 == sscanf(arg, "%d %d:%d %d:%d", &tr1, &m1, &s1, &m2, &s2))
+		if (5 == sscanf(arg, "%d %u:%u %u:%u", &tr1, &m1, &s1, &m2, &s2))
 			goto Play_Relative_Addresses;
 
 		tr2 = m2 = s2 = f2 = f1 = 0;
-		if (5 == sscanf(arg, "%d %d:%d %d %d",
+		if (5 == sscanf(arg, "%d %u:%u %d %u",
 		    &tr1, &m1, &s1, &tr2, &m2))
 			goto Play_Relative_Addresses;
 
 		tr2 = m2 = s2 = f2 = f1 = 0;
-		if (5 == sscanf(arg, "%d %d:%d.%d %d",
+		if (5 == sscanf(arg, "%d %u:%u.%u %d",
 		    &tr1, &m1, &s1, &f1, &tr2))
 			goto Play_Relative_Addresses;
 
 		tr2 = m2 = s2 = f2 = f1 = 0;
-		if (4 == sscanf(arg, "%d %d:%d %d", &tr1, &m1, &s1, &tr2))
+		if (4 == sscanf(arg, "%d %u:%u %u", &tr1, &m1, &s1, &tr2))
 			goto Play_Relative_Addresses;
 
 		tr2 = m2 = s2 = f2 = f1 = 0;
-		if (4 == sscanf(arg, "%d %d:%d.%d", &tr1, &m1, &s1, &f1))
+		if (4 == sscanf(arg, "%d %u:%u.%u", &tr1, &m1, &s1, &f1))
 			goto Play_Relative_Addresses;
 
 		tr2 = m2 = s2 = f2 = f1 = 0;
-		if (3 == sscanf(arg, "%d %d:%d", &tr1, &m1, &s1))
+		if (3 == sscanf(arg, "%d %u:%u", &tr1, &m1, &s1))
 			goto Play_Relative_Addresses;
 
 		tr2 = m2 = s2 = f2 = f1 = 0;
@@ -732,13 +729,13 @@ Play_Relative_Addresses:
 		return (play_msf(m1, s1, f1, m2, s2, f2));
 
 Try_Absolute_Timed_Addresses:
-		if (6 != sscanf(arg, "%d:%d.%d%d:%d.%d",
+		if (6 != sscanf(arg, "%u:%u.%u%u:%u.%u",
 		    &m1, &s1, &f1, &m2, &s2, &f2) &&
-		    5 != sscanf(arg, "%d:%d.%d%d:%d", &m1, &s1, &f1, &m2, &s2) &&
-		    5 != sscanf(arg, "%d:%d%d:%d.%d", &m1, &s1, &m2, &s2, &f2) &&
-		    3 != sscanf(arg, "%d:%d.%d", &m1, &s1, &f1) &&
-		    4 != sscanf(arg, "%d:%d%d:%d", &m1, &s1, &m2, &s2) &&
-		    2 != sscanf(arg, "%d:%d", &m1, &s1))
+		    5 != sscanf(arg, "%u:%u.%u%u:%u", &m1, &s1, &f1, &m2, &s2) &&
+		    5 != sscanf(arg, "%u:%u%u:%u.%u", &m1, &s1, &m2, &s2, &f2) &&
+		    3 != sscanf(arg, "%u:%u.%u", &m1, &s1, &f1) &&
+		    4 != sscanf(arg, "%u:%u%u:%u", &m1, &s1, &m2, &s2) &&
+		    2 != sscanf(arg, "%u:%u", &m1, &s1))
 			goto Clean_up;
 
 		if (m2 == 0) {
@@ -1242,6 +1239,7 @@ input(int *cmd)
 	char *buf;
 	int siz = 0;
 	char *p;
+	HistEvent hev;
 
 	do {
 		if ((buf = (char *) el_gets(el, &siz)) == NULL || !siz) {
@@ -1250,7 +1248,7 @@ input(int *cmd)
 			return (0);
 		}
 		if (strlen(buf) > 1)
-			history(hist, H_ENTER, buf);
+			history(hist, &hev, H_ENTER, buf);
 		p = parse(buf, cmd);
 	} while (!p);
 	return (p);
@@ -1359,10 +1357,12 @@ prompt(void)
 void
 switch_el(void)
 {
+	HistEvent hev;
+
 	if (el == NULL && hist == NULL) {
-		el = el_init(__progname, stdin, stdout);
+		el = el_init(__progname, stdin, stdout, stderr);
 		hist = history_init();
-		history(hist, H_EVENT, 100);
+		history(hist, &hev, H_SETSIZE, 100);
 		el_set(el, EL_HIST, history, hist);
 		el_set(el, EL_EDITOR, "emacs");
 		el_set(el, EL_PROMPT, prompt);

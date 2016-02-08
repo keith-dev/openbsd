@@ -1,4 +1,4 @@
-#	$OpenBSD: changelist,v 1.31 2003/08/21 19:10:19 frantzen Exp $
+#	$OpenBSD: changelist,v 1.35 2004/02/26 22:01:17 david Exp $
 #
 # List of files which the security script backs up and checks
 # for modifications.
@@ -8,6 +8,7 @@
 #
 
 /etc/Distfile
+/etc/bgpd.conf
 /etc/boot.conf
 /etc/bootparams
 /etc/bootptab
@@ -76,9 +77,10 @@
 /etc/rc.shutdown
 /etc/remote
 /etc/resolv.conf
-/etc/rndc.key
++/etc/rndc.key
 /etc/rpc
 /etc/security
+/etc/sensorsd.conf
 /etc/services
 /etc/shells
 /etc/shosts.equiv
@@ -99,11 +101,17 @@
 /etc/weekly
 /etc/weekly.local
 /etc/wsconsctl.conf
+/etc/mail/access
 /etc/mail/aliases
+/etc/mail/helpfile
+/etc/mail/local-host-names
 /etc/mail/localhost.cf
+/etc/mail/mailertable
+/etc/mail/relay-domains
 /etc/mail/sendmail.cf
 /etc/mail/submit.cf
-/etc/mail/local-host-names
+/etc/mail/trusted-users
+/etc/mail/virtusertable
 /root/.cshrc
 /root/.klogin
 /root/.login
@@ -116,7 +124,7 @@
 /var/cron/deny
 /var/cron/tabs/root
 /var/named/etc/named.conf
-/var/named/etc/rndc.key
++/var/named/etc/rndc.key
 /var/www/conf/httpd.conf
 /var/www/conf/srm.conf
 /var/www/conf/access.conf

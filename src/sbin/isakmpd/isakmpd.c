@@ -1,4 +1,4 @@
-/*	$OpenBSD: isakmpd.c,v 1.53 2003/06/04 07:31:17 ho Exp $	*/
+/*	$OpenBSD: isakmpd.c,v 1.58 2004/03/19 14:04:43 hshoexer Exp $	*/
 /*	$EOM: isakmpd.c,v 1.54 2000/10/05 09:28:22 niklas Exp $	*/
 
 /*
@@ -95,6 +95,7 @@ volatile sig_atomic_t sigusr2ed = 0;
 /*
  * If we receive a TERM signal, perform a "clean shutdown" of the daemon.
  * This includes to send DELETE notifications for all our active SAs.
+ * Also on recv of an INT signal (Ctrl-C out of an '-d' session, typically).
  */
 volatile sig_atomic_t sigtermed = 0;
 void daemon_shutdown_now (int);
@@ -114,7 +115,7 @@ usage (void)
 	   "usage: %s [-4] [-6] [-c config-file] [-d] [-D class=level]\n"
 	   "          [-f fifo] [-i pid-file] [-n] [-p listen-port]\n"
 	   "          [-P local-port] [-L] [-l packetlog-file] [-r seed]\n"
-	   "          [-R report-file]\n",
+	   "          [-R report-file] [-v]\n",
 	   sysdep_progname ());
   exit (1);
 }
@@ -129,7 +130,7 @@ parse_args (int argc, char *argv[])
   int do_packetlog = 0;
 #endif
 
-  while ((ch = getopt (argc, argv, "46c:dD:f:i:np:P:Ll:r:R:")) != -1) {
+  while ((ch = getopt (argc, argv, "46c:dD:f:i:np:P:Ll:r:R:v")) != -1) {
     switch (ch) {
     case '4':
       bind_family |= BIND_FAMILY_INET4;
@@ -206,6 +207,10 @@ parse_args (int argc, char *argv[])
       report_file = optarg;
       break;
 
+    case 'v':
+      verbose_logging = 1;
+      break;
+
     case '?':
     default:
       usage ();
@@ -239,7 +244,7 @@ report (void)
 
   if (!rfp)
     {
-      log_error ("fopen (\"%s\", \"w\") failed", report_file);
+      log_error ("report: fopen (\"%s\", \"w\") failed", report_file);
       return;
     }
 
@@ -322,7 +327,7 @@ daemon_shutdown (void)
     }
 }
 
-/* Called on SIGTERM, or by ui_shutdown_daemon().  */
+/* Called on SIGTERM, SIGINT or by ui_shutdown_daemon().  */
 void
 daemon_shutdown_now (int sig)
 {
@@ -335,18 +340,19 @@ write_pid_file (void)
 {
   FILE *fp;
 
-  /* Ignore errors. XXX Will fail with USE_PRIVSEP.  */
+  /* Ignore errors. This will fail with USE_PRIVSEP.  */
   unlink (pid_file);
 
   fp = monitor_fopen (pid_file, "w");
   if (fp != NULL)
     {
-      /* XXX Error checking!  */
-      fprintf (fp, "%ld\n", (long) getpid ());
+      if (fprintf (fp, "%ld\n", (long) getpid ()) < 0)
+	log_error ("write_pid_file: failed to write PID to \"%.100s\"",
+	           pid_file);
       fclose (fp);
     }
   else
-    log_fatal ("main: fopen (\"%s\", \"w\") failed", pid_file);
+    log_fatal ("write_pid_file: fopen (\"%.100s\", \"w\") failed", pid_file);
 }
 
 int
@@ -357,28 +363,38 @@ main (int argc, char *argv[])
   size_t mask_size;
   struct timeval tv, *timeout;
 
+  closefrom (STDERR_FILENO + 1);
+
   /* Make sure init() won't alloc fd 0, 1 or 2, as daemon() will close them. */
   for (n = 0; n <= 2; n++)
     if (fcntl (n, F_GETFL, 0) == -1 && errno == EBADF)
       (void)open ("/dev/null", n ? O_WRONLY : O_RDONLY, 0);
 
+  for (n = 1; n < _NSIG; n++)
+    signal (n, SIG_DFL);
+
   /* Log cmd line parsing and initialization errors to stderr.  */
   log_to (stderr);
   parse_args (argc, argv);
-  log_init ();
+  log_init (debug);
 
-  /* Do a clean daemon shutdown on TERM reception. (Needed by monitor).  */
+  /*
+   * Do a clean daemon shutdown on TERM/INT. These signals must be
+   * initialized before monitor_init(). INT is only used with '-d'.
+   */
   signal (SIGTERM, daemon_shutdown_now);
+  if (debug == 1) /* i.e '-dd' will skip this.  */
+    signal (SIGINT, daemon_shutdown_now);
+
+  /* Daemonize before forking unpriv'ed child */
+  if (!debug)
+    if (daemon (0, 0))
+      log_fatal ("main: daemon (0, 0) failed");
 
 #if defined (USE_PRIVSEP)
   if (monitor_init ())
     {
-      /* The parent, with privileges.  */
-      if (!debug)
-	if (daemon (0, 0))
-	  log_fatal ("main [priv]: daemon (0, 0) failed");
-
-      /* Enter infinite monitor loop.  */
+      /* The parent, with privileges enters infinite monitor loop.  */
       monitor_loop (debug);
       exit (0); /* Never reached.  */
     }
@@ -387,14 +403,6 @@ main (int argc, char *argv[])
 #endif
 
   init ();
-
-  if (!debug)
-    {
-      if (daemon (0, 0))
-	log_fatal ("main: daemon (0, 0) failed");
-      /* Switch to syslog.  */
-      log_to (0);
-    }
 
   write_pid_file ();
 
@@ -423,6 +431,10 @@ main (int argc, char *argv[])
   if (!wfds)
     log_fatal ("main: malloc (%lu) failed", (unsigned long)mask_size);
 
+#if defined (USE_PRIVSEP)
+  monitor_init_done();
+#endif
+
   while (1)
     {
       /* If someone has sent SIGHUP to us, reconfigure.  */
@@ -448,8 +460,8 @@ main (int argc, char *argv[])
 	}
 
       /*
-       * and if someone set 'sigtermed' (SIGTERM or via the UI), this
-       * indicated we should start a shutdown of the daemon.
+       * and if someone set 'sigtermed' (SIGTERM, SIGINT or via the UI),
+       * this indicates we should start a controlled shutdown of the daemon.
        *
        * Note: Since _one_ message is sent per iteration of this enclosing
        * while-loop, and we want to send a number of DELETE notifications,
@@ -494,7 +506,7 @@ main (int argc, char *argv[])
 	{
 	  if (errno != EINTR)
 	    {
-	      log_error ("select");
+	      log_error ("main: select");
 
 	      /*
 	       * In order to give the unexpected error condition time to

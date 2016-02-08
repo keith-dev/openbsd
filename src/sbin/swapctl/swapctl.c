@@ -1,4 +1,4 @@
-/*	$OpenBSD: swapctl.c,v 1.11 2003/03/03 13:41:23 miod Exp $	*/
+/*	$OpenBSD: swapctl.c,v 1.13 2004/01/12 19:46:08 avsm Exp $	*/
 /*	$NetBSD: swapctl.c,v 1.9 1998/07/26 20:23:15 mycroft Exp $	*/
 
 /*
@@ -362,7 +362,7 @@ do_fstab(void)
 			priority = pri;
 
 		if ((s = strstr(fp->fs_mntops, NFSMNTPT)) != NULL) {
-			char *t, cmd[strlen(PATH_MOUNT)+1+PATH_MAX+1+PATH_MAX+1];
+			char *t, cmd[sizeof(PATH_MOUNT)+PATH_MAX+1+PATH_MAX+1];
 
 			/*
 			 * Skip this song and dance if we're only
@@ -375,19 +375,20 @@ do_fstab(void)
 			if (t != 0)
 				*t = '\0';
 			spec = strdup(s + strlen(NFSMNTPT));
+			if (spec == NULL)
+				err(1, "strdup");
+
 			if (t != 0)
 				*t = ',';
-
-			if (spec == NULL)
-				errx(1, "Out of memory");
 
 			if (strlen(spec) == 0) {
 				warnx("empty mountpoint");
 				free((char *)spec);
 				continue;
 			}
-			snprintf(cmd, sizeof(cmd), "%s %s %s",
-			    PATH_MOUNT, fp->fs_spec, spec);
+			if (snprintf(cmd, sizeof(cmd), "%s %s %s",
+			    PATH_MOUNT, fp->fs_spec, spec) >= sizeof(cmd))
+				errx(1, "path too long");
 			if (system(cmd) != 0) {
 				warnx("%s: mount failed", fp->fs_spec);
 				continue;

@@ -1,4 +1,4 @@
-/*	$OpenBSD: log.c,v 1.35 2003/06/10 16:41:29 deraadt Exp $	*/
+/*	$OpenBSD: log.c,v 1.41 2004/03/19 14:04:43 hshoexer Exp $	*/
 /*	$EOM: log.c,v 1.30 2000/09/29 08:19:23 niklas Exp $	*/
 
 /*
@@ -60,14 +60,17 @@
 #include <stdarg.h>
 #include <unistd.h>
 
+#include "conf.h"
 #include "isakmp_num.h"
 #include "log.h"
 #include "monitor.h"
+#include "util.h"
 
 static void _log_print (int, int, const char *, va_list, int, int);
 
 static FILE *log_output;
 
+int verbose_logging = 0;
 #if defined (USE_DEBUG)
 static int log_level[LOG_ENDCLASS];
 
@@ -98,9 +101,56 @@ static u_int16_t in_cksum (const u_int16_t *, int);
 #endif /* USE_DEBUG */
 
 void
-log_init (void)
+log_init (int debug)
 {
-  log_output = stderr;
+  if (debug)
+    log_output = stderr;
+  else
+    log_to (0); /* syslog */
+}
+
+void
+log_reinit (void)
+{
+  struct conf_list *logging;
+#ifdef USE_DEBUG
+  struct conf_list_node *logclass;
+  int class, level;
+#endif  /* USE_DEBUG */
+
+  logging = conf_get_list ("General", "Logverbose");
+  if (logging)
+    {
+      verbose_logging = 1;
+      conf_free_list (logging);
+    }
+
+
+#ifdef USE_DEBUG
+  logging = conf_get_list ("General", "Loglevel");
+  if (logging)
+    {
+      for (logclass = TAILQ_FIRST (&logging->fields); logclass;
+	   logclass = TAILQ_NEXT (logclass, link))
+	{
+	  if (sscanf (logclass->field, "%d=%d", &class, &level) != 2)
+	    {
+	      if (sscanf (logclass->field, "A=%d", &level) == 1)
+		  for (class = 0; class < LOG_ENDCLASS; class++)
+		    log_debug_cmd (class, level);
+	      else
+		{
+		  log_print ("init: invalid logging class or level: %s",
+			     logclass->field);
+		  continue;
+		}
+	    }
+	  else
+	    log_debug_cmd (class, level);
+	}
+      conf_free_list (logging);
+    }
+#endif /* USE_DEBUG */
 }
 
 void
@@ -163,7 +213,7 @@ _log_print (int error, int syslog_level, const char *fmt, va_list ap,
 		  class == LOG_PRINT ? "Default" : "Report>");
       strlcat (nbuf, buffer, sizeof nbuf);
 #if defined (USE_PRIVSEP)
-      strlcat (nbuf, getuid() ? "" : " [priv]", LOG_SIZE + 32);
+      strlcat (nbuf, getuid () ? "" : " [priv]", LOG_SIZE + 32);
 #endif
       strlcat (nbuf, "\n", sizeof nbuf);
 
@@ -207,7 +257,7 @@ log_debug (int cls, int level, const char *fmt, ...)
   if (cls >= 0 && (log_level[cls] == 0 || level > log_level[cls]))
     return;
   va_start (ap, fmt);
-  _log_print (0, LOG_DEBUG, fmt, ap, cls, level);
+  _log_print (0, LOG_INFO, fmt, ap, cls, level);
   va_end (ap);
 }
 
@@ -305,6 +355,28 @@ log_print (const char *fmt, ...)
 }
 
 void
+log_verbose (const char *fmt, ...)
+{
+  va_list ap;
+#ifdef USE_DEBUG
+  int i;
+#endif /* USE_DEBUG */
+
+  if (verbose_logging == 0)
+    return;
+
+#ifdef USE_DEBUG
+  for (i = 0; i < LOG_ENDCLASS; i++)
+    if (log_level[i] > 0)
+      return;
+#endif
+
+  va_start (ap, fmt);
+  _log_print (0, LOG_NOTICE, fmt, ap, LOG_PRINT, 0);
+  va_end (ap);
+}
+
+void
 log_error (const char *fmt, ...)
 {
   va_list ap;
@@ -355,7 +427,12 @@ log_packet_init (char *newname)
     }
 
   /* Does the file already exist?  XXX lstat() or stat()?  */
+#if defined (USE_PRIVSEP)
+  /* XXX This is a fstat! */
+  if (monitor_stat (pcaplog_file, &st) == 0)
+#else
   if (lstat (pcaplog_file, &st) == 0)
+#endif
     {
       /* Sanity checks.  */
       if ((st.st_mode & S_IFMT) != S_IFREG)
@@ -469,7 +546,8 @@ log_packet_iov (struct sockaddr *src, struct sockaddr *dst, struct iovec *iov,
   isakmphdr->flags &= ~(ISAKMP_FLAGS_ENC);
 
   /* udp */
-  udp.uh_sport = udp.uh_dport = htons (500);
+  udp.uh_sport = sockaddr_port (src);
+  udp.uh_dport = sockaddr_port (dst);
   datalen += sizeof udp;
   udp.uh_ulen = htons (datalen);
 

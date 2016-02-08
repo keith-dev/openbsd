@@ -1,4 +1,4 @@
-/*	$OpenBSD: login.c,v 1.51 2003/08/12 13:14:58 hin Exp $	*/
+/*	$OpenBSD: login.c,v 1.54 2004/01/23 04:36:37 millert Exp $	*/
 /*	$NetBSD: login.c,v 1.13 1996/05/15 23:50:16 jtc Exp $	*/
 
 /*-
@@ -73,7 +73,7 @@ static const char copyright[] =
 #if 0
 static const char sccsid[] = "@(#)login.c	8.4 (Berkeley) 4/2/94";
 #endif
-static const char rcsid[] = "$OpenBSD: login.c,v 1.51 2003/08/12 13:14:58 hin Exp $";
+static const char rcsid[] = "$OpenBSD: login.c,v 1.54 2004/01/23 04:36:37 millert Exp $";
 #endif /* not lint */
 
 /*
@@ -276,9 +276,6 @@ main(int argc, char *argv[])
 	} else
 		ask = 1;
 
-	for (cnt = getdtablesize(); cnt > 2; cnt--)
-		(void)close(cnt);
-
 	/*
 	 * If effective user is not root, just run su(1) to emulate login(1).
 	 */
@@ -287,6 +284,7 @@ main(int argc, char *argv[])
 
 		auth_close(as);
 		closelog();
+		closefrom(STDERR_FILENO + 1);
 
 		ap = av;
 		*ap++ = _PATH_SU;
@@ -754,13 +752,8 @@ failed:
 	/*
 	 * The last thing we do is discard all of the open file descriptors.
 	 * Last because the C library may have some open.
-	 *
-	 * XXX
-	 * Assume that stdin, stdout and stderr are 0, 1 and 2, and that
-	 * STDERR_FILENO is 2.
 	 */
-	for (cnt = getdtablesize(); cnt > STDERR_FILENO; cnt--)
-		(void)close(cnt);
+	closefrom(STDERR_FILENO + 1);
 
 	/*
 	 * Close the authentication session, make sure it is marked
@@ -848,7 +841,7 @@ motd(void)
 void
 sigint(int signo)
 {
-	return;			/* just interupt syscall */
+	return;			/* just interrupt syscall */
 }
 
 /* ARGSUSED */

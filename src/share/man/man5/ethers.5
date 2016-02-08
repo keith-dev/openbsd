@@ -1,4 +1,4 @@
-.\"	$OpenBSD: ethers.5,v 1.14 2003/06/06 13:28:13 jmc Exp $
+.\"	$OpenBSD: ethers.5,v 1.17 2004/01/30 16:41:01 otto Exp $
 .\"	$NetBSD: ethers.5,v 1.2 1994/11/30 19:31:16 jtc Exp $
 .\"
 .\"     Written by Roland McGrath <roland@frob.com>.  Public domain.
@@ -28,7 +28,10 @@ can read and produce this format.
 .Pp
 The
 .Nm
-file has support for YP functionality.
+file has support for YP functionality,
+which is enabled by specifying a
+.Ql +
+alone on a line.
 .Sh FILES
 .Bl -tag -width /etc/ethers -compact
 .It Pa /etc/ethers
@@ -48,6 +51,7 @@ A name server should be used instead of a static file.
 Lines in
 .Pa /etc/ethers
 are limited to
-.Dv BUFSIZE
-characters (currently 1024).
+.Dv BUFSIZ
+characters
+.Pq currently 1024 .
 Longer lines will be ignored.

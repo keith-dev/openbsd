@@ -7,14 +7,14 @@
  *    You may distribute under the terms of either the GNU General Public
  *    License or the Artistic License, as specified in the README file.
  *
- * $Date: 2002/10/27 22:25:22 $
+ * $Date: 2003/12/03 03:02:28 $
  * $Source: /cvs/src/gnu/usr.bin/perl/ext/DynaLoader/dl_dld.xs,v $
- * $Revision: 1.6 $
+ * $Revision: 1.7 $
  * $State: Exp $
  *
  * $Log: dl_dld.xs,v $
- * Revision 1.6  2002/10/27 22:25:22  millert
- * Resolve conflicts, remove old files, merge local changes
+ * Revision 1.7  2003/12/03 03:02:28  millert
+ * Resolve conflicts for perl 5.8.2, remove old files, and add OpenBSD-specific scaffolding
  *
  * Removed implicit link against libc.  1994/09/14 William Setzer.
  *

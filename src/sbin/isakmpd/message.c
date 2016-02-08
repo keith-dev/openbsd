@@ -1,4 +1,4 @@
-/*	$OpenBSD: message.c,v 1.61 2003/09/02 18:14:52 ho Exp $	*/
+/*	$OpenBSD: message.c,v 1.69 2004/03/10 23:08:49 hshoexer Exp $	*/
 /*	$EOM: message.c,v 1.156 2000/10/10 12:36:39 provos Exp $	*/
 
 /*
@@ -47,10 +47,13 @@
 #include "doi.h"
 #include "exchange.h"
 #include "field.h"
+#include "hash.h"
+#include "ipsec.h"
 #include "ipsec_num.h"
 #include "isakmp.h"
 #include "log.h"
 #include "message.h"
+#include "prf.h"
 #include "sa.h"
 #include "timer.h"
 #include "transport.h"
@@ -105,6 +108,13 @@ static struct field *fields[] = {
   isakmp_id_fld, isakmp_cert_fld, isakmp_certreq_fld, isakmp_hash_fld,
   isakmp_sig_fld, isakmp_nonce_fld, isakmp_notify_fld, isakmp_delete_fld,
   isakmp_vendor_fld, isakmp_attribute_fld
+};
+
+static u_int16_t min_payload_lengths[] = {
+  0, ISAKMP_SA_SZ, ISAKMP_PROP_SZ, ISAKMP_TRANSFORM_SZ, ISAKMP_KE_SZ,
+  ISAKMP_ID_SZ, ISAKMP_CERT_SZ, ISAKMP_CERTREQ_SZ, ISAKMP_HASH_SZ,
+  ISAKMP_SIG_SZ, ISAKMP_NONCE_SZ, ISAKMP_NOTIFY_SZ, ISAKMP_DELETE_SZ,
+  ISAKMP_VENDOR_SZ, ISAKMP_ATTRIBUTE_SZ
 };
 
 /*
@@ -280,9 +290,24 @@ message_parse_payloads (struct message *msg, struct payload *p, u_int8_t next,
 	}
 
       /*
-       * Decode the payload length field.
+       * Decode and validate the payload length field.
        */
       len = GET_ISAKMP_GEN_LENGTH (buf);
+
+      if ((payload < ISAKMP_PAYLOAD_RESERVED_MIN)
+	   && (len < min_payload_lengths[payload]))
+	{
+	  log_print ("message_parse_payloads: payload too short: %u", len);
+	  message_drop (msg, ISAKMP_NOTIFY_PAYLOAD_MALFORMED, 0, 1, 1);
+	  return -1;
+	}
+  
+      if (buf + len > (u_int8_t *)msg->iov[0].iov_base + msg->iov[0].iov_len)
+	{
+	  log_print ("message_parse_payloads: payload too long: %u", len);
+	  message_drop (msg, ISAKMP_NOTIFY_PAYLOAD_MALFORMED, 0, 1, 1);
+	  return -1;
+	}
 
       /* Ignore private payloads.  */
       if (next >= ISAKMP_PAYLOAD_PRIVATE_MIN)
@@ -439,6 +464,12 @@ message_validate_delete (struct message *msg, struct payload *p)
 {
   u_int8_t proto = GET_ISAKMP_DELETE_PROTO (p->p);
   struct doi *doi;
+  struct sa *sa, *isakmp_sa;
+  struct sockaddr *dst, *dst_isa;
+  u_int32_t nspis = GET_ISAKMP_DELETE_NSPIS (p->p);
+  u_int8_t *spis = (u_int8_t *)p->p + ISAKMP_DELETE_SPI_OFF;
+  int i;
+  char *addr;
 
   doi = doi_lookup (GET_ISAKMP_DELETE_DOI (p->p));
   if (!doi)
@@ -472,16 +503,148 @@ message_validate_delete (struct message *msg, struct payload *p)
     }
 
   /* Validate the SPIs.  */
+  for (i = 0; i < nspis; i++)
+    {
+      /* Get ISAKMP SA protecting this message. */
+      isakmp_sa = msg->isakmp_sa;
+      if (!isakmp_sa)
+        {
+          /* XXX should not happen? */
+          log_print ("message_validate_delete: invalid spi "
+                     "(no valid ISAKMP SA found)");
+          message_free (msg);
+          return -1;
+        }
+      isakmp_sa->transport->vtbl->get_dst (isakmp_sa->transport, &dst_isa);
+
+      /* Get SA to be deleted. */
+      msg->transport->vtbl->get_dst (msg->transport, &dst);
+      if (proto == ISAKMP_PROTO_ISAKMP)
+	sa = sa_lookup_isakmp_sa (dst, spis + i * ISAKMP_HDR_COOKIES_LEN);
+      else
+	sa = ipsec_sa_lookup (dst, ((u_int32_t *)spis)[i], proto);
+      if (!sa)
+        {
+          LOG_DBG ((LOG_MESSAGE, 50, "message_validate_delete: invalid spi "
+                    "(no valid SA found)"));
+          message_free (msg);
+          return -1;
+        }
+      sa->transport->vtbl->get_dst (sa->transport, &dst);
+
+      /* Destination addresses must match. */
+      if (dst->sa_family != dst_isa->sa_family ||
+          memcmp (sockaddr_addrdata (dst_isa), sockaddr_addrdata (dst),
+                  sockaddr_addrlen (dst)))
+        {
+          sockaddr2text (dst_isa, &addr, 0);
+
+          log_print ("message_validate_delete: invalid spi "
+                     "(illegal delete request from %s)", addr);
+          free (addr);
+          message_free (msg);
+          return -1;
+        }
+    }
 
   return 0;
 }
 
 /*
- * Validate the hash payload P in message MSG.  */
+ * Validate the hash payload P in message MSG.
+ * XXX Currently hash payloads are processed by the particular exchanges,
+ * except INFORMATIONAL.  This should be actually done here.
+ */
 static int
 message_validate_hash (struct message *msg, struct payload *p)
 {
-  /* XXX Not implemented yet.  */
+  struct sa *isakmp_sa = msg->isakmp_sa;
+  struct ipsec_sa *isa;
+  struct hash *hash;
+  struct payload *hashp = TAILQ_FIRST (&msg->payload[ISAKMP_PAYLOAD_HASH]);
+  struct prf *prf;
+  u_int8_t *comp_hash, *rest;
+  u_int8_t message_id[ISAKMP_HDR_MESSAGE_ID_LEN];
+  size_t rest_len;
+
+  if (msg->exchange)	/* active exchange validates hash payload. */
+    return 0;
+
+  if (isakmp_sa == NULL)
+    {
+      log_print ("message_validate_hash: invalid hash information");
+      message_drop (msg, ISAKMP_NOTIFY_INVALID_HASH_INFORMATION, 0, 1, 1);
+      return -1;
+    }
+
+  isa = isakmp_sa->data;
+  hash = hash_get (isa->hash);
+
+  if (hash == NULL)
+    {
+      log_print ("message_validate_hash: invalid hash information");
+      message_drop (msg, ISAKMP_NOTIFY_INVALID_HASH_INFORMATION, 0, 1, 1);
+      return -1;
+    }
+
+  /* If no SKEYID_a, we can not do anything (should not happen).  */
+  if (!isa->skeyid_a)
+    {
+      log_print ("message_validate_hash: invalid hash information");
+      message_drop (msg, ISAKMP_NOTIFY_INVALID_HASH_INFORMATION, 0, 1, 1);
+      return -1;
+    }
+
+  /* Allocate the prf and start calculating our HASH(1). */
+  LOG_DBG_BUF ((LOG_MISC, 90, "message_validate_hash: SKEYID_a", isa->skeyid_a,
+		isa->skeyid_len));
+  prf = prf_alloc (isa->prf_type, hash->type, isa->skeyid_a, isa->skeyid_len);
+  if (!prf)
+    {
+      message_free (msg);
+      return -1;
+    }
+
+  comp_hash = (u_int8_t *)malloc (hash->hashsize);
+  if (!comp_hash)
+    {
+      log_error ("message_validate_hash: malloc (%lu) failed",
+	         (unsigned long)hash->hashsize);
+      prf_free (prf);
+      message_free (msg);
+      return -1;
+    }
+
+  /* This is not an active exchange. */
+  GET_ISAKMP_HDR_MESSAGE_ID (msg->iov[0].iov_base, message_id);
+
+  prf->Init (prf->prfctx);
+  LOG_DBG_BUF ((LOG_MISC, 90, "message_validate_hash: message_id",
+		message_id, ISAKMP_HDR_MESSAGE_ID_LEN));
+  prf->Update (prf->prfctx, message_id, ISAKMP_HDR_MESSAGE_ID_LEN);
+  rest = hashp->p + GET_ISAKMP_GEN_LENGTH (hashp->p);
+  rest_len = (GET_ISAKMP_HDR_LENGTH (msg->iov[0].iov_base)
+	        - (rest - (u_int8_t*)msg->iov[0].iov_base));
+  LOG_DBG_BUF ((LOG_MISC, 90, "message_validate_hash: payloads after HASH(1)",
+		rest, rest_len));
+  prf->Update (prf->prfctx, rest, rest_len);
+  prf->Final (comp_hash, prf->prfctx);
+  prf_free (prf);
+
+  if (memcmp (hashp->p + ISAKMP_HASH_DATA_OFF, comp_hash, hash->hashsize))
+    {
+      log_print ("message_validate_hash: invalid hash value for %s payload",
+		 TAILQ_FIRST (&msg->payload[ISAKMP_PAYLOAD_DELETE])
+		 ? "DELETE" : "NOTIFY");
+      message_drop (msg, ISAKMP_NOTIFY_INVALID_HASH_INFORMATION, 0, 1, 0);
+      free (comp_hash);
+      return -1;
+    }
+  free (comp_hash);
+
+  /* Mark the HASH as handled. */
+  hashp->flags |= PL_MARK;
+
   return 0;
 }
 
@@ -733,7 +896,8 @@ message_validate_sa (struct message *msg, struct payload *p)
    * Let the DOI validate the situation, at the same time it tells us what
    * the length of the situation field is.
    */
-  if (exchange->doi->validate_situation (p->p + ISAKMP_SA_SIT_OFF, &len))
+  if (exchange->doi->validate_situation (p->p + ISAKMP_SA_SIT_OFF, &len,
+      GET_ISAKMP_GEN_LENGTH (p->p) - ISAKMP_SA_SIT_OFF))
     {
       log_print ("message_validate_sa: situation not supported");
       message_drop (msg, ISAKMP_NOTIFY_SITUATION_NOT_SUPPORTED, 0, 1, 1);
@@ -1122,6 +1286,7 @@ message_recv (struct message *msg)
 	{
 	  LOG_DBG ((LOG_MISC, 10,
 		    "message_recv: no isakmp_sa for encrypted message"));
+	  message_free (msg);
 	  return -1;
 	}
 
@@ -1217,10 +1382,12 @@ message_recv (struct message *msg)
       && (flags & ISAKMP_FLAGS_COMMIT))
     msg->exchange->flags |= EXCHANGE_FLAG_HE_COMMITTED;
 
-  /* Require encryption for any phase 2 message. XXX Always?  */
-  if (msg->exchange->phase == 2 && (flags & ISAKMP_FLAGS_ENC) == 0)
+  /* Require encryption as soon as we have the keystate for it.  */
+  if ((flags & ISAKMP_FLAGS_ENC) == 0 &&
+      (msg->exchange->phase == 2 || msg->exchange->keystate))
     {
-      log_print ("message_recv: cleartext phase 2 message");
+      log_print ("message_recv: cleartext phase %d message",
+		 msg->exchange->phase);
       message_drop (msg, ISAKMP_NOTIFY_INVALID_FLAGS, 0, 1, 1);
       return -1;
     }
@@ -1572,8 +1739,11 @@ message_drop (struct message *msg, int notify, struct proto *proto,
     }
 
   log_print ("dropped message from %s port %d due to notification type %s",
-             address ? address : "<unknown>", htons(port),
+             address ? address : "<unknown>", htons (port),
 	     constant_name (isakmp_notify_cst, notify));
+
+  if (address)
+    free (address);
 
   /* If specified, return a notification.  */
   if (notify)

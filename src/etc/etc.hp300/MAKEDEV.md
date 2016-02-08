@@ -1,8 +1,8 @@
 vers(__file__,
-	{-$OpenBSD: MAKEDEV.md,v 1.13 2003/06/18 18:08:59 todd Exp $-},
+	{-$OpenBSD: MAKEDEV.md,v 1.20 2004/03/12 18:25:18 miod Exp $-},
 etc.MACHINE)dnl
 dnl
-dnl Copyright (c) 2001,2002,2003 Todd T. Fries <todd@OpenBSD.org>
+dnl Copyright (c) 2001-2004 Todd T. Fries <todd@OpenBSD.org>
 dnl
 dnl Permission to use, copy, modify, and distribute this software for any
 dnl purpose with or without fee is hereby granted, provided that the above
@@ -18,6 +18,8 @@ dnl OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 dnl
 dnl *** hp300 specific device scripts/descriptions
 dnl
+__devitem(ct, ct*, HP300 HP-IB cartridge tape drives,{-\&ct-})dnl
+__devitem(hd, {-hd*-}, HP300 HP-IB disks)dnl
 _mkdev(st_hp300, ct*|mt*|st*,
 {-case $i in
 	ct*) name=ct blk=major_ct_b chr=major_ct_c;;
@@ -40,48 +42,51 @@ _mkdev(st_hp300, ct*|mt*|st*,
 		echo bad unit for tape in: $1
 		;;
 	esac-})dnl
-__devitem(st_hp300, st*, Exabyte tape)dnl
-__devitem(grf, grf*, raw interface to HP300 graphics devices)dnl
+__devitem(st_hp300, st*, Exabyte tape,st)dnl
+__devitem(grf, grf*, Raw interface to HP300 graphics devices)dnl
 dnl
 dnl
 _TITLE(make)
 _DEV(all)
+_DEV(ramdisk)
 _DEV(std)
 _DEV(local)
+_TITLE(dis)
+_DEV(ccd, 17, 5)
+_DEV(hd, 9, 2)
+_DEV(rd, 34, 8)
+_DEV(sd, 8, 4)
+_DEV(vnd, 19, 6)
 _TITLE(tap)
 _DEV(ct, 7, 0)
 _DEV(mt, 16, 1)
 _DEV(st_hp300, 20, 7)
-_TITLE(dis)
-_DEV(ccd, 17, 5)
-_DEV(hd, 9, 2)
-_DEV(sd, 8, 4)
-_DEV(vnd, 19, 6)
-_DEV(rd, 34, 8)
-_TITLE(termp)
+_TITLE(term)
+_DEV(apci)
 _DEV(dca, 12)
 _DEV(dcm, 15)
-_DEV(apci)
+dnl _TITLE(call)
 _TITLE(pty)
-_DEV(tty, 4)
+_DEV(ptm, 52)
 _DEV(pty, 5)
-_TITLE(prn)
-_DEV(ppi, 11)
-_TITLE(call)
-_TITLE(spec)
-_DEV(fdesc, 21)
+_DEV(tty, 4)
+_TITLE(cons)
 _DEV(grf, 10)
 _DEV(ite)
-_DEV(hil, 14)
+_TITLE(prn)
+_DEV(ppi, 11)
+_TITLE(spec)
 _DEV(bpf, 22)
-_DEV(tun, 23)
-_DEV(pf, 33)
+_DEV(fdesc, 21)
+_DEV(hil, 14)
 _DEV(lkm, 24)
+_DEV(pf, 33)
 _DEV(rnd, 32)
-_DEV(xfs, 51)
+_DEV(tun, 23)
 _DEV(systrace, 50)
+_DEV(xfs, 51)
 dnl
-divert(7)dnl
+divert(__mddivert)dnl
 dnl
 ramdisk)
 	_recurse std ct0 ct1 st0 st1 hd0 hd1 hd2 hd3 hd4
@@ -209,6 +214,7 @@ target( all, dcm, 0, 1, 2, 3)dnl
 target( all, hd, 0, 1, 2)dnl
 target( all, ct, 0, 1)dnl
 target( all, ite, 0)dnl
+target( all, ttye, 0, 1, 2, 3, 4, 5, 6)dnl
 target(ramd, ct, 0, 1)dnl
 target(ramd, hd, 0, 1, 2)dnl
 target(ramd, sd, 0, 1, 2)dnl

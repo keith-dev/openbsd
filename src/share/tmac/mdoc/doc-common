@@ -1,4 +1,4 @@
-.\"	$OpenBSD: doc-common,v 1.33 2003/09/02 19:04:58 jmc Exp $
+.\"	$OpenBSD: doc-common,v 1.36 2004/02/27 18:02:47 deraadt Exp $
 .\"
 .\" Copyright (c) 1991, 1993
 .\"	The Regents of the University of California.  All rights reserved.
@@ -167,10 +167,12 @@
 .\" .	if "\\$3"HOW"	.ds vT OpenBSD How Pocket Manual
 .	if "\\$3"LOCAL" .ds vT OpenBSD Local Manual
 .	if "\\$3"alpha" .as vT \ (Alpha)
+.	if "\\$3"amd64" .as vT \ (AMD64)
 .	if "\\$3"amiga" .as vT \ (Amiga)
 .	if "\\$3"arc" .as vT \ (ARC)
 .	if "\\$3"arm32" .as vT \ (Arm32)
 .	if "\\$3"atari" .as vT \ (Atari)
+.	if "\\$3"cats" .as vT \ (Cats)
 .	if "\\$3"hp300" .as vT \ (HP300)
 .	if "\\$3"hppa" .as vT \ (HPPA)
 .	if "\\$3"i386"  .as vT \ (i386)
@@ -180,6 +182,7 @@
 .	if "\\$3"mvme88k" .as vT \ (MVME88K)
 .	if "\\$3"mvmeppc" .as vT \ (MVMEPPC)
 .	if "\\$3"pc532" .as vT \ (PC532)
+.	if "\\$3"pegasos" .as vT \ (Pegasos)
 .	if "\\$3"pmax"  .as vT \ (PMAX)
 .	if "\\$3"sparc" .as vT \ (SPARC)
 .	if "\\$3"sparc64" .as vT \ (SPARC64)
@@ -198,7 +201,7 @@
 .de Os
 .ds oS Null
 .if "\\$1"" \{\
-.	ds oS OpenBSD 3.4
+.	ds oS OpenBSD 3.5
 .\}
 .if "\\$2"" \{\
 .	ds aa Non-Null
@@ -267,6 +270,7 @@
 .	if "\\$2"3.2"  .as oS \03.2
 .	if "\\$2"3.3"  .as oS \03.3
 .	if "\\$2"3.4"  .as oS \03.4
+.	if "\\$2"3.5"  .as oS \03.5
 .\}
 .if "\\*(oS"Null" .ds oS \0\\$1
 .if "\\*(aa"Non-Null" .as oS \0\\$2

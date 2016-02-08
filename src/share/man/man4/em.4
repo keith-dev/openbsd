@@ -1,4 +1,4 @@
-.\" $OpenBSD: em.4,v 1.8 2003/06/06 10:29:41 jmc Exp $
+.\" $OpenBSD: em.4,v 1.13 2004/03/21 19:50:25 miod Exp $
 .\" Copyright (c) 2002 Intel Corporation
 .\" All rights reserved.
 .\" Redistribution and use in source and binary forms of the Software, with or without
@@ -40,7 +40,8 @@
 The
 .Nm
 driver provides support for PCI gigabit Ethernet adapters based on the
-Intel 82540, 82542, 82543, 82544, 82545 and 82546 Ethernet controller chips.
+Intel 82540, 82541, 82542, 82543, 82544, 82545, 82546 and 82547 Ethernet
+controller chips.
 This includes the following models:
 .Pp
 .Bl -item -offset indent -compact
@@ -70,29 +71,26 @@ Intel PRO/1000MF Server Adapter (SX Fiber) (PWLA8490MF)
 Intel PRO/1000MF Dual Port Server Adapter (SX Fiber) (PWLA8492MF)
 .It
 Intel PRO/1000MF Server Adapter (LX Fiber) (PWLA8490LX)
+.It
+Intel PRO/1000MT Quad PCI-X Adapter (PWLA8494MT)
 .El
 .Pp
 The
 .Nm
 driver supports the following media types:
-.Pp
-.Bl -tag -width xxx -offset indent
-.It Cm media No autoselect
+.Bl -tag -width autoselect -offset indent
+.It autoselect
 Enables auto-negotiation for speed and duplex.
-.It Cm media No 10baseT Cm mediaopt No full-duplex
+.It 10baseT Cm mediaopt No full-duplex
 Sets 10Mbps operation.
-.It Cm media No 100baseTX Cm mediaopt No full-duplex
+.It 100baseTX Cm mediaopt No full-duplex
 Sets 100Mbps operation.
-.It Cm media No 1000baseSX
+.It 1000baseSX
 Sets 1000Mbps operation.
-Only
-full-duplex
-mode is supported at this speed.
-.It Cm media No 1000baseT
+Only full-duplex mode is supported at this speed.
+.It 1000baseT
 Sets 1000Mbps operation.
-Only
-full-duplex
-mode is supported at this speed.
+Only full-duplex mode is supported at this speed.
 .El
 .Pp
 For more information on configuring this device, see

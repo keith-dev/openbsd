@@ -13,7 +13,7 @@
  * called by a name other than "ssh" or "Secure Shell".
  *
  * Copyright (c) 1999 Niels Provos.  All rights reserved.
- * Copyright (c) 2000, 2001, 2002 Markus Friedl.  All rights reserved.
+ * Copyright (c) 2000, 2001, 2002, 2003 Markus Friedl.  All rights reserved.
  *
  * Modified to work with SSL by Niels Provos <provos@citi.umich.edu>
  * in Canada (German citizen).
@@ -40,7 +40,7 @@
  */
 
 #include "includes.h"
-RCSID("$OpenBSD: ssh.c,v 1.201 2003/09/01 18:15:50 markus Exp $");
+RCSID("$OpenBSD: ssh.c,v 1.209 2004/03/11 10:21:17 markus Exp $");
 
 #include <openssl/evp.h>
 #include <openssl/err.h>
@@ -142,48 +142,12 @@ pid_t proxy_command_pid = 0;
 static void
 usage(void)
 {
-	fprintf(stderr, "Usage: %s [options] host [command]\n", __progname);
-	fprintf(stderr, "Options:\n");
-	fprintf(stderr, "  -l user     Log in using this user name.\n");
-	fprintf(stderr, "  -n          Redirect input from " _PATH_DEVNULL ".\n");
-	fprintf(stderr, "  -F config   Config file (default: ~/%s).\n",
-	     _PATH_SSH_USER_CONFFILE);
-	fprintf(stderr, "  -A          Enable authentication agent forwarding.\n");
-	fprintf(stderr, "  -a          Disable authentication agent forwarding (default).\n");
-	fprintf(stderr, "  -X          Enable X11 connection forwarding.\n");
-	fprintf(stderr, "  -x          Disable X11 connection forwarding (default).\n");
-	fprintf(stderr, "  -i file     Identity for public key authentication "
-	    "(default: ~/.ssh/identity)\n");
-#ifdef SMARTCARD
-	fprintf(stderr, "  -I reader   Set smartcard reader.\n");
-#endif
-	fprintf(stderr, "  -t          Tty; allocate a tty even if command is given.\n");
-	fprintf(stderr, "  -T          Do not allocate a tty.\n");
-	fprintf(stderr, "  -v          Verbose; display verbose debugging messages.\n");
-	fprintf(stderr, "              Multiple -v increases verbosity.\n");
-	fprintf(stderr, "  -V          Display version number only.\n");
-	fprintf(stderr, "  -q          Quiet; don't display any warning messages.\n");
-	fprintf(stderr, "  -f          Fork into background after authentication.\n");
-	fprintf(stderr, "  -e char     Set escape character; ``none'' = disable (default: ~).\n");
-
-	fprintf(stderr, "  -c cipher   Select encryption algorithm\n");
-	fprintf(stderr, "  -m macs     Specify MAC algorithms for protocol version 2.\n");
-	fprintf(stderr, "  -p port     Connect to this port.  Server must be on the same port.\n");
-	fprintf(stderr, "  -L listen-port:host:port   Forward local port to remote address\n");
-	fprintf(stderr, "  -R listen-port:host:port   Forward remote port to local address\n");
-	fprintf(stderr, "              These cause %s to listen for connections on a port, and\n", __progname);
-	fprintf(stderr, "              forward them to the other side by connecting to host:port.\n");
-	fprintf(stderr, "  -D port     Enable dynamic application-level port forwarding.\n");
-	fprintf(stderr, "  -C          Enable compression.\n");
-	fprintf(stderr, "  -N          Do not execute a shell or command.\n");
-	fprintf(stderr, "  -g          Allow remote hosts to connect to forwarded ports.\n");
-	fprintf(stderr, "  -1          Force protocol version 1.\n");
-	fprintf(stderr, "  -2          Force protocol version 2.\n");
-	fprintf(stderr, "  -4          Use IPv4 only.\n");
-	fprintf(stderr, "  -6          Use IPv6 only.\n");
-	fprintf(stderr, "  -o 'option' Process the option as if it was read from a configuration file.\n");
-	fprintf(stderr, "  -s          Invoke command (mandatory) as SSH2 subsystem.\n");
-	fprintf(stderr, "  -b addr     Local IP address.\n");
+	fprintf(stderr,
+"usage: ssh [-1246AaCfghkNnqsTtVvXxY] [-b bind_address] [-c cipher_spec]\n"
+"           [-D port] [-e escape_char] [-F configfile] [-i identity_file]\n"
+"           [-L port:host:hostport] [-l login_name] [-m mac_spec] [-o option]\n"
+"           [-p port] [-R port:host:hostport] [user@]hostname [command]\n"
+	);
 	exit(1);
 }
 
@@ -200,7 +164,7 @@ main(int ac, char **av)
 	int i, opt, exit_status;
 	u_short fwd_port, fwd_host_port;
 	char sfwd_port[6], sfwd_host_port[6];
-	char *p, *cp, buf[256];
+	char *p, *cp, *line, buf[256];
 	struct stat st;
 	struct passwd *pw;
 	int dummy;
@@ -255,7 +219,7 @@ main(int ac, char **av)
 
 again:
 	while ((opt = getopt(ac, av,
-	    "1246ab:c:e:fgi:kl:m:no:p:qstvxACD:F:I:L:NPR:TVX")) != -1) {
+	    "1246ab:c:e:fgi:kl:m:no:p:qstvxACD:F:I:L:NPR:TVXY")) != -1) {
 		switch (opt) {
 		case '1':
 			options.protocol = SSH_PROTO_1;
@@ -282,6 +246,10 @@ again:
 		case 'X':
 			options.forward_x11 = 1;
 			break;
+		case 'Y':
+			options.forward_x11 = 1;
+			options.forward_x11_trusted = 1;
+			break;
 		case 'g':
 			options.gateway_ports = 1;
 			break;
@@ -295,7 +263,7 @@ again:
 			options.forward_agent = 1;
 			break;
 		case 'k':
-			/* ignored for backward compatibility */
+			options.gss_deleg_creds = 0;
 			break;
 		case 'i':
 			if (stat(optarg, &st) < 0) {
@@ -333,12 +301,8 @@ again:
 			}
 			/* fallthrough */
 		case 'V':
-			fprintf(stderr,
-			    "%s, SSH protocols %d.%d/%d.%d, %s\n",
-			    SSH_VERSION,
-			    PROTOCOL_MAJOR_1, PROTOCOL_MINOR_1,
-			    PROTOCOL_MAJOR_2, PROTOCOL_MINOR_2,
-			    SSLeay_version(SSLEAY_VERSION));
+			fprintf(stderr, "%s, %s\n",
+			    SSH_VERSION, SSLeay_version(SSLEAY_VERSION));
 			if (opt == 'V')
 				exit(0);
 			break;
@@ -450,9 +414,11 @@ again:
 			break;
 		case 'o':
 			dummy = 1;
+			line = xstrdup(optarg);
 			if (process_config_line(&options, host ? host : "",
-			    optarg, "command-line", 0, &dummy) != 0)
+			    line, "command-line", 0, &dummy) != 0)
 				exit(1);
+			xfree(line);
 			break;
 		case 's':
 			subsystem_flag = 1;
@@ -589,7 +555,7 @@ again:
 		options.proxy_command = NULL;
 
 	/* Open a connection to the remote host. */
-	if (ssh_connect(host, &hostaddr, options.port, 
+	if (ssh_connect(host, &hostaddr, options.port,
 	    options.address_family, options.connection_attempts,
 	    original_effective_uid == 0 && options.use_privileged_port,
 	    options.proxy_command) != 0)
@@ -697,7 +663,7 @@ again:
 	packet_close();
 
 	/*
-	 * Send SIGHUP to proxy command if used. We don't wait() in 
+	 * Send SIGHUP to proxy command if used. We don't wait() in
 	 * case it hangs and instead rely on init to reap the child
 	 */
 	if (proxy_command_pid > 1)
@@ -706,19 +672,25 @@ again:
 	return exit_status;
 }
 
+#define SSH_X11_PROTO "MIT-MAGIC-COOKIE-1"
+
 static void
 x11_get_proto(char **_proto, char **_data)
 {
+	char cmd[1024];
 	char line[512];
+	char xdisplay[512];
 	static char proto[512], data[512];
 	FILE *f;
-	int got_data = 0, i;
-	char *display;
+	int got_data = 0, generated = 0, do_unlink = 0, i;
+	char *display, *xauthdir, *xauthfile;
 	struct stat st;
 
+	xauthdir = xauthfile = NULL;
 	*_proto = proto;
 	*_data = data;
 	proto[0] = data[0] = '\0';
+
 	if (!options.xauth_location ||
 	    (stat(options.xauth_location, &st) == -1)) {
 		debug("No xauth program.");
@@ -727,28 +699,59 @@ x11_get_proto(char **_proto, char **_data)
 			debug("x11_get_proto: DISPLAY not set");
 			return;
 		}
-		/* Try to get Xauthority information for the display. */
-		if (strncmp(display, "localhost:", 10) == 0)
-			/*
-			 * Handle FamilyLocal case where $DISPLAY does
-			 * not match an authorization entry.  For this we
-			 * just try "xauth list unix:displaynum.screennum".
-			 * XXX: "localhost" match to determine FamilyLocal
-			 *      is not perfect.
-			 */
-			snprintf(line, sizeof line, "%s list unix:%s 2>"
-			    _PATH_DEVNULL, options.xauth_location, display+10);
-		else
-			snprintf(line, sizeof line, "%s list %.200s 2>"
-			    _PATH_DEVNULL, options.xauth_location, display);
-		debug2("x11_get_proto: %s", line);
-		f = popen(line, "r");
+		/*
+		 * Handle FamilyLocal case where $DISPLAY does
+		 * not match an authorization entry.  For this we
+		 * just try "xauth list unix:displaynum.screennum".
+		 * XXX: "localhost" match to determine FamilyLocal
+		 *      is not perfect.
+		 */
+		if (strncmp(display, "localhost:", 10) == 0) {
+			snprintf(xdisplay, sizeof(xdisplay), "unix:%s",
+			    display + 10);
+			display = xdisplay;
+		}
+		if (options.forward_x11_trusted == 0) {
+			xauthdir = xmalloc(MAXPATHLEN);
+			xauthfile = xmalloc(MAXPATHLEN);
+			strlcpy(xauthdir, "/tmp/ssh-XXXXXXXXXX", MAXPATHLEN);
+			if (mkdtemp(xauthdir) != NULL) {
+				do_unlink = 1;
+				snprintf(xauthfile, MAXPATHLEN, "%s/xauthfile",
+				    xauthdir);
+				snprintf(cmd, sizeof(cmd),
+				    "%s -f %s generate %s " SSH_X11_PROTO
+				    " untrusted timeout 1200 2>" _PATH_DEVNULL,
+				    options.xauth_location, xauthfile, display);
+				debug2("x11_get_proto: %s", cmd);
+				if (system(cmd) == 0)
+					generated = 1;
+			}
+		}
+		snprintf(cmd, sizeof(cmd),
+		    "%s %s%s list %s . 2>" _PATH_DEVNULL,
+		    options.xauth_location,
+		    generated ? "-f " : "" ,
+		    generated ? xauthfile : "",
+		    display);
+		debug2("x11_get_proto: %s", cmd);
+		f = popen(cmd, "r");
 		if (f && fgets(line, sizeof(line), f) &&
 		    sscanf(line, "%*s %511s %511s", proto, data) == 2)
 			got_data = 1;
 		if (f)
 			pclose(f);
 	}
+
+	if (do_unlink) {
+		unlink(xauthfile);
+		rmdir(xauthdir);
+	}
+	if (xauthdir)
+		xfree(xauthdir);
+	if (xauthfile)
+		xfree(xauthfile);
+
 	/*
 	 * If we didn't get authentication data, just make up some
 	 * data.  The forwarding code will check the validity of the
@@ -760,12 +763,14 @@ x11_get_proto(char **_proto, char **_data)
 	if (!got_data) {
 		u_int32_t rand = 0;
 
-		logit("Warning: No xauth data; using fake authentication data for X11 forwarding.");
-		strlcpy(proto, "MIT-MAGIC-COOKIE-1", sizeof proto);
+		logit("Warning: No xauth data; "
+		    "using fake authentication data for X11 forwarding.");
+		strlcpy(proto, SSH_X11_PROTO, sizeof proto);
 		for (i = 0; i < 16; i++) {
 			if (i % 4 == 0)
 				rand = arc4random();
-			snprintf(data + 2 * i, sizeof data - 2 * i, "%02x", rand & 0xff);
+			snprintf(data + 2 * i, sizeof data - 2 * i, "%02x",
+			    rand & 0xff);
 			rand >>= 8;
 		}
 	}
@@ -968,16 +973,13 @@ client_subsystem_reply(int type, u_int32_t seq, void *ctxt)
 }
 
 void
-client_global_request_reply(int type, u_int32_t seq, void *ctxt)
+client_global_request_reply_fwd(int type, u_int32_t seq, void *ctxt)
 {
 	int i;
 
 	i = client_global_request_id++;
-	if (i >= options.num_remote_forwards) {
-		debug("client_global_request_reply: too many replies %d > %d",
-		    i, options.num_remote_forwards);
+	if (i >= options.num_remote_forwards)
 		return;
-	}
 	debug("remote forward %s for: listen %d, connect %s:%d",
 	    type == SSH2_MSG_REQUEST_SUCCESS ? "success" : "failure",
 	    options.remote_forwards[i].port,

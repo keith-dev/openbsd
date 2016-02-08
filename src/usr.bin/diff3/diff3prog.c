@@ -1,4 +1,4 @@
-/*	$OpenBSD: diff3prog.c,v 1.2 2003/07/14 17:43:52 deraadt Exp $	*/
+/*	$OpenBSD: diff3prog.c,v 1.5 2004/01/07 18:16:42 canacar Exp $	*/
 
 /*
  * Copyright (C) Caldera International Inc.  2001-2002.
@@ -71,7 +71,7 @@ static const char copyright[] =
 #endif /* not lint */
 
 #ifndef lint
-static const char rcsid[] = "$OpenBSD: diff3prog.c,v 1.2 2003/07/14 17:43:52 deraadt Exp $";
+static const char rcsid[] = "$OpenBSD: diff3prog.c,v 1.5 2004/01/07 18:16:42 canacar Exp $";
 #endif /* not lint */
 
 #include <stdio.h>
@@ -200,7 +200,7 @@ main(int argc, char **argv)
 }
 
 /*
- * Pick up the line numbers of allcahnges from one change file.
+ * Pick up the line numbers of all changes from one change file.
  * (This puts the numbers in a vector, which is not strictly necessary,
  * since the vector is processed in one sequential pass.
  * The vector could be optimized out of existence)
@@ -301,7 +301,7 @@ merge(int m1, int m2)
 			d2->new.from,d2->new.to);
 		}
 		/* first file is different from others */
-		if ((!t2 || t1) && d1->new.to < d2->new.from) {
+		if (!t2 || (t1 && d1->new.to < d2->new.from)) {
 			/* stuff peculiar to 1st file */
 			if (eflag==0) {
 				separate("1");
@@ -313,7 +313,7 @@ merge(int m1, int m2)
 			continue;
 		}
 		/* second file is different from others */
-		if ((!t1 || t2) && d2->new.to < d1->new.from) {
+		if (!t1 || (t2 && d2->new.to < d1->new.from)) {
 			if (eflag==0) {
 				separate("2");
 				keep(1, &d2->new);
@@ -346,7 +346,7 @@ merge(int m1, int m2)
 			dup = duplicate(&d1->old,&d2->old);
 			/*
 			 * dup = 0 means all files differ
-			 * dup = 1 meands files 1 and 2 identical
+			 * dup = 1 means files 1 and 2 identical
 			 */
 			if (eflag==0) {
 				separate(dup ? "3" : "");
@@ -441,7 +441,7 @@ keep(int i, struct range *rnew)
 }
 
 /*
- * skip to just befor line number from in file "i".  If "pr" is non-NULL,
+ * skip to just before line number from in file "i".  If "pr" is non-NULL,
  * print all skipped stuff with string pr as a prefix.
  */
 int
@@ -450,7 +450,7 @@ skip(int i, int from, char *pr)
 	int j, n;
 
 	for (n = 0; cline[i] < from - 1; n += j) {
-		if ((j = getline(fp[i])) == NULL)
+		if ((j = getline(fp[i])) == 0)
 			trouble();
 		if (pr != NULL)
 			printf("%s%s", pr, line);

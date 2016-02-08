@@ -1,4 +1,4 @@
-/*	$OpenBSD: if.c,v 1.14 2003/06/03 14:28:16 ho Exp $	*/
+/*	$OpenBSD: if.c,v 1.17 2004/03/19 14:04:43 hshoexer Exp $	*/
 /*	$EOM: if.c,v 1.12 1999/10/01 13:45:20 niklas Exp $	*/
 
 /*
@@ -65,7 +65,7 @@ siocgifconf (struct ifconf *ifcp)
   caddr_t buf, new_buf;
 
   /* Get a socket to ask for the network interface configurations.  */
-  s = socket (AF_INET, SOCK_DGRAM, 0);
+  s = monitor_socket (AF_INET, SOCK_DGRAM, 0);
   if (s == -1)
     {
       log_error ("siocgifconf: socket (AF_INET, SOCK_DGRAM, 0) failed");
@@ -80,13 +80,13 @@ siocgifconf (struct ifconf *ifcp)
        * Allocate a larger buffer each time around the loop and get the
        * network interfaces configurations into it.
        */
-      ifcp->ifc_len = len;
       new_buf = realloc (buf, len);
       if (!new_buf)
 	{
 	  log_error ("siocgifconf: realloc (%p, %d) failed", buf, len);
 	  goto err;
 	}
+      ifcp->ifc_len = len;
       ifcp->ifc_buf = buf = new_buf;
       if (ioctl (s, SIOCGIFCONF, ifcp) == -1)
 	{
@@ -108,6 +108,8 @@ siocgifconf (struct ifconf *ifcp)
 err:
   if (buf)
     free (buf);
+  ifcp->ifc_len = 0;
+  ifcp->ifc_buf = 0;
   close (s);
   return -1;
 }
@@ -120,13 +122,13 @@ if_map (int (*func) (char *, struct sockaddr *, void *), void *arg)
 #ifdef HAVE_GETIFADDRS
   struct ifaddrs *ifap, *ifa;
 
-  if (getifaddrs(&ifap) < 0)
+  if (getifaddrs (&ifap) < 0)
     return -1;
 
   for (ifa = ifap; ifa; ifa = ifa->ifa_next)
     if ((*func) (ifa->ifa_name, ifa->ifa_addr, arg) == -1)
       err = -1;
-  freeifaddrs(ifap);
+  freeifaddrs (ifap);
 #else
   struct ifconf ifc;
   struct ifreq *ifrp;

@@ -1,4 +1,4 @@
-#	$OpenBSD: install.md,v 1.18 2003/08/16 20:37:24 krw Exp $
+#	$OpenBSD: install.md,v 1.22 2004/03/03 02:19:26 krw Exp $
 #
 #
 # Copyright (c) 1996 The NetBSD Foundation, Inc.
@@ -47,15 +47,9 @@ ARCH=ARCH
 md_set_term() {
 	local _tables
 
-	ask "Do you wish to select a keyboard encoding table?" n
+	ask_yn "Do you wish to select a keyboard encoding table?"
+	[[ $resp == n ]] && return
 
-	case $resp in
-	Y*|y*)	;;
-	*)	return
-		;;
-	esac
-
-	resp=
 	while : ; do
 		ask "Select your keyboard type: (P)C-AT/XT, (U)SB or 'done'" P
 		case $resp in
@@ -98,33 +92,32 @@ __EOT
 
 md_installboot() {
 	echo Installing boot block...
-	cp /usr/mdec/boot /mnt/boot
+	# LBA biosboot uses /boot's i-node number. Using 'cat' preserves that
+	# number, so multiboot setups (NTLDR) can work across upgrades.
+	cat /usr/mdec/boot > /mnt/boot
 	/usr/mdec/installboot -v /mnt/boot /usr/mdec/biosboot ${1}
 	echo "done."
 }
 
+# $1 is the disk to check
 md_checkfordisklabel() {
-	# $1 is the disk to check
-	local rval
+	local rval=0
 
-	disklabel -r $1 > /dev/null 2> /tmp/checkfordisklabel
-	if grep "no disk label" /tmp/checkfordisklabel; then
-		rval=1
-	elif grep "disk label corrupted" /tmp/checkfordisklabel; then
+	disklabel -r $1 >/dev/null 2>/tmp/checkfordisklabel
+
+	if grep "disk label corrupted" /tmp/checkfordisklabel; then
 		rval=2
-	else
-		rval=0
-	fi
+	fi >/dev/null 2>&1
 
 	rm -f /tmp/checkfordisklabel
 	return $rval
 }
 
-md_prep_fdisk()
-{
-	local _disk=$1 _whole=$2
+md_prep_fdisk() {
+	local _disk=$1
 
-	if [ -n "$_whole" ]; then
+	ask_yn "Do you want to use *all* of $_disk for OpenBSD?"
+	if [[ $resp == y ]]; then
 		echo -n "Putting all of $_disk into an active OpenBSD MBR partition (type 'A6')..."
 		fdisk -e ${_disk} << __EOT > /dev/null
 reinit
@@ -156,15 +149,10 @@ $(fdisk ${_disk})
 __EOT
 }
 
-md_prep_disklabel()
-{
+md_prep_disklabel() {
 	local _disk=$1
 
-	ask "Do you want to use *all* of $_disk for OpenBSD?" no
-	case $resp in
-	y*|Y*)	md_prep_fdisk ${_disk} Y ;;
-	*)	md_prep_fdisk ${_disk} ;;
-	esac
+	md_prep_fdisk $_disk
 
 	cat << __EOT
 
@@ -179,16 +167,12 @@ __EOT
 
 	md_checkfordisklabel $_disk
 	case $? in
-	0)	;;
-	1)	echo WARNING: Disk $_disk has no label. You will be creating a new one.
-		echo
-		;;
-	2)	echo WARNING: Label on disk $_disk is corrupted. You will be repairing.
-		echo
+	2)	echo "WARNING: Label on disk $_disk is corrupted. You will be repairing it.\n"
 		;;
 	esac
 
-	disklabel -f /tmp/fstab.${_disk} -E ${_disk}
+	disklabel -W $_disk >/dev/null 2>&1
+	disklabel -f /tmp/fstab.$_disk -E $_disk
 }
 
 md_congrats() {

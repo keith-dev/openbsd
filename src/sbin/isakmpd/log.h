@@ -1,4 +1,4 @@
-/*	$OpenBSD: log.h,v 1.15 2003/06/03 14:28:16 ho Exp $	*/
+/*	$OpenBSD: log.h,v 1.19 2004/02/25 16:01:28 hshoexer Exp $	*/
 /*	$EOM: log.h,v 1.19 2000/03/30 14:27:23 ho Exp $	*/
 
 /*
@@ -38,6 +38,8 @@
 #include <sys/uio.h>
 #include <stdio.h>
 
+extern int verbose_logging;
+
 /*
  * We cannot do the log strings dynamically sizeable as out of memory is one
  * of the situations we need to report about.
@@ -46,11 +48,11 @@
 
 enum log_classes {
   LOG_MISC, LOG_TRANSPORT, LOG_MESSAGE, LOG_CRYPTO, LOG_TIMER, LOG_SYSDEP,
-  LOG_SA, LOG_EXCHANGE, LOG_NEGOTIATION, LOG_POLICY, LOG_ENDCLASS
+  LOG_SA, LOG_EXCHANGE, LOG_NEGOTIATION, LOG_POLICY, LOG_UI, LOG_ENDCLASS
 };
 #define LOG_CLASSES_TEXT \
   { "Misc", "Trpt", "Mesg", "Cryp", "Timr", "Sdep", "SA  ", "Exch", "Negt", \
-    "Plcy" }
+    "Plcy", "UI  " }
 
 /*
  * "Class" LOG_REPORT will always be logged to the current log channel,
@@ -91,7 +93,10 @@ extern void log_fatal (const char *, ...)
      __attribute__ ((__format__ (__printf__, 1, 2)));
 extern void log_print (const char *, ...)
      __attribute__ ((__format__ (__printf__, 1, 2)));
+extern void log_verbose (const char *, ...)
+     __attribute__ ((__format__ (__printf__, 1, 2)));
 extern void log_to (FILE *);
-extern void log_init (void);
+extern void log_init (int);
+extern void log_reinit (void);
 
 #endif /* _LOG_H_ */

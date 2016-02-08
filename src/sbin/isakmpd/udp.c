@@ -1,4 +1,4 @@
-/*	$OpenBSD: udp.c,v 1.64 2003/06/10 16:41:29 deraadt Exp $	*/
+/*	$OpenBSD: udp.c,v 1.67 2004/03/29 16:32:19 deraadt Exp $	*/
 /*	$EOM: udp.c,v 1.57 2001/01/26 10:09:57 niklas Exp $	*/
 
 /*
@@ -142,7 +142,7 @@ udp_make (struct sockaddr *laddr)
       return 0;
     }
 
-  s = socket (laddr->sa_family, SOCK_DGRAM, IPPROTO_UDP);
+  s = monitor_socket (laddr->sa_family, SOCK_DGRAM, IPPROTO_UDP);
   if (s == -1)
     {
       log_error ("udp_make: socket (%d, %d, %d)", laddr->sa_family, SOCK_DGRAM,
@@ -174,7 +174,7 @@ udp_make (struct sockaddr *laddr)
    * sending from it make sure it is entirely reuseable with SO_REUSEPORT.
    */
   on = 1;
-  if (setsockopt (s, SOL_SOCKET,
+  if (monitor_setsockopt (s, SOL_SOCKET,
 		  wildcardaddress ? SO_REUSEPORT : SO_REUSEADDR,
 		  (void *)&on, sizeof on) == -1)
     {
@@ -343,7 +343,9 @@ udp_bind_if (char *ifname, struct sockaddr *if_addr, void *arg)
    * address bound. If so, unmark the transport and skip it; this allows
    * us to call this function when we suspect a new address has appeared.
    */
-  memcpy (saddr, if_addr, sizeof saddr_st);
+  if (sysdep_sa_len (if_addr) > sizeof saddr_st)
+    return 0;
+  memcpy (saddr, if_addr, sysdep_sa_len (if_addr));
   switch (saddr->sa_family)  /* Add the port number to the sockaddr. */
     {
     case AF_INET:
@@ -363,7 +365,7 @@ udp_bind_if (char *ifname, struct sockaddr *if_addr, void *arg)
     }
 
   /* Don't bother with interfaces that are down.  */
-  s = socket (if_addr->sa_family, SOCK_DGRAM, 0);
+  s = monitor_socket (if_addr->sa_family, SOCK_DGRAM, 0);
   if (s == -1)
     {
       log_error ("udp_bind_if: socket (%d, SOCK_DGRAM, 0) failed",
@@ -637,6 +639,7 @@ udp_init (void)
 {
   struct sockaddr_storage dflt_stor;
   struct sockaddr_in *dflt = (struct sockaddr_in *)&dflt_stor;
+  struct conf_list *listen_on;
   char *port;
   long lport;
   char *ep;
@@ -652,6 +655,16 @@ udp_init (void)
   if (if_map (udp_bind_if, port) == -1)
       log_fatal ("udp_init: Could not bind the ISAKMP UDP port %s on all "
 		 "interfaces", port);
+
+  /* Only listen to the specified address if Listen-on is configured */
+  listen_on = conf_get_list ("General", "Listen-on");
+  if (listen_on)
+    {
+      LOG_DBG ((LOG_TRANSPORT, 50,
+		"udp_init: not binding ISAKMP UDP port to INADDR_ANY"));
+      conf_free_list (listen_on);
+      return;
+    }
 
   /*
    * Get port.

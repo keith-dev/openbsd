@@ -1,4 +1,4 @@
-.\"	$OpenBSD: puc.4,v 1.18 2003/07/09 13:26:20 jmc Exp $
+.\"	$OpenBSD: puc.4,v 1.21 2004/03/13 23:25:27 jmc Exp $
 .\"	$NetBSD: puc.4,v 1.7 1999/07/03 05:55:23 cgd Exp $
 .\"
 .\" Copyright (c) 1998 Christopher G. Demetriou.  All rights reserved.
@@ -84,6 +84,7 @@ The driver currently supports the following cards:
 .It Tn "VScom PCI 200L (2 port serial)"
 .It Tn "VScom PCI 210L (2 port serial and 1 port parallel)"
 .It Tn "VScom PCI 400L (4 port serial)"
+.It Tn "VScom PCI 400S (4 port serial)"
 .It Tn "VScom PCI 800L (8 port serial)"
 .It Tn "AT&T/Lucent Venus Modem (found on IBM 33L4618 card, Actiontec 56K, and others)"
 .It Tn "US Robotics 3CP5609 PCI (modem)"
@@ -97,6 +98,7 @@ The driver currently supports the following cards:
 .It Tn "Syba Tech Ltd. PCI-4S2P-550-ECP (4 port serial and 2 port parallel)"
 .It Tn "Moxa Technologies Co., Ltd. PCI I/O Card 4S (4 port serial)"
 .It Tn "Moxa Technologies Co., Ltd. C104H/PCI (4 port serial)"
+.It Tn "Moxa Technologies Co., Ltd. CP104/PCI (4 port serial)"
 .It Tn "NetMos 2S1P (2 port serial and 1 port parallel)"
 .It Tn "Boca Research Turbo Serial 654 (4 port serial)"
 .It Tn "Boca Research Turbo Serial 658 (8 port serial)"
@@ -154,7 +156,7 @@ Of course, because boards with those are PCI boards, they also suffer
 from dynamic address assignment, which also means that they
 can't easily be used as console.
 .Pp
-Some of cards supported by this driver have jumper-selectable
+Some of the cards supported by this driver have jumper-selectable
 .Nm com
 port clock multipliers, which are unsupported by this driver.
 Those can be easily accommodated with driver flags, or by

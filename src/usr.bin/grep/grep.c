@@ -1,4 +1,4 @@
-/*	$OpenBSD: grep.c,v 1.23 2003/09/07 19:40:54 millert Exp $	*/
+/*	$OpenBSD: grep.c,v 1.26 2004/02/04 18:38:52 millert Exp $	*/
 
 /*-
  * Copyright (c) 1999 James Howard and Dag-Erling Coïdan Smørgrav
@@ -105,11 +105,12 @@ usage(void)
 {
 	fprintf(stderr,
 #ifdef NOZ
-	    "usage: %s [-[AB] num] [-CEFGHILPRSUVabchilnoqsvwx]"
+	    "usage: %s [-AB num] [-CEFGHILPRSUVabchilnoqsvwx]\n"
 #else
-	    "usage: %s [-[AB] num] [-CEFGHILPRSUVZabchilnoqsvwx]"
+	    "usage: %s [-AB num] [-CEFGHILPRSUVZabchilnoqsvwx]\n"
 #endif
-	    " [-e pattern] [-f file] [file ...]\n", __progname);
+	    "\t[--context[=num]] [--binary-files=value]\n"
+	    "\t[-e pattern] [-f file] [pattern] [file ...]\n", __progname);
 	exit(2);
 }
 
@@ -171,10 +172,23 @@ add_pattern(char *pat, size_t len)
 	}
 	if (pat[len - 1] == '\n')
 		--len;
-	pattern[patterns] = grep_malloc(len + 1);
 	/* pat may not be NUL-terminated */
-	memcpy(pattern[patterns], pat, len);
-	pattern[patterns][len] = '\0';
+	if (wflag) {
+		int bol = 0, eol = 0;
+		if (pat[0] == '^')
+			bol = 1;
+		if (pat[len - 1] == '$')
+			eol = 1;
+		pattern[patterns] = grep_malloc(len + 15);
+		snprintf(pattern[patterns], len + 15, "%s[[:<:]]%.*s[[:>:]]%s",
+		    bol ? "^" : "", (int)len - bol - eol, pat + bol,
+		    eol ? "$" : "");
+		len += 14;
+	} else {
+		pattern[patterns] = grep_malloc(len + 1);
+		memcpy(pattern[patterns], pat, len);
+		pattern[patterns][len] = '\0';
+	}
 	++patterns;
 
 	if (len > maxPatternLen)

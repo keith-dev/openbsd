@@ -1,4 +1,4 @@
-.\" $OpenBSD: pthreads.3,v 1.19 2003/05/18 13:06:33 jmc Exp $
+.\" $OpenBSD: pthreads.3,v 1.23 2004/01/15 23:17:19 marc Exp $
 .\" David Leonard <d@openbsd.org>, 1998. Public domain.
 .Dd August 17, 1998
 .Dt PTHREADS 3
@@ -37,8 +37,198 @@ signal mask, and name (as set by
 If the environment variable
 .Ev PTHREAD_DEBUG
 is defined additional information is displayed.
+.Pp
+For the purpose of this document,
+the functions available are grouped in the following categories.
+For further information, see the individual man page for each function.
+.Pp
+.Bl -dash -offset indent -compact
+.It
+Attribute Object Routines
+.It
+Cancellation Routines
+.It
+Condition Variable Routines
+.It
+Data Management Routines
+.It
+Mutex Routines
+.It
+Non Portable Extensions
+.It
+Read/Write Lock Routines
+.It
+Thread Routines
+.El
+.Ss Attribute Object Routines
+The functions available are as follows:
+.Pp
+.Bl -tag -width "pthread_attr_getdetachstate()" -compact
+.It Fn pthread_attr_init
+Initialise a threads attribute object.
+.It Fn pthread_attr_destroy
+Destroy a threads attribute object.
+.It Fn pthread_attr_getdetachstate
+Get detachstate attribute.
+.It Fn pthread_attr_setdetachstate
+Set detachstate attribute.
+.It Fn pthread_attr_getstackaddr
+Get stackaddr attribute.
+.It Fn pthread_attr_setstackaddr
+Set stackaddr attribute.
+.It Fn pthread_attr_getstacksize
+Get stacksize attribute.
+.It Fn pthread_attr_setstacksize
+Set stacksize attribute.
+.El
+.Ss Cancellation Routines
+The functions available are as follows:
+.Pp
+.Bl -tag -width "pthread_setcancelstate()" -compact
+.It Fn pthread_cancel
+Cancel execution of a thread.
+.It Fn pthread_cleanup_pop
+Call the first cleanup routine.
+.It Fn pthread_cleanup_push
+Add a cleanup function for thread exit.
+.It Fn pthread_setcancelstate
+Set cancelability state.
+.It Fn pthread_setcanceltype
+Set cancelability state.
+.It Fn pthread_testcancel
+Set cancelability state.
+.El
+.Ss Condition Variable Routines
+The functions available are as follows:
+.Pp
+.Bl -tag -width "pthread_cond_timedwait()" -compact
+.It Fn pthread_cond_broadcast
+Unblock all threads waiting for a condition variable.
+.It Fn pthread_cond_destroy
+Destroy a condition variable.
+.It Fn pthread_cond_init
+Create a condition variable.
+.It Fn pthread_cond_signal
+Unblock a thread waiting for a condition variable.
+.It Fn pthread_cond_timedwait
+Wait on a condition variable for a specific amount of time.
+.It Fn pthread_cond_wait
+Wait on a condition variable.
+.El
+.Ss Data Management Routines
+The functions available are as follows:
+.Pp
+.Bl -tag -width "pthread_getspecific()" -compact
+.It Fn pthread_getspecific
+Get a thread-specific data value.
+.It Fn pthread_setspecific
+Set a thread-specific data value.
+.It Fn pthread_key_create
+Thread-specific data key creation.
+.It Fn pthread_key_delete
+Delete a thread-specific data key.
+.El
+.Ss Mutex Routines
+The functions available are as follows:
+.Pp
+.Bl -tag -width "pthread_mutexattr_getprioceiling()" -compact
+.It Fn pthread_mutex_destroy
+Free resources allocated for a mutex.
+.It Fn pthread_mutex_init
+Create a mutex.
+.It Fn pthread_mutex_lock
+Lock a mutex.
+.It Fn pthread_mutex_trylock
+Attempt to lock a mutex without blocking.
+.It Fn pthread_mutex_unlock
+Unlock a mutex.
+.It Fn pthread_mutexattr_init
+Mutex attribute operations.
+.It Fn pthread_mutexattr_destroy
+Mutex attribute operations.
+.It Fn pthread_mutexattr_getprioceiling
+Mutex attribute operations.
+.It Fn pthread_mutexattr_setprioceiling
+Mutex attribute operations.
+.It Fn pthread_mutexattr_getprotocol
+Mutex attribute operations.
+.It Fn pthread_mutexattr_setprotocol
+Mutex attribute operations.
+.It Fn pthread_mutexattr_gettype
+Mutex attribute operations.
+.It Fn pthread_mutexattr_settype
+Mutex attribute operations.
+.El
+.Ss Non Portable Extensions
+The functions available are as follows:
+.Pp
+.Bl -tag -width "pthread_set_name_np()" -compact
+.It Fn pthread_main_np
+Identify the main thread.
+.It Fn pthread_set_name_np
+Set the name of a thread.
+.It Fn pthread_single_np
+Switch thread scheduling mode.
+.It Fn pthread_multi_np
+Switch thread scheduling mode.
+.It Fn pthread_stackseg_np
+Return stack size and location.
+.It Fn pthread_yield
+Yield control of the current thread.
+.El
+.Ss Read/Write Lock Routines
+The functions available are as follows:
+.Pp
+.Bl -tag -width "pthread_rwlockattr_getpshared()" -compact
+.It Fn pthread_rwlock_destroy
+Destroy a read/write lock.
+.It Fn pthread_rwlock_init
+Initialise a read/write lock.
+.It Fn pthread_rwlock_rdlock
+Acquire a read/write lock for reading.
+.It Fn pthread_rwlock_unlock
+Release a read/write lock.
+.It Fn pthread_rwlock_wrlock
+Acquire a read/write lock for writing.
+.It Fn pthread_rwlockattr_destroy
+Destroy a read/write lock.
+.It Fn pthread_rwlockattr_getpshared
+Get the process shared attribute.
+.It Fn pthread_rwlockattr_init
+Initialise a read/write lock.
+.It Fn pthread_rwlockattr_setpshared
+Set the process shared attribute.
+.El
+.Ss Thread Routines
+The functions available are as follows:
+.Pp
+.Bl -tag -width "pthread_getconcurrency()" -compact
+.It Fn pthread_create
+Create a new thread.
+.It Fn pthread_detach
+Detach a thread.
+.It Fn pthread_equal
+Compare thread IDs.
+.It Fn pthread_exit
+Terminate the calling thread.
+.It Fn pthread_getconcurrency
+Get level of concurrency.
+.It Fn pthread_setconcurrency
+Set level of concurrency.
+.It Fn pthread_join
+Wait for thread termination.
+.It Fn pthread_kill
+Send a signal to a specific thread.
+.It Fn pthread_once
+Dynamic package initialisation.
+.It Fn pthread_self
+Get the calling thread's ID.
+.It Fn pthread_sigmask
+Examine/change a thread's signal mask.
+.El
 .Ss Thread states
 Threads can be in one of these states:
+.Pp
 .Bl -tag -offset indent -width Dv -compact
 .It cond_wait
 Executing
@@ -108,6 +298,7 @@ or similar.
 .El
 .Ss Thread flags
 The first three flags are one of:
+.Pp
 .Bl -tag -offset indent -width 3en -compact
 .It "p"
 Private, system thread (e.g., the garbage collector).
@@ -118,7 +309,9 @@ or is at a cancellation point (c).
 .It "t"
 Thread is being traced.
 .El
+.Pp
 The next 7 flags refer to thread attributes:
+.Pp
 .Bl -tag -offset indent -width 3en -compact
 .It "C"
 Thread is in the
@@ -143,6 +336,7 @@ Thread will save floating point context.
 .Ss Scheduling algorithm
 The scheduling algorithm used by the user-level thread library is
 roughly as follows:
+.Pp
 .Bl -enum -compact
 .It
 Threads each have a time slice credit which is debited
@@ -178,13 +372,99 @@ signal, you should make use of
 .Xr sigaltstack 2
 or
 .Xr sigprocmask 2 .
+.Ss Thread safety
+The following functions are not thread safe:
+.Bd -filled
+asctime(),
+basename(),
+catgets(),
+crypt(),
+ctime(),
+dbm_clearerr(),
+dbm_close(),
+dbm_delete(),
+dbm_error(),
+dbm_fetch(),
+dbm_firstkey(),
+dbm_nextkey(),
+dbm_open(),
+dbm_store(),
+dirname(),
+dlerror(),
+drand48(),
+ecvt(),
+encrypt(),
+endgrent(),
+endpwent(),
+fcvt(),
+ftw(),
+gcvt(),
+getc_unlocked(),
+getchar_unlocked(),
+getenv(),
+getgrent(),
+getgrgid(),
+getgrnam(),
+gethostbyaddr(),
+gethostbyname(),
+gethostent(),
+getlogin(),
+getnetbyaddr(),
+getnetbyname(),
+getnetent(),
+getopt(),
+getprotobyname(),
+getprotobynumber(),
+getprotoent(),
+getpwent(),
+getpwnam(),
+getpwuid(),
+getservbyname(),
+getservbyport(),
+getservent(),
+gmtime(),
+hcreate(),
+hdestroy(),
+hsearch(),
+inet_ntoa(),
+l64a(),
+lgamma(),
+lgammaf(),
+localeconv(),
+localtime(),
+lrand48(),
+mrand48(),
+nftw(),
+nl_langinfo(),
+putc_unlocked(),
+putchar_unlocked(),
+putenv(),
+rand(),
+readdir(),
+setenv(),
+setgrent(),
+setkey(),
+setpwent(),
+strerror(),
+strtok(),
+ttyname(),
+unsetenv(),
+.Ed
+.Pp
+The
+.Fn ctermid
+and
+.Fn tmpnam
+functions are not thread safe when passed a
+.Dv NULL
+argument.
 .Sh ENVIRONMENT
-.Bl -tag -width "PTHREAD_DEBUG"
+.Bl -tag -width "LIBPTHREAD_DEBUG"
 .It Ev PTHREAD_DEBUG
 Enables verbose
 .Dv SIGINFO
 signal output.
-.It Ev LIBC_R_DEBUG
+.It Ev LIBPTHREAD_DEBUG
 Display thread status every time the garbage collection thread runs,
 approximately once every 10 seconds.
 The status display verbosity is controlled by the
@@ -192,6 +472,11 @@ The status display verbosity is controlled by the
 environment variable.
 .El
 .Sh SEE ALSO
+.Xr pthread_attr_init 3 ,
+.Xr pthread_attr_setdetachstate 3 ,
+.Xr pthread_attr_setstackaddr 3 ,
+.Xr pthread_attr_setstacksize 3 ,
+.Xr pthread_cancel 3 ,
 .Xr pthread_cleanup_pop 3 ,
 .Xr pthread_cleanup_push 3 ,
 .Xr pthread_cond_broadcast 3 ,
@@ -209,11 +494,13 @@ environment variable.
 .Xr pthread_key_create 3 ,
 .Xr pthread_key_delete 3 ,
 .Xr pthread_kill 3 ,
+.Xr pthread_main_np 3 ,
 .Xr pthread_mutex_destroy 3 ,
 .Xr pthread_mutex_init 3 ,
 .Xr pthread_mutex_lock 3 ,
 .Xr pthread_mutex_trylock 3 ,
 .Xr pthread_mutex_unlock 3 ,
+.Xr pthread_mutexattr 3 ,
 .Xr pthread_once 3 ,
 .Xr pthread_rwlock_destroy 3 ,
 .Xr pthread_rwlock_init 3 ,
@@ -224,8 +511,16 @@ environment variable.
 .Xr pthread_rwlockattr_getpshared 3 ,
 .Xr pthread_rwlockattr_init 3 ,
 .Xr pthread_rwlockattr_setpshared 3 ,
+.Xr pthread_schedparam 3 ,
 .Xr pthread_self 3 ,
-.Xr pthread_setspecific 3
+.Xr pthread_set_name_np 3 ,
+.Xr pthread_setspecific 3 ,
+.Xr pthread_sigmask 3 ,
+.Xr pthread_single_np 3 ,
+.Xr pthread_stackseg_np 3 ,
+.Xr pthread_suspend_np 3 ,
+.Xr pthread_testcancel 3 ,
+.Xr pthread_yield 3
 .Sh STANDARDS
 The user-level thread library provides functions that
 conform to ISO/IEC 9945-1 ANSI/IEEE

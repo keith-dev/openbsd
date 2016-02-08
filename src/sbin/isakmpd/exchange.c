@@ -1,4 +1,4 @@
-/*	$OpenBSD: exchange.c,v 1.84 2003/08/08 08:46:59 ho Exp $	*/
+/*	$OpenBSD: exchange.c,v 1.91 2004/02/16 20:40:34 markus Exp $	*/
 /*	$EOM: exchange.c,v 1.143 2000/12/04 00:02:25 angelos Exp $	*/
 
 /*
@@ -220,8 +220,10 @@ exchange_validate (struct message *msg)
 	      && !TAILQ_FIRST (&msg->payload[ISAKMP_PAYLOAD_HASH])
 	      && !TAILQ_FIRST (&msg->payload[ISAKMP_PAYLOAD_SIG]))
 	  || (*pc == EXCHANGE_SCRIPT_INFO
-	      && !TAILQ_FIRST (&msg->payload[ISAKMP_PAYLOAD_NOTIFY])
-	      && !TAILQ_FIRST (&msg->payload[ISAKMP_PAYLOAD_DELETE])))
+	      && ((!TAILQ_FIRST (&msg->payload[ISAKMP_PAYLOAD_NOTIFY])
+		   && !TAILQ_FIRST (&msg->payload[ISAKMP_PAYLOAD_DELETE]))
+	          || (TAILQ_FIRST (&msg->payload[ISAKMP_PAYLOAD_DELETE])
+		      && !TAILQ_FIRST (&msg->payload[ISAKMP_PAYLOAD_HASH])))))
 	{
 	  /* Missing payload.  */
 	  LOG_DBG ((LOG_MESSAGE, 70,
@@ -1018,7 +1020,7 @@ exchange_setup_p1 (struct message *msg, u_int32_t doi)
   struct conf_list *flags;
   struct conf_list_node *flag;
 #endif
-  char *name = 0, *policy = 0, *str, *tag;
+  char *name = 0, *policy = 0, *str;
   u_int32_t want_doi;
   u_int8_t type;
 
@@ -1035,7 +1037,7 @@ exchange_setup_p1 (struct message *msg, u_int32_t doi)
        * Find out our inbound phase 1 mode.
        */
       t->vtbl->get_dst (t, &dst);
-      if (sockaddr2text(dst, &str, 0) == -1)
+      if (sockaddr2text (dst, &str, 0) == -1)
 	return 0;
       name = conf_get_str ("Phase 1", str);
       free (str);
@@ -1098,12 +1100,11 @@ exchange_setup_p1 (struct message *msg, u_int32_t doi)
 	}
       if (type != GET_ISAKMP_HDR_EXCH_TYPE (msg->iov[0].iov_base))
 	{
-	  tag = constant_lookup (isakmp_exch_cst,
-				 GET_ISAKMP_HDR_EXCH_TYPE (msg->iov[0]
-							   .iov_base));
 	  log_print ("exchange_setup_p1: expected exchange type %s got %s",
-		     str, tag ? tag : "<unknown>");
-		     
+		     str,
+		     constant_name (isakmp_exch_cst,
+				    GET_ISAKMP_HDR_EXCH_TYPE (msg->iov[0]
+							      .iov_base)));
 	  return 0;
 	}
     }
@@ -1392,6 +1393,7 @@ exchange_finalize (struct message *msg)
   struct conf_list_node *attr;
   struct cert_handler *handler;
   int i;
+  char *id_doi, *id_trp;
 
 #ifdef USE_DEBUG
   exchange_dump ("exchange_finalize", exchange);
@@ -1508,17 +1510,24 @@ exchange_finalize (struct message *msg)
 	      = handler->cert_dup (exchange->sent_cert);
 	}
 
-      LOG_DBG ((LOG_EXCHANGE, 10,
-		"exchange_finalize: phase 1 done: %s, %s",
-		!exchange->doi ? "<no doi>" :
-		exchange->doi->decode_ids ("initiator id %s, responder id %s",
-					   exchange->id_i, exchange->id_i_len,
-					   exchange->id_r, exchange->id_r_len,
-					   0),
-		!msg->isakmp_sa || !msg->isakmp_sa->transport
-		? "<no transport>"
-		: msg->isakmp_sa->transport->vtbl->decode_ids (msg->isakmp_sa
-							       ->transport)));
+      if (exchange->doi)
+	id_doi = exchange->doi->decode_ids ("initiator id %s, responder id %s",
+					    exchange->id_i, exchange->id_i_len,
+					    exchange->id_r, exchange->id_r_len,
+					    0);
+      else
+	id_doi = "<no doi>";
+
+      if (msg->isakmp_sa && msg->isakmp_sa->transport)
+	id_trp = msg->isakmp_sa->transport->vtbl->decode_ids
+	  (msg->isakmp_sa->transport);
+      else
+        id_trp = "<no transport>";
+
+      LOG_DBG ((LOG_EXCHANGE, 10, "exchange_finalize: phase 1 done: %s, %s",
+	        id_doi, id_trp));
+
+      log_verbose ("isakmpd: phase 1 done: %s, %s", id_doi, id_trp);
     }
 
   exchange->doi->finalize_exchange (msg);
@@ -1666,7 +1675,7 @@ exchange_add_certs (struct message *msg)
 {
   struct exchange *exchange = msg->exchange;
   struct certreq_aca *aca;
-  u_int8_t *cert;
+  u_int8_t *cert = 0, *new_cert = 0;
   u_int32_t certlen;
   u_int8_t *id;
   size_t id_len;
@@ -1691,15 +1700,20 @@ exchange_add_certs (struct message *msg)
 	{
 	  log_print ("exchange_add_certs: could not obtain cert for a type %d "
 		     "cert request", aca->id);
+	  if (cert)
+	    free (cert);
 	  return -1;
 	}
-      cert = realloc (cert, ISAKMP_CERT_SZ + certlen);
-      if (!cert)
+      new_cert = realloc (cert, ISAKMP_CERT_SZ + certlen);
+      if (!new_cert)
 	{
 	  log_error ("exchange_add_certs: realloc (%p, %d) failed", cert,
 		     ISAKMP_CERT_SZ + certlen);
+	  if (cert)
+	    free (cert);
 	  return -1;
 	}
+      cert = new_cert;
       memmove (cert + ISAKMP_CERT_DATA_OFF, cert, certlen);
       SET_ISAKMP_CERT_ENCODING (cert, aca->id);
       if (message_add_payload (msg, ISAKMP_PAYLOAD_CERT, cert,

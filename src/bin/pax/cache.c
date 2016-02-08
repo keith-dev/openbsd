@@ -1,4 +1,4 @@
-/*	$OpenBSD: cache.c,v 1.15 2003/08/08 01:39:52 millert Exp $	*/
+/*	$OpenBSD: cache.c,v 1.17 2004/03/16 03:28:34 tedu Exp $	*/
 /*	$NetBSD: cache.c,v 1.4 1995/03/21 09:07:10 cgd Exp $	*/
 
 /*-
@@ -38,7 +38,7 @@
 #if 0
 static const char sccsid[] = "@(#)cache.c	8.1 (Berkeley) 5/31/93";
 #else
-static const char rcsid[] = "$OpenBSD: cache.c,v 1.15 2003/08/08 01:39:52 millert Exp $";
+static const char rcsid[] = "$OpenBSD: cache.c,v 1.17 2004/03/16 03:28:34 tedu Exp $";
 #endif
 #endif /* not lint */
 
@@ -204,12 +204,12 @@ name_uid(uid_t uid, int frc)
 		++pwopn;
 	}
 	if (ptr == NULL)
-		ptr = (UIDC *)malloc(sizeof(UIDC));
+		ptr = uidtb[uid % UID_SZ] = malloc(sizeof(UIDC));
 
 	if ((pw = getpwuid(uid)) == NULL) {
 		/*
 		 * no match for this uid in the local password file
-		 * a string that is the uid in numberic format
+		 * a string that is the uid in numeric format
 		 */
 		if (ptr == NULL)
 			return("");
@@ -270,7 +270,7 @@ name_gid(gid_t gid, int frc)
 		++gropn;
 	}
 	if (ptr == NULL)
-		ptr = (GIDC *)malloc(sizeof(GIDC));
+		ptr = gidtb[gid % GID_SZ] = malloc(sizeof(GIDC));
 
 	if ((gr = getgrgid(gid)) == NULL) {
 		/*

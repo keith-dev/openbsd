@@ -1,13 +1,14 @@
-/* $RCSfile: util.c,v $$Revision: 1.7 $$Date: 2002/10/27 22:25:40 $
+/* $RCSfile: util.c,v $$Revision: 1.8 $$Date: 2003/12/03 03:02:53 $
  *
- *    Copyright (c) 1991-2002, Larry Wall
+ *    Copyright (C) 1991, 1992, 1993, 1994, 1995, 1996, 1997, 1999,
+ *    2000, 2001, by Larry Wall and others
  *
  *    You may distribute under the terms of either the GNU General Public
  *    License or the Artistic License, as specified in the README file.
  *
  * $Log: util.c,v $
- * Revision 1.7  2002/10/27 22:25:40  millert
- * Resolve conflicts, remove old files, merge local changes
+ * Revision 1.8  2003/12/03 03:02:53  millert
+ * Resolve conflicts for perl 5.8.2, remove old files, and add OpenBSD-specific scaffolding
  *
  */
 
@@ -208,7 +209,7 @@ fatal(char *pat,...)
     exit(1);
 }
 
-#if defined(__APPLE_CC__)
+#if defined(DARWIN)
 __private_extern__	/* warn() conflicts with libc */
 #endif
 void

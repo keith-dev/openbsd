@@ -1,7 +1,7 @@
 #!./perl
 # tests for "goto &sub"-ing into XSUBs
 
-# $RCSfile: goto_xs.t,v $$Revision: 1.5 $$Date: 2002/10/27 22:25:37 $
+# $RCSfile: goto_xs.t,v $$Revision: 1.6 $$Date: 2003/12/03 03:02:48 $
 
 # Note: This only tests things that should *work*.  At some point, it may
 #       be worth while to write some failure tests for things that should

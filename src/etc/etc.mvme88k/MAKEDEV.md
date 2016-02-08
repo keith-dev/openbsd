@@ -1,8 +1,8 @@
 vers(__file__,
-	{-$OpenBSD: MAKEDEV.md,v 1.7 2003/06/18 18:08:59 todd Exp $-},
+	{-$OpenBSD: MAKEDEV.md,v 1.13 2004/02/16 19:01:02 miod Exp $-},
 etc.MACHINE)dnl
 dnl
-dnl Copyright (c) 2001,2002,2003 Todd T. Fries <todd@OpenBSD.org>
+dnl Copyright (c) 2001-2004 Todd T. Fries <todd@OpenBSD.org>
 dnl
 dnl Permission to use, copy, modify, and distribute this software for any
 dnl purpose with or without fee is hereby granted, provided that the above
@@ -19,13 +19,11 @@ dnl
 dnl
 dnl *** mvme88k-specific devices
 dnl
-__devitem(dart, ttya-d, MVME188 standard serial ports)dnl
+__devitem(dart, ttya-b, MVME188 serial ports)dnl
 _mkdev(dart, {-tty[a-z]-}, {-u=${i#tty*}
 	case $u in
 	a) n=0 ;;
 	b) n=1 ;;
-	c) n=2 ;;
-	d) n=3 ;;
 	*) echo unknown tty device $i ;;
 	esac
 	case $u in
@@ -37,7 +35,7 @@ _mkdev(dart, {-tty[a-z]-}, {-u=${i#tty*}
 __devitem(cl, tty0*, MVME1x7 CL-CD2400 serial ports)dnl
 _mkdev(cl, {-tty0*-}, {-u=${i#tty0*}
 	case $u in
-	0|1|2|3)
+	0|1|2|3|4|5|6|7)
 		M tty0$u c major_cl_c $u 660 dialer uucp
 		M cua0$u c major_cl_c Add($u, 128) 660 dialer uucp
 		;;
@@ -52,13 +50,13 @@ _mkdev(vx, {-ttyv*-}, {-u=${i#ttyv*}
 		;;
 	*) echo unknown tty device $i ;;
 	esac-})dnl
-__devitem(sram, sram0, static memory access)dnl
+__devitem(sram, sram0, On-board static memory)dnl
 _mkdev(sram, sram0, {-M sram0 c major_sram_c 0 640 kmem-})dnl
-__devitem(nvram, nvram0, non-volatile memory access)dnl
+__devitem(nvram, nvram0, On-board non-volatile memory)dnl
 _mkdev(nvram, nvram0, {-M nvram0 c major_nvram_c 0 640 kmem-})dnl
-__devitem(vmes, vmes0, VMEbus access)dnl
+__devitem(vmes, vmes0, VMEbus D16 space)dnl
 _mkdev(vmes, vmes0, {-M vmes0 c major_vmes_c 0 640 kmem-})dnl
-__devitem(vmel, vmel0, VMEbus access)dnl
+__devitem(vmel, vmel0, VMEbus D32 space)dnl
 _mkdev(vmel, vmel0, {-M vmel0 c major_vmel_c 0 640 kmem-})dnl
 dnl
 dnl *** MAKEDEV itself
@@ -74,6 +72,7 @@ target(all, vmel, 0)dnl
 dnl
 target(all, ses, 0)dnl
 target(all, ch, 0)dnl
+target(all, ss, 0)dnl
 target(all, xfs, 0)dnl
 target(all, pty, 0, 1, 2)dnl
 target(all, bpf, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9)dnl
@@ -81,10 +80,11 @@ target(all, tun, 0, 1, 2, 3)dnl
 target(all, rd, 0)dnl
 target(all, cd, 0, 1)dnl
 target(all, sd, 0, 1, 2, 3, 4)dnl
+target(all, uk, 0)dnl
 target(all, vnd, 0, 1, 2, 3)dnl
 target(all, ccd, 0, 1, 2, 3)dnl
-twrget(all, dart, tty, a, b, c, d)dnl
-twrget(all, cl, tty0, 0, 1, 2, 3)dnl
+twrget(all, dart, tty, a, b)dnl
+twrget(all, cl, tty0, 0, 1, 2, 3, 4, 5, 6, 7)dnl
 twrget(all, vx, ttyv, 0, 1, 2, 3, 4, 5, 6, 7)dnl
 _DEV(all)
 dnl
@@ -100,38 +100,42 @@ target(ramd, pty, 0)dnl
 _DEV(ramd)
 dnl
 _DEV(std)
-_DEV(loc)
+_DEV(local)
 dnl
-_TITLE(tap)
-_DEV(st, 20, 5)
 _TITLE(dis)
-_DEV(sd, 8, 4)
-_DEV(cd, 9, 6)
 _DEV(ccd, 17, 9)
-_DEV(vnd, 19, 8)
+_DEV(cd, 9, 6)
 _DEV(rd, 18, 7)
+_DEV(sd, 8, 4)
+_DEV(vnd, 19, 8)
+_TITLE(tap)
+_DEV(ch, 44)
+_DEV(st, 20, 5)
 _TITLE(term)
-_DEV(dart, 12)
 _DEV(cl, 13)
+_DEV(dart, 12)
 _DEV(vx, 15)
 _TITLE(pty)
-_DEV(tty, 4)
+_DEV(ptm, 52)
 _DEV(pty, 5)
+_DEV(tty, 4)
 _TITLE(spec)
-_DEV(fdesc, 21)
 _DEV(bpf, 22)
-_DEV(tun, 23)
-_DEV(pf, 39)
+_DEV(fdesc, 21)
 _DEV(lkm, 24)
-_DEV(rnd, 40)
-_DEV(xfs, 51)
-_DEV(sram, 7)
 _DEV(nvram, 10)
-_DEV(vmes, 32)
-_DEV(vmel, 31)
+_DEV(pf, 39)
+_DEV(rnd, 40)
+_DEV(sram, 7)
+_DEV(ss, 42)
 _DEV(systrace, 50)
+_DEV(tun, 23)
+_DEV(vmel, 31)
+_DEV(vmes, 32)
+_DEV(uk, 41)
+_DEV(xfs, 51)
 dnl
-divert(7)dnl
+divert(__mddivert)dnl
 dnl
 _std(1, 2, 43, 3, 6)
 	;;

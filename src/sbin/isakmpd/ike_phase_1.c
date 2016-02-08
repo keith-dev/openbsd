@@ -1,10 +1,10 @@
-/*	$OpenBSD: ike_phase_1.c,v 1.39 2003/08/08 08:46:59 ho Exp $	*/
+/*	$OpenBSD: ike_phase_1.c,v 1.44 2004/02/27 10:16:26 ho Exp $	*/
 /*	$EOM: ike_phase_1.c,v 1.31 2000/12/11 23:47:56 niklas Exp $	*/
 
 /*
  * Copyright (c) 1999, 2000 Niklas Hallqvist.  All rights reserved.
  * Copyright (c) 1999, 2000 Angelos D. Keromytis.  All rights reserved.
- * Copyright (c) 2001 Håkan Olsson.  All rights reserved.
+ * Copyright (c) 2001, 2004 Håkan Olsson.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -79,6 +79,7 @@ ike_phase_1_initiator_send_SA (struct message *msg)
   int i, value, update_nextp;
   struct payload *p;
   struct proto *proto;
+  struct proto_attr *pa;
   int group_desc = -1, new_group_desc;
 
   /* Get the list of transforms.  */
@@ -236,7 +237,7 @@ ike_phase_1_initiator_send_SA (struct message *msg)
 	    group_desc = new_group_desc;
 	  else if (group_desc != new_group_desc)
 	    {
-	      log_print ("ike_phase_1_inititor_send_SA: "
+	      log_print ("ike_phase_1_initiator_send_SA: "
 			 "differing group descriptions in a proposal");
 	      goto bail_out;
 	    }
@@ -284,8 +285,24 @@ ike_phase_1_initiator_send_SA (struct message *msg)
   proto->no = 1;
   proto->proto = ISAKMP_PROTO_ISAKMP;
   proto->sa = TAILQ_FIRST (&exchange->sa_list);
-  TAILQ_INSERT_TAIL (&TAILQ_FIRST (&exchange->sa_list)->protos, proto,
-		     link);
+  proto->xf_cnt = conf->cnt;
+  TAILQ_INIT (&proto->xfs);
+  for (i = 0; i < proto->xf_cnt; i++)
+    {
+      pa = (struct proto_attr *)calloc (1, sizeof *pa);
+      if (!pa)
+	goto bail_out;
+      pa->len = transform_len[i];
+      pa->attrs = (u_int8_t *)malloc (pa->len);
+      if (!pa->attrs)
+	{
+	  free (pa);
+	  goto bail_out;
+	}
+      memcpy (pa->attrs, transform[i], pa->len);
+      TAILQ_INSERT_TAIL (&proto->xfs, pa, next);
+    }
+  TAILQ_INSERT_TAIL (&TAILQ_FIRST (&exchange->sa_list)->protos, proto, link);
 
   sa_len = ISAKMP_SA_SIT_OFF + IPSEC_SIT_SIT_LEN;
   sa_buf = malloc (sa_len);
@@ -1207,7 +1224,7 @@ attribute_unacceptable (u_int16_t type, u_int8_t *value, u_int16_t len,
   struct conf_list *life_conf;
   struct conf_list_node *xf = vs->xf, *life;
   char *tag = constant_lookup (ike_attr_cst, type);
-  char *tag2, *str;
+  char *str;
   struct constant_map *map;
   struct attr_node *node;
   int rv;
@@ -1256,10 +1273,9 @@ attribute_unacceptable (u_int16_t type, u_int8_t *value, u_int16_t len,
 	  LIST_INSERT_HEAD (&vs->attrs, node, link);
 	  return 0;
 	}
-      tag2 = constant_lookup (map, decode_16 (value));
       LOG_DBG ((LOG_NEGOTIATION, 70,
 		"attribute_unacceptable: %s: got %s, expected %s", tag,
-		tag2 ? tag2 : "<unknown>", str));
+		constant_name (map, decode_16 (value)), str));
       return 1;
 
     case IKE_ATTR_GROUP_PRIME:
@@ -1330,12 +1346,23 @@ attribute_unacceptable (u_int16_t type, u_int8_t *value, u_int16_t len,
 	      goto bail_out;
 	    }
 
-	  if (!strcmp (conf_get_str (vs->life, "LIFE_DURATION"), "ANY"))
-	    rv = 0;
+	  str = conf_get_str (vs->life, "LIFE_DURATION");
+	  if (str)
+	    {
+	      if (!strcmp (str, "ANY"))
+		rv = 0;
+	      else
+		rv = !conf_match_num (vs->life, "LIFE_DURATION",
+				      len == 4 ? decode_32 (value) :
+				      decode_16 (value));
+	    }
 	  else
-	    rv = !conf_match_num (vs->life, "LIFE_DURATION",
-				  len == 4 ? decode_32 (value) :
-				  decode_16 (value));
+	    {
+	      LOG_DBG ((LOG_NEGOTIATION, 70, "attribute_unacceptable: "
+			"section [%s] has no LIFE_DURATION", vs->life));
+	      rv = 1;
+	    }
+
 	  free (vs->life);
 	  vs->life = 0;
 	  break;

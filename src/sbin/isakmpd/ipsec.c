@@ -1,4 +1,4 @@
-/*	$OpenBSD: ipsec.c,v 1.80 2003/09/02 18:15:55 ho Exp $	*/
+/*	$OpenBSD: ipsec.c,v 1.87 2004/03/10 23:08:48 hshoexer Exp $	*/
 /*	$EOM: ipsec.c,v 1.143 2000/12/11 23:57:42 niklas Exp $	*/
 
 /*
@@ -122,7 +122,7 @@ static int ipsec_validate_id_information (u_int8_t, u_int8_t *, u_int8_t *,
 static int ipsec_validate_key_information (u_int8_t *, size_t);
 static int ipsec_validate_notification (u_int16_t);
 static int ipsec_validate_proto (u_int8_t);
-static int ipsec_validate_situation (u_int8_t *, size_t *);
+static int ipsec_validate_situation (u_int8_t *, size_t *, size_t);
 static int ipsec_validate_transform_id (u_int8_t, u_int8_t);
 
 static struct doi ipsec_doi = {
@@ -414,7 +414,6 @@ static int
 ipsec_set_network (u_int8_t *src_id, u_int8_t *dst_id, struct ipsec_sa *isa)
 {
   int id;
-  char *v;
 
   /* Set source address/mask.  */
   id = GET_ISAKMP_ID_TYPE (src_id);
@@ -468,9 +467,8 @@ ipsec_set_network (u_int8_t *src_id, u_int8_t *dst_id, struct ipsec_sa *isa)
     case IPSEC_ID_DER_ASN1_GN:
     case IPSEC_ID_KEY_ID:
     default:
-      v = constant_lookup (ipsec_id_cst, id);
       log_print ("ipsec_set_network: ID type %d (%s) not supported",
-		 id, v ? v : "<unknown>");
+		 id, constant_name (ipsec_id_cst, id));
       return -1;
     }
 
@@ -853,35 +851,21 @@ ipsec_validate_proto (u_int8_t proto)
 }
 
 static int
-ipsec_validate_situation (u_int8_t *buf, size_t *sz)
+ipsec_validate_situation (u_int8_t *buf, size_t *sz, size_t len)
 {
-  int sit = GET_IPSEC_SIT_SIT (buf);
-  int off;
-
-  if (sit & (IPSEC_SIT_SECRECY | IPSEC_SIT_INTEGRITY))
+  if (len < IPSEC_SIT_SIT_OFF + IPSEC_SIT_SIT_LEN)
     {
-      /*
-       * XXX All the roundups below, round up to 32 bit boundaries given
-       * that the situation field is aligned.  This is not necessarily so,
-       * but I interpret the drafts as this is like this they want it.
-       */
-      off = ROUNDUP_32 (GET_IPSEC_SIT_SECRECY_LENGTH (buf));
-      off += ROUNDUP_32 (GET_IPSEC_SIT_SECRECY_CAT_LENGTH (buf + off));
-      off += ROUNDUP_32 (GET_IPSEC_SIT_INTEGRITY_LENGTH (buf + off));
-      off += ROUNDUP_32 (GET_IPSEC_SIT_INTEGRITY_CAT_LENGTH (buf + off));
-      *sz = off + IPSEC_SIT_SZ;
+      log_print ("ipsec_validate_situation: payload too short: %u",
+	         (unsigned int)len);
+      return -1;
     }
-  else
-    *sz = IPSEC_SIT_SIT_LEN;
 
   /* Currently only "identity only" situations are supported.  */
-#ifdef notdef
-  return
-    sit & ~(IPSEC_SIT_IDENTITY_ONLY | IPSEC_SIT_SECRECY | IPSEC_SIT_INTEGRITY);
-#else
-   return sit & ~IPSEC_SIT_IDENTITY_ONLY;
-#endif
+  if (GET_IPSEC_SIT_SIT (buf) != IPSEC_SIT_IDENTITY_ONLY)
     return 1;
+
+  *sz = IPSEC_SIT_SIT_LEN;
+
   return 0;
 }
 
@@ -1000,7 +984,7 @@ ipsec_delete_spi_list (struct sockaddr *addr, u_int8_t proto,
         {
 	  LOG_DBG ((LOG_SA, 30, "ipsec_delete_spi_list: "
 		   "could not locate SA (SPI %08x, proto %u)",
-		   spis[i], proto));
+		   ((u_int32_t *)spis)[i], proto));
 	  continue;
 	}
 
@@ -1013,50 +997,12 @@ ipsec_delete_spi_list (struct sockaddr *addr, u_int8_t proto,
     }
 }
 
-/*
- * deal with a NOTIFY of INVALID_SPI
- */
-static void
-ipsec_invalid_spi (struct message *msg, struct payload *p)
-{
-  struct sockaddr *dst;
-  int invspisz, off;
-  u_int32_t spi;
-  u_int16_t totsiz;
-  u_int8_t spisz;
-
-  /*
-   * get the invalid spi out of the variable sized notification data
-   * field, which is after the variable sized SPI field [which specifies
-   * the receiving entity's phase-1 SPI, not the invalid spi]
-   */
-  totsiz = GET_ISAKMP_GEN_LENGTH (p->p);
-  spisz = GET_ISAKMP_NOTIFY_SPI_SZ (p->p);
-  off = ISAKMP_NOTIFY_SPI_OFF + spisz;
-  invspisz = totsiz - off;
-
-  if (invspisz != sizeof spi)
-    {
-      LOG_DBG ((LOG_SA, 40,
-	       "ipsec_invalid_spi: SPI size %d in INVALID_SPI "
-	       "payload unsupported", spisz));
-       return;
-    }
-  memcpy (&spi, p->p + off, sizeof spi);
-
-  msg->transport->vtbl->get_dst (msg->transport, &dst);
-
-  /* delete matching SPI's from this peer */
-  ipsec_delete_spi_list (dst, 0, (u_int8_t *)&spi, 1, "INVALID_SPI");
-}
-
 static int
 ipsec_responder (struct message *msg)
 {
   struct exchange *exchange = msg->exchange;
   int (**script) (struct message *) = 0;
   struct payload *p;
-  char *tag;
   u_int16_t type;
 
   /* Check that a new exchange is coherent with the IKE rules.  */
@@ -1096,13 +1042,9 @@ ipsec_responder (struct message *msg)
 	   p = TAILQ_NEXT (p, link))
 	{
 	  type = GET_ISAKMP_NOTIFY_MSG_TYPE (p->p);
-	  tag = constant_lookup (isakmp_notify_cst, type);
 	  LOG_DBG ((LOG_EXCHANGE, 10,
 		    "ipsec_responder: got NOTIFY of type %s",
-		    tag ? tag : "<unknown>"));
-
-	  if (type == ISAKMP_NOTIFY_INVALID_SPI)
-	    ipsec_invalid_spi (msg, p);
+		    constant_name (isakmp_notify_cst, type)));
 
 	  p->flags |= PL_MARK;
 	}
@@ -1178,8 +1120,10 @@ ipsec_is_attribute_incompatible (u_int16_t type, u_int8_t *value,
 	case IKE_ATTR_AUTHENTICATION_METHOD:
 	  return !ike_auth_get (decode_16 (value));
 	case IKE_ATTR_GROUP_DESCRIPTION:
-	  return decode_16 (value) < IKE_GROUP_DESC_MODP_768
-	    || decode_16 (value) > IKE_GROUP_DESC_MODP_1536;
+	  return (decode_16 (value) < IKE_GROUP_DESC_MODP_768
+	          || decode_16 (value) > IKE_GROUP_DESC_MODP_1536) 
+	    && (decode_16 (value) < IKE_GROUP_DESC_MODP_2048
+	        || decode_16 (value) > IKE_GROUP_DESC_MODP_8192);
 	case IKE_ATTR_GROUP_TYPE:
 	  return 1;
 	case IKE_ATTR_GROUP_PRIME:
@@ -1221,8 +1165,10 @@ ipsec_is_attribute_incompatible (u_int16_t type, u_int8_t *value,
 	case IPSEC_ATTR_SA_LIFE_DURATION:
 	  return len != 2 && len != 4;
 	case IPSEC_ATTR_GROUP_DESCRIPTION:
-	  return decode_16 (value) < IKE_GROUP_DESC_MODP_768
-	    || decode_16 (value) > IKE_GROUP_DESC_MODP_1536;
+	  return (decode_16 (value) < IKE_GROUP_DESC_MODP_768
+	          || decode_16 (value) > IKE_GROUP_DESC_MODP_1536)
+	    && (decode_16 (value) < IKE_GROUP_DESC_MODP_2048
+		|| IKE_GROUP_DESC_MODP_8192 < decode_16 (value));
 	case IPSEC_ATTR_ENCAPSULATION_MODE:
 	  return decode_16 (value) < IPSEC_ENCAP_TUNNEL
 	    || decode_16 (value) > IPSEC_ENCAP_TRANSPORT;
@@ -1657,6 +1603,31 @@ ipsec_handle_leftover_payload (struct message *msg, u_int8_t type,
 	{
 	case IPSEC_NOTIFY_INITIAL_CONTACT:
 	  /*
+	   * Permit INITIAL-CONTACT if
+	   *   - this is not an AGGRESSIVE mode exchange
+	   *   - it is protected by an ISAKMP SA
+	   *
+	   * XXX Instead of the first condition above, we could permit this
+	   * XXX only for phase 2. In the last packet of main-mode, this
+	   * XXX payload, while encrypted, is not part of the hash digest.
+	   * XXX As we currently send our own INITIAL-CONTACTs at this point,
+	   * XXX this too would need to be changed.
+	   */
+	  if (msg->exchange->type == ISAKMP_EXCH_AGGRESSIVE)
+	    {	
+	      log_print ("ipsec_handle_leftover_payload: got INITIAL-CONTACT "
+			 "in AGGRESSIVE mode");
+	      return -1;
+	    }
+
+	  if ((msg->exchange->flags & EXCHANGE_FLAG_ENCRYPT) == 0)
+	    {
+	      log_print ("ipsec_handle_leftover_payload: got INITIAL-CONTACT "
+			 "without ISAKMP SA");
+	      return -1;
+	    }
+
+	  /*
 	   * Find out who is sending this and then delete every SA that is
 	   * ready.  Exchanges will timeout themselves and then the
 	   * non-ready SAs will disappear too.
@@ -1960,7 +1931,7 @@ ipsec_decode_id (char *buf, int size, u_int8_t *id, size_t id_len,
 	case IPSEC_ID_USER_FQDN:
 	  /* String is not NUL terminated, be careful */
 	  id_len -= ISAKMP_ID_DATA_OFF;
-	  id_len = MIN(id_len, size - 1);
+	  id_len = MIN (id_len, size - 1);
 	  memcpy (buf, id + ISAKMP_ID_DATA_OFF, id_len);
 	  buf[id_len] = '\0';
 	  break;
@@ -1971,7 +1942,7 @@ ipsec_decode_id (char *buf, int size, u_int8_t *id, size_t id_len,
 				 id_len - ISAKMP_ID_DATA_OFF);
 	  if (!addr)
 	    {
-	      snprintf(buf, size, "unparsable ASN1 DN ID");
+	      snprintf (buf, size, "unparsable ASN1 DN ID");
 	      return;
 	    }
 	  strlcpy (buf, addr, size);
@@ -2408,7 +2379,7 @@ ipsec_id_string (u_int8_t *id, size_t id_len)
       strlcpy (buf,
 	       GET_ISAKMP_ID_TYPE (id) == IPSEC_ID_FQDN ? "fqdn/" : "ufqdn/",
 	       size);
-      len = strlen(buf);
+      len = strlen (buf);
 
       memcpy (buf + len, id + ISAKMP_ID_DATA_OFF, id_len);
       *(buf + len + id_len) = '\0';
@@ -2417,7 +2388,7 @@ ipsec_id_string (u_int8_t *id, size_t id_len)
 #ifdef USE_X509
     case IPSEC_ID_DER_ASN1_DN:
       strlcpy (buf, "asn1_dn/", size);
-      len = strlen(buf);
+      len = strlen (buf);
       addrstr = x509_DN_string (id + ISAKMP_ID_DATA_OFF,
 				id_len - ISAKMP_ID_DATA_OFF);
       if (!addrstr)

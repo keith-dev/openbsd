@@ -1,5 +1,5 @@
 # BeOS hints file
-# $Id: beos.sh,v 1.5 2002/10/27 22:25:24 millert Exp $
+# $Id: beos.sh,v 1.6 2003/12/03 03:02:34 millert Exp $
 
 if [ ! -f beos/nm ]; then mwcc -w all -o beos/nm beos/nm.c 2>/dev/null; fi
 # If this fails, that's all right - it's only for PPC.

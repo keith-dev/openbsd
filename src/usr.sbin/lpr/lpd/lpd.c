@@ -1,4 +1,4 @@
-/*	$OpenBSD: lpd.c,v 1.40 2003/09/03 20:23:26 tedu Exp $ */
+/*	$OpenBSD: lpd.c,v 1.43 2003/11/08 19:17:29 jmc Exp $ */
 /*	$NetBSD: lpd.c,v 1.33 2002/01/21 14:42:29 wiz Exp $	*/
 
 /*
@@ -41,7 +41,7 @@ static const char copyright[] =
 #if 0
 static const char sccsid[] = "@(#)lpd.c	8.7 (Berkeley) 5/10/95";
 #else
-static const char rcsid[] = "$OpenBSD: lpd.c,v 1.40 2003/09/03 20:23:26 tedu Exp $";
+static const char rcsid[] = "$OpenBSD: lpd.c,v 1.43 2003/11/08 19:17:29 jmc Exp $";
 #endif
 #endif /* not lint */
 
@@ -144,7 +144,7 @@ main(int argc, char **argv)
 	int lfd, i, f, funix, *finet;
 	int options, check_options, maxfd;
 	long l;
-	long child_max = 32;	/* more then enough to hose the system */
+	long child_max = 32;	/* more than enough to hose the system */
 	struct servent *sp;
 	const char *port = "printer";
 	char *cp;
@@ -171,11 +171,23 @@ main(int argc, char **argv)
 		switch (i) {
 		case 'b':
 			if (blist_addrs >= blist_size) {
-				blist_size += sizeof(char *) * 4;
-				if (blist == NULL)
+				if (blist == NULL) {
+					blist_size += sizeof(char *) * 4;
 					blist = malloc(blist_size);
-				else
-					blist = realloc(blist, blist_size);
+				}
+				else {
+					char **newblist;
+					int newblist_size = blist_size +
+					    sizeof(char *) * 4;
+					newblist = realloc(blist, newblist_size);
+					if (newblist == NULL) {
+						free(blist);
+						blist_size = 0;
+						blist = NULL;
+					}
+					blist = newblist;
+					blist_size = newblist_size;
+				}
 				if (blist == NULL)
 					err(1, "cant allocate bind addr list");
 			}
@@ -774,7 +786,7 @@ int *
 socksetup(int af, int options, const char *port)
 {
 	struct addrinfo hints, *res, *r;
-	int error, maxs = 0, *s, *socks = NULL, blidx = 0;
+	int error, maxs = 0, *s, *socks = NULL, *newsocks, blidx = 0;
 	const int on = 1;
 
 	do {
@@ -800,8 +812,15 @@ socksetup(int af, int options, const char *port)
 			socks = malloc((maxs + 1) * sizeof(int));
 			if (socks)
 				*socks = 0; /* num of sockets ctr at start */
-		} else
-			socks = realloc(socks, (maxs + 1) * sizeof(int));
+		} else {
+			newsocks = realloc(socks, (maxs + 1) * sizeof(int));
+			if (newsocks)
+				socks = newsocks;
+			else {
+				free(socks);
+				socks = NULL;
+			}
+		}
 		if (!socks) {
 			syslog(LOG_ERR, "couldn't allocate memory for sockets");
 			mcleanup(0);

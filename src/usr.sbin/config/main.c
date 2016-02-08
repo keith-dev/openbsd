@@ -1,4 +1,4 @@
-/*	$OpenBSD: main.c,v 1.32 2003/06/28 04:55:07 deraadt Exp $	*/
+/*	$OpenBSD: main.c,v 1.36 2004/01/04 18:30:05 deraadt Exp $	*/
 /*	$NetBSD: main.c,v 1.22 1997/02/02 21:12:33 thorpej Exp $	*/
 
 /*
@@ -53,6 +53,7 @@ static char copyright[] =
 #include <ctype.h>
 #include <errno.h>
 #include <stdio.h>
+#include <err.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
@@ -296,6 +297,8 @@ mksymlinks(void)
 		q = machinearch;
 	} else {
 		p = strdup("machine");
+		if (!p)
+			errx(1, "out of memory");
 		q = machine;
 	}
 	(void)unlink(q);
@@ -321,9 +324,8 @@ stop(void)
 void
 defoption(const char *name)
 {
+	char *p, *low, c;
 	const char *n;
-	char *p, c;
-	char low[500];
 
 	/*
 	 * Convert to lower case.  The header file name will be
@@ -332,11 +334,13 @@ defoption(const char *name)
 	 * original string will be stored in the nvlist for use
 	 * in the header file.
 	 */
+	low = emalloc(strlen(name) + 1);
 	for (n = name, p = low; (c = *n) != '\0'; n++)
 		*p++ = isupper(c) ? tolower(c) : c;
 	*p = 0;
 
 	n = intern(low);
+	free(low);
 	(void)do_option(defopttab, &nextdefopt, n, name, "defopt");
 
 	/*
@@ -353,13 +357,11 @@ void
 removeoption(const char *name)
 {
 	struct nvlist *nv, *nvt;
+	char *p, *low, c;
 	const char *n;
-	char *p, c;
-	char low[500];
 
 	if ((nv = ht_lookup(opttab, name)) != NULL) {
-		if (options == nv)
-		{
+		if (options == nv) {
 			options = nv->nv_next;
 			nvfree(nv);
 		} else {
@@ -369,8 +371,7 @@ removeoption(const char *name)
 					nvt->nv_next = nvt->nv_next->nv_next;
 					nvfree(nv);
 					break;
-				}
-				else
+				} else
 					nvt = nvt->nv_next;
 			}
 		}
@@ -378,11 +379,13 @@ removeoption(const char *name)
 
 	(void)ht_remove(opttab, name);
 
+	low = emalloc(strlen(name) + 1);
 	/* make lowercase, then add to select table */
 	for (n = name, p = low; (c = *n) != '\0'; n++)
 		*p++ = isupper(c) ? tolower(c) : c;
 	*p = 0;
 	n = intern(low);
+	free(low);
 	(void)ht_remove(selecttab, n);
 }
 
@@ -393,18 +396,19 @@ removeoption(const char *name)
 void
 addoption(const char *name, const char *value)
 {
+	char *p, *low, c;
 	const char *n;
-	char *p, c;
-	char low[500];
 
 	if (do_option(opttab, &nextopt, name, value, "options"))
 		return;
 
+	low = emalloc(strlen(name) + 1);
 	/* make lowercase, then add to select table */
 	for (n = name, p = low; (c = *n) != '\0'; n++)
 		*p++ = isupper(c) ? tolower(c) : c;
 	*p = 0;
 	n = intern(low);
+	free(low);
 	(void)ht_insert(selecttab, n, (void *)n);
 }
 
@@ -654,17 +658,17 @@ setupdirs(void)
 		madedir = 1;
 	} else if (!S_ISDIR(st.st_mode)) {
 		(void)fprintf(stderr, "config: %s is not a directory\n",
-			      builddir);
+		    builddir);
 		exit(2);
 	}
 	if (chdir(builddir) != 0) {
 		(void)fprintf(stderr, "config: cannot change to %s\n",
-			      builddir);
+		    builddir);
 		exit(2);
 	}
 	if (stat(srcdir, &st) != 0 || !S_ISDIR(st.st_mode)) {
 		(void)fprintf(stderr, "config: %s is not a directory\n",
-			      srcdir);
+		    srcdir);
 		exit(2);
 	}
 }
@@ -704,7 +708,7 @@ optiondelta(void)
 
 	for (nnewopts = 0, nv = options; nv != NULL; nv = nv->nv_next)
 		nnewopts++;
-	newopts = (struct opt *)malloc(nnewopts * sizeof(struct opt));
+	newopts = (struct opt *)emalloc(nnewopts * sizeof(struct opt));
 	if (newopts == NULL)
 		ret = 0;
 	for (i = 0, nv = options; nv != NULL; nv = nv->nv_next, i++) {

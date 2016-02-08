@@ -1,10 +1,10 @@
 #! /bin/sh
 #
-# $Id: configure.gnu,v 1.5 2002/10/27 22:25:17 millert Exp $
+# $Id: configure.gnu,v 1.6 2003/12/03 03:02:19 millert Exp $
 #
 # GNU configure-like front end to metaconfig's Configure.
 #
-# Written by Andy Dougherty <doughera@lafcol.lafayette.edu>
+# Written by Andy Dougherty <doughera@lafayette.edu>
 # and Matthew Green <mrg@mame.mu.oz.au>.
 #
 # Reformatted and modified for inclusion in the dist-3.0 package by
@@ -16,8 +16,8 @@
 # include this script in your own package.
 #
 # $Log: configure.gnu,v $
-# Revision 1.5  2002/10/27 22:25:17  millert
-# Resolve conflicts, remove old files, merge local changes
+# Revision 1.6  2003/12/03 03:02:19  millert
+# Resolve conflicts for perl 5.8.2, remove old files, and add OpenBSD-specific scaffolding
 #
 # Revision 3.0.1.1  1995/07/25  14:16:21  ram
 # patch56: created
@@ -65,6 +65,12 @@ EOM
 		;;
 	--prefix=*)
 		arg=`echo $1 | sed 's/--prefix=/-Dprefix=/'`
+		opts="$opts $arg"
+		shift
+		;;
+	--prefix)
+		shift
+		arg="-Dprefix=$1"
 		opts="$opts $arg"
 		shift
 		;;

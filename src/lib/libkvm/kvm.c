@@ -1,4 +1,4 @@
-/*	$OpenBSD: kvm.c,v 1.34 2003/06/02 20:18:40 millert Exp $ */
+/*	$OpenBSD: kvm.c,v 1.37 2004/02/23 23:19:09 deraadt Exp $ */
 /*	$NetBSD: kvm.c,v 1.43 1996/05/05 04:31:59 gwr Exp $	*/
 
 /*-
@@ -38,7 +38,7 @@
 #if 0
 static char sccsid[] = "@(#)kvm.c	8.2 (Berkeley) 2/13/94";
 #else
-static char *rcsid = "$OpenBSD: kvm.c,v 1.34 2003/06/02 20:18:40 millert Exp $";
+static char *rcsid = "$OpenBSD: kvm.c,v 1.37 2004/02/23 23:19:09 deraadt Exp $";
 #endif
 #endif /* LIBC_SCCS and not lint */
 
@@ -190,6 +190,7 @@ _kvm_open(kd, uf, mf, sf, flag, errout)
 	kd->nlfd = -1;
 	kd->alive = 0;
 	kd->procbase = 0;
+	kd->procbase2 = 0;
 	kd->nbpg = getpagesize();
 	kd->swapspc = 0;
 	kd->argspc = 0;
@@ -300,7 +301,7 @@ failed:
 	 * Copy out the error if doing sane error semantics.
 	 */
 	if (errout != 0)
-		(void)strncpy(errout, kd->errbuf, _POSIX2_LINE_MAX - 1);
+		(void)strlcpy(errout, kd->errbuf, _POSIX2_LINE_MAX);
 	(void)kvm_close(kd);
 	return (0);
 }
@@ -614,7 +615,7 @@ kvm_openfiles(uf, mf, sf, flag, errout)
 	register kvm_t *kd;
 
 	if ((kd = malloc(sizeof(*kd))) == NULL) {
-		(void)strncpy(errout, strerror(errno), _POSIX2_LINE_MAX - 1);
+		(void)strlcpy(errout, strerror(errno), _POSIX2_LINE_MAX);
 		return (0);
 	}
 	kd->program = 0;
@@ -867,7 +868,7 @@ kvm_read(kd, kva, buf, len)
 		 * device and let the active kernel do the address translation.
 		 */
 		cc = _kvm_pread(kd, kd->vmfd, buf, len, (off_t)kva);
-		if (cc < 0) {
+		if (cc == -1) {
 			_kvm_err(kd, 0, "invalid address (%lx)", kva);
 			return (-1);
 		} else if (cc < len)
@@ -890,7 +891,7 @@ kvm_read(kd, kva, buf, len)
 				cc = len;
 			cc = _kvm_pread(kd, kd->pmfd, cp, cc,
 			    (off_t)_kvm_pa2off(kd, pa));
-			if (cc < 0) {
+			if (cc == -1) {
 				_kvm_syserr(kd, 0, _PATH_MEM);
 				break;
 			}
@@ -925,7 +926,7 @@ kvm_write(kd, kva, buf, len)
 		 * Just like kvm_read, only we write.
 		 */
 		cc = _kvm_pwrite(kd, kd->vmfd, (void*)buf, (size_t)len, (off_t)kva);
-		if (cc < 0) {
+		if (cc == -1) {
 			_kvm_err(kd, 0, "invalid address (%lx)", kva);
 			return (-1);
 		} else if (cc < len)

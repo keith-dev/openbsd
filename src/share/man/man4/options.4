@@ -1,4 +1,4 @@
-.\"	$OpenBSD: options.4,v 1.130 2003/08/08 09:51:53 jmc Exp $
+.\"	$OpenBSD: options.4,v 1.138 2004/03/21 19:50:44 miod Exp $
 .\"	$NetBSD: options.4,v 1.21 1997/06/25 03:13:00 thorpej Exp $
 .\"
 .\" Copyright (c) 1998 Theo de Raadt
@@ -34,7 +34,7 @@
 .\" THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 .\"
 .\"
-.Dd August 17, 1997
+.Dd March 21, 2004
 .Dt OPTIONS 4
 .Os
 .Sh NAME
@@ -152,8 +152,9 @@ On those architectures that support it, this enables binary
 compatibility with
 .Em NetBSD
 applications built for the same architecture.
-See
-.Xr compat_freebsd 8 .
+.\" See
+.\" .Xr compat_netbsd 8 .
+This option is available on the alpha architecture.
 .It Cd option COMPAT_OSF1
 On those architectures that support it, this enables binary
 compatibility with
@@ -541,6 +542,9 @@ This option causes Extended Attributes to be started and enabled when each
 UFS filesystem is mounted.
 The attribute storage is expected to be (relative to mount point)
 .Pa /.attribute/{system|user}/<attrname>
+.It Cd option UFS_DIRHASH
+This option enables using an in memory hash table to speed lookups
+in large directories.
 .El
 .Ss Miscellaneous Options
 .Bl -ohang
@@ -560,7 +564,8 @@ and PCI configuration registers by user-processes
 This option is supported on the
 .Va alpha ,
 .Va i386 ,
-.Va macppc
+.Va macppc ,
+.Va pegasos
 and
 .Va sparc64
 architectures.
@@ -920,7 +925,59 @@ which affects processor cycle counter.
 Terser SCSI error messages.
 This omits the table for decoding ASC/ASCQ info, saving about 8KB.
 .It Cd option SCSIDEBUG
-Prints extra debugging info for the SCSI subsystem to the console.
+Enable printing of SCSI subsystem debugging info to the console.
+Each of
+.Em SCSIDEBUG_LEVEL ,
+.Em SCSIDEBUG_BUSES ,
+.Em SCSIDEBUG_TARGETS
+and
+.Em SCSIDEBUG_LUNS
+must have non-zero values for any debugging info to be printed.
+Only
+.Em SCSI_DEBUG_LEVEL
+has a default value that is non-zero.
+.It Cd option SCSIDEBUG_LEVEL=value
+Define which of the four levels of debugging info are printed.
+Each bit enables a level, and multiple levels are specified by setting multiple
+bits.
+.Bd -literal -offset indent
+0x0010	(SDEV_DB1) SCSI commands, errors, and data
+0x0020	(SDEV_DB2) routine flow
+0x0040	(SDEV_DB3) routine internals
+0x0080	(SDEV_DB4) miscellaneous addition debugging
+.Ed
+.Pp
+If
+.Em SCSIDEBUG_LEVEL
+is undefined, a value of 0x0030 (SDEV_DB1|SDEV_DB2) is used.
+.It Cd option SCSIDEBUG_BUSES=value
+Define which SCSI buses will print debug info.
+Each bit enables debugging info for the corresponding bus.
+e.g. a value of 0x1 enables debug info for bus 0.
+.It Cd option SCSIDEBUG_TARGETS=value
+Define which SCSI targets will print debug info.
+Each bit enables debugging info for the corresponding target.
+.It Cd option SCSIDEBUG_LUNS=value
+Define which SCSI luns will print debug info.
+Each bit enables debugging info for the corresponding lun.
+.It Cd option SCSIFORCELUN_BUSES=value
+Define which SCSI buses will do full lun scanning.
+.Em SCSIFORCELUN_TARGETS
+must also be set to a non-zero value for this option to take effect.
+Each bit enables a full lun scan for the corresponding SCSI bus.
+The lun scan normally terminates if identical INQUIRY data is seen for
+lun 0 and another lun, as this usually means the target cannot
+distinguish between different luns.
+But some devices (e.g. some external RAID devices) can legitimately
+supply identical INQUIRY data for several luns.
+.It Cd option SCSIFORCELUN_TARGETS=value
+Define which SCSI targets will do full lun scanning.
+.Em SCSIFORCELUN_BUSES
+must also be set to a non-zero value for this option to have any
+effect.
+Each bit enables a full lun scan for the corresponding target on the
+buses specified by
+.Em SCSIFORCELUN_BUSES.
 .El
 .Ss System V IPC Options
 .Bl -ohang
@@ -986,11 +1043,12 @@ Default value is 10.
 .It Cd option NMBCLUSTERS=value
 Size of kernel mbuf cluster map,
 .Em mb_map ,
-in MCLBYTES-sized logical pages.
-Defaults to 2048 on i386, to 1024 on powerpc and sparc64, and to 512 on
-other architectures (doubled when using
+in MCLBYTES-sized (default: 2048 bytes) logical pages.
+NMBCLUSTERS defaults to 2048 on hppa and i386, to 1024 on powerpc and sparc64,
+to 256 on vax, and to 512 on other architectures.
+If its value is not 2048, it is doubled if
 .Dq option GATEWAY
-except on i386).
+is used.
 See
 .Pa /usr/include/machine/param.h
 for exact default information.
@@ -1027,6 +1085,11 @@ panic.
 These options set the number of pages available for the buffer cache.
 Their default value is a machine dependent value, often calculated as
 between 5% and 10% of total available RAM.
+.It Cd option DUMMY_NOPS
+This option is supported on the i386 architecture.
+When enabled, it speeds up interrupt processing by removing delays
+while accessing the interrupt controller.
+Care should be taken when using this option.
 .It Cd option APM_NOPRINT
 This option is supported on the i386 architecture.
 When enabled, kernel messages regarding the status of the automatic power

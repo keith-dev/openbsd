@@ -1,8 +1,8 @@
-#	$OpenBSD: Makefile,v 1.6 2003/07/31 15:57:29 deraadt Exp $
+#	$OpenBSD: Makefile,v 1.12 2004/03/04 07:24:01 david Exp $
 
 .if ${MACHINE} == "sparc64" || ${MACHINE} == "sparc" || \
-    ${MACHINE} == "alpha" || ${MACHINE} == "macppc" || \
-    ${MACHINE} == "mvmeppc" || ${MACHINE} == "i386" || \
+    ${MACHINE} == "alpha" || \
+    ${MACHINE_ARCH} == "amd64" || ${MACHINE} == "i386" || \
     ${MACHINE} == "hppa"
 
 PROG=	noexec
@@ -14,6 +14,7 @@ REGRESS_TARGETS=	nxtext-mmap	nxtext-mprotect \
 		nxheap	nxheap-mmap	nxheap-mprotect \
 		nxmmap			nxmmap-mprotect \
 		nxstack	nxstack-mmap	nxstack-mprotect
+REGRESS_SKIP_TARGETS+=	nxtext-mmap
 .PHONY: ${REGRESS_TARGETS}
 
 nxtext-mmap: ${PROG}

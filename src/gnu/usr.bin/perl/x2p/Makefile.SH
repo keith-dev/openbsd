@@ -27,11 +27,11 @@ esac
 echo "Extracting x2p/Makefile (with variable substitutions)"
 rm -f Makefile
 cat >Makefile <<!GROK!THIS!
-# $RCSfile: Makefile.SH,v $$Revision: 1.8 $$Date: 2002/10/27 22:25:40 $
+# $RCSfile: Makefile.SH,v $$Revision: 1.9 $$Date: 2003/12/03 03:02:53 $
 #
 # $Log: Makefile.SH,v $
-# Revision 1.8  2002/10/27 22:25:40  millert
-# Resolve conflicts, remove old files, merge local changes
+# Revision 1.9  2003/12/03 03:02:53  millert
+# Resolve conflicts for perl 5.8.2, remove old files, and add OpenBSD-specific scaffolding
 #
 
 CC = $cc
@@ -42,7 +42,7 @@ LDFLAGS = $ldflags
 #mallocobj = $mallocobj
 shellflags = $shellflags
 
-libs = $libs
+libs = $perllibs
 
 $make_set_make
 # grrr
@@ -147,8 +147,9 @@ clean:
 	rm -f a2p$(EXE_EXT) psed *$(OBJ_EXT) $(plexe) $(plc) $(plm)
 
 realclean: clean
+	-rmdir .depending
 	rm -f core $(addedbyconf) all malloc.c
-	rm -f $(FIRSTMAKEFILE) $(FIRSTMAKEFILE).old
+	rm -f $(FIRSTMAKEFILE) $(FIRSTMAKEFILE).old makefile.old
 
 veryclean: realclean
 	rm -f *~ *.orig

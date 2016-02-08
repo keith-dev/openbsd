@@ -1,4 +1,4 @@
-/* $OpenBSD: user.c,v 1.52 2003/06/14 22:12:53 millert Exp $ */
+/* $OpenBSD: user.c,v 1.56 2004/02/26 21:18:18 millert Exp $ */
 /* $NetBSD: user.c,v 1.69 2003/04/14 17:40:07 agc Exp $ */
 
 /*
@@ -894,6 +894,20 @@ scantime(time_t *tp, char *s)
 	return 1;
 }
 
+/* compute the extra length '&' expansion consumes */
+static size_t
+expand_len(const char *p, const char *username)
+{
+	size_t alen;
+	size_t ulen;
+
+	ulen = strlen(username);
+	for (alen = 0; *p != '\0'; p++)
+		if (*p == '&')
+			alen += ulen - 1;
+	return alen;
+}
+
 /* add a user */
 static int
 adduser(char *login_name, user_t *up)
@@ -1043,9 +1057,8 @@ adduser(char *login_name, user_t *up)
 	    up->u_comment,
 	    home,
 	    up->u_shell);
-	if (strchr(up->u_comment, '&') != NULL)
-		cc += strlen(login_name);
-	if (cc >= sizeof(buf)) {
+	if (cc >= sizeof(buf) || cc < 0 ||
+	    cc + expand_len(up->u_comment, login_name) >= 1023) {
 		(void) close(ptmpfd);
 		pw_abort();
 		errx(EXIT_FAILURE, "can't add `%s', line too long", buf);
@@ -1098,24 +1111,19 @@ static int
 rm_user_from_groups(char *login_name)
 {
 	struct stat	st;
-	regmatch_t	matchv[10];
-	regex_t		r;
+	size_t		login_len;
 	FILE		*from;
 	FILE		*to;
-	char		line[LINE_MAX];
 	char		buf[LINE_MAX];
 	char		f[MaxFileNameLen];
+	char		*cp, *ep;
 	int		fd;
 	int		cc;
-	int		sc;
 
-	(void) snprintf(line, sizeof(line), "(:|,)(%s)(,|$)", login_name);
-	if (regcomp(&r, line, REG_EXTENDED|REG_NEWLINE) != 0) {
-		warn("can't compile regular expression `%s'", line);
-		return 0;
-	}
+	login_len = strlen(login_name);
 	if ((from = fopen(_PATH_GROUP, "r")) == NULL) {
-		warn("can't remove gid for `%s': can't open `%s'", login_name, _PATH_GROUP);
+		warn("can't remove gid for `%s': can't open `%s'",
+		    login_name, _PATH_GROUP);
 		return 0;
 	}
 	if (flock(fileno(from), LOCK_EX | LOCK_NB) < 0) {
@@ -1125,14 +1133,15 @@ rm_user_from_groups(char *login_name)
 	(void) snprintf(f, sizeof(f), "%s.XXXXXXXX", _PATH_GROUP);
 	if ((fd = mkstemp(f)) < 0) {
 		(void) fclose(from);
-		warn("can't create gid: mkstemp failed");
+		warn("can't remove gid for `%s': mkstemp failed", login_name);
 		return 0;
 	}
 	if ((to = fdopen(fd, "w")) == NULL) {
 		(void) fclose(from);
 		(void) close(fd);
 		(void) unlink(f);
-		warn("can't create gid: fdopen `%s' failed", f);
+		warn("can't remove gid for `%s': fdopen `%s' failed",
+		    login_name, f);
 		return 0;
 	}
 	while (fgets(buf, sizeof(buf), from) > 0) {
@@ -1144,37 +1153,50 @@ rm_user_from_groups(char *login_name)
 			    _PATH_GROUP, buf, cc);
 			continue;
 		}
-		if (regexec(&r, buf, 10, matchv, 0) == 0) {
-			if (buf[(int)matchv[1].rm_so] == ',')
-				matchv[2].rm_so = matchv[1].rm_so;
-			else if (matchv[2].rm_eo != matchv[3].rm_eo)
-				matchv[2].rm_eo = matchv[3].rm_eo;
-			cc -= (int) matchv[2].rm_eo;
-			sc = (int) matchv[2].rm_so;
-			if (fwrite(buf, sc, 1, to) != 1 ||
-			    fwrite(&buf[(int)matchv[2].rm_eo], cc, 1, to) != 1) {
-				(void) fclose(from);
-				(void) close(fd);
-				(void) unlink(f);
-				warn("can't create gid: short write to `%s'", f);
-				return 0;
+
+		/* Break out the group list. */
+		for (cp = buf, cc = 0; *cp != '\0' && cc < 3; cp++) {
+			if (*cp == ':')
+				cc++;
+		}
+		if (cc != 3) {
+			warnx("Malformed entry `%.*s'. Skipping",
+			    (int)strlen(buf) - 1, buf);
+			continue;
+		}
+		while ((cp = strstr(cp, login_name)) != NULL) {
+			if ((cp[-1] == ':' || cp[-1] == ',') &&
+			    (cp[login_len] == ',' || cp[login_len] == '\n')) {
+				ep = cp + login_len;
+				if (cp[login_len] == ',')
+					ep++;
+				else if (cp[-1] == ',')
+					cp--;
+				memmove(cp, ep, strlen(ep) + 1);
+			} else {
+				if ((cp = strchr(cp, ',')) == NULL)
+					break;
+				cp++;
 			}
-		} else if (fwrite(buf, cc, 1, to) != 1) {
+		}
+		if (fwrite(buf, strlen(buf), 1, to) != 1) {
 			(void) fclose(from);
-			(void) close(fd);
+			(void) fclose(to);
 			(void) unlink(f);
-			warn("can't create gid: short write to `%s'", f);
+			warn("can't remove gid for `%s': short write to `%s'",
+			    login_name, f);
 			return 0;
 		}
 	}
+	(void) fchmod(fileno(to), st.st_mode & 07777);
 	(void) fclose(from);
 	(void) fclose(to);
 	if (rename(f, _PATH_GROUP) < 0) {
 		(void) unlink(f);
-		warn("can't create gid: can't rename `%s' to `%s'", f, _PATH_GROUP);
+		warn("can't remove gid for `%s': can't rename `%s' to `%s'",
+		    login_name, f, _PATH_GROUP);
 		return 0;
 	}
-	(void) chmod(_PATH_GROUP, st.st_mode & 07777);
 	return 1;
 }
 
@@ -1223,11 +1245,12 @@ moduser(char *login_name, char *newlogin, user_t *up)
 	struct group	*grp;
 	const char	*homedir;
 	char		buf[LINE_MAX];
-	size_t		colonc, len, loginc;
+	size_t		colonc, loginc;
 	size_t		cc;
 	FILE		*master;
 	char		newdir[MaxFileNameLen];
-	char		*colon, *line;
+	char		*colon;
+	int		len;
 	int		masterfd;
 	int		ptmpfd;
 	int		rval;
@@ -1352,13 +1375,13 @@ moduser(char *login_name, char *newlogin, user_t *up)
 #endif
 	}
 	loginc = strlen(login_name);
-	while ((line = fgetln(master, &len)) != NULL) {
-		if ((colon = strchr(line, ':')) == NULL) {
-			warnx("Malformed entry `%s'. Skipping", line);
+	while (fgets(buf, sizeof(buf), master) != NULL) {
+		if ((colon = strchr(buf, ':')) == NULL) {
+			warnx("Malformed entry `%s'. Skipping", buf);
 			continue;
 		}
-		colonc = (size_t)(colon - line);
-		if (strncmp(login_name, line, loginc) == 0 && loginc == colonc) {
+		colonc = (size_t)(colon - buf);
+		if (strncmp(login_name, buf, loginc) == 0 && loginc == colonc) {
 			if (up != NULL) {
 				if ((len = snprintf(buf, sizeof(buf),
 				    "%s:%s:%d:%d:%s:%ld:%ld:%s:%s:%s\n",
@@ -1376,13 +1399,14 @@ moduser(char *login_name, char *newlogin, user_t *up)
 				    pwp->pw_gecos,
 				    pwp->pw_dir,
 				    pwp->pw_shell)) >= sizeof(buf) || len < 0 ||
-				    (strchr(up->u_comment, '&') != NULL &&
-				    len + strlen(newlogin) >= sizeof(buf))) {
+				    len + expand_len(pwp->pw_gecos, newlogin)
+				    >= 1023) {
 					(void) close(ptmpfd);
 					pw_abort();
-					errx(EXIT_FAILURE, "can't add `%s',
-					    line too long (%d bytes)", buf,
-					    len + strlen(newlogin));
+					errx(EXIT_FAILURE, "can't add `%s', "
+					    "line too long (%d bytes)", buf,
+					    len + expand_len(pwp->pw_gecos,
+					    newlogin));
 				}
 				if (write(ptmpfd, buf, len) != len) {
 					(void) close(ptmpfd);
@@ -1390,12 +1414,15 @@ moduser(char *login_name, char *newlogin, user_t *up)
 					err(EXIT_FAILURE, "can't add `%s'", buf);
 				}
 			}
-		} else if ((cc = write(ptmpfd, line, len)) != len) {
-			(void) close(masterfd);
-			(void) close(ptmpfd);
-			pw_abort();
-			err(EXIT_FAILURE, "short write to /etc/ptmp (%lld not %lld chars)",
-			    (long long)cc, (long long)len);
+		} else {
+			len = strlen(buf);
+			if ((cc = write(ptmpfd, buf, len)) != len) {
+				(void) close(masterfd);
+				(void) close(ptmpfd);
+				pw_abort();
+				err(EXIT_FAILURE, "short write to /etc/ptmp (%lld not %lld chars)",
+				    (long long)cc, (long long)len);
+			}
 		}
 	}
 	if (up != NULL) {

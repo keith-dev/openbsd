@@ -22,7 +22,7 @@
 .\" OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
 .\" SUCH DAMAGE.
 .\"
-.\"	$OpenBSD: style.9,v 1.33 2003/06/29 13:26:04 jmc Exp $
+.\"	$OpenBSD: style.9,v 1.37 2004/02/24 19:55:51 jmc Exp $
 .\"
 .Dd June 18, 2001
 .Dt STYLE 9
@@ -83,11 +83,11 @@ If it's a network program, put the network include files next.
 .Ed
 .Pp
 Then there's a blank line, followed by the
-.Pa /usr
-include files.
+.Pa /usr/include
+files.
 The
-.Pa /usr
-include files should be sorted!
+.Pa /usr/include
+files should be sorted!
 .Bd -literal -offset 0i
 #include <stdio.h>
 .Ed
@@ -243,7 +243,6 @@ typedef struct _bar {
 	int	level;
 } BAR;
 .Ed
-.Pp
 .Bd -literal -offset 0i
 /*
  * All major routines should have a comment briefly describing what
@@ -466,7 +465,7 @@ warning: variable `foo' might be clobbered by `longjmp' or `vfork'.
 .Pp
 If any warnings of this type occur you must apply the
 .Dq volatile
-specifier to the variable in question.
+type-qualifier to the variable in question.
 Failure to do so may result in improper code generation when optimization
 is enabled.
 Note that for pointers, the location of
@@ -612,14 +611,20 @@ braces, followed by options with operands, in alphabetical order,
 each in braces, followed by required arguments in the order they
 are specified, followed by optional arguments in the order they
 are specified.
+.Pp
 A bar
 .Pq Sq \&|
 separates either-or options/arguments,
 and multiple options/arguments which are specified together are
 placed in a single set of braces.
 .Pp
+If numbers are used as options, they should be placed first,
+as shown in the example below.
+Uppercase letters take precedence over lowercase.
+Note that the options list in manual pages should be purely alphabetical.
+That is, with no regard to whether an option takes an argument.
 .Bd -ragged -offset 0.3i
-"usage: f [-ade] [-b b_arg] [-m m_arg] req1 req2 [opt1 [opt2]]\en"
+"usage: f [-12aDde] [-b b_arg] [-m m_arg] req1 req2 [opt1 [opt2]]\en"
 "usage: f [-a | -b] [-c [-de] [-n number]]\en"
 .Ed
 .Pp
@@ -646,6 +651,11 @@ Whenever possible, code should be run through a code checker
 .Dq Li gcc -Wall -W -Wtraditional -Wpointer-arith -Wbad-function-cast ... ,
 .Xr lint 1
 or lclint from the ports tree) and produce minimal warnings.
+.Sh FILES
+.Bl -tag -width "/usr/share/misc/license.template " -compact
+.It Pa /usr/share/misc/license.template
+Example license for new code.
+.El
 .Sh SEE ALSO
 .Xr indent 1 ,
 .Xr err 3 ,

@@ -14,7 +14,7 @@
 #include <sendmail.h>
 #include <sys/time.h>
 
-SM_RCSID("@(#)$Sendmail: deliver.c,v 8.940.2.18 2003/03/28 17:34:39 ca Exp $")
+SM_RCSID("@(#)$Sendmail: deliver.c,v 8.940.2.20 2003/09/26 18:26:19 ca Exp $")
 
 #if HASSETUSERCONTEXT
 # include <login_cap.h>
@@ -3491,7 +3491,12 @@ do_transfer:
 		    (mci->mci_state == MCIS_MAIL ||
 		     mci->mci_state == MCIS_RCPT ||
 		     mci->mci_state == MCIS_DATA))
+		{
 			mci->mci_state = MCIS_OPEN;
+			SmtpPhase = mci->mci_phase = "idle";
+			sm_setproctitle(true, e, "%s: %s", CurHostName,
+					mci->mci_phase);
+		}
 	}
 
 	if (tobuf[0] != '\0')
@@ -4476,7 +4481,7 @@ putbody(mci, e, separator)
 		char *df = queuename(e, DATAFL_LETTER);
 
 		e->e_dfp = sm_io_open(SmFtStdio, SM_TIME_DEFAULT, df,
-				      SM_IO_RDONLY, NULL);
+				      SM_IO_RDONLY_B, NULL);
 		if (e->e_dfp == NULL)
 		{
 			char *msg = "!putbody: Cannot open %s for %s from %s";
@@ -5207,7 +5212,7 @@ mailfile(filename, mailer, ctladdr, sfflags, e)
 			char *df = queuename(e, DATAFL_LETTER);
 
 			e->e_dfp = sm_io_open(SmFtStdio, SM_TIME_DEFAULT, df,
-					      SM_IO_RDONLY, NULL);
+					      SM_IO_RDONLY_B, NULL);
 			if (e->e_dfp == NULL)
 			{
 				syserr("mailfile: Cannot open %s for %s from %s",

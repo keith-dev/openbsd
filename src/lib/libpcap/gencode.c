@@ -1,4 +1,4 @@
-/*	$OpenBSD: gencode.c,v 1.19 2003/05/14 08:50:37 canacar Exp $	*/
+/*	$OpenBSD: gencode.c,v 1.21 2004/01/27 06:58:03 tedu Exp $	*/
 
 /*
  * Copyright (c) 1990, 1991, 1992, 1993, 1994, 1995, 1996, 1997, 1998
@@ -20,10 +20,6 @@
  * WARRANTIES, INCLUDING, WITHOUT LIMITATION, THE IMPLIED WARRANTIES OF
  * MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE.
  */
-#ifndef lint
-static const char rcsid[] =
-    "@(#) $Header: /cvs/src/lib/libpcap/gencode.c,v 1.19 2003/05/14 08:50:37 canacar Exp $ (LBL)";
-#endif
 
 #include <sys/types.h>
 #include <sys/socket.h>
@@ -599,6 +595,11 @@ init_linktype(type)
 	case DLT_IEEE802:
 		off_linktype = 20;
 		off_nl = 22;
+		return;
+
+	case DLT_IEEE802_11:
+		off_linktype = 30; /* XXX variable */
+		off_nl = 32;
 		return;
 
 	case DLT_ATM_RFC1483:

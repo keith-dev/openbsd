@@ -1,4 +1,4 @@
-/*	$OpenBSD: mkioconf.c,v 1.22 2003/06/28 04:55:07 deraadt Exp $	*/
+/*	$OpenBSD: mkioconf.c,v 1.25 2004/01/04 18:30:05 deraadt Exp $	*/
 /*	$NetBSD: mkioconf.c,v 1.41 1996/11/11 14:18:49 mycroft Exp $	*/
 
 /*
@@ -199,7 +199,7 @@ addlocname(const char *name)
 
 	if (locnames == NULL || nlocnames+1 > maxlocnames) {
 		maxlocnames *= 4;
-		locnames = (char **)realloc(locnames, maxlocnames * sizeof(char *));
+		locnames = (char **)erealloc(locnames, maxlocnames * sizeof(char *));
 	}
 	for (i = 0; i < nlocnames; i++)
 		if (strcmp(name, locnames[i]) == 0)
@@ -217,7 +217,7 @@ addlocnami(short index)
 {
 	if (locnami == NULL || nlocnami+1 > maxlocnami) {
 		maxlocnami *= 4;
-		locnami = (short *)realloc(locnami, maxlocnami * sizeof(short));
+		locnami = (short *)erealloc(locnami, maxlocnami * sizeof(short));
 	}
 	locnami[nlocnami++] = index;
 }
@@ -334,7 +334,7 @@ short pv[%d] = {", parents.used) < 0)
 static int
 emitcfdata(FILE *fp)
 {
-	struct devi **p, *i, **par;
+	struct devi **p, *i;
 	int unit, v;
 	const char *vs, *state, *basename, *attachment;
 	struct nvlist *nv;
@@ -355,7 +355,6 @@ struct cfdata cfdata[] = {\n\
 		/* the description */
 		if (fprintf(fp, "/*%3d: %s at ", i->i_cfindex, i->i_name) < 0)
 			return (1);
-		par = i->i_parents;
 		for (v = 0; v < i->i_pvlen; v++)
 			if (fprintf(fp, "%s%s", v == 0 ? "" : "|",
 			    i->i_parents[v]->i_name) < 0)
@@ -478,5 +477,5 @@ emitpseudo(FILE *fp)
 		    d->d_name, d->d_umax) < 0)
 			return (1);
 	}
-	return (fputs("\t{ 0, 0 }\n};\n", fp) < 0);
+	return (fputs("\t{ NULL, 0 }\n};\n", fp) < 0);
 }

@@ -1,4 +1,4 @@
-/*	$OpenBSD: diff.c,v 1.42 2003/09/07 22:05:30 millert Exp $	*/
+/*	$OpenBSD: diff.c,v 1.45 2004/03/16 00:40:34 millert Exp $	*/
 
 /*
  * Copyright (c) 2003 Todd C. Miller <Todd.Miller@courtesan.com>
@@ -21,7 +21,7 @@
  */
 
 #ifndef lint
-static const char rcsid[] = "$OpenBSD: diff.c,v 1.42 2003/09/07 22:05:30 millert Exp $";
+static const char rcsid[] = "$OpenBSD: diff.c,v 1.45 2004/03/16 00:40:34 millert Exp $";
 #endif /* not lint */
 
 #include <sys/param.h>
@@ -40,14 +40,14 @@ static const char rcsid[] = "$OpenBSD: diff.c,v 1.42 2003/09/07 22:05:30 millert
 
 #include "diff.h"
 
-int	 aflag, bflag, dflag, iflag, lflag, Nflag, Pflag, rflag;
+int	 aflag, bflag, dflag, iflag, lflag, Nflag, Pflag, pflag, rflag;
 int	 sflag, tflag, Tflag, wflag;
 int	 format, context, status;
 char	*start, *ifdefname, *diffargs, *label;
 struct stat stb1, stb2;
 struct excludes *excludes_list;
 
-#define	OPTIONS	"0123456789abC:cdD:efhiL:lnNPqrS:sTtU:uwX:x:"
+#define	OPTIONS	"0123456789abC:cdD:efhiL:lnNPpqrS:sTtU:uwX:x:"
 static struct option longopts[] = {
 	{ "text",			no_argument,		0,	'a' },
 	{ "ignore-space-change",	no_argument,		0,	'b' },
@@ -62,6 +62,7 @@ static struct option longopts[] = {
 	{ "new-file",			no_argument,		0,	'N' },
 	{ "rcs",			no_argument,		0,	'n' },
 	{ "unidirectional-new-file",	no_argument,		0,	'P' },
+	{ "show-c-function",		no_argument,		0,	'p' },
 	{ "brief",			no_argument,		0,	'q' },
 	{ "recursive",			no_argument,		0,	'r' },
 	{ "report-identical-files",	no_argument,		0,	's' },
@@ -153,6 +154,9 @@ main(int argc, char **argv)
 			break;
 		case 'n':
 			format = D_NREVERSE;
+			break;
+		case 'p':
+			pflag = 1;
 			break;
 		case 'P':
 			Pflag = 1;
@@ -339,13 +343,19 @@ push_excludes(char *pattern)
 }
 
 void
+print_only(const char *path, size_t dirlen, const char *entry)
+{
+	if (dirlen > 1)
+		dirlen--;
+	printf("Only in %.*s: %s\n", (int)dirlen, path, entry);
+}
+
+void
 print_status(int val, char *path1, char *path2, char *entry)
 {
 	switch (val) {
 	case D_ONLY:
-		/* must strip off the trailing '/' */
-		printf("Only in %.*s: %s\n", (int)(strlen(path1) - 1),
-		    path1, entry);
+		print_only(path1, strlen(path1), entry);
 		break;
 	case D_COMMON:
 		printf("Common subdirectories: %s%s and %s%s\n",
@@ -375,6 +385,14 @@ print_status(int val, char *path1, char *path2, char *entry)
 		printf("File %s%s is a regular file while file %s%s is a directory\n",
 		    path1, entry ? entry : "", path2, entry ? entry : "");
 		break;
+	case D_SKIPPED1:
+		printf("File %s%s is not a regular file or directory and was skipped\n",
+		    path1, entry ? entry : "");
+		break;
+	case D_SKIPPED2:
+		printf("File %s%s is not a regular file or directory and was skipped\n",
+		    path2, entry ? entry : "");
+		break;
 	}
 }
 
@@ -382,11 +400,11 @@ __dead void
 usage(void)
 {
 	(void)fprintf(stderr,
-	    "usage: diff [-abdilqtTw] [-c | -e | -f | -n | -u] [-L label] file1 file2\n"
-	    "       diff [-abdilqtTw] [-L label] -C number file1 file2\n"
+	    "usage: diff [-abdilpqtTw] [-c | -e | -f | -n | -u] [-L label] file1 file2\n"
+	    "       diff [-abdilpqtTw] [-L label] -C number file1 file2\n"
 	    "       diff [-abdilqtw] -D string file1 file2\n"
-	    "       diff [-abdilqtTw] [-L label] -U number file1 file2\n"
-	    "       diff [-abdilNPqtTw] [-c | -e | -f | -n | -u ] [-L label] [-r] [-s]\n"
+	    "       diff [-abdilpqtTw] [-L label] -U number file1 file2\n"
+	    "       diff [-abdilNPpqtTw] [-c | -e | -f | -n | -u ] [-L label] [-r] [-s]\n"
 	    "            [-S name] [-X file] [-x pattern] dir1 dir2\n");
 
 	exit(2);

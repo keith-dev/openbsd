@@ -1,4 +1,4 @@
-#	$OpenBSD: install.md,v 1.47 2002/11/07 01:28:52 krw Exp $
+#	$OpenBSD: install.md,v 1.50 2003/10/12 13:18:37 krw Exp $
 #	$NetBSD: install.md,v 1.3.2.5 1996/08/26 15:45:28 gwr Exp $
 #
 #
@@ -48,13 +48,7 @@ md_set_term() {
 }
 
 md_installboot() {
-	local _rawdev _prefix
-
-	if [ -z "$1" ]; then
-		echo No disk device specified, you must run installboot manually.
-		return
-	fi
-	_rawdev=/dev/r${1}c
+	local _rawdev=/dev/r${1}c _prefix
 
 	# use extracted mdec if it exists (may be newer)
 	if [ -e /mnt/usr/mdec/boot ]; then
@@ -72,40 +66,31 @@ md_installboot() {
 	installboot -v /mnt/boot ${_prefix}/bootxx ${_rawdev}
 }
 
+# $1 is the disk to check
 md_checkfordisklabel() {
-	# $1 is the disk to check
-	local rval
+	local rval=0
 
-	disklabel $1 > /dev/null 2> /tmp/checkfordisklabel
-	if grep "no disk label" /tmp/checkfordisklabel; then
-		rval=1
-	elif grep "disk label corrupted" /tmp/checkfordisklabel; then
+	disklabel $1 >/dev/null 2>/tmp/checkfordisklabel
+
+	if grep "disk label corrupted" /tmp/checkfordisklabel; then
 		rval=2
-	else
-		rval=0
-	fi
+	fi >/dev/null 2>&1
 
 	rm -f /tmp/checkfordisklabel
 	return $rval
 }
 
-md_prep_disklabel()
-{
+md_prep_disklabel() {
 	local _disk=$1
 
 	md_checkfordisklabel $_disk
 	case $? in
-	0)	;;
-	1)	echo WARNING: Disk $_disk has no label. You will be creating a new one.
-		echo
-		;;
-	2)	echo WARNING: Label on disk $_disk is corrupted. You will be repairing.
-		echo
+	2)	echo "WARNING: Label on disk $_disk is corrupted. You will be repairing it.\n"
 		;;
 	esac
 
-	disklabel -W ${_disk}
-	disklabel -f /tmp/fstab.${_disk} -E ${_disk}
+	disklabel -W $_disk >/dev/null 2>&1
+	disklabel -f /tmp/fstab.$_disk -E $_disk
 }
 
 md_congrats() {

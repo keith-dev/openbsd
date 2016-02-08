@@ -1,4 +1,4 @@
-/*	$OpenBSD: config.h,v 1.8 2003/05/16 18:49:46 jsyn Exp $	*/
+/*	$OpenBSD: config.h,v 1.10 2004/02/08 19:18:15 deraadt Exp $	*/
 
 /* config.h.  NOT generated automatically. */
 
@@ -76,7 +76,7 @@
 /* Define if the closedir function returns void instead of int.  */
 /* #undef VOID_CLOSEDIR */
 
-/* Define if your kernal doesn't handle scripts starting with #! */
+/* Define if your kernel doesn't handle scripts starting with #! */
 /* #undef SHARPBANG */
 
 /* Define if dup2() preserves the close-on-exec flag (ultrix does this) */
@@ -235,13 +235,6 @@
 
 /* The number of bytes in a int.  */
 #define SIZEOF_INT 4
-
-/* The number of bytes in a long.  */
-#if defined(alpha)
-#define SIZEOF_LONG 8
-#else
-#define SIZEOF_LONG 4
-#endif
 
 /* Define if you have the _setjmp function.  */
 /* #undef HAVE__SETJMP */

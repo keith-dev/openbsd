@@ -117,6 +117,114 @@ static int res_hnok(const char *dn);
 
 char *option_as_string (unsigned int code, unsigned char *data, int len);
 
+int  routefd;
+
+struct interface_info *
+isours(u_int16_t index)
+{
+	struct interface_info *ip;
+
+	for(ip = interfaces; ip; ip = ip->next) {
+		if (index == ip->index)
+			return (ip);
+	}
+	return (NULL);
+}
+
+#define ROUNDUP(a) \
+        ((a) > 0 ? (1 + (((a) - 1) | (sizeof(long) - 1))) : sizeof(long))
+#define ADVANCE(x, n) (x += ROUNDUP((n)->sa_len))
+
+int
+findproto(char *cp, int n)
+{
+	struct sockaddr *sa;
+	int i;
+
+	if (n == 0)
+		return -1;
+	for (i = 1; i; i <<= 1) {
+		if (i & n) {
+			sa = (struct sockaddr *)cp;
+			switch (i) {
+			case RTA_IFA:
+			case RTA_DST:
+			case RTA_GATEWAY:
+			case RTA_NETMASK:
+				if (sa->sa_family == AF_INET)
+					return AF_INET;
+				if (sa->sa_family == AF_INET6)
+					return AF_INET6;
+				break;
+			case RTA_IFP:
+				break;
+			}
+			ADVANCE(cp, sa);
+		}
+	}
+	return (-1);
+}
+
+void
+routehandler(struct protocol *p)
+{
+	char msg[2048];
+	struct rt_msghdr *rtm;
+	struct if_msghdr *ifm;
+	struct ifa_msghdr *ifam;
+	struct if_announcemsghdr *ifan;
+	struct interface_info *ip;
+	ssize_t n;
+
+	n = read(routefd, &msg, sizeof msg);
+	rtm = (struct rt_msghdr *)msg;
+	if (n < sizeof(rtm->rtm_msglen) || n < rtm->rtm_msglen ||
+	    rtm->rtm_version != RTM_VERSION)
+		return;
+
+	switch (rtm->rtm_type) {
+	case RTM_NEWADDR:
+		ifam = (struct ifa_msghdr *)rtm;
+		if ((ip = isours(ifam->ifam_index)) == NULL)
+			break;
+		if (findproto((char *)(ifam + 1), ifam->ifam_addrs) != AF_INET)
+			break;
+		/* goto die; */
+		break;
+	case RTM_DELADDR:
+		ifam = (struct ifa_msghdr *)rtm;
+		if ((ip = isours(ifam->ifam_index)) == 0)
+			break;
+		if (findproto((char *)(ifam + 1), ifam->ifam_addrs) != AF_INET)
+			break;
+		goto die;
+		break;
+	case RTM_IFINFO:
+		ifm = (struct if_msghdr *)rtm;
+		if ((ip = isours(ifm->ifm_index)) == 0)
+			break;
+		if ((rtm->rtm_flags & RTF_UP) == 0)
+			goto die;
+		break;
+	case RTM_IFANNOUNCE:
+		ifan = (struct if_announcemsghdr *)rtm;
+		if (ifan->ifan_what == IFAN_DEPARTURE &&
+		    (ip = isours(ifan->ifan_index)) != NULL)
+			goto die;
+		break;
+	default:
+		break;
+	}
+	return;
+
+die:
+	script_init(ip, "FAIL", (struct string_list *)0);
+	if (ip->client->alias)
+		script_write_params(ip, "alias_", ip->client->alias);
+	script_go(ip);
+	exit(1);
+}
+
 int main (argc, argv)
 	int argc;
 	char **argv;
@@ -261,6 +369,10 @@ int main (argc, argv)
 			script_go(ip);
 		}
 	}
+
+	routefd = socket(PF_ROUTE, SOCK_RAW, 0);
+	if (routefd != -1)
+		add_protocol("AF_ROUTE", routefd, routehandler, interfaces);
 
 	/* At this point, all the interfaces that the script thinks
 	   are relevant should be running, so now we once again call
@@ -1923,14 +2035,15 @@ void script_init (ip, reason, medium)
 {
 	if (ip) {
 		ip->client->scriptEnvsize = 100;
-		ip->client->scriptEnv = malloc(ip->client->scriptEnvsize 
-	          * sizeof(char *));
+		if (ip->client->scriptEnv == NULL)
+			ip->client->scriptEnv =
+			    malloc(ip->client->scriptEnvsize * sizeof(char *));
 		if (ip->client->scriptEnv == NULL)
 			error ("script_init: no memory for environment initialization");
 		
 		ip->client->scriptEnv[0]=strdup(CLIENT_PATH);
 		if (ip->client->scriptEnv[0] == NULL)
-			error ("script_init:n no memory for environment initialization");
+			error ("script_init: no memory for environment initialization");
 
 		ip->client->scriptEnv[1]=NULL;
 
@@ -2149,11 +2262,18 @@ void script_set_env (client, prefix, name, value)
 	} else {
 		/* New variable.  Expand if necessary. */
 		if (i >= client->scriptEnvsize - 1) {
-			client->scriptEnvsize += 50;
-			client->scriptEnv = realloc(client->scriptEnv,
-		          client->scriptEnvsize);
-			if (client->scriptEnv == NULL)
+			char **newscriptEnv;
+			int newscriptEnvsize = client->scriptEnvsize + 50;
+			newscriptEnv = realloc(client->scriptEnv,
+		          newscriptEnvsize);
+			if (newscriptEnv == NULL) {
+				free(client->scriptEnv);
+				client->scriptEnv = NULL;
+				client->scriptEnvsize = 0;
 				error("script_set_env: no memory for variable");
+			}
+			client->scriptEnv = newscriptEnv;
+			client->scriptEnvsize = newscriptEnvsize;
 		}
 		/* need to set the NULL pointer at end of array beyond
 		   the new slot. */

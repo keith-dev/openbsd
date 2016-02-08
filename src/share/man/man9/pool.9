@@ -1,4 +1,4 @@
-.\"	$OpenBSD: pool.9,v 1.25 2003/08/29 19:46:29 tedu Exp $
+.\"	$OpenBSD: pool.9,v 1.28 2004/01/20 18:37:37 tedu Exp $
 .\"	$NetBSD: pool.9,v 1.18 2001/06/21 11:59:01 wiz Exp $
 .\"
 .\" Copyright (c) 1997, 1998 The NetBSD Foundation, Inc.
@@ -45,7 +45,13 @@
 .Nm pool_put ,
 .Nm pool_prime ,
 .Nm pool_sethiwat ,
-.Nm pool_setlowat
+.Nm pool_setlowat ,
+.Nm pool_cache_init ,
+.Nm pool_cache_destroy ,
+.Nm pool_cache_get ,
+.Nm pool_cache_put ,
+.Nm pool_cache_destruct_object ,
+.Nm pool_cache_invalidate
 .Nd resource-pool manager
 .Sh SYNOPSIS
 .Fd #include <sys/types.h>
@@ -57,7 +63,7 @@
 .Fa "u_int align"
 .Fa "u_int align_offset"
 .Fa "int flags"
-.Fa "char *wmesg"
+.Fa "const char *wmesg"
 .Fa "struct pool_allocator *palloc"
 .Fc
 .Ft void
@@ -75,7 +81,7 @@
 .Ft void
 .Fn pool_put "struct pool *pp" "void *item"
 .Ft int
-.Fn pool_prime "struct pool *pp" "int nitems" "caddr_t storage"
+.Fn pool_prime "struct pool *pp" "int nitems"
 .Ft void
 .Fn pool_sethiwat "struct pool *pp" "int n"
 .Ft void
@@ -83,10 +89,28 @@
 .Ft int
 .Fo pool_sethardlimit
 .Fa "struct pool *pp"
-.Fa "int n"
+.Fa "unsigned n"
 .Fa "const char *warnmess"
 .Fa "int ratecap"
 .Fc
+.Ft void
+.Fo pool_cache_init
+.Fa "struct pool_cache *pc"
+.Fa "struct pool *pp"
+.Fa "int (*ctor)(void *, void *, int)"
+.Fa "void (*dtor)(void *, void *)"
+.Fa "void *arg"
+.Fc
+.Ft void
+.Fn pool_cache_destroy "struct pool_cache *pc"
+.Ft void *
+.Fn pool_cache_get "struct pool_cache *pc" "int flags"
+.Ft void
+.Fn pool_cache_put "struct pool_cache *pc" "void *object"
+.Ft void
+.Fn pool_cache_destruct_object "struct pool_cache *pc" "void *object"
+.Ft void
+.Fn pool_cache_invalidate "struct pool_cache *pc"
 .Sh DESCRIPTION
 These utility routines provide management of pools of fixed-sized
 areas of memory.
@@ -110,7 +134,6 @@ The function
 .Fn pool_init
 initializes a resource pool.
 The arguments are:
-.Pp
 .Bl -tag -offset indent -width "align_offset"
 .It Fa pool
 Specifies the pool storage to be initialized.
@@ -245,14 +268,9 @@ A pointer to a pool item previously obtained by
 .Ss PRIMING A POOL
 .Fn pool_prime
 adds items to the pool.
-Storage space for the items is either allocated by using the page allocation
+Storage space for the items is allocated by using the page allocation
 routine specified to
-.Fn pool_init ,
-or provided to
-.Fn pool_prime
-by the caller through the
-.Fa storage
-parameter.
+.Fn pool_init .
 .Pp
 .Fn pool_prime
 .Bl -tag -offset indent -width "nitems"
@@ -260,8 +278,6 @@ parameter.
 The handle identifying the pool resource instance.
 .It Fa nitems
 The number of items to add to the pool.
-.It Fa storage
-Optional pre-allocated storage.
 .El
 .Pp
 This function may return
@@ -334,6 +350,42 @@ The pool resource code uses a per-pool lock to protect its internal state.
 If any pool functions are called in an interrupt context,
 the caller must block all interrupts that might cause the
 code to be reentered.
+.Ss POOL CACHES
+Another set of functions are available as extensions to the pool manager.
+The pool cache functions automatically call constructors and destructors
+when objects are allocated from the pool or returned to it.
+They have similar semantics as the other pool functions.
+The
+.Fa pp
+argument to
+.Fn pool_cache_init
+must already be initialized.
+.Pp
+Objects are not immediately deconstructed when put into the pool cache.
+Instead, they are maintained for future allocations.
+When the system determines that memory needs to be reclaimed, then the
+deconstructor is called on each free object and it is placed back into the
+pool.
+The
+.Fa ctor
+and
+.Fa dtor
+functions are passed
+.Fa arg
+and a pointer to the object, in that order.
+The
+.Fa ctor
+is also passed the same
+.Fa flags
+that are passed to
+.Fn pool_cache_get .
+The
+.Fn pool_cache_destruct_object
+function deconstructs and puts an object back into the pool immediately.
+.Fn pool_cache_invalidate
+deconstructs all cached objects and releases their memory.
+.Pp
+Pool caches are also commonly referred to as a slab allocator.
 .Ss DIAGNOSTICS
 Pool usage logs can be enabled by defining the compile-time option
 .Dv POOL_DIAGNOSTIC .

@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip6_output.c,v 1.76 2003/08/15 20:32:20 tedu Exp $	*/
+/*	$OpenBSD: ip6_output.c,v 1.82 2004/02/04 08:47:41 itojun Exp $	*/
 /*	$KAME: ip6_output.c,v 1.172 2001/03/25 09:55:56 itojun Exp $	*/
 
 /*
@@ -86,12 +86,14 @@
 #include <netinet/icmp6.h>
 #include <netinet6/ip6_var.h>
 #include <netinet6/nd6.h>
+#include <netinet6/ip6protosw.h>
 
 #if NPF > 0
 #include <net/pfvar.h>
 #endif
 
 #ifdef IPSEC
+#include <netinet/ip_ipsp.h>
 #include <netinet/ip_ah.h>
 #include <netinet/ip_esp.h>
 #include <netinet/udp.h>
@@ -123,7 +125,7 @@ static int ip6_insertfraghdr(struct mbuf *, struct mbuf *, int,
 static int ip6_insert_jumboopt(struct ip6_exthdrs *, u_int32_t);
 static int ip6_splithdr(struct mbuf *, struct ip6_exthdrs *);
 static int ip6_getpmtu(struct route_in6 *, struct route_in6 *,
-	struct ifnet *, struct in6_addr *, u_long *);
+	struct ifnet *, struct in6_addr *, u_long *, int *);
 
 /*
  * IP6 output. The packet in mbuf chain m contains a skeletal IP6
@@ -154,6 +156,7 @@ ip6_output(m0, opt, ro, flags, im6o, ifpp)
 	int error = 0;
 	struct in6_ifaddr *ia;
 	u_long mtu;
+	int alwaysfrag, dontfrag;
 	u_int32_t optlen = 0, plen = 0, unfragpartlen = 0;
 	struct ip6_exthdrs exthdrs;
 	struct in6_addr finaldst;
@@ -551,10 +554,10 @@ ip6_output(m0, opt, ro, flags, im6o, ifpp)
 		 * (this may happen when we are sending a packet to one of
 		 *  our own addresses.)
 		 */
-		if (opt && opt->ip6po_pktinfo
-		 && opt->ip6po_pktinfo->ipi6_ifindex) {
-			if (!(ifp->if_flags & IFF_LOOPBACK)
-			 && ifp->if_index != opt->ip6po_pktinfo->ipi6_ifindex) {
+		if (opt && opt->ip6po_pktinfo &&
+		    opt->ip6po_pktinfo->ipi6_ifindex) {
+			if (!(ifp->if_flags & IFF_LOOPBACK) &&
+			    ifp->if_index != opt->ip6po_pktinfo->ipi6_ifindex) {
 				ip6stat.ip6s_noroute++;
 				in6_ifstat_inc(ifp, ifs6_out_discard);
 				error = EHOSTUNREACH;
@@ -699,7 +702,8 @@ ip6_output(m0, opt, ro, flags, im6o, ifpp)
 		*ifpp = ifp;
 
 	/* Determine path MTU. */
-	if ((error = ip6_getpmtu(ro_pmtu, ro, ifp, &finaldst, &mtu)) != 0)
+	if ((error = ip6_getpmtu(ro_pmtu, ro, ifp, &finaldst, &mtu,
+	    &alwaysfrag)) != 0)
 		goto bad;
 
 	/*
@@ -797,28 +801,84 @@ ip6_output(m0, opt, ro, flags, im6o, ifpp)
 	/*
 	 * Send the packet to the outgoing interface.
 	 * If necessary, do IPv6 fragmentation before sending.
+	 *
+	 * the logic here is rather complex:
+	 * 1: normal case (dontfrag == 0, alwaysfrag == 0)
+	 * 1-a: send as is if tlen <= path mtu
+	 * 1-b: fragment if tlen > path mtu
+	 *
+	 * 2: if user asks us not to fragment (dontfrag == 1)
+	 * 2-a: send as is if tlen <= interface mtu
+	 * 2-b: error if tlen > interface mtu
+	 *
+	 * 3: if we always need to attach fragment header (alwaysfrag == 1)
+	 *      always fragment
+	 *
+	 * 4: if dontfrag == 1 && alwaysfrag == 1
+	 *      error, as we cannot handle this conflicting request
 	 */
 	tlen = m->m_pkthdr.len;
-	if (tlen <= mtu) {
+
+	dontfrag = 0;
+	if (dontfrag && alwaysfrag) {	/* case 4 */
+		/* conflicting request - can't transmit */
+		error = EMSGSIZE;
+		goto bad;
+	}
+	if (dontfrag && tlen > IN6_LINKMTU(ifp)) {	/* case 2-b */
+		/*
+		 * Even if the DONTFRAG option is specified, we cannot send the
+		 * packet when the data length is larger than the MTU of the
+		 * outgoing interface.
+		 * Notify the error by sending IPV6_PATHMTU ancillary data as
+		 * well as returning an error code (the latter is not described
+		 * in the API spec.)
+		 */
+#if 0
+		u_int32_t mtu32;
+		struct ip6ctlparam ip6cp;
+
+		mtu32 = (u_int32_t)mtu;
+		bzero(&ip6cp, sizeof(ip6cp));
+		ip6cp.ip6c_cmdarg = (void *)&mtu32;
+		pfctlinput2(PRC_MSGSIZE, (struct sockaddr *)&ro_pmtu->ro_dst,
+		    (void *)&ip6cp);
+#endif
+
+		error = EMSGSIZE;
+		goto bad;
+	}
+
+	/*
+	 * transmit packet without fragmentation
+	 */
+	if (dontfrag || (!alwaysfrag && tlen <= mtu)) {	/* case 1-a and 2-a */
 		error = nd6_output(ifp, origifp, m, dst, ro->ro_rt);
 		goto done;
-	} else if (mtu < IPV6_MMTU) {
-		/*
-		 * note that path MTU is never less than IPV6_MMTU
-		 * (see icmp6_input).
-		 */
+	}
+
+	/*
+	 * try to fragment the packet.  case 1-b and 3
+	 */
+	if (mtu < IPV6_MMTU) {
+		/* path MTU cannot be less than IPV6_MMTU */
 		error = EMSGSIZE;
 		in6_ifstat_inc(ifp, ifs6_out_fragfail);
 		goto bad;
-	} else if (ip6->ip6_plen == 0) { /* jumbo payload cannot be fragmented */
+	} else if (ip6->ip6_plen == 0) {
+		/* jumbo payload cannot be fragmented */
 		error = EMSGSIZE;
 		in6_ifstat_inc(ifp, ifs6_out_fragfail);
 		goto bad;
 	} else {
 		struct mbuf **mnext, *m_frgpart;
 		struct ip6_frag *ip6f;
-		u_int32_t id = htonl(ip6_id++);
+		u_int32_t id = htonl(ip6_randomid());
 		u_char nextproto;
+#if 0
+		struct ip6ctlparam ip6cp;
+		u_int32_t mtu32;
+#endif
 
 		/*
 		 * Too large for the destination or interface;
@@ -828,6 +888,16 @@ ip6_output(m0, opt, ro, flags, im6o, ifpp)
 		hlen = unfragpartlen;
 		if (mtu > IPV6_MAXPACKET)
 			mtu = IPV6_MAXPACKET;
+
+#if 0
+		/* Notify a proper path MTU to applications. */
+		mtu32 = (u_int32_t)mtu;
+		bzero(&ip6cp, sizeof(ip6cp));
+		ip6cp.ip6c_cmdarg = (void *)&mtu32;
+		pfctlinput2(PRC_MSGSIZE, (struct sockaddr *)&ro_pmtu->ro_dst,
+		    (void *)&ip6cp);
+#endif
+
 		len = (mtu - hlen - sizeof(struct ip6_frag)) & ~7;
 		if (len < 8) {
 			error = EMSGSIZE;
@@ -862,12 +932,15 @@ ip6_output(m0, opt, ro, flags, im6o, ifpp)
 		 */
 		m0 = m;
 		for (off = hlen; off < tlen; off += len) {
+			struct mbuf *mlast;
+
 			MGETHDR(m, M_DONTWAIT, MT_HEADER);
 			if (!m) {
 				error = ENOBUFS;
 				ip6stat.ip6s_odropped++;
 				goto sendorfree;
 			}
+			m->m_pkthdr.rcvif = NULL;
 			m->m_flags = m0->m_flags & M_COPYFLAGS;
 			*mnext = m;
 			mnext = &m->m_nextpkt;
@@ -880,19 +953,21 @@ ip6_output(m0, opt, ro, flags, im6o, ifpp)
 				ip6stat.ip6s_odropped++;
 				goto sendorfree;
 			}
-			ip6f->ip6f_offlg = htons((u_short)((off - hlen) & ~7));
+			ip6f->ip6f_offlg = htons((u_int16_t)((off - hlen) & ~7));
 			if (off + len >= tlen)
 				len = tlen - off;
 			else
 				ip6f->ip6f_offlg |= IP6F_MORE_FRAG;
-			mhip6->ip6_plen = htons((u_short)(len + hlen +
+			mhip6->ip6_plen = htons((u_int16_t)(len + hlen +
 			    sizeof(*ip6f) - sizeof(struct ip6_hdr)));
 			if ((m_frgpart = m_copy(m0, off, len)) == 0) {
 				error = ENOBUFS;
 				ip6stat.ip6s_odropped++;
 				goto sendorfree;
 			}
-			m_cat(m, m_frgpart);
+			for (mlast = m; mlast->m_next; mlast = mlast->m_next)
+				;
+			mlast->m_next = m_frgpart;
 			m->m_pkthdr.len = len + hlen + sizeof(*ip6f);
 			m->m_pkthdr.rcvif = (struct ifnet *)0;
 			ip6f->ip6f_reserved = 0;
@@ -1118,13 +1193,15 @@ ip6_insertfraghdr(m0, m, hlen, frghdrp)
 }
 
 static int
-ip6_getpmtu(ro_pmtu, ro, ifp, dst, mtup)
+ip6_getpmtu(ro_pmtu, ro, ifp, dst, mtup, alwaysfragp)
 	struct route_in6 *ro_pmtu, *ro;
 	struct ifnet *ifp;
 	struct in6_addr *dst;
 	u_long *mtup;
+	int *alwaysfragp;
 {
 	u_int32_t mtu = 0;
+	int alwaysfrag = 0;
 	int error = 0;
 
 	if (ro_pmtu != ro) {
@@ -1135,7 +1212,7 @@ ip6_getpmtu(ro_pmtu, ro, ifp, dst, mtup)
 		    ((ro_pmtu->ro_rt->rt_flags & RTF_UP) == 0 ||
 		     !IN6_ARE_ADDR_EQUAL(&sa6_dst->sin6_addr, dst))) {
 			RTFREE(ro_pmtu->ro_rt);
-			ro_pmtu->ro_rt = (struct rtentry *)0;
+			ro_pmtu->ro_rt = (struct rtentry *)NULL;
 		}
 		if (ro_pmtu->ro_rt == 0) {
 			bzero(sa6_dst, sizeof(*sa6_dst));
@@ -1155,7 +1232,18 @@ ip6_getpmtu(ro_pmtu, ro, ifp, dst, mtup)
 		mtu = ro_pmtu->ro_rt->rt_rmx.rmx_mtu;
 		if (mtu == 0)
 			mtu = ifmtu;
-		else if (mtu > ifmtu) {
+		else if (mtu < IPV6_MMTU) {
+			/*
+			 * RFC2460 section 5, last paragraph:
+			 * if we record ICMPv6 too big message with
+			 * mtu < IPV6_MMTU, transmit packets sized IPV6_MMTU
+			 * or smaller, with fragment header attached.
+			 * (fragment header is needed regardless from the
+			 * packet size, for translators to identify packets)
+			 */
+			alwaysfrag = 1;
+			mtu = IPV6_MMTU;
+		} else if (mtu > ifmtu) {
 			/*
 			 * The MTU on the route is larger than the MTU on
 			 * the interface!  This shouldn't happen, unless the
@@ -1163,9 +1251,6 @@ ip6_getpmtu(ro_pmtu, ro, ifp, dst, mtup)
 			 * interface was brought up.  Change the MTU in the
 			 * route to match the interface MTU (as long as the
 			 * field isn't locked).
-			 *
-			 * if MTU on the route is 0, we need to fix the MTU.
-			 * this case happens with path MTU discovery timeouts.
 			 */
 			mtu = ifmtu;
 			if (!(ro_pmtu->ro_rt->rt_rmx.rmx_locks & RTV_MTU))
@@ -1177,6 +1262,8 @@ ip6_getpmtu(ro_pmtu, ro, ifp, dst, mtup)
 		error = EHOSTUNREACH; /* XXX */
 
 	*mtup = mtu;
+	if (alwaysfragp)
+		*alwaysfragp = alwaysfrag;
 	return (error);
 }
 
@@ -1766,7 +1853,8 @@ ip6_setmoptions(optname, im6op, m)
 			break;
 		}
 		bcopy(mtod(m, u_int *), &ifindex, sizeof(ifindex));
-		if (ifindex < 0 || if_index < ifindex) {
+		if (ifindex < 0 || if_indexlim <= ifindex ||
+		    !ifindex2ifnet[ifindex]) {
 			error = ENXIO;	/* XXX EINVAL? */
 			break;
 		}
@@ -1844,8 +1932,9 @@ ip6_setmoptions(optname, im6op, m)
 		/*
 		 * If the interface is specified, validate it.
 		 */
-		if (mreq->ipv6mr_interface < 0
-		 || if_index < mreq->ipv6mr_interface) {
+		if (mreq->ipv6mr_interface < 0 ||
+		    if_indexlim <= mreq->ipv6mr_interface ||
+		    !ifindex2ifnet[mreq->ipv6mr_interface]) {
 			error = ENXIO;	/* XXX EINVAL? */
 			break;
 		}
@@ -1895,7 +1984,7 @@ ip6_setmoptions(optname, im6op, m)
 		 */
 		if (IN6_IS_ADDR_MC_LINKLOCAL(&mreq->ipv6mr_multiaddr)) {
 			mreq->ipv6mr_multiaddr.s6_addr16[1] =
-			    htons(mreq->ipv6mr_interface);
+			    htons(ifp->if_index);
 		}
 		/*
 		 * See if the membership already exists.
@@ -1944,8 +2033,9 @@ ip6_setmoptions(optname, im6op, m)
 		 * If an interface address was specified, get a pointer
 		 * to its ifnet structure.
 		 */
-		if (mreq->ipv6mr_interface < 0
-		 || if_index < mreq->ipv6mr_interface) {
+		if (mreq->ipv6mr_interface < 0 ||
+		    if_indexlim <= mreq->ipv6mr_interface ||
+		    !ifindex2ifnet[mreq->ipv6mr_interface]) {
 			error = ENXIO;	/* XXX EINVAL? */
 			break;
 		}
@@ -2110,8 +2200,12 @@ ip6_setpktoptions(control, opt, priv)
 				opt->ip6po_pktinfo->ipi6_addr.s6_addr16[1] =
 					htons(opt->ip6po_pktinfo->ipi6_ifindex);
 
-			if (opt->ip6po_pktinfo->ipi6_ifindex > if_index ||
+			if (opt->ip6po_pktinfo->ipi6_ifindex >= if_indexlim ||
 			    opt->ip6po_pktinfo->ipi6_ifindex < 0) {
+				return (ENXIO);
+			}
+			if (opt->ip6po_pktinfo->ipi6_ifindex > 0 &&
+			    !ifindex2ifnet[opt->ip6po_pktinfo->ipi6_ifindex]) {
 				return (ENXIO);
 			}
 

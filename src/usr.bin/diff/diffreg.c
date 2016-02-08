@@ -1,4 +1,4 @@
-/*	$OpenBSD: diffreg.c,v 1.50 2003/09/07 07:53:01 tedu Exp $	*/
+/*	$OpenBSD: diffreg.c,v 1.55 2004/01/07 17:18:32 otto Exp $	*/
 
 /*
  * Copyright (C) Caldera International Inc.  2001-2002.
@@ -65,7 +65,7 @@
  */
 
 #ifndef lint
-static const char rcsid[] = "$OpenBSD: diffreg.c,v 1.50 2003/09/07 07:53:01 tedu Exp $";
+static const char rcsid[] = "$OpenBSD: diffreg.c,v 1.55 2004/01/07 17:18:32 otto Exp $";
 #endif /* not lint */
 
 #include <sys/param.h>
@@ -195,6 +195,11 @@ static struct context_vec *context_vec_start;
 static struct context_vec *context_vec_end;
 static struct context_vec *context_vec_ptr;
 
+#define FUNCTION_CONTEXT_SIZE	41
+static char lastbuf[FUNCTION_CONTEXT_SIZE];
+static int lastline;
+static int lastmatchline;
+
 static FILE *opentemp(const char *);
 static void output(char *, FILE *, char *, FILE *);
 static void check(char *, FILE *, char *, FILE *);
@@ -220,6 +225,7 @@ static int  readhash(FILE *);
 static int  files_differ(FILE *, FILE *, int);
 static __inline int min(int, int);
 static __inline int max(int, int);
+static char *match_function(const long *, int, FILE *);
 
 
 /*
@@ -292,6 +298,8 @@ diffreg(char *ofile1, char *ofile2, int flags)
 	pid_t pid = -1;
 
 	anychange = 0;
+	lastline = 0;
+	lastmatchline = 0;
 	context_vec_ptr = context_vec_start - 1;
 	chrtran = (iflag ? cup2low : clow2low);
 	if (S_ISDIR(stb1.st_mode) != S_ISDIR(stb2.st_mode))
@@ -352,17 +360,11 @@ diffreg(char *ofile1, char *ofile2, int flags)
 		goto closem;
 	}
 
-	/*
-	 * Files certainly differ at this point; set status accordingly
-	 */
-	status |= 1;
-	rval = D_DIFFER;
 	if (!asciifile(f1) || !asciifile(f2)) {
 		rval = D_BINARY;
+		status |= 1;
 		goto closem;
 	}
-	if (format == D_BRIEF)
-		goto closem;
 	if (lflag) {
 		/* redirect stdout to pr */
 		int pfd[2];
@@ -447,6 +449,11 @@ diffreg(char *ofile1, char *ofile2, int flags)
 		waitpid(pid, &wstatus, 0);
 	}
 closem:
+	if (anychange) {
+		status |= 1;
+		if (rval == D_SAME)
+			rval = D_DIFFER;
+	}
 	if (f1 != NULL)
 		fclose(f1);
 	if (f2 != NULL)
@@ -1023,6 +1030,8 @@ restart:
 		anychange = 1;
 	switch (format) {
 
+	case D_BRIEF:
+		return;
 	case D_NORMAL:
 	case D_EDIT:
 		range(a, b, ",");
@@ -1119,8 +1128,12 @@ fetch(long *f, int a, int b, FILE *lb, int ch, int oldfile)
 		col = 0;
 		for (j = 0, lastc = '\0'; j < nc; j++, lastc = c) {
 			if ((c = getc(lb)) == EOF) {
-				puts("\n\\ No newline at end of file");
-				return (0);;
+				if (format == D_EDIT || format == D_REVERSE ||
+				    format == D_NREVERSE)
+					warnx("No newline at end of file");
+				else
+					puts("\n\\ No newline at end of file");
+				return (0);
 			}
 			if (c == '\t' && tflag) {
 				do {
@@ -1209,7 +1222,7 @@ readhash(FILE *f)
 	return (sum == 0 ? 1 : sum);
 }
 
-int
+static int
 asciifile(FILE *f)
 {
 	char buf[BUFSIZ];
@@ -1236,6 +1249,37 @@ static __inline int max(int a, int b)
 	return (a > b ? a : b);
 }
 
+static char *
+match_function(const long *f, int pos, FILE *file)
+{
+	char buf[FUNCTION_CONTEXT_SIZE];
+	size_t nc;
+	int last = lastline;
+	char *p;
+
+	lastline = pos;
+	while (pos > last) {
+		fseek(file, f[pos - 1], SEEK_SET);
+		nc = f[pos] - f[pos - 1];
+		if (nc >= sizeof(buf))
+			nc = sizeof(buf) - 1;
+		nc = fread(buf, 1, nc, file);
+		if (nc > 0) {
+			buf[nc] = '\0';
+			p = strchr(buf, '\n');
+			if (p != NULL)
+				*p = '\0';
+			if (isalpha(buf[0]) || buf[0] == '_' || buf[0] == '$') {
+				strlcpy(lastbuf, buf, sizeof lastbuf);
+				lastmatchline = pos;
+				return lastbuf;
+			}
+		}
+		pos--;
+	}
+	return lastmatchline > 0 ? lastbuf : NULL;
+}
+
 /* dump accumulated "context" diff changes */
 static void
 dump_context_vec(FILE *f1, FILE *f2)
@@ -1243,7 +1287,7 @@ dump_context_vec(FILE *f1, FILE *f2)
 	struct context_vec *cvp = context_vec_start;
 	int lowa, upb, lowc, upd, do_output;
 	int a, b, c, d;
-	char ch;
+	char ch, *f;
 
 	if (context_vec_start > context_vec_ptr)
 		return;
@@ -1254,7 +1298,15 @@ dump_context_vec(FILE *f1, FILE *f2)
 	lowc = max(1, cvp->c - context);
 	upd = min(len[1], context_vec_ptr->d + context);
 
-	printf("***************\n*** ");
+	printf("***************");
+	if (pflag) {
+		f = match_function(ixold, lowa-1, f1);
+		if (f != NULL) {
+			putchar(' ');
+			fputs(f, stdout);
+		}
+	}
+	printf("\n*** ");
 	range(lowa, upb, ",");
 	printf(" ****\n");
 
@@ -1340,7 +1392,7 @@ dump_unified_vec(FILE *f1, FILE *f2)
 	struct context_vec *cvp = context_vec_start;
 	int lowa, upb, lowc, upd;
 	int a, b, c, d;
-	char ch;
+	char ch, *f;
 
 	if (context_vec_start > context_vec_ptr)
 		return;
@@ -1355,7 +1407,15 @@ dump_unified_vec(FILE *f1, FILE *f2)
 	uni_range(lowa, upb);
 	fputs(" +", stdout);
 	uni_range(lowc, upd);
-	fputs(" @@\n", stdout);
+	fputs(" @@", stdout);
+	if (pflag) {
+		f = match_function(ixold, lowa-1, f1);
+		if (f != NULL) {
+			putchar(' ');
+			fputs(f, stdout);
+		}
+	}
+	putchar('\n');
 
 	/*
 	 * Output changes in "unified" diff format--the old and new lines

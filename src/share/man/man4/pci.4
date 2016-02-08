@@ -1,4 +1,4 @@
-.\"	$OpenBSD: pci.4,v 1.78 2003/08/19 03:44:44 mickey Exp $
+.\"	$OpenBSD: pci.4,v 1.87 2004/03/18 20:41:11 grange Exp $
 .\"	$NetBSD: pci.4,v 1.29 2000/04/01 00:32:23 tsarna Exp $
 .\"
 .\" Copyright (c) 2000 Theo de Raadt.  All rights reserved.
@@ -45,11 +45,16 @@
 .Cd "pci* at lca?"
 .Cd "pci* at tsp?"
 .Pp
-.Cd "# i386"
+.Cd "# amd64, i386"
 .Cd "pci* at mainbus0 bus ?"
-.Cd "pci* at pchb? bus ?"
 .Pp
-.Cd "# macppc"
+.Cd "# cats"
+.Cd "pci0 at footbridge?"
+.Pp
+.Cd "# hppa"
+.Cd "pci* at dino?"
+.Pp
+.Cd "# macppc, pegasos"
 .Cd "pci* at mpcpcibr?"
 .Pp
 .Cd "# sparc64"
@@ -57,7 +62,7 @@
 .Cd "pci* at schizo?"
 .Pp
 .Cd "# all architectures"
-.Cd "ppb* at pci? dev ? function ?"
+.Cd "pci* at pchb? bus ?"
 .Cd "pci* at ppb? bus ?"
 .Sh DESCRIPTION
 The system includes a machine-independent
@@ -110,6 +115,10 @@ QLogic ISP-1020, ISP-1040, and ISP-2100
 .Tn SCSI
 and
 .Tn FibreChannel
+interfaces.
+.It Xr mpt 4
+LSI Fusion-MPT
+.Tn SCSI/Fibre Channel
 interfaces.
 .It Xr ncr 4 , Xr siop 4
 LSI/Symbios Logic/NCR 53c8xx and 53c1010-family
@@ -167,6 +176,8 @@ controllers.
 .Bl -tag -width 10n -offset ind -compact
 .It Xr an 4
 Aironet Communications 4500/4800 IEEE 802.11DS wireless network adapter.
+.It Xr bce 4
+Broadcom BCM4401 Ethernet.
 .It Xr bge 4
 Broadcom BCM570x PCI gigabit ethernet.
 .It Xr dc 4
@@ -295,10 +306,9 @@ Integrated Intel 82801AA/AB/BA/CA and 440MX sound devices.
 Trident 4DWAVE-DX/NX, SiS 7018, ALi M5451 audio devices.
 .It Xr auvia 4
 Integrated AC97 audio controller of the
-.Tn VIA Technologies VT82C686A
-and
-.Tn VT8233
-Southbridges.
+.Tn VIA Technologies VT82C686A ,
+.Tn VT8233 ,
+VT8235, VT8237 Southbridges.
 .It Xr clcs 4
 Cirrus Logic CrystalClear CS4280 sound devices.
 .It Xr clct 4
@@ -405,8 +415,7 @@ The
 configuration register the user would like to access.
 .It pi_width
 The width, in bytes, of the data the user would like to read.
-This value may be either 1, 2, or 4.
-3-byte reads and reads larger than 4 bytes are not supported.
+This value can be only 4.
 .It pi_data
 The data returned by the kernel.
 .El
@@ -440,16 +449,17 @@ driver.
 .Xr ahc 4 ,
 .Xr ami 4 ,
 .Xr an 4 ,
-.\" no manpage .Xr apecs 4
+.Xr apecs 4 ,
 .Xr auich 4 ,
 .Xr autri 4 ,
 .Xr auvia 4 ,
+.Xr bce 4 ,
 .Xr bge 4 ,
 .Xr bha 4 ,
 .Xr bktr 4 ,
 .Xr cac 4 ,
 .Xr cardbus 4 ,
-.\" no manpage .Xr cia 4
+.Xr cia 4 ,
 .Xr clcs 4 ,
 .Xr clct 4 ,
 .Xr cmpci 4 ,
@@ -457,6 +467,7 @@ driver.
 .Xr cz 4 ,
 .Xr dc 4 ,
 .Xr de 4 ,
+.Xr dino 4 ,
 .Xr dpt 4 ,
 .Xr eap 4 ,
 .Xr eisa 4 ,
@@ -467,6 +478,7 @@ driver.
 .Xr esa 4 ,
 .Xr eso 4 ,
 .Xr fms 4 ,
+.Xr footbridge 4 ,
 .Xr fpa 4 ,
 .Xr fxp 4 ,
 .Xr gdt 4 ,
@@ -475,18 +487,19 @@ driver.
 .Xr iha 4 ,
 .Xr intro 4 ,
 .Xr iop 4 ,
-.\" no manpage .Xr irongate 4
+.Xr irongate 4 ,
 .Xr isa 4 ,
 .Xr isapnp 4 ,
 .Xr ises 4 ,
 .Xr isp 4 ,
-.\" no manpage .Xr lca 4
+.Xr lca 4 ,
 .Xr le 4 ,
 .Xr lge 4 ,
 .Xr lmc 4 ,
 .Xr lofn 4 ,
 .Xr maestro 4 ,
 .\" no manpage .Xr mpcpcibr 4
+.Xr mpt 4 ,
 .Xr ncr 4 ,
 .Xr ne 4 ,
 .Xr neo 4 ,
@@ -503,7 +516,6 @@ driver.
 .Xr psycho 4 ,
 .Xr puc 4 ,
 .Xr rl 4 ,
-.\" no manpage .Xr tsp 4
 .Xr safe 4 ,
 .Xr schizo 4 ,
 .Xr sf 4 ,
@@ -516,6 +528,7 @@ driver.
 .Xr ti 4 ,
 .Xr tl 4 ,
 .Xr trm 4 ,
+.Xr tsp 4 ,
 .Xr twe 4 ,
 .Xr tx 4 ,
 .Xr txp 4 ,

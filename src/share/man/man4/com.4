@@ -1,4 +1,4 @@
-.\"	$OpenBSD: com.4,v 1.11 2003/06/02 23:30:12 millert Exp $
+.\"	$OpenBSD: com.4,v 1.15 2004/03/20 22:13:47 miod Exp $
 .\"	$NetBSD: com.4,v 1.5 1996/03/16 00:07:08 thorpej Exp $
 .\"
 .\" Copyright (c) 1990, 1991 The Regents of the University of California.
@@ -41,7 +41,7 @@
 .Nm pccom
 .Nd serial communications interface
 .Sh SYNOPSIS
-.Cd "# i386 - pccom or com attachments"
+.Cd "# amd64 and i386 - pccom or com attachments"
 .Cd "pccom0 at isa? port 0x3f8 irq 4"
 .Cd "pccom1 at isa? port 0x2f8 irq 3"
 .Cd "pccom2 at isa? port 0x3e8 irq 5"
@@ -60,15 +60,19 @@
 .Cd "com0 at isa? port 0x3f8 irq 4"
 .Cd "com1 at isa? port 0x2f8 irq 3"
 .Pp
-.Cd "# sparc64"
-.Cd "com* at asio?"
-.Cd "com* at ebus?"
-.Pp
 .Cd "# hppa"
 .Cd "com0 at gsc? offset 0x5000 irq 5"
 .Cd "com0 at gsc? offset 0x23000 irq 5"
 .Cd "com1 at gsc? offset 0x22000 irq 6"
 .Cd "com2 at gsc? offset ? irq 13"
+.Cd "com1 at dino? irq 11"
+.Pp
+.Cd "# pegasos"
+.Cd "com0 at isa? port 0x2f8 irq 3"
+.Pp
+.Cd "# sparc64"
+.Cd "com* at asio?"
+.Cd "com* at ebus?"
 .Sh DESCRIPTION
 The
 .Nm com
@@ -125,6 +129,7 @@ with the code listed.
 .Xr asio 4 ,
 .Xr ast 4 ,
 .Xr boca 4 ,
+.Xr dino 4 ,
 .Xr ebus 4 ,
 .Xr gsc 4 ,
 .Xr hsq 4 ,
@@ -141,8 +146,7 @@ The
 driver was originally derived from the
 .Nm HP9000/300
 .Nm dca
-driver and is
-.Ud
+driver.
 .Sh BUGS
 Data loss is possible on busy systems with unbuffered UARTs at high speed.
 .Pp

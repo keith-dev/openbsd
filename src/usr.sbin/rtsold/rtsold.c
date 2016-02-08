@@ -1,5 +1,5 @@
-/*	$OpenBSD: rtsold.c,v 1.31 2003/07/07 00:18:30 deraadt Exp $	*/
-/*	$KAME: rtsold.c,v 1.57 2002/09/20 21:59:55 itojun Exp $	*/
+/*	$OpenBSD: rtsold.c,v 1.36 2004/01/05 20:35:52 itojun Exp $	*/
+/*	$KAME: rtsold.c,v 1.75 2004/01/03 00:00:07 itojun Exp $	*/
 
 /*
  * Copyright (C) 1995, 1996, 1997, and 1998 WIDE Project.
@@ -52,45 +52,38 @@
 #include <stdarg.h>
 #include <ifaddrs.h>
 #include <util.h>
-#ifdef HAVE_POLL_H
 #include <poll.h>
-#endif
 
 #include "rtsold.h"
 
 struct ifinfo *iflist;
 struct timeval tm_max =	{0x7fffffff, 0x7fffffff};
-int aflag = 0;
-int dflag = 0;
 static int log_upto = 999;
 static int fflag = 0;
+static int Fflag = 0;	/* force setting sysctl parameters */
+
+int aflag = 0;
+int dflag = 0;
 
 /* protocol constatns */
 #define MAX_RTR_SOLICITATION_DELAY	1 /* second */
 #define RTR_SOLICITATION_INTERVAL	4 /* seconds */
 #define MAX_RTR_SOLICITATIONS		3 /* times */
 
-/* implementation dependent constants */
-#define PROBE_INTERVAL 60	/* secondes XXX: should be configurable */
+/* 
+ * implementation dependent constants in seconds
+ * XXX: should be configurable 
+ */
+#define PROBE_INTERVAL 60
 
-/* utility macros */
-/* a < b */
-#define TIMEVAL_LT(a, b) (((a).tv_sec < (b).tv_sec) ||\
-			  (((a).tv_sec == (b).tv_sec) && \
-			    ((a).tv_usec < (b).tv_usec)))
-
-/* a <= b */
-#define TIMEVAL_LEQ(a, b) (((a).tv_sec < (b).tv_sec) ||\
-			   (((a).tv_sec == (b).tv_sec) &&\
-			    ((a).tv_usec <= (b).tv_usec)))
-
-/* a == b */
-#define TIMEVAL_EQ(a, b) (((a).tv_sec==(b).tv_sec) && ((a).tv_usec==(b).tv_usec))
+int main(int, char **);
 
 /* static variables and functions */
 static int mobile_node = 0;
+#ifndef SMALL
 volatile sig_atomic_t do_dump;
 static char *dumpfilename = "/var/run/rtsold.dump"; /* XXX: should be configurable */
+#endif
 
 #if 0
 static int ifreconfig(char *);
@@ -102,7 +95,9 @@ static struct timeval *rtsol_check_timer(void);
 static void TIMEVAL_ADD(struct timeval *, struct timeval *, struct timeval *);
 static void TIMEVAL_SUB(struct timeval *, struct timeval *, struct timeval *);
 
+#ifndef SMALL
 static void rtsold_set_dump_file(int);
+#endif
 static void usage(char *);
 
 int
@@ -111,13 +106,7 @@ main(int argc, char *argv[])
 	int s, ch, once = 0;
 	struct timeval *timeout;
 	char *argv0, *opts;
-#ifdef HAVE_POLL_H
 	struct pollfd set[2];
-#else
-	fd_set *fdsetp, *selectfdp;
-	int fdmasks;
-	int maxfd;
-#endif
 #ifdef USE_RTSOCK
 	int rtsock;
 #endif
@@ -131,9 +120,9 @@ main(int argc, char *argv[])
 	if (argv0 && argv0[strlen(argv0) - 1] != 'd') {
 		fflag = 1;
 		once = 1;
-		opts = "adD";
+		opts = "adDF";
 	} else
-		opts = "adDfm1";
+		opts = "adDfFm1";
 
 	while ((ch = getopt(argc, argv, opts)) != -1) {
 		switch (ch) {
@@ -148,6 +137,9 @@ main(int argc, char *argv[])
 			break;
 		case 'f':
 			fflag = 1;
+			break;
+		case 'F':
+			Fflag = 1;
 			break;
 		case 'm':
 			mobile_node = 1;
@@ -184,20 +176,22 @@ main(int argc, char *argv[])
 			setlogmask(LOG_UPTO(log_upto));
 	}
 
-#ifndef HAVE_ARC4RANDOM
-	/* random value initilization */
-	srandom((u_long)time(NULL));
-#endif
+	if (Fflag) {
+		setinet6sysctl(IPV6CTL_ACCEPT_RTADV, 1);
+		setinet6sysctl(IPV6CTL_FORWARDING, 0);
+	} else {
+		/* warn if accept_rtadv is down */
+		if (!getinet6sysctl(IPV6CTL_ACCEPT_RTADV))
+			warnx("kernel is configured not to accept RAs");
+		/* warn if forwarding is up */
+		if (getinet6sysctl(IPV6CTL_FORWARDING))
+			warnx("kernel is configured as a router, not a host");
+	}
 
-	/* warn if accept_rtadv is down */
-	if (!getinet6sysctl(IPV6CTL_ACCEPT_RTADV))
-		warnx("kernel is configured not to accept RAs");
-	/* warn if forwarding is up */
-	if (getinet6sysctl(IPV6CTL_FORWARDING))
-		warnx("kernel is configured as a router, not a host");
-
+#ifndef SMALL
 	/* initialization to dump internal status to a file */
 	signal(SIGUSR1, rtsold_set_dump_file);
+#endif
 
 	if (!fflag)
 		daemon(0, 0);		/* act as a daemon */
@@ -212,16 +206,10 @@ main(int argc, char *argv[])
 		exit(1);
 		/*NOTREACHED*/
 	}
-#ifdef HAVE_POLL_H
 	set[0].fd = s;
 	set[0].events = POLLIN;
-#else
-	maxfd = s;
-#endif
 
-#ifdef HAVE_POLL_H
 	set[1].fd = -1;
-#endif
 
 #ifdef USE_RTSOCK
 	if ((rtsock = rtsock_open()) < 0) {
@@ -229,25 +217,8 @@ main(int argc, char *argv[])
 		exit(1);
 		/*NOTREACHED*/
 	}
-#ifdef HAVE_POLL_H
 	set[1].fd = rtsock;
 	set[1].events = POLLIN;
-#else
-	if (rtsock > maxfd)
-		maxfd = rtsock;
-#endif
-#endif
-
-#ifndef HAVE_POLL_H
-	fdmasks = howmany(maxfd + 1, NFDBITS) * sizeof(fd_mask);
-	if ((fdsetp = malloc(fdmasks)) == NULL) {
-		err(1, "malloc");
-		/*NOTREACHED*/
-	}
-	if ((selectfdp = malloc(fdmasks)) == NULL) {
-		err(1, "malloc");
-		/*NOTREACHED*/
-	}
 #endif
 
 	/* configuration per interface */
@@ -277,33 +248,16 @@ main(int argc, char *argv[])
 		/*NOTREACHED*/
 	}
 
-	/* dump the current pid */
-	if (!once) {
-		if (pidfile(NULL) < 0) {
-			warnmsg(LOG_ERR, __func__,
-			    "failed to open a pid log file: %s",
-			    strerror(errno));
-		}
-	}
-
-#ifndef HAVE_POLL_H
-	memset(fdsetp, 0, fdmasks);
-	FD_SET(s, fdsetp);
-#ifdef USE_RTSOCK
-	FD_SET(rtsock, fdsetp);
-#endif
-#endif
 	while (1) {		/* main loop */
 		int e;
 
-#ifndef HAVE_POLL_H
-		memcpy(selectfdp, fdsetp, fdmasks);
-#endif
 
+#ifndef SMALL
 		if (do_dump) {	/* SIGUSR1 */
 			do_dump = 0;
 			rtsold_dump_file(dumpfilename);
 		}
+#endif
 
 		timeout = rtsol_check_timer();
 
@@ -322,11 +276,7 @@ main(int argc, char *argv[])
 			if (ifi == NULL)
 				break;
 		}
-#ifdef HAVE_POLL_H
 		e = poll(set, 2, timeout ? (timeout->tv_sec * 1000 + timeout->tv_usec / 1000) : INFTIM);
-#else
-		e = select(maxfd + 1, selectfdp, NULL, NULL, timeout);
-#endif
 		if (e < 1) {
 			if (e < 0 && errno != EINTR) {
 				warnmsg(LOG_ERR, __func__, "select: %s",
@@ -337,18 +287,10 @@ main(int argc, char *argv[])
 
 		/* packet reception */
 #ifdef USE_RTSOCK
-#ifdef HAVE_POLL_H
 		if (set[1].revents & POLLIN)
-#else
-		if (FD_ISSET(rtsock, selectfdp))
-#endif
 			rtsock_input(rtsock);
 #endif
-#ifdef HAVE_POLL_H
 		if (set[0].revents & POLLIN)
-#else
-		if (FD_ISSET(s, selectfdp))
-#endif
 			rtsol_input(s);
 	}
 	/* NOTREACHED */
@@ -540,7 +482,7 @@ rtsol_check_timer(void)
 	rtsol_timer = tm_max;
 
 	for (ifinfo = iflist; ifinfo; ifinfo = ifinfo->next) {
-		if (TIMEVAL_LEQ(ifinfo->expire, now)) {
+		if (timercmp(&ifinfo->expire, &now, <=)) {
 			if (dflag > 1)
 				warnmsg(LOG_DEBUG, __func__,
 				    "timer expiration on %s, "
@@ -607,18 +549,18 @@ rtsol_check_timer(void)
 			rtsol_timer_update(ifinfo);
 		}
 
-		if (TIMEVAL_LT(ifinfo->expire, rtsol_timer))
+		if (timercmp(&ifinfo->expire, &rtsol_timer, <))
 			rtsol_timer = ifinfo->expire;
 	}
 
-	if (TIMEVAL_EQ(rtsol_timer, tm_max)) {
+	if (timercmp(&rtsol_timer, &tm_max, ==)) {
 		warnmsg(LOG_DEBUG, __func__, "there is no timer");
 		return(NULL);
-	} else if (TIMEVAL_LT(rtsol_timer, now))
+	} else if (timercmp(&rtsol_timer, &now, <))
 		/* this may occur when the interval is too small */
 		returnval.tv_sec = returnval.tv_usec = 0;
 	else
-		TIMEVAL_SUB(&rtsol_timer, &now, &returnval);
+		timersub(&rtsol_timer, &now, &returnval);
 
 	if (dflag > 1)
 		warnmsg(LOG_DEBUG, __func__, "New timer is %ld:%08ld",
@@ -654,11 +596,7 @@ rtsol_timer_update(struct ifinfo *ifinfo)
 			ifinfo->timer = tm_max;	/* stop timer(valid?) */
 		break;
 	case IFS_DELAY:
-#ifndef HAVE_ARC4RANDOM
-		interval = random() % (MAX_RTR_SOLICITATION_DELAY * MILLION);
-#else
 		interval = arc4random() % (MAX_RTR_SOLICITATION_DELAY * MILLION);
-#endif
 		ifinfo->timer.tv_sec = interval / MILLION;
 		ifinfo->timer.tv_usec = interval % MILLION;
 		break;
@@ -684,13 +622,13 @@ rtsol_timer_update(struct ifinfo *ifinfo)
 	}
 
 	/* reset the timer */
-	if (TIMEVAL_EQ(ifinfo->timer, tm_max)) {
+	if (timercmp(&ifinfo->timer, &tm_max, ==)) {
 		ifinfo->expire = tm_max;
 		warnmsg(LOG_DEBUG, __func__,
 		    "stop timer for %s", ifinfo->ifname);
 	} else {
 		gettimeofday(&now, NULL);
-		TIMEVAL_ADD(&now, &ifinfo->timer, &ifinfo->expire);
+		timeradd(&now, &ifinfo->timer, &ifinfo->expire);
 
 		if (dflag > 1)
 			warnmsg(LOG_DEBUG, __func__,
@@ -705,54 +643,23 @@ rtsol_timer_update(struct ifinfo *ifinfo)
 /* timer related utility functions */
 #define MILLION 1000000
 
-/* result = a + b */
-static void
-TIMEVAL_ADD(struct timeval *a, struct timeval *b, struct timeval *result)
-{
-	long l;
-
-	if ((l = a->tv_usec + b->tv_usec) < MILLION) {
-		result->tv_usec = l;
-		result->tv_sec = a->tv_sec + b->tv_sec;
-	} else {
-		result->tv_usec = l - MILLION;
-		result->tv_sec = a->tv_sec + b->tv_sec + 1;
-	}
-}
-
-/*
- * result = a - b
- * XXX: this function assumes that a >= b.
- */
-void
-TIMEVAL_SUB(struct timeval *a, struct timeval *b, struct timeval *result)
-{
-	long l;
-
-	if ((l = a->tv_usec - b->tv_usec) >= 0) {
-		result->tv_usec = l;
-		result->tv_sec = a->tv_sec - b->tv_sec;
-	} else {
-		result->tv_usec = MILLION + l;
-		result->tv_sec = a->tv_sec - b->tv_sec - 1;
-	}
-}
-
+#ifndef SMALL
 static void
 rtsold_set_dump_file(int sig)
 {
 	do_dump = 1;
 }
+#endif
 
 static void
 usage(char *progname)
 {
 	if (progname && progname[strlen(progname) - 1] != 'd') {
-		fprintf(stderr, "usage: rtsol [-dD] interfaces...\n");
-		fprintf(stderr, "usage: rtsol [-dD] -a\n");
+		fprintf(stderr, "usage: rtsol [-dDF] interfaces...\n");
+		fprintf(stderr, "usage: rtsol [-dDF] -a\n");
 	} else {
-		fprintf(stderr, "usage: rtsold [-adDfm1] interfaces...\n");
-		fprintf(stderr, "usage: rtsold [-dDfm1] -a\n");
+		fprintf(stderr, "usage: rtsold [-adDfFm1] interfaces...\n");
+		fprintf(stderr, "usage: rtsold [-dDfFm1] -a\n");
 	}
 	exit(1);
 }

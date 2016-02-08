@@ -1,4 +1,4 @@
-/*	$OpenBSD: intercept.c,v 1.42 2003/08/04 18:15:11 sturm Exp $	*/
+/*	$OpenBSD: intercept.c,v 1.45 2004/01/30 17:21:16 sturm Exp $	*/
 /*
  * Copyright 2002 Niels Provos <provos@citi.umich.edu>
  * All rights reserved.
@@ -58,7 +58,7 @@ struct intercept_syscall {
 	char emulation[16];
 
 	short (*cb)(int, pid_t, int, const char *, int, const char *, void *,
-	    int, struct intercept_tlq *, void *);
+	    int, struct intercept_replace *, struct intercept_tlq *, void *);
 	void *cb_arg;
 
 	struct intercept_tlq tls;
@@ -181,7 +181,7 @@ intercept_sccb_cbarg(char *emulation, char *name)
 int
 intercept_register_sccb(char *emulation, char *name,
     short (*cb)(int, pid_t, int, const char *, int, const char *, void *, int,
-	struct intercept_tlq *, void *),
+	struct intercept_replace *, struct intercept_tlq *, void *),
     void *cbarg)
 {
 	struct intercept_syscall *tmp;
@@ -272,7 +272,7 @@ intercept_run(int bg, int fd, uid_t uid, gid_t gid,
 	pid_t pid, cpid;
 	int status;
 
-	/* Block signals so that timeing on signal delivery does not matter */
+	/* Block signals so that timing on signal delivery does not matter */
 	sigemptyset(&none);
 	sigemptyset(&set);
 	sigaddset(&set, SIGUSR1);
@@ -519,7 +519,7 @@ intercept_replace_init(struct intercept_replace *repl)
 
 int
 intercept_replace_add(struct intercept_replace *repl, int off,
-    u_char *addr, size_t len)
+    u_char *addr, size_t len, u_int flags)
 {
 	int ind = repl->num;
 
@@ -529,6 +529,7 @@ intercept_replace_add(struct intercept_replace *repl, int off,
 	repl->ind[ind] = off;
 	repl->address[ind] = addr;
 	repl->len[ind] = len;
+	repl->flags[ind] = flags;
 
 	repl->num++;
 
@@ -536,12 +537,13 @@ intercept_replace_add(struct intercept_replace *repl, int off,
 }
 
 int
-intercept_replace(int fd, pid_t pid, struct intercept_replace *repl)
+intercept_replace(int fd, pid_t pid, u_int16_t seqnr,
+    struct intercept_replace *repl)
 {
 	if (repl->num == 0)
 		return (0);
 
-	return (intercept.replace(fd, pid, repl));
+	return (intercept.replace(fd, pid, seqnr, repl));
 }
 
 char *
@@ -611,6 +613,13 @@ normalize_filename(int fd, pid_t pid, char *name, int userp)
 	static char cwd[2*MAXPATHLEN];
 	int havecwd = 0;
 
+	/*
+	 * The empty filename does not receive normalization.
+	 * System calls are supposed to fail on it.
+	 */
+	if (strcmp(name, "") == 0)
+		return (name);
+
 	if (fd != -1 && intercept.setcwd(fd, pid) == -1) {
 		if (errno == EBUSY)
 			return (NULL);
@@ -640,7 +649,7 @@ normalize_filename(int fd, pid_t pid, char *name, int userp)
 
 	if (userp != ICLINK_NONE) {
 		static char rcwd[2*MAXPATHLEN];
-		char *base= basename(cwd);
+		char *base = basename(cwd);
 		int failed = 0;
 
 		/* The dot maybe used by rmdir("/tmp/something/.") */
@@ -771,10 +780,23 @@ intercept_syscall(int fd, pid_t pid, u_int16_t seqnr, int policynr,
 				break;
 		}
 
-		if (!ic_abort)
+		if (!ic_abort) {
+			struct intercept_replace repl;
+
+			intercept_replace_init(&repl);
+
 			action = (*sc->cb)(fd, pid, policynr, name, code,
-			    emulation, args, argsize, &sc->tls, sc->cb_arg);
-		else
+			    emulation, args, argsize, &repl,
+			    &sc->tls, sc->cb_arg);
+
+			if (action < ICPOLICY_NEVER) {
+				/* if we can not rewrite the arguments,
+				 * system call fails.
+				 */
+				if (intercept_replace(fd, pid, seqnr, &repl) == -1)
+					action = ICPOLICY_NEVER;
+			}
+		} else
 			action = ICPOLICY_NEVER;
 	} else if (intercept_gencb != NULL)
 		action = (*intercept_gencb)(fd, pid, policynr, name, code,

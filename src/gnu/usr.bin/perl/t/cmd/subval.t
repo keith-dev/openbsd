@@ -1,6 +1,6 @@
 #!./perl
 
-# $RCSfile: subval.t,v $$Revision: 1.6 $$Date: 2002/10/27 22:25:35 $
+# $RCSfile: subval.t,v $$Revision: 1.7 $$Date: 2003/12/03 03:02:47 $
 
 sub foo1 {
     'true1';

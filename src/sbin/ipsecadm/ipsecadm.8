@@ -1,4 +1,4 @@
-.\" $OpenBSD: ipsecadm.8,v 1.62 2003/07/24 08:03:19 itojun Exp $
+.\" $OpenBSD: ipsecadm.8,v 1.65 2004/01/27 09:26:22 markus Exp $
 .\"
 .\" Copyright 1997 Niels Provos <provos@physnet.uni-hamburg.de>
 .\" All rights reserved.
@@ -90,6 +90,7 @@ modifiers are:
 .Fl authkey ,
 .Fl authkeyfile ,
 .Fl forcetunnel ,
+.Fl udpencap ,
 .Fl key ,
 and
 .Fl keyfile .
@@ -285,8 +286,9 @@ Allowed modifiers are:
 .Fl oldah ,
 .Fl oldesp ,
 .Fl ip4 ,
+.Fl ipcomp ,
 and
-.Fl ipcomp .
+.Fl tcpmd5 .
 Default action is to flush all types of security associations
 from the kernel.
 .It show
@@ -297,8 +299,9 @@ Allowed modifiers are:
 .Fl oldah ,
 .Fl oldesp ,
 .Fl ip4 ,
+.Fl ipcomp ,
 and
-.Fl ipcomp .
+.Fl tcpmd5 .
 Default action is to show all types of security associations
 from the kernel.
 .It monitor
@@ -326,6 +329,15 @@ After this an IPCA/SA bundle must be created using the
 .Nm group
 keyword.
 The IPCA must be applied first.
+.It tcpmd5
+Set up a key for use by the RFC 2385 TCP MD5 option.
+Allowed modifiers are:
+.Fl dst ,
+.Fl src ,
+.Fl spi ,
+.Fl key ,
+and
+.Fl keyfile .
 .El
 .Pp
 If no command is given
@@ -382,6 +394,10 @@ and
 options.
 Notice that the IPsec stack will perform IP-inside-IP encapsulation
 when deemed necessary, even if this flag has not been set.
+.It Fl udpencap
+Enable ESP-inside-UDP encapsulation.
+The UDP destination port must be specified on the command line.
+This port will be used for sending encapsulated UDP packets.
 .It Fl enc
 The encryption algorithm to be used with the SA.
 Possible values are:
@@ -704,6 +720,11 @@ Set up a bypass flow:
 .Bd -literal
 # ipsecadm flow -bypass -out \\
 	-addr 10.1.1.0/24 10.1.1.0/24
+.Ed
+.Pp
+Set up a key for the TCP MD5 option:
+.Bd -literal
+# ipsecadm tcpmd5 -src ::1 -dst ::1 -spi 0100 -key deadbeef
 .Ed
 .Pp
 Delete all esp SAs and their flows and routing information:

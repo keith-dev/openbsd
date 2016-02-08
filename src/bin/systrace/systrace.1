@@ -1,4 +1,4 @@
-.\"	$OpenBSD: systrace.1,v 1.36 2003/09/04 12:17:44 jmc Exp $
+.\"	$OpenBSD: systrace.1,v 1.40 2004/02/01 17:34:10 jmc Exp $
 .\"
 .\" Copyright 2002 Niels Provos <provos@citi.umich.edu>
 .\" All rights reserved.
@@ -30,7 +30,7 @@
 .\"
 .\" Manual page, using -mandoc macros
 .\"
-.Dd May 21, 2003
+.Dd November 28, 2003
 .Dt SYSTRACE 1
 .Os
 .Sh NAME
@@ -39,7 +39,7 @@
 .Sh SYNOPSIS
 .Nm systrace
 .Bk -words
-.Op Fl AaitUu
+.Op Fl AaCeitUu
 .Op Fl c Ar uid:gid
 .Op Fl d Ar policydir
 .Op Fl f Ar file
@@ -86,7 +86,28 @@ The created policy functions as a base that can be refined.
 .It Fl a
 Enables automatic enforcement of configured policies.
 An operation not covered by policy is denied and logged via
-.Xr syslog 3 .
+.Xr syslog 3 ,
+or to
+.Em stderr
+if the
+.Fl e
+flag is specified.
+.It Fl C
+Run
+.Nm
+in cradle mode;
+currently, when multiple processes are started with systrace protection, each
+.Nm
+starts its own UI
+.Pq user interface
+process.
+Cradle mode allows a user to attach all
+.Nm
+processes to one UI.
+This may be useful, for example, in scenarios where
+.Nm
+is being heavily used.
+If a cradle server is not running, one is launched.
 .It Fl c Ar uid:gid
 Specifies the
 .Va uid
@@ -99,6 +120,11 @@ root privilege.
 .It Fl d Ar policydir
 Specifies an alternative location for the user's directory from
 which policies are loaded and to which changed policies are stored.
+.It Fl e
+Specifies to log to
+.Em stderr
+instead of
+.Xr syslog 3 .
 .It Fl f Ar file
 The policies specified in
 .Ar file
@@ -119,7 +145,7 @@ as
 .It Fl t
 Uses text mode to ask for interactive policy generation.
 .It Fl U
-Ignore user configured policies and use only global system policies.
+Ignore user-configured policies and use only global system policies.
 .It Fl u
 Do not perform aliasing on system call names.
 Aliasing is enabled by default to group similar system calls into a
@@ -221,8 +247,7 @@ the specified regular expression.
 By appending the
 .Va log
 statement to a rule, a matching system call and its arguments
-is logged to
-.Xr syslog 3 .
+are logged.
 This is useful, for example, to log all invocations of the
 .Va execve
 system call.

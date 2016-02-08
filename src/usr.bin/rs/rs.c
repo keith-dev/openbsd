@@ -1,4 +1,4 @@
-/*	$OpenBSD: rs.c,v 1.9 2003/06/10 22:20:50 deraadt Exp $	*/
+/*	$OpenBSD: rs.c,v 1.11 2004/03/13 20:08:21 tedu Exp $	*/
 
 /*-
  * Copyright (c) 1993
@@ -123,7 +123,7 @@ getfile(void)
 {
 	char *p;
 	char *endp;
-	char **ep = 0;
+	char **ep = NULL;
 	int multisep = (flags & ONEISEPONLY ? 0 : 1);
 	int nullpad = flags & NULLPAD;
 	char **padto;
@@ -180,7 +180,7 @@ getfile(void)
 			}
 		}
 	} while (getline() != EOF);
-	*ep = 0;				/* mark end of pointers */
+	*ep = NULL;				/* mark end of pointers */
 	nelem = ep - elem;
 }
 
@@ -366,14 +366,18 @@ char **
 getptrs(char **sp)
 {
 	char **p;
+	int newsize, gap;
 
-	allocsize += allocsize;
-	p = (char **)realloc(elem, allocsize * sizeof(char *));
-	if (p == (char **)0)
+	newsize = allocsize * 2;
+	p = realloc(elem, newsize * sizeof(char *));
+	if (p == NULL)
 		err(1, "no memory");
 
-	sp += (p - elem);
-	endelem = (elem = p) + allocsize;
+	gap = p - elem;
+	elem = p;
+	allocsize = newsize;
+	sp += gap;
+	endelem = elem + allocsize;
 	return(sp);
 }
 

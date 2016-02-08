@@ -52,7 +52,7 @@
 
 #ifndef lint
 static char rcsid[] =
-    "@(#) $Id: mtrace.c,v 1.19 2003/08/19 22:19:07 itojun Exp $";
+    "@(#) $Id: mtrace.c,v 1.23 2004/03/16 01:11:09 tedu Exp $";
 #endif
 
 #include <netdb.h>
@@ -132,10 +132,6 @@ u_int32_t tdst = 0;		/* Address where trace is sent (last-hop) */
 
 vifi_t  numvifs;		/* to keep loader happy */
 				/* (see kern.c) */
-#ifndef SYSV
-extern long random(void);
-#endif
-extern int errno;
 
 char *			inet_name(u_int32_t addr);
 u_int32_t			host_addr(char *name);
@@ -295,6 +291,8 @@ get_netmask(s, dst)
 	return (retval);
     }
     for (ifa = ifap; ifa; ifa = ifa->ifa_next) {
+	if (ifa->ifa_addr->sa_family != AF_INET) 
+             continue;
 	if_addr = ((struct sockaddr_in *)ifa->ifa_addr)->sin_addr.s_addr;
 	if_mask = ((struct sockaddr_in *)ifa->ifa_netmask)->sin_addr.s_addr;
 	if ((dst & if_mask) == (if_addr & if_mask)) {
@@ -491,7 +489,7 @@ send_recv(dst, type, code, tries, save)
 		continue;
 
 	    iphdrlen = ip->ip_hl << 2;
-	    ipdatalen = ntohs(ip->ip_len);
+	    ipdatalen = ntohs(ip->ip_len) - iphdrlen;
 	    if (iphdrlen + ipdatalen != recvlen) {
 		fprintf(stderr,
 			"packet shorter (%u bytes) than hdr+data len (%u+%u)\n",
@@ -645,7 +643,7 @@ passive_mode(void)
 	    continue;
 
 	iphdrlen = ip->ip_hl << 2;
-	ipdatalen = ntohs(ip->ip_len);
+	ipdatalen = ntohs(ip->ip_len) - iphdrlen;
 	if (iphdrlen + ipdatalen != recvlen) {
 	    fprintf(stderr,
 		    "packet shorter (%u bytes) than hdr+data len (%u+%u)\n",
@@ -1658,7 +1656,7 @@ or multicast at ttl %d doesn't reach its last-hop router for that source\n",
 void
 check_vif_state()
 {
-    log(LOG_WARNING, errno, "sendto");
+    logit(LOG_WARNING, errno, "sendto");
 }
 
 /*
@@ -1667,7 +1665,7 @@ check_vif_state()
  * LOG_ERR or worse, terminate the program.
  */
 void
-log(int severity, int syserr, char *format, ...)
+logit(int severity, int syserr, char *format, ...)
 {
     va_list ap;
 

@@ -1,4 +1,4 @@
-# $OpenBSD: Makefile,v 1.31 2003/06/02 08:45:58 markus Exp $
+# $OpenBSD: Makefile,v 1.36 2004/02/27 17:36:13 deraadt Exp $
 
 LIB=	crypto
 
@@ -6,22 +6,12 @@ SSLEAYDIST=	src
 SSL_SRC=	${.CURDIR}/../${SSLEAYDIST}
 LCRYPTO_SRC=	${SSL_SRC}/crypto
 
-.if ${MACHINE_ARCH} == "i386"
+.if ${MACHINE_ARCH} == "i386" || ${MACHINE_ARCH} == "arm" || \
+    ${MACHINE_ARCH} == "vax" || ${MACHINE_ARCH} == "amd64" || \
+    ${MACHINE_ARCH} == "alpha"
 CFLAGS+= -DL_ENDIAN
-.else
-.if ${MACHINE_ARCH} == "mips"
-CFLAGS+= -DL_ENDIAN
-.else
-.if ${MACHINE_ARCH} == "vax"
-CFLAGS+= -DL_ENDIAN
-.else
-.if ${MACHINE_ARCH} == "alpha"
-# no ENDIAN stuff defined for alpha
 .else
 CFLAGS+= -DB_ENDIAN
-.endif
-.endif
-.endif
 .endif 
 
 CFLAGS+= -DOPENSSL_NO_IDEA -DTERMIOS -DANSI_SOURCE -DNO_ERR -DOPENSSL_NO_ASM
@@ -42,6 +32,7 @@ SRCS+=	sha_dgst.c sha1dgst.c sha_one.c sha1_one.c
 #SRCS+=	mdc2dgst.c mdc2_one.c					
 SRCS+=	hmac.c							
 SRCS+=	rmd_dgst.c rmd_one.c				
+SRCS+=	acss_skey.c acss_enc.c
 SRCS+= aes_cbc.c aes_cfb.c aes_ctr.c aes_ecb.c aes_ofb.c aes_misc.c aes_core.c
 SRCS+=	cbc_cksm.c cbc_enc.c cfb64enc.c cfb_enc.c \
 	ecb3_enc.c ecb_enc.c enc_read.c enc_writ.c \
@@ -53,17 +44,17 @@ SRCS+=	cbc_cksm.c cbc_enc.c cfb64enc.c cfb_enc.c \
 	des_old.c read2pwd.c
 SRCS+=	rc2_ecb.c rc2_skey.c rc2_cbc.c rc2cfb64.c
 SRCS+=	rc2ofb64.c							
-SRCS+=	rc4_skey.c rc4_enc.c
+SRCS+=	rc4_skey.c
 #SRCS+=	rc5_skey.c rc5_ecb.c rc5cfb64.c rc5cfb64.c 	
 #SRCS+=	rc5ofb64.c rc5_enc.c
 #SRCS+=	i_cbc.c i_cfb64.c i_ofb64.c i_ecb.c		
 #SRCS+=	i_skey.c							
-SRCS+=	bf_skey.c bf_ecb.c bf_cfb64.c bf_ofb64.c bf_enc.c		
+SRCS+=	bf_skey.c bf_ecb.c bf_cfb64.c bf_ofb64.c
 SRCS+=	c_skey.c c_ecb.c c_cfb64.c c_ofb64.c c_enc.c	
 SRCS+=	bn_add.c bn_div.c bn_exp.c bn_lib.c
 SRCS+=	bn_mul.c bn_print.c bn_rand.c bn_shift.c
 SRCS+=	bn_word.c bn_blind.c bn_gcd.c bn_prime.c bn_err.c
-SRCS+=	bn_sqr.c bn_recp.c bn_mont.c bn_mpi.c bn_asm.c bn_mod.c
+SRCS+=	bn_sqr.c bn_recp.c bn_mont.c bn_mpi.c bn_mod.c
 SRCS+=	bn_exp2.c bn_ctx.c
 SRCS+=	bn_sqrt.c bn_kron.c
 SRCS+=	rsa_eay.c rsa_gen.c rsa_lib.c rsa_sign.c
@@ -91,7 +82,7 @@ SRCS+= c_all.c evp_err.c evp_acnf.c m_md4.c p5_crpt.c
 SRCS+= c_allc.c evp_key.c m_md5.c p5_crpt2.c
 SRCS+= c_alld.c e_null.c evp_lib.c p_dec.c
 SRCS+= digest.c e_rc2.c evp_pbe.c m_null.c p_enc.c
-SRCS+= e_aes.c e_rc4.c evp_pkey.c m_ripemd.c p_lib.c
+SRCS+= e_acss.c e_aes.c e_rc4.c evp_pkey.c m_ripemd.c p_lib.c
 SRCS+= md4_dgst.c md4_one.c
 SRCS+=	pem_sign.c pem_seal.c pem_info.c pem_lib.c pem_pkey.c	
 SRCS+=	pem_all.c pem_err.c pem_x509.c pem_pk8.c pem_oth.c pem_xaux.c
@@ -151,9 +142,11 @@ SRCS+= ec_err.c ec_mult.c ecp_nist.c ecp_smpl.c
 	${LCRYPTO_SRC}/pkcs7 ${LCRYPTO_SRC}/x509v3 ${LCRYPTO_SRC}/pkcs12 \
 	${LCRYPTO_SRC}/comp ${LCRYPTO_SRC}/txt_db ${LCRYPTO_SRC}/md4 \
 	${LCRYPTO_SRC}/engine ${LCRYPTO_SRC}/dso ${LCRYPTO_SRC}/ui \
-	${LCRYPTO_SRC}/ocsp ${LCRYPTO_SRC}/ec ${LCRYPTO_SRC}/aes ${LCRYPTO_SRC}
+	${LCRYPTO_SRC}/ocsp ${LCRYPTO_SRC}/ec ${LCRYPTO_SRC}/aes ${LCRYPTO_SRC} \
+	${LCRYPTO_SRC}/acss ${.CURDIR}/arch/${MACHINE_ARCH}
 
 HDRS=\
+	crypto/acss/acss.h \
 	crypto/aes/aes.h \
 	crypto/asn1/asn1.h \
 	crypto/asn1/asn1_mac.h \
@@ -259,6 +252,42 @@ des_enc.o:
 des_enc.po:            
 	${CC} ${CFLAGS} -O1 ${CPPFLAGS} -c ${.IMPSRC} -o $@
 .endif  
+
+.if (${MACHINE_ARCH} == "i386")
+CFLAGS+= -DMD5_ASM
+CFLAGS+= -DSHA1_ASM
+CFLAGS+= -DRMD160_ASM
+CFLAGS+= -DOPENBSD_CAST_ASM
+CFLAGS+= -DOPENBSD_DES_ASM
+SSLASM=\
+	bf bf-586 \
+	bn bn-586 \
+	bn co-586 \
+	cast cast-586 \
+	des des-586 \
+	md5 md5-586 \
+	rc4 rc4-586 \
+	ripemd rmd-586 \
+	sha sha1-586
+.for dir f in ${SSLASM}
+SRCS+=	${f}.S
+GENERATED+=${f}.S
+${f}.S: ${LCRYPTO_SRC}/${dir}/asm/${f}.pl ${LCRYPTO_SRC}/perlasm/x86unix.pl
+	/usr/bin/perl -I${LCRYPTO_SRC}/perlasm -I${LCRYPTO_SRC}/${dir}/asm \
+		${LCRYPTO_SRC}/${dir}/asm/${f}.pl openbsd-elf 386 > ${.TARGET}
+.endfor
+SRCS+= bf_cbc.c	
+.else
+.if (${MACHINE_ARCH} == "vax")
+SRCS+= bf_enc.c
+SRCS+= bn_asm_vax.S
+SRCS+= rc4_enc.c	
+.else
+SRCS+= bf_enc.c	
+SRCS+= bn_asm.c
+SRCS+= rc4_enc.c	
+.endif
+.endif
 
 all beforedepend: ${GENERATED}
 

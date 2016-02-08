@@ -1,4 +1,4 @@
-/*	$OpenBSD: mixerctl.c,v 1.12 2003/05/15 09:30:06 todd Exp $	*/
+/*	$OpenBSD: mixerctl.c,v 1.16 2004/03/02 23:09:27 tedu Exp $	*/
 /*	$NetBSD: mixerctl.c,v 1.11 1998/04/27 16:55:23 augustss Exp $	*/
 
 /*
@@ -238,12 +238,12 @@ int
 main(int argc, char **argv)
 {
 	int fd, i, j, ch, pos;
-	int aflag = 0, qflag = 0, wflag = 0, vflag = 0;
+	int aflag = 0, qflag = 0, vflag = 0;
 	char *file;
 	char *sep = "=";
 	mixer_devinfo_t dinfo;
 	mixer_ctrl_t val;
-	int ndev = 0;
+	int ndev;
 
 	if ((file = getenv("MIXERDEVICE")) == 0 || *file == '\0')
 	        file = "/dev/mixer";
@@ -254,7 +254,7 @@ main(int argc, char **argv)
 			aflag++;
 			break;
 		case 'w':
-			wflag++;
+			/* compat */
 			break;
 		case 'v':
 			vflag++;
@@ -276,13 +276,14 @@ main(int argc, char **argv)
 	argc -= optind;
 	argv += optind;
 
-	if ((fd = open(file, wflag ? O_RDWR : O_RDONLY)) < 0)
-		err(1, "%s", file);
+	if ((fd = open(file, O_RDWR)) == -1)
+		if ((fd = open(file, O_RDONLY)) == -1)
+			err(1, "%s", file);
 
-	for(;;) {
-	       dinfo.index = ndev++;
-	       if (ioctl(fd, AUDIO_MIXER_DEVINFO, &dinfo) < 0)
-	 	       break;
+	for(ndev = 0; ; ndev++) {
+		dinfo.index = ndev;
+		if (ioctl(fd, AUDIO_MIXER_DEVINFO, &dinfo) < 0)
+			break;
 	}
 
 	if (!ndev)
@@ -340,49 +341,46 @@ main(int argc, char **argv)
 						fields[i].name);
 	}
 
-	if (!argc && aflag && !wflag) {
+	if (!argc && aflag) {
 		for(i = 0; fields[i].name; i++) {
 			prfield(&fields[i], sep, vflag);
 			fprintf(out, "\n");
 		}
 	} else if (argc > 0 && !aflag) {
 		struct field *p;
-		if (wflag) {
-			while(argc--) {
-				char *q;
 
-				if (q = strchr(*argv, '=')) {
-					*q++ = 0;
-					p = findfield(*argv);
-					if (p == 0)
-						warnx("field %s does not exist", *argv);
-					else {
-						val = *p->valp;
-						if (rdfield(p, q)) {
-							if (ioctl(fd, AUDIO_MIXER_WRITE, p->valp) < 0)
-								warn("AUDIO_MIXER_WRITE");
-							else if (sep && !qflag) {
-								*p->valp = val;
-								prfield(p, ": ", 0);
-								ioctl(fd, AUDIO_MIXER_READ, p->valp);
-								printf(" -> ");
-								prfield(p, 0, 0);
-								printf("\n");
-							}
+		while(argc--) {
+			char *q;
+
+			if (q = strchr(*argv, '=')) {
+				*q++ = 0;
+				p = findfield(*argv);
+				if (p == NULL)
+					warnx("field %s does not exist", *argv);
+				else {
+					val = *p->valp;
+					if (rdfield(p, q)) {
+						if (ioctl(fd, AUDIO_MIXER_WRITE, p->valp) < 0)
+							warn("AUDIO_MIXER_WRITE");
+						else if (sep && !qflag) {
+							*p->valp = val;
+							prfield(p, ": ", 0);
+							ioctl(fd, AUDIO_MIXER_READ, p->valp);
+							printf(" -> ");
+							prfield(p, 0, 0);
+							printf("\n");
 						}
 					}
-				} else
-					warnx("No `=' in %s", *argv);
+				}
 				argv++;
-			}
-		} else {
-			while(argc--) {
+			} else {
 				p = findfield(*argv);
-				if (p == 0)
+				if (p == NULL)
 					warnx("field %s does not exist", *argv);
-				else
-					prfield(p, sep, vflag), fprintf(out, "\n");
-				argv++;
+				else {
+					prfield(p, sep, vflag);
+					fprintf(out, "\n");
+				}
 			}
 		}
 	} else
@@ -396,9 +394,9 @@ usage(void)
 	extern char *__progname;	/* from crt0.o */
 
 	fprintf(stderr,
-	    "usage: %s [-f file] [-n] [-v] -a\n"
-	    "	    %s [-f file] [-n] [-v] name ...\n"
-	    "       %s [-f file] [-n] [-q] -w name=value ...\n",
+	    "usage: %s [-nv] [-f file] -a\n"
+	    "       %s [-nv] [-f file] name [...]\n"
+	    "       %s [-q]  [-f file] name=value [...]\n",
 	    __progname, __progname, __progname);
 
 	exit(1);

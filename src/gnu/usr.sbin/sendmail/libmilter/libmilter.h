@@ -19,7 +19,7 @@
 #ifdef _DEFINE
 # define EXTERN
 # define INIT(x)	= x
-SM_IDSTR(MilterlId, "@(#)$Sendmail: libmilter.h,v 8.33.2.9 2003/01/03 22:14:40 ca Exp $")
+SM_IDSTR(MilterlId, "@(#)$Sendmail: libmilter.h,v 8.33.2.13 2003/10/20 21:51:50 msk Exp $")
 #else /* _DEFINE */
 # define EXTERN extern
 # define INIT(x)
@@ -151,7 +151,7 @@ typedef pthread_mutex_t smutex_t;
 
 /* hack */
 #define smi_log		syslog
-#define sm_dprintf	printf
+#define sm_dprintf	(void) printf
 #define milter_ret	int
 #define SMI_LOG_ERR	LOG_ERR
 #define SMI_LOG_FATAL	LOG_ERR
@@ -176,7 +176,7 @@ extern void	mi_clean_signals __P((void));
 extern struct hostent *mi_gethostbyname __P((char *, int));
 extern int	mi_inet_pton __P((int, const char *, void *));
 extern void	mi_closener __P((void));
-extern int	mi_opensocket __P((char *, int, int, smfiDesc_ptr));
+extern int	mi_opensocket __P((char *, int, int, bool, smfiDesc_ptr));
 
 /* communication functions */
 extern char	*mi_rd_cmd __P((socket_t, struct timeval *, char *, size_t *, char *));

@@ -1,10 +1,10 @@
-/*	$OpenBSD: ike_quick_mode.c,v 1.70 2003/06/10 16:41:29 deraadt Exp $	*/
+/*	$OpenBSD: ike_quick_mode.c,v 1.75 2004/02/27 10:16:26 ho Exp $	*/
 /*	$EOM: ike_quick_mode.c,v 1.139 2001/01/26 10:43:17 niklas Exp $	*/
 
 /*
  * Copyright (c) 1998, 1999, 2000, 2001 Niklas Hallqvist.  All rights reserved.
  * Copyright (c) 1999, 2000, 2001 Angelos D. Keromytis.  All rights reserved.
- * Copyright (c) 2000, 2001 Håkan Olsson.  All rights reserved.
+ * Copyright (c) 2000, 2001, 2004 Håkan Olsson.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -139,9 +139,8 @@ check_policy (struct exchange *exchange, struct sa *sa, struct sa *isakmp_sa)
       keynote_ids = calloc (keynote_policy_asserts_num, sizeof *keynote_ids);
       if (!keynote_ids)
         {
-	  log_error ("check_policy: "
-	     "failed to allocate %lu bytes for book keeping",
-	     keynote_policy_asserts_num * (unsigned long)sizeof *keynote_ids);
+	  log_error ("check_policy: calloc (%d, %lu) failed",
+	     keynote_policy_asserts_num, (unsigned long)sizeof *keynote_ids);
 	  return 0;
         }
     }
@@ -446,6 +445,7 @@ initiator_send_HASH_SA_NONCE (struct message *msg)
   struct ipsec_sa *isa = msg->isakmp_sa->data;
   struct hash *hash = hash_get (isa->hash);
   struct sockaddr *src;
+  struct proto_attr *pa;
 
   if (!ipsec_add_hash_payload (msg, hash->hashsize))
     return -1;
@@ -779,6 +779,23 @@ initiator_send_HASH_SA_NONCE (struct message *msg)
 	  proto->no = suite_no + 1;
 	  proto->proto = protocol_num;
 	  proto->sa = TAILQ_FIRST (&exchange->sa_list);
+	  proto->xf_cnt = transform_cnt[prop_no];
+	  TAILQ_INIT (&proto->xfs);
+	  for (xf_no = 0; xf_no < proto->xf_cnt; xf_no++)
+	    {
+	      pa = (struct proto_attr *)calloc (1, sizeof *pa);
+	      if (!pa)
+		goto bail_out;
+	      pa->len = transform_len[prop_no][xf_no];
+	      pa->attrs = (u_int8_t *)malloc (pa->len);
+	      if (!pa->attrs)
+		{
+		  free (pa);
+		  goto bail_out;
+		}
+	      memcpy (pa->attrs, transform[prop_no][xf_no], pa->len);
+	      TAILQ_INSERT_TAIL (&proto->xfs, pa, next);
+	    }
 	  TAILQ_INSERT_TAIL (&TAILQ_FIRST (&exchange->sa_list)->protos, proto,
 			     link);
 
@@ -926,8 +943,8 @@ initiator_send_HASH_SA_NONCE (struct message *msg)
       id = calloc (sz, sizeof (char));
       if (!id)
 	{
-	  log_error ("initiator_send_HASH_SA_NONCE: malloc(%lu) failed",
-		     (unsigned long)sz);
+	  log_error ("initiator_send_HASH_SA_NONCE: calloc (%lu, %lu) failed",
+		     (unsigned long)sz, (unsigned long)sizeof (char));
 	  return -1;
 	}
 
@@ -1163,12 +1180,18 @@ initiator_recv_HASH_SA_NONCE (struct message *msg)
 
       if (!ie->id_ci || !ie->id_cr)
 	{
-	  log_error ("initiator_recv_HASH_SA_NONCE: malloc (%lu) failed",
-		     (unsigned long)ie->id_cr_sz);
+	  log_error ("initiator_recv_HASH_SA_NONCE: calloc (%lu, %lu) failed",
+		     (unsigned long)ie->id_cr_sz, (unsigned long)sizeof (char));
 	  if (ie->id_ci)
-	    free (ie->id_ci);
+	    {
+	      free (ie->id_ci);
+	      ie->id_ci = 0;
+	    }
 	  if (ie->id_cr)
-	    free (ie->id_cr);
+	    {
+	      free (ie->id_cr);
+	      ie->id_cr = 0;
+	    }
 	  return -1;
 	}
 
@@ -1176,7 +1199,9 @@ initiator_recv_HASH_SA_NONCE (struct message *msg)
 	{
 	  log_error ("initiator_recv_HASH_SA_NONCE: sa_family mismatch");
 	  free (ie->id_ci);
+	  ie->id_ci = 0;
 	  free (ie->id_cr);
+	  ie->id_cr = 0;
 	  return -1;
 	}
 
@@ -1196,7 +1221,9 @@ initiator_recv_HASH_SA_NONCE (struct message *msg)
 	  log_error ("initiator_recv_HASH_SA_NONCE: unknown sa_family %d",
 		     src->sa_family);
 	  free (ie->id_ci);
+	  ie->id_ci = 0;
 	  free (ie->id_cr);
+	  ie->id_cr = 0;
 	  return -1;
 	}
       memcpy (ie->id_ci + ISAKMP_ID_DATA_OFF, sockaddr_addrdata (src),
@@ -1429,6 +1456,12 @@ post_quick_mode (struct message *msg)
 	    }
 	}
     }
+
+  log_verbose ("isakmpd: quick mode done: %s",
+	           !msg->isakmp_sa || !msg->isakmp_sa->transport
+		   ? "<no transport>"
+		   : msg->isakmp_sa->transport->vtbl->decode_ids
+		   (msg->isakmp_sa ->transport));
 }
 
 /*
@@ -1581,8 +1614,8 @@ responder_recv_HASH_SA_NONCE (struct message *msg)
 
       if (!ie->id_ci || !ie->id_cr)
 	{
-	  log_error ("responder_recv_HASH_SA_NONCE: malloc (%lu) failed",
-		     (unsigned long)ie->id_ci_sz);
+	  log_error ("responder_recv_HASH_SA_NONCE: calloc (%lu, %lu) failed",
+		     (unsigned long)ie->id_ci_sz, (unsigned long)sizeof (char));
 	  goto cleanup;
 	}
 
@@ -1744,9 +1777,15 @@ cleanup:
   if (my_hash)
     free (my_hash);
   if (ie->id_ci)
-    free (ie->id_ci);
+    {
+      free (ie->id_ci);
+      ie->id_ci = 0;
+    }
   if (ie->id_cr)
-    free (ie->id_cr);
+    {
+      free (ie->id_cr);
+      ie->id_cr = 0;
+    }
   return -1;
 }
 

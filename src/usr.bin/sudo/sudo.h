@@ -182,6 +182,9 @@ struct sudo_user {
  */
 #define YY_DECL int yylex __P((void))
 
+#ifndef HAVE_CLOSEFROM
+void closefrom		__P((int));
+#endif
 #ifndef HAVE_GETCWD
 char *getcwd		__P((char *, size_t size));
 #endif
@@ -237,6 +240,7 @@ int user_is_exempt	__P((void));
 void set_fqdn		__P((void));
 char *sudo_getepw	__P((struct passwd *));
 int pam_prep_user	__P((struct passwd *));
+void zero_bytes		__P((volatile VOID *, size_t));
 YY_DECL;
 
 /* Only provide extern declarations outside of sudo.c. */

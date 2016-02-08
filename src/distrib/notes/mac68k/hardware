@@ -1,4 +1,4 @@
-dnl	$OpenBSD: hardware,v 1.17 2003/05/05 20:18:02 miod Exp $
+dnl	$OpenBSD: hardware,v 1.20 2004/03/25 08:38:52 tom Exp $
 OpenBSD/MACHINE OSREV runs on several of the older Macintosh computers.
 6MB of RAM should be sufficient to boot and a minimal system can probably
 be squeezed onto a 100MB partition by installing just the minimum sets.
@@ -7,7 +7,7 @@ booting, more RAM and disk space is highly recommended. About 250MB will be
 necessary to install all of the OpenBSD OSREV binary distribution (note that
 this does not count swap space!).  Much more disk space is required to
 install the source and objects as well (about another 600MB).
-A MacOS partition is also required to install OpenBSD/MACHINE OSREV and boot it,
+A Mac OS partition is also required to install OpenBSD/MACHINE OSREV and boot it,
 see below.
 
 OpenBSD/MACHINE OSREV now runs on most 680x0 MacIntosh's.  Specifically, it
@@ -26,7 +26,7 @@ machine.
 	Color Classic, Classic II, LC520, LC550, Performa 4xx,  LCII,
 	LCIII, MacTV, Quadra 610, Quadra 700, Quadra 650, Quadra 800,
 	Quadra 840AV, some Duo Series,
-	Powerbook 180 and 180c, PB140, PB145, PB145B, PB160, PB170, PB165,
+	PowerBook 180 and 180c, PB140, PB145, PB145B, PB160, PB170, PB165,
 	PB165c
 
 
@@ -40,7 +40,7 @@ Supported devices on all of the above systems {:-include-:}:
 	ADB keyboards and mice
 	Ethernet cards based on the Natl. Semiconductor 8390
 		(Asante, Apple, and a few others)
-	Some ethernet cards based on the SONIC chip including internal
+	Some Ethernet cards based on the SONIC chip including internal
 		Ethernet on many of Apple's non-AV Quadras/Centrises and
 		PowerBook 500 series.
 	
@@ -63,7 +63,7 @@ What isn't supported, but often asked about:
 		itself contains a major bug which is presently being worked
 		on.  However, machines such as the Centris 605 don't work
 		right now.
-	LCPDS ethernet cards.
-	Apple Communication Slot (CS) ethernet cards.
-	Quadra/Centris AV series' onboard MACE ethernet.
+	LCPDS Ethernet cards.
+	Apple Communication Slot (CS) Ethernet cards.
+	Quadra/Centris AV series' onboard MACE Ethernet.
 	Floppy drive.

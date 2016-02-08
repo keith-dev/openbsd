@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.184 2003/08/21 19:10:19 frantzen Exp $
+#	$OpenBSD: Makefile,v 1.201 2004/02/29 18:02:14 deraadt Exp $
 
 TZDIR=		/usr/share/zoneinfo
 LOCALTIME=	Canada/Mountain
@@ -22,9 +22,11 @@ BIN1=	bootptab changelist ccd.conf csh.cshrc csh.login csh.logout \
 	shells spamd.conf syslog.conf weekly etc.${MACHINE}/disktab \
 	dhclient.conf mailer.conf
 
-.if (${MACHINE} == "alpha" || ${MACHINE} == "hppa" || \
-     ${MACHINE} == "i386" || ${MACHINE} == "macppc" || \
-     ${MACHINE} == "sparc" || ${MACHINE} == "sparc64")
+.if ${MACHINE} == "alpha" || ${MACHINE} == "hppa" || \
+    ${MACHINE} == "i386" || ${MACHINE} == "macppc" || \
+    ${MACHINE} == "pegasos" || ${MACHINE} == "sparc" || \
+    ${MACHINE} == "sparc64" || ${MACHINE} == "amd64" || \
+    ${MACHINE} == "cats"
 BIN1+=	wsconsctl.conf
 .endif
 
@@ -77,8 +79,10 @@ distribution-etc-root-var: distrib-dirs
 	${INSTALL} -c -o root -g wheel -m 600 master.passwd ${DESTDIR}/etc
 	pwd_mkdb -p -d ${DESTDIR}/etc /etc/master.passwd
 	${INSTALL} -c -o root -g wheel -m 644 moduli ${DESTDIR}/etc
+	${INSTALL} -c -o root -g wheel -m 600 bgpd.conf ${DESTDIR}/etc
 	${INSTALL} -c -o root -g wheel -m 600 pf.conf ${DESTDIR}/etc
 	${INSTALL} -c -o root -g wheel -m 644 pf.os ${DESTDIR}/etc
+	${INSTALL} -c -o root -g wheel -m 644 sensorsd.conf ${DESTDIR}/etc
 	${INSTALL} -c -o ${BINOWN} -g ${BINGRP} -m 555 \
 	    etc.${MACHINE}/MAKEDEV ${DESTDIR}/dev
 	cd root; \
@@ -230,11 +234,7 @@ distribution-etc-root-var: distrib-dirs
 	cd ../lib/libssl && exec ${MAKE} distribution
 	cd ../gnu/usr.bin/lynx && exec ${MAKE} -f Makefile.bsd-wrapper distribution
 	cd ../usr.bin/mail && exec ${MAKE} distribution
-	${INSTALL} -c -o root -g ${BINGRP} -m 644 aliases \
-	    ${DESTDIR}/etc/mail/aliases
-	/usr/libexec/sendmail/sendmail -C${DESTDIR}/etc/mail/sendmail.cf \
-	    -bi -O AliasFile=${DESTDIR}/etc/mail/aliases \
-	    -O DontBlameSendmail=mapinunsafedirpath
+	cd mail && exec ${MAKE} distribution
 	${INSTALL} -c -o root -g wheel -m 600 root/root.mail \
 		${DESTDIR}/var/mail/root
 	${INSTALL} -c -o root -g wheel -m 440 ../usr.bin/sudo/sudoers \
@@ -329,6 +329,8 @@ snap_md:
 .endif	# DESTDIR check
 
 MAKEDEVARCHS+= alpha
+MAKEDEVARCHS+= amd64
+MAKEDEVARCHS+= cats
 MAKEDEVARCHS+= hp300
 MAKEDEVARCHS+= hppa
 MAKEDEVARCHS+= i386
@@ -337,9 +339,10 @@ MAKEDEVARCHS+= macppc
 MAKEDEVARCHS+= mvme68k
 MAKEDEVARCHS+= mvme88k
 #MAKEDEVARCHS+= mvmeppc
+MAKEDEVARCHS+= pegasos
 MAKEDEVARCHS+= sparc
 MAKEDEVARCHS+= sparc64
-#MAKEDEVARCHS+= vax
+MAKEDEVARCHS+= vax
 
 clean:
 	rm -f etc.${MACHINE}/MAKEDEV
@@ -348,21 +351,39 @@ cleandir:
 	cd ${.CURDIR}; for m in ${MAKEDEVARCHS}; do \
 	    ${MAKE} MACHINE=$$m clean; done
 
+MAKEDEVSRC=	MAKEDEV.mi MAKEDEV.sub MAKEDEV.common
+MAKEDEVDOC=	MAKEDEV.man MAKEDEV.mansub MAKEDEV.common
 m4: etc.${M}/MAKEDEV
+man: ${.CURDIR}/../share/man/man8/man.${M}/MAKEDEV.8
 
-etc.${M}/MAKEDEV: MAKEDEV.sub MAKEDEV.mi etc.${M}/MAKEDEV.md
-	echo "==> etc.${M}/MAKEDEV"
+etc.${M}/MAKEDEV: ${MAKEDEVSRC} etc.${M}/MAKEDEV.md
+	@echo "==> etc.${M}/MAKEDEV"
 	m4 -DMACHINE=${M} MAKEDEV.mi > etc.${M}/.MAKEDEV.tmp && \
 	    mv etc.${M}/.MAKEDEV.tmp etc.${M}/MAKEDEV || \
 	    rm etc.${M}/.MAKEDEV.tmp
 
-allarchs: MAKEDEV.sub MAKEDEV.mi
+${.CURDIR}/../share/man/man8/man.${M}/MAKEDEV.8: ${MAKEDEVDOC} etc.${M}/MAKEDEV.md
+	m4 -DMACHINE=${M} MAKEDEV.man > \
+	    ${.CURDIR}/../share/man/man8/man8.${M}/MAKEDEV.8
+
+allarchs: ${MAKEDEVSRC} ${MAKEDEVDOC}
 	cd ${.CURDIR}; for m in ${MAKEDEVARCHS}; do \
-	    ${MAKE} M=$$m m4; done
+	    ${MAKE} M=$$m m4 man; done
 
 distrib:
 	cd ${.CURDIR}/../distrib && \
 	    ${MAKE} cleandir && ${MAKE} && exec ${SUDO} ${MAKE} install
+
+DHSIZE=1024 1536 2048 3072 4096
+update-moduli:
+	( \
+		echo '#    $$OpenBSD: Makefile,v 1.201 2004/02/29 18:02:14 deraadt Exp $$'; \
+		echo '# Time Type Tests Tries Size Generator Modulus'; \
+		( for i in ${DHSIZE}; do \
+			ssh-keygen -b $$i -G /dev/stdout; \
+		done) | \
+		ssh-keygen -T /dev/stdout \
+	) > moduli
 
 .PHONY: distribution-etc-root-var distribution distrib-dirs \
 	release snapshot allarchs snap_pre snap_tar snap_md m4

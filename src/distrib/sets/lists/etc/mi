@@ -7,6 +7,7 @@
 ./etc/afs/afsd.conf
 ./etc/amd/master.sample
 ./etc/authpf
+./etc/bgpd.conf
 ./etc/bootptab
 ./etc/ccd.conf
 ./etc/changelist
@@ -39,12 +40,23 @@
 ./etc/lynx.cfg
 ./etc/magic
 ./etc/mail.rc
+./etc/mail/Makefile
+./etc/mail/README
+./etc/mail/access
+./etc/mail/access.db
 ./etc/mail/aliases
 ./etc/mail/aliases.db
 ./etc/mail/helpfile
+./etc/mail/local-host-names
 ./etc/mail/localhost.cf
+./etc/mail/mailertable
+./etc/mail/mailertable.db
+./etc/mail/relay-domains
 ./etc/mail/sendmail.cf
 ./etc/mail/submit.cf
+./etc/mail/trusted-users
+./etc/mail/virtusertable
+./etc/mail/virtusertable.db
 ./etc/mailer.conf
 ./etc/man.conf
 ./etc/master.passwd
@@ -88,6 +100,7 @@
 ./etc/rmt
 ./etc/rpc
 ./etc/security
+./etc/sensorsd.conf
 ./etc/services
 ./etc/shells
 ./etc/skel/.cshrc
@@ -161,6 +174,7 @@
 ./var/www/htdocs/lock.gif
 ./var/www/htdocs/logo23.jpg
 ./var/www/htdocs/logo24.jpg
+./var/www/htdocs/manual/FAQ.html
 ./var/www/htdocs/manual/LICENSE
 ./var/www/htdocs/manual/bind.html.en
 ./var/www/htdocs/manual/bind.html.fr
@@ -174,7 +188,6 @@
 ./var/www/htdocs/manual/configuring.html.fr
 ./var/www/htdocs/manual/configuring.html.html
 ./var/www/htdocs/manual/configuring.html.ja.jis
-./var/www/htdocs/manual/content-negotiation.html
 ./var/www/htdocs/manual/content-negotiation.html.en
 ./var/www/htdocs/manual/content-negotiation.html.html
 ./var/www/htdocs/manual/content-negotiation.html.ja.jis
@@ -332,7 +345,6 @@
 ./var/www/htdocs/manual/mod/mod_isapi.html
 ./var/www/htdocs/manual/mod/mod_log_agent.html
 ./var/www/htdocs/manual/mod/mod_log_common.html
-./var/www/htdocs/manual/mod/mod_log_config.html
 ./var/www/htdocs/manual/mod/mod_log_config.html.en
 ./var/www/htdocs/manual/mod/mod_log_config.html.html
 ./var/www/htdocs/manual/mod/mod_log_config.html.ja.jis
@@ -346,7 +358,9 @@
 ./var/www/htdocs/manual/mod/mod_negotiation.html.html
 ./var/www/htdocs/manual/mod/mod_negotiation.html.ja.jis
 ./var/www/htdocs/manual/mod/mod_proxy.html
-./var/www/htdocs/manual/mod/mod_rewrite.html
+./var/www/htdocs/manual/mod/mod_rewrite.html.en
+./var/www/htdocs/manual/mod/mod_rewrite.html.html
+./var/www/htdocs/manual/mod/mod_rewrite.html.ja.jis
 ./var/www/htdocs/manual/mod/mod_setenvif.html.en
 ./var/www/htdocs/manual/mod/mod_setenvif.html.html
 ./var/www/htdocs/manual/mod/mod_setenvif.html.ja.jis

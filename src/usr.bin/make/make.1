@@ -1,4 +1,4 @@
-.\"	$OpenBSD: make.1,v 1.56 2003/09/04 22:14:43 jmc Exp $
+.\"	$OpenBSD: make.1,v 1.62 2004/03/13 22:57:09 jmc Exp $
 .\"	$OpenPackages$
 .\"	$NetBSD: make.1,v 1.18 1997/03/10 21:19:53 christos Exp $
 .\"
@@ -47,7 +47,7 @@
 .Op Fl j Ar max_jobs
 .Op Fl m Ar directory
 .Op Fl V Ar variable
-.Op Ar variable Ns No = Ns Ar value
+.Op Ar NAME Ns = Ns Ar value
 .Bk -words
 .Op Ar target ...
 .Ek
@@ -121,9 +121,9 @@ before each command line in the makefile.
 .It Fl t
 Rather than re-building a target as specified in the makefile, create it
 or update its modification time to make it appear up-to-date.
-.It Ar variable Ns No = Ns Ar value
+.It Ar NAME Ns = Ns Ar value
 Set the value of the variable
-.Ar variable
+.Ar NAME
 to
 .Ar value .
 .El
@@ -189,7 +189,7 @@ Specify the maximum number of jobs that
 .Nm
 may have running at any one time.
 Turns compatibility mode off, unless the
-.Ar B
+.Fl B
 flag is also specified.
 .It Fl m Ar directory
 Specify a directory in which to search for
@@ -243,13 +243,14 @@ by the operator that separates them.
 Note that the use of several targets is merely a shorthand for duplicate
 rules.
 Specifically,
-.Bd -literal
+.Bd -literal -offset indent
 target1 target2: depa depb
 	cmd1
 	cmd2
 .Ed
+.Pp
 is just a short form of
-.Bd -literal
+.Bd -literal -offset indent
 target1: depa depb
 	cmd1
 	cmd2
@@ -260,7 +261,7 @@ target2: depa depb
 .Pp
 .Nm
 does not support Solaris syntax for true multiple targets:
-.Bd -literal
+.Bd -literal -offset indent
 target1 + target2: depa depb
 	cmd1
 	cmd2
@@ -340,7 +341,7 @@ If a command line begins with a combination of the characters,
 .Sq Ic \-
 and/or
 .Sq Ic + ,
-the command is treated specially.
+the command is treated specially:
 .Bl -tag -width `@'
 .It Sq Ic @
 causes the command not to be echoed before it is executed.
@@ -349,7 +350,8 @@ causes any non-zero exit status of the command line to be ignored.
 .It Sq Ic +
 causes the command to be executed even if
 .Fl n
-has been specified (This can be useful to debug recursive Makefiles).
+has been specified.
+(This can be useful to debug recursive Makefiles.)
 .El
 .Pp
 The command is always executed using
@@ -362,6 +364,9 @@ Variables in
 .Nm
 are much like variables in the shell, and, by tradition,
 consist of all upper-case letters.
+They are also called
+.Sq macros
+in various texts.
 For portability, only periods, underscores, digits and letters should be
 used for variable names.
 The five operators that can be used to assign values to variables are as
@@ -372,7 +377,7 @@ Assign the value to the variable.
 Any previous value is overridden.
 .It Ic \&:=
 Assign with expansion, i.e., expand the value before assigning it
-to the variable (extension)
+to the variable (extension).
 .It Ic \&+=
 Append the value to the current value of the variable (extension).
 .It Ic \&?=
@@ -459,7 +464,7 @@ should only be used for actual implied rules.
 It is also set when there is an implied rule that matches the current
 dependency in scope.
 That is, in
-.Bd -literal
+.Bd -literal -offset indent
 \&.SUFFIXES: .c.o
 file.o: file.c
 	cmd1 $<
@@ -467,6 +472,7 @@ file.o: file.c
 \&.c.o:
 	cmd2
 .Ed
+.Pp
 building
 .Pa file.o
 will execute
@@ -623,11 +629,11 @@ is currently building.
 .It Va .INCLUDES
 See
 .Ic .INCLUDES
-special target
+special target.
 .It Va .LIBS
 See
 .Ic .LIBS
-special target
+special target.
 .It Va MACHINE
 Name of the machine architecture
 .Nm
@@ -657,15 +663,15 @@ special characters.
 The colon may be escaped with a backslash
 .Pq Ql \e .
 .Bl -tag -width Ds
-.It Cm E
+.It Cm :E
 Replaces each word in the variable with its suffix.
-.It Cm H
+.It Cm :H
 Replaces each word in the variable with everything but the last component.
-.It Cm L
+.It Cm :L
 Replaces each word in the variable with its lower case equivalent.
-.It Cm U
+.It Cm :U
 Replaces each word in the variable with its upper case equivalent.
-.It Cm M Ns Ar pattern
+.It Cm :M Ns Ar pattern
 Select only those words that match the rest of the modifier.
 The standard shell wildcard characters
 .Pf ( Ql * ,
@@ -676,19 +682,19 @@ may
 be used.
 The wildcard characters may be escaped with a backslash
 .Pq Ql \e .
-.It Cm N Ns Ar pattern
+.It Cm :N Ns Ar pattern
 This is identical to
-.Cm M ,
+.Cm :M ,
 but selects all words which do not match
 the rest of the modifier.
-.It Cm Q
+.It Cm :Q
 Quotes every shell meta-character in the variable, so that it can be passed
 safely through recursive invocations of
 .Nm make .
-.It Cm R
+.It Cm :R
 Replaces each word in the variable with everything but its suffix.
 .Sm off
-.It Cm S No \&/ Ar old_string Xo
+.It Cm :S No \&/ Ar old_string Xo
 .No \&/ Ar new_string
 .No \&/ Op Cm 1g
 .Xc
@@ -741,15 +747,15 @@ of a dollar sign
 .Pq Ql \&$ ,
 not a preceding dollar sign as is usual.
 .Sm off
-.It Cm C No \&/ Ar pattern Xo
+.It Cm :C No \&/ Ar pattern Xo
 .No \&/ Ar replacement
 .No \&/ Op Cm 1g
 .Xc
 .Sm on
 The
-.Cm C
+.Cm :C
 modifier is just like the
-.Cm S
+.Cm :S
 modifier except that the old and new strings, instead of being
 simple strings, are a regular expression (see
 .Xr regex 3 )
@@ -771,9 +777,9 @@ and
 are orthogonal; the former specifies whether multiple words are
 potentially affected, the latter whether multiple substitutions can
 potentially occur within each affected word.
-.It Cm T
+.It Cm :T
 Replaces each word in the variable with its last component.
-.It Ar old_string Ns No = Ns Ar new_string
+.It Ar :old_string Ns = Ns Ar new_string
 This is the
 .At V
 style variable substitution.
@@ -807,13 +813,14 @@ dot
 .Pq Ql \&.
 character.
 Whitespace characters may follow this dot, e.g.,
-.Bd -literal
-    \&.include <file>
+.Bd -literal -offset indent
+\&.include <file>
 .Ed
 and
-.Bd -literal
-    \&.   include <file>
+.Bd -literal -offset indent -compact
+\&.   include <file>
 .Ed
+.Pp
 are identical constructs.
 Files are included with either
 .Ql .include <file>
@@ -1230,7 +1237,7 @@ command in the file.
 .It Ic .SUFFIXES
 Each source specifies a suffix to
 .Nm make .
-If no sources are specified, any previously specified suffices are deleted.
+If no sources are specified, any previously specified suffixes are deleted.
 .El
 .Sh ENVIRONMENT
 .Nm
@@ -1259,13 +1266,18 @@ list of dependencies
 system makefile
 .It Pa /usr/share/mk
 system makefile directory
-.IT Pa /usr/obj
+.It Pa /usr/obj
 default
 .Ev MAKEOBJDIRPREFIX
-directory.
+directory
 .El
 .Sh SEE ALSO
-.Xr mkdep 1
+.Xr ed 1 ,
+.Xr mkdep 1 ,
+.Xr sh 1 ,
+.Xr getcwd 3 ,
+.Xr regex 3 ,
+.Xr uname 3
 .Pp
 .Rs
 .%T Make \- A Tutorial
@@ -1305,7 +1317,7 @@ If the same target is specified several times in normal dependency rules,
 .Nm
 silently ignores all commands after the first non empty set of commands,
 e.g., in
-.Bd -literal
+.Bd -literal -offset indent
 a:
 	@echo "Executed"
 a:
@@ -1331,7 +1343,7 @@ For instance, tests should be written as
 not the other way around, which doesn't work.
 .Pp
 For loops are expanded before tests, so a fragment such as:
-.Bd -literal
+.Bd -literal -offset indent
 \&.for TMACHINE in ${SHARED_ARCHS}
 \&.if ${TMACHINE} = ${MACHINE}
      ...
@@ -1346,10 +1358,11 @@ When handling pre-BSD 4.4 archives,
 may erroneously mark archive members as out of date if the archive name
 was truncated.
 .Pp
-The handling of ; and other special characters in tests may be utterly
-bogus.
+The handling of
+.Sq ;\&
+and other special characters in tests may be utterly bogus.
 For instance, in
-.Bd -literal
+.Bd -literal -offset indent
 \&A=abcd;c.c
 \&.if ${A:R} == "abcd;c"
 .Ed
@@ -1358,21 +1371,22 @@ the test will never match, even though the value is correct.
 .Pp
 The conditional handler is incredibly lame.
 Junk such as
-.Bd -literal
-\&.if defined anything goes (A)
-.Ed
+.Pp
+.Dl \&.if defined anything goes (A)
 .Pp
 will be accepted silently.
 .Pp
-In a .for loop, only the variable value is used, assignments will be
+In a .for loop, only the variable value is used; assignments will be
 evaluated later, e.g., in
-.Bd -literal
+.Bd -literal -offset indent
 \&.for I in a b c d
 I:=${I:S/a/z}
 A+=$I
 \&.endfor
 .Ed
-A will evaluate to a b c d after the loop, not z b c d.
+.Pp
+.Sq A
+will evaluate to a b c d after the loop, not z b c d.
 .Pp
 The
 .Ql +

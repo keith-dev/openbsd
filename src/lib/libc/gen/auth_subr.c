@@ -1,4 +1,4 @@
-/*	$OpenBSD: auth_subr.c,v 1.23 2003/06/11 21:03:10 deraadt Exp $	*/
+/*	$OpenBSD: auth_subr.c,v 1.26 2004/01/23 03:48:42 deraadt Exp $	*/
 
 /*-
  * Copyright (c) 1995,1996,1997 Berkeley Software Design, Inc.
@@ -129,7 +129,13 @@ static va_list nilap;
  * Quick one liners that only exist to keep auth_session_t opaque
  */
 void	auth_setstate(auth_session_t *as, int s){ as->state = s; }
-void	auth_set_va_list(auth_session_t *as, va_list ap) { as->ap = ap; }
+void	auth_set_va_list(auth_session_t *as, va_list ap) {
+#if defined(__GNUC__) && __GNUC__ >= 3
+	va_copy(as->ap, ap);
+#else
+	as->ap = ap;
+#endif
+}
 int	auth_getstate(auth_session_t *as)	{ return (as->state); }
 struct passwd *auth_getpwd(auth_session_t *as)	{ return (as->pwd); }
 
@@ -171,14 +177,6 @@ auth_clean(auth_session_t *as)
 		as->rmlist = rm->next;
 		unlink(rm->file);
 		free(rm);
-	}
-
-	/*
-	 * Clean out the opt list
-	 */
-	while ((opt = as->optlist) != NULL) {
-		as->optlist = opt->next;
-		free(opt);
 	}
 
 	/*
@@ -829,9 +827,7 @@ auth_call(auth_session_t *as, char *path, ...)
 			close(pfd[1]);
 		}
 
-		for (status = getdtablesize() - 1; status > COMM_FD; status--)
-			close(status);
-
+		closefrom(COMM_FD + 1);
 		execve(path, argv, auth_environ);
 		syslog(LOG_ERR, "%s: %m", path);
 		err(1, "%s", path);

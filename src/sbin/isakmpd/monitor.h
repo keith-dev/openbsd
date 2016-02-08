@@ -1,4 +1,4 @@
-/*	$OpenBSD: monitor.h,v 1.5 2003/06/10 16:41:29 deraadt Exp $	*/
+/*	$OpenBSD: monitor.h,v 1.7 2004/03/19 14:04:43 hshoexer Exp $	*/
 
 /*
  * Copyright (c) 2003 Håkan Olsson.  All rights reserved.
@@ -24,10 +24,19 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
+#ifndef _MONITOR_H_
+#define _MONITOR_H_
+
 #if defined (USE_PRIVSEP)
+#include <sys/types.h>
+#include <sys/stat.h>
+
+#include <dirent.h>
 #include <stdio.h>
 
 #define ISAKMPD_PRIVSEP_USER "_isakmpd"
+
+#define ISAKMP_PORT_DEFAULT	500
 
 enum monitor_reqtypes
 {
@@ -36,13 +45,20 @@ enum monitor_reqtypes
   MONITOR_SETSOCKOPT,
   MONITOR_BIND,
   MONITOR_MKFIFO,
-  MONITOR_SHUTDOWN,
-#if defined (USE_X509)
-  MONITOR_RSA_UPLOADKEY,
-  MONITOR_RSA_GETKEY,
-  MONITOR_RSA_ENCRYPT,
-  MONITOR_RSA_FREEKEY,
-#endif
+  MONITOR_INIT_DONE,
+  MONITOR_SHUTDOWN
+};
+
+enum priv_state {
+	STATE_INIT,		/* just started */
+	STATE_RUNNING,		/* running */
+	STATE_QUIT		/* shutting down */
+};
+
+struct monitor_dirents
+{
+  int	 current;
+  struct dirent **dirents;
 };
 
 pid_t	monitor_init (void);
@@ -51,7 +67,6 @@ void	monitor_loop (int);
 int	mm_send_fd (int, int);
 int	mm_receive_fd (int);
 
-struct stat;
 FILE	*monitor_fopen (const char *, const char *);
 int	monitor_open (const char *, int, mode_t);
 int	monitor_stat (const char *, struct stat *);
@@ -59,14 +74,10 @@ int	monitor_socket (int, int, int);
 int	monitor_setsockopt (int, int, int, const void *, socklen_t);
 int	monitor_bind (int, const struct sockaddr *, socklen_t);
 int	monitor_mkfifo (const char *, mode_t);
-
-#if defined (USE_X509)
-char	*monitor_RSA_upload_key (char *);
-char	*monitor_RSA_get_private_key (char *, char *);
-int	monitor_RSA_private_encrypt (int, unsigned char *, unsigned char **,
-				     void *, int);
-void	monitor_RSA_free (void *);
-#endif
+struct monitor_dirents	*monitor_opendir (const char *);
+struct dirent	*monitor_readdir (struct monitor_dirents *);
+int	monitor_closedir (struct monitor_dirents *);
+void	monitor_init_done (void);
 
 #else /* !USE_PRIVSEP */
 
@@ -77,9 +88,9 @@ void	monitor_RSA_free (void *);
 #define monitor_setsockopt setsockopt
 #define monitor_bind bind
 #define monitor_mkfifo mkfifo
-
-#if defined (USE_X509)
-#define monitor_RSA_free RSA_free
-#endif
+#define monitor_opendir opendir
+#define monitor_readdir readdir
+#define monitor_closedir closedir
 
 #endif /* USE_PRIVSEP */
+#endif /* _MONITOR_H_ */

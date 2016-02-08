@@ -1,4 +1,4 @@
-.\"	$OpenBSD: intro.4,v 1.1 2003/08/07 19:22:38 miod Exp $
+.\"	$OpenBSD: intro.4,v 1.3 2003/12/27 23:59:47 miod Exp $
 .\" Copyright (c) 1990, 1991 Regents of the University of California.
 .\" All rights reserved.
 .\"
@@ -103,6 +103,8 @@ BusSwitch local peripheral bus interface.
 .\" Cirrus Logic CL2400 serial controller.
 .It Xr ie 4
 Intel i82596CA LAN coprocessor.
+.It Xr le 4
+MVME376 Ethernet Communications Controller.
 .\" .It Xr memc 4
 .\" memory controller.
 .It Xr pcctwo 4
@@ -111,14 +113,12 @@ PCCchip2 local bus controller.
 NCR 53C710 low level SCSI adapter interface.
 .\" .It Xr syscon 4
 .\" MVME188 system controller.
-.It Xr ve 4
-AMD 7990/LANCE-based MVME376 VME board
 .It Xr vme 4
 VMEchip2 VMEbus interface chip.
 .It Xr vs 4
-MVME328 low level SCSI adapter interface.
+MVME328S High Performance SCSI Controller.
 .\" .It Xr vx 4
-.\" MVME332 8-port serial board.
+.\" MVME332XT High Performance Serial I/O Controller.
 .El
 .Sh SEE ALSO
 .Xr autoconf 4 ,

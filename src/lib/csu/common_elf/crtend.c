@@ -1,13 +1,14 @@
-/*	$OpenBSD: crtend.c,v 1.2 2002/02/16 21:27:20 millert Exp $	*/
+/*	$OpenBSD: crtend.c,v 1.5 2004/01/26 20:04:11 espie Exp $	*/
 /*	$NetBSD: crtend.c,v 1.1 1996/09/12 16:59:04 cgd Exp $	*/
 
-#ifndef ECOFF_COMPAT
-
 #include <sys/cdefs.h>
+#include "md_init.h"
+#include "extern.h"
 
-static void (*__CTOR_LIST__[1])(void)
+static init_f __CTOR_LIST__[1]
     __attribute__((section(".ctors"))) = { (void *)0 };		/* XXX */
-static void (*__DTOR_LIST__[1])(void)
+static init_f __DTOR_LIST__[1]
     __attribute__((section(".dtors"))) = { (void *)0 };		/* XXX */
 
-#endif /* !ECOFF_COMPAT */
+MD_SECTION_EPILOGUE(".init");
+MD_SECTION_EPILOGUE(".fini");

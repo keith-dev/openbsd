@@ -1,4 +1,4 @@
-/*	$OpenBSD: diff.h,v 1.23 2003/08/01 20:54:18 deraadt Exp $	*/
+/*	$OpenBSD: diff.h,v 1.27 2004/03/16 00:40:34 millert Exp $	*/
 
 /*-
  * Copyright (c) 1991, 1993
@@ -61,15 +61,17 @@
 #define	D_ONLY		4	/* Only exists in one directory */
 #define	D_MISMATCH1	5	/* path1 was a dir, path2 a file */
 #define	D_MISMATCH2	6	/* path1 was a file, path2 a dir */
-#define	D_ERROR		7	/* An error ocurred */
+#define	D_ERROR		7	/* An error occurred */
+#define	D_SKIPPED1	8	/* path1 was a special file */
+#define	D_SKIPPED2	9	/* path2 was a special file */
 
 struct excludes {
 	char *pattern;
 	struct excludes *next;
 };
 
-extern int	aflag, bflag, dflag, iflag, lflag, Nflag, Pflag, rflag, sflag,
-		tflag, Tflag, wflag;
+extern int	aflag, bflag, dflag, iflag, lflag, Nflag, Pflag, pflag, rflag,
+		sflag, tflag, Tflag, wflag;
 extern int	format, context, status;
 extern char	*start, *ifdefname, *diffargs, *label;
 extern struct	stat stb1, stb2;
@@ -81,4 +83,5 @@ int	easprintf(char **, const char *, ...);
 void	*emalloc(size_t);
 void	*erealloc(void *, size_t);
 void	diffdir(char *, char *);
+void	print_only(const char *, size_t, const char *);
 void	print_status(int, char *, char *, char *);

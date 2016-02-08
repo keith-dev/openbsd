@@ -7,7 +7,7 @@
  */
 
 #include "includes.h"
-RCSID("$OpenBSD: ssh-keyscan.c,v 1.44 2003/06/28 16:23:06 deraadt Exp $");
+RCSID("$OpenBSD: ssh-keyscan.c,v 1.47 2004/03/08 09:38:05 djm Exp $");
 
 #include <sys/queue.h>
 #include <errno.h>
@@ -210,7 +210,7 @@ fdlim_get(int hard)
 	if (getrlimit(RLIMIT_NOFILE, &rlfd) < 0)
 		return (-1);
 	if ((hard ? rlfd.rlim_max : rlfd.rlim_cur) == RLIM_INFINITY)
-		return 10000;
+		return sysconf(_SC_OPEN_MAX);
 	else
 		return hard ? rlfd.rlim_max : rlfd.rlim_cur;
 }
@@ -476,7 +476,7 @@ conrecycle(int s)
 static void
 congreet(int s)
 {
-	int remote_major, remote_minor, n = 0;
+	int remote_major = 0, remote_minor = 0, n = 0;
 	char buf[256], *cp;
 	char remote_version[sizeof buf];
 	size_t bufsiz;
@@ -660,7 +660,7 @@ fatal(const char *fmt,...)
 	if (nonfatal_fatal)
 		longjmp(kexjmp, -1);
 	else
-		fatal_cleanup();
+		exit(255);
 }
 
 static void

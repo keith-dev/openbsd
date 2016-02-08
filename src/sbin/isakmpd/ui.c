@@ -1,4 +1,4 @@
-/*	$OpenBSD: ui.c,v 1.33 2003/06/03 14:28:16 ho Exp $	*/
+/*	$OpenBSD: ui.c,v 1.36 2004/03/19 14:04:43 hshoexer Exp $	*/
 /*	$EOM: ui.c,v 1.43 2000/10/05 09:25:12 niklas Exp $	*/
 
 /*
@@ -77,7 +77,12 @@ ui_init (void)
   else
     {
       /* Don't overwrite a file, i.e '-f /etc/isakmpd/isakmpd.conf'.  */
+#if defined (USE_PRIVSEP)
+      /* XXX This is a fstat! */
+      if (monitor_stat (ui_fifo, &st) == 0)
+#else
       if (lstat (ui_fifo, &st) == 0)
+#endif
 	if ((st.st_mode & S_IFMT) == S_IFREG)
 	  {
 	    errno = EEXIST;
@@ -110,7 +115,7 @@ ui_connect (char *cmd)
       log_print ("ui_connect: command \"%s\" malformed", cmd);
       return;
     }
-  log_print ("ui_connect: setup connection \"%s\"", name);
+  LOG_DBG ((LOG_UI, 10, "ui_connect: setup connection \"%s\"", name));
   connection_setup (name);
 }
 
@@ -126,7 +131,7 @@ ui_teardown (char *cmd)
       log_print ("ui_teardown: command \"%s\" malformed", cmd);
       return;
     }
-  log_print ("ui_teardown: teardown connection \"%s\"", name);
+  LOG_DBG ((LOG_UI, 10, "ui_teardown: teardown connection \"%s\"", name));
   connection_teardown (name);
   while ((sa = sa_lookup_by_name (name, 2)) != 0)
     sa_delete (sa, 1);
@@ -137,7 +142,7 @@ static void
 ui_teardown_all (char *cmd)
 {
   /* Skip 'cmd' as arg. */
-  sa_teardown_all();
+  sa_teardown_all ();
 }
 
 /*
@@ -178,7 +183,7 @@ ui_config (char *cmd)
   else
     goto fail;
 
-  log_print ("ui_config: \"%s\"", cmd);
+  LOG_DBG ((LOG_UI, 30, "ui_config: \"%s\"", cmd));
   conf_end (trans, 1);
   return;
 
@@ -221,8 +226,9 @@ ui_delete (char *cmd)
       log_print ("ui_delete: command \"%s\" found no SA", cmd);
       return;
     }
-  log_print ("ui_delete: deleting SA for cookie \"%s\" msgid \"%s\"",
-	     cookies_str, message_id_str);
+  LOG_DBG ((LOG_UI, 20, 
+	    "ui_delete: deleting SA for cookie \"%s\" msgid \"%s\"",
+	    cookies_str, message_id_str));
   sa_delete (sa, 1);
 }
 

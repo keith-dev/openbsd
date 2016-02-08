@@ -1,4 +1,4 @@
-/*	$OpenBSD: terminal.c,v 1.6 2003/06/11 08:45:33 pjanzen Exp $	*/
+/*	$OpenBSD: terminal.c,v 1.8 2004/01/16 00:13:19 espie Exp $	*/
 /*	$NetBSD: terminal.c,v 1.2 1997/10/10 16:34:05 lukem Exp $	*/
 /*
  * Copyright (c) 1983-2003, Regents of the University of California.
@@ -247,11 +247,11 @@ logx(prio, fmt)
 	else if (conf_logerr)
 	/* if (prio < LOG_NOTICE) */
 		vwarnx(fmt, ap);
-	va_end(fmt);
+	va_end(ap);
 }
 
 void
-log(prio, fmt)
+logit(prio, fmt)
 	int prio;
 	const char *fmt;
 {
@@ -266,5 +266,5 @@ log(prio, fmt)
 	} else if (conf_logerr)
 	/* if (prio < LOG_NOTICE) */
 		vwarn(fmt, ap);
-	va_end(fmt);
+	va_end(ap);
 }

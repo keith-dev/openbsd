@@ -1,5 +1,5 @@
 # Build wrapper for Apache 
-# $OpenBSD: Makefile.bsd-wrapper,v 1.41 2003/08/21 14:00:28 henning Exp $
+# $OpenBSD: Makefile.bsd-wrapper,v 1.46 2004/02/27 17:36:18 deraadt Exp $
 
 # Our lndir is hacked; specify a full path to avoid potential conflicts
 # with the one installed with X11.
@@ -97,9 +97,10 @@ INSTALL_MODULES=
 # If you support dynamic loading, enable the so module, and build all the
 # modules that come with Apache.
 
-.if ${MACHINE_ARCH} == "alpha" || ${MACHINE_ARCH} == "i386" || \
-    ${MACHINE_ARCH} == "m68k" || ${MACHINE_ARCH} == "powerpc" || \
-    ${MACHINE_ARCH} == "sparc" || ${MACHINE_ARCH} == "sparc64"
+.if ${MACHINE_ARCH} == "alpha" || ${MACHINE_ARCH} == "arm" || \
+    ${MACHINE_ARCH} == "i386" || ${MACHINE_ARCH} == "m68k" || \
+    ${MACHINE_ARCH} == "powerpc" || ${MACHINE_ARCH} == "sparc" || \
+    ${MACHINE_ARCH} == "sparc64" || ${MACHINE_ARCH} == "amd64"
 CONFIG_ARGS+=  ${DSO_MODULE_ARGS}
 INSTALL_MODULES= \
 	src/modules/experimental/mod_mmap_static.so \
@@ -233,6 +234,7 @@ HTDOCS= \
 CGIFILES=	cgi-bin/printenv cgi-bin/test-cgi	
 
 MANUALFILES= \
+	manual/FAQ.html \
 	manual/howto/auth.html \
 	manual/howto/htaccess.html \
 	manual/howto/cgi.html.en \
@@ -256,7 +258,6 @@ MANUALFILES= \
 	manual/configuring.html.fr \
 	manual/configuring.html.html \
 	manual/configuring.html.ja.jis \
-	manual/content-negotiation.html \
 	manual/content-negotiation.html.en \
 	manual/content-negotiation.html.html \
 	manual/content-negotiation.html.ja.jis \
@@ -488,7 +489,6 @@ MANUALFILES= \
 	manual/mod/mod_isapi.html \
 	manual/mod/mod_log_agent.html \
 	manual/mod/mod_log_common.html \
-	manual/mod/mod_log_config.html \
 	manual/mod/mod_log_config.html.en \
 	manual/mod/mod_log_config.html.html \
 	manual/mod/mod_log_config.html.ja.jis \
@@ -502,7 +502,9 @@ MANUALFILES= \
 	manual/mod/mod_negotiation.html.html \
 	manual/mod/mod_negotiation.html.ja.jis \
 	manual/mod/mod_proxy.html \
-	manual/mod/mod_rewrite.html \
+	manual/mod/mod_rewrite.html.en \
+	manual/mod/mod_rewrite.html.html \
+	manual/mod/mod_rewrite.html.ja.jis \
 	manual/mod/mod_setenvif.html.en \
 	manual/mod/mod_setenvif.html.html \
 	manual/mod/mod_so.html.en \

@@ -1,8 +1,8 @@
 vers(__file__,
-	{-$OpenBSD: MAKEDEV.md,v 1.19 2003/06/18 18:08:59 todd Exp $-},
+	{-$OpenBSD: MAKEDEV.md,v 1.23 2004/02/20 19:13:08 miod Exp $-},
 etc.MACHINE)dnl
 dnl
-dnl Copyright (c) 2001,2002,2003 Todd T. Fries <todd@OpenBSD.org>
+dnl Copyright (c) 2001-2004 Todd T. Fries <todd@OpenBSD.org>
 dnl
 dnl Permission to use, copy, modify, and distribute this software for any
 dnl purpose with or without fee is hereby granted, provided that the above
@@ -20,8 +20,8 @@ dnl
 dnl
 dnl *** some sparc-specific devices
 dnl
-__devitem(s64_tzs, tty[a-z]*, Zilog 8530 Serial Port)dnl
-__devitem(s64_czs, cua[a-z]*, Zilog 8530 Serial Port)dnl
+__devitem(s64_tzs, tty[a-z]*, Zilog 8530 serial ports,zs)dnl
+__devitem(s64_czs, cua[a-z]*, Zilog 8530 serial ports,zs)dnl
 _mkdev(s64_tzs, {-tty[a-z]-}, {-u=${i#tty*}
 	case $u in
 	a) n=0 ;;
@@ -51,27 +51,31 @@ dnl *** MAKEDEV itself
 dnl
 _TITLE(make)
 _DEV(all)
+_DEV(ramdisk)
 _DEV(std)
-_DEV(loc)
-_TITLE(tap)
-_DEV(st, 18, 11)
+_DEV(local)
 _TITLE(dis)
-_DEV(sd, 17, 7)
-_DEV(cd, 58, 18)
-_DEV(ch, 19)
-_DEV(uk, 120)
-_DEV(ss, 121)
-_DEV(xy, 9, 3)
-_DEV(rd, 106, 17)
-_DEV(xd, 42, 10)
-_DEV(flo, 54, 16)
-_DEV(vnd, 110, 8)
 _DEV(ccd, 23, 9)
+_DEV(cd, 58, 18)
+_DEV(flo, 54, 16)
 _DEV(presto, 25, 26)
+_DEV(sd, 17, 7)
+_DEV(raid, 123, 25)
+_DEV(rd, 106, 17)
+_DEV(vnd, 110, 8)
+_DEV(xd, 42, 10)
+_DEV(xy, 9, 3)
+_TITLE(tap)
+_DEV(ch, 19)
+_DEV(st, 18, 11)
+_TITLE(term)
+_DEV(s64_czs, 12)
+_DEV(s64_tzs, 12)
 _TITLE(pty)
-_DEV(tty, 20)
+_DEV(ptm, 125)
 _DEV(pty, 21)
-_TITLE(prn)
+_DEV(tty, 20)
+dnl _TTILE(prn)
 _TITLE(cons)
 _DEV(wscons)
 _DEV(wsdisp, 78)
@@ -79,29 +83,27 @@ _DEV(wskbd, 79)
 _DEV(wsmux, 81)
 _TITLE(point)
 _DEV(wsmouse, 80)
-_TITLE(term)
-_DEV(s64_tzs, 12)
-_DEV(s64_czs, 12)
 _TITLE(spec)
 _DEV(au, 69)
-_DEV(oppr)
 _DEV(bpf, 105)
-_DEV(pf, 59)
-_DEV(lkm, 112)
-_DEV(tun, 111)
-_DEV(rnd, 119)
-_DEV(mag, 100)
-_DEV(bppmag, 101)
-_DEV(spif, 102)
-_DEV(bppsp, 103)
 _DEV(bpp, 104)
-_DEV(xfs, 51)
-_DEV(raid, 123, 25)
+_DEV(bppmag, 101)
+_DEV(bppsp, 103)
 _DEV(fdesc, 24)
+_DEV(lkm, 112)
+_DEV(oppr)
+_DEV(mag, 100)
+_DEV(pf, 59)
+_DEV(rnd, 119)
+_DEV(spif, 102)
 _DEV(ses, 124)
+_DEV(ss, 121)
 _DEV(systrace, 50)
+_DEV(tun, 111)
+_DEV(uk, 120)
+_DEV(xfs, 51)
 dnl
-divert(7)dnl
+divert(__mddivert)dnl
 dnl
 ramdisk)
 	_recurse std random bpf0

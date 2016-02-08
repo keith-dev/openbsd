@@ -1,4 +1,4 @@
-.\"	$OpenBSD: sysctl.3,v 1.109 2003/09/09 10:00:24 jmc Exp $
+.\"	$OpenBSD: sysctl.3,v 1.136 2004/03/24 06:13:56 mcbride Exp $
 .\"
 .\" Copyright (c) 1993
 .\"	The Regents of the University of California.  All rights reserved.
@@ -270,6 +270,7 @@ privileges may change the value.
 .Bl -column "Second level nameXXXXXX" integerXXX -offset indent
 .It Sy Second level name	Type	Changeable
 .It Dv HW_BYTEORDER No "	integer	no"
+.It Dv HW_CPUSPEED No "	integer	no"
 .It Dv HW_DISKCOUNT No "	integer	no"
 .It Dv HW_DISKNAMES No "	string	no"
 .It Dv HW_DISKSTATS No "	struct	no"
@@ -279,11 +280,15 @@ privileges may change the value.
 .It Dv HW_PAGESIZE No "	integer	no"
 .It Dv HW_PHYSMEM No "	integer	no"
 .It Dv HW_SENSORS No "	struct	no"
+.It Dv HW_SETPERF No "	integer	yes"
 .It Dv HW_USERMEM No "	integer	no"
 .El
 .Bl -tag -width "123456"
 .It Dv HW_BYTEORDER
 The byteorder (4321 or 1234).
+.It Dv HW_CPUSPEED
+The CPU frequency
+.Pq in MHz .
 .It Dv HW_DISKCOUNT
 The number of disks currently attached to the system.
 .It Dv HW_DISKNAMES
@@ -306,6 +311,9 @@ The bytes of physical memory.
 An array of
 .Li struct sensor
 structures containing information from the hardware monitoring sensors.
+.It Dv HW_SETPERF
+Current CPU performance
+.Pq percentage .
 .It Dv HW_USERMEM
 The bytes of non-kernel memory.
 .El
@@ -358,7 +366,8 @@ information.
 .It Dv KERN_OSTYPE No "	string	no"
 .It Dv KERN_OSVERSION No "	string	no"
 .It Dv KERN_POSIX1 No "	integer	no"
-.It Dv KERN_PROC No "	struct proc	no"
+.It Dv KERN_PROC No "	struct kinfo_proc	no"
+.It Dv KERN_PROC2 No "	struct kinfo_proc2	no"
 .It Dv KERN_PROC_ARGS No "	node	not applicable"
 .It Dv KERN_PROF No "	node	not applicable"
 .It Dv KERN_RAWPARTITION No "	integer	no"
@@ -427,7 +436,7 @@ Enable binary emulation.
 .Bl -column "KERN_EMUL_FREEBSD" "string" -offset indent
 .It Sy Third level name	Type	Changeable
 .It Dv KERN_EMUL_ENABLED No "	integer	yes"
-.It Dv KERN_EMUL_NAME No "	string	yes"
+.It Dv KERN_EMUL_NAME No "	string	no"
 .It Dv KERN_EMUL_NEMULS No "	integer	no"
 .El
 .Pp
@@ -582,6 +591,15 @@ The third and fourth level names are as follows:
 .It Dv KERN_PROC_TTY No "	A tty device"
 .It Dv KERN_PROC_UID No "	A user ID"
 .El
+.It Dv KERN_PROC2
+Like
+.Dv KERN_PROC
+but an array of
+.Li struct kinfo_proc2
+structures is returned.
+The fifth level name is the size of the
+.Li struct kinfo_proc2
+and the sixth level name is the number of structures to return.
 .It Dv KERN_PROC_ARGS
 Returns the arguments or environment of a process.
 The third level name is the PID of the process.
@@ -820,6 +838,9 @@ The changeable column shows whether a process with appropriate
 privileges may change the value.
 .Bl -column "KERN_TTY_TKRAWCCXXX" "int64_tXX" -offset indent
 .It Sy Third level name	Type	Changeable
+.It Dv KERN_TTY_INFO No "	struct itty	no"
+.It Dv KERN_TTY_NPTYS No "	integer	no"
+.It Dv KERN_TTY_MAXPTYS No "	integer	yes"
 .It Dv KERN_TTY_TKCANCC No "	int64_t	no"
 .It Dv KERN_TTY_TKNIN No "	int64_t	no"
 .It Dv KERN_TTY_TKNOUT No "	int64_t	no"
@@ -828,8 +849,22 @@ privileges may change the value.
 .Pp
 The variables are as follows:
 .Bl -tag -width "123456"
+.It Dv KERN_TTY_INFO
+Returns an array of
+.Li struct itty
+structures containing tty statistics.
+.It Dv KERN_TTY_MAXPTYS
+The maximum number of
+.Xr pty 4
+devices supported by the kernel.
+This is the upper bound on
+.Dv KERN_TTY_NPTYS .
+.It Dv KERN_TTY_NPTYS
+The current number of
+.Xr pty 4
+devices allocated by the kernel.
 .It Dv KERN_TTY_TKCANCC
-Return the number of input characters in canonical mode.
+Returns the number of input characters in canonical mode.
 .It Dv KERN_TTY_TKNIN
 Returns the number of input characters from a
 .Xr tty 4 .
@@ -837,7 +872,7 @@ Returns the number of input characters from a
 Returns the number of output characters on a
 .Xr tty 4 .
 .It Dv KERN_TTY_TKRAWCC
-Return the number of input characters in raw mode.
+Returns the number of input characters in raw mode.
 .El
 .It Dv KERN_TTYCOUNT
 Number of available
@@ -941,7 +976,15 @@ The currently defined protocols and names are:
 .Bl -column "Protocol name" "ipsec-soft-bytes " "integer" -offset indent
 .It Sy Protocol name	Variable name	Type	Changeable
 .It ah	enable	integer	yes
+.It bpf	bufsize	integer	yes
+.It bpf	maxbufsize	integer	yes
+.It carp	allow	integer	yes
+.It carp	arpbalance	integer	yes
+.It carp	log	integer	yes
+.It carp	preempt	integer	yes
 .It esp	enable	integer	yes
+.It esp	udpencap	integer	yes
+.It esp	udpencap_port	integer	yes
 .It etherip	allow	integer	yes
 .It gre	allow	integer	yes
 .It gre	wccp	integer	yes
@@ -989,12 +1032,16 @@ The currently defined protocols and names are:
 .It tcp	keepinittime	integer	yes
 .It tcp	keepintvl	integer	yes
 .It tcp	mssdflt	integer	yes
+.It tcp	reasslimit	integer	yes
 .It tcp	recvspace	integer	yes
 .It tcp	rfc1323	integer	yes
+.It tcp	rfc3390	integer	yes
 .It tcp	rstppslimit	integer	yes
 .It tcp	sack	integer	yes
 .It tcp	sendspace	integer	yes
 .It tcp	slowhz	integer	no
+.It tcp	synbucketlimit	integer	yes
+.It tcp	syncachelimit	integer	yes
 .It udp	baddynamic	array	yes
 .It udp	checksum	integer	yes
 .It udp	recvspace	integer	yes
@@ -1011,6 +1058,37 @@ Enabled by default.
 See
 .Xr ipsec 4
 for more information.
+.It Li bpf.bufsize
+The initial size of BPF buffers.
+.It Li bpf.maxbufsize
+The maximum size a user may request a BPF buffer to be.
+.It Li carp.allow
+If set to 0, incoming
+.Tn CARP
+packets will not be processed.
+If set to any other value, processing will occur.
+Enabled by default.
+.It Li carp.arpbalance
+If set to any value other than 0, the ARP balancing functionality in carp is
+enabled.
+When ARP requests are received for an IP address which is part of any virtual
+host, carp will hash the source IP in the ARP request to select one of the
+virtual hosts from the set of all the virtual hosts which have that IP address.
+The master of that host will respond with the correct virtual MAC address.
+Disabled by default.
+.It Li carp.log
+If set to any value other than 0,
+.Xr carp 4
+will log errors.
+Disabled by default.
+.It Li carp.preempt
+If set to 0,
+.Xr carp 4
+will not attempt to become master if it is receiving advertisements from
+another active master.
+If set to any other value, carp will become master of the virtual host if it
+believes it can send advertisements more frequently than the current master.
+Disabled by default.
 .It Li esp.enable
 If set to 1, enable Encapsulating Security Payload
 .Pq ESP
@@ -1019,6 +1097,13 @@ Enabled by default.
 See
 .Xr ipsec 4
 for more information.
+.It Li esp.udpencap
+If set to 1, enable processing of UDP encapsulated ESP packets.
+Disabled by default.
+.It Li esp.udpencap_port
+Contains the value of the UDP port that triggers
+decapsulation for incoming UDP encapsulated ESP packets.
+The default port is 4500.
 .It Li etherip.allow
 If set to 0, incoming Ethernet-in-IPv4 packets will not be processed.
 If set to any other value, processing will occur.
@@ -1088,7 +1173,7 @@ or as a result of dynamic
 entries.
 Supported values are hmac-md5, hmac-sha1, and hmac-ripemd160.
 If set to any other value, it is left to the key management daemons to
-select an authentiction algorithm for the security association.
+select an authentication algorithm for the security association.
 The default value is hmac-sha1.
 .It Li ip.ipsec-bytes
 The number of bytes that will be processed by a security association
@@ -1200,7 +1285,7 @@ or programs executed by ordinary users.
 Cannot be less than 1024 or greater than 49151.
 Must be less than ip.portlast.
 .It Li ip.porthifirst
-Maximum dynamic/private port number for TCP/UDP port allocation.
+Minimum dynamic/private port number for TCP/UDP port allocation.
 Dynamic/private ports can be used by ordinary user processes
 or programs executed by ordinary users.
 Cannot be less than 49152 or greater than 65535.
@@ -1228,8 +1313,9 @@ and should normally be enabled on all systems.
 .It Li ip.sourceroute
 Returns 1 when forwarding of source-routed packets is enabled for
 the host.
-This value may only be changed if the kernel security
-level is less than 1.
+As detailed in
+.Xr securelevel 7 ,
+this variable may not be changed if the securelevel is \*(Gt 0.
 .It Li ip.ttl
 The maximum time-to-live (hop count) value for an
 .Tn IP
@@ -1287,6 +1373,10 @@ See also tcp.slowhz.
 .It Li tcp.mssdflt
 The maximum segment size that is used as default for non-local connections.
 The default value is 512.
+.It Li tcp.reasslimit
+The maximum number of out-of-order
+.Tn TCP
+segments the system will store for reassembly.
 .It Li tcp.recvspace
 Returns the default
 .Tn TCP
@@ -1295,6 +1385,10 @@ receive buffer size.
 Returns 1 if RFC 1323 extensions to
 .Tn TCP
 are enabled.
+.It Li tcp.rfc3390
+Returns 1 if the
+.Tn TCP
+Initial Window is increased, as specified in RFC 3390.
 .It Li tcp.rstppslimit
 This variable specifies the maximum number of outgoing TCP RST packets
 per second.
@@ -1312,6 +1406,10 @@ The units for tcp.keepidle and tcp.keepintvl; those variables are in ticks
 of a clock that ticks tcp.slowhz times per second.
 (That is, their values must be divided by the tcp.slowhz value to get times
 in seconds.)
+.It Li tcp.synbucketlimit
+The maximum number of entries allowed per hash bucket in the TCP syn cache.
+.It Li tcp.syncachelimit
+The maximum number of entries allowed in the TCP syn cache.
 .It Li udp.baddynamic
 Analogous to
 .Li tcp.baddynamic
@@ -1417,8 +1515,8 @@ IPv6 neighbor discovery permits upper layer protocols to supply reachability
 hints, to avoid unnecessary neighbor discovery exchanges.
 This variable defines the number of consecutive hints the neighbor discovery
 layer will take.
-For example, by setting the variable to 3, neighbor discovery can take
-take a maximum of 3 consecutive hints.
+For example, by setting the variable to 3, neighbor discovery will take
+a maximum of 3 consecutive hints.
 After receiving 3 hints, the neighbor discovery layer will instead perform
 the normal neighbor discovery process.
 .Pp
@@ -1450,10 +1548,10 @@ possible to fine tune which responses should be answered.
 Two separate bits can be set:
 .Bl -tag -width "123" -offset indent
 .It 1
-Respond to ICMPv6 FQDN queries, e.g.
+Respond to ICMPv6 FQDN queries, e.g.\&
 .Li ping6 -w .
 .It 2
-Respond to ICMPv6 node addresses queries, e.g.
+Respond to ICMPv6 node addresses queries, e.g.\&
 .Li ping6 -a .
 .El
 .Pp
@@ -1713,6 +1811,9 @@ Some filesystems may contain settings.
 .It Dv FFS_ASYNCFREE No "	integer	yes"
 .It Dv FFS_CLUSTERREAD No "	integer	yes"
 .It Dv FFS_CLUSTERWRITE No "	integer	yes"
+.It Dv FFS_DIRHASH_DIRSIZE No "	integer	yes"
+.It Dv FFS_DIRHASH_MAXMEM No "	integer	yes"
+.It Dv FFS_DIRHASH_MEM No "	integer	no"
 .It Dv FFS_MAXSOFTDEPS No "	integer	yes"
 .It Dv FFS_REALLOCBLOCKS No "	integer	yes"
 .It Dv FFS_SD_BLK_LIMIT_HIT No "	integer	yes"
@@ -1726,6 +1827,22 @@ Some filesystems may contain settings.
 .It Dv FFS_SD_SYNC_LIMIT_HIT No "	integer	yes"
 .It Dv FFS_SD_TICKDELAY No "	integer	yes"
 .It Dv FFS_SD_WORKLIST_PUSH No "	integer	yes"
+.El
+.Bl -tag -width "123456"
+.It Dv FFS_CLUSTERREAD
+Enable combining multiple reads into one request to improve performance.
+.It Dv FFS_CLUSTERWRITE
+Enable combining multiple writes into one request.
+.It Dv FFS_DIRHASH_DIRSIZE
+The minimum size of a directory, in bytes, before it is considered for hashing.
+.It Dv FFS_DIRHASH_MAXMEM
+The maximum amount of memory, in bytes, to be used for storing directory
+hashes.
+.It Dv FFS_DIRHASH_MEM
+The amount of memory currently used by all directory hashes.
+.It Dv FFS_REALLOCBLOCKS
+When enabled, the kernel will attempt to relocate growing files so that they
+are contiguous on disk, reducing fragmentation.
 .El
 .It nfs
 .Bl -column "Third level nameXXX" "struct loadavgXXX" -offset ind
@@ -1793,7 +1910,7 @@ The number of encryption keys that have been randomly created.
 The swap partition is divided into sections of normally 512KB.
 Each section has its own encryption key.
 .It Dv SWPENC_DELETED
-The number of encryption keys that have been deleted, thus effectivly
+The number of encryption keys that have been deleted, thus effectively
 erasing the data that has been encrypted with them.
 Encryption keys are deleted when their reference counter reaches zero.
 .It Dv SWPENC_ENABLE

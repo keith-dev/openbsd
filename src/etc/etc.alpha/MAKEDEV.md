@@ -1,8 +1,8 @@
 vers(__file__,
-	{-$OpenBSD: MAKEDEV.md,v 1.16 2003/06/18 18:08:59 todd Exp $-},
+	{-$OpenBSD: MAKEDEV.md,v 1.23 2004/03/12 04:54:04 deraadt Exp $-},
 etc.MACHINE)dnl
 dnl
-dnl Copyright (c) 2001,2002,2003 Todd T. Fries <todd@OpenBSD.org>
+dnl Copyright (c) 2001-2004 Todd T. Fries <todd@OpenBSD.org>
 dnl
 dnl Permission to use, copy, modify, and distribute this software for any
 dnl purpose with or without fee is hereby granted, provided that the above
@@ -21,64 +21,63 @@ _TITLE(make)
 _DEV(all)
 _DEV(ramdisk)
 _DEV(std)
-_DEV(loc)
-_TITLE(tap)
-_DEV(st, 12, 2)
+_DEV(local)
 _TITLE(dis)
-_DEV(sd, 8, 8)
-_DEV(cd, 13, 3)
-_DEV(vnd, 9, 9)
 _DEV(ccd, 27, 7)
-_DEV(wd, 36, 0)
-_DEV(rd, 28, 6)
-_DEV(raid, 43, 16)
+_DEV(cd, 13, 3)
 _DEV(flo, 37, 4)
+_DEV(raid, 43, 16)
+_DEV(rd, 28, 6)
+_DEV(sd, 8, 8)
+_DEV(vnd, 9, 9)
+_DEV(wd, 36, 0)
+_TITLE(tap)
+_DEV(ch, 14)
+_DEV(st, 12, 2)
 _TITLE(term)
+_DEV(com, 26)
 _DEV(ttyB)
+_DEV(ttyc, 38)
+_TITLE(pty)
+_DEV(ptm, 55)
+_DEV(pty, 5)
+_DEV(tty, 4)
+_TITLE(cons)
 _DEV(wscons)
 _DEV(wsdisp, 25)
 _DEV(wskbd, 29)
 _DEV(wsmux, 56)
-_DEV(com, 26)
-_DEV(ttyc, 38)
 _TITLE(point)
 _DEV(wsmouse, 30)
-_TITLE(pty)
-_DEV(tty, 4)
-_DEV(pty, 5)
 _TITLE(prn)
-_DEV(lpt, 31)
 _DEV(lpa)
+_DEV(lpt, 31)
 _TITLE(usb)
-_DEV(usb, 45)
+_DEV(uall)
+_DEV(ttyU, 49)
+_DEV(ugen, 48)
 _DEV(uhid, 46)
 _DEV(ulpt, 47)
-_DEV(ugen, 48)
-_DEV(utty, 49)
+_DEV(usb, 45)
 _TITLE(spec)
-_DEV(ch, 14)
-_DEV(pf, 35)
-_DEV(bpf, 11)
-_DEV(iop, 54)
-_DEV(pci, 52)
-_DEV(usbs)
-_DEV(fdesc, 10)
-_DEV(lkm, 16)
-_DEV(tun, 7)
-_DEV(mmcl)
-_DEV(kbd)
-_DEV(mouse)
-_DEV(rnd, 34)
-_DEV(uk, 33)
-_DEV(ss, 32)
-_DEV(xfs, 51)
 _DEV(au, 24)
-_DEV(speak, 40)
-_DEV(rmidi, 41)
+_DEV(bpf, 11)
+_DEV(fdesc, 10)
+_DEV(iop, 54)
+_DEV(lkm, 16)
 _DEV(music, 42)
+_DEV(pci, 52)
+_DEV(pf, 35)
+_DEV(rmidi, 41)
+_DEV(rnd, 34)
+_DEV(speak, 40)
+_DEV(ss, 32)
 _DEV(systrace, 50)
+_DEV(tun, 7)
+_DEV(uk, 33)
+_DEV(xfs, 51)
 dnl
-divert(7)dnl
+divert(__mddivert)dnl
 dnl
 ramdisk)
 	_recurse std fd0 wd0 wd1 wd2 sd0 sd1 sd2
@@ -97,10 +96,6 @@ ttyB*|ttyc*)
 	esac
 	M tty$type$U c $major $minor 660 dialer uucp
 	M cua$type$U c $major Add($minor, 128) 660 dialer uucp
-	;;
-
-mmclock)
-	M mmclock c 28 0 444
 	;;
 dnl
 dnl *** alpha specific targets
@@ -126,4 +121,3 @@ target(ramd, tty0, 0, 1)dnl
 target(ramd, st, 0)dnl
 target(ramd, cd, 0)dnl
 target(ramd, ttyB, 0, 1)dnl
-target(ramd, ttyE, 0, 1)dnl

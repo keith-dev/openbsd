@@ -1,4 +1,4 @@
-/*	$OpenBSD: server.c,v 1.24 2003/06/03 02:56:14 millert Exp $	*/
+/*	$OpenBSD: server.c,v 1.26 2004/01/16 01:12:35 espie Exp $	*/
 
 /*
  * Copyright (c) 1983, 1993
@@ -31,7 +31,7 @@
 
 #ifndef lint
 /* from: static char sccsid[] = "@(#)server.c	8.1 (Berkeley) 6/9/93"; */
-static char *rcsid = "$OpenBSD: server.c,v 1.24 2003/06/03 02:56:14 millert Exp $";
+static char *rcsid = "$OpenBSD: server.c,v 1.26 2004/01/16 01:12:35 espie Exp $";
 #endif /* not lint */
 
 #include <sys/wait.h>
@@ -212,7 +212,7 @@ server()
 			continue;
 
 		case 'L':  /* Log. save message in log file */
-			log(lfp, "%s", cp);
+			logit(lfp, "%s", cp);
 			continue;
 #endif
 
@@ -388,25 +388,25 @@ sendf(rname, opts)
 
 	if (pw == NULL || pw->pw_uid != stb.st_uid)
 		if ((pw = getpwuid(stb.st_uid)) == NULL) {
-			log(lfp, "%s: no password entry for uid %u \n",
+			logit(lfp, "%s: no password entry for uid %u \n",
 				target, stb.st_uid);
 			pw = NULL;
-			(void) snprintf(user, sizeof(user), ":%lu", stb.st_uid);
+			(void) snprintf(user, sizeof(user), ":%u", stb.st_uid);
 		}
 	if (gr == NULL || gr->gr_gid != stb.st_gid)
 		if ((gr = getgrgid(stb.st_gid)) == NULL) {
-			log(lfp, "%s: no name for group %u\n",
+			logit(lfp, "%s: no name for group %u\n",
 				target, stb.st_gid);
 			gr = NULL;
-			(void) snprintf(group, sizeof(group), ":%lu",
+			(void) snprintf(group, sizeof(group), ":%u",
 				stb.st_gid);
 		}
 	if (u == 1) {
 		if (opts & VERIFY) {
-			log(lfp, "need to install: %s\n", target);
+			logit(lfp, "need to install: %s\n", target);
 			goto dospecial;
 		}
-		log(lfp, "installing: %s\n", target);
+		logit(lfp, "installing: %s\n", target);
 		opts &= ~(COMPARE|REMOVE);
 	}
 
@@ -468,8 +468,8 @@ sendf(rname, opts)
 			}
 		}
 		(void) snprintf(buf, sizeof(buf), "K%o %o %qd %ld %s %s %s\n",
-			opts, stb.st_mode & 07777, stb.st_size, stb.st_mtime,
-			protoname(), protogroup(), rname);
+			opts, stb.st_mode & 07777, stb.st_size,
+			(long)stb.st_mtime, protoname(), protogroup(), rname);
 		if (debug)
 			printf("buf = %s", buf);
 		(void) write(rem, buf, strlen(buf));
@@ -491,10 +491,10 @@ sendf(rname, opts)
 
 	if (u == 2) {
 		if (opts & VERIFY) {
-			log(lfp, "need to update: %s\n", target);
+			logit(lfp, "need to update: %s\n", target);
 			goto dospecial;
 		}
-		log(lfp, "updating: %s\n", target);
+		logit(lfp, "updating: %s\n", target);
 	}
 
 	if (stb.st_nlink > 1) {
@@ -511,7 +511,7 @@ sendf(rname, opts)
 		return;
 	}
 	(void) snprintf(buf, sizeof(buf), "R%o %o %qd %ld %s %s %s\n", opts,
-		stb.st_mode & 07777, stb.st_size, stb.st_mtime,
+		stb.st_mode & 07777, stb.st_size, (long)stb.st_mtime,
 		protoname(), protogroup(), rname);
 	if (debug)
 		printf("buf = %s", buf);
@@ -545,7 +545,7 @@ dospecial:
 			continue;
 		if (sc->sc_args != NULL && !inlist(sc->sc_args, target))
 			continue;
-		log(lfp, "special \"%s\"\n", sc->sc_name);
+		logit(lfp, "special \"%s\"\n", sc->sc_name);
 		if (opts & VERIFY)
 			continue;
 		(void) snprintf(buf, sizeof(buf), "SFILE=%s;%s\n", target,
@@ -571,7 +571,7 @@ savelink(stp)
 		}
 	lp = (struct linkbuf *) malloc(sizeof(*lp));
 	if (lp == NULL)
-		log(lfp, "out of memory, link information lost\n");
+		logit(lfp, "out of memory, link information lost\n");
 	else {
 		lp->nextp = ihead;
 		ihead = lp;
@@ -604,7 +604,7 @@ update(rname, opts, stp)
 	time_t mtime;
 
 	if (debug) 
-		printf("update(%s, %x, %x)\n", rname, opts, stp);
+		printf("update(%s, %x, %p)\n", rname, opts, stp);
 
 	/*
 	 * Check to see if the file exists on the remote machine.
@@ -642,7 +642,7 @@ again:
 	case '\3':
 		*--cp = '\0';
 		if (lfp != NULL) 
-			log(lfp, "update: note: %s\n", s);
+			logit(lfp, "update: note: %s\n", s);
 		goto again;
 
 	default:
@@ -678,7 +678,7 @@ again:
 		if (stp->st_mtime == mtime)
 			return(0);
 		if (stp->st_mtime < mtime) {
-			log(lfp, "Warning: %s: remote copy is newer\n", target);
+			logit(lfp, "Warning: %s: remote copy is newer\n", target);
 			return(0);
 		}
 	} else if (stp->st_mtime == mtime && stp->st_size == size)
@@ -715,7 +715,7 @@ query(name)
 	switch (stb.st_mode & S_IFMT) {
 	case S_IFREG:
 		(void) snprintf(buf, sizeof(buf), "Y%qd %ld\n", stb.st_size,
-			stb.st_mtime);
+			(long)stb.st_mtime);
 		(void) write(rem, buf, strlen(buf));
 		break;
 
@@ -1184,7 +1184,7 @@ rmchk(opts)
 		case '\0':
 			*--cp = '\0';
 			if (*s != '\0')
-				log(lfp, "%s\n", s);
+				logit(lfp, "%s\n", s);
 			break;
 
 		case 'E':
@@ -1436,7 +1436,7 @@ dospecial(cmd)
 }
 
 void
-log(FILE *fp, const char *fmt, ...)
+logit(FILE *fp, const char *fmt, ...)
 {
 	va_list ap;
 
@@ -1529,13 +1529,13 @@ response()
 	case '\0':
 		*--cp = '\0';
 		if (*s != '\0') {
-			log(lfp, "%s\n", s);
+			logit(lfp, "%s\n", s);
 			return(1);
 		}
 		return(0);
 	case '\3':
 		*--cp = '\0';
-		log(lfp, "Note: %s\n",s);
+		logit(lfp, "Note: %s\n",s);
 		return(response());
 
 	default:

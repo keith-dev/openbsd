@@ -1,4 +1,4 @@
-/*	$OpenBSD: monitor.c,v 1.9 2003/09/05 07:50:04 tedu Exp $	*/
+/*	$OpenBSD: monitor.c,v 1.16 2004/03/29 17:07:59 deraadt Exp $	*/
 
 /*
  * Copyright (c) 2003 Håkan Olsson.  All rights reserved.
@@ -30,6 +30,7 @@
 #include <sys/ioctl.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
+#include <netinet/in.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <pwd.h>
@@ -48,9 +49,6 @@
 #include "monitor.h"
 #include "policy.h"
 #include "util.h"
-#if defined (USE_X509)
-#include "x509.h"
-#endif
 
 struct monitor_state
 {
@@ -60,7 +58,11 @@ struct monitor_state
 } m_state;
 
 volatile sig_atomic_t sigchlded = 0;
+volatile sig_atomic_t monitor_sighupped = 0;
 extern volatile sig_atomic_t sigtermed;
+static volatile sig_atomic_t cur_state = STATE_INIT;
+
+extern char *ui_fifo;
 
 /* Private functions.  */
 int m_write_int32 (int, int32_t);
@@ -69,23 +71,16 @@ int m_read_int32 (int, int32_t *);
 int m_read_raw (int, char *, size_t);
 void m_flush (int);
 
-void m_priv_getfd (int);
-void m_priv_getsocket (int);
-void m_priv_setsockopt (int);
-void m_priv_bind (int);
-void m_priv_mkfifo (int);
-void m_priv_local_sanitize_path (char *, size_t, int);
-
-#if defined (USE_X509)
-void m_priv_rsa_getkey (int);
-void m_priv_rsa_freekey (int);
-void m_priv_rsa_uploadkey (int);
-void m_priv_rsa_encrypt (int);
-
-int32_t m_priv_local_addkey (RSA *);
-RSA *m_priv_local_getkey (int32_t);
-void m_priv_local_deletekey (int32_t);
-#endif /* USE_X509 */
+static void m_priv_getfd (int);
+static void m_priv_getsocket (int);
+static void m_priv_setsockopt (int);
+static void m_priv_bind (int);
+static void m_priv_mkfifo (int);
+static int  m_priv_local_sanitize_path (char *, size_t, int);
+static int  m_priv_check_sockopt (int, int);
+static int  m_priv_check_bind (const struct sockaddr *, socklen_t);
+static void m_priv_increase_state (int);
+static void m_priv_test_state (int);
 
 /*
  * Public functions, unprivileged.
@@ -117,9 +112,8 @@ monitor_init (void)
   /* The child process should drop privileges now.  */
   if (!m_state.pid)
     {
-      if (chroot (pw->pw_dir) != 0)
-	log_fatal ("monitor_init: chroot(\"%s\") failed", pw->pw_dir);
-      chdir ("/");
+      if (chroot (pw->pw_dir) != 0 || chdir("/") != 0)
+	log_fatal ("monitor_init: chroot failed");
 
       if (setgid (pw->pw_gid) != 0)
 	log_fatal ("monitor_init: setgid(%d) failed", pw->pw_gid);
@@ -142,13 +136,8 @@ int
 monitor_open (const char *path, int flags, mode_t mode)
 {
   int fd, mode32 = (int32_t) mode;
+  int32_t err;
   char realpath[MAXPATHLEN];
-
-  if (m_state.pid)
-    {
-      /* Called from the parent, i.e already privileged.  */
-      return open (path, flags, mode);
-    }
 
   if (path[0] == '/')
     strlcpy (realpath, path, sizeof realpath);
@@ -168,12 +157,21 @@ monitor_open (const char *path, int flags, mode_t mode)
   if (m_write_int32 (m_state.s, mode32))
     goto errout;
 
+  if (m_read_int32 (m_state.s, &err))
+    goto errout;
+
+  if (err != 0)
+    {
+      errno = (int)err;
+      return -1;
+    }
 
   /* Wait for response.  */
   fd = mm_receive_fd (m_state.s);
   if (fd < 0)
     {
-      log_error ("monitor_open: open(\"%s\") failed", path);
+      log_error ("monitor_open: mm_receive_fd () failed: %s",
+	         strerror (errno));
       return -1;
     }
 
@@ -188,7 +186,7 @@ FILE *
 monitor_fopen (const char *path, const char *mode)
 {
   FILE *fp;
-  int fd, flags = 0, umask = 0;
+  int fd, flags = 0, mask, saved_errno;
 
   /* Only the child process is supposed to run this.  */
   if (m_state.pid)
@@ -209,7 +207,9 @@ monitor_fopen (const char *path, const char *mode)
       log_fatal ("monitor_fopen: bad call");
     }
 
-  fd = monitor_open (path, flags, umask);
+  mask = S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH | S_IWOTH;
+
+  fd = monitor_open (path, flags, mask);
   if (fd < 0)
     return NULL;
 
@@ -218,7 +218,9 @@ monitor_fopen (const char *path, const char *mode)
   if (!fp)
     {
       log_error ("monitor_fopen: fdopen() failed");
+      saved_errno = errno;
       close (fd);
+      errno = saved_errno;
       return NULL;
     }
 
@@ -230,12 +232,10 @@ monitor_stat (const char *path, struct stat *sb)
 {
   int fd, r, saved_errno;
 
-  fd = monitor_open (path, O_RDONLY, 0);
+  /* O_NONBLOCK is needed for stat'ing fifos. */
+  fd = monitor_open (path, O_RDONLY | O_NONBLOCK, 0);
   if (fd < 0)
-    {
-      errno = EACCES; /* A good guess? */
       return -1;
-    }
 
   r = fstat (fd, sb);
   saved_errno = errno;
@@ -248,6 +248,7 @@ int
 monitor_socket (int domain, int type, int protocol)
 {
   int s;
+  int32_t err;
 
   if (m_write_int32 (m_state.s, MONITOR_GET_SOCKET))
     goto errout;
@@ -261,9 +262,23 @@ monitor_socket (int domain, int type, int protocol)
   if (m_write_int32 (m_state.s, (int32_t)protocol))
     goto errout;
 
+  if (m_read_int32 (m_state.s, &err))
+    goto errout;
+
+  if (err != 0)
+    {
+      errno = (int)err;
+      return -1;
+    }
 
   /* Read result.  */
   s = mm_receive_fd (m_state.s);
+  if (s < 0)
+    {
+      log_error ("monitor_socket: mm_receive_fd () failed: %s",
+	         strerror (errno));
+      return -1;
+    }
 
   return s;
 
@@ -276,11 +291,12 @@ int
 monitor_setsockopt (int s, int level, int optname, const void *optval,
 		    socklen_t optlen)
 {
-  int ret;
+  int32_t ret, err;
 
   if (m_write_int32 (m_state.s, MONITOR_SETSOCKOPT))
     goto errout;
-  mm_send_fd (m_state.s, s); /* XXX? */
+  if (mm_send_fd (m_state.s, s))
+    goto errout;
 
   if (m_write_int32 (m_state.s, (int32_t)level))
     goto errout;
@@ -291,10 +307,16 @@ monitor_setsockopt (int s, int level, int optname, const void *optval,
   if (m_write_raw (m_state.s, (char *)optval, (size_t)optlen))
     goto errout;
 
+  if (m_read_int32 (m_state.s, &err))
+    goto errout;
+
+  if (err != 0)
+    errno = (int)err;
+
   if (m_read_int32 (m_state.s, &ret))
     goto errout;
 
-  return ret;
+  return (int)ret;
 
  errout:
   log_print ("monitor_setsockopt: read/write error");
@@ -304,21 +326,28 @@ monitor_setsockopt (int s, int level, int optname, const void *optval,
 int
 monitor_bind (int s, const struct sockaddr *name, socklen_t namelen)
 {
-  int ret;
+  int32_t ret, err;
 
   if (m_write_int32 (m_state.s, MONITOR_BIND))
     goto errout;
-  mm_send_fd (m_state.s, s);
+  if (mm_send_fd (m_state.s, s))
+    goto errout;
 
   if (m_write_int32 (m_state.s, (int32_t)namelen))
     goto errout;
   if (m_write_raw (m_state.s, (char *)name, (size_t)namelen))
     goto errout;
 
+  if (m_read_int32 (m_state.s, &err))
+    goto errout;
+
+  if (err != 0)
+    errno = (int)err;
+
   if (m_read_int32 (m_state.s, &ret))
     goto errout;
 
-  return ret;
+  return (int)ret;
 
  errout:
   log_print ("monitor_bind: read/write error");
@@ -328,7 +357,7 @@ monitor_bind (int s, const struct sockaddr *name, socklen_t namelen)
 int
 monitor_mkfifo (const char *path, mode_t mode)
 {
-  int32_t ret;
+  int32_t ret, err;
   char realpath[MAXPATHLEN];
 
   /* Only the child process is supposed to run this.  */
@@ -350,6 +379,12 @@ monitor_mkfifo (const char *path, mode_t mode)
   if (m_write_int32 (m_state.s, ret))
     goto errout;
 
+  if (m_read_int32 (m_state.s, &err))
+    goto errout;
+
+  if (err != 0)
+    errno = (int)err;
+
   if (m_read_int32 (m_state.s, &ret))
     goto errout;
 
@@ -360,158 +395,160 @@ monitor_mkfifo (const char *path, mode_t mode)
   return -1;
 }
 
-#if defined (USE_X509)
-/* Called by rsa_sig_encode_hash, the code that gets a key from ACQUIRE.  */
-char *
-monitor_RSA_upload_key (char *k_raw)
+struct monitor_dirents *
+monitor_opendir (const char *path)
 {
-  RSA *rsa = (RSA *)k_raw;
-  int32_t v;
+  char *buf, *cp;
+  size_t bufsize;
+  int fd, nbytes, entries;
+  long base;
+  struct stat sb;
+  struct dirent *dp;
+  struct monitor_dirents *direntries;
 
-  if (m_write_int32 (m_state.s, MONITOR_RSA_UPLOADKEY))
-    goto errout;
+  fd = monitor_open (path, 0, O_RDONLY);
+  if (fd < 0)
+    { 
+      log_error ("monitor_opendir: opendir(\"%s\") failed", path);
+      return NULL;
+    }
 
-  /* XXX - incomplete */
-  if (m_write_raw (m_state.s, k_raw, 0))
-    goto errout;
+  /* Now build a list with all dirents from fd. */
+  if (fstat (fd, &sb) < 0)
+    {
+      (void)close (fd);
+      return NULL;
+    }
 
-  RSA_free (rsa);
+  if (!S_ISDIR (sb.st_mode))
+    {
+      (void)close (fd);
+      errno = EACCES;
+      return NULL;
+    }
 
-  if (m_read_int32 (m_state.s, &v))
-    goto errout;
+  bufsize = sb.st_size;
+  if (bufsize < sb.st_blksize)
+    bufsize = sb.st_blksize;
 
-  return (char *)v;
+  buf = calloc (bufsize, sizeof (char));
+  if (buf == NULL)
+    {
+      (void)close (fd);
+      errno = EACCES;
+      return NULL;
+    }
 
- errout:
-  log_print ("monitor_RSA_upload_key: read/write error");
-  return 0;
+  nbytes = getdirentries (fd, buf, bufsize, &base);
+  if (nbytes <= 0)
+    {
+      (void)close (fd);
+      free (buf);
+      errno = EACCES;
+      return NULL;
+    }
+  (void)close (fd);
+
+  for (entries = 0, cp = buf; cp < buf + nbytes; )
+    {
+      dp = (struct dirent *)cp;
+      cp += dp->d_reclen;
+      entries++;
+    }
+
+  direntries = calloc (1, sizeof (struct monitor_dirents));
+  if (direntries == NULL)
+    {
+      free (buf);
+      errno = EACCES;
+      return NULL;
+    }
+
+  direntries->dirents = calloc (entries + 1, sizeof (struct dirent *));
+  if (direntries->dirents == NULL)
+    {
+      free (buf);
+      free (direntries);
+      errno = EACCES;
+      return NULL;
+    }
+  direntries->current = 0;
+
+  for (entries = 0, cp = buf; cp < buf + nbytes; )
+    {
+      dp = (struct dirent *)cp;
+      direntries->dirents[entries++] = dp;
+      cp += dp->d_reclen;
+    }
+  direntries->dirents[entries] = NULL;
+
+  return direntries;
 }
 
-char *
-monitor_RSA_get_private_key (char *id, char *local_id)
+struct dirent *
+monitor_readdir (struct monitor_dirents *direntries)
 {
-  char *confval;
-  int32_t v;
+  if (direntries->dirents[direntries->current] != NULL)
+    return direntries->dirents[direntries->current++];
 
-  if (m_write_int32 (m_state.s, MONITOR_RSA_GETKEY))
-    goto errout;
-
-  /*
-   * The privileged process will call ike_auth_get_key, so we need to
-   * to collect some current configuration data for it.
-   */
-  confval = conf_get_str ("KeyNote", "Credential-directory");
-  if (!confval)
-    m_write_int32 (m_state.s, 0);
-  else
-    m_write_raw (m_state.s, confval, strlen (confval) + 1);
-
-  confval = conf_get_str ("X509-certificates", "Private-key");
-  if (!confval)
-    m_write_int32 (m_state.s, 0);
-  else
-    m_write_raw (m_state.s, confval, strlen (confval) + 1);
-
-  /* Next, the required arguments.  */
-  if (m_write_raw (m_state.s, id, strlen (id) + 1))
-    goto errout;
-  if (m_write_raw (m_state.s, local_id, strlen (local_id) + 1))
-    goto errout;
-
-  /* Now, read the results.  */
-  if (m_read_int32 (m_state.s, &v))
-    goto errout;
-
-  return (char *)v;
-
- errout:
-  log_print ("monitor_RSA_upload_key: read/write error");
-  return 0;
+  return NULL;
 }
 
 int
-monitor_RSA_private_encrypt (int hashsize, unsigned char *hash,
-			     unsigned char **sigdata, void *rkey, int padtype)
+monitor_closedir (struct monitor_dirents *direntries)
 {
-  int32_t v;
-  char *data = 0;
-  int datalen;
+  free (direntries->dirents);
+  free (direntries);
 
-  *sigdata = 0;
-
-  if (m_write_int32 (m_state.s, MONITOR_RSA_ENCRYPT))
-    goto errout;
-
-  if (m_write_int32 (m_state.s, (int32_t)hashsize))
-    goto errout;
-
-  if (m_write_raw (m_state.s, hash, hashsize))
-    goto errout;
-
-  if (m_write_int32 (m_state.s, (int32_t)rkey))
-    goto errout;
-
-  if (m_write_int32 (m_state.s, (int32_t)padtype))
-    goto errout;
-
-  /* Read results.  */
-  if (m_read_int32 (m_state.s, &v))
-    goto errout;
-  datalen = (int)v;
-
-  if (datalen == -1)
-    goto errout;
-
-  data = (char *)malloc (datalen);
-  if (!data)
-    goto errout;
-
-  if (m_read_raw (m_state.s, data, datalen))
-    goto errout;
-
-  *sigdata = data;
-  return datalen;
-
- errout:
-  if (data)
-    free (data);
-  return -1;
+  return 0;
 }
 
 void
-monitor_RSA_free (void *key)
+monitor_init_done (void)
 {
-  if (m_write_int32 (m_state.s, MONITOR_RSA_FREEKEY) == 0)
-    m_write_int32 (m_state.s, (int32_t)key);
+  if (m_write_int32 (m_state.s, MONITOR_INIT_DONE))
+    log_print ("monitor_init_done: read/write error");
 
   return;
 }
-#endif /* USE_X509 */
 
 /*
  * Start of code running with privileges (the monitor process).
  */
 
-/* Help function for monitor_loop().  */
+/* Help functions for monitor_loop().  */
 static void
 monitor_got_sigchld (int sig)
 {
   sigchlded = 1;
 }
 
+static void
+sig_pass_to_chld(int sig)
+{
+  int oerrno = errno;
+
+  if (m_state.pid != -1)
+    kill(m_state.pid, sig);
+  errno = oerrno;
+}
+
 /* This function is where the privileged process waits(loops) indefinitely.  */
 void
 monitor_loop (int debugging)
 {
+  pid_t pid;
   fd_set *fds;
-  int n, maxfd, shutdown = 0;
+  size_t fdsn;
+  int n, maxfd;
 
   if (!debugging)
     log_to (0);
 
   maxfd = m_state.s + 1;
 
-  fds = (fd_set *)calloc (howmany (maxfd, NFDBITS), sizeof (fd_mask));
+  fdsn = howmany (maxfd, NFDBITS) * sizeof (fd_mask);
+  fds = (fd_set *)malloc (fdsn);
   if (!fds)
     {
       kill (m_state.pid, SIGTERM);
@@ -522,7 +559,12 @@ monitor_loop (int debugging)
   /* If the child dies, we should shutdown also.  */
   signal (SIGCHLD, monitor_got_sigchld);
 
-  while (!shutdown)
+  /* SIGHUP, SIGUSR1 and SIGUSR2 will be forwarded to child. */
+  signal (SIGHUP, sig_pass_to_chld);
+  signal (SIGUSR1, sig_pass_to_chld);
+  signal (SIGUSR2, sig_pass_to_chld);
+
+  while (cur_state < STATE_QUIT)
     {
       /*
        * Currently, there is no need for us to hang around if the child
@@ -530,13 +572,31 @@ monitor_loop (int debugging)
        */
       if (sigtermed || sigchlded)
 	{
+	  if (sigtermed)
+	    kill (m_state.pid, SIGTERM);
+
 	  if (sigchlded)
-	    wait (&n);
-	  shutdown++;
+	    {
+	      do
+		{
+		  pid = waitpid (m_state.pid, &n, WNOHANG);
+		}
+	      while (pid == -1 && errno == EINTR);
+
+	      if (pid == m_state.pid && (WIFEXITED (n) || WIFSIGNALED (n)))
+		m_priv_increase_state (STATE_QUIT);
+	    }
+
 	  break;
 	}
 
-      FD_ZERO (fds);
+      if (monitor_sighupped)
+	{
+	  kill (m_state.pid, SIGHUP);
+	  monitor_sighupped = 0;
+	}
+
+      memset (fds, 0, fdsn);
       FD_SET (m_state.s, fds);
 
       n = select (maxfd, fds, NULL, NULL, NULL);
@@ -562,43 +622,39 @@ monitor_loop (int debugging)
 		  break;
 
 		case MONITOR_GET_SOCKET:
+		  LOG_DBG ((LOG_MISC, 80, "%s: MONITOR_GET_SOCKET", __func__));
+		  m_priv_test_state (STATE_INIT);
 		  m_priv_getsocket (m_state.s);
 		  break;
 
 		case MONITOR_SETSOCKOPT:
+		  LOG_DBG ((LOG_MISC, 80, "%s: MONITOR_SETSOCKOPT", __func__));
+		  m_priv_test_state (STATE_INIT);
 		  m_priv_setsockopt (m_state.s);
 		  break;
 
 		case MONITOR_BIND:
+		  LOG_DBG ((LOG_MISC, 80, "%s: MONITOR_BIND", __func__));
+		  m_priv_test_state (STATE_INIT);
 		  m_priv_bind (m_state.s);
 		  break;
 
 		case MONITOR_MKFIFO:
+		  LOG_DBG ((LOG_MISC, 80, "%s: MONITOR_MKFIFO", __func__));
+		  m_priv_test_state (STATE_INIT);
 		  m_priv_mkfifo (m_state.s);
 		  break;
 
+		case MONITOR_INIT_DONE:
+		  LOG_DBG ((LOG_MISC, 80, "%s: MONITOR_INIT_DONE", __func__));
+		  m_priv_test_state (STATE_INIT);
+		  m_priv_increase_state (STATE_RUNNING);
+		  break;
+
 		case MONITOR_SHUTDOWN:
-		  shutdown++;
+		  LOG_DBG ((LOG_MISC, 80, "%s: MONITOR_SHUTDOWN", __func__));
+		  m_priv_increase_state (STATE_QUIT);
 		  break;
-
-#if defined (USE_X509)
-		case MONITOR_RSA_UPLOADKEY:
-		  /* XXX Not implemented yet. */
-		  /* m_priv_rsa_uploadkey (m_state.s); */
-		  break;
-
-		case MONITOR_RSA_GETKEY:
-		  m_priv_rsa_getkey (m_state.s);
-		  break;
-
-		case MONITOR_RSA_ENCRYPT:
-		  m_priv_rsa_encrypt (m_state.s);
-		  break;
-
-		case MONITOR_RSA_FREEKEY:
-		  m_priv_rsa_freekey (m_state.s);
-		  break;
-#endif
 
 		default:
 		  log_print ("monitor_loop: got unknown code %d", msgcode);
@@ -611,11 +667,11 @@ monitor_loop (int debugging)
 }
 
 /* Privileged: called by monitor_loop.  */
-void
+static void
 m_priv_getfd (int s)
 {
   char path[MAXPATHLEN];
-  int32_t v;
+  int32_t v, err;
   int flags;
   mode_t mode;
 
@@ -638,10 +694,23 @@ m_priv_getfd (int s)
     goto errout;
   mode = (mode_t)v;
 
-  m_priv_local_sanitize_path (path, sizeof path, flags);
+  if (m_priv_local_sanitize_path (path, sizeof path, flags) != 0)
+    {
+      err = EACCES;
+      v = -1;
+    }
+  else
+    {
+      err = 0;
+      v = (int32_t)open (path, flags, mode);
+      if (v < 0)
+	err = (int32_t)errno;
+    }
 
-  v = (int32_t)open (path, flags, mode);
-  if (mm_send_fd (s, v))
+  if (m_write_int32 (s, err))
+    goto errout;
+
+  if (v > 0 && mm_send_fd (s, v))
     {
       close (v);
       goto errout;
@@ -655,11 +724,11 @@ m_priv_getfd (int s)
 }
 
 /* Privileged: called by monitor_loop.  */
-void
+static void
 m_priv_getsocket (int s)
 {
   int domain, type, protocol;
-  int32_t v;
+  int32_t v, err;
 
   if (m_read_int32 (s, &v))
     goto errout;
@@ -673,8 +742,15 @@ m_priv_getsocket (int s)
     goto errout;
   protocol = (int)v;
 
+  err = 0;
   v = (int32_t)socket (domain, type, protocol);
-  if (mm_send_fd (s, v))
+  if (v < 0)
+    err = (int32_t)errno;
+
+  if (m_write_int32 (s, err))
+    goto errout;
+
+  if (v > 0 && mm_send_fd (s, v))
     {
       close (v);
       goto errout;
@@ -688,13 +764,13 @@ m_priv_getsocket (int s)
 }
 
 /* Privileged: called by monitor_loop.  */
-void
+static void
 m_priv_setsockopt (int s)
 {
   int sock, level, optname;
   char *optval = 0;
   socklen_t optlen;
-  int32_t v;
+  int32_t v, err;
 
   sock = mm_receive_fd (s);
   if (sock < 0)
@@ -716,9 +792,25 @@ m_priv_setsockopt (int s)
   if (m_read_raw (s, optval, optlen))
     goto errout;
 
-  v = (int32_t) setsockopt (sock, level, optname, optval, optlen);
+  if (m_priv_check_sockopt (level, optname) != 0)
+    {
+      err = EACCES;
+      v = -1;
+    }
+  else
+    {
+      err = 0;
+      v = (int32_t) setsockopt (sock, level, optname, optval, optlen);
+      if (v < 0)
+	err = (int32_t)errno;
+    }
+
   close (sock);
   sock = -1;
+
+  if (m_write_int32 (s, err))
+    goto errout;
+
   if (m_write_int32 (s, v))
     goto errout;
 
@@ -735,13 +827,13 @@ m_priv_setsockopt (int s)
 }
 
 /* Privileged: called by monitor_loop.  */
-void
+static void
 m_priv_bind (int s)
 {
   int sock;
   struct sockaddr *name = 0;
   socklen_t namelen;
-  int32_t v;
+  int32_t v, err;
 
   sock = mm_receive_fd (s);
   if (sock < 0)
@@ -758,13 +850,29 @@ m_priv_bind (int s)
   if (m_read_raw (s, (char *)name, (size_t)namelen))
     goto errout;
 
-  v = (int32_t)bind (sock, name, namelen);
-  if (v < 0)
-    log_error ("m_priv_bind: bind(%d,%p,%d) returned %d",
-	       sock, name, namelen, v);
+  if (m_priv_check_bind (name, namelen) != 0)
+    {
+      err = EACCES;
+      v = -1;
+    }
+  else
+    {
+      err = 0;
+      v = (int32_t)bind (sock, name, namelen);
+      if (v < 0)
+      {
+	log_error ("m_priv_bind: bind(%d,%p,%d) returned %d",
+		   sock, name, namelen, v);
+	err = (int32_t)errno;
+      }
+    }
 
   close (sock);
   sock = -1;
+
+  if (m_write_int32 (s, err))
+    goto errout;
+
   if (m_write_int32 (s, v))
     goto errout;
 
@@ -781,26 +889,45 @@ m_priv_bind (int s)
 }
 
 /* Privileged: called by monitor_loop.  */
-void
+static void
 m_priv_mkfifo (int s)
 {
-  char name[MAXPATHLEN];
+  char path[MAXPATHLEN];
   mode_t mode;
-  int32_t v;
+  int32_t v, err;
 
-  if (m_read_raw (s, name, MAXPATHLEN))
+  if (m_read_raw (s, path, MAXPATHLEN))
     goto errout;
 
   if (m_read_int32 (s, &v))
     goto errout;
   mode = (mode_t)v;
 
-  /* XXX Sanity checks for 'name'.  */
+  /* 
+   * ui_fifo is set before creation of the unpriv'ed child.  So path should 
+   * exactly match ui_fifo.  It's also restricted to /var/run.
+   */
+  if (m_priv_local_sanitize_path (path, sizeof path, O_RDWR) != 0 ||
+      strncmp (ui_fifo, path, strlen (ui_fifo)))
+    {
+      err = EACCES;
+      v = -1;
+    }
+  else
+    {
+      unlink (path); /* XXX See ui.c:ui_init() */
 
-  unlink (name); /* XXX See ui.c:ui_init() */
-  v = (int32_t)mkfifo (name, mode);
-  if (v)
-    log_error ("m_priv_mkfifo: mkfifo(\"%s\", %d) failed", name, mode);
+      err = 0;
+      v = (int32_t)mkfifo (path, mode);
+      if (v)
+	{
+	  log_error ("m_priv_mkfifo: mkfifo(\"%s\", %o) failed", path, mode);
+	  err = (int32_t)errno;
+	}
+    }
+
+  if (m_write_int32 (s, err))
+    goto errout;
 
   if (m_write_int32 (s, v))
     goto errout;
@@ -811,242 +938,6 @@ m_priv_mkfifo (int s)
   log_print ("m_priv_mkfifo: read/write error");
   return;
 }
-
-#if defined (USE_X509)
-void
-m_priv_rsa_getkey (int s)
-{
-  char cred_dir[MAXPATHLEN], pkey_path[MAXPATHLEN], pbuf[MAXPATHLEN];
-  char id[MAXPATHLEN],local_id[MAXPATHLEN];		/* XXX MAXPATHLEN? */
-  size_t fsize;
-  int32_t keyno;
-  RSA *rsakey = 0;
-  BIO *keyh;
-
-  cred_dir[0] = pkey_path[0] = id[0] = local_id[0] = 0;
-  if (m_read_raw (s, pbuf, sizeof pbuf))
-    goto errout;
-  if (pbuf[0] == '/')
-    strlcpy (cred_dir, pbuf, sizeof cred_dir);
-  else
-    snprintf (cred_dir, sizeof cred_dir, "%s/%s", m_state.root, pbuf);
-
-  if (m_read_raw (s, pbuf, sizeof pbuf))
-    goto errout;
-  if (pbuf[0] == '/')
-    strlcpy (pkey_path, pbuf, sizeof pkey_path);
-  else
-    snprintf (pkey_path, sizeof pkey_path, "%s/%s", m_state.root, pbuf);
-
-  if (m_read_raw (s, id, sizeof id))
-    goto errout;
-  if (m_read_raw (s, local_id, sizeof local_id))
-    goto errout;
-
-  /* This is basically a copy of ike_auth_get_key ().  */
-#if defined (USE_KEYNOTE)
-  if (local_id[0] && cred_dir[0])
-    {
-      struct stat sb;
-      struct keynote_deckey dc;
-      char *privkeyfile, *buf2, *buf;
-      int fd, pkflen;
-      size_t size;
-
-      pkflen = strlen (cred_dir) + strlen (local_id) +
-	sizeof PRIVATE_KEY_FILE + sizeof "//" - 1;
-      privkeyfile = calloc (pkflen, sizeof (char));
-      if (!privkeyfile)
-	{
-	  log_print ("m_priv_rsa_getkey: failed to allocate %d bytes", pkflen);
-	  goto errout;
-	}
-
-      snprintf (privkeyfile, pkflen, "%s/%s/%s", cred_dir, local_id,
-		PRIVATE_KEY_FILE);
-
-      if (stat (privkeyfile, &sb) < 0)
-	{
-	  free (privkeyfile);
-	  goto ignorekeynote;
-	}
-      size = (size_t)sb.st_size;
-
-      fd = open (privkeyfile, O_RDONLY, 0);
-      if (fd < 0)
-	{
-	  log_print ("m_priv_rsa_getkey: failed opening \"%s\"", privkeyfile);
-	  free (privkeyfile);
-	  goto errout;
-	}
-
-      buf = calloc (size + 1, sizeof (char));
-      if (!buf)
-	{
-	  log_print ("m_priv_rsa_getkey: failed allocating %lu bytes",
-		     (unsigned long)size + 1);
-	  free (privkeyfile);
-	  goto errout;
-	}
-
-      if (read (fd, buf, size) != size)
-	{
-	  free (buf);
-	  log_print ("m_priv_rsa_getkey: "
-		     "failed reading %lu bytes from \"%s\"",
-		     (unsigned long)size, privkeyfile);
-	  free (privkeyfile);
-	  goto errout;
-	}
-
-      close (fd);
-
-      /* Parse private key string */
-      buf2 = kn_get_string (buf);
-      free (buf);
-
-      if (kn_decode_key (&dc, buf2, KEYNOTE_PRIVATE_KEY) == -1)
-	{
-	  free (buf2);
-	  log_print ("m_priv_rsa_getkey: failed decoding key in \"%s\"",
-		     privkeyfile);
-	  free (privkeyfile);
-	  goto errout;
-	}
-
-      free (buf2);
-
-      if (dc.dec_algorithm != KEYNOTE_ALGORITHM_RSA)
-	{
-	  log_print ("m_priv_rsa_getkey: wrong algorithm type %d in \"%s\"",
-		     dc.dec_algorithm, privkeyfile);
-	  free (privkeyfile);
-	  kn_free_key (&dc);
-	  goto errout;
-	}
-
-      free (privkeyfile);
-      rsakey = dc.dec_key;
-    }
- ignorekeynote:
-#endif /* USE_KEYNOTE */
-
-  /* XXX I do not really like to call this from here.  */
-  if (check_file_secrecy (pkey_path, &fsize))
-    goto errout;
-
-  keyh = BIO_new (BIO_s_file ());
-  if (keyh == NULL)
-    {
-      log_print ("m_priv_rsa_getkey: "
-		 "BIO_new (BIO_s_file ()) failed");
-      goto errout;
-    }
-  if (BIO_read_filename (keyh, pkey_path) == -1)
-    {
-      log_print ("m_priv_rsa_getkey: "
-		 "BIO_read_filename (keyh, \"%s\") failed",
-		 pkey_path);
-      BIO_free (keyh);
-      goto errout;
-    }
-
-#if SSLEAY_VERSION_NUMBER >= 0x00904100L
-  rsakey = PEM_read_bio_RSAPrivateKey (keyh, NULL, NULL, NULL);
-#else
-  rsakey = PEM_read_bio_RSAPrivateKey (keyh, NULL, NULL);
-#endif
-  BIO_free (keyh);
-  if (!rsakey)
-    {
-      log_print ("m_priv_rsa_getkey: PEM_read_bio_RSAPrivateKey failed");
-      goto errout;
-    }
-
-  /* Enable RSA blinding.  */
-  if (RSA_blinding_on (rsakey, NULL) != 1)
-    {
-      log_error ("m_priv_rsa_getkey: RSA_blinding_on () failed");
-      goto errout;
-    }
-
-  keyno = m_priv_local_addkey (rsakey);
-  m_write_int32 (s, keyno);
-  return;
-
- errout:
-  m_write_int32 (s, -1);
-  if (rsakey)
-    RSA_free (rsakey);
-  return;
-}
-
-void
-m_priv_rsa_encrypt (int s)
-{
-  int32_t hashsize, padtype, datalen;
-  char *hash = 0, *data = 0;
-  RSA *key;
-  int32_t v;
-
-  if (m_read_int32 (s, &hashsize))
-    goto errout;
-
-  hash = (char *)malloc (hashsize);
-  if (!hash)
-    goto errout;
-
-  if (m_read_raw (s, hash, hashsize))
-    goto errout;
-
-  if (m_read_int32 (s, &v))
-    goto errout;
-
-  if (m_read_int32 (s, &padtype))
-    goto errout;
-
-  key = m_priv_local_getkey (v);
-  if (!key)
-    goto errout;
-
-  data = (char *)malloc (RSA_size (key));
-  if (!data)
-    goto errout;
-
-  datalen = RSA_private_encrypt (hashsize, hash, data, key, padtype);
-  if (datalen == -1)
-    {
-      log_print ("m_priv_rsa_encrypt: RSA_private_encrypt () failed");
-      goto errout;
-    }
-
-  if (m_write_int32 (s, datalen))
-    goto errout;
-
-  if (m_write_raw (s, data, datalen))
-    goto errout;
-
-  free (hash);
-  free (data);
-  return;
-
- errout:
-  m_write_int32 (s, -1);
-  if (data)
-    free (data);
-  if (hash)
-    free (hash);
-  return;
-}
-
-void
-m_priv_rsa_freekey (int s)
-{
-  int32_t keyno;
-  if (m_read_int32 (s, &keyno) == 0)
-    m_priv_local_deletekey (keyno);
-}
-#endif /* USE_X509 */
 
 /*
  * Help functions, used by both privileged and unprivileged code
@@ -1090,7 +981,6 @@ m_read_raw (int s, char *data, size_t maxlen)
   if (v > maxlen)
     return 1;
   r = read (s, data, v);
-  data[v] = 0;
   return (r == -1);
 }
 
@@ -1106,98 +996,19 @@ m_flush (int s)
   ioctl (s, FIONBIO, 0);		/* Blocking */
 }
 
-#if defined (USE_X509)
-/* Privileged process RSA key storage help functions.  */
-struct m_key_storage
-{
-  RSA *key;
-  int32_t keyno;
-  struct m_key_storage *next;
-} *keylist = 0;
-
-int32_t
-m_priv_local_addkey (RSA *key)
-{
-  struct m_key_storage *n, *k;
-
-  n = (struct m_key_storage *)calloc (1, sizeof (struct m_key_storage));
-  if (!n)
-    return 0;
-
-  if (!keylist)
-    {
-      keylist = n;
-      n->keyno = 1;
-    }
-  else
-    {
-      for (k = keylist; k->next; k = k->next) ;
-      k->next = n;
-      n->keyno = k->keyno + 1;		/* XXX 2^31 keys? */
-    }
-
-  n->key = key;
-  return n->keyno;
-}
-
-RSA *
-m_priv_local_getkey (int32_t keyno)
-{
-  struct m_key_storage *k;
-
-  for (k = keylist; k; k = k->next)
-    if (k->keyno == keyno)
-      return k->key;
-  return 0;
-}
-
-void
-m_priv_local_deletekey (int32_t keyno)
-{
-  struct m_key_storage *k;
-
-  if (keylist->keyno == keyno)
-    {
-      k = keylist;
-      keylist = keylist->next;
-    }
-  else
-    for (k = keylist; k->next; k = k->next)
-      if (k->next->keyno == keyno)
-	{
-	  struct m_key_storage *s = k->next;
-	  k->next = k->next->next;
-	  k = s;
-	  break;
-	}
-
-  if (k)
-    {
-      RSA_free (k->key);
-      free (k);
-    }
-
-  return;
-}
-#endif /* USE_X509 */
-
 /* Check that path/mode is permitted.  */
-void
+static int
 m_priv_local_sanitize_path (char *path, size_t pmax, int flags)
 {
   char *p;
 
   /*
-   * Basically, we only permit paths starting with
+   * We only permit paths starting with
    *  /etc/isakmpd/	(read only)
-   *  /var/run/
-   *  /var/tmp
-   *  /tmp
-   *
-   * XXX This is an interim measure only.
+   *  /var/run/		(rw)
    */
 
-  if (strlen (path) < sizeof "/tmp")
+  if (strlen (path) < strlen ("/var/run/"))
     goto bad_path;
 
   /* Any path containing '..' is invalid.  */
@@ -1208,21 +1019,131 @@ m_priv_local_sanitize_path (char *path, size_t pmax, int flags)
   /* For any write-mode, only a few paths are permitted.  */
   if ((flags & O_ACCMODE) != O_RDONLY)
     {
-      if (strncmp ("/var/run/", path, sizeof "/var/run") == 0 ||
-	  strncmp ("/var/tmp/", path, sizeof "/var/tmp") == 0 ||
-	  strncmp ("/tmp/", path, sizeof "/tmp") == 0)
-	return;
+      if (strncmp ("/var/run/", path, strlen ("/var/run/")) == 0)
+	return 0;
       goto bad_path;
     }
 
-  /* Any other paths are read-only.  */
-  if (strncmp (ISAKMPD_ROOT, path, strlen (ISAKMPD_ROOT)) == 0)
-    return;
+  /* Any other path is read-only.  */
+  if (strncmp (ISAKMPD_ROOT, path, strlen (ISAKMPD_ROOT)) == 0 ||
+      strncmp ("/var/run/", path, strlen ("/var/run/")) == 0)
+    return 0;
 
  bad_path:
   log_print ("m_priv_local_sanitize_path: illegal path \"%.1023s\", "
 	     "replaced with \"/dev/null\"", path);
   strlcpy (path, "/dev/null", pmax);
-  return;
+  return 1;
 }
 
+/* Check setsockopt */
+static int
+m_priv_check_sockopt (int level, int name)
+{
+  switch (level)
+    {
+    /* These are allowed */
+    case SOL_SOCKET:
+    case IPPROTO_IP:
+    case IPPROTO_IPV6:
+      break;
+
+    default:
+      log_print ("m_priv_check_sockopt: Illegal level %d", level);
+      return 1;
+    }
+
+  switch (name)
+    {
+    /* These are allowed */
+    case SO_REUSEPORT:
+    case SO_REUSEADDR:
+    case IP_AUTH_LEVEL:
+    case IP_ESP_TRANS_LEVEL:
+    case IP_ESP_NETWORK_LEVEL:
+    case IP_IPCOMP_LEVEL:
+    case IPV6_AUTH_LEVEL:
+    case IPV6_ESP_TRANS_LEVEL:
+    case IPV6_ESP_NETWORK_LEVEL:
+    case IPV6_IPCOMP_LEVEL:
+      break;
+
+    default:
+      log_print ("m_priv_check_sockopt: Illegal option name %d", name);
+      return 1;
+    }
+
+  return 0;
+}
+
+/* Check bind */
+static int
+m_priv_check_bind (const struct sockaddr *sa, socklen_t salen)
+{
+  in_port_t port;
+
+  if (sa == NULL)
+    {
+      log_print ("NULL address");
+      return 1;
+    }
+
+    if (sa->sa_len != salen)
+      {
+	log_print ("Length mismatch: %d %d", (int) sa->sa_len, (int) salen);
+	return 1;
+      }
+
+    switch (sa->sa_family)
+      {
+      case AF_INET:
+	if (salen != sizeof (struct sockaddr_in))
+	  {
+	    log_print ("Invalid inet address length");
+	    return 1;
+	  }
+	port = ((const struct sockaddr_in *)sa)->sin_port;
+	break;
+      case AF_INET6:
+	if (salen != sizeof (struct sockaddr_in6))
+	  {
+	    log_print ("Invalid inet6 address length");
+	    return 1;
+	  }
+	port = ((const struct sockaddr_in6 *)sa)->sin6_port;
+	break;
+      default:
+	log_print ("Unknown address family");
+	return 1;
+      }
+
+    port = ntohs(port);
+
+    if (port != ISAKMP_PORT_DEFAULT && port < 1024)
+      {
+	log_print ("Disallowed port %u", port);
+	return 1;
+      }
+
+    return 0;
+}
+	
+/* Increase state into less permissive mode */
+static void
+m_priv_increase_state (int state)
+{
+  if (state <= cur_state)
+    log_print ("m_priv_increase_state: attempt to decrase state or match "
+	       "current state");
+  if (state < STATE_INIT || state > STATE_QUIT)
+    log_print ("m_priv_increase_state: attempt to switch to invalid state");
+  cur_state = state;
+}
+
+static void
+m_priv_test_state (int state)
+{
+  if (cur_state != state)
+    log_print ("m_priv_test_state: Illegal state: %d != %d", cur_state, state);
+  return;
+}

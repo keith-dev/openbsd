@@ -1,6 +1,6 @@
 #!./perl
 
-# $RCSfile: sleep.t,v $$Revision: 1.6 $$Date: 2002/10/27 22:25:37 $
+# $RCSfile: sleep.t,v $$Revision: 1.7 $$Date: 2003/12/03 03:02:49 $
 
 print "1..1\n";
 

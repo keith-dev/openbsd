@@ -1,4 +1,4 @@
-/*	$OpenBSD: util.c,v 1.22 2003/06/17 21:21:26 miod Exp $ */
+/*	$OpenBSD: util.c,v 1.24 2004/03/04 01:09:23 mickey Exp $ */
 /*	$NetBSD: util.c,v 1.8 2000/03/14 08:11:53 sato Exp $ */
 
 /*-
@@ -68,7 +68,8 @@ static const struct nameint kbtype_tab[] = {
 	{ WSKBD_TYPE_ADB,	"adb" },
 	{ WSKBD_TYPE_SUN,	"sun" },
 	{ WSKBD_TYPE_SUN5,	"sun5" },
-	{ WSKBD_TYPE_HIL,	"hil" }
+	{ WSKBD_TYPE_HIL,	"hil" },
+	{ WSKBD_TYPE_GSC,	"hp-ps2" }
 };
 
 static const struct nameint mstype_tab[] = {
@@ -126,6 +127,7 @@ static const struct nameint dpytype_tab[] = {
 	{ WSDISPLAY_TYPE_SUNCG12,	"suncg12" },
 	{ WSDISPLAY_TYPE_MGX,		"mgx" },
 	{ WSDISPLAY_TYPE_SB_P9000,	"p9000" },
+	{ WSDISPLAY_TYPE_RFLEX,		"rasterflex" }
 };
 
 static const struct nameint kbdenc_tab[] = {

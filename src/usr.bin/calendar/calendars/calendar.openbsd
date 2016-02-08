@@ -1,7 +1,7 @@
 /*
  * OpenBSD-related dates to celebrate
  *
- * $OpenBSD: calendar.openbsd,v 1.12 2003/05/22 04:31:08 mickey Exp $
+ * $OpenBSD: calendar.openbsd,v 1.15 2004/01/28 01:57:35 mickey Exp $
  */
 
 #ifndef _calendar_openbsd_
@@ -11,6 +11,7 @@ Jan 06	IPF gets integrated into the OpenBSD kernel, 1996
 Jan 06	NRL IPv6 addition to OpenBSD, 1999
 Jan 20	Bind 9 goes into the tree, 2003
 Jan 26	Anoncvs service inaugurated, 1996
+Jan 27	OpenBSD/amd64 added, 2004
 Jan 29	``second anoncvs server is 100 miles from the first'', 1996
 Feb 03	Describe the ports mechanism [in OpenBSD], 1997
 Feb 13	Unpatented fast block cipher for new password hashing, 1997
@@ -44,6 +45,7 @@ Aug 17	c2k1-II hackathon, Washington D.C., 12 developers, 2001
 Aug 17	OpenBSD/sparc64 port added, from NetBSD, 2001
 Sep 26	OpenSSH born, Sunday 11:56 MST, 1999
 Oct 14	OpenBSD born, Saturday 16:36 MST, 1995
+Oct 30	OpenBSD 3.4 released, implementing W^X on i396 and AES in VIA C3, 2003
 Nov 01	OpenBSD 3.2 released, ftp mirrors preload for the first time, 2002
 Nov 11	want.html added to OpenBSD/www, 1998
 Nov 18	altq merged into pf, 2002

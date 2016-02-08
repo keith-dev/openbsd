@@ -1,4 +1,4 @@
-/*	$OpenBSD: ike_auth.c,v 1.79 2003/08/08 08:46:59 ho Exp $	*/
+/*	$OpenBSD: ike_auth.c,v 1.83 2004/03/19 14:04:43 hshoexer Exp $	*/
 /*	$EOM: ike_auth.c,v 1.59 2000/11/21 00:21:31 angelos Exp $	*/
 
 /*
@@ -143,7 +143,11 @@ ike_auth_get_key (int type, char *id, char *local_id, size_t *keylen)
 #if defined (USE_X509) || defined (USE_KEYNOTE)
   char *keyfile;
 #if defined (USE_X509)
+#if defined (USE_PRIVSEP)
+  FILE *keyfp;
+#else
   BIO *keyh;
+#endif
   RSA *rsakey;
   size_t fsize;
 #endif
@@ -172,7 +176,7 @@ ike_auth_get_key (int type, char *id, char *local_id, size_t *keylen)
 	  buf = malloc (*keylen);
 	  if (!buf)
 	    {
-	      log_print ("ike_auth_get_key: malloc (%lu) failed",
+	      log_error ("ike_auth_get_key: malloc (%lu) failed",
 		(unsigned long)*keylen);
 	      return 0;
 	    }
@@ -185,7 +189,16 @@ ike_auth_get_key (int type, char *id, char *local_id, size_t *keylen)
 	  key = buf;
 	}
       else
-	*keylen = strlen (key);
+	{
+	  buf = key;
+	  key = strdup (buf);
+	  if (!key)
+	    {
+	      log_error ("ike_auth_get_key: strdup() failed");
+	      return 0;
+	    }
+	  *keylen = strlen (key);
+	}
       break;
 
     case IKE_AUTH_RSA_SIG:
@@ -214,14 +227,14 @@ ike_auth_get_key (int type, char *id, char *local_id, size_t *keylen)
 		   PRIVATE_KEY_FILE);
 	  keyfile = privkeyfile;
 
-	  if (stat (keyfile, &sb) < 0)
+	  if (monitor_stat (keyfile, &sb) < 0)
 	    {
 	      free (keyfile);
 	      goto ignorekeynote;
 	    }
 	  size = (size_t)sb.st_size;
 
-	  fd = open (keyfile, O_RDONLY, 0);
+	  fd = monitor_open (keyfile, O_RDONLY, 0);
 	  if (fd < 0)
 	    {
 	      log_print ("ike_auth_get_key: failed opening \"%s\"", keyfile);
@@ -287,6 +300,20 @@ ike_auth_get_key (int type, char *id, char *local_id, size_t *keylen)
       if (check_file_secrecy (keyfile, &fsize))
 	return 0;
 
+#if defined (USE_PRIVSEP)
+      keyfp = monitor_fopen (keyfile, "r");
+      if (!keyfp)
+	{
+	  log_print ("ike_auth_get_key: failed opening \"%s\"", keyfile);
+	  return 0;
+	}
+#if SSLEAY_VERSION_NUMBER >= 0x00904100L
+      rsakey = PEM_read_RSAPrivateKey (keyfp, NULL, NULL, NULL);
+#else
+      rsakey = PEM_read_RSAPrivateKey (keyfp, NULL, NULL);
+#endif
+      fclose (keyfp);
+#else
       keyh = BIO_new (BIO_s_file ());
       if (keyh == NULL)
 	{
@@ -309,6 +336,8 @@ ike_auth_get_key (int type, char *id, char *local_id, size_t *keylen)
       rsakey = PEM_read_bio_RSAPrivateKey (keyh, NULL, NULL);
 #endif
       BIO_free (keyh);
+#endif	/* USE_PRIVSEP */
+
       if (!rsakey)
 	{
 	  log_print ("ike_auth_get_key: PEM_read_bio_RSAPrivateKey failed");
@@ -398,12 +427,14 @@ pre_shared_gen_skeyid (struct exchange *exchange, size_t *sz)
     {
       log_error ("pre_shared_gen_skeyid: malloc (%lu) failed",
 	(unsigned long)keylen);
+      free (key);
       return 0;
     }
   memcpy (exchange->recv_key, key, keylen);
   exchange->recv_certtype = ISAKMP_CERTENC_NONE;
+  free (key);
 
-  prf = prf_alloc (ie->prf_type, ie->hash->type, key, keylen);
+  prf = prf_alloc (ie->prf_type, ie->hash->type, exchange->recv_key, keylen);
   if (!prf)
     return 0;
 
@@ -443,10 +474,11 @@ sig_gen_skeyid (struct exchange *exchange, size_t *sz)
   memcpy (key + exchange->nonce_i_len, exchange->nonce_r,
 	  exchange->nonce_r_len);
 
-  LOG_DBG((LOG_NEGOTIATION, 80, "sig_gen_skeyid: PRF type %d, hash %d",
-      ie->prf_type, ie->hash->type));
-  LOG_DBG_BUF((LOG_NEGOTIATION, 80, "sig_gen_skeyid: SKEYID initialized with",
-      (u_int8_t *)key, exchange->nonce_i_len + exchange->nonce_r_len));
+  LOG_DBG ((LOG_NEGOTIATION, 80, "sig_gen_skeyid: PRF type %d, hash %d",
+	    ie->prf_type, ie->hash->type));
+  LOG_DBG_BUF ((LOG_NEGOTIATION, 80, "sig_gen_skeyid: SKEYID initialized with",
+		(u_int8_t *)key,
+		exchange->nonce_i_len + exchange->nonce_r_len));
 
   prf = prf_alloc (ie->prf_type, ie->hash->type, key,
 		   exchange->nonce_i_len + exchange->nonce_r_len);
@@ -464,10 +496,10 @@ sig_gen_skeyid (struct exchange *exchange, size_t *sz)
       return 0;
     }
 
-  LOG_DBG((LOG_NEGOTIATION, 80, "sig_gen_skeyid: g^xy length %lu",
-      (unsigned long)ie->g_x_len));
-  LOG_DBG_BUF((LOG_NEGOTIATION, 80,
-      "sig_gen_skeyid: SKEYID fed with g^xy", ie->g_xy, ie->g_x_len));
+  LOG_DBG ((LOG_NEGOTIATION, 80, "sig_gen_skeyid: g^xy length %lu",
+	    (unsigned long)ie->g_x_len));
+  LOG_DBG_BUF ((LOG_NEGOTIATION, 80, "sig_gen_skeyid: SKEYID fed with g^xy",
+		ie->g_xy, ie->g_x_len));
 
   prf->Init (prf->prfctx);
   prf->Update (prf->prfctx, ie->g_xy, ie->g_x_len);
@@ -582,7 +614,6 @@ rsa_sig_decode_hash (struct message *msg)
   u_int32_t *id_cert_len;
   size_t id_len;
   int found = 0, n, i, id_found;
-  char *tag;
 #if defined (USE_DNSSEC)
   u_int8_t *rawkey = 0;
   u_int32_t rawkeylen;
@@ -681,11 +712,10 @@ rsa_sig_decode_hash (struct message *msg)
       handler = cert_get (GET_ISAKMP_CERT_ENCODING (p->p));
       if (!handler)
 	{
-	  tag = constant_lookup (isakmp_certenc_cst,
-				 GET_ISAKMP_CERT_ENCODING (p->p));
 	  LOG_DBG ((LOG_MISC, 30,
 		    "rsa_sig_decode_hash: no handler for %s CERT encoding",
-		    tag ? tag : "<unknown>"));
+		    constant_name (isakmp_certenc_cst,
+				   GET_ISAKMP_CERT_ENCODING (p->p))));
 	  continue;
 	}
 
@@ -1042,13 +1072,6 @@ rsa_sig_encode_hash (struct message *msg)
 		     "SA acquisition subsystem");
 	  return 0;
 	}
-#if defined (USE_PRIVSEP)
-      {
-	/* With USE_PRIVSEP, the sent_key should be a key number. */
-	void *key = sent_key;
-	sent_key = monitor_RSA_upload_key (key);
-      }
-#endif
     }
   else /* Try through the regular means.  */
     {
@@ -1084,12 +1107,8 @@ rsa_sig_encode_hash (struct message *msg)
 	  return 0;
 	}
 
-#if defined (USE_PRIVSEP)
-      sent_key = monitor_RSA_get_private_key (exchange->name, (char *)buf2);
-#else
       sent_key = ike_auth_get_key (IKE_AUTH_RSA_SIG, exchange->name,
 				   (char *)buf2, 0);
-#endif
       free (buf2);
 
       /* Did we find a key?  */
@@ -1100,14 +1119,12 @@ rsa_sig_encode_hash (struct message *msg)
 	}
     }
 
-#if !defined (USE_PRIVSEP)
   /* Enable RSA blinding.  */
   if (RSA_blinding_on (sent_key, NULL) != 1)
     {
       log_error ("rsa_sig_encode_hash: RSA_blinding_on () failed.");
       return -1;
     }
-#endif
 
   /* XXX hashsize is not necessarily prf->blocksize.  */
   buf = malloc (hashsize);
@@ -1128,7 +1145,6 @@ rsa_sig_encode_hash (struct message *msg)
 	    initiator ? 'I' : 'R');
   LOG_DBG_BUF ((LOG_MISC, 80, header, buf, hashsize));
 
-#if !defined (USE_PRIVSEP)
   data = malloc (RSA_size (sent_key));
   if (!data)
     {
@@ -1139,17 +1155,13 @@ rsa_sig_encode_hash (struct message *msg)
 
   datalen = RSA_private_encrypt (hashsize, buf, data, sent_key,
 				 RSA_PKCS1_PADDING);
-#else
-  datalen = monitor_RSA_private_encrypt (hashsize, buf, &data, sent_key,
-					 RSA_PKCS1_PADDING);
-#endif /* USE_PRIVSEP */
   if (datalen == -1)
     {
       log_print ("rsa_sig_encode_hash: RSA_private_encrypt () failed");
       if (data)
 	free (data);
       free (buf);
-      monitor_RSA_free (sent_key);
+      RSA_free (sent_key);
       return -1;
     }
 
@@ -1223,7 +1235,11 @@ get_raw_key_from_file (int type, u_int8_t *id, size_t id_len, RSA **rsa)
   char filename[FILENAME_MAX];
   char *fstr;
   struct stat st;
+#if defined (USE_PRIVSEP)
+  FILE *keyfp;
+#else
   BIO *bio;
+#endif
 
   if (type != IKE_AUTH_RSA_SIG) /* XXX More types? */
     {
@@ -1252,8 +1268,19 @@ get_raw_key_from_file (int type, u_int8_t *id, size_t id_len, RSA **rsa)
   free (fstr);
 
   /* If the file does not exist, fail silently.  */
-  if (stat (filename, &st) == 0)
+  if (monitor_stat (filename, &st) == 0)
     {
+#if defined (USE_PRIVSEP)
+      keyfp = monitor_fopen (filename, "r");
+      if (!keyfp)
+	{
+	  log_error ("get_raw_key_from_file: monitor_fopen (\"%s\", \"r\") "
+	             "failed", filename);
+	  return -1;
+	}
+      *rsa = PEM_read_RSA_PUBKEY (keyfp, NULL, NULL, NULL);
+      fclose (keyfp);
+#else
       bio = BIO_new (BIO_s_file ());
       if (!bio)
 	{
@@ -1262,19 +1289,20 @@ get_raw_key_from_file (int type, u_int8_t *id, size_t id_len, RSA **rsa)
 	}
       if (BIO_read_filename (bio, filename) <= 0)
 	{
-	  LOG_DBG((LOG_NEGOTIATION, 50, "get_raw_key_from_file: "
-		   "BIO_read_filename(bio, \"%s\") failed", filename));
+	  LOG_DBG ((LOG_NEGOTIATION, 50, "get_raw_key_from_file: "
+		    "BIO_read_filename(bio, \"%s\") failed", filename));
 	  BIO_free (bio);
 	  return -1;
 	}
-      LOG_DBG((LOG_NEGOTIATION, 80, "get_raw_key_from_file: reading file %s",
-	       filename));
+      LOG_DBG ((LOG_NEGOTIATION, 80, "get_raw_key_from_file: reading file %s",
+		filename));
       *rsa = PEM_read_bio_RSA_PUBKEY (bio, NULL, NULL, NULL);
       BIO_free (bio);
+#endif	/* USE_PRIVSEP */
     }
   else
-    LOG_DBG((LOG_NEGOTIATION, 50, "get_raw_key_from_file: file %s not found",
-	     filename));
+    LOG_DBG ((LOG_NEGOTIATION, 50, "get_raw_key_from_file: file %s not found",
+	      filename));
 
   return (*rsa ? 0 : -1);
 }

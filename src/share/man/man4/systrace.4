@@ -1,4 +1,4 @@
-.\"	$OpenBSD: systrace.4,v 1.8 2003/07/09 13:26:20 jmc Exp $
+.\"	$OpenBSD: systrace.4,v 1.10 2004/03/22 20:31:36 miod Exp $
 .\"
 .\" Copyright (c) 2002, 2003 CubeSoft Communications, Inc.
 .\" All rights reserved.
@@ -31,7 +31,7 @@
 .Nm systrace
 .Nd enforce and generate policies for system calls
 .Sh SYNOPSIS
-.Cd "pseudo-device systrace 1"
+.Cd "pseudo-device systrace" Op Ar count
 .Sh DESCRIPTION
 .Nm
 attaches to processes and enforces policies for system calls.
@@ -102,7 +102,7 @@ struct str_msg_child {
 supports the following
 .Xr ioctl 2
 commands:
-.Bl -tag -width "xxxxxx"
+.Bl -tag -width STRIOCXXXXXXXX
 .It Dv SYSTR_CLONE Fa "int"
 Return a
 .Nm

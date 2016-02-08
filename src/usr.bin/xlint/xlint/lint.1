@@ -1,4 +1,4 @@
-.\"	$OpenBSD: lint.1,v 1.13 2003/06/10 09:12:13 jmc Exp $
+.\"	$OpenBSD: lint.1,v 1.17 2004/01/23 23:08:47 jmc Exp $
 .\"	$NetBSD: lint.1,v 1.3 1995/10/23 13:45:31 jpo Exp $
 .\"
 .\" Copyright (c) 1994, 1995 Jochen Pohl
@@ -122,7 +122,8 @@ and
 By default,
 .Nm
 appends the standard C lint library
-.Pq Pa llib-lc.ln
+.Pq Pa llib-lc.ln ,
+if it exists,
 to the end of the list of files.
 When the
 .Fl i
@@ -408,10 +409,10 @@ like
 makes
 .Nm
 check the first
-.Pq Ar n Ns No -1
+.Pq Ar n Ns -1
 arguments as usual.
 The
-.Ar n Ns No -th
+.Ar n Ns -th
 argument is interpreted as a
 .Sy printf
 format string that is used to check the remaining arguments.
@@ -432,10 +433,10 @@ is zero, function prototypes will be treated normally.
 makes
 .Nm
 check the first
-.Pq Ar n Ns No -1
+.Pq Ar n Ns -1
 arguments as usual.
 The
-.Ar n Ns No -th
+.Ar n Ns -th
 argument is interpreted as a
 .Sy scanf
 format string that is used to check the remaining arguments.
@@ -485,7 +486,7 @@ to be used to
 .Nm
 only the source files that have been modified since the last
 time the set of source files were
-.Nm lint Ns No ed .
+.Nm lint Ns ed .
 .Sh ENVIRONMENT
 .Bl -tag -width Fl
 .It Ev LIBDIR
@@ -500,11 +501,13 @@ usually the path for temporary files can be redefined by setting
 this environment variable.
 .El
 .Sh FILES
-.Bl -tag -width /usr/libdata/lint/llib-lc.ln -compact
+.Bl -tag -width /usr/libdata/lint/llib-lposix.ln -compact
 .It Pa /usr/libexec/lint Ns Bq 12
 programs
-.It Pa /usr/libdata/lint/llib-l*.ln
-various prebuilt lint libraries
+.It Pa /usr/libdata/lint/llib-lposix.ln
+prebuilt POSIX C lint library
+.It Pa /usr/libdata/lint/llib-lstdc.ln
+prebuilt ANSI/ISO C lint library
 .It Pa /tmp/lint*
 temporaries
 .El

@@ -1,4 +1,4 @@
-/*	$OpenBSD: fmt.c,v 1.4 2003/07/02 21:19:33 deraadt Exp $	*/
+/*	$OpenBSD: fmt.c,v 1.7 2004/01/08 18:18:35 millert Exp $	*/
 
 /*-
  * Copyright (c) 1990, 1993, 1994
@@ -47,9 +47,9 @@
 #include "extern.h"
 
 void
-fmt_puts(char *s, int *leftp)
+fmt_puts(const char *s, int *leftp)
 {
-	static char *v = 0, *nv;
+	static char *v = NULL, *nv;
 	static int maxlen = 0;
 	int len;
 
@@ -57,13 +57,20 @@ fmt_puts(char *s, int *leftp)
 		return;
 	len = strlen(s) * 4 + 1;
 	if (len > maxlen) {
-		if (maxlen == 0)
-			maxlen = getpagesize();
-		while (len > maxlen)
-			maxlen *= 2;
-		nv = realloc(v, maxlen);
-		if (nv == 0)
+		int newmaxlen = maxlen;
+
+		if (newmaxlen == 0)
+			newmaxlen = getpagesize();
+		while (len > newmaxlen)
+			newmaxlen *= 2;
+		nv = realloc(v, newmaxlen);
+		if (nv == 0) {
+			free(v);
+			v = NULL;
+			maxlen = 0;
 			return;
+		}
+		maxlen = newmaxlen;
 		v = nv;
 	}
 	strvis(v, s, VIS_TAB | VIS_NL | VIS_CSTYLE);

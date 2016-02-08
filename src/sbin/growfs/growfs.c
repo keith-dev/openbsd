@@ -1,4 +1,4 @@
-/*	$OpenBSD: growfs.c,v 1.6 2003/08/25 23:28:15 tedu Exp $	*/
+/*	$OpenBSD: growfs.c,v 1.11 2004/03/15 08:52:01 deraadt Exp $	*/
 /*
  * Copyright (c) 2000 Christoph Herrmann, Thomas-Henning von Kamptz
  * Copyright (c) 1980, 1989, 1993 The Regents of the University of California.
@@ -46,7 +46,7 @@ static const char copyright[] =
 Copyright (c) 1980, 1989, 1993 The Regents of the University of California.\n\
 All rights reserved.\n";
 
-static const char rcsid[] = "$OpenBSD: growfs.c,v 1.6 2003/08/25 23:28:15 tedu Exp $";
+static const char rcsid[] = "$OpenBSD: growfs.c,v 1.11 2004/03/15 08:52:01 deraadt Exp $";
 #endif /* not lint */
 
 /* ********************************************************** INCLUDES ***** */
@@ -63,6 +63,8 @@ static const char rcsid[] = "$OpenBSD: growfs.c,v 1.6 2003/08/25 23:28:15 tedu E
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <util.h>
+
 #include <ufs/ufs/dinode.h>
 #include <ufs/ffs/fs.h>
 
@@ -1149,7 +1151,7 @@ updcsloc(time_t utime, int fsi, int fso, unsigned int Nflag)
 		/*
 		 * XXX	Handle the cluster statistics here in the case  this
 		 *	cylinder group is now almost full, and the remaining
-		 *	space is less then the maximum cluster size. This is
+		 *	space is less than the maximum cluster size. This is
 		 *	probably not needed, as you would hardly find a file
 		 *	system which has only MAXCSBUFS+FS_MAXCONTIG of free
 		 *	space right behind the cylinder group information in
@@ -1848,10 +1850,9 @@ int
 main(int argc, char **argv)
 {
 	DBG_FUNC("main")
-	char	*device, *special, *cp;
-	char	ch;
+	char	*device, *rdev;
+	int	ch;
 	unsigned int	size = 0;
-	size_t	len;
 	unsigned int	Nflag = 0;
 	int	ExpertFlag = 0;
 	struct stat	st;
@@ -1865,7 +1866,7 @@ main(int argc, char **argv)
 
 	DBG_ENTER;
 
-	while ((ch = getopt(argc, argv, "Ns:vy")) != -1) {
+	while ((ch = getopt(argc, argv, "Ns:y")) != -1) {
 		switch (ch) {
 		case 'N':
 			Nflag = 1;
@@ -1875,8 +1876,6 @@ main(int argc, char **argv)
 			if (size < 1) {
 				usage();
 			}
-			break;
-		case 'v': /* for compatibility to newfs */
 			break;
 		case 'y':
 			ExpertFlag = 1;
@@ -1896,55 +1895,41 @@ main(int argc, char **argv)
 	device = *argv;
 
 	/*
-	 * Now try to guess the (raw)device name.
+	 * Rather than guessing, use opendev() to get the device
+	 * name, which we open for reading.
 	 */
-	if (0 == strrchr(device, '/')) {
-		/*
-		 * No path prefix was given, so try in that order:
-		 *     /dev/%s
-		 *     /dev/r%s
-		 */
-		len = strlen(device) + strlen(_PATH_DEV) + 2;
-		special = malloc(len);
-		if (special == NULL)
-			errx(1, "malloc failed");
-		snprintf(special, len, "%s%s", _PATH_DEV, device);
-		if (stat(special, &st) == -1)
-			snprintf(special, len, "%sr%s", _PATH_DEV, device);
-		device = special;
-	}
+	if ((fsi = opendev(device, O_RDONLY, 0, &rdev)) < 0)
+		err(1, "%s", rdev);
 
 	/*
-	 * Try to access our devices for writing ...
+	 * Try to access our device for writing ...
 	 */
 	if (Nflag) {
 		fso = -1;
 	} else {
-		fso = open(device, O_WRONLY);
+		fso = open(rdev, O_WRONLY);
 		if (fso < 0)
-			err(1, "%s", device);
+			err(1, "%s", rdev);
 	}
 
 	/*
-	 * ... and reading.
+	 * Now we have a file descriptor for our device, fstat() it to
+	 * figure out the partition number.
 	 */
-	fsi = open(device, O_RDONLY);
-	if (fsi < 0)
-		err(1, "%s", device);
+	if (fstat(fsi, &st) != 0)
+		err(1, "%s: fstat()", rdev);
 
 	/*
-	 * Try  to read a label and guess the slice if not  specified.  This
-	 * code  should guess the right thing and avoid to bother the user
-	 * with the task of specifying the option -v on vinum volumes.
+	 * Try to read a label from the disk.  Then get the partition from the
+	 * device minor number, using DISKPART().  Probably don't need to
+	 * check against getmaxpartitions().
 	 */
-	cp = device + strlen(device)-1;
 	lp = get_disklabel(fsi);
-	if (isdigit(*cp))
-		pp = &lp->d_partitions[2];
-	else if (*cp>='a' && *cp<='h')
-		pp = &lp->d_partitions[*cp - 'a'];
+	if (DISKPART(st.st_rdev) < getmaxpartitions())
+		pp = &lp->d_partitions[DISKPART(st.st_rdev)];
 	else
-		errx(1, "unknown device");
+		errx(1, "%s: invalid partition number %u",
+		    rdev, DISKPART(st.st_rdev));
 
 	/*
 	 * Check if that partition looks suited for growing a filesystem.
@@ -2064,7 +2049,7 @@ main(int argc, char **argv)
 		sblock.fs_ncyl -= sblock.fs_ncyl % sblock.fs_cpg;
 #endif
 		sblock.fs_ncyl -= sblock.fs_ncyl % sblock.fs_cpg;
-		printf( "Warning: %d sector(s) cannot be allocated.\n",
+		printf("Warning: %d sector(s) cannot be allocated.\n",
 		    (sblock.fs_size-(sblock.fs_ncg)*sblock.fs_fpg) *
 		    NSPF(&sblock));
 		sblock.fs_size = sblock.fs_ncyl * sblock.fs_spc / NSPF(&sblock);
@@ -2099,7 +2084,8 @@ main(int argc, char **argv)
 	DBG_PRINT0("label rewritten\n");
 
 	close(fsi);
-	if (fso > -1) close(fso);
+	if (fso > -1)
+		close(fso);
 
 	DBG_CLOSE;
 

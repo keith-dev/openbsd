@@ -1,8 +1,8 @@
 #!/bin/sh
-#	$OpenBSD: install.sh,v 1.136 2003/08/17 18:18:50 krw Exp $
+#	$OpenBSD: install.sh,v 1.142 2004/03/23 02:39:38 krw Exp $
 #	$NetBSD: install.sh,v 1.5.2.8 1996/08/27 18:15:05 gwr Exp $
 #
-# Copyright (c) 1997-2002 Todd Miller, Theo de Raadt, Ken Westerback
+# Copyright (c) 1997-2004 Todd Miller, Theo de Raadt, Ken Westerback
 # All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
@@ -94,13 +94,13 @@ if [ ! -f /etc/fstab ]; then
 			resp=$ROOTDISK
 			rm -f /tmp/fstab
 			# Make sure empty files exist so we don't have to
-			# keep checking for their existance before grep'ing.
+			# keep checking for their existence before grep'ing.
 			cat /dev/null >$FILESYSTEMS
 			cat /dev/null >$SWAPLIST
 		else
 			# Force the user to think and type in a disk name by
 			# making 'done' the default choice.
-			ask_which "disk" "do you wish to initialize?" "$_DKDEVS" done "No more disks to initialize"
+			ask_which "disk" "do you wish to initialize" "$_DKDEVS" done "No more disks to initialize"
 			[[ $resp == done ]] && break
 		fi
 
@@ -240,13 +240,8 @@ $(<$FILESYSTEMS)
 The next step creates a filesystem on each partition, ERASING existing data.
 __EOT
 
-	ask "Are you really sure that you're ready to proceed?" n
-	case $resp in
-	y*|Y*)	;;
-	*)	echo "ok, try again later..."
-		exit
-		;;
-	esac
+	ask_yn "Are you really sure that you're ready to proceed?"
+	[[ $resp == n ]] && { echo "ok, try again later..." ; exit ; }
 
 	# Read $FILESYSTEMS, creating a new filesystem on each listed
 	# partition and saving the partition and mount point information
@@ -353,16 +348,13 @@ cat > /tmp/hosts << __EOT
 127.0.0.1 $(hostname -s)
 __EOT
 
-ask "Configure the network?" y
-case $resp in
-y*|Y*)	donetconfig ;;
-*)	;;
-esac
+ask_yn "Configure the network?" yes
+[[ $resp == y ]] && donetconfig
 
 _oifs=$IFS
 IFS=
 resp=
-while [ -z "$resp" ]; do
+while [[ -z $resp ]]; do
 	askpass "Password for root account? (will not echo)"
 	_password=$resp
 
@@ -383,8 +375,8 @@ while read _dev _mp _fstype _opt _rest; do
 	mount -u -o $_opt $_dev $_mp ||	exit
 done < /etc/fstab
 
-# Create /tmp/sysctl.conf from installed sysctl.conf if appropriate.
-set_machdep_apertureallowed
+# Handle questions...
+questions
 
 echo -n "Saving configuration files..."
 
@@ -432,6 +424,8 @@ echo -n "done.\nGenerating initial host.random file..."
 dd if=/mnt/dev/urandom of=host.random bs=1024 count=64 >/dev/null 2>&1
 chmod 600 host.random >/dev/null 2>&1 )
 echo "done."
+
+set_timezone
 
 # Perform final steps common to both an install and an upgrade.
 finish_up

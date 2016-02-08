@@ -1,4 +1,4 @@
-/*	$OpenBSD: finger.c,v 1.14 2003/06/10 22:20:46 deraadt Exp $	*/
+/*	$OpenBSD: finger.c,v 1.16 2004/03/15 02:50:29 tedu Exp $	*/
 
 /*
  * Copyright (c) 1989 The Regents of the University of California.
@@ -43,14 +43,14 @@
  */
 
 #ifndef lint
-char copyright[] =
+static const char copyright[] =
 "@(#) Copyright (c) 1989 The Regents of the University of California.\n\
  All rights reserved.\n";
 #endif /* not lint */
 
 #ifndef lint
 /*static char sccsid[] = "from: @(#)finger.c	5.22 (Berkeley) 6/29/90";*/
-static char rcsid[] = "$OpenBSD: finger.c,v 1.14 2003/06/10 22:20:46 deraadt Exp $";
+static const char rcsid[] = "$OpenBSD: finger.c,v 1.16 2004/03/15 02:50:29 tedu Exp $";
 #endif /* not lint */
 
 /*
@@ -82,6 +82,8 @@ static char rcsid[] = "$OpenBSD: finger.c,v 1.14 2003/06/10 22:20:46 deraadt Exp
 time_t now;
 int entries, lflag, sflag, mflag, oflag, pplan, Mflag;
 char tbuf[1024];
+PERSON *htab[HSIZE];
+PERSON *phead, *ptail;
 
 int
 main(int argc, char *argv[])
@@ -120,7 +122,7 @@ main(int argc, char *argv[])
 		case '?':
 		default:
 			(void)fprintf(stderr,
-			    "usage: %s [-lmMpsho] [login ...]\n", __progname);
+			    "usage: %s [-hlMmops] [login ...]\n", __progname);
 			exit(1);
 		}
 	argc -= optind;

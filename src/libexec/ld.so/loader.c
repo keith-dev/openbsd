@@ -1,4 +1,4 @@
-/*	$OpenBSD: loader.c,v 1.68 2003/09/04 19:33:48 drahn Exp $ */
+/*	$OpenBSD: loader.c,v 1.73 2004/02/23 20:47:39 drahn Exp $ */
 
 /*
  * Copyright (c) 1998 Per Fogelstrom, Opsycon AB
@@ -54,6 +54,7 @@ void _dl_debug_state(void);
 void _dl_setup_env(char **);
 void _dl_dtors(void);
 void _dl_boot_bind(const long, long *, Elf_Dyn *);
+void _dl_fixup_user_env(void);
 
 const char *_dl_progname;
 int  _dl_pagesz;
@@ -129,6 +130,7 @@ _dl_dopreload(char *paths)
  * grab interesting environment variables, zap bad env vars if
  * issetugid
  */
+char **_dl_so_envp;
 void
 _dl_setup_env(char **envp)
 {
@@ -168,6 +170,7 @@ _dl_setup_env(char **envp)
 			_dl_unsetenv("LD_NORANDOM", envp);
 		}
 	}
+	_dl_so_envp = envp;
 }
 
 /*
@@ -205,7 +208,7 @@ _dl_boot(const char **argv, char **envp, const long loff, long *dl_data)
 	{
 		extern char *__got_start;
 		extern char *__got_end;
-#ifndef __i386__
+#ifndef RTLD_TEXT_PLT
 		extern char *__plt_start;
 		extern char *__plt_end;
 #endif
@@ -215,7 +218,7 @@ _dl_boot(const char **argv, char **envp, const long loff, long *dl_data)
 		    ELF_TRUNC((long)&__got_start, _dl_pagesz),
 		    GOT_PERMS);
 
-#ifndef __i386__
+#ifndef RTLD_TEXT_PLT
 		/* only for DATA_PLT or BSS_PLT */
 		_dl_mprotect((void *)ELF_TRUNC((long)&__plt_start, _dl_pagesz),
 		    ELF_ROUND((long)&__plt_end,_dl_pagesz) -
@@ -333,6 +336,9 @@ _dl_boot(const char **argv, char **envp, const long loff, long *dl_data)
 	    dl_data[AUX_base], loff);
 	_dl_add_object(dyn_obj);
 	dyn_obj->status |= STAT_RELOC_DONE;
+
+	if (_dl_traceld == NULL)
+		_dl_fixup_user_env();
 
 	/*
 	 * Everything should be in place now for doing the relocation
@@ -708,4 +714,27 @@ _dl_unsetenv(const char *var, char **env)
 		}
 		env++;
 	}
+}
+
+/* 
+ * _dl_fixup_user_env()
+ * 
+ * Set the user environment so that programs can use the environment
+ * while running constructors. Specifically, MALLOC_OPTIONS= for malloc()
+ */
+void
+_dl_fixup_user_env(void)
+{
+	const Elf_Sym *sym;
+	Elf_Addr ooff;
+	struct elf_object dummy_obj;
+
+	dummy_obj.dyn.symbolic = 0;
+	dummy_obj.load_name = "ld.so";
+
+	sym = NULL;
+	ooff = _dl_find_symbol("environ", _dl_objects, &sym,
+	    SYM_SEARCH_ALL|SYM_NOWARNNOTFOUND|SYM_PLT, 0, &dummy_obj);
+	if (sym != NULL)
+		*((char ***)(sym->st_value + ooff)) = _dl_so_envp;
 }

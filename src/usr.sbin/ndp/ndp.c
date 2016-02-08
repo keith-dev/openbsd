@@ -1,4 +1,4 @@
-/*	$OpenBSD: ndp.c,v 1.29 2003/06/26 21:33:33 deraadt Exp $	*/
+/*	$OpenBSD: ndp.c,v 1.34 2004/03/16 01:11:09 tedu Exp $	*/
 /*	$KAME: ndp.c,v 1.101 2002/07/17 08:46:33 itojun Exp $	*/
 
 /*
@@ -330,8 +330,8 @@ file(char *name)
 	args[4] = &arg[4][0];
 	retval = 0;
 	while (fgets(line, 100, fp) != NULL) {
-		i = sscanf(line, "%s %s %s %s %s", arg[0], arg[1], arg[2],
-		    arg[3], arg[4]);
+		i = sscanf(line, "%49s %49s %49s %49s %49s",
+		    arg[0], arg[1], arg[2], arg[3], arg[4]);
 		if (i < 2) {
 			fprintf(stderr, "ndp: bad line: %s\n", line);
 			retval = 1;
@@ -572,7 +572,6 @@ dump(struct in6_addr *addr, int cflag)
 	struct rt_msghdr *rtm;
 	struct sockaddr_in6 *sin;
 	struct sockaddr_dl *sdl;
-	extern int h_errno;
 	struct in6_nbrinfo *nbi;
 	struct timeval time;
 	int addrwidth;
@@ -762,6 +761,7 @@ again:;
 
 	if (repeat) {
 		printf("\n");
+		fflush(stdout);
 		sleep(repeat);
 		goto again;
 	}
@@ -867,7 +867,7 @@ rtmsg(int cmd)
 		rtm->rtm_flags |= (RTF_HOST | RTF_STATIC);
 		if (rtm->rtm_flags & RTF_ANNOUNCE) {
 			rtm->rtm_flags &= ~RTF_HOST;
-			rtm->rtm_flags |= RTA_NETMASK;
+			rtm->rtm_addrs |= RTA_NETMASK;
 		}
 		/* FALLTHROUGH */
 	case RTM_GET:

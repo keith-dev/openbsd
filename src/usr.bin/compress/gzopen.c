@@ -1,4 +1,4 @@
-/*	$OpenBSD: gzopen.c,v 1.14 2003/07/17 20:17:02 mickey Exp $	*/
+/*	$OpenBSD: gzopen.c,v 1.21 2004/02/23 21:07:30 deraadt Exp $	*/
 
 /*
  * Copyright (c) 1997 Michael Shalayeff
@@ -58,8 +58,10 @@
   (zlib format), rfc1951.txt (deflate format) and rfc1952.txt (gzip format).
 */
 
+#ifndef SMALL
 const char gz_rcsid[] =
-    "$OpenBSD: gzopen.c,v 1.14 2003/07/17 20:17:02 mickey Exp $";
+    "$OpenBSD: gzopen.c,v 1.21 2004/02/23 21:07:30 deraadt Exp $";
+#endif
 
 #include <sys/param.h>
 #include <sys/stat.h>
@@ -135,6 +137,7 @@ gz_open(int fd, const char *mode, char *name, int bits,
 	s->z_mode = mode[0];
 
 	if (s->z_mode == 'w') {
+#ifndef SMALL
 		/* windowBits is passed < 0 to suppress zlib header */
 		if (deflateInit2(&(s->z_stream), bits, Z_DEFLATED,
 				 -MAX_WBITS, DEF_MEM_LEVEL, 0) != Z_OK) {
@@ -142,6 +145,9 @@ gz_open(int fd, const char *mode, char *name, int bits,
 			return NULL;
 		}
 		s->z_stream.next_out = s->z_buf;
+#else
+		return (NULL);
+#endif
 	} else {
 		if (inflateInit2(&(s->z_stream), -MAX_WBITS) != Z_OK) {
 			free (s);
@@ -180,6 +186,7 @@ gz_close(void *cookie, struct z_info *info)
 	if (s == NULL)
 		return -1;
 
+#ifndef SMALL
 	if (s->z_mode == 'w' && (err = gz_flush (s, Z_FINISH)) == Z_OK) {
 		if ((err = put_int32 (s, s->z_crc)) == Z_OK) {
 			s->z_hlen += sizeof(int32_t);
@@ -187,10 +194,14 @@ gz_close(void *cookie, struct z_info *info)
 				s->z_hlen += sizeof(int32_t);
 		}
 	}
-
+#endif
 	if (!err && s->z_stream.state != NULL) {
 		if (s->z_mode == 'w')
+#ifndef SMALL
 			err = deflateEnd(&s->z_stream);
+#else
+			err = -1;
+#endif
 		else if (s->z_mode == 'r')
 			err = inflateEnd(&s->z_stream);
 	}
@@ -213,6 +224,7 @@ gz_close(void *cookie, struct z_info *info)
 	return err;
 }
 
+#ifndef SMALL
 int
 gz_flush(void *cookie, int flush)
 {
@@ -250,6 +262,7 @@ gz_flush(void *cookie, int flush)
 	}
 	return 0;
 }
+#endif
 
 static int
 put_int32(gz_stream *s, u_int32_t x)
@@ -407,11 +420,12 @@ gz_read(void *cookie, char *buf, int len)
 {
 	gz_stream *s = (gz_stream*)cookie;
 	u_char *start = buf; /* starting point for crc computation */
+	int error = Z_OK;
 
 	s->z_stream.next_out = buf;
 	s->z_stream.avail_out = len;
 
-	while (s->z_stream.avail_out != 0 && !s->z_eof) {
+	while (error == Z_OK && !s->z_eof && s->z_stream.avail_out != 0) {
 
 		if (s->z_stream.avail_in == 0) {
 
@@ -422,7 +436,8 @@ gz_read(void *cookie, char *buf, int len)
 			s->z_stream.next_in = s->z_buf;
 		}
 
-		if (inflate(&(s->z_stream), Z_NO_FLUSH) == Z_STREAM_END) {
+		error = inflate(&(s->z_stream), Z_NO_FLUSH);
+		if (error == Z_STREAM_END) {
 			/* Check CRC and original size */
 			s->z_crc = crc32(s->z_crc, start,
 			    (uInt)(s->z_stream.next_out - start));
@@ -432,24 +447,32 @@ gz_read(void *cookie, char *buf, int len)
 				errno = EINVAL;
 				return -1;
 			}
-			if (get_int32(s) != s->z_stream.total_out) {
+			if (get_int32(s) != (u_int32_t)s->z_stream.total_out) {
 				errno = EIO;
 				return -1;
 			}
 			s->z_hlen += 2 * sizeof(int32_t);
-			s->z_eof = 1;
-			break;
+			/* Check for the existence of an appended file. */
+			if (get_header(s, NULL, 0) != 0) {
+				s->z_eof = 1;
+				break;
+			}
+			inflateReset(&(s->z_stream));
+			s->z_crc = crc32(0L, Z_NULL, 0);
+			error = Z_OK;
 		}
 	}
 	s->z_crc = crc32(s->z_crc, start,
 	    (uInt)(s->z_stream.next_out - start));
+	len -= s->z_stream.avail_out;
 
-	return (int)(len - s->z_stream.avail_out);
+	return (len);
 }
 
 int
 gz_write(void *cookie, const char *buf, int len)
 {
+#ifndef SMALL
 	gz_stream *s = (gz_stream*)cookie;
 
 	s->z_stream.next_in = (char *)buf;
@@ -468,4 +491,5 @@ gz_write(void *cookie, const char *buf, int len)
 	s->z_crc = crc32(s->z_crc, buf, len);
 
 	return (int)(len - s->z_stream.avail_in);
+#endif
 }

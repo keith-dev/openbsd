@@ -1,6 +1,6 @@
 #!./perl
 
-# $RCSfile: time.t,v $$Revision: 1.7 $$Date: 2002/10/27 22:25:37 $
+# $RCSfile: time.t,v $$Revision: 1.8 $$Date: 2003/12/03 03:02:49 $
 
 if ( $does_gmtime = gmtime(time) ) { 
     print "1..7\n" 
@@ -34,7 +34,7 @@ ok($now > $beg && $now - $beg < 10,             'very basic time test');
 
 for ($i = 0; $i < 100000; $i++) {
     ($nowuser, $nowsys) = times;
-    $i = 200000 if $nowuser > $beguser && ( $nowsys > $begsys || 
+    $i = 200000 if $nowuser > $beguser && ( $nowsys >= $begsys || 
                                             (!$nowsys && !$begsys));
     last if time - $beg > 20;
 }

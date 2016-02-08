@@ -529,8 +529,14 @@ init_vars(sudo_mode)
 	pw.pw_name = pw_name;
 	sudo_user.pw = &pw;
 
-	log_error(0, "uid %lu does not exist in the passwd file!",
-	    (unsigned long) pw.pw_uid);
+	/*
+	 * If we are in -k/-K mode, just spew to stderr.  It is not unusual for
+	 * users to place "sudo -k" in a .logout file which can cause sudo to
+	 * be run during reboot after the YP/NIS/NIS+/LDAP/etc daemon has died.
+	 */
+	if (sudo_mode & (MODE_INVALIDATE|MODE_KILL))
+	    errx(1, "uid %s does not exist in the passwd file!", pw_name);
+	log_error(0, "uid %s does not exist in the passwd file!", pw_name);
     }
     if (user_shell == NULL || *user_shell == '\0')
 	user_shell = sudo_user.pw->pw_shell;
@@ -856,12 +862,9 @@ check_sudoers()
 static void
 initial_setup()
 {
-    int fd, maxfd;
-#ifdef HAVE_SETRLIMIT
-    struct rlimit rl;
-#endif
-
 #if defined(RLIMIT_CORE) && !defined(SUDO_DEVEL)
+    struct rlimit rl;
+
     /*
      * Turn off core dumps.
      */
@@ -871,23 +874,7 @@ initial_setup()
     (void) setrlimit(RLIMIT_CORE, &rl);
 #endif /* RLIMIT_CORE && !SUDO_DEVEL */
 
-    /*
-     * Close any open fd's other than stdin, stdout and stderr.
-     */
-#ifdef HAVE_SYSCONF
-    maxfd = sysconf(_SC_OPEN_MAX) - 1;
-#else
-    maxfd = getdtablesize() - 1;
-#endif /* HAVE_SYSCONF */
-#ifdef RLIMIT_NOFILE
-    if (getrlimit(RLIMIT_NOFILE, &rl) == 0) {
-	if (rl.rlim_max != RLIM_INFINITY && rl.rlim_max <= maxfd)
-	    maxfd = rl.rlim_max - 1;
-    }
-#endif /* RLIMIT_NOFILE */
-
-    for (fd = maxfd; fd > STDERR_FILENO; fd--)
-	(void) close(fd);
+    closefrom(STDERR_FILENO + 1);
 
     /*
      * Make set_perms point to the correct function.

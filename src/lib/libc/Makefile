@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.19 2002/07/15 19:41:10 mickey Exp $
+#	$OpenBSD: Makefile,v 1.22 2004/01/28 17:58:12 deraadt Exp $
 #
 # All library objects contain sccsid strings by default; they may be
 # excluded as a space-saving measure.  To produce a library that does
@@ -18,7 +18,7 @@
 LIB=c
 LINTFLAGS=-z
 CLEANFILES+=tags
-CFLAGS+=-Werror
+#CFLAGS+=-Werror
 
 LIBCSRCDIR=${.CURDIR}
 .include "${LIBCSRCDIR}/Makefile.inc"
@@ -50,7 +50,8 @@ rm-from-libkern:
 all: tags
 tags: ${SRCS}
 	ctags -w ${.ALLSRC:M*.c}
-	egrep "^SYSENTRY(.*)|^ENTRY(.*)|^FUNC(.*)|^SYSCALL(.*)" /dev/null ${.ALLSRC:M*.S} | \
+	egrep "^SYSENTRY(.*)|^ENTRY(.*)|^FUNC(.*)|^SYSCALL(.*)" \
+	    /dev/null ${.ALLSRC:M*.S} | \
 	    sed "s;\([^:]*\):\([^(]*\)(\([^, )]*\)\(.*\);\3 \1 /^\2(\3\4$$/;" \
 	    >> tags; sort -o tags tags
 

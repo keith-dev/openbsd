@@ -1,4 +1,4 @@
-/*	$OpenBSD: inode.c,v 1.24 2003/08/25 23:28:15 tedu Exp $	*/
+/*	$OpenBSD: inode.c,v 1.26 2003/10/11 01:43:45 tedu Exp $	*/
 /*	$NetBSD: inode.c,v 1.23 1996/10/11 20:15:47 thorpej Exp $	*/
 
 /*
@@ -34,7 +34,7 @@
 #if 0
 static char sccsid[] = "@(#)inode.c	8.5 (Berkeley) 2/8/95";
 #else
-static const char rcsid[] = "$OpenBSD: inode.c,v 1.24 2003/08/25 23:28:15 tedu Exp $";
+static const char rcsid[] = "$OpenBSD: inode.c,v 1.26 2003/10/11 01:43:45 tedu Exp $";
 #endif
 #endif /* not lint */
 
@@ -363,15 +363,16 @@ void
 cacheino(struct ufs1_dinode *dp, ino_t inumber)
 {
 	struct inoinfo *inp;
-	struct inoinfo **inpp;
+	struct inoinfo **inpp, **newinpsort;
 	unsigned int blks;
+	long newlistmax;
 
 	blks = howmany(dp->di_size, sblock.fs_bsize);
 	if (blks > NDADDR)
 		blks = NDADDR + NIADDR;
 	inp = malloc(sizeof(*inp) + (blks ? blks - 1 : 0) * sizeof(daddr_t));
 	if (inp == NULL)
-		errexit("cannot allocate memory for inode cache");
+		errexit("cannot allocate memory for inode cache\n");
 	inpp = &inphead[inumber % numdirs];
 	inp->i_nexthash = *inpp;
 	*inpp = inp;
@@ -386,11 +387,13 @@ cacheino(struct ufs1_dinode *dp, ino_t inumber)
 	inp->i_numblks = blks * sizeof(daddr_t);
 	memcpy(&inp->i_blks[0], &dp->di_db[0], (size_t)inp->i_numblks);
 	if (inplast == listmax) {
-		listmax += 100;
-		inpsort = realloc(inpsort,
-		    (unsigned)listmax * sizeof(struct inoinfo *));
-		if (inpsort == NULL)
+		newlistmax = listmax + 100;
+		newinpsort = realloc(inpsort,
+		    (unsigned)newlistmax * sizeof(struct inoinfo *));
+		if (newinpsort == NULL)
 			errexit("cannot increase directory list");
+		inpsort = newinpsort;
+		listmax = newlistmax;
 	}
 	inpsort[inplast++] = inp;
 }
@@ -532,7 +535,7 @@ blkerror(ino_t ino, char *type, daddr_t blk)
 		return;
 
 	default:
-		errexit("BAD STATE %d TO BLKERR", statemap[ino]);
+		errexit("BAD STATE %d TO BLKERR\n", statemap[ino]);
 		/* NOTREACHED */
 	}
 }

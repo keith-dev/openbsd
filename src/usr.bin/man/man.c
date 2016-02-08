@@ -1,4 +1,4 @@
-/*	$OpenBSD: man.c,v 1.26 2003/06/10 22:20:48 deraadt Exp $	*/
+/*	$OpenBSD: man.c,v 1.28 2004/02/23 14:14:14 jmc Exp $	*/
 /*	$NetBSD: man.c,v 1.7 1995/09/28 06:05:34 tls Exp $	*/
 
 /*
@@ -40,7 +40,7 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)man.c	8.17 (Berkeley) 1/31/95";
 #else
-static char rcsid[] = "$OpenBSD: man.c,v 1.26 2003/06/10 22:20:48 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: man.c,v 1.28 2004/02/23 14:14:14 jmc Exp $";
 #endif
 #endif /* not lint */
 
@@ -159,6 +159,9 @@ main(int argc, char *argv[])
 	if (!f_cat && !f_how && !f_where) {
 		if (!isatty(1))
 			f_cat = 1;
+		else if ((pager = getenv("MANPAGER")) != NULL &&
+				(*pager != '\0'))
+			pager = check_pager(pager);
 		else if ((pager = getenv("PAGER")) != NULL && (*pager != '\0'))
 			pager = check_pager(pager);
 		else
@@ -703,11 +706,11 @@ check_pager(char *name)
 		++p;
 
 	/* make sure it's "more", not "morex" */
-	if (!strncmp(p, "more", 4) && (!p[4] || isspace(p[4]))){
+	if (!strncmp(p, "more", 4) && (p[4] == '\0' || isspace(p[4]))){
 		save = name;
 		/* allocate space to add the "-s" */
 		len = strlen(save) + 1 + sizeof("-s");
-		if (!(name =malloc(len)))
+		if ((name = malloc(len)) == NULL)
 			err(1, NULL);
 		(void)snprintf(name, len, "%s %s", save, "-s");
 	}
@@ -789,8 +792,9 @@ static void
 usage(void)
 {
 	(void)fprintf(stderr, "usage: %s [-achw] [-C file] [-M path] [-m path] "
-	    "[-s section] [-S subsection] [section] title ...\n", __progname);
-	(void)fprintf(stderr, "usage: %s -k keyword\n", __progname);
+	    "[-S subsection] [-s section]\n\t   [section] name [...]\n",
+	    __progname);
 	(void)fprintf(stderr, "usage: %s -f command\n", __progname);
+	(void)fprintf(stderr, "usage: %s -k keyword\n", __progname);
 	exit(1);
 }

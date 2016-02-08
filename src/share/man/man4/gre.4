@@ -1,4 +1,4 @@
-.\" $OpenBSD: gre.4,v 1.19 2003/08/31 20:37:54 jmc Exp $
+.\" $OpenBSD: gre.4,v 1.23 2004/02/07 19:08:44 jmc Exp $
 .\" $NetBSD: gre.4,v 1.10 1999/12/22 14:55:49 kleink Exp $
 .\"
 .\" Copyright 1998 (c) The NetBSD Foundation, Inc.
@@ -19,7 +19,7 @@
 .\"    must display the following acknowledgement:
 .\"     This product includes software developed by the NetBSD
 .\"	Foundation, Inc. and its contributors.
-.\" 4. Neither the name of the The NetBSD Foundation nor the names of its
+.\" 4. Neither the name of The NetBSD Foundation nor the names of its
 .\"    contributors may be used to endorse or promote products derived
 .\"    from this software without specific prior written permission.
 .\"
@@ -42,7 +42,7 @@
 .Nm gre
 .Nd encapsulating network device
 .Sh SYNOPSIS
-.Cd pseudo-device gre Op Ar count
+.Cd "pseudo-device gre" Op Ar count
 .Sh NOTE
 .Tn GRE ,
 .Tn WCCPv1 ,
@@ -52,11 +52,11 @@ are enabled with the following
 .Xr sysctl 3
 variables respectively in
 .Pa /etc/sysctl.conf :
-.Bl -tag -width xxxxxxxxxxxxxxxxxxxxx
+.Bl -tag -width "net.inet.mobileip.allow"
 .It net.inet.gre.allow
 Allow GRE packets in and out of the system.
 .It net.inet.gre.wccp
-Allow WCCPv2-style GRE packets into the system (depends on the above).
+Allow WCCPv1-style GRE packets into the system (depends on the above).
 .It net.inet.mobileip.allow
 Allow MobileIP packets in and out of the system.
 .El
@@ -65,6 +65,15 @@ The
 .Nm
 network interface allows tunnel construction using the Cisco GRE or
 the Mobile-IP (RFC 2004) encapsulation protocols.
+.Pp
+A
+.Nm
+interface can be created at runtime using the
+.Ic ifconfig greN create
+command or by setting up a
+.Xr hostname.if 5
+configuration file for
+.Xr netstart 8 .
 .Pp
 This driver currently supports the following modes of operation:
 .Bl -tag -width abc
@@ -136,6 +145,7 @@ Host X-- Host A  ----------------tunnel---------- Cisco D------Host E
 On Host A (OpenBSD):
 .Bd -literal -offset indent
 # route add default B
+# ifconfig greN create
 # ifconfig greN A D netmask 0xffffffff linkX up
 # ifconfig greN tunnel A D
 # route add E D
@@ -155,9 +165,9 @@ ip route X mask tunnelX
 OR
 .Pp
 On Host D (OpenBSD):
-.Pp
 .Bd -literal -offset indent
 # route add default C
+# ifconfig greN create
 # ifconfig greN D A
 # ifconfig greN tunnel D A
 .Ed

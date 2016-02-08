@@ -1,9 +1,15 @@
-#	$OpenBSD: Makefile,v 1.16 2002/11/23 23:52:21 miod Exp $
+#	$OpenBSD: Makefile,v 1.21 2004/02/07 21:06:13 miod Exp $
 
-.if (${MACHINE} == "alpha") || (${MACHINE} == "hppa") || \
-    (${MACHINE} == "i386") || (${MACHINE} == "macppc") || \
+#
+# Be sure to change src/distrib/special/kbd/Makefile as well if you add
+# architectures to this list!
+#
+.if (${MACHINE} == "i386") || (${MACHINE} == "amd64") || \
+    (${MACHINE} == "macppc") || (${MACHINE} == "pegasos") || \
+    (${MACHINE} == "alpha") || (${MACHINE} == "hppa") || \
     (${MACHINE} == "sparc") || (${MACHINE} == "sparc64") || \
-    (${MACHINE} == "vax")
+    (${MACHINE} == "vax") || (${MACHINE} == "cats")
+    
 PROG=	kbd
 
 SRCS=	main.c kbd_wscons.c
@@ -15,6 +21,6 @@ NOPROG=	Yes
 .endif
 
 MAN=		kbd.8
-MANSUBDIR=	alpha hppa i386 macppc sparc sparc64 vax
+MANSUBDIR=	alpha hppa i386 macppc sparc sparc64 vax pegasos amd64 cats
 
 .include <bsd.prog.mk>

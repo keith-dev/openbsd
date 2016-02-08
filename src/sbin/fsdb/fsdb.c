@@ -1,4 +1,4 @@
-/*	$OpenBSD: fsdb.c,v 1.15 2003/08/25 23:28:15 tedu Exp $	*/
+/*	$OpenBSD: fsdb.c,v 1.18 2004/03/19 14:16:01 aaron Exp $	*/
 /*	$NetBSD: fsdb.c,v 1.7 1997/01/11 06:50:53 lukem Exp $	*/
 
 /*-
@@ -38,7 +38,7 @@
  */
 
 #ifndef lint
-static const char rcsid[] = "$OpenBSD: fsdb.c,v 1.15 2003/08/25 23:28:15 tedu Exp $";
+static const char rcsid[] = "$OpenBSD: fsdb.c,v 1.18 2004/03/19 14:16:01 aaron Exp $";
 #endif /* not lint */
 
 #include <sys/types.h>
@@ -229,15 +229,16 @@ cmdloop(void)
 	struct cmdtable *cmdp;
 	History *hist;
 	EditLine *elptr;
+	HistEvent hev;
 
 	curinode = ginode(ROOTINO);
 	curinum = ROOTINO;
 	printactive();
 
 	hist = history_init();
-	history(hist, H_EVENT, 100);	/* 100 elt history buffer */
+	history(hist, &hev, H_SETSIZE, 100);	/* 100 elt history buffer */
 
-	elptr = el_init(__progname, stdin, stdout);
+	elptr = el_init(__progname, stdin, stdout, stderr);
 	el_set(elptr, EL_EDITOR, "emacs");
 	el_set(elptr, EL_PROMPT, prompt);
 	el_set(elptr, EL_HIST, history, hist);
@@ -247,16 +248,18 @@ cmdloop(void)
 		if (debug)
 			printf("command `%s'\n", line);
 
-		history(hist, H_ENTER, elline);
+		history(hist, &hev, H_ENTER, elline);
 
 		line = strdup(elline);
+		if (line == NULL)
+			errx(1, "out of memory");
 		cmd_argv = crack(line, &cmd_argc);
 		if (cmd_argc) {
 			/*
 			 * el_parse returns -1 to signal that it's not been handled
 			 * internally.
 			 */
-			if (el_parse(elptr, cmd_argc, cmd_argv) != -1)
+			if (el_parse(elptr, cmd_argc, (const char **)cmd_argv) != -1)
 				continue;
 			known = 0;
 			for (cmdp = cmds; cmdp->cmd; cmdp++) {
@@ -454,15 +457,16 @@ CMDFUNCSTART(focusname)
 		    return 1;
 	}
 	for (p = argv[1]; p != NULL;) {
-		while ((val = strsep(&p, "/")) != NULL && *val == '\0');
-			if (val) {
-				printf("component `%s': ", val);
-				fflush(stdout);
-				if (!dolookup(val)) {
-					curinode = ginode(curinum);
-					return(1);
-				}
+		while ((val = strsep(&p, "/")) != NULL && *val == '\0')
+			;
+		if (val) {
+			printf("component `%s': ", val);
+			fflush(stdout);
+			if (!dolookup(val)) {
+				curinode = ginode(curinum);
+				return(1);
 			}
+		}
 	}
 	return 0;
 }

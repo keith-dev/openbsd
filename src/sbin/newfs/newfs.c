@@ -1,4 +1,4 @@
-/*	$OpenBSD: newfs.c,v 1.44 2003/07/16 18:02:36 tedu Exp $	*/
+/*	$OpenBSD: newfs.c,v 1.47 2003/11/03 05:40:09 tedu Exp $	*/
 /*	$NetBSD: newfs.c,v 1.20 1996/05/16 07:13:03 thorpej Exp $	*/
 
 /*
@@ -40,7 +40,7 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)newfs.c	8.8 (Berkeley) 4/18/94";
 #else
-static char rcsid[] = "$OpenBSD: newfs.c,v 1.44 2003/07/16 18:02:36 tedu Exp $";
+static char rcsid[] = "$OpenBSD: newfs.c,v 1.47 2003/11/03 05:40:09 tedu Exp $";
 #endif
 #endif /* not lint */
 
@@ -465,7 +465,7 @@ main(int argc, char *argv[])
 			printf("%s: %s: not a character-special device\n",
 			    __progname, special);
 		cp = strchr(argv[0], '\0') - 1;
-		if (cp == 0 || ((*cp < 'a' || *cp > ('a' + maxpartitions - 1))
+		if (cp == NULL || ((*cp < 'a' || *cp > ('a' + maxpartitions - 1))
 		    && !isdigit(*cp)))
 			fatal("%s: can't figure out file system partition",
 			    argv[0]);
@@ -587,8 +587,8 @@ havelabel:
 		pp->p_size *= blkpersec;
 	}
 	ncyls = fssize / secpercyl;
-	if (ncyls == 0)
-		ncyls = 1;
+	if (ncyls < 2)
+		ncyls = 2;
 	if (cpg == 0)
 		cpg = DESCPG < ncyls ? DESCPG : ncyls;
 	else if (cpg > ncyls) {
@@ -612,8 +612,7 @@ havelabel:
 
 		switch (pid = fork()) {
 		case -1:
-			perror("mfs");
-			exit(10);
+			err(10, "mfs");
 		case 0:
 			snprintf(mountfromname, sizeof(mountfromname),
 			    "mfs:%d", getpid());

@@ -1,4 +1,5 @@
-/*	$OpenBSD: sdl.c,v 1.8 2003/08/22 21:50:34 david Exp $ */
+/*	$OpenBSD: sdl.c,v 1.12 2004/02/26 08:18:56 deraadt Exp $ */
+
 /*
  * Copyright (c) 2003 Bob Beck.  All rights reserved.
  *
@@ -68,8 +69,8 @@ sdl_add(char *sdname, char *sdstring, char ** addrs, int addrc)
 	 */
 	for (i = 0; i < blu; i++) {
 		if (strcmp(blacklists[i].tag, sdname) == 0) {
-				index = i;
-				break;
+			index = i;
+			break;
 		}
 	}
 	if (index != -1) {
@@ -83,7 +84,8 @@ sdl_add(char *sdname, char *sdstring, char ** addrs, int addrc)
 	}
 	if (index == blu && blu == blc) {
 		struct sdlist *tmp;
-		tmp = realloc (blacklists, (blc + 128) *
+
+		tmp = realloc(blacklists, (blc + 128) *
 		    sizeof(struct sdlist));
 		if (tmp == NULL)
 			return (-1);
@@ -187,13 +189,13 @@ match_addr(struct sdaddr *a, struct sdaddr *m, struct sdaddr *b,
 		break;
 	case AF_INET6:
 		if (((a->addr32[0]) ==
-		     (b->addr32[0] & m->addr32[0])) &&
+		    (b->addr32[0] & m->addr32[0])) &&
 		    ((a->addr32[1]) ==
-		     (b->addr32[1] & m->addr32[1])) &&
+		    (b->addr32[1] & m->addr32[1])) &&
 		    ((a->addr32[2]) ==
-		     (b->addr32[2] & m->addr32[2])) &&
+		    (b->addr32[2] & m->addr32[2])) &&
 		    ((a->addr32[3]) ==
-		     (b->addr32[3] & m->addr32[3])))
+		    (b->addr32[3] & m->addr32[3])))
 			match++;
 		break;
 	}
@@ -212,8 +214,8 @@ sdl_lookup(struct sdlist *head, int af, void * src)
 	struct sdlist *sdl;
 	struct sdentry *sda;
 	struct sdaddr *source = (struct sdaddr *) src;
-	static int sdnewlen = 0;
-	static struct sdlist **sdnew = NULL;
+	int sdnewlen = 0;
+	struct sdlist **sdnew = NULL;
 
 	if (head == NULL)
 		return (NULL);
@@ -228,7 +230,7 @@ sdl_lookup(struct sdlist *head, int af, void * src)
 
 					tmp = realloc(sdnew,
 					    (sdnewlen + 128) *
-					     sizeof(struct sdlist *));
+					    sizeof(struct sdlist *));
 					if (tmp == NULL)
 						/*
 						 * XXX out of memory -
@@ -252,15 +254,9 @@ sdl_lookup(struct sdlist *head, int af, void * src)
 static void
 sdl_free(struct sdlist *sdl)
 {
-	if (sdl->tag != NULL)
-		free(sdl->tag);
-
-	if (sdl->string != NULL)
-		free(sdl->string);
-
-	if (sdl->addrs != NULL)
-		free(sdl->addrs);
-
+	free(sdl->tag);
+	free(sdl->string);
+	free(sdl->addrs);
 	sdl_clear(sdl);
 }
 

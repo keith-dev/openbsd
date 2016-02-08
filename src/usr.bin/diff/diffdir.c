@@ -1,4 +1,4 @@
-/*	$OpenBSD: diffdir.c,v 1.24 2003/07/21 23:28:00 millert Exp $	*/
+/*	$OpenBSD: diffdir.c,v 1.27 2004/03/16 00:40:34 millert Exp $	*/
 
 /*
  * Copyright (c) 2003 Todd C. Miller <Todd.Miller@courtesan.com>
@@ -21,7 +21,7 @@
  */
 
 #ifndef lint
-static const char rcsid[] = "$OpenBSD: diffdir.c,v 1.24 2003/07/21 23:28:00 millert Exp $";
+static const char rcsid[] = "$OpenBSD: diffdir.c,v 1.27 2004/03/16 00:40:34 millert Exp $";
 #endif /* not lint */
 
 #include <sys/param.h>
@@ -48,7 +48,7 @@ static void diffit(struct dirent *, char *, size_t, char *, size_t);
 #define d_status	d_type		/* we need to store status for -l */
 
 /*
- * Diff directory traveral. Will be called recursively if -r was specified.
+ * Diff directory traversal. Will be called recursively if -r was specified.
  */
 void
 diffdir(char *p1, char *p2)
@@ -118,8 +118,7 @@ diffdir(char *p1, char *p2)
 			else if (lflag)
 				dent1->d_status |= D_ONLY;
 			else
-				printf("Only in %.*s: %s\n", (int)(dirlen1 - 1),
-				    path1, dent1->d_name);
+				print_only(path1, dirlen1, dent1->d_name);
 			dp1++;
 		} else {
 			/* file only in second dir, only diff if -N or -P */
@@ -128,8 +127,7 @@ diffdir(char *p1, char *p2)
 			else if (lflag)
 				dent2->d_status |= D_ONLY;
 			else
-				printf("Only in %.*s: %s\n", (int)(dirlen2 - 1),
-				    path2, dent2->d_name);
+				print_only(path2, dirlen2, dent2->d_name);
 			dp2++;
 		}
 	}
@@ -285,7 +283,12 @@ diffit(struct dirent *dp, char *path1, size_t plen1, char *path2, size_t plen2)
 			    path1, path2);
 		return;
 	}
-	dp->d_status = diffreg(path1, path2, flags);
+	if (!S_ISREG(stb1.st_mode) && !S_ISDIR(stb1.st_mode))
+		dp->d_status = D_SKIPPED1;
+	else if (!S_ISREG(stb2.st_mode) && !S_ISDIR(stb2.st_mode))
+		dp->d_status = D_SKIPPED2;
+	else
+		dp->d_status = diffreg(path1, path2, flags);
 	if (!lflag)
 		print_status(dp->d_status, path1, path2, NULL);
 }

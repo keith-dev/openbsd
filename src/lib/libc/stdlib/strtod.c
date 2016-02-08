@@ -90,12 +90,13 @@
  */
 
 #if defined(LIBC_SCCS) && !defined(lint)
-static char *rcsid = "$OpenBSD: strtod.c,v 1.16 2002/12/02 15:38:54 millert Exp $";
+static char *rcsid = "$OpenBSD: strtod.c,v 1.19 2004/02/03 16:52:11 drahn Exp $";
 #endif /* LIBC_SCCS and not lint */
 
 #if defined(__m68k__) || defined(__sparc__) || defined(__i386__) || \
     defined(__mips__) || defined(__ns32k__) || defined(__alpha__) || \
-    defined(__powerpc__) || defined(__m88k__) || defined(__hppa__)
+    defined(__powerpc__) || defined(__m88k__) || defined(__hppa__) || \
+    defined(__x86_64__) || (defined(__arm__) && defined(__VFP_FP__))
 #include <sys/types.h>
 #if BYTE_ORDER == BIG_ENDIAN
 #define IEEE_BIG_ENDIAN
@@ -104,7 +105,7 @@ static char *rcsid = "$OpenBSD: strtod.c,v 1.16 2002/12/02 15:38:54 millert Exp 
 #endif
 #endif
 
-#ifdef __arm32__
+#if defined(__arm__) && !defined(__VFP_FP__)
 /*
  * Although the CPU is little endian the FP has different
  * byte and word endianness. The byte order is still little endian
@@ -238,7 +239,7 @@ typedef union {
  * An alternative that might be better on some machines is
  * #define Storeinc(a,b,c) (*a++ = b << 16 | c & 0xffff)
  */
-#if defined(IEEE_LITTLE_ENDIAN) + defined(VAX) + defined(__arm32__)
+#if defined(IEEE_LITTLE_ENDIAN) + defined(VAX) + defined(__arm__)
 #define Storeinc(a,b,c) (((unsigned short *)a)[1] = (unsigned short)b, \
 ((unsigned short *)a)[0] = (unsigned short)c, a++)
 #else

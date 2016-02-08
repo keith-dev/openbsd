@@ -1,4 +1,4 @@
-/*	$OpenBSD: brconfig.c,v 1.26 2003/06/25 09:44:55 henning Exp $	*/
+/*	$OpenBSD: brconfig.c,v 1.30 2004/03/08 17:23:33 mcbride Exp $	*/
 
 /*
  * Copyright (c) 1999, 2000 Jason L. Wright (jason@thought.net)
@@ -124,8 +124,16 @@ main(int argc, char *argv[])
 	if (strcmp(brdg, "-a") == 0)
 		return bridge_show_all(sock);
 
-	if (!is_bridge(sock, brdg)) {
+	if (strlen(brdg) >= IFNAMSIZ) {
 		warnx("%s is not a bridge", brdg);
+		return (EX_USAGE);
+	}
+
+	if (!is_bridge(sock, brdg)) {
+		if (errno == ENXIO)
+			warn("%s", brdg);
+		else
+			warnx("%s is not a bridge", brdg);
 		return (EX_USAGE);
 	}
 
@@ -474,16 +482,19 @@ bridge_ifclrflag(int s, char *brdg, char *ifsname, u_int32_t flag)
 int
 bridge_show_all(int s)
 {
-	char *inbuf = NULL;
+	char *inbuf = NULL, *inb;
 	struct ifconf ifc;
 	struct ifreq *ifrp, ifreq;
 	int len = 8192, i;
 
 	while (1) {
 		ifc.ifc_len = len;
-		ifc.ifc_buf = inbuf = realloc(inbuf, len);
-		if (inbuf == NULL)
+		inb = realloc(inbuf, len);
+		if (inb == NULL) {
+			free(inbuf);
 			err(1, "malloc");
+		}
+		ifc.ifc_buf = inbuf = inb;
 		if (ioctl(s, SIOCGIFCONF, &ifc) < 0)
 			err(1, "ioctl(SIOCGIFCONF)");
 		if (ifc.ifc_len + sizeof(struct ifreq) < len)
@@ -631,14 +642,17 @@ bridge_list(int s, char *brdg, char *delim)
 	struct ifbreq *reqp;
 	struct ifbifconf bifc;
 	int i, len = 8192;
-	char buf[sizeof(reqp->ifbr_ifsname) + 1], *inbuf = NULL;
+	char buf[sizeof(reqp->ifbr_ifsname) + 1], *inbuf = NULL, *inb;
 
 	while (1) {
-		strlcpy(bifc.ifbic_name, brdg, sizeof(bifc.ifbic_name));
 		bifc.ifbic_len = len;
-		bifc.ifbic_buf = inbuf = realloc(inbuf, len);
-		if (inbuf == NULL)
+		inb = realloc(inbuf, len);
+		if (inb == NULL) {
+			free(inbuf);
 			err(1, "malloc");
+		}
+		bifc.ifbic_buf = inbuf = inb;
+		strlcpy(bifc.ifbic_name, brdg, sizeof(bifc.ifbic_name));
 		if (ioctl(s, SIOCBRDGIFS, &bifc) < 0)
 			err(1, "%s", brdg);
 		if (bifc.ifbic_len + sizeof(*reqp) < len)
@@ -734,13 +748,14 @@ int
 bridge_timeout(int s, char *brdg, char *arg)
 {
 	struct ifbrparam bp;
-	int newtime;
+	long newtime;
 	char *endptr;
 
 	errno = 0;
 	newtime = strtol(arg, &endptr, 0);
-	if (arg[0] == '\0' || endptr[0] != '\0' || newtime < 0 ||
-	    (errno == ERANGE && newtime == ULONG_MAX)) {
+	if (arg[0] == '\0' || endptr[0] != '\0' ||
+	    (newtime & ~INT_MAX) != 0L ||
+	    (errno == ERANGE && newtime == LONG_MAX)) {
 		printf("invalid arg for timeout: %s\n", arg);
 		return (EX_USAGE);
 	}
@@ -758,13 +773,13 @@ int
 bridge_maxage(int s, char *brdg, char *arg)
 {
 	struct ifbrparam bp;
-	u_int32_t v;
+	unsigned long v;
 	char *endptr;
 
 	errno = 0;
 	v = strtoul(arg, &endptr, 0);
-	if (arg[0] == '\0' || endptr[0] != '\0' ||
-	    (errno == ERANGE && v == ULONG_MAX) || (v > 0xff)) {
+	if (arg[0] == '\0' || endptr[0] != '\0' || v > 0xffUL ||
+	    (errno == ERANGE && v == ULONG_MAX)) {
 		printf("invalid arg for maxage: %s\n", arg);
 		return (EX_USAGE);
 	}
@@ -782,13 +797,13 @@ int
 bridge_priority(int s, char *brdg, char *arg)
 {
 	struct ifbrparam bp;
-	u_int32_t v;
+	unsigned long v;
 	char *endptr;
 
 	errno = 0;
 	v = strtoul(arg, &endptr, 0);
-	if (arg[0] == '\0' || endptr[0] != '\0' ||
-	    (errno == ERANGE && v == ULONG_MAX) || (v > 0xffff)) {
+	if (arg[0] == '\0' || endptr[0] != '\0' || v > 0xffffUL ||
+	    (errno == ERANGE && v == ULONG_MAX)) {
 		printf("invalid arg for maxage: %s\n", arg);
 		return (EX_USAGE);
 	}
@@ -806,13 +821,13 @@ int
 bridge_fwddelay(int s, char *brdg, char *arg)
 {
 	struct ifbrparam bp;
-	u_int32_t v;
+	unsigned long v;
 	char *endptr;
 
 	errno = 0;
 	v = strtoul(arg, &endptr, 0);
-	if (arg[0] == '\0' || endptr[0] != '\0' ||
-	    (errno == ERANGE && v == ULONG_MAX) || (v > 0xff)) {
+	if (arg[0] == '\0' || endptr[0] != '\0' || v > 0xffUL ||
+	    (errno == ERANGE && v == ULONG_MAX)) {
 		printf("invalid arg for fwddelay: %s\n", arg);
 		return (EX_USAGE);
 	}
@@ -830,13 +845,13 @@ int
 bridge_hellotime(int s, char *brdg, char *arg)
 {
 	struct ifbrparam bp;
-	u_int32_t v;
+	unsigned long v;
 	char *endptr;
 
 	errno = 0;
 	v = strtoul(arg, &endptr, 0);
-	if (arg[0] == '\0' || endptr[0] != '\0' ||
-	    (errno == ERANGE && v == ULONG_MAX) || (v > 0xff)) {
+	if (arg[0] == '\0' || endptr[0] != '\0' || v > 0xffUL ||
+	    (errno == ERANGE && v == ULONG_MAX)) {
 		printf("invalid arg for hellotime: %s\n", arg);
 		return (EX_USAGE);
 	}
@@ -854,12 +869,12 @@ int
 bridge_maxaddr(int s, char *brdg, char *arg)
 {
 	struct ifbrparam bp;
-	u_int32_t newsize;
+	unsigned long newsize;
 	char *endptr;
 
 	errno = 0;
 	newsize = strtoul(arg, &endptr, 0);
-	if (arg[0] == '\0' || endptr[0] != '\0' ||
+	if (arg[0] == '\0' || endptr[0] != '\0' || newsize > 0xffffffffUL ||
 	    (errno == ERANGE && newsize == ULONG_MAX)) {
 		printf("invalid arg for maxaddr: %s\n", arg);
 		return (EX_USAGE);
@@ -900,7 +915,7 @@ int
 bridge_ifprio(int s, char *brdg, char *ifname, char *val)
 {
 	struct ifbreq breq;
-	u_int32_t v;
+	unsigned long v;
 	char *endptr;
 
 	strlcpy(breq.ifbr_name, brdg, sizeof(breq.ifbr_name));
@@ -908,8 +923,8 @@ bridge_ifprio(int s, char *brdg, char *ifname, char *val)
 
 	errno = 0;
 	v = strtoul(val, &endptr, 0);
-	if (val[0] == '\0' || endptr[0] != '\0' ||
-	    (errno == ERANGE && v == ULONG_MAX) || (v > 0xff)) {
+	if (val[0] == '\0' || endptr[0] != '\0' || v > 0xffUL ||
+	    (errno == ERANGE && v == ULONG_MAX)) {
 		printf("invalid arg for ifpriority: %s\n", val);
 		return (EX_USAGE);
 	}
@@ -926,7 +941,7 @@ int
 bridge_ifcost(int s, char *brdg, char *ifname, char *val)
 {
 	struct ifbreq breq;
-	u_int32_t v;
+	unsigned long v;
 	char *endptr;
 
 	strlcpy(breq.ifbr_name, brdg, sizeof(breq.ifbr_name));
@@ -935,7 +950,8 @@ bridge_ifcost(int s, char *brdg, char *ifname, char *val)
 	errno = 0;
 	v = strtoul(val, &endptr, 0);
 	if (val[0] == '\0' || endptr[0] != '\0' ||
-	    (errno == ERANGE && v == ULONG_MAX) || (v < 1 || v > 0xffffffff)) {
+	    v < 1 || v > 0xffffffffUL ||
+	    (errno == ERANGE && v == ULONG_MAX)) {
 		printf("invalid arg for ifcost: %s\n", val);
 		return (EX_USAGE);
 	}
@@ -978,15 +994,18 @@ bridge_addrs(int s, char *brdg, char *delim)
 {
 	struct ifbaconf ifbac;
 	struct ifbareq *ifba;
-	char *inbuf = NULL, buf[sizeof(ifba->ifba_ifsname) + 1];
+	char *inbuf = NULL, buf[sizeof(ifba->ifba_ifsname) + 1], *inb;
 	int i, len = 8192;
 
 	while (1) {
 		ifbac.ifbac_len = len;
-		ifbac.ifbac_buf = inbuf = realloc(inbuf, len);
-		strlcpy(ifbac.ifbac_name, brdg, sizeof(ifbac.ifbac_name));
-		if (inbuf == NULL)
+		inb = realloc(inbuf, len);
+		if (inb == NULL) {
+			free(inbuf);
 			err(EX_IOERR, "malloc");
+		}
+		ifbac.ifbac_buf = inbuf = inb;
+		strlcpy(ifbac.ifbac_name, brdg, sizeof(ifbac.ifbac_name));
 		if (ioctl(s, SIOCBRDGRTS, &ifbac) < 0) {
 			if (errno == ENETDOWN)
 				return (0);
@@ -1098,18 +1117,21 @@ bridge_flushrule(int s, char *brdg, char *ifname)
 int
 bridge_rules(int s, char *brdg, char *ifname, char *delim)
 {
-	char *inbuf = NULL;
+	char *inbuf = NULL, *inb;
 	struct ifbrlconf ifc;
 	struct ifbrlreq *ifrp, ifreq;
 	int len = 8192, i;
 
 	while (1) {
 		ifc.ifbrl_len = len;
-		ifc.ifbrl_buf = inbuf = realloc(inbuf, len);
+		inb = realloc(inbuf, len);
+		if (inb == NULL) {
+			free(inbuf);
+			err(1, "malloc");
+		}
+		ifc.ifbrl_buf = inbuf = inb;
 		strlcpy(ifc.ifbrl_name, brdg, sizeof(ifc.ifbrl_name));
 		strlcpy(ifc.ifbrl_ifsname, ifname, sizeof(ifc.ifbrl_ifsname));
-		if (inbuf == NULL)
-			err(1, "malloc");
 		if (ioctl(s, SIOCBRDGGRL, &ifc) < 0)
 			err(1, "ioctl(SIOCBRDGGRL)");
 		if (ifc.ifbrl_len + sizeof(ifreq) < len)

@@ -1,4 +1,4 @@
-/* $OpenBSD: http_main.c,v 1.31 2003/08/21 13:11:35 henning Exp $ */
+/* $OpenBSD: http_main.c,v 1.35 2004/02/10 12:59:29 henning Exp $ */
 
 /* ====================================================================
  * The Apache Software License, Version 1.1
@@ -3780,11 +3780,7 @@ static int make_sock(pool *p, const struct sockaddr_in *server)
 #ifndef _OSD_POSIX
 	ap_log_error(APLOG_MARK, APLOG_CRIT, server_conf,
 		    "make_sock: for %s, setsockopt: (SO_REUSEADDR)", addr);
-#ifdef BEOS
 	closesocket(s);
-#else
-	close(s);
-#endif
 	ap_unblock_alarms();
 	exit(1);
 #endif /*_OSD_POSIX*/
@@ -3794,11 +3790,7 @@ static int make_sock(pool *p, const struct sockaddr_in *server)
     if (setsockopt(s, SOL_SOCKET, SO_KEEPALIVE, (char *) &one, sizeof(int)) < 0) {
 	ap_log_error(APLOG_MARK, APLOG_CRIT, server_conf,
 		    "make_sock: for %s, setsockopt: (SO_KEEPALIVE)", addr);
-#ifdef BEOS
 	closesocket(s);
-#else
-	close(s);
-#endif
 
 	ap_unblock_alarms();
 	exit(1);
@@ -3853,11 +3845,7 @@ static int make_sock(pool *p, const struct sockaddr_in *server)
 	    GETUSERMODE();
 #endif
 
-#ifdef BEOS
 	closesocket(s);
-#else
-	close(s);
-#endif
 	ap_unblock_alarms();
 	exit(1);
     }
@@ -3869,11 +3857,7 @@ static int make_sock(pool *p, const struct sockaddr_in *server)
     if (listen(s, ap_listenbacklog) == -1) {
 	ap_log_error(APLOG_MARK, APLOG_ERR, server_conf,
 	    "make_sock: unable to listen for connections on %s", addr);
-#ifdef BEOS
 	closesocket(s);
-#else
-	close(s);
-#endif
 	ap_unblock_alarms();
 	exit(1);
     }
@@ -3923,11 +3907,7 @@ static int make_sock(pool *p, const struct sockaddr_in *server)
 	    "larger than FD_SETSIZE (%u) "
 	    "found, you probably need to rebuild Apache with a "
 	    "larger FD_SETSIZE", addr, s, FD_SETSIZE);
-#ifdef BEOS
 	closesocket(s);
-#else
-	close(s);
-#endif
 	exit(1);
     }
 #endif
@@ -5277,6 +5257,13 @@ static void standalone_main(int argc, char **argv)
 		OpenSSL_add_all_algorithms();
 #endif
 
+		if (initgroups(ap_user_name, ap_group_id)) {
+		    ap_log_error(APLOG_MARK, APLOG_CRIT, server_conf,
+			"initgroups: unable to set groups for User %s "
+			"and Group %u", ap_user_name, (unsigned)ap_group_id);
+		    exit(1);
+		}
+
 		if (chroot(ap_server_root) < 0) {
 		    ap_log_error(APLOG_MARK, APLOG_EMERG, server_conf,
 			"unable to chroot into %s!", ap_server_root);
@@ -5288,9 +5275,8 @@ static void standalone_main(int argc, char **argv)
 		is_chrooted = 1;
 		setproctitle("parent [chroot %s]", ap_server_root);
 
-		if (setgroups(1, &ap_group_id) || setegid(ap_group_id) ||
-		    setgid(ap_group_id) || seteuid(ap_user_id) || 
-		    setuid(ap_user_id)) {
+		if (setegid(ap_group_id) || setgid(ap_group_id) ||
+		    seteuid(ap_user_id) || setuid(ap_user_id)) {
 			ap_log_error(APLOG_MARK, APLOG_CRIT, server_conf,
 			    "can't drop priviliges!");
 			exit(1);
@@ -8154,7 +8140,7 @@ const XML_LChar *suck_in_expat(void)
 }
 #endif /* USE_EXPAT */
 
-API_EXPORT(int) ap_server_strip_chroot(char *src, int force)
+API_EXPORT(void) ap_server_strip_chroot(char *src, int force)
 {
     char buf[MAX_STRING_LEN];
 

@@ -1,4 +1,4 @@
-/*	$OpenBSD: file.c,v 1.25 2003/08/16 00:24:51 deraadt Exp $	*/
+/*	$OpenBSD: file.c,v 1.28 2003/11/09 00:19:02 vincent Exp $	*/
 
 /*
  *	File commands.
@@ -299,7 +299,7 @@ doneread:
 		}
 	}
 endoffile:
-	undo_add_insert(olp, opos, siz);
+	undo_add_insert(olp, opos, siz-1);
 
 	/* ignore errors */
 	ffclose(NULL);
@@ -365,7 +365,7 @@ out:		lp2 = NULL;
  * Ask for a file name and write the contents of the current buffer to that
  * file.  Update the remembered file name and clear the buffer changed flag.
  * This handling of file names is different from the earlier versions and
- * is more compatable with Gosling EMACS than with ITS EMACS.
+ * is more compatible with Gosling EMACS than with ITS EMACS.
  */
 /* ARGSUSED */
 int
@@ -373,7 +373,7 @@ filewrite(int f, int n)
 {
 	int	 s;
 	char	 fname[NFILEN];
-	char	*adjfname;
+	char	*adjfname, *p;
 
 	if ((s = eread("Write file: ", fname, NFILEN,
 	    EFNEW | EFCR | EFFILE)) != TRUE)
@@ -385,6 +385,14 @@ filewrite(int f, int n)
 	bzero(&curbp->b_fi, sizeof(curbp->b_fi));
 	if ((s = writeout(curbp, adjfname)) == TRUE) {
 		(void)strlcpy(curbp->b_fname, adjfname, sizeof curbp->b_fname);
+		p = strrchr(curbp->b_fname, '/');
+		if (p)
+			p++;
+		else
+			p = curbp->b_fname;
+		if (curbp->b_bname)
+			free((char *)curbp->b_bname);
+		curbp->b_bname = strdup(p);
 #ifndef NO_BACKUP
 		curbp->b_flag &= ~(BFBAK | BFCHG);
 #else /* !NO_BACKUP */

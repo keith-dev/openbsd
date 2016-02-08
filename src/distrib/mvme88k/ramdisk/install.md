@@ -1,4 +1,4 @@
-#       $OpenBSD: install.md,v 1.20 2003/09/09 18:45:52 miod Exp $
+#       $OpenBSD: install.md,v 1.23 2003/10/15 04:32:28 deraadt Exp $
 # Copyright (c) 1996 The NetBSD Foundation, Inc.
 # All rights reserved.
 #
@@ -46,38 +46,34 @@ md_set_term() {
 
 md_installboot() {
 	echo "Installing boot block..."
-	cp /mnt/usr/mdec/bootsd /mnt/bootsd
-	/mnt/usr/mdec/installboot -v /mnt/bootsd /mnt/usr/mdec/bootxx /dev/r${1}a
+	cp /mnt/usr/mdec/bootsd /mnt/boot
+	/mnt/usr/mdec/installboot -v /mnt/boot /mnt/usr/mdec/bootxx /dev/r${1}a
 }
 
+# $1 is the disk to check
 md_checkfordisklabel() {
-	# $1 is the disk to check
 	local rval=0
 
 	disklabel $1 >/dev/null 2>/tmp/checkfordisklabel
-	if grep "no disk label" /tmp/checkfordisklabel; then
-		rval=1
-	elif grep "disk label corrupted" /tmp/checkfordisklabel; then
+
+	if grep "disk label corrupted" /tmp/checkfordisklabel; then
 		rval=2
-	fi
+	fi >/dev/null 2>&1
 
 	rm -f /tmp/checkfordisklabel
 	return $rval
 }
 
-md_prep_disklabel()
-{
+md_prep_disklabel() {
 	local _disk=$1
 
 	md_checkfordisklabel $_disk
 	case $? in
-	1)	echo "WARNING: Disk $_disk has no label. You will be creating a new one.\n"
-		;;
 	2)	echo "WARNING: Label on disk $_disk is corrupted. You will be repairing it.\n"
 		;;
 	esac
 
-	disklabel -W $_disk
+	disklabel -W $_disk >/dev/null 2>&1
 	disklabel -f /tmp/fstab.$_disk -E $_disk
 }
 

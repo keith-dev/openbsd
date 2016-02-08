@@ -30,7 +30,7 @@
 .\" OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
 .\" SUCH DAMAGE.
 .\"
-.\"	$OpenBSD: malloc.3,v 1.28 2003/06/02 20:18:37 millert Exp $
+.\"	$OpenBSD: malloc.3,v 1.36 2004/02/09 13:07:42 espie Exp $
 .\"
 .Dd August 27, 1996
 .Dt MALLOC 3
@@ -55,7 +55,7 @@
 .Ft void
 .Fn cfree "void *ptr"
 .Ft char *
-.Va malloc_options
+.Va malloc_options ;
 .Sh DESCRIPTION
 The
 .Fn malloc
@@ -141,25 +141,30 @@ object is returned.
 When using
 .Fn realloc
 one must be careful to avoid the following idiom:
-.Pp
 .Bd -literal -offset indent
-if ((p = realloc(p, nsize)) == NULL)
-	return NULL;
+size += 50;
+if ((p = realloc(p, size)) == NULL)
+	return (NULL);
 .Ed
 .Pp
-In most cases, this will result in a leak of memory.
+Do not adjust the variable describing how much memory has been allocated
+until one knows the allocation has been successful.
+This can cause aberrant program behavior if the incorrect size value is used.
+In most cases, the above sample will also result in a leak of memory.
 As stated earlier, a return value of
 .Dv NULL
 indicates that the old object still remains allocated.
 Better code looks like this:
 .Bd -literal -offset indent
-if ((p2 = realloc(p, nsize)) == NULL) {
-	if (p)
-		free(p);
+newsize = size + 50;
+if ((newp = realloc(p, newsize)) == NULL) {
+	free(p);
 	p = NULL;
-	return NULL;
+	size = 0;
+	return (NULL);
 }
-p = p2;
+p = newp;
+size = newsize;
 .Ed
 .Pp
 Malloc will first look for a symbolic link called
@@ -187,17 +192,30 @@ at exit.
 This option requires the library to have been compiled with -DMALLOC_STATS in
 order to have any effect.
 .Pp
+.It Cm F
+.Dq Freeguard .
+Enable use after free protection.
+Unused pages on the freelist are read and write protected to
+cause a segmentation fault upon access.
+.Pp
+.It Cm G
+.Dq Guard .
+Enable guard pages and chunk randomization.
+Each page size or larger allocation is followed by a guard page that will
+cause a segmentation fault upon any access.
+Smaller than page size chunks are returned in a random order.
+.Pp
+.It Cm H
+.Dq Hint .
+Pass a hint to the kernel about pages we don't use.
+If the machine is paging a lot this may help a bit.
+.Pp
 .It Cm J
 .Dq Junk .
 Fill some junk into the area allocated.
 Currently junk is bytes of 0xd0; this is pronounced
 .Dq Duh .
 \&:-)
-.Pp
-.It Cm H
-.Dq Hint .
-Pass a hint to the kernel about pages we don't use.
-If the machine is paging a lot this may help a bit.
 .Pp
 .It Cm N
 Do not output warning messages when encountering possible corruption
@@ -337,7 +355,7 @@ internal freelist has been stomped on.
 Here is a brief description of the warning messages and what they mean:
 .Bl -tag -width Fl
 .It Dq chunk/page is already free.
-A pointer to a free chunk is attempted freed again.
+There was an attempt to free a chunk that had already been freed.
 .It Dq junk pointer, too high to make sense.
 The pointer doesn't make sense.
 It's above the area of memory that
@@ -410,5 +428,5 @@ Every time the free-list is traversed, all the otherwise unused, and very
 likely paged out, pages get faulted into primary memory, just to see what
 lies after them in the list.
 .Pp
-On systems which are paging, this can make a factor five in difference on the
-page-faults of a process.
+On systems which are paging, this can increase the page-faults
+of a process by a factor of five.

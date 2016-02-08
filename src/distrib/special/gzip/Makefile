@@ -1,12 +1,11 @@
-#	$OpenBSD: Makefile,v 1.2 2003/09/05 04:46:35 tedu Exp $
+#	$OpenBSD: Makefile,v 1.7 2003/12/17 19:37:59 henning Exp $
 
 PROG=	gzip
-SRCS=	main.c gzopen.c
+SRCS=	main.c gzopen.c 
+SRCS+=	adler32.c crc32.c inflate.c inftrees.c zutil.c
 MAN=
-COPTS+=-Os -DSMALL
+COPTS+=-Os -DSMALL -DDYNAMIC_CRC_TABLE -DNOBYFOUR -DNO_GZIP -DSLOW
 .PATH:  ${.CURDIR}/../../../usr.bin/compress
-
-LDADD=-lz
-DPADD=${LIBZ}
+.PATH:  ${.CURDIR}/../../../lib/libz
 
 .include <bsd.prog.mk>

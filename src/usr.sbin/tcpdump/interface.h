@@ -1,4 +1,4 @@
-/*	$OpenBSD: interface.h,v 1.40 2003/08/21 19:14:23 frantzen Exp $	*/
+/*	$OpenBSD: interface.h,v 1.43 2004/01/28 19:44:55 canacar Exp $	*/
 
 /*
  * Copyright (c) 1988, 1989, 1990, 1991, 1992, 1993, 1994, 1995, 1996, 1997
@@ -20,7 +20,7 @@
  * WARRANTIES, INCLUDING, WITHOUT LIMITATION, THE IMPLIED WARRANTIES OF
  * MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE.
  *
- * @(#) $Header: /cvs/src/usr.sbin/tcpdump/interface.h,v 1.40 2003/08/21 19:14:23 frantzen Exp $ (LBL)
+ * @(#) $Header: /cvs/src/usr.sbin/tcpdump/interface.h,v 1.43 2004/01/28 19:44:55 canacar Exp $ (LBL)
  */
 
 #ifndef tcpdump_interface_h
@@ -165,7 +165,7 @@ extern __dead void error(const char *, ...)
 extern void warning(const char *, ...) __attribute__ ((format (printf, 1, 2)));
 
 extern char *read_infile(char *);
-extern char *copy_argv(char **);
+extern char *copy_argv(char * const *);
 
 extern char *isonsap_string(const u_char *);
 extern char *llcsap_string(u_char);
@@ -200,6 +200,7 @@ extern void pflog_old_if_print(u_char *, const struct pcap_pkthdr *,
         const u_char *);
 extern void pfsync_if_print(u_char *, const struct pcap_pkthdr *,
         const u_char *);
+extern void pfsync_ip_print(const u_char *, u_int, const u_char *);
 extern void ether_if_print(u_char *, const struct pcap_pkthdr *,
 	const u_char *);
 extern void fddi_if_print(u_char *, const struct pcap_pkthdr *, const u_char *);
@@ -223,7 +224,7 @@ extern void vrrp_print(const u_char *bp, u_int len, int ttl);
 extern void hsrp_print(const u_char *, u_int);
 extern void nfsreply_print(const u_char *, u_int, const u_char *);
 extern void nfsreq_print(const u_char *, u_int, const u_char *);
-extern void ns_print(const u_char *, u_int);
+extern void ns_print(const u_char *, u_int, int);
 extern void ntp_print(const u_char *, u_int);
 extern void loop_if_print(u_char *, const struct pcap_pkthdr *, const u_char *);
 extern void null_if_print(u_char *, const struct pcap_pkthdr *, const u_char *);

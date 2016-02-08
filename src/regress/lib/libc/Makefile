@@ -1,8 +1,9 @@
-#	$OpenBSD: Makefile,v 1.11 2003/05/15 04:23:49 deraadt Exp $
+#	$OpenBSD: Makefile,v 1.13 2004/02/11 23:38:11 deraadt Exp $
 
-SUBDIR+= alloca
-SUBDIR+= _setjmp db getaddrinfo regex setjmp sigsetjmp malloc sigreturn popen
-SUBDIR+= longjmp atexit sprintf
+SUBDIR+= _setjmp alloca atexit db getaddrinfo longjmp malloc
+SUBDIR+= popen regex setjmp setjmp-signal sigreturn sigsetjmp
+SUBDIR+= sprintf time
+
 .if (${MACHINE_ARCH} != "vax")
 SUBDIR+= ieeefp
 .endif

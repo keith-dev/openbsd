@@ -23,7 +23,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- *	$Id: pppctl.c,v 1.14 2003/09/07 07:50:29 tedu Exp $
+ *	$Id: pppctl.c,v 1.16 2003/11/15 00:21:23 tedu Exp $
  */
 
 #include <sys/types.h>
@@ -120,11 +120,12 @@ Receive(int fd, int display)
             for (last = Buffer+len-2; last > Buffer && *last != ' '; last--)
                 ;
             if (last > Buffer+3 && !strncmp(last-3, " on", 3)) {
-                 /* a password is required ! */
+                 /* a password is required! */
                  if (display & REC_PASSWD) {
                     /* password time */
                     if (!passwd)
-                        passwd = getpass("Password: ");
+                        if ((passwd = getpass("Password: ")) == NULL)
+				err(1, "getpass");
                     snprintf(Buffer, sizeof Buffer, "passwd %s\n", passwd);
                     memset(passwd, '\0', strlen(passwd));
                     if (display & REC_VERBOSE)
@@ -398,10 +399,7 @@ main(int argc, char **argv)
                 History *hist;
                 const char *l, *env;
                 int size;
-#ifdef __NetBSD__
                 HistEvent hev = { 0, "" };
-#endif
-
 
                 hist = history_init();
                 if ((env = getenv("EL_SIZE"))) {
@@ -410,13 +408,8 @@ main(int argc, char **argv)
                       size = 20;
                 } else
                     size = 20;
-#ifdef __NetBSD__
                 history(hist, &hev, H_SETSIZE, size);
                 edit = el_init("pppctl", stdin, stdout, stderr);
-#else
-                history(hist, H_EVENT, size);
-                edit = el_init("pppctl", stdin, stdout);
-#endif
                 el_source(edit, NULL);
                 el_set(edit, EL_PROMPT, GetPrompt);
                 if ((env = getenv("EL_EDITOR"))) {
@@ -429,11 +422,7 @@ main(int argc, char **argv)
                 el_set(edit, EL_HIST, history, (const char *)hist);
                 while ((l = smartgets(edit, &len, fd))) {
                     if (len > 1)
-#ifdef __NetBSD__
                         history(hist, &hev, H_ENTER, l);
-#else
-                        history(hist, H_ENTER, l);
-#endif
                     write(fd, l, len);
                     if (Receive(fd, REC_SHOW) != 0)
                         break;

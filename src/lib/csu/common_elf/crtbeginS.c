@@ -1,4 +1,4 @@
-/*	$OpenBSD: crtbeginS.c,v 1.3 2003/06/26 23:19:18 deraadt Exp $	*/
+/*	$OpenBSD: crtbeginS.c,v 1.7 2004/01/26 20:04:11 espie Exp $	*/
 /*	$NetBSD: crtbegin.c,v 1.1 1996/09/12 16:59:03 cgd Exp $	*/
 
 /*
@@ -41,10 +41,12 @@
 
  */
 #include <stdlib.h>
+#include "md_init.h"
+#include "extern.h"
 
-static void (*__CTOR_LIST__[0])(void)
+static init_f __CTOR_LIST__[1]
     __attribute__((section(".ctors"))) = { (void *)-1 };	/* XXX */
-static void (*__DTOR_LIST__[0])(void)
+static init_f __DTOR_LIST__[1]
     __attribute__((section(".dtors"))) = { (void *)-1 };	/* XXX */
 
 static void	__dtors(void);
@@ -54,7 +56,7 @@ void
 __dtors(void)
 {
 	unsigned long i = (unsigned long) __DTOR_LIST__[0];
-	void (**p)(void);
+	init_f *p;
 
 	if (i == -1)  {
 		for (i = 1; __DTOR_LIST__[i] != NULL; i++)
@@ -70,15 +72,26 @@ __dtors(void)
 static void
 __ctors(void)
 {
-	void (**p)(void) = __CTOR_LIST__ + 1;
+	init_f *p = __CTOR_LIST__ + 1;
 
 	while (*p) {
 		(**p++)();
 	}
 }
+void _init(void);
+void _fini(void);
+static void _do_init(void);
+static void _do_fini(void);
+
+MD_SECTION_PROLOGUE(".init", _init);
+
+MD_SECTION_PROLOGUE(".fini", _fini);
+
+MD_SECT_CALL_FUNC(".init", _do_init);
+MD_SECT_CALL_FUNC(".fini", _do_fini);
 
 void
-_init(void)
+_do_init(void)
 {
 	static int initialized = 0;
 
@@ -93,11 +106,15 @@ _init(void)
 }
 
 void
-_fini(void)
+_do_fini(void)
 {
-	/*
-	 * since the _init() function sets up the destructors to be called
-	 * by atexit, do not call the destructors here.
-	 */
-	__dtors();
+	static int finalized = 0;
+	if (!finalized) {
+		finalized = 1;
+		/*
+		 * since the _init() function sets up the destructors to 
+		 * be called by atexit, do not call the destructors here.
+		 */
+		__dtors();
+	}
 }

@@ -1,4 +1,4 @@
-/*	$OpenBSD: uthread_writev.c,v 1.6 2003/01/31 04:46:17 marc Exp $	*/
+/*	$OpenBSD: uthread_writev.c,v 1.8 2004/01/01 08:19:33 brad Exp $	*/
 /*
  * Copyright (c) 1995-1998 John Birrell <jb@cimlogic.com.au>
  * All rights reserved.
@@ -57,6 +57,9 @@ writev(int fd, const struct iovec * iov, int iovcnt)
 	ssize_t	ret;
 	struct iovec liov[20];
 	struct iovec *p_iov = liov;
+
+	/* This is a cancellation point: */
+	_thread_enter_cancellation_point();
 
 	/* Check if the array size exceeds to compiled in size: */
 	if (iovcnt > (int) (sizeof(liov) / sizeof(struct iovec))) {
@@ -174,19 +177,34 @@ writev(int fd, const struct iovec * iov, int iovcnt)
 				 * interrupted by a signal
 				 */
 				if (curthread->interrupted) {
-					/* Return an error: */
-					ret = -1;
+					if (num > 0) {
+						/* Return partial success: */
+						ret = num;
+					} else {
+						/* Return an error: */
+						errno = EINTR;
+						ret = -1;
+					}
 				}
 
 			/*
-			 * If performing a non-blocking write or if an
-			 * error occurred, just return whatever the write
-			 * syscall did:
+			 * If performing a non-blocking write,
+			 * just return whatever the write syscall did:
 			 */
-			} else if (!blocking || n < 0) {
+			} else if (!blocking) {
 				/* A non-blocking call might return zero: */
 				ret = n;
 				break;
+
+			/*
+			 * If there was an error, return partial success
+			 * (if any bytes were written) or else the error:
+			 */
+			} else if (n < 0) {
+				if (num > 0)
+					ret = num;
+				else
+					ret = n;
 
 			/* Check if the write has completed: */
 			} else if (idx == iovcnt)
@@ -199,6 +217,9 @@ writev(int fd, const struct iovec * iov, int iovcnt)
 	/* If memory was allocated for the array, free it: */
 	if (p_iov != liov)
 		free(p_iov);
+
+	/* No longer in a cancellation point: */
+	_thread_leave_cancellation_point();
 
 	return (ret);
 }

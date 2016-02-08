@@ -1,4 +1,4 @@
-/*	$OpenBSD: pthread_private.h,v 1.48 2003/08/01 19:50:23 millert Exp $	*/
+/*	$OpenBSD: pthread_private.h,v 1.52 2004/02/01 06:22:14 brad Exp $	*/
 /*
  * Copyright (c) 1995-1998 John Birrell <jb@cimlogic.com.au>.
  * All rights reserved.
@@ -765,6 +765,9 @@ struct pthread {
 	/* Number of priority ceiling or protection mutexes owned. */
 	int		priority_mutex_count;
 
+	/* Number rwlocks rdlocks held. */
+	int			rdlock_count;
+
 	/*
 	 * Queue of currently owned mutexes.
 	 */
@@ -1243,6 +1246,7 @@ void    _thread_sys_setbuffer(FILE *, char *, int);
 #ifdef  _UNISTD_H_
 char    *_thread_sys_ttyname(int);
 int     _thread_sys_close(int);
+int     _thread_sys_closefrom(int);
 int     _thread_sys_dup(int);
 int     _thread_sys_dup2(int, int);
 int     _thread_sys_exect(const char *, char * const *, char * const *);
@@ -1253,7 +1257,6 @@ int     _thread_sys_fsync(int);
 int     _thread_sys_ftruncate(int, off_t);
 long	_thread_sys_fpathconf(int, int);
 pid_t	_thread_sys_getpid(void);
-int     _thread_sys_pause(void);
 int     _thread_sys_pipe(int *);
 int     _thread_sys_select(int, fd_set *, fd_set *, fd_set *, struct timeval *);
 off_t   _thread_sys_lseek(int, off_t, int);
@@ -1313,6 +1316,7 @@ int 	_thread_sys_poll(struct pollfd *, unsigned, int);
 
 /* #include <sys/event.h> */
 #ifdef _SYS_EVENT_H_
+int	_thread_sys_kqueue(void);
 int     _thread_sys_kevent(int, const struct kevent *, int, struct kevent *,
 	int, const struct timespec *);
 #endif

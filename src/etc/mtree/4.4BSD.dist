@@ -1,4 +1,4 @@
-#	$OpenBSD: 4.4BSD.dist,v 1.155 2003/08/19 09:34:16 markus Exp $
+#	$OpenBSD: 4.4BSD.dist,v 1.162 2004/02/26 05:22:42 deraadt Exp $
 
 /set type=dir uname=root gname=wheel mode=0755
 # .
@@ -1059,9 +1059,15 @@ mvme88k
 ..
 mvmeppc
 ..
+pegasos
+..
 sparc
 ..
 sparc64
+..
+amd64
+..
+cats
 ..
 vax
 ..
@@ -1074,6 +1080,10 @@ cat2
 
 # ./usr/share/man/cat2/alpha
 alpha
+..
+
+# ./usr/share/man/cat2/amd64
+amd64
 ..
 
 # ./usr/share/man/cat2/i386
@@ -1106,9 +1116,15 @@ mvme88k
 ..
 mvmeppc
 ..
+pegasos
+..
 sparc
 ..
 sparc64
+..
+amd64
+..
+cats
 ..
 vax
 ..
@@ -1142,9 +1158,15 @@ mvme88k
 ..
 mvmeppc
 ..
+pegasos
+..
 sparc
 ..
 sparc64
+..
+amd64
+..
+cats
 ..
 vax
 ..
@@ -1176,6 +1198,12 @@ mvmeppc
 sparc
 ..
 sparc64
+..
+amd64
+..
+pegasos
+..
+cats
 ..
 vax
 ..
@@ -1214,9 +1242,15 @@ mvme88k
 ..
 mvmeppc
 ..
+pegasos
+..
 sparc
 ..
 sparc64
+..
+amd64
+..
+cats
 ..
 vax
 ..
@@ -1245,9 +1279,15 @@ mvme88k
 ..
 mvmeppc
 ..
+pegasos
+..
 sparc
 ..
 sparc64
+..
+amd64
+..
+cats
 ..
 vax
 ..
@@ -1276,9 +1316,15 @@ mvme88k
 ..
 mvmeppc
 ..
+pegasos
+..
 sparc
 ..
 sparc64
+..
+amd64
+..
+cats
 ..
 vax
 ..
@@ -1289,16 +1335,11 @@ vax
 # ./usr/share/man/ps2
 ps2
 
-# ./usr/share/man/ps2/alpha
 alpha
-
-# ./usr/share/man/ps2/alpha
 ..
-
-# ./usr/share/man/ps2/i386
+amd64
+..
 i386
-
-# ./usr/share/man/ps2/i386
 ..
 
 # ./usr/share/man/ps2
@@ -1325,9 +1366,15 @@ mvme88k
 ..
 mvmeppc
 ..
+pegasos
+..
 sparc
 ..
 sparc64
+..
+amd64
+..
+cats
 ..
 vax
 ..
@@ -1361,9 +1408,15 @@ mvme88k
 ..
 mvmeppc
 ..
+pegasos
+..
 sparc
 ..
 sparc64
+..
+amd64
+..
+cats
 ..
 vax
 ..
@@ -1392,9 +1445,15 @@ mvme88k
 ..
 mvmeppc
 ..
+pegasos
+..
 sparc
 ..
 sparc64
+..
+amd64
+..
+cats
 ..
 vax
 ..
@@ -1433,9 +1492,15 @@ mvme88k
 ..
 mvmeppc
 ..
+pegasos
+..
 sparc
 ..
 sparc64
+..
+amd64
+..
+cats
 ..
 vax
 ..
@@ -1464,9 +1529,15 @@ mvme88k
 ..
 mvmeppc
 ..
+pegasos
+..
 sparc
 ..
 sparc64
+..
+amd64
+..
+cats
 ..
 vax
 ..
@@ -1495,9 +1566,15 @@ mvme88k
 ..
 mvmeppc
 ..
+pegasos
+..
 sparc
 ..
 sparc64
+..
+amd64
+..
+cats
 ..
 vax
 ..
@@ -1541,9 +1618,15 @@ mvme88k
 ..
 mvmeppc
 ..
+pegasos
+..
 sparc
 ..
 sparc64
+..
+amd64
+..
+cats
 ..
 vax
 ..
@@ -1587,9 +1670,15 @@ mvme88k
 ..
 mvmeppc
 ..
+pegasos
+..
 sparc
 ..
 sparc64
+..
+amd64
+..
+cats
 ..
 vax
 ..
@@ -1877,7 +1966,7 @@ mail
 ..
 
 # ./var/msgs
-msgs
+msgs		uname=daemon
 # ./var/msgs
 ..
 

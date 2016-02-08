@@ -1,4 +1,4 @@
-/*	$OpenBSD: forward.c,v 1.17 2003/07/14 08:06:06 otto Exp $	*/
+/*	$OpenBSD: forward.c,v 1.20 2004/03/12 19:40:05 otto Exp $	*/
 /*	$NetBSD: forward.c,v 1.7 1996/02/13 16:49:10 ghudson Exp $	*/
 
 /*-
@@ -37,7 +37,7 @@
 #if 0
 static char sccsid[] = "@(#)forward.c	8.1 (Berkeley) 6/6/93";
 #endif
-static char rcsid[] = "$OpenBSD: forward.c,v 1.17 2003/07/14 08:06:06 otto Exp $";
+static char rcsid[] = "$OpenBSD: forward.c,v 1.20 2004/03/12 19:40:05 otto Exp $";
 #endif /* not lint */
 
 #include <sys/types.h>
@@ -56,7 +56,7 @@ static char rcsid[] = "$OpenBSD: forward.c,v 1.17 2003/07/14 08:06:06 otto Exp $
 
 #include "extern.h"
 
-static int rlines(FILE *, long, struct stat *);
+static int rlines(FILE *, off_t, struct stat *);
 
 /*
  * forward -- display the file, from an offset, forward.
@@ -84,12 +84,12 @@ void
 forward(fp, style, off, sbp)
 	FILE *fp;
 	enum STYLE style;
-	long off;
+	off_t off;
 	struct stat *sbp;
 {
 	int ch;
 	struct stat nsb;
-	int kq;
+	int kq, queue;
 	struct kevent ke;
 
 	switch(style) {
@@ -99,7 +99,7 @@ forward(fp, style, off, sbp)
 		if (S_ISREG(sbp->st_mode)) {
 			if (sbp->st_size < off)
 				off = sbp->st_size;
-			if (fseek(fp, off, SEEK_SET) == -1) {
+			if (fseeko(fp, off, SEEK_SET) == -1) {
 				ierr();
 				return;
 			}
@@ -130,7 +130,7 @@ forward(fp, style, off, sbp)
 	case RBYTES:
 		if (S_ISREG(sbp->st_mode)) {
 			if (sbp->st_size >= off &&
-			    fseek(fp, -off, SEEK_END) == -1) {
+			    fseeko(fp, -off, SEEK_END) == -1) {
 				ierr();
 				return;
 			}
@@ -149,7 +149,7 @@ forward(fp, style, off, sbp)
 	case RLINES:
 		if (S_ISREG(sbp->st_mode)) {
 			if (!off) {
-				if (fseek(fp, 0L, SEEK_END) == -1) {
+				if (fseeko(fp, (off_t)0, SEEK_END) == -1) {
 					ierr();
 					return;
 				}
@@ -184,7 +184,7 @@ kq_retry:
 			ke.ident = fileno(fp);
 			ke.flags = EV_ENABLE|EV_ADD|EV_CLEAR;
 			ke.filter = EVFILT_VNODE;
-			ke.fflags = NOTE_DELETE | NOTE_RENAME;
+			ke.fflags = NOTE_DELETE | NOTE_RENAME | NOTE_TRUNCATE;
 			if (kevent(kq, &ke, 1, NULL, 0, NULL) < 0) {
 				close(kq);
 				kq = -1;
@@ -206,11 +206,13 @@ kq_retry:
 		if (!fflag)
 			break;
 		clearerr(fp);
+		queue = 1;
 		if (kq < 0 || kevent(kq, NULL, 0, &ke, 1, NULL) <= 0) {
+			queue = 0;
 			sleep(1);
 		} else if (ke.filter == EVFILT_READ) {
 			continue;
-		} else {
+		} else if ((ke.fflags & NOTE_TRUNCATE) == 0) {
 			/*
 			 * File was renamed or deleted.
 			 *
@@ -235,11 +237,13 @@ kq_retry:
 			}
 			(void)memcpy(sbp, &nsb, sizeof(nsb));
 			goto kq_retry;
-		} else if (nsb.st_size < sbp->st_size) {
+		} else if ((queue && (ke.fflags & NOTE_TRUNCATE)) ||
+		    (!queue && nsb.st_size < sbp->st_size)) {
 			warnx("%s has been truncated, resetting.", fname);
+			fpurge(fp);
 			rewind(fp);
-			(void)memcpy(sbp, &nsb, sizeof(nsb));
 		}
+		(void)memcpy(sbp, &nsb, sizeof(nsb));
 	}
 	if (kq >= 0)
 		close(kq);
@@ -249,7 +253,7 @@ kq_retry:
  * rlines -- display the last offset lines of the file.
  */
 static int
-rlines(FILE *fp, long off, struct stat *sbp)
+rlines(FILE *fp, off_t off, struct stat *sbp)
 {
 	off_t pos;
 	int ch;

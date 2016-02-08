@@ -1,4 +1,4 @@
-/*	$OpenBSD: lex.c,v 1.28 2003/06/03 02:56:11 millert Exp $	*/
+/*	$OpenBSD: lex.c,v 1.30 2003/10/24 20:32:06 avsm Exp $	*/
 /*	$NetBSD: lex.c,v 1.10 1997/05/17 19:55:13 pk Exp $	*/
 
 /*
@@ -34,7 +34,7 @@
 #if 0
 static const char sccsid[] = "@(#)lex.c	8.2 (Berkeley) 4/20/95";
 #else
-static const char rcsid[] = "$OpenBSD: lex.c,v 1.28 2003/06/03 02:56:11 millert Exp $";
+static const char rcsid[] = "$OpenBSD: lex.c,v 1.30 2003/10/24 20:32:06 avsm Exp $";
 #endif
 #endif /* not lint */
 
@@ -407,7 +407,7 @@ execute(char *linebuf, int contxt)
 				com->c_msgmask);
 			msgvec[1] = NULL;
 		}
-		if (*msgvec == NULL) {
+		if (*msgvec == 0) {
 			puts("No applicable messages");
 			break;
 		}
@@ -437,7 +437,7 @@ execute(char *linebuf, int contxt)
 				com->c_msgmask);
 			msgvec[1] = NULL;
 		}
-		if (*msgvec == NULL) {
+		if (*msgvec == 0) {
 			puts("No applicable messages");
 			break;
 		}
@@ -534,11 +534,13 @@ out:
 void
 setmsize(int n)
 {
+	int *msgvec2;
 	size_t msize;
 
 	msize = (n + 1) * sizeof(*msgvec);
-	if ((msgvec = realloc(msgvec, msize)) == NULL)
+	if ((msgvec2 = realloc(msgvec, msize)) == NULL)
 		errx(1, "Out of memory");
+	msgvec = msgvec2;
 	memset(msgvec, 0, msize);
 }
 

@@ -1,4 +1,4 @@
-.\" $OpenBSD: bsd.port.mk.5,v 1.123 2003/09/09 15:37:39 espie Exp $
+.\" $OpenBSD: bsd.port.mk.5,v 1.134 2004/02/18 13:39:02 xsa Exp $
 .\"
 .\" Copyright (c) 2000 Marc Espie
 .\"
@@ -204,6 +204,18 @@ hooks.
 .It Ar fake
 Do a fake port installation, that is, simulate the port installation under
 ${WRKINST}.
+There is no
+.Ev do-fake
+and
+.Ev post-fake
+hooks.
+.Ar fake
+actually uses
+.Ev pre-fake ,
+.Ev pre-install ,
+.Ev do-install
+and
+.Ev post-install .
 Described in a separate section below.
 .It Ar fetch
 Fetch the distribution files and patchfiles, using ${FETCH_CMD}.
@@ -384,7 +396,10 @@ by checking the corresponding packages are actually installed,
 and install the missing ports by recursing through the ports tree.
 Invoked right before installing the package.
 .It Ar show
-Invoked as show=name, show the contents of ${name}.
+Invoked as make show=name, show the contents of ${name}.
+Invoked as make show="name1 name2 ...",
+show the contents of ${name1} ${name2} ...,
+one variable value per line.
 Mostly used from recursive makes, or to know the contents of another
 port's variables without guessing wrongly.
 .It Ar unlink-categories
@@ -453,7 +468,10 @@ and that some variables are marked as
 which means that they shouldn't ever be changed.
 .Bl -tag -width MASTER_SITES
 .It Ev show
-Invoked as make show=name, show the contents of variable name.
+Invoked as make show=name, show the contents of ${name}.
+Invoked as make show="name1 name2 ...", show the contents of
+${name1} ${name2} ...,
+one variable value per line.
 .It Ev ALLFILES
 List of all files that need to be retrieved by
 .Ar fetch ,
@@ -548,6 +566,9 @@ If set to
 successful package builds and installations will clean
 their working directories, after invoking
 any targets mentioned in BULK_TARGETS.
+Can be set on a per-${PKGPATH} basis.
+For instance, setting BULK_misc/screen=No
+will override any BULK=Yes passed on the command line.
 See
 .Ev BULK_COOKIES_DIR ,
 .Ev BIN_PACKAGES ,
@@ -563,6 +584,8 @@ Flags to pass to build each target in
 Targets to run after each bulk package build before cleaning up the
 working directory.
 Empty defaults.
+Can be set on a per-${PKGPATH} basis, e.g.,
+BULK_TARGETS_${PKGPATH}=...
 .It Ev BZIP2
 Name of the bzip2 binary.
 .It Ev CATEGORIES
@@ -587,8 +610,8 @@ Path to a local database that holds distribution files (usually a CD-ROM
 or other similar media), used to retrieve distribution files before going
 to the network.
 Defaults to
-.Pa /cdrom/distfiles
-if this path exists.
+.Pa /cdrom/distfiles .
+Set to empty to avoid checking any path.
 Distribution files are still copied or linked (see
 .Ev FETCH_SYMLINK_DISFILES )
 into
@@ -612,6 +635,8 @@ If set to
 .Sq Yes ,
 .Sq make clean
 will also clean dependencies.
+Can be overridden on a per-${PKGPATH} basis,
+by setting CLEANDEPENDS_${PKGPATH}.
 .It Ev COMMENT
 Comment used for the package, and in the INDEX.
 .It Ev COMMENT-foo
@@ -703,7 +728,7 @@ is set.
 Default flags passed to the C++ compiler for building.
 Many ports ignore it.
 .It Ev CXXOPTS
-User setttings.
+User settings.
 Supplementary options appended to ${CXXFLAGS} for building.
 .It Ev DEF_UMASK
 Correct value of umask for the port to build and package correctly.
@@ -839,8 +864,11 @@ By default, ${DESTDIRNAME}=${WRKINST}.
 Target build by ${MAKE_PROGRAM} on fake invocation.
 Defaults to ${INSTALL_TARGET}.
 .It Ev FAKEOBJDIR
-If defined, used as a base for the fake area.
+If non empty, used as a base for the fake area.
 The real fake directory ${WRKINST} is created there.
+Can be set on a per-${PKGPATH} basis.
+For instance, setting FAKEOBJDIR_www/mozilla=/tmp/obj
+will affect only the mozilla port.
 .It Ev FETCH_CMD
 Command used to fetch distribution files for this port.
 Defaults to
@@ -869,7 +897,6 @@ to link distribution files off
 instead of copying them.
 .It Ev FILESDIR
 Location of other files related to the current ports.
-Holds at least the checksum file, sometimes other files
 (default: files.${ARCH} or files).
 .It Ev FLAVOR
 The port's current options.
@@ -908,7 +935,7 @@ Set to a link to the homepage of the software, if applicable.
 Set to the list of files that cannot be checksummed.
 For use by ports which
 fetch dynamically generated archives that can't be checksummed.
-Avoid using IGNOREFILES whenver possible.
+Avoid using IGNOREFILES whenever possible.
 .It Ev LIB_DEPENDS
 Libraries this port depends upon.
 Each item has the form
@@ -948,8 +975,8 @@ If set to
 .Sq Yes ,
 do not print anything when ignoring a port.
 .It Ev INSTALL_{PROGRAM,SCRIPT,DATA,MAN}[_DIR]
-Macros to use to install a program, a script, a man page, or data (or the
-corresponding directory, respectively).
+Macros to use to install a program, a script, data, or a man page (or the
+corresponding directory), respectively.
 .It Ev INSTALL_TARGET
 Target invoked to install the software, during fake installation.
 Default is
@@ -1039,7 +1066,8 @@ such as the kde suite, where a base package sets up a large, extra
 directory hierarchy that would make the manual checking of packing lists
 tedious.
 .It Ev MOTIFLIB
-Read-only.  Correct incantation to link with motif.
+Read-only.
+Correct incantation to link with motif.
 .It Ev MULTI_PACKAGES
 Set to a list of package extensions for ports that create multiple packages.
 See
@@ -1202,6 +1230,10 @@ PATCH_LIST=${PORTSDIR}/x11/kde/libs2/patches/p-* patch-*
 .It Ev PATCH_STRIP
 Patch option used to strip directory levels while applying port's patches.
 Defaults to -p0 .
+.It Ev PKG_ARCH
+Comma-separated list of architectures on which this package may install.
+Defaults to ${MACHINE_ARCH},${ARCH}.
+Use * to mean any arch.
 .It Ev PKG_DBDIR
 Path to package installation records.
 Defaults to
@@ -1344,7 +1376,10 @@ Make variables whole values get substituted to create the actual package
 information.
 Always holds
 .Ev ARCH ,
+.Ev FLAVOR_EXT ,
 .Ev HOMEPAGE ,
+.Ev MACHINE_ARCH ,
+.Ev MAINTAINER ,
 .Ev PREFIX ,
 and
 .Ev SYSCONFDIR .
@@ -1460,8 +1495,11 @@ Subdirectory of ${WRKDIR} where port normally installs (see
 .Ar fake
 target).
 .It Ev WRKOBJDIR
-If defined, used as a base for the actual port working directory.
+If non empty, used as a base for the actual port working directory.
 The real working directory ${WRKDIR} is created there.
+Can be set on a per-${PKGPATH} basis.
+For instance, setting WRKOBJDIR_www/mozilla=/tmp/obj
+will affect only the mozilla port.
 .It Ev X11BASE
 Where X11 has been installed (default: /usr/X11R6).
 .It Ev USE_GMAKE
@@ -1507,7 +1545,7 @@ likely to see a message like
 with the default process limits.
 .It Ev XMKMF
 Invocation of xmkmf for CONFIGURE_STYLE=imake port.
-Defaults to xmkf -a -DPorts.
+Defaults to xmkmf -a -DPorts.
 The -DPorts is specific to
 .Ox
 and is always appended.
@@ -1567,6 +1605,8 @@ Extra directory used to store local ports before committing them.
 All depend targets will normally look there after the normal lookup fails.
 See
 .Ev PORTSDIR_PATH .
+.It Pa systrace.filter
+List of additional port specific filters, included automatically.
 .El
 .Sh OBSOLETE TARGETS
 .Bl -tag -width do-configure

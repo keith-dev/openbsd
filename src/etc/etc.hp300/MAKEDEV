@@ -3,12 +3,13 @@
 # THIS FILE AUTOMATICALLY GENERATED.  DO NOT EDIT.
 # generated from:
 #
-#	OpenBSD: etc.hp300/MAKEDEV.md,v 1.13 2003/06/18 18:08:59 todd Exp 
-#	OpenBSD: MAKEDEV.mi,v 1.60 2003/06/18 18:08:59 todd Exp 
-#	OpenBSD: MAKEDEV.sub,v 1.8 2003/06/18 18:08:59 todd Exp 
+#	OpenBSD: etc.hp300/MAKEDEV.md,v 1.19 2004/02/20 19:13:08 miod Exp 
+#	OpenBSD: MAKEDEV.common,v 1.4 2004/03/12 04:54:04 deraadt Exp 
+#	OpenBSD: MAKEDEV.mi,v 1.72 2004/02/16 18:58:53 miod Exp 
+#	OpenBSD: MAKEDEV.sub,v 1.12 2004/02/20 19:13:01 miod Exp 
 #
 #
-# Copyright (c) 2001,2002,2003 Todd T. Fries <todd@OpenBSD.org>
+# Copyright (c) 2001-2004 Todd T. Fries <todd@OpenBSD.org>
 #
 # Permission to use, copy, modify, and distribute this software for any
 # purpose with or without fee is hereby granted, provided that the above
@@ -25,40 +26,42 @@
 # Device "make" file.  Valid arguments:
 #	all	makes all known devices, including local devices.
 #		Tries to make the ``standard'' number of each type.
-#	std	standard devices
-#	local	configuration specific devices
-# Tapes:
-#	ct*	HP300 HP-IB cartridge tape
-#	mt*	(Magnetic) 9-track reel tape
-#	st*	Exabyte tape
+#	ramdisk	Ramdisk kernel devices
+#	std	Standard devices
+#	local	Configuration specific devices
 # Disks:
-#	ccd*	concatenated disk devices
+#	ccd*	Concatenated disk devices
 #	hd*	HP300 HP-IB disks
-#	sd*	SCSI disks
-#	vnd*	"file" pseudo-disks
 #	rd*	"rd" pseudo-disks
-# Terminal multiplexers:
+#	sd*	SCSI disks, including flopticals
+#	vnd*	"file" pseudo-disk devices
+# Tapes:
+#	ct*	HP300 HP-IB cartridge tape drives
+#	mt*	(Magnetic) 9-track reel tape drives
+#	st*	Exabyte tape
+# Terminal ports:
+#	apci*	HP400 4 port serial mux interface
 #	dca*	HP200/300 single port serial interface
 #	dcm*	HP200/300 4 port serial mux interface
-#	apci*	HP400 4 port serial mux interface
 # Pseudo terminals:
-#	tty*	set of 16 slave psuedo terminals
-#	pty*	set of 16 master pseudo terminals
+#	ptm	pty master device
+#	pty*	Set of 16 master pseudo terminals
+#	tty*	Set of 16 slave pseudo terminals
+# Console ports:
+#	grf*	Raw interface to HP300 graphics devices
+#	ite*	Terminal emulator interface to HP300 graphics devices
 # Printers:
 #	ppi*	HP-IB plotters
-# Call units:
 # Special purpose devices:
-#	fd	makes fd/* for the fdescfs
-#	grf*	raw interface to HP300 graphics devices
-#	ite*	terminal emulator interface to HP300 graphics devices
-#	hil	HP300 HIL input devices
 #	bpf*	Berkeley Packet Filter
-#	tun*	network tunnel driver
+#	fd	fd/* nodes for fdescfs
+#	hil	HP-HIL input devices
+#	lkm	Loadable kernel modules interface
 #	pf*	Packet Filter
-#	lkm	loadable kernel modules interface
-#	*random	inkernel random data source
-#	xfs*	XFS filesystem devices
-#	systrace*	system call tracing device
+#	*random	In-kernel random data source
+#	tun*	Network tunnel driver
+#	systrace*	System call tracing device
+#	xfs*	XFS filesystem node
 PATH=/sbin:/usr/sbin:/bin:/usr/bin
 T=$0
 
@@ -78,15 +81,32 @@ hex()
 	esac
 }
 
-trunc()
+alph2d()
 {
-	# XXX pdksh can't seem to deal with locally scoped variables
-	# in ${foo#$bar} expansions
-	arg1="$1"
-	arg2="$2"
-	case $3 in
-	l)   echo ${arg2#$arg1} ;;
-	r|*) echo ${arg1#$arg2} ;;
+	local t="$1"  
+	local p="0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
+	local sub=${p%${t}*}
+	echo ${#sub}
+}
+
+h2d()
+{
+	local s="$1"
+	local f=${s%*[0-9a-f]} n=${s#[0-9a-f]*}
+
+	echo $(($(_h2d $f)*16+ $(_h2d $n) ))
+}
+
+_h2d()
+{
+	case $1 in
+	[0-9]) echo -n $1;;
+	a) echo -n 10;;
+	b) echo -n 11;;
+	c) echo -n 12;;
+	d) echo -n 13;;
+	e) echo -n 14;;
+	f) echo -n 15;;
 	esac
 }
 
@@ -287,12 +307,16 @@ hil)
 	RMlist="$RMlist keyboard locator"
 	;;
 
+xfs*)
+	M xfs$U c 51 $U 600
+	;;
+
 systrace)
 	M systrace c 50 0 644
 	;;
 
-xfs*)
-	M xfs$U c 51 $U 600
+tun*)
+	M tun$U c 23 $U 600
 	;;
 
 *random)
@@ -304,26 +328,22 @@ xfs*)
 	done
 	;;
 
-lkm)
-	M lkm c 24 0 640 _lkm
-	;;
-
 pf*)
 	M pf c 33 0 600
 	;;
 
-tun*)
-	M tun$U c 23 $U 600
-	;;
-
-bpf*)
-	M bpf$U c 22 $U 600
+lkm)
+	M lkm c 24 0 640 _lkm
 	;;
 
 fd)
 	RMlist="mkdir -p fd;$RMlist" n=0
 	while [ $n -lt 64 ];do M fd/$n c 21 $n;n=$(($n+1));done
 	MKlist="$MKlist;chmod 555 fd"
+	;;
+
+bpf*)
+	M bpf$U c 22 $U 600
 	;;
 
 pty*)
@@ -344,13 +364,8 @@ pty*)
 	done
 	;;
 
-rd*)
-	dodisk2 rd $U 8 34 $U 0
-	;;
-
-vnd*)
-	dodisk vnd $U 6 19 $U 0
-	dodisk svnd $U 6 19 $U 128
+ptm)
+	M ptm c 52 0 666
 	;;
 
 ct*|mt*|st*)
@@ -377,6 +392,15 @@ ct*|mt*|st*)
 	esac
 	;;
 
+vnd*)
+	dodisk vnd $U 6 19 $U 0
+	dodisk svnd $U 6 19 $U 2048
+	;;
+
+rd*)
+	dodisk2 rd $U 8 34 $U 0
+	;;
+
 local)
 	test -s $T.local && sh $T.local
 	;;
@@ -385,7 +409,7 @@ all)
 	R ite0 ct0 ct1 hd0 hd1 hd2 dcm0 dcm1 dcm2 dcm3 dca0 dca1 st0
 	R st1 hil grf0 ccd0 ccd1 ccd2 ccd3 vnd0 vnd1 vnd2 vnd3 sd0 sd1
 	R sd2 sd3 sd4 rd0 tun0 tun1 tun2 tun3 bpf0 bpf1 bpf2 bpf3 bpf4
-	R bpf5 bpf6 bpf7 bpf8 bpf9 pty0 pty1 pty2 xfs0 local ppi0
+	R bpf5 bpf6 bpf7 bpf8 bpf9 pty0 pty1 pty2 xfs0 ptm local ppi0
 	R apci0 random lkm pf systrace std fd
 	;;
 
@@ -404,22 +428,6 @@ esac
 done
 }
 R "$@"
-if [ "$os" = "SunOS" ]; then
-	eo=transform
-	transform() {
-		case $mode in
-		600) mask=077;;
-		640) mask=027;;
-		660) mask=007;;
-		644) mask=022;;
-		666) mask=0;;
-		440) mask=227;;
-		esac
-		echo `echo "$@"|sed \
-		    's/mknod -m \([0-9]*\) /umask '$mask';mknod /;s/-m [0-9]* //g;\
-		    s/operator/5/g;s/root.kmem/root.2/g;s/root\./root:/g'`
-	}
-fi
 list="$RMlist"
 for mode in $modes; do
 	list="$list;${mklist[$mode]}"
@@ -428,7 +436,7 @@ for group in $groups; do
 	list="$list;${grplist[$group]}"
 done
 list="$list;$MKlist"
-if [ "$eo" = "echo" -o "$eo" = "transform" ]; then
+if [ "$eo" = "echo" ]; then
 	$eo "$list"
 else
 	echo "$list" | sh

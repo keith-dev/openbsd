@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.29 2002/08/08 00:35:50 mickey Exp $
+#	$OpenBSD: Makefile,v 1.32 2004/02/25 05:09:11 deraadt Exp $
 
 PROG=	disklabel
 SRCS=	disklabel.c dkcksum.c editor.c manual.c
@@ -14,7 +14,7 @@ CLEANFILES+=manual.c
 .ifdef NOMAN
 manual.c:
 	(echo 'char manpage[] = "\\'; \
-	echo "no manual"; \
+	echo "no manual\\"; \
 	echo '";' ) > manual.c
 .else
 manual.c:	disklabel.cat8
@@ -27,7 +27,7 @@ manual.c:	disklabel.cat8
 CFLAGS+= -D${MACHINE}
 .endif
 
-.if (${MACHINE} == "i386")
+.if (${MACHINE} == "i386") || (${MACHINE} == "amd64")
 CFLAGS+= -DNUMBOOT=2 -DDOSLABEL
 CFLAGS+= -DSEEALSO="\"fdisk(8), installboot(8)\""
 .endif
@@ -50,7 +50,7 @@ CFLAGS+= -DSEEALSO="\"installboot(8)\"" -DCYLCHECK -DAAT0
 CFLAGS+= -DSEEALSO="\"installboot(8)\""
 .endif
 
-.if (${MACHINE} == "macppc")
+.if (${MACHINE} == "macppc") || (${MACHINE} == "pegasos")
 CFLAGS+= -DDOSLABEL
 CFLAGS+= -DSEEALSO="\"fdisk(8)\""
 .endif

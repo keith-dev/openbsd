@@ -1,4 +1,4 @@
-/*	$OpenBSD: main.c,v 1.16 2003/06/25 21:09:37 deraadt Exp $	*/
+/*	$OpenBSD: main.c,v 1.22 2004/02/19 08:43:37 mpech Exp $	*/
 /*	$NetBSD: main.c,v 1.6 1995/05/21 16:54:10 mycroft Exp $	*/
 
 /*
@@ -40,7 +40,7 @@ static const char copyright[] =
 #if 0
 static char sccsid[] = "@(#)main.c	8.1 (Berkeley) 6/6/93";
 #endif
-static const char rcsid[] = "$OpenBSD: main.c,v 1.16 2003/06/25 21:09:37 deraadt Exp $";
+static const char rcsid[] = "$OpenBSD: main.c,v 1.22 2004/02/19 08:43:37 mpech Exp $";
 #endif /* not lint */
 
 /* Many bug fixes are from Jim Guyton <guyton@rand-unix> */
@@ -161,11 +161,11 @@ main(int argc, char *argv[])
 		errx(1, "udp/tftp: unknown service");
 	f = socket(AF_INET, SOCK_DGRAM, 0);
 	if (f < 0)
-		err(3, "tftp: socket");
+		err(3, "socket");
 	bzero((char *)&s_in, sizeof (s_in));
 	s_in.sin_family = AF_INET;
 	if (bind(f, (struct sockaddr *)&s_in, sizeof (s_in)) < 0)
-		err(1, "tftp: bind");
+		err(1, "bind");
 	strlcpy(mode, "netascii", sizeof mode);
 	signal(SIGINT, intr);
 	if (argc > 1) {
@@ -196,7 +196,7 @@ setpeer(int argc, char *argv[])
 		argv = margv;
 	}
 	if ((argc < 2) || (argc > 3)) {
-		printf("usage: %s host-name [port]\n", argv[0]);
+		printf("usage: %s [host [port]]\n", argv[0]);
 		return;
 	}
 	if (inet_aton(argv[1], &peeraddr.sin_addr) != 0) {
@@ -340,6 +340,7 @@ put(int argc, char *argv[])
 		bcopy(hp->h_addr, (caddr_t)&peeraddr.sin_addr, hp->h_length);
 		peeraddr.sin_family = hp->h_addrtype;
 		connected = 1;
+		port = sp->s_port;
 		strlcpy(hostname, hp->h_name, sizeof hostname);
 	}
 	if (!connected) {
@@ -355,24 +356,26 @@ put(int argc, char *argv[])
 		}
 		if (verbose)
 			printf("putting %s to %s:%s [%s]\n",
-				cp, hostname, targ, mode);
+			    cp, hostname, targ, mode);
 		peeraddr.sin_port = port;
 		sendfile(fd, targ, mode);
 		return;
 	}
-				/* this assumes the target is a directory */
-				/* on a remote unix system.  hmmmm.  */
+
+	/* this assumes the target is a directory */
+	/* on a remote unix system.  hmmmm.  */
 	for (n = 1; n < argc - 1; n++) {
 		if (asprintf(&cp, "%s/%s", targ, tail(argv[n])) == -1)
 			err(1, "asprintf");
 		fd = open(argv[n], O_RDONLY);
 		if (fd < 0) {
 			warn("open: %s", argv[n]);
+			free(cp);
 			continue;
 		}
 		if (verbose)
 			printf("putting %s to %s:%s [%s]\n",
-				argv[n], hostname, cp, mode);
+			    argv[n], hostname, cp, mode);
 		peeraddr.sin_port = port;
 		sendfile(fd, cp, mode);
 		free(cp);
@@ -382,8 +385,8 @@ put(int argc, char *argv[])
 static void
 putusage(char *s)
 {
-	printf("usage: %s file ... host:target, or\n", s);
-	printf("       %s file ... target (when already connected)\n", s);
+	printf("usage: %s file [[host:]remotename]\n", s);
+	printf("       %s file1 file2 ... fileN [[host:]remote-directory]\n", s);
 }
 
 /*
@@ -445,7 +448,7 @@ get(int argc, char *argv[])
 			}
 			if (verbose)
 				printf("getting from %s:%s to %s [%s]\n",
-					hostname, src, cp, mode);
+				    hostname, src, cp, mode);
 			peeraddr.sin_port = port;
 			recvfile(fd, src, mode);
 			break;
@@ -458,7 +461,7 @@ get(int argc, char *argv[])
 		}
 		if (verbose)
 			printf("getting from %s:%s to %s [%s]\n",
-				hostname, src, cp, mode);
+			    hostname, src, cp, mode);
 		peeraddr.sin_port = port;
 		recvfile(fd, src, mode);
 	}
@@ -467,8 +470,8 @@ get(int argc, char *argv[])
 static void
 getusage(char *s)
 {
-	printf("usage: %s host:file host:file ... file, or\n", s);
-	printf("       %s file file ... file if connected\n", s);
+	printf("usage: %s [host:]file [localname]\n", s);
+	printf("       %s [host1:]file1 [host2:]file2 ... [hostN:]fileN\n", s);
 }
 
 int	rexmtval = TIMEOUT;

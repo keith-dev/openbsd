@@ -1,4 +1,4 @@
-.\"     $OpenBSD: file.9,v 1.5 2003/04/15 04:14:29 jmc Exp $
+.\"     $OpenBSD: file.9,v 1.7 2004/02/05 14:25:52 jmc Exp $
 .\"
 .\" Copyright (c) 2002 Artur Grabowski <art@openbsd.org>
 .\" All rights reserved.
@@ -26,13 +26,13 @@
 .Dt FILE 9
 .Os
 .Sh NAME
-.Nm vnode
+.Nm file
 .Nd an overview of file descriptor handling
 .Sh SYNOPSIS
 .Fd #include <sys/file.h>
 .Fd #include <sys/filedesc.h>
 .Ft int
-.Fn falloc "struct proc *p" "struct file **fesultfp" "int *resultfd"
+.Fn falloc "struct proc *p" "struct file **resultfp" "int *resultfd"
 .Ft int
 .Fn fdrelease "struct proc *p" "int fd"
 .Ft void

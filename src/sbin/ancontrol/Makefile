@@ -1,9 +1,11 @@
-#	$OpenBSD: Makefile,v 1.5 2001/09/01 16:21:16 drahn Exp $
+#	$OpenBSD: Makefile,v 1.8 2004/01/29 03:42:49 deraadt Exp $
 
-.if (${MACHINE} == "i386") || (${MACHINE_ARCH} == "powerpc") || \
-    (${MACHINE} == "alpha")
+.if (${MACHINE} == "i386") || (${MACHINE} == "amd64") || \
+    (${MACHINE_ARCH} == "powerpc") || (${MACHINE} == "alpha") || \
+    (${MACHINE} == "cats")
+
 PROG=	ancontrol
-CFLAGS+=-DANCACHE
+CPPFLAGS+=-DANCACHE
 .else
 NOPROG=
 .endif

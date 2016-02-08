@@ -1,6 +1,10 @@
-#	$OpenBSD: Makefile,v 1.7 1997/09/21 11:51:46 deraadt Exp $
+#	$OpenBSD: Makefile,v 1.12 2004/02/09 21:09:10 jmc Exp $
 
 SUBDIR= build
-#SUBDIR+=docs/USD.doc/edit docs/USD.doc/exref docs/USD.doc/vi.ref docs/USD.doc/vitut
+
+.if make(install)
+SUBDIR+= docs/USD.doc/edit docs/USD.doc/exref
+SUBDIR+= docs/USD.doc/vi.ref docs/USD.doc/vitut
+.endif
 
 .include <bsd.subdir.mk>

@@ -146,7 +146,7 @@ int main (argc, argv)
 				}
 			}
 			if (iap) {
-				sp = (struct server_list *)malloc (sizeof *sp);
+				sp = calloc(1, sizeof *sp);
 				if (!sp)
 					error ("no memory for server.\n");
 				sp -> next = servers;
@@ -186,7 +186,6 @@ int main (argc, argv)
 
 	/* Set up the server sockaddrs. */
 	for (sp = servers; sp; sp = sp -> next) {
-		memset(&sp->to, 0, sizeof(sp->to));
 		sp -> to.sin_port = local_port;
 		sp -> to.sin_family = AF_INET;
 		sp -> to.sin_len = sizeof sp -> to;
@@ -296,10 +295,10 @@ void relay (ip, packet, length, from_port, from, hfrom)
 			return;
 		}
 
-		if (!send_packet (out,
+		if (send_packet (out,
 				  (struct packet *)0,
 				  packet, length, out -> primary_address,
-				  &to, &hto) < 0)
+				  &to, &hto) != -1)
 			debug ("forwarded BOOTREPLY for %s to %s",
 			       print_hw_addr (packet -> htype, packet -> hlen,
 					      packet -> chaddr),
@@ -324,11 +323,11 @@ void relay (ip, packet, length, from_port, from, hfrom)
 	/* Otherwise, it's a BOOTREQUEST, so forward it to all the
 	   servers. */
 	for (sp = servers; sp; sp = sp -> next) {
-		if (!send_packet ((fallback_interface
+		if (send_packet ((fallback_interface
 				   ? fallback_interface : interfaces),
 				  (struct packet *)0,
 				  packet, length, ip -> primary_address,
-				  &sp -> to, (struct hardware *)0) < 0) {
+				  &sp -> to, (struct hardware *)0) != -1) {
 			debug ("forwarded BOOTREQUEST for %s to %s",
 			       print_hw_addr (packet -> htype, packet -> hlen,
 					      packet -> chaddr),
@@ -349,7 +348,7 @@ static void usage (appname)
 	note (url);
 	note ("%s", "");
 
-	warn ("Usage: %s [-i] [-d] [-i if0] [...-i ifN] [-p <port>]", appname);
+	warn ("Usage: %s [-q] [-d] [-i if0] [...-i ifN] [-p <port>]", appname);
 	error ("      [-pf pidfilename] [server1 [... serverN]]");
 }
 

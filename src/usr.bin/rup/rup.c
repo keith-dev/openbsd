@@ -1,4 +1,4 @@
-/*	$OpenBSD: rup.c,v 1.18 2003/08/04 17:06:45 deraadt Exp $	*/
+/*	$OpenBSD: rup.c,v 1.20 2003/12/12 05:25:06 deraadt Exp $	*/
 
 /*-
  * Copyright (c) 1993, John Brezak
@@ -12,13 +12,8 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
- *    may be used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *  3. The name of the author may not be used to endorse or promote products
+ *     derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE REGENTS AND CONTRIBUTORS ``AS IS'' AND
  * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
@@ -34,7 +29,7 @@
  */
 
 #ifndef lint
-static char rcsid[] = "$OpenBSD: rup.c,v 1.18 2003/08/04 17:06:45 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: rup.c,v 1.20 2003/12/12 05:25:06 deraadt Exp $";
 #endif /* not lint */
 
 #include <stdio.h>
@@ -136,16 +131,21 @@ static void
 remember_rup_data(char *host, struct statstime *st)
 {
 	if (rup_data_idx >= rup_data_max) {
-		rup_data_max += 16;
-		rup_data = realloc(rup_data,
-		    rup_data_max * sizeof(struct rup_data));
-		if (rup_data == NULL) {
+		int newsize;
+		struct rup_data *newrup;
+
+		newsize = rup_data_max + 16;
+		newrup = realloc(rup_data, newsize * sizeof(struct rup_data));
+		if (newrup == NULL) {
 			err(1, NULL);
 			/* NOTREACHED */
 		}
+		rup_data = newrup;
+		rup_data_max = newsize;
 	}
 	
-	rup_data[rup_data_idx].host = strdup(host);
+	if ((rup_data[rup_data_idx].host = strdup(host)) == NULL)
+		err(1, NULL);
 	rup_data[rup_data_idx].statstime = *st;
 	rup_data_idx++;
 }

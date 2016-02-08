@@ -1,8 +1,8 @@
 vers(__file__,
-	{-$OpenBSD: MAKEDEV.md,v 1.11 2003/06/18 18:08:59 todd Exp $-},
+	{-$OpenBSD: MAKEDEV.md,v 1.16 2004/02/20 19:13:08 miod Exp $-},
 etc.MACHINE)dnl
 dnl
-dnl Copyright (c) 2001,2002,2003 Todd T. Fries <todd@OpenBSD.org>
+dnl Copyright (c) 2001-2004 Todd T. Fries <todd@OpenBSD.org>
 dnl
 dnl Permission to use, copy, modify, and distribute this software for any
 dnl purpose with or without fee is hereby granted, provided that the above
@@ -17,41 +17,49 @@ dnl ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
 dnl OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 dnl
 dnl
+dnl *** mac68k specific defintions
+dnl
+__devitem(ttye, ttye*, ITE bitmapped consoles,ite)dnl
+dnl
 _TITLE(make)
 _DEV(all)
-_DEV(std)
-_DEV(fdesc, 21)
-_DEV(local)
 _DEV(ramd)
-_DEV(st, 14, 5)
-_DEV(sd, 13, 4)
+_DEV(std)
+_DEV(local)
+_TITLE(dis)
+_DEV(ccd, 20, 9)
 _DEV(cd, 15, 6)
 _DEV(rd, 18, 13)
-_DEV(ch, 17)
+_DEV(sd, 13, 4)
 _DEV(vnd, 19, 8)
-_DEV(ccd, 20, 9)
+_TITLE(tap)
+_DEV(ch, 17)
+_DEV(st, 14, 5)
 _TITLE(term)
-_DEV(mac_ttye)
 _DEV(mac_tty0)
+_DEV(ttye)
+dnl _TITLE(call)
 _TITLE(pty)
-_DEV(tty, 4)
+_DEV(ptm, 52)
 _DEV(pty, 5)
-_TITLE(graph)
+_DEV(tty, 4)
+_TITLE(cons)
+_DEV(adb, 23)
 _DEV(grf_mac, 10)
 _TITLE(spec)
-_DEV(bpf, 22)
-_DEV(tun, 24)
-_DEV(pf, 35)
-_DEV(lkm, 25)
-_DEV(rnd, 32)
-_DEV(uk, 34)
-_DEV(ss, 33)
-_DEV(xfs, 51)
-_DEV(adb, 23)
 _DEV(asc, 36)
+_DEV(bpf, 22)
+_DEV(fdesc, 21)
+_DEV(lkm, 25)
+_DEV(pf, 35)
+_DEV(rnd, 32)
+_DEV(ss, 33)
 _DEV(systrace, 50)
+_DEV(tun, 24)
+_DEV(uk, 34)
+_DEV(xfs, 51)
 dnl
-divert(7)dnl
+divert(__mddivert)dnl
 dnl
 _std(1, 2, 37, 3, 6)
 	;;
@@ -114,12 +122,12 @@ target(all, xy, 0, 1, 2, 3)dnl
 target(all, rd, 0)dnl
 target(all, cd, 0, 1)dnl
 target(all, ccd, 0, 1, 2, 3)dnl
+twrget(all, ttye, ttye, 0)dnl
 target(ramd, sd, 0, 1, 2, 3)dnl
 target(ramd, st, 0, 1)dnl
 target(ramd, rd, 0, 1)dnl
 target(ramd, adb)dnl
 target(ramd, asc, 0)dnl
 target(ramd, grf, 0, 1)dnl
-target(ramd, ttye, 0)dnl
 twrget(ramd, mac_tty0, tty0, 0, 1)dnl
 target(ramd, pty, 0)dnl

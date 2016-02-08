@@ -52,6 +52,27 @@
 0	belong&0377777777	041600507	OpenBSD/m68k core
 >12	string			>\0		from '%s'
 
+0	belong&0377777777	046200413	OpenBSD/m88k demand paged
+>0	byte			&0x80		
+>>20	belong			<8192		shared library
+>>20	belong			=8192		dynamically linked executable
+>>20	belong			>8192		dynamically linked executable
+>0	byte			^0x80		executable
+>16	belong			>0		not stripped
+0	belong&0377777777	046200410	OpenBSD/m88k pure
+>0	byte			&0x80		dynamically linked executable
+>0	byte			^0x80		executable
+>16	belong			>0		not stripped
+0	belong&0377777777	046200407	OpenBSD/m88k
+>0	byte			&0x80		dynamically linked executable
+>0	byte			^0x80
+>>0	byte			&0x40		position independent
+>>20	belong			!0		executable
+>>20	belong			=0		object file
+>16	belong			>0		not stripped
+0	belong&0377777777	046200507	OpenBSD/m88k core
+>12	string			>\0		from '%s'
+
 0	belong&0377777777	042000413	OpenBSD/m68k4k demand paged
 >0	byte			&0x80		
 >>20	belong			<4096		shared library
@@ -195,10 +216,6 @@
 0	belong&0377777777	045600507	OpenBSD/sparc64 core
 >12	string			>\0		from '%s'
 
-# OpenBSD/m88k core files
-0	belong&0377777777	046200507	OpenBSD/m88k core
->12	string			>\0		from '%s'
-
 # OpenBSD/hppa core files
 0	belong&0377777777	046400507	OpenBSD/hppa core
 >12	string			>\0		from '%s'
@@ -225,23 +242,25 @@
 0	belong&0377777777	043400507	OpenBSD/mips core
 >12	string			>\0		from '%s'
 
-0	belong&0377777777	043600413	OpenBSD/arm32 demand paged
+0	belong&0377777777	043600413	OpenBSD/arm demand paged
 >0	byte			&0x80
 >>20	lelong			<8192		shared library
 >>20	lelong			=8192		dynamically linked executable
 >>20	lelong			>8192		dynamically linked executable
 >0	byte			^0x80		executable
 >16	lelong			>0		not stripped
-0	belong&0377777777	043600410	OpenBSD/arm32 pure
+0	belong&0377777777	043600410	OpenBSD/arm pure
 >0	byte			&0x80		dynamically linked executable
 >0	byte			^0x80		executable
 >16	lelong			>0		not stripped
-0	belong&0377777777	043600407	OpenBSD/arm32
+0	belong&0377777777	043600407	OpenBSD/arm
 >0	byte			&0x80		dynamically linked executable
 >0	byte			^0x80
 >>0	byte			&0x40		position independent
 >>20	lelong			!0		executable
 >>20	lelong			=0		object file
 >16	lelong			>0		not stripped
-0	belong&0377777777	043600507	OpenBSD/arm32 core
+0	belong&0377777777	043600507	OpenBSD/arm core
+>12	string			>\0		from '%s'
+0	belong&0377777777	047200507	OpenBSD/amd64 core
 >12	string			>\0		from '%s'

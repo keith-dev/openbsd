@@ -1,4 +1,4 @@
-/*	$OpenBSD: main.c,v 1.54 2003/07/02 21:04:10 deraadt Exp $	*/
+/*	$OpenBSD: main.c,v 1.57 2003/12/16 21:46:22 deraadt Exp $	*/
 /*	$NetBSD: main.c,v 1.24 1997/08/18 10:20:26 lukem Exp $	*/
 
 /*
@@ -65,13 +65,9 @@ static char copyright[] =
 	The Regents of the University of California.  All rights reserved.\n";
 #endif /* not lint */
 
-#ifndef lint
-#if 0
-static char sccsid[] = "@(#)main.c	8.6 (Berkeley) 10/9/94";
-#else
-static char rcsid[] = "$OpenBSD: main.c,v 1.54 2003/07/02 21:04:10 deraadt Exp $";
-#endif
-#endif /* not lint */
+#if !defined(lint) && !defined(SMALL)
+static char rcsid[] = "$OpenBSD: main.c,v 1.57 2003/12/16 21:46:22 deraadt Exp $";
+#endif /* not lint and not SMALL */
 
 /*
  * FTP User Program -- Command Interface.
@@ -386,6 +382,9 @@ cmdscanner(top)
 {
 	struct cmd *c;
 	int num;
+#ifndef SMALL
+	HistEvent hev;
+#endif
 
 	if (!top 
 #ifndef SMALL
@@ -433,7 +432,7 @@ cmdscanner(top)
 			}
 			memcpy(line, buf, (size_t)num);
 			line[num] = '\0';
-			history(hist, H_ENTER, buf);
+			history(hist, &hev, H_ENTER, buf);
 		}
 #endif /* !SMALL */
 
@@ -453,7 +452,7 @@ cmdscanner(top)
 			 *       them will not elicit an error.
 			 */
 			if (editing &&
-			    el_parse(el, margc, margv) != 0)
+			    el_parse(el, margc, (const char **)margv) != 0)
 #endif /* !SMALL */
 				fputs("?Invalid command.\n", ttyout);
 			continue;
@@ -728,10 +727,10 @@ void
 usage()
 {
 	(void)fprintf(stderr,
-	    "usage: %s [-AVadegimnptv46] [-o output] [-P port] [-r <seconds>] [host [port]]\n"
-	    "       %s host:[/path/]file[/]\n"
-	    "       %s ftp://[user:password@]host[:port]/file[/]\n"
-	    "       %s http://host[:port]/file\n",
+	    "usage: %s [-46AadegimnptVv] [-P port] [-r seconds] [host [port]]\n"
+	    "       %s [-o output] ftp://[user:password@]host[:port]/file[/]\n"
+	    "       %s [-o output] http://host[:port]/file\n"
+	    "       %s [-o output] host:[/path/]file[/]\n",
 	    __progname, __progname, __progname, __progname);
 	exit(1);
 }

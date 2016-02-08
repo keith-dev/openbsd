@@ -1,10 +1,10 @@
-/*	$OpenBSD: ftpd.c,v 1.145 2003/07/29 18:39:22 deraadt Exp $	*/
+/*	$OpenBSD: ftpd.c,v 1.153 2003/12/12 19:45:22 deraadt Exp $	*/
 /*	$NetBSD: ftpd.c,v 1.15 1995/06/03 22:46:47 mycroft Exp $	*/
 
 /*
  * Copyright (C) 1997 and 1998 WIDE Project.
  * All rights reserved.
- * 
+ *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
  * are met:
@@ -16,7 +16,7 @@
  * 3. Neither the name of the project nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
- * 
+ *
  * THIS SOFTWARE IS PROVIDED BY THE PROJECT AND CONTRIBUTORS ``AS IS'' AND
  * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
  * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
@@ -69,8 +69,8 @@ static const char copyright[] =
 #if 0
 static const char sccsid[] = "@(#)ftpd.c	8.4 (Berkeley) 4/16/94";
 #else
-static const char rcsid[] = 
-    "$OpenBSD: ftpd.c,v 1.145 2003/07/29 18:39:22 deraadt Exp $";
+static const char rcsid[] =
+    "$OpenBSD: ftpd.c,v 1.153 2003/12/12 19:45:22 deraadt Exp $";
 #endif
 #endif /* not lint */
 
@@ -116,6 +116,7 @@ static const char rcsid[] =
 #include <unistd.h>
 #include <util.h>
 #include <utmp.h>
+#include <poll.h>
 
 #if defined(TCPWRAPPERS)
 #include <tcpd.h>
@@ -161,7 +162,7 @@ int	mode;
 int	doutmp = 0;		/* update utmp file */
 int	usedefault = 1;		/* for data transfers */
 int	pdata = -1;		/* for passive mode */
-int	family = AF_INET;
+int	family = AF_UNSPEC;
 volatile sig_atomic_t transflag;
 off_t	file_size;
 off_t	byte_count;
@@ -272,7 +273,7 @@ static void
 usage(void)
 {
 	syslog(LOG_ERR,
-	    "usage: ftpd [-AdDhlMPSU46] [-t timeout] [-T maxtimeout] [-u mask]");
+	    "usage: ftpd [-46ADdlMnPSU] [-T maxtimeout] [-t timeout] [-u mask]");
 	exit(2);
 }
 
@@ -385,8 +386,9 @@ main(int argc, char *argv[])
 	openlog("ftpd", LOG_PID | LOG_NDELAY, LOG_FTP);
 
 	if (daemon_mode) {
-		int ctl_sock, fd;
-		struct servent *sv;
+		int *fds, n, error, i, fd;
+		struct pollfd *pfds;
+		struct addrinfo hints, *res, *res0;
 
 		/*
 		 * Detach from parent.
@@ -397,47 +399,69 @@ main(int argc, char *argv[])
 		}
 		sa.sa_handler = reapchild;
 		(void) sigaction(SIGCHLD, &sa, NULL);
-		/*
-		 * Get port number for ftp/tcp.
-		 */
-		sv = getservbyname("ftp", "tcp");
-		if (sv == NULL) {
-			syslog(LOG_ERR, "getservbyname for ftp failed");
+
+		memset(&hints, 0, sizeof(hints));
+		hints.ai_family = family;
+		hints.ai_socktype = SOCK_STREAM;
+		hints.ai_protocol = IPPROTO_TCP;
+		hints.ai_flags = AI_PASSIVE;
+		error = getaddrinfo(NULL, "ftp", &hints, &res0);
+		if (error) {
+			syslog(LOG_ERR, "%s", gai_strerror(error));
 			exit(1);
 		}
+
+		n = 0;
+		for (res = res0; res; res = res->ai_next)
+			n++;
+
+		fds = malloc(n * sizeof(int));
+		pfds = malloc(n * sizeof(struct pollfd));
+		if (!fds || !pfds) {
+			syslog(LOG_ERR, "%s", strerror(errno));
+			exit(1);
+		}
+
 		/*
-		 * Open a socket, bind it to the FTP port, and start
+		 * Open sockets, bind it to the FTP port, and start
 		 * listening.
 		 */
-		ctl_sock = socket(family, SOCK_STREAM, 0);
-		if (ctl_sock < 0) {
-			syslog(LOG_ERR, "control socket: %m");
+		n = 0;
+		for (res = res0; res; res = res->ai_next) {
+			fds[n] = socket(res->ai_family, res->ai_socktype,
+			    res->ai_protocol);
+			if (fds[n] < 0)
+				continue;
+
+			if (setsockopt(fds[n], SOL_SOCKET, SO_REUSEADDR,
+			    (char *)&on, sizeof(on)) < 0) {
+				close(fds[n]);
+				fds[n] = -1;
+				continue;
+			}
+
+			if (bind(fds[n], res->ai_addr, res->ai_addrlen) < 0) {
+				close(fds[n]);
+				fds[n] = -1;
+				continue;
+			}
+			if (listen(fds[n], 32) < 0) {
+				close(fds[n]);
+				fds[n] = -1;
+				continue;
+			}
+
+			pfds[n].fd = fds[n];
+			pfds[n].events = POLLIN;
+			n++;
+		}
+		freeaddrinfo(res0);
+
+		if (n == 0) {
+			syslog(LOG_ERR, "could not open control socket");
 			exit(1);
 		}
-		if (setsockopt(ctl_sock, SOL_SOCKET, SO_REUSEADDR,
-		    (char *)&on, sizeof(on)) < 0)
-			syslog(LOG_ERR, "control setsockopt: %m");
-		memset(&server_addr, 0, sizeof(server_addr));
-		server_addr.su_sin.sin_family = family;
-		switch (family) {
-		case AF_INET:
-			server_addr.su_len = sizeof(struct sockaddr_in);
-			server_addr.su_sin.sin_port = sv->s_port;
-			break;
-		case AF_INET6:
-			server_addr.su_len = sizeof(struct sockaddr_in6);
-			server_addr.su_sin6.sin6_port = sv->s_port;
-			break;
-		}
-		if (bind(ctl_sock, (struct sockaddr *)&server_addr,
-			 server_addr.su_len)) {
-			syslog(LOG_ERR, "control bind: %m");
-			exit(1);
-		}
-		if (listen(ctl_sock, 32) < 0) {
-			syslog(LOG_ERR, "control listen: %m");
-			exit(1);
-		}
+
 		/* Stash pid in pidfile */
 		if (pidfile(NULL))
 			syslog(LOG_ERR, "can't open pidfile: %m");
@@ -446,19 +470,29 @@ main(int argc, char *argv[])
 		 * children to handle them.
 		 */
 		while (1) {
-			addrlen = sizeof(his_addr);
-			fd = accept(ctl_sock, (struct sockaddr *)&his_addr,
-				    &addrlen);
-			if (fork() == 0) {
-				/* child */
-				(void) dup2(fd, 0);
-				(void) dup2(fd, 1);
-				close(ctl_sock);
-				break;
+			if (poll(pfds, n, INFTIM) < 0) {
+				if (errno == EINTR)
+					continue;
+				err(1, "poll");
 			}
-			close(fd);
+			for (i = 0; i < n; i++)
+				if (pfds[i].revents & POLLIN) {
+					addrlen = sizeof(his_addr);
+					fd = accept(pfds[i].fd,
+					    (struct sockaddr *)&his_addr,
+					    &addrlen);
+					if (fork() == 0)
+						goto child;
+					close(fd);
+				}
 		}
 
+	child:
+		/* child */
+		(void)dup2(fd, STDIN_FILENO);
+		(void)dup2(fd, STDOUT_FILENO);
+		for (i = 0; i < n; i++)
+			close(fds[i]);
 #if defined(TCPWRAPPERS)
 		/* ..in the child. */
 		if (!check_host((struct sockaddr *)&his_addr))
@@ -984,10 +1018,10 @@ pass(char *passwd)
 
 			/* Compute root directory. */
 			snprintf(rootdir, sizeof(rootdir), "%s/%s",
-				  pw->pw_dir, dhostname);
+			    pw->pw_dir, dhostname);
 			if (stat(rootdir, &ts) < 0) {
 				snprintf(rootdir, sizeof(rootdir), "%s/%s",
-					  pw->pw_dir, hostname);
+				    pw->pw_dir, hostname);
 			}
 		} else
 			strlcpy(rootdir, pw->pw_dir, sizeof(rootdir));
@@ -1156,7 +1190,7 @@ retrieve(char *cmd, char *name)
 		goto done;
 	time(&start);
 	send_data(fin, dout, st.st_blksize, st.st_size,
-		  (restart_point == 0 && cmd == 0 && S_ISREG(st.st_mode)));
+	    (restart_point == 0 && cmd == 0 && S_ISREG(st.st_mode)));
 	if ((cmd == 0) && stats)
 		logxfer(name, byte_count, start);
 	(void) fclose(dout);
@@ -1256,7 +1290,9 @@ getdatasock(char *mode)
 	if (data >= 0)
 		return (fdopen(data, mode));
 	sigprocmask (SIG_BLOCK, &allsigs, NULL);
+	(void) seteuid(0);
 	s = socket(ctrl_addr.su_family, SOCK_STREAM, 0);
+	(void) seteuid((uid_t)pw->pw_uid);
 	if (s < 0)
 		goto bad;
 	if (setsockopt(s, SOL_SOCKET, SO_REUSEADDR,
@@ -1327,7 +1363,7 @@ dataconn(char *name, off_t size, char *mode)
 	file_size = size;
 	byte_count = 0;
 	if (size != (off_t) -1) {
-		(void) snprintf(sizebuf, sizeof(sizebuf), " (%qd bytes)", 
+		(void) snprintf(sizebuf, sizeof(sizebuf), " (%qd bytes)",
 				size);
 	} else
 		sizebuf[0] = '\0';
@@ -1374,7 +1410,7 @@ dataconn(char *name, off_t size, char *mode)
 			return (NULL);
 		}
 		if (portcheck && memcmp(fa, ha, alen) != 0) {
-			perror_reply(435, "Can't build data connection"); 
+			perror_reply(435, "Can't build data connection");
 			(void) close(pdata);
 			(void) close(s);
 			pdata = -1;
@@ -1395,70 +1431,70 @@ dataconn(char *name, off_t size, char *mode)
 	if (usedefault)
 		data_dest = his_addr;
 	usedefault = 1;
-	file = getdatasock(mode);
-	if (file == NULL) {
-		char hbuf[MAXHOSTNAMELEN], pbuf[10];
+	do {
+		file = getdatasock(mode);
+		if (file == NULL) {
+			char hbuf[MAXHOSTNAMELEN], pbuf[10];
 
-		getnameinfo((struct sockaddr *)&data_source, data_source.su_len,
-		    hbuf, sizeof(hbuf), pbuf, sizeof(pbuf),
-		    NI_NUMERICHOST | NI_NUMERICSERV);
-		reply(425, "Can't create data socket (%s,%s): %s.",
-		    hbuf, pbuf, strerror(errno));
-		return (NULL);
-	}
-	data = fileno(file);
-
-	/*
-	 * attempt to connect to reserved port on client machine;
-	 * this looks like an attack
-	 */
-	switch (data_dest.su_family) {
-	case AF_INET:
-		p = (in_port_t *)&data_dest.su_sin.sin_port;
-		fa = (u_char *)&data_dest.su_sin.sin_addr;
-		ha = (u_char *)&his_addr.su_sin.sin_addr;
-		alen = sizeof(struct in_addr);
-		break;
-	case AF_INET6:
-		p = (in_port_t *)&data_dest.su_sin6.sin6_port;
-		fa = (u_char *)&data_dest.su_sin6.sin6_addr;
-		ha = (u_char *)&his_addr.su_sin6.sin6_addr;
-		alen = sizeof(struct in6_addr);
-		break;
-	default:
-		perror_reply(425, "Can't build data connection");
-		(void) fclose(file);
-		pdata = -1;
-		return (NULL);
-	}
-	if (data_dest.su_family != his_addr.su_family ||
-	    ntohs(*p) < IPPORT_RESERVED || ntohs(*p) == 2049) {	/* XXX */
-		perror_reply(425, "Can't build data connection");
-		(void) fclose(file);
-		data = -1;
-		return NULL;
-	}
-	if (portcheck && memcmp(fa, ha, alen) != 0) {
-		perror_reply(435, "Can't build data connection");
-		(void) fclose(file);
-		data = -1;
-		return NULL;
-	}
-	while (connect(data, (struct sockaddr *)&data_dest,
-	    data_dest.su_len) < 0) {
-		if (errno == EADDRINUSE && retry < swaitmax) {
-			sleep((unsigned) swaitint);
-			retry += swaitint;
-			continue;
+			getnameinfo((struct sockaddr *)&data_source,
+			    data_source.su_len, hbuf, sizeof(hbuf), pbuf,
+			    sizeof(pbuf), NI_NUMERICHOST | NI_NUMERICSERV);
+			reply(425, "Can't create data socket (%s,%s): %s.",
+			    hbuf, pbuf, strerror(errno));
+			return (NULL);
 		}
-		perror_reply(425, "Can't build data connection");
+
+		/*
+		 * attempt to connect to reserved port on client machine;
+		 * this looks like an attack
+		 */
+		switch (data_dest.su_family) {
+		case AF_INET:
+			p = (in_port_t *)&data_dest.su_sin.sin_port;
+			fa = (u_char *)&data_dest.su_sin.sin_addr;
+			ha = (u_char *)&his_addr.su_sin.sin_addr;
+			alen = sizeof(struct in_addr);
+			break;
+		case AF_INET6:
+			p = (in_port_t *)&data_dest.su_sin6.sin6_port;
+			fa = (u_char *)&data_dest.su_sin6.sin6_addr;
+			ha = (u_char *)&his_addr.su_sin6.sin6_addr;
+			alen = sizeof(struct in6_addr);
+			break;
+		default:
+			perror_reply(425, "Can't build data connection");
+			(void) fclose(file);
+			pdata = -1;
+			return (NULL);
+		}
+		if (data_dest.su_family != his_addr.su_family ||
+		    ntohs(*p) < IPPORT_RESERVED || ntohs(*p) == 2049) { /* XXX */
+			perror_reply(425, "Can't build data connection");
+			(void) fclose(file);
+			return NULL;
+		}
+		if (portcheck && memcmp(fa, ha, alen) != 0) {
+			perror_reply(435, "Can't build data connection");
+			(void) fclose(file);
+			return NULL;
+		}
+
+		if (connect(fileno(file), (struct sockaddr *)&data_dest,
+		    data_dest.su_len) == 0) {
+			reply(150, "Opening %s mode data connection for '%s'%s.",
+			    type == TYPE_A ? "ASCII" : "BINARY", name, sizebuf);
+			data = fileno(file);
+			return (file);
+		}
+		if (errno != EADDRINUSE)
+			break;
 		(void) fclose(file);
-		data = -1;
-		return (NULL);
-	}
-	reply(150, "Opening %s mode data connection for '%s'%s.",
-	    type == TYPE_A ? "ASCII" : "BINARY", name, sizebuf);
-	return (file);
+		sleep((unsigned) swaitint);
+		retry += swaitint;
+	} while (retry <= swaitmax);
+	perror_reply(425, "Can't build data connection");
+	(void) fclose(file);
+	return (NULL);
 }
 
 /*
@@ -1509,7 +1545,7 @@ send_data(FILE *instr, FILE *outstr, off_t blksize, off_t filesize, int isreg)
 
 		if (isreg && filesize < (off_t)16 * 1024 * 1024) {
 			buf = mmap(0, filesize, PROT_READ, MAP_SHARED, filefd,
-				   (off_t)0);
+			    (off_t)0);
 			if (buf == MAP_FAILED) {
 				syslog(LOG_WARNING, "mmap(%lu): %m",
 				    (unsigned long)filesize);
@@ -1525,7 +1561,8 @@ send_data(FILE *instr, FILE *outstr, off_t blksize, off_t filesize, int isreg)
 				}
 				len -= cnt;
 				bp += cnt;
-				if (cnt > 0) byte_count += cnt;
+				if (cnt > 0)
+					byte_count += cnt;
 			} while(cnt > 0 && len > 0);
 
 			transflag = 0;
@@ -2469,9 +2506,9 @@ protounsupp:
 
 /*
  * 522 Protocol not supported (proto,...)
- * as we assume address family for control and data connections are the same, 
- * we do not return the list of address families we support - instead, we 
- * return the address family of the control connection.  
+ * as we assume address family for control and data connections are the same,
+ * we do not return the list of address families we support - instead, we
+ * return the address family of the control connection.
  */
 void
 epsv_protounsupp(const char *message)
@@ -2777,7 +2814,7 @@ copy_dir(char *dir, struct passwd *pw)
 	size_t dirsiz;
 
 	/* Nothing to expand */
-	if (dir[0] !=  '~')
+	if (dir[0] != '~')
 		return (strdup(dir));
 
 	/* "dir" is of form ~user/some/dir, lookup user. */

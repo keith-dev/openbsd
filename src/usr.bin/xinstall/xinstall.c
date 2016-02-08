@@ -1,4 +1,4 @@
-/*	$OpenBSD: xinstall.c,v 1.36 2003/07/02 00:21:17 avsm Exp $	*/
+/*	$OpenBSD: xinstall.c,v 1.40 2004/02/10 07:33:23 jmc Exp $	*/
 /*	$NetBSD: xinstall.c,v 1.9 1995/12/20 10:25:17 jonathan Exp $	*/
 
 /*
@@ -40,7 +40,7 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)xinstall.c	8.1 (Berkeley) 7/21/93";
 #endif
-static char rcsid[] = "$OpenBSD: xinstall.c,v 1.36 2003/07/02 00:21:17 avsm Exp $";
+static char rcsid[] = "$OpenBSD: xinstall.c,v 1.40 2004/02/10 07:33:23 jmc Exp $";
 #endif /* not lint */
 
 #include <sys/param.h>
@@ -438,6 +438,8 @@ copy(int from_fd, char *from_name, int to_fd, char *to_name, off_t size,
 			(void)unlink(to_name);
 			errx(EX_OSERR, "%s: %s", from_name, strerror(serrno));
 		}
+		if (size)
+			madvise(p, size, MADV_SEQUENTIAL);
 		siz = (size_t)size;
 		if ((nw = write(to_fd, p, siz)) != siz) {
 			serrno = errno;
@@ -514,6 +516,10 @@ compare(int from_fd, const char *from_name, size_t from_len, int to_fd,
 		if ((p2 = mmap(NULL, length, PROT_READ, MAP_PRIVATE,
 		    to_fd, to_off)) == MAP_FAILED)
 			err(EX_OSERR, "%s", to_name);
+		if (length) {
+			madvise(p1, length, MADV_SEQUENTIAL);
+			madvise(p2, length, MADV_SEQUENTIAL);
+		}
 
 		dfound = memcmp(p1, p2, length);
 
@@ -595,9 +601,7 @@ void
 usage(void)
 {
 	(void)fprintf(stderr, "\
-usage: install [-bCcpSs] [-B suffix] [-f flags] [-g group] [-m mode] [-o owner] file1 file2\n\
-       install [-bCcpSs] [-B suffix] [-f flags] [-g group] [-m mode] [-o owner] file1 ... fileN directory\n\
-       install  -d   [-g group] [-m mode] [-o owner] directory ...\n");
+usage: install [-bCcdpSs] [-B suffix] [-f flags] [-g group] [-m mode] [-o owner]\n	       source [...] target [...]\n");
 	exit(EX_USAGE);
 	/* NOTREACHED */
 }

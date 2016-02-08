@@ -1,4 +1,4 @@
-/*	$OpenBSD: isakmp_doi.c,v 1.16 2003/08/08 08:46:59 ho Exp $	*/
+/*	$OpenBSD: isakmp_doi.c,v 1.18 2004/03/10 23:08:49 hshoexer Exp $	*/
 /*	$EOM: isakmp_doi.c,v 1.42 2000/09/12 16:29:41 ho Exp $	*/
 
 /*
@@ -67,7 +67,7 @@ static int isakmp_validate_id_information (u_int8_t, u_int8_t *, u_int8_t *,
 static int isakmp_validate_key_information (u_int8_t *, size_t);
 static int isakmp_validate_notification (u_int16_t);
 static int isakmp_validate_proto (u_int8_t);
-static int isakmp_validate_situation (u_int8_t *, size_t *);
+static int isakmp_validate_situation (u_int8_t *, size_t *, size_t);
 static int isakmp_validate_transform_id (u_int8_t, u_int8_t);
 
 static struct doi isakmp_doi = {
@@ -197,7 +197,7 @@ isakmp_validate_proto (u_int8_t proto)
 }
 
 static int
-isakmp_validate_situation (u_int8_t *buf, size_t *sz)
+isakmp_validate_situation (u_int8_t *buf, size_t *sz, size_t len)
 {
   /* There are no situations in the ISAKMP DOI.  */
   *sz = 0;
@@ -228,7 +228,6 @@ static int
 isakmp_responder (struct message *msg)
 {
   struct payload *p;
-  char *tag;
 
   switch (msg->exchange->type)
     {
@@ -236,11 +235,10 @@ isakmp_responder (struct message *msg)
       for (p = TAILQ_FIRST (&msg->payload[ISAKMP_PAYLOAD_NOTIFY]); p;
 	   p = TAILQ_NEXT (p, link))
 	{
-	  tag = constant_lookup (isakmp_notify_cst,
-				 GET_ISAKMP_NOTIFY_MSG_TYPE (p->p));
 	  LOG_DBG ((LOG_EXCHANGE, 10,
 		    "isakmp_responder: got NOTIFY of type %s, ignoring",
-		    tag ? tag : "<unknown>"));
+		    constant_name (isakmp_notify_cst,
+				   GET_ISAKMP_NOTIFY_MSG_TYPE (p->p))));
 	  p->flags |= PL_MARK;
 	}
 

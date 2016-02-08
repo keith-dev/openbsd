@@ -1,17 +1,17 @@
-dnl	$OpenBSD: install,v 1.30 2003/09/07 12:01:56 krw Exp $
+dnl	$OpenBSD: install,v 1.34 2004/03/17 09:25:10 jmc Exp $
 OpenBSDInstallPrelude
 
 There are several ways to install OpenBSD onto a disk. The easiest way
 in terms of preliminary setup is to use the OpenBSD installation
 dnl XXX change back if more than one floppy again.
-dnl cdrom, or an installation floppy.
-cdrom, or the installation floppy.
+dnl CD-ROM, or an installation floppy.
+CD-ROM, or the installation floppy.
 
-If your machine is hooked up in a network and you can find a server to
-arrange for a diskless setup, which is a convenient way to install on a
+If your machine is hooked up to a network, try and find a server to
+arrange for a diskless setup. This is a convenient way to install on a
 machine whose disk does not currently hold a usable operating system.
 This is difficult to get set up correctly the first time, but easy to
-use afterwards.  (see ``Installing using a diskless setup'' below).
+use afterwards.  (See ``Installing using a diskless setup'' below.)
 
 It is also possible to install OpenBSD "manually" from a running Solaris
 system, using the system tools, as well as gunzip; see ``Installing from
@@ -19,9 +19,9 @@ Solaris'' below.
 
 On Blade100 systems you must use a serial console if you want to install or
 upgrade using the network. There is currently a problem that causes the
-system to crash if you attempt an ftp or http install while the keyboard
-and a monitor are attached. Simply unplug the keyboard, connect the serial
-port to the system you will use as the console and reboot. There is no
+system to crash if you attempt an FTP or HTTP install while the keyboard
+and monitor are attached. Simply unplug the keyboard, connect the serial
+port to the system you will use as the console, and reboot. There is no
 problem with normal operation over the network once the install or upgrade
 is complete. 
 
@@ -34,7 +34,7 @@ does not necessarily wipe out all the partitions on the hard disk, errors
 during the install process can have unforeseen consequences and you will
 probably render the system unbootable if you start, but do not complete
 the installation.  Having the installation media for the prior installation,
-be it a Solaris or OpenBSD CD-ROM or OpenBSD install diskettes is good
+be it a Solaris or OpenBSD CD-ROM or OpenBSD install diskettes, is good
 insurance if you want to be able to "go back" for some reason.
 
 After taking care of all that, bring your system down gracefully using
@@ -48,7 +48,7 @@ Booting from Floppy Disk installation media:
 
 This will cause the kernel contained in the floppy to be booted.
 Please note that PCI systems are not able to boot from floppy; also,
-Ultra 1, 1E and 2 systems might need a firmware update to be able to boot
+Ultra 1, 1E, and 2 systems might need a firmware update to be able to boot
 from floppy; refer to the ``Updating your firmware'' section earlier in
 this document for details.
 
@@ -59,7 +59,7 @@ dnl No args! not a typo
 	ok boot cdrom
 
 If the boot is successful, you will get a loader version message,
-executable sizes and then the Kernel copyright and device probe
+executable sizes, and then the kernel copyright and device probe
 messages.  Boot failure modes are typically a lot of CD-ROM drive
 activity, but no messages or complaints about magic numbers,
 checksums or formats.
@@ -83,15 +83,15 @@ which device it has been booted from.  In this case, it will ask you
 for the root and swap devices.  Answer the device and partition you
 booted from as the root partition (likely sd0b or wd0b); you might
 want to rely on the boot messages to find the correct device name
-(see below).  When the kernel asks your for the swap device, just
+(see below).  When the kernel asks you for the swap device, just
 validate the suggested device name; since the installation procedure
 does not use swap, it doesn't matter.
 
 
 Installing using a diskless setup:
 
-First, you must setup a diskless client configuration on a server. If
-you are using a OpenBSD system as the boot-server, have a look at the
+First, you must set up a diskless client configuration on a server. If
+you are using an OpenBSD system as the boot-server, have a look at the
 diskless(8) manual page for guidelines on how to proceed with this.
 If the server runs another operating system, you'll have to consult
 documentation that came with it (on SunOS systems, add_client(8) and
@@ -132,9 +132,9 @@ OpenBSDBootMsgs
 
 	You will next be asked for your terminal type.  If you are
 	installing from a keyboard/monitor console, the default of
-	"sun" if correct.  If you are installing from a serial console
+	"sun" is correct.  If you are installing from a serial console
 	you should choose the terminal type from amongst those listed.
-	(If your terminal type is xterm, just use vt100).
+	(If your terminal type is xterm, just use vt100.)
 
 OpenBSDInstallPart3({:- or "wd0" for IDE drives-:})
 
@@ -160,7 +160,7 @@ OpenBSDCommonURL
 
 After completing an installation:
 
-Now try a reboot.  (If needed, swap your scsi id's first).
+Now try a reboot.  (If needed, swap your SCSI IDs first).
 
 The UltraSPARC OpenFirmware will normally load the kernel from the device
 and filename as instructed by the ``boot-device'' and ``boot-file''
@@ -194,15 +194,14 @@ also need at least the following pieces:
   - the *.tgz files you want to install (as a minimum, base{:--:}OSrev.tgz and
     etc{:--:}OSrev.tgz)
   - gunzip (GNU gzip) Solaris binary
-  - a boot block file from a Solaris machine that matches your machine type,
-    for ufs filesystem, such as /usr/platform/`uname -i`/lib/fs/ufs/bootblk
+  - the OpenBSD boot blocks (bootblk and ofwboot)
   - an OpenBSD kernel
 
-All these pieces, except the boot block and the GNU utilities are supplied
-in the OpenBSD/MACHINE distribution.
+All these pieces, except gunzip, are supplied in the OpenBSD/MACHINE
+distribution.
 
 You need to format and partition the disk using Solaris (since
-OpenBSD/MACHINE uses Sun compatible disk labels.)  Give yourself adequate
+OpenBSD/MACHINE uses Sun compatible disk labels).  Give yourself adequate
 partition sizes.  Here is an example layout:
 
     solaris# prtvtoc -s /dev/rdsk/c0t1d0s2
@@ -217,7 +216,7 @@ partition sizes.  Here is an example layout:
            6      4    00     936000   3229271   4165270   /usr
 
 Use Solaris to newfs the partitions which will have filesystems on them.
-(OpenBSD's filesystem format is almost identical to Solaris).
+(OpenBSD's filesystem format is almost identical to Solaris.)
 
     solaris# newfs /dev/rdsk/c0t1d0s0
     [... lots of output]
@@ -244,15 +243,15 @@ Mount those partitions in a tree formation, under /mnt; ie:
     /dev/dsk/c0t1d0s5     193536       0  193536     0%    /mnt/var/tmp
     /dev/dsk/c0t1d0s6    1564024       0 1564024     0%    /mnt/usr
 
-Place the boot block in /mnt (your new root partition), and use the Solaris
+Place the boot blocks in /mnt (your new root partition), and use the Solaris
 command "installboot" to make it work.
 The installboot man page says to do something like this:
 
-    solaris# cp /usr/platform/`uname -i`/lib/fs/ufs/bootblk /mnt/bootblk
+    solaris# cp bootblk ofwboot /mnt
     solaris# sync; sync
     solaris# /usr/sbin/installboot /mnt/bootblk /dev/rdsk/c0t1d0s0
 
-You can now extract the provided "*.tgz files onto your disk.
+You can now extract the provided "*.tgz" files onto your disk.
 
     solaris# ls -FC
     base{:--:}OSrev.tgz     etc{:--:}OSrev.tgz      misc{:--:}OSrev.tgz     xserv{:--:}OSrev.tgz
@@ -269,7 +268,7 @@ The GNU gunzip program is not distributed as part of Solaris, but may be
 present in your /usr/local/bin.  If not, you will need to obtain it from a
 GNU archive and install before proceeding.
 
-After the files have been extracted, setup /mnt/etc/fstab to match
+After the files have been extracted, set up /mnt/etc/fstab to match
 your actual disk layout.  (Minus the "/mnt" component of each path, of
 course :-)
 
@@ -294,7 +293,7 @@ Your UltraSPARC expects to be able to download a second stage bootstrap
 program via TFTP after having acquired its IP address through RevARP when
 instructed to boot "over the net". It will look for a filename composed of
 the machine's IP address. For example, a machine which has been assigned IP
-address 130.115.144.11, will make an TFTP request for `8273900B'.
+address 130.115.144.11 will make a TFTP request for `8273900B'.
 Normally, this file is a symbolic link to an appropriate second-stage
 boot program, which should be located in a place where the TFTP daemon
 can find it (remember, many TFTP daemons run in a chroot'ed environment).
@@ -306,7 +305,7 @@ After the boot program has been loaded into memory and given control by
 the PROM, it starts locating the machine's remote root directory through
 the BOOTPARAM protocol. First a BOOTPARAM WHOAMI request is broadcast
 on the local net. The answer to this request (if it comes in) contains
-the client's name. This name is used in next step, a BOOTPARAM GETFILE
+the client's name. This name is used in the next step, a BOOTPARAM GETFILE
 request -- sent to the server that responded to the WHOAMI request --
 requesting the name and address of the machine that will serve the client's
 root directory, as well as the path of the client's root on that server.
@@ -319,7 +318,7 @@ kernel which is then read into memory.
 
 You will want export the miniroot{:--:}OSrev.fs filesystem to the client.  You
 can dd this filesystem image to some spare partition, mount and export
-that partition or use tar to copy the contents to a more convenient spot.
+that partition, or use tar to copy the contents to a more convenient spot.
 
 Alternatively you can build a bootable partition from the distribution sets
 as follows:
@@ -347,14 +346,4 @@ A few configuration files need to be edited:
 			server:/export/root/client       /     nfs  rw 0 0
 			server:/export/exec/MACHINE.OpenBSD /usr  nfs  rw 0 0
 
-Now you must populate the `/dev' directory for your client. If the server
-runs SunOS 4.x, you can simply change your working directory to `<root>/dev'
-and run the MAKEDEV script: `sh MAKEDEV all' (this might require the edition
-of MAKEDEV to change the PATH for it to work properly).
-
-On Solaris (SunOS 5.x) systems, MAKEDEV can also be used, but there'll be
-error messages about unknown user and groups. These errors are
-inconsequential for the purpose of installing OpenBSD. However, you may
-want to correct them if you plan to the diskless setup regularly. In that
-case, you may re-run MAKEDEV on your OpenBSD machine once it has booted.
-
+OpenBSDInstNFS

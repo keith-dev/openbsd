@@ -1,4 +1,4 @@
-/*	$OpenBSD: editor.c,v 1.90 2003/08/29 00:17:09 tedu Exp $	*/
+/*	$OpenBSD: editor.c,v 1.93 2003/12/29 19:51:34 millert Exp $	*/
 
 /*
  * Copyright (c) 1997-2000 Todd C. Miller <Todd.Miller@courtesan.com>
@@ -17,7 +17,7 @@
  */
 
 #ifndef lint
-static char rcsid[] = "$OpenBSD: editor.c,v 1.90 2003/08/29 00:17:09 tedu Exp $";
+static char rcsid[] = "$OpenBSD: editor.c,v 1.93 2003/12/29 19:51:34 millert Exp $";
 #endif /* not lint */
 
 #include <sys/types.h>
@@ -1035,7 +1035,7 @@ getuint(struct disklabel *lp, int partno, char *prompt, char *helpstring,
 	u_int32_t rval = oval;
 	size_t n;
 	int mult = 1;
-	double d;
+	double d, percent = 1.0;
 
 	/* We only care about the remainder */
 	offset = offset % lp->d_secpercyl;
@@ -1086,6 +1086,18 @@ getuint(struct disklabel *lp, int partno, char *prompt, char *helpstring,
 					mult = 1073741824 / lp->d_secsize;
 					buf[--n] = '\0';
 					break;
+				case '%':
+					buf[--n] = '\0';
+					percent = strtod(buf, NULL) / 100.0;
+					snprintf(buf, sizeof(buf), "%d",
+					    lp->d_secperunit);
+					break;
+				case '&':
+					buf[--n] = '\0';
+					percent = strtod(buf, NULL) / 100.0;
+					snprintf(buf, sizeof(buf), "%d",
+					    maxval);
+					break;
 				}
 			}
 
@@ -1105,10 +1117,10 @@ getuint(struct disklabel *lp, int partno, char *prompt, char *helpstring,
 			} else {
 				/* XXX - should check for overflow */
 				if (mult > 0)
-					rval = d * mult;
+					rval = d * mult * percent;
 				else
 					/* Negative mult means divide (fancy) */
-					rval = d / (-mult);
+					rval = d / (-mult) * percent;
 
 				/* Apply the operator */
 				if (operator == '+')
@@ -1853,30 +1865,31 @@ editor_help(char *arg)
 		break;
 	default:
 		puts("Available commands:");
-		puts("\tp [unit]  - print label.");
-		puts("\tM         - show entire OpenBSD man page for disklabel.");
-		puts("\te         - edit drive parameters.");
+		puts("\t? [cmnd]  - this message or command specific help.");
 		puts("\ta [part]  - add new partition.");
 		puts("\tb         - set OpenBSD disk boundaries.");
 		puts("\tc [part]  - change partition size.");
-		puts("\td [part]  - delete partition.");
 		puts("\tD         - set label to default.");
-		puts("\tg [d|b]   - Use [d]isk or [b]ios geometry.");
+		puts("\td [part]  - delete partition.");
+		puts("\te         - edit drive parameters.");
+		puts("\tg [b|d|u] - use [b]ios, [d]isk or [u]ser geometry.");
+		puts("\tM         - show entire OpenBSD man page for disklabel.");
 		puts("\tm [part]  - modify existing partition.");
 		puts("\tn [part]  - set the mount point for a partition.");
-		puts("\tr         - recalculate free space.");
-		puts("\tu         - undo last change.");
-		puts("\ts [path]  - save label to file.");
-		puts("\tw         - write label to disk.");
+		puts("\tp [unit]  - print label.");
 		puts("\tq         - quit and save changes.");
-		puts("\tx         - exit without saving changes.");
+		puts("\tr         - recalculate free space.");
+		puts("\ts [path]  - save label to file.");
+		puts("\tu         - undo last change.");
+		puts("\tw         - write label to disk.");
 		puts("\tX         - toggle expert mode.");
+		puts("\tx         - exit without saving changes.");
 		puts("\tz         - zero out partition table.");
-		puts("\t? [cmnd]  - this message or command specific help.");
 		puts(
 "Numeric parameters may use suffixes to indicate units:\n\t"
 "'b' for bytes, 'c' for cylinders, 'k' for kilobytes, 'm' for megabytes,\n\t"
 "'g' for gigabytes or no suffix for sectors (usually 512 bytes).\n\t"
+"'%' for percent of total disk size, '&' for percent of free space.\n\t"
 "Non-sector units will be rounded to the nearest cylinder.\n"
 "Entering '?' at most prompts will give you (simple) context sensitive help.");
 		break;
@@ -1887,14 +1900,16 @@ char **
 mpcopy(char **to, char **from)
 {
 	int i;
+	char *top;
 
 	for (i = 0; i < MAXPARTITIONS; i++) {
 		if (from[i] != NULL) {
 			int len = strlen(from[i]) + 1;
 
-			to[i] = realloc(to[i], len);
-			if (to[i] == NULL)
+			top = realloc(to[i], len);
+			if (top == NULL)
 				errx(4, "out of memory");
+			to[i] = top;
 			(void)strlcpy(to[i], from[i], len);
 		} else if (to[i] != NULL) {
 			free(to[i]);

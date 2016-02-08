@@ -1,4 +1,4 @@
-/*	$OpenBSD: dlfcn.c,v 1.31 2003/09/04 19:33:48 drahn Exp $ */
+/*	$OpenBSD: dlfcn.c,v 1.33 2003/10/01 02:55:23 millert Exp $ */
 
 /*
  * Copyright (c) 1998 Per Fogelstrom, Opsycon AB
@@ -235,28 +235,42 @@ _dl_unload_deps(elf_object_t *object)
 const char *
 dlerror(void)
 {
+	const char *errmsg;
+
 	switch (_dl_errno) {
 	case 0:	/* NO ERROR */
-		return (NULL);
+		errmsg = NULL;
+		break;
 	case DL_NOT_FOUND:
-		return ("File not found");
+		errmsg = "File not found";
+		break;
 	case DL_CANT_OPEN:
-		return ("Can't open file");
+		errmsg = "Can't open file";
+		break;
 	case DL_NOT_ELF:
-		return ("File not an ELF object");
+		errmsg = "File not an ELF object";
+		break;
 	case DL_CANT_OPEN_REF:
-		return ("Can't open referenced object");
+		errmsg = "Can't open referenced object";
+		break;
 	case DL_CANT_MMAP:
-		return ("Can't map ELF object");
+		errmsg = "Can't map ELF object";
+		break;
 	case DL_INVALID_HANDLE:
-		return ("Invalid handle");
+		errmsg = "Invalid handle";
+		break;
 	case DL_NO_SYMBOL:
-		return ("Unable to resolve symbol");
+		errmsg = "Unable to resolve symbol";
+		break;
 	case DL_INVALID_CTL:
-		return ("Invalid dlctl() command");
+		errmsg = "Invalid dlctl() command";
+		break;
 	default:
-		return ("Unknown error");
+		errmsg = "Unknown error";
 	}
+
+	_dl_errno = 0;
+	return (errmsg);
 }
 
 void

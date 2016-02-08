@@ -1,4 +1,4 @@
-dnl	$OpenBSD: INSTALL,v 1.37 2003/09/06 22:11:19 miod Exp $
+dnl	$OpenBSD: INSTALL,v 1.40 2004/03/27 23:33:06 miod Exp $
 include(INCLUDE/../m4.common)dnl
 INSTALLATION NOTES for OpenBSD/MACHINE OSREV
 
@@ -10,7 +10,7 @@ OpenBSD is a fully functional, multi-platform UN*X-like Operating
 System based on Berkeley Networking Release 2 (Net/2) and 4.4BSD-Lite.
 There are several operating systems in this family, but OpenBSD
 differentiates itself by putting security and correctness first.  The
-OpenBSD team strives to achieve what is called 'a secure by default'
+OpenBSD team strives to achieve what is called a 'secure by default'
 status.  This means that an OpenBSD user should feel safe that their
 newly installed machine will not be compromised.  This 'secure by
 default' goal is achieved by taking a proactive stance on security.
@@ -40,13 +40,13 @@ aiming at making the emulation as accurate as possible so that it is
 transparent to the user.
 
 Because OpenBSD is from Canada, the export of Cryptography pieces
-(such as SSH, IPsec, and Kerberos) to the world is not restricted.
+(such as OpenSSH, IPsec, and Kerberos) to the world is not restricted.
 
 (NOTE: OpenBSD can not be re-exported from the US once it has entered
 the US.  Because of this, take care NOT to get the distribution from
 an FTP server in the US if you are outside of Canada and the US.)
 
-A comprehensive list of the improvewents brought by the OSREV release
+A comprehensive list of the improvements brought by the OSREV release
 is available on the web at http://www.OpenBSD.org/OSrev.html.
 
 includeit(whatis)dnl
@@ -106,7 +106,7 @@ access to source code so that you can recompile pieces of the system.
 
 A few methods are provided.  If you have an OpenBSD CD-ROM, the source code
 is provided.  Otherwise, you can get the pieces over the Internet using
-ANONCVS, CTM or FTP.  For more information, see
+ANONCVS, CTM, or FTP.  For more information, see
 
 	http://www.OpenBSD.org/anoncvs.html
 	http://www.OpenBSD.org/ctm.html
@@ -165,7 +165,7 @@ Administrivia:
 --------------
 
 There are various mailing lists available via the mailing list
-server at <majordomo@OpenBSD.ORG>.  To get help on using the mailing
+server at <majordomo@OpenBSD.org>.  To get help on using the mailing
 list server, send mail to that address with an empty body, and it will
 reply with instructions.  There are also two OpenBSD Usenet newsgroups,
 comp.unix.bsd.openbsd.announce for important announcements and
@@ -176,7 +176,7 @@ and fill in as much information about the problem as you can.  Good
 bug reports {:-include-:} lots of details.  Additionally, bug reports can
 be sent by mail to:
 
-	bugs@OpenBSD.ORG
+	bugs@OpenBSD.org
 
 Use of 'sendbug' is encouraged, however, because bugs reported with it
 are entered into the OpenBSD bugs database, and thus can't slip through

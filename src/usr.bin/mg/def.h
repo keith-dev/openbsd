@@ -1,4 +1,4 @@
-/*	$OpenBSD: def.h,v 1.48 2003/08/15 23:23:18 vincent Exp $	*/
+/*	$OpenBSD: def.h,v 1.54 2004/01/27 23:43:37 vincent Exp $	*/
 
 #include <sys/queue.h>
 
@@ -106,6 +106,20 @@ typedef int	(*PF)(int, int);	/* generally useful type */
 #define KFORW	1
 #define KBACK	2
 
+
+/*
+ * This structure holds the starting position
+ * (as a line/offset pair) and the number of characters in a
+ * region of a buffer. This makes passing the specification
+ * of a region around a little bit easier.
+ */
+typedef struct {
+	struct LINE	*r_linep;	/* Origin LINE address.		 */
+	int		r_offset;	/* Origin LINE offset.		 */
+	RSIZE		r_size;		/* Length in characters.	 */
+} REGION;
+
+
 /*
  * All text is kept in circularly linked
  * lists of "LINE" structures. These begin at the
@@ -187,6 +201,11 @@ typedef struct MGWIN {
 	char		w_ntrows;	/* # of rows of text in window	*/
 	char		w_force;	/* If NZ, forcing row.		*/
 	char		w_flag;		/* Flags.			*/
+	LIST_HEAD(, undo_rec) w_undo;	/* Undo actions list */
+	int             w_undopos;      /* Where we were during the last
+					   undo action */
+	struct undo_rec *w_undoptr;
+	struct LINE	*w_wrapline;
 } MGWIN;
 #define w_wndp	w_list.l_p.l_wp
 #define w_name	w_list.l_name
@@ -208,17 +227,6 @@ typedef struct MGWIN {
 
 struct undo_rec;
 
-/*
- * This structure holds the starting position
- * (as a line/offset pair) and the number of characters in a
- * region of a buffer. This makes passing the specification
- * of a region around a little bit easier.
- */
-typedef struct {
-	struct LINE	*r_linep;	/* Origin LINE address.		 */
-	int		r_offset;	/* Origin LINE offset.		 */
-	RSIZE		r_size;		/* Length in characters.	 */
-} REGION;
 /*
  * Text is kept in buffers. A buffer header, described
  * below, exists for every buffer in the system. The buffers are
@@ -243,12 +251,7 @@ typedef struct BUFFER {
 	char		b_flag;		/* Flags			 */
 	char		b_fname[NFILEN];/* File name			 */
 	struct fileinfo	b_fi;		/* File attributes		 */
-	LIST_HEAD(, undo_rec) b_undo;	/* Undo actions list */
-	REGION          b_undopos;      /* Where we were during the last
-					   undo action */
-	struct undo_rec *b_undoptr;
 } BUFFER;
-
 #define b_bufp	b_list.l_p.x_bp
 #define b_bname b_list.l_name
 
@@ -273,7 +276,6 @@ struct undo_rec {
 	} type;
 	REGION		 region;
 	int		 pos;
-	int		 size;
 	char		*content;
 };
 
@@ -348,6 +350,7 @@ LINE	*lalloc(int);
 int	 lrealloc(LINE *, int);
 void	 lfree(LINE *);
 void	 lchange(int);
+int	 linsert_str(const char *, int);
 int	 linsert(int, int);
 int	 lnewline(void);
 int	 ldelete(RSIZE, int);
@@ -358,6 +361,8 @@ int	 kinsert(int, int);
 int	 kremove(int);
 
 /* window.c X */
+MGWIN	*new_window(BUFFER *);
+void	 free_window(MGWIN *);
 int	 reposition(int, int);
 int	 refresh(int, int);
 int	 nextwind(int, int);
@@ -583,7 +588,6 @@ int	 cntnonmatchlines(int, int);
 void	 free_undo_record(struct undo_rec *);
 int	 undo_dump(int, int);
 int	 undo_enable(int);
-int	 undo_add_custom(int, int, LINE *, int, void *, int);
 int	 undo_add_boundary(void);
 int	 undo_add_insert(LINE *, int, int);
 int	 undo_add_delete(LINE *, int, int);

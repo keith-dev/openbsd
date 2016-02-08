@@ -1,4 +1,4 @@
-/*	$OpenBSD: print-ip.c,v 1.19 2003/02/20 23:39:20 jason Exp $	*/
+/*	$OpenBSD: print-ip.c,v 1.24 2004/02/04 08:35:12 otto Exp $	*/
 
 /*
  * Copyright (c) 1988, 1989, 1990, 1991, 1992, 1993, 1994, 1995, 1996, 1997
@@ -23,7 +23,7 @@
 
 #ifndef lint
 static const char rcsid[] =
-    "@(#) $Header: /cvs/src/usr.sbin/tcpdump/print-ip.c,v 1.19 2003/02/20 23:39:20 jason Exp $ (LBL)";
+    "@(#) $Header: /cvs/src/usr.sbin/tcpdump/print-ip.c,v 1.24 2004/02/04 08:35:12 otto Exp $ (LBL)";
 #endif
 
 #include <sys/param.h>
@@ -39,6 +39,7 @@ static const char rcsid[] =
 #include <netinet/tcp.h>
 #include <netinet/tcpip.h>
 
+#include <inttypes.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -359,13 +360,12 @@ ip_print(register const u_char *bp, register u_int length)
 	register const u_char *cp;
 
 	ip = (const struct ip *)bp;
-#ifdef LBL_ALIGN
 	/*
 	 * If the IP header is not aligned, copy into abuf.
-	 * This will never happen with BPF.  It does happen raw packet
+	 * This will never happen with BPF.  It does happen with raw packet
 	 * dumps from -r.
 	 */
-	if ((long)ip & 3) {
+	if ((intptr_t)ip & (sizeof(long)-1)) {
 		static u_char *abuf = NULL;
 		static int didwarn = 0;
 
@@ -384,7 +384,7 @@ ip_print(register const u_char *bp, register u_int length)
 			++didwarn;
 		}
 	}
-#endif
+
 	if ((u_char *)(ip + 1) > snapend) {
 		printf("[|ip]");
 		return;
@@ -555,6 +555,13 @@ ip_print(register const u_char *bp, register u_int length)
 					     ipaddr_string(&ip->ip_src),
 					     ipaddr_string(&ip->ip_dst));
 			vrrp_print(cp, len, ip->ip_ttl);
+			break;
+
+#ifndef IPPROTO_PFSYNC  
+#define IPPROTO_PFSYNC 240
+#endif
+		case IPPROTO_PFSYNC:
+			pfsync_ip_print(cp, len, (const u_char *)ip);
 			break;
 
 		default:

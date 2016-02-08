@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.92 2003/05/17 20:58:52 millert Exp $
+#	$OpenBSD: Makefile,v 1.100 2004/02/27 17:36:11 deraadt Exp $
 
 #
 # For more information on building in tricky environments, please see
@@ -76,10 +76,6 @@ build:
 	    NOMAN=1 exec ${SUDO} ${MAKE} install
 	cd ${.CURDIR}/gnu/lib && ${MAKE} depend && ${MAKE} && \
 	    NOMAN=1 exec ${SUDO} ${MAKE} install
-.if (${KERBEROS5:L} == "yes")
-	cd ${.CURDIR}/kerberosV/lib && ${MAKE} depend && ${MAKE} && \
-	    NOMAN=1 exec ${SUDO} ${MAKE} install
-.endif
 	${MAKE} depend && ${MAKE} && exec ${SUDO} ${MAKE} install
 
 .if !defined(TARGET)
@@ -132,13 +128,13 @@ cross-env:	.PHONY
 ${CROSSDIRS}:
 	@-mkdir -p ${CROSSDIR}
 	@case ${TARGET} in \
-		sparc|i386|m68k|alpha|hppa|powerpc|sparc64|m88k|vax) \
+		alpha|hppa|i386|m68k|m88k|powerpc|sparc|sparc64|vax|amd64) \
 			echo ${TARGET} ;;\
-		amiga|sun3|mac68k|hp300|mvme68k) \
+		amiga|hp300|mac68k|mvme68k) \
 			echo m68k ;;\
 		mvme88k) \
 			echo m88k ;;\
-		mvmeppc|macppc) \
+		macppc|mvmeppc|pegasos) \
 			echo powerpc ;;\
 		sgi) \
 			echo mips ;;\
@@ -178,14 +174,15 @@ ${CROSSINCLUDES}:	${CROSSOBJ}
 	    ${MAKE} DESTDIR=${CROSSDIR} includes)
 	@touch ${CROSSINCLUDES}
 
-.if ${TARGET} == "alpha" || ${TARGET} == "hppa" || ${TARGET} == "i386" || \
-    ${TARGET} == "macppc" || ${TARGET} == "mvmeppc" || ${TARGET} == "sgi" || \
-    ${TARGET} == "sparc" || ${TARGET} == "sparc64"
+.if ${TARGET} == "alpha" || ${TARGET} == "amd64" || ${TARGET} == "hppa" || \
+    ${TARGET} == "i386" || ${TARGET} == "macppc" || ${TARGET} == "mvmeppc" || \
+    ${TARGET} == "pegasos" || ${TARGET} == "sparc" || ${TARGET} == "sparc64" || \
+    ${TARGET} == "sgi"
 BINUTILS=	ar as gasp ld nm objcopy objdump ranlib readelf size \
 		strings strip
 NEW_BINUTILS?=	Yes
 .else
-BINUTILS=	ar as ld nm ranlib objcopy objdump size strings strip
+BINUTILS=	ar as ld nm ranlib objcopy objdump strings strip
 NEW_BINUTILS?=	No
 .endif
 
@@ -243,15 +240,6 @@ ${CROSSBINUTILS}:	${CROSSINCLUDES}
 	    NOMAN= install)
 	ln -sf ${CROSSDIR}/usr/bin/strip \
 	    ${CROSSDIR}/usr/`cat ${CROSSDIR}/TARGET_CANON`/bin/strip
-	(cd ${.CURDIR}/usr.bin/size; \
-	    MAKEOBJDIR=obj.${MACHINE}.${TARGET} \
-	    ${MAKE} TARGET_MACHINE_ARCH=`cat ${CROSSDIR}/TARGET_ARCH` \
-	    MACHINE_ARCH=`cat ${CROSSDIR}/TARGET_ARCH` \
-	    NOMAN= depend all; \
-	    DESTDIR=${CROSSDIR} MAKEOBJDIR=obj.${MACHINE}.${TARGET} \
-	    ${MAKE} NOMAN= install)
-	ln -sf ${CROSSDIR}/usr/bin/size \
-	    ${CROSSDIR}/usr/`cat ${CROSSDIR}/TARGET_CANON`/bin/size
 	(cd ${.CURDIR}/usr.bin/nm; \
 	    MAKEOBJDIR=obj.${MACHINE}.${TARGET} \
 	    ${MAKE} TARGET_MACHINE_ARCH=`cat ${CROSSDIR}/TARGET_ARCH` \
@@ -260,6 +248,8 @@ ${CROSSBINUTILS}:	${CROSSINCLUDES}
 	    DESTDIR=${CROSSDIR} MAKEOBJDIR=obj.${MACHINE}.${TARGET} \
 	    ${MAKE} NOMAN= install)
 	ln -sf ${CROSSDIR}/usr/bin/nm \
+	    ${CROSSDIR}/usr/`cat ${CROSSDIR}/TARGET_CANON`/bin/nm
+	ln -sf ${CROSSDIR}/usr/bin/size \
 	    ${CROSSDIR}/usr/`cat ${CROSSDIR}/TARGET_CANON`/bin/nm
 .endif
 	@for cmd in ${BINUTILS}; do \
@@ -308,27 +298,20 @@ cross-lib:	${CROSSGCC}
 	(cd ${.CURDIR}/lib; \
 	    for lib in csu libc; do \
 	    (cd $$lib; \
-	        ${CROSSENV} MAKEOBJDIR=obj.${MACHINE}.${TARGET} \
+	        eval ${CROSSENV} MAKEOBJDIR=obj.${MACHINE}.${TARGET} \
 		    ${MAKE} depend all install); \
 	    done; \
-	    ${CROSSENV} MAKEOBJDIR=obj.${MACHINE}.${TARGET} \
-	        SKIPDIR="${NO_CROSS} libocurses/PSD.doc" \
+	    eval ${CROSSENV} MAKEOBJDIR=obj.${MACHINE}.${TARGET} \
+	        SKIPDIR=\"${NO_CROSS} libocurses/PSD.doc\" \
 	        ${MAKE} depend all install)
-.if (${KERBEROS5:L} == "yes")
-	MACHINE=${TARGET} MACHINE_ARCH=`cat ${CROSSDIR}/TARGET_ARCH`; \
-	export MACHINE MACHINE_ARCH; \
-	cd kerberosV/lib; \
-	${CROSSENV} MAKEOBJDIR=obj.${MACHINE}.${TARGET} \
-	    ${MAKE} depend all install
-.endif
 
 cross-bin:	${CROSSOBJ}
 	MACHINE=${TARGET} MACHINE_ARCH=`cat ${CROSSDIR}/TARGET_ARCH`; \
 	export MACHINE MACHINE_ARCH; \
 	for i in libexec bin sbin usr.bin usr.sbin; do \
 	(cd ${.CURDIR}/$$i; \
-	    ${CROSSENV} MAKEOBJDIR=obj.${MACHINE}.${TARGET} \
-	        SKIPDIR="${BINUTILS} ${NO_CROSS}" \
+	    eval ${CROSSENV} MAKEOBJDIR=obj.${MACHINE}.${TARGET} \
+	        SKIPDIR=\"${BINUTILS} ${NO_CROSS}\" \
 	        ${MAKE} depend all install); \
 	done
 

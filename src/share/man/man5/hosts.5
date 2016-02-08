@@ -1,4 +1,4 @@
-.\"	$OpenBSD: hosts.5,v 1.14 2003/06/06 13:28:13 jmc Exp $
+.\"	$OpenBSD: hosts.5,v 1.16 2003/10/28 15:11:37 jmc Exp $
 .\"	$NetBSD: hosts.5,v 1.4 1994/11/30 19:31:20 jtc Exp $
 .\"
 .\" Copyright (c) 1983, 1991, 1993
@@ -117,6 +117,7 @@ A name server should be used instead of a static file.
 Lines in
 .Pa /etc/hosts
 are limited to
-.Dv BUFSIZE
-characters (currently 1024).
+.Dv BUFSIZ
+characters
+.Pq currently 1024 .
 Longer lines will be ignored.

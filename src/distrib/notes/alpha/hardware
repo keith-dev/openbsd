@@ -1,4 +1,4 @@
-dnl	$OpenBSD: hardware,v 1.34 2003/09/06 22:22:41 miod Exp $
+dnl	$OpenBSD: hardware,v 1.42 2004/03/25 08:38:52 tom Exp $
 OpenBSD/MACHINE OSREV is expected to run on the following hardware.
 If you have hardware that is listed here and are unable to run
 OpenBSD, or if you are able to run OpenBSD on hardware not listed
@@ -10,7 +10,7 @@ Supported hardware:
     chipset (only one processor on the DS20 will be used)
 	  Supported devices:
 		Built-in serial and parallel ports.
-		Built-in DEC21143 ethernet.
+		Built-in DEC21143 Ethernet.
 		Built-in ISP SCSI.
 		Built-in IDE controller.
 		Built-in USB should work, but has not been thoroughly
@@ -24,7 +24,7 @@ Supported hardware:
     API UP1000 machines and other EV6 machines using the Irongate chipset
 	  Supported devices:
 		Built-in serial and parallel ports.
-		Built-in DEC21040 ethernet.
+		Built-in DEC21040 Ethernet.
 		Built-in IDE controller works, though there may be stability
 		  issues.
 	  Unsupported devices:
@@ -38,7 +38,7 @@ Supported hardware:
 	trying to install OpenBSD on them.
 	  Supported devices:
 		Built-in serial and parallel ports.
-		Built-in DEC21043 ethernet.
+		Built-in DEC21043 Ethernet.
 		Built-in ISP SCSI, when present (i.e. on ``au'' models).
 		Built-in IDE controller.
 		Most PCI devices (see below).
@@ -67,7 +67,7 @@ Supported hardware:
     AlphaServer 800, 1000 and 1000A
 	  Supported devices:
 		Built-in serial and parallel ports.
-		Built-in DEC21040 ethernet.
+		Built-in DEC21040 Ethernet.
 		Built-in ISP SCSI.
 		PCI graphics card (TGA or VGA compatible).
 		Most PCI devices (see below).
@@ -81,7 +81,7 @@ dnl uncomment when support is back on track
 dnl    AlphaStation 500 and 600
 dnl	  Supported devices:
 dnl		Built-in serial and parallel ports.
-dnl		Built-in DEC21040 ethernet.
+dnl		Built-in DEC21040 Ethernet.
 dnl		Built-in ISP SCSI.
 dnl		PCI graphics card (TGA or VGA compatible).
 dnl		Most PCI devices (see below).
@@ -94,7 +94,7 @@ dnl
     AlphaStation 200, 250, 255 and 400
 	  Supported devices:
 		Built-in serial and parallel ports.
-		Built-in DEC21040 ethernet.
+		Built-in DEC21040 Ethernet.
 		Built-in ISP SCSI.
 		PCI graphics card (TGA or VGA compatible).
 		Most PCI devices (see below).
@@ -107,9 +107,9 @@ dnl
     AXPpci based machines (including ``Noname'', UDB, Multia)
 	  Supported devices:
 		Built-in serial and parallel ports.
-		Built-in DEC21040 ethernet.
+		Built-in DEC21040 Ethernet.
 		Built-in 53C810 SCSI (siop).
-		Built-in IDE controller. (though, will not boot from ide)
+		Built-in IDE controller. (will not boot from IDE, though)
 		PCI graphics card (TGA or VGA compatible).
 		Most PCI devices (see below).
 		Some ISA devices (see below).
@@ -120,9 +120,9 @@ dnl
     DEC 3000 models 300{,L,X,LX}
           Supported devices:
 		Built-in serial ports.
-		Built-in LANCE ethernet.
+		Built-in LANCE Ethernet.
 		Built-in SCSI (53C94).
-		TURBOchannel LANCE ethernet cards (PMAD-A).
+		TURBOchannel LANCE Ethernet cards (PMAD-A).
 		TURBOchannel SCSI (53C94) (PMAZ-A).
 		TURBOchannel DEFTA FDDI cards (PMAF-FA).
 	  Unsupported devices:
@@ -133,9 +133,9 @@ dnl
     DEC 3000 models 400,500,500X,600,700,800,900
 	  Supported devices:
 		Built-in serial ports.
-		Built-in LANCE ethernet.
+		Built-in LANCE Ethernet.
 		Built-in SCSI (53C94 or 53CF94-2).
-		TURBOchannel LANCE ethernet cards (PMAD-A).
+		TURBOchannel LANCE Ethernet cards (PMAD-A).
 		TURBOchannel SCSI (53C94) (PMAZ-A).
 		TURBOchannel DEFTA FDDI cards (PMAF-FA).
 	  Unsupported devices:
@@ -156,7 +156,7 @@ dnl	  be disguised AlphaStation machines
 	DEC 4000, 7000, and 10000 systems (FutureBus+ and XMIBus based)
 	EB64+ based systems
 	Samsung 164BX/UX (no SRM)
-	Multiprocessor alpha systems
+	Multiprocessor Alpha systems
 	VME Alpha systems
 
 Supported Peripherals:
@@ -168,14 +168,25 @@ Supported Peripherals:
 		Any other PCI IDE-compliant controller should work, but are
 		  untested at this point
 	SCSI Host Adapters
-		Adaptec AIC-7770-based SCSI host adapters (including the
-		  Adaptec AHA-274x and AHA-284x families). (ahc) [*]
-		Adaptec AHA-[23]94x[W] cards. (ahc) [*]
-		Adaptec AHA-[23]9[34]xU[2W] cards. (ahc) [*]
-		Adaptec AIC-789[29] chips and products like the AHA-29160
-		  based upon it which do 160MB/sec SCSI. (ahc) [*]
-		  (However, the 7899G card is currently not supported with
-		   more than one device attached)
+		Adaptec AIC-7770, AIC-7850, AIC-7860, AIC-7870, AIC-7880,
+		AIC-7890, AIC-7891, AIC-7892, AIC-7895, AIC-7896, AIC-7897
+		and AIC-7899 based host adapters (ahc) [*] including the
+		Adaptec cards
+			AHA-274X[W,T]
+			AHA-284X
+			AHA-2910, AHA-2915
+			AHA-2920
+			AHA-2930[C,U2]
+			AHA-2940[J,N,U,AU,UW,UW Dual,UW Pro,U2W,U2B]
+			AHA-2950[U2W,U2B]
+			AHA-3940[U,AU,UW,AUW,U2W]
+			AHA-3950U2
+			AHA-3960
+			AHA-3985
+			AHA-4944UW
+			AHA-19160B
+			AHA-29160[B,N]
+			AHA-39160
 		QLogic PCI SCSI controllers (isp)
 		Symbios Logic (NCR) 53C8xx, 53C1010 and 53C1510D-based PCI SCSI
 		  host adapters (including generic/no name cards, old ASUS
@@ -287,8 +298,8 @@ Supported Peripherals:
 	FDDI Adapters [*]
 		Digital DEFPA PCI FDDI adapters (fpa)
 	Cryptography Accelerators [*]
-		Hifn 7751-based boards (hifn), including:
-		    Soekris Engineering vpn1201 and vpn1211
+		Hifn 7751/7811/7951/7955/7956-based boards (hifn), including:
+		    Soekris Engineering vpn1201, vpn1211, vpn1401, and vpn1411
 		    GTGI PowerCrypt Encryption Accelerator
 		    NetSec 7751
 		    Hifn 7751 and 9751 reference boards
@@ -304,7 +315,7 @@ work. It's our best guess that they do, but any feedback is appreciated.
 
 	SCSI Host Adapters [*]
 		AdvanSys ABP940UW, ASB3940UW-00, ASB3940U2W-00 and
-		  ASB3950U160 PCI SCSI controlers. (adw)
+		  ASB3950U160 PCI SCSI controllers. (adw)
 	RAID and Cache Controllers [*]
 		3ware Escalade 3W-5x00, 3W-6x00
 		DPT SmartCache and SmartRaid III/IV PCI/EISA adapters (dpt)
@@ -341,7 +352,7 @@ work. It's our best guess that they do, but any feedback is appreciated.
 			LinkSys USB100TX, USB100H1 and USB10TA
 			Melco Inc. LUA-TX
 			Siemens SpeedStream USB
-			Smartbridces smartNIC 2
+			SmartBridges smartNIC 2
 			SMC 2202USB
 			SMC EZ Connect USB
 			SOHOware NUB100
@@ -426,7 +437,21 @@ work. It's our best guess that they do, but any feedback is appreciated.
 			Farallon PN9000SX
 			Netgear GA620 and GA620T
 			SGI Tigon
-		SysKonnect SK-984x (9841/9842/9843/9844) based adapters (sk)
+		SysKonnect and Marvell based adapters (sk), including:
+			SysKonnect SK-9821 (1000baseT)
+			SysKonnect SK-9822 (dual 1000baseT)
+			SysKonnect SK-9841 (1000baseLX)
+			SysKonnect SK-9842 (dual 1000baseLX)
+			SysKonnect SK-9843 (1000baseSX)
+			SysKonnect SK-9844 (dual 1000baseSX)
+			SysKonnect SK-9521 v2.0 (1000baseT 32-bit)
+			SysKonnect SK-9821 v2.0 (1000baseT)
+			SysKonnect SK-9843 v2.0 (1000baseSX)
+			3Com 3c940 (1000baseT)
+			D-Link DGE-530T (1000baseT)
+			Linksys EG1032v2 (1000baseT)
+			Linksys EG1064v2 (1000baseT)
+			SMC 9452TX (1000baseT)
 	ATM Adapters [*]
 		Efficient Networks EN-155 and Adaptec ANA-590x ATM interfaces
 		  (en)
@@ -458,10 +483,10 @@ work. It's our best guess that they do, but any feedback is appreciated.
 		S3 SonicVibes (sv)
 
 Drivers for hardware marked with "[*]" are NOT included on the installation
-floppies, but are available in the cd-rom installation kernel as well as the
+floppies, but are available in the CD-ROM installation kernel as well as the
 GENERIC kernel which will be installed.
 Drivers for hardware marked with "[-]" are NOT available on the installation
-floppies, or the cdrom installation kernel, but are available in the GENERIC
+floppies, or the CD-ROM installation kernel, but are available in the GENERIC
 kernel which will be installed.
 
 Console frame buffers and keyboards are only supported on systems

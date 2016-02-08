@@ -1,4 +1,4 @@
-.\"	$OpenBSD: ccd.4,v 1.15 2001/06/23 07:03:53 pjanzen Exp $
+.\"	$OpenBSD: ccd.4,v 1.18 2004/03/21 19:47:59 miod Exp $
 .\"	$NetBSD: ccd.4,v 1.5 1995/10/09 06:09:09 thorpej Exp $
 .\"
 .\" Copyright (c) 1994 Jason Downs.
@@ -40,7 +40,7 @@
 .Nm ccd
 .Nd concatenated disk driver
 .Sh SYNOPSIS
-.Cd "pseudo-device ccd 4"
+.Cd "pseudo-device ccd" Op Ar count
 .Sh DESCRIPTION
 The
 .Nm
@@ -74,10 +74,10 @@ pseudo-device	ccd	4	# concatenated disk devices
 .Ed
 .Pp
 The count argument is how many
-.Nm ccd Ns No 's
+.Nm ccd Ns 's
 memory is allocated for at boot time.
 In this example, no more than 4
-.Nm ccd Ns No 's
+.Nm ccd Ns 's
 may be configured.
 .Pp
 A
@@ -120,7 +120,7 @@ geometry and size.
 Optimum striping cannot occur with different disk types.
 .Pp
 There is a run-time utility that is used for configuring
-.Nm ccd Ns No 's .
+.Nm ccd Ns 's .
 See
 .Xr ccdconfig 8
 for more information.
@@ -130,7 +130,10 @@ If just one (or more) of the disks in a
 fails, the entire
 file system will be lost.
 .Sh FILES
-/dev/{,r}ccd* - ccd device special files.
+.Bl -tag -width tenletters+five -compact
+.It Pa /dev/{,r}ccd*
+ccd device special files
+.El
 .Sh SEE ALSO
 .Xr MAKEDEV 8 ,
 .Xr ccdconfig 8 ,

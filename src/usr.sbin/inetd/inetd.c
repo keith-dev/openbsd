@@ -1,5 +1,5 @@
-/*	$OpenBSD: inetd.c,v 1.111 2003/06/26 19:47:08 deraadt Exp $	*/
-/*	$NetBSD: inetd.c,v 1.11 1996/02/22 11:14:41 mycroft Exp $	*/
+/*	$OpenBSD: inetd.c,v 1.115 2004/01/06 19:45:54 millert Exp $	*/
+
 /*
  * Copyright (c) 1983,1991 The Regents of the University of California.
  * All rights reserved.
@@ -37,7 +37,7 @@ char copyright[] =
 
 #ifndef lint
 /*static char sccsid[] = "from: @(#)inetd.c	5.30 (Berkeley) 6/3/91";*/
-static char rcsid[] = "$OpenBSD: inetd.c,v 1.111 2003/06/26 19:47:08 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: inetd.c,v 1.115 2004/01/06 19:45:54 millert Exp $";
 #endif /* not lint */
 
 /*
@@ -348,7 +348,7 @@ main(int argc, char *argv[])
 			int val;
 
 			val = strtoul(optarg, &p, 0);
-			if (val >= 1 && *p == NULL) {
+			if (val >= 1 && *p == '\0') {
 				toomany = val;
 				break;
 			}
@@ -407,7 +407,7 @@ main(int argc, char *argv[])
 	sigaddset(&blockmask, SIGHUP);
 	sigaddset(&blockmask, SIGALRM);
 
-	memset((char *)&sa, 0, sizeof(sa));
+	memset(&sa, 0, sizeof(sa));
 	sigemptyset(&sa.sa_mask);
 	sigaddset(&sa.sa_mask, SIGALRM);
 	sigaddset(&sa.sa_mask, SIGCHLD);
@@ -429,17 +429,18 @@ main(int argc, char *argv[])
 	for (;;) {
 		int n, ctrl = -1;
 
+	    restart:
 		if (nsock == 0) {
 			(void) sigprocmask(SIG_BLOCK, &blockmask, NULL);
 			while (nsock == 0) {
-				if (wantretry || wantconfig || wantreap)
+				if (wantretry || wantconfig || wantreap || wantdie)
 					break;
 				sigsuspend(&emptymask);
 			}
 			(void) sigprocmask(SIG_SETMASK, &emptymask, NULL);
 		}
 
-		if (wantretry || wantconfig || wantreap || wantdie) {
+		while (wantretry || wantconfig || wantreap || wantdie) {
 			if (wantretry) {
 				doretry();
 				wantretry = 0;
@@ -454,7 +455,7 @@ main(int argc, char *argv[])
 			}
 			if (wantdie)
 				dodie();
-			continue;
+			goto restart;
 		}
 
 		if (readablen != allsockn) {
@@ -671,7 +672,7 @@ doconfig(void)
 
 	if (!setconfig()) {
 		syslog(LOG_ERR, "%s: %m", CONFIG);
-		return;
+		exit(1);
 	}
 	for (sep = servtab; sep; sep = sep->se_next)
 		sep->se_checked = 0;
@@ -879,7 +880,7 @@ doconfig(void)
 		if (debug)
 			print_service("FREE", sep);
 		freeconfig(sep);
-		free((char *)sep);
+		free(sep);
 	}
 	sigprocmask(SIG_SETMASK, &omask, NULL);
 }
@@ -954,7 +955,7 @@ setup(struct servtab *sep)
 		return;
 	}
 #define	turnon(fd, opt) \
-setsockopt(fd, SOL_SOCKET, opt, (char *)&on, sizeof (on))
+setsockopt(fd, SOL_SOCKET, opt, &on, sizeof (on))
 	if (strncmp(sep->se_proto, "tcp", 3) == 0 && (options & SO_DEBUG) &&
 	    turnon(sep->se_fd, SO_DEBUG) < 0)
 		syslog(LOG_ERR, "setsockopt (SO_DEBUG): %m");
@@ -1134,7 +1135,8 @@ struct servtab	*dupconfig(struct servtab *);
 int
 setconfig(void)
 {
-	if (defhost) free(defhost);
+	if (defhost)
+		free(defhost);
 	defhost = newstr("*");
 	if (fconfig != NULL) {
 		fseek(fconfig, 0L, SEEK_SET);
@@ -1184,7 +1186,7 @@ more:
 		return (NULL);
 	}
 
-	memset((char *)sep, 0, sizeof *sep);
+	memset(sep, 0, sizeof *sep);
 	arg = skip(&cp, 0);
 	if (arg == NULL) {
 		/* A blank line. */
@@ -1802,7 +1804,7 @@ machtime_stream(s, sep)
 	u_int32_t result;
 
 	result = machtime();
-	(void) write(s, (char *) &result, sizeof(result));
+	(void) write(s, &result, sizeof(result));
 }
 
 /* ARGSUSED */
@@ -1814,13 +1816,13 @@ machtime_dg(int s, struct servtab *sep)
 	socklen_t size;
 
 	size = sizeof(ss);
-	if (recvfrom(s, (char *)&result, sizeof(result), 0,
+	if (recvfrom(s, &result, sizeof(result), 0,
 	    (struct sockaddr *)&ss, &size) < 0)
 		return;
 	if (dg_badinput((struct sockaddr *)&ss))
 		return;
 	result = machtime();
-	(void) sendto(s, (char *) &result, sizeof(result), 0,
+	(void) sendto(s, &result, sizeof(result), 0,
 	    (struct sockaddr *)&ss, size);
 }
 

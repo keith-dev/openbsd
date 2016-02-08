@@ -1,4 +1,4 @@
-/*	$OpenBSD: sh.h,v 1.14 2003/09/01 15:47:40 naddy Exp $	*/
+/*	$OpenBSD: sh.h,v 1.16 2004/02/08 19:18:15 deraadt Exp $	*/
 
 /*
  * Public Domain Bourne/Korn shell
@@ -246,15 +246,7 @@ extern int dup2 ARGS((int, int));
  * by autoconf (assumes an 8 bit byte, but I'm not concerned).
  * NOTE: INT32 may end up being more than 32 bits.
  */
-#if SIZEOF_INT >= 4
 # define INT32	int
-#else /* SIZEOF_INT */
-# if SIZEOF_LONG >= 4
-#  define INT32	long
-# else /* SIZEOF_LONG */
-   #error cannot find 32 bit type...
-# endif /* SIZEOF_LONG */
-#endif /* SIZEOF_INT */
 
 /* end of common headers */
 
@@ -482,7 +474,7 @@ enum sh_flag {
 #endif
 	FIGNOREEOF,	/* eof does not exit */
 	FTALKING,	/* -i: interactive */
-	FKEYWORD,	/* -k: name=value anywere */
+	FKEYWORD,	/* -k: name=value anywhere */
 	FLOGIN,		/* -l: a login shell */
 	FMARKDIRS,	/* mark dirs with / in file name completion */
 	FMONITOR,	/* -m: job control monitoring */
@@ -499,7 +491,7 @@ enum sh_flag {
 	FPOSIX,		/* -o posix: be posixly correct */
 	FPRIVILEGED,	/* -p: use suid_profile */
 	FRESTRICTED,	/* -r: restricted shell */
-	FSH,		/* -o sh: favor sh behavour */
+	FSH,		/* -o sh: favor sh behaviour */
 	FSTDIN,		/* -s: (invocation) parse stdin */
 	FTRACKALL,	/* -h: create tracked aliases for all commands */
 	FVERBOSE,	/* -v: echo input */
@@ -689,11 +681,11 @@ EXTERN char	*current_wd;
 EXTERN int	current_wd_size;
 
 #ifdef EDIT
-/* Minimium required space to work with on a line - if the prompt leaves less
+/* Minimum required space to work with on a line - if the prompt leaves less
  * space than this on a line, the prompt is truncated.
  */
 # define MIN_EDIT_SPACE	7
-/* Minimium allowed value for x_cols: 2 for prompt, 3 for " < " at end of line
+/* Minimum allowed value for x_cols: 2 for prompt, 3 for " < " at end of line
  */
 # define MIN_COLS	(2 + MIN_EDIT_SPACE + 3)
 EXTERN	int	x_cols I__(80);	/* tty columns */

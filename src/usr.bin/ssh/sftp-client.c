@@ -1,25 +1,17 @@
 /*
- * Copyright (c) 2001-2003 Damien Miller.  All rights reserved.
+ * Copyright (c) 2001-2004 Damien Miller <djm@openbsd.org>
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in the
- *    documentation and/or other materials provided with the distribution.
+ * Permission to use, copy, modify, and distribute this software for any
+ * purpose with or without fee is hereby granted, provided that the above
+ * copyright notice and this permission notice appear in all copies.
  *
- * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
- * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
- * OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
- * IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
- * NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
- * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
- * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
- * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ * THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+ * WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+ * MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+ * ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+ * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+ * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
+ * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
 /* XXX: memleaks */
@@ -28,7 +20,7 @@
 /* XXX: copy between two remote sites */
 
 #include "includes.h"
-RCSID("$OpenBSD: sftp-client.c,v 1.44 2003/06/28 16:23:06 deraadt Exp $");
+RCSID("$OpenBSD: sftp-client.c,v 1.47 2004/03/03 09:30:42 djm Exp $");
 
 #include <sys/queue.h>
 
@@ -798,7 +790,7 @@ do_download(struct sftp_conn *conn, char *remote_path, char *local_path,
 		return(-1);
 	}
 
-	local_fd = open(local_path, O_WRONLY | O_CREAT | O_TRUNC, 
+	local_fd = open(local_path, O_WRONLY | O_CREAT | O_TRUNC,
 	    mode | S_IWRITE);
 	if (local_fd == -1) {
 		error("Couldn't open local file \"%s\" for writing: %s",
@@ -813,13 +805,8 @@ do_download(struct sftp_conn *conn, char *remote_path, char *local_path,
 	max_req = 1;
 	progress_counter = 0;
 
-	if (showprogress) {
-		if (size)
-			start_progress_meter(remote_path, size,
-			    &progress_counter);
-		else
-			printf("Fetching %s to %s\n", remote_path, local_path);
-	}
+	if (showprogress && size != 0)
+		start_progress_meter(remote_path, size, &progress_counter);
 
 	while (num_req > 0 || max_req > 0) {
 		char *data;
@@ -1040,8 +1027,6 @@ do_upload(struct sftp_conn *conn, char *local_path, char *remote_path,
 	offset = 0;
 	if (showprogress)
 		start_progress_meter(local_path, sb.st_size, &offset);
-	else
-		printf("Uploading %s to %s\n", local_path, remote_path);
 
 	for (;;) {
 		int len;

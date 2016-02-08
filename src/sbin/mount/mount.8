@@ -1,4 +1,4 @@
-.\"	$OpenBSD: mount.8,v 1.44 2003/06/24 20:19:20 jmc Exp $
+.\"	$OpenBSD: mount.8,v 1.47 2004/01/02 06:14:14 david Exp $
 .\"	$NetBSD: mount.8,v 1.11 1995/07/12 06:23:21 cgd Exp $
 .\"
 .\" Copyright (c) 1980, 1989, 1991, 1993
@@ -89,7 +89,14 @@ is nonzero
 .Po
 see
 .Xr sysctl 8
-.Pc .
+.Pc ,
+the
+.Ar special
+device
+is readable and writeable by the user attempting the mount,
+and the mount point
+.Ar node
+is owned by the user attempting the mount.
 .Pp
 The options are as follows:
 .Bl -tag -width Ds
@@ -214,14 +221,14 @@ For example, the
 .Nm
 command:
 .Bd -literal -offset indent
-# mount -t mfs -o nosuid,-N,-s=4000 /dev/dk0b /tmp
+# mount -t mfs -o nosuid,-s=4000 /dev/sd0b /tmp
 .Ed
 .Pp
 causes
 .Nm
 to execute the equivalent of:
 .Bd -literal -offset indent
-# /sbin/mount_mfs -o nosuid -N -s 4000 /dev/dk0b /tmp
+# /sbin/mount_mfs -o nosuid -s 4000 /dev/sd0b /tmp
 .Ed
 .It Fl r
 The file system is to be mounted read-only.
@@ -333,6 +340,7 @@ file system table
 .Xr mount_mfs 8 ,
 .Xr mount_msdos 8 ,
 .Xr mount_nfs 8 ,
+.Xr mount_ntfs 8 ,
 .Xr mount_null 8 ,
 .Xr mount_portal 8 ,
 .Xr mount_procfs 8 ,

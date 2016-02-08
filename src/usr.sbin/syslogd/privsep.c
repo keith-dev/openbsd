@@ -1,4 +1,4 @@
-/*	$OpenBSD: privsep.c,v 1.5 2003/08/15 23:13:06 deraadt Exp $	*/
+/*	$OpenBSD: privsep.c,v 1.16 2004/03/14 19:17:05 otto Exp $	*/
 
 /*
  * Copyright (c) 2003 Anil Madhavapeddy <anil@recoil.org>
@@ -28,6 +28,7 @@
 #include <fcntl.h>
 #include <netdb.h>
 #include <paths.h>
+#include <poll.h>
 #include <pwd.h>
 #include <signal.h>
 #include <stdio.h>
@@ -48,7 +49,7 @@
  *
  * This allows a HUP signal to the child to reopen its log files, and
  * the config file to be parsed if it hasn't been changed (this is still
- * useful to force resoluton of remote syslog servers again).
+ * useful to force resolution of remote syslog servers again).
  * If the config file has been modified, then the child dies, and
  * the priv parent restarts itself.
  */
@@ -56,8 +57,7 @@ enum priv_state {
 	STATE_INIT,		/* just started up */
 	STATE_CONFIG,		/* parsing config file for first time */
 	STATE_RUNNING,		/* running and accepting network traffic */
-	STATE_QUIT,		/* shutting down */
-	STATE_RESTART		/* kill child and re-exec to restart */
+	STATE_QUIT		/* shutting down */
 };
 
 enum cmd_types {
@@ -72,7 +72,7 @@ enum cmd_types {
 };
 
 static int priv_fd = -1;
-static pid_t child_pid;
+static volatile pid_t child_pid = -1;
 static char config_file[MAXPATHLEN];
 static struct stat cf_info;
 static int allow_gethostbyaddr = 0;
@@ -92,15 +92,20 @@ static void sig_pass_to_chld(int);
 static void sig_got_chld(int);
 static void must_read(int, void *, size_t);
 static void must_write(int, void *, size_t);
+static int  may_read(int, void *, size_t);
 
 int
 priv_init(char *conf, int numeric, int lockfd, int nullfd, char *argv[])
 {
-	int i, fd, socks[2], cmd, addr_len, addr_af, result;
+	int i, fd, socks[2], cmd, addr_len, addr_af, result, restart;
+	size_t path_len, hostname_len;
 	char path[MAXPATHLEN], hostname[MAXHOSTNAMELEN];
 	struct stat cf_stat;
 	struct hostent *hp;
 	struct passwd *pw;
+
+	for (i = 1; i < _NSIG; i++)
+		signal(i, SIG_DFL);
 
 	/* Create sockets */
 	if (socketpair(AF_LOCAL, SOCK_STREAM, PF_UNSPEC, socks) == -1)
@@ -109,16 +114,24 @@ priv_init(char *conf, int numeric, int lockfd, int nullfd, char *argv[])
 	pw = getpwnam("_syslogd");
 	if (pw == NULL)
 		errx(1, "unknown user _syslogd");
+	endpwent();
 
 	child_pid = fork();
 	if (child_pid < 0)
 		err(1, "fork() failed");
 
 	if (!child_pid) {
+		gid_t gidset[1];
+
 		/* Child - drop privileges and return */
 		if (chroot(pw->pw_dir) != 0)
 			err(1, "unable to chroot");
-		chdir("/");
+		if (chdir("/") != 0)
+			err(1, "unable to chdir");
+
+		gidset[0] = pw->pw_gid;
+		if (setgroups(1, gidset) == -1)
+			err(1, "setgroups() failed");
 		if (setegid(pw->pw_gid) == -1)
 			err(1, "setegid() failed");
 		if (setgid(pw->pw_gid) == -1)
@@ -143,9 +156,6 @@ priv_init(char *conf, int numeric, int lockfd, int nullfd, char *argv[])
 		close(nullfd);
 
 	/* Father */
-	for (i = 1; i <= _NSIG; i++)
-		signal(i, SIG_DFL);
-
 	/* Pass TERM/HUP through to child, and accept CHLD */
 	signal(SIGTERM, sig_pass_to_chld);
 	signal(SIGHUP, sig_pass_to_chld);
@@ -156,12 +166,16 @@ priv_init(char *conf, int numeric, int lockfd, int nullfd, char *argv[])
 
 	/* Close descriptors that only the unpriv child needs */
 	for (i = 0; i < nfunix; i++)
-		if (funix[i] != -1)
-			close(funix[i]);
-	if (finet != -1)
-		close(finet);
-	if (fklog != -1)
-		close(fklog);
+		if (pfd[PFD_UNIX_0 + i].fd != -1)
+			close(pfd[PFD_UNIX_0 + i].fd);
+	if (pfd[PFD_INET].fd != -1)
+		close(pfd[PFD_INET].fd);
+	if (pfd[PFD_CTLSOCK].fd != -1)
+		close(pfd[PFD_CTLSOCK].fd);
+	if (pfd[PFD_CTLCONN].fd != -1)
+		close(pfd[PFD_CTLCONN].fd);
+	if (pfd[PFD_KLOG].fd)
+		close(pfd[PFD_KLOG].fd);
 
 	/* Save the config file specified by the child process */
 	if (strlcpy(config_file, conf, sizeof config_file) >= sizeof(config_file))
@@ -178,14 +192,21 @@ priv_init(char *conf, int numeric, int lockfd, int nullfd, char *argv[])
 
 	TAILQ_INIT(&lognames);
 	increase_state(STATE_CONFIG);
+	restart = 0;
 
 	while (cur_state < STATE_QUIT) {
-		must_read(socks[0], &cmd, sizeof(int));
+		if (may_read(socks[0], &cmd, sizeof(int)))
+			break;
 		switch (cmd) {
 		case PRIV_OPEN_TTY:
-			must_read(socks[0], &path, sizeof path);
 			dprintf("[priv]: msg PRIV_OPEN_TTY received\n");
-			check_tty_name(path, sizeof path);
+			/* Expecting: length, path */
+			must_read(socks[0], &path_len, sizeof(size_t));
+			if (path_len == 0 || path_len > sizeof(path))
+				_exit(0);
+			must_read(socks[0], &path, path_len);
+			path[path_len - 1] = '\0';
+			check_tty_name(path, path_len);
 			fd = open(path, O_WRONLY|O_NONBLOCK, 0);
 			if (fd < 0)
 				warnx("priv_open_tty failed");
@@ -194,9 +215,14 @@ priv_init(char *conf, int numeric, int lockfd, int nullfd, char *argv[])
 			break;
 
 		case PRIV_OPEN_LOG:
-			must_read(socks[0], &path, sizeof path);
-			dprintf("[priv]: msg PRIV_OPEN_LOG received: %s\n", path);
-			check_log_name(path, sizeof path);
+			dprintf("[priv]: msg PRIV_OPEN_LOG received\n");
+			/* Expecting: length, path */
+			must_read(socks[0], &path_len, sizeof(size_t));
+			if (path_len == 0 || path_len > sizeof(path))
+				_exit(0);
+			must_read(socks[0], &path, path_len);
+			path[path_len - 1] = '\0';
+			check_log_name(path, path_len);
 			fd = open(path, O_WRONLY|O_APPEND|O_NONBLOCK, 0);
 			if (fd < 0)
 				warnx("priv_open_log failed");
@@ -230,9 +256,8 @@ priv_init(char *conf, int numeric, int lockfd, int nullfd, char *argv[])
 			    &cf_stat.st_mtimespec, <) ||
 			    cf_info.st_size != cf_stat.st_size) {
 				dprintf("config file modified: restarting\n");
-				result = 1;
+				restart = result = 1;
 				must_write(socks[0], &result, sizeof(int));
-				increase_state(STATE_RESTART);
 			} else {
 				result = 0;
 				must_write(socks[0], &result, sizeof(int));
@@ -246,8 +271,12 @@ priv_init(char *conf, int numeric, int lockfd, int nullfd, char *argv[])
 
 		case PRIV_GETHOSTBYNAME:
 			dprintf("[priv]: msg PRIV_GETHOSTBYNAME received\n");
-			/* Expecting: hostname[MAXHOSTNAMELEN] */
-			must_read(socks[0], &hostname, sizeof hostname);
+			/* Expecting: length, hostname */
+			must_read(socks[0], &hostname_len, sizeof(size_t));
+			if (hostname_len == 0 || hostname_len > sizeof(hostname))
+				_exit(0);
+			must_read(socks[0], &hostname, hostname_len);
+			hostname[hostname_len - 1] = '\0';
 			hp = gethostbyname(hostname);
 			if (hp == NULL) {
 				addr_len = 0;
@@ -264,7 +293,7 @@ priv_init(char *conf, int numeric, int lockfd, int nullfd, char *argv[])
 				errx(1, "rejected attempt to gethostbyaddr");
 			/* Expecting: length, address, address family */
 			must_read(socks[0], &addr_len, sizeof(int));
-			if (addr_len > sizeof(hostname))
+			if (addr_len <= 0 || addr_len > sizeof(hostname))
 				_exit(0);
 			must_read(socks[0], hostname, addr_len);
 			must_read(socks[0], &addr_af, sizeof(int));
@@ -286,10 +315,12 @@ priv_init(char *conf, int numeric, int lockfd, int nullfd, char *argv[])
 
 	/* Unlink any domain sockets that have been opened */
 	for (i = 0; i < nfunix; i++)
-		if (funixn[i] && funix[i] != -1)
+		if (funixn[i] != NULL && pfd[PFD_UNIX_0 + i].fd != -1)
 			(void)unlink(funixn[i]);
+	if (ctlsock_path != NULL && pfd[PFD_CTLSOCK].fd != -1)
+		(void)unlink(ctlsock_path);
 
-	if (cur_state == STATE_RESTART) {
+	if (restart) {
 		int r;
 
 		wait(&r);
@@ -370,7 +401,7 @@ increase_state(int state)
 {
 	if (state <= cur_state)
 		errx(1, "attempt to decrease or match current state");
-	if (state < STATE_INIT || state > STATE_RESTART)
+	if (state < STATE_INIT || state > STATE_QUIT)
 		errx(1, "attempt to switch to invalid state");
 	cur_state = state;
 }
@@ -381,15 +412,19 @@ priv_open_tty(const char *tty)
 {
 	char path[MAXPATHLEN];
 	int cmd, fd;
+	size_t path_len;
 
 	if (priv_fd < 0)
 		errx(1, "%s: called from privileged portion", __func__);
 
 	if (strlcpy(path, tty, sizeof path) >= sizeof(path))
 		return -1;
+	path_len = strlen(path) + 1;
+
 	cmd = PRIV_OPEN_TTY;
 	must_write(priv_fd, &cmd, sizeof(int));
-	must_write(priv_fd, path, sizeof(path));
+	must_write(priv_fd, &path_len, sizeof(size_t));
+	must_write(priv_fd, path, path_len);
 	fd = receive_fd(priv_fd);
 	return fd;
 }
@@ -400,15 +435,19 @@ priv_open_log(const char *log)
 {
 	char path[MAXPATHLEN];
 	int cmd, fd;
+	size_t path_len;
 
 	if (priv_fd < 0)
 		errx(1, "%s: called from privileged child", __func__);
 
 	if (strlcpy(path, log, sizeof path) >= sizeof(path))
 		return -1;
+	path_len = strlen(path) + 1;
+
 	cmd = PRIV_OPEN_LOG;
 	must_write(priv_fd, &cmd, sizeof(int));
-	must_write(priv_fd, path, sizeof(path));
+	must_write(priv_fd, &path_len, sizeof(size_t));
+	must_write(priv_fd, path, path_len);
 	fd = receive_fd(priv_fd);
 	return fd;
 }
@@ -503,16 +542,19 @@ priv_gethostbyname(char *host, char *addr, size_t addr_len)
 {
 	char hostcpy[MAXHOSTNAMELEN];
 	int cmd, ret_len;
-
-	if (strlcpy(hostcpy, host, sizeof hostcpy) >= sizeof(hostcpy))
-		errx(1, "%s: overflow attempt in hostname", __func__);
+	size_t hostname_len;
 
 	if (priv_fd < 0)
 		errx(1, "%s: called from privileged portion", __func__);
 
+	if (strlcpy(hostcpy, host, sizeof hostcpy) >= sizeof(hostcpy))
+		errx(1, "%s: overflow attempt in hostname", __func__);
+	hostname_len = strlen(hostcpy) + 1;
+
 	cmd = PRIV_GETHOSTBYNAME;
 	must_write(priv_fd, &cmd, sizeof(int));
-	must_write(priv_fd, hostcpy, sizeof(hostcpy));
+	must_write(priv_fd, &hostname_len, sizeof(size_t));
+	must_write(priv_fd, hostcpy, hostname_len);
 
 	/* Expect back an integer size, and then a string of that length */
 	must_read(priv_fd, &ret_len, sizeof(int));
@@ -566,7 +608,11 @@ priv_gethostbyaddr(char *addr, int addr_len, int af, char *res, size_t res_len)
 static void
 sig_pass_to_chld(int sig)
 {
-	kill(child_pid, sig);
+	int oerrno = errno;
+
+	if (child_pid != -1)
+		kill(child_pid, sig);
+	errno = oerrno;
 }
 
 /* When child dies, move into the shutdown state */
@@ -575,6 +621,28 @@ sig_got_chld(int sig)
 {
 	if (cur_state < STATE_QUIT)
 		cur_state = STATE_QUIT;
+}
+
+/* Read all data or return 1 for error.  */
+static int
+may_read(int fd, void *buf, size_t n)
+{
+	char *s = buf;
+	ssize_t res, pos = 0;
+
+	while (n > pos) {
+		res = read(fd, s + pos, n - pos);
+		switch (res) {
+		case -1:
+			if (errno == EINTR || errno == EAGAIN)
+				continue;
+		case 0:
+			return (1);
+		default:
+			pos += res;
+		}
+	}
+	return (0);
 }
 
 /* Read data with the assertion that it all must come through, or

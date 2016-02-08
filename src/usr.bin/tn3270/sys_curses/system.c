@@ -1,4 +1,4 @@
-/*	$OpenBSD: system.c,v 1.15 2003/07/10 00:06:51 david Exp $	*/
+/*	$OpenBSD: system.c,v 1.17 2004/03/20 04:28:51 aaron Exp $	*/
 
 /*-
  * Copyright (c) 1988 The Regents of the University of California.
@@ -31,7 +31,7 @@
 
 #ifndef lint
 /*static char sccsid[] = "from: @(#)system.c	4.5 (Berkeley) 4/26/91";*/
-static char rcsid[] = "$OpenBSD: system.c,v 1.15 2003/07/10 00:06:51 david Exp $";
+static char rcsid[] = "$OpenBSD: system.c,v 1.17 2004/03/20 04:28:51 aaron Exp $";
 #endif /* not lint */
 
 #include <sys/types.h>
@@ -471,7 +471,7 @@ doconnect()
 	FD_SET(serversock, &fdset);
 	if ((i = select(serversock+1, &fdset,
 		    (fd_set *)0, (fd_set *)0, (struct timeval *)0)) < 0) {
-	    if (errno = EINTR) {
+	    if (errno == EINTR) {
 		continue;
 	    } else {
 		perror("in select waiting for API connection");
@@ -638,13 +638,15 @@ char	*argv[];
     struct timeval tv;
     long ikey;
 
-    keyname = strdup("/tmp/apiXXXXXXXXXX");
+    if ((keyname = strdup("/tmp/apiXXXXXXXXXX")) == NULL)
+	    err(1, "strdup");
     if ((fd = mkstemp(keyname)) == -1) {
 	perror("open");
 	free(keyname);
 	return 0;
     }
-    keyname = strdup(sockNAME);
+    if ((keyname = strdup(sockNAME)) == NULL)
+	    err(1, "strdup");
 
     /* Now, get seed for random */
 

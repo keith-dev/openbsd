@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1998-2002 Sendmail, Inc. and its suppliers.
+ * Copyright (c) 1998-2003 Sendmail, Inc. and its suppliers.
  *	All rights reserved.
  * Copyright (c) 1983, 1995-1997 Eric P. Allman.  All rights reserved.
  * Copyright (c) 1988, 1993
@@ -13,7 +13,7 @@
 
 #include <sendmail.h>
 
-SM_RCSID("@(#)$Sendmail: alias.c,v 8.214 2002/05/24 20:50:16 gshapiro Exp $")
+SM_RCSID("@(#)$Sendmail: alias.c,v 8.214.2.2 2003/10/06 20:43:29 ca Exp $")
 
 #define SEPARATOR ':'
 # define ALIAS_SPEC_SEPARATORS	" ,/:"
@@ -94,7 +94,7 @@ alias(a, sendq, aliaslevel, e)
 		if (aliaslookup(obuf, &status, a->q_host) != NULL)
 		{
 			if (LogLevel > 8)
-				syslog(LOG_WARNING,
+				sm_syslog(LOG_WARNING, e->e_id,
 				       "possible spam from <> to list: %s, redirected to %s\n",
 				       a->q_user, obuf);
 			a->q_user = sm_rpool_strdup_x(e->e_rpool, obuf);

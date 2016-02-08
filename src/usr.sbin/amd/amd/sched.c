@@ -1,3 +1,5 @@
+/*	$OpenBSD: sched.c,v 1.11 2004/03/15 08:54:54 djm Exp $	*/
+
 /*
  * Copyright (c) 1990 Jan-Simon Pendry
  * Copyright (c) 1990 Imperial College of Science, Technology & Medicine
@@ -32,7 +34,7 @@
  * SUCH DAMAGE.
  *
  *	from: @(#)sched.c	8.1 (Berkeley) 6/6/93
- *	$Id: sched.c,v 1.9 2003/06/02 23:36:51 millert Exp $
+ *	$Id: sched.c,v 1.11 2004/03/15 08:54:54 djm Exp $
  */
 
 /*
@@ -222,7 +224,8 @@ sigchld(int sig)
 		}
 
 #ifdef DEBUG
-		if (p) ; else dlog("can't locate task block for pid %ld", (long)pid);
+		if (p == NULL)
+			dlog("can't locate task block for pid %ld", (long)pid);
 #endif /* DEBUG */
 	}
 
@@ -244,7 +247,7 @@ do_task_notify(void)
 	/*
 	 * Keep taking the first item off the list and processing it.
 	 *
-	 * Done this way because the the callback can, quite reasonably,
+	 * Done this way because the callback can, quite reasonably,
 	 * queue a new task, so no local reference into the list can be
 	 * held here.
 	 */

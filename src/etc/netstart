@@ -1,6 +1,6 @@
 #!/bin/sh -
 #
-#	$OpenBSD: netstart,v 1.87 2003/08/27 11:49:36 henning Exp $
+#	$OpenBSD: netstart,v 1.96 2004/03/22 04:31:42 mcbride Exp $
 
 # Returns true if $1 contains only alphanumerics
 isalphanumeric() {
@@ -27,7 +27,11 @@ ifstart() {
 
 	ifconfig $if > /dev/null 2>&1
 	if [ "$?" != "0" ]; then
-		return
+		# Try to create interface if it does not exist
+		ifconfig $if create > /dev/null 2>&1
+		if [ "$?" != "0" ]; then
+			return
+		fi
 	fi
 
 	# Now parse the hostname.* file
@@ -107,7 +111,7 @@ ifstart() {
 				if [ "$bcaddr" -a "X$bcaddr" != "XNONE" ]; then
 					cmd="$cmd broadcast $bcaddr"
 				fi
-				[ "$alias" ] && rtcmd=";route -n add -host $name 127.0.0.1"
+				[ "$alias" ] && rtcmd=";route -qn add -host $name 127.0.0.1"
 				;;
 			inet6) [ "$mask" ] && cmd="$cmd prefixlen $mask"
 				cmd="$cmd $bcaddr"
@@ -132,7 +136,11 @@ bridgestart() {
 	fi
 	brconfig $1 > /dev/null 2>&1
 	if [ "$?" != "0" ]; then
-		return
+		# Try to create interface if it does not exist
+		ifconfig $if create > /dev/null 2>&1
+		if [ "$?" != "0" ]; then
+			return
+		fi
 	fi
 
 	# Now parse the bridgename.* file
@@ -186,41 +194,37 @@ if [ -f /etc/defaultdomain ]; then
 	domainname `cat /etc/defaultdomain`
 fi
 
-# Set the address for the loopback interface.
-# It will also initialize IPv6 address for lo0 (::1 and others).
-ifconfig lo0 inet localhost
-
-# Use loopback, not the wire.
-route -n add -host $hostname localhost > /dev/null
-route -n add -net 127 127.0.0.1 -reject > /dev/null
+# Set the address for the loopback interface.  Bringing the
+# interface up, automatically invokes the IPv6 address ::1)
+ifconfig lo0 inet 127.0.0.1
 
 if ifconfig lo0 inet6 >/dev/null 2>&1; then
 	# IPv6 configurations.
 	ip6kernel=YES
 
 	# Disallow link-local unicast dest without outgoing scope identifiers.
-	route add -inet6 fe80:: -prefixlen 10 ::1 -reject > /dev/null
+	route -q add -inet6 fe80:: -prefixlen 10 ::1 -reject > /dev/null
 
 	# Disallow site-local unicast dest without outgoing scope identifiers.
 	# If you configure site-locals without scope id (it is permissible
 	# config for routers that are not on scope boundary), you may want
 	# to comment the line out.
-	route add -inet6 fec0:: -prefixlen 10 ::1 -reject > /dev/null
+	route -q add -inet6 fec0:: -prefixlen 10 ::1 -reject > /dev/null
 
 	# Disallow "internal" addresses to appear on the wire.
-	route add -inet6 ::ffff:0.0.0.0 -prefixlen 96 ::1 -reject > /dev/null
+	route -q add -inet6 ::ffff:0.0.0.0 -prefixlen 96 ::1 -reject > /dev/null
 
 	# Disallow packets to malicious IPv4 compatible prefix.
-	route add -inet6 ::224.0.0.0 -prefixlen 100 ::1 -reject > /dev/null
-	route add -inet6 ::127.0.0.0 -prefixlen 104 ::1 -reject > /dev/null
-	route add -inet6 ::0.0.0.0 -prefixlen 104 ::1 -reject > /dev/null
-	route add -inet6 ::255.0.0.0 -prefixlen 104 ::1 -reject > /dev/null
+	route -q add -inet6 ::224.0.0.0 -prefixlen 100 ::1 -reject > /dev/null
+	route -q add -inet6 ::127.0.0.0 -prefixlen 104 ::1 -reject > /dev/null
+	route -q add -inet6 ::0.0.0.0 -prefixlen 104 ::1 -reject > /dev/null
+	route -q add -inet6 ::255.0.0.0 -prefixlen 104 ::1 -reject > /dev/null
 
 	# Disallow packets to malicious 6to4 prefix.
-	route add -inet6 2002:e000:: -prefixlen 20 ::1 -reject > /dev/null
-	route add -inet6 2002:7f00:: -prefixlen 24 ::1 -reject > /dev/null
-	route add -inet6 2002:0000:: -prefixlen 24 ::1 -reject > /dev/null
-	route add -inet6 2002:ff00:: -prefixlen 24 ::1 -reject > /dev/null
+	route -q add -inet6 2002:e000:: -prefixlen 20 ::1 -reject > /dev/null
+	route -q add -inet6 2002:7f00:: -prefixlen 24 ::1 -reject > /dev/null
+	route -q add -inet6 2002:0000:: -prefixlen 24 ::1 -reject > /dev/null
+	route -q add -inet6 2002:ff00:: -prefixlen 24 ::1 -reject > /dev/null
 
 	# Completely disallow packets to IPv4 compatible prefix.
 	# This may conflict with RFC1933 under following circumstances:
@@ -235,7 +239,7 @@ if ifconfig lo0 inet6 >/dev/null 2>&1; then
 	#     asked to forward it.
 	# Due to rare use of IPv4 compatible addresses, and security issues
 	# with it, we disable it by default.
-	route add -inet6 ::0.0.0.0 -prefixlen 96 ::1 -reject > /dev/null
+	route -q add -inet6 ::0.0.0.0 -prefixlen 96 ::1 -reject > /dev/null
 
 	rtsolif=""
 else
@@ -250,9 +254,9 @@ for hn in /etc/hostname.*; do
 	test "$if" = "*" && continue
 
 	case $if in
-	"gif"*|"gre"*)
-		# GIF and GRE interfaces need the routes to be setup before
-		# they are configured.
+	"carp"*|"gif"*|"gre"*|"pfsync"*)
+		# CARP, GIF, GRE and PFSYNC interfaces need the routes to be setup
+		# before they are configured.
 		continue
 		;;
 	*)
@@ -274,14 +278,13 @@ fi
 if [ "$ip6kernel" = "YES" ]; then
 	# this is to make sure DAD is completed before going further.
 	sleep `sysctl -n net.inet6.ip6.dad_count`
-	sleep 1
 fi
 
 # /etc/mygate, if it exists, contains the name of my gateway host
 # that name must be in /etc/hosts.
 if [ -f /etc/mygate ]; then
 	route delete default > /dev/null 2>&1
-	route -n add -host default `cat /etc/mygate`
+	route -qn add -host default `cat /etc/mygate`
 fi
 
 # Multicast routing.
@@ -294,13 +297,13 @@ fi
 #	   Any other combination		-reject		config error
 case "$multicast_host:$multicast_router" in
 NO:NO)
-	route -n add -net 224.0.0.0/4 -interface 127.0.0.1 -reject > /dev/null
+	route -qn add -net 224.0.0.0/4 -interface 127.0.0.1 -reject > /dev/null
 	;;
 NO:YES)
 	;;
 *:NO)
 	set `if [ $multicast_host = YES ]; then
-		ed -s '!route -n show -inet' <<EOF
+		ed -s '!route -qn show -inet' <<EOF
 /^default/p
 EOF
 	else
@@ -308,15 +311,20 @@ EOF
 /^	inet /p
 EOF
 	fi`
-	route -n add -net 224.0.0.0/4 -interface $2 > /dev/null
+	route -qn add -net 224.0.0.0/4 -interface $2 > /dev/null
 	;;
 *:*)
 	echo 'config error, multicasting disabled until rc.conf is fixed'
-	route -n add -net 224.0.0.0/4 -interface 127.0.0.1 -reject > /dev/null
+	route -qn add -net 224.0.0.0/4 -interface 127.0.0.1 -reject > /dev/null
 	;;
 esac
 
-# Configure all the gif and gre interfaces which we know about.
+# The pfsync interface needs to come up before carp.
+if [ -f /etc/hostname.pfsync0 ]; then
+		ifstart pfsync0
+fi
+
+# Configure all the carp, gif and gre interfaces which we know about.
 # They were delayed because they require the routes to be set.
 for hn in /etc/hostname.*; do
 	# Strip off /etc/hostname. prefix
@@ -324,7 +332,7 @@ for hn in /etc/hostname.*; do
 	test "$if" = "*" && continue
 
 	case $if in
-	"gif"*|"gre"*)
+	"carp"*|"gif"*|"gre"*)
 		ifstart $if
 		;;
 	*)
@@ -333,6 +341,10 @@ for hn in /etc/hostname.*; do
 		;;
 	esac
 done
+
+# Use loopback, not the wire.
+route -qn add -host $hostname 127.0.0.1 > /dev/null
+route -qn add -net 127 127.0.0.1 -reject > /dev/null
 
 # Configure all the bridges.
 for bn in /etc/bridgename.*; do

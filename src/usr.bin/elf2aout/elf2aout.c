@@ -1,4 +1,4 @@
-/* $OpenBSD: elf2aout.c,v 1.3 2003/06/10 22:20:46 deraadt Exp $	 */
+/* $OpenBSD: elf2aout.c,v 1.5 2004/03/16 01:11:09 tedu Exp $	 */
 
 /*
  * Copyright (c) 1995
@@ -35,7 +35,7 @@
 #include <machine/elf_abi.h>
 #include <stdio.h>
 #include <a.out.h>
-#include <sys/errno.h>
+#include <errno.h>
 #include <string.h>
 #include <limits.h>
 
@@ -51,7 +51,6 @@ int             phcmp();
 char           *saveRead(int file, off_t offset, off_t len, char *name);
 int             copy(int, int, off_t, off_t);
 int             translate_syms(int, int, off_t, off_t, off_t, off_t);
-extern int      errno;
 int            *symTypeTable;
 
 /* Symbol table entry... */
@@ -174,7 +173,8 @@ usage:
 		/* Section types we can't handle... */
 		else if (ph[i].p_type != PT_LOAD) {
 			fprintf(stderr,
-			    "Program header %d type %d can't be converted.\n");
+			    "Program header %d type %d can't be converted.\n",
+			    i, ph[i].p_type);
 			exit(1);
 		}
 		/* Writable (data) segment? */
@@ -341,7 +341,7 @@ translate_syms(int out, int in, off_t symoff, off_t symsize, off_t stroff,
 	/* Initialize the table pointer... */
 	nsp = newstrings;
 
-	/* Go the the start of the ELF symbol table... */
+	/* Go to the start of the ELF symbol table... */
 	if (lseek(in, symoff, SEEK_SET) < 0) {
 		perror("translate_syms: lseek");
 		exit(1);
@@ -418,7 +418,7 @@ copy(int out, int in, off_t offset, off_t size)
 	char ibuf[4096];
 	int  remaining, cur, count;
 
-	/* Go the the start of the ELF symbol table... */
+	/* Go to the start of the ELF symbol table... */
 	if (lseek(in, offset, SEEK_SET) < 0) {
 		perror("copy: lseek");
 		exit(1);

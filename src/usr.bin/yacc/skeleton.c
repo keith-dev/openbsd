@@ -1,4 +1,4 @@
-/*	$OpenBSD: skeleton.c,v 1.21 2003/06/19 16:34:53 pvalchev Exp $	*/
+/*	$OpenBSD: skeleton.c,v 1.23 2004/03/12 13:39:50 henning Exp $	*/
 /*	$NetBSD: skeleton.c,v 1.10 1996/03/25 00:36:18 mrg Exp $	*/
 
 /*
@@ -60,10 +60,10 @@ char *banner[] =
     "#ifndef lint",
     "/*static char yysccsid[] = \"from: @(#)yaccpar	1.9 (Berkeley) 02/21/93\";*/",
     "static char yyrcsid[]",
-    "#if __GNUC__ == 2",
+    "#if __GNUC__ >= 2",
     "  __attribute__ ((unused))",
-    "#endif /* __GNUC__ == 2 */",
-    "  = \"$OpenBSD: skeleton.c,v 1.21 2003/06/19 16:34:53 pvalchev Exp $\";",
+    "#endif /* __GNUC__ >= 2 */",
+    "  = \"$OpenBSD: skeleton.c,v 1.23 2004/03/12 13:39:50 henning Exp $\";",
     "#endif",
     "#include <stdlib.h>",
     "#define YYBYACC 1",
@@ -397,8 +397,22 @@ char *trailer[] =
     "yyoverflow:",
     "    yyerror(\"yacc stack overflow\");",
     "yyabort:",
+    "    if (yyss)",
+    "            free(yyss);",
+    "    if (yyvs)",
+    "            free(yyvs);",
+    "    yyss = yyssp = NULL;",
+    "    yyvs = yyvsp = NULL;",
+    "    yystacksize = 0;",
     "    return (1);",
     "yyaccept:",
+    "    if (yyss)",
+    "            free(yyss);",
+    "    if (yyvs)",
+    "            free(yyvs);",
+    "    yyss = yyssp = NULL;",
+    "    yyvs = yyvsp = NULL;",
+    "    yystacksize = 0;",
     "    return (0);",
     "}",
     0

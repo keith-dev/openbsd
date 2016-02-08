@@ -1,4 +1,4 @@
-/*	$OpenBSD: grep.h,v 1.8 2003/07/02 21:04:10 deraadt Exp $	*/
+/*	$OpenBSD: grep.h,v 1.10 2004/01/25 21:36:00 millert Exp $	*/
 
 /*-
  * Copyright (c) 1999 James Howard and Dag-Erling Coïdan Smørgrav
@@ -43,7 +43,7 @@
 typedef struct {
 	size_t		 len;
 	int		 line_no;
-	int		 off;
+	off_t		 off;
 	char		*file;
 	char		*dat;
 } str_t;
@@ -55,6 +55,7 @@ typedef struct {
 	/* flags */
 	int		 bol;
 	int		 eol;
+	int		 wmatch;
 	int		 reversedSearch;
 } fastgrep_t;
 
@@ -83,7 +84,6 @@ int		 procfile(char *fn);
 int		 grep_tree(char **argv);
 void		*grep_malloc(size_t size);
 void		*grep_realloc(void *ptr, size_t size);
-unsigned char	*grep_strdup(const char *);
 void		 printline(str_t *line, int sep);
 int		 fastcomp(fastgrep_t *, const char *);
 

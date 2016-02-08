@@ -1,4 +1,4 @@
-/*	$OpenBSD: inp.c,v 1.28 2003/08/15 08:00:51 otto Exp $	*/
+/*	$OpenBSD: inp.c,v 1.31 2003/12/08 22:44:18 mickey Exp $	*/
 
 /*
  * patch - a program to apply diffs to original files
@@ -27,7 +27,7 @@
  */
 
 #ifndef lint
-static const char     rcsid[] = "$OpenBSD: inp.c,v 1.28 2003/08/15 08:00:51 otto Exp $";
+static const char     rcsid[] = "$OpenBSD: inp.c,v 1.31 2003/12/08 22:44:18 mickey Exp $";
 #endif /* not lint */
 
 #include <sys/types.h>
@@ -111,17 +111,20 @@ scan_input(const char *filename)
 static bool
 reallocate_lines(size_t *lines_allocated)
 {
-	char **p;
+	char	**p;
+	size_t	new_size;
 
-	*lines_allocated = *lines_allocated * 3 / 2;
-	p = realloc(i_ptr, (*lines_allocated + 2) * sizeof(char *));
+	new_size = *lines_allocated * 3 / 2;
+	p = realloc(i_ptr, (new_size + 2) * sizeof(char *));
 	if (p == NULL) {	/* shucks, it was a near thing */
 		munmap(i_womp, i_size);
 		i_womp = NULL;
 		free(i_ptr);
 		i_ptr = NULL;
+		*lines_allocated = 0;
 		return false;
 	}
+	*lines_allocated = new_size;
 	i_ptr = p;
 	return true;
 }
@@ -245,14 +248,17 @@ plan_a(const char *filename)
 	if ((ifd = open(filename, O_RDONLY)) < 0)
 		pfatal("can't open file %s", filename);
 
-	i_womp = mmap(NULL, i_size, PROT_READ, MAP_FILE, ifd, 0);
+	i_womp = mmap(NULL, i_size, PROT_READ, MAP_PRIVATE, ifd, 0);
 	if (i_womp == MAP_FAILED) {
 		perror("mmap failed");
 		i_womp = NULL;
+		close(ifd);
 		return false;
 	}
 
 	close(ifd);
+	if (i_size)
+		madvise(i_womp, i_size, MADV_SEQUENTIAL);
 
 	/* estimate the number of lines */
 	lines_allocated = i_size / 25;

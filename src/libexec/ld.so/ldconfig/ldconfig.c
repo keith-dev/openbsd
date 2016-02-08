@@ -1,4 +1,4 @@
-/*	$OpenBSD: ldconfig.c,v 1.13 2003/07/06 20:04:00 deraadt Exp $	*/
+/*	$OpenBSD: ldconfig.c,v 1.15 2003/11/21 08:56:34 djm Exp $	*/
 
 /*
  * Copyright (c) 1993,1995 Paul Kranenburg

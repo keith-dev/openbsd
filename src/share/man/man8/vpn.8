@@ -1,4 +1,4 @@
-.\" $OpenBSD: vpn.8,v 1.70 2003/09/08 14:01:13 fgsch Exp $
+.\" $OpenBSD: vpn.8,v 1.73 2004/03/12 09:46:03 jmc Exp $
 .\"
 .\" Copyright 1998 Niels Provos <provos@physnet.uni-hamburg.de>
 .\" All rights reserved.
@@ -78,7 +78,7 @@ Make sure that the following options and devices are enabled in the kernel:
 .Bd -literal -offset indent
 option    CRYPTO          # Cryptographic Framework
 option    IPSEC           # IPSEC VPN
-pseudo-device enc 4       # Encapsulation device used by IPSEC
+pseudo-device enc 1       # Encapsulation device used by IPSEC
 .Ed
 .Pp
 To use IPsec,
@@ -89,8 +89,8 @@ Before doing either manual or automated keying, or performing
 encryption (ESP) or authentication (AH) operations, ensure the appropriate
 kernel operation has been enabled:
 .Bd -literal -offset indent
-# sysctl -w net.inet.esp.enable=1
-# sysctl -w net.inet.ah.enable=1
+# sysctl net.inet.esp.enable=1
+# sysctl net.inet.ah.enable=1
 .Ed
 .Pp
 The ESP and AH protocols default to 'on'.
@@ -98,8 +98,8 @@ The ESP and AH protocols default to 'on'.
 For security gateways, proper operation often also requires packet
 forwarding to be enabled:
 .Bd -literal -offset indent
-# sysctl -w net.inet.ip.forwarding=1
-# sysctl -w net.inet6.ip6.forwarding=1
+# sysctl net.inet.ip.forwarding=1
+# sysctl net.inet6.ip6.forwarding=1
 .Ed
 .Pp
 Packet forwarding defaults to 'off'.
@@ -301,7 +301,7 @@ Create the Security Associations (on both endpoints):
    -keyfile enc_key -authkeyfile auth_key
 .Ed
 .It
-Create the IPsec flows on machine A (the fist is for
+Create the IPsec flows on machine A (the first is for
 outbound flows, the latter is the ingress filter for the
 incoming security association):
 .Bd -literal

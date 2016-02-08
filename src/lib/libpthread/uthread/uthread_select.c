@@ -1,4 +1,4 @@
-/*	$OpenBSD: uthread_select.c,v 1.6 2003/01/19 21:22:31 marc Exp $	*/
+/*	$OpenBSD: uthread_select.c,v 1.11 2004/01/03 07:35:10 brad Exp $	*/
 /*
  * Copyright (c) 1995-1998 John Birrell <jb@cimlogic.com.au>
  * All rights reserved.
@@ -45,17 +45,23 @@
 #include <pthread.h>
 #include "pthread_private.h"
 
+/*
+ * Minimum number of poll_data entries to allocate
+ */
+#define POLLDATA_MIN	128
+
 int 
 select(int numfds, fd_set * readfds, fd_set * writefds,
        fd_set * exceptfds, struct timeval * timeout)
 {
 	struct pthread	*curthread = _get_curthread();
 	struct timespec ts;
-	int             i, ret = 0, f_wait = 1;
-	int		pfd_index, got_one = 0, fd_count = 0;
+	int             bit, i, j, ret = 0, f_wait = 1;
+	int		events, got_events = 0, fd_count = 0;
 	struct pthread_poll_data data;
+	fd_mask		mask, rmask, wmask, emask;
 
-	/* this is a cancellation point per IEEE Std 1003.1-2001 */
+	/* This is a cancellation point: */
 	_thread_enter_cancellation_point();
 
 	if (numfds > _thread_dtablesize) {
@@ -83,13 +89,14 @@ select(int numfds, fd_set * readfds, fd_set * writefds,
 	}
 
 	/* Count the number of file descriptors to be polled: */
-	if (readfds || writefds || exceptfds) {
-		for (i = 0; i < numfds; i++) {
-			if ((readfds && FD_ISSET(i, readfds)) ||
-			    (exceptfds && FD_ISSET(i, exceptfds)) ||
-			    (writefds && FD_ISSET(i, writefds))) {
+	if (numfds && (readfds || writefds || exceptfds)) {
+		for (i = (numfds - 1) / NFDBITS; i >= 0; i--) {
+			rmask = readfds ? readfds->fds_bits[i] : 0;
+			wmask = writefds ? writefds->fds_bits[i] : 0;
+			emask = exceptfds ? exceptfds->fds_bits[i] : 0;
+			mask = rmask | wmask | emask;
+			for (; (bit = ffs(mask)); mask ^= (1 << (bit - 1)))
 				fd_count++;
-			}
 		}
 	}
 
@@ -100,7 +107,7 @@ select(int numfds, fd_set * readfds, fd_set * writefds,
 	if ((curthread->poll_data.fds == NULL) ||
 	    (curthread->poll_data.nfds < fd_count)) {
 		data.fds = (struct pollfd *) realloc(curthread->poll_data.fds,
-		    sizeof(struct pollfd) * MAX(128, fd_count));
+		    sizeof(struct pollfd) * MAX(POLLDATA_MIN, fd_count));
 		if (data.fds == NULL) {
 			errno = ENOMEM;
 			ret = -1;
@@ -112,7 +119,7 @@ select(int numfds, fd_set * readfds, fd_set * writefds,
 			 * currently being polled.
 			 */
 			curthread->poll_data.fds = data.fds;
-			curthread->poll_data.nfds = MAX(128, fd_count);
+			curthread->poll_data.nfds = MAX(POLLDATA_MIN, fd_count);
 		}
 	}
 	if (ret == 0) {
@@ -125,27 +132,33 @@ select(int numfds, fd_set * readfds, fd_set * writefds,
 		 * running the loop in reverse and stopping when
 		 * the number of selected file descriptors is reached.
 		 */
-		for (i = numfds - 1, pfd_index = fd_count - 1;
-		    (i >= 0) && (pfd_index >= 0); i--) {
-			data.fds[pfd_index].events = 0;
-			if (readfds && FD_ISSET(i, readfds)) {
-				data.fds[pfd_index].events = POLLRDNORM;
-			}
-			if (exceptfds && FD_ISSET(i, exceptfds)) {
-				data.fds[pfd_index].events |= POLLRDBAND;
-			}
-			if (writefds && FD_ISSET(i, writefds)) {
-				data.fds[pfd_index].events |= POLLWRNORM;
-			}
-			if (data.fds[pfd_index].events != 0) {
-				/*
-				 * Set the file descriptor to be polled and
-				 * clear revents in case of a timeout which
-				 * leaves fds unchanged:
-				 */
-				data.fds[pfd_index].fd = i;
-				data.fds[pfd_index].revents = 0;
-				pfd_index--;
+		for (i = (numfds - 1) / NFDBITS, j = fd_count;
+		    j != 0 && i >= 0; i--) {
+			rmask = readfds ? readfds->fds_bits[i] : 0;
+			wmask = writefds ? writefds->fds_bits[i] : 0;
+			emask = exceptfds ? exceptfds->fds_bits[i] : 0;
+			mask = rmask | wmask | emask;
+			while ((bit = ffs(mask))) {
+				int n = 1 << (bit - 1);
+				mask ^= n;
+				events = 0;
+				if (rmask & n)
+					events |= POLLRDNORM;
+				if (wmask & n)
+					events |= POLLWRNORM;
+				if (emask & n)
+					events |= POLLRDBAND;
+				if (events != 0) {
+					/*
+					 * Set the file descriptor to be polled
+					 * and clear revents in case of a
+					 * timeout which leaves fds unchanged:
+					 */
+					data.fds[--j].fd =
+					    (i * NFDBITS) + bit - 1;
+					data.fds[j].events = events;
+					data.fds[j].revents = 0;
+				}
 			}
 		}
 		if (((ret = _thread_sys_poll(data.fds, data.nfds, 0)) == 0) &&
@@ -170,21 +183,34 @@ select(int numfds, fd_set * readfds, fd_set * writefds,
 			 * this file descriptor from the fdset if
 			 * the requested event wasn't ready.
 			 */
-			got_one = 0;
+
+			/*
+			 * First check for invalid descriptor.
+			 * If found, set errno and return -1.
+			 */
+			if (data.fds[i].revents & POLLNVAL) {
+				errno = EBADF;
+				ret = -1;
+				goto done;
+			}
+
+			got_events = 0;
 			if (readfds != NULL) {
 				if (FD_ISSET(data.fds[i].fd, readfds)) {
-					if (data.fds[i].revents & (POLLIN |
-					    POLLRDNORM))
-						got_one = 1;
+					if ((data.fds[i].revents & (POLLIN
+					    | POLLRDNORM | POLLERR
+					    | POLLHUP)) != 0)
+						got_events++;
 					else
 						FD_CLR(data.fds[i].fd, readfds);
 				}
 			}
 			if (writefds != NULL) {
 				if (FD_ISSET(data.fds[i].fd, writefds)) {
-					if (data.fds[i].revents & (POLLOUT |
-					    POLLWRNORM | POLLWRBAND))
-						got_one = 1;
+					if ((data.fds[i].revents & (POLLOUT
+					    | POLLWRNORM | POLLWRBAND | POLLERR
+					    | POLLHUP)) != 0)
+						got_events++;
 					else
 						FD_CLR(data.fds[i].fd,
 						    writefds);
@@ -193,21 +219,21 @@ select(int numfds, fd_set * readfds, fd_set * writefds,
 			if (exceptfds != NULL) {
 				if (FD_ISSET(data.fds[i].fd, exceptfds)) {
 					if (data.fds[i].revents & (POLLRDBAND |
-					    POLLPRI | POLLHUP | POLLERR |
-					    POLLNVAL))
-						got_one = 1;
+					    POLLPRI))
+						got_events++;
 					else
 						FD_CLR(data.fds[i].fd,
 						    exceptfds);
 				}
 			}
-			if (got_one)
-				numfds++;
+			if (got_events != 0)
+				numfds+=got_events;
 		}
 		ret = numfds;
 	}
 
 done:
+	/* No longer in a cancellation point: */
 	_thread_leave_cancellation_point();
 
 	return (ret);
