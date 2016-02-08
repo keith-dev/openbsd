@@ -1,4 +1,4 @@
-/*	$OpenBSD: ossaudiovar.h,v 1.3 1999/11/20 18:52:00 espie Exp $	*/
+/*	$OpenBSD: ossaudiovar.h,v 1.5 2008/06/26 05:42:14 ray Exp $	*/
 /*	$NetBSD: ossaudiovar.h,v 1.4 1997/10/16 16:49:40 augustss Exp $	*/
 
 /*
@@ -13,13 +13,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -89,6 +82,7 @@ struct oss_sys_ioctl_args {
 #define OSS_SNDCTL_DSP_SETSYNCRO	_OSS_IO  ('P', 21)
 #define OSS_SNDCTL_DSP_SETDUPLEX	_OSS_IO  ('P', 22)
 #define OSS_SNDCTL_DSP_PROFILE		_OSS_IOW ('P', 23, int)
+#define OSS_SNDCTL_DSP_GETODELAY	_OSS_IOR ('P', 24, int)
 #define	  OSS_APF_NORMAL		0	/* Normal applications */
 #define	  OSS_APF_NETWORK		1	/* "external" delays */
 #define   OSS_APF_CPUINTENS		2	/* CPU delays */

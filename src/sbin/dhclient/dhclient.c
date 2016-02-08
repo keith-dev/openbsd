@@ -1,4 +1,4 @@
-/*	$OpenBSD: dhclient.c,v 1.116 2007/10/16 20:19:26 sobrado Exp $	*/
+/*	$OpenBSD: dhclient.c,v 1.120 2008/06/07 03:22:26 deraadt Exp $	*/
 
 /*
  * Copyright 2004 Henning Brauer <henning@openbsd.org>
@@ -154,6 +154,7 @@ struct iaddr defaddr = { 4 };
 void
 routehandler(void)
 {
+	int linkstat;
 	char msg[2048];
 	struct rt_msghdr *rtm;
 	struct if_msghdr *ifm;
@@ -216,6 +217,19 @@ routehandler(void)
 			break;
 		if ((rtm->rtm_flags & RTF_UP) == 0)
 			goto die;
+
+		linkstat =
+		    LINK_STATE_IS_UP(ifm->ifm_data.ifi_link_state) ? 1 : 0;
+		if (linkstat != ifi->linkstat) {
+			debug("link state %s -> %s",
+			    ifi->linkstat ? "up" : "down",
+			    linkstat ? "up" : "down");
+			ifi->linkstat = interface_link_status(ifi->name);
+			if (ifi->linkstat) {
+				client->state = S_INIT;
+				state_reboot();
+			}
+		}
 		break;
 	case RTM_IFANNOUNCE:
 		ifan = (struct if_announcemsghdr *)rtm;
@@ -305,32 +319,29 @@ main(int argc, char *argv[])
 
 	read_client_conf();
 
-	if (!interface_link_status(ifi->name)) {
-		int linkstat = interface_link_forceup(ifi->name);
+	if (interface_status(ifi->name) == 0) {
+		interface_link_forceup(ifi->name);
+		/* Give it up to 4 seconds of silent grace to find link */
+		i = -4;
+	} else
+		i = 0;
 
-		fprintf(stderr, "%s: no link ...", ifi->name);
-		if (config->link_timeout == 0) {
-			fprintf(stderr, " giving up\n");
-			if (linkstat == 0)
-				interface_link_forcedown(ifi->name);
-			exit(1);
-		}
-		fflush(stderr);
-		sleep(1);
-		while (!interface_link_status(ifi->name)) {
+	while (!(ifi->linkstat = interface_link_status(ifi->name))) {
+		if (i == 0)
+			fprintf(stderr, "%s: no link ...", ifi->name);
+		else if (i > 0)
 			fprintf(stderr, ".");
-			fflush(stderr);
-			if (++i > config->link_timeout) {
-				fprintf(stderr, " giving up\n");
-				if (linkstat == 0)
-					interface_link_forcedown(ifi->name);
-				exit(1);
-			}
-			sleep(1);
+		fflush(stderr);
+		if (++i > config->link_timeout) {
+			fprintf(stderr, " sleeping\n");
+			goto dispatch;
 		}
-		fprintf(stderr, " got link\n");
+		sleep(1);
 	}
+	if (i > 0)
+		fprintf(stderr, " got link\n");
 
+ dispatch:
 	if ((nullfd = open(_PATH_DEVNULL, O_RDWR, 0)) == -1)
 		error("cannot open %s: %m", _PATH_DEVNULL);
 
@@ -383,8 +394,11 @@ main(int argc, char *argv[])
 
 	setproctitle("%s", ifi->name);
 
-	client->state = S_INIT;
-	state_reboot();
+	if (ifi->linkstat) {
+		client->state = S_INIT;
+		state_reboot();
+	} else
+		go_daemon();
 
 	dispatch();
 
@@ -1807,7 +1821,7 @@ priv_script_go(void)
 
 	script_flush_env();
 
-	return (wstatus & 0xff);
+	return (WEXITSTATUS(wstatus));
 }
 
 void

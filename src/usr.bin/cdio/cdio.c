@@ -1,4 +1,4 @@
-/*	$OpenBSD: cdio.c,v 1.57 2007/05/26 03:00:03 mjc Exp $	*/
+/*	$OpenBSD: cdio.c,v 1.64 2008/07/23 21:33:32 av Exp $	*/
 
 /*  Copyright (c) 1995 Serge V. Vakulenko
  * All rights reserved.
@@ -148,6 +148,8 @@ struct cd_toc_entry *toc_buffer;
 
 char		*cdname;
 int		fd = -1;
+int		writeperm = 0;
+int		mediacap = 0;
 int		verbose = 1;
 int		msf = 1;
 const char	*cddb_host;
@@ -165,6 +167,8 @@ int		play_msf(int, int, int, int, int, int);
 int		play_track(int, int, int, int);
 int		get_vol(int *, int *);
 int		status(int *, int *, int *, int *);
+int		is_wave(int);
+__dead void	tao(int argc, char **argv);
 int		play(char *arg);
 int		info(char *arg);
 int		cddbinfo(char *arg);
@@ -227,13 +231,6 @@ main(int argc, char **argv)
 {
 	int ch, cmd;
 	char *arg;
-	struct stat sb;
-	struct track_info *cur_track;
-	struct track_info *tr;
-	off_t availblk, needblk = 0;
-	u_int blklen;
-	u_int ntracks = 0;
-	char type;
 
 	cdname = getenv("DISC");
 	if (!cdname)
@@ -273,67 +270,9 @@ main(int argc, char **argv)
 		    "No CD device name specified. Defaulting to %s.\n", cdname);
 	}
 
-	if (argc > 0 && ! strcasecmp(*argv, "tao")) {
-		if (argc == 1)
-			usage();
-		SLIST_INIT(&tracks);
-		type = 'd';
-		blklen = 2048;
-		while (argc > 1) {
-			tr = malloc(sizeof(struct track_info));
-			tr->type = type;
-			optreset = 1;
-			optind = 1;
-			while ((ch = getopt(argc, argv, "ad")) != -1) {
-				switch (ch) {
-				case 'a':
-					type = 'a';
-					blklen = 2352;
-					break;
-				case 'd':
-					type = 'd';
-					blklen = 2048;
-					break;
-				default:
-					usage();
-				}
-			}
-			tr->type = type;
-			tr->blklen = blklen;
-			argc -= optind;
-			argv += optind;
-			if (argv[0] == NULL)
-				usage();
-			tr->file = argv[0];
-			tr->fd = open(tr->file, O_RDONLY, 0640);
-			if (tr->fd == -1)
-				err(1, "cannot open file %s", tr->file);
-			if (fstat(tr->fd, &sb) == -1)
-				err(1, "cannot stat file %s", tr->file);
-			tr->sz = sb.st_size;
-			if (tr->type == 'a')
-				tr->sz -= WAVHDRLEN;
-			if (SLIST_EMPTY(&tracks))
-				SLIST_INSERT_HEAD(&tracks, tr, track_list);
-			else
-				SLIST_INSERT_AFTER(cur_track, tr, track_list);
-			cur_track = tr;
-		}
-		if (!open_cd(cdname, 1))
-			exit(1);
-		get_disc_size(&availblk);
-		SLIST_FOREACH(tr, &tracks, track_list) {
-			needblk += tr->sz/tr->blklen;
-			ntracks++;
-		}
-		needblk += (ntracks - 1) * 150; /* transition area between tracks */
-		if (needblk > availblk)
-			errx(1, "Only %llu of the required %llu blocks available",
-			    availblk, needblk);
-		if (writetao(&tracks) != 0)
-			exit(1);
-		else
-			exit(0);
+	if (argc > 0 && !strcasecmp(*argv, "tao")) {
+		tao(argc, argv);
+		/* NOTREACHED */
 	}
 	if (argc > 0) {
 		char buf[80], *p;
@@ -387,42 +326,42 @@ run(int cmd, char *arg)
 		exit(0);
 
 	case CMD_INFO:
-		if (fd < 0 && ! open_cd(cdname, 0))
+		if (!open_cd(cdname, 0))
 			return (0);
 
 		return info(arg);
 
 	case CMD_CDDB:
-		if (fd < 0 && ! open_cd(cdname, 0))
+		if (!open_cd(cdname, 0))
 			return (0);
 
 		return cddbinfo(arg);
 
 	case CMD_CDID:
-		if (fd < 0 && ! open_cd(cdname, 0))
+		if (!open_cd(cdname, 0))
 			return (0);
 		return cdid();
 
 	case CMD_STATUS:
-		if (fd < 0 && ! open_cd(cdname, 0))
+		if (!open_cd(cdname, 0))
 			return (0);
 
 		return pstatus(arg);
 
 	case CMD_PAUSE:
-		if (fd < 0 && ! open_cd(cdname, 0))
+		if (!open_cd(cdname, 0))
 			return (0);
 
 		return ioctl(fd, CDIOCPAUSE);
 
 	case CMD_RESUME:
-		if (fd < 0 && ! open_cd(cdname, 0))
+		if (!open_cd(cdname, 0))
 			return (0);
 
 		return ioctl(fd, CDIOCRESUME);
 
 	case CMD_STOP:
-		if (fd < 0 && ! open_cd(cdname, 0))
+		if (!open_cd(cdname, 0))
 			return (0);
 
 		rc = ioctl(fd, CDIOCSTOP);
@@ -432,7 +371,7 @@ run(int cmd, char *arg)
 		return (rc);
 
 	case CMD_RESET:
-		if (fd < 0 && ! open_cd(cdname, 0))
+		if (!open_cd(cdname, 0))
 			return (0);
 
 		rc = ioctl(fd, CDIOCRESET);
@@ -443,7 +382,7 @@ run(int cmd, char *arg)
 		return (0);
 
 	case CMD_DEBUG:
-		if (fd < 0 && ! open_cd(cdname, 0))
+		if (!open_cd(cdname, 0))
 			return (0);
 
 		if (!strcasecmp(arg, "on"))
@@ -477,7 +416,7 @@ run(int cmd, char *arg)
 		return (1);
 
 	case CMD_EJECT:
-		if (fd < 0 && ! open_cd(cdname, 0))
+		if (!open_cd(cdname, 0))
 			return (0);
 
 		(void) ioctl(fd, CDIOCALLOW);
@@ -495,7 +434,7 @@ run(int cmd, char *arg)
 
 	case CMD_CLOSE:
 #if defined(CDIOCCLOSE)
-		if (fd < 0 && ! open_cd(cdname, 0))
+		if (!open_cd(cdname, 0))
 			return (0);
 
 		(void) ioctl(fd, CDIOCALLOW);
@@ -511,7 +450,7 @@ run(int cmd, char *arg)
 #endif
 
 	case CMD_PLAY:
-		if (fd < 0 && ! open_cd(cdname, 0))
+		if (!open_cd(cdname, 0))
 			return (0);
 
 		while (isspace(*arg))
@@ -529,7 +468,7 @@ run(int cmd, char *arg)
 		return (0);
 
 	case CMD_VOLUME:
-		if (fd < 0 && !open_cd(cdname, 0))
+		if (!open_cd(cdname, 0))
 			return (0);
 
 		if (!strncasecmp(arg, "left", strlen(arg)))
@@ -555,29 +494,38 @@ run(int cmd, char *arg)
 		return setvol(l, r);
 
 	case CMD_NEXT:
-		if (fd < 0 && ! open_cd(cdname, 0))
+		if (!open_cd(cdname, 0))
 			return (0);
 
 		return play_next(arg);
 
 	case CMD_PREV:
-		if (fd < 0 && ! open_cd(cdname, 0))
+		if (!open_cd(cdname, 0))
 			return (0);
 
 		return play_prev(arg);
 
 	case CMD_REPLAY:
-		if (fd < 0 && ! open_cd(cdname, 0))
+		if (!open_cd(cdname, 0))
 			return 0;
 
 		return play_same(arg);
 	case CMD_BLANK:
-		if (fd < 0 && ! open_cd(cdname, 1))
+		if (!open_cd(cdname, 1))
 			return 0;
+
+		if (get_media_capabilities(&mediacap) == -1) {
+			warnx("Can't determine media type");
+			return (0);
+		}
+		if ((mediacap & MEDIACAP_CDRW_WRITE) == 0) {
+			warnx("The media doesn't support blanking");
+			return (0);
+		}
 
 		return blank();
 	case CMD_CDRIP:
-		if (fd < 0 && ! open_cd(cdname, 0))
+		if (!open_cd(cdname, 0))
 			return (0);
 
 		while (isspace(*arg))
@@ -585,7 +533,7 @@ run(int cmd, char *arg)
 
 		return cdrip(arg);
 	case CMD_CDPLAY:
-		if (fd < 0 && ! open_cd(cdname, 0))
+		if (!open_cd(cdname, 0))
 			return (0);
 
 		while (isspace(*arg))
@@ -598,6 +546,136 @@ run(int cmd, char *arg)
 		return (0);
 
 	}
+}
+
+/*
+ * Check if audio file has RIFF WAVE format. If not, we assume it's just PCM.
+ */
+int
+is_wave(int fd)
+{
+	char buf[WAVHDRLEN];
+	int rv;
+
+	rv = 0;
+	if (read(fd, buf, sizeof(buf)) == sizeof(buf)) {
+		if (memcmp(buf, "RIFF", 4) == 0 &&
+		    memcmp(buf + 8, "WAVE", 4) == 0)
+			rv = 1;
+	}
+
+	return (rv);
+}
+
+__dead void
+tao(int argc, char **argv)
+{
+	struct stat sb;
+	struct track_info *cur_track;
+	struct track_info *tr;
+	off_t availblk, needblk = 0;
+	u_int blklen;
+	u_int ntracks = 0;
+	char type;
+	int ch, speed;
+	const char *errstr;
+
+	if (argc == 1)
+		usage();
+
+	SLIST_INIT(&tracks);
+	type = 'd';
+	speed = DRIVE_SPEED_OPTIMAL;
+	blklen = 2048;
+	while (argc > 1) {
+		tr = malloc(sizeof(struct track_info));
+		if (tr == NULL)
+			err(1, "tao");
+
+		optreset = 1;
+		optind = 1;
+		while ((ch = getopt(argc, argv, "ads:")) != -1) {
+			switch (ch) {
+			case 'a':
+				type = 'a';
+				blklen = 2352;
+				break;
+			case 'd':
+				type = 'd';
+				blklen = 2048;
+				break;
+			case 's':
+				if (strcmp(optarg, "auto") == 0) {
+					speed = DRIVE_SPEED_OPTIMAL;
+				} else if (strcmp(optarg, "max") == 0) {
+					speed = DRIVE_SPEED_MAX;
+				} else {
+					speed = (int)strtonum(optarg, 1,
+					    CD_MAX_SPEED, &errstr);
+					if (errstr != NULL) {
+						errx(1,
+						    "incorrect speed value");
+					}
+				}
+				break;
+			default:
+				usage();
+				/* NOTREACHED */
+			}
+		}
+
+		if (speed != DRIVE_SPEED_OPTIMAL && speed != DRIVE_SPEED_MAX)
+			tr->speed = CD_SPEED_TO_KBPS(speed, blklen);
+		else
+			tr->speed = speed;
+
+		tr->type = type;
+		tr->blklen = blklen;
+		argc -= optind;
+		argv += optind;
+		if (argv[0] == NULL)
+			usage();
+		tr->file = argv[0];
+		tr->fd = open(tr->file, O_RDONLY, 0640);
+		if (tr->fd == -1)
+			err(1, "cannot open file %s", tr->file);
+		if (fstat(tr->fd, &sb) == -1)
+			err(1, "cannot stat file %s", tr->file);
+		tr->sz = sb.st_size;
+		tr->off = 0;
+		if (tr->type == 'a') {
+			if (is_wave(tr->fd)) {
+				tr->sz -= WAVHDRLEN;
+				tr->off = WAVHDRLEN;
+			}
+		}
+		if (SLIST_EMPTY(&tracks))
+			SLIST_INSERT_HEAD(&tracks, tr, track_list);
+		else
+			SLIST_INSERT_AFTER(cur_track, tr, track_list);
+		cur_track = tr;
+	}
+
+	if (!open_cd(cdname, 1))
+		exit(1);
+	if (get_media_capabilities(&mediacap) == -1)
+		errx(1, "Can't determine media type");
+	if ((mediacap & MEDIACAP_TAO) == 0)
+		errx(1, "The media can't be written in TAO mode");
+
+	get_disc_size(&availblk);
+	SLIST_FOREACH(tr, &tracks, track_list) {
+		needblk += tr->sz/tr->blklen;
+		ntracks++;
+	}
+	needblk += (ntracks - 1) * 150; /* transition area between tracks */
+	if (needblk > availblk)
+		errx(1, "Only %llu of the required %llu blocks available",
+		    availblk, needblk);
+	if (writetao(&tracks) != 0)
+		exit(1);
+	else
+		exit(0);
 }
 
 int
@@ -1289,7 +1367,7 @@ prtrack(struct cd_toc_entry *e, int lastflag, char *name)
 	else
 		next = e[1].addr.lba;
 	len = next - block;
-	lba2msf(len, &m, &s, &f);
+	lba2msf(len - 150, &m, &s, &f);
 
 	if (name)
 		printf("%2d:%02d.%02d  %s\n", m, s, f, name);
@@ -1438,7 +1516,7 @@ parse(char *buf, int *cmd)
 {
 	struct cmdtab *c;
 	char *p;
-	int len;
+	size_t len;
 
 	for (p=buf; isspace(*p); p++)
 		continue;
@@ -1499,8 +1577,13 @@ open_cd(char *dev, int needwrite)
 	char *realdev;
 	int tries;
 
-	if (fd > -1)
-		return (1);
+	if (fd > -1) {
+		if (needwrite && !writeperm) {
+			close(fd);
+			fd = -1;
+		} else
+			return (1);
+	}
 
 	for (tries = 0; fd < 0 && tries < 10; tries++) {
 		if (needwrite)
@@ -1527,6 +1610,7 @@ open_cd(char *dev, int needwrite)
 		warn("Can't open %s", realdev);
 		return (0);
 	}
+	writeperm = needwrite;
 	return (1);
 }
 

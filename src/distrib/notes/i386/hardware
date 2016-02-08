@@ -1,4 +1,4 @@
-dnl	$OpenBSD: hardware,v 1.258 2008/03/10 21:45:44 miod Exp $
+dnl	$OpenBSD: hardware,v 1.269 2008/08/07 06:18:44 miod Exp $
 OpenBSD/MACHINE OSREV works across a broad range of standard PCs and
 clones, with a wide variety of processors and I/O bus architectures.  It
 can be expected to install and run with minimal difficulties on most
@@ -39,17 +39,17 @@ dnl	       	The only CPU that is known to work poorly (due to
 dnl		flawed motherboard designs) is the Cyrix 386DLC.
 	Buses
 		All standard ISA, EISA, VLB, and PCI bus based machines,
-		including:
+		including among others:
 			Intel 450GX/KX based machines
 			Intel 450NX based machines
 			ServerWorks chipset-based machines
-			(We just had to mention those last three, since
-			 they are the hardest to support)
-		Both 16-bit PCMCIA Cards and newer 32-bit CardBus
-		support
+dnl Not worth bragging anymore
+dnl			(We just had to mention those last three, since
+dnl			 they are the hardest to support)
+		Both 16-bit PCMCIA Cards and newer 32-bit CardBus support
 		Universal Serial Bus (USB)
 		Inter IC (I2C) bus
-		The MCA bus found in various IBM PS/2 machines is not
+		The MCA bus found in various older IBM PS/2 machines is not
 		supported.
 	Bus Interfaces
 		Standard PCI-PCI bridges, including PCI expansion
@@ -230,7 +230,7 @@ dnl		flawed motherboard designs) is the Cyrix 386DLC.
 		8250/16450-based ports
 		16550-based ports
 		ST16660-base ports
-		XR16850-based ports (only in the pccom driver)
+dnl		XR16850-based ports (only in the pccom driver)
 		AST-style 4-port serial boards [G]
 		BOCA 8-port serial cards [*]
 		Cyclades Cyclom-{4, 8, 16}Y serial boards [G]
@@ -611,6 +611,8 @@ dnl		flawed motherboard designs) is the Cyrix 386DLC.
 		    Compex WLU108AG
 		    Compex WLU108G
 		    D-Link DWL-G132
+		    IODATA WN-G54/US
+		    MELCO WLI-U2-KAMG54
 		    Netgear WG111T
 		    Netgear WG111U
 		    Netgear WPN111
@@ -741,6 +743,7 @@ dnl		flawed motherboard designs) is the Cyrix 386DLC.
 		Marvell Libertas IEEE 802.11b/g Compact Flash adapters (will be
 		detected as PCMCIA adapters) [G]
 		    Ambicom WL54CF
+		    I-O DATA WN-G54/CF
 		Ralink Technology IEEE 802.11a/b/g CardBus adapters [A] [B]
 		    A-Link WL54PC
 		    Alfa AWPC036
@@ -898,12 +901,15 @@ dnl		flawed motherboard designs) is the Cyrix 386DLC.
 		    Atlantis Land A02-UP1-W54
 		    Belkin F5D7050 ver 3
 		    Belkin F5D9050 ver 3
+		    Belkin F5D9050C
 		    Buffalo WLI-U2-SG54HP
 		    Buffalo WLI-U2-G54HP
 		    CNet CWD-854 ver F
 		    Conceptronic C54RU ver 2
 		    Corega CG-WLUSB2GL
 		    Corega CG-WLUSB2GO
+		    Corega CG-WLUSB2GPX
+		    D-Link DWA-111
 		    D-Link DWL-G122 rev C1
 		    D-Link WUA-1340
 		    Digitus DN-7003GR
@@ -1125,6 +1131,7 @@ dnl		flawed motherboard designs) is the Cyrix 386DLC.
 		    X-Micro XWL-11GUZX
 		    Yakumo QuickWLAN USB
 		    Zonet ZEW2501
+		    ZyXEL G-202
 		    ZyXEL ZyAIR G-220
 		
 	Gigabit Ethernet Adapters
@@ -1438,6 +1445,7 @@ dnl		flawed motherboard designs) is the Cyrix 386DLC.
 	Sound Devices [G]
 		ALI M5461
 		AMD 768 and 8111 AC'97
+		AMD Geode LX series CS5536 integrated AC'97
 		ATI IXP series integrated AC'97
 		ATI SB450/SB600
 		C-Media CMI8[37]38
@@ -1483,7 +1491,7 @@ dnl		flawed motherboard designs) is the Cyrix 386DLC.
 		SoundForte RadioLink SF16-FMR FM radio
 		SoundForte RadioLink SF16-FMR2 FM radio
 	Miscellaneous Devices
-		APM power management,
+		APM power management (on non-ACPI systems)
 		Brooktree 8[47][89] based frame grabber and TV tuner cards,
 		including: [G]
 		    Animation Technologies FlyVideo
@@ -1508,30 +1516,53 @@ dnl		flawed motherboard designs) is the Cyrix 386DLC.
 		    VideoLogic Captivator PCI
 		    Zoltrix TV and Genie TV/FM
 		Hardware monitoring sensors, including: [G]
-		    Asus AS99127F
-		    Asus ASB100
+		    AMD K8 embedded temperature sensor
 		    Analog Devices AD7416, AD7417 and AD7418
-		    Analog Devices ADM1021
+		    Analog Devices ADM1021, ADM1023 and ADM1032
+		    Analog Devices ADM1022 and ADM1028
 		    Analog Devices ADM1024
 		    Analog Devices ADM1025
 		    Analog Devices ADM1026
+		    Analog Devices ADM1027
 		    Analog Devices ADM1030
 		    Analog Devices ADM1031
-		    Analog Devices ADT7460
+		    Analog Devices ADM9240
+		    Analog Devices ADT7460, ADT7465, ADT7475, ADT7476, ADT7477
+		    Andigilog aSC7611
+		    Andigilog aSC7621
+		    Asus AS99127F
+		    Asus ASB100
+		    Dallas Semiconductor 1775
+		    Dallas Semiconductor 1780
+		    Fintek F71805
 		    Genesys Logic GL518SM
-		    ITE IT8705F, IT8712F
-		    National Semiconductor LM87
+		    Genesys Logic GL523SM
+		    Global Mixed-mode Technology G781
+		    Intel Core embedded temperature sensor
+		    Intel Xeon embedded temperature sensor
+		    ITE IT8705F, IT8712F, IT8716F, IT8718F and IT8726F
+		    Maxim DS1617
+		    Maxim DS1624, DS1631 and DS1721
+		    Maxim MAX6642, MAX6657, MAX6658, MAX6659 and MAX6690
 		    National Semiconductor LM75, LM77
 		    National Semiconductor LM78, LM78-J, LM79
+		    National Semiconductor LM81 and LM87
+		    National Semiconductor LM85 and LM96000
+		    National Semiconductor LM86, LM89, LM90, LM99 and LM99-1
+		    National Semiconductor LM93
 		    National Semiconductor PC87366 LPC Super I/O VLM and TMS
-		    Maxim DS1624/DS1631/DS1721
-		    Maxim MAX6642/MAX6690
+		    Philips LM75A
+		    Philips NE1619
+		    SMSC 47m192
+		    SMSC EMC6D10x and SCH5017
 		    SiS SiS950
+		    Texas Instruments THMC50
 		    ThinkPad Active Protection System accelerometer
 		    VIA VT1211
 		    VIA VT82C686A, VT8231
 		    Winbond W83627HF, W83627THF, W83627DHG, W83627EHF, W83637HF
 		    Winbond W83697HF, W83781D, W83782D, W83783S, W83791D, W83792D
+		    Winbond W83793G
 		    Winbond W83L784R, W83L785R and W83L785TS-L
 		Hardware watchdog timer support, including: [G]
 		    AMD Elan SC520 System Controller
@@ -1562,9 +1593,10 @@ dnl		flawed motherboard designs) is the Cyrix 386DLC.
 Drivers for hardware marked with [G] are only included in the GENERIC
 kernels, but are NOT included on the various distribution floppies
 (including the CD-ROM boot image).
-Drivers for hardware marked with [A] are not included in floppy A.
-Drivers for hardware marked with [B] are not included in floppy B.
-Drivers for hardware marked with [C] are not included in floppy C.
+Drivers for hardware marked with [A] are NOT included in floppy A.
+Drivers for hardware marked with [B] are NOT included in floppy B.
+Drivers for hardware marked with [C] are NOT included in floppy C.
+
 Support for devices marked with [*] is not included in the distribution media
 or in the GENERIC kernel, and will require you to compile a custom kernel to
 enable it.
@@ -1596,9 +1628,9 @@ be configured with specific settings.  Here's their list:
 
 Device		Name	Port	IRQ	DRQ	Misc
 ------		----	----	---	---	----
-Serial ports	pccom0	0x3f8	4		[8250/16450/16550/clones]
-		pccom1	0x2f8	3		[8250/16450/16550/clones]
-		pccom2	0x3e8	5		[8250/16450/16550/clones]
+Serial ports	com0	0x3f8	4		[8250/16450/16550/clones]
+		com1	0x2f8	3		[8250/16450/16550/clones]
+		com2	0x3e8	5		[8250/16450/16550/clones]
 		ast0	0x1a0	5		[AST 4-port serial card]
 		cy0		12		iomem 0xd4000 [Cyclom
 						serial card]
@@ -1683,43 +1715,36 @@ PCI BIOS, or autoconfigured.
 Hardware not listed in the above table doesn't need any specific
 configuration.
 
-dnl
-dnl Special care for PCI BIOS:
-dnl
-dnl	As with all BIOS implementations and subsystems this one has bugs
-dnl	too.
-dnl	Sometimes specifications are unclear about interfaces and/or data
-dnl	validation.
-dnl	These all cause our driver for PCI BIOS to misbehave in more or
-dnl	less fatal ways, such as panics on pcibios0 configuration or PCI
-dnl	device attachments, or unconfigured PCI devices due to IRQ and/or
-dnl	I/O address misconfiguration.
-dnl
-dnl	Fast workaround
-dnl
-dnl	Boot by giving the -c flag to the initial boot request.
-dnl	Following the loading of the kernel, the user is presented with a
-dnl
-dnl	UKC>
-dnl
-dnl	Then type the following commands:
-dnl
-dnl	UKC> change bios0
-dnl	165 bios0 at mainbus0 bus -1 flags 0x0
-dnl	change [n] y
-dnl	bus [-1] ? <enter>
-dnl	flags [0] ? 3
-dnl	165 bios0 changed
-dnl	165 bios0 at mainbus0 bus -1 flags 0x3
-dnl	UKC> quit
-dnl
-dnl	This will disable the pcibios0 attachment.
-dnl	Sometimes, especially when hangs occur on particular PCI device
-dnl	attachments, moving PCI cards into a different slot helps.
-dnl
-dnl	Fixing for good
-dnl
-dnl	Try to gather dmesg output from the failing configuration, for
-dnl	example by using a serial console (see boot(8)), and send it to
-dnl	<mickey@OpenBSD.org> along with descriptions of your hardware setup.
-dnl	Alternatively, dig in the code and fix problems.
+ACPI notice:
+
+	OpenBSD supports the ACPI information provided by many modern
+	machine BIOSes.  On a minority of systems, this ACPI information
+	may be misleading or misinterpreted.
+
+	This might cause various drivers to misbehave in more or less
+	fatal ways, most problems being interrupt-related (interrupt
+	storms slowing the machine down, or a device not getting any
+	interrupts at all).
+
+	If your system seems to misbehave under OpenBSD, you might want
+	to try booting the kernel with ACPI support disabled.
+
+	To do so, boot with the -c flag at the initial bootloader prompt.
+	After the kernel loads, at the UKC> prompt, enter "disable acpi"
+	followed by "quit". This will disable ACPI support.
+
+	If disabling ACPI helps, it is possible to make this behaviour
+	permanent with the userland config(8) utility. In any case,
+	please open a bug report with sendbug(1), giving as many
+	details as possible, including the dmesg(8) output for both ACPI
+	and ACPI-disabled kernels, as well as the output from acpidump(8)
+	and pcidump(8).
+
+	On a few machines as well (usually with broken BIOSes), the
+	monoprocessor kernel (bsd) and the multiprocessor kernel (bsd.mp)
+	will behave differently, due to differences in the interrupt
+	routing mechanism.  Trying the multiprocessor kernel, even on a
+	single processor machine, or the other way around, might solve
+	interrupt problems as well. As with the potential ACPI problems
+	above, please report any such problems, so that the developers
+	have a chance to fix them.

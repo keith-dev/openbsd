@@ -1,4 +1,4 @@
-/*	$OpenBSD: spec_vnops.c,v 1.44 2007/12/27 13:59:12 thib Exp $	*/
+/*	$OpenBSD: spec_vnops.c,v 1.53 2008/07/24 18:48:18 thib Exp $	*/
 /*	$NetBSD: spec_vnops.c,v 1.29 1996/04/22 01:42:38 christos Exp $	*/
 
 /*
@@ -57,10 +57,10 @@ struct vnode *speclisth[SPECHSZ];
 
 int (**spec_vnodeop_p)(void *);
 struct vnodeopv_entry_desc spec_vnodeop_entries[] = {
-	{ &vop_default_desc, vn_default_error },
+	{ &vop_default_desc, eopnotsupp },
 	{ &vop_lookup_desc, vop_generic_lookup },	/* lookup */
-	{ &vop_create_desc, spec_create },		/* create */
-	{ &vop_mknod_desc, spec_mknod },		/* mknod */
+	{ &vop_create_desc, spec_badop },		/* create */
+	{ &vop_mknod_desc, spec_badop },		/* mknod */
 	{ &vop_open_desc, spec_open },			/* open */
 	{ &vop_close_desc, spec_close },		/* close */
 	{ &vop_access_desc, spec_access },		/* access */
@@ -71,28 +71,28 @@ struct vnodeopv_entry_desc spec_vnodeop_entries[] = {
 	{ &vop_ioctl_desc, spec_ioctl },		/* ioctl */
 	{ &vop_poll_desc, spec_poll },			/* poll */
 	{ &vop_kqfilter_desc, spec_kqfilter },		/* kqfilter */
-	{ &vop_revoke_desc, spec_revoke },              /* revoke */
+	{ &vop_revoke_desc, vop_generic_revoke },	/* revoke */
 	{ &vop_fsync_desc, spec_fsync },		/* fsync */
-	{ &vop_remove_desc, spec_remove },		/* remove */
-	{ &vop_link_desc, spec_link },			/* link */
-	{ &vop_rename_desc, spec_rename },		/* rename */
-	{ &vop_mkdir_desc, spec_mkdir },		/* mkdir */
-	{ &vop_rmdir_desc, spec_rmdir },		/* rmdir */
-	{ &vop_symlink_desc, spec_symlink },		/* symlink */
-	{ &vop_readdir_desc, spec_readdir },		/* readdir */
-	{ &vop_readlink_desc, spec_readlink },		/* readlink */
-	{ &vop_abortop_desc, spec_abortop },		/* abortop */
+	{ &vop_remove_desc, spec_badop },		/* remove */
+	{ &vop_link_desc, spec_badop },			/* link */
+	{ &vop_rename_desc, spec_badop },		/* rename */
+	{ &vop_mkdir_desc, spec_badop },		/* mkdir */
+	{ &vop_rmdir_desc, spec_badop },		/* rmdir */
+	{ &vop_symlink_desc, spec_badop },		/* symlink */
+	{ &vop_readdir_desc, spec_badop },		/* readdir */
+	{ &vop_readlink_desc, spec_badop },		/* readlink */
+	{ &vop_abortop_desc, spec_badop },		/* abortop */
 	{ &vop_inactive_desc, spec_inactive },		/* inactive */
-	{ &vop_reclaim_desc, spec_reclaim },		/* reclaim */
-	{ &vop_lock_desc, spec_lock },			/* lock */
-	{ &vop_unlock_desc, spec_unlock },		/* unlock */
-	{ &vop_bmap_desc, spec_bmap },			/* bmap */
+	{ &vop_reclaim_desc, nullop },			/* reclaim */
+	{ &vop_lock_desc, vop_generic_lock },		/* lock */
+	{ &vop_unlock_desc, vop_generic_unlock },	/* unlock */
+	{ &vop_bmap_desc, vop_generic_bmap },		/* bmap */
 	{ &vop_strategy_desc, spec_strategy },		/* strategy */
 	{ &vop_print_desc, spec_print },		/* print */
-	{ &vop_islocked_desc, spec_islocked },		/* islocked */
+	{ &vop_islocked_desc, vop_generic_islocked },	/* islocked */
 	{ &vop_pathconf_desc, spec_pathconf },		/* pathconf */
 	{ &vop_advlock_desc, spec_advlock },		/* advlock */
-	{ &vop_bwrite_desc, spec_bwrite },		/* bwrite */
+	{ &vop_bwrite_desc, vop_generic_bwrite },	/* bwrite */
 	{ NULL, NULL }
 };
 struct vnodeopv_desc spec_vnodeop_opv_desc =
@@ -109,7 +109,6 @@ spec_vnoperate(void *v)
 /*
  * Open a special file.
  */
-/* ARGSUSED */
 int
 spec_open(void *v)
 {
@@ -197,7 +196,6 @@ spec_open(void *v)
 /*
  * Vnode op for read
  */
-/* ARGSUSED */
 int
 spec_read(void *v)
 {
@@ -286,7 +284,6 @@ spec_inactive(void *v)
 /*
  * Vnode op for write
  */
-/* ARGSUSED */
 int
 spec_write(void *v)
 {
@@ -363,7 +360,6 @@ spec_write(void *v)
 /*
  * Device ioctl operation.
  */
-/* ARGSUSED */
 int
 spec_ioctl(void *v)
 {
@@ -387,7 +383,6 @@ spec_ioctl(void *v)
 	}
 }
 
-/* ARGSUSED */
 int
 spec_poll(void *v)
 {
@@ -405,7 +400,6 @@ spec_poll(void *v)
 		return (*cdevsw[major(dev)].d_poll)(dev, ap->a_events, ap->a_p);
 	}
 }
-/* ARGSUSED */
 int
 spec_kqfilter(void *v)
 {
@@ -422,7 +416,6 @@ spec_kqfilter(void *v)
 /*
  * Synch buffers associated with a block device
  */
-/* ARGSUSED */
 int
 spec_fsync(void *v)
 {
@@ -447,7 +440,7 @@ loop:
 		if ((bp->b_flags & B_DELWRI) == 0)
 			panic("spec_fsync: not dirty");
 		bremfree(bp);
-		bp->b_flags |= B_BUSY;
+		buf_acquire(bp);
 		splx(s);
 		bawrite(bp);
 		goto loop;
@@ -482,27 +475,8 @@ spec_strategy(void *v)
 }
 
 /*
- * This is a noop, simply returning what one has been given.
- */
-int
-spec_bmap(void *v)
-{
-	struct vop_bmap_args *ap = v;
-
-	if (ap->a_vpp != NULL)
-		*ap->a_vpp = ap->a_vp;
-	if (ap->a_bnp != NULL)
-		*ap->a_bnp = ap->a_bn;
-	if (ap->a_runp != NULL)
-		*ap->a_runp = 0;
-	
-	return (0);
-}
-
-/*
  * Device close routine
  */
-/* ARGSUSED */
 int
 spec_close(void *v)
 {
@@ -529,6 +503,8 @@ spec_close(void *v)
 			vrele(vp);
 			ap->a_p->p_session->s_ttyvp = NULL;
 		}
+		if (cdevsw[major(dev)].d_flags & D_CLONE)
+			return (spec_close_clone(ap));
 		/*
 		 * If the vnode is locked, then we are in the midst
 		 * of forcably closing the device, otherwise we only
@@ -536,8 +512,6 @@ spec_close(void *v)
 		 */
 		if (vcount(vp) > 1 && (vp->v_flag & VXLOCK) == 0)
 			return (0);
-		if (cdevsw[major(dev)].d_flags & D_CLONE)
-			return (spec_close_clone(ap));
 		devclose = cdevsw[major(dev)].d_close;
 		mode = S_IFCHR;
 		break;
@@ -577,6 +551,47 @@ spec_close(void *v)
 	}
 
 	return ((*devclose)(dev, ap->a_fflag, mode, ap->a_p));
+}
+
+int
+spec_getattr(void *v)
+{
+	struct vop_getattr_args	*ap = v;
+	struct vnode		*vp = ap->a_vp;
+
+	if (!(vp->v_flag & VCLONE))
+		return (EBADF);
+
+	return (VOP_GETATTR(vp->v_specparent, ap->a_vap, ap->a_cred, ap->a_p));
+}
+
+int
+spec_setattr(void *v)
+{
+	struct vop_getattr_args	*ap = v;
+	struct vnode		*vp = ap->a_vp;
+	int			 error;
+
+	if (!(vp->v_flag & VCLONE))
+		return (EBADF);
+
+	vn_lock(vp->v_specparent, LK_EXCLUSIVE|LK_RETRY, ap->a_p);
+	error = VOP_SETATTR(vp->v_specparent, ap->a_vap, ap->a_cred, ap->a_p);
+	VOP_UNLOCK(vp, 0, ap->a_p);
+
+	return (error);
+}
+
+int
+spec_access(void *v)
+{
+	struct vop_access_args	*ap = v;
+	struct vnode		*vp = ap->a_vp;
+
+	if (!(vp->v_flag & VCLONE))
+		return (EBADF);
+
+	return (VOP_ACCESS(vp->v_specparent, ap->a_mode, ap->a_cred, ap->a_p));
 }
 
 /*
@@ -628,7 +643,6 @@ spec_pathconf(void *v)
 /*
  * Special device advisory byte-level locks.
  */
-/* ARGSUSED */
 int
 spec_advlock(void *v)
 {
@@ -637,17 +651,6 @@ spec_advlock(void *v)
 
 	return (lf_advlock(&vp->v_speclockf, (off_t)0, ap->a_id,
 		ap->a_op, ap->a_fl, ap->a_flags));
-}
-
-/*
- * Special device failed operation
- */
-/*ARGSUSED*/
-int
-spec_ebadf(void *v)
-{
-
-	return (EBADF);
 }
 
 /*

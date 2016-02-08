@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip_input.c,v 1.157 2008/02/05 22:57:31 mpf Exp $	*/
+/*	$OpenBSD: ip_input.c,v 1.160 2008/06/08 13:58:09 thib Exp $	*/
 /*	$NetBSD: ip_input.c,v 1.30 1996/03/16 23:53:58 christos Exp $	*/
 
 /*
@@ -138,6 +138,7 @@ struct	in_ifaddrhead in_ifaddr;
 struct	ifqueue ipintrq;
 
 struct pool ipqent_pool;
+struct pool ipq_pool;
 
 struct ipstat ipstat;
 
@@ -186,6 +187,8 @@ ip_init()
 
 	pool_init(&ipqent_pool, sizeof(struct ipqent), 0, 0, 0, "ipqepl",
 	    NULL);
+	pool_init(&ipq_pool, sizeof(struct ipq), 0, 0, 0, "ipqpl",
+	    NULL);
 
 	pr = pffindproto(PF_INET, IPPROTO_RAW, SOCK_RAW);
 	if (pr == 0)
@@ -226,7 +229,7 @@ ipintr()
 	struct mbuf *m;
 	int s;
 
-	while (ipintrq.ifq_head) {
+	for (;;) {
 		/*
 		 * Get next datagram off input queue and get IP header
 		 * in first mbuf.
@@ -234,7 +237,7 @@ ipintr()
 		s = splnet();
 		IF_DEQUEUE(&ipintrq, m);
 		splx(s);
-		if (m == 0)
+		if (m == NULL)
 			return;
 #ifdef	DIAGNOSTIC
 		if ((m->m_flags & M_PKTHDR) == 0)
@@ -387,6 +390,9 @@ ipv4_input(m)
 	 */
 	if ((ia = in_iawithaddr(ip->ip_dst, m)) != NULL &&
 	    (ia->ia_ifp->if_flags & IFF_UP))
+		goto ours;
+
+	if (m->m_pkthdr.pf.flags & PF_TAG_DIVERTED)
 		goto ours;
 
 	if (IN_MULTICAST(ip->ip_dst.s_addr)) {
@@ -723,8 +729,8 @@ ip_reass(ipqe, fp)
 	/*
 	 * If first fragment to arrive, create a reassembly queue.
 	 */
-	if (fp == 0) {
-		fp = malloc(sizeof (struct ipq), M_FTABLE, M_NOWAIT);
+	if (fp == NULL) {
+		fp = pool_get(&ipq_pool, PR_NOWAIT);
 		if (fp == NULL)
 			goto dropfrag;
 		LIST_INSERT_HEAD(&ipq, fp, ipq_q);
@@ -861,7 +867,7 @@ insert:
 	ip->ip_src = fp->ipq_src;
 	ip->ip_dst = fp->ipq_dst;
 	LIST_REMOVE(fp, ipq_q);
-	free(fp, M_FTABLE);
+	pool_put(&ipq_pool, fp);
 	m->m_len += (ip->ip_hl << 2);
 	m->m_data -= (ip->ip_hl << 2);
 	/* some debugging cruft by sklower, below, will go away soon */
@@ -900,7 +906,7 @@ ip_freef(fp)
 		ip_frags--;
 	}
 	LIST_REMOVE(fp, ipq_q);
-	free(fp, M_FTABLE);
+	pool_put(&ipq_pool, fp);
 }
 
 /*

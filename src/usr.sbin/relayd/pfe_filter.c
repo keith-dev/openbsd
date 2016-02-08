@@ -1,4 +1,4 @@
-/*	$OpenBSD: pfe_filter.c,v 1.23 2008/01/31 09:33:39 reyk Exp $	*/
+/*	$OpenBSD: pfe_filter.c,v 1.32 2008/07/16 14:38:33 reyk Exp $	*/
 
 /*
  * Copyright (c) 2006 Pierre-Yves Ritschard <pyr@openbsd.org>
@@ -41,8 +41,9 @@
 struct pfdata {
 	int			 dev;
 	struct pf_anchor	*anchor;
-	struct pfioc_trans	 pft;
-	struct pfioc_trans_e	 pfte;
+	struct pfioc_trans	 pft[PF_RULESET_MAX];
+	struct pfioc_trans_e	 pfte[PF_RULESET_MAX];
+	u_int8_t		 pfused;
 };
 
 int	 transaction_init(struct relayd *, const char *);
@@ -53,6 +54,9 @@ void
 init_filter(struct relayd *env)
 {
 	struct pf_status	status;
+
+	if (!(env->sc_flags & F_NEEDPF))
+		return;
 
 	if ((env->sc_pf = calloc(1, sizeof(*(env->sc_pf)))) == NULL)
 		fatal("calloc");
@@ -72,6 +76,9 @@ init_tables(struct relayd *env)
 	struct rdr		*rdr;
 	struct pfr_table	*tables;
 	struct pfioc_table	 io;
+
+	if (!(env->sc_flags & F_NEEDPF))
+		return;
 
 	if ((tables = calloc(env->sc_rdrcount, sizeof(*tables))) == NULL)
 		fatal("calloc");
@@ -125,6 +132,9 @@ kill_tables(struct relayd *env) {
 	struct pfioc_table	 io;
 	struct rdr		*rdr;
 
+	if (!(env->sc_flags & F_NEEDPF))
+		return;
+
 	memset(&io, 0, sizeof(io));
 	TAILQ_FOREACH(rdr, env->sc_rdrs, entry) {
 		if (strlcpy(io.pfrio_table.pfrt_anchor, RELAYD_ANCHOR "/",
@@ -152,6 +162,9 @@ sync_table(struct relayd *env, struct rdr *rdr, struct table *table)
 	struct sockaddr_in	*sain;
 	struct sockaddr_in6	*sain6;
 	struct host		*host;
+
+	if (!(env->sc_flags & F_NEEDPF))
+		return;
 
 	if (table == NULL)
 		return;
@@ -211,7 +224,11 @@ sync_table(struct relayd *env, struct rdr *rdr, struct table *table)
 
 	if (ioctl(env->sc_pf->dev, DIOCRSETADDRS, &io) == -1)
 		fatal("sync_table: cannot set address list");
-
+	if (rdr->conf.flags & F_STICKY) {
+		if (ioctl(env->sc_pf->dev, DIOCCLRSRCNODES, 0) == -1)
+			fatal("sync_table: cannot clear the tree of "
+			    "source tracking nodes");
+	}
 	free(addlist);
 
 	log_debug("sync_table: table %s: %d added, %d deleted, %d changed",
@@ -228,6 +245,9 @@ flush_table(struct relayd *env, struct rdr *rdr)
 {
 	struct pfioc_table	io;
 
+	if (!(env->sc_flags & F_NEEDPF))
+		return;
+
 	memset(&io, 0, sizeof(io));
 	if (strlcpy(io.pfrio_table.pfrt_anchor, RELAYD_ANCHOR "/",
 	    sizeof(io.pfrio_table.pfrt_anchor)) >= PF_ANCHOR_NAME_SIZE)
@@ -241,8 +261,13 @@ flush_table(struct relayd *env, struct rdr *rdr)
 		goto toolong;
 	if (ioctl(env->sc_pf->dev, DIOCRCLRADDRS, &io) == -1)
 		fatal("flush_table: cannot flush table addresses");
+
+	io.pfrio_esize = sizeof(io.pfrio_table);
+	io.pfrio_size = 1;
+	io.pfrio_buffer = &io.pfrio_table;
 	if (ioctl(env->sc_pf->dev, DIOCRCLRTSTATS, &io) == -1)
 		fatal("flush_table: cannot flush table stats");
+
 	log_debug("flush_table: flushed table %s", rdr->conf.name);
 	return;
 
@@ -253,24 +278,35 @@ flush_table(struct relayd *env, struct rdr *rdr)
 int
 transaction_init(struct relayd *env, const char *anchor)
 {
-	env->sc_pf->pft.size = 1;
-	env->sc_pf->pft.esize = sizeof env->sc_pf->pfte;
-	env->sc_pf->pft.array = &env->sc_pf->pfte;
+	int i;
 
-	memset(&env->sc_pf->pfte, 0, sizeof env->sc_pf->pfte);
-	(void)strlcpy(env->sc_pf->pfte.anchor, anchor, PF_ANCHOR_NAME_SIZE);
-	env->sc_pf->pfte.rs_num = PF_RULESET_RDR;
+	for (i = 0; i < PF_RULESET_MAX; i++) {
+		env->sc_pf->pft[i].size = 1;
+		env->sc_pf->pft[i].esize = sizeof(env->sc_pf->pfte[i]);
+		env->sc_pf->pft[i].array = &env->sc_pf->pfte[i];
+	
+		bzero(&env->sc_pf->pfte[i], sizeof(env->sc_pf->pfte[i]));
+		(void)strlcpy(env->sc_pf->pfte[i].anchor,
+		    anchor, PF_ANCHOR_NAME_SIZE);
+		env->sc_pf->pfte[i].rs_num = i;
 
-	if (ioctl(env->sc_pf->dev, DIOCXBEGIN, &env->sc_pf->pft) == -1)
-		return (-1);
+		if (ioctl(env->sc_pf->dev, DIOCXBEGIN,
+		    &env->sc_pf->pft[i]) == -1)
+			return (-1);
+	}
 	return (0);
 }
 
 int
 transaction_commit(struct relayd *env)
 {
-	if (ioctl(env->sc_pf->dev, DIOCXCOMMIT, &env->sc_pf->pft) == -1)
-		return (-1);
+	int i;
+
+	for (i = 0; i < PF_RULESET_MAX; i++) {
+		if (ioctl(env->sc_pf->dev, DIOCXCOMMIT,
+		    &env->sc_pf->pft[i]) == -1)
+			return (-1);
+	}
 	return (0);
 }
 
@@ -283,6 +319,11 @@ sync_ruleset(struct relayd *env, struct rdr *rdr, int enable)
 	struct sockaddr_in6	*sain6;
 	struct address		*address;
 	char			 anchor[PF_ANCHOR_NAME_SIZE];
+	int			 rs;
+	struct table		*t = rdr->table;
+
+	if (!(env->sc_flags & F_NEEDPF))
+		return;
 
 	bzero(anchor, sizeof(anchor));
 	if (strlcpy(anchor, RELAYD_ANCHOR "/", sizeof(anchor)) >=
@@ -310,7 +351,32 @@ sync_ruleset(struct relayd *env, struct rdr *rdr, int enable)
 		memset(&pio, 0, sizeof(pio));
 		(void)strlcpy(rio.anchor, anchor, sizeof(rio.anchor));
 
-		rio.ticket = env->sc_pf->pfte.ticket;
+		switch (t->conf.fwdmode) {
+		case FWD_NORMAL:
+			/* traditional redirection in the rdr-anchor */
+			rs = PF_RULESET_RDR;
+			rio.rule.action = PF_RDR;
+			break;
+		case FWD_ROUTE:
+			/* re-route with pf for DSR (direct server return) */
+			rs = PF_RULESET_FILTER;
+			rio.rule.action = PF_PASS;
+			rio.rule.rt = PF_ROUTETO;
+			rio.rule.direction = PF_IN;
+			rio.rule.quick = 1; /* force first match */
+
+			/* Use sloppy state handling for half connections */
+			rio.rule.keep_state = PF_STATE_NORMAL;
+			rio.rule.rule_flag = PFRULE_STATESLOPPY;
+			break;
+		default:
+			fatalx("sync_ruleset: invalid forward mode");
+			/* NOTREACHED */
+		}
+
+		rio.rule.timeout[PFTM_TCP_ESTABLISHED] =
+		    rdr->conf.timeout.tv_sec;
+		rio.ticket = env->sc_pf->pfte[rs].ticket;
 		if (ioctl(env->sc_pf->dev, DIOCBEGINADDRS, &pio) == -1)
 			fatal("sync_ruleset: cannot initialise address pool");
 
@@ -322,7 +388,7 @@ sync_ruleset(struct relayd *env, struct rdr *rdr, int enable)
 		rio.rule.dst.port_op = PF_OP_EQ;
 		rio.rule.dst.port[0] = address->port;
 		rio.rule.rtableid = -1; /* stay in the main routing table */
-		rio.rule.action = PF_RDR;
+
 		if (strlen(rdr->conf.tag))
 			(void)strlcpy(rio.rule.tagname, rdr->conf.tag,
 			    sizeof(rio.rule.tagname));
@@ -336,7 +402,6 @@ sync_ruleset(struct relayd *env, struct rdr *rdr, int enable)
 			rio.rule.dst.addr.v.a.addr.addr32[0] =
 			    sain->sin_addr.s_addr;
 			rio.rule.dst.addr.v.a.mask.addr32[0] = 0xffffffff;
-
 		} else {
 			sain6 = (struct sockaddr_in6 *)&address->ss;
 
@@ -347,6 +412,9 @@ sync_ruleset(struct relayd *env, struct rdr *rdr, int enable)
 		}
 
 		pio.addr.addr.type = PF_ADDR_TABLE;
+		if (strlen(t->conf.ifname))
+			(void)strlcpy(pio.addr.ifname, t->conf.ifname,
+			    sizeof(pio.addr.ifname));
 		if (strlcpy(pio.addr.addr.v.tblname, rdr->conf.name,
 		    sizeof(pio.addr.addr.v.tblname)) >=
 		    sizeof(pio.addr.addr.v.tblname))
@@ -362,7 +430,9 @@ sync_ruleset(struct relayd *env, struct rdr *rdr, int enable)
 
 		if (ioctl(env->sc_pf->dev, DIOCADDRULE, &rio) == -1)
 			fatal("cannot add rule");
-		log_debug("sync_ruleset: rule added");
+		log_debug("sync_ruleset: rule added to %sanchor \"%s\"",
+		    rdr->table->conf.fwdmode == FWD_ROUTE ?
+		    "" : "rdr-", anchor);
 	}
 	if (transaction_commit(env) == -1)
 		log_warn("sync_ruleset: add rules transaction failed");
@@ -377,6 +447,9 @@ flush_rulesets(struct relayd *env)
 {
 	struct rdr	*rdr;
 	char		 anchor[PF_ANCHOR_NAME_SIZE];
+
+	if (!(env->sc_flags & F_NEEDPF))
+		return;
 
 	kill_tables(env);
 	TAILQ_FOREACH(rdr, env->sc_rdrs, entry) {
@@ -413,6 +486,9 @@ natlook(struct relayd *env, struct ctl_natlook *cnl)
 	struct sockaddr_in6	*in6, *out6;
 	char			 ibuf[BUFSIZ], obuf[BUFSIZ];
 
+	if (!(env->sc_flags & F_NEEDPF))
+		return (0);
+
 	bzero(&pnl, sizeof(pnl));
 
 	if ((pnl.af = cnl->src.ss_family) != cnl->dst.ss_family)
@@ -421,20 +497,20 @@ natlook(struct relayd *env, struct ctl_natlook *cnl)
 	case AF_INET:
 		in = (struct sockaddr_in *)&cnl->src;
 		out = (struct sockaddr_in *)&cnl->dst;
-		bcopy(&in->sin_addr, &pnl.saddr.addr8, in->sin_len);
+		bcopy(&in->sin_addr, &pnl.saddr.v4, sizeof(pnl.saddr.v4));
 		pnl.sport = in->sin_port;
-		bcopy(&out->sin_addr, &pnl.daddr.addr8, out->sin_len);
+		bcopy(&out->sin_addr, &pnl.daddr.v4, sizeof(pnl.daddr.v4));
 		pnl.dport = out->sin_port;
 		break;
 	case AF_INET6:
 		in6 = (struct sockaddr_in6 *)&cnl->src;
 		out6 = (struct sockaddr_in6 *)&cnl->dst;
-		bcopy(&in6->sin6_addr, &pnl.saddr.addr8, in6->sin6_len);
+		bcopy(&in6->sin6_addr, &pnl.saddr.v6, sizeof(pnl.saddr.v6));
 		pnl.sport = in6->sin6_port;
-		bcopy(&out6->sin6_addr, &pnl.daddr.addr8, out6->sin6_len);
+		bcopy(&out6->sin6_addr, &pnl.daddr.v6, sizeof(pnl.daddr.v6));
 		pnl.dport = out6->sin6_port;
 	}
-	pnl.proto = IPPROTO_TCP;
+	pnl.proto = cnl->proto;
 	pnl.direction = PF_IN;
 	cnl->in = 1;
 
@@ -442,7 +518,7 @@ natlook(struct relayd *env, struct ctl_natlook *cnl)
 		pnl.direction = PF_OUT;
 		cnl->in = 0;
 		if (ioctl(env->sc_pf->dev, DIOCNATLOOK, &pnl) == -1) {
-			log_debug("natlook: error");
+			log_debug("natlook: error: %s", strerror(errno));
 			return (-1);
 		}
 	}
@@ -457,17 +533,16 @@ natlook(struct relayd *env, struct ctl_natlook *cnl)
 	case AF_INET:
 		in = (struct sockaddr_in *)&cnl->rsrc;
 		out = (struct sockaddr_in *)&cnl->rdst;
-		bcopy(&pnl.rsaddr.addr8, &in->sin_addr, sizeof(in->sin_addr));
+		bcopy(&pnl.rsaddr.v4, &in->sin_addr, sizeof(in->sin_addr));
 		in->sin_port = pnl.rsport;
-		bcopy(&pnl.rdaddr.addr8, &out->sin_addr, sizeof(out->sin_addr));
+		bcopy(&pnl.rdaddr.v4, &out->sin_addr, sizeof(out->sin_addr));
 		out->sin_port = pnl.rdport;
 		break;
 	case AF_INET6:
 		in6 = (struct sockaddr_in6 *)&cnl->rsrc;
 		out6 = (struct sockaddr_in6 *)&cnl->rdst;
-		bcopy(&pnl.rsaddr.addr8, &in6->sin6_addr,
-		    sizeof(in6->sin6_addr));
-		bcopy(&pnl.rdaddr.addr8, &out6->sin6_addr,
+		bcopy(&pnl.rsaddr.v6, &in6->sin6_addr, sizeof(in6->sin6_addr));
+		bcopy(&pnl.rdaddr.v6, &out6->sin6_addr,
 		    sizeof(out6->sin6_addr));
 		break;
 	}

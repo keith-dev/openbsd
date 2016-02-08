@@ -1,4 +1,4 @@
-/*      $OpenBSD: athvar.h,v 1.20 2007/06/06 21:41:32 reyk Exp $  */
+/*      $OpenBSD: athvar.h,v 1.24 2008/07/29 00:18:25 reyk Exp $  */
 /*	$NetBSD: athvar.h,v 1.10 2004/08/10 01:03:53 dyoung Exp $	*/
 
 /*-
@@ -43,6 +43,8 @@
 
 #include <net80211/ieee80211_radiotap.h>
 #include <dev/ic/ar5xxx.h>
+
+#include "bpfilter.h"
 
 #ifdef notyet
 #include "gpio.h"
@@ -212,12 +214,13 @@ struct ath_softc {
 					const struct ieee80211_node *);
 	void			(*sc_recv_mgmt)(struct ieee80211com *,
 				    struct mbuf *, struct ieee80211_node *,
-				    int, int, u_int32_t);
+				    struct ieee80211_rxinfo *, int);
 #ifdef __FreeBSD__
 	device_t		sc_dev;
 #endif
 	bus_space_tag_t		sc_st;		/* bus space tag */
 	bus_space_handle_t	sc_sh;		/* bus space handle */
+	bus_size_t		sc_ss;		/* bus space size */
 	bus_dma_tag_t		sc_dmat;	/* bus DMA tag */
 #ifdef __FreeBSD__
 	struct mtx		sc_mtx;		/* master lock (recursive) */
@@ -228,7 +231,7 @@ struct ath_softc {
 				sc_veol : 1,	/* tx VEOL support */
 				sc_softled : 1,	/* GPIO software LED */
 				sc_probing : 1,	/* probing AP on beacon miss */
-				sc_64bit : 1;	/* indicates PCI Express */
+				sc_pcie : 1;	/* indicates PCI Express */
 	u_int			sc_nchan;	/* number of valid channels */
 	const HAL_RATE_TABLE	*sc_rates[IEEE80211_MODE_MAX];
 	const HAL_RATE_TABLE	*sc_currates;	/* current rate table */

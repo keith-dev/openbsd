@@ -1,4 +1,4 @@
-/*	$OpenBSD: auvia.c,v 1.34 2008/01/15 02:52:50 jakemsr Exp $ */
+/*	$OpenBSD: auvia.c,v 1.39 2008/06/26 05:42:17 ray Exp $ */
 /*	$NetBSD: auvia.c,v 1.28 2002/11/04 16:38:49 kent Exp $	*/
 
 /*-
@@ -16,13 +16,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -88,6 +81,7 @@ void	auvia_set_params_sub(struct auvia_softc *, struct auvia_softc_chan *,
 	struct audio_params *);
 int	auvia_set_params(void *, int, int, struct audio_params *,
 	struct audio_params *);
+void	auvia_get_default_params(void *, int, struct audio_params *);
 int	auvia_round_blocksize(void *, int);
 int	auvia_halt_output(void *);
 int	auvia_halt_input(void *);
@@ -210,7 +204,8 @@ struct audio_hw_if auvia_hw_if = {
 	auvia_mappage,
 	auvia_get_props,
 	auvia_trigger_output,
-	auvia_trigger_input
+	auvia_trigger_input,
+	auvia_get_default_params
 };
 
 int	auvia_attach_codec(void *, struct ac97_codec_if *);
@@ -576,6 +571,11 @@ auvia_set_params_sub(struct auvia_softc *sc, struct auvia_softc_chan *ch,
 	}
 }
 
+void
+auvia_get_default_params(void *addr, int mode, struct audio_params *params)
+{
+	ac97_get_default_params(params);
+}
 
 int
 auvia_set_params(void *addr, int setmode, int usemode,
@@ -877,8 +877,16 @@ auvia_mappage(void *addr, void *mem, off_t off, int prot)
 int
 auvia_get_props(void *addr)
 {
-	return (AUDIO_PROP_MMAP |  AUDIO_PROP_INDEPENDENT |
-	    AUDIO_PROP_FULLDUPLEX);
+	struct auvia_softc *sc = addr;
+	int props;
+
+	props = AUDIO_PROP_MMAP | AUDIO_PROP_INDEPENDENT; 
+
+	/* recording doesn't work correctly on 8233 based devices */
+	if (!(sc->sc_flags & AUVIA_FLAGS_VT8233))
+		props |= AUDIO_PROP_FULLDUPLEX;
+
+	return  props;
 }
 
 

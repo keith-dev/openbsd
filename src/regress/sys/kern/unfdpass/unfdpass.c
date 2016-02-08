@@ -1,4 +1,4 @@
-/*	$OpenBSD: unfdpass.c,v 1.12 2004/08/30 18:13:14 millert Exp $	*/
+/*	$OpenBSD: unfdpass.c,v 1.16 2008/06/26 05:42:06 ray Exp $	*/
 /*	$NetBSD: unfdpass.c,v 1.3 1998/06/24 23:51:30 thorpej Exp $	*/
 
 /*-
@@ -17,13 +17,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -74,7 +67,10 @@ main(int argc, char *argv[])
 	struct sockaddr_un sun, csun;
 	int csunlen;
 	pid_t pid;
-	char message[CMSG_SPACE(sizeof(int) * 2)];
+	union {
+		struct cmsghdr hdr;
+		char buf[CMSG_SPACE(sizeof(int) * 3)];
+	} cmsgbuf;
 	int pflag;
 	extern char *__progname;
 
@@ -93,7 +89,7 @@ main(int argc, char *argv[])
 	/*
 	 * Create the test files.
 	 */
-	for (i = 0; i < 2; i++) {
+	for (i = 0; i < 3; i++) {
 		(void) snprintf(fname, sizeof fname, "file%d", i + 1);
 		if ((fd = open(fname, O_WRONLY|O_CREAT|O_TRUNC, 0666)) == -1)
 			err(1, "open %s", fname);
@@ -169,8 +165,8 @@ main(int argc, char *argv[])
 	 * Grab the descriptors passed to us.
 	 */
 	(void) memset(&msg, 0, sizeof(msg));
-	msg.msg_control = message;
-	msg.msg_controllen = CMSG_LEN(sizeof(int) * 2);
+	msg.msg_control = &cmsgbuf.buf;
+	msg.msg_controllen = sizeof(cmsgbuf.buf);
 
 	if (recvmsg(sock, &msg, 0) < 0)
 		err(1, "recvmsg");
@@ -191,7 +187,7 @@ main(int argc, char *argv[])
 
 		switch (cmp->cmsg_type) {
 		case SCM_RIGHTS:
-			if (cmp->cmsg_len != CMSG_LEN(sizeof(int) * 2))
+			if (cmp->cmsg_len != CMSG_LEN(sizeof(int) * 3))
 				errx(1, "bad fd control message length %d",
 				    cmp->cmsg_len);
 
@@ -210,7 +206,7 @@ main(int argc, char *argv[])
 	if (files == NULL)
 		warnx("didn't get fd control message");
 	else {
-		for (i = 0; i < 2; i++) {
+		for (i = 0; i < 3; i++) {
 			(void) memset(buf, 0, sizeof(buf));
 			if (read(files[i], buf, sizeof(buf)) <= 0)
 				err(1, "read file %d (%d)", i + 1, files[i]);
@@ -243,7 +239,10 @@ child(int sock)
 	struct cmsghdr *cmp;
 	int i, fd;
 	struct sockaddr_un sun;
-	char cmsgbuf[CMSG_SPACE(sizeof(int) * 2)];
+	union {
+		struct cmsghdr hdr;
+		char buf[CMSG_SPACE(sizeof(int) * 3)];
+	} cmsgbuf;
 	int *files;
 
 	/*
@@ -263,11 +262,11 @@ child(int sock)
 	}
 
 	(void) memset(&msg, 0, sizeof(msg));
-	msg.msg_control = cmsgbuf;
-	msg.msg_controllen = CMSG_LEN(sizeof(int) * 2);
+	msg.msg_control = &cmsgbuf.buf;
+	msg.msg_controllen = sizeof(cmsgbuf.buf);
 
 	cmp = CMSG_FIRSTHDR(&msg);
-	cmp->cmsg_len = CMSG_LEN(sizeof(int) * 2);
+	cmp->cmsg_len = CMSG_LEN(sizeof(int) * 3);
 	cmp->cmsg_level = SOL_SOCKET;
 	cmp->cmsg_type = SCM_RIGHTS;
 
@@ -275,7 +274,7 @@ child(int sock)
 	 * Open the files again, and pass them to the child over the socket.
 	 */
 	files = (int *)CMSG_DATA(cmp);
-	for (i = 0; i < 2; i++) {
+	for (i = 0; i < 3; i++) {
 		(void) snprintf(fname, sizeof fname, "file%d", i + 1);
 		if ((fd = open(fname, O_RDONLY, 0666)) == -1)
 			err(1, "child open %s", fname);

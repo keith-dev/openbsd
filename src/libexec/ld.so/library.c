@@ -1,4 +1,4 @@
-/*	$OpenBSD: library.c,v 1.54 2006/05/08 20:34:36 deraadt Exp $ */
+/*	$OpenBSD: library.c,v 1.57 2008/05/05 02:29:02 kurt Exp $ */
 
 /*
  * Copyright (c) 2002 Dale Rahn
@@ -69,7 +69,7 @@ _dl_unload_shlib(elf_object_t *object)
 			_dl_unload_shlib(n->data);
 		DL_DEB(("unload_shlib unloading on %s\n", object->load_name));
 		_dl_load_list_free(object->load_list);
-		_dl_munmap((void *)object->load_addr, object->load_size);
+		_dl_munmap((void *)object->load_base, object->load_size);
 		_dl_remove_object(object);
 	}
 }
@@ -79,7 +79,7 @@ _dl_tryload_shlib(const char *libname, int type, int flags)
 {
 	int	libfile, i, align = _dl_pagesz - 1;
 	struct load_list *next_load, *load_list = NULL;
-	Elf_Addr maxva = 0, minva = 0x7fffffff;	/* XXX Correct for 64bit? */
+	Elf_Addr maxva = 0, minva = ELFDEFNNAME(NO_ADDR);
 	Elf_Addr libaddr, loff;
 	elf_object_t *object;
 	char	hbuf[4096];
@@ -243,7 +243,9 @@ _dl_tryload_shlib(const char *libname, int type, int flags)
 	_dl_close(libfile);
 
 	dynp = (Elf_Dyn *)((unsigned long)dynp + loff);
-	object = _dl_finalize_object(libname, dynp, 0, type, libaddr, loff);
+	object = _dl_finalize_object(libname, dynp,
+	    (Elf_Phdr *)((char *)libaddr + ehdr->e_phoff), ehdr->e_phnum,type,
+	    libaddr, loff);
 	if (object) {
 		object->prebind_data = prebind_data;
 		object->load_size = maxva - minva;	/*XXX*/

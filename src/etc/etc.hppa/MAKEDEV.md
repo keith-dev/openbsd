@@ -1,5 +1,6 @@
+define(MACHINE,hppa)dnl
 vers(__file__,
-	{-$OpenBSD: MAKEDEV.md,v 1.30 2007/05/28 22:26:02 todd Exp $-},
+	{-$OpenBSD: MAKEDEV.md,v 1.35 2008/06/28 21:46:05 mglocker Exp $-},
 etc.MACHINE)dnl
 dnl
 dnl Copyright (c) 2001-2006 Todd T. Fries <todd@OpenBSD.org>
@@ -74,13 +75,14 @@ _DEV(ss, 14)
 _DEV(systrace, 34)
 _DEV(tun, 18)
 _DEV(uk, 15)
+_DEV(vi, 33)
 _DEV(xfs, 32)
 dnl
 divert(__mddivert)dnl
 dnl
 ramdisk)
 	_recurse std fd st0 st1 sd0 sd1 sd2 sd3 rd0
-	_recurse pty0 bpf0 bpf1 tun0 tun1 lkm random
+	_recurse pty0 bpf0 bpf1 tun0 tun1 lkm bio
 	;;
 
 _std(1, 2, 25, 3, 6)

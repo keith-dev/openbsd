@@ -1,4 +1,4 @@
-/*	$OpenBSD: atactl.c,v 1.38 2007/09/02 15:19:23 deraadt Exp $	*/
+/*	$OpenBSD: atactl.c,v 1.40 2008/07/05 21:13:47 sobrado Exp $	*/
 /*	$NetBSD: atactl.c,v 1.4 1999/02/24 18:49:14 jwise Exp $	*/
 
 /*-
@@ -16,13 +16,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -384,8 +377,7 @@ __dead void
 usage(void)
 {
 
-	fprintf(stderr, "usage: %s <device> [command [arg]]\n",
-	    __progname);
+	fprintf(stderr, "usage: %s device [command [arg]]\n", __progname);
 	exit(1);
 }
 
@@ -729,7 +721,7 @@ device_dump(int argc, char *argv[])
 	return;
 
 usage:
-	fprintf(stderr, "usage: %s <device> %s\n", __progname, argv[0]);
+	fprintf(stderr, "usage: %s device %s\n", __progname, argv[0]);
 	exit(1);
 }
 
@@ -857,7 +849,7 @@ device_identify(int argc, char *argv[])
 	return;
 
 usage:
-	fprintf(stderr, "usage: %s <device> %s\n", __progname, argv[0]);
+	fprintf(stderr, "usage: %s device %s\n", __progname, argv[0]);
 	exit(1);
 }
 
@@ -889,7 +881,7 @@ device_idle(int argc, char *argv[])
 
 	return;
 usage:
-	fprintf(stderr, "usage: %s <device> %s\n", __progname, argv[0]);
+	fprintf(stderr, "usage: %s device %s\n", __progname, argv[0]);
 	exit(1);
 }
 
@@ -962,9 +954,9 @@ device_sec_setpass(int argc, char *argv[])
 
 	return;
 usage:
-	fprintf(stderr, "usage: %s <device> %s user high | maximum\n",
+	fprintf(stderr, "usage: %s device %s user high|maximum\n",
 	    __progname, argv[0]);
-	fprintf(stderr, "usage: %s <device> %s master\n", __progname, argv[0]);
+	fprintf(stderr, "       %s device %s master\n", __progname, argv[0]);
 	exit(1);
 }
 
@@ -1005,7 +997,7 @@ device_sec_unlock(int argc, char *argv[])
 
 	return;
 usage:
-	fprintf(stderr, "usage: %s <device> %s user | master\n", __progname,
+	fprintf(stderr, "usage: %s device %s user|master\n", __progname,
 	    argv[0]);
 	exit(1);
 }
@@ -1061,7 +1053,7 @@ device_sec_erase(int argc, char *argv[])
 
 	return;
 usage:
-	fprintf(stderr, "usage: %s <device> %s user | master [enhanced]\n",
+	fprintf(stderr, "usage: %s device %s user|master [enhanced]\n",
 	    __progname, argv[0]);
 	exit(1);
 }
@@ -1086,7 +1078,7 @@ device_sec_freeze(int argc, char *argv[])
 
 	return;
 usage:
-	fprintf(stderr, "usage: %s <device> %s\n", __progname, argv[0]);
+	fprintf(stderr, "usage: %s device %s\n", __progname, argv[0]);
 	exit(1);
 }
 
@@ -1127,7 +1119,7 @@ device_sec_disablepass(int argc, char *argv[])
 
 	return;
 usage:
-	fprintf(stderr, "usage: %s <device> %s user | master\n", __progname,
+	fprintf(stderr, "usage: %s device %s user|master\n", __progname,
 	    argv[0]);
 	exit(1);
 }
@@ -1176,7 +1168,7 @@ device_smart_enable(int argc, char *argv[])
 
 	return;
 usage:
-	fprintf(stderr, "usage: %s <device> %s\n", __progname, argv[0]);
+	fprintf(stderr, "usage: %s device %s\n", __progname, argv[0]);
 	exit(1);
 }
 
@@ -1202,7 +1194,7 @@ device_smart_disable(int argc, char *argv[])
 
 	return;
 usage:
-	fprintf(stderr, "usage: %s <device> %s\n", __progname, argv[0]);
+	fprintf(stderr, "usage: %s device %s\n", __progname, argv[0]);
 	exit(1);
 }
 
@@ -1236,7 +1228,7 @@ device_smart_status(int argc, char *argv[])
 
 	return;
 usage:
-	fprintf(stderr, "usage: %s <device> %s\n", __progname, argv[0]);
+	fprintf(stderr, "usage: %s device %s\n", __progname, argv[0]);
 	exit(1);
 }
 
@@ -1266,7 +1258,7 @@ device_smart_autosave(int argc, char *argv[])
 
 	return;
 usage:
-	fprintf(stderr, "usage: %s <device> %s enable | disable\n", __progname,
+	fprintf(stderr, "usage: %s device %s enable|disable\n", __progname,
 	    argv[0]);
 	exit(1);
 }
@@ -1297,7 +1289,7 @@ device_smart_offline(int argc, char *argv[])
 
 	return;
 usage:
-	fprintf(stderr, "usage: %s <device> %s <subcommand>\n", __progname,
+	fprintf(stderr, "usage: %s device %s subcommand\n", __progname,
 	    argv[0]);
 	exit(1);
 }
@@ -1356,7 +1348,7 @@ device_smart_read(int argc, char *argv[])
 
 	return;
 usage:
-	fprintf(stderr, "usage: %s <device> %s\n", __progname, argv[0]);
+	fprintf(stderr, "usage: %s device %s\n", __progname, argv[0]);
 	exit(1);
 }
 
@@ -1523,7 +1515,7 @@ device_smart_readlog(int argc, char *argv[])
 
 	return;
 usage:
-	fprintf(stderr, "usage: %s <device> %s <log>\n", __progname, argv[0]);
+	fprintf(stderr, "usage: %s device %s log\n", __progname, argv[0]);
 	exit(1);
 }
 
@@ -1664,7 +1656,7 @@ device_attr(int argc, char *argv[])
 	return;
 
 usage:
-	fprintf(stderr, "usage: %s <device> %s\n", __progname, argv[0]);
+	fprintf(stderr, "usage: %s device %s\n", __progname, argv[0]);
 	exit(1);
 }
 
@@ -1699,7 +1691,7 @@ device_acoustic(int argc, char *argv[])
 	return;
 
 usage:
-	fprintf(stderr, "usage: %s <device> %s <acoustic-management-value>\n",
+	fprintf(stderr, "usage: %s device %s acoustic-management-level\n",
 	    __progname, argv[0]);
 	exit(1);
 }
@@ -1737,7 +1729,7 @@ device_apm(int argc, char *argv[])
 	return;
 
 usage:
-	fprintf(stderr, "usage: %s <device> %s <power-management-level>\n",
+	fprintf(stderr, "usage: %s device %s power-management-level\n",
 	    __progname, argv[0]);
 	exit(1);
 }
@@ -1790,7 +1782,7 @@ device_feature(int argc, char *argv[])
 	return;
 
 usage:
-	fprintf(stderr, "usage: %s <device> %s\n", __progname, argv[0]);
+	fprintf(stderr, "usage: %s device %s\n", __progname, argv[0]);
 	exit(1);
 }
 
@@ -1837,8 +1829,8 @@ device_setidle(int argc, char *argv[])
 	return;
 
 usage:
-	fprintf(stderr, "usage: %s <device> %s <idle-time>\n", __progname,
-	    argv[0]);
+	fprintf(stderr, "usage: %s device %s %s\n", __progname, argv[0],
+	    (strcmp(argv[0], "setidle") == 0) ? "idle-timer" : "standby-timer");
 	exit(1);
 }
 
@@ -1879,6 +1871,6 @@ device_checkpower(int argc, char *argv[])
 
 	return;
 usage:
-	fprintf(stderr, "usage: %s <device> %s\n", __progname, argv[0]);
+	fprintf(stderr, "usage: %s device %s\n", __progname, argv[0]);
 	exit(1);
 }

@@ -1,4 +1,4 @@
-/*	$OpenBSD: conf.c,v 1.55 2007/06/20 18:28:56 miod Exp $	*/
+/*	$OpenBSD: conf.c,v 1.57 2008/06/12 20:03:48 mglocker Exp $	*/
 /*	$NetBSD: conf.c,v 1.16 1996/10/18 21:26:57 cgd Exp $	*/
 
 /*-
@@ -91,6 +91,7 @@ cdev_decl(mm);
 #include "scc.h"
 cdev_decl(scc);
 #include "audio.h"
+#include "video.h"
 #include "com.h"
 cdev_decl(com);
 #include "wsdisplay.h"
@@ -143,11 +144,11 @@ struct cdevsw	cdevsw[] =
 	cdev_tty_init(NPTY,pts),	/* 4: pseudo-tty slave */
 	cdev_ptc_init(NPTY,ptc),	/* 5: pseudo-tty master */
 	cdev_log_init(1,log),		/* 6: /dev/klog */
-	cdev_bpftun_init(NTUN,tun),	/* 7: network tunnel */
+	cdev_tun_init(NTUN,tun),	/* 7: network tunnel */
 	cdev_disk_init(NSD,sd),		/* 8: SCSI disk */
 	cdev_disk_init(NVND,vnd),	/* 9: vnode disk driver */
 	cdev_fd_init(1,filedesc),	/* 10: file descriptor pseudo-dev */
-	cdev_bpftun_init(NBPFILTER,bpf),/* 11: Berkeley packet filter */
+	cdev_bpf_init(NBPFILTER,bpf),	/* 11: Berkeley packet filter */
 	cdev_tape_init(NST,st),		/* 12: SCSI tape */
 	cdev_disk_init(NCD,cd),		/* 13: SCSI CD-ROM */
 	cdev_ch_init(NCH,ch),		/* 14: SCSI autochanger */
@@ -180,7 +181,7 @@ struct cdevsw	cdevsw[] =
 	cdev_midi_init(NMIDI,midi),     /* 41: MIDI I/O */
         cdev_midi_init(NSEQUENCER,sequencer),   /* 42: sequencer I/O */
 	cdev_disk_init(NRAID,raid),	/* 43: RAIDframe disk driver */
-	cdev_notdef(),			/* 44 */
+	cdev_video_init(NVIDEO,video),	/* 44: generic video I/O */
 	cdev_usb_init(NUSB,usb),	/* 45: USB controller */
 	cdev_usbdev_init(NUHID,uhid),	/* 46: USB generic HID */
 	cdev_ulpt_init(NULPT,ulpt),	/* 47: USB printer */

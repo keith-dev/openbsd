@@ -1,4 +1,4 @@
-/*	$OpenBSD: vnd.c,v 1.84 2007/10/15 01:37:49 fgsch Exp $	*/
+/*	$OpenBSD: vnd.c,v 1.88 2008/07/23 16:24:43 beck Exp $	*/
 /*	$NetBSD: vnd.c,v 1.26 1996/03/30 23:06:11 christos Exp $	*/
 
 /*
@@ -160,7 +160,7 @@ void	vndstart(struct vnd_softc *);
 int	vndsetcred(struct vnd_softc *, struct ucred *);
 void	vndiodone(struct buf *);
 void	vndshutdown(void);
-void	vndgetdisklabel(dev_t, struct vnd_softc *);
+void	vndgetdisklabel(dev_t, struct vnd_softc *, struct disklabel *, int);
 void	vndencrypt(struct vnd_softc *, caddr_t, size_t, daddr64_t, int);
 size_t	vndbdevsize(struct vnode *, struct proc *);
 
@@ -245,7 +245,7 @@ vndopen(dev_t dev, int flags, int mode, struct proc *p)
 	if ((sc->sc_flags & VNF_INITED) &&
 	    (sc->sc_flags & VNF_HAVELABEL) == 0) {
 		sc->sc_flags |= VNF_HAVELABEL;
-		vndgetdisklabel(dev, sc);
+		vndgetdisklabel(dev, sc, sc->sc_dk.dk_label, 0);
 	}
 
 	part = DISKPART(dev);
@@ -298,14 +298,14 @@ bad:
  * Load the label information on the named device
  */
 void
-vndgetdisklabel(dev_t dev, struct vnd_softc *sc)
+vndgetdisklabel(dev_t dev, struct vnd_softc *sc, struct disklabel *lp,
+    int spoofonly)
 {
-	struct disklabel *lp = sc->sc_dk.dk_label;
 	char *errstring = NULL;
 
 	bzero(lp, sizeof(struct disklabel));
 
-	lp->d_secsize = 512;
+	lp->d_secsize = DEV_BSIZE;
 	lp->d_ntracks = 1;
 	lp->d_nsectors = 100;
 	lp->d_ncylinders = sc->sc_size / 100;
@@ -325,7 +325,7 @@ vndgetdisklabel(dev_t dev, struct vnd_softc *sc)
 	lp->d_checksum = dkcksum(lp);
 
 	/* Call the generic disklabel extraction routine */
-	errstring = readdisklabel(VNDLABELDEV(dev), vndstrategy, lp, 0);
+	errstring = readdisklabel(VNDLABELDEV(dev), vndstrategy, lp, spoofonly);
 	if (errstring) {
 		DNPRINTF(VDB_IO, "%s: %s\n", sc->sc_dev.dv_xname,
 		    errstring);
@@ -652,6 +652,8 @@ vndiodone(struct buf *bp)
 		    vbp->vb_buf.b_error);
 
 		pbp->b_flags |= B_ERROR;
+		/* XXX does this matter here? */
+		(&vbp->vb_buf)->b_flags |= B_RAW;
 		pbp->b_error = biowait(&vbp->vb_buf);
 	}
 	pbp->b_resid -= vbp->vb_buf.b_bcount;
@@ -922,6 +924,12 @@ vndioctl(dev_t dev, u_long cmd, caddr_t addr, int flag, struct proc *p)
 		}
 
 		break;
+
+	case DIOCGPDINFO:
+		if ((vnd->sc_flags & VNF_HAVELABEL) == 0)
+			return (ENOTTY);
+		vndgetdisklabel(dev, vnd, (struct disklabel *)addr, 1);
+		return (0);
 
 	case DIOCGDINFO:
 		if ((vnd->sc_flags & VNF_HAVELABEL) == 0)

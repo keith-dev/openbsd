@@ -1,4 +1,4 @@
-/*	$OpenBSD: subr_pool.c,v 1.58 2007/12/11 15:04:58 tedu Exp $	*/
+/*	$OpenBSD: subr_pool.c,v 1.62 2008/06/26 05:42:20 ray Exp $	*/
 /*	$NetBSD: subr_pool.c,v 1.61 2001/09/26 07:14:56 chs Exp $	*/
 
 /*-
@@ -17,13 +17,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -385,8 +378,11 @@ pool_get(struct pool *pp, int flags)
 		mtx_leave(&pp->pr_mtx);
 		v = NULL;
 	}
-	if (v)
+	if (v) {
 		pp->pr_nget++;
+		if (flags & PR_ZERO)
+			memset(v, 0, pp->pr_size);
+	}
 	return (v);
 }
 
@@ -865,7 +861,7 @@ pool_sethiwat(struct pool *pp, int n)
 }
 
 int
-pool_sethardlimit(struct pool *pp, unsigned n, const char *warnmess, int ratecap)
+pool_sethardlimit(struct pool *pp, u_int n, const char *warnmsg, int ratecap)
 {
 	int error = 0;
 
@@ -875,7 +871,7 @@ pool_sethardlimit(struct pool *pp, unsigned n, const char *warnmess, int ratecap
 	}
 
 	pp->pr_hardlimit = n;
-	pp->pr_hardlimit_warning = warnmess;
+	pp->pr_hardlimit_warning = warnmsg;
 	pp->pr_hardlimit_ratecap.tv_sec = ratecap;
 	pp->pr_hardlimit_warning_last.tv_sec = 0;
 	pp->pr_hardlimit_warning_last.tv_usec = 0;
@@ -1258,12 +1254,10 @@ void	pool_page_free_oldnointr(struct pool *, void *);
 void	*pool_page_alloc(struct pool *, int);
 void	pool_page_free(struct pool *, void *);
 
-/* previous nointr.  handles large allocations safely */
-struct pool_allocator pool_allocator_oldnointr = {
-	pool_page_alloc_oldnointr, pool_page_free_oldnointr, 0,
-};
-/* safe for interrupts, name preserved for compat
- * this is the default allocator */
+/*
+ * safe for interrupts, name preserved for compat this is the default
+ * allocator
+ */
 struct pool_allocator pool_allocator_nointr = {
 	pool_page_alloc, pool_page_free, 0,
 };
@@ -1319,23 +1313,4 @@ pool_page_free(struct pool *pp, void *v)
 {
 
 	uvm_km_putpage(v);
-}
-
-void *
-pool_page_alloc_oldnointr(struct pool *pp, int flags)
-{
-	boolean_t waitok = (flags & PR_WAITOK) ? TRUE : FALSE;
-
-	splassert(IPL_NONE);
-
-	return ((void *)uvm_km_alloc_poolpage1(kernel_map, uvm.kernel_object,
-	    waitok));
-}
-
-void
-pool_page_free_oldnointr(struct pool *pp, void *v)
-{
-	splassert(IPL_NONE);
-
-	uvm_km_free_poolpage1(kernel_map, (vaddr_t)v);
 }

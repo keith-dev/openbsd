@@ -1,4 +1,4 @@
-/*	$OpenBSD: trap.c,v 1.60 2008/01/16 20:55:36 kettenis Exp $	*/
+/*	$OpenBSD: trap.c,v 1.63 2008/07/12 08:08:54 kettenis Exp $	*/
 /*	$NetBSD: trap.c,v 1.73 2001/08/09 01:03:01 eeh Exp $ */
 
 /*
@@ -645,6 +645,7 @@ badtrap:
 	case T_ALIGN:
 	case T_LDDF_ALIGN:
 	case T_STDF_ALIGN:
+#if 0
 	{
 		int64_t dsfsr, dsfar=0, isfsr;
 
@@ -652,6 +653,8 @@ badtrap:
 		if (dsfsr & SFSR_FV)
 			dsfar = ldxa(SFAR, ASI_DMMU);
 		isfsr = ldxa(SFSR, ASI_IMMU);
+	}
+#endif
 		/* 
 		 * If we're busy doing copyin/copyout continue
 		 */
@@ -660,7 +663,6 @@ badtrap:
 			tf->tf_npc = tf->tf_pc + 4;
 			break;
 		}
-	}
 		
 		if ((p->p_md.md_flags & MDP_FIXALIGN) != 0 && 
 		    fixalign(p, tf) == 0) {
@@ -984,7 +986,7 @@ data_access_error(tf, type, afva, afsr, sfva, sfsr)
 	printf("data error type %x sfsr=%lx sfva=%lx afsr=%lx afva=%lx tf=%p\n",
 		type, sfsr, sfva, afsr, afva, tf);
 
-	if (afsr == 0) {
+	if (afsr == 0 && sfsr == 0) {
 		printf("data_access_error: no fault\n");
 		goto out;	/* No fault. Why were we called? */
 	}
@@ -1259,7 +1261,7 @@ syscall(tf, code, pc)
 	int64_t *ap;
 	const struct sysent *callp;
 	struct proc *p;
-	int error = 0, new;
+	int error = 0, new, lock;
 	register_t args[8];
 	register_t rval[2];
 
@@ -1279,6 +1281,8 @@ syscall(tf, code, pc)
 
 	callp = p->p_emul->e_sysent;
 	nsys = p->p_emul->e_nsysent;
+
+	lock = !(callp->sy_flags & SY_NOLOCK);
 
 	/*
 	 * The first six system call arguments are in the six %o registers.
@@ -1350,20 +1354,27 @@ syscall(tf, code, pc)
 		goto bad;
 	}
 
-	KERNEL_PROC_LOCK(p);
 #ifdef SYSCALL_DEBUG
+	KERNEL_PROC_LOCK(p);
 	scdebug_call(p, code, args);
+	KERNEL_PROC_UNLOCK(p);
 #endif
 	rval[0] = 0;
 	rval[1] = tf->tf_out[1];
 #if NSYSTRACE > 0
-	if (ISSET(p->p_flag, P_SYSTRACE))
+	if (ISSET(p->p_flag, P_SYSTRACE)) {
+		KERNEL_PROC_LOCK(p);
 		error = systrace_redirect(code, p, args, rval);
-	else
+		KERNEL_PROC_UNLOCK(p);
+	} else
 #endif
+	{
+		if (lock)
+			KERNEL_PROC_LOCK(p);
 		error = (*callp->sy_call)(p, args, rval);
-	KERNEL_PROC_UNLOCK(p);
-
+		if (lock)
+			KERNEL_PROC_UNLOCK(p);
+	}
 	switch (error) {
 		vaddr_t dest;
 	case 0:

@@ -1,4 +1,4 @@
-/*	$OpenBSD: conf.c,v 1.41 2007/05/28 22:26:03 todd Exp $	*/
+/*	$OpenBSD: conf.c,v 1.43 2008/05/14 20:49:48 miod Exp $	*/
 /*	$NetBSD: conf.c,v 1.39 1997/05/12 08:17:53 thorpej Exp $	*/
 
 /*-
@@ -138,8 +138,8 @@ struct cdevsw	cdevsw[] =
 	cdev_disk_init(NVND,vnd),	/* 19: vnode disk driver */
 	cdev_tape_init(NST,st),		/* 20: SCSI tape */
 	cdev_fd_init(1,filedesc),	/* 21: file descriptor pseudo-device */
-	cdev_bpftun_init(NBPFILTER,bpf),/* 22: Berkeley packet filter */
-	cdev_bpftun_init(NTUN,tun),	/* 23: network tunnel */
+	cdev_bpf_init(NBPFILTER,bpf),	/* 22: Berkeley packet filter */
+	cdev_tun_init(NTUN,tun),	/* 23: network tunnel */
 	cdev_lkm_init(NLKM,lkm),	/* 24: loadable module driver */
 	cdev_lkm_dummy(),		/* 25 */
 	cdev_lkm_dummy(),		/* 26 */
@@ -228,20 +228,20 @@ int chrtoblktbl[] = {
 	/*  4 */	NODEV,
 	/*  5 */	NODEV,
 	/*  6 */	NODEV,
-	/*  7 */	0,
-	/*  8 */	4,
-	/*  9 */	2,
+	/*  7 */	0,		/* ct */
+	/*  8 */	4,		/* sd */
+	/*  9 */	2,		/* hd */
 	/* 10 */	NODEV,
 	/* 11 */	NODEV,
 	/* 12 */	NODEV,
 	/* 13 */	NODEV,
 	/* 14 */	NODEV,
 	/* 15 */	NODEV,
-	/* 16 */	NODEV,
-	/* 17 */	5,
-	/* 18 */	9,
-	/* 19 */	6,
-	/* 20 */	7,
+	/* 16 */	1,		/* mt */
+	/* 17 */	5,		/* ccd */
+	/* 18 */	9,		/* cd */
+	/* 19 */	6,		/* vnd */
+	/* 20 */	7,		/* st */
 	/* 21 */	NODEV,
 	/* 22 */	NODEV,
 	/* 23 */	NODEV,
@@ -255,7 +255,7 @@ int chrtoblktbl[] = {
 	/* 31 */	NODEV,
 	/* 32 */	NODEV,
 	/* 33 */	NODEV,
-	/* 34 */	8,
+	/* 34 */	8,		/* rd */
 };
 int nchrtoblktbl = sizeof(chrtoblktbl) / sizeof(chrtoblktbl[0]);
 

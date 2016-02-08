@@ -1,4 +1,4 @@
-/*	$OpenBSD: session.c,v 1.279 2007/12/23 18:56:17 henning Exp $ */
+/*	$OpenBSD: session.c,v 1.282 2008/06/26 00:01:51 claudio Exp $ */
 
 /*
  * Copyright (c) 2003, 2004, 2005 Henning Brauer <henning@openbsd.org>
@@ -317,6 +317,7 @@ session_main(struct bgpd_config *config, struct peer *cpeers,
 						last->next = next;
 					else
 						peers = next;
+					timer_remove_all(p);
 					free(p);
 					peer_cnt--;
 					continue;
@@ -406,29 +407,41 @@ session_main(struct bgpd_config *config, struct peer *cpeers,
 
 		for (p = peers; p != NULL; p = p->next) {
 			time_t	nextaction;
+			struct peer_timer *pt;
 
 			/* check timers */
-			if (timer_due(p, Timer_Hold))
-				bgp_fsm(p, EVNT_TIMER_HOLDTIME);
-			if (timer_due(p, Timer_ConnectRetry))
-				bgp_fsm(p, EVNT_TIMER_CONNRETRY);
-			if (timer_due(p, Timer_Keepalive))
-				bgp_fsm(p, EVNT_TIMER_KEEPALIVE);
-			if (timer_due(p, Timer_IdleHold))
-				bgp_fsm(p, EVNT_START);
-			if (timer_due(p, Timer_IdleHoldReset)) {
-				p->IdleHoldTime /= 2;
-				if (p->IdleHoldTime <=
-				    INTERVAL_IDLE_HOLD_INITIAL) {
-					p->IdleHoldTime =
-					    INTERVAL_IDLE_HOLD_INITIAL;
-					timer_stop(p, Timer_IdleHoldReset);
-					p->errcnt = 0;
-				} else
-					timer_set(p, Timer_IdleHoldReset,
-					    p->IdleHoldTime);
+			if ((pt = timer_nextisdue(p)) != NULL) {
+				switch (pt->type) {
+				case Timer_Hold:
+					bgp_fsm(p, EVNT_TIMER_HOLDTIME);
+					break;
+				case Timer_ConnectRetry:
+					bgp_fsm(p, EVNT_TIMER_CONNRETRY);
+					break;
+				case Timer_Keepalive:
+					bgp_fsm(p, EVNT_TIMER_KEEPALIVE);
+					break;
+				case Timer_IdleHold:
+					bgp_fsm(p, EVNT_START);
+					break;
+				case Timer_IdleHoldReset:
+					p->IdleHoldTime /= 2;
+					if (p->IdleHoldTime <=
+					    INTERVAL_IDLE_HOLD_INITIAL) {
+						p->IdleHoldTime =
+						    INTERVAL_IDLE_HOLD_INITIAL;
+						timer_stop(p,
+						    Timer_IdleHoldReset);
+						p->errcnt = 0;
+					} else
+						timer_set(p,
+						    Timer_IdleHoldReset,
+						    p->IdleHoldTime);
+					break;
+				default:
+					fatalx("King Bula lost in time");
+				}
 			}
-
 			if ((nextaction = timer_nextduein(p)) != -1 &&
 			    nextaction < timeout)
 				timeout = nextaction;
@@ -586,6 +599,7 @@ init_conf(struct bgpd_config *c)
 void
 init_peer(struct peer *p)
 {
+	TAILQ_INIT(&p->timers);
 	p->fd = p->wbuf.fd = -1;
 
 	if (p->conf.if_depend[0])
@@ -2245,7 +2259,7 @@ session_dispatch_imsg(struct imsgbuf *ibuf, int idx, u_int *listener_cnt)
 		fatal("session_dispatch_imsg: imsg_read error");
 
 	if (n == 0)	/* connection closed */
-		fatal("session_dispatch_imsg: pipe closed");
+		fatalx("session_dispatch_imsg: pipe closed");
 
 	for (;;) {
 		if ((n = imsg_get(ibuf, &imsg)) == -1)

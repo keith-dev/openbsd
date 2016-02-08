@@ -1,4 +1,4 @@
-/*	$OpenBSD: ndp.c,v 1.39 2007/03/22 15:06:57 itojun Exp $	*/
+/*	$OpenBSD: ndp.c,v 1.42 2008/06/09 15:49:31 claudio Exp $	*/
 /*	$KAME: ndp.c,v 1.101 2002/07/17 08:46:33 itojun Exp $	*/
 
 /*
@@ -830,7 +830,7 @@ usage(void)
 #ifdef SIOCSDEFIFACE_IN6
 	printf("[-I [interface | delete]] ");
 #endif
-	printf("[-i interface [flags...]]\n");
+	printf("[-i interface [flag ...]]\n");
 	printf("\t[-s nodename etheraddr [temp] [proxy]] [hostname]\n");
 	exit(1);
 }
@@ -862,22 +862,26 @@ rtmsg(int cmd)
 			rtm->rtm_inits = RTV_EXPIRE;
 		}
 		rtm->rtm_flags |= (RTF_HOST | RTF_STATIC);
+#if 0	/* we don't support ipv6addr/128 type proxying. */
 		if (rtm->rtm_flags & RTF_ANNOUNCE) {
 			rtm->rtm_flags &= ~RTF_HOST;
 			rtm->rtm_addrs |= RTA_NETMASK;
 		}
+#endif
 		/* FALLTHROUGH */
 	case RTM_GET:
 		rtm->rtm_addrs |= RTA_DST;
 	}
 #define NEXTADDR(w, s) \
 	if (rtm->rtm_addrs & (w)) { \
-		bcopy((char *)&s, cp, sizeof(s)); cp += sizeof(s);}
+		bcopy((char *)&s, cp, sizeof(s)); cp += ROUNDUP(sizeof(s));}
 
 	NEXTADDR(RTA_DST, sin_m);
 	NEXTADDR(RTA_GATEWAY, sdl_m);
+#if 0	/* we don't support ipv6addr/128 type proxying. */
 	memset(&so_mask.sin6_addr, 0xff, sizeof(so_mask.sin6_addr));
 	NEXTADDR(RTA_NETMASK, so_mask);
+#endif
 
 	rtm->rtm_msglen = cp - (char *)&m_rtmsg;
 doit:

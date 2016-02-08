@@ -1,4 +1,4 @@
-#	$OpenBSD: install.md,v 1.44 2008/03/04 00:36:38 krw Exp $
+#	$OpenBSD: install.md,v 1.46 2008/06/26 05:42:03 ray Exp $
 #	$NetBSD: install.md,v 1.1.2.4 1996/08/26 15:45:14 gwr Exp $
 #
 # Copyright (c) 1996 The NetBSD Foundation, Inc.
@@ -15,13 +15,6 @@
 # 2. Redistributions in binary form must reproduce the above copyright
 #    notice, this list of conditions and the following disclaimer in the
 #    documentation and/or other materials provided with the distribution.
-# 3. All advertising materials mentioning features or use of this software
-#    must display the following acknowledgement:
-#        This product includes software developed by the NetBSD
-#        Foundation, Inc. and its contributors.
-# 4. Neither the name of The NetBSD Foundation nor the names of its
-#    contributors may be used to endorse or promote products derived
-#    from this software without specific prior written permission.
 #
 # THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
 # ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -50,28 +43,8 @@ md_installboot() {
 	echo "done."
 }
 
-# $1 is the disk to check
-md_checkfordisklabel() {
-	local rval=0
-
-	disklabel -r $1 >/dev/null 2>/tmp/checkfordisklabel
-
-	if grep "disk label corrupted" /tmp/checkfordisklabel; then
-		rval=2
-	fi >/dev/null 2>&1
-
-	rm -f /tmp/checkfordisklabel
-	return $rval
-}
-
 md_prep_disklabel() {
 	local _disk=$1
-
-	md_checkfordisklabel $_disk
-	case $? in
-	2)	echo "WARNING: Label on disk $_disk is corrupted. You will be repairing it.\n"
-		;;
-	esac
 
 	disklabel -W $_disk >/dev/null 2>&1
 	disklabel -f /tmp/fstab.$_disk -E $_disk

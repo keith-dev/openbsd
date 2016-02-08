@@ -1,4 +1,4 @@
-/*	$OpenBSD: netisr.h,v 1.29 2008/01/19 18:26:18 mpf Exp $	*/
+/*	$OpenBSD: netisr.h,v 1.33 2008/05/09 12:54:52 dlg Exp $	*/
 /*	$NetBSD: netisr.h,v 1.12 1995/08/12 23:59:24 mycroft Exp $	*/
 
 /*
@@ -52,8 +52,10 @@
  * interrupt used for scheduling the network code to calls
  * on the lowest level routine of each protocol.
  */
-#define	NETISR_RND	1
+#define	NETISR_RND_DONE	1
 #define	NETISR_IP	2		/* same as AF_INET */
+#define	NETISR_TX	3		/* for if_snd processing */
+#define	NETISR_MPLS	4		/* AF_MPLS would overflow */
 #define	NETISR_ATALK	16		/* same as AF_APPLETALK */
 #define	NETISR_ARP	18		/* same as AF_LINK */
 #define	NETISR_IPV6	24		/* same as AF_INET6 */
@@ -68,7 +70,7 @@
 #ifdef _KERNEL
 extern int	netisr;			/* scheduling bits for network */
 
-void	netrndintr(void);
+void	nettxintr(void);
 void	arpintr(void);
 void	ipintr(void);
 void	ip6intr(void);
@@ -79,11 +81,12 @@ void	pppintr(void);
 void	bridgeintr(void);
 void	pppoeintr(void);
 void	btintr(void);
+void	mplsintr(void);
 
 #include <machine/atomic.h>
 #define	schednetisr(anisr)						\
 do {									\
-	atomic_setbits_int(&netisr, (1 << (anisr)) | (1 << NETISR_RND));\
+	atomic_setbits_int(&netisr, (1 << (anisr)));			\
 	setsoftnet();							\
 } while (0)
 #endif

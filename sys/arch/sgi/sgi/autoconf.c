@@ -1,4 +1,4 @@
-/*	$OpenBSD: autoconf.c,v 1.16 2008/02/29 19:02:34 miod Exp $	*/
+/*	$OpenBSD: autoconf.c,v 1.18 2008/07/21 04:35:54 todd Exp $	*/
 /*
  * Copyright (c) 1996 Per Fogelstrom
  * Copyright (c) 1995 Theo de Raadt
@@ -274,5 +274,7 @@ boot_getnr(const char *p, int *no)
 struct nam2blk nam2blk[] = {
 	{ "sd",		0 },
 	{ "wd",		4 },
+	{ "rd",		8 },
+	{ "vnd",	2 },
 	{ NULL,		-1 }
 };

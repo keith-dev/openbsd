@@ -1,4 +1,4 @@
-#	$OpenBSD: GENERIC,v 1.198 2008/02/24 21:49:36 uwe Exp $
+#	$OpenBSD: GENERIC,v 1.203 2008/06/27 05:40:21 brad Exp $
 #
 # For further information on compiling OpenBSD kernels, see the config(8)
 # man page.
@@ -11,7 +11,7 @@
 
 machine		alpha
 include		"../../../conf/GENERIC"
-maxusers	32			# estimated number of users
+maxusers	80			# estimated number of users
 
 # CPU Support
 option		DEC_3000_500	# Flamingo etc:	3000/[4-9]00*
@@ -126,6 +126,10 @@ ural*	at uhub?			# Ralink RT2500USB
 rum*	at uhub?			# Ralink RT2501USB/RT2601USB
 uow*	at uhub?			# Maxim/Dallas DS2490 1-Wire adapter
 onewire* at uow?
+
+# USB Video
+uvideo* at uhub?
+video*  at uvideo?
 
 # Bluetooth controllers
 #ubt*	at uhub?			# USB Bluetooth
@@ -315,6 +319,7 @@ lmtemp*	at iic?				# NS LM75/LM77 temperature sensor
 maxds*	at iic?				# Maxim DS1631
 maxtmp*	at iic?				# Maxim MAX6642/MAX6690
 spdmem* at iic?				# SPD memory eeproms
+sdtemp*	at iic?				# SO-DIMM (JC-42.4) temperature
 
 # ISA/EISA bus support
 isa*	at	pceb?
@@ -387,16 +392,16 @@ atapiscsi* at pciide?
 scsibus* at atapiscsi?
 
 # Audio devices
+cmpci*	at pci?				# C-Media CMI8338/8738
 eap*	at pci?				# Ensoniq AudioPCI S5016
 emu*	at pci?				# SB Live!
+eso*	at pci?				# ESS Solo-1 PCI AudioDrive
 
 puc*	at pci?				# PCI "universal" comm device
 com*	at puc?
 
 # UNTESTED.  The following drivers are untested
-eso*	at pci?				# ESS Solo-1 PCI AudioDrive
 sv*	at pci?				# S3 SonicVibes (S3 617)
-cmpci*	at pci?				# C-Media CMI8338/8738
 fms*	at pci?				# Forte Media FM801
 auvia*	at pci?				# VIA VT82C686A
 ##
@@ -439,7 +444,6 @@ lofn*	at pci?				# Hi/fn 6500 crypto card
 nofn*	at pci?				# Hi/fn 7814/7851/7854 crypto card
 ubsec*	at pci?				# Bluesteel Networks 5xxx crypto card
 safe*	at pci?				# SafeNet SafeXcel 1141/1741
-#ises*	at pci?				# Pijnenburg PCC-ISES
 
 # 1-Wire devices
 option ONEWIREVERBOSE

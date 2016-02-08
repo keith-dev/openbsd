@@ -1,4 +1,4 @@
-/*	$OpenBSD: vs.c,v 1.22 2007/10/06 02:18:38 krw Exp $ */
+/*	$OpenBSD: vs.c,v 1.25 2008/07/30 18:08:03 miod Exp $ */
 
 /*
  * Copyright (c) 1999 Steve Murphree, Jr.
@@ -360,7 +360,7 @@ vs_scsicmd(xs)
 		cqep->cqe_WORK_QUEUE = slp->target + 1;
 	}
    
-	MALLOC(m328_cmd, M328_CMD*, sizeof(M328_CMD), M_DEVBUF, M_WAITOK);
+	m328_cmd = (M328_CMD*)malloc(sizeof(M328_CMD), M_DEVBUF, M_WAITOK);
    
 	m328_cmd->xs = xs;
 	if (xs->datalen) {
@@ -590,7 +590,7 @@ vs_initialize(sc)
 	vs_reset(sc);
 	/* sync all devices */
 	vs_resync(sc);
-	printf(": target %d\n", sc->sc_link.adapter_target);
+	printf("\n");
 }
 
 void
@@ -805,7 +805,7 @@ vs_intr(arg)
 			m328_cmd->top_sg_list = (M328_SG)0;
 		}
       
-		FREE(m328_cmd, M_DEVBUF); /* free the command tag */
+		free(m328_cmd, M_DEVBUF); /* free the command tag */
 		if (vs_checkintr (sc, xs, &status)) {
 			vs_scsidone(xs, status);
 		}

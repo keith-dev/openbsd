@@ -1,4 +1,4 @@
-/*	$OpenBSD: conf.c,v 1.41 2007/07/15 19:25:49 kettenis Exp $	*/
+/*	$OpenBSD: conf.c,v 1.44 2008/06/12 20:03:48 mglocker Exp $	*/
 
 /*-
  * Copyright (c) 1991 The Regents of the University of California.
@@ -81,6 +81,7 @@ struct bdevsw   bdevsw[] =
 int	nblkdev = sizeof(bdevsw) / sizeof(bdevsw[0]);
 
 #include "audio.h"
+#include "video.h"
 #include "bio.h"
 #include "pty.h"
 #include "wsdisplay.h"
@@ -141,8 +142,8 @@ struct cdevsw   cdevsw[] =
 	cdev_ss_init(NSS,ss),		/* 14: SCSI scanner */
 	cdev_uk_init(NUK,uk),		/* 15: SCSI unknown */
 	cdev_fd_init(1,filedesc),	/* 16: file descriptor pseudo-device */
-	cdev_bpftun_init(NBPFILTER,bpf),/* 17: Berkeley packet filter */
-	cdev_bpftun_init(NTUN,tun),	/* 18: network tunnel */
+	cdev_bpf_init(NBPFILTER,bpf),	/* 17: Berkeley packet filter */
+	cdev_tun_init(NTUN,tun),	/* 18: network tunnel */
 	cdev_lkm_init(NLKM,lkm),	/* 19: loadable module driver */
 	cdev_random_init(1,random),	/* 20: random generator */
 	cdev_pf_init(NPF,pf),		/* 21: packet filter */
@@ -166,7 +167,7 @@ struct cdevsw   cdevsw[] =
 #else
 	cdev_notdef(),
 #endif
-	cdev_notdef(),			/* 33: ALTQ (deprecated) */
+	cdev_video_init(NVIDEO,video),	/* 33: generic video I/O */
 	cdev_systrace_init(NSYSTRACE,systrace),	/* 34: system call tracing */
 	cdev_audio_init(NAUDIO,audio),	/* 35: /dev/audio */
 	cdev_crypto_init(NCRYPTO,crypto), /* 36: /dev/crypto */
@@ -213,12 +214,12 @@ int chrtoblktbl[] = {
 	/*  4 */	NODEV,
 	/*  5 */	NODEV,
 	/*  6 */	NODEV,
-	/*  7 */	1,
-	/*  8 */	2,
-	/*  9 */	3,
-	/* 10 */	4,
-	/* 11 */	5,
-	/* 12 */	6,
+	/*  7 */	1,		/* ccd */
+	/*  8 */	2,		/* vnd */
+	/*  9 */	3,		/* rd */
+	/* 10 */	4,		/* sd */
+	/* 11 */	5,		/* st */
+	/* 12 */	6,		/* cd */
 	/* 13 */	NODEV,
 	/* 14 */	NODEV,
 	/* 15 */	NODEV,
@@ -230,7 +231,7 @@ int chrtoblktbl[] = {
 	/* 21 */	NODEV,
 	/* 22 */	NODEV,
 	/* 23 */	NODEV,
-	/* 24 */	7,
+	/* 24 */	7,		/* fd */
 	/* 25 */	NODEV,
 	/* 26 */	NODEV,
 	/* 27 */	NODEV,
@@ -245,14 +246,7 @@ int chrtoblktbl[] = {
 	/* 36 */	NODEV,
 	/* 37 */	NODEV,
 	/* 38 */	NODEV,
-	/* 39 */	NODEV,
-	/* 40 */	NODEV,
-	/* 41 */	NODEV,
-	/* 42 */	NODEV,
-	/* 43 */	NODEV,
-	/* 44 */	NODEV,
-	/* 45 */	NODEV,
-	/* 46 */	NODEV
+	/* 39 */	8,		/* wd */
 };
 int nchrtoblktbl = sizeof(chrtoblktbl) / sizeof(chrtoblktbl[0]);
 

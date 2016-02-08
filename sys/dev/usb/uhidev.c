@@ -1,4 +1,4 @@
-/*	$OpenBSD: uhidev.c,v 1.31 2007/11/12 04:18:09 deraadt Exp $	*/
+/*	$OpenBSD: uhidev.c,v 1.33 2008/06/26 05:42:18 ray Exp $	*/
 /*	$NetBSD: uhidev.c,v 1.14 2003/03/11 16:44:00 augustss Exp $	*/
 
 /*
@@ -17,13 +17,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -112,18 +105,6 @@ uhidev_match(struct device *parent, void *match, void *aux)
 		return (UMATCH_NONE);
 	if (uaa->matchlvl)
 		return (uaa->matchlvl);
-
-#ifdef __macppc__
-	/*
-	 * Some Apple laptops have USB phantom devices which match
-	 * the ADB devices.  We want to ignore them to avoid
-	 * confusing users, as the real hardware underneath is adb
-	 * and has already attached.
-	 */
-	if (uaa->vendor == USB_VENDOR_APPLE &&
-	    uaa->product == USB_PRODUCT_APPLE_ADB)
-		return (UMATCH_NONE);
-#endif
 
 	return (UMATCH_IFACECLASS_GENERIC);
 }

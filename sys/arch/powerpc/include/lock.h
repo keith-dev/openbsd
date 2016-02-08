@@ -1,4 +1,4 @@
-/*	$OpenBSD: lock.h,v 1.1 2007/03/20 20:59:53 kettenis Exp $	*/
+/*	$OpenBSD: lock.h,v 1.3 2008/06/26 05:42:12 ray Exp $	*/
 /*	$NetBSD: lock.h,v 1.8 2005/12/28 19:09:29 perry Exp $	*/
 
 /*-
@@ -16,13 +16,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -109,4 +102,25 @@ __cpu_simple_unlock(__cpu_simple_lock_t *alp)
 	*alp = __SIMPLELOCK_UNLOCKED;
 }
 
+#define rw_cas __cpu_cas
+static __inline int
+__cpu_cas(volatile unsigned long *addr, unsigned long old, unsigned long new)
+{
+        int success, scratch;
+        __asm volatile(
+            "1: lwarx   %0, 0,  %4      \n"
+            "   cmpw    0, %0, %2       \n"
+            "   li      %1, 1           \n"
+            "   bne     0,2f            \n"
+            "   stwcx.  %3, 0, %4       \n" 
+            "   li      %1, 0           \n" 
+            "   bne-    1b              \n"
+	    "2:				\n"
+            : "=&r" (scratch), "=&r" (success)
+            : "r" (old), "r" (new), "r" (addr)
+            : "memory");
+
+        return success;
+}
+	
 #endif /* _POWERPC_LOCK_H_ */

@@ -1,4 +1,4 @@
-/*	$OpenBSD: pwd_mkdb.c,v 1.38 2004/08/08 00:05:09 deraadt Exp $	*/
+/*	$OpenBSD: pwd_mkdb.c,v 1.40 2008/06/25 14:51:27 millert Exp $	*/
 
 /*-
  * Copyright (c) 1991, 1993, 1994
@@ -41,7 +41,7 @@ static const char copyright[] =
 #if 0
 static const char sccsid[] = "from: @(#)pwd_mkdb.c	8.5 (Berkeley) 4/20/94";
 #else
-static const char rcsid[] = "$OpenBSD: pwd_mkdb.c,v 1.38 2004/08/08 00:05:09 deraadt Exp $";
+static const char rcsid[] = "$OpenBSD: pwd_mkdb.c,v 1.40 2008/06/25 14:51:27 millert Exp $";
 #endif
 #endif /* not lint */
 
@@ -466,9 +466,8 @@ cleanup(void)
 void
 usage(void)
 {
-
 	(void)fprintf(stderr,
-	    "usage: pwd_mkdb [-c] [-p | -s] [-d basedir] [-u username] file\n");
+	    "usage: pwd_mkdb [-c] [-p | -s] [-d directory] [-u username] file\n");
 	exit(1);
 }
 
@@ -491,7 +490,7 @@ void
 db_store(FILE *fp, FILE *oldfp, DB *edp, DB *dp, struct passwd *pw,
 	 int keytype, char *username, uid_t olduid)
 {
-	char *p, *t, buf[LINE_MAX * 2], tbuf[1024];
+	char *p, *t, buf[LINE_MAX * 2], tbuf[_PW_BUF_LEN];
 	int flags = 0, dbmode, found = 0;
 	static int firsttime = 1;
 	DBT data, key;

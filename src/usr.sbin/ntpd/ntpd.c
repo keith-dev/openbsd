@@ -1,4 +1,4 @@
-/*	$OpenBSD: ntpd.c,v 1.58 2007/12/31 17:21:35 henning Exp $ */
+/*	$OpenBSD: ntpd.c,v 1.61 2008/07/19 21:31:39 claudio Exp $ */
 
 /*
  * Copyright (c) 2003, 2004 Henning Brauer <henning@openbsd.org>
@@ -29,6 +29,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <err.h>
 
 #include "ntpd.h"
 
@@ -124,6 +125,11 @@ main(int argc, char *argv[])
 		}
 	}
 
+	argc -= optind;
+	argv += optind;
+	if (argc > 0)
+		usage();
+
 	if (parse_config(conffile, &lconf))
 		exit(1);
 
@@ -132,15 +138,12 @@ main(int argc, char *argv[])
 		exit(0);
 	}
 
-	if (geteuid()) {
-		fprintf(stderr, "ntpd: need root privileges\n");
-		exit(1);
-	}
+	if (geteuid())
+		errx(1, "need root privileges");
 
-	if ((pw = getpwnam(NTPD_USER)) == NULL) {
-		fprintf(stderr, "ntpd: unknown user %s\n", NTPD_USER);
-		exit(1);
-	}
+	if ((pw = getpwnam(NTPD_USER)) == NULL)
+		errx(1, "unknown user %s", NTPD_USER);
+
 	endpwent();
 
 	reset_adjtime();
@@ -405,10 +408,6 @@ ntpd_settime(double d)
 	struct timeval	tv, curtime;
 	char		buf[80];
 	time_t		tval;
-
-	/* if the offset is small, don't call settimeofday */
-	if (d < SETTIME_MIN_OFFSET && d > -SETTIME_MIN_OFFSET)
-		return;
 
 	if (gettimeofday(&curtime, NULL) == -1) {
 		log_warn("gettimeofday");

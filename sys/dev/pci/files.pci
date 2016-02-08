@@ -1,4 +1,4 @@
-#	$OpenBSD: files.pci,v 1.250 2008/01/21 20:00:33 sobrado Exp $
+#	$OpenBSD: files.pci,v 1.254 2008/06/08 20:01:02 reyk Exp $
 #	$NetBSD: files.pci,v 1.20 1996/09/24 17:47:15 christos Exp $
 #
 # Config file and device description for machine-independent PCI code.
@@ -355,6 +355,14 @@ file	dev/pci/if_ixgb.c		ixgb
 file	dev/pci/ixgb_ee.c		ixgb
 file	dev/pci/ixgb_hw.c		ixgb
 
+# Intel 82598 10GbE
+device	ix: ether, ifnet, ifmedia
+attach	ix at pci
+file	dev/pci/if_ix.c			ix
+file	dev/pci/ixgbe.c			ix
+file	dev/pci/ixgbe_82598.c		ix
+file	dev/pci/ixgbe_phy.c		ix
+
 # Neterion Xframe 10 Gigabit ethernet 
 device	xge: ether, ifnet, ifmedia
 attach	xge  at pci
@@ -434,11 +442,6 @@ file	dev/pci/ubsec.c			ubsec
 device	noct: crypto
 attach	noct at pci
 file	dev/pci/noct.c			noct
-
-# Pijnenburg PCC-ISES
-device	ises: crypto
-attach	ises at pci
-file	dev/pci/ises.c			ises
 
 # Safenet SafeXcel 1141
 device	safe: crypto
@@ -743,3 +746,13 @@ file	dev/pci/nviic.c			nviic
 # SD Host Controller
 attach	sdhc at pci with sdhc_pci
 file	dev/pci/sdhc_pci.c		sdhc
+
+# AMD NPT Family 0Fh Processors, Function 3 -- Miscellaneous Control
+device	kate
+attach	kate at pci
+file	dev/pci/kate.c			kate
+
+# AMD Family 10h Processors, Function 3 -- Miscellaneous Control
+device	km
+attach	km at pci
+file	dev/pci/km.c			km

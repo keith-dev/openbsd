@@ -1,7 +1,7 @@
-/*	$OpenBSD: if_iwn.c,v 1.16 2007/11/30 19:19:47 damien Exp $	*/
+/*	$OpenBSD: if_iwn.c,v 1.22 2008/07/31 20:14:17 damien Exp $	*/
 
 /*-
- * Copyright (c) 2007
+ * Copyright (c) 2007,2008
  *	Damien Bergamini <damien.bergamini@free.fr>
  *
  * Permission to use, copy, modify, and distribute this software for any
@@ -72,7 +72,9 @@ static const struct pci_matchid iwn_devices[] = {
 
 int		iwn_match(struct device *, void *, void *);
 void		iwn_attach(struct device *, struct device *, void *);
+#ifndef SMALL_KERNEL
 void		iwn_sensor_attach(struct iwn_softc *);
+#endif
 void		iwn_radiotap_attach(struct iwn_softc *);
 void		iwn_power(int, void *);
 int		iwn_dma_contig_alloc(bus_dma_tag_t, struct iwn_dma_info *,
@@ -131,9 +133,11 @@ void		iwn_start(struct ifnet *);
 void		iwn_watchdog(struct ifnet *);
 int		iwn_ioctl(struct ifnet *, u_long, caddr_t);
 int		iwn_cmd(struct iwn_softc *, int, const void *, int, int);
-int		iwn_setup_node_mrr(struct iwn_softc *, uint8_t, int);
+int		iwn_setup_node_mrr(struct iwn_softc *,
+		    const struct ieee80211_node *, uint8_t);
+int		iwn_set_fixed_rate(struct iwn_softc *, uint8_t, uint8_t, int);
 int		iwn_set_key(struct ieee80211com *, struct ieee80211_node *,
-		    const struct ieee80211_key *);
+		    struct ieee80211_key *);
 void		iwn_updateedca(struct ieee80211com *);
 void		iwn_set_led(struct iwn_softc *, uint8_t, uint8_t, uint8_t);
 int		iwn_set_critical_temp(struct iwn_softc *);
@@ -291,6 +295,7 @@ iwn_attach(struct device *parent, struct device *self, void *aux)
 	/* set device capabilities */
 	ic->ic_caps =
 	    IEEE80211_C_WEP |		/* s/w WEP */
+	    IEEE80211_C_RSN |		/* WPA/RSN */
 	    IEEE80211_C_MONITOR |	/* monitor mode supported */
 	    IEEE80211_C_TXPMGT |	/* tx power management */
 	    IEEE80211_C_SHSLOT |	/* short slot time supported */
@@ -320,7 +325,9 @@ iwn_attach(struct device *parent, struct device *self, void *aux)
 	ieee80211_ifattach(ifp);
 	ic->ic_node_alloc = iwn_node_alloc;
 	ic->ic_newassoc = iwn_newassoc;
+#ifdef notyet
 	ic->ic_set_key = iwn_set_key;
+#endif
 	ic->ic_updateedca = iwn_updateedca;
 
 	/* override state transition machine */
@@ -331,7 +338,9 @@ iwn_attach(struct device *parent, struct device *self, void *aux)
 	sc->amrr.amrr_min_success_threshold =  1;
 	sc->amrr.amrr_max_success_threshold = 15;
 
+#ifndef SMALL_KERNEL
 	iwn_sensor_attach(sc);
+#endif
 	iwn_radiotap_attach(sc);
 
 	timeout_set(&sc->calib_to, iwn_calib_timeout, sc);
@@ -349,6 +358,7 @@ fail2:	iwn_free_kw(sc);
 fail1:	iwn_free_fwmem(sc);
 }
 
+#ifndef SMALL_KERNEL
 /*
  * Attach the adapter's on-board thermal sensor to the sensors framework.
  */
@@ -364,6 +374,7 @@ iwn_sensor_attach(struct iwn_softc *sc)
 	sensor_attach(&sc->sensordev, &sc->sensor);
 	sensordev_install(&sc->sensordev);
 }
+#endif
 
 /*
  * Attach the interface to 802.11 radiotap.
@@ -1185,6 +1196,7 @@ iwn_rx_intr(struct iwn_softc *sc, struct iwn_rx_desc *desc,
 	struct iwn_rx_ring *ring = &sc->rxq;
 	struct iwn_rbuf *rbuf;
 	struct ieee80211_frame *wh;
+	struct ieee80211_rxinfo rxi;
 	struct ieee80211_node *ni;
 	struct mbuf *m, *mnew;
 	struct iwn_rx_stat *stat;
@@ -1319,7 +1331,10 @@ iwn_rx_intr(struct iwn_softc *sc, struct iwn_rx_desc *desc,
 	ni = ieee80211_find_rxnode(ic, wh);
 
 	/* send the frame to the 802.11 layer */
-	ieee80211_input(ifp, m, ni, rssi, 0);
+	rxi.rxi_flags = 0;
+	rxi.rxi_rssi = rssi;
+	rxi.rxi_tstamp = 0;	/* unused */
+	ieee80211_input(ifp, m, ni, &rxi);
 
 	/* node is no longer needed */
 	ieee80211_release_node(ic, ni);
@@ -1451,7 +1466,7 @@ iwn_notif_intr(struct iwn_softc *sc)
 
 		DPRINTFN(4,("rx notification qid=%x idx=%d flags=%x type=%d "
 		    "len=%d\n", desc->qid, desc->idx, desc->flags, desc->type,
-		    letoh32(desc->len)));
+		    letoh16(desc->len)));
 
 		if (!(desc->qid & 0x80))	/* reply to a command */
 			iwn_cmd_intr(sc, desc);
@@ -1668,12 +1683,13 @@ iwn_tx_data(struct iwn_softc *sc, struct mbuf *m0, struct ieee80211_node *ni,
 	struct iwn_tx_cmd *cmd;
 	struct iwn_cmd_data *tx;
 	struct ieee80211_frame *wh;
+	struct ieee80211_key *k;
 	struct mbuf *mnew;
 	bus_addr_t paddr;
 	uint32_t flags;
 	uint8_t type;
 	u_int hdrlen;
-	int i, rate, error, pad, ovhd = 0;
+	int i, rate, error, pad;
 
 	desc = &ring->desc[ring->cur];
 	data = &ring->data[ring->cur];
@@ -1727,18 +1743,13 @@ iwn_tx_data(struct iwn_softc *sc, struct mbuf *m0, struct ieee80211_node *ni,
 	/* no need to bzero tx, all fields are reinitialized here */
 
 	if (wh->i_fc[1] & IEEE80211_FC1_PROTECTED) {
-		const struct ieee80211_key *key =
-		    &ic->ic_nw_keys[ic->ic_wep_txkey];
-		if (key->k_cipher == IEEE80211_CIPHER_WEP40)
-			tx->security = IWN_CIPHER_WEP40;
-		else
-			tx->security = IWN_CIPHER_WEP104;
-		tx->security |= ic->ic_wep_txkey << 6;
-		memcpy(&tx->key[3], key->k_key, key->k_len);
-		/* compute crypto overhead */
-		ovhd = IEEE80211_WEP_TOTLEN;
-	} else
-		tx->security = 0;
+		k = ieee80211_get_txkey(ic, wh, ni);
+
+		if ((m0 = ieee80211_encrypt(ic, m0, k)) == NULL)
+			return ENOBUFS;
+
+		wh = mtod(m0, struct ieee80211_frame *);
+	}
 
 	flags = IWN_TX_AUTO_SEQ;
 	if (!IEEE80211_IS_MULTICAST(wh->i_addr1))
@@ -1753,7 +1764,7 @@ iwn_tx_data(struct iwn_softc *sc, struct mbuf *m0, struct ieee80211_node *ni,
 	/* check if RTS/CTS or CTS-to-self protection must be used */
 	if (!IEEE80211_IS_MULTICAST(wh->i_addr1)) {
 		/* multicast frames are not sent at OFDM rates in 802.11b/g */
-		if (m0->m_pkthdr.len + ovhd + IEEE80211_CRC_LEN >
+		if (m0->m_pkthdr.len + IEEE80211_CRC_LEN >
 		    ic->ic_rtsthreshold) {
 			flags |= IWN_TX_NEED_RTS | IWN_TX_FULL_TXOP;
 		} else if ((ic->ic_flags & IEEE80211_F_USEPROT) &&
@@ -1801,9 +1812,9 @@ iwn_tx_data(struct iwn_softc *sc, struct mbuf *m0, struct ieee80211_node *ni,
 		if (!IWN_RATE_IS_OFDM(rate))
 			tx->rflags |= IWN_RFLAG_CCK;
 	} else {
-		tx->ridx = 0;
+		tx->ridx = ni->ni_rates.rs_nrates - ni->ni_txrate - 1;
 		/* tell adapter to ignore rflags */
-		tx->flags |= htole32(IWN_TX_USE_NODE_RATE);
+		tx->flags |= htole32(IWN_TX_MRR_INDEX);
 	}
 
 	/* copy and trim IEEE802.11 header */
@@ -2216,11 +2227,13 @@ iwn_cmd(struct iwn_softc *sc, int code, const void *buf, int size, int async)
  * Configure hardware multi-rate retries for one node.
  */
 int
-iwn_setup_node_mrr(struct iwn_softc *sc, uint8_t id, int async)
+iwn_setup_node_mrr(struct iwn_softc *sc, const struct ieee80211_node *ni,
+    uint8_t id)
 {
-	struct ieee80211com *ic = &sc->sc_ic;
+	const struct ieee80211_rateset *rs = &ni->ni_rates;
 	struct iwn_cmd_mrr mrr;
-	int i, ridx;
+	uint8_t rate;
+	int i, r;
 
 	memset(&mrr, 0, sizeof mrr);
 	mrr.id = id;
@@ -2229,18 +2242,48 @@ iwn_setup_node_mrr(struct iwn_softc *sc, uint8_t id, int async)
 	mrr.ampdu_disable = 3;
 	mrr.ampdu_limit = 4000;
 
-	if (id == IWN_ID_BSS)
-		ridx = IWN_OFDM54;
-	else if (ic->ic_curmode == IEEE80211_MODE_11A)
-		ridx = IWN_OFDM6;
-	else
-		ridx = IWN_CCK1;
-	for (i = 0; i < IWN_MAX_TX_RETRIES; i++) {
-		mrr.table[i].rate = iwn_ridx_to_plcp[ridx];
+	r = rs->rs_nrates - 1;
+	for (i = 0; i < IWN_MAX_TX_RETRIES && r >= 0; i++, r--) {
+		rate = rs->rs_rates[r] & IEEE80211_RATE_VAL;
+		DPRINTF(("retry #%d: rate %d\n", i, rate));
+		mrr.table[i].rate = iwn_plcp_signal(rate);
 		mrr.table[i].rflags = IWN_RFLAG_ANT_B;
-		if (ridx <= IWN_CCK11)
+		if (!IWN_RATE_IS_OFDM(rate))
 			mrr.table[i].rflags |= IWN_RFLAG_CCK;
-		ridx = iwn_prev_ridx[ridx];
+	}
+	/* pad with the lowest available bit-rate */
+	for (; i < IWN_MAX_TX_RETRIES; i++) {
+		rate = rs->rs_rates[0] & IEEE80211_RATE_VAL;
+		DPRINTF(("retry #%d: rate %d\n", i, rate));
+		mrr.table[i].rate = iwn_plcp_signal(rate);
+		mrr.table[i].rflags = IWN_RFLAG_ANT_B;
+		if (!IWN_RATE_IS_OFDM(rate))
+			mrr.table[i].rflags |= IWN_RFLAG_CCK;
+	}
+	return iwn_cmd(sc, IWN_CMD_NODE_MRR_SETUP, &mrr, sizeof mrr, 1);
+}
+
+int
+iwn_set_fixed_rate(struct iwn_softc *sc, uint8_t id, uint8_t rate, int async)
+{
+	struct iwn_cmd_mrr mrr;
+	int i;
+
+	memset(&mrr, 0, sizeof mrr);
+	mrr.id = id;
+	mrr.ssmask = 2;
+	mrr.dsmask = 3;
+	mrr.ampdu_disable = 3;
+	mrr.ampdu_limit = 4000;
+
+	/* to setup a fixed rate, make all retries use the same rate.. */
+	mrr.table[0].rate = iwn_plcp_signal(rate);
+	mrr.table[0].rflags = IWN_RFLAG_ANT_B;
+	if (!IWN_RATE_IS_OFDM(rate))
+		mrr.table[0].rflags |= IWN_RFLAG_CCK;
+	for (i = 1; i < IWN_MAX_TX_RETRIES; i++) {
+		mrr.table[i].rate = mrr.table[0].rate;
+		mrr.table[i].rflags = mrr.table[0].rflags;
 	}
 	return iwn_cmd(sc, IWN_CMD_NODE_MRR_SETUP, &mrr, sizeof mrr, async);
 }
@@ -2250,7 +2293,7 @@ iwn_setup_node_mrr(struct iwn_softc *sc, uint8_t id, int async)
  */
 int
 iwn_set_key(struct ieee80211com *ic, struct ieee80211_node *ni,
-    const struct ieee80211_key *k)
+    struct ieee80211_key *k)
 {
 	struct iwn_softc *sc = ic->ic_softc;
 	struct iwn_node_info node;
@@ -2538,11 +2581,11 @@ iwn_get_rssi(const struct iwn_rx_stat *stat)
 
 	rssi = 0;
 	if (mask & (1 << 0))	/* Ant A */
-		rssi = max(rssi, stat->rssi[0]);
+		rssi = MAX(rssi, stat->rssi[0]);
 	if (mask & (1 << 1))	/* Ant B */
-		rssi = max(rssi, stat->rssi[2]);
+		rssi = MAX(rssi, stat->rssi[2]);
 	if (mask & (1 << 2))	/* Ant C */
-		rssi = max(rssi, stat->rssi[4]);
+		rssi = MAX(rssi, stat->rssi[4]);
 
 	return rssi - agc - IWN_RSSI_TO_DBM;
 }
@@ -2651,8 +2694,8 @@ iwn_compute_differential_gain(struct iwn_softc *sc,
 		return;
 
 	/* determine antenna with highest average RSSI */
-	val = max(calib->rssi[0], calib->rssi[1]);
-	val = max(calib->rssi[2], val);
+	val = MAX(calib->rssi[0], calib->rssi[1]);
+	val = MAX(calib->rssi[2], val);
 
 	/* determine which antennas are connected */
 	sc->antmsk = 0;
@@ -2667,7 +2710,7 @@ iwn_compute_differential_gain(struct iwn_softc *sc,
 	val = INT_MAX;	/* ok, there's at least one */
 	for (i = 0; i < 3; i++)
 		if (sc->antmsk & (1 << i))
-			val = min(calib->noise[i], val);
+			val = MIN(calib->noise[i], val);
 
 	memset(&cmd, 0, sizeof cmd);
 	cmd.code = IWN_SET_DIFF_GAIN;
@@ -2676,7 +2719,7 @@ iwn_compute_differential_gain(struct iwn_softc *sc,
 		if (sc->antmsk & (1 << i)) {
 			cmd.gain[i] = (calib->noise[i] - val) / 30;
 			/* limit differential gain to 3 */
-			cmd.gain[i] = min(cmd.gain[i], 3);
+			cmd.gain[i] = MIN(cmd.gain[i], 3);
 			cmd.gain[i] |= IWN_GAIN_SET;
 		}
 	}
@@ -2749,8 +2792,8 @@ iwn_tune_sensitivity(struct iwn_softc *sc, const struct iwn_rx_stats *stats)
 	/* compute maximum noise among 3 antennas */
 	for (i = 0; i < 3; i++)
 		noise[i] = (letoh32(stats->general.noise[i]) >> 8) & 0xff;
-	val = max(noise[0], noise[1]);
-	val = max(noise[2], val);
+	val = MAX(noise[0], noise[1]);
+	val = MAX(noise[2], val);
 	/* insert it into our samples table */
 	calib->noise_samples[calib->cur_noise_sample] = val;
 	calib->cur_noise_sample = (calib->cur_noise_sample + 1) % 20;
@@ -2758,13 +2801,13 @@ iwn_tune_sensitivity(struct iwn_softc *sc, const struct iwn_rx_stats *stats)
 	/* compute maximum noise among last 20 samples */
 	noise_ref = calib->noise_samples[0];
 	for (i = 1; i < 20; i++)
-		noise_ref = max(noise_ref, calib->noise_samples[i]);
+		noise_ref = MAX(noise_ref, calib->noise_samples[i]);
 
 	/* compute maximum energy among 3 antennas */
 	for (i = 0; i < 3; i++)
 		energy[i] = letoh32(stats->general.energy[i]);
-	val = min(energy[0], energy[1]);
-	val = min(energy[2], val);
+	val = MIN(energy[0], energy[1]);
+	val = MIN(energy[2], val);
 	/* insert it into our samples table */
 	calib->energy_samples[calib->cur_energy_sample] = val;
 	calib->cur_energy_sample = (calib->cur_energy_sample + 1) % 10;
@@ -2772,7 +2815,7 @@ iwn_tune_sensitivity(struct iwn_softc *sc, const struct iwn_rx_stats *stats)
 	/* compute minimum energy among last 10 samples */
 	energy_min = calib->energy_samples[0];
 	for (i = 1; i < 10; i++)
-		energy_min = max(energy_min, calib->energy_samples[i]);
+		energy_min = MAX(energy_min, calib->energy_samples[i]);
 	energy_min += 6;
 
 	/* compute number of false alarms since last call for CCK */
@@ -2871,6 +2914,7 @@ iwn_auth(struct iwn_softc *sc)
 	struct ieee80211com *ic = &sc->sc_ic;
 	struct ieee80211_node *ni = ic->ic_bss;
 	struct iwn_node_info node;
+	uint8_t rate;
 	int error;
 
 	/* update adapter's configuration */
@@ -2927,8 +2971,9 @@ iwn_auth(struct iwn_softc *sc)
 		    sc->sc_dev.dv_xname);
 		return error;
 	}
-	DPRINTF(("setting MRR for node %d\n", node.id));
-	if ((error = iwn_setup_node_mrr(sc, node.id, 1)) != 0) {
+	DPRINTF(("setting fixed rate for node %d\n", node.id));
+	rate = (ic->ic_curmode == IEEE80211_MODE_11A) ? 12 : 2;
+	if ((error = iwn_set_fixed_rate(sc, node.id, rate, 1)) != 0) {
 		printf("%s: could not setup MRR for broadcast node\n",
 		    sc->sc_dev.dv_xname, node.id);
 		return error;
@@ -2997,7 +3042,7 @@ iwn_run(struct iwn_softc *sc)
 		return error;
 	}
 	DPRINTF(("setting MRR for node %d\n", node.id));
-	if ((error = iwn_setup_node_mrr(sc, node.id, 1)) != 0) {
+	if ((error = iwn_setup_node_mrr(sc, ni, node.id)) != 0) {
 		printf("%s: could not setup MRR for node %d\n",
 		    sc->sc_dev.dv_xname, node.id);
 		return error;
@@ -3207,6 +3252,7 @@ iwn_config(struct iwn_softc *sc)
 	struct iwn_power power;
 	struct iwn_bluetooth bluetooth;
 	struct iwn_node_info node;
+	uint8_t rate;
 	int error;
 
 	/* set power mode */
@@ -3294,8 +3340,9 @@ iwn_config(struct iwn_softc *sc)
 		    sc->sc_dev.dv_xname);
 		return error;
 	}
-	DPRINTF(("setting MRR for node %d\n", node.id));
-	if ((error = iwn_setup_node_mrr(sc, node.id, 0)) != 0) {
+	DPRINTF(("setting fixed rate for node %d\n", node.id));
+	rate = (ic->ic_curmode == IEEE80211_MODE_11A) ? 12 : 2;
+	if ((error = iwn_set_fixed_rate(sc, node.id, rate, 0)) != 0) {
 		printf("%s: could not setup MRR for node %d\n",
 		    sc->sc_dev.dv_xname, node.id);
 		return error;
@@ -3400,12 +3447,12 @@ iwn_reset(struct iwn_softc *sc)
 	IWN_WRITE(sc, IWN_GPIO_CTL, tmp | IWN_GPIO_INIT);
 
 	/* wait for clock stabilization */
-	for (ntries = 0; ntries < 1000; ntries++) {
+	for (ntries = 0; ntries < 25000; ntries++) {
 		if (IWN_READ(sc, IWN_GPIO_CTL) & IWN_GPIO_CLOCK)
 			break;
-		DELAY(10);
+		DELAY(100);
 	}
-	if (ntries == 1000) {
+	if (ntries == 25000) {
 		printf("%s: timeout waiting for clock stabilization\n",
 		    sc->sc_dev.dv_xname);
 		return ETIMEDOUT;

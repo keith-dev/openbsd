@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_gif.c,v 1.47 2007/12/20 02:53:02 brad Exp $	*/
+/*	$OpenBSD: if_gif.c,v 1.49 2008/05/07 13:45:35 dlg Exp $	*/
 /*	$KAME: if_gif.c,v 1.43 2001/02/20 08:51:07 itojun Exp $	*/
 
 /*
@@ -208,7 +208,7 @@ gif_start(ifp)
 		m_tag_prepend(m, mtag);
 
 		/*
-		 * remove multicast and broadcast flags or encapsulated paket
+		 * Remove multicast and broadcast flags or encapsulated packet
 		 * ends up as multicast or broadcast packet.
 		 */
 		m->m_flags &= ~(M_BCAST|M_MCAST);
@@ -308,8 +308,7 @@ gif_output(ifp, m, dst, rt)
 		splx(s);
 		return (error);
 	}
-	if ((ifp->if_flags & IFF_OACTIVE) == 0)
-		(*ifp->if_start)(ifp);
+	if_start(ifp);
 	splx(s);
 	return (error);
 

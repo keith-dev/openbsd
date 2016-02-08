@@ -1,4 +1,4 @@
-/*	$OpenBSD: mount.h,v 1.81 2007/06/01 05:37:14 deraadt Exp $	*/
+/*	$OpenBSD: mount.h,v 1.91 2008/07/22 08:05:02 thib Exp $	*/
 /*	$NetBSD: mount.h,v 1.48 1996/02/18 11:55:47 fvdl Exp $	*/
 
 /*
@@ -282,8 +282,40 @@ union mount_info {
 	char __align[160];	/* 64-bit alignment and room to grow */
 };
 
-/* new statfs structure with mount options */
+/* new statfs structure with mount options and statvfs fields */
 struct statfs {
+	u_int32_t	f_flags;	/* copy of mount flags */
+	u_int32_t	f_bsize;	/* file system block size */
+	u_int32_t	f_iosize;	/* optimal transfer block size */
+
+					/* unit is f_bsize */
+	u_int64_t  	f_blocks;	/* total data blocks in file system */
+	u_int64_t  	f_bfree;	/* free blocks in fs */
+	int64_t  	f_bavail;	/* free blocks avail to non-superuser */
+
+	u_int64_t 	f_files;	/* total file nodes in file system */
+	u_int64_t  	f_ffree;	/* free file nodes in fs */
+	int64_t  	f_favail;	/* free file nodes avail to non-root */
+
+	u_int64_t  	f_syncwrites;	/* count of sync writes since mount */
+	u_int64_t  	f_syncreads;	/* count of sync reads since mount */
+	u_int64_t  	f_asyncwrites;	/* count of async writes since mount */
+	u_int64_t  	f_asyncreads;	/* count of async reads since mount */
+
+	fsid_t	   	f_fsid;		/* file system id */
+	u_int32_t	f_namemax;      /* maximum filename length */
+	uid_t	   	f_owner;	/* user that mounted the file system */
+	u_int32_t  	f_ctime;	/* last mount [-u] time */
+	u_int32_t	f_spare[3];	/* spare for later */
+
+	char f_fstypename[MFSNAMELEN];	/* fs type name */
+	char f_mntonname[MNAMELEN];	/* directory on which mounted */
+	char f_mntfromname[MNAMELEN];	/* mounted file system */
+	union mount_info mount_info;	/* per-filesystem mount options */
+};
+
+/* old (pre-4.3) statfs structure with mount options */
+struct o43statfs {
 	u_int32_t  f_flags;		/* copy of mount flags */
 	int32_t    f_bsize;		/* fundamental file system block size */
 	u_int32_t  f_iosize;		/* optimal transfer block size */
@@ -433,10 +465,13 @@ struct mount {
 #define VFS_MAXTYPENUM	1	/* int: highest defined filesystem type */
 #define VFS_CONF	2	/* struct: vfsconf for filesystem given
 				   as next argument */
+#define VFS_BCACHESTAT	3	/* struct: buffer cache statistics given 
+				   as next argument */
 #define	CTL_VFSGENCTL_NAMES { \
 	{ 0, 0 }, \
 	{ "maxtypenum", CTLTYPE_INT }, \
-	{ "conf", CTLTYPE_NODE } \
+	{ "conf", CTLTYPE_NODE }, \
+	{ "bcachestat", CTLTYPE_STRUCT } \
 }
 
 /*
@@ -450,9 +485,27 @@ struct vfsconf {
 	int	vfc_typenum;		/* historic filesystem type number */
 	int	vfc_refcount;		/* number mounted of this type */
 	int	vfc_flags;		/* permanent flags */
-	int	(*vfc_mountroot)(void);	/* if != NULL, routine to mount root */
 	struct	vfsconf *vfc_next;	/* next in list */
 };
+
+/* buffer cache statistics */
+struct bcachestats {
+	int64_t numbufs;		/* number of buffers allocated */
+	int64_t freebufs;		/* number of free buffers */
+	int64_t numbufpages;		/* number of pages in buffer cache */
+	int64_t numfreepages; 		/* number of free pages */
+	int64_t numdirtypages; 		/* number of dirty free pages */
+	int64_t numcleanpages; 		/* number of clean free pages */
+	int64_t pendingwrites;		/* number of pending writes */
+	int64_t pendingreads;		/* number of pending reads */
+	int64_t numwrites;		/* total writes started */
+	int64_t numreads;		/* total reads started */
+	int64_t cachehits;		/* total reads found in cache */
+};
+#ifdef _KERNEL
+extern struct bcachestats bcstats;
+#define BUFPAGES_DEFICIT (bufpages - bcstats.numbufpages)
+#endif
 
 /*
  * Operations supported on mounted file system.
@@ -565,7 +618,6 @@ int     vfs_mount_foreach_vnode(struct mount *, int (*func)(struct vnode *,
 void	vfs_getnewfsid(struct mount *);
 struct	mount *vfs_getvfs(fsid_t *);
 int	vfs_mountedon(struct vnode *);
-int	vfs_mountroot(void);
 int	vfs_rootmountalloc(char *, char *, struct mount **);
 void	vfs_unbusy(struct mount *);
 void	vfs_unmountall(void);
@@ -585,7 +637,6 @@ void	vfs_shutdown(void);	/* unmount and sync file systems */
 long	makefstype(char *);
 int	dounmount(struct mount *, int, struct proc *, struct vnode *);
 void	vfsinit(void);
-void	vfs_bufstats(void);
 int	vfs_register(struct vfsconf *);
 int	vfs_unregister(struct vfsconf *);
 #else /* _KERNEL */

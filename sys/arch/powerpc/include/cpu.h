@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.h,v 1.32 2007/12/04 22:36:39 kettenis Exp $	*/
+/*	$OpenBSD: cpu.h,v 1.38 2008/07/18 23:43:31 art Exp $	*/
 /*	$NetBSD: cpu.h,v 1.1 1996/09/30 16:34:21 ws Exp $	*/
 
 /*
@@ -52,11 +52,13 @@ struct cpu_info {
 	struct proc *ci_vecproc;
 	int ci_cpuid;
 
-	volatile int ci_astpending;
 	volatile int ci_want_resched;
 	volatile int ci_cpl;
 	volatile int ci_iactive;
+#define		CI_IACTIVE_PROCESSING_SOFT	1
+#define		CI_IACTIVE_PROCESSING_HARD	2
 	volatile int ci_ipending;
+
 	int ci_intrdepth;
 	char *ci_intstk;
 #define CPUSAVE_LEN	8
@@ -64,6 +66,14 @@ struct cpu_info {
 	register_t ci_ddbsave[CPUSAVE_LEN];
 #define DISISAVE_LEN	4
 	register_t ci_disisave[DISISAVE_LEN];
+
+	volatile u_int64_t ci_nexttimerevent;
+	volatile u_int64_t ci_prevtb;
+	volatile u_int64_t ci_lasttb;
+	volatile u_int64_t ci_nextstatevent;
+	int ci_statspending;
+
+	u_long ci_randseed;
 };
 
 static __inline struct cpu_info *
@@ -89,7 +99,7 @@ cpu_number(void)
 {
 	int pir;
 
-	__asm ("mfspr %0,1023" : "=r"(pir));
+	pir = curcpu()->ci_cpuid;
 	return pir;
 }
 
@@ -129,9 +139,23 @@ extern struct cpu_info cpu_info[PPC_MAXPROCS];
 void	delay(unsigned);
 #define	DELAY(n)		delay(n)
 
-#define	need_resched(ci)	(ci->ci_want_resched = 1, ci->ci_astpending = 1)
-#define	need_proftick(p)	do { curcpu()->ci_astpending = 1; } while (0)
-#define	signotify(p)		(curcpu()->ci_astpending = 1)
+#define	aston(p)		((p)->p_md.md_astpending = 1)
+
+/*
+ * Preempt the current process if in interrupt from user mode,
+ * or after the current trap/syscall if in system mode.
+ */
+#define	need_resched(ci) \
+do {									\
+	ci->ci_want_resched = 1;					\
+	if (ci->ci_curproc != NULL)					\
+		aston(ci->ci_curproc);					\
+} while (0)
+#define clear_resched(ci) (ci)->ci_want_resched = 0
+
+#define	need_proftick(p)	aston(p)
+
+void	signotify(struct proc *);
 
 extern char *bootpath;
 

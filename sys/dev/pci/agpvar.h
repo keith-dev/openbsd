@@ -1,4 +1,4 @@
-/*	$OpenBSD: agpvar.h,v 1.10 2007/12/07 17:35:22 oga Exp $	*/
+/*	$OpenBSD: agpvar.h,v 1.14 2008/07/12 17:31:06 oga Exp $	*/
 /*	$NetBSD: agpvar.h,v 1.4 2001/10/01 21:54:48 fvdl Exp $	*/
 
 /*-
@@ -44,8 +44,8 @@
 #define AGPUNIT(x)	minor(x)
 
 struct agpbus_attach_args {
-        char    *apa_busname; 
         struct pci_attach_args apa_pci_args;
+        struct pci_attach_args apa_vga_args;
 };
 
 enum agp_acquire_state {
@@ -135,6 +135,9 @@ struct agp_softc {
 	pcireg_t		sc_id;
 	pci_chipset_tag_t	sc_pc;
 
+	pci_chipset_tag_t	sc_vgapc;
+	pcitag_t		sc_vgapcitag;
+
 	struct agp_methods 	*sc_methods;
 	void			*sc_chipc;	/* chipset-dependent state */
 
@@ -147,6 +150,8 @@ struct agp_softc {
 	u_int32_t		sc_allocated;	/* amount allocated */
 	enum agp_acquire_state	sc_state;
 	struct agp_memory_list	sc_memory;	/* list of allocated memory */
+
+	struct vga_pci_softc	*vga_softc;	/* needed for shared mappings */
 };
 
 struct agp_gatt {
@@ -174,6 +179,7 @@ paddr_t	agpmmap(void *, off_t, int);
 int	agpioctl(dev_t, u_long, caddr_t, int, struct proc *);
 int	agpopen(dev_t, int, int, struct proc *);
 int	agpclose(dev_t, int, int , struct proc *);
+void	agp_set_pchb(struct pci_attach_args*);
 /*
  * Functions private to the AGP code.
  */
@@ -181,6 +187,8 @@ int	agpclose(dev_t, int, int , struct proc *);
 int	agp_find_caps(pci_chipset_tag_t, pcitag_t);
 int	agp_map_aperture(struct pci_attach_args *, 
 	    struct agp_softc *, u_int32_t, u_int32_t);
+u_int32_t agp_generic_get_aperture(struct agp_softc *);
+int	agp_generic_set_aperture(struct agp_softc *, u_int32_t);
 struct agp_gatt *
 	agp_alloc_gatt(struct agp_softc *);
 void	agp_free_gatt(struct agp_softc *, struct agp_gatt *);

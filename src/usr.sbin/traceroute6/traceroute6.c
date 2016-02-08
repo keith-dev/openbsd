@@ -1,4 +1,4 @@
-/*	$OpenBSD: traceroute6.c,v 1.43 2006/12/19 14:47:45 itojun Exp $	*/
+/*	$OpenBSD: traceroute6.c,v 1.45 2008/03/24 16:11:06 deraadt Exp $	*/
 /*	$KAME: traceroute6.c,v 1.63 2002/10/24 12:53:25 itojun Exp $	*/
 
 /*
@@ -592,6 +592,7 @@ main(int argc, char *argv[])
 	rcvmhdr.msg_iovlen = 1;
 	rcvcmsglen = CMSG_SPACE(sizeof(struct in6_pktinfo)) +
 	    CMSG_SPACE(sizeof(int));
+	
 	if ((rcvcmsgbuf = malloc(rcvcmsglen)) == NULL) {
 		fprintf(stderr, "traceroute6: malloc failed\n");
 		exit(1);

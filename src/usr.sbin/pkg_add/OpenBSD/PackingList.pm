@@ -1,5 +1,5 @@
 # ex:ts=8 sw=4:
-# $OpenBSD: PackingList.pm,v 1.81 2007/12/08 15:54:45 espie Exp $
+# $OpenBSD: PackingList.pm,v 1.83 2008/06/06 15:02:57 espie Exp $
 #
 # Copyright (c) 2003-2007 Marc Espie <espie@openbsd.org>
 #
@@ -151,7 +151,18 @@ sub FilesOnly
 	my ($fh, $cont) = @_;
 	local $_;
 	while (<$fh>) {
-	    	next unless m/^\@(?:cwd|name|info|man|file|lib|shell|sample)\b/o || !m/^\@/o;
+	    	next unless m/^\@(?:cwd|name|info|man|file|lib|shell|sample|bin)\b/o || !m/^\@/o;
+		&$cont($_);
+	}
+}
+
+sub PrelinkStuffOnly
+{
+	my ($fh, $cont) = @_;
+	local $_;
+	while (<$fh>) {
+		next unless m/^\@(?:cwd|bin|lib|name|depend|wantlib)\b/o ||
+			m/^\@comment\s+subdir\=/o;
 		&$cont($_);
 	}
 }

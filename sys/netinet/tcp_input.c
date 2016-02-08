@@ -1,4 +1,4 @@
-/*	$OpenBSD: tcp_input.c,v 1.212 2008/02/20 11:24:02 markus Exp $	*/
+/*	$OpenBSD: tcp_input.c,v 1.220 2008/07/03 15:46:24 henning Exp $	*/
 /*	$NetBSD: tcp_input.c,v 1.23 1996/02/13 23:43:44 christos Exp $	*/
 
 /*
@@ -95,6 +95,13 @@
 #include <netinet/tcpip.h>
 #include <netinet/tcp_debug.h>
 
+#include "faith.h"
+
+#include "pf.h"
+#if NPF > 0
+#include <net/pfvar.h>
+#endif
+
 struct	tcpiphdr tcp_saveti;
 
 int tcp_mss_adv(struct ifnet *, int);
@@ -188,11 +195,7 @@ do { \
  */
 
 int
-tcp_reass(tp, th, m, tlen)
-	struct tcpcb *tp;
-	struct tcphdr *th;
-	struct mbuf *m;
-	int *tlen;
+tcp_reass(struct tcpcb *tp, struct tcphdr *th, struct mbuf *m, int *tlen)
 {
 	struct tcpqent *p, *q, *nq, *tiqe;
 	struct socket *so = tp->t_inpcb->inp_socket;
@@ -325,13 +328,11 @@ present:
 
 #ifdef INET6
 int
-tcp6_input(mp, offp, proto)
-	struct mbuf **mp;
-	int *offp, proto;
+tcp6_input(struct mbuf **mp, int *offp, int proto)
 {
 	struct mbuf *m = *mp;
 
-#if defined(NFAITH) && 0 < NFAITH
+#if NFAITH > 0
 	if (m->m_pkthdr.rcvif) {
 		if (m->m_pkthdr.rcvif->if_type == IFT_FAITH) {
 			/* XXX send icmp6 host/port unreach? */
@@ -369,7 +370,7 @@ void
 tcp_input(struct mbuf *m, ...)
 {
 	struct ip *ip;
-	struct inpcb *inp;
+	struct inpcb *inp = NULL;
 	u_int8_t *optp = NULL;
 	int optlen = 0;
 	int tlen, off;
@@ -594,19 +595,32 @@ tcp_input(struct mbuf *m, ...)
 	 * Locate pcb for segment.
 	 */
 findpcb:
-	switch (af) {
-#ifdef INET6
-	case AF_INET6:
-		inp = in6_pcbhashlookup(&tcbtable, &ip6->ip6_src, th->th_sport,
-		    &ip6->ip6_dst, th->th_dport);
-		break;
+#if NPF > 0
+	if (m->m_pkthdr.pf.statekey)
+		inp = ((struct pf_state_key *)m->m_pkthdr.pf.statekey)->inp;
 #endif
-	case AF_INET:
-		inp = in_pcbhashlookup(&tcbtable, ip->ip_src, th->th_sport,
-		    ip->ip_dst, th->th_dport);
-		break;
+	if (inp == NULL) {
+		switch (af) {
+#ifdef INET6
+		case AF_INET6:
+			inp = in6_pcbhashlookup(&tcbtable, &ip6->ip6_src,
+			    th->th_sport, &ip6->ip6_dst, th->th_dport);
+			break;
+#endif
+		case AF_INET:
+			inp = in_pcbhashlookup(&tcbtable, ip->ip_src,
+			    th->th_sport, ip->ip_dst, th->th_dport);
+			break;
+		}
+#if NPF > 0
+		if (m->m_pkthdr.pf.statekey && inp) {
+			((struct pf_state_key *)m->m_pkthdr.pf.statekey)->inp =
+			    inp;
+			inp->inp_pf_sk = m->m_pkthdr.pf.statekey;
+		}
+#endif
 	}
-	if (inp == 0) {
+	if (inp == NULL) {
 		int	inpl_flags = 0;
 		if (m->m_pkthdr.pf.flags & PF_TAG_TRANSLATE_LOCALHOST)
 			inpl_flags = INPLOOKUP_WILDCARD;
@@ -615,12 +629,12 @@ findpcb:
 #ifdef INET6
 		case AF_INET6:
 			inp = in6_pcblookup_listen(&tcbtable,
-			    &ip6->ip6_dst, th->th_dport, inpl_flags);
+			    &ip6->ip6_dst, th->th_dport, inpl_flags, m);
 			break;
 #endif /* INET6 */
 		case AF_INET:
 			inp = in_pcblookup_listen(&tcbtable,
-			    ip->ip_dst, th->th_dport, inpl_flags);
+			    ip->ip_dst, th->th_dport, inpl_flags, m);
 			break;
 		}
 		/*
@@ -862,6 +876,14 @@ after_listen:
 	 */
 	if (tp->t_state == TCPS_LISTEN)
 		panic("tcp_input: TCPS_LISTEN");
+#endif
+
+#if NPF > 0
+		if (m->m_pkthdr.pf.statekey) {
+			((struct pf_state_key *)m->m_pkthdr.pf.statekey)->inp =
+			    inp;
+			inp->inp_pf_sk = m->m_pkthdr.pf.statekey;
+		}
 #endif
 
 #ifdef IPSEC
@@ -1227,10 +1249,8 @@ after_listen:
 				tp->snd_scale = tp->requested_s_scale;
 				tp->rcv_scale = tp->request_r_scale;
 			}
-			tcp_reass_lock(tp);
 			(void) tcp_reass(tp, (struct tcphdr *)0,
 				(struct mbuf *)0, &tlen);
-			tcp_reass_unlock(tp);
 			/*
 			 * if we didn't have to retransmit the SYN,
 			 * use its rtt as our initial srtt & rtt var.
@@ -1506,10 +1526,8 @@ trimthenstep6:
 			tp->rcv_scale = tp->request_r_scale;
 			tiwin = th->th_win << tp->snd_scale;
 		}
-		tcp_reass_lock(tp);
 		(void) tcp_reass(tp, (struct tcphdr *)0, (struct mbuf *)0,
 				 &tlen);
-		tcp_reass_unlock(tp);
 		tp->snd_wl1 = th->th_seq - 1;
 		/* fall into ... */
 
@@ -1652,19 +1670,15 @@ trimthenstep6:
 					if (win < 2)
 						win = 2;
 					tp->snd_ssthresh = win * tp->t_maxseg;
-#if defined(TCP_SACK)
-					tp->snd_last = tp->snd_max;
-#endif
 #ifdef TCP_SACK
+					tp->snd_last = tp->snd_max;
                     			if (tp->sack_enable) {
 						TCP_TIMER_DISARM(tp, TCPT_REXMT);
 						tp->t_rtttime = 0;
 #ifdef TCP_ECN
 						tp->t_flags |= TF_SEND_CWR;
 #endif
-#if 1 /* TCP_ECN */
 						tcpstat.tcps_cwr_frecovery++;
-#endif
 						tcpstat.tcps_sack_recovery_episode++;
 #if defined(TCP_SACK) && defined(TCP_FACK)
 						tp->t_dupacks = tcprexmtthresh;
@@ -1693,9 +1707,7 @@ trimthenstep6:
 #ifdef TCP_ECN
 					tp->t_flags |= TF_SEND_CWR;
 #endif
-#if 1 /* TCP_ECN */
 					tcpstat.tcps_cwr_frecovery++;
-#endif
 					tcpstat.tcps_sndrexmitfast++;
 					(void) tcp_output(tp);
 
@@ -2042,10 +2054,8 @@ dodata:							/* XXX */
 		tcp_seq laststart = th->th_seq;
 		tcp_seq lastend = th->th_seq + tlen;
 #endif
-		tcp_reass_lock(tp);
 		if (th->th_seq == tp->rcv_nxt && TAILQ_EMPTY(&tp->t_segq) &&
 		    tp->t_state == TCPS_ESTABLISHED) {
-			tcp_reass_unlock(tp);
 			TCP_SETUP_ACK(tp, tiflags);
 			tp->rcv_nxt += tlen;
 			tiflags = th->th_flags & TH_FIN;
@@ -2062,7 +2072,6 @@ dodata:							/* XXX */
 		} else {
 			m_adj(m, hdroptlen);
 			tiflags = tcp_reass(tp, th, m, &tlen);
-			tcp_reass_unlock(tp);
 			tp->t_flags |= TF_ACKNOW;
 		}
 #ifdef TCP_SACK
@@ -2244,14 +2253,8 @@ drop:
 }
 
 int
-tcp_dooptions(tp, cp, cnt, th, m, iphlen, oi)
-	struct tcpcb *tp;
-	u_char *cp;
-	int cnt;
-	struct tcphdr *th;
-	struct mbuf *m;
-	int iphlen;
-	struct tcp_opt_info *oi;
+tcp_dooptions(struct tcpcb *tp, u_char *cp, int cnt, struct tcphdr *th,
+    struct mbuf *m, int iphlen, struct tcp_opt_info *oi)
 {
 	u_int16_t mss = 0;
 	int opt, optlen;
@@ -2424,8 +2427,7 @@ tcp_dooptions(tp, cp, cnt, th, m, iphlen, oi)
 
 #if defined(TCP_SACK)
 u_long
-tcp_seq_subtract(a, b)
-	u_long a, b;
+tcp_seq_subtract(u_long a, u_long b)
 {
 	return ((long)(a - b));
 }
@@ -2761,9 +2763,7 @@ done:
  * tcp_dooptions(), will fix up the hole.
  */
 void
-tcp_del_sackholes(tp, th)
-	struct tcpcb *tp;
-	struct tcphdr *th;
+tcp_del_sackholes(struct tcpcb *tp, struct tcphdr *th)
 {
 	if (tp->sack_enable && tp->t_state != TCPS_LISTEN) {
 		/* max because this could be an older ack just arrived */
@@ -2792,8 +2792,7 @@ tcp_del_sackholes(tp, th)
  * Delete all receiver-side SACK information.
  */
 void
-tcp_clean_sackreport(tp)
-	struct tcpcb *tp;
+tcp_clean_sackreport(struct tcpcb *tp)
 {
 	int i;
 
@@ -2809,9 +2808,7 @@ tcp_clean_sackreport(tp)
  * If the ack advances at least to tp->snd_last, return 0.
  */
 int
-tcp_sack_partialack(tp, th)
-	struct tcpcb *tp;
-	struct tcphdr *th;
+tcp_sack_partialack(struct tcpcb *tp, struct tcphdr *th)
 {
 	if (SEQ_LT(th->th_ack, tp->snd_last)) {
 		/* Turn off retx. timer (will start again next segment) */
@@ -2842,11 +2839,7 @@ tcp_sack_partialack(tp, th)
  * sequencing purposes.
  */
 void
-tcp_pulloutofband(so, urgent, m, off)
-	struct socket *so;
-	u_int urgent;
-	struct mbuf *m;
-	int off;
+tcp_pulloutofband(struct socket *so, u_int urgent, struct mbuf *m, int off)
 {
         int cnt = off + urgent - 1;
 
@@ -2874,9 +2867,7 @@ tcp_pulloutofband(so, urgent, m, off)
  * and update averages and current timeout.
  */
 void
-tcp_xmit_timer(tp, rtt)
-	struct tcpcb *tp;
-	short rtt;
+tcp_xmit_timer(struct tcpcb *tp, int rtt)
 {
 	short delta;
 	short rttmin;
@@ -2978,9 +2969,7 @@ tcp_xmit_timer(tp, rtt)
  * Path MTU discovery.
  */
 int
-tcp_mss(tp, offer)
-	struct tcpcb *tp;
-	int offer;
+tcp_mss(struct tcpcb *tp, int offer)
 {
 	struct rtentry *rt;
 	struct ifnet *ifp;
@@ -3177,8 +3166,7 @@ tcp_hdrsz(struct tcpcb *tp)
  * before this routine is called!
  */
 void
-tcp_mss_update(tp)
-	struct tcpcb *tp;
+tcp_mss_update(struct tcpcb *tp)
 {
 	int mss;
 	u_long bufsize;
@@ -3223,9 +3211,7 @@ tcp_mss_update(tp)
  * be started again.  If the ack advances at least to tp->snd_last, return 0.
  */
 int
-tcp_newreno(tp, th)
-	struct tcpcb *tp;
-	struct tcphdr *th;
+tcp_newreno(struct tcpcb *tp, struct tcphdr *th)
 {
 	if (SEQ_LT(th->th_ack, tp->snd_last)) {
 		/*
@@ -3386,9 +3372,7 @@ syn_cache_init()
 }
 
 void
-syn_cache_insert(sc, tp)
-	struct syn_cache *sc;
-	struct tcpcb *tp;
+syn_cache_insert(struct syn_cache *sc, struct tcpcb *tp)
 {
 	struct syn_cache_head *scp;
 	struct syn_cache *sc2;
@@ -3550,8 +3534,7 @@ syn_cache_reaper(void *arg)
  * (if there's no tcb entry, syn cache entry will never be used)
  */
 void
-syn_cache_cleanup(tp)
-	struct tcpcb *tp;
+syn_cache_cleanup(struct tcpcb *tp)
 {
 	struct syn_cache *sc, *nsc;
 	int s;
@@ -3578,10 +3561,8 @@ syn_cache_cleanup(tp)
  * Find an entry in the syn cache.
  */
 struct syn_cache *
-syn_cache_lookup(src, dst, headp)
-	struct sockaddr *src;
-	struct sockaddr *dst;
-	struct syn_cache_head **headp;
+syn_cache_lookup(struct sockaddr *src, struct sockaddr *dst,
+    struct syn_cache_head **headp)
 {
 	struct syn_cache *sc;
 	struct syn_cache_head *scp;
@@ -3631,13 +3612,8 @@ syn_cache_lookup(src, dst, headp)
  *	associated with the connection.
  */
 struct socket *
-syn_cache_get(src, dst, th, hlen, tlen, so, m)
-	struct sockaddr *src;
-	struct sockaddr *dst;
-	struct tcphdr *th;
-	unsigned int hlen, tlen;
-	struct socket *so;
-	struct mbuf *m;
+syn_cache_get(struct sockaddr *src, struct sockaddr *dst, struct tcphdr *th,
+    u_int hlen, u_int tlen, struct socket *so, struct mbuf *m)
 {
 	struct syn_cache *sc;
 	struct syn_cache_head *scp;
@@ -3881,10 +3857,7 @@ abort:
  */
 
 void
-syn_cache_reset(src, dst, th)
-	struct sockaddr *src;
-	struct sockaddr *dst;
-	struct tcphdr *th;
+syn_cache_reset(struct sockaddr *src, struct sockaddr *dst, struct tcphdr *th)
 {
 	struct syn_cache *sc;
 	struct syn_cache_head *scp;
@@ -3906,10 +3879,7 @@ syn_cache_reset(src, dst, th)
 }
 
 void
-syn_cache_unreach(src, dst, th)
-	struct sockaddr *src;
-	struct sockaddr *dst;
-	struct tcphdr *th;
+syn_cache_unreach(struct sockaddr *src, struct sockaddr *dst, struct tcphdr *th)
 {
 	struct syn_cache *sc;
 	struct syn_cache_head *scp;
@@ -3961,17 +3931,9 @@ syn_cache_unreach(src, dst, th)
  */
 
 int
-syn_cache_add(src, dst, th, iphlen, so, m, optp, optlen, oi, issp)
-	struct sockaddr *src;
-	struct sockaddr *dst;
-	struct tcphdr *th;
-	unsigned int iphlen;
-	struct socket *so;
-	struct mbuf *m;
-	u_char *optp;
-	int optlen;
-	struct tcp_opt_info *oi;
-	tcp_seq *issp;
+syn_cache_add(struct sockaddr *src, struct sockaddr *dst, struct tcphdr *th,
+    u_int iphlen, struct socket *so, struct mbuf *m, u_char *optp, int optlen,
+    struct tcp_opt_info *oi, tcp_seq *issp)
 {
 	struct tcpcb tb, *tp;
 	long win;
@@ -4126,9 +4088,7 @@ syn_cache_add(src, dst, th, iphlen, so, m, optp, optlen, oi, issp)
 }
 
 int
-syn_cache_respond(sc, m)
-	struct syn_cache *sc;
-	struct mbuf *m;
+syn_cache_respond(struct syn_cache *sc, struct mbuf *m)
 {
 	struct route *ro;
 	u_int8_t *optp;

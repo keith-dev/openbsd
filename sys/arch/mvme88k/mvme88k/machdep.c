@@ -1,4 +1,4 @@
-/* $OpenBSD: machdep.c,v 1.210 2008/01/23 16:37:57 jsing Exp $	*/
+/* $OpenBSD: machdep.c,v 1.213 2008/06/27 17:22:14 miod Exp $	*/
 /*
  * Copyright (c) 1998, 1999, 2000, 2001 Steve Murphree, Jr.
  * Copyright (c) 1996 Nivas Madhur
@@ -84,6 +84,7 @@
 #include <dev/cons.h>
 
 #include <uvm/uvm_extern.h>
+#include <uvm/uvm_swap.h>
 
 #include "ksyms.h"
 #if DDB
@@ -493,8 +494,8 @@ boot(howto)
 			printf("WARNING: not updating battery clock\n");
 	}
 
-	/* Disable interrupts. */
-	splhigh();
+	uvm_shutdown();
+	splhigh();		/* Disable interrupts. */
 
 	/* If rebooting and a dump is requested, do it. */
 	if (howto & RB_DUMP)
@@ -506,7 +507,9 @@ haltsys:
 
 	if (howto & RB_HALT) {
 		printf("System halted. Press any key to reboot...\n\n");
+		cnpollc(1);
 		cngetc();
+		cnpollc(0);
 	}
 
 	doboot();
@@ -602,6 +605,10 @@ dumpsys()
 
 	printf("\ndumping to dev %u,%u offset %ld\n", maj,
 	    minor(dumpdev), dumplo);
+
+#ifdef UVM_SWAP_ENCRYPT
+	uvm_swap_finicrypt_all();
+#endif
 
 	/* Setup the dump header */
 	kseg_p = (kcore_seg_t *)dump_hdr;

@@ -25,9 +25,9 @@ changecom(,)dnl
 .\" OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
 .\" SUCH DAMAGE.
 .\"
-.\" $OpenBSD: ppp.8.m4,v 1.38 2007/05/31 19:20:27 jmc Exp $
+.\" $OpenBSD: ppp.8.m4,v 1.41 2008/07/19 10:35:31 reyk Exp $
 .\"
-.Dd $Mdocdate: May 31 2007 $
+.Dd $Mdocdate: July 19 2008 $
 .Dt PPP 8
 .Os
 .Sh NAME
@@ -2174,12 +2174,11 @@ set speed 115200
 .Pp
 The first serial port is cua00.
 The modem will attach at either
-.Xr com 4 ,
-.Xr pccom 4 ,
+.Xr com 4
 or
 .Xr ucom 4 .
 So, for example, if the modem attaches at
-.Dq pccom3 ,
+.Dq com3 ,
 device should be set to
 .Pa /dev/cua03 .
 .Pp
@@ -5482,8 +5481,8 @@ for
 .Ar gw .
 .Pp
 For example, a returned value of
-.Dq 3ffe:505:abcd::/48 ::
-would result in a routing table entry to the 3ffe:505:abcd::/48 network via
+.Dq 2001:db8:abcd::/48 ::
+would result in a routing table entry to the 2001:db8:abcd::/48 network via
 .Dv HISADDR6
 and a returned value of
 .Dq :: ::
@@ -6035,7 +6034,6 @@ This socket is used to pass links between different instances of
 .Xr syslog 3 ,
 .Xr uucplock 3 ,
 .Xr com 4 ,
-.Xr pccom 4 ,
 .Xr tun 4 ,
 .Xr ucom 4 ,
 .Xr crontab 5 ,

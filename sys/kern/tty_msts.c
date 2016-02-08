@@ -1,4 +1,4 @@
-/*	$OpenBSD: tty_msts.c,v 1.2 2008/01/06 13:11:51 mbalmer Exp $ */
+/*	$OpenBSD: tty_msts.c,v 1.4 2008/06/11 17:11:36 mbalmer Exp $ */
 
 /*
  * Copyright (c) 2008 Marc Balmer <mbalmer@openbsd.org>
@@ -52,12 +52,13 @@ void	mstsattach(int);
 #define TRUSTTIME	(10 * 60)	/* 10 minutes */
 #endif
 
-int msts_count;	/* this is wrong, it should really be a SLIST */
+int msts_count, msts_nxid;
 static int t_trust;
 
 struct msts {
 	char			cbuf[MSTSMAX];	/* receive buffer */
 	struct ksensor		time;		/* the timedelta sensor */
+	struct ksensor		signal;		/* signal status */
 	struct ksensordev	timedev;
 	struct timespec		ts;		/* current timestamp */
 	struct timespec		lts;		/* timestamp of last <STX> */
@@ -101,13 +102,22 @@ mstsopen(dev_t dev, struct tty *tp)
 		return error;
 	np = malloc(sizeof(struct msts), M_DEVBUF, M_WAITOK|M_ZERO);
 	snprintf(np->timedev.xname, sizeof(np->timedev.xname), "msts%d",
-	    msts_count++);
+	    msts_nxid++);
+	msts_count++;
 	np->time.status = SENSOR_S_UNKNOWN;
 	np->time.type = SENSOR_TIMEDELTA;
 #ifndef MSTS_DEBUG
 	np->time.flags = SENSOR_FINVALID;
 #endif
 	sensor_attach(&np->timedev, &np->time);
+
+	np->signal.type = SENSOR_PERCENT;
+	np->signal.status = SENSOR_S_UNKNOWN;
+	np->signal.value = 100000LL;
+	np->signal.flags = 0;
+	strlcpy(np->signal.desc, "Signal", sizeof(np->signal.desc));
+	sensor_attach(&np->timedev, &np->signal);
+
 	np->sync = 1;
 	tp->t_sc = (caddr_t)np;
 
@@ -139,6 +149,8 @@ mstsclose(struct tty *tp, int flags)
 	free(np, M_DEVBUF);
 	tp->t_sc = NULL;
 	msts_count--;
+	if (msts_count == 0)
+		msts_nxid = 0;
 	return linesw[TTYDISC].l_close(tp, flags);
 }
 
@@ -292,8 +304,11 @@ msts_decode(struct msts *np, struct tty *tp, char *fld[], int fldcnt)
 	 */
 	if (fld[3][0] == ' ' && fld[3][1] == ' ') {
 		np->time.status = SENSOR_S_OK;
+		np->signal.status = SENSOR_S_OK;
 		timeout_add(&np->msts_tout, t_trust);
-	}
+	} else
+		np->signal.status = SENSOR_S_WARN;
+
 	/*
 	 * If tty timestamping is requested, but not PPS signal is present, set
 	 * the sensor state to CRITICAL.

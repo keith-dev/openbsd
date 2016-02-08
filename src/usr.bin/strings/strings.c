@@ -1,4 +1,4 @@
-/*	$OpenBSD: strings.c,v 1.12 2003/10/02 05:10:03 mickey Exp $	*/
+/*	$OpenBSD: strings.c,v 1.14 2008/06/01 21:42:30 sobrado Exp $	*/
 /*	$NetBSD: strings.c,v 1.7 1995/02/15 15:49:19 jtc Exp $	*/
 
 /*
@@ -40,7 +40,7 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)strings.c	8.2 (Berkeley) 1/28/94";
 #endif
-static char rcsid[] = "$OpenBSD: strings.c,v 1.12 2003/10/02 05:10:03 mickey Exp $";
+static char rcsid[] = "$OpenBSD: strings.c,v 1.14 2008/06/01 21:42:30 sobrado Exp $";
 #endif /* not lint */
 
 #include <sys/types.h>
@@ -195,10 +195,8 @@ main(int argc, char *argv[])
 				hcnt = 0;
 		}
 start:
-		for (cnt = 0; (ch = getch()) != EOF;) {
+		for (cnt = 0, C = bfr; (ch = getch()) != EOF;) {
 			if (ISSTR(ch)) {
-				if (!cnt)
-					C = bfr;
 				*C++ = ch;
 				if (++cnt < minlen)
 					continue;
@@ -235,6 +233,7 @@ start:
 				;
 			}
 			cnt = 0;
+			C = bfr;
 		}
 nextfile: ;
 	} while (*argv);
@@ -263,6 +262,6 @@ static void
 usage(void)
 {
 	(void)fprintf(stderr,
-	    "usage: strings [-afo] [-n length] [-t {o,d,x}] [file ... ]\n");
+	    "usage: strings [-afo] [-m number] [-n number] [-t radix] [file ...]\n");
 	exit(1);
 }

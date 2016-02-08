@@ -1,4 +1,4 @@
-/*	$OpenBSD: cmpci.c,v 1.17 2008/01/09 02:17:52 jakemsr Exp $	*/
+/*	$OpenBSD: cmpci.c,v 1.20 2008/05/29 07:20:15 jakemsr Exp $	*/
 /*	$NetBSD: cmpci.c,v 1.25 2004/10/26 06:32:20 xtraeme Exp $	*/
 
 /*
@@ -41,11 +41,6 @@
  *   - Joystick support.
  *
  */
-
-#if 0
-#include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: cmpci.c,v 1.25 2004/10/26 06:32:20 xtraeme Exp $");
-#endif
 
 #if defined(AUDIO_DEBUG) || defined(DEBUG)
 #define DPRINTF(x) if (cmpcidebug) printf x
@@ -138,6 +133,7 @@ int cmpci_query_encoding(void *, struct audio_encoding *);
 int cmpci_set_params(void *, int, int,
 				 struct audio_params *,
 				 struct audio_params *);
+void cmpci_get_default_params(void *, int, struct audio_params*);
 int cmpci_round_blocksize(void *, int);
 int cmpci_halt_output(void *);
 int cmpci_halt_input(void *);
@@ -184,6 +180,7 @@ struct audio_hw_if cmpci_hw_if = {
 	cmpci_get_props,	/* get_props */
 	cmpci_trigger_output,	/* trigger_output */
 	cmpci_trigger_input,	/* trigger_input */
+	cmpci_get_default_params
 };
 
 /*
@@ -634,6 +631,17 @@ cmpci_query_encoding(void *handle, struct audio_encoding *fp)
 		return EINVAL;
 	}
 	return 0;
+}
+
+void
+cmpci_get_default_params(void *addr, int mode, struct audio_params *params)
+{
+	params->sample_rate = 48000;
+	params->encoding = AUDIO_ENCODING_SLINEAR_LE;
+	params->precision = 16;
+	params->channels = 2;
+	params->sw_code = NULL;
+	params->factor = 1;
 }
 
 int

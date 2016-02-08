@@ -1,5 +1,5 @@
 # ex:ts=8 sw=4:
-# $OpenBSD: PackingElement.pm,v 1.143 2007/07/14 21:50:05 ajacoutot Exp $
+# $OpenBSD: PackingElement.pm,v 1.148 2008/06/11 12:21:03 espie Exp $
 #
 # Copyright (c) 2003-2007 Marc Espie <espie@openbsd.org>
 #
@@ -250,6 +250,25 @@ sub realname
 	return $state->{destdir}.$name;
 }
 
+sub compute_md5
+{
+	my ($self, $filename) = @_;
+	require OpenBSD::md5;
+	return OpenBSD::md5::fromfile($filename);
+}
+
+sub write
+{
+	my ($self, $fh) = @_;
+
+	$self->SUPER::write($fh);
+	if (defined $self->{tags}) {
+		for my $tag (sort keys %{$self->{tags}}) {
+			print $fh "\@tag ", $tag, "\n";
+		}
+	}
+}
+
 # exec/unexec and friends
 package OpenBSD::PackingElement::Action;
 our @ISA=qw(OpenBSD::PackingElement::Object);
@@ -322,6 +341,7 @@ sub destate
 	my ($self, $state) = @_;
 	$self->SUPER::destate($state);
 	$state->{lastfile} = $self;
+	$state->{lastchecksummable} = $self;
 	$self->compute_modes($state);
 	if (defined $state->{nochecksum}) {
 		$self->{nochecksum} = 1;
@@ -531,6 +551,12 @@ our @ISA=qw(OpenBSD::PackingElement::FileBase);
 sub keyword() { "ltlib" }
 __PACKAGE__->register_with_factory;
 
+package OpenBSD::PackingElement::Binary;
+our @ISA=qw(OpenBSD::PackingElement::FileBase);
+
+sub keyword() { "bin" }
+__PACKAGE__->register_with_factory;
+
 # Comment is very special
 package OpenBSD::PackingElement::Comment;
 our @ISA=qw(OpenBSD::PackingElement::Meta);
@@ -570,7 +596,7 @@ sub add
 {
 	my ($class, $plist, $args) = @_;
 
-	$plist->{state}->{lastfile}->add_md5(pack('H*', $args));
+	$plist->{state}->{lastchecksummable}->add_md5(pack('H*', $args));
 	return;
 }
 
@@ -597,8 +623,27 @@ sub add
 package OpenBSD::PackingElement::DefineTag;
 our @ISA=qw(OpenBSD::PackingElement::Meta);
 
+sub category() { 'define-tag' }
 sub keyword() { 'define-tag' }
 __PACKAGE__->register_with_factory;
+
+sub new
+{
+	my ($class, $args) = @_;
+	my ($tag, $condition, @command) = split(/\s+/, $args);
+	bless { 
+		name => $tag, 
+		when => $condition, 
+		command => join(' ', @command)
+	}, $class;
+}
+
+sub stringize
+{
+	my $self = shift;
+	return join(' ', map { $self->{$_}} 
+		(qw(name when command)));
+}
 
 package OpenBSD::PackingElement::symlink;
 our @ISA=qw(OpenBSD::PackingElement::Annotation);
@@ -796,6 +841,26 @@ our @ISA=qw(OpenBSD::PackingElement::Depend);
 sub category() { "wantlib" }
 sub keyword() { "wantlib" }
 __PACKAGE__->register_with_factory;
+
+sub destate
+{
+	my ($self, $state) = @_;
+	$state->{lastchecksummable} = $self;
+}
+
+sub write
+{
+	my ($self, $fh) = @_;
+	$self->SUPER::write($fh);
+	if (defined $self->{md5}) {
+		print $fh "\@md5 ", unpack('H*', $self->{md5}), "\n";
+	}
+}
+
+sub add_md5
+{
+	&OpenBSD::PackingElement::FileBase::add_md5;
+}
 
 package OpenBSD::PackingElement::PkgPath;
 our @ISA=qw(OpenBSD::PackingElement::Meta);
@@ -1285,22 +1350,25 @@ sub exec_on_delete { 0 }
 
 sub add_md5
 {
-	my ($self, $md5) = @_;
-	$self->{md5} = $md5;
+	&OpenBSD::PackingElement::FileBase::add_md5;
 }
 
 sub add_size
 {
-	my ($self, $sz) = @_;
-	$self->{size} = $sz;
+	&OpenBSD::PackingElement::FileBase::add_size;
 }
 
-sub needs_keyword { 0 }
+sub compute_md5
+{
+	&OpenBSD::PackingElement::FileObject::compute_md5;
+}
 
 sub write
 {
 	&OpenBSD::PackingElement::FileBase::write;
 }
+
+sub needs_keyword { 0 }
 
 sub add_object
 {
@@ -1368,7 +1436,7 @@ sub run
 	return if $not;
 	chmod 0755, $name;
 	return if $state->system($name, $pkgname, @args) == 0;
-	if ($state->{forced}->{scripts}) {
+	if ($state->{defines}->{scripts}) {
 		$state->warn($self->beautify, " script failed\n");
 	} else {
 		$state->fatal($self->beautify." script failed");

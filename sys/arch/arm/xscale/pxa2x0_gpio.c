@@ -1,4 +1,4 @@
-/*	$OpenBSD: pxa2x0_gpio.c,v 1.18 2005/06/16 21:57:29 drahn Exp $ */
+/*	$OpenBSD: pxa2x0_gpio.c,v 1.20 2008/05/19 18:42:12 miod Exp $ */
 /*	$NetBSD: pxa2x0_gpio.c,v 1.2 2003/07/15 00:24:55 lukem Exp $	*/
 
 /*
@@ -35,11 +35,6 @@
  * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  * POSSIBILITY OF SUCH DAMAGE.
  */
-
-#include <sys/cdefs.h>
-/*
-__KERNEL_RCSID(0, "$NetBSD: pxa2x0_gpio.c,v 1.2 2003/07/15 00:24:55 lukem Exp $");
-*/
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -235,7 +230,7 @@ pxa2x0_gpio_intr_establish(u_int gpio, int level, int spl, int (*func)(void *),
 	if (GPIO_FN_IS_OUT(pxa2x0_gpio_get_function(gpio)) != GPIO_IN)
 		panic("pxa2x0_gpio_intr_establish: Pin %d not GPIO_IN", gpio);
 
-	MALLOC(gh, struct gpio_irq_handler *, sizeof(struct gpio_irq_handler),
+	gh = (struct gpio_irq_handler *)malloc(sizeof(struct gpio_irq_handler),
 	    M_DEVBUF, M_NOWAIT);
 
 	gh->gh_func = func;
@@ -335,7 +330,7 @@ pxa2x0_gpio_intr_disestablish(void *cookie)
 #endif /* PXAGPIO_HAS_GPION_INTRS */
 	}
 
-	FREE(gh, M_DEVBUF); 
+	free(gh, M_DEVBUF); 
 }
 
 #ifdef PXAGPIO_HAS_GPION_INTRS

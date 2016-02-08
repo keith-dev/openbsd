@@ -1,4 +1,4 @@
-/*	$OpenBSD: fd.c,v 1.56 2007/11/27 16:22:13 martynas Exp $	*/
+/*	$OpenBSD: fd.c,v 1.62 2008/06/26 05:42:13 ray Exp $	*/
 /*	$NetBSD: fd.c,v 1.51 1997/05/24 20:16:19 pk Exp $	*/
 
 /*-
@@ -16,13 +16,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -244,7 +237,7 @@ struct cfdriver fd_cd = {
 	NULL, "fd", DV_DISK
 };
 
-void fdgetdisklabel(dev_t);
+void fdgetdisklabel(dev_t, struct fd_softc *, struct disklabel *, int);
 int fd_get_parms(struct fd_softc *);
 void fdstrategy(struct buf *);
 void fdstart(struct fd_softc *);
@@ -984,7 +977,7 @@ fdopen(dev, flags, fmt, p)
 	 * Only update the disklabel if we're not open anywhere else.
 	 */
 	if (fd->sc_dk.dk_openmask == 0)
-		fdgetdisklabel(dev);
+		fdgetdisklabel(dev, fd, fd->sc_dk.dk_label, 0);
 
 	pmask = (1 << FDPART(dev));
 
@@ -1768,11 +1761,29 @@ fdioctl(dev, cmd, addr, flag, p)
 	struct proc *p;
 {
 	struct fd_softc *fd = fd_cd.cd_devs[FDUNIT(dev)];
+	struct disklabel *lp;
 	int error;
 
 	switch (cmd) {
+	case DIOCRLDINFO:
+		lp = malloc(sizeof(*lp), M_TEMP, M_WAITOK);
+		fdgetdisklabel(dev, fd, lp, 0);
+		bcopy(lp, fd->sc_dk.dk_label, sizeof(*lp));
+		free(lp, M_TEMP);
+		return 0;
+
+	case DIOCGPDINFO:
+		fdgetdisklabel(dev, fd, (struct disklabel *)addr, 1);
+		return 0;
+
 	case DIOCGDINFO:
 		*(struct disklabel *)addr = *(fd->sc_dk.dk_label);
+		return 0;
+
+	case DIOCGPART:
+		((struct partinfo *)addr)->disklab = fd->sc_dk.dk_label;
+		((struct partinfo *)addr)->part =
+		    &fd->sc_dk.dk_label->d_partitions[FDPART(dev)];
 		return 0;
 
 	case DIOCWLABEL:
@@ -1893,7 +1904,7 @@ fdformat(dev, finfo, p)
 	if (bp == 0)
 		return (ENOBUFS);
 
-	bp->b_flags = B_BUSY | B_PHYS | B_FORMAT;
+	bp->b_flags = B_BUSY | B_PHYS | B_FORMAT | B_RAW;
 	bp->b_proc = p;
 	bp->b_dev = dev;
 
@@ -1943,12 +1954,9 @@ fdformat(dev, finfo, p)
 }
 
 void
-fdgetdisklabel(dev)
-	dev_t dev;
+fdgetdisklabel(dev_t dev, struct fd_softc *fd, struct disklabel *lp,
+    int spoofonly)
 {
-	int unit = FDUNIT(dev);
-	struct fd_softc *fd = fd_cd.cd_devs[unit];
-	struct disklabel *lp = fd->sc_dk.dk_label;
 	char *errstring;
 
 	bzero(lp, sizeof(struct disklabel));
@@ -1974,7 +1982,7 @@ fdgetdisklabel(dev)
 	/*
 	 * Call the generic disklabel extraction routine.
 	 */
-	errstring = readdisklabel(DISKLABELDEV(dev), fdstrategy, lp, 0);
+	errstring = readdisklabel(DISKLABELDEV(dev), fdstrategy, lp, spoofonly);
 	if (errstring) {
 		/*printf("%s: %s\n", fd->sc_dv.dv_xname, errstring);*/
 	}

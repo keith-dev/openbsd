@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_uath.c,v 1.32 2008/01/21 12:57:31 jsg Exp $	*/
+/*	$OpenBSD: if_uath.c,v 1.35 2008/07/21 18:43:19 damien Exp $	*/
 
 /*-
  * Copyright (c) 2006
@@ -118,6 +118,8 @@ static const struct uath_type {
 	UATH_DEV_UG(GIGASET,		SMCWUSBTG),
 	UATH_DEV_UG(GLOBALSUN,		AR5523_1),
 	UATH_DEV_UX(GLOBALSUN,		AR5523_2),
+	UATH_DEV_UG(IODATA,		USBWNG54US),
+	UATH_DEV_UG(MELCO,		WLIU2KAMG54),
 	UATH_DEV_UX(NETGEAR,		WG111U),
 	UATH_DEV_UG(NETGEAR3,		WG111T),
 	UATH_DEV_UG(NETGEAR3,		WPN111),
@@ -369,6 +371,7 @@ uath_attach(struct device *parent, struct device *self, void *aux)
 
 	/* set device capabilities */
 	ic->ic_caps =
+	    IEEE80211_C_MONITOR |	/* monitor mode supported */
 	    IEEE80211_C_TXPMGT |	/* tx power management */
 	    IEEE80211_C_SHPREAMBLE |	/* short preamble supported */
 	    IEEE80211_C_SHSLOT |	/* short slot time supported */
@@ -1179,6 +1182,7 @@ uath_data_rxeof(usbd_xfer_handle xfer, usbd_private_handle priv,
 	struct ieee80211com *ic = &sc->sc_ic;
 	struct ifnet *ifp = &ic->ic_if;
 	struct ieee80211_frame *wh;
+	struct ieee80211_rxinfo rxi;
 	struct ieee80211_node *ni;
 	struct uath_rx_desc *desc;
 	struct mbuf *mnew, *m;
@@ -1245,6 +1249,7 @@ uath_data_rxeof(usbd_xfer_handle xfer, usbd_private_handle priv,
 	data->buf = mtod(data->m, uint8_t *);
 
 	wh = mtod(m, struct ieee80211_frame *);
+	rxi.rxi_flags = 0;
 	if ((wh->i_fc[1] & IEEE80211_FC1_WEP) &&
 	    ic->ic_opmode != IEEE80211_M_MONITOR) {
 		/*
@@ -1258,6 +1263,8 @@ uath_data_rxeof(usbd_xfer_handle xfer, usbd_private_handle priv,
 		m_adj(m, IEEE80211_WEP_IVLEN + IEEE80211_WEP_KIDLEN);
 		m_adj(m, -IEEE80211_WEP_CRCLEN);
 		wh = mtod(m, struct ieee80211_frame *);
+
+		rxi.rxi_flags |= IEEE80211_RXI_HWDEC;
 	}
 
 #if NBPFILTER > 0
@@ -1283,7 +1290,9 @@ uath_data_rxeof(usbd_xfer_handle xfer, usbd_private_handle priv,
 
 	s = splnet();
 	ni = ieee80211_find_rxnode(ic, wh);
-	ieee80211_input(ifp, m, ni, (int)betoh32(desc->rssi), 0);
+	rxi.rxi_rssi = (int)betoh32(desc->rssi);
+	rxi.rxi_tstamp = 0;	/* unused */
+	ieee80211_input(ifp, m, ni, &rxi);
 
 	/* node is no longer needed */
 	ieee80211_release_node(ic, ni);

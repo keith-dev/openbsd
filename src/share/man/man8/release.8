@@ -1,4 +1,4 @@
-.\"	$OpenBSD: release.8,v 1.52 2008/03/03 07:02:28 matthieu Exp $
+.\"	$OpenBSD: release.8,v 1.55 2008/06/22 20:54:51 ajacoutot Exp $
 .\"
 .\"	Copyright (c) 2000 Marco S. Hyman
 .\"
@@ -9,7 +9,7 @@
 .\"	LIMITATION, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
 .\"	FOR A PARTICULAR PURPOSE.
 .\"
-.Dd $Mdocdate: March 3 2008 $
+.Dd $Mdocdate: June 22 2008 $
 .Dt RELEASE 8
 .Os
 .Sh NAME
@@ -155,22 +155,26 @@ Build the kernel compilation directory and compile the kernel:
 .Bd -literal -offset indent
 $ config ${NAME}
 $ cd ../compile/${NAME}
-$ make clean depend && make
+$ make clean && make depend && make
 .Ed
 .Pp
 (In this instance
 .Li "make clean"
 is your friend.)
 .Pp
-Replace the old kernel and reboot:
+Replace the old kernel and reboot.
+The current kernel is copied to
+.Pa /obsd
+and the new kernel to
+.Pa /bsd .
 .Bd -literal -offset indent
 $ su
-# mv /bsd /bsd.old && mv bsd / && chown root:wheel /bsd
+# make install
 # shutdown -r now
 .Ed
 .Pp
 If the system does not come up you can boot using
-.Pa bsd.old .
+.Pa /obsd .
 .Ss 3. Build a new system
 Now that you are running your new kernel you can build a new system.
 It's safer (but slower) to remove your object directories and re-create
@@ -208,8 +212,9 @@ Update
 .Pa /etc ,
 .Pa /var ,
 and
-.Pa /dev/MAKEDEV
-by hand.
+.Pa /dev/MAKEDEV ,
+either by hand or using
+.Xr sysmerge 8 .
 .Pp
 At this point your system is up-to-date and running the code that you
 are going to make into a release.
@@ -262,8 +267,8 @@ You must be root to create a release:
 .Pp
 Create the special tools needed to build the release:
 .Bd -literal -offset indent
-# cd /usr/src/distrib/crunch && make obj depend \e
-	&& make all install
+# cd /usr/src/distrib/crunch && make obj && make depend \e
+	&& make all && make install
 # export DESTDIR=your-destdir; export RELEASEDIR=your-releasedir
 # test -d ${DESTDIR} && mv ${DESTDIR} ${DESTDIR}- && \e
 	rm -rf ${DESTDIR}- &
@@ -366,7 +371,8 @@ That's all there is to it.
 .Xr cvs 1 ,
 .Xr pkg_add 1 ,
 .Xr ports 7 ,
-.Xr sudo 8
+.Xr sudo 8 ,
+.Xr sysmerge 8
 .Sh HISTORY
 This document first appeared in
 .Ox 2.8 .

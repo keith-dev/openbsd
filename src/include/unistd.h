@@ -1,4 +1,4 @@
-/*	$OpenBSD: unistd.h,v 1.59 2006/12/20 08:12:00 espie Exp $ */
+/*	$OpenBSD: unistd.h,v 1.62 2008/06/25 14:58:54 millert Exp $ */
 /*	$NetBSD: unistd.h,v 1.26.4.1 1996/05/28 02:31:51 mrg Exp $	*/
 
 /*-
@@ -48,6 +48,11 @@
 #define F_LOCK          1	/* lock a section for exclusive use */
 #define F_TLOCK         2	/* test and lock a section for exclusive use */
 #define F_TEST          3	/* test a section for locks by other procs */
+#endif
+
+#if __POSIX_VISIBLE
+#define _POSIX_REENTRANT_FUNCTIONS	1
+#define _POSIX_THREAD_SAFE_FUNCTIONS	200112L
 #endif
 
 #ifndef NULL
@@ -176,7 +181,7 @@ int	 ttyname_r(int, char *, size_t)
 
 #if __BSD_VISIBLE ||  __XPG_VISIBLE <= 500
 /* Interfaces withdrawn by X/Open Issue 5 Version 0 */
-void	 *brk(void *);
+int	 brk(void *);
 int	 chroot(const char *);
 int	 getdtablesize(void);
 int	 getpagesize(void);
@@ -218,7 +223,6 @@ int	 issetugid(void);
 char	*mkdtemp(char *);
 int	 mkstemps(char *, int);
 int	 nfssvc(int, void *);
-void	 psignal(unsigned int, const char *);
 int	 profil(char *, size_t, unsigned long, unsigned int)
 		__attribute__ ((__bounded__(__string__,1,2)));
 int	 quotactl(const char *, int, int, char *);
@@ -255,7 +259,6 @@ void	 setusershell(void);
 int	 strtofflags(char **, u_int32_t *, u_int32_t *);
 int	 swapctl(int cmd, const void *arg, int misc);
 int	 syscall(int, ...);
-extern __const char *__const sys_siglist[]; /* XXX - also in signal.h */
 #endif /* __BSD_VISIBLE */
 __END_DECLS
 

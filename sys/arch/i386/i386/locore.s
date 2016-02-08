@@ -1,4 +1,4 @@
-/*	$OpenBSD: locore.s,v 1.121 2007/11/28 17:05:09 tedu Exp $	*/
+/*	$OpenBSD: locore.s,v 1.124 2008/07/28 19:08:46 miod Exp $	*/
 /*	$NetBSD: locore.s,v 1.145 1996/05/03 19:41:19 christos Exp $	*/
 
 /*-
@@ -601,7 +601,7 @@ try586:	/* Use the `cpuid' instruction. */
 
 /*
  * Construct a page table directory.
-*/
+ */
 	movl	RELOC(_C_LABEL(nkpde)),%ecx		# count of pde s,
 	leal	(PROC0PDIR+0*4)(%esi),%ebx		# where temp maps!
 	leal	(SYSMAP+PG_V|PG_KW)(%esi),%eax		# pte for KPT in proc 0
@@ -667,6 +667,7 @@ begin:
 	addl	$4,%esp
 
 	call	_C_LABEL(main)
+	/* NOTREACHED */
 
 NENTRY(proc_trampoline)
 #ifdef MULTIPROCESSOR
@@ -780,30 +781,6 @@ _C_LABEL(freebsd_esigcode):
 /*
  * The following primitives are used to fill and copy regions of memory.
  */
-
-/*
- * fillw(short pattern, caddr_t addr, size_t len);
- * Write len copies of pattern at addr.
- */
-ENTRY(fillw)
-	pushl	%edi
-	movl	8(%esp),%eax
-	movl	12(%esp),%edi
-	movw	%ax,%cx
-	rorl	$16,%eax
-	movw	%cx,%ax
-	cld
-	movl	16(%esp),%ecx
-	shrl	%ecx			# do longwords
-	rep
-	stosl
-	movl	16(%esp),%ecx
-	andl	$1,%ecx			# do remainder
-	rep
-	stosw
-	popl	%edi
-	ret
-
 
 /* Frame pointer reserve on stack. */
 #ifdef DDB
@@ -1325,11 +1302,8 @@ ENTRY(cpu_switchto)
 	movl	16(%esp), %esi
 	movl	20(%esp), %edi
 
-	xorl	%eax, %eax
-
-	movl	%eax, CPUVAR(RESCHED)
-
 #ifdef	DIAGNOSTIC
+	xorl	%eax, %eax
 	cmpl	%eax,P_WCHAN(%edi)	# Waiting for something?
 	jne	_C_LABEL(switch_error1)	# Yes; shouldn't be queued.
 	cmpb	$SRUN,P_STAT(%edi)	# In run state?

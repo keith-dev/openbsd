@@ -1,4 +1,4 @@
-/*	$OpenBSD: ipifuncs.c,v 1.6 2007/11/27 19:00:26 kettenis Exp $	*/
+/*	$OpenBSD: ipifuncs.c,v 1.11 2008/07/21 10:07:14 kettenis Exp $	*/
 /*	$NetBSD: ipifuncs.c,v 1.8 2006/10/07 18:11:36 rjs Exp $ */
 
 /*-
@@ -13,13 +13,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -40,6 +33,7 @@
 
 #include <machine/cpu.h>
 #include <machine/ctlreg.h>
+#include <machine/hypervisor.h>
 #include <machine/pmap.h>
 #include <machine/sparc64.h>
 
@@ -49,18 +43,34 @@ extern int db_active;
 
 #define	sparc64_ipi_sleep()	delay(1000)
 
+void	sun4u_send_ipi(int, void (*)(void), u_int64_t, u_int64_t);
+void	sun4u_broadcast_ipi(void (*)(void), u_int64_t, u_int64_t);
+void	sun4v_send_ipi(int, void (*)(void), u_int64_t, u_int64_t);
+void	sun4v_broadcast_ipi(void (*)(void), u_int64_t, u_int64_t);
+
 /*
  * These are the "function" entry points in locore.s to handle IPI's.
  */
-void	ipi_tlb_page_demap(void);
-void	ipi_tlb_context_demap(void);
+void	sun4u_ipi_tlb_page_demap(void);
+void	sun4u_ipi_tlb_context_demap(void);
+void	sun4v_ipi_tlb_page_demap(void);
+void	sun4v_ipi_tlb_context_demap(void);
 void	ipi_softint(void);
 
 /*
  * Send an interprocessor interrupt.
  */
 void
-sparc64_send_ipi(int upaid, void (*func)(void), u_int64_t arg0, u_int64_t arg1)
+sparc64_send_ipi(int itid, void (*func)(void), u_int64_t arg0, u_int64_t arg1)
+{
+	if (CPU_ISSUN4V)
+		sun4v_send_ipi(itid, func, arg0, arg1);
+	else
+		sun4u_send_ipi(itid, func, arg0, arg1);
+}
+
+void
+sun4u_send_ipi(int itid, void (*func)(void), u_int64_t arg0, u_int64_t arg1)
 {
 	int i, j, shift = 0;
 
@@ -68,10 +78,10 @@ sparc64_send_ipi(int upaid, void (*func)(void), u_int64_t arg0, u_int64_t arg1)
 
 	/*
 	 * UltraSPARC-IIIi CPUs select the BUSY/NACK pair based on the
-	 * lower two bits of the target CPU ID.
+	 * lower two bits of the ITID.
 	 */
 	if (((getver() & VER_IMPL) >> VER_IMPL_SHIFT) == IMPL_JALAPENO)
-		shift = (upaid & 0x3) * 2;
+		shift = (itid & 0x3) * 2;
 
 	if (ldxa(0, ASR_IDSR) & (IDSR_BUSY << shift)) {
 		__asm __volatile("ta 1; nop");
@@ -84,7 +94,7 @@ sparc64_send_ipi(int upaid, void (*func)(void), u_int64_t arg0, u_int64_t arg1)
 		stxa(IDDR_0H, ASI_INTERRUPT_DISPATCH, (u_int64_t)func);
 		stxa(IDDR_1H, ASI_INTERRUPT_DISPATCH, arg0);
 		stxa(IDDR_2H, ASI_INTERRUPT_DISPATCH, arg1);
-		stxa(IDCR(upaid), ASI_INTERRUPT_DISPATCH, 0);
+		stxa(IDCR(itid), ASI_INTERRUPT_DISPATCH, 0);
 		membar(Sync);
 
 		for (j = 0; j < 1000000; j++) {
@@ -104,12 +114,33 @@ sparc64_send_ipi(int upaid, void (*func)(void), u_int64_t arg0, u_int64_t arg1)
 
 #if 1
 	if (db_active || panicstr != NULL)
-		printf("ipi_send: couldn't send ipi to module %u\n", upaid);
+		printf("ipi_send: couldn't send ipi to module %u\n", itid);
 	else
 		panic("ipi_send: couldn't send ipi");
 #else
 	__asm __volatile("ta 1; nop" : :);
 #endif
+}
+
+void
+sun4v_send_ipi(int itid, void (*func)(void), u_int64_t arg0, u_int64_t arg1)
+{
+	struct cpu_info *ci = curcpu();
+	int err, i;
+
+	stha(ci->ci_cpuset, ASI_PHYS_CACHED, itid);
+	stxa(ci->ci_mondo, ASI_PHYS_CACHED, (vaddr_t)func);
+	stxa(ci->ci_mondo + 8, ASI_PHYS_CACHED, arg0);
+	stxa(ci->ci_mondo + 16, ASI_PHYS_CACHED, arg1);
+
+	for (i = 0; i < SPARC64_IPI_RETRIES; i++) {
+		err = hv_cpu_mondo_send(1, ci->ci_cpuset, ci->ci_mondo);
+		if (err != H_EWOULDBLOCK)
+			break;
+		delay(10);
+	}
+	if (err != H_EOK)
+		panic("Unable to send mondo %lx to cpu %d: %d", func, itid, err);
 }
 
 /*
@@ -118,6 +149,15 @@ sparc64_send_ipi(int upaid, void (*func)(void), u_int64_t arg0, u_int64_t arg1)
 void
 sparc64_broadcast_ipi(void (*func)(void), u_int64_t arg0, u_int64_t arg1)
 {
+	if (CPU_ISSUN4V)
+		sun4v_broadcast_ipi(func, arg0, arg1);
+	else
+		sun4u_broadcast_ipi(func, arg0, arg1);
+}
+
+void
+sun4u_broadcast_ipi(void (*func)(void), u_int64_t arg0, u_int64_t arg1)
+{
 	struct cpu_info *ci;
 
 	for (ci = cpus; ci != NULL; ci = ci->ci_next) {
@@ -125,8 +165,43 @@ sparc64_broadcast_ipi(void (*func)(void), u_int64_t arg0, u_int64_t arg1)
 			continue;
 		if ((ci->ci_flags & CPUF_RUNNING) == 0)
 			continue;
-		sparc64_send_ipi(ci->ci_upaid, func, arg0, arg1);
+		sun4u_send_ipi(ci->ci_itid, func, arg0, arg1);
 	}
+}
+
+void
+sun4v_broadcast_ipi(void (*func)(void), u_int64_t arg0, u_int64_t arg1)
+{
+	struct cpu_info *ci = curcpu();
+	paddr_t cpuset = ci->ci_cpuset;
+	int err, i, ncpus = 0;
+
+	for (ci = cpus; ci != NULL; ci = ci->ci_next) {
+		if (ci->ci_number == cpu_number())
+			continue;
+		if ((ci->ci_flags & CPUF_RUNNING) == 0)
+			continue;
+		stha(cpuset, ASI_PHYS_CACHED, ci->ci_itid);
+		cpuset += sizeof(int16_t);
+		ncpus++;
+	}
+
+	if (ncpus == 0)
+		return;
+
+	ci = curcpu();
+	stxa(ci->ci_mondo, ASI_PHYS_CACHED, (vaddr_t)func);
+	stxa(ci->ci_mondo + 8, ASI_PHYS_CACHED, arg0);
+	stxa(ci->ci_mondo + 16, ASI_PHYS_CACHED, arg1);
+
+	for (i = 0; i < SPARC64_IPI_RETRIES; i++) {
+		err = hv_cpu_mondo_send(ncpus, ci->ci_cpuset, ci->ci_mondo);
+		if (err != H_EWOULDBLOCK)
+			break;
+		delay(10);
+	}
+	if (err != H_EOK)
+		panic("Unable to broadcast mondo %lx: %d", func, err);
 }
 
 void
@@ -137,7 +212,10 @@ smp_tlb_flush_pte(vaddr_t va, int ctx)
 	if (db_active)
 		return;
 
-	sparc64_broadcast_ipi(ipi_tlb_page_demap, va, ctx);
+	if (CPU_ISSUN4V)
+		sun4v_broadcast_ipi(sun4v_ipi_tlb_page_demap, va, ctx);
+	else
+		sun4u_broadcast_ipi(sun4u_ipi_tlb_page_demap, va, ctx);
 }
 
 void
@@ -148,14 +226,22 @@ smp_tlb_flush_ctx(int ctx)
 	if (db_active)
 		return;
 
-	sparc64_broadcast_ipi(ipi_tlb_context_demap, ctx, 0);
+	if (CPU_ISSUN4V)
+		sun4v_broadcast_ipi(sun4v_ipi_tlb_context_demap, ctx, 0);
+	else
+		sun4u_broadcast_ipi(sun4u_ipi_tlb_context_demap, ctx, 0);
 }
 
 void
 smp_signotify(struct proc *p)
 {
+	struct cpu_info *ci = p->p_cpu;
+
 	if (db_active)
 		return;
 
-	sparc64_send_ipi(p->p_cpu->ci_upaid, ipi_softint, 1 << IPL_NONE, 0UL);
+	if (CPU_ISSUN4V)
+		sun4v_send_ipi(ci->ci_itid, ipi_softint, 1 << IPL_SOFTINT, 0);
+	else
+		sun4u_send_ipi(ci->ci_itid, ipi_softint, 1 << IPL_SOFTINT, 0);
 }

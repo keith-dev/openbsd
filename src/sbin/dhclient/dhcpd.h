@@ -1,4 +1,4 @@
-/*	$OpenBSD: dhcpd.h,v 1.65 2007/02/25 16:27:20 stevesk Exp $	*/
+/*	$OpenBSD: dhcpd.h,v 1.67 2008/05/26 03:11:48 deraadt Exp $	*/
 
 /*
  * Copyright (c) 2004 Henning Brauer <henning@openbsd.org>
@@ -189,6 +189,7 @@ struct interface_info {
 	int			 noifmedia;
 	int			 errors;
 	u_int16_t		 index;
+	int			 linkstat;
 };
 
 struct timeout {
@@ -254,6 +255,7 @@ void got_one(void);
 void add_timeout(time_t, void (*)(void));
 void cancel_timeout(void (*)(void));
 int interface_link_status(char *);
+int interface_status(char *);
 int interface_link_forceup(char *);
 void interface_link_forcedown(char *);
 

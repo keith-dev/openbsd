@@ -1,4 +1,4 @@
-/* $OpenBSD: apicvec.s,v 1.10 2007/05/25 15:55:26 art Exp $ */
+/* $OpenBSD: apicvec.s,v 1.16 2008/06/26 05:42:10 ray Exp $ */
 /* $NetBSD: apicvec.s,v 1.1.2.2 2000/02/21 21:54:01 sommerfeld Exp $ */
 
 /*-
@@ -18,13 +18,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -66,26 +59,6 @@ XINTR(ipi):
 	cli
 	popl	CPL
 	INTRFASTEXIT
-
-	.globl XINTR(ipi_ast)
-XINTR(ipi_ast):
-	pushl	%eax
-	pushl	%ds
-	movl	$GSEL(GDATA_SEL, SEL_KPL), %eax
-	movl	%eax, %ds
-
-	ioapic_asm_ack()
-
-	movl	$IPL_SOFTAST, %eax
-	orl	$(1 << SIR_AST), _C_LABEL(ipending)
-
-	orl	$(LAPIC_DLMODE_FIXED|LAPIC_LVL_ASSERT|LAPIC_DEST_SELF), %eax
-	movl	%eax, _C_LABEL(local_apic) + LAPIC_ICRLO
-
-	movl	_C_LABEL(local_apic) + LAPIC_ID, %eax
-	popl	%ds
-	popl	%eax
-	iret
 
 	.globl	XINTR(ipi_invltlb)
 	.p2align 4,0x90
@@ -181,7 +154,7 @@ XINTR(ltimer):
 #endif
 	jmp	_C_LABEL(Xdoreti)
 
-	.globl	XINTR(softclock), XINTR(softnet), XINTR(softtty), XINTR(softast)
+	.globl	XINTR(softclock), XINTR(softnet), XINTR(softtty)
 XINTR(softclock):
 	pushl	$0
 	pushl	$T_ASTFLT
@@ -189,13 +162,15 @@ XINTR(softclock):
 	MAKE_FRAME
 	pushl	CPL
 	movl	$IPL_SOFTCLOCK,CPL
-	andl	$~(1<<SIR_CLOCK),_C_LABEL(ipending)
+	andl	$~(1<<SIR_CLOCK),CPUVAR(IPENDING)
 	ioapic_asm_ack()
 	sti
 #ifdef MULTIPROCESSOR
 	call	_C_LABEL(i386_softintlock)
 #endif
-	call	_C_LABEL(softclock)
+	pushl	$I386_SOFTINTR_SOFTCLOCK
+	call	_C_LABEL(softintr_dispatch)
+	addl	$4,%esp
 #ifdef MULTIPROCESSOR
 	call	_C_LABEL(i386_softintunlock)
 #endif
@@ -215,7 +190,7 @@ XINTR(softnet):
 	MAKE_FRAME
 	pushl	CPL
 	movl	$IPL_SOFTNET,CPL
-	andl	$~(1<<SIR_NET),_C_LABEL(ipending)
+	andl	$~(1<<SIR_NET),CPUVAR(IPENDING)
 	ioapic_asm_ack()
 	sti
 #ifdef MULTIPROCESSOR
@@ -223,7 +198,12 @@ XINTR(softnet):
 #endif
 	xorl	%edi,%edi
 	xchgl	_C_LABEL(netisr),%edi
+
 #include <net/netisr_dispatch.h>
+
+	pushl	$I386_SOFTINTR_SOFTNET
+	call	_C_LABEL(softintr_dispatch)
+	addl	$4,%esp
 #ifdef MULTIPROCESSOR
 	call	_C_LABEL(i386_softintunlock)
 #endif
@@ -237,28 +217,18 @@ XINTR(softtty):
 	MAKE_FRAME
 	pushl	CPL
 	movl	$IPL_SOFTTTY,CPL
-	andl	$~(1<<SIR_TTY),_C_LABEL(ipending)
+	andl	$~(1<<SIR_TTY),CPUVAR(IPENDING)
 	ioapic_asm_ack()
 	sti
 #ifdef MULTIPROCESSOR
 	call	_C_LABEL(i386_softintlock)
 #endif
-	call	_C_LABEL(comsoft)
+	pushl	$I386_SOFTINTR_SOFTTTY
+	call	_C_LABEL(softintr_dispatch)
+	addl	$4,%esp
 #ifdef MULTIPROCESSOR
 	call	_C_LABEL(i386_softintunlock)
 #endif
-	jmp	_C_LABEL(Xdoreti)
-
-XINTR(softast):
-	pushl	$0
-	pushl	$T_ASTFLT
-	INTRENTRY
-	MAKE_FRAME
-	pushl	CPL
-	movl	$IPL_SOFTAST,CPL
-	andl	$~(1<<SIR_AST),_C_LABEL(ipending)
-	ioapic_asm_ack()
-	sti
 	jmp	_C_LABEL(Xdoreti)
 
 #if NIOAPIC > 0

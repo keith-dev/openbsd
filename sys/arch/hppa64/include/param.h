@@ -1,4 +1,4 @@
-/*	$OpenBSD: param.h,v 1.9 2007/05/28 21:02:49 thib Exp $	*/
+/*	$OpenBSD: param.h,v 1.11 2008/04/27 17:48:10 martin Exp $	*/
 
 /* 
  * Copyright (c) 1988-1994, The University of Utah and
@@ -84,19 +84,11 @@
 #define	ctod(x)		((x) << (PAGE_SHIFT - DEV_BSHIFT))
 #define	dtoc(x)		((x) >> (PAGE_SHIFT - DEV_BSHIFT))
 
-/* pages to bytes */
-#define	ctob(x)		((x) << PAGE_SHIFT)
-#define	btoc(x)		(((x) + PAGE_MASK) >> PAGE_SHIFT)
-
 #define	btodb(x)	((x) >> DEV_BSHIFT)
 #define	dbtob(x)	((x) << DEV_BSHIFT)
 
 #ifndef _LOCORE
-#define	CONADDR	conaddr
-#define	CONUNIT	conunit
 #define	COM_FREQ	7372800
-extern hppa_hpa_t conaddr;
-extern int conunit;
 #endif
 
 #define	__SWAP_BROKEN

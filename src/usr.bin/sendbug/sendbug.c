@@ -1,4 +1,4 @@
-/*	$OpenBSD: sendbug.c,v 1.54 2008/01/04 00:50:09 ray Exp $	*/
+/*	$OpenBSD: sendbug.c,v 1.57 2008/06/14 20:45:45 pvalchev Exp $	*/
 
 /*
  * Written by Ray Lai <ray@cyth.net>.
@@ -39,8 +39,8 @@ int	send_file(const char *, int);
 int	sendmail(const char *);
 void	template(FILE *);
 
-const char *categories = "system user library documentation ports kernel "
-    "alpha amd64 arm i386 m68k m88k mips ppc sgi sparc sparc64 vax";
+const char *categories = "system user library documentation kernel "
+    "alpha amd64 arm hppa i386 m68k m88k mips64 powerpc sh sparc sparc64 vax";
 char *version = "4.2";
 const char *comment[] = {
 	"<synopsis of the problem (one line)>",
@@ -321,7 +321,7 @@ sendmail(const char *pathname)
 			return (-1);
 		}
 		close(filedes[0]);
-		execl("/usr/sbin/sendmail", "sendmail",
+		execl(_PATH_SENDMAIL, "sendmail",
 		    "-oi", "-t", (void *)NULL);
 		warn("sendmail error: unsent report in %s",
 		    pathname);
@@ -433,9 +433,10 @@ send_file(const char *file, int dst)
 		return (-1);
 	lbuf = NULL;
 	while ((buf = fgetln(fp, &len))) {
-		if (buf[len - 1] == '\n')
+		if (buf[len - 1] == '\n') {
 			buf[len - 1] = '\0';
-		else {
+			--len;
+		} else {
 			/* EOF without EOL, copy and add the NUL */
 			if ((lbuf = malloc(len + 1)) == NULL)
 				goto end;
@@ -468,8 +469,7 @@ send_file(const char *file, int dst)
 				copylen = sp - buf;
 			else
 				copylen = len;
-			if (atomicio(vwrite, dst, buf, copylen) != copylen ||
-			    atomicio(vwrite, dst, "\n", 1) != 1)
+			if (atomicio(vwrite, dst, buf, copylen) != copylen)
 				goto end;
 			if (!ep)
 				break;
@@ -477,6 +477,8 @@ send_file(const char *file, int dst)
 			len -= ep - buf + 1;
 			buf = ep + 1;
 		}
+		if (atomicio(vwrite, dst, "\n", 1) != 1)
+			goto end;
 	}
 	rval = 0;
  end:

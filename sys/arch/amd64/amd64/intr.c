@@ -1,4 +1,4 @@
-/*	$OpenBSD: intr.c,v 1.15 2007/09/17 15:34:38 chl Exp $	*/
+/*	$OpenBSD: intr.c,v 1.17 2008/04/28 18:09:00 kettenis Exp $	*/
 /*	$NetBSD: intr.c,v 1.3 2003/03/03 22:16:20 fvdl Exp $	*/
 
 /*
@@ -205,6 +205,14 @@ intr_allocate_slot_cpu(struct cpu_info *ci, struct pic *pic, int pin,
 	slot = -1;
 
 	simple_lock(&ci->ci_slock);
+	for (i = 0; i < start; i++) {
+		isp = ci->ci_isources[i];
+		if (isp != NULL && isp->is_pic == pic && isp->is_pin == pin) {
+			slot = i;
+			start = MAX_INTR_SOURCES;
+			break;
+		}
+	}
 	for (i = start; i < MAX_INTR_SOURCES ; i++) {
 		isp = ci->ci_isources[i];
 		if (isp != NULL && isp->is_pic == pic && isp->is_pin == pin) {
@@ -537,7 +545,7 @@ intr_disestablish(struct intrhand *ih)
  */
 struct intrhand fake_softclock_intrhand;
 struct intrhand fake_softnet_intrhand;
-struct intrhand fake_softserial_intrhand;
+struct intrhand fake_softtty_intrhand;
 struct intrhand fake_timer_intrhand;
 struct intrhand fake_ipi_intrhand;
 
@@ -578,12 +586,12 @@ cpu_intr_init(struct cpu_info *ci)
 	isp = malloc(sizeof (struct intrsource), M_DEVBUF, M_WAITOK|M_ZERO);
 	if (isp == NULL)
 		panic("can't allocate fixed interrupt source");
-	isp->is_recurse = Xsoftserial;
-	isp->is_resume = Xsoftserial;
-	fake_softserial_intrhand.ih_level = IPL_SOFTSERIAL;
-	isp->is_handlers = &fake_softserial_intrhand;
+	isp->is_recurse = Xsofttty;
+	isp->is_resume = Xsofttty;
+	fake_softtty_intrhand.ih_level = IPL_SOFTTTY;
+	isp->is_handlers = &fake_softtty_intrhand;
 	isp->is_pic = &softintr_pic;
-	ci->ci_isources[SIR_SERIAL] = isp;
+	ci->ci_isources[SIR_TTY] = isp;
 #if NLAPIC > 0
 	isp = malloc(sizeof (struct intrsource), M_DEVBUF, M_WAITOK|M_ZERO);
 	if (isp == NULL)

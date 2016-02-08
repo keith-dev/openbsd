@@ -1,4 +1,4 @@
-/*	$OpenBSD: biovar.h,v 1.28 2007/05/28 21:54:26 marco Exp $	*/
+/*	$OpenBSD: biovar.h,v 1.31 2008/06/14 18:40:50 hshoexer Exp $	*/
 
 /*
  * Copyright (c) 2002 Niklas Hallqvist.  All rights reserved.
@@ -180,6 +180,23 @@ struct bioc_createraid {
 #define BIOC_SCFORCE		0x01	/* do not assemble, force create */
 #define BIOC_SCDEVT		0x02	/* dev_t array or string in dev_list */
 #define BIOC_SCNOAUTOASSEMBLE	0x04	/* do not assemble during autoconf */
+	u_int32_t	bc_opaque_size;
+	u_int32_t	bc_opaque_flags;
+#define	BIOC_SOINVALID		0x00	/* no opaque pointer */
+#define	BIOC_SOIN		0x01	/* kernel perspective direction */
+#define BIOC_SOOUT		0x02	/* kernel perspective direction */
+	u_int32_t	bc_opaque_status;
+#define	BIOC_SOINOUT_FAILED	0x00	/* operation failed */
+#define	BIOC_SOINOUT_OK		0x01	/* operation succeeded */
+	void		*bc_opaque;
+};
+
+#define BIOCDELETERAID _IOWR('B', 39, struct bioc_deleteraid)
+struct bioc_deleteraid {
+	void		*bd_cookie;
+	u_int32_t	bd_flags;
+#define BIOC_SDCLEARMETA	0x01	/* clear metadata region */
+	char		bd_dev[16];	/* device */
 };
 
 /* kernel and userspace defines */
@@ -190,6 +207,7 @@ struct bioc_createraid {
 #define BIOC_BLINK		0x0010
 #define BIOC_SETSTATE		0x0020
 #define BIOC_CREATERAID		0x0040
+#define BIOC_DELETERAID		0x0080
 
 /* user space defines */
 #define BIOC_DEVLIST		0x10000

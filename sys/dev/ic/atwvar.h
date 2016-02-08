@@ -1,4 +1,4 @@
-/*	$OpenBSD: atwvar.h,v 1.13 2007/06/07 20:20:15 damien Exp $	*/
+/*	$OpenBSD: atwvar.h,v 1.15 2008/07/21 18:43:19 damien Exp $	*/
 /*	$NetBSD: atwvar.h,v 1.13 2004/07/23 07:07:55 dyoung Exp $	*/
 
 /*
@@ -15,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of the author nor the names of any co-contributors
- *    may be used to endorse or promote products derived from this software
- *    without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY David Young AND CONTRIBUTORS ``AS IS'' AND
  * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
@@ -204,7 +197,7 @@ struct atw_softc {
 					enum ieee80211_state, int);
 	void			(*sc_recv_mgmt)(struct ieee80211com *,
 				    struct mbuf *, struct ieee80211_node *,
-				    int, int, u_int32_t);
+				    struct ieee80211_rxinfo *, int);
 	struct ieee80211_node	*(*sc_node_alloc)(struct ieee80211com *);
 	void			(*sc_node_free)(struct ieee80211com *,
 					struct ieee80211_node *);

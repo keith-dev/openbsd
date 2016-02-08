@@ -1,4 +1,4 @@
-/*	$OpenBSD: locore.S,v 1.36 2008/02/15 17:33:51 drahn Exp $	*/
+/*	$OpenBSD: locore.S,v 1.41 2008/07/28 19:08:46 miod Exp $	*/
 /*	$NetBSD: locore.S,v 1.2 1996/10/16 19:33:09 ws Exp $	*/
 
 /*
@@ -44,7 +44,9 @@
 
 #define GET_CPUINFO(r)	mfsprg r,0
 
-#define	INTSTK	(8*1024)		/* 8K interrupt stack */
+#define	INTSTK		(8*1024)	/* 8K interrupt stack */
+#define	SPILLSTK	(1*1024)
+#define	DDBSTK		(7*1024)
 
 /*
  * Globals
@@ -115,6 +117,7 @@ start:
 	stw	%r8,CI_INTSTK(%r9)
 	li	%r0,-1
 	stw	%r0,CI_INTRDEPTH(%r9)
+	addi	%r8,%r8,SPILLSTK+DDBSTK	/* leave room for spillstk and ddbstk */
 	lis	%r9,_C_LABEL(proc0paddr)@ha
 	stw	%r8,_C_LABEL(proc0paddr)@l(%r9)
 	addi	%r1,%r8,USPACE-FRAMELEN	/* stackpointer for proc0 */
@@ -142,7 +145,7 @@ _ENTRY(_C_LABEL(cpu_spinup_trampoline))
  * void cpu_switchto(struct proc *old, struct proc *new)
  * Switch from "old" proc to "new".
  */
-_ENTRY(_C_LABEL(cpu_switchto))
+_ENTRY(_C_LABEL(cpu_switchto_asm))
 	mflr	%r0			/* save lr */
 	stw	%r0,4(%r1)
 	stwu	%r1,-16(%r1)
@@ -155,15 +158,6 @@ _ENTRY(_C_LABEL(cpu_switchto))
  * r5 - cpuinfo
  */
 	GET_CPUINFO(%r5)
-	li	%r31,0
-	/* just did this resched thing, clear resched */
-	stw	%r31,CI_WANT_RESCHED(%r5)
-
-#ifdef MULTIPROCESSOR
-	stw	%r5,P_CPU(%r4)
-#endif
-
-	stw	%r4,CI_CURPROC(%r5)	/* record new process */
 
 	li	%r31,SONPROC
 	stb	%r31,P_STAT(%r4)
@@ -184,6 +178,12 @@ switch_exited:
 	mfmsr	%r30
 	andi.	%r30,%r30,~PSL_EE@l
 	mtmsr	%r30
+
+	stw	%r4,CI_CURPROC(%r5)	/* record new process */
+
+#ifdef MULTIPROCESSOR
+	stw	%r5,P_CPU(%r4)
+#endif
 
 	lwz	%r31,P_ADDR(%r4)
 	stw	%r31,CI_CURPCB(%r5)	/* indicate new pcb */
@@ -279,14 +279,7 @@ _ENTRY(_C_LABEL(cpu_idle_leave))
 	ori	%r3,%r3,PSL_EE@l
 	mtmsr	%r3
 	blr
-
-/*
- * Data used during primary/secondary traps/interrupts
- */
 
-	.data
-#define	SPILLSTK 1024			/* 1K spill stack */
-.lcomm	spillstk,SPILLSTK,8
 
 /*
  * This code gets copied to all the trap vectors
@@ -713,9 +706,6 @@ _C_LABEL(tlbdsmsize) =	.-_C_LABEL(tlbdsmiss)
 /*
  * In case of DDB we want a separate trap catcher for it
  */
-	.local	ddbstk
-	.comm	ddbstk,INTSTK,8	/* ddb stack */
-
 	.globl	_C_LABEL(ddblow),_C_LABEL(ddbsize)
 _C_LABEL(ddblow):
 	mtsprg	1,%r1			/* save SP */
@@ -728,8 +718,9 @@ nop32_7e:
 	stmw	%r28,CI_DDBSAVE(%r1)	/* free r28-r31 */
 	mflr	%r28			/* save LR */
 	mfcr	%r29			/* save CR */
-	lis	%r1,ddbstk+INTSTK@ha	/* get new SP */
-	addi	%r1,%r1,ddbstk+INTSTK@l
+	GET_CPUINFO(%r30)
+	lwz	%r30,CI_INTSTK(%r30)	/* get interrupt stack */
+	addi	%r1,%r30,(SPILLSTK+DDBSTK)
 	bla	ddbtrap
 _C_LABEL(ddbsize) =	.-_C_LABEL(ddblow)
 #endif  /* DDB */
@@ -920,7 +911,8 @@ trapexit:
 	mtcr	%r5
 	bc	4,17,1f			/* branch if PSL_PR is false */
 	GET_CPUINFO(%r3)
-	lwz	%r4,CI_ASTPENDING(%r3)
+	lwz	%r4,CI_CURPROC(%r3)
+	lwz	%r4,P_MD_ASTPENDING(%r4)
 	andi.	%r4,%r4,1
 	beq	1f
 	li	%r6,EXC_AST
@@ -955,8 +947,9 @@ s_dsitrap:
 	mtcr	%r31
 	mtsprg	1,%r1			/* save SP */
 	bc	4,1,disitrap		/* branch if table miss is false */
-	lis	%r1,spillstk+SPILLSTK@ha
-	addi	%r1,%r1,spillstk+SPILLSTK@l	/* get spill stack */
+	GET_CPUINFO(%r30)
+	lwz	%r30,CI_INTSTK(%r30)	/* get interrupt stack */
+	addi	%r1,%r30,SPILLSTK
 	stwu	%r1,-52(%r1)
 	stw	%r0,48(%r1)		/* save non-volatile registers */
 	stw	%r3,44(%r1)
@@ -1016,8 +1009,9 @@ s_isitrap:
 	mtcr	%r31
 	mtsprg	1,%r1			/* save SP */
 	bc	4,%r1,disitrap		/* branch if table miss is false */
-	lis	%r1,spillstk+SPILLSTK@ha
-	addi	%r1,%r1,spillstk+SPILLSTK@l	/* get spill stack */
+	GET_CPUINFO(%r30)
+	lwz	%r30,CI_INTSTK(%r30)	/* get interrupt stack */
+	addi	%r1,%r30,SPILLSTK
 	stwu	%r1,-52(%r1)
 	stw	%r0,48(%r1)		/* save non-volatile registers */
 	stw	%r3,44(%r1)
@@ -1151,7 +1145,8 @@ intr_exit:
 	lwz	%r4,52(3);	mtsr 13,%r4;
 	lwz	%r4,56(3);	mtsr 14,%r4;
 	lwz	%r4,60(3);	mtsr 15,%r4;
-	lwz	%r4,CI_ASTPENDING(%r5)	/* Test AST pending */
+	lwz	%r4,CI_CURPROC(%r5)
+	lwz	%r4,P_MD_ASTPENDING(%r4)	/* Test AST pending */
 	andi.	%r4,%r4,1
 	beq	1f
 /* Setup for entry to realtrap: */

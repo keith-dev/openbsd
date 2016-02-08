@@ -1,4 +1,4 @@
-#	$OpenBSD: files.i386,v 1.172 2008/03/04 21:14:29 oga Exp $
+#	$OpenBSD: files.i386,v 1.182 2008/07/08 05:22:00 dlg Exp $
 #
 # new style config file for i386 architecture
 #
@@ -6,7 +6,7 @@
 # maxpartitions must be first item in files.${ARCH}
 maxpartitions 16
 
-maxusers 2 16 64
+maxusers 2 16 100
 
 major	{ccd = 16}
 
@@ -16,7 +16,6 @@ file	arch/i386/i386/db_disasm.c	ddb
 file	arch/i386/i386/db_interface.c	ddb
 file	arch/i386/i386/db_memrw.c	ddb | kgdb
 file	arch/i386/i386/db_trace.c	ddb
-file	arch/i386/i386/db_magic.s	ddb
 file	arch/i386/i386/disksubr.c	disk
 file	arch/i386/i386/est.c		!small_kernel
 file	arch/i386/i386/gdt.c
@@ -40,6 +39,7 @@ file	arch/i386/i386/random.s
 file	arch/i386/i386/sys_machdep.c
 file	arch/i386/i386/trap.c
 file	arch/i386/i386/vm_machdep.c
+file	arch/i386/i386/softintr.c
 file	arch/i386/i386/dkcsum.c		bios
 file	lib/libz/adler32.c		!ppp_deflate & !ipsec & !crypto
 file	dev/cninit.c
@@ -96,15 +96,17 @@ file	arch/i386/i386/mainbus.c	mainbus
 #
 
 include "../../../dev/pci/files.pci"
-include "../../../dev/pci/files.agp"
 file	arch/i386/pci/pci_machdep.c		pci
-file	arch/i386/pci/agp_machdep.c		agp
 file	arch/i386/pci/pciide_machdep.c		pciide
 file	arch/i386/pci/pcic_pci_machdep.c	pcic_pci
 
+# AGP devices
+device agp: agp_ali, agp_amd, agp_i810, agp_intel, agp_sis, agp_via
+attach agp at agpbus
+file	arch/i386/pci/agp_machdep.c	agp
+
 # PCI-Host bridge chipsets
-device  pchb: pcibus, agpbus, agp_amd, agp_i810, agp_intel, agp_sis,
-              agp_via
+device  pchb: pcibus
 attach	pchb at pci
 file	arch/i386/pci/pchb.c		pchb
 
@@ -132,6 +134,16 @@ file	arch/i386/pci/gscpm.c		gscpm
 device	glxpcib: isabus, gpiobus
 attach	glxpcib at pci
 file	arch/i386/pci/glxpcib.c		glxpcib   
+
+# AMD Geode LX series MSR access
+device	amdmsr
+attach	amdmsr at mainbus
+file	arch/i386/i386/amdmsr.c		amdmsr	needs-flag
+
+# AMD Geode CS5536 Audio
+device	auglx: audio
+attach	auglx at pci
+file	arch/i386/pci/auglx.c		auglx
 
 # PCI-ISA bridge chipsets
 device	pcib: isabus
@@ -185,12 +197,6 @@ file	arch/i386/isa/npx.c		npx needs-flag
 # XXX should be a real device
 define pckbcport {[irq = -1], [port = -1]}
 
-# 8250/16[45]50-based "com" ports, optimized for the i386 interrupt system
-#device	pccom: tty
-attach	pccom at isa with pccom_isa
-attach	pccom at commulti with pccom_commulti
-file	arch/i386/isa/pccom.c		pccom & (pccom_isa | pccom_isapnp | pccom_commulti | pccom_pcmcia | pccom_cardbus | pccom_puc) needs-flag
-
 # PC Mice; Logitech-style, Microsoft-style, and PS/2-style
 device	lms: wsmousedev
 attach	lms at isa
@@ -241,8 +247,6 @@ file	arch/i386/eisa/eisa_machdep.c	eisa
 
 include "../../../dev/isa/files.isapnp"
 file	arch/i386/isa/isapnp_machdep.c	isapnp
-
-attach	pccom at isapnp with pccom_isapnp
 
 # Game adapter (joystick)
 device	joy
@@ -381,21 +385,12 @@ file	dev/isa/tcic2_isa.c		tcic_isa
 #
 include "dev/puc/files.puc"
 
-# i386-specific PUC drivers
-attach	pccom at puc with pccom_puc
-
 # PCMCIA wants to be probed as late as possible.
 
 #
 # Machine-independent PCMCIA drivers
 #
 include "dev/pcmcia/files.pcmcia"
-
-# i386-specific PCMCIA drivers
-attach	pccom at pcmcia with pccom_pcmcia
-
-# i386-specific Cardbus drivers
-attach	pccom at cardbus with pccom_cardbus
 
 #
 # Machine-independent USB drivers
@@ -435,6 +430,9 @@ file	arch/i386/i386/acpi_machdep.c		acpi
 #
 attach	ipmi at mainbus
 
+# VMware Tools
+attach	vmt at mainbus
+
 # Dell Embedded Systems Management
 device	esm
 attach	esm at mainbus
@@ -447,7 +445,7 @@ include "dev/vesa/files.vesa"
 
 #include "dev/rasops/files.rasops"
 
-# quad support is neccessary for 32 bit architectures
+# quad support is necessary for 32 bit architectures
 file lib/libkern/adddi3.c
 file lib/libkern/anddi3.c
 file lib/libkern/ashldi3.c

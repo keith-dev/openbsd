@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_sched.c,v 1.2 2007/11/26 17:15:29 art Exp $	*/
+/*	$OpenBSD: kern_sched.c,v 1.6 2008/06/12 06:58:39 deraadt Exp $	*/
 /*
  * Copyright (c) 2007 Artur Grabowski <art@openbsd.org>
  *
@@ -27,7 +27,6 @@
 
 #include <uvm/uvm_extern.h>
 
-struct proc *sched_chooseproc(void);
 void sched_kthreads_create(void *);
 void sched_idle(void *);
 
@@ -113,6 +112,8 @@ sched_idle(void *v)
 				exit2(dead);
 			}
 		}
+
+		splassert(IPL_NONE);
 
 		cpu_idle_enter();
 		while (sched_is_idle())
@@ -211,7 +212,7 @@ sched_chooseproc(void)
 	SCHED_ASSERT_LOCKED();
 
 again:
-	if (sched_whichqs == 0) {
+	if (sched_is_idle()) {
 		p = curcpu()->ci_schedstate.spc_idleproc;
 		if (p == NULL) {
                         int s;

@@ -1,4 +1,4 @@
-/*	$OpenBSD: sysctl.c,v 1.155 2008/02/09 15:10:58 kettenis Exp $	*/
+/*	$OpenBSD: sysctl.c,v 1.160 2008/08/04 04:26:42 miod Exp $	*/
 /*	$NetBSD: sysctl.c,v 1.9 1995/09/30 07:12:50 thorpej Exp $	*/
 
 /*
@@ -40,7 +40,7 @@ static const char copyright[] =
 #if 0
 static const char sccsid[] = "@(#)sysctl.c	8.5 (Berkeley) 5/9/95";
 #else
-static const char rcsid[] = "$OpenBSD: sysctl.c,v 1.155 2008/02/09 15:10:58 kettenis Exp $";
+static const char rcsid[] = "$OpenBSD: sysctl.c,v 1.160 2008/08/04 04:26:42 miod Exp $";
 #endif
 #endif /* not lint */
 
@@ -93,6 +93,8 @@ static const char rcsid[] = "$OpenBSD: sysctl.c,v 1.155 2008/02/09 15:10:58 kett
 #include <netinet6/pim6_var.h>
 #endif
 
+#include <netmpls/mpls.h>
+
 #include <uvm/uvm_swap_encrypt.h>
 
 #include <ufs/ufs/quota.h>
@@ -141,6 +143,9 @@ struct ctlname machdepname[] = CTL_MACHDEP_NAMES;
 struct ctlname ddbname[] = CTL_DDB_NAMES;
 char names[BUFSIZ];
 int lastused;
+
+/* Maximum size object to expect from sysctl(3) */
+#define SYSCTL_BUFSIZ	8192
 
 struct list {
 	struct	ctlname *list;
@@ -197,6 +202,7 @@ int sysctl_inet(char *, char **, int *, int, int *);
 int sysctl_inet6(char *, char **, int *, int, int *);
 #endif
 int sysctl_bpf(char *, char **, int *, int, int *);
+int sysctl_mpls(char *, char **, int *, int, int *);
 int sysctl_fs(char *, char **, int *, int, int *);
 static int sysctl_vfs(char *, char **, int[], int, int *);
 static int sysctl_vfsgen(char *, char **, int[], int, int *);
@@ -308,7 +314,7 @@ parse(char *string, int flags)
 	int64_t quadval;
 	struct list *lp;
 	int mib[CTL_MAXNAME];
-	char *cp, *bufp, buf[BUFSIZ];
+	char *cp, *bufp, buf[SYSCTL_BUFSIZ];
 
 	(void)strlcpy(buf, string, sizeof(buf));
 	bufp = buf;
@@ -579,6 +585,12 @@ parse(char *string, int flags)
 				return;
 			break;
 		}
+		if (mib[1] == PF_MPLS) {
+			len = sysctl_mpls(string, &bufp, mib, flags, &type);
+			if (len < 0)
+				return;
+			break;
+		}
 		if (flags == 0)
 			return;
 		warnx("use netstat to view %s information", string);
@@ -703,7 +715,7 @@ parse(char *string, int flags)
 			break;
 		}
 	}
-	size = BUFSIZ;
+	size = SYSCTL_BUFSIZ;
 	if (sysctl(mib, len, buf, &size, newval, newsize) == -1) {
 		if (flags == 0)
 			return;
@@ -880,7 +892,7 @@ parse(char *string, int flags)
 		return;
 	}
 	if (special & BADDYNAMIC) {
-		in_port_t port, lastport;
+		u_int port, lastport;
 		u_int32_t *baddynamic = (u_int32_t *)buf;
 
 		if (!qflag) {
@@ -888,10 +900,9 @@ parse(char *string, int flags)
 				(void)printf("%s%s", string,
 				    newsize ? ": " : equ);
 			lastport = 0;
-			for (port = IPPORT_RESERVED/2; port < IPPORT_RESERVED;
-			    port++)
+			for (port = 0; port < 65536; port++)
 				if (DP_ISSET(baddynamic, port)) {
-					(void)printf("%s%hd",
+					(void)printf("%s%u",
 					    lastport ? "," : "", port);
 					lastport = port;
 				}
@@ -900,10 +911,9 @@ parse(char *string, int flags)
 					fputs(" -> ", stdout);
 				baddynamic = (u_int32_t *)newval;
 				lastport = 0;
-				for (port = IPPORT_RESERVED/2;
-				    port < IPPORT_RESERVED; port++)
+				for (port = 0; port < 65536; port++)
 					if (DP_ISSET(baddynamic, port)) {
-						(void)printf("%s%hd",
+						(void)printf("%s%u",
 						    lastport ? "," : "", port);
 						lastport = port;
 					}
@@ -1001,6 +1011,7 @@ parse_baddynamic(int mib[], size_t len, char *string, void **newvalp,
 	in_port_t port;
 	size_t size;
 	char action, *cp;
+	const char *errstr;
 
 	if (strchr((char *)*newvalp, '+') || strchr((char *)*newvalp, '-')) {
 		size = sizeof(newbaddynamic);
@@ -1017,10 +1028,9 @@ parse_baddynamic(int mib[], size_t len, char *string, void **newvalp,
 			if (*cp != '+' && *cp != '-')
 				errx(1, "cannot mix +/- with full list");
 			action = *cp++;
-			port = atoi(cp);
-			if (port < IPPORT_RESERVED/2 || port >= IPPORT_RESERVED)
-				errx(1, "invalid port, range is %d to %d",
-				    IPPORT_RESERVED/2, IPPORT_RESERVED-1);
+			port = strtonum(cp, 0, 65535, &errstr);
+			if (errstr != NULL)
+				errx(1, "port is %s: %s", errstr, cp);
 			if (action == '+')
 				DP_SET(newbaddynamic, port);
 			else
@@ -1029,10 +1039,9 @@ parse_baddynamic(int mib[], size_t len, char *string, void **newvalp,
 	} else {
 		(void)memset((void *)newbaddynamic, 0, sizeof(newbaddynamic));
 		while (*newvalp && (cp = strsep((char **)newvalp, ", \t")) && *cp) {
-			port = atoi(cp);
-			if (port < IPPORT_RESERVED/2 || port >= IPPORT_RESERVED)
-				errx(1, "invalid port, range is %d to %d",
-				    IPPORT_RESERVED/2, IPPORT_RESERVED-1);
+			port = strtonum(cp, 0, 65535, &errstr);
+			if (errstr != NULL)
+				errx(1, "port is %s: %s", errstr, cp);
 			DP_SET(newbaddynamic, port);
 		}
 	}
@@ -1608,34 +1617,40 @@ sysctl_nchstats(char *string, char **bufpp, int mib[], int flags, int *typep)
 		(void)printf("%s%s", string, equ);
 	switch (indx) {
 	case KERN_NCHSTATS_GOODHITS:
-		(void)printf("%ld\n", nch.ncs_goodhits);
+		(void)printf("%llu\n", nch.ncs_goodhits);
 		break;
 	case KERN_NCHSTATS_NEGHITS:
-		(void)printf("%ld\n", nch.ncs_neghits);
+		(void)printf("%llu\n", nch.ncs_neghits);
 		break;
 	case KERN_NCHSTATS_BADHITS:
-		(void)printf("%ld\n", nch.ncs_badhits);
+		(void)printf("%llu\n", nch.ncs_badhits);
 		break;
 	case KERN_NCHSTATS_FALSEHITS:
-		(void)printf("%ld\n", nch.ncs_falsehits);
+		(void)printf("%llu\n", nch.ncs_falsehits);
 		break;
 	case KERN_NCHSTATS_MISS:
-		(void)printf("%ld\n", nch.ncs_miss);
+		(void)printf("%llu\n", nch.ncs_miss);
 		break;
 	case KERN_NCHSTATS_LONG:
-		(void)printf("%ld\n", nch.ncs_long);
+		(void)printf("%llu\n", nch.ncs_long);
 		break;
 	case KERN_NCHSTATS_PASS2:
-		(void)printf("%ld\n", nch.ncs_pass2);
+		(void)printf("%llu\n", nch.ncs_pass2);
 		break;
 	case KERN_NCHSTATS_2PASSES:
-		(void)printf("%ld\n", nch.ncs_2passes);
+		(void)printf("%llu\n", nch.ncs_2passes);
 		break;
 	case KERN_NCHSTATS_REVHITS:
-		(void)printf("%ld\n", nch.ncs_revhits);
+		(void)printf("%llu\n", nch.ncs_revhits);
 		break;
 	case KERN_NCHSTATS_REVMISS:
-		(void)printf("%ld\n", nch.ncs_revmiss);
+		(void)printf("%llu\n", nch.ncs_revmiss);
+		break;
+	case KERN_NCHSTATS_DOTHITS:
+		(void)printf("%llu\n", nch.ncs_dothits);
+		break;
+	case KERN_NCHSTATS_DOTDOTHITS:
+		(void)printf("%llu\n", nch.ncs_dotdothits);
 		break;
 	}
 	return (-1);
@@ -1732,7 +1747,7 @@ int
 sysctl_malloc(char *string, char **bufpp, int mib[], int flags, int *typep)
 {
 	int indx, stor, i;
-	char *name, bufp[BUFSIZ], *buf, *ptr;
+	char *name, bufp[SYSCTL_BUFSIZ], *buf, *ptr;
 	struct list lp;
 	size_t size;
 
@@ -1745,7 +1760,7 @@ sysctl_malloc(char *string, char **bufpp, int mib[], int flags, int *typep)
 	mib[2] = indx;
 	if (mib[2] == KERN_MALLOC_BUCKET) {
 		if ((name = strsep(bufpp, ".")) == NULL) {
-			size = BUFSIZ;
+			size = SYSCTL_BUFSIZ;
 			stor = mib[2];
 			mib[2] = KERN_MALLOC_BUCKETS;
 			buf = bufp;
@@ -1776,7 +1791,7 @@ sysctl_malloc(char *string, char **bufpp, int mib[], int flags, int *typep)
 		*typep = CTLTYPE_STRING;
 		return (3);
 	} else if (mib[2] == KERN_MALLOC_KMEMSTATS) {
-		size = BUFSIZ;
+		size = SYSCTL_BUFSIZ;
 		stor = mib[2];
 		mib[2] = KERN_MALLOC_KMEMNAMES;
 		buf = bufp;
@@ -1865,30 +1880,32 @@ sysctl_chipset(char *string, char **bufpp, int mib[], int flags, int *typep)
 	case CPU_CHIPSET_HAE_MASK:
 		len = sizeof(void *);
 		if (sysctl(mib, 3, &q, &len, NULL, 0) < 0)
-			return (-1);
-		printf("%p\n", q);
+			goto done;
+		printf("%p", q);
 		break;
 	case CPU_CHIPSET_BWX:
 		len = sizeof(int);
 		if (sysctl(mib, 3, &bwx, &len, NULL, 0) < 0)
-			return (-1);
-		printf("%d\n", bwx);
+			goto done;
+		printf("%d", bwx);
 		break;
 	case CPU_CHIPSET_TYPE:
 		if (sysctl(mib, 3, NULL, &len, NULL, 0) < 0)
-			return (-1);
+			goto done;
 		p = malloc(len + 1);
 		if (p == NULL)
-			return (-1);
+			goto done;
 		if (sysctl(mib, 3, p, &len, NULL, 0) < 0) {
 			free(p);
-			return (-1);
+			goto done;
 		}
 		p[len] = '\0';
-		printf("%s\n", p);
+		printf("%s", p);
 		free(p);
 		break;
 	}
+done:
+	printf("\n");
 	return (-1);
 }
 #endif
@@ -2039,6 +2056,41 @@ sysctl_bpf(char *string, char **bufpp, int mib[], int flags, int *typep)
 	return (3);
 }
 
+struct ctlname mplsname[] = MPLSCTL_NAMES;
+struct list mplslist = { mplsname, MPLSCTL_MAXID };
+
+/* handle MPLS requests */
+int
+sysctl_mpls(char *string, char **bufpp, int mib[], int flags, int *typep)
+{
+	struct list *lp;
+	int indx;
+
+	if (*bufpp == NULL) {
+		listall(string, &mplslist);
+		return (-1);
+	}
+	if ((indx = findname(string, "third", bufpp, &mplslist)) == -1)
+		return (-1);
+	mib[2] = indx;
+	*typep = mplslist.list[indx].ctl_type;
+	if (*typep == CTLTYPE_NODE) {
+		int tindx;
+
+		if (*bufpp == NULL) {
+			listall(string, &ifqlist);
+			return(-1);
+		}
+		lp = &ifqlist;
+		if ((tindx = findname(string, "fourth", bufpp, lp)) == -1)
+			return (-1);
+		mib[3] = tindx;
+		*typep = lp->list[tindx].ctl_type;
+		return(4);
+	}
+	return (3);
+}
+
 /*
  * Handle SysV semaphore info requests
  */
@@ -2140,7 +2192,7 @@ sysctl_sensors(char *string, char **bufpp, int mib[], int flags, int *typep)
 	size_t sdlen = sizeof(snsrdev);
 
 	if (*bufpp == NULL) {
-		char buf[BUFSIZ];
+		char buf[SYSCTL_BUFSIZ];
 
 		/* scan all sensor devices */
 		for (dev = 0; dev < MAXSENSORDEVICES; dev++) {
@@ -2234,7 +2286,7 @@ sysctl_sensors(char *string, char **bufpp, int mib[], int flags, int *typep)
 void
 print_sensordev(char *string, int mib[], u_int mlen, struct sensordev *snsrdev)
 {
-	char buf[BUFSIZ];
+	char buf[SYSCTL_BUFSIZ];
 	enum sensor_type type;
 
 	if (mlen == 3) {
@@ -2594,8 +2646,9 @@ void
 usage(void)
 {
 
-	(void)fprintf(stderr, "usage:\t%s\n\t%s\n\t%s\n",
-	    "sysctl [-n] name ...", "sysctl [-nq] name=value ...",
-	    "sysctl [-Aan]");
+	(void)fprintf(stderr,
+	    "usage: sysctl [-Aan]\n"
+	    "       sysctl [-n] name ...\n"
+	    "       sysctl [-nq] name=value ...\n");
 	exit(1);
 }

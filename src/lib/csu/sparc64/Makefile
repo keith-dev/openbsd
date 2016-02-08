@@ -1,8 +1,10 @@
-#	$OpenBSD: Makefile,v 1.3 2004/01/08 14:59:15 drahn Exp $
+#	$OpenBSD: Makefile,v 1.5 2008/07/28 14:17:00 kurt Exp $
 #	$NetBSD: Makefile,v 1.6 1996/10/18 05:27:38 thorpej Exp $
 
 CFLAGS+=	-DLIBC_SCCS -DELFSIZE=64
-OBJS=		crt0.o gcrt0.o crtbegin.o crtend.o crtbeginS.o crtendS.o
+OBJS=		crt0.o gcrt0.o
+OBJS+=		crtbegin.o crtend.o
+OBJS+=		crtbeginS.o crtendS.o
 SRCS=		crt0.c crtbegin.c crtbeginS.c crtend.c crtendS.c
 
 ELFDIR=		${.CURDIR}/../common_elf

@@ -1,4 +1,4 @@
-/*	$OpenBSD: mib.c,v 1.19 2008/01/30 10:12:45 reyk Exp $	*/
+/*	$OpenBSD: mib.c,v 1.27 2008/03/18 16:57:58 reyk Exp $	*/
 
 /*
  * Copyright (c) 2007, 2008 Reyk Floeter <reyk@vantronix.net>
@@ -26,6 +26,7 @@
 #include <sys/utsname.h>
 #include <sys/sysctl.h>
 #include <sys/sensors.h>
+#include <sys/mount.h>
 
 #include <net/if.h>
 #include <net/if_types.h>
@@ -59,6 +60,9 @@ int	 mib_sysor(struct oid *, struct ber_oid *, struct ber_element **);
 int	 mib_setsnmp(struct oid *, struct ber_oid *, struct ber_element **);
 
 static struct oid mib_tree[] = MIB_TREE;
+static struct ber_oid zerodotzero = { { 0, 0 }, 2 };
+
+#define sizeofa(_a) (sizeof(_a) / sizeof((_a)[0]))
 
 /* base MIB tree */
 static struct oid base_mib[] = {
@@ -182,7 +186,7 @@ mib_sysor(struct oid *oid, struct ber_oid *o, struct ber_element **elm)
 	struct ber_element	*ber = *elm;
 	u_int32_t		 idx = 1, nmib = 0;
 	struct oid		*next, *miboid;
-	char			 buf[SNMPD_MAXSTRLEN], *ptr;
+	char			 buf[SNMPD_MAXSTRLEN];
 
 	/* Count MIB root OIDs in the tree */
 	for (next = NULL;
@@ -219,12 +223,7 @@ mib_sysor(struct oid *oid, struct ber_oid *o, struct ber_element **elm)
 		 * help to display names of internal OIDs.
 		 */
 		smi_oidstring(&miboid->o_id, buf, sizeof(buf));
-		if ((ptr = strdup(buf)) == NULL) {
-			ber = ber_add_string(ber, miboid->o_name);
-		} else {
-			ber = ber_add_string(ber, ptr);
-			ber->be_free = 1;
-		}
+		ber = ber_add_string(ber, buf);
 		break;
 	case 4:
 		/*
@@ -319,6 +318,300 @@ mib_setsnmp(struct oid *oid, struct ber_oid *o, struct ber_element **elm)
 }
 
 /*
+ * Defined in HOST-RESOURCES-MIB.txt (RFC 2790)
+ */
+
+int	 mib_hrmemory(struct oid *, struct ber_oid *, struct ber_element **);
+int	 mib_hrstorage(struct oid *, struct ber_oid *, struct ber_element **);
+int	 mib_hrswrun(struct oid *, struct ber_oid *, struct ber_element **);
+
+int	 kinfo_proc_comp(const void *, const void *);
+int	 kinfo_proc(u_int32_t, struct kinfo_proc2 **);
+int	 kinfo_args(struct kinfo_proc2 *, char **);
+
+static struct oid hr_mib[] = {
+	{ MIB(host),				OID_MIB },
+	{ MIB(hrStorage),			OID_MIB },
+	{ MIB(hrMemorySize),			OID_RD,	mib_hrmemory },
+	{ MIB(hrStorageIndex),			OID_TRD, mib_hrstorage },
+	{ MIB(hrStorageType),			OID_TRD, mib_hrstorage },
+	{ MIB(hrStorageDescr),			OID_TRD, mib_hrstorage },
+	{ MIB(hrStorageAllocationUnits),	OID_TRD, mib_hrstorage },
+	{ MIB(hrStorageSize),			OID_TRD, mib_hrstorage },
+	{ MIB(hrStorageUsed),			OID_TRD, mib_hrstorage },
+	{ MIB(hrStorageAllocationFailures),	OID_TRD, mib_hrstorage },
+	{ MIB(hrSWRun),				OID_MIB },
+	{ MIB(hrSWRunIndex),			OID_TRD, mib_hrswrun },
+	{ MIB(hrSWRunName),			OID_TRD, mib_hrswrun },
+	{ MIB(hrSWRunID),			OID_TRD, mib_hrswrun },
+	{ MIB(hrSWRunPath),			OID_TRD, mib_hrswrun },
+	{ MIB(hrSWRunParameters),		OID_TRD, mib_hrswrun },
+	{ MIB(hrSWRunType),			OID_TRD, mib_hrswrun },
+	{ MIB(hrSWRunStatus),			OID_TRD, mib_hrswrun },
+	{ MIBEND }
+};
+
+int
+mib_hrmemory(struct oid *oid, struct ber_oid *o, struct ber_element **elm)
+{
+	struct ber_element	*ber = *elm;
+	int			 mib[] = { CTL_HW, HW_PHYSMEM64 };
+	u_int64_t		 physmem;
+	size_t			 len = sizeof(physmem);
+
+	if (sysctl(mib, sizeofa(mib), &physmem, &len, NULL, 0) == -1)
+		return (-1);
+
+	ber = ber_add_integer(ber, physmem / 1024);
+
+	return (0);
+}
+
+int
+mib_hrstorage(struct oid *oid, struct ber_oid *o, struct ber_element **elm)
+{
+	struct ber_element	*ber = *elm;
+	static struct ber_oid	 so = { { MIB_hrStorageFixedDisk } };
+	u_int32_t		 idx;
+	struct statfs		*mntbuf, *mnt;
+	int			 mntsize;
+
+	mntsize = getmntinfo(&mntbuf, MNT_NOWAIT);
+	if (mntsize == 0)
+		return (-1);
+
+	/* Get and verify the current row index */
+	idx = o->bo_id[OIDIDX_hrStorageEntry];
+	if ((int)idx > mntsize)
+		return (1);
+
+	/* Tables need to prepend the OID on their own */
+	o->bo_id[OIDIDX_hrStorageEntry] = idx;
+	ber = ber_add_oid(ber, o);
+
+	mnt = &mntbuf[idx - 1];
+
+	switch (o->bo_id[OIDIDX_hrStorage]) {
+	case 1: /* hrStorageIndex */
+		ber = ber_add_integer(ber, idx);
+		break;
+	case 2: /* hrStorageType */
+		smi_oidlen(&so);
+		ber = ber_add_oid(ber, &so);
+		break;
+	case 3: /* hrStorageDescr */
+		ber = ber_add_string(ber, mnt->f_mntonname);
+		break;
+	case 4: /* hrStorageAllocationUnits */
+		ber = ber_add_integer(ber, mnt->f_bsize);
+		break;
+	case 5: /* hrStorageSize */
+		ber = ber_add_integer(ber, mnt->f_blocks);
+		break;
+	case 6: /* hrStorageUsed */
+		ber = ber_add_integer(ber, mnt->f_blocks - mnt->f_bfree);
+		break;
+	case 7: /* hrStorageAllocationFailures */
+		ber = ber_add_integer(ber, 0);
+		ber_set_header(ber, BER_CLASS_APPLICATION, SNMP_T_COUNTER32);
+		break;
+	default:
+		return (-1);
+	}
+
+	return (0);
+}
+
+int
+mib_hrswrun(struct oid *oid, struct ber_oid *o, struct ber_element **elm)
+{
+	struct ber_element	*ber = *elm;
+	struct kinfo_proc2	*kinfo;
+	char			*s;
+
+	/* Get and verify the current row index */
+	if (kinfo_proc(o->bo_id[OIDIDX_hrSWRunEntry], &kinfo) == -1)
+		return (-1);
+
+	if (kinfo == NULL)
+		return (1);
+
+	/* Tables need to prepend the OID on their own */
+	o->bo_id[OIDIDX_hrSWRunEntry] = kinfo->p_pid;
+	ber = ber_add_oid(ber, o);
+
+	switch (o->bo_id[OIDIDX_hrSWRun]) {
+	case 1: /* hrSWRunIndex */
+		ber = ber_add_integer(ber, kinfo->p_pid);
+		break;
+	case 2: /* hrSWRunName */
+	case 4: /* hrSWRunPath */
+		ber = ber_add_string(ber, kinfo->p_comm);
+		break;
+	case 3: /* hrSWRunID */
+		ber = ber_add_oid(ber, &zerodotzero);
+		break;
+	case 5: /* hrSWRunParameters */
+		if (kinfo_args(kinfo, &s) == -1)
+			return (-1);
+
+		ber = ber_add_string(ber, s);
+		break;
+	case 6: /* hrSWRunType */
+		if (kinfo->p_flag & P_SYSTEM) {
+			/* operatingSystem(2) */
+			ber = ber_add_integer(ber, 2);
+		} else {
+			/* application(4) */
+			ber = ber_add_integer(ber, 4);
+		}
+		break;
+	case 7: /* hrSWRunStatus */
+		switch (kinfo->p_stat) {
+		case SONPROC:
+			/* running(1) */
+			ber = ber_add_integer(ber, 1);
+			break;
+		case SIDL:
+		case SRUN:
+		case SSLEEP:
+			/* runnable(2) */
+			ber = ber_add_integer(ber, 2);
+			break;
+		case SSTOP:
+			/* notRunnable(3) */
+			ber = ber_add_integer(ber, 3);
+			break;
+		case SZOMB:
+		case SDEAD:
+		default:
+			/* invalid(4) */
+			ber = ber_add_integer(ber, 4);
+			break;
+		}
+		break;
+	default:
+		return (-1);
+	}
+
+	return (0);
+}
+
+int
+kinfo_proc_comp(const void *a, const void *b)
+{
+	struct kinfo_proc2 * const *k1 = a;
+	struct kinfo_proc2 * const *k2 = b;
+
+	return (((*k1)->p_pid > (*k2)->p_pid) ? 1 : -1);
+}
+
+int
+kinfo_proc(u_int32_t idx, struct kinfo_proc2 **kinfo)
+{
+	static struct kinfo_proc2 *kp = NULL;
+	static size_t		 nkp = 0;
+	int			 mib[] = { CTL_KERN, KERN_PROC2,
+				    KERN_PROC_ALL, 0, sizeof(*kp), 0 };
+	struct kinfo_proc2	**klist;
+	size_t			 size, count, i;
+
+	for (;;) {
+		size = nkp * sizeof(*kp);
+		mib[5] = nkp;
+		if (sysctl(mib, sizeofa(mib), kp, &size, NULL, 0) == -1) {
+			if (errno == ENOMEM) {
+				free(kp);
+				kp = NULL;
+				nkp = 0;
+				continue;
+			}
+
+			return (-1);
+		}
+
+		count = size / sizeof(*kp);
+		if (count <= nkp)
+			break;
+
+		kp = malloc(size);
+		if (kp == NULL) {
+			nkp = 0;
+			return (-1);
+		}
+		nkp = count;
+	}
+
+	klist = malloc(count * sizeof(*klist));
+	if (klist == NULL)
+		return (-1);
+
+	for (i = 0; i < count; i++)
+		klist[i] = &kp[i];
+	qsort(klist, count, sizeof(*klist), kinfo_proc_comp);
+
+	*kinfo = NULL;
+	for (i = 0; i < count; i++) {
+		if (klist[i]->p_pid >= (int32_t)idx) {
+			*kinfo = klist[i];
+			break;
+		}
+	}
+	free(klist);
+
+	return (0);
+}
+
+int
+kinfo_args(struct kinfo_proc2 *kinfo, char **s)
+{
+	static char		 str[128];
+	static char		*buf = NULL;
+	static size_t		 buflen = 128;
+
+	int			 mib[] = { CTL_KERN, KERN_PROC_ARGS,
+				    kinfo->p_pid, KERN_PROC_ARGV };
+	char			*nbuf, **argv;
+
+	if (buf == NULL) {
+		buf = malloc(buflen);
+		if (buf == NULL)
+			return (-1);
+	}
+
+	str[0] = '\0';
+	*s = str;
+
+	while (sysctl(mib, sizeofa(mib), buf, &buflen, NULL, 0) == -1) {
+		if (errno != ENOMEM) {
+			/* some errors are expected, dont get too upset */
+			return (0);
+		}
+
+		nbuf = realloc(buf, buflen + 128);
+		if (nbuf == NULL)
+			return (-1);
+
+		buf = nbuf;
+		buflen += 128;
+	}
+
+	argv = (char **)buf;
+	if (argv[0] == NULL)
+		return (0);
+
+	argv++;
+	while (*argv != NULL) {
+		strlcat(str, *argv, sizeof(str));
+		argv++;
+		if (*argv != NULL)
+			strlcat(str, " ", sizeof(str));
+	}
+
+	return (0);
+}
+
+/*
  * Defined in IF-MIB.txt (RFCs 1229, 1573, 2233, 2863)
  */
 
@@ -331,7 +624,6 @@ int	 mib_ifstacklast(struct oid *, struct ber_oid *, struct ber_element **);
 int	 mib_ifrcvtable(struct oid *, struct ber_oid *, struct ber_element **);
 
 static u_int8_t ether_zeroaddr[] = { 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 };
-static struct ber_oid zerodotzero = { { 0, 0 }, 2 };
 
 static struct oid if_mib[] = {
 	{ MIB(ifMIB),			OID_MIB },
@@ -429,7 +721,6 @@ mib_iftable(struct oid *oid, struct ber_oid *o, struct ber_element **elm)
 	size_t			 len;
 	int			 ifq;
 	int			 mib[] = { CTL_NET, AF_INET, IPPROTO_IP, 0, 0 };
-	char			*s;
 
 	/* Get and verify the current row index */
 	idx = o->bo_id[OIDIDX_ifEntry];
@@ -450,10 +741,7 @@ mib_iftable(struct oid *oid, struct ber_oid *o, struct ber_element **elm)
 		 * but we just use the interface name (like ifName).
 		 * The interface name includes the driver name on OpenBSD.
 		 */
-		if ((s = strdup(kif->if_name)) == NULL)
-			return (-1);
-		ber = ber_add_string(ber, s);
-		ber->be_free = 1;
+		ber = ber_add_string(ber, kif->if_name);
 		break;
 	case 3:
 		if (kif->if_type >= 0xf0) {
@@ -542,8 +830,7 @@ mib_iftable(struct oid *oid, struct ber_oid *o, struct ber_element **elm)
 		mib[3] = IPCTL_IFQUEUE;
 		mib[4] = IFQCTL_DROPS;
 		len = sizeof(ifq);
-		if (sysctl(mib, sizeof(mib) / sizeof(mib[0]),
-		    &ifq, &len, 0, 0) == -1) {
+		if (sysctl(mib, sizeofa(mib), &ifq, &len, 0, 0) == -1) {
 			log_info("mib_iftable: %s: invalid ifq: %s",
 			    kif->if_name, strerror(errno));
 			return (-1);
@@ -559,8 +846,7 @@ mib_iftable(struct oid *oid, struct ber_oid *o, struct ber_element **elm)
 		mib[3] = IPCTL_IFQUEUE;
 		mib[4] = IFQCTL_LEN;
 		len = sizeof(ifq);
-		if (sysctl(mib, sizeof(mib) / sizeof(mib[0]),
-		    &ifq, &len, 0, 0) == -1) {
+		if (sysctl(mib, sizeofa(mib), &ifq, &len, 0, 0) == -1) {
 			log_info("mib_iftable: %s: invalid ifq: %s",
 			    kif->if_name, strerror(errno));
 			return (-1);
@@ -585,7 +871,6 @@ mib_ifxtable(struct oid *oid, struct ber_oid *o, struct ber_element **elm)
 	u_int32_t		 idx = 0;
 	struct kif		*kif;
 	int			 i = 0;
-	char			*s;
 
 	/* Get and verify the current row index */
 	idx = o->bo_id[OIDIDX_ifXEntry];
@@ -598,10 +883,7 @@ mib_ifxtable(struct oid *oid, struct ber_oid *o, struct ber_element **elm)
 
 	switch (o->bo_id[OIDIDX_ifX]) {
 	case 1:
-		if ((s = strdup(kif->if_name)) == NULL)
-			return (-1);
-		ber = ber_add_string(ber, s);
-		ber->be_free = 1;
+		ber = ber_add_string(ber, kif->if_name);
 		break;
 	case 2:
 		ber = ber_add_integer(ber, (u_int32_t)kif->if_imcasts);
@@ -671,10 +953,7 @@ mib_ifxtable(struct oid *oid, struct ber_oid *o, struct ber_element **elm)
 		ber = ber_add_integer(ber, i);
 		break;
 	case 18:
-		if ((s = strdup(kif->if_descr)) == NULL)
-			return (-1);
-		ber = ber_add_string(ber, s);
-		ber->be_free = 1;
+		ber = ber_add_string(ber, kif->if_descr);
 		break;
 	case 19:
 		ber = ber_add_integer(ber, 0);
@@ -755,7 +1034,7 @@ mib_ifrcvtable(struct oid *oid, struct ber_oid *o, struct ber_element **elm)
 
 int	 mib_sensornum(struct oid *, struct ber_oid *, struct ber_element **);
 int	 mib_sensors(struct oid *, struct ber_oid *, struct ber_element **);
-char	*mib_sensorunit(struct sensor *);
+const char *mib_sensorunit(struct sensor *);
 char	*mib_sensorvalue(struct sensor *);
 
 static struct oid openbsd_mib[] = {
@@ -777,12 +1056,11 @@ mib_sensornum(struct oid *oid, struct ber_oid *o, struct ber_element **elm)
 	struct sensordev	 sensordev;
 	size_t			 len = sizeof(sensordev);
 	int			 mib[] = { CTL_HW, HW_SENSORS, 0 };
-	size_t			 miblen = sizeof(mib) / sizeof(mib[0]);
 	int			 i, c;
 
 	for (i = c = 0; i < MAXSENSORDEVICES; i++) {
 		mib[2] = i;
-		if (sysctl(mib, miblen,
+		if (sysctl(mib, sizeofa(mib),
 		    &sensordev, &len, NULL, 0) == -1) {
 			if (errno != ENOENT)
 				return (-1);
@@ -813,8 +1091,7 @@ mib_sensors(struct oid *oid, struct ber_oid *o, struct ber_element **elm)
 
 	for (i = c = 0, n = 1; i < MAXSENSORDEVICES; i++) {
 		mib[2] = i;
-		if (sysctl(mib, 3,
-		    &sensordev, &len, NULL, 0) == -1) {
+		if (sysctl(mib, 3, &sensordev, &len, NULL, 0) == -1) {
 			if (errno != ENOENT)
 				return (-1);
 			continue;
@@ -844,31 +1121,22 @@ mib_sensors(struct oid *oid, struct ber_oid *o, struct ber_element **elm)
 		ber = ber_add_integer(ber, (int32_t)n);
 		break;
 	case 2:
-		if ((s = strdup(sensor.desc)) == NULL)
-			return (-1);
-		ber = ber_add_string(ber, s);
-		ber->be_free = 1;
+		ber = ber_add_string(ber, sensor.desc);
 		break;
 	case 3:
 		ber = ber_add_integer(ber, sensor.type);
 		break;
 	case 4:
-		if ((s = strdup(sensordev.xname)) == NULL)
-			return (-1);
-		ber = ber_add_string(ber, s);
-		ber->be_free = 1;
+		ber = ber_add_string(ber, sensordev.xname);
 		break;
 	case 5:
 		if ((s = mib_sensorvalue(&sensor)) == NULL)
 			return (-1);
 		ber = ber_add_string(ber, s);
-		ber->be_free = 1;
+		free(s);
 		break;
 	case 6:
-		if ((s = mib_sensorunit(&sensor)) == NULL)
-			return (-1);
-		ber = ber_add_string(ber, s);
-		ber->be_free = 1;
+		ber = ber_add_string(ber, mib_sensorunit(&sensor));
 		break;
 	case 7:
 		ber = ber_add_integer(ber, sensor.status);
@@ -889,13 +1157,13 @@ static const char * const sensor_unit_s[SENSOR_MAX_TYPES + 1] = {
 	"", "", "%", "lx", "", "sec", ""
 };
 
-char *
+const char *
 mib_sensorunit(struct sensor *s)
 {
 	u_int	 idx;
 	idx = s->type > SENSOR_MAX_TYPES ?
 	    SENSOR_MAX_TYPES : s->type;
-	return (strdup(sensor_unit_s[idx]));
+	return (sensor_unit_s[idx]);
 }
 
 char *
@@ -1011,8 +1279,7 @@ mib_ipforwarding(struct oid *oid, struct ber_oid *o, struct ber_element **elm)
 	int	v;
 	size_t	len = sizeof(v);
 
-	if (sysctl(mib, sizeof(mib) / sizeof(mib[0]),
-	    &v, &len, NULL, 0) == -1)
+	if (sysctl(mib, sizeofa(mib), &v, &len, NULL, 0) == -1)
 		return (-1);
 
 	*elm = ber_add_integer(*elm, v);
@@ -1027,8 +1294,7 @@ mib_ipdefaultttl(struct oid *oid, struct ber_oid *o, struct ber_element **elm)
 	int	v;
 	size_t	len = sizeof(v);
 
-	if (sysctl(mib, sizeof(mib) / sizeof(mib[0]),
-	    &v, &len, NULL, 0) == -1)
+	if (sysctl(mib, sizeofa(mib), &v, &len, NULL, 0) == -1)
 		return (-1);
 
 	*elm = ber_add_integer(*elm, v);
@@ -1042,8 +1308,7 @@ mib_getipstat(struct ipstat *ipstat)
 	int	 mib[] = { CTL_NET, AF_INET, IPPROTO_IP, IPCTL_STATS };
 	size_t	 len = sizeof(*ipstat);
 
-	return (sysctl(mib, sizeof(mib) / sizeof(mib[0]),
-	    ipstat, &len, NULL, 0));
+	return (sysctl(mib, sizeofa(mib), ipstat, &len, NULL, 0));
 }
 
 int
@@ -1342,6 +1607,9 @@ mib_init(void)
 
 	/* SNMPv2-MIB */
 	smi_mibtree(base_mib);
+
+	/* HOST-RESOURCES-MIB */
+	smi_mibtree(hr_mib);
 
 	/* IF-MIB */
 	smi_mibtree(if_mib);

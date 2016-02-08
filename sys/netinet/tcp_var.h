@@ -1,4 +1,4 @@
-/*	$OpenBSD: tcp_var.h,v 1.86 2008/02/20 14:23:31 markus Exp $	*/
+/*	$OpenBSD: tcp_var.h,v 1.89 2008/05/24 19:48:32 thib Exp $	*/
 /*	$NetBSD: tcp_var.h,v 1.17 1996/02/13 23:44:24 christos Exp $	*/
 
 /*
@@ -92,7 +92,6 @@ struct tcpcb {
 #define TF_SEND_CWR	0x00020000	/* send CWR in next seg */
 #define TF_DISABLE_ECN	0x00040000	/* disable ECN for this connection */
 #endif
-#define TF_REASSLOCK	0x00080000	/* reassembling or draining */
 #define TF_LASTIDLE	0x00100000	/* no outstanding ACK on last send */
 #define TF_DEAD		0x00200000	/* dead and to-be-released */
 #define TF_PMTUD_PEND	0x00400000	/* Path MTU Discovery pending */
@@ -302,35 +301,6 @@ struct syn_cache_head {
 	u_short sch_length;			/* # entries in bucket */
 };
 
-static __inline int tcp_reass_lock_try(struct tcpcb *);
-static __inline void tcp_reass_unlock(struct tcpcb *);
-#define tcp_reass_lock(tp) tcp_reass_lock_try(tp)
-
-static __inline int
-tcp_reass_lock_try(struct tcpcb *tp)
-{
-	int s;
-
-	/* Use splvm() due to mbuf allocation. */
-	s = splvm();
-	if (tp->t_flags & TF_REASSLOCK) {
-		splx(s);
-		return (0);
-	}
-	tp->t_flags |= TF_REASSLOCK;
-	splx(s);
-	return (1);
-}
-
-static __inline void
-tcp_reass_unlock(struct tcpcb *tp)
-{
-	int s;
-
-	s = splvm();
-	tp->t_flags &= ~TF_REASSLOCK;
-	splx(s);
-}
 #endif /* _KERNEL */
 
 /*
@@ -594,7 +564,6 @@ struct tcpcb *
 	 tcp_drop(struct tcpcb *, int);
 int	 tcp_dooptions(struct tcpcb *, u_char *, int, struct tcphdr *,
 		struct mbuf *, int, struct tcp_opt_info *);
-void	 tcp_drain(void);
 void	 tcp_init(void);
 #if defined(INET6) && !defined(TCP6)
 int	 tcp6_input(struct mbuf **, int *, int);
@@ -626,12 +595,8 @@ void	 tcp_trace(short, short, struct tcpcb *, caddr_t, int, int);
 struct tcpcb *
 	 tcp_usrclosed(struct tcpcb *);
 int	 tcp_sysctl(int *, u_int, void *, size_t *, void *, size_t);
-#if defined(INET6) && !defined(TCP6)
-int	 tcp6_usrreq(struct socket *,
-	    int, struct mbuf *, struct mbuf *, struct mbuf *, struct proc *);
-#endif
 int	 tcp_usrreq(struct socket *,
-	    int, struct mbuf *, struct mbuf *, struct mbuf *);
+	    int, struct mbuf *, struct mbuf *, struct mbuf *, struct proc *);
 void	 tcp_xmit_timer(struct tcpcb *, int);
 void	 tcpdropoldhalfopen(struct tcpcb *, u_int16_t);
 #ifdef TCP_SACK

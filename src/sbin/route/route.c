@@ -1,4 +1,4 @@
-/*	$OpenBSD: route.c,v 1.112 2007/09/25 08:57:47 henning Exp $	*/
+/*	$OpenBSD: route.c,v 1.119 2008/05/09 07:14:56 henning Exp $	*/
 /*	$NetBSD: route.c,v 1.16 1996/04/15 18:27:05 cgd Exp $	*/
 
 /*
@@ -55,6 +55,7 @@
 #include <paths.h>
 #include <err.h>
 #include <net/if_media.h>
+#include <netmpls/mpls.h>
 
 #include "keywords.h"
 #include "show.h"
@@ -69,6 +70,7 @@ union	sockunion {
 	struct sockaddr_in6	sin6;
 	struct sockaddr_dl	sdl;
 	struct sockaddr_rtlabel	rtlabel;
+	struct sockaddr_mpls	smpls;
 } so_dst, so_gate, so_mask, so_genmask, so_ifa, so_ifp, so_label;
 
 typedef union sockunion *sup;
@@ -91,6 +93,7 @@ void	 monitor(void);
 int	 prefixlen(char *);
 void	 sockaddr(char *, struct sockaddr *);
 void	 sodump(sup, char *);
+char	*priorityname(u_int8_t);
 void	 print_getmsg(struct rt_msghdr *, int);
 void	 print_rtmsg(struct rt_msghdr *, int);
 void	 pmsg_common(struct rt_msghdr *);
@@ -99,7 +102,8 @@ void	 bprintf(FILE *, int, char *);
 void	 mask_addr(union sockunion *, union sockunion *, int);
 int	 inet6_makenetandmask(struct sockaddr_in6 *);
 int	 getaddr(int, char *, struct hostent **);
-int	 rtmsg(int, int, int);
+void	 getmplslabel(char *, int);
+int	 rtmsg(int, int, int, u_short);
 __dead void usage(char *);
 void	 set_metric(char *, int);
 void	 inet_makenetandmask(u_int32_t, struct sockaddr_in *, int);
@@ -227,6 +231,9 @@ flushroutes(int argc, char **argv)
 			case K_LINK:
 				af = AF_LINK;
 				break;
+			case K_MPLS:
+				af = AF_MPLS;
+				break;
 			default:
 				usage(*argv);
 				/* NOTREACHED */
@@ -261,6 +268,8 @@ flushroutes(int argc, char **argv)
 	seqno = 0;
 	for (next = buf; next < lim; next += rtm->rtm_msglen) {
 		rtm = (struct rt_msghdr *)next;
+		if (rtm->rtm_version != RTM_VERSION)
+			continue;
 		if (verbose)
 			print_rtmsg(rtm, rtm->rtm_msglen);
 		if ((rtm->rtm_flags & (RTF_GATEWAY|RTF_STATIC|RTF_LLINFO)) == 0)
@@ -337,10 +346,12 @@ set_metric(char *value, int key)
 int
 newroute(int argc, char **argv)
 {
+	const char *errstr;
 	char *cmd, *dest = "", *gateway = "", *error;
 	int ishost = 0, ret = 0, attempts, oerrno, flags = RTF_STATIC;
 	int fmask = 0;
 	int key;
+	u_short prio = 0;
 	struct hostent *hp = NULL;
 
 	if (uid)
@@ -366,6 +377,39 @@ newroute(int argc, char **argv)
 			case K_SA:
 				af = PF_ROUTE;
 				aflen = sizeof(union sockunion);
+				break;
+			case K_MPLS:
+				af = AF_MPLS;
+				aflen = sizeof(struct sockaddr_mpls);
+				break;
+			case K_IN:
+				if (!--argc)
+					usage(1+*argv);
+				if (af != AF_MPLS)
+					errx(1, "-in requires -mpls");
+				getmplslabel(*++argv, 1);
+				break;
+			case K_OUT:
+				if (!--argc)
+					usage(1+*argv);
+				if (af != AF_MPLS)
+					errx(1, "-out requires -mpls");
+				getmplslabel(*++argv, 0);
+				break;
+			case K_POP:
+				if (af != AF_MPLS)
+					errx(1, "-pop requires -mpls");
+				so_dst.smpls.smpls_operation = MPLS_OP_POP;
+				break;
+			case K_PUSH:
+				if (af != AF_MPLS)
+					errx(1, "-push requires -mpls");
+				so_dst.smpls.smpls_operation = MPLS_OP_PUSH;
+				break;
+			case K_SWAP:
+				if (af != AF_MPLS)
+					errx(1, "-swap requires -mpls");
+				so_dst.smpls.smpls_operation = MPLS_OP_SWAP;
 				break;
 			case K_IFACE:
 			case K_INTERFACE:
@@ -475,6 +519,14 @@ newroute(int argc, char **argv)
 					usage(1+*argv);
 				set_metric(*++argv, key);
 				break;
+			case K_PRIORITY:
+				if (!--argc)
+					usage(1+*argv);
+				prio = strtonum(*++argv, 0, RTP_MAX, &errstr);
+				if (errstr)
+					errx(1, "priority is %s: %s", errstr,
+					    *argv);
+				break;
 			default:
 				usage(1+*argv);
 				/* NOTREACHED */
@@ -523,7 +575,7 @@ newroute(int argc, char **argv)
 		flags |= RTF_GATEWAY;
 	for (attempts = 1; ; attempts++) {
 		errno = 0;
-		if ((ret = rtmsg(*cmd, flags, fmask)) == 0)
+		if ((ret = rtmsg(*cmd, flags, fmask, prio)) == 0)
 			break;
 		if (errno != ENETUNREACH && errno != ESRCH)
 			break;
@@ -583,6 +635,9 @@ show(int argc, char *argv[])
 				break;
 			case K_LINK:
 				af = AF_LINK;
+				break;
+			case K_MPLS:
+				af = AF_MPLS;
 				break;
 			case K_ENCAP:
 				af = PF_KEY;
@@ -771,7 +826,8 @@ getaddr(int which, char *s, struct hostent **hpp)
 	case AF_LINK:
 		link_addr(s, &su->sdl);
 		return (1);
-
+	case AF_MPLS:
+		errx(1, "mpls labels require -in or -out switch");
 	case PF_ROUTE:
 		su->sa.sa_len = sizeof(*su);
 		sockaddr(s, &su->sa);
@@ -814,6 +870,38 @@ getaddr(int which, char *s, struct hostent **hpp)
 	default:
 		errx(1, "%d: bad address family", afamily);
 		/* NOTREACHED */
+	}
+}
+
+void
+getmplslabel(char *s, int in)
+{
+	sup su = NULL;
+	const char *errstr;
+	char *ifname;
+	u_int32_t label;
+	u_int16_t ifindex = 0;
+
+	rtm_addrs |= RTA_DST;
+	su = &so_dst;
+	su->sa.sa_len = aflen;
+	su->sa.sa_family = af;
+
+	ifname = strchr(s, SCOPE_DELIMITER);
+	if (ifname) {
+		*ifname++ = '\0';
+		ifindex = if_nametoindex(ifname);
+	}
+
+	label = strtonum(s, 0, 0x000fffff, &errstr);
+	if (errstr)
+		errx(1, "bad label: %s is %s", s, errstr);
+	if (in) {
+		su->smpls.smpls_in_label = htonl(label << MPLS_LABEL_OFFSET);
+		su->smpls.smpls_in_ifindex = ifindex;
+	} else {
+		su->smpls.smpls_out_label = htonl(label << MPLS_LABEL_OFFSET);
+		su->smpls.smpls_out_ifindex = ifindex;
 	}
 }
 
@@ -923,7 +1011,7 @@ struct {
 } m_rtmsg;
 
 int
-rtmsg(int cmd, int flags, int fmask)
+rtmsg(int cmd, int flags, int fmask, u_short prio)
 {
 	static int seq;
 	char *cp = m_rtmsg.m_space;
@@ -963,6 +1051,7 @@ rtmsg(int cmd, int flags, int fmask)
 	rtm.rtm_rmx = rt_metrics;
 	rtm.rtm_inits = rtm_inits;
 	rtm.rtm_tableid = tableid;
+	rtm.rtm_priority = prio;
 
 	if (rtm_addrs & RTA_NETMASK)
 		mask_addr(&so_dst, &so_mask, RTA_DST);
@@ -1045,7 +1134,7 @@ char *msgtypes[] = {
 };
 
 char metricnames[] =
-"\011pksent\010rttvar\7rtt\6ssthresh\5sendpipe\4recvpipe\3expire\2hopcount\1mtu";
+"\011priority\010rttvar\7rtt\6ssthresh\5sendpipe\4recvpipe\3expire\2hopcount\1mtu";
 char routeflags[] =
 "\1UP\2GATEWAY\3HOST\4REJECT\5DYNAMIC\6MODIFIED\7DONE\010MASK_PRESENT\011CLONING"
 "\012XRESOLVE\013LLINFO\014STATIC\015BLACKHOLE\016PROTO3\017PROTO2\020PROTO1\021CLONED\022SOURCE\023MPATH\024JUMBO";
@@ -1053,7 +1142,7 @@ char ifnetflags[] =
 "\1UP\2BROADCAST\3DEBUG\4LOOPBACK\5PTP\6NOTRAILERS\7RUNNING\010NOARP\011PPROMISC"
 "\012ALLMULTI\013OACTIVE\014SIMPLEX\015LINK0\016LINK1\017LINK2\020MULTICAST";
 char addrnames[] =
-"\1DST\2GATEWAY\3NETMASK\4GENMASK\5IFP\6IFA\7AUTHOR\010BRD\13LABEL";
+"\1DST\2GATEWAY\3NETMASK\4GENMASK\5IFP\6IFA\7AUTHOR\010BRD\013LABEL";
 
 const char *
 get_linkstate(int mt, int link_state)
@@ -1149,11 +1238,37 @@ print_rtmsg(struct rt_msghdr *rtm, int msglen)
 		printf("\n");
 		break;
 	default:
-		printf("table: %u, pid: %ld, seq %d, errno %d, flags:",
+		printf("priority %d, ", rtm->rtm_priority);
+		printf("table %u, pid: %ld, seq %d, errno %d\nflags:",
 		    rtm->rtm_tableid, (long)rtm->rtm_pid, rtm->rtm_seq,
 		    rtm->rtm_errno);
 		bprintf(stdout, rtm->rtm_flags, routeflags);
 		pmsg_common(rtm);
+	}
+}
+
+char *
+priorityname(u_int8_t prio)
+{
+	switch (prio) {
+	case 0:
+		return ("none");
+	case 4:
+		return ("connected");
+	case 8:
+		return ("static");
+	case 16:
+		return ("ospf");
+	case 20:
+		return ("is-is");
+	case 24:
+		return ("rip");
+	case 32:
+		return ("bgp");
+	case 48:
+		return ("default");
+	default:
+		return ("");
 	}
 }
 
@@ -1228,6 +1343,8 @@ print_getmsg(struct rt_msghdr *rtm, int msglen)
 		    ifp->sdl_nlen, ifp->sdl_data);
 	if (ifa)
 		printf(" if address: %s\n", routename(ifa));
+	printf("   priority: %u (%s)\n", rtm->rtm_priority,
+	   priorityname(rtm->rtm_priority)); 
 	printf("      flags: ");
 	bprintf(stdout, rtm->rtm_flags, routeflags);
 	printf("\n");
@@ -1237,9 +1354,8 @@ print_getmsg(struct rt_msghdr *rtm, int msglen)
 #define lock(f)	((rtm->rtm_rmx.rmx_locks & __CONCAT(RTV_,f)) ? 'L' : ' ')
 #define msec(u)	(((u) + 500) / 1000)		/* usec to msec */
 
-	printf("%s\n", "     use  hopcount       mtu    expire");
+	printf("%s\n", "     use       mtu    expire");
 	printf("%8llu  ", rtm->rtm_rmx.rmx_pksent);
-	printf("%8u%c ", rtm->rtm_rmx.rmx_hopcount, lock(HOPCOUNT));
 	printf("%8u%c ", rtm->rtm_rmx.rmx_mtu, lock(MTU));
 	if (rtm->rtm_rmx.rmx_expire)
 		rtm->rtm_rmx.rmx_expire -= time(NULL);

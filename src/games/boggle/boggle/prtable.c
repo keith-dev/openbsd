@@ -1,4 +1,4 @@
-/*	$OpenBSD: prtable.c,v 1.9 2004/07/10 07:26:22 deraadt Exp $	*/
+/*	$OpenBSD: prtable.c,v 1.11 2008/08/04 18:42:09 millert Exp $	*/
 /*	$NetBSD: prtable.c,v 1.2 1995/03/21 12:14:42 cgd Exp $	*/
 
 /*-
@@ -41,7 +41,9 @@
 
 #define NCOLS	5
 
-static int	get_maxlen(char *[], int, int (*)(char **, int));
+static int	get_maxlen(char **, int, int (*)(char **, int));
+
+extern int	lastline, LIST_LINE, LIST_COL;
 
 /*
  * Routine to print a table
@@ -59,8 +61,8 @@ static int	get_maxlen(char *[], int, int (*)(char **, int));
  * an index
  */
 void
-prtable(char *base[], int num, int d_cols, int width, 
-        void (*prentry)(char *[], int), int (*length)(char *[], int))
+prtable(char **base, int num, int d_cols, int width, 
+        void (*prentry)(char **, int), int (*length)(char **, int))
 {
 	int c, j;
 	int a, b, cols, loc, maxlen, nrows, z;
@@ -102,12 +104,27 @@ prtable(char *base[], int num, int d_cols, int width,
 		}
 		getyx(stdscr, row, col);
 		move(row + 1, 0);
+		if (row + 1 == lastline && a != nrows) {
+			attron(A_REVERSE);
+			printw("--More--");
+			attroff(A_REVERSE);
+			do {
+			    j = inputch();
+			} while (j != ' ' && j != 'q' && j != 'Q');
+			if (j == 'q' || j == 'Q') {
+				move(row + 1, 0);
+				wclrtoeol(stdscr);
+				break;
+			}
+			move(LIST_LINE, LIST_COL);
+			wclrtobot(stdscr);
+		}
 	}
 	refresh();
 }
 
 static int
-get_maxlen(char *base[], int num, int (*length)(char **, int))
+get_maxlen(char **base, int num, int (*length)(char **, int))
 {
 	int i, len, max;
 

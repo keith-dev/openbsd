@@ -1,4 +1,4 @@
-/*	$OpenBSD: altq_cdnr.c,v 1.8 2007/09/13 20:40:02 chl Exp $	*/
+/*	$OpenBSD: altq_cdnr.c,v 1.10 2008/05/08 15:22:02 chl Exp $	*/
 /*	$KAME: altq_cdnr.c,v 1.8 2000/12/14 08:12:45 thorpej Exp $	*/
 
 /*
@@ -285,8 +285,6 @@ cdnr_cballoc(top, type, input_func)
 	}
 
 	cb = malloc(size, M_DEVBUF, M_WAITOK|M_ZERO);
-	if (cb == NULL)
-		return (NULL);
 
 	cb->cb_len = size;
 	cb->cb_type = type;
@@ -846,7 +844,7 @@ tswtcm_input(cb, pktinfo)
 	 * marker
 	 */
 	if (avg_rate > tsw->cmtd_rate) {
-		u_int32_t randval = random() % avg_rate;
+		u_int32_t randval = arc4random_uniform(avg_rate);
 
 		if (avg_rate > tsw->peak_rate) {
 			if (randval < avg_rate - tsw->peak_rate) {

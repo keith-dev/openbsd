@@ -1,4 +1,4 @@
-.\"	$OpenBSD: relayd.conf.5,v 1.80 2008/03/03 23:15:55 jmc Exp $
+.\"	$OpenBSD: relayd.conf.5,v 1.92 2008/07/25 12:29:33 jmc Exp $
 .\"
 .\" Copyright (c) 2006, 2007 Reyk Floeter <reyk@openbsd.org>
 .\" Copyright (c) 2006, 2007 Pierre-Yves Ritschard <pyr@openbsd.org>
@@ -15,7 +15,7 @@
 .\" ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
 .\" OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 .\"
-.Dd $Mdocdate: March 3 2008 $
+.Dd $Mdocdate: July 25 2008 $
 .Dt RELAYD.CONF 5
 .Os
 .Sh NAME
@@ -183,7 +183,7 @@ The table can be later enabled through
 .El
 Each table must contain at least one host;
 multiple hosts are separated by newline, comma, or whitespace.
-Host entries may be defined with the following attribute:
+Host entries may be defined with the following attributes:
 .Bl -tag -width retry
 .It Ic retry Ar number
 The optional retry option adds a tolerance for failed host checks;
@@ -192,6 +192,17 @@ the check will be retried for
 more times before setting the host state to down.
 If this table is used by a relay, it will also specify the number of
 retries for outgoing connection attempts.
+.It Ic parent Ar number
+The optional parent option inherits the state from a parent
+host with the specified identifier.
+The check will be skipped for this host and copied from the parent host.
+This can be used to prevent multiple checks on hosts with multiple IP
+addresses for the same service.
+The host identifiers are sequentially assigned to the configured hosts
+starting with 1; it can be shown with the
+.Xr relayctl 8
+.Ic show summary
+commands.
 .El
 .Pp
 For example:
@@ -250,7 +261,7 @@ This has the same effect as above but wraps the HTTP request in SSL.
 .Xc
 For each host in the table, verify that retrieving the URL
 .Ar path
-produces content whose message digest matches the defined string.
+produces non-binary content whose message digest matches the defined string.
 The algorithm used is determined by the string length of the
 .Ar digest
 argument, either SHA1 (40 characters) or MD5 (32 characters).
@@ -260,6 +271,10 @@ is specified, it is used as the
 .Dq Host:
 header to query a specific hostname at the target host.
 The digest does not take the HTTP headers into account.
+Do not specify a binary object (such as a graphic) as the target of the
+request, as
+.Nm
+expects the data returned to be a string.
 To compute the digest, use this simple command:
 .Bd -literal -offset indent
 $ ftp -o - http://host[:port]/path | sha1
@@ -418,6 +433,25 @@ to listen on.
 will redirect incoming connections for the specified target to the
 hosts in the main or backup table.
 The rdr rule can be optionally restricted to a given interface name.
+.It Xo
+.Ic route to
+.Aq Ar table
+.Op Ic port Ar number
+.Ar options ...
+.Xc
+Like the
+.Ic forward to
+directive, but directly routes the packets to the target host without
+modifying the target address.
+This can be used for
+.Dq direct server return
+to force the target host to respond via a different gateway.
+Note that hosts have to accept sessions for the same address as
+the gateway, which is typically done by configuring a loopback
+interface on the host with this address.
+.It Ic session timeout Ar seconds
+Specify the inactivity timeout in seconds for established redirections.
+The default timeout is 600 seconds (10 minutes).
 .It Ic sticky-address
 This has the same effect as specifying sticky-address
 for an rdr rule in
@@ -451,10 +485,11 @@ configuration directives are described below:
 .It Ic disable
 Start the relay but immediately close any accepted connections.
 .It Xo
+.Op Ic transparent
 .Ic forward to
 .Ar address
 .Op Ic port Ar port
-.Op Ic retry Ar number
+.Ar options ...
 .Xc
 Specify the address and port of the target host to connect to.
 If the
@@ -462,11 +497,40 @@ If the
 option is not specified, the port from the
 .Ic listen on
 directive will be used.
+Use the
+.Ic transparent
+keyword to enable fully-transparent mode; the source address of the
+client will be retained in this case.
 .Pp
-The optional host retry option will be used as a tolerance for failed
+The following options may be specified for forward directives:
+.Pp
+.Bl -tag -width Ds
+.It Ic retry Ar number
+The optional host
+.Ic retry
+option will be used as a tolerance for failed
 host connections; the connection will be retried for
 .Ar number
 more times.
+.It Ic inet
+If the requested destination is an IPv6 address,
+.Xr relayd 8
+will forward the connection to an IPv4 address which is determined by
+the last 4 octets of the original IPv6 destination.
+For example, if the original IPv6 destination address is
+2001:db8:7395:ffff::a01:101, the session is relayed to the IPv4
+address 10.1.1.1 (a01:101).
+.It Ic inet6 Ar address-prefix
+If the requested destination is an IPv4 address,
+.Xr relayd 8
+will forward the connection to an IPv6 address which is determined by
+setting the last 4 octets of the specified IPv6
+.Ar address-prefix
+to the 4 octets of the original IPv4 destination.
+For example, if the original IPv4 destination address is 10.1.1.1 and
+the specified address prefix is 2001:db8:7395:ffff::, the session is
+relayed to the IPv6 address 2001:db8:7395:ffff::a01:101.
+.El
 .It Xo
 .Ic forward to
 .Aq Ar table
@@ -480,7 +544,7 @@ section above for information about table options.
 .It Xo
 .Ic forward to
 .Ic nat lookup
-.Op Ic retry Ar number
+.Ar options ...
 .Xc
 When redirecting connections with an
 .Ar rdr
@@ -526,8 +590,8 @@ The generic TCP protocol options will be used by default;
 see the
 .Sx PROTOCOLS
 section below.
-.It Ic timeout Ar seconds
-Specify the timeout in seconds for accepted sessions.
+.It Ic session timeout Ar seconds
+Specify the inactivity timeout in seconds for accepted sessions.
 The default timeout is 600 seconds (10 minutes).
 .El
 .Sh PROTOCOLS
@@ -594,7 +658,7 @@ Handle the data stream from the target host to the relay, like
 HTTP server replies.
 .El
 .Pp
-.Bq Ar action
+.Bq Ar type
 may be one of:
 .Bl -tag -width Ds
 .It Ic cookie

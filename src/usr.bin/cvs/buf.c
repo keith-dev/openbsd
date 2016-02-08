@@ -1,4 +1,4 @@
-/*	$OpenBSD: buf.c,v 1.69 2008/02/27 22:34:04 joris Exp $	*/
+/*	$OpenBSD: buf.c,v 1.72 2008/06/10 01:00:34 joris Exp $	*/
 /*
  * Copyright (c) 2003 Jean-Francois Brousseau <jfb@openbsd.org>
  * All rights reserved.
@@ -102,6 +102,8 @@ cvs_buf_load_fd(int fd)
 	if (lseek(fd, 0, SEEK_SET) == -1)
 		fatal("cvs_buf_load_fd: lseek: %s", strerror(errno));
 
+	if (st.st_size > SIZE_MAX)
+		fatal("cvs_buf_load_fd: file size too big");
 	buf = cvs_buf_alloc(st.st_size);
 	if (atomicio(read, fd, buf->cb_buf, buf->cb_size) != buf->cb_size)
 		fatal("cvs_buf_load_fd: read: %s", strerror(errno));
@@ -172,6 +174,17 @@ cvs_buf_putc(BUF *b, int c)
 	}
 	*bp = (u_char)c;
 	b->cb_len++;
+}
+
+/*
+ * cvs_buf_puts()
+ *
+ * Wrapper function for constant strings to cvs_buf_append.
+ */
+void
+cvs_buf_puts(BUF *b, const char *str)
+{
+	cvs_buf_append(b, str, strlen(str));
 }
 
 /*
@@ -296,7 +309,7 @@ cvs_buf_write_stmp(BUF *b, char *template, struct timeval *tv)
 
 	cvs_worklist_add(template, &temp_files);
 
-	if (lseek(fd, SEEK_SET, 0) < 0)
+	if (lseek(fd, 0, SEEK_SET) < 0)
 		fatal("cvs_buf_write_stmp: lseek: %s", strerror(errno));
 
 	return (fd);

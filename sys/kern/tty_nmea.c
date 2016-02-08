@@ -1,7 +1,7 @@
-/*	$OpenBSD: tty_nmea.c,v 1.25 2008/01/28 20:32:50 stevesk Exp $ */
+/*	$OpenBSD: tty_nmea.c,v 1.30 2008/07/22 06:06:47 mbalmer Exp $ */
 
 /*
- * Copyright (c) 2006, 2007 Marc Balmer <mbalmer@openbsd.org>
+ * Copyright (c) 2006, 2007, 2008 Marc Balmer <mbalmer@openbsd.org>
  *
  * Permission to use, copy, modify, and distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -49,12 +49,13 @@ void	nmeaattach(int);
 #define TRUSTTIME	(10 * 60)	/* 10 minutes */
 #endif
 
-int nmea_count;	/* this is wrong, it should really be a SLIST */
+int nmea_count, nmea_nxid;
 static int t_trust;
 
 struct nmea {
 	char			cbuf[NMEAMAX];	/* receive buffer */
 	struct ksensor		time;		/* the timedelta sensor */
+	struct ksensor		signal;		/* signal status */
 	struct ksensordev	timedev;
 	struct timespec		ts;		/* current timestamp */
 	struct timespec		lts;		/* timestamp of last '$' seen */
@@ -78,6 +79,11 @@ void	nmea_gprmc(struct nmea *, struct tty *, char *fld[], int fldcnt);
 int	nmea_date_to_nano(char *s, int64_t *nano);
 int	nmea_time_to_nano(char *s, int64_t *nano);
 
+#if NMEA_POS_IN_DESC
+/* longitude and latitude formatting and copying */
+void	nmea_degrees(char *dst, char *src, int neg, size_t len);
+#endif
+
 /* degrade the timedelta sensor */
 void	nmea_timeout(void *);
 
@@ -100,11 +106,20 @@ nmeaopen(dev_t dev, struct tty *tp)
 		return error;
 	np = malloc(sizeof(struct nmea), M_DEVBUF, M_WAITOK | M_ZERO);
 	snprintf(np->timedev.xname, sizeof(np->timedev.xname), "nmea%d",
-	    nmea_count++);
+	    nmea_nxid++);
+	nmea_count++;
 	np->time.status = SENSOR_S_UNKNOWN;
 	np->time.type = SENSOR_TIMEDELTA;
 	np->time.value = 0LL;
 	sensor_attach(&np->timedev, &np->time);
+
+	np->signal.type = SENSOR_PERCENT;
+	np->signal.status = SENSOR_S_UNKNOWN;
+	np->signal.value = 100000LL;
+	np->signal.flags = 0;
+	strlcpy(np->signal.desc, "Signal", sizeof(np->signal.desc));
+	sensor_attach(&np->timedev, &np->signal);
+
 	np->sync = 1;
 	tp->t_sc = (caddr_t)np;
 
@@ -135,6 +150,8 @@ nmeaclose(struct tty *tp, int flags)
 	free(np, M_DEVBUF);
 	tp->t_sc = NULL;
 	nmea_count--;
+	if (nmea_count == 0)
+		nmea_nxid = 0;
 	return linesw[TTYDISC].l_close(tp, flags);
 }
 
@@ -337,7 +354,7 @@ nmea_gprmc(struct nmea *np, struct tty *tp, char *fld[], int fldcnt)
 			    sizeof(np->time.desc));
 			break;
 		case 'N':
-			strlcpy(np->time.desc, "GPS not valid",
+			strlcpy(np->time.desc, "GPS invalid",
 			    sizeof(np->time.desc));
 			break;
 		default:
@@ -346,19 +363,25 @@ nmea_gprmc(struct nmea *np, struct tty *tp, char *fld[], int fldcnt)
 			DPRINTF(("gprmc: unknown mode '%c'\n", np->mode));
 		}
 	}
-
+#if NMEA_POS_IN_DESC
+	nmea_degrees(np->time.desc, fld[3], *fld[4] == 'S' ? 1 : 0,
+	    sizeof(np->time.desc));
+	nmea_degrees(np->time.desc, fld[5], *fld[6] == 'W' ? 1 : 0,
+	    sizeof(np->time.desc));
+#endif
 	switch (*fld[2]) {
 	case 'A':	/* The GPS has a fix, (re)arm the timeout. */
 		np->time.status = SENSOR_S_OK;
+		np->signal.status = SENSOR_S_OK;
 		timeout_add(&np->nmea_tout, t_trust);
 		break;
 	case 'V':	/*
 			 * The GPS indicates a warning status, do not add to
 			 * the timeout, if the condition persist, the sensor
-			 * will be degraded.
+			 * will be degraded.  Signal the condition through
+			 * the signal sensor.
 			 */
-			/* FALLTHROUGH */
-	default:
+		np->signal.status = SENSOR_S_WARN;
 		break;
 	}
 
@@ -369,6 +392,63 @@ nmea_gprmc(struct nmea *np, struct tty *tp, char *fld[], int fldcnt)
 	if (np->no_pps)
 		np->time.status = SENSOR_S_CRIT;
 }
+
+#ifdef NMEA_POS_IN_DESC
+/* format a nmea position in the form DDDMM.MMMM to DDDdMM.MMm */
+void
+nmea_degrees(char *dst, char *src, int neg, size_t len)
+{
+	size_t dlen, ppos, rlen;
+	int n;
+	char *p;
+
+	for (dlen = 0; *dst; dlen++)
+		dst++;
+
+	while (*src == '0')
+		++src;	/* skip leading zeroes */
+
+	for (p = src, ppos = 0; *p; ppos++)
+		if (*p++ == '.')
+			break;
+
+	if (*p == '\0')
+		return;	/* no decimal point */
+
+	/*
+	 * we need at least room for a comma, an optional '-', the src data up
+	 * to the decimal point, the decimal point itself, two digits after
+	 * it and some additional characters:  an optional leading '0' in case
+	 * there a no degrees in src, the 'd' degrees indicator, the 'm'
+	 * minutes indicator and the terminating NUL character.
+	 */
+	rlen = dlen + ppos + 7;
+	if (neg)
+		rlen++;
+	if (ppos < 3)
+		rlen++;
+	if (len < rlen)
+		return;		/* not enough room in dst */
+
+	*dst++ = ',';
+	if (neg)
+		*dst++ = '-';
+
+	if (ppos < 3)
+		*dst++ = '0';
+
+	for (n = 0; *src && n + 2 < ppos; n++)
+		*dst++ = *src++;
+	*dst++ = 'd';
+	if (ppos == 0)
+		*dst++ = '0';
+
+	for (; *src && n < (ppos + 3); n++)
+		*dst++ = *src++;
+	*dst++ = 'm';
+	*dst = '\0';
+}
+#endif
 
 /*
  * Convert a NMEA 0183 formatted date string to seconds since the epoch.

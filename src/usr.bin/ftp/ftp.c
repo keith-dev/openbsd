@@ -1,4 +1,4 @@
-/*	$OpenBSD: ftp.c,v 1.67 2007/06/16 08:58:33 espie Exp $	*/
+/*	$OpenBSD: ftp.c,v 1.73 2008/07/08 21:07:57 martynas Exp $	*/
 /*	$NetBSD: ftp.c,v 1.27 1997/08/18 10:20:23 lukem Exp $	*/
 
 /*
@@ -60,7 +60,7 @@
  */
 
 #if !defined(lint) && !defined(SMALL)
-static const char rcsid[] = "$OpenBSD: ftp.c,v 1.67 2007/06/16 08:58:33 espie Exp $";
+static const char rcsid[] = "$OpenBSD: ftp.c,v 1.73 2008/07/08 21:07:57 martynas Exp $";
 #endif /* not lint and not SMALL */
 
 #include <sys/types.h>
@@ -149,7 +149,7 @@ hookup(char *host, char *port)
 #ifndef SMALL
 		else if (strcmp(port, "https") == 0)
 			snprintf(pbuf, sizeof(pbuf), "%d", HTTPS_PORT);
-#endif
+#endif /* !SMALL */
 		if (pbuf[0])
 			error = getaddrinfo(host, pbuf, &hints, &res0);
 	}
@@ -179,7 +179,8 @@ hookup(char *host, char *port)
 			if (getnameinfo(res->ai_addr, res->ai_addrlen,
 			    hbuf, sizeof(hbuf), NULL, 0, NI_NUMERICHOST) != 0)
 				strlcpy(hbuf, "unknown", sizeof(hbuf));
-			fprintf(ttyout, "Trying %s...\n", hbuf);
+			if (verbose)
+				fprintf(ttyout, "Trying %s...\n", hbuf);
 		}
 		s = socket(res->ai_family, res->ai_socktype, res->ai_protocol);
 		if (s < 0) {
@@ -256,12 +257,13 @@ hookup(char *host, char *port)
 	}
 #ifdef SO_OOBINLINE
 	{
-	int on = 1;
+	int ret, on = 1;
 
-	if (setsockopt(s, SOL_SOCKET, SO_OOBINLINE, (char *)&on, sizeof(on))
-		< 0 && debug) {
-			warn("setsockopt");
-		}
+	ret = setsockopt(s, SOL_SOCKET, SO_OOBINLINE, (char *)&on, sizeof(on));
+#ifndef SMALL
+	if (ret < 0 && debug)
+		warn("setsockopt");
+#endif /* !SMALL */
 	}
 #endif /* SO_OOBINLINE */
 
@@ -293,6 +295,7 @@ command(const char *fmt, ...)
 	sig_t oldintr;
 
 	abrtflag = 0;
+#ifndef SMALL
 	if (debug) {
 		fputs("---> ", ttyout);
 		va_start(ap, fmt);
@@ -306,6 +309,7 @@ command(const char *fmt, ...)
 		putc('\n', ttyout);
 		(void)fflush(ttyout);
 	}
+#endif /* !SMALL */
 	if (cout == NULL) {
 		warnx("No control connection for command.");
 		code = -1;
@@ -325,7 +329,7 @@ command(const char *fmt, ...)
 	return (r);
 }
 
-int keep_alive_timeout = 0;		/* 0 -> no timeout */
+int keep_alive_timeout = 60;		/* 0 -> no timeout */
 
 static int full_noops_sent = 0;
 static time_t last_timestamp = 0;	/* 0 -> no measurement yet */
@@ -337,8 +341,10 @@ static int current_nop_pos = 0;		/* 0 -> no noop started */
 void 
 send_noop_char()
 {
+#ifndef SMALL
 	if (debug)
 		fprintf(ttyout, "---> %c\n", noop[current_nop_pos]);
+#endif /* !SMALL */
 	fputc(noop[current_nop_pos++], cout);
 	(void)fflush(cout);
 	if (current_nop_pos >= NOOP_LENGTH) {
@@ -362,8 +368,10 @@ may_receive_noop_ack()
 	/* finish sending last incomplete noop */
 	if (current_nop_pos != 0) {
 		fputs(&(noop[current_nop_pos]), cout);
+#ifndef SMALL
 		if (debug)
 			fprintf(ttyout, "---> %s\n", &(noop[current_nop_pos]));
+#endif /* !SMALL */
 		(void)fflush(cout);
 		current_nop_pos = 0;
 		full_noops_sent++;
@@ -447,9 +455,9 @@ getreply(int expecteof)
 				return (4);
 			}
 			if (c != '\r' && (verbose > 0 ||
-			    ((verbose > -1 && n == '5' && dig > 4)) &&
+			    ((verbose > -1 && n == '5' && dig > 4) &&
 			    (((!n && c < '5') || (n && n < '5'))
-			     || !retry_connect))) {
+			     || !retry_connect)))) {
 				if (proxflag &&
 				   (dig == 1 || (dig == 5 && verbose == 0)))
 					fprintf(ttyout, "%s:", hostname);
@@ -541,7 +549,7 @@ sendrequest(const char *cmd, const char *local, const char *remote,
 	volatile off_t hashbytes;
 	char * volatile lmode;
 	char buf[BUFSIZ], *bufp;
-	int oprogress;
+	int oprogress, serrno;
 
 	hashbytes = mark;
 	direction = "sent";
@@ -655,7 +663,6 @@ sendrequest(const char *cmd, const char *local, const char *remote,
 		}
 		if (rc == -1) {
 			warn("local: %s", local);
-			restart_point = 0;
 			progress = oprogress;
 			if (closefunc != NULL)
 				(*closefunc)(fin);
@@ -663,13 +670,11 @@ sendrequest(const char *cmd, const char *local, const char *remote,
 		}
 		if (command("REST %lld", (long long) restart_point)
 			!= CONTINUE) {
-			restart_point = 0;
 			progress = oprogress;
 			if (closefunc != NULL)
 				(*closefunc)(fin);
 			return;
 		}
-		restart_point = 0;
 		lmode = "r+w";
 	}
 	if (remote) {
@@ -704,7 +709,7 @@ sendrequest(const char *cmd, const char *local, const char *remote,
 
 	case TYPE_I:
 	case TYPE_L:
-		errno = d = 0;
+		d = 0;
 		while ((c = read(fileno(fin), buf, sizeof(buf))) > 0) {
 			may_send_noop_char();
 			bytes += c;
@@ -720,6 +725,8 @@ sendrequest(const char *cmd, const char *local, const char *remote,
 				(void)fflush(ttyout);
 			}
 		}
+		if (c == -1 || d == -1)
+			serrno = errno;
 		if (hash && (!progress || filesize < 0) && bytes > 0) {
 			if (bytes < mark)
 				(void)putc('#', ttyout);
@@ -727,10 +734,10 @@ sendrequest(const char *cmd, const char *local, const char *remote,
 			(void)fflush(ttyout);
 		}
 		if (c < 0)
-			warn("local: %s", local);
+			warnx("local: %s: %s", local, strerror(serrno));
 		if (d < 0) {
-			if (errno != EPIPE)
-				warn("netout");
+			if (serrno != EPIPE)
+				warnx("netout: %s", strerror(serrno));
 			bytes = -1;
 		}
 		break;
@@ -759,6 +766,8 @@ sendrequest(const char *cmd, const char *local, const char *remote,
 			}
 #endif
 		}
+		if (ferror(fin) || ferror(dout))
+			serrno = errno;
 		if (hash && (!progress || filesize < 0)) {
 			if (bytes < hashbytes)
 				(void)putc('#', ttyout);
@@ -766,10 +775,10 @@ sendrequest(const char *cmd, const char *local, const char *remote,
 			(void)fflush(ttyout);
 		}
 		if (ferror(fin))
-			warn("local: %s", local);
+			warnx("local: %s: %s", local, strerror(serrno));
 		if (ferror(dout)) {
 			if (errno != EPIPE)
-				warn("netout");
+				warnx("netout: %s", strerror(serrno));
 			bytes = -1;
 		}
 		break;
@@ -834,7 +843,7 @@ recvrequest(const char *cmd, const char * volatile local, const char *remote,
 	FILE * volatile fout, * volatile din;
 	int (* volatile closefunc)(FILE *);
 	volatile sig_t oldinti, oldintr, oldintp;
-	int c, d;
+	int c, d, serrno;
 	volatile int is_retr, tcrflag, bare_lfs;
 	static size_t bufsize;
 	static char *buf;
@@ -890,7 +899,7 @@ recvrequest(const char *cmd, const char * volatile local, const char *remote,
 	oldinti = signal(SIGINFO, psummary);
 	if (ignorespecial || (strcmp(local, "-") && *local != '|')) {
 		if (access(local, W_OK) < 0) {
-			char *dir = strrchr(local, '/');
+			char *dir;
 
 			if (errno != ENOENT && errno != EACCES) {
 				warn("local: %s", local);
@@ -899,6 +908,7 @@ recvrequest(const char *cmd, const char * volatile local, const char *remote,
 				code = -1;
 				return;
 			}
+			dir = strrchr(local, '/');
 			if (dir != NULL)
 				*dir = 0;
 			d = access(dir == local ? "/" : dir ? local : ".", W_OK);
@@ -1048,6 +1058,8 @@ recvrequest(const char *cmd, const char * volatile local, const char *remote,
 				(void)fflush(ttyout);
 			}
 		}
+		if (c == -1 || d < c)
+			serrno = errno;
 		if (hash && (!progress || filesize < 0) && bytes > 0) {
 			if (bytes < mark)
 				(void)putc('#', ttyout);
@@ -1055,13 +1067,13 @@ recvrequest(const char *cmd, const char * volatile local, const char *remote,
 			(void)fflush(ttyout);
 		}
 		if (c < 0) {
-			if (errno != EPIPE)
-				warn("netin");
+			if (serrno != EPIPE)
+				warnx("netin: %s", strerror(serrno));
 			bytes = -1;
 		}
 		if (d < c) {
 			if (d < 0)
-				warn("local: %s", local);
+				warnx("local: %s: %s", local, strerror(serrno));
 			else
 				warnx("%s: short write", local);
 		}
@@ -1075,14 +1087,20 @@ recvrequest(const char *cmd, const char * volatile local, const char *remote,
 				goto done;
 			n = restart_point;
 			for (i = 0; i++ < n;) {
-				if ((ch = fgetc(fout)) == EOF)
+				if ((ch = fgetc(fout)) == EOF) {
+					if (!ferror(fout))
+						errno = 0;
 					goto done;
+				}
 				if (ch == '\n')
 					i++;
 			}
 			if (fseek(fout, 0L, SEEK_CUR) < 0) {
 done:
-				warn("local: %s", local);
+				if (errno)
+					warn("local: %s", local);
+				else
+					warnx("local: %s", local);
 				progress = oprogress;
 				preserve = opreserve;
 				if (closefunc != NULL)
@@ -1119,6 +1137,8 @@ done:
 	contin2:	;
 		}
 break2:
+		if (ferror(din) || ferror(fout))
+			serrno = errno;
 		if (bare_lfs) {
 			fprintf(ttyout,
 "WARNING! %d bare linefeeds received in ASCII mode.\n", bare_lfs);
@@ -1132,12 +1152,12 @@ break2:
 			(void)fflush(ttyout);
 		}
 		if (ferror(din)) {
-			if (errno != EPIPE)
-				warn("netin");
+			if (serrno != EPIPE)
+				warnx("netin: %s", strerror(serrno));
 			bytes = -1;
 		}
 		if (ferror(fout))
-			warn("local: %s", local);
+			warnx("local: %s: %s", local, strerror(serrno));
 		break;
 	}
 	progressmeter(1);
@@ -1232,10 +1252,12 @@ reinit:
 			warn("socket");
 			return (1);
 		}
+#ifndef SMALL
 		if ((options & SO_DEBUG) &&
 		    setsockopt(data, SOL_SOCKET, SO_DEBUG, (char *)&on,
 			       sizeof(on)) < 0)
 			warn("setsockopt (ignored)");
+#endif /* !SMALL */
 		switch (data_addr.su_family) {
 		case AF_INET:
 			if (epsv4 && !epsv4bad) {
@@ -1257,11 +1279,13 @@ reinit:
 				}
 				if (result != COMPLETE) {
 					epsv4bad = 1;
+#ifndef SMALL
 					if (debug) {
 						fputs(
 "disabling epsv4 for this connection\n",
 						    ttyout);
 					}
+#endif /* !SMALL */
 				}
 			}
 			if (result != COMPLETE)
@@ -1500,10 +1524,12 @@ noport:
 		warn("bind");
 		goto bad;
 	}
+#ifndef SMALL
 	if (options & SO_DEBUG &&
 	    setsockopt(data, SOL_SOCKET, SO_DEBUG, (char *)&on,
 			sizeof(on)) < 0)
 		warn("setsockopt (ignored)");
+#endif /* !SMALL */
 	namelen = sizeof(data_addr);
 	if (getsockname(data, (struct sockaddr *)&data_addr, &namelen) < 0) {
 		warn("getsockname");
@@ -1540,11 +1566,13 @@ noport:
 				    af_tmp, hname, pbuf);
 				if (result != COMPLETE) {
 					epsv4bad = 1;
+#ifndef SMALL
 					if (debug) {
 						fputs(
 "disabling epsv4 for this connection\n",
 						    ttyout);
 					}
+#endif /* !SMALL */
 				}
 			}
 			break;

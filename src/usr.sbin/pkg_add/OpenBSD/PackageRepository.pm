@@ -1,5 +1,5 @@
 # ex:ts=8 sw=4:
-# $OpenBSD: PackageRepository.pm,v 1.51 2008/03/04 19:18:37 ckuethe Exp $
+# $OpenBSD: PackageRepository.pm,v 1.58 2008/07/04 10:47:13 espie Exp $
 #
 # Copyright (c) 2003-2007 Marc Espie <espie@openbsd.org>
 #
@@ -32,33 +32,93 @@ use OpenBSD::Paths;
 
 sub _new
 {
-	my ($class, $address) = @_;
-	bless { baseurl => $address }, $class;
+	my ($class, $path, $host) = @_;
+	$path .= '/' unless $path =~ m/\/$/;
+	bless { host => $host, path => $path }, $class;
+}
+
+sub baseurl
+{
+	my $self = shift;
+
+	return $self->{path};
 }
 
 sub new
 {
 	my ($class, $baseurl) = @_;
-	if ($baseurl =~ m/^ftp\:(.*)$/io) {
-		return OpenBSD::PackageRepository::FTP->_new($1);
-	} elsif ($baseurl =~ m/^http\:(.*)$/io) {
-		return OpenBSD::PackageRepository::HTTP->_new($1);
-	} elsif ($baseurl =~ m/^https\:(.*)$/io) {
-		return OpenBSD::PackageRepository::HTTPS->_new($1);
-	} elsif ($baseurl =~ m/^scp\:(.*)$/io) {
+	my $o = $class->parse(\$baseurl);
+	return $o;
+}
+
+sub strip_urlscheme
+{
+	my ($class, $r) = @_;
+	if ($$r =~ m/^(.*?)\:(.*)$/) {
+		my $scheme = lc($1);
+		if ($scheme eq $class->urlscheme) {
+			$$r = $2;
+			return 1;
+	    	}
+	}
+	return 0;
+}
+
+sub parse_local_url
+{
+	my ($class, $r, @args) = @_;
+
+	my $o;
+
+	if ($$r =~ m/^(.*?)\:(.*)/) {
+		$o = $class->_new($1, @args);
+		$$r = $2;
+	} else {
+		$o = $class->_new($$r, @args);
+		$$r = '';
+	}
+	return $o;
+}
+
+sub parse_url
+{
+	&parse_local_url;
+}
+
+sub parse_fullurl
+{
+	my ($class, $r) = @_;
+
+	$class->strip_urlscheme($r) or return undef;
+	return $class->parse_url($r);
+}
+
+sub parse
+{
+	my ($class, $ref) = @_;
+	local $_ = $$ref;
+	return undef if $_ eq '';
+
+	if (m/^ftp\:/io) {
+		return OpenBSD::PackageRepository::FTP->parse_fullurl($ref);
+	} elsif (m/^http\:/io) {
+		return OpenBSD::PackageRepository::HTTP->parse_fullurl($ref);
+	} elsif (m/^https\:/io) {
+		return OpenBSD::PackageRepository::HTTPS->parse_fullurl($ref);
+	} elsif (m/^scp\:/io) {
 		require OpenBSD::PackageRepository::SCP;
 
-		return OpenBSD::PackageRepository::SCP->_new($1);
-	} elsif ($baseurl =~ m/^src\:(.*)$/io) {
+		return OpenBSD::PackageRepository::SCP->parse_fullurl($ref);
+	} elsif (m/^src\:/io) {
 		require OpenBSD::PackageRepository::Source;
 
-		return OpenBSD::PackageRepository::Source->_new($1);
-	} elsif ($baseurl =~ m/^file\:(.*)$/io) {
-		return OpenBSD::PackageRepository::Local->_new($1);
-	} elsif ($baseurl =~ m/^inst\:(.*)$/io) {
-		return OpenBSD::PackageRepository::Installed->_new($1);
+		return OpenBSD::PackageRepository::Source->parse_fullurl($ref);
+	} elsif (m/^file\:/io) {
+		return OpenBSD::PackageRepository::Local->parse_fullurl($ref);
+	} elsif (m/^inst\:$/io) {
+		return OpenBSD::PackageRepository::Installed->parse_fullurl($ref);
 	} else {
-		return OpenBSD::PackageRepository::Local->_new($baseurl);
+		return OpenBSD::PackageRepository::Local->parse_fullurl($ref);
 	}
 }
 
@@ -197,9 +257,9 @@ sub relative_url
 {
 	my ($self, $name) = @_;
 	if (defined $name) {
-		return $self->{baseurl}.$name.".tgz";
+		return $self->baseurl.$name.".tgz";
 	} else {
-		return $self->{baseurl};
+		return $self->baseurl;
 	}
 }
 
@@ -209,6 +269,14 @@ our @ISA=qw(OpenBSD::PackageRepository);
 sub urlscheme
 {
 	return 'file';
+}
+
+sub parse_fullurl
+{
+	my ($class, $r) = @_;
+
+	$class->strip_urlscheme($r);
+	return $class->parse_local_url($r);
 }
 
 sub open_pipe
@@ -243,7 +311,7 @@ sub list
 {
 	my $self = shift;
 	my $l = [];
-	my $dname = $self->{baseurl};
+	my $dname = $self->baseurl;
 	opendir(my $dir, $dname) or return $l;
 	while (my $e = readdir $dir) {
 		next unless $e =~ m/^(.*)\.tgz$/o;
@@ -296,6 +364,32 @@ sub open_pipe
 
 package OpenBSD::PackageRepository::Distant;
 our @ISA=qw(OpenBSD::PackageRepository);
+
+sub baseurl
+{
+	my $self = shift;
+
+	return "//$self->{host}/$self->{path}";
+}
+
+sub parse_url
+{
+	&parse_distant_url;
+}
+
+sub parse_distant_url
+{
+	my ($class, $r) = @_;
+	# same heuristics as ftp(1):
+	# find host part, rest is parsed as a local url
+	if ($$r =~ m/^\/\/(.*?)(\/.*)$/) {
+		my $host = $1;
+		$$r = $2;
+		return $class->parse_local_url($r, $host);
+	} else {
+		return undef;
+	}
+}
 
 my $buffsize = 2 * 1024 * 1024;
 
@@ -460,21 +554,11 @@ sub maxcount
 sub opened
 {
 	my $self = $_[0];
-	my $k = $self->{key};
+	my $k = $self->{host};
 	if (!defined $distant{$k}) {
 		$distant{$k} = [];
 	}
 	return $distant{$k};
-}
-
-sub _new
-{
-	my ($class, $baseurl) = @_;
-	my $distant_host;
-	if ($baseurl =~ m/^(\/\/.*?\/)/io) {
-	    $distant_host = $1;
-	}
-	bless { baseurl => $baseurl, key => $distant_host }, $class;
 }
 
 sub should_have
@@ -497,6 +581,9 @@ sub try_until_success
 		my $o = &$code;
 		if (defined $o) {
 			return $o;
+		}
+		if (defined $self->{lasterror} && $self->{lasterror} == 550) {
+			last;
 		}
 		if ($self->should_have($pkgname)) {
 			print STDERR "Temporary error, sleeping $retry seconds\n";
@@ -595,11 +682,10 @@ sub get_http_list
 	local $_;
 	open(my $fh, '-|', OpenBSD::Paths->ftp." -o - $fullname 2>$error")
 	    or return;
-	# XXX assumes a pkg HREF won't cross a line. Is this the case ?
 	while(<$fh>) {
 		chomp;
 		for my $pkg (m/\<A\s+HREF=\"(.*?)\.tgz\"\>/gio) {
-			next if $pkg =~ m|/|;
+			$pkg = $1 if $pkg =~ m|^.*/(.*)$|;
 			push(@$l, $pkg);
 		}
 	}
@@ -645,8 +731,8 @@ sub _list
 	open(my $fh, '-|', "$cmd") or return;
 	while(<$fh>) {
 		chomp;
-		next if m/^d.*\s+\S/;
-		next unless m/([^\s]+)\.tgz\s*$/;
+		next if m/^\d\d\d\s+\S/;
+		next unless m/(\S+)\.tgz\s*$/;
 		push(@$l, $1);
 	}
 	close($fh);
@@ -658,8 +744,8 @@ sub get_ftp_list
 	my ($self, $error) = @_;
 
 	my $fullname = $self->url;
-	return $self->_list("echo 'nlist *.tgz'| ".OpenBSD::Paths->ftp
-	    ." -o - $fullname 2>$error");
+	return $self->_list("echo 'nlist'| ".OpenBSD::Paths->ftp
+	    ." $fullname 2>$error");
 }
 
 sub obtain_list

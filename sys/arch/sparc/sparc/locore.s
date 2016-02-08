@@ -1,4 +1,4 @@
-/*	$OpenBSD: locore.s,v 1.75 2007/11/26 08:18:51 deraadt Exp $	*/
+/*	$OpenBSD: locore.s,v 1.81 2008/07/28 19:08:46 miod Exp $	*/
 /*	$NetBSD: locore.s,v 1.73 1997/09/13 20:36:48 pk Exp $	*/
 
 /*
@@ -231,11 +231,6 @@ _C_LABEL(pgofset):
 	.globl	_C_LABEL(trapbase)
 _C_LABEL(trapbase):
 	.word	0
-
-#if defined(SUN4M)
-_C_LABEL(mapme):
-	.asciz "0 0 f8000000 15c6a0 map-pages"
-#endif
 
 #if !defined(SUN4M)
 sun4m_notsup:
@@ -4315,14 +4310,14 @@ ENTRY(copyout)
 	 mov	EFAULT, %o0
 
 	/*
-	 * ******NOTE****** this depends on bcopy() not using %g7
+	 * ******NOTE****** this depends on old bcopy() not using %g7
 	 */
 Ldocopy:
 !	sethi	%hi(_C_LABEL(cpcb)), %o3
 	ld	[%o3 + %lo(_C_LABEL(cpcb))], %o3
 	set	Lcopyfault, %o4
 	mov	%o7, %g7		! save return address
-	call	_C_LABEL(bcopy)			! bcopy(src, dst, len)
+	call	Lbcopy_old		! bcopy(src, dst, len)
 	 st	%o4, [%o3 + PCB_ONFAULT]
 
 	sethi	%hi(_C_LABEL(cpcb)), %o3
@@ -4416,8 +4411,6 @@ ENTRY(cpu_switchto)
 
 	mov	SONPROC, %o0			! p->p_stat = SONPROC
 	stb	%o0, [%g3 + P_STAT]
-	sethi	%hi(_C_LABEL(want_resched)), %o0
-	st	%g0, [%o0 + %lo(_C_LABEL(want_resched))]	! want_resched = 0;
 	ld	[%g3 + P_ADDR], %g5		! newpcb = p->p_addr;
 	ld	[%g5 + PCB_PSR], %g2		! newpsr = newpcb->pcb_psr;
 	st	%g3, [%g7 + %lo(_C_LABEL(curproc))]	! curproc = p;
@@ -4719,7 +4712,7 @@ ENTRY(qzero)
 	nop
 
 /*
- * kernel bcopy/memcpy
+ * kernel old bcopy/memcpy
  * Assumes regions do not overlap; has no useful return value.
  *
  * Must not use %g7 (see copyin/copyout above).
@@ -4735,7 +4728,7 @@ ENTRY(memcpy)
 	mov	%o0, %o3
 	mov	%o1, %o0
 	mov	%o3, %o1
-ENTRY(bcopy)
+Lbcopy_old:
 	cmp	%o2, BCOPY_SMALL
 Lbcopy_start:
 	bge,a	Lbcopy_fancy	! if >= this many, go be fancy.
@@ -4901,11 +4894,12 @@ Lbcopy_done:
 	retl
 	stb	%o4,[%o1]
 /*
- * ovbcopy(src, dst, len): like bcopy, but regions may overlap.
+ * ovbcopy(src, dst, len): like old bcopy, but regions may overlap.
  */
+ENTRY(bcopy)
 ENTRY(ovbcopy)
 	cmp	%o0, %o1	! src < dst?
-	bgeu	Lbcopy_start	! no, go copy forwards as via bcopy
+	bgeu	Lbcopy_start	! no, go copy forwards as via old bcopy
 	cmp	%o2, BCOPY_SMALL! (check length for doublecopy first)
 
 	/*
@@ -4997,7 +4991,7 @@ Lback_fancy:
 	dec	2, %o0		! do {
 	ldsh	[%o0], %o4	!	src -= 2;
 	dec	2, %o1		!	dst -= 2;
-	deccc	2, %o0		!	*(short *)dst = *(short *)src;
+	deccc	2, %o2		!	*(short *)dst = *(short *)src;
 	bge	5b		! } while ((len -= 2) >= 0);
 	sth	%o4, [%o1]
 	b	Lback_mopb	! goto mop_up_byte;
@@ -5060,7 +5054,7 @@ Lback_mopb:
 	stb	%o4, [%o1 - 1]	! }
 
 /*
- * kcopy() is exactly like bcopy except that it set pcb_onfault such that
+ * kcopy() is exactly like old bcopy except that it set pcb_onfault such that
  * when a fault occurs, it is able to return -1 to indicate this to the
  * caller.
  */
@@ -5105,7 +5099,7 @@ Lkcopy_fancy:
 	 EMPTY
 	btst	7, %o1
 	be,a	Lkcopy_doubles
-	 dec	8, %o2		! if all lined up, len -= 8, goto bcopy_doubes
+	 dec	8, %o2		! if all lined up, len -= 8, goto bcopy_doubles
 
 	! If the low bits match, we can make these line up.
 1:
@@ -6115,10 +6109,7 @@ Lpanic_ljmp:
 	_ALIGN
 
 ENTRY(longjmp)
-	addcc	%o1, %g0, %g6	! compute v ? v : 1 in a global register
-	be,a	0f
-	 mov	1, %g6
-0:
+	mov	1, %g6
 	mov	%o0, %g1	! save a in another global register
 	ld	[%g1+8], %g7	/* get caller's frame */
 1:
@@ -6165,5 +6156,3 @@ _C_LABEL(proc0paddr):
 
 	.comm	_C_LABEL(nwindows), 4
 	.comm	_C_LABEL(promvec), 4
-	.comm	_C_LABEL(qs), 32 * 8
-	.comm	_C_LABEL(whichqs), 4

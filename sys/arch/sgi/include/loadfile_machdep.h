@@ -1,4 +1,4 @@
-/*	$OpenBSD: loadfile_machdep.h,v 1.1 2004/08/06 21:12:19 pefo Exp $ */
+/*	$OpenBSD: loadfile_machdep.h,v 1.3 2008/06/26 05:42:12 ray Exp $ */
 /*	$NetBSD: loadfile_machdep.h,v 1.2 2001/10/31 17:20:49 thorpej Exp $	 */
 
 /*-
@@ -16,13 +16,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -37,15 +30,11 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef _SGIMIPS_LOADFILE_MACHDEP_H_
-#define _SGIMIPS_LOADFILE_MACHDEP_H_
+#define BOOT_ELF
+#define ELFSIZE	64
 
-#define BOOT_AOUT
-#define BOOT_ECOFF
-#define BOOT_ELF32
-
-#define LOAD_KERNEL	(LOAD_ALL & ~LOAD_TEXTA)
-#define COUNT_KERNEL	(COUNT_ALL & ~COUNT_TEXTA)
+#define LOAD_KERNEL		(LOAD_ALL & ~LOAD_TEXTA)
+#define COUNT_KERNEL		(COUNT_ALL & ~COUNT_TEXTA)
 
 #define LOADADDR(a)		(((u_long)(a)) + offset)
 #define ALIGNENTRY(a)		((u_long)(a))
@@ -59,5 +48,3 @@
 #define ALLOC(a)		alloc(a)
 #define FREE(a, b)		free(a, b)
 #define OKMAGIC(a)		((a) == OMAGIC)
-
-#endif	/* !_SGIMIPS_LOADFILE_MACHDEP_H_ */

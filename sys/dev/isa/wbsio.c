@@ -1,4 +1,4 @@
-/*	$OpenBSD: wbsio.c,v 1.1 2008/02/17 15:04:08 kettenis Exp $	*/
+/*	$OpenBSD: wbsio.c,v 1.4 2008/04/08 18:48:43 kettenis Exp $	*/
 /*
  * Copyright (c) 2008 Mark Kettenis <kettenis@openbsd.org>
  *
@@ -198,14 +198,23 @@ wbsio_attach(struct device *parent, struct device *self, void *aux)
 	/* Select HM logical device */
 	wbsio_conf_write(sc->sc_iot, sc->sc_ioh, WBSIO_LDN, WBSIO_LDN_HM);
 
+	/*
+	 * The address should be 8-byte aligned, but it seems some
+	 * BIOSes ignore this.  They get away with it, because
+	 * Apparently the hardware simply ignores the lower three
+	 * bits.  We do the same here.
+	 */
 	reg0 = wbsio_conf_read(sc->sc_iot, sc->sc_ioh, WBSIO_HM_ADDR_LSB);
 	reg1 = wbsio_conf_read(sc->sc_iot, sc->sc_ioh, WBSIO_HM_ADDR_MSB);
-	iobase = (reg1 << 8) | reg0;
+	iobase = (reg1 << 8) | (reg0 & ~0x7);
 
 	printf("\n");
 
 	/* Escape from configuration mode */
 	wbsio_conf_disable(sc->sc_iot, sc->sc_ioh);
+
+	if (iobase == 0)
+		return;
 
 	nia = *ia;
 	nia.ia_iobase = iobase;
@@ -213,10 +222,12 @@ wbsio_attach(struct device *parent, struct device *self, void *aux)
 }
 
 int
-wbsio_print(void *aux, const char *isa)
+wbsio_print(void *aux, const char *pnp)
 {
 	struct isa_attach_args *ia = aux;
 
+	if (pnp)
+		printf("%s", pnp);
 	if (ia->ia_iosize)
 		printf(" port 0x%x", ia->ia_iobase);
 	if (ia->ia_iosize > 1)

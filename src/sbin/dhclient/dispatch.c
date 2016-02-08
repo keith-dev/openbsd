@@ -1,4 +1,4 @@
-/*	$OpenBSD: dispatch.c,v 1.40 2007/11/12 10:14:40 dlg Exp $	*/
+/*	$OpenBSD: dispatch.c,v 1.42 2008/05/26 03:11:49 deraadt Exp $	*/
 
 /*
  * Copyright 2004 Henning Brauer <henning@openbsd.org>
@@ -50,8 +50,6 @@
 struct timeout *timeouts;
 static struct timeout *free_timeouts;
 static int interfaces_invalidated;
-
-static int interface_status(void);
 
 /*
  * Use getifaddrs() to get a list of all the attached interfaces.  For
@@ -133,6 +131,9 @@ dispatch(void)
 		 * a timeout registered, time out the select call then.
 		 */
 another:
+		if (!ifi->linkstat)
+			interfaces_invalidated = 0;
+
 		if (timeouts) {
 			struct timeout *t;
 
@@ -181,7 +182,8 @@ another:
 		}
 
 		if ((fds[0].revents & (POLLIN | POLLHUP))) {
-			if (ifi && ifi->rfdesc != -1)
+			if (ifi->linkstat &&
+			    ifi && ifi->rfdesc != -1)
 				got_one();
 		}
 		if ((fds[1].revents & (POLLIN | POLLHUP))) {
@@ -205,7 +207,7 @@ got_one(void)
 		warning("receive_packet failed on %s: %s", ifi->name,
 		    strerror(errno));
 		ifi->errors++;
-		if ((!interface_status()) ||
+		if ((!interface_status(ifi->name)) ||
 		    (ifi->noifmedia && ifi->errors > 20)) {
 			/* our interface has gone away. */
 			warning("Interface %s no longer appears valid.",
@@ -282,17 +284,19 @@ interface_link_forcedown(char *ifname)
 }
 
 int
-interface_status(void)
+interface_status(char *ifname)
 {
-	char *ifname = ifi->name;
-	int ifsock = ifi->rfdesc;
 	struct ifreq ifr;
 	struct ifmediareq ifmr;
+	int sock;
+
+	if ((sock = socket(AF_INET, SOCK_DGRAM, 0)) == -1)
+		error("Can't create socket");
 
 	/* get interface flags */
 	memset(&ifr, 0, sizeof(ifr));
 	strlcpy(ifr.ifr_name, ifname, sizeof(ifr.ifr_name));
-	if (ioctl(ifsock, SIOCGIFFLAGS, &ifr) < 0) {
+	if (ioctl(sock, SIOCGIFFLAGS, &ifr) < 0) {
 		warning("ioctl(SIOCGIFFLAGS) on %s: %m", ifname);
 		goto inactive;
 	}
@@ -309,7 +313,7 @@ interface_status(void)
 		goto active;
 	memset(&ifmr, 0, sizeof(ifmr));
 	strlcpy(ifmr.ifm_name, ifname, sizeof(ifmr.ifm_name));
-	if (ioctl(ifsock, SIOCGIFMEDIA, (caddr_t)&ifmr) < 0) {
+	if (ioctl(sock, SIOCGIFMEDIA, (caddr_t)&ifmr) < 0) {
 		/*
 		 * EINVAL or ENOTTY simply means that the interface
 		 * does not support the SIOCGIFMEDIA ioctl. We regard it alive.
@@ -321,20 +325,16 @@ interface_status(void)
 		goto active;
 	}
 	if (ifmr.ifm_status & IFM_AVALID) {
-		switch (ifmr.ifm_active & IFM_NMASK) {
-		case IFM_ETHER:
-			if (ifmr.ifm_status & IFM_ACTIVE)
-				goto active;
-			else
-				goto inactive;
-			break;
-		default:
+		if (ifmr.ifm_status & IFM_ACTIVE)
+			goto active;
+		else
 			goto inactive;
-		}
 	}
 inactive:
+	close(sock);
 	return (0);
 active:
+	close(sock);
 	return (1);
 }
 
@@ -442,12 +442,10 @@ interface_link_status(char *ifname)
 	close(sock);
 
 	if (ifmr.ifm_status & IFM_AVALID) {
-		if ((ifmr.ifm_active & IFM_NMASK) == IFM_ETHER) {
-			if (ifmr.ifm_status & IFM_ACTIVE)
-				return (1);
-			else
-				return (0);
-		}
+		if (ifmr.ifm_status & IFM_ACTIVE)
+			return (1);
+		else
+			return (0);
 	}
 	return (1);
 }

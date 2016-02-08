@@ -1,4 +1,4 @@
-/*	$OpenBSD: pci_machdep.c,v 1.34 2008/01/19 11:13:43 kettenis Exp $	*/
+/*	$OpenBSD: pci_machdep.c,v 1.36 2008/03/24 21:24:30 kettenis Exp $	*/
 /*	$NetBSD: pci_machdep.c,v 1.22 2001/07/20 00:07:13 eeh Exp $	*/
 
 /*
@@ -248,12 +248,12 @@ sparc64_pci_enumerate_bus(struct pci_softc *sc,
 	 * ecache line and the streaming cache (64 byte).
 	 */
 	cacheline = max(cacheinfo.ec_linesize, 64);
-	KASSERT((cacheline/64)*64 == cacheline &&
-	    (cacheline/cacheinfo.ec_linesize)*cacheinfo.ec_linesize == cacheline &&
-	    (cacheline/4)*4 == cacheline);
 
 	for (node = OF_child(node); node != 0 && node != -1;
 	     node = OF_peer(node)) {
+		if (!checkstatus(node))
+			continue;
+
 		name[0] = name[29] = 0;
 		OF_getprop(node, "name", name, sizeof(name));
 

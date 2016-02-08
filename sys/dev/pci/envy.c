@@ -1,4 +1,4 @@
-/*	$OpenBSD: envy.c,v 1.7 2008/02/21 01:41:04 ratchov Exp $	*/
+/*	$OpenBSD: envy.c,v 1.9 2008/04/30 17:31:26 ratchov Exp $	*/
 /*
  * Copyright (c) 2007 Alexandre Ratchov <alex@caoua.org>
  *
@@ -120,6 +120,7 @@ struct audio_hw_if envy_hw_if = {
 	envy_get_props,		/* get_props */
 	envy_trigger_output,	/* trigger_output */
 	envy_trigger_input,	/* trigger_input */
+	NULL
 };
 
 /*
@@ -812,7 +813,7 @@ envy_halt_output(void *self)
 
 	st = bus_space_read_1(sc->mt_iot, sc->mt_ioh, ENVY_MT_CTL);
 	st &= ~ENVY_MT_CTL_PSTART;
-	bus_space_write_1(sc->mt_iot, sc->mt_ioh, ENVY_MT_CTL, 0);
+	bus_space_write_1(sc->mt_iot, sc->mt_ioh, ENVY_MT_CTL, st);
 	return 0;
 }
 
@@ -824,7 +825,7 @@ envy_halt_input(void *self)
 
 	st = bus_space_read_1(sc->mt_iot, sc->mt_ioh, ENVY_MT_CTL);
 	st &= ~ENVY_MT_CTL_RSTART;
-	bus_space_write_1(sc->mt_iot, sc->mt_ioh, ENVY_MT_CTL, 0);
+	bus_space_write_1(sc->mt_iot, sc->mt_ioh, ENVY_MT_CTL, st);
 	return 0;
 }
 

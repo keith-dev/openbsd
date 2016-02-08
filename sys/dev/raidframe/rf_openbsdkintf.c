@@ -1,4 +1,4 @@
-/* $OpenBSD: rf_openbsdkintf.c,v 1.45 2007/11/05 16:09:49 krw Exp $	*/
+/* $OpenBSD: rf_openbsdkintf.c,v 1.50 2008/07/23 16:24:43 beck Exp $	*/
 /* $NetBSD: rf_netbsdkintf.c,v 1.109 2001/07/27 03:30:07 oster Exp $	*/
 
 /*-
@@ -16,13 +16,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	  This product includes software developed by the NetBSD
- *	  Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -270,7 +263,7 @@ struct raid_softc **raid_scPtrs;
 
 void rf_shutdown_hook(RF_ThreadArg_t);
 void raidgetdefaultlabel(RF_Raid_t *, struct raid_softc *, struct disklabel *);
-void raidgetdisklabel(dev_t, struct disklabel *, int);
+void raidgetdisklabel(dev_t, struct raid_softc *, struct disklabel *, int);
 
 int  raidlock(struct raid_softc *);
 void raidunlock(struct raid_softc *);
@@ -620,7 +613,7 @@ raidopen(dev_t dev, int flags, int fmt, struct proc *p)
 
 
 	if ((rs->sc_flags & RAIDF_INITED) && (rs->sc_dkdev.dk_openmask == 0))
-		raidgetdisklabel(dev, rs->sc_dkdev.dk_label, 0);
+		raidgetdisklabel(dev, rs, rs->sc_dkdev.dk_label, 0);
 
 	/* Make sure that this partition exists. */
 
@@ -768,13 +761,12 @@ raidstrategy(struct buf *bp)
 	 * error, the bounds check will flag that for us.
 	 */
 	wlabel = rs->sc_flags & (RAIDF_WLABEL | RAIDF_LABELLING);
-	if (DISKPART(bp->b_dev) != RAW_PART)
-		if (bounds_check_with_label(bp, lp, wlabel) <= 0) {
-			db1_printf(("Bounds check failed!!:%d %d\n",
-			    (int)bp->b_blkno, (int)wlabel));
-			biodone(bp);
-			goto raidstrategy_end;
-		}
+	if (bounds_check_with_label(bp, lp, wlabel) <= 0) {
+		db1_printf(("Bounds check failed!!:%d %d\n",
+		    (int)bp->b_blkno, (int)wlabel));
+		biodone(bp);
+		goto raidstrategy_end;
+	}
 
 	bp->b_resid = 0;
 
@@ -833,6 +825,7 @@ raidioctl(dev_t dev, u_long cmd, caddr_t data, int flag, struct proc *p)
 	int error = 0;
 	int part, pmask;
 	struct raid_softc *rs;
+	struct disklabel *lp;
 	RF_Config_t *k_cfg, *u_cfg;
 	RF_Raid_t *raidPtr;
 	RF_RaidDisk_t *diskPtr;
@@ -876,6 +869,7 @@ raidioctl(dev_t dev, u_long cmd, caddr_t data, int flag, struct proc *p)
 	case DIOCWDINFO:
 	case DIOCGPART:
 	case DIOCWLABEL:
+	case DIOCRLDINFO:
 	case DIOCGPDINFO:
 	case RAIDFRAME_SHUTDOWN:
 	case RAIDFRAME_REWRITEPARITY:
@@ -1532,6 +1526,13 @@ raidioctl(dev_t dev, u_long cmd, caddr_t data, int flag, struct proc *p)
 	 * Add support for "regular" device ioctls here.
 	 */
 	switch (cmd) {
+	case DIOCRLDINFO:
+		lp = malloc(sizeof(*lp), M_TEMP, M_WAITOK);
+		raidgetdisklabel(dev, rs, lp, 0);
+		bcopy(lp, rs->sc_dkdev.dk_label, sizeof(*lp));
+		free(lp, M_TEMP);
+		break;
+
 	case DIOCGDINFO:
 		*(struct disklabel *)data = *(rs->sc_dkdev.dk_label);
 		break;
@@ -1577,7 +1578,7 @@ raidioctl(dev_t dev, u_long cmd, caddr_t data, int flag, struct proc *p)
 		break;
 
 	case DIOCGPDINFO:
-		raidgetdisklabel(dev, (struct disklabel *)data, 1);
+		raidgetdisklabel(dev, rs, (struct disklabel *)data, 1);
 		break;
 
 	default:
@@ -2101,10 +2102,10 @@ raidgetdefaultlabel(RF_Raid_t *raidPtr, struct raid_softc *rs,
  * If one is not present, fake one up.
  */
 void
-raidgetdisklabel(dev_t dev, struct disklabel *lp, int spoofonly)
+raidgetdisklabel(dev_t dev, struct raid_softc *rs, struct disklabel *lp,
+    int spoofonly)
 {
 	int unit = DISKUNIT(dev);
-	struct raid_softc *rs = &raid_softc[unit];
 	char *errstring;
 	RF_Raid_t *raidPtr;
 	int i;
@@ -2284,7 +2285,7 @@ raidread_component_label(dev_t dev, struct vnode *b_vp,
 	/* Get our ducks in a row for the read. */
 	bp->b_blkno = RF_COMPONENT_INFO_OFFSET / DEV_BSIZE;
 	bp->b_bcount = RF_COMPONENT_INFO_SIZE;
-	bp->b_flags |= B_READ;
+	bp->b_flags |= (B_READ | B_RAW);
  	bp->b_resid = RF_COMPONENT_INFO_SIZE / DEV_BSIZE;
 
 	(*bdevsw[major(bp->b_dev)].d_strategy)(bp);
@@ -2319,7 +2320,7 @@ raidwrite_component_label(dev_t dev, struct vnode *b_vp,
 	/* Get our ducks in a row for the write. */
 	bp->b_blkno = RF_COMPONENT_INFO_OFFSET / DEV_BSIZE;
 	bp->b_bcount = RF_COMPONENT_INFO_SIZE;
-	bp->b_flags |= B_WRITE;
+	bp->b_flags |= (B_WRITE | B_RAW);
  	bp->b_resid = RF_COMPONENT_INFO_SIZE / DEV_BSIZE;
 
 	memset(bp->b_data, 0, RF_COMPONENT_INFO_SIZE );

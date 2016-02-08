@@ -1,4 +1,4 @@
-/*	$OpenBSD: ums.c,v 1.26 2007/09/17 01:40:38 fgsch Exp $ */
+/*	$OpenBSD: ums.c,v 1.29 2008/06/26 05:42:19 ray Exp $ */
 /*	$NetBSD: ums.c,v 1.60 2003/03/11 16:44:00 augustss Exp $	*/
 
 /*
@@ -17,13 +17,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -80,11 +73,6 @@ int	umsdebug = 0;
 
 #define UMSUNIT(s)	(minor(s))
 
-#define PS2LBUTMASK	x01
-#define PS2RBUTMASK	x02
-#define PS2MBUTMASK	x04
-#define PS2BUTMASK 0x0f
-
 #define MAX_BUTTONS	16	/* must not exceed size of sc_buttons */
 
 struct ums_softc {
@@ -96,9 +84,12 @@ struct ums_softc {
 	int sc_enabled;
 
 	int flags;		/* device configuration */
-#define UMS_Z		0x01	/* z direction available */
+#define UMS_Z		0x01	/* Z direction available */
 #define UMS_SPUR_BUT_UP	0x02	/* spurious button up events */
 #define UMS_REVZ	0x04	/* Z-axis is reversed */
+#define UMS_W		0x08	/* W direction available */
+#define UMS_REVW	0x10	/* W-axis is reversed */
+#define UMS_LEADINGBYTE	0x20	/* Unknown leading byte */
 
 	int nbuttons;
 
@@ -166,7 +157,7 @@ ums_attach(struct device *parent, struct device *self, void *aux)
 	int size;
 	void *desc;
 	u_int32_t flags, quirks;
-	int i;
+	int i, wheel, twheel;
 	struct hid_location loc_btn;
 
 	sc->sc_hdev.sc_intr = ums_intr;
@@ -178,6 +169,8 @@ ums_attach(struct device *parent, struct device *self, void *aux)
 		sc->flags |= UMS_REVZ;
 	if (quirks & UQ_SPUR_BUT_UP)
 		sc->flags |= UMS_SPUR_BUT_UP;
+	if (quirks & UQ_MS_LEADING_BYTE)
+		sc->flags |= UMS_LEADINGBYTE;
 
 	uhidev_get_report_desc(uha->parent, &desc, &size);
 
@@ -205,9 +198,22 @@ ums_attach(struct device *parent, struct device *self, void *aux)
 		return;
 	}
 
-	/* Try the wheel as Z activator first */
-	if (hid_locate(desc, size, HID_USAGE2(HUP_GENERIC_DESKTOP, HUG_WHEEL),
-	    uha->reportid, hid_input, &sc->sc_loc_z, &flags)) {
+	/*
+	 * Try to guess the Z activator: check WHEEL, TWHEEL, and Z,
+	 * in that order.
+	 */
+
+	wheel = hid_locate(desc, size,
+	    HID_USAGE2(HUP_GENERIC_DESKTOP, HUG_WHEEL),
+	    uha->reportid, hid_input, &sc->sc_loc_z, &flags);
+	if (wheel == 0)
+		twheel = hid_locate(desc, size,
+		    HID_USAGE2(HUP_GENERIC_DESKTOP, HUG_TWHEEL),
+		    uha->reportid, hid_input, &sc->sc_loc_z, &flags);
+	else
+		twheel = 0;
+
+	if (wheel || twheel) {
 		if ((flags & MOUSE_FLAGS_MASK) != MOUSE_FLAGS) {
 			DPRINTF(("\n%s: Wheel report 0x%04x not supported\n",
 				sc->sc_hdev.sc_dev.dv_xname, flags));
@@ -230,6 +236,8 @@ ums_attach(struct device *parent, struct device *self, void *aux)
 				/* Bad Z coord, ignore it */
 				sc->sc_loc_w.size = 0;
 			}
+			else
+				sc->flags |= UMS_W;
 		}
 	} else if (hid_locate(desc, size,
 	    HID_USAGE2(HUP_GENERIC_DESKTOP, HUG_Z),
@@ -243,6 +251,21 @@ ums_attach(struct device *parent, struct device *self, void *aux)
 		}
 	}
 
+	/*
+	 * The Microsoft Wireless Intellimouse 2.0 reports its wheel
+	 * using 0x0048 (I've called it HUG_TWHEEL) and seems to expect
+	 * us to know that the byte after the wheel is the tilt axis.
+	 * There are no other HID axis descriptors other than X, Y and
+	 * TWHEEL, so we report TWHEEL on the W axis.
+	 */
+	if (twheel) {
+		sc->sc_loc_w = sc->sc_loc_z;
+		sc->sc_loc_w.pos = sc->sc_loc_w.pos + 8;
+		sc->flags |= UMS_W | UMS_LEADINGBYTE;
+		/* Wheels need their axis reversed. */
+		sc->flags ^= UMS_REVW;
+	}
+
 	/* figure out the number of buttons */
 	for (i = 1; i <= MAX_BUTTONS; i++)
 		if (!hid_locate(desc, size, HID_USAGE2(HUP_BUTTON, i),
@@ -250,9 +273,60 @@ ums_attach(struct device *parent, struct device *self, void *aux)
 			break;
 	sc->nbuttons = i - 1;
 
-	printf(": %d button%s%s\n",
-	    sc->nbuttons, sc->nbuttons == 1 ? "" : "s",
-	    sc->flags & UMS_Z ? " and Z dir." : "");
+	/*
+	 * The Microsoft Wireless Notebook Optical Mouse seems to be in worse
+	 * shape than the Wireless Intellimouse 2.0, as its X, Y, wheel, and
+	 * all of its other button positions are all off. It also reports that
+	 * it has two addional buttons and a tilt wheel.
+	 */
+	if (quirks & UQ_MS_BAD_CLASS) {
+		/* UMS_LEADINGBYTE cleared on purpose */
+		sc->flags = UMS_Z | UMS_SPUR_BUT_UP;
+		sc->nbuttons = 3;
+		/* XXX change sc_hdev isize to 5? */
+		/* 1st byte of descriptor report contains garbage */
+		sc->sc_loc_x.pos = 16;
+		sc->sc_loc_y.pos = 24;
+		sc->sc_loc_z.pos = 32;
+		sc->sc_loc_btn[0].pos = 8;
+		sc->sc_loc_btn[1].pos = 9;
+		sc->sc_loc_btn[2].pos = 10;
+	}
+
+	/*
+	 * The Microsoft Wireless Notebook Optical Mouse 3000 Model 1049 has
+	 * five Report IDs: 19, 23, 24, 17, 18 (in the order they appear in
+	 * report descriptor), it seems that report 17 contains the necessary
+	 * mouse information (3-buttons, X, Y, wheel) so we specify it
+	 * manually.
+	 */
+	if (uaa->vendor == USB_VENDOR_MICROSOFT &&
+	    uaa->product == USB_PRODUCT_MICROSOFT_WLNOTEBOOK3) {
+		sc->flags = UMS_Z;
+		sc->nbuttons = 3;
+		/* XXX change sc_hdev isize to 5? */
+		sc->sc_loc_x.pos = 8;
+		sc->sc_loc_y.pos = 16;
+		sc->sc_loc_z.pos = 24;
+		sc->sc_loc_btn[0].pos = 0;
+		sc->sc_loc_btn[1].pos = 1;
+		sc->sc_loc_btn[2].pos = 2;
+	}
+
+	printf(": %d button%s",
+	    sc->nbuttons, sc->nbuttons <= 1 ? "" : "s");
+	switch (sc->flags & (UMS_Z | UMS_W)) {
+	case UMS_Z:
+		printf(", Z dir");
+		break;
+	case UMS_W:
+		printf(", W dir");
+		break;
+	case UMS_Z | UMS_W:
+		printf(", Z and W dir");
+		break;
+	}
+	printf("\n");
 
 	for (i = 1; i <= sc->nbuttons; i++)
 		hid_locate(desc, size, HID_USAGE2(HUP_BUTTON, i),
@@ -268,6 +342,9 @@ ums_attach(struct device *parent, struct device *self, void *aux)
 	if (sc->flags & UMS_Z)
 		DPRINTF(("ums_attach: Z\t%d/%d\n",
 			 sc->sc_loc_z.pos, sc->sc_loc_z.size));
+	if (sc->flags & UMS_W)
+		DPRINTF(("ums_attach: W\t%d/%d\n",
+			 sc->sc_loc_w.pos, sc->sc_loc_w.size));
 	for (i = 1; i <= sc->nbuttons; i++) {
 		DPRINTF(("ums_attach: B%d\t%d/%d\n",
 			 i, sc->sc_loc_btn[i-1].pos,sc->sc_loc_btn[i-1].size));
@@ -315,9 +392,10 @@ ums_detach(struct device *self, int flags)
 }
 
 void
-ums_intr(struct uhidev *addr, void *ibuf, u_int len)
+ums_intr(struct uhidev *addr, void *buf, u_int len)
 {
 	struct ums_softc *sc = (struct ums_softc *)addr;
+	u_char *ibuf = (u_char *)buf;
 	int dx, dy, dz, dw;
 	u_int32_t buttons = 0;
 	int i;
@@ -325,12 +403,36 @@ ums_intr(struct uhidev *addr, void *ibuf, u_int len)
 
 	DPRINTFN(5,("ums_intr: len=%d\n", len));
 
+	/*
+	 * The Microsoft Wireless Intellimouse 2.0 sends one extra leading
+	 * byte of data compared to most USB mice.  This byte frequently
+	 * switches from 0x01 (usual state) to 0x02.  It may be used to
+	 * report non-standard events (such as battery life).  However,
+	 * at the same time, it generates a left click event on the
+	 * button byte, where there shouldn't be any.  We simply discard
+	 * the packet in this case.
+	 *
+	 * This problem affects the MS Wireless Notebook Optical Mouse, too.
+	 * However, the leading byte for this mouse is normally 0x11, and
+	 * the phantom mouse click occurs when it's 0x14.
+	 */
+	if (sc->flags & UMS_LEADINGBYTE) {
+		if (*ibuf++ == 0x02)
+			return;
+		/* len--; */
+	} else if (sc->flags & UMS_SPUR_BUT_UP) {
+		if (*ibuf == 0x14 || *ibuf == 0x15)
+			return;
+	}
+
 	dx =  hid_get_data(ibuf, &sc->sc_loc_x);
 	dy = -hid_get_data(ibuf, &sc->sc_loc_y);
 	dz =  hid_get_data(ibuf, &sc->sc_loc_z);
 	dw =  hid_get_data(ibuf, &sc->sc_loc_w);
 	if (sc->flags & UMS_REVZ)
 		dz = -dz;
+	if (sc->flags & UMS_REVW)
+		dw = -dw;
 	for (i = 0; i < sc->nbuttons; i++)
 		if (hid_get_data(ibuf, &sc->sc_loc_btn[i]))
 			buttons |= (1 << UMS_BUT(i));

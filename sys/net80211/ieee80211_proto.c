@@ -1,9 +1,10 @@
-/*	$OpenBSD: ieee80211_proto.c,v 1.21 2007/10/08 17:31:24 mglocker Exp $	*/
+/*	$OpenBSD: ieee80211_proto.c,v 1.28 2008/07/27 14:21:15 damien Exp $	*/
 /*	$NetBSD: ieee80211_proto.c,v 1.8 2004/04/30 23:58:20 dyoung Exp $	*/
 
 /*-
  * Copyright (c) 2001 Atsushi Onoe
  * Copyright (c) 2002, 2003 Sam Leffler, Errno Consulting
+ * Copyright (c) 2008 Damien Bergamini
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -62,6 +63,9 @@
 #endif
 
 #include <net80211/ieee80211_var.h>
+#include <net80211/ieee80211_priv.h>
+
+#include <dev/rndvar.h>
 
 const char * const ieee80211_mgt_subtype_name[] = {
 	"assoc_req",	"assoc_resp",	"reassoc_req",	"reassoc_resp",
@@ -356,6 +360,167 @@ ieee80211_set_shortslottime(struct ieee80211com *ic, int on)
 		ic->ic_updateslot(ic);
 }
 
+/*
+ * Initiate a group key handshake with a node.
+ */
+static void
+ieee80211_node_gtk_rekey(void *arg, struct ieee80211_node *ni)
+{
+	struct ieee80211com *ic = arg;
+
+	if (ni->ni_state != IEEE80211_STA_ASSOC ||
+	    ni->ni_rsn_gstate != RSNA_IDLE)
+		return;
+
+	/* initiate a group key handshake with STA */
+	if (ieee80211_send_group_msg1(ic, ni) == 0) {
+		ni->ni_flags |= IEEE80211_NODE_REKEY;
+		ic->ic_rsn_keydonesta++;
+	}
+}
+
+/*
+ * This function is called in HostAP mode when the group key needs to be
+ * changed.
+ */
+void
+ieee80211_setkeys(struct ieee80211com *ic)
+{
+	u_int8_t gtk[IEEE80211_PMK_LEN];
+	u_int8_t kid;
+
+	/* Swap(GM, GN) */
+	kid = (ic->ic_def_txkey == 1) ? 2 : 1;
+
+	arc4random_buf(gtk, sizeof(gtk));
+	ieee80211_map_gtk(gtk, ic->ic_bss->ni_rsngroupcipher, kid, 1, 0,
+	    &ic->ic_nw_keys[kid]);
+
+	ic->ic_rsn_keydonesta = 0;
+	ieee80211_iterate_nodes(ic, ieee80211_node_gtk_rekey, ic);
+}
+
+/*
+ * The group key handshake has been completed with all associated stations.
+ */
+void
+ieee80211_setkeysdone(struct ieee80211com *ic)
+{
+	u_int8_t kid;
+
+	/* install GTK */
+	kid = (ic->ic_def_txkey == 1) ? 2 : 1;
+	if ((*ic->ic_set_key)(ic, ic->ic_bss, &ic->ic_nw_keys[kid]) == 0)
+		ic->ic_def_txkey = kid;
+}
+
+/*
+ * Group key lifetime has expired, update it.
+ */
+void
+ieee80211_gtk_rekey_timeout(void *arg)
+{
+	struct ieee80211com *ic = arg;
+	int s;
+
+	s = splnet();
+	ieee80211_setkeys(ic);
+	splx(s);
+
+	/* re-schedule a GTK rekeying after 3600s */
+	timeout_add(&ic->ic_rsn_timeout, 3600 * hz);
+}
+
+void
+ieee80211_auth_open(struct ieee80211com *ic, const struct ieee80211_frame *wh,
+    struct ieee80211_node *ni, struct ieee80211_rxinfo *rxi, u_int16_t seq,
+    u_int16_t status)
+{
+	struct ifnet *ifp = &ic->ic_if;
+	switch (ic->ic_opmode) {
+	case IEEE80211_M_IBSS:
+		if (ic->ic_state != IEEE80211_S_RUN ||
+		    seq != IEEE80211_AUTH_OPEN_REQUEST) {
+			DPRINTF(("discard auth from %s; state %u, seq %u\n",
+			    ether_sprintf((u_int8_t *)wh->i_addr2),
+			    ic->ic_state, seq));
+			ic->ic_stats.is_rx_bad_auth++;
+			return;
+		}
+		ieee80211_new_state(ic, IEEE80211_S_AUTH,
+		    wh->i_fc[0] & IEEE80211_FC0_SUBTYPE_MASK);
+		break;
+
+	case IEEE80211_M_AHDEMO:
+		/* should not come here */
+		break;
+
+	case IEEE80211_M_HOSTAP:
+		if (ic->ic_state != IEEE80211_S_RUN ||
+		    seq != IEEE80211_AUTH_OPEN_REQUEST) {
+			DPRINTF(("discard auth from %s; state %u, seq %u\n",
+			    ether_sprintf((u_int8_t *)wh->i_addr2),
+			    ic->ic_state, seq));
+			ic->ic_stats.is_rx_bad_auth++;
+			return;
+		}
+		if (ni == ic->ic_bss) {
+			ni = ieee80211_alloc_node(ic, wh->i_addr2);
+			if (ni == NULL) {
+				ic->ic_stats.is_rx_nodealloc++;
+				return;
+			}
+			IEEE80211_ADDR_COPY(ni->ni_bssid, ic->ic_bss->ni_bssid);
+			ni->ni_rssi = rxi->rxi_rssi;
+			ni->ni_rstamp = rxi->rxi_tstamp;
+			ni->ni_chan = ic->ic_bss->ni_chan;
+		}
+		IEEE80211_SEND_MGMT(ic, ni,
+			IEEE80211_FC0_SUBTYPE_AUTH, seq + 1);
+		if (ifp->if_flags & IFF_DEBUG)
+			printf("%s: station %s %s authenticated (open)\n",
+			    ifp->if_xname,
+			    ether_sprintf((u_int8_t *)ni->ni_macaddr),
+			    ni->ni_state != IEEE80211_STA_CACHE ?
+			    "newly" : "already");
+		ieee80211_node_newstate(ni, IEEE80211_STA_AUTH);
+		break;
+
+	case IEEE80211_M_STA:
+		if (ic->ic_state != IEEE80211_S_AUTH ||
+		    seq != IEEE80211_AUTH_OPEN_RESPONSE) {
+			ic->ic_stats.is_rx_bad_auth++;
+			DPRINTF(("discard auth from %s; state %u, seq %u\n",
+			    ether_sprintf((u_int8_t *)wh->i_addr2),
+			    ic->ic_state, seq));
+			return;
+		}
+		if (ic->ic_flags & IEEE80211_F_RSNON) {
+			/* XXX not here! */
+			ic->ic_bss->ni_port_valid = 0;
+			ic->ic_bss->ni_replaycnt_ok = 0;
+			(*ic->ic_delete_key)(ic, ic->ic_bss,
+			    &ic->ic_bss->ni_pairwise_key);
+		}
+		if (status != 0) {
+			if (ifp->if_flags & IFF_DEBUG)
+				printf("%s: open authentication failed "
+				    "(reason %d) for %s\n", ifp->if_xname,
+				    status,
+				    ether_sprintf((u_int8_t *)wh->i_addr3));
+			if (ni != ic->ic_bss)
+				ni->ni_fails++;
+			ic->ic_stats.is_rx_auth_fail++;
+			return;
+		}
+		ieee80211_new_state(ic, IEEE80211_S_ASSOC,
+		    wh->i_fc[0] & IEEE80211_FC0_SUBTYPE_MASK);
+		break;
+	case IEEE80211_M_MONITOR:
+		break;
+	}
+}
+
 int
 ieee80211_newstate(struct ieee80211com *ic, enum ieee80211_state nstate,
     int mgt)
@@ -367,8 +532,8 @@ ieee80211_newstate(struct ieee80211com *ic, enum ieee80211_state nstate,
 	int s;
 
 	ostate = ic->ic_state;
-	IEEE80211_DPRINTF(("%s: %s -> %s\n", __func__,
-	    ieee80211_state_name[ostate], ieee80211_state_name[nstate]));
+	DPRINTF(("%s -> %s\n", ieee80211_state_name[ostate],
+	    ieee80211_state_name[nstate]));
 	ic->ic_state = nstate;			/* state transition */
 	ni = ic->ic_bss;			/* NB: no reference held */
 	if (ostate == IEEE80211_S_RUN)
@@ -422,13 +587,11 @@ ieee80211_newstate(struct ieee80211com *ic, enum ieee80211_state nstate,
 			/* FALLTHROUGH */
 		case IEEE80211_S_AUTH:
 		case IEEE80211_S_SCAN:
+			if (ic->ic_opmode == IEEE80211_M_HOSTAP)
+				timeout_del(&ic->ic_rsn_timeout);
 			ic->ic_mgt_timer = 0;
 			IF_PURGE(&ic->ic_mgtq);
 			IF_PURGE(&ic->ic_pwrsaveq);
-			if (ic->ic_wep_ctx != NULL) {
-				free(ic->ic_wep_ctx, M_DEVBUF);
-				ic->ic_wep_ctx = NULL;
-			}
 			ieee80211_free_allnodes(ic);
 			break;
 		}
@@ -485,8 +648,7 @@ ieee80211_newstate(struct ieee80211com *ic, enum ieee80211_state nstate,
 	case IEEE80211_S_AUTH:
 		switch (ostate) {
 		case IEEE80211_S_INIT:
-			IEEE80211_DPRINTF(("%s: invalid transition\n",
-				__func__));
+			DPRINTF(("invalid transition\n"));
 			break;
 		case IEEE80211_S_SCAN:
 			IEEE80211_SEND_MGMT(ic, ni,
@@ -526,8 +688,7 @@ ieee80211_newstate(struct ieee80211com *ic, enum ieee80211_state nstate,
 		case IEEE80211_S_INIT:
 		case IEEE80211_S_SCAN:
 		case IEEE80211_S_ASSOC:
-			IEEE80211_DPRINTF(("%s: invalid transition\n",
-				__func__));
+			DPRINTF(("invalid transition\n"));
 			break;
 		case IEEE80211_S_AUTH:
 			IEEE80211_SEND_MGMT(ic, ni,
@@ -545,8 +706,7 @@ ieee80211_newstate(struct ieee80211com *ic, enum ieee80211_state nstate,
 		case IEEE80211_S_INIT:
 		case IEEE80211_S_AUTH:
 		case IEEE80211_S_RUN:
-			IEEE80211_DPRINTF(("%s: invalid transition\n",
-				__func__));
+			DPRINTF(("invalid transition\n"));
 			break;
 		case IEEE80211_S_SCAN:		/* adhoc/hostap mode */
 		case IEEE80211_S_ASSOC:		/* infra mode */
@@ -589,77 +749,18 @@ ieee80211_set_link_state(struct ieee80211com *ic, int nstate)
 	struct ifnet *ifp = &ic->ic_if;
 
 	switch (ic->ic_opmode) {
-	case IEEE80211_M_AHDEMO:
-		/* FALLTHROUGH */
-	case IEEE80211_M_STA:
-		if (ifp->if_link_state != nstate) {
-			if (nstate == LINK_STATE_UP) {
-				/* Change link state to UP. */
-				ifp->if_link_state = LINK_STATE_UP;
-				if_link_state_change(ifp);
-				if (ifp->if_flags & IFF_DEBUG) {
-					printf("%s: set STA link state UP\n",
-					    ifp->if_xname);
-				}
-			}
-
-			if (nstate == LINK_STATE_DOWN) {
-				/* Change link state to DOWN. */
-				ifp->if_link_state = LINK_STATE_DOWN;
-				if_link_state_change(ifp);
-				if (ifp->if_flags & IFF_DEBUG) {
-					printf("%s: set STA link state DOWN\n",
-					    ifp->if_xname);
-				}
-			}
-
-			if (nstate == LINK_STATE_UNKNOWN) {
-				/* Change link state to UNKNOWN. */
-				ifp->if_link_state = LINK_STATE_UNKNOWN;
-				if_link_state_change(ifp);
-				if (ifp->if_flags & IFF_DEBUG) {
-					printf("%s: set STA link state UNKNOWN\n",
-					    ifp->if_xname);
-				}
-			}
-		}
-		break;
 	case IEEE80211_M_IBSS:
-		/* Always change link state to UNKNOWN in IBSS mode. */
-		if (ifp->if_link_state != LINK_STATE_UNKNOWN) {
-			ifp->if_link_state = LINK_STATE_UNKNOWN;
-			if_link_state_change(ifp); 
-			if (ifp->if_flags & IFF_DEBUG) {
-				printf("%s: set IBSS link state UNKNOWN\n",
-				    ifp->if_xname);
-			}
-		}
-		break;
 	case IEEE80211_M_HOSTAP:
-		/* Always change link state to UNKNOWN in HOSTAP mode. */
-		if (ifp->if_link_state != LINK_STATE_UNKNOWN) {
-			ifp->if_link_state = LINK_STATE_UNKNOWN;
-			if_link_state_change(ifp);
-			if (ifp->if_flags & IFF_DEBUG) {
-				printf("%s: set HOSTAP link state UNKNOWN\n",
-				    ifp->if_xname);
-			}
-		}
+		nstate = LINK_STATE_UNKNOWN;
 		break;
 	case IEEE80211_M_MONITOR:
-		/* Always change link state to DOWN in MONITOR mode. */
-		if (ifp->if_link_state != LINK_STATE_DOWN) {
-			ifp->if_link_state = LINK_STATE_DOWN;
-			if_link_state_change(ifp);
-			if (ifp->if_flags & IFF_DEBUG) {
-				printf("%s: set MONITOR link state DOWN\n",
-				    ifp->if_xname);
-			}
-		}
+		nstate = LINK_STATE_DOWN;
 		break;
 	default:
-		printf("%s: can't set link state (unknown mediaopt)!\n",
-		    ifp->if_xname);
 		break;
+	}
+	if (nstate != ifp->if_link_state) {
+		ifp->if_link_state = nstate;
+		if_link_state_change(ifp);
 	}
 }

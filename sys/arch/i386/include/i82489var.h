@@ -1,4 +1,4 @@
-/*	$OpenBSD: i82489var.h,v 1.6 2007/05/26 22:09:17 weingart Exp $	*/
+/*	$OpenBSD: i82489var.h,v 1.9 2008/06/26 05:42:10 ray Exp $	*/
 /*	$NetBSD: i82489var.h,v 1.1.2.2 2000/02/21 18:46:14 sommerfeld Exp $	*/
 
 /*-
@@ -16,13 +16,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -102,18 +95,15 @@ extern void Xintrltimer(void);
 #define LAPIC_SOFTCLOCK_VECTOR		IPL_SOFTCLOCK
 #define LAPIC_SOFTNET_VECTOR		IPL_SOFTNET
 #define LAPIC_SOFTTTY_VECTOR		IPL_SOFTTTY
-#define LAPIC_SOFTAST_VECTOR		IPL_SOFTAST
 
 /*
  * Special IPI vectors. We can use IDT 0xf0 - 0xff for this.
  */
 #define LAPIC_IPI_OFFSET		0xf0
-#define LAPIC_IPI_AST			(LAPIC_IPI_OFFSET + 0)
-#define LAPIC_IPI_INVLTLB		(LAPIC_IPI_OFFSET + 1)
-#define LAPIC_IPI_INVLPG		(LAPIC_IPI_OFFSET + 2)
-#define LAPIC_IPI_INVLRANGE		(LAPIC_IPI_OFFSET + 3)
+#define LAPIC_IPI_INVLTLB		(LAPIC_IPI_OFFSET + 0)
+#define LAPIC_IPI_INVLPG		(LAPIC_IPI_OFFSET + 1)
+#define LAPIC_IPI_INVLRANGE		(LAPIC_IPI_OFFSET + 2)
 
-extern void Xintripi_ast(void);
 extern void Xintripi_invltlb(void);
 extern void Xintripi_invlpg(void);
 extern void Xintripi_invlrange(void);
@@ -121,7 +111,6 @@ extern void Xintripi_invlrange(void);
 extern void Xintrsoftclock(void);
 extern void Xintrsoftnet(void);
 extern void Xintrsofttty(void);
-extern void Xintrsoftast(void);
 
 extern void (*apichandler[])(void);
 

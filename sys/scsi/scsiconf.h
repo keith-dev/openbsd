@@ -1,4 +1,4 @@
-/*	$OpenBSD: scsiconf.h,v 1.90 2007/12/29 00:45:26 dlg Exp $	*/
+/*	$OpenBSD: scsiconf.h,v 1.94 2008/07/22 01:01:31 dlg Exp $	*/
 /*	$NetBSD: scsiconf.h,v 1.35 1997/04/02 02:29:38 mycroft Exp $	*/
 
 /*
@@ -55,6 +55,26 @@
 #include <sys/workq.h>
 #include <machine/cpu.h>
 #include <scsi/scsi_debug.h>
+
+#define DEVID_NONE	0
+#define DEVID_NAA	1
+#define DEVID_EUI	2
+#define DEVID_T10	3
+
+struct devid {
+	int		 d_type;
+	u_int		 d_len;
+	u_int8_t	*d_id;
+};
+
+#define DEVID_CMP(_a, _b) (				\
+	(_a) != NULL &&					\
+	(_b) != NULL &&					\
+	(_a)->d_type != DEVID_NONE &&			\
+	(_a)->d_type == (_b)->d_type &&			\
+	(_a)->d_len == (_b)->d_len &&			\
+	bcmp((_a)->d_id, (_b)->d_id, (_a)->d_len) == 0	\
+)
 
 /*
  * The following documentation tries to describe the relationship between the
@@ -169,7 +189,6 @@ struct scsi_link {
 #define	ADEV_NOSENSE		0x0200	/* No request sense - ATAPI */
 #define	ADEV_LITTLETOC		0x0400	/* little-endian TOC - ATAPI */
 #define	ADEV_NOCAPACITY		0x0800	/* no READ CD CAPACITY */
-#define	ADEV_NOTUR		0x1000	/* No TEST UNIT READY */
 #define	ADEV_NODOORLOCK		0x2000	/* can't lock door */
 #define SDEV_ONLYBIG		0x4000  /* always use READ_BIG and WRITE_BIG */
 	struct	scsi_device *device;	/* device entry points etc. */
@@ -178,6 +197,7 @@ struct scsi_link {
 	void	*adapter_softc;		/* needed for call to foo_scsi_cmd */
 	struct	scsibus_softc *bus;	/* link to the scsibus we're on */
 	struct	scsi_inquiry_data inqdata; /* copy of INQUIRY data from probe */
+	struct  devid id;
 };
 
 int	scsiprint(void *, const char *);
@@ -298,9 +318,14 @@ struct scsi_xfer {
 #define XS_RESET	8	/* bus was reset; possible retry command  */
 
 /*
- * Possible retries numbers for scsi_test_unit_ready()
+ * Possible retries for scsi_test_unit_ready()
  */
 #define TEST_READY_RETRIES	5
+
+/*
+ * Possible retries for most SCSI commands.
+ */
+#define SCSI_RETRIES		4
 
 const void *scsi_inqmatch(struct scsi_inquiry_data *, const void *, int,
 	    int, int *);
@@ -346,7 +371,6 @@ int	scsi_report_luns(struct scsi_link *, int,
 
 void	show_scsi_xs(struct scsi_xfer *);
 void	scsi_print_sense(struct scsi_xfer *);
-void	show_scsi_cmd(struct scsi_xfer *);
 void	show_mem(u_char *, int);
 void	scsi_strvis(u_char *, u_char *, int);
 int	scsi_delay(struct scsi_xfer *, int);

@@ -1,4 +1,4 @@
-/*	$OpenBSD: ofw_machdep.c,v 1.23 2008/01/10 22:46:48 deraadt Exp $	*/
+/*	$OpenBSD: ofw_machdep.c,v 1.28 2008/07/10 08:57:05 kettenis Exp $	*/
 /*	$NetBSD: ofw_machdep.c,v 1.16 2001/07/20 00:07:14 eeh Exp $	*/
 
 /*
@@ -105,20 +105,26 @@ get_memory_handle()
  * Point prom to our trap table.  This stops the prom from mapping us.
  */
 int
-prom_set_trap_table(tba)
+prom_set_trap_table(tba, mmfsa)
 	vaddr_t tba;
+	paddr_t mmfsa;
 {
 	struct {
 		cell_t name;
 		cell_t nargs;
 		cell_t nreturns;
 		cell_t tba;
+		cell_t mmfsa; 
 	} args;
 
 	args.name = ADR2CELL("SUNW,set-trap-table");
-	args.nargs = 1;
+	if (CPU_ISSUN4V)
+		args.nargs = 2;
+	else
+		args.nargs = 1;
 	args.nreturns = 0;
 	args.tba = ADR2CELL(tba);
+	args.mmfsa = ADR2CELL(mmfsa);
 	return openfirmware(&args);
 }
 
@@ -560,6 +566,74 @@ prom_get_msgbuf(len, align)
 	return addr; /* Kluge till we go 64-bit */
 }
 
+int
+prom_itlb_load(int index, u_int64_t data, vaddr_t vaddr)
+{
+	static struct {
+		cell_t name;
+		cell_t nargs;
+		cell_t nreturns;
+		cell_t method;
+		cell_t ihandle;
+		cell_t vaddr;
+		cell_t data;
+		cell_t index;
+		cell_t status;
+	} args;
+
+	if (mmuh == -1 && ((mmuh = get_mmu_handle()) == -1)) {
+		prom_printf("prom_itlb_load: cannot get mmuh\r\n");
+		return 0;
+	}
+	args.name = ADR2CELL("call-method");
+	args.nargs = 5;
+	args.nreturns = 1;
+	args.method = ADR2CELL("SUNW,itlb-load");
+	args.ihandle = HDL2CELL(mmuh);
+	args.vaddr = ADR2CELL(vaddr);
+	args.data = data;
+	args.index = index;
+	if(openfirmware(&args) == -1)
+		return -1;
+	if (args.status)
+		return -1;
+	return 0;
+}
+
+int
+prom_dtlb_load(int index, u_int64_t data, vaddr_t vaddr)
+{
+	static struct {
+		cell_t name;
+		cell_t nargs;
+		cell_t nreturns;
+		cell_t method;
+		cell_t ihandle;
+		cell_t vaddr;
+		cell_t data;
+		cell_t index;
+		cell_t status;
+	} args;
+
+	if (mmuh == -1 && ((mmuh = get_mmu_handle()) == -1)) {
+		prom_printf("prom_itlb_load: cannot get mmuh\r\n");
+		return 0;
+	}
+	args.name = ADR2CELL("call-method");
+	args.nargs = 5;
+	args.nreturns = 1;
+	args.method = ADR2CELL("SUNW,dtlb-load");
+	args.ihandle = HDL2CELL(mmuh);
+	args.vaddr = ADR2CELL(vaddr);
+	args.data = data;
+	args.index = index;
+	if(openfirmware(&args) == -1)
+		return -1;
+	if (args.status)
+		return -1;
+	return 0;
+}
+
 #ifdef MULTIPROCESSOR
 /*
  * Start secondary cpu, arrange 'func' as the entry.
@@ -664,6 +738,49 @@ prom_printf(const char *fmt, ...)
 	va_end(ap);
 
 	OF_write(OF_stdout(), buf, len);
+}
+
+const char *
+prom_serengeti_set_console_input(const char *new)
+{
+	static struct {
+		cell_t  name;
+		cell_t  nargs;
+		cell_t  nreturns;
+		cell_t  new;
+		cell_t  old;
+	} args;
+
+	args.name = ADR2CELL("SUNW,set-console-input");
+	args.nargs = 1;
+	args.nreturns = 1;
+	args.new = ADR2CELL(new);
+
+	if (openfirmware(&args) == -1)
+		return NULL;
+
+	return (const char *)args.old;
+}
+
+time_t
+prom_opl_get_tod(void)
+{
+	static struct {
+		cell_t  name;
+		cell_t  nargs;
+		cell_t  nreturns;
+		cell_t  stick;
+		cell_t  time;
+	} args;
+
+	args.name = ADR2CELL("FJSV,get-tod");
+	args.nargs = 0;
+	args.nreturns = 2;
+
+	if (openfirmware(&args) == -1)
+		return (time_t)-1;
+
+	return (time_t)args.time;
 }
 
 #ifdef DEBUG

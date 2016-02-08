@@ -1,4 +1,4 @@
-/*	$OpenBSD: stdlib.h,v 1.40 2007/09/03 14:37:02 millert Exp $	*/
+/*	$OpenBSD: stdlib.h,v 1.44 2008/06/24 06:01:33 otto Exp $	*/
 /*	$NetBSD: stdlib.h,v 1.25 1995/12/27 21:19:08 jtc Exp $	*/
 
 /*-
@@ -128,9 +128,9 @@ void	*malloc(size_t);
 void	 qsort(void *, size_t, size_t, int (*)(const void *, const void *));
 int	 rand(void);
 void	*realloc(void *, size_t);
-void	*recalloc(void *, size_t, size_t);
 void	 srand(unsigned);
 double	 strtod(const char *, char **);
+float	 strtof(const char *, char **);
 long	 strtol(const char *, char **, int);
 unsigned long
 	 strtoul(const char *, char **, int);
@@ -212,11 +212,7 @@ void	 unsetenv(const char *);
 #endif
 
 #if __BSD_VISIBLE
-#if defined(alloca) && (alloca == __builtin_alloca) && (__GNUC__ < 2)
-void  *alloca(int);     /* built-in for gcc */ 
-#else 
-void  *alloca(size_t); 
-#endif /* __GNUC__ */ 
+void	*alloca(size_t); 
 
 char	*getbsize(int *, long *);
 char	*cgetcap(char *, const char *, int);
@@ -272,6 +268,10 @@ u_int32_t arc4random(void);
 void	arc4random_stir(void);
 void	arc4random_addrandom(unsigned char *, int)
 	__attribute__((__bounded__ (__string__,1,2)));
+u_int32_t arc4random_uniform(u_int32_t);
+void arc4random_buf(void *, size_t)
+	__attribute__((__bounded__ (__string__,1,2)));
+
 #endif /* __BSD_VISIBLE */
 
 __END_DECLS

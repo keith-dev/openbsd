@@ -1,11 +1,11 @@
-#	$OpenBSD: files.hppa,v 1.75 2007/11/25 18:25:28 deraadt Exp $
+#	$OpenBSD: files.hppa,v 1.80 2008/07/16 16:32:08 miod Exp $
 #
 # hppa-specific configuration info
 
 # maxpartitions must be the first item in files.${ARCH}
 maxpartitions 16
 
-maxusers 2 8 64
+maxusers 2 8 128
 
 # 
 # "workstation console" routines
@@ -51,6 +51,11 @@ include "dev/eisa/files.eisa"
 # PCI Bus support
 #
 include "dev/pci/files.pci"
+
+device	hme: ether, ifnet, mii, ifmedia
+file	dev/ic/hme.c			hme
+attach	hme at pci with hme_pci
+file	dev/pci/if_hme_pci.c		hme_pci
 
 #
 # CardBus support
@@ -125,6 +130,11 @@ file	arch/hppa/dev/fpu.c			fpu
 device	phantomas: gedoens
 attach	phantomas at gedoens
 file	arch/hppa/dev/phantomas.c		phantomas
+
+# GeckoBOA BC GSC+ port
+device	gecko: gedoens
+attach	gecko at gedoens
+file	arch/hppa/dev/gecko.c			gecko
 
 # U2/Uturn, Runway to GSC Bus bridge & IOA
 device	uturn: gedoens
@@ -274,13 +284,7 @@ device	gsckbc: pckbcslot
 attach	gsckbc at gsc
 file	arch/hppa/gsc/gsckbc.c			gsckbc
 
-# PS/2 keyboard
-device	gsckbd: wskbddev
-attach	gsckbd at pckbcslot
-file	arch/hppa/gsc/gsckbd.c			gsckbd	needs-flag
-file	arch/hppa/gsc/gsckbdmap.c		gsckbd
-
-# PS/2 mouse
+# PS/2 keyboard and mouse
 include	"dev/pckbc/files.pckbc"
 
 #
@@ -316,7 +320,7 @@ file	netinet/in4_cksum.c			inet
 file	arch/hppa/dev/clock.c
 file	arch/hppa/hppa/fpemu.S			fpemul
 
-# quad support is neccessary for 32 bit architectures
+# quad support is necessary for 32 bit architectures
 file	lib/libkern/adddi3.c
 file	lib/libkern/anddi3.c
 file	lib/libkern/ashldi3.c

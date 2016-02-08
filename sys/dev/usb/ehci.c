@@ -1,4 +1,4 @@
-/*	$OpenBSD: ehci.c,v 1.77 2007/06/15 11:41:47 mbalmer Exp $ */
+/*	$OpenBSD: ehci.c,v 1.84 2008/06/29 10:04:15 yuo Exp $ */
 /*	$NetBSD: ehci.c,v 1.66 2004/06/30 03:11:56 mycroft Exp $	*/
 
 /*
@@ -16,13 +16,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -87,10 +80,6 @@
 struct cfdriver ehci_cd = {
 	NULL, "ehci", DV_DULL
 };
-
-#ifdef USB_DEBUG
-#define EHCI_DEBUG
-#endif
 
 #ifdef EHCI_DEBUG
 #define DPRINTF(x)	do { if (ehcidebug) printf x; } while(0)
@@ -194,8 +183,6 @@ void		ehci_noop(usbd_pipe_handle pipe);
 
 int		ehci_str(usb_string_descriptor_t *, int, const char *);
 void		ehci_pcd(ehci_softc_t *, usbd_xfer_handle);
-void		ehci_pcd_able(ehci_softc_t *, int);
-void		ehci_pcd_enable(void *);
 void		ehci_disown(ehci_softc_t *, int, int);
 
 ehci_soft_qh_t  *ehci_alloc_sqh(ehci_softc_t *);
@@ -472,8 +459,7 @@ ehci_init(ehci_softc_t *sc)
 	sc->sc_async_head = sqh;
 	EOWRITE4(sc, EHCI_ASYNCLISTADDR, sqh->physaddr | EHCI_LINK_QH);
 
-	timeout_set(&sc->sc_tmo_pcd, NULL, NULL);
-	timeout_set(&sc->sc_tmo_intrlist, NULL, NULL);
+	timeout_set(&sc->sc_tmo_intrlist, ehci_intrlist_timeout, sc);
 
 	rw_init(&sc->sc_doorbell_lock, "ehcidb");
 
@@ -581,15 +567,6 @@ ehci_intr1(ehci_softc_t *sc)
 	}
 	if (eintrs & EHCI_STS_PCD) {
 		ehci_pcd(sc, sc->sc_intrxfer);
-		/*
-		 * Disable PCD interrupt for now, because it will be
-		 * on until the port has been reset.
-		 */
-		ehci_pcd_able(sc, 0);
-		/* Do not allow RHSC interrupts > 1 per second */
-		timeout_del(&sc->sc_tmo_pcd);
-		timeout_set(&sc->sc_tmo_pcd, ehci_pcd_enable, sc);
-		timeout_add(&sc->sc_tmo_pcd, hz);
 		eintrs &= ~EHCI_STS_PCD;
 	}
 
@@ -604,25 +581,6 @@ ehci_intr1(ehci_softc_t *sc)
 	}
 
 	return (1);
-}
-
-void
-ehci_pcd_able(ehci_softc_t *sc, int on)
-{
-	DPRINTFN(4, ("ehci_pcd_able: on=%d\n", on));
-	if (on)
-		sc->sc_eintrs |= EHCI_STS_PCD;
-	else
-		sc->sc_eintrs &= ~EHCI_STS_PCD;
-	EOWRITE4(sc, EHCI_USBINTR, sc->sc_eintrs);
-}
-
-void
-ehci_pcd_enable(void *v_sc)
-{
-	ehci_softc_t *sc = v_sc;
-
-	ehci_pcd_able(sc, 1);
 }
 
 void
@@ -679,8 +637,6 @@ ehci_softintr(void *v)
 	/* Schedule a callout to catch any dropped transactions. */
 	if ((sc->sc_flags & EHCIF_DROPPED_INTR_WORKAROUND) &&
 	    !LIST_EMPTY(&sc->sc_intrhead)) {
-		timeout_del(&sc->sc_tmo_intrlist);
-		timeout_set(&sc->sc_tmo_intrlist, ehci_intrlist_timeout, sc);
 		timeout_add(&sc->sc_tmo_intrlist, hz);
 	}
 
@@ -905,7 +861,6 @@ ehci_detach(struct ehci_softc *sc, int flags)
 		return (rv);
 
 	timeout_del(&sc->sc_tmo_intrlist);
-	timeout_del(&sc->sc_tmo_pcd);
 
 	if (sc->sc_powerhook != NULL)
 		powerhook_disestablish(sc->sc_powerhook);
@@ -1158,7 +1113,7 @@ ehci_device_clear_toggle(usbd_pipe_handle pipe)
 
 	DPRINTF(("ehci_device_clear_toggle: epipe=%p status=0x%x\n",
 	    epipe, epipe->sqh->qh.qh_qtd.qtd_status));
-#ifdef USB_DEBUG
+#ifdef EHCI_DEBUG
 	if (ehcidebug)
 		usbd_dump_pipe(pipe);
 #endif
@@ -1863,21 +1818,6 @@ ehci_root_ctrl_start(usbd_xfer_handle xfer)
 			err = USBD_IOERROR;
 			goto ret;
 		}
-#if 0
-		switch(value) {
-		case UHF_C_PORT_CONNECTION:
-		case UHF_C_PORT_ENABLE:
-		case UHF_C_PORT_SUSPEND:
-		case UHF_C_PORT_OVER_CURRENT:
-		case UHF_C_PORT_RESET:
-			/* Enable RHSC interrupt if condition is cleared. */
-			if ((OREAD4(sc, port) >> 16) == 0)
-				ehci_pcd_able(sc, 1);
-			break;
-		default:
-			break;
-		}
-#endif
 		break;
 	case C(UR_GET_DESCRIPTOR, UT_READ_CLASS_DEVICE):
 		if ((value & 0xff) != 0) {
@@ -1957,6 +1897,12 @@ ehci_root_ctrl_start(usbd_xfer_handle xfer)
 		case UHF_PORT_SUSPEND:
 			EOWRITE4(sc, port, v | EHCI_PS_SUSP);
 			break;
+		case UHF_PORT_DISOWN_TO_1_1:
+			/* enter to Port Reset State */
+			v &= ~EHCI_PS_PE;
+			EOWRITE4(sc, port, v | EHCI_PS_PR);
+			ehci_disown(sc, index, 0);
+			break;
 		case UHF_PORT_RESET:
 			DPRINTFN(5,("ehci_root_ctrl_start: reset port %d\n",
 			    index));
@@ -1975,7 +1921,8 @@ ehci_root_ctrl_start(usbd_xfer_handle xfer)
 				goto ret;
 			}
 			/* Terminate reset sequence. */
-			EOWRITE4(sc, port, v);
+			v = EOREAD4(sc, port);
+			EOWRITE4(sc, port, v & ~EHCI_PS_PR);
 			/* Wait for HC to complete reset. */
 			usb_delay_ms(&sc->sc_bus, EHCI_PORT_RESET_COMPLETE);
 			if (sc->sc_dying) {
@@ -2616,7 +2563,7 @@ ehci_timeout(void *addr)
 	ehci_softc_t *sc = (ehci_softc_t *)epipe->pipe.device->bus;
 
 	DPRINTF(("ehci_timeout: exfer=%p\n", exfer));
-#ifdef USB_DEBUG
+#ifdef ECHI_DEBUG
 	if (ehcidebug > 1)
 		usbd_dump_pipe(exfer->xfer.pipe);
 #endif

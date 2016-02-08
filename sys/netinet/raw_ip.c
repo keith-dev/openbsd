@@ -1,4 +1,4 @@
-/*	$OpenBSD: raw_ip.c,v 1.40 2006/11/25 18:04:44 claudio Exp $	*/
+/*	$OpenBSD: raw_ip.c,v 1.45 2008/06/14 02:17:27 jsing Exp $	*/
 /*	$NetBSD: raw_ip.c,v 1.25 1996/02/18 18:58:33 christos Exp $	*/
 
 /*
@@ -77,6 +77,7 @@
 
 #include <net/if.h>
 #include <net/route.h>
+#include <net/pfvar.h>
 
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
@@ -86,6 +87,8 @@
 #include <netinet/in_pcb.h>
 #include <netinet/in_var.h>
 #include <netinet/ip_icmp.h>
+
+#include "pf.h"
 
 struct inpcbtable rawcbtable;
 
@@ -131,6 +134,16 @@ rip_input(struct mbuf *m, ...)
 #endif
 		if (inp->inp_ip.ip_p && inp->inp_ip.ip_p != ip->ip_p)
 			continue;
+#if NPF
+		if (m->m_pkthdr.pf.flags & PF_TAG_DIVERTED) {
+			struct pf_divert *divert;
+
+			if ((divert = pf_find_divert(m)) == NULL)
+				continue;
+			if (inp->inp_laddr.s_addr != divert->addr.ipv4.s_addr)
+				continue;
+		} else
+#endif
 		if (inp->inp_laddr.s_addr &&
 		    inp->inp_laddr.s_addr != ip->ip_dst.s_addr)
 			continue;
@@ -141,7 +154,8 @@ rip_input(struct mbuf *m, ...)
 			struct mbuf *n;
 
 			if ((n = m_copy(m, 0, (int)M_COPYALL)) != NULL) {
-				if (last->inp_flags & INP_CONTROLOPTS)
+				if (last->inp_flags & INP_CONTROLOPTS ||
+				    last->inp_socket->so_options & SO_TIMESTAMP)
 					ip_savecontrol(last, &opts, ip, n);
 				if (sbappendaddr(&last->inp_socket->so_rcv,
 				    sintosa(&ripsrc), n, opts) == 0) {
@@ -157,7 +171,8 @@ rip_input(struct mbuf *m, ...)
 		last = inp;
 	}
 	if (last) {
-		if (last->inp_flags & INP_CONTROLOPTS)
+		if (last->inp_flags & INP_CONTROLOPTS ||
+		    last->inp_socket->so_options & SO_TIMESTAMP)
 			ip_savecontrol(last, &opts, ip, m);
 		if (sbappendaddr(&last->inp_socket->so_rcv, sintosa(&ripsrc), m,
 		    opts) == 0) {
@@ -332,7 +347,7 @@ u_long	rip_recvspace = RIPRCVQ;
 /*ARGSUSED*/
 int
 rip_usrreq(struct socket *so, int req, struct mbuf *m, struct mbuf *nam,
-    struct mbuf *control)
+    struct mbuf *control, struct proc *p)
 {
 	int error = 0;
 	struct inpcb *inp = sotoinpcb(so);
@@ -395,7 +410,8 @@ rip_usrreq(struct socket *so, int req, struct mbuf *m, struct mbuf *nam,
 		    ((addr->sin_family != AF_INET) &&
 		     (addr->sin_family != AF_IMPLINK)) ||
 		    (addr->sin_addr.s_addr &&
-		     ifa_ifwithaddr(sintosa(addr)) == 0)) {
+		     (!(so->so_options & SO_BINDANY) &&
+		     in_iawithaddr(addr->sin_addr, NULL) == 0))) {
 			error = EADDRNOTAVAIL;
 			break;
 		}

@@ -1,4 +1,4 @@
-/*	$OpenBSD: ramdisk.c,v 1.40 2008/01/05 07:33:37 brad Exp $	*/
+/*	$OpenBSD: ramdisk.c,v 1.43 2008/07/12 19:58:48 miod Exp $	*/
 /*	$NetBSD: ramdisk.c,v 1.8 1996/04/12 08:30:09 leo Exp $	*/
 
 /*
@@ -108,7 +108,21 @@ void rdgetdisklabel(dev_t, struct rd_softc *, struct disklabel *, int);
  * XXX - that practice is questionable...
  */
 struct cfdriver rd_cd = {
-	NULL, "rd", DV_DULL
+	NULL, "rd", DV_DISK
+};
+
+/*
+ * Here we define a cfattach structure for inserting any new rd device into the
+ * device tree. This is needed by some archs that look for bootable devices in
+ * there.
+ */
+int  rd_probe(struct device *, void *, void *);
+int  rd_detach(struct device *, int);
+int  rd_activate(struct device *, enum devact);
+
+struct cfattach rd_ca = {
+	sizeof(struct rd_softc), rd_probe, rd_attach,
+	rd_detach, rd_activate
 };
 
 void rdstrategy(struct buf *bp);
@@ -125,6 +139,7 @@ rdattach(n)
 	int n;
 {
 	struct rd_softc *sc;
+	struct cfdata *cf;
 	int i;
 
 #ifdef	DIAGNOSTIC
@@ -146,6 +161,14 @@ rdattach(n)
 	rd_cd.cd_devs  = ramdisk_devs;
 
 	/* Attach as if by autoconfig. */
+	cf = malloc(sizeof(struct cfdata), M_DEVBUF, M_NOWAIT | M_ZERO);
+	if (cf == NULL) {
+		printf("WARNING: no memory for cfdata struct\n");
+		return;
+	}
+	cf->cf_attach = &rd_ca;
+	cf->cf_driver = &rd_cd;
+
 	for (i = 0; i < n; i++) {
 		sc = malloc(sizeof(*sc), M_DEVBUF, M_WAITOK | M_ZERO);
 		if (snprintf(sc->sc_dev.dv_xname, sizeof(sc->sc_dev.dv_xname),
@@ -156,6 +179,11 @@ rdattach(n)
 		}
 		ramdisk_devs[i] = sc;
 		sc->sc_dev.dv_unit = i;
+		sc->sc_dev.dv_class = DV_DISK;
+		sc->sc_dev.dv_parent = NULL;
+		sc->sc_dev.dv_cfdata = cf;
+		TAILQ_INSERT_TAIL(&alldevs, &sc->sc_dev, dv_list);
+		device_ref(&sc->sc_dev);
 		rd_attach(NULL, &sc->sc_dev, NULL);
 	}
 }
@@ -278,6 +306,11 @@ rdopen(dev, flag, fmt, proc)
 	if (sc->sc_type == RD_UNCONFIGURED)
 		return ENXIO;
 
+	/*
+	 * Make sure we have read the disklabel.
+	 */
+	rdgetdisklabel(dev, sc, sc->sc_dkdev.dk_label, 0);
+
 	return 0;
 }
 
@@ -317,7 +350,7 @@ void
 rdstrategy(bp)
 	struct buf *bp;
 {
-	int unit, part;
+	int unit;
 	struct rd_softc *sc;
 	caddr_t addr;
 	size_t off, xfer;
@@ -334,9 +367,7 @@ rdstrategy(bp)
 	}
 
 	/* Do not write on "no trespassing" areas... */
-	part = DISKPART(bp->b_dev);
-	if (part != RAW_PART &&
-	    bounds_check_with_label(bp, sc->sc_dkdev.dk_label, 1) <= 0)
+	if (bounds_check_with_label(bp, sc->sc_dkdev.dk_label, 1) <= 0)
 		goto bad;
 
 	switch (sc->sc_type) {
@@ -549,7 +580,25 @@ rd_ioctl_kalloc(sc, urd, proc)
 	sc->sc_size = (size_t)size;
 	sc->sc_type = RD_KMEM_ALLOCATED;
 	return 0;
-}	
+}
+
+int
+rd_probe(struct device *parent, void *match_, void *aux)
+{
+	return 0;
+}
+
+int
+rd_detach(struct device *self, int flags)
+{
+	return 0;
+}
+
+int
+rd_activate(struct device *self, enum devact act)
+{
+	return 0;
+}
 
 #if RAMDISK_SERVER
 

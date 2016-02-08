@@ -1,4 +1,4 @@
-/*	$OpenBSD: cvs.h,v 1.162 2008/03/01 21:29:36 deraadt Exp $	*/
+/*	$OpenBSD: cvs.h,v 1.172 2008/06/27 21:14:15 xsa Exp $	*/
 /*
  * Copyright (c) 2004 Jean-Francois Brousseau <jfb@openbsd.org>
  * All rights reserved.
@@ -34,16 +34,11 @@
 #include "log.h"
 #include "worklist.h"
 #include "repository.h"
+#include "trigger.h"
 #include "util.h"
 #include "xmalloc.h"
 
-#define CVS_VERSION_MINOR	"0"
-#define CVS_VERSION_MAJOR	"1"
-#define CVS_VERSION_PORT
-
-#define CVS_VERSION		\
-	"OpenCVS version "	\
-	CVS_VERSION_MAJOR "." CVS_VERSION_MINOR CVS_VERSION_PORT
+#define CVS_VERSION	"OpenCVS 4.4"
 
 #define CVS_HIST_CACHE	128
 #define CVS_HIST_NBFLD	6
@@ -100,10 +95,10 @@
 #define CVS_CMD_MAXNAMELEN	16
 #define CVS_CMD_MAXALIAS	2
 #define CVS_CMD_MAXDESCRLEN	64
-#define CVS_CMD_MAXARG		128
 
 /* flags */
-#define CVS_USE_WDIR		1
+#define CVS_USE_WDIR		0x01
+#define CVS_LOCK_REPO		0x02
 
 /* defaults */
 #define CVS_SERVER_DEFAULT	"cvs"
@@ -291,6 +286,8 @@ typedef struct cvs_entries {
 } CVSENTRIES;
 
 extern char *checkout_target_dir;
+extern char *cvs_join_rev1;
+extern char *cvs_join_rev2;
 
 extern struct module_checkout *current_module;
 extern char *module_repo_root;
@@ -309,6 +306,7 @@ extern char *cvs_tmpdir;
 extern char *import_repository;
 extern char *cvs_server_path;
 extern time_t cvs_specified_date;
+extern time_t cvs_directory_date;
 extern char *cvs_specified_tag;
 extern char *cvs_directory_tag;
 
@@ -322,7 +320,6 @@ extern int  cvs_nocase;
 extern int  cvs_noexec;
 extern int  cvs_readonly;
 extern int  cvs_readonlyfs;
-extern int  cvs_error;
 extern int  cvs_server_active;
 extern int  reset_option;
 extern int  reset_tag;
@@ -359,10 +356,14 @@ extern struct cvs_cmd cvs_cmd_unedit;
 extern struct cvs_cmd cvs_cmd_watch;
 extern struct cvs_cmd cvs_cmd_watchers;
 
+/* add.c */
+void		 cvs_add_tobranch(struct cvs_file *, char *);
+
 /* cmd.c */
 struct cvs_cmd	*cvs_findcmd(const char *);
 
 /* cvs.c */
+int		 cvs_build_cmd(char ***, char **, int);
 int		 cvs_var_set(const char *, const char *);
 int		 cvs_var_unset(const char *);
 const char	*cvs_var_get(const char *);
@@ -388,15 +389,18 @@ void		cvs_write_tagfile(const char *, char *, char *);
 struct cvsroot	*cvsroot_get(const char *);
 
 /* logmsg.c */
-char *	cvs_logmsg_read(const char *path);
-char *	cvs_logmsg_create(struct cvs_flisthead *, struct cvs_flisthead *,
-	struct cvs_flisthead *);
+char	*cvs_logmsg_read(const char *);
+char	*cvs_logmsg_create(char *, struct cvs_flisthead *,
+	     struct cvs_flisthead *, struct cvs_flisthead *);
+int	 cvs_logmsg_verify(char *);
 
 /* misc stuff */
 void	cvs_update_local(struct cvs_file *);
 void	cvs_update_enterdir(struct cvs_file *);
 void	cvs_update_leavedir(struct cvs_file *);
 void	cvs_checkout_file(struct cvs_file *, RCSNUM *, char *, int);
+void	cvs_remove_local(struct cvs_file *);
+void	cvs_add_local(struct cvs_file *);
 int	update_has_conflict_markers(struct cvs_file *);
 
 #define CO_MERGE	0x01

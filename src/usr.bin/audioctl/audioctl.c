@@ -1,4 +1,4 @@
-/*	$OpenBSD: audioctl.c,v 1.16 2007/11/26 13:36:34 deraadt Exp $	*/
+/*	$OpenBSD: audioctl.c,v 1.19 2008/06/26 05:42:20 ray Exp $	*/
 /*	$NetBSD: audioctl.c,v 1.14 1998/04/27 16:55:23 augustss Exp $	*/
 
 /*
@@ -15,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -66,7 +59,7 @@ audio_info_t info;
 
 char encbuf[1000];
 
-int properties, fullduplex, rerror;
+int properties, fullduplex, perrors, rerrors;
 
 struct field {
 	const char *name;
@@ -117,6 +110,8 @@ struct field {
 	{ "play.open",		&info.play.open,	UCHAR,	READONLY },
 	{ "play.active",	&info.play.active,	UCHAR,	READONLY },
 	{ "play.buffer_size",	&info.play.buffer_size,	UINT,	0 },
+	{ "play.block_size",	&info.play.block_size,	UINT,	0 },
+	{ "play.errors",	&perrors,		INT,	READONLY },
 	{ "record.rate",	&info.record.sample_rate,UINT,	0 },
 	{ "record.sample_rate",	&info.record.sample_rate,UINT,	ALIAS },
 	{ "record.channels",	&info.record.channels,	UINT,	0 },
@@ -135,7 +130,8 @@ struct field {
 	{ "record.open",	&info.record.open,	UCHAR,	READONLY },
 	{ "record.active",	&info.record.active,	UCHAR,	READONLY },
 	{ "record.buffer_size",	&info.record.buffer_size,UINT,	0 },
-	{ "record.errors",	&rerror,		INT,	READONLY },
+	{ "record.block_size",	&info.record.block_size,UINT,	0 },
+	{ "record.errors",	&rerrors,		INT,	READONLY },
 	{ 0 }
 };
 
@@ -311,7 +307,9 @@ getinfo(int fd)
 		err(1, "AUDIO_GETFD");
 	if (ioctl(fd, AUDIO_GETPROPS, &properties) < 0)
 		err(1, "AUDIO_GETPROPS");
-	if (ioctl(fd, AUDIO_RERROR, &rerror) < 0)
+	if (ioctl(fd, AUDIO_PERROR, &perrors) < 0)
+		err(1, "AUDIO_PERROR");
+	if (ioctl(fd, AUDIO_RERROR, &rerrors) < 0)
 		err(1, "AUDIO_RERROR");
 	if (ioctl(fd, AUDIO_GETINFO, &info) < 0)
 		err(1, "AUDIO_GETINFO");

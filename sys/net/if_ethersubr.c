@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_ethersubr.c,v 1.114 2008/02/05 22:57:30 mpf Exp $	*/
+/*	$OpenBSD: if_ethersubr.c,v 1.123 2008/08/04 18:55:08 damien Exp $	*/
 /*	$NetBSD: if_ethersubr.c,v 1.19 1996/05/07 02:40:30 thorpej Exp $	*/
 
 /*
@@ -104,6 +104,8 @@ didn't get a copy, you may request one from <license@ipv6.nrl.navy.mil>.
 #include <netinet/if_ether.h>
 #include <netinet/ip_ipsp.h>
 
+#include <dev/rndvar.h>
+
 #if NBPFILTER > 0
 #include <net/bpf.h>
 #endif
@@ -149,6 +151,10 @@ didn't get a copy, you may request one from <license@ipv6.nrl.navy.mil>.
 extern u_char	at_org_code[ 3 ];
 extern u_char	aarp_org_code[ 3 ];
 #endif /* NETATALK */
+
+#ifdef MPLS
+#include <netmpls/mpls.h>
+#endif /* MPLS */
 
 u_char etherbroadcastaddr[ETHER_ADDR_LEN] =
     { 0xff, 0xff, 0xff, 0xff, 0xff, 0xff };
@@ -325,6 +331,35 @@ ether_output(ifp0, m0, dst, rt0)
 		}
 		} break;
 #endif /* NETATALK */
+#ifdef MPLS
+       case AF_MPLS:
+		if (rt)
+			dst = rt_key(rt);
+		else
+			senderr(EHOSTUNREACH);
+
+		switch (dst->sa_family) {
+			case AF_LINK:
+				if (((struct sockaddr_dl *)dst)->sdl_alen <
+				    sizeof(edst))
+					senderr(EHOSTUNREACH);
+				bcopy(LLADDR(((struct sockaddr_dl *)dst)), edst,
+				    sizeof(edst));
+				break;
+			case AF_INET:
+				if (!arpresolve(ac, rt, m, dst, edst))
+					return (0); /* if not yet resolved */
+				break;
+			default:
+				senderr(EHOSTUNREACH);
+		}
+		/* XXX handling for simplex devices in case of M/BCAST ?? */
+		if (m->m_flags & (M_BCAST | M_MCAST))
+			etype = htons(ETHERTYPE_MPLS_MCAST);
+		else
+			etype = htons(ETHERTYPE_MPLS);
+		break;
+#endif /* MPLS */
 	case pseudo_AF_HDRCMPLT:
 		hdrcmplt = 1;
 		eh = (struct ether_header *)dst->sa_data;
@@ -425,15 +460,14 @@ ether_output(ifp0, m0, dst, rt0)
 		splx(s);
 		return (error);
 	}
-	ifp->if_obytes += len + ETHER_HDR_LEN;
+	ifp->if_obytes += len;
 #if NCARP > 0
 	if (ifp != ifp0)
-		ifp0->if_obytes += len + ETHER_HDR_LEN;
+		ifp0->if_obytes += len;
 #endif /* NCARP > 0 */
 	if (mflags & M_MCAST)
 		ifp->if_omcasts++;
-	if ((ifp->if_flags & IFF_OACTIVE) == 0)
-		(*ifp->if_start)(ifp);
+	if_start(ifp);
 	splx(s);
 	return (error);
 
@@ -449,8 +483,8 @@ bad:
  * the ether header, which is provided separately.
  */
 void
-ether_input(ifp, eh, m)
-	struct ifnet *ifp;
+ether_input(ifp0, eh, m)
+	struct ifnet *ifp0;
 	struct ether_header *eh;
 	struct mbuf *m;
 {
@@ -459,6 +493,7 @@ ether_input(ifp, eh, m)
 	int s, llcfound = 0;
 	struct llc *l;
 	struct arpcom *ac;
+	struct ifnet *ifp = ifp0;
 #if NTRUNK > 0
 	int i = 0;
 #endif
@@ -474,12 +509,12 @@ ether_input(ifp, eh, m)
 #if NTRUNK > 0
 	/* Handle input from a trunk port */
 	while (ifp->if_type == IFT_IEEE8023ADLAG) {
-		if (++i > TRUNK_MAX_STACKING ||
-		    trunk_input(ifp, eh, m) != 0) {
-			if (m)
-				m_freem(m);
+		if (++i > TRUNK_MAX_STACKING) {
+			m_freem(m);
 			return;
 		}
+		if (trunk_input(ifp, eh, m) != 0)
+			return;
 
 		/* Has been set to the trunk interface */
 		ifp = m->m_pkthdr.rcvif;
@@ -518,11 +553,24 @@ ether_input(ifp, eh, m)
 		else
 			m->m_flags |= M_MCAST;
 		ifp->if_imcasts++;
+#if NTRUNK > 0
+		if (ifp != ifp0)
+			ifp0->if_imcasts++;
+#endif
 	}
 
 	ifp->if_ibytes += m->m_pkthdr.len + sizeof(*eh);
+#if NTRUNK > 0
+	if (ifp != ifp0)
+		ifp0->if_ibytes += m->m_pkthdr.len + sizeof(*eh);
+#endif
 
 	etype = ntohs(eh->ether_type);
+
+	if (!(netisr & (1 << NETISR_RND_DONE))) {
+		add_net_randomness(etype);
+		atomic_setbits_int(&netisr, (1 << NETISR_RND_DONE));
+	}
 
 #if NVLAN > 0
 	if (etype == ETHERTYPE_VLAN && (vlan_input(eh, m) == 0))
@@ -673,6 +721,13 @@ decapsulate:
 		schednetisr(NETISR_PPPOE);
 		break;
 #endif /* NPPPOE > 0 */
+#ifdef MPLS
+	case ETHERTYPE_MPLS:
+	case ETHERTYPE_MPLS_MCAST:
+		inq = &mplsintrq;
+		schednetisr(NETISR_MPLS);
+		break;
+#endif
 	default:
 		if (llcfound || etype > ETHERMTU)
 			goto dropanyway;
@@ -828,13 +883,11 @@ ether_ifdetach(ifp)
  * This is for reference.  We have table-driven versions of the
  * crc32 generators, which are faster than the double-loop.
  */
-u_int32_t
-ether_crc32_le(const u_int8_t *buf, size_t len)
+u_int32_t __pure
+ether_crc32_le_update(u_int_32_t crc, const u_int8_t *buf, size_t len)
 {
-	u_int32_t c, crc, carry;
+	u_int32_t c, carry;
 	size_t i, j;
-
-	crc = 0xffffffffU;	/* initial value */
 
 	for (i = 0; i < len; i++) {
 		c = buf[i];
@@ -850,13 +903,11 @@ ether_crc32_le(const u_int8_t *buf, size_t len)
 	return (crc);
 }
 
-u_int32_t
-ether_crc32_be(const u_int8_t *buf, size_t len)
+u_int32_t __pure
+ether_crc32_be_update(u_int_32_t crc, const u_int8_t *buf, size_t len)
 {
-	u_int32_t c, crc, carry;
+	u_int32_t c, carry;
 	size_t i, j;
-
-	crc = 0xffffffffU;	/* initial value */
 
 	for (i = 0; i < len; i++) {
 		c = buf[i];
@@ -872,8 +923,8 @@ ether_crc32_be(const u_int8_t *buf, size_t len)
 	return (crc);
 }
 #else
-u_int32_t
-ether_crc32_le(const u_int8_t *buf, size_t len)
+u_int32_t __pure
+ether_crc32_le_update(u_int32_t crc, const u_int8_t *buf, size_t len)
 {
 	static const u_int32_t crctab[] = {
 		0x00000000, 0x1db71064, 0x3b6e20c8, 0x26d930ac,
@@ -882,9 +933,6 @@ ether_crc32_le(const u_int8_t *buf, size_t len)
 		0x9b64c2b0, 0x86d3d2d4, 0xa00ae278, 0xbdbdf21c
 	};
 	size_t i;
-	u_int32_t crc;
-
-	crc = 0xffffffffU;	/* initial value */
 
 	for (i = 0; i < len; i++) {
 		crc ^= buf[i];
@@ -895,8 +943,8 @@ ether_crc32_le(const u_int8_t *buf, size_t len)
 	return (crc);
 }
 
-u_int32_t
-ether_crc32_be(const u_int8_t *buf, size_t len)
+u_int32_t __pure
+ether_crc32_be_update(u_int32_t crc, const u_int8_t *buf, size_t len)
 {
 	static const u_int8_t rev[] = {
 		0x0, 0x8, 0x4, 0xc, 0x2, 0xa, 0x6, 0xe,
@@ -909,10 +957,8 @@ ether_crc32_be(const u_int8_t *buf, size_t len)
 		0x350c9b64, 0x31cd86d3, 0x3c8ea00a, 0x384fbdbd
 	};
 	size_t i;
-	u_int32_t crc;
 	u_int8_t data;
 
-	crc = 0xffffffffU;	/* initial value */
 	for (i = 0; i < len; i++) {
 		data = buf[i];
 		crc = (crc << 4) ^ crctab[(crc >> 28) ^ rev[data & 0xf]];
@@ -922,6 +968,18 @@ ether_crc32_be(const u_int8_t *buf, size_t len)
 	return (crc);
 }
 #endif
+
+u_int32_t
+ether_crc32_le(const u_int8_t *buf, size_t len)
+{
+	return ether_crc32_le_update(0xffffffff, buf, len);
+}
+
+u_int32_t
+ether_crc32_be(const u_int8_t *buf, size_t len)
+{
+	return ether_crc32_be_update(0xffffffff, buf, len);
+}
 
 #ifdef INET
 u_char	ether_ipmulticast_min[ETHER_ADDR_LEN] =

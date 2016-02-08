@@ -10,7 +10,7 @@ static const char yysccsid[] = "@(#)yaccpar	1.9 (Berkeley) 02/21/93";
 extern int yyparse(void);
 #define YYPREFIX "yy"
 #line 2 "a2p.y"
-/* $RCSfile: a2p.c,v $$Revision: 1.8 $$Date: 2006/03/28 19:23:15 $
+/* $RCSfile: a2p.c,v $$Revision: 1.9 $$Date: 2008/07/09 13:56:10 $
  *
  *    Copyright (C) 1991, 1992, 1993, 1994, 1996, 1997, 1999, 2000,
  *    by Larry Wall and others
@@ -19,6 +19,12 @@ extern int yyparse(void);
  *    License or the Artistic License, as specified in the README file.
  *
  * $Log: a2p.c,v $
+ * Revision 1.9  2008/07/09 13:56:10  millert
+ * Incorporate Otto's yacc skeleton fix.
+ *
+ * Revision 1.9  2008/07/09 13:54:44  millert
+ * Incorporate Otto's yacc skeleton fix.
+ *
  * Revision 1.8  2006/03/28 19:23:15  millert
  * merge in perl 5.8.8
  *
@@ -2315,7 +2321,10 @@ yyreduce:
                 YYPREFIX, yystate, yyn, yyrule[yyn]);
 #endif
     yym = yylen[yyn];
-    yyval = yyvsp[1-yym];
+    if (yym)
+	yyval = yyvsp[1-yym];
+    else
+	memset(&yyval, 0, sizeof(yyval));
     switch (yyn)
     {
 case 1:

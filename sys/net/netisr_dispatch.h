@@ -1,4 +1,4 @@
-/*	$OpenBSD: netisr_dispatch.h,v 1.13 2007/06/06 10:04:36 henning Exp $	*/
+/*	$OpenBSD: netisr_dispatch.h,v 1.16 2008/05/07 05:51:12 mpf Exp $	*/
 /* $NetBSD: netisr_dispatch.h,v 1.2 2000/07/02 04:40:47 cgd Exp $ */
 
 /*
@@ -34,8 +34,6 @@
  * their prototypes in <net/netisr.h> (if necessary).
  */
 
-	DONETISR(NETISR_RND,netrndintr);
-
 #ifdef INET
 #if NETHER > 0
 	DONETISR(NETISR_ARP,arpintr);
@@ -44,6 +42,9 @@
 #endif
 #ifdef INET6
 	DONETISR(NETISR_IPV6,ip6intr);
+#endif
+#ifdef MPLS
+	DONETISR(NETISR_MPLS,mplsintr);
 #endif
 #ifdef NETATALK
 	DONETISR(NETISR_ATALK,atintr);
@@ -63,3 +64,4 @@
 #if NBLUETOOTH > 0
 	DONETISR(NETISR_BT,btintr);
 #endif
+	DONETISR(NETISR_TX,nettxintr);

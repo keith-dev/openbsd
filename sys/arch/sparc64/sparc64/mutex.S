@@ -1,4 +1,4 @@
-/*	$OpenBSD: mutex.S,v 1.1 2007/08/25 18:36:47 kettenis Exp $	*/
+/*	$OpenBSD: mutex.S,v 1.3 2008/04/13 16:32:55 kettenis Exp $	*/
 
 /*
  * Copyright (c) 2007 Mark Kettenis
@@ -25,6 +25,19 @@
 #include <machine/asm.h>
 #include <machine/param.h>
 
+#ifdef MULTIPROCESSOR
+
+#define GET_CURCPU(ci) \
+	ldx	[%g7 + CI_SELF], ci
+
+#else
+
+#define GET_CURCPU(ci) \
+	set	CPUINFO_VA, ci
+
+#endif
+
+
 ENTRY(mtx_init)
 	stx	%g0, [%o0 + MTX_OWNER]
 	stw	%o1, [%o0 + MTX_WANTIPL]
@@ -32,13 +45,8 @@ ENTRY(mtx_init)
 	 stw	%g0, [%o0 + MTX_OLDIPL]
 
 ENTRY(mtx_enter)
-#ifdef MULTIPROCESSOR
-	sethi	%hi(CPUINFO_VA+CI_SELF), %g1
-	ldx	[%g1 + %lo(CPUINFO_VA+CI_SELF)], %g1
-#else
-	set	CPUINFO_VA, %g1
-#endif
 	rdpr	%pil, %g4
+	GET_CURCPU(%g1)
 1:
 	ld	[%o0 + MTX_WANTIPL], %g5
 	cmp	%g4, %g5

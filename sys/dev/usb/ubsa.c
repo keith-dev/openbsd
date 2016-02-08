@@ -1,4 +1,4 @@
-/*	$OpenBSD: ubsa.c,v 1.32 2008/02/26 18:32:06 deraadt Exp $ 	*/
+/*	$OpenBSD: ubsa.c,v 1.36 2008/07/20 14:24:49 yuo Exp $ 	*/
 /*	$NetBSD: ubsa.c,v 1.5 2002/11/25 00:51:33 fvdl Exp $	*/
 /*-
  * Copyright (c) 2002, Alexander Kabaev <kan.FreeBSD.org>.
@@ -40,13 +40,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -222,8 +215,6 @@ const struct usb_devno ubsa_devs[] = {
 	{ USB_VENDOR_ETEK, USB_PRODUCT_ETEK_1COM },
 	/* GoHubs GO-COM232 */
 	{ USB_VENDOR_GOHUBS, USB_PRODUCT_GOHUBS_GOCOM232 },
-	/* HUAWEI Mobile */
-	{ USB_VENDOR_HUAWEI, USB_PRODUCT_HUAWEI_E618 },
 	/* Novatel Wireless U740 */
 	{ USB_VENDOR_NOVATEL, USB_PRODUCT_NOVATEL_MERLINU740 },
 	/* Option Vodafone Mobile Connect 3G */
@@ -236,6 +227,8 @@ const struct usb_devno ubsa_devs[] = {
 	{ USB_VENDOR_OPTION, USB_PRODUCT_OPTION_GT3GQUADPLUS },
 	/* Peracom */
 	{ USB_VENDOR_PERACOM, USB_PRODUCT_PERACOM_SERIAL1 },
+	/* Qualcomm Inc. ZTE CMDMA MSM modem */
+	{ USB_VENDOR_QUALCOMM3, USB_PRODUCT_QUALCOMM3_CDMA_MSM },
 };
 #define ubsa_lookup(v, p) usb_lookup(ubsa_devs, v, p)
 
@@ -703,8 +696,10 @@ ubsa_intr(usbd_xfer_handle xfer, usbd_private_handle priv, usbd_status status)
 {
 	struct ubsa_softc *sc = priv;
 	u_char *buf;
+	usb_cdc_notification_t *cdcbuf;
 
 	buf = sc->sc_intr_buf;
+	cdcbuf = (usb_cdc_notification_t *)sc->sc_intr_buf;
 	if (sc->sc_dying)
 		return;
 
@@ -717,6 +712,24 @@ ubsa_intr(usbd_xfer_handle xfer, usbd_private_handle priv, usbd_status status)
 		usbd_clear_endpoint_stall_async(sc->sc_intr_pipe);
 		return;
 	}
+
+#if 1 /* test */
+	if (cdcbuf->bmRequestType == UCDC_NOTIFICATION) {
+		printf("%s: this device is using CDC notify message in" 
+		    " intr pipe.\n"
+		    "Please send your dmesg to <bugs@openbsd.org>, thanks.\n",
+		    sc->sc_dev.dv_xname);
+		printf("%s: intr buffer 0x%x 0x%x 0x%x 0x%x 0x%x 0x%x 0x%x\n", 
+		    sc->sc_dev.dv_xname,
+		    buf[0], buf[1], buf[2], buf[3], buf[4], buf[5], buf[6]);
+
+		/* check the buffer data */
+		if (cdcbuf->bNotification == UCDC_N_SERIAL_STATE)
+			printf("%s:notify serial state, len=%d, data=0x%02x\n",
+			    sc->sc_dev.dv_xname,
+			    cdcbuf->wLength, cdcbuf->data[0]);
+	}
+#endif
 
 	/* incidentally, Belkin adapter status bits match UART 16550 bits */
 	sc->sc_lsr = buf[2];

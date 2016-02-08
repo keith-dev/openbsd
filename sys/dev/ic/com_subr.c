@@ -1,4 +1,4 @@
-/*	$OpenBSD: com_subr.c,v 1.11 2007/10/22 14:11:44 fgsch Exp $	*/
+/*	$OpenBSD: com_subr.c,v 1.14 2008/05/21 18:49:47 kettenis Exp $	*/
 
 /*
  * Copyright (c) 1997 - 1999, Jason Downs.  All rights reserved.
@@ -68,14 +68,10 @@
 #include <sys/tty.h>
 
 #include "com.h"
-#ifdef i386
-#include "pccom.h"
-#else
 #define	NPCCOM	0
-#endif
 
 #include <machine/bus.h>
-#if defined(__sparc64__) || !defined(__sparc__)
+#if !defined(__sparc__) || defined(__sparc64__)
 #include <machine/intr.h>
 #endif
 
@@ -90,9 +86,6 @@
 
 #if NCOM > 0
 #include <dev/ic/comvar.h>
-#endif
-#if NPCCOM > 0
-#include <i386/isa/pccomvar.h>
 #endif
 
 #ifdef COM_PXA2X0
@@ -150,7 +143,7 @@ com_attach_subr(sc)
 	bus_space_write_1(iot, ioh, com_ier, sc->sc_ier);
 
 #ifdef COM_CONSOLE
-	if (sc->sc_iobase == comconsaddr) {
+	if (sc->sc_iot == comconsiot && sc->sc_iobase == comconsaddr) {
 		comconsattached = 1;
 		delay(10000);			/* wait for output to finish */
 		SET(sc->sc_hwflags, COM_HW_CONSOLE);

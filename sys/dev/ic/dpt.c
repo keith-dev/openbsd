@@ -1,4 +1,4 @@
-/*	$OpenBSD: dpt.c,v 1.13 2007/11/05 20:30:44 krw Exp $	*/
+/*	$OpenBSD: dpt.c,v 1.16 2008/07/30 18:08:04 miod Exp $	*/
 /*	$NetBSD: dpt.c,v 1.12 1999/10/23 16:26:33 ad Exp $	*/
 
 /*-
@@ -17,13 +17,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -68,11 +61,6 @@
  * o An interface to userland applications.
  * o Some sysctls or a utility (eg dptctl(8)) to control parameters.
  */
-
-#include <sys/cdefs.h>
-#ifdef __NetBSD__
-__KERNEL_RCSID(0, "$NetBSD: dpt.c,v 1.12 1999/10/23 16:26:33 ad Exp $");
-#endif /* __NetBSD__ */
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -376,12 +364,8 @@ dpt_init(sc, intrstr)
 	if (intrstr != NULL)
 		printf("%s: interrupting at %s\n", sc->sc_dv.dv_xname, intrstr);
 
-	printf("%s: %d queued commands, %d channel(s), adapter on ID(s)", 
+	printf("%s: %d queued commands, %d channel(s)\n", 
 	    sc->sc_dv.dv_xname, sc->sc_nccbs, ec->ec_maxchannel + 1);
-
-	for (i = 0; i <= ec->ec_maxchannel; i++)
-		printf(" %d", ec->ec_hba[3 - i]);
-	printf("\n");
 
 	/* Reset the SCSI bus */
 	if (dpt_cmd(sc, NULL, 0, CP_IMMEDIATE, CPI_BUS_RESET))

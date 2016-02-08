@@ -1,4 +1,4 @@
-/*	$OpenBSD: maestro.c,v 1.23 2007/10/22 21:42:14 ratchov Exp $	*/
+/*	$OpenBSD: maestro.c,v 1.25 2008/05/29 02:10:01 jakemsr Exp $	*/
 /* $FreeBSD: /c/ncvs/src/sys/dev/sound/pci/maestro.c,v 1.3 2000/11/21 12:22:11 julian Exp $ */
 /*
  * FreeBSD's ESS Agogo/Maestro driver 
@@ -483,6 +483,7 @@ void	maestro_close(void *);
 int	maestro_query_encoding(void *, struct audio_encoding *);
 int	maestro_set_params(void *, int, int, struct audio_params *, 
 			    struct audio_params *);
+void	maestro_get_default_params(void *, int, struct audio_params *);
 int	maestro_round_blocksize(void *, int);
 int	maestro_halt_output(void *);
 int	maestro_halt_input(void *);
@@ -571,7 +572,8 @@ struct audio_hw_if maestro_hw_if = {
 	maestro_mappage,
 	maestro_get_props,
 	maestro_trigger_output,
-	maestro_trigger_input
+	maestro_trigger_input,
+	maestro_get_default_params
 };
 
 struct audio_device maestro_audev = {
@@ -997,6 +999,12 @@ maestro_query_encoding(hdl, fp)
 		return (EINVAL);
 	*fp = maestro_tab[fp->index];
 	return (0);
+}
+
+void
+maestro_get_default_params(void *addr, int mode, struct audio_params *params)
+{
+	ac97_get_default_params(params);
 }
 
 #define UNUSED __attribute__((unused))

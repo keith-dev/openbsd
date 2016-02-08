@@ -1,4 +1,4 @@
-/*	$OpenBSD: procfs_vnops.c,v 1.41 2007/09/01 15:14:44 martin Exp $	*/
+/*	$OpenBSD: procfs_vnops.c,v 1.45 2008/06/09 23:38:37 millert Exp $	*/
 /*	$NetBSD: procfs_vnops.c,v 1.40 1996/03/16 23:52:55 christos Exp $	*/
 
 /*
@@ -118,35 +118,20 @@ static pid_t atopid(const char *, u_int);
 int	procfs_badop(void *);
 
 int	procfs_lookup(void *);
-#define	procfs_create	procfs_badop
-#define	procfs_mknod	procfs_badop
 int	procfs_open(void *);
 int	procfs_close(void *);
 int	procfs_access(void *);
 int	procfs_getattr(void *);
 int	procfs_setattr(void *);
-#define	procfs_read	procfs_rw
-#define	procfs_write	procfs_rw
 int	procfs_ioctl(void *);
-#define	procfs_fsync	procfs_badop
-#define	procfs_remove	procfs_badop
 int	procfs_link(void *);
-#define	procfs_rename	procfs_badop
-#define	procfs_mkdir	procfs_badop
-#define	procfs_rmdir	procfs_badop
 int	procfs_symlink(void *);
 int	procfs_readdir(void *);
 int	procfs_readlink(void *);
 int	procfs_inactive(void *);
 int	procfs_reclaim(void *);
-#define	procfs_lock	nullop
-#define	procfs_unlock	nullop
-int	procfs_bmap(void *);
-#define	procfs_strategy	procfs_badop
 int	procfs_print(void *);
 int	procfs_pathconf(void *);
-#define	procfs_islocked	nullop
-#define	procfs_advlock	procfs_badop
 
 static pid_t atopid(const char *, u_int);
 
@@ -155,39 +140,39 @@ static pid_t atopid(const char *, u_int);
  */
 int (**procfs_vnodeop_p)(void *);
 struct vnodeopv_entry_desc procfs_vnodeop_entries[] = {
-	{ &vop_default_desc, vn_default_error },
+	{ &vop_default_desc, eopnotsupp },
 	{ &vop_lookup_desc, procfs_lookup },		/* lookup */
-	{ &vop_create_desc, procfs_create },		/* create */
-	{ &vop_mknod_desc, procfs_mknod },		/* mknod */
+	{ &vop_create_desc, procfs_badop },		/* create */
+	{ &vop_mknod_desc, procfs_badop },		/* mknod */
 	{ &vop_open_desc, procfs_open },		/* open */
 	{ &vop_close_desc, procfs_close },		/* close */
 	{ &vop_access_desc, procfs_access },		/* access */
 	{ &vop_getattr_desc, procfs_getattr },		/* getattr */
 	{ &vop_setattr_desc, procfs_setattr },		/* setattr */
-	{ &vop_read_desc, procfs_read },		/* read */
-	{ &vop_write_desc, procfs_write },		/* write */
+	{ &vop_read_desc, procfs_rw },			/* read */
+	{ &vop_write_desc, procfs_rw },			/* write */
 	{ &vop_ioctl_desc, procfs_ioctl },		/* ioctl */
 	{ &vop_poll_desc, procfs_poll },		/* poll */
-	{ &vop_fsync_desc, procfs_fsync },		/* fsync */
-	{ &vop_remove_desc, procfs_remove },		/* remove */
+	{ &vop_fsync_desc, procfs_badop},		/* fsync */
+	{ &vop_remove_desc, procfs_badop },		/* remove */
 	{ &vop_link_desc, procfs_link },		/* link */
-	{ &vop_rename_desc, procfs_rename },		/* rename */
-	{ &vop_mkdir_desc, procfs_mkdir },		/* mkdir */
-	{ &vop_rmdir_desc, procfs_rmdir },		/* rmdir */
+	{ &vop_rename_desc, procfs_badop },		/* rename */
+	{ &vop_mkdir_desc, procfs_badop },		/* mkdir */
+	{ &vop_rmdir_desc, procfs_badop },		/* rmdir */
 	{ &vop_symlink_desc, procfs_symlink },		/* symlink */
 	{ &vop_readdir_desc, procfs_readdir },		/* readdir */
 	{ &vop_readlink_desc, procfs_readlink },	/* readlink */
 	{ &vop_abortop_desc, vop_generic_abortop },	/* abortop */
 	{ &vop_inactive_desc, procfs_inactive },	/* inactive */
 	{ &vop_reclaim_desc, procfs_reclaim },		/* reclaim */
-	{ &vop_lock_desc, procfs_lock },		/* lock */
-	{ &vop_unlock_desc, procfs_unlock },		/* unlock */
-	{ &vop_bmap_desc, procfs_bmap },		/* bmap */
-	{ &vop_strategy_desc, procfs_strategy },	/* strategy */
+	{ &vop_lock_desc, nullop },			/* lock */
+	{ &vop_unlock_desc, nullop },			/* unlock */
+	{ &vop_bmap_desc, vop_generic_bmap },		/* bmap */
+	{ &vop_strategy_desc, procfs_badop },		/* strategy */
 	{ &vop_print_desc, procfs_print },		/* print */
-	{ &vop_islocked_desc, procfs_islocked },	/* islocked */
+	{ &vop_islocked_desc, nullop },			/* islocked */
 	{ &vop_pathconf_desc, procfs_pathconf },	/* pathconf */
-	{ &vop_advlock_desc, procfs_advlock },		/* advlock */
+	{ &vop_advlock_desc, procfs_badop },		/* advlock */
 	{ NULL, NULL }
 };
 struct vnodeopv_desc procfs_vnodeop_opv_desc =
@@ -284,28 +269,6 @@ procfs_ioctl(void *v)
 {
 
 	return (ENOTTY);
-}
-
-/*
- * do block mapping for pfsnode (vp).
- * since we don't use the buffer cache
- * for procfs this function should never
- * be called.  in any case, it's not clear
- * what part of the kernel ever makes use
- * of this function.  for sanity, this is the
- * usual no-op bmap, although returning
- * (EIO) would be a reasonable alternative.
- */
-int
-procfs_bmap(void *v)
-{
-	struct vop_bmap_args *ap = v;
-
-	if (ap->a_vpp != NULL)
-		*ap->a_vpp = ap->a_vp;
-	if (ap->a_bnp != NULL)
-		*ap->a_bnp = ap->a_bn;
-	return (0);
 }
 
 /*
@@ -657,8 +620,8 @@ procfs_access(void *v)
 	if ((error = VOP_GETATTR(ap->a_vp, &va, ap->a_cred, ap->a_p)) != 0)
 		return (error);
 
-	return (vaccess(va.va_mode, va.va_uid, va.va_gid, ap->a_mode,
-			ap->a_cred));
+	return (vaccess(ap->a_vp->v_type, va.va_mode, va.va_uid, va.va_gid,
+			ap->a_mode, ap->a_cred));
 }
 
 /*

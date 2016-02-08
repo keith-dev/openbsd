@@ -39,7 +39,7 @@ Boston, MA 02111-1307, USA.  */
 
 #ifdef __ELF__
 #define LOCAL(X) .L_##X
-#define	FUNC(X,Y) .type X,Y
+#define	FUNC(X,Y) .type X,Y; .hidden X
 #define	ENDFUNC(X) .size X,.-X
 #else
 #define LOCAL(X) L_##X
@@ -376,7 +376,7 @@ LOCAL(ashrsi3_0):
 ! (none)
 !
 	.global	GLOBAL(ashlsi3)
-	FUNC(GLOBAL(ashrsi3),function)
+	FUNC(GLOBAL(ashlsi3),function)
 	.align	2
 GLOBAL(ashlsi3):
 	mov	#31,r0
@@ -390,7 +390,7 @@ GLOBAL(ashlsi3):
 	braf	r5
 #endif
 	mov	r4,r0
-	ENDFUNC(GLOBAL(ashrsi3))
+	ENDFUNC(GLOBAL(ashlsi3))
 
 	.align	2
 LOCAL(ashlsi3_table):
@@ -1895,7 +1895,17 @@ GLOBAL(moddi3):
 	FUNC(GLOBAL(set_fpscr),function)
 GLOBAL(set_fpscr):
 	lds r4,fpscr
+#ifdef __PIC__
+	mov.l	r12,@-r15
+	mova	LOCAL(set_fpscr_L0),r0
+	mov.l	LOCAL(set_fpscr_L0),r12
+	add	r0,r12
+	mov.l	LOCAL(set_fpscr_L1),r0
+	mov.l	@(r0,r12),r1
+	mov.l	@r15+,r12
+#else
 	mov.l LOCAL(set_fpscr_L1),r1
+#endif
 	swap.w r4,r0
 	or #24,r0
 #ifndef FMOVD_WORKS
@@ -1923,8 +1933,16 @@ GLOBAL(set_fpscr):
 	mov.l r3,@(4,r1)
 #endif
 	.align 2
+#ifdef __PIC__
+LOCAL(set_fpscr_L0):
+	.long _GLOBAL_OFFSET_TABLE_
+LOCAL(set_fpscr_L1):
+	.long GLOBAL(fpscr_values@GOT)
+#else
 LOCAL(set_fpscr_L1):
 	.long GLOBAL(fpscr_values)
+#endif
+
 #ifdef __ELF__
         .comm   GLOBAL(fpscr_values),8,4
 #else

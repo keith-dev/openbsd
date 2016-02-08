@@ -1,4 +1,4 @@
-/*	$OpenBSD: ebus.c,v 1.20 2008/02/17 22:01:27 kettenis Exp $	*/
+/*	$OpenBSD: ebus.c,v 1.22 2008/06/11 05:15:43 kettenis Exp $	*/
 /*	$NetBSD: ebus.c,v 1.24 2001/07/25 03:49:54 eeh Exp $	*/
 
 /*
@@ -131,6 +131,13 @@ ebus_match(struct device *parent, void *match, void *aux)
 		strcmp(name, "ebus") == 0)
 		return (1);
 
+	/* Or a fake ebus */
+	if (PCI_CLASS(pa->pa_class) == PCI_CLASS_BRIDGE &&
+	    PCI_VENDOR(pa->pa_id) == PCI_VENDOR_ALTERA &&
+	    PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_ALTERA_EBUS &&
+		strcmp(name, "ebus") == 0)
+		return (1);
+
 	/* Or a PCI-ISA bridge XXX I hope this is on-board. */
 	if (PCI_CLASS(pa->pa_class) == PCI_CLASS_BRIDGE &&
 	    PCI_SUBCLASS(pa->pa_class) == PCI_SUBCLASS_BRIDGE_ISA) {
@@ -201,6 +208,9 @@ ebus_attach(struct device *parent, struct device *self, void *aux)
 	 */
 	DPRINTF(EDB_CHILD, ("ebus node %08x, searching children...\n", node));
 	for (node = firstchild(node); node; node = nextsibling(node)) {
+		if (!checkstatus(node))
+			continue;
+
 		if (ebus_setup_attach_args(sc, node, &eba) != 0) {
 			DPRINTF(EDB_CHILD,
 			    ("ebus_attach: %s: incomplete\n",

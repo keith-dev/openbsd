@@ -1,5 +1,5 @@
 # ex:ts=8 sw=4:
-# $OpenBSD: Error.pm,v 1.11 2007/06/04 14:40:39 espie Exp $
+# $OpenBSD: Error.pm,v 1.13 2008/06/21 13:23:09 espie Exp $
 #
 # Copyright (c) 2004 Marc Espie <espie@openbsd.org>
 #
@@ -20,16 +20,75 @@ use warnings;
 
 package OpenBSD::Error;
 our @ISA=qw(Exporter);
-our @EXPORT=qw(System VSystem Copy Fatal Warn Usage set_usage 
+our @EXPORT=qw(System VSystem Copy Unlink Fatal Warn Usage set_usage 
     try throw catch catchall rethrow);
 
 our ($FileName, $Line, $FullMessage);
+
+my @signal_name = ();
+
+sub fillup_names
+{
+	{
+	# XXX force autoload
+	package verylocal;
+
+	require POSIX;
+	POSIX->import(qw(signal_h));
+	}
+
+	for my $sym (keys %POSIX::) {
+		next unless $sym =~ /^SIG([A-Z].*)/;
+		$signal_name[eval "&POSIX::$sym()"] = $1;
+	}
+	# extra BSD signals
+	$signal_name[5] = 'TRAP';
+	$signal_name[7] = 'IOT';
+	$signal_name[10] = 'BUS';
+	$signal_name[12] = 'SYS';
+	$signal_name[16] = 'URG';
+	$signal_name[23] = 'IO';
+	$signal_name[24] = 'XCPU';
+	$signal_name[25] = 'XFSZ';
+	$signal_name[26] = 'VTALRM';
+	$signal_name[27] = 'PROF';
+	$signal_name[28] = 'WINCH';
+	$signal_name[29] = 'INFO';
+}
+
+sub find_signal
+{
+	my $number =  shift;
+
+	if (@signal_name == 0) {
+		fillup_names();
+	}
+
+	return $signal_name[$number] || $number;
+}
+
+sub child_error
+{
+	my $error = $?;
+
+	my $extra = "";
+
+	if ($error & 128) {
+		$extra = " (core dumped)";
+	} 
+	if ($error & 127) {
+		return "killed by signal ". find_signal($error & 127).$extra;
+	} else {
+		return "exit(". ($error >> 8) . ")$extra";
+	}
+}
 
 sub System
 {
 	my $r = system(@_);
 	if ($r != 0) {
-		print "system(", join(", ", @_), ") failed: $?\n";
+		print "system(", join(", ", @_), ") failed: ", child_error(), 
+		    "\n";
 	}
 	return $r;
 }
@@ -43,7 +102,7 @@ sub VSystem
 		print "Running ", join(' ', @_);
 		my $r = system(@_);
 		if ($r != 0) {
-			print "... failed: $?\n";
+			print "... failed: ", child_error(), "\n";
 		} else {
 			print "\n";
 		}
@@ -57,6 +116,18 @@ sub Copy
 	my $r = File::Copy::copy(@_);
 	if (!$r) {
 		print "copy(", join(',', @_),") failed: $!\n";
+	}
+	return $r;
+}
+
+sub Unlink
+{
+	my $verbose = shift;
+	my $r = unlink @_;
+	if ($r != @_) {
+		print "rm @_ failed: removed only $r targets, $!\n";
+	} elsif ($verbose) {
+		print "rm @_\n";
 	}
 	return $r;
 }
@@ -131,11 +202,13 @@ sub system
 			$state->print($_);
 		}
 		if (!close $grab) {
-		    $state->print("system(", join(", ", @_), ") failed: $! $?\n");
+		    $state->print("system(", join(", ", @_), ") failed: $! ", 
+		    	child_error(), "\n");
 		}
 		return $?;
 	} else {
-		    $state->print("system(", join(", ", @_), ") was not run: $! $?\n");
+		    $state->print("system(", join(", ", @_), 
+		    	") was not run: $!", child_error(), "\n");
 	}
 }
 

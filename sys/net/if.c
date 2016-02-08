@@ -1,4 +1,4 @@
-/*	$OpenBSD: if.c,v 1.168 2008/01/05 19:08:19 henning Exp $	*/
+/*	$OpenBSD: if.c,v 1.173 2008/06/12 16:15:05 claudio Exp $	*/
 /*	$NetBSD: if.c,v 1.35 1996/05/07 05:26:04 thorpej Exp $	*/
 
 /*
@@ -87,8 +87,6 @@
 #include <net/route.h>
 #include <net/netisr.h>
 
-#include <dev/rndvar.h>
-
 #ifdef INET
 #include <netinet/in.h>
 #include <netinet/in_var.h>
@@ -174,6 +172,7 @@ int if_indexlim = 0;
 struct ifaddr **ifnet_addrs = NULL;
 struct ifnet **ifindex2ifnet = NULL;
 struct ifnet_head ifnet;
+struct ifnet_head iftxlist = TAILQ_HEAD_INITIALIZER(iftxlist);
 struct ifnet *lo0ifp;
 
 /*
@@ -459,6 +458,40 @@ if_attach(struct ifnet *ifp)
 	if_attachsetup(ifp);
 }
 
+void
+if_start(struct ifnet *ifp)
+{
+	if (IF_QFULL(&ifp->if_snd) && !ISSET(ifp->if_flags, IFF_OACTIVE)) {
+		if (ISSET(ifp->if_xflags, IFXF_TXREADY)) {
+			TAILQ_REMOVE(&iftxlist, ifp, if_txlist);
+			CLR(ifp->if_xflags, IFXF_TXREADY);
+		}
+		ifp->if_start(ifp);
+		return;
+	}
+
+	if (!ISSET(ifp->if_xflags, IFXF_TXREADY)) {
+		SET(ifp->if_xflags, IFXF_TXREADY);
+		TAILQ_INSERT_TAIL(&iftxlist, ifp, if_txlist);
+		schednetisr(NETISR_TX);
+	}
+}
+
+void
+nettxintr(void)
+{
+	struct ifnet *ifp;
+	int s;
+
+	s = splnet();
+	while ((ifp = TAILQ_FIRST(&iftxlist)) != NULL) {
+		TAILQ_REMOVE(&iftxlist, ifp, if_txlist);
+		CLR(ifp->if_xflags, IFXF_TXREADY);
+		ifp->if_start(ifp);
+	}
+	splx(s);
+}
+
 /*
  * Detach an interface from everything in the kernel.  Also deallocate
  * private resources.
@@ -559,6 +592,8 @@ do { \
 
 	/* Remove the interface from the list of all interfaces.  */
 	TAILQ_REMOVE(&ifnet, ifp, if_list);
+	if (ISSET(ifp->if_xflags, IFXF_TXREADY))
+		TAILQ_REMOVE(&iftxlist, ifp, if_txlist);
 
 	/*
 	 * Deallocate private resources.
@@ -1386,7 +1421,7 @@ ifioctl(struct socket *so, u_long cmd, caddr_t data, struct proc *p)
 #if !defined(COMPAT_43) && !defined(COMPAT_LINUX) && !defined(COMPAT_SVR4)
 		error = ((*so->so_proto->pr_usrreq)(so, PRU_CONTROL,
 			(struct mbuf *) cmd, (struct mbuf *) data,
-			(struct mbuf *) ifp));
+			(struct mbuf *) ifp, p));
 #else
 	    {
 		u_long ocmd = cmd;
@@ -1426,7 +1461,7 @@ ifioctl(struct socket *so, u_long cmd, caddr_t data, struct proc *p)
 		}
 		error = ((*so->so_proto->pr_usrreq)(so, PRU_CONTROL,
 		    (struct mbuf *) cmd, (struct mbuf *) data,
-		    (struct mbuf *) ifp));
+		    (struct mbuf *) ifp, p));
 		switch (ocmd) {
 
 		case OSIOCGIFADDR:
@@ -1830,14 +1865,16 @@ if_group_routechange(struct sockaddr *dst, struct sockaddr *mask)
 {
 	switch (dst->sa_family) {
 	case AF_INET:
-		if (satosin(dst)->sin_addr.s_addr == INADDR_ANY)
+		if (satosin(dst)->sin_addr.s_addr == INADDR_ANY &&
+		    mask && (mask->sa_len == 0 ||
+		    satosin(mask)->sin_addr.s_addr == INADDR_ANY))
 			if_group_egress_build();
 		break;
 #ifdef INET6
 	case AF_INET6:
 		if (IN6_ARE_ADDR_EQUAL(&(satosin6(dst))->sin6_addr,
-		    &in6addr_any) &&
-		    mask && IN6_ARE_ADDR_EQUAL(&(satosin6(mask))->sin6_addr,
+		    &in6addr_any) && mask &&
+		    IN6_ARE_ADDR_EQUAL(&(satosin6(mask))->sin6_addr,
 		    &in6addr_any))
 			if_group_egress_build();
 		break;
@@ -1960,10 +1997,4 @@ sysctl_ifq(int *name, u_int namelen, void *oldp, size_t *oldlenp,
 		return (EOPNOTSUPP);
 	}
 	/* NOTREACHED */
-}
-
-void
-netrndintr(void)
-{
-	add_net_randomness(0);
 }

@@ -1,4 +1,4 @@
-/*	$OpenBSD: hotplugd.c,v 1.7 2006/05/28 16:44:52 mk Exp $	*/
+/*	$OpenBSD: hotplugd.c,v 1.9 2008/05/25 16:49:04 jasper Exp $	*/
 /*
  * Copyright (c) 2004 Alexander Yurchenko <grange@openbsd.org>
  *
@@ -72,6 +72,11 @@ main(int argc, char *argv[])
 			/* NOTREACHED */
 		}
 
+	argc -= optind;
+	argv += optind;
+	if (argc > 0)
+		usage();
+
 	if ((devfd = open(device, O_RDONLY)) == -1)
 		err(1, "%s", device);
 
@@ -136,9 +141,10 @@ exec_script(const char *file, int class, char *name)
 
 	snprintf(strclass, sizeof(strclass), "%d", class);
 
-	if (access(file, X_OK | R_OK))
-		/* do nothing if file can't be accessed */
+	if (access(file, X_OK | R_OK)) {
+		syslog(LOG_ERR, "could not access %s", file);
 		return;
+	}
 
 	if ((pid = fork()) == -1) {
 		syslog(LOG_ERR, "fork: %m");

@@ -1,4 +1,4 @@
-/*	$OpenBSD: gus.c,v 1.29 2006/03/04 12:42:23 miod Exp $	*/
+/*	$OpenBSD: gus.c,v 1.31 2008/06/26 05:42:16 ray Exp $	*/
 /*	$NetBSD: gus.c,v 1.51 1998/01/25 23:48:06 mycroft Exp $	*/
 
 /*-
@@ -16,13 +16,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *	  Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -304,6 +297,7 @@ struct audio_hw_if gus_hw_if = {
 	gus_get_props,
 
 	NULL,
+	NULL,
 	NULL
 };
 
@@ -340,6 +334,10 @@ static struct audio_hw_if gusmax_hw_if = {
 	ad1848_round,
 	ad1848_mappage,
 	gusmax_get_props,
+
+	NULL,
+	NULL,
+	NULL
 };
 
 /*

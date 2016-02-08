@@ -1,4 +1,4 @@
-/*	$OpenBSD: uchcom.c,v 1.4 2007/10/11 18:33:14 deraadt Exp $	*/
+/*	$OpenBSD: uchcom.c,v 1.7 2008/06/26 05:42:18 ray Exp $	*/
 /*	$NetBSD: uchcom.c,v 1.1 2007/09/03 17:57:37 tshiozak Exp $	*/
 
 /*
@@ -16,13 +16,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -217,18 +210,19 @@ int		uchcom_detach(struct device *, int);
 int		uchcom_activate(struct device *, enum devact);
 
 struct	ucom_methods uchcom_methods = {
-	.ucom_get_status	= uchcom_get_status,
-	.ucom_set		= uchcom_set,
-	.ucom_param		= uchcom_param,
-	.ucom_ioctl		= NULL,
-	.ucom_open		= uchcom_open,
-	.ucom_close		= uchcom_close,
-	.ucom_read		= NULL,
-	.ucom_write		= NULL,
+	uchcom_get_status,
+	uchcom_set,
+	uchcom_param,
+	NULL,
+	uchcom_open,
+	uchcom_close,
+	NULL,
+	NULL,
 };
 
 static const struct usb_devno uchcom_devs[] = {
 	{ USB_VENDOR_WCH, USB_PRODUCT_WCH_CH341 },
+	{ USB_VENDOR_WCH2, USB_PRODUCT_WCH2_CH341 },
 };
 #define uchcom_lookup(v, p)	usb_lookup(uchcom_devs, v, p)
 

@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.141 2007/10/19 14:28:15 deraadt Exp $
+#	$OpenBSD: Makefile,v 1.144 2008/06/04 21:12:50 deraadt Exp $
 #	$NetBSD: Makefile,v 1.59 1996/05/15 21:36:43 jtc Exp $
 
 #	@(#)Makefile	5.45.1.1 (Berkeley) 5/6/91
@@ -17,7 +17,7 @@ FILES=	a.out.h ar.h assert.h bitstring.h blf.h bm.h bsd_auth.h cast.h \
 	glob.h grp.h ifaddrs.h inttypes.h iso646.h kvm.h langinfo.h \
 	libgen.h limits.h locale.h login_cap.h malloc.h math.h md4.h \
 	md5.h memory.h mpool.h ndbm.h netdb.h netgroup.h nlist.h nl_types.h \
-	ohash.h olf_abi.h paths.h poll.h pwd.h ranlib.h re_comp.h \
+	ohash.h paths.h poll.h pwd.h ranlib.h re_comp.h \
 	readpassphrase.h regex.h resolv.h rmd160.h search.h setjmp.h \
 	sgtty.h sha1.h sha2.h skipjack.h signal.h stab.h stdbool.h stddef.h \
 	stdio.h stdlib.h string.h strings.h struct.h sysexits.h tar.h \
@@ -34,8 +34,8 @@ MFILES=	float.h frame.h
 LFILES=	fcntl.h syslog.h termios.h stdarg.h stdint.h varargs.h
 
 DIRS=	arpa protocols rpc rpcsvc
-LDIRS=	crypto ddb dev isofs miscfs net netatalk netinet altq \
-	netinet6 netnatm net80211 netbt nfs scsi sys ufs uvm xfs
+LDIRS=	altq crypto ddb dev isofs miscfs net netatalk netinet netinet6 \
+	netmpls netnatm net80211 netbt nfs scsi sys ufs uvm xfs
 
 # Directories with an includes target
 RDIRS=	../lib/libpthread ../lib/libcompat ../lib/libcurses \
@@ -149,7 +149,7 @@ copies:
 	if test ${MACHINE} != ${MACHINE_ARCH} -a \
 	    -d ../sys/arch/${MACHINE_ARCH}/include; then \
 		${INSTALL} -d -o ${BINOWN} -g ${BINGRP} -m 755 \
-    	    	    ${DESTDIR}/usr/include/${MACHINE_ARCH}; \
+	    	    ${DESTDIR}/usr/include/${MACHINE_ARCH}; \
 		pax -rw -pa -s "|\.\./sys/arch/${MACHINE_ARCH}/include||" \
 		    ../sys/arch/${MACHINE_ARCH}/include/*.h \
 		    ${DESTDIR}/usr/include/${MACHINE_ARCH}; \

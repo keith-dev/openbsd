@@ -1,4 +1,4 @@
-/* $OpenBSD: disksubr.c,v 1.33 2007/06/20 18:15:45 deraadt Exp $ */
+/* $OpenBSD: disksubr.c,v 1.37 2008/06/29 20:05:22 krw Exp $ */
 /* $NetBSD: disksubr.c,v 1.12 2002/02/19 17:09:44 wiz Exp $ */
 
 /*
@@ -124,7 +124,7 @@ readdisklabel(dev_t dev, void (*strat)(struct buf *),
 	bp->b_blkno = LABELSECTOR;
 	bp->b_cylinder = 0;
 	bp->b_bcount = lp->d_secsize;
-	bp->b_flags = B_BUSY | B_READ;
+	bp->b_flags = B_BUSY | B_READ | B_RAW;
 	(*strat)(bp);
 	if (biowait(bp)) {
 		msg = "disk label read error";
@@ -179,7 +179,7 @@ writedisklabel(dev_t dev, void (*strat)(struct buf *), struct disklabel *lp)
 	bp->b_blkno = LABELSECTOR;
 	bp->b_cylinder = 0;
 	bp->b_bcount = lp->d_secsize;
-	bp->b_flags = B_BUSY | B_READ;
+	bp->b_flags = B_BUSY | B_READ | B_RAW;
 
 	(*strat)(bp);
 	error = biowait(bp);
@@ -191,7 +191,7 @@ writedisklabel(dev_t dev, void (*strat)(struct buf *), struct disklabel *lp)
 	if (error)
 		goto done;
 
-	bp->b_flags = B_BUSY | B_WRITE;
+	bp->b_flags = B_BUSY | B_WRITE | B_RAW;
 	(*strat)(bp);
 	error = biowait(bp);
 
@@ -252,7 +252,7 @@ disklabel_om_to_bsd(struct sun_disklabel *sl, struct disklabel *lp)
 	lp->d_flags = D_VENDOR;
 	memcpy(lp->d_packname, sl->sl_text, sizeof(lp->d_packname));
 
-	lp->d_secsize = 512;
+	lp->d_secsize = DEV_BSIZE;
 	lp->d_nsectors = sl->sl_nsectors;
 	lp->d_ntracks = sl->sl_ntracks;
 	lp->d_ncylinders = sl->sl_ncylinders;
@@ -328,7 +328,7 @@ disklabel_bsd_to_om(struct disklabel *lp, struct sun_disklabel *sl)
 	int i;
 	u_short cksum, *sp1, *sp2;
 
-	if (lp->d_secsize != 512)
+	if (lp->d_secsize != DEV_BSIZE)
 		return (EINVAL);
 
 	/* Format conversion. */

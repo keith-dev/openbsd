@@ -1,4 +1,4 @@
-/*	$OpenBSD: in6.h,v 1.44 2007/01/22 06:12:18 miod Exp $	*/
+/*	$OpenBSD: in6.h,v 1.46 2008/06/11 06:30:36 mcbride Exp $	*/
 /*	$KAME: in6.h,v 1.83 2001/03/29 02:55:07 jinmei Exp $	*/
 
 /*
@@ -229,7 +229,7 @@ extern const struct in6_addr in6addr_linklocal_allrouters;
 
 /*
  * Equality
- * NOTE: Some of kernel programming environment (for example, openbsd/sparc)
+ * NOTE: Some of kernel programming environment (for example, OpenBSD/sparc)
  * does not supply memcmp().  For userland memcmp() is preferred as it is
  * in ANSI standard.
  */
@@ -607,14 +607,19 @@ struct ip6_mtuinfo {
 #define IPV6CTL_KAME_VERSION	20
 #define IPV6CTL_USE_DEPRECATED	21	/* use deprecated addr (RFC2462 5.5.4) */
 #define IPV6CTL_RR_PRUNE	22	/* walk timer for router renumbering */
-/*#define IPV6CTL_MAPPED_ADDR	23	not for openbsd */
+/*#define IPV6CTL_MAPPED_ADDR	23	not for OpenBSD */
 #define IPV6CTL_V6ONLY		24
 /* 25 to 40: resrved */
 #define IPV6CTL_MAXFRAGS	41	/* max fragments */
 #define IPV6CTL_MFORWARDING	42
 #define IPV6CTL_MULTIPATH	43
 #define IPV6CTL_MCAST_PMTU	44	/* path MTU discovery for multicast */
-#define IPV6CTL_MAXID		45
+#define IPV6CTL_NEIGHBORGCTHRESH 45
+#define IPV6CTL_MAXIFPREFIXES	46
+#define IPV6CTL_MAXIFDEFROUTERS 47
+#define IPV6CTL_MAXDYNROUTES	48
+#define IPV6CTL_MAXID		49
+
 /* New entries should be added here from current IPV6CTL_MAXID value. */
 /* to define items, should talk with KAME guys first, for *BSD compatibility */
 
@@ -664,6 +669,10 @@ struct ip6_mtuinfo {
 	{ "mforwarding", CTLTYPE_INT }, \
 	{ "multipath", CTLTYPE_INT }, \
 	{ "multicast_mtudisc", CTLTYPE_INT }, \
+	{ "neighborgcthresh", CTLTYPE_INT }, \
+	{ "maxifprefixes", CTLTYPE_INT }, \
+	{ "maxifdefrouters", CTLTYPE_INT }, \
+	{ "maxdynroutes", CTLTYPE_INT }, \
 }
 
 #define IPV6CTL_VARS { \
@@ -712,6 +721,10 @@ struct ip6_mtuinfo {
 	&ip6_mforwarding, \
 	&ip6_multipath, \
 	&ip6_mcast_pmtu, \
+	&ip6_neighborgcthresh, \
+	&ip6_maxifprefixes, \
+	&ip6_maxifdefrouters, \
+	&ip6_maxdynroutes, \
 }
 
 #endif /* __BSD_VISIBLE */

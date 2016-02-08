@@ -1,4 +1,4 @@
-/*	$OpenBSD: intr.h,v 1.9 2008/02/14 19:07:56 kettenis Exp $	*/
+/*	$OpenBSD: intr.h,v 1.12 2008/06/26 05:42:13 ray Exp $	*/
 /*	$NetBSD: intr.h,v 1.8 2001/01/14 23:50:30 thorpej Exp $ */
 
 /*-
@@ -16,13 +16,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -62,6 +55,7 @@ struct intrhand {
 	struct intrhand		*ih_pending;	/* pending list */
 	volatile u_int64_t	*ih_map;	/* interrupt map reg */
 	volatile u_int64_t	*ih_clr;	/* clear interrupt reg */
+	void			(*ih_ack)(struct intrhand *);
 	struct evcount		ih_count;	/* # of interrupts */
 	const void		*ih_bus;	/* parent bus */
 	char			ih_name[32];	/* device name */
@@ -78,7 +72,7 @@ void    intr_establish(int, struct intrhand *);
 #define	IPL_SOFTNET	1		/* protocol stack */
 #define	IPL_BIO		PIL_BIO		/* block I/O */
 #define	IPL_NET		PIL_NET		/* network */
-#define	IPL_SOFTSERIAL	4		/* serial */
+#define	IPL_SOFTTTY	4		/* delayed terminal handling */
 #define	IPL_TTY		PIL_TTY		/* terminal */
 #define	IPL_VM		PIL_VM		/* memory allocation */
 #define	IPL_AUDIO	PIL_AUD		/* audio */
@@ -89,13 +83,8 @@ void    intr_establish(int, struct intrhand *);
 #define IPL_STATCLOCK	PIL_STATCLOCK	/* statclock */
 #define	IPL_HIGH	PIL_HIGH	/* everything */
 
-void *
-softintr_establish(int level, void (*fun)(void *), void *arg);
-
-void
-softintr_disestablish(void *cookie);
-
-void
-softintr_schedule(void *cookie);
+void	*softintr_establish(int, void (*)(void *), void *);
+void	 softintr_disestablish(void *);
+void	 softintr_schedule(void *);
 
 #endif /* _SPARC64_INTR_H_ */

@@ -1,4 +1,4 @@
-/*	$OpenBSD: syscall.c,v 1.11 2007/12/01 16:20:07 art Exp $	*/
+/*	$OpenBSD: syscall.c,v 1.13 2008/06/26 05:42:09 ray Exp $	*/
 /*	$NetBSD: syscall.c,v 1.1 2003/04/26 18:39:32 fvdl Exp $	*/
 
 /*-
@@ -16,13 +16,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -74,7 +67,7 @@ syscall(struct trapframe frame)
 	int nsys;
 	size_t argsize, argoff;
 	register_t code, args[9], rval[2], *argp;
-	int nolock;
+	int lock;
 
 	uvmexp.syscalls++;
 	p = curproc;
@@ -133,41 +126,36 @@ syscall(struct trapframe frame)
 		}
 	}
 
-	nolock = (callp->sy_flags & SY_NOLOCK);
+	lock = !(callp->sy_flags & SY_NOLOCK);
 
-	if (!nolock)
-		KERNEL_PROC_LOCK(p);
 #ifdef SYSCALL_DEBUG
-	if (nolock)
-		KERNEL_PROC_LOCK(p);
+	KERNEL_PROC_LOCK(p);
 	scdebug_call(p, code, argp);
-	if (nolock)
-		KERNEL_PROC_UNLOCK(p);
+	KERNEL_PROC_UNLOCK(p);
 #endif
 #ifdef KTRACE
 	if (KTRPOINT(p, KTR_SYSCALL)) {
-		if (nolock)
-			KERNEL_PROC_LOCK(p);
+		KERNEL_PROC_LOCK(p);
 		ktrsyscall(p, code, callp->sy_argsize, argp);
-		if (nolock)
-			KERNEL_PROC_UNLOCK(p);
+		KERNEL_PROC_UNLOCK(p);
 	}
 #endif
-
 	rval[0] = 0;
 	rval[1] = frame.tf_rdx;
 #if NSYSTRACE > 0
 	if (ISSET(p->p_flag, P_SYSTRACE)) {
-		if (nolock)
-			KERNEL_PROC_LOCK(p);
+		KERNEL_PROC_LOCK(p);
 		error = systrace_redirect(code, p, argp, rval);
-		if (nolock)
-			KERNEL_PROC_UNLOCK(p);
+		KERNEL_PROC_UNLOCK(p);
 	} else
 #endif
+	{
+		if (lock)
+			KERNEL_PROC_LOCK(p);
 		error = (*callp->sy_call)(p, argp, rval);
-	if (!nolock)
-		KERNEL_PROC_UNLOCK(p);
+		if (lock)
+			KERNEL_PROC_UNLOCK(p);
+	}
 	switch (error) {
 	case 0:
 		frame.tf_rax = rval[0];

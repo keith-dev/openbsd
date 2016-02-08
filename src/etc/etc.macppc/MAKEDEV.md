@@ -1,5 +1,6 @@
+define(MACHINE,macppc)dnl
 vers(__file__,
-	{-$OpenBSD: MAKEDEV.md,v 1.32 2007/11/12 19:24:43 kettenis Exp $-},
+	{-$OpenBSD: MAKEDEV.md,v 1.36 2008/06/28 21:46:05 mglocker Exp $-},
 etc.MACHINE)dnl
 dnl
 dnl Copyright (c) 2001-2006 Todd T. Fries <todd@OpenBSD.org>
@@ -96,6 +97,7 @@ _DEV(systrace, 50)
 _DEV(tun, 23)
 _DEV(tuner, 75)
 _DEV(uk, 41)
+_DEV(vi, 45)
 _DEV(xfs, 51)
 dnl
 divert(__mddivert)dnl
@@ -130,3 +132,4 @@ target(all, bthub, 0, 1, 2)dnl
 target(ramd, ttya, 0, 1)dnl
 target(ramd, ttyb, 0, 1)dnl
 target(ramd, pty, 0)dnl
+target(ramd, bio)dnl

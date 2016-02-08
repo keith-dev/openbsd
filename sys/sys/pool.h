@@ -1,4 +1,4 @@
-/*	$OpenBSD: pool.h,v 1.25 2007/12/09 00:24:04 tedu Exp $	*/
+/*	$OpenBSD: pool.h,v 1.29 2008/06/26 05:42:20 ray Exp $	*/
 /*	$NetBSD: pool.h,v 1.27 2001/06/06 22:00:17 rafal Exp $	*/
 
 /*-
@@ -17,13 +17,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -106,6 +99,7 @@ struct pool {
 #define PR_LOGGING	0x10
 #define PR_LIMITFAIL	0x20	/* even if waiting, fail if we hit limit */
 #define PR_DEBUG	0x40
+#define PR_ZERO		0x100
 
 	int			pr_ipl;
 
@@ -140,9 +134,6 @@ struct pool {
 };
 
 #ifdef _KERNEL
-/* old nointr allocator, still needed for large allocations */
-extern struct pool_allocator pool_allocator_oldnointr;
-
 extern struct pool_allocator pool_allocator_nointr;
 
 /* these functions are not locked */
@@ -152,7 +143,7 @@ void		pool_destroy(struct pool *);
 void		pool_setipl(struct pool *, int);
 void		pool_setlowat(struct pool *, int);
 void		pool_sethiwat(struct pool *, int);
-int		pool_sethardlimit(struct pool *, unsigned, const char *, int);
+int		pool_sethardlimit(struct pool *, u_int, const char *, int);
 void		pool_set_ctordtor(struct pool *, int (*)(void *, void *, int),
 		    void(*)(void *, void *), void *);
 

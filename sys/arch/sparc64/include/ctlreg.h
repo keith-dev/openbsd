@@ -1,4 +1,4 @@
-/*	$OpenBSD: ctlreg.h,v 1.15 2008/01/06 16:09:49 kettenis Exp $	*/
+/*	$OpenBSD: ctlreg.h,v 1.19 2008/07/12 07:37:25 kettenis Exp $	*/
 /*	$NetBSD: ctlreg.h,v 1.28 2001/08/06 23:55:34 eeh Exp $ */
 
 /*
@@ -99,7 +99,11 @@
 #define	ASI_PHYS_CACHED_LITTLE		0x1c	/* [4u] MMU bypass to main memory, little endian */
 #define	ASI_PHYS_NON_CACHED_LITTLE	0x1d	/* [4u] MMU bypass to I/O location, little endian */
 
+#define	ASI_SCRATCHPAD			0x20	/* [4v] scratchpad registers */
+#define	ASI_MMU_CONTEXTID		0x21	/* [4v] MMU context */
+
 #define	ASI_NUCLEUS_QUAD_LDD		0x24	/* [4u] use w/LDDA to load 128-bit item */
+#define	ASI_QUEUE			0x25	/* [4v] interrupt queue registers */
 #define	ASI_NUCLEUS_QUAD_LDD_LITTLE	0x2c	/* [4u] use w/LDDA to load 128-bit item, little endian */
 
 #define	ASI_FLUSH_D_PAGE_PRIMARY	0x38	/* [4u] flush D-cache page using primary context */
@@ -242,10 +246,17 @@
  * The following are 4u control registers
  */
 
+/* Get the CPU's UPA port ID */
+#define	UPA_CR_MID(x)		(((x) >> 17) & 0x1f)
+#define	CPU_UPAID		UPA_CR_MID(ldxa(0, ASI_MID_REG))
 
-/* Get the CPU's UPAID */
-#define	UPA_CR_MID(x)	(((x)>>17)&0x1f)	
-#define	CPU_UPAID	UPA_CR_MID(ldxa(0, ASI_MID_REG))
+/* Get the CPU's Fireplane agent ID */
+#define FIREPLANE_CR_AID(x)	(((x) >> 17) & 0x3ff)
+#define CPU_FIREPLANEID		FIREPLANE_CR_AID(ldxa(0, ASI_MID_REG))
+
+/* Get the CPU's Jupiter Bus interrupt target ID */
+#define JUPITER_CR_ITID(x)	((x) & 0x3ff)
+#define CPU_JUPITERID		JUPITER_CR_ITID(ldxa(0, ASI_MID_REG))
 
 /*
  * [4u] MMU and Cache Control Register (MCCR)
@@ -577,6 +588,7 @@ GEN_RDPR(cwp);
 GEN_RDPR(tick);
 GEN_RDPR(pstate);
 GEN_RDPR(pil);
+GEN_RDPR(tba);
 GEN_RDPR(ver);
 /*
  * Before adding GEN_RDPRs for other registers, see Errata 50 (E.g,. in
@@ -714,7 +726,7 @@ void flush(void *p)
 /* read 64-bit %tick register */
 #define tick() (sparc_rdpr(tick) & TICK_TICKS)
 
-extern void next_tick(long);
+extern void tickcmpr_set(u_int64_t);
 
 #endif /* _LOCORE */
 #endif /* _SPARC64_CTLREG_ */

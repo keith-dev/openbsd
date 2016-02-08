@@ -1,4 +1,4 @@
-/*	$OpenBSD: emuxki.c,v 1.25 2008/02/22 11:45:36 jakemsr Exp $	*/
+/*	$OpenBSD: emuxki.c,v 1.29 2008/06/26 05:42:17 ray Exp $	*/
 /*	$NetBSD: emuxki.c,v 1.1 2001/10/17 18:39:41 jdolecek Exp $	*/
 
 /*-
@@ -16,13 +16,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -173,6 +166,7 @@ int	emuxki_query_encoding(void *, struct audio_encoding *);
 int	emuxki_set_params(void *, int, int,
 				      struct audio_params *,
 				      struct audio_params *);
+void	emuxki_get_default_params(void *, int, struct audio_params *);
 
 int	emuxki_round_blocksize(void *, int);
 size_t	emuxki_round_buffersize(void *, int, size_t);
@@ -207,7 +201,6 @@ void emuxki_ac97_reset(void *);
 
 const struct pci_matchid emuxki_devices[] = {
 	{ PCI_VENDOR_CREATIVELABS, PCI_PRODUCT_CREATIVELABS_SBLIVE },
-	{ PCI_VENDOR_CREATIVELABS, PCI_PRODUCT_CREATIVELABS_SBLIVE2 },
 	{ PCI_VENDOR_CREATIVELABS, PCI_PRODUCT_CREATIVELABS_AUDIGY },
 	{ PCI_VENDOR_CREATIVELABS, PCI_PRODUCT_CREATIVELABS_AUDIGY2 },
 };
@@ -254,6 +247,7 @@ struct audio_hw_if emuxki_hw_if = {
 	emuxki_get_props,
 	emuxki_trigger_output,
 	emuxki_trigger_input,
+	emuxki_get_default_params
 };
 
 #if 0
@@ -2224,6 +2218,12 @@ emuxki_set_params(void *addr, int setmode, int usemode,
 	}
 
 	return (0);
+}
+
+void
+emuxki_get_default_params(void *addr, int mode, struct audio_params *params)
+{
+	ac97_get_default_params(params);
 }
 
 int

@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.c,v 1.16 2007/11/16 16:16:07 deraadt Exp $	*/
+/*	$OpenBSD: cpu.c,v 1.19 2008/06/26 05:42:09 ray Exp $	*/
 /* $NetBSD: cpu.c,v 1.1 2003/04/26 18:39:26 fvdl Exp $ */
 
 /*-
@@ -18,13 +18,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -150,8 +143,6 @@ u_int32_t cpus_attached = 0;
  * curproc, etc. are used early.
  */
 struct cpu_info *cpu_info[MAXCPUS] = { &cpu_info_primary };
-
-u_int32_t cpus_running = 0;
 
 void    	cpu_hatch(void *);
 static void    	cpu_boot_secondary(struct cpu_info *ci);
@@ -389,15 +380,8 @@ cpu_init(struct cpu_info *ci)
 	lcr0(rcr0() | CR0_WP);
 	lcr4(rcr4() | CR4_DEFAULT);
 
-#ifdef MTRR
-	if ((ci->ci_flags & CPUF_AP) == 0)
-		i686_mtrr_init_first();
-	mtrr_init_cpu(ci);
-#endif
-
 #ifdef MULTIPROCESSOR
 	ci->ci_flags |= CPUF_RUNNING;
-	cpus_running |= 1 << ci->ci_cpuid;
 #endif
 }
 

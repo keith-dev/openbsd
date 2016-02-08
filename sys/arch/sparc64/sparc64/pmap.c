@@ -1,4 +1,4 @@
-/*	$OpenBSD: pmap.c,v 1.50 2008/01/10 20:37:14 marco Exp $	*/
+/*	$OpenBSD: pmap.c,v 1.67 2008/07/27 20:33:23 kettenis Exp $	*/
 /*	$NetBSD: pmap.c,v 1.107 2001/08/31 16:47:41 eeh Exp $	*/
 #undef	NO_VCACHE /* Don't forget the locked TLB in dostart */
 /*
@@ -43,6 +43,7 @@
 #include <machine/pcb.h>
 #include <machine/sparc64.h>
 #include <machine/ctlreg.h>
+#include <machine/hypervisor.h>
 #include <machine/openfirm.h>
 #include <machine/kcore.h>
 
@@ -198,6 +199,8 @@ extern void	pmap_remove_pv(struct pmap *pm, vaddr_t va, paddr_t pa);
 extern void	pmap_enter_pv(struct pmap *pm, vaddr_t va, paddr_t pa);
 extern void	pmap_page_cache(struct pmap *pm, paddr_t pa, int mode);
 
+void	pmap_bootstrap_cpu(paddr_t);
+
 void	pmap_pinit(struct pmap *);
 void	pmap_release(struct pmap *);
 pv_entry_t pa_to_pvh(paddr_t);
@@ -218,6 +221,16 @@ pa_to_pvh(paddr_t pa)
 	return pg ? &pg->mdpage.pvent : NULL;
 }
 
+static __inline u_int
+pmap_tte2flags(u_int64_t tte)
+{
+	if (CPU_ISSUN4V)
+		return (((tte & SUN4V_TLB_ACCESS) ? PV_REF : 0) |
+		    ((tte & SUN4V_TLB_MODIFY) ? PV_MOD : 0));
+	else
+		return (((tte & SUN4U_TLB_ACCESS) ? PV_REF : 0) |
+		    ((tte & SUN4U_TLB_MODIFY) ? PV_MOD : 0));
+}
 
 /*
  * Here's the CPU TSB stuff.  It's allocated in pmap_bootstrap.
@@ -231,7 +244,31 @@ int tsbsize;		/* tsbents = 512 * 2^^tsbsize */
  * The invalid tsb tag uses the fact that the last context we have is
  * never allocated.
  */
-#define TSB_TAG_INVALID (~0LL)
+#define TSB_TAG_INVALID	(~0LL << 48)
+
+#define TSB_DATA(g,sz,pa,priv,write,cache,aliased,valid,ie) \
+  (CPU_ISSUN4V ?\
+    SUN4V_TSB_DATA(g,sz,pa,priv,write,cache,aliased,valid,ie) : \
+    SUN4U_TSB_DATA(g,sz,pa,priv,write,cache,aliased,valid,ie))
+
+/* The same for sun4u and sun4v. */
+#define TLB_V		SUN4U_TLB_V
+
+/* Only used for DEBUG. */
+#define TLB_NFO		(CPU_ISSUN4V ? SUN4V_TLB_NFO : SUN4U_TLB_NFO)
+
+/*
+ * UltraSPARC T1 & T2 implement only a 40-bit real address range, just
+ * like older UltraSPARC CPUs.
+ */
+#define TLB_PA_MASK	SUN4U_TLB_PA_MASK
+
+/* XXX */
+#define TLB_TSB_LOCK	(CPU_ISSUN4V ? SUN4V_TLB_TSB_LOCK : SUN4U_TLB_TSB_LOCK)
+
+#ifdef SUN4V
+struct tsb_desc *tsb_desc;
+#endif
 
 struct pmap kernel_pmap_;
 
@@ -250,7 +287,6 @@ vaddr_t ekdata;
 paddr_t ekdatap;
 
 static int npgs;
-static u_int nextavail;
 static struct mem_region memlist[8]; /* Pick a random size here */
 
 vaddr_t	vmmap;			/* one reserved MI vpage for /dev/mem */
@@ -273,9 +309,11 @@ tsb_invalidate(int ctx, vaddr_t va)
 	i = ptelookup_va(va);
 	tag = TSB_TAG(0, ctx, va);
 	if (tsb_dmmu[i].tag == tag)
-		tsb_dmmu[i].tag = TSB_TAG_INVALID;
+		sparc64_casx((volatile unsigned long *)&tsb_dmmu[i].tag,
+		    tag, TSB_TAG_INVALID);
 	if (tsb_immu[i].tag == tag)
-		tsb_immu[i].tag = TSB_TAG_INVALID;
+		sparc64_casx((volatile unsigned long *)&tsb_immu[i].tag,
+		    tag, TSB_TAG_INVALID);
 }
 
 #if notyet
@@ -807,15 +845,17 @@ remap_data:
 		physmem += atop(mp->size);
 	BDPRINTF(PDB_BOOT1, (" result %x or %d pages\r\n", 
 			     (int)physmem, (int)physmem));
+
 	/* 
-	 * Calculate approx TSB size.  This probably needs tweaking.
+	 * Calculate approx TSB size.
 	 */
-	if (physmem < atop(64 * 1024 * 1024))
-		tsbsize = 0;
-	else if (physmem < atop(512 * 1024 * 1024))
-		tsbsize = 1;
-	else
-		tsbsize = 2;
+	tsbsize = 0;
+#ifdef SMALL_KERNEL
+	while ((physmem >> tsbsize) > atop(64 * MEG) && tsbsize < 2)
+#else
+	while ((physmem >> tsbsize) > atop(64 * MEG) && tsbsize < 7)
+#endif
+		tsbsize++;
 
 	/*
 	 * Save the prom translations
@@ -844,12 +884,12 @@ remap_data:
 	 * Hunt for the kernel text segment and figure out it size and
 	 * alignment.  
 	 */
+	ktsize = 0;
 	for (i = 0; i < prom_map_size; i++) 
-		if (prom_map[i].vstart == ktext)
-			break;
-	if (i == prom_map_size) 
+		if (prom_map[i].vstart == ktext + ktsize)
+			ktsize += prom_map[i].vsize;
+	if (ktsize == 0)
 		panic("No kernel text segment!");
-	ktsize = prom_map[i].vsize;
 	ektext = ktext + ktsize;
 
 	if (ktextp & (4*MEG-1)) {
@@ -1041,6 +1081,19 @@ remap_data:
 	BDPRINTF(PDB_BOOT1, ("firstaddr after TSB=%lx\r\n", (u_long)firstaddr));
 	BDPRINTF(PDB_BOOT1, ("TSB allocated at %p size %08x\r\n", (void *)tsb_dmmu,
 	    (int)TSBSIZE));
+
+#ifdef SUN4V
+	if (CPU_ISSUN4V) {
+		valloc(tsb_desc, struct tsb_desc, sizeof(struct tsb_desc));
+		bzero(tsb_desc, sizeof(struct tsb_desc));
+		tsb_desc->td_idxpgsz = 0;
+		tsb_desc->td_assoc = 1;
+		tsb_desc->td_size = TSBENTS;
+		tsb_desc->td_ctxidx = -1;
+		tsb_desc->td_pgsz = 0xf;
+		tsb_desc->td_pa = (paddr_t)tsb_dmmu + kdatap - kdata;
+	}
+#endif
 
 	first_phys_addr = mem->start;
 	BDPRINTF(PDB_BOOT1, ("firstaddr after pmap=%08lx\r\n", 
@@ -1265,6 +1318,9 @@ remap_data:
 	BDPRINTF(PDB_BOOT1, ("Done inserting mesgbuf into pmap_kernel()\r\n"));
 	
 	BDPRINTF(PDB_BOOT1, ("Inserting PROM mappings into pmap_kernel()\r\n"));
+	data = 0;
+	if (CPU_ISSUN4U || CPU_ISSUN4US)
+		data = SUN4U_TLB_EXEC;
 	for (i = 0; i < prom_map_size; i++)
 		if (prom_map[i].vstart && ((prom_map[i].vstart>>32) == 0))
 			for (j = 0; j < prom_map[i].vsize; j += NBPG) {
@@ -1283,7 +1339,7 @@ remap_data:
 #endif
 				/* Enter PROM map into pmap_kernel() */
 				pmap_enter_kpage(prom_map[i].vstart + j,
-					(prom_map[i].tte + j)|TLB_EXEC|
+					(prom_map[i].tte + j)|data|
 					page_size_map[k].code);
 			}
 	BDPRINTF(PDB_BOOT1, ("Done inserting PROM mappings into pmap_kernel()\r\n"));
@@ -1376,13 +1432,16 @@ remap_data:
 		cpus->ci_next = NULL; /* Redundant, I know. */
 		cpus->ci_curproc = &proc0;
 		cpus->ci_cpcb = (struct pcb *)u0[0]; /* Need better source */
-		cpus->ci_upaid = CPU_UPAID;
+		cpus->ci_upaid = cpu_myid();
 		cpus->ci_number = 0;
 		cpus->ci_flags = CPUF_RUNNING;
 		cpus->ci_fpproc = NULL;
 		cpus->ci_spinup = main; /* Call main when we're running. */
 		cpus->ci_initstack = (void *)u0[1];
 		cpus->ci_paddr = cpu0paddr;
+#ifdef SUN4V
+		cpus->ci_mmfsa = cpu0paddr;
+#endif
 		proc0paddr = cpus->ci_cpcb;
 
 		cpu0paddr += 64 * KB;
@@ -1396,12 +1455,124 @@ remap_data:
 	/*
 	 * Set up bounds of allocatable memory for vmstat et al.
 	 */
-	nextavail = avail->start;
-	avail_start = nextavail;
+	avail_start = avail->start;
 	for (mp = avail; mp->size; mp++)
 		avail_end = mp->start+mp->size;
 	BDPRINTF(PDB_BOOT1, ("Finished pmap_bootstrap()\r\n"));
 
+	pmap_bootstrap_cpu(cpus->ci_paddr);
+}
+
+void sun4u_bootstrap_cpu(paddr_t);
+void sun4v_bootstrap_cpu(paddr_t);
+
+void
+pmap_bootstrap_cpu(paddr_t intstack)
+{
+	if (CPU_ISSUN4V)
+		sun4v_bootstrap_cpu(intstack);
+	else
+		sun4u_bootstrap_cpu(intstack);
+}
+
+extern void sun4u_set_tsbs(void);
+
+void
+sun4u_bootstrap_cpu(paddr_t intstack)
+{
+	u_int64_t data;
+	paddr_t pa;
+	vaddr_t va;
+	int index;
+
+	/*
+	 * Establish the 4MB locked mappings for kernel data and text.
+	 *
+	 * The text segment needs to be mapped into the DTLB too,
+	 * because of .rodata.
+	 */
+
+	index = 15; /* XXX */
+	for (va = ktext, pa = ktextp; va < ektext; va += 4*MEG, pa += 4*MEG) {
+		data = SUN4U_TSB_DATA(0, PGSZ_4M, pa, 1, 0, 1, FORCE_ALIAS, 1, 0);
+		data |= SUN4U_TLB_L;
+		prom_itlb_load(index, data, va);
+		prom_dtlb_load(index, data, va);
+		index--;
+	}
+
+	for (va = kdata, pa = kdatap; va < ekdata; va += 4*MEG, pa += 4*MEG) {
+		data = SUN4U_TSB_DATA(0, PGSZ_4M, pa, 1, 1, 1, FORCE_ALIAS, 1, 0);
+		data |= SUN4U_TLB_L;
+		prom_dtlb_load(index, data, va);
+		index--;
+	}
+
+	/*
+	 * Establish the 64KB locked mapping for the interrupt stack.
+	 */
+
+	data = SUN4U_TSB_DATA(0, PGSZ_64K, intstack, 1, 1, 1, FORCE_ALIAS, 1, 0);
+	data |= SUN4U_TLB_L;
+	prom_dtlb_load(index, data, INTSTACK);
+
+	sun4u_set_tsbs();
+}
+
+void
+sun4v_bootstrap_cpu(paddr_t intstack)
+{
+#ifdef SUN4V
+	u_int64_t data;
+	paddr_t pa;
+	vaddr_t va;
+	int err;
+
+	/*
+	 * Establish the 4MB locked mappings for kernel data and text.
+	 *
+	 * The text segment needs to be mapped into the DTLB too,
+	 * because of .rodata.
+	 */
+
+	for (va = ktext, pa = ktextp; va < ektext; va += 4*MEG, pa += 4*MEG) {
+		data = SUN4V_TSB_DATA(0, PGSZ_4M, pa, 1, 0, 1, 0, 1, 0);
+		data |= SUN4V_TLB_X;
+		err = hv_mmu_map_perm_addr(va, data, MAP_ITLB|MAP_DTLB);
+		if (err != H_EOK)
+			prom_printf("err: %d\r\n", err);
+	}
+
+	for (va = kdata, pa = kdatap; va < ekdata; va += 4*MEG, pa += 4*MEG) {
+		data = SUN4V_TSB_DATA(0, PGSZ_4M, pa, 1, 1, 1, 0, 1, 0);
+		err = hv_mmu_map_perm_addr(va, data, MAP_DTLB);
+		if (err != H_EOK)
+			prom_printf("err: %d\r\n", err);
+	}
+
+#ifndef MULTIPROCESSOR
+	/*
+	 * Establish the 64KB locked mapping for the interrupt stack.
+	 */
+	data = SUN4V_TSB_DATA(0, PGSZ_64K, intstack, 1, 1, 1, 0, 1, 0);
+	err = hv_mmu_map_perm_addr(INTSTACK, data, MAP_DTLB);
+	if (err != H_EOK)
+		prom_printf("err: %d\r\n", err);
+#else
+	pa = intstack + (CPUINFO_VA - INTSTACK);
+	pa += offsetof(struct cpu_info, ci_self);
+	stxa(0x00, ASI_SCRATCHPAD, ldxa(pa, ASI_PHYS_CACHED));
+#endif
+
+	stxa(0x10, ASI_SCRATCHPAD, intstack + (CPUINFO_VA - INTSTACK));
+
+	err = hv_mmu_tsb_ctx0(1, (paddr_t)tsb_desc + kdatap - kdata);
+	if (err != H_EOK)
+		prom_printf("err: %d\r\n", err);
+	err = hv_mmu_tsb_ctxnon0(1, (paddr_t)tsb_desc + kdatap - kdata);
+	if (err != H_EOK)
+		prom_printf("err: %d\r\n", err);
+#endif
 }
 
 /*
@@ -1501,8 +1672,7 @@ pmap_create(void)
 
 	DPRINTF(PDB_CREATE, ("pmap_create()\n"));
 
-	pm = pool_get(&pmap_pool, PR_WAITOK);
-	bzero((caddr_t)pm, sizeof *pm);
+	pm = pool_get(&pmap_pool, PR_WAITOK | PR_ZERO);
 	DPRINTF(PDB_CREATE, ("pmap_create(): created %p\n", pm));
 
 	pm->pm_refs = 1;
@@ -1585,12 +1755,7 @@ pmap_release(pm)
 							Debugger();
 #endif
 							/* Save REF/MOD info */
-							if (data & TLB_ACCESS)
-								pv->pv_va |=
-									PV_REF;
-							if (data & (TLB_MODIFY))
-								pv->pv_va |=
-									PV_MOD;
+							pv->pv_va |= pmap_tte2flags(data);
 
 							pmap_remove_pv(pm, 
 								       (long)((u_int64_t)i<<STSHIFT)|((long)k<<PDSHIFT)|((long)j<<PTSHIFT), 
@@ -1741,7 +1906,10 @@ pmap_activate(p)
 		write_user_windows();
 		if (pmap->pm_ctx == NULL)
 			ctx_alloc(pmap);
-		stxa(CTX_SECONDARY, ASI_DMMU, pmap->pm_ctx);
+		if (CPU_ISSUN4V)
+			stxa(CTX_SECONDARY, ASI_MMU_CONTEXTID, pmap->pm_ctx);
+		else
+			stxa(CTX_SECONDARY, ASI_DMMU, pmap->pm_ctx);
 	}
 	splx(s);
 }
@@ -1789,17 +1957,29 @@ pmap_kenter_pa(va, pa, prot)
 	enter_stats.unmanaged ++;
 #endif
 	tte.tag = TSB_TAG(0,pm->pm_ctx,va);
-	tte.data = TSB_DATA(0, PGSZ_8K, pa, 1 /* Privileged */,
-				 (VM_PROT_WRITE & prot),
-				 1, 0, 1, 0);
-	/*
-	 * We don't track modification on kenter mappings.
-	 */
-	if (prot & VM_PROT_WRITE)
-		tte.data |= TLB_REAL_W|TLB_W;
-	if (prot & VM_PROT_EXECUTE)
-		tte.data |= TLB_EXEC;
-	tte.data |= TLB_TSB_LOCK;	/* wired */
+	if (CPU_ISSUN4V) {
+		tte.data = SUN4V_TSB_DATA(0, PGSZ_8K, pa, 1 /* Privileged */,
+		    (VM_PROT_WRITE & prot), 1, 0, 1, 0);
+		/*
+		 * We don't track modification on kenter mappings.
+		 */
+		if (prot & VM_PROT_WRITE)
+			tte.data |= SUN4V_TLB_REAL_W|SUN4V_TLB_W;
+		if (prot & VM_PROT_EXECUTE)
+			tte.data |= SUN4V_TLB_EXEC;
+		tte.data |= SUN4V_TLB_TSB_LOCK;	/* wired */
+	} else {
+		tte.data = SUN4U_TSB_DATA(0, PGSZ_8K, pa, 1 /* Privileged */,
+		    (VM_PROT_WRITE & prot), 1, 0, 1, 0);
+		/*
+		 * We don't track modification on kenter mappings.
+		 */
+		if (prot & VM_PROT_WRITE)
+			tte.data |= SUN4U_TLB_REAL_W|SUN4U_TLB_W;
+		if (prot & VM_PROT_EXECUTE)
+			tte.data |= SUN4U_TLB_EXEC;
+		tte.data |= SUN4U_TLB_TSB_LOCK;	/* wired */
+	}
 	KDASSERT((tte.data & TLB_NFO) == 0);
 
 	/* Kernel page tables are pre-allocated. */
@@ -1849,10 +2029,6 @@ pmap_kremove(va, size)
 #endif
 		/* Shouldn't need to do this if the entry's not valid. */
 		if ((data = pseg_get(pm, va))) {
-			paddr_t entry;
-
-			flush |= 1;
-			entry = (data&TLB_PA_MASK);
 			/* We need to flip the valid bit and clear the access statistics. */
 			if (pseg_set(pm, va, 0, 0)) {
 				printf("pmap_kremove: gotten pseg empty!\n");
@@ -1873,6 +2049,7 @@ pmap_kremove(va, size)
 #endif
 			/* Here we assume nothing can get into the TLB unless it has a PTE */
 			tlb_flush_pte(va, pm->pm_ctx);
+			flush = 1;
 		}
 		va += NBPG;
 		size -= NBPG;
@@ -1943,10 +2120,11 @@ pmap_enter(pm, va, pa, prot, flags)
 			panic("pmap_enter: access_type exceeds prot");
 #endif
 		/* If we don't have the traphandler do it, set the ref/mod bits now */
-		if ((flags & VM_PROT_ALL) || (tte.data & TLB_ACCESS))
+		if (flags & VM_PROT_ALL)
 			pv->pv_va |= PV_REF;
-		if ((flags & VM_PROT_WRITE) || (tte.data & (TLB_MODIFY)))
+		if (flags & VM_PROT_WRITE)
 			pv->pv_va |= PV_MOD;
+		pv->pv_va |= pmap_tte2flags(tte.data);
 #ifdef DEBUG
 		enter_stats.managed ++;
 #endif
@@ -1963,15 +2141,27 @@ pmap_enter(pm, va, pa, prot, flags)
 #ifdef DEBUG
 	enter_stats.ci ++;
 #endif
-	tte.data = TSB_DATA(0, size, pa, pm == pmap_kernel(),
-		(flags & VM_PROT_WRITE), (!(pa & PMAP_NC)), 
-		aliased, 1, (pa & PMAP_LITTLE));
-	if (prot & VM_PROT_WRITE)
-		tte.data |= TLB_REAL_W;
-	if (prot & VM_PROT_EXECUTE)
-		tte.data |= TLB_EXEC;
-	if (wired)
-		tte.data |= TLB_TSB_LOCK;
+	if (CPU_ISSUN4V) {
+		tte.data = SUN4V_TSB_DATA(0, size, pa, pm == pmap_kernel(),
+		    (flags & VM_PROT_WRITE), (!(pa & PMAP_NC)), 
+		    aliased, 1, (pa & PMAP_LITTLE));
+		if (prot & VM_PROT_WRITE)
+			tte.data |= SUN4V_TLB_REAL_W;
+		if (prot & VM_PROT_EXECUTE)
+			tte.data |= SUN4V_TLB_EXEC;
+		if (wired)
+			tte.data |= SUN4V_TLB_TSB_LOCK;
+	} else {
+		tte.data = SUN4U_TSB_DATA(0, size, pa, pm == pmap_kernel(),
+		    (flags & VM_PROT_WRITE), (!(pa & PMAP_NC)), 
+		    aliased, 1, (pa & PMAP_LITTLE));
+		if (prot & VM_PROT_WRITE)
+			tte.data |= SUN4U_TLB_REAL_W;
+		if (prot & VM_PROT_EXECUTE)
+			tte.data |= SUN4U_TLB_EXEC;
+		if (wired)
+			tte.data |= SUN4U_TLB_TSB_LOCK;
+	}
 	KDASSERT((tte.data & TLB_NFO) == 0);
 
 	pg = NULL;
@@ -2052,9 +2242,7 @@ pmap_remove(pm, va, endva)
 			pv = pa_to_pvh(entry);
 			if (pv != NULL) {
 				/* Save REF/MOD info */
-				if (data & TLB_ACCESS) pv->pv_va |= PV_REF;
-				if (data & (TLB_MODIFY))  pv->pv_va |= PV_MOD;
-
+				pv->pv_va |= pmap_tte2flags(data);
 				pmap_remove_pv(pm, va, entry);
 			}
 			/* We need to flip the valid bit and clear the access statistics. */
@@ -2141,29 +2329,28 @@ pmap_protect(pm, sva, eva, prot)
 		if (((data = pseg_get(pm, sva))&TLB_V) /*&& ((data&TLB_TSB_LOCK) == 0)*/) {
 			pa = data&TLB_PA_MASK;
 #ifdef DEBUG
-			if (pmapdebug & (PDB_CHANGEPROT|PDB_REF))
+			if (pmapdebug & (PDB_CHANGEPROT|PDB_REF)) {
 				printf("pmap_protect: va=%08x data=%x:%08x seg=%08x pte=%08x\r\n", 
 					    (u_int)sva, (int)(pa>>32), (int)pa, (int)va_to_seg(sva), (int)va_to_pte(sva));
-/* Catch this before the assertion */
-			if (data & TLB_NFO) {
-				printf("pmap_protect: pm=%p  NFO mapping va=%x data=%x:%x\n",
-				       pm, (u_int)sva, (int)(data>>32), (int)data);
-				Debugger();
 			}
 #endif
 			pv = pa_to_pvh(pa);
 			if (pv != NULL) {
 				/* Save REF/MOD info */
-				if (data & TLB_ACCESS)
-					pv->pv_va |= PV_REF;
-				if (data & (TLB_MODIFY))  
-					pv->pv_va |= PV_MOD;
+				pv->pv_va |= pmap_tte2flags(data);
 			}
 			/* Just do the pmap and TSB, not the pv_list */
-			if ((prot & VM_PROT_WRITE) == 0)
-				data &= ~(TLB_W|TLB_REAL_W);
-			if ((prot & VM_PROT_EXECUTE) == 0)
-				data &= ~(TLB_EXEC);
+			if (CPU_ISSUN4V) {
+				if ((prot & VM_PROT_WRITE) == 0)
+					data &= ~(SUN4V_TLB_W|SUN4V_TLB_REAL_W);
+				if ((prot & VM_PROT_EXECUTE) == 0)
+					data &= ~(SUN4V_TLB_EXEC);
+			} else {
+				if ((prot & VM_PROT_WRITE) == 0)
+					data &= ~(SUN4U_TLB_W|SUN4U_TLB_REAL_W);
+				if ((prot & VM_PROT_EXECUTE) == 0)
+					data &= ~(SUN4U_TLB_EXEC);
+			}
 			KDASSERT((data & TLB_NFO) == 0);
 			if (pseg_set(pm, sva, data, 0)) {
 				printf("pmap_protect: gotten pseg empty!\n");
@@ -2207,6 +2394,14 @@ pmap_extract(pm, va, pap)
 	} else if( pm == pmap_kernel() && va >= ktext && va < ektext ) {
 		/* Need to deal w/locked TLB entry specially. */
 		pa = (paddr_t) (ktextp - ktext + va);
+#ifdef DEBUG
+		if (pmapdebug & PDB_EXTRACT) {
+			printf("pmap_extract: va=%lx pa=%llx\n",
+			    (u_long)va, (unsigned long long)pa);
+		}
+#endif
+	} else if (pm == pmap_kernel() && va >= INTSTACK && va < EINTSTACK) {
+		pa = curcpu()->ci_paddr + va - INTSTACK;
 #ifdef DEBUG
 		if (pmapdebug & PDB_EXTRACT) {
 			printf("pmap_extract: va=%lx pa=%llx\n",
@@ -2500,9 +2695,15 @@ pmap_clear_modify(pg)
 			/* First clear the mod bit in the PTE and make it R/O */
 			data = pseg_get(pv->pv_pmap, pv->pv_va&PV_VAMASK);
 			/* Need to both clear the modify and write bits */
-			if (data & (TLB_MODIFY))
-				changed |= 1;
-			data &= ~(TLB_MODIFY|TLB_W);
+			if (CPU_ISSUN4V) {
+				if (data & (SUN4V_TLB_MODIFY))
+					changed |= 1;
+				data &= ~(SUN4V_TLB_MODIFY|SUN4V_TLB_W);
+			} else {
+				if (data & (SUN4U_TLB_MODIFY))
+					changed |= 1;
+				data &= ~(SUN4U_TLB_MODIFY|SUN4U_TLB_W);
+			}
 			KDASSERT((data & TLB_NFO) == 0);
 			if (pseg_set(pv->pv_pmap, pv->pv_va&PV_VAMASK, data, 0)) {
 				printf("pmap_clear_modify: gotten pseg empty!\n");
@@ -2583,9 +2784,15 @@ pmap_clear_reference(struct vm_page *pg)
 				printf("clearing ref pm:%p va:%p ctx:%lx data:%x:%x\n", pv->pv_pmap,
 				       (void *)(u_long)pv->pv_va, (u_long)pv->pv_pmap->pm_ctx, (int)(data>>32), (int)data);
 #endif
-			if (data & TLB_ACCESS)
-				changed |= 1;
-			data &= ~TLB_ACCESS;
+			if (CPU_ISSUN4V) {
+				if (data & SUN4V_TLB_ACCESS)
+					changed |= 1;
+				data &= ~SUN4V_TLB_ACCESS;
+			} else {
+				if (data & SUN4U_TLB_ACCESS)
+					changed |= 1;
+				data &= ~SUN4U_TLB_ACCESS;
+			}
 			KDASSERT((data & TLB_NFO) == 0);
 			if (pseg_set(pv->pv_pmap, pv->pv_va, data, 0)) {
 				printf("pmap_clear_reference: gotten pseg empty!\n");
@@ -2649,7 +2856,7 @@ pmap_is_modified(struct vm_page *pg)
 			int64_t data;
 			
 			data = pseg_get(npv->pv_pmap, npv->pv_va&PV_VAMASK);
-			if (data & (TLB_MODIFY)) i = 1;
+			if (pmap_tte2flags(data) & PV_MOD) i = 1;
 			/* Migrate modify info to head pv */
 			if (npv->pv_va & PV_MOD) i = 1;
 			npv->pv_va &= ~PV_MOD;
@@ -2693,7 +2900,7 @@ pmap_is_referenced(struct vm_page* pg)
 			int64_t data;
 			
 			data = pseg_get(npv->pv_pmap, npv->pv_va&PV_VAMASK);
-			if (data & TLB_ACCESS) i = 1;
+			if (pmap_tte2flags(data) & PV_REF) i = 1;
 			/* Migrate modify info to head pv */
 			if (npv->pv_va & PV_REF) i = 1;
 			npv->pv_va &= ~PV_REF;
@@ -2752,7 +2959,10 @@ pmap_unwire(pmap, va)
 	simple_lock(&pmap->pm_lock);
 	data = pseg_get(pmap, va&PV_VAMASK);
 
-	data &= ~TLB_TSB_LOCK;
+	if (CPU_ISSUN4V)
+		data &= ~SUN4V_TLB_TSB_LOCK;
+	else
+		data &= ~SUN4U_TLB_TSB_LOCK;
 
 	if (pseg_set(pmap, va&PV_VAMASK, data, 0)) {
 		printf("pmap_unwire: gotten pseg empty!\n");
@@ -2796,13 +3006,21 @@ pmap_page_protect(pg, prot)
 		/* copy_on_write */
 
 		set = TLB_V;
-		clear = TLB_REAL_W|TLB_W;
-		if (VM_PROT_EXECUTE & prot)
-			set |= TLB_EXEC;
-		else
-			clear |= TLB_EXEC;
-		if (VM_PROT_EXECUTE == prot)
-			set |= TLB_EXEC_ONLY;
+		if (CPU_ISSUN4V) {
+			clear = SUN4V_TLB_REAL_W|SUN4V_TLB_W;
+			if (VM_PROT_EXECUTE & prot)
+				set |= SUN4V_TLB_EXEC;
+			else
+				clear |= SUN4V_TLB_EXEC;
+		} else {
+			clear = SUN4U_TLB_REAL_W|SUN4U_TLB_W;
+			if (VM_PROT_EXECUTE & prot)
+				set |= SUN4U_TLB_EXEC;
+			else
+				clear |= SUN4U_TLB_EXEC;
+			if (VM_PROT_EXECUTE == prot)
+				set |= SUN4U_TLB_EXEC_ONLY;
+		}
 
 		pv = pa_to_pvh(pa);
 		s = splvm();
@@ -2832,9 +3050,7 @@ pmap_page_protect(pg, prot)
 				data = pseg_get(pv->pv_pmap, pv->pv_va&PV_VAMASK);
 
 				/* Save REF/MOD info */
-				if (data & TLB_ACCESS) pv->pv_va |= PV_REF;
-				if (data & (TLB_MODIFY))  
-					pv->pv_va |= PV_MOD;
+				pv->pv_va |= pmap_tte2flags(data);
 
 				data &= ~(clear);
 				data |= (set);
@@ -2886,11 +3102,8 @@ pmap_page_protect(pg, prot)
 			/* clear the entry in the page table */
 			data = pseg_get(npv->pv_pmap, npv->pv_va&PV_VAMASK);
 
-			/* Save ref/mod info */
-			if (data & TLB_ACCESS) 
-				firstpv->pv_va |= PV_REF;
-			if (data & (TLB_MODIFY))
-				firstpv->pv_va |= PV_MOD;
+			/* Save REF/MOD info */
+			firstpv->pv_va |= pmap_tte2flags(data);
 			if (data & TLB_TSB_LOCK) {
 #ifdef DIAGNOSTIC
 				printf("pmap_page_protect: wired page pm %p va %p not removed\n",
@@ -2936,11 +3149,8 @@ pmap_page_protect(pg, prot)
 			}
 #endif
 			data = pseg_get(pv->pv_pmap, pv->pv_va&PV_VAMASK);
-			/* Save ref/mod info */
-			if (data & TLB_ACCESS) 
-				pv->pv_va |= PV_REF;
-			if (data & (TLB_MODIFY))
-				pv->pv_va |= PV_MOD;
+			/* Save REF/MOD info */
+			pv->pv_va |= pmap_tte2flags(data);
 			if (pseg_set(pv->pv_pmap, pv->pv_va&PV_VAMASK, 0, 0)) {
 				printf("pmap_page_protect: gotten pseg empty!\n");
 				Debugger();
@@ -2983,6 +3193,15 @@ pmap_count_res(pm)
 	int i, j, k, n, s;
 	paddr_t *pdir, *ptbl;
 	/* Almost the same as pmap_collect() */
+
+	/*
+	 * XXX On the SPARC Enterprise T5120, counting the number of
+	 * pages in the kernel pmap is ridiculously slow.  Since ps(1)
+	 * doesn't use the information for P_SYSTEM processes, we may
+	 * as well skip the counting and return zero immediately.
+	 */
+	if (pm == pmap_kernel())
+		return 0;
 
 	/* Don't want one of these pages reused while we're reading it. */
 	s = splvm();
@@ -3292,11 +3511,8 @@ pmap_remove_pv(pmap, va, pa)
 		pool_put(&pv_pool, npv);
 	}
 
-	/* Save ref/mod info */
-	if (data & TLB_ACCESS) 
-		opv->pv_va |= PV_REF;
-	if (data & (TLB_MODIFY))
-		opv->pv_va |= PV_MOD;
+	/* Save REF/MOD info */
+	opv->pv_va |= pmap_tte2flags(data);
 
 	/* Check to see if the alias went away */
 	if (opv->pv_va & PV_ALIAS) {
@@ -3327,6 +3543,9 @@ pmap_page_cache(pm, pa, mode)
 	pv_entry_t pv;
 	int s;
 
+	if (CPU_ISSUN4US || CPU_ISSUN4V)
+		return;
+
 #ifdef DEBUG
 	if (pmapdebug & (PDB_ENTER))
 		printf("pmap_page_uncache(%llx)\n", (unsigned long long)pa);
@@ -3345,8 +3564,8 @@ pmap_page_cache(pm, pa, mode)
 			simple_lock(&pv->pv_pmap->pm_lock);
 		if (pv->pv_va & PV_NC) {
 			/* Non-cached -- I/O mapping */
-			if (pseg_set(pv->pv_pmap, va, 
-				     pseg_get(pv->pv_pmap, va) & ~(TLB_CV|TLB_CP), 
+			if (pseg_set(pv->pv_pmap, va,
+			    pseg_get(pv->pv_pmap, va) & ~(SUN4U_TLB_CV|SUN4U_TLB_CP),
 				     0)) {
 				printf("pmap_page_cache: aliased pseg empty!\n");
 				Debugger();
@@ -3354,16 +3573,16 @@ pmap_page_cache(pm, pa, mode)
 			}
 		} else if (mode && (!(pv->pv_va & PV_NVC))) {
 			/* Enable caching */
-			if (pseg_set(pv->pv_pmap, va, 
-				     pseg_get(pv->pv_pmap, va) | TLB_CV, 0)) {
+			if (pseg_set(pv->pv_pmap, va,
+			    pseg_get(pv->pv_pmap, va) | SUN4U_TLB_CV, 0)) {
 				printf("pmap_page_cache: aliased pseg empty!\n");
 				Debugger();
 				/* panic? */
 			}
 		} else {
 			/* Disable caching */
-			if (pseg_set(pv->pv_pmap, va, 
-				     pseg_get(pv->pv_pmap, va) & ~TLB_CV, 0)) {
+			if (pseg_set(pv->pv_pmap, va,
+			    pseg_get(pv->pv_pmap, va) & ~SUN4U_TLB_CV, 0)) {
 				printf("pmap_page_cache: aliased pseg empty!\n");
 				Debugger();
 				/* panic? */
@@ -3415,6 +3634,31 @@ pmap_free_page(paddr_t pa, struct pmap *pm)
 
 	pg->wire_count = 0;
 	uvm_pagefree(pg);
+}
+
+void
+pmap_remove_holes(struct vm_map *map)
+{
+	vaddr_t shole, ehole;
+
+	/*
+	 * Although the hardware only supports 44-bit virtual addresses
+	 * (and thus a hole from 1 << 43 to -1 << 43), this pmap
+	 * implementation itself only supports 43-bit virtual addresses,
+	 * so we have to narrow the hole a bit more.
+	 */
+	shole = 1L << (HOLESHIFT - 1);
+	ehole = -1L << (HOLESHIFT - 1);
+
+	shole = ulmax(vm_map_min(map), shole);
+	ehole = ulmin(vm_map_max(map), ehole);
+
+	if (ehole <= shole)
+		return;
+
+	(void)uvm_map(map, &shole, ehole - shole, NULL, UVM_UNKNOWN_OFFSET, 0,
+	    UVM_MAPFLAG(UVM_PROT_NONE, UVM_PROT_NONE, UVM_INH_NONE,
+	      UVM_ADV_RANDOM, UVM_FLAG_NOMERGE | UVM_FLAG_HOLE));
 }
 
 #ifdef DDB

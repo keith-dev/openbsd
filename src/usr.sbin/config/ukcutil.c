@@ -1,4 +1,4 @@
-/*	$OpenBSD: ukcutil.c,v 1.14 2004/01/04 18:30:05 deraadt Exp $ */
+/*	$OpenBSD: ukcutil.c,v 1.17 2008/03/24 21:35:03 maja Exp $ */
 
 /*
  * Copyright (c) 1999-2001 Mats O Jansson.  All rights reserved.
@@ -25,7 +25,7 @@
  */
 
 #ifndef LINT
-static	char rcsid[] = "$OpenBSD: ukcutil.c,v 1.14 2004/01/04 18:30:05 deraadt Exp $";
+static	char rcsid[] = "$OpenBSD: ukcutil.c,v 1.17 2008/03/24 21:35:03 maja Exp $";
 #endif
 
 #include <sys/types.h>
@@ -97,7 +97,7 @@ more(void)
 	cmd_t cmd;
 
 	if (cnt != -1) {
-		if (cnt == lines) {
+		if (cnt > 0 && cnt == lines) {
 			printf("--- more ---");
 			fflush(stdout);
 			ask_cmd(&cmd);
@@ -183,9 +183,12 @@ pdev(short devno)
 		}
 		if (devno > totdev && devno <= totdev + maxpseudo) {
 			pi = get_pdevinit(devno - totdev -1);
-			printf("%3d %s count %d (pseudo device)\n", devno,
+			printf("%3d %s count %d", devno,
 			    get_pdevnames(devno - totdev - 1),
-			    pi->pdev_count);
+			    abs(pi->pdev_count));
+			if (pi->pdev_count < 0)
+				printf(" disable");
+			printf(" (pseudo device)\n");
 			return;
 		}
 	}
@@ -602,9 +605,8 @@ void
 disable(int devno)
 {
 	struct cfdata *cd;
+	struct pdevinit *pi;
 	int done = 0;
-
-	ukc_mod_kernel = 1;
 
 	if (devno <= maxdev) {
 
@@ -628,8 +630,11 @@ disable(int devno)
 
 		printf("%3d ", devno);
 		pdevnam(devno);
-		if (done)
+		if (done) {
 			printf(" already");
+		} else {
+			ukc_mod_kernel = 1;
+		}
 		printf(" disabled\n");
 
 		return;
@@ -641,8 +646,17 @@ disable(int devno)
 			return;
 		}
 		if (devno > totdev && devno <= totdev + maxpseudo) {
-			printf("%3d %s can't disable pseudo device\n", devno,
-			    get_pdevnames(devno - totdev - 1));
+			pi = get_pdevinit(devno-totdev-1);
+
+			printf("%3d %s", devno,
+				get_pdevnames(devno - totdev - 1));
+			if (pi->pdev_count < 1) {
+				printf(" already");
+			} else {
+				ukc_mod_kernel = 1;
+				pi->pdev_count*=-1;
+			}
+			printf(" disabled\n");
 			return;
 		}
 	}
@@ -655,9 +669,8 @@ void
 enable(int devno)
 {
 	struct cfdata *cd;
+	struct pdevinit *pi;
 	int done = 0;
-
-	ukc_mod_kernel = 1;
 
 	if (devno <= maxdev) {
 		cd = get_cfdata(devno);
@@ -680,8 +693,11 @@ enable(int devno)
 
 		printf("%3d ", devno);
 		pdevnam(devno);
-		if (done)
+		if (done) {
 			printf(" already");
+		} else {
+			ukc_mod_kernel = 1;
+		}
 		printf(" enabled\n");
 
 		return;
@@ -693,8 +709,17 @@ enable(int devno)
 			return;
 		}
 		if (devno > totdev && devno <= totdev + maxpseudo) {
-			printf("%3d %s can't enable pseudo device\n", devno,
-			    get_pdevnames(devno - totdev - 1));
+			pi = get_pdevinit(devno-totdev-1);
+
+			printf("%3d %s", devno,
+				get_pdevnames(devno - totdev - 1));
+			if (pi->pdev_count > 0) {
+				printf(" already");
+			} else {
+				ukc_mod_kernel = 1;
+				pi->pdev_count*=-1;
+			}
+			printf(" enabled\n");
 			return;
 		}
 	}

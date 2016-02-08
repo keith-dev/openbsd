@@ -1,4 +1,4 @@
-/*	$OpenBSD: azalia_codec.c,v 1.46 2007/12/16 18:48:19 deanna Exp $	*/
+/*	$OpenBSD: azalia_codec.c,v 1.49 2008/06/26 05:42:17 ray Exp $	*/
 /*	$NetBSD: azalia_codec.c,v 1.8 2006/05/10 11:17:27 kent Exp $	*/
 
 /*-
@@ -16,13 +16,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -36,11 +29,6 @@
  * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  * POSSIBILITY OF SUCH DAMAGE.
  */
-
-#include <sys/cdefs.h>
-#ifdef NETBSD_GOOP
-__KERNEL_RCSID(0, "$NetBSD: azalia_codec.c,v 1.3 2005/09/29 04:14:03 kent Exp $");
-#endif
 
 #include <sys/param.h>
 #include <sys/device.h>
@@ -2144,9 +2132,8 @@ azalia_ad1984_init_dacgroup(codec_t *this)
 		{{2, {0x03, 0x04}}}};
 
 	static const convgroupset_t adcs = {
-		-1, 2,
-		{{1, {0x05}},
-		 {1, {0x06}}}};
+		-1, 1,
+		{{1, {0x08}}}};
 
 	this->dacs = dacs;
 	this->adcs = adcs;
@@ -2165,6 +2152,19 @@ static const mixer_item_t ad1984_mixer_items[] = {
 	  4, 0, .un.v={{""}, 2, MIXER_DELTA(39)}}, 0x03, AD1984_TARGET_MASTER},
 	{{0, {AudioNmute}, AUDIO_MIXER_ENUM, AZ_CLASS_OUTPUT,
 	  0, 3, ENUM_OFFON}, 0x11, AD1984_TARGET_MASTER_MUTE},
+	{{0, {AudioNvolume}, AUDIO_MIXER_VALUE, AZ_CLASS_RECORD,
+	  0, 0, .un.v={{""}, 2, MIXER_DELTA(54)}}, 0x0c, MI_TARGET_OUTAMP},
+	{{0, {AudioNvolume"."AudioNmute}, AUDIO_MIXER_ENUM, AZ_CLASS_RECORD,
+	  0, 0, ENUM_OFFON}, 0x0c, MI_TARGET_OUTAMP},
+	{{0, {AudioNsource}, AUDIO_MIXER_ENUM, AZ_CLASS_RECORD,
+	  0, 0, .un.e={1, {{{AudioNmicrophone}, 0}}}},
+	 0x0c, MI_TARGET_CONNLIST},
+	{{0, {AudioNmicrophone"."AudioNpreamp}, AUDIO_MIXER_VALUE, AZ_CLASS_INPUT,
+	  0, 0, .un.v={{""}, 2, MIXER_DELTA(3)}}, 0x14, MI_TARGET_INAMP(0)},
+	{{0, {AudioNmicrophone}, AUDIO_MIXER_VALUE, AZ_CLASS_INPUT,
+	  0, 0, .un.v={{""}, 2, MIXER_DELTA(31)}}, 0x20, MI_TARGET_INAMP(0)},
+	{{0, {AudioNmicrophone"."AudioNmute}, AUDIO_MIXER_ENUM, AZ_CLASS_INPUT,
+	  0, 0, ENUM_OFFON}, 0x20, MI_TARGET_INAMP(0)},
 	{{0, {AudioNheadphone}, AUDIO_MIXER_VALUE, AZ_CLASS_OUTPUT,
 	  0, 0, .un.v={{""}, 2, MIXER_DELTA(39)}}, 0x03, MI_TARGET_OUTAMP},
 	{{0, {AudioNheadphone"."AudioNmute}, AUDIO_MIXER_ENUM, AZ_CLASS_OUTPUT,

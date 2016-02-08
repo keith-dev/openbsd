@@ -1,4 +1,4 @@
-/*	$OpenBSD: pchb.c,v 1.66 2008/01/04 00:23:25 kettenis Exp $ */
+/*	$OpenBSD: pchb.c,v 1.73 2008/07/07 07:54:48 bernd Exp $ */
 /*	$NetBSD: pchb.c,v 1.65 2007/08/15 02:26:13 markd Exp $	*/
 
 /*
@@ -41,13 +41,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -78,6 +71,8 @@
 #include <dev/rndvar.h>
 
 #include <dev/ic/i82802reg.h>
+
+#include "agp.h"
 
 #define PCISET_INTEL_BRIDGETYPE_MASK	0x3
 #define PCISET_INTEL_TYPE_COMPAT	0x1
@@ -139,7 +134,6 @@ struct cfdriver pchb_cd = {
 };
 
 int	pchb_print(void *, const char *);
-int	agpbus_print(void *, const char *);
 void	pchb_rnd(void *);
 void	pchb_amd64ht_attach(struct device *, struct pci_attach_args *, int);
 
@@ -174,7 +168,6 @@ pchbattach(struct device *parent, struct device *self, void *aux)
 	struct pchb_softc *sc = (struct pchb_softc *)self;
 	struct pci_attach_args *pa = aux;
 	struct pcibus_attach_args pba;
-	struct agpbus_attach_args apa;
 	pcireg_t bcreg;
 	u_char bdnum, pbnum;
 	pcitag_t tag;
@@ -191,7 +184,9 @@ pchbattach(struct device *parent, struct device *self, void *aux)
 			has_agp = 1; /* XXX is this detected otherwise */
 			break;
 #endif /* __i386__ */
-		case PCI_PRODUCT_AMD_AMD64_HT:
+		case PCI_PRODUCT_AMD_AMD64_0F_HT:
+		case PCI_PRODUCT_AMD_AMD64_10_HT:
+		case PCI_PRODUCT_AMD_AMD64_11_HT:
 			for (i = 0; i < AMD64HT_NUM_LDT; i++)
 				pchb_amd64ht_attach(self, pa, i);
 			break;
@@ -328,9 +323,12 @@ pchbattach(struct device *parent, struct device *self, void *aux)
 #endif /* __i386__ */
 		case PCI_PRODUCT_INTEL_82915GM_HB:
 		case PCI_PRODUCT_INTEL_82945GM_HB:
+		case PCI_PRODUCT_INTEL_82945GME_HB:
 		case PCI_PRODUCT_INTEL_82G965_HB:
 		case PCI_PRODUCT_INTEL_82Q965_HB:
 		case PCI_PRODUCT_INTEL_82GM965_HB:
+		case PCI_PRODUCT_INTEL_82G33_HB:
+		case PCI_PRODUCT_INTEL_82G35_HB:
 			has_agp = 1;
 			break;
 
@@ -396,17 +394,16 @@ pchbattach(struct device *parent, struct device *self, void *aux)
 		break;
 	}
 
+#if NAGP > 0
 	/*
 	 * If we haven't detected AGP yet (via a product ID),
 	 * then check for AGP capability on the device.
 	 */
 	if (has_agp ||
 	    pci_get_capability(pa->pa_pc, pa->pa_tag, PCI_CAP_AGP,
-	    NULL, NULL) != 0) {
-		apa.apa_busname = "agp";
-		apa.apa_pci_args = *pa;
-		config_found(self, &apa, agpbus_print);
-	}
+	    NULL, NULL) != 0)
+		agp_set_pchb(pa);
+#endif /* NAGP > 0 */
 #ifdef __i386__
 	if (doattach == 0)
 		return;
@@ -431,14 +428,6 @@ pchb_print(void *aux, const char *pnp)
 	if (pnp)
 		printf("%s at %s", pba->pba_busname, pnp);
 	printf(" bus %d", pba->pba_bus);
-	return (UNCONF);
-}
-
-int
-agpbus_print(void *vaa, const char *pnp)
-{
-	if (pnp)
-		printf("agp at %s", pnp);
 	return (UNCONF);
 }
 

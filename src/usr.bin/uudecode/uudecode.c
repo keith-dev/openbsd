@@ -1,4 +1,4 @@
-/*	$OpenBSD: uudecode.c,v 1.14 2004/04/09 22:54:02 millert Exp $	*/
+/*	$OpenBSD: uudecode.c,v 1.16 2008/07/29 18:25:28 sobrado Exp $	*/
 /*	$FreeBSD: uudecode.c,v 1.49 2003/05/03 19:44:46 obrien Exp $	*/
 
 /*-
@@ -40,7 +40,7 @@ static const char copyright[] =
 #if 0
 static const char sccsid[] = "@(#)uudecode.c	8.2 (Berkeley) 4/2/94";
 #endif
-static const char rcsid[] = "$OpenBSD: uudecode.c,v 1.14 2004/04/09 22:54:02 millert Exp $";
+static const char rcsid[] = "$OpenBSD: uudecode.c,v 1.16 2008/07/29 18:25:28 sobrado Exp $";
 #endif /* not lint */
 
 /*
@@ -75,17 +75,29 @@ static int	decode2(void);
 static int	uu_decode(void);
 static int	base64_decode(void);
 
+enum program_mode {
+	MODE_DECODE,
+	MODE_B64DECODE
+} pmode;
+
 int
 main(int argc, char *argv[])
 {
 	int rval, ch;
 	extern char *__progname;
+	static const char *optstr[2] = {
+		"cimo:prs",
+		"cio:prs"
+	};
 
-	if (strcmp(__progname, "b64decode") == 0)
+	pmode = MODE_DECODE;
+	if (strcmp(__progname, "b64decode") == 0) {
 		base64 = 1;
+		pmode = MODE_B64DECODE;
+	}
 
 	setlocale(LC_ALL, "");
-	while ((ch = getopt(argc, argv, "cimo:prs")) != -1) {
+	while ((ch = getopt(argc, argv, optstr[pmode])) != -1) {
 		switch(ch) {
 		case 'c':
 			if (oflag || rflag)
@@ -438,10 +450,17 @@ base64_decode(void)
 static void
 usage(void)
 {
-	(void)fprintf(stderr,
-	    "usage: uudecode [-cimprs] [file ...]\n"
-	    "       uudecode [-i] -o output_file [file]\n"
-	    "       b64decode [-cimprs] [file ...]\n"
-	    "       b64decode [-i] -o output_file [file]\n");
+	switch (pmode) {
+	case MODE_DECODE:
+		(void)fprintf(stderr,
+		    "usage: uudecode [-cimprs] [file ...]\n"
+		    "       uudecode [-i] -o output_file [file]\n");
+		break;
+	case MODE_B64DECODE:
+		(void)fprintf(stderr,
+		    "usage: b64decode [-ciprs] [file ...]\n"
+		    "       b64decode [-i] -o output_file [file]\n");
+		break;
+	}
 	exit(1);
 }

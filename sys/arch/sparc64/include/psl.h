@@ -1,4 +1,4 @@
-/*	$OpenBSD: psl.h,v 1.23 2007/05/16 19:37:06 thib Exp $	*/
+/*	$OpenBSD: psl.h,v 1.25 2008/07/05 20:53:33 kettenis Exp $	*/
 /*	$NetBSD: psl.h,v 1.20 2001/04/13 23:30:05 thorpej Exp $ */
 
 /*
@@ -192,6 +192,10 @@
 #define IMPL_SPARC64		0x01 /* SPARC64 */
 #define IMPL_SPARC64_II		0x02 /* SPARC64-II */
 #define IMPL_SPARC64_III	0x03 /* SPARC64-III */
+#define IMPL_SPARC64_IV		0x04 /* SPARC64-IV */
+#define IMPL_ZEUS		0x05 /* SPARC64-V */
+#define IMPL_OLYMPUS_C		0x06 /* SPARC64-VI */
+#define IMPL_JUPITER		0x07 /* SPARC64-VII */
 #define IMPL_SPITFIRE		0x10 /* UltraSPARC */
 #define IMPL_BLACKBIRD		0x11 /* UltraSPARC-II */
 #define IMPL_SABRE		0x12 /* UltraSPARC-IIi */
@@ -216,7 +220,7 @@
  * stack pointer and then vector to the real handler.  We could optimize this
  * if we could guarantee only 32-bit or 64-bit stacks.
  */
-#define WSTATE_KERN	026
+#define WSTATE_KERN	027
 #define WSTATE_USER	022
 
 #define CWP		0x01f

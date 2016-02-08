@@ -1,4 +1,4 @@
-/*      $OpenBSD: pci_map.c,v 1.20 2007/01/26 01:18:48 tsi Exp $     */
+/*      $OpenBSD: pci_map.c,v 1.23 2008/06/26 05:42:17 ray Exp $     */
 /*	$NetBSD: pci_map.c,v 1.7 2000/05/10 16:58:42 thorpej Exp $	*/
 
 /*-
@@ -16,13 +16,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -326,8 +319,10 @@ pci_mapreg_map(struct pci_attach_args *pa, int reg, pcireg_t type, int busflags,
 	if ((rv = pci_mapreg_info(pa->pa_pc, pa->pa_tag, reg, type,
 	    &base, &size, &flags)) != 0)
 		return (rv);
+#if !defined(__sparc64__) && !defined(__socppc__)
 	if (base == 0)
 		return (EINVAL);	/* disabled because of invalid BAR */
+#endif
 
 	csr = pci_conf_read(pa->pa_pc, pa->pa_tag, PCI_COMMAND_STATUS_REG);
 	if (PCI_MAPREG_TYPE(type) == PCI_MAPREG_TYPE_IO)

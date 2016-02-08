@@ -1,4 +1,4 @@
-/*	$OpenBSD: autoconf.c,v 1.77 2008/03/01 15:56:09 kettenis Exp $	*/
+/*	$OpenBSD: autoconf.c,v 1.97 2008/07/21 04:35:54 todd Exp $	*/
 /*	$NetBSD: autoconf.c,v 1.51 2001/07/24 19:32:11 eeh Exp $ */
 
 /*
@@ -61,15 +61,19 @@
 #include <net/if.h>
 
 #include <dev/cons.h>
+#include <dev/clock_subr.h>
 
 #include <uvm/uvm_extern.h>
 
 #include <machine/bus.h>
 #include <machine/autoconf.h>
+#include <machine/hypervisor.h>
 #include <machine/openfirm.h>
 #include <machine/sparc64.h>
 #include <machine/cpu.h>
 #include <machine/pmap.h>
+#include <machine/trap.h>
+#include <sparc64/sparc64/cache.h>
 #include <sparc64/sparc64/timerreg.h>
 
 #include <dev/ata/atavar.h>
@@ -95,10 +99,6 @@ int printspl = 0;
 int	stdinnode;	/* node ID of ROM's console input device */
 int	fbnode;		/* node ID of ROM's console output device */
 int	optionsnode;	/* node ID of ROM's options */
-
-#ifdef KGDB
-extern	int kgdb_debug_panic;
-#endif
 
 static	int rootnode;
 char platform_type[64];
@@ -196,42 +196,46 @@ str2hex(char *str, long *vp)
 	return (str);
 }
 
+/*
+ * Hunt through the device tree for CPUs.  There should be no need to
+ * go more than four levels deep; an UltraSPARC-IV on Seregeti shows
+ * up as /ssm@0,0/cmp@0,0/cpu@0 and a SPARC64-VI will show up as
+ * /cmp@0,0/core@0/cpu@0.
+ */
 int
 get_ncpus(void)
 {
 #ifdef MULTIPROCESSOR
-	int node0, node,ncpus;
+	int node, child, stack[4], depth, ncpus;
 	char buf[32];
 
-	node = findroot();
+	stack[0] = findroot();
+	depth = 0;
 
 	ncpus = 0;
-	for (node = OF_child(node), node0 = 0; node; node = OF_peer(node)) {
-		/* 
-		 * UltraSPARC-IV cpus appear as two "cpu" nodes below
-		 * a "cmp" node.  Go down one level, but remember
-		 * where we came from, such that we can go up again
-		 * after we've handled both "cpu" nodes.
-		 */
-		if (OF_getprop(node, "name", buf, sizeof(buf)) <= 0)
+	for (;;) {
+		node = stack[depth];
+
+		if (node == 0 || node == -1) {
+			if (--depth < 0)
+				return (ncpus);
+			
+			stack[depth] = OF_peer(stack[depth]);
 			continue;
-		if (strcmp(buf, "cmp") == 0) {
-			node0 = node;
-			node = OF_child(node0);
 		}
 
-		if (OF_getprop(node, "device_type", buf, sizeof(buf)) <= 0)
-			continue;
-		if (strcmp(buf, "cpu") == 0)
+		if (OF_getprop(node, "device_type", buf, sizeof(buf)) > 0 &&
+		    strcmp(buf, "cpu") == 0)
 			ncpus++;
 
-		if (node0 && OF_peer(node) == 0) {
-			node = node0;
-			node0 = 0;
-		}
+		child = OF_child(node);
+		if (child != 0 && child != -1 && depth < 3)
+			stack[++depth] = child;
+		else
+			stack[depth] = OF_peer(stack[depth]);
 	}
 
-	return (ncpus);
+	return (0);
 #else
 	return (1);
 #endif
@@ -257,7 +261,15 @@ bootstrap(nctx)
 	int nctx;
 {
 	extern int end;	/* End of kernel */
+	struct trapvec *romtba;
+#if defined(SUN4US) || defined(SUN4V)
+	char buf[32];
+#endif
+	int impl = 0;
 	int ncpus;
+
+	/* Initialize the PROM console so printf will not panic. */
+	(*cn_tab->cn_init)(cn_tab);
 
 	/* 
 	 * Initialize ddb first and register OBP callbacks.
@@ -268,18 +280,107 @@ bootstrap(nctx)
 	 * By doing this first and installing the OBP callbacks
 	 * we get to do symbolic debugging of pmap_bootstrap().
 	 */
-#ifdef KGDB
-/* Moved zs_kgdb_init() to dev/zs.c:consinit(). */
-	zs_kgdb_init();		/* XXX */
-#endif
-	/* Initialize the PROM console so printf will not panic */
-	(*cn_tab->cn_init)(cn_tab);
 #ifdef DDB
 	db_machine_init();
 	ddb_init();
 	/* This can only be installed on an 64-bit system cause otherwise our stack is screwed */
 	OF_set_symbol_lookup(OF_sym2val, OF_val2sym);
 #endif
+
+#if defined (SUN4US) || defined(SUN4V)
+	if (OF_getprop(findroot(), "compatible", buf, sizeof(buf)) > 0) {
+		if (strcmp(buf, "sun4us") == 0)
+			cputyp = CPU_SUN4US;
+		if (strcmp(buf, "sun4v") == 0)
+			cputyp = CPU_SUN4V;
+	}
+#endif
+
+	/* We cannot read %ver on sun4v systems. */
+	if (CPU_ISSUN4U || CPU_ISSUN4US)
+		impl = (getver() & VER_IMPL) >> VER_IMPL_SHIFT;
+
+	if (impl >= IMPL_CHEETAH) {
+		extern vaddr_t dlflush_start;
+		vaddr_t *pva;
+		u_int32_t insn;
+
+		for (pva = &dlflush_start; *pva; pva++) {
+			insn = *(u_int32_t *)(*pva);
+			insn &= ~(ASI_DCACHE_TAG << 5);
+			insn |= (ASI_DCACHE_INVALIDATE << 5);
+			*(u_int32_t *)(*pva) = insn;
+			flush((void *)(*pva));
+		}
+
+		cacheinfo.c_dcache_flush_page = us3_dcache_flush_page;
+	}
+
+	if ((impl >= IMPL_ZEUS && impl <= IMPL_JUPITER) || CPU_ISSUN4V) {
+		extern vaddr_t dlflush_start;
+		vaddr_t *pva;
+
+		for (pva = &dlflush_start; *pva; pva++) {
+			*(u_int32_t *)(*pva) = 0x01000000; /* nop */
+			flush((void *)(*pva));
+		}
+
+		cacheinfo.c_dcache_flush_page = no_dcache_flush_page;
+	}
+
+#ifdef SUN4V
+	if (CPU_ISSUN4V) {
+		u_int32_t insn;
+		int32_t disp;
+
+		disp = (vaddr_t)hv_mmu_demap_page - (vaddr_t)sp_tlb_flush_pte;
+		insn = 0x10800000 | disp >> 2;	/* ba hv_mmu_demap_page */
+		((u_int32_t *)sp_tlb_flush_pte)[0] = insn;
+		insn = 0x94102003; 		/* mov MAP_ITLB|MAP_DTLB, %o2 */
+		((u_int32_t *)sp_tlb_flush_pte)[1] = insn;
+
+		disp =  (vaddr_t)hv_mmu_demap_ctx - (vaddr_t)sp_tlb_flush_ctx;
+		insn = 0x10800000 | disp >> 2;	/* ba hv_mmu_demap_ctx */
+		((u_int32_t *)sp_tlb_flush_ctx)[0] = insn;
+		insn = 0x94102003; 		/* mov MAP_ITLB|MAP_DTLB, %o2 */
+		((u_int32_t *)sp_tlb_flush_ctx)[1] = insn;
+
+	{
+		struct sun4v_patch {
+			u_int32_t addr;
+			u_int32_t insn;
+		} *p;
+
+		extern struct sun4v_patch sun4v_patch;
+		extern struct sun4v_patch sun4v_patch_end;
+
+		for (p = &sun4v_patch; p < &sun4v_patch_end; p++) {
+			*(u_int32_t *)(vaddr_t)p->addr = p->insn;
+			flush((void *)(vaddr_t)p->addr);
+		}
+
+#ifdef MULTIPROCESSOR
+		extern struct sun4v_patch sun4v_mp_patch;
+		extern struct sun4v_patch sun4v_mp_patch_end;
+
+		for (p = &sun4v_mp_patch; p < &sun4v_mp_patch_end; p++) {
+			*(u_int32_t *)(vaddr_t)p->addr = p->insn;
+			flush((void *)(vaddr_t)p->addr);
+		}
+#endif
+	}
+
+	}
+#endif
+
+	/*
+	 * Copy over the OBP breakpoint trap vector; OpenFirmware 5.x
+	 * needs it to be able to return to the ok prompt.
+	 */
+	romtba = (struct trapvec *)sparc_rdpr(tba);
+	bcopy(&romtba[T_MON_BREAKPOINT], &trapbase[T_MON_BREAKPOINT],
+	    sizeof(struct trapvec));
+	flush((void *)trapbase);
 
 	ncpus = get_ncpus();
 	pmap_bootstrap(KERNBASE, (u_long)&end, nctx, ncpus);
@@ -426,10 +527,7 @@ bootpath_build()
 
 		/* specialties */
 		if (*cp == 'd') {
-#if defined(KGDB)
-			kgdb_debug_panic = 1;
-			kgdb_connect(1);
-#elif defined(DDB)
+#if defined(DDB)
 			Debugger();
 #else
 			printf("kernel has no debugger\n");
@@ -650,7 +748,7 @@ extern bus_space_tag_t mainbus_space_tag;
 	struct mainbus_attach_args ma;
 	char buf[32], *p;
 	const char *const *ssp, *sp = NULL;
-	int node0, node, rv, len, ncpus;
+	int node0, node, rv, len;
 
 	static const char *const openboot_special[] = {
 		/* ignore these (end with NULL) */
@@ -697,28 +795,35 @@ extern bus_space_tag_t mainbus_space_tag;
 	/* We configure the CPUs first. */
 
 	node = findroot();
+	for (node0 = OF_child(node); node0; node0 = OF_peer(node0)) {
+		if (OF_getprop(node0, "name", buf, sizeof(buf)) <= 0)
+			continue;
+	}
 
-	ncpus = 0;
-	for (node = OF_child(node), node0 = 0; node; node = OF_peer(node)) {
+	for (node = OF_child(node); node; node = OF_peer(node)) {
+		if (!checkstatus(node))
+			continue;
+
 		/* 
 		 * UltraSPARC-IV cpus appear as two "cpu" nodes below
-		 * a "cmp" node.  Go down one level, but remember
-		 * where we came from, such that we can go up again
-		 * after we've handled both "cpu" nodes.
+		 * a "cmp" node.
 		 */
 		if (OF_getprop(node, "name", buf, sizeof(buf)) <= 0)
 			continue;
 		if (strcmp(buf, "cmp") == 0) {
-			node0 = node;
-			node = OF_child(node0);
+			bzero(&ma, sizeof(ma));
+			ma.ma_node = node;
+			ma.ma_name = buf;
+			getprop(node, "reg", sizeof(*ma.ma_reg),
+			    &ma.ma_nreg, (void **)&ma.ma_reg);
+			config_found(dev, &ma, mbprint);
+			continue;
 		}
 
 		if (OF_getprop(node, "device_type", buf, sizeof(buf)) <= 0)
 			continue;
 		if (strcmp(buf, "cpu") == 0) {
 			bzero(&ma, sizeof(ma));
-			ma.ma_bustag = mainbus_space_tag;
-			ma.ma_dmatag = &mainbus_dma_tag;
 			ma.ma_node = node;
 			OF_getprop(node, "name", buf, sizeof(buf));
 			if (strcmp(buf, "cpu") == 0)
@@ -727,17 +832,9 @@ extern bus_space_tag_t mainbus_space_tag;
 			getprop(node, "reg", sizeof(*ma.ma_reg),
 			    &ma.ma_nreg, (void **)&ma.ma_reg);
 			config_found(dev, &ma, mbprint);
-			ncpus++;
-		}
-
-		if (node0 && OF_peer(node) == 0) {
-			node = node0;
-			node0 = 0;
+			continue;
 		}
 	}
-
-	if (ncpus == 0)
-		panic("None of the CPUs found");
 
 	node = findroot();	/* re-init root node */
 
@@ -747,25 +844,35 @@ extern bus_space_tag_t mainbus_space_tag;
 	if (optionsnode == 0)
 		panic("no options in OPENPROM");
 
+	for (node0 = OF_child(node); node0; node0 = OF_peer(node0)) {
+		if (OF_getprop(node0, "name", buf, sizeof(buf)) <= 0)
+			continue;
+	}
+
 	/*
 	 * Configure the devices, in PROM order.  Skip
 	 * PROM entries that are not for devices, or which must be
 	 * done before we get here.
 	 */
-	for (node = node0; node; node = OF_peer(node)) {
+	for (node = OF_child(node); node; node = OF_peer(node)) {
 		int portid;
 
 		DPRINTF(ACDB_PROBE, ("Node: %x", node));
 		if (OF_getprop(node, "device_type", buf, sizeof(buf)) > 0 &&
 		    strcmp(buf, "cpu") == 0)
 			continue;
-		OF_getprop(node, "name", buf, sizeof(buf));
+		if (OF_getprop(node, "name", buf, sizeof(buf)) > 0 &&
+		    strcmp(buf, "cmp") == 0)
+			continue;
 		DPRINTF(ACDB_PROBE, (" name %s\n", buf));
 		for (ssp = openboot_special; (sp = *ssp) != NULL; ssp++)
 			if (strcmp(buf, sp) == 0)
 				break;
 		if (sp != NULL)
 			continue; /* an "early" device already configured */
+
+		if (!checkstatus(node))
+			continue;
 
 		bzero(&ma, sizeof ma);
 		ma.ma_bustag = mainbus_space_tag;
@@ -832,10 +939,23 @@ extern bus_space_tag_t mainbus_space_tag;
 		if (ma.ma_naddress)
 			free(ma.ma_address, M_DEVBUF);
 	}
-	/* Try to attach PROM console */
-	bzero(&ma, sizeof ma);
-	ma.ma_name = "pcons";
-	config_found(dev, &ma, mbprint);
+
+	extern int prom_cngetc(dev_t);
+
+	/* Attach PROM console if no other console attached. */
+	if (cn_tab->cn_getc == prom_cngetc) {
+		bzero(&ma, sizeof ma);
+		ma.ma_name = "pcons";
+		config_found(dev, &ma, mbprint);
+	}
+
+	extern todr_chip_handle_t todr_handle;
+
+	if (todr_handle == NULL) {
+		bzero(&ma, sizeof ma);
+		ma.ma_name = "prtc";
+		config_found(dev, &ma, mbprint);
+	}
 }
 
 struct cfattach mainbus_ca = {
@@ -979,7 +1099,26 @@ nextsibling(node)
 	return OF_peer(node);
 }
 
-/* The following are used primarily in consinit() */
+int
+checkstatus(int node)
+{
+	char buf[32];
+
+	/* If there is no "status" property, assume everything is fine. */
+	if (OF_getprop(node, "status", buf, sizeof(buf)) <= 0)
+		return 1;
+
+	/*
+	 * If OpenBoot Diagnostics discovers a problem with a device
+	 * it will mark it with "fail" or "fail-xxx", where "xxx" is
+	 * additional human-readable information about the particular
+	 * fault-condition.
+	 */
+	if (strcmp(buf, "disabled") == 0 || strncmp(buf, "fail", 4) == 0)
+		return 0;
+
+	return 1;
+}
 
 int
 node_has_property(node, prop)	/* returns 1 if node has given property */
@@ -1085,7 +1224,8 @@ device_register(struct device *dev, void *aux)
 	 * types; this is only used to find the boot device.
 	 */
 	busname = busdev->dv_cfdata->cf_driver->cd_name;
-	if (strcmp(busname, "mainbus") == 0 || strcmp(busname, "upa") == 0)
+	if (strcmp(busname, "mainbus") == 0 ||
+	    strcmp(busname, "ssm") == 0 || strcmp(busname, "upa") == 0)
 		node = ma->ma_node;
 	else if (strcmp(busname, "sbus") == 0 ||
 	    strcmp(busname, "dma") == 0 || strcmp(busname, "ledma") == 0)
@@ -1214,5 +1354,6 @@ struct nam2blk nam2blk[] = {
 	{ "wd",		12 },
 	{ "cd",		18 },
 	{ "raid",	25 },
+	{ "vnd",	8 },
 	{ NULL,		-1 }
 };

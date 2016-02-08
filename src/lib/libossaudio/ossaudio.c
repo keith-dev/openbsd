@@ -1,4 +1,4 @@
-/*	$OpenBSD: ossaudio.c,v 1.14 2007/11/12 05:43:59 jakemsr Exp $	*/
+/*	$OpenBSD: ossaudio.c,v 1.16 2008/06/26 05:42:05 ray Exp $	*/
 /*	$NetBSD: ossaudio.c,v 1.14 2001/05/10 01:53:48 augustss Exp $	*/
 
 /*-
@@ -13,13 +13,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -404,17 +397,10 @@ audio_ioctl(int fd, unsigned long com, void *argp)
 	case SNDCTL_DSP_SETTRIGGER:
 		idat = INTARG;
 		AUDIO_INITINFO(&tmpinfo);
-		tmpinfo.mode = 0;
-		if (idat & PCM_ENABLE_OUTPUT) {
-			tmpinfo.mode |= (AUMODE_PLAY | AUMODE_PLAY_ALL);
+		if (idat & PCM_ENABLE_OUTPUT)
 			tmpinfo.play.pause = 0;
-		} else
-			tmpinfo.play.pause = 1;
-		if (idat & PCM_ENABLE_INPUT) {
-			tmpinfo.mode |= AUMODE_RECORD;
+		if (idat & PCM_ENABLE_INPUT)
 			tmpinfo.record.pause = 0;
-		} else
-			tmpinfo.record.pause = 1;
 		retval = ioctl(fd, AUDIO_SETINFO, &tmpinfo);
 		rerr = errno;
 		/* FALLTHRU */

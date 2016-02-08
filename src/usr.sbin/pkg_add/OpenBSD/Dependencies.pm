@@ -1,5 +1,5 @@
 # ex:ts=8 sw=4:
-# $OpenBSD: Dependencies.pm,v 1.59 2007/06/26 14:40:25 espie Exp $
+# $OpenBSD: Dependencies.pm,v 1.64 2008/06/21 14:01:10 espie Exp $
 #
 # Copyright (c) 2005-2007 Marc Espie <espie@openbsd.org>
 #
@@ -157,20 +157,26 @@ sub find_in_already_done
 	return $r;
 }
 
+sub find_in_plist
+{
+	my ($self, $plist, $dep) = @_;
+	if ($plist->has('define-tag')) {
+		for my $t (@{$plist->{'define-tag'}}) {
+			$self->{known_tags}->{$t->{name}} = $dep;
+		}
+	}
+}
+
 sub find_in_new_source
 {
 	my ($self, $solver, $state, $obj, $dep) = @_;
 	my $plist = OpenBSD::PackingList->from_installation($dep,
-	    \&OpenBSD::PackingList::DependsOnly);
+	    \&OpenBSD::PackingList::DependOnly);
 	if (!defined $plist) {
 		print STDERR "Can't read plist for $dep\n";
 	}
-	if ($plist->has('define-tag')) {
-		for my $t (@{$plist->{'define-tag'}}) {
-			$self->{known_tags}->{$t} = $dep;
-		}
-	}
-	return $self->find_in_already_dony($solver, $state, $obj);
+	$self->find_in_plist($plist, $dep);
+	return $self->find_in_already_done($solver, $state, $obj);
 }
 
 package OpenBSD::Dependencies::Solver;
@@ -239,7 +245,7 @@ sub find_dep_in_repositories
 	# XXX not really efficient, but hey
 	my %c = map {($_->{name}, $_)} @candidates;
 	my @pkgs = keys %c;
-	if (!$state->{forced}->{allversions}) {
+	if (!$state->{defines}->{allversions}) {
 		@pkgs = OpenBSD::PackageName::keep_most_recent(@pkgs);
 	}
 	if (@pkgs == 1) {
@@ -396,6 +402,17 @@ sub adjust_old_dependencies
 	}
 }
 
+sub repair_dependencies
+{
+	my ($self, $state) = @_;
+	my $pkgname = $self->{set}->handle->{pkgname};
+	for my $pkg (installed_packages(1)) {
+		my $plist = OpenBSD::PackingList->from_installation($pkg, 
+		    \&OpenBSD::PackingList::DependOnly);
+	    	$plist->repair_dependency($pkg, $pkgname);
+	}
+}
+
 use OpenBSD::SharedLibs;
 
 sub check_lib_spec
@@ -471,6 +488,22 @@ sub solve_tags
 	    	}
 	}
 	return $okay;
+}
+
+package OpenBSD::PackingElement;
+sub repair_dependency
+{
+}
+
+package OpenBSD::PackingElement::Dependency;
+sub repair_dependency
+{
+	my ($self, $requiring, $required) = @_;
+	if ($self->spec->filter($required) == 1) {
+		require OpenBSD::RequiredBy;
+		OpenBSD::RequiredBy->new($required)->add($requiring);
+		OpenBSD::Requiring->new($requiring)->add($required);
+	}
 }
 
 1;

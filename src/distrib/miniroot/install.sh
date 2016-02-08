@@ -1,5 +1,5 @@
 #!/bin/ksh
-#	$OpenBSD: install.sh,v 1.156 2008/03/02 21:18:58 krw Exp $
+#	$OpenBSD: install.sh,v 1.159 2008/06/26 05:42:03 ray Exp $
 #	$NetBSD: install.sh,v 1.5.2.8 1996/08/27 18:15:05 gwr Exp $
 #
 # Copyright (c) 1997-2004 Todd Miller, Theo de Raadt, Ken Westerback
@@ -39,13 +39,6 @@
 # 2. Redistributions in binary form must reproduce the above copyright
 #    notice, this list of conditions and the following disclaimer in the
 #    documentation and/or other materials provided with the distribution.
-# 3. All advertising materials mentioning features or use of this software
-#    must display the following acknowledgement:
-#        This product includes software developed by the NetBSD
-#        Foundation, Inc. and its contributors.
-# 4. Neither the name of The NetBSD Foundation nor the names of its
-#    contributors may be used to endorse or promote products derived
-#    from this software without specific prior written permission.
 #
 # THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
 # ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -120,7 +113,6 @@ if [ ! -f /etc/fstab ]; then
 		disklabel $DISK 2>&1 | sed -ne '/^ *[a-p]: /p' >/tmp/disklabel.$DISK
 		while read _dev _size _offset _type _rest; do
 			_pp=${DISK}${_dev%:}
-			_ps=$_size
 
 			if [[ $_pp == $ROOTDEV ]]; then
 				echo "$ROOTDEV /" >$FILESYSTEMS
@@ -133,7 +125,7 @@ if [ ! -f /etc/fstab ]; then
 			fi
 
 			_partitions[$_i]=$_pp
-			_psizes[$_i]=$_ps
+			_psizes[$_i]=$_size
 
 			# Set _mount_points[$_i].
 			if [[ -f /tmp/fstab.$DISK ]]; then
@@ -165,11 +157,11 @@ if [ ! -f /etc/fstab ]; then
 		_i=0
 		while :; do
 			_pp=${_partitions[$_i]}
-			_ps=$(( ${_psizes[$_i]} / 2 ))
 			_mp=${_mount_points[$_i]}
+			_size=$(stdsize ${_psizes[$_i]})
 
 			# Get the mount point from the user
-			ask "Mount point for ${_pp} (size=${_ps}k)? (or 'none' or 'done')" "$_mp"
+			ask "Mount point for $_pp ($_size)? (or 'none' or 'done')" "$_mp"
 			case $resp in
 			"")	;;
 			none)	_mp=
@@ -398,11 +390,12 @@ mv hosts.new hosts
 save_comments hosts
 save_comments dhclient.conf
 
-# Possible files: fstab, kbdtype, myname, mygate, sysctl.conf
-#                 dhclient.conf resolv.conf resolv.conf.tail
-#		  hostname.* hosts
-for _f in fstab kbdtype my* *.conf *.tail host* ttys; do
-	[[ -f $_f ]] && mv $_f /mnt/etc/.
+# Possible files: fstab hostname.* hosts kbdtype mygate myname ttys
+#		  boot.conf dhclient.conf resolv.conf sysctl.conf 
+#		  resolv.conf.tail
+# Save only non-empty (-s) regular (-f) files.
+for _f in fstab host* kbdtype my* ttys *.conf *.tail; do
+	[[ -f $_f && -s $_f ]] && mv $_f /mnt/etc/.
 done )
 
 _encr=`/mnt/usr/bin/encrypt -b 8 -- "$_password"`

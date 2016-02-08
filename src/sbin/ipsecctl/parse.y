@@ -1,4 +1,4 @@
-/*	$OpenBSD: parse.y,v 1.133 2008/02/22 23:51:31 hshoexer Exp $	*/
+/*	$OpenBSD: parse.y,v 1.138 2008/07/01 14:31:37 bluhm Exp $	*/
 
 /*
  * Copyright (c) 2002, 2003, 2004 Henning Brauer <henning@openbsd.org>
@@ -168,7 +168,7 @@ struct ipsec_addr_wrap	*copyhost(const struct ipsec_addr_wrap *);
 char			*copytag(const char *);
 struct ipsec_rule	*copyrule(struct ipsec_rule *);
 int			 validate_af(struct ipsec_addr_wrap *,
-			    struct ipsec_addr_wrap *);
+			     struct ipsec_addr_wrap *);
 int			 validate_sa(u_int32_t, u_int8_t,
 			     struct ipsec_transforms *, struct ipsec_key *,
 			     struct ipsec_key *, u_int8_t);
@@ -181,16 +181,18 @@ struct ipsec_rule	*create_sagroup(struct ipsec_addr_wrap *, u_int8_t,
 			     u_int32_t, struct ipsec_addr_wrap *, u_int8_t,
 			     u_int32_t);
 struct ipsec_rule	*create_flow(u_int8_t, u_int8_t, struct ipsec_hosts *,
-			     struct ipsec_hosts *, u_int8_t, char *, char *,
-			     u_int8_t);
+			     u_int8_t, char *, char *, u_int8_t);
+int			 set_rule_peers(struct ipsec_rule *r,
+			     struct ipsec_hosts *peers);
 void			 expand_any(struct ipsec_addr_wrap *);
-int			 expand_rule(struct ipsec_rule *, u_int8_t, u_int32_t,
-			     struct ipsec_key *, struct ipsec_key *, int);
+int			 expand_rule(struct ipsec_rule *, struct ipsec_hosts *,
+			     u_int8_t, u_int32_t, struct ipsec_key *,
+			     struct ipsec_key *, int);
 struct ipsec_rule	*reverse_rule(struct ipsec_rule *);
 struct ipsec_rule	*create_ike(u_int8_t, struct ipsec_hosts *,
-			     struct ipsec_hosts *, struct ike_mode *,
-			     struct ike_mode *, u_int8_t, u_int8_t, u_int8_t,
-			     char *, char *, struct ike_auth *, char *);
+			     struct ike_mode *, struct ike_mode *, u_int8_t,
+			     u_int8_t, u_int8_t, char *, char *,
+			     struct ike_auth *, char *);
 int			 add_sagroup(struct ipsec_rule *);
 int			 get_id_type(char *);
 
@@ -246,6 +248,7 @@ typedef struct {
 %token	AUTHKEY ENCKEY FILENAME AUTHXF ENCXF ERROR IKE MAIN QUICK AGGRESSIVE
 %token	PASSIVE ACTIVE ANY IPIP IPCOMP COMPXF TUNNEL TRANSPORT DYNAMIC LIFE
 %token	TYPE DENY BYPASS LOCAL PROTO USE ACQUIRE REQUIRE DONTACQ GROUP PORT TAG
+%token	INCLUDE
 %token	<v.string>		STRING
 %token	<v.number>		NUMBER
 %type	<v.string>		string
@@ -276,6 +279,7 @@ typedef struct {
 %%
 
 grammar		: /* empty */
+		| grammar include '\n'
 		| grammar '\n'
 		| grammar ikerule '\n'
 		| grammar flowrule '\n'
@@ -289,6 +293,21 @@ comma		: ','
 		| /* empty */
 		;
 
+include		: INCLUDE STRING		{
+			struct file	*nfile;
+
+			if ((nfile = pushfile($2, 0)) == NULL) {
+				yyerror("failed to include file %s", $2);
+				free($2);
+				YYERROR;
+			}
+			free($2);
+
+			file = nfile;
+			lungetc('\n');
+		}
+		;
+
 tcpmd5rule	: TCPMD5 hosts spispec authkeyspec	{
 			struct ipsec_rule	*r;
 
@@ -297,7 +316,8 @@ tcpmd5rule	: TCPMD5 hosts spispec authkeyspec	{
 			if (r == NULL)
 				YYERROR;
 
-			if (expand_rule(r, 0, $3.spiin, $4.keyin, NULL, 0))
+			if (expand_rule(r, NULL, 0, $3.spiin, $4.keyin, NULL,
+			    0))
 				errx(1, "tcpmd5rule: expand_rule");
 		}
 		;
@@ -311,7 +331,8 @@ sarule		: satype tmode hosts spispec transforms authkeyspec
 			if (r == NULL)
 				YYERROR;
 
-			if (expand_rule(r, 0, $4.spiin, $6.keyin, $7.keyin, 1))
+			if (expand_rule(r, NULL, 0, $4.spiin, $6.keyin,
+			    $7.keyin, 1))
 				errx(1, "sarule: expand_rule");
 		}
 		;
@@ -319,12 +340,12 @@ sarule		: satype tmode hosts spispec transforms authkeyspec
 flowrule	: FLOW satype dir proto hosts peers ids type {
 			struct ipsec_rule	*r;
 
-			r = create_flow($3, $4, &$5, &$6, $2, $7.srcid,
+			r = create_flow($3, $4, &$5, $2, $7.srcid,
 			    $7.dstid, $8);
 			if (r == NULL)
 				YYERROR;
 
-			if (expand_rule(r, $3, 0, NULL, NULL, 0))
+			if (expand_rule(r, &$6, $3, 0, NULL, NULL, 0))
 				errx(1, "flowrule: expand_rule");
 		}
 		;
@@ -333,12 +354,12 @@ ikerule		: IKE ikemode satype tmode proto hosts peers
 		    phase1mode phase2mode ids ikeauth tag {
 			struct ipsec_rule	*r;
 
-			r = create_ike($5, &$6, &$7, $8, $9, $3, $4, $2,
+			r = create_ike($5, &$6, $8, $9, $3, $4, $2,
 			    $10.srcid, $10.dstid, &$11, $12);
 			if (r == NULL)
 				YYERROR;
 
-			if (expand_rule(r, 0, 0, NULL, NULL, 0))
+			if (expand_rule(r, &$7, 0, 0, NULL, NULL, 0))
 				errx(1, "ikerule: expand_rule");
 		}
 		;
@@ -877,6 +898,7 @@ lookup(char *s)
 		{ "group",		GROUP },
 		{ "ike",		IKE },
 		{ "in",			IN },
+		{ "include",		INCLUDE },
 		{ "ipcomp",		IPCOMP },
 		{ "ipip",		IPIP },
 		{ "life",		LIFE },
@@ -1561,7 +1583,7 @@ host_v4(const char *s, int mask)
 struct ipsec_addr_wrap *
 host_dns(const char *s, int mask)
 {
-	struct ipsec_addr_wrap	*ipa = NULL;
+	struct ipsec_addr_wrap	*ipa = NULL, *head = NULL;
 	struct addrinfo		 hints, *res0, *res;
 	int			 error;
 	char			 hbuf[NI_MAXHOST];
@@ -1607,6 +1629,12 @@ host_dns(const char *s, int mask)
 		ipa->af = res->ai_family;
 		ipa->next = NULL;
 		ipa->tail = ipa;
+		if (head == NULL)
+			head = ipa;
+		else {
+			head->tail->next = ipa;
+			head->tail = ipa;
+		}
 
 		/*
 		 * XXX for now, no netmask support for IPv6.
@@ -1620,11 +1648,10 @@ host_dns(const char *s, int mask)
 			if (mask != -1)
 				err(1, "host_dns: cannot apply netmask "
 				    "on non-IPv4 address");
-		break;
 	}
 	freeaddrinfo(res0);
 
-	return (ipa);
+	return (head);
 }
 
 struct ipsec_addr_wrap *
@@ -2290,7 +2317,6 @@ create_sagroup(struct ipsec_addr_wrap *dst, u_int8_t proto, u_int32_t spi,
 
 struct ipsec_rule *
 create_flow(u_int8_t dir, u_int8_t proto, struct ipsec_hosts *hosts,
-    struct ipsec_hosts *peers,
     u_int8_t satype, char *srcid, char *dstid, u_int8_t type)
 {
 	struct ipsec_rule *r;
@@ -2318,30 +2344,9 @@ create_flow(u_int8_t dir, u_int8_t proto, struct ipsec_hosts *hosts,
 		goto errout;
 	}
 
-	if (type == TYPE_DENY || type == TYPE_BYPASS) {
-		r->flowtype = type;
-		return (r);
-	}
-
 	r->flowtype = type;
-	r->local = peers->src;
-	if (peers->dst == NULL) {
-		/* Set peer to remote host.  Must be a host address. */
-		if (r->direction == IPSEC_IN) {
-			if (r->src->netaddress) {
-				yyerror("no peer specified");
-				goto errout;
-			}
-			r->peer = copyhost(r->src);
-		} else {
-			if (r->dst->netaddress) {
-				yyerror("no peer specified");
-				goto errout;
-			}
-			r->peer = copyhost(r->dst);
-		}
-	} else
-		r->peer = peers->dst;
+	if (type == TYPE_DENY || type == TYPE_BYPASS)
+		return (r);
 
 	r->auth = calloc(1, sizeof(struct ipsec_auth));
 	if (r->auth == NULL)
@@ -2392,14 +2397,47 @@ expand_any(struct ipsec_addr_wrap *ipa_in)
 		ipa->next->next = oldnext;
 	}
 }
+	 
+int
+set_rule_peers(struct ipsec_rule *r, struct ipsec_hosts *peers)
+{
+	if (r->type == RULE_FLOW &&
+	    (r->flowtype == TYPE_DENY || r->flowtype == TYPE_BYPASS))
+		return (0);
+
+	r->local = copyhost(peers->src);
+	r->peer = copyhost(peers->dst);
+	if (r->peer == NULL) {
+		/* Set peer to remote host.  Must be a host address. */
+		if (r->direction == IPSEC_IN) {
+			if (r->src->netaddress)
+				r->peer = NULL;
+			else
+				r->peer = copyhost(r->src);
+		} else {
+			if (r->dst->netaddress)
+				r->peer = NULL;
+			else
+				r->peer = copyhost(r->dst);
+		}
+	}
+
+	if (r->type == RULE_FLOW && r->peer == NULL) {
+		yyerror("no peer specified for destination %s",
+		    r->dst->name);
+		return (1);
+	}
+	return (0);
+}
 
 int
-expand_rule(struct ipsec_rule *rule, u_int8_t direction, u_int32_t spi,
-    struct ipsec_key *authkey, struct ipsec_key *enckey, int group)
+expand_rule(struct ipsec_rule *rule, struct ipsec_hosts *peers,
+    u_int8_t direction, u_int32_t spi, struct ipsec_key *authkey,
+    struct ipsec_key *enckey, int group)
 {
 	struct ipsec_rule	*r, *revr;
 	struct ipsec_addr_wrap	*src, *dst;
-	int added = 0;
+	int added = 0, ret = 1;
 
 	if (validate_af(rule->src, rule->dst)) {
 		yyerror("source/destination address families do not match");
@@ -2407,7 +2445,6 @@ expand_rule(struct ipsec_rule *rule, u_int8_t direction, u_int32_t spi,
 	}
 	expand_any(rule->src);
 	expand_any(rule->dst);
-	expand_any(rule->peer);
 	for (src = rule->src; src; src = src->next) {
 		for (dst = rule->dst; dst; dst = dst->next) {
 			if (src->af != dst->af)
@@ -2417,34 +2454,39 @@ expand_rule(struct ipsec_rule *rule, u_int8_t direction, u_int32_t spi,
 			r->src = copyhost(src);
 			r->dst = copyhost(dst);
 
+			if (peers && set_rule_peers(r, peers)) {
+				ipsecctl_free_rule(r);
+				goto errout;
+			}
+
 			r->nr = ipsec->rule_nr++;
 			if (ipsecctl_add_rule(ipsec, r))
-				return (1);
+				goto out;
 			if (group && add_sagroup(r))
-				return (1);
+				goto out;
 
 			if (direction == IPSEC_INOUT) {
 				/* Create and add reverse flow rule. */
 				revr = reverse_rule(r);
 				if (revr == NULL)
-					return (1);
+					goto out;
 
 				revr->nr = ipsec->rule_nr++;
 				if (ipsecctl_add_rule(ipsec, revr))
-					return (1);
+					goto out;
 				if (group && add_sagroup(revr))
-					return (1);
+					goto out;
 			} else if (spi != 0 || authkey || enckey) {
 				/* Create and add reverse sa rule. */
 				revr = reverse_sa(r, spi, authkey, enckey);
 				if (revr == NULL)
-					return (1);
+					goto out;
 
 				revr->nr = ipsec->rule_nr++;
 				if (ipsecctl_add_rule(ipsec, revr))
-					return (1);
+					goto out;
 				if (group && add_sagroup(revr))
-					return (1);
+					goto out;
 			}
 			added++;
 		}
@@ -2452,8 +2494,16 @@ expand_rule(struct ipsec_rule *rule, u_int8_t direction, u_int32_t spi,
 	if (!added)
 		yyerror("rule expands to no valid combination");
  errout:
+	ret = 0;
 	ipsecctl_free_rule(rule);
-	return (0);
+ out:
+	if (peers) {
+		if (peers->src)
+			free(peers->src);
+		if (peers->dst)
+			free(peers->dst);
+	}
+	return (ret);
 }
 
 struct ipsec_rule *
@@ -2504,7 +2554,7 @@ reverse_rule(struct ipsec_rule *rule)
 }
 
 struct ipsec_rule *
-create_ike(u_int8_t proto, struct ipsec_hosts *hosts, struct ipsec_hosts *peers,
+create_ike(u_int8_t proto, struct ipsec_hosts *hosts,
     struct ike_mode *phase1mode, struct ike_mode *phase2mode, u_int8_t satype,
     u_int8_t tmode, u_int8_t mode, char *srcid, char *dstid,
     struct ike_auth *authtype, char *tag)
@@ -2548,25 +2598,6 @@ create_ike(u_int8_t proto, struct ipsec_hosts *hosts, struct ipsec_hosts *peers,
 			free(dstid);
 		return NULL;
 	}
-
-	if (peers->dst == NULL) {
-		/* Set peer to remote host.  Must be a host address. */
-		if (r->direction == IPSEC_IN) {
-			if (r->src->netaddress)
-				r->peer = NULL;
-			else
-				r->peer = copyhost(r->src);
-		} else {
-			if (r->dst->netaddress)
-				r->peer = NULL;
-			else
-				r->peer = copyhost(r->dst);
-		}
-	} else
-		r->peer = peers->dst;
-
-	if (peers->src)
-		r->local = peers->src;
 
 	r->satype = satype;
 	r->tmode = tmode;

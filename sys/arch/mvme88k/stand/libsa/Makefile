@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.9 2007/11/26 10:26:02 deraadt Exp $
+#	$OpenBSD: Makefile,v 1.12 2008/04/02 21:53:18 miod Exp $
 
 LIB=sa
 
@@ -19,17 +19,18 @@ SRCS+=	alloc.c memcpy.c exit.c getfile.c gets.c globals.c \
 	ufs.c cread.c
 SRCS+=	arp.c ether.c in_cksum.c net.c netif.c rpc.c nfs.c \
 	rarp.c bootparam.c
+SRCS+=	loadfile.c
 
 .PATH:	${S}/lib/libkern/arch/m88k ${S}/lib/libkern
-SRCS+=	ashrdi3.c bzero.c
+SRCS+=	ashrdi3.c bzero.c __main.c
 
 # DBG= -DDEBUG -DNETIF_DEBUG -DNFS_DEBUG -DRPC_DEBUG \
 # 	-DNET_DEBUG -DRARP_DEBUG -DETHER_DEBUG
 
 #DEFS= -DCOMPAT_UFS
-DEFS= -D__INTERNAL_LIBSA_CREAD
+DEFS= -D__INTERNAL_LIBSA_CREAD -D_STANDALONE
 #DEFS+=-DNETIF_DEBUG
-INCL= -I${.CURDIR} -I${.CURDIR}/../libbug -I${S}/lib/libsa -I${S}
+INCL= -I${.CURDIR} -I${.CURDIR}/../libbug -I${S}/lib/libsa -I${S} -I.
 CFLAGS+= ${XCFLAGS} ${COPTS} ${DEFS} ${DBG} ${INCL}
 
 all: libsa.a
@@ -37,3 +38,11 @@ all: libsa.a
 install:
 
 .include <bsd.lib.mk>
+
+.if !make(obj)
+.BEGIN:
+	@([ -h machine ] || ln -s ${.CURDIR}/../../../${MACHINE}/include machine)
+	@([ -h m88k ] || ln -s ${.CURDIR}/../../../m88k/include m88k)
+.NOPATH: machine m88k
+CLEANFILES+=	machine m88k
+.endif

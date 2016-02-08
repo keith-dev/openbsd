@@ -1,4 +1,4 @@
-/*	$OpenBSD: ssh.c,v 1.16 2007/05/29 13:56:13 pyr Exp $ */
+/*	$OpenBSD: ssh.c,v 1.18 2008/08/05 04:29:03 miod Exp $ */
 
 /*
  * Copyright (c) 1994 Michael L. Hitch
@@ -500,8 +500,8 @@ sshinitialize(sc)
 	 * malloc sc_acb to ensure that DS is on a long word boundary.
 	 */
 
-	MALLOC(sc->sc_acb, struct ssh_acb *, 
-			 sizeof(struct ssh_acb) * SSH_NACB, M_DEVBUF, M_NOWAIT);
+	sc->sc_acb = (struct ssh_acb *)malloc(sizeof(struct ssh_acb) *
+	    SSH_NACB, M_DEVBUF, M_NOWAIT);
 	if (sc->sc_acb == NULL)
 		panic("sshinitialize: ACB malloc failed!");
 
@@ -582,8 +582,7 @@ struct ssh_softc *sc;
 	splx(s);
 
 	delay(ssh_reset_delay * 1000);
-	printf(": version %d target %d\n", rp->ssh_ctest8 >> 4,
-			 sc->sc_link.adapter_target);
+	printf(": version %d\n", rp->ssh_ctest8 >> 4);
 
 	if ((sc->sc_flags & SSH_ALIVE) == 0) {
 		TAILQ_INIT(&sc->ready_list);

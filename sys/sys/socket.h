@@ -1,4 +1,4 @@
-/*	$OpenBSD: socket.h,v 1.55 2007/11/27 16:22:14 martynas Exp $	*/
+/*	$OpenBSD: socket.h,v 1.58 2008/05/09 02:52:15 markus Exp $	*/
 /*	$NetBSD: socket.h,v 1.14 1996/02/09 18:25:36 christos Exp $	*/
 
 /*
@@ -67,6 +67,8 @@
 #define	SO_OOBINLINE	0x0100		/* leave received OOB data in line */
 #define	SO_REUSEPORT	0x0200		/* allow local address & port reuse */
 #define SO_JUMBO	0x0400		/* try to use jumbograms */
+#define SO_TIMESTAMP	0x0800		/* timestamp received dgram traffic */
+#define	SO_BINDANY	0x1000		/* allow bind to any address */
 
 /*
  * Additional options, not kept in so_options.
@@ -134,8 +136,8 @@ struct	linger {
 #define pseudo_AF_HDRCMPLT 31		/* Used by BPF to not rewrite headers
 					   in interface output routine */
 #define	AF_BLUETOOTH	32		/* Bluetooth */
-
-#define	AF_MAX		33
+#define AF_MPLS         33              /* MPLS */
+#define AF_MAX          34
 
 /*
  * Structure used by kernel to store most
@@ -214,6 +216,7 @@ struct sockproto {
 #define PF_KEY		AF_KEY
 #define PF_BPF		pseudo_AF_HDRCMPLT
 #define	PF_BLUETOOTH	AF_BLUETOOTH
+#define PF_MPLS		AF_MPLS
 #define	PF_MAX		AF_MAX
 
 /*
@@ -284,6 +287,8 @@ struct sockcred {
 	{ "sip", CTLTYPE_NODE }, \
 	{ "key", CTLTYPE_NODE }, \
 	{ "bpf", CTLTYPE_NODE }, \
+	{ "bluetooth", CTLTYPE_NODE }, \
+	{ "mpls", CTLTYPE_NODE }, \
 }
 
 /*
@@ -414,6 +419,7 @@ struct cmsghdr {
 /* "Socket"-level control message types: */
 #define	SCM_RIGHTS	0x01		/* access rights (array of int) */
 #define SCM_CREDS	0x02		/* credentials (struct sockcred) */
+#define	SCM_TIMESTAMP	0x04		/* timestamp (struct timeval) */
 
 /*
  * 4.3 compat sockaddr, move to compat file later

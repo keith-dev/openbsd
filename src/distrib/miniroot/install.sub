@@ -1,4 +1,4 @@
-#	$OpenBSD: install.sub,v 1.426 2008/03/05 01:09:58 krw Exp $
+#	$OpenBSD: install.sub,v 1.436 2008/07/07 15:53:15 jdixon Exp $
 #	$NetBSD: install.sub,v 1.5.2.8 1996/09/02 23:25:02 pk Exp $
 #
 # Copyright (c) 1997-2007 Todd Miller, Theo de Raadt, Ken Westerback
@@ -38,13 +38,6 @@
 # 2. Redistributions in binary form must reproduce the above copyright
 #    notice, this list of conditions and the following disclaimer in the
 #    documentation and/or other materials provided with the distribution.
-# 3. All advertising materials mentioning features or use of this software
-#    must display the following acknowledgement:
-#        This product includes software developed by the NetBSD
-#        Foundation, Inc. and its contributors.
-# 4. Neither the name of The NetBSD Foundation nor the names of its
-#    contributors may be used to endorse or promote products derived
-#    from this software without specific prior written permission.
 #
 # THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
 # ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -227,6 +220,27 @@ mount_mnt2() {
 	# Always mount msdos partitions with -s to get lower case names.
 	grep -q "^  $resp: .*MSDOS" $_file && _opts="-s"
 	mount -o ro,$_opts /dev/$_dev$resp /mnt2
+}
+
+# Translate block count into human readable byte count.
+# N.B.:  Assumes blocks being counted are 512 bytes!
+# N.B.:  ksh arithmetic is 32 bits so can't just calculate!
+stdsize ()  {
+	local _p= _s= _sz=$1
+
+	set -- " " K M G T P E Z Y
+
+	while (( ${#_sz} > 3 )); do
+		shift
+		_p=${_sz%[0-9][0-9][0-9]}
+		_s=${_sz#$_p}
+		_s=${_s##+(0)}
+		_sz=$_p
+	done
+
+	(( _s > 500 )) && : $(( _sz = _sz + 1 ))
+
+	echo "$(( _sz * 512 )) ${1}Bytes"
 }
 
 # Ask for a password, saving the input in $resp.
@@ -433,7 +447,7 @@ manual_net_cfg() {
 # log in via ftp to host $1 as user $2 with password $3
 # and return a list of all files in the directory $4 on stdout
 ftp_list_files() {
-	ftp ${_ftp_active} -V -n "$1" <<__EOT
+	ftp $FTPOPTS -n "$1" <<__EOT
 user "$2" "$3"
 cd "$4"
 ls
@@ -567,7 +581,7 @@ __EOT
 		v4_config "$_ifs" "$_media" "$_name" "$_hn"
 		v6_config "$_ifs" "$_media" "$_name" "$_hn"
 
-		[[ -f $_hn ]] && _IFDEVS=$(rmel "$_ifs" $_IFDEVS)
+		[[ -f $_hn ]] && chmod 600 $_hn && _IFDEVS=$(rmel "$_ifs" $_IFDEVS)
 	done
 }
 
@@ -650,7 +664,7 @@ v4_config() {
 		fi
 	fi
 
-	[[ -x /sbin/dhclient ]] && _prompt=" or 'dhcp'"
+	[[ -x /sbin/dhclient ]] && { _prompt=" or 'dhcp'" ; : ${_addr:=dhcp} ; }
 	_prompt="IPv4 address for $_ifs? (or 'none'$_prompt)"
 
 	ask_until "$_prompt" "$_addr"
@@ -944,9 +958,9 @@ __EOT
 		isin $_f $_get_sets || continue
 		echo "Getting $_f ..."
 		case $_f in
-		*.tgz)	ftp $_ftp_active -o - -V -m "$_src/$_f" | tar zxphf - -C /mnt
+		*.tgz)	ftp $FTPOPTS -o - -m "$_src/$_f" | tar zxphf - -C /mnt
 			;;
-		*)	ftp $_ftp_active -o "/mnt/$_f" -V -m "$_src/$_f"
+		*)	ftp $FTPOPTS -o "/mnt/$_f" -m "$_src/$_f"
 			;;
 		esac
 		if [ $? -ne 0 ]; then
@@ -1018,11 +1032,21 @@ ftp_error() {
 	return 1
 }
 
+set_ftp_opt() {
+	local _q=$1 _opt=$2
+	ask_yn "Use $_q?" $(isin $_opt $FTPOPTS && echo "yes")
+
+	case $resp in
+	y) FTPOPTS=$(addel $_opt $FTPOPTS) ;;
+	n) FTPOPTS=$(rmel $_opt $FTPOPTS) ;;
+	esac
+}
+
 # Get several parameters from the user, and xfer
 # files from the server.
 # $1 = url type (ftp or http)
 # Note:	_ftp_server_ip, _ftp_server_dir, _ftp_server_login,
-#	and _ftp_active must be global.
+#	and FTPOPTS must be global.
 install_url() {
 	local _url_type=$1 _file_list _url_base _oifs _prompt _passwd
 
@@ -1037,7 +1061,7 @@ install_url() {
 		# ftp.openbsd.org == 129.128.5.191 and will remain at
 		# that address for the foreseeable future.
 		echo -n "Getting the list from 129.128.5.191 (ftp.openbsd.org)..."
-		ftp $_ftp_active -V -a -o - \
+		ftp $FTPOPTS -a -o - \
 			ftp://129.128.5.191/$FTPDIR/ftplist 2>/tmp/ftplisterr \
 			| sed -ne "/^${_url_type}:\/\//s///p" >$SERVERLIST
 		if [[ -s $SERVERLIST ]]; then
@@ -1081,14 +1105,7 @@ install_url() {
 	# ask the user if it worth trying passive mode to the chosen server.
 	# Irrelevant if using a proxy.
 	if [[ $_url_type == ftp && -z $ftp_proxy ]]; then
-		case $_ftp_active in
-		-A)	resp=no ;;
-		*)	resp=yes ;;
-		esac
-
-		unset _ftp_active
-		ask_yn "Does the server support passive mode ftp?" $resp
-		[[ $resp == n ]] && _ftp_active=-A
+		set_ftp_opt "active mode ftp" "-A"
 	fi
 
 	# Get server directory
@@ -1135,7 +1152,7 @@ install_url() {
 	else
 		# Assumes index file is "index.txt" for http (or proxy)
 		# We can't use index.html since the format is server-dependent
-		_file_list=$(ftp -o - -V "$_url_base/index.txt" | sed 's///')
+		_file_list=$(ftp $FTPOPTS -o - "$_url_base/index.txt" | sed 's///')
 	fi
 
 	install_files "$_url_base" "$_file_list"
@@ -1191,7 +1208,7 @@ install_nfs() {
 	[[ $resp == y ]] && _tcp=-T
 
 	# Mount the server
-	mount_nfs $_tcp -o ro $NFS_ADDR:$NFS_PATH /mnt2 || return
+	mount_nfs $_tcp -o ro -R 5 $NFS_ADDR:$NFS_PATH /mnt2 || return
 
 	install_mounted_fs
 }
@@ -1513,10 +1530,11 @@ questions() {
 		    >>/mnt/etc/rc.conf.local
 	fi
 
-	ask "NTP server? (host, 'none' or 'default')" none
-	if [[ $resp != none ]]; then
+	ask_yn "Start ntpd(8) by default?" no
+	if [[ $resp == y ]]; then
 		echo "ntpd_flags=		# enabled during install" \
 			>>/mnt/etc/rc.conf.local
+		ask "NTP server? (hostname or 'default')" default
 		if [[ $resp != default ]]; then
 			# Comment out the default 'servers' line, and add a
 			# 'server' line with the first token in $resp as the
@@ -1616,11 +1634,12 @@ __EOT
 ROOTDISK=
 ROOTDEV=
 
-VERSION=43
+VERSION=44
 
 VNAME="$(( $VERSION / 10 )).$(( $VERSION % 10 ))"
 SETDIR="$VNAME/$ARCH"
 FTPDIR="pub/OpenBSD/$VNAME"
+FTPOPTS="-V"
 OBSD="OpenBSD/$ARCH $VNAME"
 SERVERLIST=/tmp/serverlist
 

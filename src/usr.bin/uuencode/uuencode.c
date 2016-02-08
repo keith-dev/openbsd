@@ -1,4 +1,4 @@
-/*	$OpenBSD: uuencode.c,v 1.7 2004/04/09 22:54:02 millert Exp $	*/
+/*	$OpenBSD: uuencode.c,v 1.9 2008/07/29 18:25:28 sobrado Exp $	*/
 /*	$FreeBSD: uuencode.c,v 1.18 2004/01/22 07:23:35 grehan Exp $	*/
 
 /*-
@@ -40,7 +40,7 @@ static const char copyright[] =
 #if 0
 static const char sccsid[] = "@(#)uuencode.c	8.2 (Berkeley) 4/2/94";
 #endif
-static const char rcsid[] = "$OpenBSD: uuencode.c,v 1.7 2004/04/09 22:54:02 millert Exp $";
+static const char rcsid[] = "$OpenBSD: uuencode.c,v 1.9 2008/07/29 18:25:28 sobrado Exp $";
 #endif /* not lint */
 
 /*
@@ -69,23 +69,34 @@ FILE *output;
 int mode;
 char **av;
 
+enum program_mode {
+	MODE_ENCODE,
+	MODE_B64ENCODE
+} pmode;
+
 int
 main(int argc, char *argv[])
 {
 	struct stat sb;
-	int base64;
-	int ch;
+	int base64, ch;
 	char *outfile;
 	extern char *__progname;
+	static const char *optstr[2] = {
+		"mo:",
+		"o:"
+	};
 
 	base64 = 0;
 	outfile = NULL;
 
-	if (strcmp(__progname, "b64encode") == 0)
+	pmode = MODE_ENCODE;
+	if (strcmp(__progname, "b64encode") == 0) {
 		base64 = 1;
+		pmode = MODE_B64ENCODE;
+	}
 
 	setlocale(LC_ALL, "");
-	while ((ch = getopt(argc, argv, "mo:")) != -1) {
+	while ((ch = getopt(argc, argv, optstr[pmode])) != -1) {
 		switch (ch) {
 		case 'm':
 			base64 = 1;
@@ -218,8 +229,15 @@ encode(void)
 static void
 usage(void)
 {
-	(void)fprintf(stderr,
-	    "usage: uuencode [-m] [-o outfile] [infile] remotefile\n"
-	    "       b64encode [-o outfile] [infile] remotefile\n");
+	switch (pmode) {
+	case MODE_ENCODE:
+		(void)fprintf(stderr,
+		    "usage: uuencode [-m] [-o output_file] [file] name\n");
+		break;
+	case MODE_B64ENCODE:
+		(void)fprintf(stderr,
+		    "usage: b64encode [-o output_file] [file] name\n");
+		break;
+	}
 	exit(1);
 }

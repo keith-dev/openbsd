@@ -1,4 +1,4 @@
-/*	$OpenBSD: subr_disk.c,v 1.68 2007/12/23 01:59:58 dlg Exp $	*/
+/*	$OpenBSD: subr_disk.c,v 1.79 2008/06/25 15:26:43 reyk Exp $	*/
 /*	$NetBSD: subr_disk.c,v 1.17 1996/03/16 23:17:08 christos Exp $	*/
 
 /*
@@ -57,6 +57,11 @@
 #include <sys/dkstat.h>		/* XXX */
 #include <sys/proc.h>
 #include <uvm/uvm_extern.h>
+
+#include <sys/socket.h>
+#include <sys/socketvar.h>
+
+#include <net/if.h>
 
 #include <dev/rndvar.h>
 #include <dev/cons.h>
@@ -394,7 +399,7 @@ readdoslabel(struct buf *bp, void (*strat)(struct buf *),
 		/* read boot record */
 		bp->b_blkno = part_blkno;
 		bp->b_bcount = lp->d_secsize;
-		bp->b_flags = B_BUSY | B_READ;
+		bp->b_flags = B_BUSY | B_READ | B_RAW;
 		(*strat)(bp);
 		if (biowait(bp)) {
 /*wrong*/		if (partoffp)
@@ -404,7 +409,7 @@ readdoslabel(struct buf *bp, void (*strat)(struct buf *),
 
 		bcopy(bp->b_data + DOSPARTOFF, dp, sizeof(dp));
 
-		if (ourpart == -1 && part_blkno == DOSBBSECTOR) {
+		if (ourpart == -1) {
 			/* Search for our MBR partition */
 			for (dp2=dp, i=0; i < NDOSPART && ourpart == -1;
 			    i++, dp2++)
@@ -449,11 +454,6 @@ donot:
 				continue;
 			if (letoh32(dp2->dp_size) == 0)
 				continue;
-			if (letoh32(dp2->dp_start))
-				DL_SETPOFFSET(pp,
-				    letoh32(dp2->dp_start) + part_blkno);
-
-			DL_SETPSIZE(pp, letoh32(dp2->dp_size));
 
 			switch (dp2->dp_typ) {
 			case DOSPTYP_UNUSED:
@@ -494,6 +494,19 @@ donot:
 				n++;
 				break;
 			}
+
+			/*
+			 * There is no need to set the offset/size when
+			 * wandering; it would also invalidate the
+			 * disklabel checksum.
+			 */
+			if (wander)
+				continue;
+
+			if (letoh32(dp2->dp_start))
+				DL_SETPOFFSET(pp,
+				    letoh32(dp2->dp_start) + part_blkno);
+			DL_SETPSIZE(pp, letoh32(dp2->dp_size));
 		}
 	}
 	lp->d_npartitions = MAXPARTITIONS;
@@ -537,7 +550,7 @@ notfat:
 
 	bp->b_blkno = dospartoff + DOS_LABELSECTOR;
 	bp->b_bcount = lp->d_secsize;
-	bp->b_flags = B_BUSY | B_READ;
+	bp->b_flags = B_BUSY | B_READ | B_RAW;
 	(*strat)(bp);
 	if (biowait(bp))
 		return ("disk label I/O error");
@@ -976,10 +989,6 @@ bufq_default_get(struct bufq *bq)
 	return (bp);
 }
 
-#ifdef RAMDISK_HOOKS
-static struct device fakerdrootdev = { DV_DISK, {}, NULL, 0, "rd0", NULL };
-#endif
-
 struct device *
 getdisk(char *str, int len, int defpart, dev_t *devp)
 {
@@ -987,9 +996,6 @@ getdisk(char *str, int len, int defpart, dev_t *devp)
 
 	if ((dv = parsedisk(str, len, defpart, devp)) == NULL) {
 		printf("use one of: exit");
-#ifdef RAMDISK_HOOKS
-		printf(" %s[a-p]", fakerdrootdev.dv_xname);
-#endif
 		TAILQ_FOREACH(dv, &alldevs, dv_list) {
 			if (dv->dv_class == DV_DISK)
 				printf(" %s[a-p]", dv->dv_xname);
@@ -1019,20 +1025,11 @@ parsedisk(char *str, int len, int defpart, dev_t *devp)
 	} else
 		part = defpart;
 
-#ifdef RAMDISK_HOOKS
-	if (strcmp(str, fakerdrootdev.dv_xname) == 0) {
-		dv = &fakerdrootdev;
-		goto gotdisk;
-	}
-#endif
 
 	TAILQ_FOREACH(dv, &alldevs, dv_list) {
 		if (dv->dv_class == DV_DISK &&
 		    strncmp(str, dv->dv_xname, len) == 0 &&
 		    dv->dv_xname[len] == '\0') {
-#ifdef RAMDISK_HOOKS
-gotdisk:
-#endif
 			majdev = findblkmajor(dv);
 			if (majdev < 0)
 				panic("parsedisk");
@@ -1059,18 +1056,10 @@ setroot(struct device *bootdv, int part, int exitflags)
 	struct swdevt *swp;
 	struct device *rootdv, *dv;
 	dev_t nrootdev, nswapdev = NODEV, temp = NODEV;
+	struct ifnet *ifp = NULL;
 	char buf[128];
 #if defined(NFSCLIENT)
 	extern char *nfsbootdevname;
-#endif
-
-	if (boothowto & RB_DFLTROOT)
-		return;
-
-#ifdef RAMDISK_HOOKS
-	bootdv = &fakerdrootdev;
-	mountroot = NULL;
-	part = 0;
 #endif
 
 	/*
@@ -1168,8 +1157,10 @@ gotswap:
 		rootdv = bootdv;
 		rootdev = dumpdev = swapdev = NODEV;
 #endif
-	} else if (mountroot == NULL) {
-		/* `swap generic': Use the device the ROM told us to use */
+	} else if (mountroot == NULL && rootdev == NODEV) {
+		/*
+		 * `swap generic'
+		 */
 		rootdv = bootdv;
 		majdev = findblkmajor(rootdv);
 		if (majdev >= 0) {
@@ -1198,7 +1189,17 @@ gotswap:
 		snprintf(buf, sizeof buf, "%s%d%c",
 		    findblkname(majdev), unit, 'a' + part);
 		rootdv = parsedisk(buf, strlen(buf), 0, &nrootdev);
+		if (rootdv == NULL)
+			panic("root device (%s) not found", buf);
 	}
+
+	if (rootdv && rootdv == bootdv && rootdv->dv_class == DV_IFNET)
+		ifp = ifunit(rootdv->dv_xname);
+	else if (bootdv && bootdv->dv_class == DV_IFNET)
+		ifp = ifunit(bootdv->dv_xname);
+
+	if (ifp)
+		if_addgroup(ifp, "netboot");
 
 	switch (rootdv->dv_class) {
 #if defined(NFSCLIENT)

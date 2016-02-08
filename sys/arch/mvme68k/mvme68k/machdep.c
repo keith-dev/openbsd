@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.108 2007/11/09 17:30:55 miod Exp $ */
+/*	$OpenBSD: machdep.c,v 1.111 2008/06/27 17:22:14 miod Exp $ */
 
 /*
  * Copyright (c) 1995 Theo de Raadt
@@ -115,6 +115,7 @@
 #endif
 
 #include <uvm/uvm_extern.h>
+#include <uvm/uvm_swap.h>
 
 /* the following is used externally (sysctl_hw) */
 char machine[] = MACHINE;		/* cpu "architecture" */
@@ -525,8 +526,8 @@ boot(howto)
 		}
 	}
 
-	/* Disable interrupts. */
-	splhigh();
+	uvm_shutdown();
+	splhigh();			/* Disable interrupts. */
 
 	/* If rebooting and a dump is requested, do it. */
 	if (howto & RB_DUMP)
@@ -538,7 +539,9 @@ haltsys:
 
 	if (howto & RB_HALT) {
 		printf("System halted. Press any key to reboot...\n\n");
+		cnpollc(1);
 		cngetc();
+		cnpollc(0);
 	}
 
 	doboot();
@@ -636,6 +639,10 @@ dumpsys()
 
 	printf("\ndumping to dev %u,%u offset %ld\n", maj,
 	    minor(dumpdev), dumplo);
+
+#ifdef UVM_SWAP_ENCRYPT
+	uvm_swap_finicrypt_all();
+#endif
 
 	kseg_p = (kcore_seg_t *)dump_hdr;
 	chdr_p = (cpu_kcore_hdr_t *)&dump_hdr[ALIGN(sizeof(*kseg_p))];

@@ -1,4 +1,4 @@
-/*	$OpenBSD: sbus.c,v 1.32 2008/01/17 22:53:18 kettenis Exp $	*/
+/*	$OpenBSD: sbus.c,v 1.35 2008/06/26 05:42:13 ray Exp $	*/
 /*	$NetBSD: sbus.c,v 1.46 2001/10/07 20:30:41 eeh Exp $ */
 
 /*-
@@ -16,13 +16,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -117,6 +110,7 @@
 #include <sparc64/dev/iommureg.h>
 #include <sparc64/dev/iommuvar.h>
 #include <sparc64/dev/sbusreg.h>
+#include <sparc64/dev/starfire.h>
 #include <dev/sbus/sbusvar.h>
 #include <dev/sbus/xboxvar.h>
 
@@ -124,6 +118,7 @@
 
 #include <machine/autoconf.h>
 #include <machine/cpu.h>
+#include <machine/openfirm.h>
 #include <machine/sparc64.h>
 
 #ifdef DEBUG
@@ -296,6 +291,7 @@ sbus_mb_attach(struct device *parent, struct device *self, void *aux)
 	struct intrhand *ih;
 	int ipl, error;
 	struct sysioreg *sysio;
+	char buf[32];
 	char *name;
 
 	sc->sc_master = sc;
@@ -352,6 +348,11 @@ sbus_mb_attach(struct device *parent, struct device *self, void *aux)
 
 	printf("%s: ", sc->sc_dev.dv_xname);
 	iommu_init(name, &sc->sc_is, 0, -1);
+
+	/* Initialize Starfire PC interrupt translation. */
+	if (OF_getprop(findroot(), "name", buf, sizeof(buf)) > 0 &&
+	    strcmp(buf, "SUNW,Ultra-Enterprise-10000") == 0)
+		starfire_pc_ittrans_init(ma->ma_upaid);
 
 	/* Enable the over temp intr */
 	ih = malloc(sizeof(*ih), M_DEVBUF, M_NOWAIT | M_ZERO);
@@ -415,6 +416,9 @@ sbus_attach_common(struct sbus_softc *sc, int node, int indirect)
 	 */
 	node0 = firstchild(node);
 	for (node = node0; node; node = nextsibling(node)) {
+		if (!checkstatus(node))
+			continue;
+
 		if (sbus_setup_attach_args(sc, sbt, sc->sc_dmatag,
 					   node, &sa) != 0) {
 			DPRINTF(SDB_CHILD,

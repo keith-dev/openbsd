@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.165 2007/09/22 09:57:40 martin Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.168 2008/07/14 13:37:39 miod Exp $	*/
 
 /*
  * Copyright (c) 1999-2003 Michael Shalayeff
@@ -57,6 +57,7 @@
 
 #include <uvm/uvm.h>
 #include <uvm/uvm_page.h>
+#include <uvm/uvm_swap.h>
 
 #include <dev/cons.h>
 
@@ -559,8 +560,6 @@ cpuid()
 
 	/* force strong ordering for now */
 	if (p->features & HPPA_FTRS_W32B) {
-		extern register_t kpsw;	/* intr.c */
-
 		kpsw |= PSL_O;
 	}
 
@@ -918,6 +917,7 @@ boot(howto)
 
 		/* XXX probably save howto into stable storage */
 
+		uvm_shutdown();
 		splhigh();
 
 		if (howto & RB_DUMP)
@@ -1040,6 +1040,10 @@ dumpsys(void)
 		return;
 	}
 	printf("\ndumping to dev %x, offset %ld\n", dumpdev, dumplo);
+
+#ifdef UVM_SWAP_ENCRYPT
+	uvm_swap_finicrypt_all();
+#endif
 
 	psize = (*bdevsw[major(dumpdev)].d_psize)(dumpdev);
 	printf("dump ");
@@ -1420,7 +1424,7 @@ sys_sigreturn(p, v, retval)
 		tf->tf_iisq_tail = HPPA_SID_KERNEL;
 	else
 		tf->tf_iisq_tail = p->p_addr->u_pcb.pcb_space;
-	tf->tf_ipsw = ksc.sc_ps;
+	tf->tf_ipsw = ksc.sc_ps | (kpsw & PSL_O);
 
 #ifdef DEBUG
 	if ((sigdebug & SDB_FOLLOW) && (!sigpid || p->p_pid == sigpid))

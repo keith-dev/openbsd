@@ -1,4 +1,4 @@
-/*	$OpenBSD: ifconfig.c,v 1.193 2008/02/05 22:57:30 mpf Exp $	*/
+/*	$OpenBSD: ifconfig.c,v 1.202 2008/07/17 08:14:24 sthen Exp $	*/
 /*	$NetBSD: ifconfig.c,v 1.40 1997/10/01 02:19:43 enami Exp $	*/
 
 /*
@@ -46,13 +46,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -98,6 +91,8 @@
 #include <netdb.h>
 
 #include <net/if_vlan_var.h>
+
+#include <netmpls/mpls.h>
 
 #include <ctype.h>
 #include <err.h>
@@ -153,6 +148,13 @@ void	setifmtu(const char *, int);
 void	setifnwid(const char *, int);
 void	setifbssid(const char *, int);
 void	setifnwkey(const char *, int);
+void	setifwmm(const char *, int);
+void	setifwpa(const char *, int);
+void	setifwpaprotos(const char *, int);
+void	setifwpaakms(const char *, int);
+void	setifwpaciphers(const char *, int);
+void	setifwpagroupcipher(const char *, int);
+void	setifwpapsk(const char *, int);
 void	setifchan(const char *, int);
 void	setiftxpower(const char *, int);
 void	setifpowersave(const char *, int);
@@ -182,15 +184,19 @@ void	unsetmediaopt(const char *, int);
 void	setmediainst(const char *, int);
 void	settimeslot(const char *, int);
 void	timeslot_status(void);
+void	setmpelabel(const char *, int);
 void	setvlantag(const char *, int);
 void	setvlanprio(const char *, int);
 void	setvlandev(const char *, int);
 void	unsetvlandev(const char *, int);
+void	mpe_status(void);
 void	vlan_status(void);
 void	getifgroups(void);
 void	carp_status(void);
 void	setcarp_advbase(const char *,int);
 void	setcarp_advskew(const char *, int);
+void	setcarppeer(const char *, int);
+void	unsetcarppeer(const char *, int);
 void	setcarp_passwd(const char *, int);
 void	setcarp_vhid(const char *, int);
 void	setcarp_state(const char *, int);
@@ -283,6 +289,16 @@ const struct	cmd {
 	{ "-bssid",	-1,		0,		setifbssid },
 	{ "nwkey",	NEXTARG,	0,		setifnwkey },
 	{ "-nwkey",	-1,		0,		setifnwkey },
+	{ "wmm",	1,		0,		setifwmm },
+	{ "-wmm",	0,		0,		setifwmm },
+	{ "wpa",	1,		0,		setifwpa },
+	{ "-wpa",	0,		0,		setifwpa },
+	{ "wpaakms",	NEXTARG,	0,		setifwpaakms },
+	{ "wpaciphers",	NEXTARG,	0,		setifwpaciphers },
+	{ "wpagroupcipher", NEXTARG,	0,		setifwpagroupcipher },
+	{ "wpaprotos",	NEXTARG,	0,		setifwpaprotos },
+	{ "wpapsk",	NEXTARG,	0,		setifwpapsk },
+	{ "-wpapsk",	-1,		0,		setifwpapsk },
 	{ "chan",	NEXTARG,	0,		setifchan },
 	{ "-chan",	-1,		0,		setifchan },
 	{ "powersave",	1,		0,		setifpowersave },
@@ -305,12 +321,15 @@ const struct	cmd {
 	{ "-rtlabel",	-1,		0,		setifrtlabel },
 	{ "range",	NEXTARG,	0,		setatrange },
 	{ "phase",	NEXTARG,	0,		setatphase },
+	{ "mplslabel",	NEXTARG,	0,		setmpelabel },
 	{ "vlan",	NEXTARG,	0,		setvlantag },
 	{ "vlanprio",	NEXTARG,	0,		setvlanprio },
 	{ "vlandev",	NEXTARG,	0,		setvlandev },
 	{ "-vlandev",	1,		0,		unsetvlandev },
 	{ "advbase",	NEXTARG,	0,		setcarp_advbase },
 	{ "advskew",	NEXTARG,	0,		setcarp_advskew },
+	{ "carppeer",	NEXTARG,	0,		setcarppeer },
+	{ "-carppeer",	1,		0,		unsetcarppeer },
 	{ "pass",	NEXTARG,	0,		setcarp_passwd },
 	{ "vhid",	NEXTARG,	0,		setcarp_vhid },
 	{ "state",	NEXTARG,	0,		setcarp_state },
@@ -1292,7 +1311,6 @@ print_string(const u_int8_t *buf, int len)
 	}
 }
 
-/* ARGSUSED */
 void
 setifnwid(const char *val, int d)
 {
@@ -1397,6 +1415,184 @@ setifnwkey(const char *val, int d)
 	(void)strlcpy(nwkey.i_name, name, sizeof(nwkey.i_name));
 	if (ioctl(s, SIOCS80211NWKEY, (caddr_t)&nwkey) == -1)
 		warn("SIOCS80211NWKEY");
+}
+
+/* ARGSUSED */
+void
+setifwmm(const char *val, int d)
+{
+	struct ieee80211_wmmparams wmm;
+
+	(void)strlcpy(wmm.i_name, name, sizeof(wmm.i_name));
+	wmm.i_enabled = d;
+	if (ioctl(s, SIOCS80211WMMPARMS, (caddr_t)&wmm) < 0)
+		err(1, "SIOCS80211WMMPARMS");
+}
+
+/* ARGSUSED */
+void
+setifwpa(const char *val, int d)
+{
+	struct ieee80211_wpaparams wpa;
+
+	(void)strlcpy(wpa.i_name, name, sizeof(wpa.i_name));
+	if (ioctl(s, SIOCG80211WPAPARMS, (caddr_t)&wpa) < 0)
+		err(1, "SIOCG80211WPAPARMS");
+	wpa.i_enabled = d;
+	if (ioctl(s, SIOCS80211WPAPARMS, (caddr_t)&wpa) < 0)
+		err(1, "SIOCS80211WPAPARMS");
+}
+
+/* ARGSUSED */
+void
+setifwpaprotos(const char *val, int d)
+{
+	struct ieee80211_wpaparams wpa;
+	char *optlist, *str;
+	u_int rval = 0;
+
+	if ((optlist = strdup(val)) == NULL)
+		err(1, "strdup");
+	str = strtok(optlist, ",");
+	while (str != NULL) {
+		if (strcasecmp(str, "wpa1") == 0)
+			rval |= IEEE80211_WPA_PROTO_WPA1;
+		else if (strcasecmp(str, "wpa2") == 0)
+			rval |= IEEE80211_WPA_PROTO_WPA2;
+		else
+			errx(1, "wpaprotos: unknown protocol: %s", str);
+		str = strtok(NULL, ",");
+	}
+	free(optlist);
+
+	(void)strlcpy(wpa.i_name, name, sizeof(wpa.i_name));
+	if (ioctl(s, SIOCG80211WPAPARMS, (caddr_t)&wpa) < 0)
+		err(1, "SIOCG80211WPAPARMS");
+	wpa.i_protos = rval;
+	if (ioctl(s, SIOCS80211WPAPARMS, (caddr_t)&wpa) < 0)
+		err(1, "SIOCS80211WPAPARMS");
+}
+
+/* ARGSUSED */
+void
+setifwpaakms(const char *val, int d)
+{
+	struct ieee80211_wpaparams wpa;
+	char *optlist, *str;
+	u_int rval = 0;
+
+	if ((optlist = strdup(val)) == NULL)
+		err(1, "strdup");
+	str = strtok(optlist, ",");
+	while (str != NULL) {
+		if (strcasecmp(str, "psk") == 0)
+			rval |= IEEE80211_WPA_AKM_PSK;
+		else if (strcasecmp(str, "802.1x") == 0)
+			rval |= IEEE80211_WPA_AKM_IEEE8021X;
+		else
+			errx(1, "wpaakms: unknown akm: %s", str);
+		str = strtok(NULL, ",");
+	}
+	free(optlist);
+
+	(void)strlcpy(wpa.i_name, name, sizeof(wpa.i_name));
+	if (ioctl(s, SIOCG80211WPAPARMS, (caddr_t)&wpa) < 0)
+		err(1, "SIOCG80211WPAPARMS");
+	wpa.i_akms = rval;
+	if (ioctl(s, SIOCS80211WPAPARMS, (caddr_t)&wpa) < 0)
+		err(1, "SIOCS80211WPAPARMS");
+}
+
+static const struct {
+	const char	*name;
+	u_int		cipher;
+} ciphers[] = {
+	{ "usegroup",	IEEE80211_WPA_CIPHER_USEGROUP },
+	{ "wep40",	IEEE80211_WPA_CIPHER_WEP40 },
+	{ "tkip",	IEEE80211_WPA_CIPHER_TKIP },
+	{ "ccmp",	IEEE80211_WPA_CIPHER_CCMP },
+	{ "wep104",	IEEE80211_WPA_CIPHER_WEP104 }
+};
+
+u_int
+getwpacipher(const char *name)
+{
+	int i;
+
+	for (i = 0; i < sizeof(ciphers) / sizeof(ciphers[0]); i++)
+		if (strcasecmp(name, ciphers[i].name) == 0)
+			return ciphers[i].cipher;
+	return IEEE80211_WPA_CIPHER_NONE;
+}
+
+/* ARGSUSED */
+void
+setifwpaciphers(const char *val, int d)
+{
+	struct ieee80211_wpaparams wpa;
+	char *optlist, *str;
+	u_int rval = 0;
+
+	if ((optlist = strdup(val)) == NULL)
+		err(1, "strdup");
+	str = strtok(optlist, ",");
+	while (str != NULL) {
+		u_int cipher = getwpacipher(str);
+		if (cipher == IEEE80211_WPA_CIPHER_NONE)
+			errx(1, "wpaciphers: unknown cipher: %s", str);
+
+		rval |= cipher;
+		str = strtok(NULL, ",");
+	}
+	free(optlist);
+
+	(void)strlcpy(wpa.i_name, name, sizeof(wpa.i_name));
+	if (ioctl(s, SIOCG80211WPAPARMS, (caddr_t)&wpa) < 0)
+		err(1, "SIOCG80211WPAPARMS");
+	wpa.i_ciphers = rval;
+	if (ioctl(s, SIOCS80211WPAPARMS, (caddr_t)&wpa) < 0)
+		err(1, "SIOCS80211WPAPARMS");
+}
+
+/* ARGSUSED */
+void
+setifwpagroupcipher(const char *val, int d)
+{
+	struct ieee80211_wpaparams wpa;
+	u_int cipher;
+
+	cipher = getwpacipher(val);
+	if (cipher == IEEE80211_WPA_CIPHER_NONE)
+		errx(1, "wpagroupcipher: unknown cipher: %s", val);
+
+	(void)strlcpy(wpa.i_name, name, sizeof(wpa.i_name));
+	if (ioctl(s, SIOCG80211WPAPARMS, (caddr_t)&wpa) < 0)
+		err(1, "SIOCG80211WPAPARMS");
+	wpa.i_groupcipher = cipher;
+	if (ioctl(s, SIOCS80211WPAPARMS, (caddr_t)&wpa) < 0)
+		err(1, "SIOCS80211WPAPARMS");
+}
+
+void
+setifwpapsk(const char *val, int d)
+{
+	struct ieee80211_wpapsk psk;
+	int len;
+
+	if (d != -1) {
+		len = sizeof(psk.i_psk);
+		val = get_string(val, NULL, psk.i_psk, &len);
+		if (val == NULL)
+			errx(1, "wpapsk: invalid pre-shared key\n");
+		if (len != sizeof(psk.i_psk))
+			errx(1, "wpapsk: bad pre-shared key length");
+		psk.i_enabled = 1;
+	} else
+		psk.i_enabled = 0;
+
+	(void)strlcpy(psk.i_name, name, sizeof(psk.i_name));
+	if (ioctl(s, SIOCS80211WPAPSK, (caddr_t)&psk) < 0)
+		err(1, "SIOCS80211WPAPSK");
 }
 
 void
@@ -1518,15 +1714,37 @@ setifpowersavesleep(const char *val, int d)
 }
 
 void
+print_cipherset(u_int32_t cipherset)
+{
+	const char *sep = "";
+	int i;
+
+	if (cipherset == IEEE80211_WPA_CIPHER_NONE) {
+		printf("none");
+		return;
+	}
+	for (i = 0; i < sizeof(ciphers) / sizeof(ciphers[0]); i++) {
+		if (cipherset & ciphers[i].cipher) {
+			printf("%s%s", sep, ciphers[i].name);
+			sep = ",";
+		}
+	}
+}
+
+void
 ieee80211_status(void)
 {
-	int len, i, nwkey_verbose, inwid, inwkey, ichan, ipwr, ibssid, itxpower;
+	int len, i, nwkey_verbose, inwid, inwkey, ipsk, ichan, ipwr;
+	int ibssid, itxpower, iwmm, iwpa;
 	struct ieee80211_nwid nwid;
 	struct ieee80211_nwkey nwkey;
+	struct ieee80211_wpapsk psk;
 	struct ieee80211_power power;
 	struct ieee80211chanreq channel;
 	struct ieee80211_bssid bssid;
 	struct ieee80211_txpower txpower;
+	struct ieee80211_wmmparams wmm;
+	struct ieee80211_wpaparams wpa;
 	struct ieee80211_nodereq nr;
 	u_int8_t zero_bssid[IEEE80211_ADDR_LEN];
 	u_int8_t keybuf[IEEE80211_WEP_NKID][16];
@@ -1541,6 +1759,10 @@ ieee80211_status(void)
 	memset(&nwkey, 0, sizeof(nwkey));
 	strlcpy(nwkey.i_name, name, sizeof(nwkey.i_name));
 	inwkey = ioctl(s, SIOCG80211NWKEY, (caddr_t)&nwkey);
+
+	memset(&psk, 0, sizeof(psk));
+	strlcpy(psk.i_name, name, sizeof(psk.i_name));
+	ipsk = ioctl(s, SIOCG80211WPAPSK, (caddr_t)&psk);
 
 	memset(&power, 0, sizeof(power));
 	strlcpy(power.i_name, name, sizeof(power.i_name));
@@ -1558,9 +1780,18 @@ ieee80211_status(void)
 	strlcpy(txpower.i_name, name, sizeof(txpower.i_name));
 	itxpower = ioctl(s, SIOCG80211TXPOWER, &txpower);
 
+	memset(&wmm, 0, sizeof(wmm));
+	strlcpy(wmm.i_name, name, sizeof(wmm.i_name));
+	iwmm = ioctl(s, SIOCG80211WMMPARMS, &wmm);
+
+	memset(&wpa, 0, sizeof(wpa));
+	strlcpy(wpa.i_name, name, sizeof(wpa.i_name));
+	iwpa = ioctl(s, SIOCG80211WPAPARMS, &wpa);
+
 	/* check if any ieee80211 option is active */
-	if (inwid == 0 || inwkey == 0 || ipwr == 0 ||
-	    ichan == 0 || ibssid == 0 || itxpower == 0)
+	if (inwid == 0 || inwkey == 0 || ipsk == 0 || ipwr == 0 ||
+	    ichan == 0 || ibssid == 0 || iwmm == 0 || iwpa == 0 ||
+	    itxpower == 0)
 		fputs("\tieee80211:", stdout);
 	else
 		return;
@@ -1652,6 +1883,41 @@ ieee80211_status(void)
 			}
 		}
 	}
+
+	if (ipsk == 0 && psk.i_enabled) {
+		fputs(" wpapsk ", stdout);
+		if (psk.i_enabled == 2)
+			fputs("<not displayed>", stdout);
+		else
+			print_string(psk.i_psk, sizeof(psk.i_psk));
+	}
+	if (iwpa == 0 && wpa.i_enabled) {
+		const char *sep;
+
+		fputs(" wpaprotos ", stdout); sep = "";
+		if (wpa.i_protos & IEEE80211_WPA_PROTO_WPA1) {
+			fputs("wpa1", stdout);
+			sep = ",";
+		}
+		if (wpa.i_protos & IEEE80211_WPA_PROTO_WPA2)
+			printf("%swpa2", sep);
+
+		fputs(" wpaakms ", stdout); sep = "";
+		if (wpa.i_akms & IEEE80211_WPA_AKM_PSK) {
+			fputs("psk", stdout);
+			sep = ",";
+		}
+		if (wpa.i_akms & IEEE80211_WPA_AKM_IEEE8021X)
+			printf("%s802.1x", sep);
+
+		fputs(" wpaciphers ", stdout);
+		print_cipherset(wpa.i_ciphers);
+
+		fputs(" wpagroupcipher ", stdout);
+		print_cipherset(wpa.i_groupcipher);
+	}
+	if (iwmm == 0 && wmm.i_enabled)
+		fputs(" wmm", stdout);
 
 	if (ipwr == 0 && power.i_enabled)
 		printf(" powersave on (%dms sleep)", power.i_maxsleep);
@@ -1761,6 +2027,7 @@ ieee80211_printnode(struct ieee80211_nodereq *nr)
 		printb_status(nr->nr_capinfo, IEEE80211_CAPINFO_BITS);
 		putchar(' ');
 	}
+
 	if ((nr->nr_flags & IEEE80211_NODEREQ_AP) == 0)
 		printb_status(IEEE80211_NODEREQ_STATE(nr->nr_state),
 		    IEEE80211_NODEREQ_STATE_BITS);
@@ -2293,6 +2560,7 @@ status(int link, struct sockaddr_dl *sdl)
 	timeslot_status();
 	sppp_status();
 	trunk_status();
+	mpe_status();
 #endif
 	getifgroups();
 
@@ -2553,6 +2821,8 @@ in6_alias(struct in6_ifreq *creq)
 			printf(" detached");
 		if (ifr6.ifr_ifru.ifru_flags6 & IN6_IFF_DEPRECATED)
 			printf(" deprecated");
+		if (ifr6.ifr_ifru.ifru_flags6 & IN6_IFF_AUTOCONF)
+			printf(" autoconf");
 	}
 
 	if (scopeid)
@@ -2761,6 +3031,35 @@ checkatrange(struct sockaddr_at *sat)
 	*((struct netrange *) &sat->sat_zero) = at_nr;
 }
 
+void
+mpe_status(void)
+{
+	struct shim_hdr	shim;
+
+	bzero(&shim, sizeof(shim));
+	ifr.ifr_data = (caddr_t)&shim;
+
+	if (ioctl(s, SIOCGETLABEL , (caddr_t)&ifr) == -1)
+		return;
+	printf("\tmpls label: %d\n", shim.shim_label);
+}
+
+void
+setmpelabel(const char *val, int d)
+{
+	struct shim_hdr	 shim;
+	const char	*estr;
+
+	bzero(&shim, sizeof(shim));
+	ifr.ifr_data = (caddr_t)&shim;
+	shim.shim_label = strtonum(val, 0, MPLS_LABEL_MAX, &estr);
+
+	if (estr)
+		errx(1, "mpls label %s is %s", val, estr);
+	if (ioctl(s, SIOCSETLABEL, (caddr_t)&ifr) == -1)
+		warn("SIOCSETLABEL");
+}
+
 static int __tag = 0;
 static int __have_tag = 0;
 
@@ -2894,6 +3193,7 @@ carp_status(void)
 {
 	const char *state, *balmode;
 	struct carpreq carpr;
+	char peer[32];
 	int i;
 
 	memset((char *)&carpr, 0, sizeof(struct carpreq));
@@ -2910,6 +3210,12 @@ carp_status(void)
 	else
 		balmode = carp_bal_modes[carpr.carpr_balancing];
 
+	if (carpr.carpr_peer.s_addr != htonl(INADDR_CARP_GROUP))
+		snprintf(peer, sizeof(peer),
+		    " carppeer %s", inet_ntoa(carpr.carpr_peer));
+	else
+		peer[0] = '\0';
+
 	for (i = 0; carpr.carpr_vhids[i]; i++) {
 		if (carpr.carpr_states[i] > CARP_MAXSTATE)
 			state = "<UNKNOWN>";
@@ -2917,17 +3223,18 @@ carp_status(void)
 			state = carp_states[carpr.carpr_states[i]];
 		if (carpr.carpr_vhids[1] == 0) {
 			printf("\tcarp: %s carpdev %s vhid %u advbase %d "
-			    "advskew %u\n", state,
+			    "advskew %u%s\n", state,
 			    carpr.carpr_carpdev[0] != '\0' ?
 		    	    carpr.carpr_carpdev : "none", carpr.carpr_vhids[0],
-		    	    carpr.carpr_advbase, carpr.carpr_advskews[0]);
+		    	    carpr.carpr_advbase, carpr.carpr_advskews[0],
+			    peer);
 		} else {
 			if (i == 0) {
 				printf("\tcarp: carpdev %s advbase %d"
-				    " balancing %s\n",
+				    " balancing %s%s\n",
 				    carpr.carpr_carpdev[0] != '\0' ?
 				    carpr.carpr_carpdev : "none",
-				    carpr.carpr_advbase, balmode);
+				    carpr.carpr_advbase, balmode, peer);
 			}
 			printf("\t\tstate %s vhid %u advskew %u\n", state,
 			    carpr.carpr_vhids[i], carpr.carpr_advskews[i]);
@@ -3029,6 +3336,57 @@ setcarp_advbase(const char *val, int d)
 
 /* ARGSUSED */
 void
+setcarppeer(const char *val, int d)
+{
+	struct carpreq carpr;
+	struct addrinfo hints, *peerres;
+	int ecode;
+
+	memset((char *)&carpr, 0, sizeof(struct carpreq));
+	ifr.ifr_data = (caddr_t)&carpr;
+
+	if (ioctl(s, SIOCGVH, (caddr_t)&ifr) == -1)
+		err(1, "SIOCGVH");
+
+	bzero(&hints, sizeof(hints));
+	hints.ai_family = AF_INET;
+	hints.ai_socktype = SOCK_DGRAM;
+
+	if ((ecode = getaddrinfo(val, NULL, &hints, &peerres)) != 0)
+		errx(1, "error in parsing address string: %s",
+		    gai_strerror(ecode));
+
+	if (peerres->ai_addr->sa_family != AF_INET)
+		errx(1, "only IPv4 addresses supported for the carppeer");
+
+	carpr.carpr_peer.s_addr = ((struct sockaddr_in *)
+	    peerres->ai_addr)->sin_addr.s_addr;
+
+	if (ioctl(s, SIOCSVH, (caddr_t)&ifr) == -1)
+		err(1, "SIOCSVH");
+
+	freeaddrinfo(peerres);
+}
+
+void
+unsetcarppeer(const char *val, int d)
+{
+	struct carpreq carpr;
+
+	bzero((char *)&carpr, sizeof(struct carpreq));
+	ifr.ifr_data = (caddr_t)&carpr;
+
+	if (ioctl(s, SIOCGVH, (caddr_t)&ifr) == -1)
+		err(1, "SIOCGVH");
+
+	bzero((char *)&carpr.carpr_peer, sizeof(carpr.carpr_peer));
+
+	if (ioctl(s, SIOCSVH, (caddr_t)&ifr) == -1)
+		err(1, "SIOCSVH");
+}
+
+/* ARGSUSED */
+void
 setcarp_state(const char *val, int d)
 {
 	struct carpreq carpr;
@@ -3089,7 +3447,7 @@ unsetcarpdev(const char *val, int d)
 void
 setcarp_nodes(const char *val, int d)
 {
-	char *str;
+	char *optlist, *str;
 	int i;
 	struct carpreq carpr;
 
@@ -3102,11 +3460,12 @@ setcarp_nodes(const char *val, int d)
 	bzero(carpr.carpr_vhids, sizeof(carpr.carpr_vhids));
 	bzero(carpr.carpr_advskews, sizeof(carpr.carpr_advskews));
 
-	str = strdup(val);
-	if (str == NULL)
+	optlist = strdup(val);
+	if (optlist == NULL)
 		err(1, "strdup");
 
-	for (i = 0; (str = strtok(str, ",")) != NULL; str = NULL) {
+	str = strtok(optlist, ",");
+	for (i = 0; str != NULL; i++) {
 		u_int vhid, advskew;
 		if (i > CARP_MAXNODES)
 			errx(1, "too many carp nodes");
@@ -3120,9 +3479,9 @@ setcarp_nodes(const char *val, int d)
 
 		carpr.carpr_vhids[i] = vhid;
 		carpr.carpr_advskews[i] = advskew;
-		i++;
+		str = strtok(NULL, ",");
 	}
-	free(str);
+	free(optlist);
 
 	if (ioctl(s, SIOCSVH, (caddr_t)&ifr) == -1)
 		err(1, "SIOCSVH");
@@ -3277,7 +3636,7 @@ pfsync_status(void)
 
 	if (preq.pfsyncr_syncdev[0] != '\0') {
 		printf("\tpfsync: syncdev: %s ", preq.pfsyncr_syncdev);
-		if (preq.pfsyncr_syncpeer.s_addr != INADDR_PFSYNC_GROUP)
+		if (preq.pfsyncr_syncpeer.s_addr != htonl(INADDR_PFSYNC_GROUP))
 			printf("syncpeer: %s ",
 			    inet_ntoa(preq.pfsyncr_syncpeer));
 		printf("maxupd: %d\n", preq.pfsyncr_maxupdates);
@@ -3482,7 +3841,7 @@ setspppkey(const char *val, int d)
 	if (auth->proto == 0)
 		errx(1, "unspecified protocol");
 	if (strlcpy((char *)auth->secret, val, AUTHKEYLEN) >= AUTHKEYLEN)
-		errx(1, "setspppname");
+		errx(1, "setspppkey");
 
 	spr.cmd = (int)SPPPIOSDEFS;
 	if (ioctl(s, SIOCSIFGENERIC, &ifr) == -1)
@@ -3647,6 +4006,7 @@ trunk_status(void)
 	struct trunk_protos tpr[] = TRUNK_PROTOS;
 	struct trunk_reqport rp, rpbuf[TRUNK_MAX_PORTS];
 	struct trunk_reqall ra;
+	struct lacp_opreq *lp;
 	const char *proto = "<unknown>";
 	int i, isport = 0;
 
@@ -3664,6 +4024,8 @@ trunk_status(void)
 	ra.ra_port = rpbuf;
 
 	if (ioctl(s, SIOCGTRUNK, &ra) == 0) {
+		lp = (struct lacp_opreq *)&ra.ra_lacpreq;
+
 		for (i = 0; i < (sizeof(tpr) / sizeof(tpr[0])); i++) {
 			if (ra.ra_proto == tpr[i].tpr_proto) {
 				proto = tpr[i].tpr_name;
@@ -3675,6 +4037,17 @@ trunk_status(void)
 		if (isport)
 			printf(" trunkdev %s", rp.rp_ifname);
 		putchar('\n');
+		if (ra.ra_proto == TRUNK_PROTO_LACP) {
+			printf("\ttrunk id: [(%04X,%s,%04X,%04X,%04X),\n"
+			    "\t\t (%04X,%s,%04X,%04X,%04X)]\n",
+			    lp->actor_prio,
+			    ether_ntoa((struct ether_addr*)lp->actor_mac),
+			    lp->actor_key, lp->actor_portprio, lp->actor_portno,
+			    lp->partner_prio,
+			    ether_ntoa((struct ether_addr*)lp->partner_mac),
+			    lp->partner_key, lp->partner_portprio,
+			    lp->partner_portno);
+		}
 
 		for (i = 0; i < ra.ra_ports; i++) {
 			printf("\t\ttrunkport %s ", rpbuf[i].rp_portname);

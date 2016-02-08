@@ -1,4 +1,4 @@
-/*	$OpenBSD: pgt.c,v 1.46 2007/12/30 17:37:57 claudio Exp $  */
+/*	$OpenBSD: pgt.c,v 1.50 2008/07/21 18:43:19 damien Exp $  */
 
 /*
  * Copyright (c) 2006 Claudio Jeker <claudio@openbsd.org>
@@ -916,6 +916,7 @@ pgt_input_frames(struct pgt_softc *sc, struct mbuf *m)
 	struct ether_header eh;
 	struct ifnet *ifp;
 	struct ieee80211_channel *chan;
+	struct ieee80211_rxinfo rxi;
 	struct ieee80211_node *ni;
 	struct ieee80211com *ic;
 	struct pgt_rx_annex *pra;
@@ -1034,9 +1035,10 @@ input:
 				bpf_mtap(sc->sc_drvbpf, &mb, BPF_DIRECTION_IN);
 			}
 #endif
-			ni->ni_rssi = rssi;
-			ni->ni_rstamp = rstamp;
-			ieee80211_input(ifp, m, ni, rssi, rstamp);
+			rxi.rxi_flags = 0;
+			ni->ni_rssi = rxi.rxi_rssi = rssi;
+			ni->ni_rstamp = rxi.rxi_tstamp = rstamp;
+			ieee80211_input(ifp, m, ni, &rxi);
 			/*
 			 * The frame may have caused the node to be marked for
 			 * reclamation (e.g. in response to a DEAUTH message)
@@ -1329,7 +1331,7 @@ pgt_trap_received(struct pgt_softc *sc, uint32_t oid, void *trapdata,
 		return;
 
 	total = sizeof(oid) + size + sizeof(struct pgt_async_trap);
-	if (total >= MINCLSIZE) {
+	if (total > MLEN) {
 		MGETHDR(m, M_DONTWAIT, MT_DATA);
 		if (m == NULL)
 			return;
@@ -1518,7 +1520,7 @@ pgt_datarx_completion(struct pgt_softc *sc, enum pgt_queue pq)
 
 		if (m == NULL)
 			goto fail;
-		if (datalen >= MINCLSIZE) {
+		if (datalen > MHLEN) {
 			MCLGET(m, M_DONTWAIT);
 			if (!(m->m_flags & M_EXT)) {
 				m_free(m);
@@ -1541,7 +1543,6 @@ pgt_datarx_completion(struct pgt_softc *sc, enum pgt_queue pq)
 	}
 
 	if (top) {
-		ifp->if_ipackets++;
 		top->m_pkthdr.len = tlen;
 		top->m_pkthdr.rcvif = ifp;
 	}
@@ -2979,10 +2980,6 @@ pgt_newstate(struct ieee80211com *ic, enum ieee80211_state nstate, int arg)
 			ic->ic_if.if_timer = 0;
 		ic->ic_mgt_timer = 0;
 		ic->ic_flags &= ~IEEE80211_F_SIBSS;
-		if (ic->ic_wep_ctx != NULL) {
-			free(ic->ic_wep_ctx, M_DEVBUF);  
-			ic->ic_wep_ctx = NULL;
-		}
 		ieee80211_free_allnodes(ic);
 		break;
 	case IEEE80211_S_SCAN:

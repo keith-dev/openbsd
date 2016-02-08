@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_wpi.c,v 1.58 2007/11/19 19:34:25 damien Exp $	*/
+/*	$OpenBSD: if_wpi.c,v 1.63 2008/07/31 20:14:17 damien Exp $	*/
 
 /*-
  * Copyright (c) 2006, 2007
@@ -72,7 +72,9 @@ static const struct pci_matchid wpi_devices[] = {
 
 int		wpi_match(struct device *, void *, void *);
 void		wpi_attach(struct device *, struct device *, void *);
+#ifndef SMALL_KERNEL
 void		wpi_sensor_attach(struct wpi_softc *);
+#endif
 void		wpi_radiotap_attach(struct wpi_softc *);
 void		wpi_power(int, void *);
 int		wpi_dma_contig_alloc(bus_dma_tag_t, struct wpi_dma_info *,
@@ -128,7 +130,7 @@ int		wpi_ioctl(struct ifnet *, u_long, caddr_t);
 int		wpi_cmd(struct wpi_softc *, int, const void *, int, int);
 int		wpi_mrr_setup(struct wpi_softc *);
 int		wpi_set_key(struct ieee80211com *, struct ieee80211_node *,
-		    const struct ieee80211_key *);
+		    struct ieee80211_key *);
 void		wpi_updateedca(struct ieee80211com *);
 void		wpi_set_led(struct wpi_softc *, uint8_t, uint8_t, uint8_t);
 void		wpi_enable_tsf(struct wpi_softc *, struct ieee80211_node *);
@@ -268,6 +270,7 @@ wpi_attach(struct device *parent, struct device *self, void *aux)
 	/* set device capabilities */
 	ic->ic_caps =
 	    IEEE80211_C_WEP |		/* s/w WEP */
+	    IEEE80211_C_RSN |		/* WPA/RSN */
 	    IEEE80211_C_MONITOR |	/* monitor mode supported */
 	    IEEE80211_C_TXPMGT |	/* tx power management */
 	    IEEE80211_C_SHSLOT |	/* short slot time supported */
@@ -297,7 +300,9 @@ wpi_attach(struct device *parent, struct device *self, void *aux)
 	ieee80211_ifattach(ifp);
 	ic->ic_node_alloc = wpi_node_alloc;
 	ic->ic_newassoc = wpi_newassoc;
+#ifdef notyet
 	ic->ic_set_key = wpi_set_key;
+#endif
 	ic->ic_updateedca = wpi_updateedca;
 
 	/* override state transition machine */
@@ -308,7 +313,9 @@ wpi_attach(struct device *parent, struct device *self, void *aux)
 	sc->amrr.amrr_min_success_threshold =  1;
 	sc->amrr.amrr_max_success_threshold = 15;
 
+#ifndef SMALL_KERNEL
 	wpi_sensor_attach(sc);
+#endif
 	wpi_radiotap_attach(sc);
 
 	timeout_set(&sc->calib_to, wpi_calib_timeout, sc);
@@ -325,6 +332,7 @@ fail2:	wpi_free_shared(sc);
 fail1:	wpi_free_fwmem(sc);
 }
 
+#ifndef SMALL_KERNEL
 /*
  * Attach the adapter's on-board thermal sensor to the sensors framework.
  */
@@ -342,6 +350,7 @@ wpi_sensor_attach(struct wpi_softc *sc)
 	sensor_attach(&sc->sensordev, &sc->sensor);
 	sensordev_install(&sc->sensordev);
 }
+#endif
 
 /*
  * Attach the interface to 802.11 radiotap.
@@ -1195,6 +1204,7 @@ wpi_rx_intr(struct wpi_softc *sc, struct wpi_rx_desc *desc,
 	struct wpi_rx_tail *tail;
 	struct wpi_rbuf *rbuf;
 	struct ieee80211_frame *wh;
+	struct ieee80211_rxinfo rxi;
 	struct ieee80211_node *ni;
 	struct mbuf *m, *mnew;
 
@@ -1308,7 +1318,10 @@ wpi_rx_intr(struct wpi_softc *sc, struct wpi_rx_desc *desc,
 	ni = ieee80211_find_rxnode(ic, wh);
 
 	/* send the frame to the 802.11 layer */
-	ieee80211_input(ifp, m, ni, stat->rssi, 0);
+	rxi.rxi_flags = 0;
+	rxi.rxi_rssi = stat->rssi;
+	rxi.rxi_tstamp = 0;	/* unused */
+	ieee80211_input(ifp, m, ni, &rxi);
 
 	/* node is no longer needed */
 	ieee80211_release_node(ic, ni);
@@ -1563,9 +1576,10 @@ wpi_tx_data(struct wpi_softc *sc, struct mbuf *m0, struct ieee80211_node *ni,
 	struct wpi_tx_cmd *cmd;
 	struct wpi_cmd_data *tx;
 	struct ieee80211_frame *wh;
+	struct ieee80211_key *k;
 	struct mbuf *mnew;
 	u_int hdrlen;
-	int i, rate, error, ovhd = 0;
+	int i, rate, error;
 
 	desc = &ring->desc[ring->cur];
 	data = &ring->data[ring->cur];
@@ -1620,18 +1634,13 @@ wpi_tx_data(struct wpi_softc *sc, struct mbuf *m0, struct ieee80211_node *ni,
 	tx->flags = 0;
 
 	if (wh->i_fc[1] & IEEE80211_FC1_PROTECTED) {
-		const struct ieee80211_key *key =
-		    &ic->ic_nw_keys[ic->ic_wep_txkey];
-		if (key->k_cipher == IEEE80211_CIPHER_WEP40)
-			tx->security = WPI_CIPHER_WEP40;
-		else
-			tx->security = WPI_CIPHER_WEP104;
-		tx->security |= ic->ic_wep_txkey << 6;
-		memcpy(&tx->key[3], key->k_key, key->k_len);
-		/* compute crypto overhead */
-		ovhd = IEEE80211_WEP_TOTLEN;
-	} else
-		tx->security = 0;
+		k = ieee80211_get_txkey(ic, wh, ni);
+
+		if ((m0 = ieee80211_encrypt(ic, m0, k)) == NULL)
+			return ENOBUFS;
+
+		wh = mtod(m0, struct ieee80211_frame *);
+	}
 
 	if (!IEEE80211_IS_MULTICAST(wh->i_addr1)) {
 		tx->id = WPI_ID_BSS;
@@ -1642,7 +1651,7 @@ wpi_tx_data(struct wpi_softc *sc, struct mbuf *m0, struct ieee80211_node *ni,
 	/* check if RTS/CTS or CTS-to-self protection must be used */
 	if (!IEEE80211_IS_MULTICAST(wh->i_addr1)) {
 		/* multicast frames are not sent at OFDM rates in 802.11b/g */
-		if (m0->m_pkthdr.len + ovhd + IEEE80211_CRC_LEN >
+		if (m0->m_pkthdr.len + IEEE80211_CRC_LEN >
 		    ic->ic_rtsthreshold) {
 			tx->flags |= htole32(WPI_TX_NEED_RTS |
 			    WPI_TX_FULL_TXOP);
@@ -2112,7 +2121,7 @@ wpi_mrr_setup(struct wpi_softc *sc)
  */
 int
 wpi_set_key(struct ieee80211com *ic, struct ieee80211_node *ni,
-    const struct ieee80211_key *k)
+    struct ieee80211_key *k)
 {
 	struct wpi_softc *sc = ic->ic_softc;
 	struct wpi_node_info node;
@@ -2290,7 +2299,7 @@ wpi_get_power_index(struct wpi_softc *sc, struct wpi_power_group *group,
 	}
 
 	/* never exceed channel's maximum allowed Tx power */
-	pwr = min(pwr, sc->maxpwr[chan]);
+	pwr = MIN(pwr, sc->maxpwr[chan]);
 
 	/* retrieve power index into gain tables from samples */
 	for (sample = group->samples; sample < &group->samples[3]; sample++)
@@ -2716,12 +2725,12 @@ wpi_reset(struct wpi_softc *sc)
 	WPI_WRITE(sc, WPI_GPIO_CTL, tmp | WPI_GPIO_INIT);
 
 	/* wait for clock stabilization */
-	for (ntries = 0; ntries < 1000; ntries++) {
+	for (ntries = 0; ntries < 25000; ntries++) {
 		if (WPI_READ(sc, WPI_GPIO_CTL) & WPI_GPIO_CLOCK)
 			break;
-		DELAY(10);
+		DELAY(100);
 	}
-	if (ntries == 1000) {
+	if (ntries == 25000) {
 		printf("%s: timeout waiting for clock stabilization\n",
 		    sc->sc_dev.dv_xname);
 		return ETIMEDOUT;

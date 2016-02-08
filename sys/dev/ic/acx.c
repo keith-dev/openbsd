@@ -1,4 +1,4 @@
-/*	$OpenBSD: acx.c,v 1.80 2007/11/26 09:28:33 martynas Exp $ */
+/*	$OpenBSD: acx.c,v 1.85 2008/07/21 18:43:19 damien Exp $ */
 
 /*
  * Copyright (c) 2006 Jonathan Gray <jsg@openbsd.org>
@@ -598,6 +598,7 @@ acx_stop(struct acx_softc *sc)
 	/* Clear RX host descriptors */
 	bzero(rd->rx_ring, ACX_RX_RING_SIZE);
 
+	sc->sc_txtimer = 0;
 	ifp->if_timer = 0;
 	ifp->if_flags &= ~(IFF_RUNNING | IFF_OACTIVE);
 	ieee80211_new_state(&sc->sc_ic, IEEE80211_S_INIT, -1);
@@ -998,10 +999,11 @@ acx_start(struct ifnet *ifp)
 
 		wh = mtod(m, struct ieee80211_frame *);
 		if ((wh->i_fc[1] & IEEE80211_FC1_WEP) && !sc->chip_hw_crypt) {
-			m = ieee80211_wep_crypt(ifp, m, 1);
-			if (m == NULL) {
+			struct ieee80211_key *k;
+
+			k = ieee80211_get_txkey(ic, wh, ni);
+			if ((m = ieee80211_encrypt(ic, m, k)) == NULL) {
 				ieee80211_release_node(ic, ni);
-				m_freem(m);
 				ifp->if_oerrors++;
 				continue;
 			}
@@ -1056,9 +1058,9 @@ acx_start(struct ifnet *ifp)
 	if (bd->tx_used_count == ACX_TX_DESC_CNT)
 		ifp->if_flags |= IFF_OACTIVE;
 
-	if (trans && ifp->if_timer == 0)
-		ifp->if_timer = 5;
-	sc->sc_txtimer = 5;
+	if (trans && sc->sc_txtimer == 0)
+		sc->sc_txtimer = 5;
+	ifp->if_timer = 1;
 }
 
 void
@@ -1077,8 +1079,8 @@ acx_watchdog(struct ifnet *ifp)
 			acx_txeof(ifp->if_softc);
 			ifp->if_oerrors++;
 			return;
-		}
-		ifp->if_timer = 5;
+		} else
+			ifp->if_timer = 1;
 	}
 
 	ieee80211_watchdog(ifp);
@@ -1196,8 +1198,7 @@ acx_txeof(struct acx_softc *sc)
 	}
 	bd->tx_used_start = idx;
 
-	ifp->if_timer = bd->tx_used_count == 0 ? 0 : 5;
-	sc->sc_txtimer = 0;
+	sc->sc_txtimer = bd->tx_used_count == 0 ? 0 : 5;
 
 	if (bd->tx_used_count != ACX_TX_DESC_CNT) {
 		ifp->if_flags &= ~IFF_OACTIVE;
@@ -1314,6 +1315,7 @@ acx_rxeof(struct acx_softc *sc)
 		struct acx_rxbuf_hdr *head;
 		struct acx_rxbuf *buf;
 		struct mbuf *m;
+		struct ieee80211_rxinfo rxi;
 		uint32_t desc_status;
 		uint16_t desc_ctrl;
 		int len, error;
@@ -1349,6 +1351,7 @@ acx_rxeof(struct acx_softc *sc)
 			    sc->chip_rxbuf_exhdr);
 			wh = mtod(m, struct ieee80211_frame *);
 
+			rxi.rxi_flags = 0;
 			if ((wh->i_fc[1] & IEEE80211_FC1_WEP) &&
 			    sc->chip_hw_crypt) {
 				/* Short circuit software WEP */
@@ -1359,6 +1362,7 @@ acx_rxeof(struct acx_softc *sc)
 					sc->chip_proc_wep_rxbuf(sc, m, &len);
 					wh = mtod(m, struct ieee80211_frame *);
 				}
+				rxi.rxi_flags |= IEEE80211_RXI_HWDEC;
 			}
 
 			m->m_len = m->m_pkthdr.len = len;
@@ -1389,11 +1393,11 @@ acx_rxeof(struct acx_softc *sc)
 
 			ni = ieee80211_find_rxnode(ic, wh);
 
-			ieee80211_input(ifp, m, ni, head->rbh_level,
-			    letoh32(head->rbh_time));
+			rxi.rxi_rssi = head->rbh_level;
+			rxi.rxi_tstamp = letoh32(head->rbh_time);
+			ieee80211_input(ifp, m, ni, &rxi);
 
 			ieee80211_release_node(ic, ni);
-			ifp->if_ipackets++;
 		} else {
 			m_freem(m);
 			ifp->if_ierrors++;
@@ -2502,7 +2506,7 @@ acx_join_bss(struct acx_softc *sc, uint8_t mode, struct ieee80211_node *node)
 	dtim_intvl = sc->sc_ic.ic_opmode == IEEE80211_M_IBSS ? 1 : 10;
 	sc->chip_set_bss_join_param(sc, bj->chip_spec, dtim_intvl);
 
-	bj->ndata_txrate = ACX_NDATA_TXRATE_2;
+	bj->ndata_txrate = ACX_NDATA_TXRATE_1;
 	bj->ndata_txopt = 0;
 	bj->mode = mode;
 	bj->channel = ieee80211_chan2ieee(&sc->sc_ic, node->ni_chan);

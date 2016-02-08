@@ -1,4 +1,4 @@
-/*	$OpenBSD: run.c,v 1.27 2008/02/27 17:19:34 deraadt Exp $	*/
+/*	$OpenBSD: run.c,v 1.29 2008/06/04 14:04:42 pyr Exp $	*/
 /****************************************************************
 Copyright (C) Lucent Technologies 1997
 All Rights Reserved
@@ -1509,13 +1509,71 @@ Cell *bltin(Node **a, int n)	/* builtin functions. a[0] is type, a[1] is arg lis
 			nextarg = nextarg->nnext;
 		}
 		break;
+	case FCOMPL:
+		u = ~((int)getfval(x));
+		break;
+	case FAND:
+		if (nextarg == 0) {
+			WARNING("and requires two arguments; returning 0");
+			u = 0;
+			break;
+		}
+		y = execute(a[1]->nnext);
+		u = ((int)getfval(x)) & ((int)getfval(y));
+		tempfree(y);
+		nextarg = nextarg->nnext;
+		break;
+	case FFOR:
+		if (nextarg == 0) {
+			WARNING("or requires two arguments; returning 0");
+			u = 0;
+			break;
+		}
+		y = execute(a[1]->nnext);
+		u = ((int)getfval(x)) | ((int)getfval(y));
+		tempfree(y);
+		nextarg = nextarg->nnext;
+		break;
+	case FXOR:
+		if (nextarg == 0) {
+			WARNING("or requires two arguments; returning 0");
+			u = 0;
+			break;
+		}
+		y = execute(a[1]->nnext);
+		u = ((int)getfval(x)) ^ ((int)getfval(y));
+		tempfree(y);
+		nextarg = nextarg->nnext;
+		break;
+	case FLSHIFT:
+		if (nextarg == 0) {
+			WARNING("or requires two arguments; returning 0");
+			u = 0;
+			break;
+		}
+		y = execute(a[1]->nnext);
+		u = ((int)getfval(x)) << ((int)getfval(y));
+		tempfree(y);
+		nextarg = nextarg->nnext;
+		break;
+	case FRSHIFT:
+		if (nextarg == 0) {
+			WARNING("or requires two arguments; returning 0");
+			u = 0;
+			break;
+		}
+		y = execute(a[1]->nnext);
+		u = ((int)getfval(x)) >> ((int)getfval(y));
+		tempfree(y);
+		nextarg = nextarg->nnext;
+		break;
 	case FSYSTEM:
 		fflush(stdout);		/* in case something is buffered already */
 		u = (Awkfloat) system(getsval(x)) / 256;   /* 256 is unix-dep */
 		break;
 	case FRAND:
 		if (use_arc4)
-			u = (Awkfloat) (arc4random() % RAND_MAX) / RAND_MAX;
+			u = (Awkfloat)arc4random() / 0xffffffff;
 		else
 			u = (Awkfloat) (random() % RAND_MAX) / RAND_MAX;
 		break;

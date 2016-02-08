@@ -1,4 +1,4 @@
-/*	$OpenBSD: ber.c,v 1.6 2008/02/09 13:03:01 reyk Exp $ */
+/*	$OpenBSD: ber.c,v 1.15 2008/06/29 16:00:22 ragge Exp $ */
 
 /*
  * Copyright (c) 2007 Reyk Floeter <reyk@vantronix.net>
@@ -53,9 +53,9 @@ static ssize_t	ber_getc(struct ber *b, u_char *c);
 static ssize_t	ber_read(struct ber *ber, void *buf, size_t len);
 
 #ifdef DEBUG
-#define DPRINTF(x...)	printf(x)
+#define DPRINTF(...)	printf(__VA_ARGS__)
 #else
-#define DPRINTF(x...)	do { } while (0)
+#define DPRINTF(...)	do { } while (0)
 #endif
 
 struct ber_element *
@@ -218,31 +218,28 @@ ber_get_boolean(struct ber_element *elm, int *b)
 }
 
 struct ber_element *
-ber_add_string(struct ber_element *prev, char *string)
+ber_add_string(struct ber_element *prev, const char *string)
 {
-	struct ber_element *elm;
-
-	if ((elm = ber_get_element(BER_TYPE_OCTETSTRING)) == NULL)
-		return NULL;
-
-	elm->be_val = string;
-	elm->be_len = strlen(string);	/* terminating '\0' not included */
-
-	ber_link_elements(prev, elm);
-
-	return elm;
+	return ber_add_nstring(prev, string, strlen(string));
 }
 
 struct ber_element *
-ber_add_nstring(struct ber_element *prev, char *string, size_t len)
+ber_add_nstring(struct ber_element *prev, const char *string0, size_t len)
 {
 	struct ber_element *elm;
+	char *string;
 
-	if ((elm = ber_get_element(BER_TYPE_OCTETSTRING)) == NULL)
+	if ((string = calloc(1, len)) == NULL)
 		return NULL;
+	if ((elm = ber_get_element(BER_TYPE_OCTETSTRING)) == NULL) {
+		free(string);
+		return NULL;
+	}
 
+	bcopy(string0, string, len);
 	elm->be_val = string;
 	elm->be_len = len;
+	elm->be_free = 1;		/* free string on cleanup */
 
 	ber_link_elements(prev, elm);
 
@@ -271,15 +268,22 @@ ber_get_nstring(struct ber_element *elm, void **p, size_t *len)
 }
 
 struct ber_element *
-ber_add_bitstring(struct ber_element *prev, void *v, size_t len)
+ber_add_bitstring(struct ber_element *prev, const void *v0, size_t len)
 {
 	struct ber_element *elm;
+	void *v;
 
-	if ((elm = ber_get_element(BER_TYPE_BITSTRING)) == NULL)
+	if ((v = calloc(1, len)) == NULL)
 		return NULL;
+	if ((elm = ber_get_element(BER_TYPE_BITSTRING)) == NULL) {
+		free(v);
+		return NULL;
+	}
 
+	bcopy(v0, v, len);
 	elm->be_val = v;
 	elm->be_len = len;
+	elm->be_free = 1;		/* free string on cleanup */
 
 	ber_link_elements(prev, elm);
 
@@ -354,7 +358,7 @@ ber_oid2ber(struct ber_oid *o, u_int8_t *buf, size_t len)
 	v = (o->bo_id[0] * 40) + o->bo_id[1];
 	for (i = 2, j = 0; i <= o->bo_n; v = o->bo_id[i], i++) {
 		for (k = 28; k >= 7; k -= 7) {
-			if (v > (u_int)(1 << k)) {
+			if (v >= (u_int)(1 << k)) {
 				if (len)
 					buf[j] = v >> k | BER_TAG_MORE;
 				j++;
@@ -642,6 +646,9 @@ ber_scanf_elements(struct ber_element *ber, char *fmt, ...)
 			break;
 		case '{':
 		case '(':
+			if (ber->be_encoding != BER_TYPE_SEQUENCE &&
+			    ber->be_encoding != BER_TYPE_SET)
+				goto fail;
 			if (ber->be_sub == NULL || level >= _MAX_SEQ)
 				goto fail;
 			parent[++level] = ber;
@@ -732,8 +739,10 @@ ber_write_elements(struct ber *ber, struct ber_element *root)
  *	NULL, type mismatch or read error
  */
 struct ber_element *
-ber_read_elements(struct ber *ber, struct ber_element *root)
+ber_read_elements(struct ber *ber, struct ber_element *elm)
 {
+	struct ber_element *root = elm;
+
 	if (root == NULL) {
 		if ((root = ber_get_element(0)) == NULL)
 			return NULL;
@@ -741,8 +750,12 @@ ber_read_elements(struct ber *ber, struct ber_element *root)
 
 	DPRINTF("read ber elements, root %p\n", root);
 
-	if (ber_read_element(ber, root) == -1)
+	if (ber_read_element(ber, root) == -1) {
+		/* Cleanup if root was allocated by us */
+		if (elm == NULL)
+			ber_free_elements(root);
 		return NULL;
+	}
 
 	return root;
 }
@@ -940,8 +953,7 @@ get_id(struct ber *b, unsigned long *tag, int *class, int *cstruct)
 }
 
 /*
- * extract length of a ber object -- if length is unknown a length of -1 is
- * returned.
+ * extract length of a ber object -- if length is unknown an error is returned.
  */
 static ssize_t
 get_len(struct ber *b, ssize_t *len)
@@ -976,8 +988,11 @@ get_len(struct ber *b, ssize_t *len)
 		return -1;
 	}
 
-	if (s == 0)
-		s = -1;
+	if (s == 0) {
+		/* invalid encoding */
+		errno = EINVAL;
+		return -1;
+	}
 
 	*len = s;
 	return r;
@@ -1102,6 +1117,10 @@ ber_readbuf(struct ber *b, void *buf, size_t nbytes)
 
 	sz = b->br_rend - b->br_rptr;
 	len = MIN(nbytes, sz);
+	if (len == 0) {
+		errno = ECANCELED;
+		return (-1);	/* end of buffer and parser wants more data */
+	}
 
 	bcopy(b->br_rptr, buf, len);
 	b->br_rptr += len;
@@ -1151,8 +1170,6 @@ ber_getc(struct ber *b, u_char *c)
 		r = ber_readbuf(b, c, 1);
 	else
 		r = read(b->fd, c, 1);
-	if (r == -1)
-		warn("ber_getc");
 	return r;
 }
 

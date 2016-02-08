@@ -1,4 +1,4 @@
-/*	$OpenBSD: pxa2x0.c,v 1.12 2008/01/03 17:59:32 kettenis Exp $ */
+/*	$OpenBSD: pxa2x0.c,v 1.14 2008/07/03 03:00:37 ray Exp $ */
 /*	$NetBSD: pxa2x0.c,v 1.5 2003/12/12 16:42:44 thorpej Exp $ */
 
 /*
@@ -52,13 +52,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *      This product includes software developed by the NetBSD
- *      Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  */
 /*-
  * Copyright (c) 1999
@@ -93,11 +86,6 @@
  * SUCH DAMAGE.
  *
  */
-
-#include <sys/cdefs.h>
-/*
-__KERNEL_RCSID(0, "$NetBSD: pxa2x0.c,v 1.5 2003/12/12 16:42:44 thorpej Exp $");
-*/
 
 #include "pxaintc.h"
 #include "pxagpio.h"

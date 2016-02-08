@@ -1,4 +1,4 @@
-/*	$OpenBSD: conf.c,v 1.52 2007/05/28 22:26:03 todd Exp $ */
+/*	$OpenBSD: conf.c,v 1.54 2008/05/14 20:49:48 miod Exp $ */
 /*	$NetBSD: conf.c,v 1.44 1999/10/27 16:38:54 ragge Exp $	*/
 
 /*-
@@ -413,8 +413,8 @@ struct cdevsw	cdevsw[] =
 	cdev_fd_init(1,filedesc),	/* 53: file descriptor pseudo-device */
 	cdev_disk_init(NCCD,ccd),	/* 54: concatenated disk driver */
 	cdev_disk_init(NVND,vnd),	/* 55: vnode disk driver */
-	cdev_bpftun_init(NBPFILTER,bpf),/* 56: berkeley packet filter */
-	cdev_bpftun_init(NTUN,tun),	/* 57: tunnel filter */
+	cdev_bpf_init(NBPFILTER,bpf),	/* 56: berkeley packet filter */
+	cdev_tun_init(NTUN,tun),	/* 57: tunnel filter */
 	cdev_disk_init(NHD,hd),		/* 58: HDC9224/RD?? */
 	cdev_disk_init(NSD,sd),		/* 59: SCSI disk */
 	cdev_tape_init(NST,st),		/* 60: SCSI tape */
@@ -459,7 +459,7 @@ int	chrtoblktbl[] = {
 	NODEV,	/* 2 */
 	NODEV,	/* 3 */
 	0,	/* 4 */
-	1,	/* 5 */
+	NODEV,	/* 5 */
 	NODEV,	/* 6 */
 	NODEV,	/* 7 */
 	NODEV,	/* 8 */
@@ -486,7 +486,7 @@ int	chrtoblktbl[] = {
 	NODEV,	/* 29 */
 	12,	/* 30 */
 	NODEV,	/* 31 */
-	14,	/* 32 */
+	NODEV,	/* 32 */
 	NODEV,	/* 33 */
 	NODEV,	/* 34 */
 	NODEV,	/* 35 */
@@ -506,7 +506,7 @@ int	chrtoblktbl[] = {
 	NODEV,	/* 49 */
 	NODEV,	/* 50 */
 	NODEV,	/* 51 */
-	16,	/* 52 */
+	NODEV,	/* 52 */
 	NODEV,	/* 53 */
 	17,	/* 54 */
 	18,	/* 55 */
@@ -525,7 +525,7 @@ int	chrtoblktbl[] = {
 	NODEV,	/* 68 */
 	NODEV,	/* 69 */
 	NODEV,	/* 70 */
-	NODEV,	/* 71 */
+	24,	/* 71 */
 	NODEV,	/* 72 */
 	25,	/* 73 */
 	NODEV,	/* 74 */

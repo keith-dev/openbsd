@@ -1,4 +1,4 @@
-/*	$OpenBSD: scsi_all.h,v 1.44 2007/12/28 16:19:15 dlg Exp $	*/
+/*	$OpenBSD: scsi_all.h,v 1.46 2008/06/02 15:43:59 krw Exp $	*/
 /*	$NetBSD: scsi_all.h,v 1.10 1996/09/12 01:57:17 thorpej Exp $	*/
 
 /*
@@ -291,11 +291,11 @@ struct scsi_vpd_devid_hdr {
 #define VPD_DEVID_CODE_UTF8		0x3
 	u_int8_t flags;
 #define VPD_DEVID_PIV		0x80
-#define VPD_DEVID_ASSOC		0x30
+#define VPD_DEVID_ASSOC(_f)	((_f) & 0x30)
 #define VPD_DEVID_ASSOC_LU		0x00
 #define VPD_DEVID_ASSOC_PORT		0x10
 #define VPD_DEVID_ASSOC_TARG		0x20
-#define VPD_DEVID_TYPE		(((_f) >> 0) & 0x0f)
+#define VPD_DEVID_TYPE(_f)	((_f) & 0x0f)
 #define VPD_DEVID_TYPE_VENDOR		0x0
 #define VPD_DEVID_TYPE_T10		0x1
 #define VPD_DEVID_TYPE_EUI64		0x2
@@ -435,8 +435,10 @@ struct scsi_mode_header_big {
 union scsi_mode_sense_buf {
 	struct scsi_mode_header hdr;
 	struct scsi_mode_header_big hdr_big;
-	u_char buf[255];	/* 256 bytes breaks some devices. */
-} __packed;			/* Ensure sizeof() is 255! */
+	u_char buf[254];	/* 255 & 256 bytes breaks some devices. */
+				/* ahci doesn't like 255, various don't like */
+				/* 256 because length must fit in 8 bits. */
+} __packed;			/* Ensure sizeof() is 254! */
 
 struct scsi_report_luns_data {
 	u_int8_t length[4];	/* length of LUN inventory, in bytes */

@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_nfe.c,v 1.77 2008/02/05 16:52:50 brad Exp $	*/
+/*	$OpenBSD: if_nfe.c,v 1.79 2008/05/23 08:49:27 brad Exp $	*/
 
 /*-
  * Copyright (c) 2006, 2007 Damien Bergamini <damien.bergamini@free.fr>
@@ -184,14 +184,8 @@ nfe_attach(struct device *parent, struct device *self, void *aux)
 	pcireg_t memtype;
 
 	memtype = pci_mapreg_type(pa->pa_pc, pa->pa_tag, NFE_PCI_BA);
-	switch (memtype) {
-	case PCI_MAPREG_TYPE_MEM | PCI_MAPREG_MEM_TYPE_32BIT:
-	case PCI_MAPREG_TYPE_MEM | PCI_MAPREG_MEM_TYPE_64BIT:
-		if (pci_mapreg_map(pa, NFE_PCI_BA, memtype, 0, &sc->sc_memt,
-		    &sc->sc_memh, NULL, &memsize, 0) == 0)
-			break;
-		/* FALLTHROUGH */
-	default:
+	if (pci_mapreg_map(pa, NFE_PCI_BA, memtype, 0, &sc->sc_memt,
+	    &sc->sc_memh, NULL, &memsize, 0)) {
 		printf(": could not map mem space\n");
 		return;
 	}
@@ -871,7 +865,7 @@ nfe_txeof(struct nfe_softc *sc)
 				goto skip;
 
 			if ((flags & NFE_TX_ERROR_V1) != 0) {
-				printf("%s: tx v1 error 0x%04b\n",
+				printf("%s: tx v1 error %b\n",
 				    sc->sc_dev.dv_xname, flags, NFE_V1_TXERR);
 				ifp->if_oerrors++;
 			} else
@@ -881,7 +875,7 @@ nfe_txeof(struct nfe_softc *sc)
 				goto skip;
 
 			if ((flags & NFE_TX_ERROR_V2) != 0) {
-				printf("%s: tx v2 error 0x%04b\n",
+				printf("%s: tx v2 error %b\n",
 				    sc->sc_dev.dv_xname, flags, NFE_V2_TXERR);
 				ifp->if_oerrors++;
 			} else

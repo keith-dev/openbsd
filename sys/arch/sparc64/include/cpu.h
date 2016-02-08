@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.h,v 1.55 2008/02/20 09:44:47 robert Exp $	*/
+/*	$OpenBSD: cpu.h,v 1.63 2008/07/18 23:43:31 art Exp $	*/
 /*	$NetBSD: cpu.h,v 1.28 2001/06/14 22:56:58 thorpej Exp $ */
 
 /*
@@ -115,12 +115,16 @@ struct cpu_info {
 	int			ci_number;
 	int			ci_flags;
 	int			ci_upaid;
+#ifdef MULTIPROCESSOR
+	int			ci_itid;
+#endif
 	int			ci_node;
 	struct schedstate_percpu ci_schedstate; /* scheduler state */
 
 	int			ci_want_resched;
 	int			ci_handled_intr_level;
 	void			*ci_intrpending[16][8];
+	u_int64_t		ci_tick;
 
 	/* DEBUG/DIAGNOSTIC stuff */
 	u_long			ci_spin_locks;	/* # of spin locks held */
@@ -130,6 +134,18 @@ struct cpu_info {
 	void			(*ci_spinup)(void); /* spinup routine */
 	void			*ci_initstack;
 	paddr_t			ci_paddr;	/* Phys addr of this structure. */
+
+#ifdef SUN4V
+	struct rwindow64	ci_rw;
+	u_int64_t		ci_rwsp;
+
+	paddr_t			ci_mmfsa;
+	paddr_t			ci_cpumq;
+	paddr_t			ci_devmq;
+
+	paddr_t			ci_cpuset;
+	paddr_t			ci_mondo;
+#endif
 };
 
 #define CPUF_RUNNING	0x0001		/* CPU is running */
@@ -142,7 +158,16 @@ extern struct cpu_info *cpus;
 #ifdef MULTIPROCESSOR
 
 #define	cpu_number()	(curcpu()->ci_number)
-#define	curcpu()	(((struct cpu_info *)CPUINFO_VA)->ci_self)
+
+extern __inline struct cpu_info *curcpu(void);
+extern __inline struct cpu_info *
+curcpu(void)
+{
+	struct cpu_info *ci;
+
+	__asm __volatile("mov %%g7, %0" : "=r"(ci));
+	return (ci->ci_self);
+}
 
 #define CPU_IS_PRIMARY(ci)	((ci)->ci_number == 0)
 #define CPU_INFO_ITERATOR	int
@@ -198,6 +223,7 @@ void setsoftnet(void);
  * or after the current trap/syscall if in system mode.
  */
 extern void need_resched(struct cpu_info *);
+#define clear_resched(ci) (ci)->ci_want_resched = 0
 
 /*
  * This is used during profiling to integrate system time.
@@ -213,6 +239,8 @@ extern void need_resched(struct cpu_info *);
 
 void signotify(struct proc *);
 
+/* cpu.c */
+int	cpu_myid(void);
 /* machdep.c */
 int	ldcontrolb(caddr_t);
 void	dumpconf(void);
@@ -250,19 +278,10 @@ void	fpusave_proc(struct proc *, int);
 int	cnrom(void);
 /* zs.c */
 void zsconsole(struct tty *, int, int, void (**)(struct tty *, int));
-#ifdef KGDB
-void zs_kgdb_init(void);
-#endif
 /* fb.c */
 void	fb_unblank(void);
 /* tda.c */
 void	tda_full_blast(void);
-/* kgdb_stub.c */
-#ifdef KGDB
-void kgdb_attach(int (*)(void *), void (*)(void *, int), void *);
-void kgdb_connect(int);
-void kgdb_panic(void);
-#endif
 /* emul.c */
 int	fixalign(struct proc *, struct trapframe64 *);
 int	emulinstr(vaddr_t, struct trapframe64 *);
@@ -286,7 +305,7 @@ int	emul_popc(int32_t, struct proc *, union sigval, struct trapframe64 *);
 struct trapvec {
 	int	tv_instr[8];		/* the eight instructions */
 };
-extern struct trapvec *trapbase;	/* the 256 vectors */
+extern struct trapvec trapbase[];	/* the 256 vectors */
 
 extern void wzero(void *, u_int);
 extern void wcopy(const void *, void *, u_int);

@@ -1,4 +1,4 @@
-/*	$OpenBSD: zaurus_flash.c,v 1.6 2007/10/06 02:18:38 krw Exp $	*/
+/*	$OpenBSD: zaurus_flash.c,v 1.8 2008/05/19 18:42:13 miod Exp $	*/
 
 /*
  * Copyright (c) 2005 Uwe Stuehler <uwe@openbsd.org>
@@ -644,13 +644,13 @@ zflash_safe_start(struct zflash_softc *sc, dev_t dev)
 	DPRINTF(("pblks %u lblks %u\n", sp->sp_pblks, sp->sp_lblks));
 
 	/* Next physical block to use; randomize for wear-leveling. */
-	sp->sp_pnext = arc4random() % sp->sp_pblks;
+	sp->sp_pnext = arc4random_uniform(sp->sp_pblks);
 
 	/* Allocate physical block usage map. */
 	phyuse = (u_int16_t *)malloc(sp->sp_pblks * sizeof(u_int16_t),
 	    M_DEVBUF, M_NOWAIT);
 	if (phyuse == NULL) {
-		FREE(sp, M_DEVBUF);
+		free(sp, M_DEVBUF);
 		return ENOMEM;
 	}
 	sp->sp_phyuse = phyuse;
@@ -659,8 +659,8 @@ zflash_safe_start(struct zflash_softc *sc, dev_t dev)
 	logmap = (u_int *)malloc(sp->sp_lblks * sizeof(u_int),
 	    M_DEVBUF, M_NOWAIT);
 	if (logmap == NULL) {
-		FREE(phyuse, M_DEVBUF);
-		FREE(sp, M_DEVBUF);
+		free(phyuse, M_DEVBUF);
+		free(sp, M_DEVBUF);
 		return ENOMEM;
 	}
 	sp->sp_logmap = logmap;

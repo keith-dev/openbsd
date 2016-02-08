@@ -1,4 +1,4 @@
-/*	$OpenBSD: extern.h,v 1.31 2007/06/16 08:58:33 espie Exp $	*/
+/*	$OpenBSD: extern.h,v 1.35 2008/07/08 21:07:57 martynas Exp $	*/
 /*	$NetBSD: extern.h,v 1.17 1997/08/18 10:20:19 lukem Exp $	*/
 
 /*
@@ -133,6 +133,7 @@ void	psummary(int);
 void    pswitch(int);
 void    ptransfer(int);
 void	put(int, char **);
+void	putit(int, char **, int);
 void	pwd(int, char **);
 void	quit(int, char **);
 void	quote(int, char **);
@@ -141,10 +142,14 @@ void    recvrequest(const char *, const char *, const char *,
 	    const char *, int, int);
 void	reget(int, char **);
 char   *remglob(char **, int, char **);
+#ifndef SMALL
+char   *remglob2(char **, int, char **, FILE **ftemp, char *type);
+#endif /* !SMALL */
 off_t	remotesize(const char *, int);
 time_t	remotemodtime(const char *, int);
 void	removedir(int, char **);
 void	renamefile(int, char **);
+void	reput(int, char **);
 void    reset(int, char **);
 void	restart(int, char **);
 void	rmthelp(int, char **);
@@ -155,7 +160,9 @@ void	setbell(int, char **);
 void	setbinary(int, char **);
 void	setcase(int, char **);
 void	setcr(int, char **);
+#ifndef SMALL
 void	setdebug(int, char **);
+#endif /* !SMALL */
 void	setedit(int, char **);
 void	setepsv4(int, char **);
 void	setform(int, char **);
@@ -193,7 +200,8 @@ void	user(int, char **);
 int	ruserpass(const char *, char **, char **, char **);
 void	cookie_load(void);
 void	cookie_get(const char *, const char *, int, char **);
-#endif
+void	parse_list(char **, char *);
+#endif /* !SMALL */
 
 
 extern jmp_buf	abortprox;

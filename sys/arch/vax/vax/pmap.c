@@ -1,4 +1,4 @@
-/*	$OpenBSD: pmap.c,v 1.41 2007/09/10 18:49:45 miod Exp $ */
+/*	$OpenBSD: pmap.c,v 1.44 2008/06/14 10:55:20 mk Exp $ */
 /*	$NetBSD: pmap.c,v 1.74 1999/11/13 21:32:25 matt Exp $	   */
 /*
  * Copyright (c) 1994, 1998, 1999 Ludd, University of Lule}, Sweden.
@@ -69,7 +69,7 @@ vaddr_t	istack;
 struct pmap kernel_pmap_store;
 
 pt_entry_t *Sysmap;		/* System page table */
-void	*scratch;
+vaddr_t scratch;
 vaddr_t	iospace;
 
 vaddr_t ptemapstart, ptemapend;
@@ -176,13 +176,13 @@ pmap_bootstrap()
 	mtpr((unsigned)Sysmap - KERNBASE, PR_SBR);
 
 	/* Map Interrupt stack and set red zone */
-	istack = (unsigned)Sysmap + ROUND_PAGE(sysptsize * 4);
+	istack = (vaddr_t)Sysmap + ROUND_PAGE(sysptsize * 4);
 	mtpr(istack + ISTACK_SIZE, PR_ISP);
 	*kvtopte(istack) &= ~PG_V;
 
 	/* Some scratch pages */
-	scratch = (void *)((u_int)istack + ISTACK_SIZE);
-	avail_start = (u_int)scratch + 4 * VAX_NBPG - KERNBASE;
+	scratch = istack + ISTACK_SIZE;
+	avail_start = scratch + 4 * VAX_NBPG - KERNBASE;
 
 	/* Kernel message buffer */
 	avail_end -= MSGBUFSIZE;
@@ -221,7 +221,7 @@ pmap_bootstrap()
 
 #if 0 /* Breaks cninit() on some machines */
 	cninit();
-	printf("Sysmap %p, istack %lx, scratch %p\n",Sysmap,istack,scratch);
+	printf("Sysmap %p, istack %p, scratch %p\n",Sysmap,istack,scratch);
 	printf("etext %p\n", &etext);
 	printf("SYSPTSIZE %x\n",sysptsize);
 	printf("ptemapstart %lx ptemapend %lx\n", ptemapstart, ptemapend);
@@ -379,8 +379,7 @@ pmap_create()
 	struct pmap *pmap;
 	int bytesiz, res;
 
-	pmap =  pool_get(&pmap_pmap_pool, PR_WAITOK);
-	bzero(pmap, sizeof(struct pmap));
+	pmap = pool_get(&pmap_pmap_pool, PR_WAITOK | PR_ZERO);
 
 	/*
 	 * Allocate PTEs and stash them away in the pmap.
@@ -427,7 +426,9 @@ pmap_remove_holes(struct vm_map *map)
 	if (ehole <= shole)
 		return;
 
-	uvm_map_reserve(map, ehole - shole, UVM_UNKNOWN_OFFSET, 0, &shole);
+	(void)uvm_map(map, &shole, ehole - shole, NULL, UVM_UNKNOWN_OFFSET, 0,
+	    UVM_MAPFLAG(UVM_PROT_NONE, UVM_PROT_NONE, UVM_INH_NONE,
+	      UVM_ADV_RANDOM, UVM_FLAG_NOMERGE | UVM_FLAG_HOLE));
 }
 
 void

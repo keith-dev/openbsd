@@ -1,4 +1,4 @@
-/*	$OpenBSD: bus.h,v 1.8 2008/02/20 19:13:38 miod Exp $	*/
+/*	$OpenBSD: bus.h,v 1.10 2008/07/30 17:37:44 miod Exp $	*/
 
 /*
  * Copyright (c) 2003-2004 Opsycon AB Sweden.  All rights reserved.
@@ -66,12 +66,25 @@ struct mips_bus_space {
 			  bus_size_t);
 	void		(*_space_write_8)(bus_space_tag_t , bus_space_handle_t,
 			  bus_size_t, u_int64_t);
+	void		(*_space_read_raw_2)(bus_space_tag_t, bus_space_handle_t,
+			  bus_addr_t, u_int8_t *, bus_size_t);
+	void		(*_space_write_raw_2)(bus_space_tag_t, bus_space_handle_t,
+			  bus_addr_t, const u_int8_t *, bus_size_t);
+	void		(*_space_read_raw_4)(bus_space_tag_t, bus_space_handle_t,
+			  bus_addr_t, u_int8_t *, bus_size_t);
+	void		(*_space_write_raw_4)(bus_space_tag_t, bus_space_handle_t,
+			  bus_addr_t, const u_int8_t *, bus_size_t);
+	void		(*_space_read_raw_8)(bus_space_tag_t, bus_space_handle_t,
+			  bus_addr_t, u_int8_t *, bus_size_t);
+	void		(*_space_write_raw_8)(bus_space_tag_t, bus_space_handle_t,
+			  bus_addr_t, const u_int8_t *, bus_size_t);
 	int		(*_space_map)(bus_space_tag_t , bus_addr_t,
 			  bus_size_t, int, bus_space_handle_t *);
 	void		(*_space_unmap)(bus_space_tag_t, bus_space_handle_t,
 			  bus_size_t);
 	int		(*_space_subregion)(bus_space_tag_t, bus_space_handle_t,
 			  bus_size_t, bus_size_t, bus_space_handle_t *);
+	void *		(*_space_vaddr)(bus_space_tag_t, bus_space_handle_t);
 };
 
 #define	bus_space_read_1(t, h, o) (*(t)->_space_read_1)((t), (h), (o))
@@ -84,10 +97,26 @@ struct mips_bus_space {
 #define	bus_space_write_4(t, h, o, v) (*(t)->_space_write_4)((t), (h), (o), (v))
 #define	bus_space_write_8(t, h, o, v) (*(t)->_space_write_8)((t), (h), (o), (v))
 
+#define	bus_space_read_raw_multi_2(t, h, a, b, l) \
+	(*(t)->_space_read_raw_2)((t), (h), (a), (b), (l))
+#define	bus_space_read_raw_multi_4(t, h, a, b, l) \
+	(*(t)->_space_read_raw_4)((t), (h), (a), (b), (l))
+#define	bus_space_read_raw_multi_8(t, h, a, b, l) \
+	(*(t)->_space_read_raw_8)((t), (h), (a), (b), (l))
+
+#define	bus_space_write_raw_multi_2(t, h, a, b, l) \
+	(*(t)->_space_write_raw_2)((t), (h), (a), (b), (l))
+#define	bus_space_write_raw_multi_4(t, h, a, b, l) \
+	(*(t)->_space_write_raw_4)((t), (h), (a), (b), (l))
+#define	bus_space_write_raw_multi_8(t, h, a, b, l) \
+	(*(t)->_space_write_raw_8)((t), (h), (a), (b), (l))
+
 #define	bus_space_map(t, o, s, c, p) (*(t)->_space_map)((t), (o), (s), (c), (p))
 #define	bus_space_unmap(t, h, s) (*(t)->_space_unmap)((t), (h), (s))
 #define	bus_space_subregion(t, h, o, s, p) \
     (*(t)->_space_subregion)((t), (h), (o), (s), (p))
+
+#define	bus_space_vaddr(t, h)	(*(t)->_space_vaddr)((t), (h))
 
 /* Helper function in pmap.c */
 int bus_mem_add_mapping(bus_addr_t, bus_size_t, int, bus_space_handle_t *);
@@ -106,8 +135,7 @@ CAT(bus_space_read_multi_,n)(bus_space_tag_t bst, bus_space_handle_t bsh,     \
 bus_space_read_multi(1,8)
 bus_space_read_multi(2,16)
 bus_space_read_multi(4,32)
-
-#define	bus_space_read_multi_8	!!! bus_space_read_multi_8 not implemented !!!
+bus_space_read_multi(8,64)
 
 /*----------------------------------------------------------------------------*/
 #define bus_space_read_region(n,m)					      \
@@ -122,8 +150,7 @@ CAT(bus_space_read_region_,n)(bus_space_tag_t bst, bus_space_handle_t bsh,    \
 bus_space_read_region(1,8)
 bus_space_read_region(2,16)
 bus_space_read_region(4,32)
-
-#define	bus_space_read_region_8	!!! bus_space_read_region_8 not implemented !!!
+bus_space_read_region(8,64)
 
 /*----------------------------------------------------------------------------*/
 #define bus_space_write_multi(n,m)					      \
@@ -139,8 +166,7 @@ CAT(bus_space_write_multi_,n)(bus_space_tag_t bst, bus_space_handle_t bsh,    \
 bus_space_write_multi(1,8)
 bus_space_write_multi(2,16)
 bus_space_write_multi(4,32)
-
-#define	bus_space_write_multi_8	!!! bus_space_write_multi_8 not implemented !!!
+bus_space_write_multi(8,64)
 
 /*----------------------------------------------------------------------------*/
 #define bus_space_write_region(n,m)					      \
@@ -157,9 +183,7 @@ CAT(bus_space_write_region_,n)(bus_space_tag_t bst, bus_space_handle_t bsh,   \
 bus_space_write_region(1,8)
 bus_space_write_region(2,16)
 bus_space_write_region(4,32)
-
-#define	bus_space_write_region_8					      \
-    !!! bus_space_write_region_8 not implemented !!!
+bus_space_write_region(8,64)
 
 /*----------------------------------------------------------------------------*/
 #define bus_space_set_region(n,m)					      \
@@ -176,38 +200,7 @@ CAT(bus_space_set_region_,n)(bus_space_tag_t bst, bus_space_handle_t bsh,     \
 bus_space_set_region(1,8)
 bus_space_set_region(2,16)
 bus_space_set_region(4,32)
-
-/*----------------------------------------------------------------------------*/
-#define	bus_space_read_raw_multi(n,m,l)					      \
-static __inline void							      \
-CAT(bus_space_read_raw_multi_,n)(bus_space_tag_t bst, bus_space_handle_t bsh, \
-    bus_addr_t ba, u_int8_t *buf, bus_size_t cnt)			      \
-{									      \
-	CAT(bus_space_read_multi_,n)(bst, bsh, ba, (CAT3(u_int,m,_t) *)buf,   \
-	    cnt >> l);							      \
-}
-
-bus_space_read_raw_multi(2,16,1)
-bus_space_read_raw_multi(4,32,2)
-
-#define	bus_space_read_raw_multi_8 \
-    !!! bus_space_read_raw_multi_8 not implemented !!!
-
-/*----------------------------------------------------------------------------*/
-#define	bus_space_write_raw_multi(n,m,l)				      \
-static __inline void							      \
-CAT(bus_space_write_raw_multi_,n)(bus_space_tag_t bst, bus_space_handle_t bsh,\
-    bus_addr_t ba, const u_int8_t *buf, bus_size_t cnt)			      \
-{									      \
-	CAT(bus_space_write_multi_,n)(bst, bsh, ba,			      \
-	    (const CAT3(u_int,m,_t) *)buf, cnt >> l);			      \
-}
-
-bus_space_write_raw_multi(2,16,1)
-bus_space_write_raw_multi(4,32,2)
-
-#define	bus_space_write_raw_multi_8 \
-    !!! bus_space_write_raw_multi_8 not implemented !!!
+bus_space_set_region(8,64)
 
 /*----------------------------------------------------------------------------*/
 static __inline void
@@ -244,8 +237,16 @@ bus_space_copy_4(void *v, bus_space_handle_t h1, bus_size_t o1,
 		*d++ = *s++;
 }
 
-#define bus_space_copy_8 \
-    !!! bus_space_write_raw_multi_8 not implemented !!!
+static __inline void
+bus_space_copy_8(void *v, bus_space_handle_t h1, bus_size_t o1,
+	bus_space_handle_t h2, bus_size_t o2, bus_size_t c)
+{
+	int64_t *s = (int64_t *)(h1 + o1);
+	int64_t *d = (int64_t *)(h2 + o2);
+
+	while (c--)
+		*d++ = *s++;
+}
 
 /*----------------------------------------------------------------------------*/
 /*

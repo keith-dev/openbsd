@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_tun.c,v 1.91 2007/12/20 02:53:02 brad Exp $	*/
+/*	$OpenBSD: if_tun.c,v 1.94 2008/08/04 18:55:08 damien Exp $	*/
 /*	$NetBSD: if_tun.c,v 1.24 1996/05/07 02:40:48 thorpej Exp $	*/
 
 /*
@@ -551,6 +551,8 @@ tun_output(struct ifnet *ifp, struct mbuf *m0, struct sockaddr *dst,
 		return (ether_output(ifp, m0, dst, rt));
 
 	M_PREPEND(m0, sizeof(*af), M_DONTWAIT);
+	if (m0 == NULL)
+		return (ENOBUFS);
 	af = mtod(m0, u_int32_t *);
 	*af = htonl(dst->sa_family);
 
@@ -559,7 +561,7 @@ tun_output(struct ifnet *ifp, struct mbuf *m0, struct sockaddr *dst,
 		bpf_mtap(ifp->if_bpf, m0, BPF_DIRECTION_OUT);
 #endif
 
-	len = m0->m_pkthdr.len + sizeof(*af);
+	len = m0->m_pkthdr.len;
 	s = splnet();
 	IFQ_ENQUEUE(&ifp->if_snd, m0, NULL, error);
 	if (error) {
@@ -855,6 +857,9 @@ tunwrite(dev_t dev, struct uio *uio, int ioflag)
 #endif
 
 	if (tp->tun_flags & TUN_LAYER2) {
+		/* quirk to not add randomness from a virtual device */
+		atomic_setbits_int(&netisr, (1 << NETISR_RND_DONE));
+
 		ether_input_mbuf(ifp, top);
 		ifp->if_ipackets++; /* ibytes are counted in ether_input */
 		return (0);

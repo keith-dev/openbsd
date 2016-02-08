@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvm_extern.h,v 1.68 2007/11/29 00:26:41 tedu Exp $	*/
+/*	$OpenBSD: uvm_extern.h,v 1.70 2008/06/09 20:30:23 miod Exp $	*/
 /*	$NetBSD: uvm_extern.h,v 1.57 2001/03/09 01:02:12 chs Exp $	*/
 
 /*
@@ -184,6 +184,7 @@ typedef int		vm_prot_t;
 #define UVM_FLAG_COPYONW 0x080000 /* set copy_on_write flag */
 #define UVM_FLAG_AMAPPAD 0x100000 /* for bss: pad amap to reduce malloc() */
 #define UVM_FLAG_TRYLOCK 0x200000 /* fail if we can not lock map */
+#define	UVM_FLAG_HOLE    0x400000 /* no backend */
 
 /* macros to extract info */
 #define UVM_PROTECTION(X)	((X) & UVM_PROT_MASK)
@@ -555,6 +556,7 @@ void			uvm_pagerealloc(struct vm_page *,
 void			uvm_page_physload(paddr_t, paddr_t,
 					       paddr_t, paddr_t, int);
 void			uvm_setpagesize(void);
+void			uvm_shutdown(void);
 
 /* uvm_pager.c */
 void			uvm_aio_biodone1(struct buf *);

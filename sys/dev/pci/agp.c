@@ -1,4 +1,4 @@
-/* $OpenBSD: agp.c,v 1.16 2008/01/04 00:23:26 kettenis Exp $ */
+/* $OpenBSD: agp.c,v 1.24 2008/07/12 17:31:06 oga Exp $ */
 /*-
  * Copyright (c) 2000 Doug Rabson
  * All rights reserved.
@@ -87,9 +87,12 @@ const struct agp_product agp_products[] = {
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82915GM_HB, agp_i810_attach },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82945G_HB, agp_i810_attach },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82945GM_HB, agp_i810_attach },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82945GME_HB, agp_i810_attach },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82G965_HB, agp_i810_attach },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82Q965_HB, agp_i810_attach },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82GM965_HB, agp_i810_attach },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82G33_HB, agp_i810_attach },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82G35_HB, agp_i810_attach },
 #endif 
 #if NAGP_INTEL > 0
 	{ PCI_VENDOR_INTEL, -1, agp_intel_attach },
@@ -109,6 +112,11 @@ agp_probe(struct device *parent, void *match, void *aux)
 {
 	struct agpbus_attach_args *aaa = aux;
 	struct pci_attach_args *pa = &aaa->apa_pci_args;
+
+	/* pci_args must be a pchb */
+	if (PCI_CLASS(pa->pa_class) != PCI_CLASS_BRIDGE || 
+	    PCI_SUBCLASS(pa->pa_class) != PCI_SUBCLASS_BRIDGE_HOST)
+		return (0);
 
 	if (agp_lookup(pa) == NULL)
 		return (0);
@@ -166,9 +174,14 @@ agp_attach(struct device *parent, struct device *self, void *aux)
 		sc->sc_pc = pa->pa_pc;
 		sc->sc_id = pa->pa_id;
 		sc->sc_dmat = pa->pa_dmat;
+		sc->sc_memt = pa->pa_memt;
+		sc->sc_vgapcitag = aaa->apa_vga_args.pa_tag;
+		sc->sc_vgapc = aaa->apa_vga_args.pa_pc;
 
 		pci_get_capability(sc->sc_pc, sc->sc_pcitag, PCI_CAP_AGP,
 		    &sc->sc_capoff, NULL);
+
+		sc->vga_softc = (struct vga_pci_softc *)parent;
 
 		printf(": ");
 		ret = (*ap->ap_attach)(sc, pa);
@@ -213,7 +226,7 @@ agpmmap(void *v, off_t off, int prot)
 int
 agpopen(dev_t dev, int oflags, int devtype, struct proc *p)
 {
-        struct agp_softc *sc = (struct agp_softc *)device_lookup(&agp_cd, AGPUNIT(dev));
+        struct agp_softc *sc = agp_find_device(AGPUNIT(dev));
 
         if (sc == NULL)
                 return (ENXIO);
@@ -233,7 +246,7 @@ agpopen(dev_t dev, int oflags, int devtype, struct proc *p)
 int
 agpioctl(dev_t dev, u_long cmd, caddr_t addr, int flag, struct proc *pb)
 {
-	struct agp_softc *sc = (struct agp_softc *)device_lookup(&agp_cd, AGPUNIT(dev));
+	struct agp_softc *sc = agp_find_device(AGPUNIT(dev));
 
 	if (sc ==NULL)
 		return (ENODEV);
@@ -278,8 +291,7 @@ agpioctl(dev_t dev, u_long cmd, caddr_t addr, int flag, struct proc *pb)
 int
 agpclose(dev_t dev, int flags, int devtype, struct proc *p)
 {
-	struct agp_softc *sc = 
-		(struct agp_softc *)device_lookup(&agp_cd, AGPUNIT(dev));
+	struct agp_softc *sc = agp_find_device(AGPUNIT(dev));
 	struct agp_memory *mem;
 
 	/*
@@ -355,6 +367,21 @@ agp_map_aperture(struct pci_attach_args *pa, struct agp_softc *sc, u_int32_t bar
 	return (0);
 }
 
+u_int32_t
+agp_generic_get_aperture(struct agp_softc *sc)
+{
+	return (sc->sc_apsize);
+}
+
+int
+agp_generic_set_aperture(struct agp_softc *sc, u_int32_t aperture)
+{
+	if (aperture != AGP_GET_APERTURE(sc))
+		return (EINVAL);
+
+	return (0);
+}
+
 struct agp_gatt *
 agp_alloc_gatt(struct agp_softc *sc)
 {
@@ -402,7 +429,7 @@ agp_generic_enable(struct agp_softc *sc, u_int32_t mode)
 	pcireg_t command;
 	int rq, sba, fw, rate, capoff;
 	
-	if (pci_get_capability(sc->sc_pc, sc->sc_pcitag, PCI_CAP_AGP,
+	if (pci_get_capability(sc->sc_vgapc, sc->sc_vgapcitag, PCI_CAP_AGP,
 	    &capoff, NULL) == 0) {
 		printf("agp_generic_enable: not an AGP capable device\n");
 		return (-1);
@@ -410,7 +437,8 @@ agp_generic_enable(struct agp_softc *sc, u_int32_t mode)
 
 	tstatus = pci_conf_read(sc->sc_pc, sc->sc_pcitag,
 	    sc->sc_capoff + AGP_STATUS);
-	mstatus = pci_conf_read(sc->sc_pc, sc->sc_pcitag,
+	/* display agp mode */
+	mstatus = pci_conf_read(sc->sc_vgapc, sc->sc_vgapcitag,
 	    capoff + AGP_STATUS);
 
 	/* Set RQ to the min of mode, tstatus and mstatus */
@@ -447,9 +475,11 @@ agp_generic_enable(struct agp_softc *sc, u_int32_t mode)
 	command = AGP_MODE_SET_FW(command, fw);
 	command = AGP_MODE_SET_RATE(command, rate);
 	command = AGP_MODE_SET_AGP(command, 1);
+
 	pci_conf_write(sc->sc_pc, sc->sc_pcitag,
 	    sc->sc_capoff + AGP_COMMAND, command);
-	pci_conf_write(sc->sc_pc, sc->sc_pcitag, capoff + AGP_COMMAND, command);
+	pci_conf_write(sc->sc_vgapc, sc->sc_vgapcitag, capoff + AGP_COMMAND,
+	    command);
 	return (0);
 }
 
@@ -850,7 +880,9 @@ agp_unbind_user(void *dev, agp_unbind *unbind)
 void *
 agp_find_device(int unit)
 {
-        return (device_lookup(&agp_cd, unit)); 
+	if (unit >= agp_cd.cd_ndevs || unit < 0)
+		return (NULL);
+	return (agp_cd.cd_devs[unit]);
 }
 
 enum agp_acquire_state

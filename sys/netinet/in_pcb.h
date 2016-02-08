@@ -1,4 +1,4 @@
-/*	$OpenBSD: in_pcb.h,v 1.59 2007/02/22 20:23:07 millert Exp $	*/
+/*	$OpenBSD: in_pcb.h,v 1.66 2008/07/10 02:19:28 djm Exp $	*/
 /*	$NetBSD: in_pcb.h,v 1.14 1996/02/13 23:42:00 christos Exp $	*/
 
 /*
@@ -145,6 +145,7 @@ struct inpcb {
 #define inp_csumoffset	in6p_cksum
 #endif
 	struct	icmp6_filter *inp_icmp6filt;
+	void	*inp_pf_sk;
 };
 
 struct inpcbtable {
@@ -170,9 +171,10 @@ struct inpcbtable {
 #define	INP_LOWPORT	0x020	/* user wants "low" port binding */
 #define	INP_RECVIF	0x080	/* receive incoming interface */
 #define	INP_RECVTTL	0x040	/* receive incoming IP TTL */
+#define	INP_RECVDSTPORT	0x200	/* receive IP dst addr before rdr */
 
 #define	INP_CONTROLOPTS	(INP_RECVOPTS|INP_RECVRETOPTS|INP_RECVDSTADDR| \
-	    INP_RXSRCRT|INP_HOPLIMIT|INP_RECVIF|INP_RECVTTL)
+	    INP_RXSRCRT|INP_HOPLIMIT|INP_RECVIF|INP_RECVTTL|INP_RECVDSTPORT)
 
 /*
  * These flags' values should be determined by either the transport
@@ -219,14 +221,17 @@ struct inpcbtable {
 
 /* macros for handling bitmap of ports not to allocate dynamically */
 #define	DP_MAPBITS	(sizeof(u_int32_t) * NBBY)
-#define	DP_MAPSIZE	(howmany(IPPORT_RESERVED/2, DP_MAPBITS))
-#define	DP_SET(m, p)	((m)[((p) - IPPORT_RESERVED/2) / DP_MAPBITS] |= (1 << ((p) % DP_MAPBITS)))
-#define	DP_CLR(m, p)	((m)[((p) - IPPORT_RESERVED/2) / DP_MAPBITS] &= ~(1 << ((p) % DP_MAPBITS)))
-#define	DP_ISSET(m, p)	((m)[((p) - IPPORT_RESERVED/2) / DP_MAPBITS] & (1 << ((p) % DP_MAPBITS)))
+#define	DP_MAPSIZE	(howmany(65536, DP_MAPBITS))
+#define	DP_SET(m, p)	((m)[(p) / DP_MAPBITS] |= (1 << ((p) % DP_MAPBITS)))
+#define	DP_CLR(m, p)	((m)[(p) / DP_MAPBITS] &= ~(1 << ((p) % DP_MAPBITS)))
+#define	DP_ISSET(m, p)	((m)[(p) / DP_MAPBITS] & (1 << ((p) % DP_MAPBITS)))
 
 /* default values for baddynamicports [see ip_init()] */
-#define	DEFBADDYNAMICPORTS_TCP	{ 587, 749, 750, 751, 871, 0 }
-#define	DEFBADDYNAMICPORTS_UDP	{ 623, 664, 749, 750, 751, 0 }
+#define	DEFBADDYNAMICPORTS_TCP	{ \
+	587, 749, 750, 751, 871, 2049, \
+	6000, 6001, 6002, 6003, 6004, 6005, 6006, 6007, 6008, 6009, 6010, \
+	0 }
+#define	DEFBADDYNAMICPORTS_UDP	{ 623, 664, 749, 750, 751, 2049, 0 }
 
 struct baddynamicports {
 	u_int32_t tcp[DP_MAPSIZE];
@@ -239,7 +244,7 @@ struct baddynamicports {
 
 void	 in_losing(struct inpcb *);
 int	 in_pcballoc(struct socket *, void *);
-int	 in_pcbbind(void *, struct mbuf *);
+int	 in_pcbbind(void *, struct mbuf *, struct proc *);
 int	 in_pcbconnect(void *, struct mbuf *);
 void	 in_pcbdetach(void *);
 void	 in_pcbdisconnect(void *);
@@ -247,15 +252,16 @@ struct inpcb *
 	 in_pcbhashlookup(struct inpcbtable *, struct in_addr,
 			       u_int, struct in_addr, u_int);
 struct inpcb *
-	 in_pcblookup_listen(struct inpcbtable *, struct in_addr, u_int, int);
+	 in_pcblookup_listen(struct inpcbtable *, struct in_addr, u_int, int,
+	    struct mbuf *);
 #ifdef INET6
 struct inpcb *
 	 in6_pcbhashlookup(struct inpcbtable *, struct in6_addr *,
 			       u_int, struct in6_addr *, u_int);
 struct inpcb *
 	 in6_pcblookup_listen(struct inpcbtable *,
-			       struct in6_addr *, u_int, int);
-int	 in6_pcbbind(struct inpcb *, struct mbuf *);
+			       struct in6_addr *, u_int, int, struct mbuf *);
+int	 in6_pcbbind(struct inpcb *, struct mbuf *, struct proc *);
 int	 in6_pcbconnect(struct inpcb *, struct mbuf *);
 int	 in6_setsockaddr(struct inpcb *, struct mbuf *);
 int	 in6_setpeeraddr(struct inpcb *, struct mbuf *);

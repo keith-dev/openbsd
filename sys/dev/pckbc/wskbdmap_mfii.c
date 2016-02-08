@@ -1,9 +1,8 @@
-/*	$OpenBSD: wskbdmap_mfii.c,v 1.34 2006/12/05 21:27:07 otto Exp $ */
+/*	$OpenBSD: wskbdmap_mfii.c,v 1.38 2008/07/30 15:53:31 deraadt Exp $ */
 /*	$NetBSD: wskbdmap_mfii.c,v 1.15 2000/05/19 16:40:04 drochner Exp $	*/
 
 /*
  * PLEASE DO NOT FORGET TO REGEN
- *	sys/arch/hppa/gsc/gsckbdmap.c
  *	sys/dev/usb/ukbdmap.c
  * AFTER ANY CHANGES TO THIS FILE!
  */
@@ -23,13 +22,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -166,7 +158,7 @@ static const keysym_t pckbd_keydesc_us[] = {
     KC(221),			KS_Menu,
 };
 
-#if !defined(SMALL_KERNEL) || !defined(__alpha__)
+#if !defined(WSKBD_NO_INTL_LAYOUTS)
 
 static const keysym_t pckbd_keydesc_de[] = {
 /*  pos      normal		shifted		altgr		shift-altgr */
@@ -977,14 +969,14 @@ static const keysym_t pckbd_keydesc_nl_nodead[] = {
     KC(40),  KS_apostrophe,	KS_grave,
 };
 
-#endif	/* SMALL_KERNEL */
+#endif	/* WSKBD_NO_INTL_LAYOUTS */
 
 #define KBD_MAP(name, base, map) \
 			{ name, base, sizeof(map)/sizeof(keysym_t), map }
 
 const struct wscons_keydesc pckbd_keydesctab[] = {
 	KBD_MAP(KB_US,			0,	pckbd_keydesc_us),
-#if !defined(SMALL_KERNEL) || !defined(__alpha__)
+#if !defined(WSKBD_NO_INTL_LAYOUTS)
 	KBD_MAP(KB_DE,			KB_US,	pckbd_keydesc_de),
 	KBD_MAP(KB_DE | KB_NODEAD,	KB_DE,	pckbd_keydesc_de_nodead),
 	KBD_MAP(KB_FR,			KB_US,	pckbd_keydesc_fr),
@@ -1030,7 +1022,7 @@ const struct wscons_keydesc pckbd_keydesctab[] = {
 	KBD_MAP(KB_LV,			KB_US,	pckbd_keydesc_lv),
 	KBD_MAP(KB_NL,			KB_US, 	pckbd_keydesc_nl),
 	KBD_MAP(KB_NL | KB_NODEAD,	KB_NL,	pckbd_keydesc_nl_nodead),
-#endif	/* SMALL_KERNEL */
+#endif	/* WSKBD_NO_INTL_LAYOUTS */
 	{0, 0, 0, 0}
 };
 

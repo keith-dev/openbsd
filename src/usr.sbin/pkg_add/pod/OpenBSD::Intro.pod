@@ -1,4 +1,4 @@
-$OpenBSD: OpenBSD::Intro.pod,v 1.6 2008/03/02 23:39:19 espie Exp $
+$OpenBSD: OpenBSD::Intro.pod,v 1.8 2008/06/02 23:31:33 jmc Exp $
 
 =head1 NAME
 
@@ -47,7 +47,7 @@ get away with, before having to define an actual database format.
 Turns out we do not need a database format, or even any cache on the
 ftp server.
 
-Avoid copying files all over the place. Hence the L<OpenBSD::UStar(3p)>
+Avoid copying files all over the place. Hence the L<OpenBSD::Ustar(3p)>
 module that allows package tools to manipulate tarballs directly without
 having to extract them first in a staging area.
 
@@ -457,6 +457,11 @@ handles items that may be shared by several packages.
 =item OpenBSD::SharedLibs
 
 shared library specificities when handled as dependencies.
+
+=item OpenBSD::Subst
+
+conventions used for substituting variables during L<pkg_create(1)>, 
+and related algorithms.
 
 =item OpenBSD::Temp
 

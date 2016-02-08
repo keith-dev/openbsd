@@ -1,4 +1,4 @@
-/*	$OpenBSD: rcsprog.c,v 1.141 2008/03/04 16:43:51 joris Exp $	*/
+/*	$OpenBSD: rcsprog.c,v 1.145 2008/07/08 12:25:47 joris Exp $	*/
 /*
  * Copyright (c) 2005 Jean-Francois Brousseau <jfb@openbsd.org>
  * All rights reserved.
@@ -34,10 +34,9 @@
 
 #include "rcsprog.h"
 
-#define RCS_CMD_MAXARG	128
 #define RCSPROG_OPTSTRING	"A:a:b::c:e::ik:Ll::m:Mn:N:o:qt::TUu::Vx::z::"
 
-const char rcs_version[] = "OpenRCS 4.3";
+const char rcs_version[] = "OpenRCS 4.4";
 
 int	 rcsflags;
 int	 rcs_optind;
@@ -75,71 +74,67 @@ sighdlr(int sig)
 }
 
 int
-rcs_init(char *envstr, char **argv, int argvlen)
+build_cmd(char ***cmd_argv, char **argv, int argc)
 {
-	u_int i;
-	int argc, error;
-	char linebuf[256],  *lp, *cp;
+	int cmd_argc, i, cur;
+	char *cp, *rcsinit, *linebuf, *lp;
 
-	if (strlcpy(linebuf, envstr, sizeof(linebuf)) >= sizeof(linebuf))
-		errx(1, "rcs_init: string truncation");
-	(void)memset(argv, 0, argvlen * sizeof(char *));
+	if ((rcsinit = getenv("RCSINIT")) == NULL) {
+		*cmd_argv = argv;
+		return argc;
+	}
 
-	error = argc = 0;
+	cur = argc + 2;
+	cmd_argc = 0;
+	*cmd_argv = xcalloc(cur, sizeof(char *));
+	(*cmd_argv)[cmd_argc++] = argv[0];
+
+	linebuf = xstrdup(rcsinit);
 	for (lp = linebuf; lp != NULL;) {
 		cp = strsep(&lp, " \t\b\f\n\r\t\v");
 		if (cp == NULL)
 			break;
-		else if (*cp == '\0')
+		if (*cp == '\0')
 			continue;
 
-		if (argc == argvlen) {
-			error++;
-			break;
+		if (cmd_argc == cur) {
+			cur += 8;
+			*cmd_argv = xrealloc(*cmd_argv, cur,
+			    sizeof(char *));
 		}
 
-		argv[argc] = xstrdup(cp);
-		argc++;
+		(*cmd_argv)[cmd_argc++] = cp;
 	}
 
-	if (error != 0) {
-		for (i = 0; i < (u_int)argc; i++)
-			xfree(argv[i]);
-		argc = -1;
+	if (cmd_argc + argc > cur) {
+		cur = cmd_argc + argc + 1;
+		*cmd_argv = xrealloc(*cmd_argv, cur,
+		    sizeof(char *));
 	}
 
-	return (argc);
+	for (i = 1; i < argc; i++)
+		(*cmd_argv)[cmd_argc++] = argv[i];
+
+	(*cmd_argv)[cmd_argc] = NULL;
+
+	return cmd_argc;
 }
 
 int
 main(int argc, char **argv)
 {
 	u_int i;
-	char *rcsinit, *cmd_argv[RCS_CMD_MAXARG];
+	char **cmd_argv;
 	int ret, cmd_argc;
 
 	ret = -1;
 	rcs_optind = 1;
 	SLIST_INIT(&rcs_temp_files);
 
-	cmd_argc = 0;
-	cmd_argv[cmd_argc++] = argv[0];
-	if ((rcsinit = getenv("RCSINIT")) != NULL) {
-		ret = rcs_init(rcsinit, cmd_argv + 1,
-		    RCS_CMD_MAXARG - 1);
-		if (ret < 0) {
-			warnx("failed to prepend RCSINIT options");
-			exit (1);
-		}
-
-		cmd_argc += ret;
-	}
+	cmd_argc = build_cmd(&cmd_argv, argv, argc);
 
 	if ((rcs_tmpdir = getenv("TMPDIR")) == NULL)
 		rcs_tmpdir = RCS_TMPDIR_DEFAULT;
-
-	for (ret = 1; ret < argc; ret++)
-		cmd_argv[cmd_argc++] = argv[ret];
 
 	signal(SIGHUP, sighdlr);
 	signal(SIGINT, sighdlr);

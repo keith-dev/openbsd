@@ -1,4 +1,4 @@
-/*	$OpenBSD: comvar.h,v 1.43 2007/05/08 21:28:11 deraadt Exp $	*/
+/*	$OpenBSD: comvar.h,v 1.45 2008/06/08 13:55:06 kettenis Exp $	*/
 /*	$NetBSD: comvar.h,v 1.5 1996/05/05 19:50:47 christos Exp $	*/
 
 /*
@@ -173,6 +173,7 @@ int	kgdbintr(void *);
 void com_attach_subr(struct com_softc *);
 
 extern int comdefaultrate;
+extern int comconsrate;
 extern int comconsfreq;
 extern bus_addr_t comconsaddr;
 extern bus_addr_t comsiraddr;
@@ -180,4 +181,5 @@ extern int comconsinit;
 extern int comconsattached;
 extern bus_space_tag_t comconsiot;
 extern bus_space_handle_t comconsioh;
+extern int comconsunit;
 extern tcflag_t comconscflag;

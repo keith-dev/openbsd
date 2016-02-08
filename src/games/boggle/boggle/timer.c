@@ -1,4 +1,4 @@
-/*	$OpenBSD: timer.c,v 1.7 2004/07/10 07:26:22 deraadt Exp $	*/
+/*	$OpenBSD: timer.c,v 1.9 2008/03/26 20:12:59 millert Exp $	*/
 /*	$NetBSD: timer.c,v 1.3 1995/04/24 12:22:45 cgd Exp $	*/
 
 /*-
@@ -37,7 +37,7 @@
 #if 0
 static char sccsid[] = "@(#)timer.c	8.2 (Berkeley) 2/22/94";
 #else
-static char rcsid[] = "$OpenBSD: timer.c,v 1.7 2004/07/10 07:26:22 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: timer.c,v 1.9 2008/03/26 20:12:59 millert Exp $";
 #endif
 #endif /* not lint */
 
@@ -52,6 +52,8 @@ static char rcsid[] = "$OpenBSD: timer.c,v 1.7 2004/07/10 07:26:22 deraadt Exp $
 
 #include "bog.h"
 #include "extern.h"
+
+extern int TIMER_LINE, TIMER_COL;
 
 static int waitch(long);
 
@@ -89,7 +91,7 @@ timerch(void)
 		move(row, col);
 		refresh();
 	}
-	return (getch() & 0177);
+	return (inputch());
 }
 
 /*

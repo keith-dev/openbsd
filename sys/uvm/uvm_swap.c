@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvm_swap.c,v 1.76 2007/12/18 11:05:52 thib Exp $	*/
+/*	$OpenBSD: uvm_swap.c,v 1.82 2008/06/12 06:58:40 deraadt Exp $	*/
 /*	$NetBSD: uvm_swap.c,v 1.40 2000/11/17 11:39:39 mrg Exp $	*/
 
 /*
@@ -142,6 +142,7 @@ struct swapdev {
 #ifdef UVM_SWAP_ENCRYPT
 #define SWD_KEY_SHIFT		7		/* One key per 0.5 MByte */
 #define SWD_KEY(x,y)		&((x)->swd_keys[((y) - (x)->swd_drumoffset) >> SWD_KEY_SHIFT])
+#define	SWD_KEY_SIZE(x)	(((x) + (1 << SWD_KEY_SHIFT) - 1) >> SWD_KEY_SHIFT)
 
 #define SWD_DCRYPT_SHIFT	5
 #define SWD_DCRYPT_BITS		32
@@ -151,7 +152,6 @@ struct swapdev {
 #define SWD_DCRYPT_SIZE(x)	(SWD_DCRYPT_OFF((x) + SWD_DCRYPT_MASK) * sizeof(u_int32_t))
 	u_int32_t		*swd_decrypt;	/* bitmap for decryption */
 	struct swap_key		*swd_keys;	/* keys for different parts */
-	int			swd_nkeys;	/* active keys */
 #endif
 };
 
@@ -323,13 +323,17 @@ uvm_swap_initcrypt_all(void)
 {
 	struct swapdev *sdp;
 	struct swappri *spp;
+	int npages;
 
 	simple_lock(&uvm.swap_data_lock);
 
 	LIST_FOREACH(spp, &swap_priority, spi_swappri) {
 		CIRCLEQ_FOREACH(sdp, &spp->spi_swapdev, swd_next)
-			if (sdp->swd_decrypt == NULL)
-				uvm_swap_initcrypt(sdp, sdp->swd_npages);
+			if (sdp->swd_decrypt == NULL) {
+				npages = dbtob((uint64_t)sdp->swd_nblks) >>
+				    PAGE_SHIFT;
+				uvm_swap_initcrypt(sdp, npages);
+			}
 	}
 	simple_unlock(&uvm.swap_data_lock);
 }
@@ -346,9 +350,8 @@ uvm_swap_initcrypt(struct swapdev *sdp, int npages)
 	 */
 	sdp->swd_decrypt = malloc(SWD_DCRYPT_SIZE(npages), M_VMSWAP,
 	    M_WAITOK|M_ZERO);
-	sdp->swd_keys = malloc((npages >> SWD_KEY_SHIFT) * sizeof(struct swap_key),
+	sdp->swd_keys = malloc(SWD_KEY_SIZE(npages) * sizeof(struct swap_key),
 	    M_VMSWAP, M_WAITOK|M_ZERO);
-	sdp->swd_nkeys = 0;
 }
 
 boolean_t
@@ -438,7 +441,34 @@ uvm_swap_needdecrypt(struct swapdev *sdp, int off)
 	return sdp->swd_decrypt[SWD_DCRYPT_OFF(off)] & (1 << SWD_DCRYPT_BIT(off)) ?
 		TRUE : FALSE;
 }
+
+void
+uvm_swap_finicrypt_all(void)
+{
+	struct swapdev *sdp;
+	struct swappri *spp;
+	struct swap_key *key;
+	unsigned int nkeys;
+
+	simple_lock(&uvm.swap_data_lock);
+
+	LIST_FOREACH(spp, &swap_priority, spi_swappri) {
+		CIRCLEQ_FOREACH(sdp, &spp->spi_swapdev, swd_next) {
+			if (sdp->swd_decrypt == NULL)
+				continue;
+
+			nkeys = dbtob((uint64_t)sdp->swd_nblks) >> PAGE_SHIFT;
+			key = sdp->swd_keys + (SWD_KEY_SIZE(nkeys) - 1);
+			do {
+				if (key->refcount != 0)
+					swap_key_delete(key);
+			} while (key-- != sdp->swd_keys);
+		}
+	}
+	simple_unlock(&uvm.swap_data_lock);
+}
 #endif /* UVM_SWAP_ENCRYPT */
+
 /*
  * swaplist functions: functions that operate on the list of swap
  * devices on the system.
@@ -1028,8 +1058,9 @@ swap_on(p, sdp)
 		mp = rootvnode->v_mount;
 		sp = &mp->mnt_stat;
 		rootblocks = sp->f_blocks * btodb(sp->f_bsize);
-		rootpages = round_page(dbtob(rootblocks)) >> PAGE_SHIFT;
-		if (rootpages > size)
+		rootpages = round_page(dbtob((u_int64_t)rootblocks))
+		    >> PAGE_SHIFT;
+		if (rootpages >= size)
 			panic("swap_on: miniroot larger than swap?");
 
 		if (extent_alloc_region(sdp->swd_ex, addr, 
@@ -1200,7 +1231,7 @@ swstrategy(bp)
 	 * be yanked out from under us because we are holding resources
 	 * in it (i.e. the blocks we are doing I/O on).
 	 */
-	pageno = dbtob((int64_t)bp->b_blkno) >> PAGE_SHIFT;
+	pageno = dbtob((u_int64_t)bp->b_blkno) >> PAGE_SHIFT;
 	simple_lock(&uvm.swap_data_lock);
 	sdp = swapdrum_getsdp(pageno);
 	simple_unlock(&uvm.swap_data_lock);
@@ -1703,8 +1734,13 @@ uvm_swap_free(startslot, nslots)
 		if (swap_encrypt_initialized) {
 			/* Dereference keys */
 			for (i = 0; i < nslots; i++)
-				if (uvm_swap_needdecrypt(sdp, startslot + i))
-					SWAP_KEY_PUT(sdp, SWD_KEY(sdp, startslot + i));
+				if (uvm_swap_needdecrypt(sdp, startslot + i)) {
+					struct swap_key *key;
+
+					key = SWD_KEY(sdp, startslot + i);
+					if (key->refcount != 0)
+						SWAP_KEY_PUT(sdp, key);
+				}
 
 			/* Mark range as not decrypt */
 			uvm_swap_markdecrypt(sdp, startslot, nslots, 0);
@@ -1944,7 +1980,7 @@ uvm_swap_io(pps, startslot, npages, flags)
 	 * fill in the bp.   we currently route our i/o through
 	 * /dev/drum's vnode [swapdev_vp].
 	 */
-	bp->b_flags = B_BUSY | B_NOCACHE | (flags & (B_READ|B_ASYNC));
+	bp->b_flags = B_BUSY | B_NOCACHE | B_RAW | (flags & (B_READ|B_ASYNC));
 	bp->b_proc = &proc0;	/* XXX */
 	bp->b_vnbufs.le_next = NOLIST;
 	bp->b_data = (caddr_t)kva;
@@ -2008,12 +2044,16 @@ uvm_swap_io(pps, startslot, npages, flags)
 		int i;
 		caddr_t data = bp->b_data;
 		u_int64_t block = startblk;
-		struct swap_key *key = NULL;
+		struct swap_key *key;
 
 		for (i = 0; i < npages; i++) {
 			/* Check if we need to decrypt */
 			if (uvm_swap_needdecrypt(sdp, startslot + i)) {
 				key = SWD_KEY(sdp, startslot + i);
+				if (key->refcount == 0) {
+					result = VM_PAGER_ERROR;
+					break;
+				}
 				swap_decrypt(key, data, data, block,
 					     1 << PAGE_SHIFT);
 			}

@@ -1,4 +1,4 @@
-/*	$OpenBSD: vfs_init.c,v 1.20 2007/09/07 15:00:20 art Exp $	*/
+/*	$OpenBSD: vfs_init.c,v 1.23 2008/05/16 17:45:37 thib Exp $	*/
 /*	$NetBSD: vfs_init.c,v 1.6 1996/02/09 19:00:58 christos Exp $	*/
 
 /*
@@ -50,19 +50,14 @@
 #include <sys/pool.h>
 #include <sys/systm.h>
 
-/*
- * Sigh, such primitive tools are these...
- */
-#if 0
-#define DODEBUG(A) A
-#else
-#define DODEBUG(A)
-#endif
-
+/* a list of lists of vnodeops defns */
 extern struct vnodeopv_desc *vfs_opv_descs[];
-				/* a list of lists of vnodeops defns */
+
+/* and the operations they perform */
 extern struct vnodeop_desc *vfs_op_descs[];
-				/* and the operations they perform */
+
+struct pool namei_pool;
+
 /*
  * This code doesn't work if the defn is **vnodop_defns with cc.
  * The problem is because of the compiler sometimes putting in an
@@ -72,18 +67,6 @@ extern struct vnodeop_desc *vfs_op_descs[];
 int vfs_opv_numops;
 
 typedef int (*PFI)(void *);
-
-/*
- * A miscellaneous routine.
- * A generic "default" routine that just returns an error.
- */
-/*ARGSUSED*/
-int
-vn_default_error(void *v)
-{
-
-	return (EOPNOTSUPP);
-}
 
 /*
  * vfs_init.c
@@ -119,8 +102,6 @@ vfs_opv_init_explicit(struct vnodeopv_desc *vfs_opv_desc)
 		opv_desc_vector = malloc(vfs_opv_numops * sizeof(PFI),
 		    M_VNODE, M_WAITOK|M_ZERO);
 		*(vfs_opv_desc->opv_desc_vector_p) = opv_desc_vector;
-		DODEBUG(printf("vector at %p allocated\n",
-		    opv_desc_vector));
 	}
 
 	for (opve_descp = vfs_opv_desc->opv_desc_ops;
@@ -177,14 +158,26 @@ vfs_opv_init_default(struct vnodeopv_desc *vfs_opv_desc)
 			    opv_desc_vector[VOFFSET(vop_default)];
 }
 
+/* Initialize known vnode operations vectors. */
 void
-vfs_opv_init(void)
+vfs_op_init(void)
 {
 	int i;
 
+	/* Set all vnode vectors to a well known value. */
+	for (i = 0; vfs_opv_descs[i]; i++)
+		*(vfs_opv_descs[i]->opv_desc_vector_p) = NULL;
+
 	/*
-	 * Allocate the dynamic vectors and fill them in.
+	 * Figure out how many ops there are by counting the table,
+	 * and assign each its offset.
 	 */
+	for (vfs_opv_numops = 0, i = 0; vfs_op_descs[i]; i++) {
+		vfs_op_descs[i]->vdesc_offset = vfs_opv_numops;
+		vfs_opv_numops++;
+	}
+
+	/* Allocate the dynamic vectors and fill them in. */
 	for (i = 0; vfs_opv_descs[i]; i++)
 		vfs_opv_init_explicit(vfs_opv_descs[i]);
 
@@ -194,37 +187,9 @@ vfs_opv_init(void)
 	 */
 	for (i = 0; vfs_opv_descs[i]; i++)
 		vfs_opv_init_default(vfs_opv_descs[i]);
+
 }
 
-/*
- * Initialize known vnode operations vectors.
- */
-void
-vfs_op_init(void)
-{
-	int i;
-
-	DODEBUG(printf("Vnode_interface_init.\n"));
-	/*
-	 * Set all vnode vectors to a well known value.
-	 */
-	for (i = 0; vfs_opv_descs[i]; i++)
-		*(vfs_opv_descs[i]->opv_desc_vector_p) = NULL;
-	/*
-	 * Figure out how many ops there are by counting the table,
-	 * and assign each its offset.
-	 */
-	for (vfs_opv_numops = 0, i = 0; vfs_op_descs[i]; i++) {
-		vfs_op_descs[i]->vdesc_offset = vfs_opv_numops;
-		vfs_opv_numops++;
-	}
-	DODEBUG(printf ("vfs_opv_numops=%d\n", vfs_opv_numops));
-}
-
-/*
- * Routines having to do with the management of the vnode table.
- */
-struct pool namei_pool;
 
 /*
  * Initialize the vnode structures and initialize each file system type.
@@ -251,7 +216,6 @@ vfsinit(void)
 	 * Build vnode operation vectors.
 	 */
 	vfs_op_init();
-	vfs_opv_init();   /* finish the job */
 
 	/*
 	 * Stop using vfsconf and maxvfsconf as a temporary storage,

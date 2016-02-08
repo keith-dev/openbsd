@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_bridge.c,v 1.166 2007/12/20 02:53:02 brad Exp $	*/
+/*	$OpenBSD: if_bridge.c,v 1.170 2008/06/14 21:46:22 reyk Exp $	*/
 
 /*
  * Copyright (c) 1999, 2000 Jason L. Wright (jason@thought.net)
@@ -600,9 +600,10 @@ bridge_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 			break;
 		}
 		sc->sc_brttimeout = bparam->ifbrp_ctime;
-		timeout_del(&sc->sc_brtimeout);
 		if (bparam->ifbrp_ctime != 0)
 			timeout_add(&sc->sc_brtimeout, sc->sc_brttimeout * hz);
+		else
+			timeout_del(&sc->sc_brtimeout);
 		break;
 	case SIOCBRDGGTO:
 		bparam->ifbrp_ctime = sc->sc_brttimeout;
@@ -1170,7 +1171,7 @@ bridgeintr(void)
 	int s;
 
 	LIST_FOREACH(sc, &bridge_list, sc_list) {
-		while (sc->sc_if.if_snd.ifq_head) {
+		for (;;) {
 			s = splnet();
 			IF_DEQUEUE(&sc->sc_if.if_snd, m);
 			splx(s);
@@ -1469,7 +1470,7 @@ bridge_input(struct ifnet *ifp, struct ether_header *eh, struct mbuf *m)
 		if (bcmp(ac->ac_enaddr, eh->ether_dhost, ETHER_ADDR_LEN) == 0
 #if NCARP > 0
 		    || (ifl->ifp->if_carp && carp_ourether(ifl->ifp->if_carp,
-			eh, IFT_ETHER, 0) != NULL)
+			eh, 0) != NULL)
 #endif
 		    ) {
 			if (srcifl->bif_flags & IFBIF_LEARNING)
@@ -1492,7 +1493,7 @@ bridge_input(struct ifnet *ifp, struct ether_header *eh, struct mbuf *m)
 		if (bcmp(ac->ac_enaddr, eh->ether_shost, ETHER_ADDR_LEN) == 0
 #if NCARP > 0
 		    || (ifl->ifp->if_carp && carp_ourether(ifl->ifp->if_carp,
-			eh, IFT_ETHER, 1) != NULL)
+			eh, 1) != NULL)
 #endif
 		    ) {
 			m_freem(m);
@@ -2716,8 +2717,7 @@ bridge_ifenqueue(struct bridge_softc *sc, struct ifnet *ifp, struct mbuf *m)
 	ifp->if_obytes += len;
 	if (mflags & M_MCAST)
 		ifp->if_omcasts++;
-	if ((ifp->if_flags & IFF_OACTIVE) == 0)
-		(*ifp->if_start)(ifp);
+	if_start(ifp);
 
 	return (0);
 }

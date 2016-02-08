@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.c,v 1.46 2008/02/15 17:33:51 drahn Exp $ */
+/*	$OpenBSD: cpu.c,v 1.57 2008/05/02 19:10:01 drahn Exp $ */
 
 /*
  * Copyright (c) 1997 Per Fogelstrom
@@ -250,6 +250,7 @@ cpuattach(struct device *parent, struct device *dev, void *aux)
 	ci = &cpu_info[reg[0]];
 	ci->ci_cpuid = reg[0];
 	ci->ci_intrdepth = -1;
+	ci->ci_randseed = 1;
 	ci->ci_dev = dev;
 
 	pvr = ppc_mfpvr();
@@ -552,6 +553,7 @@ struct cpu_hatch_data {
 	struct cpu_info *ci;
 	int running;
 	int hid0;
+	int l2cr;
 	int sdr1;
 	int tbu, tbl;
 };
@@ -570,13 +572,15 @@ cpu_spinup(struct device *self, struct cpu_info *ci)
 	int size = 0;
 	char *cp;
 	u_char *reset_cpu;
+	char cpuname[64];
+	u_int node;
 
         /*
          * Allocate some contiguous pages for the interrupt stack
          * from the lowest 256MB (because bat0 always maps it va == pa).
          */
         size += INTSTK;
-        size += 4096;   /* SPILLSTK */
+        size += 8192;   /* SPILLSTK(1k) + DDBSTK(7k) */
 
 	TAILQ_INIT(&mlist);
 	error = uvm_pglistalloc(size, 0x0, 0x10000000, 0, 0, &mlist, 1, 1);
@@ -595,30 +599,42 @@ cpu_spinup(struct device *self, struct cpu_info *ci)
 	h->ci = ci;
 	h->running = 0;
 	h->hid0 = ppc_mfhid0();
+	h->l2cr = ppc_mfl2cr();
 	h->sdr1 = ppc_mfsdr1();
 	cpu_hatch_data = h;
-
-#ifdef notyet
-	ci->ci_lasttb = curcpu()->ci_lasttb;
-#endif
 
 	__asm volatile ("sync; isync");
 
 	/* XXX OpenPIC */
 	{
 		uint64_t tb;
+		int off;
 
 		*(u_int *)EXC_RST = 0x48000002 | (u_int)cpu_spinup_trampoline;
 		syncicache((void *)EXC_RST, 0x100);
 
 		h->running = -1;
 
-		/* Start secondary CPU. */
-		reset_cpu = mapiodev(0x80000000 + 0x5c, 1);
-		*reset_cpu = 0x4;
-		__asm volatile ("eieio" ::: "memory");
-		*reset_cpu = 0x5;
-		__asm volatile ("eieio" ::: "memory");
+		snprintf(cpuname, sizeof(cpuname), "/cpus/@%x", ci->ci_cpuid);
+		node = OF_finddevice(cpuname);
+		if (node == -1) {
+			printf(": unable to locate OF node %s\n", cpuname);
+			return  -1;
+		}
+		if (OF_getprop(node, "soft-reset", &off, 4) == 4) {
+			reset_cpu = mapiodev(0x80000000 + off, 1);
+			*reset_cpu = 0x4;
+			__asm volatile ("eieio" ::: "memory");
+			*reset_cpu = 0x0;
+			__asm volatile ("eieio" ::: "memory");
+		} else {
+			/* Start secondary CPU. */
+			reset_cpu = mapiodev(0x80000000 + 0x5c, 1);
+			*reset_cpu = 0x4;
+			__asm volatile ("eieio" ::: "memory");
+			*reset_cpu = 0x0;
+			__asm volatile ("eieio" ::: "memory");
+		}
 
 		/* Sync timebase. */
 		tb = ppc_mftb();
@@ -635,11 +651,9 @@ cpu_spinup(struct device *self, struct cpu_info *ci)
                 delay(500000);
 	}
 
-	printf("cpu%d: timebase %llx\n", cpu_number(), ppc_mftb());
 
 	for (i = 0; i < 0x3fffffff; i++)
 		if (h->running) {
-			printf("running\n");
 			break;
 		}
 
@@ -658,6 +672,9 @@ cpu_boot_secondary_processors(void)
 		ci = &cpu_info[i];
 		if (ci->ci_cpuid == 0)
 			continue;
+
+		sched_init_cpu(ci);
+
 		cpu_spinup(NULL, ci);
 	}
 
@@ -665,10 +682,13 @@ cpu_boot_secondary_processors(void)
 	__asm volatile ("sync");
 }
 
+void cpu_startclock(void);
+
 void
 cpu_hatch(void)
 {
 	volatile struct cpu_hatch_data *h = cpu_hatch_data;
+	int intrstate;
 	int scratch, i, s;
 
         /* Initialize timebase. */
@@ -676,9 +696,6 @@ cpu_hatch(void)
 
 	/* Initialize curcpu(). */
 	ppc_mtsprg0((u_int)h->ci);
-
-	/* Set PIR . */
-	ppc_mtpir(curcpu()->ci_cpuid);
 
 	/*
 	 * Initialize BAT registers to unmapped to not generate
@@ -714,6 +731,21 @@ cpu_hatch(void)
 		ppc_mtsrin(PPC_KERNEL_SEG0 + i, i << ADDR_SR_SHIFT);
 
 	ppc_mthid0(h->hid0);
+	if (h->l2cr != 0) {
+		u_int x;
+		ppc_mtl2cr(h->l2cr & ~L2CR_L2E);
+
+		/* Wait for L2 clock to be stable (640 L2 clocks). */
+		delay(100);
+
+		/* Invalidate all L2 contents. */
+		ppc_mtl2cr((h->l2cr & ~L2CR_L2E)|L2CR_L2I);
+		do {
+			x = ppc_mfl2cr();
+		} while (x & L2CR_L2IP);
+		
+		ppc_mtl2cr(h->l2cr);
+	}
 	ppc_mtsdr1(h->sdr1);
 
 	/*
@@ -744,18 +776,19 @@ cpu_hatch(void)
 
 	__asm volatile ("sync; isync");
 
-	printf("cpu%d: running\n", cpu_number());
-	printf("cpu%d: timebase %llx\n", cpu_number(), ppc_mftb());
-#ifdef notyet
-	ppc_mtdec(ticks_per_intr);
-#endif
-
 	curcpu()->ci_ipending = 0;
 	curcpu()->ci_cpl = 0;
 
 	s = splhigh();
 	microuptime(&curcpu()->ci_schedstate.spc_runtime);
 	splx(s);
+
+	intrstate = ppc_intr_disable();
+	cpu_startclock();
+	ppc_intr_enable(intrstate);
+
+	/* Enable inter-processor interrupts. */
+	openpic_set_priority(curcpu()->ci_cpuid, 14);
 
 	SCHED_LOCK(s);
 	cpu_switchto(NULL, sched_chooseproc());

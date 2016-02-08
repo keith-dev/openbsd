@@ -1,4 +1,4 @@
-#	$OpenBSD: files,v 1.424 2008/01/21 20:00:32 sobrado Exp $
+#	$OpenBSD: files,v 1.438 2008/07/21 19:05:21 damien Exp $
 #	$NetBSD: files,v 1.87 1996/05/19 17:17:50 jonathan Exp $
 
 #	@(#)files.newconf	7.5 (Berkeley) 5/10/93
@@ -20,6 +20,7 @@ define	radiobus {}
 define	i2cbus {}
 define	gpiobus {}
 define	onewirebus {}
+define	video {}
 
 # filesystem firmware loading attribute
 define firmload
@@ -33,6 +34,9 @@ define tea5757
 define lm700x
 define tc921x
 define pt2254a
+
+device	video
+attach	video at video
 
 # audio and midi devices, attaches to audio hardware driver
 device	audio
@@ -93,12 +97,16 @@ file	dev/ic/pcdisplay_chars.c	pcdisplayops
 define	mk48txx
 file	dev/ic/mk48txx.c		mk48txx
 
+# AGP
+define agpbus {}
+include "dev/pci/files.agp"
+
 # DRM - Direct Rendering Manager: /dev/drm
 define drm {}
 include "dev/pci/drm/files.drm"
 
 # VGA graphics
-device	vga: wsemuldisplaydev, pcdisplayops, drm
+device	vga: wsemuldisplaydev, pcdisplayops, drm, agpbus
 file	dev/ic/vga.c			vga & (vga_pci | vga_isa) needs-flag
 file	dev/ic/vga_subr.c		vga & (vga_pci | vga_isa) needs-flag
 
@@ -237,11 +245,6 @@ file	dev/ic/if_wi_hostap.c		wi
 # Aironet 802.11 DS Ethernet controller
 device	an: ether, ifnet, ifmedia, wlan
 file	dev/ic/an.c			an
-
-# RangeLAN2
-device	rln: ether, ifnet
-file	dev/ic/rln.c			rln
-file	dev/ic/rlnsubr.c		rln
 
 # LANCE and PCnet Ethernet controllers
 device	le: ether, ifnet, ifmedia
@@ -438,6 +441,10 @@ file dev/radio.c			radio	needs-flag
 device	ipmi
 file	dev/ipmi.c			ipmi	needs-flag
 
+# VMware Tools
+device	vmt
+file	dev/vmt.c			vmt	needs-flag
+
 # Software RAID
 device	softraid: scsi
 attach	softraid at root
@@ -473,6 +480,7 @@ pseudo-device gif: ifnet
 pseudo-device gre: ifnet
 pseudo-device crypto: ifnet
 pseudo-device trunk: ifnet, ether, ifmedia
+pseudo-device mpe: ifnet, ether
 
 pseudo-device sequencer
 pseudo-device systrace
@@ -615,6 +623,7 @@ file dev/raidframe/rf_stripelocks.c	raid			needs-flag
 file dev/raidframe/rf_strutils.c	raid			needs-flag
 file dev/raidframe/rf_threadstuff.c	raid			needs-flag
 file dev/raidframe/rf_utils.c		raid			needs-flag
+file dev/video.c			video			needs-flag
 file isofs/cd9660/cd9660_bmap.c		cd9660
 file isofs/cd9660/cd9660_lookup.c	cd9660
 file isofs/cd9660/cd9660_node.c		cd9660
@@ -702,6 +711,7 @@ file kern/uipc_socket2.c
 file kern/uipc_syscalls.c
 file kern/uipc_usrreq.c
 file kern/vfs_bio.c
+file kern/vfs_biomem.c
 file kern/vfs_cache.c
 file kern/vfs_cluster.c
 file kern/vfs_conf.c
@@ -771,13 +781,20 @@ file net/slcompress.c			sl | ppp | strip
 file net/if_enc.c			enc			needs-count
 file net/if_gre.c			gre			needs-count
 file net/if_trunk.c			trunk			needs-count
+file net/trunklacp.c			trunk
+file net/if_mpe.c			mpe			needs-count
 file net80211/ieee80211.c		wlan
 file net80211/ieee80211_amrr.c		wlan
 file net80211/ieee80211_crypto.c	wlan
+file net80211/ieee80211_crypto_ccmp.c	wlan
+file net80211/ieee80211_crypto_tkip.c	wlan
+file net80211/ieee80211_crypto_wep.c	wlan
 file net80211/ieee80211_input.c		wlan
 file net80211/ieee80211_ioctl.c		wlan
 file net80211/ieee80211_node.c		wlan
 file net80211/ieee80211_output.c	wlan
+file net80211/ieee80211_pae_input.c	wlan
+file net80211/ieee80211_pae_output.c	wlan
 file net80211/ieee80211_proto.c		wlan
 file net80211/ieee80211_rssadapt.c	wlan
 file net80211/ieee80211_regdomain.c	wlan
@@ -830,6 +847,7 @@ file crypto/xform.c			(inet & ipsec) | crypto
 file crypto/deflate.c			(inet & ipsec) | crypto
 file crypto/arc4.c			
 file crypto/michael.c			wlan
+file crypto/idgen.c			inet6 | nfsclient | nfsserver
 file netatalk/aarp.c			netatalk
 file netatalk/at_control.c		netatalk
 file netatalk/at_proto.c		netatalk
@@ -855,6 +873,10 @@ file netbt/rfcomm_socket.c		bluetooth
 file netbt/rfcomm_upper.c		bluetooth
 file netbt/sco_socket.c			bluetooth
 file netbt/sco_upper.c			bluetooth
+file netmpls/mpls_input.c		mpls
+file netmpls/mpls_proto.c		mpls
+file netmpls/mpls_raw.c			mpls
+file netmpls/mpls_shim.c		mpls
 file netnatm/natm_pcb.c			natm
 file netnatm/natm_proto.c		natm
 file netnatm/natm.c			natm
@@ -988,6 +1010,7 @@ file compat/common/vfs_syscalls_25.c	!small_kernel &
 	(compat_freebsd | compat_bsdos | compat_sunos | compat_hpux)
 file compat/common/vfs_syscalls_35.c	!small_kernel &
 	(compat_freebsd | compat_bsdos | compat_sunos | compat_hpux)
+file compat/common/vfs_syscalls_o43.c	!small_kernel & compat_o43
 file compat/common/kern_ipc_35.c	!small_kernel & compat_35
 file compat/common/kern_ipc_23.c	!small_kernel & compat_23
 file compat/common/kern_exit_43.c	!small_kernel

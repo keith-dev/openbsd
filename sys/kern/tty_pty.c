@@ -1,4 +1,4 @@
-/*	$OpenBSD: tty_pty.c,v 1.35 2007/09/07 15:00:20 art Exp $	*/
+/*	$OpenBSD: tty_pty.c,v 1.38 2008/08/02 11:39:38 stefan Exp $	*/
 /*	$NetBSD: tty_pty.c,v 1.33.4.1 1996/06/02 09:08:11 mrg Exp $	*/
 
 /*
@@ -456,7 +456,7 @@ ptcread(dev_t dev, struct uio *uio, int flag)
 	struct pt_softc *pti = pt_softc[minor(dev)];
 	struct tty *tp = pti->pt_tty;
 	char buf[BUFSIZ];
-	int error = 0, cc;
+	int error = 0, cc, bufcc = 0;
 
 	/*
 	 * We want to block until the slave
@@ -471,7 +471,7 @@ ptcread(dev_t dev, struct uio *uio, int flag)
 				if (error)
 					return (error);
 				if (pti->pt_send & TIOCPKT_IOCTL) {
-					cc = min(uio->uio_resid,
+					cc = MIN(uio->uio_resid,
 						sizeof(tp->t_termios));
 					uiomove(&tp->t_termios, cc, uio);
 				}
@@ -500,7 +500,10 @@ ptcread(dev_t dev, struct uio *uio, int flag)
 	if (pti->pt_flags & (PF_PKT|PF_UCNTL))
 		error = ureadc(0, uio);
 	while (uio->uio_resid > 0 && error == 0) {
-		cc = q_to_b(&tp->t_outq, buf, min(uio->uio_resid, BUFSIZ));
+		cc = MIN(uio->uio_resid, BUFSIZ);
+		cc = q_to_b(&tp->t_outq, buf, cc);
+		if (cc > bufcc)
+			bufcc = cc;
 		if (cc <= 0)
 			break;
 		error = uiomove(buf, cc, uio);
@@ -512,6 +515,8 @@ ptcread(dev_t dev, struct uio *uio, int flag)
 		}
 		selwakeup(&tp->t_wsel);
 	}
+	if (bufcc)
+		bzero(buf, bufcc);
 	return (error);
 }
 
@@ -522,9 +527,9 @@ ptcwrite(dev_t dev, struct uio *uio, int flag)
 	struct pt_softc *pti = pt_softc[minor(dev)];
 	struct tty *tp = pti->pt_tty;
 	u_char *cp = NULL;
-	int cc = 0;
-	u_char locbuf[BUFSIZ];
-	int cnt = 0;
+	int cc = 0, bufcc = 0;
+	u_char buf[BUFSIZ];
+	size_t cnt = 0;
 	int error = 0;
 
 again:
@@ -535,15 +540,19 @@ again:
 			goto block;
 		while (uio->uio_resid > 0 && tp->t_canq.c_cc < TTYHOG - 1) {
 			if (cc == 0) {
-				cc = min(uio->uio_resid, BUFSIZ);
+				cc = MIN(uio->uio_resid, BUFSIZ);
 				cc = min(cc, TTYHOG - 1 - tp->t_canq.c_cc);
-				cp = locbuf;
+				if (cc > bufcc)
+					bufcc = cc;
+				cp = buf;
 				error = uiomove(cp, cc, uio);
 				if (error)
-					return (error);
+					goto done;
 				/* check again for safety */
-				if ((tp->t_state&TS_ISOPEN) == 0)
-					return (EIO);
+				if ((tp->t_state&TS_ISOPEN) == 0) {
+					error = EIO;
+					goto done;
+				}
 			}
 			if (cc)
 				(void) b_to_q((char *)cp, cc, &tp->t_canq);
@@ -552,19 +561,24 @@ again:
 		(void) putc(0, &tp->t_canq);
 		ttwakeup(tp);
 		wakeup(&tp->t_canq);
-		return (0);
+		goto done;
 	}
 	while (uio->uio_resid > 0) {
 		if (cc == 0) {
-			cc = min(uio->uio_resid, BUFSIZ);
-			cp = locbuf;
+			cc = MIN(uio->uio_resid, BUFSIZ);
+			if (cc > bufcc)
+				bufcc = cc;
+			cp = buf;
 			error = uiomove(cp, cc, uio);
 			if (error)
-				return (error);
+				goto done;
 			/* check again for safety */
-			if ((tp->t_state&TS_ISOPEN) == 0)
-				return (EIO);
+			if ((tp->t_state&TS_ISOPEN) == 0) {
+				error = EIO;
+				goto done;
+			}
 		}
+		bufcc = cc;
 		while (cc > 0) {
 			if ((tp->t_rawq.c_cc + tp->t_canq.c_cc) >= TTYHOG - 2 &&
 			   (tp->t_canq.c_cc > 0 || !ISSET(tp->t_lflag, ICANON))) {
@@ -577,29 +591,34 @@ again:
 		}
 		cc = 0;
 	}
-	return (0);
+	goto done;
 block:
 	/*
 	 * Come here to wait for slave to open, for space
 	 * in outq, or space in rawq.
 	 */
-	if ((tp->t_state&TS_CARR_ON) == 0)
-		return (EIO);
+	if ((tp->t_state&TS_CARR_ON) == 0) {
+		error = EIO;
+		goto done;
+	}
 	if (flag & IO_NDELAY) {
 		/* adjust for data copied in but not written */
 		uio->uio_resid += cc;
 		if (cnt == 0)
-			return (EWOULDBLOCK);
-		return (0);
+			error = EWOULDBLOCK;
+		goto done;
 	}
 	error = tsleep(&tp->t_rawq.c_cf, TTOPRI | PCATCH,
 	    ttyout, 0);
-	if (error) {
-		/* adjust for data copied in but not written */
-		uio->uio_resid += cc;
-		return (error);
-	}
-	goto again;
+	if (error == 0)
+		goto again;
+
+	/* adjust for data copied in but not written */
+	uio->uio_resid += cc;
+done:
+	if (bufcc)
+		bzero(buf, bufcc);
+	return (error);
 }
 
 int
@@ -790,8 +809,7 @@ ptyioctl(dev_t dev, u_long cmd, caddr_t data, int flag, struct proc *p)
 			tp->t_lflag &= ~EXTPROC;
 		}
 		return(0);
-	} else
-	if (cdevsw[major(dev)].d_open == ptcopen)
+	} else if (cdevsw[major(dev)].d_open == ptcopen)
 		switch (cmd) {
 
 		case TIOCGPGRP:
@@ -855,7 +873,8 @@ ptyioctl(dev_t dev, u_long cmd, caddr_t data, int flag, struct proc *p)
 			break;
 
 		case TIOCSIG:
-			if (*(unsigned int *)data >= NSIG)
+			if (*(unsigned int *)data >= NSIG ||
+			    *(unsigned int *)data == 0)
 				return(EINVAL);
 			if ((tp->t_lflag&NOFLSH) == 0)
 				ttyflush(tp, FREAD|FWRITE);

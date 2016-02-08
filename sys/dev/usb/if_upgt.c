@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_upgt.c,v 1.34 2008/02/16 21:56:43 mglocker Exp $ */
+/*	$OpenBSD: if_upgt.c,v 1.36 2008/07/21 18:43:19 damien Exp $ */
 
 /*
  * Copyright (c) 2007 Marcus Glocker <mglocker@openbsd.org>
@@ -401,7 +401,8 @@ upgt_attach_hook(void *arg)
 	    IEEE80211_C_MONITOR |
 	    IEEE80211_C_SHPREAMBLE |
 	    IEEE80211_C_SHSLOT |
-	    IEEE80211_C_WEP;
+	    IEEE80211_C_WEP |
+	    IEEE80211_C_RSN;
 
 	ic->ic_sup_rates[IEEE80211_MODE_11B] = ieee80211_std_rateset_11b;
 	ic->ic_sup_rates[IEEE80211_MODE_11G] = ieee80211_std_rateset_11g;
@@ -1507,8 +1508,8 @@ upgt_tx_task(void *arg)
 {
 	struct upgt_softc *sc = arg;
 	struct ieee80211com *ic = &sc->sc_ic;
-	struct ifnet *ifp = &ic->ic_if;
 	struct ieee80211_frame *wh;
+	struct ieee80211_key *k;
 	struct upgt_lmac_mem *mem;
 	struct upgt_lmac_tx_desc *txdesc;
 	struct mbuf *m;
@@ -1533,14 +1534,16 @@ upgt_tx_task(void *arg)
 		addr = data_tx->addr + UPGT_MEMSIZE_FRAME_HEAD;
 
 		/*
-		 * Software WEP.
+		 * Software crypto.
 		 */
 		wh = mtod(m, struct ieee80211_frame *);
 
-		if (wh->i_fc[1] & IEEE80211_FC1_WEP) {
-			m = ieee80211_wep_crypt(ifp, m, 1);
-			if (m == NULL)
+		if (wh->i_fc[1] & IEEE80211_FC1_PROTECTED) {
+			k = ieee80211_get_txkey(ic, wh, ic->ic_bss);
+
+			if ((m = ieee80211_encrypt(ic, m, k)) == NULL)
 				return;
+
 			/* in case packet header moved, reset pointer */
 			wh = mtod(m, struct ieee80211_frame *);
 		}
@@ -1768,6 +1771,7 @@ upgt_rx(struct upgt_softc *sc, uint8_t *data, int pkglen)
 	struct ifnet *ifp = &ic->ic_if;
 	struct upgt_lmac_rx_desc *rxdesc;
 	struct ieee80211_frame *wh;
+	struct ieee80211_rxinfo rxi;
 	struct ieee80211_node *ni;
 	struct mbuf *m;
 	int s;
@@ -1814,7 +1818,10 @@ upgt_rx(struct upgt_softc *sc, uint8_t *data, int pkglen)
 	ni = ieee80211_find_rxnode(ic, wh);
 
 	/* push the frame up to the 802.11 stack */
-	ieee80211_input(ifp, m, ni, rxdesc->rssi, 0);
+	rxi.rxi_flags = 0;
+	rxi.rxi_rssi = rxdesc->rssi;
+	rxi.rxi_tstamp = 0;	/* unused */
+	ieee80211_input(ifp, m, ni, &rxi);
 
 	/* node is no longer needed */
 	ieee80211_release_node(ic, ni);

@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.h,v 1.99 2007/11/28 17:05:09 tedu Exp $	*/
+/*	$OpenBSD: cpu.h,v 1.103 2008/07/18 23:43:31 art Exp $	*/
 /*	$NetBSD: cpu.h,v 1.35 1996/05/05 19:29:26 christos Exp $	*/
 
 /*-
@@ -204,7 +204,6 @@ curcpu(void)
 #define CPU_IS_PRIMARY(ci)	((ci)->ci_flags & CPUF_PRIMARY)
 
 extern struct cpu_info	*cpu_info[MAXCPUS];
-extern u_long		 cpus_running;
 
 extern void cpu_boot_secondary_processors(void);
 extern void cpu_init_idle_pcbs(void);
@@ -220,6 +219,8 @@ extern void cpu_init_idle_pcbs(void);
 
 #endif
 
+#define aston(p)	((p)->p_md.md_astpending = 1)
+
 #define curpcb			curcpu()->ci_curpcb
 
 #define want_resched (curcpu()->ci_want_resched)
@@ -229,6 +230,7 @@ extern void cpu_init_idle_pcbs(void);
  * or after the current trap/syscall if in system mode.
  */
 extern void need_resched(struct cpu_info *);
+#define clear_resched(ci) (ci)->ci_want_resched = 0
 
 #define	CLKF_USERMODE(frame)	USERMODE((frame)->if_cs, (frame)->if_eflags)
 #define	CLKF_PC(frame)		((frame)->if_eip)
@@ -238,8 +240,6 @@ extern void need_resched(struct cpu_info *);
  * This is used during profiling to integrate system time.
  */
 #define	PROC_PC(p)		((p)->p_md.md_regs->tf_eip)
-
-void aston(struct proc *);
 
 /*
  * Give a profiling tick to the current process when the user profiling
@@ -252,7 +252,7 @@ void aston(struct proc *);
  * Notify the current process (p) that it has a signal pending,
  * process as soon as possible.
  */
-#define signotify(p)		aston(p)
+void signotify(struct proc *);
 
 /*
  * We need a machine-independent name for this.
@@ -360,7 +360,6 @@ void	cpuid(u_int32_t, u_int32_t *);
 /* locore.s */
 struct region_descriptor;
 void	lgdt(struct region_descriptor *);
-void	fillw(short, void *, size_t);
 
 struct pcb;
 void	savectx(struct pcb *);

@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_etreg.h,v 1.2 2007/11/26 10:39:55 claudio Exp $	*/
+/*	$OpenBSD: if_etreg.h,v 1.4 2008/07/21 04:12:21 kevlo Exp $	*/
 
 /*
  * Copyright (c) 2007 The DragonFly Project.  All rights reserved.
@@ -486,16 +486,13 @@ struct et_softc {
 	struct arpcom		sc_arpcom;
 	int			sc_if_flags;
 
-	int			sc_mem_rid;
-	struct resource		*sc_mem_res;
 	bus_space_tag_t		sc_mem_bt;
 	bus_space_handle_t	sc_mem_bh;
+	bus_size_t		sc_mem_size;
 	bus_dma_tag_t		sc_dmat;
 	pci_chipset_tag_t	sc_pct;
 	pcitag_t		sc_pcitag;
 
-	int			sc_irq_rid;
-	struct resource		*sc_irq_res;
 	void			*sc_irq_handle;
 
 	struct mii_data		sc_miibus;

@@ -1,4 +1,4 @@
-/*	$OpenBSD: est.c,v 1.5 2007/06/07 11:20:58 dim Exp $ */
+/*	$OpenBSD: est.c,v 1.7 2008/08/06 05:24:44 gwk Exp $ */
 /*
  * Copyright (c) 2003 Michael Eriksson.
  * All rights reserved.

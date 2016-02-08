@@ -1,4 +1,4 @@
-.\"	$OpenBSD: ifconfig.8,v 1.153 2008/02/11 07:58:28 jmc Exp $
+.\"	$OpenBSD: ifconfig.8,v 1.164 2008/07/29 18:20:02 damien Exp $
 .\"	$NetBSD: ifconfig.8,v 1.11 1996/01/04 21:27:29 pk Exp $
 .\"     $FreeBSD: ifconfig.8,v 1.16 1998/02/01 07:03:29 steve Exp $
 .\"
@@ -31,7 +31,7 @@
 .\"
 .\"     @(#)ifconfig.8	8.4 (Berkeley) 6/1/94
 .\"
-.Dd $Mdocdate: February 11 2008 $
+.Dd $Mdocdate: July 29 2008 $
 .Dt IFCONFIG 8
 .Os
 .Sh NAME
@@ -183,6 +183,7 @@ At least the following devices can be created on demand:
 .Xr gif 4 ,
 .Xr gre 4 ,
 .Xr lo 4 ,
+.Xr mpe 4 ,
 .Xr pflog 4 ,
 .Xr ppp 4 ,
 .Xr pppoe 4 ,
@@ -247,6 +248,10 @@ interface group.
 .It
 IEEE 802.11 wireless interfaces are members of the
 .Em wlan
+interface group.
+.It
+Any interfaces used for network booting are members of the
+.Em netboot
 interface group.
 .El
 .It Cm -group Ar group-name
@@ -321,12 +326,8 @@ Disable the specified media options on the interface.
 Set the routing metric of the interface to
 .Ar nhops ,
 default 0.
-The routing metric is used by the routing protocol
-(see
-.Xr routed 8 ) .
-Higher metrics have the effect of making a route
-less favorable; metrics are counted as addition hops
-to the destination network or host.
+The routing metric can be used by routing protocols.
+Higher metrics have the effect of making a route less favorable.
 .It Cm mode Ar mode
 If the driver for the interface supports the media selection system,
 set the specified operating mode on the interface to the given
@@ -422,6 +423,8 @@ IEEE 802.11 (wireless devices)
 .It
 interface groups
 .It
+.Xr mpe 4
+.It
 .Xr pfsync 4
 .It
 .Xr pppoe 4
@@ -448,6 +451,7 @@ and
 .Op Cm balancing Ar mode
 .Op Cm carpnodes Ar vhid:advskew,vhid:advskew,...
 .Op Cm carpdev Ar iface
+.Op Oo Fl Oc Cm carppeer Ar peer_address
 .Op Cm pass Ar passphrase
 .Op Cm state Ar state
 .Op Cm vhid Ar host-id
@@ -493,6 +497,26 @@ pseudo-device, attach it to
 .Ar iface .
 If not specified, the kernel will attempt to select an interface with
 a subnet matching that of the carp interface.
+.It Cm carppeer Ar peer_address
+If the driver is a
+.Xr carp 4
+pseudo-device, send the carp advertisements to a specified
+point-to-point peer or multicast group instead of sending the messages
+to the default carp multicast group.
+The
+.Ar peer_address
+is the IP address of the other host taking part in the carp cluster.
+With this option,
+.Xr carp 4
+traffic can be protected using
+.Xr ipsec 4
+and it may be desired in networks that do not allow or have problems
+with IPv4 multicast traffic.
+.It Fl carppeer
+If the driver is a
+.Xr carp 4
+pseudo-device, send the advertisements to the default carp multicast
+group.
 .It Cm pass Ar passphrase
 If the driver is a
 .Xr carp 4
@@ -543,6 +567,13 @@ will begin advertising as master.
 .Op Oo Fl Oc Cm powersave
 .Op Cm powersavesleep Ar duration
 .Op Oo Fl Oc Cm txpower Ar dBm
+.Op Oo Fl Oc Cm wmm
+.Op Oo Fl Oc Cm wpa
+.Op Cm wpaakms Ar akm,akm,...
+.Op Cm wpaciphers Ar cipher,cipher,...
+.Op Cm wpagroupcipher Ar cipher
+.Op Cm wpaprotos Ar proto,proto,...
+.Op Oo Fl Oc Cm wpapsk Ar psk
 .Ek
 .Pp
 The options are as follows:
@@ -631,10 +662,8 @@ If a set of keys is specified, a comma
 within the key must be escaped with a backslash.
 Note that if multiple keys are used, their order must be the same within
 the network.
-For IEEE 802.11 wireless networks, the length of each key is restricted to
-40 bits, i.e. a 5-character string or 10 hexadecimal digits.
-WaveLAN/IEEE Gold and newer Prism cards will also accept a 104-bit
-(13-character) key.
+The length of each key must be either 40 bits, i.e. a 5-character string or
+10 hexadecimal digits or 104 bits (13-character).
 .It Fl nwkey
 Disable WEP encryption for IEEE 802.11-based wireless network interfaces.
 .It Cm nwkey Cm persist
@@ -660,6 +689,131 @@ mode.
 .It Fl txpower
 Disable manual transmit power mode and enable any auto level and transmit
 power controls.
+.It Cm wmm
+Enable Wi-Fi Multimedia (WMM).
+WMM is a Wi-Fi Alliance protocol based on the IEEE 802.11e standard and
+provides basic Quality of Service (QoS) features to Wi-Fi networks.
+For a station, this option enables the use of QoS if the access point
+supports it but it does not prevent the association to an access point
+not supporting QoS.
+In Host AP mode, this option allows QoS stations to negotiate QoS during
+association.
+Notice that not all drivers support QoS.
+Check the driver's manual page to know if this option is supported.
+QoS priorities can be defined using VLANs (see the
+.Cm vlanprio
+option).
+Otherwise, the IEEE 802.11 layer will automatically assign priorities to
+frames based on the Differentiated Services Codepoint field of IP packets.
+.It Fl wmm
+Disable Wi-Fi Multimedia.
+.It Cm wpa
+Enable Wi-Fi Protected Access.
+WPA is a Wi-Fi Alliance protocol based on the IEEE 802.11i standard.
+It was designed to enhance the security of wireless networks.
+Notice that not all drivers support WPA.
+Check the driver's manual page to know if this option is supported.
+.It Fl wpa
+Disable Wi-Fi Protected Access.
+.It Cm wpaakms Ar akm,akm,...
+Set the comma-separated list of allowed authentication and key management
+protocols.
+.Pp
+The supported values are
+.Dq psk
+and
+.Dq 802.1x .
+.Ar psk
+authentication (also known as personal mode) uses a 256-bit pre-shared key.
+.Ar 802.1x
+authentication (also known as enterprise mode) is meant to be used with
+an external IEEE 802.1X authentication server.
+The default value is
+.Dq psk,802.1x .
+.Dq psk
+can only be used if a pre-shared key is configured using the
+.Cm wpapsk
+option.
+.It Cm wpaciphers Ar cipher,cipher,...
+Set the comma-separated list of allowed pairwise ciphers.
+.Pp
+The supported values are
+.Dq tkip ,
+.Dq ccmp ,
+and
+.Dq usegroup .
+.Ar usegroup
+specifies that no pairwise ciphers are supported and that only group keys
+should be used.
+The default value is
+.Dq tkip,ccmp .
+If multiple pairwise ciphers are specified, the pairwise cipher will
+be negotiated between the station and the access point at association
+time.
+A station will always try to use
+.Ar ccmp
+over
+.Ar tkip
+if both ciphers are allowed and supported by the access point.
+If the selected cipher is not supported by the hardware, software
+encryption will be used.
+Check the driver's manual page to know which ciphers are supported in
+hardware.
+.It Cm wpagroupcipher Ar cipher
+Set the group cipher to be used to encrypt broadcast and multicast traffic.
+.Pp
+The supported values are
+.Dq wep40 ,
+.Dq wep104 ,
+.Dq tkip ,
+and
+.Dq ccmp .
+The default value is
+.Dq tkip .
+The use of
+.Ar wep40
+or
+.Ar wep104
+as the group cipher is discouraged due to weaknesses in WEP.
+The
+.Cm wpagroupcipher
+option is available in Host AP mode only.
+A station will always use the group cipher of the BSS.
+.It Cm wpaprotos Ar proto,proto,...
+Set the comma-separated list of allowed WPA protocol versions.
+.Pp
+The supported values are
+.Dq wpa1
+and
+.Dq wpa2 .
+.Ar wpa1
+is based on draft 3 of the IEEE 802.11i standard whereas
+.Ar wpa2
+is based on the ratified standard.
+The default value is
+.Dq wpa1,wpa2 .
+If
+.Dq wpa1,wpa2
+is specified, a station will always use the
+.Ar wpa2
+protocol when supported by the access point.
+.It Cm wpapsk Ar psk
+Set the 256-bit pre-shared key.
+The pre-shared key must be specified using a series of 64 hexadecimal digits
+(preceded by
+.So 0x Sc ) .
+The pre-shared key will be used only if
+.Dq psk
+authentication is allowed using the
+.Cm wpaakms
+option.
+Pre-shared keys can be generated from passphrases using
+.Xr wpa-psk 8 .
+.It Fl wpapsk
+Delete the pre-shared key.
+This will prevent
+.Dq psk
+authentication.
 .El
 .\" INET6
 .Sh INET6
@@ -722,6 +876,22 @@ demote count for given interface group by
 If
 .Ar number
 is omitted, it is decreased by 1.
+.El
+.\" MPE
+.Sh MPE
+.Nm ifconfig
+.Ar mpe-interface
+.Op Cm mplslabel Ar mpls-label
+.Pp
+The options are as follows:
+.Bl -tag -width Ds
+.It Cm mplslabel Ar mpls-label
+If the interface is a
+.Xr mpe 4
+pseudo-interface, set the MPLS label to
+.Ar mpls-label .
+This value is a 20-bit number which will be used as the MPLS header for
+packets entering the MPLS domain.
 .El
 .\" PFSYNC
 .Sh PFSYNC

@@ -1,4 +1,4 @@
-/*	$OpenBSD: locore.S,v 1.25 2007/11/03 20:58:30 gwk Exp $	*/
+/*	$OpenBSD: locore.S,v 1.27 2008/07/28 19:08:46 miod Exp $	*/
 /*	$NetBSD: locore.S,v 1.13 2004/03/25 18:33:17 drochner Exp $	*/
 
 /*
@@ -56,13 +56,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -759,11 +752,9 @@ ENTRY(cpu_switchto)
 	movq	%rdi, %r13
 	movq	%rsi, %r12
 
-	xorq	%rax,%rax
-	movl	%eax,CPUVAR(RESCHED)
-
 switch_resume:
 #ifdef DIAGNOSTIC
+	xorq	%rax,%rax
 	cmpq	%rax,P_WCHAN(%r12)
 	jne	_C_LABEL(switch_error2)
 	cmpb	$SRUN,P_STAT(%r12)

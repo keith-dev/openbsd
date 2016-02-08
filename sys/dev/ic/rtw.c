@@ -1,4 +1,4 @@
-/*	$OpenBSD: rtw.c,v 1.65 2007/11/21 15:58:22 blambert Exp $	*/
+/*	$OpenBSD: rtw.c,v 1.67 2008/07/21 18:43:19 damien Exp $	*/
 /*	$NetBSD: rtw.c,v 1.29 2004/12/27 19:49:16 dyoung Exp $ */
 
 /*-
@@ -106,7 +106,7 @@ void	 rtw_start(struct ifnet *);
 void	 rtw_watchdog(struct ifnet *);
 void	 rtw_next_scan(void *);
 void	 rtw_recv_mgmt(struct ieee80211com *, struct mbuf *,
-	    struct ieee80211_node *, int, int, u_int32_t);
+	    struct ieee80211_node *, struct ieee80211_rxinfo *, int);
 struct ieee80211_node *rtw_node_alloc(struct ieee80211com *);
 void	 rtw_node_free(struct ieee80211com *, struct ieee80211_node *);
 void	 rtw_media_status(struct ifnet *, struct ifmediareq *);
@@ -1090,7 +1090,7 @@ rtw_intr_rx(struct rtw_softc *sc, u_int16_t isr)
 	struct rtw_rxsoft *rs;
 	struct rtw_rxdesc_blk *rdb;
 	struct mbuf *m;
-
+	struct ieee80211_rxinfo rxi;
 	struct ieee80211_node *ni;
 	struct ieee80211_frame *wh;
 
@@ -1289,7 +1289,10 @@ rtw_intr_rx(struct rtw_softc *sc, u_int16_t isr)
 		}
 #endif /* NBPFILTER > 0 */
 
-		ieee80211_input(&sc->sc_if, m, ni, rssi, htsftl);
+		rxi.rxi_flags = 0;
+		rxi.rxi_rssi = rssi;
+		rxi.rxi_tstamp = htsftl;
+		ieee80211_input(&sc->sc_if, m, ni, &rxi);
 		ieee80211_release_node(&sc->sc_ic, ni);
 next:
 		rtw_rxdesc_init(rdb, rs, next, 0);
@@ -2718,18 +2721,22 @@ rtw_dequeue(struct ifnet *ifp, struct rtw_txsoft_blk **tsbp,
     struct rtw_txdesc_blk **tdbp, struct mbuf **mp,
     struct ieee80211_node **nip)
 {
+	struct ieee80211com *ic;
+	struct ieee80211_frame *wh;
+	struct ieee80211_key *k;
 	struct mbuf *m0;
 	struct rtw_softc *sc;
 	short *if_flagsp;
 
 	sc = (struct rtw_softc *)ifp->if_softc;
+	ic = &sc->sc_ic;
 
 	DPRINTF(sc, RTW_DEBUG_XMIT,
 	    ("%s: enter %s\n", sc->sc_dev.dv_xname, __func__));
 
 	if_flagsp = &ifp->if_flags;
 
-	if (sc->sc_ic.ic_state == IEEE80211_S_RUN &&
+	if (ic->ic_state == IEEE80211_S_RUN &&
 	    (*mp = rtw_80211_dequeue(sc, &sc->sc_beaconq, RTW_TXPRIBCN, tsbp,
 	    tdbp, nip, if_flagsp)) != NULL) {
 		DPRINTF(sc, RTW_DEBUG_XMIT, ("%s: dequeue beacon frame\n",
@@ -2737,7 +2744,7 @@ rtw_dequeue(struct ifnet *ifp, struct rtw_txsoft_blk **tsbp,
 		return 0;
 	}
 
-	if ((*mp = rtw_80211_dequeue(sc, &sc->sc_ic.ic_mgtq, RTW_TXPRIMD, tsbp,
+	if ((*mp = rtw_80211_dequeue(sc, &ic->ic_mgtq, RTW_TXPRIMD, tsbp,
 	    tdbp, nip, if_flagsp)) != NULL) {
 		DPRINTF(sc, RTW_DEBUG_XMIT, ("%s: dequeue mgt frame\n",
 		    __func__));
@@ -2749,14 +2756,14 @@ rtw_dequeue(struct ifnet *ifp, struct rtw_txsoft_blk **tsbp,
 		return 0;
 	}
 
-	if ((*mp = rtw_80211_dequeue(sc, &sc->sc_ic.ic_pwrsaveq, RTW_TXPRIHI,
+	if ((*mp = rtw_80211_dequeue(sc, &ic->ic_pwrsaveq, RTW_TXPRIHI,
 	    tsbp, tdbp, nip, if_flagsp)) != NULL) {
 		DPRINTF(sc, RTW_DEBUG_XMIT, ("%s: dequeue pwrsave frame\n",
 		    __func__));
 		return 0;
 	}
 
-	if (sc->sc_ic.ic_state != IEEE80211_S_RUN) {
+	if (ic->ic_state != IEEE80211_S_RUN) {
 		DPRINTF(sc, RTW_DEBUG_XMIT, ("%s: not running\n", __func__));
 		return 0;
 	}
@@ -2797,8 +2804,10 @@ rtw_dequeue(struct ifnet *ifp, struct rtw_txsoft_blk **tsbp,
 	}
 
 	/* XXX should do WEP in hardware */
-	if (sc->sc_ic.ic_flags & IEEE80211_F_WEPON) {
-		if ((m0 = ieee80211_wep_crypt(ifp, m0, 1)) == NULL)
+	if (ic->ic_flags & IEEE80211_F_WEPON) {
+		wh = mtod(m0, struct ieee80211_frame *);
+		k = ieee80211_get_txkey(ic, wh, *nip);
+		if ((m0 = ieee80211_encrypt(ic, m0, k)) == NULL)
 			return -1;
 	}
 
@@ -3505,11 +3514,11 @@ rtw_ibss_merge(struct rtw_softc *sc, struct ieee80211_node *ni,
 
 void
 rtw_recv_mgmt(struct ieee80211com *ic, struct mbuf *m,
-    struct ieee80211_node *ni, int subtype, int rssi, u_int32_t rstamp)
+    struct ieee80211_node *ni, struct ieee80211_rxinfo *rxi, int subtype)
 {
 	struct rtw_softc *sc = (struct rtw_softc*)ic->ic_softc;
 
-	(*sc->sc_mtbl.mt_recv_mgmt)(ic, m, ni, subtype, rssi, rstamp);
+	(*sc->sc_mtbl.mt_recv_mgmt)(ic, m, ni, rxi, subtype);
 
 	switch (subtype) {
 	case IEEE80211_FC0_SUBTYPE_PROBE_RESP:
@@ -3517,7 +3526,7 @@ rtw_recv_mgmt(struct ieee80211com *ic, struct mbuf *m,
 		if (ic->ic_opmode != IEEE80211_M_IBSS ||
 		    ic->ic_state != IEEE80211_S_RUN)
 			return;
-		rtw_ibss_merge(sc, ni, rstamp);
+		rtw_ibss_merge(sc, ni, rxi->rxi_tstamp);
 		break;
 	default:
 		break;

@@ -1,4 +1,4 @@
-/*	$OpenBSD: mkmakefile.c,v 1.27 2007/11/27 14:56:31 chl Exp $	*/
+/*	$OpenBSD: mkmakefile.c,v 1.30 2008/04/19 14:22:04 chl Exp $	*/
 /*	$NetBSD: mkmakefile.c,v 1.34 1997/02/02 21:12:36 thorpej Exp $	*/
 
 /*
@@ -444,35 +444,14 @@ emitfiles(FILE *fp, int suffix)
  * Emit the make-rules.
  */
 static int
-emitrules1(FILE *fp, const char *suffix, const char *rule_prefix, int ruleindex)
+emit_1rule(FILE *fp, struct files *fi, const char *fpath, const char *suffix,
+    int ruleindex)
 {
-	struct files *fi;
-	const char *cp, *fpath;
-	int ch;
-	char buf[200];
-
-	for (fi = allfiles; fi != NULL; fi = fi->fi_next) {
-		if ((fi->fi_flags & FI_SEL) == 0)
-			continue;
-		if ((fpath = srcpath(fi)) == NULL)
-			return (1);
-		if (fprintf(fp, "%s%s: %s%s\n", fi->fi_base, suffix,
-		    *fpath != '/' ? "$S/" : "", fpath) < 0)
-			return (1);
-		if ((cp = fi->fi_mkrule[ruleindex]) == NULL) {
-			cp = rule_prefix;
-			if (fpath[0] == '\0') {
-				errno = ENOENT;
-				return (1);
-			}
-			ch = fpath[strlen(fpath) - 1];
-			if (islower(ch))
-				ch = toupper(ch);
-			(void)snprintf(buf, sizeof buf, "${%s_%c}",
-			    cp, ch);
-			cp = buf;
-		}
-		if (fprintf(fp, "\t%s\n\n", cp) < 0)
+	if (fprintf(fp, "%s%s: %s%s\n", fi->fi_base, suffix,
+	    *fpath != '/' ? "$S/" : "", fpath) < 0)
+		return (1);
+	if (fi->fi_mkrule[ruleindex] != NULL) {
+		if (fprintf(fp, "\t%s\n\n", fi->fi_mkrule[ruleindex]) < 0)
 			return (1);
 	}
 	return (0);
@@ -481,7 +460,54 @@ emitrules1(FILE *fp, const char *suffix, const char *rule_prefix, int ruleindex)
 static int
 emitrules(FILE *fp)
 {
-	return emitrules1(fp, ".o", "NORMAL", 0) || emitrules1(fp, ".ln", "LINT", 1);
+	struct files *fi;
+	const char *fpath;
+
+	/* write suffixes */
+	if (fprintf(fp,
+	    ".SUFFIXES:\n"
+	    ".SUFFIXES: .s .S .c .o .ln\n\n"
+
+	    ".c.o:\n"
+	    "\t${NORMAL_C}\n\n"
+
+	    ".c.ln:\n"
+	    "\t${LINT_C}\n\n"
+
+	    ".s.o:\n"
+	    "\t${NORMAL_S}\n\n"
+
+	    ".s.ln:\n"
+	    "\t${LINT_S}\n\n"
+
+	    ".S.o:\n"
+	    "\t${NORMAL_S}\n\n"
+
+	    ".S.ln:\n"
+	    "\t${LINT_S}\n\n") < 0)
+		return (1);
+
+
+	for (fi = allfiles; fi != NULL; fi = fi->fi_next) {
+		if ((fi->fi_flags & FI_SEL) == 0)
+			continue;
+		if ((fpath = srcpath(fi)) == NULL)
+			return (1);
+		/* special rule: need to emit them independently */
+		if (fi->fi_mkrule[0] || fi->fi_mkrule[1]) {
+			if (emit_1rule(fp, fi, fpath, ".o", 0) ||
+			    emit_1rule(fp, fi, fpath, ".ln", 1))
+				return (1);
+		/* simple default rule */
+		} else {
+			if (fprintf(fp, "%s.o %s.ln: %s%s\n", fi->fi_base,
+			    fi->fi_base,
+			    *fpath != '/' ? "$S/" : "", fpath) < 0)
+				return (1);
+		}
+
+	}
+	return (0);
 }
 
 /*

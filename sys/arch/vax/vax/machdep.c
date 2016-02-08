@@ -1,4 +1,4 @@
-/* $OpenBSD: machdep.c,v 1.94 2008/02/16 22:59:34 miod Exp $ */
+/* $OpenBSD: machdep.c,v 1.96 2008/06/27 17:22:15 miod Exp $ */
 /* $NetBSD: machdep.c,v 1.108 2000/09/13 15:00:23 thorpej Exp $	 */
 
 /*
@@ -75,6 +75,7 @@
 #include <dev/cons.h>
 
 #include <uvm/uvm_extern.h>
+#include <uvm/uvm_swap.h>
 
 #ifdef SYSVMSG
 #include <sys/msg.h>
@@ -530,6 +531,8 @@ boot(howto)
 		 */
 		resettodr();
 	}
+
+	uvm_shutdown();
 	splhigh();		/* extreme priority */
 
 	/* If rebooting and a dump is requested, do it. */
@@ -633,6 +636,10 @@ dumpsys()
 
 	printf("\ndumping to dev %u,%u offset %ld\n", major(dumpdev),
 	    minor(dumpdev), dumplo);
+
+#ifdef UVM_SWAP_ENCRYPT
+	uvm_swap_finicrypt_all();
+#endif
 
 	/* Setup the dump header */
 	kseg_p = (kcore_seg_t *)dump_hdr;

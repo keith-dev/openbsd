@@ -1,4 +1,4 @@
-/*	$OpenBSD: evdns.h,v 1.1 2007/03/19 15:12:49 millert Exp $	*/
+/*	$OpenBSD: evdns.h,v 1.3 2008/05/02 15:55:58 brad Exp $	*/
 
 /*
  * Copyright (c) 2006 Niels Provos <provos@citi.umich.edu>
@@ -315,10 +315,6 @@ void evdns_set_log_fn(evdns_debug_log_fn_type fn);
 
 #define DNS_NO_SEARCH 1
 
-#ifdef __cplusplus
-}
-#endif
-
 /*
  * Structures and functions used to implement a DNS server.
  */
@@ -363,5 +359,11 @@ int evdns_server_request_add_cname_reply(struct evdns_server_request *req, const
 
 int evdns_server_request_respond(struct evdns_server_request *req, int err);
 int evdns_server_request_drop(struct evdns_server_request *req);
+struct sockaddr;
+int evdns_server_request_get_requesting_addr(struct evdns_server_request *_req, struct sockaddr *sa, int addr_len);
 
-#endif  // !EVENTDNS_H
+#ifdef __cplusplus
+}
+#endif
+
+#endif  /* !EVENTDNS_H */

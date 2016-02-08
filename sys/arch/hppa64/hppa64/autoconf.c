@@ -1,4 +1,4 @@
-/*	$OpenBSD: autoconf.c,v 1.9 2007/06/01 19:25:09 deraadt Exp $	*/
+/*	$OpenBSD: autoconf.c,v 1.11 2008/07/21 04:35:54 todd Exp $	*/
 
 /*
  * Copyright (c) 1998-2005 Michael Shalayeff
@@ -67,6 +67,7 @@
 #endif
 
 void	dumpconf(void);
+void	print_devpath(const char *, struct pz_device *);
 
 void (*cold_hook)(int); /* see below */
 
@@ -540,5 +541,6 @@ struct nam2blk nam2blk[] = {
 	{ "wd",		? },
 	{ "fd",		7 },
 #endif
+	{ "vnd",	2 },
 	{ NULL,		-1 }
 };

@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_tht.c,v 1.112 2008/02/02 20:34:42 brad Exp $ */
+/*	$OpenBSD: if_tht.c,v 1.117 2008/05/13 00:52:12 brad Exp $ */
 
 /*
  * Copyright (c) 2007 David Gwynne <dlg@openbsd.org>
@@ -37,6 +37,7 @@
 #include <sys/proc.h>
 #include <sys/queue.h>
 #include <sys/rwlock.h>
+#include <sys/time.h>
 
 #include <machine/bus.h>
 
@@ -296,6 +297,7 @@ struct tht_rx_free {
 #define THT_RXF_SGL_LEN		((THT_FIFO_DESC_LEN - \
 				    sizeof(struct tht_rx_free)) / \
 				    sizeof(struct tht_pbd))
+#define THT_RXF_PKT_NUM		128
 
 /* rx descriptor */
 struct tht_rx_desc {
@@ -377,6 +379,7 @@ struct tht_tx_task {
 #define THT_TXT_SGL_LEN		((THT_FIFO_DESC_LEN - \
 				    sizeof(struct tht_tx_task)) / \
 				    sizeof(struct tht_pbd))
+#define THT_TXT_PKT_NUM		128
 
 /* tx free fifo */
 struct tht_tx_free {
@@ -482,6 +485,7 @@ struct tht_softc {
 
 	struct arpcom		sc_ac;
 	struct ifmedia		sc_media;
+	struct timeval		sc_mediacheck;
 
 	u_int16_t		sc_lladdr[3];
 
@@ -941,9 +945,11 @@ tht_up(struct tht_softc *sc)
 		return;
 	}
 
-	if (tht_pkt_alloc(sc, &sc->sc_tx_list, 128, THT_TXT_SGL_LEN) != 0)
+	if (tht_pkt_alloc(sc, &sc->sc_tx_list, THT_TXT_PKT_NUM,
+	    THT_TXT_SGL_LEN) != 0)
 		return;
-	if (tht_pkt_alloc(sc, &sc->sc_rx_list, 128, THT_RXF_SGL_LEN) != 0)
+	if (tht_pkt_alloc(sc, &sc->sc_rx_list, THT_RXF_PKT_NUM,
+	    THT_RXF_SGL_LEN) != 0)
 		goto free_tx_list;
 
 	if (tht_fifo_alloc(sc, &sc->sc_txt, &tht_txt_desc) != 0)
@@ -1730,7 +1736,7 @@ tht_fw_load(struct tht_softc *sc)
 		buf += wrlen;
 	}
 
-	timeout_set(&ticker, tht_fw_tick, &ticker);
+	timeout_set(&ticker, tht_fw_tick, (void *)&ok);
 	timeout_add(&ticker, 2*hz);
 	while (ok) {
 		if (tht_read(sc, THT_REG_INIT_STATUS) != 0) {
@@ -1761,18 +1767,22 @@ tht_fw_tick(void *arg)
 void
 tht_link_state(struct tht_softc *sc)
 {
+	static const struct timeval	interval = { 0, 10000 };
 	struct ifnet			*ifp = &sc->sc_ac.ac_if;
 	int				link_state = LINK_STATE_DOWN;
 
+	if (!ratecheck(&sc->sc_mediacheck, &interval))
+		return;
+
 	if (tht_read(sc, THT_REG_MAC_LNK_STAT) & THT_REG_MAC_LNK_STAT_LINK)
-		link_state = LINK_STATE_UP;
+		link_state = LINK_STATE_FULL_DUPLEX;
 
 	if (ifp->if_link_state != link_state) {
 		ifp->if_link_state = link_state;
 		if_link_state_change(ifp);
 	}
 
-	if (ifp->if_link_state == LINK_STATE_UP)
+	if (LINK_STATE_IS_UP(ifp->if_link_state))
 		ifp->if_baudrate = IF_Gbps(10);
 	else
 		ifp->if_baudrate = 0;

@@ -1,4 +1,4 @@
-/*	$OpenBSD: pcidump.c,v 1.12 2008/03/02 17:59:10 kettenis Exp $	*/
+/*	$OpenBSD: pcidump.c,v 1.15 2008/07/23 15:39:52 kettenis Exp $	*/
 
 /*
  * Copyright (c) 2006, 2007 David Gwynne <loki@animata.net>
@@ -39,6 +39,7 @@ void hexdump(int, int, int, int);
 const char *str2busdevfunc(const char *, int *, int *, int *);
 int pci_nfuncs(int, int);
 int pci_read(int, int, int, u_int32_t, u_int32_t *);
+void dump_caplist(int, int, int, u_int8_t);
 
 __dead void
 usage(void)
@@ -53,6 +54,28 @@ usage(void)
 int pcifd;
 int verbose = 0;
 int hex = 0;
+
+const char *pci_capnames[] = {
+	"Reserved",
+	"Power Management",
+	"AGP",
+	"Vital Product Data (VPD)",
+	"Slot Identification",
+	"Message Signaled Interrupts (MSI)",
+	"CompactPCI Hot Swap",
+	"PCI-X",
+	"AMD LDT/HT",
+	"Vendor Specific",
+	"Debug Port",
+	"CompactPCI Central Resource Control",
+	"PCI Hot-Plug",
+	"PCI-PCI",
+	"AGP8",
+	"Secure",
+	"PCI Express",
+	"Extended Message Signaled Interrupts (MSI-X)"
+};
+#define PCI_CAPNAMES_MAX	PCI_CAP_MSIX
 
 int
 main(int argc, char *argv[])
@@ -190,21 +213,92 @@ probe(int bus, int dev, int func)
 }
 
 void
+dump_caplist(int bus, int dev, int func, u_int8_t ptr)
+{
+	u_int32_t reg;
+	u_int8_t cap;
+
+	if (pci_read(bus, dev, func, PCI_COMMAND_STATUS_REG, &reg) != 0)
+		return;
+	if (!(reg & PCI_STATUS_CAPLIST_SUPPORT))
+		return;
+
+	if (pci_read(bus, dev, func, ptr, &reg) != 0)
+		return;
+	ptr = PCI_CAPLIST_PTR(reg);
+	while (ptr != 0) {
+		if (pci_read(bus, dev, func, ptr, &reg) != 0)
+			return;
+		cap = PCI_CAPLIST_CAP(reg);
+		printf("\t0x%04x: Capability 0x%02x: ", ptr, cap);
+		if (cap > PCI_CAPNAMES_MAX)
+			cap = 0;
+		printf("%s\n", pci_capnames[cap]);
+		ptr = PCI_CAPLIST_NEXT(reg);
+	}
+}
+
+void
 dump_type0(int bus, int dev, int func)
 {
+	const char *memtype;
+	u_int64_t mem;
 	u_int32_t reg;
 	int bar;
 
 	for (bar = PCI_MAPREG_START; bar < PCI_MAPREG_END; bar += 0x4) {
 		if (pci_read(bus, dev, func, bar, &reg) != 0)
 			warn("unable to read PCI_MAPREG 0x%02x", bar);
-		printf("\t0x%04x: %08x\n", bar, reg);
+
+		printf("\t0x%04x: BAR ", bar);
+
+		if (reg == 0x0) {
+			printf("empty (%08x)\n", reg);
+			continue;
+		}
+
+		switch (PCI_MAPREG_TYPE(reg)) {
+		case PCI_MAPREG_TYPE_MEM:
+			printf("mem ");
+			if (PCI_MAPREG_MEM_PREFETCHABLE(reg))
+				printf("prefetchable ");
+
+			memtype = "32bit 1m";
+			switch (PCI_MAPREG_MEM_TYPE(reg)) {
+			case PCI_MAPREG_MEM_TYPE_32BIT:
+				memtype = "32bit";
+			case PCI_MAPREG_MEM_TYPE_32BIT_1M:
+				printf("%s ", memtype);
+
+				printf("addr: 0x%08x\n",
+				    PCI_MAPREG_MEM_ADDR(reg));
+
+				break;
+			case PCI_MAPREG_MEM_TYPE_64BIT:
+				mem = reg;
+				bar += 0x04;
+				if (pci_read(bus, dev, func, bar, &reg) != 0)
+					warn("unable to read 0x%02x", bar);
+
+				mem |= (u_int64_t)reg << 32;
+
+				printf("64bit addr: 0x%016llx\n",
+				    PCI_MAPREG_MEM64_ADDR(mem));
+
+				break;
+			}
+			break;
+
+		case PCI_MAPREG_TYPE_IO:
+			printf("io addr: 0x%08x\n",
+			    PCI_MAPREG_IO_ADDR(reg));
+			break;
+		}
 	}
 
 	if (pci_read(bus, dev, func, PCI_CARDBUS_CIS_REG, &reg) != 0)
 		warn("unable to read PCI_CARDBUS_CIS_REG");
 	printf("\t0x%04x: Cardbus CIS: %08x\n", PCI_CARDBUS_CIS_REG, reg);
-
 
 	if (pci_read(bus, dev, func, PCI_SUBSYS_ID_REG, &reg) != 0)
 		warn("unable to read PCI_SUBSYS_ID_REG");
@@ -215,11 +309,6 @@ dump_type0(int bus, int dev, int func)
 		warn("unable to read PCI_ROM_REG");
 	printf("\t0x%04x: Expansion ROM Base Address: %08x\n",
 	    PCI_ROM_REG, reg);
-
-	if (pci_read(bus, dev, func, PCI_CAPLISTPTR_REG, &reg) != 0)
-		warn("unable to read PCI_CAPLISTPTR_REG");
-	printf("\t0x%04x: Capabilities Pointer: %02x\n",
-	    PCI_CAPLISTPTR_REG, PCI_CAPLIST_PTR(reg));
 
 	if (pci_read(bus, dev, func, 0x38, &reg) != 0)
 		warn("unable to read 0x38 (reserved)");
@@ -290,11 +379,6 @@ dump_type1(int bus, int dev, int func)
 	    "I/O Limit Upper 16 Bits: %04x\n", PCI_IOBASEH_1,
 	    (reg >> 0) & 0xffff, (reg >> 16) & 0xffff);
 
-	if (pci_read(bus, dev, func, PCI_CAPLISTPTR_REG, &reg) != 0)
-		warn("unable to read PCI_CAPLISTPTR_REG");
-	printf("\t0x%04x: Capabilities Pointer: %02x\n",
-	    PCI_CAPLISTPTR_REG, PCI_CAPLIST_PTR(reg));
-
 #define PCI_PPB_ROM_REG		0x38
 	if (pci_read(bus, dev, func, PCI_PPB_ROM_REG, &reg) != 0)
 		warn("unable to read PCI_PPB_ROM_REG");
@@ -318,11 +402,6 @@ dump_type2(int bus, int dev, int func)
 		warn("unable to read PCI_MAPREG\n");
 	printf("\t0x%04x: Cardbus Control Registers Base Address: %08x\n",
 	    PCI_MAPREG_START, reg);
-
-	if (pci_read(bus, dev, func, PCI_CARDBUS_CAPLISTPTR_REG, &reg) != 0)
-		warn("unable to read PCI_CARDBUS_CAPLISTPTR_REG");
-	printf("\t0x%04x: Capabilities Pointer: %02x Cardbus Status: %04x\n",
-	    PCI_CARDBUS_CAPLISTPTR_REG, PCI_CAPLIST_PTR(reg), reg >> 16);
 
 	if (pci_read(bus, dev, func, PCI_PRIBUS_2, &reg) != 0)
 		warn("unable to read PCI_PRIBUS_2");
@@ -385,6 +464,7 @@ void
 dump(int bus, int dev, int func)
 {
 	u_int32_t reg;
+	u_int8_t capptr = PCI_CAPLISTPTR_REG;
 
 	if (pci_read(bus, dev, func, PCI_ID_REG, &reg) != 0)
 		warn("unable to read PCI_ID_REG");
@@ -411,6 +491,7 @@ dump(int bus, int dev, int func)
 	switch (PCI_HDRTYPE_TYPE(reg)) {
 	case 2:
 		dump_type2(bus, dev, func);
+		capptr = PCI_CARDBUS_CAPLISTPTR_REG;
 		break;
 	case 1:
 		dump_type1(bus, dev, func);
@@ -421,7 +502,7 @@ dump(int bus, int dev, int func)
 	default:
 		break;
 	}
-
+	dump_caplist(bus, dev, func, capptr);
 }
 
 void

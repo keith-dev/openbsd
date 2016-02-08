@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.c,v 1.33 2007/12/21 12:15:36 kettenis Exp $	*/
+/*	$OpenBSD: cpu.c,v 1.45 2008/07/21 13:30:05 art Exp $	*/
 /*	$NetBSD: cpu.c,v 1.13 2001/05/26 21:27:15 chs Exp $ */
 
 /*
@@ -62,11 +62,14 @@
 #include <machine/cpu.h>
 #include <machine/reg.h>
 #include <machine/trap.h>
+#include <machine/hypervisor.h>
 #include <machine/openfirm.h>
 #include <machine/pmap.h>
 #include <machine/sparc64.h>
 
 #include <sparc64/sparc64/cache.h>
+
+#include <sparc64/dev/starfire.h>
 
 /* This is declared here so that you must include a CPU for the cache code. */
 struct cacheinfo cacheinfo = {
@@ -76,29 +79,28 @@ struct cacheinfo cacheinfo = {
 /* Linked list of all CPUs in system. */
 struct cpu_info *cpus = NULL;
 
-struct cpu_info *alloc_cpuinfo(int);
+struct cpu_info *alloc_cpuinfo(struct mainbus_attach_args *);
 
 /* The following are used externally (sysctl_hw). */
 char	machine[] = MACHINE;		/* from <machine/param.h> */
 char	cpu_model[100];
 
-void cpu_hatch(void);
-
 /* The CPU configuration driver. */
-static void cpu_attach(struct device *, struct device *, void *);
-int  cpu_match(struct device *, void *, void *);
+int cpu_match(struct device *, void *, void *);
+void cpu_attach(struct device *, struct device *, void *);
 
 struct cfattach cpu_ca = {
 	sizeof(struct device), cpu_match, cpu_attach
 };
 
-extern struct cfdriver cpu_cd;
+void cpu_init(struct cpu_info *ci);
+void cpu_hatch(void);
 
 #define	IU_IMPL(v)	((((u_int64_t)(v))&VER_IMPL) >> VER_IMPL_SHIFT)
 #define	IU_VERS(v)	((((u_int64_t)(v))&VER_MASK) >> VER_MASK_SHIFT)
 
 struct cpu_info *
-alloc_cpuinfo(int node)
+alloc_cpuinfo(struct mainbus_attach_args *ma)
 {
 	paddr_t pa0, pa;
 	vaddr_t va, va0;
@@ -107,9 +109,13 @@ alloc_cpuinfo(int node)
 	struct cpu_info *cpi, *ci;
 	extern paddr_t cpu0paddr;
 
-	portid = getpropint(node, "portid", -1);
+	portid = getpropint(ma->ma_node, "upa-portid", -1);
 	if (portid == -1)
-		portid = getpropint(node, "upa-portid", -1);
+		portid = getpropint(ma->ma_node, "portid", -1);
+	if (portid == -1)
+		portid = getpropint(ma->ma_node, "cpuid", -1);
+	if (portid == -1 && ma->ma_nreg > 0)
+		portid = (ma->ma_reg[0].ur_paddr >> 32) & 0x0fffffff;
 	if (portid == -1)
 		panic("alloc_cpuinfo: portid");
 
@@ -151,10 +157,13 @@ alloc_cpuinfo(int node)
 	cpi->ci_spinup = NULL;
 #endif
 
-	cpi->ci_initstack = (void *)EINTSTACK;
+	cpi->ci_initstack = cpi;
 	cpi->ci_paddr = pa0;
+#ifdef SUN4V
+	cpi->ci_mmfsa = pa0;
+#endif
 	cpi->ci_self = cpi;
-	cpi->ci_node = node;
+	cpi->ci_node = ma->ma_node;
 
 	sched_init_cpu(cpi);
 
@@ -193,10 +202,18 @@ cpu_match(parent, vcf, aux)
 		portid = getpropint(ma->ma_node, "portid", -1);
 	if (portid == -1)
 		portid = getpropint(ma->ma_node, "cpuid", -1);
+	if (portid == -1 && ma->ma_nreg > 0)
+		portid = (ma->ma_reg[0].ur_paddr >> 32) & 0xff;
 	if (portid == -1)
 		return (0);
 
 	if (portid != cpus->ci_upaid)
+		return (0);
+#else
+	/* XXX Only attach the first thread of a core for now. */
+	if (OF_getprop(OF_parent(ma->ma_node), "device_type",
+	    buf, sizeof(buf)) >= 0 && strcmp(buf, "core") == 0 &&
+	    (getpropint(ma->ma_node, "cpuid", -1) % 2) == 1)
 		return (0);
 #endif
 
@@ -208,33 +225,37 @@ cpu_match(parent, vcf, aux)
  * Discover interesting goop about the virtual address cache
  * (slightly funny place to do it, but this is where it is to be found).
  */
-static void
+void
 cpu_attach(parent, dev, aux)
 	struct device *parent;
 	struct device *dev;
 	void *aux;
 {
 	int node;
-	long clk;
+	u_int clk;
 	int impl, vers;
 	struct mainbus_attach_args *ma = aux;
 	struct cpu_info *ci;
 	const char *sep;
 	register int i, l;
-	u_int64_t ver;
+	u_int64_t ver = 0;
 	extern u_int64_t cpu_clockrate[];
 
-	ver = getver();
+	if (CPU_ISSUN4U || CPU_ISSUN4US)
+		ver = getver();
 	impl = IU_IMPL(ver);
 	vers = IU_VERS(ver);
 
 	/* tell them what we have */
-	node = ma->ma_node;
+	if (strncmp(parent->dv_xname, "core", 4) == 0)
+		node = OF_parent(ma->ma_node);
+	else
+		node = ma->ma_node;
 
 	/*
 	 * Allocate cpu_info structure if needed.
 	 */
-	ci = alloc_cpuinfo(node);
+	ci = alloc_cpuinfo(ma);
 
 	clk = getpropint(node, "clock-frequency", 0);
 	if (clk == 0) {
@@ -250,6 +271,9 @@ cpu_attach(parent, dev, aux)
 	snprintf(cpu_model, sizeof cpu_model, "%s (rev %d.%d) @ %s MHz",
 	    ma->ma_name, vers >> 4, vers & 0xf, clockfreq(clk));
 	printf(": %s\n", cpu_model);
+
+	if (ci->ci_upaid == cpu_myid())
+		cpu_init(ci);
 
 	cacheinfo.c_physical = 1; /* Dunno... */
 	cacheinfo.c_split = 1;
@@ -342,25 +366,76 @@ cpu_attach(parent, dev, aux)
 	}
 	printf("\n");
 	cache_enable();
+}
 
-	if (impl >= IMPL_CHEETAH) {
-		extern vaddr_t ktext, dlflush_start;
-		extern paddr_t ktextp;
-		vaddr_t *pva;
-		paddr_t pa;
-		u_int32_t inst;
+int
+cpu_myid(void)
+{
+	char buf[32];
+	int impl;
 
-		for (pva = &dlflush_start; *pva; pva++) {
-			inst = *(u_int32_t *)(*pva);
-			inst &= ~(ASI_DCACHE_TAG << 5);
-			inst |= (ASI_DCACHE_INVALIDATE << 5);
-			pa = (paddr_t) (ktextp - ktext + *pva);
-			stwa(pa, ASI_PHYS_CACHED, inst);
-			flush((void *)KERNBASE);
-		}
+#ifdef SUN4V
+	if (CPU_ISSUN4V) {
+		uint64_t myid;
 
-		cacheinfo.c_dcache_flush_page = us3_dcache_flush_page;
+		hv_cpu_myid(&myid);
+		return myid;
 	}
+#endif
+
+	if (OF_getprop(findroot(), "name", buf, sizeof(buf)) > 0 &&
+	    strcmp(buf, "SUNW,Ultra-Enterprise-10000") == 0)
+		return lduwa(0x1fff40000d0UL, ASI_PHYS_NON_CACHED);
+
+	impl = (getver() & VER_IMPL) >> VER_IMPL_SHIFT;
+	switch (impl) {
+	case IMPL_OLYMPUS_C:
+	case IMPL_JUPITER:
+		return CPU_JUPITERID;
+	case IMPL_CHEETAH:
+	case IMPL_CHEETAH_PLUS:
+	case IMPL_JAGUAR:
+	case IMPL_PANTHER:
+		return CPU_FIREPLANEID;
+	default:
+		return CPU_UPAID;
+	}
+}
+
+void
+cpu_init(struct cpu_info *ci)
+{
+#ifdef SUN4V
+	paddr_t pa = ci->ci_paddr;
+	int err;
+
+	if (CPU_ISSUN4U || CPU_ISSUN4US)
+		return;
+
+#define MONDO_QUEUE_SIZE	32
+#define QUEUE_ENTRY_SIZE	64
+
+	pa += CPUINFO_VA - INTSTACK;
+	pa += PAGE_SIZE;
+
+	ci->ci_cpumq = pa;
+	err = hv_cpu_qconf(CPU_MONDO_QUEUE, ci->ci_cpumq, MONDO_QUEUE_SIZE);
+	if (err != H_EOK)
+		panic("Unable to set cpu mondo queue: %d", err);
+	pa += MONDO_QUEUE_SIZE * QUEUE_ENTRY_SIZE;
+
+	ci->ci_devmq = pa;
+	err = hv_cpu_qconf(DEVICE_MONDO_QUEUE, ci->ci_devmq, MONDO_QUEUE_SIZE);
+	if (err != H_EOK)
+		panic("Unable to set device mondo queue: %d", err);
+	pa += MONDO_QUEUE_SIZE * QUEUE_ENTRY_SIZE;
+
+	ci->ci_mondo = pa;
+	pa += 64;
+
+	ci->ci_cpuset = pa;
+	pa += 64;
+#endif
 }
 
 struct cfdriver cpu_cd = {
@@ -375,12 +450,26 @@ cpu_boot_secondary_processors(void)
 {
 	struct cpu_info *ci;
 	int cpuid, i;
+	char buf[32];
+
+	if (OF_getprop(findroot(), "name", buf, sizeof(buf)) > 0 &&
+	    strcmp(buf, "SUNW,Ultra-Enterprise-10000") == 0) {
+		for (ci = cpus; ci != NULL; ci = ci->ci_next)
+			ci->ci_itid = STARFIRE_UPAID2HWMID(ci->ci_upaid);
+	} else {
+		for (ci = cpus; ci != NULL; ci = ci->ci_next)
+			ci->ci_itid = ci->ci_upaid;
+	}
 
 	for (ci = cpus; ci != NULL; ci = ci->ci_next) {
-		if (ci->ci_upaid == CPU_UPAID)
+		if (ci->ci_upaid == cpu_myid())
 			continue;
 
-		cpuid = getpropint(ci->ci_node, "cpuid", -1);
+		if (CPU_ISSUN4V)
+			cpuid = ci->ci_upaid;
+		else
+			cpuid = getpropint(ci->ci_node, "cpuid", -1);
+
 		if (cpuid == -1) {
 			prom_start_cpu(ci->ci_node,
 			    (void *)cpu_mp_startup, ci->ci_paddr);
@@ -401,13 +490,16 @@ cpu_boot_secondary_processors(void)
 void
 cpu_hatch(void)
 {
+	struct cpu_info *ci = curcpu();
 	int s;
 
-	curcpu()->ci_flags |= CPUF_RUNNING;
+	cpu_init(ci);
+
+	ci->ci_flags |= CPUF_RUNNING;
 	sparc_membar(Sync);
 
 	s = splhigh();
-	microuptime(&curcpu()->ci_schedstate.spc_runtime);
+	microuptime(&ci->ci_schedstate.spc_runtime);
 	splx(s);
 
 	tick_start();
@@ -423,4 +515,39 @@ need_resched(struct cpu_info *ci)
 	ci->ci_want_resched = 1;
 	if (ci->ci_curproc != NULL)
 		aston(ci->ci_curproc);
+}
+
+/*
+ * Idle loop.
+ *
+ * We disable and reenable the interrupts in every cycle of the idle loop.
+ * Since hv_cpu_yield doesn't actually reenable interrupts, it just wakes
+ * up if an interrupt would have happened, but it's our responsibility to
+ * unblock interrupts.
+ */
+
+void
+cpu_idle_enter(void)
+{
+	if (CPU_ISSUN4V) {
+		sparc_wrpr(pstate, sparc_rdpr(pstate) & ~PSTATE_IE, 0);
+	}
+}
+
+void
+cpu_idle_cycle(void)
+{
+	if (CPU_ISSUN4V) {
+		hv_cpu_yield();
+		sparc_wrpr(pstate, sparc_rdpr(pstate) | PSTATE_IE, 0);
+		sparc_wrpr(pstate, sparc_rdpr(pstate) & ~PSTATE_IE, 0);
+	}
+}
+
+void
+cpu_idle_leave()
+{
+	if (CPU_ISSUN4V) {
+		sparc_wrpr(pstate, sparc_rdpr(pstate) | PSTATE_IE, 0);
+	}
 }

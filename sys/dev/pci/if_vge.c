@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_vge.c,v 1.35 2007/12/11 02:36:02 brad Exp $	*/
+/*	$OpenBSD: if_vge.c,v 1.37 2008/05/22 19:23:04 mk Exp $	*/
 /*	$FreeBSD: if_vge.c,v 1.3 2004/09/11 22:13:25 wpaul Exp $	*/
 /*
  * Copyright (c) 2004
@@ -1193,10 +1193,8 @@ vge_tick(void *xsc)
 			sc->vge_link = 1;
 			if (mii->mii_media_status & IFM_FDX)
 				ifp->if_link_state = LINK_STATE_FULL_DUPLEX;
-			else if (mii->mii_media_status & IFM_HDX)
-				ifp->if_link_state = LINK_STATE_HALF_DUPLEX;
 			else
-				ifp->if_link_state = LINK_STATE_UP;
+				ifp->if_link_state = LINK_STATE_HALF_DUPLEX;
 			if_link_state_change(ifp);
 			if (!IFQ_IS_EMPTY(&ifp->if_snd))
 				vge_start(ifp);
@@ -1812,8 +1810,8 @@ vge_stop(struct vge_softc *sc)
 
 	ifp = &sc->arpcom.ac_if;
 	ifp->if_timer = 0;
-	if (timeout_pending(&sc->timer_handle))
-		timeout_del(&sc->timer_handle);
+
+	timeout_del(&sc->timer_handle);
 
 	ifp->if_flags &= ~(IFF_RUNNING | IFF_OACTIVE);
 

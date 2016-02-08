@@ -1,4 +1,4 @@
-#	$OpenBSD: genassym.cf,v 1.26 2008/02/14 19:07:56 kettenis Exp $
+#	$OpenBSD: genassym.cf,v 1.32 2008/06/26 05:42:13 ray Exp $
 #	$NetBSD: genassym.cf,v 1.23 2001/08/08 00:09:30 eeh Exp $
 
 #
@@ -16,13 +16,6 @@
 # 2. Redistributions in binary form must reproduce the above copyright
 #    notice, this list of conditions and the following disclaimer in the
 #    documentation and/or other materials provided with the distribution.
-# 3. All advertising materials mentioning features or use of this software
-#    must display the following acknowledgement:
-#        This product includes software developed by the NetBSD
-#        Foundation, Inc. and its contributors.
-# 4. Neither the name of The NetBSD Foundation nor the names of its
-#    contributors may be used to endorse or promote products derived
-#    from this software without specific prior written permission.
 #
 # THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
 # ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -157,6 +150,13 @@ member	ci_intrpending
 member	ci_spinup
 member	ci_initstack
 member	ci_paddr
+ifdef SUN4V
+member	ci_rw
+member	ci_rwsp
+member	ci_mmfsa
+member	ci_cpumq
+member	ci_devmq
+endif
 
 # FPU state
 struct	fpstate64
@@ -236,10 +236,9 @@ member	ih_number
 member	ih_pil
 member	IH_PEND		ih_pending
 member	ih_next
-member	ih_map
-member	ih_clr
+member	ih_ack
 member	IH_COUNT	ih_count.ec_count
-	
+
 # mbuf fields of import
 struct	mbuf
 member	m_next
@@ -266,22 +265,24 @@ member	dbr_local
 member	dbr_in
 endif
 
-export	TLB_ACCESS
-export	TLB_MODIFY
-export	TLB_REAL_W
-export	TLB_TSB_LOCK
-export	TLB_EXEC
-export	TLB_EXEC_ONLY
-export	TLB_L
-export	TLB_CACHE_MASK
-export	TLB_CP
-export	TLB_CV
-export	TLB_E
-export	TLB_P
-export	TLB_W
-export	TLB_G
+export	TSB_TAG_LOCKED
+
+export	SUN4U_TLB_ACCESS
+export	SUN4U_TLB_MODIFY
+export	SUN4U_TLB_REAL_W
+export	SUN4U_TLB_EXEC
+export	SUN4U_TLB_W
+
+export	SUN4V_TLB_ACCESS
+export	SUN4V_TLB_MODIFY
+export	SUN4V_TLB_REAL_W
+export	SUN4V_TLB_EXEC
+export	SUN4V_TLB_W
 
 struct	mutex
 member	mtx_wantipl
 member	mtx_oldipl
 member	mtx_owner
+
+export	CPU_SUN4U
+export	CPU_SUN4V

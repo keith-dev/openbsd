@@ -1,4 +1,4 @@
-/* $OpenBSD: ncr.c,v 1.22 2007/12/29 03:04:19 dlg Exp $ */
+/* $OpenBSD: ncr.c,v 1.24 2008/07/30 18:08:04 miod Exp $ */
 /*	$NetBSD: ncr.c,v 1.32 2000/06/25 16:00:43 ragge Exp $	*/
 
 /*-
@@ -16,13 +16,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	  This product includes software developed by the NetBSD
- *	  Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -180,6 +173,8 @@ si_attach(parent, self, aux)
 	struct scsibus_attach_args saa;
 	int tweak, target;
 
+	printf("\n");
+
 	/* enable interrupts on vsbus too */
 	scb_vecalloc(va->va_cvec, (void (*)(void *)) ncr5380_intr, sc,
 	    SCB_ISTACK, &sc->ncr_intrcnt);
@@ -247,8 +242,6 @@ si_attach(parent, self, aux)
 		target = 7;
 	else
 		target = (clk_page[0xbc/2] >> tweak) & 7;
-
-	printf(": SCSI ID %d\n", target);
 
 	ncr_sc->sc_link.adapter_softc =	sc;
 	ncr_sc->sc_link.adapter_target = target;

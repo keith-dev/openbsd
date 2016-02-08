@@ -1,4 +1,4 @@
-/*	$OpenBSD: intr.h,v 1.11 2007/05/25 16:22:11 art Exp $	*/
+/*	$OpenBSD: intr.h,v 1.13 2008/06/26 05:42:09 ray Exp $	*/
 /*	$NetBSD: intr.h,v 1.2 2003/05/04 22:01:56 fvdl Exp $	*/
 
 /*-
@@ -16,13 +16,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -140,7 +133,6 @@ void softintr(int);
 #define	splaudio()	splraise(IPL_AUDIO)
 #define	splclock()	splraise(IPL_CLOCK)
 #define	splstatclock()	splclock()
-#define	splserial()	splraise(IPL_SERIAL)
 #define splipi()	splraise(IPL_IPI)
 
 #define spllpt()	spltty()
@@ -152,7 +144,7 @@ void softintr(int);
  */
 #define	splsoftclock()	splraise(IPL_SOFTCLOCK)
 #define	splsoftnet()	splraise(IPL_SOFTNET)
-#define	splsoftserial()	splraise(IPL_SOFTSERIAL)
+#define	splsofttty()	splraise(IPL_SOFTTTY)
 
 /*
  * Miscellaneous
@@ -198,7 +190,7 @@ void splassert_check(int, const char *);
 
 extern void Xsoftclock(void);
 extern void Xsoftnet(void);
-extern void Xsoftserial(void);
+extern void Xsofttty(void);
 
 extern struct intrstub i8259_stubs[];
 extern struct intrstub ioapic_edge_stubs[];
@@ -244,7 +236,7 @@ extern void (*ipifunc[X86_NIPI])(struct cpu_info *);
 
 #define	X86_SOFTINTR_SOFTCLOCK		0
 #define	X86_SOFTINTR_SOFTNET		1
-#define	X86_SOFTINTR_SOFTSERIAL		2
+#define	X86_SOFTINTR_SOFTTTY		2
 #define	X86_NSOFTINTR			3
 
 #ifndef _LOCORE

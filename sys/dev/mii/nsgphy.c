@@ -1,4 +1,4 @@
-/*	$OpenBSD: nsgphy.c,v 1.18 2006/12/27 19:11:09 kettenis Exp $	*/
+/*	$OpenBSD: nsgphy.c,v 1.20 2008/05/30 05:08:29 brad Exp $	*/
 /*
  * Copyright (c) 2001 Wind River Systems
  * Copyright (c) 2001
@@ -45,6 +45,8 @@
  * 83861 can. (I think it wasn't originally designed to do this, but
  * it can now thanks to firmware updates.) The 83861 also allows
  * access to its internal RAM via indirect register access.
+ *
+ * The DP83865 is a low power version of the DP83861.
  */
 
 #include <sys/param.h>
@@ -84,6 +86,8 @@ const struct mii_phy_funcs nsgphy_funcs = {
 static const struct mii_phydesc nsgphys[] = {
 	{ MII_OUI_NATSEMI,		MII_MODEL_NATSEMI_DP83861,
 	  MII_STR_NATSEMI_DP83861 },
+	{ MII_OUI_NATSEMI,		MII_MODEL_NATSEMI_DP83865,
+	  MII_STR_NATSEMI_DP83865 },
 	{ MII_OUI_NATSEMI,		MII_MODEL_NATSEMI_DP83891,
 	  MII_STR_NATSEMI_DP83891 },
 
@@ -125,7 +129,7 @@ nsgphyattach(struct device *parent, struct device *self, void *aux)
 
 	sc->mii_capabilities =
 		PHY_READ(sc, MII_BMSR) & ma->mii_capmask;
-        if (sc->mii_capabilities & BMSR_EXTSTAT)
+	if (sc->mii_capabilities & BMSR_EXTSTAT)
 		sc->mii_extcapabilities = PHY_READ(sc, MII_EXTSR);
 
 	/*
@@ -141,9 +145,9 @@ nsgphyattach(struct device *parent, struct device *self, void *aux)
 	if (anar & ANAR_10_FD)
 		sc->mii_capabilities |= (BMSR_10TFDX & ma->mii_capmask);
 
-        if ((sc->mii_capabilities & BMSR_MEDIAMASK) ||
-            (sc->mii_extcapabilities & EXTSR_MEDIAMASK))
-                mii_phy_add_media(sc);
+	if ((sc->mii_capabilities & BMSR_MEDIAMASK) ||
+	    (sc->mii_extcapabilities & EXTSR_MEDIAMASK))
+		mii_phy_add_media(sc);
 }
 
 int

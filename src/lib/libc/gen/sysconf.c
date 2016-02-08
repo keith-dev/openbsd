@@ -1,4 +1,4 @@
-/*	$OpenBSD: sysconf.c,v 1.8 2005/08/08 08:05:34 espie Exp $ */
+/*	$OpenBSD: sysconf.c,v 1.10 2008/06/25 14:54:44 millert Exp $ */
 /*-
  * Copyright (c) 1993
  *	The Regents of the University of California.  All rights reserved.
@@ -36,8 +36,10 @@
 #include <sys/sysctl.h>
 #include <sys/time.h>
 #include <sys/resource.h>
+#include <sys/vmmeter.h>
 
 #include <errno.h>
+#include <pwd.h>
 #include <unistd.h>
 
 /*
@@ -108,6 +110,19 @@ sysconf(int name)
 		mib[0] = CTL_KERN;
 		mib[1] = KERN_FSYNC;
 		goto yesno;
+
+/* 1003.1c */
+	case _SC_LOGIN_NAME_MAX:
+		return (LOGIN_NAME_MAX);
+
+	case _SC_THREAD_SAFE_FUNCTIONS:
+		return (_POSIX_THREAD_SAFE_FUNCTIONS);
+
+	case _SC_GETGR_R_SIZE_MAX:
+		return (_PW_BUF_LEN);
+
+	case _SC_GETPW_R_SIZE_MAX:
+		return (_PW_BUF_LEN);
 
 /* 1003.2 */
 	case _SC_BC_BASE_MAX:
@@ -198,6 +213,31 @@ yesno:		if (sysctl(mib, namelen, &value, &len, NULL, 0) == -1)
 		    KERN_SEMINFO_SEMMNS : KERN_SEMINFO_SEMVMX;
 		namelen = 3;
 		break;
+
+/* Extensions */
+	case _SC_PHYS_PAGES:
+	{
+		int64_t physmem;
+
+		mib[0] = CTL_HW;
+		mib[1] = HW_PHYSMEM64;
+		len = sizeof(physmem);
+		if (sysctl(mib, namelen, &physmem, &len, NULL, 0) == -1)
+			return (-1);
+		return (physmem / getpagesize());
+	}
+	case _SC_AVPHYS_PAGES:
+	{
+		struct vmtotal vmtotal;
+
+		mib[0] = CTL_VM;
+		mib[1] = VM_METER;
+		len = sizeof(vmtotal);
+		if (sysctl(mib, namelen, &vmtotal, &len, NULL, 0) == -1)
+			return (-1);
+		return (vmtotal.t_free);
+	}
+
 	default:
 		errno = EINVAL;
 		return (-1);

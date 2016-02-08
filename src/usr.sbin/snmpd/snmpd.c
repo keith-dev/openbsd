@@ -1,4 +1,4 @@
-/*	$OpenBSD: snmpd.c,v 1.5 2008/02/16 22:06:10 sobrado Exp $	*/
+/*	$OpenBSD: snmpd.c,v 1.7 2008/05/12 19:15:02 pyr Exp $	*/
 
 /*
  * Copyright (c) 2007, 2008 Reyk Floeter <reyk@vantronix.net>
@@ -84,7 +84,8 @@ usage(void)
 {
 	extern char	*__progname;
 
-	fprintf(stderr, "%s [-dNnv] [-D macro=value] [-f file]\n", __progname);
+	fprintf(stderr, "usage: %s [-dNnv] [-D macro=value] [-f file]\n",
+	    __progname);
 	exit(1);
 }
 
@@ -132,6 +133,11 @@ main(int argc, char *argv[])
 			usage();
 		}
 	}
+
+	argc -= optind;
+	argv += optind;
+	if (argc > 0)
+		usage();
 
 	if ((env = parse_config(conffile, flags)) == NULL)
 		exit(1);

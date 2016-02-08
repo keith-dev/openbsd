@@ -1,4 +1,4 @@
-/*	$OpenBSD: ntp.c,v 1.103 2008/01/28 11:45:59 mpf Exp $ */
+/*	$OpenBSD: ntp.c,v 1.106 2008/06/10 03:46:09 naddy Exp $ */
 
 /*
  * Copyright (c) 2003, 2004 Henning Brauer <henning@openbsd.org>
@@ -230,7 +230,7 @@ ntp_main(int pipe_prnt[2], struct ntpd_conf *nconf, struct passwd *pw)
 					sent_cnt++;
 			}
 			if (p->deadline > 0 && p->deadline <= getmonotime()) {
-				timeout = error_interval();
+				timeout = 300;
 				log_debug("no reply from %s received in time, "
 				    "next query %ds", log_sockaddr(
 				    (struct sockaddr *)&p->addr->ss), timeout);
@@ -576,7 +576,6 @@ priv_adjtime(void)
 	conf->status.stratum++;	/* one more than selected peer */
 	update_scale(offset_median);
 
-	conf->status.refid4 = offsets[i]->status.refid4;
 	conf->status.refid = offsets[i]->status.send_refid;
 
 	free(offsets);
@@ -659,7 +658,7 @@ scale_interval(time_t requested)
 	time_t interval, r;
 
 	interval = requested * conf->scale;
-	r = arc4random() % MAX(5, interval / 10);
+	r = arc4random_uniform(MAX(5, interval / 10));
 	return (interval + r);
 }
 
@@ -669,7 +668,7 @@ error_interval(void)
 	time_t interval, r;
 
 	interval = INTERVAL_QUERY_PATHETIC * QSCALE_OFF_MAX / QSCALE_OFF_MIN;
-	r = arc4random() % (interval / 10);
+	r = arc4random_uniform(interval / 10);
 	return (interval + r);
 }
 

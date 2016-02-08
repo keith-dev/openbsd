@@ -1,4 +1,4 @@
-/*	$OpenBSD: re.c,v 1.77 2008/03/12 16:26:45 brad Exp $	*/
+/*	$OpenBSD: re.c,v 1.85 2008/08/05 01:58:47 brad Exp $	*/
 /*	$FreeBSD: if_re.c,v 1.31 2004/09/04 07:54:05 ru Exp $	*/
 /*
  * Copyright (c) 1997, 1998-2003
@@ -209,21 +209,27 @@ static const struct re_revision {
 	u_int32_t		re_chipid;
 	const char		*re_name;
 } re_revisions[] = {
-	{ RL_HWREV_8169,	"RTL8169" },
-	{ RL_HWREV_8110S,	"RTL8110S" },
-	{ RL_HWREV_8169S,	"RTL8169S" },
-	{ RL_HWREV_8169_8110SB,	"RTL8169/8110SB" },
-	{ RL_HWREV_8169_8110SCd, "RTL8169/8110SCd" },
-	{ RL_HWREV_8168_SPIN1,	"RTL8168 1" },
+	{ RL_HWREV_8100,	"RTL8100" },
 	{ RL_HWREV_8100E_SPIN1,	"RTL8100E 1" },
+	{ RL_HWREV_8100E_SPIN2, "RTL8100E 2" },
+	{ RL_HWREV_8101,	"RTL8101" },
 	{ RL_HWREV_8101E,	"RTL8101E" },
+	{ RL_HWREV_8102E,	"RTL8102E" },
+	{ RL_HWREV_8102EL,	"RTL8102EL" },
+	{ RL_HWREV_8110S,	"RTL8110S" },
+	{ RL_HWREV_8139CPLUS,	"RTL8139C+" },
+	{ RL_HWREV_8168_SPIN1,	"RTL8168 1" },
 	{ RL_HWREV_8168_SPIN2,	"RTL8168 2" },
 	{ RL_HWREV_8168_SPIN3,	"RTL8168 3" },
-	{ RL_HWREV_8100E_SPIN2, "RTL8100E 2" },
-	{ RL_HWREV_8139CPLUS,	"RTL8139C+" },
-	{ RL_HWREV_8101,	"RTL8101" },
-	{ RL_HWREV_8100,	"RTL8100" },
+	{ RL_HWREV_8168C,	"RTL8168C/8111C" },
+	{ RL_HWREV_8168C_SPIN2,	"RTL8168C/8111C" },
+	{ RL_HWREV_8168CP,	"RTL8168CP/8111CP" },
+	{ RL_HWREV_8169,	"RTL8169" },
+	{ RL_HWREV_8169_8110SB,	"RTL8169/8110SB" },
+	{ RL_HWREV_8169_8110SBL, "RTL8169SBL" },
+	{ RL_HWREV_8169_8110SCd, "RTL8169/8110SCd" },
 	{ RL_HWREV_8169_8110SCe, "RTL8169/8110SCe" },
+	{ RL_HWREV_8169S,	"RTL8169S" },
 
 	{ 0, NULL }
 };
@@ -433,7 +439,7 @@ re_miibus_readreg(struct device *dev, int phy, int reg)
 		return (0);
 	}
 	rval = CSR_READ_2(sc, re8139_reg);
-	if (sc->sc_hwrev == RL_HWREV_8139CPLUS && re8139_reg == RL_BMCR) {
+	if (re8139_reg == RL_BMCR) {
 		/* 8139C+ has different bit layout. */
 		rval &= ~(BMCR_LOOP | BMCR_ISO);
 	}
@@ -464,10 +470,8 @@ re_miibus_writereg(struct device *dev, int phy, int reg, int data)
 	switch(reg) {
 	case MII_BMCR:
 		re8139_reg = RL_BMCR;
-		if (sc->sc_hwrev == RL_HWREV_8139CPLUS) {
-			/* 8139C+ has different bit layout. */
-			data &= ~(BMCR_LOOP | BMCR_ISO);
-		}
+		/* 8139C+ has different bit layout. */
+		data &= ~(BMCR_LOOP | BMCR_ISO);
 		break;
 	case MII_BMSR:
 		re8139_reg = RL_BMSR;
@@ -564,16 +568,10 @@ re_setmulti(struct rl_softc *sc)
 	 * parts. This means we have to write the hash pattern in reverse
 	 * order for those devices.
 	 */
-	switch (sc->sc_hwrev) {
-	case RL_HWREV_8100E_SPIN1:
-	case RL_HWREV_8100E_SPIN2:
-	case RL_HWREV_8101E:
-	case RL_HWREV_8168_SPIN1:
-	case RL_HWREV_8168_SPIN2:
+	if (sc->rl_flags & RL_FLAG_INVMAR) {
 		CSR_WRITE_4(sc, RL_MAR0, swap32(hashes[1]));
 		CSR_WRITE_4(sc, RL_MAR4, swap32(hashes[0]));
-		break;
-	default:
+	} else {
 		CSR_WRITE_4(sc, RL_MAR0, hashes[0]);
 		CSR_WRITE_4(sc, RL_MAR4, hashes[1]);
 	}
@@ -610,7 +608,7 @@ re_reset(struct rl_softc *sc)
 	if (i == RL_TIMEOUT)
 		printf("%s: reset never completed!\n", sc->sc_dev.dv_xname);
 
-	CSR_WRITE_1(sc, 0x82, 1);
+	CSR_WRITE_1(sc, RL_LDPS, 1);
 }
 
 #ifdef RE_DIAG
@@ -828,40 +826,101 @@ re_attach(struct rl_softc *sc, const char *intrstr)
 	/* Reset the adapter. */
 	re_reset(sc);
 
-	sc->rl_eewidth = RL_9356_ADDR_LEN;
-	re_read_eeprom(sc, (caddr_t)&re_did, 0, 1);
-	if (re_did != 0x8129)
-		sc->rl_eewidth = RL_9346_ADDR_LEN;
-
-	/*
-	 * Get station address from the EEPROM.
-	 */
-	re_read_eeprom(sc, (caddr_t)as, RL_EE_EADDR, 3);
-	for (i = 0; i < ETHER_ADDR_LEN / 2; i++)
-		as[i] = letoh16(as[i]);
-	bcopy(as, eaddr, sizeof(eaddr));
-#ifdef __armish__
-	/*
-	 * On the Thecus N2100, the MAC address in the EEPROM is
-	 * always 00:14:fd:10:00:00.  The proper MAC address is stored
-	 * in flash.  Fortunately RedBoot configures the proper MAC
-	 * address (for the first onboard interface) which we can read
-	 * from the IDR.
-	 */
-	if (eaddr[0] == 0x00 && eaddr[1] == 0x14 && eaddr[2] == 0xfd &&
-	    eaddr[3] == 0x10 && eaddr[4] == 0x00 && eaddr[5] == 0x00) {
-		if (boot_eaddr_valid == 0) {
-			boot_eaddr.eaddr_word[1] = letoh32(CSR_READ_4(sc, RL_IDR4));
-			boot_eaddr.eaddr_word[0] = letoh32(CSR_READ_4(sc, RL_IDR0));
-			boot_eaddr_valid = 1;
-		}
-
-		bcopy(boot_eaddr.eaddr, eaddr, sizeof(eaddr));
-		eaddr[5] += sc->sc_dev.dv_unit;
-	}
-#endif
-
 	sc->sc_hwrev = CSR_READ_4(sc, RL_TXCFG) & RL_TXCFG_HWREV;
+
+	switch (sc->sc_hwrev) {
+	case RL_HWREV_8139CPLUS:
+		sc->rl_flags |= RL_FLAG_NOJUMBO;
+		break;
+	case RL_HWREV_8100E_SPIN1:
+	case RL_HWREV_8100E_SPIN2:
+	case RL_HWREV_8101E:
+		sc->rl_flags |= RL_FLAG_NOJUMBO | RL_FLAG_INVMAR |
+		    RL_FLAG_PHYWAKE;
+		break;
+	case RL_HWREV_8102E:
+	case RL_HWREV_8102EL:
+		sc->rl_flags |= RL_FLAG_NOJUMBO | RL_FLAG_INVMAR |
+		    RL_FLAG_PHYWAKE | RL_FLAG_PAR | RL_FLAG_DESCV2 |
+		    RL_FLAG_MACSTAT;
+		break;
+	case RL_HWREV_8168_SPIN1:
+	case RL_HWREV_8168_SPIN2:
+	case RL_HWREV_8168_SPIN3:
+		sc->rl_flags |= RL_FLAG_INVMAR | RL_FLAG_PHYWAKE |
+		    RL_FLAG_MACSTAT;
+		break;
+	case RL_HWREV_8168C:
+	case RL_HWREV_8168C_SPIN2:
+	case RL_HWREV_8168CP:
+		sc->rl_flags |= RL_FLAG_INVMAR | RL_FLAG_PHYWAKE |
+		    RL_FLAG_PAR | RL_FLAG_DESCV2 | RL_FLAG_MACSTAT;
+		/*
+		 * These controllers support jumbo frame but it seems
+		 * that enabling it requires touching additional magic
+		 * registers. Depending on MAC revisions some
+		 * controllers need to disable checksum offload. So
+		 * disable jumbo frame until I have better idea what
+		 * it really requires to make it support.
+		 * RTL8168C/CP : supports up to 6KB jumbo frame.
+		 * RTL8111C/CP : supports up to 9KB jumbo frame.
+		 */
+		sc->rl_flags |= RL_FLAG_NOJUMBO;
+		break;
+	case RL_HWREV_8169_8110SB:
+	case RL_HWREV_8169_8110SCd:
+	case RL_HWREV_8169_8110SBL:
+		sc->rl_flags |= RL_FLAG_PHYWAKE;
+		break;
+	default:
+		break;
+	}
+
+	if (sc->rl_flags & RL_FLAG_PAR) {
+		/*
+		 * XXX Should have a better way to extract station
+		 * address from EEPROM.
+		 */
+		for (i = 0; i < ETHER_ADDR_LEN; i++)
+			eaddr[i] = CSR_READ_1(sc, RL_IDR0 + i);
+	} else {
+		sc->rl_eewidth = RL_9356_ADDR_LEN;
+		re_read_eeprom(sc, (caddr_t)&re_did, 0, 1);
+		if (re_did != 0x8129)
+			sc->rl_eewidth = RL_9346_ADDR_LEN;
+
+		/*
+		 * Get station address from the EEPROM.
+		 */
+		re_read_eeprom(sc, (caddr_t)as, RL_EE_EADDR, 3);
+		for (i = 0; i < ETHER_ADDR_LEN / 2; i++)
+			as[i] = letoh16(as[i]);
+		bcopy(as, eaddr, sizeof(eaddr));
+
+#ifdef __armish__
+		/*
+		 * On the Thecus N2100, the MAC address in the EEPROM is
+		 * always 00:14:fd:10:00:00.  The proper MAC address is
+		 * stored in flash.  Fortunately RedBoot configures the
+		 * proper MAC address (for the first onboard interface)
+		 * which we can read from the IDR.
+		 */
+		if (eaddr[0] == 0x00 && eaddr[1] == 0x14 &&
+		    eaddr[2] == 0xfd && eaddr[3] == 0x10 &&
+		    eaddr[4] == 0x00 && eaddr[5] == 0x00) {
+			if (boot_eaddr_valid == 0) {
+				boot_eaddr.eaddr_word[1] =
+				    letoh32(CSR_READ_4(sc, RL_IDR4));
+				boot_eaddr.eaddr_word[0] =
+				    letoh32(CSR_READ_4(sc, RL_IDR0));
+				boot_eaddr_valid = 1;
+			}
+
+			bcopy(boot_eaddr.eaddr, eaddr, sizeof(eaddr));
+			eaddr[5] += sc->sc_dev.dv_unit;
+		}
+#endif
+	}
 
 	/*
 	 * Set RX length mask, TX poll request register
@@ -1003,13 +1062,16 @@ re_attach(struct rl_softc *sc, const char *intrstr)
 	ifp->if_start = re_start;
 	ifp->if_watchdog = re_watchdog;
 	ifp->if_init = re_init;
-	if (sc->sc_hwrev != RL_HWREV_8139CPLUS)
+	if ((sc->rl_flags & RL_FLAG_NOJUMBO) == 0)
 		ifp->if_hardmtu = RL_JUMBO_MTU;
 	IFQ_SET_MAXLEN(&ifp->if_snd, RL_TX_QLEN);
 	IFQ_SET_READY(&ifp->if_snd);
 
-	ifp->if_capabilities = IFCAP_VLAN_MTU | IFCAP_CSUM_IPv4 |
-			       IFCAP_CSUM_TCPv4 | IFCAP_CSUM_UDPv4;
+	
+	ifp->if_capabilities = IFCAP_VLAN_MTU;
+	if ((sc->rl_flags & RL_FLAG_DESCV2) == 0)
+		ifp->if_capabilities |= IFCAP_CSUM_IPv4 |
+		    IFCAP_CSUM_TCPv4 | IFCAP_CSUM_UDPv4;
 
 #if NVLAN > 0
 	ifp->if_capabilities |= IFCAP_VLAN_HWTAGGING;
@@ -1350,17 +1412,22 @@ re_rxeof(struct rl_softc *sc)
 
 		/* Do RX checksumming */
 
-		/* Check IP header checksum */
-		if ((rxstat & RL_RDESC_STAT_PROTOID) &&
-		    !(rxstat & RL_RDESC_STAT_IPSUMBAD))
-			m->m_pkthdr.csum_flags |= M_IPV4_CSUM_IN_OK;
+		if (sc->rl_flags & RL_FLAG_DESCV2) {
+			/* XXX V2 CSUM */
+		} else {
+			/* Check IP header checksum */
+			if ((rxstat & RL_RDESC_STAT_PROTOID) &&
+			    !(rxstat & RL_RDESC_STAT_IPSUMBAD))
+				m->m_pkthdr.csum_flags |= M_IPV4_CSUM_IN_OK;
 
-		/* Check TCP/UDP checksum */
-		if ((RL_TCPPKT(rxstat) &&
-		    !(rxstat & RL_RDESC_STAT_TCPSUMBAD)) ||
-		    (RL_UDPPKT(rxstat) &&
-		    !(rxstat & RL_RDESC_STAT_UDPSUMBAD)))
-			m->m_pkthdr.csum_flags |= M_TCP_CSUM_IN_OK | M_UDP_CSUM_IN_OK;
+			/* Check TCP/UDP checksum */
+			if ((RL_TCPPKT(rxstat) &&
+			    !(rxstat & RL_RDESC_STAT_TCPSUMBAD)) ||
+			    (RL_UDPPKT(rxstat) &&
+			    !(rxstat & RL_RDESC_STAT_UDPSUMBAD)))
+				m->m_pkthdr.csum_flags |= M_TCP_CSUM_IN_OK |
+				    M_UDP_CSUM_IN_OK;
+		}
 
 #if NBPFILTER > 0
 		if (ifp->if_bpf)
@@ -1533,7 +1600,7 @@ re_encap(struct rl_softc *sc, struct mbuf *m, int *idx)
 	bus_dmamap_t	map;
 	int		error, seg, nsegs, uidx, startidx, curidx, lastidx, pad;
 	struct rl_desc	*d;
-	u_int32_t	cmdstat, rl_flags = 0;
+	u_int32_t	cmdstat, vlanctl, rl_flags = 0;
 	struct rl_txq	*txq;
 #if NVLAN > 0
 	struct ifvlan	*ifv = NULL;
@@ -1600,6 +1667,17 @@ re_encap(struct rl_softc *sc, struct mbuf *m, int *idx)
 		BUS_DMASYNC_PREWRITE);
 
 	/*
+	 * Set up hardware VLAN tagging. Note: vlan tag info must
+	 * appear in all descriptors of a multi-descriptor
+	 * transmission attempt.
+	 */
+	vlanctl = 0;
+#if NVLAN > 0
+	if (ifv != NULL)
+		vlanctl = swap16(ifv->ifv_tag) | RL_TDESC_VLANCTL_TAG;
+#endif
+
+	/*
 	 * Map the segment array into descriptors. Note that we set the
 	 * start-of-frame and end-of-frame markers for either TX or RX, but
 	 * they really only have meaning in the TX case. (In the RX case,
@@ -1633,7 +1711,7 @@ re_encap(struct rl_softc *sc, struct mbuf *m, int *idx)
 			goto fail_unload;
 		}
 
-		d->rl_vlanctl = 0;
+		d->rl_vlanctl = htole32(vlanctl);
 		re_set_bufaddr(d, map->dm_segs[seg].ds_addr);
 		cmdstat = rl_flags | map->dm_segs[seg].ds_len;
 		if (seg == 0)
@@ -1654,7 +1732,7 @@ re_encap(struct rl_softc *sc, struct mbuf *m, int *idx)
 		bus_addr_t paddaddr;
 
 		d = &sc->rl_ldata.rl_tx_list[curidx];
-		d->rl_vlanctl = 0;
+		d->rl_vlanctl = htole32(vlanctl);
 		paddaddr = RL_TXPADDADDR(sc);
 		re_set_bufaddr(d, paddaddr);
 		cmdstat = rl_flags |
@@ -1669,20 +1747,6 @@ re_encap(struct rl_softc *sc, struct mbuf *m, int *idx)
 		curidx = RL_NEXT_TX_DESC(sc, curidx);
 	}
 	KASSERT(lastidx != -1);
-
-	/*
-	 * Set up hardware VLAN tagging. Note: vlan tag info must
-	 * appear in the first descriptor of a multi-descriptor
-	 * transmission attempt.
-	 */
-
-#if NVLAN > 0
-	if (ifv != NULL) {
-		sc->rl_ldata.rl_tx_list[startidx].rl_vlanctl =
-		    htole32(swap16(ifv->ifv_tag) |
-		    RL_TDESC_VLANCTL_TAG);
-	}
-#endif
 
 	/* Transfer ownership of packet to the chip. */
 
@@ -1795,6 +1859,7 @@ re_init(struct ifnet *ifp)
 {
 	struct rl_softc *sc = ifp->if_softc;
 	u_int32_t	rxcfg = 0;
+	u_int16_t	cfg;
 	int		s;
 	union {
 		u_int32_t align_dummy;
@@ -1812,9 +1877,17 @@ re_init(struct ifnet *ifp)
 	 * Enable C+ RX and TX mode, as well as RX checksum offload.
 	 * We must configure the C+ register before all others.
 	 */
-	CSR_WRITE_2(sc, RL_CPLUS_CMD, RL_CPLUSCMD_RXENB|
-	    RL_CPLUSCMD_TXENB|RL_CPLUSCMD_PCI_MRW|
-	    RL_CPLUSCMD_RXCSUM_ENB);
+	cfg = RL_CPLUSCMD_PCI_MRW;
+	if (ifp->if_capabilities & IFCAP_CSUM_IPv4)
+		cfg |= RL_CPLUSCMD_RXCSUM_ENB;
+	if (sc->rl_flags & RL_FLAG_MACSTAT) {
+		cfg |= RL_CPLUSCMD_MACSTAT_DIS;
+		/* XXX magic. */
+		cfg |= 0x0001;
+	} else {
+		cfg |= RL_CPLUSCMD_RXENB | RL_CPLUSCMD_TXENB;
+	}
+	CSR_WRITE_2(sc, RL_CPLUS_CMD, cfg);
 
 	/*
 	 * Init our MAC address.  Even though the chipset
@@ -1868,8 +1941,7 @@ re_init(struct ifnet *ifp)
 
 	CSR_WRITE_1(sc, RL_EARLY_TX_THRESH, 16);
 
-	CSR_WRITE_4(sc, RL_RXCFG,
-	    RL_RXFIFO_NOTHRESH|RL_RX_MAXDMA|RL_RX_BUF_SZ);
+	CSR_WRITE_4(sc, RL_RXCFG, RL_RXCFG_CONFIG);
 
 	/* Set the individual bit to receive frames for this host only. */
 	rxcfg = CSR_READ_4(sc, RL_RXCFG);

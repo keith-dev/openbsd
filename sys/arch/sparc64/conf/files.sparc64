@@ -1,4 +1,4 @@
-#	$OpenBSD: files.sparc64,v 1.95 2008/02/20 09:44:47 robert Exp $
+#	$OpenBSD: files.sparc64,v 1.110 2008/07/11 14:23:53 kettenis Exp $
 #	$NetBSD: files.sparc64,v 1.50 2001/08/10 20:53:50 eeh Exp $
 
 # maxpartitions must be first item in files.${ARCH}
@@ -9,11 +9,15 @@ maxusers 2 8 1024
 define	mainbus {}
 device	mainbus: pcibus, mainbus
 attach	mainbus at root
-file	arch/sparc64/dev/upa.c			upa
+
+device	ssm: mainbus
+attach	ssm at mainbus
+file	arch/sparc64/dev/ssm.c			ssm
 
 define	upa {}
 device	upa
 attach	upa at mainbus
+file	arch/sparc64/dev/upa.c			upa
 
 define	central {}
 device	central
@@ -38,6 +42,10 @@ device	environ
 attach	environ at fhc
 file	arch/sparc64/dev/environ.c		environ
 
+device	vbus {}
+attach	vbus at mainbus
+file	arch/sparc64/dev/vbus.c			vbus
+
 # Sun HME Ethernet controllers
 device	hme: ether, ifnet, mii, ifmedia
 file	dev/ic/hme.c			hme
@@ -55,6 +63,10 @@ include	"dev/wsfont/files.wsfont"
 device	pcons: wsemuldisplaydev
 attach	pcons at mainbus
 file	arch/sparc64/dev/pcons.c		pcons needs-flag
+
+device	prtc
+attach	prtc at mainbus
+file	arch/sparc64/dev/prtc.c			prtc
 
 include	"dev/sbus/files.sbus"
 include	"dev/i2o/files.i2o"
@@ -92,7 +104,11 @@ device	pyro: pcibus
 attach	pyro at mainbus
 file	arch/sparc64/dev/pyro.c			pyro
 
-file	arch/sparc64/dev/pci_machdep.c		psycho | schizo | pyro
+device	vpci: pcibus
+attach	vpci at mainbus
+file	arch/sparc64/dev/vpci.c			vpci
+
+file	arch/sparc64/dev/pci_machdep.c		psycho | schizo | pyro | vpci
 
 attach	hme at pci with hme_pci
 file	dev/pci/if_hme_pci.c			hme_pci
@@ -101,8 +117,20 @@ device	vgafb: wsemuldisplaydev, rasops_bswap, rasops8, rasops16, rasops32
 attach	vgafb at pci
 file	arch/sparc64/dev/vgafb.c		vgafb
 
-# IOMMU is for both
-file	arch/sparc64/dev/iommu.c		sbus | psycho
+device	ifb: wsemuldisplaydev, rasops8
+attach	ifb at pci
+file	arch/sparc64/dev/ifb.c			ifb
+
+device	sbbc
+attach	sbbc at pci
+file	arch/sparc64/dev/sbbc.c			sbbc needs-flag
+
+# IOMMU is for both sbus and pci
+file	arch/sparc64/dev/iommu.c		sbus | psycho | schizo | pyro | vpci
+file	arch/sparc64/dev/viommu.c		vpci
+
+# Starfire PC is needed for sbus and pci
+file	arch/sparc64/dev/starfire.c		sbus | psycho
 
 device	ebus {[addr = -1]}: pcibus
 attach	ebus at pci
@@ -125,8 +153,16 @@ device	eeprom
 attach	eeprom at sbus, ebus
 file	arch/sparc64/sparc64/clock.c
 
+device	cmp {}
+attach	cmp at mainbus
+file	arch/sparc64/dev/cmp.c			cmp
+
+device	core {}
+attach	core at cmp
+file	arch/sparc64/dev/core.c			core
+
 device	cpu
-attach	cpu at mainbus
+attach	cpu at mainbus, cmp, core
 file	arch/sparc64/sparc64/cpu.c
 
 device	auxio
@@ -240,6 +276,7 @@ file	arch/sparc64/sparc64/cache.c
 file	arch/sparc64/sparc64/conf.c
 file	arch/sparc64/sparc64/disksubr.c
 file	arch/sparc64/sparc64/emul.c
+file	arch/sparc64/sparc64/hvcall.S		sun4v
 file	arch/sparc64/sparc64/in_cksum.S		inet
 file	arch/sparc64/sparc64/in4_cksum.c	inet
 file	arch/sparc64/sparc64/intr.c
@@ -325,3 +362,17 @@ include "dev/gpio/files.gpio"
 # Machine-independent 1-Wire drivers
 #
 include "dev/onewire/files.onewire"
+
+# Virtual console
+device	vcons
+attach	vcons at vbus
+file	arch/sparc64/dev/vcons.c		vcons needs-flag
+
+# Virtual rtc
+device	vrtc
+attach	vrtc at vbus
+file	arch/sparc64/dev/vrtc.c			vrtc
+
+device	mgiic: i2cbus
+attach	mgiic at mainbus
+file	arch/sparc64/dev/mgiic.c		mgiic

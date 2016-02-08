@@ -1,4 +1,4 @@
-/*	$OpenBSD: ukbd.c,v 1.39 2008/01/24 14:50:38 robert Exp $	*/
+/*	$OpenBSD: ukbd.c,v 1.43 2008/06/26 05:42:18 ray Exp $	*/
 /*      $NetBSD: ukbd.c,v 1.85 2003/03/11 16:44:00 augustss Exp $        */
 
 /*
@@ -17,13 +17,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -113,11 +106,11 @@ const u_int8_t ukbd_trtab[256] = {
     0x7f, 0xd2, 0xc7, 0xc9, 0xd3, 0xcf, 0xd1, 0xcd, /* 48 - 4f */
     0xcb, 0xd0, 0xc8, 0x45, 0xb5, 0x37, 0x4a, 0x4e, /* 50 - 57 */
     0x9c, 0x4f, 0x50, 0x51, 0x4b, 0x4c, 0x4d, 0x47, /* 58 - 5f */
-    0x48, 0x49, 0x52, 0x53, 0x56, 0xdd,   NN, 0x59, /* 60 - 67 */
+    0x48, 0x49, 0x52, 0x53, 0x56, 0xdd, 0x84, 0x59, /* 60 - 67 */
     0x5d, 0x5e, 0x5f,   NN,   NN,   NN,   NN,   NN, /* 68 - 6f */
       NN,   NN,   NN,   NN, 0x97,   NN, 0x93, 0x95, /* 70 - 77 */
-    0x91, 0x92, 0x94, 0x9a, 0x96, 0x98, 0x99,   NN, /* 78 - 7f */
-      NN,   NN,   NN,   NN,   NN, 0x7e,   NN, 0x73, /* 80 - 87 */
+    0x91, 0x92, 0x94, 0x9a, 0x96, 0x98, 0x99, 0xa0, /* 78 - 7f */
+    0xb0, 0xae,   NN,   NN,   NN, 0x7e,   NN, 0x73, /* 80 - 87 */
     0x70, 0x7d, 0x79, 0x7b, 0x5c,   NN,   NN,   NN, /* 88 - 8f */
       NN,   NN, 0x78, 0x77, 0x76,   NN,   NN,   NN, /* 90 - 97 */
       NN,   NN,   NN,   NN,   NN,   NN,   NN,   NN, /* 98 - 9f */
@@ -735,12 +728,12 @@ ukbd_decode(struct ukbd_softc *sc, struct ukbd_data *ud)
 		s = spltty();
 		wskbd_rawinput(sc->sc_wskbddev, cbuf, j);
 		splx(s);
-		timeout_del(&sc->sc_rawrepeat_ch);
 		if (npress != 0) {
 			sc->sc_nrep = npress;
 			timeout_add(&sc->sc_rawrepeat_ch,
 			    hz * REP_DELAY1 / 1000);
-		}
+		} else
+			timeout_del(&sc->sc_rawrepeat_ch);
 		return;
 	}
 #endif
@@ -843,31 +836,12 @@ ukbd_hookup_bell(void (*fn)(void *, u_int, u_int, u_int, int), void *arg)
 	}
 }
 
-/*
- * This is a hack to work around some broken ports that don't call
- * cnpollc() before cngetc().
- */
-static int pollenter, warned;
-
 /* Console interface. */
 void
 ukbd_cngetc(void *v, u_int *type, int *data)
 {
 	struct ukbd_softc *sc = v;
 	int c;
-	int broken;
-
-	if (pollenter == 0) {
-		if (!warned) {
-			printf("\n"
-"This port is broken, it does not call cnpollc() before calling cngetc().\n"
-"This should be fixed, but it will work anyway (for now).\n");
-			warned = 1;
-		}
-		broken = 1;
-		ukbd_cnpollc(v, 1);
-	} else
-		broken = 0;
 
 	DPRINTFN(0,("ukbd_cngetc: enter\n"));
 	sc->sc_polling = 1;
@@ -881,8 +855,6 @@ ukbd_cngetc(void *v, u_int *type, int *data)
 	*type = c & RELEASE ? WSCONS_EVENT_KEY_UP : WSCONS_EVENT_KEY_DOWN;
 	*data = c & CODEMASK;
 	DPRINTFN(0,("ukbd_cngetc: return 0x%02x\n", c));
-	if (broken)
-		ukbd_cnpollc(v, 0);
 }
 
 void
@@ -894,13 +866,10 @@ ukbd_cnpollc(void *v, int on)
 	DPRINTFN(2,("ukbd_cnpollc: sc=%p on=%d\n", v, on));
 
 	usbd_interface2device_handle(sc->sc_hdev.sc_parent->sc_iface, &dev);
-	if (on) {
+	if (on)
 		sc->sc_spl = splusb();
-		pollenter++;
-	} else {
+	else
 		splx(sc->sc_spl);
-		pollenter--;
-	}
 	usbd_set_polling(dev, on);
 }
 

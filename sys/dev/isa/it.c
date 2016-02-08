@@ -1,7 +1,7 @@
-/*	$OpenBSD: it.c,v 1.27 2007/12/24 14:07:47 form Exp $	*/
+/*	$OpenBSD: it.c,v 1.32 2008/04/07 17:50:37 form Exp $	*/
 
 /*
- * Copyright (c) 2007 Oleg Safiullin <form@pdp-11.org.ru>
+ * Copyright (c) 2007-2008 Oleg Safiullin <form@pdp-11.org.ru>
  * Copyright (c) 2006-2007 Juan Romero Pardines <juan@xtrarom.org>
  * Copyright (c) 2003 Julien Bordet <zejames@greyhats.org>
  * All rights reserved.
@@ -50,7 +50,7 @@ int it_match(struct device *, void *, void *);
 void it_attach(struct device *, struct device *, void *);
 u_int8_t it_readreg(bus_space_tag_t, bus_space_handle_t, int);
 void it_writereg(bus_space_tag_t, bus_space_handle_t, int, u_int8_t);
-void it_enter(bus_space_tag_t, bus_space_handle_t);
+void it_enter(bus_space_tag_t, bus_space_handle_t, int);
 void it_exit(bus_space_tag_t, bus_space_handle_t);
 
 u_int8_t it_ec_readreg(struct it_softc *, int);
@@ -58,6 +58,16 @@ void it_ec_writereg(struct it_softc *, int, u_int8_t);
 void it_ec_refresh(void *arg);
 
 int it_wdog_cb(void *, int);
+
+/*
+ * IT87-compatible chips can typically measure voltages up to 4.096 V.
+ * To measure higher voltages the input is attenuated with (external)
+ * resistors.  Negative voltages are measured using a reference
+ * voltage.  So we have to convert the sensor values back to real
+ * voltages by applying the appropriate resistor factor.
+ */
+#define RFACT_NONE		10000
+#define RFACT(x, y)		(RFACT_NONE * ((x) + (y)) / (y))
 
 
 struct {
@@ -89,71 +99,54 @@ struct {
 	{ SENSOR_VOLTS_DC,	"VBAT"		}
 };
 
-#define RFACT_NONE		10000
-#define RFACT(x, y)		(RFACT_NONE * ((x) + (y)) / (y))
-
+/* rfact values for voltage sensors */
 int it_vrfact[IT_VOLT_COUNT] = {
-	RFACT_NONE, RFACT_NONE, RFACT_NONE, RFACT(68, 100), RFACT(30, 10),
-	RFACT(21, 10), RFACT(83, 20),
-	RFACT(68, 100), RFACT_NONE
+	RFACT_NONE,		/* VCORE_A	*/
+	RFACT_NONE,		/* VCORE_A	*/
+	RFACT_NONE,		/* +3.3V	*/
+	RFACT(68, 100),		/* +5V		*/
+	RFACT(30, 10),		/* +12V		*/
+	RFACT(21, 10),		/* -5V		*/
+	RFACT(83, 20),		/* -12V		*/
+	RFACT(68, 100),		/* +5VSB	*/
+	RFACT_NONE		/* VBAT		*/
 };
 
-int it_found;
+LIST_HEAD(, it_softc) it_softc_list = LIST_HEAD_INITIALIZER(&it_softc_list);
 
 
 int
 it_match(struct device *parent, void *match, void *aux)
 {
 	struct isa_attach_args *ia = aux;
+	struct it_softc *sc;
 	bus_space_handle_t ioh;
-	bus_addr_t iobase;
+	int ec_iobase, found = 0;
 	u_int16_t cr;
 
-	if (it_found || ia->ipa_io[0].base == IOBASEUNK)
-		return (0);
-
-	/* map EC i/o space */
-	if (bus_space_map(ia->ia_iot, ia->ipa_io[0].base, 8, 0, &ioh) != 0) {
-		DPRINTF(("it_probe: can't map EC i/o space"));
-		return (0);
-	}
-
-	/* get vendor id */
-	bus_space_write_1(ia->ia_iot, ioh, IT_EC_ADDR, IT_EC_VENDID);
-	cr = bus_space_read_1(ia->ia_iot, ioh, IT_EC_DATA);
-
-	/* unmap EC i/o space */
-	bus_space_unmap(ia->ia_iot, ioh, 8);
-
-	/* check for ITE vendor ID */
-	if (cr != IT_VEND_ITE)
+	if (ia->ipa_io[0].base != IO_IT1 && ia->ipa_io[0].base != IO_IT2)
 		return (0);
 
 	/* map i/o space */
-	if (bus_space_map(ia->ia_iot, IO_IT, 2, 0, &ioh) != 0) {
-		DPRINTF(("it_probe: can't map i/o space"));
+	if (bus_space_map(ia->ia_iot, ia->ipa_io[0].base, 2, 0, &ioh) != 0) {
+		DPRINTF(("it_match: can't map i/o space"));
 		return (0);
 	}
 
 	/* enter MB PnP mode */
-	it_enter(ia->ia_iot, ioh);
+	it_enter(ia->ia_iot, ioh, ia->ipa_io[0].base);
+
+	/*
+	 * SMSC or similar SuperIO chips use 0x55 magic to enter PnP mode
+	 * and 0xaa to exit. These chips also enter PnP mode via ITE
+	 * `enter MB PnP mode' sequence, so force chip to exit PnP mode
+	 * if this is the case.
+	 */
+	bus_space_write_1(ia->ia_iot, ioh, IT_IO_ADDR, 0xaa);
 
 	/* get chip id */
 	cr = it_readreg(ia->ia_iot, ioh, IT_CHIPID1) << 8;
 	cr |= it_readreg(ia->ia_iot, ioh, IT_CHIPID2);
-
-	/* get environment controller base address */
-	it_writereg(ia->ia_iot, ioh, IT_LDN, IT_EC_LDN);
-	iobase = it_readreg(ia->ia_iot, ioh, IT_EC_MSB) << 8;
-	iobase |= it_readreg(ia->ia_iot, ioh, IT_EC_LSB);
-
-	/* exit MB PnP mode and unmap */
-	it_exit(ia->ia_iot, ioh);
-	bus_space_unmap(ia->ia_iot, ioh, 2);
-
-	/* check if EC i/o base address match */
-	if (ia->ipa_io[0].base != iobase)
-		return (0);
 
 	switch (cr) {
 	case IT_ID_8705:
@@ -161,15 +154,33 @@ it_match(struct device *parent, void *match, void *aux)
 	case IT_ID_8716:
 	case IT_ID_8718:
 	case IT_ID_8726:
-		ia->ipa_nio = 1;
-		ia->ipa_io[0].length = 8;
-		ia->ipa_nmem = ia->ipa_nirq = ia->ipa_ndrq = 0;
+		/* get environment controller base address */
+		it_writereg(ia->ia_iot, ioh, IT_LDN, IT_EC_LDN);
+		ec_iobase = it_readreg(ia->ia_iot, ioh, IT_EC_MSB) << 8;
+		ec_iobase |= it_readreg(ia->ia_iot, ioh, IT_EC_LSB);
+
+		/* check if device already attached */
+		LIST_FOREACH(sc, &it_softc_list, sc_list)
+			if (sc->sc_ec_iobase == ec_iobase)
+				break;
+
+		if (sc == NULL) {
+			ia->ipa_nio = 1;
+			ia->ipa_io[0].length = 2;
+			ia->ipa_nmem = ia->ipa_nirq = ia->ipa_ndrq = 0;
+			found++;
+		}
+
 		break;
-	default:
-		return (0);
 	}
 
-	return (1);
+	/* exit MB PnP mode */
+	it_exit(ia->ia_iot, ioh);
+
+	/* unmap i/o space */
+	bus_space_unmap(ia->ia_iot, ioh, 2);
+
+	return (found);
 }
 
 void
@@ -181,37 +192,51 @@ it_attach(struct device *parent, struct device *self, void *aux)
 	u_int8_t cr;
 
 	sc->sc_iot = ia->ia_iot;
-	if (bus_space_map(sc->sc_iot, IO_IT, 2, 0, &sc->sc_ioh) != 0) {
+	sc->sc_iobase = ia->ipa_io[0].base;
+	if (bus_space_map(sc->sc_iot, sc->sc_iobase, 2, 0, &sc->sc_ioh) != 0) {
 		printf(": can't map i/o space\n");
 		return;
 	}
 
-	it_found++;
-
 	/* enter MB PnP mode */
-	it_enter(sc->sc_iot, sc->sc_ioh);
+	it_enter(sc->sc_iot, sc->sc_ioh, sc->sc_iobase);
 
 	/* get chip id and rev */
 	sc->sc_chipid = it_readreg(sc->sc_iot, sc->sc_ioh, IT_CHIPID1) << 8;
 	sc->sc_chipid |= it_readreg(sc->sc_iot, sc->sc_ioh, IT_CHIPID2);
 	sc->sc_chiprev = it_readreg(sc->sc_iot, sc->sc_ioh, IT_CHIPREV);
 
+	/* get environment controller base address */
+	it_writereg(sc->sc_iot, sc->sc_ioh, IT_LDN, IT_EC_LDN);
+	sc->sc_ec_iobase = it_readreg(sc->sc_iot, sc->sc_ioh, IT_EC_MSB) << 8;
+	sc->sc_ec_iobase |= it_readreg(sc->sc_iot, sc->sc_ioh, IT_EC_LSB);
+
 	/* initialize watchdog */
 	if (sc->sc_chipid != IT_ID_8705) {
 		it_writereg(sc->sc_iot, sc->sc_ioh, IT_LDN, IT_WDT_LDN);
 		it_writereg(sc->sc_iot, sc->sc_ioh, IT_WDT_CSR, 0x00);
-		it_writereg(sc->sc_iot, sc->sc_ioh, IT_WDT_TCR, 0x80);
+		it_writereg(sc->sc_iot, sc->sc_ioh, IT_WDT_TCR,
+		    IT_WDT_TCR_SECS);
 		wdog_register(sc, it_wdog_cb);
 	}
 
 	/* exit MB PnP mode and unmap */
 	it_exit(sc->sc_iot, sc->sc_ioh);
 
-	printf(": IT%xF rev 0x%02x\n", sc->sc_chipid, sc->sc_chiprev);
+	LIST_INSERT_HEAD(&it_softc_list, sc, sc_list);
+
+	printf(": IT%xF rev 0x%02x", sc->sc_chipid, sc->sc_chiprev);
+
+	if (sc->sc_ec_iobase == 0) {
+		printf(", EC disabled\n");
+		return;
+	}
+
+	printf(", EC port 0x%x\n", sc->sc_ec_iobase);
 
 	/* map environment controller i/o space */
 	sc->sc_ec_iot = ia->ia_iot;
-	if (bus_space_map(sc->sc_ec_iot, ia->ipa_io[0].base, 8, 0,
+	if (bus_space_map(sc->sc_ec_iot, sc->sc_ec_iobase, 8, 0,
 	    &sc->sc_ec_ioh) != 0) {
 		printf("%s: can't map EC i/o space\n", sc->sc_dev.dv_xname);
 		return;
@@ -222,9 +247,8 @@ it_attach(struct device *parent, struct device *self, void *aux)
 		sc->sc_sensors[i].type = it_sensors[i].type;
 
 		if (it_sensors[i].desc != NULL)
-			snprintf(sc->sc_sensors[i].desc,
-			    sizeof(sc->sc_sensors[i].desc),
-			    it_sensors[i].desc); 
+			strlcpy(sc->sc_sensors[i].desc, it_sensors[i].desc,
+			    sizeof(sc->sc_sensors[i].desc));
 	}
 
 	/* register update task */
@@ -262,12 +286,15 @@ it_writereg(bus_space_tag_t iot, bus_space_handle_t ioh, int r, u_int8_t v)
 }
 
 void
-it_enter(bus_space_tag_t iot, bus_space_handle_t ioh)
+it_enter(bus_space_tag_t iot, bus_space_handle_t ioh, int iobase)
 {
 	bus_space_write_1(iot, ioh, IT_IO_ADDR, 0x87);
 	bus_space_write_1(iot, ioh, IT_IO_ADDR, 0x01);
 	bus_space_write_1(iot, ioh, IT_IO_ADDR, 0x55);
-	bus_space_write_1(iot, ioh, IT_IO_ADDR, 0x55);
+	if (iobase == IO_IT1)
+		bus_space_write_1(iot, ioh, IT_IO_ADDR, 0x55);
+	else
+		bus_space_write_1(iot, ioh, IT_IO_ADDR, 0xaa);
 }
 
 void
@@ -384,11 +411,11 @@ it_wdog_cb(void *arg, int period)
 	struct it_softc *sc = arg;
 
 	/* enter MB PnP mode and select WDT device */
-	it_enter(sc->sc_iot, sc->sc_ioh);
+	it_enter(sc->sc_iot, sc->sc_ioh, sc->sc_iobase);
 	it_writereg(sc->sc_iot, sc->sc_ioh, IT_LDN, IT_WDT_LDN);
 
 	/* disable watchdog timeout */
-	it_writereg(sc->sc_iot, sc->sc_ioh, IT_WDT_TCR, 0x80);
+	it_writereg(sc->sc_iot, sc->sc_ioh, IT_WDT_TCR, IT_WDT_TCR_SECS);
 
 	/* 1000s should be enough for everyone */
 	if (period > 1000)
@@ -397,12 +424,13 @@ it_wdog_cb(void *arg, int period)
 		period = 0;
 
 	/* set watchdog timeout */
-	it_writereg(sc->sc_iot, sc->sc_ioh, IT_WDT_MSB, period >> 8);
-	it_writereg(sc->sc_iot, sc->sc_ioh, IT_WDT_LSB, period & 0xff);
+	it_writereg(sc->sc_iot, sc->sc_ioh, IT_WDT_TMO_MSB, period >> 8);
+	it_writereg(sc->sc_iot, sc->sc_ioh, IT_WDT_TMO_LSB, period & 0xff);
 
 	if (period > 0)
 		/* enable watchdog timeout */
-		it_writereg(sc->sc_iot, sc->sc_ioh, IT_WDT_TCR, 0xc0);
+		it_writereg(sc->sc_iot, sc->sc_ioh, IT_WDT_TCR,
+		    IT_WDT_TCR_SECS | IT_WDT_TCR_KRST);
 
 	/* exit MB PnP mode */
 	it_exit(sc->sc_iot, sc->sc_ioh);

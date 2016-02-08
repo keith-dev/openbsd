@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.7 2007/06/06 17:15:12 deraadt Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.12 2008/06/27 17:22:14 miod Exp $	*/
 
 /*
  * Copyright (c) 2005 Michael Shalayeff
@@ -48,6 +48,7 @@
 
 #include <uvm/uvm.h>
 #include <uvm/uvm_page.h>
+#include <uvm/uvm_swap.h>
 
 #include <dev/cons.h>
 #include <dev/clock_subr.h>
@@ -254,8 +255,8 @@ TODO hpmc/toc/pfr
 	avail_end = trunc_page(PAGE0->imm_max_mem);
 	if (avail_end > 0x4000000)
 		avail_end = 0x4000000;
-	physmem = btoc(avail_end);
-	resvmem = btoc(((vaddr_t)&kernel_text));
+	physmem = atop(avail_end);
+	resvmem = atop(((vaddr_t)&kernel_text));
 
 	/* we hope this won't fail */
 	hppa_ex = extent_create("mem", 0, HPPA_PHYSMAP, M_DEVBUF,
@@ -395,7 +396,7 @@ cpu_startup(void)
 	 */
 	printf("%s%s\n", version, cpu_model);
 	printf("real mem = %u (%u reserved for PROM, %u used by OpenBSD)\n",
-	    ctob(physmem), ctob(resvmem), ctob(resvphysmem - resvmem));
+	    ptoa(physmem), ptoa(resvmem), ptoa(resvphysmem - resvmem));
 
 	/*
 	 * Determine how many buffers to allocate.
@@ -645,6 +646,7 @@ boot(howto)
 
 		/* XXX probably save howto into stable storage */
 
+		uvm_shutdown();
 		splhigh();
 
 		if (howto & RB_DUMP)
@@ -672,6 +674,10 @@ boot(howto)
 	} else {
 		printf("rebooting...");
 		DELAY(2000000);
+
+		/* ask firmware to reset */
+                pdc_call((iodcio_t)pdc, 0, PDC_BROADCAST_RESET, PDC_DO_RESET);
+
 		__asm __volatile(".export hppa_reset, entry\n\t"
 		    ".label hppa_reset");
 		__asm __volatile("stwas %0, 0(%1)"
@@ -763,6 +769,10 @@ dumpsys(void)
 	}
 	printf("\ndumping to dev %x, offset %ld\n", dumpdev, dumplo);
 
+#ifdef UVM_SWAP_ENCRYPT
+	uvm_swap_finicrypt_all();
+#endif
+
 	psize = (*bdevsw[major(dumpdev)].d_psize)(dumpdev);
 	printf("dump ");
 	if (psize == -1) {
@@ -772,7 +782,7 @@ dumpsys(void)
 
 	if (!(error = cpu_dump())) {
 
-		bytes = ctob(physmem);
+		bytes = ptoa(physmem);
 		maddr = NULL;
 		blkno = dumplo + cpu_dumpsize();
 		dump = bdevsw[major(dumpdev)].d_dump;
@@ -1125,12 +1135,9 @@ cpu_sysctl(name, namelen, oldp, oldlenp, newp, newlen, p)
 void
 consinit(void)
 {
-	static int initted;
-
-	if (!initted) {
-		initted++;
-		cninit();
-	}
+	/*
+	 * Initial console setup has been done in pdc_init().
+	 */
 }
 
 #ifdef DIAGNOSTIC

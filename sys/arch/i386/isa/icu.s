@@ -1,4 +1,4 @@
-/*	$OpenBSD: icu.s,v 1.25 2007/05/25 21:27:15 krw Exp $	*/
+/*	$OpenBSD: icu.s,v 1.29 2008/05/21 18:49:47 kettenis Exp $	*/
 /*	$NetBSD: icu.s,v 1.45 1996/01/07 03:59:34 mycroft Exp $	*/
 
 /*-
@@ -33,11 +33,9 @@
 #include <net/netisr.h>
 
 	.data
-	.globl	_C_LABEL(imen),_C_LABEL(ipending),_C_LABEL(netisr)
+	.globl	_C_LABEL(imen),_C_LABEL(netisr)
 _C_LABEL(imen):
 	.long	0xffff		# interrupt mask enable (all off)
-_C_LABEL(ipending):
-	.long	0		# interrupts pending
 _C_LABEL(netisr):
 	.long	0		# scheduling bits for network
 
@@ -60,11 +58,11 @@ IDTVEC(spllower)
 	shrl	$4,%eax			# find its mask.
 	movl	_C_LABEL(iunmask)(,%eax,4),%eax
 	cli
-	andl	_C_LABEL(ipending),%eax		# any non-masked bits left?
+	andl	CPUVAR(IPENDING),%eax	# any non-masked bits left?
 	jz	2f
 	sti
 	bsfl	%eax,%eax
-	btrl	%eax,_C_LABEL(ipending)
+	btrl	%eax,CPUVAR(IPENDING)
 	jnc	1b
 	jmp	*_C_LABEL(Xrecurse)(,%eax,4)
 2:	movl	%ebx,CPL
@@ -89,11 +87,11 @@ IDTVEC(doreti)
 	shrl	$4,%eax
 	movl	_C_LABEL(iunmask)(,%eax,4),%eax
 	cli
-	andl	_C_LABEL(ipending),%eax
+	andl	CPUVAR(IPENDING),%eax
 	jz	2f
 	sti
 	bsfl    %eax,%eax               # slow, but not worth optimizing
-	btrl    %eax,_C_LABEL(ipending)
+	btrl    %eax,CPUVAR(IPENDING)
 	jnc     1b			# some intr cleared the in-memory bit
 	cli
 	jmp	*_C_LABEL(Xresume)(,%eax,4)
@@ -121,26 +119,18 @@ IDTVEC(doreti)
  * Soft interrupt handlers
  */
 
-#include "pccom.h"
-
-IDTVEC(softast)
-	movl	$IPL_SOFTAST,%eax
-	movl	%eax,CPL
-	sti
-	jmp	*%esi
-
 IDTVEC(softtty)
-#if NPCCOM > 0
 	movl	$IPL_SOFTTTY,%eax
 	movl	%eax,CPL
 	sti
 #ifdef MULTIPROCESSOR
 	call	_C_LABEL(i386_softintlock)
 #endif
-	call	_C_LABEL(comsoft)
+	pushl	$I386_SOFTINTR_SOFTTTY
+	call	_C_LABEL(softintr_dispatch)
+	addl	$4,%esp
 #ifdef MULTIPROCESSOR	
 	call	_C_LABEL(i386_softintunlock)
-#endif
 #endif
 	jmp	*%esi
 
@@ -160,7 +150,12 @@ IDTVEC(softnet)
 #endif
 	xorl	%edi,%edi
 	xchgl	_C_LABEL(netisr),%edi
+
 #include <net/netisr_dispatch.h>
+
+	pushl	$I386_SOFTINTR_SOFTNET
+	call	_C_LABEL(softintr_dispatch)
+	addl	$4,%esp
 #ifdef MULTIPROCESSOR	
 	call	_C_LABEL(i386_softintunlock)
 #endif
@@ -174,7 +169,9 @@ IDTVEC(softclock)
 #ifdef MULTIPROCESSOR
 	call	_C_LABEL(i386_softintlock)
 #endif
-	call	_C_LABEL(softclock)
+	pushl	$I386_SOFTINTR_SOFTCLOCK
+	call	_C_LABEL(softintr_dispatch)
+	addl	$4,%esp
 #ifdef MULTIPROCESSOR	
 	call	_C_LABEL(i386_softintunlock)
 #endif

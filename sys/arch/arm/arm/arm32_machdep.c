@@ -1,4 +1,4 @@
-/*	$OpenBSD: arm32_machdep.c,v 1.27 2007/05/30 17:13:29 miod Exp $	*/
+/*	$OpenBSD: arm32_machdep.c,v 1.29 2008/05/04 09:57:46 martin Exp $	*/
 /*	$NetBSD: arm32_machdep.c,v 1.42 2003/12/30 12:33:15 pk Exp $	*/
 
 /*
@@ -273,20 +273,11 @@ cpu_startup()
 	 */
 
 	/* msgbufphys was setup during the secondary boot strap */
-	for (loop = 0; loop < btoc(MSGBUFSIZE); ++loop)
+	for (loop = 0; loop < atop(MSGBUFSIZE); ++loop)
 		pmap_kenter_pa((vaddr_t)msgbufaddr + loop * PAGE_SIZE,
 		    msgbufphys + loop * PAGE_SIZE, VM_PROT_READ|VM_PROT_WRITE);
 	pmap_update(pmap_kernel());
 	initmsgbuf(msgbufaddr, round_page(MSGBUFSIZE));
-
-	/*
-	 * Look at arguments passed to us and compute boothowto.
-	 * Default to SINGLE and ASKNAME if no args or
-	 * SINGLE and DFLTROOT if this is a ramdisk kernel.
-	 */
-#ifdef RAMDISK_HOOKS
-	boothowto = RB_SINGLE | RB_DFLTROOT;
-#endif /* RAMDISK_HOOKS */
 
 	/*
 	 * Identify ourselves for the msgbuf (everything printed earlier will
@@ -294,8 +285,8 @@ cpu_startup()
 	 */
 	printf(version);
 
-	printf("real mem  = %u (%uMB)\n", ctob(physmem),
-	    ctob(physmem)/1024/1024);
+	printf("real mem  = %u (%uMB)\n", ptoa(physmem),
+	    ptoa(physmem)/1024/1024);
 
 	/*
 	 * Find out how much space we need, allocate it,

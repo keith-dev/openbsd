@@ -1,4 +1,4 @@
-/*	$OpenBSD: arcbios.c,v 1.5 2008/02/19 13:18:50 jsing Exp $	*/
+/*	$OpenBSD: arcbios.c,v 1.7 2008/03/27 15:11:37 jsing Exp $	*/
 /*-
  * Copyright (c) 1996 M. Warner Losh.  All rights reserved.
  * Copyright (c) 1996-2004 Opsycon AB.  All rights reserved.
@@ -34,15 +34,15 @@
 
 #define	USE_SGI_PARTITIONS	1
 
-void bios_configure_memory(void);
-int bios_get_system_type(void);
+int	bios_is_32bit;
+
+void	bios_configure_memory(void);
+int	bios_get_system_type(void);
 const char *bios_get_path_component(const char *, char *, int *);
 
-arc_dsp_stat_t	displayinfo;		/* Save area for display status info. */
-
 static struct systypes {
-	char *sys_vend;		/* Vendor ID if name is ambigous */
-	char *sys_name;		/* May be left NULL if name is sufficient */
+	char *sys_vend;		/* Vendor ID if name is ambiguous. */
+	char *sys_name;		/* May be left NULL if name is sufficient. */
 	int  sys_type;
 } sys_types[] = {
     { NULL,		"PICA-61",			ACER_PICA_61 },
@@ -58,13 +58,15 @@ static struct systypes {
     { NULL,		"SGI-IP22",			SGI_INDY },
     { NULL,		"SGI-IP25",			SGI_POWER10 },
     { NULL,		"SGI-IP26",			SGI_POWERI },
-    { NULL,		"SGI-IP32",			SGI_O2 },
+    { NULL,		"SGI-IP27",			SGI_O200 },
+    { NULL,		"SGI-IP30",			SGI_OCTANE },
+    { NULL,		"SGI-IP32",			SGI_O2 }
 };
 
 #define KNOWNSYSTEMS (sizeof(sys_types) / sizeof(struct systypes))
 
 /*
- *	ARC Bios trampoline code.
+ * ARCBios trampoline code.
  */
 #define ARC_Call(Name,Offset)	\
 __asm__("\n"			\
@@ -119,110 +121,111 @@ ARC_Call(Bios_TestUnicodeCharacter,	0x8c);
 ARC_Call(Bios_GetDisplayStatus,		0x90);
 
 /*
- *	Simple getchar/putchar interface.
+ * Simple getchar/putchar interface.
  */
 
 int
 getchar()
 {
 	char buf[4];
-	int  cnt;
+	int cnt;
 
 	if (Bios_Read(0, &buf[0], 1, &cnt) != 0)
-		return(-1);
-	return(buf[0] & 255);
+		return (-1);
+
+	return (buf[0] & 255);
 }
 
 void
-putchar(c)
-char c;
+putchar(int c)
 {
 	char buf[4];
-	int  cnt;
+	int cnt;
 
 	if (c == '\n') {
 		buf[0] = '\r';
 		buf[1] = c;
 		cnt = 2;
-		if (displayinfo.CursorYPosition < displayinfo.CursorMaxYPosition)
-			displayinfo.CursorYPosition++;
-	}
-	else {
+	} else {
 		buf[0] = c;
 		cnt = 1;
 	}
+
 	Bios_Write(1, &buf[0], cnt, &cnt);
 }
 
-void
-bios_putstring(s)
-char *s;
-{
-	while (*s) {
-		putchar(*s++);
-	}
-}
-
 /*
- * Find out system type.
+ * Identify system type.
  */
 int
 bios_get_system_type()
 {
-	arc_config_t	*cf;
-	arc_sid_t	*sid;
-	int		i;
+	arc_config_t *cf;
+	arc_sid_t *sid;
+	char *sysid;
+	int i, sysid_len;
 
-	if ((ArcBiosBase32->magic != ARC_PARAM_BLK_MAGIC) &&
-	    (ArcBiosBase32->magic != ARC_PARAM_BLK_MAGIC_BUG)) {
-		return(-1);	/* This is not an ARC system */
-	}
+	/*
+	 * Figure out if this is an ARCBios machine and if it is, see if we're
+	 * dealing with a 32 or 64 bit version.
+	 */
+	if ((ArcBiosBase32->magic == ARC_PARAM_BLK_MAGIC) ||
+	    (ArcBiosBase32->magic == ARC_PARAM_BLK_MAGIC_BUG)) {
+		bios_is_32bit = 1;
+		printf("ARCS32 Firmware Version %d.%d\n",
+		    ArcBiosBase32->version, ArcBiosBase32->revision);
+	} else if ((ArcBiosBase64->magic == ARC_PARAM_BLK_MAGIC) ||
+	    (ArcBiosBase64->magic == ARC_PARAM_BLK_MAGIC_BUG)) {
+		bios_is_32bit = 0;
+		printf("ARCS64 Firmware Version %d.%d\n",
+		    ArcBiosBase64->version, ArcBiosBase64->revision);
+	} else
+		return (-1);	/* XXX BAD BAD BAD!!! */
 
 	sid = (arc_sid_t *)Bios_GetSystemId();
+
 	cf = (arc_config_t *)Bios_GetChild(NULL);
-	if (cf) {
-		for (i = 0; i < KNOWNSYSTEMS; i++) {
-			if (strcmp(sys_types[i].sys_name, (char *)cf->id) != 0)
-				continue;
-			if (sys_types[i].sys_vend &&
-			    strncmp(sys_types[i].sys_vend, sid->vendor, 8) != 0)
-				continue;
-			return (sys_types[i].sys_type);	/* Found it. */
+	if (cf != NULL) {
+		if (bios_is_32bit) {
+			sysid = (char *)(long)cf->id;
+			sysid_len = cf->id_len;
+		} else {
+			sysid = (char *)((arc_config64_t *)cf)->id;
+			sysid_len = ((arc_config64_t *)cf)->id_len;
 		}
+
+		if (sysid_len > 0 && sysid != NULL) {
+			sysid_len--;
+			for (i = 0; i < KNOWNSYSTEMS; i++) {
+				if (strlen(sys_types[i].sys_name) !=sysid_len)
+					continue;
+				if (strncmp(sys_types[i].sys_name, sysid,
+				    sysid_len) != 0)
+					continue;
+				if (sys_types[i].sys_vend &&
+				    strncmp(sys_types[i].sys_vend, sid->vendor,
+				      8) != 0)
+					continue;
+				return (sys_types[i].sys_type);	/* Found it. */
+			}
+		}
+	} else {
+#if defined(TGT_ORIGIN200) || defined(TGT_ORIGIN2000)
+		if (IP27_KLD_KLCONFIG(0)->magic == IP27_KLDIR_MAGIC) {
+			/* If we find a kldir assume IP27. */
+			return (SGI_O200);
+		}
+#endif
 	}
 
-	bios_putstring("UNIDENTIFIED SYSTEM `");
-	if (cf)
-		bios_putstring((char *)cf->id);
-	else
-		bios_putstring("????????");
-	bios_putstring("' VENDOR `");
-	sid->vendor[8] = 0;
-	bios_putstring(sid->vendor);
-	bios_putstring("'. Please contact OpenBSD (www.openbsd.org).\n");
-	bios_putstring("Reset system to restart!\n");
-	while(1);
+	printf("UNRECOGNIZED SYSTEM '%s' VENDOR '%8.8s' PRODUCT '%8.8s'\n",
+	    cf == NULL ? "??" : sysid, sid->vendor, sid->prodid);
+	printf("See www.openbsd.org for further information.\n");
+	printf("Halting system!\n");
+	Bios_Halt();
+	printf("Halting failed, use manual reset!\n");
+	while (1);
 }
-
-/*
- * Return geometry of the display. Used by pccons.c to set up the
- * display configuration.
- */
-void
-bios_display_info(xpos, ypos, xsize, ysize)
-    int	*xpos;
-    int	*ypos;
-    int *xsize;
-    int *ysize;
-{
-#ifdef __arc__
-	*xpos = displayinfo.CursorXPosition;
-	*ypos = displayinfo.CursorYPosition;
-	*xsize = displayinfo.CursorMaxXPosition;
-	*ysize = displayinfo.CursorMaxYPosition;
-#endif
-}
-
 
 /*
  *  Decompose the device pathname and find driver.
@@ -241,7 +244,7 @@ devopen(struct open_file *f, const char *fname, char **file)
 	ecp = cp = fname;
 
 	/*
-	 *  Scan the component list and find device and partition.
+	 * Scan the component list and find device and partition.
 	 */
 	while ((ncp = bios_get_path_component(cp, namebuf, &i)) != NULL) {
 		if (strcmp(namebuf, "partition") == 0) {
@@ -251,7 +254,7 @@ devopen(struct open_file *f, const char *fname, char **file)
 		} else
 			ecp = ncp;
 
-		/* XXX do this with a table if more devs are added */
+		/* XXX Do this with a table if more devs are added. */
 		if (strcmp(namebuf, "scsi") == 0)
 			strncpy(devname, namebuf, sizeof(devname)); 
 
@@ -262,7 +265,7 @@ devopen(struct open_file *f, const char *fname, char **file)
 	namebuf[ecp - fname] = '\0';
 
 	/*
-	 *  Dig out the driver.
+	 * Dig out the driver.
 	 */
 	dp = devsw;
 	n = ndevs;
@@ -278,19 +281,18 @@ devopen(struct open_file *f, const char *fname, char **file)
 		}
 		dp++;
 	}
-	return ENXIO;
+	return (ENXIO);
 }
 
 const char *
 bios_get_path_component(const char *p, char *comp, int *no)
 {
-	while (*p && *p != '(') {
+	while (*p && *p != '(')
 		*comp++ = *p++;
-	}
 	*comp = '\0';
 
 	if (*p == NULL)
-		return NULL;
+		return (NULL);
 
 	*no = 0;
 	p++;
@@ -298,7 +300,7 @@ bios_get_path_component(const char *p, char *comp, int *no)
 		if (*p >= '0' && *p <= '9')
 			*no = *no * 10 + *p++ - '0';
 		else
-			return NULL;
+			return (NULL);
 	}
-	return ++p;
+	return (++p);
 }

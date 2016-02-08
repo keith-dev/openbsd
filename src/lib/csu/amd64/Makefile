@@ -1,7 +1,9 @@
-#	$OpenBSD: Makefile,v 1.1 2004/01/28 01:46:17 mickey Exp $
+#	$OpenBSD: Makefile,v 1.3 2008/07/28 14:17:00 kurt Exp $
 
 CFLAGS+=	-DLIBC_SCCS -fno-omit-frame-pointer
-OBJS=		crt0.o gcrt0.o crtbegin.o crtend.o crtbeginS.o crtendS.o
+OBJS=		crt0.o gcrt0.o
+OBJS+=		crtbegin.o crtend.o
+OBJS+=		crtbeginS.o crtendS.o
 SRCS=		crt0.c crtbegin.c crtbeginS.c crtend.c crtendS.c
 
 ELFDIR=		${.CURDIR}/../common_elf

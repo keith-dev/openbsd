@@ -1,4 +1,4 @@
-/*	$OpenBSD: init_main.c,v 1.148 2008/01/01 16:31:42 miod Exp $	*/
+/*	$OpenBSD: init_main.c,v 1.150 2008/06/09 07:07:16 djm Exp $	*/
 /*	$NetBSD: init_main.c,v 1.84.4.1 1996/06/02 09:08:06 mrg Exp $	*/
 
 /*
@@ -396,7 +396,7 @@ main(void *framep)
 	{
 		volatile long newguard[8];
 
-		arc4random_bytes((long *)newguard, sizeof(newguard));
+		arc4random_buf((long *)newguard, sizeof(newguard));
 
 		for (i = sizeof(__guard)/sizeof(__guard[0]) - 1; i; i--)
 			__guard[i] = newguard[i];
@@ -446,9 +446,9 @@ main(void *framep)
 	/* Configure root/swap devices */
 	diskconf();
 
-	/* Mount the root file system. */
-	if (vfs_mountroot())
+	if (mountroot == NULL || ((*mountroot)() != 0))
 		panic("cannot mount root");
+
 	CIRCLEQ_FIRST(&mountlist)->mnt_flag |= MNT_ROOTFS;
 
 	/* Get the vnode for '/'.  Set p->p_fd->fd_cdir to reference it. */

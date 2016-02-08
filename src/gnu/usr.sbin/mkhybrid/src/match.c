@@ -12,11 +12,10 @@
  */
 #endif /* APPLE_HYB */
 
-static char rcsid[] ="$Id: match.c,v 1.2 2002/11/03 20:27:03 pvalchev Exp $";
-
 #include "config.h"
 #include <prototyp.h>
 #include <stdio.h>
+#include <fnmatch.h>
 #ifndef VMS
 #ifdef HAVE_MALLOC_H
 #include <malloc.h>
@@ -31,11 +30,7 @@ static char rcsid[] ="$Id: match.c,v 1.2 2002/11/03 20:27:03 pvalchev Exp $";
 #define MAXMATCH 1000
 static char *mat[MAXMATCH];
 
-#ifdef APPLE_HYB
 int  add_match(fn)
-#else
-void add_match(fn)
-#endif /* APPLE_HYB */
 char * fn;
 {
   register int i;
@@ -65,7 +60,7 @@ char * fn;
   register int i;
 
   for (i=0; mat[i] && i<MAXMATCH; i++) {
-    if (fnmatch(mat[i], fn, FNM_FILE_NAME) != FNM_NOMATCH) {
+    if (fnmatch(mat[i], fn, FNM_PATHNAME) != FNM_NOMATCH) {
       return 1; /* found -> excluded filenmae */
     }
   }
@@ -76,11 +71,7 @@ char * fn;
 
 static char *i_mat[MAXMATCH];
 
-#ifdef APPLE_HYB
 int  i_add_match(fn)
-#else
-void i_add_match(fn)
-#endif /* APPLE_HYB */
 char * fn;
 {
   register int i;
@@ -88,17 +79,19 @@ char * fn;
   for (i=0; i_mat[i] && i<MAXMATCH; i++);
   if (i == MAXMATCH) {
     fprintf(stderr,"Can't exclude RE '%s' - too many entries in table\n",fn);
-    return;
+    return 1;
   }
 
  
   i_mat[i] = (char *) malloc(strlen(fn)+1);
   if (! i_mat[i]) {
     fprintf(stderr,"Can't allocate memory for excluded filename\n");
-    return;
+    return 1;
   }
 
   strcpy(i_mat[i],fn);
+
+  return 0;
 }
 
 int i_matches(fn)
@@ -108,7 +101,7 @@ char * fn;
   register int i;
 
   for (i=0; i_mat[i] && i<MAXMATCH; i++) {
-    if (fnmatch(i_mat[i], fn, FNM_FILE_NAME) != FNM_NOMATCH) {
+    if (fnmatch(i_mat[i], fn, FNM_PATHNAME) != FNM_NOMATCH) {
       return 1; /* found -> excluded filenmae */
     }
   }
@@ -124,11 +117,7 @@ intptr_t i_ishidden()
 
 static char *j_mat[MAXMATCH];
 
-#ifdef APPLE_HYB
 int  j_add_match(fn)
-#else
-void j_add_match(fn)
-#endif /* APPLE_HYB */
 char * fn;
 {
   register int i;
@@ -158,7 +147,7 @@ char * fn;
   register int i;
 
   for (i=0; j_mat[i] && i<MAXMATCH; i++) {
-    if (fnmatch(j_mat[i], fn, FNM_FILE_NAME) != FNM_NOMATCH) {
+    if (fnmatch(j_mat[i], fn, FNM_PATHNAME) != FNM_NOMATCH) {
       return 1; /* found -> excluded filenmae */
     }
   }
@@ -228,7 +217,7 @@ char * fn;
   register int i;
 
   for (i=0; hfs_mat[i] && i<MAXMATCH; i++) {
-    if (fnmatch(hfs_mat[i], fn, FNM_FILE_NAME) != FNM_NOMATCH) {
+    if (fnmatch(hfs_mat[i], fn, FNM_PATHNAME) != FNM_NOMATCH) {
       return 1; /* found -> excluded filenmae */
     }
   }

@@ -1,4 +1,4 @@
-/*	$OpenBSD: probe.c,v 1.10 2003/10/05 15:29:28 deraadt Exp $	*/
+/*	$OpenBSD: probe.c,v 1.12 2008/03/24 16:11:05 deraadt Exp $	*/
 /*	$KAME: probe.c,v 1.16 2002/06/10 20:00:36 itojun Exp $	*/
 
 /*

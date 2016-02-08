@@ -1,4 +1,4 @@
-/*	$OpenBSD: lapic.c,v 1.20 2008/01/26 11:18:42 kettenis Exp $	*/
+/*	$OpenBSD: lapic.c,v 1.23 2008/06/26 05:42:10 ray Exp $	*/
 /* $NetBSD: lapic.c,v 1.1.2.8 2000/02/23 06:10:50 sommerfeld Exp $ */
 
 /*-
@@ -18,13 +18,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -119,7 +112,6 @@ lapic_set_softvectors(void)
 	idt_vec_set(LAPIC_SOFTCLOCK_VECTOR, Xintrsoftclock);
 	idt_vec_set(LAPIC_SOFTNET_VECTOR, Xintrsoftnet);
 	idt_vec_set(LAPIC_SOFTTTY_VECTOR, Xintrsofttty);
-	idt_vec_set(LAPIC_SOFTAST_VECTOR, Xintrsoftast);
 }
 
 void
@@ -183,7 +175,6 @@ lapic_boot_init(paddr_t lapic_base)
 
 #ifdef MULTIPROCESSOR
 	idt_vec_set(LAPIC_IPI_VECTOR, Xintripi);
-	idt_vec_set(LAPIC_IPI_AST, Xintripi_ast);
 	idt_vec_set(LAPIC_IPI_INVLTLB, Xintripi_invltlb);
 	idt_vec_set(LAPIC_IPI_INVLPG, Xintripi_invlpg);
 	idt_vec_set(LAPIC_IPI_INVLRANGE, Xintripi_invlrange);

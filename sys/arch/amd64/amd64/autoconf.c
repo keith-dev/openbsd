@@ -1,4 +1,4 @@
-/*	$OpenBSD: autoconf.c,v 1.24 2007/12/27 18:04:27 deraadt Exp $	*/
+/*	$OpenBSD: autoconf.c,v 1.28 2008/07/21 04:35:54 todd Exp $	*/
 /*	$NetBSD: autoconf.c,v 1.1 2003/04/26 18:39:26 fvdl Exp $	*/
 
 /*-
@@ -89,8 +89,6 @@
 #endif
 
 int	cold = 1;	/* if 1, still working on cold-start */
-struct device *booted_device;
-int booted_partition;
 extern dev_t bootdev;
 
 /*
@@ -169,11 +167,9 @@ diskconf(void)
 				break;
 		}
 		if (ifp) {
-			if_addgroup(ifp, "pxeboot");
 #if defined(NFSCLIENT)
 			printf("PXE boot MAC address %s, interface %s\n",
 			    ether_sprintf(bios_bootmac->mac), ifp->if_xname);
-			mountroot = nfs_mountroot;	/* potentially */
 			bootdv = parsedisk(ifp->if_xname, strlen(ifp->if_xname),
 			    0, &tmpdev);
 			part = 0;
@@ -192,5 +188,6 @@ struct nam2blk nam2blk[] = {
 	{ "sd",		4 },
 	{ "rd",		17 },
 	{ "raid",	19 },
+	{ "vnd",	14 },
 	{ NULL,		-1 }
 };

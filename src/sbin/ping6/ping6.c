@@ -1,4 +1,4 @@
-/*	$OpenBSD: ping6.c,v 1.70 2007/12/30 13:38:47 sobrado Exp $	*/
+/*	$OpenBSD: ping6.c,v 1.73 2008/03/24 16:11:08 deraadt Exp $	*/
 /*	$KAME: ping6.c,v 1.163 2002/10/25 02:19:06 itojun Exp $	*/
 
 /*
@@ -493,13 +493,12 @@ main(int argc, char *argv[])
 	}
 
 	if (argc > 1) {
-		rthlen = CMSG_SPACE(inet6_rth_space(IPV6_RTHDR_TYPE_0,
-		    argc - 1));
+		rthlen = inet6_rth_space(IPV6_RTHDR_TYPE_0, argc - 1);
 		if (rthlen == 0) {
 			errx(1, "too many intermediate hops");
 			/*NOTREACHED*/
 		}
-		ip6optlen += rthlen;
+		ip6optlen += CMSG_SPACE(rthlen);
 	}
 
 	if (options & F_NIGROUP) {
@@ -873,7 +872,10 @@ main(int argc, char *argv[])
 
 	for (;;) {
 		struct msghdr m;
-		u_char buf[1024];
+		union {
+			struct cmsghdr hdr;
+			u_char buf[CMSG_SPACE(1024)];
+		} cmsgbuf;
 		struct iovec iov[2];
 
 		/* signal handling */
@@ -919,8 +921,8 @@ main(int argc, char *argv[])
 		iov[0].iov_len = packlen;
 		m.msg_iov = iov;
 		m.msg_iovlen = 1;
-		m.msg_control = (caddr_t)buf;
-		m.msg_controllen = sizeof(buf);
+		m.msg_control = (caddr_t)&cmsgbuf.buf;
+		m.msg_controllen = sizeof(cmsgbuf.buf);
 
 		cc = recvmsg(s, &m, 0);
 		if (cc < 0) {

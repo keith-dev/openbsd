@@ -1,4 +1,4 @@
-/*	$OpenBSD: locore.S,v 1.156 2007/10/10 15:53:51 art Exp $	*/
+/*	$OpenBSD: locore.S,v 1.158 2008/07/28 19:08:46 miod Exp $	*/
 
 /*
  * Copyright (c) 1998-2004 Michael Shalayeff
@@ -94,7 +94,6 @@
 	.import	esym, data
 	.import	curproc, data
 	.import cpu_info_primary, data
-	.import	want_resched, data
 	.import virtual_avail, data
 	.import	proc0, data
 	.import	proc0paddr, data
@@ -2711,7 +2710,7 @@ LEAF_ENTRY(longjmp)
 	ldwm	4(arg0),sp	/* stack pointer, */
 
 	bv	0(rp)
-	copy	arg1,ret0	/* Move return value to where it belongs. */
+	ldi	1, ret0
 EXIT(longjmp)
 
 
@@ -2821,8 +2820,6 @@ kstack_check
 	nop
 kstack_ok
 #endif
-	ldil	L%want_resched, t4
-	stw	r0, R%want_resched(t4)
 
 	/* Record new proc. */
 	ldi	SONPROC, t1

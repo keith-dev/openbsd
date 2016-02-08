@@ -1,4 +1,4 @@
-/*	$OpenBSD: mbuf.h,v 1.96 2007/11/28 14:04:26 deraadt Exp $	*/
+/*	$OpenBSD: mbuf.h,v 1.100 2008/07/25 08:53:39 henning Exp $	*/
 /*	$NetBSD: mbuf.h,v 1.19 1996/02/09 18:25:14 christos Exp $	*/
 
 /*
@@ -47,7 +47,8 @@
 #define	MLEN		(MSIZE - sizeof(struct m_hdr))	/* normal data len */
 #define	MHLEN		(MLEN - sizeof(struct pkthdr))	/* data len w/pkthdr */
 
-#define	MINCLSIZE	(MHLEN + 1)	/* smallest amount to put in cluster */
+/* smallest amount to put in cluster */
+#define	MINCLSIZE	(MHLEN + 1)
 #define	M_MAXCOMPRESS	(MHLEN / 2)	/* max amount to copy for compression */
 
 /* Packet tags structure */
@@ -76,6 +77,7 @@ struct m_hdr {
 /* pf stuff */
 struct pkthdr_pf {
 	void		*hdr;		/* saved hdr pos in mbuf, for ECN */
+	void		*statekey;	/* pf stackside statekey */
 	u_int		 rtableid;	/* alternate routing table id */
 	u_int32_t	 qid;		/* queue id */
 	u_int16_t	 tag;		/* tag id */
@@ -87,6 +89,7 @@ struct pkthdr_pf {
 #define	PF_TAG_GENERATED		0x01
 #define	PF_TAG_FRAGCACHE		0x02
 #define	PF_TAG_TRANSLATE_LOCALHOST	0x04
+#define	PF_TAG_DIVERTED			0x08
 
 /* record/packet header in first mbuf of chain; valid if M_PKTHDR set */
 struct	pkthdr {
@@ -507,6 +510,7 @@ struct m_tag *m_tag_next(struct mbuf *, struct m_tag *);
 #define PACKET_TAG_GRE				9  /* GRE processing done */
 #define PACKET_TAG_IN_PACKET_CHECKSUM		10 /* NIC checksumming done */
 #define PACKET_TAG_DLT				17 /* data link layer type */
+#define PACKET_TAG_PF_DIVERT			18 /* pf(4) diverted packet */
 
 #ifdef MBTYPES
 int mbtypes[] = {				/* XXX */

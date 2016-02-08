@@ -1,4 +1,4 @@
-#	$OpenBSD: 4.4BSD.dist,v 1.192 2008/02/15 11:15:59 bernd Exp $
+#	$OpenBSD: 4.4BSD.dist,v 1.194 2008/06/07 01:59:36 jdixon Exp $
 
 /set type=dir uname=root gname=wheel mode=0755
 # .
@@ -591,6 +591,53 @@ curses
 milter
 
 # ./usr/share/doc/html/milter
+..
+
+# ./usr/share/doc/html/httpd
+httpd  type=dir uname=root gname=wheel mode=755
+
+# ./usr/share/doc/html/httpd/mod
+mod  type=dir uname=root gname=wheel mode=755
+
+# ./usr/share/doc/html/httpd/mod/mod_ssl
+mod_ssl  type=dir uname=root gname=wheel mode=755
+# ./usr/share/doc/html/httpd/mod/mod_ssl
+..
+
+# ./usr/share/doc/html/httpd/mod
+..
+
+# ./usr/share/doc/html/httpd/images
+images  type=dir uname=root gname=wheel mode=755
+# ./usr/share/doc/html/httpd/images
+..
+
+# ./usr/share/doc/html/httpd/vhosts
+vhosts  type=dir uname=root gname=wheel mode=755
+# ./usr/share/doc/html/httpd/vhosts
+..
+
+# ./usr/share/doc/html/httpd/misc
+misc  type=dir uname=root gname=wheel mode=755
+# ./usr/share/doc/html/httpd/misc
+..
+
+# ./usr/share/doc/html/httpd/search
+search  type=dir uname=root gname=wheel mode=755
+# ./usr/share/doc/html/httpd/search
+..
+
+# ./usr/share/doc/html/httpd/howto
+howto  type=dir uname=root gname=wheel mode=755
+# ./usr/share/doc/html/httpd/howto
+..
+
+# ./usr/share/doc/html/httpd/programs
+programs  type=dir uname=root gname=wheel mode=755
+# ./usr/share/doc/html/httpd/programs
+..
+
+# ./usr/share/doc/html/httpd
 ..
 
 # ./usr/share/doc/html
@@ -1485,6 +1532,8 @@ mvmeppc
 ..
 sgi
 ..
+socppc
+..
 sparc
 ..
 sparc64
@@ -1562,6 +1611,8 @@ mvmeppc
 ..
 sgi
 ..
+socppc
+..
 sparc
 ..
 sparc64
@@ -1614,6 +1665,8 @@ mvmeppc
 ..
 sgi
 ..
+socppc
+..
 sparc
 ..
 sparc64
@@ -1660,6 +1713,8 @@ mvme88k
 mvmeppc
 ..
 sgi
+..
+socppc
 ..
 sparc
 ..
@@ -1718,6 +1773,8 @@ mvmeppc
 ..
 sgi
 ..
+socppc
+..
 sparc
 ..
 sparc64
@@ -1765,6 +1822,8 @@ mvmeppc
 ..
 sgi
 ..
+socppc
+..
 sparc
 ..
 sparc64
@@ -1811,6 +1870,8 @@ mvme88k
 mvmeppc
 ..
 sgi
+..
+socppc
 ..
 sparc
 ..
@@ -1878,6 +1939,8 @@ mvmeppc
 ..
 sgi
 ..
+socppc
+..
 sparc
 ..
 sparc64
@@ -1930,6 +1993,8 @@ mvmeppc
 ..
 sgi
 ..
+socppc
+..
 sparc
 ..
 sparc64
@@ -1976,6 +2041,8 @@ mvme88k
 mvmeppc
 ..
 sgi
+..
+socppc
 ..
 sparc
 ..
@@ -2034,6 +2101,8 @@ mvmeppc
 ..
 sgi
 ..
+socppc
+..
 sparc
 ..
 sparc64
@@ -2081,6 +2150,8 @@ mvmeppc
 ..
 sgi
 ..
+socppc
+..
 sparc
 ..
 sparc64
@@ -2127,6 +2198,8 @@ mvme88k
 mvmeppc
 ..
 sgi
+..
+socppc
 ..
 sparc
 ..
@@ -2190,6 +2263,8 @@ mvmeppc
 ..
 sgi
 ..
+socppc
+..
 sparc
 ..
 sparc64
@@ -2251,6 +2326,8 @@ mvme88k
 mvmeppc
 ..
 sgi
+..
+socppc
 ..
 sparc
 ..
@@ -2699,53 +2776,6 @@ cgi-bin  type=dir uname=root gname=daemon mode=755
 
 #./www/htdocs
 htdocs  type=dir uname=root gname=daemon mode=755
-
-#./www/htdocs/manual
-manual  type=dir uname=root gname=daemon mode=755
-
-#./www/htdocs/manual/mod
-mod  type=dir uname=root gname=daemon mode=755
-
-#./www/htdocs/manual/mod/mod_ssl
-mod_ssl  type=dir uname=root gname=daemon mode=755
-#./www/htdocs/manual/mod/mod_ssl
-..
-
-#./www/htdocs/manual/mod
-..
-
-#./www/htdocs/manual/images
-images  type=dir uname=root gname=daemon mode=755
-#./www/htdocs/manual/images
-..
-
-#./www/htdocs/manual/vhosts
-vhosts  type=dir uname=root gname=daemon mode=755
-#./www/htdocs/manual/vhosts
-..
-
-#./www/htdocs/manual/misc
-misc  type=dir uname=root gname=daemon mode=755
-#./www/htdocs/manual/misc
-..
-
-#./www/htdocs/manual/search
-search  type=dir uname=root gname=daemon mode=755
-#./www/htdocs/manual/search
-..
-
-#./www/htdocs/manual/howto
-howto  type=dir uname=root gname=daemon mode=755
-#./www/htdocs/manual/howto
-..
-
-#./www/htdocs/manual/programs
-programs  type=dir uname=root gname=daemon mode=755
-#./www/htdocs/manual/programs
-..
-
-#./www/htdocs/manual
-..
 
 #./www/htdocs
 ..

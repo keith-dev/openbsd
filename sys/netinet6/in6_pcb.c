@@ -1,4 +1,4 @@
-/*	$OpenBSD: in6_pcb.c,v 1.43 2005/06/24 07:57:24 markus Exp $	*/
+/*	$OpenBSD: in6_pcb.c,v 1.47 2008/06/11 19:00:50 mcbride Exp $	*/
 
 /*
  * Copyright (C) 1995, 1996, 1997, and 1998 WIDE Project.
@@ -162,15 +162,12 @@ u_char inet6ctlerrmap[PRC_NCMDS] = {
  * Bind an address (or at least a port) to an PF_INET6 socket.
  */
 int
-in6_pcbbind(inp, nam)
-	struct inpcb *inp;
-	struct mbuf *nam;
+in6_pcbbind(struct inpcb *inp, struct mbuf *nam, struct proc *p)
 {
 	struct socket *so = inp->inp_socket;
 
 	struct inpcbtable *head = inp->inp_table;
 	struct sockaddr_in6 *sin6;
-	struct proc *p = curproc;		/* XXX */
 	u_short lport = 0;
 	int wild = INPLOOKUP_IPV6, reuseport = (so->so_options & SO_REUSEPORT);
 	int error;
@@ -237,8 +234,9 @@ in6_pcbbind(inp, nam)
 					       * well.  (What about flow?)
 					       */
 			sin6->sin6_flowinfo = 0;
-			if ((ia = ifa_ifwithaddr((struct sockaddr *)sin6))
-			    == NULL)
+			if (!(so->so_options & SO_BINDANY) &&
+			    ((ia = ifa_ifwithaddr((struct sockaddr *)sin6))
+			    == NULL))
 				return EADDRNOTAVAIL;
 
 			/*
@@ -299,10 +297,7 @@ in6_pcbbind(inp, nam)
 }
 
 int
-in6_pcbsetport(laddr, inp, p)
-	struct in6_addr *laddr;
-	struct inpcb *inp;
-	struct proc *p;
+in6_pcbsetport(struct in6_addr *laddr, struct inpcb *inp, struct proc *p)
 {
 	struct socket *so = inp->inp_socket;
 	struct inpcbtable *table = inp->inp_table;
@@ -347,7 +342,7 @@ in6_pcbsetport(laddr, inp, p)
 		 */
 		count = first - last;
 		if (count)
-			*lastport = first - (arc4random() % count);
+			*lastport = first - arc4random_uniform(count);
 
 		do {
 			if (count-- < 0)	/* completely used? */
@@ -365,7 +360,7 @@ in6_pcbsetport(laddr, inp, p)
 		 */
 		count = last - first;
 		if (count)
-			*lastport = first + (arc4random() % count);
+			*lastport = first + arc4random_uniform(count);
 
 		do {
 			if (count-- < 0)	/* completely used? */
@@ -400,9 +395,7 @@ in6_pcbsetport(laddr, inp, p)
  * I believe this has to be called at splnet().
  */
 int
-in6_pcbconnect(inp, nam)
-	struct inpcb *inp;
-	struct mbuf *nam;
+in6_pcbconnect(struct inpcb *inp, struct mbuf *nam)
 {
 	struct in6_addr *in6a = NULL;
 	struct sockaddr_in6 *sin6 = mtod(nam, struct sockaddr_in6 *);
@@ -464,7 +457,7 @@ in6_pcbconnect(inp, nam)
 	}
 	if (IN6_IS_ADDR_UNSPECIFIED(&inp->inp_laddr6)) {
 		if (inp->inp_lport == 0)
-			(void)in6_pcbbind(inp, (struct mbuf *)0);
+			(void)in6_pcbbind(inp, NULL, curproc);
 		inp->inp_laddr6 = *in6a;
 	}
 	inp->inp_faddr6 = sin6->sin6_addr;
@@ -492,14 +485,9 @@ in6_pcbconnect(inp, nam)
  * Must be called at splnet.
  */
 int
-in6_pcbnotify(head, dst, fport_arg, src, lport_arg, cmd, cmdarg, notify)
-	struct inpcbtable *head;
-	struct sockaddr *dst, *src;
-	uint fport_arg;
-	uint lport_arg;
-	int cmd;
-	void *cmdarg;
-	void (*notify)(struct inpcb *, int);
+in6_pcbnotify(struct inpcbtable *head, struct sockaddr *dst, 
+	uint fport_arg, struct sockaddr *src, uint lport_arg, int cmd, 
+	void *cmdarg, void (*notify)(struct inpcb *, int))
 {
 	struct inpcb *inp, *ninp;
 	u_short fport = fport_arg, lport = lport_arg;
@@ -631,9 +619,7 @@ in6_pcbnotify(head, dst, fport_arg, src, lport_arg, cmd, cmdarg, notify)
  * This services the getsockname(2) call.
  */
 int
-in6_setsockaddr(inp, nam)
-	struct inpcb *inp;
-	struct mbuf *nam;
+in6_setsockaddr(struct inpcb *inp, struct mbuf *nam)
 {
 	struct sockaddr_in6 *sin6;
 
@@ -656,9 +642,7 @@ in6_setsockaddr(inp, nam)
  * This services the getpeername(2) call.
  */
 int
-in6_setpeeraddr(inp, nam)
-	struct inpcb *inp;
-	struct mbuf *nam;
+in6_setpeeraddr(struct inpcb *inp, struct mbuf *nam)
 {
 	struct sockaddr_in6 *sin6;
 

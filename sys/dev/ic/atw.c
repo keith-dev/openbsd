@@ -1,4 +1,4 @@
-/*	$OpenBSD: atw.c,v 1.55 2007/09/30 11:33:14 kettenis Exp $	*/
+/*	$OpenBSD: atw.c,v 1.60 2008/07/21 18:43:19 damien Exp $	*/
 /*	$NetBSD: atw.c,v 1.69 2004/07/23 07:07:55 dyoung Exp $	*/
 
 /*-
@@ -16,13 +16,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -40,11 +33,6 @@
 /*
  * Device driver for the ADMtek ADM8211 802.11 MAC/BBP.
  */
-
-#include <sys/cdefs.h>
-#if defined(__NetBSD__)
-__KERNEL_RCSID(0, "$NetBSD: atw.c,v 1.69 2004/07/23 07:07:55 dyoung Exp $");
-#endif
 
 #include "bpfilter.h"
 
@@ -213,7 +201,7 @@ void	atw_linkintr(struct atw_softc *, u_int32_t);
 int	atw_newstate(struct ieee80211com *, enum ieee80211_state, int);
 int	atw_tune(struct atw_softc *);
 void	atw_recv_mgmt(struct ieee80211com *, struct mbuf *,
-	    struct ieee80211_node *, int, int, u_int32_t);
+	    struct ieee80211_node *, struct ieee80211_rxinfo *, int);
 void	atw_next_scan(void *);
 
 /* Device initialization */
@@ -2274,7 +2262,7 @@ atw_change_ibss(struct atw_softc *sc)
 
 void
 atw_recv_mgmt(struct ieee80211com *ic, struct mbuf *m,
-    struct ieee80211_node *ni, int subtype, int rssi, u_int32_t rstamp)
+    struct ieee80211_node *ni, struct ieee80211_rxinfo *rxi, int subtype)
 {
 	struct atw_softc *sc = (struct atw_softc*)ic->ic_softc;
 
@@ -2283,7 +2271,7 @@ atw_recv_mgmt(struct ieee80211com *ic, struct mbuf *m,
 	    sc->sc_rev < ATW_REVISION_BA)
 		return;
 
-	(*sc->sc_recv_mgmt)(ic, m, ni, subtype, rssi, rstamp);
+	(*sc->sc_recv_mgmt)(ic, m, ni, rxi, subtype);
 
 	switch (subtype) {
 	case IEEE80211_FC0_SUBTYPE_PROBE_RESP:
@@ -3078,6 +3066,7 @@ atw_rxintr(struct atw_softc *sc)
 {
 	static int rate_tbl[] = {2, 4, 11, 22, 44};
 	struct ieee80211com *ic = &sc->sc_ic;
+	struct ieee80211_rxinfo rxi;
 	struct ieee80211_node *ni;
 	struct ieee80211_frame *wh;
 	struct ifnet *ifp = &ic->ic_if;
@@ -3176,7 +3165,6 @@ atw_rxintr(struct atw_softc *sc)
 			continue;
 		}
 
-		ifp->if_ipackets++;
 		if (sc->sc_opmode & ATW_NAR_PR)
 			len -= IEEE80211_CRC_LEN;
 		m->m_pkthdr.rcvif = ifp;
@@ -3226,11 +3214,16 @@ atw_rxintr(struct atw_softc *sc)
 
 		wh = mtod(m, struct ieee80211_frame *);
 		ni = ieee80211_find_rxnode(ic, wh);
+		rxi.rxi_flags = 0;
 #if 0
-		if (atw_hw_decrypted(sc, wh))
+		if (atw_hw_decrypted(sc, wh)) {
 			wh->i_fc[1] &= ~IEEE80211_FC1_WEP;
+			rxi.rxi_flags |= IEEE80211_RXI_HWDEC;
+		}
 #endif
-		ieee80211_input(ifp, m, ni, (int)rssi, 0);
+		rxi.rxi_rssi = (int)rssi;
+		rxi.rxi_tstamp = 0;
+		ieee80211_input(ifp, m, ni, &rxi);
 		/*
 		 * The frame may have caused the node to be marked for
 		 * reclamation (e.g. in response to a DEAUTH message)
@@ -3615,6 +3608,7 @@ atw_start(struct ifnet *ifp)
 	struct ieee80211com *ic = &sc->sc_ic;
 	struct ieee80211_node *ni;
 	struct ieee80211_frame *wh;
+	struct ieee80211_key *k;
 	struct atw_frame *hh;
 	struct mbuf *m0, *m;
 	struct atw_txsoft *txs, *last_txs;
@@ -3671,8 +3665,11 @@ atw_start(struct ifnet *ifp)
 				break;
 			}
 
-			if (sc->sc_ic.ic_flags & IEEE80211_F_WEPON) {
-				if ((m0 = ieee80211_wep_crypt(ifp, m0, 1)) == NULL) {
+			if (ic->ic_flags & IEEE80211_F_WEPON) {
+				wh = mtod(m0, struct ieee80211_frame *);
+				k = ieee80211_get_txkey(ic, wh, ni);
+				m0 = ieee80211_encrypt(ic, m0, k);
+				if (m0 == NULL) {
 					ifp->if_oerrors++;
 					break;	
 				}

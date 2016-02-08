@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.143 2007/11/02 19:18:54 martin Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.146 2008/06/27 17:22:14 miod Exp $	*/
 /*	$NetBSD: machdep.c,v 1.207 1998/07/08 04:39:34 thorpej Exp $	*/
 
 /*
@@ -113,6 +113,7 @@
 #include <machine/pmap.h>
 
 #include <uvm/uvm_extern.h>
+#include <uvm/uvm_swap.h>
 
 #include <sys/sysctl.h>
 
@@ -574,8 +575,8 @@ boot(howto)
 		}
 	}
 
-	/* Disable interrupts. */
-	splhigh();
+	uvm_shutdown();
+	splhigh();			/* Disable interrupts. */
 
 	/* If rebooting and a dump is requested, do it. */
 	if (howto & RB_DUMP) {
@@ -598,7 +599,9 @@ haltsys:
 		}
 		printf("\nThe operating system has halted.\n");
 		printf("Please press any key to reboot.\n\n");
+		cnpollc(1);
 		(void)cngetc();
+		cnpollc(0);
 	}
 
 	/* Map the last physical page VA = PA for doboot() */
@@ -758,6 +761,10 @@ dumpsys()
 
 	printf("\ndumping to dev %u,%u offset %ld\n", major(dumpdev),
 	    minor(dumpdev), dumplo);
+
+#ifdef UVM_SWAP_ENCRYPT
+	uvm_swap_finicrypt_all();
+#endif
 
 	printf("dump ");
 

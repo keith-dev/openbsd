@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.54 2008/02/20 19:13:38 miod Exp $ */
+/*	$OpenBSD: machdep.c,v 1.60 2008/05/18 07:36:10 jsing Exp $ */
 
 /*
  * Copyright (c) 2003-2004 Opsycon AB  (www.opsycon.se / www.opsycon.com)
@@ -79,16 +79,10 @@
 #include <mips64/archtype.h>
 #include <machine/bus.h>
 
-#include <sgi/localbus/crimebus.h>
-#include <sgi/localbus/macebus.h>
-#if defined(TGT_ORIGIN200) || defined(TGT_ORIGIN2000)
-#include <sgi/localbus/xbowmux.h>
-#endif
-
-extern struct consdev *cn_tab;
 extern char kernel_text[];
 extern int makebootdev(const char *, int);
 extern void stacktrace(void);
+extern bus_addr_t comconsaddr;
 
 #ifdef DEBUG
 void dump_tlb(void);
@@ -117,6 +111,7 @@ vm_map_t phys_map;
 int	extent_malloc_flags = 0;
 
 caddr_t	msgbufbase;
+vaddr_t	uncached_base;
 
 int	physmem;		/* Max supported memory, changes to actual. */
 int	rsvdmem;		/* Reserved memory not usable. */
@@ -130,8 +125,7 @@ int	kbd_reset;
 int32_t *environment;
 struct sys_rec sys_config;
 
-
-/* ddb symbol init stuff */
+/* Pointers to the start and end of the symbol table. */
 caddr_t	ssym;
 caddr_t	esym;
 caddr_t	ekern;
@@ -140,7 +134,7 @@ struct phys_mem_desc mem_layout[MAXMEMSEGS];
 
 void crime_configure_memory(void);
 
-caddr_t mips_init(int, void *);
+caddr_t mips_init(int, void *, caddr_t);
 void initcpu(void);
 void dumpsys(void);
 void dumpconf(void);
@@ -151,86 +145,13 @@ void db_command_loop(void);
 static void dobootopts(int, void *);
 static int atoi(const char *, int, const char **);
 
-#if BYTE_ORDER == BIG_ENDIAN
-int	my_endian = 1;
-#else
-int	my_endian = 0;
-#endif
-
-#if defined(TGT_O2)
-void
-crime_configure_memory(void)
-{
-	struct phys_mem_desc *m;
-	volatile u_int64_t *bank_ctrl;
-	paddr_t addr;
-	psize_t size;
-	u_int32_t first_page, last_page;
-	int bank, i;
-
-	bank_ctrl = (void *)PHYS_TO_KSEG1(CRIMEBUS_BASE + CRIME_MEM_BANK0_CONTROL);
-	for (bank = 0; bank < CRIME_MAX_BANKS; bank++) {
-		addr = (bank_ctrl[bank] & CRIME_MEM_BANK_ADDR) << 25;
-		size = (bank_ctrl[bank] & CRIME_MEM_BANK_128MB) ? 128 : 32;
-#ifdef DEBUG
-		bios_printf("crime: bank %d contains %ld MB at 0x%lx\n",
-		    bank, size, addr);
-#endif
-
-		/*
-		 * Do not report memory regions below 256MB, since ARCBIOS will do.
-		 * Moreover, empty banks are reported at address zero.
-		 */
-		if (addr < 256 * 1024 * 1024)
-			continue;
-
-		addr += 1024 * 1024 * 1024;
-		size *= 1024 * 1024;
-		first_page = atop(addr);
-		last_page = atop(addr + size);
-
-		/*
-		 * Try to coalesce with other memory segments if banks are 
-		 * contiguous.
-		 */
-		m = NULL;
-		for (i = 0; i < MAXMEMSEGS; i++) {
-			if (mem_layout[i].mem_last_page == 0) {
-				if (m == NULL)
-					m = &mem_layout[i];
-			} else if (last_page == mem_layout[i].mem_first_page) {
-				m = &mem_layout[i];
-				m->mem_first_page = first_page;
-			} else if (mem_layout[i].mem_last_page == first_page) {
-				m = &mem_layout[i];
-				m->mem_last_page = last_page;
-			}
-		}
-		if (m != NULL && m->mem_last_page == 0) {
-			m->mem_first_page = first_page;
-			m->mem_last_page = last_page;
-		}
-		if (m != NULL)
-			physmem += atop(size);
-	}
-
-#ifdef DEBUG
-	for (i = 0; i < MAXMEMSEGS; i++)
-		if (mem_layout[i].mem_first_page)
-			bios_printf("MEM %d, 0x%x to  0x%x\n",i,
-				ptoa(mem_layout[i].mem_first_page),
-				ptoa(mem_layout[i].mem_last_page));
-#endif
-}
-#endif
-
 /*
  * Do all the stuff that locore normally does before calling main().
  * Reset mapping and set up mapping to hardware and init "wired" reg.
  */
 
 caddr_t
-mips_init(int argc, void *argv)
+mips_init(int argc, void *argv, caddr_t boot_esym)
 {
 	char *cp;
 	int i;
@@ -247,33 +168,57 @@ mips_init(int argc, void *argv)
 	 */
 	setsr(getsr() | SR_KX | SR_UX);
 
+#ifdef notyet
+	/*
+	 * Make sure KSEG0 cacheability match what we intend to use.
+	 *
+	 * XXX This does not work as expected on IP30. Does ARCBios
+	 * XXX depend on this?
+	 */
+	cp0_setcfg((cp0_getcfg() & ~0x07) | CCA_CACHED);
+#endif
+
 	/*
 	 * Clear the compiled BSS segment in OpenBSD code.
 	 */
 	bzero(edata, end - edata);
 
 	/*
-	 *  Reserve symbol table space. If invalid pointers no table.
+	 * Reserve space for the symbol table, if it exists.
 	 */
 	ssym = (char *)*(u_int64_t *)end;
-	esym = (char *)*((u_int64_t *)end + 1);
-	ekern = esym;
-	if (((long)ssym - (long)end) < 0 ||
-	    ((long)ssym - (long)end) > 0x1000 ||
-	    ssym[0] != ELFMAG0 || ssym[1] != ELFMAG1 ||
-	    ssym[2] != ELFMAG2 || ssym[3] != ELFMAG3 ) {
+
+	/* Attempt to locate ELF header and symbol table after kernel. */
+	if (end[0] == ELFMAG0 && end[1] == ELFMAG1 &&
+	    end[2] == ELFMAG2 && end[3] == ELFMAG3 ) {
+
+		/* ELF header exists directly after kernel. */
+		ssym = end;
+		esym = boot_esym;
+		ekern = esym;
+
+	} else if (((long)ssym - (long)end) >= 0 &&
+	    ((long)ssym - (long)end) <= 0x1000 &&
+	    ssym[0] == ELFMAG0 && ssym[1] == ELFMAG1 &&
+	    ssym[2] == ELFMAG2 && ssym[3] == ELFMAG3 ) {
+
+		/* Pointers exist directly after kernel. */
+		esym = (char *)*((u_int64_t *)end + 1);
+		ekern = esym;
+
+	} else {
+
+		/* Pointers aren't setup either... */
 		ssym = NULL;
 		esym = NULL;
 		ekern = end;
 	}
 
 	/*
-	 *  Initialize the system type and set up memory layout.
-	 *  Note that some systems have a more complex memory setup.
+	 * Initialize the system type and set up memory layout.
+	 * Note that some systems have a more complex memory setup.
 	 */
 	bios_ident();
-
-bios_printf("SR=%08x\n", getsr()); /* leave this in for now. need to see sr */
 
 	/*
 	 * Determine system type and set up configuration record data.
@@ -283,32 +228,13 @@ bios_printf("SR=%08x\n", getsr()); /* leave this in for now. need to see sr */
 	case SGI_O2:
 		bios_printf("Found SGI-IP32, setting up.\n");
 		strlcpy(cpu_model, "SGI-O2 (IP32)", sizeof(cpu_model));
-		sys_config.cons_ioaddr[0] = MACE_ISA_SER1_OFFS;
-		sys_config.cons_ioaddr[1] = MACE_ISA_SER2_OFFS;
-		sys_config.cons_baudclk = 1843200;		/*XXX*/
-		sys_config.cons_iot = &macebus_tag;
-		sys_config.cpu[0].tlbwired = 2;
-
-		crime_configure_memory();
+		ip32_setup();
 
 		sys_config.cpu[0].clock = 180000000;  /* Reasonable default */
 		cp = Bios_GetEnvironmentVariable("cpufreq");
 		if (cp && atoi(cp, 10, NULL) > 100)
 			sys_config.cpu[0].clock = atoi(cp, 10, NULL) * 1000000;
 
-		/* R1xK O2s are one disk slot machines. Offset slotno. */
-		switch ((cp0_get_prid() >> 8) & 0xff) {
-		case MIPS_R10000:
-		case MIPS_R12000:
-			bootdriveoffs = -1;
-			break;
-		}
-		/* R12K O2s must run with DSD on. */
-		switch ((cp0_get_prid() >> 8) & 0xff) {
-		case MIPS_R12000:
-			setsr(getsr() | SR_DSD);
-			break;
-		}
 		break;
 #endif
 
@@ -316,14 +242,22 @@ bios_printf("SR=%08x\n", getsr()); /* leave this in for now. need to see sr */
 	case SGI_O200:
 		bios_printf("Found SGI-IP27, setting up.\n");
 		strlcpy(cpu_model, "SGI-Origin200 (IP27)", sizeof(cpu_model));
+		ip27_setup();
 
-		kl_scan_config(0);
+		break;
+#endif
 
-		sys_config.cons_ioaddr[0] = kl_get_console_base();
-		sys_config.cons_ioaddr[1] = kl_get_console_base() - 8;
-		sys_config.cons_baudclk = 22000000 / 3;	/*XXX*/
-		sys_config.cons_iot = &xbowbus_tag;
-		sys_config.cpu[0].tlbwired = 2;
+#if defined(TGT_OCTANE)
+	case SGI_OCTANE:
+		bios_printf("Found SGI-IP30, setting up.\n");
+		strlcpy(cpu_model, "SGI-Octane (IP30)", sizeof cpu_model);
+		ip30_setup();
+
+		sys_config.cpu[0].clock = 175000000;  /* Reasonable default */
+		cp = Bios_GetEnvironmentVariable("cpufreq");
+		if (cp && atoi(cp, 10, NULL) > 100)
+			sys_config.cpu[0].clock = atoi(cp, 10, NULL) * 1000000;
+
 		break;
 #endif
 
@@ -341,16 +275,14 @@ bios_printf("SR=%08x\n", getsr()); /* leave this in for now. need to see sr */
 	if (cp != NULL && *cp != '\0')
 		strlcpy(bios_console, cp, sizeof bios_console);
 
+	/* Disable serial console if ARCS is telling us to use video. */
+	if (strncmp(bios_console, "video", 5) == 0)
+		comconsaddr = 0;
+
 	/*
 	 * Look at arguments passed to us and compute boothowto.
-	 * Default to AUTOBOOT if no args or SINGLE and DFLTROOT
-	 * if this is a ramdisk kernel.
 	 */
-#ifdef RAMDISK_HOOKS
-	boothowto = RB_SINGLE | RB_DFLTROOT;
-#else
 	boothowto = RB_AUTOBOOT;
-#endif /* RAMDISK_HOOKS */
 
 	dobootopts(argc, argv);
 
@@ -424,14 +356,15 @@ bios_printf("SR=%08x\n", getsr()); /* leave this in for now. need to see sr */
 			uvm_page_physload(fp, xp, fp, xp, VM_FREELIST_DEFAULT);
 			fp = lastkernpage;
 		}
-		if (lp >= fp)
+		if (lp > fp)
 			uvm_page_physload(fp, lp, fp, lp, VM_FREELIST_DEFAULT);
 	}
 
 
 	switch (sys_config.system_type) {
-#if defined(TGT_O2)
+#if defined(TGT_O2) || defined(TGT_OCTANE)
 	case SGI_O2:
+	case SGI_OCTANE:
 		sys_config.cpu[0].type = (cp0_get_prid() >> 8) & 0xff;
 		sys_config.cpu[0].vers_maj = (cp0_get_prid() >> 4) & 0x0f;
 		sys_config.cpu[0].vers_min = cp0_get_prid() & 0x0f;
@@ -454,6 +387,7 @@ bios_printf("SR=%08x\n", getsr()); /* leave this in for now. need to see sr */
 
 		case MIPS_R10000:
 		case MIPS_R12000:
+		case MIPS_R14000:
 			sys_config.cpu[0].tlbsize = 64;
 			break;
 
@@ -474,7 +408,7 @@ bios_printf("SR=%08x\n", getsr()); /* leave this in for now. need to see sr */
 	case MIPS_R10000:
 	case MIPS_R12000:
 	case MIPS_R14000:
-		sys_config.cpu[0].cfg_reg = Mips10k_ConfigCache();
+		Mips10k_ConfigCache();
 		sys_config._SyncCache = Mips10k_SyncCache;
 		sys_config._InvalidateICache = Mips10k_InvalidateICache;
 		sys_config._InvalidateICachePage = Mips10k_InvalidateICachePage;
@@ -485,7 +419,7 @@ bios_printf("SR=%08x\n", getsr()); /* leave this in for now. need to see sr */
 		break;
 
 	default:
-		sys_config.cpu[0].cfg_reg = Mips5k_ConfigCache();
+		Mips5k_ConfigCache();
 		sys_config._SyncCache = Mips5k_SyncCache;
 		sys_config._InvalidateICache = Mips5k_InvalidateICache;
 		sys_config._InvalidateICachePage = Mips5k_InvalidateICachePage;
@@ -502,43 +436,11 @@ bios_printf("SR=%08x\n", getsr()); /* leave this in for now. need to see sr */
 	 * mapped BIOS text or data.
 	 */
 	delay(20*1000);		/* Let any UART FIFO drain... */
+
+	sys_config.cpu[0].tlbwired = UPAGES / 2;
 	tlb_set_wired(0);
 	tlb_flush(sys_config.cpu[0].tlbsize);
 	tlb_set_wired(sys_config.cpu[0].tlbwired);
-
-#if 0
-	/* XXX Save the following as an example on how to optimize I/O mapping. */
-
-	/*
-	 * Set up some fixed mappings. These are frequently used so faulting
-	 * them in will waste too many cycles.
-	 */
-	if (sys_config.system_type == MOMENTUM_CP7000G ||
-	    sys_config.system_type == MOMENTUM_CP7000 ||
-	    sys_config.system_type == GALILEO_EV64240) {
-		struct tlb tlb;
-
-		tlb.tlb_mask = PG_SIZE_16M;
-#if defined(LP64)
-		tlb.tlb_hi = vad_to_vpn(0xfffffffffc000000) | 1;
-		tlb.tlb_lo0 = vad_to_pfn(0xfffffffff4000000) | PG_IOPAGE;
-#else
-		tlb.tlb_hi = vad_to_vpn(0xfc000000) | 1;
-		tlb.tlb_lo0 = vad_to_pfn(0xf4000000) | PG_IOPAGE;
-#endif
-		tlb.tlb_lo1 = vad_to_pfn(sys_config.cons_ioaddr[0]) | PG_IOPAGE;
-		tlb_write_indexed(2, &tlb);
-
-		if (sys_config.system_type == GALILEO_EV64240) {
-			tlb.tlb_mask = PG_SIZE_16M;
-			tlb.tlb_hi = vad_to_vpn(0xf8000000) | 1;
-			tlb.tlb_lo0 = vad_to_pfn(sys_config.pci_io[0].bus_base) | PG_IOPAGE;
-			tlb.tlb_lo1 = vad_to_pfn(sys_config.pci_mem[0].bus_base) | PG_IOPAGE;
-			tlb_write_indexed(3, &tlb);
-		}
-	}
-/* XXX */
-#endif
 
 #if defined(TGT_ORIGIN200) || defined(TGT_ORIGIN2000)
 	/*
@@ -581,7 +483,6 @@ bios_printf("SR=%08x\n", getsr()); /* leave this in for now. need to see sr */
 	 * Bootstrap VM system.
 	 */
 	pmap_bootstrap();
-
 
 	/*
 	 * Copy down exception vector code.
@@ -921,6 +822,7 @@ boot(int howto)
 		}
 	}
 
+	uvm_shutdown();
 	(void) splhigh();		/* Extreme priority. */
 
 	if (howto & RB_DUMP)
@@ -966,10 +868,10 @@ dumpconf(void)
 		return;
 
 	dumpsize = ptoa(physmem);
-	if (dumpsize > btoc(dbtob(nblks - dumplo)))
-		dumpsize = btoc(dbtob(nblks - dumplo));
+	if (dumpsize > atop(round_page(dbtob(nblks - dumplo))))
+		dumpsize = atop(round_page(dbtob(nblks - dumplo)));
 	else if (dumplo == 0)
-		dumplo = nblks - btodb(ctob(physmem));
+		dumplo = nblks - btodb(ptoa(physmem));
 
 	/*
 	 * Don't dump on the first page in case the dump device includes a 

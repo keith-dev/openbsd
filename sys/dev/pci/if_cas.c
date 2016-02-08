@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_cas.c,v 1.14 2008/02/08 10:56:41 thib Exp $	*/
+/*	$OpenBSD: if_cas.c,v 1.19 2008/05/31 22:49:03 kettenis Exp $	*/
 
 /*
  *
@@ -152,7 +152,8 @@ int		cas_intr(void *);
 #endif
 
 const struct pci_matchid cas_pci_devices[] = {
-	{ PCI_VENDOR_SUN, PCI_PRODUCT_SUN_CASSINI }
+	{ PCI_VENDOR_SUN, PCI_PRODUCT_SUN_CASSINI },
+	{ PCI_VENDOR_NS, PCI_PRODUCT_NS_SATURN }
 };
 
 int
@@ -629,19 +630,32 @@ cas_tick(void *arg)
 	bus_space_tag_t t = sc->sc_memt;
 	bus_space_handle_t mac = sc->sc_memh;
 	int s;
+	u_int32_t v;
 
 	/* unload collisions counters */
-	ifp->if_collisions +=
-	    bus_space_read_4(t, mac, CAS_MAC_NORM_COLL_CNT) +
-	    bus_space_read_4(t, mac, CAS_MAC_FIRST_COLL_CNT) +
-	    bus_space_read_4(t, mac, CAS_MAC_EXCESS_COLL_CNT) +
+	v = bus_space_read_4(t, mac, CAS_MAC_EXCESS_COLL_CNT) +
 	    bus_space_read_4(t, mac, CAS_MAC_LATE_COLL_CNT);
+	ifp->if_collisions += v +
+	    bus_space_read_4(t, mac, CAS_MAC_NORM_COLL_CNT) +
+	    bus_space_read_4(t, mac, CAS_MAC_FIRST_COLL_CNT);
+	ifp->if_oerrors += v;
+
+	/* read error counters */
+	ifp->if_ierrors +=
+	    bus_space_read_4(t, mac, CAS_MAC_RX_LEN_ERR_CNT) +
+	    bus_space_read_4(t, mac, CAS_MAC_RX_ALIGN_ERR) +
+	    bus_space_read_4(t, mac, CAS_MAC_RX_CRC_ERR_CNT) +
+	    bus_space_read_4(t, mac, CAS_MAC_RX_CODE_VIOL);
 
 	/* clear the hardware counters */
 	bus_space_write_4(t, mac, CAS_MAC_NORM_COLL_CNT, 0);
 	bus_space_write_4(t, mac, CAS_MAC_FIRST_COLL_CNT, 0);
 	bus_space_write_4(t, mac, CAS_MAC_EXCESS_COLL_CNT, 0);
 	bus_space_write_4(t, mac, CAS_MAC_LATE_COLL_CNT, 0);
+	bus_space_write_4(t, mac, CAS_MAC_RX_LEN_ERR_CNT, 0);
+	bus_space_write_4(t, mac, CAS_MAC_RX_ALIGN_ERR, 0);
+	bus_space_write_4(t, mac, CAS_MAC_RX_CRC_ERR_CNT, 0);
+	bus_space_write_4(t, mac, CAS_MAC_RX_CODE_VIOL, 0);
 
 	s = splnet();
 	mii_tick(&sc->sc_mii);
@@ -1294,7 +1308,9 @@ cas_add_rxbuf(struct cas_softc *sc, int idx)
 	if ((sc->sc_rxdptr % 4) == 0)
 		bus_space_write_4(t, h, CAS_RX_KICK, sc->sc_rxdptr);
 
-	sc->sc_rxdptr++;
+	if (++sc->sc_rxdptr == CAS_NRXDESC)
+		sc->sc_rxdptr = 0;
+
 	return (0);
 }
 
@@ -1909,11 +1925,11 @@ cas_tint(struct cas_softc *sc, u_int32_t status)
 {
 	struct ifnet *ifp = &sc->sc_arpcom.ac_if;
 	struct cas_sxd *sd;
-	u_int32_t cons, hwcons;
+	u_int32_t cons, comp;
 
-	hwcons = status >> 19;
+	comp = bus_space_read_4(sc->sc_memt, sc->sc_memh, CAS_TX_COMPLETION);
 	cons = sc->sc_tx_cons;
-	while (cons != hwcons) {
+	while (cons != comp) {
 		sd = &sc->sc_txd[cons];
 		if (sd->sd_mbuf != NULL) {
 			bus_dmamap_sync(sc->sc_dmatag, sd->sd_map, 0,
@@ -1929,10 +1945,12 @@ cas_tint(struct cas_softc *sc, u_int32_t status)
 	}
 	sc->sc_tx_cons = cons;
 
-	cas_start(ifp);
-
+	if (sc->sc_tx_cnt < CAS_NTXDESC - 2)
+		ifp->if_flags &= ~IFF_OACTIVE;
 	if (sc->sc_tx_cnt == 0)
 		ifp->if_timer = 0;
+
+	cas_start(ifp);
 
 	return (1);
 }
@@ -1967,7 +1985,7 @@ cas_start(struct ifnet *ifp)
 		 * or fail...
 		 */
 		if (cas_encap(sc, m, &bix)) {
-			ifp->if_timer = 2;
+			ifp->if_flags |= IFF_OACTIVE;
 			break;
 		}
 

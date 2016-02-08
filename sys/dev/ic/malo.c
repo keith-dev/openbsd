@@ -1,4 +1,4 @@
-/*	$OpenBSD: malo.c,v 1.81 2007/11/10 14:20:15 mglocker Exp $ */
+/*	$OpenBSD: malo.c,v 1.84 2008/07/27 11:28:17 mbalmer Exp $ */
 
 /*
  * Copyright (c) 2006 Claudio Jeker <claudio@openbsd.org>
@@ -378,7 +378,8 @@ malo_attach(struct malo_softc *sc)
 	    IEEE80211_C_MONITOR |
 	    IEEE80211_C_SHPREAMBLE |
 	    IEEE80211_C_SHSLOT |
-	    IEEE80211_C_WEP;
+	    IEEE80211_C_WEP |
+	    IEEE80211_C_RSN;
 	ic->ic_opmode = IEEE80211_M_STA;
 	ic->ic_state = IEEE80211_S_INIT;
 	ic->ic_max_rssi = 75;
@@ -1359,7 +1360,7 @@ malo_tx_intr(struct malo_softc *sc)
 		/* save last used TX rate */
 		sc->sc_last_txrate = malo_chip2rate(desc->datarate);
 
-		/* cleanup TX data and TX descritpor */
+		/* cleanup TX data and TX descriptor */
 		bus_dmamap_sync(sc->sc_dmat, data->map, 0,
 		    data->map->dm_mapsize, BUS_DMASYNC_POSTWRITE);
 		bus_dmamap_unload(sc->sc_dmat, data->map);
@@ -1410,15 +1411,6 @@ malo_tx_mgt(struct malo_softc *sc, struct mbuf *m0, struct ieee80211_node *ni)
 		}
 	}
 	wh = mtod(m0, struct ieee80211_frame *);
-
-	if (wh->i_fc[1] & IEEE80211_FC1_WEP) {
-		m0 = ieee80211_wep_crypt(ifp, m0, 1);
-		if (m0 == NULL)
-			return (ENOBUFS);
-
-		/* packet header may have moved, reset our local pointer */
-		wh = mtod(m0, struct ieee80211_frame *);
-	}
 
 #if NBPFILTER > 0
 	if (sc->sc_drvbpf != NULL) {
@@ -1506,6 +1498,7 @@ malo_tx_data(struct malo_softc *sc, struct mbuf *m0,
 	struct malo_tx_desc *desc;
 	struct malo_tx_data *data;
 	struct ieee80211_frame *wh;
+	struct ieee80211_key *k;
 	struct mbuf *mnew;
 	int error;
 
@@ -1524,8 +1517,8 @@ malo_tx_data(struct malo_softc *sc, struct mbuf *m0,
 	wh = mtod(m0, struct ieee80211_frame *);
 
 	if (wh->i_fc[1] & IEEE80211_FC1_WEP) {
-		m0 = ieee80211_wep_crypt(ifp, m0, 1);
-		if (m0 == NULL)
+		k = ieee80211_get_txkey(ic, wh, ni);
+		if ((m0 = ieee80211_encrypt(ic, m0, k)) == NULL)
 			return (ENOBUFS);
 
 		/* packet header may have moved, reset our local pointer */
@@ -1633,6 +1626,7 @@ malo_rx_intr(struct malo_softc *sc)
 	struct malo_rx_desc *desc;
 	struct malo_rx_data *data;
 	struct ieee80211_frame *wh;
+	struct ieee80211_rxinfo rxi;
 	struct ieee80211_node *ni;
 	struct mbuf *mnew, *m;
 	uint32_t rxRdPtr, rxWrPtr;
@@ -1743,7 +1737,10 @@ malo_rx_intr(struct malo_softc *sc)
 		ni = ieee80211_find_rxnode(ic, wh);
 
 		/* send the frame to the 802.11 layer */
-		ieee80211_input(ifp, m, ni, desc->rssi, 0);
+		rxi.rxi_flags = 0;
+		rxi.rxi_rssi = desc->rssi;
+		rxi.rxi_tstamp = 0;	/* unused */
+		ieee80211_input(ifp, m, ni, &rxi);
 
 		/* node is no longer needed */
 		ieee80211_release_node(ic, ni);

@@ -1,5 +1,5 @@
 /* $NetBSD: loadfile.c,v 1.10 2000/12/03 02:53:04 tsutsui Exp $ */
-/* $OpenBSD: loadfile.c,v 1.14 2007/06/26 10:32:50 tom Exp $ */
+/* $OpenBSD: loadfile.c,v 1.18 2008/06/26 05:42:20 ray Exp $ */
 
 /*-
  * Copyright (c) 1997 The NetBSD Foundation, Inc.
@@ -17,13 +17,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -95,7 +88,7 @@
 static int coff_exec(int, struct ecoff_exechdr *, u_long *, int);
 #endif
 #ifdef BOOT_AOUT
-#include <sys/exec_aout.h>
+/* #include <sys/exec_aout.h> done from <sys/exec.h> above */
 static int aout_exec(int, struct exec *, u_long *, int);
 #endif
 
@@ -311,15 +304,17 @@ aout_exec(int fd, struct exec *x, u_long *marks, int flags)
 	else {
 		if (flags & LOAD_HDR)
 			BCOPY(x, maxp, sizeof(*x));
-		if (flags & (LOAD_HDR|COUNT_HDR))
+		if (flags & (LOAD_HDR|COUNT_HDR)) {
+			minp += sizeof(*x);
 			maxp += sizeof(*x);
+		}
 	}
 
 	/*
 	 * Read in the text segment.
 	 */
 	if (flags & LOAD_TEXT) {
-		PROGRESS(("%ld", x->a_text));
+		PROGRESS(("%d", x->a_text));
 
 		if (READ(fd, maxp, x->a_text - sub) != x->a_text - sub) {
 			WARN(("read text"));
@@ -353,7 +348,7 @@ aout_exec(int fd, struct exec *x, u_long *marks, int flags)
 	 * Read in the data segment.
 	 */
 	if (flags & LOAD_DATA) {
-		PROGRESS(("+%ld", x->a_data));
+		PROGRESS(("+%d", x->a_data));
 
 		if (READ(fd, maxp, x->a_data) != x->a_data) {
 			WARN(("read data"));
@@ -374,7 +369,7 @@ aout_exec(int fd, struct exec *x, u_long *marks, int flags)
 	 * (Kernel doesn't care, but do it anyway.)
 	 */
 	if (flags & LOAD_BSS) {
-		PROGRESS(("+%ld", x->a_bss));
+		PROGRESS(("+%d", x->a_bss));
 
 		BZERO(maxp, x->a_bss);
 	}
@@ -398,7 +393,7 @@ aout_exec(int fd, struct exec *x, u_long *marks, int flags)
 		/* Symbol table and string table length word. */
 
 		if (flags & LOAD_SYM) {
-			PROGRESS(("+[%ld", x->a_syms));
+			PROGRESS(("+[%d", x->a_syms));
 
 			if (READ(fd, maxp, x->a_syms) != x->a_syms) {
 				WARN(("read symbols"));

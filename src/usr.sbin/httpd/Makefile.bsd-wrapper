@@ -1,5 +1,5 @@
 # Build wrapper for Apache 
-# $OpenBSD: Makefile.bsd-wrapper,v 1.64 2008/01/08 10:08:31 henning Exp $
+# $OpenBSD: Makefile.bsd-wrapper,v 1.68 2008/07/11 00:12:35 martynas Exp $
 
 # Our lndir is hacked; specify a full path to avoid potential conflicts
 # with the one installed with X11.
@@ -19,6 +19,7 @@ LNDIR=	/usr/bin/lndir
 #    datadir:       $prefix
 #    iconsdir:      $prefix/icons
 #    htdocsdir:     $prefix/htdocs
+#    manualdir:     $exec_prefix/share/doc/html/httpd
 #    cgidir:        $prefix/cgi-bin
 #    includedir:    $exec_prefix/lib/apache/include
 #    localstatedir: $prefix
@@ -35,6 +36,7 @@ HTTPD_LIBEXECDIR=	${HTTPD_EXEC_PREFIX}/lib/apache/modules
 HTTPD_SYSCONFDIR=	${HTTPD_PREFIX}/conf
 HTTPD_ICONSDIR=		${HTTPD_PREFIX}/icons
 HTTPD_HTDOCSDIR=	${HTTPD_PREFIX}/htdocs
+HTTPD_MANUALDIR=	${HTTPD_EXEC_PREFIX}/share/doc/html/httpd
 HTTPD_INCLUDEDIR=	${HTTPD_EXEC_PREFIX}/lib/apache/include
 HTTPD_RUNDIR=		${HTTPD_PREFIX}/logs
 HTTPD_LOGDIR=		${HTTPD_PREFIX}/logs
@@ -93,7 +95,8 @@ DSO_MODULE_ARGS=  \
 	--enable-module=usertrack \
 	--enable-shared=usertrack \
 	--enable-module=vhost_alias \
-	--enable-shared=vhost_alias 
+	--enable-shared=vhost_alias \
+	--enable-rule=INET6
 
 INSTALL_MODULES=
 
@@ -224,14 +227,13 @@ MODCONFDIR= \
 	modules.sample
 
 CONFFILES= \
-	conf/httpd.conf-dist conf/httpd.conf \
-	conf/mime.types conf/magic
+	conf/httpd.conf conf/mime.types conf/magic
 
 HTDOCS= \
 	htdocs/apache_pb.gif htdocs/index.html htdocs/openbsdpower.gif \
 	htdocs/blowfish.jpg htdocs/bsd_small.gif htdocs/lock.gif \
 	htdocs/logo23.jpg htdocs/logo24.jpg htdocs/smalltitle.gif \
-	htdocs/openbsd_pb.gif
+	htdocs/openbsd_pb.gif htdocs/mod_ssl_sb.gif htdocs/openssl_ics.gif
 
 CGIFILES=	cgi-bin/printenv cgi-bin/test-cgi	
 
@@ -252,6 +254,7 @@ MANUALFILES= \
 	manual/handler.html \
 	manual/index.html \
 	manual/invoking.html \
+	manual/ipv6.html \
 	manual/keepalive.html \
 	manual/location.html \
 	manual/logs.html \
@@ -658,7 +661,7 @@ includes:
 		    ${.CURDIR}/$$i ${DESTDIR}${HTTPD_INCLUDEDIR}/xml; \
 	done
 
-install: maninstall
+install: maninstall htmlinstall
 	@-for i in ${BINFILES}; do \
 		j=`basename $$i`; \
 		echo "Installing ${DESTDIR}${HTTPD_BINDIR}/$$j"; \
@@ -739,6 +742,15 @@ cleanman:
 	@echo NOMAN is set
 .endif
 
+htmlinstall:
+	@-for i in ${MANUALFILES}; do \
+		j=`dirname $$i | sed 's;^manual/*;;'`; \
+		k=`basename $$i`; \
+		echo "Installing ${DESTDIR}${HTTPD_MANUALDIR}/$$j/$$k"; \
+		${INSTALL} ${INSTALL_COPY} -g ${BINGRP} -m 444 \
+		    ${.OBJDIR}/htdocs/$$i ${DESTDIR}${HTTPD_MANUALDIR}/$$j/; \
+	done
+
 distribution:
 	@-for i in ${MODCONFDIR}; do \
 		echo "Installing ${DESTDIR}${HTTPD_SYSCONFDIR}/$$i"; \
@@ -755,12 +767,6 @@ distribution:
 		echo "Installing ${DESTDIR}${HTTPD_PREFIX}/$$i"; \
 		${INSTALL} ${INSTALL_COPY} -g ${BINGRP} -m 444 \
 		    ${.OBJDIR}/$$i ${DESTDIR}${HTTPD_PREFIX}/$$j/; \
-	done
-	@-for i in ${MANUALFILES}; do \
-		j=`dirname $$i`; \
-		echo "Installing ${DESTDIR}${HTTPD_HTDOCSDIR}/$$i"; \
-		${INSTALL} ${INSTALL_COPY} -g ${BINGRP} -m 444 \
-		    ${.OBJDIR}/htdocs/$$i ${DESTDIR}${HTTPD_HTDOCSDIR}/$$j/; \
 	done
 	@-for i in ${CGIFILES}; do \
 		j=`dirname $$i`; \

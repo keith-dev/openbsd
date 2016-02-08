@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_bge.c,v 1.222 2008/02/20 12:17:25 brad Exp $	*/
+/*	$OpenBSD: if_bge.c,v 1.238 2008/07/17 19:59:44 brad Exp $	*/
 
 /*
  * Copyright (c) 2001 Wind River Systems
@@ -209,6 +209,7 @@ const struct pci_matchid bge_devices[] = {
 
 	{ PCI_VENDOR_ALTIMA, PCI_PRODUCT_ALTIMA_AC1000 },
 	{ PCI_VENDOR_ALTIMA, PCI_PRODUCT_ALTIMA_AC1001 },
+	{ PCI_VENDOR_ALTIMA, PCI_PRODUCT_ALTIMA_AC1003 },
 	{ PCI_VENDOR_ALTIMA, PCI_PRODUCT_ALTIMA_AC9100 },
 
 	{ PCI_VENDOR_APPLE, PCI_PRODUCT_APPLE_BCM5701 },
@@ -267,9 +268,13 @@ const struct pci_matchid bge_devices[] = {
 	{ PCI_VENDOR_BROADCOM, PCI_PRODUCT_BROADCOM_BCM5906 },
 	{ PCI_VENDOR_BROADCOM, PCI_PRODUCT_BROADCOM_BCM5906M },
 
+	{ PCI_VENDOR_FUJITSU, PCI_PRODUCT_FUJITSU_PW008GE4 },
+	{ PCI_VENDOR_FUJITSU, PCI_PRODUCT_FUJITSU_PW008GE5 },
+	{ PCI_VENDOR_FUJITSU, PCI_PRODUCT_FUJITSU_PP250_450_LAN },
+
 	{ PCI_VENDOR_SCHNEIDERKOCH, PCI_PRODUCT_SCHNEIDERKOCH_SK9D21 },
 
-	{ PCI_VENDOR_3COM, PCI_PRODUCT_3COM_3C996 },
+	{ PCI_VENDOR_3COM, PCI_PRODUCT_3COM_3C996 }
 };
 
 #define BGE_IS_5705_OR_BEYOND(sc)  \
@@ -1213,78 +1218,67 @@ bge_chipinit(struct bge_softc *sc)
 	    i < BGE_STATUS_BLOCK_END + 1; i += sizeof(u_int32_t))
 		BGE_MEMWIN_WRITE(pa->pa_pc, pa->pa_tag, i, 0);
 
-	/* Set up the PCI DMA control register. */
+	/*
+	 * Set up the PCI DMA control register.
+	 */
+	dma_rw_ctl = BGE_PCIDMARWCTL_RD_CMD_SHIFT(6) |
+	    BGE_PCIDMARWCTL_WR_CMD_SHIFT(7);
+
 	if (sc->bge_flags & BGE_PCIE) {
-		/* PCI Express bus */
-		u_int32_t device_ctl;
-
-		/* alternative from Linux driver */
-#define DMA_CTRL_WRITE_PCIE_H20MARK_128		0x00180000
-#define DMA_CTRL_WRITE_PCIE_H20MARK_256		0x00380000
-
-		dma_rw_ctl = 0x76000000; /* XXX XXX XXX */;
-		device_ctl = pci_conf_read(pa->pa_pc, pa->pa_tag,
-					   BGE_PCI_CONF_DEV_CTRL);
-
-		if ((device_ctl & 0x00e0) && 0) {
-			/*
-			 * This clause is exactly what the Broadcom-supplied
-			 * Linux does; but given overall register programming
-			 * by bge(4), this larger DMA-write watermark
-			 * value causes BCM5721 chips to totally wedge.
-			 */
-			dma_rw_ctl |= BGE_PCIDMA_RWCTL_PCIE_WRITE_WATRMARK_256;
-		} else {
-			dma_rw_ctl |= BGE_PCIDMA_RWCTL_PCIE_WRITE_WATRMARK_128;
-		}
+		/* Read watermark not used, 128 bytes for write. */
+		dma_rw_ctl |= BGE_PCIDMARWCTL_WR_WAT_SHIFT(3);
 	} else if (sc->bge_flags & BGE_PCIX) {
 		/* PCI-X bus */
 		if (BGE_IS_5714_FAMILY(sc)) {
-			dma_rw_ctl = BGE_PCI_READ_CMD|BGE_PCI_WRITE_CMD;
-			dma_rw_ctl &= ~BGE_PCIDMARWCTL_ONEDMA_ATONCE; /* XXX */
-			/* XXX magic values, Broadcom-supplied Linux driver */
-			if (BGE_ASICREV(sc->bge_chipid) == BGE_ASICREV_BCM5780)
-				dma_rw_ctl |= (1 << 20) | (1 << 18) |
-				    BGE_PCIDMARWCTL_ONEDMA_ATONCE;
-			else
-				dma_rw_ctl |= (1<<20) | (1<<18) | (1 << 15);
-		} else if (BGE_ASICREV(sc->bge_chipid) == BGE_ASICREV_BCM5704)
-			/*
-			 * The 5704 uses a different encoding of read/write
-			 * watermarks.
-			 */
-			dma_rw_ctl = BGE_PCI_READ_CMD|BGE_PCI_WRITE_CMD |
-			    (0x7 << BGE_PCIDMARWCTL_RD_WAT_SHIFT) |
-			    (0x3 << BGE_PCIDMARWCTL_WR_WAT_SHIFT);
-		else
-			dma_rw_ctl = BGE_PCI_READ_CMD|BGE_PCI_WRITE_CMD |
-			    (0x3 << BGE_PCIDMARWCTL_RD_WAT_SHIFT) |
-			    (0x3 << BGE_PCIDMARWCTL_WR_WAT_SHIFT) |
-			    (0x0F);
+			/* 256 bytes for read and write. */
+			dma_rw_ctl |= BGE_PCIDMARWCTL_RD_WAT_SHIFT(2) |
+			    BGE_PCIDMARWCTL_WR_WAT_SHIFT(2);
 
-		/*
-		 * 5703 and 5704 need ONEDMA_AT_ONCE as a workaround
-		 * for hardware bugs.
-		 */
+			if (BGE_ASICREV(sc->bge_chipid) == BGE_ASICREV_BCM5780)
+				dma_rw_ctl |= BGE_PCIDMARWCTL_ONEDMA_ATONCE_GLOBAL;
+			else
+				dma_rw_ctl |= BGE_PCIDMARWCTL_ONEDMA_ATONCE_LOCAL;
+		} else if (BGE_ASICREV(sc->bge_chipid) == BGE_ASICREV_BCM5704) {
+			/* 1536 bytes for read, 384 bytes for write. */
+			dma_rw_ctl |= BGE_PCIDMARWCTL_RD_WAT_SHIFT(7) |
+			    BGE_PCIDMARWCTL_WR_WAT_SHIFT(3);
+		} else {
+			/* 384 bytes for read and write. */
+			dma_rw_ctl |= BGE_PCIDMARWCTL_RD_WAT_SHIFT(3) |
+			    BGE_PCIDMARWCTL_WR_WAT_SHIFT(3) |
+			    (0x0F);
+		}
+
 		if (BGE_ASICREV(sc->bge_chipid) == BGE_ASICREV_BCM5703 ||
 		    BGE_ASICREV(sc->bge_chipid) == BGE_ASICREV_BCM5704) {
 			u_int32_t tmp;
 
+			/* Set ONEDMA_ATONCE for hardware workaround. */
 			tmp = CSR_READ_4(sc, BGE_PCI_CLKCTL) & 0x1f;
-			if (tmp == 0x6 || tmp == 0x7)
-				dma_rw_ctl |= BGE_PCIDMARWCTL_ONEDMA_ATONCE;
+			if (tmp == 6 || tmp == 7)
+				dma_rw_ctl |=
+				    BGE_PCIDMARWCTL_ONEDMA_ATONCE_GLOBAL;
+
+			/* Set PCI-X DMA write workaround. */
+			dma_rw_ctl |= BGE_PCIDMARWCTL_ASRT_ALL_BE;
 		}
- 	} else {
-		/* Conventional PCI bus */
-		dma_rw_ctl = BGE_PCI_READ_CMD | BGE_PCI_WRITE_CMD |
-		    (0x7 << BGE_PCIDMARWCTL_RD_WAT_SHIFT) |
-		    (0x7 << BGE_PCIDMARWCTL_WR_WAT_SHIFT) |
-		    (0x0f);
+	} else {
+		/* Conventional PCI bus: 256 bytes for read and write. */
+		dma_rw_ctl |= BGE_PCIDMARWCTL_RD_WAT_SHIFT(7) |
+		    BGE_PCIDMARWCTL_WR_WAT_SHIFT(7);
+
+		if (BGE_ASICREV(sc->bge_chipid) != BGE_ASICREV_BCM5705 &&
+		    BGE_ASICREV(sc->bge_chipid) != BGE_ASICREV_BCM5750)
+			dma_rw_ctl |= 0x0F;
 	}
+
+	if (BGE_ASICREV(sc->bge_chipid) == BGE_ASICREV_BCM5700 ||
+	    BGE_ASICREV(sc->bge_chipid) == BGE_ASICREV_BCM5701)
+		dma_rw_ctl |= BGE_PCIDMARWCTL_USE_MRM |
+		    BGE_PCIDMARWCTL_ASRT_ALL_BE;
  
 	if (BGE_ASICREV(sc->bge_chipid) == BGE_ASICREV_BCM5703 ||
-	    BGE_ASICREV(sc->bge_chipid) == BGE_ASICREV_BCM5704 ||
-	    BGE_ASICREV(sc->bge_chipid) == BGE_ASICREV_BCM5705)
+	    BGE_ASICREV(sc->bge_chipid) == BGE_ASICREV_BCM5704)
 		dma_rw_ctl &= ~BGE_PCIDMARWCTL_MINDMA;
 
 	pci_conf_write(pa->pa_pc, pa->pa_tag, BGE_PCI_DMA_RW_CTL, dma_rw_ctl);
@@ -1675,8 +1669,8 @@ bge_blockinit(struct bge_softc *sc)
 		dma_read_modebits =
 		  BGE_RDMAMODE_ENABLE | BGE_RDMAMODE_ALL_ATTNS;
 
-		if (sc->bge_flags & BGE_PCIE && 0)
-			dma_read_modebits |= BGE_RDMA_MODE_FIFO_LONG_BURST;
+		if (sc->bge_flags & BGE_PCIE)
+			dma_read_modebits |= BGE_RDMAMODE_FIFO_LONG_BURST;
 
 		CSR_WRITE_4(sc, BGE_RDMA_MODE, dma_read_modebits);
 	}
@@ -1724,8 +1718,7 @@ bge_blockinit(struct bge_softc *sc)
  	} else {
 		BGE_STS_SETBIT(sc, BGE_STS_AUTOPOLL);
 		BGE_SETBIT(sc, BGE_MI_MODE, BGE_MIMODE_AUTOPOLL|10<<16);
-		if (BGE_ASICREV(sc->bge_chipid) == BGE_ASICREV_BCM5700 &&
-		    sc->bge_chipid != BGE_CHIPID_BCM5700_B2)
+		if (BGE_ASICREV(sc->bge_chipid) == BGE_ASICREV_BCM5700)
 			CSR_WRITE_4(sc, BGE_MAC_EVT_ENB,
 			    BGE_EVTENB_MI_INTERRUPT);
 	}
@@ -1813,14 +1806,8 @@ bge_attach(struct device *parent, struct device *self, void *aux)
 
 	DPRINTFN(5, ("pci_mapreg_map\n"));
 	memtype = pci_mapreg_type(pa->pa_pc, pa->pa_tag, BGE_PCI_BAR0);
- 	switch (memtype) {
-	case PCI_MAPREG_TYPE_MEM | PCI_MAPREG_MEM_TYPE_32BIT:
-	case PCI_MAPREG_TYPE_MEM | PCI_MAPREG_MEM_TYPE_64BIT:
-		if (pci_mapreg_map(pa, BGE_PCI_BAR0,
-		    memtype, 0, &sc->bge_btag, &sc->bge_bhandle,
-		    NULL, &size, 0) == 0)
-			break;
-	default:
+	if (pci_mapreg_map(pa, BGE_PCI_BAR0, memtype, 0, &sc->bge_btag,
+	    &sc->bge_bhandle, NULL, &size, 0)) {
 		printf(": can't find mem space\n");
 		return;
 	}
@@ -1910,6 +1897,11 @@ bge_attach(struct device *parent, struct device *self, void *aux)
 	misccfg = CSR_READ_4(sc, BGE_MISC_CFG);
 	misccfg &= BGE_MISCCFG_BOARD_ID_MASK;
 
+	if (BGE_ASICREV(sc->bge_chipid) == BGE_ASICREV_BCM5705 &&
+	    (misccfg == BGE_MISCCFG_BOARD_ID_5788 ||
+	     misccfg == BGE_MISCCFG_BOARD_ID_5788M))
+		sc->bge_flags |= BGE_IS_5788;
+
 	if ((BGE_ASICREV(sc->bge_chipid) == BGE_ASICREV_BCM5703 &&
 	     (misccfg == 0x4000 || misccfg == 0x8000)) ||
 	    (BGE_ASICREV(sc->bge_chipid) == BGE_ASICREV_BCM5705 &&
@@ -1931,6 +1923,9 @@ bge_attach(struct device *parent, struct device *self, void *aux)
 	    BGE_ASICREV(sc->bge_chipid) == BGE_ASICREV_BCM5906)
 		sc->bge_flags |= BGE_NO_ETH_WIRE_SPEED;
 
+	if (sc->bge_chipid == BGE_CHIPID_BCM5701_A0 ||
+	    sc->bge_chipid == BGE_CHIPID_BCM5701_B0)
+		sc->bge_flags |= BGE_PHY_CRC_BUG;
 	if (BGE_CHIPREV(sc->bge_chipid) == BGE_CHIPREV_5703_AX ||
 	    BGE_CHIPREV(sc->bge_chipid) == BGE_CHIPREV_5704_AX)
 		sc->bge_flags |= BGE_PHY_ADC_BUG;
@@ -2074,7 +2069,6 @@ bge_attach(struct device *parent, struct device *self, void *aux)
 	ifp->if_ioctl = bge_ioctl;
 	ifp->if_start = bge_start;
 	ifp->if_watchdog = bge_watchdog;
-	ifp->if_baudrate = 1000000000;
 	IFQ_SET_MAXLEN(&ifp->if_snd, BGE_TX_RING_CNT - 1);
 	IFQ_SET_READY(&ifp->if_snd);
 	DPRINTFN(5, ("bcopy\n"));
@@ -2154,13 +2148,18 @@ bge_attach(struct device *parent, struct device *self, void *aux)
 		ifmedia_set(&sc->bge_ifmedia, IFM_ETHER|IFM_AUTO);
 		sc->bge_ifmedia.ifm_media = sc->bge_ifmedia.ifm_cur->ifm_media;
 	} else {
+		int mii_flags;
+
 		/*
 		 * Do transceiver setup.
 		 */
 		ifmedia_init(&sc->bge_mii.mii_media, 0, bge_ifmedia_upd,
 			     bge_ifmedia_sts);
+		mii_flags = MIIF_DOPAUSE;
+		if (sc->bge_flags & BGE_PHY_FIBER_MII)
+			mii_flags |= MIIF_HAVEFIBER;
 		mii_attach(&sc->bge_dev, &sc->bge_mii, 0xffffffff,
-			   MII_PHY_ANY, MII_OFFSET_ANY, MIIF_DOPAUSE);
+			   MII_PHY_ANY, MII_OFFSET_ANY, mii_flags);
 		
 		if (LIST_FIRST(&sc->bge_mii.mii_phys) == NULL) {
 			printf("%s: no PHY found!\n", sc->bge_dev.dv_xname);
@@ -2648,8 +2647,7 @@ bge_intr(void *xsc)
 		/* clear status word */
 		sc->bge_rdata->bge_status_block.bge_status = 0;
 
-		if ((BGE_ASICREV(sc->bge_chipid) == BGE_ASICREV_BCM5700 &&
-		    sc->bge_chipid != BGE_CHIPID_BCM5700_B2) ||
+		if (BGE_ASICREV(sc->bge_chipid) == BGE_ASICREV_BCM5700 ||
 		    statusword & BGE_STATFLAG_LINKSTATE_CHANGED ||
 		    BGE_STS_BIT(sc, BGE_STS_LINK_EVT))
 			bge_link_upd(sc);
@@ -3173,15 +3171,18 @@ bge_ifmedia_upd(struct ifnet *ifp)
 			 */
 			if (BGE_ASICREV(sc->bge_chipid) == BGE_ASICREV_BCM5704) {
 				u_int32_t sgdig;
-				CSR_WRITE_4(sc, BGE_TX_TBI_AUTONEG, 0);
-				sgdig = CSR_READ_4(sc, BGE_SGDIG_CFG);
-				sgdig |= BGE_SGDIGCFG_AUTO|
-				    BGE_SGDIGCFG_PAUSE_CAP|
-				    BGE_SGDIGCFG_ASYM_PAUSE;
-				CSR_WRITE_4(sc, BGE_SGDIG_CFG,
-				    sgdig|BGE_SGDIGCFG_SEND);
-				DELAY(5);
-				CSR_WRITE_4(sc, BGE_SGDIG_CFG, sgdig);
+				sgdig = CSR_READ_4(sc, BGE_SGDIG_STS);
+				if (sgdig & BGE_SGDIGSTS_DONE) {
+					CSR_WRITE_4(sc, BGE_TX_TBI_AUTONEG, 0);
+					sgdig = CSR_READ_4(sc, BGE_SGDIG_CFG);
+					sgdig |= BGE_SGDIGCFG_AUTO |
+					    BGE_SGDIGCFG_PAUSE_CAP |
+					    BGE_SGDIGCFG_ASYM_PAUSE;
+					CSR_WRITE_4(sc, BGE_SGDIG_CFG,
+					    sgdig | BGE_SGDIGCFG_SEND);
+					DELAY(5);
+					CSR_WRITE_4(sc, BGE_SGDIG_CFG, sgdig);
+				}
 			}
 			break;
 		case IFM_1000_SX:
@@ -3467,12 +3468,7 @@ bge_stop(struct bge_softc *sc)
 
 	sc->bge_tx_saved_considx = BGE_TXCONS_UNSET;
 
-	/*
-	 * We can't just call bge_link_upd() cause chip is almost stopped so
-	 * bge_link_upd -> bge_tick_locked -> bge_stats_update sequence may
-	 * lead to hardware deadlock. So we just clearing MAC's link state
-	 * (PHY may still have link UP).
-	 */
+	/* Clear MAC's link state (PHY may still have link UP). */
 	BGE_STS_CLRBIT(sc, BGE_STS_LINK);
 }
 
@@ -3511,26 +3507,20 @@ bge_link_upd(struct bge_softc *sc)
 	 * changes, thereby adding an additional register access to
 	 * the interrupt handler.
 	 *
-	 * XXX: perhaps link state detection procedure used for
-	 * BGE_CHIPID_BCM5700_B2 can be used for other BCM5700 revisions.
 	 */
-
-	if (BGE_ASICREV(sc->bge_chipid) == BGE_ASICREV_BCM5700 &&
-	    sc->bge_chipid != BGE_CHIPID_BCM5700_B2) {
+	if (BGE_ASICREV(sc->bge_chipid) == BGE_ASICREV_BCM5700) {
 		status = CSR_READ_4(sc, BGE_MAC_STS);
 		if (status & BGE_MACSTAT_MI_INTERRUPT) {
-			timeout_del(&sc->bge_timeout);
-			bge_tick(sc);
+			mii_pollstat(mii);
 
 			if (!BGE_STS_BIT(sc, BGE_STS_LINK) &&
 			    mii->mii_media_status & IFM_ACTIVE &&
-			    IFM_SUBTYPE(mii->mii_media_active) != IFM_NONE) {
+			    IFM_SUBTYPE(mii->mii_media_active) != IFM_NONE)
 				BGE_STS_SETBIT(sc, BGE_STS_LINK);
-			} else if (BGE_STS_BIT(sc, BGE_STS_LINK) &&
+			else if (BGE_STS_BIT(sc, BGE_STS_LINK) &&
 			    (!(mii->mii_media_status & IFM_ACTIVE) ||
-			    IFM_SUBTYPE(mii->mii_media_active) == IFM_NONE)) {
+			    IFM_SUBTYPE(mii->mii_media_active) == IFM_NONE))
 				BGE_STS_CLRBIT(sc, BGE_STS_LINK);
-			}
 
 			/* Clear the interrupt */
 			CSR_WRITE_4(sc, BGE_MAC_EVT_ENB,
@@ -3557,11 +3547,13 @@ bge_link_upd(struct bge_softc *sc)
 				    LINK_STATE_HALF_DUPLEX :
 				    LINK_STATE_FULL_DUPLEX;
 				if_link_state_change(ifp);
+				ifp->if_baudrate = IF_Gbps(1);
 			}
 		} else if (BGE_STS_BIT(sc, BGE_STS_LINK)) {
 			BGE_STS_CLRBIT(sc, BGE_STS_LINK);
 			ifp->if_link_state = LINK_STATE_DOWN;
 			if_link_state_change(ifp);
+			ifp->if_baudrate = 0;
 		}
         /*
 	 * Discard link events for MII/GMII cards if MI auto-polling disabled.
@@ -3577,10 +3569,8 @@ bge_link_upd(struct bge_softc *sc)
 		link = (CSR_READ_4(sc, BGE_MI_STS) & BGE_MISTS_LINK)?
 		    BGE_STS_LINK : 0;
 
-		if (BGE_STS_BIT(sc, BGE_STS_LINK) != link ||
-		    BGE_ASICREV(sc->bge_chipid) == BGE_ASICREV_BCM5700) {
-			timeout_del(&sc->bge_timeout);
-			bge_tick(sc);
+		if (BGE_STS_BIT(sc, BGE_STS_LINK) != link) {
+			mii_pollstat(mii);
 
 			if (!BGE_STS_BIT(sc, BGE_STS_LINK) &&
 			    mii->mii_media_status & IFM_ACTIVE &&

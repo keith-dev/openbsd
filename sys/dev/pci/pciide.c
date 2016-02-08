@@ -1,4 +1,4 @@
-/*	$OpenBSD: pciide.c,v 1.281 2008/02/27 20:10:29 kettenis Exp $	*/
+/*	$OpenBSD: pciide.c,v 1.287 2008/07/29 20:09:11 kettenis Exp $	*/
 /*	$NetBSD: pciide.c,v 1.127 2001/08/03 01:31:08 tsutsui Exp $	*/
 
 /*
@@ -130,6 +130,11 @@ int wdcdebug_pciide_mask = WDCDEBUG_PCIIDE_MASK;
 #include <dev/pci/pciide_svwsata_reg.h>
 #include <dev/pci/pciide_jmicron_reg.h>
 #include <dev/pci/cy82c693var.h>
+
+#ifdef __sparc64__
+#include <machine/autoconf.h>
+#include <machine/openfirm.h>
+#endif
 
 /* functions for reading/writing 8-bit PCI registers */
 
@@ -400,99 +405,99 @@ const struct pciide_product_desc pciide_intel_products[] =  {
 	  piixsata_chip_map
 	},
 	{ PCI_PRODUCT_INTEL_82801ER_SATA, /* Intel 82801ER (ICH5R) SATA */
-	  IDE_PCI_CLASS_OVERRIDE,
+	  0,
 	  piixsata_chip_map
 	},
 	{ PCI_PRODUCT_INTEL_6300ESB_IDE, /* Intel 6300ESB IDE */
-	  IDE_PCI_CLASS_OVERRIDE,
+	  0,
 	  piix_chip_map
 	},
 	{ PCI_PRODUCT_INTEL_6300ESB_SATA, /* Intel 6300ESB SATA */
-	  IDE_PCI_CLASS_OVERRIDE,
+	  0,
 	  piixsata_chip_map
 	},
 	{ PCI_PRODUCT_INTEL_6300ESB_SATA2, /* Intel 6300ESB SATA */
-	  IDE_PCI_CLASS_OVERRIDE,
+	  0,
 	  piixsata_chip_map
 	},
 	{ PCI_PRODUCT_INTEL_6321ESB_IDE, /* Intel 6321ESB IDE */
-	  IDE_PCI_CLASS_OVERRIDE,
+	  0,
 	  piix_chip_map
 	},
 	{ PCI_PRODUCT_INTEL_82801FB_IDE,  /* Intel 82801FB (ICH6) IDE */
-	  IDE_PCI_CLASS_OVERRIDE,
+	  0,
 	  piix_chip_map
 	},
 	{ PCI_PRODUCT_INTEL_82801FBM_SATA,  /* Intel 82801FBM (ICH6M) SATA */
-	  IDE_PCI_CLASS_OVERRIDE,
+	  0,
 	  piixsata_chip_map
 	},
 	{ PCI_PRODUCT_INTEL_82801FB_SATA, /* Intel 82801FB (ICH6) SATA */
-	  IDE_PCI_CLASS_OVERRIDE,
+	  0,
 	  piixsata_chip_map
 	},
 	{ PCI_PRODUCT_INTEL_82801FR_SATA, /* Intel 82801FR (ICH6R) SATA */
-	  IDE_PCI_CLASS_OVERRIDE,
+	  0,
 	  piixsata_chip_map
 	},
 	{ PCI_PRODUCT_INTEL_82801GB_IDE,  /* Intel 82801GB (ICH7) IDE */
-	  IDE_PCI_CLASS_OVERRIDE,
+	  0,
 	  piix_chip_map
 	},
 	{ PCI_PRODUCT_INTEL_82801GB_SATA, /* Intel 82801GB (ICH7) SATA */
-	  IDE_PCI_CLASS_OVERRIDE,
+	  0,
 	  piixsata_chip_map
 	},
 	{ PCI_PRODUCT_INTEL_82801GR_AHCI, /* Intel 82801GR (ICH7R) AHCI */
-	  IDE_PCI_CLASS_OVERRIDE,
+	  0,
 	  piixsata_chip_map
 	},
 	{ PCI_PRODUCT_INTEL_82801GR_RAID, /* Intel 82801GR (ICH7R) RAID */
-	  IDE_PCI_CLASS_OVERRIDE,
+	  0,
 	  piixsata_chip_map
 	},
 	{ PCI_PRODUCT_INTEL_82801GBM_SATA, /* Intel 82801GBM (ICH7M) SATA */
-	  IDE_PCI_CLASS_OVERRIDE,
+	  0,
 	  piixsata_chip_map
 	},
 	{ PCI_PRODUCT_INTEL_82801GBM_AHCI, /* Intel 82801GBM (ICH7M) AHCI */
-	  IDE_PCI_CLASS_OVERRIDE,
+	  0,
 	  piixsata_chip_map
 	},
 	{ PCI_PRODUCT_INTEL_82801GHM_RAID, /* Intel 82801GHM (ICH7M DH) RAID */
-	  IDE_PCI_CLASS_OVERRIDE,
+	  0,
 	  piixsata_chip_map
 	},
 	{ PCI_PRODUCT_INTEL_82801H_SATA_1, /* Intel 82801H (ICH8) SATA */
-	  IDE_PCI_CLASS_OVERRIDE,
+	  0,
 	  piixsata_chip_map
 	},
 	{ PCI_PRODUCT_INTEL_82801H_AHCI_6P, /* Intel 82801H (ICH8) AHCI */
-	  IDE_PCI_CLASS_OVERRIDE,
+	  0,
 	  piixsata_chip_map
 	},
 	{ PCI_PRODUCT_INTEL_82801H_RAID, /* Intel 82801H (ICH8) RAID */
-	  IDE_PCI_CLASS_OVERRIDE,
+	  0,
 	  piixsata_chip_map
 	},
 	{ PCI_PRODUCT_INTEL_82801H_AHCI_4P, /* Intel 82801H (ICH8) AHCI */
-	  IDE_PCI_CLASS_OVERRIDE,
+	  0,
 	  piixsata_chip_map
 	},
 	{ PCI_PRODUCT_INTEL_82801H_SATA_2, /* Intel 82801H (ICH8) SATA */
-	  IDE_PCI_CLASS_OVERRIDE,
+	  0,
 	  piixsata_chip_map
 	},
 	{ PCI_PRODUCT_INTEL_82801HBM_SATA, /* Intel 82801HBM (ICH8M) SATA */
-	  IDE_PCI_CLASS_OVERRIDE,
+	  0,
 	  piixsata_chip_map
 	},
 	{ PCI_PRODUCT_INTEL_82801HBM_AHCI, /* Intel 82801HBM (ICH8M) AHCI */
-	  IDE_PCI_CLASS_OVERRIDE,
+	  0,
 	  piixsata_chip_map
 	},
 	{ PCI_PRODUCT_INTEL_82801HBM_RAID, /* Intel 82801HBM (ICH8M) RAID */
-	  IDE_PCI_CLASS_OVERRIDE,
+	  0,
 	  piixsata_chip_map
 	},
 	{ PCI_PRODUCT_INTEL_82801HBM_IDE, /* Intel 82801HBM (ICH8M) IDE */
@@ -584,11 +589,11 @@ const struct pciide_product_desc pciide_cmd_products[] =  {
 	  cmd0643_9_chip_map
 	},
 	{ PCI_PRODUCT_CMDTECH_648,	/* CMD Technology PCI0648 */
-	  IDE_PCI_CLASS_OVERRIDE,
+	  0,
 	  cmd0643_9_chip_map
 	},
 	{ PCI_PRODUCT_CMDTECH_649,	/* CMD Technology PCI0649 */
-	  IDE_PCI_CLASS_OVERRIDE,
+	  0,
 	  cmd0643_9_chip_map
 	},
 	{ PCI_PRODUCT_CMDTECH_680,	/* CMD Technology PCI0680 */
@@ -596,19 +601,19 @@ const struct pciide_product_desc pciide_cmd_products[] =  {
 	  cmd680_chip_map
 	},
 	{ PCI_PRODUCT_CMDTECH_3112,	/* SiI3112 SATA */
-	  IDE_PCI_CLASS_OVERRIDE,
+	  0,
 	  sii3112_chip_map
 	},
 	{ PCI_PRODUCT_CMDTECH_3512,	/* SiI3512 SATA */
-	  IDE_PCI_CLASS_OVERRIDE,
+	  0,
 	  sii3112_chip_map
 	},
 	{ PCI_PRODUCT_CMDTECH_AAR_1210SA, /* Adaptec AAR-1210SA */
-	  IDE_PCI_CLASS_OVERRIDE,
+	  0,
 	  sii3112_chip_map
 	},
-	{ PCI_PRODUCT_CMDTECH_3114,	/* SiI3114 */
-	  IDE_PCI_CLASS_OVERRIDE,
+	{ PCI_PRODUCT_CMDTECH_3114,	/* SiI3114 SATA */
+	  0,
 	  sii3114_chip_map
 	}
 };
@@ -635,15 +640,15 @@ const struct pciide_product_desc pciide_via_products[] =  {
 	  apollo_chip_map
 	},
 	{ PCI_PRODUCT_VIATECH_VT6420_SATA, /* VIA VT6420 SATA */
-	  IDE_PCI_CLASS_OVERRIDE,
+	  0,
 	  sata_chip_map
 	},
 	{ PCI_PRODUCT_VIATECH_VT6421_SATA, /* VIA VT6421 SATA */
-	  IDE_PCI_CLASS_OVERRIDE,
+	  0,
 	  sata_chip_map
 	},
 	{ PCI_PRODUCT_VIATECH_VT8237A_SATA, /* VIA VT8237A SATA */
-	  IDE_PCI_CLASS_OVERRIDE,
+	  0,
 	  sata_chip_map
 	},
 	{ PCI_PRODUCT_VIATECH_VT8237A_SATA_2, /* VIA VT8237A SATA */
@@ -655,7 +660,7 @@ const struct pciide_product_desc pciide_via_products[] =  {
 	  sata_chip_map
 	},
 	{ PCI_PRODUCT_VIATECH_VT8251_SATA, /* VIA VT8251 SATA */
-	  IDE_PCI_CLASS_OVERRIDE,
+	  0,
 	  sata_chip_map
 	}
 };
@@ -673,15 +678,15 @@ const struct pciide_product_desc pciide_sis_products[] =  {
 	  sis_chip_map
 	},
 	{ PCI_PRODUCT_SIS_180,		/* SIS 180 SATA */
-	  IDE_PCI_CLASS_OVERRIDE,
+	  0,
 	  sata_chip_map
 	},
 	{ PCI_PRODUCT_SIS_181,		/* SIS 181 SATA */
-	  IDE_PCI_CLASS_OVERRIDE,
+	  0,
 	  sata_chip_map
 	},
 	{ PCI_PRODUCT_SIS_182,		/* SIS 182 SATA */
-	  IDE_PCI_CLASS_OVERRIDE,
+	  0,
 	  sata_chip_map
 	}
 };
@@ -891,7 +896,7 @@ const struct pciide_product_desc pciide_serverworks_products[] =  {
 	  serverworks_chip_map,
 	},
 	{ PCI_PRODUCT_RCC_K2_SATA,
-	  IDE_PCI_CLASS_OVERRIDE,
+	  0,
 	  svwsata_chip_map,
 	},
 	{ PCI_PRODUCT_RCC_FRODO4_SATA,
@@ -1092,15 +1097,15 @@ const struct pciide_product_desc pciide_ati_products[] = {
 	  ixp_chip_map
 	},
 	{ PCI_PRODUCT_ATI_IXP_SATA_300,
-	  IDE_PCI_CLASS_OVERRIDE,
+	  0,
 	  sii3112_chip_map
 	},
 	{ PCI_PRODUCT_ATI_IXP_SATA_400_1,
-	  IDE_PCI_CLASS_OVERRIDE,
+	  0,
 	  sii3112_chip_map
 	},
 	{ PCI_PRODUCT_ATI_IXP_SATA_400_2,
-	  IDE_PCI_CLASS_OVERRIDE,
+	  0,
 	  sii3112_chip_map
 	}
 };
@@ -1277,6 +1282,7 @@ pciide_match(struct device *parent, void *match, void *aux)
 		 */
 		case PCI_SUBCLASS_MASS_STORAGE_SATA:
 		case PCI_SUBCLASS_MASS_STORAGE_RAID:
+		case PCI_SUBCLASS_MASS_STORAGE_MISC:
 			if (pp)
 				return (1);
 			else
@@ -4659,7 +4665,9 @@ static struct sis_hostbr_type {
 	 * {PCI_PRODUCT_SIS_961, 0x00, 6, "961", SIS_TYPE_133NEW},
 	 */
 	{PCI_PRODUCT_SIS_962, 0x00, 6, "962", SIS_TYPE_133NEW},
-	{PCI_PRODUCT_SIS_963, 0x00, 6, "963", SIS_TYPE_133NEW}
+	{PCI_PRODUCT_SIS_963, 0x00, 6, "963", SIS_TYPE_133NEW},
+	{PCI_PRODUCT_SIS_964, 0x00, 6, "964", SIS_TYPE_133NEW},
+	{PCI_PRODUCT_SIS_965, 0x00, 6, "965", SIS_TYPE_133NEW}
 };
 
 static struct sis_hostbr_type *sis_hostbr_type_match;
@@ -4699,22 +4707,15 @@ sis_chip_map(struct pciide_softc *sc, struct pci_attach_args *pa)
 	pcireg_t interface = PCI_INTERFACE(pa->pa_class);
 	int rev = sc->sc_rev;
 	bus_size_t cmdsize, ctlsize;
-	pcitag_t br_tag;
-	struct pci_attach_args br_pa;
 	struct pciide_sis *sis;
 
 	/* Allocate memory for private data */
 	sc->sc_cookie = malloc(sizeof(*sis), M_DEVBUF, M_NOWAIT | M_ZERO);
 	sis = sc->sc_cookie;
 
-	/* Find PCI bridge (dev 0 func 0 on the same bus) */
-	br_tag = pci_make_tag(pa->pa_pc, pa->pa_bus, 0, 0);
-	br_pa.pa_id = pci_conf_read(sc->sc_pc, br_tag, PCI_ID_REG);
-	br_pa.pa_class = pci_conf_read(sc->sc_pc, br_tag, PCI_CLASS_REG);
-	WDCDEBUG_PRINT(("%s: PCI bridge pa_id=0x%x pa_class=0x%x\n",
-	    __func__, br_pa.pa_id, br_pa.pa_class), DEBUG_PROBE);
+	pci_find_device(NULL, sis_hostbr_match);
 
-	if (sis_hostbr_match(&br_pa)) {
+	if (sis_hostbr_type_match) {
 		if (sis_hostbr_type_match->type == SIS_TYPE_SOUTH) {
 			pciide_pci_write(sc->sc_pc, sc->sc_tag, SIS_REG_57,
 			    pciide_pci_read(sc->sc_pc, sc->sc_tag,
@@ -4724,19 +4725,7 @@ sis_chip_map(struct pciide_softc *sc, struct pci_attach_args *pa)
 				sc->sc_wdcdev.UDMA_cap =
 				    sis_hostbr_type_match->udma_mode;
 			} else {
-				/* Find ISA bridge (func 0 of the same dev) */
-				br_tag = pci_make_tag(pa->pa_pc, pa->pa_bus,
-				    pa->pa_device, 0);
-				br_pa.pa_id = pci_conf_read(sc->sc_pc,
-				    br_tag, PCI_ID_REG);
-				br_pa.pa_class = pci_conf_read(sc->sc_pc,
-				    br_tag, PCI_CLASS_REG);
-				WDCDEBUG_PRINT(("%s: ISA bridge "
-				    "pa_id=0x%x pa_class=0x%x\n",
-				    __func__, br_pa.pa_id, br_pa.pa_class),
-				    DEBUG_PROBE);
-
-				if (sis_south_match(&br_pa)) {
+				if (pci_find_device(NULL, sis_south_match)) {
 					sis->sis_type = SIS_TYPE_133OLD;
 					sc->sc_wdcdev.UDMA_cap =
 					    sis_hostbr_type_match->udma_mode;
@@ -5358,11 +5347,26 @@ acer_chip_map(struct pciide_softc *sc, struct pci_attach_args *pa)
 	pcireg_t cr, interface;
 	bus_size_t cmdsize, ctlsize;
 	int rev = sc->sc_rev;
+#ifdef __sparc64__
+	char buf[32];
+#endif
 
 	printf(": DMA");
 	pciide_mapreg_dma(sc, pa);
 	sc->sc_wdcdev.cap = WDC_CAPABILITY_DATA16 | WDC_CAPABILITY_DATA32 |
 	    WDC_CAPABILITY_MODE;
+
+#ifdef __sparc64__
+	/*
+	 * XXX The Tadpole SPARCLE doesn't want to do DMA.  PIO works
+	 * fine, so we have this ugly hack to make the machine work.
+	 * It is likely the real cause is still lurking somewhere in
+	 * the code.
+	 */
+	if (OF_getprop(findroot(), "name", buf, sizeof(buf)) > 0 &&
+	    strcmp(buf, "TAD,SPARCLE") == 0)
+		sc->sc_dma_ok = 0;
+#endif
 
 	if (sc->sc_dma_ok) {
 		sc->sc_wdcdev.cap |= WDC_CAPABILITY_DMA;

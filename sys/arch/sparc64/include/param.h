@@ -1,4 +1,4 @@
-/*	$OpenBSD: param.h,v 1.29 2007/10/27 22:20:16 martin Exp $	*/
+/*	$OpenBSD: param.h,v 1.31 2008/05/21 19:23:15 kettenis Exp $	*/
 /*	$NetBSD: param.h,v 1.25 2001/05/30 12:28:51 mrg Exp $ */
 
 /*
@@ -188,6 +188,18 @@
 extern void	delay(unsigned int);
 #define	DELAY(n)	delay(n)
 
+extern int cputyp;
+
+#if defined (SUN4US) || defined (SUN4V)
+#define CPU_ISSUN4U	(cputyp == CPU_SUN4U)
+#define CPU_ISSUN4US	(cputyp == CPU_SUN4US)
+#define CPU_ISSUN4V	(cputyp == CPU_SUN4V)
+#else
+#define CPU_ISSUN4U	(1)
+#define CPU_ISSUN4US	(0)
+#define CPU_ISSUN4V	(0)
+#endif
+
 #endif /* _LOCORE */
 #endif /* _KERNEL */
 
@@ -198,6 +210,8 @@ extern void	delay(unsigned int);
 #define CPU_SUN4C	1
 #define CPU_SUN4M	2
 #define CPU_SUN4U	3
+#define CPU_SUN4US	4
+#define CPU_SUN4V	5 
 
 /*
  * On a sun4u machine, the page size is 8192.

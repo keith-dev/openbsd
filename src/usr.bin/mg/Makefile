@@ -1,4 +1,4 @@
-# $OpenBSD: Makefile,v 1.19 2006/12/16 17:00:03 kjell Exp $
+# $OpenBSD: Makefile,v 1.21 2008/06/13 18:51:02 kjell Exp $
 
 PROG=	mg
 
@@ -25,6 +25,6 @@ SRCS=	cinfo.c fileio.c spawn.c ttyio.c tty.c ttykbd.c \
 #
 # More or less standalone extensions.
 #
-SRCS+=	grep.c theo.c mail.c
+SRCS+=	grep.c theo.c cmode.c
 
 .include <bsd.prog.mk>

@@ -2,43 +2,44 @@ divert(-1)
 #
 # Sendmail configuration file for lists.openbsd.org
 #
-# This config just accepts bulk mail from mj2 on port 24 and delivers it.
-# It is a queue-only config--we use persistent queue runners to do the
-# actual delivery.
-#
-# The queue runners are started from rc.local as follows:
-#
-# set -- q0 50 modification 1s q1 5 host 1m q2 5 host 2m q3 5 host 5m qold 10 host 10m
-# _key=8675309
-# while test $# -ge 4; do
-#	/usr/sbin/sendmail -C/etc/mail/bulk.cf -Lsm-queue -OQueueSortOrder=$3 \
-#	    -OMaxQueueChildren=$2 -OQueueDirectory=/var/spool/mqueue/$1 \
-#	    -OProcessTitlePrefix=$1 -OPidFile=/var/run/runner-$1.pid \
-#	    -OSharedMemoryKey=$_key -q$4
-#	_key=$(( $_key + 10 ))
-#	shift 4
-# done
-#
-# A cron job moves failed messages progressively from q0 -> qold
+# This config accepts bulk mail from mj2 on port 24 and delivers it.
 #
 
 divert(0)dnl
-VERSIONID(`$OpenBSD: openbsd-bulk.mc,v 1.2 2005/01/06 17:21:03 millert Exp $')
+VERSIONID(`$OpenBSD: openbsd-bulk.mc,v 1.4 2008/06/09 14:47:01 millert Exp $')
 OSTYPE(openbsd)dnl
 dnl
 dnl Advertise ourselves as ``openbsd.org''
 define(`confSMTP_LOGIN_MSG', `openbsd.org Sendmail $v/$Z/bulk ready willing and able at $b')dnl
 dnl
 dnl Override some default values
-define(`confDELIVERY_MODE', `q')dnl
 define(`confTRY_NULL_MX_LIST', `True')dnl
 define(`confMAX_HOP', `30')dnl
 define(`confQUEUE_LA', `25')dnl
 define(`confREFUSE_LA', `100')dnl
 dnl
+dnl Disable ident queries
+define(`confTO_IDENT', `0')dnl
+dnl
 dnl Some alternate paths so we don't conflict with sendmail on port 25
 define(`confPID_FILE', `/var/run/bulkmail.pid')dnl
-define(`QUEUE_DIR', `/var/spool/mqueue/q0')dnl
+dnl
+dnl Wait at least 27 minutes before trying to redeliver a message.
+define(`confMIN_QUEUE_AGE', `27m')dnl
+dnl
+dnl Just queue incoming messages, we have queue runners for actual delivery
+define(`confDELIVERY_MODE', `q')dnl
+dnl
+dnl Don't prioritize a message based on the number of recepients
+dnl or Precedence header.  We only care about message size and
+dnl number of retries.
+define(`confWORK_RECIPIENT_FACTOR', `0')dnl
+define(`confWORK_CLASS_FACTOR', `0')dnl
+define(`confRETRY_FACTOR', `90000')dnl
+dnl
+dnl One queue group, many dirs, max 90 runners
+define(`confMAX_QUEUE_CHILDREN', `90')
+QUEUE_GROUP(`mqueue', `P=/var/spool/mqueue/bulk*, R=5, r=10, F=f I=1')dnl
 dnl
 dnl Add a prefix to differentiate outgoing bulk messages from incoming ones
 define(`confPROCESS_TITLE_PREFIX', `bulk')dnl
@@ -54,21 +55,8 @@ dnl Keep host status on disk between sendmail runs in the .hoststat dir
 define(`confHOST_STATUS_DIRECTORY', `/var/spool/mqueue/.hoststat')dnl
 define(`confTO_HOSTSTATUS', `30m')dnl
 dnl
-dnl Wait at least 27 minutes before trying to redeliver a message.
-define(`confMIN_QUEUE_AGE', `27m')dnl
-dnl
-dnl Don't prioritize a message based on the number of recepients.
-dnl This prevents retries from having higher priority than new batches.
-define(`confWORK_RECIPIENT_FACTOR', `0')dnl
-dnl
-dnl Reduce ClassFactor
-define(`confWORK_CLASS_FACTOR', `1000')dnl
-dnl
 dnl Always use fully qualified domains
 FEATURE(always_add_domain)dnl
-dnl
-dnl No need to do DNS lookups on addresses, they've already been done
-FEATURE(nocanonify)dnl
 dnl
 dnl Wait a day before sending mail about deferred messages
 define(`confTO_QUEUEWARN', `1d')dnl
@@ -107,8 +95,8 @@ MAILER(local)dnl
 MAILER(smtp)dnl
 dnl
 dnl Only accept connections from localhost on port 24, use ipv6 or ipv4
-dnl for delivery.
-DAEMON_OPTIONS(`Family=inet6, address=::1, Name=MTA6, Port=24, M=OS')dnl
-DAEMON_OPTIONS(`Family=inet, address=127.0.0.1, Name=MTA, Port=24, M=S')dnl
+dnl for delivery and disable canonification.
+DAEMON_OPTIONS(`Family=inet6, address=::1, Name=MTA6, Port=24, M=COS')dnl
+DAEMON_OPTIONS(`Family=inet, address=127.0.0.1, Name=MTA, Port=24, M=CS')dnl
 CLIENT_OPTIONS(`Family=inet6, Address=::')dnl
 CLIENT_OPTIONS(`Family=inet, Address=0.0.0.0')dnl

@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.94 2007/11/04 13:43:38 martin Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.99 2008/06/27 17:22:14 miod Exp $	*/
 /*	$NetBSD: machdep.c,v 1.4 1996/10/16 19:33:11 ws Exp $	*/
 
 /*
@@ -86,6 +86,9 @@
 #include <ddb/db_sym.h>
 #include <ddb/db_extern.h>
 #endif
+
+#include <powerpc/reg.h>
+#include <powerpc/fpu.h>
 
 /*
  * Global variables used here and there
@@ -348,14 +351,8 @@ initppc(startkernel, endkernel, args)
 
 	/*
 	 * Look at arguments passed to us and compute boothowto.
-	 * Default to SINGLE and ASKNAME if no args or
-	 * SINGLE and DFLTROOT if this is a ramdisk kernel.
 	 */
-#ifdef RAMDISK_HOOKS
-	boothowto = RB_SINGLE | RB_DFLTROOT;
-#else
 	boothowto = RB_AUTOBOOT;
-#endif /* RAMDISK_HOOKS */
 
 	/*
 	 * Parse arg string.
@@ -824,6 +821,10 @@ dumpsys()
 		return;
 	printf("dumping to dev %x, offset %ld\n", dumpdev, dumplo);
 
+#ifdef UVM_SWAP_ENCRYPT
+	uvm_swap_finicrypt_all();
+#endif
+
 	error = (*bdevsw[major(dumpdev)].d_psize)(dumpdev);
 	if (error == -1) {
 		printf("area unavailable\n");
@@ -937,6 +938,8 @@ boot(int howto)
 			printf("WARNING: not updating battery clock\n");
 		}
 	}
+
+	uvm_shutdown();
 	splhigh();
 	if (howto & RB_HALT) {
 		doshutdownhooks();
@@ -1007,6 +1010,20 @@ do_pending_int()
 	if (pending_int_f != NULL) {
 		(*pending_int_f)();
 	}
+}
+
+/*
+ * Notify the current process (p) that it has a signal pending,
+ * process as soon as possible.
+ */
+void
+signotify(struct proc *p)
+{
+	aston(p);
+#ifdef MULTIPROCESSOR
+	if (p->p_cpu != curcpu() && p->p_cpu != NULL)
+		openpic_send_ipi(p->p_cpu->ci_cpuid);
+#endif
 }
 
 /*
@@ -1439,4 +1456,24 @@ kcopy(const void *from, void *to, size_t size)
 	curproc->p_addr->u_pcb.pcb_onfault = oldh;
 
 	return 0;
+}
+
+/* prototype for locore function */
+void cpu_switchto_asm(struct proc *oldproc, struct proc *newproc);
+
+void cpu_switchto( struct proc *oldproc, struct proc *newproc)
+{
+	/*
+	 * if this CPU is running a new process, flush the
+	 * FPU/Altivec context to avoid an IPI.
+	 */
+#ifdef MULTIPROCESSOR
+	struct cpu_info *ci = curcpu();
+	if (ci->ci_fpuproc)
+		save_fpu();
+	if (ci->ci_vecproc)
+		save_vec(ci->ci_vecproc);
+#endif
+
+	cpu_switchto_asm(oldproc, newproc);
 }

@@ -1,4 +1,4 @@
-.\"	$OpenBSD: acpi.4,v 1.28 2007/12/05 19:17:12 deraadt Exp $
+.\"	$OpenBSD: acpi.4,v 1.33 2008/06/07 17:00:38 marco Exp $
 .\"
 .\" Copyright (c) 2006 Alexander Yurchenko <grange@openbsd.org>
 .\"
@@ -14,7 +14,7 @@
 .\" ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
 .\" OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 .\"
-.Dd $Mdocdate: December 5 2007 $
+.Dd $Mdocdate: June 7 2008 $
 .Dt ACPI 4
 .Os
 .Sh NAME
@@ -22,19 +22,12 @@
 .Nd Advanced Configuration and Power Interface
 .Sh SYNOPSIS
 .Cd "acpi0 at bios?"
-.Pp
-.Cd "option ACPIVERBOSE"
 .Sh DESCRIPTION
 The
 .Nm
 driver provides basic support for ACPI including loading ACPI tables from
 the firmware, parsing and interpreting AML code, event handling,
 suspending and powering off, and attaching device drivers.
-.Pp
-If the configuration option
-.Dq Dv ACPIVERBOSE
-is set, information about all detected ACPI devices will be displayed
-on boot.
 Userland may access
 .Nm
 by using the
@@ -44,9 +37,11 @@ device.
 The following devices can attach to
 .Nm :
 .Pp
-.Bl -tag -width "acpitimer(4)XXX" -offset indent -compact
+.Bl -tag -width "acpithinkpad(4)XXX" -offset indent -compact
 .It Xr acpiac 4
 ACPI AC adapter
+.It Xr acpiasus 4
+ASUS ACPI hotkeys
 .It Xr acpibat 4
 ACPI control method battery
 .It Xr acpibtn 4
@@ -63,6 +58,8 @@ ACPI high precision event timer
 ACPI APIC configuration
 .It Xr acpiprt 4
 ACPI PCI routing table configuration
+.It Xr acpithinkpad 4
+IBM/Lenovo ThinkPad ACPI support
 .It Xr acpitimer 4
 ACPI power management timer
 .It Xr acpitz 4

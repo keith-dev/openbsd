@@ -1,4 +1,4 @@
-/*      $OpenBSD: eap.c,v 1.30 2007/11/12 05:38:23 jakemsr Exp $ */
+/*      $OpenBSD: eap.c,v 1.34 2008/06/26 05:42:17 ray Exp $ */
 /*	$NetBSD: eap.c,v 1.46 2001/09/03 15:07:37 reinoud Exp $ */
 
 /*
@@ -16,13 +16,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -176,6 +169,7 @@ int	eap_trigger_input(void *, void *, void *, int, void (*)(void *),
 	    void *, struct audio_params *);
 int	eap_halt_output(void *);
 int	eap_halt_input(void *);
+void	eap_get_default_params(void *, int, struct audio_params *);
 void    eap1370_write_codec(struct eap_softc *, int, int);
 int	eap_getdev(void *, struct audio_device *);
 int	eap1370_mixer_set_port(void *, mixer_ctrl_t *);
@@ -199,8 +193,6 @@ int     eap1371_attach_codec(void *sc, struct ac97_codec_if *);
 int	eap1371_read_codec(void *sc, u_int8_t a, u_int16_t *d);
 int	eap1371_write_codec(void *sc, u_int8_t a, u_int16_t d);
 void    eap1371_reset_codec(void *sc);
-int     eap1371_get_portnum_by_name(struct eap_softc *, char *, char *,
-	    char *);
 #if NMIDI > 0
 void	eap_midi_close(void *);
 void	eap_midi_getinfo(void *, struct midi_info *);
@@ -236,6 +228,7 @@ struct audio_hw_if eap1370_hw_if = {
 	eap_get_props,
 	eap_trigger_output,
 	eap_trigger_input,
+	eap_get_default_params
 };
 
 struct audio_hw_if eap1371_hw_if = {
@@ -265,6 +258,7 @@ struct audio_hw_if eap1371_hw_if = {
 	eap_get_props,
 	eap_trigger_output,
 	eap_trigger_input,
+	eap_get_default_params
 };
 
 #if NMIDI > 0
@@ -690,26 +684,6 @@ eap_attach(struct device *parent, struct device *self, void *aux)
 			return;
 
 		eap_hw_if = &eap1371_hw_if;
-
-		/* Just enable the DAC and master volumes by default */
-		ctl.type = AUDIO_MIXER_ENUM;
-		ctl.un.ord = 0;  /* off */
-		ctl.dev = eap1371_get_portnum_by_name(sc, AudioCoutputs,
-		    AudioNmaster, AudioNmute);
-		eap1371_mixer_set_port(sc, &ctl);
-		ctl.dev = eap1371_get_portnum_by_name(sc, AudioCinputs,
-		    AudioNdac, AudioNmute);
-		eap1371_mixer_set_port(sc, &ctl);
-		ctl.dev = eap1371_get_portnum_by_name(sc, AudioCrecord,
-		    AudioNvolume, AudioNmute);
-		eap1371_mixer_set_port(sc, &ctl);
-		
-		ctl.dev = eap1371_get_portnum_by_name(sc, AudioCrecord,
-		    AudioNsource, NULL);
-		ctl.type = AUDIO_MIXER_ENUM;
-		ctl.un.ord = 0;
-		eap1371_mixer_set_port(sc, &ctl);
-
 	}
 
 	audio_attach_mi(eap_hw_if, sc, &sc->sc_dev);
@@ -929,6 +903,12 @@ eap_query_encoding(void *addr, struct audio_encoding *fp)
 	default:
 		return (EINVAL);
 	}
+}
+
+void
+eap_get_default_params(void *addr, int mode, struct audio_params *params)
+{
+	ac97_get_default_params(params);
 }
 
 int
@@ -1244,14 +1224,6 @@ eap1371_query_devinfo(void *addr, mixer_devinfo_t *dip)
 	struct eap_softc *sc = addr;
 
 	return (sc->codec_if->vtbl->query_devinfo(sc->codec_if, dip));
-}
-
-int
-eap1371_get_portnum_by_name(struct eap_softc *sc,
-    char *class, char *device, char *qualifier)
-{
-	return (sc->codec_if->vtbl->get_portnum_by_name(sc->codec_if, class,
-	    device, qualifier));
 }
 
 void

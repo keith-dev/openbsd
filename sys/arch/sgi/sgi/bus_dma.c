@@ -1,4 +1,4 @@
-/*	$OpenBSD: bus_dma.c,v 1.3 2007/10/02 00:59:12 krw Exp $ */
+/*	$OpenBSD: bus_dma.c,v 1.6 2008/07/16 15:49:22 miod Exp $ */
 
 /*
  * Copyright (c) 2003-2004 Opsycon AB  (www.opsycon.se / www.opsycon.com)
@@ -438,7 +438,7 @@ _dmamem_alloc(t, size, alignment, boundary, segs, nsegs, rsegs, flags)
 	int flags;
 {
 	return (_dmamem_alloc_range(t, size, alignment, boundary,
-	    segs, nsegs, rsegs, flags, 0, 0xf0000000));
+	    segs, nsegs, rsegs, flags, 0, -1));
 }
 
 /*
@@ -491,12 +491,13 @@ _dmamem_map(t, segs, nsegs, size, kvap, flags)
 	int curseg;
 
 	if (nsegs == 1) {
+		pa = (*t->_device_to_pa)(segs[0].ds_addr);
+#ifndef TGT_COHERENT
 		if (flags & BUS_DMA_COHERENT)
-			*kvap = (caddr_t)PHYS_TO_XKPHYS(segs[0].ds_addr,
-			    CCA_NC);
+			*kvap = (caddr_t)PHYS_TO_UNCACHED(pa);
 		else
-			*kvap = (caddr_t)PHYS_TO_XKPHYS(segs[0].ds_addr,
-			    CCA_NONCOHERENT);
+#endif
+			*kvap = (caddr_t)PHYS_TO_XKPHYS(pa, CCA_CACHED);
 		return (0);
 	}
 

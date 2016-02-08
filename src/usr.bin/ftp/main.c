@@ -1,4 +1,4 @@
-/*	$OpenBSD: main.c,v 1.68 2007/11/28 16:21:25 jmc Exp $	*/
+/*	$OpenBSD: main.c,v 1.70 2008/07/08 21:07:57 martynas Exp $	*/
 /*	$NetBSD: main.c,v 1.24 1997/08/18 10:20:26 lukem Exp $	*/
 
 /*
@@ -66,7 +66,7 @@ static const char copyright[] =
 #endif /* not lint */
 
 #if !defined(lint) && !defined(SMALL)
-static const char rcsid[] = "$OpenBSD: main.c,v 1.68 2007/11/28 16:21:25 jmc Exp $";
+static const char rcsid[] = "$OpenBSD: main.c,v 1.70 2008/07/08 21:07:57 martynas Exp $";
 #endif /* not lint and not SMALL */
 
 /*
@@ -103,7 +103,7 @@ main(volatile int argc, char *argv[])
 	httpport = "http";
 #ifndef SMALL
 	httpsport = "https";
-#endif
+#endif /* !SMALL */
 	gateport = getenv("FTPSERVERPORT");
 	if (gateport == NULL || *gateport == '\0')
 		gateport = "ftpgate";
@@ -122,7 +122,7 @@ main(volatile int argc, char *argv[])
 	hist = NULL;
 	cookiefile = NULL;
 	resume = 0;
-#endif
+#endif /* !SMALL */
 	mark = HASHBYTES;
 	marg_sl = sl_init();
 #ifdef INET6
@@ -171,7 +171,7 @@ main(volatile int argc, char *argv[])
 #ifndef SMALL
 		if (!dumb_terminal)
 			editing = 1;	/* editing mode on if tty is usable */
-#endif
+#endif /* !SMALL */
 	}
 
 	ttyout = stdout;
@@ -180,7 +180,7 @@ main(volatile int argc, char *argv[])
 
 #ifndef SMALL
 	cookiefile = getenv("http_cookies");
-#endif
+#endif /* !SMALL */
 
 	while ((ch = getopt(argc, argv, "46AaCc:dEegik:mno:pP:r:tvV")) != -1) {
 		switch (ch) {
@@ -202,18 +202,20 @@ main(volatile int argc, char *argv[])
 		case 'C':
 #ifndef SMALL
 			resume = 1;
-#endif
+#endif /* !SMALL */
 			break;
 
 		case 'c':
 #ifndef SMALL
 			cookiefile = optarg;
-#endif
+#endif /* !SMALL */
 			break;
 
 		case 'd':
+#ifndef SMALL
 			options |= SO_DEBUG;
 			debug++;
+#endif /* !SMALL */
 			break;
 
 		case 'E':
@@ -223,7 +225,7 @@ main(volatile int argc, char *argv[])
 		case 'e':
 #ifndef SMALL
 			editing = 0;
-#endif
+#endif /* !SMALL */
 			break;
 
 		case 'g':
@@ -296,7 +298,7 @@ main(volatile int argc, char *argv[])
 
 #ifndef SMALL
 	cookie_load();
-#endif
+#endif /* !SMALL */
 
 	cpend = 0;	/* no pending replies */
 	proxy = 0;	/* proxy not active */
@@ -424,7 +426,7 @@ cmdscanner(int top)
 	int num;
 #ifndef SMALL
 	HistEvent hev;
-#endif
+#endif /* !SMALL */
 
 	if (!top 
 #ifndef SMALL
@@ -577,7 +579,7 @@ makeargv(void)
 
 #ifdef SMALL
 #define INC_CHKCURSOR(x)	(x)++
-#else  /* !SMALL */
+#else  /* SMALL */
 #define INC_CHKCURSOR(x)	{ (x)++ ; \
 				if (x == cursor_pos) { \
 					cursor_argc = margc; \
@@ -585,7 +587,7 @@ makeargv(void)
 					cursor_pos = NULL; \
 				} }
 						
-#endif /* !SMALL */
+#endif /* SMALL */
 
 /*
  * Parse string into argbuf;
@@ -764,21 +766,37 @@ void
 usage(void)
 {
 	(void)fprintf(stderr,
-	    "usage: %s [-46AadEegimnptVv] [-k seconds] "
+	    "usage: %s [-46Aa"
+#ifndef SMALL
+	    "d"
+#endif /* !SMALL */
+	    "EegimnptVv] [-k seconds] "
 	    "[-P port] [-r seconds] [host [port]]\n"
-	    "       %s [-C] [-o output] "
+	    "       %s "
+#ifndef SMALL
+	    "[-C] "
+#endif /* !SMALL */
+	    "[-o output] "
 	    "ftp://[user:password@]host[:port]/file[/]\n"
-	    "       %s [-C] [-c cookie] [-o output] "
+	    "       %s "
+#ifndef SMALL
+	    "[-C] [-c cookie] "
+#endif /* !SMALL */
+	    "[-o output] "
 	    "http://host[:port]/file\n"
 #ifndef SMALL
 	    "       %s [-C] [-c cookie] [-o output] "
 	    "https://host[:port]/file\n"
-#endif
-	    "       %s [-C] [-o output] host:[/path/]file[/]\n",
+#endif /* !SMALL */
+	    "       %s "
+#ifndef SMALL
+	    "[-C] "
+#endif /* !SMALL */
+	    "[-o output] host:[/path/]file[/]\n",
 #ifndef SMALL
 	    __progname, __progname, __progname, __progname, __progname);
-#else
+#else /* !SMALL */
 	    __progname, __progname, __progname, __progname);
-#endif
+#endif /* !SMALL */
 	exit(1);
 }
