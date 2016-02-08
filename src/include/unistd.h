@@ -1,4 +1,4 @@
-/*	$OpenBSD: unistd.h,v 1.83 2013/12/28 01:51:53 martynas Exp $ */
+/*	$OpenBSD: unistd.h,v 1.89 2014/07/08 21:35:39 tedu Exp $ */
 /*	$NetBSD: unistd.h,v 1.26.4.1 1996/05/28 02:31:51 mrg Exp $	*/
 
 /*-
@@ -114,7 +114,7 @@
 #define _POSIX2_C_DEV				(-1) /* need C99 utility */
 #define _POSIX2_CHAR_TERM			1
 #define _POSIX2_FORT_DEV			(-1) /* need fort77 utility */
-#define _POSIX2_FORT_RUN			200112L
+#define _POSIX2_FORT_RUN			(-1) /* need asa utility */
 #define _POSIX2_LOCALEDEF			(-1)
 #define _POSIX2_PBS				(-1)
 #define _POSIX2_PBS_ACCOUNTING			(-1)
@@ -325,6 +325,11 @@
 #endif
 #endif
 
+#ifndef	_INTPTR_T_DEFINED_
+#define	_INTPTR_T_DEFINED_
+typedef	__intptr_t		intptr_t;
+#endif
+
 __BEGIN_DECLS
 __dead void	 _exit(int);
 int	 access(const char *, int);
@@ -335,10 +340,10 @@ int	 close(int);
 int	 dup(int);
 int	 dup2(int, int);
 int	 execl(const char *, const char *, ...) 
-	    __attribute__((sentinel));
+	    __attribute__((__sentinel__));
 int	 execle(const char *, const char *, ...);
 int	 execlp(const char *, const char *, ...) 
-	    __attribute__((sentinel));
+	    __attribute__((__sentinel__));
 int	 execv(const char *, char *const *);
 int	 execve(const char *, char *const *, char *const *);
 int	 execvp(const char *, char *const *);
@@ -405,6 +410,9 @@ int	 fdatasync(int);
 #endif
 
 #if __XPG_VISIBLE || __BSD_VISIBLE
+#if __BSD_VISIBLE
+int	crypt_checkpass(const char *, const char *);
+#endif
 char	*crypt(const char *, const char *);
 int	 encrypt(char *, int);
 int	 fchdir(int);
@@ -530,6 +538,7 @@ void	 setusershell(void);
 int	 strtofflags(char **, u_int32_t *, u_int32_t *);
 int	 swapctl(int cmd, const void *arg, int misc);
 int	 syscall(int, ...);
+int	 getentropy(void *, size_t);
 pid_t	 __tfork_thread(const struct __tfork *, size_t, void (*)(void *),
 	    void *);
 #endif /* __BSD_VISIBLE */

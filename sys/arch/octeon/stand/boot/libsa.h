@@ -1,4 +1,4 @@
-/*	$OpenBSD: libsa.h,v 1.1 2013/06/05 01:02:29 jasper Exp $	*/
+/*	$OpenBSD: libsa.h,v 1.4 2014/07/14 10:23:58 jasper Exp $	*/
 
 /*
  * Copyright (c) 2013 Jasper Lievisse Adriaanse <jasper@openbsd.org>
@@ -19,8 +19,6 @@
 #include <lib/libsa/stand.h>
 
 #define DEFAULT_KERNEL_ADDRESS	0
-#define INITRD_BASE		PHYS_TO_CKSEG0(0x04000000)
-#define CONSPEED		115200
 
 extern char *kernelfile;
 
@@ -34,7 +32,6 @@ void    run_loadfile(u_long *, int);
 /*
  * CN30XX UART
  */
-
 void	cn30xxuartcnprobe(struct consdev *);
 void	cn30xxuartcninit(struct consdev *);
 void	cn30xxuartcnputc(dev_t, int);
@@ -44,3 +41,4 @@ int	cn30xxuartcngetc(dev_t);
  * clock
  */
 void	delay(int);
+u_int	cp0_get_count(void);

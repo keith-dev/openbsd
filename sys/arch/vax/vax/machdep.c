@@ -1,4 +1,4 @@
-/* $OpenBSD: machdep.c,v 1.130 2013/11/24 22:08:25 miod Exp $ */
+/* $OpenBSD: machdep.c,v 1.143 2014/07/21 17:25:47 uebayasi Exp $ */
 /* $NetBSD: machdep.c,v 1.108 2000/09/13 15:00:23 thorpej Exp $	 */
 
 /*
@@ -141,7 +141,7 @@ int iospace_inited = 0;
 
 /* sysctl settable */
 #if NLED > 0
-int	vax_led_blink = 0;
+int	vax_led_blink = 1;
 #endif
 
 struct cpu_info cpu_info_store;
@@ -443,7 +443,7 @@ sendsig(catcher, sig, mask, code, type, val)
 	union sigval 	val;
 {
 	struct	proc	*p = curproc;
-	struct	sigacts *psp = p->p_sigacts;
+	struct	sigacts *psp = p->p_p->ps_sigacts;
 	struct	trapframe *syscf;
 	struct	sigframe *sigf, gsigf;
 	unsigned int	cursp;
@@ -493,7 +493,7 @@ sendsig(catcher, sig, mask, code, type, val)
 	if (copyout(&gsigf, sigf, sizeof(gsigf)))
 		sigexit(p, SIGILL);
 
-	syscf->pc = p->p_sigcode;
+	syscf->pc = p->p_p->ps_sigcode;
 	syscf->psl = PSL_U | PSL_PREVU;
 	/*
 	 * Place sp at the beginning of sigf; this ensures that possible
@@ -508,13 +508,12 @@ sendsig(catcher, sig, mask, code, type, val)
 int	waittime = -1;
 static	volatile int showto; /* Must be volatile to survive MM on -> MM off */
 
-void
-boot(howto)
-	register int howto;
+__dead void
+boot(int howto)
 {
-	/* If system is cold, just halt. */
+	struct device *mainbus;
+
 	if (cold) {
-		/* (Unless the user explicitly asked for reboot.) */
 		if ((howto & RB_USERREQ) == 0)
 			howto |= RB_HALT;
 		goto haltsys;
@@ -523,10 +522,7 @@ boot(howto)
 	if ((howto & RB_NOSYNC) == 0 && waittime < 0) {
 		waittime = 0;
 		vfs_shutdown();
-		/*
-		 * If we've been adjusting the clock, the todr will be out of
-		 * synch; adjust it now.
-		 */
+
 		if ((howto & RB_TIMEBAD) == 0) {
 			resettodr();
 		} else {
@@ -536,19 +532,19 @@ boot(howto)
 	if_downall();
 
 	uvm_shutdown();
-	splhigh();		/* extreme priority */
+	splhigh();
+	cold = 1;
 
-	/* If rebooting and a dump is requested, do it. */
-	if (howto & RB_DUMP)
+	if ((howto & RB_DUMP) != 0)
 		dumpsys();
-
 
 haltsys:
 	doshutdownhooks();
-	if (!TAILQ_EMPTY(&alldevs))
-		config_suspend(TAILQ_FIRST(&alldevs), DVACT_POWERDOWN);
+	mainbus = device_mainbus();
+	if (mainbus != NULL)
+		config_suspend(mainbus, DVACT_POWERDOWN);
 
-	if (howto & RB_HALT) {
+	if ((howto & RB_HALT) != 0) {
 		if (dep_call->cpu_halt)
 			(*dep_call->cpu_halt) ();
 		printf("halting (in tight loop); hit\n\t^P\n\tHALT\n\n");

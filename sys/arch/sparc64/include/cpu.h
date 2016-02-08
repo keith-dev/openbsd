@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.h,v 1.83 2013/05/31 17:00:59 tedu Exp $	*/
+/*	$OpenBSD: cpu.h,v 1.85 2014/07/11 10:53:07 uebayasi Exp $	*/
 /*	$NetBSD: cpu.h,v 1.28 2001/06/14 22:56:58 thorpej Exp $ */
 
 /*
@@ -174,7 +174,7 @@ curcpu(void)
 {
 	struct cpu_info *ci;
 
-	__asm __volatile("mov %%g7, %0" : "=r"(ci));
+	__asm volatile("mov %%g7, %0" : "=r"(ci));
 	return (ci->ci_self);
 }
 
@@ -205,6 +205,8 @@ void	cpu_unidle(struct cpu_info *);
 #define MAXCPUS 1
 
 #define cpu_unidle(ci)
+
+#define CPU_BUSY_CYCLE()	do {} while (0)
 
 #endif
 
@@ -264,7 +266,7 @@ void	savefpstate(struct fpstate64 *);
 void	loadfpstate(struct fpstate64 *);
 void	clearfpstate(void);
 u_int64_t	probeget(paddr_t, int, int);
-#define	 write_all_windows() __asm __volatile("flushw" : : )
+#define	 write_all_windows() __asm volatile("flushw" : : )
 void	write_user_windows(void);
 void 	proc_trampoline(void);
 struct pcb;

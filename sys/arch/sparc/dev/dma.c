@@ -1,4 +1,4 @@
-/*	$OpenBSD: dma.c,v 1.28 2010/07/10 19:32:24 miod Exp $	*/
+/*	$OpenBSD: dma.c,v 1.30 2014/07/28 18:31:39 miod Exp $	*/
 /*	$NetBSD: dma.c,v 1.46 1997/08/27 11:24:16 bouyer Exp $ */
 
 /*
@@ -32,6 +32,7 @@
 #include <sys/kernel.h>
 #include <sys/errno.h>
 #include <sys/ioctl.h>
+#include <sys/socket.h>
 #include <sys/device.h>
 #include <sys/malloc.h>
 #include <sys/buf.h>
@@ -41,6 +42,9 @@
 #include <sparc/cpu.h>
 
 #include <sparc/sparc/cpuvar.h>
+
+#include <net/if.h>
+#include <net/if_media.h>
 
 #include <scsi/scsi_all.h>
 #include <scsi/scsiconf.h>
@@ -157,11 +161,14 @@ dmaattach(parent, self, aux)
 		char *cabletype = getpropstring(devnode, "cable-selection");
 		if (strcmp(cabletype, "tpe") == 0) {
 			sc->sc_regs->csr |= E_TP_AUI;
+			sc->sc_defaultmedia = IFM_ETHER | IFM_10_T;
 		} else if (strcmp(cabletype, "aui") == 0) {
 			sc->sc_regs->csr &= ~E_TP_AUI;
+			sc->sc_defaultmedia = IFM_ETHER | IFM_10_5;
 		} else {
 			/* assume TP if nothing there */
 			sc->sc_regs->csr |= E_TP_AUI;
+			sc->sc_defaultmedia = IFM_ETHER | IFM_AUTO;
 		}
 		delay(20000);	/* manual says we need 20ms delay */
 	}
@@ -465,7 +472,7 @@ dma_setup(sc, addr, len, datain, dmasize)
 	sc->sc_dmaaddr = addr;
 	sc->sc_dmalen = len;
 
-	NCR_DMA(("%s: start %d@%p,%d\n", sc->sc_dev.dv_xname,
+	NCR_DMA(("%s: start %zd@%p,%d\n", sc->sc_dev.dv_xname,
 		*sc->sc_dmalen, *sc->sc_dmaaddr, datain ? 1 : 0));
 
 	/*
@@ -476,7 +483,7 @@ dma_setup(sc, addr, len, datain, dmasize)
 	*dmasize = sc->sc_dmasize =
 		min(*dmasize, DMAMAX((size_t) *sc->sc_dmaaddr));
 
-	NCR_DMA(("dma_setup: dmasize = %d\n", sc->sc_dmasize));
+	NCR_DMA(("dma_setup: dmasize = %zd\n", sc->sc_dmasize));
 
 	/*
 	 * XXX what length?
@@ -553,11 +560,11 @@ espdmaintr(sc)
 
 	csr = DMACSR(sc);
 
-	NCR_DMA(("%s: intr: addr %p, csr %b\n", sc->sc_dev.dv_xname,
+	NCR_DMA(("%s: intr: addr %p, csr %lb\n", sc->sc_dev.dv_xname,
 		 DMADDR(sc), csr, DDMACSR_BITS));
 
 	if (csr & (D_ERR_PEND|D_SLAVE_ERR)) {
-		printf("%s: error: csr=%b\n", sc->sc_dev.dv_xname,
+		printf("%s: error: csr=%lb\n", sc->sc_dev.dv_xname,
 			csr, DDMACSR_BITS);
 		DMACSR(sc) &= ~D_EN_DMA;	/* Stop DMA */
 		/* Invalidate the queue; SLAVE_ERR bit is write-to-clear */
@@ -674,7 +681,7 @@ ledmaintr(sc)
 	if (csr & D_ERR_PEND) {
 		DMACSR(sc) &= ~D_EN_DMA;	/* Stop DMA */
 		DMACSR(sc) |= D_INVALIDATE;
-		printf("%s: error: csr=%b\n", sc->sc_dev.dv_xname,
+		printf("%s: error: csr=%lb\n", sc->sc_dev.dv_xname,
 			csr, DDMACSR_BITS);
 		DMA_RESET(sc);
 	}

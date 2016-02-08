@@ -1,4 +1,4 @@
-/*	$OpenBSD: xbridge.c,v 1.87 2014/01/22 00:03:06 jsg Exp $	*/
+/*	$OpenBSD: xbridge.c,v 1.90 2014/07/12 18:44:42 tedu Exp $	*/
 
 /*
  * Copyright (c) 2008, 2009, 2011  Miodrag Vallat.
@@ -45,7 +45,7 @@
 #include <machine/intr.h>
 #include <machine/mnode.h>
 
-#include <uvm/uvm.h>
+#include <uvm/uvm_extern.h>
 
 #include <dev/pci/pcireg.h>
 #include <dev/pci/pcivar.h>
@@ -641,16 +641,16 @@ xbpci_attach(struct device *parent, struct device *self, void *aux)
 	return;
 
 fail2:
-	free(xb->xb_dmat, M_DEVBUF);
+	free(xb->xb_dmat, M_DEVBUF, 0);
 fail1:
 	if (xb->xb_io_bus_space_sw != NULL)
-		free(xb->xb_io_bus_space_sw, M_DEVBUF);
+		free(xb->xb_io_bus_space_sw, M_DEVBUF, 0);
 	if (xb->xb_io_bus_space != NULL)
-		free(xb->xb_io_bus_space, M_DEVBUF);
+		free(xb->xb_io_bus_space, M_DEVBUF, 0);
 	if (xb->xb_mem_bus_space_sw != NULL)
-		free(xb->xb_mem_bus_space_sw, M_DEVBUF);
+		free(xb->xb_mem_bus_space_sw, M_DEVBUF, 0);
 	if (xb->xb_mem_bus_space != NULL)
-		free(xb->xb_mem_bus_space, M_DEVBUF);
+		free(xb->xb_mem_bus_space, M_DEVBUF, 0);
 	if (errmsg == NULL)
 		errmsg = "not enough memory to build bus access structures";
 	printf("%s\n", errmsg);
@@ -1058,7 +1058,7 @@ xbridge_intr_string(void *cookie, pci_intr_handle_t ih)
 
 	if (xb->xb_intrstr[intrbit][0] == '\0')
 		snprintf(xb->xb_intrstr[intrbit],
-		    sizeof xb->xb_intrstr[intrbit], "irq %d", ih);
+		    sizeof xb->xb_intrstr[intrbit], "irq %ld", ih);
 	return xb->xb_intrstr[intrbit];
 }
 
@@ -1090,7 +1090,7 @@ xbridge_intr_establish(void *cookie, pci_intr_handle_t ih, int level,
 		LIST_INIT(&xi->xi_handlers);
 
 		if (xbow_intr_register(xb->xb_widget, level, &intrsrc) != 0) {
-			free(xi, M_DEVBUF);
+			free(xi, M_DEVBUF, 0);
 			return NULL;
 		}
 
@@ -1198,7 +1198,7 @@ xbridge_intr_disestablish(void *cookie, void *vih)
 		 */
 	}
 
-	free(xih, M_DEVBUF);
+	free(xih, M_DEVBUF, 0);
 }
 
 int
@@ -1957,7 +1957,7 @@ xbridge_err_handle(struct xbpci_softc *xb, uint64_t isr)
 		    xbridge_read_reg(xb, BRIDGE_WIDGET_RESP_UPPER) << 32;
 
 	/* XXX give more detailed information */
-	printf("%s: error interrupt, isr %p wid %p pci %p resp %p\n",
+	printf("%s: error interrupt, isr %llx wid %llx pci %llx resp %llx\n",
 	    DEVNAME(xb), isr, wid_err, pci_err, resp_err);
 
 	xbridge_err_clear(xb, isr);

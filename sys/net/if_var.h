@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_var.h,v 1.4 2014/01/21 10:18:26 mpi Exp $	*/
+/*	$OpenBSD: if_var.h,v 1.12 2014/07/08 04:02:14 dlg Exp $	*/
 /*	$NetBSD: if.h,v 1.23 1996/05/07 02:40:27 thorpej Exp $	*/
 
 /*
@@ -37,8 +37,6 @@
 #define _NET_IF_VAR_H_
 
 #include <sys/queue.h>
-#include <sys/tree.h>
-#include <altq/if_altq.h>
 #ifdef _KERNEL
 #include <net/hfsc.h>
 #endif
@@ -97,7 +95,6 @@ struct if_clone {
 
 /*
  * Structure defining a queue for a network interface.
- * XXX keep in sync with struct ifaltq.
  */
 struct	ifqueue {
 	struct {
@@ -169,7 +166,7 @@ struct ifnet {				/* and the entries */
 	void	(*if_watchdog)(struct ifnet *);
 	int	(*if_wol)(struct ifnet *, int);
 	struct	ifaddr *if_lladdr;	/* pointer to link-level address */
-	struct	ifaltq if_snd;		/* output queue (includes altq) */
+	struct	ifqueue if_snd;		/* output queue */
 	struct sockaddr_dl *if_sadl;	/* pointer to our sockaddr_dl */
 
 	void	*if_afdata[AF_MAX];
@@ -291,19 +288,12 @@ struct ifaddr {
 	TAILQ_ENTRY(ifaddr) ifa_list;	/* list of addresses for interface */
 					/* check or clean routes (+ or -)'d */
 	void	(*ifa_rtrequest)(int, struct rtentry *);
-	u_int	ifa_flags;		/* mostly rt_flags for cloning */
-	u_int	ifa_refcnt;		/* count of references */
+	u_int	ifa_flags;		/* interface flags, see below */
+	u_int	ifa_refcnt;		/* number of `rt_ifa` references */
 	int	ifa_metric;		/* cost of going out this interface */
 };
-#define	IFA_ROUTE	RTF_UP		/* route installed */
 
-struct ifaddr_item {
-	RB_ENTRY(ifaddr_item)	 ifai_entry;
-	struct sockaddr		*ifai_addr;
-	struct ifaddr		*ifai_ifa;
-	struct ifaddr_item	*ifai_next;
-	u_int			 ifai_rdomain;
-};
+#define	IFA_ROUTE		0x01	/* Auto-magically installed route */
 
 /*
  * Interface multicast address.
@@ -339,73 +329,6 @@ struct ifg_list {
 };
 
 #ifdef _KERNEL
-/* XXX the IFQ_ macros are a giant mess right now. cleanup once altq gone. */
-
-#ifdef ALTQ
-
-/* XXX pattr unused */
-/* if_snd becomes ifqueue when altq is gone and the casts go away */
-#define	IFQ_ENQUEUE(ifq, m, pattr, err)					\
-do {									\
-	if (HFSC_ENABLED((ifq)))					\
-		(err) = hfsc_enqueue(((struct ifqueue *)(ifq)), (m));	\
-	else if (ALTQ_IS_ENABLED((ifq))) {				\
-		m->m_pkthdr.pf.prio = IFQ_MAXPRIO;			\
-		ALTQ_ENQUEUE((ifq), (m), (pattr), (err));		\
-	} else {							\
-		if (IF_QFULL((ifq))) {					\
-			m_freem((m));					\
-			(err) = ENOBUFS;				\
-		} else {						\
-			IF_ENQUEUE((ifq), (m));				\
-			(err) = 0;					\
-		}							\
-	}								\
-	if ((err))							\
-		(ifq)->ifq_drops++;					\
-} while (/* CONSTCOND */0)
-
-#define	IFQ_DEQUEUE(ifq, m)						\
-do {									\
-	if (HFSC_ENABLED((ifq)))					\
-		(m) = hfsc_dequeue(((struct ifqueue *)(ifq)), 1);	\
-	else if (OLDTBR_IS_ENABLED((ifq)))				\
-		(m) = oldtbr_dequeue((ifq), ALTDQ_REMOVE);		\
-	else if (ALTQ_IS_ENABLED((ifq)))				\
-		ALTQ_DEQUEUE((ifq), (m));				\
-	else								\
-		IF_DEQUEUE((ifq), (m));					\
-} while (/* CONSTCOND */0)
-
-#define	IFQ_POLL(ifq, m)						\
-do {									\
-	if (HFSC_ENABLED((ifq)))					\
-		(m) = hfsc_dequeue(((struct ifqueue *)(ifq)), 0);	\
-	else if (OLDTBR_IS_ENABLED((ifq)))				\
-		(m) = oldtbr_dequeue((ifq), ALTDQ_POLL);		\
-	else if (ALTQ_IS_ENABLED((ifq)))				\
-		ALTQ_POLL((ifq), (m));					\
-	else								\
-		IF_POLL((ifq), (m));					\
-} while (/* CONSTCOND */0)
-
-#define	IFQ_PURGE(ifq)							\
-do {									\
-	if (HFSC_ENABLED((ifq)))					\
-		hfsc_purge(((struct ifqueue *)(ifq)));			\
-	else if (ALTQ_IS_ENABLED((ifq)))				\
-		ALTQ_PURGE(ifq);					\
-	else								\
-		IF_PURGE((ifq));					\
-} while (/* CONSTCOND */0)
-
-#define	IFQ_SET_READY(ifq)						\
-do {									\
-	((ifq)->altq_flags |= ALTQF_READY);				\
-} while (/* CONSTCOND */0)
-
-#else /* !ALTQ */
-
 /* XXX pattr unused */
 #define	IFQ_ENQUEUE(ifq, m, pattr, err)					\
 do {									\
@@ -449,8 +372,6 @@ do {									\
 } while (/* CONSTCOND */0)
 
 #define	IFQ_SET_READY(ifq)	/* nothing */
-
-#endif /* ALTQ */
 
 #define	IFQ_LEN(ifq)			IF_LEN(ifq)
 #define	IFQ_IS_EMPTY(ifq)		((ifq)->ifq_len == 0)
@@ -504,11 +425,10 @@ void	ifnewlladdr(struct ifnet *);
 struct	ifaddr *ifa_ifwithaddr(struct sockaddr *, u_int);
 struct	ifaddr *ifa_ifwithdstaddr(struct sockaddr *, u_int);
 struct	ifaddr *ifa_ifwithnet(struct sockaddr *, u_int);
-struct	ifaddr *ifa_ifwithroute(int, struct sockaddr *,
-					struct sockaddr *, u_int);
 struct	ifaddr *ifaof_ifpforaddr(struct sockaddr *, struct ifnet *);
 void	ifafree(struct ifaddr *);
 void	link_rtrequest(int, struct rtentry *);
+void	p2p_rtrequest(int, struct rtentry *);
 
 void	if_clone_attach(struct if_clone *);
 void	if_clone_detach(struct if_clone *);
@@ -529,6 +449,17 @@ void	ifa_add(struct ifnet *, struct ifaddr *);
 void	ifa_del(struct ifnet *, struct ifaddr *);
 void	ifa_update_broadaddr(struct ifnet *, struct ifaddr *,
 	    struct sockaddr *);
+
+void	if_rxr_init(struct if_rxring *, u_int, u_int);
+u_int	if_rxr_get(struct if_rxring *, u_int);
+
+#define if_rxr_put(_r, _c)	do { (_r)->rxr_alive -= (_c); } while (0)
+#define if_rxr_inuse(_r)	((_r)->rxr_alive)
+
+int	if_rxr_info_ioctl(struct if_rxrinfo *, u_int, struct if_rxring_info *);
+int	if_rxr_ioctl(struct if_rxrinfo *, const char *, u_int,
+	    struct if_rxring *);
+
 #endif /* _KERNEL */
 
 #endif /* _NET_IF_VAR_H_ */

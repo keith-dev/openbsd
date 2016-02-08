@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_rum.c,v 1.101 2013/08/07 01:06:42 bluhm Exp $	*/
+/*	$OpenBSD: if_rum.c,v 1.106 2014/07/13 15:52:49 mpi Exp $	*/
 
 /*-
  * Copyright (c) 2005-2007 Damien Bergamini <damien.bergamini@free.fr>
@@ -48,9 +48,7 @@
 #include <net/if_types.h>
 
 #include <netinet/in.h>
-#include <netinet/in_systm.h>
 #include <netinet/if_ether.h>
-#include <netinet/ip.h>
 
 #include <net80211/ieee80211_var.h>
 #include <net80211/ieee80211_amrr.h>
@@ -63,10 +61,6 @@
 
 #include <dev/usb/if_rumreg.h>
 #include <dev/usb/if_rumvar.h>
-
-#ifdef USB_DEBUG
-#define RUM_DEBUG
-#endif
 
 #ifdef RUM_DEBUG
 #define DPRINTF(x)	do { if (rum_debug) printf x; } while (0)
@@ -219,21 +213,16 @@ static const struct rfprog {
 	RT2573_RF5225
 };
 
-int rum_match(struct device *, void *, void *); 
-void rum_attach(struct device *, struct device *, void *); 
-int rum_detach(struct device *, int); 
-int rum_activate(struct device *, int); 
+int rum_match(struct device *, void *, void *);
+void rum_attach(struct device *, struct device *, void *);
+int rum_detach(struct device *, int);
 
-struct cfdriver rum_cd = { 
-	NULL, "rum", DV_IFNET 
-}; 
+struct cfdriver rum_cd = {
+	NULL, "rum", DV_IFNET
+};
 
-const struct cfattach rum_ca = { 
-	sizeof(struct rum_softc), 
-	rum_match, 
-	rum_attach, 
-	rum_detach, 
-	rum_activate, 
+const struct cfattach rum_ca = {
+	sizeof(struct rum_softc), rum_match, rum_attach, rum_detach
 };
 
 int
@@ -268,7 +257,7 @@ rum_attachhook(void *xsc)
 		    sc->sc_dev.dv_xname);
 	}
 
-	free(ucode, M_DEVBUF);
+	free(ucode, M_DEVBUF, 0);
 }
 
 void
@@ -1278,8 +1267,7 @@ rum_start(struct ifnet *ifp)
 			}
 			IF_DEQUEUE(&ic->ic_mgtq, m0);
 
-			ni = (struct ieee80211_node *)m0->m_pkthdr.rcvif;
-			m0->m_pkthdr.rcvif = NULL;
+			ni = m0->m_pkthdr.ph_cookie;
 #if NBPFILTER > 0
 			if (ic->ic_rawbpf != NULL)
 				bpf_mtap(ic->ic_rawbpf, m0, BPF_DIRECTION_OUT);
@@ -2302,18 +2290,4 @@ rum_amrr_update(struct usbd_xfer *xfer, void *priv,
 
 	if (!usbd_is_dying(sc->sc_udev))
 		timeout_add_sec(&sc->amrr_to, 1);
-}
-
-int
-rum_activate(struct device *self, int act)
-{
-	struct rum_softc *sc = (struct rum_softc *)self;
-
-	switch (act) {
-	case DVACT_DEACTIVATE:
-		usbd_deactivate(sc->sc_udev);
-		break;
-	}
-
-	return 0;
 }

@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.149 2013/11/01 17:36:19 krw Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.167 2014/07/21 17:25:47 uebayasi Exp $	*/
 /*	$NetBSD: machdep.c,v 1.108 2001/07/24 19:30:14 eeh Exp $ */
 
 /*-
@@ -167,7 +167,7 @@ struct uvm_constraint_range *uvm_md_constraints[] = { NULL };
 int	physmem;
 extern	caddr_t msgbufaddr;
 
-int sparc_led_blink;
+int sparc_led_blink = 1;
 
 #ifdef APERTURE
 #ifdef INSECURE
@@ -325,7 +325,7 @@ setregs(p, pack, stack, retval)
 		 * to save it.  In any case, get rid of our FPU state.
 		 */
 		fpusave_proc(p, 0);
-		free(p->p_md.md_fpstate, M_SUBPROC);
+		free(p->p_md.md_fpstate, M_SUBPROC, 0);
 		p->p_md.md_fpstate = NULL;
 	}
 	bzero((caddr_t)tf, sizeof *tf);
@@ -424,7 +424,7 @@ sendsig(catcher, sig, mask, code, type, val)
 	union sigval val;
 {
 	struct proc *p = curproc;
-	struct sigacts *psp = p->p_sigacts;
+	struct sigacts *psp = p->p_p->ps_sigacts;
 	struct sigframe *fp;
 	struct trapframe64 *tf;
 	vaddr_t addr, oldsp, newsp;
@@ -510,7 +510,7 @@ sendsig(catcher, sig, mask, code, type, val)
 	 * Arrange to continue execution at the code copied out in exec().
 	 * It needs the function to call in %g1, and a new stack pointer.
 	 */
-	addr = p->p_sigcode;
+	addr = p->p_p->ps_sigcode;
 	tf->tf_global[1] = (vaddr_t)catcher;
 	tf->tf_pc = addr;
 	tf->tf_npc = addr + 4;
@@ -604,16 +604,14 @@ signotify(struct proc *p)
 int	waittime = -1;
 struct pcb dumppcb;
 
-void
-boot(howto)
-	int howto;
+__dead void
+boot(int howto)
 {
 	int i;
 	static char str[128];
+	struct device *mainbus;
 
-	/* If system is cold, just halt. */
 	if (cold) {
-		/* (Unless the user explicitly asked for reboot.) */
 		if ((howto & RB_USERREQ) == 0)
 			howto |= RB_HALT;
 		goto haltsys;
@@ -622,18 +620,13 @@ boot(howto)
 	fb_unblank();
 	boothowto = howto;
 	if ((howto & RB_NOSYNC) == 0 && waittime < 0) {
-		extern struct proc proc0;
 		extern int sparc_clock_time_is_ok;
 
-		/* make sure there's a process to charge for I/O in sync() */
-		if (curproc == NULL)
-			curproc = &proc0;
 		waittime = 0;
 		vfs_shutdown();
 
 		/*
-		 * If we've been adjusting the clock, the todr
-		 * will be out of synch; adjust it now.
+		 * XXX
 		 * Do this only if the TOD clock has already been read out
 		 * successfully by inittodr() or set by an explicit call
 		 * to resettodr() (e.g. from settimeofday()).
@@ -647,19 +640,20 @@ boot(howto)
 	if_downall();
 
 	uvm_shutdown();
-	(void) splhigh();		/* ??? */
+	splhigh();
+	cold = 1;
 
-	/* If rebooting and a dump is requested, do it. */
-	if (howto & RB_DUMP)
+	if ((howto & RB_DUMP) != 0)
 		dumpsys();
 
 haltsys:
 	doshutdownhooks();
-	if (!TAILQ_EMPTY(&alldevs))
-		config_suspend(TAILQ_FIRST(&alldevs), DVACT_POWERDOWN);
+	mainbus = device_mainbus();
+	if (mainbus != NULL)
+		config_suspend(mainbus, DVACT_POWERDOWN);
 
 	/* If powerdown was requested, do it. */
-	if ((howto & RB_POWERDOWN) == RB_POWERDOWN) {
+	if ((howto & RB_POWERDOWN) != 0) {
 		/* Let the OBP do the work. */
 		OF_poweroff();
 		printf("WARNING: powerdown failed!\n");
@@ -668,7 +662,7 @@ haltsys:
 		 */
 	}
 
-	if (howto & RB_HALT) {
+	if ((howto & RB_HALT) != 0) {
 		printf("halted\n\n");
 		OF_exit();
 		panic("PROM exit failed");
@@ -688,9 +682,9 @@ haltsys:
 		str[0] = '\0';
 	}
 			
-	if (howto & RB_SINGLE)
+	if ((howto & RB_SINGLE) != 0)
 		str[i++] = 's';
-	if (howto & RB_KDB)
+	if ((howto & RB_KDB) != 0)
 		str[i++] = 'd';
 	if (i > 1) {
 		if (str[0] == '\0')
@@ -700,7 +694,8 @@ haltsys:
 		str[0] = 0;
 	OF_boot(str);
 	panic("cpu_reboot -- failed");
-	/*NOTREACHED*/
+	for (;;) ;
+	/* NOTREACHED */
 }
 
 u_long	dumpmag = 0x8fca0101;	/* magic number for savecore */
@@ -823,7 +818,7 @@ printf("starting dump, blkno %lld\n", (long long)blkno);
 
 			/* print out how many MBs we have dumped */
 			if (i && (i % (1024*1024)) == 0)
-				printf("%d ", i / (1024*1024));
+				printf("%lld ", i / (1024*1024));
 			(void) pmap_enter(pmap_kernel(), dumpspace, maddr,
 					VM_PROT_READ, VM_PROT_READ|PMAP_WIRED);
 			pmap_update(pmap_kernel());
@@ -1007,7 +1002,7 @@ _bus_dmamap_destroy(t, t0, map)
 	if (map->dm_nsegs)
 		bus_dmamap_unload(t0, map);
 
-	free(map, M_DEVBUF);
+	free(map, M_DEVBUF, 0);
 }
 
 /*
@@ -1425,7 +1420,7 @@ _bus_dmamem_free(t, t0, segs, nsegs)
 	 * Return the list of pages back to the VM system.
 	 */
 	uvm_pglistfree(segs[0]._ds_mlist);
-	free(segs[0]._ds_mlist, M_DEVBUF);
+	free(segs[0]._ds_mlist, M_DEVBUF, 0);
 }
 
 /*
@@ -1441,6 +1436,7 @@ _bus_dmamem_map(t, t0, segs, nsegs, size, kvap, flags)
 	caddr_t *kvap;
 	int flags;
 {
+	const struct kmem_dyn_mode *kd;
 	struct vm_page *m;
 	vaddr_t va, sva;
 	size_t ssize;
@@ -1454,7 +1450,8 @@ _bus_dmamem_map(t, t0, segs, nsegs, size, kvap, flags)
 #endif
 
 	size = round_page(size);
-	va = uvm_km_valloc(kernel_map, size);
+	kd = flags & BUS_DMA_NOWAIT ? &kd_trylock : &kd_waitok;
+	va = (vaddr_t)km_alloc(size, &kv_any, &kp_none, kd);
 	if (va == 0)
 		return (ENOMEM);
 
@@ -1478,7 +1475,7 @@ _bus_dmamem_map(t, t0, segs, nsegs, size, kvap, flags)
 		    VM_PROT_WRITE | PMAP_WIRED | PMAP_CANFAIL);
 		if (error) {
 			pmap_update(pmap_kernel());
-			uvm_km_free(kernel_map, sva, ssize);
+			km_free((void *)sva, ssize, &kv_any, &kp_none);
 			return (error);
 		}
 		va += PAGE_SIZE;
@@ -1505,8 +1502,7 @@ _bus_dmamem_unmap(t, t0, kva, size)
 		panic("_bus_dmamem_unmap");
 #endif
 
-	size = round_page(size);
-	uvm_km_free(kernel_map, (vaddr_t)kva, size);
+	km_free(kva, round_page(size), &kv_any, &kp_none);
 }
 
 /*
@@ -1818,7 +1814,7 @@ bus_intr_allocate(bus_space_tag_t t, int (*handler)(void *), void *arg,
 void
 bus_intr_free(void *arg)
 {
-	free(arg, M_DEVBUF);
+	free(arg, M_DEVBUF, 0);
 }
 
 void *
@@ -2102,7 +2098,7 @@ struct blink_led_softc {
 	SLIST_HEAD(, blink_led) bls_head;
 	int bls_on;
 	struct timeout bls_to;
-} blink_sc = { SLIST_HEAD_INITIALIZER(bls_head), 0 };
+} blink_sc = { SLIST_HEAD_INITIALIZER(blink_sc.bls_head), 0 };
 
 void
 blink_led_register(struct blink_led *l)

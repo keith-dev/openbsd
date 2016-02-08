@@ -1,4 +1,4 @@
-/*	$OpenBSD: ehcivar.h,v 1.28 2013/11/07 10:15:15 mpi Exp $ */
+/*	$OpenBSD: ehcivar.h,v 1.32 2014/05/16 18:17:03 mpi Exp $ */
 /*	$NetBSD: ehcivar.h,v 1.19 2005/04/29 15:04:29 augustss Exp $	*/
 
 /*
@@ -91,8 +91,6 @@ struct ehci_xfer {
 #define EHCI_XFER_ABORTING	0x0001	/* xfer is aborting. */
 #define EHCI_XFER_ABORTWAIT	0x0002	/* abort completion is being awaited. */
 
-#define EXFER(xfer) ((struct ehci_xfer *)(xfer))
-
 /* Information about an entry in the interrupt list. */
 struct ehci_soft_islot {
 	struct ehci_soft_qh *sqh;	/* Queue Head. */
@@ -141,7 +139,6 @@ struct ehci_softc {
 	LIST_HEAD(sc_freeitds, ehci_soft_itd) sc_freeitds;
 
 	int sc_noport;
-	u_int8_t sc_addr;		/* device address */
 	u_int8_t sc_conf;		/* device configuration */
 	struct usbd_xfer *sc_intrxfer;
 	char sc_isreset;
@@ -150,13 +147,9 @@ struct ehci_softc {
 	u_int32_t sc_eintrs;
 	struct ehci_soft_qh *sc_async_head;
 
-	SIMPLEQ_HEAD(, usbd_xfer) sc_free_xfers; /* free xfers */
-
 	struct rwlock sc_doorbell_lock;
 
 	struct timeout sc_tmo_intrlist;
-
-	struct device *sc_child;		/* /dev/usb# device */
 };
 
 #define EREAD1(sc, a) bus_space_read_1((sc)->iot, (sc)->ioh, (a))
@@ -174,7 +167,7 @@ struct ehci_softc {
 
 usbd_status	ehci_init(struct ehci_softc *);
 int		ehci_intr(void *);
-int		ehci_detach(struct ehci_softc *, int);
+int		ehci_detach(struct device *, int);
 int		ehci_activate(struct device *, int);
 usbd_status	ehci_reset(struct ehci_softc *);
 

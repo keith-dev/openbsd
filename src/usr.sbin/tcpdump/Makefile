@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.54 2013/06/19 03:51:30 lteo Exp $
+#	$OpenBSD: Makefile,v 1.56 2014/06/30 04:25:11 deraadt Exp $
 #
 #  Copyright (c) 1988, 1989, 1990, 1991, 1992, 1993, 1994
 # 	The Regents of the University of California.  All rights reserved.
@@ -41,7 +41,7 @@ SRCS=	tcpdump.c addrtoname.c privsep.c privsep_fdpass.c privsep_pcap.c \
 	print-fddi.c print-llc.c print-sunrpc.c print-hsrp.c print-vqp.c \
 	print-vrrp.c print-wb.c print-decnet.c print-isoclns.c print-ipx.c \
 	print-atm.c print-dvmrp.c print-krb.c print-pim.c print-netbios.c \
-	util.c bpf_dump.c parsenfsfh.c version.c machdep.c print-igrp.c \
+	util.c bpf_dump.c parsenfsfh.c version.c print-igrp.c \
 	print-gre.c print-radius.c print-enc.c print-cnfp.c \
 	print-ipsec.c print-ike.c print-raw.c print-l2tp.c print-mobile.c \
 	print-ip6.c print-ip6opts.c print-icmp6.c print-dhcp6.c print-frag6.c \
@@ -50,7 +50,7 @@ SRCS=	tcpdump.c addrtoname.c privsep.c privsep_fdpass.c privsep_pcap.c \
 	print-pfsync.c pf_print_state.c \
 	print-udpencap.c print-carp.c \
 	print-802_11.c print-iapp.c print-mpls.c print-slow.c \
-	gmt2local.c savestr.c setsignal.c
+	gmt2local.c savestr.c setsignal.c in_cksum.c
 
 # TCP OS Fingerprinting
 .PATH: ${.CURDIR}/../../sys/net

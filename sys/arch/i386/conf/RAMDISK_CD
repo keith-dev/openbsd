@@ -1,4 +1,4 @@
-#	$OpenBSD: RAMDISK_CD,v 1.210 2014/02/19 05:32:57 jmatthew Exp $
+#	$OpenBSD: RAMDISK_CD,v 1.218 2014/07/16 14:59:41 naddy Exp $
 
 machine		i386		# architecture, used by config; REQUIRED
 
@@ -48,6 +48,8 @@ acpimadt0	at acpi?
 acpiprt*	at acpi?
 #acpitz*	at acpi?
 
+mpbios0		at bios0
+
 cpu0	at mainbus?
 bios0	at mainbus0
 ioapic*	at mainbus?
@@ -96,6 +98,7 @@ pcic*	at pci?
 pcmcia*	at pcic?
 
 # USB Controllers
+#xhci*	at pci?			# eXtensible Host Controller
 ehci*	at pci?			# Enhanced Host Controller
 ehci*	at cardbus?		# Enhanced Host Controller
 uhci*	at pci?			# Universal Host Controller (Intel)
@@ -103,6 +106,7 @@ ohci*	at pci?			# Open Host Controller
 ohci*	at cardbus?		# Open Host Controller
 
 # USB bus support
+#usb*	at xhci?
 usb*	at ehci?
 usb*	at uhci?
 usb*	at ohci?
@@ -127,6 +131,7 @@ umass*	at uhub?		# USB Mass Storage devices
 aue*	at uhub?		# ADMtek AN986 Pegasus Ethernet
 #atu*	at uhub?		# Atmel AT76c50x based 802.11b
 axe*	at uhub?		# ASIX Electronics AX88172 USB Ethernet
+axen*	at uhub?		# ASIX Electronics AX88179 USB Ethernet
 cue*	at uhub?		# CATC USB-EL1201A based Ethernet
 kue*	at uhub?		# Kawasaki KL5KUSB101B based Ethernet
 smsc*	at uhub?		# SMSC LAN95xx Ethernet
@@ -138,7 +143,6 @@ udav*	at uhub?		# Davicom DM9601 based Ethernet
 mos*	at uhub?		# MOSCHIP MCS7730/7830 10/100 Ethernet
 url*	at uhub?		# Realtek RTL8150L based adapters
 wi*	at uhub?		# WaveLAN IEEE 802.11DS
-#uyap*	at uhub?		# Y@P firmware loader
 #ugen*	at uhub?		# USB Generic driver
 ural*	at uhub?		# Ralink RT2500
 rum*	at uhub?		# Ralink RT2501USB/RT2601USB
@@ -216,9 +220,9 @@ ciss*	at pci?			# Compaq Smart ARRAY [56]* RAID controllers
 twe*	at pci?			# 3ware Escalade RAID controllers
 #iha*	at pci?			# Initio Ultra/UltraWide SCSI controllers
 ips*	at pci?			# IBM ServeRAID controllers
-isp*	at pci?			# Qlogic ISP [12]0x0 SCSI/FibreChannel
-#qla*	at pci?			# Qlogic ISP 2[123]xx SCSI/FibreChannel
-#qle*	at pci?			# Qlogic ISP 2[45]xx SCSI/FibreChannel
+qlw*	at pci?			# QLogic ISP SCSI
+qla*	at pci?			# QLogic ISP 2[123]xx FibreChannel
+qle*	at pci?			# QLogic ISP 2[45]xx FibreChannel
 aic0	at isa? port 0x340 irq 11	# Adaptec 152[02] SCSI controllers
 aic*	at isapnp?
 aic*	at pcmcia?		# PCMCIA based aic SCSI controllers
@@ -409,8 +413,6 @@ mlphy*	at mii?				# Micro Linear 6692 PHY
 ukphy*	at mii?				# "unknown" PHYs
 
 pseudo-device	loop	1		# network loopback
-#pseudo-device	sl	1		# CSLIP
-#pseudo-device	ppp	1		# PPP
 pseudo-device	vlan			# IEEE 802.1Q VLAN 
 pseudo-device	bpfilter 1		# packet filter
 pseudo-device	rd	1		# ramdisk

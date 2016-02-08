@@ -1,4 +1,4 @@
-/*	$OpenBSD: setup.c,v 1.19 2013/11/22 04:38:02 guenther Exp $	*/
+/*	$OpenBSD: setup.c,v 1.23 2014/07/13 16:08:53 pelikan Exp $	*/
 /*	$NetBSD: setup.c,v 1.1 1997/06/11 11:22:01 bouyer Exp $	*/
 
 /*
@@ -107,9 +107,9 @@ setup(char *dev)
 	if (sblk.b_un.b_buf == NULL || asblk.b_un.b_buf == NULL)
 		errexit("cannot allocate space for superblock\n");
 	if ((lp = getdisklabel((char *)NULL, fsreadfd)) != NULL)
-		dev_bsize = secsize = lp->d_secsize;
+		secsize = lp->d_secsize;
 	else
-		dev_bsize = secsize = DEV_BSIZE;
+		secsize = DEV_BSIZE;
 	/*
 	 * Read in the superblock, looking for alternates if necessary
 	 */
@@ -226,7 +226,7 @@ setup(char *dev)
 		goto badsblabel;
 	}
 	for (numdirs = 0, cg = 0; cg < sblock.e2fs_ncg; cg++) {
-		numdirs += fs2h16(sblock.e2fs_gd[cg].ext2bgd_ndirs);
+		numdirs += letoh16(sblock.e2fs_gd[cg].ext2bgd_ndirs);
 	}
 	inplast = 0;
 	listmax = numdirs + 10;
@@ -253,7 +253,7 @@ badsblabel:
 static int
 readsb(int listerr)
 {
-	daddr32_t super = bflag ? bflag : SBOFF / dev_bsize;
+	daddr32_t super = bflag ? bflag : SBOFF / DEV_BSIZE;
 
 	if (bread(fsreadfd, (char *)sblk.b_un.b_fs, super, (long)SBSIZE) != 0)
 		return (0);
@@ -271,6 +271,9 @@ readsb(int listerr)
 	}
 	if (sblock.e2fs.e2fs_log_bsize > 2) {
 		badsb(listerr, "BAD LOG_BSIZE"); return (0);
+	}
+	if (sblock.e2fs.e2fs_bpg == 0) {
+		badsb(listerr, "BAD BLOCKS PER GROUP"); return (0);
 	}
 
 	/* compute the dynamic fields of the in-memory sb */
@@ -294,9 +297,7 @@ readsb(int listerr)
 	 * according to fsbtodb, and adjust superblock block number
 	 * so we can tell if this is an alternate later.
 	 */
-	super *= dev_bsize;
-	dev_bsize = sblock.e2fs_bsize / fsbtodb(&sblock, 1);
-	sblk.b_bno = super / dev_bsize;
+	sblk.b_bno = super / DEV_BSIZE;
 
 	if (sblock.e2fs_ncg == 1) {
 		/* no alternate superblock; assume it's okey */
@@ -362,8 +363,8 @@ readsb(int listerr)
 					continue;
 				printf("offset %ld, original %ld, alternate %ld\n",
 					(long)(olp - (u_int32_t *)sblk.b_un.b_fs),
-					(long)fs2h32(*olp),
-					(long)fs2h32(*nlp));
+					(long)letoh32(*olp),
+					(long)letoh32(*nlp));
 			}
 		}
 		badsb(listerr,
@@ -378,32 +379,32 @@ void
 copyback_sb(struct bufarea *bp)
 {
 	/* Copy the in-memory superblock back to buffer */
-	bp->b_un.b_fs->e2fs_icount = fs2h32(sblock.e2fs.e2fs_icount);
-	bp->b_un.b_fs->e2fs_bcount = fs2h32(sblock.e2fs.e2fs_bcount);
-	bp->b_un.b_fs->e2fs_rbcount = fs2h32(sblock.e2fs.e2fs_rbcount);
-	bp->b_un.b_fs->e2fs_fbcount = fs2h32(sblock.e2fs.e2fs_fbcount);
-	bp->b_un.b_fs->e2fs_ficount = fs2h32(sblock.e2fs.e2fs_ficount);
+	bp->b_un.b_fs->e2fs_icount = letoh32(sblock.e2fs.e2fs_icount);
+	bp->b_un.b_fs->e2fs_bcount = letoh32(sblock.e2fs.e2fs_bcount);
+	bp->b_un.b_fs->e2fs_rbcount = letoh32(sblock.e2fs.e2fs_rbcount);
+	bp->b_un.b_fs->e2fs_fbcount = letoh32(sblock.e2fs.e2fs_fbcount);
+	bp->b_un.b_fs->e2fs_ficount = letoh32(sblock.e2fs.e2fs_ficount);
 	bp->b_un.b_fs->e2fs_first_dblock =
-					fs2h32(sblock.e2fs.e2fs_first_dblock);
-	bp->b_un.b_fs->e2fs_log_bsize = fs2h32(sblock.e2fs.e2fs_log_bsize);
-	bp->b_un.b_fs->e2fs_fsize = fs2h32(sblock.e2fs.e2fs_fsize);
-	bp->b_un.b_fs->e2fs_bpg = fs2h32(sblock.e2fs.e2fs_bpg);
-	bp->b_un.b_fs->e2fs_fpg = fs2h32(sblock.e2fs.e2fs_fpg);
-	bp->b_un.b_fs->e2fs_ipg = fs2h32(sblock.e2fs.e2fs_ipg);
-	bp->b_un.b_fs->e2fs_mtime = fs2h32(sblock.e2fs.e2fs_mtime);
-	bp->b_un.b_fs->e2fs_wtime = fs2h32(sblock.e2fs.e2fs_wtime);
-	bp->b_un.b_fs->e2fs_lastfsck = fs2h32(sblock.e2fs.e2fs_lastfsck);
-	bp->b_un.b_fs->e2fs_fsckintv = fs2h32(sblock.e2fs.e2fs_fsckintv);
-	bp->b_un.b_fs->e2fs_creator = fs2h32(sblock.e2fs.e2fs_creator);
-	bp->b_un.b_fs->e2fs_rev = fs2h32(sblock.e2fs.e2fs_rev);
-	bp->b_un.b_fs->e2fs_mnt_count = fs2h16(sblock.e2fs.e2fs_mnt_count);
+					letoh32(sblock.e2fs.e2fs_first_dblock);
+	bp->b_un.b_fs->e2fs_log_bsize = letoh32(sblock.e2fs.e2fs_log_bsize);
+	bp->b_un.b_fs->e2fs_log_fsize = letoh32(sblock.e2fs.e2fs_log_fsize);
+	bp->b_un.b_fs->e2fs_bpg = letoh32(sblock.e2fs.e2fs_bpg);
+	bp->b_un.b_fs->e2fs_fpg = letoh32(sblock.e2fs.e2fs_fpg);
+	bp->b_un.b_fs->e2fs_ipg = letoh32(sblock.e2fs.e2fs_ipg);
+	bp->b_un.b_fs->e2fs_mtime = letoh32(sblock.e2fs.e2fs_mtime);
+	bp->b_un.b_fs->e2fs_wtime = letoh32(sblock.e2fs.e2fs_wtime);
+	bp->b_un.b_fs->e2fs_lastfsck = letoh32(sblock.e2fs.e2fs_lastfsck);
+	bp->b_un.b_fs->e2fs_fsckintv = letoh32(sblock.e2fs.e2fs_fsckintv);
+	bp->b_un.b_fs->e2fs_creator = letoh32(sblock.e2fs.e2fs_creator);
+	bp->b_un.b_fs->e2fs_rev = letoh32(sblock.e2fs.e2fs_rev);
+	bp->b_un.b_fs->e2fs_mnt_count = letoh16(sblock.e2fs.e2fs_mnt_count);
 	bp->b_un.b_fs->e2fs_max_mnt_count =
-					fs2h16(sblock.e2fs.e2fs_max_mnt_count);
-	bp->b_un.b_fs->e2fs_magic = fs2h16(sblock.e2fs.e2fs_magic);
-	bp->b_un.b_fs->e2fs_state = fs2h16(sblock.e2fs.e2fs_state);
-	bp->b_un.b_fs->e2fs_beh = fs2h16(sblock.e2fs.e2fs_beh);
-	bp->b_un.b_fs->e2fs_ruid = fs2h16(sblock.e2fs.e2fs_ruid);
-	bp->b_un.b_fs->e2fs_rgid = fs2h16(sblock.e2fs.e2fs_rgid);
+					letoh16(sblock.e2fs.e2fs_max_mnt_count);
+	bp->b_un.b_fs->e2fs_magic = letoh16(sblock.e2fs.e2fs_magic);
+	bp->b_un.b_fs->e2fs_state = letoh16(sblock.e2fs.e2fs_state);
+	bp->b_un.b_fs->e2fs_beh = letoh16(sblock.e2fs.e2fs_beh);
+	bp->b_un.b_fs->e2fs_ruid = letoh16(sblock.e2fs.e2fs_ruid);
+	bp->b_un.b_fs->e2fs_rgid = letoh16(sblock.e2fs.e2fs_rgid);
 }
 
 void

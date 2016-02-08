@@ -1,5 +1,5 @@
 # ex:ts=8 sw=4:
-# $OpenBSD: AddDelete.pm,v 1.60 2014/01/30 13:23:51 espie Exp $
+# $OpenBSD: AddDelete.pm,v 1.66 2014/07/11 12:50:15 espie Exp $
 #
 # Copyright (c) 2007-2010 Marc Espie <espie@openbsd.org>
 #
@@ -73,6 +73,10 @@ sub framework
 		    $state->defines('tally')) {
 			$state->vstat->tally;
 		}
+		$state->say("Extracted #1 from #2", 
+		    $state->{stats}{donesize},
+		    $state->{stats}{totsize}) 
+			if defined $state->{stats} and $state->verbose;
 		# show any error, and show why we died...
 		rethrow $dielater;
 	};
@@ -214,8 +218,8 @@ sub init
 	$self->{status} = OpenBSD::Status->new;
 	$self->{recorder} = OpenBSD::SharedItemsRecorder->new;
 	$self->{v} = 0;
-	$self->{wantntogo} = $self->config->istrue("ntogo");
 	$self->SUPER::init(@_);
+	$self->{wantntogo} = $self->config->istrue("ntogo");
 	$self->{export_level}++;
 }
 
@@ -306,24 +310,6 @@ sub run_quirks
 			$state->errsay("Bad quirk: #1", $@);
 		}
 	}
-}
-
-sub vsystem
-{
-	my $self = shift;
-	my $verbose = $self;
-	if ($self->verbose < 2) {
-		$self->system(@_);
-	} else {
-		$self->verbose_system(@_);
-	}
-}
-
-sub system
-{
-	my $self = shift;
-	$self->progress->clear;
-	$self->SUPER::system(@_);
 }
 
 sub check_root
@@ -432,7 +418,6 @@ sub init
 	}
 	open my $fh, "-|", @{$self->{ldconfig}}, "-r";
 	if (defined $fh) {
-		my $_;
 		while (<$fh>) {
 			if (m/^\s*search directories:\s*(.*?)\s*$/o) {
 				for my $d (split(/\:/o, $1)) {

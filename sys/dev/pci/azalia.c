@@ -1,4 +1,4 @@
-/*	$OpenBSD: azalia.c,v 1.210 2014/02/25 18:40:37 kettenis Exp $	*/
+/*	$OpenBSD: azalia.c,v 1.215 2014/07/13 23:10:23 deraadt Exp $	*/
 /*	$NetBSD: azalia.c,v 1.20 2006/05/07 08:31:44 kent Exp $	*/
 
 /*-
@@ -46,7 +46,6 @@
 #include <sys/systm.h>
 #include <sys/types.h>
 #include <sys/timeout.h>
-#include <uvm/uvm_param.h>
 #include <dev/audio_if.h>
 #include <dev/auconv.h>
 #include <dev/pci/pcidevs.h>
@@ -175,10 +174,10 @@ typedef struct azalia_t {
 	rirb_entry_t *unsolq;
 	int unsolq_wp;
 	int unsolq_rp;
-	boolean_t unsolq_kick;
+	int unsolq_kick;
 	struct timeout unsol_to;
 
-	boolean_t ok64;
+	int ok64;
 	int nistreams, nostreams, nbstreams;
 	stream_t pstream;
 	stream_t rstream;
@@ -629,7 +628,7 @@ azalia_pci_detach(struct device *self, int flags)
 	}
 	az->ncodecs = 0;
 	if (az->codecs != NULL) {
-		free(az->codecs, M_DEVBUF);
+		free(az->codecs, M_DEVBUF, 0);
 		az->codecs = NULL;
 	}
 
@@ -639,7 +638,7 @@ azalia_pci_detach(struct device *self, int flags)
 	if (az->rirb_dma.addr != NULL)
 		azalia_free_dmamem(az, &az->rirb_dma);
 	if (az->unsolq != NULL) {
-		free(az->unsolq, M_DEVBUF);
+		free(az->unsolq, M_DEVBUF, 0);
 		az->unsolq = NULL;
 	}
 
@@ -771,26 +770,26 @@ azalia_reset(azalia_t *az)
 	DPRINTF(("%s: resetting\n", __func__));
 	gctl = AZ_READ_4(az, GCTL);
 	AZ_WRITE_4(az, GCTL, gctl & ~HDA_GCTL_CRST);
-	for (i = 5000; i >= 0; i--) {
+	for (i = 5000; i > 0; i--) {
 		DELAY(10);
 		if ((AZ_READ_4(az, GCTL) & HDA_GCTL_CRST) == 0)
 			break;
 	}
 	DPRINTF(("%s: reset counter = %d\n", __func__, i));
-	if (i <= 0) {
+	if (i == 0) {
 		DPRINTF(("%s: reset failure\n", XNAME(az)));
 		return(ETIMEDOUT);
 	}
 	DELAY(1000);
 	gctl = AZ_READ_4(az, GCTL);
 	AZ_WRITE_4(az, GCTL, gctl | HDA_GCTL_CRST);
-	for (i = 5000; i >= 0; i--) {
+	for (i = 5000; i > 0; i--) {
 		DELAY(10);
 		if (AZ_READ_4(az, GCTL) & HDA_GCTL_CRST)
 			break;
 	}
 	DPRINTF(("%s: reset counter = %d\n", __func__, i));
-	if (i <= 0) {
+	if (i == 0) {
 		DPRINTF(("%s: reset-exit failure\n", XNAME(az)));
 		return(ETIMEDOUT);
 	}
@@ -830,7 +829,7 @@ azalia_get_ctrlr_caps(azalia_t *az)
 		printf("%s: no HD-Audio codecs\n", XNAME(az));
 		return -1;
 	}
-	az->codecs = malloc(sizeof(codec_t) * az->ncodecs, M_DEVBUF,
+	az->codecs = mallocarray(az->ncodecs, sizeof(codec_t), M_DEVBUF,
 	    M_NOWAIT | M_ZERO);
 	if (az->codecs == NULL) {
 		printf("%s: can't allocate memory for codecs\n", XNAME(az));
@@ -1016,13 +1015,13 @@ azalia_halt_corb(azalia_t *az)
 	corbctl = AZ_READ_1(az, CORBCTL);
 	if (corbctl & HDA_CORBCTL_CORBRUN) { /* running? */
 		AZ_WRITE_1(az, CORBCTL, corbctl & ~HDA_CORBCTL_CORBRUN);
-		for (i = 5000; i >= 0; i--) {
+		for (i = 5000; i > 0; i--) {
 			DELAY(10);
 			corbctl = AZ_READ_1(az, CORBCTL);
 			if ((corbctl & HDA_CORBCTL_CORBRUN) == 0)
 				break;
 		}
-		if (i <= 0) {
+		if (i == 0) {
 			DPRINTF(("%s: CORB is running\n", XNAME(az)));
 			return EBUSY;
 		}
@@ -1061,13 +1060,13 @@ azalia_init_corb(azalia_t *az, int resuming)
 	corbrp = AZ_READ_2(az, CORBRP);
 	AZ_WRITE_2(az, CORBRP, corbrp | HDA_CORBRP_CORBRPRST);
 	AZ_WRITE_2(az, CORBRP, corbrp & ~HDA_CORBRP_CORBRPRST);
-	for (i = 5000; i >= 0; i--) {
+	for (i = 5000; i > 0; i--) {
 		DELAY(10);
 		corbrp = AZ_READ_2(az, CORBRP);
 		if ((corbrp & HDA_CORBRP_CORBRPRST) == 0)
 			break;
 	}
-	if (i <= 0) {
+	if (i == 0) {
 		DPRINTF(("%s: CORBRP reset failure\n", XNAME(az)));
 		return -1;
 	}
@@ -1093,13 +1092,13 @@ azalia_halt_rirb(azalia_t *az)
 	rirbctl = AZ_READ_1(az, RIRBCTL);
 	if (rirbctl & HDA_RIRBCTL_RIRBDMAEN) { /* running? */
 		AZ_WRITE_1(az, RIRBCTL, rirbctl & ~HDA_RIRBCTL_RIRBDMAEN);
-		for (i = 5000; i >= 0; i--) {
+		for (i = 5000; i > 0; i--) {
 			DELAY(10);
 			rirbctl = AZ_READ_1(az, RIRBCTL);
 			if ((rirbctl & HDA_RIRBCTL_RIRBDMAEN) == 0)
 				break;
 		}
-		if (i <= 0) {
+		if (i == 0) {
 			DPRINTF(("%s: RIRB is running\n", XNAME(az)));
 			return(EBUSY);
 		}
@@ -1153,7 +1152,7 @@ azalia_init_rirb(azalia_t *az, int resuming)
 
 	az->unsolq_rp = 0;
 	az->unsolq_wp = 0;
-	az->unsolq_kick = FALSE;
+	az->unsolq_kick = 0;
 
 	AZ_WRITE_2(az, RINTCNT, 1);
 
@@ -1161,13 +1160,13 @@ azalia_init_rirb(azalia_t *az, int resuming)
 	rirbctl = AZ_READ_1(az, RIRBCTL);
 	AZ_WRITE_1(az, RIRBCTL, rirbctl |
 	    HDA_RIRBCTL_RIRBDMAEN | HDA_RIRBCTL_RINTCTL);
-	for (i = 5000; i >= 0; i--) {
+	for (i = 5000; i > 0; i--) {
 		DELAY(10);
 		rirbctl = AZ_READ_1(az, RIRBCTL);
 		if (rirbctl & HDA_RIRBCTL_RIRBDMAEN)
 			break;
 	}
-	if (i <= 0) {
+	if (i == 0) {
 		DPRINTF(("%s: RIRB is not running\n", XNAME(az)));
 		return(EBUSY);
 	}
@@ -1244,7 +1243,7 @@ azalia_get_response(azalia_t *az, uint32_t *result)
 			DELAY(10);
 			i--;
 		}
-		if (i <= 0) {
+		if (i == 0) {
 			DPRINTF(("%s: RIRB time out\n", XNAME(az)));
 			return(ETIMEDOUT);
 		}
@@ -1271,7 +1270,7 @@ azalia_rirb_kick_unsol_events(void *v)
 
 	if (az->unsolq_kick)
 		return;
-	az->unsolq_kick = TRUE;
+	az->unsolq_kick = 1;
 	while (az->unsolq_rp != az->unsolq_wp) {
 		addr = RIRB_RESP_CODEC(az->unsolq[az->unsolq_rp].resp_ex);
 		tag = RIRB_UNSOL_TAG(az->unsolq[az->unsolq_rp].resp);
@@ -1284,7 +1283,7 @@ azalia_rirb_kick_unsol_events(void *v)
 		if (az->codecs[az->codecno].address == addr)
 			azalia_unsol_event(&az->codecs[az->codecno], tag);
 	}
-	az->unsolq_kick = FALSE;
+	az->unsolq_kick = 0;
 }
 
 void
@@ -1632,7 +1631,8 @@ azalia_codec_init(codec_t *this)
 		return -1;
 	}
 	this->wend = this->wstart + COP_NSUBNODES(result);
-	this->w = malloc(sizeof(widget_t) * this->wend, M_DEVBUF, M_NOWAIT | M_ZERO);
+	this->w = mallocarray(this->wend, sizeof(widget_t), M_DEVBUF,
+	    M_NOWAIT | M_ZERO);
 	if (this->w == NULL) {
 		printf("%s: out of memory\n", XNAME(this->az));
 		return ENOMEM;
@@ -2055,7 +2055,7 @@ azalia_codec_sort_pins(codec_t *this)
 		}
 	}
 
-	this->opins = malloc(nopins * sizeof(struct io_pin), M_DEVBUF,
+	this->opins = mallocarray(nopins, sizeof(struct io_pin), M_DEVBUF,
 	    M_NOWAIT | M_ZERO);
 	if (this->opins == NULL)
 		return(ENOMEM);
@@ -2073,7 +2073,7 @@ azalia_codec_sort_pins(codec_t *this)
 			break;
 	}
 
-	this->opins_d = malloc(nopins_d * sizeof(struct io_pin), M_DEVBUF,
+	this->opins_d = mallocarray(nopins_d, sizeof(struct io_pin), M_DEVBUF,
 	    M_NOWAIT | M_ZERO);
 	if (this->opins_d == NULL)
 		return(ENOMEM);
@@ -2091,7 +2091,7 @@ azalia_codec_sort_pins(codec_t *this)
 			break;
 	}
 
-	this->ipins = malloc(nipins * sizeof(struct io_pin), M_DEVBUF,
+	this->ipins = mallocarray(nipins, sizeof(struct io_pin), M_DEVBUF,
 	    M_NOWAIT | M_ZERO);
 	if (this->ipins == NULL)
 		return(ENOMEM);
@@ -2109,7 +2109,7 @@ azalia_codec_sort_pins(codec_t *this)
 			break;
 	}
 
-	this->ipins_d = malloc(nipins_d * sizeof(struct io_pin), M_DEVBUF,
+	this->ipins_d = mallocarray(nipins_d, sizeof(struct io_pin), M_DEVBUF,
 	    M_NOWAIT | M_ZERO);
 	if (this->ipins_d == NULL)
 		return(ENOMEM);
@@ -2162,7 +2162,7 @@ azalia_codec_select_dacs(codec_t *this)
 	int nconv, conv;
 	int i, j, k, err;
 
-	convs = malloc(this->na_dacs * sizeof(nid_t), M_DEVBUF,
+	convs = mallocarray(this->na_dacs, sizeof(nid_t), M_DEVBUF,
 	    M_NOWAIT | M_ZERO);
 	if (convs == NULL)
 		return(ENOMEM);
@@ -2218,7 +2218,7 @@ azalia_codec_select_dacs(codec_t *this)
 		}
 	}
 
-	free(convs, M_DEVBUF);
+	free(convs, M_DEVBUF, 0);
 	return(err);
 }
 
@@ -2613,43 +2613,43 @@ azalia_codec_delete(codec_t *this)
 	azalia_mixer_delete(this);
 
 	if (this->formats != NULL) {
-		free(this->formats, M_DEVBUF);
+		free(this->formats, M_DEVBUF, 0);
 		this->formats = NULL;
 	}
 	this->nformats = 0;
 
 	if (this->encs != NULL) {
-		free(this->encs, M_DEVBUF);
+		free(this->encs, M_DEVBUF, 0);
 		this->encs = NULL;
 	}
 	this->nencs = 0;
 
 	if (this->opins != NULL) {
-		free(this->opins, M_DEVBUF);
+		free(this->opins, M_DEVBUF, 0);
 		this->opins = NULL;
 	}
 	this->nopins = 0;
 
 	if (this->opins_d != NULL) {
-		free(this->opins_d, M_DEVBUF);
+		free(this->opins_d, M_DEVBUF, 0);
 		this->opins_d = NULL;
 	}
 	this->nopins_d = 0;
 
 	if (this->ipins != NULL) {
-		free(this->ipins, M_DEVBUF);
+		free(this->ipins, M_DEVBUF, 0);
 		this->ipins = NULL;
 	}
 	this->nipins = 0;
 
 	if (this->ipins_d != NULL) {
-		free(this->ipins_d, M_DEVBUF);
+		free(this->ipins_d, M_DEVBUF, 0);
 		this->ipins_d = NULL;
 	}
 	this->nipins_d = 0;
 
 	if (this->w != NULL) {
-		free(this->w, M_DEVBUF);
+		free(this->w, M_DEVBUF, 0);
 		this->w = NULL;
 	}
 
@@ -2723,9 +2723,9 @@ azalia_codec_construct_format(codec_t *this, int newdac, int newadc)
 	}
 
 	if (this->formats != NULL)
-		free(this->formats, M_DEVBUF);
+		free(this->formats, M_DEVBUF, 0);
 	this->nformats = 0;
-	this->formats = malloc(sizeof(struct audio_format) * variation,
+	this->formats = mallocarray(variation, sizeof(struct audio_format),
 	    M_DEVBUF, M_NOWAIT | M_ZERO);
 	if (this->formats == NULL) {
 		printf("%s: out of memory in %s\n",
@@ -3412,7 +3412,7 @@ azalia_widget_init_connection(widget_t *this, const codec_t *codec)
 		}
 	}
 
-	this->connections = malloc(sizeof(nid_t) * nconn, M_DEVBUF, M_NOWAIT);
+	this->connections = mallocarray(nconn, sizeof(nid_t), M_DEVBUF, M_NOWAIT);
 	if (this->connections == NULL) {
 		printf("%s: out of memory\n", XNAME(codec->az));
 		return ENOMEM;
@@ -3708,26 +3708,26 @@ azalia_stream_reset(stream_t *this)
 	/* Start reset and wait for chip to enter. */
 	ctl = STR_READ_2(this, CTL);
 	STR_WRITE_2(this, CTL, ctl | HDA_SD_CTL_SRST);
-	for (i = 5000; i >= 0; i--) {
+	for (i = 5000; i > 0; i--) {
 		DELAY(10);
 		ctl = STR_READ_2(this, CTL);
 		if (ctl & HDA_SD_CTL_SRST)
 			break;
 	}
-	if (i <= 0) {
+	if (i == 0) {
 		DPRINTF(("%s: stream reset failure 1\n", XNAME(this->az)));
 		return -1;
 	}
 
 	/* Clear reset and wait for chip to finish */
 	STR_WRITE_2(this, CTL, ctl & ~HDA_SD_CTL_SRST);
-	for (i = 5000; i >= 0; i--) {
+	for (i = 5000; i > 0; i--) {
 		DELAY(10);
 		ctl = STR_READ_2(this, CTL);
 		if ((ctl & HDA_SD_CTL_SRST) == 0)
 			break;
 	}
-	if (i <= 0) {
+	if (i == 0) {
 		DPRINTF(("%s: stream reset failure 2\n", XNAME(this->az)));
 		return -1;
 	}
@@ -4047,7 +4047,7 @@ azalia_set_params_sub(codec_t *codec, int mode, audio_params_t *par)
 			break;
 		}
 		if (j == codec->formats[i].frequency_type) {
-			DPRINTF(("%s: can't find %s rate %u\n",
+			DPRINTF(("%s: can't find %s rate %lu\n",
 			    __func__, cmode, par->sample_rate));
 			return EINVAL;
 		}
@@ -4289,7 +4289,7 @@ azalia_trigger_input(void *v, void *start, void *end, int blk,
 	int err;
 	uint16_t fmt;
 
-	DPRINTFN(1, ("%s: this=%p start=%p end=%p blk=%d {enc=%u %uch %ubit %uHz}\n",
+	DPRINTFN(1, ("%s: this=%p start=%p end=%p blk=%d {enc=%u %uch %ubit %luHz}\n",
 	    __func__, v, start, end, blk, param->encoding, param->channels,
 	    param->precision, param->sample_rate));
 
@@ -4332,7 +4332,7 @@ azalia_params2fmt(const audio_params_t *param, uint16_t *fmt)
 		return EINVAL;
 	}
 
-	DPRINTFN(1, ("%s: prec=%d, chan=%d, rate=%d\n", __func__,
+	DPRINTFN(1, ("%s: prec=%d, chan=%d, rate=%ld\n", __func__,
 	    param->precision, param->channels, param->sample_rate));
 
 	/* Only mono is emulated, and it is emulated from stereo. */
@@ -4426,9 +4426,9 @@ azalia_create_encodings(codec_t *this)
 	}
 
 	if (this->encs != NULL)
-		free(this->encs, M_DEVBUF);
+		free(this->encs, M_DEVBUF, 0);
 	this->nencs = 0;
-	this->encs = malloc(sizeof(struct audio_encoding) * nencs,
+	this->encs = mallocarray(nencs, sizeof(struct audio_encoding),
 	    M_DEVBUF, M_NOWAIT | M_ZERO);
 	if (this->encs == NULL) {
 		printf("%s: out of memory in %s\n",

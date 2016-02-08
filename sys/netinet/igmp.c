@@ -1,4 +1,4 @@
-/*	$OpenBSD: igmp.c,v 1.37 2014/01/21 10:18:26 mpi Exp $	*/
+/*	$OpenBSD: igmp.c,v 1.43 2014/07/22 11:06:10 mpi Exp $	*/
 /*	$NetBSD: igmp.c,v 1.15 1996/02/13 23:41:25 christos Exp $	*/
 
 /*
@@ -77,6 +77,7 @@
 
 #include <sys/param.h>
 #include <sys/mbuf.h>
+#include <sys/systm.h>
 #include <sys/socket.h>
 #include <sys/protosw.h>
 #include <sys/proc.h>
@@ -88,7 +89,6 @@
 
 #include <netinet/in.h>
 #include <netinet/in_var.h>
-#include <netinet/in_systm.h>
 #include <netinet/ip.h>
 #include <netinet/ip_var.h>
 #include <netinet/igmp.h>
@@ -103,6 +103,7 @@ int *igmpctl_vars[IGMPCTL_MAXID] = IGMPCTL_VARS;
 
 int		igmp_timers_are_running;
 static struct router_info *rti_head;
+static struct mbuf *router_alert;
 struct igmpstat igmpstat;
 
 void igmp_checktimer(struct ifnet *);
@@ -113,12 +114,34 @@ struct router_info * rti_find(struct ifnet *);
 void
 igmp_init(void)
 {
+	struct ipoption *ra;
 
-	/*
-	 * To avoid byte-swapping the same value over and over again.
-	 */
 	igmp_timers_are_running = 0;
 	rti_head = 0;
+
+	router_alert = m_get(M_DONTWAIT, MT_DATA);
+	if (router_alert == NULL) {
+		printf("%s: no mbuf\n", __func__);
+		return;
+	}
+
+	/*
+	 * Construct a Router Alert option (RAO) to use in report
+	 * messages as required by RFC2236.  This option has the
+	 * following format:
+	 *
+	 *	| 10010100 | 00000100 |  2 octet value  |
+	 *
+	 * where a value of "0" indicates that routers shall examine
+	 * the packet.
+	 */
+	ra = mtod(router_alert, struct ipoption *);
+	ra->ipopt_dst.s_addr = INADDR_ANY;
+	ra->ipopt_list[0] = IPOPT_RA;
+	ra->ipopt_list[1] = 0x04;
+	ra->ipopt_list[2] = 0x00;
+	ra->ipopt_list[3] = 0x00;
+	router_alert->m_len = sizeof(ra->ipopt_dst) + ra->ipopt_list[1];
 }
 
 /* Return -1 for error. */
@@ -178,7 +201,7 @@ rti_delete(struct ifnet *ifp)
 	for (rti = rti_head; rti != 0; rti = rti->rti_next) {
 		if (rti->rti_ifp == ifp) {
 			*prti = rti->rti_next;
-			free(rti, M_MRTABLE);
+			free(rti, M_MRTABLE, 0);
 			break;
 		}
 		prti = &rti->rti_next;
@@ -634,8 +657,7 @@ igmp_sendpkt(struct in_multi *inm, int type, in_addr_t addr)
 	imo.imo_multicast_loop = 0;
 #endif /* MROUTING */
 
-	ip_output(m, (struct mbuf *)0, (struct route *)0, IP_MULTICASTOPTS,
-	    &imo, (void *)NULL);
+	ip_output(m, router_alert, NULL, IP_MULTICASTOPTS, &imo, NULL, 0);
 
 	++igmpstat.igps_snd_reports;
 }

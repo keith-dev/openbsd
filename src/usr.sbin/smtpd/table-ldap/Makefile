@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.2 2014/01/18 05:54:51 martynas Exp $
+#	$OpenBSD: Makefile,v 1.4 2014/07/08 13:49:09 eric Exp $
 
 .PATH: ${.CURDIR}/..
 
@@ -8,6 +8,7 @@ SRCS=	table_ldap.c
 SRCS+=	table_api.c
 SRCS+=	aldap.c
 SRCS+=	ber.c
+SRCS+=	dict.c
 SRCS+=	log.c
 
 NOMAN=	noman
@@ -17,7 +18,7 @@ BINDIR=	/usr/libexec/smtpd
 DPADD=	${LIBUTIL}
 LDADD=	-lutil
 
-CFLAGS+=	-g3 -ggdb -I${.CURDIR}/..
+CFLAGS+=	-I${.CURDIR}/..
 CFLAGS+=	-Wall -Wstrict-prototypes -Wmissing-prototypes
 CFLAGS+=	-Wmissing-declarations
 CFLAGS+=	-Wshadow -Wpointer-arith -Wcast-qual

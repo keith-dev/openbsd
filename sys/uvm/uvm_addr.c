@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvm_addr.c,v 1.6 2014/02/04 01:04:03 tedu Exp $	*/
+/*	$OpenBSD: uvm_addr.c,v 1.8 2014/06/10 20:08:48 kettenis Exp $	*/
 
 /*
  * Copyright (c) 2011 Ariane van der Steldt <ariane@stack.nl>
@@ -70,9 +70,7 @@ struct uaddr_rnd_state {
 	TAILQ_HEAD(, vm_map_entry)	 ur_free;
 };
 
-/*
- * Definition of a pivot in pivot selector.
- */
+/* Definition of a pivot in pivot selector. */
 struct uaddr_pivot {
 	vaddr_t				 addr;	/* End of prev. allocation. */
 	int				 expire;/* Best before date. */
@@ -106,85 +104,81 @@ uvm_mapent_fspace_cmp(struct vm_map_entry *e1, struct vm_map_entry *e2)
 extern const struct uvm_addr_functions uaddr_kernel_functions;
 struct uvm_addr_state uaddr_kbootstrap;
 
-
-/*
- * Support functions.
- */
-
+/* Support functions. */
 #ifndef SMALL_KERNEL
 struct vm_map_entry	*uvm_addr_entrybyspace(struct uaddr_free_rbtree*,
 			    vsize_t);
 #endif /* !SMALL_KERNEL */
-void			 uaddr_kinsert(struct vm_map*, struct uvm_addr_state*,
-			    struct vm_map_entry*);
-void			 uaddr_kremove(struct vm_map*, struct uvm_addr_state*,
-			    struct vm_map_entry*);
-void			 uaddr_kbootstrapdestroy(struct uvm_addr_state*);
+void			 uaddr_kinsert(struct vm_map *,
+			    struct uvm_addr_state *, struct vm_map_entry *);
+void			 uaddr_kremove(struct vm_map *,
+			    struct uvm_addr_state *, struct vm_map_entry *);
+void			 uaddr_kbootstrapdestroy(struct uvm_addr_state *);
 
-void			 uaddr_destroy(struct uvm_addr_state*);
-void			 uaddr_hint_destroy(struct uvm_addr_state*);
-void			 uaddr_kbootstrap_destroy(struct uvm_addr_state*);
-void			 uaddr_rnd_destroy(struct uvm_addr_state*);
-void			 uaddr_bestfit_destroy(struct uvm_addr_state*);
-void			 uaddr_pivot_destroy(struct uvm_addr_state*);
+void			 uaddr_destroy(struct uvm_addr_state *);
+void			 uaddr_hint_destroy(struct uvm_addr_state *);
+void			 uaddr_kbootstrap_destroy(struct uvm_addr_state *);
+void			 uaddr_rnd_destroy(struct uvm_addr_state *);
+void			 uaddr_bestfit_destroy(struct uvm_addr_state *);
+void			 uaddr_pivot_destroy(struct uvm_addr_state *);
 
-int			 uaddr_lin_select(struct vm_map*,
-			    struct uvm_addr_state*, struct vm_map_entry**,
-			    vaddr_t*, vsize_t, vaddr_t, vaddr_t, vm_prot_t,
+int			 uaddr_lin_select(struct vm_map *,
+			    struct uvm_addr_state *, struct vm_map_entry **,
+			    vaddr_t *, vsize_t, vaddr_t, vaddr_t, vm_prot_t,
 			    vaddr_t);
-int			 uaddr_kbootstrap_select(struct vm_map*,
-			    struct uvm_addr_state*, struct vm_map_entry**,
-			    vaddr_t*, vsize_t, vaddr_t, vaddr_t, vm_prot_t,
+int			 uaddr_kbootstrap_select(struct vm_map *,
+			    struct uvm_addr_state *, struct vm_map_entry **,
+			    vaddr_t *, vsize_t, vaddr_t, vaddr_t, vm_prot_t,
 			    vaddr_t);
-int			 uaddr_rnd_select(struct vm_map*,
-			    struct uvm_addr_state*, struct vm_map_entry**,
-			    vaddr_t*, vsize_t, vaddr_t, vaddr_t, vm_prot_t,
+int			 uaddr_rnd_select(struct vm_map *,
+			    struct uvm_addr_state *, struct vm_map_entry **,
+			    vaddr_t *, vsize_t, vaddr_t, vaddr_t, vm_prot_t,
 			    vaddr_t);
-int			 uaddr_hint_select(struct vm_map*,
-			    struct uvm_addr_state*, struct vm_map_entry**,
-			    vaddr_t*, vsize_t, vaddr_t, vaddr_t, vm_prot_t,
+int			 uaddr_hint_select(struct vm_map *,
+			    struct uvm_addr_state*, struct vm_map_entry **,
+			    vaddr_t *, vsize_t, vaddr_t, vaddr_t, vm_prot_t,
 			    vaddr_t);
-int			 uaddr_bestfit_select(struct vm_map*,
-			    struct uvm_addr_state*, struct vm_map_entry**,
-			    vaddr_t*, vsize_t, vaddr_t, vaddr_t, vm_prot_t,
+int			 uaddr_bestfit_select(struct vm_map *,
+			    struct uvm_addr_state*, struct vm_map_entry **,
+			    vaddr_t *, vsize_t, vaddr_t, vaddr_t, vm_prot_t,
 			    vaddr_t);
 #ifndef SMALL_KERNEL
-int			 uaddr_pivot_select(struct vm_map*,
-			    struct uvm_addr_state*, struct vm_map_entry**,
-			    vaddr_t*, vsize_t, vaddr_t, vaddr_t, vm_prot_t,
+int			 uaddr_pivot_select(struct vm_map *,
+			    struct uvm_addr_state *, struct vm_map_entry **,
+			    vaddr_t *, vsize_t, vaddr_t, vaddr_t, vm_prot_t,
 			    vaddr_t);
-int			 uaddr_stack_brk_select(struct vm_map*,
-			    struct uvm_addr_state*, struct vm_map_entry**,
-			    vaddr_t*, vsize_t, vaddr_t, vaddr_t, vm_prot_t,
+int			 uaddr_stack_brk_select(struct vm_map *,
+			    struct uvm_addr_state *, struct vm_map_entry **,
+			    vaddr_t *, vsize_t, vaddr_t, vaddr_t, vm_prot_t,
 			    vaddr_t);
 #endif /* !SMALL_KERNEL */
 
-void			 uaddr_rnd_insert(struct vm_map*,
-			    struct uvm_addr_state*, struct vm_map_entry*);
-void			 uaddr_rnd_remove(struct vm_map*,
-			    struct uvm_addr_state*, struct vm_map_entry*);
-void			 uaddr_bestfit_insert(struct vm_map*,
-			    struct uvm_addr_state*, struct vm_map_entry*);
-void			 uaddr_bestfit_remove(struct vm_map*,
-			    struct uvm_addr_state*, struct vm_map_entry*);
-void			 uaddr_pivot_insert(struct vm_map*,
-			    struct uvm_addr_state*, struct vm_map_entry*);
-void			 uaddr_pivot_remove(struct vm_map*,
-			    struct uvm_addr_state*, struct vm_map_entry*);
+void			 uaddr_rnd_insert(struct vm_map *,
+			    struct uvm_addr_state *, struct vm_map_entry *);
+void			 uaddr_rnd_remove(struct vm_map *,
+			    struct uvm_addr_state *, struct vm_map_entry *);
+void			 uaddr_bestfit_insert(struct vm_map *,
+			    struct uvm_addr_state *, struct vm_map_entry *);
+void			 uaddr_bestfit_remove(struct vm_map *,
+			    struct uvm_addr_state *, struct vm_map_entry *);
+void			 uaddr_pivot_insert(struct vm_map *,
+			    struct uvm_addr_state *, struct vm_map_entry *);
+void			 uaddr_pivot_remove(struct vm_map *,
+			    struct uvm_addr_state *, struct vm_map_entry *);
 
 #ifndef SMALL_KERNEL
 vsize_t			 uaddr_pivot_random(void);
-int			 uaddr_pivot_newpivot(struct vm_map*,
-			    struct uaddr_pivot_state*, struct uaddr_pivot*,
-			    struct vm_map_entry**, vaddr_t*,
+int			 uaddr_pivot_newpivot(struct vm_map *,
+			    struct uaddr_pivot_state *, struct uaddr_pivot *,
+			    struct vm_map_entry **, vaddr_t *,
 			    vsize_t, vaddr_t, vaddr_t, vsize_t, vsize_t);
 #endif /* !SMALL_KERNEL */
 
 #if defined(DEBUG) || defined(DDB)
-void			 uaddr_pivot_print(struct uvm_addr_state*, boolean_t,
-			    int (*)(const char*, ...));
-void			 uaddr_rnd_print(struct uvm_addr_state*, boolean_t,
-			    int (*)(const char*, ...));
+void			 uaddr_pivot_print(struct uvm_addr_state *, boolean_t,
+			    int (*)(const char *, ...));
+void			 uaddr_rnd_print(struct uvm_addr_state *, boolean_t,
+			    int (*)(const char *, ...));
 #endif /* DEBUG || DDB */
 
 
@@ -192,7 +186,7 @@ void			 uaddr_rnd_print(struct uvm_addr_state*, boolean_t,
 /*
  * Find smallest entry in tree that will fit sz bytes.
  */
-struct vm_map_entry*
+struct vm_map_entry *
 uvm_addr_entrybyspace(struct uaddr_free_rbtree *free, vsize_t sz)
 {
 	struct vm_map_entry	*tmp, *res;
@@ -258,9 +252,7 @@ uvm_addr_fitspace(vaddr_t *min_result, vaddr_t *max_result,
 	if (fspace < sz + before_gap + after_gap)
 		return ENOMEM;
 
-	/*
-	 * Calculate lowest address.
-	 */
+	/* Calculate lowest address. */
 	low_addr += before_gap;
 	low_addr = uvm_addr_align_forward(tmp = low_addr, align, offset);
 	if (low_addr < tmp)	/* Overflow during alignment. */
@@ -268,9 +260,7 @@ uvm_addr_fitspace(vaddr_t *min_result, vaddr_t *max_result,
 	if (high_addr - after_gap - sz < low_addr)
 		return ENOMEM;
 
-	/*
-	 * Calculate highest address.
-	 */
+	/* Calculate highest address. */
 	high_addr -= after_gap + sz;
 	high_addr = uvm_addr_align_backward(tmp = high_addr, align, offset);
 	if (high_addr > tmp)	/* Overflow during alignment. */
@@ -288,7 +278,7 @@ uvm_addr_fitspace(vaddr_t *min_result, vaddr_t *max_result,
  * Initialize uvm_addr.
  */
 void
-uvm_addr_init()
+uvm_addr_init(void)
 {
 	pool_init(&uaddr_pool, sizeof(struct uvm_addr_state),
 	    0, 0, 0, "uaddr", &pool_allocator_nointr);
@@ -354,7 +344,7 @@ uvm_addr_align_back(vaddr_t addr, vaddr_t align, vaddr_t offset)
  */
 int
 uvm_addr_linsearch(struct vm_map *map, struct uvm_addr_state *uaddr,
-    struct vm_map_entry**entry_out, vaddr_t *addr_out,
+    struct vm_map_entry **entry_out, vaddr_t *addr_out,
     vaddr_t hint, vsize_t sz, vaddr_t align, vaddr_t offset,
     int direction, vaddr_t low, vaddr_t high,
     vsize_t before_gap, vsize_t after_gap)
@@ -369,9 +359,7 @@ uvm_addr_linsearch(struct vm_map *map, struct uvm_addr_state *uaddr,
 	    (before_gap & PAGE_MASK) == 0 && (after_gap & PAGE_MASK) == 0);
 	KASSERT(high + sz > high); /* Check for overflow. */
 
-	/*
-	 * Hint magic.
-	 */
+	/* Hint magic. */
 	if (hint == 0)
 		hint = (direction == 1 ? low : high);
 	else if (hint > high) {
@@ -420,7 +408,7 @@ uvm_addr_linsearch(struct vm_map *map, struct uvm_addr_state *uaddr,
  */
 int
 uvm_addr_invoke(struct vm_map *map, struct uvm_addr_state *uaddr,
-    struct vm_map_entry**entry_out, struct vm_map_entry**last_out,
+    struct vm_map_entry **entry_out, struct vm_map_entry **last_out,
     vaddr_t *addr_out,
     vsize_t sz, vaddr_t align, vaddr_t offset, vm_prot_t prot, vaddr_t hint)
 {
@@ -457,7 +445,7 @@ uvm_addr_invoke(struct vm_map *map, struct uvm_addr_state *uaddr,
 #if defined(DEBUG) || defined(DDB)
 void
 uvm_addr_print(struct uvm_addr_state *uaddr, const char *slot, boolean_t full,
-    int (*pr)(const char*, ...))
+    int (*pr)(const char *, ...))
 {
 	if (uaddr == NULL) {
 		(*pr)("- uvm_addr %s: NULL\n", slot);
@@ -492,17 +480,16 @@ uaddr_destroy(struct uvm_addr_state *uaddr)
  * If hint is set, search will start at the hint position.
  * Only searches forward.
  */
-
 const struct uvm_addr_functions uaddr_lin_functions = {
 	.uaddr_select = &uaddr_lin_select,
 	.uaddr_destroy = &uaddr_destroy,
 	.uaddr_name = "uaddr_lin"
 };
 
-struct uvm_addr_state*
+struct uvm_addr_state *
 uaddr_lin_create(vaddr_t minaddr, vaddr_t maxaddr)
 {
-	struct uvm_addr_state* uaddr;
+	struct uvm_addr_state *uaddr;
 
 	uaddr = pool_get(&uaddr_pool, PR_WAITOK);
 	uaddr->uaddr_minaddr = minaddr;
@@ -513,15 +500,13 @@ uaddr_lin_create(vaddr_t minaddr, vaddr_t maxaddr)
 
 int
 uaddr_lin_select(struct vm_map *map, struct uvm_addr_state *uaddr,
-    struct vm_map_entry**entry_out, vaddr_t *addr_out,
+    struct vm_map_entry **entry_out, vaddr_t *addr_out,
     vsize_t sz, vaddr_t align, vaddr_t offset,
     vm_prot_t prot, vaddr_t hint)
 {
 	vaddr_t guard_sz;
 
-	/*
-	 * Deal with guardpages: search for space with one extra page.
-	 */
+	/* Deal with guardpages: search for space with one extra page. */
 	guard_sz = ((map->flags & VM_MAP_GUARDPAGES) == 0 ? 0 : PAGE_SIZE);
 
 	if (uaddr->uaddr_maxaddr - uaddr->uaddr_minaddr < sz + guard_sz)
@@ -549,10 +534,10 @@ const struct uvm_addr_functions uaddr_rnd_functions = {
 	.uaddr_name = "uaddr_rnd"
 };
 
-struct uvm_addr_state*
+struct uvm_addr_state *
 uaddr_rnd_create(vaddr_t minaddr, vaddr_t maxaddr)
 {
-	struct uaddr_rnd_state* uaddr;
+	struct uaddr_rnd_state *uaddr;
 
 	uaddr = pool_get(&uaddr_rnd_pool, PR_WAITOK);
 	uaddr->ur_uaddr.uaddr_minaddr = minaddr;
@@ -564,7 +549,7 @@ uaddr_rnd_create(vaddr_t minaddr, vaddr_t maxaddr)
 
 int
 uaddr_rnd_select(struct vm_map *map, struct uvm_addr_state *uaddr,
-    struct vm_map_entry**entry_out, vaddr_t *addr_out,
+    struct vm_map_entry **entry_out, vaddr_t *addr_out,
     vsize_t sz, vaddr_t align, vaddr_t offset,
     vm_prot_t prot, vaddr_t hint)
 {
@@ -576,7 +561,7 @@ uaddr_rnd_select(struct vm_map *map, struct uvm_addr_state *uaddr,
 	vaddr_t			 tmp;
 
 	KASSERT((map->flags & VM_MAP_ISVMSPACE) != 0);
-	vm = (struct vmspace*)map;
+	vm = (struct vmspace *)map;
 
 	/* Deal with guardpages: search for space with one extra page. */
 	guard_sz = ((map->flags & VM_MAP_GUARDPAGES) == 0 ? 0 : PAGE_SIZE);
@@ -702,7 +687,7 @@ uaddr_rnd_print(struct uvm_addr_state *uaddr_p, boolean_t full,
 	size_t			 count;
 	vsize_t			 space;
 
-	uaddr = (struct uaddr_rnd_state*)uaddr_p;
+	uaddr = (struct uaddr_rnd_state *)uaddr_p;
 	addr = 0;
 	count = 0;
 	space = 0;
@@ -739,7 +724,6 @@ uaddr_rnd_print(struct uvm_addr_state *uaddr_p, boolean_t full,
  *
  * If no hint is given, the allocator refuses to allocate.
  */
-
 const struct uvm_addr_functions uaddr_hint_functions = {
 	.uaddr_select = &uaddr_hint_select,
 	.uaddr_destroy = &uaddr_hint_destroy,
@@ -749,10 +733,10 @@ const struct uvm_addr_functions uaddr_hint_functions = {
 /*
  * Create uaddr_hint state.
  */
-struct uvm_addr_state*
+struct uvm_addr_state *
 uaddr_hint_create(vaddr_t minaddr, vaddr_t maxaddr, vsize_t max_dist)
 {
-	struct uaddr_hint_state* ua_hint;
+	struct uaddr_hint_state *ua_hint;
 
 	KASSERT(uaddr_hint_pool.pr_size == sizeof(*ua_hint));
 
@@ -780,11 +764,12 @@ uaddr_hint_destroy(struct uvm_addr_state *uaddr)
  */
 int
 uaddr_hint_select(struct vm_map *map, struct uvm_addr_state *uaddr_param,
-    struct vm_map_entry**entry_out, vaddr_t *addr_out,
+    struct vm_map_entry **entry_out, vaddr_t *addr_out,
     vsize_t sz, vaddr_t align, vaddr_t offset,
     vm_prot_t prot, vaddr_t hint)
 {
-	struct uaddr_hint_state	*uaddr = (struct uaddr_hint_state*)uaddr_param;
+	struct uaddr_hint_state	*uaddr =
+	    (struct uaddr_hint_state *)uaddr_param;
 	vsize_t			 before_gap, after_gap;
 	vaddr_t			 low, high;
 	int			 dir;
@@ -792,9 +777,7 @@ uaddr_hint_select(struct vm_map *map, struct uvm_addr_state *uaddr_param,
 	if (hint == 0)
 		return ENOMEM;
 
-	/*
-	 * Calculate upper and lower bound for selected address.
-	 */
+	/* Calculate upper and lower bound for selected address. */
 	high = hint + uaddr->max_dist;
 	if (high < hint)	/* overflow */
 		high = map->max_offset;
@@ -849,7 +832,6 @@ uaddr_hint_select(struct vm_map *map, struct uvm_addr_state *uaddr_param,
 /*
  * Kernel allocation bootstrap logic.
  */
-
 const struct uvm_addr_functions uaddr_kernel_functions = {
 	.uaddr_select = &uaddr_kbootstrap_select,
 	.uaddr_destroy = &uaddr_kbootstrap_destroy,
@@ -887,7 +869,7 @@ uaddr_kbootstrap_select(struct vm_map *map, struct uvm_addr_state *uaddr,
 void
 uaddr_kbootstrap_destroy(struct uvm_addr_state *uaddr)
 {
-	KASSERT(uaddr == (struct uvm_addr_state*)&uaddr_kbootstrap);
+	KASSERT(uaddr == (struct uvm_addr_state *)&uaddr_kbootstrap);
 }
 
 #ifndef SMALL_KERNEL
@@ -903,7 +885,7 @@ const struct uvm_addr_functions uaddr_bestfit_functions = {
 	.uaddr_name = "uaddr_bestfit"
 };
 
-struct uvm_addr_state*
+struct uvm_addr_state *
 uaddr_bestfit_create(vaddr_t minaddr, vaddr_t maxaddr)
 {
 	struct uaddr_bestfit_state *uaddr;
@@ -929,7 +911,7 @@ uaddr_bestfit_insert(struct vm_map *map, struct uvm_addr_state *uaddr_p,
 	struct uaddr_bestfit_state	*uaddr;
 	struct vm_map_entry		*rb_rv;
 
-	uaddr = (struct uaddr_bestfit_state*)uaddr_p;
+	uaddr = (struct uaddr_bestfit_state *)uaddr_p;
 	if ((rb_rv = RB_INSERT(uaddr_free_rbtree, &uaddr->ubf_free, entry)) !=
 	    NULL) {
 		panic("%s: duplicate insertion: state %p "
@@ -944,14 +926,14 @@ uaddr_bestfit_remove(struct vm_map *map, struct uvm_addr_state *uaddr_p,
 {
 	struct uaddr_bestfit_state	*uaddr;
 
-	uaddr = (struct uaddr_bestfit_state*)uaddr_p;
+	uaddr = (struct uaddr_bestfit_state *)uaddr_p;
 	if (RB_REMOVE(uaddr_free_rbtree, &uaddr->ubf_free, entry) != entry)
 		panic("%s: entry was not in tree", __func__);
 }
 
 int
 uaddr_bestfit_select(struct vm_map *map, struct uvm_addr_state *uaddr_p,
-    struct vm_map_entry**entry_out, vaddr_t *addr_out,
+    struct vm_map_entry **entry_out, vaddr_t *addr_out,
     vsize_t sz, vaddr_t align, vaddr_t offset,
     vm_prot_t prot, vaddr_t hint)
 {
@@ -960,7 +942,7 @@ uaddr_bestfit_select(struct vm_map *map, struct uvm_addr_state *uaddr_p,
 	struct vm_map_entry		*entry;
 	vsize_t				 guardsz;
 
-	uaddr = (struct uaddr_bestfit_state*)uaddr_p;
+	uaddr = (struct uaddr_bestfit_state *)uaddr_p;
 	guardsz = ((map->flags & VM_MAP_GUARDPAGES) ? PAGE_SIZE : 0);
 
 	/*
@@ -971,9 +953,7 @@ uaddr_bestfit_select(struct vm_map *map, struct uvm_addr_state *uaddr_p,
 	if (entry == NULL)
 		return ENOMEM;
 
-	/*
-	 * Walk the tree until we find an entry that fits.
-	 */
+	/* Walk the tree until we find an entry that fits.  */
 	while (uvm_addr_fitspace(&min, &max,
 	    VMMAP_FREE_START(entry), VMMAP_FREE_END(entry),
 	    sz, align, offset, 0, guardsz) != 0) {
@@ -982,9 +962,7 @@ uaddr_bestfit_select(struct vm_map *map, struct uvm_addr_state *uaddr_p,
 			return ENOMEM;
 	}
 
-	/*
-	 * Return the address that generates the least fragmentation.
-	 */
+	/* Return the address that generates the least fragmentation. */
 	*entry_out = entry;
 	*addr_out = (min - VMMAP_FREE_START(entry) <=
 	    VMMAP_FREE_END(entry) - guardsz - sz - max ?
@@ -1061,7 +1039,7 @@ uaddr_pivot_random()
 int
 uaddr_pivot_newpivot(struct vm_map *map, struct uaddr_pivot_state *uaddr,
     struct uaddr_pivot *pivot,
-    struct vm_map_entry**entry_out, vaddr_t *addr_out,
+    struct vm_map_entry **entry_out, vaddr_t *addr_out,
     vsize_t sz, vaddr_t align, vaddr_t offset,
     vsize_t before_gap, vsize_t after_gap)
 {
@@ -1231,7 +1209,7 @@ uaddr_pivot_newpivot(struct vm_map *map, struct uaddr_pivot_state *uaddr,
  */
 int
 uaddr_pivot_select(struct vm_map *map, struct uvm_addr_state *uaddr_p,
-    struct vm_map_entry**entry_out, vaddr_t *addr_out,
+    struct vm_map_entry **entry_out, vaddr_t *addr_out,
     vsize_t sz, vaddr_t align, vaddr_t offset,
     vm_prot_t prot, vaddr_t hint)
 {
@@ -1249,7 +1227,7 @@ uaddr_pivot_select(struct vm_map *map, struct uvm_addr_state *uaddr_p,
 	/*
 	 * Select a random pivot and a random gap sizes around the allocation.
 	 */
-	uaddr = (struct uaddr_pivot_state*)uaddr_p;
+	uaddr = (struct uaddr_pivot_state *)uaddr_p;
 	pivot = &uaddr->up_pivots[
 	    arc4random_uniform(nitems(uaddr->up_pivots))];
 	before_gap = uaddr_pivot_random();
@@ -1257,9 +1235,7 @@ uaddr_pivot_select(struct vm_map *map, struct uvm_addr_state *uaddr_p,
 	if (pivot->addr == 0 || pivot->entry == NULL || pivot->expire == 0)
 		goto expired;	/* Pivot is invalid (null or expired). */
 
-	/*
-	 * Attempt to use the pivot to map the entry.
-	 */
+	/* Attempt to use the pivot to map the entry. */
 	entry = pivot->entry;
 	if (pivot->dir > 0) {
 		if (uvm_addr_fitspace(&min, &max,
@@ -1317,7 +1293,7 @@ uaddr_pivot_insert(struct vm_map *map, struct uvm_addr_state *uaddr_p,
 	vaddr_t				 check_addr;
 	vaddr_t				 start, end;
 
-	uaddr = (struct uaddr_pivot_state*)uaddr_p;
+	uaddr = (struct uaddr_pivot_state *)uaddr_p;
 	if ((rb_rv = RB_INSERT(uaddr_free_rbtree, &uaddr->up_free, entry)) !=
 	    NULL) {
 		panic("%s: duplicate insertion: state %p "
@@ -1357,7 +1333,7 @@ uaddr_pivot_remove(struct vm_map *map, struct uvm_addr_state *uaddr_p,
 	struct uaddr_pivot_state	*uaddr;
 	struct uaddr_pivot		*p;
 
-	uaddr = (struct uaddr_pivot_state*)uaddr_p;
+	uaddr = (struct uaddr_pivot_state *)uaddr_p;
 	if (RB_REMOVE(uaddr_free_rbtree, &uaddr->up_free, entry) != entry)
 		panic("%s: entry was not in tree", __func__);
 
@@ -1383,7 +1359,7 @@ uaddr_pivot_remove(struct vm_map *map, struct uvm_addr_state *uaddr_p,
  *   the next pivots will likely end up in different segments of free memory,
  *   that was segmented by an earlier allocation; better spread.
  */
-struct uvm_addr_state*
+struct uvm_addr_state *
 uaddr_pivot_create(vaddr_t minaddr, vaddr_t maxaddr)
 {
 	struct uaddr_pivot_state *uaddr;
@@ -1406,7 +1382,7 @@ uaddr_pivot_create(vaddr_t minaddr, vaddr_t maxaddr)
  */
 void
 uaddr_pivot_print(struct uvm_addr_state *uaddr_p, boolean_t full,
-    int (*pr)(const char*, ...))
+    int (*pr)(const char *, ...))
 {
 	struct uaddr_pivot_state	*uaddr;
 	struct uaddr_pivot		*pivot;
@@ -1414,7 +1390,7 @@ uaddr_pivot_print(struct uvm_addr_state *uaddr_p, boolean_t full,
 	int				 i;
 	vaddr_t				 check_addr;
 
-	uaddr = (struct uaddr_pivot_state*)uaddr_p;
+	uaddr = (struct uaddr_pivot_state *)uaddr_p;
 
 	for (i = 0; i < NUM_PIVOTS; i++) {
 		pivot = &uaddr->up_pivots[i];
@@ -1472,7 +1448,6 @@ struct uaddr_bs_strat {
  * select which one (stack or brk area) to try. If the allocation fails,
  * the other one is tested.
  */
-
 const struct uvm_addr_functions uaddr_stack_brk_functions = {
 	.uaddr_select = &uaddr_stack_brk_select,
 	.uaddr_destroy = &uaddr_destroy,
@@ -1484,7 +1459,7 @@ const struct uvm_addr_functions uaddr_stack_brk_functions = {
  */
 int
 uaddr_stack_brk_select(struct vm_map *map, struct uvm_addr_state *uaddr,
-    struct vm_map_entry**entry_out, vaddr_t *addr_out,
+    struct vm_map_entry **entry_out, vaddr_t *addr_out,
     vsize_t sz, vaddr_t align, vaddr_t offset,
     vm_prot_t prot, vaddr_t hint)
 {
@@ -1511,9 +1486,7 @@ uaddr_stack_brk_select(struct vm_map *map, struct uvm_addr_state *uaddr,
 		stack_idx = 1;
 	}
 
-	/*
-	 * Set up stack search strategy.
-	 */
+	/* Set up stack search strategy. */
 	s = &strat[stack_idx];
 	s->start = MAX(map->s_start, uaddr->uaddr_minaddr);
 	s->end = MIN(map->s_end, uaddr->uaddr_maxaddr);
@@ -1523,17 +1496,13 @@ uaddr_stack_brk_select(struct vm_map *map, struct uvm_addr_state *uaddr,
 	s->dir =  1;
 #endif
 
-	/*
-	 * Set up brk search strategy.
-	 */
+	/* Set up brk search strategy. */
 	s = &strat[brk_idx];
 	s->start = MAX(map->b_start, uaddr->uaddr_minaddr);
 	s->end = MIN(map->b_end, uaddr->uaddr_maxaddr);
 	s->dir = -1;	/* Opposite of brk() growth. */
 
-	/*
-	 * Linear search for space.
-	 */
+	/* Linear search for space.  */
 	for (s = &strat[0]; s < &strat[nitems(strat)]; s++) {
 		if (s->end - s->start < sz)
 			continue;
@@ -1546,7 +1515,7 @@ uaddr_stack_brk_select(struct vm_map *map, struct uvm_addr_state *uaddr,
 	return ENOMEM;
 }
 
-struct uvm_addr_state*
+struct uvm_addr_state *
 uaddr_stack_brk_create(vaddr_t minaddr, vaddr_t maxaddr)
 {
 	struct uvm_addr_state* uaddr;

@@ -1,4 +1,4 @@
-/*	$OpenBSD: vmwpvs.c,v 1.8 2013/10/30 02:11:32 dlg Exp $ */
+/*	$OpenBSD: vmwpvs.c,v 1.10 2014/07/13 23:10:23 deraadt Exp $ */
 
 /*
  * Copyright (c) 2013 David Gwynne <dlg@openbsd.org>
@@ -507,7 +507,8 @@ vmwpvs_attach(struct device *parent, struct device *self, void *aux)
 		goto free_sgl;
 	}
 
-	sc->sc_ccbs = malloc(sizeof(struct vmwpvs_ccb) * r, M_DEVBUF, M_WAITOK);
+	sc->sc_ccbs = mallocarray(r, sizeof(struct vmwpvs_ccb),
+	    M_DEVBUF, M_WAITOK);
 	/* cant fail */
 
 	sgls = VMWPVS_DMA_KVA(sc->sc_sgls);
@@ -581,7 +582,7 @@ vmwpvs_attach(struct device *parent, struct device *self, void *aux)
 free_ccbs:
 	while ((ccb = vmwpvs_ccb_get(sc)) != NULL)
 		bus_dmamap_destroy(sc->sc_dmat, ccb->ccb_dmamap);
-	free(sc->sc_ccbs, M_DEVBUF);
+	free(sc->sc_ccbs, M_DEVBUF, 0);
 /* free_sense: */
 	vmwpvs_dmamem_free(sc, sc->sc_sense);
 free_sgl:
@@ -1138,7 +1139,7 @@ free:
 destroy:
 	bus_dmamap_destroy(sc->sc_dmat, dm->dm_map);
 dmfree:
-	free(dm, M_DEVBUF);
+	free(dm, M_DEVBUF, 0);
 
 	return (NULL);
 }
@@ -1164,5 +1165,5 @@ vmwpvs_dmamem_free(struct vmwpvs_softc *sc, struct vmwpvs_dmamem *dm)
 	bus_dmamem_unmap(sc->sc_dmat, dm->dm_kva, dm->dm_size);
 	bus_dmamem_free(sc->sc_dmat, &dm->dm_seg, 1);
 	bus_dmamap_destroy(sc->sc_dmat, dm->dm_map);
-	free(dm, M_DEVBUF);
+	free(dm, M_DEVBUF, 0);
 }

@@ -1,4 +1,4 @@
-/*	$OpenBSD: sysctl.h,v 1.141 2014/02/12 05:47:36 guenther Exp $	*/
+/*	$OpenBSD: sysctl.h,v 1.148 2014/07/13 16:41:22 claudio Exp $	*/
 /*	$NetBSD: sysctl.h,v 1.16 1996/04/09 20:55:36 cgd Exp $	*/
 
 /*
@@ -38,7 +38,7 @@
 #ifndef _SYS_SYSCTL_H_
 #define	_SYS_SYSCTL_H_
 
-#include <uvm/uvm_extern.h>
+#include <uvm/uvmexp.h>
 
 /*
  * Definitions for sysctl call.  The sysctl call uses a hierarchical name
@@ -179,7 +179,8 @@ struct ctlname {
 #define	KERN_NETLIVELOCKS	76	/* int: number of network livelocks */
 #define	KERN_POOL_DEBUG		77	/* int: enable pool_debug */
 #define	KERN_PROC_CWD		78      /* node: proc cwd */
-#define	KERN_MAXID		79	/* number of valid kern ids */
+#define	KERN_PROC_NOBROADCASTKILL 79	/* node: proc no broadcast kill */
+#define	KERN_MAXID		80	/* number of valid kern ids */
 
 #define	CTL_KERN_NAMES { \
 	{ 0, 0 }, \
@@ -261,6 +262,7 @@ struct ctlname {
 	{ "netlivelocks", CTLTYPE_INT }, \
 	{ "pool_debug", CTLTYPE_INT }, \
 	{ "proc_cwd", CTLTYPE_NODE }, \
+	{ "proc_nobroadcastkill", CTLTYPE_NODE }, \
 }
 
 /*
@@ -357,8 +359,8 @@ struct kinfo_proc {
 	u_int32_t p_rtime_sec;		/* STRUCT TIMEVAL: Real time. */
 	u_int32_t p_rtime_usec;		/* STRUCT TIMEVAL: Real time. */
 	int32_t	p_cpticks;		/* INT: Ticks of cpu time. */
-	u_int32_t p_pctcpu;		/* FIXPT_T: %cpu for this process during p_swtime */
-	u_int32_t p_swtime;		/* U_INT: Time swapped in or out. */
+	u_int32_t p_pctcpu;		/* FIXPT_T: %cpu for this process */
+	u_int32_t p_swtime;		/* unused, always zero */
 	u_int32_t p_slptime;		/* U_INT: Time since last blocked. */
 	int32_t	p_schedflags;		/* INT: PSCHED_* flags */
 
@@ -448,7 +450,6 @@ struct kinfo_proc {
  *	    pre-filled with zeros; for libkvm, src is a kvm address
  *	p - source struct proc
  *	pr - source struct process
- *	pc - source struct pcreds
  *	uc - source struct ucreds
  *	pg - source struct pgrp
  *	paddr - kernel address of the source struct proc
@@ -463,17 +464,17 @@ struct kinfo_proc {
 
 #define PTRTOINT64(_x)	((u_int64_t)(u_long)(_x))
 
-#define FILL_KPROC(kp, copy_str, p, pr, pc, uc, pg, paddr, \
+#define FILL_KPROC(kp, copy_str, p, pr, uc, pg, paddr, \
     praddr, sess, vm, lim, sa, isthread, show_addresses) \
 do {									\
 	memset((kp), 0, sizeof(*(kp)));					\
 									\
 	if (show_addresses) {						\
 		(kp)->p_paddr = PTRTOINT64(paddr);			\
-		(kp)->p_fd = PTRTOINT64((p)->p_fd);			\
+		(kp)->p_fd = PTRTOINT64((pr)->ps_fd);			\
 		(kp)->p_limit = PTRTOINT64((pr)->ps_limit);		\
-		(kp)->p_vmspace = PTRTOINT64((p)->p_vmspace);		\
-		(kp)->p_sigacts = PTRTOINT64((p)->p_sigacts);		\
+		(kp)->p_vmspace = PTRTOINT64((pr)->ps_vmspace);		\
+		(kp)->p_sigacts = PTRTOINT64((pr)->ps_sigacts);		\
 		(kp)->p_sess = PTRTOINT64((pg)->pg_session);		\
 		(kp)->p_ru = PTRTOINT64((pr)->ps_ru);			\
 	}								\
@@ -485,11 +486,11 @@ do {									\
 	(kp)->p__pgid = (pg)->pg_id;					\
 									\
 	(kp)->p_uid = (uc)->cr_uid;					\
-	(kp)->p_ruid = (pc)->p_ruid;					\
+	(kp)->p_ruid = (uc)->cr_ruid;					\
 	(kp)->p_gid = (uc)->cr_gid;					\
-	(kp)->p_rgid = (pc)->p_rgid;					\
-	(kp)->p_svuid = (pc)->p_svuid;					\
-	(kp)->p_svgid = (pc)->p_svgid;					\
+	(kp)->p_rgid = (uc)->cr_rgid;					\
+	(kp)->p_svuid = (uc)->cr_svuid;					\
+	(kp)->p_svgid = (uc)->cr_svgid;					\
 									\
 	memcpy((kp)->p_groups, (uc)->cr_groups,				\
 	    MIN(sizeof((kp)->p_groups), sizeof((uc)->cr_groups)));	\
@@ -514,7 +515,6 @@ do {									\
 		(kp)->p_iticks = (pr)->ps_tu.tu_iticks;			\
 	}								\
 	(kp)->p_cpticks = (p)->p_cpticks;				\
-	(kp)->p_pctcpu = (p)->p_pctcpu;					\
 									\
 	if (show_addresses)						\
 		(kp)->p_tracep = PTRTOINT64((pr)->ps_tracevp);		\
@@ -532,7 +532,7 @@ do {									\
 	(kp)->p_acflag = (pr)->ps_acflag;				\
 									\
 	/* XXX depends on e_name being an array and not a pointer */	\
-	copy_str((kp)->p_emul, (char *)(p)->p_emul +			\
+	copy_str((kp)->p_emul, (char *)(pr)->ps_emul +			\
 	    offsetof(struct emul, e_name), sizeof((kp)->p_emul));	\
 	strlcpy((kp)->p_comm, (p)->p_comm, sizeof((kp)->p_comm));	\
 	strlcpy((kp)->p_login, (sess)->s_login,			\
@@ -543,7 +543,7 @@ do {									\
 	if ((sess)->s_leader == (praddr))				\
 		(kp)->p_eflag |= EPROC_SLEADER;				\
 									\
-	if ((p)->p_stat != SIDL && !P_ZOMBIE(p)) {			\
+	if (((pr)->ps_flags & (PS_EMBRYO | PS_ZOMBIE)) == 0) {		\
 		if ((vm) != NULL) {					\
 			(kp)->p_vm_rssize = (vm)->vm_rssize;		\
 			(kp)->p_vm_tsize = (vm)->vm_tsize;		\
@@ -552,7 +552,6 @@ do {									\
 		}							\
 		(kp)->p_addr = PTRTOINT64((p)->p_addr);			\
 		(kp)->p_stat = (p)->p_stat;				\
-		(kp)->p_swtime = (p)->p_swtime;				\
 		(kp)->p_slptime = (p)->p_slptime;			\
 		(kp)->p_holdcnt = 1;					\
 		(kp)->p_priority = (p)->p_priority;			\
@@ -568,7 +567,7 @@ do {									\
 		(kp)->p_rlim_rss_cur =					\
 		    (lim)->pl_rlimit[RLIMIT_RSS].rlim_cur;		\
 									\
-	if (!P_ZOMBIE(p)) {						\
+	if (((pr)->ps_flags & PS_ZOMBIE) == 0) {			\
 		struct timeval tv;					\
 									\
 		(kp)->p_uvalid = 1;					\

@@ -1,4 +1,4 @@
-/*	$OpenBSD: raw_ip6.c,v 1.64 2014/01/08 22:38:29 bluhm Exp $	*/
+/*	$OpenBSD: raw_ip6.c,v 1.68 2014/07/22 11:06:10 mpi Exp $	*/
 /*	$KAME: raw_ip6.c,v 1.69 2001/03/04 15:55:44 itojun Exp $	*/
 
 /*
@@ -88,7 +88,6 @@
 #include <netinet6/ip6_mroute.h>
 #endif
 #include <netinet/icmp6.h>
-#include <netinet/in_systm.h>
 #include <netinet/ip.h>
 #include <netinet/in_pcb.h>
 #include <netinet6/nd6.h>
@@ -413,13 +412,12 @@ rip6_output(struct mbuf *m, ...)
 	{
 		struct in6_addr *in6a;
 
-		if ((in6a = in6_selectsrc(dstsock, optp, in6p->inp_moptions6,
-		    &in6p->inp_route6, &in6p->inp_laddr6, &error,
-		    in6p->inp_rtableid)) == 0) {
-			if (error == 0)
-				error = EADDRNOTAVAIL;
+		error = in6_selectsrc(&in6a, dstsock, optp,
+		    in6p->inp_moptions6, &in6p->inp_route6, &in6p->inp_laddr6,
+		    in6p->inp_rtableid);
+		if (error)
 			goto bad;
-		}
+
 		ip6->ip6_src = *in6a;
 		if (in6p->inp_route6.ro_rt &&
 		    in6p->inp_route6.ro_rt->rt_flags & RTF_UP)
@@ -468,8 +466,8 @@ rip6_output(struct mbuf *m, ...)
 	if (in6p->inp_flags & IN6P_MINMTU)
 		flags |= IPV6_MINMTU;
 
-	/* force routing domain */
-	m->m_pkthdr.rdomain = in6p->inp_rtableid;
+	/* force routing table */
+	m->m_pkthdr.ph_rtableid = in6p->inp_rtableid;
 
 	error = ip6_output(m, optp, &in6p->inp_route6, flags,
 	    in6p->inp_moptions6, &oifp, in6p);
@@ -652,7 +650,7 @@ rip6_usrreq(struct socket *so, int req, struct mbuf *m, struct mbuf *nam,
 			ip6_mrouter_done();
 #endif
 		if (in6p->inp_icmp6filt) {
-			free(in6p->inp_icmp6filt, M_PCB);
+			free(in6p->inp_icmp6filt, M_PCB, 0);
 			in6p->inp_icmp6filt = NULL;
 		}
 		in_pcbdetach(in6p);
@@ -722,14 +720,11 @@ rip6_usrreq(struct socket *so, int req, struct mbuf *m, struct mbuf *nam,
 		}
 
 		/* Source address selection. XXX: need pcblookup? */
-		in6a = in6_selectsrc(addr, in6p->inp_outputopts6,
+		error = in6_selectsrc(&in6a, addr, in6p->inp_outputopts6,
 		    in6p->inp_moptions6, &in6p->inp_route6,
-		    &in6p->inp_laddr6, &error, in6p->inp_rtableid);
-		if (in6a == NULL) {
-			if (error == 0)
-				error = EADDRNOTAVAIL;
+		    &in6p->inp_laddr6, in6p->inp_rtableid);
+		if (error)
 			break;
-		}
 		in6p->inp_laddr6 = *in6a;
 		in6p->inp_faddr6 = addr->sin6_addr;
 		soisconnected(so);

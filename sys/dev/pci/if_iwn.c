@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_iwn.c,v 1.130 2014/02/11 19:44:22 kettenis Exp $	*/
+/*	$OpenBSD: if_iwn.c,v 1.133 2014/07/22 13:12:11 mpi Exp $	*/
 
 /*-
  * Copyright (c) 2007-2010 Damien Bergamini <damien.bergamini@free.fr>
@@ -52,9 +52,7 @@
 #include <net/if_types.h>
 
 #include <netinet/in.h>
-#include <netinet/in_systm.h>
 #include <netinet/if_ether.h>
-#include <netinet/ip.h>
 
 #include <net80211/ieee80211_var.h>
 #include <net80211/ieee80211_amrr.h>
@@ -2160,7 +2158,7 @@ iwn5000_rx_calib_results(struct iwn_softc *sc, struct iwn_rx_desc *desc,
 
 	/* Save calibration result. */
 	if (sc->calibcmd[idx].buf != NULL)
-		free(sc->calibcmd[idx].buf, M_DEVBUF);
+		free(sc->calibcmd[idx].buf, M_DEVBUF, 0);
 	sc->calibcmd[idx].buf = malloc(len, M_DEVBUF, M_NOWAIT);
 	if (sc->calibcmd[idx].buf == NULL) {
 		DPRINTF(("not enough memory for calibration result %d\n",
@@ -3064,7 +3062,7 @@ iwn_start(struct ifnet *ifp)
 		/* Send pending management frames first. */
 		IF_DEQUEUE(&ic->ic_mgtq, m);
 		if (m != NULL) {
-			ni = (void *)m->m_pkthdr.rcvif;
+			ni = m->m_pkthdr.ph_cookie;
 			goto sendit;
 		}
 		if (ic->ic_state != IEEE80211_S_RUN)
@@ -4556,7 +4554,7 @@ iwn_scan(struct iwn_softc *sc, uint16_t flags)
 
 	DPRINTF(("sending scan command nchan=%d\n", hdr->nchan));
 	error = iwn_cmd(sc, IWN_CMD_SCAN, buf, buflen, 1);
-	free(buf, M_DEVBUF);
+	free(buf, M_DEVBUF, 0);
 	return error;
 }
 
@@ -5619,7 +5617,7 @@ iwn_read_firmware(struct iwn_softc *sc)
 	if (fw->size < sizeof (uint32_t)) {
 		printf("%s: firmware too short: %zu bytes\n",
 		    sc->sc_dev.dv_xname, fw->size);
-		free(fw->data, M_DEVBUF);
+		free(fw->data, M_DEVBUF, 0);
 		return EINVAL;
 	}
 
@@ -5631,7 +5629,7 @@ iwn_read_firmware(struct iwn_softc *sc)
 	if (error != 0) {
 		printf("%s: could not read firmware sections\n",
 		    sc->sc_dev.dv_xname);
-		free(fw->data, M_DEVBUF);
+		free(fw->data, M_DEVBUF, 0);
 		return error;
 	}
 
@@ -5644,7 +5642,7 @@ iwn_read_firmware(struct iwn_softc *sc)
 	    (fw->boot.textsz & 3) != 0) {
 		printf("%s: firmware sections too large\n",
 		    sc->sc_dev.dv_xname);
-		free(fw->data, M_DEVBUF);
+		free(fw->data, M_DEVBUF, 0);
 		return EINVAL;
 	}
 
@@ -6047,7 +6045,7 @@ iwn_init(struct ifnet *ifp)
 
 	/* Initialize hardware and upload firmware. */
 	error = iwn_hw_init(sc);
-	free(sc->fw.data, M_DEVBUF);
+	free(sc->fw.data, M_DEVBUF, 0);
 	if (error != 0) {
 		printf("%s: could not initialize hardware\n",
 		    sc->sc_dev.dv_xname);

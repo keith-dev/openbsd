@@ -1,4 +1,4 @@
-/*	$OpenBSD: network.c,v 1.9 2013/04/21 09:51:24 millert Exp $	*/
+/*	$OpenBSD: network.c,v 1.17 2014/07/22 07:30:24 jsg Exp $	*/
 /*	$NetBSD: network.c,v 1.5 1996/02/28 21:04:06 thorpej Exp $	*/
 
 /*
@@ -31,7 +31,11 @@
  */
 
 #include "telnet_locl.h"
-#include <err.h>
+
+#include <sys/socket.h>
+#include <errno.h>
+#include <poll.h>
+#include <unistd.h>
 
 Ring		netoring, netiring;
 unsigned char	netobuf[2*BUFSIZ], netibuf[BUFSIZ];
@@ -40,16 +44,12 @@ unsigned char	netobuf[2*BUFSIZ], netibuf[BUFSIZ];
  * Initialize internal network data structures.
  */
 
-    void
-init_network()
+void
+init_network(void)
 {
-    if (ring_init(&netoring, netobuf, sizeof netobuf) != 1) {
-	exit(1);
-    }
-    if (ring_init(&netiring, netibuf, sizeof netibuf) != 1) {
-	exit(1);
-    }
-    NetTrace = stdout;
+	ring_init(&netoring, netobuf, sizeof netobuf);
+	ring_init(&netiring, netibuf, sizeof netibuf);
+	SetNetTrace(NULL);
 }
 
 
@@ -58,8 +58,8 @@ init_network()
  * Telnet "synch" processing).
  */
 
-    int
-stilloob()
+int
+stilloob(void)
 {
     struct pollfd pfd[1];
     int value;
@@ -72,8 +72,7 @@ stilloob()
 
     if (value < 0) {
 	perror("poll");
-	(void) quit();
-	/* NOTREACHED */
+	quit();
     }
     if (pfd[0].revents & POLLRDBAND)
 	return 1;
@@ -81,19 +80,17 @@ stilloob()
 	return 0;
 }
 
-
 /*
  *  setneturg()
  *
  *	Sets "neturg" to the current location.
  */
 
-    void
-setneturg()
+void
+setneturg(void)
 {
     ring_mark(&netoring);
 }
-
 
 /*
  *  netflush
@@ -104,16 +101,11 @@ setneturg()
  *	useful work.
  */
 
-
-    int
-netflush()
+int
+netflush(void)
 {
     int n, n1;
 
-#if    defined(ENCRYPTION)
-    if (encrypt_output)
-	ring_encrypt(&netoring, encrypt_output);
-#endif
     if ((n1 = n = ring_full_consecutive(&netoring)) > 0) {
 	if (!ring_at_mark(&netoring)) {
 	    n = send(net, (char *)netoring.consume, n, 0); /* normal write */
@@ -133,10 +125,9 @@ netflush()
 	if (errno != ENOBUFS && errno != EWOULDBLOCK) {
 	    setcommandmode();
 	    perror(hostname);
-	    (void)NetClose(net);
+	    (void)close(net);
 	    ring_clear_mark(&netoring);
 	    longjmp(peerdied, -1);
-	    /*NOTREACHED*/
 	}
 	n = 0;
     }

@@ -1,4 +1,4 @@
-/*	$OpenBSD: ffs_vnops.c,v 1.73 2013/12/12 19:00:10 tedu Exp $	*/
+/*	$OpenBSD: ffs_vnops.c,v 1.77 2014/07/08 17:19:26 deraadt Exp $	*/
 /*	$NetBSD: ffs_vnops.c,v 1.7 1996/05/11 18:27:24 mycroft Exp $	*/
 
 /*
@@ -48,8 +48,6 @@
 #include <sys/pool.h>
 #include <sys/event.h>
 #include <sys/specdev.h>
-
-#include <uvm/uvm_extern.h>
 
 #include <miscfs/fifofs/fifo.h>
 
@@ -378,6 +376,10 @@ ffs_write(void *v)
 		if (error != 0)
 			memset(bp->b_data + blkoffset, 0, xfersize);
 
+#if 0
+		if (ioflag & IO_NOCACHE)
+			bp->b_flags |= B_NOCACHE;
+#endif
 		if (ioflag & IO_SYNC)
 			(void)bwrite(bp);
 		else if (xfersize + blkoffset == fs->fs_bsize) {
@@ -409,7 +411,7 @@ ffs_write(void *v)
 			uio->uio_resid = resid;
 		}
 	} else if (resid > uio->uio_resid && (ioflag & IO_SYNC)) {
-		error = UFS_UPDATE(ip, MNT_WAIT);
+		error = UFS_UPDATE(ip, 1);
 	}
 	/* correct the result for writes clamped by vn_fsizechk() */
 	uio->uio_resid += overrun;

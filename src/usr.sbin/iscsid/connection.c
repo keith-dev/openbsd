@@ -1,4 +1,4 @@
-/*	$OpenBSD: connection.c,v 1.13 2011/05/04 21:00:04 claudio Exp $ */
+/*	$OpenBSD: connection.c,v 1.19 2014/05/10 11:30:47 claudio Exp $ */
 
 /*
  * Copyright (c) 2009 Claudio Jeker <claudio@openbsd.org>
@@ -42,9 +42,11 @@ void	conn_write_dispatch(int, short, void *);
 int	c_do_connect(struct connection *, enum c_event);
 int	c_do_login(struct connection *, enum c_event);
 int	c_do_loggedin(struct connection *, enum c_event);
+int	c_do_req_logout(struct connection *, enum c_event);
 int	c_do_logout(struct connection *, enum c_event);
 int	c_do_loggedout(struct connection *, enum c_event);
 int	c_do_fail(struct connection *, enum c_event);
+int	c_do_cleanup(struct connection *, enum c_event);
 
 const char *conn_state(int);
 const char *conn_event(enum c_event);
@@ -99,7 +101,6 @@ conn_new(struct session *s, struct connection_config *cc)
 
 	event_set(&c->ev, c->fd, EV_READ|EV_PERSIST, conn_dispatch, c);
 	event_set(&c->wev, c->fd, EV_WRITE, conn_write_dispatch, c);
-	event_add(&c->ev, NULL);
 
 	conn_fsm(c, CONN_EV_CONNECT);
 }
@@ -107,12 +108,15 @@ conn_new(struct session *s, struct connection_config *cc)
 void
 conn_free(struct connection *c)
 {
+	log_debug("conn_free");
+
 	pdu_readbuf_free(&c->prbuf);
 	pdu_free_queue(&c->pdu_w);
 
 	event_del(&c->ev);
 	event_del(&c->wev);
-	close(c->fd);
+	if (c->fd != -1)
+		close(c->fd);
 
 	taskq_cleanup(&c->tasks);
 
@@ -131,6 +135,10 @@ conn_dispatch(int fd, short event, void *arg)
 		return;
 	}
 	if ((n = pdu_read(c)) == -1) {
+		if (errno == EAGAIN || errno == ENOBUFS ||
+		    errno == EINTR)	/* try later */
+			return;
+		log_warn("pdu_read");
 		conn_fsm(c, CONN_EV_FAIL);
 		return;
 	}
@@ -160,7 +168,7 @@ conn_write_dispatch(int fd, short event, void *arg)
 		len = sizeof(error);
 		if (getsockopt(c->fd, SOL_SOCKET, SO_ERROR,
 		    &error, &len) == -1 || (errno = error)) {
-			log_warn("cwd connect(%s)",
+			log_warn("connect to %s failed",
 			    log_sockaddr(&c->config.TargetAddr));
 			conn_fsm(c, CONN_EV_FAIL);
 			return;
@@ -281,6 +289,7 @@ conn_parse_kvp(struct connection *c, struct kvp *kvp)
 
 
 	for (k = kvp; k->key; k++) {
+		/* XXX handle NotUnderstood|Irrelevant|Reject */
 		SET_NUM(k, s, MaxBurstLength, 512, 16777215);
 		SET_NUM(k, s, FirstBurstLength, 512, 16777215);
 		SET_NUM(k, s, DefaultTime2Wait, 0, 3600);
@@ -313,35 +322,35 @@ conn_gen_kvp(struct connection *c, struct kvp *kvp, size_t *nkvp)
 	size_t i = 0;
 
 	if (s->mine.MaxConnections != iscsi_sess_defaults.MaxConnections) {
-		i++;
 		if (kvp && i < *nkvp) {
 			kvp[i].key = strdup("MaxConnections");
 			if (kvp[i].key == NULL)
-				return (-1);
-			if (asprintf(&kvp[i].value, "%u",
-			    (unsigned int)s->mine.MaxConnections) == -1) {
+				return -1;
+			if (asprintf(&kvp[i].value, "%hu",
+			    s->mine.MaxConnections) == -1) {
 				kvp[i].value = NULL;
-				return (-1);
+				return -1;
 			}
 		}
+		i++;
 	}
 	if (c->mine.MaxRecvDataSegmentLength !=
 	    iscsi_conn_defaults.MaxRecvDataSegmentLength) {
-		i++;
 		if (kvp && i < *nkvp) {
 			kvp[i].key = strdup("MaxRecvDataSegmentLength");
 			if (kvp[i].key == NULL)
-				return (-1);
+				return -1;
 			if (asprintf(&kvp[i].value, "%u",
-			    (unsigned int)c->mine.MaxRecvDataSegmentLength) == -1) {
+			    c->mine.MaxRecvDataSegmentLength) == -1) {
 				kvp[i].value = NULL;
-				return (-1);
+				return -1;
 			}
 		}
+		i++;
 	}
 
 	*nkvp = i;
-	return (0);
+	return 0;
 }
 
 void
@@ -378,8 +387,17 @@ struct {
 	{ CONN_XPT_WAIT, CONN_EV_CONNECTED, c_do_login },	/* T4 */
 	{ CONN_IN_LOGIN, CONN_EV_LOGGED_IN, c_do_loggedin },	/* T5 */
 	{ CONN_LOGGED_IN, CONN_EV_LOGOUT, c_do_logout },	/* T9 */
+	{ CONN_LOGGED_IN, CONN_EV_REQ_LOGOUT, c_do_req_logout },/* T11 */
 	{ CONN_LOGOUT_REQ, CONN_EV_LOGOUT, c_do_logout },	/* T10 */
+	{ CONN_LOGOUT_REQ, CONN_EV_REQ_LOGOUT, c_do_req_logout},/* T12 */
+	{ CONN_LOGOUT_REQ, CONN_EV_LOGGED_OUT, c_do_loggedout },/* T18 */
 	{ CONN_IN_LOGOUT, CONN_EV_LOGGED_OUT, c_do_loggedout },	/* T13 */
+	{ CONN_IN_LOGOUT, CONN_EV_REQ_LOGOUT, c_do_req_logout },/* T14 */
+	{ CONN_CLEANUP_WAIT, CONN_EV_CLEANING_UP, c_do_cleanup},/* M2 */
+	{ CONN_CLEANUP_WAIT, CONN_EV_FREE, c_do_loggedout },	/* M1 */
+	{ CONN_IN_CLEANUP, CONN_EV_FREE, c_do_loggedout },	/* M4 */
+	{ CONN_IN_CLEANUP, CONN_EV_CLEANING_UP, c_do_cleanup},
+	/* either one of T2, T7, T15, T16, T17, M3 */
 	{ CONN_ANYSTATE, CONN_EV_CLOSED, c_do_fail },
 	{ CONN_ANYSTATE, CONN_EV_FAIL, c_do_fail },
 	{ CONN_ANYSTATE, CONN_EV_FREE, c_do_fail },
@@ -418,24 +436,34 @@ c_do_connect(struct connection *c, enum c_event ev)
 	if (c->fd == -1) {
 		log_warnx("connect(%s), lost socket",
 		    log_sockaddr(&c->config.TargetAddr));
-		session_fsm(c->session, SESS_EV_CONN_FAIL, c);
-		return (CONN_FREE);
+		session_fsm(c->session, SESS_EV_CONN_FAIL, c, 0);
+		return CONN_FREE;
 	}
-
+	if (c->config.LocalAddr.ss_len != 0) {
+		if (bind(c->fd, (struct sockaddr *)&c->config.LocalAddr,
+		    c->config.LocalAddr.ss_len) == -1) {
+			log_warn("bind(%s)",
+			    log_sockaddr(&c->config.LocalAddr));
+			session_fsm(c->session, SESS_EV_CONN_FAIL, c, 0);
+			return CONN_FREE;
+		}
+	}
 	if (connect(c->fd, (struct sockaddr *)&c->config.TargetAddr,
 	    c->config.TargetAddr.ss_len) == -1) {
 		if (errno == EINPROGRESS) {
 			event_add(&c->wev, NULL);
-			return (CONN_XPT_WAIT);
+			event_add(&c->ev, NULL);
+			return CONN_XPT_WAIT;
 		} else {
 			log_warn("connect(%s)",
 			    log_sockaddr(&c->config.TargetAddr));
-			session_fsm(c->session, SESS_EV_CONN_FAIL, c);
-			return (CONN_FREE);
+			session_fsm(c->session, SESS_EV_CONN_FAIL, c, 0);
+			return CONN_FREE;
 		}
 	}
+	event_add(&c->ev, NULL);
 	/* move forward */
-	return (c_do_login(c, CONN_EV_CONNECTED));
+	return c_do_login(c, CONN_EV_CONNECTED);
 }
 
 int
@@ -443,49 +471,73 @@ c_do_login(struct connection *c, enum c_event ev)
 {
 	/* start a login session and hope for the best ... */
 	initiator_login(c);
-	return (CONN_IN_LOGIN);
+	return CONN_IN_LOGIN;
 }
 
 int
 c_do_loggedin(struct connection *c, enum c_event ev)
 {
-	session_fsm(c->session, SESS_EV_CONN_LOGGED_IN, c);
+	iscsi_merge_conn_params(&c->active, &c->mine, &c->his);
+	session_fsm(c->session, SESS_EV_CONN_LOGGED_IN, c, 0);
 
-	return (CONN_LOGGED_IN);
+	return CONN_LOGGED_IN;
+}
+
+int
+c_do_req_logout(struct connection *c, enum c_event ev)
+{
+	/* target requested logout. XXX implement async handler */
+
+	if (c->state & CONN_IN_LOGOUT)
+		return CONN_IN_LOGOUT;
+	else
+		return CONN_LOGOUT_REQ;
 }
 
 int
 c_do_logout(struct connection *c, enum c_event ev)
 {
 	/* logout is in progress ... */
-	return (CONN_IN_LOGOUT);
+	return CONN_IN_LOGOUT;
 }
 
 int
 c_do_loggedout(struct connection *c, enum c_event ev)
 {
-	/* close TCP session and cleanup */
-	event_del(&c->ev);
-	event_del(&c->wev);
-	close(c->fd);
-
-	/* session is informed by the logout handler */
-	return (CONN_FREE);
+	/*
+	 * Called by the session fsm before calling conn_free.
+	 * Doing this so the state transition is logged.
+	 */
+	return CONN_FREE;
 }
 
 int
 c_do_fail(struct connection *c, enum c_event ev)
 {
+	log_debug("c_do_fail");
+
 	/* cleanup events so that the connection does not retrigger */
 	event_del(&c->ev);
 	event_del(&c->wev);
 	close(c->fd);
+	c->fd = -1;	/* make sure this fd is not closed again */
 
-	session_fsm(c->session, SESS_EV_CONN_FAIL, c);
+	/* all pending task have failed so clean them up */
+	taskq_cleanup(&c->tasks);
+
+	/* session will take care of cleaning up the mess */
+	session_fsm(c->session, SESS_EV_CONN_FAIL, c, 0);
 
 	if (ev == CONN_EV_FREE || c->state & CONN_NEVER_LOGGED_IN)
-		return (CONN_FREE);
-	return (CONN_CLEANUP_WAIT);
+		return CONN_FREE;
+	return CONN_CLEANUP_WAIT;
+}
+
+int
+c_do_cleanup(struct connection *c, enum c_event ev)
+{
+	/* nothing to do here just adjust state */
+	return CONN_IN_CLEANUP;
 }
 
 const char *
@@ -533,10 +585,14 @@ conn_event(enum c_event e)
 		return "connected";
 	case CONN_EV_LOGGED_IN:
 		return "logged in";
+	case CONN_EV_REQ_LOGOUT:
+		return "logout requested";
 	case CONN_EV_LOGOUT:
 		return "logout";
 	case CONN_EV_LOGGED_OUT:
 		return "logged out";
+	case CONN_EV_CLEANING_UP:
+		return "cleaning up";
 	case CONN_EV_CLOSED:
 		return "closed";
 	case CONN_EV_FREE:

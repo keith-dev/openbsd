@@ -1,4 +1,4 @@
-/*	$OpenBSD: virtio.c,v 1.5 2013/03/10 21:58:02 sf Exp $	*/
+/*	$OpenBSD: virtio.c,v 1.9 2014/07/13 23:10:23 deraadt Exp $	*/
 /*	$NetBSD: virtio.c,v 1.3 2011/11/02 23:05:52 njoly Exp $	*/
 
 /*
@@ -277,7 +277,6 @@ virtio_init_vq(struct virtio_softc *sc, struct virtqueue *vq, int reinit)
 
 	/* enqueue/dequeue status */
 	vq->vq_avail_idx = 0;
-	vq->vq_avail_signalled = 0xffff;
 	vq->vq_used_idx = 0;
 	vq_sync_aring(sc, vq, BUS_DMASYNC_PREWRITE);
 	vq_sync_uring(sc, vq, BUS_DMASYNC_PREREAD);
@@ -380,8 +379,8 @@ virtio_alloc_vq(struct virtio_softc *sc,
 	vq->vq_maxnsegs = maxnsegs;
 
 	/* free slot management */
-	vq->vq_entries = malloc(sizeof(struct vq_entry)*vq_size,
-				     M_DEVBUF, M_NOWAIT | M_ZERO);
+	vq->vq_entries = mallocarray(vq_size, sizeof(struct vq_entry),
+	    M_DEVBUF, M_NOWAIT | M_ZERO);
 	if (vq->vq_entries == NULL) {
 		r = ENOMEM;
 		goto err;
@@ -431,7 +430,7 @@ virtio_free_vq(struct virtio_softc *sc, struct virtqueue *vq)
 	/* tell device that there's no virtqueue any longer */
 	virtio_setup_queue(sc, vq->vq_index, 0);
 
-	free(vq->vq_entries, M_DEVBUF);
+	free(vq->vq_entries, M_DEVBUF, 0);
 	bus_dmamap_unload(sc->sc_dmat, vq->vq_dmamap);
 	bus_dmamap_destroy(sc->sc_dmat, vq->vq_dmamap);
 	bus_dmamem_unmap(sc->sc_dmat, vq->vq_vaddr, vq->vq_bytesize);
@@ -609,8 +608,8 @@ virtio_enqueue(struct virtqueue *vq, int slot, bus_dmamap_t dmamap, int write)
 	if (dmamap->dm_nsegs > vq->vq_maxnsegs) {
 #if VIRTIO_DEBUG
 		for (i = 0; i < dmamap->dm_nsegs; i++) {
-			printf(" %d (%d): %p %u \n", i, write,
-			    dmamap->dm_segs[i].ds_addr,
+			printf(" %d (%d): %p %lx \n", i, write,
+			    (void *)dmamap->dm_segs[i].ds_addr,
 			    dmamap->dm_segs[i].ds_len);
 		}
 #endif
@@ -684,15 +683,13 @@ virtio_enqueue_commit(struct virtio_softc *sc, struct virtqueue *vq,
 notify:
 	if (notifynow) {
 		if (vq->vq_owner->sc_features & VIRTIO_F_RING_EVENT_IDX) {
-			uint16_t o = vq->vq_avail_signalled;
+			uint16_t o = vq->vq_avail->idx;
 			uint16_t n = vq->vq_avail_idx;
-			uint16_t t = VQ_AVAIL_EVENT(vq) + 1;
+			uint16_t t;
 			publish_avail_idx(sc, vq);
-			if ((o < n && o < t && t <= n)
-			    || (o > n && (o < t || t <= n))) {
+			t = VQ_AVAIL_EVENT(vq) + 1;
+			if ((uint16_t)(n - t) < (uint16_t)(n - o))
 				sc->sc_ops->kick(sc, vq->vq_index);
-				vq->vq_avail_signalled = n;
-			}
 		} else {
 			publish_avail_idx(sc, vq);
 			if (!(vq->vq_used->flags & VRING_USED_F_NO_NOTIFY))

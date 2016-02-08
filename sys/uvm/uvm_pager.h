@@ -1,8 +1,7 @@
-/*	$OpenBSD: uvm_pager.h,v 1.27 2009/07/22 21:05:37 oga Exp $	*/
+/*	$OpenBSD: uvm_pager.h,v 1.29 2014/07/11 16:35:40 jsg Exp $	*/
 /*	$NetBSD: uvm_pager.h,v 1.20 2000/11/27 08:40:05 chs Exp $	*/
 
 /*
- *
  * Copyright (c) 1997 Charles D. Cranor and Washington University.
  * All rights reserved.
  *
@@ -14,12 +13,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *      This product includes software developed by Charles D. Cranor and
- *      Washington University.
- * 4. The name of the author may not be used to endorse or promote products
- *    derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
@@ -74,13 +67,7 @@
 #ifndef _UVM_UVM_PAGER_H_
 #define _UVM_UVM_PAGER_H_
 
-/*
- * uvm_pager.h
- */
-
-/*
- * pager ops
- */
+#ifdef _KERNEL
 
 struct uvm_pagerops {
 						/* init pager */
@@ -127,8 +114,6 @@ struct uvm_pagerops {
 
 /* page we are not interested in getting */
 #define PGO_DONTCARE ((struct vm_page *) -1L)	/* [get only] */
-
-#ifdef _KERNEL
 
 /*
  * prototypes

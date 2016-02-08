@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_athn_pci.c,v 1.14 2013/12/06 21:03:03 deraadt Exp $	*/
+/*	$OpenBSD: if_athn_pci.c,v 1.16 2014/07/08 08:55:33 stsp Exp $	*/
 
 /*-
  * Copyright (c) 2009 Damien Bergamini <damien.bergamini@free.fr>

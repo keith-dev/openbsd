@@ -1,4 +1,4 @@
-/* $OpenBSD: i80321_intr.c,v 1.14 2010/09/20 06:33:47 matthew Exp $ */
+/* $OpenBSD: i80321_intr.c,v 1.16 2014/04/03 10:17:34 mpi Exp $ */
 
 /*
  * Copyright (c) 2006 Dale Rahn <drahn@openbsd.org>
@@ -21,7 +21,7 @@
 #include <sys/malloc.h>
 #include <sys/evcount.h>
 
-#include <uvm/uvm.h>	/* uvmexp */
+#include <uvm/uvm_extern.h>
 
 #include <machine/intr.h>
 
@@ -50,8 +50,8 @@ uint32_t	i80321intc_smask[NIPL];
 
 #define SI_TO_IRQBIT(x)	(1 << (x))
 
-__volatile int current_ipl_level;
-__volatile int softint_pending;
+volatile int current_ipl_level;
+volatile int softint_pending;
 
 struct cfattach i80321intc_ca = {
 	sizeof(struct device), i80321intc_match, i80321intc_attach

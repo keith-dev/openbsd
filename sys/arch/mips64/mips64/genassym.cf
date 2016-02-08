@@ -1,4 +1,4 @@
-#	$OpenBSD: genassym.cf,v 1.9 2012/06/24 16:26:04 miod Exp $
+#	$OpenBSD: genassym.cf,v 1.12 2014/07/09 08:49:20 deraadt Exp $
 #
 # Copyright (c) 1997 Per Fogelstrom / Opsycon AB
 #
@@ -30,9 +30,8 @@ include <sys/buf.h>
 include <sys/proc.h>
 include <sys/mbuf.h>
 include <sys/user.h>
+include <uvm/uvm_extern.h>
 include <sys/siginfo.h>
-
-include <uvm/uvm.h>
 
 include <machine/cpu.h>
 
@@ -56,6 +55,7 @@ member	PCB_FPREGS	pcb_regs.f0
 member	pcb_context
 member	pcb_onfault
 member	pcb_segtab
+member	pcb_nwired
 
 struct	cpu_info
 member	ci_cpuid

@@ -1,4 +1,4 @@
-/* $OpenBSD: procname.c,v 1.11 2013/10/10 12:39:24 nicm Exp $ */
+/* $OpenBSD: procname.c,v 1.13 2014/07/04 05:58:31 guenther Exp $ */
 
 /*
  * Copyright (c) 2009 Nicholas Marriott <nicm@users.sourceforge.net>
@@ -33,7 +33,7 @@
 #define is_runnable(p) \
 	((p)->p_stat == SRUN || (p)->p_stat == SIDL || (p)->p_stat == SONPROC)
 #define is_stopped(p) \
-	((p)->p_stat == SSTOP || (p)->p_stat == SZOMB || (p)->p_stat == SDEAD)
+	((p)->p_stat == SSTOP || (p)->p_stat == SDEAD)
 
 struct kinfo_proc	*cmp_procs(struct kinfo_proc *, struct kinfo_proc *);
 char			*get_proc_name(int, char *);
@@ -96,7 +96,7 @@ get_proc_name(int fd, char *tty)
 
 retry:
 	if (sysctl(mib, nitems(mib), NULL, &len, NULL, 0) == -1)
-		return (NULL);
+		goto error;
 	len = (len * 5) / 4;
 
 	if ((newbuf = realloc(buf, len)) == NULL)

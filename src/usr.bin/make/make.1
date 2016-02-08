@@ -1,4 +1,4 @@
-.\"	$OpenBSD: make.1,v 1.110 2014/02/13 07:30:39 guenther Exp $
+.\"	$OpenBSD: make.1,v 1.115 2014/07/16 14:11:50 jmc Exp $
 .\"	$NetBSD: make.1,v 1.18 1997/03/10 21:19:53 christos Exp $
 .\"
 .\" Copyright (c) 1990, 1993
@@ -30,7 +30,7 @@
 .\"
 .\"	from: @(#)make.1	8.4 (Berkeley) 3/19/94
 .\"
-.Dd $Mdocdate: February 13 2014 $
+.Dd $Mdocdate: July 16 2014 $
 .Dt MAKE 1
 .Os
 .Sh NAME
@@ -54,37 +54,30 @@
 .Nm
 is a program designed to simplify the maintenance of other programs.
 Its input is a
-.Ar makefile :
+.Em makefile :
 a list of specifications (target rules) describing build
 relationships between programs and other files.
-By default, this
-.Ar makefile
-is determined as follows:
-first the file
-.Sq Pa BSDmakefile ,
-if it exists, then the files
-.Sq Pa makefile
-and
-.Sq Pa Makefile ,
-in that order.
-If none of these files exist,
+By default, the file
+.Pa makefile
+is used;
+if no such file is found, it tries
+.Pa Makefile .
+If neither of these exist,
 .Nm
 can still rely on a set of built-in system rules.
 .Pp
-In addition, if the file
+If the file
 .Sq Pa .depend
-exists, it is also read on top of the main
+exists, it will also be read after the main
 .Ar makefile
 (see
 .Xr mkdep 1 ) .
 .Pp
 The handling of
-.Sq Pa BSDmakefile
-and
 .Sq Pa .depend
-are
+is a
 .Bx
-extensions.
+extension.
 .Pp
 Standard options are as follows:
 .Bl -tag -width Ds
@@ -1466,12 +1459,8 @@ also ignores and unsets
 .Bl -tag -width /usr/share/mk -compact
 .It Pa .depend
 list of dependencies
-.It Pa BSDmakefile
-default makefile
 .It Pa makefile
-default makefile if
-.Pa BSDmakefile
-does not exist
+default makefile
 .It Pa Makefile
 default makefile if
 .Pa makefile
@@ -1516,7 +1505,8 @@ The
 .Nm
 utility is mostly compliant with the
 .St -p1003.1-2008
-specification.
+specification,
+though its presence is optional.
 .Pp
 The flags
 .Op Fl BDdIjmV

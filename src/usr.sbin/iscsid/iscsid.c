@@ -1,4 +1,4 @@
-/*	$OpenBSD: iscsid.c,v 1.9 2014/02/17 18:59:50 claudio Exp $ */
+/*	$OpenBSD: iscsid.c,v 1.16 2014/07/13 17:07:00 claudio Exp $ */
 
 /*
  * Copyright (c) 2009 Claudio Jeker <claudio@openbsd.org>
@@ -17,8 +17,10 @@
  */
 
 #include <sys/types.h>
+#include <sys/param.h>
 #include <sys/queue.h>
 #include <sys/socket.h>
+#include <sys/sysctl.h>
 #include <sys/time.h>
 #include <sys/uio.h>
 
@@ -68,7 +70,8 @@ main(int argc, char *argv[])
 	struct passwd *pw;
 	char *ctrlsock = ISCSID_CONTROL;
 	char *vscsidev = ISCSID_DEVICE;
-	int ch, debug = 0, verbose = 0;
+	int name[] = { CTL_KERN, KERN_PROC_NOBROADCASTKILL, 0 };
+	int ch, debug = 0, verbose = 0, nobkill = 1;
 
 	log_init(1);    /* log to stderr until daemonized */
 	log_verbose(1);
@@ -113,6 +116,10 @@ main(int argc, char *argv[])
 		daemon(1, 0);
 	log_info("startup");
 
+	name[2] = getpid();
+	if (sysctl(name, 3, NULL, 0, &nobkill, sizeof(nobkill)) != 0)
+		fatal("sysctl");
+
 	event_init();
 	vscsi_open(vscsidev);
 
@@ -138,21 +145,33 @@ main(int argc, char *argv[])
 	signal_add(&ev_sighup, NULL);
 	signal(SIGPIPE, SIG_IGN);
 
-	if (control_listen() == -1)
-		fatalx("control socket listen failed");
-
+	control_event_init();
 	initiator = initiator_init();
 
 	event_dispatch();
 
-	/* CLEANUP XXX */
+	/* do some cleanup on the way out */
 	control_cleanup(ctrlsock);
 	initiator_cleanup(initiator);
 	log_info("exiting.");
 	return 0;
 }
 
-/* ARGSUSED */
+void
+shutdown_cb(int fd, short event, void *arg)
+{
+	struct timeval tv;
+
+	if (exit_rounds++ >= ISCSI_EXIT_WAIT || initiator_isdown(initiator))
+		event_loopexit(NULL);
+
+	timerclear(&tv);
+	tv.tv_sec = 1;
+
+	if (evtimer_add(&exit_ev, &tv) == -1)
+		fatal("shutdown_cb");
+}
+
 void
 main_sig_handler(int sig, short event, void *arg)
 {
@@ -206,7 +225,7 @@ iscsid_ctrl_dispatch(void *ch, struct pdu *pdu)
 			break;
 		}
 		ic = pdu_getbuf(pdu, NULL, 1);
-		bcopy(ic, &initiator->config, sizeof(initiator->config));
+		memcpy(&initiator->config, ic, sizeof(initiator->config));
 		control_compose(ch, CTRL_SUCCESS, NULL, 0);
 		break;
 	case CTRL_SESSION_CONFIG:
@@ -239,7 +258,7 @@ iscsid_ctrl_dispatch(void *ch, struct pdu *pdu)
 
 		session_config(s, sc);
 		if (s->state == SESS_INIT)
-			session_fsm(s, SESS_EV_START, NULL);
+			session_fsm(s, SESS_EV_START, NULL, 0);
 
 		control_compose(ch, CTRL_SUCCESS, NULL, 0);
 		break;
@@ -253,6 +272,38 @@ iscsid_ctrl_dispatch(void *ch, struct pdu *pdu)
 		log_verbose(*valp);
 		control_compose(ch, CTRL_SUCCESS, NULL, 0);
 		break;
+	case CTRL_VSCSI_STATS:
+		control_compose(ch, CTRL_VSCSI_STATS, vscsi_stats(),
+		    sizeof(struct vscsi_stats));
+		break;
+	case CTRL_SHOW_SUM:
+		control_compose(ch, CTRL_INITIATOR_CONFIG, &initiator->config,
+		    sizeof(initiator->config));
+
+		TAILQ_FOREACH(s, &initiator->sessions, entry) {
+			struct ctrldata cdv[3];
+			bzero(cdv, sizeof(cdv));
+
+			cdv[0].buf = &s->config;
+			cdv[0].len = sizeof(s->config);
+
+			if (s->config.TargetName) {
+				cdv[1].buf = s->config.TargetName;
+				cdv[1].len =
+				    strlen(s->config.TargetName) + 1;
+			}
+			if (s->config.InitiatorName) {
+				cdv[2].buf = s->config.InitiatorName;
+				cdv[2].len =
+				    strlen(s->config.InitiatorName) + 1;
+			}
+
+			control_build(ch, CTRL_SESSION_CONFIG,
+			    nitems(cdv), cdv);
+		}
+
+		control_compose(ch, CTRL_SUCCESS, NULL, 0);
+		break;
 	default:
 		log_warnx("unknown control message type %d", cmh->type);
 		control_compose(ch, CTRL_FAILURE, NULL, 0);
@@ -261,21 +312,6 @@ iscsid_ctrl_dispatch(void *ch, struct pdu *pdu)
 
 done:
 	pdu_free(pdu);
-}
-
-void
-shutdown_cb(int fd, short event, void *arg)
-{
-	struct timeval tv;
-
-	if (exit_rounds++ >= ISCSI_EXIT_WAIT || initiator_isdown(initiator))
-		event_loopexit(NULL);
-
-	timerclear(&tv);
-	tv.tv_sec = 1;
-
-	if (evtimer_add(&exit_ev, &tv) == -1)
-		fatal("shutdown_cb");
 }
 
 #define MERGE_MIN(r, a, b, v)				\

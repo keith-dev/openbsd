@@ -1,4 +1,4 @@
-/*	$OpenBSD: trap.c,v 1.17 2012/12/31 06:46:14 guenther Exp $	*/
+/*	$OpenBSD: trap.c,v 1.21 2014/05/11 00:12:44 guenther Exp $	*/
 /*	OpenBSD: trap.c,v 1.42 2004/12/06 20:12:25 miod Exp 	*/
 
 /*
@@ -286,6 +286,7 @@ trap(type, psr, pc, tf)
 		p = &proc0;
 	pcb = &p->p_addr->u_pcb;
 	p->p_md.md_tf = tf;	/* for ptrace/signals */
+	refreshcreds(p);
 
 	switch (type) {
 
@@ -307,11 +308,8 @@ trap(type, psr, pc, tf)
 
 	case T_AST:
 		want_ast = 0;
-		if (p->p_flag & P_OWEUPC) {
-			ADDUPROF(p);
-		}
-		if (want_resched)
-			preempt(NULL);
+		uvmexp.softs++;
+		mi_ast(p, want_resched);
 		break;
 
 	case T_ILLINST:
@@ -788,8 +786,8 @@ syscall(code, tf, pc)
 	new = code & (SYSCALL_G7RFLAG | SYSCALL_G2RFLAG);
 	code &= ~(SYSCALL_G7RFLAG | SYSCALL_G2RFLAG);
 
-	callp = p->p_emul->e_sysent;
-	nsys = p->p_emul->e_nsysent;
+	callp = p->p_p->ps_emul->e_sysent;
+	nsys = p->p_p->ps_emul->e_nsysent;
 
 	/*
 	 * The first six system call arguments are in the six %o registers.
@@ -820,7 +818,7 @@ syscall(code, tf, pc)
 	}
 
 	if (code < 0 || code >= nsys)
-		callp += p->p_emul->e_nosys;
+		callp += p->p_p->ps_emul->e_nosys;
 	else {
 		callp += code;
 		i = callp->sy_argsize / sizeof(register_t);

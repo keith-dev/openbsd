@@ -1,4 +1,4 @@
-/*	$OpenBSD: bridgestp.c,v 1.46 2013/10/20 08:48:39 deraadt Exp $	*/
+/*	$OpenBSD: bridgestp.c,v 1.49 2014/07/22 11:06:09 mpi Exp $	*/
 
 /*
  * Copyright (c) 2000 Jason L. Wright (jason@thought.net)
@@ -55,7 +55,6 @@
 
 #ifdef INET
 #include <netinet/in.h>
-#include <netinet/in_systm.h>
 #include <netinet/ip.h>
 #include <netinet/if_ether.h>
 #endif
@@ -484,11 +483,10 @@ bstp_send_bpdu(struct bstp_state *bs, struct bstp_port *bp,
 	if (ifp == NULL || (ifp->if_flags & IFF_RUNNING) == 0)
 		goto done;
 
-#ifdef ALTQ
-	if (!ALTQ_IS_ENABLED(&ifp->if_snd))
-#endif
-	if (IF_QFULL(&ifp->if_snd))
+	if (IF_QFULL(&ifp->if_snd)) {
+		IF_DROP(&ifp->if_snd);
 		goto done;
+	}
 
 	MGETHDR(m, M_DONTWAIT, MT_DATA);
 	if (m == NULL)
@@ -1958,7 +1956,7 @@ bstp_destroy(struct bstp_state *bs)
 	if (!LIST_EMPTY(&bs->bs_bplist))
 		panic("bstp still active");
 
-	free(bs, M_DEVBUF);
+	free(bs, M_DEVBUF, 0);
 }
 
 void
@@ -2034,7 +2032,7 @@ bstp_delete(struct bstp_port *bp)
 	LIST_REMOVE(bp, bp_next);
 	bp->bp_bs = NULL;
 	bp->bp_active = 0;
-	free(bp, M_DEVBUF);
+	free(bp, M_DEVBUF, 0);
 	bstp_initialization(bs);
 }
 

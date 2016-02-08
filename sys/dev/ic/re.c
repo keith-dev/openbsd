@@ -1,4 +1,4 @@
-/*	$OpenBSD: re.c,v 1.147 2013/12/31 21:09:34 brad Exp $	*/
+/*	$OpenBSD: re.c,v 1.155 2014/07/22 13:12:12 mpi Exp $	*/
 /*	$FreeBSD: if_re.c,v 1.31 2004/09/04 07:54:05 ru Exp $	*/
 /*
  * Copyright (c) 1997, 1998-2003
@@ -127,8 +127,6 @@
 
 #ifdef INET
 #include <netinet/in.h>
-#include <netinet/in_systm.h>
-#include <netinet/ip.h>
 #include <netinet/if_ether.h>
 #endif
 
@@ -214,38 +212,37 @@ static const struct re_revision {
 	const char		*re_name;
 } re_revisions[] = {
 	{ RL_HWREV_8100,	"RTL8100" },
-	{ RL_HWREV_8100E_SPIN1,	"RTL8100E 1" },
+	{ RL_HWREV_8100E,	"RTL8100E" },
 	{ RL_HWREV_8100E_SPIN2, "RTL8100E 2" },
 	{ RL_HWREV_8101,	"RTL8101" },
 	{ RL_HWREV_8101E,	"RTL8101E" },
 	{ RL_HWREV_8102E,	"RTL8102E" },
 	{ RL_HWREV_8106E,	"RTL8106E" },
-	{ RL_HWREV_8106E_SPIN1,	"RTL8106E" },
 	{ RL_HWREV_8401E,	"RTL8401E" },
 	{ RL_HWREV_8402,	"RTL8402" },
 	{ RL_HWREV_8411,	"RTL8411" },
+	{ RL_HWREV_8411B,	"RTL8411B" },
 	{ RL_HWREV_8102EL,	"RTL8102EL" },
 	{ RL_HWREV_8102EL_SPIN1, "RTL8102EL 1" },
 	{ RL_HWREV_8103E,       "RTL8103E" },
 	{ RL_HWREV_8110S,	"RTL8110S" },
 	{ RL_HWREV_8139CPLUS,	"RTL8139C+" },
-	{ RL_HWREV_8168_SPIN1,	"RTL8168 1" },
-	{ RL_HWREV_8168_SPIN2,	"RTL8168 2" },
-	{ RL_HWREV_8168_SPIN3,	"RTL8168 3" },
+	{ RL_HWREV_8168B_SPIN1,	"RTL8168 1" },
+	{ RL_HWREV_8168B_SPIN2,	"RTL8168 2" },
+	{ RL_HWREV_8168B_SPIN3,	"RTL8168 3" },
 	{ RL_HWREV_8168C,	"RTL8168C/8111C" },
 	{ RL_HWREV_8168C_SPIN2,	"RTL8168C/8111C" },
 	{ RL_HWREV_8168CP,	"RTL8168CP/8111CP" },
 	{ RL_HWREV_8168F,	"RTL8168F/8111F" },
 	{ RL_HWREV_8168G,	"RTL8168G/8111G" },
-	{ RL_HWREV_8168G_SPIN1,	"RTL8168G/8111G" },
-	{ RL_HWREV_8168G_SPIN2,	"RTL8168G/8111G" },
-	{ RL_HWREV_8168G_SPIN4,	"RTL8168G/8111G" },
+	{ RL_HWREV_8168GU,	"RTL8168GU/8111GU" },
 	{ RL_HWREV_8105E,	"RTL8105E" },
 	{ RL_HWREV_8105E_SPIN1,	"RTL8105E" },
 	{ RL_HWREV_8168D,	"RTL8168D/8111D" },
 	{ RL_HWREV_8168DP,      "RTL8168DP/8111DP" },
 	{ RL_HWREV_8168E,       "RTL8168E/8111E" },
 	{ RL_HWREV_8168E_VL,	"RTL8168E/8111E-VL" },
+	{ RL_HWREV_8168EP,	"RTL8168EP/8111EP" },
 	{ RL_HWREV_8169,	"RTL8169" },
 	{ RL_HWREV_8169_8110SB,	"RTL8169/8110SB" },
 	{ RL_HWREV_8169_8110SBL, "RTL8169SBL" },
@@ -644,7 +641,7 @@ re_attach(struct rl_softc *sc, const char *intrstr)
 	case RL_HWREV_8139CPLUS:
 		sc->rl_flags |= RL_FLAG_NOJUMBO | RL_FLAG_AUTOPAD;
 		break;
-	case RL_HWREV_8100E_SPIN1:
+	case RL_HWREV_8100E:
 	case RL_HWREV_8100E_SPIN2:
 	case RL_HWREV_8101E:
 		sc->rl_flags |= RL_FLAG_NOJUMBO | RL_FLAG_INVMAR |
@@ -665,15 +662,14 @@ re_attach(struct rl_softc *sc, const char *intrstr)
 	case RL_HWREV_8105E:
 	case RL_HWREV_8105E_SPIN1:
 	case RL_HWREV_8106E:
-	case RL_HWREV_8106E_SPIN1:
 		sc->rl_flags |= RL_FLAG_INVMAR | RL_FLAG_PHYWAKE |
 		    RL_FLAG_PHYWAKE_PM | RL_FLAG_PAR | RL_FLAG_DESCV2 |
 		    RL_FLAG_MACSTAT | RL_FLAG_CMDSTOP | RL_FLAG_AUTOPAD |
 		    RL_FLAG_NOJUMBO;
 		break;
-	case RL_HWREV_8168_SPIN1:
-	case RL_HWREV_8168_SPIN2:
-	case RL_HWREV_8168_SPIN3:
+	case RL_HWREV_8168B_SPIN1:
+	case RL_HWREV_8168B_SPIN2:
+	case RL_HWREV_8168B_SPIN3:
 		sc->rl_flags |= RL_FLAG_INVMAR | RL_FLAG_PHYWAKE |
 		    RL_FLAG_MACSTAT | RL_FLAG_HWIM;
 		break;
@@ -707,19 +703,21 @@ re_attach(struct rl_softc *sc, const char *intrstr)
 		break;
 	case RL_HWREV_8168E_VL:
 	case RL_HWREV_8168F:
+		sc->rl_flags |= RL_FLAG_EARLYOFF;
+		/* FALLTHROUGH */
 	case RL_HWREV_8411:
 		sc->rl_flags |= RL_FLAG_INVMAR | RL_FLAG_PHYWAKE |
 		    RL_FLAG_PAR | RL_FLAG_DESCV2 | RL_FLAG_MACSTAT |
 		    RL_FLAG_CMDSTOP | RL_FLAG_AUTOPAD | RL_FLAG_NOJUMBO;
 		break;
+	case RL_HWREV_8168EP:
 	case RL_HWREV_8168G:
-	case RL_HWREV_8168G_SPIN1:
-	case RL_HWREV_8168G_SPIN2:
-	case RL_HWREV_8168G_SPIN4:
+	case RL_HWREV_8411B:
+	case RL_HWREV_8168GU:
 		sc->rl_flags |= RL_FLAG_INVMAR | RL_FLAG_PHYWAKE |
 		    RL_FLAG_PAR | RL_FLAG_DESCV2 | RL_FLAG_MACSTAT |
 		    RL_FLAG_CMDSTOP | RL_FLAG_AUTOPAD | RL_FLAG_NOJUMBO |
-		    RL_FLAG_EARLYOFF;
+		    RL_FLAG_EARLYOFFV2 | RL_FLAG_RXDV_GATED;
 		break;
 	case RL_HWREV_8169_8110SB:
 	case RL_HWREV_8169_8110SBL:
@@ -964,8 +962,6 @@ re_attach(struct rl_softc *sc, const char *intrstr)
 	IFQ_SET_MAXLEN(&ifp->if_snd, RL_TX_QLEN);
 	IFQ_SET_READY(&ifp->if_snd);
 
-	m_clsetwms(ifp, MCLBYTES, 2, RL_RX_DESC_CNT);
-
 	ifp->if_capabilities = IFCAP_VLAN_MTU | IFCAP_CSUM_TCPv4 |
 	    IFCAP_CSUM_UDPv4;
 
@@ -1083,7 +1079,7 @@ re_newbuf(struct rl_softc *sc)
 	u_int32_t	cmdstat;
 	int		error, idx;
 
-	m = MCLGETI(NULL, M_DONTWAIT, &sc->sc_arpcom.ac_if, MCLBYTES);
+	m = MCLGETI(NULL, M_DONTWAIT, NULL, MCLBYTES);
 	if (!m)
 		return (ENOBUFS);
 
@@ -1133,7 +1129,6 @@ re_newbuf(struct rl_softc *sc)
 	RL_RXDESCSYNC(sc, idx, BUS_DMASYNC_PREREAD|BUS_DMASYNC_PREWRITE);
 
 	sc->rl_ldata.rl_rx_prodidx = RL_NEXT_RX_DESC(sc, idx);
-	sc->rl_ldata.rl_rx_cnt++;
 
 	return (0);
 }
@@ -1168,9 +1163,9 @@ re_rx_list_init(struct rl_softc *sc)
 
 	sc->rl_ldata.rl_rx_prodidx = 0;
 	sc->rl_ldata.rl_rx_considx = 0;
-	sc->rl_ldata.rl_rx_cnt = 0;
 	sc->rl_head = sc->rl_tail = NULL;
 
+	if_rxr_init(&sc->rl_ldata.rl_rx_ring, 2, RL_RX_DESC_CNT);
 	re_rx_list_fill(sc);
 
 	return (0);
@@ -1179,10 +1174,14 @@ re_rx_list_init(struct rl_softc *sc)
 void
 re_rx_list_fill(struct rl_softc *sc)
 {
-	while (sc->rl_ldata.rl_rx_cnt < RL_RX_DESC_CNT) {
+	u_int slots;
+
+	for (slots = if_rxr_get(&sc->rl_ldata.rl_rx_ring, RL_RX_DESC_CNT);
+	    slots > 0; slots--) {
 		if (re_newbuf(sc) == ENOBUFS)
 			break;
 	}
+	if_rxr_put(&sc->rl_ldata.rl_rx_ring, slots);
 }
 
 /*
@@ -1202,7 +1201,8 @@ re_rxeof(struct rl_softc *sc)
 
 	ifp = &sc->sc_arpcom.ac_if;
 
-	for (i = sc->rl_ldata.rl_rx_considx; sc->rl_ldata.rl_rx_cnt > 0;
+	for (i = sc->rl_ldata.rl_rx_considx;
+	    if_rxr_inuse(&sc->rl_ldata.rl_rx_ring) > 0;
 	     i = RL_NEXT_RX_DESC(sc, i)) {
 		cur_rx = &sc->rl_ldata.rl_rx_list[i];
 		RL_RXDESCSYNC(sc, i,
@@ -1216,7 +1216,7 @@ re_rxeof(struct rl_softc *sc)
 		rxs = &sc->rl_ldata.rl_rxsoft[i];
 		m = rxs->rxs_mbuf;
 		rxs->rxs_mbuf = NULL;
-		sc->rl_ldata.rl_rx_cnt--;
+		if_rxr_put(&sc->rl_ldata.rl_rx_ring, 1);
 		rx = 1;
 
 		/* Invalidate the RX mbuf and unload its map */
@@ -1850,6 +1850,10 @@ re_init(struct ifnet *ifp)
 	CSR_WRITE_4(sc, RL_TXLIST_ADDR_LO,
 	    RL_ADDR_LO(sc->rl_ldata.rl_tx_list_map->dm_segs[0].ds_addr));
 
+	if (sc->rl_flags & RL_FLAG_RXDV_GATED)
+		CSR_WRITE_4(sc, RL_MISC, CSR_READ_4(sc, RL_MISC) &
+		    ~0x00080000);
+
 	/*
 	 * Enable transmit and receive.
 	 */
@@ -1858,21 +1862,15 @@ re_init(struct ifnet *ifp)
 	/*
 	 * Set the initial TX and RX configuration.
 	 */
-	if (sc->rl_testmode) {
-		if (sc->sc_hwrev == RL_HWREV_8139CPLUS)
-			CSR_WRITE_4(sc, RL_TXCFG,
-			    RL_TXCFG_CONFIG|RL_LOOPTEST_ON_CPLUS);
-		else
-			CSR_WRITE_4(sc, RL_TXCFG,
-			    RL_TXCFG_CONFIG|RL_LOOPTEST_ON);
-	} else
-		CSR_WRITE_4(sc, RL_TXCFG, RL_TXCFG_CONFIG);
+	CSR_WRITE_4(sc, RL_TXCFG, RL_TXCFG_CONFIG);
 
 	CSR_WRITE_1(sc, RL_EARLY_TX_THRESH, 16);
 
 	rxcfg = RL_RXCFG_CONFIG;
 	if (sc->rl_flags & RL_FLAG_EARLYOFF)
 		rxcfg |= RL_RXCFG_EARLYOFF;
+	else if (sc->rl_flags & RL_FLAG_EARLYOFFV2)
+		rxcfg |= RL_RXCFG_EARLYOFFV2;
 	CSR_WRITE_4(sc, RL_RXCFG, rxcfg);
 
 	/* Program promiscuous mode and multicast filters. */
@@ -1881,10 +1879,7 @@ re_init(struct ifnet *ifp)
 	/*
 	 * Enable interrupts.
 	 */
-	if (sc->rl_testmode)
-		CSR_WRITE_2(sc, RL_IMR, 0);
-	else
-		re_setup_intr(sc, 1, sc->rl_imtype);
+	re_setup_intr(sc, 1, sc->rl_imtype);
 	CSR_WRITE_2(sc, RL_ISR, sc->rl_imtype);
 
 	/* Start RX/TX process. */
@@ -1900,11 +1895,6 @@ re_init(struct ifnet *ifp)
 	 */
 	if (sc->sc_hwrev != RL_HWREV_8139CPLUS)
 		CSR_WRITE_2(sc, RL_MAXRXPKTLEN, 16383);
-
-	if (sc->rl_testmode) {
-		splx(s);
-		return (0);
-	}
 
 	mii_mediachg(&sc->sc_mii);
 

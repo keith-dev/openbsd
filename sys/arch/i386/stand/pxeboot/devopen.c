@@ -1,4 +1,4 @@
-/*	$OpenBSD: devopen.c,v 1.9 2011/06/26 23:19:11 tedu Exp $	*/
+/*	$OpenBSD: devopen.c,v 1.11 2014/07/13 09:26:08 jasper Exp $	*/
 
 /*
  * Copyright (c) 2004 Tom Cosgrove
@@ -142,53 +142,6 @@ devboot(dev_t bootdev, char *p)
 	*p++ = 't';
 	*p++ = 'p';
 	*p = '\0';
-}
-
-int pch_pos = 0;
-
-void
-putchar(int c)
-{
-	switch (c) {
-	case '\177':	/* DEL erases */
-		cnputc('\b');
-		cnputc(' ');
-	case '\b':
-		cnputc('\b');
-		if (pch_pos)
-			pch_pos--;
-		break;
-	case '\t':
-		do
-			cnputc(' ');
-		while (++pch_pos % 8);
-		break;
-	case '\n':
-	case '\r':
-		cnputc(c);
-		pch_pos=0;
-		break;
-	default:
-		cnputc(c);
-		pch_pos++;
-		break;
-	}
-}
-
-int
-getchar(void)
-{
-	register int c = cngetc();
-
-	if (c == '\r')
-		c = '\n';
-
-	if ((c < ' ' && c != '\n') || c == '\177')
-		return c;
-
-	putchar(c);
-
-	return c;
 }
 
 char ttyname_buf[8];

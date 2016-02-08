@@ -1,4 +1,4 @@
-/*	$OpenBSD: pipex.c,v 1.48 2013/11/11 09:15:34 mpi Exp $	*/
+/*	$OpenBSD: pipex.c,v 1.55 2014/07/22 11:06:10 mpi Exp $	*/
 
 /*-
  * Copyright (c) 2009 Internet Initiative Japan Inc.
@@ -64,7 +64,6 @@
 
 #ifdef INET
 #include <netinet/in.h>
-#include <netinet/in_systm.h>
 #include <netinet/ip.h>
 #include <netinet/ip_var.h>
 #ifdef INET6
@@ -95,8 +94,8 @@ struct pipex_hash_head
 
 struct radix_node_head pipex_rd_head4;
 struct radix_node_head pipex_rd_head6;
-int pipex_rd_head4_initialized = 0;
-int pipex_rd_head6_initialized = 0;
+int pipex_rd_head4_initialized;
+int pipex_rd_head6_initialized;
 struct timeout pipex_timer_ch; 		/* callout timer context */
 int pipex_prune = 1;			/* walk list every seconds */
 
@@ -397,7 +396,7 @@ pipex_add_session(struct pipex_session_req *req,
 #ifdef PIPEX_MPPE
     	if ((req->pr_ppp_flags & PIPEX_PPP_MPPE_ACCEPTED) != 0) {
 		if (req->pr_mppe_recv.keylenbits <= 0) {
-			free(session, M_TEMP);
+			free(session, M_TEMP, 0);
 			return (EINVAL);
 		}
 		pipex_session_init_mppe_recv(session,
@@ -406,7 +405,7 @@ pipex_add_session(struct pipex_session_req *req,
 	}
     	if ((req->pr_ppp_flags & PIPEX_PPP_MPPE_ENABLED) != 0) {
 		if (req->pr_mppe_send.keylenbits <= 0) {
-			free(session, M_TEMP);
+			free(session, M_TEMP, 0);
 			return (EINVAL);
 		}
 		pipex_session_init_mppe_send(session,
@@ -417,7 +416,7 @@ pipex_add_session(struct pipex_session_req *req,
 	if (pipex_session_is_mppe_required(session)) {
 		if (!pipex_session_is_mppe_enabled(session) ||
 		    !pipex_session_is_mppe_accepted(session)) {
-			free(session, M_TEMP);
+			free(session, M_TEMP, 0);
 			return (EINVAL);
 		}
 	}
@@ -429,7 +428,7 @@ pipex_add_session(struct pipex_session_req *req,
 		if (pipex_lookup_by_ip_address(session->ip_address.sin_addr)
 		    != NULL) {
 			splx(s);
-			free(session, M_TEMP);
+			free(session, M_TEMP, 0);
 			return (EADDRINUSE);
 		}
 
@@ -437,7 +436,7 @@ pipex_add_session(struct pipex_session_req *req,
 		    &session->ip_netmask, &pipex_rd_head4, session->ps4_rn, RTP_STATIC);
 		if (rn == NULL) {
 			splx(s);
-			free(session, M_TEMP);
+			free(session, M_TEMP, 0);
 			return (ENOMEM);
 		}
 	}
@@ -447,7 +446,7 @@ pipex_add_session(struct pipex_session_req *req,
                     RTP_STATIC);
                 if (rn == NULL) {
                         splx(s);
-                        free(session, M_TEMP);
+                        free(session, M_TEMP, 0);
                         return (ENOMEM);
                 }
 	}
@@ -626,8 +625,8 @@ pipex_destroy_session(struct pipex_session *session)
 	splx(s);
 
 	if (session->mppe_recv.old_session_keys)
-		free(session->mppe_recv.old_session_keys, M_TEMP);
-	free(session, M_TEMP);
+		free(session->mppe_recv.old_session_keys, M_TEMP, 0);
+	free(session, M_TEMP, 0);
 
 	return (0);
 }
@@ -1040,9 +1039,13 @@ pipex_ppp_input(struct mbuf *m0, struct pipex_session *session, int decrypted)
 
 	proto = pipex_ppp_proto(m0, session, 0, &hlen);
 #ifdef PIPEX_MPPE
-	if (pipex_session_is_mppe_accepted(session) && proto == PPP_COMP) {
+	if (proto == PPP_COMP) {
 		if (decrypted)
 			goto drop;
+
+		/* checked this on ppp_common_input() already. */
+		KASSERT(pipex_session_is_mppe_accepted(session));
+
 		m_adj(m0, hlen);
 		pipex_mppe_input(m0, session);
 		return;
@@ -1103,10 +1106,9 @@ pipex_ppp_input(struct mbuf *m0, struct pipex_session *session, int decrypted)
 	default:
 		if (decrypted)
 			goto drop;
-		KASSERT(session->protocol == PIPEX_PROTO_PPPOE);
-		/* will be proccessed by userland */
-		m_freem(m0);
-		return;
+		/* protocol must be checked on pipex_common_input() already */
+		KASSERT(0);
+		goto drop;
 	}
 
 	return;
@@ -1307,6 +1309,9 @@ pipex_common_input(struct pipex_session *session, struct mbuf *m0, int hlen,
 		break;
 
 	case PPP_COMP:
+		if (pipex_session_is_mppe_accepted(session))
+			break;
+		goto not_ours;
 #endif
 	case PPP_IP:
 #ifdef INET6
@@ -1558,7 +1563,7 @@ pipex_pptp_output(struct mbuf *m0, struct pipex_session *session,
 	gre->flags = htons(gre->flags);
 
 	m0->m_pkthdr.rcvif = session->pipex_iface->ifnet_this;
-	if (ip_output(m0, NULL, NULL, 0, NULL, NULL) != 0) {
+	if (ip_output(m0, NULL, NULL, 0, NULL, NULL, 0) != 0) {
 		PIPEX_DBG((session, LOG_DEBUG, "ip_output failed."));
 		goto drop;
 	}
@@ -1996,7 +2001,7 @@ pipex_l2tp_output(struct mbuf *m0, struct pipex_session *session)
 		ip->ip_ttl = MAXTTL;
 		ip->ip_tos = 0;
 
-		if (ip_output(m0, NULL, NULL, IP_IPSECFLOW, NULL, NULL,
+		if (ip_output(m0, NULL, NULL, 0, NULL, NULL,
 		    session->proto.l2tp.ipsecflowinfo) != 0) {
 			PIPEX_DBG((session, LOG_DEBUG, "ip_output failed."));
 			goto drop;
@@ -2832,6 +2837,8 @@ adjust_tcp_mss(struct mbuf *m0, int mtu)
 	if ((th->th_flags & TH_SYN) == 0)
 		goto handled;
 
+	lpktp = MIN(th->th_off << 4, lpktp);
+
 	pktp += sizeof(struct tcphdr);
 	lpktp -= sizeof(struct tcphdr);
 	while (lpktp >= TCPOLEN_MAXSEG) {
@@ -2860,7 +2867,9 @@ adjust_tcp_mss(struct mbuf *m0, int mtu)
 			break;
 		default:
 			GETCHAR(optlen, pktp);
-			pktp += 2 - optlen;
+			if (optlen < 2)	/* packet is broken */
+				goto drop;
+			pktp += optlen - 2;
 			lpktp -= optlen;
 			break;
 		}

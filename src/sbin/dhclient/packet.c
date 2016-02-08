@@ -1,4 +1,4 @@
-/*	$OpenBSD: packet.c,v 1.25 2014/01/20 09:16:36 deraadt Exp $	*/
+/*	$OpenBSD: packet.c,v 1.27 2014/07/28 16:40:32 tobias Exp $	*/
 
 /* Packet assembly code, originally contributed by Archie Cobbs. */
 
@@ -80,13 +80,9 @@ wrapsum(u_int32_t sum)
 }
 
 void
-assemble_eh_header(struct ether_header *eh, struct ether_addr *to)
+assemble_eh_header(struct ether_header *eh)
 {
-	if (to != NULL)
-		memcpy(eh->ether_dhost, to->ether_addr_octet,
-		    sizeof(eh->ether_dhost));
-	else
-		memset(eh->ether_dhost, 0xff, sizeof(eh->ether_dhost));
+	memset(eh->ether_dhost, 0xff, sizeof(eh->ether_dhost));
 
 	memcpy(eh->ether_shost, ifi->hw_address.ether_addr_octet,
 	    sizeof(eh->ether_shost));
@@ -130,7 +126,7 @@ decode_udp_ip_header(unsigned char *buf, int bufix, struct sockaddr_in *from,
 	ip_packets_seen++;
 	if (wrapsum(checksum(buf + bufix, ip_len, 0)) != 0) {
 		ip_packets_bad_checksum++;
-		if (ip_packets_seen > 4 &&
+		if (ip_packets_seen > 4 && ip_packets_bad_checksum != 0 &&
 		    (ip_packets_seen / ip_packets_bad_checksum) < 2) {
 			note("%d bad IP checksums seen in %d packets",
 			    ip_packets_bad_checksum, ip_packets_seen);
@@ -158,6 +154,7 @@ decode_udp_ip_header(unsigned char *buf, int bufix, struct sockaddr_in *from,
 	if ((len < 0) || (len + data > buf + bufix + buflen)) {
 		udp_packets_length_overflow++;
 		if (udp_packets_length_checked > 4 &&
+		    udp_packets_length_overflow != 0 &&
 		    (udp_packets_length_checked /
 		    udp_packets_length_overflow) < 2) {
 			note("%d udp packets in %d too long - dropped",
@@ -184,7 +181,7 @@ decode_udp_ip_header(unsigned char *buf, int bufix, struct sockaddr_in *from,
 	udp_packets_seen++;
 	if (usum && usum != sum) {
 		udp_packets_bad_checksum++;
-		if (udp_packets_seen > 4 &&
+		if (udp_packets_seen > 4 && udp_packets_bad_checksum != 0 &&
 		    (udp_packets_seen / udp_packets_bad_checksum) < 2) {
 			note("%d bad udp checksums in %d packets",
 			    udp_packets_bad_checksum, udp_packets_seen);

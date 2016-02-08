@@ -1,4 +1,4 @@
-/*	$OpenBSD: commands.c,v 1.55 2013/10/26 21:33:29 sthen Exp $	*/
+/*	$OpenBSD: commands.c,v 1.69 2014/07/22 07:30:24 jsg Exp $	*/
 /*	$NetBSD: commands.c,v 1.14 1996/03/24 22:03:48 jtk Exp $	*/
 
 /*
@@ -31,21 +31,38 @@
  */
 
 #include "telnet_locl.h"
-#include <err.h>
 
-#if	defined(IPPROTO_IP) && defined(IP_TOS)
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <netinet/ip.h>
+#include <arpa/inet.h>
+#include <arpa/telnet.h>
+
+#include <ctype.h>
+#include <err.h>
+#include <errno.h>
+#include <netdb.h>
+#include <pwd.h>
+#include <stdarg.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+
+#ifdef SKEY
+#include <sys/wait.h>
+#define PATH_SKEY	"/usr/bin/skey"
+#endif
+
+static unsigned long sourceroute(char *arg, char **cpp, int *lenp);
+
 int tos = -1;
-#endif	/* defined(IPPROTO_IP) && defined(IP_TOS) */
 
 char	*hostname;
-
-typedef int (*intrtn_t)(int, char**);
-static int call(intrtn_t, ...);
 
 typedef struct {
 	char	*name;		/* command name */
 	char	*help;		/* help string (NULL for no help) */
-	int	(*handler)();	/* routine which executes command */
+	int	(*handler)(int, char **);/* routine which executes command */
 	int	needconnect;	/* Do we need to be connected to execute? */
 } Command;
 
@@ -54,13 +71,9 @@ static char saveline[256];
 static int margc;
 static char *margv[20];
 
-#if	defined(SKEY)
-#include <sys/wait.h>
-#define PATH_SKEY	"/usr/bin/skey"
-    int
-skey_calc(argc, argv)
-	int argc;
-	char **argv;
+#ifdef SKEY
+int
+skey_calc(int argc, char **argv)
 {
 	int status;
 
@@ -84,11 +97,9 @@ skey_calc(argc, argv)
 	}
 }
 #endif
-   	
 
-
-    static void
-makeargv()
+static void
+makeargv(void)
 {
     char *cp, *cp2, c;
     char **argp = margv;
@@ -103,7 +114,7 @@ makeargv()
     }
     while ((c = *cp)) {
 	int inquote = 0;
-	while (isspace(c))
+	while (isspace((unsigned char)c))
 	    c = *++cp;
 	if (c == '\0')
 	    break;
@@ -125,7 +136,7 @@ makeargv()
 		} else if (c == '\'') {
 		    inquote = '\'';
 		    continue;
-		} else if (isspace(c))
+		} else if (isspace((unsigned char)c))
 		    break;
 	    }
 	    *cp2++ = c;
@@ -144,9 +155,8 @@ makeargv()
  * Todo:  1.  Could take random integers (12, 0x12, 012, 0b1).
  */
 
-	static char
-special(s)
-	char *s;
+static char
+special(char *s)
 {
 	char c;
 	char b;
@@ -171,9 +181,8 @@ special(s)
  * Construct a control character sequence
  * for a special character.
  */
-	static char *
-control(c)
-	cc_t c;
+static char *
+control(cc_t c)
 {
 	static char buf[5];
 	/*
@@ -206,8 +215,6 @@ control(c)
 	}
 	return (buf);
 }
-
-
 
 /*
  *	The following are data structures and routines for
@@ -266,10 +273,8 @@ static struct sendlist Sendlist[] = {
 #define	GETSEND(name) ((struct sendlist *) genget(name, (char **) Sendlist, \
 				sizeof(struct sendlist)))
 
-    static int
-sendcmd(argc, argv)
-    int  argc;
-    char **argv;
+static int
+sendcmd(int argc, char **argv)
 {
     int count;		/* how many bytes we are going to need to send */
     int i;
@@ -333,8 +338,7 @@ sendcmd(argc, argv)
     for (i = 1; i < argc; i++) {
 	if ((s = GETSEND(argv[i])) == 0) {
 	    fprintf(stderr, "Telnet 'send' error - argument disappeared!\r\n");
-	    (void) quit();
-	    /*NOTREACHED*/
+	    quit();
 	}
 	if (s->handler) {
 	    count++;
@@ -349,46 +353,41 @@ sendcmd(argc, argv)
     return (count == success);
 }
 
-	static int
-send_tncmd(void (*func)(), char *cmd, char *name);
+static int send_tncmd(void (*func)(int, int), char *cmd, char *name);
 
-    static int
-send_esc()
+static int
+send_esc(void)
 {
     NETADD(escape);
     return 1;
 }
 
-    static int
-send_docmd(name)
-    char *name;
+static int
+send_docmd(char *name)
 {
     return(send_tncmd(send_do, "do", name));
 }
 
-    static int
-send_dontcmd(name)
-    char *name;
+static int
+send_dontcmd(char *name)
 {
     return(send_tncmd(send_dont, "dont", name));
 }
-    static int
-send_willcmd(name)
-    char *name;
+
+static int
+send_willcmd(char *name)
 {
     return(send_tncmd(send_will, "will", name));
 }
-    static int
-send_wontcmd(name)
-    char *name;
+
+static int
+send_wontcmd(char *name)
 {
     return(send_tncmd(send_wont, "wont", name));
 }
 
-    int
-send_tncmd(func, cmd, name)
-    void	(*func)();
-    char	*cmd, *name;
+int
+send_tncmd(void (*func)(int, int), char *cmd, char *name)
 {
     char **cpp;
     extern char *telopts[];
@@ -448,8 +447,8 @@ send_tncmd(func, cmd, name)
     return 1;
 }
 
-    static int
-send_help()
+static int
+send_help(void)
 {
     struct sendlist *s;	/* pointer to current command */
     for (s = Sendlist; s->name; s++) {
@@ -464,34 +463,25 @@ send_help()
  * to by the arguments to the "toggle" command.
  */
 
-    static int
-lclchars()
+static int
+lclchars(int unused)
 {
     donelclchars = 1;
     return 1;
 }
 
-    static int
-togdebug()
+static int
+togdebug(int unused)
 {
-#ifndef	NOT43
     if (net > 0 &&
-	(SetSockOpt(net, SOL_SOCKET, SO_DEBUG, debug)) < 0) {
+	(setsockopt(net, SOL_SOCKET, SO_DEBUG, &debug, sizeof(debug))) == -1) {
 	    perror("setsockopt (SO_DEBUG)");
     }
-#else	/* NOT43 */
-    if (debug) {
-	if (net > 0 && SetSockOpt(net, SOL_SOCKET, SO_DEBUG, 0, 0) < 0)
-	    perror("setsockopt (SO_DEBUG)");
-    } else
-	printf("Cannot turn off socket debugging\r\n");
-#endif	/* NOT43 */
     return 1;
 }
 
-
-    static int
-togcrlf()
+static int
+togcrlf(int unused)
 {
     if (crlf) {
 	printf("Will send carriage returns as telnet <CR><LF>.\r\n");
@@ -503,9 +493,8 @@ togcrlf()
 
 int binmode;
 
-    static int
-togbinary(val)
-    int val;
+static int
+togbinary(int val)
 {
     donebinarytoggle = 1;
 
@@ -542,9 +531,8 @@ togbinary(val)
     return 1;
 }
 
-    static int
-togrbinary(val)
-    int val;
+static int
+togrbinary(int val)
 {
     donebinarytoggle = 1;
 
@@ -569,9 +557,8 @@ togrbinary(val)
     return 1;
 }
 
-    static int
-togxbinary(val)
-    int val;
+static int
+togxbinary(int val)
 {
     donebinarytoggle = 1;
 
@@ -597,22 +584,12 @@ togxbinary(val)
 }
 
 
-static int togglehelp(void);
-#if	defined(AUTHENTICATION)
-extern int auth_togdebug(int);
-#endif
-#if    defined(ENCRYPTION)
-extern int EncryptAutoEnc(int);
-extern int EncryptAutoDec(int);
-extern int EncryptDebug(int);
-extern int EncryptVerbose(int);
-#endif
-
+static int togglehelp(int);
 
 struct togglelist {
-    char	*name;		/* name of toggle */
-    char	*help;		/* help message */
-    int		(*handler)();	/* routine to do actual setting */
+    char	*name;			/* name of toggle */
+    char	*help;			/* help message */
+    int		(*handler)(int);	/* routine to do actual setting */
     int		*variable;
     char	*actionexplanation;
     int		needconnect;	/* Need to be connected */
@@ -629,40 +606,11 @@ static struct togglelist Togglelist[] = {
 	    0,
 		&autosynch,
 		    "send interrupt characters in urgent mode" },
-#if	defined(AUTHENTICATION)
     { "autologin",
-	"automatic sending of login and/or authentication info",
+	"automatic sending of login name",
 	    0,
 		&autologin,
-		    "send login name and/or authentication information" },
-    { "authdebug",
-	"Toggle authentication debugging",
-	    auth_togdebug,
-		0,
-		     "print authentication debugging information" },
-#endif
-#if    defined(ENCRYPTION)
-    { "autoencrypt",
-       "automatic encryption of data stream",
-           EncryptAutoEnc,
-               0,
-                   "automatically encrypt output" },
-    { "autodecrypt",
-       "automatic decryption of data stream",
-           EncryptAutoDec,
-               0,
-                   "automatically decrypt input" },
-    { "verbose_encrypt",
-       "Toggle verbose encryption output",
-           EncryptVerbose,
-               0,
-                   "print verbose encryption output" },
-    { "encdebug",
-       "Toggle encryption debugging",
-           EncryptDebug,
-               0,
-                   "print encryption debugging information" },
-#endif
+		    "send login name" },
     { "skiprc",
 	"don't read ~/.telnetrc file",
 	    0,
@@ -699,18 +647,6 @@ static struct togglelist Togglelist[] = {
 		&localchars,
 		    "recognize certain control characters" },
     { " ", "", 0, 0 },		/* empty line */
-#if	defined(unix) && defined(TN3270)
-    { "apitrace",
-	"(debugging) toggle tracing of API transactions",
-	    0,
-		&apitrace,
-		    "trace API transactions", 0 },
-    { "cursesdata",
-	"(debugging) toggle printing of hexadecimal curses data",
-	    0,
-		&cursesdata,
-		    "print hexadecimal representation of curses data", 0 },
-#endif	/* defined(unix) && defined(TN3270) */
     { "debug",
 	"debugging",
 	    togdebug,
@@ -731,13 +667,11 @@ static struct togglelist Togglelist[] = {
 	    0,
 		&showoptions,
 		    "show option processing" },
-#if	defined(unix)
     { "termdata",
 	"(debugging) toggle printing of hexadecimal terminal data",
 	    0,
 		&termdata,
 		    "print hexadecimal representation of terminal traffic" },
-#endif	/* defined(unix) */
     { "?",
 	0,
 	    togglehelp },
@@ -747,8 +681,8 @@ static struct togglelist Togglelist[] = {
     { 0 }
 };
 
-    static int
-togglehelp()
+static int
+togglehelp(int unused)
 {
     struct togglelist *c;
 
@@ -765,9 +699,8 @@ togglehelp()
     return 0;
 }
 
-    static void
-settogglehelp(set)
-    int set;
+static void
+settogglehelp(int set)
 {
     struct togglelist *c;
 
@@ -785,10 +718,8 @@ settogglehelp(set)
 #define	GETTOGGLE(name) (struct togglelist *) \
 		genget(name, (char **) Togglelist, sizeof(struct togglelist))
 
-    static int
-toggle(argc, argv)
-    int  argc;
-    char *argv[];
+static int
+toggle(int argc, char *argv[])
 {
     int retval = 1;
     char *name;
@@ -836,14 +767,12 @@ toggle(argc, argv)
  * The following perform the "set" command.
  */
 
-#ifdef	USE_TERMIO
 struct termios new_tc = { 0 };
-#endif
 
 struct setlist {
     char *name;				/* name */
     char *help;				/* help information */
-    void (*handler)();
+    void (*handler)(char *);
     cc_t *charp;			/* where it is located at */
 };
 
@@ -876,17 +805,15 @@ static struct setlist Setlist[] = {
     { 0 }
 };
 
-    static struct setlist *
-getset(name)
-    char *name;
+static struct setlist *
+getset(char *name)
 {
     return (struct setlist *)
 		genget(name, (char **) Setlist, sizeof(struct setlist));
 }
 
-    void
-set_escape_char(s)
-    char *s;
+void
+set_escape_char(char *s)
 {
 	if (rlogin != _POSIX_VDISABLE) {
 		rlogin = (s && *s) ? special(s) : _POSIX_VDISABLE;
@@ -898,10 +825,8 @@ set_escape_char(s)
 	}
 }
 
-    static int
-setcmd(argc, argv)
-    int  argc;
-    char *argv[];
+static int
+setcmd(int argc, char *argv[])
 {
     int value;
     struct setlist *ct;
@@ -976,10 +901,8 @@ setcmd(argc, argv)
     return 1;
 }
 
-    static int
-unsetcmd(argc, argv)
-    int  argc;
-    char *argv[];
+static int
+unsetcmd(int argc, char *argv[])
 {
     struct setlist *ct;
     struct togglelist *c;
@@ -1029,7 +952,7 @@ unsetcmd(argc, argv)
 			name);
 	    return 0;
 	} else if (ct->handler) {
-	    (*ct->handler)(0);
+	    (*ct->handler)(NULL);
 	    printf("%s reset to \"%s\".\r\n", ct->name, (char *)ct->charp);
 	} else {
 	    *(ct->charp) = _POSIX_VDISABLE;
@@ -1044,10 +967,8 @@ unsetcmd(argc, argv)
  * 'mode' command.
  */
 #ifdef	KLUDGELINEMODE
-extern int kludgelinemode;
-
-    static int
-dokludgemode()
+static int
+dokludgemode(int unused)
 {
     kludgelinemode = 1;
     send_wont(TELOPT_LINEMODE, 1);
@@ -1057,8 +978,8 @@ dokludgemode()
 }
 #endif
 
-    static int
-dolinemode()
+static int
+dolinemode(int unused)
 {
 #ifdef	KLUDGELINEMODE
     if (kludgelinemode)
@@ -1069,8 +990,8 @@ dolinemode()
     return 1;
 }
 
-    static int
-docharmode()
+static int
+docharmode(int unused)
 {
 #ifdef	KLUDGELINEMODE
     if (kludgelinemode)
@@ -1082,12 +1003,10 @@ docharmode()
     return 1;
 }
 
-    static int
-dolmmode(bit, on)
-    int bit, on;
+static int
+dolmmode(int bit, int on)
 {
     unsigned char c;
-    extern int linemode;
 
     if (my_want_state_is_wont(TELOPT_LINEMODE)) {
 	printf("?Need to have LINEMODE option enabled first.\r\n");
@@ -1103,14 +1022,14 @@ dolmmode(bit, on)
     return 1;
 }
 
-    int
-tn_setmode(bit)
+int
+tn_setmode(int bit)
 {
     return dolmmode(bit, 1);
 }
 
-    int
-tn_clearmode(bit)
+int
+tn_clearmode(int bit)
 {
     return dolmmode(bit, 0);
 }
@@ -1118,12 +1037,12 @@ tn_clearmode(bit)
 struct modelist {
 	char	*name;		/* command name */
 	char	*help;		/* help string */
-	int	(*handler)();	/* routine which executes command */
+	int	(*handler)(int);/* routine which executes command */
 	int	needconnect;	/* Do we need to be connected to execute? */
 	int	arg1;
 };
 
-static int modehelp(void);
+static int modehelp(int);
 
 static struct modelist ModeList[] = {
     { "character", "Disable LINEMODE option",	docharmode, 1 },
@@ -1157,9 +1076,8 @@ static struct modelist ModeList[] = {
     { 0 },
 };
 
-
-    static int
-modehelp()
+static int
+modehelp(int unused)
 {
     struct modelist *mt;
 
@@ -1178,10 +1096,8 @@ modehelp()
 #define	GETMODECMD(name) (struct modelist *) \
 		genget(name, (char **) ModeList, sizeof(struct modelist))
 
-    static int
-modecmd(argc, argv)
-    int  argc;
-    char *argv[];
+static int
+modecmd(int argc, char *argv[])
 {
     struct modelist *mt;
 
@@ -1206,10 +1122,8 @@ modecmd(argc, argv)
  * "display" command.
  */
 
-    static int
-display(argc, argv)
-    int  argc;
-    char *argv[];
+static int
+display(int argc, char *argv[])
 {
     struct togglelist *tl;
     struct setlist *sl;
@@ -1261,9 +1175,6 @@ display(argc, argv)
 	}
     }
 /*@*/optionstatus();
-#if    defined(ENCRYPTION)
-    EncryptStatus();
-#endif
     return 1;
 #undef	doset
 #undef	dotog
@@ -1277,10 +1188,8 @@ display(argc, argv)
 /*
  * Set the escape character.
  */
-	static int
-setescape(argc, argv)
-	int argc;
-	char *argv[];
+static int
+setescape(int argc, char *argv[])
 {
 	char *arg;
 	char buf[50];
@@ -1297,16 +1206,13 @@ setescape(argc, argv)
 	}
 	if (arg[0] != '\0')
 		escape = arg[0];
-	if (!In3270) {
-		printf("Escape character is '%s'.\r\n", control(escape));
-	}
+	printf("Escape character is '%s'.\r\n", control(escape));
 	(void) fflush(stdout);
 	return 1;
 }
 
-    /*VARARGS*/
-    static int
-togcrmod()
+static int
+togcrmod(int unused1, char *unused2[])
 {
     crmod = !crmod;
     printf("Deprecated usage - please use 'toggle crmod' in the future.\r\n");
@@ -1315,11 +1221,9 @@ togcrmod()
     return 1;
 }
 
-    /*VARARGS*/
-    int
-telnetsuspend()
+int
+telnetsuspend(int unused1, char *unused2[])
 {
-#ifdef	SIGTSTP
     setcommandmode();
     {
 	long oldrows, oldcols, newrows, newcols, err;
@@ -1339,18 +1243,11 @@ telnetsuspend()
     /* reget parameters in case they were changed */
     TerminalSaveState();
     setconnmode(0);
-#else
-    printf("Suspend is not supported.  Try the '!' command instead\r\n");
-#endif
     return 1;
 }
 
-#if	!defined(TN3270)
-    /*ARGSUSED*/
-    int
-shell(argc, argv)
-    int argc;
-    char *argv[];
+int
+shell(int argc, char *argv[])
 {
     long oldrows, oldcols, newrows, newcols, err;
 
@@ -1394,52 +1291,43 @@ shell(argc, argv)
     }
     return 1;
 }
-#else	/* !defined(TN3270) */
-extern int shell();
-#endif	/* !defined(TN3270) */
 
-    /*VARARGS*/
-    static int
-bye(argc, argv)
-    int  argc;		/* Number of arguments */
-    char *argv[];	/* arguments */
+static void
+close_connection(void)
 {
-    extern int resettermname;
+	if (connected) {
+		(void) shutdown(net, 2);
+		printf("Connection closed.\r\n");
+		(void)close(net);
+		connected = 0;
+		resettermname = 1;
+		/* reset options */
+		tninit();
+	}
+}
 
-    if (connected) {
-	(void) shutdown(net, 2);
-	printf("Connection closed.\r\n");
-	(void) NetClose(net);
-	connected = 0;
-	resettermname = 1;
-#if	defined(AUTHENTICATION) || defined(ENCRYPTION)
-	auth_encrypt_connect(connected);
-#endif	/* defined(AUTHENTICATION) */
-	/* reset options */
-	tninit();
-#if	defined(TN3270)
-	SetIn3270();		/* Get out of 3270 mode */
-#endif	/* defined(TN3270) */
-    }
-    if ((argc != 2) || (strcmp(argv[1], "fromquit") != 0)) {
+static int
+bye(int argc, char *argv[])
+{
+	close_connection();
 	longjmp(toplevel, 1);
-	/* NOTREACHED */
-    }
-    return 0; /* NOTREACHED */
 }
 
-/*VARARGS*/
-	int
-quit()
+void
+quit(void)
 {
-	(void) call(bye, "bye", "fromquit", 0);
+	close_connection();
 	Exit(0);
-	return 0; /*NOTREACHED*/
 }
 
-/*VARARGS*/
-	static int
-logout()
+static int
+quitcmd(int unused1, char *unused2[])
+{
+	quit();
+}
+
+static int
+logout(int unused1, char *unused2[])
 {
 	send_do(TELOPT_LOGOUT, 1);
 	(void) netflush();
@@ -1454,11 +1342,11 @@ logout()
 struct slclist {
 	char	*name;
 	char	*help;
-	void	(*handler)();
+	void	(*handler)(int);
 	int	arg;
 };
 
-static void slc_help();
+static void slc_help(int);
 
 struct slclist SlcList[] = {
     { "export",	"Use local special character definitions",
@@ -1472,8 +1360,8 @@ struct slclist SlcList[] = {
     { 0 },
 };
 
-    static void
-slc_help()
+static void
+slc_help(int unused)
 {
     struct slclist *c;
 
@@ -1487,18 +1375,15 @@ slc_help()
     }
 }
 
-    static struct slclist *
-getslc(name)
-    char *name;
+static struct slclist *
+getslc(char *name)
 {
     return (struct slclist *)
 		genget(name, (char **) SlcList, sizeof(struct slclist));
 }
 
-    static int
-slccmd(argc, argv)
-    int  argc;
-    char *argv[];
+static int
+slccmd(int argc, char *argv[])
 {
     struct slclist *c;
 
@@ -1535,6 +1420,12 @@ struct envlist {
 };
 
 static void	env_help(void);
+static void	env_undefine(unsigned char *);
+static void	env_export(unsigned char *);
+static void	env_unexport(unsigned char *);
+static void	env_send(unsigned char *);
+static void	env_list(void);
+static struct env_lst *env_find(unsigned char *var);
 
 struct envlist EnvList[] = {
     { "define",	"Define an environment variable",
@@ -1548,17 +1439,13 @@ struct envlist EnvList[] = {
     { "send",	"Send an environment variable", env_send,	1 },
     { "list",	"List the current environment variables",
 						env_list,	0 },
-#if defined(OLD_ENVIRON) && defined(ENV_HACK)
-    { "varval", "Reverse VAR and VALUE (auto, right, wrong, status)",
-						env_varval,    1 },
-#endif
     { "help",	0,				env_help,		0 },
     { "?",	"Print help information",	env_help,		0 },
     { 0 },
 };
 
-    static void
-env_help()
+static void
+env_help(void)
 {
     struct envlist *c;
 
@@ -1572,18 +1459,15 @@ env_help()
     }
 }
 
-    static struct envlist *
-getenvcmd(name)
-    char *name;
+static struct envlist *
+getenvcmd(char *name)
 {
     return (struct envlist *)
 		genget(name, (char **) EnvList, sizeof(struct envlist));
 }
 
-    int
-env_cmd(argc, argv)
-    int  argc;
-    char *argv[];
+static int
+env_cmd(int argc, char *argv[])
 {
     struct envlist *c;
 
@@ -1625,9 +1509,8 @@ struct env_lst {
 
 struct env_lst envlisthead;
 
-	struct env_lst *
-env_find(var)
-	unsigned char *var;
+static struct env_lst *
+env_find(unsigned char *var)
 {
 	struct env_lst *ep;
 
@@ -1638,8 +1521,8 @@ env_find(var)
 	return(NULL);
 }
 
-	void
-env_init()
+void
+env_init(void)
 {
 	extern char **environ;
 	char **epp, *cp;
@@ -1695,9 +1578,8 @@ env_init()
 	env_export((unsigned char *)"XAUTHORITY");
 }
 
-	struct env_lst *
-env_define(var, value)
-	unsigned char *var, *value;
+struct env_lst *
+env_define(unsigned char *var, unsigned char *value)
 {
 	struct env_lst *ep;
 
@@ -1724,9 +1606,8 @@ env_define(var, value)
 	return(ep);
 }
 
-	void
-env_undefine(var)
-	unsigned char *var;
+static void
+env_undefine(unsigned char *var)
 {
 	struct env_lst *ep;
 
@@ -1742,9 +1623,8 @@ env_undefine(var)
 	}
 }
 
-	void
-env_export(var)
-	unsigned char *var;
+static void
+env_export(unsigned char *var)
 {
 	struct env_lst *ep;
 
@@ -1752,9 +1632,8 @@ env_export(var)
 		ep->export = 1;
 }
 
-	void
-env_unexport(var)
-	unsigned char *var;
+static void
+env_unexport(unsigned char *var)
 {
 	struct env_lst *ep;
 
@@ -1762,16 +1641,12 @@ env_unexport(var)
 		ep->export = 0;
 }
 
-	void
-env_send(var)
-	unsigned char *var;
+static void
+env_send(unsigned char *var)
 {
 	struct env_lst *ep;
 
 	if (my_state_is_wont(TELOPT_NEW_ENVIRON)
-#ifdef	OLD_ENVIRON
-	    && my_state_is_wont(TELOPT_OLD_ENVIRON)
-#endif
 		) {
 		fprintf(stderr,
 		    "Cannot send '%s': Telnet ENVIRON option not enabled\r\n",
@@ -1789,8 +1664,8 @@ env_send(var)
 	env_opt_end(0);
 }
 
-	void
-env_list()
+static void
+env_list(void)
 {
 	struct env_lst *ep;
 
@@ -1800,9 +1675,8 @@ env_list()
 	}
 }
 
-	unsigned char *
-env_default(init, welldefined)
-	int init;
+unsigned char *
+env_default(int init, int welldefined)
 {
 	static struct env_lst *nep = NULL;
 
@@ -1819,10 +1693,8 @@ env_default(init, welldefined)
 	return(NULL);
 }
 
-	unsigned char *
-env_getvalue(var, exported_only)
-	unsigned char *var;
-	int exported_only;
+unsigned char *
+env_getvalue(unsigned char *var, int exported_only)
 {
 	struct env_lst *ep;
 
@@ -1831,337 +1703,54 @@ env_getvalue(var, exported_only)
 	return(NULL);
 }
 
-#if defined(OLD_ENVIRON) && defined(ENV_HACK)
-	void
-env_varval(what)
-	unsigned char *what;
+static void
+connection_status(int local_only)
 {
-	extern int old_env_var, old_env_value, env_auto;
-	int len = strlen((char *)what);
+	if (!connected)
+		printf("No connection.\r\n");
+	else {
+		printf("Connected to %s.\r\n", hostname);
+		if (!local_only) {
+			int mode = getconnmode();
 
-	if (len == 0)
-		goto unknown;
+			printf("Operating ");
+			if (my_want_state_is_will(TELOPT_LINEMODE)) {
+				printf("with LINEMODE option\r\n"
+				    "%s line editing\r\n"
+				    "%s catching of signals\r\n",
+				    (mode & MODE_EDIT) ? "Local" : "No",
+				    (mode & MODE_TRAPSIG) ? "Local" : "No");
+				slcstate();
+#ifdef	KLUDGELINEMODE
+			} else if (kludgelinemode &&
+			    my_want_state_is_dont(TELOPT_SGA)) {
+				printf("in obsolete linemode\r\n");
+#endif
+			} else {
+				printf("in single character mode\r\n");
+				if (localchars)
+					printf("Catching signals locally\r\n");
+			}
 
-	if (strncasecmp((char *)what, "status", len) == 0) {
-		if (env_auto)
-			printf("%s%s", "VAR and VALUE are/will be ",
-					"determined automatically\r\n");
-		if (old_env_var == OLD_ENV_VAR)
-			printf("VAR and VALUE set to correct definitions\r\n");
-		else
-			printf("VAR and VALUE definitions are reversed\r\n");
-	} else if (strncasecmp((char *)what, "auto", len) == 0) {
-		env_auto = 1;
-		old_env_var = OLD_ENV_VALUE;
-		old_env_value = OLD_ENV_VAR;
-	} else if (strncasecmp((char *)what, "right", len) == 0) {
-		env_auto = 0;
-		old_env_var = OLD_ENV_VAR;
-		old_env_value = OLD_ENV_VALUE;
-	} else if (strncasecmp((char *)what, "wrong", len) == 0) {
-		env_auto = 0;
-		old_env_var = OLD_ENV_VALUE;
-		old_env_value = OLD_ENV_VAR;
-	} else {
-unknown:
-		printf("Unknown \"varval\" command. (\"auto\", \"right\", \"wrong\", \"status\")\r\n");
+			printf("%s character echo\r\n",
+			    (mode & MODE_ECHO) ? "Local" : "Remote");
+			if (my_want_state_is_will(TELOPT_LFLOW))
+				printf("%s flow control\r\n",
+				    (mode & MODE_FLOW) ? "Local" : "No");
+		}
 	}
+	printf("Escape character is '%s'.\r\n", control(escape));
+	(void) fflush(stdout);
 }
-#endif
-
-#if	defined(AUTHENTICATION)
-/*
- * The AUTHENTICATE command.
- */
-
-struct authlist {
-	char	*name;
-	char	*help;
-	int	(*handler)();
-	int	narg;
-};
-
-static int
-	auth_help(void);
-
-struct authlist AuthList[] = {
-    { "status",	"Display current status of authentication information",
-						auth_status,	0 },
-    { "disable", "Disable an authentication type ('auth disable ?' for more)",
-						auth_disable,	1 },
-    { "enable", "Enable an authentication type ('auth enable ?' for more)",
-						auth_enable,	1 },
-    { "help",	0,				auth_help,		0 },
-    { "?",	"Print help information",	auth_help,		0 },
-    { 0 },
-};
-
-    static int
-auth_help()
-{
-    struct authlist *c;
-
-    for (c = AuthList; c->name; c++) {
-	if (c->help) {
-	    if (*c->help)
-		printf("%-15s %s\r\n", c->name, c->help);
-	    else
-		printf("\r\n");
-	}
-    }
-    return 0;
-}
-
-    int
-auth_cmd(argc, argv)
-    int  argc;
-    char *argv[];
-{
-    struct authlist *c;
-
-    if (argc < 2) {
-	fprintf(stderr,
-	    "Need an argument to 'auth' command.  'auth ?' for help.\r\n");
-	return 0;
-    }
-
-    c = (struct authlist *)
-		genget(argv[1], (char **) AuthList, sizeof(struct authlist));
-    if (c == 0) {
-	fprintf(stderr, "'%s': unknown argument ('auth ?' for help).\r\n",
-    				argv[1]);
-	return 0;
-    }
-    if (Ambiguous(c)) {
-	fprintf(stderr, "'%s': ambiguous argument ('auth ?' for help).\r\n",
-    				argv[1]);
-	return 0;
-    }
-    if (c->narg + 2 != argc) {
-	fprintf(stderr,
-	    "Need %s%d argument%s to 'auth %s' command.  'auth ?' for help.\r\n",
-		c->narg < argc + 2 ? "only " : "",
-		c->narg, c->narg == 1 ? "" : "s", c->name);
-	return 0;
-    }
-    return((*c->handler)(argv[2], argv[3]));
-}
-#endif
-
-#if    defined(ENCRYPTION)
-/*
- * The ENCRYPT command.
- */
-
-struct encryptlist {
-       char    *name;
-       char    *help;
-       int     (*handler)();
-       int     needconnect;
-       int     minarg;
-       int     maxarg;
-};
- 
-static int
-       EncryptHelp (void);
-
-struct encryptlist EncryptList[] = {
-    { "enable", "Enable encryption. ('encrypt enable ?' for more)",
-                                               EncryptEnable, 1, 1, 2 },
-    { "disable", "Disable encryption. ('encrypt enable ?' for more)",
-                                               EncryptDisable, 0, 1, 2 },
-    { "type", "Set encryption type. ('encrypt type ?' for more)",
-                                               EncryptType, 0, 1, 1 },
-    { "start", "Start encryption. ('encrypt start ?' for more)",
-                                               EncryptStart, 1, 0, 1 },
-    { "stop", "Stop encryption. ('encrypt stop ?' for more)",
-                                               EncryptStop, 1, 0, 1 },
-    { "input", "Start encrypting the input stream",
-                                               EncryptStartInput, 1, 0, 0 },
-    { "-input", "Stop encrypting the input stream",
-                                               EncryptStopInput, 1, 0, 0 },
-    { "output", "Start encrypting the output stream",
-                                               EncryptStartOutput, 1, 0, 0 },
-    { "-output", "Stop encrypting the output stream",
-                                               EncryptStopOutput, 1, 0, 0 },
-
-    { "status",        "Display current status of authentication information",
-                                               EncryptStatus,  0, 0, 0 },
-    { "help",  0,                              EncryptHelp,    0, 0, 0 },
-    { "?",     "Print help information",       EncryptHelp,    0, 0, 0 },
-    { 0 },
-};
-
-static int
-EncryptHelp()
-{
-    struct encryptlist *c;
-
-    for (c = EncryptList; c->name; c++) {
-       if (c->help) {
-           if (*c->help)
-               printf("%-15s %s\r\n", c->name, c->help);
-           else
-               printf("\r\n");
-       }
-    }
-    return 0;
-}
-
-static int
-encrypt_cmd(int argc, char **argv)
-{
-    struct encryptlist *c;
-
-    if (argc < 2) {
-	fprintf(stderr, "Need at least one argument for 'encrypt' command.\n");
-	fprintf(stderr, "('encrypt ?' for help)\n");
-	return 0;
-    }
-
-    c = (struct encryptlist *)
-               genget(argv[1], (char **) EncryptList, sizeof(struct encryptlist));
-    if (c == 0) {
-        fprintf(stderr, "'%s': unknown argument ('encrypt ?' for help).\r\n",
-                               argv[1]);
-        return 0;
-    }
-    if (Ambiguous(c)) {
-        fprintf(stderr, "'%s': ambiguous argument ('encrypt ?' for help).\r\n",
-                               argv[1]);
-        return 0;
-    }
-    argc -= 2;
-    if (argc < c->minarg || argc > c->maxarg) {
-       if (c->minarg == c->maxarg) {
-           fprintf(stderr, "Need %s%d argument%s ",
-               c->minarg < argc ? "only " : "", c->minarg,
-               c->minarg == 1 ? "" : "s");
-       } else {
-           fprintf(stderr, "Need %s%d-%d arguments ",
-               c->maxarg < argc ? "only " : "", c->minarg, c->maxarg);
-       }
-       fprintf(stderr, "to 'encrypt %s' command.  'encrypt ?' for help.\r\n",
-               c->name);
-       return 0;
-    }
-    if (c->needconnect && !connected) {
-       if (!(argc && (isprefix(argv[2], "help") || isprefix(argv[2], "?")))) {
-           printf("?Need to be connected first.\r\n");
-           return 0;
-       }
-    }
-    return ((*c->handler)(argc > 0 ? argv[2] : 0,
-                       argc > 1 ? argv[3] : 0,
-                       argc > 2 ? argv[4] : 0));
-}
-#endif
-
-#if	defined(unix) && defined(TN3270)
-    static void
-filestuff(fd)
-    int fd;
-{
-    int res;
-
-#ifdef	F_GETOWN
-    setconnmode(0);
-    res = fcntl(fd, F_GETOWN, 0);
-    setcommandmode();
-
-    if (res == -1) {
-	perror("fcntl");
-	return;
-    }
-    printf("\tOwner is %d.\r\n", res);
-#endif
-
-    setconnmode(0);
-    res = fcntl(fd, F_GETFL, 0);
-    setcommandmode();
-
-    if (res == -1) {
-	perror("fcntl");
-	return;
-    }
-#ifdef notdef
-    printf("\tFlags are 0x%x: %s\r\n", res, decodeflags(res));
-#endif
-}
-#endif /* defined(unix) && defined(TN3270) */
 
 /*
  * Print status about the connection.
  */
-    /*ARGSUSED*/
-    static int
-status(argc, argv)
-    int	 argc;
-    char *argv[];
+static int
+status(int argc, char *argv[])
 {
-    if (connected) {
-	printf("Connected to %s.\r\n", hostname);
-	if ((argc < 2) || strcmp(argv[1], "notmuch")) {
-	    int mode = getconnmode();
-
-	    if (my_want_state_is_will(TELOPT_LINEMODE)) {
-		printf("Operating with LINEMODE option\r\n");
-		printf("%s line editing\r\n", (mode&MODE_EDIT) ? "Local" : "No");
-		printf("%s catching of signals\r\n",
-					(mode&MODE_TRAPSIG) ? "Local" : "No");
-		slcstate();
-#ifdef	KLUDGELINEMODE
-	    } else if (kludgelinemode && my_want_state_is_dont(TELOPT_SGA)) {
-		printf("Operating in obsolete linemode\r\n");
-#endif
-	    } else {
-		printf("Operating in single character mode\r\n");
-		if (localchars)
-		    printf("Catching signals locally\r\n");
-	    }
-	    printf("%s character echo\r\n", (mode&MODE_ECHO) ? "Local" : "Remote");
-	    if (my_want_state_is_will(TELOPT_LFLOW))
-		printf("%s flow control\r\n", (mode&MODE_FLOW) ? "Local" : "No");
-#if    defined(ENCRYPTION)
-           encrypt_display();
-#endif
-	}
-    } else {
-	printf("No connection.\r\n");
-    }
-#   if !defined(TN3270)
-    printf("Escape character is '%s'.\r\n", control(escape));
-    (void) fflush(stdout);
-#   else /* !defined(TN3270) */
-    if ((!In3270) && ((argc < 2) || strcmp(argv[1], "notmuch"))) {
-	printf("Escape character is '%s'.\r\n", control(escape));
-    }
-#   if defined(unix)
-    if ((argc >= 2) && !strcmp(argv[1], "everything")) {
-	printf("SIGIO received %d time%s.\r\n",
-				sigiocount, (sigiocount == 1)? "":"s");
-	if (In3270) {
-	    printf("Process ID %ld, process group %ld.\r\n",
-					    (long)getpid(), (long)getpgrp());
-	    printf("Terminal input:\r\n");
-	    filestuff(tin);
-	    printf("Terminal output:\r\n");
-	    filestuff(tout);
-	    printf("Network socket:\r\n");
-	    filestuff(net);
-	}
-    }
-    if (In3270 && transcom) {
-       printf("Transparent mode command is '%s'.\r\n", transcom);
-    }
-#   endif /* defined(unix) */
-    (void) fflush(stdout);
-    if (In3270) {
-	return 0;
-    }
-#   endif /* defined(TN3270) */
-    fflush(stdout);
-    return 1;
+	connection_status(0);
+	return 1;
 }
 
 #ifdef	SIGINFO
@@ -2169,9 +1758,9 @@ status(argc, argv)
  * Function that gets called when SIGINFO is received.
  */
 void
-ayt_status()
+ayt_status(int sig)
 {
-    (void) call(status, "status", "notmuch", 0);
+	connection_status(1);
 }
 #endif
 
@@ -2215,11 +1804,11 @@ cmdrc(char *m1, char *m2)
 	if (line[0] == '#')
 	    continue;
 	if (gotmachine) {
-	    if (!isspace(line[0]))
+	    if (!isspace((unsigned char)line[0]))
 		gotmachine = 0;
 	}
 	if (gotmachine == 0) {
-	    if (isspace(line[0]))
+	    if (isspace((unsigned char)line[0]))
 		continue;
 	    if (strncasecmp(line, m1, l1) == 0)
 		strncpy(line, &line[l1], sizeof(line) - l1);
@@ -2257,21 +1846,15 @@ cmdrc(char *m1, char *m2)
     fclose(rcfile);
 }
 
-
-    int
-tn(argc, argv)
-    int argc;
-    char *argv[];
+int
+tn(int argc, char *argv[])
 {
     struct addrinfo hints, *res, *res0;
     int error;
     struct sockaddr_in sin;
     unsigned long temp;
-    extern char *inet_ntoa();
-#if	defined(IP_OPTIONS) && defined(IPPROTO_IP)
     char *srp = 0;
     int srlen;
-#endif
     char *cmd, *hostp = 0, *portp = 0, *user = 0, *aliasp = 0;
     int retry;
     const int niflags = NI_NUMERICHOST;
@@ -2329,13 +1912,12 @@ tn(argc, argv)
 	    continue;
 	}
     usage:
-	printf("usage: %s [-l user] [-a] host-name [port]\r\n", cmd);
+	printf("usage: %s [-a] [-b hostalias] [-l user] host-name [port]\r\n", cmd);
 	return 0;
     }
     if (hostp == 0)
 	goto usage;
 
-#if	defined(IP_OPTIONS) && defined(IPPROTO_IP)
     if (hostp[0] == '@' || hostp[0] == '!') {
 	if ((hostname = strrchr(hostp, ':')) == NULL)
 	    hostname = strrchr(hostp, '@');
@@ -2352,7 +1934,6 @@ tn(argc, argv)
 	    abort();
 	}
     } else
-#endif
     {
 	hostname = hostp;
 	memset(&hints, 0, sizeof(hints));
@@ -2423,30 +2004,24 @@ tn(argc, argv)
             }
 	    freeaddrinfo(ares);
 	}
-#if	defined(IP_OPTIONS) && defined(IPPROTO_IP)
 	if (srp && res->ai_family == AF_INET
-	 && setsockopt(net, IPPROTO_IP, IP_OPTIONS, (char *)srp, srlen) < 0)
+	 && setsockopt(net, IPPROTO_IP, IP_OPTIONS, srp, srlen) < 0)
 		perror("setsockopt (IP_OPTIONS)");
-#endif
-#if	defined(IPPROTO_IP) && defined(IP_TOS)
 	if (res->ai_family == AF_INET) {
-# if	defined(HAS_GETTOS)
-	    struct tosent *tp;
-	    if (tos < 0 && (tp = gettosbyname("telnet", "tcp")))
-		tos = tp->t_tos;
-# endif
 	    if (tos < 0)
 		tos = IPTOS_LOWDELAY;	/* Low Delay bit */
 	    if (tos
-		&& (setsockopt(net, IPPROTO_IP, IP_TOS,
-		    (void *)&tos, sizeof(int)) < 0)
+		&& (setsockopt(net, IPPROTO_IP, IP_TOS, &tos, sizeof(int)) < 0)
 		&& (errno != ENOPROTOOPT))
 		    perror("telnet: setsockopt (IP_TOS) (ignored)");
 	}
-#endif	/* defined(IPPROTO_IP) && defined(IP_TOS) */
 
-	if (debug && SetSockOpt(net, SOL_SOCKET, SO_DEBUG, 1) < 0) {
-		perror("setsockopt (SO_DEBUG)");
+	if (debug) {
+		int one = 1;
+
+		if (setsockopt(net, SOL_SOCKET, SO_DEBUG, &one,
+		    sizeof(one)) < 0)
+			perror("setsockopt (SO_DEBUG)");
 	}
 
 	if (connect(net, res->ai_addr, res->ai_addrlen) < 0) {
@@ -2466,9 +2041,6 @@ tn(argc, argv)
 	}
 
 	connected++;
-#if	defined(AUTHENTICATION) || defined(ENCRYPTION)
-	auth_encrypt_connect(connected);
-#endif	/* defined(AUTHENTICATION) */
 	break;
     }
     freeaddrinfo(res0);
@@ -2479,9 +2051,9 @@ tn(argc, argv)
     if (autologin && user == NULL) {
 	struct passwd *pw;
 
-	user = getenv("USER");
+	user = getlogin();
 	if (user == NULL ||
-	    ((pw = getpwnam(user)) && pw->pw_uid != getuid())) {
+	    (pw = getpwnam(user)) == NULL || pw->pw_uid != getuid()) {
 		if ((pw = getpwuid(getuid())) != NULL)
 			user = pw->pw_name;
 		else
@@ -2492,13 +2064,11 @@ tn(argc, argv)
 	env_define((unsigned char *)"USER", (unsigned char *)user);
 	env_export((unsigned char *)"USER");
     }
-    (void) call(status, "status", "notmuch", 0);
+    connection_status(1);
     if (setjmp(peerdied) == 0)
 	telnet(user);
-    (void) NetClose(net);
+    (void)close(net);
     ExitString("Connection closed by foreign host.\r\n",1);
-    /*NOTREACHED*/
-    return 0;
 }
 
 #define HELPINDENT (sizeof ("connect"))
@@ -2516,15 +2086,6 @@ static char
 	togglestring[] ="toggle operating parameters ('toggle ?' for more)",
 	slchelp[] =	"change state of special charaters ('slc ?' for more)",
 	displayhelp[] =	"display operating parameters",
-#if	defined(TN3270) && defined(unix)
-	transcomhelp[] = "specify Unix command for transparent mode pipe",
-#endif	/* defined(TN3270) && defined(unix) */
-#if	defined(AUTHENTICATION)
-	authhelp[] =	"turn on (off) authentication ('auth ?' for more)",
-#endif
-#if     defined(ENCRYPTION)
-        encrypthelp[] = "turn on (off) encryption ('encrypt ?' for more)",
-#endif
 	zhelp[] =	"suspend telnet",
 #ifdef SKEY
 	skeyhelp[] =	"compute response to s/key challenge",
@@ -2541,32 +2102,19 @@ static Command cmdtab[] = {
 	{ "display",	displayhelp,	display,	0 },
 	{ "mode",	modestring,	modecmd,	0 },
 	{ "open",	openhelp,	tn,		0 },
-	{ "quit",	quithelp,	quit,		0 },
+	{ "quit",	quithelp,	quitcmd,	0 },
 	{ "send",	sendhelp,	sendcmd,	0 },
 	{ "set",	sethelp,	setcmd,		0 },
 	{ "unset",	unsethelp,	unsetcmd,	0 },
 	{ "status",	statushelp,	status,		0 },
 	{ "toggle",	togglestring,	toggle,		0 },
 	{ "slc",	slchelp,	slccmd,		0 },
-#if	defined(TN3270) && defined(unix)
-	{ "transcom",	transcomhelp,	settranscom,	0 },
-#endif	/* defined(TN3270) && defined(unix) */
-#if	defined(AUTHENTICATION)
-	{ "auth",	authhelp,	auth_cmd,	0 },
-#endif
-#if    defined(ENCRYPTION)
-	{ "encrypt",    encrypthelp,    encrypt_cmd,    0 },
-#endif
 
 	{ "z",		zhelp,		telnetsuspend,	0 },
-#if	defined(TN3270)
-	{ "!",		shellhelp,	shell,		1 },
-#else
 	{ "!",		shellhelp,	shell,		0 },
-#endif
 	{ "environ",	envhelp,	env_cmd,	0 },
 	{ "?",		helphelp,	help,		0 },
-#if	defined(SKEY)
+#ifdef SKEY
 	{ "skey",	skeyhelp,	skey_calc,	0 },
 #endif		
 	{ 0,		0,		0,		0 }
@@ -2583,28 +2131,8 @@ static Command cmdtab2[] = {
 };
 
 
-/*
- * Call routine with argc, argv set from args (terminated by 0).
- */
-
-    /*VARARGS1*/
-    static int
-call(intrtn_t routine, ...)
-{
-    va_list ap;
-    char *args[100];
-    int argno = 0;
-
-    va_start(ap, routine);
-    while ((args[argno++] = va_arg(ap, char *)) != 0);
-    va_end(ap);
-    return (*routine)(argno-1, args);
-}
-
-
-    static Command *
-getcmd(name)
-    char *name;
+static Command *
+getcmd(char *name)
 {
     Command *cm;
 
@@ -2613,22 +2141,17 @@ getcmd(name)
     return (Command *) genget(name, (char **) cmdtab2, sizeof(Command));
 }
 
-    void
-command(top, tbuf, cnt)
-    int top;
-    char *tbuf;
-    int cnt;
+void
+command(int top, char *tbuf, int cnt)
 {
     Command *c;
 
     setcommandmode();
     if (!top) {
 	putchar('\n');
-#if	defined(unix)
     } else {
 	(void) signal(SIGINT, SIG_DFL);
 	(void) signal(SIGQUIT, SIG_DFL);
-#endif	/* defined(unix) */
     }
     for (;;) {
 	if (rlogin == _POSIX_VDISABLE)
@@ -2649,10 +2172,8 @@ command(top, tbuf, cnt)
 	    if (rlogin != _POSIX_VDISABLE)
 		printf("%s> ", prompt);
 	    if (fgets(line, sizeof(line), stdin) == NULL) {
-		if (feof(stdin) || ferror(stdin)) {
-		    (void) quit();
-		    /*NOTREACHED*/
-		}
+		if (feof(stdin) || ferror(stdin))
+		    quit();
 		break;
 	    }
 	}
@@ -2680,27 +2201,17 @@ command(top, tbuf, cnt)
 	}
     }
     if (!top) {
-	if (!connected) {
+	if (!connected)
 	    longjmp(toplevel, 1);
-	    /*NOTREACHED*/
-	}
-#if	defined(TN3270)
-	if (shell_active == 0) {
-	    setconnmode(0);
-	}
-#else	/* defined(TN3270) */
 	setconnmode(0);
-#endif	/* defined(TN3270) */
     }
 }
 
 /*
  * Help command.
  */
-	static int
-help(argc, argv)
-	int argc;
-	char *argv[];
+static int
+help(int argc, char *argv[])
 {
 	Command *c;
 
@@ -2726,8 +2237,6 @@ help(argc, argv)
 	}
 	return 0;
 }
-
-#if	defined(IP_OPTIONS) && defined(IPPROTO_IP)
 
 /*
  * Source route is handed in as
@@ -2768,19 +2277,13 @@ help(argc, argv)
  *		pointed to by *cpp is.
  *
  */
-	unsigned long
-sourceroute(arg, cpp, lenp)
-	char	*arg;
-	char	**cpp;
-	int	*lenp;
+
+static unsigned long
+sourceroute(char *arg, char **cpp, int *lenp)
 {
 	static char lsr[44];
-#ifdef	sysV88
-	static IOPTN ipopt;
-#endif
 	char *cp, *cp2, *lsrp, *lsrep;
-	int tmp;
-	struct in_addr sin_addr;
+	struct in_addr addr;
 	struct hostent *host = 0;
 	char c;
 
@@ -2811,31 +2314,21 @@ sourceroute(arg, cpp, lenp)
 	 * route or a strict source route, and fill in
 	 * the begining of the option.
 	 */
-#ifndef	sysV88
 	if (*cp == '!') {
 		cp++;
 		*lsrp++ = IPOPT_SSRR;
 	} else
 		*lsrp++ = IPOPT_LSRR;
-#else
-	if (*cp == '!') {
-		cp++;
-		ipopt.io_type = IPOPT_SSRR;
-	} else
-		ipopt.io_type = IPOPT_LSRR;
-#endif
 
 	if (*cp != '@')
 		return((unsigned long)-1);
 
-#ifndef	sysV88
 	lsrp++;		/* skip over length, we'll fill it in later */
 	*lsrp++ = 4;
-#endif
 
 	cp++;
 
-	sin_addr.s_addr = 0;
+	addr.s_addr = 0;
 
 	for (c = 0;;) {
 		if (c == ':')
@@ -2856,22 +2349,14 @@ sourceroute(arg, cpp, lenp)
 		if (!c)
 			cp2 = 0;
 
-		if ((tmp = inet_addr(cp)) != -1) {
-			sin_addr.s_addr = tmp;
-		} else if ((host = gethostbyname(cp))) {
-#if	defined(h_addr)
-			memmove((caddr_t)&sin_addr,
-				host->h_addr_list[0], 
-				sizeof(sin_addr));
-#else
-			memmove((caddr_t)&sin_addr, host->h_addr, 
-				sizeof(sin_addr));
-#endif
-		} else {
-			*cpp = cp;
-			return(0);
+		if ((addr.s_addr = inet_addr(cp)) == INADDR_NONE) {
+			if ((host = gethostbyname(cp)) == NULL) {
+				*cpp = cp;
+				return(0);
+			}
+			memcpy(&addr, host->h_addr_list[0], sizeof addr);
 		}
-		memmove(lsrp, (char *)&sin_addr, 4);
+		memcpy(lsrp, &addr, 4);
 		lsrp += 4;
 		if (cp2)
 			cp = cp2;
@@ -2883,7 +2368,6 @@ sourceroute(arg, cpp, lenp)
 		if (lsrp + 4 > lsrep)
 			return((unsigned long)-1);
 	}
-#ifndef	sysV88
 	if ((*(*cpp+IPOPT_OLEN) = lsrp - *cpp) <= 7) {
 		*cpp = 0;
 		*lenp = 0;
@@ -2891,16 +2375,5 @@ sourceroute(arg, cpp, lenp)
 	}
 	*lsrp++ = IPOPT_NOP; /* 32 bit word align it */
 	*lenp = lsrp - *cpp;
-#else
-	ipopt.io_len = lsrp - *cpp;
-	if (ipopt.io_len <= 5) {		/* Is 3 better ? */
-		*cpp = 0;
-		*lenp = 0;
-		return((unsigned long)-1);
-	}
-	*lenp = sizeof(ipopt);
-	*cpp = (char *) &ipopt;
-#endif
-	return(sin_addr.s_addr);
+	return(addr.s_addr);
 }
-#endif

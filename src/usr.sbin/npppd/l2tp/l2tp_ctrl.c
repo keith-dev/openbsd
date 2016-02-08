@@ -1,4 +1,4 @@
-/*	$OpenBSD: l2tp_ctrl.c,v 1.16 2013/09/13 03:25:27 yasuoka Exp $	*/
+/*	$OpenBSD: l2tp_ctrl.c,v 1.18 2014/07/21 01:51:11 guenther Exp $	*/
 
 /*-
  * Copyright (c) 2009 Internet Initiative Japan Inc.
@@ -26,15 +26,15 @@
  * SUCH DAMAGE.
  */
 /**@file Control connection processing functions for L2TP LNS */
-/* $Id: l2tp_ctrl.c,v 1.16 2013/09/13 03:25:27 yasuoka Exp $ */
+/* $Id: l2tp_ctrl.c,v 1.18 2014/07/21 01:51:11 guenther Exp $ */
 #include <sys/types.h>
 #include <sys/param.h>
 #include <sys/time.h>
 #include <sys/socket.h>
-#include <sys/endian.h>
 #include <netinet/in.h>
 #include <net/if.h>
 #include <arpa/inet.h>
+#include <endian.h>
 #include <errno.h>
 #include <event.h>
 #include <ifaddrs.h>
@@ -106,13 +106,8 @@ static u_int l2tp_ctrl_id_seq = 0;
 l2tp_ctrl *
 l2tp_ctrl_create(void)
 {
-	l2tp_ctrl *_this;
 
-	if ((_this = malloc(sizeof(l2tp_ctrl))) == NULL)
-		return NULL;
-
-	memset(_this, 0, sizeof(l2tp_ctrl));
-	return (l2tp_ctrl *)_this;
+	return calloc(1, sizeof(l2tp_ctrl));
 }
 
 /**

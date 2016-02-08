@@ -1,4 +1,4 @@
-/* $OpenBSD: sgmap_common.c,v 1.10 2008/06/26 05:42:08 ray Exp $ */
+/* $OpenBSD: sgmap_common.c,v 1.13 2014/07/12 18:44:40 tedu Exp $ */
 /* $NetBSD: sgmap_common.c,v 1.13 2000/06/29 09:02:57 mrg Exp $ */
 
 /*-
@@ -119,6 +119,7 @@ alpha_sgmap_init(t, sgmap, name, wbase, sgvabase, sgvasize, ptesize, ptva,
 		    name);
 		goto die;
 	}
+	mtx_init(&sgmap->aps_mtx, IPL_HIGH);
 
 	/*
 	 * Allocate a spill page if that hasn't already been done.
@@ -142,6 +143,17 @@ alpha_sgmap_init(t, sgmap, name, wbase, sgvabase, sgvasize, ptesize, ptva,
 }
 
 int
+alpha_sgmap_dmamap_setup(map, nsegments, flags)
+	bus_dmamap_t map;
+	int nsegments;
+	int flags;
+{
+	map->_dm_cookie = malloc(nsegments * sizeof(struct extent_region),
+	    M_DEVBUF, (flags & BUS_DMA_NOWAIT) ? M_NOWAIT : M_WAITOK);
+	return (map->_dm_cookie == NULL);
+}
+
+int
 alpha_sgmap_dmamap_create(t, size, nsegments, maxsegsz, boundary,
     flags, dmamp)
 	bus_dma_tag_t t;
@@ -161,10 +173,21 @@ alpha_sgmap_dmamap_create(t, size, nsegments, maxsegsz, boundary,
 		return (error);
 
 	map = *dmamp;
+	if (alpha_sgmap_dmamap_setup(map, nsegments, flags)) {
+		_bus_dmamap_destroy(t, map);
+		return (ENOMEM);
+	}
 
 	/* XXX BUS_DMA_ALLOCNOW */
 
-	return (error);
+	return (0);
+}
+
+void
+alpha_sgmap_dmamap_teardown(map)
+	bus_dmamap_t map;
+{
+	free(map->_dm_cookie, M_DEVBUF, 0);
 }
 
 void
@@ -174,5 +197,6 @@ alpha_sgmap_dmamap_destroy(t, map)
 {
 	KASSERT(map->dm_mapsize == 0);
 
+	alpha_sgmap_dmamap_teardown(map);
 	_bus_dmamap_destroy(t, map);
 }

@@ -356,6 +356,8 @@ ngx_start_worker_processes(ngx_cycle_t *cycle, ngx_int_t n, ngx_int_t type)
 
     ngx_log_error(NGX_LOG_NOTICE, cycle->log, 0, "start worker processes");
 
+    ngx_memzero(&ch, sizeof(ngx_channel_t));
+
     ch.command = NGX_CMD_OPEN_CHANNEL;
 
     for (i = 0; i < n; i++) {
@@ -401,6 +403,8 @@ ngx_start_cache_manager_processes(ngx_cycle_t *cycle, ngx_uint_t respawn)
     ngx_spawn_process(cycle, ngx_cache_manager_process_cycle,
                       &ngx_cache_manager_ctx, "cache manager process",
                       respawn ? NGX_PROCESS_JUST_RESPAWN : NGX_PROCESS_RESPAWN);
+
+    ngx_memzero(&ch, sizeof(ngx_channel_t));
 
     ch.command = NGX_CMD_OPEN_CHANNEL;
     ch.pid = ngx_processes[ngx_process_slot].pid;
@@ -460,6 +464,8 @@ ngx_signal_worker_processes(ngx_cycle_t *cycle, int signo)
     ngx_int_t      i;
     ngx_err_t      err;
     ngx_channel_t  ch;
+
+    ngx_memzero(&ch, sizeof(ngx_channel_t));
 
 #if (NGX_BROKEN_SCM_RIGHTS)
 
@@ -531,7 +537,7 @@ ngx_signal_worker_processes(ngx_cycle_t *cycle, int signo)
         }
 
         ngx_log_debug2(NGX_LOG_DEBUG_CORE, cycle->log, 0,
-                       "kill (%P, %d)" , ngx_processes[i].pid, signo);
+                       "kill (%P, %d)", ngx_processes[i].pid, signo);
 
         if (kill(ngx_processes[i].pid, signo) == -1) {
             err = ngx_errno;
@@ -561,6 +567,8 @@ ngx_reap_children(ngx_cycle_t *cycle)
     ngx_uint_t        live;
     ngx_channel_t     ch;
     ngx_core_conf_t  *ccf;
+
+    ngx_memzero(&ch, sizeof(ngx_channel_t));
 
     ch.command = NGX_CMD_CLOSE_CHANNEL;
     ch.fd = -1;
@@ -703,10 +711,13 @@ ngx_master_process_exit(ngx_cycle_t *cycle)
      * ngx_cycle->pool is already destroyed.
      */
 
-    ngx_exit_log_file.fd = ngx_cycle->log->file->fd;
 
-    ngx_exit_log = *ngx_cycle->log;
+    ngx_exit_log = *ngx_log_get_file_log(ngx_cycle->log);
+
+    ngx_exit_log_file.fd = ngx_exit_log.file->fd;
     ngx_exit_log.file = &ngx_exit_log_file;
+    ngx_exit_log.next = NULL;
+    ngx_exit_log.writer = NULL;
 
     ngx_exit_cycle.log = &ngx_exit_log;
     ngx_exit_cycle.files = ngx_cycle->files;
@@ -897,6 +908,8 @@ ngx_worker_process_init(ngx_cycle_t *cycle, ngx_int_t worker)
 #endif
 
     if (geteuid() == 0) {
+	char *prefix;
+
         if (!ngx_chrooted) {
             goto nochroot;
         }
@@ -908,23 +921,28 @@ ngx_worker_process_init(ngx_cycle_t *cycle, ngx_int_t worker)
             exit(2);
 	}
 
-	if (stat(pw->pw_dir, &stb) == -1) {
+	if (ngx_prefix)
+	    prefix = (char *)ngx_prefix;
+	else
+	    prefix = pw->pw_dir;
+
+	if (stat(prefix, &stb) == -1) {
             ngx_log_error(NGX_LOG_EMERG, cycle->log, ngx_errno,
-                          "stat(%s) failed", pw->pw_dir);
+                          "stat(%s) failed", prefix);
             /* fatal */
             exit(2);
 	}
 
 	if (stb.st_uid != 0 || (stb.st_mode & (S_IWGRP|S_IWOTH)) != 0) {
             ngx_log_error(NGX_LOG_EMERG, cycle->log, ngx_errno,
-                          "bad privsep dir permissions on %s", pw->pw_dir);
+                          "bad privsep dir permissions on %s", prefix);
             /* fatal */
             exit(2);
 	}
 
-	if (chroot(pw->pw_dir) == -1) {
+	if (chroot(prefix) == -1) {
             ngx_log_error(NGX_LOG_EMERG, cycle->log, ngx_errno,
-                          "chroot(%s) failed", pw->pw_dir);
+                          "chroot(%s) failed", prefix);
             /* fatal */
             exit(2);
 	}
@@ -992,6 +1010,8 @@ nochroot:
         ngx_log_error(NGX_LOG_ALERT, cycle->log, ngx_errno,
                       "sigprocmask() failed");
     }
+
+    srandom((ngx_pid << 16) ^ ngx_time());
 
     /*
      * disable deleting previous events for the listening sockets because
@@ -1078,8 +1098,8 @@ ngx_worker_process_exit(ngx_cycle_t *cycle)
                 && !c[i].read->resolver)
             {
                 ngx_log_error(NGX_LOG_ALERT, cycle->log, 0,
-                              "open socket #%d left in connection %ui",
-                              c[i].fd, i);
+                              "*%uA open socket #%d left in connection %ui",
+                              c[i].number, c[i].fd, i);
                 ngx_debug_quit = 1;
             }
         }
@@ -1097,10 +1117,12 @@ ngx_worker_process_exit(ngx_cycle_t *cycle)
      * ngx_cycle->pool is already destroyed.
      */
 
-    ngx_exit_log_file.fd = ngx_cycle->log->file->fd;
+    ngx_exit_log = *ngx_log_get_file_log(ngx_cycle->log);
 
-    ngx_exit_log = *ngx_cycle->log;
+    ngx_exit_log_file.fd = ngx_exit_log.file->fd;
     ngx_exit_log.file = &ngx_exit_log_file;
+    ngx_exit_log.next = NULL;
+    ngx_exit_log.writer = NULL;
 
     ngx_exit_cycle.log = &ngx_exit_log;
     ngx_exit_cycle.files = ngx_cycle->files;

@@ -1,4 +1,4 @@
-/*	$OpenBSD: safte.c,v 1.48 2011/06/15 01:10:05 dlg Exp $ */
+/*	$OpenBSD: safte.c,v 1.50 2014/07/13 17:34:25 deraadt Exp $ */
 
 /*
  * Copyright (c) 2005 David Gwynne <dlg@openbsd.org>
@@ -201,7 +201,7 @@ safte_attach(struct device *parent, struct device *self, void *aux)
 			printf("%s: unable to register update task\n",
 			    DEVNAME(sc));
 			sc->sc_nsensors = sc->sc_ntemps = 0;
-			free(sc->sc_sensors, M_DEVBUF);
+			free(sc->sc_sensors, M_DEVBUF, 0);
 		} else {
 			for (i = 0; i < sc->sc_nsensors; i++)
 				sensor_attach(&sc->sc_sensordev, 
@@ -247,7 +247,7 @@ safte_detach(struct device *self, int flags)
 		for (i = 0; i < sc->sc_nsensors; i++)
 			sensor_detach(&sc->sc_sensordev, 
 			    &sc->sc_sensors[i].se_sensor);
-		free(sc->sc_sensors, M_DEVBUF);
+		free(sc->sc_sensors, M_DEVBUF, 0);
 	}
 
 	if (sc->sc_encbuf != NULL)
@@ -321,7 +321,7 @@ safte_read_config(struct safte_softc *sc)
 	sc->sc_nsensors = config->nfans + config->npwrsup + config->ntemps + 
 		(config->doorlock ? 1 : 0) + (config->alarm ? 1 : 0);
 
-	sc->sc_sensors = malloc(sc->sc_nsensors * sizeof(struct safte_sensor),
+	sc->sc_sensors = mallocarray(sc->sc_nsensors, sizeof(struct safte_sensor),
 	    M_DEVBUF, M_NOWAIT | M_ZERO);
 	if (sc->sc_sensors == NULL) {
 		dma_free(sc->sc_encbuf, sc->sc_encbuflen);

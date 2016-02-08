@@ -1,4 +1,4 @@
-/* $OpenBSD: fuse_vfsops.c,v 1.8 2013/12/10 13:43:05 pelikan Exp $ */
+/* $OpenBSD: fuse_vfsops.c,v 1.11 2014/07/12 18:43:52 tedu Exp $ */
 /*
  * Copyright (c) 2012-2013 Sylvestre Gallon <ccna.syl@gmail.com>
  *
@@ -98,8 +98,12 @@ fusefs_mount(struct mount *mp, const char *path, void *data,
 	fmp->mp = mp;
 	fmp->sess_init = 0;
 	fmp->dev = vp->v_rdev;
-	mp->mnt_data = fmp;
+	if (args.max_read > 0)
+		fmp->max_read = MIN(args.max_read, FUSEBUFMAXSIZE);
+	else
+		fmp->max_read = FUSEBUFMAXSIZE;
 
+	mp->mnt_data = fmp;
 	mp->mnt_flag |= MNT_LOCAL;
 	vfs_getnewfsid(mp);
 
@@ -134,6 +138,17 @@ fusefs_unmount(struct mount *mp, int mntflags, struct proc *p)
 
 	fmp = VFSTOFUSEFS(mp);
 
+	if (mntflags & MNT_FORCE) {
+		/* fusefs can never be rootfs so don't check for it */
+		if (!doforce)
+			return (EINVAL);
+
+		flags |= FORCECLOSE;
+	}
+
+	if ((error = vflush(mp, NULLVP, flags)))
+		return (error);
+
 	if (fmp->sess_init) {
 		fmp->sess_init = 0;
 		fbuf = fb_setup(0, 0, FBT_DESTROY, p);
@@ -146,20 +161,9 @@ fusefs_unmount(struct mount *mp, int mntflags, struct proc *p)
 		fb_delete(fbuf);
 	}
 
-	if (mntflags & MNT_FORCE) {
-		/* fusefs can never be rootfs so don't check for it */
-		if (!doforce)
-			return (EINVAL);
-
-		flags |= FORCECLOSE;
-	}
-
-	if ((error = vflush(mp, 0, flags)))
-		return (error);
-
 	fuse_device_cleanup(fmp->dev, NULL);
 	fuse_device_set_fmp(fmp, 0);
-	free(fmp, M_FUSEFS);
+	free(fmp, M_FUSEFS, 0);
 
 	return (error);
 }

@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_wi.c,v 1.154 2013/11/26 09:50:33 mpi Exp $	*/
+/*	$OpenBSD: if_wi.c,v 1.156 2014/07/22 13:12:12 mpi Exp $	*/
 
 /*
  * Copyright (c) 1997, 1998, 1999
@@ -81,8 +81,6 @@
 
 #ifdef INET
 #include <netinet/in.h>
-#include <netinet/in_systm.h>
-#include <netinet/ip.h>
 #include <netinet/if_ether.h>
 #endif
 
@@ -1976,7 +1974,7 @@ wi_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 			na->na_nodes++;
 		}
 		if (nr)
-			free(nr, M_DEVBUF);
+			free(nr, M_DEVBUF, 0);
 		break;
 	    }
 	case SIOCG80211FLAGS:
@@ -2031,9 +2029,9 @@ wi_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 	}
 
 	if (wreq)
-		free(wreq, M_DEVBUF);
+		free(wreq, M_DEVBUF, 0);
 	if (nwidp)
-		free(nwidp, M_DEVBUF);
+		free(nwidp, M_DEVBUF, 0);
 
 fail:
 	sc->wi_flags &= ~WI_FLAGS_BUSY;

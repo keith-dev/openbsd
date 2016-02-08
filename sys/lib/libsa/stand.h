@@ -1,4 +1,4 @@
-/*	$OpenBSD: stand.h,v 1.56 2013/12/28 02:51:07 deraadt Exp $	*/
+/*	$OpenBSD: stand.h,v 1.58 2014/07/13 09:26:08 jasper Exp $	*/
 /*	$NetBSD: stand.h,v 1.18 1996/11/30 04:35:51 gwr Exp $	*/
 
 /*-

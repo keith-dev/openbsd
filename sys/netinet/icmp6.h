@@ -1,4 +1,4 @@
-/*	$OpenBSD: icmp6.h,v 1.38 2013/10/24 11:20:16 deraadt Exp $	*/
+/*	$OpenBSD: icmp6.h,v 1.40 2014/07/11 12:20:26 benno Exp $	*/
 /*	$KAME: icmp6.h,v 1.84 2003/04/23 10:26:51 itojun Exp $	*/
 
 /*
@@ -529,7 +529,6 @@ struct icmp6stat {
 #define ICMPV6CTL_ND6_DELAY	8
 #define ICMPV6CTL_ND6_UMAXTRIES	9
 #define ICMPV6CTL_ND6_MMAXTRIES		10
-#define ICMPV6CTL_ND6_USELOOPBACK	11
 #define ICMPV6CTL_NODEINFO	13
 #define ICMPV6CTL_ERRPPSLIMIT	14	/* ICMPv6 error pps limitation */
 #define ICMPV6CTL_ND6_MAXNUDHINT	15
@@ -552,9 +551,9 @@ struct icmp6stat {
 	{ "nd6_delay", CTLTYPE_INT }, \
 	{ "nd6_umaxtries", CTLTYPE_INT }, \
 	{ "nd6_mmaxtries", CTLTYPE_INT }, \
-	{ "nd6_useloopback", CTLTYPE_INT }, \
 	{ 0, 0 }, \
-	{ "nodeinfo", CTLTYPE_INT }, \
+	{ 0, 0 }, \
+	{ 0, 0 }, \
 	{ "errppslimit", CTLTYPE_INT }, \
 	{ "nd6_maxnudhint", CTLTYPE_INT }, \
 	{ "mtudisc_hiwat", CTLTYPE_INT }, \
@@ -576,9 +575,9 @@ struct icmp6stat {
 	&nd6_delay, \
 	&nd6_umaxtries, \
 	&nd6_mmaxtries, \
-	&nd6_useloopback, \
 	NULL, \
-	&icmp6_nodeinfo, \
+	NULL, \
+	NULL, \
 	&icmp6errppslim, \
 	&nd6_maxnudhint, \
 	&icmp6_mtudisc_hiwat, \

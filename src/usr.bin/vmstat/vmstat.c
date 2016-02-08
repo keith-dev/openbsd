@@ -1,5 +1,5 @@
 /*	$NetBSD: vmstat.c,v 1.29.4.1 1996/06/05 00:21:05 cgd Exp $	*/
-/*	$OpenBSD: vmstat.c,v 1.127 2013/11/26 21:08:12 deraadt Exp $	*/
+/*	$OpenBSD: vmstat.c,v 1.132 2014/07/13 21:13:51 kettenis Exp $	*/
 
 /*
  * Copyright (c) 1980, 1986, 1991, 1993
@@ -42,6 +42,8 @@
 #include <sys/sysctl.h>
 #include <sys/device.h>
 #include <sys/pool.h>
+#include <sys/vmmeter.h>
+
 #include <time.h>
 #include <nlist.h>
 #include <kvm.h>
@@ -56,9 +58,6 @@
 #include <paths.h>
 #include <limits.h>
 #include "dkstats.h"
-
-#include <uvm/uvm_object.h>
-#include <uvm/uvm_extern.h>
 
 struct nlist namelist[] = {
 #define X_UVMEXP	0		/* sysctl */
@@ -358,7 +357,8 @@ dovmstat(u_int interval, int reps)
 #define	rate(x)	((unsigned)((((unsigned)x) + halfuptime) / uptime)) /* round */
 #define pgtok(a) ((a) * ((unsigned int)uvmexp.pagesize >> 10))
 		(void)printf("%6u %7u ",
-		    pgtok(total.t_avm), pgtok(total.t_free));
+		    pgtok(uvmexp.active + uvmexp.swpginuse),
+		    pgtok(uvmexp.free));
 		(void)printf("%4u ", rate(uvmexp.faults - ouvmexp.faults));
 		(void)printf("%3u ", rate(uvmexp.pdreact - ouvmexp.pdreact));
 		(void)printf("%3u ", rate(uvmexp.pageins - ouvmexp.pageins));
@@ -528,6 +528,8 @@ dosum(void)
 	(void)printf("%11u forks where vmspace is shared\n",
 		     uvmexp.forks_sharevm);
 	(void)printf("%11u kernel map entries\n", uvmexp.kmapent);
+	(void)printf("%11u zeroed page hits\n", uvmexp.pga_zerohit);
+	(void)printf("%11u zeroed page misses\n", uvmexp.pga_zeromiss);
 
 	/* daemon counters */
 	(void)printf("%11u number of times the pagedaemon woke up\n",
@@ -884,7 +886,7 @@ domem(void)
 }
 
 static void
-print_pool(struct pool *pp, char *name)
+print_pool(struct kinfo_pool *pp, char *name)
 {
 	static int first = 1;
 	char maxp[32];
@@ -965,7 +967,7 @@ dopool_sysctl(void)
 {
 	int mib[4], npools, i;
 	long total = 0, inuse = 0;
-	struct pool pool;
+	struct kinfo_pool pool;
 	size_t size;
 
 	mib[0] = CTL_KERN;
@@ -984,7 +986,7 @@ dopool_sysctl(void)
 		mib[1] = KERN_POOL;
 		mib[2] = KERN_POOL_POOL;
 		mib[3] = i;
-		size = sizeof(struct pool);
+		size = sizeof(pool);
 		if (sysctl(mib, 4, &pool, &size, NULL, 0) < 0) {
 			if (errno == ENOENT)
 				continue;
@@ -1001,7 +1003,7 @@ dopool_sysctl(void)
 		print_pool(&pool, name);
 
 		inuse += (pool.pr_nget - pool.pr_nput) * pool.pr_size;
-		total += pool.pr_npages * getpagesize();	/* XXX */
+		total += pool.pr_npages * pool.pr_pgsize;
 	}
 
 	inuse /= 1024;
@@ -1015,6 +1017,8 @@ dopool_kvm(void)
 {
 	SIMPLEQ_HEAD(,pool) pool_head;
 	struct pool pool, *pp = &pool;
+	struct pool_allocator palloc;
+	struct kinfo_pool pi;
 	long total = 0, inuse = 0;
 	u_long addr;
 
@@ -1036,13 +1040,38 @@ dopool_kvm(void)
 			    kvm_geterr(kd));
 			exit(1);
 		}
+		if (kvm_read(kd, (u_long)pp->pr_alloc,
+		    &palloc, sizeof(palloc)) < 0) {
+			(void)fprintf(stderr,
+			    "vmstat: pool allocator trashed: %s\n",
+			    kvm_geterr(kd));
+			exit(1);
+		}
 
 		name[31] = '\0';
 
-		print_pool(pp, name);
+		memset(&pi, 0, sizeof(pi));
+		pi.pr_size = pp->pr_size;
+		pi.pr_pgsize = palloc.pa_pagesz;
+		pi.pr_itemsperpage = pp->pr_itemsperpage;
+		pi.pr_npages = pp->pr_npages;
+		pi.pr_minpages = pp->pr_minpages;
+		pi.pr_maxpages = pp->pr_maxpages;
+		pi.pr_hardlimit = pp->pr_hardlimit;
+		pi.pr_nout = pp->pr_nout;
+		pi.pr_nitems = pp->pr_nitems;
+		pi.pr_nget = pp->pr_nget;
+		pi.pr_nput = pp->pr_nput;
+		pi.pr_nfail = pp->pr_nfail;
+		pi.pr_npagealloc = pp->pr_npagealloc;
+		pi.pr_npagefree = pp->pr_npagefree;
+		pi.pr_hiwat = pp->pr_hiwat;
+		pi.pr_nidle = pp->pr_nidle;
 
-		inuse += (pp->pr_nget - pp->pr_nput) * pp->pr_size;
-		total += pp->pr_npages * getpagesize();	/* XXX */
+		print_pool(&pi, name);
+
+		inuse += (pi.pr_nget - pi.pr_nput) * pi.pr_size;
+		total += pi.pr_npages * pi.pr_pgsize;
 
 		addr = (u_long)SIMPLEQ_NEXT(pp, pr_poollist);
 	}

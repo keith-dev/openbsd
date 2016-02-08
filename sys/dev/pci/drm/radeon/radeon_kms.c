@@ -1,4 +1,4 @@
-/*	$OpenBSD: radeon_kms.c,v 1.24 2014/02/25 00:03:38 kettenis Exp $	*/
+/*	$OpenBSD: radeon_kms.c,v 1.29 2014/07/06 08:24:54 jsg Exp $	*/
 /*
  * Copyright 2008 Advanced Micro Devices, Inc.
  * Copyright 2008 Red Hat Inc.
@@ -578,6 +578,7 @@ radeondrm_attach_kms(struct device *parent, struct device *self, void *aux)
 	dev = (struct drm_device *)drm_attach_pci(&kms_driver, pa, is_agp,
 	    rdev->console, self);
 	rdev->ddev = dev;
+	rdev->pdev = dev->pdev;
 
 	rdev->family = rdev->flags & RADEON_FAMILY_MASK;
 	if (!radeon_msi_ok(rdev))
@@ -750,12 +751,14 @@ radeondrm_attachhook(void *xsc)
 }
 
 int
-radeondrm_activate_kms(struct device *arg, int act)
+radeondrm_activate_kms(struct device *self, int act)
 {
-	struct radeon_device *rdev = (struct radeon_device *)arg;
+	struct radeon_device *rdev = (struct radeon_device *)self;
+	int rv = 0;
 
 	switch (act) {
 	case DVACT_QUIESCE:
+		rv = config_activate_children(self, act);
 		radeon_suspend_kms(rdev->ddev);
 		break;
 	case DVACT_SUSPEND:
@@ -764,10 +767,11 @@ radeondrm_activate_kms(struct device *arg, int act)
 		break;
 	case DVACT_WAKEUP:
 		radeon_resume_kms(rdev->ddev);
+		rv = config_activate_children(self, act);
 		break;
 	}
 
-	return (0);
+	return (rv);
 }
 
 /**
@@ -1107,19 +1111,29 @@ int radeon_driver_open_kms(struct drm_device *dev, struct drm_file *file_priv)
 
 		radeon_vm_init(rdev, &fpriv->vm);
 
-		/* map the ib pool buffer read only into
-		 * virtual address space */
-		bo_va = radeon_vm_bo_add(rdev, &fpriv->vm,
-					 rdev->ring_tmp_bo.bo);
-		r = radeon_vm_bo_set_addr(rdev, bo_va, RADEON_VA_IB_OFFSET,
-					  RADEON_VM_PAGE_READABLE |
-					  RADEON_VM_PAGE_SNOOPED);
-		if (r) {
-			radeon_vm_fini(rdev, &fpriv->vm);
-			kfree(fpriv);
-			return r;
-		}
+		if (rdev->accel_working) {
+			r = radeon_bo_reserve(rdev->ring_tmp_bo.bo, false);
+			if (r) {
+				radeon_vm_fini(rdev, &fpriv->vm);
+				kfree(fpriv);
+				return r;
+			}
 
+			/* map the ib pool buffer read only into
+			 * virtual address space */
+			bo_va = radeon_vm_bo_add(rdev, &fpriv->vm,
+						 rdev->ring_tmp_bo.bo);
+			r = radeon_vm_bo_set_addr(rdev, bo_va, RADEON_VA_IB_OFFSET,
+						  RADEON_VM_PAGE_READABLE |
+						  RADEON_VM_PAGE_SNOOPED);
+
+			radeon_bo_unreserve(rdev->ring_tmp_bo.bo);
+			if (r) {
+				radeon_vm_fini(rdev, &fpriv->vm);
+				kfree(fpriv);
+				return r;
+			}
+		}
 		file_priv->driver_priv = fpriv;
 	}
 	return 0;
@@ -1144,13 +1158,15 @@ void radeon_driver_postclose_kms(struct drm_device *dev,
 		struct radeon_bo_va *bo_va;
 		int r;
 
-		r = radeon_bo_reserve(rdev->ring_tmp_bo.bo, false);
-		if (!r) {
-			bo_va = radeon_vm_bo_find(&fpriv->vm,
-						  rdev->ring_tmp_bo.bo);
-			if (bo_va)
-				radeon_vm_bo_rmv(rdev, bo_va);
-			radeon_bo_unreserve(rdev->ring_tmp_bo.bo);
+		if (rdev->accel_working) {
+			r = radeon_bo_reserve(rdev->ring_tmp_bo.bo, false);
+			if (!r) {
+				bo_va = radeon_vm_bo_find(&fpriv->vm,
+							  rdev->ring_tmp_bo.bo);
+				if (bo_va)
+					radeon_vm_bo_rmv(rdev, bo_va);
+				radeon_bo_unreserve(rdev->ring_tmp_bo.bo);
+			}
 		}
 
 		radeon_vm_fini(rdev, &fpriv->vm);

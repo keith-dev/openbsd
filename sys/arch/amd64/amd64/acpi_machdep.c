@@ -1,4 +1,4 @@
-/*	$OpenBSD: acpi_machdep.c,v 1.57 2014/01/21 09:40:54 kettenis Exp $	*/
+/*	$OpenBSD: acpi_machdep.c,v 1.62 2014/07/16 07:42:50 mlarkin Exp $	*/
 /*
  * Copyright (c) 2005 Thorsten Lockert <tholo@sigmasoft.com>
  *
@@ -106,22 +106,23 @@ acpi_scan(struct acpi_mem_map *handle, paddr_t pa, size_t len)
 
 	if (acpi_map(pa, len, handle))
 		return (NULL);
-	for (ptr = handle->va, i = 0;
-	     i < len;
-	     ptr += 16, i += 16)
-		if (memcmp(ptr, RSDP_SIG, sizeof(RSDP_SIG) - 1) == 0) {
-			rsdp = (struct acpi_rsdp1 *)ptr;
-			/*
-			 * Only checksum whichever portion of the
-			 * RSDP that is actually present
-			 */
-			if (rsdp->revision == 0 &&
-			    acpi_checksum(ptr, sizeof(struct acpi_rsdp1)) == 0)
+	for (ptr = handle->va, i = 0; i < len; ptr += 16, i += 16) {
+		/* is there a valid signature? */
+		if (memcmp(ptr, RSDP_SIG, sizeof(RSDP_SIG) - 1))
+			continue;
+
+		/* is the checksum valid? */
+		if (acpi_checksum(ptr, sizeof(struct acpi_rsdp1)) != 0)
+			continue;
+
+		/* check the extended checksum as needed */
+		rsdp = (struct acpi_rsdp1 *)ptr;
+		if (rsdp->revision == 0)
+			return (ptr);
+		else if (rsdp->revision >= 2 && rsdp->revision <= 4)
+			if (acpi_checksum(ptr, sizeof(struct acpi_rsdp)) == 0)
 				return (ptr);
-			else if (rsdp->revision >= 2 && rsdp->revision <= 4 &&
-			    acpi_checksum(ptr, sizeof(struct acpi_rsdp)) == 0)
-				return (ptr);
-		}
+	}
 	acpi_unmap(handle);
 
 	return (NULL);
@@ -183,7 +184,7 @@ acpi_acquire_glk(uint32_t *lock)
 		new = (old & ~GL_BIT_PENDING) | GL_BIT_OWNED;
 		if ((old & GL_BIT_OWNED) != 0)
 			new |= GL_BIT_PENDING;
-	} while (x86_atomic_cas_int32(lock, old, new) != old);
+	} while (atomic_cas_uint(lock, old, new) != old);
 
 	return ((new & GL_BIT_PENDING) == 0);
 }
@@ -201,7 +202,7 @@ acpi_release_glk(uint32_t *lock)
 	do {
 		old = *lock;
 		new = old & ~(GL_BIT_PENDING | GL_BIT_OWNED);
-	} while (x86_atomic_cas_int32(lock, old, new) != old);
+	} while (atomic_cas_uint(lock, old, new) != old);
 
 	return ((old & GL_BIT_PENDING) != 0);
 }
@@ -302,12 +303,10 @@ acpi_sleep_cpu(struct acpi_softc *sc, int state)
 
 #ifdef HIBERNATE
 		if (state == ACPI_STATE_S4) {
-			uvm_pmr_zero_everything();
 			if (hibernate_suspend()) {
 				printf("%s: hibernate_suspend failed",
 				    DEVNAME(sc));
 				hibernate_free();
-				uvm_pmr_dirty_everything();
 				return (ECANCELED);
 			}
 		}
@@ -318,7 +317,7 @@ acpi_sleep_cpu(struct acpi_softc *sc, int state)
 		 * when we get to DVACT_POWERDOWN.
 		 */
 		boothowto |= RB_POWERDOWN;
-		config_suspend(TAILQ_FIRST(&alldevs), DVACT_POWERDOWN);
+		config_suspend(device_mainbus(), DVACT_POWERDOWN);
 		boothowto &= ~RB_POWERDOWN;
 
 		acpi_sleep_pm(sc, state);
@@ -326,13 +325,6 @@ acpi_sleep_cpu(struct acpi_softc *sc, int state)
 		return (ECANCELED);
 	}
 	/* Resume path */
-
-#ifdef HIBERNATE
-	if (state == ACPI_STATE_S4) {
-		hibernate_free();
-		uvm_pmr_dirty_everything();
-	}
-#endif
 
 	/* Reset the vectors */
 	sc->sc_facs->wakeup_vector = 0;

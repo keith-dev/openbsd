@@ -1,4 +1,4 @@
-/*      $OpenBSD: if_gre.c,v 1.64 2013/10/19 14:46:30 mpi Exp $ */
+/*      $OpenBSD: if_gre.c,v 1.70 2014/07/22 11:06:09 mpi Exp $ */
 /*	$NetBSD: if_gre.c,v 1.9 1999/10/25 19:18:11 drochner Exp $ */
 
 /*
@@ -59,7 +59,6 @@
 
 #ifdef INET
 #include <netinet/in.h>
-#include <netinet/in_systm.h>
 #include <netinet/ip.h>
 #include <netinet/ip_var.h>
 #include <netinet/if_ether.h>
@@ -178,7 +177,7 @@ gre_clone_destroy(struct ifnet *ifp)
 
 	if_detach(ifp);
 
-	free(sc, M_DEVBUF);
+	free(sc, M_DEVBUF, 0);
 	return (0);
 }
 
@@ -208,10 +207,10 @@ gre_output(struct ifnet *ifp, struct mbuf *m, struct sockaddr *dst,
 	}
 
 #ifdef DIAGNOSTIC
-	if (ifp->if_rdomain != rtable_l2(m->m_pkthdr.rdomain)) {
+	if (ifp->if_rdomain != rtable_l2(m->m_pkthdr.ph_rtableid)) {
 		printf("%s: trying to send packet on wrong domain. "
 		    "if %d vs. mbuf %d, AF %d\n", ifp->if_xname,
-		    ifp->if_rdomain, rtable_l2(m->m_pkthdr.rdomain),
+		    ifp->if_rdomain, rtable_l2(m->m_pkthdr.ph_rtableid),
 		    dst->sa_family);
 	}
 #endif
@@ -423,14 +422,14 @@ gre_output(struct ifnet *ifp, struct mbuf *m, struct sockaddr *dst,
 	ifp->if_obytes += m->m_pkthdr.len;
 
 
-	m->m_pkthdr.rdomain = sc->g_rtableid;
+	m->m_pkthdr.ph_rtableid = sc->g_rtableid;
 
 #if NPF > 0
 	pf_pkt_addr_changed(m);
 #endif
 
 	/* Send it off */
-	error = ip_output(m, (void *)NULL, &sc->route, 0, (void *)NULL, (void *)NULL);
+	error = ip_output(m, NULL, &sc->route, 0, NULL, NULL, 0);
   end:
 	if (error)
 		ifp->if_oerrors++;
@@ -441,7 +440,8 @@ int
 gre_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 {
 
-	struct ifreq *ifr = (struct ifreq *) data;
+	struct ifreq *ifr = (struct ifreq *)data;
+	struct ifaddr *ifa = (struct ifaddr *)data;
 	struct if_laddrreq *lifr = (struct if_laddrreq *)data;
 	struct ifkalivereq *ikar = (struct ifkalivereq *)data;
 	struct gre_softc *sc = ifp->if_softc;
@@ -455,6 +455,7 @@ gre_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 	switch(cmd) {
 	case SIOCSIFADDR:
 		ifp->if_flags |= IFF_UP;
+		ifa->ifa_rtrequest = p2p_rtrequest;
 		break;
 	case SIOCSIFDSTADDR:
 		break;

@@ -1,4 +1,4 @@
-/*	$OpenBSD: varmodifiers.c,v 1.35 2013/11/22 15:47:35 espie Exp $	*/
+/*	$OpenBSD: varmodifiers.c,v 1.38 2014/05/18 08:08:50 espie Exp $	*/
 /*	$NetBSD: var.c,v 1.18 1997/03/18 19:24:46 christos Exp $	*/
 
 /*
@@ -460,14 +460,14 @@ do_sort(const char *s, const struct Name *dummy UNUSED, void *arg UNUSED)
 	const char *start, *end;
 
 	n = 1024;	/* start at 1024 words */
-	t = (struct Name *)emalloc(sizeof(struct Name) * n);
+	t = ereallocarray(NULL, n, sizeof(struct Name));
 	start = s;
 	end = start;
 
 	for (i = 0;; i++) {
 		if (i == n) {
 			n *= 2;
-			t = (struct Name *)erealloc(t, sizeof(struct Name) * n);
+			t = ereallocarray(t, n, sizeof(struct Name));
 		}
 		start = iterate_words(&end);
 		if (start == NULL)
@@ -1414,7 +1414,7 @@ do_regex(const char *s, const struct Name *n UNUSED, void *arg)
 		p2.nsub = 1;
 	if (p2.nsub > 10)
 		p2.nsub = 10;
-	p2.matches = emalloc(p2.nsub * sizeof(regmatch_t));
+	p2.matches = ereallocarray(NULL, p2.nsub, sizeof(regmatch_t));
 	result = VarModify((char *)s, VarRESubstitute, &p2);
 	regfree(&p2.re);
 	free(p2.matches);

@@ -1,4 +1,4 @@
-#	$OpenBSD: RAMDISK,v 1.60 2013/11/15 19:42:20 sasano Exp $
+#	$OpenBSD: RAMDISK,v 1.63 2014/07/15 22:12:10 deraadt Exp $
 
 machine		amd64		# architecture, used by config; REQUIRED
 
@@ -107,7 +107,6 @@ wskbd*	at ukbd? mux 1
 #upl*	at uhub?		# Prolific PL2301/PL2302 host-to-host `network'
 #ugl*	at uhub?		# Genesys Logic GL620USB-A host-to-host `network'
 #urio*	at uhub?		# Diamond Multimedia Rio 500
-#uyap*	at uhub?		# Y@P firmware loader
 #ugen*	at uhub?		# USB Generic driver
 
 pckbc0		at isa?		# PC keyboard controller
@@ -143,7 +142,6 @@ mfi*	at pci?			# LSI MegaRAID SAS controllers
 #ciss*	at pci?			# Compaq Smart ARRAY [56]* RAID controllers
 #twe*	at pci?			# 3ware Escalade RAID controllers
 #iha*	at pci?			# Initio Ultra/UltraWide SCSI controllers
-#isp*	at pci?			# Qlogic ISP [12]0x0 SCSI/FibreChannel
 #aic*	at pcmcia?		# PCMCIA Adaptec 152[02] SCSI
 #siop*	at pci?			# NCR 538XX SCSI controllers(new)
 #adv*	at pci?			# AdvanSys 1200A/B and ULTRA SCSI
@@ -243,8 +241,6 @@ ciphy*	at mii?			# Cicada CS8201 10/100/1000 copper PHY
 ukphy*	at mii?			# "unknown" PHYs
 
 pseudo-device	loop	1	# network loopback
-#pseudo-device	sl	1	# CSLIP
-#pseudo-device	ppp	1	# PPP
 pseudo-device	bpfilter 1	# packet filter
 pseudo-device	rd	1	# ramdisk
 pseudo-device	wsmux	2

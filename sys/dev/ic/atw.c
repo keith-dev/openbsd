@@ -1,4 +1,4 @@
-/*	$OpenBSD: atw.c,v 1.80 2013/12/06 21:03:02 deraadt Exp $	*/
+/*	$OpenBSD: atw.c,v 1.83 2014/07/12 18:48:17 tedu Exp $	*/
 /*	$NetBSD: atw.c,v 1.69 2004/07/23 07:07:55 dyoung Exp $	*/
 
 /*-
@@ -48,8 +48,6 @@
 #include <sys/time.h>
 
 #include <machine/endian.h>
-
-#include <uvm/uvm_extern.h>
 
 #include <net/if.h>
 #include <net/if_dl.h>
@@ -425,7 +423,7 @@ atw_read_srom(struct atw_softc *sc)
 
 	if (!read_seeprom(&sd, sc->sc_srom, 0, sc->sc_sromsz/2)) {
 		printf("%s: could not read SROM\n", sc->sc_dev.dv_xname);
-		free(sc->sc_srom, M_DEVBUF);
+		free(sc->sc_srom, M_DEVBUF, 0);
 		return -1;
 	}
 #ifdef ATW_DEBUG
@@ -2745,7 +2743,7 @@ atw_detach(struct atw_softc *sc)
 	bus_dmamem_free(sc->sc_dmat, &sc->sc_cdseg, sc->sc_cdnseg);
 
 	if (sc->sc_srom)
-		free(sc->sc_srom, M_DEVBUF);
+		free(sc->sc_srom, M_DEVBUF, 0);
 
 	return (0);
 }
@@ -3605,8 +3603,7 @@ atw_start(struct ifnet *ifp)
 		 */
 		IF_DEQUEUE(&ic->ic_mgtq, m0);
 		if (m0 != NULL) {
-			ni = (struct ieee80211_node *)m0->m_pkthdr.rcvif;
-			m0->m_pkthdr.rcvif = NULL;
+			ni = m0->m_pkthdr.ph_cookie;
 		} else {
 			/* send no data packets until we are associated */
 			if (ic->ic_state != IEEE80211_S_RUN)

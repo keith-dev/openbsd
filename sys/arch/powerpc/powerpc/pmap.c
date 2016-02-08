@@ -1,4 +1,4 @@
-/*	$OpenBSD: pmap.c,v 1.125 2014/02/09 11:25:58 mpi Exp $ */
+/*	$OpenBSD: pmap.c,v 1.129 2014/05/09 18:16:15 miod Exp $ */
 
 /*
  * Copyright (c) 2001, 2002, 2007 Dale Rahn.
@@ -81,10 +81,10 @@
 #include <sys/systm.h>
 #include <sys/pool.h>
 
-#include <uvm/uvm.h>
+#include <uvm/uvm_extern.h>
 
 #include <machine/pcb.h>
-#include <machine/powerpc.h>
+#include <powerpc/powerpc.h>
 #include <machine/pmap.h>
 
 #include <machine/db_machdep.h>
@@ -92,6 +92,9 @@
 #include <ddb/db_output.h>
 
 #include <powerpc/lock.h>
+
+struct dumpmem dumpmem[VM_PHYSSEG_MAX];
+u_int ndumpmem;
 
 struct pmap kernel_pmap_;
 static struct mem_region *pmap_mem, *pmap_avail;
@@ -1398,7 +1401,7 @@ pmap_avail_setup(void)
 	struct mem_region *mp;
 	int pmap_physmem;
 
-	(fw->mem_regions) (&pmap_mem, &pmap_avail);
+	ppc_mem_regions(&pmap_mem, &pmap_avail);
 	pmap_cnt_avail = 0;
 	pmap_physmem = 0;
 
@@ -1548,7 +1551,7 @@ pmap_steal_avail(size_t size, int align)
 			}
 		}
 	}
-	panic ("unable to allocate region with size %x align %x",
+	panic ("unable to allocate region with size %zx align %x",
 	    size, align);
 }
 
@@ -2663,12 +2666,12 @@ void
 print_pteg(pmap_t pm, vaddr_t va)
 {
 	int sr, idx;
-	struct pte *ptp;
+	struct pte_32 *ptp;
 
 	sr = ptesr(pm->pm_sr, va);
 	idx = pteidx(sr,  va);
 
-	ptp = pmap_ptable + idx  * 8;
+	ptp = pmap_ptable32 + idx  * 8;
 	db_printf("va %x, sr %x, idx %x\n", va, sr, idx);
 
 	db_printf("%08x %08x %08x %08x  %08x %08x %08x %08x\n",
@@ -2677,7 +2680,7 @@ print_pteg(pmap_t pm, vaddr_t va)
 	db_printf("%08x %08x %08x %08x  %08x %08x %08x %08x\n",
 	    ptp[0].pte_lo, ptp[1].pte_lo, ptp[2].pte_lo, ptp[3].pte_lo,
 	    ptp[4].pte_lo, ptp[5].pte_lo, ptp[6].pte_lo, ptp[7].pte_lo);
-	ptp = pmap_ptable + (idx ^ pmap_ptab_mask) * 8;
+	ptp = pmap_ptable32 + (idx ^ pmap_ptab_mask) * 8;
 	db_printf("%08x %08x %08x %08x  %08x %08x %08x %08x\n",
 	    ptp[0].pte_hi, ptp[1].pte_hi, ptp[2].pte_hi, ptp[3].pte_hi,
 	    ptp[4].pte_hi, ptp[5].pte_hi, ptp[6].pte_hi, ptp[7].pte_hi);
@@ -2706,9 +2709,9 @@ pmap_print_pted(struct pte_desc *pted, int(*print)(const char *, ...))
 			print("ptehi %x ptelo %x ptp %x Aptp %x\n",
 			    pted->p.pted_pte64.pte_hi,
 			    pted->p.pted_pte64.pte_lo,
-			    pmap_ptable +
+			    pmap_ptable64 +
 				8*pteidx(ptesr(pted->pted_pmap->pm_sr, va), va),
-			    pmap_ptable +
+			    pmap_ptable64 +
 				8*(pteidx(ptesr(pted->pted_pmap->pm_sr, va), va)
 				    ^ pmap_ptab_mask)
 			    );
@@ -2716,9 +2719,9 @@ pmap_print_pted(struct pte_desc *pted, int(*print)(const char *, ...))
 			print("ptehi %x ptelo %x ptp %x Aptp %x\n",
 			    pted->p.pted_pte32.pte_hi,
 			    pted->p.pted_pte32.pte_lo,
-			    pmap_ptable +
+			    pmap_ptable32 +
 				8*pteidx(ptesr(pted->pted_pmap->pm_sr, va), va),
-			    pmap_ptable +
+			    pmap_ptable32 +
 				8*(pteidx(ptesr(pted->pted_pmap->pm_sr, va), va)
 				    ^ pmap_ptab_mask)
 			    );

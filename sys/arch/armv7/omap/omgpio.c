@@ -1,4 +1,4 @@
-/* $OpenBSD: omgpio.c,v 1.3 2013/11/20 13:32:40 rapha Exp $ */
+/* $OpenBSD: omgpio.c,v 1.5 2014/07/14 08:55:07 rapha Exp $ */
 /*
  * Copyright (c) 2007,2009 Dale Rahn <drahn@openbsd.org>
  *
@@ -470,7 +470,8 @@ omgpio_pin_ctl(void *arg, int pin, int flags)
 		omgpio_pin_dir_write(sc, pin, OMGPIO_DIR_OUT);
 
 	if (board_id == BOARD_ID_AM335X_BEAGLEBONE)
-		sitara_cm_padconf_set_gpioflags(pin, flags);
+		sitara_cm_padconf_set_gpioflags(
+		    sc->sc_dev.dv_unit * GPIO_NUM_PINS + pin, flags);
 }
 
 void
@@ -662,7 +663,7 @@ omgpio_intr_disestablish(struct omgpio_softc *sc, void *cookie)
 
 	evcount_detach(&ih->ih_count);
 
-	free(ih, M_DEVBUF);
+	free(ih, M_DEVBUF, 0);
 
 	omgpio_intr_level(gpio, IST_NONE);
 	omgpio_intr_mask(gpio);

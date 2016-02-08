@@ -1,4 +1,4 @@
-/*	$OpenBSD: param.h,v 1.105 2014/01/12 11:26:09 deraadt Exp $	*/
+/*	$OpenBSD: param.h,v 1.107 2014/07/15 21:59:17 deraadt Exp $	*/
 
 /*-
  * Copyright (c) 1982, 1986, 1989, 1993
@@ -41,8 +41,8 @@
 #define BSD4_3	1
 #define BSD4_4	1
 
-#define OpenBSD	201405		/* OpenBSD version (year & month). */
-#define OpenBSD5_5 1		/* OpenBSD 5.5 */
+#define OpenBSD	201411		/* OpenBSD version (year & month). */
+#define OpenBSD5_6 1		/* OpenBSD 5.6 */
 
 #ifndef NULL
 #ifdef 	__GNUG__
@@ -161,7 +161,7 @@
 #define	DEV_BSIZE	(1 << _DEV_BSHIFT)
 #ifdef _KERNEL
 #define	DEV_BSHIFT	_DEV_BSHIFT
-#define	BLKDEV_IOSIZE	2048
+#define	BLKDEV_IOSIZE	PAGE_SIZE
 #endif /* _KERNEL */
 
 /* pages to disk blocks */

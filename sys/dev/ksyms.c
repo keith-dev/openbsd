@@ -1,4 +1,4 @@
-/*	$OpenBSD: ksyms.c,v 1.23 2013/10/17 08:02:19 deraadt Exp $	*/
+/*	$OpenBSD: ksyms.c,v 1.25 2014/07/08 17:19:25 deraadt Exp $	*/
 /*
  * Copyright (c) 1998 Todd C. Miller <Todd.Miller@courtesan.com>
  * Copyright (c) 2001 Artur Grabowski <art@openbsd.org>
@@ -33,8 +33,6 @@
 #include <sys/malloc.h>
 #include <sys/fcntl.h>
 #include <sys/conf.h>
-
-#include <uvm/uvm_extern.h>
 
 #ifdef _NLIST_DO_ELF
 #include <sys/exec_elf.h>
@@ -153,6 +151,9 @@ ksymsread(dev_t dev, struct uio *uio, int flags)
 	size_t len;
 	caddr_t v;
 	size_t off;
+
+	if (uio->uio_offset < 0)
+		return (EINVAL);
 
 	while (uio->uio_resid > 0) {
 		if (uio->uio_offset >= ksym_head_size + ksym_syms_size)

@@ -1,4 +1,4 @@
-/*	$OpenBSD: mbuf.h,v 1.172 2014/01/19 03:04:54 claudio Exp $	*/
+/*	$OpenBSD: mbuf.h,v 1.180 2014/07/13 09:52:48 dlg Exp $	*/
 /*	$NetBSD: mbuf.h,v 1.19 1996/02/09 18:25:14 christos Exp $	*/
 
 /*
@@ -82,7 +82,6 @@ struct pf_state_key;
 struct inpcb;
 
 struct pkthdr_pf {
-	void		*hdr;		/* saved hdr pos in mbuf, for ECN */
 	struct pf_state_key *statekey;	/* pf stackside statekey */
 	struct inpcb	*inp;		/* connected pcb for outgoing packet */
 	u_int32_t	 qid;		/* queue id */
@@ -111,13 +110,14 @@ struct pkthdr_pf {
 /* record/packet header in first mbuf of chain; valid if M_PKTHDR set */
 struct	pkthdr {
 	struct ifnet		*rcvif;		/* rcv interface */
-	SLIST_HEAD(packet_tags, m_tag) tags; /* list of packet tags */
+	SLIST_HEAD(packet_tags, m_tag) tags;	/* list of packet tags */
 	int			 len;		/* total packet length */
 	u_int16_t		 tagsset;	/* mtags attached */
 	u_int16_t		 pad;
 	u_int16_t		 csum_flags;	/* checksum flags */
 	u_int16_t		 ether_vtag;	/* Ethernet 802.1p+Q vlan tag */
-	u_int			 rdomain;	/* routing domain id */
+	u_int			 ph_rtableid;	/* routing table id */
+	void			*ph_cookie;	/* additional data */
 	struct pkthdr_pf	 pf;
 };
 
@@ -126,11 +126,8 @@ struct mbuf_ext {
 	caddr_t	ext_buf;		/* start of buffer */
 					/* free routine if not the usual */
 	void	(*ext_free)(caddr_t, u_int, void *);
-	void	*ext_arg;		/* argument for ext_free */
+	void	*ext_arg;
 	u_int	ext_size;		/* size of buffer, for ext_free */
-	int	ext_type;
-	struct ifnet* ext_ifp;
-	int	ext_backend;		/* backend pool the storage came from */
 	struct mbuf *ext_nextref;
 	struct mbuf *ext_prevref;
 #ifdef DEBUG
@@ -170,7 +167,7 @@ struct mbuf {
 #define	M_EXT		0x0001	/* has associated external storage */
 #define	M_PKTHDR	0x0002	/* start of record */
 #define	M_EOR		0x0004	/* end of record */
-#define M_CLUSTER	0x0008	/* external storage is a cluster */
+#define M_EXTWR		0x0008	/* external storage is writable */
 #define	M_PROTO1	0x0010	/* protocol-specific */
 
 /* mbuf pkthdr flags, also in m_flags */
@@ -188,7 +185,7 @@ struct mbuf {
 
 #ifdef _KERNEL
 #define M_BITS \
-    ("\20\1M_EXT\2M_PKTHDR\3M_EOR\4M_CLUSTER\5M_PROTO1\6M_VLANTAG\7M_LOOP" \
+    ("\20\1M_EXT\2M_PKTHDR\3M_EOR\4M_EXTWR\5M_PROTO1\6M_VLANTAG\7M_LOOP" \
     "\10M_FILDROP\11M_BCAST\12M_MCAST\13M_CONF\14M_AUTH\15M_TUNNEL" \
     "\16M_ZEROIZE\17M_COMP\20M_LINK0")
 #endif
@@ -270,7 +267,7 @@ struct mbuf {
 
 #define	MCLADDREFERENCE(o, n)	do {					\
 		int ms = splnet();					\
-		(n)->m_flags |= ((o)->m_flags & (M_EXT|M_CLUSTER));	\
+		(n)->m_flags |= ((o)->m_flags & (M_EXT|M_EXTWR));	\
 		(n)->m_ext.ext_nextref = (o)->m_ext.ext_nextref;	\
 		(n)->m_ext.ext_prevref = (o);				\
 		(o)->m_ext.ext_nextref = (n);				\
@@ -295,14 +292,12 @@ struct mbuf {
  * MCLGET allocates and adds an mbuf cluster to a normal mbuf;
  * the flag M_EXT is set upon success.
  */
-#define	MEXTADD(m, buf, size, type, free, arg) do {			\
+#define	MEXTADD(m, buf, size, mflags, free, arg) do {			\
 	(m)->m_data = (m)->m_ext.ext_buf = (caddr_t)(buf);		\
-	(m)->m_flags |= M_EXT;						\
-	(m)->m_flags &= ~M_CLUSTER;					\
+	(m)->m_flags |= M_EXT | (mflags & M_EXTWR);			\
 	(m)->m_ext.ext_size = (size);					\
 	(m)->m_ext.ext_free = (free);					\
 	(m)->m_ext.ext_arg = (arg);					\
-	(m)->m_ext.ext_type = (type);					\
 	MCLINITREFERENCE(m);						\
 } while (/* CONSTCOND */ 0)
 
@@ -331,7 +326,7 @@ struct mbuf {
  * from must have M_PKTHDR set, and to must be empty.
  */
 #define	M_MOVE_PKTHDR(to, from) do {					\
-	(to)->m_flags = ((to)->m_flags & (M_EXT | M_CLUSTER));		\
+	(to)->m_flags = ((to)->m_flags & (M_EXT | M_EXTWR));		\
 	(to)->m_flags |= (from)->m_flags & M_COPYFLAGS;			\
 	M_MOVE_HDR((to), (from));					\
 	if (((to)->m_flags & M_EXT) == 0)				\
@@ -358,7 +353,7 @@ struct mbuf {
  */
 #define	M_READONLY(m)							\
 	(((m)->m_flags & M_EXT) != 0 &&					\
-	  (((m)->m_flags & M_CLUSTER) == 0 || MCLISREFERENCED(m)))
+	  (((m)->m_flags & M_EXTWR) == 0 || MCLISREFERENCED(m)))
 
 /*
  * Compute the amount of space available
@@ -432,11 +427,7 @@ struct  mbuf *m_getptr(struct mbuf *, int, int *);
 int	m_leadingspace(struct mbuf *);
 int	m_trailingspace(struct mbuf *);
 struct mbuf *m_clget(struct mbuf *, int, struct ifnet *, u_int);
-void	m_clsetwms(struct ifnet *, u_int, u_int, u_int);
-int	m_cldrop(struct ifnet *, int);
-void	m_clcount(struct ifnet *, int);
-void	m_cluncount(struct mbuf *, int);
-void	m_clinitifp(struct ifnet *);
+void	m_extfree_pool(caddr_t, u_int, void *);
 void	m_adj(struct mbuf *, int);
 int	m_copyback(struct mbuf *, int, int, const void *, int);
 void	m_freem(struct mbuf *);

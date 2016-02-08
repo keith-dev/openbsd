@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvm_unix.c,v 1.47 2013/01/16 21:47:08 deraadt Exp $	*/
+/*	$OpenBSD: uvm_unix.c,v 1.50 2014/07/11 16:35:40 jsg Exp $	*/
 /*	$NetBSD: uvm_unix.c,v 1.18 2000/09/13 15:00:25 thorpej Exp $	*/
 
 /*
@@ -20,12 +20,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *      This product includes software developed by Charles D. Cranor,
- *	Washington University, the University of California, Berkeley and 
- *	its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -86,9 +81,7 @@ sys_obreak(struct proc *p, void *v, register_t *retval)
 	if (new == old)
 		return (0);
 
-	/*
-	 * grow or shrink?
-	 */
+	/* grow or shrink? */
 	if (new > old) {
 		error = uvm_map(&vm->vm_map, &old, new - old, NULL,
 		    UVM_UNKNOWN_OFFSET, 0,
@@ -112,22 +105,17 @@ sys_obreak(struct proc *p, void *v, register_t *retval)
 /*
  * uvm_grow: enlarge the "stack segment" to include sp.
  */
-
 void
 uvm_grow(struct proc *p, vaddr_t sp)
 {
 	struct vmspace *vm = p->p_vmspace;
 	int si;
 
-	/*
-	 * For user defined stacks (from sendsig).
-	 */
+	/* For user defined stacks (from sendsig). */
 	if (sp < (vaddr_t)vm->vm_maxsaddr)
 		return;
 
-	/*
-	 * For common case of already allocated (from trap).
-	 */
+	/* For common case of already allocated (from trap). */
 #ifdef MACHINE_STACK_GROWS_UP
 	if (sp < USRSTACK + ptoa(vm->vm_ssize))
 #else
@@ -135,9 +123,7 @@ uvm_grow(struct proc *p, vaddr_t sp)
 #endif
 		return;
 
-	/*
-	 * Really need to check vs limit and increment stack size if ok.
-	 */
+	/* Really need to check vs limit and increment stack size if ok. */
 #ifdef MACHINE_STACK_GROWS_UP
 	si = atop(sp - USRSTACK) - vm->vm_ssize + 1;
 #else
@@ -174,12 +160,10 @@ uvm_coredump(struct proc *p, struct vnode *vp, struct ucred *cred,
 		}
 
 		if (!(entry->protection & VM_PROT_WRITE) &&
-		    entry->start != p->p_sigcode)
+		    entry->start != p->p_p->ps_sigcode)
 			continue;
 
-		/*
-		 * Don't dump mmaped devices.
-		 */
+		/* Don't dump mmaped devices. */
 		if (entry->object.uvm_obj != NULL &&
 		    UVM_OBJ_IS_DEVICE(entry->object.uvm_obj))
 			continue;
@@ -214,9 +198,7 @@ uvm_coredump(struct proc *p, struct vnode *vp, struct ucred *cred,
 		} else
 			flag = CORE_DATA;
 
-		/*
-		 * Set up a new core file segment.
-		 */
+		/* Set up a new core file segment. */
 		CORE_SETMAGIC(cseg, CORESEGMAGIC, CORE_GETMID(*chdr), flag);
 		cseg.c_addr = start;
 		cseg.c_size = end - start;
@@ -287,12 +269,10 @@ uvm_coredump_walkmap(struct proc *p, void *iocookie,
 		}
 
 		if (!(entry->protection & VM_PROT_WRITE) &&
-		    entry->start != p->p_sigcode)
+		    entry->start != p->p_p->ps_sigcode)
 			continue;
 
-		/*
-		 * Don't dump mmaped devices.
-		 */
+		/* Don't dump mmaped devices. */
 		if (entry->object.uvm_obj != NULL &&
 		    UVM_OBJ_IS_DEVICE(entry->object.uvm_obj))
 			continue;

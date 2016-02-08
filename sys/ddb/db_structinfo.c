@@ -1,4 +1,4 @@
-/* $OpenBSD: db_structinfo.c,v 1.7 2013/12/13 19:55:12 naddy Exp $ */
+/* $OpenBSD: db_structinfo.c,v 1.10 2014/05/29 09:16:22 daniel Exp $ */
 /* public domain */
 /*
  * This file is intended to be compiled with debug information,
@@ -75,7 +75,6 @@
 #include <sys/termios.h>
 #include <sys/time.h>
 #include <sys/timeout.h>
-#include <sys/times.h>
 #include <sys/timetc.h>
 #include <sys/tprintf.h>
 #include <sys/tree.h>
@@ -98,7 +97,6 @@
 
 /* XXX add filesystem includes there */
 
-#include <sys/agpio.h>
 #include <sys/ataio.h>
 #include <sys/audioio.h>
 #include <sys/cdio.h>
@@ -111,7 +109,4 @@
 #include <sys/scanio.h>
 #include <sys/scsiio.h>
 #include <sys/sockio.h>
-/* videoio.h uses anonymous unions which gcc2 doesn't support */
-#if (defined(__GNUC__) && __GNUC__ >= 3) || defined(__PCC__)
 #include <sys/videoio.h>
-#endif

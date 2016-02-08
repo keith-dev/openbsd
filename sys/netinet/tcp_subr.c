@@ -1,4 +1,4 @@
-/*	$OpenBSD: tcp_subr.c,v 1.125 2013/10/24 11:31:43 mpi Exp $	*/
+/*	$OpenBSD: tcp_subr.c,v 1.132 2014/07/22 11:06:10 mpi Exp $	*/
 /*	$NetBSD: tcp_subr.c,v 1.22 1996/02/13 23:44:00 christos Exp $	*/
 
 /*
@@ -82,7 +82,6 @@
 #include <net/if.h>
 
 #include <netinet/in.h>
-#include <netinet/in_systm.h>
 #include <netinet/ip.h>
 #include <netinet/in_pcb.h>
 #include <netinet/ip_var.h>
@@ -118,10 +117,9 @@ int	tcp_do_rfc3390 = 2;	/* Increase TCP's Initial Window to 10*mss */
 
 u_int32_t	tcp_now = 1;
 
-#ifndef TCBHASHSIZE
-#define	TCBHASHSIZE	128
+#ifndef TCB_INITIAL_HASH_SIZE
+#define	TCB_INITIAL_HASH_SIZE	128
 #endif
-int	tcbhashsize = TCBHASHSIZE;
 
 /* syn hash parameters */
 #define	TCP_SYN_HASH_SIZE	293
@@ -162,7 +160,7 @@ tcp_init()
 	    NULL);
 	pool_sethardlimit(&sackhl_pool, tcp_sackhole_limit, NULL, 0);
 #endif /* TCP_SACK */
-	in_pcbinit(&tcbtable, tcbhashsize);
+	in_pcbinit(&tcbtable, TCB_INITIAL_HASH_SIZE);
 
 #ifdef INET6
 	/*
@@ -319,7 +317,6 @@ tcp_respond(struct tcpcb *tp, caddr_t template, struct tcphdr *th0,
 	struct route *ro = 0;
 	struct tcphdr *th;
 	struct ip *ip;
-	struct ipovly *ih;
 #ifdef INET6
 	struct ip6_hdr *ip6;
 #endif
@@ -385,6 +382,7 @@ tcp_respond(struct tcpcb *tp, caddr_t template, struct tcphdr *th0,
 	m->m_len = tlen;
 	m->m_pkthdr.len = tlen;
 	m->m_pkthdr.rcvif = (struct ifnet *) 0;
+	m->m_pkthdr.csum_flags |= M_TCP_CSUM_OUT;
 	th->th_seq = htonl(seq);
 	th->th_ack = htonl(ack);
 	th->th_x2 = 0;
@@ -397,11 +395,11 @@ tcp_respond(struct tcpcb *tp, caddr_t template, struct tcphdr *th0,
 	th->th_win = htons((u_int16_t)win);
 	th->th_urp = 0;
 
-	/* force routing domain */
+	/* force routing table */
 	if (tp)
-		m->m_pkthdr.rdomain = tp->t_inpcb->inp_rtableid;
+		m->m_pkthdr.ph_rtableid = tp->t_inpcb->inp_rtableid;
 	else
-		m->m_pkthdr.rdomain = rtableid;
+		m->m_pkthdr.ph_rtableid = rtableid;
 
 	switch (af) {
 #ifdef INET6
@@ -410,9 +408,6 @@ tcp_respond(struct tcpcb *tp, caddr_t template, struct tcphdr *th0,
 		ip6->ip6_nxt  = IPPROTO_TCP;
 		ip6->ip6_hlim = in6_selecthlim(tp ? tp->t_inpcb : NULL, NULL);	/*XXX*/
 		ip6->ip6_plen = tlen - sizeof(struct ip6_hdr);
-		th->th_sum = 0;
-		th->th_sum = in6_cksum(m, IPPROTO_TCP,
-		   sizeof(struct ip6_hdr), ip6->ip6_plen);
 		HTONS(ip6->ip6_plen);
 		ip6_output(m, tp ? tp->t_inpcb->inp_outputopts6 : NULL,
 		    (struct route_in6 *)ro, 0, NULL, NULL,
@@ -420,21 +415,11 @@ tcp_respond(struct tcpcb *tp, caddr_t template, struct tcphdr *th0,
 		break;
 #endif /* INET6 */
 	case AF_INET:
-		ih = (struct ipovly *)ip;
-		bzero(ih->ih_x1, sizeof ih->ih_x1);
-		ih->ih_len = htons((u_short)tlen - sizeof(struct ip));
-
-		/*
-		 * There's no point deferring to hardware checksum processing
-		 * here, as we only send a minimal TCP packet whose checksum
-		 * we need to compute in any case.
-		 */
-		th->th_sum = 0;
-		th->th_sum = in_cksum(m, tlen);
 		ip->ip_len = htons(tlen);
 		ip->ip_ttl = ip_defttl;
-		ip_output(m, (void *)NULL, ro, ip_mtudisc ? IP_MTUDISC : 0,
-			(void *)NULL, tp ? tp->t_inpcb : (void *)NULL);
+		ip->ip_tos = 0;
+		ip_output(m, NULL, ro, ip_mtudisc ? IP_MTUDISC : 0,
+		    NULL, tp ? tp->t_inpcb : NULL, 0);
 	}
 }
 
@@ -1025,7 +1010,7 @@ tcp_signature_tdb_zeroize(tdbp)
 {
 	if (tdbp->tdb_amxkey) {
 		explicit_bzero(tdbp->tdb_amxkey, tdbp->tdb_amxkeylen);
-		free(tdbp->tdb_amxkey, M_XDATA);
+		free(tdbp->tdb_amxkey, M_XDATA, 0);
 		tdbp->tdb_amxkey = NULL;
 	}
 

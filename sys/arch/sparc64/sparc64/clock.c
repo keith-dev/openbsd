@@ -1,4 +1,4 @@
-/*	$OpenBSD: clock.c,v 1.51 2014/02/08 11:04:50 kettenis Exp $	*/
+/*	$OpenBSD: clock.c,v 1.54 2014/07/12 18:44:43 tedu Exp $	*/
 /*	$NetBSD: clock.c,v 1.41 2001/07/24 19:29:25 eeh Exp $ */
 
 /*
@@ -445,7 +445,7 @@ getidprom()
 	if (getprop(node, "idprom", sizeof(*idp), &n, (void **)&idp) != 0)
 		return (NULL);
 	if (n != 1) {
-		free(idp, M_DEVBUF);
+		free(idp, M_DEVBUF, 0);
 		return (NULL);
 	}
 	return (idp);
@@ -502,7 +502,7 @@ timerattach(parent, self, aux)
 	strlcpy(level14.ih_name, "prof", sizeof(level14.ih_name));
 	intr_establish(14, &level14);
 
-	printf(" ivec 0x%x, 0x%x\n", INTVEC(level10.ih_number),
+	printf(" ivec 0x%llx, 0x%llx\n", INTVEC(level10.ih_number),
 	    INTVEC(level14.ih_number));
 }
 
@@ -544,7 +544,7 @@ myetheraddr(cp)
 	cp[4] = idp->id_ether[4];
 	cp[5] = idp->id_ether[5];
 	if (idprom == NULL)
-		free(idp, M_DEVBUF);
+		free(idp, M_DEVBUF, 0);
 }
 
 /*
@@ -1037,7 +1037,7 @@ tick_get_timecount(struct timecounter *tc)
 {
 	u_int64_t tick;
 
-	__asm __volatile("rd %%tick, %0" : "=r" (tick) :);
+	__asm volatile("rd %%tick, %0" : "=r" (tick) :);
 
 	return (tick & ~0u);
 }
@@ -1047,7 +1047,7 @@ sys_tick_get_timecount(struct timecounter *tc)
 {
 	u_int64_t tick;
 
-	__asm __volatile("rd %%sys_tick, %0" : "=r" (tick) :);
+	__asm volatile("rd %%sys_tick, %0" : "=r" (tick) :);
 
 	return (tick & ~0u);
 }

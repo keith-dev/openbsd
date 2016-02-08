@@ -1,4 +1,4 @@
-.\"	$OpenBSD: sysmerge.8,v 1.44 2014/01/28 09:42:42 ajacoutot Exp $
+.\"	$OpenBSD: sysmerge.8,v 1.50 2014/07/15 09:27:04 ajacoutot Exp $
 .\"
 .\" Copyright (c) 2008 Antoine Jacoutot <ajacoutot@openbsd.org>
 .\"
@@ -14,7 +14,7 @@
 .\" ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
 .\" OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 .\"
-.Dd $Mdocdate: January 28 2014 $
+.Dd $Mdocdate: July 15 2014 $
 .Dt SYSMERGE 8
 .Os
 .Sh NAME
@@ -106,7 +106,6 @@ It automatically installs missing files and binaries,
 and updates files differing only by CVS Id.
 Files whose reference sources have matching CVS Id are skipped from comparison.
 .Pa /etc/fbtab ,
-.Pa /etc/login.conf ,
 .Pa /etc/sysctl.conf ,
 and
 .Pa /etc/ttys
@@ -121,6 +120,14 @@ and
 files will
 .Sy always
 be automatically (re)created.
+.Pp
+Each time
+.Nm
+is run it will compare the checksum of each file stored under
+.Pa /etc/examples
+against the previous one, then warn if it does not match and the
+corresponding file exists under
+.Pa /etc .
 .Pp
 .Nm
 will finish by running
@@ -168,9 +175,9 @@ The following files will always be skipped from comparison:
 .Pa /etc/motd ,
 .Pa /etc/myname ,
 .Pa /var/db/locate.database ,
-.Pa /var/db/sysmerge/etcsum ,
-.Pa /var/db/sysmerge/xetcsum ,
-.Pa /var/games/tetris.scores ,
+.Pa /usr/share/sysmerge/etcsum ,
+.Pa /usr/share/sysmerge/examplessum ,
+.Pa /usr/share/sysmerge/xetcsum ,
 .Pa /var/mail/root .
 .Pp
 The
@@ -188,7 +195,7 @@ and they are offered for comparison only if they really differ.
 .It Ev DBDIR
 Directory in which checksum files are stored.
 If unset, this defaults to
-.Pa /var/db/sysmerge .
+.Pa /usr/share/sysmerge .
 .It Ev DESTDIR
 Directory in which to merge and install files.
 If unset, this defaults to

@@ -1,4 +1,4 @@
-/*	$OpenBSD: sysv_shm.c,v 1.55 2012/03/09 13:01:28 ariane Exp $	*/
+/*	$OpenBSD: sysv_shm.c,v 1.58 2014/07/13 15:29:04 tedu Exp $	*/
 /*	$NetBSD: sysv_shm.c,v 1.50 1998/10/21 22:24:29 tron Exp $	*/
 
 /*
@@ -275,7 +275,7 @@ sys_shmat(struct proc *p, void *v, register_t *retval)
 
 	shmmap_s->va = attach_va;
 	shmmap_s->shmid = SCARG(uap, shmid);
-	shmseg->shm_lpid = p->p_p->ps_mainproc->p_pid;
+	shmseg->shm_lpid = p->p_p->ps_pid;
 	shmseg->shm_atime = time_second;
 	shmseg->shm_nattch++;
 	*retval = attach_va;
@@ -441,7 +441,7 @@ shmget_allocate_segment(struct proc *p,
 	shmseg->shm_perm.seq = shmseqs[segnum] = (shmseqs[segnum] + 1) & 0x7fff;
 	shmseg->shm_perm.key = key;
 	shmseg->shm_segsz = SCARG(uap, size);
-	shmseg->shm_cpid = p->p_p->ps_mainproc->p_pid;
+	shmseg->shm_cpid = p->p_p->ps_pid;
 	shmseg->shm_lpid = shmseg->shm_nattch = 0;
 	shmseg->shm_atime = shmseg->shm_dtime = 0;
 	shmseg->shm_ctime = time_second;
@@ -517,7 +517,7 @@ shmexit(struct vmspace *vm)
 	    i++, shmmap_s++)
 		if (shmmap_s->shmid != -1)
 			shm_delete_mapping(vm, shmmap_s);
-	free(vm->vm_shm, M_SHM);
+	free(vm->vm_shm, M_SHM, 0);
 	vm->vm_shm = NULL;
 }
 
@@ -592,17 +592,17 @@ sysctl_sysvshm(int *name, u_int namelen, void *oldp, size_t *oldlenp,
 			return (EINVAL);
 
 		/* Expand shmsegs and shmseqs arrays */
-		newsegs = malloc(val * sizeof(struct shmid_ds *),
+		newsegs = mallocarray(val, sizeof(struct shmid_ds *),
 		    M_SHM, M_WAITOK|M_ZERO);
 		bcopy(shmsegs, newsegs,
 		    shminfo.shmmni * sizeof(struct shmid_ds *));
-		free(shmsegs, M_SHM);
+		free(shmsegs, M_SHM, 0);
 		shmsegs = newsegs;
-		newseqs = malloc(val * sizeof(unsigned short), M_SHM,
+		newseqs = mallocarray(val, sizeof(unsigned short), M_SHM,
 		    M_WAITOK|M_ZERO);
 		bcopy(shmseqs, newseqs,
 		    shminfo.shmmni * sizeof(unsigned short));
-		free(shmseqs, M_SHM);
+		free(shmseqs, M_SHM, 0);
 		shmseqs = newseqs;
 		shminfo.shmmni = val;
 		return (0);

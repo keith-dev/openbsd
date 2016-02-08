@@ -1,4 +1,4 @@
-/*	$OpenBSD: vnet.c,v 1.29 2013/08/21 05:21:42 dlg Exp $	*/
+/*	$OpenBSD: vnet.c,v 1.33 2014/07/12 18:44:43 tedu Exp $	*/
 /*
  * Copyright (c) 2009 Mark Kettenis
  *
@@ -42,7 +42,7 @@
 #include <net/bpf.h>
 #endif
 
-#include <uvm/uvm.h>
+#include <uvm/uvm_extern.h>
 
 #include <sparc64/dev/cbusvar.h>
 #include <sparc64/dev/ldcvar.h>
@@ -258,7 +258,7 @@ vnet_attach(struct device *parent, struct device *self, void *aux)
 		printf(": can't map interrupt\n");
 		return;
 	}
-	printf(": ivec 0x%lx, 0x%lx", sc->sc_tx_sysino, sc->sc_rx_sysino);
+	printf(": ivec 0x%llx, 0x%llx", sc->sc_tx_sysino, sc->sc_rx_sysino);
 
 	/*
 	 * Un-configure queues before registering interrupt handlers,
@@ -805,8 +805,7 @@ vnet_rx_vio_dring_data(struct vnet_softc *sc, struct vio_msg_tag *tag)
 			if (desc.hdr.dstate != VIO_DESC_READY)
 				break;
 
-			m = MCLGETI(NULL, M_DONTWAIT, &sc->sc_ac.ac_if,
-			    MCLBYTES);
+			m = MCLGETI(NULL, M_DONTWAIT, NULL, desc.nbytes);
 			if (!m)
 				break;
 			ifp->if_ipackets++;
@@ -1493,5 +1492,5 @@ vnet_dring_free(bus_dma_tag_t t, struct vnet_dring *vd)
 	bus_dmamem_unmap(t, (caddr_t)vd->vd_desc, size);
 	bus_dmamem_free(t, &vd->vd_seg, 1);
 	bus_dmamap_destroy(t, vd->vd_map);
-	free(vd, M_DEVBUF);
+	free(vd, M_DEVBUF, 0);
 }

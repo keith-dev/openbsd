@@ -1,6 +1,6 @@
 #! /usr/bin/perl
 # ex:ts=8 sw=4:
-# $OpenBSD: PkgInfo.pm,v 1.30 2014/01/09 20:20:01 espie Exp $
+# $OpenBSD: PkgInfo.pm,v 1.33 2014/07/18 16:57:41 espie Exp $
 #
 # Copyright (c) 2003-2014 Marc Espie <espie@openbsd.org>
 #
@@ -106,7 +106,6 @@ sub footer
 sub printfile
 {
 	my ($state, $filename) = @_;
-	my $_;
 
 	open my $fh, '<', $filename or return;
 	while(<$fh>) {
@@ -117,10 +116,23 @@ sub printfile
 	$state->say;
 }
 
+sub printfile_sorted
+{
+	my ($state, $filename) = @_;
+
+	open my $fh, '<', $filename or return;
+	my @lines = (<$fh>);
+	close $fh;
+	foreach my $line (sort @lines) {
+		chomp $line;
+		$state->say("#1", $line);
+	}
+	$state->say;
+}
+
 sub print_description
 {
 	my ($state, $dir) = @_;
-	my $_;
 
 	open my $fh, '<', $dir.DESC or return;
 	$_ = <$fh>; # zap COMMENT
@@ -385,7 +397,7 @@ sub print_info
 		if ($state->opt('R') && -f $handle->info.REQUIRED_BY) {
 			$state->header($handle);
 			$state->banner("Required by:");
-			$state->printfile($handle->info.REQUIRED_BY);
+			$state->printfile_sorted($handle->info.REQUIRED_BY);
 		}
 		if ($state->opt('d')) {
 			$state->header($handle);

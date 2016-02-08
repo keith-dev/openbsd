@@ -1,4 +1,4 @@
-.\" $OpenBSD: usbd_transfer.9,v 1.1 2013/09/20 15:34:52 mpi Exp $
+.\" $OpenBSD: usbd_transfer.9,v 1.5 2014/07/12 16:07:06 mpi Exp $
 .\"
 .\" Copyright (c) 2013 Martin Pieuchot
 .\"
@@ -14,7 +14,7 @@
 .\" ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
 .\" OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 .\"
-.Dd $Mdocdate: September 20 2013 $
+.Dd $Mdocdate: July 12 2014 $
 .Dt USBD_TRANSFER 9
 .Os
 .Sh NAME
@@ -69,9 +69,8 @@ Do not report short reads, when the length of the data read is lower than
 .Fa length ,
 as errors.
 .It Dv USBD_FORCE_SHORT_XFER
-Submit a supplementary zero length packet at the end of the data if
-.Fa length
-is a multiple of the endpoint's wMaxPacketSize.
+Submit a supplementary zero length packet at the end of the written data.
+Some requests may need such packets in order to be properly terminated.
 .It Dv USBD_CATCH
 Used in conjunction with the
 .Dv USBD_SYNCHRONOUS
@@ -94,9 +93,16 @@ is used to submit the USB transfer described by
 to the corresponding
 .Xr usb 4
 host controller to perform I/O with devices.
-.Sh CODE REFERENCES
-These functions are implemented in the file
-.Pa sys/dev/usb/usbdi.c .
+.Sh CONTEXT
+.Fn usbd_setup_xfer
+can be called during autoconf, from process context, or from interrupt context.
+.Pp
+.Fn usbd_transfer
+can be called during autoconf, from process context, or from interrupt context
+if
+.Dv USBD_SYNCHRONOUS
+has not been passed via
+.Fa flags .
 .Sh SEE ALSO
 .Xr ehci 4 ,
 .Xr ohci 4 ,

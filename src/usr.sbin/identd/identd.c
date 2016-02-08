@@ -1,4 +1,4 @@
-/*	$OpenBSD: identd.c,v 1.24 2014/01/07 00:11:11 dlg Exp $ */
+/*	$OpenBSD: identd.c,v 1.26 2014/07/13 17:53:41 claudio Exp $ */
 
 /*
  * Copyright (c) 2013 David Gwynne <dlg@openbsd.org>
@@ -220,7 +220,7 @@ main(int argc, char *argv[])
 	pid_t parent;
 	int sibling;
 
-	while ((c = getopt(argc, argv, "46deHhl:Nnp:t:")) != -1) {
+	while ((c = getopt(argc, argv, "46deHhl:Nnt:")) != -1) {
 		switch (c) {
 		case '4':
 			family = AF_INET;
@@ -275,7 +275,7 @@ main(int argc, char *argv[])
 
 	pw = getpwnam(IDENTD_USER);
 	if (pw == NULL)
-		err(1, "no %s user", IDENTD_USER);
+		errx(1, "no %s user", IDENTD_USER);
 
 	if (!debug && daemon(1, 0) == -1)
 		err(1, "daemon");

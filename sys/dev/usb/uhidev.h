@@ -1,4 +1,4 @@
-/*	$OpenBSD: uhidev.h,v 1.16 2013/11/19 14:04:07 pirofti Exp $	*/
+/*	$OpenBSD: uhidev.h,v 1.20 2014/04/24 09:40:28 mpi Exp $	*/
 /*	$NetBSD: uhidev.h,v 1.3 2002/10/08 09:56:17 dan Exp $	*/
 
 /*
@@ -41,6 +41,7 @@ struct uhidev_softc {
 	struct device sc_dev;		/* base device */
 	struct usbd_device *sc_udev;
 	struct usbd_interface *sc_iface;/* interface */
+	int sc_ifaceno;			/* interface number */
 	struct usbd_pipe *sc_ipipe;	/* input interrupt pipe */
 	struct usbd_xfer *sc_ixfer;	/* read request */
 	int sc_iep_addr;
@@ -68,7 +69,6 @@ struct uhidev {
 	struct uhidev_softc *sc_parent;
 	uByte sc_report_id;
 	u_int8_t sc_state;
-	int sc_in_rep_size;
 #define	UHIDEV_OPEN	0x01	/* device is open */
 	void (*sc_intr)(struct uhidev *, void *, u_int);
 
@@ -78,17 +78,17 @@ struct uhidev {
 };
 
 struct uhidev_attach_arg {
-	struct usb_attach_arg *uaa;
-	struct uhidev_softc *parent;
-	int reportid;
-	int reportsize;
+	struct usb_attach_arg	*uaa;
+	struct uhidev_softc	*parent;
+	uint8_t			 reportid;
+#define	UHIDEV_CLAIM_ALLREPORTID	255
 };
 
 void uhidev_get_report_desc(struct uhidev_softc *, void **, int *);
 int uhidev_open(struct uhidev *);
 void uhidev_close(struct uhidev *);
 int uhidev_ioctl(struct uhidev *, u_long, caddr_t, int, struct proc *);
-usbd_status uhidev_set_report(struct uhidev *, int, void *, int);
-usbd_status uhidev_set_report_async(struct uhidev *, int, void *, int);
-usbd_status uhidev_get_report(struct uhidev *scd, int type, void *data,int len);
+usbd_status uhidev_set_report(struct uhidev *, int, int, void *, int);
+usbd_status uhidev_set_report_async(struct uhidev *, int, int, void *, int);
+usbd_status uhidev_get_report(struct uhidev *, int, int, void *, int);
 usbd_status uhidev_write(struct uhidev_softc *, void *, int);

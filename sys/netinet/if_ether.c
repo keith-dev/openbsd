@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_ether.c,v 1.118 2014/01/22 06:28:09 claudio Exp $	*/
+/*	$OpenBSD: if_ether.c,v 1.131 2014/07/12 18:44:23 tedu Exp $	*/
 /*	$NetBSD: if_ether.c,v 1.31 1996/05/11 12:59:58 mycroft Exp $	*/
 
 /*
@@ -90,7 +90,6 @@ LIST_HEAD(, llinfo_arp) llinfo_arp;
 struct	ifqueue arpintrq;
 int	arp_inuse, arp_allocated;
 int	arp_maxtries = 5;
-int	useloopback = 1;	/* use loopback interface for local traffic */
 int	arpinit_done;
 int	la_hold_total;
 
@@ -135,14 +134,12 @@ arptimer(void *arg)
 	splx(s);
 }
 
-/*
- * Parallel to llc_rtrequest.
- */
 void
 arp_rtrequest(int req, struct rtentry *rt)
 {
 	struct sockaddr *gate = rt->rt_gateway;
 	struct llinfo_arp *la = (struct llinfo_arp *)rt->rt_llinfo;
+	struct ifnet *ifp = rt->rt_ifp;
 	struct ifaddr *ifa;
 	struct mbuf *m;
 
@@ -177,27 +174,28 @@ arp_rtrequest(int req, struct rtentry *rt)
 		if ((rt->rt_flags & RTF_HOST) == 0 && rt_mask(rt) &&
 		    satosin(rt_mask(rt))->sin_addr.s_addr != 0xffffffff)
 			rt->rt_flags |= RTF_CLONING;
-		if (rt->rt_flags & RTF_CLONING) {
+		if (rt->rt_flags & RTF_CLONING ||
+		    ((rt->rt_flags & RTF_LLINFO) && !la)) {
 			/*
 			 * Case 1: This route should come from a route to iface.
 			 */
-			rt_setgate(rt, rt_key(rt),
-			    (struct sockaddr *)&null_sdl,
-			    rt->rt_ifp->if_rdomain);
+			rt_setgate(rt, rt_key(rt), (struct sockaddr *)&null_sdl,
+			    ifp->if_rdomain);
 			gate = rt->rt_gateway;
-			SDL(gate)->sdl_type = rt->rt_ifp->if_type;
-			SDL(gate)->sdl_index = rt->rt_ifp->if_index;
+			SDL(gate)->sdl_type = ifp->if_type;
+			SDL(gate)->sdl_index = ifp->if_index;
 			/*
 			 * Give this route an expiration time, even though
 			 * it's a "permanent" route, so that routes cloned
 			 * from it do not need their expiration time set.
 			 */
 			rt->rt_expire = time_second;
-			break;
+			if ((rt->rt_flags & RTF_CLONING) != 0)
+				break;
 		}
 		/* Announce a new entry if requested. */
 		if (rt->rt_flags & RTF_ANNOUNCE)
-			arprequest(rt->rt_ifp,
+			arprequest(ifp,
 			    &satosin(rt_key(rt))->sin_addr.s_addr,
 			    &satosin(rt_key(rt))->sin_addr.s_addr,
 			    (u_char *)LLADDR(SDL(gate)));
@@ -205,11 +203,12 @@ arp_rtrequest(int req, struct rtentry *rt)
 	case RTM_RESOLVE:
 		if (gate->sa_family != AF_LINK ||
 		    gate->sa_len < sizeof(struct sockaddr_dl)) {
-			log(LOG_DEBUG, "arp_rtrequest: bad gateway value\n");
+			log(LOG_DEBUG, "%s: bad gateway value: %s\n", __func__,
+			    ifp->if_xname);
 			break;
 		}
-		SDL(gate)->sdl_type = rt->rt_ifp->if_type;
-		SDL(gate)->sdl_index = rt->rt_ifp->if_index;
+		SDL(gate)->sdl_type = ifp->if_type;
+		SDL(gate)->sdl_index = ifp->if_index;
 		if (la != 0)
 			break; /* This happens on a route change */
 		/*
@@ -219,7 +218,7 @@ arp_rtrequest(int req, struct rtentry *rt)
 		la = malloc(sizeof(*la), M_RTABLE, M_NOWAIT | M_ZERO);
 		rt->rt_llinfo = (caddr_t)la;
 		if (la == NULL) {
-			log(LOG_DEBUG, "arp_rtrequest: malloc failed\n");
+			log(LOG_DEBUG, "%s: malloc failed\n", __func__);
 			break;
 		}
 		arp_inuse++;
@@ -228,37 +227,25 @@ arp_rtrequest(int req, struct rtentry *rt)
 		rt->rt_flags |= RTF_LLINFO;
 		LIST_INSERT_HEAD(&llinfo_arp, la, la_list);
 
-		TAILQ_FOREACH(ifa, &rt->rt_ifp->if_addrlist, ifa_list) {
+		TAILQ_FOREACH(ifa, &ifp->if_addrlist, ifa_list) {
 			if ((ifa->ifa_addr->sa_family == AF_INET) &&
 			    ifatoia(ifa)->ia_addr.sin_addr.s_addr ==
 			    satosin(rt_key(rt))->sin_addr.s_addr)
 				break;
 		}
 		if (ifa) {
-			/*
-			 * This test used to be
-			 *	if (lo0ifp->if_flags & IFF_UP)
-			 * It allowed local traffic to be forced through
-			 * the hardware by configuring the loopback down.
-			 * However, it causes problems during network
-			 * configuration for boards that can't receive
-			 * packets they send.  It is now necessary to clear
-			 * "useloopback" and remove the route to force
-			 * traffic out to the hardware.
-			 *
-			 * In 4.4BSD, the above "if" statement checked
-			 * rt->rt_ifa against rt_key(rt).  It was changed
-			 * to the current form so that we can provide a
-			 * better support for multiple IPv4 addresses on a
-			 * interface.
-			 */
 			rt->rt_expire = 0;
 			SDL(gate)->sdl_alen = ETHER_ADDR_LEN;
 			memcpy(LLADDR(SDL(gate)),
-			    ((struct arpcom *)rt->rt_ifp)->ac_enaddr,
-			    ETHER_ADDR_LEN);
-			if (useloopback)
-				rt->rt_ifp = lo0ifp;
+			    ((struct arpcom *)ifp)->ac_enaddr, ETHER_ADDR_LEN);
+
+			/*
+			 * XXX Since lo0 is in the default rdomain we
+			 * should not (ab)use it for any route related
+			 * to an interface of a different rdomain.
+			 */
+			rt->rt_ifp = lo0ifp;
+
 			/*
 			 * make sure to set rt->rt_ifa to the interface
 			 * address we are using, otherwise we will have trouble
@@ -284,7 +271,7 @@ arp_rtrequest(int req, struct rtentry *rt)
 			la_hold_total--;
 			m_freem(m);
 		}
-		free(la, M_RTABLE);
+		free(la, M_RTABLE, 0);
 	}
 }
 
@@ -306,7 +293,7 @@ arprequest(struct ifnet *ifp, u_int32_t *sip, u_int32_t *tip, u_int8_t *enaddr)
 		return;
 	m->m_len = sizeof(*ea);
 	m->m_pkthdr.len = sizeof(*ea);
-	m->m_pkthdr.rdomain = ifp->if_rdomain;
+	m->m_pkthdr.ph_rtableid = ifp->if_rdomain;
 	MH_ALIGN(m, sizeof(*ea));
 	ea = mtod(m, struct ether_arp *);
 	eh = (struct ether_header *)sa.sa_data;
@@ -633,7 +620,7 @@ in_arpinput(struct mbuf *m)
 		goto reply;
 	}
 	la = arplookup(isaddr.s_addr, itaddr.s_addr == myaddr.s_addr, 0,
-	    rtable_l2(m->m_pkthdr.rdomain));
+	    rtable_l2(m->m_pkthdr.ph_rtableid));
 	if (la && (rt = la->la_rt) && (sdl = SDL(rt->rt_gateway))) {
 		if (sdl->sdl_alen) {
 		    if (memcmp(ea->arp_sha, LLADDR(sdl), sdl->sdl_alen)) {
@@ -697,6 +684,7 @@ in_arpinput(struct mbuf *m)
 			rt->rt_expire = time_second + arpt_keep;
 		rt->rt_flags &= ~RTF_REJECT;
 		la->la_asked = 0;
+		rt_sendmsg(rt, RTM_RESOLVE, rt->rt_ifp->if_rdomain);
 		while ((mh = la->la_hold_head) != NULL) {
 			if ((la->la_hold_head = mh->m_nextpkt) == NULL)
 				la->la_hold_tail = NULL;
@@ -731,7 +719,7 @@ out:
 		memcpy(ea->arp_sha, enaddr, sizeof(ea->arp_sha));
 	} else {
 		la = arplookup(itaddr.s_addr, 0, SIN_PROXY,
-		    rtable_l2(m->m_pkthdr.rdomain));
+		    rtable_l2(m->m_pkthdr.ph_rtableid));
 		if (la == 0)
 			goto out;
 		rt = la->la_rt;
@@ -769,7 +757,6 @@ arptfree(struct llinfo_arp *la)
 {
 	struct rtentry *rt = la->la_rt;
 	struct sockaddr_dl *sdl;
-	struct rt_addrinfo info;
 	u_int tid = 0;
 
 	if (rt == NULL)
@@ -781,14 +768,11 @@ arptfree(struct llinfo_arp *la)
 		rt->rt_flags &= ~RTF_REJECT;
 		return;
 	}
-	memset(&info, 0, sizeof(info));
-	info.rti_info[RTAX_DST] = rt_key(rt);
-	info.rti_info[RTAX_NETMASK] = rt_mask(rt);
 
 	if (rt->rt_ifp)
 		tid = rt->rt_ifp->if_rdomain;
 
-	rtrequest1(RTM_DELETE, &info, rt->rt_priority, NULL, tid);
+	rtdeletemsg(rt, tid);
 }
 
 /*
@@ -849,7 +833,7 @@ arpproxy(struct in_addr in, u_int rdomain)
 			continue;
 
 		if (!memcmp(LLADDR((struct sockaddr_dl *)la->la_rt->rt_gateway),
-		    LLADDR((struct sockaddr_dl *)ifp->if_lladdr->ifa_addr),
+		    LLADDR(ifp->if_sadl),
 		    ETHER_ADDR_LEN)) {
 		    	found = 1;
 		    	break;
@@ -869,7 +853,6 @@ arp_ifinit(struct arpcom *ac, struct ifaddr *ifa)
 	    &satosin(ifa->ifa_addr)->sin_addr.s_addr,
 	    ac->ac_enaddr);
 	ifa->ifa_rtrequest = arp_rtrequest;
-	ifa->ifa_flags |= RTF_CLONING;
 }
 
 /*
@@ -1134,7 +1117,7 @@ int
 db_show_arptab(void)
 {
 	struct radix_node_head *rnh;
-	rnh = rt_gettable(AF_INET, 0);
+	rnh = rtable_get(0, AF_INET);
 	db_printf("Route tree for AF_INET\n");
 	if (rnh == NULL) {
 		db_printf(" (not initialized)\n");

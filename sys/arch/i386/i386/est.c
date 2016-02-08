@@ -1,4 +1,4 @@
-/*	$OpenBSD: est.c,v 1.40 2012/10/08 09:01:21 jsg Exp $ */
+/*	$OpenBSD: est.c,v 1.43 2014/07/12 18:44:41 tedu Exp $ */
 /*
  * Copyright (c) 2003 Michael Eriksson.
  * All rights reserved.
@@ -998,7 +998,7 @@ est_acpi_init()
 	return acpilist;
 
 notable:
-	free(acpilist, M_DEVBUF);
+	free(acpilist, M_DEVBUF, 0);
 	acpilist = NULL;
 nolist:
 	return NULL;
@@ -1026,7 +1026,7 @@ est_acpi_pss_changed(struct acpicpu_pss *pss, int npss)
 	    M_DEVBUF, M_NOWAIT)) == NULL) {
 		printf("est_acpi_pss_changed: cannot allocate memory for new "
 		    "operating points");
-		free(acpilist, M_DEVBUF);
+		free(acpilist, M_DEVBUF, 0);
 		return;
 	}
 
@@ -1037,8 +1037,8 @@ est_acpi_pss_changed(struct acpicpu_pss *pss, int npss)
 			needtran = 0;
 	}
 
-	free(est_fqlist->table, M_DEVBUF);
-	free(est_fqlist, M_DEVBUF);
+	free(est_fqlist->table, M_DEVBUF, 0);
+	free(est_fqlist, M_DEVBUF, 0);
 	est_fqlist = acpilist;
 
 	if (needtran) {
@@ -1142,7 +1142,7 @@ est_init(struct cpu_info *ci, int vendor)
 
 		if ((fake_table = malloc(sizeof(struct est_op) * 3, M_DEVBUF,
 		     M_NOWAIT)) == NULL) {
-			free(fake_fqlist, M_DEVBUF);
+			free(fake_fqlist, M_DEVBUF, 0);
 			printf("%s: EST: cannot allocate memory for fake "
 			    "table\n", cpu_device);
 			return;
@@ -1177,13 +1177,16 @@ est_init(struct cpu_info *ci, int vendor)
 		return;
 
 	if (est_fqlist->n < 2)
-		return;
-
-	printf("%s: Enhanced SpeedStep %d MHz", cpu_device, cpuspeed);
+		goto nospeedstep;
 
 	low = est_fqlist->table[est_fqlist->n - 1].mhz;
 	high = est_fqlist->table[0].mhz;
+	if (low == high)
+		goto nospeedstep;
+
 	perflevel = (cpuspeed - low) * 100 / (high - low);
+
+	printf("%s: Enhanced SpeedStep %d MHz", cpu_device, cpuspeed);
 
 	/*
 	 * OK, tell the user the available frequencies.
@@ -1195,6 +1198,16 @@ est_init(struct cpu_info *ci, int vendor)
 
 	cpu_setperf = est_setperf;
 	setperf_prio = 3;
+
+	return;
+
+nospeedstep:
+	/*
+	 * While est_fqlist can point into the static est_cpus[],
+	 * it can't fail in that case and therefore can't reach here.
+	 */
+	free(est_fqlist->table, M_DEVBUF, 0);
+	free(est_fqlist, M_DEVBUF, 0);
 }
 
 void

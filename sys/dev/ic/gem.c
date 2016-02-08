@@ -1,4 +1,4 @@
-/*	$OpenBSD: gem.c,v 1.101 2013/08/08 16:01:34 kettenis Exp $	*/
+/*	$OpenBSD: gem.c,v 1.105 2014/07/22 13:12:12 mpi Exp $	*/
 /*	$NetBSD: gem.c,v 1.1 2001/09/16 00:11:43 eeh Exp $ */
 
 /*
@@ -54,14 +54,8 @@
 #include <net/if_dl.h>
 #include <net/if_media.h>
 
-#ifdef INET
 #include <netinet/in.h>
-#include <netinet/in_systm.h>
-#include <netinet/ip.h>
 #include <netinet/if_ether.h>
-#include <netinet/tcp.h>
-#include <netinet/udp.h>
-#endif
 
 #if NBPFILTER > 0
 #include <net/bpf.h>
@@ -120,7 +114,6 @@ int		gem_eint(struct gem_softc *, u_int);
 int		gem_rint(struct gem_softc *);
 int		gem_tint(struct gem_softc *, u_int32_t);
 int		gem_pint(struct gem_softc *);
-void		gem_rxcksum(struct mbuf *, u_int64_t);
 
 #ifdef GEM_DEBUG
 #define	DPRINTF(sc, x)	if ((sc)->sc_arpcom.ac_if.if_flags & IFF_DEBUG) \
@@ -231,9 +224,6 @@ gem_config(struct gem_softc *sc)
 	ifp->if_watchdog = gem_watchdog;
 	IFQ_SET_MAXLEN(&ifp->if_snd, GEM_NTXDESC - 1);
 	IFQ_SET_READY(&ifp->if_snd);
-
-	/* Hardware reads RX descriptors in multiples of four. */
-	m_clsetwms(ifp, MCLBYTES, 4, GEM_NRXDESC - 4);
 
 	ifp->if_capabilities = IFCAP_VLAN_MTU;
 
@@ -521,7 +511,7 @@ gem_rxdrain(struct gem_softc *sc)
 			rxs->rxs_mbuf = NULL;
 		}
 	}
-	sc->sc_rx_prod = sc->sc_rx_cons = sc->sc_rx_cnt = 0;
+	sc->sc_rx_prod = sc->sc_rx_cons = 0;
 }
 
 /*
@@ -698,6 +688,8 @@ gem_meminit(struct gem_softc *sc)
 		sc->sc_rxdescs[i].gd_flags = 0;
 		sc->sc_rxdescs[i].gd_addr = 0;
 	}
+	/* Hardware reads RX descriptors in multiples of four. */
+	if_rxr_init(&sc->sc_rx_ring, 4, GEM_NRXDESC - 4);
 	gem_fill_rx_ring(sc);
 
 	return (0);
@@ -811,9 +803,6 @@ gem_init(struct ifnet *ifp)
 
 	/* Encode Receive Descriptor ring size: four possible values */
 	v = gem_ringsize(GEM_NRXDESC /*XXX*/);
-	/* RX TCP/UDP checksum offset */
-	v |= ((ETHER_HDR_LEN + sizeof(struct ip)) <<
-	    GEM_RX_CONFIG_CXM_START_SHFT);
 	/* Enable DMA */
 	bus_space_write_4(t, h, GEM_RX_CONFIG, 
 		v|(GEM_THRSH_1024<<GEM_RX_CONFIG_FIFO_THRS_SHIFT)|
@@ -948,95 +937,6 @@ gem_init_regs(struct gem_softc *sc)
 }
 
 /*
- * RX TCP/UDP checksum
- */
-void
-gem_rxcksum(struct mbuf *m, u_int64_t rxstat)
-{
-	struct ether_header *eh;
-	struct ip *ip;
-	struct udphdr *uh;
-	int32_t hlen, len, pktlen;
-	u_int16_t cksum, *opts;
-	u_int32_t temp32;
-	union pseudoh {
-		struct hdr {
-			u_int16_t len;
-			u_int8_t ttl;
-			u_int8_t proto;
-			u_int32_t src;
-			u_int32_t dst;
-		} h;
-		u_int16_t w[6];
-	} ph;
-
-	pktlen = m->m_pkthdr.len;
-	if (pktlen < sizeof(struct ether_header))
-		return;
-	eh = mtod(m, struct ether_header *);
-	if (eh->ether_type != htons(ETHERTYPE_IP))
-		return;
-	ip = (struct ip *)(eh + 1);
-	if (ip->ip_v != IPVERSION)
-		return;
-
-	hlen = ip->ip_hl << 2;
-	pktlen -= sizeof(struct ether_header);
-	if (hlen < sizeof(struct ip))
-		return;
-	if (ntohs(ip->ip_len) < hlen)
-		return;
-	if (ntohs(ip->ip_len) != pktlen) 
-		return;
-	if (ip->ip_off & htons(IP_MF | IP_OFFMASK))
-		return;	/* can't handle fragmented packet */
-
-	switch (ip->ip_p) {
-	case IPPROTO_TCP:
-		if (pktlen < (hlen + sizeof(struct tcphdr)))
-			return;
-		break;
-	case IPPROTO_UDP:
-		if (pktlen < (hlen + sizeof(struct udphdr)))
-			return;
-		uh = (struct udphdr *)((caddr_t)ip + hlen);
-		if (uh->uh_sum == 0)
-			return; /* no checksum */
-		break;
-	default:
-		return;
-	}
-
-	cksum = htons(~(rxstat & GEM_RD_CHECKSUM));
-	/* cksum fixup for IP options */
-	len = hlen - sizeof(struct ip);
-	if (len > 0) {
-		opts = (u_int16_t *)(ip + 1);
-		for (; len > 0; len -= sizeof(u_int16_t), opts++) {
-			temp32 = cksum - *opts;
-			temp32 = (temp32 >> 16) + (temp32 & 65535);
-			cksum = temp32 & 65535;
-		}
-	}
-
-	ph.h.len = htons(ntohs(ip->ip_len) - hlen);
-	ph.h.ttl = 0;
-	ph.h.proto = ip->ip_p;
-	ph.h.src = ip->ip_src.s_addr;
-	ph.h.dst = ip->ip_dst.s_addr;
-	temp32 = cksum;
-	opts = &ph.w[0];
-	temp32 += opts[0] + opts[1] + opts[2] + opts[3] + opts[4] + opts[5];
-	temp32 = (temp32 >> 16) + (temp32 & 65535);
-	temp32 += (temp32 >> 16);
-	cksum = ~temp32;
-	if (cksum == 0) {
-		m->m_pkthdr.csum_flags |=
-			M_TCP_CSUM_IN_OK | M_UDP_CSUM_IN_OK;
-	}
-}
-
-/*
  * Receive interrupt.
  */
 int
@@ -1050,13 +950,14 @@ gem_rint(struct gem_softc *sc)
 	u_int64_t rxstat;
 	int i, len;
 
-	for (i = sc->sc_rx_cons; sc->sc_rx_cnt > 0; i = GEM_NEXTRX(i)) {
+	for (i = sc->sc_rx_cons; if_rxr_inuse(&sc->sc_rx_ring) > 0;
+	    i = GEM_NEXTRX(i)) {
 		rxs = &sc->sc_rxsoft[i];
 
 		GEM_CDRXSYNC(sc, i,
 		    BUS_DMASYNC_POSTREAD|BUS_DMASYNC_POSTWRITE);
 
-		rxstat = GEM_DMA_READ(sc, sc->sc_rxdescs[i].gd_flags);
+		rxstat = GEM_DMA_READ(sc, &sc->sc_rxdescs[i].gd_flags);
 
 		if (rxstat & GEM_RD_OWN) {
 			/* We have processed all of the receive buffers. */
@@ -1070,7 +971,7 @@ gem_rint(struct gem_softc *sc)
 		m = rxs->rxs_mbuf;
 		rxs->rxs_mbuf = NULL;
 
-		sc->sc_rx_cnt--;
+		if_rxr_put(&sc->sc_rx_ring, 1);
 
 		if (rxstat & GEM_RD_BAD_CRC) {
 			ifp->if_ierrors++;
@@ -1086,9 +987,9 @@ gem_rint(struct gem_softc *sc)
 		if (ifp->if_flags & IFF_DEBUG) {
 			printf("    rxsoft %p descriptor %d: ", rxs, i);
 			printf("gd_flags: 0x%016llx\t", (long long)
-				GEM_DMA_READ(sc, sc->sc_rxdescs[i].gd_flags));
+				GEM_DMA_READ(sc, &sc->sc_rxdescs[i].gd_flags));
 			printf("gd_addr: 0x%016llx\n", (long long)
-				GEM_DMA_READ(sc, sc->sc_rxdescs[i].gd_addr));
+				GEM_DMA_READ(sc, &sc->sc_rxdescs[i].gd_addr));
 		}
 #endif
 
@@ -1100,8 +1001,6 @@ gem_rint(struct gem_softc *sc)
 		ifp->if_ipackets++;
 		m->m_pkthdr.rcvif = ifp;
 		m->m_pkthdr.len = m->m_len = len;
-
-		gem_rxcksum(m, rxstat);	
 
 #if NBPFILTER > 0
 		if (ifp->if_bpf)
@@ -1126,10 +1025,14 @@ gem_rint(struct gem_softc *sc)
 void
 gem_fill_rx_ring(struct gem_softc *sc)
 {
-	while (sc->sc_rx_cnt < (GEM_NRXDESC - 4)) {
+	u_int slots;
+
+	for (slots = if_rxr_get(&sc->sc_rx_ring, GEM_NRXDESC - 4);
+	    slots > 0; slots--) {
 		if (gem_add_rxbuf(sc, sc->sc_rx_prod))
 			break;
 	}
+	if_rxr_put(&sc->sc_rx_ring, slots);
 }
 
 /*
@@ -1142,7 +1045,7 @@ gem_add_rxbuf(struct gem_softc *sc, int idx)
 	struct mbuf *m;
 	int error;
 
-	m = MCLGETI(NULL, M_DONTWAIT, &sc->sc_arpcom.ac_if, MCLBYTES);
+	m = MCLGETI(NULL, M_DONTWAIT, NULL, MCLBYTES);
 	if (!m)
 		return (ENOBUFS);
 	m->m_len = m->m_pkthdr.len = MCLBYTES;
@@ -1168,7 +1071,6 @@ gem_add_rxbuf(struct gem_softc *sc, int idx)
 	GEM_INIT_RXDESC(sc, idx);
 
 	sc->sc_rx_prod = GEM_NEXTRX(sc->sc_rx_prod);
-	sc->sc_rx_cnt++;
 
 	return (0);
 }
@@ -1811,15 +1713,15 @@ gem_start(struct ifnet *ifp)
 		    BUS_DMASYNC_PREWRITE);
 
 		for (i = 0; i < map->dm_nsegs; i++) {
-			sc->sc_txdescs[frag].gd_addr =
-			    GEM_DMA_WRITE(sc, map->dm_segs[i].ds_addr);
+			GEM_DMA_WRITE(sc, &sc->sc_txdescs[frag].gd_addr,
+			    map->dm_segs[i].ds_addr);
 			flags = map->dm_segs[i].ds_len & GEM_TD_BUFSIZE;
 			if (i == 0)
 				flags |= GEM_TD_START_OF_PACKET;
 			if (i == (map->dm_nsegs - 1))
 				flags |= GEM_TD_END_OF_PACKET;
-			sc->sc_txdescs[frag].gd_flags =
-			    GEM_DMA_WRITE(sc, flags);
+			GEM_DMA_WRITE(sc, &sc->sc_txdescs[frag].gd_flags,
+			    flags);
 			bus_dmamap_sync(sc->sc_dmatag, sc->sc_cddmamap,
 			    GEM_CDTXOFF(frag), sizeof(struct gem_desc),
 			    BUS_DMASYNC_PREWRITE);

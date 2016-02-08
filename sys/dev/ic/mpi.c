@@ -1,4 +1,4 @@
-/*	$OpenBSD: mpi.c,v 1.185 2014/01/20 02:22:10 dlg Exp $ */
+/*	$OpenBSD: mpi.c,v 1.193 2014/07/13 23:10:23 deraadt Exp $ */
 
 /*
  * Copyright (c) 2005, 2006, 2009 David Gwynne <dlg@openbsd.org>
@@ -134,6 +134,7 @@ int			mpi_portenable(struct mpi_softc *);
 int			mpi_cfg_coalescing(struct mpi_softc *);
 void			mpi_get_raid(struct mpi_softc *);
 int			mpi_fwupload(struct mpi_softc *);
+int			mpi_manufacturing(struct mpi_softc *);
 int			mpi_scsi_probe_virtual(struct scsi_link *);
 
 int			mpi_eventnotify(struct mpi_softc *);
@@ -205,6 +206,13 @@ void		mpi_refresh_sensors(void *);
 #define mpi_ecfg_page(_s, _a, _h, _r, _p, _l) \
 	mpi_req_cfg_page((_s), (_a), MPI_PG_POLL|MPI_PG_EXTENDED, \
 	    (_h), (_r), (_p), (_l))
+
+static inline void
+mpi_dvatosge(struct mpi_sge *sge, u_int64_t dva)
+{
+	htolem32(&sge->sg_addr_lo, dva);
+	htolem32(&sge->sg_addr_hi, dva >> 32);
+}
 
 int
 mpi_attach(struct mpi_softc *sc)
@@ -292,6 +300,10 @@ mpi_attach(struct mpi_softc *sc)
 		goto free_replies;
 	}
 
+	if (mpi_manufacturing(sc) != 0) {
+		printf("%s: unable to fetch manufacturing info\n", DEVNAME(sc));		goto free_replies;
+	}
+
 	switch (sc->sc_porttype) {
 	case MPI_PORTFACTS_PORTTYPE_SCSI:
 		if (mpi_cfg_spi_port(sc) != 0) {
@@ -328,8 +340,8 @@ mpi_attach(struct mpi_softc *sc)
 				    DEVNAME(sc));
 			}
 
-			sc->sc_vol_page = malloc(sc->sc_cfg_hdr.page_length * 4,
-			    M_TEMP, M_WAITOK | M_CANFAIL);
+			sc->sc_vol_page = mallocarray(sc->sc_cfg_hdr.page_length,
+			    4, M_TEMP, M_WAITOK | M_CANFAIL);
 			if (sc->sc_vol_page == NULL) {
 				panic("%s: can't get memory for IOC page 2, "
 				    "bio disabled", DEVNAME(sc));
@@ -387,7 +399,7 @@ free_ccbs:
 	while ((ccb = mpi_get_ccb(sc)) != NULL)
 		bus_dmamap_destroy(sc->sc_dmat, ccb->ccb_dmamap);
 	mpi_dmamem_free(sc, sc->sc_requests);
-	free(sc->sc_ccbs, M_DEVBUF);
+	free(sc->sc_ccbs, M_DEVBUF, 0);
 
 	return(1);
 }
@@ -551,7 +563,7 @@ mpi_run_ppr(struct mpi_softc *sc)
 	}
 
 out:
-	free(physdisk_pg, M_TEMP);
+	free(physdisk_pg, M_TEMP, 0);
 }
 
 int
@@ -693,21 +705,21 @@ mpi_ppr(struct mpi_softc *sc, struct scsi_link *link,
 	    "info: 0x%08x\n", DEVNAME(sc), pg0.neg_params1, pg0.neg_offset,
 	    pg0.neg_period, pg0.neg_params2, letoh32(pg0.information));
 
-	if (!(letoh32(pg0.information) & 0x07) && (try == 0)) {
+	if (!(lemtoh32(&pg0.information) & 0x07) && (try == 0)) {
 		DNPRINTF(MPI_D_PPR, "%s: mpi_ppr U320 ppr rejected\n",
 		    DEVNAME(sc));
 		return (EAGAIN);
 	}
 
-	if ((((letoh32(pg0.information) >> 8) & 0xff) > 0x09) && (try == 1)) {
+	if ((((lemtoh32(&pg0.information) >> 8) & 0xff) > 0x09) && (try == 1)) {
 		DNPRINTF(MPI_D_PPR, "%s: mpi_ppr U160 ppr rejected\n",
 		    DEVNAME(sc));
 		return (EAGAIN);
 	}
 
-	if (letoh32(pg0.information) & 0x0e) {
+	if (lemtoh32(&pg0.information) & 0x0e) {
 		DNPRINTF(MPI_D_PPR, "%s: mpi_ppr ppr rejected: %0x\n",
-		    DEVNAME(sc), letoh32(pg0.information));
+		    DEVNAME(sc), lemtoh32(&pg0.information));
 		return (EAGAIN);
 	}
 
@@ -757,7 +769,6 @@ mpi_inq(struct mpi_softc *sc, u_int16_t target, int physdisk)
 	} __packed			*bundle;
 	struct mpi_msg_scsi_io		*io;
 	struct mpi_sge			*sge;
-	u_int64_t			addr;
 
 	DNPRINTF(MPI_D_PPR, "%s: mpi_inq\n", DEVNAME(sc));
 
@@ -787,8 +798,6 @@ mpi_inq(struct mpi_softc *sc, u_int16_t target, int physdisk)
 	io->sense_buf_len = sizeof(struct scsi_sense_data);
 	io->msg_flags = MPI_SCSIIO_SENSE_BUF_ADDR_WIDTH_64;
 
-	io->msg_context = htole32(ccb->ccb_id);
-
 	/*
 	 * always lun 0
 	 * io->lun[0] = htobe16(link->lun);
@@ -799,18 +808,17 @@ mpi_inq(struct mpi_softc *sc, u_int16_t target, int physdisk)
 
 	memcpy(io->cdb, &inq, sizeof(inq));
 
-	io->data_length = htole32(sizeof(struct scsi_inquiry_data));
+	htolem32(&io->data_length, sizeof(struct scsi_inquiry_data));
 
-	io->sense_buf_low_addr = htole32(ccb->ccb_cmd_dva +
+	htolem32(&io->sense_buf_low_addr, ccb->ccb_cmd_dva +
 	    ((u_int8_t *)&bundle->sense - (u_int8_t *)bundle));
 
-	sge->sg_hdr = htole32(MPI_SGE_FL_TYPE_SIMPLE | MPI_SGE_FL_SIZE_64 |
+	htolem32(&sge->sg_hdr, MPI_SGE_FL_TYPE_SIMPLE | MPI_SGE_FL_SIZE_64 |
 	    MPI_SGE_FL_LAST | MPI_SGE_FL_EOB | MPI_SGE_FL_EOL |
 	    (u_int32_t)sizeof(inq));
 
-	addr = ccb->ccb_cmd_dva +
-	    ((u_int8_t *)&bundle->inqbuf - (u_int8_t *)bundle);
-	sge->sg_addr = htole64(addr);
+	mpi_dvatosge(sge, ccb->ccb_cmd_dva +
+	    ((u_int8_t *)&bundle->inqbuf - (u_int8_t *)bundle));
 
 	if (mpi_poll(sc, ccb, 5000) != 0)
 		return (1);
@@ -835,7 +843,7 @@ mpi_cfg_sas(struct mpi_softc *sc)
 	    &ehdr) != 0)
 		return (0);
 
-	pagelen = letoh16(ehdr.ext_page_length) * 4;
+	pagelen = lemtoh16(&ehdr.ext_page_length) * 4;
 	pg = malloc(pagelen, M_TEMP, M_NOWAIT | M_ZERO);
 	if (pg == NULL)
 		return (ENOMEM);
@@ -851,7 +859,7 @@ mpi_cfg_sas(struct mpi_softc *sc)
 	}
 
 out:
-	free(pg, M_TEMP);
+	free(pg, M_TEMP, 0);
 	return (rv);
 }
 
@@ -947,7 +955,7 @@ mpi_reply(struct mpi_softc *sc, u_int32_t reg)
 
 		reply = rcb->rcb_reply;
 
-		id = letoh32(reply->msg_context);
+		id = lemtoh32(&reply->msg_context);
 	} else {
 		switch (reg & MPI_REPLY_QUEUE_TYPE_MASK) {
 		case MPI_REPLY_QUEUE_TYPE_INIT:
@@ -1015,7 +1023,7 @@ free:
 destroy:
 	bus_dmamap_destroy(sc->sc_dmat, mdm->mdm_map);
 mdmfree:
-	free(mdm, M_DEVBUF);
+	free(mdm, M_DEVBUF, 0);
 
 	return (NULL);
 }
@@ -1029,7 +1037,7 @@ mpi_dmamem_free(struct mpi_softc *sc, struct mpi_dmamem *mdm)
 	bus_dmamem_unmap(sc->sc_dmat, mdm->mdm_kva, mdm->mdm_size);
 	bus_dmamem_free(sc->sc_dmat, &mdm->mdm_seg, 1);
 	bus_dmamap_destroy(sc->sc_dmat, mdm->mdm_map);
-	free(mdm, M_DEVBUF);
+	free(mdm, M_DEVBUF, 0);
 }
 
 int
@@ -1042,7 +1050,7 @@ mpi_alloc_ccbs(struct mpi_softc *sc)
 	SLIST_INIT(&sc->sc_ccb_free);
 	mtx_init(&sc->sc_ccb_mtx, IPL_BIO);
 
-	sc->sc_ccbs = malloc(sizeof(struct mpi_ccb) * sc->sc_maxcmds,
+	sc->sc_ccbs = mallocarray(sc->sc_maxcmds, sizeof(struct mpi_ccb),
 	    M_DEVBUF, M_WAITOK | M_CANFAIL | M_ZERO);
 	if (sc->sc_ccbs == NULL) {
 		printf("%s: unable to allocate ccbs\n", DEVNAME(sc));
@@ -1097,7 +1105,7 @@ free_maps:
 
 	mpi_dmamem_free(sc, sc->sc_requests);
 free_ccbs:
-	free(sc->sc_ccbs, M_DEVBUF);
+	free(sc->sc_ccbs, M_DEVBUF, 0);
 
 	return (1);
 }
@@ -1148,14 +1156,14 @@ mpi_alloc_replies(struct mpi_softc *sc)
 {
 	DNPRINTF(MPI_D_MISC, "%s: mpi_alloc_replies\n", DEVNAME(sc));
 
-	sc->sc_rcbs = malloc(sc->sc_repq * sizeof(struct mpi_rcb), M_DEVBUF,
+	sc->sc_rcbs = mallocarray(sc->sc_repq, sizeof(struct mpi_rcb), M_DEVBUF,
 	    M_WAITOK|M_CANFAIL);
 	if (sc->sc_rcbs == NULL)
 		return (1);
 
 	sc->sc_replies = mpi_dmamem_alloc(sc, sc->sc_repq * MPI_REPLY_SIZE);
 	if (sc->sc_replies == NULL) {
-		free(sc->sc_rcbs, M_DEVBUF);
+		free(sc->sc_rcbs, M_DEVBUF, 0);
 		return (1);
 	}
 
@@ -1194,8 +1202,13 @@ mpi_push_replies(struct mpi_softc *sc)
 void
 mpi_start(struct mpi_softc *sc, struct mpi_ccb *ccb)
 {
+	struct mpi_msg_request *msg;
+
 	DNPRINTF(MPI_D_RW, "%s: mpi_start %#x\n", DEVNAME(sc),
 	    ccb->ccb_cmd_dva);
+
+	msg = ccb->ccb_cmd;
+	htolem32(&msg->msg_context, ccb->ccb_id);
 
 	bus_dmamap_sync(sc->sc_dmat, MPI_DMA_MAP(sc->sc_requests),
 	    ccb->ccb_offset, MPI_REQUEST_SIZE,
@@ -1332,9 +1345,7 @@ mpi_scsi_cmd(struct scsi_xfer *xs)
 	io->sense_buf_len = sizeof(xs->sense);
 	io->msg_flags = MPI_SCSIIO_SENSE_BUF_ADDR_WIDTH_64;
 
-	io->msg_context = htole32(ccb->ccb_id);
-
-	io->lun[0] = htobe16(link->lun);
+	htobem16(&io->lun[0], link->lun);
 
 	switch (xs->flags & (SCSI_DATA_IN | SCSI_DATA_OUT)) {
 	case SCSI_DATA_IN:
@@ -1356,9 +1367,9 @@ mpi_scsi_cmd(struct scsi_xfer *xs)
 
 	memcpy(io->cdb, xs->cmd, xs->cmdlen);
 
-	io->data_length = htole32(xs->datalen);
+	htolem32(&io->data_length, xs->datalen);
 
-	io->sense_buf_low_addr = htole32(ccb->ccb_cmd_dva +
+	htolem32(&io->sense_buf_low_addr, ccb->ccb_cmd_dva +
 	    ((u_int8_t *)&mcb->mcb_sense - (u_int8_t *)mcb));
 
 	if (mpi_load_xs(ccb) != 0) {
@@ -1436,9 +1447,9 @@ mpi_scsi_cmd_done(struct mpi_ccb *ccb)
 	    letoh16(sie->tag));
 
 	xs->status = sie->scsi_status;
-	switch (letoh16(sie->ioc_status)) {
+	switch (lemtoh16(&sie->ioc_status)) {
 	case MPI_IOCSTATUS_SCSI_DATA_UNDERRUN:
-		xs->resid = xs->datalen - letoh32(sie->transfer_count);
+		xs->resid = xs->datalen - lemtoh32(&sie->transfer_count);
 		if (sie->scsi_state & MPI_SCSIIO_ERR_STATE_NO_SCSI_STATUS) {
 			xs->error = XS_DRIVER_STUFFUP;
 			break;
@@ -1514,13 +1525,12 @@ mpi_load_xs(struct mpi_ccb *ccb)
 	struct mpi_msg_scsi_io		*io = &mcb->mcb_io;
 	struct mpi_sge			*sge, *nsge = &mcb->mcb_sgl[0];
 	struct mpi_sge			*ce = NULL, *nce;
-	u_int64_t			ce_dva;
 	bus_dmamap_t			dmap = ccb->ccb_dmamap;
 	u_int32_t			addr, flags;
 	int				i, error;
 
 	if (xs->datalen == 0) {
-		nsge->sg_hdr = htole32(MPI_SGE_FL_TYPE_SIMPLE |
+		htolem32(&nsge->sg_hdr, MPI_SGE_FL_TYPE_SIMPLE |
 		    MPI_SGE_FL_LAST | MPI_SGE_FL_EOB | MPI_SGE_FL_EOL);
 		return (0);
 	}
@@ -1539,7 +1549,7 @@ mpi_load_xs(struct mpi_ccb *ccb)
 
 	if (dmap->dm_nsegs > sc->sc_first_sgl_len) {
 		ce = &mcb->mcb_sgl[sc->sc_first_sgl_len - 1];
-		io->chain_offset = ((u_int8_t *)ce - (u_int8_t *)io) / 4;
+		io->chain_offset = (u_int32_t *)ce - (u_int32_t *)io;
 	}
 
 	for (i = 0; i < dmap->dm_nsegs; i++) {
@@ -1548,13 +1558,9 @@ mpi_load_xs(struct mpi_ccb *ccb)
 			nsge++;
 			sge->sg_hdr |= htole32(MPI_SGE_FL_LAST);
 
-			DNPRINTF(MPI_D_DMA, "%s:   - 0x%08x 0x%016llx\n",
-			    DEVNAME(sc), sge->sg_hdr,
-			    sge->sg_addr);
-
 			if ((dmap->dm_nsegs - i) > sc->sc_chain_len) {
 				nce = &nsge[sc->sc_chain_len - 1];
-				addr = ((u_int8_t *)nce - (u_int8_t *)nsge) / 4;
+				addr = (u_int32_t *)nce - (u_int32_t *)nsge;
 				addr = addr << 16 |
 				    sizeof(struct mpi_sge) * sc->sc_chain_len;
 			} else {
@@ -1566,13 +1572,8 @@ mpi_load_xs(struct mpi_ccb *ccb)
 			ce->sg_hdr = htole32(MPI_SGE_FL_TYPE_CHAIN |
 			    MPI_SGE_FL_SIZE_64 | addr);
 
-			ce_dva = ccb->ccb_cmd_dva +
-			    ((u_int8_t *)nsge - (u_int8_t *)mcb);
-
-			ce->sg_addr = htole64(ce_dva);
-
-			DNPRINTF(MPI_D_DMA, "%s:  ce: 0x%08x 0x%016llx\n",
-			    DEVNAME(sc), ce->sg_hdr, ce->sg_addr);
+			mpi_dvatosge(ce, ccb->ccb_cmd_dva +
+			    ((u_int8_t *)nsge - (u_int8_t *)mcb));
 
 			ce = nce;
 		}
@@ -1581,15 +1582,10 @@ mpi_load_xs(struct mpi_ccb *ccb)
 		    i, dmap->dm_segs[i].ds_len,
 		    (u_int64_t)dmap->dm_segs[i].ds_addr);
 
-		sge = nsge;
+		sge = nsge++;
 
 		sge->sg_hdr = htole32(flags | dmap->dm_segs[i].ds_len);
-		sge->sg_addr = htole64(dmap->dm_segs[i].ds_addr);
-
-		DNPRINTF(MPI_D_DMA, "%s:  %d: 0x%08x 0x%016llx\n",
-		    DEVNAME(sc), i, sge->sg_hdr, sge->sg_addr);
-
-		nsge = sge + 1;
+		mpi_dvatosge(sge, dmap->dm_segs[i].ds_addr);
 	}
 
 	/* terminate list */
@@ -1641,7 +1637,7 @@ mpi_scsi_probe_virtual(struct scsi_link *link)
 	if (rv == 0)
 		SET(link->flags, SDEV_VIRTUAL);
 
-	free(rp0, M_TEMP);
+	free(rp0, M_TEMP, 0);
 	return (0);
 }
 
@@ -1690,7 +1686,7 @@ mpi_scsi_probe(struct scsi_link *link)
 	DNPRINTF(MPI_D_MISC, "%s:  flags: 0x%04x physical_port: 0x%02x\n",
 	    DEVNAME(sc), letoh16(pg0.flags), pg0.physical_port);
 
-	if (ISSET(letoh32(pg0.device_info),
+	if (ISSET(lemtoh32(&pg0.device_info),
 	    MPI_CFG_SAS_DEV_0_DEVINFO_ATAPI_DEVICE)) {
 		DNPRINTF(MPI_D_MISC, "%s: target %d is an ATAPI device\n",
 		    DEVNAME(sc), link->target);
@@ -2036,10 +2032,17 @@ mpi_iocfacts(struct mpi_softc *sc)
 	DNPRINTF(MPI_D_MISC, "%s:  hi_priority_queue_depth: 0x%04x\n",
 	    DEVNAME(sc), letoh16(ifp.hi_priority_queue_depth));
 	DNPRINTF(MPI_D_MISC, "%s:  host_page_buffer_sge: hdr: 0x%08x "
-	    "addr 0x%016llx\n", DEVNAME(sc),
+	    "addr 0x%08lx%08lx\n", DEVNAME(sc),
 	    letoh32(ifp.host_page_buffer_sge.sg_hdr),
-	    letoh64(ifp.host_page_buffer_sge.sg_addr));
-	sc->sc_maxcmds = letoh16(ifp.global_credits);
+	    letoh32(ifp.host_page_buffer_sge.sg_addr_hi),
+	    letoh32(ifp.host_page_buffer_sge.sg_addr_lo));
+
+	sc->sc_fw_maj = ifp.fw_version_maj;
+	sc->sc_fw_min = ifp.fw_version_min;
+	sc->sc_fw_unit = ifp.fw_version_unit;
+	sc->sc_fw_dev = ifp.fw_version_dev;
+
+	sc->sc_maxcmds = lemtoh16(&ifp.global_credits);
 	sc->sc_maxchdepth = ifp.max_chain_depth;
 	sc->sc_ioc_number = ifp.ioc_number;
 	if (sc->sc_flags & MPI_F_SPI)
@@ -2048,20 +2051,20 @@ mpi_iocfacts(struct mpi_softc *sc)
 		sc->sc_buswidth =
 		    (ifp.max_devices == 0) ? 256 : ifp.max_devices;
 	if (ifp.flags & MPI_IOCFACTS_FLAGS_FW_DOWNLOAD_BOOT)
-		sc->sc_fw_len = letoh32(ifp.fw_image_size);
+		sc->sc_fw_len = lemtoh32(&ifp.fw_image_size);
 
-	sc->sc_repq = MIN(MPI_REPLYQ_DEPTH, letoh16(ifp.reply_queue_depth));
+	sc->sc_repq = MIN(MPI_REPLYQ_DEPTH, lemtoh16(&ifp.reply_queue_depth));
 
 	/*
 	 * you can fit sg elements on the end of the io cmd if they fit in the
 	 * request frame size.
 	 */
-	sc->sc_first_sgl_len = ((letoh16(ifp.request_frame_size) * 4) -
+	sc->sc_first_sgl_len = ((lemtoh16(&ifp.request_frame_size) * 4) -
 	    sizeof(struct mpi_msg_scsi_io)) / sizeof(struct mpi_sge);
 	DNPRINTF(MPI_D_MISC, "%s:   first sgl len: %d\n", DEVNAME(sc),
 	    sc->sc_first_sgl_len);
 
-	sc->sc_chain_len = (letoh16(ifp.request_frame_size) * 4) /
+	sc->sc_chain_len = (lemtoh16(&ifp.request_frame_size) * 4) /
 	    sizeof(struct mpi_sge);
 	DNPRINTF(MPI_D_MISC, "%s:   chain len: %d\n", DEVNAME(sc),
 	    sc->sc_chain_len);
@@ -2102,8 +2105,8 @@ mpi_iocinit(struct mpi_softc *sc)
 	iiq.reply_frame_size = htole16(MPI_REPLY_SIZE);
 
 	hi_addr = (u_int32_t)(MPI_DMA_DVA(sc->sc_requests) >> 32);
-	iiq.host_mfa_hi_addr = htole32(hi_addr);
-	iiq.sense_buffer_hi_addr = htole32(hi_addr);
+	htolem32(&iiq.host_mfa_hi_addr, hi_addr);
+	htolem32(&iiq.sense_buffer_hi_addr, hi_addr);
 
 	iiq.msg_version_maj = 0x01;
 	iiq.msg_version_min = 0x02;
@@ -2163,7 +2166,6 @@ mpi_portfacts(struct mpi_softc *sc)
 	pfq->chain_offset = 0;
 	pfq->msg_flags = 0;
 	pfq->port_number = 0;
-	pfq->msg_context = htole32(ccb->ccb_id);
 
 	if (mpi_poll(sc, ccb, 50000) != 0) {
 		DNPRINTF(MPI_D_MISC, "%s: mpi_portfacts poll\n", DEVNAME(sc));
@@ -2201,7 +2203,7 @@ mpi_portfacts(struct mpi_softc *sc)
 
 	sc->sc_porttype = pfp->port_type;
 	if (sc->sc_target == -1)
-		sc->sc_target = letoh16(pfp->port_scsi_id);
+		sc->sc_target = lemtoh16(&pfp->port_scsi_id);
 
 	mpi_push_reply(sc, ccb->ccb_rcb);
 	rv = 0;
@@ -2238,7 +2240,7 @@ mpi_cfg_coalescing(struct mpi_softc *sc)
 	DNPRINTF(MPI_D_MISC, "%s:  coalescing_depth: %d pci_slot_num: %d\n",
 	    DEVNAME(sc), pg.coalescing_depth, pg.pci_slot_num);
 
-	flags = letoh32(pg.flags);
+	flags = lemtoh32(&pg.flags);
 	if (!ISSET(flags, MPI_CFG_IOC_1_REPLY_COALESCING))
 		return (0);
 
@@ -2277,7 +2279,6 @@ mpi_eventnotify(struct mpi_softc *sc)
 	enq->function = MPI_FUNCTION_EVENT_NOTIFICATION;
 	enq->chain_offset = 0;
 	enq->event_switch = MPI_EVENT_SWITCH_ON;
-	enq->msg_context = htole32(ccb->ccb_id);
 
 	mpi_start(sc, ccb);
 	return (0);
@@ -2308,7 +2309,7 @@ mpi_eventnotify_done(struct mpi_ccb *ccb)
 	DNPRINTF(MPI_D_EVT, "%s:  event_context: 0x%08x\n", DEVNAME(sc),
 	    letoh32(enp->event_context));
 
-	switch (letoh32(enp->event)) {
+	switch (lemtoh32(&enp->event)) {
 	/* ignore these */
 	case MPI_EVENT_EVENT_CHANGE:
 	case MPI_EVENT_SAS_PHY_LINK_STATUS:
@@ -2332,7 +2333,7 @@ mpi_eventnotify_done(struct mpi_ccb *ccb)
 
 	default:
 		DNPRINTF(MPI_D_EVT, "%s:  unhandled event 0x%02x\n",
-		    DEVNAME(sc), letoh32(enp->event));
+		    DEVNAME(sc), lemtoh32(&enp->event));
 		break;
 	}
 
@@ -2436,8 +2437,6 @@ mpi_evt_sas_detach(void *cookie, void *io)
 
 	str->task_type = MPI_MSG_SCSI_TASK_TYPE_TARGET_RESET;
 
-	str->msg_context = htole32(ccb->ccb_id);
-
 	mpi_eventnotify_free(sc, rcb);
 
 	mpi_start(sc, ccb);
@@ -2513,7 +2512,7 @@ mpi_fc_rescan(void *xsc, void *xarg)
 		    pg.current_bus == 0)
 			setbit(devmap, pg.current_target_id);
 
-		id = htole32(pg.port_id);
+		id = lemtoh32(&pg.port_id);
 	} while (id <= 0xff0000);
 
 	for (i = 0; i < sc->sc_buswidth; i++) {
@@ -2563,7 +2562,6 @@ mpi_eventack(void *cookie, void *io)
 	eaq = ccb->ccb_cmd;
 
 	eaq->function = MPI_FUNCTION_EVENT_ACK;
-	eaq->msg_context = htole32(ccb->ccb_id);
 
 	eaq->event = enp->event;
 	eaq->event_context = enp->event_context;
@@ -2607,7 +2605,6 @@ mpi_portenable(struct mpi_softc *sc)
 
 	peq->function = MPI_FUNCTION_PORT_ENABLE;
 	peq->port_number = 0;
-	peq->msg_context = htole32(ccb->ccb_id);
 
 	if (mpi_poll(sc, ccb, 50000) != 0) {
 		DNPRINTF(MPI_D_MISC, "%s: mpi_portenable poll\n", DEVNAME(sc));
@@ -2660,17 +2657,16 @@ mpi_fwupload(struct mpi_softc *sc)
 	bundle = ccb->ccb_cmd;
 
 	bundle->req.function = MPI_FUNCTION_FW_UPLOAD;
-	bundle->req.msg_context = htole32(ccb->ccb_id);
 
 	bundle->req.image_type = MPI_FWUPLOAD_IMAGETYPE_IOC_FW;
 
 	bundle->req.tce.details_length = 12;
-	bundle->req.tce.image_size = htole32(sc->sc_fw_len);
+	htolem32(&bundle->req.tce.image_size, sc->sc_fw_len);
 
-	bundle->sge.sg_hdr = htole32(MPI_SGE_FL_TYPE_SIMPLE |
+	htolem32(&bundle->sge.sg_hdr, MPI_SGE_FL_TYPE_SIMPLE |
 	    MPI_SGE_FL_SIZE_64 | MPI_SGE_FL_LAST | MPI_SGE_FL_EOB |
 	    MPI_SGE_FL_EOL | (u_int32_t)sc->sc_fw_len);
-	bundle->sge.sg_addr = htole64(MPI_DMA_DVA(sc->sc_fw));
+	mpi_dvatosge(&bundle->sge, MPI_DMA_DVA(sc->sc_fw));
 
 	if (mpi_poll(sc, ccb, 50000) != 0) {
 		DNPRINTF(MPI_D_MISC, "%s: mpi_cfg_header poll\n", DEVNAME(sc));
@@ -2681,7 +2677,7 @@ mpi_fwupload(struct mpi_softc *sc)
 		panic("%s: unable to do fw upload", DEVNAME(sc));
 	upp = ccb->ccb_rcb->rcb_reply;
 
-	if (letoh16(upp->ioc_status) != MPI_IOCSTATUS_SUCCESS)
+	if (lemtoh16(&upp->ioc_status) != MPI_IOCSTATUS_SUCCESS)
 		rv = 1;
 
 	mpi_push_reply(sc, ccb->ccb_rcb);
@@ -2692,6 +2688,42 @@ mpi_fwupload(struct mpi_softc *sc)
 err:
 	mpi_dmamem_free(sc, sc->sc_fw);
 	return (1);
+}
+
+int
+mpi_manufacturing(struct mpi_softc *sc)
+{
+	char board_name[33];
+	struct mpi_cfg_hdr hdr;
+	struct mpi_cfg_manufacturing_pg0 *pg;
+	size_t pagelen;
+	int rv = 1;
+
+	if (mpi_cfg_header(sc, MPI_CONFIG_REQ_PAGE_TYPE_MANUFACTURING,
+	    0, 0, &hdr) != 0)
+		return (1);
+
+	pagelen = hdr.page_length * 4; /* dwords to bytes */
+	if (pagelen < sizeof(*pg))
+		return (1);
+
+	pg = malloc(pagelen, M_TEMP, M_WAITOK|M_CANFAIL);
+	if (pg == NULL)
+		return (1);
+
+	if (mpi_cfg_page(sc, 0, &hdr, 1, pg, pagelen) != 0)
+		goto out;
+
+	scsi_strvis(board_name, pg->board_name, sizeof(pg->board_name));
+
+	printf("%s: %s, firmware %d.%d.%d.%d\n", DEVNAME(sc), board_name,
+	    sc->sc_fw_maj, sc->sc_fw_min, sc->sc_fw_unit, sc->sc_fw_dev);
+
+	rv = 0;
+
+out:
+	free(pg, M_TEMP, 0);
+	return (rv);
 }
 
 void
@@ -2724,7 +2756,7 @@ mpi_get_raid(struct mpi_softc *sc)
 		goto out;
 	}
 
-	capabilities = letoh32(vol_page->capabilities);
+	capabilities = lemtoh32(&vol_page->capabilities);
 
 	DNPRINTF(MPI_D_RAID, "%s:  capabilities: 0x08%x\n", DEVNAME(sc),
 	    letoh32(vol_page->capabilities));
@@ -2743,7 +2775,7 @@ mpi_get_raid(struct mpi_softc *sc)
 		sc->sc_flags |= MPI_F_RAID;
 
 out:
-	free(vol_page, M_TEMP);
+	free(vol_page, M_TEMP, 0);
 }
 
 int
@@ -2778,15 +2810,14 @@ mpi_req_cfg_header(struct mpi_softc *sc, u_int8_t type, u_int8_t number,
 	cq = ccb->ccb_cmd;
 
 	cq->function = MPI_FUNCTION_CONFIG;
-	cq->msg_context = htole32(ccb->ccb_id);
 
 	cq->action = MPI_CONFIG_REQ_ACTION_PAGE_HEADER;
 
 	cq->config_header.page_number = number;
 	cq->config_header.page_type = type;
 	cq->ext_page_type = etype;
-	cq->page_address = htole32(address);
-	cq->page_buffer.sg_hdr = htole32(MPI_SGE_FL_TYPE_SIMPLE |
+	htolem32(&cq->page_address, address);
+	htolem32(&cq->page_buffer.sg_hdr, MPI_SGE_FL_TYPE_SIMPLE |
 	    MPI_SGE_FL_LAST | MPI_SGE_FL_EOB | MPI_SGE_FL_EOL);
 
 	ccb->ccb_done = mpi_empty_done;
@@ -2822,7 +2853,7 @@ mpi_req_cfg_header(struct mpi_softc *sc, u_int8_t type, u_int8_t number,
 	    cp->config_header.page_number,
 	    cp->config_header.page_type);
 
-	if (letoh16(cp->ioc_status) != MPI_IOCSTATUS_SUCCESS)
+	if (lemtoh16(&cp->ioc_status) != MPI_IOCSTATUS_SUCCESS)
 		rv = 1;
 	else if (ISSET(flags, MPI_PG_EXTENDED)) {
 		memset(ehdr, 0, sizeof(*ehdr));
@@ -2857,7 +2888,7 @@ mpi_req_cfg_page(struct mpi_softc *sc, u_int32_t address, int flags,
 	    DEVNAME(sc), address, read, hdr->page_type);
 
 	page_length = ISSET(flags, MPI_PG_EXTENDED) ?
-	    letoh16(ehdr->ext_page_length) : hdr->page_length;
+	    lemtoh16(&ehdr->ext_page_length) : hdr->page_length;
 
 	if (len > MPI_REQUEST_SIZE - sizeof(struct mpi_msg_config_request) ||
 	    len < page_length * 4)
@@ -2873,7 +2904,6 @@ mpi_req_cfg_page(struct mpi_softc *sc, u_int32_t address, int flags,
 	cq = ccb->ccb_cmd;
 
 	cq->function = MPI_FUNCTION_CONFIG;
-	cq->msg_context = htole32(ccb->ccb_id);
 
 	cq->action = (read ? MPI_CONFIG_REQ_ACTION_PAGE_READ_CURRENT :
 	    MPI_CONFIG_REQ_ACTION_PAGE_WRITE_CURRENT);
@@ -2887,14 +2917,14 @@ mpi_req_cfg_page(struct mpi_softc *sc, u_int32_t address, int flags,
 	} else
 		cq->config_header = *hdr;
 	cq->config_header.page_type &= MPI_CONFIG_REQ_PAGE_TYPE_MASK;
-	cq->page_address = htole32(address);
-	cq->page_buffer.sg_hdr = htole32(MPI_SGE_FL_TYPE_SIMPLE |
+	htolem32(&cq->page_address, address);
+	htolem32(&cq->page_buffer.sg_hdr, MPI_SGE_FL_TYPE_SIMPLE |
 	    MPI_SGE_FL_LAST | MPI_SGE_FL_EOB | MPI_SGE_FL_EOL |
 	    (page_length * 4) |
 	    (read ? MPI_SGE_FL_DIR_IN : MPI_SGE_FL_DIR_OUT));
 
 	/* bounce the page via the request space to avoid more bus_dma games */
-	cq->page_buffer.sg_addr = htole64(ccb->ccb_cmd_dva +
+	mpi_dvatosge(&cq->page_buffer, ccb->ccb_cmd_dva +
 	    sizeof(struct mpi_msg_config_request));
 
 	kva = ccb->ccb_cmd;
@@ -2937,7 +2967,7 @@ mpi_req_cfg_page(struct mpi_softc *sc, u_int32_t address, int flags,
 	    cp->config_header.page_number,
 	    cp->config_header.page_type);
 
-	if (letoh16(cp->ioc_status) != MPI_IOCSTATUS_SUCCESS)
+	if (lemtoh16(&cp->ioc_status) != MPI_IOCSTATUS_SUCCESS)
 		rv = 1;
 	else if (read)
 		memcpy(page, kva, len);
@@ -3006,7 +3036,7 @@ mpi_ioctl_cache(struct scsi_link *link, u_long cmd, struct dk_cache *dc)
 		goto done;
 	}
 
-	enabled = ISSET(letoh16(rpg0->settings.volume_settings),
+	enabled = ISSET(lemtoh16(&rpg0->settings.volume_settings),
 	    MPI_CFG_RAID_VOL_0_SETTINGS_WRITE_CACHE_EN) ? 1 : 0;
 
 	if (cmd == DIOCGCACHE) {
@@ -3043,7 +3073,6 @@ mpi_ioctl_cache(struct scsi_link *link, u_long cmd, struct dk_cache *dc)
 	req->action = MPI_MSG_RAID_ACTION_CH_VOL_SETTINGS;
 	req->vol_id = rpg0->volume_id;
 	req->vol_bus = rpg0->volume_bus;
-	req->msg_context = htole32(ccb->ccb_id);
 
 	memcpy(&req->data_word, &settings, sizeof(req->data_word));
 	ccb->ccb_done = mpi_empty_done;
@@ -3056,7 +3085,7 @@ mpi_ioctl_cache(struct scsi_link *link, u_long cmd, struct dk_cache *dc)
 	if (rep == NULL)
 		panic("%s: raid volume settings change failed", DEVNAME(sc));
 
-	switch (letoh16(rep->action_status)) {
+	switch (lemtoh16(&rep->action_status)) {
 	case MPI_RAID_ACTION_STATUS_OK:
 		rv = 0;
 		break;
@@ -3069,7 +3098,7 @@ mpi_ioctl_cache(struct scsi_link *link, u_long cmd, struct dk_cache *dc)
 	scsi_io_put(&sc->sc_iopool, ccb);
 
 done:
-	free(rpg0, M_TEMP);
+	free(rpg0, M_TEMP, 0);
 	return (rv);
 }
 
@@ -3107,7 +3136,7 @@ mpi_bio_get_pg0_raid(struct mpi_softc *sc, int id)
 		goto done;
 	}
 	if (sc->sc_rpg0)
-		free(sc->sc_rpg0, M_DEVBUF);
+		free(sc->sc_rpg0, M_DEVBUF, 0);
 	sc->sc_rpg0 = rpg0;
 
 	/* get raid vol page 0 */
@@ -3247,7 +3276,7 @@ mpi_ioctl_vol(struct mpi_softc *sc, struct bioc_vol *bv)
 	if (rpg0->volume_status & MPI_CFG_RAID_VOL_0_STATUS_RESYNCING)
 		bv->bv_status = BIOC_SVREBUILD;
 
-	bv->bv_size = (u_quad_t)letoh32(rpg0->max_lba) * 512;
+	bv->bv_size = (u_quad_t)lemtoh32(&rpg0->max_lba) * 512;
 
 	switch (sc->sc_vol_list[id].vol_type) {
 	case MPI_CFG_RAID_TYPE_RAID_IS:
@@ -3339,7 +3368,7 @@ mpi_ioctl_disk(struct mpi_softc *sc, struct bioc_disk *bd)
 	bd->bd_channel = pdpg0.phys_disk_bus;
 	bd->bd_target = pdpg0.phys_disk_id;
 	bd->bd_lun = 0;
-	bd->bd_size = (u_quad_t)letoh32(pdpg0.max_lba) * 512;
+	bd->bd_size = (u_quad_t)lemtoh32(&pdpg0.max_lba) * 512;
 	strlcpy(bd->bd_vendor, (char *)pdpg0.vendor_id, sizeof(bd->bd_vendor));
 
 	switch (pdpg0.phys_disk_state) {
@@ -3401,7 +3430,7 @@ mpi_create_sensors(struct mpi_softc *sc)
 	if (vol == 0)
 		return (0);
 
-	sc->sc_sensors = malloc(sizeof(struct ksensor) * vol,
+	sc->sc_sensors = mallocarray(vol, sizeof(struct ksensor),
 	    M_DEVBUF, M_NOWAIT | M_ZERO);
 	if (sc->sc_sensors == NULL)
 		return (1);
@@ -3435,7 +3464,7 @@ mpi_create_sensors(struct mpi_softc *sc)
 	return (0);
 
 bad:
-	free(sc->sc_sensors, M_DEVBUF);
+	free(sc->sc_sensors, M_DEVBUF, 0);
 	return (1);
 }
 

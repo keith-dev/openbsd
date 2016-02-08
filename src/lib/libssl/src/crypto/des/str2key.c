@@ -1,4 +1,4 @@
-/* crypto/des/str2key.c */
+/* $OpenBSD: str2key.c,v 1.8 2014/06/12 15:49:28 deraadt Exp $ */
 /* Copyright (C) 1995-1998 Eric Young (eay@cryptsoft.com)
  * All rights reserved.
  *
@@ -56,8 +56,8 @@
  * [including the GNU Public Licence.]
  */
 
-#include "des_locl.h"
 #include <openssl/crypto.h>
+#include "des_locl.h"
 
 void DES_string_to_key(const char *str, DES_cblock *key)
 	{

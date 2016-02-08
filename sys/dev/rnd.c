@@ -1,4 +1,4 @@
-/*	$OpenBSD: rnd.c,v 1.155 2014/02/05 05:54:58 tedu Exp $	*/
+/*	$OpenBSD: rnd.c,v 1.159 2014/07/17 13:38:22 tedu Exp $	*/
 
 /*
  * Copyright (c) 2011 Theo de Raadt.
@@ -123,6 +123,8 @@
 #include <sys/mutex.h>
 #include <sys/task.h>
 #include <sys/msgbuf.h>
+#include <sys/mount.h>
+#include <sys/syscallargs.h>
 
 #include <crypto/md5.h>
 
@@ -840,7 +842,7 @@ randomread(dev_t dev, struct uio *uio, int ioflag)
 	if (myctx)
 		explicit_bzero(&lctx, sizeof(lctx));
 	explicit_bzero(buf, POOLBYTES);
-	free(buf, M_TEMP);
+	free(buf, M_TEMP, 0);
 	return ret;
 }
 
@@ -873,7 +875,7 @@ randomwrite(dev_t dev, struct uio *uio, int flags)
 		arc4_init(NULL, NULL);
 
 	explicit_bzero(buf, POOLBYTES);
-	free(buf, M_TEMP);
+	free(buf, M_TEMP, 0);
 	return ret;
 }
 
@@ -927,4 +929,24 @@ randomioctl(dev_t dev, u_long cmd, caddr_t data, int flag, struct proc *p)
 		return ENOTTY;
 	}
 	return 0;
+}
+
+int
+sys_getentropy(struct proc *p, void *v, register_t *retval)
+{
+	struct sys_getentropy_args /* {
+		syscallarg(void *) buf;
+		syscallarg(size_t) nbyte;
+	} */ *uap = v;
+	char buf[256];
+	int error;
+
+	if (SCARG(uap, nbyte) > sizeof(buf))
+		return (EIO);
+	arc4random_buf(buf, SCARG(uap, nbyte));
+	if ((error = copyout(buf, SCARG(uap, buf), SCARG(uap, nbyte))) != 0)
+		return (error);
+	explicit_bzero(buf, sizeof(buf));
+	retval[0] = 0;
+	return (0);
 }

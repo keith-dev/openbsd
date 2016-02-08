@@ -1,4 +1,4 @@
-/*	$OpenBSD: umsm.c,v 1.96 2013/12/13 17:43:07 yuo Exp $	*/
+/*	$OpenBSD: umsm.c,v 1.100 2014/07/12 21:24:33 mpi Exp $	*/
 
 /*
  * Copyright (c) 2008 Yojiro UO <yuo@nui.org>
@@ -36,10 +36,6 @@
 #include <dev/usb/umassvar.h>
 #undef DPRINTF	/* undef DPRINTF for umass */
 
-#ifdef USB_DEBUG
-#define UMSM_DEBUG
-#endif
-
 #ifdef UMSM_DEBUG
 int     umsmdebug = 0;
 #define DPRINTFN(n, x)  do { if (umsmdebug > (n)) printf x; } while (0)
@@ -57,7 +53,6 @@ int     umsmdebug = 0;
 int umsm_match(struct device *, void *, void *);
 void umsm_attach(struct device *, struct device *, void *);
 int umsm_detach(struct device *, int);
-int umsm_activate(struct device *, int);
 
 int umsm_open(void *, int);
 void umsm_close(void *, int);
@@ -249,8 +244,10 @@ static const struct umsm_type umsm_devs[] = {
 	{{ USB_VENDOR_SIERRA, USB_PRODUCT_SIERRA_MC8355}, 0},
 
 	{{ USB_VENDOR_TCTMOBILE, USB_PRODUCT_TCTMOBILE_UMASS }, DEV_UMASS3},
+	{{ USB_VENDOR_TCTMOBILE, USB_PRODUCT_TCTMOBILE_UMASS_2 }, DEV_UMASS3},
 	{{ USB_VENDOR_TCTMOBILE, USB_PRODUCT_TCTMOBILE_UMSM }, 0},
 	{{ USB_VENDOR_TCTMOBILE, USB_PRODUCT_TCTMOBILE_UMSM_2 }, 0},
+	{{ USB_VENDOR_TCTMOBILE, USB_PRODUCT_TCTMOBILE_UMSM_3 }, 0},
 
 	{{ USB_VENDOR_TOSHIBA, USB_PRODUCT_TOSHIBA_HSDPA }, 0},
 
@@ -270,11 +267,7 @@ struct cfdriver umsm_cd = {
 };
 
 const struct cfattach umsm_ca = {
-	sizeof(struct umsm_softc),
-	umsm_match,
-	umsm_attach,
-	umsm_detach,
-	umsm_activate,
+	sizeof(struct umsm_softc), umsm_match, umsm_attach, umsm_detach
 };
 
 int
@@ -421,7 +414,7 @@ umsm_detach(struct device *self, int flags)
 	if (sc->sc_intr_pipe != NULL) {
 		usbd_abort_pipe(sc->sc_intr_pipe);
 		usbd_close_pipe(sc->sc_intr_pipe);
-		free(sc->sc_intr_buf, M_USBDEV);
+		free(sc->sc_intr_buf, M_USBDEV, 0);
 		sc->sc_intr_pipe = NULL;
 	}
 
@@ -432,19 +425,6 @@ umsm_detach(struct device *self, int flags)
 	}
 
 	return (rv);
-}
-
-int
-umsm_activate(struct device *self, int act)
-{
-	struct umsm_softc *sc = (struct umsm_softc *)self;
-
-	switch (act) {
-	case DVACT_DEACTIVATE:
-		usbd_deactivate(sc->sc_udev);
-		break;
-	}
-	return (0);
 }
 
 int
@@ -494,7 +474,7 @@ umsm_close(void *addr, int portno)
 			printf("%s: close interrupt pipe failed: %s\n",
 			    sc->sc_dev.dv_xname,
 			    usbd_errstr(err));
-		free(sc->sc_intr_buf, M_USBDEV);
+		free(sc->sc_intr_buf, M_USBDEV, 0);
 		sc->sc_intr_pipe = NULL;
 	}
 }

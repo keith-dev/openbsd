@@ -1,4 +1,4 @@
-/*	$OpenBSD: i82365.c,v 1.30 2013/11/18 20:21:51 deraadt Exp $	*/
+/*	$OpenBSD: i82365.c,v 1.32 2014/07/12 18:48:17 tedu Exp $	*/
 /*	$NetBSD: i82365.c,v 1.10 1998/06/09 07:36:55 thorpej Exp $	*/
 
 /*
@@ -38,8 +38,6 @@
 #include <sys/kernel.h>
 #include <sys/malloc.h>
 #include <sys/kthread.h>
-
-#include <uvm/uvm_extern.h>
 
 #include <machine/bus.h>
 #include <machine/intr.h>
@@ -471,9 +469,9 @@ pcic_event_process(h, pe)
 				break;
 			if (pe2->pe_type == PCIC_EVENT_INSERTION) {
 				SIMPLEQ_REMOVE_HEAD(&h->events, pe_q);
-				free(pe1, M_TEMP);
+				free(pe1, M_TEMP, 0);
 				SIMPLEQ_REMOVE_HEAD(&h->events, pe_q);
-				free(pe2, M_TEMP);
+				free(pe2, M_TEMP, 0);
 			}
 		}
 		splx(s);
@@ -495,9 +493,9 @@ pcic_event_process(h, pe)
 				break;
 			if (pe2->pe_type == PCIC_EVENT_REMOVAL) {
 				SIMPLEQ_REMOVE_HEAD(&h->events, pe_q);
-				free(pe1, M_TEMP);
+				free(pe1, M_TEMP, 0);
 				SIMPLEQ_REMOVE_HEAD(&h->events, pe_q);
-				free(pe2, M_TEMP);
+				free(pe2, M_TEMP, 0);
 			}
 		}
 		splx(s);
@@ -509,7 +507,7 @@ pcic_event_process(h, pe)
 	default:
 		panic("pcic_event_thread: unknown event %d", pe->pe_type);
 	}
-	free(pe, M_TEMP);
+	free(pe, M_TEMP, 0);
 }
 
 void

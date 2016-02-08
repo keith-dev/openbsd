@@ -1,4 +1,4 @@
-/*	$OpenBSD: sdmmc.c,v 1.32 2014/01/23 01:41:44 deraadt Exp $	*/
+/*	$OpenBSD: sdmmc.c,v 1.34 2014/07/12 18:48:52 tedu Exp $	*/
 
 /*
  * Copyright (c) 2006 Uwe Stuehler <uwe@openbsd.org>
@@ -403,7 +403,7 @@ sdmmc_enable(struct sdmmc_softc *sc)
 	}
 
 	/* XXX wait for card to power up */
-	sdmmc_delay(100000);
+	sdmmc_delay(250000);
 
 	/* Initialize SD I/O card function(s). */
 	if ((error = sdmmc_io_enable(sc)) != 0)
@@ -487,7 +487,7 @@ sdmmc_function_alloc(struct sdmmc_softc *sc)
 void
 sdmmc_function_free(struct sdmmc_function *sf)
 {
-	free(sf, M_DEVBUF);
+	free(sf, M_DEVBUF, 0);
 }
 
 /*
@@ -810,7 +810,7 @@ sdmmc_ioctl(struct device *self, u_long request, caddr_t addr)
 			return EFAULT;
 
 		if (ucmd->c_data)
-			free(data, M_TEMP);
+			free(data, M_TEMP, 0);
 		break;
 
 	default:

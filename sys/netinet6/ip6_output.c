@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip6_output.c,v 1.153 2014/01/23 23:51:29 henning Exp $	*/
+/*	$OpenBSD: ip6_output.c,v 1.158 2014/07/22 11:06:10 mpi Exp $	*/
 /*	$KAME: ip6_output.c,v 1.172 2001/03/25 09:55:56 itojun Exp $	*/
 
 /*
@@ -78,7 +78,6 @@
 #include <net/route.h>
 
 #include <netinet/in.h>
-#include <netinet/in_systm.h>
 #include <netinet/ip.h>
 #include <netinet/in_pcb.h>
 #include <netinet/udp.h>
@@ -132,6 +131,9 @@ int ip6_splithdr(struct mbuf *, struct ip6_exthdrs *);
 int ip6_getpmtu(struct route_in6 *, struct route_in6 *,
 	struct ifnet *, struct in6_addr *, u_long *, int *);
 int copypktopts(struct ip6_pktopts *, struct ip6_pktopts *, int);
+static __inline u_int16_t __attribute__((__unused__))
+    in6_cksum_phdr(const struct in6_addr *, const struct in6_addr *,
+    u_int32_t, u_int32_t);
 void in6_delayed_cksum(struct mbuf *, u_int8_t);
 
 /* Context for non-repeating IDs */
@@ -496,7 +498,7 @@ reroute:
 		 * packet gets tunneled?
 		 */
 
-		tdb = gettdb(rtable_l2(m->m_pkthdr.rdomain),
+		tdb = gettdb(rtable_l2(m->m_pkthdr.ph_rtableid),
 		    sspi, &sdst, sproto);
 		if (tdb == NULL) {
 			error = EHOSTUNREACH;
@@ -544,9 +546,9 @@ reroute:
 	dstsock.sin6_family = AF_INET6;
 	dstsock.sin6_addr = ip6->ip6_dst;
 	dstsock.sin6_len = sizeof(dstsock);
-	ro->ro_tableid = m->m_pkthdr.rdomain;
+	ro->ro_tableid = m->m_pkthdr.ph_rtableid;
 	if ((error = in6_selectroute(&dstsock, opt, im6o, ro, &ifp,
-	    &rt, m->m_pkthdr.rdomain)) != 0) {
+	    &rt, m->m_pkthdr.ph_rtableid)) != 0) {
 		switch (error) {
 		case EHOSTUNREACH:
 			ip6stat.ip6s_noroute++;
@@ -1218,7 +1220,7 @@ ip6_getpmtu(struct route_in6 *ro_pmtu, struct route_in6 *ro,
 		    ((ro_pmtu->ro_rt->rt_flags & RTF_UP) == 0 ||
 		     !IN6_ARE_ADDR_EQUAL(&sa6_dst->sin6_addr, dst))) {
 			RTFREE(ro_pmtu->ro_rt);
-			ro_pmtu->ro_rt = (struct rtentry *)NULL;
+			ro_pmtu->ro_rt = NULL;
 		}
 		if (ro_pmtu->ro_rt == 0) {
 			bzero(ro_pmtu, sizeof(*ro_pmtu));
@@ -2094,7 +2096,7 @@ ip6_pcbopts(struct ip6_pktopts **pktopt, struct mbuf *m, struct socket *so)
 		 * Only turning off any previous options, regardless of
 		 * whether the opt is just created or given.
 		 */
-		free(opt, M_IP6OPT);
+		free(opt, M_IP6OPT, 0);
 		return (0);
 	}
 
@@ -2104,7 +2106,7 @@ ip6_pcbopts(struct ip6_pktopts **pktopt, struct mbuf *m, struct socket *so)
 	if ((error = ip6_setpktopts(m, opt, NULL, priv,
 	    so->so_proto->pr_protocol)) != 0) {
 		ip6_clearpktopts(opt, -1);	/* XXX discard all options */
-		free(opt, M_IP6OPT);
+		free(opt, M_IP6OPT, 0);
 		return (error);
 	}
 	*pktopt = opt;
@@ -2244,7 +2246,7 @@ ip6_clearpktopts(struct ip6_pktopts *pktopt, int optname)
 {
 	if (optname == -1 || optname == IPV6_PKTINFO) {
 		if (pktopt->ip6po_pktinfo)
-			free(pktopt->ip6po_pktinfo, M_IP6OPT);
+			free(pktopt->ip6po_pktinfo, M_IP6OPT, 0);
 		pktopt->ip6po_pktinfo = NULL;
 	}
 	if (optname == -1 || optname == IPV6_HOPLIMIT)
@@ -2257,22 +2259,22 @@ ip6_clearpktopts(struct ip6_pktopts *pktopt, int optname)
 			pktopt->ip6po_nextroute.ro_rt = NULL;
 		}
 		if (pktopt->ip6po_nexthop)
-			free(pktopt->ip6po_nexthop, M_IP6OPT);
+			free(pktopt->ip6po_nexthop, M_IP6OPT, 0);
 		pktopt->ip6po_nexthop = NULL;
 	}
 	if (optname == -1 || optname == IPV6_HOPOPTS) {
 		if (pktopt->ip6po_hbh)
-			free(pktopt->ip6po_hbh, M_IP6OPT);
+			free(pktopt->ip6po_hbh, M_IP6OPT, 0);
 		pktopt->ip6po_hbh = NULL;
 	}
 	if (optname == -1 || optname == IPV6_RTHDRDSTOPTS) {
 		if (pktopt->ip6po_dest1)
-			free(pktopt->ip6po_dest1, M_IP6OPT);
+			free(pktopt->ip6po_dest1, M_IP6OPT, 0);
 		pktopt->ip6po_dest1 = NULL;
 	}
 	if (optname == -1 || optname == IPV6_RTHDR) {
 		if (pktopt->ip6po_rhinfo.ip6po_rhi_rthdr)
-			free(pktopt->ip6po_rhinfo.ip6po_rhi_rthdr, M_IP6OPT);
+			free(pktopt->ip6po_rhinfo.ip6po_rhi_rthdr, M_IP6OPT, 0);
 		pktopt->ip6po_rhinfo.ip6po_rhi_rthdr = NULL;
 		if (pktopt->ip6po_route.ro_rt) {
 			RTFREE(pktopt->ip6po_route.ro_rt);
@@ -2281,7 +2283,7 @@ ip6_clearpktopts(struct ip6_pktopts *pktopt, int optname)
 	}
 	if (optname == -1 || optname == IPV6_DSTOPTS) {
 		if (pktopt->ip6po_dest2)
-			free(pktopt->ip6po_dest2, M_IP6OPT);
+			free(pktopt->ip6po_dest2, M_IP6OPT, 0);
 		pktopt->ip6po_dest2 = NULL;
 	}
 }
@@ -2338,7 +2340,7 @@ ip6_freepcbopts(struct ip6_pktopts *pktopt)
 
 	ip6_clearpktopts(pktopt, -1);
 
-	free(pktopt, M_IP6OPT);
+	free(pktopt, M_IP6OPT, 0);
 }
 
 /*
@@ -2475,7 +2477,7 @@ ip6_setmoptions(int optname, struct ip6_moptions **im6op, struct mbuf *m)
 			 *   XXX: is it a good approach?
 			 */
 			bzero(&ro, sizeof(ro));
-			ro.ro_tableid = m->m_pkthdr.rdomain;
+			ro.ro_tableid = m->m_pkthdr.ph_rtableid;
 			dst = &ro.ro_dst;
 			dst->sin6_len = sizeof(struct sockaddr_in6);
 			dst->sin6_family = AF_INET6;
@@ -2614,7 +2616,7 @@ ip6_setmoptions(int optname, struct ip6_moptions **im6op, struct mbuf *m)
 	    im6o->im6o_multicast_hlim == ip6_defmcasthlim &&
 	    im6o->im6o_multicast_loop == IPV6_DEFAULT_MULTICAST_LOOP &&
 	    LIST_EMPTY(&im6o->im6o_memberships)) {
-		free(*im6op, M_IPMOPTS);
+		free(*im6op, M_IPMOPTS, 0);
 		*im6op = NULL;
 	}
 
@@ -2681,7 +2683,7 @@ ip6_freemoptions(struct ip6_moptions *im6o)
 		LIST_REMOVE(imm, i6mm_chain);
 		in6_leavegroup(imm);
 	}
-	free(im6o, M_IPMOPTS);
+	free(im6o, M_IPMOPTS, 0);
 }
 
 /*
@@ -3200,6 +3202,43 @@ void
 ip6_randomid_init(void)
 {
 	idgen32_init(&ip6_id_ctx);
+}
+
+/*
+ *	Compute significant parts of the IPv6 checksum pseudo-header
+ *	for use in a delayed TCP/UDP checksum calculation.
+ */
+static __inline u_int16_t __attribute__((__unused__))
+in6_cksum_phdr(const struct in6_addr *src, const struct in6_addr *dst,
+    u_int32_t len, u_int32_t nxt)
+{
+	u_int32_t sum = 0;
+	const u_int16_t *w;
+
+	w = (const u_int16_t *) src;
+	sum += w[0];
+	if (!IN6_IS_SCOPE_EMBED(src))
+		sum += w[1];
+	sum += w[2]; sum += w[3]; sum += w[4]; sum += w[5];
+	sum += w[6]; sum += w[7];
+
+	w = (const u_int16_t *) dst;
+	sum += w[0];
+	if (!IN6_IS_SCOPE_EMBED(dst))
+		sum += w[1];
+	sum += w[2]; sum += w[3]; sum += w[4]; sum += w[5];
+	sum += w[6]; sum += w[7];
+
+	sum += (u_int16_t)(len >> 16) + (u_int16_t)(len /*& 0xffff*/);
+
+	sum += (u_int16_t)(nxt >> 16) + (u_int16_t)(nxt /*& 0xffff*/);
+
+	sum = (u_int16_t)(sum >> 16) + (u_int16_t)(sum /*& 0xffff*/);
+
+	if (sum > 0xffff)
+		sum -= 0xffff;
+
+	return (sum);
 }
 
 /*

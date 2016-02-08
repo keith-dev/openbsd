@@ -1,4 +1,4 @@
-/*	$OpenBSD: raw_ip.c,v 1.67 2013/12/20 02:04:08 krw Exp $	*/
+/*	$OpenBSD: raw_ip.c,v 1.74 2014/07/22 11:06:10 mpi Exp $	*/
 /*	$NetBSD: raw_ip.c,v 1.25 1996/02/18 18:58:33 christos Exp $	*/
 
 /*
@@ -80,7 +80,6 @@
 #include <net/pfvar.h>
 
 #include <netinet/in.h>
-#include <netinet/in_systm.h>
 #include <netinet/ip.h>
 #include <netinet/ip_mroute.h>
 #include <netinet/ip_var.h>
@@ -135,7 +134,7 @@ rip_input(struct mbuf *m, ...)
 			continue;
 #endif
 		if (rtable_l2(inp->inp_rtableid) !=
-		    rtable_l2(m->m_pkthdr.rdomain))
+		    rtable_l2(m->m_pkthdr.ph_rtableid))
 			continue;
 
 		if (inp->inp_ip.ip_p && inp->inp_ip.ip_p != ip->ip_p)
@@ -218,7 +217,7 @@ rip_output(struct mbuf *m, ...)
 	va_end(ap);
 
 	inp = sotoinpcb(so);
-	flags = (so->so_options & SO_DONTROUTE) | IP_ALLOWBROADCAST;
+	flags = IP_ALLOWBROADCAST;
 
 	/*
 	 * If the user handed us a complete IP packet, use it.
@@ -274,11 +273,11 @@ rip_output(struct mbuf *m, ...)
 	 *             ip_output should be guarded against v6/v4 problems.
 	 */
 #endif
-	/* force routing domain */
-	m->m_pkthdr.rdomain = inp->inp_rtableid;
+	/* force routing table */
+	m->m_pkthdr.ph_rtableid = inp->inp_rtableid;
 
 	error = ip_output(m, inp->inp_options, &inp->inp_route, flags,
-	    inp->inp_moptions, inp);
+	    inp->inp_moptions, inp, 0);
 	if (error == EACCES)	/* translate pf(4) error for userland */
 		error = EHOSTUNREACH;
 	return (error);
@@ -465,9 +464,9 @@ rip_usrreq(struct socket *so, int req, struct mbuf *m, struct mbuf *nam,
 			break;
 		}
 		if (!((so->so_options & SO_BINDANY) ||
-		    addr->sin_addr.s_addr == 0 ||
-		    in_iawithaddr(addr->sin_addr, inp->inp_rtableid) ||
-		    in_broadcast(addr->sin_addr, NULL, inp->inp_rtableid))) {
+		    addr->sin_addr.s_addr == INADDR_ANY ||
+		    addr->sin_addr.s_addr == INADDR_BROADCAST ||
+		    ifa_ifwithaddr(sintosa(addr), inp->inp_rtableid))) {
 			error = EADDRNOTAVAIL;
 			break;
 		}

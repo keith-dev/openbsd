@@ -1,4 +1,4 @@
-/*	$OpenBSD: ca.c,v 1.26 2014/02/17 15:07:23 markus Exp $	*/
+/*	$OpenBSD: ca.c,v 1.31 2014/07/10 12:50:05 jsg Exp $	*/
 
 /*
  * Copyright (c) 2010-2013 Reyk Floeter <reyk@openbsd.org>
@@ -43,11 +43,12 @@
 #include <openssl/pem.h>
 #include <openssl/evp.h>
 #include <openssl/sha.h>
+#include <openssl/rsa.h>
 
 #include "iked.h"
 #include "ikev2.h"
 
-void	 ca_reset(struct privsep *, void *);
+void	 ca_reset(struct privsep *, struct privsep_proc *, void *);
 int	 ca_reload(struct iked *);
 
 int	 ca_getreq(struct iked *, struct imsg *);
@@ -56,6 +57,7 @@ int	 ca_getauth(struct iked *, struct imsg *);
 X509	*ca_by_subjectpubkey(X509_STORE *, u_int8_t *, size_t);
 X509	*ca_by_issuer(X509_STORE *, X509_NAME *, struct iked_static_id *);
 int	 ca_subjectpubkey_digest(X509 *, u_int8_t *, u_int *);
+int	 ca_x509_subject_cmp(X509 *, struct iked_static_id *);
 int	 ca_validate_pubkey(struct iked *, struct iked_static_id *,
 	    void *, size_t);
 int	 ca_validate_cert(struct iked *, struct iked_static_id *,
@@ -119,7 +121,7 @@ caproc(struct privsep *ps, struct privsep_proc *p)
 }
 
 void
-ca_reset(struct privsep *ps, void *arg)
+ca_reset(struct privsep *ps, struct privsep_proc *p, void *arg)
 {
 	struct iked	*env = ps->ps_env;
 	struct ca_store	*store = arg;
@@ -160,7 +162,7 @@ ca_dispatch_parent(int fd, struct privsep_proc *p, struct imsg *imsg)
 		memcpy(&mode, imsg->data, sizeof(mode));
 		if (mode == RESET_ALL || mode == RESET_CA) {
 			log_debug("%s: config reload", __func__);
-			ca_reset(&env->sc_ps, store);
+			ca_reset(&env->sc_ps, p, store);
 		}
 		break;
 	case IMSG_OCSP_FD:
@@ -241,7 +243,8 @@ ca_setcert(struct iked *env, struct iked_sahdr *sh, struct iked_id *id,
 	iov[iovcnt].iov_len = len;
 	iovcnt++;
 
-	if (proc_composev_imsg(env, procid, IMSG_CERT, -1, iov, iovcnt) == -1)
+	if (proc_composev_imsg(&env->sc_ps, procid, -1,
+	    IMSG_CERT, -1, iov, iovcnt) == -1)
 		return (-1);
 	return (0);
 }
@@ -282,7 +285,7 @@ ca_setreq(struct iked *env, struct iked_sahdr *sh,
 	iov[iovcnt].iov_len = len;
 	iovcnt++;
 
-	if (proc_composev_imsg(env, procid,
+	if (proc_composev_imsg(&env->sc_ps, procid, -1,
 	    IMSG_CERTREQ, -1, iov, iovcnt) == -1)
 		goto done;
 
@@ -319,7 +322,8 @@ ca_setauth(struct iked *env, struct iked_sa *sa,
 		log_debug("%s: auth length %zu", __func__, ibuf_size(authmsg));
 	}
 
-	if (proc_composev_imsg(env, id, IMSG_AUTH, -1, iov, iovcnt) == -1)
+	if (proc_composev_imsg(&env->sc_ps, id, -1,
+	    IMSG_AUTH, -1, iov, iovcnt) == -1)
 		return (-1);
 	return (0);
 }
@@ -379,7 +383,8 @@ ca_getcert(struct iked *env, struct imsg *imsg)
 	iov[1].iov_base = &type;
 	iov[1].iov_len = sizeof(type);
 
-	if (proc_composev_imsg(env, PROC_IKEV2, cmd, -1, iov, iovcnt) == -1)
+	if (proc_composev_imsg(&env->sc_ps, PROC_IKEV2, -1,
+	    cmd, -1, iov, iovcnt) == -1)
 		return (-1);
 	return (0);
 }
@@ -623,8 +628,8 @@ ca_reload(struct iked *env)
 		    ibuf_length(env->sc_certreq) == SHA_DIGEST_LENGTH ?
 		    "" : "s");
 
-		(void)proc_composev_imsg(env, PROC_IKEV2, IMSG_CERTREQ, -1,
-		    iov, iovcnt);
+		(void)proc_composev_imsg(&env->sc_ps, PROC_IKEV2, -1,
+		    IMSG_CERTREQ, -1, iov, iovcnt);
 	}
 
 	/*
@@ -672,8 +677,8 @@ ca_reload(struct iked *env)
 
 	iov[0].iov_base = &env->sc_certreqtype;
 	iov[0].iov_len = sizeof(env->sc_certreqtype);
-	(void)proc_composev_imsg(env, PROC_IKEV2, IMSG_CERTREQ, -1,
-	    iov, iovcnt);
+	(void)proc_composev_imsg(&env->sc_ps, PROC_IKEV2, -1,
+	    IMSG_CERTREQ, -1, iov, iovcnt);
 
 	return (0);
 }
@@ -728,9 +733,16 @@ ca_by_issuer(X509_STORE *ctx, X509_NAME *subject, struct iked_static_id *id)
 		if ((issuer = X509_get_issuer_name(cert)) == NULL)
 			continue;
 		else if (X509_NAME_cmp(subject, issuer) == 0) {
-			if (ca_x509_subjectaltname_cmp(cert, id) != 0)
-				continue;
-			return (cert);
+			switch (id->id_type) {
+			case IKEV2_ID_ASN1_DN:
+				if (ca_x509_subject_cmp(cert, id) == 0)
+					return (cert);
+				break;
+			default:
+				if (ca_x509_subjectaltname_cmp(cert, id) == 0)
+					return (cert);
+				break;
+			}
 		}
 	}
 
@@ -781,6 +793,7 @@ ca_x509_serialize(X509 *x509)
 
 	len = BIO_get_mem_data(out, &d);
 	buf = ibuf_new(d, len);
+	BIO_free(out);
 
 	return (buf);
 }
@@ -788,8 +801,7 @@ ca_x509_serialize(X509 *x509)
 int
 ca_pubkey_serialize(EVP_PKEY *key, struct iked_id *id)
 {
-	RSA		*rsa;
-	BIO		*out = NULL;
+	RSA		*rsa = NULL;
 	u_int8_t	*d;
 	int		 len = 0;
 	int		 ret = -1;
@@ -802,14 +814,16 @@ ca_pubkey_serialize(EVP_PKEY *key, struct iked_id *id)
 
 		if ((rsa = EVP_PKEY_get1_RSA(key)) == NULL)
 			goto done;
-		if ((out = BIO_new(BIO_s_mem())) == NULL)
+		if ((len = i2d_RSAPublicKey(rsa, NULL)) <= 0)
 			goto done;
-		if (!i2d_RSAPublicKey_bio(out, rsa))
+		if ((id->id_buf = ibuf_new(NULL, len)) == NULL)
 			goto done;
 
-		len = BIO_get_mem_data(out, &d);
-		if ((id->id_buf = ibuf_new(d, len)) == NULL)
+		d = ibuf_data(id->id_buf);
+		if (i2d_RSAPublicKey(rsa, &d) != len) {
+			ibuf_release(id->id_buf);
 			goto done;
+		}
 
 		id->id_type = IKEV2_CERT_RSA_KEY;
 		break;
@@ -823,17 +837,18 @@ ca_pubkey_serialize(EVP_PKEY *key, struct iked_id *id)
 
 	ret = 0;
  done:
-	if (out != NULL)
-		BIO_free(out);
+	if (rsa != NULL)
+		RSA_free(rsa);
 	return (ret);
 }
 
 int
 ca_privkey_serialize(EVP_PKEY *key, struct iked_id *id)
 {
-	RSA		*rsa;
+	RSA		*rsa = NULL;
 	u_int8_t	*d;
 	int		 len = 0;
+	int		 ret = -1;
 
 	switch (key->type) {
 	case EVP_PKEY_RSA:
@@ -842,16 +857,16 @@ ca_privkey_serialize(EVP_PKEY *key, struct iked_id *id)
 		ibuf_release(id->id_buf);
 
 		if ((rsa = EVP_PKEY_get1_RSA(key)) == NULL)
-			return (-1);
+			goto done;
 		if ((len = i2d_RSAPrivateKey(rsa, NULL)) <= 0)
-			return (-1);
+			goto done;
 		if ((id->id_buf = ibuf_new(NULL, len)) == NULL)
-			return (-1);
+			goto done;
 
 		d = ibuf_data(id->id_buf);
 		if (i2d_RSAPrivateKey(rsa, &d) != len) {
 			ibuf_release(id->id_buf);
-			return (-1);
+			goto done;
 		}
 
 		id->id_type = IKEV2_CERT_RSA_KEY;
@@ -864,7 +879,11 @@ ca_privkey_serialize(EVP_PKEY *key, struct iked_id *id)
 	log_debug("%s: type %s length %d", __func__,
 	    print_map(id->id_type, ikev2_cert_map), len);
 
-	return (0);
+	ret = 0;
+ done:
+	if (rsa != NULL)
+		RSA_free(rsa);
+	return (ret);
 }
 
 char *
@@ -894,6 +913,101 @@ ca_x509_name(void *ptr)
 		return (NULL);
 
 	return (strdup(buf));
+}
+
+/*
+ * Copy 'src' to 'dst' until 'marker' is found while unescaping '\'
+ * characters. The return value tells the caller where to continue
+ * parsing (might be the end of the string) or NULL on error.
+ */
+static char *
+ca_x509_name_unescape(char *src, char *dst, char marker)
+{
+	while (*src) {
+		if (*src == marker) {
+			src++;
+			break;
+		}
+		if (*src == '\\') {
+			src++;
+			if (!*src) {
+				log_warnx("%s: '\\' at end of string",
+				    __func__);
+				*dst = '\0';
+				return (NULL);
+			}
+		}
+		*dst++ = *src++;
+	}
+	*dst = '\0';
+	return (src);
+}
+/*
+ * Parse an X509 subject name where 'subject' is in the format
+ *    /type0=value0/type1=value1/type2=...
+ * where characters may be escaped by '\'.
+ * See lib/libssl/src/apps/apps.c:parse_name()
+ */
+void *
+ca_x509_name_parse(char *subject)
+{
+	char		*cp, *value = NULL, *type = NULL;
+	size_t		 maxlen;
+	X509_NAME	*name = NULL;
+
+	if (*subject != '/') {
+		log_warnx("%s: leading '/' missing in '%s'", __func__, subject);
+		goto err;
+	}
+
+	/* length of subject is upper bound for unescaped type/value */
+	maxlen = strlen(subject) + 1;
+
+	if ((type = calloc(1, maxlen)) == NULL ||
+	    (value = calloc(1, maxlen)) == NULL ||
+	    (name = X509_NAME_new()) == NULL)
+		goto err;
+
+	cp = subject + 1;
+	while (*cp) {
+		/* unescape type, terminated by '=' */
+		cp = ca_x509_name_unescape(cp, type, '=');
+		if (cp == NULL) {
+			log_warnx("%s: could not parse type", __func__);
+			goto err;
+		}
+		if (!*cp) {
+			log_warnx("%s: missing value", __func__);
+			goto err;
+		}
+		/* unescape value, terminated by '/' */
+		cp = ca_x509_name_unescape(cp, value, '/');
+		if (cp == NULL) {
+			log_warnx("%s: could not parse value", __func__);
+			goto err;
+		}
+		if (!*type || !*value) {
+			log_warnx("%s: empty type or value", __func__);
+			goto err;
+		}
+		log_debug("%s: setting '%s' to '%s'", __func__, type, value);
+		if (!X509_NAME_add_entry_by_txt(name, type, MBSTRING_ASC,
+		    value, -1, -1, 0)) {
+			log_warnx("%s: setting '%s' to '%s' failed", __func__,
+			    type, value);
+			ca_sslerror(__func__);
+			goto err;
+		}
+	}
+	free(type);
+	free(value);
+	return (name);
+
+err:
+	X509_NAME_free(name);
+	free(type);
+	free(value);
+	return (NULL);
 }
 
 int
@@ -1006,9 +1120,7 @@ ca_validate_cert(struct iked *env, struct iked_static_id *id,
 	BIO		*rawcert = NULL;
 	X509		*cert = NULL;
 	int		 ret = -1, result, error;
-	size_t		 idlen, idoff;
-	const u_int8_t	*idptr;
-	X509_NAME	*idname = NULL, *subject;
+	X509_NAME	*subject;
 	const char	*errstr = "failed";
 
 	if (len == 0) {
@@ -1037,17 +1149,7 @@ ca_validate_cert(struct iked *env, struct iked_static_id *id,
 
 		switch (id->id_type) {
 		case IKEV2_ID_ASN1_DN:
-			idoff = id->id_offset;
-			if (id->id_length <= idoff) {
-				errstr = "invalid ASN1_DN id length";
-				goto done;
-			}
-			idlen = id->id_length - idoff;
-			idptr = id->id_data + idoff;
-
-			if ((idname = d2i_X509_NAME(NULL,
-			    &idptr, idlen)) == NULL ||
-			    X509_NAME_cmp(subject, idname) != 0) {
+			if (ca_x509_subject_cmp(cert, id) < 0) {
 				errstr = "ASN1_DN identifier mismatch";
 				goto done;
 			}
@@ -1090,14 +1192,37 @@ ca_validate_cert(struct iked *env, struct iked_static_id *id,
 	if (cert != NULL)
 		log_debug("%s: %s %.100s", __func__, cert->name, errstr);
 
-	if (idname != NULL)
-		X509_NAME_free(idname);
 	if (rawcert != NULL) {
 		BIO_free(rawcert);
 		if (cert != NULL)
 			X509_free(cert);
 	}
 
+	return (ret);
+}
+
+/* check if subject from cert matches the id */
+int
+ca_x509_subject_cmp(X509 *cert, struct iked_static_id *id)
+{
+	X509_NAME	*subject, *idname = NULL;
+	const u_int8_t	*idptr;
+	size_t		 idlen;
+	int		 ret = -1;
+
+	if (id->id_type != IKEV2_ID_ASN1_DN)
+		return (-1);
+	if ((subject = X509_get_subject_name(cert)) == NULL)
+		return (-1);
+	if (id->id_length <= id->id_offset)
+		return (-1);
+	idlen = id->id_length - id->id_offset;
+	idptr = id->id_data + id->id_offset;
+	if ((idname = d2i_X509_NAME(NULL, &idptr, idlen)) == NULL)
+		return (-1);
+	if (X509_NAME_cmp(subject, idname) == 0)
+		ret = 0;
+	X509_NAME_free(idname);
 	return (ret);
 }
 

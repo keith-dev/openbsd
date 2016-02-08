@@ -1,4 +1,4 @@
-/*	$OpenBSD: hme.c,v 1.63 2013/08/07 01:06:29 bluhm Exp $	*/
+/*	$OpenBSD: hme.c,v 1.67 2014/07/22 13:12:12 mpi Exp $	*/
 /*	$NetBSD: hme.c,v 1.21 2001/07/07 15:59:37 thorpej Exp $	*/
 
 /*-
@@ -56,11 +56,7 @@
 
 #ifdef INET
 #include <netinet/in.h>
-#include <netinet/in_systm.h>
-#include <netinet/ip.h>
 #include <netinet/if_ether.h>
-#include <netinet/tcp.h>
-#include <netinet/udp.h>
 #endif
 
 #if NBPFILTER > 0
@@ -105,12 +101,9 @@ void		hme_mediastatus(struct ifnet *, struct ifmediareq *);
 int		hme_eint(struct hme_softc *, u_int);
 int		hme_rint(struct hme_softc *);
 int		hme_tint(struct hme_softc *);
-/* TCP/UDP checksum offload support */
-void 		hme_rxcksum(struct mbuf *, u_int32_t);
 
 void
-hme_config(sc)
-	struct hme_softc *sc;
+hme_config(struct hme_softc *sc)
 {
 	struct ifnet *ifp = &sc->sc_arpcom.ac_if;
 	struct mii_data *mii = &sc->sc_mii;
@@ -230,8 +223,6 @@ hme_config(sc)
 	IFQ_SET_READY(&ifp->if_snd);
 	ifp->if_capabilities = IFCAP_VLAN_MTU;
 
-	m_clsetwms(ifp, MCLBYTES, 0, HME_RX_RING_SIZE);
-
 	/* Initialize ifmedia structures and MII info */
 	mii->mii_ifp = ifp;
 	mii->mii_readreg = hme_mii_readreg; 
@@ -307,8 +298,7 @@ fail:
 }
 
 void
-hme_unconfig(sc)
-	struct hme_softc *sc;
+hme_unconfig(struct hme_softc *sc)
 {
 	struct ifnet *ifp = &sc->sc_arpcom.ac_if;
 	int i;
@@ -334,8 +324,7 @@ hme_unconfig(sc)
 }
 
 void
-hme_tick(arg)
-	void *arg;
+hme_tick(void *arg)
 {
 	struct hme_softc *sc = arg;
 	struct ifnet *ifp = &sc->sc_arpcom.ac_if;
@@ -365,7 +354,7 @@ hme_tick(arg)
 	 * If buffer allocation fails, the receive ring may become
 	 * empty. There is no receive interrupt to recover from that.
 	 */
-	if (sc->sc_rx_cnt == 0)
+	if (if_rxr_inuse(&sc->sc_rx_ring) == 0)
 		hme_fill_rx_ring(sc);
 
 	mii_tick(&sc->sc_mii);
@@ -375,8 +364,7 @@ hme_tick(arg)
 }
 
 void
-hme_reset(sc)
-	struct hme_softc *sc;
+hme_reset(struct hme_softc *sc)
 {
 	int s;
 
@@ -443,12 +431,11 @@ hme_stop(struct hme_softc *sc, int softonly)
 			sc->sc_rxd[n].sd_mbuf = NULL;
 		}
 	}
-	sc->sc_rx_prod = sc->sc_rx_cons = sc->sc_rx_cnt = 0;
+	sc->sc_rx_prod = sc->sc_rx_cons = 0;
 }
 
 void
-hme_meminit(sc)
-	struct hme_softc *sc;
+hme_meminit(struct hme_softc *sc)
 {
 	bus_addr_t dma;
 	caddr_t p;
@@ -498,6 +485,7 @@ hme_meminit(sc)
 		sc->sc_rxd[i].sd_mbuf = NULL;
 	}
 
+	if_rxr_init(&sc->sc_rx_ring, 2, HME_RX_RING_SIZE);
 	hme_fill_rx_ring(sc);
 }
 
@@ -506,8 +494,7 @@ hme_meminit(sc)
  * and transmit/receive descriptor rings.
  */
 void
-hme_init(sc)
-	struct hme_softc *sc;
+hme_init(struct hme_softc *sc)
 {
 	struct ifnet *ifp = &sc->sc_arpcom.ac_if;
 	bus_space_tag_t t = sc->sc_bustag;
@@ -516,7 +503,7 @@ hme_init(sc)
 	bus_space_handle_t erx = sc->sc_erx;
 	bus_space_handle_t mac = sc->sc_mac;
 	u_int8_t *ea;
-	u_int32_t v, n;
+	u_int32_t v;
 
 	/*
 	 * Initialization sequence. The numbered steps below correspond
@@ -625,10 +612,6 @@ hme_init(sc)
 #endif
 	/* Enable DMA */
 	v |= HME_ERX_CFG_DMAENABLE | (HME_RX_OFFSET << 3);
-	/* RX TCP/UDP cksum offset */
-	n = (ETHER_HDR_LEN + sizeof(struct ip)) / 2;
-	n = (n << HME_ERX_CFG_CSUM_SHIFT) & HME_ERX_CFG_CSUMSTART;
-	v |= n;
 	bus_space_write_4(t, erx, HME_ERXI_CFG, v);
 
 	/* step 11. XIF Configuration */
@@ -665,8 +648,7 @@ hme_init(sc)
 }
 
 void
-hme_start(ifp)
-	struct ifnet *ifp;
+hme_start(struct ifnet *ifp)
 {
 	struct hme_softc *sc = (struct hme_softc *)ifp->if_softc;
 	struct hme_ring *hr = &sc->sc_rb;
@@ -777,8 +759,7 @@ hme_start(ifp)
  * Transmit interrupt.
  */
 int
-hme_tint(sc)
-	struct hme_softc *sc;
+hme_tint(struct hme_softc *sc)
 {
 	struct ifnet *ifp = &sc->sc_arpcom.ac_if;
 	unsigned int ri, txflags;
@@ -831,106 +812,10 @@ hme_tint(sc)
 }
 
 /*
- * XXX layering violation
- *
- * If we can have additional csum data member in 'struct pkthdr' for
- * these incomplete checksum offload capable hardware, things would be
- * much simpler. That member variable will carry partial checksum
- * data and it may be evaluated in TCP/UDP input handler after
- * computing pseudo header checksumming.
- */
-void
-hme_rxcksum(struct mbuf *m, u_int32_t flags)
-{
-	struct ether_header *eh;
-	struct ip *ip;
-	struct udphdr *uh;
-	int32_t hlen, len, pktlen;
-	u_int16_t cksum, *opts;
-	u_int32_t temp32;
-	union pseudoh {
-		struct hdr {
-			u_int16_t len;
-			u_int8_t ttl;
-			u_int8_t proto;
-			u_int32_t src;
-			u_int32_t dst;
-		} h;
-		u_int16_t w[6];
-	} ph;
-
-	pktlen = m->m_pkthdr.len;
-	if (pktlen < sizeof(struct ether_header))
-		return;
-	eh = mtod(m, struct ether_header *);
-	if (eh->ether_type != htons(ETHERTYPE_IP))
-		return;
-	ip = (struct ip *)(eh + 1);
-	if (ip->ip_v != IPVERSION)
-		return;
-
-	hlen = ip->ip_hl << 2;
-	pktlen -= sizeof(struct ether_header);
-	if (hlen < sizeof(struct ip))
-		return;
-	if (ntohs(ip->ip_len) < hlen)
-		return;
-	if (ntohs(ip->ip_len) != pktlen) 
-		return;
-	if (ip->ip_off & htons(IP_MF | IP_OFFMASK))
-		return;	/* can't handle fragmented packet */
-
-	switch (ip->ip_p) {
-	case IPPROTO_TCP:
-		if (pktlen < (hlen + sizeof(struct tcphdr)))
-			return;
-		break;
-	case IPPROTO_UDP:
-		if (pktlen < (hlen + sizeof(struct udphdr)))
-			return;
-		uh = (struct udphdr *)((caddr_t)ip + hlen);
-		if (uh->uh_sum == 0)
-			return; /* no checksum */
-		break;
-	default:
-		return;
-	}
-
-	cksum = htons(~(flags & HME_XD_RXCKSUM));
-	/* cksum fixup for IP options */
-	len = hlen - sizeof(struct ip);
-	if (len > 0) {
-		opts = (u_int16_t *)(ip + 1);
-		for (; len > 0; len -= sizeof(u_int16_t), opts++) {
-			temp32 = cksum - *opts;
-			temp32 = (temp32 >> 16) + (temp32 & 65535);
-			cksum = temp32 & 65535;
-		}
-	}
-	/* cksum fixup for pseudo-header, replace with in_cksum_phdr()? */
-	ph.h.len = htons(ntohs(ip->ip_len) - hlen);
-	ph.h.ttl = 0;
-	ph.h.proto = ip->ip_p;
-	ph.h.src = ip->ip_src.s_addr;
-	ph.h.dst = ip->ip_dst.s_addr;
-	temp32 = cksum;
-	opts = &ph.w[0];
-	temp32 += opts[0] + opts[1] + opts[2] + opts[3] + opts[4] + opts[5];
-	temp32 = (temp32 >> 16) + (temp32 & 65535);
-	temp32 += (temp32 >> 16);
-	cksum = ~temp32;
-	if (cksum == 0) {
-		m->m_pkthdr.csum_flags |=
-			M_TCP_CSUM_IN_OK | M_UDP_CSUM_IN_OK;
-	}
-}
-
-/*
  * Receive interrupt.
  */
 int
-hme_rint(sc)
-	struct hme_softc *sc;
+hme_rint(struct hme_softc *sc)
 {
 	struct ifnet *ifp = &sc->sc_arpcom.ac_if;
 	struct mbuf *m;
@@ -944,7 +829,7 @@ hme_rint(sc)
 	/*
 	 * Process all buffers with valid data.
 	 */
-	while (sc->sc_rx_cnt > 0) {
+	while (if_rxr_inuse(&sc->sc_rx_ring) > 0) {
 		flags = HME_XD_GETFLAGS(sc->sc_pci, sc->sc_rb.rb_rxd, ri);
 		if (flags & HME_XD_OWN)
 			break;
@@ -961,7 +846,8 @@ hme_rint(sc)
 			sd = sc->sc_rxd;
 		} else
 			sd++;
-		sc->sc_rx_cnt--;
+
+		if_rxr_put(&sc->sc_rx_ring, 1);
 
 		if (flags & HME_XD_OFL) {
 			ifp->if_ierrors++;
@@ -975,7 +861,6 @@ hme_rint(sc)
 		m->m_pkthdr.len = m->m_len = len;
 
 		ifp->if_ipackets++;
-		hme_rxcksum(m, flags);
 
 #if NBPFILTER > 0
 		if (ifp->if_bpf)
@@ -991,9 +876,7 @@ hme_rint(sc)
 }
 
 int
-hme_eint(sc, status)
-	struct hme_softc *sc;
-	u_int status;
+hme_eint(struct hme_softc *sc, u_int status)
 {
 	struct ifnet *ifp = &sc->sc_arpcom.ac_if;
 
@@ -1026,8 +909,7 @@ hme_eint(sc, status)
 }
 
 int
-hme_intr(v)
-	void *v;
+hme_intr(void *v)
 {
 	struct hme_softc *sc = (struct hme_softc *)v;
 	bus_space_tag_t t = sc->sc_bustag;
@@ -1053,8 +935,7 @@ hme_intr(v)
 
 
 void
-hme_watchdog(ifp)
-	struct ifnet *ifp;
+hme_watchdog(struct ifnet *ifp)
 {
 	struct hme_softc *sc = ifp->if_softc;
 
@@ -1068,8 +949,7 @@ hme_watchdog(ifp)
  * Initialize the MII Management Interface
  */
 void
-hme_mifinit(sc)
-	struct hme_softc *sc;
+hme_mifinit(struct hme_softc *sc)
 {
 	bus_space_tag_t t = sc->sc_bustag;
 	bus_space_handle_t mif = sc->sc_mif;
@@ -1104,9 +984,7 @@ hme_mifinit(sc)
  * MII interface
  */
 static int
-hme_mii_readreg(self, phy, reg)
-	struct device *self;
-	int phy, reg;
+hme_mii_readreg(struct device *self, int phy, int reg)
 {
 	struct hme_softc *sc = (struct hme_softc *)self;
 	bus_space_tag_t t = sc->sc_bustag;
@@ -1162,9 +1040,7 @@ out:
 }
 
 static void
-hme_mii_writereg(self, phy, reg, val)
-	struct device *self;
-	int phy, reg, val;
+hme_mii_writereg(struct device *self, int phy, int reg, int val)
 {
 	struct hme_softc *sc = (void *)self;
 	bus_space_tag_t t = sc->sc_bustag;
@@ -1217,8 +1093,7 @@ out:
 }
 
 static void
-hme_mii_statchg(dev)
-	struct device *dev;
+hme_mii_statchg(struct device *dev)
 {
 	struct hme_softc *sc = (void *)dev;
 	bus_space_tag_t t = sc->sc_bustag;
@@ -1245,8 +1120,7 @@ hme_mii_statchg(dev)
 }
 
 int
-hme_mediachange(ifp)
-	struct ifnet *ifp;
+hme_mediachange(struct ifnet *ifp)
 {
 	struct hme_softc *sc = ifp->if_softc;
 	bus_space_tag_t t = sc->sc_bustag;
@@ -1281,9 +1155,7 @@ hme_mediachange(ifp)
 }
 
 void
-hme_mediastatus(ifp, ifmr)
-	struct ifnet *ifp;
-	struct ifmediareq *ifmr;
+hme_mediastatus(struct ifnet *ifp, struct ifmediareq *ifmr)
 {
 	struct hme_softc *sc = ifp->if_softc;
 
@@ -1299,10 +1171,7 @@ hme_mediastatus(ifp, ifmr)
  * Process an ioctl request.
  */
 int
-hme_ioctl(ifp, cmd, data)
-	struct ifnet *ifp;
-	u_long cmd;
-	caddr_t data;
+hme_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 {
 	struct hme_softc *sc = ifp->if_softc;
 	struct ifaddr *ifa = (struct ifaddr *)data;
@@ -1405,12 +1274,13 @@ hme_iff(struct hme_softc *sc)
 }
 
 void
-hme_fill_rx_ring(sc)
-	struct hme_softc *sc;
+hme_fill_rx_ring(struct hme_softc *sc)
 {
 	struct hme_sxd *sd;
+	u_int slots;
 
-	while (sc->sc_rx_cnt < HME_RX_RING_SIZE) {
+	for (slots = if_rxr_get(&sc->sc_rx_ring, HME_RX_RING_SIZE);
+	    slots > 0; slots--) {
 		if (hme_newbuf(sc, &sc->sc_rxd[sc->sc_rx_prod]))
 			break;
 
@@ -1422,14 +1292,12 @@ hme_fill_rx_ring(sc)
 
 		if (++sc->sc_rx_prod == HME_RX_RING_SIZE)
 			sc->sc_rx_prod = 0;
-		sc->sc_rx_cnt++;
         }
+	if_rxr_put(&sc->sc_rx_ring, slots);
 }
 
 int
-hme_newbuf(sc, d)
-	struct hme_softc *sc;
-	struct hme_sxd *d;
+hme_newbuf(struct hme_softc *sc, struct hme_sxd *d)
 {
 	struct mbuf *m;
 	bus_dmamap_t map;
@@ -1439,7 +1307,7 @@ hme_newbuf(sc, d)
 	 * until we're sure everything is a success.
 	 */
 
-	m = MCLGETI(NULL, M_DONTWAIT, &sc->sc_arpcom.ac_if, MCLBYTES);
+	m = MCLGETI(NULL, M_DONTWAIT, NULL, MCLBYTES);
 	if (!m)
 		return (ENOBUFS);
 	m->m_pkthdr.rcvif = &sc->sc_arpcom.ac_if;

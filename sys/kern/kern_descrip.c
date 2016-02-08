@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_descrip.c,v 1.104 2013/09/14 01:35:00 guenther Exp $	*/
+/*	$OpenBSD: kern_descrip.c,v 1.112 2014/07/13 15:29:04 tedu Exp $	*/
 /*	$NetBSD: kern_descrip.c,v 1.42 1996/03/30 22:24:38 christos Exp $	*/
 
 /*
@@ -60,8 +60,6 @@
 #include <sys/event.h>
 #include <sys/pool.h>
 #include <sys/ktrace.h>
-
-#include <uvm/uvm_extern.h>
 
 #include <sys/pipe.h>
 
@@ -390,7 +388,7 @@ restart:
 			struct socket *so = (struct socket *)fp->f_data;
 
 			so->so_pgid = (long)SCARG(uap, arg);
-			so->so_siguid = p->p_cred->p_ruid;
+			so->so_siguid = p->p_ucred->cr_ruid;
 			so->so_sigeuid = p->p_ucred->cr_uid;
 			break;
 		}
@@ -767,7 +765,7 @@ fdexpand(struct proc *p)
 	else
 		nfiles = 2 * fdp->fd_nfiles;
 
-	newofile = malloc(nfiles * OFILESIZE, M_FILEDESC, M_WAITOK);
+	newofile = mallocarray(nfiles, OFILESIZE, M_FILEDESC, M_WAITOK);
 	newofileflags = (char *) &newofile[nfiles];
 
 	/*
@@ -783,12 +781,12 @@ fdexpand(struct proc *p)
 	memset(newofileflags + copylen, 0, nfiles * sizeof(char) - copylen);
 
 	if (fdp->fd_nfiles > NDFILE)
-		free(fdp->fd_ofiles, M_FILEDESC);
+		free(fdp->fd_ofiles, M_FILEDESC, 0);
 
 	if (NDHISLOTS(nfiles) > NDHISLOTS(fdp->fd_nfiles)) {
-		newhimap = malloc(NDHISLOTS(nfiles) * sizeof(u_int),
+		newhimap = mallocarray(NDHISLOTS(nfiles), sizeof(u_int),
 		    M_FILEDESC, M_WAITOK);
-		newlomap = malloc(NDLOSLOTS(nfiles) * sizeof(u_int),
+		newlomap = mallocarray(NDLOSLOTS(nfiles), sizeof(u_int),
 		    M_FILEDESC, M_WAITOK);
 
 		copylen = NDHISLOTS(fdp->fd_nfiles) * sizeof(u_int);
@@ -802,8 +800,8 @@ fdexpand(struct proc *p)
 		    NDLOSLOTS(nfiles) * sizeof(u_int) - copylen);
 
 		if (NDHISLOTS(fdp->fd_nfiles) > NDHISLOTS(NDFILE)) {
-			free(fdp->fd_himap, M_FILEDESC);
-			free(fdp->fd_lomap, M_FILEDESC);
+			free(fdp->fd_himap, M_FILEDESC, 0);
+			free(fdp->fd_lomap, M_FILEDESC, 0);
 		}
 		fdp->fd_himap = newhimap;
 		fdp->fd_lomap = newlomap;
@@ -867,21 +865,12 @@ restart:
  * Build a new filedesc structure.
  */
 struct filedesc *
-fdinit(struct proc *p)
+fdinit(void)
 {
 	struct filedesc0 *newfdp;
 	extern int cmask;
 
 	newfdp = pool_get(&fdesc_pool, PR_WAITOK|PR_ZERO);
-	if (p != NULL) {
-		struct filedesc *fdp = p->p_fd;
-
-		newfdp->fd_fd.fd_cdir = fdp->fd_cdir;
-		vref(newfdp->fd_fd.fd_cdir);
-		newfdp->fd_fd.fd_rdir = fdp->fd_rdir;
-		if (newfdp->fd_fd.fd_rdir)
-			vref(newfdp->fd_fd.fd_rdir);
-	}
 	rw_init(&newfdp->fd_fd.fd_lock, "fdlock");
 
 	/* Create the file descriptor table. */
@@ -904,19 +893,19 @@ fdinit(struct proc *p)
  * Share a filedesc structure.
  */
 struct filedesc *
-fdshare(struct proc *p)
+fdshare(struct process *pr)
 {
-	p->p_fd->fd_refcnt++;
-	return (p->p_fd);
+	pr->ps_fd->fd_refcnt++;
+	return (pr->ps_fd);
 }
 
 /*
  * Copy a filedesc structure.
  */
 struct filedesc *
-fdcopy(struct proc *p)
+fdcopy(struct process *pr)
 {
-	struct filedesc *newfdp, *fdp = p->p_fd;
+	struct filedesc *newfdp, *fdp = pr->ps_fd;
 	struct file **fpp;
 	int i;
 
@@ -950,7 +939,7 @@ fdcopy(struct proc *p)
 		i = newfdp->fd_nfiles;
 		while (i >= 2 * NDEXTENT && i > newfdp->fd_lastfile * 2)
 			i /= 2;
-		newfdp->fd_ofiles = malloc(i * OFILESIZE, M_FILEDESC, M_WAITOK);
+		newfdp->fd_ofiles = mallocarray(i, OFILESIZE, M_FILEDESC, M_WAITOK);
 		newfdp->fd_ofileflags = (char *) &newfdp->fd_ofiles[i];
 	}
 	if (NDHISLOTS(i) <= NDHISLOTS(NDFILE)) {
@@ -959,13 +948,13 @@ fdcopy(struct proc *p)
 		newfdp->fd_lomap =
 			((struct filedesc0 *) newfdp)->fd_dlomap;
 	} else {
-		newfdp->fd_himap = malloc(NDHISLOTS(i) * sizeof(u_int),
+		newfdp->fd_himap = mallocarray(NDHISLOTS(i), sizeof(u_int),
 		    M_FILEDESC, M_WAITOK);
-		newfdp->fd_lomap = malloc(NDLOSLOTS(i) * sizeof(u_int),
+		newfdp->fd_lomap = mallocarray(NDLOSLOTS(i), sizeof(u_int),
 		    M_FILEDESC, M_WAITOK);
 	}
 	newfdp->fd_nfiles = i;
-	memcpy(newfdp->fd_ofiles, fdp->fd_ofiles, i * sizeof(struct file **));
+	memcpy(newfdp->fd_ofiles, fdp->fd_ofiles, i * sizeof(struct file *));
 	memcpy(newfdp->fd_ofileflags, fdp->fd_ofileflags, i * sizeof(char));
 	memcpy(newfdp->fd_himap, fdp->fd_himap, NDHISLOTS(i) * sizeof(u_int));
 	memcpy(newfdp->fd_lomap, fdp->fd_lomap, NDLOSLOTS(i) * sizeof(u_int));
@@ -1026,19 +1015,19 @@ fdfree(struct proc *p)
 	}
 	p->p_fd = NULL;
 	if (fdp->fd_nfiles > NDFILE)
-		free(fdp->fd_ofiles, M_FILEDESC);
+		free(fdp->fd_ofiles, M_FILEDESC, 0);
 	if (NDHISLOTS(fdp->fd_nfiles) > NDHISLOTS(NDFILE)) {
-		free(fdp->fd_himap, M_FILEDESC);
-		free(fdp->fd_lomap, M_FILEDESC);
+		free(fdp->fd_himap, M_FILEDESC, 0);
+		free(fdp->fd_lomap, M_FILEDESC, 0);
 	}
 	if (fdp->fd_cdir)
 		vrele(fdp->fd_cdir);
 	if (fdp->fd_rdir)
 		vrele(fdp->fd_rdir);
 	if (fdp->fd_knlist)
-		free(fdp->fd_knlist, M_TEMP);
+		free(fdp->fd_knlist, M_TEMP, 0);
 	if (fdp->fd_knhash)
-		free(fdp->fd_knhash, M_TEMP);
+		free(fdp->fd_knhash, M_TEMP, 0);
 	pool_put(&fdesc_pool, fdp);
 }
 

@@ -1,4 +1,4 @@
-/* crypto/sha/sha1_one.c */
+/* $OpenBSD: sha1_one.c,v 1.11 2014/07/10 22:45:58 jsing Exp $ */
 /* Copyright (C) 1995-1998 Eric Young (eay@cryptsoft.com)
  * All rights reserved.
  *
@@ -58,8 +58,11 @@
 
 #include <stdio.h>
 #include <string.h>
-#include <openssl/sha.h>
+
+#include <openssl/opensslconf.h>
+
 #include <openssl/crypto.h>
+#include <openssl/sha.h>
 
 #ifndef OPENSSL_NO_SHA1
 unsigned char *SHA1(const unsigned char *d, size_t n, unsigned char *md)

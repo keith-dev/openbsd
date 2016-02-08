@@ -1,4 +1,4 @@
-/*	$OpenBSD: apm.c,v 1.17 2013/12/06 21:03:05 deraadt Exp $	*/
+/*	$OpenBSD: apm.c,v 1.23 2014/07/19 18:01:23 pirofti Exp $	*/
 
 /*-
  * Copyright (c) 2001 Alexander Guy.  All rights reserved.
@@ -50,6 +50,8 @@
 #include <machine/conf.h>
 #include <machine/cpu.h>
 #include <machine/apmvar.h>
+
+#include <dev/pci/pcivar.h>    /* pci_dopm */
 
 #include <dev/wscons/wsdisplayvar.h>
 
@@ -132,6 +134,9 @@ apmmatch(struct device *parent, void *match, void *aux)
 void
 apmattach(struct device *parent, struct device *self, void *aux)
 {
+	/* Enable PCI Power Management. */
+	pci_dopm = 1;
+
 	printf("\n");
 }
 
@@ -360,6 +365,7 @@ apm_record_event(u_int event, const char *src, const char *msg)
 int
 apm_suspend(int state)
 {
+	struct device *mainbus = device_mainbus();
 	int rv;
 	int s;
 
@@ -369,14 +375,14 @@ apm_suspend(int state)
 
 	resettodr();
 
+	config_suspend(mainbus, DVACT_QUIESCE);
 	bufq_quiesce();
-	config_suspend(TAILQ_FIRST(&alldevs), DVACT_QUIESCE);
 
 	s = splhigh();
 	(void)disableintr();
 	cold = 1;
 
-	rv = config_suspend(TAILQ_FIRST(&alldevs), DVACT_SUSPEND);
+	rv = config_suspend(mainbus, DVACT_SUSPEND);
 
 #ifdef HIBERNATE
 	if (state == APM_IOC_HIBERNATE) {
@@ -395,7 +401,7 @@ apm_suspend(int state)
 	 * when we get to DVACT_POWERDOWN.
 	 */
 	boothowto |= RB_POWERDOWN;
-	(void) config_suspend(TAILQ_FIRST(&alldevs), DVACT_POWERDOWN);
+	(void) config_suspend(mainbus, DVACT_POWERDOWN);
 	boothowto &= ~RB_POWERDOWN;
 
 	if (rv == 0) {
@@ -404,7 +410,7 @@ apm_suspend(int state)
 			rv = sys_platform->resume();
 	}
 	inittodr(time_second);	/* Move the clock forward */
-	config_suspend(TAILQ_FIRST(&alldevs), DVACT_RESUME);
+	config_suspend(mainbus, DVACT_RESUME);
 
 	cold = 0;
 	(void)enableintr();
@@ -412,7 +418,7 @@ apm_suspend(int state)
 
 	bufq_restart();
 
-	config_suspend(TAILQ_FIRST(&alldevs), DVACT_WAKEUP);
+	config_suspend(mainbus, DVACT_WAKEUP);
 
 #if NWSDISPLAY > 0
 	wsdisplay_resume();

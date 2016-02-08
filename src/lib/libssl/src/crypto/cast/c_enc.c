@@ -1,4 +1,4 @@
-/* crypto/cast/c_enc.c */
+/* $OpenBSD: c_enc.c,v 1.6 2014/06/12 15:49:28 deraadt Exp $ */
 /* Copyright (C) 1995-1998 Eric Young (eay@cryptsoft.com)
  * All rights reserved.
  *
@@ -63,7 +63,7 @@
 void CAST_encrypt(CAST_LONG *data, const CAST_KEY *key)
 	{
 	register CAST_LONG l,r,t;
-	const register CAST_LONG *k;
+	register const CAST_LONG *k;
 
 	k= &(key->data[0]);
 	l=data[0];
@@ -96,7 +96,7 @@ void CAST_encrypt(CAST_LONG *data, const CAST_KEY *key)
 void CAST_decrypt(CAST_LONG *data, const CAST_KEY *key)
 	{
 	register CAST_LONG l,r,t;
-	const register CAST_LONG *k;
+	register const CAST_LONG *k;
 
 	k= &(key->data[0]);
 	l=data[0];

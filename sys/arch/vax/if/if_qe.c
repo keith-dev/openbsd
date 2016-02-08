@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_qe.c,v 1.26 2013/11/27 08:56:31 mpi Exp $	*/
+/*	$OpenBSD: if_qe.c,v 1.28 2014/08/06 15:40:40 jsg Exp $	*/
 /*      $NetBSD: if_qe.c,v 1.51 2002/06/08 12:28:37 ragge Exp $ */
 /*
  * Copyright (c) 1999 Ludd, University of Lule}, Sweden. All rights reserved.
@@ -195,7 +195,7 @@ qematch(struct device *parent, struct cfdata *cf, void *aux)
 	 * All done with the bus resources.
 	 */
 	ubfree((void *)parent, &ui);
-	free(ring, M_TEMP);
+	free(ring, M_TEMP, 0);
 	return 1;
 }
 
@@ -345,13 +345,13 @@ qeattach(struct device *parent, struct device *self, void *aux)
 	}
  fail_5:
 	for (i = 0; i < RXDESCS; i++) {
-		if (sc->sc_xmtmap[i] != NULL)
-			bus_dmamap_destroy(sc->sc_dmat, sc->sc_xmtmap[i]);
+		if (sc->sc_rcvmap[i] != NULL)
+			bus_dmamap_destroy(sc->sc_dmat, sc->sc_rcvmap[i]);
 	}
  fail_4:
 	for (i = 0; i < TXDESCS; i++) {
-		if (sc->sc_rcvmap[i] != NULL)
-			bus_dmamap_destroy(sc->sc_dmat, sc->sc_rcvmap[i]);
+		if (sc->sc_xmtmap[i] != NULL)
+			bus_dmamap_destroy(sc->sc_dmat, sc->sc_xmtmap[i]);
 	}
 }
 

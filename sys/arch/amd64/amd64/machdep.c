@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.173 2014/01/05 20:23:56 mlarkin Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.189 2014/07/21 17:25:47 uebayasi Exp $	*/
 /*	$NetBSD: machdep.c,v 1.3 2003/05/07 22:58:18 fvdl Exp $	*/
 
 /*-
@@ -157,6 +157,7 @@ char machine[] = MACHINE;
 void (*cpu_idle_leave_fcn)(void) = NULL;
 void (*cpu_idle_cycle_fcn)(void) = NULL;
 void (*cpu_idle_enter_fcn)(void) = NULL;
+void (*cpu_busy_cycle_fcn)(void) = NULL;
 
 /* the following is used externally for concurrent handlers */
 int setperf_prio = 0;
@@ -543,7 +544,7 @@ sendsig(sig_t catcher, int sig, int mask, u_long code, int type,
 {
 	struct proc *p = curproc;
 	struct trapframe *tf = p->p_md.md_regs;
-	struct sigacts * psp = p->p_sigacts;
+	struct sigacts *psp = p->p_p->ps_sigacts;
 	struct sigcontext ksc;
 	siginfo_t ksi;
 	register_t sp, scp, sip;
@@ -608,7 +609,7 @@ sendsig(sig_t catcher, int sig, int mask, u_long code, int type,
 	tf->tf_rsi = sip;
 	tf->tf_rdx = scp;
 
-	tf->tf_rip = (u_int64_t)p->p_sigcode;
+	tf->tf_rip = (u_int64_t)p->p_p->ps_sigcode;
 	tf->tf_cs = GSEL(GUCODE_SEL, SEL_UPL);
 	tf->tf_rflags &= ~(PSL_T|PSL_D|PSL_VM|PSL_AC);
 	tf->tf_rsp = scp;
@@ -616,7 +617,7 @@ sendsig(sig_t catcher, int sig, int mask, u_long code, int type,
 
 #ifdef DEBUG
 	if ((sigdebug & SDB_FOLLOW) && (!sigpid || p->p_pid == sigpid))
-		printf("sendsig(%d): pc 0x%x, catcher 0x%x\n", p->p_pid,
+		printf("sendsig(%d): pc 0x%llx, catcher 0x%llx\n", p->p_pid,
 		    tf->tf_rip, tf->tf_rax);
 #endif
 }
@@ -742,17 +743,15 @@ cpu_unidle(struct cpu_info *ci)
 int	waittime = -1;
 struct pcb dumppcb;
 
-void
+__dead void
 boot(int howto)
 {
-	if (howto & RB_POWERDOWN)
+	struct device *mainbus;
+
+	if ((howto & RB_POWERDOWN) != 0)
 		lid_suspend = 0;
 
 	if (cold) {
-		/*
-		 * If the system is cold, just halt, unless the user
-		 * explicitly asked for reboot.
-		 */
 		if ((howto & RB_USERREQ) == 0)
 			howto |= RB_HALT;
 		goto haltsys;
@@ -761,14 +760,8 @@ boot(int howto)
 	boothowto = howto;
 	if ((howto & RB_NOSYNC) == 0 && waittime < 0) {
 		waittime = 0;
-
-		if (curproc == NULL)
-			curproc = &proc0;	/* XXX */
 		vfs_shutdown();
-		/*
-		 * If we've been adjusting the clock, the todr
-		 * will be out of synch; adjust it now.
-		 */
+
 		if ((howto & RB_TIMEBAD) == 0) {
 			resettodr();
 		} else {
@@ -780,28 +773,29 @@ boot(int howto)
 	delay(4*1000000);	/* XXX */
 
 	uvm_shutdown();
-	splhigh();		/* Disable interrupts. */
+	splhigh();
+	cold = 1;
 
-	/* Do a dump if requested. */
-	if (howto & RB_DUMP)
+	if ((howto & RB_DUMP) != 0)
 		dumpsys();
 
 haltsys:
 	doshutdownhooks();
-	if (!TAILQ_EMPTY(&alldevs))
-		config_suspend(TAILQ_FIRST(&alldevs), DVACT_POWERDOWN);
+	mainbus = device_mainbus();
+	if (mainbus != NULL)
+		config_suspend(mainbus, DVACT_POWERDOWN);
 
 #ifdef MULTIPROCESSOR
 	x86_broadcast_ipi(X86_IPI_HALT);
 #endif
 
-	if (howto & RB_HALT) {
+	if ((howto & RB_HALT) != 0) {
 #if NACPI > 0 && !defined(SMALL_KERNEL)
 		extern int acpi_enabled;
 
 		if (acpi_enabled) {
 			delay(500000);
-			if (howto & RB_POWERDOWN)
+			if ((howto & RB_POWERDOWN) != 0)
 				acpi_powerdown();
 		}
 #endif
@@ -817,8 +811,8 @@ haltsys:
 	if (cpureset_delay > 0)
 		delay(cpureset_delay * 1000);
 	cpu_reset();
-	for(;;) ;
-	/*NOTREACHED*/
+	for (;;) ;
+	/* NOTREACHED */
 }
 
 /*
@@ -1650,7 +1644,7 @@ cpu_reset(void)
 	 * invalid and causing a fault.
 	 */
 	memset((caddr_t)idt, 0, NIDT * sizeof(idt[0]));
-	__asm __volatile("divl %0,%1" : : "q" (0), "a" (0)); 
+	__asm volatile("divl %0,%1" : : "q" (0), "a" (0)); 
 
 #if 0
 	/*
@@ -1867,7 +1861,7 @@ getbootinfo(char *bootinfo, int bootinfo_size)
 				int unit = minor(cdp->consdev);
 				int consaddr = cdp->consaddr;
 				if (consaddr == -1 && unit >= 0 &&
-				    unit < (sizeof(ports)/sizeof(ports[0])))
+				    unit < nitems(ports))
 					consaddr = ports[unit];
 				if (major(cdp->consdev) == 8 &&
 				    consaddr != -1) {

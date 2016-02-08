@@ -1,4 +1,4 @@
-/*	$OpenBSD: mount.c,v 1.54 2013/04/21 11:05:14 jsing Exp $	*/
+/*	$OpenBSD: mount.c,v 1.58 2014/07/17 06:25:12 guenther Exp $	*/
 /*	$NetBSD: mount.c,v 1.24 1995/11/18 03:34:29 cgd Exp $	*/
 
 /*
@@ -54,6 +54,7 @@
 
 int	debug, verbose, skip;
 char	**typelist = NULL;
+enum { NONET_FILTER, NET_FILTER } filter = NONET_FILTER;
 
 int	selected(const char *);
 char   *catopt(char *, const char *);
@@ -84,7 +85,6 @@ static struct opt {
 	{ MNT_EXRDONLY,		1,	"exported read-only",	"" },
 	{ MNT_LOCAL,		0,	"local",		"" },
 	{ MNT_NOATIME,		0,	"noatime",		"noatime" },
-	{ MNT_NOATIME,		0,	"noaccesstime",		"" },
 	{ MNT_NODEV,		0,	"nodev",		"nodev" },
 	{ MNT_NOEXEC,		0,	"noexec",		"noexec" },
 	{ MNT_NOSUID,		0,	"nosuid",		"nosuid" },
@@ -110,7 +110,7 @@ main(int argc, char * const argv[])
 	all = forceall = 0;
 	options = NULL;
 	vfstype = "ffs";
-	while ((ch = getopt(argc, argv, "Aadfo:rswt:uv")) != -1)
+	while ((ch = getopt(argc, argv, "AadfNo:rswt:uv")) != -1)
 		switch (ch) {
 		case 'A':
 			all = forceall = 1;
@@ -124,6 +124,9 @@ main(int argc, char * const argv[])
 		case 'f':
 			if (!hasopt(options, "force"))
 				options = catopt(options, "force");
+			break;
+		case 'N':
+			filter = NET_FILTER;
 			break;
 		case 'o':
 			if (*optarg)
@@ -173,6 +176,16 @@ main(int argc, char * const argv[])
 			while ((fs = getfsent()) != NULL) {
 				if (BADTYPE(fs->fs_type))
 					continue;
+				switch (filter) {
+				case NET_FILTER:
+					if (!hasopt(fs->fs_mntops, "net"))
+						continue;
+					break;
+				case NONET_FILTER:
+					if (hasopt(fs->fs_mntops, "net"))
+						continue;
+					break;
+				}
 				if (!selected(fs->fs_vfstype))
 					continue;
 				if (hasopt(fs->fs_mntops, "noauto"))
@@ -382,7 +395,7 @@ mountfs(const char *vfstype, const char *spec, const char *name,
 	}
 
 	argvsize = 64;
-	if((argv = calloc(argvsize, sizeof(char *))) == NULL)
+	if((argv = reallocarray(NULL, argvsize, sizeof(char *))) == NULL)
 		err(1, "malloc");
 	argc = 0;
 	argv[argc++] = NULL;	/* this should be a full path name */
@@ -421,7 +434,7 @@ mountfs(const char *vfstype, const char *spec, const char *name,
 
 		if (errno == ENOENT)
 			warn("no mount helper program found for %s", vfstype);
-		exit(1);
+		_exit(1);
 		/* NOTREACHED */
 	default:				/* Parent. */
 		free(optbuf);
@@ -493,7 +506,7 @@ prmount(struct statfs *sf)
 
 	/*
 	 * Filesystem-specific options
-	 * We only print the "interesting" values unless in verboser
+	 * We only print the "interesting" values unless in verbose
 	 * mode in order to keep the signal/noise ratio high.
 	 */
 	if (strcmp(sf->f_fstypename, MOUNT_NFS) == 0) {
@@ -648,8 +661,8 @@ maketypelist(char *fslist)
 		++nextcp;
 
 	/* Build an array of that many types. */
-	if ((av = typelist = calloc(i + 1, sizeof(char *))) == NULL)
-		err(1, NULL);
+	if ((av = typelist = reallocarray(NULL, i + 1, sizeof(char *))) == NULL)
+		err(1, "malloc");
 	av[0] = fslist;
 	for (i = 1, nextcp = fslist; (nextcp = strchr(nextcp, ',')); i++) {
 		*nextcp = '\0';
@@ -708,7 +721,7 @@ usage(void)
 {
 
 	(void)fprintf(stderr,
-	    "usage: mount [-Aadfruvw] [-t type]\n"
+	    "usage: mount [-AadfNruvw] [-t type]\n"
 	    "       mount [-dfrsuvw] special | node\n"
 	    "       mount [-dfruvw] [-o options] [-t type] special node\n");
 	exit(1);

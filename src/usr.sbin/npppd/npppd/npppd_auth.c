@@ -1,4 +1,4 @@
-/*	$OpenBSD: npppd_auth.c,v 1.12 2013/01/31 09:44:21 yasuoka Exp $ */
+/*	$OpenBSD: npppd_auth.c,v 1.14 2014/05/30 05:06:00 yasuoka Exp $ */
 
 /*-
  * Copyright (c) 2009 Internet Initiative Japan Inc.
@@ -26,7 +26,7 @@
  * SUCH DAMAGE.
  */
 /**@file authentication realm */
-/* $Id: npppd_auth.c,v 1.12 2013/01/31 09:44:21 yasuoka Exp $ */
+/* $Id: npppd_auth.c,v 1.14 2014/05/30 05:06:00 yasuoka Exp $ */
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <sys/socket.h>
@@ -73,8 +73,7 @@ npppd_auth_create(int auth_type, const char *name, void *_npppd)
 
 	switch (auth_type) {
 	case NPPPD_AUTH_TYPE_LOCAL:
-		if ((base = malloc(sizeof(npppd_auth_local))) != NULL) {
-			memset(base, 0, sizeof(npppd_auth_local));
+		if ((base = calloc(1, sizeof(npppd_auth_local))) != NULL) {
 			base->type = NPPPD_AUTH_TYPE_LOCAL;
 			base->strip_nt_domain = 1;
 			base->strip_atmark_realm = 0;
@@ -87,9 +86,8 @@ npppd_auth_create(int auth_type, const char *name, void *_npppd)
 
 #ifdef USE_NPPPD_RADIUS
 	case NPPPD_AUTH_TYPE_RADIUS:
-		if ((base = malloc(sizeof(npppd_auth_radius))) != NULL) {
+		if ((base = calloc(1, sizeof(npppd_auth_radius))) != NULL) {
 			npppd_auth_radius *_this = (npppd_auth_radius *)base;
-			memset(base, 0, sizeof(npppd_auth_radius));
 			base->type = NPPPD_AUTH_TYPE_RADIUS;
 			base->strip_nt_domain = 0;
 			strlcpy(base->name, name, sizeof(base->name));
@@ -189,15 +187,11 @@ npppd_auth_reload(npppd_auth_base *base)
 	if (auth == NULL)
 		return 1;
 
-	base->pppprefix[0] = '\0';
 	base->pppsuffix[0] = '\0';
 	if (auth != NULL) {
 		if (auth->username_suffix != NULL)
 			strlcpy(base->pppsuffix, auth->username_suffix,
 			    sizeof(base->pppsuffix));
-		if (auth->username_prefix != NULL)
-			strlcpy(base->pppprefix, auth->username_prefix,
-			    sizeof(base->pppprefix));
 		base->eap_capable = auth->eap_capable;
 		base->strip_nt_domain = auth->strip_nt_domain;
 		base->strip_atmark_realm = auth->strip_atmark_realm;
@@ -450,12 +444,6 @@ npppd_auth_get_suffix(npppd_auth_base *base)
 }
 
 const char *
-npppd_auth_get_prefix(npppd_auth_base *base)
-{
-	return base->pppprefix;
-}
-
-const char *
 npppd_auth_username_for_auth(npppd_auth_base *base, const char *username,
     char *username_buffer)
 {
@@ -494,12 +482,10 @@ npppd_auth_get_user(npppd_auth_base *base, const char *username)
 
 	un = username;
 	lsuffix = strlen(base->pppsuffix);
-	if (lsuffix > 0) {
-		/* Strip the suffix */
-		lusername = strlen(username);
-		NPPPD_AUTH_ASSERT(lusername + 1 < sizeof(buf));
-		if (lusername + 1 >= sizeof(buf))
-			return NULL;
+	lusername = strlen(username);
+	if (lsuffix > 0 && lusername > lsuffix &&
+	    strcmp(username + lusername - lsuffix, base->pppsuffix) == 0 &&
+	    lusername - lsuffix < sizeof(buf)) {
 		memcpy(buf, username, lusername - lsuffix);
 		buf[lusername - lsuffix] = '\0';
 		un = buf;

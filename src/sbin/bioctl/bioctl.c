@@ -1,4 +1,4 @@
-/* $OpenBSD: bioctl.c,v 1.119 2014/01/18 09:11:12 jsing Exp $       */
+/* $OpenBSD: bioctl.c,v 1.121 2014/07/20 01:38:40 guenther Exp $       */
 
 /*
  * Copyright (c) 2004, 2005 Marco Peereboom
@@ -836,10 +836,9 @@ bio_createraid(u_int16_t level, char *dev_list, char *key_disk)
 	} else
 #endif /* AOE */
 	{
-		dt = (dev_t *)malloc(BIOC_CRMAXLEN);
+		dt = calloc(1, BIOC_CRMAXLEN);
 		if (!dt)
 			err(1, "not enough memory for dev_t list");
-		memset(dt, 0, BIOC_CRMAXLEN);
 
 		no_dev = bio_parse_devlist(dev_list, dt);
 	}
@@ -927,8 +926,9 @@ bio_createraid(u_int16_t level, char *dev_list, char *key_disk)
 		if (fd == -1)
 			err(1, "could not open %s", key_disk);
 		if (fstat(fd, &sb) == -1) {
+			int saved_errno = errno;
 			close(fd);
-			err(1, "could not stat %s", key_disk);
+			errc(1, saved_errno, "could not stat %s", key_disk);
 		}
 		close(fd);
 		create.bc_key_disk = sb.st_rdev;
@@ -1027,8 +1027,9 @@ bio_parse_devlist(char *lst, dev_t *dt)
 			if (fd == -1)
 				err(1, "could not open %s", dev);
 			if (fstat(fd, &sb) == -1) {
+				int saved_errno = errno;
 				close(fd);
-				err(1, "could not stat %s", dev);
+				errc(1, saved_errno, "could not stat %s", dev);
 			}
 			close(fd);
 			dt[no_dev] = sb.st_rdev;

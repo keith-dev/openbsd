@@ -1,7 +1,7 @@
-/*	$OpenBSD: ext2fs_lookup.c,v 1.30 2013/12/12 19:00:09 tedu Exp $	*/
+/*	$OpenBSD: ext2fs_lookup.c,v 1.37 2014/07/13 16:59:35 pelikan Exp $	*/
 /*	$NetBSD: ext2fs_lookup.c,v 1.16 2000/08/03 20:29:26 thorpej Exp $	*/
 
-/* 
+/*
  * Modified for NetBSD 1.2E
  * May 1997, Manuel Bouyer
  * Laboratoire d'informatique de Paris VI
@@ -70,17 +70,19 @@
 extern	int dirchk;
 
 static void	ext2fs_dirconv2ffs(struct ext2fs_direct *e2dir,
-					  struct dirent *ffsdir);
-static int	ext2fs_dirbadentry(struct vnode *dp,
-					  struct ext2fs_direct *de,
-					  int entryoffsetinblock);
+    struct dirent *ffsdir);
+static int	ext2fs_dirbadentry(struct vnode *dp, struct ext2fs_direct *de,
+    int entryoffsetinblock);
+static int	ext2fs_search_dirblock(struct inode *, void *, int *,
+    struct componentname *, int *, doff_t *, doff_t *,
+    struct ext2fs_searchslot *);
 
 /*
  * the problem that is tackled below is the fact that FFS
  * includes the terminating zero on disk while EXT2FS doesn't
  * this implies that we need to introduce some padding.
- * For instance, a filename "sbin" has normally a reclen 12 
- * in EXT2, but 16 in FFS. 
+ * For instance, a filename "sbin" has normally a reclen 12
+ * in EXT2, but 16 in FFS.
  * This reminds me of that Pepsi commercial: 'Kid saved a lousy nine cents...'
  * If it wasn't for that, the complete ufs code for directories would
  * have worked w/o changes (except for the difference in DIRBLKSIZ)
@@ -89,7 +91,7 @@ static void
 ext2fs_dirconv2ffs(struct ext2fs_direct	*e2dir, struct dirent *ffsdir)
 {
 	memset(ffsdir, 0, sizeof(struct dirent));
-	ffsdir->d_fileno = fs2h32(e2dir->e2d_ino);
+	ffsdir->d_fileno = letoh32(e2dir->e2d_ino);
 	ffsdir->d_namlen = e2dir->e2d_namlen;
 
 	ffsdir->d_type = DT_UNKNOWN;		/* don't know more here */
@@ -105,7 +107,7 @@ ext2fs_dirconv2ffs(struct ext2fs_direct	*e2dir, struct dirent *ffsdir)
 #endif
 	strncpy(ffsdir->d_name, e2dir->e2d_name, ffsdir->d_namlen);
 
-	/* Godmar thinks: since e2dir->e2d_reclen can be big and means 
+	/* Godmar thinks: since e2dir->e2d_reclen can be big and means
 	   nothing anyway, we compute our own reclen according to what
 	   we think is right
 	 */
@@ -118,7 +120,7 @@ ext2fs_dirconv2ffs(struct ext2fs_direct	*e2dir, struct dirent *ffsdir)
  * Convert the on-disk entries to <sys/dirent.h> entries.
  * the problem is that the conversion will blow up some entries by four bytes,
  * so it can't be done in place. This is too bad. Right now the conversion is
- * done entry by entry, the converted entry is sent via uiomove. 
+ * done entry by entry, the converted entry is sent via uiomove.
  *
  * XXX allocate a buffer, convert as many entries as possible, then send
  * the whole buffer to uiomove
@@ -164,9 +166,9 @@ ext2fs_readdir(void *v)
 	error = VOP_READ(ap->a_vp, &auio, 0, ap->a_cred);
 	if (error == 0) {
 		readcnt = e2fs_count - auio.uio_resid;
-		for (dp = (struct ext2fs_direct *)dirbuf; 
-			(char *)dp < (char *)dirbuf + readcnt; ) {
-			e2d_reclen = fs2h16(dp->e2d_reclen);
+		dp = (struct ext2fs_direct *) dirbuf;
+		while ((char *) dp < (char *) dirbuf + readcnt) {
+			e2d_reclen = letoh16(dp->e2d_reclen);
 			if (e2d_reclen == 0) {
 				error = EIO;
 				break;
@@ -186,7 +188,7 @@ ext2fs_readdir(void *v)
 		/* we need to correct uio_offset */
 		uio->uio_offset = off;
 	}
-	free(dirbuf, M_TEMP);
+	free(dirbuf, M_TEMP, e2fs_count);
 	*ap->a_eofflag = ext2fs_size(VTOI(ap->a_vp)) <= uio->uio_offset;
 	return (error);
 }
@@ -233,11 +235,7 @@ ext2fs_lookup(void *v)
 	struct buf *bp;			/* a buffer of directory entries */
 	struct ext2fs_direct *ep; /* the current directory entry */
 	int entryoffsetinblock;		/* offset of ep in bp's buffer */
-	enum {NONE, COMPACT, FOUND} slotstatus;
-	doff_t slotoffset;		/* offset of area with free space */
-	int slotsize;			/* size of area at slotoffset */
-	int slotfreespace;		/* amount of space free in slot */
-	int slotneeded;			/* size of the entry we're seeking */
+	struct ext2fs_searchslot ss;
 	int numdirpasses;		/* strategy for directory search */
 	doff_t endsearch;		/* offset to end directory search */
 	doff_t prevoff;			/* prev entry dp->i_offset */
@@ -247,22 +245,26 @@ ext2fs_lookup(void *v)
 	u_long bmask;			/* block offset mask */
 	int lockparent;			/* 1 => lockparent flag is set */
 	int wantparent;			/* 1 => wantparent or lockparent flag */
-	int namlen, error;
 	struct vnode **vpp = ap->a_vpp;
 	struct componentname *cnp = ap->a_cnp;
 	struct ucred *cred = cnp->cn_cred;
 	int flags = cnp->cn_flags;
 	int nameiop = cnp->cn_nameiop;
 	struct proc *p = cnp->cn_proc;
-	int	dirblksize = VTOI(ap->a_dvp)->i_e2fs->e2fs_bsize;
+	int dirblksize, entry_found = 0, error;
+
+	ss.slotstatus = FOUND;
+	ss.slotoffset = -1;
+	ss.slotfreespace = ss.slotsize = ss.slotneeded = 0;
 
 	bp = NULL;
-	slotoffset = -1;
 	*vpp = NULL;
 	vdp = ap->a_dvp;
 	dp = VTOI(vdp);
+	dirblksize = dp->i_e2fs->e2fs_bsize;
 	lockparent = flags & LOCKPARENT;
 	wantparent = flags & (LOCKPARENT|WANTPARENT);
+
 	/*
 	 * Check accessiblity of directory.
 	 */
@@ -289,12 +291,9 @@ ext2fs_lookup(void *v)
 	 * we watch for a place to put the new file in
 	 * case it doesn't already exist.
 	 */
-	slotstatus = FOUND;
-	slotfreespace = slotsize = slotneeded = 0;
-	if ((nameiop == CREATE || nameiop == RENAME) &&
-		(flags & ISLASTCN)) {
-		slotstatus = NONE;
-		slotneeded = EXT2FS_DIRSIZ(cnp->cn_namelen);
+	if ((nameiop == CREATE || nameiop == RENAME) && (flags & ISLASTCN)) {
+		ss.slotstatus = NONE;
+		ss.slotneeded = EXT2FS_DIRSIZ(cnp->cn_namelen);
 	}
 
 	/*
@@ -310,15 +309,15 @@ ext2fs_lookup(void *v)
 	 */
 	bmask = VFSTOUFS(vdp->v_mount)->um_mountp->mnt_stat.f_iosize - 1;
 	if (nameiop != LOOKUP || dp->i_diroff == 0 ||
-		dp->i_diroff >ext2fs_size(dp)) {
+	    dp->i_diroff > ext2fs_size(dp)) {
 		entryoffsetinblock = 0;
 		dp->i_offset = 0;
 		numdirpasses = 1;
 	} else {
 		dp->i_offset = dp->i_diroff;
 		if ((entryoffsetinblock = dp->i_offset & bmask) &&
-			(error = ext2fs_bufatoff(dp, (off_t)dp->i_offset, 
-			    NULL, &bp)))
+		    (error = ext2fs_bufatoff(dp, (off_t)dp->i_offset,
+		    NULL, &bp)))
 			return (error);
 		numdirpasses = 2;
 	}
@@ -331,98 +330,37 @@ searchloop:
 		/*
 		 * If necessary, get the next directory block.
 		 */
-		if ((dp->i_offset & bmask) == 0) {
-			if (bp != NULL)
-				brelse(bp);
-			error = ext2fs_bufatoff(dp, (off_t)dp->i_offset, 
-			    NULL, &bp);
-			if (error != 0)
-				return (error);
-			entryoffsetinblock = 0;
-		}
+		if (bp != NULL)
+			brelse(bp);
+
+		error = ext2fs_bufatoff(dp, (off_t)dp->i_offset, NULL, &bp);
+		if (error != 0)
+			return (error);
+		entryoffsetinblock = 0;
+
 		/*
 		 * If still looking for a slot, and at a dirblksize
 		 * boundary, have to start looking for free space again.
 		 */
-		if (slotstatus == NONE &&
-			(entryoffsetinblock & (dirblksize - 1)) == 0) {
-			slotoffset = -1;
-			slotfreespace = 0;
-		}
-		/*
-		 * Get pointer to next entry.
-		 * Full validation checks are slow, so we only check
-		 * enough to insure forward progress through the
-		 * directory. Complete checks can be run by patching
-		 * "dirchk" to be true.
-		 */
-		ep = (struct ext2fs_direct *)
-			((char *)bp->b_data + entryoffsetinblock);
-		if (ep->e2d_reclen == 0 ||
-		    (dirchk &&
-		    ext2fs_dirbadentry(vdp, ep, entryoffsetinblock))) {
-			int i;
-			ufs_dirbad(dp, dp->i_offset, "mangled entry");
-			i = dirblksize -
-			    (entryoffsetinblock & (dirblksize - 1));
-			dp->i_offset += i;
-			entryoffsetinblock += i;
-			continue;
+		if (ss.slotstatus == NONE) {
+			ss.slotoffset = -1;
+			ss.slotfreespace = 0;
 		}
 
-		/*
-		 * If an appropriate sized slot has not yet been found,
-		 * check to see if one is available. Also accumulate space
-		 * in the current block so that we can determine if
-		 * compaction is viable.
-		 */
-		if (slotstatus != FOUND) {
-			int size = fs2h16(ep->e2d_reclen);
-
-			if (ep->e2d_ino != 0)
-				size -= EXT2FS_DIRSIZ(ep->e2d_namlen);
-			if (size > 0) {
-				if (size >= slotneeded) {
-					slotstatus = FOUND;
-					slotoffset = dp->i_offset;
-					slotsize = fs2h16(ep->e2d_reclen);
-				} else if (slotstatus == NONE) {
-					slotfreespace += size;
-					if (slotoffset == -1)
-						slotoffset = dp->i_offset;
-					if (slotfreespace >= slotneeded) {
-						slotstatus = COMPACT;
-						slotsize = dp->i_offset +
-							  fs2h16(ep->e2d_reclen) - slotoffset;
-					}
-				}
-			}
+		error = ext2fs_search_dirblock(dp, bp->b_data, &entry_found,
+		    cnp, &entryoffsetinblock, &prevoff, &enduseful, &ss);
+		if (error) {
+			brelse(bp);
+			return (error);
 		}
-
-		/*
-		 * Check for a name match.
-		 */
-		if (ep->e2d_ino) {
-			namlen = ep->e2d_namlen;
-			if (namlen == cnp->cn_namelen &&
-				!memcmp(cnp->cn_nameptr, ep->e2d_name,
-				(unsigned)namlen)) {
-				/*
-				 * Save directory entry's inode number and
-				 * reclen in ndp->ni_ufs area, and release
-				 * directory buffer.
-				 */
-				dp->i_ino = fs2h32(ep->e2d_ino);
-				dp->i_reclen = fs2h16(ep->e2d_reclen);
-				brelse(bp);
-				goto found;
-			}
+		if (entry_found) {
+			ep = (struct ext2fs_direct *)
+			    ((char *)bp->b_data + (entryoffsetinblock & bmask));
+/* foundentry: */
+			dp->i_ino = letoh32(ep->e2d_ino);
+			dp->i_reclen = letoh16(ep->e2d_reclen);
+			goto found;
 		}
-		prevoff = dp->i_offset;
-		dp->i_offset += fs2h16(ep->e2d_reclen);
-		entryoffsetinblock += fs2h16(ep->e2d_reclen);
-		if (ep->e2d_ino)
-			enduseful = dp->i_offset;
 	}
 /* notfound: */
 	/*
@@ -449,7 +387,7 @@ searchloop:
 		 * is pointless, so don't proceed any further.
 		 */
 		if (vdp->v_mount->mnt_flag & MNT_RDONLY)
-					return (EROFS);
+			return (EROFS);
 		/*
 		 * Access for write is interpreted as allowing
 		 * creation of files in the directory.
@@ -465,15 +403,15 @@ searchloop:
 		 * can be put in the range from dp->i_offset to
 		 * dp->i_offset + dp->i_count.
 		 */
-		if (slotstatus == NONE) {
+		if (ss.slotstatus == NONE) {
 			dp->i_offset = roundup(ext2fs_size(dp), dirblksize);
 			dp->i_count = 0;
 			enduseful = dp->i_offset;
 		} else {
-			dp->i_offset = slotoffset;
-			dp->i_count = slotsize;
-			if (enduseful < slotoffset + slotsize)
-				enduseful = slotoffset + slotsize;
+			dp->i_offset = ss.slotoffset;
+			dp->i_count = ss.slotsize;
+			if (enduseful < ss.slotoffset + ss.slotsize)
+				enduseful = ss.slotoffset + ss.slotsize;
 		}
 		dp->i_endoff = roundup(enduseful, dirblksize);
 		dp->i_flag |= IN_CHANGE | IN_UPDATE;
@@ -520,6 +458,7 @@ found:
 		}
 		dp->i_flag |= IN_CHANGE | IN_UPDATE;
 	}
+	brelse(bp);
 
 	/*
 	 * Found component in pathname.
@@ -586,8 +525,7 @@ found:
 	 * Must get inode of directory entry to verify it's a
 	 * regular file, or empty directory.
 	 */
-	if (nameiop == RENAME && wantparent &&
-		(flags & ISLASTCN)) {
+	if (nameiop == RENAME && wantparent && (flags & ISLASTCN)) {
 		if ((error = VOP_ACCESS(vdp, VWRITE, cred, cnp->cn_proc)) != 0)
 			return (error);
 		/*
@@ -664,6 +602,101 @@ found:
 	return (0);
 }
 
+int
+ext2fs_search_dirblock(struct inode *ip, void *data, int *foundp,
+    struct componentname *cnp, int *entryoffsetinblockp,
+    doff_t *prevoffp, doff_t *endusefulp, struct ext2fs_searchslot *ssp)
+{
+	struct ext2fs_direct *ep, *lim;
+	struct vnode *vdp;
+	int offset = *entryoffsetinblockp;
+	int dirblksize = ip->i_e2fs->e2fs_bsize;
+	size_t namlen;
+
+	vdp = ITOV(ip);
+
+	lim = (struct ext2fs_direct *)
+	    ((char *)data + dirblksize - EXT2FS_DIRSIZ(0));
+	ep = (struct ext2fs_direct *) ((char *)data + offset);
+
+	while (ep < lim) {
+		/*
+		 * Full validation checks are slow, so we only check
+		 * enough to insure forward progress through the
+		 * directory. Complete checks can be run by patching
+		 * "dirchk" to be true.
+		 */
+		if (ep->e2d_reclen == 0 ||
+		    (dirchk && ext2fs_dirbadentry(vdp, ep, offset))) {
+			int i;
+			ufs_dirbad(ip, ip->i_offset, "mangled entry");
+			i = dirblksize - (offset & (dirblksize - 1));
+			ip->i_offset += i;
+			offset += i;
+			continue;
+		}
+
+		/*
+		 * If an appropriate sized slot has not yet been found,
+		 * check to see if one is available. Also accumulate space
+		 * in the current block so that we can determine if
+		 * compaction is viable.
+		 */
+		if (ssp->slotstatus != FOUND) {
+			int size = letoh16(ep->e2d_reclen);
+
+			if (ep->e2d_ino != 0)
+				size -= EXT2FS_DIRSIZ(ep->e2d_namlen);
+			if (size > 0) {
+				if (size >= ssp->slotneeded) {
+					ssp->slotstatus = FOUND;
+					ssp->slotoffset = ip->i_offset;
+					ssp->slotsize = letoh16(ep->e2d_reclen);
+				} else if (ssp->slotstatus == NONE) {
+					ssp->slotfreespace += size;
+					if (ssp->slotoffset == -1)
+						ssp->slotoffset = ip->i_offset;
+					if (ssp->slotfreespace >= ssp->slotneeded) {
+						ssp->slotstatus = COMPACT;
+						ssp->slotsize = ip->i_offset +
+							  letoh16(ep->e2d_reclen) - ssp->slotoffset;
+					}
+				}
+			}
+		}
+
+		/*
+		 * Check for a name match.
+		 */
+		if (ep->e2d_ino) {
+			namlen = ep->e2d_namlen;
+			if (namlen == cnp->cn_namelen &&
+			    !memcmp(cnp->cn_nameptr, ep->e2d_name, namlen)) {
+				/*
+				 * Save directory entry's inode number and
+				 * reclen in ndp->ni_ufs area, and release
+				 * directory buffer.
+				 */
+				*foundp = 1;
+				return (0);
+			}
+		}
+		*prevoffp = ip->i_offset;
+		ip->i_offset += letoh16(ep->e2d_reclen);
+		offset += letoh16(ep->e2d_reclen);
+		*entryoffsetinblockp = offset;
+		if (ep->e2d_ino)
+			*endusefulp = ip->i_offset;
+
+		/*
+		 * Get pointer to the next entry.
+		 */
+		ep = (struct ext2fs_direct *) ((char *)data + offset);
+	}
+
+	return (0);
+}
+
 /*
  * Do consistency checking on a directory entry:
  *	record length must be multiple of 4
@@ -679,33 +712,30 @@ static int
 ext2fs_dirbadentry(struct vnode *dp, struct ext2fs_direct *de,
     int entryoffsetinblock)
 {
-	int	dirblksize = VTOI(dp)->i_e2fs->e2fs_bsize;
+	int dirblksize = VTOI(dp)->i_e2fs->e2fs_bsize;
+	char *error_msg = NULL;
+	int reclen = letoh16(de->e2d_reclen);
+	int namlen = de->e2d_namlen;
 
-		char * error_msg = NULL;
-		int reclen = fs2h16(de->e2d_reclen);
-		int namlen = de->e2d_namlen;
+	if (reclen < EXT2FS_DIRSIZ(1)) /* e2d_namlen = 1 */
+		error_msg = "rec_len is smaller than minimal";
+	else if (reclen % 4 != 0)
+		error_msg = "rec_len % 4 != 0";
+	else if (reclen < EXT2FS_DIRSIZ(namlen))
+		error_msg = "reclen is too small for name_len";
+	else if (entryoffsetinblock + reclen > dirblksize)
+		error_msg = "directory entry across blocks";
+	else if (letoh32(de->e2d_ino) > VTOI(dp)->i_e2fs->e2fs.e2fs_icount)
+		error_msg = "inode out of bounds";
 
-		if (reclen < EXT2FS_DIRSIZ(1)) /* e2d_namlen = 1 */
-				error_msg = "rec_len is smaller than minimal";
-		else if (reclen % 4 != 0)
-				error_msg = "rec_len % 4 != 0";
-		else if (reclen < EXT2FS_DIRSIZ(namlen))
-				error_msg = "reclen is too small for name_len";
-		else if (entryoffsetinblock + reclen > dirblksize)
-				error_msg = "directory entry across blocks";
-		else if (fs2h32(de->e2d_ino) >
-		    VTOI(dp)->i_e2fs->e2fs.e2fs_icount)
-				error_msg = "inode out of bounds";
-
-		if (error_msg != NULL) {
-			printf( "bad directory entry: %s\n"
-			    "offset=%d, inode=%lu, rec_len=%d, name_len=%d \n",
-			    error_msg, entryoffsetinblock,
-			    (unsigned long) fs2h32(de->e2d_ino),
-			    reclen, namlen);
-			panic("ext2fs_dirbadentry");
-		}
-		return error_msg == NULL ? 0 : 1;
+	if (error_msg != NULL) {
+		printf("bad directory entry: %s\n"
+		    "offset=%d, inode=%u, rec_len=%d, name_len=%d \n",
+		    error_msg, entryoffsetinblock, letoh32(de->e2d_ino),
+		    reclen, namlen);
+		panic(__func__);
+	}
+	return (0);
 }
 
 /*
@@ -737,7 +767,7 @@ ext2fs_direnter(struct inode *ip, struct vnode *dvp,
 		panic("direnter: missing name");
 #endif
 	dp = VTOI(dvp);
-	newdir.e2d_ino = h2fs32(ip->i_number);
+	newdir.e2d_ino = htole32(ip->i_number);
 	newdir.e2d_namlen = cnp->cn_namelen;
 	if (ip->i_e2fs->e2fs.e2fs_rev > E2FS_REV0 &&
 	    (ip->i_e2fs->e2fs.e2fs_features_incompat & EXT2F_INCOMPAT_FTYPE)) {
@@ -757,7 +787,7 @@ ext2fs_direnter(struct inode *ip, struct vnode *dvp,
 		if (dp->i_offset & (dirblksize - 1))
 			panic("ext2fs_direnter: newblk");
 		auio.uio_offset = dp->i_offset;
-		newdir.e2d_reclen = h2fs16(dirblksize);
+		newdir.e2d_reclen = htole16(dirblksize);
 		auio.uio_resid = newentrysize;
 		aiov.iov_len = newentrysize;
 		aiov.iov_base = (caddr_t)&newdir;
@@ -793,7 +823,7 @@ ext2fs_direnter(struct inode *ip, struct vnode *dvp,
 	/*
 	 * Get the block containing the space for the new directory entry.
 	 */
-	if ((error = ext2fs_bufatoff(dp, (off_t)dp->i_offset, &dirbuf, &bp)) 
+	if ((error = ext2fs_bufatoff(dp, (off_t)dp->i_offset, &dirbuf, &bp))
 	    != 0)
 		return (error);
 	/*
@@ -805,20 +835,20 @@ ext2fs_direnter(struct inode *ip, struct vnode *dvp,
 	 */
 	ep = (struct ext2fs_direct *)dirbuf;
 	dsize = EXT2FS_DIRSIZ(ep->e2d_namlen);
-	spacefree = fs2h16(ep->e2d_reclen) - dsize;
-	for (loc = fs2h16(ep->e2d_reclen); loc < dp->i_count; ) {
+	spacefree = letoh16(ep->e2d_reclen) - dsize;
+	for (loc = letoh16(ep->e2d_reclen); loc < dp->i_count; ) {
 		nep = (struct ext2fs_direct *)(dirbuf + loc);
 		if (ep->e2d_ino) {
 			/* trim the existing slot */
-			ep->e2d_reclen = h2fs16(dsize);
+			ep->e2d_reclen = htole16(dsize);
 			ep = (struct ext2fs_direct *)((char *)ep + dsize);
 		} else {
 			/* overwrite; nothing there; header is ours */
 			spacefree += dsize;
 		}
 		dsize = EXT2FS_DIRSIZ(nep->e2d_namlen);
-		spacefree += fs2h16(nep->e2d_reclen) - dsize;
-		loc += fs2h16(nep->e2d_reclen);
+		spacefree += letoh16(nep->e2d_reclen) - dsize;
+		loc += letoh16(nep->e2d_reclen);
 		memcpy(ep, nep, dsize);
 	}
 	/*
@@ -830,7 +860,7 @@ ext2fs_direnter(struct inode *ip, struct vnode *dvp,
 		if (spacefree + dsize < newentrysize)
 			panic("ext2fs_direnter: compact1");
 #endif
-		newdir.e2d_reclen = h2fs16(spacefree + dsize);
+		newdir.e2d_reclen = htole16(spacefree + dsize);
 	} else {
 #ifdef DIAGNOSTIC
 		if (spacefree < newentrysize) {
@@ -839,8 +869,8 @@ ext2fs_direnter(struct inode *ip, struct vnode *dvp,
 			panic("ext2fs_direnter: compact2");
 		}
 #endif
-		newdir.e2d_reclen = h2fs16(spacefree);
-		ep->e2d_reclen = h2fs16(dsize);
+		newdir.e2d_reclen = htole16(spacefree);
+		ep->e2d_reclen = htole16(dsize);
 		ep = (struct ext2fs_direct *)((char *)ep + dsize);
 	}
 	memcpy(ep, &newdir, newentrysize);
@@ -871,13 +901,13 @@ ext2fs_dirremove(struct vnode *dvp, struct componentname *cnp)
 	struct ext2fs_direct *ep;
 	struct buf *bp;
 	int error;
-	 
+
 	dp = VTOI(dvp);
 	if (dp->i_count == 0) {
 		/*
 		 * First entry in block: set d_ino to zero.
 		 */
-		error = ext2fs_bufatoff(dp, (off_t)dp->i_offset, (char **)&ep, 
+		error = ext2fs_bufatoff(dp, (off_t)dp->i_offset, (char **)&ep,
 		    &bp);
 		if (error != 0)
 			return (error);
@@ -893,7 +923,7 @@ ext2fs_dirremove(struct vnode *dvp, struct componentname *cnp)
 	    (char **)&ep, &bp);
 	if (error != 0)
 		return (error);
-	ep->e2d_reclen = h2fs16(fs2h16(ep->e2d_reclen) + dp->i_reclen);
+	ep->e2d_reclen = htole16(letoh16(ep->e2d_reclen) + dp->i_reclen);
 	error = VOP_BWRITE(bp);
 	dp->i_flag |= IN_CHANGE | IN_UPDATE;
 	return (error);
@@ -915,7 +945,7 @@ ext2fs_dirrewrite(struct inode *dp, struct inode *ip,
 	error = ext2fs_bufatoff(dp, (off_t)dp->i_offset, (char **)&ep, &bp);
 	if (error != 0)
 		return (error);
-	ep->e2d_ino = h2fs32(ip->i_number);
+	ep->e2d_ino = htole32(ip->i_number);
 	if (ip->i_e2fs->e2fs.e2fs_rev > E2FS_REV0 &&
 	    (ip->i_e2fs->e2fs.e2fs_features_incompat & EXT2F_INCOMPAT_FTYPE)) {
 		ep->e2d_type = inot2ext2dt(IFTODT(ip->i_e2fs_mode));
@@ -944,10 +974,10 @@ ext2fs_dirempty(struct inode *ip, ufsino_t parentino, struct ucred *cred)
 	struct ext2fs_direct *dp = (struct ext2fs_direct *)&dbuf;
 	int error, namlen;
 	size_t count;
-		 
+
 #define	MINDIRSIZ (sizeof (struct ext2fs_dirtemplate) / 2)
 
-	for (off = 0; off < ext2fs_size(ip); off += fs2h16(dp->e2d_reclen)) {
+	for (off = 0; off < ext2fs_size(ip); off += letoh16(dp->e2d_reclen)) {
 		error = vn_rdwr(UIO_READ, ITOV(ip), (caddr_t)dp, MINDIRSIZ, off,
 		   UIO_SYSSPACE, IO_NODELOCKED, cred, &count, curproc);
 		/*
@@ -975,7 +1005,7 @@ ext2fs_dirempty(struct inode *ip, ufsino_t parentino, struct ucred *cred)
 		 */
 		if (namlen == 1)
 			continue;
-		if (dp->e2d_name[1] == '.' && fs2h32(dp->e2d_ino) == parentino)
+		if (dp->e2d_name[1] == '.' && letoh32(dp->e2d_ino) == parentino)
 			continue;
 		return (0);
 	}
@@ -1024,7 +1054,7 @@ ext2fs_checkpath(struct inode *source, struct inode *target,
 			error = ENOTDIR;
 			break;
 		}
-		ino = fs2h32(dirbuf.dotdot_ino);
+		ino = letoh32(dirbuf.dotdot_ino);
 		if (ino == source->i_number) {
 			error = EINVAL;
 			break;

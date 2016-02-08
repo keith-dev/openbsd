@@ -1,4 +1,4 @@
-/*	$OpenBSD: softintr.c,v 1.2 2010/12/21 14:56:24 claudio Exp $	*/
+/*	$OpenBSD: softintr.c,v 1.4 2014/07/12 18:44:43 tedu Exp $	*/
 /*	$NetBSD: softintr.c,v 1.2 2003/07/15 00:24:39 lukem Exp $	*/
 
 /*
@@ -37,6 +37,7 @@
  */
 
 #include <sys/param.h>
+#include <sys/mutex.h>
 #include <sys/malloc.h>
 
 #include <uvm/uvm_extern.h>
@@ -148,7 +149,7 @@ softintr_disestablish(void *arg)
 	}
 	mtx_leave(&siq->siq_mtx);
 
-	free(sih, M_DEVBUF);
+	free(sih, M_DEVBUF, 0);
 }
 
 /*

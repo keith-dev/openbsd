@@ -1,4 +1,4 @@
-/* $OpenBSD: prcm.c,v 1.7 2013/11/06 19:03:07 syl Exp $ */
+/* $OpenBSD: prcm.c,v 1.9 2014/05/08 21:17:01 miod Exp $ */
 /*
  * Copyright (c) 2007,2009 Dale Rahn <drahn@openbsd.org>
  *
@@ -319,6 +319,12 @@ prcm_am335x_clkctrl(int mod)
 		return PRCM_AM335X_TPTC1_CLKCTRL;
 	case PRCM_TPTC2:
 		return PRCM_AM335X_TPTC2_CLKCTRL;
+	case PRCM_I2C0:
+		return PRCM_AM335X_I2C0_CLKCTRL;
+	case PRCM_I2C1:
+		return PRCM_AM335X_I2C1_CLKCTRL;
+	case PRCM_I2C2:
+		return PRCM_AM335X_I2C2_CLKCTRL;
 	default:
 		panic("%s: module not found\n", __func__);
 	}
@@ -437,7 +443,7 @@ prcm_v4_hsusbhost_activate(int type)
 			break;
 
 		default:
-			panic("%s: invalid type %d", type);
+			panic("%s: invalid type %d", __func__, type);
 			return (EINVAL);
 	}
 	bus_space_write_4(sc->sc_iot, sc->sc_cm2, clksel_reg_off, clksel);

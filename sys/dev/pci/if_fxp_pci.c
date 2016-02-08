@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_fxp_pci.c,v 1.60 2013/12/06 21:03:04 deraadt Exp $	*/
+/*	$OpenBSD: if_fxp_pci.c,v 1.62 2014/07/22 13:12:11 mpi Exp $	*/
 
 /*
  * Copyright (c) 1995, David Greenman
@@ -54,8 +54,6 @@
 
 #ifdef INET
 #include <netinet/in.h>
-#include <netinet/in_systm.h>
-#include <netinet/ip.h>
 #endif
 
 #include <sys/ioctl.h>
@@ -195,7 +193,6 @@ fxp_pci_attach(struct device *parent, struct device *self, void *aux)
 	case PCI_PRODUCT_INTEL_8255x:
 	case PCI_PRODUCT_INTEL_82559:
 	case PCI_PRODUCT_INTEL_82559ER:
-	{
 		chipname = "i82557";
 		if (sc->sc_revision >= FXP_REV_82558_A4)
 			chipname = "i82558";
@@ -207,8 +204,6 @@ fxp_pci_attach(struct device *parent, struct device *self, void *aux)
 			chipname = "i82550";
 		if (sc->sc_revision >= FXP_REV_82551_E)
 			chipname = "i82551";
-		break;
-	}
 		break;
 	case PCI_PRODUCT_INTEL_82552:
 		chipname = "i82552";

@@ -1,4 +1,4 @@
-/* $OpenBSD: cmd-split-window.c,v 1.48 2013/11/22 20:58:36 nicm Exp $ */
+/* $OpenBSD: cmd-split-window.c,v 1.50 2014/05/13 08:08:32 nicm Exp $ */
 
 /*
  * Copyright (c) 2009 Nicholas Marriott <nicm@users.sourceforge.net>
@@ -36,7 +36,7 @@ enum cmd_retval	 cmd_split_window_exec(struct cmd *, struct cmd_q *);
 
 const struct cmd_entry cmd_split_window_entry = {
 	"split-window", "splitw",
-	"c:dF:l:hp:Pt:v", 0, 1,
+	"c:dF:l:hp:Pt:v", 0, -1,
 	"[-dhvP] [-c start-directory] [-F format] [-p percentage|-l size] "
 	CMD_TARGET_PANE_USAGE " [command]",
 	0,
@@ -61,14 +61,15 @@ cmd_split_window_exec(struct cmd *self, struct cmd_q *cmdq)
 	struct window		*w;
 	struct window_pane	*wp, *new_wp = NULL;
 	struct environ		 env;
-	const char		*cmd, *shell, *template;
-	char			*cause, *new_cause, *cp;
+	const char		*cmd, *path, *shell, *template;
+	char		       **argv, *cause, *new_cause, *cp;
 	u_int			 hlimit;
-	int			 size, percentage, cwd, fd = -1;
+	int			 argc, size, percentage, cwd, fd = -1;
 	enum layout_type	 type;
 	struct layout_cell	*lc;
 	struct client		*c;
 	struct format_tree	*ft;
+	struct environ_entry	*envent;
 
 	if ((wl = cmd_find_pane(cmdq, args_get(args, 't'), &s, &wp)) == NULL)
 		return (CMD_RETURN_ERROR);
@@ -80,10 +81,19 @@ cmd_split_window_exec(struct cmd *self, struct cmd_q *cmdq)
 	environ_copy(&s->environ, &env);
 	server_fill_environ(s, &env);
 
-	if (args->argc == 0)
+	if (args->argc == 0) {
 		cmd = options_get_string(&s->options, "default-command");
-	else
-		cmd = args->argv[0];
+		if (cmd != NULL && *cmd != '\0') {
+			argc = 1;
+			argv = (char**)&cmd;
+		} else {
+			argc = 0;
+			argv = NULL;
+		}
+	} else {
+		argc = args->argc;
+		argv = args->argv;
+	}
 
 	if (args_has(args, 'c')) {
 		ft = format_create();
@@ -148,8 +158,17 @@ cmd_split_window_exec(struct cmd *self, struct cmd_q *cmdq)
 		goto error;
 	}
 	new_wp = window_add_pane(w, hlimit);
-	if (window_pane_spawn(
-	    new_wp, cmd, shell, cwd, &env, s->tio, &cause) != 0)
+
+	path = NULL;
+	if (cmdq->client != NULL && cmdq->client->session == NULL)
+		envent = environ_find(&cmdq->client->environ, "PATH");
+	else
+		envent = environ_find(&s->environ, "PATH");
+	if (envent != NULL)
+		path = envent->value;
+
+	if (window_pane_spawn(new_wp, argc, argv, path, shell, cwd, &env,
+	    s->tio, &cause) != 0)
 		goto error;
 	layout_assign_pane(lc, new_wp);
 

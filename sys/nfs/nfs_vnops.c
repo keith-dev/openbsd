@@ -1,4 +1,4 @@
-/*	$OpenBSD: nfs_vnops.c,v 1.150 2014/01/18 07:10:26 deraadt Exp $	*/
+/*	$OpenBSD: nfs_vnops.c,v 1.152 2014/07/12 18:43:52 tedu Exp $	*/
 /*	$NetBSD: nfs_vnops.c,v 1.62.4.1 1996/07/08 20:26:52 jtc Exp $	*/
 
 /*
@@ -62,8 +62,6 @@
 #include <sys/queue.h>
 #include <sys/specdev.h>
 #include <sys/unistd.h>
-
-#include <uvm/uvm_extern.h>
 
 #include <miscfs/fifofs/fifo.h>
 
@@ -2042,7 +2040,7 @@ nfs_readdir(void *v)
 		}
 	} while (!error && !done && !eof && cnt--);
 
-	free(data, M_TEMP);
+	free(data, M_TEMP, 0);
 	data = NULL;
 
 	uio->uio_offset = newoff;
@@ -2540,7 +2538,7 @@ nfs_sillyrename(struct vnode *dvp, struct vnode *vp, struct componentname *cnp)
 bad:
 	vrele(sp->s_dvp);
 	crfree(sp->s_cred);
-	free(sp, M_NFSREQ);
+	free(sp, M_NFSREQ, 0);
 	return (error);
 }
 

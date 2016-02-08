@@ -1,4 +1,4 @@
-/*      $OpenBSD: if_malo.c,v 1.76 2013/12/06 21:03:04 deraadt Exp $ */
+/*      $OpenBSD: if_malo.c,v 1.78 2014/07/12 18:48:52 tedu Exp $ */
 
 /*
  * Copyright (c) 2007 Marcus Glocker <mglocker@openbsd.org>
@@ -193,7 +193,7 @@ malo_pcmcia_attach(struct device *parent, struct device *self, void *aux)
 	sc->sc_iot = psc->sc_pcioh.iot;
 	sc->sc_ioh = psc->sc_pcioh.ioh;
 
-	printf(" port 0x%x/%d", psc->sc_pcioh.addr, psc->sc_pcioh.size);
+	printf(" port 0x%lx/%ld", psc->sc_pcioh.addr, psc->sc_pcioh.size);
 
 	/* establish interrupt */
 	psc->sc_ih = pcmcia_intr_establish(psc->sc_pf, IPL_NET, cmalo_intr, sc,
@@ -456,7 +456,7 @@ cmalo_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		}
 
 		if (nr)
-			free(nr, M_DEVBUF);
+			free(nr, M_DEVBUF, 0);
 		break;
 	default:
 		error = ieee80211_ioctl(ifp, cmd, data);
@@ -510,12 +510,12 @@ void
 cmalo_fw_free(struct malo_softc *sc)
 {
 	if (sc->sc_fw_h != NULL) {
-		free(sc->sc_fw_h, M_DEVBUF);
+		free(sc->sc_fw_h, M_DEVBUF, 0);
 		sc->sc_fw_h = NULL;
 	}
 
 	if (sc->sc_fw_m != NULL) {
-		free(sc->sc_fw_m, M_DEVBUF);
+		free(sc->sc_fw_m, M_DEVBUF, 0);
 		sc->sc_fw_m = NULL;
 	}
 }
@@ -839,11 +839,11 @@ cmalo_detach(void *arg)
 
 	/* free command buffer */
 	if (sc->sc_cmd != NULL)
-		free(sc->sc_cmd, M_DEVBUF);
+		free(sc->sc_cmd, M_DEVBUF, 0);
 
 	/* free data buffer */
 	if (sc->sc_data != NULL)
-		free(sc->sc_data, M_DEVBUF);
+		free(sc->sc_data, M_DEVBUF, 0);
 
 	/* free firmware */
 	cmalo_fw_free(sc);

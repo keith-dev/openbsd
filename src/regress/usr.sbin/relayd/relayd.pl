@@ -1,5 +1,5 @@
 #!/usr/bin/perl
-#	$OpenBSD: relayd.pl,v 1.8 2013/02/07 22:56:27 bluhm Exp $
+#	$OpenBSD: relayd.pl,v 1.12 2014/07/11 15:38:44 bluhm Exp $
 
 # Copyright (c) 2010-2013 Alexander Bluhm <bluhm@openbsd.org>
 #
@@ -38,13 +38,18 @@ if (@ARGV and -f $ARGV[-1]) {
 }
 @ARGV == 1 or usage();
 
+my $redo = $args{lengths} && @{$args{lengths}};
+$redo = 0 if $args{client}{http_vers};  # run only one persistent connection
 my($sport, $rport) = find_ports(num => 2);
 my $s = Server->new(
+    forward             => $ARGV[0],
     func                => \&read_char,
     listendomain        => AF_INET,
     listenaddr          => "127.0.0.1",
     listenport          => $sport,
+    redo                => $redo,
     %{$args{server}},
+    testfile            => $test,
 ) unless $args{server}{noserver};
 my $r = Relayd->new(
     forward             => $ARGV[0],
@@ -58,20 +63,22 @@ my $r = Relayd->new(
     testfile            => $test,
 );
 my $c = Client->new(
+    forward             => $ARGV[0],
     func                => \&write_char,
     connectdomain       => AF_INET,
     connectaddr         => "127.0.0.1",
     connectport         => $rport,
     %{$args{client}},
-);
+    testfile            => $test,
+) unless $args{client}{noclient};
 
 $s->run unless $args{server}{noserver};
 $r->run;
 $r->up;
-$c->run->up;
+$c->run->up unless $args{client}{noclient};
 $s->up unless $args{server}{noserver};
 
-$c->down;
+$c->down unless $args{client}{noclient};
 $s->down unless $args{server}{noserver};
 $r->kill_child;
 $r->down;

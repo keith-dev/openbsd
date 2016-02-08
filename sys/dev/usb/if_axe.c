@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_axe.c,v 1.123 2013/11/15 10:17:39 pirofti Exp $	*/
+/*	$OpenBSD: if_axe.c,v 1.126 2014/07/13 15:52:49 mpi Exp $	*/
 
 /*
  * Copyright (c) 2005, 2006, 2007 Jonathan Gray <jsg@openbsd.org>
@@ -109,12 +109,8 @@
 #include <net/bpf.h>
 #endif
 
-#ifdef INET
 #include <netinet/in.h>
-#include <netinet/in_systm.h>
-#include <netinet/ip.h>
 #include <netinet/if_ether.h>
-#endif
 
 #include <dev/mii/mii.h>
 #include <dev/mii/miivar.h>
@@ -178,21 +174,16 @@ const struct axe_type axe_devs[] = {
 
 #define axe_lookup(v, p) ((struct axe_type *)usb_lookup(axe_devs, v, p))
 
-int axe_match(struct device *, void *, void *); 
-void axe_attach(struct device *, struct device *, void *); 
-int axe_detach(struct device *, int); 
-int axe_activate(struct device *, int); 
+int axe_match(struct device *, void *, void *);
+void axe_attach(struct device *, struct device *, void *);
+int axe_detach(struct device *, int);
 
-struct cfdriver axe_cd = { 
-	NULL, "axe", DV_IFNET 
-}; 
+struct cfdriver axe_cd = {
+	NULL, "axe", DV_IFNET
+};
 
-const struct cfattach axe_ca = { 
-	sizeof(struct axe_softc), 
-	axe_match, 
-	axe_attach, 
-	axe_detach, 
-	axe_activate, 
+const struct cfattach axe_ca = {
+	sizeof(struct axe_softc), axe_match, axe_attach, axe_detach
 };
 
 int axe_tx_list_init(struct axe_softc *);
@@ -476,7 +467,7 @@ axe_iff(struct axe_softc *sc)
 	 * Always accept frames destined to our station address.
 	 */
 	rxmode |= AXE_RXCMD_BROADCAST;
-	if (!sc->axe_flags & AX178 && !sc->axe_flags & AX772)
+	if ((sc->axe_flags & (AX178 | AX772)) == 0)
 		rxmode |= AXE_172_RXCMD_UNICAST;
 
 	if (ifp->if_flags & IFF_PROMISC || ac->ac_multirangecnt > 0) {
@@ -712,7 +703,7 @@ axe_attach(struct device *parent, struct device *self, void *aux)
 	id = usbd_get_interface_descriptor(sc->axe_iface);
 
 	/* decide on what our bufsize will be */
-	if (sc->axe_flags & AX178 || sc->axe_flags & AX772)
+	if (sc->axe_flags & (AX178 | AX772))
 		sc->axe_bufsz = (sc->axe_udev->speed == USB_SPEED_HIGH) ?
 		    AXE_178_MAX_BUFSZ : AXE_178_MIN_BUFSZ;
 	else
@@ -765,7 +756,7 @@ axe_attach(struct device *parent, struct device *self, void *aux)
 	/*
 	 * Get station address.
 	 */
-	if (sc->axe_flags & AX178 || sc->axe_flags & AX772)
+	if (sc->axe_flags & (AX178 | AX772))
 		axe_cmd(sc, AXE_178_CMD_READ_NODEID, 0, 0, &eaddr);
 	else
 		axe_cmd(sc, AXE_172_CMD_READ_NODEID, 0, 0, &eaddr);
@@ -886,21 +877,6 @@ axe_detach(struct device *self, int flags)
 	}
 	splx(s);
 
-	return (0);
-}
-
-int
-axe_activate(struct device *self, int act)
-{
-	struct axe_softc *sc = (struct axe_softc *)self;
-
-	DPRINTFN(2,("%s: %s: enter\n", sc->axe_dev.dv_xname, __func__));
-
-	switch (act) {
-	case DVACT_DEACTIVATE:
-		usbd_deactivate(sc->axe_udev);
-		break;
-	}
 	return (0);
 }
 
@@ -1027,7 +1003,7 @@ axe_rxeof(struct usbd_xfer *xfer, void *priv, usbd_status status)
 	usbd_get_xfer_status(xfer, NULL, NULL, &total_len, NULL);
 
 	do {
-		if (sc->axe_flags & AX178 || sc->axe_flags & AX772) {
+		if (sc->axe_flags & (AX178 | AX772)) {
 			if (total_len < sizeof(hdr)) {
 				ifp->if_ierrors++;
 				goto done;
@@ -1214,7 +1190,7 @@ axe_encap(struct axe_softc *sc, struct mbuf *m, int idx)
 
 	c = &sc->axe_cdata.axe_tx_chain[idx];
 
-	if (sc->axe_flags & AX178 || sc->axe_flags & AX772) {
+	if (sc->axe_flags & (AX178 | AX772)) {
 		boundary = (sc->axe_udev->speed == USB_SPEED_HIGH) ? 512 : 64;
 
 		hdr.len = htole16(m->m_pkthdr.len);
@@ -1318,7 +1294,7 @@ axe_init(void *xsc)
 	axe_reset(sc);
 
 	/* set MAC address */
-	if (sc->axe_flags & AX178 || sc->axe_flags & AX772)
+	if (sc->axe_flags & (AX178 | AX772))
 		axe_cmd(sc, AXE_178_CMD_WRITE_NODEID, 0, 0,
 		    &sc->arpcom.ac_enaddr);
 
@@ -1339,7 +1315,7 @@ axe_init(void *xsc)
 	}
 
 	/* Set transmitter IPG values */
-	if (sc->axe_flags & AX178 || sc->axe_flags & AX772)
+	if (sc->axe_flags & (AX178 | AX772))
 		axe_cmd(sc, AXE_178_CMD_WRITE_IPG012, sc->axe_ipgs[2],
 		    (sc->axe_ipgs[1] << 8) | (sc->axe_ipgs[0]), NULL);
 	else {
@@ -1357,7 +1333,7 @@ axe_init(void *xsc)
 	rxmode |= AXE_RXCMD_ENABLE;
 	if (sc->axe_flags & AX772B)
 		rxmode |= AXE_772B_RXCMD_RH1M;
-	else if (sc->axe_flags & AX178 || sc->axe_flags & AX772) {
+	else if (sc->axe_flags & (AX178 | AX772)) {
 		if (sc->axe_udev->speed == USB_SPEED_HIGH) {
 			/* largest possible USB buffer size for AX88178 */
 			rxmode |= AXE_178_RXCMD_MFB;

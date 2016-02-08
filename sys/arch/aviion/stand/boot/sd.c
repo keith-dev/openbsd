@@ -1,4 +1,4 @@
-/*	$OpenBSD: sd.c,v 1.5 2013/10/16 16:59:34 miod Exp $	*/
+/*	$OpenBSD: sd.c,v 1.7 2014/07/12 19:01:49 tedu Exp $	*/
 
 /*
  * Copyright (c) 2013 Miodrag Vallat.

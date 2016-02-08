@@ -1,4 +1,4 @@
-/*	$OpenBSD: schizo.c,v 1.64 2013/05/13 17:46:42 kettenis Exp $	*/
+/*	$OpenBSD: schizo.c,v 1.66 2014/07/12 18:44:43 tedu Exp $	*/
 
 /*
  * Copyright (c) 2002 Jason L. Wright (jason@thought.net)
@@ -244,7 +244,7 @@ schizo_init(struct schizo_softc *sc, int busa)
 	pba.pba_pc->conf_write = schizo_conf_write;
 	pba.pba_pc->intr_map = schizo_intr_map;
 
-	free(busranges, M_DEVBUF);
+	free(busranges, M_DEVBUF, 0);
 
 	schizo_pbm_write(pbm, SCZ_PCI_INTR_RETRY, 5);
 
@@ -327,23 +327,23 @@ schizo_pci_error(void *vpbm)
 	printf("%s: pci bus %c error\n", sc->sc_dv.dv_xname,
 	    sp->sp_bus_a ? 'A' : 'B');
 
-	printf("PCIAFSR=%lb\n", afsr, SCZ_PCIAFSR_BITS);
-	printf("PCIAFAR=%lx\n", afar);
-	printf("PCICTRL=%lb\n", ctrl, SCZ_PCICTRL_BITS);
+	printf("PCIAFSR=%llb\n", afsr, SCZ_PCIAFSR_BITS);
+	printf("PCIAFAR=%llx\n", afar);
+	printf("PCICTRL=%llb\n", ctrl, SCZ_PCICTRL_BITS);
 	printf("PCICSR=%b\n", csr, PCI_COMMAND_STATUS_BITS);
 
 	if (ctrl & SCZ_PCICTRL_MMU_ERR) {
-		u_int32_t ctrl, tfar;
+		u_int64_t ctrl, tfar;
 
 		ctrl = schizo_pbm_read(sp, SCZ_PCI_IOMMU_CTRL);
-		printf("IOMMUCTRL=%lx\n", ctrl);
+		printf("IOMMUCTRL=%llx\n", ctrl);
 
 		if ((ctrl & TOM_IOMMU_ERR) == 0)
 			goto clear_error;
 
 		if (sc->sc_tomatillo) {
 			tfar = schizo_pbm_read(sp, TOM_PCI_IOMMU_TFAR);
-			printf("IOMMUTFAR=%lx\n", tfar);
+			printf("IOMMUTFAR=%llx\n", tfar);
 		}
 
 		/* These are non-fatal if target abort was signalled. */
@@ -373,11 +373,11 @@ schizo_safari_error(void *vsc)
 
 	printf("%s: safari error\n", sc->sc_dv.dv_xname);
 
-	printf("ERRLOG=%lx\n", schizo_read(sc, SCZ_SAFARI_ERRLOG));
-	printf("UE_AFSR=%lx\n", schizo_read(sc, SCZ_UE_AFSR));
-	printf("UE_AFAR=%lx\n", schizo_read(sc, SCZ_UE_AFAR));
-	printf("CE_AFSR=%lx\n", schizo_read(sc, SCZ_CE_AFSR));
-	printf("CE_AFAR=%lx\n", schizo_read(sc, SCZ_CE_AFAR));
+	printf("ERRLOG=%llx\n", schizo_read(sc, SCZ_SAFARI_ERRLOG));
+	printf("UE_AFSR=%llx\n", schizo_read(sc, SCZ_UE_AFSR));
+	printf("UE_AFAR=%llx\n", schizo_read(sc, SCZ_UE_AFAR));
+	printf("CE_AFSR=%llx\n", schizo_read(sc, SCZ_CE_AFSR));
+	printf("CE_AFAR=%llx\n", schizo_read(sc, SCZ_CE_AFAR));
 
 	panic("%s: fatal", sc->sc_dv.dv_xname);
 	return (1);
@@ -445,7 +445,7 @@ schizo_init_iommu(struct schizo_softc *sc, struct schizo_pbm *pbm)
 		}
 #undef TSBCASE
 		DPRINTF(SDB_BUSMAP, ("schizo_iommu_init: iobase=0x%x\n", iobase));
-		free(vdma, M_DEVBUF);
+		free(vdma, M_DEVBUF, 0);
 	} else {
 		DPRINTF(SDB_BUSMAP, ("schizo_iommu_init: getprop failed, "
 		    "using iobase=0x%x, tsbsize=%d\n", iobase, tsbsize));
@@ -557,7 +557,7 @@ schizo_set_intr(struct schizo_softc *sc, struct schizo_pbm *pbm, int ipl,
 	    map, clr, name);
 	if (ih == NULL) {
 		printf("set_intr failed...\n");
-		free(name, M_DEVBUF);
+		free(name, M_DEVBUF, 0);
 		return;
 	}
 

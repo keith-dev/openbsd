@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.213 2013/11/23 07:20:52 uebayasi Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.233 2014/07/22 01:04:04 uebayasi Exp $	*/
 
 /*
  * Copyright (c) 1999-2003 Michael Shalayeff
@@ -54,8 +54,6 @@
 
 #include <net/if.h>
 #include <uvm/uvm.h>
-#include <uvm/uvm_page.h>
-#include <uvm/uvm_swap.h>
 
 #include <dev/cons.h>
 
@@ -167,7 +165,6 @@ int   safepri = 0;
  * wide used hardware params
  */
 struct pdc_hwtlb pdc_hwtlb PDC_ALIGNMENT;
-struct pdc_coproc pdc_coproc PDC_ALIGNMENT;
 struct pdc_coherence pdc_coherence PDC_ALIGNMENT;
 struct pdc_spidb pdc_spidbits PDC_ALIGNMENT;
 struct pdc_model pdc_model PDC_ALIGNMENT;
@@ -206,7 +203,6 @@ int pbtlb_u(int i);
 int hpti_l(vaddr_t, vsize_t);
 int hpti_u(vaddr_t, vsize_t);
 int hpti_g(vaddr_t, vsize_t);
-int desidhash_x(void);
 int desidhash_s(void);
 int desidhash_t(void);
 int desidhash_l(void);
@@ -420,6 +416,7 @@ cpuid()
 	extern u_int fpu_enable;
 	extern int cpu_fpuena;
 	struct pdc_cpuid pdc_cpuid PDC_ALIGNMENT;
+	struct pdc_coproc pdc_coproc PDC_ALIGNMENT;
 	const struct hppa_cpu_typed *p = NULL;
 	u_int cpu_features;
 	int error;
@@ -452,9 +449,23 @@ cpuid()
 	/* locate coprocessors and SFUs */
 	bzero(&pdc_coproc, sizeof(pdc_coproc));
 	if ((error = pdc_call((iodcio_t)pdc, 0, PDC_COPROC, PDC_COPROC_DFLT,
-	    &pdc_coproc, 0, 0, 0, 0)) < 0) {
-		printf("WARNING: PDC_COPROC error %d\n", error);
-		cpu_fpuena = 0;
+	    &pdc_coproc, 0, 0, 0, 0, 0)) < 0) {
+		/*
+		 * Some 1.1 systems fail the PDC_COPROC call with error == -3,
+		 * when booting from disk (but not when netbooting).
+		 * Until the cause of this misbehaviour is found, assume the
+		 * usual 1.1 FPU settings, so that userland gets a chance to
+		 * run.
+		 */
+		if ((pdc_model.hvers >> 4) != 0 && pdc_model.arch_rev == 4) {
+			printf("WARNING: PDC_COPROC error %d,"
+			    " assuming 1.1 FPU\n", error);
+			fpu_enable = 0xc0;
+			cpu_fpuena = 1;
+		} else {
+			printf("WARNING: PDC_COPROC error %d\n", error);
+			cpu_fpuena = 0;
+		}
 	} else {
 		printf("pdc_coproc: 0x%x, 0x%x; model %x rev %x\n",
 		    pdc_coproc.ccr_enable, pdc_coproc.ccr_present,
@@ -613,9 +624,9 @@ cpu_startup(void)
 	printf(version);
 
 	printf("%s\n", cpu_model);
-	printf("real mem = %u (%uMB)\n", ptoa(physmem),
+	printf("real mem = %lu (%luMB)\n", ptoa(physmem),
 	    ptoa(physmem) / 1024 / 1024);
-	printf("rsvd mem = %u (%uKB)\n", ptoa(resvmem), ptoa(resvmem) / 1024);
+	printf("rsvd mem = %lu (%luKB)\n", ptoa(resvmem), ptoa(resvmem) / 1024);
 
 	/*
 	 * Allocate a submap for exec arguments.  This map effectively
@@ -875,9 +886,11 @@ btlb_insert(pa_space_t space, vaddr_t va, paddr_t pa, vsize_t *lenp, u_int prot)
 
 int waittime = -1;
 
-void
+__dead void
 boot(int howto)
 {
+	struct device *mainbus;
+
 	/*
 	 * On older systems without software power control, prevent mi code
 	 * from spinning disks off, in case the operator changes his mind
@@ -887,9 +900,7 @@ boot(int howto)
 	if (cold_hook == NULL)
 		howto &= ~RB_POWERDOWN;
 
-	/* If system is cold, just halt. */
 	if (cold) {
-		/* (Unless the user explicitly asked for reboot.) */
 		if ((howto & RB_USERREQ) == 0)
 			howto |= RB_HALT;
 		goto haltsys;
@@ -897,33 +908,30 @@ boot(int howto)
 
 	boothowto = howto | (boothowto & RB_HALT);
 
-	if (!(howto & RB_NOSYNC)) {
+	if ((howto & RB_NOSYNC) == 0) {
 		waittime = 0;
 		vfs_shutdown();
-		/*
-		 * If we've been adjusting the clock, the todr
-		 * will be out of synch; adjust it now unless
-		 * the system was sitting in ddb.
-		 */
-		if ((howto & RB_TIMEBAD) == 0)
+
+		if ((howto & RB_TIMEBAD) == 0) {
 			resettodr();
-		else
+		} else {
 			printf("WARNING: not updating battery clock\n");
+		}
 	}
 	if_downall();
 
-	/* XXX probably save howto into stable storage */
-
 	uvm_shutdown();
 	splhigh();
+	cold = 1;
 
-	if (howto & RB_DUMP)
+	if ((howto & RB_DUMP) != 0)
 		dumpsys();
 
 haltsys:
 	doshutdownhooks();
-	if (!TAILQ_EMPTY(&alldevs))
-		config_suspend(TAILQ_FIRST(&alldevs), DVACT_POWERDOWN);
+	mainbus = device_mainbus();
+	if (mainbus != NULL)
+		config_suspend(mainbus, DVACT_POWERDOWN);
 
 #ifdef MULTIPROCESSOR
 	hppa_ipi_broadcast(HPPA_IPI_HALT);
@@ -933,8 +941,8 @@ haltsys:
 	if (cold_hook)
 		(*cold_hook)(HPPA_COLD_COLD);
 
-	if (howto & RB_HALT) {
-		if (howto & RB_POWERDOWN && cold_hook) {
+	if ((howto & RB_HALT) != 0) {
+		if ((howto & RB_POWERDOWN) != 0) {
 			printf("Powering off...");
 			DELAY(2000000);
 			(*cold_hook)(HPPA_COLD_OFF);
@@ -943,7 +951,7 @@ haltsys:
 
 		printf("System halted!\n");
 		DELAY(2000000);
-		__asm __volatile("stwas %0, 0(%1)"
+		__asm volatile("stwas %0, 0(%1)"
 		    :: "r" (CMD_STOP), "r" (HPPA_LBCAST + iomod_command));
 	} else {
 		printf("rebooting...");
@@ -953,13 +961,13 @@ haltsys:
                 pdc_call((iodcio_t)pdc, 0, PDC_BROADCAST_RESET, PDC_DO_RESET);
 
 		/* forcably reset module if that fails */
-		__asm __volatile(".export hppa_reset, entry\n\t"
+		__asm volatile(".export hppa_reset, entry\n\t"
 		    ".label hppa_reset");
-		__asm __volatile("stwas %0, 0(%1)"
+		__asm volatile("stwas %0, 0(%1)"
 		    :: "r" (CMD_RESET), "r" (HPPA_LBCAST + iomod_command));
 	}
 
-	for (;;) ; /* loop while bus reset is coming up */
+	for (;;) ;
 	/* NOTREACHED */
 }
 
@@ -988,10 +996,9 @@ cpu_dumpsize(void)
 void
 hpmc_dump(void)
 {
-	printf("HPMC\n");
-
 	cold = 0;
-	boot(RB_NOSYNC);
+	panic("HPMC");
+	/* NOTREACHED */
 }
 
 int
@@ -1213,7 +1220,7 @@ sendsig(sig_t catcher, int sig, int mask, u_long code, int type,
 	struct proc *p = curproc;
 	struct trapframe *tf = p->p_md.md_regs;
 	struct pcb *pcb = &p->p_addr->u_pcb;
-	struct sigacts *psp = p->p_sigacts;
+	struct sigacts *psp = p->p_p->ps_sigacts;
 	struct sigcontext ksc;
 	siginfo_t ksi;
 	register_t scp, sip;
@@ -1299,7 +1306,7 @@ sendsig(sig_t catcher, int sig, int mask, u_long code, int type,
 	tf->tf_arg2 = tf->tf_r4 = scp;
 	tf->tf_arg3 = (register_t)catcher;
 	tf->tf_ipsw &= ~(PSL_N|PSL_B|PSL_T);
-	tf->tf_iioq_head = HPPA_PC_PRIV_USER | p->p_sigcode;
+	tf->tf_iioq_head = HPPA_PC_PRIV_USER | p->p_p->ps_sigcode;
 	tf->tf_iioq_tail = tf->tf_iioq_head + 4;
 	tf->tf_iisq_tail = tf->tf_iisq_head = pcb->pcb_space;
 	/* disable tracing in the trapframe */

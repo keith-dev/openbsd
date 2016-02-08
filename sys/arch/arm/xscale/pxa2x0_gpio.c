@@ -1,4 +1,4 @@
-/*	$OpenBSD: pxa2x0_gpio.c,v 1.22 2010/09/20 06:33:47 matthew Exp $ */
+/*	$OpenBSD: pxa2x0_gpio.c,v 1.24 2014/07/12 18:44:41 tedu Exp $ */
 /*	$NetBSD: pxa2x0_gpio.c,v 1.2 2003/07/15 00:24:55 lukem Exp $	*/
 
 /*
@@ -330,7 +330,7 @@ pxa2x0_gpio_intr_disestablish(void *cookie)
 #endif /* PXAGPIO_HAS_GPION_INTRS */
 	}
 
-	free(gh, M_DEVBUF); 
+	free(gh, M_DEVBUF, 0);
 }
 
 #ifdef PXAGPIO_HAS_GPION_INTRS
@@ -399,7 +399,7 @@ pxa2x0_gpio_intr_string(void *cookie)
 	if (gh == NULL)
 		snprintf(irqstr, sizeof irqstr, "couldn't establish interrupt");
 	else 
-		snprintf(irqstr, sizeof irqstr, "irq %ld", gh->gh_irq);
+		snprintf(irqstr, sizeof irqstr, "irq %d", gh->gh_irq);
 	return(irqstr);
 }
 

@@ -1,4 +1,4 @@
-/*	$OpenBSD: dev_hppa64.c,v 1.6 2012/02/25 20:12:00 miod Exp $	*/
+/*	$OpenBSD: dev_hppa64.c,v 1.8 2014/07/13 09:26:08 jasper Exp $	*/
 
 /*
  * Copyright (c) 2005 Michael Shalayeff
@@ -156,54 +156,6 @@ devboot(dev, p)
 		p[-1] = '0' + unit;
 	*p++ = 'a' + B_PARTITION(dev);
 	*p = '\0';
-}
-
-int pch_pos;
-
-void
-putchar(c)
-	int c;
-{
-	switch(c) {
-	case '\177':	/* DEL erases */
-		cnputc('\b');
-		cnputc(' ');
-	case '\b':
-		cnputc('\b');
-		if (pch_pos)
-			pch_pos--;
-		break;
-	case '\t':
-		do
-			cnputc(' ');
-		while(++pch_pos % 8);
-		break;
-	case '\n':
-	case '\r':
-		cnputc(c);
-		pch_pos=0;
-		break;
-	default:
-		cnputc(c);
-		pch_pos++;
-		break;
-	}
-}
-
-int
-getchar()
-{
-	int c = cngetc();
-
-	if (c == '\r')
-		c = '\n';
-
-	if ((c < ' ' && c != '\n') || c == '\177')
-		return(c);
-
-	putchar(c);
-
-	return(c);
 }
 
 char ttyname_buf[8];

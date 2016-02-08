@@ -1,4 +1,4 @@
-/* $OpenBSD: softraid.c,v 1.331 2014/01/22 23:32:42 jsing Exp $ */
+/* $OpenBSD: softraid.c,v 1.338 2014/08/01 01:32:09 jsing Exp $ */
 /*
  * Copyright (c) 2007, 2008, 2009 Marco Peereboom <marco@peereboom.us>
  * Copyright (c) 2008 Chris Kuethe <ckuethe@openbsd.org>
@@ -56,6 +56,12 @@
 
 #include <dev/softraidvar.h>
 #include <dev/rndvar.h>
+
+#ifdef HIBERNATE
+#include <lib/libsa/aes_xts.h>
+#include <sys/hibernate.h>
+#include <scsi/sdvar.h>
+#endif /* HIBERNATE */
 
 /* #define SR_FANCY_STATS */
 
@@ -125,8 +131,7 @@ void			sr_set_chunk_state(struct sr_discipline *, int, int);
 void			sr_set_vol_state(struct sr_discipline *);
 
 /* utility functions */
-void			sr_shutdown(struct sr_softc *);
-void			sr_shutdownhook(void *);
+void			sr_shutdown(void);
 void			sr_uuid_generate(struct sr_uuid *);
 char			*sr_uuid_format(struct sr_uuid *);
 void			sr_uuid_print(struct sr_uuid *, int);
@@ -253,7 +258,7 @@ sr_meta_attach(struct sr_discipline *sd, int chunk_no, int force)
 
 	/* we have a valid list now create an array index */
 	cl = &sd->sd_vol.sv_chunk_list;
-	sd->sd_vol.sv_chunks = malloc(sizeof(struct sr_chunk *) * chunk_no,
+	sd->sd_vol.sv_chunks = mallocarray(chunk_no, sizeof(struct sr_chunk *),
 	    M_DEVBUF, M_WAITOK | M_ZERO);
 
 	/* fill out chunk array */
@@ -524,7 +529,7 @@ sr_meta_clear(struct sr_discipline *sd)
 
 	bzero(sd->sd_meta, SR_META_SIZE * 512);
 
-	free(m, M_DEVBUF);
+	free(m, M_DEVBUF, 0);
 	rv = 0;
 done:
 	return (rv);
@@ -727,7 +732,7 @@ restart:
 		wu.swu_dis = sd;
 		sd->sd_scsi_sync(&wu);
 	}
-	free(m, M_DEVBUF);
+	free(m, M_DEVBUF, 0);
 	return (0);
 bad:
 	return (1);
@@ -798,9 +803,9 @@ sr_meta_read(struct sr_discipline *sd)
 		cp++;
 	}
 
-	free(sm, M_DEVBUF);
+	free(sm, M_DEVBUF, 0);
 	if (fm)
-		free(fm, M_DEVBUF);
+		free(fm, M_DEVBUF, 0);
 
 done:
 	DNPRINTF(SR_D_META, "%s: sr_meta_read found %d parts\n", DEVNAME(sc),
@@ -1130,9 +1135,9 @@ sr_meta_native_bootprobe(struct sr_softc *sc, dev_t devno,
 
 done:
 	if (fake_sd)
-		free(fake_sd, M_DEVBUF);
+		free(fake_sd, M_DEVBUF, 0);
 	if (md)
-		free(md, M_DEVBUF);
+		free(md, M_DEVBUF, 0);
 
 	return (rv);
 }
@@ -1285,13 +1290,13 @@ sr_boot_assembly(struct sr_softc *sc)
 	}
 
 	/* Allocate memory for device and ondisk version arrays. */
-	devs = malloc(BIOC_CRMAXLEN * sizeof(dev_t), M_DEVBUF,
+	devs = mallocarray(BIOC_CRMAXLEN, sizeof(dev_t), M_DEVBUF,
 	    M_NOWAIT | M_CANFAIL);
 	if (devs == NULL) {
 		printf("%s: failed to allocate device array\n", DEVNAME(sc));
 		goto unwind;
 	}
-	ondisk = malloc(BIOC_CRMAXLEN * sizeof(u_int64_t), M_DEVBUF,
+	ondisk = mallocarray(BIOC_CRMAXLEN, sizeof(u_int64_t), M_DEVBUF,
 	    M_NOWAIT | M_CANFAIL);
 	if (ondisk == NULL) {
 		printf("%s: failed to allocate ondisk array\n", DEVNAME(sc));
@@ -1468,36 +1473,36 @@ unwind:
 		    bc1 != SLIST_END(&bv1->sbv_chunks); bc1 = bc2) {
 			bc2 = SLIST_NEXT(bc1, sbc_link);
 			if (bc1->sbc_metadata)
-				free(bc1->sbc_metadata, M_DEVBUF);
-			free(bc1, M_DEVBUF);
+				free(bc1->sbc_metadata, M_DEVBUF, 0);
+			free(bc1, M_DEVBUF, 0);
 		}
-		free(bv1, M_DEVBUF);
+		free(bv1, M_DEVBUF, 0);
 	}
 	/* Free keydisks chunks. */
 	for (bc1 = SLIST_FIRST(&kdh); bc1 != SLIST_END(&kdh); bc1 = bc2) {
 		bc2 = SLIST_NEXT(bc1, sbc_link);
 		if (bc1->sbc_metadata)
-			free(bc1->sbc_metadata, M_DEVBUF);
-		free(bc1, M_DEVBUF);
+			free(bc1->sbc_metadata, M_DEVBUF, 0);
+		free(bc1, M_DEVBUF, 0);
 	}
 	/* Free unallocated chunks. */
 	for (bc1 = SLIST_FIRST(&bch); bc1 != SLIST_END(&bch); bc1 = bc2) {
 		bc2 = SLIST_NEXT(bc1, sbc_link);
 		if (bc1->sbc_metadata)
-			free(bc1->sbc_metadata, M_DEVBUF);
-		free(bc1, M_DEVBUF);
+			free(bc1->sbc_metadata, M_DEVBUF, 0);
+		free(bc1, M_DEVBUF, 0);
 	}
 
 	while (!SLIST_EMPTY(&sdklist)) {
 		sdk = SLIST_FIRST(&sdklist);
 		SLIST_REMOVE_HEAD(&sdklist, sdk_link);
-		free(sdk, M_DEVBUF);
+		free(sdk, M_DEVBUF, 0);
 	}
 
 	if (devs)
-		free(devs, M_DEVBUF);
+		free(devs, M_DEVBUF, 0);
 	if (ondisk)
-		free(ondisk, M_DEVBUF);
+		free(ondisk, M_DEVBUF, 0);
 
 	return (rv);
 }
@@ -1694,7 +1699,7 @@ sr_meta_native_attach(struct sr_discipline *sd, int force)
 	rv = 0;
 bad:
 	if (md)
-		free(md, M_DEVBUF);
+		free(md, M_DEVBUF, 0);
 	return (rv);
 }
 
@@ -1759,7 +1764,7 @@ sr_hotplug_unregister(struct sr_discipline *sd, void *func)
 		if (mhe->sh_hotplug == func) {
 			SLIST_REMOVE(&sr_hotplug_callbacks, mhe,
 			    sr_hotplug_list, shl_link);
-			free(mhe, M_DEVBUF);
+			free(mhe, M_DEVBUF, 0);
 			if (SLIST_EMPTY(&sr_hotplug_callbacks))
 				SLIST_INIT(&sr_hotplug_callbacks);
 			return;
@@ -1827,8 +1832,6 @@ sr_attach(struct device *parent, struct device *self, void *aux)
 
 	softraid_disk_attach = sr_disk_attach;
 
-	sc->sc_shutdownhook = shutdownhook_establish(sr_shutdownhook, sc);
-
 	sr_boot_assembly(sc);
 
 	explicit_bzero(sr_bootkey, sizeof(sr_bootkey));
@@ -1842,12 +1845,9 @@ sr_detach(struct device *self, int flags)
 
 	DNPRINTF(SR_D_MISC, "%s: sr_detach\n", DEVNAME(sc));
 
-	if (sc->sc_shutdownhook)
-		shutdownhook_disestablish(sc->sc_shutdownhook);
-
 	softraid_disk_attach = NULL;
 
-	sr_shutdown(sc);
+	sr_shutdown();
 
 #ifndef SMALL_KERNEL
 	if (sc->sc_sensor_task != NULL)
@@ -1940,8 +1940,9 @@ sr_ccb_alloc(struct sr_discipline *sd)
 	if (sd->sd_ccb)
 		return (1);
 
-	sd->sd_ccb = malloc(sizeof(struct sr_ccb) *
-	    sd->sd_max_wu * sd->sd_max_ccb_per_wu, M_DEVBUF, M_WAITOK | M_ZERO);
+	sd->sd_ccb = mallocarray(sd->sd_max_wu,
+	    sd->sd_max_ccb_per_wu * sizeof(struct sr_ccb),
+	    M_DEVBUF, M_WAITOK | M_ZERO);
 	TAILQ_INIT(&sd->sd_ccb_freeq);
 	for (i = 0; i < sd->sd_max_wu * sd->sd_max_ccb_per_wu; i++) {
 		ccb = &sd->sd_ccb[i];
@@ -1969,7 +1970,7 @@ sr_ccb_free(struct sr_discipline *sd)
 		TAILQ_REMOVE(&sd->sd_ccb_freeq, ccb, ccb_link);
 
 	if (sd->sd_ccb)
-		free(sd->sd_ccb, M_DEVBUF);
+		free(sd->sd_ccb, M_DEVBUF, 0);
 }
 
 struct sr_ccb *
@@ -2148,7 +2149,7 @@ sr_wu_free(struct sr_discipline *sd)
 
 	while ((wu = TAILQ_FIRST(&sd->sd_wu)) != NULL) {
 		TAILQ_REMOVE(&sd->sd_wu, wu, swu_next);
-		free(wu, M_DEVBUF);
+		free(wu, M_DEVBUF, 0);
 	}
 }
 
@@ -2968,15 +2969,15 @@ sr_hotspare(struct sr_softc *sc, dev_t dev)
 
 fail:
 	if (hotspare)
-		free(hotspare, M_DEVBUF);
+		free(hotspare, M_DEVBUF, 0);
 
 done:
 	if (sd && sd->sd_vol.sv_chunks)
-		free(sd->sd_vol.sv_chunks, M_DEVBUF);
+		free(sd->sd_vol.sv_chunks, M_DEVBUF, 0);
 	if (sd)
-		free(sd, M_DEVBUF);
+		free(sd, M_DEVBUF, 0);
 	if (sm)
-		free(sm, M_DEVBUF);
+		free(sm, M_DEVBUF, 0);
 	if (open) {
 		VOP_CLOSE(vn, FREAD | FWRITE, NOCRED, curproc);
 		vput(vn);
@@ -3082,7 +3083,7 @@ sr_hotspare_rebuild(struct sr_discipline *sd)
 			/* Remove hotspare from available list. */
 			sc->sc_hotspare_no--;
 			SLIST_REMOVE(cl, hotspare, sr_chunk, src_link);
-			free(hotspare, M_DEVBUF);
+			free(hotspare, M_DEVBUF, 0);
 
 		}
 		rw_exit_write(&sc->sc_lock);
@@ -3182,7 +3183,7 @@ sr_rebuild_init(struct sr_discipline *sd, dev_t dev, int hotspare)
 
 	/* Is the partition large enough? */
 	size = DL_SECTOBLK(&label, DL_GETPSIZE(&label.d_partitions[part])) -
-	    SR_DATA_OFFSET;
+	    sd->sd_meta->ssd_data_offset;
 	if (size < csize) {
 		sr_error(sc, "%s partition too small, at least %lld bytes "
 		    "required", devname, (long long)(csize << DEV_BSHIFT));
@@ -3348,7 +3349,7 @@ sr_ioctl_createraid(struct sr_softc *sc, struct bioc_createraid *bc,
 				    &sd->sd_meta->ssdi.ssd_uuid);
 				sr_error(sc, "disk %s is currently in use; "
 				    "cannot force create", uuid);
-				free(uuid, M_DEVBUF);
+				free(uuid, M_DEVBUF, 0);
 				goto unwind;
 			}
 
@@ -3405,7 +3406,7 @@ sr_ioctl_createraid(struct sr_softc *sc, struct bioc_createraid *bc,
 		if (sr_already_assembled(sd)) {
 			uuid = sr_uuid_format(&sd->sd_meta->ssdi.ssd_uuid);
 			sr_error(sc, "disk %s already assembled", uuid);
-			free(uuid, M_DEVBUF);
+			free(uuid, M_DEVBUF, 0);
 			goto unwind;
 		}
 
@@ -3764,9 +3765,9 @@ sr_ioctl_installboot(struct sr_softc *sc, struct bioc_installboot *bb)
 
 done:
 	if (bootblk)
-		free(bootblk, M_DEVBUF);
+		free(bootblk, M_DEVBUF, 0);
 	if (bootldr)
-		free(bootldr, M_DEVBUF);
+		free(bootldr, M_DEVBUF, 0);
 
 	return (rv);
 }
@@ -3799,7 +3800,7 @@ sr_chunks_unwind(struct sr_softc *sc, struct sr_chunk_head *cl)
 			    curproc);
 			vput(ch_entry->src_vn);
 		}
-		free(ch_entry, M_DEVBUF);
+		free(ch_entry, M_DEVBUF, 0);
 	}
 	SLIST_INIT(cl);
 }
@@ -3823,18 +3824,18 @@ sr_discipline_free(struct sr_discipline *sd)
 	if (sd->sd_free_resources)
 		sd->sd_free_resources(sd);
 	if (sd->sd_vol.sv_chunks)
-		free(sd->sd_vol.sv_chunks, M_DEVBUF);
+		free(sd->sd_vol.sv_chunks, M_DEVBUF, 0);
 	if (sd->sd_meta)
-		free(sd->sd_meta, M_DEVBUF);
+		free(sd->sd_meta, M_DEVBUF, 0);
 	if (sd->sd_meta_foreign)
-		free(sd->sd_meta_foreign, M_DEVBUF);
+		free(sd->sd_meta_foreign, M_DEVBUF, 0);
 
 	som = &sd->sd_meta_opt;
 	for (omi = SLIST_FIRST(som); omi != SLIST_END(som); omi = omi_next) {
 		omi_next = SLIST_NEXT(omi, omi_link);
 		if (omi->omi_som)
-			free(omi->omi_som, M_DEVBUF);
-		free(omi, M_DEVBUF);
+			free(omi->omi_som, M_DEVBUF, 0);
+		free(omi, M_DEVBUF, 0);
 	}
 
 	if (sd->sd_target != 0) {
@@ -3850,7 +3851,7 @@ sr_discipline_free(struct sr_discipline *sd)
 	}
 
 	explicit_bzero(sd, sizeof *sd);
-	free(sd, M_DEVBUF);
+	free(sd, M_DEVBUF, 0);
 }
 
 void
@@ -3933,6 +3934,8 @@ sr_discipline_init(struct sr_discipline *sd, int level)
 	sd->sd_start_discipline = NULL;
 
 	task_set(&sd->sd_meta_save_task, sr_meta_save_callback, sd, NULL);
+	task_set(&sd->sd_hotspare_rebuild_task, sr_hotspare_rebuild_callback,
+	    sd, NULL);
 
 	switch (level) {
 	case 0:
@@ -4462,7 +4465,7 @@ sr_uuid_print(struct sr_uuid *uuid, int cr)
 
 	uuidstr = sr_uuid_format(uuid);
 	printf("%s%s", uuidstr, (cr ? "\n" : ""));
-	free(uuidstr, M_DEVBUF);
+	free(uuidstr, M_DEVBUF, 0);
 }
 
 int
@@ -4503,17 +4506,19 @@ sr_validate_stripsize(u_int32_t b)
 }
 
 void
-sr_shutdownhook(void *arg)
+sr_shutdown(void)
 {
-	sr_shutdown((struct sr_softc *)arg);
-}
-
-void
-sr_shutdown(struct sr_softc *sc)
-{
+	struct sr_softc		*sc = softraid0;
 	struct sr_discipline	*sd;
 
 	DNPRINTF(SR_D_MISC, "%s: sr_shutdown\n", DEVNAME(sc));
+
+	/*
+	 * Since softraid is not under mainbus, we have to explicitly
+	 * notify its children that the power is going down, so they
+	 * can execute their shutdown hooks.
+	 */
+	config_suspend((struct device *)sc, DVACT_POWERDOWN);
 
 	/* Shutdown disciplines in reverse attach order. */
 	while ((sd = TAILQ_LAST(&sc->sc_dis_list, sr_discipline_list)) != NULL)
@@ -4969,3 +4974,158 @@ sr_dump_mem(u_int8_t *p, int len)
 }
 
 #endif /* SR_DEBUG */
+
+#ifdef HIBERNATE
+/*
+ * Side-effect free (no malloc, printf, pool, splx) softraid crypto writer.
+ *
+ * This function must perform the following:
+ * 1. Determine the underlying device's own side-effect free I/O function
+ *    (eg, ahci_hibernate_io, wd_hibernate_io, etc).
+ * 2. Store enough information in the provided page argument for subsequent
+ *    I/O calls (such as the crypto discipline structure for the keys, the
+ *    offset of the softraid partition on the underlying disk, as well as
+ *    the offset of the swap partition within the crypto volume.
+ * 3. Encrypt the incoming data using the sr_discipline keys, then pass
+ *    the request to the underlying device's own I/O function.
+ */
+int
+sr_hibernate_io(dev_t dev, daddr_t blkno, vaddr_t addr, size_t size, int op, void *page)
+{
+	/* Struct for stashing data obtained on HIB_INIT.
+	 * XXX
+	 * We share the page with the underlying device's own
+	 * side-effect free I/O function, so we pad our data to
+	 * the end of the page. Presently this does not overlap
+	 * with either of the two other side-effect free i/o
+	 * functions (ahci/wd).
+	 */
+	struct {
+		char pad[3072];
+		struct sr_discipline *srd;
+		hibio_fn subfn;		/* underlying device i/o fn */
+		dev_t subdev;		/* underlying device dev_t */
+		daddr_t sr_swapoff; /* ofs of swap part in sr volume */
+		char buf[DEV_BSIZE];	/* encryption performed into this buf */
+	} *my = page;
+	extern struct cfdriver sd_cd;
+	char errstr[128], *dl_ret;
+	struct sr_chunk *schunk;
+	struct sd_softc *sd;
+	struct aes_xts_ctx ctx;
+	struct sr_softc *sc;
+	struct device *dv;
+	daddr_t key_blkno;
+	uint32_t sub_raidoff;  /* ofs of sr part in underlying dev */
+	struct disklabel dl;
+	size_t i, j;
+	u_char iv[8];
+
+	/*
+	 * In HIB_INIT, we are passed the swap partition size and offset
+	 * in 'size' and 'blkno' respectively. These are relative to the
+	 * start of the softraid partition, and we need to save these
+	 * for later translation to the underlying device's layout.
+	 */
+	if (op == HIB_INIT) {
+		dv = disk_lookup(&sd_cd, DISKUNIT(dev));
+		sd = (struct sd_softc *)dv;
+		sc = (struct sr_softc *)dv->dv_parent->dv_parent;
+
+		/*
+		 * Look up the sr discipline. This is used to determine
+		 * if we are SR crypto and what the underlying device is.
+		 */
+		my->srd = sc->sc_targets[sd->sc_link->target];
+		DNPRINTF(SR_D_MISC, "sr_hibernate_io: discipline is %s\n",
+			my->srd->sd_name);
+		if (strncmp(my->srd->sd_name, "CRYPTO", 10))
+			return (ENOTSUP);
+
+		/* Find the underlying device */
+		schunk = my->srd->sd_vol.sv_chunks[0];
+		my->subdev = schunk->src_dev_mm;
+
+		/*
+		 * Find the appropriate underlying device side effect free
+		 * I/O function, based on the type of device it is.
+		 */
+		my->subfn = get_hibernate_io_function(my->subdev);
+
+		/*
+		 * Find block offset where this raid partition is on
+		 * the underlying disk.
+		 */
+		dl_ret = disk_readlabel(&dl, my->subdev, errstr,
+		    sizeof(errstr));
+		if (dl_ret) {
+			printf("Hibernate error reading disklabel: %s\n", dl_ret);
+			return (ENOTSUP);
+		}
+
+		if (dl.d_partitions[DISKPART(my->subdev)].p_fstype != FS_RAID ||
+		    DL_GETPSIZE(&dl.d_partitions[DISKPART(my->subdev)]) == 0)
+			return (ENOTSUP);
+
+		/* Find the offset of the SR part in the underlying device */
+		sub_raidoff = my->srd->sd_meta->ssd_data_offset +
+		    DL_GETPOFFSET(&dl.d_partitions[DISKPART(my->subdev)]);
+		DNPRINTF(SR_D_MISC,"sr_hibernate_io: blk trans ofs: %d blks\n",
+		    sub_raidoff);
+
+		/* Save the offset of the swap partition in the SR disk */
+		my->sr_swapoff = blkno;
+
+		/* Initialize the sub-device */
+		return my->subfn(my->subdev, sub_raidoff + blkno,
+		    addr, size, op, page);
+	}
+
+	/* Hibernate only uses (and we only support) writes */
+	if (op != HIB_W)
+		return (ENOTSUP);
+
+	/*
+	 * Blocks act as the IV for the encryption. These block numbers
+	 * are relative to the start of the sr partition, but the 'blkno'
+	 * passed above is relative to the start of the swap partition
+	 * inside the sr partition, so bias appropriately.
+	 */
+	key_blkno = my->sr_swapoff + blkno;
+
+	/* Process each disk block one at a time. */
+	for (i = 0; i < size; i += DEV_BSIZE) {
+		int res;
+
+		bzero(&ctx, sizeof(ctx));
+
+		/*
+		 * Set encryption key (from the sr discipline stashed
+		 * during HIB_INIT. This code is based on the softraid
+		 * bootblock code.
+		 */
+		aes_xts_setkey(&ctx, my->srd->mds.mdd_crypto.scr_key[0], 64);
+		/* We encrypt DEV_BSIZE bytes at a time in my->buf */
+		bcopy(((char *)addr) + i, my->buf, DEV_BSIZE);
+
+		/* Block number is the IV */
+		bcopy(&key_blkno, &iv, sizeof(key_blkno));
+		aes_xts_reinit(&ctx, iv);
+
+		/* Encrypt DEV_BSIZE bytes, AES_XTS_BLOCKSIZE bytes at a time */
+		for (j = 0; j < DEV_BSIZE; j += AES_XTS_BLOCKSIZE)
+			aes_xts_encrypt(&ctx, my->buf + j);
+
+		/*
+		 * Write one block out from my->buf to the underlying device
+		 * using its own side-effect free I/O function.
+		 */
+		res = my->subfn(my->subdev, blkno + (i / DEV_BSIZE),
+		    (vaddr_t)(my->buf), DEV_BSIZE, op, page);
+		if (res != 0)
+			return (res);
+		key_blkno++;
+	}
+	return (0);
+}
+#endif /* HIBERNATE */

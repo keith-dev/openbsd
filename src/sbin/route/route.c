@@ -1,4 +1,4 @@
-/*	$OpenBSD: route.c,v 1.166 2014/01/22 06:23:37 claudio Exp $	*/
+/*	$OpenBSD: route.c,v 1.169 2014/07/24 17:45:35 jca Exp $	*/
 /*	$NetBSD: route.c,v 1.16 1996/04/15 18:27:05 cgd Exp $	*/
 
 /*
@@ -319,6 +319,8 @@ flushroutes(int argc, char **argv)
 		if (verbose)
 			print_rtmsg(rtm, rtm->rtm_msglen);
 		if ((rtm->rtm_flags & (RTF_GATEWAY|RTF_STATIC|RTF_LLINFO)) == 0)
+			continue;
+		if ((rtm->rtm_flags & RTF_LOCAL) != 0)
 			continue;
 		sa = (struct sockaddr *)(next + rtm->rtm_hdrlen);
 		if (af && sa->sa_family != af)
@@ -1243,7 +1245,7 @@ char metricnames[] =
 "\011priority\010rttvar\7rtt\6ssthresh\5sendpipe\4recvpipe\3expire\2hopcount\1mtu";
 char routeflags[] =
 "\1UP\2GATEWAY\3HOST\4REJECT\5DYNAMIC\6MODIFIED\7DONE\010MASK_PRESENT\011CLONING"
-"\012XRESOLVE\013LLINFO\014STATIC\015BLACKHOLE\016PROTO3\017PROTO2\020PROTO1\021CLONED\022SOURCE\023MPATH\025MPLS";
+"\012XRESOLVE\013LLINFO\014STATIC\015BLACKHOLE\016PROTO3\017PROTO2\020PROTO1\021CLONED\023MPATH\025MPLS\026LOCAL\027BROADCAST";
 char ifnetflags[] =
 "\1UP\2BROADCAST\3DEBUG\4LOOPBACK\5PTP\6NOTRAILERS\7RUNNING\010NOARP\011PPROMISC"
 "\012ALLMULTI\013OACTIVE\014SIMPLEX\015LINK0\016LINK1\017LINK2\020MULTICAST";
@@ -1352,6 +1354,8 @@ priorityname(u_int8_t prio)
 	switch (prio) {
 	case RTP_NONE:
 		return ("none");
+	case RTP_LOCAL:
+		return ("local");
 	case RTP_CONNECTED:
 		return ("connected");
 	case RTP_STATIC:
@@ -1676,7 +1680,7 @@ gettable(const char *s)
 		errx(1, "invalid table id: %s", errstr);
 
 	mib[0] = CTL_NET;
-	mib[1] = AF_ROUTE;
+	mib[1] = PF_ROUTE;
 	mib[2] = 0;
 	mib[3] = 0;
 	mib[4] = NET_RT_TABLE;

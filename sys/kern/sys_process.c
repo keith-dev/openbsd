@@ -1,4 +1,4 @@
-/*	$OpenBSD: sys_process.c,v 1.58 2014/01/21 01:48:45 tedu Exp $	*/
+/*	$OpenBSD: sys_process.c,v 1.64 2014/07/13 15:00:40 tedu Exp $	*/
 /*	$NetBSD: sys_process.c,v 1.55 1996/05/15 06:17:47 tls Exp $	*/
 
 /*-
@@ -185,7 +185,7 @@ sys_ptrace(struct proc *p, void *v, register_t *retval)
 		/*
 		 *	(2) it's a system process
 		 */
-		if (ISSET(t->p_flag, P_SYSTEM))
+		if (ISSET(tr->ps_flags, PS_SYSTEM))
 			return (EPERM);
 
 		/*
@@ -205,7 +205,7 @@ sys_ptrace(struct proc *p, void *v, register_t *retval)
 		 *	process which revokes its special privileges using
 		 *	setuid() from being traced.  This is good security.]
 		 */
-		if ((tr->ps_cred->p_ruid != p->p_cred->p_ruid ||
+		if ((tr->ps_ucred->cr_ruid != p->p_ucred->cr_ruid ||
 		    ISSET(tr->ps_flags, PS_SUGIDEXEC | PS_SUGID)) &&
 		    (error = suser(p, 0)) != 0)
 			return (error);
@@ -397,7 +397,7 @@ sys_ptrace(struct proc *p, void *v, register_t *retval)
 		case PIOD_READ_AUXV:
 			req = PT_READ_D;
 			uio.uio_rw = UIO_READ;
-			temp = t->p_emul->e_arglen * sizeof(char *);
+			temp = tr->ps_emul->e_arglen * sizeof(char *);
 			if (uio.uio_offset > temp)
 				return (EIO);
 			if (uio.uio_resid > temp - uio.uio_offset)
@@ -492,7 +492,7 @@ sys_ptrace(struct proc *p, void *v, register_t *retval)
 			struct process *ppr;
 
 			ppr = prfind(tr->ps_oppid);
-			proc_reparent(tr, ppr ? ppr : initproc->p_p);
+			proc_reparent(tr, ppr ? ppr : initprocess);
 		}
 
 		/* not being traced any more */
@@ -581,7 +581,7 @@ sys_ptrace(struct proc *p, void *v, register_t *retval)
 		if (error == 0) {
 			error = process_write_regs(t, regs);
 		}
-		free(regs, M_TEMP);
+		free(regs, M_TEMP, sizeof(*regs));
 		return (error);
 	case  PT_GETREGS:
 		KASSERT((p->p_flag & P_SYSTEM) == 0);
@@ -593,7 +593,7 @@ sys_ptrace(struct proc *p, void *v, register_t *retval)
 		if (error == 0)
 			error = copyout(regs,
 			    SCARG(uap, addr), sizeof (*regs));
-		free(regs, M_TEMP);
+		free(regs, M_TEMP, sizeof(*regs));
 		return (error);
 #ifdef PT_SETFPREGS
 	case  PT_SETFPREGS:
@@ -606,7 +606,7 @@ sys_ptrace(struct proc *p, void *v, register_t *retval)
 		if (error == 0) {
 			error = process_write_fpregs(t, fpregs);
 		}
-		free(fpregs, M_TEMP);
+		free(fpregs, M_TEMP, sizeof(*fpregs));
 		return (error);
 #endif
 #ifdef PT_GETFPREGS
@@ -620,7 +620,7 @@ sys_ptrace(struct proc *p, void *v, register_t *retval)
 		if (error == 0)
 			error = copyout(fpregs,
 			    SCARG(uap, addr), sizeof(*fpregs));
-		free(fpregs, M_TEMP);
+		free(fpregs, M_TEMP, sizeof(*fpregs));
 		return (error);
 #endif
 #ifdef PT_SETXMMREGS
@@ -634,7 +634,7 @@ sys_ptrace(struct proc *p, void *v, register_t *retval)
 		if (error == 0) {
 			error = process_write_xmmregs(t, xmmregs);
 		}
-		free(xmmregs, M_TEMP);
+		free(xmmregs, M_TEMP, sizeof(*xmmregs));
 		return (error);
 #endif
 #ifdef PT_GETXMMREGS
@@ -648,7 +648,7 @@ sys_ptrace(struct proc *p, void *v, register_t *retval)
 		if (error == 0)
 			error = copyout(xmmregs,
 			    SCARG(uap, addr), sizeof(*xmmregs));
-		free(xmmregs, M_TEMP);
+		free(xmmregs, M_TEMP, sizeof(*xmmregs));
 		return (error);
 #endif
 #ifdef PT_WCOOKIE
@@ -688,7 +688,7 @@ process_checkioperm(struct proc *p, struct process *tr)
 {
 	int error;
 
-	if ((tr->ps_cred->p_ruid != p->p_cred->p_ruid ||
+	if ((tr->ps_ucred->cr_ruid != p->p_ucred->cr_ruid ||
 	    ISSET(tr->ps_flags, PS_SUGIDEXEC | PS_SUGID)) &&
 	    (error = suser(p, 0)) != 0)
 		return (error);

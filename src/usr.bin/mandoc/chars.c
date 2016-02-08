@@ -1,4 +1,4 @@
-/*	$Id: chars.c,v 1.26 2014/01/22 20:58:35 schwarze Exp $ */
+/*	$Id: chars.c,v 1.29 2014/07/23 15:00:00 schwarze Exp $ */
 /*
  * Copyright (c) 2009, 2010, 2011 Kristaps Dzonsons <kristaps@bsd.lv>
  * Copyright (c) 2011 Ingo Schwarze <schwarze@openbsd.org>
@@ -21,6 +21,7 @@
 #include <string.h>
 
 #include "mandoc.h"
+#include "mandoc_aux.h"
 #include "libmandoc.h"
 
 #define	PRINT_HI	 126
@@ -47,8 +48,9 @@ struct	mchars {
 	struct ln	**htab;
 };
 
-static	const struct ln	 *find(const struct mchars *, 
+static	const struct ln	 *find(const struct mchars *,
 				const char *, size_t);
+
 
 void
 mchars_free(struct mchars *arg)
@@ -106,27 +108,38 @@ mchars_spec2cp(const struct mchars *arg, const char *p, size_t sz)
 char
 mchars_num2char(const char *p, size_t sz)
 {
-	int		  i;
+	int	  i;
 
 	if ((i = mandoc_strntoi(p, sz, 10)) < 0)
 		return('\0');
-	return(i > 0 && i < 256 && isprint(i) ? 
-			/* LINTED */ i : '\0');
+
+	return(i > 0 && i < 256 && isprint(i) ? i : '\0');
 }
 
 int
 mchars_num2uc(const char *p, size_t sz)
 {
-	int               i;
+	int	 i;
 
 	if ((i = mandoc_strntoi(p, sz, 16)) < 0)
 		return('\0');
-	/* FIXME: make sure we're not in a bogus range. */
+
+	/*
+	 * Security warning:
+	 * Never extend the range of accepted characters
+	 * to overlap with the ASCII range, 0x00-0x7F
+	 * without re-auditing the callers of this function.
+	 * Some callers might relay on the fact that we never
+	 * return ASCII characters for their escaping decisions.
+	 *
+	 * XXX Code is missing here to exclude bogus ranges.
+	 */
+
 	return(i > 0x80 && i <= 0x10FFFF ? i : '\0');
 }
 
 const char *
-mchars_spec2str(const struct mchars *arg, 
+mchars_spec2str(const struct mchars *arg,
 		const char *p, size_t sz, size_t *rsz)
 {
 	const struct ln	*ln;
@@ -155,8 +168,8 @@ find(const struct mchars *tab, const char *p, size_t sz)
 	hash = (int)p[0] - PRINT_LO;
 
 	for (pp = tab->htab[hash]; pp; pp = pp->next)
-		if (0 == strncmp(pp->code, p, sz) && 
-				'\0' == pp->code[(int)sz])
+		if (0 == strncmp(pp->code, p, sz) &&
+		    '\0' == pp->code[(int)sz])
 			return(pp);
 
 	return(NULL);

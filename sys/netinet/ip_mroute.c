@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip_mroute.c,v 1.64 2014/01/09 06:29:06 tedu Exp $	*/
+/*	$OpenBSD: ip_mroute.c,v 1.68 2014/07/22 11:06:10 mpi Exp $	*/
 /*	$NetBSD: ip_mroute.c,v 1.85 2004/04/26 01:31:57 matt Exp $	*/
 
 /*
@@ -79,7 +79,6 @@
 #include <net/raw_cb.h>
 
 #include <netinet/in.h>
-#include <netinet/in_systm.h>
 #include <netinet/ip.h>
 #include <netinet/ip_var.h>
 #include <netinet/in_pcb.h>
@@ -604,7 +603,7 @@ ip_mrouter_done()
 	}
 
 	memset(nexpire, 0, sizeof(nexpire));
-	free(mfchashtbl, M_MRTABLE);
+	free(mfchashtbl, M_MRTABLE, 0);
 	mfchashtbl = NULL;
 
 	bw_upcalls_n = 0;
@@ -1021,11 +1020,11 @@ expire_mfc(struct mfc *rt)
 	for (rte = rt->mfc_stall; rte != NULL; rte = nrte) {
 		nrte = rte->next;
 		m_freem(rte->m);
-		free(rte, M_MRTABLE);
+		free(rte, M_MRTABLE, 0);
 	}
 
 	LIST_REMOVE(rt, mfc_hash);
-	free(rt, M_MRTABLE);
+	free(rt, M_MRTABLE, 0);
 }
 
 /*
@@ -1118,7 +1117,7 @@ add_mfc(struct mbuf *m)
 					ip_mdq(rte->m, rte->ifp, rt);
 				}
 				m_freem(rte->m);
-				free(rte, M_MRTABLE);
+				free(rte, M_MRTABLE, 0);
 			}
 		}
 	}
@@ -1215,7 +1214,7 @@ del_mfc(struct mbuf *m)
 	rt->mfc_bw_meter = NULL;
 
 	LIST_REMOVE(rt, mfc_hash);
-	free(rt, M_MRTABLE);
+	free(rt, M_MRTABLE, 0);
 
 	splx(s);
 	return (0);
@@ -1225,8 +1224,7 @@ static int
 socket_send(struct socket *s, struct mbuf *mm, struct sockaddr_in *src)
 {
 	if (s != NULL) {
-		if (sbappendaddr(&s->so_rcv, sintosa(src), mm,
-		    (struct mbuf *)NULL) != 0) {
+		if (sbappendaddr(&s->so_rcv, sintosa(src), mm, NULL) != 0) {
 			sorwakeup(s);
 			return (0);
 		}
@@ -1332,7 +1330,7 @@ ip_mforward(struct mbuf *m, struct ifnet *ifp)
 		mb0 = m_copy(m, 0, M_COPYALL);
 		M_PULLUP(mb0, hlen);
 		if (mb0 == NULL) {
-			free(rte, M_MRTABLE);
+			free(rte, M_MRTABLE, 0);
 			splx(s);
 			return (ENOBUFS);
 		}
@@ -1393,9 +1391,9 @@ ip_mforward(struct mbuf *m, struct ifnet *ifp)
 				    "socket queue full\n");
 				++mrtstat.mrts_upq_sockfull;
 			fail1:
-				free(rt, M_MRTABLE);
+				free(rt, M_MRTABLE, 0);
 			fail:
-				free(rte, M_MRTABLE);
+				free(rte, M_MRTABLE, 0);
 				m_freem(mb0);
 				splx(s);
 				return (ENOBUFS);
@@ -1438,7 +1436,7 @@ ip_mforward(struct mbuf *m, struct ifnet *ifp)
 				if (++npkts > MAX_UPQ) {
 					mrtstat.mrts_upq_ovflw++;
 				non_fatal:
-					free(rte, M_MRTABLE);
+					free(rte, M_MRTABLE, 0);
 					m_freem(mb0);
 					splx(s);
 					return (0);
@@ -1488,7 +1486,7 @@ expire_upcalls(void *v)
 				struct bw_meter *x = rt->mfc_bw_meter;
 
 				rt->mfc_bw_meter = x->bm_mfc_next;
-				free(x, M_BWMETER);
+				free(x, M_BWMETER, 0);
 			}
 
 			++mrtstat.mrts_cache_cleanups;
@@ -1733,9 +1731,8 @@ send_packet(struct vif *vifp, struct mbuf *m)
 
 	if (vifp->v_flags & VIFF_TUNNEL) {
 		/* If tunnel options */
-		ip_output(m, (struct mbuf *)NULL, &vifp->v_route,
-		    IP_FORWARDING, (struct ip_moptions *)NULL,
-		    (struct inpcb *)NULL);
+		ip_output(m, NULL, &vifp->v_route, IP_FORWARDING, NULL, NULL,
+		    0);
 	} else {
 		/*
 		 * if physical interface option, extract the options
@@ -1747,9 +1744,8 @@ send_packet(struct vif *vifp, struct mbuf *m)
 		imo.imo_multicast_ttl = mtod(m, struct ip *)->ip_ttl - IPTTLDEC;
 		imo.imo_multicast_loop = 1;
 
-		error = ip_output(m, (struct mbuf *)NULL, (struct route *)NULL,
-		    IP_FORWARDING|IP_MULTICASTOPTS, &imo,
-		    (struct inpcb *)NULL);
+		error = ip_output(m, NULL, NULL,
+		    IP_FORWARDING | IP_MULTICASTOPTS, &imo, NULL, 0);
 
 		if (mrtdebug & DEBUG_XMIT)
 			log(LOG_DEBUG, "phyint_send on vif %ld err %d\n",
@@ -1880,7 +1876,7 @@ free_bw_list(struct bw_meter *list)
 
 		list = list->bm_mfc_next;
 		unschedule_bw_meter(x);
-		free(x, M_BWMETER);
+		free(x, M_BWMETER, 0);
 	}
 }
 
@@ -1948,7 +1944,7 @@ del_bw_upcall(struct mbuf *m)
 			unschedule_bw_meter(x);
 			splx(s);
 			/* Free the bw_meter entry */
-			free(x, M_BWMETER);
+			free(x, M_BWMETER, 0);
 			return (0);
 		} else {
 			splx(s);
@@ -2762,8 +2758,7 @@ pim_input(struct mbuf *m, ...)
 			    reg_vif_num);
 		}
 		/* NB: vifp was collected above; can it change on us? */
-		looutput(vifp, m, (struct sockaddr *)&dst,
-		    (struct rtentry *)NULL);
+		looutput(vifp, m, (struct sockaddr *)&dst, NULL);
 
 		/* prepare the register head to send to the mrouting daemon */
 		m = mcp;

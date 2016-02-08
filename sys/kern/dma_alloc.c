@@ -1,4 +1,5 @@
-/*	$OpenBSD: dma_alloc.c,v 1.9 2011/06/23 21:42:05 ariane Exp $	 */
+/*	$OpenBSD: dma_alloc.c,v 1.12 2014/07/08 17:19:25 deraadt Exp $	 */
+
 /*
  * Copyright (c) 2010 Theo de Raadt <deraadt@openbsd.org>
  *
@@ -16,8 +17,10 @@
  */
 
 #include <sys/param.h>
+#include <sys/systm.h>
 #include <sys/pool.h>
-#include <uvm/uvm.h>
+
+#include <uvm/uvm_extern.h>
 
 static __inline int	 dma_alloc_index(size_t size);
 
@@ -52,7 +55,7 @@ dma_alloc_index(size_t sz)
 		if (sz <= (1 << (b + DMA_BUCKET_OFFSET)))
 			return (b);
 #ifdef DEBUG
-	printf("dma_alloc/free: object %d too large\n", sz);
+	printf("dma_alloc/free: object %zd too large\n", sz);
 #endif
 	return (-1);
 }

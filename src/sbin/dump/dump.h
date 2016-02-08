@@ -1,4 +1,4 @@
-/*	$OpenBSD: dump.h,v 1.17 2013/06/11 16:42:04 deraadt Exp $	*/
+/*	$OpenBSD: dump.h,v 1.21 2014/07/11 16:01:41 halex Exp $	*/
 /*	$NetBSD: dump.h,v 1.11 1997/06/05 11:13:20 lukem Exp $	*/
 
 /*-
@@ -56,31 +56,31 @@ char	*disk;		/* name of the disk file */
 char	*tape;		/* name of the tape file */
 char	*dumpdates;	/* name of the file containing dump date information*/
 char	*temp;		/* name of the file for doing rewrite of dumpdates */
+char	*duid;		/* duid of the disk being dumped */
 char	lastlevel;	/* dump level of previous dump */
 char	level;		/* dump level of this dump */
 int	uflag;		/* update flag */
+int	Uflag;		/* use duids in dumpdates flag */
 int	diskfd;		/* disk file descriptor */
 int	tapefd;		/* tape file descriptor */
 int	pipeout;	/* true => output to standard output */
 ino_t	curino;		/* current inumber; used globally */
 int	newtape;	/* new tape flag */
 int	density;	/* density in 0.1" units */
-off_t	tapesize;	/* estimated tape size, blocks */
-off_t	tsize;		/* tape size in 0.1" units */
+int64_t	tapesize;	/* estimated tape size, blocks */
+int64_t	tsize;		/* tape size in 0.1" units */
 int	unlimited;	/* if set, write to end of medium */
-off_t	asize;		/* number of 0.1" units written on current tape */
+int64_t	asize;		/* number of 0.1" units written on current tape */
 int	etapes;		/* estimated number of tapes */
 int	nonodump;	/* if set, do not honor UF_NODUMP user flags */
 
 int	notify;		/* notify operator flag */
-int	blockswritten;	/* number of blocks written on current tape */
+int64_t	blockswritten;	/* number of blocks written on current tape */
 int	tapeno;		/* current tape number */
 time_t	tstart_writing;	/* when started writing the first tape block */
 long	xferrate;	/* averaged transfer rate of all volumes */
 struct	fs *sblock;	/* the file system super block */
 char	sblock_buf[MAXBSIZE];
-long	dev_bsize;	/* block size of underlying disk device */
-int	dev_bshift;	/* log2(dev_bsize) */
 int	tp_bshift;	/* log2(TP_BSIZE) */
 
 /* operator interface functions */
@@ -98,15 +98,16 @@ void	timeest(void);
 
 /* mapping routines */
 union	dinode;
-off_t	blockest(union dinode *dp);
-void	mapfileino(ino_t, off_t *, int *);
-int	mapfiles(ino_t maxino, off_t *tapesize, char *disk, char * const *dirv);
-int	mapdirs(ino_t maxino, off_t *tapesize);
+int64_t	blockest(union dinode *dp);
+void	mapfileino(ino_t, int64_t *, int *);
+int	mapfiles(ino_t maxino, int64_t *tapesize, char *disk,
+	    char * const *dirv);
+int	mapdirs(ino_t maxino, int64_t *tapesize);
 
 /* file dumping routines */
 void	ufs1_blksout(int32_t *blkp, int frags, ino_t ino);
 void	ufs2_blksout(daddr_t *blkp, int frags, ino_t ino);
-void	bread(daddr_t blkno, char *buf, int size);	
+void	bread(daddr_t blkno, char *buf, int size);
 void	dumpino(union dinode *dp, ino_t ino);
 void	dumpmap(char *map, int type, ino_t ino);
 void	writeheader(ino_t ino);

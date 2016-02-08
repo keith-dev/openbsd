@@ -1,4 +1,4 @@
-/*	$OpenBSD: trap.c,v 1.48 2013/11/24 22:08:25 miod Exp $     */
+/*	$OpenBSD: trap.c,v 1.53 2014/05/11 00:12:44 guenther Exp $     */
 /*	$NetBSD: trap.c,v 1.47 1999/08/21 19:26:20 matt Exp $     */
 /*
  * Copyright (c) 1994 Ludd, University of Lule}, Sweden.
@@ -110,6 +110,7 @@ arithflt(frame)
 	if ((umode = USERMODE(frame))) {
 		type |= T_USER;
 		p->p_addr->u_pcb.framep = frame;
+		refreshcreds(p);
 	}
 
 	type&=~(T_WRITE|T_PTEFETCH);
@@ -199,11 +200,9 @@ if(faultdebug)printf("trap accflt type %lx, code %lx, pc %lx, psl %lx\n",
 				    (u_int)frame->pc, (u_int)frame->code);
 			}
 			if (rv == ENOMEM) {
-				printf("UVM: pid %d (%s), uid %u killed: "
-				       "out of swap\n",
-				       p->p_pid, p->p_comm,
-				       p->p_cred && p->p_ucred ?
-				       p->p_ucred->cr_uid : -1);
+				printf("UVM: pid %d (%s), uid %d killed: "
+			           "out of swap\n", p->p_pid, p->p_comm,
+			           p->p_ucred ? (int)p->p_ucred->cr_uid : -1);
 				sig = SIGKILL;
 				typ = 0;
 			} else {
@@ -254,11 +253,8 @@ if(faultdebug)printf("trap accflt type %lx, code %lx, pc %lx, psl %lx\n",
 	case T_ASTFLT|T_USER:
 		mtpr(AST_NO,PR_ASTLVL);
 		trapsig = 0;
-		if (p->p_flag & P_OWEUPC) {
-			ADDUPROF(p);
-		}
-		if (want_resched)
-			preempt(NULL);
+		uvmexp.softs++;
+		mi_ast(p, want_resched);
 		break;
 
 #ifdef DDB
@@ -336,8 +332,8 @@ if(startsysc)printf("trap syscall %s pc %lx, psl %lx, sp %lx, pid %d, frame %p\n
 	uvmexp.syscalls++;
 
 	exptr = p->p_addr->u_pcb.framep = frame;
-	callp = p->p_emul->e_sysent;
-	nsys = p->p_emul->e_nsysent;
+	callp = p->p_p->ps_emul->e_sysent;
+	nsys = p->p_p->ps_emul->e_nsysent;
 
 	if(frame->code == SYS___syscall){
 		int g = *(int *)(frame->ap);
@@ -348,7 +344,7 @@ if(startsysc)printf("trap syscall %s pc %lx, psl %lx, sp %lx, pid %d, frame %p\n
 	}
 
 	if(frame->code < 0 || frame->code >= nsys)
-		callp += p->p_emul->e_nosys;
+		callp += p->p_p->ps_emul->e_nosys;
 	else
 		callp += frame->code;
 

@@ -1,4 +1,4 @@
-/*	$OpenBSD: power.c,v 1.5 2004/06/11 12:53:09 mickey Exp $	*/
+/*	$OpenBSD: power.c,v 1.9 2014/07/13 09:09:16 miod Exp $	*/
 
 /*
  * Copyright (c) 2003 Michael Shalayeff
@@ -27,9 +27,10 @@
  */
 
 #include <sys/param.h>
+#include <sys/proc.h>
+#include <sys/signalvar.h>
 #include <sys/kernel.h>
 #include <sys/systm.h>
-#include <sys/reboot.h>
 #include <sys/device.h>
 #include <sys/kthread.h>
 
@@ -154,7 +155,7 @@ power_thread_dr(void *v)
 		 * switch and thus we have do dampen it ourselves.
 		 */
 		if (sc->sc_dr_cnt == hz / 10)
-			boot(RB_POWERDOWN | RB_HALT);
+			prsignal(initprocess, SIGUSR2);
 
 		tsleep(v, PWAIT, "drpower", 10);
 	}
@@ -167,11 +168,11 @@ power_thread_reg(void *v)
 	u_int32_t r;
 
 	for (;;) {
-		__asm __volatile("ldwas 0(%1), %0"
+		__asm volatile("ldwas 0(%1), %0"
 		    : "=&r" (r) : "r" (sc->sc_pwr_reg));
 
 		if (!(r & 1))
-			boot(RB_POWERDOWN | RB_HALT);
+			prsignal(initprocess, SIGUSR2);
 
 		tsleep(v, PWAIT, "regpower", 10);
 	}

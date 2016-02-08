@@ -1,4 +1,4 @@
-/*	$OpenBSD: kroute.c,v 1.64 2014/02/13 00:24:13 krw Exp $	*/
+/*	$OpenBSD: kroute.c,v 1.67 2014/07/14 18:16:27 miod Exp $	*/
 
 /*
  * Copyright 2012 Kenneth R Westerback <krw@openbsd.org>
@@ -101,7 +101,7 @@ priv_flush_routes(struct imsg_flush_routes *imsg)
 		if ((bufp = realloc(buf, needed)) == NULL) {
 			free(buf);
 			errmsg = "routes buf malloc:";
-			continue;
+			break;
 		}
 		buf = bufp;
 		if (sysctl(mib, 7, buf, &needed, NULL, 0) == -1) {
@@ -138,7 +138,7 @@ priv_flush_routes(struct imsg_flush_routes *imsg)
 		case ROUTE_LABEL_DHCLIENT_OURS:
 			/* Always delete routes we labeled. */
 			delete_route(s, imsg->rdomain, rtm);
-			break;;
+			break;
 		case ROUTE_LABEL_DHCLIENT_DEAD:
 			if (imsg->zapzombies)
 				delete_route(s, imsg->rdomain, rtm);
@@ -217,7 +217,7 @@ priv_add_route(struct imsg_add_route *imsg)
 
 	iov[iovcnt].iov_base = &rtm;
 	iov[iovcnt++].iov_len = sizeof(rtm);
-	
+
 	if (imsg->addrs & RTA_DST) {
 		memset(&dest, 0, sizeof(dest));
 
@@ -230,7 +230,7 @@ priv_add_route(struct imsg_add_route *imsg)
 		iov[iovcnt].iov_base = &dest;
 		iov[iovcnt++].iov_len = sizeof(dest);
 	}
-	
+
 	if (imsg->addrs & RTA_GATEWAY) {
 		memset(&gateway, 0, sizeof(gateway));
 
@@ -533,7 +533,7 @@ resolv_conf_priority(int domain)
 
 	iov[iovcnt].iov_base = &m_rtmsg.m_rtm;
 	iov[iovcnt++].iov_len = sizeof(m_rtmsg.m_rtm);
-	
+
 	/* Set destination & netmask addresses of all zeros. */
 
 	m_rtmsg.m_rtm.rtm_addrs = RTA_DST | RTA_NETMASK;
@@ -611,7 +611,7 @@ create_route_label(struct sockaddr_rtlabel *label)
 	}
 
 	if (len >= sizeof(label->sr_label)) {
-		warning("creating route label: label too long (%d vs %zd)", len,
+		warning("creating route label: label too long (%d vs %zu)", len,
 		    sizeof(label->sr_label));
 		return (1);
 	}

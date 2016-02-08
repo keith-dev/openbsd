@@ -1,4 +1,4 @@
-/*	$OpenBSD: armish_machdep.c,v 1.21 2013/11/13 18:30:48 jasper Exp $ */
+/*	$OpenBSD: armish_machdep.c,v 1.31 2014/07/21 17:25:47 uebayasi Exp $ */
 /*	$NetBSD: lubbock_machdep.c,v 1.2 2003/07/15 00:25:06 lukem Exp $ */
 
 /*
@@ -246,14 +246,12 @@ int comcnmode = CONMODE;
  */
 void	board_reset(void);
 void	board_powerdown(void);
-void
+__dead void
 boot(int howto)
 {
+	struct device *mainbus;
+
 	if (cold) {
-		/*
-		 * If the system is cold, just halt, unless the user
-		 * explicitely asked for reboot.
-		 */
 		if ((howto & RB_USERREQ) == 0)
 			howto |=  RB_HALT;
 		goto haltsys;
@@ -266,30 +264,29 @@ boot(int howto)
 	 * that it cannot page part of the binary in as the filesystem has
 	 * been unmounted.
 	 */
-	if (!(howto & RB_NOSYNC))
+	if ((howto & RB_NOSYNC) == 0)
 		bootsync(howto);
 
 	if_downall();
 
 	uvm_shutdown();
-
-	/* Say NO to interrupts */
 	splhigh();
+	cold = 1;
 
-	/* Do a dump if requested. */
 	if ((howto & (RB_DUMP | RB_HALT)) == RB_DUMP)
 		dumpsys();
 	
 haltsys:
 	doshutdownhooks();
-	if (!TAILQ_EMPTY(&alldevs))
-		config_suspend(TAILQ_FIRST(&alldevs), DVACT_POWERDOWN);
+	mainbus = device_mainbus();
+	if (mainbus != NULL)
+		config_suspend(mainbus, DVACT_POWERDOWN);
 
 	/* Make sure IRQ's are disabled */
 	IRQdisable;
 
-	if (howto & RB_HALT) {
-		if (howto & RB_POWERDOWN) {
+	if ((howto & RB_HALT) != 0) {
+		if ((howto & RB_POWERDOWN) != 0) {
 			board_powerdown();
 			printf("WARNING: powerdown failed!\n");
 		}
@@ -306,8 +303,8 @@ haltsys:
 	board_reset();
 	cpu_reset();
 	printf("reboot failed; spinning\n");
-	while(1);
-	/*NOTREACHED*/
+	for (;;) ;
+	/* NOTREACHED */
 }
 
 /*

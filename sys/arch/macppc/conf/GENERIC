@@ -1,4 +1,4 @@
-#	$OpenBSD: GENERIC,v 1.229 2014/02/19 05:32:57 jmatthew Exp $g
+#	$OpenBSD: GENERIC,v 1.238 2014/08/03 17:52:10 stsp Exp $g
 #
 # For further information on compiling OpenBSD kernels, see the config(8)
 # man page.
@@ -61,9 +61,10 @@ ahc*		at pci?		# Adaptec 294x, aic78x0 SCSI
 #bha*		at pci?		# BusLogic 9xx SCSI
 #ami*		at pci?
 pcscp*		at pci?		# AMD Am53c974 PCscsi-PCI SCSI
-isp*		at pci?		# Qlogic ISP [12]0x0 SCSI/FibreChannel
-#qla*		at pci?		# Qlogic ISP 2[123]xx FibreChannel
-#qle*		at pci?		# Qlogic ISP 2[45]xx FibreChannel
+isp*		at pci?		# QLogic ISP [12]0x0 SCSI/FibreChannel
+qlw*		at pci?		# QLogic ISP SCSI
+qla*		at pci?		# QLogic ISP 2[123]xx FibreChannel
+qle*		at pci?		# QLogic ISP 2[45]xx FibreChannel
 mpi*		at pci?		# LSI Logic MPT-Fusion Message Passing Interface
 arc*		at pci?		# Areca RAID Controllers
 pciide*		at pci?
@@ -253,9 +254,11 @@ wskbd*	at ukbd? mux 1
 ucycom*	at uhidev?		# Cypress serial
 ucom*	at ucycom?
 uhid*	at uhidev?		# USB generic HID support
+upd*	at uhidev?		# USB Power Devices sensors
 aue*	at uhub?		# ADMtek AN986 Pegasus Ethernet
 atu*	at uhub?		# Atmel AT76c50x based 802.11b
 axe*	at uhub?		# ASIX Electronics AX88172 USB Ethernet
+axen*	at uhub?		# ASIX Electronics AX88179 USB Ethernet
 cue*	at uhub?		# CATC USB-EL1201A based Ethernet
 kue*	at uhub?		# Kawasaki KL5KUSB101B based Ethernet
 smsc*	at uhub?		# SMSC LAN95xx Ethernet
@@ -268,7 +271,6 @@ mos*	at uhub?		# MOSCHIP MCS7730/7830 10/100 Ethernet
 url*	at uhub?		# Realtek RTL8150L based adapters
 wi*	at uhub?		# WaveLAN IEEE 802.11DS
 urio*	at uhub?		# Diamond Multimedia Rio 500
-#uyap*	at uhub?		# Y@P firmware loader
 udsbr*	at uhub?		# D-Link DSB-R100 radio
 radio*	at udsbr?		# USB radio
 uberry*	at uhub?		# Research In Motion Blackberry
@@ -299,17 +301,6 @@ video*  at uvideo?
 
 udl*		at uhub?
 wsdisplay*	at udl?
-
-# Bluetooth controllers
-#ubt*	at uhub? disable	# USB Bluetooth
-#bthub*	at ubt?
-#bthidev* at bthub?		# Bluetooth HID support
-#btkbd*	at bthidev?
-#btms*	at bthidev?
-#wskbd*	at btkbd? mux 1
-#wsmouse* at btms? mux 0
-#btsco*	at bthub?		# Bluetooth audio support
-#audio*	at btsco?
 
 # I2C bus support
 iic*		at kiic?
@@ -353,6 +344,7 @@ com*		at cardbus?
 malo*		at cardbus?	# Marvell Libertas
 acx*		at cardbus?	# TI ACX100/ACX111 (802.11b/g)
 bwi*		at cardbus?	# Broadcom AirForce (802.11b/g)
+ral*		at cardbus?	# Ralink RT2500/RT2501/RT2600
 
 wsdisplay*	at vgafb?
 
@@ -388,6 +380,12 @@ ch*		at scsibus?
 safte*		at scsibus?
 ses*		at scsibus?
 uk*		at scsibus?
+
+mpath0	at root
+emc*	at scsibus?
+hds*	at scsibus?
+rdac*	at scsibus?
+sym*	at scsibus?
 
 # 1-Wire devices
 option ONEWIREVERBOSE

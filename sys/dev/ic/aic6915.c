@@ -1,4 +1,4 @@
-/*	$OpenBSD: aic6915.c,v 1.11 2013/11/26 09:50:32 mpi Exp $	*/
+/*	$OpenBSD: aic6915.c,v 1.13 2014/07/22 13:12:11 mpi Exp $	*/
 /*	$NetBSD: aic6915.c,v 1.15 2005/12/24 20:27:29 perry Exp $	*/
 
 /*-
@@ -49,15 +49,11 @@
 #include <sys/errno.h>
 #include <sys/device.h>
 
-#include <uvm/uvm_extern.h>
-
 #include <net/if.h>
 #include <net/if_dl.h>
 
 #ifdef INET
 #include <netinet/in.h>
-#include <netinet/in_systm.h>
-#include <netinet/ip.h>
 #include <netinet/if_ether.h>
 #endif
 

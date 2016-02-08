@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_gif.c,v 1.64 2013/10/19 14:46:30 mpi Exp $	*/
+/*	$OpenBSD: if_gif.c,v 1.69 2014/07/22 11:06:09 mpi Exp $	*/
 /*	$KAME: if_gif.c,v 1.43 2001/02/20 08:51:07 itojun Exp $	*/
 
 /*
@@ -45,7 +45,6 @@
 
 #ifdef	INET
 #include <netinet/in.h>
-#include <netinet/in_systm.h>
 #include <netinet/in_var.h>
 #include <netinet/in_gif.h>
 #include <netinet/ip.h>
@@ -135,12 +134,12 @@ gif_clone_destroy(struct ifnet *ifp)
 	if_detach(ifp);
 
 	if (sc->gif_psrc)
-		free((caddr_t)sc->gif_psrc, M_IFADDR);
+		free((caddr_t)sc->gif_psrc, M_IFADDR, 0);
 	sc->gif_psrc = NULL;
 	if (sc->gif_pdst)
-		free((caddr_t)sc->gif_pdst, M_IFADDR);
+		free((caddr_t)sc->gif_pdst, M_IFADDR, 0);
 	sc->gif_pdst = NULL;
-	free(sc, M_DEVBUF);
+	free(sc, M_DEVBUF, 0);
 	return (0);
 }
 
@@ -261,8 +260,7 @@ gif_start(struct ifnet *ifp)
 		switch (sc->gif_psrc->sa_family) {
 #ifdef INET
 		case AF_INET:
-			ip_output(m, (void *)NULL, (void *)NULL, 0,
-			    (void *)NULL, (void *)NULL);
+			ip_output(m, NULL, NULL, 0, NULL, NULL, 0);
 			break;
 #endif
 #ifdef INET6
@@ -273,8 +271,7 @@ gif_start(struct ifnet *ifp)
 			 * of inner packet, to achieve path MTU discovery for
 			 * encapsulated packets.
 			 */
-			ip6_output(m, 0, NULL, IPV6_MINMTU, 0, NULL,
-			     NULL);
+			ip6_output(m, 0, NULL, IPV6_MINMTU, 0, NULL, NULL);
 			break;
 #endif
 		default:
@@ -356,7 +353,8 @@ int
 gif_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 {
 	struct gif_softc *sc  = (struct gif_softc*)ifp;
-	struct ifreq     *ifr = (struct ifreq*)data;
+	struct ifreq     *ifr = (struct ifreq *)data;
+	struct ifaddr	 *ifa = (struct ifaddr *)data;
 	int error = 0, size;
 	struct sockaddr *dst, *src;
 	struct sockaddr *sa;
@@ -365,6 +363,7 @@ gif_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 
 	switch (cmd) {
 	case SIOCSIFADDR:
+		ifa->ifa_rtrequest = p2p_rtrequest;
 		break;
 
 	case SIOCSIFDSTADDR:
@@ -500,13 +499,13 @@ gif_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		}
 
 		if (sc->gif_psrc)
-			free((caddr_t)sc->gif_psrc, M_IFADDR);
+			free((caddr_t)sc->gif_psrc, M_IFADDR, 0);
 		sa = malloc(src->sa_len, M_IFADDR, M_WAITOK);
 		bcopy((caddr_t)src, (caddr_t)sa, src->sa_len);
 		sc->gif_psrc = sa;
 
 		if (sc->gif_pdst)
-			free((caddr_t)sc->gif_pdst, M_IFADDR);
+			free((caddr_t)sc->gif_pdst, M_IFADDR, 0);
 		sa = malloc(dst->sa_len, M_IFADDR, M_WAITOK);
 		bcopy((caddr_t)dst, (caddr_t)sa, dst->sa_len);
 		sc->gif_pdst = sa;
@@ -522,11 +521,11 @@ gif_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 #ifdef SIOCDIFPHYADDR
 	case SIOCDIFPHYADDR:
 		if (sc->gif_psrc) {
-			free((caddr_t)sc->gif_psrc, M_IFADDR);
+			free((caddr_t)sc->gif_psrc, M_IFADDR, 0);
 			sc->gif_psrc = NULL;
 		}
 		if (sc->gif_pdst) {
-			free((caddr_t)sc->gif_pdst, M_IFADDR);
+			free((caddr_t)sc->gif_pdst, M_IFADDR, 0);
 			sc->gif_pdst = NULL;
 		}
 		/* change the IFF_{UP, RUNNING} flag as well? */

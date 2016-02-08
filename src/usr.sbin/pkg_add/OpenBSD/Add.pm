@@ -1,5 +1,5 @@
 # ex:ts=8 sw=4:
-# $OpenBSD: Add.pm,v 1.149 2014/02/10 19:16:19 espie Exp $
+# $OpenBSD: Add.pm,v 1.161 2014/07/12 19:50:43 espie Exp $
 #
 # Copyright (c) 2003-2014 Marc Espie <espie@openbsd.org>
 #
@@ -30,27 +30,17 @@ sub manpages_index
 	my ($state) = @_;
 	return unless defined $state->{addman};
 	my $destdir = $state->{destdir};
-	require OpenBSD::Makewhatis;
 
 	# fudge verbose for API differences
-	my $v = $state->{v};
-	$state->{v} = $state->verbose >= 2;
 	while (my ($k, $v) = each %{$state->{addman}}) {
 		my @l = map { "$destdir$k/$_" } @$v;
 		if ($state->{not}) {
 			$state->say("Merging manpages in #1: #2",
 			    $destdir.$k, join(' ', @l)) if $state->verbose;
 		} else {
-			eval {
-				OpenBSD::Makewhatis::merge($destdir.$k, \@l,
-				    $state);
-			};
-			if ($@) {
-				$state->errsay("Error in makewhatis: #1", $_);
-			};
+			$state->run_makewhatis(['-d', $destdir.$k], \@l);
 		}
 	}
-	$state->{v} = $v;
 	delete $state->{addman};
 }
 
@@ -112,7 +102,11 @@ sub perform_installation
 
 	$state->{partial} = $handle->{partial};
 	$state->progress->visit_with_size($handle->{plist}, 'install', $state);
-	$handle->{location}->finish_and_close;
+	if ($handle->{location}{early_close}) {
+		$handle->{location}->close_now;
+	} else {
+		$handle->{location}->finish_and_close;
+	}
 }
 
 sub perform_extraction
@@ -123,7 +117,43 @@ sub perform_extraction
 	$state->{partial} = $handle->{partial};
 	$state->{archive} = $handle->{location};
 	$state->{check_digest} = $handle->{plist}{check_digest};
-	$state->progress->visit_with_size($handle->{plist}, 'extract', $state);
+	my ($wanted, $tied) = ({}, {});
+	$handle->{plist}->find_extractible($state, $wanted, $tied);
+	my $p = $state->progress->new_sizer($handle->{plist}, $state);
+	while (my $file = $state->{archive}->next) {
+		if (keys %$wanted == 0) {
+			for my $e (values %$tied) {
+				$e->tie($state);
+			}
+			if (keys %$tied > 0) {
+				$handle->{location}{early_close} = 1;
+			}
+			last;
+		}
+		my $e = $tied->{$file->name};
+		if (defined $e) {
+			delete $tied->{$file->name};
+			$e->prepare_to_extract($state, $file);
+			$e->tie($state);
+			$state->{archive}->skip;
+			$p->advance($e);
+			# skip to next;
+			next;
+		}
+		$e = $wanted->{$file->name};
+		if (!defined $e) {
+			$state->fatal("archive member not found #1",
+			    $file->name);
+		}
+		delete $wanted->{$file->name};
+		$e->prepare_to_extract($state, $file);
+		$e->extract($state, $file);
+		$p->advance($e);
+	}
+	if (keys %$wanted > 0) {
+		$state->fatal("Truncated archive");
+	}
+	$p->saved;
 }
 
 my $user_tagged = {};
@@ -191,6 +221,10 @@ sub prepare_for_addition
 {
 }
 
+sub find_extractible
+{
+}
+
 sub extract
 {
 	my ($self, $state) = @_;
@@ -244,6 +278,19 @@ sub set_modes
 			    $self->{mode}, $name);
 		}
 	}
+	if (defined $self->{ts}) {
+		utime $self->{ts}, $self->{ts}, $name;
+	}
+}
+
+package OpenBSD::PackingElement::Meta;
+
+# XXX stuff that's invisible to find_extractible should be considered extracted
+# for the most part, otherwise we create broken partial packages
+sub find_extractible
+{
+	my ($self, $state, $wanted, $tied) = @_;
+	$state->{partial}{$self} = 1;
 }
 
 package OpenBSD::PackingElement::ExtraInfo;
@@ -370,6 +417,16 @@ use File::Basename;
 use File::Path;
 use OpenBSD::Temp;
 
+sub find_extractible
+{
+	my ($self, $state, $wanted, $tied) = @_;
+	if ($self->{tieto} || $self->{link} || $self->{symlink}) {
+		$tied->{$self->name} = $self;
+	} else {
+		$wanted->{$self->name} = $self;
+	}
+}
+
 sub prepare_for_addition
 {
 	my ($self, $state, $pkgname) = @_;
@@ -394,19 +451,11 @@ sub prepare_for_addition
 
 sub prepare_to_extract
 {
-	my ($self, $state) = @_;
+	my ($self, $state, $file) = @_;
 	my $fullname = $self->fullname;
 	my $destdir = $state->{destdir};
 
-	my $file=$state->{archive}->next;
-	if (!defined $file) {
-		$state->fatal("truncated archive");
-	}
 	$file->{cwd} = $self->cwd;
-	if (!$file->check_name($self)) {
-		$state->fatal("archive does not match #1 != #2",
-		    $file->name, $self->name);
-	}
 	if (defined $self->{symlink} || $file->isSymLink) {
 		unless (defined $self->{symlink} && $file->isSymLink) {
 			$state->fatal("bogus symlink #1", $self->name);
@@ -433,23 +482,45 @@ sub prepare_to_extract
 
 	$file->set_name($fullname);
 	$file->{destdir} = $destdir;
-	# faked installation are VERY weird
-	if (defined $self->{symlink} && $state->{do_faked}) {
-		$file->{linkname} = $destdir.$file->{linkname};
+}
+
+sub tie
+{
+	my ($self, $state) = @_;
+	if (defined $self->{link} || defined $self->{symlink}) {
+		return;
 	}
-	return $file;
+
+	$self->SUPER::extract($state);
+
+	# figure out a safe directory where to put the temp file
+	my $d = dirname($state->{destdir}.$self->fullname);
+	# we go back up until we find an existing directory.
+	# hopefully this will be on the same file system.
+	while (!-d $d && -e _) {
+		$d = dirname($d);
+	}
+	if ($state->{not}) {
+		$state->say("link #1 -> #2", 
+		    $self->name, $d) if $state->verbose >= 3;
+	} else {
+		if (!-e _) {
+			File::Path::mkpath($d);
+		}
+		my ($fh, $tempname) = OpenBSD::Temp::permanent_file($d, "pkg");
+		$self->{tempname} = $tempname;
+
+		my $src = $self->{tieto}->realname($state);
+		unlink($tempname);
+		$state->say("link #1 -> #2", $src, $tempname)
+		    if $state->verbose >= 3;
+		link($src, $tempname) || $state->copy_file($src, $tempname);
+	}
 }
 
 sub extract
 {
-	my ($self, $state) = @_;
-
-	my $file = $self->prepare_to_extract($state);
-
-	if (defined $self->{link} || defined $self->{symlink}) {
-		$state->{archive}->skip;
-		return;
-	}
+	my ($self, $state, $file) = @_;
 
 	$self->SUPER::extract($state);
 
@@ -461,8 +532,8 @@ sub extract
 		$d = dirname($d);
 	}
 	if ($state->{not}) {
-		$state->say("extracting tempfile under #1", $d)
-		    if $state->verbose >= 3;
+		$state->say("extract #1 -> #2", 
+		    $self->name, $d) if $state->verbose >= 3;
 		$state->{archive}->skip;
 	} else {
 		if (!-e _) {
@@ -475,23 +546,9 @@ sub extract
 		$file->{destdir} = '';
 		$file->set_name($tempname);
 
-		if ($self->{tieto}) {
-			my $src = $self->{tieto}->realname($state);
-			unlink($tempname);
-			$state->say("linking #1 to #2", $src, $tempname)
-			    if $state->verbose >= 3;
-			if (link($src, $tempname) ||
-			    $state->copy_file($src, $tempname)) {
-				# we still need to adjust properties
-				$file->set_modes;
-				$state->{archive}->skip;
-				return;
-			}
-			# okay, it didn't work. recreate tempname.
-			open $fh, ">", $tempname;
-		}
+		$state->say("extract #1 -> #2", $self->name, $tempname) 
+		    if $state->verbose >= 3;
 
-		$state->say("extracting #1", $tempname) if $state->verbose >= 3;
 
 		if (!$file->isFile) {
 			$state->fatal("can't extract #1, it's not a file", 
@@ -568,6 +625,10 @@ sub prepare_for_addition
 	if ($s->avail < 0) {
 		$s->report_overflow($state, $fname);
 	}
+}
+
+sub find_extractible
+{
 }
 
 sub extract
@@ -669,10 +730,9 @@ sub install
 	my $destdir = $state->{destdir};
 	# go append to /etc/shells if needed
 	open(my $shells, '<', $destdir.OpenBSD::Paths->shells) or return;
-	my $_;
 	while(<$shells>) {
 		s/^\#.*//o;
-		return if $_ =~ m/^\Q$fullname\E\s*$/;
+		return if m/^\Q$fullname\E\s*$/;
 	}
 	close($shells);
 	open(my $shells2, '>>', $destdir.OpenBSD::Paths->shells) or return;
@@ -746,7 +806,6 @@ sub install
 {
 	my ($self, $state) = @_;
 	$self->SUPER::install($state);
-	return if $state->{do_faked};
 	$self->mark_ldconfig_directory($state);
 }
 

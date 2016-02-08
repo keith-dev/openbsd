@@ -1,4 +1,4 @@
-/*	$OpenBSD: trap.c,v 1.88 2012/10/03 11:18:23 miod Exp $	*/
+/*	$OpenBSD: trap.c,v 1.98 2014/06/12 20:52:15 kettenis Exp $	*/
 
 /*
  * Copyright (c) 1988 University of Utah.
@@ -49,9 +49,9 @@
 #include <sys/proc.h>
 #include <sys/kernel.h>
 #include <sys/signalvar.h>
+#include <sys/user.h>
 #include <sys/syscall.h>
 #include <sys/syscall_mi.h>
-#include <sys/user.h>
 #include <sys/buf.h>
 #include <sys/device.h>
 #ifdef PTRACE
@@ -148,17 +148,10 @@ ast()
 	struct cpu_info *ci = curcpu();
 	struct proc *p = ci->ci_curproc;
 
-	atomic_add_int(&uvmexp.softs, 1);
-
 	p->p_md.md_astpending = 0;
-	if (p->p_flag & P_OWEUPC) {
-		KERNEL_LOCK();
-		ADDUPROF(p);
-		KERNEL_UNLOCK();
-	}
-	if (ci->ci_want_resched)
-		preempt(NULL);
 
+	atomic_add_int(&uvmexp.softs, 1);
+	mi_ast(p, ci->ci_want_resched);
 	userret(p);
 }
 
@@ -189,6 +182,7 @@ trap(struct trap_frame *trapframe)
 		atomic_add_int(&uvmexp.traps, 1);
 	if (USERMODE(trapframe->sr)) {
 		type |= T_USER;
+		refreshcreds(p);
 	}
 
 	/*
@@ -269,6 +263,7 @@ itsa(struct trap_frame *trapframe, struct cpu_info *ci, struct proc *p,
 	int onfault;
 	int typ = 0;
 	union sigval sv;
+	struct pcb *pcb;
 
 	switch (type) {
 	case T_TLB_MOD:
@@ -288,6 +283,7 @@ itsa(struct trap_frame *trapframe, struct cpu_info *ci, struct proc *p,
 			    trunc_page(trapframe->badvaddr), entry)) {
 				/* write to read only page in the kernel */
 				ftype = VM_PROT_WRITE;
+				pcb = &p->p_addr->u_pcb;
 				goto kernel_fault;
 			}
 			entry |= PG_M;
@@ -324,7 +320,8 @@ itsa(struct trap_frame *trapframe, struct cpu_info *ci, struct proc *p,
 		    trunc_page(trapframe->badvaddr), entry)) {
 			/* write to read only page */
 			ftype = VM_PROT_WRITE;
-			goto fault_common;
+			pcb = &p->p_addr->u_pcb;
+			goto fault_common_no_miss;
 		}
 		entry |= PG_M;
 		*pte = entry;
@@ -343,6 +340,7 @@ itsa(struct trap_frame *trapframe, struct cpu_info *ci, struct proc *p,
 	case T_TLB_LD_MISS:
 	case T_TLB_ST_MISS:
 		ftype = (type == T_TLB_ST_MISS) ? VM_PROT_WRITE : VM_PROT_READ;
+		pcb = &p->p_addr->u_pcb;
 		/* check for kernel address */
 		if (trapframe->badvaddr < 0) {
 			vaddr_t va;
@@ -350,16 +348,16 @@ itsa(struct trap_frame *trapframe, struct cpu_info *ci, struct proc *p,
 
 	kernel_fault:
 			va = trunc_page((vaddr_t)trapframe->badvaddr);
-			onfault = p->p_addr->u_pcb.pcb_onfault;
-			p->p_addr->u_pcb.pcb_onfault = 0;
+			onfault = pcb->pcb_onfault;
+			pcb->pcb_onfault = 0;
 			KERNEL_LOCK();
 			rv = uvm_fault(kernel_map, trunc_page(va), 0, ftype);
 			KERNEL_UNLOCK();
-			p->p_addr->u_pcb.pcb_onfault = onfault;
+			pcb->pcb_onfault = onfault;
 			if (rv == 0)
 				return;
 			if (onfault != 0) {
-				p->p_addr->u_pcb.pcb_onfault = 0;
+				pcb->pcb_onfault = 0;
 				trapframe->pc = onfault_table[onfault];
 				return;
 			}
@@ -369,7 +367,7 @@ itsa(struct trap_frame *trapframe, struct cpu_info *ci, struct proc *p,
 		 * It is an error for the kernel to access user space except
 		 * through the copyin/copyout routines.
 		 */
-		if (p->p_addr->u_pcb.pcb_onfault != 0) {
+		if (pcb->pcb_onfault != 0) {
 			/*
 			 * We want to resolve the TLB fault before invoking
 			 * pcb_onfault if necessary.
@@ -381,11 +379,29 @@ itsa(struct trap_frame *trapframe, struct cpu_info *ci, struct proc *p,
 
 	case T_TLB_LD_MISS+T_USER:
 		ftype = VM_PROT_READ;
+		pcb = &p->p_addr->u_pcb;
 		goto fault_common;
 
 	case T_TLB_ST_MISS+T_USER:
 		ftype = VM_PROT_WRITE;
+		pcb = &p->p_addr->u_pcb;
 fault_common:
+
+#ifdef CPU_R4000
+		if (r4000_errata != 0) {
+			if (eop_tlb_miss_handler(trapframe, ci, p) != 0)
+				return;
+		}
+#endif
+
+fault_common_no_miss:
+
+#ifdef CPU_R4000
+		if (r4000_errata != 0) {
+			eop_cleanup(trapframe, p);
+		}
+#endif
+
 	    {
 		vaddr_t va;
 		struct vmspace *vm;
@@ -396,12 +412,12 @@ fault_common:
 		map = &vm->vm_map;
 		va = trunc_page((vaddr_t)trapframe->badvaddr);
 
-		onfault = p->p_addr->u_pcb.pcb_onfault;
-		p->p_addr->u_pcb.pcb_onfault = 0;
+		onfault = pcb->pcb_onfault;
+		pcb->pcb_onfault = 0;
 		KERNEL_LOCK();
 
-		rv = uvm_fault(map, trunc_page(va), 0, ftype);
-		p->p_addr->u_pcb.pcb_onfault = onfault;
+		rv = uvm_fault(map, va, 0, ftype);
+		pcb->pcb_onfault = onfault;
 
 		/*
 		 * If this was a stack access we keep track of the maximum
@@ -421,7 +437,7 @@ fault_common:
 			return;
 		if (!USERMODE(trapframe->sr)) {
 			if (onfault != 0) {
-				p->p_addr->u_pcb.pcb_onfault = 0;
+				pcb->pcb_onfault = 0;
 				trapframe->pc =  onfault_table[onfault];
 				return;
 			}
@@ -468,8 +484,8 @@ fault_common:
 			    trapframe->pc, 0, 0);
 		else
 			locr0->pc += 4;
-		callp = p->p_emul->e_sysent;
-		numsys = p->p_emul->e_nsysent;
+		callp = p->p_p->ps_emul->e_sysent;
+		numsys = p->p_p->ps_emul->e_nsysent;
 		code = locr0->v0;
 		switch (code) {
 		case SYS_syscall:
@@ -482,7 +498,7 @@ fault_common:
 			 */
 			code = locr0->a0;
 			if (code >= numsys)
-				callp += p->p_emul->e_nosys; /* (illegal) */
+				callp += p->p_p->ps_emul->e_nosys; /* (illegal) */
 			else
 				callp += code;
 			i = callp->sy_argsize / sizeof(register_t);
@@ -502,7 +518,7 @@ fault_common:
 			break;
 		default:
 			if (code >= numsys)
-				callp += p->p_emul->e_nosys; /* (illegal) */
+				callp += p->p_p->ps_emul->e_nosys; /* (illegal) */
 			else
 				callp += code;
 
@@ -606,11 +622,14 @@ fault_common:
 				printf("trap: %s (%d): breakpoint at %p "
 				    "(insn %08x)\n",
 				    p->p_comm, p->p_pid,
-				    p->p_md.md_ss_addr, p->p_md.md_ss_instr);
+				    (void *)p->p_md.md_ss_addr,
+				    p->p_md.md_ss_instr);
 #endif
 
 				/* Restore original instruction and clear BP */
+				KERNEL_LOCK();
 				process_sstep(p, 0);
+				KERNEL_UNLOCK();
 				typ = TRAP_BRKPT;
 			} else {
 				typ = TRAP_TRACE;
@@ -741,7 +760,7 @@ fault_common:
 		return;
 
 	case T_FPE:
-		printf("FPU Trap: PC %x CR %x SR %x\n",
+		printf("FPU Trap: PC %lx CR %lx SR %lx\n",
 			trapframe->pc, trapframe->cause, trapframe->sr);
 		goto err;
 
@@ -757,50 +776,24 @@ fault_common:
 	case T_ADDR_ERR_LD:	/* misaligned access */
 	case T_ADDR_ERR_ST:	/* misaligned access */
 	case T_BUS_ERR_LD_ST:	/* BERR asserted to cpu */
-		if ((onfault = p->p_addr->u_pcb.pcb_onfault) != 0) {
-			p->p_addr->u_pcb.pcb_onfault = 0;
+		pcb = &p->p_addr->u_pcb;
+		if ((onfault = pcb->pcb_onfault) != 0) {
+			pcb->pcb_onfault = 0;
 			trapframe->pc = onfault_table[onfault];
 			return;
 		}
 		goto err;
 
-#ifdef CPU_R4000
-	case T_VCEI:
-	case T_VCEI+T_USER:
-	    {
-		vaddr_t va = trapframe->badvaddr;
-#ifdef DEBUG
-		printf("VCEI trap, badvaddr %p\n", trapframe->badvaddr);
-#endif
-		/* HitWBInvalidate_S */
-		__asm__ __volatile__ ("cache 0x17, 0(%0)" :: "r"(va));
-		/* HitInvalidate_I */
-		__asm__ __volatile__ ("cache 0x10, 0(%0)" :: "r"(va));
-	    }
-		return;
-	case T_VCED:
-	case T_VCED+T_USER:
-	    {
-		vaddr_t va = trapframe->badvaddr & ~3;
-#ifdef DEBUG
-		printf("VCED trap, badvaddr %p\n", trapframe->badvaddr);
-#endif
-		/* HitWBInvalidate_S */
-		__asm__ __volatile__ ("cache 0x17, 0(%0)" :: "r"(va));
-		/* HitInvalidate_D */
-		__asm__ __volatile__ ("cache 0x11, 0(%0)" :: "r"(va));
-	    }
-		return;
-#endif	/* CPU_R4000 */
 	default:
 	err:
 		disableintr();
 #if !defined(DDB) && defined(DEBUG)
-		trapDump("trap");
+		trapDump("trap", printf);
 #endif
 		printf("\nTrap cause = %d Frame %p\n", type, trapframe);
 		printf("Trap PC %p RA %p fault %p\n",
-		    trapframe->pc, trapframe->ra, trapframe->badvaddr);
+		    (void *)trapframe->pc, (void *)trapframe->ra,
+		    (void *)trapframe->badvaddr);
 #ifdef DDB
 		stacktrace(!USERMODE(trapframe->sr) ? trapframe : p->p_md.md_regs);
 		kdb_trap(type, trapframe);
@@ -846,7 +839,7 @@ child_return(arg)
 
 #if defined(DDB) || defined(DEBUG)
 void
-trapDump(const char *msg)
+trapDump(const char *msg, int (*pr)(const char *, ...))
 {
 #ifdef MULTIPROCESSOR
 	CPU_INFO_ITERATOR cii;
@@ -856,13 +849,7 @@ trapDump(const char *msg)
 	int i;
 	uint pos;
 	int s;
-	int (*pr)(const char*, ...);
 
-#ifdef DDB
-	pr = db_printf;
-#else
-	pr = printf;
-#endif
 	s = splhigh();
 	(*pr)("trapDump(%s)\n", msg);
 #ifndef MULTIPROCESSOR
@@ -895,7 +882,8 @@ trapDump(const char *msg)
 			(*pr)("%s: PC %p CR 0x%08lx SR 0x%08lx\n",
 			    trap_type[(ptrp->cause & CR_EXC_CODE) >>
 			      CR_EXC_CODE_SHIFT],
-			    ptrp->pc, ptrp->cause, ptrp->status);
+			    ptrp->pc, ptrp->cause & 0xffffffff,
+			    ptrp->status & 0xffffffff);
 #endif
 			(*pr)(" RA %p SP %p ADR %p\n",
 			    ptrp->ra, ptrp->sp, ptrp->vadr);
@@ -1086,7 +1074,8 @@ process_sstep(struct proc *p, int sstep)
 				printf("WARNING: %s (%d): can't restore "
 				    "instruction at %p: %08x\n",
 				    p->p_comm, p->p_pid,
-				    p->p_md.md_ss_addr, p->p_md.md_ss_instr);
+				    (void *)p->p_md.md_ss_addr,
+				    p->p_md.md_ss_instr);
 #endif
 			p->p_md.md_ss_addr = 0;
 		} else
@@ -1110,7 +1099,7 @@ process_sstep(struct proc *p, int sstep)
 	if (p->p_md.md_ss_addr != 0) {
 		printf("WARNING: %s (%d): breakpoint request "
 		    "at %p, already set at %p\n",
-		    p->p_comm, p->p_pid, va, p->p_md.md_ss_addr);
+		    p->p_comm, p->p_pid, (void *)va, (void *)p->p_md.md_ss_addr);
 		return EFAULT;
 	}
 #endif
@@ -1129,8 +1118,8 @@ process_sstep(struct proc *p, int sstep)
 
 #ifdef DEBUG
 	printf("%s (%d): breakpoint set at %p: %08x (pc %p %08x)\n",
-		p->p_comm, p->p_pid,
-		p->p_md.md_ss_addr, p->p_md.md_ss_instr, locr0->pc, curinstr);
+		p->p_comm, p->p_pid, (void *)p->p_md.md_ss_addr,
+		p->p_md.md_ss_instr, (void *)locr0->pc, curinstr);
 #endif
 	return 0;
 }
@@ -1487,7 +1476,7 @@ fpe_branch_emulate(struct proc *p, struct trap_frame *tf, uint32_t insn,
 	if (rc != 0) {
 #ifdef DEBUG
 		printf("%s: uvm_map_protect on %p failed: %d\n",
-		    __func__, p->p_md.md_fppgva, rc);
+		    __func__, (void *)p->p_md.md_fppgva, rc);
 #endif
 		return rc;
 	}
@@ -1496,7 +1485,7 @@ fpe_branch_emulate(struct proc *p, struct trap_frame *tf, uint32_t insn,
 	if (rc != 0) {
 #ifdef DEBUG
 		printf("%s: uvm_fault_wire on %p failed: %d\n",
-		    __func__, p->p_md.md_fppgva, rc);
+		    __func__, (void *)p->p_md.md_fppgva, rc);
 #endif
 		goto err2;
 	}
@@ -1505,7 +1494,7 @@ fpe_branch_emulate(struct proc *p, struct trap_frame *tf, uint32_t insn,
 	if (rc != 0) {
 #ifdef DEBUG
 		printf("%s: copyout %p failed %d\n",
-		    __func__, p->p_md.md_fppgva, rc);
+		    __func__, (void *)p->p_md.md_fppgva, rc);
 #endif
 		goto err;
 	}
@@ -1514,7 +1503,7 @@ fpe_branch_emulate(struct proc *p, struct trap_frame *tf, uint32_t insn,
 	if (rc != 0) {
 #ifdef DEBUG
 		printf("%s: copyout %p failed %d\n",
-		    __func__, p->p_md.md_fppgva + 4, rc);
+		    __func__, (void *)(p->p_md.md_fppgva + 4), rc);
 #endif
 		goto err;
 	}

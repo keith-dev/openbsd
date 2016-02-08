@@ -1,4 +1,4 @@
-/*	$OpenBSD: vdsp.c,v 1.24 2014/01/24 09:58:03 kettenis Exp $	*/
+/*	$OpenBSD: vdsp.c,v 1.27 2014/07/12 18:44:43 tedu Exp $	*/
 /*
  * Copyright (c) 2009, 2011, 2014 Mark Kettenis
  *
@@ -33,7 +33,7 @@
 #include <machine/hypervisor.h>
 #include <machine/mdesc.h>
 
-#include <uvm/uvm.h>
+#include <uvm/uvm_extern.h>
 
 #include <scsi/scsi_all.h>
 #include <scsi/scsi_disk.h>
@@ -331,7 +331,7 @@ vdsp_attach(struct device *parent, struct device *self, void *aux)
 		printf(": can't map interrupt\n");
 		return;
 	}
-	printf(": ivec 0x%lx, 0x%lx", sc->sc_tx_sysino, sc->sc_tx_sysino);
+	printf(": ivec 0x%llx, 0x%llx", sc->sc_tx_sysino, sc->sc_rx_sysino);
 
 	/*
 	 * Un-configure queues before registering interrupt handlers,
@@ -848,15 +848,15 @@ vdsp_ldc_reset(struct ldc_conn *lc)
 	sc->sc_vio_state = 0;
 	sc->sc_seq_no = 0;
 	if (sc->sc_vd) {
-		free(sc->sc_vd, M_DEVBUF);
+		free(sc->sc_vd, M_DEVBUF, 0);
 		sc->sc_vd = NULL;
 	}
 	if (sc->sc_vd_task) {
-		free(sc->sc_vd_task, M_DEVBUF);
+		free(sc->sc_vd_task, M_DEVBUF, 0);
 		sc->sc_vd_task = NULL;
 	}
 	if (sc->sc_label) {
-		free(sc->sc_label, M_DEVBUF);
+		free(sc->sc_label, M_DEVBUF, 0);
 		sc->sc_label = NULL;
 	}
 
@@ -984,7 +984,7 @@ vdsp_readlabel(struct vdsp_softc *sc)
 	err = VOP_READ(sc->sc_vp, &uio, 0, p->p_ucred);
 	VOP_UNLOCK(sc->sc_vp, 0, p);
 	if (err) {
-		free(sc->sc_label, M_DEVBUF);
+		free(sc->sc_label, M_DEVBUF, 0);
 		sc->sc_label = NULL;
 	}
 }
@@ -1048,7 +1048,7 @@ vdsp_is_iso(struct vdsp_softc *sc)
 	if (err == 0 && memcmp(vdp->id, ISO_STANDARD_ID, sizeof(vdp->id)))
 		err = ENOENT;
 
-	free(vdp, M_DEVBUF);
+	free(vdp, M_DEVBUF, 0);
 	return (err == 0);
 }
 
@@ -1145,7 +1145,7 @@ vdsp_read_desc(struct vdsp_softc *sc, struct vdsk_desc_msg *dm)
 	}
 
 fail:
-	free(buf, M_DEVBUF);
+	free(buf, M_DEVBUF, 0);
 
 	/* ACK the descriptor. */
 	dm->tag.stype = VIO_SUBTYPE_ACK;
@@ -1216,7 +1216,7 @@ vdsp_read_dring(void *arg1, void *arg2)
 	}
 
 fail:
-	free(buf, M_DEVBUF);
+	free(buf, M_DEVBUF, 0);
 
 	/* ACK the descriptor. */
 	vd->hdr.dstate = VIO_DESC_DONE;
@@ -1283,7 +1283,7 @@ vdsp_write_dring(void *arg1, void *arg2)
 	VOP_UNLOCK(sc->sc_vp, 0, p);
 
 fail:
-	free(buf, M_DEVBUF);
+	free(buf, M_DEVBUF, 0);
 
 	/* ACK the descriptor. */
 	vd->hdr.dstate = VIO_DESC_DONE;
@@ -1396,7 +1396,7 @@ vdsp_get_vtoc(void *arg1, void *arg2)
 	vd->status = 0;
 
 fail:
-	free(vt, M_DEVBUF);
+	free(vt, M_DEVBUF, 0);
 
 	/* ACK the descriptor. */
 	vd->hdr.dstate = VIO_DESC_DONE;
@@ -1488,7 +1488,7 @@ vdsp_set_vtoc(void *arg1, void *arg2)
 	vd->status = vdsp_writelabel(sc);
 
 fail:
-	free(vt, M_DEVBUF);
+	free(vt, M_DEVBUF, 0);
 
 	/* ACK the descriptor. */
 	vd->hdr.dstate = VIO_DESC_DONE;
@@ -1581,7 +1581,7 @@ vdsp_get_diskgeom(void *arg1, void *arg2)
 	vd->status = 0;
 
 fail:
-	free(vg, M_DEVBUF);
+	free(vg, M_DEVBUF, 0);
 
 	/* ACK the descriptor. */
 	vd->hdr.dstate = VIO_DESC_DONE;
@@ -1665,7 +1665,7 @@ vdspopen(dev_t dev, int flag, int mode, struct proc *p)
 	err = hv_ldc_rx_qconf(lc->lc_id,
 	    lc->lc_rxq->lq_map->dm_segs[0].ds_addr, lc->lc_rxq->lq_nentries);
 	if (err != H_EOK)
-		printf("%s: hv_ldc_rx_qconf %d\n", err, __func__);
+		printf("%s: hv_ldc_rx_qconf %d\n", __func__, err);
 
 	cbus_intr_setenabled(sc->sc_tx_sysino, INTR_ENABLED);
 	cbus_intr_setenabled(sc->sc_rx_sysino, INTR_ENABLED);

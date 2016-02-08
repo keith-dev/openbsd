@@ -1,4 +1,4 @@
-/*	$OpenBSD: rt2661.c,v 1.70 2013/12/06 21:03:03 deraadt Exp $	*/
+/*	$OpenBSD: rt2661.c,v 1.75 2014/07/22 13:12:12 mpi Exp $	*/
 
 /*-
  * Copyright (c) 2006
@@ -50,9 +50,7 @@
 #include <net/if_types.h>
 
 #include <netinet/in.h>
-#include <netinet/in_systm.h>
 #include <netinet/if_ether.h>
-#include <netinet/ip.h>
 
 #include <net80211/ieee80211_var.h>
 #include <net80211/ieee80211_amrr.h>
@@ -273,7 +271,7 @@ rt2661_attachhook(void *xsc)
 	struct rt2661_softc *sc = xsc;
 	struct ieee80211com *ic = &sc->sc_ic;
 	struct ifnet *ifp = &ic->ic_if;
-	const char *name = NULL;	/* make lint happy */
+	const char *name = NULL;
 	int i, error;
 
 	switch (sc->sc_id) {
@@ -401,7 +399,7 @@ rt2661_detach(void *xsc)
 	rt2661_free_rx_ring(sc, &sc->rxq);
 
 	if (sc->ucode != NULL)
-		free(sc->ucode, M_DEVBUF);
+		free(sc->ucode, M_DEVBUF, 0);
 
 	return 0;
 }
@@ -473,8 +471,8 @@ rt2661_alloc_tx_ring(struct rt2661_softc *sc, struct rt2661_tx_ring *ring,
 
 	ring->physaddr = ring->map->dm_segs->ds_addr;
 
-	ring->data = malloc(count * sizeof (struct rt2661_tx_data), M_DEVBUF,
-	    M_NOWAIT | M_ZERO);
+	ring->data = mallocarray(count, sizeof (struct rt2661_tx_data),
+	    M_DEVBUF, M_NOWAIT | M_ZERO);
 	if (ring->data == NULL) {
 		printf("%s: could not allocate soft data\n",
 		    sc->sc_dev.dv_xname);
@@ -566,7 +564,7 @@ rt2661_free_tx_ring(struct rt2661_softc *sc, struct rt2661_tx_ring *ring)
 			if (data->map != NULL)
 				bus_dmamap_destroy(sc->sc_dmat, data->map);
 		}
-		free(ring->data, M_DEVBUF);
+		free(ring->data, M_DEVBUF, 0);
 	}
 }
 
@@ -614,8 +612,8 @@ rt2661_alloc_rx_ring(struct rt2661_softc *sc, struct rt2661_rx_ring *ring,
 
 	ring->physaddr = ring->map->dm_segs->ds_addr;
 
-	ring->data = malloc(count * sizeof (struct rt2661_rx_data), M_DEVBUF,
-	    M_NOWAIT | M_ZERO);
+	ring->data = mallocarray(count, sizeof (struct rt2661_rx_data),
+	    M_DEVBUF, M_NOWAIT | M_ZERO);
 	if (ring->data == NULL) {
 		printf("%s: could not allocate soft data\n",
 		    sc->sc_dev.dv_xname);
@@ -717,7 +715,7 @@ rt2661_free_rx_ring(struct rt2661_softc *sc, struct rt2661_rx_ring *ring)
 			if (data->map != NULL)
 				bus_dmamap_destroy(sc->sc_dmat, data->map);
 		}
-		free(ring->data, M_DEVBUF);
+		free(ring->data, M_DEVBUF, 0);
 	}
 }
 
@@ -758,7 +756,7 @@ rt2661_amrr_node_free(struct rt2661_softc *sc, struct rt2661_amrr_node *amn)
 	TAILQ_REMOVE(&sc->amn, amn, entry);
 	sc->amn_count--;
 	splx(s);
-	free(amn, M_DEVBUF);
+	free(amn, M_DEVBUF, 0);
 }
 
 void
@@ -1947,8 +1945,7 @@ rt2661_start(struct ifnet *ifp)
 			}
 			IF_DEQUEUE(&ic->ic_mgtq, m0);
 
-			ni = (struct ieee80211_node *)m0->m_pkthdr.rcvif;
-			m0->m_pkthdr.rcvif = NULL;
+			ni = m0->m_pkthdr.ph_cookie;
 #if NBPFILTER > 0
 			if (ic->ic_rawbpf != NULL)
 				bpf_mtap(ic->ic_rawbpf, m0, BPF_DIRECTION_OUT);

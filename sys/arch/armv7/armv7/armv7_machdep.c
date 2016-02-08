@@ -1,4 +1,4 @@
-/*	$OpenBSD: armv7_machdep.c,v 1.4 2013/11/13 17:30:44 syl Exp $ */
+/*	$OpenBSD: armv7_machdep.c,v 1.14 2014/07/21 17:25:47 uebayasi Exp $ */
 /*	$NetBSD: lubbock_machdep.c,v 1.2 2003/07/15 00:25:06 lukem Exp $ */
 
 /*
@@ -242,22 +242,21 @@ int comcnmode = CONMODE;
  * Deal with any syncing, unmounting, dumping and shutdown hooks,
  * then reset the CPU.
  */
-void
+__dead void
 boot(int howto)
 {
+	struct device *mainbus;
 #ifdef DIAGNOSTIC
 	/* info */
 	printf("boot: howto=%08x curproc=%p\n", howto, curproc);
 #endif
 
-	/*
-	 * If we are still cold then hit the air brakes
-	 * and crash to earth fast
-	 */
+	mainbus = device_mainbus();
+
 	if (cold) {
 		doshutdownhooks();
-		if (!TAILQ_EMPTY(&alldevs))
-			config_suspend(TAILQ_FIRST(&alldevs), DVACT_POWERDOWN);
+		if (mainbus != NULL)
+			config_suspend(mainbus, DVACT_POWERDOWN);
 		if ((howto & (RB_HALT | RB_USERREQ)) != RB_USERREQ) {
 			printf("The operating system has halted.\n");
 			printf("Please press any key to reboot.\n\n");
@@ -281,31 +280,27 @@ boot(int howto)
 	 * that it cannot page part of the binary in as the filesystem has
 	 * been unmounted.
 	 */
-	if (!(howto & RB_NOSYNC))
+	if ((howto & RB_NOSYNC) == 0)
 		bootsync(howto);
 
 	if_downall();
 
 	uvm_shutdown();
-
-	/* Say NO to interrupts */
 	splhigh();
+	cold = 1;
 
-	/* Do a dump if requested. */
 	if ((howto & (RB_DUMP | RB_HALT)) == RB_DUMP)
 		dumpsys();
 
-	/* Run any shutdown hooks */
 	doshutdownhooks();
-	if (!TAILQ_EMPTY(&alldevs))
-		config_suspend(TAILQ_FIRST(&alldevs), DVACT_POWERDOWN);
+	if (mainbus != NULL)
+		config_suspend(mainbus, DVACT_POWERDOWN);
 
 	/* Make sure IRQ's are disabled */
 	IRQdisable;
 
-	if (howto & RB_HALT) {
-		if (howto & RB_POWERDOWN) {
-
+	if ((howto & RB_HALT) != 0) {
+		if ((howto & RB_POWERDOWN) != 0) {
 			printf("\nAttempting to power down...\n");
 			delay(500000);
 			platform_powerdown();
@@ -320,8 +315,8 @@ boot(int howto)
 	delay(500000);
 	platform_watchdog_reset();
 	printf("reboot failed; spinning\n");
-	while(1);
-	/*NOTREACHED*/
+	for (;;) ;
+	/* NOTREACHED */
 }
 
 static __inline
@@ -330,7 +325,7 @@ read_ttb(void)
 {
   long ttb;
 
-  __asm __volatile("mrc	p15, 0, %0, c2, c0, 0" : "=r" (ttb));
+  __asm volatile("mrc	p15, 0, %0, c2, c0, 0" : "=r" (ttb));
 
 
   return (pd_entry_t *)(ttb & ~((1<<14)-1));

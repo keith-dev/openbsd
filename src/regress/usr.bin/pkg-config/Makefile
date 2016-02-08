@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.39 2013/06/02 16:12:27 jasper Exp $
+#	$OpenBSD: Makefile,v 1.46 2014/07/09 22:50:12 jasper Exp $
 
 REGRESS_TARGETS=cmp-vers1-1 \
 		cmp-vers1-2 \
@@ -26,6 +26,10 @@ REGRESS_TARGETS=cmp-vers1-1 \
 		cmp-vers5-7 \
 		cmp-vers6-1 \
 		cmp-vers6-2 \
+		cmp-vers7-1 \
+		cmp-vers7-2 \
+		cmp-vers7-3 \
+		cmp-vers7-4 \
 		corrupt1 \
 		corrupt2 \
 		corrupt3 \
@@ -42,8 +46,6 @@ REGRESS_TARGETS=cmp-vers1-1 \
 		static-libs3 \
 		static-libs4 \
 		static-order \
-		variable-get-1 \
-		variable-set \
 		missing-req-1 \
 		missing-req-2 \
 		missing-req-3 \
@@ -62,7 +64,14 @@ REGRESS_TARGETS=cmp-vers1-1 \
 		max-version-1 \
 		max-version-2 \
 		find-config-1 \
-		find-config-2
+		find-config-2 \
+		variable-get-1 \
+		variable-set \
+		variables-1 \
+		variables-2 \
+		variables-3 \
+		variables-4 \
+		variables-5
 
 PKG_CONFIG?=	pkg-config
 PCONFIG =	PKG_CONFIG_PATH=${.CURDIR}/pcdir/ ${PKG_CONFIG}
@@ -196,7 +205,6 @@ cmp-vers4-9:
 	@${VPCONFIG} "alpha = 0.1.0alpha2"
 	@diff -u ${WANT} ${GOT}
 
-
 cmp-vers5-1:
 	# Test suffixed versions (beta > alpha)
 	@touch ${WANT}
@@ -271,6 +279,30 @@ cmp-vers6-2:
 	@if ${VPCONFIG} --libs --static requires-test2; then false; fi
 	@diff -u ${WANT} ${GOT}
 
+cmp-vers7-1:
+	# Test suffixed version (vers3 > 1.0.1g)
+	@touch ${WANT}
+	@${VPCONFIG} "vers3 > 1.0.1g"
+	@diff -u ${WANT} ${GOT}
+
+cmp-vers7-2:
+	# Test suffixed version (vers3 < 1.0.1i)
+	@touch ${WANT}
+	@${VPCONFIG} "vers3 < 1.0.1i"
+	@diff -u ${WANT} ${GOT}
+
+cmp-vers7-3:
+	# Test suffixed version (vers3 < 1.0.1i)
+	@touch ${WANT}
+	@${VPCONFIG} "vers3 < 1.0.1i"
+	@diff -u ${WANT} ${GOT}
+
+cmp-vers7-4:
+	# Test suffixed version (vers3 > 1.0.1)
+	@touch ${WANT}
+	@${VPCONFIG} "vers3 > 1.0.1"
+	@diff -u ${WANT} ${GOT}
+
 # Tests for various environment variables
 builddir:
 	# Test PKG_CONFIG_TOP_BUILD_DIR
@@ -335,20 +367,6 @@ static-order:
 	# Test Requires.private order
 	@echo "-L/usr/X11R6/lib -lstatic-order1 -lstatic-order2 -lstatic-order3" > ${WANT}
 	@${VPCONFIG} --static --libs static-order1
-	@diff -u ${WANT} ${GOT}
-
-# Misc. tests
-variable-get-1:
-	# Test --variable
-	@echo "/tmp" > ${WANT}
-	@${VPCONFIG} --variable prefix sysroot
-	@diff -u ${WANT} ${GOT}
-
-variable-set:
-	# Test --define-variable
-	@echo "-I/usr/local2/include -I/usr/local2/include/foo" > ${WANT}
-	@${VPCONFIG} --define-variable=prefix=/usr/local2 \
-		--cflags sysroot
 	@diff -u ${WANT} ${GOT}
 
 # This fails as we read and check Requires as well as Requires.private where
@@ -452,6 +470,49 @@ find-config-2:
 	@echo "1.0.0" > ${WANT}
 	@${PKG_CONFIG} --errors-to-stdout --print-errors --modversion \
 		${.CURDIR}/pcdir/public-dep.pc > ${GOT}
+	@diff -u ${WANT} ${GOT}
+
+variable-get-1:
+	# Test --variable
+	@echo "/tmp" > ${WANT}
+	@${VPCONFIG} --variable prefix sysroot
+	@diff -u ${WANT} ${GOT}
+
+variable-set:
+	# Test --define-variable
+	@echo "-I/usr/local2/include -I/usr/local2/include/foo" > ${WANT}
+	@${VPCONFIG} --define-variable=prefix=/usr/local2 \
+		--cflags sysroot
+	@diff -u ${WANT} ${GOT}
+
+variables-1:
+	# Test --variable without any options
+	@echo "/usr/local/lib/pkgconfig-plugins.0" > ${WANT}
+	@${VPCONFIG} --variable=plugindir variables
+	@diff -u ${WANT} ${GOT}
+
+variables-2:
+	# Test --variable + --define-variable
+	@echo "/chroot/lib/pkgconfig-plugins.0" > ${WANT}
+	@${VPCONFIG} --define-variable=libdir='/chroot/lib' --variable=plugindir variables
+	@diff -u ${WANT} ${GOT}
+
+variables-3:
+	# Test --variable + --define-variable
+	@echo '$${foodir}/pkgconfig-plugins.0' > ${WANT}
+	@${VPCONFIG} --define-variable=libdir='$${foodir}' --variable=plugindir variables
+	@diff -u ${WANT} ${GOT}
+
+variables-4:
+	# Test --variable + --define-variable
+	@echo '$${libdir}/pkgconfig-plugins.0' > ${WANT}
+	@${VPCONFIG} --define-variable=libdir='$${libdir}' --variable=plugindir variables
+	@diff -u ${WANT} ${GOT}
+
+variables-5:
+	# Test --variable
+	@echo ' -lfoo-1' > ${WANT}
+	@${VPCONFIG} --libs variables
 	@diff -u ${WANT} ${GOT}
 
 clean:

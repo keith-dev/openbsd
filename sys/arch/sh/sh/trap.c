@@ -1,4 +1,4 @@
-/*	$OpenBSD: trap.c,v 1.21 2012/12/31 06:46:14 guenther Exp $	*/
+/*	$OpenBSD: trap.c,v 1.30 2014/07/10 14:21:20 deraadt Exp $	*/
 /*	$NetBSD: exception.c,v 1.32 2006/09/04 23:57:52 uwe Exp $	*/
 /*	$NetBSD: syscall.c,v 1.6 2006/03/07 07:21:50 thorpej Exp $	*/
 
@@ -88,10 +88,9 @@
 #include <sys/signal.h>
 #include <sys/resourcevar.h>
 #include <sys/signalvar.h>
+#include <uvm/uvm_extern.h>
 #include <sys/syscall.h>
 #include <sys/syscall_mi.h>
-
-#include <uvm/uvm_extern.h>
 
 #include <sh/cache.h>
 #include <sh/cpu.h>
@@ -157,7 +156,7 @@ general_exception(struct proc *p, struct trapframe *tf, uint32_t va)
 {
 	int expevt = tf->tf_expevt;
 	int tra;
-	boolean_t usermode = !KERNELMODE(tf->tf_ssr);
+	int usermode = !KERNELMODE(tf->tf_ssr);
 	union sigval sv;
 
 	uvmexp.traps++;
@@ -173,6 +172,7 @@ general_exception(struct proc *p, struct trapframe *tf, uint32_t va)
 			goto do_panic;
 		KDASSERT(p->p_md.md_regs == tf); /* check exception depth */
 		expevt |= EXP_USER;
+		refreshcreds(p);
 	}
 
 	switch (expevt) {
@@ -257,7 +257,7 @@ general_exception(struct proc *p, struct trapframe *tf, uint32_t va)
 		int fpscr, sigi;
 
 		/* XXX worth putting in the trapframe? */
-		__asm__ __volatile__ ("sts fpscr, %0" : "=r" (fpscr));
+		__asm__ volatile ("sts fpscr, %0" : "=r" (fpscr));
 		fpscr = (fpscr & FPSCR_CAUSE_MASK) >> FPSCR_CAUSE_SHIFT;
 		if (fpscr & FPEXC_E)
 			sigi = FPE_FLTINV;	/* XXX any better value? */
@@ -295,7 +295,7 @@ do_panic:
 	else
 		printf("EXPEVT 0x%03x", expevt);
 	printf(" in %s mode\n", expevt & EXP_USER ? "user" : "kernel");
-	printf("va %p spc %p ssr %p pr %p \n",
+	printf("va 0x%x spc 0x%x ssr 0x%x pr 0x%x \n",
 	    va, tf->tf_spc, tf->tf_ssr, tf->tf_pr);
 
 	panic("general_exception");
@@ -315,7 +315,7 @@ tlb_exception(struct proc *p, struct trapframe *tf, uint32_t va)
 	struct vm_map *map;
 	pmap_t pmap;
 	union sigval sv;
-	boolean_t usermode;
+	int usermode;
 	int err, track, ftype;
 	const char *panic_msg;
 
@@ -336,6 +336,7 @@ tlb_exception(struct proc *p, struct trapframe *tf, uint32_t va)
 	usermode = !KERNELMODE(tf->tf_ssr);
 	if (usermode) {
 		KDASSERT(p->p_md.md_regs == tf);
+		refreshcreds(p);
 	} else {
 		KDASSERT(p == NULL ||		/* idle */
 		    p == &proc0 ||		/* kthread */
@@ -421,7 +422,7 @@ tlb_exception(struct proc *p, struct trapframe *tf, uint32_t va)
 
 	/* Page in. load PTE to TLB. */
 	if (err == 0) {
-		boolean_t loaded = __pmap_pte_load(pmap, va, track);
+		int loaded = __pmap_pte_load(pmap, va, track);
 		TLB_ASSERT(loaded, "page table entry not found");
 		if (usermode)
 			userret(p);
@@ -434,8 +435,7 @@ tlb_exception(struct proc *p, struct trapframe *tf, uint32_t va)
 		if (err == ENOMEM) {
 			printf("UVM: pid %d (%s), uid %d killed: out of swap\n",
 			    p->p_pid, p->p_comm,
-			    p->p_cred && p->p_ucred ?
-				(int)p->p_ucred->cr_uid : -1);
+			    p->p_ucred ? (int)p->p_ucred->cr_uid : -1);
 			trapsignal(p, SIGKILL, tf->tf_expevt, SEGV_MAPERR, sv);
 		} else
 			trapsignal(p, SIGSEGV, tf->tf_expevt, SEGV_MAPERR, sv);
@@ -478,17 +478,9 @@ ast(struct proc *p, struct trapframe *tf)
 
 	while (p->p_md.md_astpending) {
 		p->p_md.md_astpending = 0;
+		refreshcreds(p);
 		uvmexp.softs++;
-
-		if (p->p_flag & P_OWEUPC) {
-			ADDUPROF(p);
-		}
-
-		if (want_resched) {
-			/* We are being preempted. */
-			preempt(NULL);
-		}
-
+		mi_ast(p, want_resched);
 		userret(p);
 	}
 }
@@ -528,8 +520,8 @@ syscall(struct proc *p, struct trapframe *tf)
 	opc = tf->tf_spc;
 	ocode = code = tf->tf_r0;
 
-	nsys = p->p_emul->e_nsysent;
-	callp = p->p_emul->e_sysent;
+	nsys = p->p_p->ps_emul->e_nsysent;
+	callp = p->p_p->ps_emul->e_sysent;
 
 	params = (caddr_t)tf->tf_r15;
 
@@ -557,13 +549,13 @@ syscall(struct proc *p, struct trapframe *tf)
 		break;
 	}
 	if (code < 0 || code >= nsys)
-		callp += p->p_emul->e_nosys;		/* illegal */
+		callp += p->p_p->ps_emul->e_nosys;		/* illegal */
 	else
 		callp += code;
 	argsize = callp->sy_argsize;
 #ifdef DIAGNOSTIC
 	if (argsize > sizeof args) {
-		callp += p->p_emul->e_nosys - code;
+		callp += p->p_p->ps_emul->e_nosys - code;
 		argsize = callp->sy_argsize;
 	}
 #endif

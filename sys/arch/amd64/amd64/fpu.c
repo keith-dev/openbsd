@@ -1,4 +1,4 @@
-/*	$OpenBSD: fpu.c,v 1.27 2012/08/30 16:10:32 kettenis Exp $	*/
+/*	$OpenBSD: fpu.c,v 1.29 2014/05/06 11:50:13 mpi Exp $	*/
 /*	$NetBSD: fpu.c,v 1.1 2003/04/26 18:39:28 fvdl Exp $	*/
 
 /*-
@@ -40,7 +40,6 @@
 #include <sys/user.h>
 #include <sys/ioctl.h>
 #include <sys/device.h>
-#include <sys/vmmeter.h>
 #include <sys/signalvar.h>
 
 #include <uvm/uvm_extern.h>
@@ -262,7 +261,7 @@ fpudna(struct cpu_info *ci)
 		 * thus leaking other process's execution history.
 		 */
 		fnclex();
-		__asm __volatile("ffree %%st(7)\n\tfldl %0" : : "m" (zero));
+		__asm volatile("ffree %%st(7)\n\tfldl %0" : : "m" (zero));
 		fxrstor(sfp);
 	}
 }

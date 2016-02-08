@@ -1,4 +1,4 @@
-# $OpenBSD: Makefile.cross,v 1.68 2013/09/04 14:43:27 patrick Exp $
+# $OpenBSD: Makefile.cross,v 1.72 2014/07/16 01:23:39 deraadt Exp $
 
 cross-tools:	cross-includes cross-binutils cross-gcc cross-lib
 cross-distrib:	cross-tools cross-bin cross-share cross-sys cross-etc-root-var
@@ -9,10 +9,7 @@ cross-distrib:	cross-tools cross-bin cross-share cross-sys cross-etc-root-var
 .if	(${TARGET} == "armish" || ${TARGET} == "armv7" || \
 	 ${TARGET} == "zaurus")
 TARGET_ARCH=	arm
-.elif	(${TARGET} == "hp300" || ${TARGET} == "mvme68k")
-TARGET_ARCH=	m68k
-.elif	(${TARGET} == "aviion" || ${TARGET} == "luna88k" || \
-	 ${TARGET} == "mvme88k")
+.elif	(${TARGET} == "aviion" || ${TARGET} == "luna88k")
 TARGET_ARCH=	m88k
 .elif	(${TARGET} == "sgi" || ${TARGET} == "octeon")
 TARGET_ARCH=	mips64
@@ -110,14 +107,13 @@ BINUTILS_DIR=gnu/usr.bin/${BINUTILS_VERSION}
 .endfor
 
 # no libcrypto.... these won't build
-#NO_CROSS+=	dc login_krb5 login_krb5-or-pwd passwd ppp tcpdump telnet \
-#		ftp gzsig sasyncd vnconfig
+#NO_CROSS+=	dc passwd ppp tcpdump telnet ftp gzsig sasyncd vnconfig
 		
 # explicit cross-compile
 NO_CROSS+=bind
 NO_CROSS+=httpd
 NO_CROSS+=microcode
-NO_CROSS+=groff lynx binutils binutils-2.17 perl texinfo gcc cvs
+NO_CROSS+=groff binutils binutils-2.17 perl texinfo gcc cvs
 NO_CROSS+=nsd
 NO_CROSS+=nginx
 NO_CROSS+=sqlite3
@@ -256,19 +252,23 @@ ${CROSSGCC}:		${CROSSBINUTILS}
 	ln -sf ${TARGET_CANON}-cpp ${CROSSDIR}/usr/${TARGET_CANON}/bin/cpp
 .else
 	(cd ${.CURDIR}/gnu/usr.bin/cc; \
+	    PIE_DEFAULT=${PIE_DEFAULT} \
 	    MAKEOBJDIR=obj.${MACHINE}.${TARGET} \
 	    TARGET_ARCH=${TARGET_ARCH} TARGET_CPU=${TARGET_CPU} \
 	    CROSSDIR=${CROSSDIR} \
 	    MACHINE=${TARGET} \
 	    PATH=${CROSSPATH} ${MAKE} depend  )
 	(cd ${.CURDIR}/gnu/usr.bin/cc; \
+	    PIE_DEFAULT=${PIE_DEFAULT} \
 	    MAKEOBJDIR=obj.${MACHINE}.${TARGET} \
 	    TARGET_ARCH=${TARGET_ARCH} TARGET_CPU=${TARGET_CPU} \
 	    CROSSDIR=${CROSSDIR} \
 	    MACHINE=${TARGET} \
 	    ${MAKE} all )
 	(cd ${.CURDIR}/gnu/usr.bin/cc; \
-	    env CROSSDIR=${CROSSDIR} DESTDIR=${CROSSDIR} MAKEOBJDIR=obj.${MACHINE}.${TARGET} \
+	    env CROSSDIR=${CROSSDIR} DESTDIR=${CROSSDIR} \
+	    PIE_DEFAULT=${PIE_DEFAULT} \
+	    MAKEOBJDIR=obj.${MACHINE}.${TARGET} \
 	    TARGET_ARCH=${TARGET_ARCH} TARGET_CPU=${TARGET_CPU} \
 	    MACHINE=${TARGET} \
 	    PATH=${CROSSPATH} ${MAKE} install)

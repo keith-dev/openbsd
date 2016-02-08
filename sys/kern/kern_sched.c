@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_sched.c,v 1.31 2014/02/12 05:47:36 guenther Exp $	*/
+/*	$OpenBSD: kern_sched.c,v 1.34 2014/07/26 16:07:39 kettenis Exp $	*/
 /*
  * Copyright (c) 2007, 2008 Artur Grabowski <art@openbsd.org>
  *
@@ -106,14 +106,9 @@ sched_kthreads_create(void *v)
 	static int num;
 
 	if (fork1(&proc0, FORK_SHAREVM|FORK_SHAREFILES|FORK_NOZOMBIE|
-	    FORK_SIGHAND|FORK_IDLE, NULL, 0, sched_idle, ci, NULL,
+	    FORK_SYSTEM|FORK_SIGHAND|FORK_IDLE, NULL, 0, sched_idle, ci, NULL,
 	    &spc->spc_idleproc))
 		panic("fork idle");
-
-	/*
-	 * Mark it as a system process.
-	 */
-	atomic_setbits_int(&spc->spc_idleproc->p_flag, P_SYSTEM);
 
 	/* Name it as specified. */
 	snprintf(spc->spc_idleproc->p_comm, sizeof(spc->spc_idleproc->p_comm),
@@ -277,9 +272,10 @@ sched_chooseproc(void)
 	if (spc->spc_schedflags & SPCF_SHOULDHALT) {
 		if (spc->spc_whichqs) {
 			for (queue = 0; queue < SCHED_NQS; queue++) {
-				TAILQ_FOREACH(p, &spc->spc_qs[queue], p_runq) {
+				while ((p = TAILQ_FIRST(&spc->spc_qs[queue]))) {
 					remrunqueue(p);
 					p->p_cpu = sched_choosecpu(p);
+					KASSERT(p->p_cpu != curcpu());
 					setrunqueue(p);
 				}
 			}
@@ -413,6 +409,7 @@ sched_choosecpu(struct proc *p)
 	 */
 	if (cpuset_isset(&set, p->p_cpu) ||
 	    (p->p_cpu == curcpu() && p->p_cpu->ci_schedstate.spc_nrun == 0 &&
+	    (p->p_cpu->ci_schedstate.spc_schedflags & SPCF_SHOULDHALT) == 0 &&
 	    curproc == p)) {
 		sched_wasidle++;
 		return (p->p_cpu);

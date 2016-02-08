@@ -1,4 +1,4 @@
-/*	$OpenBSD: ubsa.c,v 1.60 2013/11/15 10:17:39 pirofti Exp $ 	*/
+/*	$OpenBSD: ubsa.c,v 1.63 2014/07/12 20:26:33 mpi Exp $ 	*/
 /*	$NetBSD: ubsa.c,v 1.5 2002/11/25 00:51:33 fvdl Exp $	*/
 /*-
  * Copyright (c) 2002, Alexander Kabaev <kan.FreeBSD.org>.
@@ -76,10 +76,6 @@
 #include <dev/usb/usb_quirks.h>
 
 #include <dev/usb/ucomvar.h>
-
-#ifdef USB_DEBUG
-#define UBSA_DEBUG
-#endif
 
 #ifdef UBSA_DEBUG
 int	ubsadebug = 0;
@@ -214,21 +210,16 @@ const struct usb_devno ubsa_devs[] = {
 	{ USB_VENDOR_ZTE, USB_PRODUCT_ZTE_AC8700 },
 };
 
-int ubsa_match(struct device *, void *, void *); 
-void ubsa_attach(struct device *, struct device *, void *); 
-int ubsa_detach(struct device *, int); 
-int ubsa_activate(struct device *, int); 
+int ubsa_match(struct device *, void *, void *);
+void ubsa_attach(struct device *, struct device *, void *);
+int ubsa_detach(struct device *, int);
 
-struct cfdriver ubsa_cd = { 
-	NULL, "ubsa", DV_DULL 
-}; 
+struct cfdriver ubsa_cd = {
+	NULL, "ubsa", DV_DULL
+};
 
-const struct cfattach ubsa_ca = { 
-	sizeof(struct ubsa_softc), 
-	ubsa_match, 
-	ubsa_attach, 
-	ubsa_detach, 
-	ubsa_activate, 
+const struct cfattach ubsa_ca = {
+	sizeof(struct ubsa_softc), ubsa_match, ubsa_attach, ubsa_detach
 };
 
 int
@@ -380,7 +371,7 @@ ubsa_detach(struct device *self, int flags)
 	if (sc->sc_intr_pipe != NULL) {
 		usbd_abort_pipe(sc->sc_intr_pipe);
 		usbd_close_pipe(sc->sc_intr_pipe);
-		free(sc->sc_intr_buf, M_USBDEV);
+		free(sc->sc_intr_buf, M_USBDEV, 0);
 		sc->sc_intr_pipe = NULL;
 	}
 
@@ -390,19 +381,6 @@ ubsa_detach(struct device *self, int flags)
 	}
 
 	return (rv);
-}
-
-int
-ubsa_activate(struct device *self, int act)
-{
-	struct ubsa_softc *sc = (struct ubsa_softc *)self;
-
-	switch (act) {
-	case DVACT_DEACTIVATE:
-		usbd_deactivate(sc->sc_udev);
-		break;
-	}
-	return (0);
 }
 
 int
@@ -651,7 +629,7 @@ ubsa_close(void *addr, int portno)
 			printf("%s: close interrupt pipe failed: %s\n",
 			    sc->sc_dev.dv_xname,
 			    usbd_errstr(err));
-		free(sc->sc_intr_buf, M_USBDEV);
+		free(sc->sc_intr_buf, M_USBDEV, 0);
 		sc->sc_intr_pipe = NULL;
 	}
 }

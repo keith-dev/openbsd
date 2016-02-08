@@ -1,4 +1,4 @@
-/*	$OpenBSD: qlavar.h,v 1.5 2014/02/20 00:23:00 dlg Exp $ */
+/*	$OpenBSD: qlavar.h,v 1.10 2014/05/17 11:51:21 jmatthew Exp $ */
 
 /*
  * Copyright (c) 2013, 2014 Jonathan Matthew <jmatthew@openbsd.org>
@@ -16,13 +16,11 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
+#include <sys/task.h>
 
 #define QLA_DEFAULT_PORT_NAME		0x400000007F000003ULL /* from isp(4) */
 
 #define QLA_WAIT_FOR_LOOP		10
-
-/* rounded up range of assignable handles for 2k login firmware */
-#define QLA_MAX_TARGETS			2048
 
 /* maximum number of segments allowed for in a single io */
 #define QLA_MAX_SEGS			16
@@ -66,15 +64,10 @@ enum qla_port_disp {
 	QLA_PORT_DISP_DUP
 };
 
-#define QLA_UPDATE_DISCARD		0
-#define QLA_UPDATE_SOFTRESET		1
-#define QLA_UPDATE_FULL_SCAN		2
-#define QLA_UPDATE_LOOP_SCAN		3
-#define QLA_UPDATE_FABRIC_SCAN		4
-#define QLA_UPDATE_FABRIC_RELOGIN	5
-
-#define QLA_LOCATION_LOOP_ID(l)		(l | (1 << 24))
-#define QLA_LOCATION_PORT_ID(p)		(p | (2 << 24))
+#define QLA_LOCATION_LOOP		(1 << 24)
+#define QLA_LOCATION_FABRIC		(2 << 24)
+#define QLA_LOCATION_LOOP_ID(l)		(l | QLA_LOCATION_LOOP)
+#define QLA_LOCATION_PORT_ID(p)		(p | QLA_LOCATION_FABRIC)
 
 struct qla_fc_port {
 	TAILQ_ENTRY(qla_fc_port) ports;
@@ -146,6 +139,7 @@ struct qla_softc {
 	int			sc_mbox_base;
 	u_int16_t		sc_mbox[12];
 	int			sc_mbox_pending;
+	struct mutex		sc_mbox_mtx;
 
 	int			sc_loop_up;
 	int			sc_topology;
@@ -158,8 +152,24 @@ struct qla_softc {
 	TAILQ_HEAD(, qla_fc_port) sc_ports;
 	TAILQ_HEAD(, qla_fc_port) sc_ports_new;
 	TAILQ_HEAD(, qla_fc_port) sc_ports_gone;
-	struct qla_fc_port	*sc_targets[QLA_MAX_TARGETS];
-	struct taskq		*sc_scan_taskq;
+	TAILQ_HEAD(, qla_fc_port) sc_ports_found;
+	struct qla_fc_port	*sc_targets[QLA_2KL_BUSWIDTH];
+
+	struct taskq		*sc_update_taskq;
+	struct task		sc_update_task;
+	int			sc_update;
+	int			sc_update_tasks;
+#define QLA_UPDATE_TASK_CLEAR_ALL	0x00000001
+#define QLA_UPDATE_TASK_SOFTRESET	0x00000002
+#define QLA_UPDATE_TASK_UPDATE_TOPO	0x00000004
+#define QLA_UPDATE_TASK_GET_PORT_LIST	0x00000008
+#define QLA_UPDATE_TASK_PORT_LIST	0x00000010
+#define QLA_UPDATE_TASK_SCAN_FABRIC	0x00000020
+#define QLA_UPDATE_TASK_SCANNING_FABRIC	0x00000040
+#define QLA_UPDATE_TASK_FABRIC_LOGIN	0x00000080
+#define QLA_UPDATE_TASK_FABRIC_RELOGIN	0x00000100
+#define QLA_UPDATE_TASK_DETACH_TARGET	0x00000200
+#define QLA_UPDATE_TASK_ATTACH_TARGET	0x00000400
 
 	int			sc_maxcmds;
 	struct qla_dmamem	*sc_requests;

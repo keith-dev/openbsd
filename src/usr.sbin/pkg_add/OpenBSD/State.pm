@@ -1,5 +1,5 @@
 # ex:ts=8 sw=4:
-# $OpenBSD: State.pm,v 1.25 2014/01/09 20:20:01 espie Exp $
+# $OpenBSD: State.pm,v 1.32 2014/07/27 22:19:18 espie Exp $
 #
 # Copyright (c) 2007-2014 Marc Espie <espie@openbsd.org>
 #
@@ -33,7 +33,6 @@ sub read_file
 {
 	my ($self, $filename, $state) = @_;
 	open(my $fh, '<', $filename) or return;
-	my $_;
 	while (<$fh>) {
 		chomp;
 		next if m/^\s*\#/;
@@ -48,6 +47,7 @@ sub read_file
 			# bad line: should we say so ?
 			$state->errsay("Bad line in #1: #2 (#3)",
 			    $filename, $_, $.);
+			next;
 		}
 		# remove caps
 		$k =~ tr/A-Z/a-z/;
@@ -230,11 +230,11 @@ sub f
 	if (@_ == 0) {
 		return undef;
 	}
-	my ($_, @l) = @_;
+	my ($fmt, @l) = @_;
 	# make it so that #0 is #
 	unshift(@l, '#');
-	s/\#(\d+)/$l[$1]/ge;
-	return $_;
+	$fmt =~ s,\#(\d+),($l[$1] // "<Undefined #$1>"),ge;
+	return $fmt;
 }
 
 sub _fatal
@@ -402,14 +402,26 @@ sub child_error
 
 sub _system
 {
-	my ($self, $todo) = (shift, shift);
+	my $self = shift;
 	my $r = fork;
+	my ($todo, $todo2);
+	if (ref $_[0] eq 'CODE') {
+		$todo = shift;
+	} else {
+		$todo = sub {};
+	}
+	if (ref $_[0] eq 'CODE') {
+		$todo2 = shift;
+	} else {
+		$todo2 = sub {};
+	}
 	if (!defined $r) {
 		return 1;
 	} elsif ($r == 0) {
 		&$todo;
 		exec {$_[0]} @_ or return 1;
 	} else {
+		&$todo2;
 		waitpid($r, 0);
 		return $?;
 	}
@@ -418,14 +430,14 @@ sub _system
 sub system
 {
 	my $self = shift;
-	my $todo;
-	if (ref $_[0] eq 'CODE') {
-		$todo = shift;
-	} else {
-		$todo = sub {};
-	}
-	my $r = $self->_system($todo, @_);
+	my $r = $self->_system(@_);
 	if ($r != 0) {
+		if (ref $_[0] eq 'CODE') {
+			shift;
+		}
+		if (ref $_[0] eq 'CODE') {
+			shift;
+		}
 		$self->say("system(#1) failed: #2",
 		    join(", ", @_), $self->child_error);
 	}
@@ -435,15 +447,16 @@ sub system
 sub verbose_system
 {
 	my $self = shift;
-	my $todo;
-	if (ref $_[0] eq 'CODE') {
-		$todo = shift;
-	} else {
-		$todo = sub {};
+	my @p = @_;
+	if (ref $p[0]) {
+		shift @p;
+	}
+	if (ref $p[0]) {
+		shift @p;
 	}
 
-	$self->print("Running #1", join(' ', @_));
-	my $r = $self->_system($todo, @_);
+	$self->print("Running #1", join(' ', @p));
+	my $r = $self->_system(@_);
 	if ($r != 0) {
 		$self->say("... failed: #1", $self->child_error);
 	} else {

@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_san_xilinx.c,v 1.28 2013/08/07 01:06:37 bluhm Exp $	*/
+/*	$OpenBSD: if_san_xilinx.c,v 1.30 2014/07/22 13:12:11 mpi Exp $	*/
 
 /*-
  * Copyright (c) 2001-2004 Sangoma Technologies (SAN)
@@ -52,7 +52,6 @@
 #include <net/if_media.h>
 #include <net/netisr.h>
 #include <net/if_sppp.h>
-#include <netinet/in_systm.h>
 #include <netinet/in.h>
 #include <netinet/udp.h>
 #include <netinet/ip.h>
@@ -352,7 +351,7 @@ wan_xilinx_init(sdla_t *card)
 	ifp->if_softc = sc;
 	sc->common.card	= card;
 	if (wanpipe_generic_register(card, ifp, card->devname)) {
-		free(sc, M_DEVBUF);
+		free(sc, M_DEVBUF, 0);
 		return (NULL);
 	}
 
@@ -427,7 +426,7 @@ wan_xilinx_release(sdla_t* card, struct ifnet* ifp)
 
 	wanpipe_generic_unregister(ifp);
 	ifp->if_softc = NULL;
-	free(sc, M_DEVBUF);
+	free(sc, M_DEVBUF, 0);
 
 	return (0);
 }
@@ -2418,7 +2417,7 @@ aft_release_rx_buffers(xilinx_softc_t *sc)
 		aft_release_rx_dma_buff(sc, buf);		
 	}
 
-	free(sc->wp_rx_buffers, M_DEVBUF);
+	free(sc->wp_rx_buffers, M_DEVBUF, 0);
 
 	sc->wp_rx_buffers = NULL;
 	sc->wp_rx_buffer_last = NULL;

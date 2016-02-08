@@ -1,6 +1,6 @@
 #! /usr/bin/perl
 # Copyright (c) 2005-2010 Marc Espie <espie@openbsd.org>
-# $OpenBSD: pkg_mklocatedb,v 1.39 2013/01/27 11:39:22 espie Exp $
+# $OpenBSD: pkg_mklocatedb,v 1.43 2014/07/13 15:54:28 espie Exp $
 #
 # Permission to use, copy, modify, and distribute this software for any
 # purpose with or without fee is hereby granted, provided that the above
@@ -31,28 +31,17 @@ sub handle_options
 {
 	my $state = shift;
 	$state->{no_exports} = 1;
-	$state->SUPER::handle_options('aCd:Knqs:x:r:p:Pu', 
-	    '[-aCKnPqu] [-d repository] [-p portsdir] [-r release] [-s src] ',
-	    '[-x X11src] [pkg-name [...]]');
-	$state->{srcdir} = $state->opt('s');
-	$state->{xdir} = $state->opt('x');
-	$state->{releasedir} = $state->opt('r');
+	$state->SUPER::handle_options('ad:Knqp:Pu', 
+	    '[-aKnPqu] [-d repository] [-p portsdir] [pkg-name ...]');
 	$state->{portsdir} = $state->opt('p');
 	$state->{pkgdir} = $state->opt('d');
 	$state->{quiet} = $state->opt('q');
 	$state->{pkgpath} = $state->opt('P');
 	$state->{allinfo} = $state->opt('a');
 	$state->{nopipe} = $state->opt('n');
-	$state->{check} = $state->opt('C');
 	$state->{full} = $state->opt('K');
 	$state->{update} = $state->opt('u');
-	if ($state->{check}) {
-		unless ($state->{srcdir} or $state->{portsdir}) {
-			$state->usage("-C without -s dir or -x dir");
-		}
-	}
 }
-
 
 package OpenBSD::PackingElement;
 sub print_name {}
@@ -121,29 +110,6 @@ sub print_name
 }
 
 package main;
-sub tag
-{
-	my ($state, $dir, $set, $rev) = @_;
-	my $r;
-	if ($state->{allinfo}) {
-		$r = "$dir/$set:$set$rev";
-	} elsif ($state->{pkgpath}) {
-		$r = "$dir/$set";
-	} else {
-		$r = "$set$rev";
-	}
-	$state->errsay($r) unless $state->{quiet};
-	return $r;
-}
-
-my ($rev, $arch);
-sub findos
-{
-	my $cmd = OpenBSD::Paths->uname." -mr";
-	($rev, $arch) = split(/\s+/o, `$cmd`);
-	chomp $arch;
-	$rev =~ s/\.//;
-}
 
 sub open_output
 {
@@ -158,68 +124,6 @@ sub open_output
 		open $state->{out}, "|-", $MKLOCATEDB, $MKLOCATEDB or 
 		    $state->fatal("couldn't open pipe to mklocatedb: #1", $!);
 	}
-}
-
-sub sync_error
-{
-	my ($state, $e, $set) = @_;
-	if ($set =~ m/etc/) {
-		$state->errsay("Couldn't find #1 from set #2:\n\tDid you run sysmerge recently ?", $e, $set);
-	} else {
-		$state->fatal("Couldn't find #1 from set #2:\n\tsrc and installation out of synch ?", $e, $set);
-	}
-}
-
-sub do_source
-{
-	my ($state, $src, $tag, @sets) = @_;
-	findos() if !defined $arch;
-	my $dir = "$src/distrib/sets/lists";
-	for my $set (@sets) {
-		my $tag = tag($state, $tag, $set, $rev);
-		my $output = 0;
-		for my $f ("$dir/$set/mi", "$dir/$set/md.$arch") {
-			open my $l, '<', $f or next;
-			while (my $e = <$l>) {
-				chomp $e;
-				$e =~ s/^\.//;
-				if ($state->{check} && !-e $e) {
-					sync_error($state, $e, $set);
-				}
-				print {$state->{out}} "$tag:$e\n";
-				$output = 1;
-			}
-		}
-		if (!$output) {
-			$state->fatal("Couldn't find set #1", $set);
-		}
-	}
-}
-
-sub do_release
-{
-	my $state = shift;
-
-	require OpenBSD::Ustar;
-
-	opendir(my $dir, $state->{releasedir}) or return;
-	while (my $e = readdir $dir) {
-		if ($e =~ m/^(\w+\d\d)\.tgz$/o) {
-			my $set = $1;
-			open my $arc, '-|', OpenBSD::Paths->gzip, '-c', '-d', 
-			    "--", $state->{releasedir}."/".$e or
-			$state->fatal("couldn't open pipe from gzip: #1", $!);
-
-			my $u = OpenBSD::Ustar->new($arc, $state, '/');
-			while (my $f = $u->next) {
-				my $name = $f->{name};
-				$name =~ s/^\.//o;
-				print {$state->{out}} "$set:$name\n";
-			}
-			close $arc;
-		}
-	}
-	closedir($dir);
 }
 
 sub print_out
@@ -244,7 +148,6 @@ sub do_portsdir
 		my $plist = OpenBSD::PackingList->read($in,
 		    sub {
 			my ($fh, $cont) = @_;
-			my $_;
 			while (<$fh>) {
 				return if m/^\=\=\=\> /o;
 				&$cont($_);
@@ -293,16 +196,8 @@ $state->handle_options;
 
 open_output($state);
 
-if ($state->{srcdir}) {
-	do_source($state, $state->{srcdir}, 'src', 
-	    qw(base comp etc game));
-}
-if ($state->{xdir}) {
-	do_source($state, $state->{xdir}, 'xenocara', 
-	    qw(xbase xetc xfont xserv xshare));
-}
-if ($state->{releasedir}) {
-	do_release($state);
+if ($state->{fatals}) {
+	$state->fatal("Files not found, can't continue");
 }
 
 if ($state->{portsdir}) {

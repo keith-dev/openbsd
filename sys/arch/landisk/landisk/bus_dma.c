@@ -1,4 +1,4 @@
-/*	$OpenBSD: bus_dma.c,v 1.9 2010/04/21 03:03:26 deraadt Exp $	*/
+/*	$OpenBSD: bus_dma.c,v 1.11 2014/07/12 18:44:42 tedu Exp $	*/
 /*	$NetBSD: bus_dma.c,v 1.1 2006/09/01 21:26:18 uwe Exp $	*/
 
 /*
@@ -126,7 +126,7 @@ _bus_dmamap_destroy(bus_dma_tag_t t, bus_dmamap_t map)
 
 	DPRINTF(("bus_dmamap_destroy: t = %p, map = %p\n", t, map));
 
-	free(map, M_DEVBUF);
+	free(map, M_DEVBUF, 0);
 }
 
 static inline int
@@ -628,6 +628,7 @@ _bus_dmamem_map(bus_dma_tag_t t, bus_dma_segment_t *segs, int nsegs,
 	vaddr_t va;
 	bus_addr_t addr;
 	int curseg;
+	const struct kmem_dyn_mode *kd;
 
 	DPRINTF(("bus_dmamem_map: t = %p, segs = %p, nsegs = %d, size = %d, kvap = %p, flags = %x\n", t, segs, nsegs, size, kvap, flags));
 
@@ -647,8 +648,8 @@ _bus_dmamem_map(bus_dma_tag_t t, bus_dma_segment_t *segs, int nsegs,
 
 	/* Always round the size. */
 	size = round_page(size);
-
-	va = uvm_km_valloc(kernel_map, size);
+	kd = flags & BUS_DMA_NOWAIT ? &kd_trylock : &kd_waitok;
+	va = (vaddr_t)km_alloc(size, &kv_any, &kp_none, kd);
 	if (va == 0)
 		return (ENOMEM);
 
@@ -691,7 +692,7 @@ _bus_dmamem_unmap(bus_dma_tag_t t, caddr_t kva, size_t size)
 	size = round_page(size);
 	pmap_kremove((vaddr_t)kva, size);
 	pmap_update(pmap_kernel());
-	uvm_km_free(kernel_map, (vaddr_t)kva, size);
+	km_free(kva, size, &kv_any, &kp_none);
 }
 
 paddr_t

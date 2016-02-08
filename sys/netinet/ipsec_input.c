@@ -1,4 +1,4 @@
-/*	$OpenBSD: ipsec_input.c,v 1.119 2014/01/09 06:29:06 tedu Exp $	*/
+/*	$OpenBSD: ipsec_input.c,v 1.122 2014/07/22 11:06:10 mpi Exp $	*/
 /*
  * The authors of this code are John Ioannidis (ji@tla.org),
  * Angelos D. Keromytis (kermit@csd.uch.gr) and
@@ -56,7 +56,6 @@
 #endif
 
 #include <netinet/in.h>
-#include <netinet/in_systm.h>
 #include <netinet/ip.h>
 #include <netinet/ip_var.h>
 #include <netinet/ip_icmp.h>
@@ -235,7 +234,7 @@ ipsec_common_input(struct mbuf *m, int skip, int protoff, int af, int sproto,
 	}
 
 	s = splsoftnet();
-	tdbp = gettdb(rtable_l2(m->m_pkthdr.rdomain),
+	tdbp = gettdb(rtable_l2(m->m_pkthdr.ph_rtableid),
 	    spi, &dst_address, sproto);
 	if (tdbp == NULL) {
 		splx(s);
@@ -702,7 +701,7 @@ ipsec_common_input_cb(struct mbuf *m, struct tdb *tdbp, int skip, int protoff,
 			hdr.flags = m->m_flags & (M_AUTH|M_CONF);
 
 			bpf_mtap_hdr(encif->if_bpf, (char *)&hdr,
-			    ENC_HDRLEN, m, BPF_DIRECTION_IN);
+			    ENC_HDRLEN, m, BPF_DIRECTION_IN, NULL);
 		}
 	}
 #endif

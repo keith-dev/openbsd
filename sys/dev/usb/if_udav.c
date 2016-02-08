@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_udav.c,v 1.65 2014/01/22 04:13:22 sasano Exp $ */
+/*	$OpenBSD: if_udav.c,v 1.67 2014/07/13 15:52:49 mpi Exp $ */
 /*	$NetBSD: if_udav.c,v 1.3 2004/04/23 17:25:25 itojun Exp $	*/
 /*	$nabe: if_udav.c,v 1.3 2003/08/21 16:57:19 nabe Exp $	*/
 /*
@@ -65,12 +65,8 @@
 #include <net/bpf.h>
 #endif
 
-#ifdef INET
 #include <netinet/in.h>
-#include <netinet/in_systm.h>
-#include <netinet/ip.h>
 #include <netinet/if_ether.h>
-#endif
 
 #include <dev/mii/mii.h>
 #include <dev/mii/miivar.h>
@@ -82,23 +78,16 @@
 
 #include <dev/usb/if_udavreg.h>
 
+int udav_match(struct device *, void *, void *);
+void udav_attach(struct device *, struct device *, void *);
+int udav_detach(struct device *, int);
 
-/* Function declarations */
-int udav_match(struct device *, void *, void *); 
-void udav_attach(struct device *, struct device *, void *); 
-int udav_detach(struct device *, int); 
-int udav_activate(struct device *, int); 
+struct cfdriver udav_cd = {
+	NULL, "udav", DV_IFNET
+};
 
-struct cfdriver udav_cd = { 
-	NULL, "udav", DV_IFNET 
-}; 
-
-const struct cfattach udav_ca = { 
-	sizeof(struct udav_softc), 
-	udav_match, 
-	udav_attach, 
-	udav_detach, 
-	udav_activate, 
+const struct cfattach udav_ca = {
+	sizeof(struct udav_softc), udav_match, udav_attach, udav_detach
 };
 
 int udav_openpipes(struct udav_softc *);
@@ -716,21 +705,6 @@ udav_reset(struct udav_softc *sc)
 		delay(10);	/* XXX */
 	}
 	delay(10000);		/* XXX */
-}
-
-int
-udav_activate(struct device *self, int act)
-{
-	struct udav_softc *sc = (struct udav_softc *)self;
-
-	DPRINTF(("%s: %s: enter, act=%d\n", sc->sc_dev.dv_xname,
-		 __func__, act));
-	switch (act) {
-	case DVACT_DEACTIVATE:
-		usbd_deactivate(sc->sc_udev);
-		break;
-	}
-	return (0);
 }
 
 #define UDAV_BITS	6

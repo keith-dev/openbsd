@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.22 2013/12/28 02:51:06 deraadt Exp $
+#	$OpenBSD: Makefile,v 1.26 2014/07/15 22:14:37 deraadt Exp $
 
 MAN=	cdboot.8
 
@@ -10,9 +10,10 @@ PROG=	cdboot
 SRCS=	srt0.S boot.c conf.c
 LD?=	ld
 SIZE?=	size
-LDFLAGS+=-nostdlib -Bstatic -Ttext $(LINKADDR) -N -x -nopie 
-LDFLAGS+=-melf_i386 -L/usr/libdata 
+LDFLAGS+=-nostdlib -Bstatic -Ttext $(LINKADDR) -N -x -nopie
+LDFLAGS+=-melf_i386 -L/usr/libdata
 INSTALL_STRIP=
+BINMODE=644
 
 .PATH:	${SADIR}/libsa
 SRCS+=	machdep.c dev_i386.c exec_i386.c cmd_i386.c
@@ -24,7 +25,7 @@ SRCS+=	softraid.c
 SRCS+=	cmd.c vars.c bootarg.c
 
 .PATH:	${S}/lib/libsa
-SRCS+=	alloc.c exit.c strcmp.c strlen.c \
+SRCS+=	alloc.c exit.c getchar.c putchar.c strcmp.c strlen.c \
 	strncmp.c memcmp.c memcpy.c memset.c printf.c snprintf.c \
 	strerror.c strncpy.c strtol.c strtoll.c ctime.c strlcpy.c
 SRCS+=	close.c closeall.c dev.c disklabel.c dkcksum.c fstat.c lseek.c \

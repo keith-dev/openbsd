@@ -1,4 +1,4 @@
-/*	$OpenBSD: pcap.c,v 1.13 2012/05/25 01:58:08 lteo Exp $	*/
+/*	$OpenBSD: pcap.c,v 1.15 2014/06/26 04:03:33 lteo Exp $	*/
 
 /*
  * Copyright (c) 1993, 1994, 1995, 1996, 1997, 1998
@@ -265,7 +265,8 @@ pcap_list_datalinks(pcap_t *p, int **dlt_buffer)
 		**dlt_buffer = p->linktype;
 		return (1);
 	} else {
-		*dlt_buffer = (int*)calloc(sizeof(**dlt_buffer), p->dlt_count);
+		*dlt_buffer = reallocarray(NULL, sizeof(**dlt_buffer),
+		    p->dlt_count);
 		if (*dlt_buffer == NULL) {
 			(void)snprintf(p->errbuf, sizeof(p->errbuf),
 			    "malloc: %s", pcap_strerror(errno));
@@ -612,10 +613,9 @@ pcap_open_dead(int linktype, int snaplen)
 {
 	pcap_t *p;
 
-	p = malloc(sizeof(*p));
+	p = calloc(1, sizeof(*p));
 	if (p == NULL)
 		return NULL;
-	memset (p, 0, sizeof(*p));
 	p->snapshot = snaplen;
 	p->linktype = linktype;
 	p->fd = -1;

@@ -1,4 +1,4 @@
-/*	$OpenBSD: ucycom.c,v 1.24 2013/11/15 08:25:31 pirofti Exp $	*/
+/*	$OpenBSD: ucycom.c,v 1.29 2014/07/12 20:26:33 mpi Exp $	*/
 /*	$NetBSD: ucycom.c,v 1.3 2005/08/05 07:27:47 skrll Exp $	*/
 
 /*
@@ -152,21 +152,16 @@ const struct usb_devno ucycom_devs[] = {
 	{ USB_VENDOR_DELORME, USB_PRODUCT_DELORME_EMLT20 },
 };
 
-int ucycom_match(struct device *, void *, void *); 
-void ucycom_attach(struct device *, struct device *, void *); 
-int ucycom_detach(struct device *, int); 
-int ucycom_activate(struct device *, int); 
+int ucycom_match(struct device *, void *, void *);
+void ucycom_attach(struct device *, struct device *, void *);
+int ucycom_detach(struct device *, int);
 
-struct cfdriver ucycom_cd = { 
-	NULL, "ucycom", DV_DULL 
-}; 
+struct cfdriver ucycom_cd = {
+	NULL, "ucycom", DV_DULL
+};
 
-const struct cfattach ucycom_ca = { 
-	sizeof(struct ucycom_softc), 
-	ucycom_match, 
-	ucycom_attach, 
-	ucycom_detach, 
-	ucycom_activate, 
+const struct cfattach ucycom_ca = {
+	sizeof(struct ucycom_softc), ucycom_match, ucycom_attach, ucycom_detach
 };
 
 int
@@ -174,7 +169,9 @@ ucycom_match(struct device *parent, void *match, void *aux)
 {
 	struct uhidev_attach_arg *uha = aux;
 
-	DPRINTF(("ucycom match\n"));
+	if (uha->reportid == UHIDEV_CLAIM_ALLREPORTID)
+		return (UMATCH_NONE);
+
 	return (usb_lookup(ucycom_devs, uha->uaa->vendor, uha->uaa->product) != NULL ?
 	    UMATCH_VENDOR_PRODUCT : UMATCH_NONE);
 }
@@ -299,11 +296,11 @@ ucycom_close(void *addr, int portno)
 
 	s = splusb();
 	if (sc->sc_obuf != NULL) {
-		free(sc->sc_obuf, M_USBDEV);
+		free(sc->sc_obuf, M_USBDEV, 0);
 		sc->sc_obuf = NULL;
 	}
 	if (sc->sc_ibuf != NULL) {
-		free(sc->sc_ibuf, M_USBDEV);
+		free(sc->sc_ibuf, M_USBDEV, 0);
 		sc->sc_ibuf = NULL;
 	}
 	splx(s);
@@ -457,7 +454,7 @@ ucycom_param(void *addr, int portno, struct termios *t)
 	report[3] = (baud >> 24) & 0xff;
 	report[4] = cfg;
 	err = uhidev_set_report(&sc->sc_hdev, UHID_FEATURE_REPORT,
-	    report, sc->sc_flen);
+	    sc->sc_hdev.sc_report_id, report, sc->sc_flen);
 	if (err != 0) {
 		DPRINTF(("ucycom_param: uhidev_set_report %d %s\n",
 		    err, usbd_errstr(err)));
@@ -560,7 +557,7 @@ ucycom_get_cfg(struct ucycom_softc *sc)
 	uint8_t report[5];
 
 	err = uhidev_get_report(&sc->sc_hdev, UHID_FEATURE_REPORT,
-	    report, sc->sc_flen);
+	    sc->sc_hdev.sc_report_id, report, sc->sc_flen);
 	cfg = report[4];
 	baud = (report[3] << 24) + (report[2] << 16) + (report[1] << 8) + report[0];
 	DPRINTF(("ucycom_configure: device reports %d baud, %d-%c-%d (%d)\n", baud,
@@ -580,20 +577,9 @@ ucycom_detach(struct device *self, int flags)
 		config_detach(sc->sc_subdev, flags);
 		sc->sc_subdev = NULL;
 	}
-	return (0);
-}
 
-int
-ucycom_activate(struct device *self, int act)
-{
-	struct ucycom_softc *sc = (struct ucycom_softc *)self;
+	if (sc->sc_hdev.sc_state & UHIDEV_OPEN)
+		uhidev_close(&sc->sc_hdev);
 
-	DPRINTFN(5,("ucycom_activate: %d\n", act));
-
-	switch (act) {
-	case DVACT_DEACTIVATE:
-		usbd_deactivate(sc->sc_udev);
-		break;
-	}
 	return (0);
 }

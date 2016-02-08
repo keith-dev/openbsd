@@ -1,4 +1,4 @@
-/*	$OpenBSD: uticom.c,v 1.23 2013/11/15 10:17:39 pirofti Exp $	*/
+/*	$OpenBSD: uticom.c,v 1.26 2014/07/12 21:24:33 mpi Exp $	*/
 /*
  * Copyright (c) 2005 Dmitry Komissaroff <dxi@mail.ru>.
  *
@@ -45,9 +45,8 @@
 
 #include <dev/usb/ucomvar.h>
 
-#ifdef USB_DEBUG
-static int	uticomdebug = 0;
-
+#ifdef UTICOM_DEBUG
+static int uticomdebug = 0;
 #define DPRINTFN(n, x)	do { if (uticomdebug > (n)) printf x; } while (0)
 #else
 #define DPRINTFN(n, x)
@@ -176,18 +175,13 @@ struct ucom_methods uticom_methods = {
 int	uticom_match(struct device *, void *, void *);
 void	uticom_attach(struct device *, struct device *, void *);
 int	uticom_detach(struct device *, int);
-int	uticom_activate(struct device *, int);
 
 struct cfdriver uticom_cd = {
 	NULL, "uticom", DV_DULL
 };
 
 const struct cfattach uticom_ca = {
-	sizeof(struct uticom_softc),
-	uticom_match,
-	uticom_attach,
-	uticom_detach,
-	uticom_activate,
+	sizeof(struct uticom_softc), uticom_match, uticom_attach, uticom_detach
 };
 
 static const struct usb_devno uticom_devs[] = {
@@ -459,19 +453,6 @@ fwload_done:
 }
 
 int
-uticom_activate(struct device *self, int act)
-{
-	struct uticom_softc *sc = (struct uticom_softc *)self;
-
-	switch (act) {
-	case DVACT_DEACTIVATE:
-		usbd_deactivate(sc->sc_udev);
-		break;
-	}
-	return (0);
-}
-
-int
 uticom_detach(struct device *self, int flags)
 {
 	struct uticom_softc *sc = (struct uticom_softc *)self;
@@ -487,7 +468,7 @@ uticom_detach(struct device *self, int flags)
 	if (sc->sc_intr_pipe != NULL) {
 		usbd_abort_pipe(sc->sc_intr_pipe);
 		usbd_close_pipe(sc->sc_intr_pipe);
-		free(sc->sc_intr_buf, M_USBDEV);
+		free(sc->sc_intr_buf, M_USBDEV, 0);
 		sc->sc_intr_pipe = NULL;
 	}
 
@@ -787,7 +768,7 @@ uticom_close(void *addr, int portno)
 		if (err)
 			printf("%s: close interrupt pipe failed: %s\n",
 			    sc->sc_dev.dv_xname, usbd_errstr(err));
-		free(sc->sc_intr_buf, M_USBDEV);
+		free(sc->sc_intr_buf, M_USBDEV, 0);
 		sc->sc_intr_pipe = NULL;
 	}
 }
@@ -921,7 +902,7 @@ uticom_download_fw(struct uticom_softc *sc, int pipeno,
 	if (!buffer) {
 		printf("%s: uticom_download_fw: out of memory\n",
 		    sc->sc_dev.dv_xname);
-		free(firmware, M_DEVBUF);
+		free(firmware, M_DEVBUF, 0);
 		return ENOMEM;
 	}
 
@@ -971,12 +952,12 @@ uticom_download_fw(struct uticom_softc *sc, int pipeno,
 		    sc->sc_dev.dv_xname, usbd_errstr(err));
 
 finish:
-	free(firmware, M_DEVBUF);
+	free(firmware, M_DEVBUF, 0);
 	usbd_free_buffer(oxfer);
 	usbd_free_xfer(oxfer);
 	oxfer = NULL;
 	usbd_abort_pipe(pipe);
 	usbd_close_pipe(pipe);
-	free(buffer, M_USBDEV);
+	free(buffer, M_USBDEV, 0);
 	return err;
 }

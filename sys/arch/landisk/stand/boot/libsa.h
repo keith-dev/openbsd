@@ -1,4 +1,4 @@
-/*	$OpenBSD: libsa.h,v 1.4 2011/03/13 00:13:53 deraadt Exp $	*/
+/*	$OpenBSD: libsa.h,v 1.7 2014/07/17 13:14:06 miod Exp $	*/
 
 /*
  * Copyright (c) 2006 Michael Shalayeff
@@ -29,8 +29,13 @@ int readsects(int dev, uint32_t lba, void *buf, size_t size);
 int blkdevopen(struct open_file *, ...);
 int blkdevclose(struct open_file *);
 int blkdevstrategy(void *, int, daddr32_t, size_t, void *, size_t *);
-void scif_init(unsigned int);
-int scif_getc(void);
-void scif_putc(int);
+int  getc(void);
+void putc(int);
 void cache_flush(void);
 void cache_disable(void);
+
+void	scif_cnprobe(struct consdev *);
+void	scif_cninit(struct consdev *);
+int	scif_cngetc(dev_t);
+void	scif_cnputc(dev_t, int);
+void	scif_init(unsigned int);

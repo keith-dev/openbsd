@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_pflog.c,v 1.58 2013/11/16 00:36:01 chl Exp $	*/
+/*	$OpenBSD: if_pflog.c,v 1.62 2014/07/22 11:06:09 mpi Exp $	*/
 /*
  * The authors of this code are John Ioannidis (ji@tla.org),
  * Angelos D. Keromytis (kermit@csd.uch.gr) and 
@@ -51,7 +51,6 @@
 
 #ifdef	INET
 #include <netinet/in.h>
-#include <netinet/in_systm.h>
 #include <netinet/ip.h>
 #include <netinet/tcp.h>
 #include <netinet/udp.h>
@@ -85,6 +84,7 @@ int	pflogioctl(struct ifnet *, u_long, caddr_t);
 void	pflogstart(struct ifnet *);
 int	pflog_clone_create(struct if_clone *, int);
 int	pflog_clone_destroy(struct ifnet *);
+void	pflog_bpfcopy(const void *, void *, size_t);
 
 LIST_HEAD(, pflog_softc)	pflogif_list;
 struct if_clone	pflog_cloner =
@@ -128,7 +128,7 @@ pflogifs_resize(size_t n)
 			p[i] = NULL;
 
 	if (pflogifs)
-		free(pflogifs, M_DEVBUF);
+		free(pflogifs, M_DEVBUF, 0);
 	pflogifs = p;
 	npflogifs = n;
 	return (0);
@@ -192,7 +192,7 @@ pflog_clone_destroy(struct ifnet *ifp)
 	splx(s);
 
 	if_detach(ifp);
-	free(pflogif, M_DEVBUF);
+	free(pflogif, M_DEVBUF, 0);
 	return (0);
 }
 
@@ -298,7 +298,8 @@ pflog_packet(struct pf_pdesc *pd, u_int8_t reason, struct pf_rule *rm,
 	ifn->if_opackets++;
 	ifn->if_obytes += pd->m->m_pkthdr.len;
 
-	bpf_mtap_pflog(ifn->if_bpf, (caddr_t)&hdr, pd->m);
+	bpf_mtap_hdr(ifn->if_bpf, (caddr_t)&hdr, PFLOG_HDRLEN, pd->m,
+	    BPF_DIRECTION_OUT, pflog_bpfcopy);
 #endif
 
 	return (0);
@@ -440,7 +441,7 @@ pflog_bpfcopy(const void *src_arg, void *dst_arg, size_t len)
 	if (pd.virtual_proto != PF_VPROTO_FRAGMENT &&
 	    (pfloghdr->rewritten = pf_translate(&pd, &pfloghdr->saddr,
 	    pfloghdr->sport, &pfloghdr->daddr, pfloghdr->dport, 0,
-	    pfloghdr->dir, pd.m))) {
+	    pfloghdr->dir))) {
 		m_copyback(pd.m, pd.off, min(pd.m->m_len - pd.off, pd.hdrlen),
 		    pd.hdr.any, M_NOWAIT);
 #if INET && INET6

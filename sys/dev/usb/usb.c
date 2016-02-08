@@ -1,4 +1,4 @@
-/*	$OpenBSD: usb.c,v 1.93 2013/12/06 21:03:05 deraadt Exp $	*/
+/*	$OpenBSD: usb.c,v 1.100 2014/07/12 18:48:52 tedu Exp $	*/
 /*	$NetBSD: usb.c,v 1.77 2003/01/01 00:10:26 thorpej Exp $	*/
 
 /*
@@ -92,6 +92,7 @@ struct usb_softc {
 	struct device	 sc_dev;	/* base device */
 	struct usbd_bus  *sc_bus;	/* USB controller */
 	struct usbd_port sc_port;	/* dummy port for root hub */
+	int		 sc_speed;
 
 	struct usb_task	 sc_explore_task;
 
@@ -120,40 +121,34 @@ void		 usb_fill_di_task(void *);
 void		 usb_fill_udc_task(void *);
 void		 usb_fill_udf_task(void *);
 
-int		 usb_match(struct device *, void *, void *); 
-void		 usb_attach(struct device *, struct device *, void *); 
-int		 usb_detach(struct device *, int); 
-int		 usb_activate(struct device *, int); 
+int		 usb_match(struct device *, void *, void *);
+void		 usb_attach(struct device *, struct device *, void *);
+int		 usb_detach(struct device *, int);
+int		 usb_activate(struct device *, int);
 
-struct cfdriver usb_cd = { 
-	NULL, "usb", DV_DULL 
-}; 
+int		 usb_attach_roothub(struct usb_softc *);
+void		 usb_detach_roothub(struct usb_softc *);
 
-const struct cfattach usb_ca = { 
-	sizeof(struct usb_softc), 
-	usb_match, 
-	usb_attach, 
-	usb_detach, 
-	usb_activate, 
+struct cfdriver usb_cd = {
+	NULL, "usb", DV_DULL
+};
+
+const struct cfattach usb_ca = {
+	sizeof(struct usb_softc), usb_match, usb_attach, usb_detach,
+	usb_activate,
 };
 
 int
 usb_match(struct device *parent, void *match, void *aux)
 {
-	DPRINTF(("usbd_match\n"));
-	return (UMATCH_GENERIC);
+	return (1);
 }
 
 void
 usb_attach(struct device *parent, struct device *self, void *aux)
 {
 	struct usb_softc *sc = (struct usb_softc *)self;
-	struct usbd_device *dev;
-	usbd_status err;
 	int usbrev;
-	int speed;
-
-	DPRINTF(("usbd_attach\n"));
 
 	if (usb_nbuses == 0) {
 		rw_init(&usbpalock, "usbpalock");
@@ -174,10 +169,13 @@ usb_attach(struct device *parent, struct device *self, void *aux)
 	switch (usbrev) {
 	case USBREV_1_0:
 	case USBREV_1_1:
-		speed = USB_SPEED_FULL;
+		sc->sc_speed = USB_SPEED_FULL;
 		break;
 	case USBREV_2_0:
-		speed = USB_SPEED_HIGH;
+		sc->sc_speed = USB_SPEED_HIGH;
+		break;
+	case USBREV_3_0:
+		sc->sc_speed = USB_SPEED_SUPER;
 		break;
 	default:
 		printf(", not supported\n");
@@ -206,17 +204,10 @@ usb_attach(struct device *parent, struct device *self, void *aux)
 		return;
 	}
 
-	err = usbd_new_device(&sc->sc_dev, sc->sc_bus, 0, speed, 0,
-		  &sc->sc_port);
-	if (!err) {
-		dev = sc->sc_port.device;
-		if (dev->hub == NULL) {
-			sc->sc_bus->dying = 1;
-			printf("%s: root device is not a hub\n",
-			       sc->sc_dev.dv_xname);
-			return;
-		}
-		sc->sc_bus->root_hub = dev;
+
+
+	if (!usb_attach_roothub(sc)) {
+		struct usbd_device *dev = sc->sc_bus->root_hub;
 #if 1
 		/*
 		 * Turning this code off will delay attachment of USB devices
@@ -226,11 +217,8 @@ usb_attach(struct device *parent, struct device *self, void *aux)
 		if (cold && (sc->sc_dev.dv_cfdata->cf_flags & 1))
 			dev->hub->explore(sc->sc_bus->root_hub);
 #endif
-	} else {
-		printf("%s: root hub problem, error=%d\n",
-		       sc->sc_dev.dv_xname, err);
-		sc->sc_bus->dying = 1;
 	}
+
 	if (cold)
 		sc->sc_bus->use_polling--;
 
@@ -241,6 +229,45 @@ usb_attach(struct device *parent, struct device *self, void *aux)
 		config_pending_incr();
 		usb_needs_explore(sc->sc_bus->root_hub, 1);
 	}
+}
+
+int
+usb_attach_roothub(struct usb_softc *sc)
+{
+	struct usbd_device *dev;
+
+	if (usbd_new_device(&sc->sc_dev, sc->sc_bus, 0, sc->sc_speed, 0,
+	    &sc->sc_port)) {
+		printf("%s: root hub problem\n", sc->sc_dev.dv_xname);
+		sc->sc_bus->dying = 1;
+		return (1);
+	}
+
+	dev = sc->sc_port.device;
+	if (dev->hub == NULL) {
+		printf("%s: root device is not a hub\n", sc->sc_dev.dv_xname);
+		sc->sc_bus->dying = 1;
+		return (1);
+	}
+	sc->sc_bus->root_hub = dev;
+
+	return (0);
+}
+
+void
+usb_detach_roothub(struct usb_softc *sc)
+{
+	/*
+	 * To avoid races with the usb task thread, mark the root hub
+	 * as disconnecting and schedule an exploration task to detach
+	 * it.
+	 */
+	sc->sc_bus->flags |= USB_BUS_DISCONNECTING;
+	usb_needs_explore(sc->sc_bus->root_hub, 0);
+
+	usb_wait_task(sc->sc_bus->root_hub, &sc->sc_explore_task);
+
+	sc->sc_bus->root_hub = NULL;
 }
 
 void
@@ -265,12 +292,12 @@ usb_add_task(struct usbd_device *dev, struct usb_task *task)
 {
 	int s;
 
-	DPRINTFN(2,("%s: task=%p state=%d type=%d\n", __func__, task,
-	    task->state, task->type));
-
 	/* Don't add task if the device's root hub is dying. */
 	if (usbd_is_dying(dev))
 		return;
+
+	DPRINTFN(2,("%s: task=%p state=%d type=%d\n", __func__, task,
+	    task->state, task->type));
 
 	s = splusb();
 	if (!(task->state & USB_TASK_STATE_ONQ)) {
@@ -300,11 +327,11 @@ usb_rem_task(struct usbd_device *dev, struct usb_task *task)
 {
 	int s;
 
-	DPRINTFN(2,("%s: task=%p state=%d type=%d\n", __func__, task,
-	    task->state, task->type));
-
 	if (!(task->state & USB_TASK_STATE_ONQ))
 		return;
+
+	DPRINTFN(2,("%s: task=%p state=%d type=%d\n", __func__, task,
+	    task->state, task->type));
 
 	s = splusb();
 
@@ -515,7 +542,7 @@ usb_fill_udc_task(void *arg)
 	if (cdesc == NULL)
 		return;
 	udc->udc_desc = *cdesc;
-	free(cdesc, M_TEMP);
+	free(cdesc, M_TEMP, 0);
 }
 
 void
@@ -634,7 +661,7 @@ usbioctl(dev_t devt, u_long cmd, caddr_t data, int flag, struct proc *p)
 		}
 	ret:
 		if (ptr)
-			free(ptr, M_TEMP);
+			free(ptr, M_TEMP, 0);
 		return (error);
 	}
 
@@ -756,7 +783,7 @@ usbioctl(dev_t devt, u_long cmd, caddr_t data, int flag, struct proc *p)
 		uio.uio_rw = UIO_READ;
 		uio.uio_procp = p;
 		error = uiomove((void *)cdesc, len, &uio);
-		free(cdesc, M_TEMP);
+		free(cdesc, M_TEMP, 0);
 		return (error);
 	}
 
@@ -814,7 +841,20 @@ usb_explore(void *v)
 			usb_delay_ms(sc->sc_bus, pwrdly - waited_ms);
 	}
 
-	sc->sc_bus->root_hub->hub->explore(sc->sc_bus->root_hub);
+	if (sc->sc_bus->flags & USB_BUS_DISCONNECTING) {
+		/* Prevent new tasks from being scheduled. */
+		sc->sc_bus->dying = 1;
+
+		/* Make all devices disconnect. */
+		if (sc->sc_port.device != NULL) {
+			usbd_detach(sc->sc_port.device, (struct device *)sc);
+			sc->sc_port.device = NULL;
+		}
+
+		sc->sc_bus->flags &= ~USB_BUS_DISCONNECTING;
+	} else {
+		sc->sc_bus->root_hub->hub->explore(sc->sc_bus->root_hub);
+	}
 
 	if (sc->sc_bus->flags & USB_BUS_CONFIG_PENDING) {
 		DPRINTF(("%s: %s: first explore done\n", __func__,
@@ -866,23 +906,26 @@ int
 usb_activate(struct device *self, int act)
 {
 	struct usb_softc *sc = (struct usb_softc *)self;
-	struct usbd_device *dev = sc->sc_port.device;
-	int i, rv = 0, r;
+	int rv = 0;
 
 	switch (act) {
-	case DVACT_DEACTIVATE:
-		sc->sc_bus->dying = 1;
-		if (dev != NULL && dev->cdesc != NULL &&
-		    dev->subdevs != NULL) {
-			for (i = 0; dev->subdevs[i]; i++) {
-				r = config_deactivate(dev->subdevs[i]);
-				if (r)
-					rv = r;
-			}
-		}
+	case DVACT_QUIESCE:
+		if (sc->sc_bus->root_hub != NULL)
+			usb_detach_roothub(sc);
 		break;
 	case DVACT_RESUME:
-		usb_needs_explore(sc->sc_bus->root_hub, 0);
+		sc->sc_bus->dying = 0;
+
+		/*
+		 * Make sure the root hub is present before interrupts
+		 * get enabled.   As long as the bus is in polling mode
+		 * it is safe to call usbd_new_device() now since root
+		 * hub transfers do not need to sleep.
+		 */
+		sc->sc_bus->use_polling++;
+		if (!usb_attach_roothub(sc))
+			usb_needs_explore(sc->sc_bus->root_hub, 0);
+		sc->sc_bus->use_polling--;
 		break;
 	default:
 		rv = config_activate_children(self, act);
@@ -896,16 +939,8 @@ usb_detach(struct device *self, int flags)
 {
 	struct usb_softc *sc = (struct usb_softc *)self;
 
-	DPRINTF(("usb_detach: start\n"));
-
-	sc->sc_bus->dying = 1;
-
 	if (sc->sc_bus->root_hub != NULL) {
-		/* Make all devices disconnect. */
-		if (sc->sc_port.device != NULL)
-			usb_disconnect_port(&sc->sc_port, self);
-
-		usb_rem_wait_task(sc->sc_bus->root_hub, &sc->sc_explore_task);
+		usb_detach_roothub(sc);
 
 		if (--usb_nbuses == 0) {
 			usb_run_tasks = usb_run_abort_tasks = 0;

@@ -1,4 +1,4 @@
-/*	$OpenBSD: trap.c,v 1.127 2013/04/10 20:55:34 miod Exp $	*/
+/*	$OpenBSD: trap.c,v 1.136 2014/07/07 19:01:26 miod Exp $	*/
 
 /*
  * Copyright (c) 1998-2004 Michael Shalayeff
@@ -31,12 +31,12 @@
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/syscall.h>
-#include <sys/syscall_mi.h>
 #include <sys/proc.h>
 #include <sys/signalvar.h>
 #include <sys/user.h>
+#include <sys/syscall_mi.h>
 
-#include <uvm/uvm.h>
+#include <uvm/uvm_extern.h>
 
 #include <machine/autoconf.h>
 
@@ -140,13 +140,7 @@ ast(struct proc *p)
 	if (p->p_md.md_astpending) {
 		p->p_md.md_astpending = 0;
 		uvmexp.softs++;
-		if (p->p_flag & P_OWEUPC) {
-			KERNEL_LOCK();
-			ADDUPROF(p);
-			KERNEL_UNLOCK();
-		}
-		if (curcpu()->ci_want_resched)
-			preempt(NULL);
+		mi_ast(p, curcpu()->ci_want_resched);
 	}
 
 }
@@ -219,6 +213,9 @@ trap(int type, struct trapframe *frame)
 		mtctl(frame->tf_eiem, CR_EIEM);
 	}
 
+	if (type & T_USER)
+		refreshcreds(p);
+
 	switch (type) {
 	case T_NONEXIST:
 	case T_NONEXIST | T_USER:
@@ -267,13 +264,14 @@ trap(int type, struct trapframe *frame)
 	case T_IBREAK | T_USER:
 	case T_DBREAK | T_USER: {
 		int code = TRAP_BRKPT;
+
+		KERNEL_LOCK();
 #ifdef PTRACE
 		ss_clear_breakpoints(p);
 		if (opcode == SSBREAKPOINT)
 			code = TRAP_TRACE;
 #endif
 		/* pass to user debugger */
-		KERNEL_LOCK();
 		trapsignal(p, SIGTRAP, type & ~T_USER, code, sv);
 		KERNEL_UNLOCK();
 		}
@@ -281,10 +279,9 @@ trap(int type, struct trapframe *frame)
 
 #ifdef PTRACE
 	case T_TAKENBR | T_USER:
-		ss_clear_breakpoints(p);
-
-		/* pass to user debugger */
 		KERNEL_LOCK();
+		ss_clear_breakpoints(p);
+		/* pass to user debugger */
 		trapsignal(p, SIGTRAP, type & ~T_USER, TRAP_TRACE, sv);
 		KERNEL_UNLOCK();
 		break;
@@ -462,7 +459,7 @@ trap(int type, struct trapframe *frame)
 			trapsignal(p, SIGILL, type & ~T_USER, ILL_ILLTRP, sv);
 			KERNEL_UNLOCK();
 		} else
-			panic("trap: %s @ 0x%x:0x%x for 0x%x:0x%x irr 0x%08x",
+			panic("trap: %s @ 0x%lx:0x%lx for 0x%x:0x%lx irr 0x%08x",
 			    tts, frame->tf_iisq_head, frame->tf_iioq_head,
 			    space, va, opcode);
 		break;
@@ -798,8 +795,8 @@ syscall(struct trapframe *frame)
 		panic("syscall");
 
 	p->p_md.md_regs = frame;
-	nsys = p->p_emul->e_nsysent;
-	callp = p->p_emul->e_sysent;
+	nsys = p->p_p->ps_emul->e_nsysent;
+	callp = p->p_p->ps_emul->e_sysent;
 
 	argoff = 4; retq = 0;
 	switch (code = frame->tf_t1) {
@@ -833,50 +830,53 @@ syscall(struct trapframe *frame)
 	}
 
 	if (code < 0 || code >= nsys)
-		callp += p->p_emul->e_nosys;	/* bad syscall # */
+		callp += p->p_p->ps_emul->e_nosys;	/* bad syscall # */
 	else
 		callp += code;
 
 	if ((argsize = callp->sy_argsize)) {
+		register_t *s, *e, t;
 		int i;
 
-		for (i = 0, argsize -= argoff * 4;
-		    argsize > 0; i++, argsize -= 4) {
+		argsize -= argoff * 4;
+		if (argsize > 0) {
+			i = argsize / 4;
 			if ((error = copyin((void *)(frame->tf_sp +
-			    HPPA_FRAME_ARG(i + 4)), args + i + argoff, 4)))
+			    HPPA_FRAME_ARG(4 + i - 1)), args + argoff,
+			    argsize)))
 				goto bad;
+			/* reverse the args[] entries */
+			s = args + argoff;
+			e = s + i - 1;
+			while (s < e) {
+				t = *s;
+				*s = *e;
+				*e = t;
+				s++, e--;
+			}
 		}
 
 		/*
-		 * coming from syscall() or __syscall we must be
-		 * having one of those w/ a 64 bit arguments,
-		 * which needs a word swap due to the order
-		 * of the arguments on the stack.
-		 * this assumes that none of 'em are called
-		 * by their normal syscall number, maybe a regress
-		 * test should be used, to watch the behaviour.
+		 * System calls with 64-bit arguments need a word swap
+		 * due to the order of the arguments on the stack.
 		 */
-		if (argoff < 4) {
-			int t;
+		i = 0;
+		switch (code) {
+		case SYS_lseek:		retq = 0;
+		case SYS_truncate:
+		case SYS_ftruncate:	i = 2;	break;
+		case SYS_preadv:
+		case SYS_pwritev:
+		case SYS_pread:
+		case SYS_pwrite:	i = 4;	break;
+		case SYS_mquery:
+		case SYS_mmap:		i = 6;	break;
+		}
 
-			i = 0;
-			switch (code) {
-			case SYS_lseek:		retq = 0;
-			case SYS_truncate:
-			case SYS_ftruncate:	i = 2;	break;
-			case SYS_preadv:
-			case SYS_pwritev:
-			case SYS_pread:
-			case SYS_pwrite:	i = 4;	break;
-			case SYS_mquery:
-			case SYS_mmap:		i = 6;	break;
-			}
-
-			if (i) {
-				t = args[i];
-				args[i] = args[i + 1];
-				args[i + 1] = t;
-			}
+		if (i) {
+			t = args[i];
+			args[i] = args[i + 1];
+			args[i + 1] = t;
 		}
 	}
 
@@ -911,7 +911,7 @@ syscall(struct trapframe *frame)
 #ifdef DIAGNOSTIC
 	if (curcpu()->ci_cpl != oldcpl) {
 		printf("WARNING: SPL (0x%x) NOT LOWERED ON "
-		    "syscall(0x%x, 0x%x, 0x%x, 0x%x...) EXIT, PID %d\n",
+		    "syscall(0x%x, 0x%lx, 0x%lx, 0x%lx...) EXIT, PID %d\n",
 		    curcpu()->ci_cpl, code, args[0], args[1], args[2],
 		    p->p_pid);
 		curcpu()->ci_cpl = oldcpl;

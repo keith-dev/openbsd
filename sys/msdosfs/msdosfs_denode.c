@@ -1,4 +1,4 @@
-/*	$OpenBSD: msdosfs_denode.c,v 1.47 2013/12/24 00:18:46 halex Exp $	*/
+/*	$OpenBSD: msdosfs_denode.c,v 1.49 2014/07/12 18:50:41 tedu Exp $	*/
 /*	$NetBSD: msdosfs_denode.c,v 1.23 1997/10/17 11:23:58 ws Exp $	*/
 
 /*-
@@ -58,8 +58,6 @@
 #include <sys/kernel.h>		/* defines "time" */
 #include <sys/dirent.h>
 #include <sys/namei.h>
-
-#include <uvm/uvm_extern.h>
 
 #include <msdosfs/bpb.h>
 #include <msdosfs/msdosfsmount.h>
@@ -595,7 +593,7 @@ msdosfs_reclaim(void *v)
 #if 0 /* XXX */
 	dep->de_flag = 0;
 #endif
-	free(dep, M_MSDOSFSNODE);
+	free(dep, M_MSDOSFSNODE, 0);
 	vp->v_data = NULL;
 	return (0);
 }

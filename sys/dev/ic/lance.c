@@ -1,4 +1,4 @@
-/*	$OpenBSD: lance.c,v 1.2 2013/11/26 09:50:33 mpi Exp $	*/
+/*	$OpenBSD: lance.c,v 1.4 2014/07/22 13:12:12 mpi Exp $	*/
 /*	$NetBSD: lance.c,v 1.46 2012/02/02 19:43:03 tls Exp $	*/
 
 /*-
@@ -83,8 +83,6 @@
 #ifdef INET
 #include <netinet/in.h>
 #include <netinet/if_ether.h>
-#include <netinet/in_systm.h>
-#include <netinet/ip.h>
 #endif
 
 #if NBPFILTER > 0
@@ -247,9 +245,9 @@ lance_config(struct lance_softc *sc)
 	if_attach(ifp);
 	ether_ifattach(ifp);
 
-	sc->sc_rbufaddr = malloc(sc->sc_nrbuf * sizeof(int), M_DEVBUF,
+	sc->sc_rbufaddr = mallocarray(sc->sc_nrbuf, sizeof(int), M_DEVBUF,
 	    M_WAITOK);
-	sc->sc_tbufaddr = malloc(sc->sc_ntbuf * sizeof(int), M_DEVBUF,
+	sc->sc_tbufaddr = mallocarray(sc->sc_ntbuf, sizeof(int), M_DEVBUF,
 	    M_WAITOK);
 }
 

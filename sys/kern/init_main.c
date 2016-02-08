@@ -1,4 +1,4 @@
-/*	$OpenBSD: init_main.c,v 1.204 2014/02/12 05:47:36 guenther Exp $	*/
+/*	$OpenBSD: init_main.c,v 1.216 2014/07/11 08:18:31 guenther Exp $	*/
 /*	$NetBSD: init_main.c,v 1.84.4.1 1996/06/02 09:08:06 mrg Exp $	*/
 
 /*
@@ -84,9 +84,6 @@
 
 #include <ufs/ufs/quota.h>
 
-
-#include <uvm/uvm.h>
-
 #include <net/if.h>
 #include <net/raw_cb.h>
 #include <net/netisr.h>
@@ -114,11 +111,10 @@ struct	session session0;
 struct	pgrp pgrp0;
 struct	proc proc0;
 struct	process process0;
-struct	pcred cred0;
 struct	plimit limit0;
 struct	vmspace vmspace0;
 struct	sigacts sigacts0;
-struct	proc *initproc;
+struct	process *initprocess;
 struct	proc *reaperproc;
 
 int	cmask = CMASK;
@@ -129,7 +125,7 @@ int	boothowto;
 struct	timespec boottime;
 int	ncpus =  1;
 int	ncpusfound = 1;			/* number of cpus we find */
-__volatile int start_init_exec;		/* semaphore for start_init() */
+volatile int start_init_exec;		/* semaphore for start_init() */
 
 #if !defined(NO_PROPOLICE)
 long	__guard_local __attribute__((section(".openbsd.randomdata")));
@@ -267,6 +263,7 @@ main(void *framep)
 	process0.ps_refcnt = 1;
 	p->p_p = pr = &process0;
 	LIST_INSERT_HEAD(&allprocess, pr, ps_list);
+	atomic_setbits_int(&pr->ps_flags, PS_SYSTEM);
 
 	/* Set the default routing table/domain. */
 	process0.ps_rtableid = 0;
@@ -285,7 +282,7 @@ main(void *framep)
 	atomic_setbits_int(&p->p_flag, P_SYSTEM);
 	p->p_stat = SONPROC;
 	pr->ps_nice = NZERO;
-	p->p_emul = &emul_native;
+	pr->ps_emul = &emul_native;
 	bcopy("swapper", p->p_comm, sizeof ("swapper"));
 
 	/* Init timeouts. */
@@ -293,17 +290,19 @@ main(void *framep)
 	timeout_set(&pr->ps_realit_to, realitexpire, pr);
 
 	/* Create credentials. */
-	p->p_cred = &cred0;
-	p->p_ucred = crget();
-	p->p_ucred->cr_ngroups = 1;	/* group 0 */
+	pr->ps_ucred = crget();
+	pr->ps_ucred->cr_ngroups = 1;	/* group 0 */
+
+	p->p_ucred = pr->ps_ucred;	/* prime the thread's cache */
+	crhold(p->p_ucred);
 
 	/* Initialize signal state for process 0. */
 	signal_init();
-	p->p_sigacts = &sigacts0;
-	siginit(p);
+	pr->ps_sigacts = &sigacts0;
+	siginit(pr);
 
 	/* Create the file descriptor table. */
-	p->p_fd = fdinit(NULL);
+	p->p_fd = pr->ps_fd = fdinit();
 
 	/* Create the limits structures. */
 	pr->ps_limit = &limit0;
@@ -323,7 +322,7 @@ main(void *framep)
 	/* Allocate a prototype map so we have something to fork. */
 	uvmspace_init(&vmspace0, pmap_kernel(), round_page(VM_MIN_ADDRESS),
 	    trunc_page(VM_MAX_ADDRESS), TRUE, TRUE);
-	p->p_vmspace = &vmspace0;
+	p->p_vmspace = pr->ps_vmspace = &vmspace0;
 
 	p->p_addr = proc0paddr;				/* XXX */
 
@@ -345,6 +344,9 @@ main(void *framep)
 	/* Initialize the interface/address trees */
 	ifinit();
 
+	/* Lock the kernel on behalf of proc0. */
+	KERNEL_LOCK();
+
 #if NMPATH > 0
 	/* Attach mpath before hardware */
 	config_rootfound("mpath", NULL);
@@ -364,9 +366,6 @@ main(void *framep)
 
 	/* Start real time and statistics clocks. */
 	initclocks();
-
-	/* Lock the kernel on behalf of proc0. */
-	KERNEL_LOCK();
 
 #ifdef SYSVSHM
 	/* Initialize System V style shared memory. */
@@ -432,15 +431,20 @@ main(void *framep)
 	 * wait for us to inform it that the root file system has been
 	 * mounted.
 	 */
-	if (fork1(p, FORK_FORK, NULL, 0, start_init, NULL, NULL,
-	    &initproc))
-		panic("fork init");
+	{
+		struct proc *initproc;
+
+		if (fork1(p, FORK_FORK, NULL, 0, start_init, NULL, NULL,
+		    &initproc))
+			panic("fork init");
+		initprocess = initproc->p_p;
+	}
 
 	randompid = 1;
 
 	/*
 	 * Create any kernel threads whose creation was deferred because
-	 * initproc had not yet been created.
+	 * initprocess had not yet been created.
 	 */
 	kthread_run_deferred_queue();
 
@@ -479,13 +483,13 @@ main(void *framep)
 	p->p_fd->fd_rdir = NULL;
 
 	/*
-	 * Now that root is mounted, we can fixup initproc's CWD
+	 * Now that root is mounted, we can fixup initprocess's CWD
 	 * info.  All other processes are kthreads, which merely
 	 * share proc0's CWD info.
 	 */
-	initproc->p_fd->fd_cdir = rootvnode;
-	vref(initproc->p_fd->fd_cdir);
-	initproc->p_fd->fd_rdir = NULL;
+	initprocess->ps_fd->fd_cdir = rootvnode;
+	vref(initprocess->ps_fd->fd_cdir);
+	initprocess->ps_fd->fd_rdir = NULL;
 
 	/*
 	 * Now can look at time, having had a chance to verify the time
@@ -604,7 +608,7 @@ start_init(void *arg)
 	check_console(p);
 
 	/* process 0 ignores SIGCHLD, but we can't */
-	p->p_sigacts->ps_flags = 0;
+	p->p_p->ps_sigacts->ps_flags = 0;
 
 	/*
 	 * Need just enough stack to hold the faked-up "execve()" arguments.
@@ -652,7 +656,7 @@ start_init(void *arg)
 			*flagsp++ = '\0';
 			i = flagsp - flags;
 #ifdef DEBUG
-			printf("init: copying out flags `%s' %d\n", flags, i);
+			printf("init: copying out flags `%s' %ld\n", flags, i);
 #endif
 #ifdef MACHINE_STACK_GROWS_UP
 			arg1 = ucp;
@@ -669,7 +673,7 @@ start_init(void *arg)
 		 */
 		i = strlen(path) + 1;
 #ifdef DEBUG
-		printf("init: copying out path `%s' %d\n", path, i);
+		printf("init: copying out path `%s' %ld\n", path, i);
 #endif
 #ifdef MACHINE_STACK_GROWS_UP
 		arg0 = ucp;

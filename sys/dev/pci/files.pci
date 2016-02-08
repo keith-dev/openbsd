@@ -1,4 +1,4 @@
-#	$OpenBSD: files.pci,v 1.303 2014/02/12 23:04:26 jmatthew Exp $
+#	$OpenBSD: files.pci,v 1.307 2014/07/12 11:33:13 jsg Exp $
 #	$NetBSD: files.pci,v 1.20 1996/09/24 17:47:15 christos Exp $
 #
 # Config file and device description for machine-independent PCI code.
@@ -88,6 +88,10 @@ file	dev/pci/jmb.c			jmb
 attach	ahci at pci with ahci_pci
 attach	ahci at jmb with ahci_jmb
 file	dev/pci/ahci_pci.c		ahci_pci | ahci_jmb
+
+# NVM Express Controller
+attach	nvme at pci with nvme_pci
+file	dev/pci/nvme_pci.c		nvme_pci
 
 # AMI MegaRAID Express x00/Elite 1500/Express 1x00 RAID Controllers
 attach	ami at pci with ami_pci
@@ -213,6 +217,10 @@ file	dev/pci/ciss_pci.c		ciss_pci
 attach	isp at pci with isp_pci
 file	dev/pci/isp_pci.c		isp_pci
 
+# QLogic ISP SCSI Controllers
+attach  qlw at pci with qlw_pci
+file    dev/pci/qlw_pci.c               qlw_pci
+
 # QLogic ISP23xx FC Controllers
 attach  qla at pci with qla_pci
 file    dev/pci/qla_pci.c               qla_pci
@@ -238,11 +246,6 @@ file	dev/pci/sli_pci.c		sli_pci
 # Silicon Image 3124/3132/3531 SATALink
 attach	sili at pci with sili_pci
 file	dev/pci/sili_pci.c		sili_pci
-
-# QLogic iSCSI HBAs
-device	qli: scsi
-attach	qli at pci with qli_pci
-file	dev/pci/qli_pci.c		qli_pci
 
 # Ethernet driver for DC21040-based boards
 device	de: ether, ifnet, ifmedia
@@ -513,6 +516,10 @@ file	dev/pci/ohci_pci.c		ohci
 # EHCI USB controller
 attach	ehci at pci with ehci_pci
 file	dev/pci/ehci_pci.c		ehci
+
+# XHCI USB controller
+attach	xhci at pci with xhci_pci
+file	dev/pci/xhci_pci.c		xhci
 
 # YENTA PCI-CardBus bridge
 #device	cbb: cbbus, pcmciabus

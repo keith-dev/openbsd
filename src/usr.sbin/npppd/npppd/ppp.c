@@ -1,4 +1,4 @@
-/*	$OpenBSD: ppp.c,v 1.18 2013/02/13 22:10:38 yasuoka Exp $ */
+/*	$OpenBSD: ppp.c,v 1.22 2014/07/22 02:58:32 guenther Exp $ */
 
 /*-
  * Copyright (c) 2009 Internet Initiative Japan Inc.
@@ -25,7 +25,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  */
-/* $Id: ppp.c,v 1.18 2013/02/13 22:10:38 yasuoka Exp $ */
+/* $Id: ppp.c,v 1.22 2014/07/22 02:58:32 guenther Exp $ */
 /**@file
  * This file provides PPP(Point-to-Point Protocol, RFC 1661) and
  * {@link :: _npppd_ppp PPP instance} related functions.
@@ -109,11 +109,10 @@ ppp_create()
 {
 	npppd_ppp *_this;
 
-	if ((_this = malloc(sizeof(npppd_ppp))) == NULL) {
-		log_printf(LOG_ERR, "malloc() failed in %s(): %m", __func__ );
+	if ((_this = calloc(1, sizeof(npppd_ppp))) == NULL) {
+		log_printf(LOG_ERR, "calloc() failed in %s(): %m", __func__ );
 		return NULL;
 	}
-	memset(_this, 0, sizeof(npppd_ppp));
 
 	_this->snp.snp_family = AF_INET;
 	_this->snp.snp_len = sizeof(_this->snp);
@@ -408,6 +407,7 @@ ppp_stop0(npppd_ppp *_this)
 #ifdef USE_NPPPD_RADIUS
 	npppd_ppp_radius_acct_stop(_this->pppd, _this);
 #endif
+	npppd_on_ppp_stop(_this->pppd, _this);
 	npppd_ppp_unbind_iface(_this->pppd, _this);
 #ifdef	USE_NPPPD_MPPE
 	mppe_fini(&_this->mppe);
@@ -690,6 +690,7 @@ ppp_ipcp_opened(npppd_ppp *_this)
 #ifdef USE_NPPPD_RADIUS
 		npppd_ppp_radius_acct_start(_this->pppd, _this);
 #endif
+		npppd_on_ppp_start(_this->pppd, _this);
 
 		_this->logged_acct_start = 1;
 		ppp_reset_idle_timeout(_this);
@@ -1190,10 +1191,8 @@ struct tunnconf tunnconf_default_l2tp = {
 		.l2tp = {
 			.hostname = NULL,
 			.vendor_name = NULL,
-			.address = {
-				.ss_family = AF_INET,
-				.ss_len = sizeof(struct sockaddr_in)
-			},
+			.listen = TAILQ_HEAD_INITIALIZER(
+			    tunnconf_default_l2tp.proto.l2tp.listen),
 			/* .hello_interval, */
 			/* .hello_timeout, */
 			.data_use_seq = true,
@@ -1227,10 +1226,8 @@ struct tunnconf tunnconf_default_pptp = {
 		.pptp = {
 			.hostname = NULL,
 			.vendor_name = NULL,
-			.address = {
-				.ss_family = AF_INET,
-				.ss_len = sizeof(struct sockaddr_in)
-			},
+			.listen = TAILQ_HEAD_INITIALIZER(
+			    tunnconf_default_pptp.proto.pptp.listen),
 			/* .echo_interval, */
 			/* .echo_timeout, */
 		}

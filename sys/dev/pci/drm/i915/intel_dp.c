@@ -1,4 +1,4 @@
-/*	$OpenBSD: intel_dp.c,v 1.16 2014/02/18 02:48:57 jsg Exp $	*/
+/*	$OpenBSD: intel_dp.c,v 1.20 2014/06/19 06:51:05 jsg Exp $	*/
 /*
  * Copyright © 2008 Intel Corporation
  *
@@ -139,20 +139,16 @@ intel_dp_max_link_bw(struct intel_dp *intel_dp)
 	case DP_LINK_BW_1_62:
 	case DP_LINK_BW_2_7:
 		break;
+	case DP_LINK_BW_5_4: /* 1.2 capable displays may advertise higher bw */
+		max_link_bw = DP_LINK_BW_2_7;
+		break;
 	default:
+		WARN(1, "invalid max DP link bw val %x, using 1.62Gbps\n",
+		     max_link_bw);
 		max_link_bw = DP_LINK_BW_1_62;
 		break;
 	}
 	return max_link_bw;
-}
-
-static int
-intel_dp_link_clock(uint8_t link_bw)
-{
-	if (link_bw == DP_LINK_BW_2_7)
-		return 270000;
-	else
-		return 162000;
 }
 
 /*
@@ -189,7 +185,8 @@ intel_dp_adjust_dithering(struct intel_dp *intel_dp,
 			  struct drm_display_mode *mode,
 			  bool adjust_mode)
 {
-	int max_link_clock = intel_dp_link_clock(intel_dp_max_link_bw(intel_dp));
+	int max_link_clock =
+		drm_dp_bw_code_to_link_rate(intel_dp_max_link_bw(intel_dp));
 	int max_lanes = drm_dp_max_lane_count(intel_dp->dpcd);
 	int max_rate, mode_rate;
 
@@ -491,6 +488,7 @@ intel_dp_aux_native_write(struct intel_dp *intel_dp,
 	uint8_t	msg[20];
 	int msg_bytes;
 	uint8_t	ack;
+	int retry;
 
 	intel_dp_check_edp(intel_dp);
 	if (send_bytes > 16)
@@ -501,18 +499,20 @@ intel_dp_aux_native_write(struct intel_dp *intel_dp,
 	msg[3] = send_bytes - 1;
 	memcpy(&msg[4], send, send_bytes);
 	msg_bytes = send_bytes + 4;
-	for (;;) {
+	for (retry = 0; retry < 7; retry++) {
 		ret = intel_dp_aux_ch(intel_dp, msg, msg_bytes, &ack, 1);
 		if (ret < 0)
 			return ret;
 		if ((ack & AUX_NATIVE_REPLY_MASK) == AUX_NATIVE_REPLY_ACK)
-			break;
+			return send_bytes;
 		else if ((ack & AUX_NATIVE_REPLY_MASK) == AUX_NATIVE_REPLY_DEFER)
-			udelay(100);
+			usleep_range(400, 500);
 		else
 			return -EIO;
 	}
-	return send_bytes;
+
+	DRM_ERROR("too many retries, giving up\n");
+	return -EIO;
 }
 
 /* Write a single byte to the aux channel in native mode */
@@ -534,6 +534,7 @@ intel_dp_aux_native_read(struct intel_dp *intel_dp,
 	int reply_bytes;
 	uint8_t ack;
 	int ret;
+	int retry;
 
 	intel_dp_check_edp(intel_dp);
 	msg[0] = AUX_NATIVE_READ << 4;
@@ -544,7 +545,7 @@ intel_dp_aux_native_read(struct intel_dp *intel_dp,
 	msg_bytes = 4;
 	reply_bytes = recv_bytes + 1;
 
-	for (;;) {
+	for (retry = 0; retry < 7; retry++) {
 		ret = intel_dp_aux_ch(intel_dp, msg, msg_bytes,
 				      reply, reply_bytes);
 		if (ret == 0)
@@ -557,10 +558,13 @@ intel_dp_aux_native_read(struct intel_dp *intel_dp,
 			return ret - 1;
 		}
 		else if ((ack & AUX_NATIVE_REPLY_MASK) == AUX_NATIVE_REPLY_DEFER)
-			udelay(100);
+			usleep_range(400, 500);
 		else
 			return -EIO;
 	}
+
+	DRM_ERROR("too many retries, giving up\n");
+	return -EIO;
 }
 
 static int
@@ -738,12 +742,15 @@ intel_dp_mode_fixup(struct drm_encoder *encoder,
 
 	for (clock = 0; clock <= max_clock; clock++) {
 		for (lane_count = 1; lane_count <= max_lane_count; lane_count <<= 1) {
-			int link_avail = intel_dp_max_data_rate(intel_dp_link_clock(bws[clock]), lane_count);
+			int link_bw_clock =
+				drm_dp_bw_code_to_link_rate(bws[clock]);
+			int link_avail = intel_dp_max_data_rate(link_bw_clock,
+								lane_count);
 
 			if (mode_rate <= link_avail) {
 				intel_dp->link_bw = bws[clock];
 				intel_dp->lane_count = lane_count;
-				adjusted_mode->clock = intel_dp_link_clock(intel_dp->link_bw);
+				adjusted_mode->clock = link_bw_clock;
 				DRM_DEBUG_KMS("DP link bw %02x lane "
 						"count %d clock %d bpp %d\n",
 				       intel_dp->link_bw, intel_dp->lane_count,

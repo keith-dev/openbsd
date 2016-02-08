@@ -1,4 +1,4 @@
-/*	$OpenBSD: ext2fs_vnops.c,v 1.64 2014/01/25 23:31:12 guenther Exp $	*/
+/*	$OpenBSD: ext2fs_vnops.c,v 1.67 2014/07/13 16:59:35 pelikan Exp $	*/
 /*	$NetBSD: ext2fs_vnops.c,v 1.1 1997/06/11 09:34:09 bouyer Exp $	*/
 
 /*
@@ -57,8 +57,6 @@
 #include <sys/signalvar.h>
 #include <sys/specdev.h>
 
-#include <uvm/uvm_extern.h>
-
 #include <miscfs/fifofs/fifo.h>
 
 #include <ufs/ufs/quota.h>
@@ -80,7 +78,7 @@ int
 ext2fs_create(void *v)
 {
 	struct vop_create_args *ap = v;
-	return ext2fs_makeinode(MAKEIMODE(ap->a_vap->va_type, 
+	return ext2fs_makeinode(MAKEIMODE(ap->a_vap->va_type,
 					  ap->a_vap->va_mode),
 			  	ap->a_dvp, ap->a_vpp, ap->a_cnp);
 }
@@ -109,7 +107,7 @@ ext2fs_mknod(void *v)
 		 * Want to be able to use this to make badblock
 		 * inodes, so don't truncate the dev number.
 		 */
-		ip->i_e2din->e2di_rdev = h2fs32(vap->va_rdev);
+		ip->i_e2din->e2di_rdev = htole32(vap->va_rdev);
 	}
 	/*
 	 * Remove inode so that it will be reloaded by VFS_VGET and
@@ -178,7 +176,7 @@ ext2fs_getattr(void *v)
 	vap->va_nlink = ip->i_e2fs_nlink;
 	vap->va_uid = ip->i_e2fs_uid;
 	vap->va_gid = ip->i_e2fs_gid;
-	vap->va_rdev = (dev_t)fs2h32(ip->i_e2din->e2di_rdev);
+	vap->va_rdev = (dev_t) letoh32(ip->i_e2din->e2di_rdev);
 	vap->va_size = ext2fs_size(ip);
 	vap->va_atime.tv_sec = ip->i_e2fs_atime;
 	vap->va_atime.tv_nsec = 0;
@@ -238,11 +236,11 @@ ext2fs_setattr(void *v)
 			return (error);
 #ifdef EXT2FS_SYSTEM_FLAGS
 		if (cred->cr_uid == 0) {
-			if ((ip->i_e2fs_flags & 
+			if ((ip->i_e2fs_flags &
 			    (EXT2_APPEND | EXT2_IMMUTABLE)) && securelevel > 0)
 				return (EPERM);
 			ip->i_e2fs_flags &= ~(EXT2_APPEND | EXT2_IMMUTABLE);
-			ip->i_e2fs_flags |= 
+			ip->i_e2fs_flags |=
 			    (vap->va_flags & SF_APPEND) ? EXT2_APPEND : 0 |
 			    (vap->va_flags & SF_IMMUTABLE) ? EXT2_IMMUTABLE: 0;
 		} else {
@@ -250,7 +248,7 @@ ext2fs_setattr(void *v)
 		}
 #else
 		ip->i_e2fs_flags &= ~(EXT2_APPEND | EXT2_IMMUTABLE);
-		ip->i_e2fs_flags |= 
+		ip->i_e2fs_flags |=
 		    (vap->va_flags & UF_APPEND) ? EXT2_APPEND : 0 |
 		    (vap->va_flags & UF_IMMUTABLE) ? EXT2_IMMUTABLE: 0;
 #endif
@@ -295,7 +293,7 @@ ext2fs_setattr(void *v)
 			return (EROFS);
 		if (cred->cr_uid != ip->i_e2fs_uid &&
 			(error = suser_ucred(cred)) &&
-			((vap->va_vaflags & VA_UTIMES_NULL) == 0 || 
+			((vap->va_vaflags & VA_UTIMES_NULL) == 0 ||
 			(error = VOP_ACCESS(vp, VWRITE, cred, p))))
 			return (error);
 		if (vap->va_mtime.tv_sec != VNOVAL)
@@ -594,7 +592,7 @@ abortit:
 	if ((ip->i_e2fs_mode & IFMT) == IFDIR) {
         	error = VOP_ACCESS(fvp, VWRITE, tcnp->cn_cred, tcnp->cn_proc);
         	if (!error && tvp)
-                	error = VOP_ACCESS(tvp, VWRITE, tcnp->cn_cred, 
+                	error = VOP_ACCESS(tvp, VWRITE, tcnp->cn_cred,
 			    tcnp->cn_proc);
         	if (error) {
                 	VOP_UNLOCK(fvp, 0, p);
@@ -647,7 +645,7 @@ abortit:
 	 * directory hierarchy above the target, as this would
 	 * orphan everything below the source directory. Also
 	 * the user must have write permission in the source so
-	 * as to be able to change "..". We must repeat the call 
+	 * as to be able to change "..". We must repeat the call
 	 * to namei, as the parent directory is unlocked by the
 	 * call to checkpath().
 	 */
@@ -674,7 +672,7 @@ abortit:
 	}
 	/*
 	 * 2) If target doesn't exist, link the target
-	 *    to the source and unlink the source. 
+	 *    to the source and unlink the source.
 	 *    Otherwise, rewrite the target directory
 	 *    entry to reference the source inode and
 	 *    expunge the original entry's existence.
@@ -828,7 +826,7 @@ abortit:
 			dp->i_flag |= IN_CHANGE;
 			error = vn_rdwr(UIO_READ, fvp, (caddr_t)&dirbuf,
 				sizeof (struct ext2fs_dirtemplate), (off_t)0,
-				UIO_SYSSPACE, IO_NODELOCKED, 
+				UIO_SYSSPACE, IO_NODELOCKED,
 				tcnp->cn_cred, NULL, curproc);
 			if (error == 0) {
 					namlen = dirbuf.dotdot_namlen;
@@ -838,7 +836,7 @@ abortit:
 					ufs_dirbad(xp, (doff_t)12,
 					    "ext2fs_rename: mangled dir");
 				} else {
-					dirbuf.dotdot_ino = h2fs32(newparent);
+					dirbuf.dotdot_ino = htole32(newparent);
 					(void) vn_rdwr(UIO_WRITE, fvp,
 					    (caddr_t)&dirbuf,
 					    sizeof (struct dirtemplate),
@@ -935,16 +933,16 @@ ext2fs_mkdir(void *v)
 
 	/* Initialize directory with "." and ".." from static template. */
 	memset(&dirtemplate, 0, sizeof(dirtemplate));
-	dirtemplate.dot_ino = h2fs32(ip->i_number);
-	dirtemplate.dot_reclen = h2fs16(12);
+	dirtemplate.dot_ino = htole32(ip->i_number);
+	dirtemplate.dot_reclen = htole16(12);
 	dirtemplate.dot_namlen = 1;
 	if (ip->i_e2fs->e2fs.e2fs_rev > E2FS_REV0 &&
 	    (ip->i_e2fs->e2fs.e2fs_features_incompat & EXT2F_INCOMPAT_FTYPE)) {
 		dirtemplate.dot_type = EXT2_FT_DIR;
 	}
 	dirtemplate.dot_name[0] = '.';
-	dirtemplate.dotdot_ino = h2fs32(dp->i_number);
-	dirtemplate.dotdot_reclen = h2fs16(VTOI(dvp)->i_e2fs->e2fs_bsize - 12);
+	dirtemplate.dotdot_ino = htole32(dp->i_number);
+	dirtemplate.dotdot_reclen = htole16(VTOI(dvp)->i_e2fs->e2fs_bsize - 12);
 	dirtemplate.dotdot_namlen = 2;
 	if (ip->i_e2fs->e2fs.e2fs_rev > E2FS_REV0 &&
 	    (ip->i_e2fs->e2fs.e2fs_features_incompat & EXT2F_INCOMPAT_FTYPE)) {
@@ -1098,7 +1096,7 @@ ext2fs_symlink(void *v)
 		error = vn_rdwr(UIO_WRITE, vp, ap->a_target, len, (off_t)0,
 		    UIO_SYSSPACE, IO_NODELOCKED, ap->a_cnp->cn_cred, NULL,
 		    curproc);
-bad:	
+bad:
 	vput(vp);
 	return (error);
 }
@@ -1176,7 +1174,7 @@ ext2fs_makeinode(int mode, struct vnode *dvp, struct vnode **vpp,
 	if ((mode & IFMT) == 0)
 		mode |= IFREG;
 
-	if ((error = ext2fs_inode_alloc(pdir, mode, cnp->cn_cred, &tvp)) 
+	if ((error = ext2fs_inode_alloc(pdir, mode, cnp->cn_cred, &tvp))
 	    != 0) {
 		pool_put(&namei_pool, cnp->cn_pnbuf);
 		vput(dvp);
@@ -1248,7 +1246,7 @@ ext2fs_reclaim(void *v)
 #ifdef DIAGNOSTIC
 	extern int prtactive;
 
-	if (prtactive && vp->v_usecount != 0) 
+	if (prtactive && vp->v_usecount != 0)
 		vprint("ext2fs_reclaim: pushing active", vp);
 #endif
 

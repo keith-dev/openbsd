@@ -1,4 +1,4 @@
-/*	$OpenBSD: nfs_kq.c,v 1.16 2012/12/05 23:20:23 deraadt Exp $ */
+/*	$OpenBSD: nfs_kq.c,v 1.21 2014/08/06 19:31:30 guenther Exp $ */
 /*	$NetBSD: nfs_kq.c,v 1.7 2003/10/30 01:43:10 simonb Exp $	*/
 
 /*-
@@ -42,9 +42,6 @@
 #include <sys/kthread.h>
 #include <sys/rwlock.h>
 #include <sys/queue.h>
-
-#include <uvm/uvm_extern.h>
-#include <uvm/uvm.h>
 
 #include <nfs/rpcv2.h>
 #include <nfs/nfsproto.h>
@@ -206,7 +203,7 @@ filt_nfsdetach(struct knote *kn)
 			} else {
 				/* last user, g/c */
 				SLIST_REMOVE(&kevlist, ke, kevq, kev_link);
-				free(ke, M_KEVENT);
+				free(ke, M_KEVENT, 0);
 			}
 			break;
 		}
@@ -231,8 +228,12 @@ filt_nfsread(struct knote *kn, long hint)
 
 	kn->kn_data = np->n_size - kn->kn_fp->f_offset;
 #ifdef DEBUG
-	printf("nfsread event. %d\n", kn->kn_data);
+	printf("nfsread event. %lld\n", kn->kn_data);
 #endif
+	if (kn->kn_data == 0 && kn->kn_sfflags & NOTE_EOF) {
+		kn->kn_fflags |= NOTE_EOF;
+		return (1);
+	}
         return (kn->kn_data != 0);
 }
 

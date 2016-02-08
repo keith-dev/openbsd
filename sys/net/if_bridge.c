@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_bridge.c,v 1.221 2014/01/24 18:54:58 henning Exp $	*/
+/*	$OpenBSD: if_bridge.c,v 1.226 2014/07/22 11:06:09 mpi Exp $	*/
 
 /*
  * Copyright (c) 1999, 2000 Jason L. Wright (jason@thought.net)
@@ -57,7 +57,6 @@
 
 #ifdef INET
 #include <netinet/in.h>
-#include <netinet/in_systm.h>
 #include <netinet/ip.h>
 #include <netinet/ip_var.h>
 #include <netinet/if_ether.h>
@@ -195,7 +194,7 @@ bridge_clone_create(struct if_clone *ifc, int unit)
 
 	sc->sc_stp = bstp_create(&sc->sc_if);
 	if (!sc->sc_stp) {
-		free(sc, M_DEVBUF);
+		free(sc, M_DEVBUF, 0);
 		return (ENOMEM);
 	}
 
@@ -248,7 +247,7 @@ bridge_clone_destroy(struct ifnet *ifp)
 		bridge_delete(sc, bif);
 	while ((bif = TAILQ_FIRST(&sc->sc_spanlist)) != NULL) {
 		TAILQ_REMOVE(&sc->sc_spanlist, bif, next);
-		free(bif, M_DEVBUF);
+		free(bif, M_DEVBUF, 0);
 	}
 
 	s = splnet();
@@ -258,7 +257,7 @@ bridge_clone_destroy(struct ifnet *ifp)
 	bstp_destroy(sc->sc_stp);
 	if_detach(ifp);
 
-	free(sc, M_DEVBUF);
+	free(sc, M_DEVBUF, 0);
 	return (0);
 }
 
@@ -276,7 +275,7 @@ bridge_delete(struct bridge_softc *sc, struct bridge_iflist *p)
 	TAILQ_REMOVE(&sc->sc_iflist, p, next);
 	bridge_rtdelete(sc, p->ifp, 0);
 	bridge_flushrule(p);
-	free(p, M_DEVBUF);
+	free(p, M_DEVBUF, 0);
 
 	return (error);
 }
@@ -444,7 +443,7 @@ bridge_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 			if (strncmp(p->ifp->if_xname, req->ifbr_ifsname,
 			    sizeof(p->ifp->if_xname)) == 0) {
 				TAILQ_REMOVE(&sc->sc_spanlist, p, next);
-				free(p, M_DEVBUF);
+				free(p, M_DEVBUF, 0);
 				break;
 			}
 		}
@@ -817,7 +816,7 @@ bridge_bifconf(struct bridge_softc *sc, struct ifbifconf *bifc)
 
 done:
 	if (breq != NULL)
-		free(breq, M_DEVBUF);
+		free(breq, M_DEVBUF, 0);
 	bifc->ifbic_len = i * sizeof(*breq);
 	return (error);
 }
@@ -1033,9 +1032,6 @@ bridge_output(struct ifnet *ifp, struct mbuf *m, struct sockaddr *sa,
 			    (m->m_flags & (M_BCAST | M_MCAST)) == 0)
 				continue;
 
-#ifdef ALTQ
-			if (ALTQ_IS_ENABLED(&dst_if->if_snd) == 0)
-#endif
 			if (IF_QFULL(&dst_if->if_snd)) {
 				IF_DROP(&dst_if->if_snd);
 				sc->sc_if.if_oerrors++;
@@ -1333,7 +1329,7 @@ bridge_input(struct ifnet *ifp, struct ether_header *eh, struct mbuf *m)
 #if NBPFILTER > 0
 	if (sc->sc_if.if_bpf)
 		bpf_mtap_hdr(sc->sc_if.if_bpf, (caddr_t)eh,
-		    ETHER_HDR_LEN, m, BPF_DIRECTION_IN);
+		    ETHER_HDR_LEN, m, BPF_DIRECTION_IN, NULL);
 #endif
 
 	bridge_span(sc, eh, m);
@@ -1394,7 +1390,7 @@ bridge_input(struct ifnet *ifp, struct ether_header *eh, struct mbuf *m)
 			}
 			if (ifl != NULL) {
 				m->m_pkthdr.rcvif = ifl->ifp;
-				m->m_pkthdr.rdomain = ifl->ifp->if_rdomain;
+				m->m_pkthdr.ph_rtableid = ifl->ifp->if_rdomain;
 #if NBPFILTER > 0
 				if (ifl->ifp->if_bpf)
 					bpf_mtap(ifl->ifp->if_bpf, m,
@@ -1444,10 +1440,8 @@ bridge_input(struct ifnet *ifp, struct ether_header *eh, struct mbuf *m)
 			 * is aware */
 #if NBPFILTER > 0
 			if (ifl->ifp->if_bpf)
-				bpf_mtap_hdr(ifl->ifp->if_bpf,
-				    (caddr_t)eh,
-				    ETHER_HDR_LEN, m,
-				    BPF_DIRECTION_IN);
+				bpf_mtap_hdr(ifl->ifp->if_bpf, (caddr_t)eh,
+				    ETHER_HDR_LEN, m, BPF_DIRECTION_IN, NULL);
 #endif
 			/* Count for the interface we are going to */
 			ifl->ifp->if_ipackets++;
@@ -1457,7 +1451,7 @@ bridge_input(struct ifnet *ifp, struct ether_header *eh, struct mbuf *m)
 			sc->sc_if.if_ibytes += ETHER_HDR_LEN + m->m_pkthdr.len;
 
 			m->m_pkthdr.rcvif = ifl->ifp;
-			m->m_pkthdr.rdomain = ifl->ifp->if_rdomain;
+			m->m_pkthdr.ph_rtableid = ifl->ifp->if_rdomain;
 			if (ifp->if_type == IFT_GIF) {
 				m->m_flags |= M_PROTO1;
 				ether_input(ifl->ifp, eh, m);
@@ -1524,9 +1518,6 @@ bridge_broadcast(struct bridge_softc *sc, struct ifnet *ifp,
 		if ((dst_if->if_flags & IFF_RUNNING) == 0)
 			continue;
 
-#ifdef ALTQ
-		if (ALTQ_IS_ENABLED(&dst_if->if_snd) == 0)
-#endif
 		if (IF_QFULL(&dst_if->if_snd)) {
 			IF_DROP(&dst_if->if_snd);
 			sc->sc_if.if_oerrors++;
@@ -1632,7 +1623,7 @@ bridge_localbroadcast(struct bridge_softc *sc, struct ifnet *ifp,
 	}
 	/* fixup header a bit */
 	m1->m_pkthdr.rcvif = ifp;
-	m1->m_pkthdr.rdomain = ifp->if_rdomain;
+	m1->m_pkthdr.ph_rtableid = ifp->if_rdomain;
 	m1->m_flags |= M_PROTO1;
 
 #if NBPFILTER > 0
@@ -1673,9 +1664,6 @@ bridge_span(struct bridge_softc *sc, struct ether_header *eh,
 		if ((ifp->if_flags & IFF_RUNNING) == 0)
 			continue;
 
-#ifdef ALTQ
-		if (ALTQ_IS_ENABLED(&ifp->if_snd) == 0)
-#endif
 			if (IF_QFULL(&ifp->if_snd)) {
 				IF_DROP(&ifp->if_snd);
 				sc->sc_if.if_oerrors++;
@@ -1897,7 +1885,7 @@ bridge_rtage(struct bridge_softc *sc)
 				p = LIST_NEXT(n, brt_next);
 				LIST_REMOVE(n, brt_next);
 				sc->sc_brtcnt--;
-				free(n, M_DEVBUF);
+				free(n, M_DEVBUF, 0);
 				n = p;
 			}
 		}
@@ -1956,7 +1944,7 @@ bridge_rtflush(struct bridge_softc *sc, int full)
 				p = LIST_NEXT(n, brt_next);
 				LIST_REMOVE(n, brt_next);
 				sc->sc_brtcnt--;
-				free(n, M_DEVBUF);
+				free(n, M_DEVBUF, 0);
 				n = p;
 			} else
 				n = LIST_NEXT(n, brt_next);
@@ -1978,7 +1966,7 @@ bridge_rtdaddr(struct bridge_softc *sc, struct ether_addr *ea)
 		if (bcmp(ea, &p->brt_addr, sizeof(p->brt_addr)) == 0) {
 			LIST_REMOVE(p, brt_next);
 			sc->sc_brtcnt--;
-			free(p, M_DEVBUF);
+			free(p, M_DEVBUF, 0);
 			return (0);
 		}
 	}
@@ -2015,7 +2003,7 @@ bridge_rtdelete(struct bridge_softc *sc, struct ifnet *ifp, int dynonly)
 			p = LIST_NEXT(n, brt_next);
 			LIST_REMOVE(n, brt_next);
 			sc->sc_brtcnt--;
-			free(n, M_DEVBUF);
+			free(n, M_DEVBUF, 0);
 			n = p;
 		}
 	}
@@ -2194,7 +2182,7 @@ bridge_flushrule(struct bridge_iflist *bif)
 #if NPF > 0
 		pf_tag_unref(p->brl_tag);
 #endif
-		free(p, M_DEVBUF);
+		free(p, M_DEVBUF, 0);
 	}
 	while (!SIMPLEQ_EMPTY(&bif->bif_brlout)) {
 		p = SIMPLEQ_FIRST(&bif->bif_brlout);
@@ -2202,7 +2190,7 @@ bridge_flushrule(struct bridge_iflist *bif)
 #if NPF > 0
 		pf_tag_unref(p->brl_tag);
 #endif
-		free(p, M_DEVBUF);
+		free(p, M_DEVBUF, 0);
 	}
 }
 

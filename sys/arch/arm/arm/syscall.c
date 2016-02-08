@@ -1,4 +1,4 @@
-/*	$OpenBSD: syscall.c,v 1.15 2012/08/07 05:16:53 guenther Exp $	*/
+/*	$OpenBSD: syscall.c,v 1.17 2014/05/11 00:05:38 guenther Exp $	*/
 /*	$NetBSD: syscall.c,v 1.24 2003/11/14 19:03:17 scw Exp $	*/
 
 /*-
@@ -77,11 +77,11 @@
 #include <sys/kernel.h>
 #include <sys/reboot.h>
 #include <sys/signalvar.h>
-#include <sys/syscall.h>
-#include <sys/syscall_mi.h>
 #include <sys/systm.h>
 #include <sys/proc.h>
 #include <sys/user.h>
+#include <sys/syscall.h>
+#include <sys/syscall_mi.h>
 
 #include <uvm/uvm_extern.h>
 
@@ -112,7 +112,7 @@ swi_handler(trapframe_t *frame)
 	code = frame->tf_r12;
 
 	ap = &frame->tf_r0;
-	callp = p->p_emul->e_sysent;
+	callp = p->p_p->ps_emul->e_sysent;
 
 	switch (code) {	
 	case SYS_syscall:
@@ -126,8 +126,8 @@ swi_handler(trapframe_t *frame)
 		break;
 	}
 
-	if (code < 0 || code >= p->p_emul->e_nsysent) {
-		callp += p->p_emul->e_nosys;
+	if (code < 0 || code >= p->p_p->ps_emul->e_nsysent) {
+		callp += p->p_p->ps_emul->e_nosys;
 	} else {
 		callp += code;
 	}

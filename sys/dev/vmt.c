@@ -1,4 +1,4 @@
-/*	$OpenBSD: vmt.c,v 1.16 2013/11/11 09:15:34 mpi Exp $ */
+/*	$OpenBSD: vmt.c,v 1.19 2014/07/12 18:48:51 tedu Exp $ */
 
 /*
  * Copyright (c) 2007 David Crawshaw <david@zentus.com>
@@ -308,7 +308,7 @@ vmt_attach(struct device *parent, struct device *self, void *aux)
 	return;
 
 free:
-	free(sc->sc_rpc_buf, M_DEVBUF);
+	free(sc->sc_rpc_buf, M_DEVBUF, 0);
 }
 
 int
@@ -427,7 +427,7 @@ vmt_do_shutdown(struct vmt_softc *sc)
 	vm_rpc_send_str(&sc->sc_tclo_rpc, VM_RPC_REPLY_OK);
 
 	log(LOG_KERN | LOG_NOTICE, "Shutting down in response to request from VMware host\n");
-	psignal(initproc, SIGUSR2);
+	prsignal(initprocess, SIGUSR2);
 }
 
 void
@@ -437,7 +437,7 @@ vmt_do_reboot(struct vmt_softc *sc)
 	vm_rpc_send_str(&sc->sc_tclo_rpc, VM_RPC_REPLY_OK);
 
 	log(LOG_KERN | LOG_NOTICE, "Rebooting in response to request from VMware host\n");
-	psignal(initproc, SIGINT);
+	prsignal(initprocess, SIGINT);
 }
 
 void
@@ -653,7 +653,7 @@ out:
 }
 
 #define BACKDOOR_OP_I386(op, frame)		\
-	__asm__ __volatile__ (			\
+	__asm__ volatile (			\
 		"pushal;"			\
 		"pushl %%eax;"			\
 		"movl 0x18(%%eax), %%ebp;"	\
@@ -677,7 +677,7 @@ out:
 	)
 
 #define BACKDOOR_OP_AMD64(op, frame)		\
-	__asm__ __volatile__ (			\
+	__asm__ volatile (			\
 		"pushq %%rbp;			\n\t" \
 		"pushq %%rax;			\n\t" \
 		"movq 0x30(%%rax), %%rbp;	\n\t" \

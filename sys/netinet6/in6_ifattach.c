@@ -1,4 +1,4 @@
-/*	$OpenBSD: in6_ifattach.c,v 1.68 2014/01/21 10:18:26 mpi Exp $	*/
+/*	$OpenBSD: in6_ifattach.c,v 1.72 2014/07/01 19:37:07 benno Exp $	*/
 /*	$KAME: in6_ifattach.c,v 1.124 2001/07/18 08:32:51 jinmei Exp $	*/
 
 /*
@@ -32,7 +32,6 @@
 
 #include <sys/param.h>
 #include <sys/systm.h>
-#include <sys/malloc.h>
 #include <sys/socket.h>
 #include <sys/sockio.h>
 #include <sys/kernel.h>
@@ -141,14 +140,12 @@ in6_get_rand_ifid(struct ifnet *ifp, struct in6_addr *in6)
 
 /*
  * Get interface identifier for the specified interface.
- * XXX assumes single sockaddr_dl (AF_LINK address) per an interface
  *
  * in6 - upper 64bits are preserved
  */
 int
 get_hw_ifid(struct ifnet *ifp, struct in6_addr *in6)
 {
-	struct ifaddr *ifa;
 	struct sockaddr_dl *sdl;
 	char *addr;
 	size_t addrlen;
@@ -156,21 +153,10 @@ get_hw_ifid(struct ifnet *ifp, struct in6_addr *in6)
 	static u_int8_t allone[8] =
 		{ 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff };
 
-	TAILQ_FOREACH(ifa, &ifp->if_addrlist, ifa_list) {
-		if (ifa->ifa_addr->sa_family != AF_LINK)
-			continue;
-		sdl = (struct sockaddr_dl *)ifa->ifa_addr;
-		if (sdl == NULL)
-			continue;
-		if (sdl->sdl_alen == 0)
-			continue;
+	sdl = (struct sockaddr_dl *)ifp->if_sadl;
+	if (sdl == NULL || sdl->sdl_alen == 0)
+		return -1;
 
-		goto found;
-	}
-
-	return -1;
-
-found:
 	addr = LLADDR(sdl);
 	addrlen = sdl->sdl_alen;
 
@@ -592,17 +578,6 @@ in6_ifattach(struct ifnet *ifp)
 	}
 
 	/*
-	 * quirks based on interface type
-	 */
-	switch (ifp->if_type) {
-	/* we attach a link-local address when a vhid is assigned */
-	case IFT_CARP:
-		return;
-	default:
-		break;
-	}
-
-	/*
 	 * usually, we require multicast capability to the interface
 	 */
 	if ((ifp->if_flags & IFF_MULTICAST) == 0) {
@@ -662,6 +637,7 @@ in6_ifdetach(struct ifnet *ifp)
 		if (ifa->ifa_addr->sa_family != AF_INET6)
 			continue;
 		in6_purgeaddr(ifa);
+		dohooks(ifp->if_addrhooks, 0);
 	}
 
 	/*

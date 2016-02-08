@@ -1,5 +1,5 @@
 #!/bin/sh
-#	$OpenBSD: maketars,v 1.20 2010/10/18 04:11:15 deraadt Exp $
+#	$OpenBSD: maketars,v 1.23 2014/07/09 19:23:28 espie Exp $
 #
 # Copyright (c) 2001 Theo de Raadt
 # All rights reserved.
@@ -62,4 +62,5 @@ for i in base comp etc game man; do
 	echo    "done."
 done
 rm -f $TMP $TMP2
+
 exit 0

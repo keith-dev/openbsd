@@ -1,4 +1,4 @@
-/*	$OpenBSD: subr_pool.c,v 1.124 2013/11/05 03:28:45 dlg Exp $	*/
+/*	$OpenBSD: subr_pool.c,v 1.138 2014/07/10 13:34:39 tedu Exp $	*/
 /*	$NetBSD: subr_pool.c,v 1.61 2001/09/26 07:14:56 chs Exp $	*/
 
 /*-
@@ -41,7 +41,7 @@
 #include <sys/syslog.h>
 #include <sys/sysctl.h>
 
-#include <uvm/uvm.h>
+#include <uvm/uvm_extern.h>
 #include <dev/rndvar.h>
 
 /*
@@ -101,6 +101,7 @@ unsigned int pool_serial;
 int	 pool_catchup(struct pool *);
 void	 pool_prime_page(struct pool *, caddr_t, struct pool_item_header *);
 void	 pool_update_curpage(struct pool *);
+void	 pool_swizzle_curpage(struct pool *);
 void	*pool_do_get(struct pool *, int);
 void	 pool_do_put(struct pool *, void *);
 void	 pr_rmpage(struct pool *, struct pool_item_header *,
@@ -478,13 +479,17 @@ pool_get(struct pool *pp, int flags)
 
 	KASSERT(flags & (PR_WAITOK | PR_NOWAIT));
 
-#ifdef DIAGNOSTIC
 	if ((flags & PR_WAITOK) != 0) {
+#ifdef DIAGNOSTIC
 		assertwaitok();
 		if (pool_debug == 2)
 			yield();
+#endif
+		if (!cold && pool_debug) {
+			KERNEL_UNLOCK();
+			KERNEL_LOCK();
+		}
 	}
-#endif /* DIAGNOSTIC */
 
 	mtx_enter(&pp->pr_mtx);
 #ifdef POOL_DEBUG
@@ -564,6 +569,7 @@ startover:
 		return (NULL);
 	}
 
+	pool_swizzle_curpage(pp);
 	/*
 	 * The convention we use is that if `curpage' is not NULL, then
 	 * it points at a non-empty bucket. In particular, `curpage'
@@ -637,7 +643,7 @@ startover:
 		    pp->pr_wchan, ph->ph_page, pi, 0, pi->pi_magic);
 	if (pool_debug && ph->ph_magic) {
 		size_t pidx;
-		int pval;
+		uint32_t pval;
 		if (poison_check(pi + 1, pp->pr_size - sizeof(*pi),
 		    &pidx, &pval)) {
 			int *ip = (int *)(pi + 1);
@@ -809,17 +815,13 @@ pool_do_put(struct pool *pp, void *v)
 			pool_update_curpage(pp);
 		}
 	}
-
 	/*
 	 * If the page was previously completely full, move it to the
-	 * partially-full list and make it the current page.  The next
-	 * allocation will get the item from this page, instead of
-	 * further fragmenting the pool.
+	 * partially-full list.
 	 */
 	else if (ph->ph_nmissing == (pp->pr_itemsperpage - 1)) {
 		LIST_REMOVE(ph, ph_pagelist);
 		LIST_INSERT_HEAD(&pp->pr_partpages, ph, ph_pagelist);
-		pp->pr_curpage = ph;
 	}
 }
 
@@ -975,6 +977,27 @@ pool_update_curpage(struct pool *pp)
 	if (pp->pr_curpage == NULL) {
 		pp->pr_curpage = LIST_FIRST(&pp->pr_emptypages);
 	}
+}
+
+void
+pool_swizzle_curpage(struct pool *pp)
+{
+	struct pool_item_header *ph, *next;
+
+	if ((ph = pp->pr_curpage) == NULL)
+		return;
+	if (arc4random_uniform(16) != 0)
+		return;
+	next = LIST_FIRST(&pp->pr_partpages);
+	if (next == ph)
+		next = LIST_NEXT(next, ph_pagelist);
+	if (next == NULL) {
+		next = LIST_FIRST(&pp->pr_emptypages);
+		if (next == ph)
+			next = LIST_NEXT(next, ph_pagelist);
+	}
+	if (next != NULL)
+		pp->pr_curpage = next;
 }
 
 void
@@ -1291,7 +1314,7 @@ pool_chk_page(struct pool *pp, struct pool_item_header *ph, int expected)
 		}
 		if (pool_debug && ph->ph_magic) {
 			size_t pidx;
-			int pval;
+			uint32_t pval;
 			if (poison_check(pi + 1, pp->pr_size - sizeof(*pi),
 			    &pidx, &pval)) {
 				int *ip = (int *)(pi + 1);
@@ -1399,7 +1422,8 @@ pool_walk(struct pool *pp, int full,
 int
 sysctl_dopool(int *name, u_int namelen, char *where, size_t *sizep)
 {
-	struct pool *pp, *foundpool = NULL;
+	struct kinfo_pool pi;
+	struct pool *pp;
 	size_t buflen = where != NULL ? *sizep : 0;
 	int npools = 0, s;
 	unsigned int lookfor;
@@ -1417,7 +1441,7 @@ sysctl_dopool(int *name, u_int namelen, char *where, size_t *sizep)
 		lookfor = name[1];
 		break;
 	case KERN_POOL_POOL:
-		if (namelen != 2 || buflen != sizeof(struct pool))
+		if (namelen != 2 || buflen != sizeof(pi))
 			return (EINVAL);
 		lookfor = name[1];
 		break;
@@ -1429,28 +1453,42 @@ sysctl_dopool(int *name, u_int namelen, char *where, size_t *sizep)
 
 	SIMPLEQ_FOREACH(pp, &pool_head, pr_poollist) {
 		npools++;
-		if (lookfor == pp->pr_serial) {
-			foundpool = pp;
+		if (lookfor == pp->pr_serial)
 			break;
-		}
 	}
 
 	splx(s);
 
-	if (*name != KERN_POOL_NPOOLS && foundpool == NULL)
+	if (*name != KERN_POOL_NPOOLS && pp == NULL)
 		return (ENOENT);
 
 	switch (*name) {
 	case KERN_POOL_NPOOLS:
 		return copyout(&npools, where, buflen);
 	case KERN_POOL_NAME:
-		len = strlen(foundpool->pr_wchan) + 1;
+		len = strlen(pp->pr_wchan) + 1;
 		if (*sizep < len)
 			return (ENOMEM);
 		*sizep = len;
-		return copyout(foundpool->pr_wchan, where, len);
+		return copyout(pp->pr_wchan, where, len);
 	case KERN_POOL_POOL:
-		return copyout(foundpool, where, buflen);
+		memset(&pi, 0, sizeof(pi));
+		pi.pr_size = pp->pr_size;
+		pi.pr_pgsize = pp->pr_alloc->pa_pagesz;
+		pi.pr_itemsperpage = pp->pr_itemsperpage;
+		pi.pr_minpages = pp->pr_minpages;
+		pi.pr_maxpages = pp->pr_maxpages;
+		pi.pr_hardlimit = pp->pr_hardlimit;
+		pi.pr_nout = pp->pr_nout;
+		pi.pr_nitems = pp->pr_nitems;
+		pi.pr_nget = pp->pr_nget;
+		pi.pr_nput = pp->pr_nput;
+		pi.pr_nfail = pp->pr_nfail;
+		pi.pr_npagealloc = pp->pr_npagealloc;
+		pi.pr_npagefree = pp->pr_npagefree;
+		pi.pr_hiwat = pp->pr_hiwat;
+		pi.pr_nidle = pp->pr_nidle;
+		return copyout(&pi, where, buflen);
 	}
 	/* NOTREACHED */
 	return (0); /* XXX - Stupid gcc */
@@ -1490,7 +1528,7 @@ struct pool_allocator pool_allocator_nointr = {
 void *
 pool_allocator_alloc(struct pool *pp, int flags, int *slowdown)
 {
-	boolean_t waitok = (flags & PR_WAITOK) ? TRUE : FALSE;
+	int waitok = flags & PR_WAITOK;
 	void *v;
 
 	if (waitok)

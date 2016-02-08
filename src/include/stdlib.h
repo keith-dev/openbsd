@@ -1,4 +1,4 @@
-/*	$OpenBSD: stdlib.h,v 1.56 2013/12/28 01:51:53 martynas Exp $	*/
+/*	$OpenBSD: stdlib.h,v 1.59 2014/07/09 16:57:49 beck Exp $	*/
 /*	$NetBSD: stdlib.h,v 1.25 1995/12/27 21:19:08 jtc Exp $	*/
 
 /*-
@@ -124,6 +124,9 @@ char	*getenv(const char *);
 long	 labs(long);
 ldiv_t	 ldiv(long, long);
 void	*malloc(size_t);
+#if __BSD_VISIBLE
+void	*reallocarray(void *, size_t, size_t);
+#endif /* __BSD_VISIBLE */
 void	 qsort(void *, size_t, size_t, int (*)(const void *, const void *));
 int	 rand(void);
 void	*realloc(void *, size_t);
@@ -302,8 +305,8 @@ qdiv_t	 qdiv(quad_t, quad_t);
 quad_t	 strtoq(const char *, char **, int);
 u_quad_t strtouq(const char *, char **, int);
 
-u_int32_t arc4random(void);
-u_int32_t arc4random_uniform(u_int32_t);
+uint32_t arc4random(void);
+uint32_t arc4random_uniform(uint32_t);
 void arc4random_buf(void *, size_t)
 	__attribute__((__bounded__ (__string__,1,2)));
 

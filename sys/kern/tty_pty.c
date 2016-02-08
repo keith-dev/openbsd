@@ -1,4 +1,4 @@
-/*	$OpenBSD: tty_pty.c,v 1.63 2013/12/13 19:55:12 naddy Exp $	*/
+/*	$OpenBSD: tty_pty.c,v 1.68 2014/07/13 15:29:04 tedu Exp $	*/
 /*	$NetBSD: tty_pty.c,v 1.33.4.1 1996/06/02 09:08:11 mrg Exp $	*/
 
 /*
@@ -150,7 +150,7 @@ ptyarralloc(int nelem)
 {
 	struct pt_softc **pt;
 
-	pt = malloc(nelem * sizeof(struct pt_softc *), M_DEVBUF,
+	pt = mallocarray(nelem, sizeof(struct pt_softc *), M_DEVBUF,
 	    M_WAITOK|M_ZERO);
 	return pt;
 }
@@ -182,7 +182,7 @@ check_pty(int minor)
 		newpt = ptyarralloc(newnpty);
 
 		memcpy(newpt, pt_softc, npty * sizeof(struct pt_softc *));
-		free(pt_softc, M_DEVBUF);
+		free(pt_softc, M_DEVBUF, 0);
 		pt_softc = newpt;
 		npty = newnpty;
 	}
@@ -291,7 +291,7 @@ ptsread(dev_t dev, struct uio *uio, int flag)
 again:
 	if (pti->pt_flags & PF_REMOTE) {
 		while (isbackground(pr, tp)) {
-			if ((p->p_sigacts->ps_sigignore & sigmask(SIGTTIN)) ||
+			if ((pr->ps_sigacts->ps_sigignore & sigmask(SIGTTIN)) ||
 			    (p->p_sigmask & sigmask(SIGTTIN)) ||
 			    pr->ps_pgrp->pg_jobc == 0 ||
 			    pr->ps_flags & PS_PPWAIT)
@@ -503,7 +503,7 @@ ptcread(dev_t dev, struct uio *uio, int flag)
 	}
 	ttwakeupwr(tp);
 	if (bufcc)
-		bzero(buf, bufcc);
+		explicit_bzero(buf, bufcc);
 	return (error);
 }
 
@@ -604,7 +604,7 @@ block:
 	uio->uio_resid += cc;
 done:
 	if (bufcc)
-		bzero(buf, bufcc);
+		explicit_bzero(buf, bufcc);
 	return (error);
 }
 
@@ -1133,7 +1133,7 @@ retry:
 		if ((snd.ni_vp->v_mount->mnt_flag & MNT_RDONLY) == 0) {
 			gid = tty_gid;
 			/* get real uid */
-			uid = p->p_cred->p_ruid;
+			uid = p->p_ucred->cr_ruid;
 
 			VATTR_NULL(&vattr);
 			vattr.va_uid = uid;

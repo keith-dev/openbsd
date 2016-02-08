@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_rsu.c,v 1.18 2013/08/07 01:06:42 bluhm Exp $	*/
+/*	$OpenBSD: if_rsu.c,v 1.22 2014/07/13 15:52:49 mpi Exp $	*/
 
 /*-
  * Copyright (c) 2010 Damien Bergamini <damien.bergamini@free.fr>
@@ -46,9 +46,7 @@
 #include <net/if_types.h>
 
 #include <netinet/in.h>
-#include <netinet/in_systm.h>
 #include <netinet/if_ether.h>
-#include <netinet/ip.h>
 
 #include <net80211/ieee80211_var.h>
 #include <net80211/ieee80211_radiotap.h>
@@ -59,10 +57,6 @@
 #include <dev/usb/usbdevs.h>
 
 #include <dev/usb/if_rsureg.h>
-
-#ifdef USB_DEBUG
-#define RSU_DEBUG
-#endif
 
 #ifdef RSU_DEBUG
 #define DPRINTF(x)	do { if (rsu_debug) printf x; } while (0)
@@ -129,7 +123,6 @@ static const struct usb_devno rsu_devs_noht[] = {
 int		rsu_match(struct device *, void *, void *);
 void		rsu_attach(struct device *, struct device *, void *);
 int		rsu_detach(struct device *, int);
-int		rsu_activate(struct device *, int);
 int		rsu_open_pipes(struct rsu_softc *);
 void		rsu_close_pipes(struct rsu_softc *);
 int		rsu_alloc_rx_list(struct rsu_softc *);
@@ -197,11 +190,7 @@ struct cfdriver rsu_cd = {
 };
 
 const struct cfattach rsu_ca = {
-	sizeof(struct rsu_softc),
-	rsu_match,
-	rsu_attach,
-	rsu_detach,
-	rsu_activate
+	sizeof(struct rsu_softc), rsu_match, rsu_attach, rsu_detach,
 };
 
 int
@@ -363,19 +352,6 @@ rsu_detach(struct device *self, int flags)
 	rsu_free_rx_list(sc);
 	splx(s);
 
-	return (0);
-}
-
-int
-rsu_activate(struct device *self, int act)
-{
-	struct rsu_softc *sc = (struct rsu_softc *)self;
-
-	switch (act) {
-	case DVACT_DEACTIVATE:
-		usbd_deactivate(sc->sc_udev);
-		break;
-	}
 	return (0);
 }
 
@@ -2193,7 +2169,7 @@ rsu_load_firmware(struct rsu_softc *sc)
 		goto fail;
 	}
  fail:
-	free(fw, M_DEVBUF);
+	free(fw, M_DEVBUF, 0);
 	return (error);
 }
 

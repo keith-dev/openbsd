@@ -1,8 +1,7 @@
-/*	$OpenBSD: uvm_device.c,v 1.44 2013/08/13 06:56:41 kettenis Exp $	*/
+/*	$OpenBSD: uvm_device.c,v 1.48 2014/07/12 18:44:01 tedu Exp $	*/
 /*	$NetBSD: uvm_device.c,v 1.30 2000/11/25 06:27:59 chs Exp $	*/
 
 /*
- *
  * Copyright (c) 1997 Charles D. Cranor and Washington University.
  * All rights reserved.
  *
@@ -14,12 +13,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *      This product includes software developed by Charles D. Cranor and
- *      Washington University.
- * 4. The name of the author may not be used to endorse or promote products
- *    derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
@@ -67,7 +60,6 @@ struct mutex udv_lock = MUTEX_INITIALIZER(IPL_NONE);
 /*
  * functions
  */
-
 static void             udv_reference(struct uvm_object *);
 static void             udv_detach(struct uvm_object *);
 static int		udv_fault(struct uvm_faultinfo *, vaddr_t,
@@ -79,7 +71,6 @@ static boolean_t        udv_flush(struct uvm_object *, voff_t, voff_t,
 /*
  * master pager structure
  */
-
 struct uvm_pagerops uvm_deviceops = {
 	NULL,		/* inited statically */
 	udv_reference,
@@ -87,11 +78,6 @@ struct uvm_pagerops uvm_deviceops = {
 	udv_fault,
 	udv_flush,
 };
-
-/*
- * the ops.
- */
-
 
 /*
  * udv_attach
@@ -104,34 +90,27 @@ struct uvm_pagerops uvm_deviceops = {
  * The last two arguments (off and size) are only used for access checking.
  */
 struct uvm_object *
-udv_attach(void *arg, vm_prot_t accessprot, voff_t off, vsize_t size)
+udv_attach(dev_t device, vm_prot_t accessprot, voff_t off, vsize_t size)
 {
-	dev_t device = *((dev_t *)arg);
 	struct uvm_device *udv, *lcv;
 	paddr_t (*mapfn)(dev_t, off_t, int);
 #if NDRM > 0
 	struct uvm_object *obj;
 #endif
 
-	/*
-	 * before we do anything, ensure this device supports mmap
-	 */
-
+	/* before we do anything, ensure this device supports mmap */
 	mapfn = cdevsw[major(device)].d_mmap;
 	if (mapfn == NULL ||
 	    mapfn == (paddr_t (*)(dev_t, off_t, int)) enodev ||
 	    mapfn == (paddr_t (*)(dev_t, off_t, int)) nullop)
 		return(NULL);
 
-	/*
-	 * Negative offsets on the object are not allowed.
-	 */
-
+	/* Negative offsets on the object are not allowed. */
 	if (off < 0)
 		return(NULL);
 
 #if NDRM > 0
-	obj = udv_attach_drm(arg, accessprot, off, size);
+	obj = udv_attach_drm(device, accessprot, off, size);
 	if (obj)
 		return(obj);
 #endif
@@ -143,41 +122,28 @@ udv_attach(void *arg, vm_prot_t accessprot, voff_t off, vsize_t size)
 	 * XXX assumes VM_PROT_* == PROT_*
 	 * XXX clobbers off and size, but nothing else here needs them.
 	 */
-
 	while (size != 0) {
 		if ((*mapfn)(device, off, accessprot) == -1)
 			return (NULL);
 		off += PAGE_SIZE; size -= PAGE_SIZE;
 	}
 
-	/*
-	 * keep looping until we get it
-	 */
-
+	/* keep looping until we get it */
 	for (;;) {
-
-		/*
-		 * first, attempt to find it on the main list 
-		 */
-
+		/* first, attempt to find it on the main list */
 		mtx_enter(&udv_lock);
 		LIST_FOREACH(lcv, &udv_list, u_list) {
 			if (device == lcv->u_device)
 				break;
 		}
 
-		/*
-		 * got it on main list.  put a hold on it and unlock udv_lock.
-		 */
-
+		/* got it on main list.  put a hold on it and unlock udv_lock. */
 		if (lcv) {
-
 			/*
 			 * if someone else has a hold on it, sleep and start
 			 * over again. Else, we need take HOLD flag so we
 			 * don't have to re-order locking here.
 			 */
-
 			if (lcv->u_flags & UVM_DEVICE_HOLD) {
 				lcv->u_flags |= UVM_DEVICE_WANTED;
 				msleep(lcv, &udv_lock, PVM | PNORELOCK,
@@ -189,10 +155,7 @@ udv_attach(void *arg, vm_prot_t accessprot, voff_t off, vsize_t size)
 			lcv->u_flags |= UVM_DEVICE_HOLD;
 			mtx_leave(&udv_lock);
 
-			/*
-			 * bump reference count, unhold, return.
-			 */
-
+			/* bump reference count, unhold, return. */
 			lcv->u_obj.uo_refs++;
 
 			mtx_enter(&udv_lock);
@@ -203,10 +166,7 @@ udv_attach(void *arg, vm_prot_t accessprot, voff_t off, vsize_t size)
 			return(&lcv->u_obj);
 		}
 
-		/*
-		 * did not find it on main list.   need to malloc a new one.
-		 */
-
+		/* did not find it on main list.   need to malloc a new one. */
 		mtx_leave(&udv_lock);
 		/* NOTE: we could sleep in the following malloc() */
 		udv = malloc(sizeof(*udv), M_TEMP, M_WAITOK);
@@ -216,7 +176,6 @@ udv_attach(void *arg, vm_prot_t accessprot, voff_t off, vsize_t size)
 		 * now we have to double check to make sure no one added it
 		 * to the list while we were sleeping...
 		 */
-
 		LIST_FOREACH(lcv, &udv_list, u_list) {
 			if (device == lcv->u_device)
 				break;
@@ -226,10 +185,9 @@ udv_attach(void *arg, vm_prot_t accessprot, voff_t off, vsize_t size)
 		 * did we lose a race to someone else?
 		 * free our memory and retry.
 		 */
-
 		if (lcv) {
 			mtx_leave(&udv_lock);
-			free(udv, M_TEMP);
+			free(udv, M_TEMP, 0);
 			continue;
 		}
 
@@ -237,7 +195,6 @@ udv_attach(void *arg, vm_prot_t accessprot, voff_t off, vsize_t size)
 		 * we have it!   init the data structures, add to list
 		 * and return.
 		 */
-
 		uvm_objinit(&udv->u_obj, &uvm_deviceops, 1);
 		udv->u_flags = 0;
 		udv->u_device = device;
@@ -255,7 +212,6 @@ udv_attach(void *arg, vm_prot_t accessprot, voff_t off, vsize_t size)
  * already be one (the passed in reference) so there is no chance of the
  * udv being released or locked out here.
  */
-
 static void
 udv_reference(struct uvm_object *uobj)
 {
@@ -268,15 +224,12 @@ udv_reference(struct uvm_object *uobj)
  *
  * remove a reference to a VM object.
  */
-
 static void
 udv_detach(struct uvm_object *uobj)
 {
 	struct uvm_device *udv = (struct uvm_device *)uobj;
 
-	/*
-	 * loop until done
-	 */
+	/* loop until done */
 again:
 	if (uobj->uo_refs > 1) {
 		uobj->uo_refs--;
@@ -284,10 +237,7 @@ again:
 	}
 	KASSERT(uobj->uo_npages == 0 && RB_EMPTY(&uobj->memt));
 
-	/*
-	 * is it being held?   if so, wait until others are done.
-	 */
-
+	/* is it being held?   if so, wait until others are done. */
 	mtx_enter(&udv_lock);
 	if (udv->u_flags & UVM_DEVICE_HOLD) {
 		udv->u_flags |= UVM_DEVICE_WANTED;
@@ -299,15 +249,12 @@ again:
 		goto again;
 	}
 
-	/*
-	 * got it!   nuke it now.
-	 */
-
+	/* got it!   nuke it now. */
 	LIST_REMOVE(udv, u_list);
 	if (udv->u_flags & UVM_DEVICE_WANTED)
 		wakeup(udv);
 	mtx_leave(&udv_lock);
-	free(udv, M_TEMP);
+	free(udv, M_TEMP, 0);
 }
 
 
@@ -316,7 +263,6 @@ again:
  *
  * flush pages out of a uvm object.   a no-op for devices.
  */
-
 static boolean_t
 udv_flush(struct uvm_object *uobj, voff_t start, voff_t stop, int flags)
 {
@@ -337,7 +283,6 @@ udv_flush(struct uvm_object *uobj, voff_t start, voff_t stop, int flags)
  *	it as a flag
  * => NOTE: vaddr is the VA of pps[0] in ufi->entry, _NOT_ pps[centeridx]
  */
-
 static int
 udv_fault(struct uvm_faultinfo *ufi, vaddr_t vaddr, vm_page_t *pps, int npages,
     int centeridx, vm_fault_t fault_type, vm_prot_t access_type, int flags)
@@ -357,16 +302,12 @@ udv_fault(struct uvm_faultinfo *ufi, vaddr_t vaddr, vm_page_t *pps, int npages,
 	 * we do not allow device mappings to be mapped copy-on-write
 	 * so we kill any attempt to do so here.
 	 */
-	
 	if (UVM_ET_ISCOPYONWRITE(entry)) {
 		uvmfault_unlockall(ufi, ufi->entry->aref.ar_amap, uobj, NULL);
 		return(VM_PAGER_ERROR);
 	}
 
-	/*
-	 * get device map function.   
-	 */
-
+	/* get device map function. */
 	device = udv->u_device;
 	mapfn = cdevsw[major(device)].d_mmap;
 
@@ -376,16 +317,12 @@ udv_fault(struct uvm_faultinfo *ufi, vaddr_t vaddr, vm_page_t *pps, int npages,
 	 * for pmap_enter (even if we have a submap).   since virtual
 	 * addresses in a submap must match the main map, this is ok.
 	 */
-
 	/* udv offset = (offset from start of entry) + entry's offset */
 	curr_offset = entry->offset + (vaddr - entry->start);
 	/* pmap va = vaddr (virtual address of pps[0]) */
 	curr_va = vaddr;
 	
-	/*
-	 * loop over the page range entering in as needed
-	 */
-
+	/* loop over the page range entering in as needed */
 	retval = VM_PAGER_OK;
 	for (lcv = 0 ; lcv < npages ; lcv++, curr_offset += PAGE_SIZE,
 	    curr_va += PAGE_SIZE) {

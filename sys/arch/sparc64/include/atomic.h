@@ -1,4 +1,4 @@
-/*	$OpenBSD: atomic.h,v 1.9 2014/01/30 12:27:10 kettenis Exp $	*/
+/*	$OpenBSD: atomic.h,v 1.13 2014/07/18 12:44:53 dlg Exp $	*/
 /*
  * Copyright (c) 2007 Artur Grabowski <art@openbsd.org>
  *
@@ -23,7 +23,7 @@
 static inline unsigned int
 _atomic_cas_uint(volatile unsigned int *p, unsigned int e, unsigned int n)
 {
-	__asm __volatile("cas [%2], %3, %0"
+	__asm volatile("cas [%2], %3, %0"
 	    : "+r" (n), "=m" (*p)
 	    : "r" (p), "r" (e), "m" (*p));
 
@@ -34,7 +34,7 @@ _atomic_cas_uint(volatile unsigned int *p, unsigned int e, unsigned int n)
 static inline unsigned long
 _atomic_cas_ulong(volatile unsigned long *p, unsigned long e, unsigned long n)
 {
-	__asm __volatile("casx [%2], %3, %0"
+	__asm volatile("casx [%2], %3, %0"
 	    : "+r" (n), "=m" (*p)
 	    : "r" (p), "r" (e), "m" (*p));
 
@@ -43,11 +43,11 @@ _atomic_cas_ulong(volatile unsigned long *p, unsigned long e, unsigned long n)
 #define atomic_cas_ulong(_p, _e, _n) _atomic_cas_ulong((_p), (_e), (_n))
 
 static inline void *
-_atomic_cas_ptr(volatile void **p, void *e, void *n)
+_atomic_cas_ptr(volatile void *p, void *e, void *n)
 {
-	__asm __volatile("casx [%2], %3, %0"
-	    : "+r" (n), "=m" (*p)
-	    : "r" (p), "r" (e), "m" (*p));
+	__asm volatile("casx [%2], %3, %0"
+	    : "+r" (n), "=m" (*(volatile unsigned long *)p)
+	    : "r" (p), "r" (e), "m" (*(volatile unsigned long *)p));
 
 	return (n);
 }
@@ -71,8 +71,21 @@ _f(volatile _t *p, _t v)						\
 
 def_atomic_swap(_atomic_swap_uint, unsigned int, atomic_cas_uint)
 def_atomic_swap(_atomic_swap_ulong, unsigned long, atomic_cas_ulong)
-def_atomic_swap(_atomic_swap_ptr, void *, atomic_cas_ptr)
 #undef def_atomic_swap
+
+static inline void *
+_atomic_swap_ptr(volatile void *p, void *v)
+{
+	void *e, *r;
+
+	r = *(void **)p;
+	do {
+		e = r;
+		r = atomic_cas_ptr(p, e, v);
+	} while (r != e);
+
+	return (r);
+}
 
 #define atomic_swap_uint(_p, _v)  _atomic_swap_uint(_p, _v)
 #define atomic_swap_ulong(_p, _v)  _atomic_swap_ulong(_p, _v)
@@ -129,15 +142,11 @@ atomic_clearbits_int(volatile unsigned int *uip, unsigned int v)
 	} while (r != e);
 }
 
-#if KERN_MM != PSTATE_MM_TSO
-#error membar operations only support KERN_MM = PSTATE_MM_TSO
-#endif
-
-#define membar_enter()		membar(LoadLoad)
-#define membar_exit()		membar(LoadLoad)
-#define membar_producer()	membar(0)
+#define membar_enter()		membar(StoreLoad|StoreStore)
+#define membar_exit()		membar(LoadStore|StoreStore)
+#define membar_producer()	membar(StoreStore)
 #define membar_consumer()	membar(LoadLoad)
-#define membar_sync()		membar(LoadLoad)
+#define membar_sync()		membar(Sync)
 
 #endif /* defined(_KERNEL) */
 #endif /* _MACHINE_ATOMIC_H_ */

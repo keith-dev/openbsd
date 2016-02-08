@@ -1,4 +1,4 @@
-/*	$OpenBSD: if.h,v 1.153 2013/11/21 17:32:12 mikeb Exp $	*/
+/*	$OpenBSD: if.h,v 1.157 2014/07/14 03:45:43 dlg Exp $	*/
 /*	$NetBSD: if.h,v 1.23 1996/05/07 02:40:27 thorpej Exp $	*/
 
 /*
@@ -70,12 +70,24 @@ struct if_clonereq {
 
 #define MCLPOOLS	7		/* number of cluster pools */
 
-struct mclpool {
-	int	mcl_grown;
-	u_short	mcl_alive;
-	u_short mcl_hwm;
-	u_short mcl_cwm;
-	u_short mcl_lwm;
+struct if_rxring {
+	int     rxr_adjusted;
+	u_int	rxr_alive;
+	u_int	rxr_cwm;
+	u_int	rxr_lwm;
+	u_int	rxr_hwm;
+};
+
+struct if_rxring_info {
+	char	ifr_name[16];		/* name of the ring */
+	u_int	ifr_size;		/* size of the packets on the ring */
+	struct if_rxring ifr_info;
+};
+
+/* Structure used in SIOCGIFRXR request. */
+struct if_rxrinfo {
+	u_int	ifri_total;
+	struct if_rxring_info *ifri_entries;
 };
 
 /*
@@ -106,8 +118,6 @@ struct	if_data {
 	u_int64_t	ifi_noproto;		/* destined for unsupported protocol */
 	u_int32_t	ifi_capabilities;	/* interface capabilities */
 	struct	timeval ifi_lastchange;	/* last operational state change */
-
-	struct mclpool	ifi_mclpool[MCLPOOLS];
 };
 
 #define IFQ_NQUEUES	8
@@ -200,6 +210,7 @@ struct if_status_description {
 #define	IFXF_INET6_NOPRIVACY	0x4		/* don't autoconf privacy */
 #define	IFXF_MPLS		0x8		/* supports MPLS */
 #define	IFXF_WOL		0x10		/* wake on lan enabled */
+#define	IFXF_AUTOCONF6		0x20		/* v6 autoconf enabled */
 
 #define	IFXF_CANTCHANGE \
 	(IFXF_TXREADY)

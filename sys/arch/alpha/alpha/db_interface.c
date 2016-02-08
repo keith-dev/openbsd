@@ -1,4 +1,4 @@
-/* $OpenBSD: db_interface.c,v 1.19 2014/01/30 20:10:24 miod Exp $ */
+/* $OpenBSD: db_interface.c,v 1.21 2014/07/13 12:11:01 jasper Exp $ */
 /* $NetBSD: db_interface.c,v 1.8 1999/10/12 17:08:57 jdolecek Exp $ */
 
 /* 
@@ -131,7 +131,7 @@ struct db_variable db_regs[] = {
 	{	"ai",	&ddb_regs.tf_regs[FRAME_T11],	FCN_NULL	},
 	{	"pv",	&ddb_regs.tf_regs[FRAME_T12],	FCN_NULL	},
 };
-struct db_variable *db_eregs = db_regs + sizeof(db_regs)/sizeof(db_regs[0]);
+struct db_variable *db_eregs = db_regs + nitems(db_regs);
 
 /*
  * ddb_trap - field a kernel trap
@@ -223,7 +223,7 @@ void
 Debugger()
 {
 
-	__asm __volatile("call_pal 0x81");		/* bugchk */
+	__asm volatile("call_pal 0x81");		/* bugchk */
 }
 
 /*

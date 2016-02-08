@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_ral.c,v 1.124 2013/08/07 01:06:42 bluhm Exp $	*/
+/*	$OpenBSD: if_ral.c,v 1.128 2014/07/13 15:52:49 mpi Exp $	*/
 
 /*-
  * Copyright (c) 2005, 2006
@@ -48,9 +48,7 @@
 #include <net/if_types.h>
 
 #include <netinet/in.h>
-#include <netinet/in_systm.h>
 #include <netinet/if_ether.h>
-#include <netinet/ip.h>
 
 #include <net80211/ieee80211_var.h>
 #include <net80211/ieee80211_amrr.h>
@@ -63,10 +61,6 @@
 
 #include <dev/usb/if_ralreg.h>
 #include <dev/usb/if_ralvar.h>
-
-#ifdef USB_DEBUG
-#define URAL_DEBUG
-#endif
 
 #ifdef URAL_DEBUG
 #define DPRINTF(x)	do { if (ural_debug) printf x; } while (0)
@@ -188,21 +182,16 @@ static const uint32_t ural_rf2525e_r2[] =   RAL_RF2525E_R2;
 static const uint32_t ural_rf2526_hi_r2[] = RAL_RF2526_HI_R2;
 static const uint32_t ural_rf2526_r2[] =    RAL_RF2526_R2;
 
-int ural_match(struct device *, void *, void *); 
-void ural_attach(struct device *, struct device *, void *); 
-int ural_detach(struct device *, int); 
-int ural_activate(struct device *, int); 
+int ural_match(struct device *, void *, void *);
+void ural_attach(struct device *, struct device *, void *);
+int ural_detach(struct device *, int);
 
-struct cfdriver ural_cd = { 
-	NULL, "ural", DV_IFNET 
-}; 
+struct cfdriver ural_cd = {
+	NULL, "ural", DV_IFNET
+};
 
-const struct cfattach ural_ca = { 
-	sizeof(struct ural_softc), 
-	ural_match, 
-	ural_attach, 
-	ural_detach, 
-	ural_activate, 
+const struct cfattach ural_ca = {
+	sizeof(struct ural_softc), ural_match, ural_attach, ural_detach
 };
 
 int
@@ -1259,8 +1248,7 @@ ural_start(struct ifnet *ifp)
 			}
 			IF_DEQUEUE(&ic->ic_mgtq, m0);
 
-			ni = (struct ieee80211_node *)m0->m_pkthdr.rcvif;
-			m0->m_pkthdr.rcvif = NULL;
+			ni = m0->m_pkthdr.ph_cookie;
 #if NBPFILTER > 0
 			if (ic->ic_rawbpf != NULL)
 				bpf_mtap(ic->ic_rawbpf, m0, BPF_DIRECTION_OUT);
@@ -2224,18 +2212,4 @@ ural_amrr_update(struct usbd_xfer *xfer, void *priv,
 
 	if (!usbd_is_dying(sc->sc_udev))
 		timeout_add_sec(&sc->amrr_to, 1);
-}
-
-int
-ural_activate(struct device *self, int act)
-{
-	struct ural_softc *sc = (struct ural_softc *)self;
-
-	switch (act) {
-	case DVACT_DEACTIVATE:
-		usbd_deactivate(sc->sc_udev);
-		break;
-	}
-
-	return 0;
 }

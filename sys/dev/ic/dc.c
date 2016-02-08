@@ -1,4 +1,4 @@
-/*	$OpenBSD: dc.c,v 1.131 2013/12/28 03:34:59 deraadt Exp $	*/
+/*	$OpenBSD: dc.c,v 1.134 2014/07/22 13:12:11 mpi Exp $	*/
 
 /*
  * Copyright (c) 1997, 1998, 1999
@@ -107,12 +107,8 @@
 #include <net/if_dl.h>
 #include <net/if_types.h>
 
-#ifdef INET
 #include <netinet/in.h>
-#include <netinet/in_systm.h>
-#include <netinet/ip.h>
 #include <netinet/if_ether.h>
-#endif
 
 #include <net/if_media.h>
 
@@ -2565,10 +2561,6 @@ dc_encap(struct dc_softc *sc, struct mbuf *m_head, u_int32_t *txidx)
 	if (sc->dc_flags & DC_TX_USE_TX_INTR && sc->dc_cdata.dc_tx_cnt > 64)
 		sc->dc_ldata->dc_tx_list[cur].dc_ctl |=
 		    htole32(DC_TXCTL_FINT);
-	else if ((sc->dc_flags & DC_TX_USE_TX_INTR) &&
-		 TBR_IS_ENABLED(&sc->sc_arpcom.ac_if.if_snd))
-		sc->dc_ldata->dc_tx_list[cur].dc_ctl |=
-		    htole32(DC_TXCTL_FINT);
 	bus_dmamap_sync(sc->sc_dmat, map, 0, map->dm_mapsize,
 	    BUS_DMASYNC_PREWRITE);
 
@@ -3132,7 +3124,7 @@ dc_detach(struct dc_softc *sc)
 		mii_detach(&sc->sc_mii, MII_PHY_ANY, MII_OFFSET_ANY);
 
 	if (sc->dc_srom)
-		free(sc->dc_srom, M_DEVBUF);
+		free(sc->dc_srom, M_DEVBUF, 0);
 
 	for (i = 0; i < DC_RX_LIST_CNT; i++)
 		bus_dmamap_destroy(sc->sc_dmat, sc->dc_cdata.dc_rx_chain[i].sd_map);

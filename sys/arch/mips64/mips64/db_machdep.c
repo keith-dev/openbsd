@@ -1,4 +1,4 @@
-/*	$OpenBSD: db_machdep.c,v 1.36 2012/09/29 21:37:03 miod Exp $ */
+/*	$OpenBSD: db_machdep.c,v 1.42 2014/07/13 12:11:01 jasper Exp $ */
 
 /*
  * Copyright (c) 1998-2003 Opsycon AB (www.opsycon.se)
@@ -94,14 +94,14 @@ struct db_variable db_regs[] = {
     { "a1",  (long *)&ddb_regs.a1,      FCN_NULL },
     { "a2",  (long *)&ddb_regs.a2,      FCN_NULL },
     { "a3",  (long *)&ddb_regs.a3,      FCN_NULL },
-    { "a4",  (long *)&ddb_regs.t0,      FCN_NULL },
-    { "a5",  (long *)&ddb_regs.t1,      FCN_NULL },
-    { "a6",  (long *)&ddb_regs.t2,      FCN_NULL },
-    { "a7",  (long *)&ddb_regs.t3,      FCN_NULL },
-    { "t0",  (long *)&ddb_regs.t4,      FCN_NULL },
-    { "t1",  (long *)&ddb_regs.t5,      FCN_NULL },
-    { "t2",  (long *)&ddb_regs.t6,      FCN_NULL },
-    { "t3",  (long *)&ddb_regs.t7,      FCN_NULL },
+    { "a4",  (long *)&ddb_regs.a4,      FCN_NULL },
+    { "a5",  (long *)&ddb_regs.a5,      FCN_NULL },
+    { "a6",  (long *)&ddb_regs.a6,      FCN_NULL },
+    { "a7",  (long *)&ddb_regs.a7,      FCN_NULL },
+    { "t0",  (long *)&ddb_regs.t0,      FCN_NULL },
+    { "t1",  (long *)&ddb_regs.t1,      FCN_NULL },
+    { "t2",  (long *)&ddb_regs.t2,      FCN_NULL },
+    { "t3",  (long *)&ddb_regs.t3,      FCN_NULL },
     { "s0",  (long *)&ddb_regs.s0,      FCN_NULL },
     { "s1",  (long *)&ddb_regs.s1,      FCN_NULL },
     { "s2",  (long *)&ddb_regs.s2,      FCN_NULL },
@@ -125,7 +125,7 @@ struct db_variable db_regs[] = {
     { "cs",  (long *)&ddb_regs.cause,   FCN_NULL },
     { "pc",  (long *)&ddb_regs.pc,      FCN_NULL },
 };
-struct db_variable *db_eregs = db_regs + sizeof(db_regs)/sizeof(db_regs[0]);
+struct db_variable *db_eregs = db_regs + nitems(db_regs);
 
 extern label_t  *db_recover;
 
@@ -256,7 +256,7 @@ db_cpuinfo_cmd(db_expr_t addr, int have_addr, db_expr_t count, char *modif)
 	int i;
 
 	for (i = 0; i < ncpus; i++) {
-		db_printf("%c%4d: ", (i == cpu_number()) ? '*' : ' ',
+		db_printf("%c%4ld: ", (i == cpu_number()) ? '*' : ' ',
 		    get_cpu_info(i)->ci_cpuid);
 		switch(get_cpu_info(i)->ci_ddb) {
 		case CI_DDB_RUNNING:
@@ -378,75 +378,6 @@ next_instr_address(db_addr_t pc, boolean_t bd)
 
 
 /*
- *	Decode instruction and figure out type.
- */
-int
-db_inst_type(ins)
-	int	ins;
-{
-	InstFmt	inst;
-	int	ityp = 0;
-
-	inst.word = ins;
-	switch ((int)inst.JType.op) {
-	case OP_SPECIAL:
-		switch ((int)inst.RType.func) {
-		case OP_JR:
-			ityp = IT_BRANCH;
-			break;
-		case OP_JALR:
-		case OP_SYSCALL:
-			ityp = IT_CALL;
-			break;
-		}
-		break;
-
-	case OP_BCOND:
-		switch ((int)inst.IType.rt) {
-		case OP_BLTZ:
-		case OP_BLTZL:
-		case OP_BGEZ:
-		case OP_BGEZL:
-			ityp = IT_BRANCH;
-			break;
-
-		case OP_BLTZAL:
-		case OP_BLTZALL:
-		case OP_BGEZAL:
-		case OP_BGEZALL:
-			ityp = IT_CALL;
-			break;
-		}
-		break;
-
-	case OP_JAL:
-		ityp = IT_CALL;
-		break;
-
-	case OP_J:
-	case OP_BEQ:
-	case OP_BEQL:
-	case OP_BNE:
-	case OP_BNEL:
-	case OP_BLEZ:
-	case OP_BLEZL:
-	case OP_BGTZ:
-	case OP_BGTZL:
-		ityp = IT_BRANCH;
-		break;
-
-	case OP_COP1:
-		switch (inst.RType.rs) {
-		case OP_BC:
-			ityp = IT_BRANCH;
-			break;
-		}
-		break;
-	}
-	return (ityp);
-}
-
-/*
  *  MIPS machine dependent DDB commands.
  */
 
@@ -456,7 +387,7 @@ db_inst_type(ins)
 void
 db_trap_trace_cmd(db_expr_t addr, int have_addr, db_expr_t count, char *m)
 {
-	trapDump("ddb trap trace");
+	trapDump("ddb trap trace", db_printf);
 }
 
 void
@@ -568,13 +499,13 @@ db_dump_tlb_cmd(db_expr_t addr, int have_addr, db_expr_t count, char *m)
 				asid = 0;	/* KV1 addresses ignore ASID */
 			va |= ptoa((tlbno ^ asid) % 128);
 #endif
-			db_printf("%3d v=%016llx", tlbno, va);
+			db_printf("%3d v=%016lx", tlbno, va);
 			db_printf("/%02x ", asid);
 
 			db_print_tlb(tlbno, tlb.tlb_lo0);
 #ifndef CPU_R8000
 			db_print_tlb(tlbno, tlb.tlb_lo1);
-			db_printf(" sz=%x", tlb.tlb_mask);
+			db_printf(" sz=%llx", tlb.tlb_mask);
 #endif
 		} else if (pid < 0) {
 			db_printf("%3d v=invalid    ", tlbno);

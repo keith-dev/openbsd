@@ -1,5 +1,5 @@
 #
-#	$OpenBSD: Makefile,v 1.39 2013/10/31 22:37:17 schwarze Exp $
+#	$OpenBSD: Makefile,v 1.41 2014/05/05 17:18:08 miod Exp $
 #
 # Copyright (c) 1997 Tobias Weingartner
 # All rights reserved.
@@ -40,7 +40,7 @@ manual.c:
 	echo '};'; echo 'const int manpage_sz = sizeof(manpage);') > manual.c
 .else
 fdisk.cat8:	fdisk.8
-	mandoc ${.ALLSRC} > ${.TARGET}
+	mandoc -Tascii ${.ALLSRC} > ${.TARGET}
 
 manual.c:	fdisk.cat8
 	(echo 'const unsigned char manpage[] = {'; \
@@ -54,6 +54,11 @@ MAN=	fdisk.8
     ${MACHINE} == "landisk" || ${MACHINE} == "loongson" || \
     ${MACHINE} == "macppc" || ${MACHINE} == "socppc"
 CFLAGS += -DHAS_MBR
+.endif
+
+# XXX gross
+.if ${MACHINE_ARCH} == "sh"
+CFLAGS += -fno-builtin-memcpy
 .endif
 
 .include <bsd.prog.mk>

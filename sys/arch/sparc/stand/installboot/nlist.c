@@ -1,4 +1,4 @@
-/*	$OpenBSD: nlist.c,v 1.1 2013/10/30 18:04:47 deraadt Exp $ */
+/*	$OpenBSD: nlist.c,v 1.3 2014/07/12 19:01:49 tedu Exp $ */
 /*
  * Copyright (c) 1989, 1993
  *	The Regents of the University of California.  All rights reserved.

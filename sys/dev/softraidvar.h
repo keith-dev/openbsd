@@ -1,4 +1,4 @@
-/* $OpenBSD: softraidvar.h,v 1.154 2014/01/22 09:42:13 jsing Exp $ */
+/* $OpenBSD: softraidvar.h,v 1.157 2014/07/20 18:05:21 mlarkin Exp $ */
 /*
  * Copyright (c) 2006 Marco Peereboom <marco@peereboom.us>
  * Copyright (c) 2008 Chris Kuethe <ckuethe@openbsd.org>
@@ -617,6 +617,7 @@ struct sr_discipline {
 
 	/* Tasks. */
 	struct task		sd_meta_save_task;
+	struct task		sd_hotspare_rebuild_task;
 
 	TAILQ_ENTRY(sr_discipline) sd_link;
 };
@@ -625,8 +626,6 @@ TAILQ_HEAD(sr_discipline_list, sr_discipline);
 
 struct sr_softc {
 	struct device		sc_dev;
-
-	void			(*sc_shutdownhook)(void *);
 
 	struct rwlock		sc_lock;
 
@@ -730,6 +729,10 @@ int			sr_crypto_get_kdf(struct bioc_createraid *,
 int			sr_crypto_create_keys(struct sr_discipline *);
 struct sr_chunk *	sr_crypto_create_key_disk(struct sr_discipline *, dev_t);
 struct sr_chunk *	sr_crypto_read_key_disk(struct sr_discipline *, dev_t);
+
+/* Hibernate I/O function */
+int			sr_hibernate_io(dev_t dev, daddr_t blkno, vaddr_t addr,
+			    size_t size, int op, void *page);
 
 #ifdef SR_DEBUG
 void			sr_dump_block(void *, int);

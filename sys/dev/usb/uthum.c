@@ -1,4 +1,4 @@
-/*	$OpenBSD: uthum.c,v 1.24 2013/09/28 11:22:09 sasano Exp $   */
+/*	$OpenBSD: uthum.c,v 1.27 2014/04/15 09:14:27 mpi Exp $   */
 
 /*
  * Copyright (c) 2009, 2010 Yojiro UO <yuo@nui.org>
@@ -33,10 +33,6 @@
 #include <dev/usb/usbdevs.h>
 #include <dev/usb/uhidev.h>
 #include <dev/usb/hid.h>
-
-#ifdef USB_DEBUG
-#define UTHUM_DEBUG
-#endif
 
 #ifdef UTHUM_DEBUG
 #define DPRINTF(x)	do { printf x; } while (0)
@@ -171,8 +167,10 @@ const struct cfattach uthum_ca = {
 int
 uthum_match(struct device *parent, void *match, void *aux)
 {
-	struct usb_attach_arg *uaa = aux;
-	struct uhidev_attach_arg *uha = (struct uhidev_attach_arg *)uaa;
+	struct uhidev_attach_arg *uha = aux;
+
+	if (uha->reportid == UHIDEV_CLAIM_ALLREPORTID)
+		return (UMATCH_NONE);
 
 	if (uthum_lookup(uha->uaa->vendor, uha->uaa->product) == NULL)
 		return UMATCH_NONE;
@@ -293,19 +291,19 @@ uthum_issue_cmd(struct uthum_softc *sc, uint8_t target_cmd, int delay)
 	bzero(cmdbuf, sizeof(cmdbuf));
 	memcpy(cmdbuf, cmd_issue, sizeof(cmd_issue));
 	if (uhidev_set_report(&sc->sc_hdev, UHID_OUTPUT_REPORT,
-	    cmdbuf, sc->sc_olen))
+	    sc->sc_hdev.sc_report_id, cmdbuf, sc->sc_olen))
 		return EIO;
 
 	bzero(cmdbuf, sizeof(cmdbuf));
 	cmdbuf[0] = target_cmd;
 	if (uhidev_set_report(&sc->sc_hdev, UHID_OUTPUT_REPORT,
-	    cmdbuf, sc->sc_olen))
+	    sc->sc_hdev.sc_report_id, cmdbuf, sc->sc_olen))
 		return EIO;
 
 	bzero(cmdbuf, sizeof(cmdbuf));
 	for (i = 0; i < 7; i++) {
 		if (uhidev_set_report(&sc->sc_hdev, UHID_OUTPUT_REPORT,
-		    cmdbuf, sc->sc_olen))
+		    sc->sc_hdev.sc_report_id, cmdbuf, sc->sc_olen))
 			return EIO;
 	}
 
@@ -332,7 +330,7 @@ uthum_read_data(struct uthum_softc *sc, uint8_t target_cmd, uint8_t *buf,
 	bzero(cmdbuf, sizeof(cmdbuf));
 	memcpy(cmdbuf, cmd_query, sizeof(cmd_query));
 	if (uhidev_set_report(&sc->sc_hdev, UHID_OUTPUT_REPORT,
-	    cmdbuf, sc->sc_olen))
+	    sc->sc_hdev.sc_report_id, cmdbuf, sc->sc_olen))
 		return EIO;
 
 	/* wait if required */
@@ -341,7 +339,7 @@ uthum_read_data(struct uthum_softc *sc, uint8_t target_cmd, uint8_t *buf,
 
 	/* get answer */
 	if (uhidev_get_report(&sc->sc_hdev, UHID_FEATURE_REPORT,
-	    report, sc->sc_flen))
+	    sc->sc_hdev.sc_report_id, report, sc->sc_flen))
 		return EIO;
 	memcpy(buf, report, len);
 	return 0;

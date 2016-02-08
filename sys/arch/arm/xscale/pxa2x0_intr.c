@@ -1,4 +1,4 @@
-/*	$OpenBSD: pxa2x0_intr.c,v 1.23 2012/12/05 23:20:11 deraadt Exp $ */
+/*	$OpenBSD: pxa2x0_intr.c,v 1.26 2014/07/12 18:44:41 tedu Exp $ */
 /*	$NetBSD: pxa2x0_intr.c,v 1.5 2003/07/15 00:24:55 lukem Exp $	*/
 
 /*
@@ -110,8 +110,8 @@ static struct intrhandler{
 #endif
 } handler[ICU_LEN];
 
-__volatile int softint_pending;
-__volatile int current_spl_level;
+volatile int softint_pending;
+volatile int current_spl_level;
 /* interrupt masks for each level */
 int pxa2x0_imask[NIPL];
 static int extirq_level[ICU_LEN];
@@ -590,7 +590,7 @@ pxa2x0_intr_disestablish(void *cookie)
 	psw = disable_interrupts(I32_bit);
 	TAILQ_REMOVE(&handler[irqno].list, ih, ih_list);
 
-	free(ih, M_DEVBUF);
+	free(ih, M_DEVBUF, 0);
 
 	pxa2x0_update_intr_masks();
 
@@ -706,7 +706,7 @@ pxa2x0_intr_string(void *cookie)
 	if (ih == NULL)
 		snprintf(irqstr, sizeof irqstr, "couldn't establish interrupt");
 	else
-		snprintf(irqstr, sizeof irqstr, "irq %ld", ih->ih_irq);
+		snprintf(irqstr, sizeof irqstr, "irq %d", ih->ih_irq);
 
 	return irqstr;
 }

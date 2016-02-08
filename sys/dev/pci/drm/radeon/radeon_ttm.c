@@ -1,4 +1,4 @@
-/*	$OpenBSD: radeon_ttm.c,v 1.3 2014/02/09 11:03:31 jsg Exp $	*/
+/*	$OpenBSD: radeon_ttm.c,v 1.6 2014/07/12 18:48:52 tedu Exp $	*/
 /*
  * Copyright 2009 Jerome Glisse.
  * All Rights Reserved.
@@ -294,9 +294,7 @@ static int radeon_move_blit(struct ttm_buffer_object *bo,
 		return -EINVAL;
 	}
 
-#ifdef notyet
 	BUILD_BUG_ON((PAGE_SIZE % RADEON_GPU_PAGE_SIZE) != 0);
-#endif
 
 	/* sync other rings */
 	fence = bo->sync_obj;
@@ -592,7 +590,7 @@ radeon_ttm_backend_destroy(struct ttm_tt *ttm)
 	struct radeon_ttm_tt *gtt = (void *)ttm;
 
 	bus_dmamap_destroy(gtt->rdev->dmat, gtt->map);
-	free(gtt->segs, M_DRM);
+	free(gtt->segs, M_DRM, 0);
 	ttm_dma_tt_fini(&gtt->ttm);
 	kfree(gtt);
 }
@@ -633,15 +631,15 @@ struct ttm_tt *radeon_ttm_tt_create(struct ttm_bo_device *bdev,
 			   M_DRM, M_WAITOK | M_ZERO);
 	if (gtt->segs == NULL) {
 		ttm_dma_tt_fini(&gtt->ttm);
-		free(gtt, M_DRM);
+		free(gtt, M_DRM, 0);
 		return NULL;
 	}
 
 	if (bus_dmamap_create(rdev->dmat, size, gtt->ttm.ttm.num_pages, size,
 			      0, BUS_DMA_WAITOK, &gtt->map)) {
-		free(gtt->segs, M_DRM);
+		free(gtt->segs, M_DRM, 0);
 		ttm_dma_tt_fini(&gtt->ttm);
-		free(gtt, M_DRM);
+		free(gtt, M_DRM, 0);
 		return NULL;
 	}
 
@@ -793,6 +791,9 @@ int radeon_ttm_init(struct radeon_device *rdev)
 		DRM_ERROR("Failed initializing VRAM heap.\n");
 		return r;
 	}
+	/* Change the size here instead of the init above so only lpfn is affected */
+	radeon_ttm_set_active_vram_size(rdev, rdev->mc.visible_vram_size);
+
 #ifdef __sparc64__
 	r = radeon_bo_create(rdev, rdev->fb_offset, PAGE_SIZE, true,
 			     RADEON_GEM_DOMAIN_VRAM,

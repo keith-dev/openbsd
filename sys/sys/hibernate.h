@@ -1,4 +1,4 @@
-/*	$OpenBSD: hibernate.h,v 1.30 2013/11/09 06:54:00 mlarkin Exp $	*/
+/*	$OpenBSD: hibernate.h,v 1.36 2014/07/20 18:05:21 mlarkin Exp $	*/
 
 /*
  * Copyright (c) 2011 Ariane van der Steldt <ariane@stack.nl>
@@ -95,6 +95,9 @@ union hibernate_info {
 		char				kernel_version[128];
 		hibio_fn			io_func;
 		void				*io_page;
+#ifndef NO_PROPOLICE
+		long				guard;
+#endif /* ! NO_PROPOLICE */
 	};
 
 	/* XXX - remove restriction to have this union fit in a single block */
@@ -110,8 +113,9 @@ int	 uvm_pmr_alloc_pig(paddr_t*, psize_t);
 int	 uvm_pmr_alloc_piglet(vaddr_t*, paddr_t*, vsize_t, paddr_t);
 void	 uvm_pmr_free_piglet(vaddr_t, vsize_t);
 int	 uvm_page_rle(paddr_t);
+void	 uvmpd_hibernate(void);
 
-hibio_fn get_hibernate_io_function(void);
+hibio_fn get_hibernate_io_function(dev_t);
 int	get_hibernate_info(union hibernate_info *, int);
 
 int	hibernate_zlib_reset(union hibernate_info *, int);
@@ -122,7 +126,7 @@ void	hibernate_inflate_region(union hibernate_info *, paddr_t, paddr_t,
 size_t	hibernate_deflate(union hibernate_info *, paddr_t, size_t *);
 void	hibernate_process_chunk(union hibernate_info *,
 	    struct hibernate_disk_chunk *, paddr_t);
-int	hibernate_inflate_page(void);
+int	hibernate_inflate_page(int *);
 
 int	hibernate_block_io(union hibernate_info *, daddr_t, size_t, vaddr_t, int);
 int	hibernate_write_signature(union hibernate_info *);
@@ -141,5 +145,8 @@ void	hibernate_populate_resume_pt(union hibernate_info *, paddr_t, paddr_t);
 void	hibernate_free(void);
 
 int	hibernate_check_overlap(paddr_t, paddr_t, paddr_t, paddr_t);
+void	hibernate_sort_ranges(union hibernate_info *);
+void	hibernate_suspend_bufcache(void);
+void	hibernate_resume_bufcache(void);
 
 #endif /* _SYS_HIBERNATE_H_ */

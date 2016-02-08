@@ -1,4 +1,4 @@
-/*	$OpenBSD: mainbus.c,v 1.81 2010/06/19 14:06:54 miod Exp $	*/
+/*	$OpenBSD: mainbus.c,v 1.85 2014/07/12 18:44:41 tedu Exp $	*/
 
 /*
  * Copyright (c) 1998-2004 Michael Shalayeff
@@ -39,8 +39,7 @@
 #include <sys/extent.h>
 #include <sys/mbuf.h>
 
-#include <uvm/uvm.h>
-#include <uvm/uvm_page.h>
+#include <uvm/uvm_extern.h>
 
 #include <machine/bus.h>
 #include <machine/pdc.h>
@@ -761,7 +760,7 @@ mbus_dmamap_destroy(void *v, bus_dmamap_t map)
 	if (map->dm_mapsize != 0)
 		mbus_dmamap_unload(v, map);
 
-	free(map, M_DEVBUF);
+	free(map, M_DEVBUF, 0);
 }
 
 /*
@@ -1024,7 +1023,7 @@ mbus_dmamap_sync(void *v, bus_dmamap_t map, bus_addr_t off, bus_size_t len,
 		}
 
 	/* for either operation sync the shit away */
-	__asm __volatile ("sync\n\tsyncdma\n\tsync\n\t"
+	__asm volatile ("sync\n\tsyncdma\n\tsync\n\t"
 	    "nop\n\tnop\n\tnop\n\tnop\n\tnop\n\tnop\n\tnop");
 }
 
@@ -1142,7 +1141,7 @@ mbattach(parent, self, aux)
 	if (pdc_call((iodcio_t)pdc, 0, PDC_HPA, PDC_HPA_DFLT, &pdc_hpa) < 0)
 		panic("mbattach: PDC_HPA failed");
 
-	printf(" [flex %lx]\n", pdc_hpa.hpa & HPPA_FLEX_MASK);
+	printf(" [flex %x]\n", pdc_hpa.hpa & HPPA_FLEX_MASK);
 
 	/* map all the way till the end of the memory */
 	if (bus_space_map(&hppa_bustag, pdc_hpa.hpa,

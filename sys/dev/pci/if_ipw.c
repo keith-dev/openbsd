@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_ipw.c,v 1.98 2013/12/06 21:03:04 deraadt Exp $	*/
+/*	$OpenBSD: if_ipw.c,v 1.101 2014/07/22 13:12:11 mpi Exp $	*/
 
 /*-
  * Copyright (c) 2004-2008
@@ -51,9 +51,7 @@
 #include <net/if_types.h>
 
 #include <netinet/in.h>
-#include <netinet/in_systm.h>
 #include <netinet/if_ether.h>
-#include <netinet/ip.h>
 
 #include <net80211/ieee80211_var.h>
 #include <net80211/ieee80211_radiotap.h>
@@ -1690,7 +1688,7 @@ ipw_read_firmware(struct ipw_softc *sc, struct ipw_firmware *fw)
 
 	return 0;
 
-fail:	free(fw->data, M_DEVBUF);
+fail:	free(fw->data, M_DEVBUF, 0);
 	return error;
 }
 
@@ -2031,7 +2029,8 @@ ipw_init(struct ifnet *ifp)
 		goto fail2;
 	}
 	sc->sc_flags |= IPW_FLAG_FW_INITED;
-	free(fw.data, M_DEVBUF);
+	free(fw.data, M_DEVBUF, 0);
+	fw.data = NULL;
 
 	/* retrieve information tables base addresses */
 	sc->table1_base = CSR_READ_4(sc, IPW_CSR_TABLE1_BASE);
@@ -2042,7 +2041,7 @@ ipw_init(struct ifnet *ifp)
 	if ((error = ipw_config(sc)) != 0) {
 		printf("%s: device configuration failed\n",
 		    sc->sc_dev.dv_xname);
-		goto fail2;
+		goto fail1;
 	}
 
 	ifp->if_flags &= ~IFF_OACTIVE;
@@ -2055,7 +2054,8 @@ ipw_init(struct ifnet *ifp)
 
 	return 0;
 
-fail2:	free(fw.data, M_DEVBUF);
+fail2:	free(fw.data, M_DEVBUF, 0);
+	fw.data = NULL;
 fail1:	ipw_stop(ifp, 0);
 	return error;
 }

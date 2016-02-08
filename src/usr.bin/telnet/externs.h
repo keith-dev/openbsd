@@ -1,4 +1,4 @@
-/*	$OpenBSD: externs.h,v 1.17 2013/10/26 21:33:29 sthen Exp $	*/
+/*	$OpenBSD: externs.h,v 1.28 2014/07/22 07:30:24 jsg Exp $	*/
 /* $KTH: externs.h,v 1.16 1997/11/29 02:28:35 joda Exp $ */
 
 /*
@@ -32,21 +32,6 @@
  *	@(#)externs.h	8.3 (Berkeley) 5/30/95
  */
 
-#ifndef	BSD
-# define BSD 43
-#endif
-
-#ifndef	_POSIX_VDISABLE
-# ifdef sun
-#  include <sys/param.h>	/* pick up VDISABLE definition, mayby */
-# endif
-# ifdef VDISABLE
-#  define _POSIX_VDISABLE VDISABLE
-# else
-#  define _POSIX_VDISABLE ((cc_t)'\377')
-# endif
-#endif
-
 #define	SUBBUFSIZE	256
 
 extern int
@@ -59,13 +44,11 @@ extern int
     connected,		/* Are we connected to the other side? */
     globalmode,		/* Mode tty should be in */
     telnetport,		/* Are we connected to the telnet port? */
-    In3270,            /* Are we in 3270 mode? */
     localflow,		/* Flow control handled locally */
     restartany,		/* If flow control, restart output on any character */
     localchars,		/* we recognize interrupt/quit */
     donelclchars,	/* the user has set "localchars" */
     showoptions,
-    wantencryption,	/* User has requested encryption */
     net,		/* Network file descriptor */
     tin,		/* Terminal input file descriptor */
     tout,		/* Terminal output file descriptor */
@@ -78,14 +61,12 @@ extern int
     crmod,
     netdata,		/* Print out network data flow */
     prettydump,		/* Print "netdata" output in user readable format */
-#if    defined(TN3270)
-    cursesdata,		/* Print out curses data flow */
-    apitrace,		/* Trace API transactions */
-#endif /* defined(TN3270) */
     termdata,		/* Print out terminal data flow */
+    resettermname,
+    linemode,
+    kludgelinemode,
+    want_status_response,
     debug;		/* Debug level */
-
-extern volatile sig_atomic_t intr_happened, intr_waiting;	/* for interrupt handling */
 
 extern cc_t escape;	/* Escape to command mode */
 extern cc_t rlogin;	/* Rlogin mode escape character */
@@ -101,12 +82,10 @@ extern char
     dont[],
     will[],
     wont[],
+    will_wont_resp[],
+    do_dont_resp[],
     options[],		/* All the little options */
     *hostname;		/* Who are we connected to? */
-#if	defined(ENCRYPTION)
-extern void (*encrypt_output) (unsigned char *, int);
-extern int (*decrypt_input) (int);
-#endif
 
 extern int	rtableid;	/* routing table to use */
 
@@ -173,8 +152,6 @@ extern int	rtableid;	/* routing table to use */
 #define	set_his_want_state_wont		set_my_want_state_dont
 
 
-extern FILE
-    *NetTrace;		/* Where debugging output goes */
 extern unsigned char
     NetTraceFile[];	/* Name of file where debugging output goes */
 extern void
@@ -184,54 +161,17 @@ extern jmp_buf
     peerdied,
     toplevel;		/* For error conditions. */
 
-/* authenc.c */
-
-#if	defined(AUTHENTICATION) || defined(ENCRYPTION)
-int net_write(unsigned char *str, int len);
-void net_encrypt(void);
-int telnet_spin(void);
-char *telnet_getenv(const char *val);
-char *telnet_gets(char *prompt, char *result, int length, int echo);
-int Scheduler(int block);
-#endif
-
 /* commands.c */
 
 struct env_lst *env_define (unsigned char *, unsigned char *);
-struct env_lst *env_find(unsigned char *var);
 void env_init (void);
-void env_undefine (unsigned char *);
-void env_export (unsigned char *);
-void env_unexport (unsigned char *);
-void env_send (unsigned char *);
-void env_list (void);
 unsigned char * env_default(int init, int welldefined);
 unsigned char * env_getvalue(unsigned char *var, int exported_only);
 
 void set_escape_char(char *s);
-unsigned long sourceroute(char *arg, char **cpp, int *lenp);
-
-#if	defined(AUTHENTICATION)
-int auth_enable (char *);
-int auth_disable (char *);
-int auth_status (void);
-#endif
-
-#if defined(ENCRYPTION)
-int 	EncryptEnable (char *, char *);
-int 	EncryptDisable (char *, char *);
-int 	EncryptType (char *, char *);
-int 	EncryptStart (char *);
-int 	EncryptStartInput (void);
-int 	EncryptStartOutput (void);
-int 	EncryptStop (char *);
-int 	EncryptStopInput (void);
-int 	EncryptStopOutput (void);
-int 	EncryptStatus (void);
-#endif
 
 #ifdef SIGINFO
-void ayt_status(void);
+void ayt_status(int sig);
 #endif
 int tn(int argc, char **argv);
 void command(int top, char *tbuf, int cnt);
@@ -239,7 +179,6 @@ void command(int top, char *tbuf, int cnt);
 /* main.c */
 
 void tninit(void);
-void usage(void);
 
 /* network.c */
 
@@ -251,19 +190,14 @@ int netflush(void);
 /* sys_bsd.c */
 
 void init_sys(void);
-int TerminalWrite(char *buf, int n);
-int TerminalRead(unsigned char *buf, int n);
-int TerminalAutoFlush(void);
 int TerminalSpecialChars(int c);
-void TerminalFlushOutput(void);
-void TerminalSaveState(void);
 void TerminalDefaultChars(void);
-void TerminalNewMode(int f);
 cc_t *tcval(int func);
 void TerminalSpeeds(long *input_speed, long *output_speed);
 int TerminalWindowSize(long *rows, long *cols);
-int NetClose(int fd);
-void NetNonblockingIO(int fd, int onoff);
+void TerminalNewMode(int);
+void TerminalSaveState(void);
+void sys_telnet_init(void);
 int process_rings(int netin, int netout, int netex, int ttyin, int ttyout,
 		  int poll);
 
@@ -274,6 +208,7 @@ void init_telnet(void);
 void tel_leave_binary(int rw);
 void tel_enter_binary(int rw);
 int opt_welldefined(char *ep);
+void telnet(char *);
 int telrcv(void);
 int rlogin_susp(void);
 void intp(void);
@@ -282,57 +217,24 @@ void sendabort(void);
 void sendsusp(void);
 void sendeof(void);
 void sendayt(void);
+void sendnaws(void);
 
 void xmitAO(void);
 void xmitEL(void);
 void xmitEC(void);
-
-
-void     Dump (char, unsigned char *, int);
-void     printoption (char *, int, int);
-void     printsub (int, unsigned char *, int);
-void     sendnaws (void);
-void     setconnmode (int);
-void     setcommandmode (void);
-void     setneturg (void);
-void     sys_telnet_init (void);
-void     telnet (char *);
-void     tel_enter_binary (int);
-void     TerminalFlushOutput (void);
-void     TerminalNewMode (int);
-void     TerminalRestoreState (void);
-void     TerminalSaveState (void);
-void     tninit (void);
-void     willoption (int);
-void     wontoption (int);
-
 
 void     send_do (int, int);
 void     send_dont (int, int);
 void     send_will (int, int);
 void     send_wont (int, int);
 
-void     lm_will (unsigned char *, int);
-void     lm_wont (unsigned char *, int);
-void     lm_do (unsigned char *, int);
-void     lm_dont (unsigned char *, int);
 void     lm_mode (unsigned char *, int, int);
 
-void     slc_init (void);
 void     slcstate (void);
-void     slc_mode_export (void);
+void     slc_mode_export (int);
 void     slc_mode_import (int);
-void     slc_import (int);
-void     slc_export (void);
-void     slc (unsigned char *, int);
 void     slc_check (void);
-void     slc_start_reply (void);
-void     slc_add_reply (unsigned char, unsigned char, cc_t);
-void     slc_end_reply (void);
-int	 slc_update (void);
 
-void     env_opt (unsigned char *, int);
-void     env_opt_start (void);
 void     env_opt_start_info (void);
 void     env_opt_add (unsigned char *);
 void     env_opt_end (int);
@@ -345,26 +247,33 @@ int dosynch (void);
 
 cc_t *tcval (int);
 
-int quit (void);
+__dead void quit(void);
+
+/* genget.c */
+
+char	**genget(char *name, char **table, int stlen);
+int	isprefix(char *s1, char *s2);
+int	Ambiguous(void *s);
 
 /* terminal.c */
 
 void init_terminal(void);
 int ttyflush(int drop);
 int getconnmode(void);
+void setconnmode(int);
+void setcommandmode(void);
 
 /* utilities.c */
 
-int SetSockOpt(int fd, int level, int option, int yesno);
 void SetNetTrace(char *file);
 void Dump(char direction, unsigned char *buffer, int length);
 void printoption(char *direction, int cmd, int option);
 void optionstatus(void);
-void printsub(int direction, unsigned char *pointer, int length);
+void printsub(char direction, unsigned char *pointer, int length);
 void EmptyTerminal(void);
 void SetForExit(void);
-void Exit(int returnCode);
-void ExitString(char *string, int returnCode);
+__dead void Exit(int returnCode);
+__dead void ExitString(char *string, int returnCode);
 
 extern struct	termios new_tc;
 
@@ -373,12 +282,8 @@ extern struct	termios new_tc;
 # define termIntChar		new_tc.c_cc[VINTR]
 # define termKillChar		new_tc.c_cc[VKILL]
 # define termQuitChar		new_tc.c_cc[VQUIT]
+# define termSuspChar		new_tc.c_cc[VSUSP]
 
-# ifndef	VSUSP
-extern cc_t termSuspChar;
-# else
-#  define termSuspChar		new_tc.c_cc[VSUSP]
-# endif
 # if	defined(VFLUSHO) && !defined(VDISCARD)
 #  define VDISCARD VFLUSHO
 # endif
@@ -435,27 +340,3 @@ extern Ring
     netiring,
     ttyoring,
     ttyiring;
-
-/* Tn3270 section */
-#if    defined(TN3270)
-
-extern int
-    HaveInput,         /* Whether an asynchronous I/O indication came in */
-    noasynchtty,       /* Don't do signals on I/O (SIGURG, SIGIO) */
-    noasynchnet,       /* Don't do signals on I/O (SIGURG, SIGIO) */
-    sigiocount,                /* Count of SIGIO receptions */
-    shell_active;      /* Subshell is active */
-
-extern char
-    *Ibackp,           /* Oldest byte of 3270 data */
-    Ibuf[],            /* 3270 buffer */
-    *Ifrontp,          /* Where next 3270 byte goes */
-    tline[200],
-    *transcom;         /* Transparent command */
-
-extern int
-    settranscom(int, char**);
-
-extern void
-    inputAvailable(int);
-#endif /* defined(TN3270) */

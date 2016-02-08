@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_exec.c,v 1.137 2014/01/21 01:48:44 tedu Exp $	*/
+/*	$OpenBSD: kern_exec.c,v 1.144 2014/07/12 18:43:32 tedu Exp $	*/
 /*	$NetBSD: kern_exec.c,v 1.75 1996/02/09 18:59:28 christos Exp $	*/
 
 /*-
@@ -59,8 +59,6 @@
 
 #include <sys/syscallargs.h>
 
-#include <uvm/uvm_extern.h>
-
 #include <machine/reg.h>
 
 #ifdef __HAVE_MD_TCB
@@ -78,12 +76,11 @@
 /*
  * Map the shared signal code.
  */
-int exec_sigcode_map(struct proc *, struct emul *);
+int exec_sigcode_map(struct process *, struct emul *);
 
 /*
- * stackgap_random specifies if the stackgap should have a random size added
- * to it. Must be a n^2. If non-zero, the stack gap will be calculated as:
- * (arc4random() * ALIGNBYTES) & (stackgap_random - 1) + STACKGAPLEN.
+ * If non-zero, stackgap_random specifies the upper limit of the random gap size
+ * added to the fixed stack gap. Must be n^2.
  */
 int stackgap_random = STACKGAP_RANDOM;
 
@@ -257,7 +254,7 @@ sys_execve(struct proc *p, void *v, register_t *retval)
 #endif
 	char *stack;
 	struct ps_strings arginfo;
-	struct vmspace *vm = p->p_vmspace;
+	struct vmspace *vm = pr->ps_vmspace;
 	char **tmpfap;
 	extern struct emul emul_native;
 #if NSYSTRACE > 0
@@ -339,10 +336,10 @@ sys_execve(struct proc *p, void *v, register_t *retval)
 				*dp++ = *cp++;
 			*dp++ = '\0';
 
-			free(*tmpfap, M_EXEC);
+			free(*tmpfap, M_EXEC, 0);
 			tmpfap++; argc++;
 		}
-		free(pack.ep_fa, M_EXEC);
+		free(pack.ep_fa, M_EXEC, 0);
 		pack.ep_flags &= ~EXEC_HASARGL;
 	}
 
@@ -391,19 +388,19 @@ sys_execve(struct proc *p, void *v, register_t *retval)
 		}
 	}
 
-	dp = (char *)ALIGN(dp);
+	dp = (char *)(((long)dp + _STACKALIGNBYTES) & ~_STACKALIGNBYTES);
 
 	sgap = STACKGAPLEN;
-	if (stackgap_random != 0)
-		sgap += (arc4random() * ALIGNBYTES) & (stackgap_random - 1);
-#ifdef MACHINE_STACK_GROWS_UP
-	sgap = ALIGN(sgap);
-#endif
+	if (stackgap_random != 0) {
+		sgap += arc4random() & (stackgap_random - 1);
+		sgap = (sgap + _STACKALIGNBYTES) & ~_STACKALIGNBYTES;
+	}
+
 	/* Now check if args & environ fit into new stack */
 	len = ((argc + envc + 2 + pack.ep_emul->e_arglen) * sizeof(char *) +
 	    sizeof(long) + dp + sgap + sizeof(struct ps_strings)) - argp;
 
-	len = ALIGN(len);	/* make the stack "safely" aligned */
+	len = (len + _STACKALIGNBYTES) &~ _STACKALIGNBYTES;
 
 	if (len > pack.ep_ssize) { /* in effect, compare to initial limit */
 		error = ENOMEM;
@@ -416,17 +413,16 @@ sys_execve(struct proc *p, void *v, register_t *retval)
 	/*
 	 * we're committed: any further errors will kill the process, so
 	 * kill the other threads now.
-	 * XXX wait until threads are reaped to make uvmspace_exec() cheaper?
 	 */
 	single_thread_set(p, SINGLE_EXIT, 0);
 
 	/*
 	 * Prepare vmspace for remapping. Note that uvmspace_exec can replace
-	 * p_vmspace!
+	 * pr_vmspace!
 	 */
 	uvmspace_exec(p, VM_MIN_ADDRESS, VM_MAXUSER_ADDRESS);
 
-	vm = p->p_vmspace;
+	vm = pr->ps_vmspace;
 	/* Now map address space */
 	vm->vm_taddr = (char *)pack.ep_taddr;
 	vm->vm_tsize = atop(round_page(pack.ep_tsize));
@@ -495,10 +491,10 @@ sys_execve(struct proc *p, void *v, register_t *retval)
 	 * If process does execve() while it has a mismatched real,
 	 * effective, or saved uid/gid, we set PS_SUGIDEXEC.
 	 */
-	if (p->p_ucred->cr_uid != p->p_cred->p_ruid ||
-	    p->p_ucred->cr_uid != p->p_cred->p_svuid ||
-	    p->p_ucred->cr_gid != p->p_cred->p_rgid ||
-	    p->p_ucred->cr_gid != p->p_cred->p_svgid)
+	if (cred->cr_uid != cred->cr_ruid ||
+	    cred->cr_uid != cred->cr_svuid ||
+	    cred->cr_gid != cred->cr_rgid ||
+	    cred->cr_gid != cred->cr_svgid)
 		atomic_setbits_int(&pr->ps_flags, PS_SUGIDEXEC);
 	else
 		atomic_clearbits_int(&pr->ps_flags, PS_SUGIDEXEC);
@@ -520,11 +516,11 @@ sys_execve(struct proc *p, void *v, register_t *retval)
 		if (pr->ps_tracevp && !(pr->ps_traceflag & KTRFAC_ROOT))
 			ktrcleartrace(pr);
 #endif
-		p->p_ucred = crcopy(cred);
+		p->p_ucred = cred = crcopy(cred);
 		if (attr.va_mode & VSUID)
-			p->p_ucred->cr_uid = attr.va_uid;
+			cred->cr_uid = attr.va_uid;
 		if (attr.va_mode & VSGID)
-			p->p_ucred->cr_gid = attr.va_gid;
+			cred->cr_gid = attr.va_gid;
 
 		/*
 		 * For set[ug]id processes, a few caveats apply to
@@ -575,7 +571,7 @@ sys_execve(struct proc *p, void *v, register_t *retval)
 					closef(fp, p);
 					break;
 				}
-				if ((error = VOP_OPEN(vp, flags, p->p_ucred, p)) != 0) {
+				if ((error = VOP_OPEN(vp, flags, cred, p)) != 0) {
 					fdremove(p->p_fd, indx);
 					closef(fp, p);
 					vrele(vp);
@@ -595,8 +591,27 @@ sys_execve(struct proc *p, void *v, register_t *retval)
 			goto exec_abort;
 	} else
 		atomic_clearbits_int(&pr->ps_flags, PS_SUGID);
-	p->p_cred->p_svuid = p->p_ucred->cr_uid;
-	p->p_cred->p_svgid = p->p_ucred->cr_gid;
+
+	/*
+	 * Reset the saved ugids and update the process's copy of the
+	 * creds if the creds have been changed
+	 */
+	if (cred->cr_uid != cred->cr_svuid ||
+	    cred->cr_gid != cred->cr_svgid) {
+		/* make sure we have unshared ucreds */
+		p->p_ucred = cred = crcopy(cred);
+		cred->cr_svuid = cred->cr_uid;
+		cred->cr_svgid = cred->cr_gid;
+	}
+
+	if (pr->ps_ucred != cred) {
+		struct ucred *ocred;
+
+		ocred = pr->ps_ucred;
+		crhold(cred);
+		pr->ps_ucred = cred;
+		crfree(ocred);
+	}
 
 	if (pr->ps_flags & PS_SUGIDEXEC) {
 		int i, s = splclock();
@@ -635,7 +650,7 @@ sys_execve(struct proc *p, void *v, register_t *retval)
 #endif
 
 	/* map the process's signal trampoline code */
-	if (exec_sigcode_map(p, pack.ep_emul))
+	if (exec_sigcode_map(pr, pack.ep_emul))
 		goto free_pack_abort;
 
 #ifdef __HAVE_EXEC_MD_MAP
@@ -647,7 +662,7 @@ sys_execve(struct proc *p, void *v, register_t *retval)
 	if (pr->ps_flags & PS_TRACED)
 		psignal(p, SIGTRAP);
 
-	free(pack.ep_hdr, M_EXEC);
+	free(pack.ep_hdr, M_EXEC, 0);
 
 	/*
 	 * Call emulation specific exec hook. This can setup per-process
@@ -659,9 +674,9 @@ sys_execve(struct proc *p, void *v, register_t *retval)
 	 * same, the exec hook code should deallocate any old emulation
 	 * resources held previously by this process.
 	 */
-	if (p->p_emul && p->p_emul->e_proc_exit &&
-	    p->p_emul != pack.ep_emul)
-		(*p->p_emul->e_proc_exit)(p);
+	if (pr->ps_emul && pr->ps_emul->e_proc_exit &&
+	    pr->ps_emul != pack.ep_emul)
+		(*pr->ps_emul->e_proc_exit)(p);
 
 	p->p_descfd = 255;
 	if ((pack.ep_flags & EXEC_HASFD) && pack.ep_fd < 255)
@@ -674,12 +689,12 @@ sys_execve(struct proc *p, void *v, register_t *retval)
 	if (pack.ep_emul->e_proc_exec)
 		(*pack.ep_emul->e_proc_exec)(p, &pack);
 
-	/* update p_emul, the old value is no longer needed */
-	p->p_emul = pack.ep_emul;
+	/* update ps_emul, the old value is no longer needed */
+	pr->ps_emul = pack.ep_emul;
 
 #ifdef KTRACE
 	if (KTRPOINT(p, KTR_EMUL))
-		ktremul(p, p->p_emul->e_name);
+		ktremul(p);
 #endif
 
 	atomic_clearbits_int(&pr->ps_flags, PS_INEXEC);
@@ -709,14 +724,14 @@ bad:
 	if (pack.ep_interp != NULL)
 		pool_put(&namei_pool, pack.ep_interp);
 	if (pack.ep_emul_arg != NULL)
-		free(pack.ep_emul_arg, M_TEMP);
+		free(pack.ep_emul_arg, M_TEMP, 0);
 	/* close and put the exec'd file */
 	vn_close(pack.ep_vp, FREAD, cred, p);
 	pool_put(&namei_pool, nid.ni_cnd.cn_pnbuf);
 	uvm_km_free_wakeup(exec_map, (vaddr_t) argp, NCARGS);
 
  freehdr:
-	free(pack.ep_hdr, M_EXEC);
+	free(pack.ep_hdr, M_EXEC, 0);
 #if NSYSTRACE > 0
  clrflag:
 #endif
@@ -739,13 +754,13 @@ exec_abort:
 	if (pack.ep_interp != NULL)
 		pool_put(&namei_pool, pack.ep_interp);
 	if (pack.ep_emul_arg != NULL)
-		free(pack.ep_emul_arg, M_TEMP);
+		free(pack.ep_emul_arg, M_TEMP, 0);
 	pool_put(&namei_pool, nid.ni_cnd.cn_pnbuf);
 	vn_close(pack.ep_vp, FREAD, cred, p);
 	uvm_km_free_wakeup(exec_map, (vaddr_t) argp, NCARGS);
 
 free_pack_abort:
-	free(pack.ep_hdr, M_EXEC);
+	free(pack.ep_hdr, M_EXEC, 0);
 	exit1(p, W_EXITCODE(0, SIGABRT), EXIT_NORMAL);
 
 	/* NOTREACHED */
@@ -799,7 +814,7 @@ copyargs(struct exec_package *pack, struct ps_strings *arginfo, void *stack,
 }
 
 int
-exec_sigcode_map(struct proc *p, struct emul *e)
+exec_sigcode_map(struct process *pr, struct emul *e)
 {
 	vsize_t sz;
 
@@ -833,9 +848,9 @@ exec_sigcode_map(struct proc *p, struct emul *e)
 		uvm_unmap(kernel_map, va, va + round_page(sz));
 	}
 
-	p->p_sigcode = 0; /* no hint */
+	pr->ps_sigcode = 0; /* no hint */
 	uao_reference(e->e_sigobject);
-	if (uvm_map(&p->p_vmspace->vm_map, &p->p_sigcode, round_page(sz),
+	if (uvm_map(&pr->ps_vmspace->vm_map, &pr->ps_sigcode, round_page(sz),
 	    e->e_sigobject, 0, 0, UVM_MAPFLAG(UVM_PROT_RX, UVM_PROT_RX,
 	    UVM_INH_SHARE, UVM_ADV_RANDOM, 0))) {
 		uao_detach(e->e_sigobject);

@@ -1,4 +1,4 @@
-/*	$OpenBSD: elf64_exec.c,v 1.4 2013/12/28 21:00:21 kettenis Exp $	*/
+/*	$OpenBSD: elf64_exec.c,v 1.6 2014/07/12 21:03:38 tedu Exp $	*/
 /*	$NetBSD: elfXX_exec.c,v 1.2 2001/08/15 20:08:15 eeh Exp $	*/
 
 /*

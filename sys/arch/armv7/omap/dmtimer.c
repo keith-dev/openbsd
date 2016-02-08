@@ -194,7 +194,7 @@ dmtimer_attach(struct device *parent, struct device *self, void *args)
 		    dmtimer_setstatclockrate, NULL);
 	}
 	else
-		panic("attaching too many dmtimers at 0x%x",
+		panic("attaching too many dmtimers at 0x%lx",
 		    aa->aa_dev->mem[0].addr);
 
 	/* set IDLEMODE to smart-idle */
@@ -253,7 +253,7 @@ dmtimer_intr(void *frame)
 		stat_count.ec_count++;
 		statclock(frame);
 	}
-	if ((now - sc->sc_nexttickevent) < (now - sc->sc_nextstatevent))
+	if ((sc->sc_nexttickevent - now) < (sc->sc_nextstatevent - now))
 		nextevent = sc->sc_nexttickevent;
 	else
 		nextevent = sc->sc_nextstatevent;
@@ -261,10 +261,8 @@ dmtimer_intr(void *frame)
 	duration = nextevent -
 	    bus_space_read_4(sc->sc_iot, sc->sc_ioh[1], DM_TCRR);
 
-	if (duration <= 0) {
-		printf("%s: negative duration!\n", __func__);
+	if (duration <= 0)
 		duration = 1; /* trigger immediately. */
-	}
 
 	if (duration > sc->sc_ticks_per_intr + 1) {
 		printf("%s: time lost!\n", __func__);

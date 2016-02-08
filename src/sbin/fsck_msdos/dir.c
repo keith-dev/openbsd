@@ -1,4 +1,4 @@
-/*	$OpenBSD: dir.c,v 1.21 2009/10/27 23:59:33 deraadt Exp $	*/
+/*	$OpenBSD: dir.c,v 1.26 2014/07/11 14:35:19 tobias Exp $	*/
 /*	$NetBSD: dir.c,v 1.11 1997/10/17 11:19:35 ws Exp $	*/
 
 /*
@@ -15,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by Martin Husemann
- *	and Wolfgang Solfrank.
- * 4. Neither the name of the University nor the names of its contributors
- *    may be used to endorse or promote products derived from this software
- *    without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHORS ``AS IS'' AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
@@ -154,7 +147,7 @@ freeDirTodo(struct dirTodoNode *dt)
 /*
  * The stack of unread directories
  */
-struct dirTodoNode *pendingDirectories = NULL;
+static struct dirTodoNode *pendingDirectories = NULL;
 
 /*
  * Return the full pathname for a directory entry.
@@ -210,7 +203,7 @@ static char longName[DOSLONGNAMELEN] = "";
 static u_char *buffer = NULL;
 static u_char *delbuf = NULL;
 
-struct dosDirEntry *rootDir;
+static struct dosDirEntry *rootDir;
 static struct dosDirEntry *lostDir;
 
 /*
@@ -220,7 +213,6 @@ int
 resetDosDirSection(struct bootblock *boot, struct fatEntry *fat)
 {
 	int b1, b2;
-	cl_t cl;
 	int ret = FSOK;
 
 	b1 = boot->RootDirEnts * 32;
@@ -230,33 +222,18 @@ resetDosDirSection(struct bootblock *boot, struct fatEntry *fat)
 	    || !(delbuf = malloc(b2))
 	    || !(rootDir = newDosDirEntry())) {
 		xperror("No space for directory");
-		return (FSFATAL);
+		goto fail;
 	}
 	(void)memset(rootDir, 0, sizeof *rootDir);
 	if (boot->flags & FAT32) {
 		if (boot->RootCl < CLUST_FIRST || boot->RootCl >= boot->NumClusters) {
 			pfatal("Root directory starts with cluster out of range(%u)\n",
 			       boot->RootCl);
-			return (FSFATAL);
+			goto fail;
 		}
-		cl = fat[boot->RootCl].next;
-		if (cl < CLUST_FIRST
-		    || (cl >= CLUST_RSRVD && cl< CLUST_EOFS)
-		    || fat[boot->RootCl].head != boot->RootCl) {
-			if (cl == CLUST_FREE)
-				pwarn("Root directory starts with free cluster\n");
-			else if (cl >= CLUST_RSRVD)
-				pwarn("Root directory starts with cluster marked %s\n",
-				      rsrvdcltype(cl));
-			else {
-				pfatal("Root directory doesn't start a cluster chain\n");
-				return (FSFATAL);
-			}
-			if (ask(1, "Fix")) {
-				fat[boot->RootCl].next = CLUST_FREE;
-				ret = FSFATMOD;
-			} else
-				 ret = FSFATAL;
+		if (fat[boot->RootCl].head != boot->RootCl) {
+			pfatal("Root directory doesn't start a cluster chain\n");
+			goto fail;
 		}
 
 		fat[boot->RootCl].flags |= FAT_USED;
@@ -264,6 +241,9 @@ resetDosDirSection(struct bootblock *boot, struct fatEntry *fat)
 	}
 
 	return (ret);
+fail:
+	finishDosDirSection();
+	return (FSFATAL);
 }
 
 /*
@@ -381,7 +361,7 @@ checksize(struct bootblock *boot, struct fatEntry *fat, u_char *p,
 	/*
 	 * Check size on ordinary files
 	 */
-	int32_t physicalSize;
+	u_int32_t physicalSize;
 
 	if (dir->head == CLUST_FREE)
 		physicalSize = 0;
@@ -407,12 +387,16 @@ checksize(struct bootblock *boot, struct fatEntry *fat, u_char *p,
 		      fullpath(dir));
 		if (ask(1, "Drop superfluous clusters")) {
 			cl_t cl;
-			u_int32_t sz = 0;
+			u_int32_t len, sz;
 
-			for (cl = dir->head; (sz += boot->ClusterSize) < dir->size;)
+			len = sz = 0;
+			for (cl = dir->head; (sz += boot->ClusterSize) < dir->size;) {
 				cl = fat[cl].next;
+				len++;
+			}
 			clearchain(boot, fat, fat[cl].next);
 			fat[cl].next = CLUST_EOF;
+			fat[dir->head].length = len;
 			return (FSFATMOD);
 		} else
 			return (FSERROR);
@@ -537,6 +521,14 @@ readDosDirSection(int f, struct bootblock *boot, struct fatEntry *fat,
 					vallfn = NULL;
 				}
 				lidx = *p & LRNOMASK;
+				if (lidx == 0) {
+					if (!invlfn) {
+						invlfn = vallfn;
+						invcl = valcl;
+					}
+					vallfn = NULL;
+					continue;
+				}
 				t = longName + --lidx * 13;
 				for (k = 1; k < 11 && t < longName + sizeof(longName); k += 2) {
 					if (!p[k] && !p[k + 1])

@@ -1,4 +1,4 @@
-/*	$OpenBSD: main.c,v 1.46 2013/04/16 18:17:39 deraadt Exp $	*/
+/*	$OpenBSD: main.c,v 1.52 2014/07/11 16:01:41 halex Exp $	*/
 /*	$NetBSD: main.c,v 1.14 1997/06/05 11:13:24 lukem Exp $	*/
 
 /*-
@@ -34,6 +34,9 @@
 #include <sys/mount.h>
 #include <sys/stat.h>
 #include <sys/time.h>
+#include <sys/ioctl.h>
+#include <sys/disklabel.h>
+#include <sys/dkio.h>
 #include <ufs/ffs/fs.h>
 #include <ufs/ufs/dinode.h>
 
@@ -51,27 +54,29 @@
 #include <string.h>
 #include <time.h>
 #include <unistd.h>
+#include <util.h>
 
 #include "dump.h"
 #include "pathnames.h"
 
 int	notify = 0;	/* notify operator flag */
-int	blockswritten = 0;	/* number of blocks written on current tape */
+int64_t	blockswritten = 0;	/* number of blocks written on current tape */
 int	tapeno = 0;	/* current tape number */
 int	density = 0;	/* density in bytes/0.1" */
 int	ntrec = NTREC;	/* # tape blocks in each tape record */
 int	cartridge = 0;	/* Assume non-cartridge tape */
-long	dev_bsize = 1;	/* recalculated below */
-long	blocksperfile;	/* output blocks per file */
+int64_t	blocksperfile;	/* output blocks per file */
 char	*host = NULL;	/* remote host (if any) */
 int	maxbsize = 64*1024;	/* XXX MAXBSIZE from sys/param.h */
+
+struct disklabel lab;
 
 /*
  * Possible superblock locations ordered from most to least likely.
  */
 static int sblock_try[] = SBLOCKSEARCH;
 
-static long numarg(char *, long, long);
+static long long numarg(char *, long long, long long);
 static void obsolete(int *, char **[]);
 static void usage(void);
 
@@ -90,7 +95,9 @@ main(int argc, char *argv[])
 	ino_t maxino;
 	time_t t;
 	int dirlist;
-	char *toplevel, *str, *mount_point = NULL;
+	char *toplevel, *str, *mount_point = NULL, *realpath;
+	int just_estimate = 0;
+	u_int64_t zero_uid = 0;
 
 	spcl.c_date = (int64_t)time(NULL);
 
@@ -107,7 +114,7 @@ main(int argc, char *argv[])
 		usage();
 
 	obsolete(&argc, &argv);
-	while ((ch = getopt(argc, argv, "0123456789aB:b:cd:f:h:ns:T:uWw")) != -1)
+	while ((ch = getopt(argc, argv, "0123456789aB:b:cd:f:h:ns:ST:UuWw")) != -1)
 		switch (ch) {
 		/* dump level */
 		case '0': case '1': case '2': case '3': case '4':
@@ -116,11 +123,11 @@ main(int argc, char *argv[])
 			break;
 
 		case 'B':		/* blocks per output file */
-			blocksperfile = numarg("blocks per file", 1L, 0L);
+			blocksperfile = numarg("blocks per file", 1, 0);
 			break;
 
 		case 'b':		/* blocks per tape write */
-			ntrec = numarg("blocks per write", 1L, 1000L);
+			ntrec = numarg("blocks per write", 1, 1000);
 			if (ntrec > maxbsize/1024) {
 				msg("Please choose a blocksize <= %dKB\n",
 				    maxbsize/1024);
@@ -134,7 +141,7 @@ main(int argc, char *argv[])
 			break;
 
 		case 'd':		/* density, in bits per inch */
-			density = numarg("density", 10L, 327670L) / 10;
+			density = numarg("density", 10, 327670) / 10;
 			if (density >= 625 && !bflag)
 				ntrec = HIGHDENSITYTREC;
 			break;
@@ -144,7 +151,7 @@ main(int argc, char *argv[])
 			break;
 
 		case 'h':
-			honorlevel = numarg("honor level", 0L, 10L);
+			honorlevel = numarg("honor level", 0, 10);
 			break;
 
 		case 'n':		/* notify operators */
@@ -152,7 +159,11 @@ main(int argc, char *argv[])
 			break;
 
 		case 's':		/* tape size, feet */
-			tsize = numarg("tape size", 1L, 0L) * 12 * 10;
+			tsize = numarg("tape size", 1, 0) * 12 * 10;
+			break;
+
+		case 'S':		/* estimate blocks and # of tapes */
+			just_estimate = 1;
 			break;
 
 		case 'T':		/* time of last dump */
@@ -169,6 +180,10 @@ main(int argc, char *argv[])
 			}
 			Tflag = 1;
 			lastlevel = '?';
+			break;
+
+		case 'U':
+			Uflag = 1;	/* use duids */
 			break;
 
 		case 'u':		/* update /etc/dumpdates */
@@ -204,6 +219,16 @@ main(int argc, char *argv[])
 	for (i = 0; i < argc; i++) {
 		struct stat sb;
 
+		/* Convert potential duid into a device name */
+		if ((diskfd = opendev(argv[i], O_RDONLY | O_NOFOLLOW, 0,
+		    &realpath)) >= 0) {
+			argv[i] = strdup(realpath);
+			if (argv[i] == NULL) {
+				msg("Cannot malloc realpath\n");
+				exit(X_STARTUP);
+			}
+			(void)close(diskfd);
+		}
 		if (lstat(argv[i], &sb) == -1) {
 			msg("Cannot lstat %s: %s\n", argv[i], strerror(errno));
 			exit(X_STARTUP);
@@ -361,6 +386,26 @@ main(int argc, char *argv[])
 	(void)gethostname(spcl.c_host, sizeof(spcl.c_host));
 	spcl.c_level = level - '0';
 	spcl.c_type = TS_TAPE;
+
+	if ((diskfd = open(disk, O_RDONLY)) < 0) {
+		msg("Cannot open %s\n", disk);
+		exit(X_STARTUP);
+	}
+	if (ioctl(diskfd, DIOCGDINFO, (char *)&lab) < 0)
+		err(1, "ioctl (DIOCGDINFO)");
+	if (!Uflag)
+		;
+	else if (memcmp(lab.d_uid, &zero_uid, sizeof(lab.d_uid)) == 0) {
+		msg("Cannot find DUID of disk %s\n", disk);
+		exit(X_STARTUP);
+	} else if (asprintf(&duid,
+	    "%02hhx%02hhx%02hhx%02hhx%02hhx%02hhx%02hhx%02hhx.%c",
+	    lab.d_uid[0], lab.d_uid[1], lab.d_uid[2], lab.d_uid[3],
+	    lab.d_uid[4], lab.d_uid[5], lab.d_uid[6], lab.d_uid[7],
+	    disk[strlen(disk)-1]) == -1) {
+		msg("Cannot malloc duid\n");
+		exit(X_STARTUP);
+	}
 	if (!Tflag)
 	        getdumptime();		/* /etc/dumpdates snarfed */
 
@@ -378,10 +423,8 @@ main(int argc, char *argv[])
 	else
 		msgtail("to %s\n", tape);
 
-	if ((diskfd = open(disk, O_RDONLY)) < 0) {
-		msg("Cannot open %s\n", disk);
-		exit(X_STARTUP);
-	}
+	if (ioctl(diskfd, DIOCGPDINFO, (char *)&lab) < 0)
+		err(1, "ioctl (DIOCGPDINFO)");
 	sync();
 	sblock = (struct fs *)sblock_buf;
 	for (i = 0; sblock_try[i] != -1; i++) {
@@ -396,10 +439,6 @@ main(int argc, char *argv[])
 	}
 	if (sblock_try[i] == -1)
 		quit("Cannot find filesystem superblock\n");
-	dev_bsize = sblock->fs_fsize / fsbtodb(sblock, 1);
-	dev_bshift = ffs(dev_bsize) - 1;
-	if (dev_bsize != (1 << dev_bshift))
-		quit("dev_bsize (%d) is not a power of 2\n", dev_bsize);
 	tp_bshift = ffs(TP_BSIZE) - 1;
 	if (TP_BSIZE != (1 << tp_bshift))
 		quit("TP_BSIZE (%d) is not a power of 2\n", TP_BSIZE);
@@ -475,6 +514,12 @@ main(int argc, char *argv[])
 	}
 
 	/*
+	 * Exit if user wants an estimate of blocks and # of tapes only.
+	 */
+	if (just_estimate)
+		exit(X_FINOK);
+
+	/*
 	 * Allocate tape buffer.
 	 */
 	if (!alloctape())
@@ -548,7 +593,7 @@ usage(void)
 {
 	extern char *__progname;
 
-	(void)fprintf(stderr, "usage: %s [-0123456789acnuWw] [-B records] "
+	(void)fprintf(stderr, "usage: %s [-0123456789acnSUuWw] [-B records] "
 		      "[-b blocksize] [-d density]\n"
 		      "\t[-f file] [-h level] [-s feet] "
 		      "[-T date] files-to-dump\n",
@@ -560,17 +605,17 @@ usage(void)
  * Pick up a numeric argument.  It must be nonnegative and in the given
  * range (except that a vmax of 0 means unlimited).
  */
-static long
-numarg(char *meaning, long vmin, long vmax)
+static long long
+numarg(char *meaning, long long vmin, long long vmax)
 {
-	long val;
+	long long val;
 	const char *errstr;
 
 	if (vmax == 0)
-		vmax = LONG_MAX;
+		vmax = LLONG_MAX;
 	val = strtonum(optarg, vmin, vmax, &errstr);
 	if (errstr)
-		errx(X_STARTUP, "%s is %s [%ld - %ld]",
+		errx(X_STARTUP, "%s is %s [%lld - %lld]",
 		    meaning, errstr, vmin, vmax);
 
 	return (val);

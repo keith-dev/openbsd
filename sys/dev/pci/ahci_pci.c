@@ -1,4 +1,4 @@
-/*	$OpenBSD: ahci_pci.c,v 1.3 2014/01/02 08:00:35 gilles Exp $ */
+/*	$OpenBSD: ahci_pci.c,v 1.6 2014/07/10 14:21:20 deraadt Exp $ */
 
 /*
  * Copyright (c) 2006 David Gwynne <dlg@openbsd.org>
@@ -38,6 +38,7 @@
 #include <dev/ata/atascsi.h>
 #include <dev/ata/pmreg.h>
 
+#include <dev/ic/ahcireg.h>
 #include <dev/ic/ahcivar.h>
 
 #define AHCI_PCI_BAR		0x24
@@ -160,7 +161,6 @@ int			ahci_pci_detach(struct device *, int);
 int			ahci_pci_activate(struct device *, int);
 
 #ifdef HIBERNATE
-#include <uvm/uvm.h>
 #include <sys/hibernate.h>
 #include <sys/disk.h>
 #include <sys/disklabel.h>

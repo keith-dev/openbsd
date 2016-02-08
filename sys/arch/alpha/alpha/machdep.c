@@ -1,4 +1,4 @@
-/* $OpenBSD: machdep.c,v 1.149 2014/02/18 19:37:32 miod Exp $ */
+/* $OpenBSD: machdep.c,v 1.164 2014/07/21 17:25:47 uebayasi Exp $ */
 /* $NetBSD: machdep.c,v 1.210 2000/06/01 17:12:38 thorpej Exp $ */
 
 /*-
@@ -192,7 +192,7 @@ int	alpha_unaligned_sigbus = 1;	/* SIGBUS on fixed-up accesses */
 int	alpha_fp_sync_complete = 0;	/* fp fixup if sync even without /s */
 #endif
 #if NIOASIC > 0
-int	alpha_led_blink = 0;
+int	alpha_led_blink = 1;
 #endif
 
 /* used by hw_sysctl */
@@ -462,7 +462,7 @@ nobootinfo:
 	if (mddtp->mddt_cluster_cnt < 2) {
 		mddtweird = 1;
 		printf("WARNING: weird number of mem clusters: %lu\n",
-		    mddtp->mddt_cluster_cnt);
+		    (unsigned long)mddtp->mddt_cluster_cnt);
 	}
 
 #if 0
@@ -495,7 +495,7 @@ nobootinfo:
 		if (memc->mddt_usage & MDDT_mbz) {
 			mddtweird = 1;
 			printf("WARNING: mem cluster %d has weird "
-			    "usage 0x%lx\n", i, memc->mddt_usage);
+			    "usage 0x%lx\n", i, (long)memc->mddt_usage);
 			unknownmem += memc->mddt_pg_cnt;
 			continue;
 		}
@@ -721,12 +721,6 @@ nobootinfo:
 			boothowto |= RB_HALT;
 			break;
 
-#if 0
-		case 'm': /* mini root present in memory */
-		case 'M':
-			boothowto |= RB_MINIROOT;
-			break;
-#endif
 
 		case 'n': /* askname */
 		case 'N':
@@ -784,8 +778,8 @@ nobootinfo:
 	hz = hwrpb->rpb_intr_freq >> 12;
 	if (!(60 <= hz && hz <= 10240)) {
 #ifdef DIAGNOSTIC
-		printf("WARNING: unbelievable rpb_intr_freq: %ld (%d hz)\n",
-			hwrpb->rpb_intr_freq, hz);
+		printf("WARNING: unbelievable rpb_intr_freq: %lu (%d hz)\n",
+			(unsigned long)hwrpb->rpb_intr_freq, hz);
 #endif
 		hz = 1024;
 	}
@@ -933,7 +927,7 @@ alpha_unknown_sysname()
 	static char s[128];		/* safe size */
 
 	snprintf(s, sizeof s, "%s family, unknown model variation 0x%lx",
-	    platform.family, hwrpb->rpb_variation & SV_ST_MASK);
+	    platform.family, (unsigned long)hwrpb->rpb_variation & SV_ST_MASK);
 	return ((const char *)s);
 }
 
@@ -950,7 +944,7 @@ identifycpu()
 	for(s = cpu_model; *s; ++s)
 		if(strncasecmp(s, "MHz", 3) == 0)
 			goto skipMHz;
-	printf(", %ldMHz", hwrpb->rpb_cc_freq / 1000000);
+	printf(", %luMHz", (unsigned long)hwrpb->rpb_cc_freq / 1000000);
 skipMHz:
 	/* fill in hw_serial if a serial number is known */
 	slen = strlen(hwrpb->rpb_ssn) + 1;
@@ -961,8 +955,9 @@ skipMHz:
 	}
 
 	printf("\n");
-	printf("%ld byte page size, %d processor%s.\n",
-	    hwrpb->rpb_page_size, ncpusfound, ncpusfound == 1 ? "" : "s");
+	printf("%lu byte page size, %d processor%s.\n",
+	    (unsigned long)hwrpb->rpb_page_size, ncpusfound,
+	    ncpusfound == 1 ? "" : "s");
 #if 0
 	/* this is not particularly useful! */
 	printf("variation: 0x%lx, revision 0x%lx\n",
@@ -973,24 +968,21 @@ skipMHz:
 int	waittime = -1;
 struct pcb dumppcb;
 
-void
-boot(howto)
-	int howto;
+__dead void
+boot(int howto)
 {
+	struct device *mainbus;
 #if defined(MULTIPROCESSOR)
 	u_long wait_mask;
 	int i;
 #endif
 
-	/* If system is cold, just halt. */
 	if (cold) {
-		/* (Unless the user explicitly asked for reboot.) */
 		if ((howto & RB_USERREQ) == 0)
 			howto |= RB_HALT;
 		goto haltsys;
 	}
 
-	/* If "always halt" was specified as a boot flag, obey. */
 	if ((boothowto & RB_HALT) != 0)
 		howto |= RB_HALT;
 
@@ -998,11 +990,7 @@ boot(howto)
 	if ((howto & RB_NOSYNC) == 0 && waittime < 0) {
 		waittime = 0;
 		vfs_shutdown();
-		/*
-		 * If we've been adjusting the clock, the todr
-		 * will be out of synch; adjust it now unless
-		 * the system has been sitting in ddb.
-		 */
+
 		if ((howto & RB_TIMEBAD) == 0) {
 			resettodr();
 		} else {
@@ -1012,7 +1000,8 @@ boot(howto)
 	if_downall();
 
 	uvm_shutdown();
-	splhigh();		/* Disable interrupts. */
+	splhigh();
+	cold = 1;
 
 #if defined(MULTIPROCESSOR)
 	/*
@@ -1036,17 +1025,18 @@ boot(howto)
 		    cpus_running);
 #endif
 
-	/* If rebooting and a dump is requested do it. */
-	if (howto & RB_DUMP)
+	if ((howto & RB_DUMP) != 0)
 		dumpsys();
 
 haltsys:
 	doshutdownhooks();
-	if (!TAILQ_EMPTY(&alldevs))
-		config_suspend(TAILQ_FIRST(&alldevs), DVACT_POWERDOWN);
+	mainbus = device_mainbus();
+	if (mainbus != NULL)
+		config_suspend(mainbus, DVACT_POWERDOWN);
 
 #ifdef BOOTKEY
-	printf("hit any key to %s...\n", howto & RB_HALT ? "halt" : "reboot");
+	printf("hit any key to %s...\n",
+	    (howto & RB_HALT) != 0 ? "halt" : "reboot");
 	cnpollc(1);	/* for proper keyboard command handling */
 	cngetc();
 	cnpollc(0);
@@ -1054,14 +1044,16 @@ haltsys:
 #endif
 
 	/* Finally, powerdown/halt/reboot the system. */
-	if ((howto & RB_POWERDOWN) == RB_POWERDOWN &&
+	if ((howto & RB_POWERDOWN) != 0 &&
 	    platform.powerdown != NULL) {
 		(*platform.powerdown)();
 		printf("WARNING: powerdown failed!\n");
 	}
-	printf("%s\n\n", howto & RB_HALT ? "halted." : "rebooting...");
-	prom_halt(howto & RB_HALT);
-	/*NOTREACHED*/
+	printf("%s\n\n",
+	    (howto & RB_HALT) != 0 ? "halted." : "rebooting...");
+	prom_halt((howto & RB_HALT) != 0);
+	for (;;) ;
+	/* NOTREACHED */
 }
 
 /*
@@ -1425,7 +1417,7 @@ sendsig(catcher, sig, mask, code, type, val)
 	struct sigcontext *scp, ksc;
 	struct fpreg *fpregs = (struct fpreg *)&ksc.sc_fpregs;
 	struct trapframe *frame;
-	struct sigacts *psp = p->p_sigacts;
+	struct sigacts *psp = p->p_p->ps_sigacts;
 	unsigned long oldsp;
 	int fsize, rndfsize, kscsize;
 	siginfo_t *sip, ksi;
@@ -1522,7 +1514,7 @@ trash:
 	/*
 	 * Set up the registers to return to sigcode.
 	 */
-	frame->tf_regs[FRAME_PC] = p->p_sigcode;
+	frame->tf_regs[FRAME_PC] = p->p_p->ps_sigcode;
 	frame->tf_regs[FRAME_A0] = sig;
 	frame->tf_regs[FRAME_A1] = (u_int64_t)sip;
 	frame->tf_regs[FRAME_A2] = (u_int64_t)scp;

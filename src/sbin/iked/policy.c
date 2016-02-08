@@ -1,4 +1,4 @@
-/*	$OpenBSD: policy.c,v 1.31 2014/02/21 20:52:38 markus Exp $	*/
+/*	$OpenBSD: policy.c,v 1.34 2014/05/06 10:24:22 markus Exp $	*/
 
 /*
  * Copyright (c) 2010-2013 Reyk Floeter <reyk@openbsd.org>
@@ -222,11 +222,17 @@ sa_state(struct iked *env, struct iked_sa *sa, int state)
 {
 	const char		*a;
 	const char		*b;
+	int 			ostate = sa->sa_state;
 
-	a = print_map(sa->sa_state, ikev2_state_map);
+	a = print_map(ostate, ikev2_state_map);
 	b = print_map(state, ikev2_state_map);
 
-	if (state > sa->sa_state) {
+	sa->sa_state = state;
+	if (ostate != IKEV2_STATE_INIT &&
+	    !sa_stateok(sa, state)) {
+		log_debug("%s: cannot switch: %s -> %s", __func__, a, b);
+		sa->sa_state = ostate;
+	} else if (ostate != sa->sa_state) {
 		switch (state) {
 		case IKEV2_STATE_ESTABLISHED:
 		case IKEV2_STATE_CLOSED:
@@ -236,7 +242,8 @@ sa_state(struct iked *env, struct iked_sa *sa, int state)
 			    NULL, 0),
 			    print_host((struct sockaddr *)&sa->sa_local.addr,
 			    NULL, 0),
-			    sa->sa_policy->pol_name);
+			    sa->sa_policy ? sa->sa_policy->pol_name :
+			    "<unknown>");
 			break;
 		default:
 			log_debug("%s: %s -> %s", __func__, a, b);
@@ -244,7 +251,6 @@ sa_state(struct iked *env, struct iked_sa *sa, int state)
 		}
 	}
 
-	sa->sa_state = state;
 }
 
 void
@@ -280,6 +286,7 @@ sa_stateok(struct iked_sa *sa, int state)
 
 	if (state == IKEV2_STATE_SA_INIT ||
 	    state == IKEV2_STATE_VALID ||
+	    state == IKEV2_STATE_EAP_VALID ||
 	    state == IKEV2_STATE_EAP) {
 		log_debug("%s: %s flags 0x%02x, require 0x%02x %s", __func__,
 		    print_map(state, ikev2_state_map),
@@ -304,28 +311,46 @@ sa_new(struct iked *env, u_int64_t ispi, u_int64_t rspi,
 	if ((ispi == 0 && rspi == 0) ||
 	    (sa = sa_lookup(env, ispi, rspi, initiator)) == NULL) {
 		/* Create new SA */
+		if (!initiator && ispi == 0) {
+			log_debug("%s: cannot create responder IKE SA w/o ispi",
+			    __func__);
+			return (NULL);
+		}
 		sa = config_new_sa(env, initiator);
+		if (sa == NULL) {
+			log_debug("%s: failed to allocate IKE SA", __func__);
+			return (NULL);
+		}
+		if (!initiator)
+			sa->sa_hdr.sh_ispi = ispi;
+		old = RB_INSERT(iked_sas, &env->sc_sas, sa);
+		if (old && old != sa) {
+			log_warnx("%s: duplicate IKE SA", __func__);
+			config_free_sa(env, sa);
+			return (NULL);
+		}
 	}
-	if (sa == NULL) {
-		log_debug("%s: failed to get sa", __func__);
-		return (NULL);
-	}
+	/* Update rspi in the initator case */
+	if (initiator && sa->sa_hdr.sh_rspi == 0 && rspi)
+		sa->sa_hdr.sh_rspi = rspi;
+
 	if (sa->sa_policy == NULL)
 		sa->sa_policy = pol;
 	else
 		pol = sa->sa_policy;
 
-	sa->sa_statevalid = IKED_REQ_AUTH|IKED_REQ_SA;
+	sa->sa_statevalid = IKED_REQ_AUTH|IKED_REQ_AUTHVALID|IKED_REQ_SA;
 	if (pol != NULL && pol->pol_auth.auth_eap) {
-		sa->sa_statevalid |= IKED_REQ_CERT;
+		sa->sa_statevalid |= IKED_REQ_CERT|IKED_REQ_EAPVALID;
 	} else if (pol != NULL && pol->pol_auth.auth_method !=
 	    IKEV2_AUTH_SHARED_KEY_MIC) {
-		sa->sa_statevalid |= IKED_REQ_VALID|IKED_REQ_CERT;
+		sa->sa_statevalid |= IKED_REQ_CERTVALID|IKED_REQ_CERT;
 	}
 
 	if (initiator) {
 		localid = &sa->sa_iid;
-		diff = IKED_REQ_VALID|IKED_REQ_SA;
+		diff = IKED_REQ_CERTVALID|IKED_REQ_AUTHVALID|IKED_REQ_SA|
+		    IKED_REQ_EAPVALID;
 		sa->sa_stateinit = sa->sa_statevalid & ~diff;
 		sa->sa_statevalid = sa->sa_statevalid & diff;
 	} else
@@ -334,19 +359,6 @@ sa_new(struct iked *env, u_int64_t ispi, u_int64_t rspi,
 	if (!ibuf_length(localid->id_buf) && pol != NULL &&
 	    ikev2_policy2id(&pol->pol_localid, localid, 1) != 0) {
 		log_debug("%s: failed to get local id", __func__);
-		sa_free(env, sa);
-		return (NULL);
-	}
-
-	if (sa->sa_hdr.sh_ispi == 0)
-		sa->sa_hdr.sh_ispi = ispi;
-	if (sa->sa_hdr.sh_rspi == 0)
-		sa->sa_hdr.sh_rspi = rspi;
-
-	/* Re-insert node into the tree */
-	old = RB_INSERT(iked_sas, &env->sc_sas, sa);
-	if (old && old != sa) {
-		log_debug("%s: duplicate ikesa", __func__);
 		sa_free(env, sa);
 		return (NULL);
 	}
@@ -361,6 +373,12 @@ sa_free(struct iked *env, struct iked_sa *sa)
 	    print_spi(sa->sa_hdr.sh_ispi, 8),
 	    print_spi(sa->sa_hdr.sh_rspi, 8));
 
+	/* IKE rekeying running? */
+	if (sa->sa_next) {
+		RB_REMOVE(iked_sas, &env->sc_sas, sa->sa_next);
+		config_free_sa(env, sa->sa_next);
+	}
+	RB_REMOVE(iked_sas, &env->sc_sas, sa);
 	config_free_sa(env, sa);
 }
 
@@ -389,8 +407,8 @@ sa_address(struct iked_sa *sa, struct iked_addr *addr,
 {
 	struct iked_policy	*pol = sa->sa_policy;
 
-	if (pol == NULL) {
-		log_debug("%s: invalid policy", __func__);
+	if (sa->sa_state != IKEV2_STATE_CLOSING && pol == NULL) {
+		log_debug("%s: missing policy", __func__);
 		return (-1);
 	}
 
@@ -403,7 +421,7 @@ sa_address(struct iked_sa *sa, struct iked_addr *addr,
 		return (-1);
 	}
 
-	if (addr == &sa->sa_peer) {
+	if (addr == &sa->sa_peer && pol) {
 		/* XXX Re-insert node into the tree */
 		RB_REMOVE(iked_sapeers, &pol->pol_sapeers, sa);
 		memcpy(&sa->sa_polpeer, initiator ? &pol->pol_peer :
@@ -459,7 +477,7 @@ sa_lookup(struct iked *env, u_int64_t ispi, u_int64_t rspi,
 	struct iked_sa	*sa, key;
 
 	key.sa_hdr.sh_ispi = ispi;
-	key.sa_hdr.sh_rspi = rspi;
+	/* key.sa_hdr.sh_rspi = rspi; */
 	key.sa_hdr.sh_initiator = initiator;
 
 	if ((sa = RB_FIND(iked_sas, &env->sc_sas, &key)) != NULL) {

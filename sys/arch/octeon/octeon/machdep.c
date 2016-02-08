@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.41 2013/09/28 12:40:31 miod Exp $ */
+/*	$OpenBSD: machdep.c,v 1.60 2014/07/21 17:25:47 uebayasi Exp $ */
 
 /*
  * Copyright (c) 2009, 2010 Miodrag Vallat.
@@ -64,7 +64,7 @@
 #endif
 
 #include <net/if.h>
-#include <uvm/uvm.h>
+
 #include <uvm/uvm_extern.h>
 
 #include <machine/db_machdep.h>
@@ -81,6 +81,7 @@
 #include <octeon/dev/iobusvar.h>
 #include <machine/octeonreg.h>
 #include <machine/octeonvar.h>
+#include <machine/octeon_model.h>
 
 /* The following is used externally (sysctl_hw) */
 char	machine[] = MACHINE;		/* Machine "architecture" */
@@ -233,7 +234,7 @@ octeon_memory_init(struct boot_info *boot_info)
 		    (long)phys_avail[i], (long)phys_avail[i + 1]);
 	}
 	for (i = 0; mem_layout[i].mem_last_page; i++) {
-		printf("mem_layout[%d] page 0x%016lX -> 0x%016lX\n", i,
+		printf("mem_layout[%d] page 0x%016llX -> 0x%016llX\n", i,
 		    mem_layout[i].mem_first_page, mem_layout[i].mem_last_page);
 	}
 }
@@ -402,42 +403,42 @@ mips_init(__register_t a0, __register_t a1, __register_t a2 __unused,
 
 	DUMP_BOOT_DESC(desc_ver, %d);
 	DUMP_BOOT_DESC(desc_size, %d);
-	DUMP_BOOT_DESC(stack_top, %d);
-	DUMP_BOOT_DESC(heap_start, %d);
-	DUMP_BOOT_DESC(heap_end, %d);
+	DUMP_BOOT_DESC(stack_top, %llx);
+	DUMP_BOOT_DESC(heap_start, %llx);
+	DUMP_BOOT_DESC(heap_end, %llx);
 	DUMP_BOOT_DESC(argc, %d);
-	DUMP_BOOT_DESC(flags, %x);
-	DUMP_BOOT_DESC(core_mask, %x);
+	DUMP_BOOT_DESC(flags, %#x);
+	DUMP_BOOT_DESC(core_mask, %#x);
 	DUMP_BOOT_DESC(dram_size, %d);
-	DUMP_BOOT_DESC(phy_mem_desc_addr, %x);
-	DUMP_BOOT_DESC(debugger_flag_addr, %x);
+	DUMP_BOOT_DESC(phy_mem_desc_addr, %#x);
+	DUMP_BOOT_DESC(debugger_flag_addr, %#x);
 	DUMP_BOOT_DESC(eclock, %d);
-	DUMP_BOOT_DESC(boot_info_addr, %x);
+	DUMP_BOOT_DESC(boot_info_addr, %#llx);
 
 	DUMP_BOOT_INFO(ver_major, %d);
 	DUMP_BOOT_INFO(ver_minor, %d);
-	DUMP_BOOT_INFO(stack_top, %x);
-	DUMP_BOOT_INFO(heap_start, %x);
-	DUMP_BOOT_INFO(heap_end, %x);
-	DUMP_BOOT_INFO(boot_desc_addr, %x);
-	DUMP_BOOT_INFO(exception_base_addr, %x);
+	DUMP_BOOT_INFO(stack_top, %llx);
+	DUMP_BOOT_INFO(heap_start, %llx);
+	DUMP_BOOT_INFO(heap_end, %llx);
+	DUMP_BOOT_INFO(boot_desc_addr, %#llx);
+	DUMP_BOOT_INFO(exception_base_addr, %#x);
 	DUMP_BOOT_INFO(stack_size, %d);
-	DUMP_BOOT_INFO(flags, %x);
-	DUMP_BOOT_INFO(core_mask, %x);
+	DUMP_BOOT_INFO(flags, %#x);
+	DUMP_BOOT_INFO(core_mask, %#x);
 	DUMP_BOOT_INFO(dram_size, %d);
-	DUMP_BOOT_INFO(phys_mem_desc_addr, %x);
-	DUMP_BOOT_INFO(debugger_flags_addr, %x);
+	DUMP_BOOT_INFO(phys_mem_desc_addr, %#x);
+	DUMP_BOOT_INFO(debugger_flags_addr, %#x);
 	DUMP_BOOT_INFO(eclock, %d);
 	DUMP_BOOT_INFO(dclock, %d);
 	DUMP_BOOT_INFO(board_type, %d);
 	DUMP_BOOT_INFO(board_rev_major, %d);
 	DUMP_BOOT_INFO(board_rev_minor, %d);
 	DUMP_BOOT_INFO(mac_addr_count, %d);
-	DUMP_BOOT_INFO(cf_common_addr, %x);
-	DUMP_BOOT_INFO(cf_attr_addr, %x);
-	DUMP_BOOT_INFO(led_display_addr, %x);
+	DUMP_BOOT_INFO(cf_common_addr, %#llx);
+	DUMP_BOOT_INFO(cf_attr_addr, %#llx);
+	DUMP_BOOT_INFO(led_display_addr, %#llx);
 	DUMP_BOOT_INFO(dfaclock, %d);
-	DUMP_BOOT_INFO(config_flags, %x);
+	DUMP_BOOT_INFO(config_flags, %#x);
 #endif
 
 	/*
@@ -524,7 +525,7 @@ cpu_startup()
 	 * Good {morning,afternoon,evening,night}.
 	 */
 	printf(version);
-	printf("real mem = %u (%uMB)\n", ptoa((psize_t)physmem),
+	printf("real mem = %lu (%luMB)\n", ptoa((psize_t)physmem),
 	    ptoa((psize_t)physmem)/1024/1024);
 
 	/*
@@ -538,7 +539,7 @@ cpu_startup()
 	phys_map = uvm_km_suballoc(kernel_map, &minaddr, &maxaddr,
 	    VM_PHYS_SIZE, 0, FALSE, NULL);
 
-	printf("avail mem = %u (%uMB)\n", ptoa(uvmexp.free),
+	printf("avail mem = %lu (%luMB)\n", ptoa(uvmexp.free),
 	    ptoa(uvmexp.free)/1024/1024);
 
 	/*
@@ -566,12 +567,31 @@ octeon_cpuspeed(int *freq)
 	return (0);
 }
 
+int
+octeon_ioclock_speed(void)
+{
+	extern struct boot_info *octeon_boot_info;
+	int chipid;
+	u_int64_t mio_rst_boot;
+
+	chipid = octeon_get_chipid();
+	switch (octeon_model_family(chipid)) {
+	case OCTEON_MODEL_FAMILY_CN61XX:
+		mio_rst_boot = octeon_xkphys_read_8(MIO_RST_BOOT);
+		return OCTEON_IO_REF_CLOCK * ((mio_rst_boot >>
+		    MIO_RST_BOOT_PNR_MUL_SHIFT) & MIO_RST_BOOT_PNR_MUL_MASK);
+		break;
+	default:
+		return octeon_boot_info->eclock;
+	}
+}
+
 static u_int64_t
 get_ncpusfound(void)
 {
 	extern struct boot_desc *octeon_boot_desc;
 	uint64_t core_mask = octeon_boot_desc->core_mask;
-	uint64_t i, m, ncpus = 1;
+	uint64_t i, m, ncpus = 0;
 
 	for (i = 0, m = 1 ; i < OCTEON_MAXCPUS; i++, m <<= 1)
 		if (core_mask & m)
@@ -589,7 +609,7 @@ process_bootargs(void)
 	/*
 	 * The kernel is booted via a bootoctlinux command. Thus we need to skip
 	 * argv[0] when we start to decode the boot arguments (${bootargs}).
-	 * Note that U-Boot doesn't pass us anything by default, we need
+	 * Note that U-Boot doesn't pass us anything by default, we need to
 	 * explicitly pass the rootdevice.
 	 */
 	for (i = 1; i < octeon_boot_desc->argc; i++ ) {
@@ -601,14 +621,14 @@ process_bootargs(void)
 
 #ifdef DEBUG
 		printf("boot_desc->argv[%d] = %s\n",
-		       i, PHYS_TO_CKSEG0(octeon_boot_desc->argv[i]));
+		       i, (const char *)PHYS_TO_CKSEG0(octeon_boot_desc->argv[i]));
 #endif
 
 		/*
 		 * XXX: We currently only expect one other argument,
-		 * argv[1], root=ROOTDEV.
+		 * argv[1], rootdev=ROOTDEV.
 		 */
-		if (strncmp(arg, "root=", 5) == 0) {
+		if (strncmp(arg, "rootdev=", 8) == 0) {
 			if (*uboot_rootdev == '\0') {
 				strlcpy(uboot_rootdev, arg,
 					sizeof(uboot_rootdev));
@@ -643,19 +663,15 @@ cpu_sysctl(name, namelen, oldp, oldlenp, newp, newlen, p)
 
 int	waittime = -1;
 
-void
+__dead void
 boot(int howto)
 {
+	struct device *mainbus;
 
-	/* Take a snapshot before clobbering any registers. */
 	if (curproc)
 		savectx(curproc->p_addr, 0);
 
 	if (cold) {
-		/*
-		 * If the system is cold, just halt, unless the user
-		 * explicitly asked for reboot.
-		 */
 		if ((howto & RB_USERREQ) == 0)
 			howto |= RB_HALT;
 		goto haltsys;
@@ -663,20 +679,9 @@ boot(int howto)
 
 	boothowto = howto;
 	if ((howto & RB_NOSYNC) == 0 && waittime < 0) {
-		extern struct proc proc0;
-		/* fill curproc with live object */
-		if (curproc == NULL)
-			curproc = &proc0;
-		/*
-		 * Synchronize the disks...
-		 */
 		waittime = 0;
 		vfs_shutdown();
 
-		/*
-		 * If we've been adjusting the clock, the todr will be out of
-		 * sync; adjust it now.
-		 */
 		if ((howto & RB_TIMEBAD) == 0) {
 			resettodr();
 		} else {
@@ -686,18 +691,20 @@ boot(int howto)
 	if_downall();
 
 	uvm_shutdown();
-	(void) splhigh();		/* Extreme priority. */
+	splhigh();
+	cold = 1;
 
-	if (howto & RB_DUMP)
+	if ((howto & RB_DUMP) != 0)
 		dumpsys();
 
 haltsys:
 	doshutdownhooks();
-	if (!TAILQ_EMPTY(&alldevs))
-		config_suspend(TAILQ_FIRST(&alldevs), DVACT_POWERDOWN);
+	mainbus = device_mainbus();
+	if (mainbus != NULL)
+		config_suspend(mainbus, DVACT_POWERDOWN);
 
-	if (howto & RB_HALT) {
-		if (howto & RB_POWERDOWN)
+	if ((howto & RB_HALT) != 0) {
+		if ((howto & RB_POWERDOWN) != 0)
 			printf("System Power Down not supported,"
 			" halting system.\n");
 		else
@@ -711,7 +718,7 @@ haltsys:
 	}
 
 	for (;;) ;
-	/*NOTREACHED*/
+	/* NOTREACHED */
 }
 
 u_long	dumpmag = 0x8fca0101;	/* Magic number for savecore. */
@@ -827,7 +834,7 @@ hw_cpu_hatch(struct cpu_info *ci)
 	Octeon_ConfigCache(ci);
 	Mips_SyncCache(ci);
 
-	printf("cpu%d launched\n", cpu_number());
+	printf("cpu%lu launched\n", cpu_number());
 
 	(*md_startclock)(ci);
 	ncpus++;
@@ -893,16 +900,4 @@ hw_ipi_intr_clear(u_long cpuid)
 		bus_space_read_8(&iobus_tag, iobus_h, CIU_MBOX_CLR(cpuid));
 	bus_space_write_8(&iobus_tag, iobus_h, CIU_MBOX_CLR(cpuid), clr);
 }
-
-void
-hw_cpu_init_secondary(struct cpu_info *ci)
-{
-	ci->ci_cacheways = 2;
-	ci->ci_l1instcachesize = 32 * 1024;
-	ci->ci_l1instcacheline = 64;
-	ci->ci_l1datacachesize = 32 * 1024;
-	ci->ci_l1datacacheline = 64;
-	ci->ci_l2size = ci->ci_hw.l2size;
-	ci->ci_l3size = 0;
-}
-#endif
+#endif /* MULTIPROCESSOR */

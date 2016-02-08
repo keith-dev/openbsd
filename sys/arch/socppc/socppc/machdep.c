@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.39 2014/01/06 16:17:33 uebayasi Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.55 2014/07/21 17:25:47 uebayasi Exp $	*/
 /*	$NetBSD: machdep.c,v 1.4 1996/10/16 19:33:11 ws Exp $	*/
 
 /*
@@ -49,13 +49,13 @@
 #include <sys/user.h>
 
 #include <net/if.h>
-#include <uvm/uvm.h>
+#include <uvm/uvm_extern.h>
 
 #include <machine/bat.h>
 #include <machine/bus.h>
 #include <machine/fdt.h>
 #include <machine/pio.h>
-#include <machine/powerpc.h>
+#include <powerpc/powerpc.h>
 #include <machine/trap.h>
 
 #include <dev/cons.h>
@@ -108,18 +108,6 @@ struct bd_info {
 
 extern struct bd_info **fwargsave;
 extern struct fdt_head *fwfdtsave;
-
-void uboot_mem_regions(struct mem_region **, struct mem_region **);
-void uboot_vmon(void);
-
-struct firmware uboot_firmware = {
-	uboot_mem_regions,
-	NULL,
-	NULL,
-	uboot_vmon
-};
-
-struct firmware *fw = &uboot_firmware;
 
 #ifdef APERTURE
 #ifdef INSECURE
@@ -249,10 +237,18 @@ initppc(u_int startkernel, u_int endkernel, char *args)
 	ppc_mtibat1u(0);
 	ppc_mtibat2u(0);
 	ppc_mtibat3u(0);
+	ppc_mtibat4u(0);
+	ppc_mtibat5u(0);
+	ppc_mtibat6u(0);
+	ppc_mtibat7u(0);
 	ppc_mtdbat0u(0);
 	ppc_mtdbat1u(0);
 	ppc_mtdbat2u(0);
 	ppc_mtdbat3u(0);
+	ppc_mtdbat4u(0);
+	ppc_mtdbat5u(0);
+	ppc_mtdbat6u(0);
+	ppc_mtdbat7u(0);
 
 	/*
 	 * Set up initial BAT table to only map the lowest 256 MB area
@@ -364,8 +360,6 @@ initppc(u_int startkernel, u_int endkernel, char *args)
 	/*
 	 * Now enable translation (and machine checks/recoverable interrupts).
 	 */
-	(fw->vmon)();
-
 	__asm__ volatile ("eieio; mfmsr %0; ori %0,%0,%1; mtmsr %0; sync;isync"
 		      : "=r"(scratch) : "K"(PSL_IR|PSL_DR|PSL_ME|PSL_RI));
 
@@ -495,7 +489,7 @@ bus_space_map(bus_space_tag_t t, bus_addr_t bpa, bus_size_t size,
 		if (extent_free(devio_ex, bpa, size, EX_NOWAIT |
 			(ppc_malloc_ok ? EX_MALLOCOK : 0)))
 		{
-			printf("bus_space_map: pa 0x%lx, size 0x%x\n",
+			printf("bus_space_map: pa 0x%lx, size 0x%lx\n",
 				bpa, size);
 			printf("bus_space_map: can't free region\n");
 		}
@@ -529,7 +523,7 @@ bus_space_unmap(bus_space_tag_t t, bus_space_handle_t bsh, bus_size_t size)
 		if (extent_free(devio_ex, bpa | (bsh & PAGE_MASK), size, EX_NOWAIT |
 			(ppc_malloc_ok ? EX_MALLOCOK : 0)))
 		{
-			printf("bus_space_map: pa 0x%lx, size 0x%x\n",
+			printf("bus_space_map: pa 0x%lx, size 0x%lx\n",
 				bpa, size);
 			printf("bus_space_map: can't free region\n");
 		}
@@ -798,7 +792,7 @@ cpu_startup()
 
 	printf("%s", version);
 
-	printf("real mem = %u (%uMB)\n", ptoa(physmem),
+	printf("real mem = %lu (%luMB)\n", ptoa(physmem),
 	    ptoa(physmem)/1024/1024);
 
 	/*
@@ -880,7 +874,7 @@ sendsig(sig_t catcher, int sig, int mask, u_long code, int type,
 	struct proc *p = curproc;
 	struct trapframe *tf;
 	struct sigframe *fp, frame;
-	struct sigacts *psp = p->p_sigacts;
+	struct sigacts *psp = p->p_p->ps_sigacts;
 
 	bzero(&frame, sizeof(frame));
 	frame.sf_signum = sig;
@@ -919,11 +913,12 @@ sendsig(sig_t catcher, int sig, int mask, u_long code, int type,
 	tf->fixreg[3] = (int)sig;
 	tf->fixreg[4] = (psp->ps_siginfo & sigmask(sig)) ? (int)&fp->sf_si : 0;
 	tf->fixreg[5] = (int)&fp->sf_sc;
-	tf->srr0 = p->p_sigcode;
+	tf->srr0 = p->p_p->ps_sigcode;
 
 #if WHEN_WE_ONLY_FLUSH_DATA_WHEN_DOING_PMAP_ENTER
 	pmap_extract(vm_map_pmap(&p->p_vmspace->vm_map),tf->srr0, &pa);
-	syncicache(pa, (p->p_emul->e_esigcode - p->p_emul->e_sigcode));
+	syncicache(pa, (p->p_p->ps_emul->e_esigcode -
+	    p->p_p->ps_emul->e_sigcode));
 #endif
 }
 
@@ -1021,7 +1016,7 @@ dumpconf(void)
 }
 
 #define BYTES_PER_DUMP  (PAGE_SIZE)  /* must be a multiple of pagesize */
-vaddr_t dumpspace;
+static vaddr_t dumpspace;
 
 int
 reserve_dumppages(caddr_t p)
@@ -1033,31 +1028,23 @@ reserve_dumppages(caddr_t p)
 /*
  * Halt or reboot the machine after syncing/dumping according to howto.
  */
-void
+__dead void
 boot(int howto)
 {
 	static int syncing;
+	struct device *mainbus;
 
 	if (cold) {
-		/*
-		 * If the system is cold, just halt, unless the user
-		 * explicitly asked for reboot.
-		 */
 		if ((howto & RB_USERREQ) == 0)
 			howto |= RB_HALT;
 		goto haltsys;
 	}
 
 	boothowto = howto;
-	if (!(howto & RB_NOSYNC) && !syncing) {
+	if ((howto & RB_NOSYNC) == 0 && !syncing) {
 		syncing = 1;
-		vfs_shutdown();		/* sync */
+		vfs_shutdown();
 
-		/*
-		 * If we've been adjusting the clock, the todr
-		 * will be out of synch; adjust it now unless
-		 * the system was sitting in ddb.
-		 */
 		if ((howto & RB_TIMEBAD) == 0) {
 			resettodr();
 		} else {
@@ -1068,22 +1055,24 @@ boot(int howto)
 
 	uvm_shutdown();
 	splhigh();
+	cold = 1;
 
-	if ((howto & RB_DUMP))
+	if ((howto & RB_DUMP) != 0)
 		dumpsys();
 
 haltsys:
 	doshutdownhooks();
-	if (!TAILQ_EMPTY(&alldevs))
-		config_suspend(TAILQ_FIRST(&alldevs), DVACT_POWERDOWN);
+	mainbus = device_mainbus();
+	if (mainbus != NULL)
+		config_suspend(mainbus, DVACT_POWERDOWN);
 
-	if (howto & RB_HALT) {
-		if ((howto & RB_POWERDOWN) == RB_POWERDOWN) {
+	if ((howto & RB_HALT) != 0) {
+		if ((howto & RB_POWERDOWN) != 0) {
 			;
 		}
 
 		printf("halted\n\n");
-		(fw->exit)();
+		for (;;);
 	}
 	printf("rebooting\n\n");
 
@@ -1098,7 +1087,8 @@ haltsys:
 	}
 
 	printf("boot failed, spinning\n");
-	while(1) /* forever */;
+	for (;;) ;
+	/* NOTREACHED */
 }
 
 void
@@ -1168,7 +1158,7 @@ kcopy(const void *from, void *to, size_t size)
 struct mem_region uboot_mem[2], uboot_avail[4];
 
 void
-uboot_mem_regions(struct mem_region **memp, struct mem_region **availp)
+ppc_mem_regions(struct mem_region **memp, struct mem_region **availp)
 {
 	uboot_mem[0].start = bootinfo.bi_memstart;
 	uboot_mem[0].size = bootinfo.bi_memsize;
@@ -1182,11 +1172,6 @@ uboot_mem_regions(struct mem_region **memp, struct mem_region **availp)
 
 	*memp = uboot_mem;
 	*availp = uboot_avail;
-}
-
-void
-uboot_vmon(void)
-{
 }
 
 void

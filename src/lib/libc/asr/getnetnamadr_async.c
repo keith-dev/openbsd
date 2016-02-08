@@ -1,4 +1,4 @@
-/*	$OpenBSD: getnetnamadr_async.c,v 1.11 2014/02/26 20:00:08 eric Exp $	*/
+/*	$OpenBSD: getnetnamadr_async.c,v 1.16 2014/07/23 21:26:25 eric Exp $	*/
 /*
  * Copyright (c) 2012 Eric Faurot <eric@openbsd.org>
  *
@@ -20,7 +20,9 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <arpa/nameser.h>
+#include <netdb.h>
 
+#include <asr.h>
 #include <err.h>
 #include <errno.h>
 #include <resolv.h> /* for res_hnok */
@@ -28,7 +30,6 @@
 #include <string.h>
 #include <unistd.h>
 
-#include "asr.h"
 #include "asr_private.h"
 
 #define MAXALIASES	16
@@ -40,18 +41,18 @@ struct netent_ext {
 	char		*pos;
 };
 
-static int getnetnamadr_async_run(struct async *, struct async_res *);
+static int getnetnamadr_async_run(struct asr_query *, struct asr_result *);
 static struct netent_ext *netent_alloc(int);
 static int netent_set_cname(struct netent_ext *, const char *, int);
 static int netent_add_alias(struct netent_ext *, const char *, int);
 static struct netent_ext *netent_file_match(FILE *, int, const char *);
 static struct netent_ext *netent_from_packet(int, char *, size_t);
 
-struct async *
-getnetbyname_async(const char *name, struct asr *asr)
+struct asr_query *
+getnetbyname_async(const char *name, void *asr)
 {
-	struct asr_ctx	*ac;
-	struct async	*as;
+	struct asr_ctx	 *ac;
+	struct asr_query *as;
 
 	/* The current resolver segfaults. */
 	if (name == NULL) {
@@ -79,11 +80,11 @@ getnetbyname_async(const char *name, struct asr *asr)
 	return (NULL);
 }
 
-struct async *
-getnetbyaddr_async(in_addr_t net, int family, struct asr *asr)
+struct asr_query *
+getnetbyaddr_async(in_addr_t net, int family, void *asr)
 {
-	struct asr_ctx	*ac;
-	struct async	*as;
+	struct asr_ctx	 *ac;
+	struct asr_query *as;
 
 	ac = asr_use_resolver(asr);
 	if ((as = asr_async_new(ac, ASR_GETNETBYADDR)) == NULL)
@@ -104,7 +105,7 @@ getnetbyaddr_async(in_addr_t net, int family, struct asr *asr)
 }
 
 static int
-getnetnamadr_async_run(struct async *as, struct async_res *ar)
+getnetnamadr_async_run(struct asr_query *as, struct asr_result *ar)
 {
 	struct netent_ext	*n;
 	int			 r, type, saved_errno;
@@ -120,6 +121,13 @@ getnetnamadr_async_run(struct async *as, struct async_res *ar)
 		if (as->as.netnamadr.family != AF_INET) {
 			ar->ar_h_errno = NETDB_INTERNAL;
 			ar->ar_errno = EAFNOSUPPORT;
+			async_set_state(as, ASR_STATE_HALT);
+			break;
+		}
+
+		if (as->as_type == ASR_GETNETBYNAME &&
+		    as->as.netnamadr.name[0] == '\0') {
+			ar->ar_h_errno = NO_DATA;
 			async_set_state(as, ASR_STATE_HALT);
 			break;
 		}
@@ -201,7 +209,7 @@ getnetnamadr_async_run(struct async *as, struct async_res *ar)
 
 	case ASR_STATE_SUBQUERY:
 
-		if ((r = asr_async_run(as->as.netnamadr.subq, ar)) == ASYNC_COND)
+		if ((r = asr_run(as->as.netnamadr.subq, ar)) == ASYNC_COND)
 			return (ASYNC_COND);
 		as->as.netnamadr.subq = NULL;
 
@@ -286,6 +294,10 @@ netent_file_match(FILE *f, int reqtype, const char *data)
 			return (NULL);
 		}
 
+		/* there must be an address and at least one name */
+		if (n < 2)
+			continue;
+
 		if (reqtype == ASR_GETNETBYADDR) {
 			net = inet_network(tokens[1]);
 			if (memcmp(&net, data, sizeof net) == 0)
@@ -320,10 +332,10 @@ static struct netent_ext *
 netent_from_packet(int reqtype, char *pkt, size_t pktlen)
 {
 	struct netent_ext	*n;
-	struct unpack		 p;
-	struct header		 hdr;
-	struct query		 q;
-	struct rr		 rr;
+	struct asr_unpack	 p;
+	struct asr_dns_header	 hdr;
+	struct asr_dns_query	 q;
+	struct asr_dns_rr	 rr;
 
 	if ((n = netent_alloc(AF_INET)) == NULL)
 		return (NULL);

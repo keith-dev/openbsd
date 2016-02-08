@@ -1,4 +1,4 @@
-/*	$OpenBSD: ext2fs_bswap.c,v 1.4 2007/06/17 20:15:25 jasper Exp $	*/
+/*	$OpenBSD: ext2fs_bswap.c,v 1.8 2014/07/31 17:37:52 pelikan Exp $	*/
 /*	$NetBSD: ext2fs_bswap.c,v 1.6 2000/07/24 00:23:10 mycroft Exp $	*/
 
 /*
@@ -37,6 +37,7 @@
 #if defined(_KERNEL)
 #include <sys/systm.h>
 #endif
+
 #include <ufs/ext2fs/ext2fs.h>
 #include <ufs/ext2fs/ext2fs_dinode.h>
 
@@ -58,7 +59,7 @@ e2fs_sb_bswap(struct ext2fs *old, struct ext2fs *new)
 	new->e2fs_ficount	=	swap32(old->e2fs_ficount);
 	new->e2fs_first_dblock	=	swap32(old->e2fs_first_dblock);
 	new->e2fs_log_bsize	=	swap32(old->e2fs_log_bsize);
-	new->e2fs_fsize		=	swap32(old->e2fs_fsize);
+	new->e2fs_log_fsize	=	swap32(old->e2fs_log_fsize);
 	new->e2fs_bpg		=	swap32(old->e2fs_bpg);
 	new->e2fs_fpg		=	swap32(old->e2fs_fpg);
 	new->e2fs_ipg		=	swap32(old->e2fs_ipg);
@@ -83,6 +84,15 @@ e2fs_sb_bswap(struct ext2fs *old, struct ext2fs *new)
 	new->e2fs_features_incompat =	swap32(old->e2fs_features_incompat);
 	new->e2fs_features_rocompat =	swap32(old->e2fs_features_rocompat);
 	new->e2fs_algo		=	swap32(old->e2fs_algo);
+
+	/* SOME journaling-related fields. */
+	new->e2fs_journal_ino	=	swap32(old->e2fs_journal_ino);
+	new->e2fs_journal_dev	=	swap32(old->e2fs_journal_dev);
+	new->e2fs_last_orphan	=	swap32(old->e2fs_last_orphan);
+	new->e2fs_gdesc_size	=	swap16(old->e2fs_gdesc_size);
+	new->e2fs_default_mount_opts	=	swap32(old->e2fs_default_mount_opts);
+	new->e2fs_first_meta_bg	=	swap32(old->e2fs_first_meta_bg);
+	new->e2fs_mkfs_time	=	swap32(old->e2fs_mkfs_time);
 }
 
 void
@@ -100,7 +110,8 @@ e2fs_cg_bswap(struct ext2_gd *old, struct ext2_gd *new, int size)
 }
 
 void
-e2fs_i_bswap(struct ext2fs_dinode *old, struct ext2fs_dinode *new)
+e2fs_i_bswap(struct m_ext2fs *fs, struct ext2fs_dinode *old,
+    struct ext2fs_dinode *new)
 {
 	new->e2di_mode		=	swap16(old->e2di_mode);
 	new->e2di_uid_low	=	swap16(old->e2di_uid_low);
@@ -117,9 +128,15 @@ e2fs_i_bswap(struct ext2fs_dinode *old, struct ext2fs_dinode *new)
 	new->e2di_flags		=	swap32(old->e2di_flags);
 	new->e2di_gen		=	swap32(old->e2di_gen);
 	new->e2di_facl		=	swap32(old->e2di_facl);
-	new->e2di_dacl		=	swap32(old->e2di_dacl);
+	new->e2di_size_hi	=	swap32(old->e2di_size_hi);
 	new->e2di_faddr		=	swap32(old->e2di_faddr);
+	new->e2di_nblock_hi	=	swap16(old->e2di_nblock_hi);
+	new->e2di_facl_hi	=	swap16(old->e2di_facl_hi);
 	memcpy(&new->e2di_blocks[0], &old->e2di_blocks[0],
 		(NDADDR+NIADDR) * sizeof(int));
+
+	if (EXT2_DINODE_SIZE(fs) <= EXT2_REV0_DINODE_SIZE)
+		return;
+	new->e2di_isize		=	swap16(old->e2di_isize);
 }
 #endif

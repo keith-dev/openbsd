@@ -1,11 +1,10 @@
 /*
- * Copyright (C) 1984-2011  Mark Nudelman
+ * Copyright (C) 1984-2012  Mark Nudelman
  *
  * You may distribute under the terms of either the GNU General Public
  * License or the Less License, as specified in the README file.
  *
- * For more information about less, or for information on how to 
- * contact the author, see the README file.
+ * For more information, see the README file.
  */
 
 
@@ -57,7 +56,6 @@ static char consoleTitle[256];
 extern int	less_is_more;
 extern int	missing_cap;
 extern int	know_dumb;
-extern int	quit_if_one_screen;
 extern int	pr_type;
 
 
@@ -166,9 +164,6 @@ main(argc, argv)
 		quit(QUIT_OK);
 	}
 
-	if (less_is_more && get_quit_at_eof())
-		quit_if_one_screen = TRUE;
-
 #if EDITOR
 	editor = lgetenv("VISUAL");
 	if (editor == NULL || *editor == '\0')
@@ -189,7 +184,7 @@ main(argc, argv)
 	ifile = NULL_IFILE;
 #if !SMALL
 	if (dohelp)
-		ifile = get_ifile(HELPFILE, ifile);
+		ifile = get_ifile(helpfile(), ifile);
 #endif /* !SMALL */
 	while (argc-- > 0)
 	{
@@ -220,6 +215,7 @@ main(argc, argv)
 		argv++;
 		(void) get_ifile(filename, ifile);
 		ifile = prev_ifile(NULL_IFILE);
+		free(filename);
 #endif
 	}
 	/*
@@ -424,3 +420,11 @@ quit(status)
 	close_getchr();
 	exit(status);
 }
+
+#if !SMALL
+	public char *
+helpfile(void)
+{
+	return (less_is_more ? HELPDIR "/more.help" : HELPDIR "/less.help");
+}
+#endif /* !SMALL */

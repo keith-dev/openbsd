@@ -1,4 +1,4 @@
-/*	$OpenBSD: rtl81x9reg.h,v 1.78 2013/11/18 22:21:27 brad Exp $	*/
+/*	$OpenBSD: rtl81x9reg.h,v 1.85 2014/07/08 05:35:18 dlg Exp $	*/
 
 /*
  * Copyright (c) 1997, 1998
@@ -142,6 +142,7 @@
 #define RL_LDPS			0x0082	/* Link Down Power Saving */
 #define RL_MAXRXPKTLEN		0x00DA	/* 16 bits, chip multiplies by 8 */
 #define RL_IM			0x00E2
+#define RL_MISC			0x00F0
 
 /*
  * TX config register bits
@@ -172,13 +173,13 @@
 #define RL_HWREV_8168DP		0x28800000
 #define RL_HWREV_8168E		0x2C000000
 #define RL_HWREV_8168E_VL	0x2C800000
-#define RL_HWREV_8168_SPIN1	0x30000000
-#define RL_HWREV_8100E_SPIN1	0x30800000
+#define RL_HWREV_8168B_SPIN1	0x30000000
+#define RL_HWREV_8100E		0x30800000
 #define RL_HWREV_8101E		0x34000000
 #define RL_HWREV_8102E		0x34800000
 #define	RL_HWREV_8103E		0x34C00000
-#define RL_HWREV_8168_SPIN2	0x38000000
-#define RL_HWREV_8168_SPIN3	0x38400000
+#define RL_HWREV_8168B_SPIN2	0x38000000
+#define RL_HWREV_8168B_SPIN3	0x38400000
 #define RL_HWREV_8100E_SPIN2	0x38800000
 #define RL_HWREV_8168C		0x3c000000
 #define RL_HWREV_8168C_SPIN2	0x3c400000
@@ -187,13 +188,12 @@
 #define RL_HWREV_8105E_SPIN1	0x40C00000
 #define RL_HWREV_8402		0x44000000
 #define RL_HWREV_8106E		0x44800000
-#define RL_HWREV_8106E_SPIN1	0x44900000
 #define RL_HWREV_8168F		0x48000000
 #define RL_HWREV_8411		0x48800000
 #define RL_HWREV_8168G		0x4c000000
-#define RL_HWREV_8168G_SPIN1	0x4c100000
-#define RL_HWREV_8168G_SPIN2	0x50900000
-#define RL_HWREV_8168G_SPIN4	0x5c800000	
+#define RL_HWREV_8168EP		0x50000000
+#define RL_HWREV_8168GU		0x50800000
+#define RL_HWREV_8411B		0x5c800000	
 #define RL_HWREV_8139		0x60000000
 #define RL_HWREV_8139A		0x70000000
 #define RL_HWREV_8139AG		0x70800000
@@ -283,10 +283,11 @@
 #define RL_RXCFG_RX_RUNT	0x00000010
 #define RL_RXCFG_RX_ERRPKT	0x00000020
 #define RL_RXCFG_WRAP		0x00000080
-#define RL_RXCFG_EARLYOFF	0x00000100
+#define RL_RXCFG_EARLYOFFV2	0x00000800
 #define RL_RXCFG_MAXDMA		0x00000700
 #define RL_RXCFG_BURSZ		0x00001800
-#define	RL_RXCFG_FIFOTHRESH	0x0000E000
+#define RL_RXCFG_EARLYOFF	0x00003800
+#define RL_RXCFG_FIFOTHRESH	0x0000E000
 #define RL_RXCFG_EARLYTHRESH	0x07000000
 
 #define RL_RXDMA_16BYTES	0x00000000
@@ -805,7 +806,7 @@ struct rl_list_data {
 	struct rl_desc		*rl_rx_list;
 	int			rl_rx_considx;
 	int			rl_rx_prodidx;
-	int			rl_rx_cnt;
+	struct if_rxring	rl_rx_ring;
 	bus_dma_segment_t	rl_rx_listseg;
 	int			rl_rx_listnseg;
 };
@@ -833,7 +834,6 @@ struct rl_softc {
 	struct mbuf		*rl_head;
 	struct mbuf		*rl_tail;
 	u_int32_t		rl_rxlenmask;
-	int			rl_testmode;
 	struct timeout		timer_handle;
 
 	int			rl_txstart;
@@ -856,6 +856,8 @@ struct rl_softc {
 #define	RL_FLAG_LINK		0x00008000
 #define	RL_FLAG_PHYWAKE_PM	0x00010000
 #define	RL_FLAG_EARLYOFF	0x00020000
+#define	RL_FLAG_EARLYOFFV2	0x00040000
+#define	RL_FLAG_RXDV_GATED	0x00080000
 
 	u_int16_t		rl_intrs;
 	u_int16_t		rl_tx_ack;

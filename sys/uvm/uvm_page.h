@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvm_page.h,v 1.52 2014/01/23 22:06:30 miod Exp $	*/
+/*	$OpenBSD: uvm_page.h,v 1.54 2014/07/11 16:35:40 jsg Exp $	*/
 /*	$NetBSD: uvm_page.h,v 1.19 2000/12/28 08:24:55 chs Exp $	*/
 
 /* 
@@ -18,12 +18,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by Charles D. Cranor,
- *      Washington University, the University of California, Berkeley and 
- *      its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -173,6 +168,9 @@ struct vm_page {
 #define PG_PMAP1	0x02000000	/* Used by some pmaps. */
 #define PG_PMAP2	0x04000000	/* Used by some pmaps. */
 #define PG_PMAP3	0x08000000	/* Used by some pmaps. */
+#define PG_PMAP4	0x10000000	/* Used by some pmaps. */
+#define PG_PMAP5	0x20000000	/* Used by some pmaps. */
+#define PG_PMAPMASK	0x3f000000
 
 /*
  * physical memory layout structure

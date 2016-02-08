@@ -1,4 +1,4 @@
-/*	$OpenBSD: dev_armish.c,v 1.2 2010/12/06 18:44:49 jasper Exp $	*/
+/*	$OpenBSD: dev_armish.c,v 1.4 2014/07/13 09:26:08 jasper Exp $	*/
 
 /*
  * Copyright (c) 2006 Mark Kettenis
@@ -37,54 +37,6 @@ int
 cnspeed(dev_t dev, int sp)
 {
 	return CONSPEED;
-}
-
-int pch_pos;
-
-void
-putchar(c)
-	int c;
-{
-	switch(c) {
-	case '\177':	/* DEL erases */
-		cnputc('\b');
-		cnputc(' ');
-	case '\b':
-		cnputc('\b');
-		if (pch_pos)
-			pch_pos--;
-		break;
-	case '\t':
-		do
-			cnputc(' ');
-		while(++pch_pos % 8);
-		break;
-	case '\n':
-	case '\r':
-		cnputc(c);
-		pch_pos=0;
-		break;
-	default:
-		cnputc(c);
-		pch_pos++;
-		break;
-	}
-}
-
-int
-getchar()
-{
-	int c = cngetc();
-
-	if (c == '\r')
-		c = '\n';
-
-	if ((c < ' ' && c != '\n') || c == '\177')
-		return(c);
-
-	putchar(c);
-
-	return(c);
 }
 
 char ttyname_buf[8];

@@ -2,7 +2,8 @@
 
 =head1 NAME
 
-SSL_set_shutdown, SSL_get_shutdown - manipulate shutdown state of an SSL connection
+SSL_set_shutdown, SSL_get_shutdown - manipulate shutdown state of an SSL
+connection
 
 =head1 SYNOPSIS
 
@@ -24,7 +25,7 @@ The shutdown state of an ssl connection is a bitmask of:
 
 =over 4
 
-=item 0
+=item Z<>0
 
 No shutdown setting, yet.
 

@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_pppx.c,v 1.26 2013/10/19 14:46:30 mpi Exp $ */
+/*	$OpenBSD: if_pppx.c,v 1.32 2014/07/22 11:06:09 mpi Exp $ */
 
 /*
  * Copyright (c) 2010 Claudio Jeker <claudio@openbsd.org>
@@ -70,7 +70,6 @@
 #include <net/if_dl.h>
 
 #ifdef INET
-#include <netinet/in_systm.h>
 #include <netinet/in_var.h>
 #include <netinet/ip.h>
 #include <netinet/ip_var.h>
@@ -256,6 +255,7 @@ pppxopen(dev_t dev, int flags, int mode, struct proc *p)
 
 	pxd = malloc(sizeof(*pxd), M_DEVBUF, M_WAITOK | M_ZERO);
 
+	pxd->pxd_unit = minor(dev);
 	mtx_init(&pxd->pxd_rsel_mtx, IPL_NET);
 	mtx_init(&pxd->pxd_wsel_mtx, IPL_NET);
 	LIST_INIT(&pxd->pxd_pxis);
@@ -602,11 +602,11 @@ pppxclose(dev_t dev, int flags, int mode, struct proc *p)
 	IF_PURGE(&pxd->pxd_svcq);
 	splx(s);
 
-	free(pxd, M_DEVBUF);
+	free(pxd, M_DEVBUF, 0);
 
 	if (LIST_EMPTY(&pppx_devs)) {
 		pool_destroy(pppx_if_pl);
-		free(pppx_if_pl, M_DEVBUF);
+		free(pppx_if_pl, M_DEVBUF, 0);
 		pppx_if_pl = NULL;
 	}
 
@@ -659,7 +659,7 @@ pppx_if_find(struct pppx_dev *pxd, int session_id, int protocol)
 	p = RB_FIND(pppx_ifs, &pppx_ifs, s);
 	rw_exit_read(&pppx_ifs_lk);
 
-	free(s, M_DEVBUF);
+	free(s, M_DEVBUF, 0);
 	return (p);
 }
 
@@ -1093,10 +1093,14 @@ pppx_if_ioctl(struct ifnet *ifp, u_long cmd, caddr_t addr)
 {
 	struct pppx_if *pxi = (struct pppx_if *)ifp->if_softc;
 	struct ifreq *ifr = (struct ifreq *)addr;
+	struct ifaddr *ifa = (struct ifaddr *)addr;
 	int error = 0;
 
 	switch (cmd) {
 	case SIOCSIFADDR:
+		ifa->ifa_rtrequest = p2p_rtrequest;
+		break;
+
 	case SIOCSIFFLAGS:
 		break;
 

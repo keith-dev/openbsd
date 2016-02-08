@@ -1,4 +1,4 @@
-/*	$OpenBSD: initiator.c,v 1.9 2011/05/04 21:00:04 claudio Exp $ */
+/*	$OpenBSD: initiator.c,v 1.13 2014/05/10 11:30:47 claudio Exp $ */
 
 /*
  * Copyright (c) 2009 Claudio Jeker <claudio@openbsd.org>
@@ -76,7 +76,7 @@ initiator_init(void)
 	/* initialize initiator defaults */
 	initiator_sess_defaults = iscsi_sess_defaults;
 	initiator_conn_defaults = iscsi_conn_defaults;
-	initiator_sess_defaults.MaxConnections = 8;
+	initiator_sess_defaults.MaxConnections = ISCSID_DEF_CONNS;
 	initiator_conn_defaults.MaxRecvDataSegmentLength = 65536;
 
 	return initiator;
@@ -276,6 +276,7 @@ initiator_login_kvp(struct connection *c, u_int8_t stage)
 	case ISCSI_LOGIN_STG_OPNEG:
 		if (conn_gen_kvp(c, NULL, &nkvp) == -1)
 			return NULL;
+		nkvp += 1; /* add slot for terminator */
 		if (!(kvp = calloc(nkvp, sizeof(*kvp))))
 			return NULL;
 		if (conn_gen_kvp(c, kvp, &nkvp) == -1) {
@@ -338,7 +339,7 @@ initiator_login_build(struct connection *c, struct task_login *tl)
 	}
 	n = htonl(n);
 	/* copy 32bit value over ahslen and datalen */
-	bcopy(&n, &lreq->ahslen, sizeof(n));
+	memcpy(&lreq->ahslen, &n, sizeof(n));
 
 	return p;
 }
@@ -362,7 +363,7 @@ initiator_text_build(struct task *t, struct session *s, struct kvp *kvp)
 	if ((n = text_to_pdu(kvp, p)) == -1)
 		return NULL;
 	n = htonl(n);
-	bcopy(&n, &lreq->ahslen, sizeof(n));
+	memcpy(&lreq->ahslen, &n, sizeof(n));
 
 	return p;
 }
@@ -502,16 +503,17 @@ initiator_logout_cb(struct connection *c, void *arg, struct pdu *p)
 	loresp = pdu_getbuf(p, NULL, PDU_HEADER);
 	log_debug("initiator_logout_cb: "
 	    "response %d, Time2Wait %d, Time2Retain %d",
-	    loresp->response, loresp->time2wait, loresp->time2retain);
+	    loresp->response, ntohs(loresp->time2wait),
+	    ntohs(loresp->time2retain));
 
 	switch (loresp->response) {
 	case ISCSI_LOGOUT_RESP_SUCCESS:
 		if (tl->reason == ISCSI_LOGOUT_CLOSE_SESS) {
 			conn_fsm(c, CONN_EV_LOGGED_OUT);
-			session_fsm(c->session, SESS_EV_CLOSED, NULL);
+			session_fsm(c->session, SESS_EV_CLOSED, NULL, 0);
 		} else {
 			conn_fsm(tl->c, CONN_EV_LOGGED_OUT);
-			session_fsm(c->session, SESS_EV_CONN_CLOSED, tl->c);
+			session_fsm(c->session, SESS_EV_CONN_CLOSED, tl->c, 0);
 		}
 		break;
 	case ISCSI_LOGOUT_RESP_UNKN_CID:

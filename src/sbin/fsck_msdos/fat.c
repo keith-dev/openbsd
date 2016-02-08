@@ -1,4 +1,4 @@
-/*	$OpenBSD: fat.c,v 1.18 2009/10/27 23:59:33 deraadt Exp $	*/
+/*	$OpenBSD: fat.c,v 1.25 2014/07/10 20:11:12 tobias Exp $	*/
 /*	$NetBSD: fat.c,v 1.8 1997/10/17 11:19:53 ws Exp $	*/
 
 /*
@@ -13,13 +13,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by Martin Husemann
- *	and Wolfgang Solfrank.
- * 4. Neither the name of the University nor the names of its contributors
- *    may be used to endorse or promote products derived from this software
- *    without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHORS ``AS IS'' AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
@@ -309,11 +302,20 @@ clearchain(struct bootblock *boot, struct fatEntry *fat, cl_t head)
 int
 tryclear(struct bootblock *boot, struct fatEntry *fat, cl_t head, cl_t *trunc)
 {
+	u_int len;
+	cl_t p;
+
 	if (ask(0, "Clear chain starting at %u", head)) {
 		clearchain(boot, fat, head);
 		return FSFATMOD;
 	} else if (ask(0, "Truncate")) {
 		*trunc = CLUST_EOF;
+		len = 0;
+		for (p = head; p >= CLUST_FIRST && p < boot->NumClusters;
+		    p = fat[p].next) {
+			len++;
+		}
+		fat[head].length = len;
 		return FSFATMOD;
 	} else
 		return FSERROR;
@@ -364,11 +366,13 @@ checkfat(struct bootblock *boot, struct fatEntry *fat)
 			continue;
 
 		/* follow the chain to its end (hopefully) */
-		for (p = head;
+		for (len = fat[head].length, p = head;
 		     (n = fat[p].next) >= CLUST_FIRST && n < boot->NumClusters;
-		     p = n)
-			if (fat[n].head != head)
+		     p = n) {
+			/* len is always off by one due to n assignment */
+			if (fat[n].head != head || len-- < 2)
 				break;
+		}
 		if (n >= CLUST_EOFS)
 			continue;
 
@@ -381,6 +385,12 @@ checkfat(struct bootblock *boot, struct fatEntry *fat)
 		if (n < CLUST_FIRST || n >= boot->NumClusters) {
 			pwarn("Cluster chain starting at %u ends with cluster out of range (%u)\n",
 			      head, n);
+			ret |= tryclear(boot, fat, head, &fat[p].next);
+			continue;
+		}
+		if (head == fat[n].head) {
+			pwarn("Cluster chain starting at %u loops at cluster %u\n",
+			      head, p);
 			ret |= tryclear(boot, fat, head, &fat[p].next);
 			continue;
 		}
@@ -471,13 +481,15 @@ writefat(int fs, struct bootblock *boot, struct fatEntry *fat)
 		default:
 			if (fat[cl].next == CLUST_FREE)
 				boot->NumFree++;
-			if (cl + 1 < boot->NumClusters
-			    && fat[cl + 1].next == CLUST_FREE)
-				boot->NumFree++;
 			*p++ = (u_char)fat[cl].next;
-			*p++ = (u_char)((fat[cl].next >> 8) & 0xf)
-			       |(u_char)(fat[cl+1].next << 4);
-			*p++ = (u_char)(fat[++cl].next >> 4);
+			*p = (u_char)((fat[cl].next >> 8) & 0xf);
+			cl++;
+			if (cl >= boot->NumClusters)
+				break;
+			if (fat[cl].next == CLUST_FREE)
+				boot->NumFree++;
+			*p++ |= (u_char)(fat[cl].next << 4);
+			*p++ = (u_char)(fat[cl].next >> 4);
 			break;
 		}
 	}
@@ -527,15 +539,18 @@ checklost(int dosfs, struct bootblock *boot, struct fatEntry *fat)
 
 	if (boot->FSInfo) {
 		ret = 0;
-		if (boot->FSFree != boot->NumFree) {
-			pwarn("Free space in FSInfo block (%d) not correct (%d)\n",
+		if (boot->FSFree != 0xffffffff &&
+		    boot->FSFree != boot->NumFree) {
+			pwarn("Free space in FSInfo block (%u) not correct (%u)\n",
 			      boot->FSFree, boot->NumFree);
 			if (ask(1, "fix")) {
 				boot->FSFree = boot->NumFree;
 				ret = 1;
 			}
 		}
-		if (boot->NumFree && fat[boot->FSNext].next != CLUST_FREE) {
+		if (boot->FSNext != 0xffffffff &&
+		    boot->NumFree && (boot->FSNext >= boot->NumClusters ||
+		    fat[boot->FSNext].next != CLUST_FREE)) {
 			pwarn("Next free cluster in FSInfo block (%u) not free\n",
 			      boot->FSNext);
 			if (ask(1, "fix"))

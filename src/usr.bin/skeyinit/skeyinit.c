@@ -1,4 +1,4 @@
-/*	$OpenBSD: skeyinit.c,v 1.52 2013/11/28 18:24:55 deraadt Exp $	*/
+/*	$OpenBSD: skeyinit.c,v 1.55 2014/05/20 01:25:23 guenther Exp $	*/
 
 /* OpenBSD S/Key (skeyinit.c)
  *
@@ -184,7 +184,7 @@ main(int argc, char **argv)
 "secure mode this is normally done via an existing S/Key key.  However, since\n"
 "you do not have an entry in the S/Key database you will have to specify an\n"
 "alternate authentication type via the `-a' flag, e.g.\n"
-"    \"skeyinit -s -a krb5\" or \"skeyinit -s -a passwd\"\n\n"
+"    \"skeyinit -s -a passwd\"\n\n"
 "Note that entering a plaintext password over a non-secure link defeats the\n"
 "purpose of using S/Key in the fist place.\n");
 			exit(1);
@@ -220,10 +220,9 @@ main(int argc, char **argv)
 			if (rmkey) {
 				if (snprintf(filename, sizeof(filename),
 				    "%s/%s", _PATH_SKEYDIR, pp->pw_name)
-				    >= sizeof(filename)) {
-					errno = ENAMETOOLONG;
-					err(1, "Cannot remove S/Key entry");
-				}
+				    >= sizeof(filename))
+					errc(1, ENAMETOOLONG,
+					    "Cannot remove S/Key entry");
 				if (unlink(filename) != 0)
 					err(1, "Cannot remove S/Key entry");
 				printf("S/Key entry for %s removed.\n",
@@ -275,10 +274,9 @@ main(int argc, char **argv)
 			(void)printf("[Adding %s with %s]\n", pp->pw_name,
 			    ht ? ht : skey_get_algorithm());
 			if (snprintf(filename, sizeof(filename), "%s/%s",
-			    _PATH_SKEYDIR, pp->pw_name) >= sizeof(filename)) {
-				errno = ENAMETOOLONG;
-				err(1, "Cannot create S/Key entry");
-			}
+			    _PATH_SKEYDIR, pp->pw_name) >= sizeof(filename))
+				errc(1, ENAMETOOLONG,
+				    "Cannot create S/Key entry");
 			if ((l = open(filename,
 			    O_RDWR | O_NONBLOCK | O_CREAT | O_TRUNC |O_NOFOLLOW,
 			    S_IRUSR | S_IWUSR)) == -1 ||
@@ -513,12 +511,11 @@ convert_db(void)
 			continue;
 		if ((cp = strtok(NULL, " \t")) == NULL)
 			continue;
-		if (isalpha((unsigned char)*cp)) {
-			hashtype = cp;
-			if ((cp = strtok(NULL, " \t")) == NULL)
-				continue;
-		} else
-			hashtype = "md4";
+		if (!isalpha((unsigned char)*cp))
+			continue;
+		hashtype = cp;
+		if ((cp = strtok(NULL, " \t")) == NULL)
+			continue;
 		n = atoi(cp);
 		if ((seed = strtok(NULL, " \t")) == NULL)
 			continue;
@@ -533,8 +530,7 @@ convert_db(void)
 		/* Now write the new-style record. */
 		if (snprintf(filename, sizeof(filename), "%s/%s", _PATH_SKEYDIR,
 		    logname) >= sizeof(filename)) {
-			errno = ENAMETOOLONG;
-			warn("%s", logname);
+			warnc(ENAMETOOLONG, "%s", logname);
 			continue;
 		}
 		fd = open(filename, O_RDWR | O_CREAT | O_EXCL, S_IRUSR | S_IWUSR);
@@ -559,6 +555,6 @@ usage(void)
 	extern char *__progname;
 
 	(void)fprintf(stderr, "usage: %s [-CDErsx] [-a auth-type] [-n count]"
-	    "\n\t[-md4 | -md5 | -rmd160 | -sha1] [user]\n", __progname);
+	    "\n\t[-md5 | -rmd160 | -sha1] [user]\n", __progname);
 	exit(1);
 }

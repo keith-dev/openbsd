@@ -1,7 +1,6 @@
-# $OpenBSD: Makefile,v 1.7 2013/11/10 19:26:31 schwarze Exp $
+# $OpenBSD: Makefile,v 1.9 2014/06/20 18:27:51 schwarze Exp $
 
-SUBDIR = bar hyphen space unicode N
+SUBDIR = accent bar hyphen space unicode N
 
-ascii groff groff-clean obj-clean tman: _SUBDIRUSE
-
+.include "../Makefile.sub"
 .include <bsd.subdir.mk>

@@ -1,4 +1,4 @@
-/*	$OpenBSD: est.c,v 1.29 2012/10/08 09:01:21 jsg Exp $ */
+/*	$OpenBSD: est.c,v 1.33 2014/07/12 18:44:41 tedu Exp $ */
 /*
  * Copyright (c) 2003 Michael Eriksson.
  * All rights reserved.
@@ -215,24 +215,9 @@ p3_get_bus_clock(struct cpu_info *ci)
 			break;
 		}
 		break;
-	/* nehalem */
-	case 0x1a: /* Core i7, Xeon 3500/5500 */
-	case 0x1e: /* Core i5/i7, Xeon 3400 */
-	case 0x1f: /* Core i5/i7 */
-	case 0x2e: /* Xeon 6500/7500 */
-	/* westmere */
-	case 0x25: /* Core i3/i5, Xeon 3400 */
-	case 0x2c: /* Core i7, Xeon 3600/5600 */
-	case 0x2f: /* Xeon E7 */
-	/* sandy bridge */
-	case 0x2a: /* Core i5/i7 2nd Generation */
-	case 0x2d: /* Xeon E5 */
-	/* ivy bridge */
-	case 0x3a: /* Core i3/i5/i7 3rd Generation */
-		break;
 	default:
-		printf("%s: unknown i686 model 0x%x, can't get bus clock\n",
-		    ci->ci_dev->dv_xname, ci->ci_model);
+		/* no FSB on modern Intel processors */
+		break;
 	}
 }
 
@@ -270,7 +255,7 @@ est_acpi_init()
 	return acpilist;
 
 notable:
-	free(acpilist, M_DEVBUF);
+	free(acpilist, M_DEVBUF, 0);
 	acpilist = NULL;
 nolist:
 	return NULL;
@@ -298,7 +283,7 @@ est_acpi_pss_changed(struct acpicpu_pss *pss, int npss)
 	    M_DEVBUF, M_NOWAIT)) == NULL) {
 		printf("est_acpi_pss_changed: cannot allocate memory for new "
 		    "operating points");
-		free(acpilist, M_DEVBUF);
+		free(acpilist, M_DEVBUF, 0);
 		return;
 	}
 
@@ -309,8 +294,8 @@ est_acpi_pss_changed(struct acpicpu_pss *pss, int npss)
 			needtran = 0;
 	}
 
-	free(est_fqlist->table, M_DEVBUF);
-	free(est_fqlist, M_DEVBUF);
+	free(est_fqlist->table, M_DEVBUF, 0);
+	free(est_fqlist, M_DEVBUF, 0);
 	est_fqlist = acpilist;
 
 	if (needtran) {
@@ -398,7 +383,7 @@ est_init(struct cpu_info *ci)
 
 		if ((fake_table = malloc(sizeof(struct est_op) * 3, M_DEVBUF,
 		     M_NOWAIT)) == NULL) {
-			free(fake_fqlist, M_DEVBUF);
+			free(fake_fqlist, M_DEVBUF, 0);
 			printf("%s: EST: cannot allocate memory for fake "
 			    "table\n", cpu_device);
 			return;
@@ -433,13 +418,16 @@ est_init(struct cpu_info *ci)
 		return;
 
 	if (est_fqlist->n < 2)
-		return;
-
-	printf("%s: Enhanced SpeedStep %d MHz", cpu_device, cpuspeed);
+		goto nospeedstep;
 
 	low = est_fqlist->table[est_fqlist->n - 1].mhz;
 	high = est_fqlist->table[0].mhz;
+	if (low == high)
+		goto nospeedstep;
+
 	perflevel = (cpuspeed - low) * 100 / (high - low);
+
+	printf("%s: Enhanced SpeedStep %d MHz", cpu_device, cpuspeed);
 
 	/*
 	 * OK, tell the user the available frequencies.
@@ -451,6 +439,12 @@ est_init(struct cpu_info *ci)
 
 	cpu_setperf = est_setperf;
 	setperf_prio = 3;
+
+	return;
+
+nospeedstep:
+	free(est_fqlist->table, M_DEVBUF, 0);
+	free(est_fqlist, M_DEVBUF, 0);
 }
 
 void

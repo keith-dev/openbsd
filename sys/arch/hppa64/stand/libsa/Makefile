@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.2 2012/08/21 14:46:18 pascal Exp $
+#	$OpenBSD: Makefile,v 1.5 2014/07/13 09:26:08 jasper Exp $
 
 .include "${.CURDIR}/../Makefile.inc"
 
@@ -21,8 +21,9 @@ SRCS=	machdep.c pdc.c itecons.c dev_hppa64.c time.c \
 	ct.c dk.c lf.c lif.c cmd_hppa64.c
 
 # stand routines
-SRCS+=	alloc.c exit.c getfile.c gets.c globals.c \
-	printf.c strerror.c strtol.c strchr.c ctime.c loadfile.c snprintf.c
+SRCS+=	alloc.c exit.c getfile.c gets.c getchar.c globals.c \
+	printf.c putchar.c strerror.c strtol.c strchr.c ctime.c loadfile.c \
+	snprintf.c
 
 # io routines
 SRCS+=	close.c closeall.c dev.c disklabel.c dkcksum.c fstat.c ioctl.c lseek.c \
@@ -41,4 +42,4 @@ install:
 
 CPPFLAGS+=-DHEAP_LIMIT=${HEAP_LIMIT} ${DEBUGFLAGS} -DNO_NET
 CPPFLAGS+=-I${S}/stand/boot
-CFLAGS+=${SACFLAGS} -D__INTERNAL_LIBSA_CREAD -DCOMPAT_UFS
+CFLAGS+=${SACFLAGS} -D__INTERNAL_LIBSA_CREAD -DCOMPAT_UFS -DCONSPEED=9600

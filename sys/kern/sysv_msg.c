@@ -1,4 +1,4 @@
-/*	$OpenBSD: sysv_msg.c,v 1.26 2013/03/28 16:58:45 deraadt Exp $	*/
+/*	$OpenBSD: sysv_msg.c,v 1.28 2014/07/12 18:43:32 tedu Exp $	*/
 /*	$NetBSD: sysv_msg.c,v 1.19 1996/02/09 19:00:18 christos Exp $	*/
 /*
  * Copyright (c) 2009 Bret S. Lambert <blambert@openbsd.org>
@@ -393,7 +393,7 @@ que_create(key_t key, struct ucred *cred, int mode)
 
 	/* if malloc slept, a queue with the same key may have been created */
 	if (que_key_lookup(key)) {
-		free(que, M_TEMP);
+		free(que, M_TEMP, 0);
 		return (NULL);
 	}
 
@@ -488,7 +488,7 @@ que_free(struct que *que)
 		TAILQ_REMOVE(&que->que_msgs, msg, msg_next);
 		msg_free(msg);
 	}
-	free(que, M_TEMP);
+	free(que, M_TEMP, 0);
 	num_ques--;
 }
 
@@ -547,7 +547,7 @@ msg_enqueue(struct que *que, struct msg *msg, struct proc *p)
 {
 	que->msqid_ds.msg_cbytes += msg->msg_len;
 	que->msqid_ds.msg_qnum++;
-	que->msqid_ds.msg_lspid = p->p_p->ps_mainproc->p_pid;
+	que->msqid_ds.msg_lspid = p->p_p->ps_pid;
 	que->msqid_ds.msg_stime = time_second;
 
 	TAILQ_INSERT_TAIL(&que->que_msgs, msg, msg_next);
@@ -558,7 +558,7 @@ msg_dequeue(struct que *que, struct msg *msg, struct proc *p)
 {
 	que->msqid_ds.msg_cbytes -= msg->msg_len;
 	que->msqid_ds.msg_qnum--;
-	que->msqid_ds.msg_lrpid = p->p_p->ps_mainproc->p_pid;
+	que->msqid_ds.msg_lrpid = p->p_p->ps_pid;
 	que->msqid_ds.msg_rtime = time_second;
 
 	TAILQ_REMOVE(&que->que_msgs, msg, msg_next);
@@ -699,7 +699,7 @@ sysctl_sysvmsg(int *name, u_int namelen, void *where, size_t *sizep)
 		    msginfo.msgmni * sizeof(struct msqid_ds);
 
 		if (*sizep < infolen) {
-			free(info, M_TEMP);
+			free(info, M_TEMP, 0);
 			return (ENOMEM);
 		}
 
@@ -716,7 +716,7 @@ sysctl_sysvmsg(int *name, u_int namelen, void *where, size_t *sizep)
 
 		error = copyout(info, where, infolen);
 
-		free(info, M_TEMP);
+		free(info, M_TEMP, 0);
 
 		return (error);
 

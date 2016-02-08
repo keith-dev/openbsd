@@ -1,5 +1,5 @@
 # ex:ts=8 sw=4:
-# $OpenBSD: Term.pm,v 1.22 2014/02/07 11:20:58 espie Exp $
+# $OpenBSD: Term.pm,v 1.28 2014/07/08 17:02:56 espie Exp $
 #
 # Copyright (c) 2004-2007 Marc Espie <espie@openbsd.org>
 #
@@ -20,19 +20,9 @@ use warnings;
 package OpenBSD::PackingElement;
 sub size_and
 {
-	my ($self, $progress, $donesize, $totsize, $method, @r) = @_;
-	if (defined $self->{size}) {
-		$$donesize += $self->{size};
-		$progress->show($$donesize, $totsize);
-	}
+	my ($self, $p, $method, @r) = @_;
+	$p->advance($self);
 	$self->$method(@r);
-}
-
-sub compute_size
-{
-	my ($self, $totsize) = @_;
-
-	$$totsize += $self->{size} if defined $self->{size};
 }
 
 sub compute_count
@@ -59,18 +49,9 @@ sub ntogo
 	return $state->ntogo_string($offset);
 }
 
-sub compute_size
-{
-	my $plist = shift;
-	my $totsize = 0;
-	$plist->compute_size(\$totsize);
-	$totsize = 1 if $totsize == 0;
-	return $totsize;
-}
-
 sub compute_count
 {
-	my $plist = shift;
+	my ($progres, $plist) = @_;
 	my $total = 0;
 	$plist->compute_count(\$total);
 	$total = 1 if $total == 0;
@@ -80,24 +61,19 @@ sub compute_count
 sub visit_with_size
 {
 	my ($progress, $plist, $method, $state, @r) = @_;
-	$plist->{totsize} //= compute_size($plist);
-	my $donesize = 0;
-	my $totsize = $plist->{totsize};
-	$progress->show($donesize, $totsize);
-	if (defined $state->{archive}) {
-		$state->{archive}{callback} = sub {
-		    my $done = shift;
-		    $progress->show($donesize + $done, $totsize);
-		};
-	}
-	$plist->size_and($progress, \$donesize, $totsize,
-	    $method, $state, @r);
+	my $p = $progress->new_sizer($plist, $state);
+	$plist->size_and($p, $method, $state, @r);
+}
+
+sub sizer_class
+{
+	"ProgressSizer"
 }
 
 sub visit_with_count
 {
 	my ($progress, $plist, $method, @r) = @_;
-	$plist->{total} //= compute_count($plist);
+	$plist->{total} //= $progress->compute_count($plist);
 	my $count = 0;
 	$progress->show($count, $plist->{total});
 	$plist->count_and($progress, \$count, $plist->{total},
@@ -188,18 +164,18 @@ sub set_header
 sub hmove
 {
 	my ($self, $v) = @_;
-	my $_ = $self->{hpa};
-	s/\%i// and $v++;
-	s/\%n// and $v ^= 0140;
-	s/\%B// and $v = 16 * ($v/10) + $v%10;
-	s/\%D// and $v = $v - 2*($v%16);
-	s/\%\./sprintf('%c', $v)/e;
-	s/\%d/sprintf('%d', $v)/e;
-	s/\%2/sprintf('%2d', $v)/e;
-	s/\%3/sprintf('%3d', $v)/e;
-	s/\%\+(.)/sprintf('%c', $v+ord($1))/e;
-	s/\%\%/\%/g;
-	return $_;
+	my $seq = $self->{hpa};
+	$seq =~ s/\%i// and $v++;
+	$seq =~ s/\%n// and $v ^= 0140;
+	$seq =~ s/\%B// and $v = 16 * ($v/10) + $v%10;
+	$seq =~ s/\%D// and $v = $v - 2*($v%16);
+	$seq =~ s/\%\./sprintf('%c', $v)/e;
+	$seq =~ s/\%d/sprintf('%d', $v)/e;
+	$seq =~ s/\%2/sprintf('%2d', $v)/e;
+	$seq =~ s/\%3/sprintf('%3d', $v)/e;
+	$seq =~ s/\%\+(.)/sprintf('%c', $v+ord($1))/e;
+	$seq =~ s/\%\%/\%/g;
+	return $seq;
 }
 
 sub _show
@@ -304,6 +280,33 @@ sub next
 
 	$todo //= 'ok';
 	print "\r$self->{header}: $todo\n";
+}
+
+package ProgressSizer;
+our @ISA = qw(PureSizer);
+
+sub new
+{
+	my ($class, $progress, $plist, $state) = @_;
+	my $p = $class->SUPER::new($progress, $plist, $state);
+	$progress->show(0, $p->{totsize});
+	if (defined $state->{archive}) {
+		$state->{archive}->set_callback(
+		    sub {
+			my $done = shift;
+			$progress->show($p->{donesize} + $done, $p->{totsize});
+		});
+	}
+	return $p;
+}
+
+sub advance
+{
+	my ($self, $e) = @_;
+	if (defined $e->{size}) {
+		$self->{donesize} += $e->{size};
+		$self->{progress}->show($self->{donesize}, $self->{totsize});
+	}
 }
 
 1;

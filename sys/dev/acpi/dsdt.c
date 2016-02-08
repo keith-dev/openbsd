@@ -1,4 +1,4 @@
-/* $OpenBSD: dsdt.c,v 1.205 2013/12/12 20:56:01 guenther Exp $ */
+/* $OpenBSD: dsdt.c,v 1.213 2014/07/20 12:20:38 kettenis Exp $ */
 /*
  * Copyright (c) 2005 Jordan Hargrave <jordan@openbsd.org>
  *
@@ -424,7 +424,7 @@ _acpi_os_malloc(size_t size, const char *fn, int line)
 	struct acpi_memblock *sptr;
 
 	sptr = malloc(size+sizeof(*sptr), M_ACPI, M_WAITOK | M_ZERO);
-	dnprintf(99, "alloc: %x %s:%d\n", sptr, fn, line);
+	dnprintf(99, "alloc: %p %s:%d\n", sptr, fn, line);
 	acpi_nalloc += size;
 	sptr->size = size;
 #ifdef ACPI_MEMDEBUG
@@ -451,8 +451,8 @@ _acpi_os_free(void *ptr, const char *fn, int line)
 		LIST_REMOVE(sptr, link);
 #endif
 
-		dnprintf(99, "free: %x %s:%d\n", sptr, fn, line);
-		free(sptr, M_ACPI);
+		dnprintf(99, "free: %p %s:%d\n", sptr, fn, line);
+		free(sptr, M_ACPI, 0);
 	}
 }
 
@@ -552,7 +552,7 @@ aml_register_notify(struct aml_node *node, const char *pnpid,
 	struct aml_notify_data	*pdata;
 	extern int acpi_poll_enabled;
 
-	dnprintf(10, "aml_register_notify: %s %s %x\n",
+	dnprintf(10, "aml_register_notify: %s %s %p\n",
 	    node->name, pnpid ? pnpid : "", proc);
 
 	pdata = acpi_os_malloc(sizeof(struct aml_notify_data));
@@ -727,81 +727,63 @@ aml_delchildren(struct aml_node *node)
 void aml_unlockfield(struct aml_scope *, struct aml_value *);
 void aml_lockfield(struct aml_scope *, struct aml_value *);
 
-long acpi_acquire_global_lock(void*);
-long acpi_release_global_lock(void*);
 static long global_lock_count = 0;
-#define acpi_acquire_global_lock(x) 1
-#define acpi_release_global_lock(x) 0
 
 void
 acpi_glk_enter(void)
 {
-	acpi_acquire_glk(&acpi_softc->sc_facs->global_lock);
+	int st = 0;
+
+	/* If lock is already ours, just continue. */
+	if (global_lock_count++)
+		return;
+
+	/* Spin to acquire the lock. */
+	while (!st) {
+		st = acpi_acquire_glk(&acpi_softc->sc_facs->global_lock);
+		/* XXX - yield/delay? */
+	}
 }
 
 void
 acpi_glk_leave(void)
 {
-	int x;
+	int st, x;
 
-	if (acpi_release_glk(&acpi_softc->sc_facs->global_lock)) {
-		/*
-		 * If pending, notify the BIOS that the lock was released
-		 * by the OSPM. No locking is needed because nobody outside
-		 * the ACPI thread is touching this register.
-		 */
-		x = acpi_read_pmreg(acpi_softc, ACPIREG_PM1_CNT, 0);
-		x |= ACPI_PM1_GBL_RLS;
-		acpi_write_pmreg(acpi_softc, ACPIREG_PM1_CNT, 0, x);
-	}
+	/* If we are the last one, turn out the lights. */
+	if (--global_lock_count)
+		return;
+
+	st = acpi_release_glk(&acpi_softc->sc_facs->global_lock);
+	if (!st)
+		return;
+
+	/*
+	 * If pending, notify the BIOS that the lock was released by
+	 * OSPM.  No locking is needed because nobody outside the ACPI
+	 * thread is supposed to touch this register.
+	 */
+	x = acpi_read_pmreg(acpi_softc, ACPIREG_PM1_CNT, 0);
+	x |= ACPI_PM1_GBL_RLS;
+	acpi_write_pmreg(acpi_softc, ACPIREG_PM1_CNT, 0, x);
 }
 
 void
 aml_lockfield(struct aml_scope *scope, struct aml_value *field)
 {
-	int st = 0;
-
 	if (AML_FIELD_LOCK(field->v_field.flags) != AML_FIELD_LOCK_ON)
 		return;
 
-	/* If lock is already ours, just continue */
-	if (global_lock_count++)
-		return;
-
-	/* Spin to acquire lock */
-	while (!st) {
-		st = acpi_acquire_glk(&acpi_softc->sc_facs->global_lock);
-		/* XXX - yield/delay? */
-	}
-
-	return;
+	acpi_glk_enter();
 }
 
 void
 aml_unlockfield(struct aml_scope *scope, struct aml_value *field)
 {
-	int st, x, s;
-
 	if (AML_FIELD_LOCK(field->v_field.flags) != AML_FIELD_LOCK_ON)
 		return;
 
-	/* If we are the last ones, turn out the lights */
-	if (--global_lock_count)
-		return;
-
-	/* Release lock */
-	st = acpi_release_glk(&acpi_softc->sc_facs->global_lock);
-	if (!st)
-		return;
-
-	/* Signal others if someone waiting */
-	s = spltty();
-	x = acpi_read_pmreg(acpi_softc, ACPIREG_PM1_CNT, 0);
-	x |= ACPI_PM1_GBL_RLS;
-	acpi_write_pmreg(acpi_softc, ACPIREG_PM1_CNT, 0, x);
-	splx(s);
-
-	return;
+	acpi_glk_leave();
 }
 
 /*
@@ -1510,6 +1492,8 @@ char *aml_valid_osi[] = {
 	"Windows 2001 SP4",
 	"Windows 2006",
 	"Windows 2009",
+	"Windows 2012",
+	"Windows 2013",
 	NULL
 };
 
@@ -2257,7 +2241,7 @@ aml_rwgas(struct aml_value *rgn, int bpos, int blen, struct aml_value *val,
 	struct aml_value tmp;
 	union amlpci_t pi;
 	void *tbit, *vbit;
-	int slen, type, sz;
+	int tlen, type, sz;
 
 	dnprintf(10," %5s %.2x %.8llx %.4x [%s]\n",
 		mode == ACPI_IOREAD ? "read" : "write",
@@ -2265,12 +2249,6 @@ aml_rwgas(struct aml_value *rgn, int bpos, int blen, struct aml_value *val,
 		rgn->v_opregion.iobase + (bpos >> 3),
 		blen, aml_nodename(rgn->node));
 	memset(&tmp, 0, sizeof(tmp));
-	pi.addr = rgn->v_opregion.iobase + (bpos >> 3);
-	if (rgn->v_opregion.iospace == GAS_PCI_CFG_SPACE)
-	{
-		/* Get PCI Root Address for this opregion */
-		aml_rdpciaddr(rgn->node->parent, &pi);
-	}
 
 	/* Get field access size */
 	switch (AML_FIELD_ACCESS(flag)) {
@@ -2288,61 +2266,67 @@ aml_rwgas(struct aml_value *rgn, int bpos, int blen, struct aml_value *val,
 		break;
 	}
 
+	pi.addr = rgn->v_opregion.iobase + ((bpos >> 3) & ~(sz - 1));
+	bpos &= ((sz << 3) - 1);
+
+	if (rgn->v_opregion.iospace == GAS_PCI_CFG_SPACE) {
+		/* Get PCI Root Address for this opregion */
+		aml_rdpciaddr(rgn->node->parent, &pi);
+	}
+
 	tbit = &tmp.v_integer;
 	vbit = &val->v_integer;
-	slen = (blen + 7) >> 3;
+	tlen = roundup(bpos + blen, sz << 3);
 	type = rgn->v_opregion.iospace;
 
 	/* Allocate temporary storage */
+	if (tlen > aml_intlen) {
+		_aml_setvalue(&tmp, AML_OBJTYPE_BUFFER, tlen >> 3, 0);
+		tbit = tmp.v_buffer;
+	}
+
 	if (blen > aml_intlen) {
 		if (mode == ACPI_IOREAD) {
 			/* Read from a large field:  create buffer */
-			_aml_setvalue(val, AML_OBJTYPE_BUFFER, slen, 0);
+			_aml_setvalue(val, AML_OBJTYPE_BUFFER, (blen + 7) >> 3, 0);
 		} else {
 			/* Write to a large field.. create or convert buffer */
 			val = aml_convert(val, AML_OBJTYPE_BUFFER, -1);
 		}
-		_aml_setvalue(&tmp, AML_OBJTYPE_BUFFER, slen, 0);
-		tbit = tmp.v_buffer;
 		vbit = val->v_buffer;
-	} else if (mode == ACPI_IOREAD) {
-		/* Read from a short field.. initialize integer */
-		_aml_setvalue(val, AML_OBJTYPE_INTEGER, 0, 0);
 	} else {
-		/* Write to a short field.. convert to integer */
-		val = aml_convert(val, AML_OBJTYPE_INTEGER, -1);
+		if (mode == ACPI_IOREAD) {
+			/* Read from a short field.. initialize integer */
+			_aml_setvalue(val, AML_OBJTYPE_INTEGER, 0, 0);
+		} else {
+			/* Write to a short field.. convert to integer */
+			val = aml_convert(val, AML_OBJTYPE_INTEGER, -1);
+		}
 	}
 
 	if (mode == ACPI_IOREAD) {
 		/* Read bits from opregion */
 		acpi_gasio(acpi_softc, ACPI_IOREAD, type, pi.addr,
-		    sz, slen, tbit);
-		aml_bufcpy(vbit, 0, tbit, bpos & 7, blen);
+		    sz, tlen >> 3, tbit);
+		aml_bufcpy(vbit, 0, tbit, bpos, blen);
 	} else {
 		/* Write bits to opregion */
-		if (val->length < slen) {
-			dnprintf(0,"writetooshort: %d %d %s\n",
-			    val->length, slen, aml_nodename(rgn->node));
-			slen = val->length;
-		}
-		if (AML_FIELD_UPDATE(flag) == AML_FIELD_PRESERVE && 
-		    ((bpos | blen) & 7)) {
-			/* If not aligned and preserve, read existing value */
+		if (AML_FIELD_UPDATE(flag) == AML_FIELD_PRESERVE &&
+		    (bpos != 0 || blen != tlen)) {
 			acpi_gasio(acpi_softc, ACPI_IOREAD, type, pi.addr,
-			    sz, slen, tbit);
+			    sz, tlen >> 3, tbit);
 		} else if (AML_FIELD_UPDATE(flag) == AML_FIELD_WRITEASONES) {
-			memset(tbit, 0xFF, tmp.length);
+			memset(tbit, 0xff, tmp.length);
 		}
 		/* Copy target bits, then write to region */
-		aml_bufcpy(tbit, bpos & 7, vbit, 0, blen);
+		aml_bufcpy(tbit, bpos, vbit, 0, blen);
 		acpi_gasio(acpi_softc, ACPI_IOWRITE, type, pi.addr,
-		    sz, slen, tbit);
+		    sz, tlen >> 3, tbit);
 
 		aml_delref(&val, "fld.write");
 	}
 	aml_freevalue(&tmp);
 }
-
 
 void
 aml_rwindexfield(struct aml_value *fld, struct aml_value *val, int mode)
@@ -2554,14 +2538,12 @@ int
 acpi_mutex_acquire(struct aml_scope *scope, struct aml_value *mtx,
     int timeout)
 {
-	int err;
-
 	if (mtx->v_mtx.owner == NULL || scope == mtx->v_mtx.owner) {
 		/* We are now the owner */
 		mtx->v_mtx.owner = scope;
 		if (mtx == aml_global_lock) {
 			dnprintf(10,"LOCKING GLOBAL\n");
-			err = acpi_acquire_global_lock(&acpi_softc->sc_facs->global_lock);
+			acpi_glk_enter();
 		}
 		dnprintf(5,"%s acquires mutex %s\n", scope->node->name,
 		    mtx->node->name);
@@ -2576,11 +2558,9 @@ acpi_mutex_acquire(struct aml_scope *scope, struct aml_value *mtx,
 void
 acpi_mutex_release(struct aml_scope *scope, struct aml_value *mtx)
 {
-	int err;
-
 	if (mtx == aml_global_lock) {
 		dnprintf(10,"UNLOCKING GLOBAL\n");
-		err=acpi_release_global_lock(&acpi_softc->sc_facs->global_lock);
+		acpi_glk_leave();
 	}
 	dnprintf(5, "%s releases mutex %s\n", scope->node->name,
 	    mtx->node->name);
@@ -3144,7 +3124,7 @@ aml_eval(struct aml_scope *scope, struct aml_value *my_ret, int ret_type,
 	case AML_OBJTYPE_BUFFERFIELD:
 	case AML_OBJTYPE_FIELDUNIT:
 		my_ret = aml_allocvalue(0,0,NULL);
-		dnprintf(20,"quick: Convert Bufferfield to %c 0x%x\n",
+		dnprintf(20,"quick: Convert Bufferfield to %c %p\n",
 		    ret_type, my_ret);
 		aml_rwfield(tmp, 0, tmp->v_field.bitlen, my_ret, ACPI_IOREAD);
 		break;
@@ -3991,7 +3971,7 @@ aml_parse(struct aml_scope *scope, int ret_type, const char *stype)
 	case AMLOP_NOTIFY:
 		/* Notify: Si */
 		rv = aml_gettgt(opargs[0], opcode);
-		dnprintf(50,"Notifying: %s %x\n",
+		dnprintf(50,"Notifying: %s %llx\n",
 		    aml_nodename(rv->node),
 		    opargs[1]->v_integer);
 		aml_notify(rv->node, opargs[1]->v_integer);
@@ -4152,7 +4132,7 @@ aml_evalnode(struct acpi_softc *sc, struct aml_node *node,
 		memset(res, 0, sizeof(*res));
 	if (node == NULL || node->value == NULL)
 		return (ACPI_E_BADVALUE);
-	dnprintf(12,"EVALNODE: %s %d\n", aml_nodename(node), acpi_nalloc);
+	dnprintf(12,"EVALNODE: %s %lx\n", aml_nodename(node), acpi_nalloc);
 
 	aml_error = 0;
 	xres = aml_eval(NULL, node->value, 't', argc, argv);
@@ -4225,7 +4205,7 @@ __aml_searchname(struct aml_node *root, const void *vname, int create)
 	char  nseg[AML_NAMESEG_LEN + 1];
 	int   i;
 
-	dnprintf(25,"Searchname: %s:%s = ", aml_nodename(root), vname);
+	dnprintf(25,"Searchname: %s:%s = ", aml_nodename(root), name);
 	while (*name == AMLOP_ROOTCHAR) {
 		root = &aml_root;
 		name++;

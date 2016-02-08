@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip_ipsp.c,v 1.193 2014/01/09 06:29:06 tedu Exp $	*/
+/*	$OpenBSD: ip_ipsp.c,v 1.197 2014/07/22 11:06:10 mpi Exp $	*/
 /*
  * The authors of this code are John Ioannidis (ji@tla.org),
  * Angelos D. Keromytis (kermit@csd.uch.gr),
@@ -41,11 +41,11 @@
 #include "pfsync.h"
 
 #include <sys/param.h>
+#include <sys/systm.h>
 #include <sys/mbuf.h>
 #include <sys/socket.h>
 #include <sys/kernel.h>
 #include <sys/proc.h>
-#include <sys/sysctl.h>
 #include <sys/timeout.h>
 
 #include <net/if.h>
@@ -61,7 +61,6 @@
 
 #ifdef INET
 #include <netinet/in.h>
-#include <netinet/in_systm.h>
 #include <netinet/ip.h>
 #include <netinet/in_pcb.h>
 #include <netinet/ip_var.h>
@@ -638,13 +637,13 @@ tdb_rehash(void)
 		}
 	}
 
-	free(tdbh, M_TDB);
+	free(tdbh, M_TDB, 0);
 	tdbh = new_tdbh;
 
-	free(tdbaddr, M_TDB);
+	free(tdbaddr, M_TDB, 0);
 	tdbaddr = new_tdbaddr;
 
-	free(tdbsrc, M_TDB);
+	free(tdbsrc, M_TDB, 0);
 	tdbsrc = new_srcaddr;
 }
 
@@ -892,7 +891,7 @@ tdb_free(struct tdb *tdbp)
 	if ((tdbp->tdb_inext) && (tdbp->tdb_inext->tdb_onext == tdbp))
 		tdbp->tdb_inext->tdb_onext = NULL;
 
-	free(tdbp, M_TDB);
+	free(tdbp, M_TDB, 0);
 }
 
 /*
@@ -1049,7 +1048,7 @@ ipsp_reffree(struct ipsec_ref *ipr)
 		    ipr->ref_count, ipr, ipr->ref_len, ipr->ref_malloctype);
 #endif
 	if (--ipr->ref_count <= 0)
-		free(ipr, ipr->ref_malloctype);
+		free(ipr, ipr->ref_malloctype, 0);
 }
 
 /* Mark a TDB as TDBF_SKIPCRYPTO. */
@@ -1182,7 +1181,7 @@ ipsp_parse_headers(struct mbuf *m, int off, u_int8_t proto)
 					    sizeof(struct sockaddr_in6);
 					tdbi->dst.sin6.sin6_addr = ip6_dst;
 					tdbi->rdomain =
-					    rtable_l2(m->m_pkthdr.rdomain);
+					    rtable_l2(m->m_pkthdr.ph_rtableid);
 					SLIST_INSERT_HEAD(&tags,
 					    mtag, m_tag_link);
 				}
@@ -1275,7 +1274,7 @@ ipsp_parse_headers(struct mbuf *m, int off, u_int8_t proto)
 				    (caddr_t) &tdbi->spi);
 
 			tdbi->proto = proto; /* AH or ESP */
-			tdbi->rdomain = rtable_l2(m->m_pkthdr.rdomain);
+			tdbi->rdomain = rtable_l2(m->m_pkthdr.ph_rtableid);
 
 #ifdef INET
 			/* Last network header was IPv4. */

@@ -1,4 +1,4 @@
-/*	$OpenBSD: i82596.c,v 1.36 2013/11/27 06:48:50 deraadt Exp $	*/
+/*	$OpenBSD: i82596.c,v 1.39 2014/07/22 13:12:12 mpi Exp $	*/
 /*	$NetBSD: i82586.c,v 1.18 1998/08/15 04:42:42 mycroft Exp $	*/
 
 /*-
@@ -156,12 +156,8 @@ Mode of operation:
 
 #ifdef INET
 #include <netinet/in.h>
-#include <netinet/in_systm.h>
-#include <netinet/ip.h>
 #include <netinet/if_ether.h>
 #endif
-
-#include <uvm/uvm_extern.h>
 
 #include <machine/bus.h>
 
@@ -1975,7 +1971,7 @@ ie_mc_reset(sc)
 	if (size > sc->mcast_addrs_size) {
 		/* Need to allocate more space */
 		if (sc->mcast_addrs_size)
-			free(sc->mcast_addrs, M_IFMADDR);
+			free(sc->mcast_addrs, M_IFMADDR, 0);
 		sc->mcast_addrs = (char *)
 			malloc(size, M_IFMADDR, M_WAITOK);
 		sc->mcast_addrs_size = size;

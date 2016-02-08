@@ -1,4 +1,4 @@
-/*	$OpenBSD: msdosfs_vfsops.c,v 1.63 2013/04/15 15:32:19 jsing Exp $	*/
+/*	$OpenBSD: msdosfs_vfsops.c,v 1.68 2014/07/12 18:50:41 tedu Exp $	*/
 /*	$NetBSD: msdosfs_vfsops.c,v 1.48 1997/10/18 02:54:57 briggs Exp $	*/
 
 /*-
@@ -119,10 +119,16 @@ msdosfs_mount(struct mount *mp, const char *path, void *data,
 		error = 0;
 		if (!(pmp->pm_flags & MSDOSFSMNT_RONLY) &&
 		    (mp->mnt_flag & MNT_RDONLY)) {
+			mp->mnt_flag &= ~MNT_RDONLY;
+			VFS_SYNC(mp, MNT_WAIT, p->p_ucred, p);
+			mp->mnt_flag |= MNT_RDONLY;
+
 			flags = WRITECLOSE;
 			if (mp->mnt_flag & MNT_FORCE)
 				flags |= FORCECLOSE;
 			error = vflush(mp, NULLVP, flags);
+			if (!error)
+				pmp->pm_flags |= MSDOSFSMNT_RONLY;
 		}
 		if (!error && (mp->mnt_flag & MNT_RELOAD))
 			/* not yet implemented */
@@ -312,7 +318,6 @@ msdosfs_mountfs(struct vnode *devvp, struct mount *mp, struct proc *p,
 	 */
 	if ((error = bread(devvp, 0, 4096, &bp)) != 0)
 		goto error_exit;
-	bp->b_flags |= B_AGE;
 	bsp = (union bootsector *)bp->b_data;
 	b33 = (struct byte_bpb33 *)bsp->bs33.bsBPB;
 	b50 = (struct byte_bpb50 *)bsp->bs50.bsBPB;
@@ -380,7 +385,8 @@ msdosfs_mountfs(struct vnode *devvp, struct mount *mp, struct proc *p,
 	if ((SecPerClust == 0) || (SecPerClust & (SecPerClust - 1)) ||
 	    (pmp->pm_BytesPerSec < DEV_BSIZE) ||
 	    (pmp->pm_BytesPerSec & (pmp->pm_BytesPerSec - 1)) ||
-	    (pmp->pm_HugeSectors == 0) || (pmp->pm_FATsecs == 0)) {
+	    (pmp->pm_HugeSectors == 0) || (pmp->pm_FATsecs == 0) ||
+	    (SecPerClust * pmp->pm_BlkPerSec > MAXBSIZE / DEV_BSIZE)) {
 		error = EINVAL;
 		goto error_exit;
 	}		
@@ -512,7 +518,7 @@ msdosfs_mountfs(struct vnode *devvp, struct mount *mp, struct proc *p,
 	 * Allocate memory for the bitmap of allocated clusters, and then
 	 * fill it in.
 	 */
-	bmapsiz = (pmp->pm_maxcluster + N_INUSEBITS - 1) / N_INUSEBITS;
+	bmapsiz = howmany(pmp->pm_maxcluster + 1, N_INUSEBITS);
 	if (bmapsiz == 0 || SIZE_MAX / bmapsiz < sizeof(*pmp->pm_inusemap)) {
 		/* detect multiplicative integer overflow */
 		error = EINVAL;
@@ -580,8 +586,8 @@ error_exit:
 
 	if (pmp) {
 		if (pmp->pm_inusemap)
-			free(pmp->pm_inusemap, M_MSDOSFSFAT);
-		free(pmp, M_MSDOSFSMNT);
+			free(pmp->pm_inusemap, M_MSDOSFSFAT, 0);
+		free(pmp, M_MSDOSFSMNT, 0);
 		mp->mnt_data = (qaddr_t)0;
 	}
 	return (error);
@@ -621,8 +627,8 @@ msdosfs_unmount(struct mount *mp, int mntflags,struct proc *p)
 	error = VOP_CLOSE(vp,
 	   pmp->pm_flags & MSDOSFSMNT_RONLY ? FREAD : FREAD|FWRITE, NOCRED, p);
 	vput(vp);
-	free(pmp->pm_inusemap, M_MSDOSFSFAT);
-	free(pmp, M_MSDOSFSMNT);
+	free(pmp->pm_inusemap, M_MSDOSFSFAT, 0);
+	free(pmp, M_MSDOSFSMNT, 0);
 	mp->mnt_data = (qaddr_t)0;
 	mp->mnt_flag &= ~MNT_LOCAL;
 	return (error);

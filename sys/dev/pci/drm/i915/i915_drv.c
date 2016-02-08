@@ -1,4 +1,4 @@
-/* $OpenBSD: i915_drv.c,v 1.63 2014/02/23 09:36:52 kettenis Exp $ */
+/* $OpenBSD: i915_drv.c,v 1.67 2014/07/12 14:18:06 jsg Exp $ */
 /*
  * Copyright (c) 2008-2009 Owain G. Ainsworth <oga@openbsd.org>
  *
@@ -419,14 +419,6 @@ const static struct drm_pcidev inteldrm_pciidlist[] = {		/* aka */
 	INTEL_VGA_DEVICE(0x0D0E, &intel_haswell_d_info), /* CRW GT1 reserved */
 	INTEL_VGA_DEVICE(0x0D1E, &intel_haswell_d_info), /* CRW GT2 reserved */
 	INTEL_VGA_DEVICE(0x0D2E, &intel_haswell_d_info), /* CRW GT3 reserved */
-#ifdef notyet
-	INTEL_VGA_DEVICE(0x0f30, &intel_valleyview_m_info),
-	INTEL_VGA_DEVICE(0x0f31, &intel_valleyview_m_info),
-	INTEL_VGA_DEVICE(0x0f32, &intel_valleyview_m_info),
-	INTEL_VGA_DEVICE(0x0f33, &intel_valleyview_m_info),
-	INTEL_VGA_DEVICE(0x0157, &intel_valleyview_m_info),
-	INTEL_VGA_DEVICE(0x0155, &intel_valleyview_d_info),
-#endif
 	{0, 0, 0}
 };
 
@@ -554,6 +546,7 @@ __i915_drm_thaw(struct drm_device *dev)
 		DRM_UNLOCK();
 
 		intel_modeset_init_hw(dev);
+		drm_mode_config_reset(dev);
 		intel_modeset_setup_hw_state(dev, false);
 		drm_irq_install(dev);
 	}
@@ -871,6 +864,7 @@ inteldrm_attach(struct device *parent, struct device *self, void *aux)
 	const struct drm_pcidev	*id_entry;
 	int			 i;
 	uint16_t		 pci_device;
+	uint32_t		 aperture_size;
 
 	id_entry = drm_find_description(PCI_VENDOR(pa->pa_id),
 	    PCI_PRODUCT(pa->pa_id), inteldrm_pciidlist);
@@ -884,6 +878,9 @@ inteldrm_attach(struct device *parent, struct device *self, void *aux)
 	dev_priv->bst = pa->pa_memt;
 
 	printf("\n");
+
+	if (dev_priv->info->gen >= 6)
+		inteldrm_driver.flags &= ~(DRIVER_AGP | DRIVER_AGP_REQUIRE);
 
 	/* All intel chipsets need to be treated as agp, so just pass one */
 	dev_priv->drmdev = drm_attach_pci(&inteldrm_driver, pa, 1, 1, self);
@@ -924,6 +921,8 @@ inteldrm_attach(struct device *parent, struct device *self, void *aux)
 		printf(": couldn't map interrupt\n");
 		return;
 	}
+
+	i915_gem_gtt_init(dev);
 
 	intel_irq_init(dev);
 
@@ -990,6 +989,9 @@ inteldrm_attach(struct device *parent, struct device *self, void *aux)
 		return;
 	}
 
+	aperture_size = dev_priv->mm.gtt->gtt_mappable_entries << PAGE_SHIFT;
+	dev_priv->mm.gtt_base_addr = dev_priv->mm.gtt->gma_bus_addr;
+
 	intel_pm_init(dev);
 	intel_gt_sanitize(dev);
 	intel_gt_init(dev);
@@ -999,23 +1001,24 @@ inteldrm_attach(struct device *parent, struct device *self, void *aux)
 	intel_setup_gmbus(dev_priv);
 
 	/* XXX would be a lot nicer to get agp info before now */
-	uvm_page_physload(atop(dev->agp->base), atop(dev->agp->base +
-	    dev->agp->info.ai_aperture_size), atop(dev->agp->base),
-	    atop(dev->agp->base + dev->agp->info.ai_aperture_size),
+	uvm_page_physload(atop(dev_priv->mm.gtt_base_addr),
+	    atop(dev_priv->mm.gtt_base_addr + aperture_size),
+	    atop(dev_priv->mm.gtt_base_addr),
+	    atop(dev_priv->mm.gtt_base_addr + aperture_size),
 	    PHYSLOAD_DEVICE);
 	/* array of vm pages that physload introduced. */
-	dev_priv->pgs = PHYS_TO_VM_PAGE(dev->agp->base);
+	dev_priv->pgs = PHYS_TO_VM_PAGE(dev_priv->mm.gtt_base_addr);
 	KASSERT(dev_priv->pgs != NULL);
 	/*
 	 * XXX mark all pages write combining so user mmaps get the right
 	 * bits. We really need a proper MI api for doing this, but for now
 	 * this allows us to use PAT where available.
 	 */
-	for (i = 0; i < atop(dev->agp->info.ai_aperture_size); i++)
+	for (i = 0; i < atop(aperture_size); i++)
 		atomic_setbits_int(&(dev_priv->pgs[i].pg_flags), PG_PMAP_WC);
-	if (agp_init_map(dev_priv->bst, dev->agp->base,
-	    dev->agp->info.ai_aperture_size, BUS_SPACE_MAP_LINEAR |
-	    BUS_SPACE_MAP_PREFETCHABLE, &dev_priv->agph))
+	if (agp_init_map(dev_priv->bst, dev_priv->mm.gtt_base_addr,
+	    aperture_size, BUS_SPACE_MAP_LINEAR | BUS_SPACE_MAP_PREFETCHABLE,
+	    &dev_priv->agph))
 		panic("can't map aperture");
 
 	/* XXX */
@@ -1113,24 +1116,29 @@ inteldrm_detach(struct device *self, int flags)
 }
 
 int
-inteldrm_activate(struct device *arg, int act)
+inteldrm_activate(struct device *self, int act)
 {
-	struct inteldrm_softc	*dev_priv = (struct inteldrm_softc *)arg;
-	struct drm_device	*dev = (struct drm_device *)dev_priv->drmdev;
+	struct inteldrm_softc *dev_priv = (struct inteldrm_softc *)self;
+	struct drm_device *dev = (struct drm_device *)dev_priv->drmdev;
+	int rv = 0;
 
 	switch (act) {
 	case DVACT_QUIESCE:
+		rv = config_activate_children(self, act);
 		i915_drm_freeze(dev);
 		break;
 	case DVACT_SUSPEND:
 		break;
+	case DVACT_RESUME:
+		break;
 	case DVACT_WAKEUP:
 		i915_drm_thaw(dev);
 		intel_fb_restore_mode(dev);
+		rv = config_activate_children(self, act);
 		break;
 	}
 
-	return (0);
+	return (rv);
 }
 
 struct cfattach inteldrm_ca = {

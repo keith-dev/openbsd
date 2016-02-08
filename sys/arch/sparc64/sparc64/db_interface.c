@@ -1,4 +1,4 @@
-/*	$OpenBSD: db_interface.c,v 1.32 2012/03/23 15:51:26 guenther Exp $	*/
+/*	$OpenBSD: db_interface.c,v 1.36 2014/07/13 12:11:01 jasper Exp $	*/
 /*	$NetBSD: db_interface.c,v 1.61 2001/07/31 06:55:47 eeh Exp $ */
 
 /*
@@ -35,8 +35,6 @@
 #include <sys/reboot.h>
 #include <sys/systm.h>
 #include <sys/malloc.h>
-
-#include <uvm/uvm.h>
 
 #include <dev/cons.h>
 
@@ -197,7 +195,7 @@ struct db_variable db_regs[] = {
 	{ "gsr", (long *)&DDB_FP->fs_gsr, FCN_NULL, },
 
 };
-struct db_variable *db_eregs = db_regs + sizeof(db_regs)/sizeof(db_regs[0]);
+struct db_variable *db_eregs = db_regs + nitems(db_regs);
 
 extern label_t	*db_recover;
 
@@ -426,7 +424,7 @@ void db_print_dtlb_entry(int entry, int i, int endc);
 extern __inline__ unsigned long db_get_dtlb_data(int entry)
 {
 	unsigned long r;
-	__asm__ __volatile__("ldxa [%1] %2,%0"
+	__asm__ volatile("ldxa [%1] %2,%0"
 		: "=r" (r)
 		: "r" (entry <<3), "i" (ASI_DMMU_TLB_DATA));
 	return r;
@@ -434,7 +432,7 @@ extern __inline__ unsigned long db_get_dtlb_data(int entry)
 extern __inline__ unsigned long db_get_dtlb_tag(int entry)
 {
 	unsigned long r;
-	__asm__ __volatile__("ldxa [%1] %2,%0"
+	__asm__ volatile("ldxa [%1] %2,%0"
 		: "=r" (r)
 		: "r" (entry <<3), "i" (ASI_DMMU_TLB_TAG));
 	return r;
@@ -442,7 +440,7 @@ extern __inline__ unsigned long db_get_dtlb_tag(int entry)
 extern __inline__ unsigned long db_get_itlb_data(int entry)
 {
 	unsigned long r;
-	__asm__ __volatile__("ldxa [%1] %2,%0"
+	__asm__ volatile("ldxa [%1] %2,%0"
 		: "=r" (r)
 		: "r" (entry <<3), "i" (ASI_IMMU_TLB_DATA));
 	return r;
@@ -450,7 +448,7 @@ extern __inline__ unsigned long db_get_itlb_data(int entry)
 extern __inline__ unsigned long db_get_itlb_tag(int entry)
 {
 	unsigned long r;
-	__asm__ __volatile__("ldxa [%1] %2,%0"
+	__asm__ volatile("ldxa [%1] %2,%0"
 		: "=r" (r)
 		: "r" (entry <<3), "i" (ASI_IMMU_TLB_TAG));
 	return r;
@@ -801,8 +799,8 @@ db_proc_cmd(addr, have_addr, count, modif)
 	db_printf("maxsaddr:%p ssiz:%dpg or %llxB\n",
 	    p->p_vmspace->vm_maxsaddr, p->p_vmspace->vm_ssize, 
 	    (unsigned long long)ptoa(p->p_vmspace->vm_ssize));
-	db_printf("profile timer: %ld sec %ld usec\n",
-	    p->p_p->ps_timer[ITIMER_PROF].it_value.tv_sec,
+	db_printf("profile timer: %lld sec %ld usec\n",
+	    (long long)p->p_p->ps_timer[ITIMER_PROF].it_value.tv_sec,
 	    p->p_p->ps_timer[ITIMER_PROF].it_value.tv_usec);
 	db_printf("pcb: %p tf: %p fpstate: %p\n", &p->p_addr->u_pcb, 
 	    p->p_md.md_tf, p->p_md.md_fpstate);
@@ -1097,9 +1095,6 @@ struct db_command db_machine_command_table[] = {
 	{ "tf",		db_dump_trap,	0,	0 },
 	{ "ts",		db_dump_ts,	0,	0 },
 	{ "traptrace",	db_traptrace,	0,	0 },
-#ifdef UVMHIST
-	{ "uvmdump",	db_uvmhistdump,	0,	0 },
-#endif
 	{ "watch",	db_watch,	0,	0 },
 	{ "window",	db_dump_window,	0,	0 },
 	{ "xir",	db_xir,		0,	0 },

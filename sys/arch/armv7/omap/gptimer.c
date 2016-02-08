@@ -1,4 +1,4 @@
-/* $OpenBSD: gptimer.c,v 1.2 2013/11/06 19:03:07 syl Exp $ */
+/* $OpenBSD: gptimer.c,v 1.4 2014/06/20 14:08:11 rapha Exp $ */
 /*
  * Copyright (c) 2007,2009 Dale Rahn <drahn@openbsd.org>
  *
@@ -171,7 +171,7 @@ gptimer_attach(struct device *parent, struct device *self, void *args)
 		tc_init(&gptimer_timecounter);
 	}
 	else
-		panic("attaching too many gptimers at 0x%x",
+		panic("attaching too many gptimers at 0x%lx",
 		    aa->aa_dev->mem[0].addr);
 
 	arm_clock_register(gptimer_cpu_initclocks, gptimer_delay,
@@ -233,7 +233,7 @@ gptimer_intr(void *frame)
 		stat_count.ec_count++;
 		statclock(frame);
 	}
-        if ((now - nexttickevent) < (now - nextstatevent))
+	if ((nexttickevent - now) < (nextstatevent - now))
                 nextevent = nexttickevent;
         else
                 nextevent = nextstatevent;

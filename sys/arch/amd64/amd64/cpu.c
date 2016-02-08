@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.c,v 1.59 2014/01/19 12:45:35 deraadt Exp $	*/
+/*	$OpenBSD: cpu.c,v 1.64 2014/07/10 11:56:56 mlarkin Exp $	*/
 /* $NetBSD: cpu.c,v 1.1 2003/04/26 18:39:26 fvdl Exp $ */
 
 /*-
@@ -102,6 +102,11 @@
 #include <dev/ic/mc146818reg.h>
 #include <amd64/isa/nvram.h>
 #include <dev/isa/isareg.h>
+
+#ifdef HIBERNATE
+#include <sys/hibernate.h>
+#include <machine/hibernate.h>
+#endif /* HIBERNATE */
 
 int     cpu_match(struct device *, void *, void *);
 void    cpu_attach(struct device *, struct device *, void *);
@@ -535,7 +540,7 @@ cpu_attach(struct device *parent, struct device *self, void *aux)
 	if (mp_verbose) {
 		printf("%s: kstack at 0x%lx for %d bytes\n",
 		    sc->sc_dev.dv_xname, kstack, USPACE);
-		printf("%s: idle pcb at %p, idle sp at 0x%lx\n",
+		printf("%s: idle pcb at %p, idle sp at 0x%llx\n",
 		    sc->sc_dev.dv_xname, pcb, pcb->pcb_rsp);
 	}
 #endif
@@ -589,7 +594,7 @@ cpu_boot_secondary_processors(void)
 			continue;
 		if ((ci->ci_flags & CPUF_PRESENT) == 0)
 			continue;
-		if (ci->ci_flags & (CPUF_BSP|CPUF_SP|CPUF_PRIMARY))
+		if (ci->ci_flags & (CPUF_BSP | CPUF_SP | CPUF_PRIMARY))
 			continue;
 		ci->ci_randseed = (arc4random() & 0x7fffffff) + 1;
 		cpu_boot_secondary(ci);
@@ -715,6 +720,13 @@ cpu_hatch(void *v)
 
 	while ((ci->ci_flags & CPUF_GO) == 0)
 		delay(10);
+#ifdef HIBERNATE
+	if ((ci->ci_flags & CPUF_PARK) != 0) {
+		atomic_clearbits_int(&ci->ci_flags, CPUF_PARK);
+		hibernate_drop_to_real_mode();
+	}
+#endif /* HIBERNATE */
+
 #ifdef DEBUG
 	if (ci->ci_flags & CPUF_RUNNING)
 		panic("%s: already running!?", ci->ci_dev->dv_xname);
@@ -932,7 +944,7 @@ rdrand(void *v)
 	int i;
 
 	for (i = 0; i < 2; i++) {
-		__asm __volatile(
+		__asm volatile(
 		    "xor	%1, %1\n\t"
 		    "rdrand	%0\n\t"
 		    "rcl	$1, %1\n"

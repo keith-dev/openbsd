@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.29 2013/09/28 12:40:30 miod Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.40 2014/07/21 17:25:47 uebayasi Exp $	*/
 /*	$NetBSD: machdep.c,v 1.1 2006/09/01 21:26:18 uwe Exp $	*/
 
 /*-
@@ -79,7 +79,8 @@
 #include <sys/kcore.h>
 
 #include <net/if.h>
-#include <uvm/uvm.h>
+
+#include <uvm/uvm_extern.h>
 
 #include <dev/cons.h>
 
@@ -189,9 +190,10 @@ landisk_startup(int howto, char *_esym)
 	for (;;) ;
 }
 
-void
+__dead void
 boot(int howto)
 {
+	struct device *mainbus;
 
 	if (cold) {
 		if ((howto & RB_USERREQ) == 0)
@@ -202,37 +204,36 @@ boot(int howto)
 	boothowto = howto;
 	if ((howto & RB_NOSYNC) == 0) {
 		vfs_shutdown();
-		/*
-		 * If we've been adjusting the clock, the todr
-		 * will be out of synch; adjust it now.
-		 */
-		if ((howto & RB_TIMEBAD) == 0)
+
+		if ((howto & RB_TIMEBAD) == 0) {
 			resettodr();
-		else
+		} else {
 			printf("WARNING: not updating battery clock\n");
+		}
 	}
 	if_downall();
 
 	uvm_shutdown();
-	splhigh();		/* Disable interrupts. */
+	splhigh();
+	cold = 1;
 
-	/* Do a dump if requested. */
-	if (howto & RB_DUMP)
+	if ((howto & RB_DUMP) != 0)
 		dumpsys();
 
 haltsys:
 	doshutdownhooks();
-	if (!TAILQ_EMPTY(&alldevs))
-		config_suspend(TAILQ_FIRST(&alldevs), DVACT_POWERDOWN);
+	mainbus = device_mainbus();
+	if (mainbus != NULL)
+		config_suspend(mainbus, DVACT_POWERDOWN);
 
-	if ((howto & RB_POWERDOWN) == RB_POWERDOWN) {
+	if ((howto & RB_POWERDOWN) != 0) {
 		_reg_write_1(LANDISK_PWRMNG, PWRMNG_POWEROFF);
 		delay(1 * 1000 * 1000);
 		printf("POWEROFF FAILED!\n");
 		howto |= RB_HALT;
 	}
 
-	if (howto & RB_HALT) {
+	if ((howto & RB_HALT) != 0) {
 		printf("\n");
 		printf("The operating system has halted.\n");
 		printf("Please press any key to reboot.\n\n");
@@ -244,7 +245,7 @@ haltsys:
 	printf("rebooting...\n");
 	machine_reset();
 
-	/*NOTREACHED*/
+	/* NOTREACHED */
 	for (;;) {
 		continue;
 	}

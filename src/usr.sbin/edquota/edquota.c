@@ -153,8 +153,9 @@ main(int argc, char *argv[])
 			exit(1);
 		}
 		if (editit(tmpfil) == -1) {
+			int saved_errno = errno;
 			unlink(tmpfil);
-			err(1, "error starting editor");
+			errc(1, saved_errno, "error starting editor");
 		}
 		if (readtimes(protoprivs, tmpfd))
 			putprivs(0, quotatype, protoprivs);
@@ -242,7 +243,7 @@ getprivs(u_int id, int quotatype)
 	size_t qfpathnamelen;
 
 	setfsent();
-	quphead = (struct quotause *)0;
+	quphead = NULL;
 	qcmd = QCMD(Q_GETQUOTA, quotatype);
 	while ((fs = getfsent())) {
 		if (strcmp(fs->fs_vfstype, "ffs") &&
@@ -310,7 +311,7 @@ getprivs(u_int id, int quotatype)
 		else
 			quptail->next = qup;
 		quptail = qup;
-		qup->next = 0;
+		qup->next = NULL;
 	}
 	endfsent();
 	return(quphead);
@@ -450,7 +451,7 @@ readprivs(struct quotause *quplist, int infd)
 			warnx("%s: bad format", line1);
 			return(0);
 		}
-		if ((cp = strtok((char *)0, "\n")) == NULL) {
+		if ((cp = strtok(NULL, "\n")) == NULL) {
 			warnx("%s: %s: bad format", fsp, &fsp[strlen(fsp) + 1]);
 			return(0);
 		}
@@ -587,7 +588,7 @@ readtimes(struct quotause *quplist, int infd)
 			warnx("%s: bad format", line1);
 			return(0);
 		}
-		if ((cp = strtok((char *)0, "\n")) == NULL) {
+		if ((cp = strtok(NULL, "\n")) == NULL) {
 			warnx("%s: %s: bad format", fsp,
 			    &fsp[strlen(fsp) + 1]);
 			return(0);

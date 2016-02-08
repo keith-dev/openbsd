@@ -1,4 +1,4 @@
-/*	$OpenBSD: tcp_output.c,v 1.101 2013/10/24 11:31:43 mpi Exp $	*/
+/*	$OpenBSD: tcp_output.c,v 1.107 2014/07/22 11:06:10 mpi Exp $	*/
 /*	$NetBSD: tcp_output.c,v 1.16 1997/06/03 16:17:09 kml Exp $	*/
 
 /*
@@ -82,7 +82,6 @@
 #include <net/if.h>
 
 #include <netinet/in.h>
-#include <netinet/in_systm.h>
 #include <netinet/ip.h>
 #include <netinet/in_pcb.h>
 #include <netinet/ip_var.h>
@@ -1050,8 +1049,8 @@ send:
 	}
 #endif
 
-	/* force routing domain */
-	m->m_pkthdr.rdomain = tp->t_inpcb->inp_rtableid;
+	/* force routing table */
+	m->m_pkthdr.ph_rtableid = tp->t_inpcb->inp_rtableid;
 
 #if NPF > 0
 	m->m_pkthdr.pf.inp = tp->t_inpcb;
@@ -1076,9 +1075,7 @@ send:
 		}
 		error = ip_output(m, tp->t_inpcb->inp_options,
 			&tp->t_inpcb->inp_route,
-			(ip_mtudisc ? IP_MTUDISC : 0) |
-				  (so->so_options & SO_DONTROUTE),
-			(void *)NULL, tp->t_inpcb);
+			(ip_mtudisc ? IP_MTUDISC : 0), NULL, tp->t_inpcb, 0);
 		break;
 #endif /* INET */
 #ifdef INET6
@@ -1099,8 +1096,7 @@ send:
 		}
 		error = ip6_output(m, tp->t_inpcb->inp_outputopts6,
 			  &tp->t_inpcb->inp_route6,
-			  (so->so_options & SO_DONTROUTE), NULL, NULL,
-			  tp->t_inpcb);
+			  0, NULL, NULL, tp->t_inpcb);
 		break;
 #endif /* INET6 */
 	}

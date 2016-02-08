@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.5 2013/09/30 19:27:02 miod Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.8 2014/07/13 09:26:08 jasper Exp $	*/
 
 /*
  * Copyright (c) 2010 Miodrag Vallat.
@@ -61,54 +61,7 @@ extern int bootprompt;
 int
 cnspeed(dev_t dev, int sp)
 {
-	return 9600;
-}
-
-int
-getchar()
-{
-	int c = cngetc();
-
-	if (c == '\r')
-		c = '\n';
-
-	if ((c < ' ' && c != '\n') || c == '\177')
-		return c;
-
-	putchar(c);
-
-	return c;
-}
-
-int pch_pos;
-
-void
-putchar(int c)
-{
-	switch (c) {
-	case '\177':	/* DEL erases */
-		cnputc('\b');
-		cnputc(' ');
-	case '\b':
-		cnputc('\b');
-		if (pch_pos)
-			pch_pos--;
-		break;
-	case '\t':
-		do
-			cnputc(' ');
-		while (++pch_pos % 8) ;
-		break;
-	case '\n':
-	case '\r':
-		cnputc(c);
-		pch_pos = 0;
-		break;
-	default:
-		cnputc(c);
-		pch_pos++;
-		break;
-	}
+	return CONSPEED;
 }
 
 char *

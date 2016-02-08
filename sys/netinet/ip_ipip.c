@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip_ipip.c,v 1.51 2013/10/24 11:31:43 mpi Exp $ */
+/*	$OpenBSD: ip_ipip.c,v 1.53 2014/07/22 11:06:10 mpi Exp $ */
 /*
  * The authors of this code are John Ioannidis (ji@tla.org),
  * Angelos D. Keromytis (kermit@csd.uch.gr) and
@@ -54,7 +54,6 @@
 #include <net/bpf.h>
 
 #include <netinet/in.h>
-#include <netinet/in_systm.h>
 #include <netinet/ip.h>
 #include <netinet/in_pcb.h>
 #include <netinet/ip_var.h>
@@ -313,7 +312,7 @@ ipip_input(struct mbuf *m, int iphlen, struct ifnet *gifp, int proto)
 	if ((m->m_pkthdr.rcvif == NULL ||
 	    !(m->m_pkthdr.rcvif->if_flags & IFF_LOOPBACK)) &&
 	    ipip_allow != 2) {
-		rdomain = rtable_l2(m->m_pkthdr.rdomain);
+		rdomain = rtable_l2(m->m_pkthdr.ph_rtableid);
 		TAILQ_FOREACH(ifp, &ifnet, if_list) {
 			if (ifp->if_rdomain != rdomain)
 				continue;

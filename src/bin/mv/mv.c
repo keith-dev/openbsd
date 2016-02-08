@@ -1,4 +1,4 @@
-/*	$OpenBSD: mv.c,v 1.35 2009/10/27 23:59:22 deraadt Exp $	*/
+/*	$OpenBSD: mv.c,v 1.37 2014/07/21 19:55:33 deraadt Exp $	*/
 /*	$NetBSD: mv.c,v 1.9 1995/03/21 09:06:52 cgd Exp $	*/
 
 /*
@@ -300,13 +300,13 @@ err:		if (unlink(to))
 	(void)close(from_fd);
 
 	if (badchown) {
-		errno = serrno;
 		if ((sbp->st_mode & (S_ISUID|S_ISGID)))  {
-			warn("%s: set owner/group; not setting setuid/setgid",
+			warnc(serrno,
+			    "%s: set owner/group; not setting setuid/setgid",
 			    to);
 			sbp->st_mode &= ~(S_ISUID|S_ISGID);
 		} else if (!fflg)
-			warn("%s: set owner/group", to);
+			warnc(serrno, "%s: set owner/group", to);
 	}
 	if (fchmod(to_fd, sbp->st_mode))
 		warn("%s: set mode", to);
@@ -347,7 +347,7 @@ copy(char *from, char *to)
 	pid_t pid;
 
 	if ((pid = vfork()) == 0) {
-		execl(_PATH_CP, "mv", "-PRp", "--", from, to, (char *)NULL);
+		execl(_PATH_CP, "cp", "-PRp", "--", from, to, (char *)NULL);
 		warn("%s", _PATH_CP);
 		_exit(1);
 	}
@@ -365,7 +365,7 @@ copy(char *from, char *to)
 		return (1);
 	}
 	if (!(pid = vfork())) {
-		execl(_PATH_RM, "mv", "-rf", "--", from, (char *)NULL);
+		execl(_PATH_RM, "cp", "-rf", "--", from, (char *)NULL);
 		warn("%s", _PATH_RM);
 		_exit(1);
 	}

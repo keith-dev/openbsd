@@ -1,4 +1,4 @@
-/*	$OpenBSD: ieee80211_input.c,v 1.123 2013/06/11 18:15:53 deraadt Exp $	*/
+/*	$OpenBSD: ieee80211_input.c,v 1.126 2014/07/12 18:44:22 tedu Exp $	*/
 
 /*-
  * Copyright (c) 2001 Atsushi Onoe
@@ -42,7 +42,7 @@
 #include <sys/errno.h>
 #include <sys/proc.h>
 #include <sys/sysctl.h>
-#include <sys/workq.h>
+#include <sys/task.h>
 
 #include <net/if.h>
 #include <net/if_dl.h>
@@ -136,6 +136,11 @@ void	ieee80211_input_print(struct ieee80211com *,  struct ifnet *,
 	    struct ieee80211_frame *, struct ieee80211_rxinfo *);
 void	ieee80211_input_print_task(void *, void *);
 
+struct ieee80211printmsg {
+	struct task	task;
+	char		text[512];
+};
+
 /*
  * Retrieve the length in bytes of an 802.11 header.
  */
@@ -164,19 +169,18 @@ ieee80211_get_hdrlen(const struct ieee80211_frame *wh)
 void
 ieee80211_input_print_task(void *arg1, void *arg2)
 {
-	char *msg = arg1;
+	struct ieee80211printmsg *msg = arg1;
 
-	printf("%s", msg);
-	free(msg, M_DEVBUF);
-
+	printf("%s", msg->text);
+	free(msg, M_DEVBUF, 0);
 }
 
 void
 ieee80211_input_print(struct ieee80211com *ic,  struct ifnet *ifp,
     struct ieee80211_frame *wh, struct ieee80211_rxinfo *rxi)
 {
-	int doprint, error;
-	char *msg;
+	int doprint;
+	struct ieee80211printmsg *msg;
 	u_int8_t subtype = wh->i_fc[0] & IEEE80211_FC0_SUBTYPE_MASK;
 
 	/* avoid printing too many frames */
@@ -202,20 +206,19 @@ ieee80211_input_print(struct ieee80211com *ic,  struct ifnet *ifp,
 	if (!doprint)
 		return;
 
-	msg = malloc(1024, M_DEVBUF, M_NOWAIT);
+	msg = malloc(sizeof(*msg), M_DEVBUF, M_NOWAIT);
 	if (msg == NULL)
 		return;
 
-	snprintf(msg, 1024, "%s: received %s from %s rssi %d mode %s\n",
-	    ifp->if_xname,
+	snprintf(msg->text, sizeof(msg->text),
+	    "%s: received %s from %s rssi %d mode %s\n", ifp->if_xname,
 	    ieee80211_mgt_subtype_name[subtype >> IEEE80211_FC0_SUBTYPE_SHIFT],
 	    ether_sprintf(wh->i_addr2), rxi->rxi_rssi,
 	    ieee80211_phymode_name[ieee80211_chan2mode(
 	        ic, ic->ic_bss->ni_chan)]);
 
-	error = workq_add_task(NULL, 0, ieee80211_input_print_task, msg, NULL);
-	if (error)
-		free(msg, M_DEVBUF);
+	task_set(&msg->task, ieee80211_input_print_task, msg, NULL);
+	task_add(systq, &msg->task);
 }
 
 /*
@@ -1327,7 +1330,7 @@ ieee80211_save_ie(const u_int8_t *frm, u_int8_t **ie)
 {
 	if (*ie == NULL || (*ie)[1] != frm[1]) {
 		if (*ie != NULL)
-			free(*ie, M_DEVBUF);
+			free(*ie, M_DEVBUF, 0);
 		*ie = malloc(2 + frm[1], M_DEVBUF, M_NOWAIT);
 		if (*ie == NULL)
 			return ENOMEM;
@@ -1579,11 +1582,11 @@ ieee80211_recv_probe_resp(struct ieee80211com *ic, struct mbuf *m,
 			ieee80211_parse_wmm_params(ic, wmmie);
 	}
 
-	if (ic->ic_state == IEEE80211_S_SCAN &&
+	if (ic->ic_state == IEEE80211_S_SCAN
 #ifndef IEEE80211_STA_ONLY
-	    ic->ic_opmode != IEEE80211_M_HOSTAP &&
+	    && ic->ic_opmode != IEEE80211_M_HOSTAP
 #endif
-	    (ic->ic_flags & IEEE80211_F_RSNON)) {
+	   ) {
 		struct ieee80211_rsnparams rsn;
 		const u_int8_t *saveie = NULL;
 		/*
@@ -1613,8 +1616,7 @@ ieee80211_recv_probe_resp(struct ieee80211com *ic, struct mbuf *m,
 			ni->ni_rsncaps = rsn.rsn_caps;
 		} else
 			ni->ni_rsnprotos = IEEE80211_PROTO_NONE;
-	} else if (ic->ic_state == IEEE80211_S_SCAN)
-		ni->ni_rsnprotos = IEEE80211_PROTO_NONE;
+	}
 
 	if (ssid[1] != 0 && ni->ni_esslen == 0) {
 		ni->ni_esslen = ssid[1];
@@ -2443,7 +2445,7 @@ ieee80211_recv_addba_req(struct ieee80211com *ic, struct mbuf *m,
 	if (ic->ic_ampdu_rx_start != NULL &&
 	    ic->ic_ampdu_rx_start(ic, ni, tid) != 0) {
 		/* driver failed to setup, rollback */
-		free(ba->ba_buf, M_DEVBUF);
+		free(ba->ba_buf, M_DEVBUF, 0);
 		ba->ba_buf = NULL;
 		status = IEEE80211_STATUS_REFUSED;
 		goto resp;
@@ -2581,7 +2583,7 @@ ieee80211_recv_delba(struct ieee80211com *ic, struct mbuf *m,
 				if (ba->ba_buf[i].m != NULL)
 					m_freem(ba->ba_buf[i].m);
 			/* free reordering buffer */
-			free(ba->ba_buf, M_DEVBUF);
+			free(ba->ba_buf, M_DEVBUF, 0);
 			ba->ba_buf = NULL;
 		}
 	} else {

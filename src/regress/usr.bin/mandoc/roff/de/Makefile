@@ -1,6 +1,7 @@
-# $OpenBSD: Makefile,v 1.1 2012/06/02 23:18:31 schwarze Exp $
+# $OpenBSD: Makefile,v 1.5 2014/07/07 11:34:41 schwarze Exp $
 
-REGRESS_TARGETS=TH Dd
+REGRESS_TARGETS = append escname indir TH Dd
+LINT_TARGETS	= escname indir
 
 .include <bsd.regress.mk>
 
@@ -23,10 +24,10 @@ ascii-diff-opt: TH.mandoc_ascii_opt Dd.mandoc_ascii_opt
 	${DIFF} ${.CURDIR}/Dd.out_ascii_opt Dd.mandoc_ascii_opt
 
 TH.mandoc_ascii_opt: TH.in
-	${MANDOC} -man ${.ALLSRC} > ${.TARGET}
+	${MANDOC} -Tascii -man ${.ALLSRC} > ${.TARGET}
 
 Dd.mandoc_ascii_opt: Dd.in
-	${MANDOC} -mdoc ${.ALLSRC} > ${.TARGET}
+	${MANDOC} -Tascii -mdoc ${.ALLSRC} > ${.TARGET}
 
 ascii-clean-opt:
 	rm -f TH.mandoc_ascii_opt Dd.mandoc_ascii_opt

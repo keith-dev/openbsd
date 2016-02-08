@@ -1,4 +1,4 @@
-/*	$OpenBSD: ohcivar.h,v 1.34 2013/11/01 12:00:54 mpi Exp $ */
+/*	$OpenBSD: ohcivar.h,v 1.37 2014/05/16 18:17:03 mpi Exp $ */
 /*	$NetBSD: ohcivar.h,v 1.32 2003/02/22 05:24:17 tsutsui Exp $	*/
 /*	$FreeBSD: src/sys/dev/usb/ohcivar.h,v 1.13 1999/11/17 22:33:41 n_hibma Exp $	*/
 
@@ -97,7 +97,6 @@ struct ohci_softc {
 	LIST_HEAD(, ohci_soft_itd) sc_hash_itds[OHCI_HASH_SIZE];
 
 	int sc_noport;
-	u_int8_t sc_addr;		/* device address */
 	u_int8_t sc_conf;		/* device configuration */
 
 	char sc_softwake;
@@ -105,8 +104,6 @@ struct ohci_softc {
 	struct ohci_soft_ed *sc_freeeds;
 	struct ohci_soft_td *sc_freetds;
 	struct ohci_soft_itd *sc_freeitds;
-
-	SIMPLEQ_HEAD(, usbd_xfer) sc_free_xfers; /* free xfers */
 
 	struct usbd_xfer *sc_intrxfer;
 
@@ -124,8 +121,6 @@ struct ohci_softc {
 	struct timeval sc_overrun_ntc;
 
 	struct timeout sc_tmo_rhsc;
-
-	struct device *sc_child;
 };
 
 struct ohci_xfer {
@@ -136,5 +131,5 @@ usbd_status	ohci_checkrev(struct ohci_softc *);
 usbd_status	ohci_handover(struct ohci_softc *);
 usbd_status	ohci_init(struct ohci_softc *);
 int		ohci_intr(void *);
-int		ohci_detach(struct ohci_softc *, int);
+int		ohci_detach(struct device *, int);
 int		ohci_activate(struct device *, int);

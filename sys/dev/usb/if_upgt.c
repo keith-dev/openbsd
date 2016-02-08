@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_upgt.c,v 1.60 2013/08/21 05:21:45 dlg Exp $ */
+/*	$OpenBSD: if_upgt.c,v 1.64 2014/07/13 15:52:49 mpi Exp $ */
 
 /*
  * Copyright (c) 2007 Marcus Glocker <mglocker@openbsd.org>
@@ -42,9 +42,7 @@
 #include <net/if_types.h>
 
 #include <netinet/in.h>
-#include <netinet/in_systm.h>
 #include <netinet/if_ether.h>
-#include <netinet/ip.h>
 
 #include <net80211/ieee80211_var.h>
 #include <net80211/ieee80211_radiotap.h>
@@ -87,7 +85,6 @@ int		upgt_match(struct device *, void *, void *);
 void		upgt_attach(struct device *, struct device *, void *);
 void		upgt_attach_hook(void *);
 int		upgt_detach(struct device *, int);
-int		upgt_activate(struct device *, int);
 
 int		upgt_device_type(struct upgt_softc *, uint16_t, uint16_t);
 int		upgt_device_init(struct upgt_softc *);
@@ -147,11 +144,7 @@ struct cfdriver upgt_cd = {
 };
 
 const struct cfattach upgt_ca = {
-	sizeof(struct upgt_softc),
-	upgt_match,
-	upgt_attach,
-	upgt_detach,
-	upgt_activate,
+	sizeof(struct upgt_softc), upgt_match, upgt_attach, upgt_detach
 };
 
 static const struct usb_devno upgt_devs_1[] = {
@@ -505,20 +498,6 @@ upgt_detach(struct device *self, int flags)
 }
 
 int
-upgt_activate(struct device *self, int act)
-{
-	struct upgt_softc *sc = (struct upgt_softc *)self;
-
-	switch (act) {
-	case DVACT_DEACTIVATE:
-		usbd_deactivate(sc->sc_udev);
-		break;
-	}
-
-	return (0);
-}
-
-int
 upgt_device_type(struct upgt_softc *sc, uint16_t vendor, uint16_t product)
 {
 	if (usb_lookup(upgt_devs_1, vendor, product) != NULL) {
@@ -647,7 +626,7 @@ void
 upgt_fw_free(struct upgt_softc *sc)
 {
 	if (sc->sc_fw != NULL) {
-		free(sc->sc_fw, M_DEVBUF);
+		free(sc->sc_fw, M_DEVBUF, 0);
 		sc->sc_fw = NULL;
 		DPRINTF(1, "%s: firmware freed\n", sc->sc_dev.dv_xname);
 	}
@@ -1410,8 +1389,7 @@ upgt_start(struct ifnet *ifp)
 			/* management frame */
 			IF_DEQUEUE(&ic->ic_mgtq, m);
 
-			ni = (struct ieee80211_node *)m->m_pkthdr.rcvif;
-			m->m_pkthdr.rcvif = NULL;
+			ni = m->m_pkthdr.ph_cookie;
 #if NBPFILTER > 0
 			if (ic->ic_rawbpf != NULL)
 				bpf_mtap(ic->ic_rawbpf, m, BPF_DIRECTION_OUT);

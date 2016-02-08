@@ -1,4 +1,4 @@
-/*	$OpenBSD: ext2fs.h,v 1.15 2013/06/11 16:42:18 deraadt Exp $	*/
+/*	$OpenBSD: ext2fs.h,v 1.21 2014/07/14 08:54:13 pelikan Exp $	*/
 /*	$NetBSD: ext2fs.h,v 1.10 2000/01/28 16:00:23 bouyer Exp $	*/
 
 /*
@@ -59,8 +59,11 @@
 #define	SBLOCK		((daddr_t)(BBLOCK + BBSIZE / DEV_BSIZE))
 
 /*
- * Addresses stored in inodes are capable of addressing blocks
- * XXX
+ * Inodes are, like in UFS, 32-bit unsigned integers and therefore ufsino_t.
+ * Disk blocks are 32-bit, if the filesystem isn't operating in 64-bit mode
+ * (the incompatible ext4 64BIT flag).  More work is needed to properly use
+ * daddr_t as the disk block data type on both BE and LE architectures.
+ * XXX disk blocks are simply u_int32_t for now.
  */
 
 /*
@@ -69,9 +72,12 @@
  * thus changes to (struct cg) must keep its size within MINBSIZE.
  * Note that super blocks are always of size SBSIZE,
  * and that both SBSIZE and MAXBSIZE must be >= MINBSIZE.
+ * FSIZE means fragment size.
  */
-#define LOG_MINBSIZE 10
+#define LOG_MINBSIZE	10
 #define MINBSIZE	(1 << LOG_MINBSIZE)
+#define LOG_MINFSIZE	10
+#define MINFSIZE	(1 << LOG_MINFSIZE)
 
 /*
  * The path name on which the file system is mounted is maintained
@@ -105,7 +111,7 @@ struct ext2fs {
 	u_int32_t  e2fs_ficount;	/* free inodes count */
 	u_int32_t  e2fs_first_dblock;	/* first data block */
 	u_int32_t  e2fs_log_bsize;	/* block size = 1024*(2^e2fs_log_bsize) */
-	u_int32_t  e2fs_fsize;		/* fragment size */
+	u_int32_t  e2fs_log_fsize;	/* fragment size log2 */
 	u_int32_t  e2fs_bpg;		/* blocks per group */
 	u_int32_t  e2fs_fpg;		/* frags per group */
 	u_int32_t  e2fs_ipg;		/* inodes per group */
@@ -137,7 +143,20 @@ struct ext2fs {
 	u_int8_t   e2fs_prealloc;	/* # of blocks to preallocate */
 	u_int8_t   e2fs_dir_prealloc;	/* # of blocks to preallocate for dir */
 	u_int16_t  e2fs_reserved_ngdb;	/* # of reserved gd blocks for resize */
-	u_int32_t  reserved2[204];
+	/* Ext3 JBD2 journaling. */
+	u_int8_t   e2fs_journal_uuid[16];
+	u_int32_t  e2fs_journal_ino;
+	u_int32_t  e2fs_journal_dev;
+	u_int32_t  e2fs_last_orphan;	/* start of list of inodes to delete */
+	u_int32_t  e2fs_hash_seed[4];	/* htree hash seed */
+	u_int8_t   e2fs_def_hash_version;
+	u_int8_t   e2fs_journal_backup_type;
+	u_int16_t  e2fs_gdesc_size;
+	u_int32_t  e2fs_default_mount_opts;
+	u_int32_t  e2fs_first_meta_bg;
+	u_int32_t  e2fs_mkfs_time;
+	u_int32_t  e2fs_journal_backup[17];
+	u_int32_t  reserved2[76];
 };
 
 
@@ -147,6 +166,7 @@ struct m_ext2fs {
 	u_char	e2fs_fsmnt[MAXMNTLEN];	/* name mounted on */
 	int8_t	e2fs_ronly;	/* mounted read-only flag */
 	int8_t	e2fs_fmod;	/* super block modified flag */
+	int32_t e2fs_fsize;	/* fragment size */
 	int32_t	e2fs_bsize;	/* block size */
 	int32_t e2fs_bshift;	/* ``lblkno'' calc of logical blkno */
 	int32_t e2fs_bmask;	/* ``blkoff'' calc of blk offsets */
@@ -156,10 +176,15 @@ struct m_ext2fs {
 	int32_t	e2fs_ngdb;	/* number of group descriptor block */
 	int32_t	e2fs_ipb;	/* number of inodes per block */
 	int32_t	e2fs_itpg;	/* number of inode table per group */
+	off_t	e2fs_maxfilesize;	/* depends on LARGE/HUGE flags */
 	struct	ext2_gd *e2fs_gd; /* group descriptors */
 };
 
-
+static inline int
+e2fs_overflow(struct m_ext2fs *fs, off_t lower, off_t value)
+{
+	return (value < lower || value > fs->e2fs_maxfilesize);
+}
 
 /*
  * Filesystem identification
@@ -172,22 +197,31 @@ struct m_ext2fs {
 #define EXT2F_COMPAT_PREALLOC		0x0001
 #define EXT2F_COMPAT_HASJOURNAL		0x0004
 #define EXT2F_COMPAT_RESIZE		0x0010
+#define EXT2F_COMPAT_DIRHASHINDEX	0x0020
 
 
 #define EXT2F_ROCOMPAT_SPARSESUPER	0x0001
 #define EXT2F_ROCOMPAT_LARGEFILE	0x0002
 #define EXT2F_ROCOMPAT_BTREE_DIR	0x0004
+#define EXT2F_ROCOMPAT_HUGE_FILE	0x0008
 
 #define EXT2F_INCOMPAT_COMP		0x0001
 #define EXT2F_INCOMPAT_FTYPE		0x0002
 #define EXT2F_INCOMPAT_RECOVER		0x0004
 #define EXT2F_INCOMPAT_JOURNAL_DEV	0x0008
+#define EXT2F_INCOMPAT_META_BG		0x0010
+#define EXT2F_INCOMPAT_EXTENTS		0x0040
+#define EXT2F_INCOMPAT_FLEX_BG		0x0200
 
 /* features supported in this implementation */
 #define EXT2F_COMPAT_SUPP		0x0000
-#define EXT2F_ROCOMPAT_SUPP		(EXT2F_ROCOMPAT_SPARSESUPER \
-					| EXT2F_ROCOMPAT_LARGEFILE)
-#define EXT2F_INCOMPAT_SUPP		EXT2F_INCOMPAT_FTYPE
+#define EXT2F_ROCOMPAT_SUPP		(EXT2F_ROCOMPAT_SPARSESUPER | \
+					 EXT2F_ROCOMPAT_LARGEFILE)
+#define EXT2F_INCOMPAT_SUPP		(EXT2F_INCOMPAT_FTYPE)
+#define EXT4F_RO_INCOMPAT_SUPP		(EXT2F_INCOMPAT_EXTENTS | \
+					 EXT2F_INCOMPAT_FLEX_BG | \
+					 EXT2F_INCOMPAT_META_BG | \
+					 EXT2F_INCOMPAT_RECOVER)
 
 /*
  * Definitions of behavior on errors
@@ -247,14 +281,9 @@ cg_has_sb(i)
 }
 
 /*
- * EXT2FS metadatas are stored in little-endian byte order. These macros
- * helps reading theses metadatas
+ * Ext2 metadata is stored in little-endian byte order.
+ * JBD2 journal used in ext3 and ext4 is big-endian!
  */
-
-#define h2fs16(x) htole16(x)
-#define h2fs32(x) htole32(x)
-#define fs2h16(x) letoh16(x)
-#define fs2h32(x) letoh32(x)
 #if BYTE_ORDER == LITTLE_ENDIAN
 #define e2fs_sbload(old, new) memcpy((new), (old), SBSIZE);
 #define e2fs_cgload(old, new, size) memcpy((new), (old), (size));
@@ -311,12 +340,12 @@ void e2fs_cg_bswap(struct ext2_gd *, struct ext2_gd *, int);
 	(((size) + (fs)->e2fs_qbmask) & (fs)->e2fs_bmask)
 #define fragroundup(fs, size)	/* calculates roundup(size, fs->e2fs_bsize) */ \
 	(((size) + (fs)->e2fs_qbmask) & (fs)->e2fs_bmask)
-/* 
+/*
  * Determine the number of available frags given a
  * percentage to hold in reserve.
- */   
+ */
 #define freespace(fs) \
-   ((fs)->e2fs.e2fs_fbcount - (fs)->e2fs.e2fs_rbcount) 
+   ((fs)->e2fs.e2fs_fbcount - (fs)->e2fs.e2fs_rbcount)
 
 /*
  * Number of indirects in a file system block.

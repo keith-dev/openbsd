@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip6_var.h,v 1.47 2013/10/21 12:27:16 deraadt Exp $	*/
+/*	$OpenBSD: ip6_var.h,v 1.49 2014/07/11 16:39:06 henning Exp $	*/
 /*	$KAME: ip6_var.h,v 1.33 2000/06/11 14:59:20 jinmei Exp $	*/
 
 /*
@@ -243,7 +243,6 @@ extern struct socket *ip6_mrouter; 	/* multicast routing daemon */
 extern int	ip6_sendredirects;	/* send IP redirects when forwarding? */
 extern int	ip6_maxfragpackets; /* Maximum packets in reassembly queue */
 extern int	ip6_maxfrags;	/* Maximum fragments in reassembly queue */
-extern int	ip6_accept_rtadv;	/* Acts as a host not a router */
 extern int	ip6_log_interval;
 extern time_t	ip6_log_time;
 extern int	ip6_hdrnestlimit; /* upper limit of # of extension headers */
@@ -308,9 +307,9 @@ int	rip6_sysctl(int *, u_int, void *, size_t *, void *, size_t);
 int	dest6_input(struct mbuf **, int *, int);
 int	none_input(struct mbuf **, int *, int);
 
-struct in6_addr *in6_selectsrc(struct sockaddr_in6 *, struct ip6_pktopts *,
-	    struct ip6_moptions *, struct route_in6 *, struct in6_addr *,
-	    int *, u_int);
+int	in6_selectsrc(struct in6_addr **, struct sockaddr_in6 *,
+	    struct ip6_pktopts *, struct ip6_moptions *, struct route_in6 *,
+	    struct in6_addr *, u_int);
 int	in6_selectroute(struct sockaddr_in6 *, struct ip6_pktopts *,
 	    struct ip6_moptions *, struct route_in6 *, struct ifnet **,
 	    struct rtentry **, u_int rtableid);

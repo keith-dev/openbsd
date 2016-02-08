@@ -1,4 +1,4 @@
-/*	$OpenBSD: dhcpd.h,v 1.136 2014/02/09 20:45:56 krw Exp $	*/
+/*	$OpenBSD: dhcpd.h,v 1.139 2014/05/23 15:26:22 krw Exp $	*/
 
 /*
  * Copyright (c) 2004 Henning Brauer <henning@openbsd.org>
@@ -154,7 +154,7 @@ struct client_state {
 	struct client_lease	*active;
 	struct client_lease	*new;
 	TAILQ_HEAD(, client_lease) offered_leases;
-	TAILQ_HEAD(, client_lease) leases;
+	TAILQ_HEAD(_leases, client_lease) leases;
 	enum dhcp_state		 state;
 	struct in_addr		 destination;
 	int			 flags;
@@ -198,7 +198,6 @@ struct dhcp_timeout {
 
 #define	_PATH_DHCLIENT_CONF	"/etc/dhclient.conf"
 #define	_PATH_DHCLIENT_DB	"/var/db/dhclient.leases"
-#define	DHCPD_LOG_FACILITY	LOG_DAEMON
 
 /* External definitions. */
 
@@ -249,7 +248,7 @@ time_t parse_date(FILE *);
 /* bpf.c */
 void if_register_send(void);
 void if_register_receive(void);
-ssize_t send_packet(struct in_addr, struct sockaddr_in *, struct ether_addr *);
+ssize_t send_packet(struct in_addr, struct in_addr);
 ssize_t receive_packet(struct sockaddr_in *, struct ether_addr *);
 
 /* dispatch.c */
@@ -288,7 +287,7 @@ void free_client_lease(struct client_lease *);
 void routehandler(void);
 
 /* packet.c */
-void assemble_eh_header(struct ether_header *, struct ether_addr *);
+void assemble_eh_header(struct ether_header *);
 ssize_t decode_hw_header(unsigned char *, int, struct ether_addr *);
 ssize_t decode_udp_ip_header(unsigned char *, int, struct sockaddr_in *,
     int);

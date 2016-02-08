@@ -41,16 +41,17 @@ main(void)
 	char sfn[24];
 	char buf[sizeof(TEXT)];
 	FILE *sfp;
-	int fd, i;
+	int fd;
 
 	strlcpy(sfn, "/tmp/barnacles.XXXXXXXX", sizeof(sfn));
 	if ((fd = mkstemp(sfn)) == -1 ||
 	    (sfp = fdopen(fd, "w+")) == NULL) {
+		int saved_errno = errno;
 		if (fd != -1) {
 			unlink(sfn);
 			close(fd);
 		}
-		err(1, "could not open temporary file");
+		errc(1, saved_errno, "could not open temporary file");
 	}
 
 	run_threads(fputs_thread, sfp);

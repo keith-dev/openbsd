@@ -1,4 +1,4 @@
-/*	$OpenBSD: uchcom.c,v 1.19 2013/11/15 10:17:39 pirofti Exp $	*/
+/*	$OpenBSD: uchcom.c,v 1.22 2014/07/12 20:26:33 mpi Exp $	*/
 /*	$NetBSD: uchcom.c,v 1.1 2007/09/03 17:57:37 tshiozak Exp $	*/
 
 /*
@@ -91,17 +91,16 @@ int	uchcomdebug = 0;
 #define UCHCOM_BRK1_MASK	0x01
 #define UCHCOM_BRK2_MASK	0x40
 
-#define UCHCOM_LCR1_MASK	0xAF
-#define UCHCOM_LCR2_MASK	0x07
-#define UCHCOM_LCR1_PARENB	0x80
-#define UCHCOM_LCR2_PAREVEN	0x07
-#define UCHCOM_LCR2_PARODD	0x06
-#define UCHCOM_LCR2_PARMARK	0x05
-#define UCHCOM_LCR2_PARSPACE	0x04
-
 #define UCHCOM_INTR_STAT1	0x02
 #define UCHCOM_INTR_STAT2	0x03
 #define UCHCOM_INTR_LEAST	4
+
+/*
+ * XXX - these magic numbers come from Linux (drivers/usb/serial/ch341.c).
+ * The manufacturer was unresponsive when asked for documentation.
+ */
+#define UCHCOM_RESET_VALUE	0x501F	/* line mode? */
+#define UCHCOM_RESET_INDEX	0xD90A	/* baud rate? */
 
 #define UCHCOMIBUFSIZE 256
 #define UCHCOMOBUFSIZE 256
@@ -201,10 +200,9 @@ int		uchcom_setup_comm(struct uchcom_softc *);
 int		uchcom_setup_intr_pipe(struct uchcom_softc *);
 
 
-int		uchcom_match(struct device *, void *, void *); 
-void		uchcom_attach(struct device *, struct device *, void *); 
-int		uchcom_detach(struct device *, int); 
-int		uchcom_activate(struct device *, int);
+int		uchcom_match(struct device *, void *, void *);
+void		uchcom_attach(struct device *, struct device *, void *);
+int		uchcom_detach(struct device *, int);
 
 struct	ucom_methods uchcom_methods = {
 	uchcom_get_status,
@@ -223,16 +221,12 @@ static const struct usb_devno uchcom_devs[] = {
 	{ USB_VENDOR_WCH2, USB_PRODUCT_WCH2_CH341A }
 };
 
-struct cfdriver uchcom_cd = { 
-	NULL, "uchcom", DV_DULL 
-}; 
+struct cfdriver uchcom_cd = {
+	NULL, "uchcom", DV_DULL
+};
 
-const struct cfattach uchcom_ca = { 
-	sizeof(struct uchcom_softc), 
-	uchcom_match, 
-	uchcom_attach, 
-	uchcom_detach, 
-	uchcom_activate, 
+const struct cfattach uchcom_ca = {
+	sizeof(struct uchcom_softc), uchcom_match, uchcom_attach, uchcom_detach
 };
 
 /* ----------------------------------------------------------------------
@@ -325,20 +319,6 @@ uchcom_detach(struct device *self, int flags)
 	}
 
 	return rv;
-}
-
-int
-uchcom_activate(struct device *self, int act)
-{
-	struct uchcom_softc *sc = (struct uchcom_softc *)self;
-
-	switch (act) {
-	case DVACT_DEACTIVATE:
-		uchcom_close_intr_pipe(sc);
-		usbd_deactivate(sc->sc_udev);
-		break;
-	}
-	return 0;
 }
 
 int
@@ -707,27 +687,10 @@ uchcom_set_dte_rate(struct uchcom_softc *sc, uint32_t rate)
 int
 uchcom_set_line_control(struct uchcom_softc *sc, tcflag_t cflag)
 {
-	usbd_status err;
-	uint8_t lcr1 = 0, lcr2 = 0;
-
-	err = uchcom_read_reg(sc, UCHCOM_REG_LCR1, &lcr1, UCHCOM_REG_LCR2,
-	    &lcr2);
-	if (err) {
-		printf("%s: cannot get LCR: %s\n",
-		       sc->sc_dev.dv_xname, usbd_errstr(err));
-		return EIO;
-	}
-
-	lcr1 &= ~UCHCOM_LCR1_MASK;
-	lcr2 &= ~UCHCOM_LCR2_MASK;
-
 	/*
 	 * XXX: it is difficult to handle the line control appropriately:
-	 *   - CS8, !CSTOPB and any parity mode seems ok, but
-	 *   - the chip doesn't have the function to calculate parity
-	 *     in !CS8 mode.
-	 *   - it is unclear that the chip supports CS5,6 mode.
-	 *   - it is unclear how to handle stop bits.
+	 *   work as chip default - CS8, no parity, !CSTOPB
+	 *   other modes are not supported.
 	 */
 
 	switch (ISSET(cflag, CSIZE)) {
@@ -739,21 +702,8 @@ uchcom_set_line_control(struct uchcom_softc *sc, tcflag_t cflag)
 		break;
 	}
 
-	if (ISSET(cflag, PARENB)) {
-		lcr1 |= UCHCOM_LCR1_PARENB;
-		if (ISSET(cflag, PARODD))
-			lcr2 |= UCHCOM_LCR2_PARODD;
-		else
-			lcr2 |= UCHCOM_LCR2_PAREVEN;
-	}
-
-	err = uchcom_write_reg(sc, UCHCOM_REG_LCR1, lcr1, UCHCOM_REG_LCR2,
-	    lcr2);
-	if (err) {
-		printf("%s: cannot set LCR: %s\n",
-		       sc->sc_dev.dv_xname, usbd_errstr(err));
-		return EIO;
-	}
+	if (ISSET(cflag, PARENB) || ISSET(cflag, CSTOPB))
+		return EINVAL;
 
 	return 0;
 }
@@ -778,38 +728,12 @@ int
 uchcom_reset_chip(struct uchcom_softc *sc)
 {
 	usbd_status err;
-	uint8_t lcr1, lcr2, pre, div, mod;
-	uint16_t val=0, idx=0;
 
-	err = uchcom_read_reg(sc, UCHCOM_REG_LCR1, &lcr1, UCHCOM_REG_LCR2, &lcr2);
-	if (err)
-		goto failed;
+	DPRINTF(("%s: reset\n", sc->sc_dev.dv_xname));
 
-	err = uchcom_read_reg(sc, UCHCOM_REG_BPS_PRE, &pre, UCHCOM_REG_BPS_DIV,
-	    &div);
-	if (err)
-		goto failed;
-
-	err = uchcom_read_reg(sc, UCHCOM_REG_BPS_MOD, &mod, UCHCOM_REG_BPS_PAD,
-	    NULL);
-	if (err)
-		goto failed;
-
-	val |= (uint16_t)(lcr1&0xF0) << 8;
-	val |= 0x01;
-	val |= (uint16_t)(lcr2&0x0F) << 8;
-	val |= 0x02;
-	idx |= pre & 0x07;
-	val |= 0x04;
-	idx |= (uint16_t)div << 8;
-	val |= 0x08;
-	idx |= mod & 0xF8;
-	val |= 0x10;
-
-	DPRINTF(("%s: reset v=0x%04X, i=0x%04X\n",
-		 sc->sc_dev.dv_xname, val, idx));
-
-	err = uchcom_generic_control_out(sc, UCHCOM_REQ_RESET, val, idx);
+	err = uchcom_generic_control_out(sc, UCHCOM_REQ_RESET,
+					 UCHCOM_RESET_VALUE,
+					 UCHCOM_RESET_INDEX);
 	if (err)
 		goto failed;
 
@@ -900,7 +824,7 @@ uchcom_close_intr_pipe(struct uchcom_softc *sc)
 		if (err)
 			printf("%s: close interrupt pipe failed: %s\n",
 			       sc->sc_dev.dv_xname, usbd_errstr(err));
-		free(sc->sc_intr_buf, M_USBDEV);
+		free(sc->sc_intr_buf, M_USBDEV, 0);
 		sc->sc_intr_pipe = NULL;
 	}
 }

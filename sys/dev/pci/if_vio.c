@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_vio.c,v 1.15 2014/01/19 20:49:02 bluhm Exp $	*/
+/*	$OpenBSD: if_vio.c,v 1.18 2014/07/12 18:48:52 tedu Exp $	*/
 
 /*
  * Copyright (c) 2012 Stefan Fritsch, Alexander Fiveg.
@@ -90,6 +90,13 @@
 #define VIRTIO_NET_F_CTRL_VLAN		(1<<19)
 #define VIRTIO_NET_F_CTRL_RX_EXTRA	(1<<20)
 #define VIRTIO_NET_F_GUEST_ANNOUNCE	(1<<21)
+
+/*
+ * Config(8) flags. The lowest byte is reserved for generic virtio stuff.
+ */
+
+/* Workaround for vlan related bug in qemu < version 2.0 */
+#define CONFFLAG_QEMU_VLAN_BUG		(1<<8)
 
 static const struct virtio_feature_name virtio_net_feature_names[] = {
 	{ VIRTIO_NET_F_CSUM,		"CSum" },
@@ -216,6 +223,7 @@ struct vio_softc {
 	bus_dmamap_t		*sc_tx_dmamaps;
 	struct mbuf		**sc_rx_mbufs;
 	struct mbuf		**sc_tx_mbufs;
+	struct if_rxring	sc_rx_ring;
 
 	enum vio_ctrl_state	sc_ctrl_inuse;
 
@@ -465,7 +473,7 @@ err_reqs:
 			bus_dmamap_destroy(vsc->sc_dmat, sc->sc_rx_dmamaps[i]);
 	}
 	if (sc->sc_arrays) {
-		free(sc->sc_arrays, M_DEVBUF);
+		free(sc->sc_arrays, M_DEVBUF, 0);
 		sc->sc_arrays = 0;
 	}
 err_hdr:
@@ -588,7 +596,6 @@ vio_attach(struct device *parent, struct device *self, void *aux)
 	ifmedia_add(&sc->sc_media, IFM_ETHER | IFM_AUTO, 0, NULL);
 	ifmedia_set(&sc->sc_media, IFM_ETHER | IFM_AUTO);
 	vsc->sc_config_change = vio_config_change;
-	m_clsetwms(ifp, MCLBYTES, 4, sc->sc_vq[VQRX].vq_num);
 	timeout_set(&sc->sc_txtick, vio_txtick, &sc->sc_vq[VQTX]);
 	timeout_set(&sc->sc_rxtick, vio_rxtick, &sc->sc_vq[VQRX]);
 
@@ -660,6 +667,7 @@ vio_init(struct ifnet *ifp)
 	struct vio_softc *sc = ifp->if_softc;
 
 	vio_stop(ifp, 0);
+	if_rxr_init(&sc->sc_rx_ring, 4, sc->sc_vq[VQRX].vq_num);
 	vio_populate_rx_mbufs(sc);
 	ifp->if_flags |= IFF_RUNNING;
 	ifp->if_flags &= ~IFF_OACTIVE;
@@ -871,7 +879,7 @@ vio_add_rx_mbuf(struct vio_softc *sc, int i)
 	struct mbuf *m;
 	int r;
 
-	m = MCLGETI(NULL, M_DONTWAIT, &sc->sc_ac.ac_if, MCLBYTES);
+	m = MCLGETI(NULL, M_DONTWAIT, NULL, MCLBYTES);
 	if (m == NULL)
 		return ENOBUFS;
 	sc->sc_rx_mbufs[i] = m;
@@ -901,11 +909,13 @@ void
 vio_populate_rx_mbufs(struct vio_softc *sc)
 {
 	struct virtio_softc *vsc = sc->sc_virtio;
-	int i, r, ndone = 0;
+	int r, done = 0;
+	u_int slots;
 	struct virtqueue *vq = &sc->sc_vq[VQRX];
 	int mrg_rxbuf = VIO_HAVE_MRG_RXBUF(sc);
 
-	for (i = 0; i < vq->vq_num; i++) {
+	for (slots = if_rxr_get(&sc->sc_rx_ring, vq->vq_num);
+	    slots > 0; slots--) {
 		int slot;
 		r = virtio_enqueue_prep(vq, &slot);
 		if (r == EAGAIN)
@@ -941,9 +951,11 @@ vio_populate_rx_mbufs(struct vio_softc *sc)
 			    sc->sc_hdr_size, MCLBYTES - sc->sc_hdr_size, 0);
 		}
 		virtio_enqueue_commit(vsc, vq, slot, 0);
-		ndone++;
+		done = 1;
 	}
-	if (ndone > 0)
+	if_rxr_put(&sc->sc_rx_ring, slots);
+
+	if (done)
 		virtio_notify(vsc, vq);
 	if (vq->vq_used_idx != vq->vq_avail_idx)
 		timeout_del(&sc->sc_rxtick);
@@ -972,6 +984,7 @@ vio_rxeof(struct vio_softc *sc)
 		bus_dmamap_unload(vsc->sc_dmat, sc->sc_rx_dmamaps[slot]);
 		sc->sc_rx_mbufs[slot] = NULL;
 		virtio_dequeue_commit(vq, slot);
+		if_rxr_put(&sc->sc_rx_ring, 1);
 		m->m_pkthdr.rcvif = ifp;
 		m->m_len = m->m_pkthdr.len = len;
 		m->m_pkthdr.csum_flags = 0;
@@ -1394,6 +1407,9 @@ vio_iff(struct vio_softc *sc)
 		ifp->if_flags |= IFF_ALLMULTI | IFF_PROMISC;
 		return;
 	}
+
+	if (sc->sc_dev.dv_cfdata->cf_flags & CONFFLAG_QEMU_VLAN_BUG)
+		ifp->if_flags |= IFF_PROMISC;
 
 	if (ifp->if_flags & IFF_PROMISC || ac->ac_multirangecnt > 0 ||
 	    ac->ac_multicnt >= VIRTIO_NET_CTRL_MAC_MC_ENTRIES) {

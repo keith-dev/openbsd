@@ -1,4 +1,4 @@
-/*	$OpenBSD: uipc_domain.c,v 1.34 2014/01/19 03:04:54 claudio Exp $	*/
+/*	$OpenBSD: uipc_domain.c,v 1.37 2014/07/11 21:54:38 tedu Exp $	*/
 /*	$NetBSD: uipc_domain.c,v 1.14 1996/02/09 19:00:44 christos Exp $	*/
 
 /*
@@ -41,11 +41,9 @@
 #include <sys/kernel.h>
 #include <sys/systm.h>
 #include <sys/proc.h>
-#include <uvm/uvm_extern.h>
 #include <sys/sysctl.h>
 #include <sys/timeout.h>
 
-#include "bluetooth.h"
 #include "bpfilter.h"
 #include "pflow.h"
 
@@ -78,7 +76,6 @@ domaininit(void)
 	 * KAME NOTE: ADDDOMAIN(route) is moved to the last part so that
 	 * it will be initialized as the *first* element.  confusing!
 	 */
-#ifndef lint
 	ADDDOMAIN(unix);
 #ifdef INET
 	ADDDOMAIN(inet);
@@ -97,11 +94,7 @@ domaininit(void)
 	ADDDOMAIN(key);
 #endif
 #endif
-#if NBLUETOOTH > 0
-	ADDDOMAIN(bt);
-#endif
 	ADDDOMAIN(route);
-#endif
 
 	for (dp = domains; dp; dp = dp->dom_next) {
 		if (dp->dom_init)

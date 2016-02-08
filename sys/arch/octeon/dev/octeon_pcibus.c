@@ -1,4 +1,4 @@
-/*	$OpenBSD: octeon_pcibus.c,v 1.12 2013/08/29 07:56:50 pirofti Exp $	*/
+/*	$OpenBSD: octeon_pcibus.c,v 1.15 2014/07/12 18:44:42 tedu Exp $	*/
 /*	$NetBSD: bonito_mainbus.c,v 1.11 2008/04/28 20:23:10 martin Exp $	*/
 /*	$NetBSD: bonito_pci.c,v 1.5 2008/04/28 20:23:28 martin Exp $	*/
 
@@ -248,7 +248,7 @@ octeon_pcibus_attach(struct device *parent, struct device *self, void *aux)
 bus_addr_t
 octeon_pcibus_pa_to_device(paddr_t pa)
 {
-	printf("%s:%d: pa=%p\n", __func__, __LINE__, pa);
+	OCTEON_PCIDEBUG(("%s:%d: pa=%p\n", __func__, __LINE__, (void *)pa));
 
 	return pa & 0x1ffffffffffffUL;
 }
@@ -256,7 +256,7 @@ octeon_pcibus_pa_to_device(paddr_t pa)
 paddr_t
 octeon_pcibus_device_to_pa(bus_addr_t addr)
 {
-	printf("%s:%d: addr=%p\n", __func__, __LINE__, addr);
+	OCTEON_PCIDEBUG(("%s:%d: addr=%lx\n", __func__, __LINE__, addr));
 
 	return PHYS_TO_XKPHYS(addr, CCA_NC);
 }
@@ -406,7 +406,7 @@ octeon_pcibus_pci_intr_string(void *cookie, pci_intr_handle_t ih)
 {
 	static char irqstr[sizeof("irq 0123456789")];
 
-	snprintf(irqstr, sizeof irqstr, "irq %d", ih);
+	snprintf(irqstr, sizeof irqstr, "irq %ld", ih);
 	return irqstr;
 }
 
@@ -504,7 +504,7 @@ octeon_pcibus_get_resource_extent(pci_chipset_tag_t pc, int io)
 
 out:
 	if (exname != NULL)
-		free(exname, M_DEVBUF);
+		free(exname, M_DEVBUF, 0);
 
 	return ex;
 }

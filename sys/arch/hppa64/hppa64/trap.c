@@ -1,4 +1,4 @@
-/*	$OpenBSD: trap.c,v 1.33 2012/12/31 06:46:13 guenther Exp $	*/
+/*	$OpenBSD: trap.c,v 1.39 2014/05/11 00:12:44 guenther Exp $	*/
 
 /*
  * Copyright (c) 2005 Michael Shalayeff
@@ -21,13 +21,13 @@
 
 #include <sys/param.h>
 #include <sys/systm.h>
-#include <sys/syscall.h>
-#include <sys/syscall_mi.h>
 #include <sys/proc.h>
 #include <sys/signalvar.h>
 #include <sys/user.h>
+#include <sys/syscall.h>
+#include <sys/syscall_mi.h>
 
-#include <uvm/uvm.h>
+#include <uvm/uvm_extern.h>
 
 #include <machine/autoconf.h>
 #include <machine/cpufunc.h>
@@ -133,11 +133,7 @@ ast(struct proc *p)
 	if (astpending) {
 		astpending = 0;
 		uvmexp.softs++;
-		if (p->p_flag & P_OWEUPC) {
-			ADDUPROF(p);
-		}
-		if (want_resched)
-			preempt(NULL);
+		mi_ast(p, want_resched);
 	}
 }
 
@@ -211,6 +207,9 @@ trap(int type, struct trapframe *frame)
 		mtctl(frame->tf_eiem, CR_EIEM);
 	        ssm(PSL_I, mask);
 	}
+
+	if (type & T_USER)
+		refreshcreds(p);
 
 	switch (type) {
 	case T_NONEXIST:
@@ -574,8 +573,8 @@ syscall(struct trapframe *frame)
 		panic("syscall");
 
 	p->p_md.md_regs = frame;
-	nsys = p->p_emul->e_nsysent;
-	callp = p->p_emul->e_sysent;
+	nsys = p->p_p->ps_emul->e_nsysent;
+	callp = p->p_p->ps_emul->e_sysent;
 
 	switch (code = frame->tf_r1) {
 	case SYS_syscall:
@@ -602,7 +601,7 @@ syscall(struct trapframe *frame)
 	}
 
 	if (code < 0 || code >= nsys)
-		callp += p->p_emul->e_nosys;	/* bad syscall # */
+		callp += p->p_p->ps_emul->e_nosys;	/* bad syscall # */
 	else
 		callp += code;
 

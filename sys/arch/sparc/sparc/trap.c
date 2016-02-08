@@ -1,4 +1,4 @@
-/*	$OpenBSD: trap.c,v 1.63 2013/06/03 18:46:02 kettenis Exp $	*/
+/*	$OpenBSD: trap.c,v 1.68 2014/05/11 00:12:44 guenther Exp $	*/
 /*	$NetBSD: trap.c,v 1.58 1997/09/12 08:55:01 pk Exp $ */
 
 /*
@@ -279,6 +279,7 @@ trap(type, psr, pc, tf)
 		p = &proc0;
 	pcb = &p->p_addr->u_pcb;
 	p->p_md.md_tf = tf;	/* for ptrace/signals */
+	refreshcreds(p);
 
 	switch (type) {
 
@@ -300,11 +301,8 @@ trap(type, psr, pc, tf)
 
 	case T_AST:
 		want_ast = 0;
-		if (p->p_flag & P_OWEUPC) {
-			ADDUPROF(p);
-		}
-		if (want_resched)
-			preempt(NULL);
+		uvmexp.softs++;
+		mi_ast(p, want_resched);
 		break;
 
 	case T_ILLINST:
@@ -951,8 +949,8 @@ syscall(code, tf, pc)
 	int error, new;
 	struct args {
 		register_t i[8];
-	} args;
-	register_t rval[2];
+	} args __aligned(8);
+	register_t rval[2] __aligned(8);
 #ifdef DIAGNOSTIC
 	extern struct pcb *cpcb;
 #endif
@@ -971,8 +969,8 @@ syscall(code, tf, pc)
 	new = code & SYSCALL_G2RFLAG;
 	code &= ~SYSCALL_G2RFLAG;
 
-	callp = p->p_emul->e_sysent;
-	nsys = p->p_emul->e_nsysent;
+	callp = p->p_p->ps_emul->e_sysent;
+	nsys = p->p_p->ps_emul->e_nsysent;
 
 	/*
 	 * The first six system call arguments are in the six %o registers.
@@ -1003,7 +1001,7 @@ syscall(code, tf, pc)
 	}
 
 	if (code < 0 || code >= nsys)
-		callp += p->p_emul->e_nosys;
+		callp += p->p_p->ps_emul->e_nosys;
 	else {
 		callp += code;
 		i = callp->sy_argsize / sizeof(register_t);

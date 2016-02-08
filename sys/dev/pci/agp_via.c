@@ -1,4 +1,4 @@
-/*	$OpenBSD: agp_via.c,v 1.17 2011/10/16 01:11:31 dhill Exp $	*/
+/*	$OpenBSD: agp_via.c,v 1.20 2014/05/27 12:40:00 kettenis Exp $	*/
 /*	$NetBSD: agp_via.c,v 1.2 2001/09/15 00:25:00 thorpej Exp $	*/
 
 /*-
@@ -32,11 +32,8 @@
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/malloc.h>
-#include <sys/kernel.h>
-#include <sys/lock.h>
-#include <sys/conf.h>
 #include <sys/device.h>
-#include <sys/agpio.h>
+#include <sys/rwlock.h>
 
 #include <dev/pci/pcivar.h>
 #include <dev/pci/pcireg.h>
@@ -190,26 +187,6 @@ agp_via_attach(struct device *parent, struct device *self, void *aux)
 
 	return;
 }
-
-#if 0
-int
-agp_via_detach(struct agp_softc *sc)
-{
-	struct agp_via_softc *vsc = sc->sc_chipc;
-	int error;
-
-	error = agp_generic_detach(sc);
-	if (error)
-		return (error);
-
-	pci_conf_write(sc->as_pc, sc->as_tag, vsc->regs[REG_GARTCTRL], 0);
-	pci_conf_write(sc->as_pc, sc->as_tag, vsc->regs[REG_ATTBASE], 0);
-	AGP_SET_APERTURE(sc, vsc->initial_aperture);
-	agp_free_gatt(sc, vsc->gatt);
-
-	return (0);
-}
-#endif
 
 int
 agp_via_activate(struct device *arg, int act)

@@ -1,4 +1,4 @@
-/*	$OpenBSD: ucred.h,v 1.6 2003/08/15 20:32:20 tedu Exp $	*/
+/*	$OpenBSD: ucred.h,v 1.9 2014/04/18 11:51:17 guenther Exp $	*/
 /*	$NetBSD: ucred.h,v 1.12 1995/06/01 22:44:50 jtc Exp $	*/
 
 /*
@@ -40,19 +40,38 @@
  */
 struct ucred {
 	u_int	cr_ref;			/* reference count */
+
+/* The following fields are all copied by crset() */
+#define	cr_startcopy	cr_uid
 	uid_t	cr_uid;			/* effective user id */
+	uid_t	cr_ruid;		/* Real user id. */
+	uid_t	cr_svuid;		/* Saved effective user id. */
 	gid_t	cr_gid;			/* effective group id */
+	gid_t	cr_rgid;		/* Real group id. */
+	gid_t	cr_svgid;		/* Saved effective group id. */
 	short	cr_ngroups;		/* number of groups */
 	gid_t	cr_groups[NGROUPS];	/* groups */
 };
 #define NOCRED ((struct ucred *)-1)	/* no credential available */
 #define FSCRED ((struct ucred *)-2)	/* filesystem credential */
 
+/*
+ *  Userspace version, for use in syscalls arguments
+ */
+struct xucred {
+	uid_t	cr_uid;			/* user id */
+	gid_t	cr_gid;			/* group id */
+	short	cr_ngroups;		/* number of groups */
+	gid_t	cr_groups[NGROUPS];	/* groups */
+};
+
 #ifdef _KERNEL
 #define	crhold(cr)	(cr)->cr_ref++
 
 #define SUSER_NOACCT	0x1	/* don't mark accounting flags */
 
+void		crfromxucred(struct ucred *, const struct xucred *);
+void		crset(struct ucred *, const struct ucred *);
 struct ucred	*crcopy(struct ucred *cr);
 struct ucred	*crdup(struct ucred *cr);
 void		crfree(struct ucred *cr);

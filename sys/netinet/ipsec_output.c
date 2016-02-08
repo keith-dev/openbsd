@@ -1,4 +1,4 @@
-/*	$OpenBSD: ipsec_output.c,v 1.50 2013/10/24 11:31:43 mpi Exp $ */
+/*	$OpenBSD: ipsec_output.c,v 1.53 2014/07/22 11:06:10 mpi Exp $ */
 /*
  * The author of this code is Angelos D. Keromytis (angelos@cis.upenn.edu)
  *
@@ -38,7 +38,6 @@
 
 #ifdef INET
 #include <netinet/in.h>
-#include <netinet/in_systm.h>
 #include <netinet/ip.h>
 #include <netinet/in_pcb.h>
 #include <netinet/ip_var.h>
@@ -511,7 +510,7 @@ ipsp_process_done(struct mbuf *m, struct tdb *tdb)
 	switch (tdb->tdb_dst.sa.sa_family) {
 #ifdef INET
 	case AF_INET:
-		return ip_output(m, (void *)NULL, (void *)NULL, IP_RAWOUTPUT, (void *)NULL, (void *)NULL);
+		return (ip_output(m, NULL, NULL, IP_RAWOUTPUT, NULL, NULL, 0));
 #endif /* INET */
 
 #ifdef INET6
@@ -520,7 +519,7 @@ ipsp_process_done(struct mbuf *m, struct tdb *tdb)
 		 * We don't need massage, IPv6 header fields are always in
 		 * net endian.
 		 */
-		return ip6_output(m, NULL, NULL, 0, NULL, NULL, NULL);
+		return (ip6_output(m, NULL, NULL, 0, NULL, NULL, NULL));
 #endif /* INET6 */
 	}
 	return EINVAL; /* Not reached. */

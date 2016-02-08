@@ -1,4 +1,4 @@
-/*	$OpenBSD: eval.c,v 1.71 2013/11/14 15:56:50 deraadt Exp $	*/
+/*	$OpenBSD: eval.c,v 1.73 2014/07/11 21:04:17 espie Exp $	*/
 /*	$NetBSD: eval.c,v 1.7 1996/11/10 21:21:29 pk Exp $	*/
 
 /*
@@ -790,7 +790,7 @@ dom4wrap(const char *text)
 			maxwraps = 16;
 		else
 			maxwraps *= 2;
-		m4wraps = xrealloc(m4wraps, maxwraps * sizeof(*m4wraps),
+		m4wraps = xreallocarray(m4wraps, maxwraps, sizeof(*m4wraps),
 		   "too many m4wraps");
 	}
 	m4wraps[wrapindex++] = xstrdup(text);
@@ -817,11 +817,10 @@ dodiv(int n)
 	if (outfile[n] == NULL) {
 		char fname[] = _PATH_DIVNAME;
 
-		if ((fd = mkstemp(fname)) < 0 || 
-			(outfile[n] = fdopen(fd, "w+")) == NULL)
-				err(1, "%s: cannot divert", fname);
-		if (unlink(fname) == -1)
-			err(1, "%s: cannot unlink", fname);
+		if ((fd = mkstemp(fname)) < 0 ||
+		    unlink(fname) == -1 ||
+		    (outfile[n] = fdopen(fd, "w+")) == NULL)
+			err(1, "%s: cannot divert", fname);
 	}
 	active = outfile[n];
 }

@@ -1,4 +1,4 @@
-/*	$OpenBSD: i386_installboot.c,v 1.1 2014/01/19 02:58:50 jsing Exp $	*/
+/*	$OpenBSD: i386_installboot.c,v 1.5 2014/07/08 17:19:26 deraadt Exp $	*/
 /*	$NetBSD: installboot.c,v 1.5 1995/11/17 23:23:50 gwr Exp $ */
 
 /*
@@ -50,8 +50,6 @@
 #include <ufs/ufs/dinode.h>
 #include <ufs/ufs/dir.h>
 #include <ufs/ffs/fs.h>
-
-#include <uvm/uvm_extern.h>
 
 #include <machine/cpu.h>
 #include <machine/biosvar.h>
@@ -137,6 +135,9 @@ md_installboot(int devfd, char *dev)
 		warnx("disklabel type unknown");
 
 	bootldr = fileprefix(root, bootldr);
+	if (verbose)
+		fprintf(stderr, "%s %s to %s\n",
+		    (nowrite ? "would copy" : "copying"), stage2, bootldr);
 	if (!nowrite)
 		filecopy(stage2, bootldr);
 
@@ -190,9 +191,13 @@ write_bootblocks(int devfd, char *dev, struct disklabel *dl)
 
 	if (!nowrite) {
 		if (lseek(devfd, (off_t)start * dl->d_secsize, SEEK_SET) < 0)
-			err(1, "seek bootstrap");
+			err(1, "seek boot sector");
 		secbuf = calloc(1, dl->d_secsize);
+		if (read(devfd, secbuf, dl->d_secsize) != dl->d_secsize)
+			err(1, "read boot sector");
 		bcopy(blkstore, secbuf, blksize);
+		if (lseek(devfd, (off_t)start * dl->d_secsize, SEEK_SET) < 0)
+			err(1, "seek bootstrap");
 		if (write(devfd, secbuf, dl->d_secsize) != dl->d_secsize)
 			err(1, "write bootstrap");
 		free(secbuf);
@@ -223,7 +228,8 @@ again:
 		    (mbroff == DOSBBSECTOR) ? "master" : "extended",
 		    (mbroff == DOSBBSECTOR) ? 'M' : 'E', mbroff);
 
-	secbuf = malloc(dl->d_secsize); 
+	if ((secbuf = malloc(dl->d_secsize)) == NULL)
+		err(1, NULL);
 	if (lseek(devfd, (off_t)mbroff * dl->d_secsize, SEEK_SET) < 0 ||
 	    read(devfd, secbuf, dl->d_secsize) < (ssize_t)sizeof(mbr))
 		err(4, "can't read boot record");

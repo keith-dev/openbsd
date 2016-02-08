@@ -1,4 +1,4 @@
-/*	$OpenBSD: in6_src.c,v 1.37 2014/01/07 17:07:46 mikeb Exp $	*/
+/*	$OpenBSD: in6_src.c,v 1.45 2014/07/22 11:06:10 mpi Exp $	*/
 /*	$KAME: in6_src.c,v 1.36 2001/02/06 04:08:17 itojun Exp $	*/
 
 /*
@@ -63,7 +63,6 @@
 
 #include <sys/param.h>
 #include <sys/systm.h>
-#include <sys/malloc.h>
 #include <sys/mbuf.h>
 #include <sys/protosw.h>
 #include <sys/socket.h>
@@ -76,7 +75,6 @@
 #include <net/route.h>
 
 #include <netinet/in.h>
-#include <netinet/in_systm.h>
 #include <netinet/ip.h>
 #include <netinet/in_pcb.h>
 #include <netinet6/in6_var.h>
@@ -96,18 +94,18 @@ int selectroute(struct sockaddr_in6 *, struct ip6_pktopts *,
  * If necessary, this function lookups the routing table and returns
  * an entry to the caller for later use.
  */
-struct in6_addr *
-in6_selectsrc(struct sockaddr_in6 *dstsock, struct ip6_pktopts *opts,
-    struct ip6_moptions *mopts, struct route_in6 *ro, struct in6_addr *laddr,
-    int *errorp, u_int rtableid)
+int
+in6_selectsrc(struct in6_addr **in6src, struct sockaddr_in6 *dstsock,
+    struct ip6_pktopts *opts, struct ip6_moptions *mopts,
+    struct route_in6 *ro, struct in6_addr *laddr, u_int rtableid)
 {
 	struct ifnet *ifp = NULL;
 	struct in6_addr *dst;
 	struct in6_ifaddr *ia6 = NULL;
 	struct in6_pktinfo *pi = NULL;
+	int	error;
 
 	dst = &dstsock->sin6_addr;
-	*errorp = 0;
 
 	/*
 	 * If the source address is explicitly specified by the caller,
@@ -120,9 +118,9 @@ in6_selectsrc(struct sockaddr_in6 *dstsock, struct ip6_pktopts *opts,
 		struct sockaddr_in6 sa6;
 
 		/* get the outgoing interface */
-		if ((*errorp = in6_selectif(dstsock, opts, mopts, ro,
-		    &ifp, rtableid)) != 0)
-			return (NULL);
+		error = in6_selectif(dstsock, opts, mopts, ro, &ifp, rtableid);
+		if (error)
+			return (error);
 
 		bzero(&sa6, sizeof(sa6));
 		sa6.sin6_family = AF_INET6;
@@ -134,22 +132,23 @@ in6_selectsrc(struct sockaddr_in6 *dstsock, struct ip6_pktopts *opts,
 
 		ia6 = ifatoia6(ifa_ifwithaddr(sin6tosa(&sa6), rtableid));
 		if (ia6 == NULL ||
-		    (ia6->ia6_flags & (IN6_IFF_ANYCAST | IN6_IFF_NOTREADY))) {
-			*errorp = EADDRNOTAVAIL;
-			return (NULL);
-		}
+		    (ia6->ia6_flags & (IN6_IFF_ANYCAST | IN6_IFF_NOTREADY)))
+			return (EADDRNOTAVAIL);
 
 		pi->ipi6_addr = sa6.sin6_addr; /* XXX: this overrides pi */
 
-		return (&pi->ipi6_addr);
+		*in6src = &pi->ipi6_addr;
+		return (0);
 	}
 
 	/*
 	 * If the source address is not specified but the socket(if any)
 	 * is already bound, use the bound address.
 	 */
-	if (laddr && !IN6_IS_ADDR_UNSPECIFIED(laddr))
-		return (laddr);
+	if (laddr && !IN6_IS_ADDR_UNSPECIFIED(laddr)) {
+		*in6src = laddr;
+		return (0);
+	}
 
 	/*
 	 * If the caller doesn't specify the source address but
@@ -158,16 +157,15 @@ in6_selectsrc(struct sockaddr_in6 *dstsock, struct ip6_pktopts *opts,
 	 */
 	if (pi && pi->ipi6_ifindex) {
 		ifp = if_get(pi->ipi6_ifindex);
-		if (ifp == NULL) {
-			*errorp = ENXIO; /* XXX: better error? */
-			return (0);
-		}
+		if (ifp == NULL)
+			return (ENXIO); /* XXX: better error? */
+
 		ia6 = in6_ifawithscope(ifp, dst, rtableid);
-		if (ia6 == 0) {
-			*errorp = EADDRNOTAVAIL;
-			return (0);
-		}
-		return (&ia6->ia_addr.sin6_addr);
+		if (ia6 == NULL)
+			return (EADDRNOTAVAIL);
+
+		*in6src = &ia6->ia_addr.sin6_addr;
+		return (0);
 	}
 
 	/*
@@ -182,16 +180,15 @@ in6_selectsrc(struct sockaddr_in6 *dstsock, struct ip6_pktopts *opts,
 	if ((IN6_IS_ADDR_LINKLOCAL(dst) || IN6_IS_ADDR_MC_LINKLOCAL(dst) ||
 	     IN6_IS_ADDR_MC_INTFACELOCAL(dst)) && dstsock->sin6_scope_id) {
 		ifp = if_get(dstsock->sin6_scope_id);
-		if (ifp == NULL) {
-			*errorp = ENXIO; /* XXX: better error? */
-			return (0);
-		}
+		if (ifp == NULL)
+			return (ENXIO); /* XXX: better error? */
+
 		ia6 = in6_ifawithscope(ifp, dst, rtableid);
-		if (ia6 == 0) {
-			*errorp = EADDRNOTAVAIL;
-			return (0);
-		}
-		return (&ia6->ia_addr.sin6_addr);
+		if (ia6 == NULL)
+			return (EADDRNOTAVAIL);
+
+		*in6src = &ia6->ia_addr.sin6_addr;
+		return (0);
 	}
 
 	/*
@@ -209,11 +206,11 @@ in6_selectsrc(struct sockaddr_in6 *dstsock, struct ip6_pktopts *opts,
 
 		if (ifp) {
 			ia6 = in6_ifawithscope(ifp, dst, rtableid);
-			if (ia6 == 0) {
-				*errorp = EADDRNOTAVAIL;
-				return (0);
-			}
-			return (&ia6->ia_addr.sin6_addr);
+			if (ia6 == NULL)
+				return (EADDRNOTAVAIL);
+
+			*in6src = &ia6->ia_addr.sin6_addr;
+			return (0);
 		}
 	}
 
@@ -236,11 +233,11 @@ in6_selectsrc(struct sockaddr_in6 *dstsock, struct ip6_pktopts *opts,
 				if (ia6 == 0)
 					ia6 = ifatoia6(rt->rt_ifa);
 			}
-			if (ia6 == 0) {
-				*errorp = EADDRNOTAVAIL;
-				return (0);
-			}
-			return (&ia6->ia_addr.sin6_addr);
+			if (ia6 == NULL)
+				return (EADDRNOTAVAIL);
+
+			*in6src = &ia6->ia_addr.sin6_addr;
+			return (0);
 		}
 	}
 
@@ -286,34 +283,14 @@ in6_selectsrc(struct sockaddr_in6 *dstsock, struct ip6_pktopts *opts,
 			if (ia6 == 0) /* xxx scope error ?*/
 				ia6 = ifatoia6(ro->ro_rt->rt_ifa);
 		}
-#if 0
-		/*
-		 * xxx The followings are necessary? (kazu)
-		 * I don't think so.
-		 * It's for SO_DONTROUTE option in IPv4.(jinmei)
-		 */
-		if (ia6 == 0) {
-			struct sockaddr_in6 sin6 = {sizeof(sin6), AF_INET6, 0};
+		if (ia6 == NULL)
+			return (EHOSTUNREACH);	/* no route */
 
-			sin6->sin6_addr = *dst;
-
-			ia6 = ifatoia6(ifa_ifwithdstaddr(sin6tosa(&sin6)));
-			if (ia6 == 0)
-				ia6 = ifatoia6(ifa_ifwithnet(sin6tosa(&sin6)));
-			if (ia6 == 0)
-				return (0);
-			return (&ia6->ia_addr.sin6_addr);
-		}
-#endif /* 0 */
-		if (ia6 == 0) {
-			*errorp = EHOSTUNREACH;	/* no route */
-			return (0);
-		}
-		return (&ia6->ia_addr.sin6_addr);
+		*in6src = &ia6->ia_addr.sin6_addr;
+		return (0);
 	}
 
-	*errorp = EADDRNOTAVAIL;
-	return (0);
+	return (EADDRNOTAVAIL);
 }
 
 int
@@ -442,9 +419,9 @@ selectroute(struct sockaddr_in6 *dstsock, struct ip6_pktopts *opts,
 		     sin6tosa(&ro->ro_dst)->sa_family != AF_INET6 ||
 		     !IN6_ARE_ADDR_EQUAL(&ro->ro_dst.sin6_addr, dst))) {
 			RTFREE(ro->ro_rt);
-			ro->ro_rt = (struct rtentry *)NULL;
+			ro->ro_rt = NULL;
 		}
-		if (ro->ro_rt == (struct rtentry *)NULL) {
+		if (ro->ro_rt == NULL) {
 			struct sockaddr_in6 *sa6;
 
 			/* No route yet, so try to acquire one */
@@ -602,11 +579,8 @@ in6_selecthlim(struct inpcb *in6p, struct ifnet *ifp)
  * we may want to change the function to return something other than ifp.
  */
 int
-in6_embedscope(in6, sin6, in6p, ifpp)
-	struct in6_addr *in6;
-	const struct sockaddr_in6 *sin6;
-	struct inpcb *in6p;
-	struct ifnet **ifpp;
+in6_embedscope(struct in6_addr *in6, const struct sockaddr_in6 *sin6,
+    struct inpcb *in6p, struct ifnet **ifpp)
 {
 	struct ifnet *ifp = NULL;
 	u_int32_t scopeid;

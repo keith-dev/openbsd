@@ -1,6 +1,6 @@
 define(MACHINE,macppc)dnl
 vers(__file__,
-	{-$OpenBSD: MAKEDEV.md,v 1.58 2014/01/05 01:16:52 deraadt Exp $-},
+	{-$OpenBSD: MAKEDEV.md,v 1.60 2014/07/11 22:04:09 tedu Exp $-},
 etc.MACHINE)dnl
 dnl
 dnl Copyright (c) 2001-2006 Todd T. Fries <todd@OpenBSD.org>
@@ -18,11 +18,8 @@ dnl ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
 dnl OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 dnl
 dnl
-__devitem(agp, agp*, AGP bridge)dnl
 __devitem(s64_tzs, tty[a-z]*, Zilog 8530 serial ports,zs)dnl
 __devitem(s64_czs, cua[a-z]*, Zilog 8530 serial ports,zs)dnl
-_mkdev(agp, agp*, {-M agp$U c major_agp_c $U
-	MKlist[${#MKlist[*]}]=";[ -e agpgart ] || ln -s agp$U agpgart"-})dnl
 _mkdev(s64_tzs, {-tty[a-z]-}, {-u=${i#tty*}
 	case $u in
 	a) n=0 ;;
@@ -81,10 +78,8 @@ _DEV(au, 44)
 _DEV(bio, 80)
 _DEV(bktr, 75)
 _DEV(bpf, 22)
-_DEV(bthub, 81)
 _DEV(cry, 47)
 _DEV(diskmap, 84)
-_DEV(agp, 86)
 _DEV(drm, 87)
 _DEV(fdesc, 21)
 _DEV(fuse, 88)
@@ -132,7 +127,6 @@ target(all, sd, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9)dnl
 target(all, vnd, 0, 1, 2, 3)dnl
 target(all, gpio, 0, 1, 2)dnl
 target(all, bio)dnl
-target(all, bthub, 0, 1, 2)dnl
 target(all, drm, 0, 1, 2, 3)dnl
 target(ramd, ttya, 0, 1)dnl
 target(ramd, ttyb, 0, 1)dnl

@@ -1,4 +1,4 @@
-/*	$OpenBSD: mainbus.c,v 1.13 2011/09/18 10:33:23 kettenis Exp $	*/
+/*	$OpenBSD: mainbus.c,v 1.15 2014/07/12 18:44:41 tedu Exp $	*/
 
 /*
  * Copyright (c) 2005 Michael Shalayeff
@@ -29,8 +29,7 @@
 #include <sys/mbuf.h>
 #include <sys/proc.h>
 
-#include <uvm/uvm.h>
-#include <uvm/uvm_page.h>
+#include <uvm/uvm_extern.h>
 
 #include <machine/pdc.h>
 #include <machine/iomod.h>
@@ -335,7 +334,7 @@ mbus_dmamap_destroy(void *v, bus_dmamap_t map)
 	if (map->dm_mapsize != 0)
 		mbus_dmamap_unload(v, map);
 
-	free(map, M_DEVBUF);
+	free(map, M_DEVBUF, 0);
 }
 
 /*

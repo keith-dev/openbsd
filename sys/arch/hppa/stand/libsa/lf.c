@@ -1,4 +1,4 @@
-/*	$OpenBSD: lf.c,v 1.8 2013/03/24 19:20:35 deraadt Exp $	*/
+/*	$OpenBSD: lf.c,v 1.10 2014/07/12 21:03:38 tedu Exp $	*/
 
 /*
  * Copyright (c) 1998-2004 Michael Shalayeff

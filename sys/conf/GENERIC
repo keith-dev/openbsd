@@ -1,4 +1,4 @@
-#	$OpenBSD: GENERIC,v 1.207 2014/02/22 07:20:39 jsg Exp $
+#	$OpenBSD: GENERIC,v 1.210 2014/07/29 12:57:08 deraadt Exp $
 #
 #	Machine-independent option; used by all architectures for their
 #	GENERIC kernel
@@ -55,7 +55,6 @@ option		TCP_SIGNATURE	# TCP MD5 Signatures, for BGP routing sessions
 #option		TCP_FACK	# Forward Acknowledgements for TCP
 
 option		INET		# IP + ICMP + TCP + UDP
-option		ALTQ		# ALTQ base
 option		INET6		# IPv6 (needs INET)
 option		IPSEC		# IPsec
 #option		KEY		# PF_KEY (implied by IPSEC)

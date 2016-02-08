@@ -1,4 +1,4 @@
-/*	$OpenBSD: pmap.c,v 1.75 2013/11/16 18:45:20 miod Exp $	*/
+/*	$OpenBSD: pmap.c,v 1.78 2014/06/09 14:33:20 miod Exp $	*/
 
 /*
  * Copyright (c) 2001-2004, 2010, Miodrag Vallat.
@@ -474,14 +474,14 @@ pmap_expand_kmap(vaddr_t va, int canfail)
 			if (canfail)
 				return NULL;
 			panic("pmap_expand_kmap(%p): uvm_pagealloc() failed",
-			    va);
+			    (void *)va);
 		}
 		pa = VM_PAGE_TO_PHYS(pg);
 	} else {
 		pa = (paddr_t)uvm_pageboot_alloc(PAGE_SIZE);
 		if (pa == 0)
 			panic("pmap_expand_kmap(%p): uvm_pageboot_alloc() failed",
-			    va);
+			    (void *)va);
 		bzero((void *)pa, PAGE_SIZE);
 	}
 
@@ -549,7 +549,7 @@ pmap_steal_memory(vsize_t size, vaddr_t *vstartp, vaddr_t *vendp)
 	/* m88k systems only have one segment. */
 #ifdef DIAGNOSTIC
 	if (vm_physmem[0].avail_end - vm_physmem[0].avail_start < npg)
-		panic("pmap_steal_memory(%x): out of memory", size);
+		panic("pmap_steal_memory(%lx): out of memory", size);
 #endif
 
 	va = ptoa(vm_physmem[0].avail_start);
@@ -588,7 +588,7 @@ pmap_map(paddr_t pa, psize_t sz, vm_prot_t prot, u_int cmode,
 #ifdef DIAGNOSTIC
 	if (pa != 0 && pa < VM_MAX_KERNEL_ADDRESS)
 		panic("pmap_map: virtual range %p-%p overlaps KVM",
-		    pa, pa + sz);
+		    (void *)pa, (void *)(pa + sz));
 #endif
 
 	sz = round_page(pa + sz) - trunc_page(pa);
@@ -1237,7 +1237,7 @@ pmap_remove_pte(pmap_t pmap, vaddr_t va, pt_entry_t *pte, struct vm_page *pg,
 #ifdef DIAGNOSTIC
 	if (pvl->pv_pmap == NULL)
 		panic("pmap_remove_pte(%p, %p, %p, %p/%p, %d): null pv_list",
-		   pmap, va, pte, pa, pg, flush);
+		   pmap, (void *)va, pte, (void *)pa, pg, flush);
 #endif
 
 	prev = NULL;
@@ -1249,7 +1249,7 @@ pmap_remove_pte(pmap_t pmap, vaddr_t va, pt_entry_t *pte, struct vm_page *pg,
 	if (cur == NULL) {
 		panic("pmap_remove_pte(%p, %p, %p, %p, %d): mapping for va "
 		    "(pa %p) not in pv list at %p",
-		    pmap, va, pte, pg, flush, pa, pvl);
+		    pmap, (void *)va, pte, pg, flush, (void *)pa, pvl);
 	}
 
 	if (prev == NULL) {
@@ -1417,12 +1417,6 @@ pmap_remove_page(struct vm_page *pg)
 		if (pte == NULL || !PDT_VALID(pte)) {
 			pvl = pvl->pv_next;
 			continue;	/* no page mapping */
-		}
-		if (pmap_pte_w(pte)) {
-			DPRINTF(CD_RMPG, ("pmap_remove_page(%p): wired mapping not removed\n",
-			    pg));
-			pvl = pvl->pv_next;
-			continue;
 		}
 
 		pmap_remove_pte(pmap, va, pte, pg, TRUE);
@@ -1893,7 +1887,7 @@ pmap_set_modify(pmap_t pmap, vaddr_t va)
 	pg = PHYS_TO_VM_PAGE(pa);
 #ifdef DIAGNOSTIC
 	if (pg == NULL)
-		panic("Write fault to unmanaged page %p", pa);
+		panic("Write fault to unmanaged page %p", (void *)pa);
 #endif
 
 	pvl = pg_to_pvh(pg);

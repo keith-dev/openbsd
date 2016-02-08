@@ -1,4 +1,4 @@
-/*	$OpenBSD: sili.c,v 1.51 2012/02/04 21:44:54 krw Exp $ */
+/*	$OpenBSD: sili.c,v 1.53 2014/07/13 23:10:23 deraadt Exp $ */
 
 /*
  * Copyright (c) 2007 David Gwynne <dlg@openbsd.org>
@@ -748,7 +748,7 @@ sili_ports_alloc(struct sili_softc *sc)
 	struct sili_port		*sp;
 	int				i;
 
-	sc->sc_ports = malloc(sizeof(struct sili_port) * sc->sc_nports,
+	sc->sc_ports = mallocarray(sc->sc_nports, sizeof(struct sili_port),
 	    M_DEVBUF, M_WAITOK | M_ZERO);
 
 	for (i = 0; i < sc->sc_nports; i++) {
@@ -772,7 +772,7 @@ sili_ports_alloc(struct sili_softc *sc)
 
 freeports:
 	/* bus_space(9) says subregions dont have to be freed */
-	free(sp, M_DEVBUF);
+	free(sp, M_DEVBUF, 0);
 	sc->sc_ports = NULL;
 	return (1);
 }
@@ -791,7 +791,7 @@ sili_ports_free(struct sili_softc *sc)
 	}
 
 	/* bus_space(9) says subregions dont have to be freed */
-	free(sc->sc_ports, M_DEVBUF);
+	free(sc->sc_ports, M_DEVBUF, 0);
 	sc->sc_ports = NULL;
 }
 
@@ -808,7 +808,7 @@ sili_ccb_alloc(struct sili_port *sp)
 	TAILQ_INIT(&sp->sp_active_ccbs);
 	TAILQ_INIT(&sp->sp_deferred_ccbs);
 
-	sp->sp_ccbs = malloc(sizeof(struct sili_ccb) * SILI_MAX_CMDS,
+	sp->sp_ccbs = mallocarray(SILI_MAX_CMDS, sizeof(struct sili_ccb),
 	    M_DEVBUF, M_WAITOK);
 	sp->sp_cmds = sili_dmamem_alloc(sc, SILI_CMD_LEN * SILI_MAX_CMDS,
 	    SILI_PRB_ALIGN);
@@ -859,7 +859,7 @@ sili_ccb_free(struct sili_port *sp)
 	while ((ccb = sili_get_ccb(sp)) != NULL)
 		bus_dmamap_destroy(sc->sc_dmat, ccb->ccb_dmamap);
 
-	free(sp->sp_ccbs, M_DEVBUF);
+	free(sp->sp_ccbs, M_DEVBUF, 0);
 	sp->sp_ccbs = NULL;
 }
 
@@ -943,7 +943,7 @@ free:
 destroy:
 	bus_dmamap_destroy(sc->sc_dmat, sdm->sdm_map);
 sdmfree:
-	free(sdm, M_DEVBUF);
+	free(sdm, M_DEVBUF, 0);
 
 	return (NULL);
 }
@@ -955,7 +955,7 @@ sili_dmamem_free(struct sili_softc *sc, struct sili_dmamem *sdm)
 	bus_dmamem_unmap(sc->sc_dmat, sdm->sdm_kva, sdm->sdm_size);
 	bus_dmamem_free(sc->sc_dmat, &sdm->sdm_seg, 1);
 	bus_dmamap_destroy(sc->sc_dmat, sdm->sdm_map);
-	free(sdm, M_DEVBUF);
+	free(sdm, M_DEVBUF, 0);
 }
 
 u_int32_t

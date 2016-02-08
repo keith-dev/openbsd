@@ -1,4 +1,4 @@
-/*	$OpenBSD: tmpfs_mem.c,v 1.2 2013/06/03 10:37:02 espie Exp $	*/
+/*	$OpenBSD: tmpfs_mem.c,v 1.4 2014/07/12 18:50:25 tedu Exp $	*/
 /*	$NetBSD: tmpfs_mem.c,v 1.4 2011/05/24 01:09:47 rmind Exp $	*/
 
 /*
@@ -44,6 +44,7 @@ __KERNEL_RCSID(0, "$NetBSD: tmpfs_mem.c,v 1.4 2011/05/24 01:09:47 rmind Exp $");
 #include <sys/namei.h>
 #include <sys/pool.h>
 #include <sys/vnode.h>
+#include <sys/sysctl.h>
 #include <sys/malloc.h>
 
 #include <tmpfs/tmpfs.h>
@@ -217,7 +218,7 @@ tmpfs_strname_free(struct tmpfs_mount *mp, char *str, size_t len)
 
 	KASSERT(sz > 0 && sz <= 1024);
 	tmpfs_mem_decr(mp, sz);
-	free(str, M_TEMP);
+	free(str, M_TEMP, 0);
 }
 
 int

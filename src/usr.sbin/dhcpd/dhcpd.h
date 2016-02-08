@@ -1,4 +1,4 @@
-/*	$OpenBSD: dhcpd.h,v 1.47 2013/04/17 19:26:10 krw Exp $ */
+/*	$OpenBSD: dhcpd.h,v 1.52 2014/07/11 16:48:29 yasuoka Exp $ */
 
 /*
  * Copyright (c) 1995, 1996, 1997, 1998, 1999
@@ -180,6 +180,7 @@ struct lease {
 #define EPHEMERAL_FLAGS		(BOOTP_LEASE)
 #define MS_NULL_TERMINATION	8
 #define ABANDONED_LEASE		16
+#define INFORM_NOLEASE		32
 
 	struct lease_state *state;
 	u_int8_t releasing;
@@ -424,6 +425,9 @@ struct interface_info {
 	int errors;
 	int dead;
 	u_int16_t	index;
+	int is_udpsock;
+	ssize_t (*send_packet)(struct interface_info *, struct dhcp_packet *,
+	    size_t, struct in_addr, struct sockaddr_in *, struct hardware *);
 };
 
 struct hardware_link {
@@ -616,8 +620,6 @@ char *print_hw_addr(int, int, unsigned char *);
 /* bpf.c */
 int if_register_bpf(struct interface_info *);
 void if_register_send(struct interface_info *);
-ssize_t send_packet(struct interface_info *, struct dhcp_packet *, size_t,
-    struct in_addr, struct sockaddr_in *, struct hardware *);
 void if_register_receive(struct interface_info *);
 ssize_t receive_packet(struct interface_info *, unsigned char *, size_t,
     struct sockaddr_in *, struct hardware *);
@@ -625,8 +627,6 @@ ssize_t receive_packet(struct interface_info *, unsigned char *, size_t,
 /* dispatch.c */
 extern struct interface_info *interfaces;
 extern struct protocol *protocols;
-extern void (*bootp_packet_handler)(struct interface_info *,
-    struct dhcp_packet *, int, unsigned int, struct iaddr, struct hardware *);
 extern struct dhcpd_timeout *timeouts;
 void discover_interfaces(int *);
 void dispatch(void);
@@ -699,3 +699,6 @@ size_t atomicio(ssize_t (*)(int, void *, size_t), int, void *, size_t);
 #define vwrite (ssize_t (*)(int, void *, size_t))write
 void pfmsg(char, struct lease *);
 extern struct syslog_data sdata;
+
+/* udpsock.c */
+void udpsock_startup(struct in_addr);

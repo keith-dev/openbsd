@@ -1,4 +1,4 @@
-/* $OpenBSD: x509.c,v 1.115 2013/11/14 15:44:06 deraadt Exp $	 */
+/* $OpenBSD: x509.c,v 1.117 2014/05/01 07:35:57 jsg Exp $	 */
 /* $EOM: x509.c,v 1.54 2001/01/16 18:42:16 ho Exp $	 */
 
 /*
@@ -295,7 +295,7 @@ x509_generate_kn(int id, X509 *cert)
 	}
 
 	tm = X509_get_notAfter(cert);
-	if (tm == NULL &&
+	if (tm == NULL ||
 	    (tm->type != V_ASN1_UTCTIME &&
 		tm->type != V_ASN1_GENERALIZEDTIME)) {
 		tt = time(0);
@@ -1153,6 +1153,7 @@ x509_cert_get_subjects(void *scert, int *cnt, u_int8_t ***id,
 	if (!*id) {
 		log_print("x509_cert_get_subject: malloc (%lu) failed",
 		    *cnt * (unsigned long)sizeof **id);
+		*cnt = 0;
 		goto fail;
 	}
 	*id_len = calloc(*cnt, sizeof **id_len);

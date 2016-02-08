@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_exit.c,v 1.135 2014/02/12 05:47:36 guenther Exp $	*/
+/*	$OpenBSD: kern_exit.c,v 1.147 2014/07/12 18:43:32 tedu Exp $	*/
 /*	$NetBSD: kern_exit.c,v 1.39 1996/04/22 01:38:25 christos Exp $	*/
 
 /*
@@ -45,6 +45,7 @@
 #include <sys/time.h>
 #include <sys/resource.h>
 #include <sys/kernel.h>
+#include <sys/sysctl.h>
 #include <sys/buf.h>
 #include <sys/wait.h>
 #include <sys/file.h>
@@ -69,9 +70,6 @@
 
 #include <sys/mount.h>
 #include <sys/syscallargs.h>
-
-
-#include <uvm/uvm_extern.h>
 
 /*
  * exit --
@@ -117,10 +115,6 @@ exit1(struct proc *p, int rv, int flags)
 	struct process *pr, *qr, *nqr;
 	struct rusage *rup;
 	struct vnode *ovp;
-
-	if (p->p_pid == 1)
-		panic("init died (signal %d, exit %d)",
-		    WTERMSIG(rv), WEXITSTATUS(rv));
 	
 	atomic_setbits_int(&p->p_flag, P_WEXIT);
 
@@ -139,6 +133,10 @@ exit1(struct proc *p, int rv, int flags)
 	}
 
 	if (flags == EXIT_NORMAL) {
+		if (pr->ps_pid == 1)
+			panic("init died (signal %d, exit %d)",
+			    WTERMSIG(rv), WEXITSTATUS(rv));
+
 		atomic_setbits_int(&pr->ps_flags, PS_EXITING);
 		pr->ps_mainproc->p_xstat = rv;
 
@@ -158,12 +156,10 @@ exit1(struct proc *p, int rv, int flags)
 	TAILQ_REMOVE(&pr->ps_threads, p, p_thr_link);
 	if ((p->p_flag & P_THREAD) == 0) {
 		/* main thread gotta wait because it has the pid, et al */
-		while (!TAILQ_EMPTY(&pr->ps_threads))
+		while (pr->ps_refcnt > 1)
 			tsleep(&pr->ps_threads, PUSER, "thrdeath", 0);
 		if (pr->ps_flags & PS_PROFIL)
 			stopprofclock(pr);
-	} else if (TAILQ_EMPTY(&pr->ps_threads)) {
-		wakeup(&pr->ps_threads);
 	}
 
 	rup = pr->ps_ru;
@@ -178,12 +174,10 @@ exit1(struct proc *p, int rv, int flags)
 	}
 	p->p_siglist = 0;
 
-	/*
-	 * Close open files and release open-file table.
-	 */
-	fdfree(p);
-
 	if ((p->p_flag & P_THREAD) == 0) {
+		/* close open files and release open-file table */
+		fdfree(p);
+
 		timeout_del(&pr->ps_realit_to);
 #ifdef SYSVSEM
 		semexit(pr);
@@ -240,10 +234,11 @@ exit1(struct proc *p, int rv, int flags)
 		 * If parent has the SAS_NOCLDWAIT flag set, we're not
 		 * going to become a zombie.
 		 */
-		if (pr->ps_pptr->ps_mainproc->p_sigacts->ps_flags &
-		    SAS_NOCLDWAIT)
+		if (pr->ps_pptr->ps_sigacts->ps_flags & SAS_NOCLDWAIT)
 			atomic_setbits_int(&pr->ps_flags, PS_NOZOMBIE);
 	}
+
+	p->p_fd = NULL;		/* zap the thread's copy */
 
 #if NSYSTRACE > 0
 	if (ISSET(p->p_flag, P_SYSTRACE))
@@ -251,10 +246,10 @@ exit1(struct proc *p, int rv, int flags)
 #endif
 
 	/*
-	 * If emulation has process exit hook, call it now.
+	 * If emulation has thread exit hook, call it now.
 	 */
-	if (p->p_emul->e_proc_exit)
-		(*p->p_emul->e_proc_exit)(p);
+	if (pr->ps_emul->e_proc_exit)
+		(*pr->ps_emul->e_proc_exit)(p);
 
         /*
 	 * Remove proc from pidhash chain and allproc so looking
@@ -291,10 +286,10 @@ exit1(struct proc *p, int rv, int flags)
 		 */
 		qr = LIST_FIRST(&pr->ps_children);
 		if (qr)		/* only need this if any child is S_ZOMB */
-			wakeup(initproc->p_p);
+			wakeup(initprocess);
 		for (; qr != 0; qr = nqr) {
 			nqr = LIST_NEXT(qr, ps_sibling);
-			proc_reparent(qr, initproc->p_p);
+			proc_reparent(qr, initprocess);
 			/*
 			 * Traced processes are killed since their
 			 * existence means someone is screwing up.
@@ -334,7 +329,7 @@ exit1(struct proc *p, int rv, int flags)
 		ruadd(rup, &pr->ps_cru);
 
 		/* notify interested parties of our demise and clean up */
-		knote_processexit(pr);
+		knote_processexit(p);
 
 		/*
 		 * Notify parent that we're gone.  If we're not going to
@@ -344,20 +339,21 @@ exit1(struct proc *p, int rv, int flags)
 		 */
 		if (pr->ps_flags & PS_NOZOMBIE) {
 			struct process *ppr = pr->ps_pptr;
-			proc_reparent(pr, initproc->p_p);
+			proc_reparent(pr, initprocess);
 			wakeup(ppr);
 		}
-	}
 
-	/*
-	 * Release the process's signal state.
-	 */
-	sigactsfree(p);
+		/*
+		 * Release the process's signal state.
+		 */
+		sigactsfree(pr);
+	}
 
 	/* just a thread? detach it from its process */
 	if (p->p_flag & P_THREAD) {
 		/* scheduler_wait_hook(pr->ps_mainproc, p); XXX */
-		--pr->ps_refcnt;
+		if (--pr->ps_refcnt == 1)
+			wakeup(&pr->ps_threads);
 		KASSERT(pr->ps_refcnt > 0);
 	}
 
@@ -413,6 +409,7 @@ exit2(struct proc *p)
 void
 proc_free(struct proc *p)
 {
+	crfree(p->p_ucred);
 	pool_put(&proc_pool, p);
 	nthreads--;
 }
@@ -447,7 +444,8 @@ reaper(void)
 		 * We must do this from a valid thread because doing
 		 * so may block.
 		 */
-		uvm_exit(p);
+		uvm_uarea_free(p);
+		p->p_vmspace = NULL;		/* zap the thread's copy */
 
 		if (p->p_flag & P_THREAD) {
 			/* Just a thread */
@@ -455,9 +453,12 @@ reaper(void)
 		} else {
 			struct process *pr = p->p_p;
 
+			/* Release the rest of the process's vmspace */
+			uvm_exit(pr);
+
 			if ((pr->ps_flags & PS_NOZOMBIE) == 0) {
 				/* Process is now a true zombie. */
-				p->p_stat = SZOMB;
+				atomic_setbits_int(&pr->ps_flags, PS_ZOMBIE);
 				prsignal(pr->ps_pptr, SIGCHLD);
 
 				/* Wake up the parent so it can get exit status. */
@@ -487,10 +488,10 @@ sys_wait4(struct proc *q, void *v, register_t *retval)
 	error = dowait4(q, SCARG(uap, pid),
 	    SCARG(uap, status) ? &status : NULL,
 	    SCARG(uap, options), SCARG(uap, rusage) ? &ru : NULL, retval);
-	if (error == 0 && SCARG(uap, status)) {
+	if (error == 0 && retval[0] > 0 && SCARG(uap, status)) {
 		error = copyout(&status, SCARG(uap, status), sizeof(status));
 	}
-	if (error == 0 && SCARG(uap, rusage)) {
+	if (error == 0 && retval[0] > 0 && SCARG(uap, rusage)) {
 		error = copyout(&ru, SCARG(uap, rusage), sizeof(ru));
 #ifdef KTRACE
 		if (error == 0 && KTRPOINT(q, KTR_STRUCT))
@@ -525,7 +526,7 @@ loop:
 			continue;
 
 		nfound++;
-		if (p->p_stat == SZOMB) {
+		if (pr->ps_flags & PS_ZOMBIE) {
 			retval[0] = p->p_pid;
 
 			if (statusp != NULL)
@@ -546,6 +547,8 @@ loop:
 
 			if (statusp != NULL)
 				*statusp = W_STOPCODE(pr->ps_single->p_xstat);
+			if (rusage != NULL)
+				memset(rusage, 0, sizeof(*rusage));
 			return (0);
 		}
 		if (p->p_stat == SSTOP &&
@@ -558,6 +561,8 @@ loop:
 
 			if (statusp != NULL)
 				*statusp = W_STOPCODE(p->p_xstat);
+			if (rusage != NULL)
+				memset(rusage, 0, sizeof(*rusage));
 			return (0);
 		}
 		if ((options & WCONTINUED) && (p->p_flag & P_CONTINUED)) {
@@ -566,6 +571,8 @@ loop:
 
 			if (statusp != NULL)
 				*statusp = _WCONTINUED;
+			if (rusage != NULL)
+				memset(rusage, 0, sizeof(*rusage));
 			return (0);
 		}
 	}
@@ -639,7 +646,7 @@ process_zap(struct process *pr)
 	/*
 	 * Decrement the count of procs running with this uid.
 	 */
-	(void)chgproccnt(pr->ps_cred->p_ruid, -1);
+	(void)chgproccnt(pr->ps_ucred->cr_ruid, -1);
 
 	/*
 	 * Release reference to text vnode
@@ -651,12 +658,11 @@ process_zap(struct process *pr)
 
 	KASSERT(pr->ps_refcnt == 1);
 	if (pr->ps_ptstat != NULL)
-		free(pr->ps_ptstat, M_SUBPROC);
+		free(pr->ps_ptstat, M_SUBPROC, 0);
 	pool_put(&rusage_pool, pr->ps_ru);
 	KASSERT(TAILQ_EMPTY(&pr->ps_threads));
 	limfree(pr->ps_limit);
-	crfree(pr->ps_cred->pc_ucred);
-	pool_put(&pcred_pool, pr->ps_cred);
+	crfree(pr->ps_ucred);
 	pool_put(&process_pool, pr);
 	nprocesses--;
 

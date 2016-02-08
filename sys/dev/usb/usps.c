@@ -1,4 +1,4 @@
-/*	$OpenBSD: usps.c,v 1.4 2013/11/07 10:44:37 pirofti Exp $   */
+/*	$OpenBSD: usps.c,v 1.7 2014/07/12 21:24:33 mpi Exp $   */
 
 /*
  * Copyright (c) 2011 Yojiro UO <yuo@nui.org>
@@ -30,10 +30,6 @@
 #include <dev/usb/usbdi.h>
 #include <dev/usb/usbdi_util.h>
 #include <dev/usb/usbdevs.h>
-
-#ifdef USB_DEBUG
-#define USPS_DEBUG
-#endif
 
 #ifdef USPS_DEBUG
 int	uspsdebug = 0;
@@ -114,7 +110,6 @@ static const struct usb_devno usps_devs[] = {
 int  usps_match(struct device *, void *, void *);
 void usps_attach(struct device *, struct device *, void *);
 int  usps_detach(struct device *, int);
-int  usps_activate(struct device *, int);
 void usps_intr(struct usbd_xfer *, void *, usbd_status);
 
 usbd_status usps_cmd(struct usps_softc *, uint8_t, uint16_t, uint16_t);
@@ -131,11 +126,7 @@ struct cfdriver usps_cd = {
 };
 
 const struct cfattach usps_ca = {
-	sizeof(struct usps_softc),
-	usps_match,
-	usps_attach,
-	usps_detach,
-	usps_activate,
+	sizeof(struct usps_softc), usps_match, usps_attach, usps_detach
 };
 
 int
@@ -301,7 +292,7 @@ fail:
 	if (sc->sc_xfer != NULL)
 		usbd_free_xfer(sc->sc_xfer);
 	if (sc->sc_intrbuf != NULL) 
-		free(sc->sc_intrbuf, M_USBDEV);
+		free(sc->sc_intrbuf, M_USBDEV, 0);
 }
 
 int
@@ -317,7 +308,7 @@ usps_detach(struct device *self, int flags)
 		usbd_abort_pipe(sc->sc_ipipe);
 		usbd_close_pipe(sc->sc_ipipe);
 		if (sc->sc_intrbuf != NULL)
-			free(sc->sc_intrbuf, M_USBDEV);
+			free(sc->sc_intrbuf, M_USBDEV, 0);
 		sc->sc_ipipe = NULL;
 	}
 	if (sc->sc_xfer != NULL)
@@ -343,19 +334,6 @@ usps_detach(struct device *self, int flags)
 		sensor_task_unregister(sc->sc_sensortask);
 
 	return (rv);
-}
-
-int
-usps_activate(struct device *self, int act)
-{
-	struct usps_softc *sc = (struct usps_softc *)self;
-
-	switch (act) {
-	case DVACT_DEACTIVATE:
-		usbd_deactivate(sc->sc_udev);
-		break;
-	}
-	return (0);
 }
 
 usbd_status

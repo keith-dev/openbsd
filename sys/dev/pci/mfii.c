@@ -1,4 +1,4 @@
-/* $OpenBSD: mfii.c,v 1.13 2013/08/30 08:51:56 haesbaert Exp $ */
+/* $OpenBSD: mfii.c,v 1.17 2014/07/13 23:10:23 deraadt Exp $ */
 
 /*
  * Copyright (c) 2012 David Gwynne <dlg@openbsd.org>
@@ -476,7 +476,7 @@ free:
 destroy:
 	bus_dmamap_destroy(sc->sc_dmat, m->mdm_map);
 mdmfree:
-	free(m, M_DEVBUF);
+	free(m, M_DEVBUF, 0);
 
 	return (NULL);
 }
@@ -488,7 +488,7 @@ mfii_dmamem_free(struct mfii_softc *sc, struct mfii_dmamem *m)
 	bus_dmamem_unmap(sc->sc_dmat, m->mdm_kva, m->mdm_size);
 	bus_dmamem_free(sc->sc_dmat, &m->mdm_seg, 1);
 	bus_dmamap_destroy(sc->sc_dmat, m->mdm_map);
-	free(m, M_DEVBUF);
+	free(m, M_DEVBUF, 0);
 }
 
 
@@ -998,14 +998,18 @@ mfii_initialise_firmware(struct mfii_softc *sc)
 	    htole16(sc->sc_reply_postq_depth);
 	iiq->reply_free_queue_depth = htole16(0);
 
-	iiq->sense_buffer_address_high =
-	    htole32(MFII_DMA_DVA(sc->sc_sense) >> 32);
+	htolem32(&iiq->sense_buffer_address_high,
+	    MFII_DMA_DVA(sc->sc_sense) >> 32);
 
-	iiq->reply_descriptor_post_queue_address =
-	    htole64(MFII_DMA_DVA(sc->sc_reply_postq));
+	htolem32(&iiq->reply_descriptor_post_queue_address_lo,
+	    MFII_DMA_DVA(sc->sc_reply_postq));
+	htolem32(&iiq->reply_descriptor_post_queue_address_hi,
+	    MFII_DMA_DVA(sc->sc_reply_postq) >> 32);
 
-	iiq->system_request_frame_base_address =
-	    htole64(MFII_DMA_DVA(sc->sc_requests));
+	htolem32(&iiq->system_request_frame_base_address_lo,
+	    MFII_DMA_DVA(sc->sc_requests));
+	htolem32(&iiq->system_request_frame_base_address_hi,
+	    MFII_DMA_DVA(sc->sc_requests) >> 32);
 
 	iiq->timestamp = htole64(time_uptime);
 
@@ -1378,7 +1382,7 @@ mfii_init_ccb(struct mfii_softc *sc)
 	u_int i;
 	int error;
 
-	sc->sc_ccb = malloc(sizeof(struct mfii_ccb) * sc->sc_max_cmds,
+	sc->sc_ccb = mallocarray(sc->sc_max_cmds, sizeof(struct mfii_ccb),
 	    M_DEVBUF, M_WAITOK|M_ZERO);
 
 	for (i = 0; i < sc->sc_max_cmds; i++) {
@@ -1426,7 +1430,7 @@ destroy:
 	while ((ccb = mfii_get_ccb(sc)) != NULL)
 		bus_dmamap_destroy(sc->sc_dmat, ccb->ccb_dmamap);
 
-	free(sc->sc_ccb, M_DEVBUF);
+	free(sc->sc_ccb, M_DEVBUF, 0);
 
 	return (1);
 }

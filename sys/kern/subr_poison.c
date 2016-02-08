@@ -1,4 +1,4 @@
-/*	$OpenBSD: subr_poison.c,v 1.6 2014/01/13 09:27:39 mpi Exp $ */
+/*	$OpenBSD: subr_poison.c,v 1.11 2014/07/22 21:41:09 deraadt Exp $ */
 /*
  * Copyright (c) 2013 Ted Unangst <tedu@openbsd.org>
  *
@@ -18,6 +18,7 @@
 #include <sys/types.h>
 #include <sys/param.h>
 #include <sys/malloc.h>
+
 #include <uvm/uvm_extern.h>
 
 /*
@@ -36,7 +37,7 @@
 #endif
 #define POISON_SIZE	64
 
-int32_t
+uint32_t
 poison_value(void *v)
 {
 	ulong l = (u_long)v;
@@ -51,7 +52,7 @@ poison_mem(void *v, size_t len)
 {
 	uint32_t *ip = v;
 	size_t i;
-	int32_t poison;
+	uint32_t poison;
 
 	poison = poison_value(v);
 
@@ -63,11 +64,11 @@ poison_mem(void *v, size_t len)
 }
 
 int
-poison_check(void *v, size_t len, size_t *pidx, int *pval)
+poison_check(void *v, size_t len, size_t *pidx, uint32_t *pval)
 {
 	uint32_t *ip = v;
 	size_t i;
-	int32_t poison;
+	uint32_t poison;
 
 	poison = poison_value(v);
 

@@ -1,4 +1,4 @@
-/*	$OpenBSD: uhid.c,v 1.55 2013/11/19 14:04:07 pirofti Exp $ */
+/*	$OpenBSD: uhid.c,v 1.58 2014/07/12 18:48:52 tedu Exp $ */
 /*	$NetBSD: uhid.c,v 1.57 2003/03/11 16:44:00 augustss Exp $	*/
 
 /*
@@ -114,11 +114,10 @@ const struct cfattach uhid_ca = {
 int
 uhid_match(struct device *parent, void *match, void *aux)
 {
-#ifdef UHID_DEBUG
-	struct uhidev_attach_arg *uha = (struct uhidev_attach_arg *)aux;
-#endif
+	struct uhidev_attach_arg *uha = aux;
 
-	DPRINTF(("uhid_match: report=%d\n", uha->reportid));
+	if (uha->reportid == UHIDEV_CLAIM_ALLREPORTID)
+		return (UMATCH_NONE);
 
 	return (UMATCH_IFACECLASS_GENERIC);
 }
@@ -248,7 +247,7 @@ uhidclose(dev_t dev, int flag, int mode, struct proc *p)
 	DPRINTF(("uhidclose: sc=%p\n", sc));
 
 	clfree(&sc->sc_q);
-	free(sc->sc_obuf, M_USBDEV);
+	free(sc->sc_obuf, M_USBDEV, 0);
 	sc->sc_async = NULL;
 	uhidev_close(&sc->sc_hdev);
 
@@ -270,7 +269,8 @@ uhid_do_read(struct uhid_softc *sc, struct uio *uio, int flag)
 		DPRINTFN(1, ("uhidread immed\n"));
 		extra = sc->sc_hdev.sc_report_id != 0;
 		err = uhidev_get_report(&sc->sc_hdev, UHID_INPUT_REPORT,
-					buffer, sc->sc_hdev.sc_isize + extra);
+		    sc->sc_hdev.sc_report_id, buffer,
+		    sc->sc_hdev.sc_isize + extra);
 		if (err)
 			return (EIO);
 		return (uiomove(buffer+extra, sc->sc_hdev.sc_isize, uio));
@@ -347,7 +347,7 @@ uhid_do_write(struct uhid_softc *sc, struct uio *uio, int flag)
 	error = uiomove(sc->sc_obuf, size, uio);
 	if (!error) {
 		err = uhidev_set_report(&sc->sc_hdev, UHID_OUTPUT_REPORT,
-					sc->sc_obuf, size);
+		    sc->sc_hdev.sc_report_id, sc->sc_obuf, size);
 		if (err)
 			error = EIO;
 	}
@@ -411,7 +411,8 @@ uhid_do_ioctl(struct uhid_softc *sc, u_long cmd, caddr_t addr,
 		if (*(int *)addr) {
 			extra = sc->sc_hdev.sc_report_id != 0;
 			err = uhidev_get_report(&sc->sc_hdev, UHID_INPUT_REPORT,
-			    buffer, sc->sc_hdev.sc_isize + extra);
+			    sc->sc_hdev.sc_report_id, buffer,
+			    sc->sc_hdev.sc_isize + extra);
 			if (err)
 				return (EOPNOTSUPP);
 

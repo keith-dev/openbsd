@@ -1,4 +1,4 @@
-/*	$OpenBSD: bootp.c,v 1.12 2006/02/06 17:37:28 jmc Exp $	*/
+/*	$OpenBSD: bootp.c,v 1.14 2014/07/13 15:31:20 mpi Exp $	*/
 /*	$NetBSD: bootp.c,v 1.10 1996/10/13 02:28:59 christos Exp $	*/
 
 /*
@@ -43,14 +43,13 @@
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
-#include <netinet/in_systm.h>
 
 #include "stand.h"
 #include "net.h"
 #include "netif.h"
 #include "bootp.h"
 
-static n_long	nmask, smask;
+static u_int32_t	nmask, smask;
 
 static time_t	bot;
 
@@ -70,11 +69,11 @@ bootp(int sock)
 	struct iodesc *d;
 	struct bootp *bp;
 	struct {
-		u_char header[HEADER_SIZE];
+		struct packet_header header;
 		struct bootp wbootp;
 	} wbuf;
 	struct {
-		u_char header[HEADER_SIZE];
+		struct packet_header header;
 		struct bootp rbootp;
 	} rbuf;
 

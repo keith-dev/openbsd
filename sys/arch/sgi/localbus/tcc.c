@@ -1,4 +1,4 @@
-/*	$OpenBSD: tcc.c,v 1.2 2012/10/03 11:18:23 miod Exp $	*/
+/*	$OpenBSD: tcc.c,v 1.5 2014/05/19 21:18:42 miod Exp $	*/
 
 /*
  * Copyright (c) 2012 Miodrag Vallat.
@@ -107,7 +107,7 @@ tcc_bus_error(uint32_t hwpend, struct trap_frame *tf)
 	error = tcc_read(TCC_ERROR);
 	addr = tcc_read(TCC_BERR_ADDR);
 
-	printf("tcc bus error: intr %lx error %lx (%d) addr %08lx\n",
+	printf("tcc bus error: intr %llx error %llx (%llu) addr %08llx\n",
 	    intr, error, (error & TCC_ERROR_TYPE_MASK) >> TCC_ERROR_TYPE_SHIFT,
 	    addr);
 
@@ -130,10 +130,10 @@ tcc_bus_error(uint32_t hwpend, struct trap_frame *tf)
  */
 
 #define	tcc_cache_hit(addr,op) \
-__asm__ __volatile__ ("lw $0, %0(%1)" :: "i" (TCC_CACHEOP_HIT), \
+__asm__ volatile ("lw $0, %0(%1)" :: "i" (TCC_CACHEOP_HIT), \
     "r" (PHYS_TO_XKPHYS(TCC_CACHEOP_BASE | (addr) | (op), CCA_NC)) : "memory")
 #define	tcc_cache_index(s,i,op) \
-__asm__ __volatile__ ("lw $0, %0(%1)" :: "i" (TCC_CACHEOP_INDEX | (op)), \
+__asm__ volatile ("lw $0, %0(%1)" :: "i" (TCC_CACHEOP_INDEX | (op)), \
     "r" (PHYS_TO_XKPHYS(TCC_CACHEOP_BASE | ((s) << TCC_CACHEOP_SET_SHIFT) | \
 	 ((i) << TCC_CACHEOP_INDEX_SHIFT), CCA_NC)) : "memory")
 
@@ -142,16 +142,14 @@ void tcc_virtual(struct cpu_info *, vaddr_t, vsize_t, uint64_t);
 void
 tcc_ConfigCache(struct cpu_info *ci)
 {
-	uint l2line, l2size;
+	struct cache_info l2;
 
-	l2line = ci->ci_l2line;
-	l2size = ci->ci_l2size;
+	l2 = ci->ci_l2;
 
 	tfp_ConfigCache(ci);
 
-	if (l2size != 0) {
-		ci->ci_l2line = l2line;
-		ci->ci_l2size = l2size;
+	if (l2.size != 0) {
+		ci->ci_l2 = l2;
 
 		ci->ci_SyncCache = tcc_SyncCache;
 		ci->ci_SyncDCachePage = tcc_SyncDCachePage;
@@ -167,7 +165,7 @@ tcc_SyncCache(struct cpu_info *ci)
 	uint64_t idx;
 
 	mips_sync();
-	tfp_InvalidateICache(ci, 0, ci->ci_l1instcachesize);
+	tfp_InvalidateICache(ci, 0, ci->ci_l1inst.size);
 
 	/*
 	 * The following relies upon the fact that the (line, set)
@@ -175,7 +173,7 @@ tcc_SyncCache(struct cpu_info *ci)
 	 * a huge number of sets and only one line, we can span the
 	 * whole cache.
 	 */
-	idx = (uint64_t)ci->ci_l2size / TCC_CACHE_LINE;
+	idx = (uint64_t)ci->ci_l2.size / TCC_CACHE_LINE;
 	while (idx != 0) {
 		idx--;
 		tcc_cache_index(idx, 0,
@@ -219,7 +217,7 @@ tcc_virtual(struct cpu_info *ci, vaddr_t va, vsize_t sz, uint64_t op)
 		/* get the proper physical address */
 		if (pmap_extract(pmap_kernel(), va, &pa) == 0) {
 #ifdef DIAGNOSTIC
-			panic("%s: invalid va %p", __func__, va);
+			panic("%s: invalid va %p", __func__, (void *)va);
 #else
 			/* should not happen */
 #endif

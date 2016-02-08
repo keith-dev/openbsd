@@ -1,4 +1,4 @@
-/*	$OpenBSD: exec_elf.c,v 1.94 2014/01/21 01:48:44 tedu Exp $	*/
+/*	$OpenBSD: exec_elf.c,v 1.100 2014/07/13 23:59:58 tedu Exp $	*/
 
 /*
  * Copyright (c) 1996 Per Fogelstrom
@@ -85,7 +85,6 @@
 #include <sys/stat.h>
 
 #include <sys/mman.h>
-#include <uvm/uvm_extern.h>
 
 #include <machine/reg.h>
 #include <machine/exec.h>
@@ -356,8 +355,8 @@ ELFNAME(load_file)(struct proc *p, char *path, struct exec_package *epp,
 		goto bad1;
 	}
 
+	ph = mallocarray(eh.e_phnum, sizeof(Elf_Phdr), M_TEMP, M_WAITOK);
 	phsize = eh.e_phnum * sizeof(Elf_Phdr);
-	ph = malloc(phsize, M_TEMP, M_WAITOK);
 
 	if ((error = ELFNAME(read_from)(p, nd.ni_vp, eh.e_phoff, (caddr_t)ph,
 	    phsize)) != 0)
@@ -491,7 +490,7 @@ ELFNAME(load_file)(struct proc *p, char *path, struct exec_package *epp,
 bad1:
 	VOP_CLOSE(nd.ni_vp, FREAD, p->p_ucred, p);
 bad:
-	free(ph, M_TEMP);
+	free(ph, M_TEMP, 0);
 
 	*last = addr;
 	vput(nd.ni_vp);
@@ -540,8 +539,8 @@ ELFNAME2(exec,makecmds)(struct proc *p, struct exec_package *epp)
 	 * Allocate space to hold all the program headers, and read them
 	 * from the file
 	 */
+	ph = mallocarray(eh->e_phnum, sizeof(Elf_Phdr), M_TEMP, M_WAITOK);
 	phsize = eh->e_phnum * sizeof(Elf_Phdr);
-	ph = malloc(phsize, M_TEMP, M_WAITOK);
 
 	if ((error = ELFNAME(read_from)(p, epp->ep_vp, eh->e_phoff, (caddr_t)ph,
 	    phsize)) != 0)
@@ -751,14 +750,14 @@ ELFNAME2(exec,makecmds)(struct proc *p, struct exec_package *epp)
 		epp->ep_interp_pos = pos;
 	}
 
-	free(ph, M_TEMP);
+	free(ph, M_TEMP, 0);
 	vn_marktext(epp->ep_vp);
 	return (exec_setup_stack(p, epp));
 
 bad:
 	if (interp)
 		pool_put(&namei_pool, interp);
-	free(ph, M_TEMP);
+	free(ph, M_TEMP, 0);
 	kill_vmcmds(&epp->ep_vmcmds);
 	return (ENOEXEC);
 }
@@ -784,7 +783,7 @@ ELFNAME2(exec,fixup)(struct proc *p, struct exec_package *epp)
 	ap = epp->ep_emul_arg;
 
 	if ((error = ELFNAME(load_file)(p, interp, epp, ap, &pos)) != 0) {
-		free(ap, M_TEMP);
+		free(ap, M_TEMP, 0);
 		pool_put(&namei_pool, interp);
 		kill_vmcmds(&epp->ep_vmcmds);
 		return (error);
@@ -835,7 +834,7 @@ ELFNAME2(exec,fixup)(struct proc *p, struct exec_package *epp)
 
 		error = copyout(ai, epp->ep_emul_argp, sizeof ai);
 	}
-	free(ap, M_TEMP);
+	free(ap, M_TEMP, 0);
 	pool_put(&namei_pool, interp);
 	return (error);
 }
@@ -861,8 +860,8 @@ ELFNAME(os_pt_note)(struct proc *p, struct exec_package *epp, Elf_Ehdr *eh,
 	size_t phsize;
 	int error;
 
+	hph = mallocarray(eh->e_phnum, sizeof(Elf_Phdr), M_TEMP, M_WAITOK);
 	phsize = eh->e_phnum * sizeof(Elf_Phdr);
-	hph = malloc(phsize, M_TEMP, M_WAITOK);
 	if ((error = ELFNAME(read_from)(p, epp->ep_vp, eh->e_phoff,
 	    (caddr_t)hph, phsize)) != 0)
 		goto out1;
@@ -880,7 +879,7 @@ ELFNAME(os_pt_note)(struct proc *p, struct exec_package *epp, Elf_Ehdr *eh,
 
 #if 0
 		if (np->type != ELF_NOTE_TYPE_OSVERSION) {
-			free(np, M_TEMP);
+			free(np, M_TEMP, 0);
 			np = NULL;
 			continue;
 		}
@@ -903,9 +902,9 @@ ELFNAME(os_pt_note)(struct proc *p, struct exec_package *epp, Elf_Ehdr *eh,
 out3:
 	error = ENOEXEC;
 out2:
-	free(np, M_TEMP);
+	free(np, M_TEMP, 0);
 out1:
-	free(hph, M_TEMP);
+	free(hph, M_TEMP, 0);
 	return error;
 }
 
@@ -1006,7 +1005,7 @@ ELFNAMEEND(coredump)(struct proc *p, void *cookie)
 	notestart = offset + sizeof(phdr) * cs.npsections;
 	secstart = notestart + notesize;
 
-	psections = malloc(cs.npsections * sizeof(Elf_Phdr),
+	psections = mallocarray(cs.npsections, sizeof(Elf_Phdr),
 	    M_TEMP, M_WAITOK|M_ZERO);
 
 	/* Pass 2: now write the P-section headers. */
@@ -1078,7 +1077,7 @@ ELFNAMEEND(coredump)(struct proc *p, void *cookie)
 	}
 
 out:
-	free(psections, M_TEMP);
+	free(psections, M_TEMP, 0);
 	return (error);
 #endif
 }
@@ -1158,8 +1157,8 @@ ELFNAMEEND(coredump_notes)(struct proc *p, void *iocookie, size_t *sizep)
 
 		cpi.cpi_sigpend = p->p_siglist;
 		cpi.cpi_sigmask = p->p_sigmask;
-		cpi.cpi_sigignore = p->p_sigacts->ps_sigignore;
-		cpi.cpi_sigcatch = p->p_sigacts->ps_sigcatch;
+		cpi.cpi_sigignore = pr->ps_sigacts->ps_sigignore;
+		cpi.cpi_sigcatch = pr->ps_sigacts->ps_sigcatch;
 
 		cpi.cpi_pid = pr->ps_pid;
 		cpi.cpi_ppid = pr->ps_pptr->ps_pid;
@@ -1169,13 +1168,13 @@ ELFNAMEEND(coredump_notes)(struct proc *p, void *iocookie, size_t *sizep)
 		else
 			cpi.cpi_sid = 0;
 
-		cpi.cpi_ruid = p->p_cred->p_ruid;
+		cpi.cpi_ruid = p->p_ucred->cr_ruid;
 		cpi.cpi_euid = p->p_ucred->cr_uid;
-		cpi.cpi_svuid = p->p_cred->p_svuid;
+		cpi.cpi_svuid = p->p_ucred->cr_svuid;
 
-		cpi.cpi_rgid = p->p_cred->p_rgid;
+		cpi.cpi_rgid = p->p_ucred->cr_rgid;
 		cpi.cpi_egid = p->p_ucred->cr_gid;
-		cpi.cpi_svgid = p->p_cred->p_svgid;
+		cpi.cpi_svgid = p->p_ucred->cr_svgid;
 
 		(void)strlcpy(cpi.cpi_name, p->p_comm, sizeof(cpi.cpi_name));
 
@@ -1192,7 +1191,7 @@ ELFNAMEEND(coredump_notes)(struct proc *p, void *iocookie, size_t *sizep)
 
 	/* Second, write an NT_OPENBSD_AUXV note. */
 	notesize = sizeof(nhdr) + elfround(sizeof("OpenBSD")) +
-	    elfround(p->p_emul->e_arglen * sizeof(char *));
+	    elfround(pr->ps_emul->e_arglen * sizeof(char *));
 	if (iocookie) {
 		iov.iov_base = &pss;
 		iov.iov_len = sizeof(pss);
@@ -1212,7 +1211,7 @@ ELFNAMEEND(coredump_notes)(struct proc *p, void *iocookie, size_t *sizep)
 			return (EIO);
 
 		nhdr.namesz = sizeof("OpenBSD");
-		nhdr.descsz = p->p_emul->e_arglen * sizeof(char *);
+		nhdr.descsz = pr->ps_emul->e_arglen * sizeof(char *);
 		nhdr.type = NT_OPENBSD_AUXV;
 
 		error = coredump_write(iocookie, UIO_SYSSPACE,

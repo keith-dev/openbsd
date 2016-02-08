@@ -1,4 +1,4 @@
-/*	$OpenBSD: nd6.h,v 1.36 2014/01/07 17:07:46 mikeb Exp $	*/
+/*	$OpenBSD: nd6.h,v 1.38 2014/07/11 15:03:17 blambert Exp $	*/
 /*	$KAME: nd6.h,v 1.95 2002/06/08 11:31:06 itojun Exp $	*/
 
 /*
@@ -32,6 +32,8 @@
 
 #ifndef _NETINET6_ND6_H_
 #define _NETINET6_ND6_H_
+
+#include <sys/task.h>
 
 /* see net/route.h, or net/if_inarp.h */
 #ifndef RTF_ANNOUNCE
@@ -184,6 +186,8 @@ struct nd_prefix {
 	struct sockaddr_in6 ndpr_prefix;	/* prefix */
 	struct in6_addr ndpr_mask; /* netmask derived from the prefix */
 
+	struct task ndpr_task;
+
 	time_t ndpr_expire;	/* expiration time of the prefix */
 	time_t ndpr_preferred;	/* preferred time of the prefix */
 	time_t ndpr_lastupdate; /* reception time of last advertisement */
@@ -215,7 +219,6 @@ extern int nd6_prune;
 extern int nd6_delay;
 extern int nd6_umaxtries;
 extern int nd6_mmaxtries;
-extern int nd6_useloopback;
 extern int nd6_maxnudhint;
 extern int nd6_gctimer;
 extern struct llinfo_nd6 llinfo_nd6;

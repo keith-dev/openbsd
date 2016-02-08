@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.h,v 1.132 2014/02/13 23:11:06 kettenis Exp $	*/
+/*	$OpenBSD: cpu.h,v 1.134 2014/07/11 10:53:07 uebayasi Exp $	*/
 /*	$NetBSD: cpu.h,v 1.35 1996/05/05 19:29:26 christos Exp $	*/
 
 /*-
@@ -208,7 +208,7 @@ curcpu(void)
 	struct cpu_info *ci;
 
 	/* Can't include sys/param.h for offsetof() since it includes us */
-	__asm __volatile("movl %%fs:%1, %0" :
+	__asm volatile("movl %%fs:%1, %0" :
 		"=r" (ci) : "m"
 		(*(struct cpu_info * const *)&((struct cpu_info *)0)->ci_self));
 	return ci;
@@ -225,6 +225,8 @@ extern void cpu_init_idle_pcbs(void);
 void cpu_kick(struct cpu_info *);
 void cpu_unidle(struct cpu_info *);
 
+#define CPU_BUSY_CYCLE()	__asm volatile("pause": : : "memory")
+
 #else /* MULTIPROCESSOR */
 
 #define MAXCPUS			1
@@ -236,6 +238,8 @@ void cpu_unidle(struct cpu_info *);
 
 #define cpu_kick(ci)
 #define cpu_unidle(ci)
+
+#define CPU_BUSY_CYCLE()	do {} while (0)
 
 #endif
 

@@ -1,4 +1,4 @@
-/*	$OpenBSD: slowcgi.c,v 1.27 2014/01/19 00:01:05 djm Exp $ */
+/*	$OpenBSD: slowcgi.c,v 1.34 2014/07/13 21:46:25 claudio Exp $ */
 /*
  * Copyright (c) 2013 David Gwynne <dlg@openbsd.org>
  * Copyright (c) 2013 Florian Obser <florian@openbsd.org>
@@ -159,7 +159,7 @@ struct fcgi_end_request_body {
 }__packed;
 
 __dead void	usage(void);
-void		slowcgi_listen(char *, gid_t);
+void		slowcgi_listen(char *, struct passwd *);
 void		slowcgi_paused(int, short, void *);
 int		accept_reserve(int, struct sockaddr *, socklen_t *, int,
 		    volatile int *);
@@ -238,7 +238,8 @@ __dead void
 usage(void)
 {
 	extern char *__progname;
-	fprintf(stderr, "usage: %s [-d] [-s socket]\n", __progname);
+	fprintf(stderr, "usage: %s [-d] [-p path] [-s socket] [-u user]\n",
+	    __progname);
 	exit(1);
 }
 
@@ -255,6 +256,8 @@ main(int argc, char *argv[])
 	struct passwd	*pw;
 	struct stat	 sb;
 	int		 c, fd;
+	const char	*chrootpath = NULL;
+	const char	*slowcgi_user = SLOWCGI_USER;
 
 	/*
 	 * Ensure we have fds 0-2 open so that we have no fd overlaps
@@ -273,13 +276,19 @@ main(int argc, char *argv[])
 		}
 	}
 
-	while ((c = getopt(argc, argv, "ds:")) != -1) {
+	while ((c = getopt(argc, argv, "dp:s:u:")) != -1) {
 		switch (c) {
 		case 'd':
 			debug = 1;
 			break;
+		case 'p':
+			chrootpath = optarg;
+			break;
 		case 's':
 			fcgi_socket = optarg;
+			break;
+		case 'u':
+			slowcgi_user = optarg;
 			break;
 		default:
 			usage();
@@ -289,10 +298,6 @@ main(int argc, char *argv[])
 
 	if (geteuid() != 0)
 		errx(1, "need root privileges");
-
-	pw = getpwnam(SLOWCGI_USER);
-	if (pw == NULL)
-		err(1, "no %s user", SLOWCGI_USER);
 
 	if (!debug && daemon(1, 0) == -1)
 		err(1, "daemon");
@@ -304,15 +309,27 @@ main(int argc, char *argv[])
 
 	event_init();
 
-	slowcgi_listen(fcgi_socket, pw->pw_gid);
+	pw = getpwnam(SLOWCGI_USER);
+	if (pw == NULL)
+		lerrx(1, "no %s user", SLOWCGI_USER);
 
-	if (chroot(pw->pw_dir) == -1)
-		lerr(1, "chroot(%s)", pw->pw_dir);
+	slowcgi_listen(fcgi_socket, pw);
+
+	lwarnx("slowcgi_user: %s", slowcgi_user);
+	pw = getpwnam(slowcgi_user);
+	if (pw == NULL)
+		lerrx(1, "no %s user", slowcgi_user);
+
+	if (chrootpath == NULL)
+		chrootpath = pw->pw_dir;
+
+	if (chroot(chrootpath) == -1)
+		lerr(1, "chroot(%s)", chrootpath);
+
+	ldebug("chroot: %s", chrootpath);
 
 	if (chdir("/") == -1)
-		lerr(1, "chdir(%s)", pw->pw_dir);
-
-	ldebug("chroot: %s", pw->pw_dir);
+		lerr(1, "chdir(/)");
 
 	if (setgroups(1, &pw->pw_gid) ||
 	    setresgid(pw->pw_gid, pw->pw_gid, pw->pw_gid) ||
@@ -333,7 +350,7 @@ main(int argc, char *argv[])
 	return (0);
 }
 void
-slowcgi_listen(char *path, gid_t gid)
+slowcgi_listen(char *path, struct passwd *pw)
 {
 	struct listener		 *l = NULL;
 	struct sockaddr_un	 sun;
@@ -356,18 +373,15 @@ slowcgi_listen(char *path, gid_t gid)
 		if (errno != ENOENT)
 			lerr(1, "slowcgi_listen: unlink %s", path);
 
-	old_umask = umask(S_IXUSR|S_IXGRP|S_IWOTH|S_IROTH|S_IXOTH);
-	mode = S_IRUSR|S_IWUSR|S_IRGRP|S_IWGRP;
+	old_umask = umask(S_IXUSR|S_IXGRP|S_IWOTH|S_IROTH|
+	    S_IXOTH);
 
 	if (bind(fd, (struct sockaddr *)&sun, sizeof(sun)) == -1)
 		lerr(1,"slowcgi_listen: bind: %s", path);
 
 	umask(old_umask);
 
-	if (chmod(path, mode) == -1)
-		lerr(1, "slowcgi_listen: chmod: %s", path);
-
-	if (chown(path, 0, gid) == -1)
+	if (chown(path, pw->pw_uid, pw->pw_gid) == -1)
 		lerr(1, "slowcgi_listen: chown: %s", path);
 
 	if (ioctl(fd, FIONBIO, &on) == -1)
@@ -696,8 +710,8 @@ parse_params(uint8_t *buf, uint16_t n, struct request *c, uint16_t id)
 			buf++;
 		} else {
 			if (n > 3) {
-				name_len = ((buf[3] & 0x7f) << 24) +
-				    (buf[2] << 16) + (buf[1] << 8) + buf[0];
+				name_len = ((buf[0] & 0x7f) << 24) +
+				    (buf[1] << 16) + (buf[2] << 8) + buf[3];
 				n -= 4;
 				buf += 4;
 			} else
@@ -711,9 +725,9 @@ parse_params(uint8_t *buf, uint16_t n, struct request *c, uint16_t id)
 				buf++;
 			} else {
 				if (n > 3) {
-					val_len = ((buf[3] & 0x7f) << 24) +
-					    (buf[2] << 16) + (buf[1] << 8) +
-					     buf[0];
+					val_len = ((buf[0] & 0x7f) << 24) +
+					    (buf[1] << 16) + (buf[2] << 8) +
+					     buf[3];
 					n -= 4;
 					buf += 4;
 				} else
@@ -741,7 +755,11 @@ parse_params(uint8_t *buf, uint16_t n, struct request *c, uint16_t id)
 
 		env_entry->val[name_len] = '\0';
 		if (val_len < MAXPATHLEN && strcmp(env_entry->val,
-		    "SCRIPT_NAME") == 0) {
+		    "SCRIPT_NAME") == 0 && c->script_name[0] == '\0') {
+			bcopy(buf, c->script_name, val_len);
+			c->script_name[val_len] = '\0';
+		} else if (val_len < MAXPATHLEN && strcmp(env_entry->val,
+		    "SCRIPT_FILENAME") == 0) {
 			bcopy(buf, c->script_name, val_len);
 			c->script_name[val_len] = '\0';
 		}
@@ -837,6 +855,7 @@ exec_cgi(struct request *c)
 	pid_t		 pid;
 	char		*argv[2];
 	char		**env;
+	char		*path;
 
 	i = 0;
 
@@ -886,6 +905,19 @@ exec_cgi(struct request *c)
 		close(s_in[1]);
 		close(s_out[1]);
 		close(s_err[1]);
+
+		path = strrchr(c->script_name, '/');
+		if (path != NULL) {
+			if (path != c->script_name) {
+				*path = '\0';
+				if (chdir(c->script_name) == -1)
+					lwarn("cannot chdir to %s",
+					    c->script_name);
+				*path = '/';
+			} else
+				if (chdir("/") == -1)
+					lwarn("cannot chdir to /");
+		}
 
 		argv[0] = c->script_name;
 		argv[1] = NULL;

@@ -1,4 +1,4 @@
-/*	$OpenBSD: setnetbootinfo.c,v 1.2 2003/05/11 19:41:09 deraadt Exp $	*/
+/*	$OpenBSD: setnetbootinfo.c,v 1.4 2014/07/12 19:01:49 tedu Exp $	*/
 /*	$NetBSD: setnetbootinfo.c,v 1.5 1997/04/06 08:41:37 cgd Exp $	*/
 
 /*

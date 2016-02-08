@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.120 2013/07/23 22:37:02 todd Exp $
+#	$OpenBSD: Makefile,v 1.122 2014/07/09 19:23:28 espie Exp $
 
 #
 # For more information on building in tricky environments, please see
@@ -41,14 +41,6 @@ SUBDIR+= gnu
 
 SUBDIR+= sys
 
-.if (${KERBEROS5:L} == "yes")
-SUBDIR+=kerberosV/tools
-SUBDIR+=kerberosV/libexec
-SUBDIR+=kerberosV/usr.bin
-SUBDIR+=kerberosV/usr.sbin
-SUBDIR+=kerberosV/doc
-.endif
-
 .if   make(clean) || make(cleandir) || make(obj)
 SUBDIR+= distrib regress
 .endif
@@ -68,6 +60,7 @@ beforeinstall:
 afterinstall:
 .ifndef NOMAN
 	cd ${.CURDIR}/share/man && exec ${MAKE} makedb
+	cd ${.CURDIR}/distrib/sets && exec ${MAKE} makedb
 .endif
 
 .ifdef DESTDIR

@@ -1,4 +1,4 @@
-/*	$OpenBSD: rtsock.c,v 1.139 2014/02/13 22:01:50 bluhm Exp $	*/
+/*	$OpenBSD: rtsock.c,v 1.150 2014/07/29 12:18:41 mpi Exp $	*/
 /*	$NetBSD: rtsock.c,v 1.18 1996/03/29 00:32:10 cgd Exp $	*/
 
 /*
@@ -64,14 +64,12 @@
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/proc.h>
+#include <sys/sysctl.h>
 #include <sys/mbuf.h>
 #include <sys/socket.h>
 #include <sys/socketvar.h>
 #include <sys/domain.h>
 #include <sys/protosw.h>
-
-#include <uvm/uvm_extern.h>
-#include <sys/sysctl.h>
 
 #include <net/if.h>
 #include <net/route.h>
@@ -158,7 +156,7 @@ route_usrreq(struct socket *so, int req, struct mbuf *m, struct mbuf *nam,
 		else
 			error = raw_attach(so, (int)(long)nam);
 		if (error) {
-			free(rp, M_PCB);
+			free(rp, M_PCB, 0);
 			splx(s);
 			return (error);
 		}
@@ -534,6 +532,7 @@ route_output(struct mbuf *m, ...)
 		}
 	}
 
+
 	/* make sure that kernel-only bits are not set */
 	rtm->rtm_priority &= RTP_MASK;
 	rtm->rtm_flags &= ~(RTF_DONE|RTF_CLONED);
@@ -597,7 +596,7 @@ route_output(struct mbuf *m, ...)
 	case RTM_GET:
 	case RTM_CHANGE:
 	case RTM_LOCK:
-		rnh = rt_gettable(info.rti_info[RTAX_DST]->sa_family, tableid);
+		rnh = rtable_get(tableid, info.rti_info[RTAX_DST]->sa_family);
 		if (rnh == NULL) {
 			error = EAFNOSUPPORT;
 			goto flush;
@@ -611,53 +610,40 @@ route_output(struct mbuf *m, ...)
 			goto flush;
 		}
 #ifndef SMALL_KERNEL
-		/*
-		 * for RTM_CHANGE/LOCK, if we got multipath routes,
-		 * we require users to specify a matching RTAX_GATEWAY.
-		 *
-		 * for RTM_GET, info.rti_info[RTAX_GATEWAY] is optional
-		 * even with multipath.
-		 * if it is NULL the first match is returned (no need to
-		 * call rt_mpath_matchgate).
-		 */
 		if (rn_mpath_capable(rnh)) {
-			/* first find correct priority bucket */
-			rn = rn_mpath_prio(rn, prio);
-			rt = (struct rtentry *)rn;
-			if (prio != RTP_ANY &&
-			    (rt->rt_priority & RTP_MASK) != prio) {
-				error = ESRCH;
-				rt->rt_refcnt++;
-				goto flush;
-			}
-
-			/* if multipath routes */
-			if (rt_mpath_next(rt)) { /* XXX ignores down routes */
-				if (info.rti_info[RTAX_GATEWAY] != NULL) {
-					rt = rt_mpath_matchgate(rt,
-					    info.rti_info[RTAX_GATEWAY], prio);
-				} else if (rtm->rtm_type != RTM_GET) {
-					/*
-					 * only RTM_GET may use an empty
-					 * gateway  on multipath ...
-					 */
-					rt = NULL;
-				}
-			} else if ((info.rti_info[RTAX_GATEWAY] != NULL) &&
-			    (rtm->rtm_type == RTM_GET ||
-			     rtm->rtm_type == RTM_LOCK)) {
-				/*
-				 * ... but if a gateway is specified RTM_GET
-				 * and RTM_LOCK must match the gateway no matter
-				 * what.
-				 */
-				rt = rt_mpath_matchgate(rt,
-				    info.rti_info[RTAX_GATEWAY], prio);
-			}
-
+			/* first find the right priority */
+			rt = rt_mpath_matchgate(rt, NULL, prio);
 			if (!rt) {
 				error = ESRCH;
 				goto flush;
+			}
+			/*
+			 * For RTM_CHANGE/LOCK, if we got multipath routes,
+			 * a matching RTAX_GATEWAY is required.
+			 * OR
+			 * If a gateway is specified then RTM_GET and
+			 * RTM_LOCK must match the gateway no matter
+			 * what even in the non multipath case.
+			 */
+			if ((rt->rt_flags & RTF_MPATH) ||
+			    (info.rti_info[RTAX_GATEWAY] && rtm->rtm_type !=
+			    RTM_CHANGE)) {
+				rt = rt_mpath_matchgate(rt,
+				    info.rti_info[RTAX_GATEWAY], prio);
+				if (!rt) {
+					error = ESRCH;
+					goto flush;
+				}
+				/*
+				 * only RTM_GET may use an empty gateway
+				 * on multipath routes
+				 */
+				if (!info.rti_info[RTAX_GATEWAY] &&
+				    rtm->rtm_type != RTM_GET) {
+					rt = NULL;
+					error = ESRCH;
+					goto flush;
+				}
 			}
 			rn = (struct radix_node *)rt;
 		}
@@ -706,7 +692,7 @@ report:
 			if (rtm->rtm_addrs & (RTA_IFP | RTA_IFA) &&
 			    (ifp = rt->rt_ifp) != NULL) {
 				info.rti_info[RTAX_IFP] =
-				    TAILQ_FIRST(&ifp->if_addrlist)->ifa_addr;
+					(struct sockaddr *)ifp->if_sadl;
 				info.rti_info[RTAX_IFA] = rt->rt_ifa->ifa_addr;
 				if (ifp->if_flags & IFF_POINTOPOINT)
 					info.rti_info[RTAX_BRD] =
@@ -725,7 +711,7 @@ report:
 					goto flush;
 				}
 				memcpy(new_rtm, rtm, rtm->rtm_msglen);
-				free(rtm, M_RTABLE);
+				free(rtm, M_RTABLE, 0);
 				rtm = new_rtm;
 			}
 			rt_msg2(rtm->rtm_type, RTM_VERSION, &info, (caddr_t)rtm,
@@ -759,32 +745,21 @@ report:
 				error = EDQUOT;
 				goto flush;
 			}
-			if (info.rti_info[RTAX_IFP] != NULL && (ifa =
-			    ifa_ifwithnet(info.rti_info[RTAX_IFP], tableid)) &&
-			    (ifp = ifa->ifa_ifp) && (info.rti_info[RTAX_IFA] ||
-			    info.rti_info[RTAX_GATEWAY]))
-				ifa = ifaof_ifpforaddr(info.rti_info[RTAX_IFA] ?
-				    info.rti_info[RTAX_IFA] :
-				    info.rti_info[RTAX_GATEWAY], ifp);
-			else if ((info.rti_info[RTAX_IFA] != NULL && (ifa =
-			    ifa_ifwithaddr(info.rti_info[RTAX_IFA], tableid)))||
-			    (info.rti_info[RTAX_GATEWAY] != NULL && (ifa =
-			    ifa_ifwithroute(rt->rt_flags, rt_key(rt),
-				    info.rti_info[RTAX_GATEWAY], tableid))))
-				ifp = ifa->ifa_ifp;
+			ifa = info.rti_ifa;
 			if (ifa) {
-				struct ifaddr *oifa = rt->rt_ifa;
-				if (oifa != ifa) {
-				    if (oifa && oifa->ifa_rtrequest)
-					oifa->ifa_rtrequest(RTM_DELETE, rt);
-				    ifafree(rt->rt_ifa);
-				    rt->rt_ifa = ifa;
-				    ifa->ifa_refcnt++;
-				    rt->rt_ifp = ifp;
+				if (rt->rt_ifa != ifa) {
+					if (rt->rt_ifa->ifa_rtrequest)
+						rt->rt_ifa->ifa_rtrequest(
+						    RTM_DELETE, rt);
+					ifafree(rt->rt_ifa);
+					rt->rt_ifa = ifa;
+					ifa->ifa_refcnt++;
+					rt->rt_ifp = ifa->ifa_ifp;
 #ifndef SMALL_KERNEL
-				    /* recheck link state after ifp change */
-				    rt_if_linkstate_change(
-					(struct radix_node *)rt, ifp, tableid);
+					/* recheck link state after ifp change*/
+					rt_if_linkstate_change(
+					    (struct radix_node *)rt, rt->rt_ifp,
+					    tableid);
 #endif
 				}
 			}
@@ -823,7 +798,7 @@ report:
 				/* if gateway changed remove MPLS information */
 				if (rt->rt_llinfo != NULL &&
 				    rt->rt_flags & RTF_MPLS) {
-					free(rt->rt_llinfo, M_TEMP);
+					free(rt->rt_llinfo, M_TEMP, 0);
 					rt->rt_llinfo = NULL;
 					rt->rt_flags &= ~RTF_MPLS;
 				}
@@ -881,7 +856,7 @@ flush:
 	if (!(so->so_options & SO_USELOOPBACK)) {
 		if (route_cb.any_count <= 1) {
 fail:
-			free(rtm, M_RTABLE);
+			free(rtm, M_RTABLE, 0);
 			m_freem(m);
 			return (error);
 		}
@@ -896,7 +871,7 @@ fail:
 			m = NULL;
 		} else if (m->m_pkthdr.len > rtm->rtm_msglen)
 			m_adj(m, rtm->rtm_msglen - m->m_pkthdr.len);
-		free(rtm, M_RTABLE);
+		free(rtm, M_RTABLE, 0);
 	}
 	if (m)
 		route_input(m, &route_proto, &route_src, &route_dst);
@@ -1049,7 +1024,7 @@ again:
 		rw->w_needed += len;
 		if (rw->w_needed <= 0 && rw->w_where) {
 			if (rw->w_tmemsize < len) {
-				free(rw->w_tmem, M_RTABLE);
+				free(rw->w_tmem, M_RTABLE, 0);
 				rw->w_tmem = malloc(len, M_RTABLE, M_NOWAIT);
 				if (rw->w_tmem)
 					rw->w_tmemsize = len;
@@ -1168,7 +1143,7 @@ rt_newaddrmsg(int cmd, struct ifaddr *ifa, int error, struct rtentry *rt)
 
 			info.rti_info[RTAX_IFA] = sa = ifa->ifa_addr;
 			info.rti_info[RTAX_IFP] =
-			    TAILQ_FIRST(&ifp->if_addrlist)->ifa_addr;
+			    (struct sockaddr *)ifp->if_sadl;
 			info.rti_info[RTAX_NETMASK] = ifa->ifa_netmask;
 			info.rti_info[RTAX_BRD] = ifa->ifa_dstaddr;
 			if ((m = rt_msg1(ncmd, &info)) == NULL)
@@ -1256,7 +1231,7 @@ sysctl_dumpentry(struct radix_node *rn, void *v, u_int id)
 	info.rti_info[RTAX_NETMASK] = rt_mask(rt);
 	if (rt->rt_ifp) {
 		info.rti_info[RTAX_IFP] =
-		    TAILQ_FIRST(&rt->rt_ifp->if_addrlist)->ifa_addr;
+		    (struct sockaddr *)rt->rt_ifp->if_sadl;
 		info.rti_info[RTAX_IFA] = rt->rt_ifa->ifa_addr;
 		if (rt->rt_ifp->if_flags & IFF_POINTOPOINT)
 			info.rti_info[RTAX_BRD] = rt->rt_ifa->ifa_dstaddr;
@@ -1309,10 +1284,8 @@ sysctl_iflist(int af, struct walkarg *w)
 	TAILQ_FOREACH(ifp, &ifnet, if_list) {
 		if (w->w_arg && w->w_arg != ifp->if_index)
 			continue;
-		ifa = TAILQ_FIRST(&ifp->if_addrlist);
-		if (!ifa)
-			continue;
-		info.rti_info[RTAX_IFP] = ifa->ifa_addr;
+		/* Copy the link-layer address first */
+		info.rti_info[RTAX_IFP] = (struct sockaddr *)ifp->if_sadl;
 		len = rt_msg2(RTM_IFINFO, RTM_VERSION, &info, 0, w);
 		if (w->w_where && w->w_tmem && w->w_needed <= 0) {
 			struct if_msghdr *ifm;
@@ -1329,7 +1302,8 @@ sysctl_iflist(int af, struct walkarg *w)
 			w->w_where += len;
 		}
 		info.rti_info[RTAX_IFP] = NULL;
-		while ((ifa = TAILQ_NEXT(ifa, ifa_list)) != NULL) {
+		TAILQ_FOREACH(ifa, &ifp->if_addrlist, ifa_list) {
+			KASSERT(ifa->ifa_addr->sa_family != AF_LINK);
 			if (af && af != ifa->ifa_addr->sa_family)
 				continue;
 			info.rti_info[RTAX_IFA] = ifa->ifa_addr;
@@ -1392,7 +1366,7 @@ sysctl_rtable(int *name, u_int namelen, void *where, size_t *given, void *new,
 	case NET_RT_DUMP:
 	case NET_RT_FLAGS:
 		for (i = 1; i <= AF_MAX; i++)
-			if ((rnh = rt_gettable(i, tableid)) != NULL &&
+			if ((rnh = rtable_get(tableid, i)) != NULL &&
 			    (af == 0 || af == i) &&
 			    (error = (*rnh->rnh_walktree)(rnh,
 			    sysctl_dumpentry, &w)))
@@ -1422,7 +1396,7 @@ sysctl_rtable(int *name, u_int namelen, void *where, size_t *given, void *new,
 		return (error);
 	}
 	splx(s);
-	free(w.w_tmem, M_RTABLE);
+	free(w.w_tmem, M_RTABLE, 0);
 	w.w_needed += w.w_given;
 	if (where) {
 		*given = w.w_where - (caddr_t)where;

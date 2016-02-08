@@ -1,4 +1,4 @@
-/*	$OpenBSD: umodem.c,v 1.55 2014/01/30 20:37:03 mpi Exp $ */
+/*	$OpenBSD: umodem.c,v 1.57 2014/07/12 20:26:33 mpi Exp $ */
 /*	$NetBSD: umodem.c,v 1.45 2002/09/23 05:51:23 simonb Exp $	*/
 
 /*
@@ -138,23 +138,18 @@ struct ucom_methods umodem_methods = {
 	NULL,
 };
 
-int umodem_match(struct device *, void *, void *); 
-void umodem_attach(struct device *, struct device *, void *); 
-int umodem_detach(struct device *, int); 
-int umodem_activate(struct device *, int); 
+int umodem_match(struct device *, void *, void *);
+void umodem_attach(struct device *, struct device *, void *);
+int umodem_detach(struct device *, int);
 
 void umodem_get_caps(struct usb_attach_arg *, int, int *, int *, int *);
 
-struct cfdriver umodem_cd = { 
-	NULL, "umodem", DV_DULL 
-}; 
+struct cfdriver umodem_cd = {
+	NULL, "umodem", DV_DULL
+};
 
-const struct cfattach umodem_ca = { 
-	sizeof(struct umodem_softc), 
-	umodem_match, 
-	umodem_attach, 
-	umodem_detach, 
-	umodem_activate, 
+const struct cfattach umodem_ca = {
+	sizeof(struct umodem_softc), umodem_match, umodem_attach, umodem_detach
 };
 
 void
@@ -576,7 +571,7 @@ umodem_ioctl(void *addr, int portno, u_long cmd, caddr_t data, int flag,
 	if (usbd_is_dying(sc->sc_udev))
 		return (EIO);
 
-	DPRINTF(("umodemioctl: cmd=0x%08lx\n", cmd));
+	DPRINTF(("umodem_ioctl: cmd=0x%08lx\n", cmd));
 
 	switch (cmd) {
 	case USB_GET_CM_OVER_DATA:
@@ -590,7 +585,7 @@ umodem_ioctl(void *addr, int portno, u_long cmd, caddr_t data, int flag,
 		break;
 
 	default:
-		DPRINTF(("umodemioctl: unknown\n"));
+		DPRINTF(("umodem_ioctl: unknown\n"));
 		error = ENOTTY;
 		break;
 	}
@@ -601,7 +596,7 @@ umodem_ioctl(void *addr, int portno, u_long cmd, caddr_t data, int flag,
 void
 umodem_dtr(struct umodem_softc *sc, int onoff)
 {
-	DPRINTF(("umodem_modem: onoff=%d\n", onoff));
+	DPRINTF(("umodem_dtr: onoff=%d\n", onoff));
 
 	if (sc->sc_dtr == onoff)
 		return;
@@ -613,7 +608,7 @@ umodem_dtr(struct umodem_softc *sc, int onoff)
 void
 umodem_rts(struct umodem_softc *sc, int onoff)
 {
-	DPRINTF(("umodem_modem: onoff=%d\n", onoff));
+	DPRINTF(("umodem_rts: onoff=%d\n", onoff));
 
 	if (sc->sc_rts == onoff)
 		return;
@@ -738,19 +733,6 @@ umodem_set_comm_feature(struct umodem_softc *sc, int feature, int state)
 	}
 
 	return (USBD_NORMAL_COMPLETION);
-}
-
-int
-umodem_activate(struct device *self, int act)
-{
-	struct umodem_softc *sc = (struct umodem_softc *)self;
-
-	switch (act) {
-	case DVACT_DEACTIVATE:
-		usbd_deactivate(sc->sc_udev);
-		break;
-	}
-	return (0);
 }
 
 int

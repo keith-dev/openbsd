@@ -1,4 +1,4 @@
-/*	$OpenBSD: util.c,v 1.108 2014/02/04 10:38:06 eric Exp $	*/
+/*	$OpenBSD: util.c,v 1.110 2014/05/25 10:55:36 espie Exp $	*/
 
 /*
  * Copyright (c) 2000,2001 Markus Friedl.  All rights reserved.
@@ -353,7 +353,7 @@ mvpurge(char *from, char *to)
 	retry = 0;
 
 again:
-	snprintf(buf, sizeof buf, "%s%s%u", to, sep, arc4random());
+	(void)snprintf(buf, sizeof buf, "%s%s%u", to, sep, arc4random());
 	if (rename(from, buf) == -1) {
 		/* ENOTDIR has actually 2 meanings, and incorrect input
 		 * could lead to an infinite loop. Consider that after
@@ -540,7 +540,7 @@ secure_file(int fd, char *path, char *userdir, uid_t uid, int mayread)
 	for (;;) {
 		if ((cp = dirname(buf)) == NULL)
 			return 0;
-		strlcpy(buf, cp, sizeof(buf));
+		(void)strlcpy(buf, cp, sizeof(buf));
 
 		if (stat(buf, &st) < 0 ||
 		    (st.st_uid != 0 && st.st_uid != uid) ||
@@ -583,11 +583,9 @@ addargs(arglist *args, char *fmt, ...)
 	} else if (args->num+2 >= nalloc)
 		nalloc *= 2;
 
-	if (SIZE_T_MAX / nalloc < sizeof(char *))
-		fatalx("addargs: nalloc * size > SIZE_T_MAX");
-	args->list = realloc(args->list, nalloc * sizeof(char *));
+	args->list = reallocarray(args->list, nalloc, sizeof(char *));
 	if (args->list == NULL)
-		fatal("addargs: realloc");
+		fatal("addargs: reallocarray");
 	args->nalloc = nalloc;
 	args->list[args->num++] = cp;
 	args->list[args->num] = NULL;

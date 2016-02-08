@@ -1,4 +1,4 @@
-/*	$OpenBSD: rtadvd.c,v 1.45 2013/05/05 14:25:52 dtucker Exp $	*/
+/*	$OpenBSD: rtadvd.c,v 1.47 2014/07/04 22:39:31 guenther Exp $	*/
 /*	$KAME: rtadvd.c,v 1.66 2002/05/29 14:18:36 itojun Exp $	*/
 
 /*
@@ -121,6 +121,7 @@ union nd_opts {
 #define NDOPT_FLAG_MTU		(1 << 4)
 #define NDOPT_FLAG_RDNSS	(1 << 5)
 #define NDOPT_FLAG_DNSSL	(1 << 6)
+#define NDOPT_FLAG_ROUTE_INFO	(1 << 7)
 
 u_int32_t ndopt_flags[] = {
 	[ND_OPT_SOURCE_LINKADDR]	= NDOPT_FLAG_SRCLINKADDR,
@@ -128,6 +129,7 @@ u_int32_t ndopt_flags[] = {
 	[ND_OPT_PREFIX_INFORMATION]	= NDOPT_FLAG_PREFIXINFO,
 	[ND_OPT_REDIRECTED_HEADER]	= NDOPT_FLAG_RDHDR,
 	[ND_OPT_MTU]			= NDOPT_FLAG_MTU,
+	[ND_OPT_ROUTE_INFO]		= NDOPT_FLAG_ROUTE_INFO,
 	[ND_OPT_RDNSS]			= NDOPT_FLAG_RDNSS,
 	[ND_OPT_DNSSL]			= NDOPT_FLAG_DNSSL,
 };
@@ -247,15 +249,14 @@ main(argc, argv)
 		fatal("cannot drop privileges");
 
 	fdmasks = howmany(maxfd + 1, NFDBITS) * sizeof(fd_mask);
-	if ((fdsetp = malloc(fdmasks)) == NULL) {
-		err(1, "malloc");
+	if ((fdsetp = calloc(1, fdmasks)) == NULL) {
+		err(1, "calloc");
 		/*NOTREACHED*/
 	}
 	if ((selectfdp = malloc(fdmasks)) == NULL) {
 		err(1, "malloc");
 		/*NOTREACHED*/
 	}
-	memset(fdsetp, 0, fdmasks);
 	FD_SET(sock, fdsetp);
 	if (rtsock >= 0)
 		FD_SET(rtsock, fdsetp);
@@ -809,7 +810,8 @@ ra_input(int len, struct nd_router_advert *ra,
 	if (nd6_options((struct nd_opt_hdr *)(ra + 1),
 			len - sizeof(struct nd_router_advert),
 			&ndopts, NDOPT_FLAG_SRCLINKADDR | NDOPT_FLAG_PREFIXINFO
-			| NDOPT_FLAG_MTU | NDOPT_FLAG_RDNSS | NDOPT_FLAG_DNSSL)) {
+			| NDOPT_FLAG_MTU | NDOPT_FLAG_ROUTE_INFO
+			| NDOPT_FLAG_RDNSS | NDOPT_FLAG_DNSSL)) {
 		log_warnx("ND option check failed for an RA from %s on %s",
 		    inet_ntop(AF_INET6, &from->sin6_addr,
 			ntopbuf, INET6_ADDRSTRLEN),
@@ -1109,6 +1111,7 @@ nd6_options(struct nd_opt_hdr *hdr, int limit,
 		}
 
 		if (hdr->nd_opt_type > ND_OPT_MTU &&
+		    hdr->nd_opt_type != ND_OPT_ROUTE_INFO &&
 		    hdr->nd_opt_type != ND_OPT_RDNSS &&
 		    hdr->nd_opt_type != ND_OPT_DNSSL)
 		{
@@ -1142,6 +1145,7 @@ nd6_options(struct nd_opt_hdr *hdr, int limit,
 		case ND_OPT_SOURCE_LINKADDR:
 		case ND_OPT_TARGET_LINKADDR:
 		case ND_OPT_REDIRECTED_HEADER:
+		case ND_OPT_ROUTE_INFO:
 		case ND_OPT_RDNSS:
 		case ND_OPT_DNSSL:
 			break;	/* we don't care about these options */

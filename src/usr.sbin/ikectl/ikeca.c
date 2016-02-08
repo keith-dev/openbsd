@@ -1,4 +1,4 @@
-/*	$OpenBSD: ikeca.c,v 1.25 2013/01/08 10:38:19 reyk Exp $	*/
+/*	$OpenBSD: ikeca.c,v 1.27 2014/07/20 01:38:40 guenther Exp $	*/
 
 /*
  * Copyright (c) 2010 Jonathan Gray <jsg@openbsd.org>
@@ -473,8 +473,9 @@ fcopy(char *src, char *dst, mode_t mode)
 		err(1, "open %s", src);
 
 	if ((ofd = open(dst, O_WRONLY|O_CREAT|O_TRUNC, mode)) == -1) {
+		int saved_errno = errno;
 		close(ifd);
-		err(1, "open %s", dst);
+		errc(1, saved_errno, "open %s", dst);
 	}
 
 	while ((r = read(ifd, buf, sizeof(buf))) > 0) {
@@ -806,7 +807,6 @@ ca_setup(char *caname, int create, int quiet, char *pass)
 	struct stat	 st;
 	struct ca	*ca;
 	char		 path[PATH_MAX];
-	u_int32_t	 rnd[256];
 
 	if (stat(PATH_OPENSSL, &st) == -1)
 		err(1, "openssl binary not available");
@@ -845,9 +845,6 @@ ca_setup(char *caname, int create, int quiet, char *pass)
 
 	if (create && stat(ca->passfile, &st) == -1 && errno == ENOENT)
 		ca_newpass(ca->passfile, pass);
-
-	arc4random_buf(rnd, sizeof(rnd));
-	RAND_seed(rnd, sizeof(rnd));
 
 	return (ca);
 }

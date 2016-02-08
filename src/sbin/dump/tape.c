@@ -1,4 +1,4 @@
-/*	$OpenBSD: tape.c,v 1.38 2013/11/12 04:59:02 deraadt Exp $	*/
+/*	$OpenBSD: tape.c,v 1.40 2014/06/13 20:43:06 naddy Exp $	*/
 /*	$NetBSD: tape.c,v 1.11 1997/06/05 11:13:26 lukem Exp $	*/
 
 /*-
@@ -56,8 +56,8 @@
 int	writesize;		/* size of malloc()ed buffer for tape */
 int64_t	lastspclrec = -1;	/* tape block number of last written header */
 int	trecno = 0;		/* next record to write in current block */
-extern	long blocksperfile;	/* number of blocks per output file */
-long	blocksthisvol;		/* number of blocks on current output file */
+extern	int64_t blocksperfile;	/* number of blocks per output file */
+int64_t	blocksthisvol;		/* number of blocks on current output file */
 extern	int ntrec;		/* blocking factor on tape */
 extern	int cartridge;
 extern	char *host;
@@ -182,7 +182,7 @@ dumpblock(daddr_t blkno, int size)
 		spcl.c_tapea += avail;
 		if (trecno >= ntrec)
 			flushtape();
-		dblkno += avail << (tp_bshift - dev_bshift);
+		dblkno += avail << (tp_bshift - (ffs(DEV_BSIZE) - 1));
 		tpblks -= avail;
 	}
 }
@@ -200,7 +200,8 @@ tperror(int signo)
 		quit("Cannot recover\n");
 		/* NOTREACHED */
 	}
-	msg("write error %ld blocks into volume %d\n", blocksthisvol, tapeno);
+	msg("write error %lld blocks into volume %d\n",
+	    (long long)blocksthisvol, tapeno);
 	broadcast("DUMP WRITE ERROR!\n");
 	if (!query("Do you want to restart?"))
 		dumpabort(0);

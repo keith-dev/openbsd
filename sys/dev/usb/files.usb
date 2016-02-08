@@ -1,4 +1,4 @@
-#	$OpenBSD: files.usb,v 1.112 2014/01/20 18:27:46 jcs Exp $
+#	$OpenBSD: files.usb,v 1.117 2014/07/12 21:56:57 tedu Exp $
 #	$NetBSD: files.usb,v 1.16 2000/02/14 20:29:54 augustss Exp $
 #
 # Config file and device description for machine-independent USB code.
@@ -24,10 +24,6 @@ attach	uhub at uhub with uhub_uhub
 
 # Modem and com serial port "bus"
 define	ucombus {[portno = -1]}
-
-# EZ-USB firmware loader
-define	ezload
-file	dev/usb/ezload.c		ezload
 
 # Audio devices
 device	uaudio: audio, auconv, mulaw
@@ -189,11 +185,6 @@ device	uvisor: ucombus
 attach	uvisor at uhub
 file	dev/usb/uvisor.c		uvisor
 
-# YAP phone firmware loader
-device	uyap: ezload, firmload
-attach	uyap at uhub
-file	dev/usb/uyap.c			uyap
-
 # D-Link DSB-R100 FM radio
 device	udsbr: radiobus
 attach	udsbr at uhub
@@ -319,6 +310,11 @@ device	moscom: ucombus
 attach	moscom at uhub
 file	dev/usb/moscom.c		moscom
 
+# simple serial
+device	uscom: ucombus
+attach	uscom at uhub
+file	dev/usb/uscom.c			uscom
+
 # iPAQ PDAs
 # Generic ipaq support
 device	uipaq: ucombus
@@ -348,11 +344,6 @@ file	dev/usb/if_wi_usb.c		wi_usb
 device	atu: ether, ifnet, ifmedia, wlan, firmload
 attach	atu at uhub
 file	dev/usb/if_atu.c		atu
-
-# Bluetooth
-device	ubt: btbus, bluetooth
-attach	ubt at uhub
-file	dev/usb/ubt.c			ubt
 
 # Ralink Technology RT2500USB
 device	ural: ether, ifnet, ifmedia, wlan
@@ -429,7 +420,7 @@ device	uberry {}
 attach	uberry at uhub
 file	dev/usb/uberry.c		uberry
 
-# DFU driver
-device	udfu {}
-attach	udfu at uhub
-file	dev/usb/udfu.c			udfu
+# USB Power Devices
+device upd: hid
+attach upd at uhidbus
+file   dev/usb/upd.c			upd

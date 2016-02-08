@@ -1,4 +1,4 @@
-/*	$OpenBSD: iked.c,v 1.19 2014/02/17 15:07:23 markus Exp $	*/
+/*	$OpenBSD: iked.c,v 1.21 2014/05/08 13:11:16 blambert Exp $	*/
 
 /*
  * Copyright (c) 2010-2013 Reyk Floeter <reyk@openbsd.org>
@@ -118,6 +118,7 @@ main(int argc, char *argv[])
 
 	ps = &env->sc_ps;
 	ps->ps_env = env;
+	TAILQ_INIT(&ps->ps_rcsocks);
 
 	if ((opts & (IKED_OPT_NONATT|IKED_OPT_NATT)) ==
 	    (IKED_OPT_NONATT|IKED_OPT_NATT))
@@ -146,6 +147,8 @@ main(int argc, char *argv[])
 		err(1, "failed to daemonize");
 
 	group_init();
+
+	ps->ps_ninstances = 1;
 	proc_init(ps, procs, nitems(procs));
 
 	setproctitle("parent");
@@ -164,7 +167,7 @@ main(int argc, char *argv[])
 	signal_add(&ps->ps_evsighup, NULL);
 	signal_add(&ps->ps_evsigpipe, NULL);
 
-	proc_config(ps, procs, nitems(procs));
+	proc_listen(ps, procs, nitems(procs));
 
 	if (parent_configure(env) == -1)
 		fatalx("configuration failed");
@@ -361,8 +364,10 @@ parent_dispatch_ca(int fd, struct privsep_proc *p, struct imsg *imsg)
 	case IMSG_CTL_DECOUPLE:
 	case IMSG_CTL_ACTIVE:
 	case IMSG_CTL_PASSIVE:
-		proc_compose_imsg(env, PROC_IKEV1, type, -1, NULL, 0);
-		proc_compose_imsg(env, PROC_IKEV2, type, -1, NULL, 0);
+		proc_compose_imsg(&env->sc_ps, PROC_IKEV1, -1,
+		    type, -1, NULL, 0);
+		proc_compose_imsg(&env->sc_ps, PROC_IKEV2, -1,
+		    type, -1, NULL, 0);
 		break;
 	case IMSG_CTL_RELOAD:
 		if (IMSG_DATA_SIZE(imsg) > 0)

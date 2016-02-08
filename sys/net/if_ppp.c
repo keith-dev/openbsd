@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_ppp.c,v 1.71 2013/10/23 15:12:42 mpi Exp $	*/
+/*	$OpenBSD: if_ppp.c,v 1.76 2014/07/22 11:06:09 mpi Exp $	*/
 /*	$NetBSD: if_ppp.c,v 1.39 1997/05/17 21:11:59 christos Exp $	*/
 
 /*
@@ -127,7 +127,6 @@
 
 #ifdef INET
 #include <netinet/in.h>
-#include <netinet/in_systm.h>
 #include <netinet/ip.h>
 #else
 #ifdef _KERNEL
@@ -274,7 +273,7 @@ ppp_clone_destroy(struct ifnet *ifp)
 
     if_detach(ifp);
 
-    free(sc, M_DEVBUF);
+    free(sc, M_DEVBUF, 0);
     return (0);
 }
 
@@ -367,19 +366,19 @@ pppdealloc(struct ppp_softc *sc)
 #endif /* PPP_COMPRESS */
 #if NBPFILTER > 0
     if (sc->sc_pass_filt.bf_insns != 0) {
-	free(sc->sc_pass_filt.bf_insns, M_DEVBUF);
+	free(sc->sc_pass_filt.bf_insns, M_DEVBUF, 0);
 	sc->sc_pass_filt.bf_insns = 0;
 	sc->sc_pass_filt.bf_len = 0;
     }
     if (sc->sc_active_filt.bf_insns != 0) {
-	free(sc->sc_active_filt.bf_insns, M_DEVBUF);
+	free(sc->sc_active_filt.bf_insns, M_DEVBUF, 0);
 	sc->sc_active_filt.bf_insns = 0;
 	sc->sc_active_filt.bf_len = 0;
     }
 #endif
 #ifdef VJC
     if (sc->sc_comp != 0) {
-	free(sc->sc_comp, M_DEVBUF);
+	free(sc->sc_comp, M_DEVBUF, 0);
 	sc->sc_comp = 0;
     }
 #endif
@@ -569,11 +568,11 @@ pppioctl(struct ppp_softc *sc, u_long cmd, caddr_t data, int flag,
 	    newcode = malloc(newcodelen, M_DEVBUF, M_WAITOK);
 	    if ((error = copyin((caddr_t)nbp->bf_insns, (caddr_t)newcode,
 			       newcodelen)) != 0) {
-		free(newcode, M_DEVBUF);
+		free(newcode, M_DEVBUF, 0);
 		return error;
 	    }
 	    if (!bpf_validate(newcode, nbp->bf_len)) {
-		free(newcode, M_DEVBUF);
+		free(newcode, M_DEVBUF, 0);
 		return EINVAL;
 	    }
 	} else
@@ -585,7 +584,7 @@ pppioctl(struct ppp_softc *sc, u_long cmd, caddr_t data, int flag,
 	bp->bf_insns = newcode;
 	splx(s);
 	if (oldcode != 0)
-	    free(oldcode, M_DEVBUF);
+	    free(oldcode, M_DEVBUF, 0);
 	break;
 #endif
 
@@ -619,6 +618,7 @@ pppsioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
     case SIOCSIFADDR:
 	if (ifa->ifa_addr->sa_family != AF_INET)
 	    error = EAFNOSUPPORT;
+	ifa->ifa_rtrequest = p2p_rtrequest;
 	break;
 
     case SIOCSIFDSTADDR:
@@ -694,10 +694,10 @@ pppoutput(struct ifnet *ifp, struct mbuf *m0, struct sockaddr *dst,
     }
 
 #ifdef DIAGNOSTIC
-    if (ifp->if_rdomain != rtable_l2(m0->m_pkthdr.rdomain)) {
+    if (ifp->if_rdomain != rtable_l2(m0->m_pkthdr.ph_rtableid)) {
 	printf("%s: trying to send packet on wrong domain. "
 	    "if %d vs. mbuf %d, AF %d\n", ifp->if_xname, ifp->if_rdomain,
-	    rtable_l2(m0->m_pkthdr.rdomain), dst->sa_family);
+	    rtable_l2(m0->m_pkthdr.ph_rtableid), dst->sa_family);
     }
 #endif
 
@@ -819,11 +819,7 @@ pppoutput(struct ifnet *ifp, struct mbuf *m0, struct sockaddr *dst,
 	m0->m_nextpkt = NULL;
 	sc->sc_npqtail = &m0->m_nextpkt;
     } else {
-	if ((m0->m_flags & M_HIGHPRI)
-#ifdef ALTQ
-	    && ALTQ_IS_ENABLED(&sc->sc_if.if_snd) == 0
-#endif
-	    ) {
+	if (m0->m_flags & M_HIGHPRI) {
 	    ifq = &sc->sc_fastq;
 	    if (IF_QFULL(ifq) && dst->sa_family != AF_UNSPEC) {
 		IF_DROP(ifq);
@@ -886,11 +882,7 @@ ppp_requeue(struct ppp_softc *sc)
 	     */
 	    *mpp = m->m_nextpkt;
 	    m->m_nextpkt = NULL;
-	    if ((m->m_flags & M_HIGHPRI)
-#ifdef ALTQ
-		&& ALTQ_IS_ENABLED(&sc->sc_if.if_snd) == 0
-#endif
-		) {
+	    if (m->m_flags & M_HIGHPRI) {
 		ifq = &sc->sc_fastq;
 		if (IF_QFULL(ifq)) {
 		    IF_DROP(ifq);
@@ -1429,8 +1421,8 @@ ppp_inproc(struct ppp_softc *sc, struct mbuf *m)
     m->m_pkthdr.len = ilen;
     m->m_pkthdr.rcvif = ifp;
 
-    /* mark incoming routing domain */
-    m->m_pkthdr.rdomain = ifp->if_rdomain;
+    /* mark incoming routing table */
+    m->m_pkthdr.ph_rtableid = ifp->if_rdomain;
 
     if ((proto & 0x8000) == 0) {
 #if NBPFILTER > 0

@@ -1,4 +1,4 @@
-/*	$OpenBSD: indent.c,v 1.23 2013/11/26 13:21:17 deraadt Exp $	*/
+/*	$OpenBSD: indent.c,v 1.25 2014/07/20 01:38:40 guenther Exp $	*/
 
 /*
  * Copyright (c) 1980, 1993
@@ -1179,7 +1179,7 @@ bakcopy(void)
     if (*p == '/')
 	p++;
     if (snprintf(bakfile, MAXPATHLEN, "%s.BAK", p) >= MAXPATHLEN)
-	    errx(1, "%s.BAK: %s", p, strerror(ENAMETOOLONG));
+	    errc(1, ENAMETOOLONG, "%s.BAK", p);
 
     /* copy in_name to backup file */
     bakchn = creat(bakfile, 0600);
@@ -1200,7 +1200,8 @@ bakcopy(void)
     /* now the original input file will be the output */
     output = fopen(in_name, "w");
     if (output == NULL) {
+	int saved_errno = errno;
 	unlink(bakfile);
-	err(1, "%s", in_name);
+	errc(1, saved_errno, "%s", in_name);
     }
 }

@@ -1,4 +1,4 @@
-/* $OpenBSD: ssh-agent.c,v 1.183 2014/02/02 03:44:31 djm Exp $ */
+/* $OpenBSD: ssh-agent.c,v 1.190 2014/07/25 21:22:03 dtucker Exp $ */
 /*
  * Author: Tatu Ylonen <ylo@cs.hut.fi>
  * Copyright (c) 1995 Tatu Ylonen <ylo@cs.hut.fi>, Espoo, Finland
@@ -40,10 +40,13 @@
 #include <sys/resource.h>
 #include <sys/types.h>
 #include <sys/socket.h>
+#include <sys/stat.h>
 #include <sys/un.h>
 #include <sys/param.h>
 
+#ifdef WITH_OPENSSL
 #include <openssl/evp.h>
+#endif
 
 #include <errno.h>
 #include <fcntl.h>
@@ -109,6 +112,9 @@ int max_fd = 0;
 /* pid of shell == parent of agent */
 pid_t parent_pid = -1;
 time_t parent_alive_interval = 0;
+
+/* pid of process for which cleanup_socket is applicable */
+pid_t cleanup_pid = 0;
 
 /* pathname and directory for AUTH_SOCKET */
 char socket_name[MAXPATHLEN];
@@ -207,9 +213,11 @@ process_request_identities(SocketEntry *e, int version)
 	buffer_put_int(&msg, tab->nentries);
 	TAILQ_FOREACH(id, &tab->idlist, next) {
 		if (id->key->type == KEY_RSA1) {
+#ifdef WITH_SSH1
 			buffer_put_int(&msg, BN_num_bits(id->key->rsa->n));
 			buffer_put_bignum(&msg, id->key->rsa->e);
 			buffer_put_bignum(&msg, id->key->rsa->n);
+#endif
 		} else {
 			u_char *blob;
 			u_int blen;
@@ -224,6 +232,7 @@ process_request_identities(SocketEntry *e, int version)
 	buffer_free(&msg);
 }
 
+#ifdef WITH_SSH1
 /* ssh1 only */
 static void
 process_authentication_challenge1(SocketEntry *e)
@@ -259,7 +268,7 @@ process_authentication_challenge1(SocketEntry *e)
 	if (id != NULL && (!id->confirm || confirm_key(id) == 0)) {
 		Key *private = id->key;
 		/* Decrypt the challenge using the private key. */
-		if (rsa_private_decrypt(challenge, challenge, private->rsa) <= 0)
+		if (rsa_private_decrypt(challenge, challenge, private->rsa) != 0)
 			goto failure;
 
 		/* The response is MD5 of decrypted challenge plus session id. */
@@ -294,6 +303,7 @@ send:
 	BN_clear_free(challenge);
 	buffer_free(&msg);
 }
+#endif
 
 /* ssh2 only */
 static void
@@ -345,12 +355,16 @@ process_sign_request2(SocketEntry *e)
 static void
 process_remove_identity(SocketEntry *e, int version)
 {
-	u_int blen, bits;
+	u_int blen;
 	int success = 0;
 	Key *key = NULL;
 	u_char *blob;
+#ifdef WITH_SSH1
+	u_int bits;
+#endif /* WITH_SSH1 */
 
 	switch (version) {
+#ifdef WITH_SSH1
 	case 1:
 		key = key_new(KEY_RSA1);
 		bits = buffer_get_int(&e->request);
@@ -361,6 +375,7 @@ process_remove_identity(SocketEntry *e, int version)
 			logit("Warning: identity keysize mismatch: actual %u, announced %u",
 			    key_size(key), bits);
 		break;
+#endif /* WITH_SSH1 */
 	case 2:
 		blob = buffer_get_string(&e->request, &blen);
 		key = key_from_blob(blob, blen);
@@ -457,6 +472,7 @@ process_add_identity(SocketEntry *e, int version)
 	Key *k = NULL;
 
 	switch (version) {
+#ifdef WITH_SSH1
 	case 1:
 		k = key_new_private(KEY_RSA1);
 		(void) buffer_get_int(&e->request);		/* ignored */
@@ -470,7 +486,9 @@ process_add_identity(SocketEntry *e, int version)
 		buffer_get_bignum(&e->request, k->rsa->p);	/* q */
 
 		/* Generate additional parameters */
-		rsa_generate_additional_parameters(k->rsa);
+		if (rsa_generate_additional_parameters(k->rsa) != 0)
+			fatal("%s: rsa_generate_additional_parameters "
+			    "error", __func__);
 
 		/* enable blinding */
 		if (RSA_blinding_on(k->rsa, NULL) != 1) {
@@ -479,6 +497,7 @@ process_add_identity(SocketEntry *e, int version)
 			goto send;
 		}
 		break;
+#endif /* WITH_SSH1 */
 	case 2:
 		k = key_private_deserialize(&e->request);
 		if (k == NULL) {
@@ -487,11 +506,10 @@ process_add_identity(SocketEntry *e, int version)
 		}
 		break;
 	}
-	comment = buffer_get_string(&e->request, NULL);
-	if (k == NULL) {
-		free(comment);
+	if (k == NULL)
 		goto send;
-	}
+	comment = buffer_get_string(&e->request, NULL);
+
 	while (buffer_len(&e->request)) {
 		switch ((type = buffer_get_char(&e->request))) {
 		case SSH_AGENT_CONSTRAIN_LIFETIME:
@@ -719,6 +737,7 @@ process_message(SocketEntry *e)
 	case SSH_AGENTC_UNLOCK:
 		process_lock_agent(e, type == SSH_AGENTC_LOCK);
 		break;
+#ifdef WITH_SSH1
 	/* ssh1 */
 	case SSH_AGENTC_RSA_CHALLENGE:
 		process_authentication_challenge1(e);
@@ -736,6 +755,7 @@ process_message(SocketEntry *e)
 	case SSH_AGENTC_REMOVE_ALL_RSA_IDENTITIES:
 		process_remove_all_identities(e, 1);
 		break;
+#endif
 	/* ssh2 */
 	case SSH2_AGENTC_SIGN_REQUEST:
 		process_sign_request2(e);
@@ -933,6 +953,7 @@ after_select(fd_set *readset, fd_set *writeset)
 					break;
 				}
 				buffer_append(&sockets[i].input, buf, len);
+				explicit_bzero(buf, sizeof(buf));
 				process_message(&sockets[i]);
 			}
 			break;
@@ -944,6 +965,9 @@ after_select(fd_set *readset, fd_set *writeset)
 static void
 cleanup_socket(void)
 {
+	if (cleanup_pid != 0 && getpid() != cleanup_pid)
+		return;
+	debug("%s: cleanup", __func__);
 	if (socket_name[0])
 		unlink(socket_name);
 	if (socket_dir[0])
@@ -985,15 +1009,10 @@ check_parent_exists(void)
 static void
 usage(void)
 {
-	fprintf(stderr, "usage: %s [options] [command [arg ...]]\n",
-	    __progname);
-	fprintf(stderr, "Options:\n");
-	fprintf(stderr, "  -c          Generate C-shell commands on stdout.\n");
-	fprintf(stderr, "  -s          Generate Bourne shell commands on stdout.\n");
-	fprintf(stderr, "  -k          Kill the current agent.\n");
-	fprintf(stderr, "  -d          Debug mode.\n");
-	fprintf(stderr, "  -a socket   Bind agent socket to given name.\n");
-	fprintf(stderr, "  -t life     Default identity lifetime (seconds).\n");
+	fprintf(stderr,
+	    "usage: ssh-agent [-c | -s] [-d] [-a bind_address] [-t life]\n"
+	    "                 [command [arg ...]]\n"
+	    "       ssh-agent [-c | -s] -k\n");
 	exit(1);
 }
 
@@ -1005,7 +1024,6 @@ main(int ac, char **av)
 	u_int nalloc;
 	char *shell, *format, *pidstr, *agentsocket = NULL;
 	fd_set *readsetp = NULL, *writesetp = NULL;
-	struct sockaddr_un sunaddr;
 	struct rlimit rlim;
 	extern int optind;
 	extern char *optarg;
@@ -1013,6 +1031,7 @@ main(int ac, char **av)
 	char pidstrbuf[1 + 3 * sizeof pid];
 	struct timeval *tvp = NULL;
 	size_t len;
+	mode_t prev_mask;
 
 	/* Ensure that fds 0, 1 and 2 are open or directed to /dev/null */
 	sanitise_stdfd();
@@ -1021,7 +1040,9 @@ main(int ac, char **av)
 	setegid(getgid());
 	setgid(getgid());
 
+#ifdef WITH_OPENSSL
 	OpenSSL_add_all_algorithms();
+#endif
 
 	while ((ch = getopt(ac, av, "cdksa:t:")) != -1) {
 		switch (ch) {
@@ -1115,24 +1136,14 @@ main(int ac, char **av)
 	 * Create socket early so it will exist before command gets run from
 	 * the parent.
 	 */
-	sock = socket(AF_UNIX, SOCK_STREAM, 0);
+	prev_mask = umask(0177);
+	sock = unix_listener(socket_name, SSH_LISTEN_BACKLOG, 0);
 	if (sock < 0) {
-		perror("socket");
+		/* XXX - unix_listener() calls error() not perror() */
 		*socket_name = '\0'; /* Don't unlink any existing file */
 		cleanup_exit(1);
 	}
-	memset(&sunaddr, 0, sizeof(sunaddr));
-	sunaddr.sun_family = AF_UNIX;
-	strlcpy(sunaddr.sun_path, socket_name, sizeof(sunaddr.sun_path));
-	if (bind(sock, (struct sockaddr *)&sunaddr, sizeof(sunaddr)) < 0) {
-		perror("bind");
-		*socket_name = '\0'; /* Don't unlink any existing file */
-		cleanup_exit(1);
-	}
-	if (listen(sock, SSH_LISTEN_BACKLOG) < 0) {
-		perror("listen");
-		cleanup_exit(1);
-	}
+	umask(prev_mask);
 
 	/*
 	 * Fork, and have the parent execute the command, if any, or present
@@ -1198,6 +1209,8 @@ main(int ac, char **av)
 	}
 
 skip:
+
+	cleanup_pid = getpid();
 
 #ifdef ENABLE_PKCS11
 	pkcs11_init(0);

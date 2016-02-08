@@ -1,8 +1,7 @@
-/*	$OpenBSD: pmap.c,v 1.67 2013/11/19 04:12:17 guenther Exp $	*/
+/*	$OpenBSD: pmap.c,v 1.71 2014/07/11 16:35:40 jsg Exp $	*/
 /*	$NetBSD: pmap.c,v 1.3 2003/05/08 18:13:13 thorpej Exp $	*/
 
 /*
- *
  * Copyright (c) 1997 Charles D. Cranor and Washington University.
  * All rights reserved.
  *
@@ -14,12 +13,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *      This product includes software developed by Charles D. Cranor and
- *      Washington University.
- * 4. The name of the author may not be used to endorse or promote products
- *    derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
@@ -229,13 +222,6 @@ pd_entry_t *alternate_pdes[] = APDES_INITIALIZER;
 struct pmap kernel_pmap_store;	/* the kernel's pmap (proc0) */
 
 /*
- * pmap_pg_g: if our processor supports PG_G in the PTE then we
- * set pmap_pg_g to PG_G (otherwise it is zero).
- */
-
-int pmap_pg_g = 0;
-
-/*
  * pmap_pg_wc: if our processor supports PAT then we set this
  * to be the pte bits for Write Combining. Else we fall back to
  * UC- so mtrrs can override the cacheability;
@@ -442,7 +428,7 @@ pmap_kenter_pa(vaddr_t va, paddr_t pa, vm_prot_t prot)
 
 	/* special 1:1 mappings in the first 2MB must not be global */
 	if (va >= (vaddr_t)NBPD_L2)
-		npte |= pmap_pg_g;
+		npte |= PG_G;
 
 	if ((cpu_feature & CPUID_NXE) && !(prot & VM_PROT_EXECUTE))
 		npte |= PG_NX;
@@ -578,8 +564,6 @@ pmap_bootstrap(paddr_t first_avail, paddr_t max_pa)
 	/*
 	 * enable global TLB entries.
 	 */
-	pmap_pg_g = PG_G;		/* enable software */
-
 	/* add PG_G attribute to already mapped kernel pages */
 #if KERNBASE == VM_MIN_KERNEL_ADDRESS
 	for (kva = VM_MIN_KERNEL_ADDRESS ; kva < virtual_avail ;
@@ -2117,7 +2101,7 @@ enter_now:
 	else if (va < VM_MAX_ADDRESS)
 		npte |= (PG_u | PG_RW);	/* XXXCDC: no longer needed? */
 	if (pmap == pmap_kernel())
-		npte |= pmap_pg_g;
+		npte |= PG_G;
 
 	ptes[pl1_i(va)] = npte;		/* zap! */
 
@@ -2388,7 +2372,7 @@ pmap_dump(struct pmap *pmap, vaddr_t sva, vaddr_t eva)
 		for (/* null */; sva < blkendva ; sva += PAGE_SIZE, pte++) {
 			if (!pmap_valid_entry(*pte))
 				continue;
-			printf("va %#lx -> pa %#lx (pte=%#lx)\n",
+			printf("va %#lx -> pa %#llx (pte=%#llx)\n",
 			       sva, *pte, *pte & PG_FRAME);
 		}
 	}
@@ -2451,7 +2435,7 @@ pmap_tlb_shootpage(struct pmap *pm, vaddr_t va)
 	if (wait > 0) {
 		int s = splvm();
 
-		while (x86_atomic_cas_ul(&tlb_shoot_wait, 0, wait) != 0) {
+		while (atomic_cas_ulong(&tlb_shoot_wait, 0, wait) != 0) {
 			while (tlb_shoot_wait != 0)
 				SPINLOCK_SPIN_HOOK;
 		}
@@ -2489,7 +2473,7 @@ pmap_tlb_shootrange(struct pmap *pm, vaddr_t sva, vaddr_t eva)
 	if (wait > 0) {
 		int s = splvm();
 
-		while (x86_atomic_cas_ul(&tlb_shoot_wait, 0, wait) != 0) {
+		while (atomic_cas_ulong(&tlb_shoot_wait, 0, wait) != 0) {
 			while (tlb_shoot_wait != 0)
 				SPINLOCK_SPIN_HOOK;
 		}
@@ -2527,7 +2511,7 @@ pmap_tlb_shoottlb(void)
 	if (wait) {
 		int s = splvm();
 
-		while (x86_atomic_cas_ul(&tlb_shoot_wait, 0, wait) != 0) {
+		while (atomic_cas_ulong(&tlb_shoot_wait, 0, wait) != 0) {
 			while (tlb_shoot_wait != 0)
 				SPINLOCK_SPIN_HOOK;
 		}

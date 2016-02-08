@@ -1,8 +1,7 @@
-/*	$OpenBSD: pmap.h,v 1.42 2014/01/30 18:16:41 miod Exp $	*/
+/*	$OpenBSD: pmap.h,v 1.45 2014/07/11 16:35:40 jsg Exp $	*/
 /*	$NetBSD: pmap.h,v 1.1 2003/04/26 18:39:46 fvdl Exp $	*/
 
 /*
- *
  * Copyright (c) 1997 Charles D. Cranor and Washington University.
  * All rights reserved.
  *
@@ -14,12 +13,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgment:
- *      This product includes software developed by Charles D. Cranor and
- *      Washington University.
- * 4. The name of the author may not be used to endorse or promote products
- *    derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
@@ -88,7 +81,7 @@
  * The x86_64 pmap module closely resembles the i386 one. It uses
  * the same recursive entry scheme, and the same alternate area
  * trick for accessing non-current pmaps. See the i386 pmap.h
- * for a description. The obvious difference is that 3 extra
+ * for a description. The first obvious difference is that 2 extra
  * levels of page table need to be dealt with. The level 1 page
  * table pages are at:
  *
@@ -96,27 +89,32 @@
  *
  * The alternate space is at:
  *
- * l1: 0xffffff8000000000 - 0xffffffffffffffff     (39 bits, needs PML4 entry)
+ * l1: 0xffffff0000000000 - 0xffffff7fffffffff     (39 bits, needs PML4 entry)
  *
- * The rest is kept as physical pages in 3 UVM objects, and is
+ * The other levels are kept as physical pages in 3 UVM objects and are
  * temporarily mapped for virtual access when needed.
+ *
+ * The other obvious difference from i386 is that it has a direct map of all
+ * physical memory in the VA range:
+ *
+ *     0xfffffe8000000000 - 0xfffffeffffffffff
  *
  * Note that address space is signed, so the layout for 48 bits is:
  *
  *  +---------------------------------+ 0xffffffffffffffff
- *  |                                 |
- *  |    alt.L1 table (PTE pages)     |
- *  |                                 |
+ *  |         Kernel Image            |
  *  +---------------------------------+ 0xffffff8000000000
+ *  |    alt.L1 table (PTE pages)     |
+ *  +---------------------------------+ 0xffffff0000000000
+ *  |         Direct Map              |
+ *  +---------------------------------+ 0xfffffe8000000000
  *  ~                                 ~
  *  |                                 |
  *  |         Kernel Space            |
  *  |                                 |
  *  |                                 |
  *  +---------------------------------+ 0xffff800000000000 = 0x0000800000000000
- *  |                                 |
- *  |    L1 table (PTE pages)	      |
- *  |                                 |
+ *  |    L1 table (PTE pages)         |
  *  +---------------------------------+ 0x00007f8000000000
  *  ~                                 ~
  *  |                                 |
@@ -368,12 +366,10 @@ struct pmap_remove_record {
 extern u_long PTDpaddr;
 
 extern struct pmap kernel_pmap_store;	/* kernel pmap */
-extern int pmap_pg_g;			/* do we support PG_G? */
 
 extern paddr_t ptp_masks[];
 extern int ptp_shifts[];
 extern long nkptp[], nbpd[], nkptpmax[];
-extern pd_entry_t *pdes[];
 
 /*
  * macros

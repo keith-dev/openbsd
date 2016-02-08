@@ -1,4 +1,4 @@
-/*	$OpenBSD: optimize.c,v 1.13 2007/09/02 15:19:18 deraadt Exp $	*/
+/*	$OpenBSD: optimize.c,v 1.15 2014/06/26 04:03:33 lteo Exp $	*/
 
 /*
  * Copyright (c) 1988, 1989, 1990, 1991, 1993, 1994, 1995, 1996
@@ -28,6 +28,7 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdint.h>
 #include <memory.h>
 
 #include "pcap-int.h"
@@ -138,7 +139,8 @@ struct edge **edges;
 static int nodewords;
 static int edgewords;
 struct block **levels;
-bpf_u_int32 *space;
+bpf_u_int32 *space1;
+bpf_u_int32 *space2;
 #define BITS_PER_WORD (8*sizeof(bpf_u_int32))
 /*
  * True if a is in uset {p}
@@ -1715,7 +1717,8 @@ opt_cleanup()
 	free((void *)vnode_base);
 	free((void *)vmap);
 	free((void *)edges);
-	free((void *)space);
+	free((void *)space1);
+	free((void *)space2);
 	free((void *)levels);
 	free((void *)blocks);
 }
@@ -1799,6 +1802,7 @@ opt_init(root)
 {
 	bpf_u_int32 *p;
 	int i, n, max_stmts;
+	size_t size1, size2;
 
 	/*
 	 * First, count the blocks, so we can malloc an array to map
@@ -1806,36 +1810,62 @@ opt_init(root)
 	 */
 	unMarkAll();
 	n = count_blocks(root);
-	blocks = (struct block **)calloc(n, sizeof(*blocks));
+	blocks = reallocarray(NULL, n, sizeof(*blocks));
 	if (blocks == NULL)
 		bpf_error("malloc");
-	
+
 	unMarkAll();
 	n_blocks = 0;
 	number_blks_r(root);
 
 	n_edges = 2 * n_blocks;
-	edges = (struct edge **)calloc(n_edges, sizeof(*edges));
+	edges = reallocarray(NULL, n_edges, sizeof(*edges));
 	if (edges == NULL)
 		bpf_error("malloc");
 
 	/*
 	 * The number of levels is bounded by the number of nodes.
 	 */
-	levels = (struct block **)calloc(n_blocks, sizeof(*levels));
+	levels = reallocarray(NULL, n_blocks, sizeof(*levels));
 	if (levels == NULL)
 		bpf_error("malloc");
 
 	edgewords = n_edges / (8 * sizeof(bpf_u_int32)) + 1;
 	nodewords = n_blocks / (8 * sizeof(bpf_u_int32)) + 1;
 
-	/* XXX */
-	space = (bpf_u_int32 *)malloc(2 * n_blocks * nodewords * sizeof(*space)
-				 + n_edges * edgewords * sizeof(*space));
-	if (space == NULL)
+	size1 = 2;
+	if (n_blocks > SIZE_MAX / size1)
+		goto fail1;
+	size1 *= n_blocks;
+	if (nodewords > SIZE_MAX / size1)
+		goto fail1;
+	size1 *= nodewords;
+	if (sizeof(*space1) > SIZE_MAX / size1)
+		goto fail1;
+	size1 *= sizeof(*space1);
+
+	space1 = (bpf_u_int32 *)malloc(size1);
+	if (space1 == NULL) {
+fail1:
 		bpf_error("malloc");
+	}
+
+	size2 = n_edges;
+	if (edgewords > SIZE_MAX / size2)
+		goto fail2;
+	size2 *= edgewords;
+	if (sizeof(*space2) > SIZE_MAX / size2)
+		goto fail2;
+	size2 *= sizeof(*space2);
+
+	space2 = (bpf_u_int32 *)malloc(size2);
+	if (space2 == NULL) {
+fail2:
+		free(space1);
+		bpf_error("malloc");
+	}
 	
-	p = space;
+	p = space1;
 	all_dom_sets = p;
 	for (i = 0; i < n; ++i) {
 		blocks[i]->dom = p;
@@ -1846,6 +1876,7 @@ opt_init(root)
 		blocks[i]->closure = p;
 		p += nodewords;
 	}
+	p = space2;
 	all_edge_sets = p;
 	for (i = 0; i < n; ++i) {
 		register struct block *b = blocks[i];
@@ -1870,8 +1901,8 @@ opt_init(root)
 	 * we'll need.
 	 */
 	maxval = 3 * max_stmts;
-	vmap = (struct vmapinfo *)calloc(maxval, sizeof(*vmap));
-	vnode_base = (struct valnode *)calloc(maxval, sizeof(*vmap));
+	vmap = reallocarray(NULL, maxval, sizeof(*vmap));
+	vnode_base = reallocarray(NULL, maxval, sizeof(*vmap));
 	if (vmap == NULL || vnode_base == NULL)
 		bpf_error("malloc");
 }

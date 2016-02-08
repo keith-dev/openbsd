@@ -1,4 +1,4 @@
-/*     $OpenBSD: genget.c,v 1.2 2009/10/27 23:59:44 deraadt Exp $  */
+/*     $OpenBSD: genget.c,v 1.5 2014/07/20 10:32:23 jsg Exp $  */
 
 /*-
  * Copyright (c) 1991, 1993
@@ -32,9 +32,8 @@
 /* $KTH: genget.c,v 1.6 1997/05/04 09:01:34 assar Exp $ */
 
 #include <ctype.h>
-#include "misc-proto.h"
+#include "telnet_locl.h"
 
-#define	LOWER(x) (isupper((int)x) ? tolower((int)x) : (x))
 /*
  * The prefix function returns 0 if *s1 is not a prefix
  * of *s2.  If *s1 exactly matches *s2, the negative of
@@ -52,7 +51,7 @@ isprefix(char *s1, char *s2)
     os1 = s1;
     c1 = *s1;
     c2 = *s2;
-    while (LOWER(c1) == LOWER(c2)) {
+    while (tolower((unsigned char)c1) == tolower((unsigned char)c2)) {
 	if (c1 == '\0')
 	    break;
 	c1 = *++s1;
@@ -72,11 +71,11 @@ genget(char *name, char **table, int stlen)
     char **c, **found;
     int n;
 
-    if (name == 0)
-	return 0;
+    if (name == NULL)
+	return (NULL);
 
-    found = 0;
-    for (c = table; *c != 0; c = (char **)((char *)c + stlen)) {
+    found = NULL;
+    for (c = table; *c != NULL; c = (char **)((char *)c + stlen)) {
 	if ((n = isprefix(name, *c)) == 0)
 	    continue;
 	if (n < 0)		/* exact match */

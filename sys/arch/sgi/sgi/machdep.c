@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.133 2013/09/28 12:40:31 miod Exp $ */
+/*	$OpenBSD: machdep.c,v 1.148 2014/07/21 17:25:47 uebayasi Exp $ */
 
 /*
  * Copyright (c) 2003-2004 Opsycon AB  (www.opsycon.se / www.opsycon.com)
@@ -48,7 +48,8 @@
 #endif
 
 #include <net/if.h>
-#include <uvm/uvm.h>
+
+#include <uvm/uvm_extern.h>
 
 #include <machine/db_machdep.h>
 #include <ddb/db_interface.h>
@@ -532,7 +533,7 @@ mips_init(int argc, void *argv, caddr_t boot_esym)
 		extern void xtlb_miss_err_r4k;
 		extern void xtlb_miss_err_r4000SC;
 
-		if (ci->ci_l2size == 0 ||
+		if (ci->ci_l2.size == 0 ||
 		    ((cp0_get_prid() >> 4) & 0x0f) >= 4) /* R4400 */
 			xtlb_handler = (vaddr_t)&xtlb_miss_err_r4k;
 		else {
@@ -570,6 +571,14 @@ mips_init(int argc, void *argv, caddr_t boot_esym)
 	build_trampoline(TLB_MISS_EXC_VEC, xtlb_handler);
 	build_trampoline(XTLB_MISS_EXC_VEC, xtlb_handler);
 #endif	/* } */
+
+#ifdef CPU_R4000
+	/*
+	 * Enable R4000 EOP errata workaround code if necessary.
+	 */
+	if (cpufamily == MIPS_R4000 && ((cp0_get_prid() >> 4) & 0x0f) < 3)
+		r4000_errata = 1;
+#endif
 
 	/*
 	 * Allocate U page(s) for proc[0], pm_tlbpid 1.
@@ -817,19 +826,15 @@ sgi_cpuspeed(int *freq)
 
 int	waittime = -1;
 
-void
+__dead void
 boot(int howto)
 {
+	struct device *mainbus;
 
-	/* Take a snapshot before clobbering any registers. */
 	if (curproc)
 		savectx(curproc->p_addr, 0);
 
 	if (cold) {
-		/*
-		 * If the system is cold, just halt, unless the user
-		 * explicitly asked for reboot.
-		 */
 		if ((howto & RB_USERREQ) == 0)
 			howto |= RB_HALT;
 		goto haltsys;
@@ -837,20 +842,9 @@ boot(int howto)
 
 	boothowto = howto;
 	if ((howto & RB_NOSYNC) == 0 && waittime < 0) {
-		extern struct proc proc0;
-		/* fill curproc with live object */
-		if (curproc == NULL)
-			curproc = &proc0;
-		/*
-		 * Synchronize the disks...
-		 */
 		waittime = 0;
 		vfs_shutdown();
 
-		/*
-		 * If we've been adjusting the clock, the todr will be out of
-		 * sync; adjust it now.
-		 */
 		if ((howto & RB_TIMEBAD) == 0) {
 			resettodr();
 		} else {
@@ -860,18 +854,20 @@ boot(int howto)
 	if_downall();
 
 	uvm_shutdown();
-	(void) splhigh();		/* Extreme priority. */
+	splhigh();
+	cold = 1;
 
-	if (howto & RB_DUMP)
+	if ((howto & RB_DUMP) != 0)
 		dumpsys();
 
 haltsys:
 	doshutdownhooks();
-	if (!TAILQ_EMPTY(&alldevs))
-		config_suspend(TAILQ_FIRST(&alldevs), DVACT_POWERDOWN);
+	mainbus = device_mainbus();
+	if (mainbus != NULL)
+		config_suspend(mainbus, DVACT_POWERDOWN);
 
-	if (howto & RB_HALT) {
-		if (howto & RB_POWERDOWN)
+	if ((howto & RB_HALT) != 0) {
+		if ((howto & RB_POWERDOWN) != 0)
 			printf("System Power Down.\n");
 		else
 			printf("System Halt.\n");
@@ -883,7 +879,7 @@ haltsys:
 
 	printf("Failed!!! Please reset manually.\n");
 	for (;;) ;
-	/*NOTREACHED*/
+	/* NOTREACHED */
 }
 
 void
@@ -971,7 +967,7 @@ dumpsys()
 		dumpconf();
 	if (dumplo < 0)
 		return;
-	printf("\ndumping to dev %x, offset %d\n", dumpdev, dumplo);
+	printf("\ndumping to dev %x, offset %ld\n", dumpdev, dumplo);
 	printf("dump not yet implemented\n");
 #if 0 /* XXX HAVE TO FIX XXX */
 	switch (error = (*bdevsw[major(dumpdev)].d_dump)(dumpdev, dumplo,)) {

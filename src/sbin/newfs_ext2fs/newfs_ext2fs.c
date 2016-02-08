@@ -1,4 +1,4 @@
-/* $OpenBSD: newfs_ext2fs.c,v 1.9 2013/11/22 04:14:01 deraadt Exp $ */
+/* $OpenBSD: newfs_ext2fs.c,v 1.13 2014/06/29 00:32:50 deraadt Exp $ */
 /*	$NetBSD: newfs_ext2fs.c,v 1.8 2009/03/02 10:38:13 tsutsui Exp $	*/
 
 /*
@@ -37,7 +37,6 @@
 #include <sys/ioctl.h>
 #include <sys/dkio.h>
 #include <sys/disklabel.h>
-#include <sys/disk.h>
 #include <sys/file.h>
 #include <sys/mount.h>
 
@@ -298,7 +297,7 @@ main(int argc, char *argv[])
 			static const char m[] =
 			    "%s partition type is not `%s' (or use -I)";
 			if (pp->p_fstype != FS_EXT2FS)
-				errx(EXIT_FAILURE, m, special, "Linux Ext2");
+				errx(EXIT_FAILURE, m, special, "ext2fs");
 		}
 		if (sectorsize == 0) {
 			sectorsize = lp->d_secsize;
@@ -337,7 +336,7 @@ main(int argc, char *argv[])
 			bufsize = sfs.f_iosize;
 
 		if ((buf = calloc(1, bufsize)) == NULL)
-			err(1, "can't malloc buffer of %d",
+			err(1, "can't allocate buffer of %d",
 			bufsize);
 		bufrem = fssize * sectorsize;
 		if (verbosity > 0)
@@ -452,7 +451,7 @@ static const char help_strings[] =
 	"\t-D inodesize\tsize of an inode in bytes (128 or 256)\n"
 	"\t-F \t\tcreate file system image in regular file\n"
 	"\t-f fsize\tfragment size\n"
-	"\t-I \t\tdo not check that the file system type is `Linux Ext2'\n"
+	"\t-I \t\tdo not check that the file system type is `ext2fs'\n"
 	"\t-i density\tnumber of bytes per inode\n"
 	"\t-m minfree\tminimum free space %\n"
 	"\t-N \t\tdo not create file system, just print out parameters\n"
@@ -511,7 +510,7 @@ getpartition(int fsi, const char *special, char *argv[], struct disklabel **dl)
 	struct partition *pp;
 
 	if (fstat(fsi, &st) < 0)
-		errx(EXIT_FAILURE, "%s: %s", special, strerror(errno));
+		err(EXIT_FAILURE, "%s", special);
 	if (S_ISBLK(st.st_mode))
 		errx(EXIT_FAILURE, "%s: block device", special);
 	if (!S_ISCHR(st.st_mode))

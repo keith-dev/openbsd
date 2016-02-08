@@ -1,4 +1,4 @@
-/*      $OpenBSD: ath.c,v 1.98 2013/11/26 09:50:32 mpi Exp $  */
+/*      $OpenBSD: ath.c,v 1.101 2014/07/12 18:48:17 tedu Exp $  */
 /*	$NetBSD: ath.c,v 1.37 2004/08/18 21:59:39 dyoung Exp $	*/
 
 /*-
@@ -264,6 +264,11 @@ ath_attach(u_int16_t devid, struct ath_softc *sc)
 			    ah->ah_radio_2ghz_revision & 0xf);
 		}
 	}
+	if (ah->ah_ee_version == AR5K_EEPROM_VERSION_4_7)
+		printf(" eeprom 4.7");
+	else
+		printf(" eeprom %1x.%1x", ah->ah_ee_version >> 12,
+		    ah->ah_ee_version & 0xff);
 
 #if 0
 	if (ah->ah_radio_5ghz_revision >= AR5K_SREV_RAD_UNSUPP ||
@@ -897,17 +902,7 @@ ath_start(struct ifnet *ifp)
 			}
 			wh = mtod(m, struct ieee80211_frame *);
 		} else {
-			/*
-			 * Hack!  The referenced node pointer is in the
-			 * rcvif field of the packet header.  This is
-			 * placed there by ieee80211_mgmt_output because
-			 * we need to hold the reference with the frame
-			 * and there's no other way (other than packet
-			 * tags which we consider too expensive to use)
-			 * to pass it along.
-			 */
-			ni = (struct ieee80211_node *) m->m_pkthdr.rcvif;
-			m->m_pkthdr.rcvif = NULL;
+			ni = m->m_pkthdr.ph_cookie;
 
 			wh = mtod(m, struct ieee80211_frame *);
 			if ((wh->i_fc[0] & IEEE80211_FC0_SUBTYPE_MASK) ==
@@ -1683,7 +1678,7 @@ ath_desc_free(struct ath_softc *sc)
 	TAILQ_INIT(&sc->sc_rxbuf);
 	TAILQ_INIT(&sc->sc_txbuf);
 	TAILQ_INIT(&sc->sc_txq);
-	free(sc->sc_bufptr, M_DEVBUF);
+	free(sc->sc_bufptr, M_DEVBUF, 0);
 	sc->sc_bufptr = NULL;
 }
 
@@ -3004,7 +2999,7 @@ ath_getchannels(struct ath_softc *sc, HAL_BOOL outdoor, HAL_BOOL xchanmode)
 	    HAL_MODE_ALL, outdoor, xchanmode)) {
 		printf("%s: unable to collect channel list from hal\n",
 		    ifp->if_xname);
-		free(chans, M_TEMP);
+		free(chans, M_TEMP, 0);
 		return EINVAL;
 	}
 
@@ -3035,7 +3030,7 @@ ath_getchannels(struct ath_softc *sc, HAL_BOOL outdoor, HAL_BOOL xchanmode)
 		/* count valid channels */
 		sc->sc_nchan++;
 	}
-	free(chans, M_TEMP);
+	free(chans, M_TEMP, 0);
 
 	if (sc->sc_nchan < 1) {
 		printf("%s: no valid channels for regdomain %s(%u)\n",

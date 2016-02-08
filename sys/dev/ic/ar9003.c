@@ -1,4 +1,4 @@
-/*	$OpenBSD: ar9003.c,v 1.27 2013/08/07 01:06:28 bluhm Exp $	*/
+/*	$OpenBSD: ar9003.c,v 1.30 2014/07/22 13:12:11 mpi Exp $	*/
 
 /*-
  * Copyright (c) 2010 Damien Bergamini <damien.bergamini@free.fr>
@@ -51,9 +51,7 @@
 #include <net/if_types.h>
 
 #include <netinet/in.h>
-#include <netinet/in_systm.h>
 #include <netinet/if_ether.h>
-#include <netinet/ip.h>
 
 #include <net80211/ieee80211_var.h>
 #include <net80211/ieee80211_amrr.h>
@@ -491,7 +489,7 @@ ar9003_read_rom(struct athn_softc *sc)
 	if (error == 0)
 		ops->swap_rom(sc);
 #endif
-	free(buf, M_DEVBUF);
+	free(buf, M_DEVBUF, 0);
 	return (error);
 }
 
@@ -725,7 +723,8 @@ ar9003_rx_alloc(struct athn_softc *sc, int qid, int count)
 	struct ar_rx_status *ds;
 	int error, i;
 
-	rxq->bf = malloc(count * sizeof(*bf), M_DEVBUF, M_NOWAIT | M_ZERO);
+	rxq->bf = mallocarray(count, sizeof(*bf), M_DEVBUF,
+	    M_NOWAIT | M_ZERO);
 	if (rxq->bf == NULL)
 		return (ENOMEM);
 
@@ -793,7 +792,7 @@ ar9003_rx_free(struct athn_softc *sc, int qid)
 		if (bf->bf_m != NULL)
 			m_freem(bf->bf_m);
 	}
-	free(rxq->bf, M_DEVBUF);
+	free(rxq->bf, M_DEVBUF, 0);
 }
 
 void

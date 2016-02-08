@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_kue.c,v 1.71 2013/11/15 10:17:39 pirofti Exp $ */
+/*	$OpenBSD: if_kue.c,v 1.74 2014/07/13 15:52:49 mpi Exp $ */
 /*	$NetBSD: if_kue.c,v 1.50 2002/07/16 22:00:31 augustss Exp $	*/
 /*
  * Copyright (c) 1997, 1998, 1999, 2000
@@ -88,12 +88,8 @@
 #include <net/bpf.h>
 #endif
 
-#ifdef INET
 #include <netinet/in.h>
-#include <netinet/in_systm.h>
-#include <netinet/ip.h>
 #include <netinet/if_ether.h>
-#endif
 
 #include <dev/usb/usb.h>
 #include <dev/usb/usbdi.h>
@@ -151,21 +147,16 @@ const struct usb_devno kue_devs[] = {
 	{ USB_VENDOR_SMC, USB_PRODUCT_SMC_2102USB },
 };
 
-int kue_match(struct device *, void *, void *); 
-void kue_attach(struct device *, struct device *, void *); 
-int kue_detach(struct device *, int); 
-int kue_activate(struct device *, int); 
+int kue_match(struct device *, void *, void *);
+void kue_attach(struct device *, struct device *, void *);
+int kue_detach(struct device *, int);
 
-struct cfdriver kue_cd = { 
-	NULL, "kue", DV_IFNET 
-}; 
+struct cfdriver kue_cd = {
+	NULL, "kue", DV_IFNET
+};
 
-const struct cfattach kue_ca = { 
-	sizeof(struct kue_softc), 
-	kue_match, 
-	kue_attach, 
-	kue_detach, 
-	kue_activate, 
+const struct cfattach kue_ca = {
+	sizeof(struct kue_softc), kue_match, kue_attach, kue_detach
 };
 
 int kue_tx_list_init(struct kue_softc *);
@@ -280,7 +271,7 @@ kue_load_fw(struct kue_softc *sc)
 	if (err) {
 		printf("%s: failed to load code segment: %s\n",
 		    sc->kue_dev.dv_xname, usbd_errstr(err));
-		free(buf, M_DEVBUF);
+		free(buf, M_DEVBUF, 0);
 		return (EIO);
 	}
 
@@ -292,7 +283,7 @@ kue_load_fw(struct kue_softc *sc)
 	if (err) {
 		printf("%s: failed to load fixup segment: %s\n",
 		    sc->kue_dev.dv_xname, usbd_errstr(err));
-		free(buf, M_DEVBUF);
+		free(buf, M_DEVBUF, 0);
 		return (EIO);
 	}
 
@@ -305,10 +296,10 @@ kue_load_fw(struct kue_softc *sc)
 	if (err) {
 		printf("%s: failed to load trigger segment: %s\n",
 		    sc->kue_dev.dv_xname, usbd_errstr(err));
-		free(buf, M_DEVBUF);
+		free(buf, M_DEVBUF, 0);
 		return (EIO);
 	}
-	free(buf, M_DEVBUF);
+	free(buf, M_DEVBUF, 0);
 
 	usbd_delay_ms(sc->kue_udev, 10);
 
@@ -556,7 +547,7 @@ kue_detach(struct device *self, int flags)
 	s = splusb();		/* XXX why? */
 
 	if (sc->kue_mcfilters != NULL) {
-		free(sc->kue_mcfilters, M_USBDEV);
+		free(sc->kue_mcfilters, M_USBDEV, 0);
 		sc->kue_mcfilters = NULL;
 	}
 
@@ -579,21 +570,6 @@ kue_detach(struct device *self, int flags)
 	sc->kue_attached = 0;
 	splx(s);
 
-	return (0);
-}
-
-int
-kue_activate(struct device *self, int act)
-{
-	struct kue_softc *sc = (struct kue_softc *)self;
-
-	DPRINTFN(2,("%s: %s: enter\n", sc->kue_dev.dv_xname, __func__));
-
-	switch (act) {
-	case DVACT_DEACTIVATE:
-		usbd_deactivate(sc->kue_udev);
-		break;
-	}
 	return (0);
 }
 

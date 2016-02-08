@@ -1,4 +1,4 @@
-/*	$OpenBSD: ext2fs_inode.c,v 1.47 2014/01/25 23:31:12 guenther Exp $	*/
+/*	$OpenBSD: ext2fs_inode.c,v 1.55 2014/07/31 17:37:52 pelikan Exp $	*/
 /*	$NetBSD: ext2fs_inode.c,v 1.24 2001/06/19 12:59:18 wiz Exp $	*/
 
 /*
@@ -45,8 +45,6 @@
 #include <sys/malloc.h>
 #include <sys/resourcevar.h>
 
-#include <uvm/uvm_extern.h>
-
 #include <ufs/ufs/quota.h>
 #include <ufs/ufs/inode.h>
 #include <ufs/ufs/ufsmount.h>
@@ -64,40 +62,37 @@ static int ext2fs_indirtrunc(struct inode *, int32_t, int32_t,
 u_int64_t
 ext2fs_size(struct inode *ip)
 {
-        u_int64_t size = ip->i_e2fs_size;
+	u_int64_t size = ip->i_e2fs_size;
 
-        if ((ip->i_e2fs_mode & IFMT) == IFREG)
-                size |= (u_int64_t)ip->i_e2fs_dacl << 32;
+	if ((ip->i_e2fs_mode & IFMT) == IFREG)
+		size |= (u_int64_t)ip->i_e2fs_size_hi << 32;
 
-        return (size);
+	return (size);
 }
 
 int
 ext2fs_setsize(struct inode *ip, u_int64_t size)
 {
-        if ((ip->i_e2fs_mode & IFMT) == IFREG ||
-            ip->i_e2fs_mode == 0) {
-                ip->i_e2fs_dacl = size >> 32;
-                if (size >= 0x80000000U) {
-                        struct m_ext2fs *fs = ip->i_e2fs;
+	struct m_ext2fs *fs = ip->i_e2fs;
 
-                        if (fs->e2fs.e2fs_rev <= E2FS_REV0) {
-                                /* Linux automagically upgrades to REV1 here! */
-                                return (EFBIG);
-                        }
-                        if (!(fs->e2fs.e2fs_features_rocompat
-                            & EXT2F_ROCOMPAT_LARGEFILE)) {
-                                fs->e2fs.e2fs_features_rocompat |=
-                                    EXT2F_ROCOMPAT_LARGEFILE;
-                                fs->e2fs_fmod = 1;
-                        }
-                }
-        } else if (size >= 0x80000000U)
-                return (EFBIG);
+	if (size <= fs->e2fs_maxfilesize) {
+		/* If HUGE_FILEs are off, e2fs_maxfilesize will protect us. */
+		if ((ip->i_e2fs_mode & IFMT) == IFREG || ip->i_e2fs_mode == 0)
+			ip->i_e2fs_size_hi = size >> 32;
 
-        ip->i_e2fs_size = size;
+		ip->i_e2fs_size = size;
+		return (0);
+	}
 
-        return (0);
+	/* Linux automagically upgrades to REV1 here! */
+	if (fs->e2fs.e2fs_rev <= E2FS_REV0)
+		return (EFBIG);
+
+	if ((fs->e2fs.e2fs_features_rocompat & EXT2F_ROCOMPAT_LARGEFILE) == 0) {
+		fs->e2fs.e2fs_features_rocompat |= EXT2F_ROCOMPAT_LARGEFILE;
+		fs->e2fs_fmod = 1;
+	}
+	return (EFBIG);
 }
 
 
@@ -106,7 +101,7 @@ ext2fs_setsize(struct inode *ip, u_int64_t size)
  */
 int
 ext2fs_inactive(void *v)
-{   
+{
 	struct vop_inactive_args *ap = v;
 	struct vnode *vp = ap->a_vp;
 	struct inode *ip = VTOI(vp);
@@ -146,7 +141,7 @@ out:
 	if (ip->i_e2din == NULL || ip->i_e2fs_dtime != 0)
 		vrecycle(vp, p);
 	return (error);
-}   
+}
 
 
 /*
@@ -194,7 +189,7 @@ ext2fs_update(struct inode *ip, int waitfor)
 	ip->i_e2fs_uid_high = ip->i_e2fs_uid >> 16;
 	ip->i_e2fs_gid_high = ip->i_e2fs_gid >> 16;
 
-	e2fs_isave(ip->i_e2din, (struct ext2fs_dinode *)cp);
+	e2fs_isave(fs, ip->i_e2din, (struct ext2fs_dinode *)cp);
 	if (waitfor)
 		return (bwrite(bp));
 	else {
@@ -246,7 +241,7 @@ ext2fs_truncate(struct inode *oip, off_t length, int flags, struct ucred *cred)
 		oip->i_flag |= IN_CHANGE | IN_UPDATE;
 		return (ext2fs_update(oip, 1));
 	}
-	
+
 	if (ext2fs_size(oip) == length) {
 		oip->i_flag |= IN_CHANGE | IN_UPDATE;
 		return (ext2fs_update(oip, 0));
@@ -297,7 +292,7 @@ ext2fs_truncate(struct inode *oip, off_t length, int flags, struct ucred *cred)
 		aflags = B_CLRBUF;
 		if (flags & IO_SYNC)
 			aflags |= B_SYNC;
-		error = ext2fs_buf_alloc(oip, lbn, offset, cred, &bp, 
+		error = ext2fs_buf_alloc(oip, lbn, offset, cred, &bp,
 		    aflags);
 		if (error)
 			return (error);
@@ -359,7 +354,7 @@ ext2fs_truncate(struct inode *oip, off_t length, int flags, struct ucred *cred)
 	indir_lbn[DOUBLE] = indir_lbn[SINGLE] - NINDIR(fs) -1;
 	indir_lbn[TRIPLE] = indir_lbn[DOUBLE] - NINDIR(fs) * NINDIR(fs) - 1;
 	for (level = TRIPLE; level >= SINGLE; level--) {
-		bn = fs2h32(oip->i_e2fs_blocks[NDADDR + level]);
+		bn = letoh32(oip->i_e2fs_blocks[NDADDR + level]);
 		if (bn != 0) {
 			error = ext2fs_indirtrunc(oip, indir_lbn[level],
 			    fsbtodb(fs, bn), lastiblock[level], level, &count);
@@ -380,7 +375,7 @@ ext2fs_truncate(struct inode *oip, off_t length, int flags, struct ucred *cred)
 	 * All whole direct blocks or frags.
 	 */
 	for (i = NDADDR - 1; i > lastblock; i--) {
-		bn = fs2h32(oip->i_e2fs_blocks[i]);
+		bn = letoh32(oip->i_e2fs_blocks[i]);
 		if (bn == 0)
 			continue;
 		oip->i_e2fs_blocks[i] = 0;
@@ -493,7 +488,7 @@ ext2fs_indirtrunc(struct inode *ip, int32_t lbn, int32_t dbn, int32_t lastbn, in
 	for (i = NINDIR(fs) - 1,
 		nlbn = lbn + 1 - i * factor; i > last;
 		i--, nlbn += factor) {
-		nb = fs2h32(bap[i]);
+		nb = letoh32(bap[i]);
 		if (nb == 0)
 			continue;
 		if (level > SINGLE) {
@@ -513,7 +508,7 @@ ext2fs_indirtrunc(struct inode *ip, int32_t lbn, int32_t dbn, int32_t lastbn, in
 	 */
 	if (level > SINGLE && lastbn >= 0) {
 		last = lastbn % factor;
-		nb = fs2h32(bap[i]);
+		nb = letoh32(bap[i]);
 		if (nb != 0) {
 			error = ext2fs_indirtrunc(ip, nlbn, fsbtodb(fs, nb),
 						   last, level - 1, &blkcount);
@@ -524,7 +519,7 @@ ext2fs_indirtrunc(struct inode *ip, int32_t lbn, int32_t dbn, int32_t lastbn, in
 	}
 
 	if (copy != NULL) {
-		free(copy, M_TEMP);
+		free(copy, M_TEMP, fs->e2fs_bsize);
 	} else {
 		bp->b_flags |= B_INVAL;
 		brelse(bp);

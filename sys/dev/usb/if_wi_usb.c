@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_wi_usb.c,v 1.60 2013/11/15 10:17:39 pirofti Exp $ */
+/*	$OpenBSD: if_wi_usb.c,v 1.63 2014/07/13 15:52:49 mpi Exp $ */
 
 /*
  * Copyright (c) 2003 Dale Rahn. All rights reserved.
@@ -46,12 +46,8 @@
 #include <net/if_media.h>
 #include <net/if_types.h>
 
-#ifdef INET
 #include <netinet/in.h>
-#include <netinet/in_systm.h>
-#include <netinet/ip.h>
 #include <netinet/if_ether.h>
-#endif
 
 #include <dev/usb/usb.h>
 #include <dev/usb/usbdi.h>
@@ -260,21 +256,16 @@ const struct wi_usb_type {
 };
 #define wi_usb_lookup(v, p) ((struct wi_usb_type *)usb_lookup(wi_usb_devs, v, p))
 
-int wi_usb_match(struct device *, void *, void *); 
-void wi_usb_attach(struct device *, struct device *, void *); 
-int wi_usb_detach(struct device *, int); 
-int wi_usb_activate(struct device *, int); 
+int wi_usb_match(struct device *, void *, void *);
+void wi_usb_attach(struct device *, struct device *, void *);
+int wi_usb_detach(struct device *, int);
 
-struct cfdriver wi_usb_cd = { 
-	NULL, "wi_usb", DV_IFNET 
-}; 
+struct cfdriver wi_usb_cd = {
+	NULL, "wi_usb", DV_IFNET
+};
 
-const struct cfattach wi_usb_ca = { 
-	sizeof(struct wi_usb_softc), 
-	wi_usb_match, 
-	wi_usb_attach, 
-	wi_usb_detach, 
-	wi_usb_activate, 
+const struct cfattach wi_usb_ca = {
+	sizeof(struct wi_usb_softc), wi_usb_match, wi_usb_attach, wi_usb_detach
 };
 
 int
@@ -437,7 +428,7 @@ wi_usb_detach(struct device *self, int flags)
 	while (sc->wi_usb_nummem) {
 		sc->wi_usb_nummem--;
 		if (sc->wi_usb_txmem[sc->wi_usb_nummem] != NULL)
-			free(sc->wi_usb_txmem[sc->wi_usb_nummem], M_DEVBUF);
+			free(sc->wi_usb_txmem[sc->wi_usb_nummem], M_DEVBUF, 0);
 		sc->wi_usb_txmem[sc->wi_usb_nummem] = NULL;
 	}
 
@@ -568,7 +559,7 @@ wi_cmd_usb(struct wi_softc *wsc, int cmd, int val0, int val1, int val2)
 		/* free alloc_nicmem regions */
 		while (sc->wi_usb_nummem) {
 			sc->wi_usb_nummem--;
-			free(sc->wi_usb_txmem[sc->wi_usb_nummem], M_DEVBUF);
+			free(sc->wi_usb_txmem[sc->wi_usb_nummem], M_DEVBUF, 0);
 			sc->wi_usb_txmem[sc->wi_usb_nummem] = NULL;
 		}
 
@@ -1314,22 +1305,6 @@ wi_get_fid_usb(struct wi_softc *sc, int fid)
 		return 0x1111;
 	}
 
-}
-
-int
-wi_usb_activate(struct device *self, int act)
-{
-	struct wi_usb_softc *sc = (struct wi_usb_softc *)self;
-
-	DPRINTFN(10,("%s: %s: enter\n", sc->wi_usb_dev.dv_xname, __func__));
-
-	switch (act) {
-	case DVACT_DEACTIVATE:
-		usbd_deactivate(sc->wi_usb_udev);
-		sc->wi_thread_info->dying = 1;
-		break;
-	}
-	return (0);
 }
 
 #if 0

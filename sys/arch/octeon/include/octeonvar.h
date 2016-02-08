@@ -1,4 +1,4 @@
-/*	$OpenBSD: octeonvar.h,v 1.15 2013/11/04 17:51:03 bcallah Exp $	*/
+/*	$OpenBSD: octeonvar.h,v 1.20 2014/07/14 10:23:58 jasper Exp $	*/
 /*	$NetBSD: maltavar.h,v 1.3 2002/03/18 10:10:16 simonb Exp $	*/
 
 /*-
@@ -203,43 +203,43 @@ struct octeon_fau_map {
 #define	BOARD_TYPE_SIM			1
 #define	BOARD_TYPE_UBIQUITI_E100	20002
 
-#ifdef _KERNEL
+#if defined(_KERNEL) || defined(_STANDALONE)
 #define OCTEON_ARGV_MAX 64
 
 /* Maximum number of cores on <= CN52XX */
 #define OCTEON_MAXCPUS	4
 
 struct boot_desc {
-	uint32_t desc_ver;
-	uint32_t desc_size;
-	uint64_t stack_top;
-	uint64_t heap_start;
-	uint64_t heap_end;
-	uint64_t __unused17;
-	uint64_t __unused16;
-	uint32_t __unused18;
-	uint32_t __unused15;
-	uint32_t __unused14;
-	uint32_t argc;
-	uint32_t argv[OCTEON_ARGV_MAX];
-	uint32_t flags;
-	uint32_t core_mask;
-	uint32_t dram_size;
-	uint32_t phy_mem_desc_addr;
-	uint32_t debugger_flag_addr;
-	uint32_t eclock;
-	uint32_t __unused10;
-	uint32_t __unused9;
-	uint16_t __unused8;
-	uint8_t __unused7;
-	uint8_t __unused6;
-	uint16_t __unused5;
-	uint8_t __unused4;
-	uint8_t __unused3;
-	uint8_t __unused2[20];
-	uint8_t __unused1[6];
-	uint8_t __unused0;
-	uint64_t boot_info_addr;
+	uint32_t	desc_ver;
+	uint32_t	desc_size;
+	uint64_t	stack_top;
+	uint64_t 	heap_start;
+	uint64_t	heap_end;
+	uint64_t      	__unused17;
+	uint64_t     	__unused16;
+	uint32_t      	__unused18;
+	uint32_t      	__unused15;
+	uint32_t      	__unused14;
+	uint32_t	argc;
+	uint32_t	argv[OCTEON_ARGV_MAX];
+	uint32_t	flags;
+	uint32_t	core_mask;
+	uint32_t	dram_size;
+	uint32_t	phy_mem_desc_addr;
+	uint32_t	debugger_flag_addr;
+	uint32_t	eclock;
+	uint32_t      	__unused10;
+	uint32_t      	__unused9;
+	uint16_t      	__unused8;
+	uint8_t 	__unused7;
+	uint8_t 	__unused6;
+	uint16_t 	__unused5;
+	uint8_t 	__unused4;
+	uint8_t 	__unused3;
+	uint8_t 	__unused2[20];
+	uint8_t 	__unused1[6];
+	uint8_t 	__unused0;
+	uint64_t 	boot_info_addr;
 };
 
 struct boot_info {
@@ -278,6 +278,7 @@ struct boot_info {
 extern struct boot_desc *octeon_boot_desc;
 extern struct boot_info *octeon_boot_info;
 
+#ifdef _KERNEL
 /* Device capabilities advertised in boot_info->config_flags */
 #define BOOTINFO_CFG_FLAG_PCI_HOST	(1ull << 0)
 #define BOOTINFO_CFG_FLAG_PCI_TARGET	(1ull << 1)
@@ -290,19 +291,36 @@ void	octeon_cal_timer(int);
 void	octeon_dma_init(struct octeon_config *);
 void	octeon_intr_init(void);
 int	octeon_get_ethaddr(int, u_int8_t *);
+
+int	octeon_ioclock_speed(void);
+
 #endif /* _KERNEL */
+#endif /* _KERNEL || _STANDALONE */
 
 static inline int
 ffs64(uint64_t val)
 {
 	int ret;
 
-	__asm __volatile ( \
+	__asm volatile ( \
 		_ASM_PROLOGUE_MIPS64
 		"	dclz	%0, %1			\n"
 		_ASM_EPILOGUE
 		: "=r"(ret) : "r"(val));
 	return 64 - ret;
+}
+
+static inline int
+ffs32(uint32_t val)
+{
+	int ret;
+
+	__asm __volatile ( \
+		_ASM_PROLOGUE_MIPS64
+		"	clz	%0, %1			\n"
+		_ASM_EPILOGUE
+		: "=r"(ret) : "r"(val));
+	return 32 - ret;
 }
 
 static inline uint64_t
@@ -367,7 +385,7 @@ octeon_disable_interrupt(uint32_t *new)
 {
 	uint32_t s, tmp;
 
-	__asm __volatile (
+	__asm volatile (
 		_ASM_PROLOGUE
 		"	mfc0	%[s], $12		\n"
 		"	and	%[tmp], %[s], ~1	\n"
@@ -383,7 +401,7 @@ octeon_disable_interrupt(uint32_t *new)
 static inline void
 octeon_restore_status(uint32_t s)
 {
-	__asm __volatile (
+	__asm volatile (
 		_ASM_PROLOGUE
 		"	mtc0	%[s], $12		\n"
 		_ASM_EPILOGUE
@@ -395,7 +413,7 @@ octeon_get_cycles(void)
 {
 	uint64_t tmp;
 
-	__asm __volatile (
+	__asm volatile (
 		_ASM_PROLOGUE_MIPS64
 		"	dmfc0	%[tmp], $9, 6		\n"
 		_ASM_EPILOGUE

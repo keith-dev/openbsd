@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_urtwn.c,v 1.32 2013/09/30 05:18:57 jsg Exp $	*/
+/*	$OpenBSD: if_urtwn.c,v 1.38 2014/07/13 15:52:49 mpi Exp $	*/
 
 /*-
  * Copyright (c) 2010 Damien Bergamini <damien.bergamini@free.fr>
@@ -46,9 +46,7 @@
 #include <net/if_types.h>
 
 #include <netinet/in.h>
-#include <netinet/in_systm.h>
 #include <netinet/if_ether.h>
-#include <netinet/ip.h>
 
 #include <net80211/ieee80211_var.h>
 #include <net80211/ieee80211_radiotap.h>
@@ -59,10 +57,6 @@
 #include <dev/usb/usbdevs.h>
 
 #include <dev/usb/if_urtwnreg.h>
-
-#ifdef USB_DEBUG
-#define URTWN_DEBUG
-#endif
 
 #ifdef URTWN_DEBUG
 #define DPRINTF(x)	do { if (urtwn_debug) printf x; } while (0)
@@ -88,6 +82,7 @@ static const struct usb_devno urtwn_devs[] = {
 	{ USB_VENDOR_BELKIN,	USB_PRODUCT_BELKIN_RTL8188CU },
 	{ USB_VENDOR_BELKIN,	USB_PRODUCT_BELKIN_RTL8188CUS },
 	{ USB_VENDOR_BELKIN,	USB_PRODUCT_BELKIN_RTL8192CU },
+	{ USB_VENDOR_BELKIN,	USB_PRODUCT_BELKIN_RTL8192CU_1 },
 	{ USB_VENDOR_BELKIN,	USB_PRODUCT_BELKIN_RTL8192CU_2 },
 	{ USB_VENDOR_CHICONY,	USB_PRODUCT_CHICONY_RTL8188CUS_1 },
 	{ USB_VENDOR_CHICONY,	USB_PRODUCT_CHICONY_RTL8188CUS_2 },
@@ -152,7 +147,6 @@ static const struct usb_devno urtwn_devs[] = {
 int		urtwn_match(struct device *, void *, void *);
 void		urtwn_attach(struct device *, struct device *, void *);
 int		urtwn_detach(struct device *, int);
-int		urtwn_activate(struct device *, int);
 int		urtwn_open_pipes(struct urtwn_softc *);
 void		urtwn_close_pipes(struct urtwn_softc *);
 int		urtwn_alloc_rx_list(struct urtwn_softc *);
@@ -250,11 +244,7 @@ struct cfdriver urtwn_cd = {
 };
 
 const struct cfattach urtwn_ca = {
-	sizeof(struct urtwn_softc),
-	urtwn_match,
-	urtwn_attach,
-	urtwn_detach,
-	urtwn_activate
+	sizeof(struct urtwn_softc), urtwn_match, urtwn_attach, urtwn_detach
 };
 
 int
@@ -433,19 +423,6 @@ urtwn_detach(struct device *self, int flags)
 	urtwn_free_rx_list(sc);
 	splx(s);
 
-	return (0);
-}
-
-int
-urtwn_activate(struct device *self, int act)
-{
-	struct urtwn_softc *sc = (struct urtwn_softc *)self;
-
-	switch (act) {
-	case DVACT_DEACTIVATE:
-		usbd_deactivate(sc->sc_udev);
-		break;
-	}
 	return (0);
 }
 
@@ -1922,7 +1899,7 @@ urtwn_start(struct ifnet *ifp)
 		/* Send pending management frames first. */
 		IF_DEQUEUE(&ic->ic_mgtq, m);
 		if (m != NULL) {
-			ni = (void *)m->m_pkthdr.rcvif;
+			ni = m->m_pkthdr.ph_cookie;
 			goto sendit;
 		}
 		if (ic->ic_state != IEEE80211_S_RUN)
@@ -2298,7 +2275,7 @@ urtwn_load_firmware(struct urtwn_softc *sc)
 		goto fail;
 	}
  fail:
-	free(fw, M_DEVBUF);
+	free(fw, M_DEVBUF, 0);
 	return (error);
 }
 

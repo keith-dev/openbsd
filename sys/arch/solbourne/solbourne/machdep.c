@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.27 2013/11/20 23:57:07 miod Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.42 2014/07/21 17:25:47 uebayasi Exp $	*/
 /*	OpenBSD: machdep.c,v 1.105 2005/04/11 15:13:01 deraadt Exp 	*/
 
 /*
@@ -92,7 +92,7 @@ struct vm_map *phys_map = NULL;
 int	physmem;
 
 /* sysctl settable */
-int	sparc_led_blink = 0;
+int	sparc_led_blink = 1;
 
 /*
  * safepri is a safe priority for sleep to set for a spin-wait
@@ -254,7 +254,7 @@ setregs(p, pack, stack, retval)
 			savefpstate(fs);
 			cpuinfo.fpproc = NULL;
 		}
-		free((void *)fs, M_SUBPROC);
+		free((void *)fs, M_SUBPROC, 0);
 		p->p_md.md_fpstate = NULL;
 	}
 	bzero((caddr_t)tf, sizeof *tf);
@@ -361,7 +361,7 @@ sendsig(catcher, sig, mask, code, type, val)
 	union sigval val;
 {
 	struct proc *p = curproc;
-	struct sigacts *psp = p->p_sigacts;
+	struct sigacts *psp = p->p_p->ps_sigacts;
 	struct sigframe *fp;
 	struct trapframe *tf;
 	int caddr, oldsp, newsp;
@@ -447,7 +447,7 @@ sendsig(catcher, sig, mask, code, type, val)
 	 * Arrange to continue execution at the code copied out in exec().
 	 * It needs the function to call in %g1, and a new stack pointer.
 	 */
-	caddr = p->p_sigcode;
+	caddr = p->p_p->ps_sigcode;
 	tf->tf_global[1] = (int)catcher;
 	tf->tf_pc = caddr;
 	tf->tf_npc = caddr + 4;
@@ -513,16 +513,14 @@ sys_sigreturn(p, v, retval)
 
 int	waittime = -1;
 
-void
-boot(howto)
-	int howto;
+__dead void
+boot(int howto)
 {
 	int i;
 	static char str[4];	/* room for "-sd\0" */
+	struct device *mainbus;
 
-	/* If system is cold, just halt. */
 	if (cold) {
-		/* (Unless the user explicitly asked for reboot.) */
 		if ((howto & RB_USERREQ) == 0)
 			howto |= RB_HALT;
 		goto haltsys;
@@ -531,19 +529,9 @@ boot(howto)
 	fb_unblank();
 	boothowto = howto;
 	if ((howto & RB_NOSYNC) == 0 && waittime < 0) {
-		extern struct proc proc0;
-
-		/* make sure there's a process to charge for I/O in sync() */
-		if (curproc == NULL)
-			curproc = &proc0;
 		waittime = 0;
 		vfs_shutdown();
 
-		/*
-		 * If we've been adjusting the clock, the todr
-		 * will be out of synch; adjust it now unless
-		 * the system was sitting in ddb.
-		 */
 		if ((howto & RB_TIMEBAD) == 0) {
 			resettodr();
 		} else {
@@ -553,26 +541,28 @@ boot(howto)
 	if_downall();
 
 	uvm_shutdown();
-	(void) splhigh();		/* ??? */
+	splhigh();
+	cold = 1;
 
-	if (howto & RB_DUMP)
+	if ((howto & RB_DUMP) != 0)
 		dumpsys();
 
 haltsys:
 	doshutdownhooks();
-	if (!TAILQ_EMPTY(&alldevs))
-		config_suspend(TAILQ_FIRST(&alldevs), DVACT_POWERDOWN);
+	mainbus = device_mainbus();
+	if (mainbus != NULL)
+		config_suspend(mainbus, DVACT_POWERDOWN);
 
-	if ((howto & RB_HALT) || (howto & RB_POWERDOWN)) {
+	if ((howto & RB_HALT) != 0 || (howto & RB_POWERDOWN) != 0) {
 		printf("halted\n\n");
 		romhalt();
 	}
 
 	printf("rebooting\n\n");
 	i = 1;
-	if (howto & RB_SINGLE)
+	if ((howto & RB_SINGLE) != 0)
 		str[i++] = 's';
-	if (howto & RB_KDB)
+	if ((howto & RB_KDB) != 0)
 		str[i++] = 'd';
 	if (i > 1) {
 		str[0] = '-';
@@ -580,7 +570,8 @@ haltsys:
 	} else
 		str[0] = 0;
 	romboot(str);
-	/*NOTREACHED*/
+	for (;;) ;
+	/* NOTREACHED */
 }
 
 /* XXX - needs to be written */

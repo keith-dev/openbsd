@@ -1,4 +1,4 @@
-/*	$OpenBSD: openpic.c,v 1.69 2012/10/08 20:06:37 deraadt Exp $	*/
+/*	$OpenBSD: openpic.c,v 1.72 2014/07/12 18:44:42 tedu Exp $	*/
 
 /*-
  * Copyright (c) 2008 Dale Rahn <drahn@openbsd.org>
@@ -39,12 +39,10 @@
 
 #include <sys/param.h>
 #include <sys/device.h>
-#include <sys/ioctl.h>
-#include <sys/mbuf.h>
-#include <sys/socket.h>
 #include <sys/systm.h>
+#include <sys/malloc.h>
 
-#include <uvm/uvm.h>
+#include <uvm/uvm_extern.h>
 #include <ddb/db_var.h>
 
 #include <machine/atomic.h>
@@ -52,9 +50,9 @@
 #include <machine/intr.h>
 #include <machine/psl.h>
 #include <machine/pio.h>
-#include <machine/powerpc.h>
-#include <macppc/dev/openpicreg.h>
 #include <dev/ofw/openfirm.h>
+
+#include <macppc/dev/openpicreg.h>
 
 #define ICU_LEN 128
 int openpic_numirq = ICU_LEN;
@@ -381,7 +379,7 @@ openpic_intr_disestablish(void *lcp, void *arg)
 	ppc_intr_enable(s);
 
 	evcount_detach(&ih->ih_count);
-	free((void *)ih, M_DEVBUF);
+	free((void *)ih, M_DEVBUF, 0);
 
 	if (TAILQ_EMPTY(&iq->iq_list))
 		iq->iq_ist = IST_NONE;

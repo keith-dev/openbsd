@@ -1,4 +1,4 @@
-/*	$OpenBSD: si.c,v 1.13 2014/02/10 01:59:48 jsg Exp $	*/
+/*	$OpenBSD: si.c,v 1.15 2014/07/12 18:48:52 tedu Exp $	*/
 /*
  * Copyright 2011 Advanced Micro Devices, Inc.
  *
@@ -208,10 +208,12 @@ static int si_mc_load_microcode(struct radeon_device *rdev)
 	const __be32 *fw_data;
 	u32 running, blackout = 0;
 	u32 *io_mc_regs;
-	int i, ucode_size, regs_size;
+	int i, regs_size, ucode_size;
 
 	if (!rdev->mc_fw)
 		return -EINVAL;
+
+	ucode_size = rdev->mc_fw_size / 4;
 
 	switch (rdev->family) {
 	case CHIP_TAHITI:
@@ -386,23 +388,23 @@ out:
 			       "si_cp: Failed to load firmware \"%s\"\n",
 			       fw_name);
 		if (rdev->pfp_fw) {
-			free(rdev->pfp_fw, M_DEVBUF);
+			free(rdev->pfp_fw, M_DEVBUF, 0);
 			rdev->pfp_fw = NULL;
 		}
 		if (rdev->me_fw) {
-			free(rdev->pfp_fw, M_DEVBUF);
+			free(rdev->pfp_fw, M_DEVBUF, 0);
 			rdev->me_fw = NULL;
 		}
 		if (rdev->ce_fw) {
-			free(rdev->ce_fw, M_DEVBUF);
+			free(rdev->ce_fw, M_DEVBUF, 0);
 			rdev->ce_fw = NULL;
 		}
 		if (rdev->rlc_fw) {
-			free(rdev->rlc_fw, M_DEVBUF);
+			free(rdev->rlc_fw, M_DEVBUF, 0);
 			rdev->rlc_fw = NULL;
 		}
 		if (rdev->mc_fw) {
-			free(rdev->mc_fw, M_DEVBUF);
+			free(rdev->mc_fw, M_DEVBUF, 0);
 			rdev->mc_fw = NULL;
 		}
 	}

@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_myx.c,v 1.56 2014/02/10 05:21:41 dlg Exp $	*/
+/*	$OpenBSD: if_myx.c,v 1.61 2014/07/12 18:48:51 tedu Exp $	*/
 
 /*
  * Copyright (c) 2007 Reyk Floeter <reyk@openbsd.org>
@@ -143,6 +143,7 @@ struct myx_softc {
 	struct myx_buf_list	 sc_rx_buf_free[2];
 	struct myx_buf_list	 sc_rx_buf_list[2];
 	u_int			 sc_rx_ring_idx[2];
+	struct if_rxring	 sc_rx_ring[2];
 #define  MYX_RXSMALL		 0
 #define  MYX_RXBIG		 1
 	struct timeout		 sc_refill;
@@ -195,6 +196,7 @@ void	 myx_media_status(struct ifnet *, struct ifmediareq *);
 void	 myx_link_state(struct myx_softc *, u_int32_t);
 void	 myx_watchdog(struct ifnet *);
 int	 myx_ioctl(struct ifnet *, u_long, caddr_t);
+int	 myx_rxrinfo(struct myx_softc *, struct if_rxrinfo *);
 void	 myx_up(struct myx_softc *);
 void	 myx_iff(struct myx_softc *);
 void	 myx_down(struct myx_softc *);
@@ -230,9 +232,9 @@ myx_sts_enter(struct myx_softc *sc)
 {
 	bus_dmamap_t		 map = sc->sc_sts_dma.mxm_map;
 
-        mtx_enter(&sc->sc_sts_mtx);
-        bus_dmamap_sync(sc->sc_dmat, map, 0, map->dm_mapsize,
-            BUS_DMASYNC_POSTREAD|BUS_DMASYNC_POSTWRITE);
+	mtx_enter(&sc->sc_sts_mtx);
+	bus_dmamap_sync(sc->sc_dmat, map, 0, map->dm_mapsize,
+	    BUS_DMASYNC_POSTREAD|BUS_DMASYNC_POSTWRITE);
 }
 
 static inline void
@@ -240,9 +242,9 @@ myx_sts_leave(struct myx_softc *sc)
 {
 	bus_dmamap_t		 map = sc->sc_sts_dma.mxm_map;
 
-        bus_dmamap_sync(sc->sc_dmat, map, 0, map->dm_mapsize,
-            BUS_DMASYNC_PREREAD|BUS_DMASYNC_PREWRITE);
-        mtx_leave(&sc->sc_sts_mtx);
+	bus_dmamap_sync(sc->sc_dmat, map, 0, map->dm_mapsize,
+	    BUS_DMASYNC_PREREAD|BUS_DMASYNC_PREWRITE);
+	mtx_leave(&sc->sc_sts_mtx);
 }
 
 struct cfdriver myx_cd = {
@@ -460,7 +462,7 @@ myx_loadfirmware(struct myx_softc *sc, const char *filename)
 	ret = 0;
 
 err:
-	free(fw, M_DEVBUF);
+	free(fw, M_DEVBUF, 0);
 	return (ret);
 }
 
@@ -944,6 +946,10 @@ myx_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		error = ifmedia_ioctl(ifp, ifr, &sc->sc_media, cmd);
 		break;
 
+	case SIOCGIFRXR:
+		error = myx_rxrinfo(sc, (struct if_rxrinfo *)ifr->ifr_data);
+		break;
+
 	default:
 		error = ether_ioctl(ifp, &sc->sc_ac, cmd, data);
 	}
@@ -957,6 +963,26 @@ myx_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 
 	splx(s);
 	return (error);
+}
+
+int
+myx_rxrinfo(struct myx_softc *sc, struct if_rxrinfo *ifri)
+{
+	struct if_rxring_info ifr[2];
+
+	memset(ifr, 0, sizeof(ifr));
+
+	ifr[0].ifr_size = MCLBYTES;
+	mtx_enter(&sc->sc_rx_ring_lock[0].mrl_mtx);
+	ifr[0].ifr_info = sc->sc_rx_ring[0];
+	mtx_leave(&sc->sc_rx_ring_lock[0].mrl_mtx);
+
+	ifr[1].ifr_size = 12 * 1024;
+	mtx_enter(&sc->sc_rx_ring_lock[1].mrl_mtx);
+	ifr[1].ifr_info = sc->sc_rx_ring[1];
+	mtx_leave(&sc->sc_rx_ring_lock[1].mrl_mtx);
+
+	return (if_rxr_info_ioctl(ifri, nitems(ifr), ifr));
 }
 
 void
@@ -1007,9 +1033,6 @@ myx_up(struct myx_softc *sc)
 		goto free_pad;
 	}
 	sc->sc_rx_ring_count = r / sizeof(struct myx_rx_desc);
-
-	m_clsetwms(ifp, MCLBYTES, 2, sc->sc_rx_ring_count - 2);
-	m_clsetwms(ifp, 12 * 1024, 2, sc->sc_rx_ring_count - 2);
 
 	memset(&mc, 0, sizeof(mc));
 	if (myx_cmd(sc, MYXCMD_GET_TXRINGSZ, &mc, &r) != 0) {
@@ -1176,6 +1199,9 @@ myx_up(struct myx_softc *sc)
 
 		myx_buf_put(&sc->sc_rx_buf_free[MYX_RXBIG], mb);
 	}
+
+	if_rxr_init(&sc->sc_rx_ring[MYX_RXBIG], 2, sc->sc_rx_ring_count - 2);
+	if_rxr_init(&sc->sc_rx_ring[MYX_RXSMALL], 2, sc->sc_rx_ring_count - 2);
 
 	myx_rx_zero(sc, MYX_RXSMALL);
 	if (myx_rx_fill(sc, MYX_RXSMALL) != 0) {
@@ -1683,8 +1709,6 @@ myx_intr(void *arg)
 	}
 	bus_space_write_raw_region_4(sc->sc_memt, sc->sc_memh,
 	    sc->sc_irqclaimoff + sizeof(data), &data, sizeof(data));
-	bus_space_barrier(sc->sc_memt, sc->sc_memh,
-	    sc->sc_irqclaimoff, sizeof(data) * 2, BUS_SPACE_BARRIER_WRITE);
 
 	if (state == MYX_S_DOWN) {
 		/* myx_down is waiting for us */
@@ -1779,6 +1803,7 @@ myx_rxeof(struct myx_softc *sc)
 	struct mbuf *m;
 	int ring;
 	int rings = 0;
+	u_int rxfree[2] = { 0 , 0 };
 	u_int len;
 
 	bus_dmamap_sync(sc->sc_dmat, sc->sc_intrq_dma.mxm_map, 0,
@@ -1820,11 +1845,22 @@ myx_rxeof(struct myx_softc *sc)
 
 		myx_buf_put(&sc->sc_rx_buf_free[ring], mb);
 
-		SET(rings, 1 << ring);
+		rxfree[ring]++;
 	}
 
 	bus_dmamap_sync(sc->sc_dmat, sc->sc_intrq_dma.mxm_map, 0,
 	    sc->sc_intrq_dma.mxm_map->dm_mapsize, BUS_DMASYNC_PREREAD);
+
+	for (ring = MYX_RXSMALL; ring <= MYX_RXBIG; ring++) {
+		if (rxfree[ring] == 0)
+			continue;
+
+		mtx_enter(&sc->sc_rx_ring_lock[ring].mrl_mtx);
+		if_rxr_put(&sc->sc_rx_ring[ring], rxfree[ring]);
+		mtx_leave(&sc->sc_rx_ring_lock[ring].mrl_mtx);
+
+		SET(rings, 1 << ring);
+	}
 
 	return (rings);
 }
@@ -1851,13 +1887,20 @@ myx_rx_fill(struct myx_softc *sc, int ring)
 	struct myx_rx_desc rxd;
 	struct myx_buf *mb, *firstmb;
 	u_int32_t offset = sc->sc_rx_ring_offset[ring];
-	u_int idx, firstidx;
+	u_int idx, firstidx, slots;
 	int rv = 1;
 
 	if (!myx_ring_enter(&sc->sc_rx_ring_lock[ring]))
 		return (-1);
 
 	do {
+		mtx_enter(&sc->sc_rx_ring_lock[ring].mrl_mtx);
+		slots = if_rxr_get(&sc->sc_rx_ring[ring], sc->sc_rx_ring_count);
+		mtx_leave(&sc->sc_rx_ring_lock[ring].mrl_mtx);
+
+		if (slots-- == 0)
+			continue;
+
 		firstmb = myx_buf_fill(sc, ring);
 		if (firstmb == NULL)
 			continue;
@@ -1869,7 +1912,7 @@ myx_rx_fill(struct myx_softc *sc, int ring)
 		idx = firstidx + 1;
 		idx %= sc->sc_rx_ring_count;
 
-		while ((mb = myx_buf_fill(sc, ring)) != NULL) {
+		while (slots > 0 && (mb = myx_buf_fill(sc, ring)) != NULL) {
 			myx_buf_put(&sc->sc_rx_buf_list[ring], mb);
 
 			rxd.rx_addr = htobe64(mb->mb_map->dm_segs[0].ds_addr);
@@ -1878,6 +1921,7 @@ myx_rx_fill(struct myx_softc *sc, int ring)
 
 			idx++;
 			idx %= sc->sc_rx_ring_count;
+			slots--;
 		}
 
 		/* make sure the first descriptor is seen after the others */
@@ -1892,6 +1936,9 @@ myx_rx_fill(struct myx_softc *sc, int ring)
 		    &rxd, sizeof(rxd));
 
 		sc->sc_rx_ring_idx[ring] = idx;
+		mtx_enter(&sc->sc_rx_ring_lock[ring].mrl_mtx);
+		if_rxr_put(&sc->sc_rx_ring[ring], slots);
+		mtx_leave(&sc->sc_rx_ring_lock[ring].mrl_mtx);
 	} while (!myx_ring_leave(&sc->sc_rx_ring_lock[ring]));
 
 	return (rv);
@@ -1906,7 +1953,7 @@ myx_buf_fill(struct myx_softc *sc, int ring)
 	int rv;
 
 	KERNEL_LOCK();
-	m = MCLGETI(NULL, M_DONTWAIT, &sc->sc_ac.ac_if, sizes[ring]);
+	m = MCLGETI(NULL, M_DONTWAIT, NULL, sizes[ring]);
 	KERNEL_UNLOCK();
 	if (m == NULL)
 		return (NULL);

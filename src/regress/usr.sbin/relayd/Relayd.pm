@@ -1,4 +1,4 @@
-#	$OpenBSD: Relayd.pm,v 1.6 2013/01/21 20:16:57 bluhm Exp $
+#	$OpenBSD: Relayd.pm,v 1.11 2014/07/10 22:33:44 bluhm Exp $
 
 # Copyright (c) 2010-2012 Alexander Bluhm <bluhm@openbsd.org>
 #
@@ -27,7 +27,7 @@ sub new {
 	my %args = @_;
 	$args{logfile} ||= "relayd.log";
 	$args{up} ||= "Started";
-	$args{down} ||= "parent terminating";
+	$args{down} ||= $args{dryrun} ? "relayd.conf:" : "parent terminating";
 	$args{func} = sub { Carp::confess "$class func may not be called" };
 	$args{conffile} ||= "relayd.conf";
 	$args{forward}
@@ -52,6 +52,15 @@ sub new {
 	open(my $fh, '>', $self->{conffile})
 	    or die ref($self), " conf file $self->{conffile} create failed: $!";
 	print $fh "log all\n";
+	print $fh "table <table-$test> { $self->{connectaddr} }\n"
+	    if defined($self->{table});
+
+	# substitute variables in config file
+	my $curdir = dirname($0) || ".";
+	my $connectport = $self->{connectport};
+	my $connectaddr = $self->{connectaddr};
+	my $listenaddr = $self->{listenaddr};
+	my $listenport = $self->{listenport};
 
 	my @protocol = @{$self->{protocol}};
 	my $proto = shift @protocol;
@@ -62,6 +71,10 @@ sub new {
 	    die ref($self), " invalid forward $self->{forward}"
 	    unless grep { /splice/ } @protocol;
 	print $fh "${proto}protocol proto-$test {";
+	# substitute variables in config file
+	foreach (@protocol) {
+		s/(\$[a-z]+)/$1/eeg;
+	}
 	print $fh  map { "\n\t$_" } @protocol;
 	print $fh  "\n}\n";
 
@@ -75,6 +88,10 @@ sub new {
 	my $withssl = $self->{forwardssl} ? " with ssl" : "";
 	print $fh  "\n\tforward$withssl to $self->{connectaddr} ".
 	    "port $self->{connectport}" unless grep { /^forward / } @relay;
+	# substitute variables in config file
+	foreach (@relay) {
+		s/(\$[a-z]+)/$1/eeg;
+	}
 	print $fh  map { "\n\t$_" } @relay;
 	print $fh  "\n}\n";
 
@@ -84,8 +101,9 @@ sub new {
 sub up {
 	my $self = Proc::up(shift, @_);
 	my $timeout = shift || 10;
-	my $lsock = $self->loggrep(qr/relay_launch: /, $timeout)
-	    or croak ref($self), " no relay_launch in $self->{logfile} ".
+	my $regex = $self->{dryrun} || "relay_launch: ";
+	$self->loggrep(qr/$regex/, $timeout)
+	    or croak ref($self), " no $regex in $self->{logfile} ".
 		"after $timeout seconds";
 	return $self;
 }

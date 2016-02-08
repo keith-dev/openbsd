@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_trunk.c,v 1.86 2013/11/21 16:16:08 mpi Exp $	*/
+/*	$OpenBSD: if_trunk.c,v 1.90 2014/07/22 11:06:09 mpi Exp $	*/
 
 /*
  * Copyright (c) 2005, 2006, 2007 Reyk Floeter <reyk@openbsd.org>
@@ -43,7 +43,6 @@
 
 #ifdef INET
 #include <netinet/in.h>
-#include <netinet/in_systm.h>
 #include <netinet/if_ether.h>
 #include <netinet/ip.h>
 #endif
@@ -169,7 +168,7 @@ trunk_clone_create(struct if_clone *ifc, int unit)
 		if (trunk_protos[i].ti_proto == TRUNK_PROTO_DEFAULT) {
 			tr->tr_proto = trunk_protos[i].ti_proto;
 			if ((error = trunk_protos[i].ti_attach(tr)) != 0) {
-				free(tr, M_DEVBUF);
+				free(tr, M_DEVBUF, 0);
 				return (error);
 			}
 			break;
@@ -235,7 +234,7 @@ trunk_clone_destroy(struct ifnet *ifp)
 	if_detach(ifp);
 
 	SLIST_REMOVE(&trunk_list, tr, trunk_softc, tr_entries);
-	free(tr, M_DEVBUF);
+	free(tr, M_DEVBUF, 0);
 
 	splx(s);
 
@@ -246,11 +245,9 @@ void
 trunk_lladdr(struct arpcom *ac, u_int8_t *lladdr)
 {
 	struct ifnet *ifp = &ac->ac_if;
-	struct ifaddr *ifa;
 	struct sockaddr_dl *sdl;
 
-	ifa = ifp->if_lladdr;
-	sdl = (struct sockaddr_dl *)ifa->ifa_addr;
+	sdl = ifp->if_sadl;
 	sdl->sdl_type = IFT_ETHER;
 	sdl->sdl_alen = ETHER_ADDR_LEN;
 	bcopy(lladdr, LLADDR(sdl), ETHER_ADDR_LEN);
@@ -339,7 +336,7 @@ trunk_port_create(struct trunk_softc *tr, struct ifnet *ifp)
 			tp->tp_flags |= TRUNK_PORT_STACK;
 			if (trunk_port_checkstacking(tr_ptr) >=
 			    TRUNK_MAX_STACKING) {
-				free(tp, M_DEVBUF);
+				free(tp, M_DEVBUF, 0);
 				return (E2BIG);
 			}
 		}
@@ -465,7 +462,7 @@ trunk_port_destroy(struct trunk_port *tp)
 	/* Reset the port lladdr */
 	trunk_port_lladdr(tp, tp->tp_lladdr);
 
-	free(tp, M_DEVBUF);
+	free(tp, M_DEVBUF, 0);
 
 	/* Update trunk capabilities */
 	tr->tr_capabilities = trunk_capabilities(tr);
@@ -843,7 +840,7 @@ trunk_ether_delmulti(struct trunk_softc *tr, struct ifreq *ifr)
 	}
 
 	SLIST_REMOVE(&tr->tr_mc_head, mc, trunk_mc, mc_entries);
-	free(mc, M_DEVBUF);
+	free(mc, M_DEVBUF, 0);
 
 	return (0);
 }
@@ -862,7 +859,7 @@ trunk_ether_purgemulti(struct trunk_softc *tr)
 		trunk_ioctl_allports(tr, SIOCDELMULTI, (caddr_t)ifr);
 
 		SLIST_REMOVE(&tr->tr_mc_head, mc, trunk_mc, mc_entries);
-		free(mc, M_DEVBUF);
+		free(mc, M_DEVBUF, 0);
 	}
 }
 
@@ -1104,7 +1101,7 @@ trunk_input(struct ifnet *ifp, struct ether_header *eh, struct mbuf *m)
 #if NBPFILTER > 0
 	if (trifp->if_bpf && tr->tr_proto != TRUNK_PROTO_FAILOVER)
 		bpf_mtap_hdr(trifp->if_bpf, (char *)eh, ETHER_HDR_LEN, m,
-		    BPF_DIRECTION_IN);
+		    BPF_DIRECTION_IN, NULL);
 #endif
 
 	error = (*tr->tr_input)(tr, tp, eh, m);
@@ -1374,7 +1371,7 @@ trunk_fail_input(struct trunk_softc *tr, struct trunk_port *tp,
 #if NBPFILTER > 0
 	if (ifp->if_bpf)
 		bpf_mtap_hdr(ifp->if_bpf, (char *)eh, ETHER_HDR_LEN, m,
-		    BPF_DIRECTION_IN);
+		    BPF_DIRECTION_IN, NULL);
 #endif
 
 	m->m_pkthdr.rcvif = ifp;
@@ -1416,7 +1413,7 @@ trunk_lb_detach(struct trunk_softc *tr)
 {
 	struct trunk_lb *lb = (struct trunk_lb *)tr->tr_psc;
 	if (lb != NULL)
-		free(lb, M_DEVBUF);
+		free(lb, M_DEVBUF, 0);
 	return (0);
 }
 

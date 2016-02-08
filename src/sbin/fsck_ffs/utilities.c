@@ -1,4 +1,4 @@
-/*	$OpenBSD: utilities.c,v 1.42 2013/11/01 17:36:18 krw Exp $	*/
+/*	$OpenBSD: utilities.c,v 1.46 2014/05/24 14:54:49 krw Exp $	*/
 /*	$NetBSD: utilities.c,v 1.18 1996/09/27 22:45:20 christos Exp $	*/
 
 /*
@@ -229,7 +229,7 @@ flush(int fd, struct bufarea *bp)
 		return;
 	if (bp->b_errs != 0)
 		pfatal("WRITING %sZERO'ED BLOCK %lld TO DISK\n",
-		    (bp->b_errs == bp->b_size / dev_bsize) ? "" : "PARTIALLY ",
+		    (bp->b_errs == bp->b_size / DEV_BSIZE) ? "" : "PARTIALLY ",
 		    (long long)bp->b_bno);
 	bp->b_dirty = 0;
 	bp->b_errs = 0;
@@ -288,9 +288,9 @@ ckfini(int markclean)
 	} else
 		sblockloc = SBLOCK_UFS2;
 	flush(fswritefd, &sblk);
-	if (havesb && sblk.b_bno != sblockloc / dev_bsize && !preen &&
+	if (havesb && sblk.b_bno != sblockloc / DEV_BSIZE && !preen &&
 	    reply("UPDATE STANDARD SUPERBLOCK")) {
-		sblk.b_bno = sblockloc / dev_bsize;
+		sblk.b_bno = sblockloc / DEV_BSIZE;
 		sbdirty();
 		flush(fswritefd, &sblk);
 	}
@@ -338,28 +338,22 @@ bread(int fd, char *buf, daddr_t blk, long size)
 	off_t offset;
 
 	offset = blk;
-	offset *= dev_bsize;
-	if (lseek(fd, offset, SEEK_SET) < 0)
-		rwerror("SEEK", blk);
-	else if (read(fd, buf, (int)size) == size)
+	offset *= DEV_BSIZE;
+	if (pread(fd, buf, size, offset) == size)
 		return (0);
 	rwerror("READ", blk);
-	if (lseek(fd, offset, SEEK_SET) < 0)
-		rwerror("SEEK", blk);
 	errs = 0;
 	memset(buf, 0, (size_t)size);
 	printf("THE FOLLOWING DISK SECTORS COULD NOT BE READ:");
 	for (cp = buf, i = 0; i < size; i += secsize, cp += secsize) {
-		if (read(fd, cp, (int)secsize) != secsize) {
-			(void)lseek(fd, offset + i + secsize, SEEK_SET);
-			if (secsize != dev_bsize && dev_bsize != 1)
+		if (pread(fd, cp, secsize, offset + i) != secsize) {
+			if (secsize != DEV_BSIZE)
 				printf(" %lld (%lld),",
-				    (long long)((blk * dev_bsize + i) /
-				    secsize),
-				    (long long)(blk + i / dev_bsize));
+				    (long long)(offset + i) / secsize,
+				    (long long)blk + i / DEV_BSIZE);
 			else
-				printf(" %lld,",
-				    (long long)(blk + i / dev_bsize));
+				printf(" %lld,", (long long)blk +
+				    i / DEV_BSIZE);
 			errs++;
 		}
 	}
@@ -377,21 +371,22 @@ bwrite(int fd, char *buf, daddr_t blk, long size)
 	if (fd < 0)
 		return;
 	offset = blk;
-	offset *= dev_bsize;
-	if (lseek(fd, offset, SEEK_SET) < 0)
-		rwerror("SEEK", blk);
-	else if (write(fd, buf, (int)size) == size) {
+	offset *= DEV_BSIZE;
+	if (pwrite(fd, buf, size, offset) == size) {
 		fsmodified = 1;
 		return;
 	}
 	rwerror("WRITE", blk);
-	if (lseek(fd, offset, SEEK_SET) < 0)
-		rwerror("SEEK", blk);
 	printf("THE FOLLOWING SECTORS COULD NOT BE WRITTEN:");
-	for (cp = buf, i = 0; i < size; i += dev_bsize, cp += dev_bsize)
-		if (write(fd, cp, (int)dev_bsize) != dev_bsize) {
-			(void)lseek(fd, offset + i + dev_bsize, SEEK_SET);
-			printf(" %lld,", (long long)(blk + i / dev_bsize));
+	for (cp = buf, i = 0; i < size; i += secsize, cp += secsize)
+		if (pwrite(fd, cp, secsize, offset + i) != secsize) {
+			if (secsize != DEV_BSIZE)
+				printf(" %lld (%lld),",
+				    (long long)(offset + i) / secsize,
+				    (long long)blk + i / DEV_BSIZE);
+			else
+				printf(" %lld,", (long long)blk +
+				    i / DEV_BSIZE);
 		}
 	printf("\n");
 	return;
@@ -620,4 +615,3 @@ catchinfo(int signo)
 	}
 	errno = save_errno;
 }
-

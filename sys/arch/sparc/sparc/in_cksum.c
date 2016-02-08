@@ -1,4 +1,4 @@
-/*	$OpenBSD: in_cksum.c,v 1.12 2008/02/16 23:02:41 miod Exp $	*/
+/*	$OpenBSD: in_cksum.c,v 1.14 2014/07/22 10:35:35 mpi Exp $	*/
 /*	$NetBSD: in_cksum.c,v 1.7 1996/10/05 23:44:34 mrg Exp $ */
 
 /*
@@ -39,8 +39,8 @@
 #include <sys/systm.h>
 #include <sys/mbuf.h>
 #include <sys/socketvar.h>
+
 #include <netinet/in.h>
-#include <netinet/in_systm.h>
 #include <netinet/ip.h>
 #include <netinet/ip_var.h>
 
@@ -75,7 +75,7 @@
  * Zubin Dittia (zubin@dworkin.wustl.edu)
  */
 
-#define Asm	__asm __volatile
+#define Asm	__asm volatile
 #define ADD64		Asm("	ld [%4+ 0],%1;   ld [%4+ 4],%2;		\
 				addcc  %0,%1,%0; addxcc %0,%2,%0;	\
 				ld [%4+ 8],%1;   ld [%4+12],%2;		\

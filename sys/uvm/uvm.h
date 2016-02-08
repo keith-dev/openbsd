@@ -1,8 +1,7 @@
-/*	$OpenBSD: uvm.h,v 1.52 2013/11/09 06:52:15 guenther Exp $	*/
+/*	$OpenBSD: uvm.h,v 1.56 2014/07/11 16:35:40 jsg Exp $	*/
 /*	$NetBSD: uvm.h,v 1.24 2000/11/27 08:40:02 chs Exp $	*/
 
 /*
- *
  * Copyright (c) 1997 Charles D. Cranor and Washington University.
  * All rights reserved.
  *
@@ -14,12 +13,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *      This product includes software developed by Charles D. Cranor and
- *      Washington University.
- * 4. The name of the author may not be used to endorse or promote products
- *    derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
@@ -39,33 +32,17 @@
 #define _UVM_UVM_H_
 
 #include <uvm/uvm_extern.h>
-
-/*
- * pull in prototypes
- */
-
 #include <uvm/uvm_amap.h>
 #include <uvm/uvm_aobj.h>
 #include <uvm/uvm_fault.h>
 #include <uvm/uvm_glue.h>
 #include <uvm/uvm_km.h>
-#include <uvm/uvm_map.h>
-#include <uvm/uvm_object.h>
-#include <uvm/uvm_page.h>
-#include <uvm/uvm_pager.h>
 #include <uvm/uvm_swap.h>
-#include <uvm/uvm_pmemrange.h>
 #ifdef UVM_SWAP_ENCRYPT
 #include <uvm/uvm_swap_encrypt.h>
 #endif
 
-#include <machine/vmparam.h>
-
-/* Constraint ranges, set by MD code. */
-extern struct uvm_constraint_range  isa_constraint;
-extern struct uvm_constraint_range  dma_constraint;
-extern struct uvm_constraint_range  no_constraint;
-extern struct uvm_constraint_range *uvm_md_constraints[];
+#include <uvm/uvm_pmemrange.h>
 
 /*
  * uvm structure (vm global state: collected in one structure for ease
@@ -152,14 +129,13 @@ do {									\
  * uvm_map internal functions.
  * Used by uvm_map address selectors.
  */
-
-struct vm_map_entry	*uvm_map_entrybyaddr(struct uvm_map_addr*, vaddr_t);
-int			 uvm_map_isavail(struct vm_map*,
-			    struct uvm_addr_state*,
-			    struct vm_map_entry**, struct vm_map_entry**,
+struct vm_map_entry	*uvm_map_entrybyaddr(struct uvm_map_addr *, vaddr_t);
+int			 uvm_map_isavail(struct vm_map *,
+			    struct uvm_addr_state *,
+			    struct vm_map_entry **, struct vm_map_entry**,
 			    vaddr_t, vsize_t);
-struct uvm_addr_state	*uvm_map_uaddr(struct vm_map*, vaddr_t);
-struct uvm_addr_state	*uvm_map_uaddr_e(struct vm_map*, struct vm_map_entry*);
+struct uvm_addr_state	*uvm_map_uaddr(struct vm_map *, vaddr_t);
+struct uvm_addr_state	*uvm_map_uaddr_e(struct vm_map *, struct vm_map_entry *);
 
 #define VMMAP_FREE_START(_entry)	((_entry)->end + (_entry)->guard)
 #define VMMAP_FREE_END(_entry)		((_entry)->end + (_entry)->guard + \

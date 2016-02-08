@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.18 2013/12/28 02:51:07 deraadt Exp $
+#	$OpenBSD: Makefile,v 1.22 2014/07/15 22:14:37 deraadt Exp $
 
 MAN=	pxeboot.8
 
@@ -11,8 +11,9 @@ SRCS=	srt0.S conf.c devopen.c net.c open.c
 LD?=	ld
 SIZE?=	size
 LDFLAGS+=-nostdlib -Bstatic -Ttext $(LINKADDR) -N -x -nopie
-LDFLAGS+=-melf_i386 -L/usr/libdata 
+LDFLAGS+=-melf_i386 -L/usr/libdata
 INSTALL_STRIP=
+BINMODE=644
 
 .PATH:	${SADIR}/libsa
 # i386 stuff (so, it will possibly load in the same 64k)
@@ -26,8 +27,8 @@ SRCS+=	softraid.c
 SRCS+=	boot.c cmd.c vars.c bootarg.c
 
 .PATH:	${S}/lib/libsa
-SRCS+=	alloc.c exit.c getfile.c gets.c globals.c strcmp.c strlen.c \
-	strncmp.c memcmp.c memcpy.c memset.c printf.c snprintf.c \
+SRCS+=	alloc.c exit.c getchar.c getfile.c gets.c globals.c putchar.c strcmp.c \
+	strlen.c strncmp.c memcmp.c memcpy.c memset.c printf.c snprintf.c \
 	strerror.c strncpy.c strtol.c strtoll.c ctime.c strlcpy.c strlcat.c
 SRCS+=	aes_xts.c explicit_bzero.c hmac_sha1.c pbkdf2.c rijndael.c sha1.c
 

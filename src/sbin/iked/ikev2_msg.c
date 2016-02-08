@@ -1,4 +1,4 @@
-/*	$OpenBSD: ikev2_msg.c,v 1.29 2014/02/17 11:00:14 reyk Exp $	*/
+/*	$OpenBSD: ikev2_msg.c,v 1.35 2014/05/07 13:04:01 markus Exp $	*/
 
 /*
  * Copyright (c) 2010-2013 Reyk Floeter <reyk@openbsd.org>
@@ -97,8 +97,8 @@ ikev2_msg_cb(int fd, short event, void *arg)
 		iov[1].iov_base = buf;
 		iov[1].iov_len = len;
 
-		proc_composev_imsg(env, PROC_IKEV1, IMSG_IKE_MESSAGE, -1,
-		    iov, 2);
+		proc_composev_imsg(&env->sc_ps, PROC_IKEV1, -1,
+		    IMSG_IKE_MESSAGE, -1, iov, 2);
 		goto done;
 	}
 	TAILQ_INIT(&msg.msg_proposals);
@@ -135,11 +135,14 @@ ikev2_msg_copy(struct iked *env, struct iked_message *msg)
 {
 	struct iked_message		*m = NULL;
 	struct ibuf			*buf;
-	ssize_t				 len;
+	size_t				 len;
 	void				*ptr;
 
-	if ((len = ibuf_size(msg->msg_data) - msg->msg_offset) <= 0 ||
-	    (ptr = ibuf_seek(msg->msg_data, msg->msg_offset, len)) == NULL ||
+	if (ibuf_size(msg->msg_data) < msg->msg_offset)
+		return (NULL);
+	len = ibuf_size(msg->msg_data) - msg->msg_offset;
+
+	if ((ptr = ibuf_seek(msg->msg_data, msg->msg_offset, len)) == NULL ||
 	    (m = malloc(sizeof(*m))) == NULL ||
 	    (buf = ikev2_msg_init(env, m, &msg->msg_peer, msg->msg_peerlen,
 	     &msg->msg_local, msg->msg_locallen, msg->msg_response)) == NULL ||
@@ -187,8 +190,22 @@ ikev2_msg_valid_ike_sa(struct iked *env, struct ike_header *oldhdr,
 	struct iked_sa			 sa;
 #endif
 
-	if (msg->msg_sa != NULL && msg->msg_policy != NULL)
+	if (msg->msg_sa != NULL && msg->msg_policy != NULL) {
+		/*
+		 * Only permit informational requests from initiator
+		 * on closing SAs (for DELETE).
+		 */
+		if (msg->msg_sa->sa_state == IKEV2_STATE_CLOSING) {
+			if (((oldhdr->ike_flags &
+			    (IKEV2_FLAG_INITIATOR|IKEV2_FLAG_RESPONSE)) ==
+			    IKEV2_FLAG_INITIATOR) &&
+			    (oldhdr->ike_exchange ==
+			    IKEV2_EXCHANGE_INFORMATIONAL))
+				return (0);
+			return (-1);
+		}
 		return (0);
+	}
 
 #if 0
 	/*
@@ -269,10 +286,12 @@ ikev2_msg_send(struct iked *env, struct iked_message *msg)
 
 	exchange = hdr->ike_exchange;
 	flags = hdr->ike_flags;
-	log_info("%s: %s from %s to %s, %ld bytes%s", __func__,
+	log_info("%s: %s %s from %s to %s msgid %u, %ld bytes%s", __func__,
 	    print_map(exchange, ikev2_exchange_map),
+	    (flags & IKEV2_FLAG_RESPONSE) ? "response" : "request",
 	    print_host((struct sockaddr *)&msg->msg_local, NULL, 0),
 	    print_host((struct sockaddr *)&msg->msg_peer, NULL, 0),
+	    betoh32(hdr->ike_msgid),
 	    ibuf_length(buf), isnatt ? ", NAT-T" : "");
 
 	if (isnatt) {
@@ -753,6 +772,7 @@ ikev2_msg_authverify(struct iked *env, struct iked_sa *sa,
 	if ((ret = dsa_verify_final(dsa, buf, len)) == 0) {
 		log_debug("%s: authentication successful", __func__);
 		sa_state(env, sa, IKEV2_STATE_AUTH_SUCCESS);
+		sa_stateflags(sa, IKED_REQ_AUTHVALID);
 
 		if (!sa->sa_policy->pol_auth.auth_eap &&
 		    auth->auth_method == IKEV2_AUTH_SHARED_KEY_MIC)
@@ -942,7 +962,6 @@ ikev2_msg_retransmit_response(struct iked *env, struct iked_sa *sa,
 	    ibuf_size(msg->msg_data), 0, (struct sockaddr *)&msg->msg_peer,
 	    msg->msg_peerlen)) == -1) {
 		log_warn("%s: sendto", __func__);
-		sa_free(env, sa);
 		return (-1);
 	}
 
@@ -978,7 +997,8 @@ ikev2_msg_retransmit_timeout(struct iked *env, void *arg)
 		timer_add(env, &msg->msg_timer,
 		    IKED_RETRANSMIT_TIMEOUT * (2 << (msg->msg_tries++)));
 	} else {
-		log_debug("%s: retransmit limit reached", __func__);
+		log_debug("%s: retransmit limit reached for msgid %u",
+		    __func__, msg->msg_msgid);
 		sa_free(env, sa);
 	}
 }

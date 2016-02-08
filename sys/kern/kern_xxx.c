@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_xxx.c,v 1.23 2012/08/07 05:16:54 guenther Exp $	*/
+/*	$OpenBSD: kern_xxx.c,v 1.26 2014/07/11 14:36:44 uebayasi Exp $	*/
 /*	$NetBSD: kern_xxx.c,v 1.32 1996/04/22 01:38:41 christos Exp $	*/
 
 /*
@@ -37,7 +37,6 @@
 #include <sys/kernel.h>
 #include <sys/proc.h>
 #include <sys/reboot.h>
-#include <uvm/uvm_extern.h>
 #include <sys/sysctl.h>
 #include <sys/mount.h>
 #include <sys/syscallargs.h>
@@ -60,8 +59,18 @@ sys_reboot(struct proc *p, void *v, register_t *retval)
 	sched_stop_secondary_cpus();
 	KASSERT(CPU_IS_PRIMARY(curcpu()));
 #endif
-	boot(SCARG(uap, opt));
+	reboot(SCARG(uap, opt));
+	/* NOTREACHED */
 	return (0);
+}
+
+__dead void
+reboot(int howto)
+{
+	KASSERT((howto & RB_NOSYNC) || curproc != NULL);
+
+	boot(howto);
+	/* NOTREACHED */
 }
 
 #if !defined(NO_PROPOLICE)
@@ -92,7 +101,7 @@ scdebug_call(struct proc *p, register_t code, const register_t args[])
 	if (!(scdebug & SCDEBUG_CALLS))
 		return;
 
-	em = p->p_emul;
+	em = p->p_p->ps_emul;
 	sy = &em->e_sysent[code];
 	if (!(scdebug & SCDEBUG_ALL || code < 0 || code >= em->e_nsysent ||
 	     sy->sy_call == sys_nosys))
@@ -125,7 +134,7 @@ scdebug_ret(struct proc *p, register_t code, int error,
 	if (!(scdebug & SCDEBUG_RETURNS))
 		return;
 
-	em = p->p_emul;
+	em = p->p_p->ps_emul;
 	sy = &em->e_sysent[code];
 	if (!(scdebug & SCDEBUG_ALL || code < 0 || code >= em->e_nsysent ||
 	    sy->sy_call == sys_nosys))

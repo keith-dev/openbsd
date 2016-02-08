@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_sl.c,v 1.50 2013/10/23 15:12:42 mpi Exp $	*/
+/*	$OpenBSD: if_sl.c,v 1.53 2014/07/22 11:06:09 mpi Exp $	*/
 /*	$NetBSD: if_sl.c,v 1.39.4.1 1996/06/02 16:26:31 thorpej Exp $	*/
 
 /*
@@ -81,7 +81,6 @@
 
 #ifdef INET
 #include <netinet/in.h>
-#include <netinet/in_systm.h>
 #include <netinet/ip.h>
 #else
 #error Huh? Slip without inet?
@@ -243,7 +242,7 @@ sl_clone_destroy(ifp)
 
 	if_detach(ifp);
 
-	free(sc, M_DEVBUF);
+	free(sc, M_DEVBUF, 0);
 	return (0);
 }
 
@@ -414,10 +413,10 @@ sloutput(ifp, m, dst, rtp)
 	}
 
 #ifdef DIAGNOSTIC
-	if (ifp->if_rdomain != rtable_l2(m->m_pkthdr.rdomain)) {
+	if (ifp->if_rdomain != rtable_l2(m->m_pkthdr.ph_rtableid)) {
 		printf("%s: trying to send packet on wrong domain. "
 		    "if %d vs. mbuf %d, AF %d\n", ifp->if_xname,
-		    ifp->if_rdomain, rtable_l2(m->m_pkthdr.rdomain),
+		    ifp->if_rdomain, rtable_l2(m->m_pkthdr.ph_rtableid),
 		    dst->sa_family);
 	}
 #endif
@@ -819,8 +818,8 @@ slinput(c, tp)
 		if (m == NULL)
 			goto error;
 
-		/* mark incoming routing domain */
-		m->m_pkthdr.rdomain = sc->sc_if.if_rdomain;
+		/* mark incoming routing table */
+		m->m_pkthdr.ph_rtableid = sc->sc_if.if_rdomain;
 
 #if NBPFILTER > 0
 		if (sc->sc_bpf) {

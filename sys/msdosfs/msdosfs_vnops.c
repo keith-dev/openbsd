@@ -1,4 +1,4 @@
-/*	$OpenBSD: msdosfs_vnops.c,v 1.91 2013/12/14 02:57:25 guenther Exp $	*/
+/*	$OpenBSD: msdosfs_vnops.c,v 1.94 2014/07/08 17:19:25 deraadt Exp $	*/
 /*	$NetBSD: msdosfs_vnops.c,v 1.63 1997/10/17 11:24:19 ws Exp $	*/
 
 /*-
@@ -67,8 +67,6 @@
 #include <sys/dirent.h>		/* defines dirent structure */
 #include <sys/lockf.h>
 #include <sys/poll.h>
-
-#include <uvm/uvm_extern.h>
 
 #include <msdosfs/bpb.h>
 #include <msdosfs/direntry.h>
@@ -743,6 +741,10 @@ msdosfs_write(void *v)
 		 * without delay.  Otherwise do a delayed write because we
 		 * may want to write somemore into the block later.
 		 */
+#if 0
+		if (ioflag & IO_NOCACHE)
+			bp->b_flags |= B_NOCACHE;
+#endif
 		if (ioflag & IO_SYNC)
 			(void) bwrite(bp);
 		else if (n + croffset == pmp->pm_bpcluster)

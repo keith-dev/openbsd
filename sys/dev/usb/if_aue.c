@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_aue.c,v 1.92 2013/12/13 01:13:56 brad Exp $ */
+/*	$OpenBSD: if_aue.c,v 1.94 2014/07/13 15:52:49 mpi Exp $ */
 /*	$NetBSD: if_aue.c,v 1.82 2003/03/05 17:37:36 shiba Exp $	*/
 /*
  * Copyright (c) 1997, 1998, 1999, 2000
@@ -97,12 +97,8 @@
 #include <net/bpf.h>
 #endif
 
-#ifdef INET
 #include <netinet/in.h>
-#include <netinet/in_systm.h>
-#include <netinet/ip.h>
 #include <netinet/if_ether.h>
-#endif
 
 #include <dev/mii/mii.h>
 #include <dev/mii/miivar.h>
@@ -209,21 +205,16 @@ const struct aue_type aue_devs[] = {
 };
 #define aue_lookup(v, p) ((struct aue_type *)usb_lookup(aue_devs, v, p))
 
-int aue_match(struct device *, void *, void *); 
-void aue_attach(struct device *, struct device *, void *); 
-int aue_detach(struct device *, int); 
-int aue_activate(struct device *, int); 
+int aue_match(struct device *, void *, void *);
+void aue_attach(struct device *, struct device *, void *);
+int aue_detach(struct device *, int);
 
-struct cfdriver aue_cd = { 
-	NULL, "aue", DV_IFNET 
-}; 
+struct cfdriver aue_cd = {
+	NULL, "aue", DV_IFNET
+};
 
-const struct cfattach aue_ca = { 
-	sizeof(struct aue_softc), 
-	aue_match, 
-	aue_attach, 
-	aue_detach, 
-	aue_activate, 
+const struct cfattach aue_ca = {
+	sizeof(struct aue_softc), aue_match, aue_attach, aue_detach
 };
 
 void aue_reset_pegasus_II(struct aue_softc *sc);
@@ -879,21 +870,6 @@ aue_detach(struct device *self, int flags)
 	}
 	splx(s);
 
-	return (0);
-}
-
-int
-aue_activate(struct device *self, int act)
-{
-	struct aue_softc *sc = (struct aue_softc *)self;
-
-	DPRINTFN(2,("%s: %s: enter\n", sc->aue_dev.dv_xname, __func__));
-
-	switch (act) {
-	case DVACT_DEACTIVATE:
-		usbd_deactivate(sc->aue_udev);
-		break;
-	}
 	return (0);
 }
 

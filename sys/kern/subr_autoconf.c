@@ -1,4 +1,4 @@
-/*	$OpenBSD: subr_autoconf.c,v 1.73 2013/12/12 20:56:01 guenther Exp $	*/
+/*	$OpenBSD: subr_autoconf.c,v 1.78 2014/07/13 15:29:04 tedu Exp $	*/
 /*	$NetBSD: subr_autoconf.c,v 1.21 1996/04/04 06:06:18 cgd Exp $	*/
 
 /*
@@ -93,7 +93,7 @@ void config_process_deferred_children(struct device *);
 
 struct devicelist alldevs;		/* list of all devices */
 
-__volatile int config_pending;		/* semaphore for mountroot */
+volatile int config_pending;		/* semaphore for mountroot */
 
 struct mutex autoconf_attdet_mtx = MUTEX_INITIALIZER(IPL_HIGH);
 /*
@@ -152,12 +152,12 @@ mapply(struct matchinfo *m, struct cfdata *cf)
 
 	if (pri > m->pri) {
 		if (m->indirect && m->match)
-			free(m->match, M_DEVBUF);
+			free(m->match, M_DEVBUF, 0);
 		m->match = match;
 		m->pri = pri;
 	} else {
 		if (m->indirect)
-			free(match, M_DEVBUF);
+			free(match, M_DEVBUF, 0);
 	}
 }
 
@@ -462,13 +462,13 @@ config_make_softc(struct device *parent, struct cfdata *cf)
 		while (new <= dev->dv_unit)
 			new *= 2;
 		cd->cd_ndevs = new;
-		nsp = malloc(new * sizeof(void *), M_DEVBUF, M_NOWAIT|M_ZERO);
+		nsp = mallocarray(new, sizeof(void *), M_DEVBUF, M_NOWAIT|M_ZERO);
 		if (nsp == NULL)
 			panic("config_make_softc: %sing dev array",
 			    old != 0 ? "expand" : "creat");
 		if (old != 0) {
 			bcopy(cd->cd_devs, nsp, old * sizeof(void *));
-			free(cd->cd_devs, M_DEVBUF);
+			free(cd->cd_devs, M_DEVBUF, 0);
 		}
 		cd->cd_devs = nsp;
 	}
@@ -523,13 +523,11 @@ config_detach(struct device *dev, int flags)
 	cd = cf->cf_driver;
 
 	/*
-	 * Ensure the device is deactivated.  If the device doesn't
-	 * have an activation entry point, we allow DVF_ACTIVE to
-	 * remain set.  Otherwise, if DVF_ACTIVE is still set, the
+	 * Ensure the device is deactivated.  If the device has an
+	 * activation entry point and DVF_ACTIVE is still set, the
 	 * device is busy, and the detach fails.
 	 */
-	if (ca->ca_activate != NULL)
-		rv = config_deactivate(dev);
+	rv = config_deactivate(dev);
 
 	/*
 	 * Try to detach the device.  If that's not possible, then
@@ -612,7 +610,7 @@ config_detach(struct device *dev, int flags)
 		if (cd->cd_devs[i] != NULL)
 			break;
 	if (i == cd->cd_ndevs) {		/* nothing found; deallocate */
-		free(cd->cd_devs, M_DEVBUF);
+		free(cd->cd_devs, M_DEVBUF, 0);
 		cd->cd_devs = NULL;
 		cd->cd_ndevs = 0;
 		cf->cf_unit = 0;
@@ -637,15 +635,11 @@ done:
 int
 config_deactivate(struct device *dev)
 {
-	struct cfattach *ca = dev->dv_cfdata->cf_attach;
 	int rv = 0, oflags = dev->dv_flags;
-
-	if (ca->ca_activate == NULL)
-		return (EOPNOTSUPP);
 
 	if (dev->dv_flags & DVF_ACTIVE) {
 		dev->dv_flags &= ~DVF_ACTIVE;
-		rv = (*ca->ca_activate)(dev, DVACT_DEACTIVATE);
+		rv = config_suspend(dev, DVACT_DEACTIVATE);
 		if (rv)
 			dev->dv_flags = oflags;
 	}
@@ -695,7 +689,7 @@ config_process_deferred_children(struct device *parent)
 		if (dc->dc_dev->dv_parent == parent) {
 			TAILQ_REMOVE(&deferred_config_queue, dc, dc_queue);
 			(*dc->dc_func)(dc->dc_dev);
-			free(dc, M_DEVBUF);
+			free(dc, M_DEVBUF, 0);
 			config_pending_decr();
 		}
 	}
@@ -767,7 +761,7 @@ config_suspend(struct device *dev, int act)
 		r = (*ca->ca_activate)(dev, act);
 	else
 		r = config_activate_children(dev, act);
-	device_unref(dev);      
+	device_unref(dev);
 	return (r);
 }
 
@@ -859,6 +853,16 @@ device_lookup(struct cfdriver *cd, int unit)
 	return (dv);
 }
 
+struct device *
+device_mainbus(void)
+{
+	extern struct cfdriver mainbus_cd;
+
+	if (mainbus_cd.cd_ndevs < 1)
+		return (NULL);
+
+	return (mainbus_cd.cd_devs[0]);
+}
 
 /*
  * Increments the ref count on the device structure. The device
@@ -884,6 +888,6 @@ device_unref(struct device *dv)
 {
 	dv->dv_ref--;
 	if (dv->dv_ref == 0) {
-		free(dv, M_DEVBUF);
+		free(dv, M_DEVBUF, 0);
 	}
 }

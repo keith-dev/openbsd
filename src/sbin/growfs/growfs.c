@@ -1,4 +1,4 @@
-/*	$OpenBSD: growfs.c,v 1.33 2013/11/10 00:48:04 krw Exp $	*/
+/*	$OpenBSD: growfs.c,v 1.36 2014/05/15 19:18:23 chl Exp $	*/
 /*
  * Copyright (c) 2000 Christoph Herrmann, Thomas-Henning von Kamptz
  * Copyright (c) 1980, 1989, 1993 The Regents of the University of California.
@@ -663,7 +663,7 @@ cond_bl_upd(daddr_t *block, struct gfs_bpp *field, int fsi, int fso,
 		/*
 		 * Copy the block back immediately.
 		 *
-		 * XXX	If src is is from an indirect block we have
+		 * XXX	If src is from an indirect block we have
 		 *	to implement copy on write here in case of
 		 *	active snapshots.
 		 */
@@ -1240,8 +1240,6 @@ updcsloc(time_t utime, int fsi, int fso, unsigned int Nflag)
 	    sizeof(struct gfs_bpp));
 	if (bp == NULL)
 		errx(1, "calloc failed");
-	memset((char *)bp, 0, ((dupper-odupper) / sblock.fs_frag + 2) *
-	    sizeof(struct gfs_bpp));
 
 	/*
 	 * Lock all new frags needed for the cylinder group summary. This  is
@@ -1519,11 +1517,12 @@ rdfs(daddr_t bno, size_t size, void *bf, int fsi)
 	DBG_FUNC("rdfs")
 	ssize_t	n;
 
+	DBG_ENTER;
 
 	if (bno < 0) {
 		err(32, "rdfs: attempting to read negative block number");
 	}
-	if (lseek(fsi, (off_t)bno * DEV_BSIZE, 0) < 0) {
+	if (lseek(fsi, (off_t)bno * DEV_BSIZE, SEEK_SET) < 0) {
 		err(33, "rdfs: seek error: %jd", (intmax_t)bno);
 	}
 	n = read(fsi, bf, size);
@@ -1899,7 +1898,7 @@ int
 main(int argc, char **argv)
 {
 	DBG_FUNC("main")
-	char	*device;
+	char	*device, *lastsector;
 	int	ch;
 	long long	size = 0;
 	unsigned int	Nflag = 0;
@@ -2068,16 +2067,20 @@ main(int argc, char **argv)
 	}
 
 	if (!quiet)
-		printf("new file systemsize is: %jd frags\n",
+		printf("new filesystem size is: %jd frags\n",
 		    (intmax_t)sblock.fs_size);
 
 	/*
-	 * Try to access our new last block in the filesystem. Even if we
-	 * later on realize we have to abort our operation, on that block
+	 * Try to access our new last sector in the filesystem. Even if we
+	 * later on realize we have to abort our operation, on that sector
 	 * there should be no data, so we can't destroy something yet.
 	 */
-	wtfs(DL_SECTOBLK(lp, DL_GETPSIZE(pp)) - 1, (size_t)DEV_BSIZE,
-	    (void *)&sblock, fso, Nflag);
+	lastsector = calloc(1, lp->d_secsize);
+	if (!lastsector)
+		err(1, "No memory for last sector test write");
+	wtfs(DL_SECTOBLK(lp, DL_GETPSIZE(pp) - 1), lp->d_secsize,
+	    lastsector, fso, Nflag);
+	free(lastsector);
 
 	/*
 	 * Now calculate new superblock values and check for reasonable

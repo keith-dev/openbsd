@@ -1,4 +1,4 @@
-/*	$OpenBSD: terminal.c,v 1.6 2003/06/03 02:56:18 millert Exp $	*/
+/*	$OpenBSD: terminal.c,v 1.13 2014/07/22 07:30:24 jsg Exp $	*/
 /*	$NetBSD: terminal.c,v 1.5 1996/02/28 21:04:17 thorpej Exp $	*/
 
 /*
@@ -32,20 +32,20 @@
 
 #include "telnet_locl.h"
 
+#include <arpa/telnet.h>
+#include <errno.h>
+#include <unistd.h>
+
 Ring		ttyoring, ttyiring;
 unsigned char	ttyobuf[2*BUFSIZ], ttyibuf[BUFSIZ];
 
 int termdata;			/* Debugging flag */
 
-#ifdef	USE_TERMIO
 # ifndef VDISCARD
 cc_t termFlushChar;
 # endif
 # ifndef VLNEXT
 cc_t termLiteralNextChar;
-# endif
-# ifndef VSUSP
-cc_t termSuspChar;
 # endif
 # ifndef VWERASE
 cc_t termWerasChar;
@@ -68,27 +68,22 @@ cc_t termForw2Char;
 # ifndef VSTATUS
 cc_t termAytChar;
 # endif
-#else
-cc_t termForw2Char;
-cc_t termAytChar;
-#endif
 
 /*
  * initialize the terminal data structures.
  */
 
-    void
-init_terminal()
+void
+init_terminal(void)
 {
-    if (ring_init(&ttyoring, ttyobuf, sizeof ttyobuf) != 1) {
-	exit(1);
-    }
-    if (ring_init(&ttyiring, ttyibuf, sizeof ttyibuf) != 1) {
-	exit(1);
-    }
-    autoflush = TerminalAutoFlush();
-}
+	struct termios tc;
 
+	ring_init(&ttyoring, ttyobuf, sizeof ttyobuf);
+	ring_init(&ttyiring, ttyibuf, sizeof ttyibuf);
+
+	tcgetattr(0, &tc);
+	autoflush = (tc.c_lflag & NOFLSH) == 0;
+}
 
 /*
  *		Send as much data as possible to the terminal.
@@ -100,20 +95,18 @@ init_terminal()
  *			 n: All data - n was written out.
  */
 
-
-    int
-ttyflush(drop)
-    int drop;
+int
+ttyflush(int drop)
 {
     int n, n0, n1;
 
     n0 = ring_full_count(&ttyoring);
     if ((n1 = n = ring_full_consecutive(&ttyoring)) > 0) {
 	if (drop) {
-	    TerminalFlushOutput();
+	    tcflush(fileno(stdout), TCOFLUSH);
 	    /* we leave 'n' alone! */
 	} else {
-	    n = TerminalWrite((char *)ttyoring.consume, n);
+	    n = write(tout, ttyoring.consume, n);
 	}
     }
     if (n > 0) {
@@ -128,7 +121,7 @@ ttyflush(drop)
 	if (n1 == n && n0 > n) {
 		n1 = n0 - n;
 		if (!drop)
-			n1 = TerminalWrite(ttyoring.bottom, n1);
+			n1 = write(tout, ttyoring.bottom, n1);
 		if (n1 > 0)
 			n += n1;
 	}
@@ -153,18 +146,10 @@ ttyflush(drop)
  * of various global variables).
  */
 
-
-    int
-getconnmode()
+int
+getconnmode(void)
 {
-    extern int linemode;
     int mode = 0;
-#ifdef	KLUDGELINEMODE
-    extern int kludgelinemode;
-#endif
-
-    if (In3270)
-	return(MODE_FLOW);
 
     if (my_want_state_is_dont(TELOPT_ECHO))
 	mode |= MODE_ECHO;
@@ -196,39 +181,18 @@ getconnmode()
     return(mode);
 }
 
-    void
-setconnmode(force)
-    int force;
+void
+setconnmode(int force)
 {
     int newmode;
-#ifdef ENCRYPTION
-    static int enc_passwd = 0;
-#endif
 
     newmode = getconnmode()|(force?MODE_FORCE:0);
 
     TerminalNewMode(newmode);
-
-#ifdef  ENCRYPTION
-    if ((newmode & (MODE_ECHO|MODE_EDIT)) == MODE_EDIT) {
-	if (my_want_state_is_will(TELOPT_ENCRYPT)
-	    && (enc_passwd == 0) && !encrypt_output) {
-	    encrypt_request_start(0, 0);
-	    enc_passwd = 1;
-	}
-    } else {
-	if (enc_passwd) {
-	    encrypt_request_end();
-	    enc_passwd = 0;
-	}
-    }
-#endif
-
 }
 
-
-    void
-setcommandmode()
+void
+setcommandmode(void)
 {
     TerminalNewMode(-1);
 }

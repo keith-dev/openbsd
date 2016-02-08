@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvm_meter.c,v 1.30 2013/03/23 16:12:31 deraadt Exp $	*/
+/*	$OpenBSD: uvm_meter.c,v 1.34 2014/07/11 16:35:40 jsg Exp $	*/
 /*	$NetBSD: uvm_meter.c,v 1.21 2001/07/14 06:36:03 matt Exp $	*/
 
 /*
@@ -16,12 +16,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *      This product includes software developed by Charles D. Cranor,
- *      Washington University, and the University of California, Berkeley
- *      and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -42,12 +37,13 @@
  */
 
 #include <sys/param.h>
-#include <sys/proc.h>
 #include <sys/systm.h>
 #include <sys/kernel.h>
-#include <uvm/uvm_extern.h>
+#include <sys/proc.h>
 #include <sys/sysctl.h>
+#include <sys/vmmeter.h>
 #include <sys/exec.h>
+#include <uvm/uvm.h>
 
 #ifdef UVM_SWAP_ENCRYPT
 #include <uvm/uvm_swap.h>
@@ -79,11 +75,9 @@ static fixpt_t cexp[3] = {
 	0.9944598480048967 * FSCALE,	/* exp(-1/180) */
 };
 
-/*
- * prototypes
- */
 
 static void uvm_loadav(struct loadavg *);
+void uvm_total(struct vmtotal *);
 
 /*
  * uvm_meter: calculate load average and wake up the swapper (if needed)
@@ -258,10 +252,7 @@ uvm_total(struct vmtotal *totalp)
 
 	memset(totalp, 0, sizeof *totalp);
 
-	/*
-	 * calculate process statistics
-	 */
-
+	/* calculate process statistics */
 	LIST_FOREACH(p, &allproc, p_list) {
 		if (p->p_flag & P_SYSTEM)
 			continue;
@@ -278,7 +269,6 @@ uvm_total(struct vmtotal *totalp)
 			if (p->p_slptime >= maxslp)
 				continue;
 			break;
-
 		case SRUN:
 		case SIDL:
 		case SONPROC:

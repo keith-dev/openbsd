@@ -1,4 +1,4 @@
-/*	$OpenBSD: ypldap_dns.c,v 1.5 2012/03/16 01:57:42 jmatthew Exp $ */
+/*	$OpenBSD: ypldap_dns.c,v 1.7 2014/07/13 15:38:09 krw Exp $ */
 
 /*
  * Copyright (c) 2003-2008 Henning Brauer <henning@openbsd.org>
@@ -122,7 +122,7 @@ ypldap_dns(int pipe_ntp[2], struct passwd *pw)
 }
 
 void
-dns_dispatch_imsg(int fd, short event, void *p)
+dns_dispatch_imsg(int fd, short events, void *p)
 {
 	struct imsg		 imsg;
 	int			 n, cnt;
@@ -134,20 +134,21 @@ dns_dispatch_imsg(int fd, short event, void *p)
 	struct imsgbuf		*ibuf = &iev->ibuf;
 	int			 shut = 0;
 
-	switch (event) {
-	case EV_READ:
+	if ((events & (EV_READ | EV_WRITE)) == 0)
+		fatalx("unknown event");
+
+	if (events & EV_READ) {
 		if ((n = imsg_read(ibuf)) == -1)
 			fatal("imsg_read error");
 		if (n == 0)
 			shut = 1;
-		break;
-	case EV_WRITE:
-		if (msgbuf_write(&ibuf->w) == -1)
+	}
+	if (events & EV_WRITE) {
+		if ((n = msgbuf_write(&ibuf->w)) == -1 && errno != EAGAIN)
 			fatal("msgbuf_write");
-		imsg_event_add(iev);
-		return;
-	default:
-		fatalx("unknown event");
+		if (n == 0)
+			shut = 1;
+		goto done;
 	}
 
 	for (;;) {
@@ -189,6 +190,8 @@ dns_dispatch_imsg(int fd, short event, void *p)
 		}
 		imsg_free(&imsg);
 	}
+
+done:
 	if (!shut)
 		imsg_event_add(iev);
 	else {

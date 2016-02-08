@@ -1,4 +1,4 @@
-/*	$OpenBSD: build.c,v 1.2 2011/07/08 03:58:27 dlg Exp $	*/
+/*	$OpenBSD: build.c,v 1.4 2014/07/12 19:01:49 tedu Exp $	*/
 
 /*
  * Copyright (c) 2007 Reyk Floeter <reyk@openbsd.org>

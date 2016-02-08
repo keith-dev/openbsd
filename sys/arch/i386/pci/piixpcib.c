@@ -1,4 +1,4 @@
-/*	$OpenBSD: piixpcib.c,v 1.8 2013/05/30 16:15:01 deraadt Exp $ */
+/*	$OpenBSD: piixpcib.c,v 1.10 2014/07/08 17:19:24 deraadt Exp $ */
 
 /*
  * Copyright (c) 2007 Stefan Sperling <stsp@stsp.in-berlin.de>
@@ -57,6 +57,8 @@
 #include <sys/device.h>
 #include <sys/proc.h>
 #include <sys/sysctl.h>
+
+#include <uvm/uvm_extern.h>
 
 #include <machine/bus.h>
 
@@ -167,7 +169,7 @@ piixpcib_set_ownership(struct piixpcib_softc *sc)
 
 	pmap_extract(pmap_kernel(), (vaddr_t)magic, &pmagic);
 
-	__asm __volatile(
+	__asm volatile(
 		"movl $0, %%edi\n\t"
 		"out %%al, (%%dx)\n"
 		: "=D" (rv)
@@ -264,7 +266,7 @@ piixpcib_getset_state(struct piixpcib_softc *sc, int *state, int function)
 	}
 #endif
 
-	__asm __volatile(
+	__asm volatile(
 		"movl $0, %%edi\n\t"
 		"out %%al, (%%dx)\n"
 		: "=a" (eax),

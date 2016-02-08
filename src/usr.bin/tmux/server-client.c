@@ -1,4 +1,4 @@
-/* $OpenBSD: server-client.c,v 1.119 2014/02/23 00:53:06 nicm Exp $ */
+/* $OpenBSD: server-client.c,v 1.122 2014/07/13 20:51:08 krw Exp $ */
 
 /*
  * Copyright (c) 2009 Nicholas Marriott <nicm@users.sourceforge.net>
@@ -119,6 +119,11 @@ server_client_open(struct client *c, char **cause)
 	if (c->flags & CLIENT_CONTROL)
 		return (0);
 
+	if (strcmp(c->ttyname, "/dev/tty") == 0) {
+		*cause = xstrdup("can't use /dev/tty");
+		return (-1);
+	}
+
 	if (!(c->flags & CLIENT_TERMINAL)) {
 		*cause = xstrdup("not a terminal");
 		return (-1);
@@ -219,7 +224,7 @@ server_client_callback(int fd, short events, void *data)
 		return;
 
 	if (fd == c->ibuf.fd) {
-		if (events & EV_WRITE && msgbuf_write(&c->ibuf.w) < 0 &&
+		if (events & EV_WRITE && msgbuf_write(&c->ibuf.w) <= 0 &&
 		    errno != EAGAIN)
 			goto client_lost;
 
@@ -869,6 +874,9 @@ server_client_msg_dispatch(struct client *c)
 			if (!(c->flags & CLIENT_SUSPENDED))
 				break;
 			c->flags &= ~CLIENT_SUSPENDED;
+
+			if (c->tty.fd == -1) /* exited in the meantime */
+				break;
 
 			if (gettimeofday(&c->activity_time, NULL) != 0)
 				fatal("gettimeofday");

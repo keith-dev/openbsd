@@ -1,4 +1,4 @@
-/*	$OpenBSD: traverse.c,v 1.28 2013/11/12 04:59:02 deraadt Exp $	*/
+/*	$OpenBSD: traverse.c,v 1.36 2014/07/10 09:33:43 krw Exp $	*/
 /*	$NetBSD: traverse.c,v 1.17 1997/06/05 11:13:27 lukem Exp $	*/
 
 /*-
@@ -33,6 +33,7 @@
 #include <sys/param.h>
 #include <sys/time.h>
 #include <sys/stat.h>
+#include <sys/disklabel.h>
 #include <ufs/ffs/fs.h>
 #include <ufs/ufs/dir.h>
 #include <ufs/ufs/dinode.h>
@@ -49,6 +50,8 @@
 
 #include "dump.h"
 
+extern struct disklabel lab;
+
 union dinode {
 	struct ufs1_dinode dp1;
 	struct ufs2_dinode dp2;
@@ -60,9 +63,9 @@ union dinode {
 #define	HASDUMPEDFILE	0x1
 #define	HASSUBDIRS	0x2
 
-static	int dirindir(ino_t, daddr_t, int, off_t *, off_t *, int);
+static	int dirindir(ino_t, daddr_t, int, off_t *, int64_t *, int);
 static	void dmpindir(ino_t, daddr_t, int, off_t *);
-static	int searchdir(ino_t, daddr_t, long, off_t, off_t *, int);
+static	int searchdir(ino_t, daddr_t, long, off_t, int64_t *, int);
 void	fs_mapinodes(ino_t maxino, off_t *tapesize, int *anydirskipped);
 
 /*
@@ -72,10 +75,10 @@ void	fs_mapinodes(ino_t maxino, off_t *tapesize, int *anydirskipped);
  * (when some of the blocks are usually used for indirect pointers);
  * hence the estimate may be high.
  */
-off_t
+int64_t
 blockest(union dinode *dp)
 {
-	off_t blkest, sizeest;
+	int64_t blkest, sizeest;
 
 	/*
 	 * dp->di_size is the size of the file in bytes.
@@ -91,8 +94,8 @@ blockest(union dinode *dp)
 	 *	dump blocks (sizeest vs. blkest in the indirect block
 	 *	calculation).
 	 */
-	blkest = howmany(dbtob((off_t)DIP(dp, di_blocks)), TP_BSIZE);
-	sizeest = howmany((off_t)DIP(dp, di_size), TP_BSIZE);
+	blkest = howmany(dbtob((int64_t)DIP(dp, di_blocks)), TP_BSIZE);
+	sizeest = howmany((int64_t)DIP(dp, di_size), TP_BSIZE);
 	if (blkest > sizeest)
 		blkest = sizeest;
 	if (DIP(dp, di_size) > sblock->fs_bsize * NDADDR) {
@@ -112,7 +115,7 @@ blockest(union dinode *dp)
  * Determine if given inode should be dumped
  */
 void
-mapfileino(ino_t ino, off_t *tapesize, int *dirskipped)
+mapfileino(ino_t ino, int64_t *tapesize, int *dirskipped)
 {
 	int mode;
 	union dinode *dp;
@@ -141,7 +144,7 @@ mapfileino(ino_t ino, off_t *tapesize, int *dirskipped)
 }
 
 void
-fs_mapinodes(ino_t maxino, off_t *tapesize, int *anydirskipped)
+fs_mapinodes(ino_t maxino, int64_t *tapesize, int *anydirskipped)
 {
 	int i, cg, inosused;
 	struct cg *cgp;
@@ -201,7 +204,7 @@ fs_mapinodes(ino_t maxino, off_t *tapesize, int *anydirskipped)
  * the directories in the filesystem.
  */
 int
-mapfiles(ino_t maxino, off_t *tapesize, char *disk, char * const *dirv)
+mapfiles(ino_t maxino, int64_t *tapesize, char *disk, char * const *dirv)
 {
 	int anydirskipped = 0;
 
@@ -301,7 +304,7 @@ mapfiles(ino_t maxino, off_t *tapesize, char *disk, char * const *dirv)
  * pass using this algorithm.
  */
 int
-mapdirs(ino_t maxino, off_t *tapesize)
+mapdirs(ino_t maxino, int64_t *tapesize)
 {
 	union dinode *dp;
 	int i, isdir, nodump;
@@ -379,7 +382,7 @@ mapdirs(ino_t maxino, off_t *tapesize)
  */
 static int
 dirindir(ino_t ino, daddr_t blkno, int ind_level, off_t *filesize,
-    off_t *tapesize, int nodump)
+    int64_t *tapesize, int nodump)
 {
 	int ret = 0;
 	int i;
@@ -422,7 +425,7 @@ dirindir(ino_t ino, daddr_t blkno, int ind_level, off_t *filesize,
  */
 static int
 searchdir(ino_t ino, daddr_t blkno, long size, off_t filesize,
-    off_t *tapesize, int nodump)
+    int64_t *tapesize, int nodump)
 {
 	struct direct *dp;
 	union dinode *ip;
@@ -499,7 +502,7 @@ dumpino(union dinode *dp, ino_t ino)
 		dumpmap(dumpinomap, TS_BITS, ino);
 	}
 	CLRINO(ino, dumpinomap);
-	if (sblock->fs_magic == FS_UFS1_MAGIC) {  
+	if (sblock->fs_magic == FS_UFS1_MAGIC) {
 		spcl.c_mode = dp->dp1.di_mode;
 		spcl.c_size = dp->dp1.di_size;
 		spcl.c_old_atime = (time_t)dp->dp1.di_atime;
@@ -545,7 +548,8 @@ dumpino(union dinode *dp, ino_t ino)
 		if (DIP(dp, di_size) > 0 &&
 #ifdef FS_44INODEFMT
 		    (DIP(dp, di_size) < sblock->fs_maxsymlinklen ||
-		     (sblock->fs_maxsymlinklen == 0 && DIP(dp, di_blocks) == 0))) {
+		     (sblock->fs_maxsymlinklen == 0 &&
+			 DIP(dp, di_blocks) == 0))) {
 #else
 		    DIP(dp, di_blocks) == 0) {
 #endif
@@ -800,33 +804,70 @@ int	breaderrors = 0;
 void
 bread(daddr_t blkno, char *buf, int size)
 {
+	static char *mybuf = NULL;
+	char *mybufp, *bufp, *np;
+	static size_t mybufsz = 0;
+	off_t offset;
 	int cnt, i;
+	u_int64_t secno, seccount;
+	u_int32_t secoff, secsize = lab.d_secsize;
+
+	/*
+	 * We must read an integral number of sectors large enough to contain
+	 * all the requested data. The read must begin at a sector.
+	 */
+	if (DL_BLKOFFSET(&lab, blkno) == 0 && size % secsize == 0) {
+		secno = DL_BLKTOSEC(&lab, blkno);
+		secoff = 0;
+		seccount = size / secsize;
+		bufp = buf;
+	} else {
+		secno = DL_BLKTOSEC(&lab, blkno);
+		secoff = DL_BLKOFFSET(&lab, blkno);
+		seccount = DL_BLKTOSEC(&lab, (size + secoff) / DEV_BSIZE);
+		if (seccount * secsize < (size + secoff))
+			seccount++;
+		if (mybufsz < seccount * secsize) {
+			np = reallocarray(mybuf, seccount, secsize);
+			if (np == NULL) {
+				msg("No memory to read %llu %u-byte sectors",
+				    seccount, secsize);
+				dumpabort(0);
+			}
+			mybufsz = seccount * secsize;
+			mybuf = np;
+		}
+		bufp = mybuf;
+	}
+
+	offset = secno * secsize;
 
 loop:
-	if (lseek(diskfd, ((off_t)blkno << dev_bshift), SEEK_SET) < 0)
-		msg("bread: lseek fails\n");
-	if ((cnt = read(diskfd, buf, size)) == size)
-		return;
-	if (blkno + (size / dev_bsize) > fsbtodb(sblock, sblock->fs_ffs1_size)) {
+	if ((cnt = pread(diskfd, bufp, seccount * secsize, offset)) ==
+	    seccount * secsize)
+		goto done;
+	if (blkno + (size / DEV_BSIZE) >
+	    fsbtodb(sblock, sblock->fs_ffs1_size)) {
 		/*
 		 * Trying to read the final fragment.
 		 *
 		 * NB - dump only works in TP_BSIZE blocks, hence
-		 * rounds `dev_bsize' fragments up to TP_BSIZE pieces.
+		 * rounds `DEV_BSIZE' fragments up to TP_BSIZE pieces.
 		 * It should be smarter about not actually trying to
 		 * read more than it can get, but for the time being
 		 * we punt and scale back the read only when it gets
 		 * us into trouble. (mkm 9/25/83)
 		 */
-		size -= dev_bsize;
+		size -= secsize;
+		seccount--;
 		goto loop;
 	}
 	if (cnt == -1)
 		msg("read error from %s: %s: [block %lld]: count=%d\n",
-			disk, strerror(errno), blkno, size);
+		    disk, strerror(errno), (long long)blkno, size);
 	else
-		msg("short read error from %s: [block %lld]: count=%d, got=%d\n",
-			disk, blkno, size, cnt);
+		msg("short read error from %s: [block %lld]: count=%d, "
+		    "got=%d\n", disk, (long long)blkno, size, cnt);
 	if (++breaderrors > BREADEMAX) {
 		msg("More than %d block read errors from %s\n",
 			BREADEMAX, disk);
@@ -841,18 +882,27 @@ loop:
 	/*
 	 * Zero buffer, then try to read each sector of buffer separately.
 	 */
-	memset(buf, 0, size);
-	for (i = 0; i < size; i += dev_bsize, buf += dev_bsize, blkno++) {
-		if (lseek(diskfd, ((off_t)blkno << dev_bshift), SEEK_SET) < 0)
-			msg("bread: lseek2 fails!\n");
-		if ((cnt = read(diskfd, buf, (int)dev_bsize)) == dev_bsize)
+	if (bufp == mybuf)
+		memset(bufp, 0, mybufsz);
+	else
+		memset(bufp, 0, size);
+	for (i = 0, mybufp = bufp; i < size; i += secsize, mybufp += secsize) {
+		if ((cnt = pread(diskfd, mybufp, secsize, offset + i)) ==
+		    secsize)
 			continue;
 		if (cnt == -1) {
-			msg("read error from %s: %s: [sector %lld]: count=%ld\n",
-				disk, strerror(errno), blkno, dev_bsize);
+			msg("read error from %s: %s: [block %lld]: "
+			    "count=%u\n", disk, strerror(errno),
+			    (long long)(offset + i) / DEV_BSIZE, secsize);
 			continue;
 		}
-		msg("short read error from %s: [sector %lld]: count=%ld, got=%d\n",
-			disk, blkno, dev_bsize, cnt);
+		msg("short read error from %s: [block %lld]: count=%u, "
+		    "got=%d\n", disk, (long long)(offset + i) / DEV_BSIZE,
+		    secsize, cnt);
 	}
+
+done:
+	/* If necessary, copy out data that was read. */
+	if (bufp == mybuf)
+		memcpy(buf, bufp + secoff, size);
 }

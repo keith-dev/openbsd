@@ -1,4 +1,4 @@
-/*	$OpenBSD: rd.c,v 1.6 2013/06/11 16:42:13 deraadt Exp $	*/
+/*	$OpenBSD: rd.c,v 1.8 2014/07/13 23:10:23 deraadt Exp $	*/
 
 /*
  * Copyright (c) 2011 Matthew Dempsky <matthew@dempsky.org>
@@ -88,7 +88,7 @@ rdattach(int num)
 	cf.cf_driver = &rd_cd;
 
 	rd_cd.cd_ndevs = num;
-	rd_cd.cd_devs = malloc(num * sizeof(void *), M_DEVBUF, M_NOWAIT);
+	rd_cd.cd_devs = mallocarray(num, sizeof(void *), M_DEVBUF, M_NOWAIT);
 	if (rd_cd.cd_devs == NULL)
 		panic("rdattach: out of memory");
 
@@ -265,7 +265,7 @@ rdioctl(dev_t dev, u_long cmd, caddr_t data, int fflag, struct proc *p)
 		lp = malloc(sizeof(*lp), M_TEMP, M_WAITOK);
 		rdgetdisklabel(dev, sc, lp, 0);
 		bcopy(lp, sc->sc_dk.dk_label, sizeof(*lp));
-		free(lp, M_TEMP);
+		free(lp, M_TEMP, 0);
 		goto done;
 
 	case DIOCGPDINFO:

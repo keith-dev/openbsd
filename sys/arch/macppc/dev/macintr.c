@@ -1,4 +1,4 @@
-/*	$OpenBSD: macintr.c,v 1.44 2011/09/16 17:56:52 drahn Exp $	*/
+/*	$OpenBSD: macintr.c,v 1.47 2014/07/12 18:44:42 tedu Exp $	*/
 
 /*-
  * Copyright (c) 2008 Dale Rahn <drahn@openbsd.org>
@@ -39,12 +39,10 @@
 
 #include <sys/param.h>
 #include <sys/device.h>
-#include <sys/ioctl.h>
-#include <sys/mbuf.h>
-#include <sys/socket.h>
 #include <sys/systm.h>
+#include <sys/malloc.h>
 
-#include <uvm/uvm.h>
+#include <uvm/uvm_extern.h>
 #include <ddb/db_var.h>
 
 #include <machine/atomic.h>
@@ -52,7 +50,6 @@
 #include <machine/intr.h>
 #include <machine/psl.h>
 #include <machine/pio.h>
-#include <machine/powerpc.h>
 
 #include <dev/ofw/openfirm.h>
 
@@ -364,7 +361,7 @@ macintr_disestablish(void *lcp, void *arg)
 	ppc_intr_enable(s);
 
 	evcount_detach(&ih->ih_count);
-	free((void *)ih, M_DEVBUF);
+	free((void *)ih, M_DEVBUF, 0);
 
 	if (TAILQ_EMPTY(&iq->iq_list))
 		iq->iq_ist = IST_NONE;

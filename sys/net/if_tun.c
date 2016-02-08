@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_tun.c,v 1.120 2013/10/24 11:31:43 mpi Exp $	*/
+/*	$OpenBSD: if_tun.c,v 1.127 2014/07/22 11:06:09 mpi Exp $	*/
 /*	$NetBSD: if_tun.c,v 1.24 1996/05/07 02:40:48 thorpej Exp $	*/
 
 /*
@@ -64,7 +64,6 @@
 
 #ifdef INET
 #include <netinet/in.h>
-#include <netinet/in_systm.h>
 #include <netinet/ip.h>
 #include <netinet/if_ether.h>
 #endif
@@ -246,7 +245,7 @@ tun_clone_destroy(struct ifnet *ifp)
 
 	if_detach(ifp);
 
-	free(tp, M_DEVBUF);
+	free(tp, M_DEVBUF, 0);
 	return (0);
 }
 
@@ -322,7 +321,7 @@ tun_switch(struct tun_softc *tp, int flags)
 	}
  abort:
 	if (ifgrpnames)
-		free(ifgrpnames, M_TEMP);
+		free(ifgrpnames, M_TEMP, 0);
 	return (r);
 }
 
@@ -469,6 +468,7 @@ tun_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 {
 	struct tun_softc	*tp = (struct tun_softc *)(ifp->if_softc);
 	struct ifreq		*ifr = (struct ifreq *)data;
+	struct ifaddr		*ifa = (struct ifaddr *)data;
 	int			 error = 0, s;
 
 	s = splnet();
@@ -477,16 +477,19 @@ tun_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 	case SIOCSIFADDR:
 		tuninit(tp);
 		TUNDEBUG(("%s: address set\n", ifp->if_xname));
-		if (tp->tun_flags & TUN_LAYER2)
-			switch (((struct ifaddr *)data)->ifa_addr->sa_family) {
+		if (tp->tun_flags & TUN_LAYER2) {
+			switch (ifa->ifa_addr->sa_family) {
 #ifdef INET
 			case AF_INET:
-				arp_ifinit(&tp->arpcom, (struct ifaddr *)data);
+				arp_ifinit(&tp->arpcom, ifa);
 				break;
 #endif
 			default:
 				break;
 			}
+		} else {
+			ifa->ifa_rtrequest = p2p_rtrequest;
+		}
 		break;
 	case SIOCSIFDSTADDR:
 		tuninit(tp);
@@ -671,7 +674,7 @@ tunioctl(dev_t dev, u_long cmd, caddr_t data, int flag, struct proc *p)
 		break;
 	case TIOCSPGRP:
 		tp->tun_pgid = *(int *)data;
-		tp->tun_siguid = p->p_cred->p_ruid;
+		tp->tun_siguid = p->p_ucred->cr_ruid;
 		tp->tun_sigeuid = p->p_ucred->cr_uid;
 		break;
 	case TIOCGPGRP:
@@ -888,7 +891,7 @@ tunwrite(dev_t dev, struct uio *uio, int ioflag)
 	top->m_data += sizeof(*th);
 	top->m_len  -= sizeof(*th);
 	top->m_pkthdr.len -= sizeof(*th);
-	top->m_pkthdr.rdomain = ifp->if_rdomain;
+	top->m_pkthdr.ph_rtableid = ifp->if_rdomain;
 
 	switch (ntohl(*th)) {
 #ifdef INET
@@ -1090,9 +1093,6 @@ filt_tunwrite(struct knote *kn, long hint)
 
 /*
  * Start packet transmission on the interface.
- * when the interface queue is rate-limited by ALTQ or TBR,
- * if_start is needed to drain packets from the queue in order
- * to notify readers when outgoing packets become ready.
  * In layer 2 mode this function is called from ether_output.
  */
 void
@@ -1102,11 +1102,6 @@ tunstart(struct ifnet *ifp)
 	struct mbuf		*m;
 
 	splassert(IPL_NET);
-
-	if (!(tp->tun_flags & TUN_LAYER2) &&
-	    !ALTQ_IS_ENABLED(&ifp->if_snd) &&
-	    !TBR_IS_ENABLED(&ifp->if_snd))
-		return;
 
 	IFQ_POLL(&ifp->if_snd, m);
 	if (m != NULL) {

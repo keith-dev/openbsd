@@ -1,4 +1,4 @@
-/*	$OpenBSD: tcp_input.c,v 1.272 2014/01/24 18:54:58 henning Exp $	*/
+/*	$OpenBSD: tcp_input.c,v 1.278 2014/07/22 11:06:10 mpi Exp $	*/
 /*	$NetBSD: tcp_input.c,v 1.23 1996/02/13 23:43:44 christos Exp $	*/
 
 /*
@@ -86,7 +86,6 @@
 #include <net/route.h>
 
 #include <netinet/in.h>
-#include <netinet/in_systm.h>
 #include <netinet/ip.h>
 #include <netinet/in_pcb.h>
 #include <netinet/ip_var.h>
@@ -464,7 +463,7 @@ tcp_input(struct mbuf *m, ...)
 		ip = mtod(m, struct ip *);
 		if (IN_MULTICAST(ip->ip_dst.s_addr) ||
 		    in_broadcast(ip->ip_dst, m->m_pkthdr.rcvif,
-		    m->m_pkthdr.rdomain))
+		    m->m_pkthdr.ph_rtableid))
 			goto drop;
 #ifdef TCP_ECN
 		/* save ip_tos before clearing it for checksum */
@@ -585,8 +584,11 @@ tcp_input(struct mbuf *m, ...)
 	 * Locate pcb for segment.
 	 */
 #if NPF > 0
-	if (m->m_pkthdr.pf.statekey)
+	if (m->m_pkthdr.pf.statekey) {
 		inp = m->m_pkthdr.pf.statekey->inp;
+		if (inp && inp->inp_pf_sk)
+			KASSERT(m->m_pkthdr.pf.statekey == inp->inp_pf_sk);
+}
 #endif
 findpcb:
 	if (inp == NULL) {
@@ -595,13 +597,13 @@ findpcb:
 		case AF_INET6:
 			inp = in6_pcbhashlookup(&tcbtable, &ip6->ip6_src,
 			    th->th_sport, &ip6->ip6_dst, th->th_dport,
-			    m->m_pkthdr.rdomain);
+			    m->m_pkthdr.ph_rtableid);
 			break;
 #endif
 		case AF_INET:
 			inp = in_pcbhashlookup(&tcbtable, ip->ip_src,
 			    th->th_sport, ip->ip_dst, th->th_dport,
-			    m->m_pkthdr.rdomain);
+			    m->m_pkthdr.ph_rtableid);
 			break;
 		}
 #if NPF > 0
@@ -621,13 +623,13 @@ findpcb:
 		case AF_INET6:
 			inp = in6_pcblookup_listen(&tcbtable,
 			    &ip6->ip6_dst, th->th_dport, inpl_reverse, m,
-			    m->m_pkthdr.rdomain);
+			    m->m_pkthdr.ph_rtableid);
 			break;
 #endif /* INET6 */
 		case AF_INET:
 			inp = in_pcblookup_listen(&tcbtable,
 			    ip->ip_dst, th->th_dport, inpl_reverse, m,
-			    m->m_pkthdr.rdomain);
+			    m->m_pkthdr.ph_rtableid);
 			break;
 		}
 		/*
@@ -959,7 +961,7 @@ findpcb:
 	if (optp)
 #endif
 		if (tcp_dooptions(tp, optp, optlen, th, m, iphlen, &opti,
-		    m->m_pkthdr.rdomain))
+		    m->m_pkthdr.ph_rtableid))
 			goto drop;
 
 	if (opti.ts_present && opti.ts_ecr) {
@@ -2255,12 +2257,12 @@ dropwithreset:
 		goto drop;
 	if (tiflags & TH_ACK) {
 		tcp_respond(tp, mtod(m, caddr_t), th, (tcp_seq)0, th->th_ack,
-		    TH_RST, m->m_pkthdr.rdomain);
+		    TH_RST, m->m_pkthdr.ph_rtableid);
 	} else {
 		if (tiflags & TH_SYN)
 			tlen++;
 		tcp_respond(tp, mtod(m, caddr_t), th, th->th_seq + tlen,
-		    (tcp_seq)0, TH_RST|TH_ACK, m->m_pkthdr.rdomain);
+		    (tcp_seq)0, TH_RST|TH_ACK, m->m_pkthdr.ph_rtableid);
 	}
 	m_freem(m);
 	return;
@@ -3040,7 +3042,6 @@ tcp_mss(struct tcpcb *tp, int offer)
 		goto out;
 	}
 
-#ifdef RTV_MTU
 	/*
 	 * if there's an mtu associated with the route and we support
 	 * path MTU discovery for the underlying protocol family, use it.
@@ -3058,23 +3059,21 @@ tcp_mss(struct tcpcb *tp, int offer)
 			 */
 			mss = IPV6_MMTU - iphlen - sizeof(struct ip6_frag) -
 			    sizeof(struct tcphdr);
-		} else
-			mss = rt->rt_rmx.rmx_mtu - iphlen - sizeof(struct tcphdr);
-	} else
-#endif /* RTV_MTU */
-	if (!ifp)
+		} else {
+			mss = rt->rt_rmx.rmx_mtu - iphlen -
+			    sizeof(struct tcphdr);
+		}
+	} else if (!ifp) {
 		/*
 		 * ifp may be null and rmx_mtu may be zero in certain
 		 * v6 cases (e.g., if ND wasn't able to resolve the
 		 * destination host.
 		 */
 		goto out;
-	else if (ifp->if_flags & IFF_LOOPBACK)
+	} else if (ifp->if_flags & IFF_LOOPBACK) {
 		mss = ifp->if_mtu - iphlen - sizeof(struct tcphdr);
-	else if (tp->pf == AF_INET) {
+	} else if (tp->pf == AF_INET) {
 		if (ip_mtudisc)
-			mss = ifp->if_mtu - iphlen - sizeof(struct tcphdr);
-		else if (inp && in_localaddr(inp->inp_faddr, inp->inp_rtableid))
 			mss = ifp->if_mtu - iphlen - sizeof(struct tcphdr);
 	}
 #ifdef INET6
@@ -3900,7 +3899,7 @@ syn_cache_get(struct sockaddr *src, struct sockaddr *dst, struct tcphdr *th,
 
 resetandabort:
 	tcp_respond(NULL, mtod(m, caddr_t), th, (tcp_seq)0, th->th_ack, TH_RST,
-	    m->m_pkthdr.rdomain);
+	    m->m_pkthdr.ph_rtableid);
 	m_freem(m);
 abort:
 	if (so != NULL)
@@ -4238,7 +4237,7 @@ syn_cache_respond(struct syn_cache *sc, struct mbuf *m)
 	m->m_data += max_linkhdr;
 	m->m_len = m->m_pkthdr.len = tlen;
 	m->m_pkthdr.rcvif = NULL;
-	m->m_pkthdr.rdomain = sc->sc_rtableid;
+	m->m_pkthdr.ph_rtableid = sc->sc_rtableid;
 	memset(mtod(m, u_char *), 0, tlen);
 
 	switch (sc->sc_src.sa.sa_family) {
@@ -4414,8 +4413,7 @@ syn_cache_respond(struct syn_cache *sc, struct mbuf *m)
 #ifdef INET
 	case AF_INET:
 		error = ip_output(m, sc->sc_ipopts, ro,
-		    (ip_mtudisc ? IP_MTUDISC : 0), 
-		    (struct ip_moptions *)NULL, inp);
+		    (ip_mtudisc ? IP_MTUDISC : 0),  NULL, inp, 0);
 		break;
 #endif
 #ifdef INET6
@@ -4424,7 +4422,7 @@ syn_cache_respond(struct syn_cache *sc, struct mbuf *m)
 				ro->ro_rt ? ro->ro_rt->rt_ifp : NULL);
 
 		error = ip6_output(m, NULL /*XXX*/, (struct route_in6 *)ro, 0,
-			(struct ip6_moptions *)0, NULL, NULL);
+		    NULL, NULL, NULL);
 		break;
 #endif
 	default:

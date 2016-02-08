@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_urtw.c,v 1.43 2013/08/07 01:06:43 bluhm Exp $	*/
+/*	$OpenBSD: if_urtw.c,v 1.47 2014/07/13 15:52:49 mpi Exp $	*/
 
 /*-
  * Copyright (c) 2009 Martynas Venckus <martynas@openbsd.org>
@@ -42,9 +42,7 @@
 #include <net/if_types.h>
 
 #include <netinet/in.h>
-#include <netinet/in_systm.h>
 #include <netinet/if_ether.h>
-#include <netinet/ip.h>
 
 #include <net80211/ieee80211_var.h>
 #include <net80211/ieee80211_radiotap.h>
@@ -55,10 +53,6 @@
 #include <dev/usb/usbdevs.h>
 
 #include <dev/usb/if_urtwreg.h>
-
-#ifdef USB_DEBUG
-#define	URTW_DEBUG
-#endif
 
 #ifdef URTW_DEBUG
 #define	DPRINTF(x)	do { if (urtw_debug) printf x; } while (0)
@@ -578,18 +572,13 @@ int		urtw_set_macaddr(struct urtw_softc *, const uint8_t *);
 int urtw_match(struct device *, void *, void *);
 void urtw_attach(struct device *, struct device *, void *);
 int urtw_detach(struct device *, int);
-int urtw_activate(struct device *, int);
 
 struct cfdriver urtw_cd = {
 	NULL, "urtw", DV_IFNET
 };
 
 const struct cfattach urtw_ca = {
-	sizeof(struct urtw_softc),
-	urtw_match,
-	urtw_attach,
-	urtw_detach,
-	urtw_activate,
+	sizeof(struct urtw_softc), urtw_match, urtw_attach, urtw_detach
 };
 
 int
@@ -791,20 +780,6 @@ urtw_detach(struct device *self, int flags)
 	urtw_close_pipes(sc);
 
 	splx(s);
-
-	return (0);
-}
-
-int
-urtw_activate(struct device *self, int act)
-{
-	struct urtw_softc *sc = (struct urtw_softc *)self;
-
-	switch (act) {
-	case DVACT_DEACTIVATE:
-		usbd_deactivate(sc->sc_udev);
-		break;
-	}
 
 	return (0);
 }
@@ -2500,8 +2475,7 @@ urtw_start(struct ifnet *ifp)
 				break;
 			}
 			IF_DEQUEUE(&ic->ic_mgtq, m0);
-			ni = (struct ieee80211_node *)m0->m_pkthdr.rcvif;
-			m0->m_pkthdr.rcvif = NULL;
+			ni = m0->m_pkthdr.ph_cookie;
 #if NBPFILTER > 0
 			if (ic->ic_rawbpf != NULL)
 				bpf_mtap(ic->ic_rawbpf, m0, BPF_DIRECTION_OUT);

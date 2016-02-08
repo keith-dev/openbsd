@@ -1,4 +1,4 @@
-/*	$OpenBSD: uhub.c,v 1.63 2013/10/19 08:29:30 mpi Exp $ */
+/*	$OpenBSD: uhub.c,v 1.69 2014/07/12 18:48:52 tedu Exp $ */
 /*	$NetBSD: uhub.c,v 1.64 2003/02/08 03:32:51 ichiro Exp $	*/
 /*	$FreeBSD: src/sys/dev/usb/uhub.c,v 1.18 1999/11/17 22:33:43 n_hibma Exp $	*/
 
@@ -30,10 +30,6 @@
  * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
  * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  * POSSIBILITY OF SUCH DAMAGE.
- */
-
-/*
- * USB spec: http://www.usb.org/developers/docs/usbspec.zip
  */
 
 #include <sys/param.h>
@@ -81,23 +77,17 @@ void uhub_intr(struct usbd_xfer *, void *, usbd_status);
 int uhub_match(struct device *, void *, void *); 
 void uhub_attach(struct device *, struct device *, void *); 
 int uhub_detach(struct device *, int); 
-int uhub_activate(struct device *, int); 
 
 struct cfdriver uhub_cd = { 
 	NULL, "uhub", DV_DULL 
 }; 
 
-const struct cfattach uhub_ca = { 
-	sizeof(struct uhub_softc), 
-	uhub_match, 
-	uhub_attach, 
-	uhub_detach, 
-	uhub_activate, 
+const struct cfattach uhub_ca = {
+	sizeof(struct uhub_softc), uhub_match, uhub_attach,  uhub_detach
 };
 
-struct cfattach uhub_uhub_ca = {
-	sizeof(struct uhub_softc), uhub_match, uhub_attach,
-	uhub_detach, uhub_activate
+const struct cfattach uhub_uhub_ca = {
+	sizeof(struct uhub_softc), uhub_match, uhub_attach,  uhub_detach
 };
 
 int
@@ -121,14 +111,16 @@ uhub_attach(struct device *parent, struct device *self, void *aux)
 	struct uhub_softc *sc = (struct uhub_softc *)self;
 	struct usb_attach_arg *uaa = aux;
 	struct usbd_device *dev = uaa->device;
-	usbd_status err;
 	struct usbd_hub *hub = NULL;
-	usb_device_request_t req;
 	usb_hub_descriptor_t hubdesc;
-	int p, port, nports, nremov, pwrdly;
+	int p, port, nports, pwrdly;
 	struct usbd_interface *iface;
 	usb_endpoint_descriptor_t *ed;
 	struct usbd_tt *tts = NULL;
+	usbd_status err;
+#ifdef UHUB_DEBUG
+	int nremov;
+#endif
 
 	sc->sc_hub = dev;
 
@@ -146,28 +138,21 @@ uhub_attach(struct device *parent, struct device *self, void *aux)
 	}
 
 	/* Get hub descriptor. */
-	req.bmRequestType = UT_READ_CLASS_DEVICE;
-	req.bRequest = UR_GET_DESCRIPTOR;
-	USETW2(req.wValue, UDESC_HUB, 0);
-	USETW(req.wIndex, 0);
-	USETW(req.wLength, USB_HUB_DESCRIPTOR_SIZE);
-	err = usbd_do_request(dev, &req, &hubdesc);
+	err = usbd_get_hub_descriptor(dev, &hubdesc, 1);
 	nports = hubdesc.bNbrPorts;
-	if (!err && nports > 7) {
-		USETW(req.wLength, USB_HUB_DESCRIPTOR_SIZE + (nports+1) / 8);
-		err = usbd_do_request(dev, &req, &hubdesc);
-	}
+	if (!err && nports > 7)
+		usbd_get_hub_descriptor(dev, &hubdesc, nports);
 	if (err) {
 		DPRINTF("%s: getting hub descriptor failed, error=%s\n",
 			 sc->sc_dev.dv_xname, usbd_errstr(err));
 		return;
 	}
 
+#ifdef UHUB_DEBUG
 	for (nremov = 0, port = 1; port <= nports; port++)
 		if (!UHD_NOT_REMOV(&hubdesc, port))
 			nremov++;
 
-#ifdef UHUB_DEBUG
 	printf("%s: %d port%s with %d removable, %s powered",
 	       sc->sc_dev.dv_xname, nports, nports != 1 ? "s" : "",
 	       nremov, dev->self_powered ? "self" : "bus");
@@ -192,7 +177,7 @@ uhub_attach(struct device *parent, struct device *self, void *aux)
 	hub->ports = malloc(sizeof(struct usbd_port) * nports,
 	    M_USBDEV, M_NOWAIT);
 	if (hub->ports == NULL) {
-		free(hub, M_USBDEV);
+		free(hub, M_USBDEV, 0);
 		return;
 	}
 	dev->hub = hub;
@@ -317,11 +302,11 @@ uhub_attach(struct device *parent, struct device *self, void *aux)
 
  bad:
 	if (sc->sc_statusbuf)
-		free(sc->sc_statusbuf, M_USBDEV);
+		free(sc->sc_statusbuf, M_USBDEV, 0);
 	if (hub) {
 		if (hub->ports)
-			free(hub->ports, M_USBDEV);
-		free(hub, M_USBDEV);
+			free(hub->ports, M_USBDEV, 0);
+		free(hub, M_USBDEV, 0);
 	}
 	dev->hub = NULL;
 }
@@ -404,7 +389,8 @@ uhub_explore(struct usbd_device *dev)
 	disco:
 		if (up->device != NULL) {
 			/* Disconnected */
-			usb_disconnect_port(up, &sc->sc_dev);
+			usbd_detach(up->device, &sc->sc_dev);
+			up->device = NULL;
 			usbd_clear_port_feature(dev, port,
 						UHF_C_PORT_CONNECTION);
 		}
@@ -444,7 +430,9 @@ uhub_explore(struct usbd_device *dev)
 		}
 
 		/* Figure out device speed */
-		if (status & UPS_HIGH_SPEED)
+		if (status & UPS_SUPER_SPEED)
+			speed = USB_SPEED_SUPER;
+		else if (status & UPS_HIGH_SPEED)
 			speed = USB_SPEED_HIGH;
 		else if (status & UPS_LOW_SPEED)
 			speed = USB_SPEED_LOW;
@@ -480,31 +468,6 @@ uhub_explore(struct usbd_device *dev)
 	return (0);
 }
 
-int
-uhub_activate(struct device *self, int act)
-{
-	struct uhub_softc *sc = (struct uhub_softc *)self;
-	struct usbd_hub *hub = sc->sc_hub->hub;
-	struct usbd_device *dev;
-	int nports, port, i;
-
-	switch (act) {
-	case DVACT_DEACTIVATE:
-		if (hub == NULL) /* malfunctioning hub */
-			break;
-		nports = hub->hubdesc.bNbrPorts;
-		for(port = 0; port < nports; port++) {
-			dev = hub->ports[port].device;
-			if (dev != NULL && dev->subdevs != NULL) {
-				for (i = 0; dev->subdevs[i] != NULL; i++)
-					config_deactivate(dev->subdevs[i]);
-			}
-		}
-		break;
-	}
-	return (0);
-}
-
 /*
  * Called from process context when the hub is gone.
  * Detach all devices on active ports.
@@ -526,17 +489,19 @@ uhub_detach(struct device *self, int flags)
 	nports = hub->hubdesc.bNbrPorts;
 	for(port = 0; port < nports; port++) {
 		rup = &hub->ports[port];
-		if (rup->device)
-			usb_disconnect_port(rup, self);
+		if (rup->device != NULL) {
+			usbd_detach(rup->device, self);
+			rup->device = NULL;
+		}
 	}
 
 	if (hub->ports[0].tt)
-		free(hub->ports[0].tt, M_USBDEV);
+		free(hub->ports[0].tt, M_USBDEV, 0);
 	if (sc->sc_statusbuf)
-		free(sc->sc_statusbuf, M_USBDEV);
+		free(sc->sc_statusbuf, M_USBDEV, 0);
 	if (hub->ports)
-		free(hub->ports, M_USBDEV);
-	free(hub, M_USBDEV);
+		free(hub->ports, M_USBDEV, 0);
+	free(hub, M_USBDEV, 0);
 	sc->sc_hub->hub = NULL;
 
 	return (0);
@@ -552,6 +517,9 @@ void
 uhub_intr(struct usbd_xfer *xfer, void *addr, usbd_status status)
 {
 	struct uhub_softc *sc = addr;
+
+	if (usbd_is_dying(sc->sc_hub))
+		return;
 
 	DPRINTF("%s: intr status=%d\n", sc->sc_dev.dv_xname, status);
 	if (status == USBD_STALLED)

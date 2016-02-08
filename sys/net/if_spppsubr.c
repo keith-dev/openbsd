@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_spppsubr.c,v 1.117 2014/01/13 23:03:52 bluhm Exp $	*/
+/*	$OpenBSD: if_spppsubr.c,v 1.125 2014/07/22 11:06:09 mpi Exp $	*/
 /*
  * Synchronous PPP/Cisco link level subroutines.
  * Keepalive protocol implemented in both Cisco and PPP modes.
@@ -60,7 +60,6 @@
 
 #ifdef INET
 #include <netinet/in.h>
-#include <netinet/in_systm.h>
 #include <netinet/in_var.h>
 #include <netinet/ip.h>
 #include <netinet/tcp.h>
@@ -445,7 +444,7 @@ spppattach(struct ifnet *ifp)
 void
 sppp_input(struct ifnet *ifp, struct mbuf *m)
 {
-	struct ppp_header *h, ht;
+	struct ppp_header ht;
 	struct ifqueue *inq = 0;
 	struct sppp *sp = (struct sppp *)ifp;
 	struct timeval tv;
@@ -474,17 +473,16 @@ sppp_input(struct ifnet *ifp, struct mbuf *m)
 	}
 
 	/* mark incoming routing domain */
-	m->m_pkthdr.rdomain = ifp->if_rdomain;
+	m->m_pkthdr.ph_rtableid = ifp->if_rdomain;
 
 	if (sp->pp_flags & PP_NOFRAMING) {
-		memcpy(&ht.protocol, mtod(m, char *), sizeof(ht.protocol));
+		m_copydata(m, 0, sizeof(ht.protocol), (caddr_t)&ht.protocol);
 		m_adj(m, 2);
 		ht.control = PPP_UI;
 		ht.address = PPP_ALLSTATIONS;
-		h = &ht;
 	} else {
 		/* Get PPP header. */
-		h = mtod (m, struct ppp_header*);
+		m_copydata(m, 0, sizeof(ht), (caddr_t)&ht);
 		m_adj (m, PPP_HEADER_LEN);
 	}
 
@@ -501,9 +499,9 @@ sppp_input(struct ifnet *ifp, struct mbuf *m)
 		}
 	}
 
-	switch (h->address) {
+	switch (ht.address) {
 	case PPP_ALLSTATIONS:
-		if (h->control != PPP_UI)
+		if (ht.control != PPP_UI)
 			goto invalid;
 		if (sp->pp_flags & PP_CISCO) {
 			if (debug)
@@ -511,20 +509,20 @@ sppp_input(struct ifnet *ifp, struct mbuf *m)
 				    SPP_FMT "PPP packet in Cisco mode "
 				    "<addr=0x%x ctrl=0x%x proto=0x%x>\n",
 				    SPP_ARGS(ifp),
-				    h->address, h->control, ntohs(h->protocol));
+				    ht.address, ht.control, ntohs(ht.protocol));
 			goto drop;
 		}
-		switch (ntohs (h->protocol)) {
+		switch (ntohs (ht.protocol)) {
 		default:
 			if (sp->state[IDX_LCP] == STATE_OPENED)
 				sppp_cp_send (sp, PPP_LCP, PROTO_REJ,
-				    ++sp->pp_seq, 2, &h->protocol);
+				    ++sp->pp_seq, 2, &ht.protocol);
 			if (debug)
 				log(LOG_DEBUG,
 				    SPP_FMT "invalid input protocol "
 				    "<addr=0x%x ctrl=0x%x proto=0x%x>\n",
 				    SPP_ARGS(ifp),
-				    h->address, h->control, ntohs(h->protocol));
+				    ht.address, ht.control, ntohs(ht.protocol));
 			++ifp->if_noproto;
 			goto drop;
 		case PPP_LCP:
@@ -580,10 +578,10 @@ sppp_input(struct ifnet *ifp, struct mbuf *m)
 				    SPP_FMT "Cisco packet in PPP mode "
 				    "<addr=0x%x ctrl=0x%x proto=0x%x>\n",
 				    SPP_ARGS(ifp),
-				    h->address, h->control, ntohs(h->protocol));
+				    ht.address, ht.control, ntohs(ht.protocol));
 			goto drop;
 		}
-		switch (ntohs (h->protocol)) {
+		switch (ntohs (ht.protocol)) {
 		default:
 			++ifp->if_noproto;
 			goto invalid;
@@ -612,7 +610,7 @@ sppp_input(struct ifnet *ifp, struct mbuf *m)
 			    SPP_FMT "invalid input packet "
 			    "<addr=0x%x ctrl=0x%x proto=0x%x>\n",
 			    SPP_ARGS(ifp),
-			    h->address, h->control, ntohs(h->protocol));
+			    ht.address, ht.control, ntohs(ht.protocol));
 		goto drop;
 	}
 
@@ -645,16 +643,15 @@ sppp_output(struct ifnet *ifp, struct mbuf *m,
 {
 	struct sppp *sp = (struct sppp*) ifp;
 	struct ppp_header *h;
-	struct ifqueue *ifq = NULL;
 	struct timeval tv;
 	int s, len, rv = 0;
 	u_int16_t protocol;
 
 #ifdef DIAGNOSTIC
-	if (ifp->if_rdomain != rtable_l2(m->m_pkthdr.rdomain)) {
+	if (ifp->if_rdomain != rtable_l2(m->m_pkthdr.ph_rtableid)) {
 		printf("%s: trying to send packet on wrong domain. "
 		    "if %d vs. mbuf %d, AF %d\n", ifp->if_xname,
-		    ifp->if_rdomain, rtable_l2(m->m_pkthdr.rdomain),
+		    ifp->if_rdomain, rtable_l2(m->m_pkthdr.ph_rtableid),
 		    dst->sa_family);
 	}
 #endif
@@ -820,20 +817,7 @@ sppp_output(struct ifnet *ifp, struct mbuf *m,
 	 * not yet active.
 	 */
 	len = m->m_pkthdr.len;
-	if (ifq != NULL
-#ifdef ALTQ
-	    && ALTQ_IS_ENABLED(&ifp->if_snd) == 0
-#endif
-		) {
-		if (IF_QFULL (ifq)) {
-			IF_DROP (&ifp->if_snd);
-			m_freem (m);
-			if (rv == 0)
-				rv = ENOBUFS;
-		} else
-			IF_ENQUEUE (ifq, m);
-	} else
-		IFQ_ENQUEUE(&ifp->if_snd, m, NULL, rv);
+	IFQ_ENQUEUE(&ifp->if_snd, m, NULL, rv);
 
 	if (rv != 0) {
 		++ifp->if_oerrors;
@@ -921,13 +905,13 @@ sppp_detach(struct ifnet *ifp)
 
 	/* release authentication data */
 	if (sp->myauth.name != NULL)
-		free(sp->myauth.name, M_DEVBUF);
+		free(sp->myauth.name, M_DEVBUF, 0);
 	if (sp->myauth.secret != NULL)
-		free(sp->myauth.secret, M_DEVBUF);
+		free(sp->myauth.secret, M_DEVBUF, 0);
 	if (sp->hisauth.name != NULL)
-		free(sp->hisauth.name, M_DEVBUF);
+		free(sp->hisauth.name, M_DEVBUF, 0);
 	if (sp->hisauth.secret != NULL)
-		free(sp->hisauth.secret, M_DEVBUF);
+		free(sp->hisauth.secret, M_DEVBUF, 0);
 }
 
 /*
@@ -1011,7 +995,8 @@ sppp_pick(struct ifnet *ifp)
 int
 sppp_ioctl(struct ifnet *ifp, u_long cmd, void *data)
 {
-	struct ifreq *ifr = (struct ifreq*) data;
+	struct ifreq *ifr = data;
+	struct ifaddr *ifa = data;
 	struct sppp *sp = (struct sppp*) ifp;
 	int s, rv, going_up, going_down, newmode;
 
@@ -1024,6 +1009,7 @@ sppp_ioctl(struct ifnet *ifp, u_long cmd, void *data)
 
 	case SIOCSIFADDR:
 		if_up(ifp);
+		ifa->ifa_rtrequest = p2p_rtrequest;
 		/* FALLTHROUGH */
 
 	case SIOCSIFFLAGS:
@@ -2128,7 +2114,7 @@ sppp_lcp_RCR(struct sppp *sp, struct lcp_header *h, int len)
 	p = (void*) (h+1);
 	for (rlen = 0; len > 1; len -= p[1], p += p[1]) {
 		if (p[1] < 2 || p[1] > len) {
-			free(buf, M_TEMP);
+			free(buf, M_TEMP, 0);
 			return (-1);
 		}
 		if (debug)
@@ -2305,7 +2291,7 @@ sppp_lcp_RCR(struct sppp *sp, struct lcp_header *h, int len)
 	}
 
  end:
-	free(buf, M_TEMP);
+	free(buf, M_TEMP, 0);
 	return (rlen == 0);
 }
 
@@ -2711,7 +2697,7 @@ sppp_ipcp_RCR(struct sppp *sp, struct lcp_header *h, int len)
 	p = (void*) (h+1);
 	for (rlen = 0; len > 1; len -= p[1], p += p[1]) {
 		if (p[1] < 2 || p[1] > len) {
-			free(buf, M_TEMP);
+			free(buf, M_TEMP, 0);
 			return (-1);
 		}
 		if (debug)
@@ -2855,7 +2841,7 @@ sppp_ipcp_RCR(struct sppp *sp, struct lcp_header *h, int len)
 	}
 
  end:
-	free(buf, M_TEMP);
+	free(buf, M_TEMP, 0);
 	return (rlen == 0);
 }
 
@@ -3179,7 +3165,7 @@ sppp_ipv6cp_RCR(struct sppp *sp, struct lcp_header *h, int len)
 	for (rlen=0; len>1 && p[1]; len-=p[1], p+=p[1]) {
 		/* Sanity check option length */
 		if (p[1] < 2 || p[1] > len) {
-			free(buf, M_TEMP);
+			free(buf, M_TEMP, 0);
 			return (-1);
 		}
 		if (debug)
@@ -3313,7 +3299,7 @@ sppp_ipv6cp_RCR(struct sppp *sp, struct lcp_header *h, int len)
 	}
 
 end:
-	free(buf, M_TEMP);
+	free(buf, M_TEMP, 0);
 	return (rlen == 0);
 }
 
@@ -4575,7 +4561,7 @@ sppp_update_gw(struct ifnet *ifp)
 
 	/* update routing table */
 	for (tid = 0; tid <= RT_TABLEID_MAX; tid++) {
-		if ((rnh = rt_gettable(AF_INET, tid)) != NULL) {
+		if ((rnh = rtable_get(tid, AF_INET)) != NULL) {
 			while ((*rnh->rnh_walktree)(rnh,
 			    sppp_update_gw_walker, ifp) == EAGAIN)
 				;	/* nothing */
@@ -4893,10 +4879,10 @@ sppp_get_params(struct sppp *sp, struct ifreq *ifr)
 		spr->phase = sp->pp_phase;
 
 		if (copyout(spr, (caddr_t)ifr->ifr_data, sizeof(*spr)) != 0) {
-			free(spr, M_DEVBUF);
+			free(spr, M_DEVBUF, 0);
 			return EFAULT;
 		}
-		free(spr, M_DEVBUF);
+		free(spr, M_DEVBUF, 0);
 		break;
 	}
 	case SPPPIOGMAUTH:
@@ -4916,10 +4902,10 @@ sppp_get_params(struct sppp *sp, struct ifreq *ifr)
 			strlcpy(spa->name, auth->name, sizeof(spa->name));
 
 		if (copyout(spa, (caddr_t)ifr->ifr_data, sizeof(*spa)) != 0) {
-			free(spa, M_DEVBUF);
+			free(spa, M_DEVBUF, 0);
 			return EFAULT;
 		}
-		free(spa, M_DEVBUF);
+		free(spa, M_DEVBUF, 0);
 		break;
 	}
 	default:
@@ -4959,7 +4945,7 @@ sppp_set_params(struct sppp *sp, struct ifreq *ifr)
 		spr = malloc(sizeof(*spr), M_DEVBUF, M_WAITOK);
 		
 		if (copyin((caddr_t)ifr->ifr_data, spr, sizeof(*spr)) != 0) {
-			free(spr, M_DEVBUF);
+			free(spr, M_DEVBUF, 0);
 			return EFAULT;
 		}
 		/*
@@ -4968,7 +4954,7 @@ sppp_set_params(struct sppp *sp, struct ifreq *ifr)
 		 *
 		 * XXX Should allow to set or clear pp_flags.
 		 */
-		free(spr, M_DEVBUF);
+		free(spr, M_DEVBUF, 0);
 		break;
 	}
 	case SPPPIOSMAUTH:
@@ -4995,22 +4981,22 @@ sppp_set_params(struct sppp *sp, struct ifreq *ifr)
 		auth = (cmd == SPPPIOSMAUTH) ? &sp->myauth : &sp->hisauth;
 
 		if (copyin((caddr_t)ifr->ifr_data, spa, sizeof(*spa)) != 0) {
-			free(spa, M_DEVBUF);
+			free(spa, M_DEVBUF, 0);
 			return EFAULT;
 		}
 
 		if (spa->proto != 0 && spa->proto != PPP_PAP &&
 		    spa->proto != PPP_CHAP) {
-			free(spa, M_DEVBUF);
+			free(spa, M_DEVBUF, 0);
 			return EINVAL;
 		}
 
 		if (spa->proto == 0) {
 			/* resetting auth */
 			if (auth->name != NULL)
-				free(auth->name, M_DEVBUF);
+				free(auth->name, M_DEVBUF, 0);
 			if (auth->secret != NULL)
-				free(auth->secret, M_DEVBUF);
+				free(auth->secret, M_DEVBUF, 0);
 			bzero(auth, sizeof *auth);
 			explicit_bzero(sp->chap_challenge, sizeof sp->chap_challenge);
 		} else {
@@ -5023,7 +5009,7 @@ sppp_set_params(struct sppp *sp, struct ifreq *ifr)
 			p = malloc(len, M_DEVBUF, M_WAITOK);
 			strlcpy(p, spa->name, len);
 			if (auth->name != NULL)
-				free(auth->name, M_DEVBUF);
+				free(auth->name, M_DEVBUF, 0);
 			auth->name = p;
 
 			if (spa->secret[0] != '\0') {
@@ -5032,7 +5018,7 @@ sppp_set_params(struct sppp *sp, struct ifreq *ifr)
 				p = malloc(len, M_DEVBUF, M_WAITOK);
 				strlcpy(p, spa->secret, len);
 				if (auth->secret != NULL)
-					free(auth->secret, M_DEVBUF);
+					free(auth->secret, M_DEVBUF, 0);
 				auth->secret = p;
 			} else if (!auth->secret) {
 				p = malloc(1, M_DEVBUF, M_WAITOK);
@@ -5040,7 +5026,7 @@ sppp_set_params(struct sppp *sp, struct ifreq *ifr)
 				auth->secret = p;
 			}
 		}
-		free(spa, M_DEVBUF);
+		free(spa, M_DEVBUF, 0);
 		break;
 	}
 	default:
@@ -5251,13 +5237,6 @@ sppp_null(struct sppp *unused)
 {
 	/* do just nothing */
 }
-/*
- * This file is large.  Tell emacs to highlight it nevertheless.
- *
- * Local Variables:
- * hilit-auto-highlight-maxout: 120000
- * End:
- */
 
 void
 sppp_set_phase(struct sppp *sp)

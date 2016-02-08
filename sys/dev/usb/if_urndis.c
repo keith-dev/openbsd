@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_urndis.c,v 1.46 2013/12/09 15:45:29 pirofti Exp $ */
+/*	$OpenBSD: if_urndis.c,v 1.49 2014/07/13 15:52:49 mpi Exp $ */
 
 /*
  * Copyright (c) 2010 Jonathan Armani <armani@openbsd.org>
@@ -41,12 +41,8 @@
 #include <net/bpf.h>
 #endif
 
-#ifdef INET
 #include <netinet/in.h>
-#include <netinet/in_systm.h>
-#include <netinet/ip.h>
 #include <netinet/if_ether.h>
-#endif
 
 #include <dev/usb/usb.h>
 #include <dev/usb/usbdi.h>
@@ -115,18 +111,13 @@ const struct urndis_class *urndis_lookup(usb_interface_descriptor_t *);
 int urndis_match(struct device *, void *, void *);
 void urndis_attach(struct device *, struct device *, void *);
 int urndis_detach(struct device *, int);
-int urndis_activate(struct device *, int);
 
 struct cfdriver urndis_cd = {
 	NULL, "urndis", DV_IFNET
 };
 
 struct cfattach urndis_ca = {
-	sizeof(struct urndis_softc),
-	urndis_match,
-	urndis_attach,
-	urndis_detach,
-	urndis_activate,
+	sizeof(struct urndis_softc), urndis_match, urndis_attach, urndis_detach
 };
 
 const struct urndis_class {
@@ -191,7 +182,7 @@ urndis_ctrl_recv(struct urndis_softc *sc)
 
 	if (err != USBD_NORMAL_COMPLETION && err != USBD_SHORT_XFER) {
 		printf("%s: %s\n", DEVNAME(sc), usbd_errstr(err));
-		free(buf, M_TEMP);
+		free(buf, M_TEMP, 0);
 		return NULL;
 	}
 
@@ -206,7 +197,7 @@ urndis_ctrl_recv(struct urndis_softc *sc)
 		    DEVNAME(sc),
 		    letoh32(hdr->rm_len),
 		    RNDIS_RESPONSE_LEN);
-		free(buf, M_TEMP);
+		free(buf, M_TEMP, 0);
 		return NULL;
 	}
 
@@ -250,7 +241,7 @@ urndis_ctrl_handle(struct urndis_softc *sc, struct urndis_comp_hdr *hdr,
 			rval = RNDIS_STATUS_FAILURE;
 	}
 
-	free(hdr, M_TEMP);
+	free(hdr, M_TEMP, 0);
 
 	return rval;
 }
@@ -441,7 +432,7 @@ urndis_ctrl_init(struct urndis_softc *sc)
 	    letoh32(msg->rm_max_xfersz)));
 
 	rval = urndis_ctrl_send(sc, msg, sizeof(*msg));
-	free(msg, M_TEMP);
+	free(msg, M_TEMP, 0);
 
 	if (rval != RNDIS_STATUS_SUCCESS) {
 		printf("%s: init failed\n", DEVNAME(sc));
@@ -480,7 +471,7 @@ urndis_ctrl_halt(struct urndis_softc *sc)
 	    letoh32(msg->rm_rid)));
 
 	rval = urndis_ctrl_send(sc, msg, sizeof(*msg));
-	free(msg, M_TEMP);
+	free(msg, M_TEMP, 0);
 
 	if (rval != RNDIS_STATUS_SUCCESS)
 		printf("%s: halt failed\n", DEVNAME(sc));
@@ -527,7 +518,7 @@ urndis_ctrl_query(struct urndis_softc *sc, u_int32_t oid,
 	    letoh32(msg->rm_devicevchdl)));
 
 	rval = urndis_ctrl_send(sc, msg, sizeof(*msg));
-	free(msg, M_TEMP);
+	free(msg, M_TEMP, 0);
 
 	if (rval != RNDIS_STATUS_SUCCESS) {
 		printf("%s: query failed\n", DEVNAME(sc));
@@ -580,7 +571,7 @@ urndis_ctrl_set(struct urndis_softc *sc, u_int32_t oid, void *buf, size_t len)
 	    letoh32(msg->rm_devicevchdl)));
 
 	rval = urndis_ctrl_send(sc, msg, sizeof(*msg));
-	free(msg, M_TEMP);
+	free(msg, M_TEMP, 0);
 
 	if (rval != RNDIS_STATUS_SUCCESS) {
 		printf("%s: set failed\n", DEVNAME(sc));
@@ -644,7 +635,7 @@ urndis_ctrl_set_param(struct urndis_softc *sc,
 	    letoh32(param->rm_valuelen)));
 
 	rval = urndis_ctrl_set(sc, OID_GEN_RNDIS_CONFIG_PARAMETER, param, tlen);
-	free(param, M_TEMP);
+	free(param, M_TEMP, 0);
 	if (rval != RNDIS_STATUS_SUCCESS)
 		printf("%s: set param failed 0x%x\n", DEVNAME(sc), rval);
 
@@ -677,7 +668,7 @@ urndis_ctrl_reset(struct urndis_softc *sc)
 	    letoh32(reset->rm_rid)));
 
 	rval = urndis_ctrl_send(sc, reset, sizeof(*reset));
-	free(reset, M_TEMP);
+	free(reset, M_TEMP, 0);
 
 	if (rval != RNDIS_STATUS_SUCCESS) {
 		printf("%s: reset failed\n", DEVNAME(sc));
@@ -717,7 +708,7 @@ urndis_ctrl_keepalive(struct urndis_softc *sc)
 	    letoh32(keep->rm_rid)));
 
 	rval = urndis_ctrl_send(sc, keep, sizeof(*keep));
-	free(keep, M_TEMP);
+	free(keep, M_TEMP, 0);
 
 	if (rval != RNDIS_STATUS_SUCCESS) {
 		printf("%s: keepalive failed\n", DEVNAME(sc));
@@ -1451,10 +1442,10 @@ urndis_attach(struct device *parent, struct device *self, void *aux)
 	if (bufsz == ETHER_ADDR_LEN) {
 		memcpy(eaddr, buf, ETHER_ADDR_LEN);
 		printf(", address %s\n", ether_sprintf(eaddr));
-		free(buf, M_TEMP);
+		free(buf, M_TEMP, 0);
 	} else {
 		printf(", invalid address\n");
-		free(buf, M_TEMP);
+		free(buf, M_TEMP, 0);
 		splx(s);
 		return;
 	}
@@ -1510,20 +1501,3 @@ urndis_detach(struct device *self, int flags)
 
 	return 0;
 }
-
-int
-urndis_activate(struct device *self, int devact)
-{
-	struct urndis_softc *sc;
-
-	sc = (struct urndis_softc *)self;
-
-	switch (devact) {
-	case DVACT_DEACTIVATE:
-		usbd_deactivate(sc->sc_udev);
-		break;
-	}
-
-	return 0;
-}
-

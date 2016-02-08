@@ -1,4 +1,4 @@
-/*	$OpenBSD: pmap7.c,v 1.12 2013/11/04 00:35:30 dlg Exp $	*/
+/*	$OpenBSD: pmap7.c,v 1.15 2014/07/12 18:44:41 tedu Exp $	*/
 /*	$NetBSD: pmap.c,v 1.147 2004/01/18 13:03:50 scw Exp $	*/
 
 /*
@@ -735,7 +735,7 @@ pmap_free_l1(pmap_t pm)
 {
 	u_int cur_ttb;
 
-	__asm __volatile("mrc p15, 0, %0, c2, c0, 0" : "=r"(cur_ttb));
+	__asm volatile("mrc p15, 0, %0, c2, c0, 0" : "=r"(cur_ttb));
 	cur_ttb &= ~(L1_TABLE_SIZE - 1);
 
 }
@@ -758,7 +758,7 @@ pmap_free_l1(pmap_t pm)
 	/* free backing va */
 	uvm_km_free(kernel_map, (vaddr_t)l1->l1_kva, L1_TABLE_SIZE);
 
-	free(l1, M_VMPMAP);
+	free(l1, M_VMPMAP, 0);
 }
 
 /*
@@ -2049,7 +2049,7 @@ pmap_fault_fixup(pmap_t pm, vaddr_t va, vm_prot_t ftype, int user)
 	pa = l2pte_pa(pte);
 
 	if ((ftype & VM_PROT_EXECUTE) && (pte & L2_V7_S_XN)) {
-printf("%s: va %08x ftype %x %c pte %08x\n", __func__, va, ftype, user ? 'u' : 's', pte);
+printf("%s: va %08lx ftype %x %c pte %08x\n", __func__, va, ftype, user ? 'u' : 's', pte);
 printf("fault on exec\n");
 Debugger();
 		/* XXX FIX THIS */
@@ -2130,7 +2130,7 @@ Debugger();
 		PTE_SYNC(ptep);
 		rv = 1;
 	} else {
-printf("%s: va %08x ftype %x %c pte %08x\n", __func__, va, ftype, user ? 'u' : 's', pte);
+printf("%s: va %08lx ftype %x %c pte %08x\n", __func__, va, ftype, user ? 'u' : 's', pte);
 		goto out;
 	}
 
@@ -2241,8 +2241,8 @@ pmap_activate(struct proc *p)
 	if (p == curproc) {
 		u_int cur_dacr, cur_ttb;
 
-		__asm __volatile("mrc p15, 0, %0, c2, c0, 0" : "=r"(cur_ttb));
-		__asm __volatile("mrc p15, 0, %0, c3, c0, 0" : "=r"(cur_dacr));
+		__asm volatile("mrc p15, 0, %0, c2, c0, 0" : "=r"(cur_ttb));
+		__asm volatile("mrc p15, 0, %0, c3, c0, 0" : "=r"(cur_dacr));
 
 		cur_ttb &= ~(L1_TABLE_SIZE - 1);
 
@@ -3517,8 +3517,8 @@ pmap_pte_init_armv7(void)
 	pte_l2_s_proto = L2_S_PROTO_v7;
 
 	/* probe L1 dcache */
-	__asm __volatile("mcr p15, 2, %0, c0, c0, 0" :: "r" (0) );
-	__asm __volatile("mrc p15, 1, %0, c0, c0, 0" : "=r" (cachereg) );
+	__asm volatile("mcr p15, 2, %0, c0, c0, 0" :: "r" (0) );
+	__asm volatile("mrc p15, 1, %0, c0, c0, 0" : "=r" (cachereg) );
 	if ((cachereg & 0x80000000) == 0) {
 #if 0
 		/*

@@ -1,4 +1,4 @@
-/*	$OpenBSD: ext2fs_balloc.c,v 1.19 2013/06/11 16:42:18 deraadt Exp $	*/
+/*	$OpenBSD: ext2fs_balloc.c,v 1.23 2014/07/14 08:54:13 pelikan Exp $	*/
 /*	$NetBSD: ext2fs_balloc.c,v 1.10 2001/07/04 21:16:01 chs Exp $	*/
 
 /*
@@ -41,8 +41,6 @@
 #include <sys/file.h>
 #include <sys/vnode.h>
 
-#include <uvm/uvm_extern.h>
-
 #include <ufs/ufs/quota.h>
 #include <ufs/ufs/inode.h>
 #include <ufs/ufs/ufs_extern.h>
@@ -56,17 +54,17 @@
  * the inode and the logical block number in a file.
  */
 int
-ext2fs_buf_alloc(struct inode *ip, daddr_t bn, int size, struct ucred *cred, 
+ext2fs_buf_alloc(struct inode *ip, u_int32_t bn, int size, struct ucred *cred,
     struct buf **bpp, int flags)
 {
 	struct m_ext2fs *fs;
 	struct buf *bp, *nbp;
 	struct vnode *vp = ITOV(ip);
 	struct indir indirs[NIADDR + 2];
-	int32_t nb, newb, *bap;
+	u_int32_t nb, newb, *bap;
 	int num, i, error;
 	u_int deallocated;
-	int32_t *allocib, *blkp, *allocblk, allociblk[NIADDR + 1];
+	u_int32_t *allocib, *blkp, *allocblk, allociblk[NIADDR + 1];
 	int unwindidx = -1;
 	daddr_t lbn, pref;
 
@@ -80,7 +78,7 @@ ext2fs_buf_alloc(struct inode *ip, daddr_t bn, int size, struct ucred *cred,
 	 * The first NDADDR blocks are direct blocks
 	 */
 	if (bn < NDADDR) {
-		nb = fs2h32(ip->i_e2fs_blocks[bn]);
+		nb = letoh32(ip->i_e2fs_blocks[bn]);
 		if (nb != 0) {
 			error = bread(vp, bn, fs->e2fs_bsize, &bp);
 			if (error) {
@@ -101,7 +99,7 @@ ext2fs_buf_alloc(struct inode *ip, daddr_t bn, int size, struct ucred *cred,
 			return (error);
 		ip->i_e2fs_last_lblk = lbn;
 		ip->i_e2fs_last_blk = newb;
-		ip->i_e2fs_blocks[bn] = h2fs32(newb);
+		ip->i_e2fs_blocks[bn] = htole32(newb);
 		ip->i_flag |= IN_CHANGE | IN_UPDATE;
 		bp = getblk(vp, bn, fs->e2fs_bsize, 0, 0);
 		bp->b_blkno = fsbtodb(fs, newb);
@@ -124,11 +122,11 @@ ext2fs_buf_alloc(struct inode *ip, daddr_t bn, int size, struct ucred *cred,
 	 * Fetch the first indirect block allocating if necessary.
 	 */
 	--num;
-	nb = fs2h32(ip->i_e2fs_blocks[NDADDR + indirs[0].in_off]);
+	nb = letoh32(ip->i_e2fs_blocks[NDADDR + indirs[0].in_off]);
 	allocib = NULL;
 	allocblk = allociblk;
 	if (nb == 0) {
-		pref = ext2fs_blkpref(ip, lbn, 0, (int32_t *)0);
+		pref = ext2fs_blkpref(ip, lbn, 0, NULL);
 		error = ext2fs_alloc(ip, lbn, pref, cred, &newb);
 		if (error)
 			return (error);
@@ -146,7 +144,7 @@ ext2fs_buf_alloc(struct inode *ip, daddr_t bn, int size, struct ucred *cred,
 			goto fail;
 		unwindidx = 0;
 		allocib = &ip->i_e2fs_blocks[NDADDR + indirs[0].in_off];
-		*allocib = h2fs32(newb);
+		*allocib = htole32(newb);
 		ip->i_flag |= IN_CHANGE | IN_UPDATE;
 	}
 	/*
@@ -158,8 +156,8 @@ ext2fs_buf_alloc(struct inode *ip, daddr_t bn, int size, struct ucred *cred,
 			brelse(bp);
 			goto fail;
 		}
-		bap = (int32_t *)bp->b_data;
-		nb = fs2h32(bap[indirs[i].in_off]);
+		bap = (u_int32_t *)bp->b_data;
+		nb = letoh32(bap[indirs[i].in_off]);
 		if (i == num)
 			break;
 		i++;
@@ -167,7 +165,7 @@ ext2fs_buf_alloc(struct inode *ip, daddr_t bn, int size, struct ucred *cred,
 			brelse(bp);
 			continue;
 		}
-		pref = ext2fs_blkpref(ip, lbn, 0, (int32_t *)0);
+		pref = ext2fs_blkpref(ip, lbn, 0, NULL);
 		error = ext2fs_alloc(ip, lbn, pref, cred, &newb);
 		if (error) {
 			brelse(bp);
@@ -189,7 +187,7 @@ ext2fs_buf_alloc(struct inode *ip, daddr_t bn, int size, struct ucred *cred,
 		}
 		if (unwindidx < 0)
 			unwindidx = i - 1;
-		bap[indirs[i - 1].in_off] = h2fs32(nb);
+		bap[indirs[i - 1].in_off] = htole32(nb);
 		/*
 		 * If required, write synchronously, otherwise use
 		 * delayed write.
@@ -204,7 +202,7 @@ ext2fs_buf_alloc(struct inode *ip, daddr_t bn, int size, struct ucred *cred,
 	 * Get the data block, allocating if necessary.
 	 */
 	if (nb == 0) {
-		pref = ext2fs_blkpref(ip, lbn, indirs[num].in_off, &bap[0]);
+		pref = ext2fs_blkpref(ip, lbn, indirs[num].in_off, bap);
 		error = ext2fs_alloc(ip, lbn, pref, cred, &newb);
 		if (error) {
 			brelse(bp);
@@ -214,7 +212,7 @@ ext2fs_buf_alloc(struct inode *ip, daddr_t bn, int size, struct ucred *cred,
 		*allocblk++ = nb;
 		ip->i_e2fs_last_lblk = lbn;
 		ip->i_e2fs_last_blk = newb;
-		bap[indirs[num].in_off] = h2fs32(nb);
+		bap[indirs[num].in_off] = htole32(nb);
 		/*
 		 * If required, write synchronously, otherwise use
 		 * delayed write.
@@ -259,13 +257,13 @@ fail:
 			*allocib = 0;
 		} else {
 			int r;
-	
-			r = bread(vp, indirs[unwindidx].in_lbn, 
+
+			r = bread(vp, indirs[unwindidx].in_lbn,
 			    (int)fs->e2fs_bsize, &bp);
 			if (r) {
 				panic("Could not unwind indirect block, error %d", r);
 			} else {
-				bap = (int32_t *)bp->b_data;
+				bap = (u_int32_t *)bp->b_data;
 				bap[indirs[unwindidx].in_off] = 0;
 				if (flags & B_SYNC)
 					bwrite(bp);

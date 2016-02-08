@@ -1,4 +1,4 @@
-/*	$OpenBSD: trap.c,v 1.33 2014/02/13 23:11:06 kettenis Exp $	*/
+/*	$OpenBSD: trap.c,v 1.42 2014/07/13 12:11:01 jasper Exp $	*/
 /*	$NetBSD: trap.c,v 1.2 2003/05/04 23:51:56 fvdl Exp $	*/
 
 /*-
@@ -124,7 +124,7 @@ const char *trap_type[] = {
 	"SSE FP exception",			/* 19 T_XMM */
 	"reserved trap",			/* 20 T_RESERVED */
 };
-int	trap_types = sizeof trap_type / sizeof trap_type[0];
+int	trap_types = nitems(trap_type);
 
 #ifdef DEBUG
 int	trapdebug = 0;
@@ -162,8 +162,8 @@ trap(struct trapframe *frame)
 
 #ifdef DEBUG
 	if (trapdebug) {
-		printf("trap %d code %lx rip %lx cs %lx rflags %lx cr2 %lx "
-		       "cpl %x\n",
+		printf("trap %d code %llx rip %llx cs %llx rflags %llx "
+		       "cr2 %llx cpl %x\n",
 		    type, frame->tf_err, frame->tf_rip, frame->tf_cs,
 		    frame->tf_rflags, rcr2(), curcpu()->ci_ilevel);
 		printf("curproc %p\n", curproc);
@@ -175,6 +175,7 @@ trap(struct trapframe *frame)
 	if (!KERNELMODE(frame->tf_cs, frame->tf_rflags)) {
 		type |= T_USER;
 		p->p_md.md_regs = frame;
+		refreshcreds(p);
 	}
 
 	switch (type) {
@@ -204,12 +205,12 @@ trap(struct trapframe *frame)
 		else
 			printf("unknown trap %ld", (u_long)frame->tf_trapno);
 		printf(" in %s mode\n", (type & T_USER) ? "user" : "supervisor");
-		printf("trap type %d code %lx rip %lx cs %lx rflags %lx cr2 "
-		       " %lx cpl %x rsp %lx\n",
-		    type, frame->tf_err, (u_long)frame->tf_rip, frame->tf_cs,
+		printf("trap type %d code %llx rip %llx cs %llx rflags %llx cr2 "
+		       " %llx cpl %x rsp %llx\n",
+		    type, frame->tf_err, frame->tf_rip, frame->tf_cs,
 		    frame->tf_rflags, rcr2(), curcpu()->ci_ilevel, frame->tf_rsp);
 
-		panic("trap type %d, code=%lx, pc=%lx",
+		panic("trap type %d, code=%llx, pc=%llx",
 		    type, frame->tf_err, frame->tf_rip);
 		/*NOTREACHED*/
 
@@ -281,14 +282,7 @@ copyfault:
 
 	case T_ASTFLT|T_USER:		/* Allow process switch */
 		uvmexp.softs++;
-		if (p->p_flag & P_OWEUPC) {
-			KERNEL_LOCK();
-			ADDUPROF(p);
-			KERNEL_UNLOCK();
-		}
-		/* Allow a forced task switch. */
-		if (curcpu()->ci_want_resched)
-			preempt(NULL);
+		mi_ast(p, curcpu()->ci_want_resched);
 		goto out;
 
 	case T_BOUND|T_USER:
@@ -409,8 +403,7 @@ faultcommon:
 		if (error == ENOMEM) {
 			printf("UVM: pid %d (%s), uid %d killed: out of swap\n",
 			       p->p_pid, p->p_comm,
-			       p->p_cred && p->p_ucred ?
-			       (int)p->p_ucred->cr_uid : -1);
+			       p->p_ucred ?  (int)p->p_ucred->cr_uid : -1);
 			sv.sival_ptr = (void *)fa;
 			trapsignal(p, SIGKILL, T_PAGEFLT, SEGV_MAPERR, sv);
 		} else {
@@ -507,8 +500,8 @@ syscall(struct trapframe *frame)
 	p = curproc;
 
 	code = frame->tf_rax;
-	callp = p->p_emul->e_sysent;
-	nsys = p->p_emul->e_nsysent;
+	callp = p->p_p->ps_emul->e_sysent;
+	nsys = p->p_p->ps_emul->e_nsysent;
 	argp = &args[0];
 	argoff = 0;
 
@@ -527,7 +520,7 @@ syscall(struct trapframe *frame)
 	}
 
 	if (code < 0 || code >= nsys)
-		callp += p->p_emul->e_nosys;
+		callp += p->p_p->ps_emul->e_nosys;
 	else
 		callp += code;
 

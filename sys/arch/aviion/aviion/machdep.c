@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.60 2014/01/19 12:45:35 deraadt Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.71 2014/07/21 17:25:47 uebayasi Exp $	*/
 /*
  * Copyright (c) 2007 Miodrag Vallat.
  *
@@ -237,7 +237,7 @@ cpu_startup()
 	 * Good {morning,afternoon,evening,night}.
 	 */
 	printf(version);
-	printf("real mem = %u (%uMB)\n", ptoa(physmem),
+	printf("real mem = %lu (%luMB)\n", ptoa(physmem),
 	    ptoa(physmem)/1024/1024);
 
 	/*
@@ -292,16 +292,14 @@ doboot()
 }
 
 __dead void
-boot(howto)
-	int howto;
+boot(int howto)
 {
-	/* take a snapshot before clobbering any registers */
+	struct device *mainbus;
+
 	if (curproc && curproc->p_addr)
 		savectx(curpcb);
 
-	/* If system is cold, just halt. */
 	if (cold) {
-		/* (Unless the user explicitly asked for reboot.) */
 		if ((howto & RB_USERREQ) == 0)
 			howto |= RB_HALT;
 		goto haltsys;
@@ -310,31 +308,29 @@ boot(howto)
 	boothowto = howto;
 	if ((howto & RB_NOSYNC) == 0) {
 		vfs_shutdown();
-		/*
-		 * If we've been adjusting the clock, the todr
-		 * will be out of synch; adjust it now unless
-		 * the system was sitting in ddb.
-		 */
-		if ((howto & RB_TIMEBAD) == 0)
+
+		if ((howto & RB_TIMEBAD) == 0) {
 			resettodr();
-		else
+		} else {
 			printf("WARNING: not updating battery clock\n");
+		}
 	}
 	if_downall();
 
 	uvm_shutdown();
-	splhigh();		/* Disable interrupts. */
+	splhigh();
+	cold = 1;
 
-	/* If rebooting and a dump is requested, do it. */
-	if (howto & RB_DUMP)
+	if ((howto & RB_DUMP) != 0)
 		dumpsys();
 
 haltsys:
 	doshutdownhooks();
-	if (!TAILQ_EMPTY(&alldevs))
-		config_suspend(TAILQ_FIRST(&alldevs), DVACT_POWERDOWN);
+	mainbus = device_mainbus();
+	if (mainbus != NULL)
+		config_suspend(mainbus, DVACT_POWERDOWN);
 
-	if (howto & RB_HALT) {
+	if ((howto & RB_HALT) != 0) {
 		printf("System halted.\n\n");
 		bootstack();
 		cmmu_shutdown();
@@ -343,8 +339,8 @@ haltsys:
 
 	doboot();
 
-	for (;;);
-	/*NOTREACHED*/
+	for (;;) ;
+	/* NOTREACHED */
 }
 
 unsigned dumpmag = 0x8fca0101;	 /* magic number for savecore */
@@ -798,7 +794,7 @@ cpu_hatch_secondary_processors()
 				ncpusfound = 1;
 				return;
 			default:
-				printf("CPU%d failed to start, error %d\n",
+				printf("CPU%ld failed to start, error %d\n",
 				    cpu, rc);
 				/* FALLTHROUGH */
 			case JPSTART_NO_JP:

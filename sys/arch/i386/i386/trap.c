@@ -1,4 +1,4 @@
-/*	$OpenBSD: trap.c,v 1.111 2014/02/13 23:11:06 kettenis Exp $	*/
+/*	$OpenBSD: trap.c,v 1.117 2014/07/09 07:29:00 guenther Exp $	*/
 /*	$NetBSD: trap.c,v 1.95 1996/05/05 06:50:02 mycroft Exp $	*/
 
 /*-
@@ -155,6 +155,7 @@ trap(struct trapframe *frame)
 	if (!KERNELMODE(frame->tf_cs, frame->tf_eflags)) {
 		type |= T_USER;
 		p->p_md.md_regs = frame;
+		refreshcreds(p);
 	}
 
 	switch (type) {
@@ -334,13 +335,7 @@ trap(struct trapframe *frame)
 
 	case T_ASTFLT|T_USER:		/* Allow process switch */
 		uvmexp.softs++;
-		if (p->p_flag & P_OWEUPC) {
-			KERNEL_LOCK();
-			ADDUPROF(p);
-			KERNEL_UNLOCK();
-		}
-		if (want_resched)
-			preempt(NULL);
+		mi_ast(p, want_resched);
 		goto out;
 
 	case T_DNA|T_USER: {
@@ -519,7 +514,6 @@ trap(struct trapframe *frame)
 		if (kdb_trap(type, 0, frame))
 			return;
 #endif
-			return;
 #endif /* DDB || KGDB */
 		/* machine/parity/power fail/"kitchen sink" faults */
 		if (isa_nmi() == 0)
@@ -563,8 +557,8 @@ syscall(struct trapframe *frame)
 	opc = frame->tf_eip;
 	code = frame->tf_eax;
 
-	nsys = p->p_emul->e_nsysent;
-	callp = p->p_emul->e_sysent;
+	nsys = p->p_p->ps_emul->e_nsysent;
+	callp = p->p_p->ps_emul->e_sysent;
 
 	params = (caddr_t)frame->tf_esp + sizeof(int);
 
@@ -583,7 +577,7 @@ syscall(struct trapframe *frame)
 	case SYS_syscall:
 #ifdef COMPAT_LINUX
 		/* Linux has a special system setup call as number 0 */
-		if (p->p_emul == &emul_linux_elf)
+		if (p->p_p->ps_emul == &emul_linux_elf)
 			break;
 #endif
 		/*
@@ -606,13 +600,13 @@ syscall(struct trapframe *frame)
 		break;
 	}
 	if (code < 0 || code >= nsys)
-		callp += p->p_emul->e_nosys;		/* illegal */
+		callp += p->p_p->ps_emul->e_nosys;		/* illegal */
 	else
 		callp += code;
 	argsize = callp->sy_argsize;
 #ifdef COMPAT_LINUX
 	/* XXX extra if() for every emul type.. */
-	if (p->p_emul == &emul_linux_elf) {
+	if (p->p_p->ps_emul == &emul_linux_elf) {
 		/*
 		 * Linux passes the args in ebx, ecx, edx, esi, edi, ebp, in
 		 * increasing order.
@@ -667,8 +661,8 @@ syscall(struct trapframe *frame)
 		break;
 	default:
 	bad:
-		if (p->p_emul->e_errno && error >= 0 && error <= ELAST)
-			frame->tf_eax = p->p_emul->e_errno[error];
+		if (p->p_p->ps_emul->e_errno && error >= 0 && error <= ELAST)
+			frame->tf_eax = p->p_p->ps_emul->e_errno[error];
 		else
 			frame->tf_eax = error;
 		frame->tf_eflags |= PSL_C;	/* carry bit */

@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.531 2014/01/05 20:23:57 mlarkin Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.550 2014/07/21 17:25:47 uebayasi Exp $	*/
 /*	$NetBSD: machdep.c,v 1.214 1996/11/10 03:16:17 thorpej Exp $	*/
 
 /*-
@@ -364,7 +364,7 @@ cyrix_write_reg(u_char reg, u_char data)
 void
 cpuid(u_int32_t ax, u_int32_t *regs)
 {
-	__asm __volatile(
+	__asm volatile(
 	    "cpuid\n\t"
 	    "movl	%%eax, 0(%2)\n\t"
 	    "movl	%%ebx, 4(%2)\n\t"
@@ -997,13 +997,14 @@ const struct cpu_cpuid_feature i386_cpuid_features[] = {
 };
 
 const struct cpu_cpuid_feature i386_ecpuid_features[] = {
-	{ CPUID_MPC,	"MPC" },
-	{ CPUID_NXE,	"NXE" },
-	{ CPUID_MMXX,	"MMXX" },
-	{ CPUID_FFXSR,	"FFXSR" },
-	{ CPUID_LONG,	"LONG" },
-	{ CPUID_3DNOW2,	"3DNOW2" },
-	{ CPUID_3DNOW,	"3DNOW" }
+	{ CPUID_MPC,		"MPC" },
+	{ CPUID_NXE,		"NXE" },
+	{ CPUID_MMXX,		"MMXX" },
+	{ CPUID_FFXSR,		"FFXSR" },
+	{ CPUID_PAGE1GB,	"PAGE1GB" },
+	{ CPUID_LONG,		"LONG" },
+	{ CPUID_3DNOW2,		"3DNOW2" },
+	{ CPUID_3DNOW,		"3DNOW" }
 };
 
 const struct cpu_cpuid_feature i386_cpuid_ecxfeatures[] = {
@@ -2219,32 +2220,17 @@ p3_get_bus_clock(struct cpu_info *ci)
 			goto print_msr;
 		}
 		break;
-	/* nehalem */
-	case 0x1a: /* Core i7, Xeon 3500/5500 */
-	case 0x1e: /* Core i5/i7, Xeon 3400 */
-	case 0x1f: /* Core i5/i7 */
-	case 0x2e: /* Xeon 6500/7500 */
-	/* westmere */
-	case 0x25: /* Core i3/i5, Xeon 3400 */
-	case 0x2c: /* Core i7, Xeon 3600/5600 */
-	case 0x2f: /* Xeon E7 */
-	/* sandy bridge */
-	case 0x2a: /* Core i5/i7 2nd Generation */
-	case 0x2d: /* Xeon E5 */
-	/* ivy bridge */
-	case 0x3a: /* Core i3/i5/i7 3rd Generation */
-		break;
 	default: 
-		printf("%s: unknown i686 model 0x%x, can't get bus clock",
-		    ci->ci_dev.dv_xname, ci->ci_model);
-print_msr:
-		/*
-		 * Show the EBL_CR_POWERON MSR, so we'll at least have
-		 * some extra information, such as clock ratio, etc.
-		 */
-		printf(" (0x%llx)\n", rdmsr(MSR_EBL_CR_POWERON));
+		/* no FSB on modern Intel processors */
 		break;
 	}
+	return;
+print_msr:
+	/*
+	 * Show the EBL_CR_POWERON MSR, so we'll at least have
+	 * some extra information, such as clock ratio, etc.
+	 */
+	printf(" (0x%llx)\n", rdmsr(MSR_EBL_CR_POWERON));
 }
 
 void
@@ -2319,7 +2305,7 @@ sendsig(sig_t catcher, int sig, int mask, u_long code, int type,
 	struct proc *p = curproc;
 	struct trapframe *tf = p->p_md.md_regs;
 	struct sigframe *fp, frame;
-	struct sigacts *psp = p->p_sigacts;
+	struct sigacts *psp = p->p_p->ps_sigacts;
 	register_t sp;
 
 	/*
@@ -2416,7 +2402,7 @@ sendsig(sig_t catcher, int sig, int mask, u_long code, int type,
 	tf->tf_gs = GSEL(GUGS_SEL, SEL_UPL);
 	tf->tf_es = GSEL(GUDATA_SEL, SEL_UPL);
 	tf->tf_ds = GSEL(GUDATA_SEL, SEL_UPL);
-	tf->tf_eip = p->p_sigcode;
+	tf->tf_eip = p->p_p->ps_sigcode;
 	tf->tf_cs = GSEL(GUCODE_SEL, SEL_UPL);
 	tf->tf_eflags &= ~(PSL_T|PSL_D|PSL_VM|PSL_AC);
 	tf->tf_esp = (int)fp;
@@ -2568,17 +2554,15 @@ cpu_unidle(struct cpu_info *ci)
 int	waittime = -1;
 struct pcb dumppcb;
 
-void
+__dead void
 boot(int howto)
 {
-	if (howto & RB_POWERDOWN)
+	struct device *mainbus;
+
+	if ((howto & RB_POWERDOWN) != 0)
 		lid_suspend = 0;
 
 	if (cold) {
-		/*
-		 * If the system is cold, just halt, unless the user
-		 * explicitly asked for reboot.
-		 */
 		if ((howto & RB_USERREQ) == 0)
 			howto |= RB_HALT;
 		goto haltsys;
@@ -2586,18 +2570,9 @@ boot(int howto)
 
 	boothowto = howto;
 	if ((howto & RB_NOSYNC) == 0 && waittime < 0) {
-		extern struct proc proc0;
-
-		/* make sure there's a process to charge for I/O in sync() */
-		if (curproc == NULL)
-			curproc = &proc0;
-
 		waittime = 0;
 		vfs_shutdown();
-		/*
-		 * If we've been adjusting the clock, the todr
-		 * will be out of synch; adjust it now.
-		 */
+
 		if ((howto & RB_TIMEBAD) == 0) {
 			resettodr();
 		} else {
@@ -2609,34 +2584,35 @@ boot(int howto)
 	delay(4*1000000);	/* XXX */
 
 	uvm_shutdown();
-	splhigh();		/* Disable interrupts. */
+	splhigh();
+	cold = 1;
 
-	/* Do a dump if requested. */
-	if (howto & RB_DUMP)
+	if ((howto & RB_DUMP) != 0)
 		dumpsys();
 
 haltsys:
 	doshutdownhooks();
-	if (!TAILQ_EMPTY(&alldevs))
-		config_suspend(TAILQ_FIRST(&alldevs), DVACT_POWERDOWN);
+	mainbus = device_mainbus();
+	if (mainbus != NULL)
+		config_suspend(mainbus, DVACT_POWERDOWN);
 
 #ifdef MULTIPROCESSOR
 	i386_broadcast_ipi(I386_IPI_HALT);
 #endif
 
-	if (howto & RB_HALT) {
+	if ((howto & RB_HALT) != 0) {
 #if NACPI > 0 && !defined(SMALL_KERNEL)
 		extern int acpi_enabled;
 
 		if (acpi_enabled) {
 			delay(500000);
-			if (howto & RB_POWERDOWN)
+			if ((howto & RB_POWERDOWN) != 0)
 				acpi_powerdown();
 		}
 #endif
 
 #if NAPM > 0
-		if (howto & RB_POWERDOWN) {
+		if ((howto & RB_POWERDOWN) != 0) {
 			int rv;
 
 			printf("\nAttempting to power down...\n");
@@ -2680,8 +2656,8 @@ haltsys:
 
 	printf("rebooting...\n");
 	cpu_reset();
-	for(;;) ;
-	/*NOTREACHED*/
+	for (;;) ;
+	/* NOTREACHED */
 }
 
 /*
@@ -3072,24 +3048,6 @@ init386(paddr_t first_avail)
 	cpu_info_primary.ci_self = &cpu_info_primary;
 	cpu_info_primary.ci_curpcb = &proc0.p_addr->u_pcb;
 
-	/*
-	 * Initialize the I/O port and I/O mem extent maps.
-	 * Note: we don't have to check the return value since
-	 * creation of a fixed extent map will never fail (since
-	 * descriptor storage has already been allocated).
-	 *
-	 * N.B. The iomem extent manages _all_ physical addresses
-	 * on the machine.  When the amount of RAM is found, the two
-	 * extents of RAM are allocated from the map (0 -> ISA hole
-	 * and end of ISA hole -> end of RAM).
-	 */
-	ioport_ex = extent_create("ioport", 0x0, 0xffff, M_DEVBUF,
-	    (caddr_t)ioport_ex_storage, sizeof(ioport_ex_storage),
-	    EX_NOCOALESCE|EX_NOWAIT);
-	iomem_ex = extent_create("iomem", 0x0, 0xffffffff, M_DEVBUF,
-	    (caddr_t)iomem_ex_storage, sizeof(iomem_ex_storage),
-	    EX_NOCOALESCE|EX_NOWAIT);
-
 	/* make bootstrap gdt gates and memory segments */
 	setsegment(&gdt[GCODE_SEL].sd, 0, 0xfffff, SDT_MEMERA, SEL_KPL, 1, 1);
 	setsegment(&gdt[GICODE_SEL].sd, 0, 0xfffff, SDT_MEMERA, SEL_KPL, 1, 1);
@@ -3138,6 +3096,24 @@ init386(paddr_t first_avail)
 	lgdt(&region);
 	setregion(&region, idt, sizeof(idt_region) - 1);
 	lidt(&region);
+
+	/*
+	 * Initialize the I/O port and I/O mem extent maps.
+	 * Note: we don't have to check the return value since
+	 * creation of a fixed extent map will never fail (since
+	 * descriptor storage has already been allocated).
+	 *
+	 * N.B. The iomem extent manages _all_ physical addresses
+	 * on the machine.  When the amount of RAM is found, the two
+	 * extents of RAM are allocated from the map (0 -> ISA hole
+	 * and end of ISA hole -> end of RAM).
+	 */
+	ioport_ex = extent_create("ioport", 0x0, 0xffff, M_DEVBUF,
+	    (caddr_t)ioport_ex_storage, sizeof(ioport_ex_storage),
+	    EX_NOCOALESCE|EX_NOWAIT);
+	iomem_ex = extent_create("iomem", 0x0, 0xffffffff, M_DEVBUF,
+	    (caddr_t)iomem_ex_storage, sizeof(iomem_ex_storage),
+	    EX_NOCOALESCE|EX_NOWAIT);
 
 #if NISA > 0
 	isa_defaultirq();
@@ -3313,7 +3289,7 @@ init386(paddr_t first_avail)
 	if (kb > atop(IOM_END)) {
 		paddr_t lim = atop(IOM_END);
 #ifdef DEBUG
-		printf(" %x-%x (<16M)", lim, kb);
+		printf(" %lx-%x (<16M)", lim, kb);
 #endif
 		uvm_page_physload(lim, kb, lim, kb, 0);
 	}
@@ -3330,7 +3306,7 @@ init386(paddr_t first_avail)
 
 		if (a < e) {
 #ifdef DEBUG
-				printf(" %x-%x", a, e);
+				printf(" %lx-%lx", a, e);
 #endif
 				uvm_page_physload(a, e, a, e, 0);
 		}
@@ -3448,7 +3424,7 @@ cpu_reset()
 	bzero((caddr_t)idt, sizeof(idt_region));
 	setregion(&region, idt, sizeof(idt_region) - 1);
 	lidt(&region);
-	__asm __volatile("divl %0,%1" : : "q" (0), "a" (0));
+	__asm volatile("divl %0,%1" : : "q" (0), "a" (0));
 
 #if 1
 	/*
@@ -3941,7 +3917,7 @@ softintr(int sir)
 {
 	struct cpu_info *ci = curcpu();
 
-	__asm __volatile("orl %1, %0" :
+	__asm volatile("orl %1, %0" :
 	    "=m" (ci->ci_ipending) : "ir" (1 << sir));
 }
 

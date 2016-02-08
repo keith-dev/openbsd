@@ -1,4 +1,4 @@
-/*      $OpenBSD: ip6_divert.c,v 1.17 2013/12/20 02:04:09 krw Exp $ */
+/*      $OpenBSD: ip6_divert.c,v 1.28 2014/07/22 11:06:10 mpi Exp $ */
 
 /*
  * Copyright (c) 2009 Michele Marchetto <michele@openbsd.org>
@@ -30,7 +30,6 @@
 #include <net/pfvar.h>
 
 #include <netinet/in.h>
-#include <netinet/in_systm.h>
 #include <netinet/ip.h>
 #include <netinet/ip_var.h>
 #include <netinet/in_pcb.h>
@@ -63,7 +62,9 @@ int divb6hashsize = DIVERTHASHSIZE;
 
 static struct sockaddr_in6 ip6addr = { sizeof(ip6addr), AF_INET6 };
 
-void divert6_detach(struct inpcb *);
+void	divert6_detach(struct inpcb *);
+int	divert6_output(struct inpcb *, struct mbuf *, struct mbuf *,
+	    struct mbuf *);
 
 void
 divert6_init()
@@ -80,29 +81,19 @@ divert6_input(struct mbuf **mp, int *offp, int proto)
 }
 
 int
-divert6_output(struct mbuf *m, ...)
+divert6_output(struct inpcb *inp, struct mbuf *m, struct mbuf *nam,
+    struct mbuf *control)
 {
-	struct inpcb *inp;
 	struct ifqueue *inq;
-	struct mbuf *nam, *control;
 	struct sockaddr_in6 *sin6;
 	struct socket *so;
 	struct ifaddr *ifa;
-	int s, error = 0, p_hdrlen = 0, nxt = 0, off;
-	va_list ap;
+	int s, error = 0, p_hdrlen = 0, nxt = 0, off, dir;
 	struct ip6_hdr *ip6;
-	u_int16_t csum = 0;
-	size_t p_off = 0;
-
-	va_start(ap, m);
-	inp = va_arg(ap, struct inpcb *);
-	nam = va_arg(ap, struct mbuf *);
-	control = va_arg(ap, struct mbuf *);
-	va_end(ap);
 
 	m->m_pkthdr.rcvif = NULL;
 	m->m_nextpkt = NULL;
-	m->m_pkthdr.rdomain = inp->inp_rtableid;
+	m->m_pkthdr.ph_rtableid = inp->inp_rtableid;
 
 	if (control)
 		m_freem(control);
@@ -131,41 +122,35 @@ divert6_output(struct mbuf *m, ...)
 	off = ip6_lasthdr(m, 0, IPPROTO_IPV6, &nxt);
 	if (off < sizeof(struct ip6_hdr))
 		goto fail;
+
+	dir = (IN6_IS_ADDR_UNSPECIFIED(&sin6->sin6_addr) ? PF_OUT : PF_IN);
+
 	switch (nxt) {
 	case IPPROTO_TCP:
 		p_hdrlen = sizeof(struct tcphdr);
-		p_off = offsetof(struct tcphdr, th_sum);
+		m->m_pkthdr.csum_flags |= M_TCP_CSUM_OUT;
 		break;
 	case IPPROTO_UDP:
 		p_hdrlen = sizeof(struct udphdr);
-		p_off = offsetof(struct udphdr, uh_sum);
+		m->m_pkthdr.csum_flags |= M_UDP_CSUM_OUT;
 		break;
 	case IPPROTO_ICMPV6:
 		p_hdrlen = sizeof(struct icmp6_hdr);
-		p_off = offsetof(struct icmp6_hdr, icmp6_cksum);
+		m->m_pkthdr.csum_flags |= M_ICMP_CSUM_OUT;
 		break;
 	default:
 		/* nothing */
 		break;
 	}
-	if (p_hdrlen) {
-		if (m->m_pkthdr.len < off + p_hdrlen)
-			goto fail;
-
-		if ((error = m_copyback(m, off + p_off, sizeof(csum), &csum, M_NOWAIT)))
-			goto fail;
-		csum = in6_cksum(m, nxt, off, m->m_pkthdr.len - off);
-		if (nxt == IPPROTO_UDP && csum == 0)
-			csum = 0xffff;
-		if ((error = m_copyback(m, off + p_off, sizeof(csum), &csum, M_NOWAIT)))
-			goto fail;
-	}
+	if (p_hdrlen && m->m_pkthdr.len < off + p_hdrlen)
+		goto fail;
 
 	m->m_pkthdr.pf.flags |= PF_TAG_DIVERTED_PACKET;
 
-	if (!IN6_IS_ADDR_UNSPECIFIED(&sin6->sin6_addr)) {
+	if (dir == PF_IN) {
 		ip6addr.sin6_addr = sin6->sin6_addr;
-		ifa = ifa_ifwithaddr(sin6tosa(&ip6addr), m->m_pkthdr.rdomain);
+		ifa = ifa_ifwithaddr(sin6tosa(&ip6addr),
+		    m->m_pkthdr.ph_rtableid);
 		if (ifa == NULL) {
 			error = EADDRNOTAVAIL;
 			goto fail;
@@ -174,14 +159,20 @@ divert6_output(struct mbuf *m, ...)
 
 		inq = &ip6intrq;
 
+		/*
+		 * Recalculate the protocol checksum for the inbound packet
+		 * since the userspace application may have modified the packet
+		 * prior to reinjection.
+		 */
+		in6_proto_cksum_out(m, NULL);
+
 		s = splnet();
 		IF_INPUT_ENQUEUE(inq, m);
 		schednetisr(NETISR_IPV6);
 		splx(s);
 	} else {
 		error = ip6_output(m, NULL, &inp->inp_route6,
-		    ((so->so_options & SO_DONTROUTE) ? IP_ROUTETOIF : 0)
-		    | IP_ALLOWBROADCAST | IP_RAWOUTPUT, NULL, NULL, NULL);
+		    IP_ALLOWBROADCAST | IP_RAWOUTPUT, NULL, NULL, NULL);
 	}
 
 	div6stat.divs_opackets++;
@@ -194,12 +185,11 @@ fail:
 }
 
 int
-divert6_packet(struct mbuf *m, int dir)
+divert6_packet(struct mbuf *m, int dir, u_int16_t divert_port)
 {
 	struct inpcb *inp;
 	struct socket *sa = NULL;
 	struct sockaddr_in6 addr;
-	struct pf_divert *divert;
 
 	inp = NULL;
 	div6stat.divs_ipackets++;
@@ -210,15 +200,8 @@ divert6_packet(struct mbuf *m, int dir)
 		return (0);
 	}
 
-	divert = pf_find_divert(m);
-	if (divert == NULL) {
-		div6stat.divs_errors++;
-		m_freem(m);
-		return (0);
-	}
-
 	TAILQ_FOREACH(inp, &divb6table.inpt_queue, inp_queue) {
-		if (inp->inp_lport != divert->port)
+		if (inp->inp_lport != divert_port)
 			continue;
 		if (inp->inp_divertfl == 0)
 			break;
@@ -229,7 +212,7 @@ divert6_packet(struct mbuf *m, int dir)
 		break;
 	}
 
-	bzero(&addr, sizeof(addr));
+	memset(&addr, 0, sizeof(addr));
 	addr.sin6_family = AF_INET6;
 	addr.sin6_len = sizeof(addr);
 
@@ -245,9 +228,6 @@ divert6_packet(struct mbuf *m, int dir)
 			break;
 		}
 	}
-	/* force checksum calculation */
-	if (dir == PF_OUT)
-		in6_proto_cksum_out(m, NULL);
 
 	if (inp) {
 		sa = inp->inp_socket;
@@ -321,7 +301,7 @@ divert6_usrreq(struct socket *so, int req, struct mbuf *m, struct mbuf *addr,
 		break;
 
 	case PRU_SEND:
-		return (divert6_output(m, inp, addr, control));
+		return (divert6_output(inp, m, addr, control));
 
 	case PRU_ABORT:
 		soisdisconnected(so);

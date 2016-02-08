@@ -1,5 +1,8 @@
-dnl	$OpenBSD: contents,v 1.71 2014/02/28 21:37:59 miod Exp $
+dnl	$OpenBSD: contents,v 1.75 2014/08/06 02:34:23 doug Exp $
 TopPart
+
+OpenBSDminiroot
+			It can be copied to a small USB key to start the install.
 
 OpenBSDfloppy
 
@@ -25,6 +28,8 @@ OpenBSDrd
 
 OpenBSDinstalliso
 
+OpenBSDinstallfs
+
 OpenBSDcd
 
 	cdbr		First-stage CD bootstrap (boot sector), which loads
@@ -38,44 +43,26 @@ OpenBSDcd
 			This file is included in the cd{:--:}OSrev.iso image, and is
 			provided as a convenience, but will rarely be needed.
 
-	cdemu{:--:}OSrev.iso	Another bootable CD-ROM image, for older systems
-			where the BIOS only supports the ``large floppy
-			emulation'' mode for bootable CD-ROMs, and which
-			are therefore unable to boot cd{:--:}OSrev.iso.  This image
-			is provided as a convenience, but should rarely be
-			needed.
-
-Additionally, you may be interested in
-
-.../OSREV/tools/
-	miscellaneous MACHINE installation utilities like rawrite.exe,
-	ntrw.exe, gzip.exe, and pfdisk.exe; see installation section,
-	below.
-
-
 OpenBSDfloppydesc(three,Each,s)
-
-In addition, the "tools/" directory contains some utilities that might be
-useful for the installation.
 
 DistributionDescription(ten)
 
-OpenBSDbase(61478992,174978445)
+OpenBSDbase(58874912,167761058)
 
-OpenBSDcomp(49653647,149153420)
+OpenBSDcomp(43192962,129659113)
 
-OpenBSDetc(525953,1718668)
+OpenBSDetc(180670,626207)
 
-OpenBSDgame(2707188,6231863)
+OpenBSDgame(2713817,6242961)
 
-OpenBSDman(10073087,39147467)
+OpenBSDman(9186865,35917754)
 
-OpenBSDxbase(12866623,35014035)
+OpenBSDxbase(15169303,41512306)
 
-OpenBSDxetc(64910,272581)
+OpenBSDxetc(69072,286078)
 
-OpenBSDxfont(39930616,52169245)
+OpenBSDxfont(39930081,52169245)
 
-OpenBSDxserv(24099690,63698147)
+OpenBSDxserv(18926794,49747867)
 
-OpenBSDxshare(4404115,24364104)
+OpenBSDxshare(4556374,25735496)

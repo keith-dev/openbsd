@@ -1,4 +1,4 @@
-/*	$OpenBSD: agp_ali.c,v 1.12 2010/08/07 18:15:38 oga Exp $	*/
+/*	$OpenBSD: agp_ali.c,v 1.15 2014/05/27 12:40:00 kettenis Exp $	*/
 /*	$NetBSD: agp_ali.c,v 1.2 2001/09/15 00:25:00 thorpej Exp $	*/
 
 
@@ -31,13 +31,10 @@
  */
 
 #include <sys/param.h>
-#include <sys/kernel.h>
 #include <sys/malloc.h>
 #include <sys/systm.h>
-#include <sys/conf.h>
 #include <sys/device.h>
-#include <sys/lock.h>
-#include <sys/agpio.h>
+#include <sys/rwlock.h>
 
 #include <dev/pci/pcivar.h>
 #include <dev/pci/pcireg.h>
@@ -148,35 +145,6 @@ agp_ali_attach(struct device *parent, struct device *self, void *aux)
 	    asc->asc_apaddr, asc->asc_apsize, &asc->dev);
 	return;
 }
-
-#if 0
-int
-agp_ali_detach(struct agp_softc *sc)
-{
-	int error;
-	pcireg_t reg;
-	struct agp_ali_softc *asc = sc->sc_chipc;
-
-	error = agp_generic_detach(sc);
-	if (error)
-		return (error);
-
-	/* Disable the TLB.. */
-	reg = pci_conf_read(sc->sc_pc, sc->sc_pcitag, AGP_ALI_TLBCTRL);
-	reg &= ~0xff;
-	reg |= 0x90;
-	pci_conf_write(sc->sc_pc, sc->sc_pcitag, AGP_ALI_TLBCTRL, reg);
-
-	/* Put the aperture back the way it started. */
-	AGP_SET_APERTURE(sc, asc->initial_aperture);
-	reg = pci_conf_read(sc->sc_pc, sc->sc_pcitag, AGP_ALI_ATTBASE);
-	reg &= 0xff;
-	pci_conf_write(sc->sc_pc, sc->sc_pcitag, AGP_ALI_ATTBASE, reg);
-
-	agp_free_gatt(sc, asc->gatt);
-	return (0);
-}
-#endif
 
 int
 agp_ali_activate(struct device *arg, int act)

@@ -1,4 +1,4 @@
-/*	$OpenBSD: hfsc.c,v 1.8 2014/01/27 15:41:06 pelikan Exp $	*/
+/*	$OpenBSD: hfsc.c,v 1.11 2014/07/12 18:44:22 tedu Exp $	*/
 
 /*
  * Copyright (c) 2012-2013 Henning Brauer <henning@openbsd.org>
@@ -150,7 +150,7 @@ hfsc_grow_class_tbl(struct hfsc_if *hif, u_int howmany)
 	hif->hif_class_tbl = newtbl;
 	hif->hif_allocated = howmany;
 
-	free(old, M_DEVBUF);
+	free(old, M_DEVBUF, 0);
 }
 
 int
@@ -164,13 +164,13 @@ hfsc_attach(struct ifnet *ifp)
 	if (ifp->if_snd.ifq_hfsc != NULL)
 		return (0);
 
-	hif = malloc(sizeof(struct hfsc_if), M_DEVBUF, M_WAITOK|M_ZERO);
+	hif = malloc(sizeof(struct hfsc_if), M_DEVBUF, M_WAITOK | M_ZERO);
 	hif->hif_eligible = hfsc_ellist_alloc();
-	hif->hif_ifq = (struct ifqueue *)&ifp->if_snd; /* XXX cast temp */
-	ifp->if_snd.ifq_hfsc = hif;
-
 	hif->hif_class_tbl = malloc(tblsize, M_DEVBUF, M_WAITOK | M_ZERO);
 	hif->hif_allocated = HFSC_DEFAULT_CLASSES;
+
+	hif->hif_ifq = &ifp->if_snd;
+	ifp->if_snd.ifq_hfsc = hif;
 
 	timeout_set(&hif->hif_defer, hfsc_deferred, ifp);
 	/* XXX HRTIMER don't schedule it yet, only when some packets wait. */
@@ -188,8 +188,8 @@ hfsc_detach(struct ifnet *ifp)
 	ifp->if_snd.ifq_hfsc = NULL;
 
 	hfsc_ellist_destroy(hif->hif_eligible);
-	free(hif->hif_class_tbl, M_DEVBUF);
-	free(hif, M_DEVBUF);
+	free(hif->hif_class_tbl, M_DEVBUF, 0);
+	free(hif, M_DEVBUF, 0);
 
 	return (0);
 }
@@ -1007,7 +1007,7 @@ hfsc_ellist_alloc(void)
 void
 hfsc_ellist_destroy(hfsc_ellist_t *head)
 {
-	free(head, M_DEVBUF);
+	free(head, M_DEVBUF, 0);
 }
 
 void
@@ -1107,7 +1107,7 @@ hfsc_actlist_alloc(void)
 void
 hfsc_actlist_destroy(hfsc_actlist_t *head)
 {
-	free(head, M_DEVBUF);
+	free(head, M_DEVBUF, 0);
 }
 
 void

@@ -1,21 +1,44 @@
-#	$OpenBSD: Makefile,v 1.74 2014/01/29 06:18:35 djm Exp $
+#	$OpenBSD: Makefile,v 1.79 2014/06/24 01:13:22 djm Exp $
 
 .PATH:		${.CURDIR}/..
 .include "${.CURDIR}/../Makefile.inc"
 
 LIB=	ssh
-SRCS=	authfd.c authfile.c bufaux.c bufec.c bufbn.c buffer.c canohost.c \
-	channels.c cipher.c cipher-3des1.c cipher-bf1.c \
+
+# These are files intended for a standalone libopenssh in the future.
+LIB_SRCS= \
+	ssherr.c \
+	sshbuf.c \
+	sshbuf-getput-basic.c \
+	sshbuf-misc.c \
+	sshkey.c
+
+.if (${OPENSSL:L} == "yes")
+LIB_SRCS+=	sshbuf-getput-crypto.c digest-openssl.c
+.else
+LIB_SRCS+=	digest-libc.c
+.endif
+
+SRCS=	${LIB_SRCS} \
+	authfd.c authfile.c bufaux.c buffer.c canohost.c \
+	channels.c cipher.c \
 	cleanup.c compat.c compress.c crc32.c deattack.c fatal.c \
 	hostfile.c log.c match.c nchan.c packet.c readpass.c \
-	rsa.c ttymodes.c xmalloc.c atomicio.c \
+	ttymodes.c xmalloc.c atomicio.c \
 	key.c dispatch.c kex.c mac.c uidswap.c uuencode.c misc.c \
+	msg.c progressmeter.c dns.c \
+	monitor_fdpass.c addrmatch.c \
+	smult_curve25519_ref.c kexc25519.c kexc25519c.c \
+	chacha.c poly1305.c cipher-chachapoly.c ssh-ed25519.c hmac.c umac.c
+
+.if (${OPENSSL:L} == "yes")
+SRCS+=	bufec.c bufbn.c cipher-3des1.c cipher-bf1.c rsa.c \
 	ssh-dss.c ssh-rsa.c ssh-ecdsa.c dh.c kexdh.c kexgex.c kexecdh.c \
-	kexdhc.c kexgexc.c kexecdhc.c msg.c progressmeter.c dns.c \
-	monitor_fdpass.c umac.c addrmatch.c ssh-pkcs11.c \
-	krl.c smult_curve25519_ref.c kexc25519.c kexc25519c.c \
-	chacha.c poly1305.c cipher-chachapoly.c ssh-ed25519.c \
-	digest-openssl.c hmac.c
+	kexdhc.c kexgexc.c kexecdhc.c ssh-pkcs11.c \
+	krl.c
+.else
+SRCS+=	rijndael.c cipher-aesctr.c
+.endif
 
 # ed25519, from supercop
 SRCS+=	sc25519.c ge25519.c fe25519.c ed25519.c verify.c hash.c blocks.c
@@ -40,11 +63,11 @@ install:
 
 .include <bsd.own.mk>
 
-.if (${KERBEROS5:L} == "yes")
-CFLAGS+= -DKRB5 -I${DESTDIR}/usr/include/kerberosV
+# .if (${KERBEROS5:L} == "yes")
+# CFLAGS+= -DKRB5 -I${DESTDIR}/usr/include/kerberosV
 
-SRCS+= gss-genr.c
-CFLAGS+= -DGSSAPI
-.endif # KERBEROS5
+# SRCS+= gss-genr.c
+# CFLAGS+= -DGSSAPI
+# .endif # KERBEROS5
 
 .include <bsd.lib.mk>

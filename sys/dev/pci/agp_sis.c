@@ -1,4 +1,4 @@
-/*	$OpenBSD: agp_sis.c,v 1.15 2010/08/07 18:09:09 oga Exp $	*/
+/*	$OpenBSD: agp_sis.c,v 1.18 2014/05/27 12:40:00 kettenis Exp $	*/
 /*	$NetBSD: agp_sis.c,v 1.2 2001/09/15 00:25:00 thorpej Exp $	*/
 
 /*-
@@ -32,11 +32,8 @@
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/malloc.h>
-#include <sys/kernel.h>
-#include <sys/lock.h>
-#include <sys/conf.h>
 #include <sys/device.h>
-#include <sys/agpio.h>
+#include <sys/rwlock.h>
 
 #include <dev/pci/pcivar.h>
 #include <dev/pci/pcireg.h>
@@ -148,31 +145,6 @@ agp_sis_attach(struct device *parent, struct device *self, void *aux)
 	    ssc->ssc_apaddr, ssc->ssc_apsize, &ssc->dev);
 	return;
 }
-
-#if 0
-int
-agp_sis_detach(struct agp_softc *sc)
-{
-	struct agp_sis_softc *ssc = sc->sc_chipc;
-	pcireg_t reg;
-	int error;
-
-	error = agp_generic_detach(sc);
-	if (error)
-		return (error);
-
-	reg = pci_conf_read(sc->sc_pc, sc->sc_pcitag, AGP_SIS_WINCTRL);
-	reg &= ~3;
-	reg &= 0x00ffffff;
-	pci_conf_write(sc->sc_pc, sc->sc_pcitag, AGP_SIS_WINCTRL, reg);
-
-	/* Put the aperture back the way it started. */
-	AGP_SET_APERTURE(sc, ssc->initial_aperture);
-
-	agp_free_gatt(sc, ssc->gatt);
-	return (0);
-}
-#endif
 
 int
 agp_sis_activate(struct device *arg, int act)

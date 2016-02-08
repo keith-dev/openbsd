@@ -185,11 +185,11 @@ ngx_module_t  ngx_core_module = {
 
 
 ngx_uint_t          ngx_max_module;
+u_char		   *ngx_prefix;
 
 static ngx_uint_t   ngx_show_help;
 static ngx_uint_t   ngx_show_version;
 static ngx_uint_t   ngx_show_configure;
-static u_char      *ngx_prefix;
 static u_char      *ngx_conf_file;
 static u_char      *ngx_conf_params;
 static char        *ngx_signal;
@@ -389,13 +389,8 @@ main(int argc, char *const *argv)
         return 1;
     }
 
-    if (cycle->log->file->fd != ngx_stderr) {
-
-        if (ngx_set_stderr(cycle->log->file->fd) == NGX_FILE_ERROR) {
-            ngx_log_error(NGX_LOG_EMERG, cycle->log, ngx_errno,
-                          ngx_set_stderr_n " failed");
-            return 1;
-        }
+    if (ngx_log_redirect_stderr(cycle) != NGX_OK) {
+        return 1;
     }
 
     if (log->file->fd != ngx_stderr) {

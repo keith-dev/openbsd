@@ -1,4 +1,4 @@
-/*	$OpenBSD: snmpd.c,v 1.18 2013/10/17 08:42:44 reyk Exp $	*/
+/*	$OpenBSD: snmpd.c,v 1.23 2014/05/23 18:37:20 benno Exp $	*/
 
 /*
  * Copyright (c) 2007, 2008, 2012 Reyk Floeter <reyk@openbsd.org>
@@ -51,7 +51,9 @@ int	 check_child(pid_t, const char *);
 struct snmpd	*snmpd_env;
 
 static struct privsep_proc procs[] = {
-	{ "snmpe", PROC_SNMPE, snmpd_dispatch_snmpe, snmpe, snmpe_shutdown }
+	{ "snmpe", PROC_SNMPE, snmpd_dispatch_snmpe, snmpe, snmpe_shutdown },
+	{ "traphandler", PROC_TRAP, snmpd_dispatch_traphandler, traphandler,
+	    traphandler_shutdown }
 };
 
 void
@@ -59,7 +61,9 @@ snmpd_sig_handler(int sig, short event, void *arg)
 {
 	struct privsep	*ps = arg;
 	struct snmpd	*env = ps->ps_env;
-	int		 die = 0, id;
+	int		 die = 0, status, fail, id;
+	pid_t		pid;
+	char		*cause;
 
 	switch (sig) {
 	case SIGTERM:
@@ -67,11 +71,39 @@ snmpd_sig_handler(int sig, short event, void *arg)
 		die = 1;
 		/* FALLTHROUGH */
 	case SIGCHLD:
-		for (id = 0; id < PROC_MAX; id++) {
-			if (check_child(ps->ps_pid[id],
-			    ps->ps_title[id]))
-				die  = 1;
-		}
+		do {
+			pid = waitpid(WAIT_ANY, &status, WNOHANG);
+			if (pid <= 0)
+				continue;
+
+			fail = 0;
+			if (WIFSIGNALED(status)) {
+				fail = 1;
+				asprintf(&cause, "terminated; signal %d",
+				    WTERMSIG(status));
+			} else if (WIFEXITED(status)) {
+				if (WEXITSTATUS(status) != 0) {
+					fail = 1;
+					asprintf(&cause, "exited abnormally");
+				} else
+					asprintf(&cause, "exited okay");
+			} else
+				fatalx("unexpected cause of SIGCHLD");
+			
+			for (id = 0; id < PROC_MAX; id++) {
+				if (pid == ps->ps_pid[id] &&
+				    check_child(ps->ps_pid[id],
+				    ps->ps_title[id])) {
+					die  = 1;
+					if (fail)
+						log_warnx("lost child: %s %s",
+						    ps->ps_title[id], cause);
+					break;
+				}
+			}
+			free(cause);
+		} while (pid > 0 || (pid == -1 && errno == EINTR));
+
 		if (die)
 			snmpd_shutdown(env);
 		break;
@@ -83,7 +115,6 @@ snmpd_sig_handler(int sig, short event, void *arg)
 	}
 }
 
-/* __dead is for lint */
 __dead void
 usage(void)
 {
@@ -171,6 +202,7 @@ main(int argc, char *argv[])
 	pf_init();
 	snmpd_generate_engineid(env);
 
+	ps->ps_ninstances = 1;
 	proc_init(ps, procs, nitems(procs));
 
 	setproctitle("parent");
@@ -190,7 +222,7 @@ main(int argc, char *argv[])
 	signal_add(&ps->ps_evsighup, NULL);
 	signal_add(&ps->ps_evsigpipe, NULL);
 
-	proc_config(ps, procs, nitems(procs));
+	proc_listen(ps, procs, nitems(procs));
 
 	event_dispatch();
 

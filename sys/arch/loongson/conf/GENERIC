@@ -1,4 +1,4 @@
-#	$OpenBSD: GENERIC,v 1.41 2013/11/15 19:42:20 sasano Exp $
+#	$OpenBSD: GENERIC,v 1.44 2014/07/11 21:58:09 tedu Exp $
 #
 # For further information on compiling OpenBSD kernels, see the config(8)
 # man page.
@@ -130,9 +130,11 @@ wsmouse*	at ums? mux 0
 ukbd*		at uhidev?	# USB keyboard
 wskbd*		at ukbd? mux 1
 uhid*		at uhidev?	# USB generic HID support
+upd*		at uhidev?	# USB Power Devices sensors
 atu*		at uhub?	# Atmel AT76c50x based 802.11b
 aue*		at uhub?	# ADMtek AN986 Pegasus Ethernet  
 axe*		at uhub?	# ASIX Electronics AX88172 USB Ethernet
+axen*		at uhub?	# ASIX Electronics AX88179 USB Ethernet
 cdce*		at uhub?	# CDC Ethernet
 urndis*		at uhub?	# Remote NDIS Ethernet
 cue*		at uhub?	# CATC USB-EL1201A based Ethernet
@@ -174,17 +176,6 @@ video*		at uvideo?
 
 udl*		at uhub?
 wsdisplay*	at udl?
-
-# Bluetooth controllers
-#ubt*	at uhub? disable	# USB Bluetooth
-#bthub*	at ubt?
-#bthidev*	at bthub?		# Bluetooth HID support
-#btkbd*	at bthidev?
-#btms*	at bthidev?
-#wskbd*	at btkbd? mux 1
-#wsmouse*	at btms? mux 0
-#btsco*	at bthub?		# Bluetooth audio support
-#audio*	at btsco?
 
 # NICs
 ral*		at pci?

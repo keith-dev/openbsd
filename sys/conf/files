@@ -1,4 +1,4 @@
-#	$OpenBSD: files,v 1.566 2014/02/10 22:41:27 jmatthew Exp $
+#	$OpenBSD: files,v 1.575 2014/07/13 15:32:28 miod Exp $
 #	$NetBSD: files,v 1.87 1996/05/19 17:17:50 jonathan Exp $
 
 #	@(#)files.newconf	7.5 (Berkeley) 5/10/93
@@ -67,7 +67,6 @@ define	systrace
 define	ether
 define	sppp
 define	wlan
-define	bluetooth
 
 # "Chipset" attributes.  These are the machine-independent portions
 # of device drivers.
@@ -195,6 +194,10 @@ file	dev/ic/isp.c			isp
 file	dev/ic/isp_openbsd.c		isp
 file	dev/ic/isp_library.c		isp
 
+# QLogic ISP SCSI Controllers
+device	qlw: scsi
+file	dev/ic/qlw.c			qlw
+
 # QLogic ISP23xx FC Controllers
 device  qla: scsi
 file    dev/ic/qla.c                    qla
@@ -207,6 +210,10 @@ file	dev/microcode/isp/isp_fw2300.c	qla | isp_pci
 # Advanced Host Controller Interface for Serial ATA
 device	ahci: scsi, atascsi
 file	dev/ic/ahci.c			ahci | ahci_pci | ahci_jmb needs-flag
+
+# NVM Express Controller
+device	nvme: scsi
+file	dev/ic/nvme.c			nvme
 
 # LSI Logic Fusion-MPT Message Passing Interface
 device	mpi: scsi
@@ -246,8 +253,8 @@ device	oosiop: scsi
 file	dev/ic/oosiop.c			oosiop
 
 # Western Digital WD33C93 SCSI controllers
-define	wd33c93
-file	dev/ic/wd33c93.c		wd33c93
+define	wd33c93ctrl
+file	dev/ic/wd33c93.c		wd33c93ctrl
 
 # 3Com Etherlink-III Ethernet controller
 device	ep: ether, ifnet, ifmedia, mii
@@ -358,8 +365,8 @@ file	dev/ic/lpt.c			lpt & (lpt_isa | lpt_localbus |
 
 # STI (hp graphics)
 device	sti: wsemuldisplaydev
-file	dev/ic/sti.c			sti & (sti_dio | sti_gedoens |
-					       sti_pci | sti_sgc) needs-flag
+file	dev/ic/sti.c			sti & (sti_gedoens |
+					       sti_pci) needs-flag
 
 # Initio ULTRA WIDE/ULTRA2 WIDE SCSI Controllers
 device	iha: scsi
@@ -459,6 +466,10 @@ file	dev/usb/ohci.c			ohci	needs-flag
 # EHCI USB controller
 device	ehci: usbus
 file	dev/usb/ehci.c			ehci	needs-flag
+
+# XHCI USB controller
+device	xhci: usbus
+file	dev/usb/xhci.c			xhci	needs-flag
 
 # SDHC SD/MMC controller
 device	sdhc: sdmmcbus
@@ -597,12 +608,6 @@ file 	net/if_pppoe.c			pppoe	needs-flag
 # XXX machine-independent SCSI files should live somewhere here, maybe
 
 # kernel sources
-file altq/altq_subr.c			altq
-file altq/altq_red.c			altq
-file altq/altq_cbq.c			altq
-file altq/altq_rmclass.c		altq
-file altq/altq_hfsc.c			altq
-file altq/altq_priq.c			altq
 file ddb/db_access.c			ddb | kgdb
 file ddb/db_break.c			ddb
 file ddb/db_command.c			ddb
@@ -688,6 +693,7 @@ file kern/kern_synch.c
 file kern/kern_tc.c
 file kern/kern_time.c
 file kern/kern_timeout.c
+file kern/kern_uuid.c			gpt
 file kern/kern_watchdog.c		!small_kernel
 file kern/kern_workq.c
 file kern/kern_task.c
@@ -878,25 +884,6 @@ file crypto/hmac.c			wlan | (softraid & crypto)
 file crypto/gmac.c			(inet & ipsec) | crypto
 file crypto/key_wrap.c			wlan
 file crypto/idgen.c			inet6 | nfsclient | nfsserver
-file netbt/bt_input.c			bluetooth		needs-flag
-file netbt/bt_proto.c			bluetooth
-file netbt/hci_event.c			bluetooth
-file netbt/hci_ioctl.c			bluetooth
-file netbt/hci_link.c			bluetooth
-file netbt/hci_misc.c			bluetooth
-file netbt/hci_socket.c			bluetooth
-file netbt/hci_unit.c			bluetooth
-file netbt/l2cap_lower.c		bluetooth
-file netbt/l2cap_misc.c			bluetooth
-file netbt/l2cap_signal.c		bluetooth
-file netbt/l2cap_socket.c		bluetooth
-file netbt/l2cap_upper.c		bluetooth
-file netbt/rfcomm_dlc.c			bluetooth
-file netbt/rfcomm_session.c		bluetooth
-file netbt/rfcomm_socket.c		bluetooth
-file netbt/rfcomm_upper.c		bluetooth
-file netbt/sco_socket.c			bluetooth
-file netbt/sco_upper.c			bluetooth
 file netmpls/mpls_input.c		mpls
 file netmpls/mpls_output.c		mpls
 file netmpls/mpls_proto.c		mpls
@@ -940,6 +927,7 @@ file ufs/ext2fs/ext2fs_alloc.c		ext2fs
 file ufs/ext2fs/ext2fs_balloc.c		ext2fs
 file ufs/ext2fs/ext2fs_bmap.c		ext2fs
 file ufs/ext2fs/ext2fs_bswap.c		ext2fs
+file ufs/ext2fs/ext2fs_extents.c	ext2fs
 file ufs/ext2fs/ext2fs_inode.c		ext2fs
 file ufs/ext2fs/ext2fs_lookup.c		ext2fs
 file ufs/ext2fs/ext2fs_readwrite.c	ext2fs
@@ -1055,7 +1043,7 @@ file lib/libkern/arch/${MACHINE_ARCH}/htons.S | lib/libkern/htons.c
 file lib/libkern/arch/${MACHINE_ARCH}/strncasecmp.S | lib/libkern/strncasecmp.c
 
 file lib/libz/adler32.c			ppp_deflate | ipsec | crypto | bios
-file lib/libz/crc32.c			ppp_deflate | ipsec | crypto
+file lib/libz/crc32.c			ppp_deflate | ipsec | crypto | gpt
 file lib/libz/infback.c			ppp_deflate | ipsec | crypto
 file lib/libz/inffast.c			ppp_deflate | ipsec | crypto
 file lib/libz/inflate.c			ppp_deflate | ipsec | crypto

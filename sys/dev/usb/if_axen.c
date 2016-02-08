@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_axen.c,v 1.5 2013/11/20 08:53:27 mpi Exp $	*/
+/*	$OpenBSD: if_axen.c,v 1.8 2014/07/13 15:52:49 mpi Exp $	*/
 
 /*
  * Copyright (c) 2013 Yojiro UO <yuo@openbsd.org>
@@ -43,12 +43,8 @@
 #include <net/bpf.h>
 #endif
 
-#ifdef INET
 #include <netinet/in.h>
-#include <netinet/in_systm.h>
-#include <netinet/ip.h>
 #include <netinet/if_ether.h>
-#endif
 
 #include <dev/mii/mii.h>
 #include <dev/mii/miivar.h>
@@ -79,7 +75,11 @@ const struct axen_type axen_devs[] = {
 #if 0 /* not tested */
 	{ { USB_VENDOR_ASIX, USB_PRODUCT_ASIX_AX88178A}, AX178A },
 #endif
-	{ { USB_VENDOR_ASIX, USB_PRODUCT_ASIX_AX88179}, AX179 }
+	{ { USB_VENDOR_ASIX, USB_PRODUCT_ASIX_AX88179}, AX179 },
+	{ { USB_VENDOR_DLINK, USB_PRODUCT_DLINK_DUB1312}, AX179 },
+	{ { USB_VENDOR_LENOVO, USB_PRODUCT_LENOVO_AX88179}, AX179 },
+	{ { USB_VENDOR_SAMSUNG2, USB_PRODUCT_SAMSUNG2_AX88179}, AX179 },
+	{ { USB_VENDOR_SITECOMEU, USB_PRODUCT_SITECOMEU_LN032}, AX179 }
 };
 
 #define axen_lookup(v, p) ((struct axen_type *)usb_lookup(axen_devs, v, p))
@@ -87,18 +87,13 @@ const struct axen_type axen_devs[] = {
 int	axen_match(struct device *, void *, void *);
 void	axen_attach(struct device *, struct device *, void *);
 int	axen_detach(struct device *, int);
-int	axen_activate(struct device *, int);
 
 struct cfdriver axen_cd = {
 	NULL, "axen", DV_IFNET
 };
 
 const struct cfattach axen_ca = {
-	sizeof(struct axen_softc),
-	axen_match,
-	axen_attach,
-	axen_detach,
-	axen_activate,
+	sizeof(struct axen_softc), axen_match, axen_attach, axen_detach
 };
 
 int	axen_tx_list_init(struct axen_softc *);
@@ -855,22 +850,6 @@ axen_detach(struct device *self, int flags)
 		usb_detach_wait(&sc->axen_dev);
 	}
 	splx(s);
-
-	return 0;
-}
-
-int
-axen_activate(struct device *self, int act)
-{
-	struct axen_softc *sc = (struct axen_softc *)self;
-
-	DPRINTFN(2,("%s: %s: enter\n", sc->axen_dev.dv_xname, __func__));
-
-	switch (act) {
-	case DVACT_DEACTIVATE:
-		usbd_deactivate(sc->axen_udev);
-		break;
-	}
 
 	return 0;
 }

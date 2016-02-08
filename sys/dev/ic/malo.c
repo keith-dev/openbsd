@@ -1,4 +1,4 @@
-/*	$OpenBSD: malo.c,v 1.97 2013/12/06 21:03:03 deraadt Exp $ */
+/*	$OpenBSD: malo.c,v 1.101 2014/07/22 13:12:12 mpi Exp $ */
 
 /*
  * Copyright (c) 2006 Claudio Jeker <claudio@openbsd.org>
@@ -43,7 +43,6 @@
 #endif
 
 #include <netinet/in.h>
-#include <netinet/in_systm.h>
 #include <netinet/if_ether.h>
 
 #include <net80211/ieee80211_var.h>
@@ -575,8 +574,8 @@ malo_alloc_rx_ring(struct malo_softc *sc, struct malo_rx_ring *ring, int count)
 
 	ring->physaddr = ring->map->dm_segs->ds_addr;
 
-	ring->data = malloc(count * sizeof (struct malo_rx_data), M_DEVBUF,
-	    M_NOWAIT);
+	ring->data = mallocarray(count, sizeof (struct malo_rx_data),
+	    M_DEVBUF, M_NOWAIT);
 	if (ring->data == NULL) {
 		printf("%s: could not allocate soft data\n",
 		    sc->sc_dev.dv_xname);
@@ -683,7 +682,7 @@ malo_free_rx_ring(struct malo_softc *sc, struct malo_rx_ring *ring)
 			if (data->map != NULL)
 				bus_dmamap_destroy(sc->sc_dmat, data->map);
 		}
-		free(ring->data, M_DEVBUF);
+		free(ring->data, M_DEVBUF, 0);
 	}
 }
 
@@ -734,8 +733,8 @@ malo_alloc_tx_ring(struct malo_softc *sc, struct malo_tx_ring *ring,
 
 	ring->physaddr = ring->map->dm_segs->ds_addr;
 
-	ring->data = malloc(count * sizeof(struct malo_tx_data), M_DEVBUF,
-	    M_NOWAIT);
+	ring->data = mallocarray(count, sizeof(struct malo_tx_data),
+	    M_DEVBUF, M_NOWAIT);
 	if (ring->data == NULL) {
 		printf("%s: could not allocate soft data\n",
 		    sc->sc_dev.dv_xname);
@@ -834,7 +833,7 @@ malo_free_tx_ring(struct malo_softc *sc, struct malo_tx_ring *ring)
 			if (data->map != NULL)
 				bus_dmamap_destroy(sc->sc_dmat, data->map);
 		}
-		free(ring->data, M_DEVBUF);
+		free(ring->data, M_DEVBUF, 0);
 	}
 }
 
@@ -1026,8 +1025,7 @@ malo_start(struct ifnet *ifp)
 			}
 			IF_DEQUEUE(&ic->ic_mgtq, m0);
 
-			ni = (struct ieee80211_node *)m0->m_pkthdr.rcvif;
-			m0->m_pkthdr.rcvif = NULL;
+			ni = m0->m_pkthdr.ph_cookie;
 #if NBPFILTER > 0
 			if (ic->ic_rawbpf != NULL)
 				bpf_mtap(ic->ic_rawbpf, m0, BPF_DIRECTION_OUT);
@@ -1804,10 +1802,10 @@ malo_load_bootimg(struct malo_softc *sc)
 	if (i == 10) {
 		printf("%s: timeout at boot firmware load!\n",
 		    sc->sc_dev.dv_xname);
-		free(ucode, M_DEVBUF);
+		free(ucode, M_DEVBUF, 0);
 		return (ETIMEDOUT);
 	}
-	free(ucode, M_DEVBUF);
+	free(ucode, M_DEVBUF, 0);
 
 	/* tell the card we're done and... */
 	malo_mem_write2(sc, 0xbef8, 0x001);
@@ -1859,7 +1857,7 @@ malo_load_firmware(struct malo_softc *sc)
 		    BUS_DMASYNC_POSTWRITE);
 		delay(500);
 	}
-	free(ucode, M_DEVBUF);
+	free(ucode, M_DEVBUF, 0);
 
 	DPRINTF(1, "%s: firmware upload finished\n", sc->sc_dev.dv_xname);
 

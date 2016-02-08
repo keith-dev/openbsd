@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.16 2013/12/28 02:51:07 deraadt Exp $
+#	$OpenBSD: Makefile,v 1.19 2014/07/15 22:14:37 deraadt Exp $
 
 MAN=	pxeboot.8
 
@@ -12,6 +12,7 @@ LD?=	ld
 SIZE?=	size
 LDFLAGS+=-nostdlib -Bstatic -Ttext $(LINKADDR) -N -x -nopie
 INSTALL_STRIP=
+BINMODE=644
 
 CLEANFILES+=	crt0.o ${PROG}.whole
 
@@ -27,9 +28,9 @@ SRCS+=	softraid.c
 SRCS+=	boot.c cmd.c vars.c bootarg.c
 
 .PATH:	${S}/lib/libsa
-SRCS+=	alloc.c ctime.c exit.c globals.c memcmp.c memcpy.c memset.c printf.c \
-	snprintf.c strcmp.c strerror.c strlen.c strncmp.c strncpy.c strtol.c \
-	strtoll.c
+SRCS+=	alloc.c ctime.c exit.c getchar.c globals.c memcmp.c memcpy.c memset.c \
+	printf.c putchar.c snprintf.c strcmp.c strerror.c strlen.c strncmp.c \
+	strncpy.c strtol.c strtoll.c
 SRCS+=	close.c closeall.c cons.c cread.c dev.c disklabel.c dkcksum.c fstat.c \
 	lseek.c read.c readdir.c stat.c
 SRCS+=	elf32.c elf64.c loadfile.c

@@ -1,4 +1,4 @@
-/*	$OpenBSD: systrace.c,v 1.63 2012/04/22 05:43:14 guenther Exp $	*/
+/*	$OpenBSD: systrace.c,v 1.71 2014/07/13 23:10:23 deraadt Exp $	*/
 /*
  * Copyright 2002 Niels Provos <provos@citi.umich.edu>
  * All rights reserved.
@@ -59,8 +59,6 @@ int	systraceopen(dev_t, int, int, struct proc *);
 int	systraceclose(dev_t, int, int, struct proc *);
 int	systraceioctl(dev_t, u_long, caddr_t, int, struct proc *);
 
-uid_t	systrace_seteuid(struct proc *,  uid_t);
-gid_t	systrace_setegid(struct proc *,  gid_t);
 int	systracef_read(struct file *, off_t *, struct uio *, struct ucred *);
 int	systracef_write(struct file *, off_t *, struct uio *, struct ucred *);
 int	systracef_ioctl(struct file *, u_long, caddr_t, struct proc *p);
@@ -117,9 +115,7 @@ struct str_process {
 	u_int16_t seqnr;	/* expected reply sequence number */
 
 	uid_t seteuid;
-	uid_t saveuid;
 	gid_t setegid;
-	gid_t savegid;
 
 	int isscript;
 	char scriptname[MAXPATHLEN];
@@ -159,6 +155,7 @@ int	systrace_policy(struct fsystrace *, struct systrace_policy *);
 int	systrace_preprepl(struct str_process *, struct systrace_replace *);
 int	systrace_replace(struct str_process *, size_t, register_t []);
 int	systrace_getcwd(struct fsystrace *, struct str_process *, int);
+int	systrace_restorecwd(struct fsystrace *, struct proc *);
 int	systrace_fname(struct str_process *, caddr_t, size_t);
 void	systrace_replacefree(struct str_process *);
 
@@ -264,7 +261,6 @@ systracef_ioctl(struct file *fp, u_long cmd, caddr_t data, struct proc *p)
 {
 	int ret = 0;
 	struct fsystrace *fst = (struct fsystrace *)fp->f_data;
-	struct filedesc *fdp;
 	struct str_process *strp;
 	pid_t pid = 0;
 	int atfd = -1;
@@ -371,23 +367,7 @@ systracef_ioctl(struct file *fp, u_long cmd, caddr_t data, struct proc *p)
 		ret = systrace_preprepl(strp, (struct systrace_replace *)data);
 		break;
 	case STRIOCRESCWD:
-		if (!fst->fd_pid) {
-			ret = EINVAL;
-			break;
-		}
-		fdp = p->p_fd;
-
-		/* Release cwd from other process */
-		if (fdp->fd_cdir)
-			vrele(fdp->fd_cdir);
-		if (fdp->fd_rdir)
-			vrele(fdp->fd_rdir);
-		/* This restores the cwd we had before */
-		fdp->fd_cdir = fst->fd_cdir;
-		fdp->fd_rdir = fst->fd_rdir;
-		/* Note that we are normal again */
-		fst->fd_pid = 0;
-		fst->fd_cdir = fst->fd_rdir = NULL;
+		ret = systrace_restorecwd(fst, p);
 		break;
 	case STRIOCGETCWD:
 		ret = systrace_getcwd(fst, strp, atfd);
@@ -478,7 +458,7 @@ systracef_close(struct file *fp, struct proc *p)
 		vrele(fst->fd_rdir);
 	rw_exit_write(&fst->lock);
 
-	free(fp->f_data, M_XDATA);
+	free(fp->f_data, M_XDATA, 0);
 	fp->f_data = NULL;
 
 	return (0);
@@ -524,14 +504,14 @@ systraceioctl(dev_t dev, u_long cmd, caddr_t data, int flag, struct proc *p)
 
 		if (suser(p, 0) == 0)
 			fst->issuser = 1;
-		fst->p_ruid = p->p_cred->p_ruid;
-		fst->p_rgid = p->p_cred->p_rgid;
+		fst->p_ruid = p->p_ucred->cr_ruid;
+		fst->p_rgid = p->p_ucred->cr_rgid;
 
 		fdplock(p->p_fd);
 		error = falloc(p, &f, &fd);
 		fdpunlock(p->p_fd);
 		if (error) {
-			free(fst, M_XDATA);
+			free(fst, M_XDATA, 0);
 			return (error);
 		}
 		f->f_flag = FREAD | FWRITE;
@@ -660,15 +640,15 @@ systrace_fork(struct proc *oldproc, struct proc *p, struct str_process *newstrp)
 int
 systrace_redirect(int code, struct proc *p, void *v, register_t *retval)
 {
+	struct process *pr = p->p_p;
 	struct sysent *callp;
 	struct str_process *strp;
 	struct str_policy *strpolicy;
 	struct fsystrace *fst = NULL;
 	struct emul *oldemul;
-	struct pcred *pc;
-	uid_t olduid;
-	gid_t oldgid;
 	int policy, error = 0, report = 0, maycontrol = 0, issuser = 0;
+	uid_t old_ruid = p->p_ucred->cr_ruid;
+	gid_t old_rgid = p->p_ucred->cr_rgid;
 
 	systrace_lock();
 	strp = p->p_systrace;
@@ -677,7 +657,7 @@ systrace_redirect(int code, struct proc *p, void *v, register_t *retval)
 		return (EINVAL);
 	}
 
-	if (code < 0 || code >= p->p_emul->e_nsysent) {
+	if (code < 0 || code >= pr->ps_emul->e_nsysent) {
 		systrace_unlock();
 		return (EINVAL);
 	}
@@ -699,9 +679,9 @@ systrace_redirect(int code, struct proc *p, void *v, register_t *retval)
 	if (fst->issuser) {
 		maycontrol = 1;
 		issuser = 1;
-	} else if (!ISSET(p->p_p->ps_flags, PS_SUGID | PS_SUGIDEXEC)) {
-		maycontrol = fst->p_ruid == p->p_cred->p_ruid &&
-		    fst->p_rgid == p->p_cred->p_rgid;
+	} else if (!ISSET(pr->ps_flags, PS_SUGID | PS_SUGIDEXEC)) {
+		maycontrol = fst->p_ruid == old_ruid &&
+		    fst->p_rgid == old_rgid;
 	}
 
 	if (!maycontrol) {
@@ -718,7 +698,7 @@ systrace_redirect(int code, struct proc *p, void *v, register_t *retval)
 		}
 	}
 
-	callp = p->p_emul->e_sysent + code;
+	callp = pr->ps_emul->e_sysent + code;
 
 	/* Fast-path */
 	if (policy != SYSTR_POLICY_ASK) {
@@ -734,7 +714,7 @@ systrace_redirect(int code, struct proc *p, void *v, register_t *retval)
 		if (policy == SYSTR_POLICY_KILL) {
 			error = EPERM;
 			DPRINTF(("systrace: pid %u killed on syscall %d\n",
-			    p->p_pid, code));
+			    pr->ps_pid, code));
 			psignal(p, SIGKILL);
 		} else if (policy == SYSTR_POLICY_PERMIT)
 			error = (*callp->sy_call)(p, v, retval);
@@ -747,7 +727,7 @@ systrace_redirect(int code, struct proc *p, void *v, register_t *retval)
 	 * base; i.e. that stackgap_init() is idempotent.
 	 */
 	systrace_inject(strp, 0 /* Just reset internal state */);
-	strp->sg = stackgap_init(p->p_emul);
+	strp->sg = stackgap_init(p);
 
 	/* Puts the current process to sleep, return unlocked */
 	error = systrace_msg_ask(fst, strp, code, callp->sy_argsize, v);
@@ -785,23 +765,38 @@ systrace_redirect(int code, struct proc *p, void *v, register_t *retval)
 	if (error)
 		goto out_unlock;
 
-	oldemul = p->p_emul;
-	pc = p->p_cred;
-	olduid = pc->p_ruid;
-	oldgid = pc->p_rgid;
+	oldemul = pr->ps_emul;
 		
 	/* Elevate privileges as desired */
-	if (issuser) {
-		if (ISSET(strp->flags, STR_PROC_SETEUID))
-			strp->saveuid = systrace_seteuid(p, strp->seteuid);
-		if (ISSET(strp->flags, STR_PROC_SETEGID))
-			strp->savegid = systrace_setegid(p, strp->setegid);
-	} else
-		CLR(strp->flags, STR_PROC_SETEUID|STR_PROC_SETEGID);
+	if (issuser && ISSET(strp->flags, STR_PROC_SETEUID|STR_PROC_SETEGID)) {
+		struct ucred *uc, *newcred;
+
+		uc = p->p_ucred;
+		newcred = NULL;
+		if (ISSET(strp->flags, STR_PROC_SETEUID) &&
+		    uc->cr_uid != strp->seteuid) {
+			newcred = crdup(uc);
+			newcred->cr_uid = strp->seteuid;
+		}
+		if (ISSET(strp->flags, STR_PROC_SETEGID) &&
+		    uc->cr_gid != strp->setegid) {
+			if (newcred == NULL)
+				newcred = crdup(uc);
+			newcred->cr_gid = strp->setegid;
+		}
+		if (newcred != NULL) {
+			p->p_ucred = newcred;
+			crfree(uc);
+			atomic_setbits_int(&pr->ps_flags, PS_SUGID);
+		}
+	}
 
 	rw_exit_write(&fst->lock);
 				
 	error = (*callp->sy_call)(p, v, retval);
+
+	/* reset the credentials on the thread */
+	refreshcreds(p);
 
 	/* Return to old privileges */
 	systrace_lock();
@@ -810,22 +805,9 @@ systrace_redirect(int code, struct proc *p, void *v, register_t *retval)
 		return (error);
 	}
 
-	if (issuser) {
-		if (ISSET(strp->flags, STR_PROC_SETEUID)) {
-			if (pc->pc_ucred->cr_uid == strp->seteuid)
-				systrace_seteuid(p, strp->saveuid);
-			CLR(strp->flags, STR_PROC_SETEUID);
-		}
-		if (ISSET(strp->flags, STR_PROC_SETEGID)) {
-			if (pc->pc_ucred->cr_gid == strp->setegid)
-				systrace_setegid(p, strp->savegid);
-			CLR(strp->flags, STR_PROC_SETEGID);
-		}
-	}
-
 	systrace_replacefree(strp);
 
-	if (ISSET(p->p_p->ps_flags, PS_SUGID | PS_SUGIDEXEC)) {
+	if (ISSET(pr->ps_flags, PS_SUGID | PS_SUGIDEXEC)) {
 		if ((fst = strp->parent) == NULL || !fst->issuser) {
 			systrace_unlock();
 			return (error);
@@ -845,7 +827,7 @@ systrace_redirect(int code, struct proc *p, void *v, register_t *retval)
 	rw_enter_write(&fst->lock);
 	systrace_unlock();
 
-	if (p->p_emul != oldemul) {
+	if (pr->ps_emul != oldemul) {
 		/* Old policy is without meaning now */
 		if (strp->policy) {
 			systrace_closepolicy(fst, strp->policy);
@@ -857,8 +839,8 @@ systrace_redirect(int code, struct proc *p, void *v, register_t *retval)
 	}
 
 	/* Report if effective uid or gid changed */
-	if (olduid != p->p_cred->p_ruid ||
-	    oldgid != p->p_cred->p_rgid) {
+	if (old_ruid != pr->ps_ucred->cr_ruid ||
+	    old_rgid != pr->ps_ucred->cr_rgid) {
 		systrace_msg_ugid(fst, strp);
 
 		REACQUIRE_LOCK;
@@ -877,44 +859,6 @@ out_unlock:
 	rw_exit_write(&fst->lock);
 out:
 	return (error);
-}
-
-uid_t
-systrace_seteuid(struct proc *p,  uid_t euid)
-{
-	struct pcred *pc = p->p_cred;
-	uid_t oeuid = pc->pc_ucred->cr_uid;
-
-	if (pc->pc_ucred->cr_uid == euid)
-		return (oeuid);
-
-	/*
-	 * Copy credentials so other references do not see our changes.
-	 */
-	pc->pc_ucred = crcopy(pc->pc_ucred);
-	pc->pc_ucred->cr_uid = euid;
-	atomic_setbits_int(&p->p_p->ps_flags, PS_SUGID);
-
-	return (oeuid);
-}
-
-gid_t
-systrace_setegid(struct proc *p,  gid_t egid)
-{
-	struct pcred *pc = p->p_cred;
-	gid_t oegid = pc->pc_ucred->cr_gid;
-
-	if (pc->pc_ucred->cr_gid == egid)
-		return (oegid);
-
-	/*
-	 * Copy credentials so other references do not see our changes.
-	 */
-	pc->pc_ucred = crcopy(pc->pc_ucred);
-	pc->pc_ucred->cr_gid = egid;
-	atomic_setbits_int(&p->p_p->ps_flags, PS_SUGID);
-
-	return (oegid);
 }
 
 /* Called with fst locked */
@@ -985,7 +929,7 @@ systrace_inject(struct str_process *strp, int docopy)
 		if (!ret && docopy &&
 		    copyout(inject->kaddr, inject->uaddr, inject->len))
 			ret = EINVAL;
-		free(inject->kaddr, M_XDATA);
+		free(inject->kaddr, M_XDATA, 0);
 	}
 
 	strp->injectind = 0;
@@ -1014,7 +958,7 @@ systrace_prepinject(struct str_process *strp, struct systrace_inject *inj)
 	kaddr = malloc(inj->stri_len, M_XDATA, M_WAITOK);
 	ret = copyin(inj->stri_addr, kaddr, inj->stri_len);
 	if (ret) {
-		free(kaddr, M_XDATA);
+		free(kaddr, M_XDATA, 0);
 		return (ret);
 	}
 
@@ -1059,7 +1003,7 @@ systrace_policy(struct fsystrace *fst, struct systrace_policy *pol)
 			return (EINVAL);
 
 		/* Check that emulation matches */
-		if (strpol->emul && strpol->emul != strp->proc->p_emul)
+		if (strpol->emul && strpol->emul != strp->proc->p_p->ps_emul)
 			return (EINVAL);
 
 		if (strp->policy)
@@ -1073,7 +1017,7 @@ systrace_policy(struct fsystrace *fst, struct systrace_policy *pol)
 
 		/* Record emulation for this policy */
 		if (strpol->emul == NULL)
-			strpol->emul = strp->proc->p_emul;
+			strpol->emul = strp->proc->p_p->ps_emul;
 
 		break;
 	case SYSTR_POLICY_MODIFY:
@@ -1116,7 +1060,7 @@ int
 systrace_getcwd(struct fsystrace *fst, struct str_process *strp, int atfd)
 {
 	struct filedesc *myfdp, *fdp;
-	struct vnode *dvp;
+	struct vnode *dvp, *odvp;
 	int error;
 
 	DPRINTF(("%s: %d\n", __func__, strp->pid));
@@ -1141,15 +1085,59 @@ systrace_getcwd(struct fsystrace *fst, struct str_process *strp, int atfd)
 			return (EINVAL);
 	}
 
-	/* Store our current values */
+	/* Is there a STRIOCGETCWD currently in effect? */
+	if (fst->fd_pid == 0) {
+		/* nope: just save the current values */
+		fst->fd_cdir = myfdp->fd_cdir;
+		fst->fd_rdir = myfdp->fd_rdir;
+	} else {
+		/* yep: carefully release the current values */
+		odvp = myfdp->fd_rdir;
+		myfdp->fd_rdir = fst->fd_rdir;
+		if (odvp != NULL)
+			vrele(odvp);
+		odvp = myfdp->fd_cdir;
+		myfdp->fd_cdir = fst->fd_cdir;
+		if (odvp != NULL)
+			vrele(odvp);
+	}
 	fst->fd_pid = strp->pid;
-	fst->fd_cdir = myfdp->fd_cdir;
-	fst->fd_rdir = myfdp->fd_rdir;
 
 	if ((myfdp->fd_cdir = dvp) != NULL)
 		vref(myfdp->fd_cdir);
 	if ((myfdp->fd_rdir = fdp->fd_rdir) != NULL)
 		vref(myfdp->fd_rdir);
+
+	return (0);
+}
+
+int
+systrace_restorecwd(struct fsystrace *fst, struct proc *p)
+{
+	struct filedesc *fdp;
+	struct vnode *rvp, *cvp;
+
+	if (!fst->fd_pid)
+		return (EINVAL);
+
+	fdp = p->p_fd;
+
+	/*
+	 * Restore original root and current directories and release the
+	 * ones from the other process.
+	 */
+	rvp = fdp->fd_rdir;
+	cvp = fdp->fd_cdir;
+	fdp->fd_rdir = fst->fd_rdir;
+	fdp->fd_cdir = fst->fd_cdir;
+	fst->fd_cdir = fst->fd_rdir = NULL;
+	if (rvp != NULL)
+		vrele(rvp);
+	if (cvp != NULL)
+		vrele(cvp);
+
+	/* Note that we are normal again */
+	fst->fd_pid = 0;
 
 	return (0);
 }
@@ -1200,15 +1188,18 @@ int
 systrace_attach(struct fsystrace *fst, pid_t pid)
 {
 	int error = 0;
-	struct proc *proc, *p = curproc;
+	struct proc *p = curproc;
+	struct proc *t;				/* target thread */
+	struct process *tr;			/* target process */
 	struct str_process *newstrp;
 
-	if ((proc = pfind(pid)) == NULL || (proc->p_flag & P_THREAD)) {
+	if ((t = pfind(pid)) == NULL || (t->p_flag & P_THREAD)) {
 		error = ESRCH;
 		goto out;
 	}
+	tr = t->p_p;
 
-	if (ISSET(proc->p_p->ps_flags, PS_INEXEC)) {
+	if (ISSET(tr->ps_flags, PS_INEXEC)) {
 		error = EAGAIN;
 		goto out;
 	}
@@ -1217,7 +1208,7 @@ systrace_attach(struct fsystrace *fst, pid_t pid)
 	 * You can't attach to a process if:
 	 *	(1) it's the process that's doing the attaching,
 	 */
-	if (proc->p_p == p->p_p) {
+	if (tr == p->p_p) {
 		error = EINVAL;
 		goto out;
 	}
@@ -1225,7 +1216,7 @@ systrace_attach(struct fsystrace *fst, pid_t pid)
 	/*
 	 *	(2) it's a system process
 	 */
-	if (ISSET(proc->p_flag, P_SYSTEM)) {
+	if (ISSET(t->p_flag, P_SYSTEM)) {
 		error = EPERM;
 		goto out;
 	}
@@ -1233,7 +1224,7 @@ systrace_attach(struct fsystrace *fst, pid_t pid)
 	/*
 	 *	(3) it's being traced already
 	 */
-	if (ISSET(proc->p_flag, P_SYSTRACE)) {
+	if (ISSET(t->p_flag, P_SYSTRACE)) {
 		error = EBUSY;
 		goto out;
 	}
@@ -1249,8 +1240,8 @@ systrace_attach(struct fsystrace *fst, pid_t pid)
 	 *	special privileges using setuid() from being
 	 *	traced. This is good security.]
 	 */
-	if ((proc->p_cred->p_ruid != p->p_cred->p_ruid ||
-		ISSET(proc->p_flag, PS_SUGID | PS_SUGIDEXEC)) &&
+	if ((tr->ps_ucred->cr_ruid != p->p_ucred->cr_ruid ||
+		ISSET(tr->ps_flags, PS_SUGID | PS_SUGIDEXEC)) &&
 	    (error = suser(p, 0)) != 0)
 		goto out;
 
@@ -1260,13 +1251,13 @@ systrace_attach(struct fsystrace *fst, pid_t pid)
 	 *          compiled with permanently insecure mode turned
 	 *	    on.
 	 */
-	if ((proc->p_pid == 1) && (securelevel > -1)) {
+	if ((tr->ps_pid == 1) && (securelevel > -1)) {
 		error = EPERM;
 		goto out;
 	}
 
 	newstrp = systrace_getproc();
-	systrace_insert_process(fst, proc, newstrp);
+	systrace_insert_process(fst, t, newstrp);
 
  out:
 	return (error);
@@ -1309,8 +1300,8 @@ systrace_execve1(char *path, struct proc *p)
 		 */
 
 		if (fst->issuser ||
-		    fst->p_ruid != p->p_cred->p_ruid ||
-		    fst->p_rgid != p->p_cred->p_rgid) {
+		    fst->p_ruid != p->p_ucred->cr_ruid ||
+		    fst->p_rgid != p->p_ucred->cr_rgid) {
 			rw_exit_write(&fst->lock);
 			return;
 		}
@@ -1331,7 +1322,7 @@ systrace_preprepl(struct str_process *strp, struct systrace_replace *repl)
 		return (ret);
 
 	if (strp->replace != NULL) {
-		free(strp->replace, M_XDATA);
+		free(strp->replace, M_XDATA, 0);
 		strp->replace = NULL;
 	}
 
@@ -1367,7 +1358,7 @@ systrace_preprepl(struct str_process *strp, struct systrace_replace *repl)
 	memcpy(strp->replace, repl, sizeof(struct systrace_replace));
 	ret = copyin(repl->strr_base, strp->replace + 1, len);
 	if (ret) {
-		free(strp->replace, M_XDATA);
+		free(strp->replace, M_XDATA, 0);
 		strp->replace = NULL;
 		return (ret);
 	}
@@ -1446,7 +1437,7 @@ void
 systrace_replacefree(struct str_process *strp)
 {
 	if (strp->replace != NULL) {
-		free(strp->replace, M_XDATA);
+		free(strp->replace, M_XDATA, 0);
 		strp->replace = NULL;
 	}
 	while (strp->nfname > 0) {
@@ -1470,8 +1461,8 @@ systrace_scriptname(struct proc *p, char *dst)
 
 	if (!fst->issuser &&
 		(ISSET(p->p_p->ps_flags, PS_SUGID | PS_SUGIDEXEC) ||
-		fst->p_ruid != p->p_cred->p_ruid ||
-		fst->p_rgid != p->p_cred->p_rgid)) {
+		fst->p_ruid != p->p_ucred->cr_ruid ||
+		fst->p_rgid != p->p_ucred->cr_rgid)) {
 		error = EPERM;
 		goto out;
 	}
@@ -1594,7 +1585,7 @@ systrace_closepolicy(struct fsystrace *fst, struct str_policy *policy)
 	fst->npolicies--;
 
 	if (policy->nsysent)
-		free(policy->sysent, M_XDATA);
+		free(policy->sysent, M_XDATA, 0);
 
 	TAILQ_REMOVE(&fst->policies, policy, next);
 
@@ -1648,8 +1639,7 @@ systrace_newpolicy(struct fsystrace *fst, int maxents)
 	DPRINTF(("%s: allocating %d -> %lu\n", __func__,
 		     maxents, (u_long)maxents * sizeof(int)));
 
-	pol->sysent = (u_char *)malloc(maxents * sizeof(u_char),
-	    M_XDATA, M_WAITOK);
+	pol->sysent = malloc(maxents, M_XDATA, M_WAITOK);
 	pol->nsysent = maxents;
 	for (i = 0; i < maxents; i++)
 		pol->sysent[i] = SYSTR_POLICY_ASK;
@@ -1703,7 +1693,7 @@ systrace_msg_emul(struct fsystrace *fst, struct str_process *strp)
 	struct str_msg_emul *msg_emul = &strp->msg.msg_data.msg_emul;
 	struct proc *p = strp->proc;
 
-	memcpy(msg_emul->emul, p->p_emul->e_name, SYSTR_EMULEN);
+	memcpy(msg_emul->emul, p->p_p->ps_emul->e_name, SYSTR_EMULEN);
 
 	return (systrace_make_msg(strp, SYSTR_MSG_EMUL));
 }
@@ -1712,10 +1702,10 @@ int
 systrace_msg_ugid(struct fsystrace *fst, struct str_process *strp)
 {
 	struct str_msg_ugid *msg_ugid = &strp->msg.msg_data.msg_ugid;
-	struct proc *p = strp->proc;
+	struct ucred *uc = strp->proc->p_p->ps_ucred;
 
-	msg_ugid->uid = p->p_cred->p_ruid;
-	msg_ugid->gid = p->p_cred->p_rgid;
+	msg_ugid->uid = uc->cr_ruid;
+	msg_ugid->gid = uc->cr_rgid;
 
 	return (systrace_make_msg(strp, SYSTR_MSG_UGID));
 }

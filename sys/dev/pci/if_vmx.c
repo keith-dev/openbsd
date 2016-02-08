@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_vmx.c,v 1.16 2014/01/22 06:04:17 brad Exp $	*/
+/*	$OpenBSD: if_vmx.c,v 1.19 2014/07/22 13:12:11 mpi Exp $	*/
 
 /*
  * Copyright (c) 2013 Tsubai Masanari
@@ -34,7 +34,6 @@
 
 #include <netinet/in.h>
 #include <netinet/if_ether.h>
-#include <netinet/in_systm.h>
 #include <netinet/ip.h>
 #include <netinet/tcp.h>
 #include <netinet/udp.h>
@@ -71,6 +70,7 @@ struct vmxnet3_txring {
 struct vmxnet3_rxring {
 	struct mbuf *m[NRXDESC];
 	bus_dmamap_t dmap[NRXDESC];
+	struct if_rxring rxr;
 	struct vmxnet3_rxdesc *rxd;
 	u_int fill;
 	u_int8_t gen;
@@ -279,8 +279,6 @@ vmxnet3_attach(struct device *parent, struct device *self, void *aux)
 	IFQ_SET_MAXLEN(&ifp->if_snd, NTXDESC);
 	IFQ_SET_READY(&ifp->if_snd);
 
-	m_clsetwms(ifp, JUMBO_LEN, 2, NRXDESC - 1);
-
 	ifmedia_init(&sc->sc_media, IFM_IMASK, vmxnet3_media_change,
 	    vmxnet3_media_status);
 	ifmedia_add(&sc->sc_media, IFM_ETHER|IFM_AUTO, 0, NULL);
@@ -483,17 +481,21 @@ vmxnet3_rxinit(struct vmxnet3_softc *sc, struct vmxnet3_rxqueue *rq)
 {
 	struct vmxnet3_rxring *ring;
 	struct vmxnet3_comp_ring *comp_ring;
-	int i, idx;
+	int i;
+	u_int slots;
 
 	for (i = 0; i < 2; i++) {
 		ring = &rq->cmd_ring[i];
 		ring->fill = 0;
 		ring->gen = 1;
 		bzero(ring->rxd, NRXDESC * sizeof ring->rxd[0]);
-		for (idx = 0; idx < NRXDESC; idx++) {
+		if_rxr_init(&ring->rxr, 2, NRXDESC - 1);
+		for (slots = if_rxr_get(&ring->rxr, NRXDESC);
+		    slots > 0; slots--) {
 			if (vmxnet3_getbuf(sc, ring))
 				break;
 		}
+		if_rxr_put(&ring->rxr, slots);
 	}
 	comp_ring = &rq->comp_ring;
 	comp_ring->next = 0;
@@ -688,6 +690,7 @@ vmxnet3_rxintr(struct vmxnet3_softc *sc, struct vmxnet3_rxqueue *rq)
 	struct ifnet *ifp = &sc->sc_arpcom.ac_if;
 	struct mbuf *m;
 	int idx, len;
+	u_int slots;
 
 	for (;;) {
 		rxcd = &comp_ring->rxcd[comp_ring->next];
@@ -713,6 +716,7 @@ vmxnet3_rxintr(struct vmxnet3_softc *sc, struct vmxnet3_rxqueue *rq)
 		    VMXNET3_RXC_LEN_M);
 		m = ring->m[idx];
 		ring->m[idx] = NULL;
+		if_rxr_put(&ring->rxr, 1);
 		bus_dmamap_unload(sc->sc_dmat, ring->dmap[idx]);
 
 		if (m == NULL)
@@ -772,13 +776,11 @@ skip_buffer:
 
 	/* XXX Should we (try to) allocate buffers for ring 2 too? */
 	ring = &rq->cmd_ring[0];
-	for (;;) {
-		idx = ring->fill;
-		if (ring->m[idx])
-			return;
+	for (slots = if_rxr_get(&ring->rxr, NRXDESC); slots > 0; slots--) {
 		if (vmxnet3_getbuf(sc, ring))
-			return;
+			break;
 	}
+	if_rxr_put(&ring->rxr, slots);
 }
 
 void
@@ -855,7 +857,6 @@ vmxnet3_getbuf(struct vmxnet3_softc *sc, struct vmxnet3_rxring *ring)
 {
 	int idx = ring->fill;
 	struct vmxnet3_rxdesc *rxd = &ring->rxd[idx];
-	struct ifnet *ifp = &sc->sc_arpcom.ac_if;
 	struct mbuf *m;
 	int btype;
 
@@ -874,7 +875,7 @@ vmxnet3_getbuf(struct vmxnet3_softc *sc, struct vmxnet3_rxring *ring)
 		btype = VMXNET3_BTYPE_BODY;
 #endif
 
-	m = MCLGETI(NULL, M_DONTWAIT, ifp, JUMBO_LEN);
+	m = MCLGETI(NULL, M_DONTWAIT, NULL, JUMBO_LEN);
 	if (m == NULL)
 		return -1;
 

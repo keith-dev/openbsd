@@ -1,4 +1,4 @@
-/*	$OpenBSD: linux_misc.c,v 1.86 2014/02/12 05:47:36 guenther Exp $	*/
+/*	$OpenBSD: linux_misc.c,v 1.90 2014/06/28 21:20:19 matthew Exp $	*/
 /*	$NetBSD: linux_misc.c,v 1.27 1996/05/20 01:59:21 fvdl Exp $	*/
 
 /*-
@@ -58,7 +58,6 @@
 #include <sys/socket.h>
 #include <sys/sysctl.h>
 #include <sys/time.h>
-#include <sys/times.h>
 #include <sys/vnode.h>
 #include <sys/uio.h>
 #include <sys/wait.h>
@@ -464,7 +463,7 @@ linux_sys_statfs(p, v, retval)
 	caddr_t sg;
 	int error;
 
-	sg = stackgap_init(p->p_emul);
+	sg = stackgap_init(p);
 	bsp = (struct statfs *) stackgap_alloc(&sg, sizeof (struct statfs));
 
 	LINUX_CHECK_ALT_EXIST(p, &sg, SCARG(uap, path));
@@ -540,7 +539,7 @@ linux_sys_statfs64(struct proc *p, void *v, register_t *retval)
 	caddr_t sg;
 	int error;
 
-	sg = stackgap_init(p->p_emul);
+	sg = stackgap_init(p);
 	bsp = (struct statfs *) stackgap_alloc(&sg, sizeof (struct statfs));
 
 	LINUX_CHECK_ALT_EXIST(p, &sg, SCARG(uap, path));
@@ -575,7 +574,7 @@ linux_sys_fstatfs(p, v, retval)
 	caddr_t sg;
 	int error;
 
-	sg = stackgap_init(p->p_emul);
+	sg = stackgap_init(p);
 	bsp = (struct statfs *) stackgap_alloc(&sg, sizeof (struct statfs));
 
 	SCARG(&bsa, fd) = SCARG(uap, fd);
@@ -605,7 +604,7 @@ linux_sys_fstatfs64(struct proc *p, void *v, register_t *retval)
 	caddr_t sg;
 	int error;
 
-	sg = stackgap_init(p->p_emul);
+	sg = stackgap_init(p);
 	bsp = (struct statfs *) stackgap_alloc(&sg, sizeof (struct statfs));
 
 	SCARG(&bsa, fd) = SCARG(uap, fd);
@@ -804,7 +803,7 @@ linux_to_bsd_mmap_args(cma, uap)
 	struct sys_mmap_args *cma;
 	const struct linux_sys_mmap2_args *uap;
 {
-	int flags = MAP_TRYFIXED, fl = SCARG(uap, flags);
+	int flags = 0, fl = SCARG(uap, flags);
 	
 	flags |= cvtto_bsd_mask(fl, LINUX_MAP_SHARED, MAP_SHARED);
 	flags |= cvtto_bsd_mask(fl, LINUX_MAP_PRIVATE, MAP_PRIVATE);
@@ -1023,7 +1022,7 @@ linux_sys_utime(p, v, retval)
 	struct timeval tv[2], *tvp;
 	struct linux_utimbuf lut;
 
-	sg = stackgap_init(p->p_emul);
+	sg = stackgap_init(p);
 	tvp = (struct timeval *) stackgap_alloc(&sg, sizeof(tv));
 	LINUX_CHECK_ALT_EXIST(p, &sg, SCARG(uap, path));
 
@@ -1309,7 +1308,7 @@ linux_select1(struct proc *p, register_t *retval, int nfds, fd_set *readfds,
 				timerclear(&utv);
 		}
 
-		sg = stackgap_init(p->p_emul);
+		sg = stackgap_init(p);
 		tvp = stackgap_alloc(&sg, sizeof(utv));
 		if ((error = copyout(&utv, tvp, sizeof(utv))))
 			return error;
@@ -1485,7 +1484,7 @@ linux_sys_setfsuid(p, v, retval)
 	 uid_t uid;
 
 	 uid = SCARG(uap, uid);
-	 if (p->p_cred->p_ruid != uid)
+	 if (p->p_ucred->cr_ruid != uid)
 		 return sys_nosys(p, v, retval);
 	 else
 		 return (0);
@@ -1543,7 +1542,7 @@ linux_sys_getuid(p, v, retval)
 	register_t *retval;
 {
 
-	*retval = p->p_cred->p_ruid;
+	*retval = p->p_ucred->cr_ruid;
 	return (0);
 }
 
@@ -1554,7 +1553,7 @@ linux_sys_getgid(p, v, retval)
 	register_t *retval;
 {
 
-	*retval = p->p_cred->p_rgid;
+	*retval = p->p_ucred->cr_rgid;
 	return (0);
 }
 

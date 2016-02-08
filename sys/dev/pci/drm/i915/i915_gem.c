@@ -1,4 +1,4 @@
-/*	$OpenBSD: i915_gem.c,v 1.70 2014/02/13 23:11:05 kettenis Exp $	*/
+/*	$OpenBSD: i915_gem.c,v 1.74 2014/07/12 18:48:52 tedu Exp $	*/
 /*
  * Copyright (c) 2008-2009 Owain G. Ainsworth <oga@openbsd.org>
  *
@@ -323,31 +323,6 @@ kunmap(void *addr)
 	pmap_kremove(va, PAGE_SIZE);
 	pmap_update(pmap_kernel());
 	uvm_km_free_wakeup(phys_map, va, PAGE_SIZE);
-#endif
-}
-
-static inline void *
-kmap_atomic(struct vm_page *pg)
-{
-	vaddr_t va;
-
-#if defined (__HAVE_PMAP_DIRECT)
-	va = pmap_map_direct(pg);
-#else
-	extern vaddr_t pmap_tmpmap_pa(paddr_t);
-	va = pmap_tmpmap_pa(VM_PAGE_TO_PHYS(pg));
-#endif
-	return (void *)va;
-}
-
-static inline void
-kunmap_atomic(void *addr)
-{
-#if defined (__HAVE_PMAP_DIRECT)
-	pmap_unmap_direct((vaddr_t)addr);
-#else
-	extern void pmap_tmpunmap_pa(void);
-	pmap_tmpunmap_pa();
 #endif
 }
 
@@ -1523,7 +1498,7 @@ i915_gem_fault(struct drm_gem_object *gem_obj, struct uvm_faultinfo *ufi,
 		if (pps[lcv] == PGO_DONTCARE)
 			continue;
 
-		paddr = dev->agp->base + obj->gtt_offset + offset;
+		paddr = dev_priv->mm.gtt_base_addr + obj->gtt_offset + offset;
 
 		if (pmap_enter(ufi->orig_map->pmap, vaddr, paddr,
 		    mapprot, PMAP_CANFAIL | mapprot) != 0) {
@@ -2061,7 +2036,7 @@ err_pages:
 	return PTR_ERR(page);
 #else
 err_pages:
-	free(st, M_DRM);
+	free(st, M_DRM, 0);
 	return -ENOMEM;
 #endif
 }
@@ -3829,7 +3804,7 @@ i915_gem_busy_ioctl(struct drm_device *dev, void *data,
 
 	args->busy = obj->active;
 	if (obj->ring) {
-//		BUILD_BUG_ON(I915_NUM_RINGS > 16);
+		BUILD_BUG_ON(I915_NUM_RINGS > 16);
 		args->busy |= intel_ring_flag(obj->ring) << 16;
 	}
 
@@ -4182,11 +4157,12 @@ intel_enable_ppgtt(struct drm_device *dev)
 
 int i915_gem_init(struct drm_device *dev)
 {
+	struct drm_i915_private *dev_priv = dev->dev_private;
 	unsigned long gtt_size, mappable_size;
 	int ret;
 
-	gtt_size = dev->agp->info.ai_aperture_size;
-	mappable_size = dev->agp->info.ai_aperture_size;
+	gtt_size = dev_priv->mm.gtt->gtt_total_entries << PAGE_SHIFT;
+	mappable_size = dev_priv->mm.gtt->gtt_mappable_entries << PAGE_SHIFT;
 
 	DRM_LOCK();
 #ifdef notyet

@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_vr.c,v 1.132 2013/12/28 03:34:54 deraadt Exp $	*/
+/*	$OpenBSD: if_vr.c,v 1.135 2014/07/22 13:12:11 mpi Exp $	*/
 
 /*
  * Copyright (c) 1997, 1998
@@ -76,8 +76,6 @@
 #include <sys/device.h>
 #ifdef INET
 #include <netinet/in.h>
-#include <netinet/in_systm.h>
-#include <netinet/ip.h>
 #include <netinet/if_ether.h>
 #endif	/* INET */
 #include <net/if_dl.h>
@@ -678,7 +676,6 @@ vr_attach(struct device *parent, struct device *self, void *aux)
 	/*
 	 * Call MI attach routines.
 	 */
-	m_clsetwms(ifp, MCLBYTES, 2, VR_RX_LIST_CNT - 1);
 	if_attach(ifp);
 	ether_ifattach(ifp);
 	return;
@@ -794,7 +791,7 @@ vr_list_rx_init(struct vr_softc *sc)
 	}
 
 	cd->vr_rx_prod = cd->vr_rx_cons = &cd->vr_rx_chain[0];
-	cd->vr_rx_cnt = 0;
+	if_rxr_init(&sc->sc_rxring, 2, VR_RX_LIST_CNT - 1);
 	vr_fill_rx_ring(sc);
 
 	return (0);
@@ -805,19 +802,22 @@ vr_fill_rx_ring(struct vr_softc *sc)
 {
 	struct vr_chain_data	*cd;
 	struct vr_list_data	*ld;
+	u_int			slots;
 
 	cd = &sc->vr_cdata;
 	ld = sc->vr_ldata;
 
-	while (cd->vr_rx_cnt < VR_RX_LIST_CNT) {
-		if (vr_alloc_mbuf(sc, cd->vr_rx_prod)) {
-			if (cd->vr_rx_cnt == 0)
-				timeout_add(&sc->sc_rxto, 0);
+	for (slots = if_rxr_get(&sc->sc_rxring, VR_RX_LIST_CNT);
+	    slots > 0; slots--) {
+		if (vr_alloc_mbuf(sc, cd->vr_rx_prod))
 			break;
-		}
+
 		cd->vr_rx_prod = cd->vr_rx_prod->vr_nextdesc;
-		cd->vr_rx_cnt++;
 	}
+
+	if_rxr_put(&sc->sc_rxring, slots);
+	if (if_rxr_inuse(&sc->sc_rxring) == 0)
+		timeout_add(&sc->sc_rxto, 0);
 }
 
 /*
@@ -835,7 +835,7 @@ vr_rxeof(struct vr_softc *sc)
 
 	ifp = &sc->arpcom.ac_if;
 
-	while(sc->vr_cdata.vr_rx_cnt > 0) {
+	while (if_rxr_inuse(&sc->sc_rxring) > 0) {
 		bus_dmamap_sync(sc->sc_dmat, sc->sc_listmap.vrm_map,
 		    0, sc->sc_listmap.vrm_map->dm_mapsize,
 		    BUS_DMASYNC_POSTREAD | BUS_DMASYNC_POSTWRITE);
@@ -849,7 +849,7 @@ vr_rxeof(struct vr_softc *sc)
 		m = cur_rx->vr_mbuf;
 		cur_rx->vr_mbuf = NULL;
 		sc->vr_cdata.vr_rx_cons = cur_rx->vr_nextdesc;
-		sc->vr_cdata.vr_rx_cnt--;
+		if_rxr_put(&sc->sc_rxring, 1);
 
 		/*
 		 * If an error occurs, update stats, clear the
@@ -1094,9 +1094,9 @@ vr_rxtick(void *xsc)
 	int s;
 
 	s = splnet();
-	if (sc->vr_cdata.vr_rx_cnt == 0) {
+	if (if_rxr_inuse(&sc->sc_rxring) == 0) {
 		vr_fill_rx_ring(sc);
-		if (sc->vr_cdata.vr_rx_cnt == 0)
+		if (if_rxr_inuse(&sc->sc_rxring) == 0)
 			timeout_add(&sc->sc_rxto, 1);
 	}
 	splx(s);
@@ -1350,10 +1350,7 @@ vr_start(struct ifnet *ifp)
 		head_tx = cur_tx;
 		if (vr_encap(sc, &cur_tx, m_head)) {
 			/* Rollback, send what we were able to encap. */
-			if (ALTQ_IS_ENABLED(&ifp->if_snd))
-				m_freem(m_head);
-			else
-				IF_PREPEND(&ifp->if_snd, m_head);
+			IF_PREPEND(&ifp->if_snd, m_head);
 			break;
 		}
 		queued++;
@@ -1729,7 +1726,7 @@ vr_alloc_mbuf(struct vr_softc *sc, struct vr_chain_onefrag *r)
 	if (r == NULL)
 		return (EINVAL);
 
-	m = MCLGETI(NULL, M_DONTWAIT, &sc->arpcom.ac_if, MCLBYTES);
+	m = MCLGETI(NULL, M_DONTWAIT, NULL, MCLBYTES);
 	if (!m)
 		return (ENOBUFS);
 

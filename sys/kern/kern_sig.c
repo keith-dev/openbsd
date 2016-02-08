@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_sig.c,v 1.158 2014/02/09 11:17:19 kettenis Exp $	*/
+/*	$OpenBSD: kern_sig.c,v 1.173 2014/07/13 16:41:21 claudio Exp $	*/
 /*	$NetBSD: kern_sig.c,v 1.54 1996/04/22 01:38:32 christos Exp $	*/
 
 /*
@@ -48,10 +48,10 @@
 #include <sys/event.h>
 #include <sys/proc.h>
 #include <sys/systm.h>
-#include <sys/times.h>
 #include <sys/buf.h>
 #include <sys/acct.h>
 #include <sys/file.h>
+#include <sys/filedesc.h>
 #include <sys/kernel.h>
 #include <sys/wait.h>
 #include <sys/ktrace.h>
@@ -66,9 +66,6 @@
 #include <sys/mount.h>
 #include <sys/syscallargs.h>
 
-
-#include <uvm/uvm_extern.h>
-
 int	filt_sigattach(struct knote *kn);
 void	filt_sigdetach(struct knote *kn);
 int	filt_signal(struct knote *kn, long hint);
@@ -80,30 +77,38 @@ void proc_stop(struct proc *p, int);
 void proc_stop_sweep(void *);
 struct timeout proc_stop_to;
 
-int cansignal(struct proc *, struct pcred *, struct proc *, int);
+int cansignal(struct proc *, struct process *, int);
 
 struct pool sigacts_pool;	/* memory pool for sigacts structures */
 
 /*
- * Can process p, with pcred pc, send the signal signum to process q?
+ * Can thread p, send the signal signum to process qr?
  */
 int
-cansignal(struct proc *p, struct pcred *pc, struct proc *q, int signum)
+cansignal(struct proc *p, struct process *qr, int signum)
 {
-	if (pc->pc_ucred->cr_uid == 0)
+	struct process *pr = p->p_p;
+	struct ucred *uc = p->p_ucred;
+	struct ucred *quc = qr->ps_ucred;
+
+	if (uc->cr_uid == 0)
 		return (1);		/* root can always signal */
 
-	if (p == q)
+	if (pr == qr)
 		return (1);		/* process can always signal itself */
 
-	if (signum == SIGCONT && q->p_p->ps_session == p->p_p->ps_session)
+	/* optimization: if the same creds then the tests below will pass */
+	if (uc == quc)
+		return (1);
+
+	if (signum == SIGCONT && qr->ps_session == pr->ps_session)
 		return (1);		/* SIGCONT in session */
 
 	/*
 	 * Using kill(), only certain signals can be sent to setugid
 	 * child processes
 	 */
-	if (q->p_p->ps_flags & PS_SUGID) {
+	if (qr->ps_flags & PS_SUGID) {
 		switch (signum) {
 		case 0:
 		case SIGKILL:
@@ -117,17 +122,17 @@ cansignal(struct proc *p, struct pcred *pc, struct proc *q, int signum)
 		case SIGHUP:
 		case SIGUSR1:
 		case SIGUSR2:
-			if (pc->p_ruid == q->p_cred->p_ruid ||
-			    pc->pc_ucred->cr_uid == q->p_cred->p_ruid)
+			if (uc->cr_ruid == quc->cr_ruid ||
+			    uc->cr_uid == quc->cr_ruid)
 				return (1);
 		}
 		return (0);
 	}
 
-	if (pc->p_ruid == q->p_cred->p_ruid ||
-	    pc->p_ruid == q->p_cred->p_svuid ||
-	    pc->pc_ucred->cr_uid == q->p_cred->p_ruid ||
-	    pc->pc_ucred->cr_uid == q->p_cred->p_svuid)
+	if (uc->cr_ruid == quc->cr_ruid ||
+	    uc->cr_ruid == quc->cr_svuid ||
+	    uc->cr_uid == quc->cr_ruid ||
+	    uc->cr_uid == quc->cr_svuid)
 		return (1);
 	return (0);
 }
@@ -149,12 +154,12 @@ signal_init(void)
  * as p.
  */
 struct sigacts *
-sigactsinit(struct proc *p)
+sigactsinit(struct process *pr)
 {
 	struct sigacts *ps;
 
 	ps = pool_get(&sigacts_pool, PR_WAITOK);
-	memcpy(ps, p->p_sigacts, sizeof(struct sigacts));
+	memcpy(ps, pr->ps_sigacts, sizeof(struct sigacts));
 	ps->ps_refcnt = 1;
 	return (ps);
 }
@@ -163,10 +168,12 @@ sigactsinit(struct proc *p)
  * Share a sigacts structure.
  */
 struct sigacts *
-sigactsshare(struct proc *p)
+sigactsshare(struct process *pr)
 {
-	p->p_sigacts->ps_refcnt++;
-	return p->p_sigacts;
+	struct sigacts *ps = pr->ps_sigacts;
+
+	ps->ps_refcnt++;
+	return ps;
 }
 
 /*
@@ -185,30 +192,30 @@ sigstkinit(struct sigaltstack *ss)
  * signal state.
  */
 void
-sigactsunshare(struct proc *p)
+sigactsunshare(struct process *pr)
 {
 	struct sigacts *newps;
 
-	if (p->p_sigacts->ps_refcnt == 1)
+	if (pr->ps_sigacts->ps_refcnt == 1)
 		return;
 
-	newps = sigactsinit(p);
-	sigactsfree(p);
-	p->p_sigacts = newps;
+	newps = sigactsinit(pr);
+	sigactsfree(pr);
+	pr->ps_sigacts = newps;
 }
 
 /*
  * Release a sigacts structure.
  */
 void
-sigactsfree(struct proc *p)
+sigactsfree(struct process *pr)
 {
-	struct sigacts *ps = p->p_sigacts;
+	struct sigacts *ps = pr->ps_sigacts;
 
 	if (--ps->ps_refcnt > 0)
 		return;
 
-	p->p_sigacts = NULL;
+	pr->ps_sigacts = NULL;
 
 	pool_put(&sigacts_pool, ps);
 }
@@ -229,7 +236,7 @@ sys_sigaction(struct proc *p, void *v, register_t *retval)
 	struct sigaction *sa;
 	const struct sigaction *nsa;
 	struct sigaction *osa;
-	struct sigacts *ps = p->p_sigacts;
+	struct sigacts *ps = p->p_p->ps_sigacts;
 	int signum;
 	int bit, error;
 
@@ -291,7 +298,7 @@ sys_sigaction(struct proc *p, void *v, register_t *retval)
 void
 setsigvec(struct proc *p, int signum, struct sigaction *sa)
 {
-	struct sigacts *ps = p->p_sigacts;
+	struct sigacts *ps = p->p_p->ps_sigacts;
 	int bit;
 	int s;
 
@@ -315,8 +322,9 @@ setsigvec(struct proc *p, int signum, struct sigaction *sa)
 		 * (init) which will reap the zombie.  Because we use
 		 * init to do our dirty work we never set SAS_NOCLDWAIT
 		 * for PID 1.
+		 * XXX exit1 rework means this is unnecessary?
 		 */
-		if (initproc->p_sigacts != ps &&
+		if (initprocess->ps_sigacts != ps &&
 		    ((sa->sa_flags & SA_NOCLDWAIT) ||
 		    sa->sa_handler == SIG_IGN))
 			atomic_setbits_int(&ps->ps_flags, SAS_NOCLDWAIT);
@@ -366,9 +374,9 @@ setsigvec(struct proc *p, int signum, struct sigaction *sa)
  * set to ignore signals that are ignored by default.
  */
 void
-siginit(struct proc *p)
+siginit(struct process *pr)
 {
-	struct sigacts *ps = p->p_sigacts;
+	struct sigacts *ps = pr->ps_sigacts;
 	int i;
 
 	for (i = 0; i < NSIG; i++)
@@ -378,7 +386,7 @@ siginit(struct proc *p)
 }
 
 /*
- * Reset signals for an exec of the specified process.
+ * Reset signals for an exec by the specified thread.
  */
 void
 execsigs(struct proc *p)
@@ -386,8 +394,8 @@ execsigs(struct proc *p)
 	struct sigacts *ps;
 	int nc, mask;
 
-	sigactsunshare(p);
-	ps = p->p_sigacts;
+	sigactsunshare(p->p_p);
+	ps = p->p_p->ps_sigacts;
 
 	/*
 	 * Reset caught signals.  Held signals remain held
@@ -464,6 +472,20 @@ sys_sigpending(struct proc *p, void *v, register_t *retval)
 }
 
 /*
+ * Temporarily replace calling proc's signal mask for the duration of a
+ * system call.  Original signal mask will be restored by userret().
+ */
+void
+dosigsuspend(struct proc *p, sigset_t newmask)
+{
+	KASSERT(p == curproc);
+
+	p->p_oldmask = p->p_sigmask;
+	atomic_setbits_int(&p->p_flag, P_SIGSUSPEND);
+	p->p_sigmask = newmask;
+}
+
+/*
  * Suspend process until signal, providing mask to be set
  * in the meantime.  Note nonstandard calling convention:
  * libc stub passes mask, not pointer, to save a copyin.
@@ -475,18 +497,10 @@ sys_sigsuspend(struct proc *p, void *v, register_t *retval)
 	struct sys_sigsuspend_args /* {
 		syscallarg(int) mask;
 	} */ *uap = v;
-	struct sigacts *ps = p->p_sigacts;
+	struct process *pr = p->p_p;
+	struct sigacts *ps = pr->ps_sigacts;
 
-	/*
-	 * When returning from sigpause, we want
-	 * the old mask to be restored after the
-	 * signal handler has finished.  Thus, we
-	 * save it here and mark the sigacts structure
-	 * to indicate this.
-	 */
-	p->p_oldmask = p->p_sigmask;
-	atomic_setbits_int(&p->p_flag, P_SIGSUSPEND);
-	p->p_sigmask = SCARG(uap, mask) &~ sigcantmask;
+	dosigsuspend(p, SCARG(uap, mask) &~ sigcantmask);
 	while (tsleep(ps, PPAUSE|PCATCH, "pause", 0) == 0)
 		/* void */;
 	/* always return EINTR rather than ERESTART... */
@@ -553,7 +567,6 @@ sys_kill(struct proc *cp, void *v, register_t *retval)
 		syscallarg(int) signum;
 	} */ *uap = v;
 	struct proc *p;
-	struct pcred *pc = cp->p_cred;
 	int pid = SCARG(uap, pid);
 	int signum = SCARG(uap, signum);
 
@@ -575,11 +588,12 @@ sys_kill(struct proc *cp, void *v, register_t *retval)
 				return (ESRCH);
 			type = STHREAD;
 		} else {
+			/* XXX use prfind() */
 			if ((p = pfind(pid)) == NULL)
 				return (ESRCH);
 			if (p->p_flag & P_THREAD)
 				return (ESRCH);
-			if (!cansignal(cp, pc, p, signum))
+			if (!cansignal(cp, p->p_p, signum))
 				return (EPERM);
 		}
 
@@ -606,9 +620,7 @@ sys_kill(struct proc *cp, void *v, register_t *retval)
 int
 killpg1(struct proc *cp, int signum, int pgid, int all)
 {
-	struct proc *p;
 	struct process *pr;
-	struct pcred *pc = cp->p_cred;
 	struct pgrp *pgrp;
 	int nfound = 0;
 
@@ -617,13 +629,13 @@ killpg1(struct proc *cp, int signum, int pgid, int all)
 		 * broadcast
 		 */
 		LIST_FOREACH(pr, &allprocess, ps_list) {
-			p = pr->ps_mainproc;
-			if (p->p_pid <= 1 || p->p_flag & P_SYSTEM ||
-			    p == cp || !cansignal(cp, pc, p, signum))
+			if (pr->ps_pid <= 1 ||
+			    pr->ps_flags & (PS_SYSTEM | PS_NOBROADCASTKILL) ||
+			    pr == cp->p_p || !cansignal(cp, pr, signum))
 				continue;
 			nfound++;
 			if (signum)
-				psignal(p, signum);
+				prsignal(pr, signum);
 		}
 	else {
 		if (pgid == 0)
@@ -637,13 +649,12 @@ killpg1(struct proc *cp, int signum, int pgid, int all)
 				return (ESRCH);
 		}
 		LIST_FOREACH(pr, &pgrp->pg_members, ps_pglist) {
-			p = pr->ps_mainproc;
-			if (p->p_pid <= 1 || p->p_flag & (P_SYSTEM|P_THREAD) ||
-			    !cansignal(cp, pc, p, signum))
+			if (pr->ps_pid <= 1 || pr->ps_flags & PS_SYSTEM ||
+			    !cansignal(cp, pr, signum))
 				continue;
 			nfound++;
-			if (signum && P_ZOMBIE(p) == 0)
-				psignal(p, signum);
+			if (signum)
+				prsignal(pr, signum);
 		}
 	}
 	return (nfound ? 0 : ESRCH);
@@ -651,12 +662,12 @@ killpg1(struct proc *cp, int signum, int pgid, int all)
 
 #define CANDELIVER(uid, euid, pr) \
 	(euid == 0 || \
-	(uid) == (pr)->ps_cred->p_ruid || \
-	(uid) == (pr)->ps_cred->p_svuid || \
-	(uid) == (pr)->ps_cred->pc_ucred->cr_uid || \
-	(euid) == (pr)->ps_cred->p_ruid || \
-	(euid) == (pr)->ps_cred->p_svuid || \
-	(euid) == (pr)->ps_cred->pc_ucred->cr_uid)
+	(uid) == (pr)->ps_ucred->cr_ruid || \
+	(uid) == (pr)->ps_ucred->cr_svuid || \
+	(uid) == (pr)->ps_ucred->cr_uid || \
+	(euid) == (pr)->ps_ucred->cr_ruid || \
+	(euid) == (pr)->ps_ucred->cr_svuid || \
+	(euid) == (pr)->ps_ucred->cr_uid)
 
 /*
  * Deliver signum to pgid, but first check uid/euid against each
@@ -721,11 +732,12 @@ void
 trapsignal(struct proc *p, int signum, u_long trapno, int code,
     union sigval sigval)
 {
-	struct sigacts *ps = p->p_sigacts;
+	struct process *pr = p->p_p;
+	struct sigacts *ps = pr->ps_sigacts;
 	int mask;
 
 	mask = sigmask(signum);
-	if ((p->p_p->ps_flags & PS_TRACED) == 0 &&
+	if ((pr->ps_flags & PS_TRACED) == 0 &&
 	    (ps->ps_sigcatch & mask) != 0 &&
 	    (p->p_sigmask & mask) == 0) {
 #ifdef KTRACE
@@ -738,7 +750,7 @@ trapsignal(struct proc *p, int signum, u_long trapno, int code,
 		}
 #endif
 		p->p_ru.ru_nsignals++;
-		(*p->p_emul->e_sendsig)(ps->ps_sigact[signum], signum,
+		(*pr->ps_emul->e_sendsig)(ps->ps_sigact[signum], signum,
 		    p->p_sigmask, trapno, code, sigval);
 		p->p_sigmask |= ps->ps_catchmask[signum];
 		if ((ps->ps_sigreset & mask) != 0) {
@@ -752,6 +764,17 @@ trapsignal(struct proc *p, int signum, u_long trapno, int code,
 		p->p_sitrapno = trapno;	/* XXX for core dump/debugger */
 		p->p_sicode = code;
 		p->p_sigval = sigval;
+
+		/*
+		 * Signals like SIGBUS and SIGSEGV should not, when
+		 * generated by the kernel, be ignorable or blockable.
+		 * If it is and we're not being traced, then just kill
+		 * the process.
+		 */
+		if ((pr->ps_flags & PS_TRACED) == 0 &&
+		    (sigprop[signum] & SA_KILL) &&
+		    ((p->p_sigmask & mask) || (ps->ps_sigignore & mask)))
+			sigexit(p, signum);
 		ptsignal(p, signum, STHREAD);
 	}
 }
@@ -874,11 +897,11 @@ ptsignal(struct proc *p, int signum, enum signal_type type)
 		 * and if it is set to SIG_IGN,
 		 * action will be SIG_DFL here.)
 		 */
-		if (p->p_sigacts->ps_sigignore & mask)
+		if (pr->ps_sigacts->ps_sigignore & mask)
 			return;
 		if (p->p_sigmask & mask) {
 			action = SIG_HOLD;
-		} else if (p->p_sigacts->ps_sigcatch & mask) {
+		} else if (pr->ps_sigacts->ps_sigcatch & mask) {
 			action = SIG_CATCH;
 		} else {
 			action = SIG_DFL;
@@ -1038,7 +1061,7 @@ ptsignal(struct proc *p, int signum, enum signal_type type)
 		/* FALLTHROUGH */
 	default:
 		/*
-		 * SRUN, SIDL, SZOMB do nothing with the signal,
+		 * SRUN, SIDL, SDEAD do nothing with the signal,
 		 * other than kicking ourselves if we are running.
 		 * It will either never be noticed, or noticed very soon.
 		 */
@@ -1097,7 +1120,7 @@ issignal(struct proc *p)
 		 * We should see pending but ignored signals
 		 * only if PS_TRACED was on when they were posted.
 		 */
-		if (mask & p->p_sigacts->ps_sigignore &&
+		if (mask & pr->ps_sigacts->ps_sigignore &&
 		    (pr->ps_flags & PS_TRACED) == 0)
 			continue;
 
@@ -1153,7 +1176,7 @@ issignal(struct proc *p)
 		 * Return the signal's number, or fall through
 		 * to clear it from the pending mask.
 		 */
-		switch ((long)p->p_sigacts->ps_sigact[signum]) {
+		switch ((long)pr->ps_sigacts->ps_sigact[signum]) {
 		case (long)SIG_DFL:
 			/*
 			 * Don't take default actions on system processes.
@@ -1268,8 +1291,7 @@ proc_stop_sweep(void *v)
 			continue;
 		atomic_clearbits_int(&pr->ps_flags, PS_STOPPED);
 
-		if ((pr->ps_pptr->ps_mainproc->p_sigacts->ps_flags &
-		    SAS_NOCLDSTOP) == 0)
+		if ((pr->ps_pptr->ps_sigacts->ps_flags & SAS_NOCLDSTOP) == 0)
 			prsignal(pr->ps_pptr, SIGCHLD);
 		wakeup(pr->ps_pptr);
 	}
@@ -1283,7 +1305,8 @@ void
 postsig(int signum)
 {
 	struct proc *p = curproc;
-	struct sigacts *ps = p->p_sigacts;
+	struct process *pr = p->p_p;
+	struct sigacts *ps = pr->ps_sigacts;
 	sig_t action;
 	u_long trapno;
 	int mask, returnmask;
@@ -1372,7 +1395,7 @@ postsig(int signum)
 			p->p_sigval.sival_ptr = NULL;
 		}
 
-		(*p->p_emul->e_sendsig)(action, signum, returnmask, trapno,
+		(*pr->ps_emul->e_sendsig)(action, signum, returnmask, trapno,
 		    code, sigval);
 	}
 
@@ -1428,27 +1451,27 @@ coredump(struct proc *p)
 #ifdef SMALL_KERNEL
 	return EPERM;
 #else
+	struct process *pr = p->p_p;
 	struct vnode *vp;
 	struct ucred *cred = p->p_ucred;
 	struct vmspace *vm = p->p_vmspace;
 	struct nameidata nd;
 	struct vattr vattr;
 	struct coredump_iostate	io;
-	int error, len;
-	char name[sizeof("/var/crash/") + MAXCOMLEN + sizeof(".core")];
-	char *dir = "";
+	int error, len, incrash = 0;
+	char name[MAXPATHLEN];
+	const char *dir = "/var/crash";
 
-	p->p_p->ps_flags |= PS_COREDUMP;
+	pr->ps_flags |= PS_COREDUMP;
 
 	/*
-	 * Don't dump if not root and the process has used set user or
-	 * group privileges, unless the nosuidcoredump sysctl is set to 2,
-	 * in which case dumps are put into /var/crash/.
+	 * If the process has inconsistant uids, nosuidcoredump
+	 * determines coredump placement policy.
 	 */
-	if (((p->p_p->ps_flags & PS_SUGID) && (error = suser(p, 0))) ||
-	   ((p->p_p->ps_flags & PS_SUGID) && nosuidcoredump)) {
-		if (nosuidcoredump == 2)
-			dir = "/var/crash/";
+	if (((pr->ps_flags & PS_SUGID) && (error = suser(p, 0))) ||
+	   ((pr->ps_flags & PS_SUGID) && nosuidcoredump)) {
+		if (nosuidcoredump == 3 || nosuidcoredump == 2)
+			incrash = 1;
 		else
 			return (EPERM);
 	}
@@ -1458,16 +1481,42 @@ coredump(struct proc *p)
 	    p->p_rlimit[RLIMIT_CORE].rlim_cur)
 		return (EFBIG);
 
-	len = snprintf(name, sizeof(name), "%s%s.core", dir, p->p_comm);
+	if (nosuidcoredump == 3) {
+		/*
+		 * If the program directory does not exist, dumps of
+		 * that core will silently fail.
+		 */
+		len = snprintf(name, sizeof(name), "%s/%s/%u.core",
+		    dir, p->p_comm, p->p_pid);
+	} else if (nosuidcoredump == 2)
+		len = snprintf(name, sizeof(name), "%s/%s.core",
+		    dir, p->p_comm);
+	else
+		len = snprintf(name, sizeof(name), "%s.core", p->p_comm);
 	if (len >= sizeof(name))
 		return (EACCES);
 
 	/*
-	 * ... but actually write it as UID
+	 * Control the UID used to write out.  The normal case uses
+	 * the real UID.  If the sugid case is going to write into the
+	 * controlled directory, we do so as root.
 	 */
-	cred = crdup(cred);
-	cred->cr_uid = p->p_cred->p_ruid;
-	cred->cr_gid = p->p_cred->p_rgid;
+	if (incrash == 0) {
+		cred = crdup(cred);
+		cred->cr_uid = cred->cr_ruid;
+		cred->cr_gid = cred->cr_rgid;
+	} else {
+		if (p->p_fd->fd_rdir) {
+			vrele(p->p_fd->fd_rdir);
+			p->p_fd->fd_rdir = NULL;
+		}
+		p->p_ucred = crdup(p->p_ucred);
+		crfree(cred);
+		cred = p->p_ucred;
+		crhold(cred);
+		cred->cr_uid = 0;
+		cred->cr_gid = 0;
+	}
 
 	NDINIT(&nd, LOOKUP, NOFOLLOW, UIO_SYSSPACE, name, p);
 
@@ -1497,7 +1546,7 @@ coredump(struct proc *p)
 	VATTR_NULL(&vattr);
 	vattr.va_size = 0;
 	VOP_SETATTR(vp, &vattr, cred, p);
-	p->p_p->ps_acflag |= ACORE;
+	pr->ps_acflag |= ACORE;
 
 	io.io_proc = p;
 	io.io_vp = vp;
@@ -1507,7 +1556,7 @@ coredump(struct proc *p)
 	vref(vp);
 	error = vn_close(vp, FWRITE, cred, p);
 	if (error == 0)
-		error = (*p->p_emul->e_coredump)(p, &io);
+		error = (*pr->ps_emul->e_coredump)(p, &io);
 	vrele(vp);
 out:
 	crfree(cred);
@@ -1849,9 +1898,7 @@ single_thread_set(struct proc *p, enum single_thread_mode mode, int deep)
 	struct proc *q;
 	int error;
 
-#ifdef MULTIPROCESSOR
-	KASSERT(__mp_lock_held(&kernel_lock));
-#endif
+	KERNEL_ASSERT_LOCKED();
 
 	if ((error = single_thread_check(p, deep)))
 		return error;
@@ -1917,7 +1964,6 @@ single_thread_set(struct proc *p, enum single_thread_mode mode, int deep)
 				pr->ps_singlecount++;
 			}
 			break;
-		case SZOMB:
 		case SDEAD:
 			break;
 		case SONPROC:
@@ -1949,9 +1995,7 @@ single_thread_clear(struct proc *p, int flag)
 	struct proc *q;
 
 	KASSERT(pr->ps_single == p);
-#ifdef MULTIPROCESSOR
-	KASSERT(__mp_lock_held(&kernel_lock));
-#endif
+	KERNEL_ASSERT_LOCKED();
 
 	pr->ps_single = NULL;
 	atomic_clearbits_int(&pr->ps_flags, PS_SINGLEUNWIND | PS_SINGLEEXIT);

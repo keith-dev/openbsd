@@ -1,4 +1,4 @@
-/*	$OpenBSD: intr.c,v 1.42 2013/11/26 20:33:12 deraadt Exp $	*/
+/*	$OpenBSD: intr.c,v 1.44 2014/07/12 18:44:41 tedu Exp $	*/
 
 /*
  * Copyright (c) 2002-2004 Michael Shalayeff
@@ -33,7 +33,7 @@
 #include <sys/evcount.h>
 #include <sys/malloc.h>
 
-#include <uvm/uvm_extern.h>	/* for uvmexp */
+#include <uvm/uvm_extern.h>
 
 #include <machine/autoconf.h>
 #include <machine/frame.h>
@@ -163,7 +163,7 @@ cpu_intr_map(void *v, int pri, int irq, int (*handler)(void *), void *arg,
 	iv = &ivb[irq];
 	if (iv->handler) {
 		if (!pv->share) {
-			free(cnt, M_DEVBUF);
+			free(cnt, M_DEVBUF, 0);
 			return (NULL);
 		} else {
 			iv = pv->share;
@@ -224,10 +224,10 @@ cpu_intr_establish(int pri, int irq, int (*handler)(void *), void *arg,
 		intr_more += 2 * CPU_NINTS;
 		for (ev = iv->next + CPU_NINTS; ev < intr_more; ev++)
 			ev->share = iv->share, iv->share = ev;
-		free(cnt, M_DEVBUF);
+		free(cnt, M_DEVBUF, 0);
 		iv->cnt = NULL;
 	} else if (name == NULL) {
-		free(cnt, M_DEVBUF);
+		free(cnt, M_DEVBUF, 0);
 		iv->cnt = NULL;
 	} else
 		evcount_attach(cnt, name, NULL);
@@ -360,7 +360,7 @@ softintr_disestablish(void *cookie)
 			iv->handler = nv->handler;
 			iv->arg = nv->arg;
 			iv->next = nv->next;
-			free(nv, M_DEVBUF);
+			free(nv, M_DEVBUF, 0);
 			return;
 		} else {
 			iv->handler = NULL;
@@ -372,7 +372,7 @@ softintr_disestablish(void *cookie)
 	for (iv = &intr_table[irq]; iv; iv = iv->next) {
 		if (iv->next == cookie) {
 			iv->next = iv->next->next;
-			free(cookie, M_DEVBUF);
+			free(cookie, M_DEVBUF, 0);
 			return;
 		}
 	}

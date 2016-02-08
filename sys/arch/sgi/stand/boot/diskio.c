@@ -1,4 +1,4 @@
-/*	$OpenBSD: diskio.c,v 1.7 2012/03/19 17:38:31 miod Exp $ */
+/*	$OpenBSD: diskio.c,v 1.9 2014/07/12 21:03:38 tedu Exp $ */
 
 /*
  * Copyright (c) 2000 Opsycon AB  (www.opsycon.se)

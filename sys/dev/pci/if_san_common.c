@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_san_common.c,v 1.16 2013/08/07 01:06:37 bluhm Exp $	*/
+/*	$OpenBSD: if_san_common.c,v 1.18 2014/07/22 13:12:11 mpi Exp $	*/
 
 /*-
  * Copyright (c) 2001-2004 Sangoma Technologies (SAN)
@@ -59,7 +59,6 @@
 # include <net/ppp_defs.h>
 # include <net/if_ppp.h>
 # include <net/if_sppp.h>
-# include <netinet/in_systm.h>
 # include <netinet/in.h>
 # include <netinet/udp.h>
 # include <netinet/ip.h>
@@ -123,7 +122,7 @@ static san_detach(void)
 		tmp_card = card;
 		card = LIST_NEXT(card, next);
 		LIST_REMOVE(tmp_card, next);
-		free(tmp_card, M_DEVBUF);
+		free(tmp_card, M_DEVBUF, 0);
 	}
 
 	log(LOG_INFO, "\n");
@@ -354,7 +353,7 @@ wan_ioctl_dump(sdla_t *card, void *u_dump)
 		log(LOG_INFO, "%s: Failed to copy to user space (%d)\n",
 				card->devname, __LINE__);
 	}
-	free(data, M_DEVBUF);
+	free(data, M_DEVBUF, 0);
 	return err;
 }
 

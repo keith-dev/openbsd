@@ -1,4 +1,4 @@
-/*	$OpenBSD: qlereg.h,v 1.2 2014/02/23 08:59:09 jmatthew Exp $ */
+/*	$OpenBSD: qlereg.h,v 1.9 2014/04/20 09:49:23 jmatthew Exp $ */
 
 /*
  * Copyright (c) 2013, 2014 Jonathan Matthew <jmatthew@openbsd.org>
@@ -145,13 +145,6 @@
 #define QLE_MBOX_LINK_INIT		0x0072
 #define QLE_MBOX_GET_PORT_NAME_LIST	0x0075
 
-/* mailbox operation register bitfields */
-#define QLE_MBOX_ABOUT_FIRMWARE_IN	0x00000001
-#define QLE_MBOX_ABOUT_FIRMWARE_OUT	0x0000004f
-#define QLE_MBOX_INIT_FIRMWARE_IN	0x000000fd
-#define QLE_MBOX_SET_FIRMWARE_OPTIONS_IN 0x0000000f
-#define QLE_MBOX_GET_LOOP_ID_OUT	0x000000cf
-
 #define QLE_MBOX_COUNT			32
 
 /* nvram layout */
@@ -249,7 +242,7 @@ struct qle_nvram {
 	u_int16_t	subsystem_device_id;
 
 	u_int32_t	checksum;
-} __packed;
+} __packed __aligned(4);
 
 /* init firmware control block */
 #define QLE_ICB_VERSION			1
@@ -304,9 +297,12 @@ struct qle_init_cb {
 	u_int16_t	icb_req_queue_len;
 	u_int16_t	icb_link_down_nos;
 	u_int16_t	icb_pri_req_queue_len;
-	u_int64_t	icb_req_queue_addr;
-	u_int64_t	icb_resp_queue_addr;
-	u_int64_t	icb_pri_req_queue_addr;
+	u_int32_t	icb_req_queue_addr_lo;
+	u_int32_t	icb_req_queue_addr_hi;
+	u_int32_t	icb_resp_queue_addr_lo;
+	u_int32_t	icb_resp_queue_addr_hi;
+	u_int32_t	icb_pri_req_queue_addr_lo;
+	u_int32_t	icb_pri_req_queue_addr_hi;
 	u_int8_t	icb_reserved2[8];
 	u_int16_t	icb_atio_queue_in;
 	u_int16_t	icb_atio_queue_len;
@@ -317,7 +313,7 @@ struct qle_init_cb {
 	u_int32_t	icb_fwoptions2;
 	u_int32_t	icb_fwoptions3;
 	u_int8_t	icb_reserved3[24];
-} __packed;
+} __packed __aligned(4);
 
 #define QLE_FW_OPTION1_ASYNC_LIP_F8	0x0001
 #define QLE_FW_OPTION1_ASYNC_LIP_RESET	0x0002
@@ -353,6 +349,12 @@ struct qle_get_port_db {
 	u_int64_t	port_name;
 	u_int64_t	node_name;
 	u_int8_t	reserved3[24];
+} __packed __aligned(4);
+
+struct qle_port_name_list {
+	u_int64_t	port_name;
+	u_int16_t	loopid;
+	u_int16_t	reserved;
 } __packed;
 
 #define QLE_SVC3_TARGET_ROLE		0x0010
@@ -374,7 +376,7 @@ struct qle_ct_cmd_hdr {
 	u_int8_t	ct_gs_subtype;
 	u_int8_t	ct_gs_options;
 	u_int8_t	ct_gs_reserved;
-} __packed;
+} __packed __aligned(4);
 
 struct qle_ct_ga_nxt_req {
 	struct qle_ct_cmd_hdr header;
@@ -382,7 +384,7 @@ struct qle_ct_ga_nxt_req {
 	u_int16_t	max_word;
 	u_int32_t	reserved3;
 	u_int32_t	port_id;
-} __packed;
+} __packed __aligned(4);
 
 struct qle_ct_ga_nxt_resp {
 	struct qle_ct_cmd_hdr header;
@@ -407,7 +409,7 @@ struct qle_ct_ga_nxt_resp {
 	u_int8_t	ip_addr[16];
 	u_int64_t	fabric_port_name;
 	u_int32_t	hard_address;
-} __packed;
+} __packed __aligned(4);
 
 struct qle_ct_rft_id_req {
 	struct qle_ct_cmd_hdr header;
@@ -416,7 +418,7 @@ struct qle_ct_rft_id_req {
 	u_int32_t	reserved3;
 	u_int32_t	port_id;
 	u_int32_t	fc4_types[8];
-} __packed;
+} __packed __aligned(4);
 
 struct qle_ct_rft_id_resp {
 	struct qle_ct_cmd_hdr header;
@@ -426,7 +428,7 @@ struct qle_ct_rft_id_resp {
 	u_int8_t	reason_code;
 	u_int8_t	explanation_code;
 	u_int8_t	vendor_unique;
-} __packed;
+} __packed __aligned(4);
 
 /* available handle ranges */
 #define QLE_MIN_HANDLE			0x81
@@ -466,9 +468,10 @@ struct qle_ct_rft_id_resp {
 #define QLE_IOCB_MARKER_SYNC_ALL	2
 
 struct qle_iocb_seg {
-	u_int64_t	seg_addr;
+	u_int32_t	seg_addr_lo;
+	u_int32_t	seg_addr_hi;
 	u_int32_t	seg_len;
-} __packed;
+} __packed __aligned(4);
 
 struct qle_iocb_status {
 	u_int8_t	entry_type;	/* QLE_IOCB_STATUS */
@@ -489,7 +492,7 @@ struct qle_iocb_status {
 
 	u_int32_t	fcp_rsp_len;
 	u_int8_t	data[28];
-} __packed;
+} __packed __aligned(64);
 
 /* completion */
 #define QLE_IOCB_STATUS_COMPLETE	0x0000
@@ -525,7 +528,7 @@ struct qle_iocb_marker {
 	u_int16_t	marker_flags;
 	u_int16_t	lun;
 	u_int8_t	reserved2[48];
-} __packed;
+} __packed __aligned(64);
 
 struct qle_iocb_status_cont {
 	u_int8_t	entry_type;	/* QLE_IOCB_STATUS_CONT */
@@ -534,7 +537,7 @@ struct qle_iocb_status_cont {
 	u_int8_t	flags;
 
 	u_int8_t	sense[44];
-} __packed;
+} __packed __aligned(64);
 
 struct qle_iocb_req6 {
 	u_int8_t	entry_type;	/* QLE_IOCB_CMD_TYPE_6 */
@@ -549,15 +552,21 @@ struct qle_iocb_req6 {
 	u_int16_t	req_resp_seg_count;
 
 	u_int16_t	req_fcp_lun[4];
+
 	u_int16_t	req_ctrl_flags;
 	u_int16_t	req_fcp_cmnd_len;
-	u_int64_t	req_fcp_cmnd_addr;
-	u_int64_t	req_resp_seg_addr;
+
+	u_int32_t	req_fcp_cmnd_addr_lo;
+	u_int32_t	req_fcp_cmnd_addr_hi;
+
+	u_int32_t	req_resp_seg_addr_lo;
+	u_int32_t	req_resp_seg_addr_hi;
+
 	u_int32_t	req_data_len;
 
 	u_int32_t	req_target_id;
 	struct qle_iocb_seg req_data_seg;
-} __packed;
+} __packed __aligned(64);
 
 struct qle_fcp_cmnd {
 	u_int16_t	fcp_lun[4];
@@ -568,7 +577,7 @@ struct qle_fcp_cmnd {
 	
 	u_int8_t	fcp_cdb[52];
 	/* 64 bytes total */
-} __packed;
+} __packed __aligned(64);
 
 struct qle_iocb_ct_passthrough {
 	u_int8_t	entry_type;	/* QLE_IOCB_CT_PASSTHROUGH */
@@ -590,7 +599,24 @@ struct qle_iocb_ct_passthrough {
 	u_int32_t	req_cmd_byte_count;
 	struct qle_iocb_seg req_cmd_seg;
 	struct qle_iocb_seg req_resp_seg;
-} __packed;
+} __packed __aligned(64);
+
+#define QLE_PLOGX_LOGIN			0x0000
+#define QLE_PLOGX_LOGIN_COND		0x0010
+
+#define QLE_PLOGX_LOGOUT		0x0008
+#define QLE_PLOGX_LOGOUT_IMPLICIT	0x0010
+#define QLE_PLOGX_LOGOUT_ALL		0x0020
+#define QLE_PLOGX_LOGOUT_EXPLICIT	0x0040
+#define QLE_PLOGX_LOGOUT_FREE_HANDLE	0x0080
+
+#define QLE_PLOGX_PORT_UNAVAILABLE	0x28
+#define QLE_PLOGX_PORT_LOGGED_OUT	0x29
+#define QLE_PLOGX_ERROR			0x31
+
+#define QLE_PLOGX_ERROR_PORT_ID_USED	0x1A
+#define QLE_PLOGX_ERROR_HANDLE_USED	0x1B
+#define QLE_PLOGX_ERROR_NO_HANDLE	0x1C
 
 struct qle_iocb_plogx {
 	u_int8_t	entry_type;	/* QLE_IOCB_PLOGX */
@@ -607,5 +633,5 @@ struct qle_iocb_plogx {
 	u_int16_t	req_port_id_lo;
 	u_int8_t	req_port_id_hi;
 	u_int8_t	req_rspsize;
-	u_int16_t	req_ioparms[22];
-} __packed;
+	u_int32_t	req_ioparms[11];
+} __packed __aligned(64);

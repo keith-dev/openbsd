@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_ie.c,v 1.45 2013/11/28 22:18:52 deraadt Exp $	*/
+/*	$OpenBSD: if_ie.c,v 1.47 2014/07/22 10:35:35 mpi Exp $	*/
 /*	$NetBSD: if_ie.c,v 1.33 1997/07/29 17:55:38 fair Exp $	*/
 
 /*-
@@ -123,15 +123,10 @@ Mode of operation:
 #include <net/bpfdesc.h>
 #endif
 
-#ifdef INET
 #include <netinet/in.h>
-#include <netinet/in_systm.h>
-#include <netinet/ip.h>
 #include <netinet/if_ether.h>
-#endif
 
 #include <uvm/uvm_extern.h>
-#include <uvm/uvm_map.h>
 
 /*
  * ugly byte-order hack for SUNs
@@ -1335,7 +1330,7 @@ ie_readframe(sc, num)
 	if (bpf_gets_it) {
 		/* Pass it up. */
 		bpf_mtap_hdr(sc->sc_arpcom.ac_if.if_bpf, (caddr_t)&eh,
-		    sizeof(eh), m, BPF_DIRECTION_IN);
+		    sizeof(eh), m, BPF_DIRECTION_IN, NULL);
 	}
 	/*
 	 * A signal passed up from the filtering code indicating that the

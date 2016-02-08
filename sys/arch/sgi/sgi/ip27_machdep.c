@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip27_machdep.c,v 1.57 2012/10/03 11:18:23 miod Exp $	*/
+/*	$OpenBSD: ip27_machdep.c,v 1.63 2014/07/13 20:29:05 miod Exp $	*/
 
 /*
  * Copyright (c) 2008, 2009 Miodrag Vallat.
@@ -40,7 +40,7 @@
 #include <machine/mnode.h>
 #include <machine/atomic.h>
 
-#include <uvm/uvm.h>
+#include <uvm/uvm_extern.h>
 
 #include <sgi/sgi/ip27.h>
 #include <sgi/sgi/l1.h>
@@ -784,7 +784,7 @@ ip27_hub_intr_disestablish(int intrbit)
 	splx(s);
 
 	if (ISSET(ih->ih_flags, IH_ALLOCATED))
-		free(ih, M_DEVBUF);
+		free(ih, M_DEVBUF, 0);
 }
 
 void
@@ -927,11 +927,12 @@ ip27_nmi(void *arg)
 	regs++;				/* NMI COP_0_STATUS_REG */
 
 	setsr(getsr() & ~SR_BOOT_EXC_VEC);
-	printf("NMI, PC = %p RA = %p SR = %08x EPC = %p\n",
-	    nmi_frame.pc, nmi_frame.ra, nmi_frame.sr, epc);
+	printf("NMI, PC = %p RA = %p SR = %08lx EPC = %p\n",
+	    (void *)nmi_frame.pc, (void *)nmi_frame.ra, nmi_frame.sr,
+	    (void *)epc);
 #ifdef DDB
 	(void)kdb_trap(-1, &nmi_frame);
 #endif
-	printf("Resetting system...\n");
-	boot(RB_USERREQ);
+	panic("NMI");
+	/* NOTREACHED */
 }

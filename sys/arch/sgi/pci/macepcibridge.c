@@ -1,4 +1,4 @@
-/*	$OpenBSD: macepcibridge.c,v 1.45 2012/09/29 18:54:39 miod Exp $ */
+/*	$OpenBSD: macepcibridge.c,v 1.47 2014/05/19 21:18:42 miod Exp $ */
 
 /*
  * Copyright (c) 2009 Miodrag Vallat.
@@ -53,7 +53,6 @@
 #include <sys/proc.h>
 #include <sys/ioctl.h>
 #include <sys/extent.h>
-#include <uvm/uvm.h>
 
 #include <machine/autoconf.h>
 #include <machine/cpu.h>
@@ -113,8 +112,6 @@ void	mace_pcibr_rbus_space_unmap(bus_space_tag_t, bus_space_handle_t,
 void	mace_pcibr_configure(struct mace_pcibr_softc *);
 void	mace_pcibr_device_fixup(struct mace_pcibr_softc *, int, int);
 int	mace_pcibr_errintr(void *);
-
-extern void pciaddr_remap(pci_chipset_tag_t);
 
 struct cfattach macepcibr_ca = {
 	sizeof(struct mace_pcibr_softc), mace_pcibrmatch, mace_pcibrattach,
@@ -220,7 +217,7 @@ const struct _perr_map {
   { 0, 0, NULL }
 };
 
-static int      mace_pcibrprint(void *, const char *pnp);
+static int mace_pcibrprint(void *, const char *pnp);
 
 int
 mace_pcibrmatch(struct device *parent, void *match, void *aux)
@@ -506,7 +503,7 @@ mace_pcibr_intr_string(void *lcv, pci_intr_handle_t ih)
 {
 	static char str[16];
 
-	snprintf(str, sizeof(str), "irq %d", ih);
+	snprintf(str, sizeof(str), "irq %ld", ih);
 	return(str);
 }
 

@@ -1,4 +1,4 @@
-/*	$OpenBSD: ifconfig.c,v 1.281 2014/01/21 21:27:14 benno Exp $	*/
+/*	$OpenBSD: ifconfig.c,v 1.287 2014/07/12 19:58:17 henning Exp $	*/
 /*	$NetBSD: ifconfig.c,v 1.40 1997/10/01 02:19:43 enami Exp $	*/
 
 /*
@@ -148,6 +148,7 @@ void	setiflladdr(const char *, int);
 void	setifdstaddr(const char *, int);
 void	setifflags(const char *, int);
 void	setifxflags(const char *, int);
+void	removeaf(const char *, int);
 void	setifbroadaddr(const char *, int);
 void	setifmtu(const char *, int);
 void	setifnwid(const char *, int);
@@ -203,6 +204,7 @@ void	setifgroup(const char *, int);
 void	unsetifgroup(const char *, int);
 void	setgroupattribs(char *, int, char *[]);
 int	printgroup(char *, int);
+void	setautoconf(const char *, int);
 
 #ifndef SMALL
 void	carp_status(void);
@@ -333,6 +335,8 @@ const struct	cmd {
 	{ "-vlandev",	1,		0,		unsetvlandev },
 	{ "group",	NEXTARG,	0,		setifgroup },
 	{ "-group",	NEXTARG,	0,		unsetifgroup },
+	{ "autoconf",	1,		0,		setautoconf },
+	{ "-autoconf",	-1,		0,		setautoconf },
 #ifdef INET6
 	{ "anycast",	IN6_IFF_ANYCAST,	0,	setia6flags },
 	{ "-anycast",	-IN6_IFF_ANYCAST,	0,	setia6flags },
@@ -411,7 +415,7 @@ const struct	cmd {
 	{ "flowdst",	NEXTARG,	0,		setpflow_receiver },
 	{ "-flowdst", 1,		0,		unsetpflow_receiver },
 	{ "pflowproto", NEXTARG,	0,		setpflowproto },
-	{ "-inet6",	IFXF_NOINET6,	0,		setifxflags } ,
+	{ "-inet6",	AF_INET6,	0,		removeaf },
 	{ "keepalive",	NEXTARG2,	0,		NULL, setkeepalive },
 	{ "-keepalive",	1,		0,		unsetkeepalive },
 	{ "add",	NEXTARG,	0,		bridge_add },
@@ -472,7 +476,7 @@ const struct	cmd {
 	{ "txpower",	NEXTARG,	0,		setignore },
 	{ "nwflag",	NEXTARG,	0,		setignore },
 	{ "rdomain",	NEXTARG,	0,		setignore },
-	{ "-inet6",	IFXF_NOINET6,	0,		setignore } ,
+	{ "-inet6",	AF_INET6,	0,		removeaf },
 	{ "description", NEXTARG,	0,		setignore },
 	{ "descr",	NEXTARG,	0,		setignore },
 	{ "wol",	IFXF_WOL,	0,		setignore },
@@ -1002,12 +1006,12 @@ printif(char *ifname, int ifaliases)
 				continue;
 			if ((p = afp) != NULL) {
 				if (ifa->ifa_addr->sa_family == p->af_af)
-					(*p->af_status)(1);
+					p->af_status(1);
 			} else {
 				for (p = afs; p->af_name; p++) {
 					if (ifa->ifa_addr->sa_family ==
 					    p->af_af)
-						(*p->af_status)(0);
+						p->af_status(0);
 				}
 			}
 			count++;
@@ -1109,7 +1113,7 @@ setifaddr(const char *addr, int param)
 		newaddr = 1;
 	if (doalias == 0)
 		clearaddr = 1;
-	(*afp->af_getaddr)(addr, (doalias >= 0 ? ADDR : RIDADDR));
+	afp->af_getaddr(addr, (doalias >= 0 ? ADDR : RIDADDR));
 }
 
 #ifndef SMALL
@@ -1129,14 +1133,14 @@ setifrtlabel(const char *label, int d)
 void
 setifnetmask(const char *addr, int ignored)
 {
-	(*afp->af_getaddr)(addr, MASK);
+	afp->af_getaddr(addr, MASK);
 }
 
 /* ARGSUSED */
 void
 setifbroadaddr(const char *addr, int ignored)
 {
-	(*afp->af_getaddr)(addr, DSTADDR);
+	afp->af_getaddr(addr, DSTADDR);
 }
 
 #ifndef SMALL
@@ -1199,7 +1203,7 @@ void
 setifdstaddr(const char *addr, int param)
 {
 	setaddr++;
-	(*afp->af_getaddr)(addr, DSTADDR);
+	afp->af_getaddr(addr, DSTADDR);
 }
 
 /*
@@ -1251,6 +1255,21 @@ setifxflags(const char *vname, int value)
 	my_ifr.ifr_flags = xflags;
 	if (ioctl(s, SIOCSIFXFLAGS, (caddr_t)&my_ifr) < 0)
 		warn("SIOCSIFXFLAGS");
+}
+
+void
+removeaf(const char *vname, int value)
+{
+	switch (value) {
+#ifdef INET6
+	case AF_INET6:
+		setifxflags(vname, IFXF_NOINET6);
+		setifxflags(vname, -IFXF_AUTOCONF6);
+		break;
+#endif
+	default:
+		errx(1, "removeaf not implemented for this AF");
+	}
 }
 
 #ifdef INET6
@@ -1312,6 +1331,7 @@ setia6eui64(const char *cmd, int val)
 
 	if (afp->af_af != AF_INET6)
 		errx(1, "%s not allowed for the AF", cmd);
+	setifxflags("inet6", -IFXF_NOINET6);
 	in6 = (struct in6_addr *)&in6_addreq.ifra_addr.sin6_addr;
 	if (memcmp(&in6addr_any.s6_addr[8], &in6->s6_addr[8], 8) != 0)
 		errx(1, "interface index is already filled");
@@ -1335,6 +1355,20 @@ setia6eui64(const char *cmd, int val)
 	freeifaddrs(ifap);
 }
 #endif /* INET6 */
+
+void
+setautoconf(const char *cmd, int val)
+{
+	switch (afp->af_af) {
+#ifdef INET6
+	case AF_INET6:
+		setifxflags("inet6", val * IFXF_AUTOCONF6);
+		break;
+#endif
+	default:
+		errx(1, "autoconf not allowed for this AF");
+	}
+}
 
 #ifndef SMALL
 /* ARGSUSED */
@@ -1576,8 +1610,40 @@ setifnwkey(const char *val, int d)
 				return;
 			}
 		} else {
+			/*
+			 * length of each key must be either a 5
+			 * character ASCII string or 10 hex digits for
+			 * 40 bit encryption, or 13 character ASCII
+			 * string or 26 hex digits for 128 bit
+			 * encryption.
+			 */
+			int j;
+			char *tmp = NULL;
+			size_t vlen = strlen(val);
+			switch(vlen) {
+			case 10:
+			case 26:
+				/* 0x must be missing for these lengths */
+				j = asprintf(&tmp, "0x%s", val);
+				if (j == -1) {
+					warnx("malloc failed");
+					return;
+				}
+				val = tmp;
+				break;
+			case 12:
+			case 28:
+			case 5:
+			case 13:
+				/* 0xkey or string case - all is ok */
+				break;
+			default:
+				warnx("Invalid WEP key length");
+				return;
+			}
 			len = sizeof(keybuf[0]);
 			val = get_string(val, NULL, keybuf[0], &len);
+			free(tmp);
 			if (val == NULL)
 				return;
 			nwkey.i_key[0].i_keylen = len;
@@ -2248,6 +2314,18 @@ ieee80211_printnode(struct ieee80211_nodereq *nr)
 	nr->nr_capinfo &= ~IEEE80211_CAPINFO_ESS;
 	if (nr->nr_capinfo) {
 		printb_status(nr->nr_capinfo, IEEE80211_CAPINFO_BITS);
+		if (nr->nr_capinfo & IEEE80211_CAPINFO_PRIVACY) {
+			if (nr->nr_rsnciphers & IEEE80211_WPA_CIPHER_CCMP)
+				fputs(",wpa2", stdout);
+			else if (nr->nr_rsnciphers & IEEE80211_WPA_CIPHER_TKIP)
+				fputs(",wpa1", stdout);
+			else
+				fputs(",wep", stdout);
+
+			if (nr->nr_rsnakms & IEEE80211_WPA_AKM_8021X ||
+			    nr->nr_rsnakms & IEEE80211_WPA_AKM_SHA256_8021X)
+				fputs(",802.1x", stdout);
+		}
 		putchar(' ');
 	}
 
@@ -2940,10 +3018,10 @@ status(int link, struct sockaddr_dl *sdl, int ls)
  proto_status:
 	if (link == 0) {
 		if ((p = afp) != NULL) {
-			(*p->af_status)(1);
+			p->af_status(1);
 		} else for (p = afs; p->af_name; p++) {
 			ifr.ifr_addr.sa_family = p->af_af;
-			(*p->af_status)(0);
+			p->af_status(0);
 		}
 	}
 
@@ -3018,8 +3096,8 @@ in_status(int force)
 void
 setifprefixlen(const char *addr, int d)
 {
-	if (*afp->af_getprefix)
-		(*afp->af_getprefix)(addr, MASK);
+	if (afp->af_getprefix)
+		afp->af_getprefix(addr, MASK);
 	explicit_prefix = 1;
 }
 

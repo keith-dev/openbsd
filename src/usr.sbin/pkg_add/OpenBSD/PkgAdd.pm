@@ -1,7 +1,7 @@
 #! /usr/bin/perl
 
 # ex:ts=8 sw=4:
-# $OpenBSD: PkgAdd.pm,v 1.63 2014/02/13 19:35:00 espie Exp $
+# $OpenBSD: PkgAdd.pm,v 1.74 2014/07/30 12:44:26 espie Exp $
 #
 # Copyright (c) 2003-2014 Marc Espie <espie@openbsd.org>
 #
@@ -85,7 +85,7 @@ sub tie_files
 	my ($self, $sha, $state) = @_;
 	return if $self->{link} or $self->{symlink} or $self->{nochecksum};
 	# XXX python doesn't like this, overreliance on timestamps
-	return if $self->{name} =~ m/\.py$/;
+	return if $self->{name} =~ m/\.py$/ && !defined $self->{ts};
 	if (defined $sha->{$self->{d}->key}) {
 		my $tied = $sha->{$self->{d}->key};
 		# don't tie if there's a problem with the file
@@ -105,19 +105,12 @@ our @ISA = qw(OpenBSD::AddDelete::State);
 sub handle_options
 {
 	my $state = shift;
-	$state->SUPER::handle_options('ruUzl:A:P:Q:',
+	$state->SUPER::handle_options('ruUzl:A:P:',
 	    '[-acinqrsUuvxz] [-A arch] [-B pkg-destdir] [-D name[=value]]',
-	    '[-L localbase] [-l file] [-P type] [-Q quick-destdir] pkg-name [...]');
+	    '[-L localbase] [-l file] [-P type] pkg-name [...]');
 
-	$state->{do_faked} = 0;
 	$state->{arch} = $state->opt('A');
 
-	if (defined $state->opt('Q') and defined $state->opt('B')) {
-		$state->usage("-Q and -B are incompatible options");
-	}
-	if (defined $state->opt('Q') and defined $state->opt('r')) {
-		$state->usage("-r and -Q are incompatible options");
-	}
 	if ($state->opt('P')) {
 		if ($state->opt('P') eq 'cdrom') {
 			$state->{cdrom_only} = 1;
@@ -129,10 +122,7 @@ sub handle_options
 		    $state->usage("bad option: -P #1", $state->opt('P'));
 		}
 	}
-	if (defined $state->opt('Q')) {
-		$state->{destdir} = $state->opt('Q');
-		$state->{do_faked} = 1;
-	} elsif (defined $state->opt('B')) {
+	if (defined $state->opt('B')) {
 		$state->{destdir} = $state->opt('B');
 	}
 	if (defined $state->{destdir}) {
@@ -270,11 +260,53 @@ sub setup_header
 		$state->{lastheader} = $header;
 		$state->print("#1", $header);
 		$state->print("(pretending) ") if $state->{not};
-		if ($state->{do_faked}) {
-			$state->print(" under #1", $state->{destdir});
-		}
 		$state->print("\n");
 	}
+}
+
+my $checked = {};
+
+sub check_security
+{
+	my ($set, $state, $plist, $h) = @_;
+	return if $checked->{$plist->fullpkgpath};
+	$checked->{$plist->fullpkgpath} = 1;
+	my ($error, $bad);
+	$state->run_quirks(
+		sub {
+			my $quirks = shift;
+			return unless $quirks->can("check_security");
+			$bad = $quirks->check_security($plist->fullpkgpath);
+			if (defined $bad) {
+				require OpenBSD::PkgSpec;
+				my $spec = OpenBSD::PkgSpec->new($bad);
+				my $r = $spec->match_locations([$h->{location}]);
+				if (@$r != 0) {
+					$error++;
+				}
+			}
+		});
+	if ($error) {
+		$state->errsay("Package #1 found, matching insecure #2", 
+		    $h->pkgname, $bad);
+	}
+}
+
+sub display_timestamp
+{
+	my ($pkgname, $plist, $state) = @_;
+
+	return unless $plist->is_signed;
+	if ($state->defines('nosig')) {
+		$state->errsay("NOT CHECKING DIGITAL SIGNATURE FOR #1",
+		    $pkgname);
+		return;
+	}
+	if (!$plist->check_signature($state)) {
+		$state->fatal("#1 is corrupted", $pkgname);
+	}
+	$state->say("#1 signed on #2", $pkgname, 
+	    $plist->get('digital-signature')->iso8601);
 }
 
 sub find_kept_handle
@@ -286,12 +318,16 @@ sub find_kept_handle
 	my $plist = $n->dependency_info;
 	return if !defined $plist;
 	my $pkgname = $plist->pkgname;
+	if ($set->{quirks}) {
+		display_timestamp($pkgname, $plist, $state);
+	}
 	# condition for no update
 	unless (is_installed($pkgname) &&
 	    (!$state->{allow_replacing} ||
 	      !$state->defines('installed') &&
 	      !$plist->has_different_sig($state) &&
 	      !$plist->uses_old_libs)) {
+	      	$set->check_security($state, $plist, $n);
 	      	return;
 	}
 	my $o = $set->{older}{$pkgname};
@@ -304,6 +340,7 @@ sub find_kept_handle
 		    	return;
 		}
 	}
+	$set->check_security($state, $plist, $o);
 	$set->move_kept($o);
 	$o->{tweaked} =
 	    OpenBSD::Add::tweak_package_status($pkgname, $state);
@@ -667,13 +704,19 @@ sub check_digital_signature
 			$state->{packages_without_sig}{$pkgname} = 1;
 			return if $state->defines('unsigned');
 			my $okay = 0;
+			my $url;
+			if (defined $handle->location) {
+				$url = $handle->location->url;
+			} else {
+				$url = $pkgname;
+			}
 			if ($state->{interactive}) {
 				$state->errprint('UNSIGNED PACKAGE #1: ', 
-				    $pkgname);
+				    $url);
 				$okay = $state->confirm("install anyway", 0);
 			}
 			if (!$okay) {
-				$state->fatal("Unsigned package #1", $pkgname);
+				$state->fatal("Unsigned package #1", $url);
 			}
 		}
 	}
@@ -903,6 +946,10 @@ sub process_set
 	if (newer_has_errors($set, $state)) {
 		return ();
 	}
+	if ($set->newer == 0 && $set->older_to_do == 0) {
+		$state->tracker->uptodate($set);
+		return ();
+	}
 
 	my @deps = $set->solver->solve_depends($state);
 	if ($state->verbose >= 2) {
@@ -920,6 +967,10 @@ sub process_set
 
 	if (newer_has_errors($set, $state)) {
 		return ();
+	}
+
+	for my $h ($set->newer) {
+		$set->check_security($state, $h->plist, $h);
 	}
 
 	if (newer_is_bad_arch($set, $state)) {
@@ -1063,7 +1114,6 @@ sub process_parameters
 	if ($state->{pkglist}) {
 		open my $f, '<', $state->{pkglist} or
 		    $state->fatal("bad list #1: #2", $state->{pkglist}, $!);
-		my $_;
 		while (<$f>) {
 			chomp;
 			s/\s.*//;

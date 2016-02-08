@@ -1,4 +1,4 @@
-/*	$OpenBSD: pcireg.h,v 1.45 2013/08/26 09:50:47 jsg Exp $	*/
+/*	$OpenBSD: pcireg.h,v 1.47 2014/04/27 14:55:09 stsp Exp $	*/
 /*	$NetBSD: pcireg.h,v 1.26 2000/05/10 16:58:42 thorpej Exp $	*/
 
 /*
@@ -167,6 +167,7 @@ typedef u_int8_t pci_revision_t;
 #define	PCI_SUBCLASS_MASS_STORAGE_ATA		0x05
 #define	PCI_SUBCLASS_MASS_STORAGE_SATA		0x06
 #define	PCI_SUBCLASS_MASS_STORAGE_SAS		0x07
+#define	PCI_SUBCLASS_MASS_STORAGE_NVM		0x08
 #define	PCI_SUBCLASS_MASS_STORAGE_MISC		0x80
 
 /* 0x02 network subclasses */
@@ -517,11 +518,13 @@ typedef u_int8_t pci_revision_t;
  * Power Management Control Status Register; access via capability pointer.
  */
 #define PCI_PMCSR		0x04
-#define PCI_PMCSR_STATE_MASK	0x03
-#define PCI_PMCSR_STATE_D0	0x00
-#define PCI_PMCSR_STATE_D1	0x01
-#define PCI_PMCSR_STATE_D2	0x02
-#define PCI_PMCSR_STATE_D3	0x03
+#define PCI_PMCSR_STATE_MASK	0x0003
+#define PCI_PMCSR_STATE_D0	0x0000
+#define PCI_PMCSR_STATE_D1	0x0001
+#define PCI_PMCSR_STATE_D2	0x0002
+#define PCI_PMCSR_STATE_D3	0x0003
+#define PCI_PMCSR_PME_STATUS	0x8000
+#define PCI_PMCSR_PME_EN	0x0100
 
 /*
  * HyperTransport; access via capability pointer.

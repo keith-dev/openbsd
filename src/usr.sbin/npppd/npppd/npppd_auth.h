@@ -1,4 +1,4 @@
-/*	$OpenBSD: npppd_auth.h,v 1.6 2012/09/18 13:14:08 yasuoka Exp $ */
+/*	$OpenBSD: npppd_auth.h,v 1.8 2014/07/12 14:04:18 yasuoka Exp $ */
 
 /*-
  * Copyright (c) 2009 Internet Initiative Japan Inc.
@@ -27,6 +27,8 @@
  */
 #ifndef	NPPPD_AUTH_H
 #define	NPPPD_AUTH_H 1
+
+#include <netinet/in.h>
 
 /** local authentication realm */
 #define	NPPPD_AUTH_TYPE_LOCAL		1
@@ -78,7 +80,6 @@ int                 npppd_auth_is_disposing (npppd_auth_base *);
 int                 npppd_auth_is_eap_capable (npppd_auth_base *);
 const char          *npppd_auth_get_name (npppd_auth_base *);
 const char          *npppd_auth_get_suffix (npppd_auth_base *);
-const char          *npppd_auth_get_prefix (npppd_auth_base *);
 const char          *npppd_auth_username_for_auth (npppd_auth_base *, const char *, char *);
 void                *npppd_auth_radius_get_radius_auth_setting (npppd_auth_radius *);
 void                *npppd_auth_radius_get_radius_acct_setting (npppd_auth_radius *);

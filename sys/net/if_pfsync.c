@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_pfsync.c,v 1.204 2013/11/18 21:16:55 chl Exp $	*/
+/*	$OpenBSD: if_pfsync.c,v 1.208 2014/07/22 11:06:09 mpi Exp $	*/
 
 /*
  * Copyright (c) 2002 Michael Shalayeff
@@ -66,7 +66,6 @@
 #include <netinet/tcp_seq.h>
 
 #ifdef	INET
-#include <netinet/in_systm.h>
 #include <netinet/in_var.h>
 #include <netinet/ip.h>
 #include <netinet/ip_var.h>
@@ -381,8 +380,8 @@ pfsync_clone_destroy(struct ifnet *ifp)
 	}
 
 	pool_destroy(&sc->sc_pool);
-	free(sc->sc_imo.imo_membership, M_IPMOPTS);
-	free(sc, M_DEVBUF);
+	free(sc->sc_imo.imo_membership, M_IPMOPTS, 0);
+	free(sc, M_DEVBUF, 0);
 
 	pfsyncif = NULL;
 	splx(s);
@@ -1683,9 +1682,9 @@ pfsync_sendout(void)
 	sc->sc_if.if_opackets++;
 	sc->sc_if.if_obytes += m->m_pkthdr.len;
 
-	m->m_pkthdr.rdomain = sc->sc_if.if_rdomain;
+	m->m_pkthdr.ph_rtableid = sc->sc_if.if_rdomain;
 
-	if (ip_output(m, NULL, NULL, IP_RAWOUTPUT, &sc->sc_imo, NULL) == 0)
+	if (ip_output(m, NULL, NULL, IP_RAWOUTPUT, &sc->sc_imo, NULL, 0) == 0)
 		pfsyncstats.pfsyncs_opackets++;
 	else
 		pfsyncstats.pfsyncs_oerrors++;
@@ -1798,8 +1797,8 @@ pfsync_undefer(struct pfsync_deferral *pd, int drop)
 			switch (pd->pd_st->key[PF_SK_WIRE]->af) {
 #ifdef INET
 			case AF_INET:
-				ip_output(pd->pd_m, NULL, NULL, 0,
-				    NULL, NULL);
+				ip_output(pd->pd_m, NULL, NULL, 0, NULL, NULL,
+				    0);
 				break;
 #endif /* INET */
 #ifdef INET6

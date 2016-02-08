@@ -1,4 +1,4 @@
-/* $OpenBSD: zaurus_kbd.c,v 1.34 2014/01/26 17:48:08 miod Exp $ */
+/* $OpenBSD: zaurus_kbd.c,v 1.36 2014/07/11 08:18:31 guenther Exp $ */
 /*
  * Copyright (c) 2005 Dale Rahn <drahn@openbsd.org>
  *
@@ -428,7 +428,7 @@ zkbd_on(void *v)
 		if (ratecheck(&zkbdontv, &zkbdhalttv)) {
 			if (allowpowerdown == 1) {
 				allowpowerdown = 0;
-				psignal(initproc, SIGUSR1);
+				prsignal(initprocess, SIGUSR2);
 			}
 		} else if (ratecheck(&zkbdontv, &zkbdsleeptv)) {
 			apm_suspends++;

@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile.inc,v 1.48 2013/06/05 04:06:08 guenther Exp $
+#	$OpenBSD: Makefile.inc,v 1.53 2014/05/08 21:43:49 deraadt Exp $
 
 # stdlib sources
 .PATH: ${LIBCSRCDIR}/arch/${MACHINE_CPU}/stdlib ${LIBCSRCDIR}/stdlib
@@ -6,15 +6,14 @@
 SRCS+=	a64l.c abort.c atexit.c atoi.c atof.c atol.c atoll.c bsearch.c \
 	cfree.c exit.c ecvt.c gcvt.c getenv.c getopt_long.c \
 	getsubopt.c hcreate.c heapsort.c imaxabs.c imaxdiv.c l64a.c llabs.c \
-	lldiv.c lsearch.c malloc.c merge.c posix_pty.c qsort.c radixsort.c \
-	rand.c random.c realpath.c setenv.c strtoimax.c strtol.c \
-	strtoll.c strtonum.c strtoul.c strtoull.c strtoumax.c system.c \
-	tfind.c tsearch.c _rand48.c drand48.c erand48.c jrand48.c lcong48.c \
-	lrand48.c mrand48.c nrand48.c seed48.c srand48.c qabs.c qdiv.c _Exit.c
+	lldiv.c lsearch.c malloc.c reallocarray.c merge.c posix_pty.c \
+	qsort.c radixsort.c rand.c random.c realpath.c setenv.c strtoimax.c \
+	strtol.c strtoll.c strtonum.c strtoul.c strtoull.c strtoumax.c \
+	system.c tfind.c tsearch.c _rand48.c drand48.c erand48.c jrand48.c \
+	lcong48.c lrand48.c mrand48.c nrand48.c seed48.c srand48.c qabs.c \
+	qdiv.c _Exit.c
 
-.if   (${MACHINE_CPU} == "m68k")
-SRCS+=	abs.S div.c labs.c ldiv.c
-.elif (${MACHINE_CPU} == "i386")
+.if (${MACHINE_CPU} == "i386")
 SRCS+=	abs.S div.S labs.S ldiv.S
 .elif (${MACHINE_CPU} == "vax")
 SRCS+=	abs.c div.c labs.c ldiv.c
@@ -25,7 +24,7 @@ SRCS+=	abs.c div.c labs.c ldiv.c
 SRCS+=	abs.c div.c labs.c ldiv.c
 .endif
 
-.if (${MACHINE_CPU} == "vax") || (${MACHINE_CPU} == "m68k")
+.if (${MACHINE_CPU} == "vax")
 SRCS+=	insque.S remque.S
 .else
 SRCS+=	insque.c remque.c
@@ -46,7 +45,7 @@ MLINKS+=insque.3 remque.3
 MLINKS+=labs.3 llabs.3
 MLINKS+=lsearch.3 lfind.3
 MLINKS+=malloc.3 free.3 malloc.3 realloc.3 malloc.3 calloc.3
-MLINKS+=malloc.3 cfree.3 malloc.3 malloc.conf.5
+MLINKS+=malloc.3 reallocarray.3 malloc.3 cfree.3 malloc.3 malloc.conf.5
 MLINKS+=qsort.3 heapsort.3 qsort.3 mergesort.3
 MLINKS+=radixsort.3 sradixsort.3
 MLINKS+=rand.3 srand.3 rand.3 rand_r.3

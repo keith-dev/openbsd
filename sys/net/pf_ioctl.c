@@ -1,4 +1,4 @@
-/*	$OpenBSD: pf_ioctl.c,v 1.269 2014/02/04 01:04:03 tedu Exp $ */
+/*	$OpenBSD: pf_ioctl.c,v 1.274 2014/07/22 11:06:09 mpi Exp $ */
 
 /*
  * Copyright (c) 2001 Daniel Hartmeier
@@ -60,7 +60,6 @@
 #include <net/route.h>
 
 #include <netinet/in.h>
-#include <netinet/in_systm.h>
 #include <netinet/ip.h>
 #include <netinet/ip_var.h>
 #include <netinet/ip_icmp.h>
@@ -82,22 +81,11 @@
 #include <netinet/in_pcb.h>
 #endif /* INET6 */
 
-#ifdef ALTQ
-#include <altq/altq.h>
-#endif
-
 void			 pfattach(int);
 void			 pf_thread_create(void *);
 int			 pfopen(dev_t, int, int, struct proc *);
 int			 pfclose(dev_t, int, int, struct proc *);
 int			 pfioctl(dev_t, u_long, caddr_t, int, struct proc *);
-#ifdef ALTQ
-int			 pf_begin_altq(u_int32_t *);
-int			 pf_rollback_altq(u_int32_t);
-int			 pf_commit_altq(u_int32_t);
-int			 pf_enable_altq(struct pf_altq *);
-int			 pf_disable_altq(struct pf_altq *);
-#endif /* ALTQ */
 int			 pf_begin_rules(u_int32_t *, const char *);
 int			 pf_rollback_rules(u_int32_t, char *);
 int			 pf_create_queues(void);
@@ -114,18 +102,12 @@ void			 pf_trans_set_commit(void);
 void			 pf_pool_copyin(struct pf_pool *, struct pf_pool *);
 int			 pf_rule_copyin(struct pf_rule *, struct pf_rule *,
 			    struct pf_ruleset *);
-u_int32_t		 pf_oqname2qid(char *);
-void			 pf_oqid2qname(u_int32_t, char *);
-void			 pf_oqid_unref(u_int32_t);
 u_int16_t		 pf_qname2qid(char *, int);
 void			 pf_qid2qname(u_int16_t, char *);
 void			 pf_qid_unref(u_int16_t);
 
 struct pf_rule		 pf_default_rule, pf_default_rule_new;
 struct rwlock		 pf_consistency_lock = RWLOCK_INITIALIZER("pfcnslk");
-#ifdef ALTQ
-static int		 pf_altq_running;
-#endif
 
 struct {
 	char		statusif[IFNAMSIZ];
@@ -142,7 +124,6 @@ struct {
 
 #define	TAGID_MAX	 50000
 TAILQ_HEAD(pf_tags, pf_tagname)	pf_tags = TAILQ_HEAD_INITIALIZER(pf_tags),
-				pf_oqids = TAILQ_HEAD_INITIALIZER(pf_oqids),
 				pf_qids = TAILQ_HEAD_INITIALIZER(pf_qids);
 
 #if (PF_QNAME_SIZE != PF_TAG_NAME_SIZE)
@@ -175,8 +156,6 @@ pfattach(int num)
 	    "pfstitem", NULL);
 	pool_init(&pf_rule_item_pl, sizeof(struct pf_rule_item), 0, 0, 0,
 	    "pfruleitem", NULL);
-	pool_init(&pf_altq_pl, sizeof(struct pf_altq), 0, 0, 0, "pfaltq",
-	    &pool_allocator_nointr);
 	pool_init(&pf_queue_pl, sizeof(struct pf_queuespec), 0, 0, 0, 
 	    "pfqueue", NULL);
 	pool_init(&hfsc_class_pl, sizeof(struct hfsc_class), 0, 0, PR_WAITOK,
@@ -203,10 +182,6 @@ pfattach(int num)
 	TAILQ_INIT(&pf_queues[1]);
 	pf_queues_active = &pf_queues[0];
 	pf_queues_inactive = &pf_queues[1];
-	TAILQ_INIT(&pf_altqs[0]);
-	TAILQ_INIT(&pf_altqs[1]);
-	pf_altqs_active = &pf_altqs[0];
-	pf_altqs_inactive = &pf_altqs[1];
 	TAILQ_INIT(&state_list);
 
 	/* default rule should never be garbage collected */
@@ -306,11 +281,6 @@ pf_rm_rule(struct pf_rulequeue *rulequeue, struct pf_rule *rule)
 		return;
 	pf_tag_unref(rule->tag);
 	pf_tag_unref(rule->match_tag);
-#ifdef ALTQ
-	if (rule->pqid != rule->qid)
-		pf_oqid_unref(rule->pqid);
-	pf_oqid_unref(rule->qid);
-#endif
 	pf_rtlabel_remove(&rule->src.addr);
 	pf_rtlabel_remove(&rule->dst.addr);
 	pfi_dynaddr_remove(&rule->src.addr);
@@ -428,7 +398,7 @@ tag_unref(struct pf_tags *head, u_int16_t tag)
 		if (tag == p->tag) {
 			if (--p->ref == 0) {
 				TAILQ_REMOVE(head, p, entries);
-				free(p, M_TEMP);
+				free(p, M_TEMP, 0);
 			}
 			break;
 		}
@@ -513,180 +483,6 @@ pf_qid_unref(u_int16_t qid)
 {
 	tag_unref(&pf_qids, (u_int16_t)qid);
 }
-
-#ifdef ALTQ
-u_int32_t
-pf_oqname2qid(char *qname)
-{
-	return ((u_int32_t)tagname2tag(&pf_oqids, qname, 1));
-}
-
-void
-pf_oqid2qname(u_int32_t qid, char *p)
-{
-	tag2tagname(&pf_oqids, (u_int16_t)qid, p);
-}
-
-void
-pf_oqid_unref(u_int32_t qid)
-{
-	tag_unref(&pf_oqids, (u_int16_t)qid);
-}
-
-int
-pf_begin_altq(u_int32_t *ticket)
-{
-	struct pf_altq	*altq;
-	int		 error = 0;
-
-	/* Purge the old altq list */
-	while ((altq = TAILQ_FIRST(pf_altqs_inactive)) != NULL) {
-		TAILQ_REMOVE(pf_altqs_inactive, altq, entries);
-		if (altq->qname[0] == 0) {
-			/* detach and destroy the discipline */
-			error = altq_remove(altq);
-		} else
-			pf_oqid_unref(altq->qid);
-		pool_put(&pf_altq_pl, altq);
-	}
-	if (error)
-		return (error);
-	*ticket = ++ticket_altqs_inactive;
-	altqs_inactive_open = 1;
-	return (0);
-}
-
-int
-pf_rollback_altq(u_int32_t ticket)
-{
-	struct pf_altq	*altq;
-	int		 error = 0;
-
-	if (!altqs_inactive_open || ticket != ticket_altqs_inactive)
-		return (0);
-	/* Purge the old altq list */
-	while ((altq = TAILQ_FIRST(pf_altqs_inactive)) != NULL) {
-		TAILQ_REMOVE(pf_altqs_inactive, altq, entries);
-		if (altq->qname[0] == 0) {
-			/* detach and destroy the discipline */
-			error = altq_remove(altq);
-		} else
-			pf_oqid_unref(altq->qid);
-		pool_put(&pf_altq_pl, altq);
-	}
-	altqs_inactive_open = 0;
-	return (error);
-}
-
-int
-pf_commit_altq(u_int32_t ticket)
-{
-	struct pf_altqqueue	*old_altqs;
-	struct pf_altq		*altq;
-	int			 s, err, error = 0;
-
-	if (!altqs_inactive_open || ticket != ticket_altqs_inactive)
-		return (EBUSY);
-
-	/* swap altqs, keep the old. */
-	s = splsoftnet();
-	old_altqs = pf_altqs_active;
-	pf_altqs_active = pf_altqs_inactive;
-	pf_altqs_inactive = old_altqs;
-	ticket_altqs_active = ticket_altqs_inactive;
-
-	/* Attach new disciplines */
-	TAILQ_FOREACH(altq, pf_altqs_active, entries) {
-		if (altq->qname[0] == 0) {
-			/* attach the discipline */
-			error = altq_pfattach(altq);
-			if (error == 0 && pf_altq_running)
-				error = pf_enable_altq(altq);
-			if (error != 0) {
-				splx(s);
-				return (error);
-			}
-		}
-	}
-
-	/* Purge the old altq list */
-	while ((altq = TAILQ_FIRST(pf_altqs_inactive)) != NULL) {
-		TAILQ_REMOVE(pf_altqs_inactive, altq, entries);
-		if (altq->qname[0] == 0) {
-			/* detach and destroy the discipline */
-			if (pf_altq_running)
-				error = pf_disable_altq(altq);
-			err = altq_pfdetach(altq);
-			if (err != 0 && error == 0)
-				error = err;
-			err = altq_remove(altq);
-			if (err != 0 && error == 0)
-				error = err;
-		} else
-			pf_oqid_unref(altq->qid);
-		pool_put(&pf_altq_pl, altq);
-	}
-	splx(s);
-
-	altqs_inactive_open = 0;
-	return (error);
-}
-
-int
-pf_enable_altq(struct pf_altq *altq)
-{
-	struct ifnet		*ifp;
-	struct oldtb_profile	 tb;
-	int			 s, error = 0;
-
-	if ((ifp = ifunit(altq->ifname)) == NULL)
-		return (EINVAL);
-
-	if (ifp->if_snd.altq_type != ALTQT_NONE)
-		error = altq_enable(&ifp->if_snd);
-
-	/* set tokenbucket regulator */
-	if (error == 0 && ifp != NULL && ALTQ_IS_ENABLED(&ifp->if_snd)) {
-		tb.rate = altq->ifbandwidth;
-		tb.depth = altq->tbrsize;
-		s = splnet();
-		error = oldtbr_set(&ifp->if_snd, &tb);
-		splx(s);
-	}
-
-	return (error);
-}
-
-int
-pf_disable_altq(struct pf_altq *altq)
-{
-	struct ifnet		*ifp;
-	struct oldtb_profile	 tb;
-	int			 s, error;
-
-	if ((ifp = ifunit(altq->ifname)) == NULL)
-		return (EINVAL);
-
-	/*
-	 * when the discipline is no longer referenced, it was overridden
-	 * by a new one.  if so, just return.
-	 */
-	if (altq->altq_disc != ifp->if_snd.altq_disc)
-		return (0);
-
-	error = altq_disable(&ifp->if_snd);
-
-	if (error == 0) {
-		/* clear tokenbucket regulator */
-		tb.rate = 0;
-		s = splnet();
-		error = oldtbr_set(&ifp->if_snd, &tb);
-		splx(s);
-	}
-
-	return (error);
-}
-#endif /* ALTQ */
 
 int
 pf_begin_rules(u_int32_t *ticket, const char *anchor)
@@ -932,7 +728,7 @@ pf_commit_rules(u_int32_t ticket, char *anchor)
 	while ((rule = TAILQ_FIRST(old_rules)) != NULL)
 		pf_rm_rule(old_rules, rule);
 	if (rs->rules.inactive.ptr_array)
-		free(rs->rules.inactive.ptr_array, M_TEMP);
+		free(rs->rules.inactive.ptr_array, M_TEMP, 0);
 	rs->rules.inactive.ptr_array = NULL;
 	rs->rules.inactive.rcount = 0;
 	rs->rules.inactive.open = 0;
@@ -954,7 +750,7 @@ pf_setup_pfsync_matching(struct pf_ruleset *rs)
 
 	MD5Init(&ctx);
 	if (rs->rules.inactive.ptr_array)
-		free(rs->rules.inactive.ptr_array, M_TEMP);
+		free(rs->rules.inactive.ptr_array, M_TEMP, 0);
 	rs->rules.inactive.ptr_array = NULL;
 
 	if (rs->rules.inactive.rcount) {
@@ -1031,9 +827,6 @@ pfioctl(dev_t dev, u_long cmd, caddr_t addr, int flags, struct proc *p)
 		case DIOCGETTIMEOUT:
 		case DIOCCLRRULECTRS:
 		case DIOCGETLIMIT:
-		case DIOCGETALTQS:
-		case DIOCGETALTQ:
-		case DIOCGETALTQSTATS:
 		case DIOCGETRULESETS:
 		case DIOCGETRULESET:
 		case DIOCGETQUEUES:
@@ -1076,9 +869,6 @@ pfioctl(dev_t dev, u_long cmd, caddr_t addr, int flags, struct proc *p)
 		case DIOCGETSTATES:
 		case DIOCGETTIMEOUT:
 		case DIOCGETLIMIT:
-		case DIOCGETALTQS:
-		case DIOCGETALTQ:
-		case DIOCGETALTQSTATS:
 		case DIOCGETRULESETS:
 		case DIOCGETRULESET:
 		case DIOCGETQUEUES:
@@ -1279,7 +1069,7 @@ pfioctl(dev_t dev, u_long cmd, caddr_t addr, int flags, struct proc *p)
 			pool_put(&pf_rule_pl, rule);
 			break;
 		}
-		rule->cuid = p->p_cred->p_ruid;
+		rule->cuid = p->p_ucred->cr_ruid;
 		rule->cpid = p->p_p->ps_pid;
 
 		switch (rule->af) {
@@ -1455,7 +1245,7 @@ pfioctl(dev_t dev, u_long cmd, caddr_t addr, int flags, struct proc *p)
 				break;
 			}
 			pf_rule_copyin(&pcr->rule, newrule, ruleset);
-			newrule->cuid = p->p_cred->p_ruid;
+			newrule->cuid = p->p_ucred->cr_ruid;
 			newrule->cpid = p->p_p->ps_pid;
 
 			switch (newrule->af) {
@@ -1691,7 +1481,7 @@ pfioctl(dev_t dev, u_long cmd, caddr_t addr, int flags, struct proc *p)
 				pf_state_export(pstore, state);
 				error = copyout(pstore, p, sizeof(*p));
 				if (error) {
-					free(pstore, M_TEMP);
+					free(pstore, M_TEMP, 0);
 					goto fail;
 				}
 				p++;
@@ -1702,7 +1492,7 @@ pfioctl(dev_t dev, u_long cmd, caddr_t addr, int flags, struct proc *p)
 
 		ps->ps_len = sizeof(struct pfsync_state) * nr;
 
-		free(pstore, M_TEMP);
+		free(pstore, M_TEMP, 0);
 		break;
 	}
 
@@ -1870,156 +1660,6 @@ pfioctl(dev_t dev, u_long cmd, caddr_t addr, int flags, struct proc *p)
 		}
 		break;
 	}
-
-#ifdef ALTQ
-	case DIOCSTARTALTQ: {
-		struct pf_altq		*altq;
-
-		/* enable all altq interfaces on active list */
-		TAILQ_FOREACH(altq, pf_altqs_active, entries) {
-			if (altq->qname[0] == 0) {
-				error = pf_enable_altq(altq);
-				if (error != 0)
-					break;
-			}
-		}
-		if (error == 0)
-			pf_altq_running = 1;
-		DPFPRINTF(LOG_NOTICE, "altq: started");
-		break;
-	}
-
-	case DIOCSTOPALTQ: {
-		struct pf_altq		*altq;
-
-		/* disable all altq interfaces on active list */
-		TAILQ_FOREACH(altq, pf_altqs_active, entries) {
-			if (altq->qname[0] == 0) {
-				error = pf_disable_altq(altq);
-				if (error != 0)
-					break;
-			}
-		}
-		if (error == 0)
-			pf_altq_running = 0;
-		DPFPRINTF(LOG_NOTICE, "altq: stopped");
-		break;
-	}
-
-	case DIOCADDALTQ: {
-		struct pfioc_altq	*pa = (struct pfioc_altq *)addr;
-		struct pf_altq		*altq, *a;
-
-		if (pa->ticket != ticket_altqs_inactive) {
-			error = EBUSY;
-			break;
-		}
-		altq = pool_get(&pf_altq_pl, PR_WAITOK|PR_LIMITFAIL);
-		if (altq == NULL) {
-			error = ENOMEM;
-			break;
-		}
-		bcopy(&pa->altq, altq, sizeof(struct pf_altq));
-		altq->altq_disc = NULL;
-
-		/*
-		 * if this is for a queue, find the discipline and
-		 * copy the necessary fields
-		 */
-		if (altq->qname[0] != 0) {
-			if ((altq->qid = pf_oqname2qid(altq->qname)) == 0) {
-				error = EBUSY;
-				pool_put(&pf_altq_pl, altq);
-				break;
-			}
-			TAILQ_FOREACH(a, pf_altqs_inactive, entries) {
-				if (strncmp(a->ifname, altq->ifname,
-				    IFNAMSIZ) == 0 && a->qname[0] == 0) {
-					altq->altq_disc = a->altq_disc;
-					break;
-				}
-			}
-		}
-
-		error = altq_add(altq);
-		if (error) {
-			pool_put(&pf_altq_pl, altq);
-			break;
-		}
-
-		TAILQ_INSERT_TAIL(pf_altqs_inactive, altq, entries);
-		bcopy(altq, &pa->altq, sizeof(struct pf_altq));
-		break;
-	}
-
-	case DIOCGETALTQS: {
-		struct pfioc_altq	*pa = (struct pfioc_altq *)addr;
-		struct pf_altq		*altq;
-
-		pa->nr = 0;
-		TAILQ_FOREACH(altq, pf_altqs_active, entries)
-			pa->nr++;
-		pa->ticket = ticket_altqs_active;
-		break;
-	}
-
-	case DIOCGETALTQ: {
-		struct pfioc_altq	*pa = (struct pfioc_altq *)addr;
-		struct pf_altq		*altq;
-		u_int32_t		 nr;
-
-		if (pa->ticket != ticket_altqs_active) {
-			error = EBUSY;
-			break;
-		}
-		nr = 0;
-		altq = TAILQ_FIRST(pf_altqs_active);
-		while ((altq != NULL) && (nr < pa->nr)) {
-			altq = TAILQ_NEXT(altq, entries);
-			nr++;
-		}
-		if (altq == NULL) {
-			error = EBUSY;
-			break;
-		}
-		bcopy(altq, &pa->altq, sizeof(struct pf_altq));
-		break;
-	}
-
-	case DIOCCHANGEALTQ:
-		/* CHANGEALTQ not supported yet! */
-		error = ENODEV;
-		break;
-
-	case DIOCGETALTQSTATS: {
-		struct pfioc_altqstats	*pq = (struct pfioc_altqstats *)addr;
-		struct pf_altq		*altq;
-		u_int32_t		 nr;
-		int			 nbytes;
-
-		if (pq->ticket != ticket_altqs_active) {
-			error = EBUSY;
-			break;
-		}
-		nbytes = pq->nbytes;
-		nr = 0;
-		altq = TAILQ_FIRST(pf_altqs_active);
-		while ((altq != NULL) && (nr < pq->nr)) {
-			altq = TAILQ_NEXT(altq, entries);
-			nr++;
-		}
-		if (altq == NULL) {
-			error = EBUSY;
-			break;
-		}
-		error = altq_getqstats(altq, pq->buf, &nbytes);
-		if (error == 0) {
-			pq->scheduler = altq->scheduler;
-			pq->nbytes = nbytes;
-		}
-		break;
-	}
-#endif /* ALTQ */
 
 	case DIOCGETRULESETS: {
 		struct pfioc_ruleset	*pr = (struct pfioc_ruleset *)addr;
@@ -2307,56 +1947,41 @@ pfioctl(dev_t dev, u_long cmd, caddr_t addr, int flags, struct proc *p)
 		bzero(&pf_trans_set, sizeof(pf_trans_set));
 		for (i = 0; i < io->size; i++) {
 			if (copyin(io->array+i, ioe, sizeof(*ioe))) {
-				free(table, M_TEMP);
-				free(ioe, M_TEMP);
+				free(table, M_TEMP, 0);
+				free(ioe, M_TEMP, 0);
 				error = EFAULT;
 				goto fail;
 			}
 			switch (ioe->type) {
-#ifdef ALTQ
-			case PF_TRANS_ALTQ:
-				if (ioe->anchor[0]) {
-					free(table, M_TEMP);
-					free(ioe, M_TEMP);
-					error = EINVAL;
-					goto fail;
-				}
-				if ((error = pf_begin_altq(&ioe->ticket))) {
-					free(table, M_TEMP);
-					free(ioe, M_TEMP);
-					goto fail;
-				}
-				break;
-#endif /* ALTQ */
 			case PF_TRANS_TABLE:
 				bzero(table, sizeof(*table));
 				strlcpy(table->pfrt_anchor, ioe->anchor,
 				    sizeof(table->pfrt_anchor));
 				if ((error = pfr_ina_begin(table,
 				    &ioe->ticket, NULL, 0))) {
-					free(table, M_TEMP);
-					free(ioe, M_TEMP);
+					free(table, M_TEMP, 0);
+					free(ioe, M_TEMP, 0);
 					goto fail;
 				}
 				break;
 			default:
 				if ((error = pf_begin_rules(&ioe->ticket,
 				    ioe->anchor))) {
-					free(table, M_TEMP);
-					free(ioe, M_TEMP);
+					free(table, M_TEMP, 0);
+					free(ioe, M_TEMP, 0);
 					goto fail;
 				}
 				break;
 			}
 			if (copyout(ioe, io->array+i, sizeof(io->array[i]))) {
-				free(table, M_TEMP);
-				free(ioe, M_TEMP);
+				free(table, M_TEMP, 0);
+				free(ioe, M_TEMP, 0);
 				error = EFAULT;
 				goto fail;
 			}
 		}
-		free(table, M_TEMP);
-		free(ioe, M_TEMP);
+		free(table, M_TEMP, 0);
+		free(ioe, M_TEMP, 0);
 		break;
 	}
 
@@ -2374,50 +1999,35 @@ pfioctl(dev_t dev, u_long cmd, caddr_t addr, int flags, struct proc *p)
 		table = malloc(sizeof(*table), M_TEMP, M_WAITOK);
 		for (i = 0; i < io->size; i++) {
 			if (copyin(io->array+i, ioe, sizeof(*ioe))) {
-				free(table, M_TEMP);
-				free(ioe, M_TEMP);
+				free(table, M_TEMP, 0);
+				free(ioe, M_TEMP, 0);
 				error = EFAULT;
 				goto fail;
 			}
 			switch (ioe->type) {
-#ifdef ALTQ
-			case PF_TRANS_ALTQ:
-				if (ioe->anchor[0]) {
-					free(table, M_TEMP);
-					free(ioe, M_TEMP);
-					error = EINVAL;
-					goto fail;
-				}
-				if ((error = pf_rollback_altq(ioe->ticket))) {
-					free(table, M_TEMP);
-					free(ioe, M_TEMP);
-					goto fail; /* really bad */
-				}
-				break;
-#endif /* ALTQ */
 			case PF_TRANS_TABLE:
 				bzero(table, sizeof(*table));
 				strlcpy(table->pfrt_anchor, ioe->anchor,
 				    sizeof(table->pfrt_anchor));
 				if ((error = pfr_ina_rollback(table,
 				    ioe->ticket, NULL, 0))) {
-					free(table, M_TEMP);
-					free(ioe, M_TEMP);
+					free(table, M_TEMP, 0);
+					free(ioe, M_TEMP, 0);
 					goto fail; /* really bad */
 				}
 				break;
 			default:
 				if ((error = pf_rollback_rules(ioe->ticket,
 				    ioe->anchor))) {
-					free(table, M_TEMP);
-					free(ioe, M_TEMP);
+					free(table, M_TEMP, 0);
+					free(ioe, M_TEMP, 0);
 					goto fail; /* really bad */
 				}
 				break;
 			}
 		}
-		free(table, M_TEMP);
-		free(ioe, M_TEMP);
+		free(table, M_TEMP, 0);
+		free(ioe, M_TEMP, 0);
 		break;
 	}
 
@@ -2437,35 +2047,18 @@ pfioctl(dev_t dev, u_long cmd, caddr_t addr, int flags, struct proc *p)
 		/* first makes sure everything will succeed */
 		for (i = 0; i < io->size; i++) {
 			if (copyin(io->array+i, ioe, sizeof(*ioe))) {
-				free(table, M_TEMP);
-				free(ioe, M_TEMP);
+				free(table, M_TEMP, 0);
+				free(ioe, M_TEMP, 0);
 				error = EFAULT;
 				goto fail;
 			}
 			switch (ioe->type) {
-#ifdef ALTQ
-			case PF_TRANS_ALTQ:
-				if (ioe->anchor[0]) {
-					free(table, M_TEMP);
-					free(ioe, M_TEMP);
-					error = EINVAL;
-					goto fail;
-				}
-				if (!altqs_inactive_open || ioe->ticket !=
-				    ticket_altqs_inactive) {
-					free(table, M_TEMP);
-					free(ioe, M_TEMP);
-					error = EBUSY;
-					goto fail;
-				}
-				break;
-#endif /* ALTQ */
 			case PF_TRANS_TABLE:
 				rs = pf_find_ruleset(ioe->anchor);
 				if (rs == NULL || !rs->topen || ioe->ticket !=
 				     rs->tticket) {
-					free(table, M_TEMP);
-					free(ioe, M_TEMP);
+					free(table, M_TEMP, 0);
+					free(ioe, M_TEMP, 0);
 					error = EBUSY;
 					goto fail;
 				}
@@ -2476,8 +2069,8 @@ pfioctl(dev_t dev, u_long cmd, caddr_t addr, int flags, struct proc *p)
 				    !rs->rules.inactive.open ||
 				    rs->rules.inactive.ticket !=
 				    ioe->ticket) {
-					free(table, M_TEMP);
-					free(ioe, M_TEMP);
+					free(table, M_TEMP, 0);
+					free(ioe, M_TEMP, 0);
 					error = EBUSY;
 					goto fail;
 				}
@@ -2492,8 +2085,8 @@ pfioctl(dev_t dev, u_long cmd, caddr_t addr, int flags, struct proc *p)
 		for (i = 0; i < PF_LIMIT_MAX; i++) {
 			if (((struct pool *)pf_pool_limits[i].pp)->pr_nout >
 			    pf_pool_limits[i].limit_new) {
-				free(table, M_TEMP);
-				free(ioe, M_TEMP);
+				free(table, M_TEMP, 0);
+				free(ioe, M_TEMP, 0);
 				error = EBUSY;
 				goto fail;
 			}
@@ -2501,37 +2094,28 @@ pfioctl(dev_t dev, u_long cmd, caddr_t addr, int flags, struct proc *p)
 		/* now do the commit - no errors should happen here */
 		for (i = 0; i < io->size; i++) {
 			if (copyin(io->array+i, ioe, sizeof(*ioe))) {
-				free(table, M_TEMP);
-				free(ioe, M_TEMP);
+				free(table, M_TEMP, 0);
+				free(ioe, M_TEMP, 0);
 				error = EFAULT;
 				goto fail;
 			}
 			switch (ioe->type) {
-#ifdef ALTQ
-			case PF_TRANS_ALTQ:
-				if ((error = pf_commit_altq(ioe->ticket))) {
-					free(table, M_TEMP);
-					free(ioe, M_TEMP);
-					goto fail; /* really bad */
-				}
-				break;
-#endif /* ALTQ */
 			case PF_TRANS_TABLE:
 				bzero(table, sizeof(*table));
 				strlcpy(table->pfrt_anchor, ioe->anchor,
 				    sizeof(table->pfrt_anchor));
 				if ((error = pfr_ina_commit(table, ioe->ticket,
 				    NULL, NULL, 0))) {
-					free(table, M_TEMP);
-					free(ioe, M_TEMP);
+					free(table, M_TEMP, 0);
+					free(ioe, M_TEMP, 0);
 					goto fail; /* really bad */
 				}
 				break;
 			default:
 				if ((error = pf_commit_rules(ioe->ticket,
 				    ioe->anchor))) {
-					free(table, M_TEMP);
-					free(ioe, M_TEMP);
+					free(table, M_TEMP, 0);
+					free(ioe, M_TEMP, 0);
 					goto fail; /* really bad */
 				}
 				break;
@@ -2542,8 +2126,8 @@ pfioctl(dev_t dev, u_long cmd, caddr_t addr, int flags, struct proc *p)
 			    pf_pool_limits[i].limit &&
 			    pool_sethardlimit(pf_pool_limits[i].pp,
 			    pf_pool_limits[i].limit_new, NULL, 0) != 0) {
-				free(table, M_TEMP);
-				free(ioe, M_TEMP);
+				free(table, M_TEMP, 0);
+				free(ioe, M_TEMP, 0);
 				error = EBUSY;
 				goto fail; /* really bad */
 			}
@@ -2560,8 +2144,8 @@ pfioctl(dev_t dev, u_long cmd, caddr_t addr, int flags, struct proc *p)
 		}
 		pfi_xcommit();
 		pf_trans_set_commit();
-		free(table, M_TEMP);
-		free(ioe, M_TEMP);
+		free(table, M_TEMP, 0);
+		free(ioe, M_TEMP, 0);
 		break;
 	}
 
@@ -2610,7 +2194,7 @@ pfioctl(dev_t dev, u_long cmd, caddr_t addr, int flags, struct proc *p)
 
 			error = copyout(pstore, p, sizeof(*p));
 			if (error) {
-				free(pstore, M_TEMP);
+				free(pstore, M_TEMP, 0);
 				goto fail;
 			}
 			p++;
@@ -2618,7 +2202,7 @@ pfioctl(dev_t dev, u_long cmd, caddr_t addr, int flags, struct proc *p)
 		}
 		psn->psn_len = sizeof(struct pf_src_node) * nr;
 
-		free(pstore, M_TEMP);
+		free(pstore, M_TEMP, 0);
 		break;
 	}
 
@@ -2815,19 +2399,12 @@ pf_rule_copyin(struct pf_rule *from, struct pf_rule *to,
 	to->max_src_conn_rate.limit = from->max_src_conn_rate.limit;
 	to->max_src_conn_rate.seconds = from->max_src_conn_rate.seconds;
 
-	/* set queue IDs. little ugly due to both altq and new system... */
 	if (to->qname[0] != 0) {
 		if ((to->qid = pf_qname2qid(to->qname, 0)) == 0)
-#ifdef ALTQ
-			if ((to->qid = pf_oqname2qid(to->qname)) == 0)
-#endif
-				return (EBUSY);
+			return (EBUSY);
 		if (to->pqname[0] != 0) {
 			if ((to->pqid = pf_qname2qid(to->pqname, 0)) == 0)
-#ifdef ALTQ
-				if ((to->pqid = pf_oqname2qid(to->pqname)) == 0)
-#endif
-					return (EBUSY);
+				return (EBUSY);
 		} else
 			to->pqid = to->qid;
 	}

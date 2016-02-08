@@ -1,4 +1,4 @@
-/*	$OpenBSD: oosiop.c,v 1.20 2013/10/09 18:22:06 miod Exp $	*/
+/*	$OpenBSD: oosiop.c,v 1.22 2014/07/13 23:10:23 deraadt Exp $	*/
 /*	$NetBSD: oosiop.c,v 1.4 2003/10/29 17:45:55 tsutsui Exp $	*/
 
 /*
@@ -43,8 +43,6 @@
 #include <sys/buf.h>
 #include <sys/malloc.h>
 #include <sys/queue.h>
-
-#include <uvm/uvm_extern.h>
 
 #include <scsi/scsi_all.h>
 #include <scsi/scsiconf.h>
@@ -294,7 +292,7 @@ oosiop_alloc_cb(struct oosiop_softc *sc, int ncb)
 	/*
 	 * Allocate oosiop_cb.
 	 */
-	cb = malloc(sizeof(*cb) * ncb, M_DEVBUF, M_NOWAIT | M_ZERO);
+	cb = mallocarray(ncb, sizeof(*cb), M_DEVBUF, M_NOWAIT | M_ZERO);
 	if (cb == NULL) {
 		printf(": failed to allocate cb memory\n");
 		return (ENOMEM);

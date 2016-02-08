@@ -1,4 +1,4 @@
-/*	$OpenBSD: dev.c,v 1.5 2013/06/11 16:42:09 deraadt Exp $	*/
+/*	$OpenBSD: dev.c,v 1.7 2014/07/12 21:03:38 tedu Exp $	*/
 
 /*
  * Copyright (c) 2010 Miodrag Vallat.

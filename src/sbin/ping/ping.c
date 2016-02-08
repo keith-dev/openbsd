@@ -1,4 +1,4 @@
-/*	$OpenBSD: ping.c,v 1.99 2014/01/10 21:57:44 florian Exp $	*/
+/*	$OpenBSD: ping.c,v 1.111 2014/07/11 15:30:47 florian Exp $	*/
 /*	$NetBSD: ping.c,v 1.20 1995/08/11 22:37:58 cgd Exp $	*/
 
 /*
@@ -70,6 +70,7 @@
 #include <ctype.h>
 #include <err.h>
 #include <errno.h>
+#include <poll.h>
 #include <string.h>
 #include <stdlib.h>
 
@@ -100,7 +101,7 @@ int options;
 #define	F_QUIET		0x0010
 #define	F_RROUTE	0x0020
 #define	F_SO_DEBUG	0x0040
-#define	F_SO_DONTROUTE	0x0080
+/*			0x0080 */
 #define	F_VERBOSE	0x0100
 #define	F_SADDR		0x0200
 #define	F_HDRINCL	0x0400
@@ -156,7 +157,7 @@ int bufspace = IP_MAXPACKET;
 void fill(char *, char *);
 void catcher(int signo);
 void prtsig(int signo);
-void finish(int signo);
+__dead void finish(int signo);
 void summary(int, int);
 int in_cksum(u_short *, int);
 void pinger(void);
@@ -175,20 +176,15 @@ void usage(void);
 int
 main(int argc, char *argv[])
 {
-	struct timeval timeout;
 	struct hostent *hp;
 	struct sockaddr_in *to;
 	struct in_addr saddr;
-	int i, ch, hold = 1, packlen, preload, maxsize, df = 0, tos = 0;
+	int ch, i, optval = 1, packlen, preload, maxsize, df = 0, tos = 0;
 	u_char *datap, *packet, ttl = MAXTTL, loop = 1;
 	char *target, hnamebuf[MAXHOSTNAMELEN];
-#ifdef IP_OPTIONS
 	char rspace[3 + 4 * NROUTES + 1];	/* record route space */
-#endif
 	socklen_t maxsizelen;
 	const char *errstr;
-	fd_set *fdmaskp;
-	size_t fdmasks;
 	uid_t uid;
 	u_int rtableid;
 
@@ -203,7 +199,7 @@ main(int argc, char *argv[])
 	preload = 0;
 	datap = &outpack[8 + sizeof(struct tv32)];
 	while ((ch = getopt(argc, argv,
-	    "DEI:LRS:c:defi:l:np:qrs:T:t:V:vw:")) != -1)
+	    "DEI:LRS:c:defi:l:np:qs:T:t:V:vw:")) != -1)
 		switch(ch) {
 		case 'c':
 			npackets = (unsigned long)strtonum(optarg, 0,
@@ -282,9 +278,6 @@ main(int argc, char *argv[])
 			break;
 		case 'R':
 			options |= F_RROUTE;
-			break;
-		case 'r':
-			options |= F_SO_DONTROUTE;
 			break;
 		case 's':		/* size of packet to send */
 			datalen = (unsigned int)strtonum(optarg, 0, MAXPAYLOAD, &errstr);
@@ -401,11 +394,8 @@ main(int argc, char *argv[])
 	}
 
 	if (options & F_SO_DEBUG)
-		(void)setsockopt(s, SOL_SOCKET, SO_DEBUG, &hold,
-		    sizeof(hold));
-	if (options & F_SO_DONTROUTE)
-		(void)setsockopt(s, SOL_SOCKET, SO_DONTROUTE, &hold,
-		    sizeof(hold));
+		(void)setsockopt(s, SOL_SOCKET, SO_DEBUG, &optval,
+		    sizeof(optval));
 
 	if (options & F_TTL) {
 		if (IN_MULTICAST(ntohl(to->sin_addr.s_addr)))
@@ -421,7 +411,7 @@ main(int argc, char *argv[])
 	if (options & F_HDRINCL) {
 		struct ip *ip = (struct ip *)outpackhdr;
 
-		setsockopt(s, IPPROTO_IP, IP_HDRINCL, &hold, sizeof(hold));
+		setsockopt(s, IPPROTO_IP, IP_HDRINCL, &optval, sizeof(optval));
 		ip->ip_v = IPVERSION;
 		ip->ip_hl = sizeof(struct ip) >> 2;
 		ip->ip_tos = tos;
@@ -440,7 +430,6 @@ main(int argc, char *argv[])
 	if (options & F_RROUTE) {
 		if (IN_MULTICAST(ntohl(to->sin_addr.s_addr)))
 			errx(1, "record route not valid to multicast destinations");
-#ifdef IP_OPTIONS
 		memset(rspace, 0, sizeof(rspace));
 		rspace[IPOPT_OPTVAL] = IPOPT_RR;
 		rspace[IPOPT_OLEN] = sizeof(rspace)-1;
@@ -450,9 +439,6 @@ main(int argc, char *argv[])
 			perror("ping: record route");
 			exit(1);
 		}
-#else
-		errx(1, "record route not available in this implementation");
-#endif /* IP_OPTIONS */
 	}
 
 	if ((moptions & MULTICAST_NOLOOP) &&
@@ -503,9 +489,7 @@ main(int argc, char *argv[])
 
 	(void)signal(SIGINT, finish);
 	(void)signal(SIGALRM, catcher);
-#ifdef SIGINFO
 	(void)signal(SIGINFO, prtsig);
-#endif
 
 	while (preload--)		/* fire off them quickies */
 		pinger();
@@ -513,26 +497,26 @@ main(int argc, char *argv[])
 	if ((options & F_FLOOD) == 0)
 		catcher(0);		/* start things going */
 
-	fdmasks = howmany(s+1, NFDBITS) * sizeof(fd_mask);
-	if ((fdmaskp = (fd_set *)malloc(fdmasks)) == NULL)
-		err(1, "malloc");
-
 	for (;;) {
-		struct sockaddr_in from;
-		sigset_t omask, nmask;
-		socklen_t fromlen;
-		int cc;
+		struct sockaddr_in	from;
+		sigset_t		omask, nmask;
+		socklen_t		fromlen;
+		struct pollfd		pfd;
+		ssize_t			cc;
+		int			timeout;
 
 		if (options & F_FLOOD) {
 			pinger();
-			timeout.tv_sec = 0;
-			timeout.tv_usec = 10000;
-			memset(fdmaskp, 0, fdmasks);
-			FD_SET(s, fdmaskp);
-			if (select(s + 1, (fd_set *)fdmaskp, (fd_set *)NULL,
-			    (fd_set *)NULL, &timeout) < 1)
-				continue;
-		}
+			timeout = 10;
+		} else
+			timeout = INFTIM;
+
+		pfd.fd = s;
+		pfd.events = POLLIN;
+
+		if (poll(&pfd, 1, timeout) <= 0)
+			continue;
+
 		fromlen = sizeof(from);
 		if ((cc = recvfrom(s, packet, packlen, 0,
 		    (struct sockaddr *)&from, &fromlen)) < 0) {
@@ -549,10 +533,8 @@ main(int argc, char *argv[])
 		if (npackets && nreceived >= npackets)
 			break;
 	}
-	free(fdmaskp);
 	finish(0);
 	/* NOTREACHED */
-	exit(0);	/* Make the compiler happy */
 }
 
 /*
@@ -716,11 +698,7 @@ pr_pack(char *buf, int cc, struct sockaddr_in *from)
 		if (timing) {
 			struct tv32 tv32;
 
-#ifndef icmp_data
-			pkttime = (char *)&icp->icmp_ip;
-#else
 			pkttime = (char *)icp->icmp_data;
-#endif
 			memcpy(&tv32, pkttime, sizeof tv32);
 			tp.tv_sec = ntohl(tv32.tv32_sec);
 			tp.tv_usec = ntohl(tv32.tv32_usec);
@@ -1010,7 +988,7 @@ qsqrt(quad_t qdev)
  * finish --
  *	Print out statistics, and give up.
  */
-void
+__dead void
 finish(int signo)
 {
 	(void)signal(SIGINT, SIG_IGN);
@@ -1021,22 +999,6 @@ finish(int signo)
 	else
 		exit(nreceived ? 0 : 1);
 }
-
-#ifdef notdef
-static char *ttab[] = {
-	"Echo Reply",		/* ip + seq + udata */
-	"Dest Unreachable",	/* net, host, proto, port, frag, sr + IP */
-	"Source Quench",	/* IP */
-	"Redirect",		/* redirect type, gateway, + IP  */
-	"Echo",
-	"Time Exceeded",	/* transit, frag reassem + IP */
-	"Parameter Problem",	/* pointer + IP */
-	"Timestamp",		/* id + seq + three timestamps */
-	"Timestamp Reply",	/* " */
-	"Info Request",		/* id + sq */
-	"Info Reply"		/* " */
-};
-#endif
 
 /*
  * pr_icmph --
@@ -1110,19 +1072,11 @@ pr_icmph(struct icmp *icp)
 			break;
 		}
 		/* Print returned IP header information */
-#ifndef icmp_data
-		pr_retip(&icp->icmp_ip);
-#else
 		pr_retip((struct ip *)icp->icmp_data);
-#endif
 		break;
 	case ICMP_SOURCEQUENCH:
 		(void)printf("Source Quench\n");
-#ifndef icmp_data
-		pr_retip(&icp->icmp_ip);
-#else
 		pr_retip((struct ip *)icp->icmp_data);
-#endif
 		break;
 	case ICMP_REDIRECT:
 		switch(icp->icmp_code) {
@@ -1144,11 +1098,7 @@ pr_icmph(struct icmp *icp)
 		}
 		(void)printf("(New addr: %s)\n",
 		    inet_ntoa(icp->icmp_gwaddr));
-#ifndef icmp_data
-		pr_retip(&icp->icmp_ip);
-#else
 		pr_retip((struct ip *)icp->icmp_data);
-#endif
 		break;
 	case ICMP_ECHO:
 		(void)printf("Echo Request\n");
@@ -1177,11 +1127,7 @@ pr_icmph(struct icmp *icp)
 			    icp->icmp_code);
 			break;
 		}
-#ifndef icmp_data
-		pr_retip(&icp->icmp_ip);
-#else
 		pr_retip((struct ip *)icp->icmp_data);
-#endif
 		break;
 	case ICMP_PARAMPROB:
 		switch(icp->icmp_code) {
@@ -1195,11 +1141,7 @@ pr_icmph(struct icmp *icp)
 			    ntohs(icp->icmp_hun.ih_pptr));
 			break;
 		}
-#ifndef icmp_data
-		pr_retip(&icp->icmp_ip);
-#else
 		pr_retip((struct ip *)icp->icmp_data);
-#endif
 		break;
 	case ICMP_TSTAMP:
 		(void)printf("Timestamp\n");
@@ -1217,17 +1159,13 @@ pr_icmph(struct icmp *icp)
 		(void)printf("Information Reply\n");
 		/* XXX ID + Seq */
 		break;
-#ifdef ICMP_MASKREQ
 	case ICMP_MASKREQ:
 		(void)printf("Address Mask Request\n");
 		break;
-#endif
-#ifdef ICMP_MASKREPLY
 	case ICMP_MASKREPLY:
 		(void)printf("Address Mask Reply (Mask 0x%08x)\n",
 		    ntohl(icp->icmp_mask));
 		break;
-#endif
 	default:
 		(void)printf("Unknown ICMP type: %d\n", icp->icmp_type);
 	}
@@ -1368,7 +1306,7 @@ check_icmph(struct ip *iph)
 
 #ifndef SMALL
 int
-map_tos(char *s, int *val)
+map_tos(char *key, int *val)
 {
 	/* DiffServ Codepoints and other TOS mappings */
 	const struct toskeywords {
@@ -1406,7 +1344,7 @@ map_tos(char *s, int *val)
 	};
 	
 	for (t = toskeywords; t->keyword != NULL; t++) {
-		if (strcmp(s, t->keyword) == 0) {
+		if (strcmp(key, t->keyword) == 0) {
 			*val = t->val;
 			return (1);
 		}
@@ -1420,7 +1358,7 @@ void
 usage(void)
 {
 	(void)fprintf(stderr,
-	    "usage: ping [-DdEefLnqRrv] [-c count] [-I ifaddr] [-i wait]\n"
+	    "usage: ping [-DdEefLnqRv] [-c count] [-I ifaddr] [-i wait]\n"
 	    "\t[-l preload] [-p pattern] [-s packetsize]"
 #ifndef	SMALL
 	    " [-T toskeyword]"

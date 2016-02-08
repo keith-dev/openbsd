@@ -1,4 +1,4 @@
-/*	$OpenBSD: arm32_machdep.c,v 1.41 2013/09/12 11:42:22 patrick Exp $	*/
+/*	$OpenBSD: arm32_machdep.c,v 1.45 2014/07/10 19:44:35 uebayasi Exp $	*/
 /*	$NetBSD: arm32_machdep.c,v 1.42 2003/12/30 12:33:15 pk Exp $	*/
 
 /*
@@ -54,8 +54,9 @@
 #include <sys/msg.h>
 #include <sys/msgbuf.h>
 #include <sys/device.h>
-#include <uvm/uvm.h>
 #include <sys/sysctl.h>
+
+#include <uvm/uvm_extern.h>
 
 #include <dev/cons.h>
 
@@ -197,7 +198,8 @@ bootsync(int howto)
 {
 	static int bootsyncdone = 0;
 
-	if (bootsyncdone) return;
+	if (bootsyncdone)
+		return;
 
 	bootsyncdone = 1;
 
@@ -215,11 +217,6 @@ bootsync(int howto)
 
 	vfs_shutdown();
 
-	/*
-	 * If we've been adjusting the clock, the todr
-	 * will be out of synch; adjust it now unless
-	 * the system has been sitting in ddb.
-	 */
 	if ((howto & RB_TIMEBAD) == 0) {
 		resettodr();
 	} else {
@@ -277,7 +274,7 @@ cpu_startup()
 	 */
 	printf(version);
 
-	printf("real mem  = %u (%uMB)\n", ptoa(physmem),
+	printf("real mem  = %lu (%luMB)\n", ptoa(physmem),
 	    ptoa(physmem)/1024/1024);
 
 	/*
@@ -299,7 +296,7 @@ cpu_startup()
 	 */
 	bufinit(); 
 
-	printf("avail mem = %lu (%uMB)\n", ptoa(uvmexp.free),
+	printf("avail mem = %lu (%luMB)\n", ptoa(uvmexp.free),
 	    ptoa(uvmexp.free)/1024/1024);
 
 	curpcb = &proc0.p_addr->u_pcb;

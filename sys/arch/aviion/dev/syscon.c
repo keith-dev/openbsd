@@ -1,4 +1,4 @@
-/*	$OpenBSD: syscon.c,v 1.8 2013/09/26 19:02:06 miod Exp $ */
+/*	$OpenBSD: syscon.c,v 1.10 2014/05/17 12:20:55 miod Exp $ */
 /*
  * Copyright (c) 2007 Miodrag Vallat.
  *
@@ -153,7 +153,7 @@ syscon_print(void *args, const char *pnp)
 	struct confargs *ca = args;
 
 	if (ca->ca_offset != (paddr_t)-1)
-		printf(" offset 0x%x", ca->ca_offset);
+		printf(" offset 0x%lx", ca->ca_offset);
 	return (UNCONF);
 }
 
@@ -209,7 +209,7 @@ int
 sysconsysfail(void *eframe)
 {
 	*(volatile u_int32_t *)AV_CLRINT = ISTATE_SYSFAIL;
-	printf("WARNING: SYSFAIL* ASSERTED\n");
+	printf("SYSFAIL* ASSERTED\n");
 	return (1);
 }
 
@@ -217,6 +217,6 @@ int
 sysconacfail(void *eframe)
 {
 	*(volatile u_int32_t *)AV_CLRINT = ISTATE_ACFAIL;
-	printf("WARNING: ACFAIL* ASSERTED\n");
+	printf("ACFAIL* ASSERTED\n");
 	return (1);
 }

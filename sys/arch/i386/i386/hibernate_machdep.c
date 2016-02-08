@@ -1,4 +1,4 @@
-/*	$OpenBSD: hibernate_machdep.c,v 1.29 2013/10/20 20:03:03 mlarkin Exp $	*/
+/*	$OpenBSD: hibernate_machdep.c,v 1.38 2014/07/20 19:47:53 deraadt Exp $	*/
 
 /*
  * Copyright (c) 2011 Mike Larkin <mlarkin@openbsd.org>
@@ -43,6 +43,7 @@
 #include "acpi.h"
 #include "wd.h"
 #include "ahci.h"
+#include "softraid.h"
 #include "sd.h"
 
 /* Hibernate support */
@@ -55,6 +56,7 @@ extern	void hibernate_flush(void);
 extern	caddr_t start, end;
 extern	int ndumpmem;
 extern  struct dumpmem dumpmem[];
+extern	bios_memmap_t *bios_memmap;
 extern	struct hibernate_state *hibernate_state;
 
 /*
@@ -67,12 +69,13 @@ extern	struct hibernate_state *hibernate_state;
  * Returns the hibernate write I/O function to use on this machine
  */
 hibio_fn
-get_hibernate_io_function(void)
+get_hibernate_io_function(dev_t dev)
 {
-	char *blkname = findblkname(major(swdevt[0].sw_dev));
+	char *blkname = findblkname(major(dev));
 
 	if (blkname == NULL)
 		return NULL;
+
 #if NWD > 0
 	if (strcmp(blkname, "wd") == 0) {
 		extern int wd_hibernate_io(dev_t dev, daddr_t blkno,
@@ -80,20 +83,29 @@ get_hibernate_io_function(void)
 		return wd_hibernate_io;
 	}
 #endif
-#if NAHCI > 0 && NSD > 0
+#if NSD > 0
 	if (strcmp(blkname, "sd") == 0) {
 		extern struct cfdriver sd_cd;
 		extern int ahci_hibernate_io(dev_t dev, daddr_t blkno,
 		    vaddr_t addr, size_t size, int op, void *page);
-		struct device *dv;
+		extern int sr_hibernate_io(dev_t dev, daddr_t blkno,
+		    vaddr_t addr, size_t size, int op, void *page);
+		struct device *dv = disk_lookup(&sd_cd, DISKUNIT(dev));
 
-		dv = disk_lookup(&sd_cd, DISKUNIT(swdevt[0].sw_dev));
+#if NAHCI > 0
 		if (dv && dv->dv_parent && dv->dv_parent->dv_parent &&
 		    strcmp(dv->dv_parent->dv_parent->dv_cfdata->cf_driver->cd_name,
 		    "ahci") == 0)
 			return ahci_hibernate_io;
+#endif
+#if NSOFTRAID > 0
+		if (dv && dv->dv_parent && dv->dv_parent->dv_parent &&
+		    strcmp(dv->dv_parent->dv_parent->dv_cfdata->cf_driver->cd_name,
+		    "softraid") == 0)
+			return sr_hibernate_io;
 	}
 #endif
+#endif /* NSD > 0 */
 	return NULL;
 }
 
@@ -104,12 +116,13 @@ int
 get_hibernate_info_md(union hibernate_info *hiber_info)
 {
 	int i;
+	bios_memmap_t *bmp;
 
 	/* Calculate memory ranges */
 	hiber_info->nranges = ndumpmem;
 	hiber_info->image_size = 0;
 
-	for(i = 0; i < ndumpmem; i++) {
+	for (i = 0; i < ndumpmem; i++) {
 		hiber_info->ranges[i].base = dumpmem[i].start * PAGE_SIZE;
 		hiber_info->ranges[i].end = dumpmem[i].end * PAGE_SIZE;
 		hiber_info->image_size += hiber_info->ranges[i].end -
@@ -117,6 +130,8 @@ get_hibernate_info_md(union hibernate_info *hiber_info)
 	}
 
 #if NACPI > 0
+	if (hiber_info->nranges >= VM_PHYSSEG_MAX)
+		return (1);
 	hiber_info->ranges[hiber_info->nranges].base = ACPI_TRAMPOLINE;
 	hiber_info->ranges[hiber_info->nranges].end =
 	    hiber_info->ranges[hiber_info->nranges].base + PAGE_SIZE;
@@ -124,12 +139,31 @@ get_hibernate_info_md(union hibernate_info *hiber_info)
 	hiber_info->nranges++;
 #endif
 #ifdef MULTIPROCESSOR
+	if (hiber_info->nranges >= VM_PHYSSEG_MAX)
+		return (1);
 	hiber_info->ranges[hiber_info->nranges].base = MP_TRAMPOLINE;
 	hiber_info->ranges[hiber_info->nranges].end =
 	    hiber_info->ranges[hiber_info->nranges].base + PAGE_SIZE;
 	hiber_info->image_size += PAGE_SIZE;
 	hiber_info->nranges++;
 #endif
+
+	for (bmp = bios_memmap; bmp->type != BIOS_MAP_END; bmp++) {
+		/* Skip non-NVS ranges (already processed) */
+		if (bmp->type != BIOS_MAP_NVS)
+			continue;
+		if (hiber_info->nranges >= VM_PHYSSEG_MAX)
+			return (1);
+
+		i = hiber_info->nranges;	
+		hiber_info->ranges[i].base = round_page(bmp->addr);
+		hiber_info->ranges[i].end = trunc_page(bmp->addr + bmp->size);
+		hiber_info->image_size += hiber_info->ranges[i].end -
+			hiber_info->ranges[i].base;
+		hiber_info->nranges++;
+	}
+
+	hibernate_sort_ranges(hiber_info);
 
 	return (0);
 }
@@ -200,8 +234,9 @@ hibernate_populate_resume_pt(union hibernate_info *hib_info,
     paddr_t image_start, paddr_t image_end)
 {
 	int phys_page_number, i;
-	paddr_t pa, piglet_start, piglet_end;
+	paddr_t pa;
 	vaddr_t kern_start_4m_va, kern_end_4m_va, page;
+	vaddr_t piglet_start_va, piglet_end_va;
 
 	/* Identity map PD, PT, and stack pages */
 	pmap_kenter_pa(HIBERNATE_PT_PAGE, HIBERNATE_PT_PAGE, VM_PROT_ALL);
@@ -217,12 +252,11 @@ hibernate_populate_resume_pt(union hibernate_info *hib_info,
 	hibernate_enter_resume_4k_pde(0);
 
 	/*
-	 * Identity map first 640KB physical for tramps and special utility
-	 * pages using 4KB mappings
+	 * Identity map low physical pages.
+	 * See arch/i386/include/hibernate_var.h for page ranges used here.
 	 */
-	for (i = 0; i < 160; i ++) {
-		hibernate_enter_resume_mapping(i*PAGE_SIZE, i*PAGE_SIZE, 0);
-	}
+	for (i = ACPI_TRAMPOLINE; i <= HIBERNATE_HIBALLOC_PAGE; i += PAGE_SIZE)
+		hibernate_enter_resume_mapping(i, i, 0);
 
 	/*
 	 * Map current kernel VA range using 4M pages
@@ -252,52 +286,19 @@ hibernate_populate_resume_pt(union hibernate_info *hib_info,
 	}
 
 	/*
-	 * Map the piglet
+	 * Identity map the piglet using 4MB pages.
 	 */
 	phys_page_number = hib_info->piglet_pa / NBPD;
-	piglet_start = hib_info->piglet_va;
-	piglet_end = piglet_start + HIBERNATE_CHUNK_SIZE * 3;
-	piglet_start &= ~(PAGE_MASK_4M);
-	piglet_end &= ~(PAGE_MASK_4M);
-	for (page = piglet_start; page <= piglet_end ;
+
+	/* VA == PA */
+	piglet_start_va = hib_info->piglet_pa;
+	piglet_end_va = piglet_start_va + HIBERNATE_CHUNK_SIZE * 4;
+
+	for (page = piglet_start_va; page <= piglet_end_va;
 	    page += NBPD, phys_page_number++) {
 		pa = (paddr_t)(phys_page_number * NBPD);
 		hibernate_enter_resume_mapping(page, pa, 1);
 	}
-}
-
-/*
- * MD-specific resume preparation (creating resume time pagetables,
- * stacks, etc).
- */
-void
-hibernate_prepare_resume_machdep(union hibernate_info *hib_info)
-{
-	paddr_t pa, piglet_end;
-	vaddr_t va;
-
-	/*
-	 * At this point, we are sure that the piglet's phys space is going to
-	 * have been unused by the suspending kernel, but the vaddrs used by
-	 * the suspending kernel may or may not be available to us here in the
-	 * resuming kernel, so we allocate a new range of VAs for the piglet.
-	 * Those VAs will be temporary and will cease to exist as soon as we
-	 * switch to the resume PT, so we need to ensure that any VAs required
-	 * during inflate are also entered into that map.
-	 */
-
-        hib_info->piglet_va = (vaddr_t)km_alloc(HIBERNATE_CHUNK_SIZE*3,
-	    &kv_any, &kp_none, &kd_nowait);
-        if (!hib_info->piglet_va)
-                panic("Unable to allocate vaddr for hibernate resume piglet\n");
-
-	piglet_end = hib_info->piglet_pa + HIBERNATE_CHUNK_SIZE*3;
-
-	for (pa = hib_info->piglet_pa,va = hib_info->piglet_va;
-	    pa <= piglet_end; pa += PAGE_SIZE, va += PAGE_SIZE)
-		pmap_kenter_pa(va, pa, VM_PROT_ALL);
-
-	pmap_activate(curproc);
 }
 
 /*
@@ -311,7 +312,7 @@ int
 hibernate_inflate_skip(union hibernate_info *hib_info, paddr_t dest)
 {
 	if (dest >= hib_info->piglet_pa &&
-	    dest <= (hib_info->piglet_pa + 3 * HIBERNATE_CHUNK_SIZE))
+	    dest <= (hib_info->piglet_pa + 4 * HIBERNATE_CHUNK_SIZE))
 		return (1);
 
 	return (0);
@@ -331,20 +332,13 @@ hibernate_disable_intr_machdep(void)
 
 #ifdef MULTIPROCESSOR
 /*
- * Quiesce CPUs in a multiprocessor machine before resuming. We need to do
- * this since the APs will be hatched (but waiting for CPUF_GO), and we don't
- * want the APs to be executing code and causing side effects during the
- * unpack operation.
+ * On i386, the APs have not been hatched at the time hibernate resume is
+ * called, so there is no need to quiesce them. We do want to make sure
+ * however that we are on the BSP.
  */
 void
 hibernate_quiesce_cpus(void)
 {
-        KASSERT(CPU_IS_PRIMARY(curcpu()));
-
-	/* Start the hatched (but idling) APs */
-	cpu_boot_secondary_processors();
-
-	/* Now shut them down */
-	acpi_sleep_mp();
+	KASSERT(CPU_IS_PRIMARY(curcpu()));
 }
 #endif /* MULTIPROCESSOR */

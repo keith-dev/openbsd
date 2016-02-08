@@ -1,4 +1,4 @@
-/*	$OpenBSD: sysctl.c,v 1.199 2014/01/23 03:00:04 guenther Exp $	*/
+/*	$OpenBSD: sysctl.c,v 1.202 2014/05/07 01:49:36 tedu Exp $	*/
 /*	$NetBSD: sysctl.c,v 1.9 1995/09/30 07:12:50 thorpej Exp $	*/
 
 /*
@@ -43,6 +43,7 @@
 #include <sys/tty.h>
 #include <sys/namei.h>
 #include <sys/sensors.h>
+#include <sys/vmmeter.h>
 #include <net/route.h>
 #include <net/if.h>
 
@@ -1053,8 +1054,8 @@ parse_baddynamic(int mib[], size_t len, char *string, void **newvalp,
 						return;
 					if (!nflag)
 						printf("%s: ", string);
-					puts("kernel does contain bad dynamic "
-					    "port tables");
+					puts("kernel does not contain bad "
+					    "dynamic port tables");
 					return;
 				}
 				baddynamic_loaded = 1;
@@ -1131,7 +1132,7 @@ vfsinit(void)
 	mib[1] = VFS_GENERIC;
 	mib[2] = VFS_MAXTYPENUM;
 	buflen = 4;
-	if (sysctl(mib, 3, &maxtypenum, &buflen, (void *)0, (size_t)0) < 0)
+	if (sysctl(mib, 3, &maxtypenum, &buflen, NULL, 0) < 0)
 		return;
 	/*
          * We need to do 0..maxtypenum so add one, and then we offset them
@@ -1153,7 +1154,7 @@ vfsinit(void)
 	buflen = sizeof vfc;
 	for (loc = lastused, cnt = 1; cnt < maxtypenum; cnt++) {
 		mib[3] = cnt - 1;
-		if (sysctl(mib, 4, &vfc, &buflen, (void *)0, (size_t)0) < 0) {
+		if (sysctl(mib, 4, &vfc, &buflen, NULL, 0) < 0) {
 			if (errno == EOPNOTSUPP)
 				continue;
 			warn("vfsinit");
@@ -1212,7 +1213,7 @@ sysctl_vfsgen(char *string, char **bufpp, int mib[], int flags, int *typep)
 	mib[2] = VFS_CONF;
 	mib[3] = indx;
 	size = sizeof vfc;
-	if (sysctl(mib, 4, &vfc, &size, (void *)0, (size_t)0) < 0) {
+	if (sysctl(mib, 4, &vfc, &size, NULL, 0) < 0) {
 		if (errno != EOPNOTSUPP)
 			warn("vfs print");
 		return -1;

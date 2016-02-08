@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_bnxreg.h,v 1.42 2013/10/30 04:08:07 dlg Exp $	*/
+/*	$OpenBSD: if_bnxreg.h,v 1.44 2014/07/22 13:12:11 mpi Exp $	*/
 
 /*-
  * Copyright (c) 2006 Broadcom Corporation
@@ -57,8 +57,6 @@
 
 #ifdef INET
 #include <netinet/in.h>
-#include <netinet/in_systm.h>
-#include <netinet/ip.h>
 #include <netinet/if_ether.h>
 #endif
 
@@ -4936,7 +4934,7 @@ struct bnx_softc {
 	struct mbuf		*rx_mbuf_ptr[TOTAL_RX_BD];
 
 	/* Track the number of rx_bd and tx_bd's in use. */
-	u_int16_t		free_rx_bd;
+	struct if_rxring	rx_ring;
 	u_int16_t		max_rx_bd;
 	u_int16_t		used_tx_bd;
 	u_int16_t		max_tx_bd;

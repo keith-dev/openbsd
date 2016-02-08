@@ -1,4 +1,4 @@
-/*	$OpenBSD: cd9660_vnops.c,v 1.64 2013/12/14 02:57:25 guenther Exp $	*/
+/*	$OpenBSD: cd9660_vnops.c,v 1.66 2014/07/12 18:50:00 tedu Exp $	*/
 /*	$NetBSD: cd9660_vnops.c,v 1.42 1997/10/16 23:56:57 christos Exp $	*/
 
 /*-
@@ -198,7 +198,7 @@ cd9660_getattr(void *v)
 		rdlnk.a_cred = ap->a_cred;
 		if (cd9660_readlink(&rdlnk) == 0)
 			vap->va_size = MAXPATHLEN - auio.uio_resid;
-		free(cp, M_TEMP);
+		free(cp, M_TEMP, 0);
 	}
 	vap->va_flags	= 0;
 	vap->va_gen = 1;
@@ -262,7 +262,7 @@ cd9660_read(void *v)
 			}
 			error = breadn(vp, lbn, size, ra->blks,
 			    ra->sizes, i, &bp);
-			free(ra, M_TEMP);
+			free(ra, M_TEMP, 0);
 		} else
 			error = bread(vp, lbn, size, &bp);
 		ci->ci_lastr = lbn;
@@ -274,9 +274,6 @@ cd9660_read(void *v)
 
 		error = uiomove(bp->b_data + on, (int)n, uio);
 
-                if (n + on == imp->logical_block_size ||
-		    uio->uio_offset == (off_t)ip->i_size)
-			bp->b_flags |= B_AGE;
 		brelse(bp);
 	} while (error == 0 && uio->uio_resid > 0 && n != 0);
 	return (error);
@@ -452,7 +449,7 @@ cd9660_readdir(void *v)
 
 	if ((entryoffsetinblock = idp->curroff & bmask) &&
 	    (error = cd9660_bufatoff(dp, (off_t)idp->curroff, NULL, &bp))) {
-		free(idp, M_TEMP);
+		free(idp, M_TEMP, 0);
 		return (error);
 	}
 	endsearch = dp->i_size;
@@ -565,7 +562,7 @@ cd9660_readdir(void *v)
 	uio->uio_offset = idp->uio_off;
 	*ap->a_eofflag = idp->eofflag;
 
-	free(idp, M_TEMP);
+	free(idp, M_TEMP, 0);
 
 	return (error);
 }

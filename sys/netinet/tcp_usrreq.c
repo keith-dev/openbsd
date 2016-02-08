@@ -1,4 +1,4 @@
-/*	$OpenBSD: tcp_usrreq.c,v 1.117 2013/11/22 07:59:09 mpi Exp $	*/
+/*	$OpenBSD: tcp_usrreq.c,v 1.119 2014/07/22 11:06:10 mpi Exp $	*/
 /*	$NetBSD: tcp_usrreq.c,v 1.20 1996/02/13 23:44:16 christos Exp $	*/
 
 /*
@@ -87,7 +87,6 @@
 #include <net/route.h>
 
 #include <netinet/in.h>
-#include <netinet/in_systm.h>
 #include <netinet/in_var.h>
 #include <netinet/ip.h>
 #include <netinet/in_pcb.h>
@@ -274,11 +273,6 @@ tcp_usrreq(so, req, m, nam, control, p)
 				break;
 			}
 
-			if (inp->inp_lport == 0) {
-				error = in6_pcbbind(inp, NULL, p);
-				if (error)
-					break;
-			}
 			error = in6_pcbconnect(inp, nam);
 		} else if (sin->sin_family == AF_INET)
 #endif /* INET6 */
@@ -291,11 +285,6 @@ tcp_usrreq(so, req, m, nam, control, p)
 				break;
 			}
 
-			if (inp->inp_lport == 0) {
-				error = in_pcbbind(inp, NULL, p);
-				if (error)
-					break;
-			}
 			error = in_pcbconnect(inp, nam);
 		}
 

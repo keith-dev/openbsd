@@ -1,4 +1,4 @@
-/*	$OpenBSD: answer.c,v 1.11 2007/11/06 10:22:29 chl Exp $	*/
+/*	$OpenBSD: answer.c,v 1.13 2014/05/25 17:39:07 tedu Exp $	*/
 /*	$NetBSD: answer.c,v 1.3 1997/10/10 16:32:50 lukem Exp $	*/
 /*
  * Copyright (c) 1983-2003, Regents of the University of California.
@@ -37,7 +37,6 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <stdio.h>
-#include <tcpd.h>
 #include <syslog.h>
 #include <string.h>
 #include <sys/socket.h>
@@ -67,7 +66,6 @@ answer_first()
 	int			newsock;
 	socklen_t		socklen;
 	int			flags;
-	struct request_info	ri;
 	struct spawn *sp;
 
 	/* Answer the call to hunt: */
@@ -78,23 +76,13 @@ answer_first()
 		return;
 	}
 
-	/* Check for access permissions: */
-	request_init(&ri, RQ_DAEMON, "huntd", RQ_FILE, newsock, 0);
-	fromhost(&ri);
-	if (hosts_access(&ri) == 0) {
-		logx(LOG_INFO, "rejected connection from %s", eval_client(&ri));
-		close(newsock);
-		return;
-	}
-
 	/* Remember this spawning connection: */
-	sp = (struct spawn *)malloc(sizeof *sp);
+	sp = calloc(1, sizeof *sp);
 	if (sp == NULL) {
-		logit(LOG_ERR, "malloc");
+		logit(LOG_ERR, "calloc");
 		close(newsock);
 		return;
 	}
-	memset(sp, '\0', sizeof *sp);
 
 	/* Keep the calling machine's source addr for ident purposes: */
 	memcpy(&sp->source, &sockstruct, sizeof sp->source);

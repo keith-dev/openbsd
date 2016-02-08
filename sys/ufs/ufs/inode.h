@@ -1,4 +1,4 @@
-/*	$OpenBSD: inode.h,v 1.42 2014/01/26 02:02:26 tedu Exp $	*/
+/*	$OpenBSD: inode.h,v 1.49 2014/07/14 08:54:13 pelikan Exp $	*/
 /*	$NetBSD: inode.h,v 1.8 1995/06/15 23:22:50 cgd Exp $	*/
 
 /*
@@ -42,16 +42,18 @@
 #include <ufs/ufs/dinode.h>
 #include <ufs/ufs/dir.h>
 #include <ufs/ext2fs/ext2fs_dinode.h>
+#include <ufs/ext2fs/ext2fs_extents.h>
 
 
 /*
  * Per-filesystem inode extensions.
  */
 struct ext2fs_inode_ext {
-       int32_t	ext2fs_last_lblk; /* last logical block allocated */
-       int32_t	ext2fs_last_blk; /* last block allocated on disk */
-       u_int32_t	ext2fs_effective_uid; /* effective inode uid */
-       u_int32_t	ext2fs_effective_gid; /* effective inode gid */
+	u_int32_t	ext2fs_last_lblk;	/* last logical blk allocated */
+	u_int32_t	ext2fs_last_blk;	/* last blk allocated on disk */
+	u_int32_t	ext2fs_effective_uid;	/* effective inode uid */
+	u_int32_t	ext2fs_effective_gid;	/* effective inode gid */
+	struct ext4_extent_cache	ext2fs_extent_cache;
 };
 
 /*
@@ -108,6 +110,7 @@ struct inode {
 #define i_e2fs_last_blk		inode_ext.e2fs.ext2fs_last_blk
 #define i_e2fs_uid		inode_ext.e2fs.ext2fs_effective_uid
 #define i_e2fs_gid		inode_ext.e2fs.ext2fs_effective_gid
+#define i_e2fs_ext_cache	inode_ext.e2fs.ext2fs_extent_cache
 #define	i_dirhash		inode_ext.dirhash
 
 	/*
@@ -233,10 +236,10 @@ struct inode_vtbl {
 #define i_e2fs_blocks		i_e2din->e2di_blocks
 #define i_e2fs_gen		i_e2din->e2di_gen
 #define i_e2fs_facl		i_e2din->e2di_facl
-#define i_e2fs_dacl		i_e2din->e2di_dacl
+#define i_e2fs_size_hi		i_e2din->e2di_size_hi
 #define i_e2fs_faddr		i_e2din->e2di_faddr
-#define i_e2fs_nfrag		i_e2din->e2di_nfrag
-#define i_e2fs_fsize		i_e2din->e2di_fsize
+#define i_e2fs_nblock_hi	i_e2din->e2di_nblock_hi
+#define i_e2fs_faddr_hi		i_e2din->e2di_faddr_hi
 #define i_e2fs_uid_low		i_e2din->e2di_uid_low
 #define i_e2fs_gid_low		i_e2din->e2di_gid_low
 #define i_e2fs_uid_high		i_e2din->e2di_uid_high
@@ -250,6 +253,8 @@ struct inode_vtbl {
 #define	IN_RENAME	0x0010		/* Inode is being renamed. */
 #define IN_SHLOCK       0x0020          /* File has shared lock. */
 #define	IN_EXLOCK	0x0040		/* File has exclusive lock. */
+#define	IN_LAZYMOD	0x0080		/* Modified, but don't write yet. */
+#define	IN_HASHED	0x0100		/* Inode is on the hash chain */
 
 #define	i_devvp i_ump->um_devvp
 
@@ -314,8 +319,14 @@ struct indir {
 #define	EXT2FS_ITIMES(ip) do {						\
 	if ((ip)->i_flag & (IN_ACCESS | IN_CHANGE | IN_UPDATE)) {	\
 		(ip)->i_flag |= IN_MODIFIED;				\
-		if ((ip)->i_flag & IN_CHANGE)				\
+		if ((ip)->i_flag & IN_ACCESS)				\
+			(ip)->i_e2fs_atime = time_second;		\
+		if ((ip)->i_flag & IN_UPDATE)				\
+			(ip)->i_e2fs_mtime = time_second;		\
+		if ((ip)->i_flag & IN_CHANGE) {				\
 			(ip)->i_e2fs_ctime = time_second;		\
+			(ip)->i_modrev++;				\
+		}							\
 		(ip)->i_flag &= ~(IN_ACCESS | IN_CHANGE | IN_UPDATE);	\
 	}								\
 } while (0)

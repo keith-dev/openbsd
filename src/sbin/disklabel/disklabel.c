@@ -1,4 +1,4 @@
-/*	$OpenBSD: disklabel.c,v 1.192 2014/02/14 15:03:43 krw Exp $	*/
+/*	$OpenBSD: disklabel.c,v 1.196 2014/07/20 01:38:40 guenther Exp $	*/
 
 /*
  * Copyright (c) 1987, 1993
@@ -210,7 +210,8 @@ main(int argc, char *argv[])
 		op = READ;
 #endif
 
-	if (argc < 1 || (fstabfile && !(op == EDITOR || aflag)))
+	if (argc < 1 || (fstabfile && !(op == EDITOR || op == RESTORE ||
+		    aflag)))
 		usage();
 
 	dkname = argv[0];
@@ -256,8 +257,14 @@ main(int argc, char *argv[])
 			err(4, "%s", argv[1]);
 		error = getasciilabel(t, lp);
 		bzero(lp->d_uid, sizeof(lp->d_uid));
-		if (error == 0)
+		if (error == 0) {
 			error = writelabel(f, bootarea, lp);
+			if (error == 0) {
+				if (ioctl(f, DIOCGDINFO, &lab) < 0)
+					err(4, "ioctl DIOCGDINFO");
+				mpsave(&lab);
+			}
+		}
 		fclose(t);
 		break;
 	case WRITE:
@@ -541,7 +548,7 @@ makebootarea(char *boot, struct disklabel *dp)
 		warnx("bootstrap: xxboot = %s", xxboot);
 
 	/*
-	 * For NUMBOOT > 0 architectures (hp300/hppa/hppa64/landisk/vax)
+	 * For NUMBOOT > 0 architectures (hppa/hppa64/landisk/vax)
 	 * up to d_bbsize bytes of ``xxboot'' go in bootarea, the rest
 	 * is remembered and written later following the bootarea.
 	 */
@@ -809,9 +816,9 @@ edit(struct disklabel *lp, int f)
 	u_int64_t total_sectors, starting_sector, ending_sector;
 
 	if ((fd = mkstemp(tmpfil)) == -1 || (fp = fdopen(fd, "w")) == NULL) {
+		warn("%s", tmpfil);
 		if (fd != -1)
 			close(fd);
-		warn("%s", tmpfil);
 		return (1);
 	}
 	display(fp, lp, 0, 1);
@@ -838,7 +845,6 @@ edit(struct disklabel *lp, int f)
 		ending_sector = DL_GETBEND(&label);
 		starting_sector = DL_GETBSTART(&label);
 		total_sectors = DL_GETDSIZE(&label);
-		memset(&label, 0, sizeof(label));
 		error = getasciilabel(fp, &label);
 		DL_SETBEND(&label, ending_sector);
 		DL_SETBSTART(&label, starting_sector);
@@ -1009,18 +1015,37 @@ getasciilabel(FILE *f, struct disklabel *lp)
 	char **cpp, *cp;
 	const char *errstr;
 	struct partition *pp;
-	char *tp, *s, line[BUFSIZ];
+	char *mp, *tp, *s, line[BUFSIZ];
+	char **omountpoints = NULL;
 	int lineno = 0, errors = 0;
 	u_int32_t v, fsize;
 	u_int64_t lv;
+	unsigned int part;
 
 	lp->d_version = 1;
 	lp->d_bbsize = BBSIZE;				/* XXX */
 	lp->d_sbsize = SBSIZE;				/* XXX */
+
+	if (!(omountpoints = calloc(MAXPARTITIONS, sizeof(char *))))
+		errx(4, "out of memory");
+
+	mpcopy(omountpoints, mountpoints);
+	for (part = 0; part < MAXPARTITIONS; part++) {
+		free(mountpoints[part]);
+		mountpoints[part] = NULL;
+	}
+	
 	while (fgets(line, sizeof(line), f)) {
 		lineno++;
-		if ((cp = strpbrk(line, "#\r\n")))
+		mp = NULL;
+		if ((cp = strpbrk(line, "\r\n")))
 			*cp = '\0';
+		if ((cp = strpbrk(line, "#"))) {
+			*cp = '\0';
+			mp = skip(cp+1);
+			if (mp && *mp != '/')
+				mp = NULL;
+		}
 		cp = skip(line);
 		if (cp == NULL)
 			continue;
@@ -1251,6 +1276,8 @@ getasciilabel(FILE *f, struct disklabel *lp)
 			default:
 				break;
 			}
+			if (mp)
+				mountpoints[part] = strdup(mp);
 			continue;
 		}
 		warnx("line %d: unknown field: %s", lineno, cp);
@@ -1259,6 +1286,11 @@ getasciilabel(FILE *f, struct disklabel *lp)
 		;
 	}
 	errors += checklabel(lp);
+
+	if (errors > 0)
+		mpcopy(mountpoints, omountpoints);
+	mpfree(omountpoints);
+	
 	return (errors > 0);
 }
 
@@ -1444,7 +1476,7 @@ usage(void)
 	    "       disklabel -E [-Acdnv] [-F|-f file] disk\t\t(simple editor)"
 	    "\n");
 	fprintf(stderr,
-	    "       disklabel -R [-nv] disk protofile\t\t(restore)\n\n");
+	    "       disklabel -R [-nv] [-F|-f file] disk protofile\t\t(restore)\n\n");
 #if NUMBOOT > 0
 	fprintf(stderr,
 	    "       disklabel -B  [-nv] [-b boot1] disk [disktype]\t\t(boot)\n");
@@ -1452,7 +1484,7 @@ usage(void)
 	    "       disklabel -Bw [-nv] [-b boot1] disk disktype [packid]\t"
 	    "(boot+write)\n");
 	fprintf(stderr,
-	    "       disklabel -BR [-nv] [-b boot1] disk protofile\t\t"
+	    "       disklabel -BR [-nv] [-F|-f file ] [-b boot1] disk protofile\t\t"
 	    "(boot+restore)\n\n");
 #endif
 	fprintf(stderr,

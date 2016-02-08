@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_athn_usb.c,v 1.18 2013/08/07 01:06:41 bluhm Exp $	*/
+/*	$OpenBSD: if_athn_usb.c,v 1.22 2014/07/13 15:52:49 mpi Exp $	*/
 
 /*-
  * Copyright (c) 2011 Damien Bergamini <damien.bergamini@free.fr>
@@ -46,9 +46,7 @@
 #include <net/if_types.h>
 
 #include <netinet/in.h>
-#include <netinet/in_systm.h>
 #include <netinet/if_ether.h>
-#include <netinet/ip.h>
 
 #include <net80211/ieee80211_var.h>
 #include <net80211/ieee80211_amrr.h>
@@ -98,7 +96,6 @@ static const struct athn_usb_type {
 int		athn_usb_match(struct device *, void *, void *);
 void		athn_usb_attach(struct device *, struct device *, void *);
 int		athn_usb_detach(struct device *, int);
-int		athn_usb_activate(struct device *, int);
 void		athn_usb_attachhook(void *);
 int		athn_usb_open_pipes(struct athn_usb_softc *);
 void		athn_usb_close_pipes(struct athn_usb_softc *);
@@ -214,8 +211,7 @@ const struct cfattach athn_usb_ca = {
 	sizeof(struct athn_usb_softc),
 	athn_usb_match,
 	athn_usb_attach,
-	athn_usb_detach,
-	athn_usb_activate
+	athn_usb_detach
 };
 
 int
@@ -301,19 +297,6 @@ athn_usb_detach(struct device *self, int flags)
 	athn_usb_free_tx_list(usc);
 	athn_usb_free_rx_list(usc);
 
-	return (0);
-}
-
-int
-athn_usb_activate(struct device *self, int act)
-{
-	struct athn_usb_softc *usc = (struct athn_usb_softc *)self;
-
-	switch (act) {
-	case DVACT_DEACTIVATE:
-		usbd_deactivate(usc->sc_udev);
-		break;
-	}
 	return (0);
 }
 
@@ -462,7 +445,7 @@ athn_usb_close_pipes(struct athn_usb_softc *usc)
 		usbd_close_pipe(usc->rx_intr_pipe);
 	}
 	if (usc->ibuf != NULL)
-		free(usc->ibuf, M_USBDEV);
+		free(usc->ibuf, M_USBDEV, 0);
 }
 
 int
@@ -679,14 +662,14 @@ athn_usb_load_firmware(struct athn_usb_softc *usc)
 		USETW(req.wLength, mlen);
 		error = usbd_do_request(usc->sc_udev, &req, ptr);
 		if (error != 0) {
-			free(fw, M_DEVBUF);
+			free(fw, M_DEVBUF, 0);
 			return (error);
 		}
 		addr += mlen >> 8;
 		ptr  += mlen;
 		size -= mlen;
 	}
-	free(fw, M_DEVBUF);
+	free(fw, M_DEVBUF, 0);
 
 	/* Start firmware. */
 	if (usc->flags & ATHN_USB_FLAG_AR7010)
@@ -2009,7 +1992,7 @@ athn_usb_start(struct ifnet *ifp)
 		/* Send pending management frames first. */
 		IF_DEQUEUE(&ic->ic_mgtq, m);
 		if (m != NULL) {
-			ni = (void *)m->m_pkthdr.rcvif;
+			ni = m->m_pkthdr.ph_cookie;
 			goto sendit;
 		}
 		if (ic->ic_state != IEEE80211_S_RUN)

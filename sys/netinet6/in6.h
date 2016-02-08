@@ -1,4 +1,4 @@
-/*	$OpenBSD: in6.h,v 1.70 2014/01/22 14:27:20 naddy Exp $	*/
+/*	$OpenBSD: in6.h,v 1.73 2014/07/11 16:39:06 henning Exp $	*/
 /*	$KAME: in6.h,v 1.83 2001/03/29 02:55:07 jinmei Exp $	*/
 
 /*
@@ -381,7 +381,7 @@ struct ipv6_mreq {
 };
 
 /*
- * IPV6_PKTINFO: Packet information(RFC2292 sec 5)
+ * IPV6_PKTINFO: Packet information(RFC3542 sec 6)
  */
 struct in6_pktinfo {
 	struct in6_addr	ipi6_addr;	/* src/dst IPv6 address */
@@ -416,55 +416,6 @@ typedef	__socklen_t	socklen_t;	/* length type for network syscalls */
 #endif /* __BSD_VISIBLE */
 
 #ifdef _KERNEL
-/*
- * in6_cksum_phdr:
- *
- *	Compute significant parts of the IPv6 checksum pseudo-header
- *	for use in a delayed TCP/UDP checksum calculation.
- *
- *	Args:
- *
- *		src		Source IPv6 address
- *		dst		Destination IPv6 address
- *		len		htonl(proto-hdr-len)
- *		nxt		htonl(next-proto-number)
- *
- *	NOTE: We expect the src and dst addresses to be 16-bit
- *	aligned!
- */
-static __inline u_int16_t __attribute__((__unused__))
-in6_cksum_phdr(const struct in6_addr *src, const struct in6_addr *dst,
-    u_int32_t len, u_int32_t nxt)
-{
-	u_int32_t sum = 0;
-	const u_int16_t *w;
-
-	w = (const u_int16_t *) src;
-	sum += w[0];
-	if (!IN6_IS_SCOPE_EMBED(src))
-		sum += w[1];
-	sum += w[2]; sum += w[3]; sum += w[4]; sum += w[5];
-	sum += w[6]; sum += w[7];
-
-	w = (const u_int16_t *) dst;
-	sum += w[0];
-	if (!IN6_IS_SCOPE_EMBED(dst))
-		sum += w[1];
-	sum += w[2]; sum += w[3]; sum += w[4]; sum += w[5];
-	sum += w[6]; sum += w[7];
-
-	sum += (u_int16_t)(len >> 16) + (u_int16_t)(len /*& 0xffff*/);
-
-	sum += (u_int16_t)(nxt >> 16) + (u_int16_t)(nxt /*& 0xffff*/);
-
-	sum = (u_int16_t)(sum >> 16) + (u_int16_t)(sum /*& 0xffff*/);
-
-	if (sum > 0xffff)
-		sum -= 0xffff;
-
-	return (sum);
-}
-
 extern	u_char inet6ctlerrmap[];
 extern	struct ifqueue ip6intrq;	/* IP6 packet input queue */
 extern	struct in6_addr zeroin6_addr;
@@ -672,7 +623,7 @@ ifatoia6(struct ifaddr *ifa)
 	{ "maxfragpackets", CTLTYPE_INT }, \
 	{ "sourcecheck", CTLTYPE_INT }, \
 	{ "sourcecheck_logint", CTLTYPE_INT }, \
-	{ "accept_rtadv", CTLTYPE_INT }, \
+	{ 0, 0 }, \
 	{ 0, 0 }, \
 	{ "log_interval", CTLTYPE_INT }, \
 	{ "hdrnestlimit", CTLTYPE_INT }, \
@@ -726,7 +677,7 @@ ifatoia6(struct ifaddr *ifa)
 	&ip6_maxfragpackets, \
 	NULL, \
 	NULL, \
-	&ip6_accept_rtadv, \
+	NULL, \
 	NULL, \
 	&ip6_log_interval, \
 	&ip6_hdrnestlimit, \
@@ -769,23 +720,6 @@ ifatoia6(struct ifaddr *ifa)
 
 __BEGIN_DECLS
 struct cmsghdr;
-
-extern int inet6_option_space(int);
-extern int inet6_option_init(void *, struct cmsghdr **, int);
-extern int inet6_option_append(struct cmsghdr *, const u_int8_t *,
-	int, int);
-extern u_int8_t *inet6_option_alloc(struct cmsghdr *, int, int, int);
-extern int inet6_option_next(const struct cmsghdr *, u_int8_t **);
-extern int inet6_option_find(const struct cmsghdr *, u_int8_t **, int);
-
-extern size_t inet6_rthdr_space(int, int);
-extern struct cmsghdr *inet6_rthdr_init(void *, int);
-extern int inet6_rthdr_add(struct cmsghdr *, const struct in6_addr *,
-		unsigned int);
-extern int inet6_rthdr_lasthop(struct cmsghdr *, unsigned int);
-extern int inet6_rthdr_segments(const struct cmsghdr *);
-extern struct in6_addr *inet6_rthdr_getaddr(struct cmsghdr *, int);
-extern int inet6_rthdr_getflags(const struct cmsghdr *, int);
 
 extern int inet6_opt_init(void *, socklen_t);
 extern int inet6_opt_append(void *, socklen_t, int, u_int8_t,

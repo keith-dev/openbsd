@@ -1,4 +1,4 @@
-/*	$OpenBSD: rtw.c,v 1.83 2013/11/26 09:50:33 mpi Exp $	*/
+/*	$OpenBSD: rtw.c,v 1.87 2014/07/13 23:10:23 deraadt Exp $	*/
 /*	$NetBSD: rtw.c,v 1.29 2004/12/27 19:49:16 dyoung Exp $ */
 
 /*-
@@ -50,8 +50,6 @@
 #include <machine/endian.h>
 #include <machine/bus.h>
 #include <machine/intr.h>	/* splnet */
-
-#include <uvm/uvm_extern.h>
 
 #include <net/if.h>
 #include <net/if_media.h>
@@ -692,7 +690,7 @@ rtw_srom_read(struct rtw_regs *regs, u_int32_t flags, struct rtw_srom *sr,
 	/* TBD bus barriers */
 	if (!read_seeprom(&sd, sr->sr_content, 0, sr->sr_size/2)) {
 		printf("\n%s: could not read SROM\n", dvname);
-		free(sr->sr_content, M_DEVBUF);
+		free(sr->sr_content, M_DEVBUF, 0);
 		sr->sr_content = NULL;
 		return -1;	/* XXX */
 	}
@@ -1504,7 +1502,7 @@ rtw_intr_beacon(struct rtw_softc *sc, u_int16_t isr)
 			    sc->sc_dev.dv_xname);
 			return;
 		}
-		m->m_pkthdr.rcvif = (void *)ieee80211_ref_node(ic->ic_bss);
+		m->m_pkthdr.ph_cookie = ieee80211_ref_node(ic->ic_bss);
 		IF_ENQUEUE(&sc->sc_beaconq, m);
 		rtw_start(&sc->sc_if);
 	}
@@ -2706,8 +2704,7 @@ rtw_80211_dequeue(struct rtw_softc *sc, struct ifqueue *ifq, int pri,
 		return NULL;
 	}
 	IF_DEQUEUE(ifq, m);
-	*nip = (struct ieee80211_node *)m->m_pkthdr.rcvif;
-	m->m_pkthdr.rcvif = NULL;
+	*nip = m->m_pkthdr.ph_cookie;
 	return m;
 }
 
@@ -3617,7 +3614,7 @@ rtw_txsoft_blk_setup(struct rtw_txsoft_blk *tsb, u_int qlen)
 	SIMPLEQ_INIT(&tsb->tsb_dirtyq);
 	SIMPLEQ_INIT(&tsb->tsb_freeq);
 	tsb->tsb_ndesc = qlen;
-	tsb->tsb_desc = malloc(qlen * sizeof(*tsb->tsb_desc), M_DEVBUF,
+	tsb->tsb_desc = mallocarray(qlen, sizeof(*tsb->tsb_desc), M_DEVBUF,
 	    M_NOWAIT);
 	if (tsb->tsb_desc == NULL)
 		return ENOMEM;
@@ -3632,7 +3629,7 @@ rtw_txsoft_blk_cleanup_all(struct rtw_softc *sc)
 
 	for (pri = 0; pri < RTW_NTXPRI; pri++) {
 		tsb = &sc->sc_txsoft_blk[pri];
-		free(tsb->tsb_desc, M_DEVBUF);
+		free(tsb->tsb_desc, M_DEVBUF, 0);
 		tsb->tsb_desc = NULL;
 	}
 }
@@ -4076,7 +4073,7 @@ fail8:
 	sr = &sc->sc_srom;
 	sr->sr_size = 0;
 	if (sr->sr_content != NULL) {
-		free(sr->sr_content, M_DEVBUF);
+		free(sr->sr_content, M_DEVBUF, 0);
 		sr->sr_content = NULL;
 	}
 

@@ -1,4 +1,4 @@
-/*	$OpenBSD: vfwprintf.c,v 1.8 2013/11/12 07:04:35 deraadt Exp $ */
+/*	$OpenBSD: vfwprintf.c,v 1.11 2014/06/04 07:45:25 stsp Exp $ */
 /*-
  * Copyright (c) 1990 The Regents of the University of California.
  * All rights reserved.
@@ -324,9 +324,6 @@ __vfwprintf(FILE * __restrict fp, const wchar_t * __restrict fmt0, __va_list ap)
 	int realsz;		/* field size expanded by dprec */
 	int size;		/* size of converted field or string */
 	const char *xdigs;	/* digits for %[xX] conversion */
-#define NIOV 8
-	struct __suio uio;	/* output information: summary */
-	struct __siov iov[NIOV];/* ... and individual io vectors */
 	wchar_t buf[BUF];	/* buffer with space for digits of uintmax_t */
 	wchar_t ox[2];		/* space for 0x; ox[1] is either x, X, or \0 */
 	union arg *argtable;	/* args, built due to positional arg */
@@ -389,7 +386,7 @@ __vfwprintf(FILE * __restrict fp, const wchar_t * __restrict fmt0, __va_list ap)
 	    flags&PTRINT ? GETARG(ptrdiff_t) : \
 	    flags&SIZEINT ? GETARG(ssize_t) : \
 	    flags&SHORTINT ? (short)GETARG(int) : \
-	    flags&CHARINT ? (__signed char)GETARG(int) : \
+	    flags&CHARINT ? (signed char)GETARG(int) : \
 	    GETARG(int)))
 #define	UARG() \
 	((uintmax_t)(flags&MAXINT ? GETARG(uintmax_t) : \
@@ -463,9 +460,6 @@ __vfwprintf(FILE * __restrict fp, const wchar_t * __restrict fmt0, __va_list ap)
 	argtable = NULL;
 	nextarg = 1;
 	va_copy(orgap, ap);
-	uio.uio_iov = iov;
-	uio.uio_resid = 0;
-	uio.uio_iovcnt = 0;
 	ret = 0;
 	convbuf = NULL;
 
@@ -784,6 +778,7 @@ fp_common:
 			}
 			break;
 #endif /* FLOATING_POINT */
+#ifndef NO_PRINTF_PERCENT_N
 		case 'n':
 			if (flags & LLONGINT)
 				*GETARG(long long *) = ret;
@@ -792,7 +787,7 @@ fp_common:
 			else if (flags & SHORTINT)
 				*GETARG(short *) = ret;
 			else if (flags & CHARINT)
-				*GETARG(__signed char *) = ret;
+				*GETARG(signed char *) = ret;
 			else if (flags & PTRINT)
 				*GETARG(ptrdiff_t *) = ret;
 			else if (flags & SIZEINT)
@@ -802,6 +797,7 @@ fp_common:
 			else
 				*GETARG(int *) = ret;
 			continue;	/* no output */
+#endif /* NO_PRINTF_PERCENT_N */
 		case 'O':
 			flags |= LONGINT;
 			/*FALLTHROUGH*/
@@ -1296,6 +1292,7 @@ reswitch:	switch (ch) {
 				ADDTYPE(T_DOUBLE);
 			break;
 #endif /* FLOATING_POINT */
+#ifndef NO_PRINTF_PERCENT_N
 		case 'n':
 			if (flags & LLONGINT)
 				ADDTYPE(TP_LLONG);
@@ -1312,6 +1309,7 @@ reswitch:	switch (ch) {
 			else
 				ADDTYPE(TP_INT);
 			continue;	/* no output */
+#endif /* NO_PRINTF_PERCENT_N */
 		case 'O':
 			flags |= LONGINT;
 			/*FALLTHROUGH*/

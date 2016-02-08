@@ -1,4 +1,4 @@
-/*	$OpenBSD: hibernate_machdep.c,v 1.3 2013/06/05 01:33:02 pirofti Exp $	*/
+/*	$OpenBSD: hibernate_machdep.c,v 1.7 2014/07/20 19:47:53 deraadt Exp $	*/
 
 /*
  * Copyright (c) 2013 Paul Irofti.
@@ -41,13 +41,13 @@
 
 #include "wd.h"
 #include "ahci.h"
+#include "softraid.h"
 #include "sd.h"
 
 #if NWD > 0
 #include <dev/ata/atavar.h>
 #include <dev/ata/wdvar.h>
 #endif
-
 
 /*
  * Loongson MD Hibernate functions
@@ -59,9 +59,9 @@
  * Returns the hibernate write I/O function to use on this machine
  */
 hibio_fn
-get_hibernate_io_function(void)
+get_hibernate_io_function(dev_t dev)
 {
-	char *blkname = findblkname(major(swdevt[0].sw_dev));
+	char *blkname = findblkname(major(dev));
 
 	if (blkname == NULL)
 		return NULL;
@@ -70,20 +70,29 @@ get_hibernate_io_function(void)
 	if (strcmp(blkname, "wd") == 0)
 		return wd_hibernate_io;
 #endif
-#if NAHCI > 0 && NSD > 0
+#if NSD > 0
 	if (strcmp(blkname, "sd") == 0) {
 		extern struct cfdriver sd_cd;
 		extern int ahci_hibernate_io(dev_t dev, daddr_t blkno,
 		    vaddr_t addr, size_t size, int op, void *page);
-		struct device *dv;
+		extern int sr_hibernate_io(dev_t dev, daddr_t blkno,
+		    vaddr_t addr, size_t size, int op, void *page);
+		struct device *dv = disk_lookup(&sd_cd, DISKUNIT(dev));
 
-		dv = disk_lookup(&sd_cd, DISKUNIT(swdevt[0].sw_dev));
+#if NAHCI > 0
 		if (dv && dv->dv_parent && dv->dv_parent->dv_parent &&
 		    strcmp(dv->dv_parent->dv_parent->dv_cfdata->cf_driver->cd_name,
 		    "ahci") == 0)
 			return ahci_hibernate_io;
+#endif
+#if NSOFTRAID > 0
+		if (dv && dv->dv_parent && dv->dv_parent->dv_parent &&
+		    strcmp(dv->dv_parent->dv_parent->dv_cfdata->cf_driver->cd_name,
+		    "softraid") == 0)
+			return sr_hibernate_io;
 	}
 #endif
+#endif /* NSD > 0 */
 	return NULL;
 }
 
@@ -136,40 +145,6 @@ hibernate_populate_resume_pt(union hibernate_info *hib_info,
 }
 
 /*
- * MD-specific resume preparation (creating resume time pagetables,
- * stacks, etc).
- */
-void
-hibernate_prepare_resume_machdep(union hibernate_info *hib_info)
-{
-	paddr_t pa, piglet_end;
-	vaddr_t va;
-
-	/*
-	 * At this point, we are sure that the piglet's phys space is going to
-	 * have been unused by the suspending kernel, but the vaddrs used by
-	 * the suspending kernel may or may not be available to us here in the
-	 * resuming kernel, so we allocate a new range of VAs for the piglet.
-	 * Those VAs will be temporary and will cease to exist as soon as we
-	 * switch to the resume PT, so we need to ensure that any VAs required
-	 * during inflate are also entered into that map.
-	 */
-
-        hib_info->piglet_va = (vaddr_t)km_alloc(HIBERNATE_CHUNK_SIZE*3,
-	    &kv_any, &kp_none, &kd_nowait);
-        if (!hib_info->piglet_va)
-                panic("Unable to allocate vaddr for hibernate resume piglet\n");
-
-	piglet_end = hib_info->piglet_pa + HIBERNATE_CHUNK_SIZE*3;
-
-	for (pa = hib_info->piglet_pa,va = hib_info->piglet_va;
-	    pa <= piglet_end; pa += PAGE_SIZE, va += PAGE_SIZE)
-		pmap_kenter_pa(va, pa, VM_PROT_ALL);
-
-	pmap_activate(curproc);
-}
-
-/*
  * During inflate, certain pages that contain our bookkeeping information
  * (eg, the chunk table, scratch pages, etc) need to be skipped over and
  * not inflated into.
@@ -180,7 +155,7 @@ int
 hibernate_inflate_skip(union hibernate_info *hib_info, paddr_t dest)
 {
 	if (dest >= hib_info->piglet_pa &&
-	    dest <= (hib_info->piglet_pa + 3 * HIBERNATE_CHUNK_SIZE))
+	    dest <= (hib_info->piglet_pa + 4 * HIBERNATE_CHUNK_SIZE))
 		return (1);
 
 	return (0);

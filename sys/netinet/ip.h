@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip.h,v 1.14 2013/10/24 15:21:21 deraadt Exp $	*/
+/*	$OpenBSD: ip.h,v 1.16 2014/07/13 13:57:56 mpi Exp $	*/
 /*	$NetBSD: ip.h,v 1.9 1995/05/15 01:22:44 cgd Exp $	*/
 
 /*
@@ -150,6 +150,7 @@ struct ip {
 #define	IPOPT_LSRR		131		/* loose source route */
 #define	IPOPT_SATID		136		/* satnet id */
 #define	IPOPT_SSRR		137		/* strict source route */
+#define	IPOPT_RA		148		/* router alert */
 
 /*
  * Offsets to fields in options other than EOL and NOP.
@@ -175,10 +176,10 @@ struct	ip_timestamp {
 		 ipt_flg:4;		/* flags, see below */
 #endif
 	union ipt_timestamp {
-		 n_time	ipt_time[1];
+		 u_int32_t ipt_time[1];
 		 struct	ipt_ta {
 			struct in_addr ipt_addr;
-			n_time ipt_time;
+			u_int32_t ipt_time;
 		 } ipt_ta[1];
 	} ipt_timestamp;
 };

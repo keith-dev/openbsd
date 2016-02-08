@@ -1,4 +1,4 @@
-/*	$OpenBSD: ext2fs_readwrite.c,v 1.27 2014/01/25 23:31:12 guenther Exp $	*/
+/*	$OpenBSD: ext2fs_readwrite.c,v 1.32 2014/07/13 13:28:26 pelikan Exp $	*/
 /*	$NetBSD: ext2fs_readwrite.c,v 1.16 2001/02/27 04:37:47 chs Exp $	*/
 
 /*-
@@ -49,10 +49,14 @@
 #include <sys/signalvar.h>
 
 #include <ufs/ufs/quota.h>
+#include <ufs/ufs/ufsmount.h>
 #include <ufs/ufs/inode.h>
 #include <ufs/ext2fs/ext2fs.h>
 #include <ufs/ext2fs/ext2fs_extern.h>
 
+
+static int	ext2_ind_read(struct vnode *, struct inode *, struct m_ext2fs *, struct uio *);
+static int	ext4_ext_read(struct vnode *, struct inode *, struct m_ext2fs *, struct uio *);
 
 #define doclusterread 0 /* XXX underway */
 #define doclusterwrite 0
@@ -69,15 +73,27 @@ ext2fs_read(void *v)
 	struct inode *ip;
 	struct uio *uio;
 	struct m_ext2fs *fs;
+
+	vp = ap->a_vp;
+	ip = VTOI(vp);
+	uio = ap->a_uio;
+	fs = ip->i_e2fs;
+
+	if (ip->i_e2fs_flags & EXT4_EXTENTS)
+		return ext4_ext_read(vp, ip, fs, uio);
+	else
+		return ext2_ind_read(vp, ip, fs, uio);
+}
+
+static int
+ext2_ind_read(struct vnode *vp, struct inode *ip, struct m_ext2fs *fs,
+    struct uio *uio)
+{
 	struct buf *bp;
 	daddr_t lbn, nextlbn;
 	off_t bytesinfile;
 	long size, xfersize, blkoffset;
 	int error;
-
-	vp = ap->a_vp;
-	ip = VTOI(vp);
-	uio = ap->a_uio;
 
 #ifdef DIAGNOSTIC
 	if (uio->uio_rw != UIO_READ)
@@ -85,15 +101,13 @@ ext2fs_read(void *v)
 
 	if (vp->v_type == VLNK) {
 		if ((int)ext2fs_size(ip) < vp->v_mount->mnt_maxsymlinklen ||
-			(vp->v_mount->mnt_maxsymlinklen == 0 &&
-			 ip->i_e2fs_nblock == 0))
+		    (vp->v_mount->mnt_maxsymlinklen == 0 &&
+		    ip->i_e2fs_nblock == 0))
 			panic("%s: short symlink", "ext2fs_read");
 	} else if (vp->v_type != VREG && vp->v_type != VDIR)
 		panic("%s: type %d", "ext2fs_read", vp->v_type);
 #endif
-	fs = ip->i_e2fs;
-	if ((u_int64_t)uio->uio_offset >
-		((u_int64_t)0x80000000 * fs->e2fs_bsize - 1))
+	if (e2fs_overflow(fs, 0, uio->uio_offset))
 		return (EFBIG);
 	if (uio->uio_resid == 0)
 		return (0);
@@ -150,6 +164,80 @@ ext2fs_read(void *v)
 	return (error);
 }
 
+int
+ext4_ext_read(struct vnode *vp, struct inode *ip, struct m_ext2fs *fs, struct uio *uio)
+{
+	struct ext4_extent_path path;
+	struct ext4_extent nex, *ep;
+	struct buf *bp;
+	size_t orig_resid;
+	daddr_t lbn, pos;
+	off_t bytesinfile;
+	long size, xfersize, blkoffset;
+	int error, cache_type;
+
+	memset(&path, 0, sizeof path);
+
+	orig_resid = uio->uio_resid;
+	if (orig_resid == 0)
+		return (0);
+
+	if (e2fs_overflow(fs, 0, uio->uio_offset))
+		return (EFBIG);
+
+	while (uio->uio_resid > 0) {
+		if ((bytesinfile = ext2fs_size(ip) - uio->uio_offset) <= 0)
+			break;
+		lbn = lblkno(fs, uio->uio_offset);
+		size = fs->e2fs_bsize;
+		blkoffset = blkoff(fs, uio->uio_offset);
+
+		xfersize = fs->e2fs_fsize - blkoffset;
+		xfersize = MIN(xfersize, uio->uio_resid);
+		xfersize = MIN(xfersize, bytesinfile);
+
+		cache_type = ext4_ext_in_cache(ip, lbn, &nex);
+		switch (cache_type) {
+		case EXT4_EXT_CACHE_NO:
+			ext4_ext_find_extent(fs, ip, lbn, &path);
+			if ((ep = path.ep_ext) == NULL)
+				return (EIO);
+			ext4_ext_put_cache(ip, ep, EXT4_EXT_CACHE_IN);
+
+			pos = lbn - ep->e_blk + (((daddr_t) ep->e_start_hi << 32) | ep->e_start_lo);
+			if (path.ep_bp != NULL) {
+				brelse(path.ep_bp);
+				path.ep_bp = NULL;
+			}
+			break;
+		case EXT4_EXT_CACHE_GAP:
+			/* block has not been allocated yet */
+			return (0);
+		case EXT4_EXT_CACHE_IN:
+			pos = lbn - nex.e_blk + (((daddr_t) nex.e_start_hi << 32) | nex.e_start_lo);
+			break;
+		}
+		error = bread(ip->i_devvp, fsbtodb(fs, pos), size, &bp);
+		if (error) {
+			brelse(bp);
+			return (error);
+		}
+		size -= bp->b_resid;
+		if (size < xfersize) {
+			if (size == 0) {
+				brelse(bp);
+				break;
+			}
+			xfersize = size;
+		}
+		error = uiomove(bp->b_data + blkoffset, xfersize, uio);
+		brelse(bp);
+		if (error)
+			return (error);
+	}
+	return (0);
+}
+
 /*
  * Vnode op for writing.
  */
@@ -203,9 +291,7 @@ ext2fs_write(void *v)
 	}
 
 	fs = ip->i_e2fs;
-	if (uio->uio_offset < 0 ||
-		(u_int64_t)uio->uio_offset + uio->uio_resid >
-		((u_int64_t)0x80000000 * fs->e2fs_bsize - 1))
+	if (e2fs_overflow(fs, uio->uio_resid, uio->uio_offset + uio->uio_resid))
 		return (EFBIG);
 
 	/* do the filesize rlimit check */
@@ -245,6 +331,10 @@ ext2fs_write(void *v)
 
 		error =
 			uiomove((char *)bp->b_data + blkoffset, (int)xfersize, uio);
+#if 0
+		if (ioflag & IO_NOCACHE)
+			bp->b_flags |= B_NOCACHE;
+#endif
 		if (ioflag & IO_SYNC)
 			(void)bwrite(bp);
 		else if (xfersize + blkoffset == fs->e2fs_bsize) {

@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_cnmac.c,v 1.12 2013/09/16 20:52:14 jmatthew Exp $	*/
+/*	$OpenBSD: if_cnmac.c,v 1.15 2014/07/22 10:35:35 mpi Exp $	*/
 
 /*
  * Copyright (c) 2007 Internet Initiative Japan, Inc.
@@ -58,15 +58,10 @@
 #include <net/if_media.h>
 #include <netinet/in.h>
 #include <netinet/if_ether.h>
-#include <net/route.h>
 
 #if NBPFILTER > 0
 #include <net/bpf.h>
 #endif
-
-#include <netinet/in.h>
-#include <netinet/in_systm.h>
-#include <netinet/ip.h>
 
 #include <machine/bus.h>
 #include <machine/intr.h>
@@ -342,11 +337,6 @@ octeon_eth_attach(struct device *parent, struct device *self, void *aux)
 	octeon_eth_board_mac_addr(enaddr);
 	printf(", address %s\n", ether_sprintf(enaddr));
 
-	/*
-	 * live lock control notifications.
-	 * XXX: use sysctl ???
-	 */
-
 	octeon_eth_gsc[sc->sc_port] = sc;
 
 	SIMPLEQ_INIT(&sc->sc_sendq);
@@ -573,6 +563,7 @@ static int
 octeon_eth_mediainit(struct octeon_eth_softc *sc)
 {
 	struct ifnet *ifp = &sc->sc_arpcom.ac_if;
+	struct mii_softc *child;
 
 	sc->sc_mii.mii_ifp = ifp;
 	sc->sc_mii.mii_readreg = octeon_eth_mii_readreg;
@@ -584,16 +575,14 @@ octeon_eth_mediainit(struct octeon_eth_softc *sc)
 	mii_attach(&sc->sc_dev, &sc->sc_mii,
 	    0xffffffff, sc->sc_phy_addr, MII_OFFSET_ANY, MIIF_DOPAUSE);
 
-	/* XXX */
-	if (LIST_FIRST(&sc->sc_mii.mii_phys) != NULL) {
-		/* XXX */
-		ifmedia_set(&sc->sc_mii.mii_media, IFM_ETHER | IFM_AUTO);
+	child = LIST_FIRST(&sc->sc_mii.mii_phys);
+	if (child == NULL) {
+                /* No PHY attached. */
+		ifmedia_add(&sc->sc_mii.mii_media, IFM_ETHER | IFM_MANUAL,
+			    0, NULL);
+		ifmedia_set(&sc->sc_mii.mii_media, IFM_ETHER | IFM_MANUAL);
 	} else {
-		/* XXX */
-		ifmedia_add(&sc->sc_mii.mii_media, IFM_ETHER | IFM_NONE,
-		    MII_MEDIA_NONE, NULL);
-		/* XXX */
-		ifmedia_set(&sc->sc_mii.mii_media, IFM_ETHER | IFM_NONE);
+		ifmedia_set(&sc->sc_mii.mii_media, IFM_ETHER | IFM_AUTO);
 	}
 
 	return 0;
@@ -616,9 +605,10 @@ octeon_eth_mediachange(struct ifnet *ifp)
 {
 	struct octeon_eth_softc *sc = ifp->if_softc;
 
-	mii_mediachg(&sc->sc_mii);
+	if ((ifp->if_flags & IFF_UP) == 0)
+		return 0;
 
-	return 0;
+	return mii_mediachg(&sc->sc_mii);
 }
 
 /* ---- send buffer garbage collection */
@@ -933,7 +923,7 @@ if_cnmac_kvtophys(vaddr_t kva)
 	else if (kva >= CKSEG1_BASE && kva < CKSEG1_BASE + CKSEG_SIZE)
 		return CKSEG1_TO_PHYS(kva);
 
-	printf("kva %p is not be able to convert physical address\n", kva);
+	printf("kva %lx is not be able to convert physical address\n", kva);
 	panic("if_cnmac_kvtophys");
 }
 

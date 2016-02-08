@@ -1,4 +1,4 @@
-/* $OpenBSD: acpi.c,v 1.253 2014/02/21 23:48:38 deraadt Exp $ */
+/* $OpenBSD: acpi.c,v 1.267 2014/07/20 18:05:21 mlarkin Exp $ */
 /*
  * Copyright (c) 2005 Thorsten Lockert <tholo@sigmasoft.com>
  * Copyright (c) 2005 Jordan Hargrave <jordan@openbsd.org>
@@ -27,7 +27,6 @@
 #include <sys/signalvar.h>
 #include <sys/proc.h>
 #include <sys/kthread.h>
-#include <sys/workq.h>
 #include <sys/sched.h>
 #include <sys/reboot.h>
 
@@ -174,32 +173,27 @@ acpi_gasio(struct acpi_softc *sc, int iodir, int iospace, uint64_t address,
     int access_size, int len, void *buffer)
 {
 	u_int8_t *pb;
+	bus_space_tag_t iot;
 	bus_space_handle_t ioh;
-	struct acpi_mem_map mh;
 	pci_chipset_tag_t pc;
 	pcitag_t tag;
-	bus_addr_t ioaddr;
 	int reg, idx, ival, sval;
 
 	dnprintf(50, "gasio: %.2x 0x%.8llx %s\n",
 	    iospace, address, (iodir == ACPI_IOWRITE) ? "write" : "read");
 
+	KASSERT((len % access_size) == 0);
+
 	pb = (u_int8_t *)buffer;
 	switch (iospace) {
 	case GAS_SYSTEM_MEMORY:
-		/* copy to/from system memory */
-		acpi_map(address, len, &mh);
-		if (iodir == ACPI_IOREAD)
-			memcpy(buffer, mh.va, len);
-		else
-			memcpy(mh.va, buffer, len);
-		acpi_unmap(&mh);
-		break;
-
 	case GAS_SYSTEM_IOSPACE:
-		/* read/write from I/O registers */
-		ioaddr = address;
-		if (acpi_bus_space_map(sc->sc_iot, ioaddr, len, 0, &ioh) != 0) {
+		if (iospace == GAS_SYSTEM_MEMORY)
+			iot = sc->sc_memt;
+		else
+			iot = sc->sc_iot;
+
+		if (acpi_bus_space_map(iot, address, len, 0, &ioh) != 0) {
 			printf("%s: unable to map iospace\n", DEVNAME(sc));
 			return (-1);
 		}
@@ -207,20 +201,20 @@ acpi_gasio(struct acpi_softc *sc, int iodir, int iospace, uint64_t address,
 			if (iodir == ACPI_IOREAD) {
 				switch (access_size) {
 				case 1:
-					*(uint8_t *)(pb+reg) = bus_space_read_1(
-					    sc->sc_iot, ioh, reg);
+					*(uint8_t *)(pb + reg) = 
+					    bus_space_read_1(iot, ioh, reg);
 					dnprintf(80, "os_in8(%llx) = %x\n",
 					    reg+address, *(uint8_t *)(pb+reg));
 					break;
 				case 2:
-					*(uint16_t *)(pb+reg) = bus_space_read_2(
-					    sc->sc_iot, ioh, reg);
+					*(uint16_t *)(pb + reg) =
+					    bus_space_read_2(iot, ioh, reg);
 					dnprintf(80, "os_in16(%llx) = %x\n",
 					    reg+address, *(uint16_t *)(pb+reg));
 					break;
 				case 4:
-					*(uint32_t *)(pb+reg) = bus_space_read_4(
-					    sc->sc_iot, ioh, reg);
+					*(uint32_t *)(pb + reg) =
+					    bus_space_read_4(iot, ioh, reg);
 					break;
 				default:
 					printf("%s: rdio: invalid size %d\n",
@@ -230,20 +224,20 @@ acpi_gasio(struct acpi_softc *sc, int iodir, int iospace, uint64_t address,
 			} else {
 				switch (access_size) {
 				case 1:
-					bus_space_write_1(sc->sc_iot, ioh, reg,
-					    *(uint8_t *)(pb+reg));
+					bus_space_write_1(iot, ioh, reg,
+					    *(uint8_t *)(pb + reg));
 					dnprintf(80, "os_out8(%llx,%x)\n",
 					    reg+address, *(uint8_t *)(pb+reg));
 					break;
 				case 2:
-					bus_space_write_2(sc->sc_iot, ioh, reg,
-					    *(uint16_t *)(pb+reg));
+					bus_space_write_2(iot, ioh, reg,
+					    *(uint16_t *)(pb + reg));
 					dnprintf(80, "os_out16(%llx,%x)\n",
 					    reg+address, *(uint16_t *)(pb+reg));
 					break;
 				case 4:
-					bus_space_write_4(sc->sc_iot, ioh, reg,
-					    *(uint32_t *)(pb+reg));
+					bus_space_write_4(iot, ioh, reg,
+					    *(uint32_t *)(pb + reg));
 					break;
 				default:
 					printf("%s: wrio: invalid size %d\n",
@@ -251,16 +245,8 @@ acpi_gasio(struct acpi_softc *sc, int iodir, int iospace, uint64_t address,
 					return (-1);
 				}
 			}
-
-			/* During autoconf some devices are still gathering
-			 * information.  Delay here to give them an opportunity
-			 * to finish.  During runtime we simply need to ignore
-			 * transient values.
-			 */
-			if (cold)
-				delay(10000);
 		}
-		acpi_bus_space_unmap(sc->sc_iot, ioh, len, &ioaddr);
+		acpi_bus_space_unmap(iot, ioh, len, NULL);
 		break;
 
 	case GAS_PCI_CFG_SPACE:
@@ -431,13 +417,13 @@ int
 acpi_matchhids(struct acpi_attach_args *aa, const char *hids[],
     const char *driver)
 {
-
 	if (aa->aaa_dev == NULL || aa->aaa_node == NULL)
 		return (0);
 	if (_acpi_matchhids(aa->aaa_dev, hids)) {
-		dnprintf(5, "driver %s matches %s\n", driver, hids);
+		dnprintf(5, "driver %s matches at least one hid\n", driver);
 		return (1);
 	}
+
 	return (0);
 }
 #endif /* SMALL_KERNEL */
@@ -526,13 +512,13 @@ acpi_getpci(struct aml_node *node, void *arg)
 
 	/* Check if PCI device exists */
 	if (pci->dev > 0x1F || pci->fun > 7) {
-		free(pci, M_DEVBUF);
+		free(pci, M_DEVBUF, 0);
 		return (1);
 	}
 	tag = pci_make_tag(pc, pci->bus, pci->dev, pci->fun);
 	reg = pci_conf_read(pc, tag, PCI_ID_REG);
 	if (PCI_VENDOR(reg) == PCI_VENDOR_INVALID) {
-		free(pci, M_DEVBUF);
+		free(pci, M_DEVBUF, 0);
 		return (1);
 	}
 	node->pci = pci;
@@ -1083,7 +1069,7 @@ acpi_loadtables(struct acpi_softc *sc, struct acpi_rsdp *rsdp)
 			acpi_maptable(sc, xsdt->table_offsets[i], NULL, NULL,
 			    NULL, 1);
 
-		free(sdt, M_DEVBUF);
+		free(sdt, M_DEVBUF, 0);
 	} else {
 		struct acpi_rsdt *rsdt;
 
@@ -1102,7 +1088,7 @@ acpi_loadtables(struct acpi_softc *sc, struct acpi_rsdp *rsdp)
 			acpi_maptable(sc, rsdt->table_offsets[i], NULL, NULL,
 			    NULL, 1);
 
-		free(sdt, M_DEVBUF);
+		free(sdt, M_DEVBUF, 0);
 	}
 
 	return (0);
@@ -1336,7 +1322,7 @@ acpi_map_pmregs(struct acpi_softc *sc)
 			break;
 		}
 		if (size && addr) {
-			dnprintf(50, "mapping: %.4x %.4x %s\n",
+			dnprintf(50, "mapping: %.4lx %.4lx %s\n",
 			    addr, size, name);
 
 			/* Size and address exist; map register space */
@@ -1432,7 +1418,7 @@ acpi_dotask(struct acpi_softc *sc)
 
 	wq->handler(wq->arg0, wq->arg1);
 
-	free(wq, M_DEVBUF);
+	free(wq, M_DEVBUF, 0);
 
 	/* We did something */
 	return (1);	
@@ -1642,7 +1628,7 @@ acpi_powerdown_task(void *arg0, int dummy)
 
 	if (allowpowerdown == 1) {
 		allowpowerdown = 0;
-		psignal(initproc, SIGUSR2);
+		prsignal(initprocess, SIGUSR2);
 	}
 }
 
@@ -1907,7 +1893,7 @@ acpi_foundprw(struct aml_node *node, void *arg)
 	wq->q_wakepkg = malloc(sizeof(struct aml_value), M_DEVBUF,
 	    M_NOWAIT | M_ZERO);
 	if (wq->q_wakepkg == NULL) {
-		free(wq, M_DEVBUF);
+		free(wq, M_DEVBUF, 0);
 		return 0;
 	}
 	dnprintf(10, "Found _PRW (%s)\n", node->parent->name);
@@ -2098,6 +2084,7 @@ acpi_indicator(struct acpi_softc *sc, int led_state)
 int
 acpi_sleep_state(struct acpi_softc *sc, int state)
 {
+	struct device *mainbus = device_mainbus();
 	int error = ENXIO;
 	int s;
 
@@ -2125,10 +2112,18 @@ acpi_sleep_state(struct acpi_softc *sc, int state)
 #if NWSDISPLAY > 0
 	wsdisplay_suspend();
 #endif /* NWSDISPLAY > 0 */
-	bufq_quiesce();
 
-	if (config_suspend(TAILQ_FIRST(&alldevs), DVACT_QUIESCE))
+	if (config_suspend(mainbus, DVACT_QUIESCE))
 		goto fail_quiesce;
+
+#ifdef HIBERNATE
+	if (state == ACPI_STATE_S4) {
+		uvmpd_hibernate();
+		hibernate_suspend_bufcache();
+	}
+#endif /* HIBERNATE */
+
+	bufq_quiesce();
 
 #ifdef MULTIPROCESSOR
 	acpi_sleep_mp();
@@ -2140,7 +2135,7 @@ acpi_sleep_state(struct acpi_softc *sc, int state)
 	disable_intr();	/* PSL_I for resume; PIC/APIC broken until repair */
 	cold = 1;	/* Force other code to delay() instead of tsleep() */
 
-	if (config_suspend(TAILQ_FIRST(&alldevs), DVACT_SUSPEND) != 0)
+	if (config_suspend(mainbus, DVACT_SUSPEND) != 0)
 		goto fail_suspend;
 	acpi_sleep_clocks(sc, state);
 
@@ -2167,12 +2162,19 @@ acpi_sleep_state(struct acpi_softc *sc, int state)
 	sc->sc_state = ACPI_STATE_S0;
 	/* Resume */
 
+#ifdef HIBERNATE
+	if (state == ACPI_STATE_S4) {
+		uvm_pmr_dirty_everything();
+		uvm_pmr_zero_everything();
+	}
+#endif /* HIBERNATE */
+
 	acpi_resume_clocks(sc);		/* AML may need clocks */
 	acpi_resume_pm(sc, state);
 	acpi_resume_cpu(sc);
 
 fail_pts:
-	config_suspend(TAILQ_FIRST(&alldevs), DVACT_RESUME);
+	config_suspend(mainbus, DVACT_RESUME);
 
 fail_suspend:
 	cold = 0;
@@ -2189,10 +2191,10 @@ fail_suspend:
 	acpi_resume_mp();
 #endif
 
-fail_quiesce:
 	bufq_restart();
 
-	config_suspend(TAILQ_FIRST(&alldevs), DVACT_WAKEUP);
+fail_quiesce:
+	config_suspend(mainbus, DVACT_WAKEUP);
 
 #if NWSDISPLAY > 0
 	wsdisplay_resume();
@@ -2200,6 +2202,14 @@ fail_quiesce:
 
 	acpi_record_event(sc, APM_NORMAL_RESUME);
 	acpi_indicator(sc, ACPI_SST_WORKING);
+
+#ifdef HIBERNATE
+	if (state == ACPI_STATE_S4) {
+		hibernate_free();
+		hibernate_resume_bufcache();
+	}
+#endif /* HIBERNATE */
+
 fail_tts:
 	return (error);
 }
@@ -2290,7 +2300,7 @@ acpi_thread(void *arg)
 	while (thread->running) {
 		s = spltty();
 		while (sc->sc_threadwaiting) {
-			dnprintf(10, "acpi going to sleep...\n");
+			dnprintf(10, "acpi thread going to sleep...\n");
 			rw_exit_write(&sc->sc_lck);
 			tsleep(sc, PWAIT, "acpi0", 0);
 			rw_enter_write(&sc->sc_lck);
@@ -2306,7 +2316,7 @@ acpi_thread(void *arg)
 		while(acpi_dotask(acpi_softc))
 			;
 	}
-	free(thread, M_DEVBUF);
+	free(thread, M_DEVBUF, 0);
 
 	kthread_exit(0);
 }
@@ -2615,7 +2625,7 @@ acpiioctl(dev_t dev, u_long cmd, caddr_t data, int flag, struct proc *p)
 			error = EBADF;
 			break;
 		}
-		if (get_hibernate_io_function() == NULL) {
+		if (get_hibernate_io_function(swdevt[0].sw_dev) == NULL) {
 			error = EOPNOTSUPP;
 			break;
 		}

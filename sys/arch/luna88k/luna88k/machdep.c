@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.94 2014/01/19 12:45:35 deraadt Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.108 2014/07/21 17:25:47 uebayasi Exp $	*/
 /*
  * Copyright (c) 1998, 1999, 2000, 2001 Steve Murphree, Jr.
  * Copyright (c) 1996 Nivas Madhur
@@ -370,7 +370,7 @@ cpu_startup()
 	 */
 	printf(version);
 	identifycpu();
-	printf("real mem = %u (%uMB)\n", ptoa(physmem),
+	printf("real mem = %lu (%luMB)\n", ptoa(physmem),
 	    ptoa(physmem) / 1024 / 1024);
 
 	/*
@@ -466,16 +466,14 @@ cpu_startup()
 }
 
 __dead void
-boot(howto)
-	int howto;
+boot(int howto)
 {
-	/* take a snapshot before clobbering any registers */
+	struct device *mainbus;
+
 	if (curproc && curproc->p_addr)
 		savectx(curpcb);
 
-	/* If system is cold, just halt. */
 	if (cold) {
-		/* (Unless the user explicitly asked for reboot.) */
 		if ((howto & RB_USERREQ) == 0)
 			howto |= RB_HALT;
 		goto haltsys;
@@ -484,46 +482,44 @@ boot(howto)
 	boothowto = howto;
 	if ((howto & RB_NOSYNC) == 0) {
 		vfs_shutdown();
-		/*
-		 * If we've been adjusting the clock, the todr
-		 * will be out of synch; adjust it now unless
-		 * the system was sitting in ddb.
-		 */
-		if ((howto & RB_TIMEBAD) == 0)
+
+		if ((howto & RB_TIMEBAD) == 0) {
 			resettodr();
-		else
+		} else {
 			printf("WARNING: not updating battery clock\n");
+		}
 	}
 	if_downall();
 
 	uvm_shutdown();
-	splhigh();			/* Disable interrupts. */
+	splhigh();
+	cold = 1;
 
-	/* If rebooting and a dump is requested, do it. */
-	if (howto & RB_DUMP)
+	if ((howto & RB_DUMP) != 0)
 		dumpsys();
 
 haltsys:
 	doshutdownhooks();
-	if (!TAILQ_EMPTY(&alldevs))
-		config_suspend(TAILQ_FIRST(&alldevs), DVACT_POWERDOWN);
+	mainbus = device_mainbus();
+	if (mainbus != NULL)
+		config_suspend(mainbus, DVACT_POWERDOWN);
 
-	/* Luna88k supports automatic powerdown */
-	if ((howto & RB_POWERDOWN) == RB_POWERDOWN) {
+	/* LUNA-88K supports automatic powerdown */
+	if ((howto & RB_POWERDOWN) != 0) {
 		printf("attempting to power down...\n");
 		powerdown();
 		/* if failed, fall through. */
 	}
 
-	if (howto & RB_HALT) {
+	if ((howto & RB_HALT) != 0) {
 		printf("halted\n\n");
 	} else {
 		/* Reset all cpus, which causes reboot */
 		*((volatile unsigned *)0x6d000010) = 0;
 	}
 
-	for (;;);  /* to keep compiler happy, and me from going crazy */
-	/*NOTREACHED*/
+	for (;;) ;
+	/* NOTREACHED */
 }
 
 u_long dumpmag = 0x8fca0101;	 /* magic number for savecore */
@@ -807,7 +803,7 @@ secondary_main()
 #endif	/* MULTIPROCESSOR */
 
 /*
- *	Device interrupt handler for LUNA88K
+ *	Device interrupt handler for LUNA-88K
  */
 
 void 
@@ -819,12 +815,11 @@ luna88k_ext_int(struct trapframe *eframe)
 #else
 	u_int cpu = cpu_number();
 #endif
-	u_int32_t cur_isr, ign_mask;
+	u_int32_t cur_isr;
 	u_int level, cur_int_level, old_spl;
 	int unmasked = 0;
 
 	cur_isr = *int_mask_reg[cpu];
-	ign_mask = 0;
 	old_spl = eframe->tf_mask;
 
 	cur_int_level = cur_isr >> 29;
@@ -1050,7 +1045,7 @@ luna88k_bootstrap()
 	avail_end = last_addr;
 
 #ifdef DEBUG
-	printf("LUNA88K boot: memory from 0x%x to 0x%x\n",
+	printf("LUNA-88K boot: memory from 0x%x to 0x%x\n",
 	    avail_start, avail_end);
 #endif
 

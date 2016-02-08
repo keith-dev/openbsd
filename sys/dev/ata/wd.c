@@ -1,4 +1,4 @@
-/*	$OpenBSD: wd.c,v 1.114 2013/10/14 23:33:13 krw Exp $ */
+/*	$OpenBSD: wd.c,v 1.116 2014/07/12 18:48:17 tedu Exp $ */
 /*	$NetBSD: wd.c,v 1.193 1999/02/28 17:15:27 explorer Exp $ */
 
 /*
@@ -77,8 +77,6 @@
 #include <sys/vnode.h>
 #include <sys/dkio.h>
 #include <sys/reboot.h>
-
-#include <uvm/uvm_extern.h>
 
 #include <machine/intr.h>
 #include <machine/bus.h>
@@ -783,7 +781,7 @@ wdioctl(dev_t dev, u_long xfer, caddr_t addr, int flag, struct proc *p)
 		lp = malloc(sizeof(*lp), M_TEMP, M_WAITOK);
 		wdgetdisklabel(dev, wd, lp, 0);
 		bcopy(lp, wd->sc_dk.dk_label, sizeof(*lp));
-		free(lp, M_TEMP);
+		free(lp, M_TEMP, 0);
 		goto exit;
 
 	case DIOCGPDINFO:

@@ -1,4 +1,4 @@
-/*	$OpenBSD: zaurus_machdep.c,v 1.40 2013/09/28 14:16:42 miod Exp $	*/
+/*	$OpenBSD: zaurus_machdep.c,v 1.51 2014/07/21 17:25:47 uebayasi Exp $	*/
 /*	$NetBSD: lubbock_machdep.c,v 1.2 2003/07/15 00:25:06 lukem Exp $ */
 
 /*
@@ -130,6 +130,7 @@
 #include <sys/device.h>
 #include <dev/cons.h>
 #include <dev/ic/smc91cxxreg.h>
+#include <sys/socket.h>
 
 #include <machine/db_machdep.h>
 #include <ddb/db_sym.h>
@@ -137,6 +138,8 @@
 #ifdef KGDB
 #include <sys/kgdb.h>
 #endif
+
+#include <net/if.h>
 
 #include <machine/bootconfig.h>
 #include <machine/bus.h>
@@ -286,19 +289,16 @@ int comcnmode = CONMODE;
  * Deal with any syncing, unmounting, dumping and shutdown hooks,
  * then reset the CPU.
  */
-void
+__dead void
 boot(int howto)
 {
+	struct device *mainbus;
 	extern int lid_suspend;
 
-	if (howto & RB_POWERDOWN)
+	if ((howto & RB_POWERDOWN) != 0)
 		lid_suspend = 0;
 
 	if (cold) {
-		/*
-		 * If the system is cold, just halt, unless the user
-		 * explicitely asked for reboot.
-		 */
 		if ((howto & RB_USERREQ) == 0)
 			howto |= RB_HALT;
 		goto haltsys;
@@ -311,27 +311,30 @@ boot(int howto)
 	 * that it cannot page part of the binary in as the filesystem has
 	 * been unmounted.
 	 */
-	if (!(howto & RB_NOSYNC))
+	if ((howto & RB_NOSYNC) == 0)
 		bootsync(howto);
 
-	/* Say NO to interrupts */
-	splhigh();
+	if_downall();
 
-	/* Do a dump if requested. */
+	uvm_shutdown();
+	splhigh();
+	cold = 1;
+
 	if ((howto & (RB_DUMP | RB_HALT)) == RB_DUMP)
 		dumpsys();
 	
 haltsys:
 	doshutdownhooks();
-	if (!TAILQ_EMPTY(&alldevs))
-		config_suspend(TAILQ_FIRST(&alldevs), DVACT_POWERDOWN);
+	mainbus = device_mainbus();
+	if (mainbus != NULL)
+		config_suspend(mainbus, DVACT_POWERDOWN);
 
 	/* Make sure IRQ's are disabled */
 	IRQdisable;
 
-	if (howto & RB_HALT) {
+	if ((howto & RB_HALT) != 0) {
 #if NAPM > 0
-		if (howto & RB_POWERDOWN) {
+		if ((howto & RB_POWERDOWN) != 0) {
 
 			printf("\nAttempting to power down...\n");
 			delay(6000000);
@@ -352,8 +355,8 @@ haltsys:
 	zapm_restart();
 #endif
 	printf("reboot failed; spinning\n");
-	while(1);
-	/*NOTREACHED*/
+	for (;;) ;
+	/* NOTREACHED */
 }
 
 static __inline
@@ -362,7 +365,7 @@ read_ttb(void)
 {
   long ttb;
 
-  __asm __volatile("mrc	p15, 0, %0, c2, c0, 0" : "=r" (ttb));
+  __asm volatile("mrc	p15, 0, %0, c2, c0, 0" : "=r" (ttb));
 
 
   return (pd_entry_t *)(ttb & ~((1<<14)-1));

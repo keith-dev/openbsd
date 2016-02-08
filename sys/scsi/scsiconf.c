@@ -1,4 +1,4 @@
-/*	$OpenBSD: scsiconf.c,v 1.186 2014/01/31 02:53:41 dlg Exp $	*/
+/*	$OpenBSD: scsiconf.c,v 1.188 2014/07/12 18:50:25 tedu Exp $	*/
 /*	$NetBSD: scsiconf.c,v 1.57 1996/05/02 01:09:01 neil Exp $	*/
 
 /*
@@ -305,32 +305,11 @@ scsibus_bioctl(struct device *dev, u_long cmd, caddr_t addr)
 	switch (cmd) {
 	case SBIOCPROBE:
 		sdev = (struct sbioc_device *)addr;
-
-		if (sdev->sd_target == -1 && sdev->sd_lun == -1)
-			return (scsi_probe_bus(sc));
-
-		/* specific lun and wildcard target is bad */
-		if (sdev->sd_target == -1)
-			return (EINVAL);
-
-		if (sdev->sd_lun == -1)
-			return (scsi_probe_target(sc, sdev->sd_target));
-
-		return (scsi_probe_lun(sc, sdev->sd_target, sdev->sd_lun));
+		return (scsi_probe(sc, sdev->sd_target, sdev->sd_lun));
 
 	case SBIOCDETACH:
 		sdev = (struct sbioc_device *)addr;
-
-		if (sdev->sd_target == -1 && sdev->sd_lun == -1)
-			return (scsi_detach_bus(sc, 0));
-
-		if (sdev->sd_target == -1)
-			return (EINVAL);
-
-		if (sdev->sd_lun == -1)
-			return (scsi_detach_target(sc, sdev->sd_target, 0));
-
-		return (scsi_detach_lun(sc, sdev->sd_target, sdev->sd_lun, 0));
+		return (scsi_detach(sc, sdev->sd_target, sdev->sd_lun, 0));
 
 	default:
 		return (ENOTTY);
@@ -413,6 +392,22 @@ dumbscan:
 }
 
 int
+scsi_probe(struct scsibus_softc *sc, int target, int lun)
+{
+	if (target == -1 && lun == -1)
+		return (scsi_probe_bus(sc));
+
+	/* specific lun and wildcard target is bad */
+	if (target == -1)
+		return (EINVAL);
+
+	if (lun == -1)
+		return (scsi_probe_target(sc, target));
+
+	return (scsi_probe_lun(sc, target, lun));
+}
+
+int
 scsi_probe_lun(struct scsibus_softc *sc, int target, int lun)
 {
 	struct scsi_link *alink = sc->adapter_link;
@@ -438,6 +433,22 @@ scsi_detach_bus(struct scsibus_softc *sc, int flags)
 	}
 
 	return (rv);
+}
+
+int
+scsi_detach(struct scsibus_softc *sc, int target, int lun, int flags)
+{
+	if (target == -1 && lun == -1)
+		return (scsi_detach_bus(sc, flags));
+
+	/* specific lun and wildcard target is bad */
+	if (target == -1)
+		return (EINVAL);
+
+	if (lun == -1)
+		return (scsi_detach_target(sc, target, flags));
+
+	return (scsi_detach_lun(sc, target, lun, flags));
 }
 
 int
@@ -495,7 +506,7 @@ scsi_detach_lun(struct scsibus_softc *sc, int target, int lun, int flags)
 	/* 3. if its using the openings io allocator, clean it up */
 	if (ISSET(link->flags, SDEV_OWN_IOPL)) {
 		scsi_iopool_destroy(link->pool);
-		free(link->pool, M_DEVBUF);
+		free(link->pool, M_DEVBUF, 0);
 	}
 
 	/* 4. free up its state in the adapter */
@@ -506,7 +517,7 @@ scsi_detach_lun(struct scsibus_softc *sc, int target, int lun, int flags)
 	if (link->id != NULL)
 		devid_free(link->id);
 	scsi_remove_link(sc, link);
-	free(link, M_DEVBUF);
+	free(link, M_DEVBUF, 0);
 
 	return (0);
 }
@@ -1057,12 +1068,12 @@ free_devid:
 		devid_free(sc_link->id);
 bad:
 	if (ISSET(sc_link->flags, SDEV_OWN_IOPL))
-		free(sc_link->pool, M_DEVBUF);
+		free(sc_link->pool, M_DEVBUF, 0);
 
 	if (scsi->adapter_link->adapter->dev_free != NULL)
 		scsi->adapter_link->adapter->dev_free(sc_link);
 free:
-	free(sc_link, M_DEVBUF);
+	free(sc_link, M_DEVBUF, 0);
 	return (rslt);
 }
 
@@ -1299,7 +1310,7 @@ scsi_devid_pg80(struct scsi_link *link)
 	    sizeof(link->inqdata.vendor) + sizeof(link->inqdata.product) + len,
 	    id);
 
-	free(id, M_TEMP);
+	free(id, M_TEMP, 0);
 
 free:
 	dma_free(pg, pglen);
@@ -1361,5 +1372,5 @@ void
 devid_free(struct devid *d)
 {
 	if (--d->d_refcount == 0)
-		free(d, M_DEVBUF);
+		free(d, M_DEVBUF, 0);
 }

@@ -31,7 +31,7 @@ POSSIBILITY OF SUCH DAMAGE.
 
 ***************************************************************************/
 
-/* $OpenBSD: if_em.c,v 1.277 2014/02/22 04:41:31 chris Exp $ */
+/* $OpenBSD: if_em.c,v 1.287 2014/07/13 23:10:23 deraadt Exp $ */
 /* $FreeBSD: if_em.c,v 1.46 2004/09/29 18:28:28 mlaier Exp $ */
 
 #include <dev/pci/if_em.h>
@@ -140,12 +140,21 @@ const struct pci_matchid em_devices[] = {
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_I217_LM },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_I217_V },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_I218_LM },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_I218_LM_2 },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_I218_LM_3 },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_I218_V },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_I218_V_2 },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_I218_V_3 },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82580_COPPER },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82580_FIBER },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82580_SERDES },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82580_SGMII },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82580_COPPER_DUAL },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82580_QUAD_FIBER },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_DH89XXCC_SGMII },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_DH89XXCC_SERDES },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_DH89XXCC_BPLANE },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_DH89XXCC_SFP },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82583V },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_I350_COPPER },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_I350_FIBER },
@@ -689,6 +698,11 @@ em_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 		error = ifmedia_ioctl(ifp, ifr, &sc->media, command);
 		break;
 
+	case SIOCGIFRXR:
+		error = if_rxr_ioctl((struct if_rxrinfo *)ifr->ifr_data,
+		    NULL, MCLBYTES, &sc->rx_ring);
+		break;
+
 	default:
 		error = ether_ioctl(ifp, &sc->interface_data, command, data);
 	}
@@ -1124,10 +1138,21 @@ em_encap(struct em_softc *sc, struct mbuf *m_head)
 	map = tx_buffer->map;
 
 	error = bus_dmamap_load_mbuf(sc->txtag, map, m_head, BUS_DMA_NOWAIT);
-	if (error != 0) {
+	switch (error) {
+	case 0:
+		break;
+	case EFBIG:
+		if ((error = m_defrag(m_head, M_DONTWAIT)) == 0 &&
+		    (error = bus_dmamap_load_mbuf(sc->txtag, map, m_head,
+		     BUS_DMA_NOWAIT)) == 0)
+			break;
+
+		/* FALLTHROUGH */
+	default:
 		sc->no_tx_dma_setup++;
 		goto loaderr;
 	}
+
 	EM_KASSERT(map->dm_nsegs!= 0, ("em_encap: empty packet"));
 
 	if (map->dm_nsegs > sc->num_tx_desc_avail - 2)
@@ -1850,8 +1875,6 @@ em_setup_interface(struct em_softc *sc)
 	IFQ_SET_MAXLEN(&ifp->if_snd, sc->num_tx_desc - 1);
 	IFQ_SET_READY(&ifp->if_snd);
 
-	m_clsetwms(ifp, MCLBYTES, 4, sc->num_rx_desc);
-
 	ifp->if_capabilities = IFCAP_VLAN_MTU;
 
 #if NVLAN > 0
@@ -2096,8 +2119,8 @@ em_dma_free(struct em_softc *sc, struct em_dma_alloc *dma)
 int
 em_allocate_transmit_structures(struct em_softc *sc)
 {
-	if (!(sc->tx_buffer_area = malloc(sizeof(struct em_buffer) *
-	    sc->num_tx_desc, M_DEVBUF, M_NOWAIT | M_ZERO))) {
+	if (!(sc->tx_buffer_area = mallocarray(sc->num_tx_desc,
+	    sizeof(struct em_buffer), M_DEVBUF, M_NOWAIT | M_ZERO))) {
 		printf("%s: Unable to allocate tx_buffer memory\n", 
 		       sc->sc_dv.dv_xname);
 		return (ENOMEM);
@@ -2274,7 +2297,7 @@ em_free_transmit_structures(struct em_softc *sc)
 		}
 	}
 	if (sc->tx_buffer_area != NULL) {
-		free(sc->tx_buffer_area, M_DEVBUF);
+		free(sc->tx_buffer_area, M_DEVBUF, 0);
 		sc->tx_buffer_area = NULL;
 	}
 	if (sc->txtag != NULL)
@@ -2485,7 +2508,7 @@ em_get_buf(struct em_softc *sc, int i)
 		return (ENOBUFS);
 	}
 
-	m = MCLGETI(NULL, M_DONTWAIT, &sc->interface_data.ac_if, MCLBYTES);
+	m = MCLGETI(NULL, M_DONTWAIT, NULL, MCLBYTES);
 	if (!m) {
 		sc->mbuf_cluster_failed++;
 		return (ENOBUFS);
@@ -2513,8 +2536,6 @@ em_get_buf(struct em_softc *sc, int i)
 	bus_dmamap_sync(sc->rxdma.dma_tag, sc->rxdma.dma_map,
 	    sizeof(*desc) * i, sizeof(*desc), BUS_DMASYNC_PREWRITE);
 
-	sc->rx_ndescs++;
-
 	return (0);
 }
 
@@ -2532,8 +2553,8 @@ em_allocate_receive_structures(struct em_softc *sc)
 	int		i, error;
 	struct em_buffer *rx_buffer;
 
-	if (!(sc->rx_buffer_area = malloc(sizeof(struct em_buffer) *
-	    sc->num_rx_desc, M_DEVBUF, M_NOWAIT | M_ZERO))) {
+	if (!(sc->rx_buffer_area = mallocarray(sc->num_rx_desc,
+	    sizeof(struct em_buffer), M_DEVBUF, M_NOWAIT | M_ZERO))) {
 		printf("%s: Unable to allocate rx_buffer memory\n", 
 		       sc->sc_dv.dv_xname);
 		return (ENOMEM);
@@ -2572,8 +2593,10 @@ fail:
 int
 em_setup_receive_structures(struct em_softc *sc)
 {
-	bzero((void *) sc->rx_desc_base,
-	    (sizeof(struct em_rx_desc)) * sc->num_rx_desc);
+	struct ifnet *ifp = &sc->interface_data.ac_if;
+
+	memset(sc->rx_desc_base, 0,
+	    sizeof(struct em_rx_desc) * sc->num_rx_desc);
 
 	if (em_allocate_receive_structures(sc))
 		return (ENOMEM);
@@ -2581,10 +2604,11 @@ em_setup_receive_structures(struct em_softc *sc)
 	/* Setup our descriptor pointers */
 	sc->next_rx_desc_to_check = 0;
 	sc->last_rx_desc_filled = sc->num_rx_desc - 1;
-	sc->rx_ndescs = 0;
 
-	em_rxfill(sc);
-	if (sc->rx_ndescs < 1) {
+	if_rxr_init(&sc->rx_ring, 2 * ((ifp->if_hardmtu / MCLBYTES) + 1),
+	    sc->num_rx_desc);
+
+	if (em_rxfill(sc) == 0) {
 		printf("%s: unable to fill any rx descriptors\n",
 		    sc->sc_dv.dv_xname);
 	}
@@ -2723,7 +2747,7 @@ em_free_receive_structures(struct em_softc *sc)
 		}
 	}
 	if (sc->rx_buffer_area != NULL) {
-		free(sc->rx_buffer_area, M_DEVBUF);
+		free(sc->rx_buffer_area, M_DEVBUF, 0);
 		sc->rx_buffer_area = NULL;
 	}
 	if (sc->rxtag != NULL)
@@ -2786,21 +2810,25 @@ em_realign(struct em_softc *sc, struct mbuf *m, u_int16_t *prev_len_adj)
 int
 em_rxfill(struct em_softc *sc)
 {
+	u_int slots;
 	int post = 0;
 	int i;
 
 	i = sc->last_rx_desc_filled;
 
-	while (sc->rx_ndescs < sc->num_rx_desc) {
+	for (slots = if_rxr_get(&sc->rx_ring, sc->num_rx_desc);
+	    slots > 0; slots--) { 
 		if (++i == sc->num_rx_desc)
 			i = 0;
 
 		if (em_get_buf(sc, i) != 0)
 			break;
 
-		sc->last_rx_desc_filled = i;
 		post = 1;
 	}
+
+	sc->last_rx_desc_filled = i;
+	if_rxr_put(&sc->rx_ring, slots);
 
 	return (post);
 }
@@ -2827,30 +2855,24 @@ em_rxeof(struct em_softc *sc)
 	struct em_buffer    *pkt;
 	u_int8_t	    status;
 
-	ifp = &sc->interface_data.ac_if;
-
-	if (!ISSET(ifp->if_flags, IFF_RUNNING))
+	if (if_rxr_inuse(&sc->rx_ring) == 0)
 		return;
 
 	i = sc->next_rx_desc_to_check;
 
-	while (sc->rx_ndescs > 0) {
+	bus_dmamap_sync(sc->rxdma.dma_tag, sc->rxdma.dma_map,
+	    0, sizeof(*desc) * sc->num_rx_desc,
+	    BUS_DMASYNC_POSTREAD);
+
+	do {
 		m = NULL;
 
 		desc = &sc->rx_desc_base[i];
 		pkt = &sc->rx_buffer_area[i];
 
-		bus_dmamap_sync(sc->rxdma.dma_tag, sc->rxdma.dma_map,
-		    sizeof(*desc) * i, sizeof(*desc),
-		    BUS_DMASYNC_POSTREAD);
-
 		status = desc->status;
-		if (!ISSET(status, E1000_RXD_STAT_DD)) {
-			bus_dmamap_sync(sc->rxdma.dma_tag, sc->rxdma.dma_map,
-			    sizeof(*desc) * i, sizeof(*desc),
-			    BUS_DMASYNC_PREREAD);
+		if (!ISSET(status, E1000_RXD_STAT_DD))
 			break;
-		}
 
 		/* pull the mbuf off the ring */
 		bus_dmamap_sync(sc->rxtag, pkt->map, 0, pkt->map->dm_mapsize,
@@ -2861,12 +2883,12 @@ em_rxeof(struct em_softc *sc)
 
 		if (m == NULL) {
 			panic("em_rxeof: NULL mbuf in slot %d "
-			    "(nrx %d, filled %d)", i, sc->rx_ndescs,
+			    "(nrx %d, filled %d)", i,
+			    if_rxr_inuse(&sc->rx_ring),
 			    sc->last_rx_desc_filled);
 		}
 
-		m_cluncount(m, 1);
-		sc->rx_ndescs--;
+		if_rxr_put(&sc->rx_ring, 1);
 
 		accept_frame = 1;
 		prev_len_adj = 0;
@@ -2972,14 +2994,15 @@ em_rxeof(struct em_softc *sc)
 			m_freem(m);
 		}
 
-		bus_dmamap_sync(sc->rxdma.dma_tag, sc->rxdma.dma_map,
-		    sizeof(*desc) * i, sizeof(*desc),
-		    BUS_DMASYNC_PREREAD);
-
 		/* Advance our pointers to the next descriptor. */
 		if (++i == sc->num_rx_desc)
 			i = 0;
-	}
+	} while (if_rxr_inuse(&sc->rx_ring) > 0);
+
+	bus_dmamap_sync(sc->rxdma.dma_tag, sc->rxdma.dma_map,
+	    0, sizeof(*desc) * sc->num_rx_desc,
+	    BUS_DMASYNC_PREREAD);
+
 	sc->next_rx_desc_to_check = i;
 }
 

@@ -1,4 +1,4 @@
-/* $OpenBSD: mke2fs.c,v 1.6 2013/12/27 19:17:28 deraadt Exp $ */
+/* $OpenBSD: mke2fs.c,v 1.11 2014/07/31 19:49:25 pelikan Exp $ */
 /*	$NetBSD: mke2fs.c,v 1.13 2009/10/19 18:41:08 bouyer Exp $	*/
 
 /*-
@@ -238,10 +238,10 @@ mke2fs(const char *fsys, int fi, int fo)
 	}
 
 	sblock.e2fs.e2fs_log_bsize = ilog2(bsize) - LOG_MINBSIZE;
-	/* Umm, why not e2fs_log_fsize? */
-	sblock.e2fs.e2fs_fsize = ilog2(fsize) - LOG_MINBSIZE;
+	sblock.e2fs.e2fs_log_fsize = ilog2(fsize) - LOG_MINFSIZE;
 
 	sblock.e2fs_bsize = bsize;
+	sblock.e2fs_fsize = fsize;
 	sblock.e2fs_bshift = sblock.e2fs.e2fs_log_bsize + LOG_MINBSIZE;
 	sblock.e2fs_qbmask = sblock.e2fs_bsize - 1;
 	sblock.e2fs_bmask = ~sblock.e2fs_qbmask;
@@ -465,10 +465,9 @@ mke2fs(const char *fsys, int fi, int fo)
 	/*
 	 * Initialize group descriptors
 	 */
-	gd = malloc(sblock.e2fs_ngdb * bsize);
+	gd = calloc(sblock.e2fs_ngdb, bsize);
 	if (gd == NULL)
 		errx(EXIT_FAILURE, "Can't allocate descriptors buffer");
-	memset(gd, 0, sblock.e2fs_ngdb * bsize);
 
 	fbcount = 0;
 	ficount = 0;
@@ -748,8 +747,8 @@ initcg(uint cylno)
 	for (i = 0; i < sblock.e2fs_itpg; i++) {
 		for (j = 0; j < sblock.e2fs_ipb; j++) {
 			dp = (struct ext2fs_dinode *)(buf + inodesize * j);
-			/* h2fs32() just for consistency */
-			dp->e2di_gen = h2fs32(arc4random());
+			/* If there is some bias in arc4random(), keep it. */
+			dp->e2di_gen = htole32(arc4random());
 		}
 		wtfs(fsbtodb(&sblock, gd[cylno].ext2bgd_i_tables + i),
 		    sblock.e2fs_bsize, buf);
@@ -1021,8 +1020,8 @@ copy_dir(struct ext2fs_direct *dir, struct ext2fs_direct *dbuf)
 {
 
 	memcpy(dbuf, dir, EXT2FS_DIRSIZ(dir->e2d_namlen));
-	dbuf->e2d_ino = h2fs32(dir->e2d_ino);
-	dbuf->e2d_reclen = h2fs16(dir->e2d_reclen);
+	dbuf->e2d_ino = htole32(dir->e2d_ino);
+	dbuf->e2d_reclen = htole16(dir->e2d_reclen);
 }
 
 /*
@@ -1116,9 +1115,9 @@ init_resizeino(const struct timeval *tv)
 		    "required to enable resize feature for this filesystem\n",
 		    __func__);
 	}
-	/* upper 32bit is stored into e2di_dacl on REV1 feature */
+	/* upper 32bit is stored into e2di_size_hi on REV1 feature */
 	node.e2di_size = isize & UINT32_MAX;
-	node.e2di_dacl = isize >> 32;
+	node.e2di_size_hi = isize >> 32;
 
 #define SINGLE	0	/* index of single indirect block */
 #define DOUBLE	1	/* index of double indirect block */
@@ -1177,7 +1176,7 @@ init_resizeino(const struct timeval *tv)
 			    "group descriptors (%u) for resize inode",
 			    __func__, sblock.e2fs.e2fs_reserved_ngdb);
 		dindir_block[i] =
-		    h2fs32(cgbase(&sblock, 0) + NBLOCK_SUPERBLOCK + i);
+		    htole32(cgbase(&sblock, 0) + NBLOCK_SUPERBLOCK + i);
 
 		/*
 		 * Setup block entries in the second dindirect blocks
@@ -1198,7 +1197,7 @@ init_resizeino(const struct timeval *tv)
 			 * These blocks are already reserved in
 			 * initcg() so no need to use alloc() here.
 			 */
-			reserved_gdb[n++] = h2fs32(cgbase(&sblock, cylno) +
+			reserved_gdb[n++] = htole32(cgbase(&sblock, cylno) +
 			    NBLOCK_SUPERBLOCK + i);
 			nblock += fsbtodb(&sblock, 1);
 		}
@@ -1206,7 +1205,7 @@ init_resizeino(const struct timeval *tv)
 			reserved_gdb[n] = 0;
 
 		/* write group descriptor block as the second dindirect refs */
-		wtfs(fsbtodb(&sblock, fs2h32(dindir_block[i])),
+		wtfs(fsbtodb(&sblock, letoh32(dindir_block[i])),
 		    sblock.e2fs_bsize, reserved_gdb);
 		nblock += fsbtodb(&sblock, 1);
 	}
@@ -1348,14 +1347,14 @@ iput(struct ext2fs_dinode *ip, ino_t ino)
 
 	dp = (struct ext2fs_dinode *)(bp +
 	    inodesize * ino_to_fsbo(&sblock, ino));
-	e2fs_isave(ip, dp);
+	e2fs_isave(&sblock, ip, dp);
 	/* e2fs_i_bswap() doesn't swap e2di_blocks addrs */
 	if ((ip->e2di_mode & EXT2_IFMT) != EXT2_IFLNK) {
 		for (i = 0; i < NDADDR + NIADDR; i++)
-			dp->e2di_blocks[i] = h2fs32(ip->e2di_blocks[i]);
+			dp->e2di_blocks[i] = htole32(ip->e2di_blocks[i]);
 	}
-	/* h2fs32() just for consistency */
-	dp->e2di_gen = h2fs32(arc4random());
+	/* If there is some bias in arc4random(), keep it. */
+	dp->e2di_gen = htole32(arc4random());
 
 	wtfs(d, sblock.e2fs_bsize, bp);
 	free(bp);

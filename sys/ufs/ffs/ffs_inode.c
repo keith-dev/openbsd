@@ -1,4 +1,4 @@
-/*	$OpenBSD: ffs_inode.c,v 1.67 2014/01/25 23:31:12 guenther Exp $	*/
+/*	$OpenBSD: ffs_inode.c,v 1.73 2014/07/14 08:11:34 beck Exp $	*/
 /*	$NetBSD: ffs_inode.c,v 1.10 1996/05/11 18:27:19 mycroft Exp $	*/
 
 /*
@@ -43,8 +43,6 @@
 #include <sys/malloc.h>
 #include <sys/resourcevar.h>
 
-#include <uvm/uvm_extern.h>
-
 #include <ufs/ufs/quota.h>
 #include <ufs/ufs/inode.h>
 #include <ufs/ufs/ufsmount.h>
@@ -59,8 +57,11 @@ int ffs_indirtrunc(struct inode *, daddr_t, daddr_t, daddr_t, int, long *);
  * Update the access, modified, and inode change times as specified by the
  * IN_ACCESS, IN_UPDATE, and IN_CHANGE flags respectively. The IN_MODIFIED
  * flag is used to specify that the inode needs to be updated but that the
- * times have already been set.  If waitfor is set, then wait for
- * the disk write of the inode to complete.
+ * times have already been set.  The IN_LAZYMOD flag is used to specify
+ * that the inode needs to be updated at some point, by reclaim if not
+ * in the course of other changes; this is used to defer writes just to
+ * update device timestamps.  If waitfor is set, then wait for the disk
+ * write of the inode to complete.
  */
 int
 ffs_update(struct inode *ip, int waitfor)
@@ -73,10 +74,10 @@ ffs_update(struct inode *ip, int waitfor)
 	vp = ITOV(ip);
 	ufs_itimes(vp);
 
-	if ((ip->i_flag & IN_MODIFIED) == 0 && waitfor != MNT_WAIT)
+	if ((ip->i_flag & IN_MODIFIED) == 0 && waitfor == 0)
 		return (0);
 
-	ip->i_flag &= ~IN_MODIFIED;
+	ip->i_flag &= ~(IN_MODIFIED | IN_LAZYMOD);
 	fs = ip->i_fs;
 
 	/*
@@ -162,7 +163,7 @@ ffs_truncate(struct inode *oip, off_t length, int flags, struct ucred *cred)
 		memset(SHORTLINK(oip), 0, (size_t) DIP(oip, size));
 		DIP_ASSIGN(oip, size, 0);
 		oip->i_flag |= IN_CHANGE | IN_UPDATE;
-		return (UFS_UPDATE(oip, MNT_WAIT));
+		return (UFS_UPDATE(oip, 1));
 	}
 
 	if ((error = getinoquota(oip)) != 0)
@@ -221,7 +222,7 @@ ffs_truncate(struct inode *oip, off_t length, int flags, struct ucred *cred)
 		else
 			bawrite(bp);
 		oip->i_flag |= IN_CHANGE | IN_UPDATE;
-		return (UFS_UPDATE(oip, MNT_WAIT));
+		return (UFS_UPDATE(oip, 1));
 	}
 	uvm_vnp_setsize(ovp, length);
 
@@ -301,7 +302,7 @@ ffs_truncate(struct inode *oip, off_t length, int flags, struct ucred *cred)
 	}
 
 	oip->i_flag |= IN_CHANGE | IN_UPDATE;
-	if ((error = UFS_UPDATE(oip, MNT_WAIT)) != 0)
+	if ((error = UFS_UPDATE(oip, 1)) != 0)
 		allerror = error;
 
 	/*
@@ -560,7 +561,7 @@ ffs_indirtrunc(struct inode *ip, daddr_t lbn, daddr_t dbn,
 		}
 	}
 	if (copy != NULL) {
-		free(copy, M_TEMP);
+		free(copy, M_TEMP, 0);
 	} else {
 		bp->b_flags |= B_INVAL;
 		brelse(bp);

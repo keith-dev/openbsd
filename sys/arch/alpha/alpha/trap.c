@@ -1,4 +1,4 @@
-/* $OpenBSD: trap.c,v 1.69 2014/02/06 05:14:12 miod Exp $ */
+/* $OpenBSD: trap.c,v 1.75 2014/07/02 18:37:33 miod Exp $ */
 /* $NetBSD: trap.c,v 1.52 2000/05/24 16:48:33 thorpej Exp $ */
 
 /*-
@@ -244,8 +244,10 @@ trap(a0, a1, a2, entry, framep)
 	ucode = 0;
 	v = 0;
 	user = (framep->tf_regs[FRAME_PS] & ALPHA_PSL_USERMODE) != 0;
-	if (user)
+	if (user) {
 		p->p_md.md_tf = framep;
+		refreshcreds(p);
+	}
 
 	switch (entry) {
 	case ALPHA_KENTRY_UNA:
@@ -337,7 +339,9 @@ trap(a0, a1, a2, entry, framep)
 		case ALPHA_IF_CODE_BUGCHK:
 #ifdef PTRACE
 			if (p->p_md.md_flags & (MDP_STEP1|MDP_STEP2)) {
+				KERNEL_LOCK();
 				process_sstep(p, 0);
+				KERNEL_UNLOCK();
 				p->p_md.md_tf->tf_regs[FRAME_PC] -= 4;
 			}
 #endif
@@ -463,10 +467,9 @@ do_fault:
 			v = (caddr_t)a0;
 			typ = SEGV_MAPERR;
 			if (rv == ENOMEM) {
-				printf("UVM: pid %u (%s), uid %u killed: "
-				       "out of swap\n", p->p_pid, p->p_comm,
-				       p->p_cred && p->p_ucred ?
-				       p->p_ucred->cr_uid : -1);
+				printf("UVM: pid %u (%s), uid %d killed: "
+			           "out of swap\n", p->p_pid, p->p_comm,
+			           p->p_ucred ? (int)p->p_ucred->cr_uid : -1);
 				i = SIGKILL;
 			} else {
 				i = SIGSEGV;
@@ -549,8 +552,8 @@ syscall(code, framep)
 	p->p_md.md_tf = framep;
 	opc = framep->tf_regs[FRAME_PC] - 4;
 
-	callp = p->p_emul->e_sysent;
-	numsys = p->p_emul->e_nsysent;
+	callp = p->p_p->ps_emul->e_sysent;
+	numsys = p->p_p->ps_emul->e_nsysent;
 
 	switch(code) {
 	case SYS_syscall:
@@ -570,7 +573,7 @@ syscall(code, framep)
 	if (code < numsys)
 		callp += code;
 	else
-		callp += p->p_emul->e_nosys;
+		callp += p->p_p->ps_emul->e_nosys;
 
 	nargs = callp->sy_narg + hidden;
 	switch (nargs) {
@@ -720,15 +723,7 @@ ast(framep)
 #endif
 
 	atomic_add_int(&uvmexp.softs, 1);
-
-	if (p->p_flag & P_OWEUPC) {
-		KERNEL_LOCK();
-		ADDUPROF(p);
-		KERNEL_UNLOCK();
-	}
-
-	if (ci->ci_want_resched)
-		preempt(NULL);
+	mi_ast(p, ci->ci_want_resched);
 
 	/* Do any deferred user pmap operations. */
 	PMAP_USERRET(vm_map_pmap(&p->p_vmspace->vm_map));

@@ -1,4 +1,4 @@
-/*	$OpenBSD: bus_dma.c,v 1.11 2012/10/03 21:44:51 miod Exp $ */
+/*	$OpenBSD: bus_dma.c,v 1.15 2014/07/12 18:44:42 tedu Exp $ */
 
 /*
  * Copyright (c) 2003-2004 Opsycon AB  (www.opsycon.se / www.opsycon.com)
@@ -117,7 +117,7 @@ _dmamap_create(bus_dma_tag_t t, bus_size_t size, int nsegments,
 void
 _dmamap_destroy(bus_dma_tag_t t, bus_dmamap_t map)
 {
-	free(map, M_DEVBUF);
+	free(map, M_DEVBUF, 0);
 }
 
 /*
@@ -388,7 +388,7 @@ _dmamem_alloc(bus_dma_tag_t t, bus_size_t size, bus_size_t alignment,
     int flags)
 {
 	return _dmamem_alloc_range(t, size, alignment, boundary,
-	    segs, nsegs, rsegs, flags, (vaddr_t)0, (vaddr_t)-1);
+	    segs, nsegs, rsegs, flags, (paddr_t)0, (paddr_t)-1);
 }
 
 /*
@@ -431,11 +431,12 @@ _dmamem_map(bus_dma_tag_t t, bus_dma_segment_t *segs, int nsegs, size_t size,
 	size_t ssize;
 	paddr_t pa;
 	bus_addr_t addr;
-	int curseg, error;
+	int curseg, error, pmap_flags;
+	const struct kmem_dyn_mode *kd;
 
 	if (nsegs == 1) {
 		pa = (*t->_device_to_pa)(segs[0].ds_addr);
-		if (flags & BUS_DMA_COHERENT)
+		if (flags & (BUS_DMA_COHERENT | BUS_DMA_NOCACHE))
 			*kvap = (caddr_t)PHYS_TO_XKPHYS(pa, CCA_NC);
 		else
 			*kvap = (caddr_t)PHYS_TO_XKPHYS(pa, CCA_CACHED);
@@ -443,7 +444,8 @@ _dmamem_map(bus_dma_tag_t t, bus_dma_segment_t *segs, int nsegs, size_t size,
 	}
 
 	size = round_page(size);
-	va = uvm_km_valloc(kernel_map, size);
+	kd = flags & BUS_DMA_NOWAIT ? &kd_trylock : &kd_waitok;
+	va = (vaddr_t)km_alloc(size, &kv_any, &kp_none, kd);
 	if (va == 0)
 		return (ENOMEM);
 
@@ -451,6 +453,9 @@ _dmamem_map(bus_dma_tag_t t, bus_dma_segment_t *segs, int nsegs, size_t size,
 
 	sva = va;
 	ssize = size;
+	pmap_flags = PMAP_WIRED | PMAP_CANFAIL;
+	if (flags & (BUS_DMA_COHERENT | BUS_DMA_NOCACHE))
+		pmap_flags |= PMAP_NOCACHE;
 	for (curseg = 0; curseg < nsegs; curseg++) {
 		for (addr = segs[curseg].ds_addr;
 		    addr < (segs[curseg].ds_addr + segs[curseg].ds_len);
@@ -460,16 +465,24 @@ _dmamem_map(bus_dma_tag_t t, bus_dma_segment_t *segs, int nsegs, size_t size,
 			pa = (*t->_device_to_pa)(addr);
 			error = pmap_enter(pmap_kernel(), va, pa,
 			    VM_PROT_READ | VM_PROT_WRITE, VM_PROT_READ |
-			    VM_PROT_WRITE | PMAP_WIRED | PMAP_CANFAIL);
+			    VM_PROT_WRITE | pmap_flags);
 			if (error) {
 				pmap_update(pmap_kernel());
-				uvm_km_free(kernel_map, sva, ssize);
+				km_free((void *)sva, ssize, &kv_any, &kp_none);
 				return (error);
 			}
 
-			if (flags & BUS_DMA_COHERENT)
+			/*
+			 * This is redundant with what pmap_enter() did 
+			 * above, but will take care of forcing other
+			 * mappings of the same page (if any) to be
+			 * uncached. 
+			 * If there are no multiple mappings of that 
+			 * page, this amounts to a noop.
+			 */
+			if (flags & (BUS_DMA_COHERENT | BUS_DMA_NOCACHE)) 
 				pmap_page_cache(PHYS_TO_VM_PAGE(pa),
-				    PV_UNCACHED);
+				    PGF_UNCACHED);
 		}
 		pmap_update(pmap_kernel());
 	}
@@ -487,8 +500,7 @@ _dmamem_unmap(bus_dma_tag_t t, caddr_t kva, size_t size)
 	if (IS_XKPHYS((vaddr_t)kva))
 		return;
 
-	size = round_page(size);
-	uvm_km_free(kernel_map, (vaddr_t)kva, size);
+	km_free(kva, round_page(size), &kv_any, &kp_none);
 }
 
 /*
@@ -634,9 +646,9 @@ _dmamap_load_buffer(bus_dma_tag_t t, bus_dmamap_t map, void *buf,
 int
 _dmamem_alloc_range(bus_dma_tag_t t, bus_size_t size, bus_size_t alignment,
     bus_size_t boundary, bus_dma_segment_t *segs, int nsegs, int *rsegs,
-    int flags, vaddr_t low, vaddr_t high)
+    int flags, paddr_t low, paddr_t high)
 {
-	vaddr_t curaddr, lastaddr;
+	paddr_t curaddr, lastaddr;
 	vm_page_t m;
 	struct pglist mlist;
 	int curseg, error, plaflag;

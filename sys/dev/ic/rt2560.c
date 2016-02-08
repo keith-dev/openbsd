@@ -1,4 +1,4 @@
-/*	$OpenBSD: rt2560.c,v 1.62 2013/12/06 21:03:03 deraadt Exp $  */
+/*	$OpenBSD: rt2560.c,v 1.66 2014/07/22 13:12:12 mpi Exp $  */
 
 /*-
  * Copyright (c) 2005, 2006
@@ -49,9 +49,7 @@
 #include <net/if_types.h>
 
 #include <netinet/in.h>
-#include <netinet/in_systm.h>
 #include <netinet/if_ether.h>
-#include <netinet/ip.h>
 
 #include <net80211/ieee80211_var.h>
 #include <net80211/ieee80211_amrr.h>
@@ -388,8 +386,8 @@ rt2560_alloc_tx_ring(struct rt2560_softc *sc, struct rt2560_tx_ring *ring,
 
 	ring->physaddr = ring->map->dm_segs->ds_addr;
 
-	ring->data = malloc(count * sizeof (struct rt2560_tx_data), M_DEVBUF,
-	    M_NOWAIT | M_ZERO);
+	ring->data = mallocarray(count, sizeof (struct rt2560_tx_data),
+	    M_DEVBUF, M_NOWAIT | M_ZERO);
 	if (ring->data == NULL) {
 		printf("%s: could not allocate soft data\n",
 		    sc->sc_dev.dv_xname);
@@ -483,7 +481,7 @@ rt2560_free_tx_ring(struct rt2560_softc *sc, struct rt2560_tx_ring *ring)
 			if (data->map != NULL)
 				bus_dmamap_destroy(sc->sc_dmat, data->map);
 		}
-		free(ring->data, M_DEVBUF);
+		free(ring->data, M_DEVBUF, 0);
 	}
 }
 
@@ -532,8 +530,8 @@ rt2560_alloc_rx_ring(struct rt2560_softc *sc, struct rt2560_rx_ring *ring,
 
 	ring->physaddr = ring->map->dm_segs->ds_addr;
 
-	ring->data = malloc(count * sizeof (struct rt2560_rx_data), M_DEVBUF,
-	    M_NOWAIT | M_ZERO);
+	ring->data = mallocarray(count, sizeof (struct rt2560_rx_data),
+	    M_DEVBUF, M_NOWAIT | M_ZERO);
 	if (ring->data == NULL) {
 		printf("%s: could not allocate soft data\n",
 		    sc->sc_dev.dv_xname);
@@ -638,7 +636,7 @@ rt2560_free_rx_ring(struct rt2560_softc *sc, struct rt2560_rx_ring *ring)
 			if (data->map != NULL)
 				bus_dmamap_destroy(sc->sc_dmat, data->map);
 		}
-		free(ring->data, M_DEVBUF);
+		free(ring->data, M_DEVBUF, 0);
 	}
 }
 
@@ -1945,8 +1943,7 @@ rt2560_start(struct ifnet *ifp)
 			}
 			IF_DEQUEUE(&ic->ic_mgtq, m0);
 
-			ni = (struct ieee80211_node *)m0->m_pkthdr.rcvif;
-			m0->m_pkthdr.rcvif = NULL;
+			ni = m0->m_pkthdr.ph_cookie;
 #if NBPFILTER > 0
 			if (ic->ic_rawbpf != NULL)
 				bpf_mtap(ic->ic_rawbpf, m0, BPF_DIRECTION_OUT);

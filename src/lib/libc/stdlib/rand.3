@@ -29,13 +29,14 @@
 .\" OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
 .\" SUCH DAMAGE.
 .\"
-.\"	$OpenBSD: rand.3,v 1.14 2014/01/21 03:15:45 schwarze Exp $
+.\"	$OpenBSD: rand.3,v 1.16 2014/07/17 23:12:28 deraadt Exp $
 .\"
-.Dd $Mdocdate: January 21 2014 $
+.Dd $Mdocdate: July 17 2014 $
 .Dt RAND 3
 .Os
 .Sh NAME
 .Nm rand ,
+.Nm rand_r ,
 .Nm srand
 .Nd bad random number generator
 .Sh SYNOPSIS
@@ -49,7 +50,10 @@
 .Sh DESCRIPTION
 .Bf -symbolic
 These interfaces are obsoleted by
-.Xr random 3 .
+.Xr random 3 ,
+which is also unsafe.
+Consider using
+.Xr arc4random 3 .
 .Ef
 .Pp
 The

@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_uath.c,v 1.56 2013/08/07 01:06:42 bluhm Exp $	*/
+/*	$OpenBSD: if_uath.c,v 1.61 2014/07/13 15:52:49 mpi Exp $	*/
 
 /*-
  * Copyright (c) 2006
@@ -52,9 +52,7 @@
 #include <net/if_types.h>
 
 #include <netinet/in.h>
-#include <netinet/in_systm.h>
 #include <netinet/if_ether.h>
-#include <netinet/ip.h>
 
 #include <net80211/ieee80211_var.h>
 #include <net80211/ieee80211_radiotap.h>
@@ -70,10 +68,6 @@
 
 #include <dev/usb/if_uathreg.h>
 #include <dev/usb/if_uathvar.h>
-
-#ifdef USB_DEBUG
-#define UATH_DEBUG
-#endif
 
 #ifdef UATH_DEBUG
 #define DPRINTF(x)	do { if (uath_debug) printf x; } while (0)
@@ -181,23 +175,17 @@ int	uath_switch_channel(struct uath_softc *, struct ieee80211_channel *);
 int	uath_init(struct ifnet *);
 void	uath_stop(struct ifnet *, int);
 int	uath_loadfirmware(struct uath_softc *, const u_char *, int);
-int	uath_activate(struct device *, int);
 
-int uath_match(struct device *, void *, void *); 
-void uath_attach(struct device *, struct device *, void *); 
-int uath_detach(struct device *, int); 
-int uath_activate(struct device *, int); 
+int uath_match(struct device *, void *, void *);
+void uath_attach(struct device *, struct device *, void *);
+int uath_detach(struct device *, int);
 
-struct cfdriver uath_cd = { 
+struct cfdriver uath_cd = {
 	NULL, "uath", DV_IFNET
-}; 
+};
 
-const struct cfattach uath_ca = { 
-	sizeof(struct uath_softc), 
-	uath_match, 
-	uath_attach, 
-	uath_detach, 
-	uath_activate, 
+const struct cfattach uath_ca = {
+	sizeof(struct uath_softc), uath_match, uath_attach, uath_detach
 };
 
 int
@@ -227,7 +215,7 @@ uath_attachhook(void *xsc)
 	}
 
 	error = uath_loadfirmware(sc, fw, size);
-	free(fw, M_DEVBUF);
+	free(fw, M_DEVBUF, 0);
 
 	if (error == 0) {
 		usb_port_status_t status;
@@ -1496,8 +1484,7 @@ uath_start(struct ifnet *ifp)
 			}
 			IF_DEQUEUE(&ic->ic_mgtq, m0);
 
-			ni = (struct ieee80211_node *)m0->m_pkthdr.rcvif;
-			m0->m_pkthdr.rcvif = NULL;
+			ni = m0->m_pkthdr.ph_cookie;
 #if NBPFILTER > 0
 			if (ic->ic_rawbpf != NULL)
 				bpf_mtap(ic->ic_rawbpf, m0, BPF_DIRECTION_OUT);
@@ -2119,17 +2106,4 @@ fail4:	usbd_free_xfer(rxxfer);
 fail3:	usbd_free_xfer(txxfer);
 fail2:	usbd_free_xfer(ctlxfer);
 fail1:	return error;
-}
-
-int
-uath_activate(struct device *self, int act)
-{
-	struct uath_softc *sc = (struct uath_softc *)self;
-
-	switch (act) {
-	case DVACT_DEACTIVATE:
-		usbd_deactivate(sc->sc_udev);
-		break;
-	}
-	return 0;
 }

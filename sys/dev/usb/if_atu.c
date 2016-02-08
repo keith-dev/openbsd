@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_atu.c,v 1.104 2013/11/15 10:17:39 pirofti Exp $ */
+/*	$OpenBSD: if_atu.c,v 1.109 2014/07/13 15:52:49 mpi Exp $ */
 /*
  * Copyright (c) 2003, 2004
  *	Daan Vreeken <Danovitsch@Vitsch.net>.  All rights reserved.
@@ -74,17 +74,11 @@
 #include <net/if_dl.h>
 #include <net/if_media.h>
 
-#ifdef INET
 #include <netinet/in.h>
 #include <netinet/if_ether.h>
-#endif
 
 #include <net80211/ieee80211_var.h>
 #include <net80211/ieee80211_radiotap.h>
-
-#ifdef USB_DEBUG
-#define ATU_DEBUG
-#endif
 
 #include <dev/usb/if_atureg.h>
 
@@ -97,21 +91,16 @@ int atudebug = 1;
 #define DPRINTFN(n,x)
 #endif
 
-int atu_match(struct device *, void *, void *); 
-void atu_attach(struct device *, struct device *, void *); 
-int atu_detach(struct device *, int); 
-int atu_activate(struct device *, int); 
+int atu_match(struct device *, void *, void *);
+void atu_attach(struct device *, struct device *, void *);
+int atu_detach(struct device *, int);
 
-struct cfdriver atu_cd = { 
-	NULL, "atu", DV_IFNET 
-}; 
+struct cfdriver atu_cd = {
+	NULL, "atu", DV_IFNET
+};
 
-const struct cfattach atu_ca = { 
-	sizeof(struct atu_softc), 
-	atu_match, 
-	atu_attach, 
-	atu_detach, 
-	atu_activate, 
+const struct cfattach atu_ca = {
+	sizeof(struct atu_softc), atu_match, atu_attach, atu_detach
 };
 
 /*
@@ -917,7 +906,7 @@ atu_internal_firmware(void *arg)
 			if (err) {
 				DPRINTF(("%s: dfu_getstatus failed!\n",
 				    sc->atu_dev.dv_xname));
-				free(firm, M_DEVBUF);
+				free(firm, M_DEVBUF, 0);
 				goto fail;
 			}
 			/* success means state => DnLoadIdle */
@@ -939,7 +928,7 @@ atu_internal_firmware(void *arg)
 			if (err) {
 				DPRINTF(("%s: dfu_dnload failed\n",
 				    sc->atu_dev.dv_xname));
-				free(firm, M_DEVBUF);
+				free(firm, M_DEVBUF, 0);
 				goto fail;
 			}
 
@@ -958,7 +947,7 @@ atu_internal_firmware(void *arg)
 
 		state = atu_get_dfu_state(sc);
 	}
-	free(firm, M_DEVBUF);
+	free(firm, M_DEVBUF, 0);
 
 	if (state != DFUState_ManifestSync) {
 		DPRINTF(("%s: state != manifestsync... eek!\n",
@@ -1030,7 +1019,7 @@ atu_external_firmware(void *arg)
 		if (err) {
 			DPRINTF(("%s: could not load external firmware "
 			    "block\n", sc->atu_dev.dv_xname));
-			free(firm, M_DEVBUF);
+			free(firm, M_DEVBUF, 0);
 			return;
 		}
 
@@ -1038,7 +1027,7 @@ atu_external_firmware(void *arg)
 		block++;
 		bytes_left -= block_size;
 	}
-	free(firm, M_DEVBUF);
+	free(firm, M_DEVBUF, 0);
 
 	err = atu_usb_request(sc, UT_WRITE_VENDOR_DEVICE, 0x0e, 0x0802,
 	    block, 0, NULL);
@@ -1513,19 +1502,6 @@ atu_detach(struct device *self, int flags)
 	}
 
 	return(0);
-}
-
-int
-atu_activate(struct device *self, int act)
-{
-	struct atu_softc *sc = (struct atu_softc *)self;
-
-	switch (act) {
-	case DVACT_DEACTIVATE:
-		usbd_deactivate(sc->atu_udev);
-		break;
-	}
-	return (0);
 }
 
 /*
@@ -2017,17 +1993,7 @@ atu_start(struct ifnet *ifp)
 			DPRINTFN(25, ("%s: atu_start: mgmt packet\n",
 			    sc->atu_dev.dv_xname));
 
-			/*
-			 * Hack!  The referenced node pointer is in the
-			 * rcvif field of the packet header.  This is
-			 * placed there by ieee80211_mgmt_output because
-			 * we need to hold the reference with the frame
-			 * and there's no other way (other than packet
-			 * tags which we consider too expensive to use)
-			 * to pass it along.
-			 */
-			ni = (struct ieee80211_node *)m->m_pkthdr.rcvif;
-			m->m_pkthdr.rcvif = NULL;
+			ni = m->m_pkthdr.ph_cookie;
 
 			wh = mtod(m, struct ieee80211_frame *);
 			/* sc->sc_stats.ast_tx_mgmt++; */

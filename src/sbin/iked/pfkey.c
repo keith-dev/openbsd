@@ -1,4 +1,4 @@
-/*	$OpenBSD: pfkey.c,v 1.29 2014/02/21 20:52:38 markus Exp $	*/
+/*	$OpenBSD: pfkey.c,v 1.38 2014/07/09 12:05:01 markus Exp $	*/
 
 /*
  * Copyright (c) 2010-2013 Reyk Floeter <reyk@openbsd.org>
@@ -43,6 +43,7 @@
 #define IOV_CNT 20
 
 #define PFKEYV2_CHUNK sizeof(u_int64_t)
+#define PFKEY_REPLY_TIMEOUT 1000
 
 static u_int32_t sadb_msg_seq = 0;
 static u_int sadb_decoupled = 0;
@@ -56,9 +57,9 @@ struct pfkey_message {
 	SIMPLEQ_ENTRY(pfkey_message)
 			 pm_entry;
 	u_int8_t	*pm_data;
-	ssize_t		 pm_lenght;
+	ssize_t		 pm_length;
 };
-SIMPLEQ_HEAD(, pfkey_message) pfkey_postponed =
+SIMPLEQ_HEAD(, pfkey_message) pfkey_retry, pfkey_postponed =
     SIMPLEQ_HEAD_INITIALIZER(pfkey_postponed);
 
 struct pfkey_constmap {
@@ -119,7 +120,7 @@ struct sadb_ident *
 void	*pfkey_find_ext(u_int8_t *, ssize_t, int);
 
 void	pfkey_timer_cb(int, short, void *);
-void	pfkey_process(struct iked *, struct pfkey_message *);
+int	pfkey_process(struct iked *, struct pfkey_message *);
 
 int
 pfkey_couple(int sd, struct iked_sas *sas, int couple)
@@ -311,11 +312,11 @@ pfkey_flow(int sd, u_int8_t satype, u_int8_t action, struct iked_flow *flow)
 		    (sizeof(sa_peer) + ROUNDUP(speer.ss_len)) / 8;
 
 		/* local id */
-		sa_srcid = pfkey_id2ident(flow->flow_srcid,
+		sa_srcid = pfkey_id2ident(IKESA_SRCID(flow->flow_ikesa),
 		    SADB_EXT_IDENTITY_SRC);
 
 		/* peer id */
-		sa_dstid = pfkey_id2ident(flow->flow_dstid,
+		sa_dstid = pfkey_id2ident(IKESA_DSTID(flow->flow_ikesa),
 		    SADB_EXT_IDENTITY_DST);
 	}
 
@@ -509,14 +510,18 @@ pfkey_sa(int sd, u_int8_t satype, u_int8_t action, struct iked_childsa *sa)
 		sa_ltime_hard.sadb_lifetime_bytes = lt->lt_bytes;
 		sa_ltime_hard.sadb_lifetime_addtime = lt->lt_seconds;
 
+		/* double the lifetime for IP compression */
+		if (satype == SADB_X_SATYPE_IPCOMP)
+			sa_ltime_hard.sadb_lifetime_addtime *= 2;
+
 		sa_ltime_soft.sadb_lifetime_exttype = SADB_EXT_LIFETIME_SOFT;
 		sa_ltime_soft.sadb_lifetime_len = sizeof(sa_ltime_soft) / 8;
 		/* set randomly to 85-95% */
 		jitter = 850 + arc4random_uniform(100);
 		sa_ltime_soft.sadb_lifetime_bytes =
-		    (lt->lt_bytes * jitter) / 1000;
+		    (sa_ltime_hard.sadb_lifetime_bytes * jitter) / 1000;
 		sa_ltime_soft.sadb_lifetime_addtime =
-		    (lt->lt_seconds * jitter) / 1000;
+		    (sa_ltime_hard.sadb_lifetime_addtime * jitter) / 1000;
 	}
 
 	/* XXX handle NULL encryption or NULL auth or combined encr/auth */
@@ -539,20 +544,20 @@ pfkey_sa(int sd, u_int8_t satype, u_int8_t action, struct iked_childsa *sa)
 		    ntohs(udpencap.sadb_x_udpencap_port));
 	}
 
-	if (sa->csa_integrxf)
+	if (sa->csa_integrid)
 		if (pfkey_map(pfkey_integr,
-		    sa->csa_integrxf->xform_id, &sadb.sadb_sa_auth) == -1) {
+		    sa->csa_integrid, &sadb.sadb_sa_auth) == -1) {
 			log_warnx("%s: unsupported integrity algorithm %s",
-			    __func__, print_map(sa->csa_integrxf->xform_id,
+			    __func__, print_map(sa->csa_integrid,
 			    ikev2_xformauth_map));
 			return (-1);
 		}
 
-	if (sa->csa_encrxf)
+	if (sa->csa_encrid)
 		if (pfkey_map(pfkey_encr,
-		    sa->csa_encrxf->xform_id, &sadb.sadb_sa_encrypt) == -1) {
+		    sa->csa_encrid, &sadb.sadb_sa_encrypt) == -1) {
 			log_warnx("%s: unsupported encryption algorithm %s",
-			    __func__, print_map(sa->csa_encrxf->xform_id,
+			    __func__, print_map(sa->csa_encrid,
 			    ikev2_xformencr_map));
 			return (-1);
 		}
@@ -577,11 +582,18 @@ pfkey_sa(int sd, u_int8_t satype, u_int8_t action, struct iked_childsa *sa)
 	if (satype == SADB_X_SATYPE_IPCOMP)
 		sadb.sadb_sa_encrypt = SADB_X_CALG_DEFLATE;
 
-	/* local id */
-	sa_srcid = pfkey_id2ident(sa->csa_srcid, SADB_EXT_IDENTITY_SRC);
-
-	/* peer id */
-	sa_dstid = pfkey_id2ident(sa->csa_dstid, SADB_EXT_IDENTITY_DST);
+	/* Note that we need to swap the IDs for incoming SAs (SADB_UPDATE) */
+	if (action != SADB_UPDATE) {
+		sa_srcid = pfkey_id2ident(
+		    IKESA_SRCID(sa->csa_ikesa), SADB_EXT_IDENTITY_SRC);
+		sa_dstid = pfkey_id2ident(
+		    IKESA_DSTID(sa->csa_ikesa), SADB_EXT_IDENTITY_DST);
+	} else {
+		sa_srcid = pfkey_id2ident(
+		    IKESA_DSTID(sa->csa_ikesa), SADB_EXT_IDENTITY_SRC);
+		sa_dstid = pfkey_id2ident(
+		    IKESA_SRCID(sa->csa_ikesa), SADB_EXT_IDENTITY_DST);
+	}
 
 	tag = sa->csa_ikesa->sa_tag;
 	if (tag != NULL && *tag != '\0') {
@@ -1085,10 +1097,42 @@ pfkey_reply(int sd, u_int8_t **datap, ssize_t *lenp)
 {
 	struct pfkey_message	*pm;
 	struct sadb_msg		 hdr;
+	struct timeval		 tv;
 	ssize_t			 len;
 	u_int8_t		*data;
+	fd_set			*fds;
+	int			 n;
 
 	for (;;) {
+		/*
+		 * We should actually expect the reply to get lost
+		 * as PF_KEY is an unreliable service per the specs.
+		 * Currently we do this by setting a short timeout,
+		 * and if it is not readable in that time, we fail
+		 * the read.
+		 */
+		n = howmany(sd + 1, NFDBITS);
+		if ((fds = calloc(n, sizeof(fd_mask))) == NULL) {
+			log_warn("%s: calloc(%lu, %lu) failed", __func__,
+			    (unsigned long) n,
+			    (unsigned long) sizeof(fd_mask));
+			return (-1);
+		}
+		FD_SET(sd, fds);
+		tv.tv_sec = 0;
+		tv.tv_usec = PFKEY_REPLY_TIMEOUT;
+		n = select(sd + 1, fds, 0, 0, &tv);
+		free(fds);
+		if (n == -1) {
+			log_warn("%s: select(%d, fds, 0, 0, &tv) failed",
+			    __func__, sd + 1);
+			return (-1);
+		}
+		if (n == 0) {
+			log_warnx("%s: no reply from PF_KEY", __func__);
+			return (-1);
+		}
+
 		if (recv(sd, &hdr, sizeof(hdr), MSG_PEEK) != sizeof(hdr)) {
 			log_warn("%s: short recv", __func__);
 			return (-1);
@@ -1117,8 +1161,10 @@ pfkey_reply(int sd, u_int8_t **datap, ssize_t *lenp)
 
 		/* ignore messages for other processes */
 		if (hdr.sadb_msg_pid != 0 &&
-		    hdr.sadb_msg_pid != (u_int32_t)getpid())
+		    hdr.sadb_msg_pid != (u_int32_t)getpid()) {
+			free(data);
 			continue;
+		}
 
 		/* not the reply, enqueue */
 		if ((pm = malloc(sizeof(*pm))) == NULL) {
@@ -1127,7 +1173,7 @@ pfkey_reply(int sd, u_int8_t **datap, ssize_t *lenp)
 			return (-1);
 		}
 		pm->pm_data = data;
-		pm->pm_lenght = len;
+		pm->pm_length = len;
 		SIMPLEQ_INSERT_TAIL(&pfkey_postponed, pm, pm_entry);
 		evtimer_add(&pfkey_timer_ev, &pfkey_timer_tv);
 	}
@@ -1458,7 +1504,7 @@ void
 pfkey_dispatch(int sd, short event, void *arg)
 {
 	struct iked		*env = (struct iked *)arg;
-	struct pfkey_message	 pm;
+	struct pfkey_message	 pm, *pmp;
 	struct sadb_msg		 hdr;
 	ssize_t			 len;
 	u_int8_t		*data;
@@ -1484,11 +1530,23 @@ pfkey_dispatch(int sd, short event, void *arg)
 		return;
 	}
 
-	pm.pm_data = data;
-	pm.pm_lenght = len;
-	pfkey_process(env, &pm);
+	/* Try postponed requests first, so we do in-order processing */
+	if (!SIMPLEQ_EMPTY(&pfkey_postponed))
+		pfkey_timer_cb(0, 0, env);
 
-	free(data);
+	pm.pm_data = data;
+	pm.pm_length = len;
+
+	if (pfkey_process(env, &pm) == -1 &&
+	    (pmp = calloc(1, sizeof(*pmp))) != NULL) {
+		pmp->pm_data = data;
+		pmp->pm_length = len;
+		log_debug("%s: pfkey_process is busy, retry later", __func__);
+		SIMPLEQ_INSERT_TAIL(&pfkey_postponed, pmp, pm_entry);
+		evtimer_add(&pfkey_timer_ev, &pfkey_timer_tv);
+	} else {
+		free(data);
+	}
 }
 
 void
@@ -1497,16 +1555,33 @@ pfkey_timer_cb(int unused, short event, void *arg)
 	struct iked		*env = arg;
 	struct pfkey_message	*pm;
 
+	SIMPLEQ_INIT(&pfkey_retry);
 	while (!SIMPLEQ_EMPTY(&pfkey_postponed)) {
 		pm = SIMPLEQ_FIRST(&pfkey_postponed);
 		SIMPLEQ_REMOVE_HEAD(&pfkey_postponed, pm_entry);
-		pfkey_process(env, pm);
-		free(pm->pm_data);
-		free(pm);
+		if (pfkey_process(env, pm) == -1) {
+			log_debug("%s: pfkey_process is busy, retry later",
+			    __func__);
+			SIMPLEQ_INSERT_TAIL(&pfkey_retry, pm, pm_entry);
+		} else {
+			free(pm->pm_data);
+			free(pm);
+		}
 	}
+	/* move from retry to postponed */
+	while ((pm = SIMPLEQ_FIRST(&pfkey_retry)) != NULL) {
+		SIMPLEQ_REMOVE_HEAD(&pfkey_retry, pm_entry);
+		SIMPLEQ_INSERT_TAIL(&pfkey_postponed, pm, pm_entry);
+	}
+	if (!SIMPLEQ_EMPTY(&pfkey_postponed))
+		evtimer_add(&pfkey_timer_ev, &pfkey_timer_tv);
 }
 
-void
+/*
+ * pfkey_process returns 0 if the message has been processed and -1 if
+ * the system is busy and the the message should be passed again, later.
+ */
+int
 pfkey_process(struct iked *env, struct pfkey_message *pm)
 {
 	struct iked_spi		 spi;
@@ -1521,17 +1596,18 @@ pfkey_process(struct iked *env, struct pfkey_message *pm)
 	struct sadb_x_policy	 sa_pol;
 	struct sockaddr		*ssrc, *sdst, *smask, *dmask, *speer;
 	struct iovec		 iov[IOV_CNT];
-	int			 iov_cnt, sd = env->sc_pfkey;
+	int			 ret = 0, iov_cnt, sd;
 	u_int8_t		*reply;
 	ssize_t			 rlen;
 	const char		*errmsg = NULL;
 	u_int8_t		*data = pm->pm_data;
-	ssize_t			 len = pm->pm_lenght;
+	ssize_t			 len = pm->pm_length;
 	size_t			 slen;
 
 	if (!env || !data || !len)
-		return;
+		return (0);
 
+	sd = env->sc_pfkey;
 	hdr = (struct sadb_msg *)data;
 
 	switch (hdr->sadb_msg_type) {
@@ -1542,20 +1618,20 @@ pfkey_process(struct iked *env, struct pfkey_message *pm)
 		if ((sa_addr = pfkey_find_ext(data, len,
 		    SADB_EXT_ADDRESS_DST)) == NULL) {
 			log_debug("%s: no peer address", __func__);
-			return;
+			return (0);
 		}
 		speer = (struct sockaddr *)(sa_addr + 1);
 		peer.addr_af = speer->sa_family;
 		peer.addr_port = htons(socket_getport(speer));
 		if ((slen = speer->sa_len) > sizeof(peer.addr)) {
 			log_debug("%s: invalid peer address len", __func__);
-			return;
+			return (0);
 		}
 		memcpy(&peer.addr, speer, slen);
 		if (socket_af((struct sockaddr *)&peer.addr,
 		    peer.addr_port) == -1) {
 			log_debug("%s: invalid address", __func__);
-			return;
+			return (0);
 		}
 		flow.flow_peer = &peer;
 
@@ -1588,7 +1664,7 @@ pfkey_process(struct iked *env, struct pfkey_message *pm)
 
 		if (pfkey_write(sd, &smsg, iov, iov_cnt, &reply, &rlen)) {
 			log_warnx("%s: failed to get a policy", __func__);
-			return;
+			return (0);
 		}
 
 		if ((sa_addr = pfkey_find_ext(reply, rlen,
@@ -1601,13 +1677,13 @@ pfkey_process(struct iked *env, struct pfkey_message *pm)
 		flow.flow_src.addr_port = htons(socket_getport(ssrc));
 		if ((slen = ssrc->sa_len) > sizeof(flow.flow_src.addr)) {
 			log_debug("%s: invalid src address len", __func__);
-			return;
+			return (0);
 		}
 		memcpy(&flow.flow_src.addr, ssrc, slen);
 		if (socket_af((struct sockaddr *)&flow.flow_src.addr,
 		    flow.flow_src.addr_port) == -1) {
 			log_debug("%s: invalid address", __func__);
-			return;
+			return (0);
 		}
 
 		if ((sa_addr = pfkey_find_ext(reply, rlen,
@@ -1620,13 +1696,13 @@ pfkey_process(struct iked *env, struct pfkey_message *pm)
 		flow.flow_dst.addr_port = htons(socket_getport(sdst));
 		if ((slen = sdst->sa_len) > sizeof(flow.flow_dst.addr)) {
 			log_debug("%s: invalid dst address len", __func__);
-			return;
+			return (0);
 		}
 		memcpy(&flow.flow_dst.addr, sdst, slen);
 		if (socket_af((struct sockaddr *)&flow.flow_dst.addr,
 		    flow.flow_dst.addr_port) == -1) {
 			log_debug("%s: invalid address", __func__);
-			return;
+			return (0);
 		}
 
 		if ((sa_addr = pfkey_find_ext(reply, rlen,
@@ -1651,7 +1727,7 @@ pfkey_process(struct iked *env, struct pfkey_message *pm)
 		default:
 			log_debug("%s: bad address family", __func__);
 			free(reply);
-			return;
+			return (0);
 		}
 
 		if ((sa_addr = pfkey_find_ext(reply, rlen,
@@ -1676,7 +1752,7 @@ pfkey_process(struct iked *env, struct pfkey_message *pm)
 		default:
 			log_debug("%s: bad address family", __func__);
 			free(reply);
-			return;
+			return (0);
 		}
 
 		if ((sa_proto = pfkey_find_ext(reply, rlen,
@@ -1692,7 +1768,7 @@ pfkey_process(struct iked *env, struct pfkey_message *pm)
 		    print_host(sdst, NULL, 0), print_host(dmask, NULL, 0),
 		    print_host(speer, NULL, 0));
 
-		ikev2_acquire_sa(env, &flow);
+		ret = ikev2_acquire_sa(env, &flow);
 
 out:
 		if (errmsg)
@@ -1703,7 +1779,7 @@ out:
 	case SADB_EXPIRE:
 		if ((sa = pfkey_find_ext(data, len, SADB_EXT_SA)) == NULL) {
 			log_warnx("%s: SA extension wasn't found", __func__);
-			return;
+			return (0);
 		}
 		if ((sa_ltime = pfkey_find_ext(data, len,
 			SADB_EXT_LIFETIME_SOFT)) == NULL &&
@@ -1711,7 +1787,7 @@ out:
 			SADB_EXT_LIFETIME_HARD)) == NULL) {
 			log_warnx("%s: lifetime extension wasn't found",
 			    __func__);
-			return;
+			return (0);
 		}
 		spi.spi = ntohl(sa->sadb_sa_spi);
 		spi.spi_size = 4;
@@ -1722,11 +1798,15 @@ out:
 		case SADB_SATYPE_ESP:
 			spi.spi_protoid = IKEV2_SAPROTO_ESP;
 			break;
+		case SADB_X_SATYPE_IPCOMP:
+			spi.spi_size = 2;
+			spi.spi_protoid = IKEV2_SAPROTO_IPCOMP;
+			break;
 		default:
-			log_warnx("%s: usupported SA type %d spi %s",
+			log_warnx("%s: unsupported SA type %d spi %s",
 			    __func__, hdr->sadb_msg_satype,
 			    print_spi(spi.spi, spi.spi_size));
-			return;
+			return (0);
 		}
 
 		log_debug("%s: SA %s is expired, pending %s", __func__,
@@ -1735,9 +1815,10 @@ out:
 		    "rekeying" : "deletion");
 
 		if (sa_ltime->sadb_lifetime_exttype == SADB_EXT_LIFETIME_SOFT)
-			ikev2_rekey_sa(env, &spi);
+			ret = ikev2_rekey_sa(env, &spi);
 		else
-			ikev2_drop_sa(env, &spi);
+			ret = ikev2_drop_sa(env, &spi);
 		break;
 	}
+	return (ret);
 }

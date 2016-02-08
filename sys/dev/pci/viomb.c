@@ -1,5 +1,6 @@
-/* $OpenBSD: viomb.c,v 1.7 2013/10/31 01:54:43 dlg Exp $	 */
+/* $OpenBSD: viomb.c,v 1.10 2014/07/11 08:48:38 jasper Exp $	 */
 /* $NetBSD: viomb.c,v 1.1 2011/10/30 12:12:21 hannken Exp $	 */
+
 /*
  * Copyright (c) 2012 Talypov Dinar <dinar@i-nk.ru>
  * Copyright (c) 2010 Minoura Makoto.
@@ -32,7 +33,10 @@
 #include <sys/device.h>
 #include <sys/task.h>
 #include <sys/pool.h>
-#include <uvm/uvm.h>
+#include <sys/sensors.h>
+
+#include <uvm/uvm_extern.h>
+
 #include <dev/pci/pcidevs.h>
 #include <dev/pci/pcivar.h>
 
@@ -45,7 +49,7 @@
 
 #define	DEVNAME(sc)	sc->sc_dev.dv_xname
 #if VIRTIO_DEBUG
-#define VIOMBDEBUG(sc, format, args...)	\
+#define VIOMBDEBUG(sc, format, args...)					  \
 		do { printf("%s: " format, sc->sc_dev.dv_xname, ##args);} \
 		while (0)
 #else
@@ -90,12 +94,14 @@ struct viomb_softc {
 	struct device		sc_dev;
 	struct virtio_softc	*sc_virtio;
 	struct virtqueue	sc_vq[2];
-	u_int32_t		sc_npages;
-	u_int32_t		sc_actual;
+	u_int32_t		sc_npages; /* desired pages */
+	u_int32_t		sc_actual; /* current pages */
 	struct balloon_req	sc_req;
 	struct taskq		*sc_taskq;
 	struct task		sc_task;
 	struct pglist		sc_balloon_pages;
+	struct ksensor		sc_sens[2];
+	struct ksensordev	sc_sensdev;
 };
 
 int	viomb_match(struct device *, void *, void *);
@@ -201,6 +207,22 @@ viomb_attach(struct device *parent, struct device *self, void *aux)
 		goto err_dmamap;
 	task_set(&sc->sc_task, viomb_worker, sc, NULL);
 
+	strlcpy(sc->sc_sensdev.xname, DEVNAME(sc),
+	    sizeof(sc->sc_sensdev.xname));
+	strlcpy(sc->sc_sens[0].desc, "desired",
+	    sizeof(sc->sc_sens[0].desc));
+	sc->sc_sens[0].type = SENSOR_INTEGER;
+	sensor_attach(&sc->sc_sensdev, &sc->sc_sens[0]);
+	sc->sc_sens[0].value = sc->sc_npages << PAGE_SHIFT;
+
+	strlcpy(sc->sc_sens[1].desc, "current",
+	    sizeof(sc->sc_sens[1].desc));
+	sc->sc_sens[1].type = SENSOR_INTEGER;
+	sensor_attach(&sc->sc_sensdev, &sc->sc_sens[1]);
+	sc->sc_sens[1].value = sc->sc_actual << PAGE_SHIFT;
+
+	sensordev_install(&sc->sc_sensdev);
+
 	printf("\n");
 	return;
 err_dmamap:
@@ -242,10 +264,14 @@ viomb_worker(void *arg1, void *arg2)
 		viomb_inflate(sc);
 		}
 	else if (sc->sc_npages < sc->sc_actual){
-		viomb_deflate(sc);
 		VIOMBDEBUG(sc, "deflating balloon from %u to %u.\n",
 			   sc->sc_actual, sc->sc_npages);
+		viomb_deflate(sc);
 	}
+
+	sc->sc_sens[0].value = sc->sc_npages << PAGE_SHIFT;
+	sc->sc_sens[1].value = sc->sc_actual << PAGE_SHIFT;
+
 	splx(s);
 }
 
@@ -380,8 +406,7 @@ viomb_vq_dequeue(struct virtqueue *vq)
 
 	r = virtio_dequeue(vsc, vq, &slot, NULL);
 	if (r != 0) {
-		printf("%s: dequeue failed, errno %d\n",
-		       DEVNAME(sc), r);
+		printf("%s: dequeue failed, errno %d\n", DEVNAME(sc), r);
 		return(r);
 	}
 	virtio_dequeue_commit(vq, slot);

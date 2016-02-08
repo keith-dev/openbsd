@@ -1,4 +1,4 @@
-/*	$OpenBSD: ugold.c,v 1.3 2013/11/04 11:51:33 mpi Exp $   */
+/*	$OpenBSD: ugold.c,v 1.6 2014/04/29 12:53:33 mpi Exp $   */
 
 /*
  * Copyright (c) 2013 Takayoshi SASANO <sasano@openbsd.org>
@@ -102,6 +102,9 @@ ugold_match(struct device *parent, void *match, void *aux)
 	int size;
 	void *desc;
 
+	if (uha->reportid == UHIDEV_CLAIM_ALLREPORTID)
+		return (UMATCH_NONE);
+
 	if (usb_lookup(ugold_devs, uha->uaa->vendor, uha->uaa->product) == NULL)
 		return (UMATCH_NONE);
 
@@ -180,6 +183,9 @@ ugold_detach(struct device *self, int flags)
 	for (i = 0; i < sc->sc_num_sensors; i++)
 		sensor_detach(&sc->sc_sensordev, &sc->sc_sensor[i]);
 
+	if (sc->sc_hdev.sc_state & UHIDEV_OPEN)
+		uhidev_close(&sc->sc_hdev);
+
 	return (0);
 }
 
@@ -254,6 +260,6 @@ ugold_refresh(void *arg)
 int
 ugold_issue_cmd(struct ugold_softc *sc, uint8_t *cmd, int len)
 {
-	 return uhidev_set_report_async(&sc->sc_hdev, UHID_OUTPUT_REPORT,
-	 	    cmd, len);
+	return uhidev_set_report_async(&sc->sc_hdev, UHID_OUTPUT_REPORT,
+	    sc->sc_hdev.sc_report_id, cmd, len);
 }

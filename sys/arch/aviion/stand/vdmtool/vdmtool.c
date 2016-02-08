@@ -1,4 +1,4 @@
-/*	$OpenBSD: vdmtool.c,v 1.2 2013/10/01 22:24:53 jmc Exp $	*/
+/*	$OpenBSD: vdmtool.c,v 1.4 2014/07/12 19:01:49 tedu Exp $	*/
 
 /*
  * Copyright (c) 2013 Miodrag Vallat.

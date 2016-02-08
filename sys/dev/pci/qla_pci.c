@@ -1,4 +1,4 @@
-/*	$OpenBSD: qla_pci.c,v 1.6 2014/02/17 03:57:20 dlg Exp $ */
+/*	$OpenBSD: qla_pci.c,v 1.8 2014/04/03 20:01:47 brad Exp $ */
 
 /*
  * Copyright (c) 2011 David Gwynne <dlg@openbsd.org>
@@ -75,6 +75,7 @@ static const struct pci_matchid qla_devices[] = {
 	{ PCI_VENDOR_QLOGIC,	PCI_PRODUCT_QLOGIC_ISP2312 },
 	{ PCI_VENDOR_QLOGIC,	PCI_PRODUCT_QLOGIC_ISP2322 },
 	{ PCI_VENDOR_QLOGIC,	PCI_PRODUCT_QLOGIC_ISP6312 },
+	{ PCI_VENDOR_QLOGIC,	PCI_PRODUCT_QLOGIC_ISP6322 },
 };
 
 int
@@ -90,6 +91,7 @@ qla_pci_attach(struct device *parent, struct device *self, void *aux)
 	struct qla_softc *sc = &psc->psc_qla;
 	struct pci_attach_args *pa = aux;
 	pci_intr_handle_t ih;
+	const char *intrstr;
 	u_int32_t pcictl;
 #ifdef __sparc64__
 	u_int64_t wwn;
@@ -123,14 +125,18 @@ qla_pci_attach(struct device *parent, struct device *self, void *aux)
 		printf(": unable to map interrupt\n");
 		goto unmap;
 	}
-	printf(": %s\n", pci_intr_string(psc->psc_pc, ih));
-
+	intrstr = pci_intr_string(psc->psc_pc, ih);
 	psc->psc_ih = pci_intr_establish(psc->psc_pc, ih, IPL_BIO,
 	    qla_intr, sc, DEVNAME(sc));
 	if (psc->psc_ih == NULL) {
-		printf("%s: unable to establish interrupt\n", DEVNAME(sc));
+		printf(": unable to establish interrupt");
+		if (intrstr != NULL)
+			printf(" at %s", intrstr);
+		printf("\n");
 		goto deintr;
 	}
+
+	printf(": %s\n", intrstr);
 
 	pcictl = pci_conf_read(pa->pa_pc, pa->pa_tag, PCI_COMMAND_STATUS_REG);
 	pcictl |= PCI_COMMAND_INVALIDATE_ENABLE |
@@ -174,6 +180,7 @@ qla_pci_attach(struct device *parent, struct device *self, void *aux)
 		break;
 
 	case PCI_PRODUCT_QLOGIC_ISP2322:
+	case PCI_PRODUCT_QLOGIC_ISP6322:
 		sc->sc_isp_type = QLA_ISP2322;
 		sc->sc_isp_gen = QLA_GEN_ISP23XX;
 		break;

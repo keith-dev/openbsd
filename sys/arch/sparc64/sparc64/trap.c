@@ -1,4 +1,4 @@
-/*	$OpenBSD: trap.c,v 1.78 2013/04/02 13:24:57 kettenis Exp $	*/
+/*	$OpenBSD: trap.c,v 1.84 2014/05/11 00:12:44 guenther Exp $	*/
 /*	$NetBSD: trap.c,v 1.73 2001/08/09 01:03:01 eeh Exp $ */
 
 /*
@@ -430,6 +430,7 @@ trap(tf, type, pc, tstate)
 		p = &proc0;
 	pcb = &p->p_addr->u_pcb;
 	p->p_md.md_tf = tf;	/* for ptrace/signals */
+	refreshcreds(p);
 
 	switch (type) {
 
@@ -451,13 +452,8 @@ dopanic:
 
 	case T_AST:
 		p->p_md.md_astpending = 0;
-		if (p->p_flag & P_OWEUPC) {
-			KERNEL_LOCK();
-			ADDUPROF(p);
-			KERNEL_UNLOCK();
-		}
-		if (curcpu()->ci_want_resched)
-			preempt(NULL);
+		uvmexp.softs++;
+		mi_ast(p, curcpu()->ci_want_resched);
 		break;
 
 	case T_RWRET:
@@ -886,10 +882,9 @@ kfault:
 			sv.sival_ptr = (void *)sfva;
 
 		if (rv == ENOMEM) {
-			printf("UVM: pid %d (%s), uid %u killed: out of swap\n",
+			printf("UVM: pid %d (%s), uid %d killed: out of swap\n",
 			       p->p_pid, p->p_comm,
-			       p->p_cred && p->p_ucred ?
-			       p->p_ucred->cr_uid : -1);
+			       p->p_ucred ? (int)p->p_ucred->cr_uid : -1);
 			trapsignal(p, SIGKILL, access_type, SEGV_MAPERR, sv);
 		} else {
 			trapsignal(p, SIGSEGV, access_type, SEGV_MAPERR, sv);
@@ -960,7 +955,7 @@ data_access_error(tf, type, afva, afsr, sfva, sfsr)
 
 			trap_trace_dis = 1; /* Disable traptrace for printf */
 			(void) splhigh();
-			panic("data fault: pc=%lx addr=%lx sfsr=%b",
+			panic("data fault: pc=%lx addr=%lx sfsr=%lb",
 				(u_long)pc, (long)sfva, sfsr, SFSR_BITS);
 			/* NOTREACHED */
 		}
@@ -970,7 +965,7 @@ data_access_error(tf, type, afva, afsr, sfva, sfsr)
 		 * cannot recover, so panic.
 		 */
 		if (afsr & ASFR_PRIV) {
-			panic("Privileged Async Fault: AFAR %p AFSR %lx\n%b",
+			panic("Privileged Async Fault: AFAR %p AFSR %lx\n%lb",
 				(void *)afva, afsr, afsr, AFSR_BITS);
 			/* NOTREACHED */
 		}
@@ -1134,7 +1129,8 @@ text_access_error(tf, type, pc, sfsr, afva, afsr)
 		extern int trap_trace_dis;
 		trap_trace_dis = 1; /* Disable traptrace for printf */
 		(void) splhigh();
-		panic("kernel text error: pc=%lx sfsr=%b", pc, sfsr, SFSR_BITS);
+		panic("kernel text error: pc=%lx sfsr=%lb", pc,
+		    sfsr, SFSR_BITS);
 		/* NOTREACHED */
 	} else
 		p->p_md.md_tf = tf;
@@ -1168,7 +1164,7 @@ text_access_error(tf, type, pc, sfsr, afva, afsr)
 			extern int trap_trace_dis;
 			trap_trace_dis = 1; /* Disable traptrace for printf */
 			(void) splhigh();
-			panic("kernel text error: pc=%lx sfsr=%b", pc,
+			panic("kernel text error: pc=%lx sfsr=%lb", pc,
 			    sfsr, SFSR_BITS);
 			/* NOTREACHED */
 		}
@@ -1241,8 +1237,8 @@ syscall(tf, code, pc)
 	new = code & SYSCALL_G2RFLAG;
 	code &= ~SYSCALL_G2RFLAG;
 
-	callp = p->p_emul->e_sysent;
-	nsys = p->p_emul->e_nsysent;
+	callp = p->p_p->ps_emul->e_sysent;
+	nsys = p->p_p->ps_emul->e_nsysent;
 
 	/*
 	 * The first six system call arguments are in the six %o registers.
@@ -1264,8 +1260,8 @@ syscall(tf, code, pc)
 		nap--;
 		break;
 	case SYS___syscall:
-		if (code < nsys &&
-		    callp[code].sy_call != callp[p->p_emul->e_nosys].sy_call)
+		if (code < nsys && callp[code].sy_call !=
+		    callp[p->p_p->ps_emul->e_nosys].sy_call)
 			break; /* valid system call */
 		if (tf->tf_out[6] & 1L) {
 			/* longs *are* quadwords */
@@ -1281,7 +1277,7 @@ syscall(tf, code, pc)
 	}
 
 	if (code < 0 || code >= nsys)
-		callp += p->p_emul->e_nosys;
+		callp += p->p_p->ps_emul->e_nosys;
 	else if (tf->tf_out[6] & 1L) {
 		register_t *argp;
 

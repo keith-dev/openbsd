@@ -1,4 +1,4 @@
-/*	$OpenBSD: octeon_iobus.c,v 1.5 2013/10/24 20:45:03 pirofti Exp $ */
+/*	$OpenBSD: octeon_iobus.c,v 1.7 2014/07/09 23:03:22 pirofti Exp $ */
 
 /*
  * Copyright (c) 2000-2004 Opsycon AB  (www.opsycon.se)
@@ -156,12 +156,14 @@ const struct iobus_unit iobus_units[] = {
 	{ 0, 0 },				/* pcibus */
 	{ GMX0_BASE_PORT0, CIU_INT_GMX_DRP0 },	/* cn30xxgmx */
 	{ OCTEON_RNG_BASE, 0 },			/* octrng */
+	{ 0, CIU_INT_USB },			/* octhci */
 };
 struct iobus_attach_args iobus_children[] = {
 	IOBUSDEV("octcf", 0, &iobus_units[0]),
 	IOBUSDEV("pcibus", 0, &iobus_units[1]),
 	IOBUSDEV("cn30xxgmx", 0, &iobus_units[2]),
-	IOBUSDEV("octrng", 0, &iobus_units[3])
+	IOBUSDEV("octrng", 0, &iobus_units[3]),
+	IOBUSDEV("octhci", 0, &iobus_units[4]),
 };
 #undef	IOBUSDEV
 
@@ -183,7 +185,7 @@ iobusprint(void *aux, const char *iobus)
 		printf("%s at %s", aa->aa_name, iobus);
 
 	if (aa->aa_unit->addr != 0)
-		printf(" base 0x%llx", aa->aa_unit->addr);
+		printf(" base 0x%lx", aa->aa_unit->addr);
 	if (aa->aa_unit->irq >= 0)
 		printf(" irq %d", aa->aa_unit->irq);
 

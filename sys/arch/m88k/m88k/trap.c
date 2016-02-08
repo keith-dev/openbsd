@@ -1,4 +1,4 @@
-/*	$OpenBSD: trap.c,v 1.88 2013/09/05 20:40:32 miod Exp $	*/
+/*	$OpenBSD: trap.c,v 1.100 2014/07/02 18:37:34 miod Exp $	*/
 /*
  * Copyright (c) 2004, Miodrag Vallat.
  * Copyright (c) 1998 Steve Murphree, Jr.
@@ -123,24 +123,24 @@ printtrap(int type, struct trapframe *frame)
 	if (CPU_IS88100) {
 		if (type == 2) {
 			/* instruction exception */
-			printf("\nInstr access fault (%s) v = %x, frame %p\n",
+			printf("\nInstr access fault (%s) v = %lx, frame %p\n",
 			    pbus_exception_type[
 			      CMMU_PFSR_FAULT(frame->tf_ipfsr)],
 			    frame->tf_sxip & XIP_ADDR, frame);
 		} else if (type == 3) {
 			/* data access exception */
-			printf("\nData access fault (%s) v = %x, frame %p\n",
+			printf("\nData access fault (%s) v = %lx, frame %p\n",
 			    pbus_exception_type[
 			      CMMU_PFSR_FAULT(frame->tf_dpfsr)],
 			    frame->tf_sxip & XIP_ADDR, frame);
 		} else
-			printf("\nTrap type %d, v = %x, frame %p\n",
+			printf("\nTrap type %d, v = %lx, frame %p\n",
 			    type, frame->tf_sxip & XIP_ADDR, frame);
 	}
 #endif
 #ifdef M88110
 	if (CPU_IS88110) {
-		printf("\nTrap type %d, v = %x, frame %p\n",
+		printf("\nTrap type %d, v = %lx, frame %p\n",
 		    type, frame->tf_exip, frame);
 	}
 #endif
@@ -205,16 +205,10 @@ ast(struct trapframe *frame)
 	struct cpu_info *ci = curcpu();
 	struct proc *p = ci->ci_curproc;
 
-	uvmexp.softs++;
 	p->p_md.md_astpending = 0;
-	if (p->p_flag & P_OWEUPC) {
-		KERNEL_LOCK();
-		ADDUPROF(p);
-		KERNEL_UNLOCK();
-	}
-	if (ci->ci_want_resched)
-		preempt(NULL);
 
+	uvmexp.softs++;
+	mi_ast(p, ci->ci_want_resched);
 	userret(p);
 }
 
@@ -245,6 +239,7 @@ m88100_trap(u_int type, struct trapframe *frame)
 	if (USERMODE(frame->tf_epsr)) {
 		type += T_USER;
 		p->p_md.md_tf = frame;	/* for ptrace/signals */
+		refreshcreds(p);
 	}
 	fault_type = SI_NOINFO;
 	fault_code = 0;
@@ -275,7 +270,7 @@ lose:
 		return;
 #endif /* DDB */
 	case T_MISALGNFLT:
-		printf("kernel misaligned access exception @%p\n",
+		printf("kernel misaligned access exception @0x%08lx\n",
 		    frame->tf_sxip);
 		goto lose;
 	case T_INSTFLT:
@@ -361,7 +356,6 @@ lose:
 				 */
 				frame->tf_snip = pcb_onfault | NIP_V;
 				frame->tf_sfip = (pcb_onfault + 4) | FIP_V;
-				frame->tf_sxip = 0;
 				/*
 				 * Continue as if the fault had been resolved,
 				 * but do not try to complete the faulting
@@ -441,12 +435,10 @@ user_fault:
 
 		if (result == 0) {
 			if (type == T_INSTFLT + T_USER) {
-				/*
-				 * back up SXIP, SNIP,
-				 * clearing the Error bit
-				 */
-				frame->tf_sfip = frame->tf_snip & ~FIP_E;
-				frame->tf_snip = frame->tf_sxip & ~NIP_E;
+				m88100_rewind_insn(&(frame->tf_regs));
+				/* clear the error bit */
+				frame->tf_sfip &= ~FIP_E;
+				frame->tf_snip &= ~NIP_E;
 				frame->tf_ipfsr = 0;
 			} else {
 				/*
@@ -469,7 +461,6 @@ user_fault:
 			if (pcb_onfault != 0) {
 				frame->tf_snip = pcb_onfault | NIP_V;
 				frame->tf_sfip = (pcb_onfault + 4) | FIP_V;
-				frame->tf_sxip = 0;
 				/*
 				 * Continue as if the fault had been resolved,
 				 * but do not try to complete the faulting
@@ -515,33 +506,10 @@ user_fault:
 		break;
 	case T_FPEPFLT+T_USER:
 		m88100_fpu_precise_exception(frame);
-		goto maysigfpe;
+		goto userexit;
 	case T_FPEIFLT+T_USER:
 		m88100_fpu_imprecise_exception(frame);
-maysigfpe:
-		/* Check for a SIGFPE condition */
-		if (frame->tf_fpsr & frame->tf_fpcr) {
-			sig = SIGFPE;
-			if (frame->tf_fpecr & FPECR_FIOV)
-				fault_type = FPE_FLTSUB;
-			else if (frame->tf_fpecr & FPECR_FROP)
-				fault_type = FPE_FLTINV;
-			else if (frame->tf_fpecr & FPECR_FDVZ)
-				fault_type = FPE_INTDIV;
-			else if (frame->tf_fpecr & FPECR_FUNF) {
-				if (frame->tf_fpsr & FPSR_EFUNF)
-					fault_type = FPE_FLTUND;
-				else if (frame->tf_fpsr & FPSR_EFINX)
-					fault_type = FPE_FLTRES;
-			} else if (frame->tf_fpecr & FPECR_FOVF) {
-				if (frame->tf_fpsr & FPSR_EFOVF)
-					fault_type = FPE_FLTOVF;
-				else if (frame->tf_fpsr & FPSR_EFINX)
-					fault_type = FPE_FLTRES;
-			} else if (frame->tf_fpecr & FPECR_FINX)
-				fault_type = FPE_FLTRES;
-		}
-		break;
+		goto userexit;
 	case T_SIGSYS+T_USER:
 		sig = SIGSYS;
 		break;
@@ -575,6 +543,7 @@ maysigfpe:
 			}
 
 			/* restore original instruction and clear breakpoint */
+			KERNEL_LOCK();
 			if (p->p_md.md_bp0va == pc) {
 				ss_put_value(p, pc, p->p_md.md_bp0save);
 				p->p_md.md_bp0va = 0;
@@ -583,11 +552,9 @@ maysigfpe:
 				ss_put_value(p, pc, p->p_md.md_bp1save);
 				p->p_md.md_bp1va = 0;
 			}
+			KERNEL_UNLOCK();
 
-#if 1
-			frame->tf_sfip = frame->tf_snip;
-			frame->tf_snip = pc | NIP_V;
-#endif
+			frame->tf_sxip = pc | NIP_V;
 			sig = SIGTRAP;
 			fault_type = TRAP_BRKPT;
 		}
@@ -603,8 +570,6 @@ maysigfpe:
 		 * breakpoint debugging.  When we get this trap, we just
 		 * return a signal which gets caught by the debugger.
 		 */
-		frame->tf_sfip = frame->tf_snip;
-		frame->tf_snip = frame->tf_sxip;
 		sig = SIGTRAP;
 		fault_type = TRAP_BRKPT;
 		break;
@@ -630,6 +595,7 @@ maysigfpe:
 		frame->tf_ipfsr = frame->tf_dpfsr = 0;
 	}
 
+userexit:
 	userret(p);
 }
 #endif /* M88100 */
@@ -696,14 +662,14 @@ m88110_trap(u_int type, struct trapframe *frame)
 		if (!USERMODE(frame->tf_epsr)) {
 			instr = *(u_int *)fault_addr;
 			if (instr == 0xf400cc01)
-				panic("mc88110 errata #16, exip %p enip %p",
+				panic("mc88110 errata #16, exip 0x%lx enip 0x%lx",
 				    (frame->tf_exip + 4) | 1, frame->tf_enip);
 		} else {
 			/* copyin here should not fail */
 			if (copyin((const void *)frame->tf_exip, &instr,
 			    sizeof instr) == 0 &&
 			    instr == 0xf400cc01) {
-				uprintf("mc88110 errata #16, exip %p enip %p",
+				uprintf("mc88110 errata #16, exip 0x%lx enip 0x%lx",
 				    (frame->tf_exip + 4) | 1, frame->tf_enip);
 				sig = SIGILL;
 			}
@@ -713,6 +679,7 @@ m88110_trap(u_int type, struct trapframe *frame)
 	if (USERMODE(frame->tf_epsr)) {
 		type += T_USER;
 		p->p_md.md_tf = frame;	/* for ptrace/signals */
+		refreshcreds(p);
 	}
 
 	if (sig != 0)
@@ -818,7 +785,7 @@ lose:
 		goto lose;
 	case T_MISALGNFLT:
 		printf("kernel misaligned access exception @%p\n",
-		    frame->tf_exip);
+		    (void *)frame->tf_exip);
 		goto lose;
 	case T_INSTFLT:
 		/* kernel mode instruction access fault.
@@ -1108,6 +1075,7 @@ m88110_user_fault:
 			}
 
 			/* restore original instruction and clear breakpoint */
+			KERNEL_LOCK();
 			if (p->p_md.md_bp0va == pc) {
 				ss_put_value(p, pc, p->p_md.md_bp0save);
 				p->p_md.md_bp0va = 0;
@@ -1116,6 +1084,7 @@ m88110_user_fault:
 				ss_put_value(p, pc, p->p_md.md_bp1save);
 				p->p_md.md_bp1va = 0;
 			}
+			KERNEL_UNLOCK();
 
 			sig = SIGTRAP;
 			fault_type = TRAP_BRKPT;
@@ -1166,7 +1135,7 @@ error_fatal(struct trapframe *frame)
 #ifdef DDB
 	regdump((struct trapframe*)frame);
 #endif
-	panic("unrecoverable exception %d", frame->tf_vector);
+	panic("unrecoverable exception %ld", frame->tf_vector);
 }
 
 #ifdef M88100
@@ -1181,8 +1150,8 @@ m88100_syscall(register_t code, struct trapframe *tf)
 
 	uvmexp.syscalls++;
 
-	callp = p->p_emul->e_sysent;
-	nsys  = p->p_emul->e_nsysent;
+	callp = p->p_p->ps_emul->e_sysent;
+	nsys  = p->p_p->ps_emul->e_nsysent;
 
 	p->p_md.md_tf = tf;
 
@@ -1211,7 +1180,7 @@ m88100_syscall(register_t code, struct trapframe *tf)
 	}
 
 	if (code < 0 || code >= nsys)
-		callp += p->p_emul->e_nosys;
+		callp += p->p_p->ps_emul->e_nosys;
 	else
 		callp += code;
 
@@ -1269,12 +1238,12 @@ m88100_syscall(register_t code, struct trapframe *tf)
 		tf->tf_sfip = tf->tf_snip + 4;
 		break;
 	case ERESTART:
-		tf->tf_epsr &= ~PSR_C;
-		tf->tf_sfip = tf->tf_snip & ~FIP_E;
-		tf->tf_snip = tf->tf_sxip & ~NIP_E;
+		m88100_rewind_insn(&(tf->tf_regs));
+		/* clear the error bit */
+		tf->tf_sfip &= ~FIP_E;
+		tf->tf_snip &= ~NIP_E;
 		break;
 	case EJUSTRETURN:
-		tf->tf_epsr &= ~PSR_C;
 		break;
 	default:
 	bad:
@@ -1302,8 +1271,8 @@ m88110_syscall(register_t code, struct trapframe *tf)
 
 	uvmexp.syscalls++;
 
-	callp = p->p_emul->e_sysent;
-	nsys  = p->p_emul->e_nsysent;
+	callp = p->p_p->ps_emul->e_sysent;
+	nsys  = p->p_p->ps_emul->e_nsysent;
 
 	p->p_md.md_tf = tf;
 
@@ -1332,7 +1301,7 @@ m88110_syscall(register_t code, struct trapframe *tf)
 	}
 
 	if (code < 0 || code >= nsys)
-		callp += p->p_emul->e_nosys;
+		callp += p->p_p->ps_emul->e_nosys;
 	else
 		callp += code;
 
@@ -1392,10 +1361,8 @@ m88110_syscall(register_t code, struct trapframe *tf)
 		 * exip is already at the trap instruction, so
 		 * there is nothing to do.
 		 */
-		tf->tf_epsr &= ~PSR_C;
 		break;
 	case EJUSTRETURN:
-		tf->tf_epsr &= ~PSR_C;
 		/* skip one instruction */
 		m88110_skip_insn(tf);
 		break;
@@ -1804,8 +1771,9 @@ cache_flush(struct trapframe *tf)
 
 #ifdef M88100
 	if (CPU_IS88100) {
-		tf->tf_snip = tf->tf_snip & ~NIP_E;
-		tf->tf_sfip = tf->tf_sfip & ~FIP_E;
+		/* clear the error bit */
+		tf->tf_sfip &= ~FIP_E;
+		tf->tf_snip &= ~NIP_E;
 	}
 #endif
 #ifdef M88110

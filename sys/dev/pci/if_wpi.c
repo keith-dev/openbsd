@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_wpi.c,v 1.117 2013/12/06 21:03:04 deraadt Exp $	*/
+/*	$OpenBSD: if_wpi.c,v 1.120 2014/07/22 13:12:11 mpi Exp $	*/
 
 /*-
  * Copyright (c) 2006-2008
@@ -52,9 +52,7 @@
 #include <net/if_types.h>
 
 #include <netinet/in.h>
-#include <netinet/in_systm.h>
 #include <netinet/if_ether.h>
-#include <netinet/ip.h>
 
 #include <net80211/ieee80211_var.h>
 #include <net80211/ieee80211_amrr.h>
@@ -1926,7 +1924,7 @@ wpi_start(struct ifnet *ifp)
 		/* Send pending management frames first. */
 		IF_DEQUEUE(&ic->ic_mgtq, m);
 		if (m != NULL) {
-			ni = (void *)m->m_pkthdr.rcvif;
+			ni = m->m_pkthdr.ph_cookie;
 			goto sendit;
 		}
 		if (ic->ic_state != IEEE80211_S_RUN)
@@ -2643,7 +2641,7 @@ wpi_scan(struct wpi_softc *sc, uint16_t flags)
 
 	DPRINTF(("sending scan command nchan=%d\n", hdr->nchan));
 	error = wpi_cmd(sc, WPI_CMD_SCAN, buf, buflen, 1);
-	free(buf, M_DEVBUF);
+	free(buf, M_DEVBUF, 0);
 	return error;
 }
 
@@ -3000,7 +2998,7 @@ wpi_read_firmware(struct wpi_softc *sc)
 	if (size < sizeof (*hdr)) {
 		printf("%s: truncated firmware header: %zu bytes\n",
 		    sc->sc_dev.dv_xname, size);
-		free(fw->data, M_DEVBUF);
+		free(fw->data, M_DEVBUF, 0);
 		return EINVAL;
 	}
 	/* Extract firmware header information. */
@@ -3020,7 +3018,7 @@ wpi_read_firmware(struct wpi_softc *sc)
 	    fw->boot.textsz > WPI_FW_BOOT_TEXT_MAXSZ ||
 	    (fw->boot.textsz & 3) != 0) {
 		printf("%s: invalid firmware header\n", sc->sc_dev.dv_xname);
-		free(fw->data, M_DEVBUF);
+		free(fw->data, M_DEVBUF, 0);
 		return EINVAL;
 	}
 
@@ -3029,7 +3027,7 @@ wpi_read_firmware(struct wpi_softc *sc)
 	    fw->init.textsz + fw->init.datasz + fw->boot.textsz) {
 		printf("%s: firmware file too short: %zu bytes\n",
 		    sc->sc_dev.dv_xname, size);
-		free(fw->data, M_DEVBUF);
+		free(fw->data, M_DEVBUF, 0);
 		return EINVAL;
 	}
 
@@ -3321,7 +3319,7 @@ wpi_init(struct ifnet *ifp)
 
 	/* Initialize hardware and upload firmware. */
 	error = wpi_hw_init(sc);
-	free(sc->fw.data, M_DEVBUF);
+	free(sc->fw.data, M_DEVBUF, 0);
 	if (error != 0) {
 		printf("%s: could not initialize hardware\n",
 		    sc->sc_dev.dv_xname);

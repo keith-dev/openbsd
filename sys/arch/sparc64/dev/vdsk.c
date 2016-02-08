@@ -1,4 +1,4 @@
-/*	$OpenBSD: vdsk.c,v 1.36 2014/01/22 23:57:59 kettenis Exp $	*/
+/*	$OpenBSD: vdsk.c,v 1.39 2014/07/12 18:44:43 tedu Exp $	*/
 /*
  * Copyright (c) 2009, 2011 Mark Kettenis
  *
@@ -24,7 +24,7 @@
 #include <machine/autoconf.h>
 #include <machine/hypervisor.h>
 
-#include <uvm/uvm.h>
+#include <uvm/uvm_extern.h>
 
 #include <scsi/scsi_all.h>
 #include <scsi/cd.h>
@@ -243,7 +243,7 @@ vdsk_attach(struct device *parent, struct device *self, void *aux)
 		printf(": can't map interrupt\n");
 		return;
 	}
-	printf(": ivec 0x%lx, 0x%lx", sysino[0], sysino[1]);
+	printf(": ivec 0x%llx, 0x%llx", sysino[0], sysino[1]);
 
 	/*
 	 * Un-configure queues before registering interrupt handlers,
@@ -920,7 +920,7 @@ vdsk_dring_free(bus_dma_tag_t t, struct vdsk_dring *vd)
 	bus_dmamem_unmap(t, (caddr_t)vd->vd_desc, size);
 	bus_dmamem_free(t, &vd->vd_seg, 1);
 	bus_dmamap_destroy(t, vd->vd_map);
-	free(vd, M_DEVBUF);
+	free(vd, M_DEVBUF, 0);
 }
 
 void *

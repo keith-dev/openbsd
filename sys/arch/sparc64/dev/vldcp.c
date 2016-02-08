@@ -1,4 +1,4 @@
-/*	$OpenBSD: vldcp.c,v 1.6 2012/10/27 21:47:52 kettenis Exp $	*/
+/*	$OpenBSD: vldcp.c,v 1.9 2014/07/12 18:44:43 tedu Exp $	*/
 /*
  * Copyright (c) 2009, 2012 Mark Kettenis
  *
@@ -27,7 +27,7 @@
 #include <machine/hypervisor.h>
 #include <machine/mdesc.h>
 
-#include <uvm/uvm.h>
+#include <uvm/uvm_extern.h>
 
 #include <sparc64/dev/cbusvar.h>
 #include <sparc64/dev/ldcvar.h>
@@ -139,7 +139,7 @@ vldcp_attach(struct device *parent, struct device *self, void *aux)
 		printf(": can't map interrupt\n");
 		return;
 	}
-	printf(": ivec 0x%lx, 0x%lx", sc->sc_tx_sysino, sc->sc_rx_sysino);
+	printf(": ivec 0x%llx, 0x%llx", sc->sc_tx_sysino, sc->sc_rx_sysino);
 
 	/*
 	 * Un-configure queues before registering interrupt handlers,
@@ -313,7 +313,7 @@ vldcpopen(dev_t dev, int flag, int mode, struct proc *p)
 	err = hv_ldc_rx_qconf(lc->lc_id,
 	    lc->lc_rxq->lq_map->dm_segs[0].ds_addr, lc->lc_rxq->lq_nentries);
 	if (err != H_EOK)
-		printf("%d: hv_ldc_rx_qconf %d\n", __func__, err);
+		printf("%s: hv_ldc_rx_qconf %d\n", __func__, err);
 
 	/* Clear a pending channel reset.  */
 	err = hv_ldc_rx_get_state(lc->lc_id, &rx_head, &rx_tail, &rx_state);
@@ -509,13 +509,13 @@ vldcpioctl(dev_t dev, u_long cmd, caddr_t data, int flag, struct proc *p)
 			    hi->hi_cookie + offset, pa, nbytes, &nbytes);
 			if (err != H_EOK) {
 				printf("hv_ldc_copy %d\n", err);
-				free(buf, M_DEVBUF);
+				free(buf, M_DEVBUF, 0);
 				device_unref(&sc->sc_dv);
 				return (EINVAL);
 			}
 			err = copyout(buf, (caddr_t)hi->hi_addr + offset, nbytes);
 			if (err) {
-				free(buf, M_DEVBUF);
+				free(buf, M_DEVBUF, 0);
 				device_unref(&sc->sc_dv);
 				return (err);
 			}
@@ -531,7 +531,7 @@ vldcpioctl(dev_t dev, u_long cmd, caddr_t data, int flag, struct proc *p)
 			nbytes = min(PAGE_SIZE, size);
 			err = copyin((caddr_t)hi->hi_addr + offset, buf, nbytes);
 			if (err) {
-				free(buf, M_DEVBUF);
+				free(buf, M_DEVBUF, 0);
 				device_unref(&sc->sc_dv);
 				return (err);
 			}
@@ -539,7 +539,7 @@ vldcpioctl(dev_t dev, u_long cmd, caddr_t data, int flag, struct proc *p)
 			    hi->hi_cookie + offset, pa, nbytes, &nbytes);
 			if (err != H_EOK) {
 				printf("hv_ldc_copy %d\n", err);
-				free(buf, M_DEVBUF);
+				free(buf, M_DEVBUF, 0);
 				device_unref(&sc->sc_dv);
 				return (EINVAL);
 			}
@@ -550,7 +550,7 @@ vldcpioctl(dev_t dev, u_long cmd, caddr_t data, int flag, struct proc *p)
 
 	}
 
-	free(buf, M_DEVBUF);
+	free(buf, M_DEVBUF, 0);
 
 	device_unref(&sc->sc_dv);
 	return (0);

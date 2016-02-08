@@ -1,4 +1,4 @@
-.\" $OpenBSD: bsd.port.mk.5,v 1.395 2014/02/11 10:35:11 espie Exp $
+.\" $OpenBSD: bsd.port.mk.5,v 1.402 2014/07/23 10:19:51 espie Exp $
 .\"
 .\" Copyright (c) 2000-2008 Marc Espie
 .\"
@@ -24,7 +24,7 @@
 .\" (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
 .\" THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 .\"
-.Dd $Mdocdate: February 11 2014 $
+.Dd $Mdocdate: July 23 2014 $
 .Dt BSD.PORT.MK 5
 .Os
 .Sh NAME
@@ -254,7 +254,7 @@ Extract the distribution files under
 (but see
 .Ev EXTRACT_ONLY
 and
-.Ev NO_DEPENDS ).
+.Ev NO_DEPENDS ) .
 Refer to
 .Ev EXTRACT_CASES
 for a complete description.
@@ -677,7 +677,7 @@ Force rebuild of the port.
 Run regression tests for the port.
 Essentially depend on a correct build and invoke
 .Bd -literal
-env -i ${MAKE_ENV} ${MAKE_PROGRAM} ${ALL_TEST_FLAGS} \e
+env -i ${ALL_TEST_ENV} ${MAKE_PROGRAM} ${ALL_TEST_FLAGS} \e
 	-f ${MAKE_FILE} ${TEST_TARGET} ${TEST_LOG}
 .Ed
 .Pp
@@ -893,6 +893,11 @@ Flags passed to ${MAKE} invocations during the fake process.
 Equals
 .Li ${MAKE_FLAGS} ${DESTDIRNAME}=${WRKINST} ${FAKE_FLAGS} .
 Read-only.
+.It Ev ALL_TEST_ENV
+Environment passed to test.
+Equals
+.Li ${MAKE_ENV} ${TEST_ENV} .
+Read-only.
 .It Ev ALL_TEST_FLAGS
 Flags passed to ${MAKE} invocations during test.
 Equals
@@ -1019,8 +1024,7 @@ Each item has the form
 .Sq [pkgspec:]pkgpath[:target] .
 .Sq target
 defaults to
-.Sq install
-if it is not specified.
+.Sq install .
 The package installed must conform to the
 .Sq pkgspec ,
 which is by default obtained from the dependent
@@ -1631,7 +1635,7 @@ to link distribution files off
 .Ev CDROM_SITE
 instead of copying them.
 .It Ev FILESDIR
-Location of other files related to the current ports.
+Location of other files related to the current port.
 Default: files.
 .It Ev FLAVOR
 The port's current options.
@@ -1686,6 +1690,26 @@ Use with
 or
 .Ev ONLY_FOR_ARCHS
 to limit ports to architectures where they compile.
+.It Ev GH_*
+Support for GitHub-hosted projects.
+Leave empty for non hosted projects.
+Yields a suitable default for
+.Ev MASTER_SITES_GITHUB .
+.It Ev GH_ACCOUNT
+Account name of the GitHub user hosting the project.
+.It Ev GH_COMMIT
+SHA1 commit id to fetch.
+It is good practice to always specify
+the commit id, even if ${GH_TAGNAME} was specified.
+.It Ev GH_PROJECT
+Name of the project on GitHub.
+.It Ev GH_TAGNAME
+Name of the tag to download.
+Setting ${GH_TAGNAME} to master is invalid
+and will throw an error.
+${WRKDIST} is auto-generated based on the
+${GH_TAGNAME} if specified, otherwise ${GH_COMMIT} will be used to generate
+${WRKDIST}.
 .It Ev GMAKE
 Location of the GNU make binary, if needed.
 Defaults to gmake.
@@ -1800,7 +1824,7 @@ Passed to gnu configure scripts.
 .It Ev LOCKDIR
 User settings.
 Defaults to
-.Pa ${WRKOBJDIR}/locks
+.Pa ${WRKOBJDIR}/locks .
 If set, points to a local directory common for all instances of
 concurrent ports builds.
 .It Ev LOCK_CMD
@@ -1811,7 +1835,7 @@ See also
 .It Ev LOCK_VERBOSE
 User settings.
 Defaults to
-.Sq \&No
+.Sq \&No .
 Set to
 .Sq Yes
 to show every acquire/release lock operation.
@@ -1825,7 +1849,7 @@ E-mail address with full name of the port's maintainer.
 Defaults to
 .Mt ports@openbsd.org .
 .It Ev MAKE_ENV
-Environment variables passed to make invocations.
+Environment variables passed to make invocations and tests.
 Sets at least PATH, PREFIX, LOCALBASE, X11BASE, CFLAGS, TRUEPREFIX, DESTDIR,
 and the BSD_INSTALL_* macros.
 .It Ev MAKE_FLAGS
@@ -1880,6 +1904,9 @@ retrieved.
 See the
 .Ar fetch
 target for details.
+Defaults to ${MASTER_SITES_GITHUB} for GitHub-hosted projects,
+see
+.Ev GH_* .
 See
 .Xr ports 7
 for user configuration.
@@ -2078,8 +2105,8 @@ in
 Read-only.
 .It Ev ONLY_FOR_ARCHS
 List of architectures on which this port builds.
-Can hold both processor-specific information (e.g., m68k), and more
-specific model information (e.g., hp300).
+Can hold both processor-specific information (e.g., powerpc), and more
+specific model information (e.g., macppc).
 This is subpackage dependent.
 Read the corresponding part of
 .Qq Flavors and multi-packages
@@ -2090,7 +2117,7 @@ Revision number of
 Read-only.
 .It Ev PACKAGE_REPOSITORY
 User settings.
-Default location for built packages.
+Location for built packages.
 Defaults to
 .Pa ${PORTSDIR}/packages .
 See
@@ -2526,6 +2553,9 @@ See
 .Ev BUILD_DEPENDS
 for specification.
 Test dependencies are only checked if the test stage is invoked.
+.It Ev TEST_ENV
+Additional environment variables passed to tests.
+Empty by default.
 .It Ev TEST_FLAGS
 Extra flags passed to ${MAKE_PROGRAM} to run the regression tests.
 Empty by default.
@@ -2551,7 +2581,7 @@ and
 which default to
 .Sq test
 and
-.Sq check
+.Sq check ,
 respectively.
 .It Ev REORDER_DEPENDENCIES
 Points to a list of files that specify inter-dependencies for
@@ -2985,7 +3015,7 @@ Defaults to
 Note that WRKDIST may be a symbolic link, if set to ${WRKDIR}.
 .It Ev WRKSRC
 Subdirectory of ${WRKDIR} where the actual source is.
-Base for configuration (default: ${WRKDIST})
+Base for configuration (default: ${WRKDIST}).
 Note that WRKSRC may be a symbolic link, if set to ${WRKDIR}.
 .It Ev WRKINST
 Subdirectory of ${WRKDIR} where port normally installs (see
@@ -3469,10 +3499,10 @@ are special.
 At the beginning of the build, during
 .Ar prepare ,
 all build dependencies will be checked,
-which includes both
+which includes
 .Ev LIB_DEPENDS ,
 .Ev WANTLIB
-and the subpackage-specific versions of these.
+for every subpackage.
 As an exception, any
 .Ev LIB_DEPENDS-sub
 that references the current port will be ignored as a build dependency,

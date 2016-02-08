@@ -1,4 +1,4 @@
-/*	$OpenBSD: vgafb.c,v 1.60 2013/10/20 20:07:27 miod Exp $	*/
+/*	$OpenBSD: vgafb.c,v 1.64 2014/07/28 15:00:27 jsg Exp $	*/
 
 /*
  * Copyright (c) 2001 Jason L. Wright (jason@thought.net)
@@ -49,6 +49,7 @@
 #include <dev/pci/pcidevs.h>
 #include <dev/pci/pcireg.h>
 #include <dev/pci/pcivar.h>
+#include <dev/pci/vga_pcivar.h>
 
 #include <dev/wscons/wsconsio.h>
 #include <dev/wscons/wsdisplayvar.h>
@@ -182,6 +183,11 @@ vgafbattach(parent, self, aux)
 	} else {
 		/* sc->sc_ofhandle = PCITAG_NODE(sc->sc_pcitag); */
 	}
+
+#ifdef RAMDISK_HOOKS
+	if (vga_aperture_needed(pa))
+		printf("%s: aperture needed\n", sc->sc_sunfb.sf_dev.dv_xname);
+#endif
 
 	fbwscons_attach(&sc->sc_sunfb, &vgafb_accessops, sc->sc_console);
 }

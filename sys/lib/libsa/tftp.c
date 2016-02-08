@@ -1,4 +1,4 @@
-/*	$OpenBSD: tftp.c,v 1.3 2009/03/02 00:00:56 krw Exp $	*/
+/*	$OpenBSD: tftp.c,v 1.6 2014/07/13 15:31:20 mpi Exp $	*/
 /*	$NetBSD: tftp.c,v 1.15 2003/08/18 15:45:29 dsl Exp $	 */
 
 /*
@@ -51,7 +51,6 @@
 #include <sys/stat.h>
 #include <netinet/in.h>
 #include <netinet/udp.h>
-#include <netinet/in_systm.h>
 #include <lib/libkern/libkern.h>
 
 #include "stand.h"
@@ -74,7 +73,7 @@ struct tftp_handle {
 	int             off;
 	const char     *path;	/* saved for re-requests */
 	struct {
-		u_char header[HEADER_SIZE];
+		struct packet_header header;
 		struct tftphdr t;
 		u_char space[RSPACE];
 	} lastdata;
@@ -153,7 +152,7 @@ int
 tftp_makereq(struct tftp_handle *h)
 {
 	struct {
-		u_char header[HEADER_SIZE];
+		struct packet_header header;
 		struct tftphdr  t;
 		u_char space[FNAME_SIZE + 6];
 	} wbuf;
@@ -198,7 +197,7 @@ int
 tftp_getnextblock(struct tftp_handle *h)
 {
 	struct {
-		u_char header[HEADER_SIZE];
+		struct packet_header header;
 		struct tftphdr t;
 	} wbuf;
 	char           *wtail;
@@ -233,7 +232,7 @@ void
 tftp_terminate(struct tftp_handle *h)
 {
 	struct {
-		u_char header[HEADER_SIZE];
+		struct packet_header header;
 		struct tftphdr t;
 	} wbuf;
 	char           *wtail;
@@ -327,14 +326,14 @@ tftp_read(struct open_file *f, void *addr, size_t size, size_t *resid)
 
 			offinblock = tftpfile->off % SEGSIZE;
 
-			inbuffer = tftpfile->validsize - offinblock;
-			if (inbuffer < 0) {
+			if (offinblock > tftpfile->validsize) {
 #ifdef DEBUG
 				printf("tftp: invalid offset %d\n",
 				    tftpfile->off);
 #endif
 				return EINVAL;
 			}
+			inbuffer = tftpfile->validsize - offinblock;
 			count = (size < inbuffer ? size : inbuffer);
 			bcopy(tftpfile->lastdata.t.th_data + offinblock,
 			    addr, count);

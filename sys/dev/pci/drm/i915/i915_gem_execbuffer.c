@@ -1,4 +1,4 @@
-/*	$OpenBSD: i915_gem_execbuffer.c,v 1.26 2014/01/21 08:57:22 kettenis Exp $	*/
+/*	$OpenBSD: i915_gem_execbuffer.c,v 1.29 2014/07/12 18:48:52 tedu Exp $	*/
 /*
  * Copyright (c) 2008-2009 Owain G. Ainsworth <oga@openbsd.org>
  *
@@ -54,30 +54,6 @@
 #include <sys/queue.h>
 #include <sys/task.h>
 
-int pagefault_disabled;
-
-static inline void
-pagefault_disable(void)
-{
-	KASSERT(pagefault_disabled == 0);
-	pagefault_disabled = 1;
-}
-
-static inline void
-pagefault_enable(void)
-{
-	KASSERT(pagefault_disabled == 1);
-	pagefault_disabled = 0;
-}
-
-static inline int
-in_atomic(void)
-{
-	return pagefault_disabled;
-}
-
-static void *kmap_atomic(struct vm_page *);
-static void kunmap_atomic(void *);
 static inline struct vm_page *i915_gem_object_get_page(struct drm_i915_gem_object *, int);
 
 struct eb_objects {
@@ -126,8 +102,8 @@ eb_get_object(struct eb_objects *eb, unsigned long handle)
 static void
 eb_destroy(struct eb_objects *eb)
 {
-	free(eb->buckets, M_DRM);
-	free(eb, M_DRM);
+	free(eb->buckets, M_DRM, 0);
+	free(eb, M_DRM, 0);
 }
 
 static inline int use_cpu_reloc(struct drm_i915_gem_object *obj)
@@ -1286,37 +1262,6 @@ i915_gem_execbuffer2(struct drm_device *dev, void *data,
 
 	drm_free(exec2_list);
 	return ret;
-}
-
-static void *
-kmap_atomic(struct vm_page *pg)
-{
-	vaddr_t va;
-
-#if defined (__HAVE_PMAP_DIRECT)
-	va = pmap_map_direct(pg);
-#else
-	va = uvm_km_valloc(kernel_map, PAGE_SIZE);
-	if (va == 0)
-		return (NULL);
-	pmap_kenter_pa(va, VM_PAGE_TO_PHYS(pg), UVM_PROT_RW);
-	pmap_update(pmap_kernel());
-#endif
-	return (void *)va;
-}
-
-static void
-kunmap_atomic(void *addr)
-{
-	vaddr_t va = (vaddr_t)addr;
-
-#if defined (__HAVE_PMAP_DIRECT)
-	pmap_unmap_direct(va);
-#else
-	pmap_kremove(va, PAGE_SIZE);
-	pmap_update(pmap_kernel());
-	uvm_km_free(kernel_map, va, PAGE_SIZE);
-#endif
 }
 
 static inline struct vm_page *

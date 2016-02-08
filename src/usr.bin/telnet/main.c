@@ -1,4 +1,4 @@
-/*	$OpenBSD: main.c,v 1.22 2013/10/26 21:33:29 sthen Exp $	*/
+/*	$OpenBSD: main.c,v 1.30 2014/07/22 07:30:24 jsg Exp $	*/
 /*	$NetBSD: main.c,v 1.5 1996/02/28 21:04:05 thorpej Exp $	*/
 
 /*
@@ -32,26 +32,10 @@
 
 #include "telnet_locl.h"
 
-/* These values need to be the same as defined in libtelnet/kerberos5.c */
-/* Either define them in both places, or put in some common header file. */
-#define OPTS_FORWARD_CREDS	0x00000002
-#define OPTS_FORWARDABLE_CREDS	0x00000001
-
-#ifdef KRB5
-#define FORWARD
-/* XXX ugly hack to setup dns-proxy stuff */
-#define Authenticator asn1_Authenticator
-#include <kerberosV/krb5.h>
-#endif
-
-#ifdef KRB4
-#include <kerberosIV/krb.h>
-#endif
-
-#ifdef FORWARD
-int forward_flags;
-static int default_forward=0;
-#endif
+#include <sys/socket.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
 
 int family = AF_UNSPEC;
 int rtableid = -1;
@@ -59,8 +43,8 @@ int rtableid = -1;
 /*
  * Initialize variables.
  */
-    void
-tninit()
+void
+tninit(void)
 {
     init_terminal();
 
@@ -69,90 +53,32 @@ tninit()
     init_telnet();
 
     init_sys();
-
-#if defined(TN3270)
-    init_3270();
-#endif
 }
 
-	void
-usage()
+static __dead void
+usage(void)
 {
 	extern char *__progname;
 
 	(void)fprintf(stderr,
-#if defined(TN3270)
-	    "usage: %s [-d] [-n filename] [-t commandname] [sysname [port]]\n",
-# else
-	    "usage: %s [-468acdEFfKLrx] [-b hostalias] [-e escapechar] "
-	    "[-k realm]\n"
-	    "\t[-l user] [-n tracefile] [-V rtable] [-X authtype] "
-	    "[host [port]]\n",
-#endif
+	    "usage: %s [-4678acDdEKLr] [-b hostalias] [-e escapechar] "
+	    "[-l user]\n"
+	    "\t[-n tracefile] [-V rtable] [host [port]]\n",
 	    __progname);
 
 	exit(1);
 }
 
-
-#ifdef KRB5
-static void
-krb5_init(void)
-{
-    krb5_context context;
-    krb5_error_code ret;
-
-    ret = krb5_init_context(&context);
-    if (ret)
-	return;
-
-#if defined(AUTHENTICATION) && defined(KRB5) && defined(FORWARD)
-    if (krb5_config_get_bool (context, NULL,
-         "libdefaults", "forward", NULL)) {
-           forward_flags |= OPTS_FORWARD_CREDS;
-           default_forward=1;
-    }
-    if (krb5_config_get_bool (context, NULL,
-         "libdefaults", "forwardable", NULL)) {
-           forward_flags |= OPTS_FORWARDABLE_CREDS;
-           default_forward=1;
-    }
-#endif
-#ifdef  ENCRYPTION
-    if (krb5_config_get_bool (context, NULL,
-        "libdefaults", "encrypt", NULL)) {
-          encrypt_auto(1);
-          decrypt_auto(1); 
-	  wantencryption = 1;
-          EncryptVerbose(1);
-        }
-#endif
-
-    krb5_free_context(context);
-}
-#endif
-
 /*
  * main.  Parse arguments, invoke the protocol or command parser.
  */
 
-	int
-main(argc, argv)
-	int argc;
-	char *argv[];
+int
+main(int argc, char *argv[])
 {
-	extern char *optarg;
-	extern int optind;
 	int ch;
 	char *user, *alias;
 	const char *errstr;
-#ifdef	FORWARD
-	extern int forward_flags;
-#endif	/* FORWARD */
-
-#ifdef KRB5
-	krb5_init();
-#endif
 
 	tninit();		/* Clear out things */
 
@@ -167,14 +93,9 @@ main(argc, argv)
 
 	rlogin = (strncmp(prompt, "rlog", 4) == 0) ? '~' : _POSIX_VDISABLE;
 
-	/* 
-	 * if AUTHENTICATION and ENCRYPTION is set autologin will be
-	 * set to true after the getopt switch; unless the -K option is
-	 * passed 
-	 */
 	autologin = -1;
 
-	while ((ch = getopt(argc, argv, "4678DEKLS:X:ab:cde:fFk:l:n:rt:V:x"))
+	while ((ch = getopt(argc, argv, "4678ab:cDdEe:KLl:n:rV:"))
 	    != -1) {
 		switch(ch) {
 		case '4':
@@ -183,11 +104,20 @@ main(argc, argv)
 		case '6':
 			family = AF_INET6;
 			break;
+		case '7':
+			eight = 0;
+			break;
 		case '8':
 			eight = 3;	/* binary output and input */
 			break;
-		case '7':
-			eight = 0;
+		case 'a':
+			autologin = 1;
+			break;
+		case 'b':
+			alias = optarg;
+			break;
+		case 'c':
+			skiprc = 1;
 			break;
 		case 'D': {
 			/* sometimes we don't want a mangled display */
@@ -196,134 +126,30 @@ main(argc, argv)
 				env_define("DISPLAY", (unsigned char*)p);
 			break;
 		}
-
-		case 'E':
-			rlogin = escape = _POSIX_VDISABLE;
-			break;
-		case 'K':
-#ifdef	AUTHENTICATION
-			autologin = 0;
-#endif
-			break;
-		case 'L':
-			eight |= 2;	/* binary output only */
-			break;
-		case 'S':
-		    {
-#ifdef	HAS_GETTOS
-			extern int tos;
-
-			if ((tos = parsetos(optarg, "tcp")) < 0)
-				fprintf(stderr, "%s%s%s%s\n",
-					prompt, ": Bad TOS argument '",
-					optarg,
-					"; will try to use default TOS");
-#else
-			fprintf(stderr,
-			   "%s: Warning: -S ignored, no parsetos() support.\n",
-								prompt);
-#endif
-		    }
-			break;
-		case 'X':
-#ifdef	AUTHENTICATION
-			auth_disable_name(optarg);
-#endif
-			break;
-		case 'a':
-			autologin = 1;
-			break;
-		case 'c':
-			skiprc = 1;
-			break;
 		case 'd':
 			debug = 1;
+			break;
+		case 'E':
+			rlogin = escape = _POSIX_VDISABLE;
 			break;
 		case 'e':
 			set_escape_char(optarg);
 			break;
-		case 'f':
-#if defined(AUTHENTICATION) && defined(KRB5) && defined(FORWARD)
-			if ((forward_flags & OPTS_FORWARD_CREDS) &&
-			    !default_forward) {
-			    fprintf(stderr,
-				    "%s: Only one of -f and -F allowed.\n",
-				    prompt);
-			    usage();
-			}
-			forward_flags |= OPTS_FORWARD_CREDS;
-#else
-			fprintf(stderr,
-			 "%s: Warning: -f ignored, no Kerberos V5 support.\n",
-				prompt);
-#endif
+		case 'K':
+			autologin = 0;
 			break;
-		case 'F':
-#if defined(AUTHENTICATION) && defined(KRB5) && defined(FORWARD)
-			if ((forward_flags & OPTS_FORWARD_CREDS) &&
-			    !default_forward) {
-			    fprintf(stderr,
-				    "%s: Only one of -f and -F allowed.\n",
-				    prompt);
-			    usage();
-			}
-			forward_flags |= OPTS_FORWARD_CREDS;
-			forward_flags |= OPTS_FORWARDABLE_CREDS;
-#else
-			fprintf(stderr,
-			 "%s: Warning: -F ignored, no Kerberos V5 support.\n",
-				prompt);
-#endif
-			break;
-		case 'k':
-#if defined(AUTHENTICATION) && defined(KRB4)
-		    {
-			extern char *dest_realm, dst_realm_buf[];
-			extern int dst_realm_sz;
-			dest_realm = dst_realm_buf;
-			(void)strncpy(dest_realm, optarg, dst_realm_sz);
-		    }
-#else
-			fprintf(stderr,
-			   "%s: Warning: -k ignored, no Kerberos V4 support.\n",
-								prompt);
-#endif
+		case 'L':
+			eight |= 2;	/* binary output only */
 			break;
 		case 'l':
 			autologin = -1;
 			user = optarg;
 			break;
-		case 'b':
-			alias = optarg;
-			break;
 		case 'n':
-#if defined(TN3270) && defined(unix)
-			/* distinguish between "-n oasynch" and "-noasynch" */
-			if (argv[optind - 1][0] == '-' && argv[optind - 1][1]
-			    == 'n' && argv[optind - 1][2] == 'o') {
-				if (!strcmp(optarg, "oasynch")) {
-					noasynchtty = 1;
-					noasynchnet = 1;
-				} else if (!strcmp(optarg, "oasynchtty"))
-					noasynchtty = 1;
-				else if (!strcmp(optarg, "oasynchnet"))
-					noasynchnet = 1;
-			} else
-#endif	/* defined(TN3270) && defined(unix) */
-				SetNetTrace(optarg);
+			SetNetTrace(optarg);
 			break;
 		case 'r':
 			rlogin = '~';
-			break;
-		case 't':
-#if defined(TN3270) && defined(unix)
-			(void)strlcpy(tline, optarg, sizeof tline);
-			transcom = tline;
-#else
-			fprintf(stderr,
-			   "%s: Warning: -t ignored, no TN3270 support.\n",
-								prompt);
-#endif
 			break;
 		case 'V':
 			rtableid = (int)strtonum(optarg, 0,
@@ -334,34 +160,10 @@ main(argc, argv)
 				    prompt, errstr, optarg);
 			}
 			break;
-		case 'x':
-#ifdef ENCRYPTION
-			encrypt_auto(1);
-			decrypt_auto(1);
-			wantencryption = 1;
-			EncryptVerbose(1);
-#else
-			fprintf(stderr,
-			    "%s: Warning: -x ignored, no ENCRYPT support.\n",
-								prompt);
-#endif
-			break;
 		case '?':
 		default:
 			usage();
-			/* NOTREACHED */
 		}
-	}
-
-	if (autologin == -1) {
-#if defined(AUTHENTICATION)
-		if(check_krb4_tickets() || check_krb5_tickets())
-			autologin = 1;
-#endif
-#if defined(ENCRYPTION)
-		encrypt_auto(1);
-		decrypt_auto(1);
-#endif
 	}
 
 	if (autologin == -1)
@@ -371,7 +173,7 @@ main(argc, argv)
 	argv += optind;
 
 	if (argc) {
-		char *args[7], **argp = args;
+		char *args[8], **argp = args;
 
 		if (argc > 2)
 			usage();
@@ -387,7 +189,7 @@ main(argc, argv)
 		*argp++ = argv[0];		/* host */
 		if (argc > 1)
 			*argp++ = argv[1];	/* port */
-		*argp = 0;
+		*argp = NULL;
 
 		if (setjmp(toplevel) != 0)
 			Exit(0);
@@ -398,12 +200,7 @@ main(argc, argv)
 	}
 	(void)setjmp(toplevel);
 	for (;;) {
-#ifdef TN3270
-		if (shell_active)
-			shell_continue();
-		else
-#endif
-			command(1, 0, 0);
+		command(1, NULL, 0);
 	}
 	return 0;
 }

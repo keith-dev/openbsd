@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile.inc,v 1.62 2013/06/17 19:11:54 guenther Exp $
+#	$OpenBSD: Makefile.inc,v 1.65 2014/07/10 13:46:31 guenther Exp $
 
 # gen sources
 .PATH: ${LIBCSRCDIR}/arch/${MACHINE_CPU}/gen ${LIBCSRCDIR}/gen
@@ -7,7 +7,7 @@ SRCS+=  alarm.c assert.c auth_subr.c authenticate.c \
         basename.c clock.c clock_getcpuclockid.c \
         closedir.c confstr.c ctermid.c ctype_.c \
         daemon.c devname.c dirfd.c dirname.c disklabel.c elf_hash.c err.c \
-        errx.c errlist.c errno.c exec.c \
+        errc.c errx.c errlist.c errno.c exec.c \
         fdatasync.c fnmatch.c fpclassify.c frexp.c \
         fstab.c ftok.c fts.c ftw.c getbsize.c getcap.c getcwd.c \
         getdomainname.c getgrent.c getgrouplist.c gethostname.c \
@@ -25,19 +25,19 @@ SRCS+=  alarm.c assert.c auth_subr.c authenticate.c \
         tolower_.c ttyname.c \
         ttyslot.c toupper_.c ualarm.c uname.c unvis.c usleep.c \
         utime.c valloc.c vis.c wait.c wait3.c waitpid.c warn.c \
-        warnx.c vwarn.c vwarnx.c verr.c verrx.c
+        warnc.c warnx.c vwarn.c vwarnc.c vwarnx.c verr.c verrc.c verrx.c
 
 # indirect reference stubs, to be removed soon.
 SRCS+=	_sys_errlist.c _sys_nerr.c _sys_siglist.c
 
 # machine-dependent gen sources
 # m-d Makefile.inc must include sources for:
-#	_setjmp() fabs() frexp() infinity ldexp() modf() nan
-#	setjmp() sigsetjmp()
+#	_setjmp() fabs() frexp() infinity ldexp() modf() __nan
+#	setjmp() sigsetjmp() __tfork_thread()
 
 .include "${LIBCSRCDIR}/arch/${MACHINE_CPU}/gen/Makefile.inc"
 
-MAN+=	alarm.3 auth_subr.3 authenticate.3 basename.3 clock.3 \
+MAN+=	__tfork_thread.3 alarm.3 auth_subr.3 authenticate.3 basename.3 clock.3 \
 	clock_getcpuclockid.3 confstr.3 \
 	ctermid.3 ctype.3 daemon.3 devname.3 directory.3 dirname.3 err.3 \
 	exec.3 fabs.3 fnmatch.3 fpclassify.3 fpgetmask.3 frexp.3 ftok.3 fts.3 \
@@ -59,6 +59,7 @@ MAN+=	alarm.3 auth_subr.3 authenticate.3 basename.3 clock.3 \
 	syslog.3 time.3 times.3 timezone.3 toascii.3 tolower.3 toupper.3 \
 	ttyname.3 ualarm.3 uname.3 unvis.3 usleep.3 utime.3 valloc.3 vis.3
 
+MLINKS+=__tfork_thread.3 __tfork.2
 MLINKS+=auth_subr.3 auth_open.3 auth_subr.3 auth_call.3 auth_subr.3 \
 	auth_challenge.3 auth_subr.3 auth_check_change.3 auth_subr.3 \
 	auth_check_expire.3 auth_subr.3 auth_clean.3 auth_subr.3 auth_close.3 \
@@ -78,7 +79,8 @@ MLINKS+=directory.3 closedir.3 directory.3 dirfd.3 directory.3 opendir.3 \
 	directory.3 readdir.3 directory.3 rewinddir.3 directory.3 seekdir.3 \
 	directory.3 telldir.3 directory.3 readdir_r.3 directory.3 fdopendir.3
 MLINKS+=err.3 verr.3 err.3 errx.3 err.3 verrx.3 err.3 warn.3 err.3 vwarn.3 \
-	err.3 warnx.3 err.3 vwarnx.3
+	err.3 warnx.3 err.3 vwarnx.3 \
+	err.3 errc.3 err.3 verrc.3 err.3 warnc.3 err.3 vwarnc.3
 MLINKS+=exec.3 execl.3 exec.3 execle.3 exec.3 execlp.3 exec.3 execv.3 \
 	exec.3 execvp.3 exec.3 execvpe.3
 MLINKS+=fabs.3 fabsf.3 fabs.3 fabsl.3

@@ -1,4 +1,4 @@
-/*	$OpenBSD: ami.c,v 1.226 2013/10/19 13:03:43 dlg Exp $	*/
+/*	$OpenBSD: ami.c,v 1.228 2014/07/13 23:10:23 deraadt Exp $	*/
 
 /*
  * Copyright (c) 2001 Michael Shalayeff
@@ -262,7 +262,7 @@ free:
 destroy:
 	bus_dmamap_destroy(sc->sc_dmat, am->am_map);
 amfree:
-	free(am, M_DEVBUF);
+	free(am, M_DEVBUF, 0);
 
 	return (NULL);
 }
@@ -274,7 +274,7 @@ ami_freemem(struct ami_softc *sc, struct ami_mem *am)
 	bus_dmamem_unmap(sc->sc_dmat, am->am_kva, am->am_size);
 	bus_dmamem_free(sc->sc_dmat, &am->am_seg, 1);
 	bus_dmamap_destroy(sc->sc_dmat, am->am_map);
-	free(am, M_DEVBUF);
+	free(am, M_DEVBUF, 0);
 }
 
 void
@@ -299,7 +299,7 @@ ami_alloc_ccbs(struct ami_softc *sc, int nccbs)
 	struct ami_ccbmem *ccbmem, *mem;
 	int i, error;
 
-	sc->sc_ccbs = malloc(sizeof(struct ami_ccb) * nccbs,
+	sc->sc_ccbs = mallocarray(nccbs, sizeof(struct ami_ccb),
 	    M_DEVBUF, M_NOWAIT);
 	if (sc->sc_ccbs == NULL) {
 		printf(": unable to allocate ccbs\n");
@@ -363,7 +363,7 @@ free_list:
 
 	ami_freemem(sc, sc->sc_ccbmem_am);
 free_ccbs:
-	free(sc->sc_ccbs, M_DEVBUF);
+	free(sc->sc_ccbs, M_DEVBUF, 0);
 
 	return (1);
 }
@@ -566,7 +566,7 @@ ami_attach(struct ami_softc *sc)
 #endif
 #endif
 
-	rsc = malloc(sizeof(struct ami_rawsoftc) * sc->sc_channels,
+	rsc = mallocarray(sc->sc_channels, sizeof(struct ami_rawsoftc),
 	    M_DEVBUF, M_NOWAIT|M_ZERO);
 	if (!rsc) {
 		printf("%s: no memory for raw interface\n", DEVNAME(sc));
@@ -1948,7 +1948,7 @@ ami_ioctl_inq(struct ami_softc *sc, struct bioc_inq *bi)
 	bcopy(bi, &sc->sc_bi, sizeof sc->sc_bi);
 	error = 0;
 bail:
-	free(p, M_DEVBUF);
+	free(p, M_DEVBUF, 0);
 done:
 	dma_free(inqbuf, sizeof(*inqbuf));
 	return (error);
@@ -2181,7 +2181,7 @@ ami_ioctl_vol(struct ami_softc *sc, struct bioc_vol *bv)
 	strlcpy(bv->bv_dev, sc->sc_hdr[i].dev, sizeof(bv->bv_dev));
 	
 bail:
-	free(p, M_DEVBUF);
+	free(p, M_DEVBUF, 0);
 
 	return (error);
 }
@@ -2293,7 +2293,7 @@ ami_ioctl_disk(struct ami_softc *sc, struct bioc_disk *bd)
 done:
 	error = 0;
 bail:
-	free(p, M_DEVBUF);
+	free(p, M_DEVBUF, 0);
 	dma_free(vpdbuf, sizeof(*vpdbuf));
 	dma_free(inqbuf, sizeof(*inqbuf));
 
@@ -2408,7 +2408,7 @@ ami_create_sensors(struct ami_softc *sc)
 	if (ssc == NULL)
 		return (1);
 
-	sc->sc_sensors = malloc(sizeof(struct ksensor) * sc->sc_nunits,
+	sc->sc_sensors = mallocarray(sc->sc_nunits, sizeof(struct ksensor),
 	    M_DEVBUF, M_WAITOK|M_CANFAIL|M_ZERO);
 	if (sc->sc_sensors == NULL)
 		return (1);
@@ -2444,9 +2444,9 @@ ami_create_sensors(struct ami_softc *sc)
 	return (0);
 
 freebd:
-	free(sc->sc_bd, M_DEVBUF);
+	free(sc->sc_bd, M_DEVBUF, 0);
 bad:
-	free(sc->sc_sensors, M_DEVBUF);
+	free(sc->sc_sensors, M_DEVBUF, 0);
 
 	return (1);
 }

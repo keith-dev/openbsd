@@ -1,4 +1,4 @@
-/*	$OpenBSD: pool.h,v 1.44 2013/11/05 03:28:44 dlg Exp $	*/
+/*	$OpenBSD: pool.h,v 1.47 2014/07/02 00:23:36 dlg Exp $	*/
 /*	$NetBSD: pool.h,v 1.27 2001/06/06 22:00:17 rafal Exp $	*/
 
 /*-
@@ -44,8 +44,31 @@
 #define KERN_POOL_NAME		2
 #define KERN_POOL_POOL		3
 
+struct kinfo_pool {
+	unsigned int	pr_size;	/* size of a pool item */
+	unsigned int	pr_pgsize;	/* size of a "page" */
+	unsigned int	pr_itemsperpage; /* number of items per "page" */
+	unsigned int	pr_minpages;	/* same in page units */
+	unsigned int	pr_maxpages;	/* maximum # of idle pages to keep */
+	unsigned int	pr_hardlimit;	/* hard limit to number of allocated
+					   items */
+
+	unsigned int	pr_npages;	/* # of pages allocated */
+	unsigned int	pr_nout;	/* # items currently allocated */
+	unsigned int	pr_nitems;	/* # items in the pool */
+
+	unsigned long	pr_nget;	/* # of successful requests */
+	unsigned long	pr_nput;	/* # of releases */
+	unsigned long	pr_nfail;	/* # of unsuccessful requests */
+	unsigned long	pr_npagealloc;	/* # of pages allocated */
+	unsigned long	pr_npagefree;	/* # of pages released */
+	unsigned int	pr_hiwat;	/* max # of pages in pool */
+	unsigned long	pr_nidle;	/* # of idle pages */
+};
+
+#if defined(_KERNEL) || defined(_LIBKVM)
+
 #include <sys/queue.h>
-#include <sys/time.h>
 #include <sys/tree.h>
 #include <sys/mutex.h>
 
@@ -59,7 +82,7 @@ struct pool_allocator {
 	int pa_pageshift;
 };
 
-LIST_HEAD(pool_pagelist,pool_item_header);
+LIST_HEAD(pool_pagelist, pool_item_header);
 
 struct pool {
 	struct mutex	pr_mtx;
@@ -71,7 +94,8 @@ struct pool {
 			pr_fullpages;	/* Full pages */
 	struct pool_pagelist
 			pr_partpages;	/* Partially-allocated pages */
-	struct pool_item_header	*pr_curpage;
+	struct pool_item_header	*
+			pr_curpage;
 	unsigned int	pr_size;	/* Size of item */
 	unsigned int	pr_align;	/* Requested alignment, must be 2^n */
 	unsigned int	pr_itemoffset;	/* Align this offset in item */
@@ -86,8 +110,9 @@ struct pool {
 	unsigned int	pr_hardlimit;	/* hard limit to number of allocated
 					   items */
 	unsigned int	pr_serial;	/* unique serial number of the pool */
-	struct pool_allocator *pr_alloc;/* backend allocator */
-	const char	*pr_wchan;	/* tsleep(9) identifier */
+	struct pool_allocator *
+			pr_alloc;	/* backend allocator */
+	const char *	pr_wchan;	/* tsleep(9) identifier */
 	unsigned int	pr_flags;	/* r/w flags */
 	unsigned int	pr_roflags;	/* r/o flags */
 #define PR_WAITOK	0x0001 /* M_WAITOK */
@@ -100,9 +125,10 @@ struct pool {
 #define PR_DEBUG	0x0800
 #define PR_DEBUGCHK	0x1000
 
-	int			pr_ipl;
+	int		pr_ipl;
 
-	RB_HEAD(phtree, pool_item_header) pr_phtree;
+	RB_HEAD(phtree, pool_item_header)
+			pr_phtree;
 
 	int		pr_maxcolor;	/* Cache colouring */
 	int		pr_curcolor;
@@ -128,10 +154,14 @@ struct pool {
 	unsigned long	pr_nidle;	/* # of idle pages */
 
 	/* Physical memory configuration. */
-	const struct kmem_pa_mode *pr_crange;
+	const struct kmem_pa_mode *
+			pr_crange;
 };
 
+#endif /* _KERNEL || _LIBKVM */
+
 #ifdef _KERNEL
+
 extern struct pool_allocator pool_allocator_nointr;
 
 /* these functions are not locked */
@@ -164,9 +194,9 @@ void		pool_walk(struct pool *, int, int (*)(const char *, ...),
 #endif
 
 /* the allocator for dma-able memory is a thin layer on top of pool  */
-void			 dma_alloc_init(void);
-void			*dma_alloc(size_t size, int flags);
-void			 dma_free(void *m, size_t size);
+void		 dma_alloc_init(void);
+void		*dma_alloc(size_t size, int flags);
+void		 dma_free(void *m, size_t size);
 #endif /* _KERNEL */
 
 #endif /* _SYS_POOL_H_ */

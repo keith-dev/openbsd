@@ -1,4 +1,4 @@
-/*	$OpenBSD: sh_machdep.c,v 1.34 2013/06/11 16:42:10 deraadt Exp $	*/
+/*	$OpenBSD: sh_machdep.c,v 1.37 2014/05/08 21:43:04 miod Exp $	*/
 /*	$NetBSD: sh3_machdep.c,v 1.59 2006/03/04 01:13:36 uwe Exp $	*/
 
 /*
@@ -265,7 +265,7 @@ sh_startup()
 	    sh_vector_interrupt_end - sh_vector_interrupt);
 #endif /* DEBUG */
 
-	printf("real mem = %u (%uMB)\n", ptoa(physmem),
+	printf("real mem = %lu (%luMB)\n", ptoa(physmem),
 	    ptoa(physmem) / 1024 / 1024);
 
 	/*
@@ -460,7 +460,7 @@ sendsig(sig_t catcher, int sig, int mask, u_long code, int type,
 	struct proc *p = curproc;
 	struct sigframe *fp, frame;
 	struct trapframe *tf = p->p_md.md_regs;
-	struct sigacts *psp = p->p_sigacts;
+	struct sigacts *psp = p->p_p->ps_sigacts;
 	siginfo_t *sip;
 
 	if ((p->p_sigstk.ss_flags & SS_DISABLE) == 0 &&
@@ -506,7 +506,7 @@ sendsig(sig_t catcher, int sig, int mask, u_long code, int type,
 	tf->tf_r6 = (int)&fp->sf_uc;	/* "ucp" argument for handler */
  	tf->tf_spc = (int)catcher;
 	tf->tf_r15 = (int)fp;
-	tf->tf_pr = (int)p->p_sigcode;
+	tf->tf_pr = (int)p->p_p->ps_sigcode;
 }
 
 /*

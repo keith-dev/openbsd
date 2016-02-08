@@ -1,4 +1,4 @@
-/*	$OpenBSD: bus_dma.c,v 1.30 2012/10/03 22:46:09 miod Exp $ */
+/*	$OpenBSD: bus_dma.c,v 1.37 2014/07/17 19:51:58 miod Exp $ */
 
 /*
  * Copyright (c) 2003-2004 Opsycon AB  (www.opsycon.se / www.opsycon.com)
@@ -61,14 +61,14 @@
 #include <sys/malloc.h>
 #include <sys/mbuf.h>
 
-#include <uvm/uvm.h>
+#include <uvm/uvm_extern.h>
 
 #include <mips64/cache.h>
 #include <machine/cpu.h>
 
 #include <machine/bus.h>
 
-#if defined(TGT_INDIGO2)
+#if defined(TGT_INDY) || defined(TGT_INDIGO2)
 #include <sgi/sgi/ip22.h>
 #endif
 
@@ -120,7 +120,7 @@ _dmamap_create(bus_dma_tag_t t, bus_size_t size, int nsegments,
 void
 _dmamap_destroy(bus_dma_tag_t t, bus_dmamap_t map)
 {
-	free(map, M_DEVBUF);
+	free(map, M_DEVBUF, 0);
 }
 
 /*
@@ -311,11 +311,33 @@ _dmamap_sync(bus_dma_tag_t t, bus_dmamap_t map, bus_addr_t addr,
 {
 	int nsegs;
 	int curseg;
+	int how;
 	struct cpu_info *ci;
 
 #ifdef TGT_COHERENT
+	/* we only need to writeback here */
 	if ((op & BUS_DMASYNC_PREWRITE) == 0)
 		return;
+	else
+		how = CACHE_SYNC_W;
+#else
+	/*
+	 * If only PREWRITE is requested, writeback.
+	 * PREWRITE with PREREAD writebacks and invalidates (since noncoherent)
+	 * *all* cache levels.
+	 * Otherwise, just invalidate (since noncoherent).
+	 */
+	if (op & BUS_DMASYNC_PREWRITE) {
+		if (op & BUS_DMASYNC_PREREAD)
+			how = CACHE_SYNC_X;
+		else
+			how = CACHE_SYNC_W;
+	} else {
+		if (op & (BUS_DMASYNC_PREREAD | BUS_DMASYNC_POSTREAD))
+			how = CACHE_SYNC_R;
+		else
+			return;
+	}
 #endif
 
 	ci = curcpu();
@@ -345,34 +367,25 @@ _dmamap_sync(bus_dma_tag_t t, bus_dmamap_t map, bus_addr_t addr,
 		if (ssize > size)
 			ssize = size;
 
+#ifndef TGT_COHERENT
 		if (IS_XKPHYS(vaddr) && XKPHYS_TO_CCA(vaddr) == CCA_NC) {
 			size -= ssize;
 			ssize = 0;
 		}
+#endif
 
 		if (ssize != 0) {
-#ifdef TGT_COHERENT
-			/* we only need to writeback here */
-			Mips_IOSyncDCache(ci, vaddr, ssize, CACHE_SYNC_W);
-#else
+			Mips_IOSyncDCache(ci, vaddr, ssize, how);
+#if defined(TGT_INDY) || defined(TGT_INDIGO2)
 			/*
-			 * If only PREWRITE is requested, writeback.
-			 * PREWRITE with PREREAD writebacks
-			 * and invalidates (if noncoherent) *all* cache levels.
-			 * Otherwise, just invalidate (if noncoherent).
+			 * Also flush external L2 if available - this could
+			 * (and used to) be done in Mips_IOSyncDCache, but
+			 * as the external L2 is physically addressed, this
+			 * would require the physical address to be
+			 * recomputed, although we know it here.
 			 */
-			if (op & BUS_DMASYNC_PREWRITE) {
-				if (op & BUS_DMASYNC_PREREAD)
-					Mips_IOSyncDCache(ci, vaddr,
-					    ssize, CACHE_SYNC_X);
-				else
-					Mips_IOSyncDCache(ci, vaddr,
-					    ssize, CACHE_SYNC_W);
-			} else
-			if (op & (BUS_DMASYNC_PREREAD | BUS_DMASYNC_POSTREAD)) {
-				Mips_IOSyncDCache(ci, vaddr,
-				    ssize, CACHE_SYNC_R);
-			}
+			if (ip22_extsync != NULL)
+				(*ip22_extsync)(ci, paddr, ssize, how);
 #endif
 			size -= ssize;
 		}
@@ -440,7 +453,8 @@ _dmamem_map(bus_dma_tag_t t, bus_dma_segment_t *segs, int nsegs, size_t size,
 	size_t ssize;
 	paddr_t pa;
 	bus_addr_t addr;
-	int curseg, error;
+	int curseg, error, pmap_flags;
+	const struct kmem_dyn_mode *kd;
 
 #if defined(TGT_INDIGO2)
 	/*
@@ -454,19 +468,23 @@ _dmamem_map(bus_dma_tag_t t, bus_dma_segment_t *segs, int nsegs, size_t size,
 		return EINVAL;
 #endif
 
+#ifdef TGT_COHERENT
+	/* coherent mappings do not need to be uncached on these platforms */
+	flags &= ~BUS_DMA_COHERENT;
+#endif
+
 	if (nsegs == 1) {
 		pa = (*t->_device_to_pa)(segs[0].ds_addr);
-#ifndef TGT_COHERENT
-		if (flags & BUS_DMA_COHERENT)
+		if (flags & (BUS_DMA_COHERENT | BUS_DMA_NOCACHE))
 			*kvap = (caddr_t)PHYS_TO_XKPHYS(pa, CCA_NC);
 		else
-#endif
 			*kvap = (caddr_t)PHYS_TO_XKPHYS(pa, CCA_CACHED);
 		return (0);
 	}
 
 	size = round_page(size);
-	va = uvm_km_valloc(kernel_map, size);
+	kd = flags & BUS_DMA_NOWAIT ? &kd_trylock : &kd_waitok;
+	va = (vaddr_t)km_alloc(size, &kv_any, &kp_none, kd);
 	if (va == 0)
 		return (ENOMEM);
 
@@ -474,6 +492,9 @@ _dmamem_map(bus_dma_tag_t t, bus_dma_segment_t *segs, int nsegs, size_t size,
 
 	sva = va;
 	ssize = size;
+	pmap_flags = PMAP_WIRED | PMAP_CANFAIL;
+	if (flags & (BUS_DMA_COHERENT | BUS_DMA_NOCACHE))
+		pmap_flags |= PMAP_NOCACHE;
 	for (curseg = 0; curseg < nsegs; curseg++) {
 		for (addr = segs[curseg].ds_addr;
 		    addr < (segs[curseg].ds_addr + segs[curseg].ds_len);
@@ -485,18 +506,24 @@ _dmamem_map(bus_dma_tag_t t, bus_dma_segment_t *segs, int nsegs, size_t size,
 			pa = (*t->_device_to_pa)(addr);
 			error = pmap_enter(pmap_kernel(), va, pa,
 			    VM_PROT_READ | VM_PROT_WRITE, VM_PROT_READ |
-			    VM_PROT_WRITE | PMAP_WIRED | PMAP_CANFAIL);
+			    VM_PROT_WRITE | pmap_flags);
 			if (error) {
 				pmap_update(pmap_kernel());
-				uvm_km_free(kernel_map, sva, ssize);
+				km_free((void *)sva, ssize, &kv_any, &kp_none);
 				return (error);
 			}
 
-#ifndef TGT_COHERENT
-			if (flags & BUS_DMA_COHERENT)
+			/*
+			 * This is redundant with what pmap_enter() did
+			 * above, but will take care of forcing other
+			 * mappings of the same page (if any) to be
+			 * uncached.
+			 * If there are no multiple mappings of that
+			 * page, this amounts to a noop.
+			 */
+			if (flags & (BUS_DMA_COHERENT | BUS_DMA_NOCACHE))
 				pmap_page_cache(PHYS_TO_VM_PAGE(pa),
-				    PV_UNCACHED);
-#endif
+				    PGF_UNCACHED);
 		}
 		pmap_update(pmap_kernel());
 	}
@@ -514,8 +541,7 @@ _dmamem_unmap(bus_dma_tag_t t, caddr_t kva, size_t size)
 	if (IS_XKPHYS((vaddr_t)kva))
 		return;
 
-	size = round_page(size);
-	uvm_km_free(kernel_map, (vaddr_t)kva, size);
+	km_free(kva, round_page(size), &kv_any, &kp_none);
 }
 
 /*
@@ -587,14 +613,14 @@ _dmamap_load_buffer(bus_dma_tag_t t, bus_dmamap_t map, void *buf,
 		 * Get the physical address for this segment.
 		 */
 		if (pmap_extract(pmap, vaddr, &curaddr) == FALSE)
-			panic("_dmapmap_load_buffer: pmap_extract(%x, %x) failed!",
-			    pmap, vaddr);
+			panic("_dmapmap_load_buffer: pmap_extract(%p, %p) failed!",
+			    pmap, (void *)vaddr);
 
 #ifdef DIAGNOSTIC
 		if (curaddr > dma_constraint.ucr_high ||
 		    curaddr < dma_constraint.ucr_low)
-			panic("Non DMA-reachable buffer at curaddr %p (raw)",
-			    curaddr);
+			panic("Non DMA-reachable buffer at addr %p (raw)",
+			    (void *)curaddr);
 #endif
 
 		/*
@@ -670,7 +696,7 @@ _dmamem_alloc_range(bus_dma_tag_t t, bus_size_t size, bus_size_t alignment,
     bus_size_t boundary, bus_dma_segment_t *segs, int nsegs, int *rsegs,
     int flags, paddr_t low, paddr_t high)
 {
-	vaddr_t curaddr, lastaddr;
+	paddr_t curaddr, lastaddr;
 	vm_page_t m;
 	struct pglist mlist;
 	int curseg, error, plaflag;

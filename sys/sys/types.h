@@ -1,4 +1,4 @@
-/*	$OpenBSD: types.h,v 1.39 2013/09/14 01:35:02 guenther Exp $	*/
+/*	$OpenBSD: types.h,v 1.41 2014/07/12 16:25:08 guenther Exp $	*/
 /*	$NetBSD: types.h,v 1.29 1996/11/15 22:48:25 jtc Exp $	*/
 
 /*-
@@ -40,8 +40,12 @@
 #ifndef _SYS_TYPES_H_
 #define	_SYS_TYPES_H_
 
-#include <sys/_types.h>
-#include <machine/endian.h>
+#include <sys/cdefs.h>
+#if __BSD_VISIBLE
+#include <sys/endian.h>
+#else
+#include <sys/_endian.h>
+#endif
 
 #if __BSD_VISIBLE
 typedef	unsigned char	u_char;
@@ -241,7 +245,7 @@ struct	uio;
 #endif
 
 #ifdef _KERNEL
-#if (defined(__GNUC__) && __GNUC__ >= 3) || defined(__PCC__) || defined(lint)
+#if (defined(__GNUC__) && __GNUC__ >= 3) || defined(__PCC__)
 /* Support for _C99: type _Bool is already built-in. */
 #define false	0
 #define true	1

@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.53 2013/11/23 07:20:52 uebayasi Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.71 2014/07/22 01:04:04 uebayasi Exp $	*/
 
 /*
  * Copyright (c) 2005 Michael Shalayeff
@@ -46,8 +46,6 @@
 
 #include <net/if.h>
 #include <uvm/uvm.h>
-#include <uvm/uvm_page.h>
-#include <uvm/uvm_swap.h>
 
 #include <dev/cons.h>
 #include <dev/clock_subr.h>
@@ -475,10 +473,10 @@ fall(int c_base, int c_count, int c_loop, int c_stride, int data)
 	for (; c_count--; c_base += c_stride)
 		for (loop = c_loop; loop--; )
 			if (data)
-				__asm __volatile("fdce 0(%%sr0,%0)"
+				__asm volatile("fdce 0(%%sr0,%0)"
 				    :: "r" (c_base));
 			else
-				__asm __volatile("fice 0(%%sr0,%0)"
+				__asm volatile("fice 0(%%sr0,%0)"
 				    :: "r" (c_base));
 }
 
@@ -534,12 +532,21 @@ ptlball(void)
 
 int waittime = -1;
 
-void
+__dead void
 boot(int howto)
 {
-	/* If system is cold, just halt. */
+	struct device *mainbus;
+
+	/*
+	 * On older systems without software power control, prevent mi code
+	 * from spinning disks off, in case the operator changes his mind
+	 * and prefers to reboot - the firmware will not send a spin up
+	 * command to the disks.
+	 */
+	if (cold_hook == NULL)
+		howto &= ~RB_POWERDOWN;
+
 	if (cold) {
-		/* (Unless the user explicitly asked for reboot.) */
 		if ((howto & RB_USERREQ) == 0)
 			howto |= RB_HALT;
 		goto haltsys;
@@ -547,40 +554,37 @@ boot(int howto)
 
 	boothowto = howto | (boothowto & RB_HALT);
 
-	if (!(howto & RB_NOSYNC)) {
+	if ((howto & RB_NOSYNC) == 0) {
 		waittime = 0;
 		vfs_shutdown();
-		/*
-		 * If we've been adjusting the clock, the todr
-		 * will be out of synch; adjust it now unless
-		 * the system was sitting in ddb.
-		 */
-		if ((howto & RB_TIMEBAD) == 0)
+
+		if ((howto & RB_TIMEBAD) == 0) {
 			resettodr();
-		else
+		} else {
 			printf("WARNING: not updating battery clock\n");
+		}
 	}
 	if_downall();
 
-	/* XXX probably save howto into stable storage */
-
 	uvm_shutdown();
 	splhigh();
+	cold = 1;
 
-	if (howto & RB_DUMP)
+	if ((howto & RB_DUMP) != 0)
 		dumpsys();
 
 haltsys:
 	doshutdownhooks();
-	if (!TAILQ_EMPTY(&alldevs))
-		config_suspend(TAILQ_FIRST(&alldevs), DVACT_POWERDOWN);
+	mainbus = device_mainbus();
+	if (mainbus != NULL)
+		config_suspend(mainbus, DVACT_POWERDOWN);
 
 	/* in case we came on powerfail interrupt */
 	if (cold_hook)
 		(*cold_hook)(HPPA_COLD_COLD);
 
-	if (howto & RB_HALT) {
-		if (howto & RB_POWERDOWN && cold_hook) {
+	if ((howto & RB_HALT) != 0) {
+		if ((howto & RB_POWERDOWN) != 0) {
 			printf("Powering off...");
 			DELAY(2000000);
 			(*cold_hook)(HPPA_COLD_OFF);
@@ -589,7 +593,7 @@ haltsys:
 
 		printf("System halted!\n");
 		DELAY(2000000);
-		__asm __volatile("stwas %0, 0(%1)"
+		__asm volatile("stwas %0, 0(%1)"
 		    :: "r" (CMD_STOP), "r" (HPPA_LBCAST + iomod_command));
 	} else {
 		printf("rebooting...");
@@ -599,13 +603,13 @@ haltsys:
                 pdc_call((iodcio_t)pdc, 0, PDC_BROADCAST_RESET, PDC_DO_RESET);
 
 		/* forcably reset module if that fails */
-		__asm __volatile(".export hppa_reset, entry\n\t"
+		__asm volatile(".export hppa_reset, entry\n\t"
 		    ".label hppa_reset");
-		__asm __volatile("stwas %0, 0(%1)"
+		__asm volatile("stwas %0, 0(%1)"
 		    :: "r" (CMD_RESET), "r" (HPPA_LBCAST + iomod_command));
 	}
 
-	for (;;) ; /* loop while bus reset is coming up */
+	for (;;) ;
 	/* NOTREACHED */
 }
 
@@ -634,10 +638,9 @@ cpu_dumpsize(void)
 void
 hpmc_dump(void)
 {
-	printf("HPMC\n");
-
 	cold = 0;
-	boot(RB_NOSYNC);
+	panic("HPMC");
+	/* NOTREACHED */
 }
 
 int
@@ -841,7 +844,7 @@ sendsig(sig_t catcher, int sig, int mask, u_long code, int type,
 	struct proc *p = curproc;
 	struct trapframe *tf = p->p_md.md_regs;
 	struct pcb *pcb = &p->p_addr->u_pcb;
-	struct sigacts *psp = p->p_sigacts;
+	struct sigacts *psp = p->p_p->ps_sigacts;
 	struct sigcontext ksc;
 	siginfo_t ksi;
 	register_t scp, sip;
@@ -897,7 +900,7 @@ sendsig(sig_t catcher, int sig, int mask, u_long code, int type,
 	tf->tf_args[2] = tf->tf_r4 = scp;
 	tf->tf_args[3] = (register_t)catcher;
 	tf->tf_ipsw &= ~(PSL_N|PSL_B|PSL_T);
-	tf->tf_iioq[0] = HPPA_PC_PRIV_USER | p->p_sigcode;
+	tf->tf_iioq[0] = HPPA_PC_PRIV_USER | p->p_p->ps_sigcode;
 	tf->tf_iioq[1] = tf->tf_iioq[0] + 4;
 	tf->tf_iisq[0] = tf->tf_iisq[1] = pcb->pcb_space;
 	/* disable tracing in the trapframe */

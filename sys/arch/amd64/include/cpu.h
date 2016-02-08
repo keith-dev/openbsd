@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.h,v 1.83 2014/02/13 23:11:06 kettenis Exp $	*/
+/*	$OpenBSD: cpu.h,v 1.85 2014/07/11 10:53:07 uebayasi Exp $	*/
 /*	$NetBSD: cpu.h,v 1.1 2003/04/26 18:39:39 fvdl Exp $	*/
 
 /*-
@@ -163,6 +163,7 @@ struct cpu_info {
 #define CPUF_RUNNING	0x2000		/* CPU is running */
 #define CPUF_PAUSE	0x4000		/* CPU is paused in DDB */
 #define CPUF_GO		0x8000		/* CPU should start running */
+#define CPUF_PARK	0x10000		/* CPU should self-park in real mode */
 
 #define PROC_PC(p)	((p)->p_md.md_regs->tf_rip)
 #define PROC_STACK(p)	((p)->p_md.md_regs->tf_rsp)
@@ -206,6 +207,8 @@ void cpu_init_idle_pcbs(void);
 void cpu_kick(struct cpu_info *);
 void cpu_unidle(struct cpu_info *);
 
+#define CPU_BUSY_CYCLE()	__asm volatile("pause": : : "memory")
+
 #else /* !MULTIPROCESSOR */
 
 #define MAXCPUS		1
@@ -217,6 +220,8 @@ extern struct cpu_info cpu_info_primary;
 
 #define cpu_kick(ci)
 #define cpu_unidle(ci)
+
+#define CPU_BUSY_CYCLE()	do {} while (0)
 
 #endif
 

@@ -1,4 +1,4 @@
-/*	$OpenBSD: pmap.h,v 1.10 2014/01/30 18:16:41 miod Exp $	*/
+/*	$OpenBSD: pmap.h,v 1.12 2014/05/08 21:31:56 miod Exp $	*/
 
 /*
  * Copyright (c) 2005 Michael Shalayeff
@@ -20,11 +20,29 @@
 #ifndef _MACHINE_PMAP_H_
 #define _MACHINE_PMAP_H_
 
-#include <machine/pte.h>
-#include <uvm/uvm_page.h>
 #include <uvm/uvm_object.h>
 
+#if !defined(_LOCORE)
+
+#include <sys/lock.h>
+
+struct pv_entry;
+struct vm_page_md {
+	struct simplelock pvh_lock;	/* locks every pv on this list */
+	struct pv_entry	*pvh_list;	/* head of list (locked by pvh_lock) */
+	u_int		pvh_attrs;	/* to preserve ref/mod */
+};
+
+#define	VM_MDPAGE_INIT(pg) do {				\
+	simple_lock_init(&(pg)->mdpage.pvh_lock);	\
+	(pg)->mdpage.pvh_list = NULL;			\
+	(pg)->mdpage.pvh_attrs = 0;			\
+} while (0)
+#endif
+
 #ifdef _KERNEL
+#include <uvm/uvm_page.h>
+#include <machine/pte.h>
 
 struct pmap {
 	struct uvm_object pm_obj;	/* object (lck by object lock) */
@@ -120,23 +138,5 @@ pmap_protect(struct pmap *pmap, vaddr_t sva, vaddr_t eva, vm_prot_t prot)
 }
 
 #endif /* _KERNEL */
-
-#if !defined(_LOCORE)
-
-#include <sys/lock.h>
-
-struct pv_entry;
-struct vm_page_md {
-	struct simplelock pvh_lock;	/* locks every pv on this list */
-	struct pv_entry	*pvh_list;	/* head of list (locked by pvh_lock) */
-	u_int		pvh_attrs;	/* to preserve ref/mod */
-};
-
-#define	VM_MDPAGE_INIT(pg) do {				\
-	simple_lock_init(&(pg)->mdpage.pvh_lock);	\
-	(pg)->mdpage.pvh_list = NULL;			\
-	(pg)->mdpage.pvh_attrs = 0;			\
-} while (0)
-#endif
 
 #endif /* _MACHINE_PMAP_H_ */

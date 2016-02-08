@@ -1,13 +1,24 @@
-/*-
- * ----------------------------------------------------------------------------
- * "THE BEER-WARE LICENSE" (Revision 42):
- * <phk@FreeBSD.ORG> wrote this file.  As long as you retain this notice you
- * can do whatever you want with this stuff. If we meet some day, and you think
- * this stuff is worth it, you can buy me a beer in return.   Poul-Henning Kamp
- * ----------------------------------------------------------------------------
+/*	$OpenBSD: kern_tc.c,v 1.25 2014/07/12 18:43:32 tedu Exp $ */
+
+/*
+ * Copyright (c) 2000 Poul-Henning Kamp <phk@FreeBSD.org>
  *
- * $OpenBSD: kern_tc.c,v 1.22 2014/01/30 21:01:59 kettenis Exp $
- * $FreeBSD: src/sys/kern/kern_tc.c,v 1.148 2003/03/18 08:45:23 phk Exp $
+ * Permission to use, copy, modify, and distribute this software for any
+ * purpose with or without fee is hereby granted, provided that the above
+ * copyright notice and this permission notice appear in all copies.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+ * WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+ * MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+ * ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+ * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+ * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
+ * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+ */
+
+/*
+ * If we meet some day, and you think this stuff is worth it, you
+ * can buy me a beer in return. Poul-Henning Kamp
  */
 
 #include <sys/param.h>
@@ -530,7 +541,7 @@ sysctl_tc_choice(void *oldp, size_t *oldlenp, void *newp, size_t newlen)
 		strlcat(choices, buf, maxlen);
 	}
 	error = sysctl_rdstring(oldp, oldlenp, newp, choices);
-	free(choices, M_TEMP);
+	free(choices, M_TEMP, 0);
 	return (error);
 }
 

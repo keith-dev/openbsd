@@ -1,8 +1,7 @@
-/*	$OpenBSD: uvm_object.h,v 1.19 2013/05/30 15:17:59 tedu Exp $	*/
+/*	$OpenBSD: uvm_object.h,v 1.21 2014/07/11 16:35:40 jsg Exp $	*/
 /*	$NetBSD: uvm_object.h,v 1.11 2001/03/09 01:02:12 chs Exp $	*/
 
 /*
- *
  * Copyright (c) 1997 Charles D. Cranor and Washington University.
  * All rights reserved.
  *
@@ -14,12 +13,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *      This product includes software developed by Charles D. Cranor and
- *      Washington University.
- * 4. The name of the author may not be used to endorse or promote products
- *    derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
@@ -97,8 +90,8 @@ RB_PROTOTYPE(uvm_objtree, vm_page, objt, uvm_pagecmp)
 	 ((struct vnode *)uobj)->v_flag & VTEXT)
 
 void	uvm_objinit(struct uvm_object *, struct uvm_pagerops *, int);
-int	uvm_objwire(struct uvm_object *, off_t, off_t, struct pglist *);
-void	uvm_objunwire(struct uvm_object *, off_t, off_t);
+int	uvm_objwire(struct uvm_object *, voff_t, voff_t, struct pglist *);
+void	uvm_objunwire(struct uvm_object *, voff_t, voff_t);
 
 #endif /* _KERNEL */
 

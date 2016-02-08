@@ -1,4 +1,4 @@
-/*	$OpenBSD: vpci.c,v 1.13 2014/01/24 05:42:23 kettenis Exp $	*/
+/*	$OpenBSD: vpci.c,v 1.15 2014/07/12 18:44:43 tedu Exp $	*/
 /*
  * Copyright (c) 2008 Mark Kettenis <kettenis@openbsd.org>
  *
@@ -203,7 +203,7 @@ vpci_attach(struct device *parent, struct device *self, void *aux)
 	pba.pba_pc->conf_write = vpci_conf_write;
 	pba.pba_pc->intr_map = vpci_intr_map;
 
-	free(busranges, M_DEVBUF);
+	free(busranges, M_DEVBUF, 0);
 
 	config_found(&sc->sc_dv, &pba, vpci_print);
 }
@@ -280,7 +280,7 @@ disable_queue:
 free_queue:
 	msi_eq_free(sc->sc_dmat, pbm->vp_meq);
 free_table:
-	free(pbm->vp_msi, M_DEVBUF);
+	free(pbm->vp_msi, M_DEVBUF, 0);
 }
 
 int
@@ -532,13 +532,13 @@ vpci_intr_establish(bus_space_tag_t t, bus_space_tag_t t0, int ihandle,
 
 		err = hv_pci_msi_setmsiq(pbm->vp_devhandle, msinum, 0, 0);
 		if (err != H_EOK) {
-			printf("pci_msi_setmsiq: err %ld\n", err);
+			printf("pci_msi_setmsiq: err %d\n", err);
 			return (NULL);
 		}
 
 		err = hv_pci_msi_setvalid(pbm->vp_devhandle, msinum, PCI_MSI_VALID);
 		if (err != H_EOK) {
-			printf("pci_msi_setvalid: err %ld\n", err);
+			printf("pci_msi_setvalid: err %d\n", err);
 			return (NULL);
 		}
 

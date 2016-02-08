@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_fork.c,v 1.158 2014/02/12 05:47:36 guenther Exp $	*/
+/*	$OpenBSD: kern_fork.c,v 1.173 2014/07/13 15:46:21 uebayasi Exp $	*/
 /*	$NetBSD: kern_fork.c,v 1.29 1996/02/09 18:59:34 christos Exp $	*/
 
 /*
@@ -48,22 +48,24 @@
 #include <sys/resourcevar.h>
 #include <sys/signalvar.h>
 #include <sys/vnode.h>
+#include <sys/vmmeter.h>
 #include <sys/file.h>
 #include <sys/acct.h>
 #include <sys/ktrace.h>
 #include <sys/sched.h>
+#include <sys/sysctl.h>
 #include <dev/rndvar.h>
 #include <sys/pool.h>
 #include <sys/mman.h>
 #include <sys/ptrace.h>
+#include <sys/atomic.h>
 
 #include <sys/syscallargs.h>
 
 #include "systrace.h"
 #include <dev/systrace.h>
 
-#include <uvm/uvm_extern.h>
-#include <uvm/uvm_map.h>
+#include <uvm/uvm.h>
 
 #ifdef __HAVE_MD_TCB
 # include <machine/tcb.h>
@@ -78,7 +80,7 @@ void fork_return(void *);
 void tfork_child_return(void *);
 int pidtaken(pid_t);
 
-void process_new(struct proc *, struct process *);
+void process_new(struct proc *, struct process *, int);
 
 void
 fork_return(void *arg)
@@ -152,7 +154,7 @@ tfork_child_return(void *arg)
  * Allocate and initialize a new process.
  */
 void
-process_new(struct proc *p, struct process *parent)
+process_new(struct proc *p, struct process *parent, int flags)
 {
 	struct process *pr;
 
@@ -176,9 +178,9 @@ process_new(struct proc *p, struct process *parent)
 	    (caddr_t)&pr->ps_endcopy - (caddr_t)&pr->ps_startcopy);
 
 	/* post-copy fixups */
-	pr->ps_cred = pool_get(&pcred_pool, PR_WAITOK);
-	memcpy(pr->ps_cred, parent->ps_cred, sizeof(*pr->ps_cred));
-	crhold(parent->ps_cred->pc_ucred);
+	pr->ps_ucred = p->p_ucred;
+	crhold(pr->ps_ucred);
+	KASSERT(p->p_ucred->cr_ref >= 3); /* fork thr, new thr, new process */
 	pr->ps_limit->p_refcnt++;
 
 	/* bump references to the text vnode (for procfs) */
@@ -189,11 +191,42 @@ process_new(struct proc *p, struct process *parent)
 	timeout_set(&pr->ps_realit_to, realitexpire, pr);
 
 	pr->ps_flags = parent->ps_flags & (PS_SUGID | PS_SUGIDEXEC);
-	if (parent->ps_session->s_ttyvp != NULL &&
-	    parent->ps_flags & PS_CONTROLT)
-		atomic_setbits_int(&pr->ps_flags, PS_CONTROLT);
+	if (parent->ps_session->s_ttyvp != NULL)
+		pr->ps_flags |= parent->ps_flags & PS_CONTROLT;
 
 	p->p_p = pr;
+
+	/*
+	 * Duplicate sub-structures as needed.
+	 * Increase reference counts on shared objects.
+	 */
+	if (flags & FORK_SHAREFILES)
+		pr->ps_fd = fdshare(parent);
+	else
+		pr->ps_fd = fdcopy(parent);
+	if (flags & FORK_SIGHAND)
+		pr->ps_sigacts = sigactsshare(parent);
+	else
+		pr->ps_sigacts = sigactsinit(parent);
+	if (flags & FORK_SHAREVM)
+		pr->ps_vmspace = uvmspace_share(parent);
+	else
+		pr->ps_vmspace = uvmspace_fork(parent);
+
+	if (parent->ps_flags & PS_PROFIL)
+		startprofclock(pr);
+	if (flags & FORK_PTRACE)
+		pr->ps_flags |= parent->ps_flags & PS_TRACED;
+	if (flags & FORK_NOZOMBIE)
+		pr->ps_flags |= PS_NOZOMBIE;
+	if (flags & FORK_SYSTEM)
+		pr->ps_flags |= PS_SYSTEM;
+
+	/* mark as embryo to protect against others */
+	pr->ps_flags |= PS_EMBRYO;
+
+	/* Force visibility of all of the above changes */
+	membar_producer();
 
 	/* it's sufficiently inited to be globally visible */
 	LIST_INSERT_HEAD(&allprocess, pr, ps_list);
@@ -222,7 +255,9 @@ fork1(struct proc *curp, int flags, void *stack, pid_t *tidptr,
 
 	/* sanity check some flag combinations */
 	if (flags & FORK_THREAD) {
-		if ((flags & FORK_SIGHAND) == 0)
+		if ((flags & FORK_SHAREFILES) == 0 ||
+		    (flags & FORK_SIGHAND) == 0 ||
+		    (flags & FORK_SYSTEM) != 0)
 			return (EINVAL);
 	}
 	if (flags & FORK_SIGHAND && (flags & FORK_SHAREVM) == 0)
@@ -237,7 +272,7 @@ fork1(struct proc *curp, int flags, void *stack, pid_t *tidptr,
 	 * the variable nthreads is the current number of procs, maxthread is
 	 * the limit.
 	 */
-	uid = curp->p_cred->p_ruid;
+	uid = curp->p_ucred->cr_ruid;
 	if ((nthreads >= maxthread - 5 && uid != 0) || nthreads >= maxthread) {
 		static struct timeval lasttfm;
 
@@ -273,10 +308,7 @@ fork1(struct proc *curp, int flags, void *stack, pid_t *tidptr,
 		}
 	}
 
-	uaddr = uvm_km_kmemalloc_pla(kernel_map, uvm.kernel_object, USPACE,
-	    USPACE_ALIGN, UVM_KMF_ZERO,
-	    no_constraint.ucr_low, no_constraint.ucr_high,
-	    0, 0, USPACE/PAGE_SIZE);
+	uaddr = uvm_uarea_alloc();
 	if (uaddr == 0) {
 		if ((flags & FORK_THREAD) == 0) {
 			(void)chgproccnt(uid, -1);
@@ -295,16 +327,6 @@ fork1(struct proc *curp, int flags, void *stack, pid_t *tidptr,
 
 	p->p_stat = SIDL;			/* protect against others */
 	p->p_flag = 0;
-	p->p_xstat = 0;
-
-	if (flags & FORK_THREAD) {
-		atomic_setbits_int(&p->p_flag, P_THREAD);
-		p->p_p = pr = curpr;
-		pr->ps_refcnt++;
-	} else {
-		process_new(p, curpr);
-		pr = p->p_p;
-	}
 
 	/*
 	 * Make a proc table entry for the new process.
@@ -315,29 +337,25 @@ fork1(struct proc *curp, int flags, void *stack, pid_t *tidptr,
 	    (caddr_t)&p->p_endzero - (caddr_t)&p->p_startzero);
 	memcpy(&p->p_startcopy, &curp->p_startcopy,
 	    (caddr_t)&p->p_endcopy - (caddr_t)&p->p_startcopy);
+	crhold(p->p_ucred);
 
 	/*
 	 * Initialize the timeouts.
 	 */
 	timeout_set(&p->p_sleep_to, endtsleep, p);
 
-	/*
-	 * Duplicate sub-structures as needed.
-	 * Increase reference counts on shared objects.
-	 */
-	if ((flags & FORK_THREAD) == 0) {
-		if (curpr->ps_flags & PS_PROFIL)
-			startprofclock(pr);
-		if ((flags & FORK_PTRACE) && (curpr->ps_flags & PS_TRACED))
-			atomic_setbits_int(&pr->ps_flags, PS_TRACED);
-		if (flags & FORK_NOZOMBIE)
-			atomic_setbits_int(&pr->ps_flags, PS_NOZOMBIE);
+	if (flags & FORK_THREAD) {
+		atomic_setbits_int(&p->p_flag, P_THREAD);
+		p->p_p = pr = curpr;
+		pr->ps_refcnt++;
+	} else {
+		process_new(p, curpr, flags);
+		pr = p->p_p;
 	}
-
-	if (flags & FORK_SHAREFILES)
-		p->p_fd = fdshare(curp);
-	else
-		p->p_fd = fdcopy(curp);
+	p->p_fd		= pr->ps_fd;
+	p->p_vmspace	= pr->ps_vmspace;
+	if (pr->ps_flags & PS_SYSTEM)
+		atomic_setbits_int(&p->p_flag, P_SYSTEM);
 
 	if (flags & FORK_PPWAIT) {
 		atomic_setbits_int(&pr->ps_flags, PS_PPWAIT);
@@ -361,32 +379,28 @@ fork1(struct proc *curp, int flags, void *stack, pid_t *tidptr,
 	 */
 	scheduler_fork_hook(curp, p);
 
-	/*
-	 * Create signal actions for the child process.
-	 */
-	if (flags & FORK_SIGHAND)
-		p->p_sigacts = sigactsshare(curp);
-	else
-		p->p_sigacts = sigactsinit(curp);
 	if (flags & FORK_THREAD)
 		sigstkinit(&p->p_sigstk);
 
 	/*
-	 * If emulation has process fork hook, call it now.
+	 * If emulation has thread fork hook, call it now.
 	 */
-	if (p->p_emul->e_proc_fork)
-		(*p->p_emul->e_proc_fork)(p, curp);
+	if (pr->ps_emul->e_proc_fork)
+		(*pr->ps_emul->e_proc_fork)(p, curp);
 
 	p->p_addr = (struct user *)uaddr;
 
 	/*
-	 * Finish creating the child process.  It will return through a
-	 * different path later.
+	 * Finish creating the child thread.  cpu_fork() will copy
+	 * and update the pcb and make the child ready to run.  If
+	 * this is a normal user fork, the child will exit directly
+	 * to user mode via child_return() on its first time slice
+	 * and will not return here.  If this is a kernel thread,
+	 * the specified entry point will be executed.
 	 */
-	uvm_fork(curp, p, ((flags & FORK_SHAREVM) ? TRUE : FALSE), stack,
-	    0, func ? func : child_return, arg ? arg : p);
+	cpu_fork(curp, p, stack, 0, func ? func : child_return, arg ? arg : p);
 
-	vm = p->p_vmspace;
+	vm = pr->ps_vmspace;
 
 	if (flags & FORK_FORK) {
 		forkstat.cntfork++;
@@ -458,11 +472,12 @@ fork1(struct proc *curp, int flags, void *stack, pid_t *tidptr,
 	}
 
 	/*
-	 * For new processes, set accounting bits
+	 * For new processes, set accounting bits and mark as complete.
 	 */
 	if ((flags & FORK_THREAD) == 0) {
 		getnanotime(&pr->ps_start);
 		pr->ps_acflag = AFORK;
+		atomic_clearbits_int(&pr->ps_flags, PS_EMBRYO);
 	}
 
 	/*
@@ -478,7 +493,7 @@ fork1(struct proc *curp, int flags, void *stack, pid_t *tidptr,
 		p->p_cpu = arg;
 
 	if (newptstat)
-		free(newptstat, M_SUBPROC);
+		free(newptstat, M_SUBPROC, 0);
 
 	/*
 	 * Notify any interested parties about the new process.
@@ -599,7 +614,7 @@ proc_trampoline_mp(void)
 	__mp_unlock(&sched_lock);
 	spl0();
 	SCHED_ASSERT_UNLOCKED();
-	KASSERT(__mp_lock_held(&kernel_lock) == 0);
+	KERNEL_ASSERT_UNLOCKED();
 
 	KERNEL_LOCK();
 }

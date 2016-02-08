@@ -1,6 +1,6 @@
 #! /usr/bin/perl
 # ex:ts=8 sw=4:
-# $OpenBSD: PkgCreate.pm,v 1.101 2014/02/02 15:35:52 espie Exp $
+# $OpenBSD: PkgCreate.pm,v 1.108 2014/07/10 10:33:10 espie Exp $
 #
 # Copyright (c) 2003-2014 Marc Espie <espie@openbsd.org>
 #
@@ -210,7 +210,7 @@ sub compute_checksum
 	if (defined $base) {
 		$fname = $base.$fname;
 	}
-	for my $field (qw(symlink link size)) {  # md5
+	for my $field (qw(symlink link size ts)) {  # md5
 		if (defined $result->{$field}) {
 			$state->error("User tried to define @#1 for #2",
 			    $field, $fname);
@@ -303,14 +303,22 @@ sub find_every_library
 {
 }
 
+package OpenBSD::PackingElement::Meta;
+sub record_digest
+{
+	my ($self, $original, $entries, $new, $tail) = @_;
+	push(@$new, $self);
+}
+
 package OpenBSD::PackingElement::RcScript;
-sub archive
+sub set_destdir
 {
 	my ($self, $state) = @_;
 	if ($self->name =~ m/^\//) {
 		$state->{archive}->destdir($state->{base});
+	} else {
+		$self->SUPER::set_destdir($state);
 	}
-	$self->SUPER::archive($state);
 }
 
 package OpenBSD::PackingElement::SpecialFile;
@@ -322,6 +330,10 @@ sub archive
 sub pretend_to_archive
 {
 	&OpenBSD::PackingElement::FileBase::pretend_to_archive;
+}
+
+sub set_destdir
+{
 }
 
 sub may_add
@@ -387,13 +399,11 @@ package OpenBSD::PackingElement::Cwd;
 sub archive
 {
 	my ($self, $state) = @_;
-	$state->{archive}->destdir($state->{base}."/".$self->name);
 }
 
 sub pretend_to_archive
 {
 	my ($self, $state) = @_;
-	$state->{archive}->destdir($state->{base}."/".$self->name);
 	$self->comment_create_package;
 }
 
@@ -407,15 +417,28 @@ package OpenBSD::PackingElement::FileBase;
 
 sub record_digest
 {
-	my ($self, $list) = @_;
+	my ($self, $original, $entries, $new, $tail) = @_;
 	if (defined $self->{d}) {
-		push(@$list, $self->{d}->stringize);
+		my $k = $self->{d}->stringize;
+		push(@{$entries->{$k}}, $self);
+		push(@$original, $k);
+	} else {
+		push(@$tail, $self);
 	}
 }
+
+sub set_destdir
+{
+	my ($self, $state) = @_;
+
+	$state->{archive}->destdir($state->{base}."/".$self->cwd);
+}
+
 sub archive
 {
 	my ($self, $state) = @_;
 
+	$self->set_destdir($state);
 	my $o = $self->prepare_for_archival($state);
 
 	$o->write unless $state->{bad};
@@ -425,6 +448,7 @@ sub pretend_to_archive
 {
 	my ($self, $state) = @_;
 
+	$self->set_destdir($state);
 	$self->prepare_for_archival($state);
 	$self->comment_create_package;
 }
@@ -790,49 +814,32 @@ sub really_solve_dependency
 	return $v;
 }
 
-my $cache = {};
-sub solve_from_ports
+sub diskcachename
 {
-	my ($self, $state, $dep, $package) = @_;
+	my ($self, $dep) = @_;
 
-	my $portsdir = $state->defines('PORTSDIR');
-	return undef unless defined $portsdir;
-	my $pkgname;
-	if (defined $cache->{$dep->{pkgpath}}) {
-		$pkgname = $cache->{$dep->{pkgpath}};
+	if ($ENV{_DEPENDS_CACHE}) {
+		my $diskcache = $dep->{pkgpath};
+		$diskcache =~ s/\//--/g;
+		return $ENV{_DEPENDS_CACHE}."/pkgcreate-".$diskcache;
 	} else {
-		my ($plist, $diskcache);
-		if ($ENV{_DEPENDS_CACHE}) {
-			$diskcache = $dep->{pkgpath};
-			$diskcache =~ s/\//--/g;
-			$diskcache = $ENV{_DEPENDS_CACHE}."/pkgcreate-".
-			    $diskcache;
-		}
-		if (defined $diskcache && -f $diskcache) {
-			$plist = OpenBSD::PackingList->fromfile($diskcache);
-		} else {
-			$plist = $self->ask_tree($state, $dep, $portsdir,
-			    'print-plist-libs-with-depends',
-			    'wantlib_args=no-wantlib-args');
-			if ($? != 0 || !defined $plist->pkgname) {
-				$state->error("Can't obtain dependency #1 from ports tree",
-				    $dep->{pattern});
-				return undef;
-			}
-			$plist->tofile($diskcache) if defined $diskcache;
-		}
-		OpenBSD::SharedLibs::add_libs_from_plist($plist, $state);
-		$self->add_dep($plist);
-		$pkgname = $plist->pkgname;
-		$cache->{$dep->{pkgpath}} = $pkgname;
-	}
-	if ($dep->spec->filter($pkgname) == 0) {
-		$state->error("Dependency #1 doesn't match FULLPKGNAME: #2",
-		    $dep->{pattern}, $pkgname);
 		return undef;
 	}
+}
 
-	return $pkgname;
+sub to_cache
+{
+	my ($self, $plist, $final) = @_;
+	# try to cache atomically. 
+	# no error if it doesn't work
+	require OpenBSD::MkTemp;
+	my ($fh, $tmp) = OpenBSD::MkTemp::mkstemp(
+	    "$ENV{_DEPENDS_CACHE}/my.XXXXXXXXXXX") or return;
+	chmod 0644, $fh;
+	$plist->write($fh);
+	close($fh);
+	rename($tmp, $final);
+	unlink($tmp);
 }
 
 sub ask_tree
@@ -858,6 +865,61 @@ sub ask_tree
 	    \&OpenBSD::PackingList::PrelinkStuffOnly);
 	close($fh);
 	return $plist;
+}
+
+sub really_solve_from_ports
+{
+	my ($self, $state, $dep, $portsdir) = @_;
+
+	my $diskcache = $self->diskcachename($dep);
+	my $plist;
+
+	if (defined $diskcache && -f $diskcache) {
+		$plist = OpenBSD::PackingList->fromfile($diskcache);
+	} else {
+		$plist = $self->ask_tree($state, $dep, $portsdir,
+		    'print-plist-libs-with-depends',
+		    'wantlib_args=no-wantlib-args');
+		if ($? != 0 || !defined $plist->pkgname) {
+			return undef;
+		}
+		if (defined $diskcache) {
+			$self->to_cache($plist, $diskcache);
+		}
+	}
+	OpenBSD::SharedLibs::add_libs_from_plist($plist, $state);
+	$self->add_dep($plist);
+	return $plist->pkgname;
+}
+
+my $cache = {};
+
+sub solve_from_ports
+{
+	my ($self, $state, $dep, $package) = @_;
+
+	my $portsdir = $state->defines('PORTSDIR');
+	return undef unless defined $portsdir;
+	my $pkgname;
+	if (defined $cache->{$dep->{pkgpath}}) {
+		$pkgname = $cache->{$dep->{pkgpath}};
+	} else {
+		$pkgname = $self->really_solve_from_ports($state, $dep, 
+		    $portsdir);
+		$cache->{$dep->{pkgpath}} = $pkgname;
+	}
+	if (!defined $pkgname) {
+		$state->error("Can't obtain dependency #1 from ports tree",
+		    $dep->{pattern});
+		return undef;
+	}
+	if ($dep->spec->filter($pkgname) == 0) {
+		$state->error("Dependency #1 doesn't match FULLPKGNAME: #2",
+		    $dep->{pattern}, $pkgname);
+		return undef;
+	}
+
+	return $pkgname;
 }
 
 # we don't want old libs
@@ -941,7 +1003,7 @@ our @ISA = qw(OpenBSD::AddCreateDelete);
 
 sub handle_fragment
 {
-	my ($self, $state, $old, $not, $frag, $_, $cont) = @_;
+	my ($self, $state, $old, $not, $frag, undef, $cont) = @_;
 	my $def = $frag;
 	if ($frag eq 'SHARED') {
 		$def = 'SHARED_LIBS';
@@ -979,19 +1041,19 @@ sub read_fragments
 	    sub {
 		my ($stack, $cont) = @_;
 		while(my $file = pop @$stack) {
-			while (my $_ = $file->readline) {
+			while (my $l = $file->readline) {
 				$state->progress->working(2048) unless $state->opt('q');
-				if (m/^(\@comment\s+\$(?:Open)BSD\$)$/o) {
-					$_ = '@comment $'.'OpenBSD: '.basename($file->name).',v$';
+				if ($l =~m/^(\@comment\s+\$(?:Open)BSD\$)$/o) {
+					$l = '@comment $'.'OpenBSD: '.basename($file->name).',v$';
 				}
-				if (m/^(\!)?\%\%(.*)\%\%$/) {
-					if (my $f2 = $self->handle_fragment($state, $file, $1, $2, $_, $cont)) {
+				if ($l =~ m/^(\!)?\%\%(.*)\%\%$/) {
+					if (my $f2 = $self->handle_fragment($state, $file, $1, $2, $l, $cont)) {
 						push(@$stack, $file);
 						$file = $f2;
 					}
 					next;
 				}
-				my $s = $subst->do($_);
+				my $s = $subst->do($l);
 				if ($fast) {
 					next unless $s =~ m/^\@(?:cwd|lib|depend|wantlib)\b/o || $s =~ m/lib.*\.a$/o;
 				}
@@ -999,7 +1061,7 @@ sub read_fragments
 				my $o = &$cont($s);
 				if (defined $o) {
 					$o->check_version($state, $s);
-					$self->annotate($o, $_, $file);
+					$self->annotate($o, $l, $file);
 				}
 			}
 		}
@@ -1186,7 +1248,7 @@ sub read_existing_plist
 
 sub create_package
 {
-	my ($self, $state, $plist, $wname) = @_;
+	my ($self, $state, $plist, $ordered, $wname) = @_;
 
 	$state->say("Creating gzip'd tar ball in '#1'", $wname)
 	    if $state->opt('v');
@@ -1204,7 +1266,11 @@ sub create_package
 	local $SIG{'TERM'} = $h;
 	$state->{archive} = $state->create_archive($wname, $plist->infodir);
 	$state->set_status("archiving");
-	$state->progress->visit_with_size($plist, 'create_package', $state);
+	my $p = $state->progress->new_sizer($plist, $state);
+	for my $e (@$ordered) {
+		$e->create_package($state);
+		$p->advance($e);
+	}
 	$state->end_status;
 	$state->{archive}->close;
 	if ($state->{bad}) {
@@ -1245,17 +1311,7 @@ sub finish_manpages
 	my ($self, $state, $plist) = @_;
 	$plist->grab_manpages($state);
 	if (defined $state->{manpages}) {
-		$state->{v} ++;
-
-		require OpenBSD::Makewhatis;
-
-		try {
-			OpenBSD::Makewhatis::scan_manpages($state->{manpages},
-			    $state);
-		} catchall {
-			$state->errsay("Error in makewhatis: #1", $_);
-		};
-		$state->{v} --;
+		$state->run_makewhatis(['-t'], $state->{manpages});
 	}
 
 	if (defined $state->{mandir}) {
@@ -1290,50 +1346,63 @@ sub save_history
 {
 	my ($self, $plist, $dir) = @_;
 
-	unless (-d $dir) {
-		require File::Path;
-
-		File::Path::make_path($dir);
-	}
-
-	my $name = $plist->fullpkgpath;
-	$name =~ s,/,.,g;
-	my $fname = "$dir/$name";
-
 	# grab the old stuff:
 	# - order
 	# - and presence
-	my @old;
 	my (%known, %found);
-	if (open(my $f, '<', $fname)) {
-		while (<$f>) {
-			chomp;
-			push(@old, $_);
-			$known{$_} = 1;
+	my $fname;
+	if (defined $dir) {
+		unless (-d $dir) {
+			require File::Path;
+
+			File::Path::make_path($dir);
 		}
-		close($f);
+
+		my $name = $plist->fullpkgpath;
+		$name =~ s,/,.,g;
+		my $fname = "$dir/$name";
+		my $n = 0;
+
+		if (open(my $f, '<', $fname)) {
+			while (<$f>) {
+				chomp;
+				$known{$_} //= $n++;
+			}
+			close($f);
+		}
 	}
 	my @new;
-	$plist->record_digest(\@new);
-	open(my $f, ">", "$fname.new") or return;
+	my $entries = {};
+	my $list = [];
+	my $tail = [];
+	$plist->record_digest(\@new, $entries, $list, $tail);
+
+	my $f;
+	if (defined $fname) {
+		open($f, ">", "$fname.new");
+	}
 	
 	# split list
 	# - first, unknown stuff
-	for my $i (@new) {
-		if ($known{$i}) {
-			$found{$i} = 1;
+	for my $h (@new) {
+		if ($known{$h} && $entries->{$h}[0]->{name} !~ /\.py$/) {
+			$found{$h} = $known{$h};
 		} else {
-			print $f "$i\n";
+			print $f "$h\n" if defined $f;
+			push(@$list, (shift @{$entries->{$h}}));
 		}
 	}
 	# - then known stuff, preserve the order
-	for my $i (@old) {
-		if ($found{$i}) {
-			print $f "$i\n";
-		}
+	for my $h (sort  {$found{$a} <=> $found{$b}} keys %found) {
+		print $f "$h\n" if defined $f;
+		push(@$list, @{$entries->{$h}});
 	}
-	close($f);
-	rename("$fname.new", $fname);
+	if (defined $f) {
+		close($f);
+		rename("$fname.new", $fname);
+	}
+	push(@$list, @$tail);
+	return $list;
 }
 
 sub parse_and_run
@@ -1378,6 +1447,7 @@ sub parse_and_run
 
 	$plist->discover_directories($state);
 	$self->tweak_libraries($state, $plist);
+	my $ordered;
 	unless (defined $state->opt('q') && defined $state->opt('n')) {
 		$state->set_status("checking dependencies");
 		$self->check_dependencies($plist, $state);
@@ -1387,10 +1457,8 @@ sub parse_and_run
 		} else {
 			$plist = $self->make_plist_with_sum($state, $plist);
 		}
-		if ($state->defines('HISTORY_DIR')) {
-			$self->save_history($plist, 
-			    $state->defines('HISTORY_DIR'));
-		}
+		$ordered = $self->save_history($plist, 
+		    $state->defines('HISTORY_DIR'));
 		$self->show_bad_symlinks($state);
 		$state->end_status;
 	}
@@ -1441,7 +1509,7 @@ sub parse_and_run
 		    $plist->infodir);
 		$plist->pretend_to_archive($state);
 	} else {
-		$self->create_package($state, $plist, $wname);
+		$self->create_package($state, $plist, $ordered, $wname);
 	}
 	$self->finish_manpages($state, $plist);
 	}catch {

@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_ix.c,v 1.93 2013/12/09 19:48:04 mikeb Exp $	*/
+/*	$OpenBSD: if_ix.c,v 1.96 2014/07/13 23:10:23 deraadt Exp $	*/
 
 /******************************************************************************
 
@@ -302,7 +302,7 @@ err_late:
 	ixgbe_free_receive_structures(sc);
 err_out:
 	ixgbe_free_pci_resources(sc);
-	free(sc->mta, M_DEVBUF);
+	free(sc->mta, M_DEVBUF, 0);
 }
 
 /*********************************************************************
@@ -340,7 +340,7 @@ ixgbe_detach(struct device *self, int flags)
 
 	ixgbe_free_transmit_structures(sc);
 	ixgbe_free_receive_structures(sc);
-	free(sc->mta, M_DEVBUF);
+	free(sc->mta, M_DEVBUF, 0);
 
 	return (0);
 }
@@ -1535,8 +1535,6 @@ ixgbe_setup_interface(struct ix_softc *sc)
 	IFQ_SET_MAXLEN(&ifp->if_snd, sc->num_tx_desc - 1);
 	IFQ_SET_READY(&ifp->if_snd);
 
-	m_clsetwms(ifp, MCLBYTES, 4, sc->num_rx_desc);
-
 	ifp->if_capabilities = IFCAP_VLAN_MTU;
 
 #if NVLAN > 0
@@ -1705,25 +1703,22 @@ ixgbe_allocate_queues(struct ix_softc *sc)
 	int txconf = 0, rxconf = 0, i;
 
 	/* First allocate the top level queue structs */
-	if (!(sc->queues =
-	    (struct ix_queue *) malloc(sizeof(struct ix_queue) *
-	    sc->num_queues, M_DEVBUF, M_NOWAIT | M_ZERO))) {
+	if (!(sc->queues = mallocarray(sc->num_queues,
+	    sizeof(struct ix_queue), M_DEVBUF, M_NOWAIT | M_ZERO))) {
 		printf("%s: Unable to allocate queue memory\n", ifp->if_xname);
 		goto fail;
 	}
 
 	/* Then allocate the TX ring struct memory */
-	if (!(sc->tx_rings =
-	    (struct tx_ring *) malloc(sizeof(struct tx_ring) *
-	    sc->num_queues, M_DEVBUF, M_NOWAIT | M_ZERO))) {
+	if (!(sc->tx_rings = mallocarray(sc->num_queues,
+	    sizeof(struct tx_ring), M_DEVBUF, M_NOWAIT | M_ZERO))) {
 		printf("%s: Unable to allocate TX ring memory\n", ifp->if_xname);
 		goto fail;
 	}
 
 	/* Next allocate the RX */
-	if (!(sc->rx_rings =
-	    (struct rx_ring *) malloc(sizeof(struct rx_ring) *
-	    sc->num_queues, M_DEVBUF, M_NOWAIT | M_ZERO))) {
+	if (!(sc->rx_rings = mallocarray(sc->num_queues,
+	    sizeof(struct rx_ring), M_DEVBUF, M_NOWAIT | M_ZERO))) {
 		printf("%s: Unable to allocate RX ring memory\n", ifp->if_xname);
 		goto rx_fail;
 	}
@@ -1792,10 +1787,10 @@ err_rx_desc:
 err_tx_desc:
 	for (txr = sc->tx_rings; txconf > 0; txr++, txconf--)
 		ixgbe_dma_free(sc, &txr->txdma);
-	free(sc->rx_rings, M_DEVBUF);
+	free(sc->rx_rings, M_DEVBUF, 0);
 	sc->rx_rings = NULL;
 rx_fail:
-	free(sc->tx_rings, M_DEVBUF);
+	free(sc->tx_rings, M_DEVBUF, 0);
 	sc->tx_rings = NULL;
 fail:
 	return (ENOMEM);
@@ -1816,9 +1811,8 @@ ixgbe_allocate_transmit_buffers(struct tx_ring *txr)
 	struct ixgbe_tx_buf	*txbuf;
 	int			 error, i;
 
-	if (!(txr->tx_buffers =
-	    (struct ixgbe_tx_buf *) malloc(sizeof(struct ixgbe_tx_buf) *
-	    sc->num_tx_desc, M_DEVBUF, M_NOWAIT | M_ZERO))) {
+	if (!(txr->tx_buffers = mallocarray(sc->num_tx_desc,
+	    sizeof(struct ixgbe_tx_buf), M_DEVBUF, M_NOWAIT | M_ZERO))) {
 		printf("%s: Unable to allocate tx_buffer memory\n",
 		    ifp->if_xname);
 		error = ENOMEM;
@@ -2030,7 +2024,7 @@ ixgbe_free_transmit_buffers(struct tx_ring *txr)
 	}
 
 	if (txr->tx_buffers != NULL)
-		free(txr->tx_buffers, M_DEVBUF);
+		free(txr->tx_buffers, M_DEVBUF, 0);
 	txr->tx_buffers = NULL;
 	txr->txtag = NULL;
 }
@@ -2441,7 +2435,7 @@ ixgbe_get_buf(struct rx_ring *rxr, int i)
 	}
 
 	/* needed in any case so prealocate since this one will fail for sure */
-	mp = MCLGETI(NULL, M_DONTWAIT, &sc->arpcom.ac_if, sc->rx_mbuf_sz);
+	mp = MCLGETI(NULL, M_DONTWAIT, NULL, sc->rx_mbuf_sz);
 	if (!mp)
 		return (ENOBUFS);
 
@@ -2467,8 +2461,6 @@ ixgbe_get_buf(struct rx_ring *rxr, int i)
 
 	bus_dmamap_sync(rxr->rxdma.dma_tag, rxr->rxdma.dma_map,
 	    dsize * i, dsize, BUS_DMASYNC_PREWRITE);
-
-	rxr->rx_ndescs++;
 
 	return (0);
 }
@@ -2527,6 +2519,7 @@ int
 ixgbe_setup_receive_ring(struct rx_ring *rxr)
 {
 	struct ix_softc		*sc = rxr->sc;
+	struct ifnet		*ifp = &sc->arpcom.ac_if;
 	int			 rsize, error;
 
 	rsize = roundup2(sc->num_rx_desc *
@@ -2540,10 +2533,12 @@ ixgbe_setup_receive_ring(struct rx_ring *rxr)
 	/* Setup our descriptor indices */
 	rxr->next_to_check = 0;
 	rxr->last_desc_filled = sc->num_rx_desc - 1;
-	rxr->rx_ndescs = 0;
+
+	if_rxr_init(&rxr->rx_ring, 2 * ((ifp->if_hardmtu / MCLBYTES) + 1),
+	    sc->num_rx_desc);
 
 	ixgbe_rxfill(rxr);
-	if (rxr->rx_ndescs < 1) {
+	if (if_rxr_inuse(&rxr->rx_ring) == 0) {
 		printf("%s: unable to fill any rx descriptors\n",
 		    sc->dev.dv_xname);
 		return (ENOBUFS);
@@ -2557,19 +2552,23 @@ ixgbe_rxfill(struct rx_ring *rxr)
 {
 	struct ix_softc *sc = rxr->sc;
 	int		 post = 0;
+	u_int		 slots;
 	int		 i;
 
 	i = rxr->last_desc_filled;
-	while (rxr->rx_ndescs < sc->num_rx_desc) {
+	for (slots = if_rxr_get(&rxr->rx_ring, sc->num_rx_desc);
+	    slots > 0; slots--) {
 		if (++i == sc->num_rx_desc)
 			i = 0;
 
 		if (ixgbe_get_buf(rxr, i) != 0)
 			break;
 
-		rxr->last_desc_filled = i;
 		post = 1;
 	}
+	if_rxr_put(&rxr->rx_ring, slots);
+
+	rxr->last_desc_filled = i;
 
 	return (post);
 }
@@ -2770,7 +2769,7 @@ ixgbe_free_receive_buffers(struct rx_ring *rxr)
 			bus_dmamap_destroy(rxr->rxdma.dma_tag, rxbuf->map);
 			rxbuf->map = NULL;
 		}
-		free(rxr->rx_buffers, M_DEVBUF);
+		free(rxr->rx_buffers, M_DEVBUF, 0);
 		rxr->rx_buffers = NULL;
 	}
 }
@@ -2801,7 +2800,7 @@ ixgbe_rxeof(struct ix_queue *que)
 		return FALSE;
 
 	i = rxr->next_to_check;
-	while (rxr->rx_ndescs > 0) {
+	while (if_rxr_inuse(&rxr->rx_ring) > 0) {
 		bus_dmamap_sync(rxr->rxdma.dma_tag, rxr->rxdma.dma_map,
 		    dsize * i, dsize, BUS_DMASYNC_POSTREAD);
 
@@ -2847,7 +2846,7 @@ ixgbe_rxeof(struct ix_queue *que)
 		if (mp == NULL) {
 			panic("%s: ixgbe_rxeof: NULL mbuf in slot %d "
 			    "(nrx %d, filled %d)", sc->dev.dv_xname,
-			    i, rxr->rx_ndescs,
+			    i, if_rxr_inuse(&rxr->rx_ring),
 			    rxr->last_desc_filled);
 		}
 
@@ -2898,8 +2897,6 @@ ixgbe_rxeof(struct ix_queue *que)
 			sendmp = NULL;
 			mp->m_next = nxbuf->buf;
 		} else { /* Sending this frame? */
-			m_cluncount(sendmp, 1);
-
 			sendmp->m_pkthdr.rcvif = ifp;
 			ifp->if_ipackets++;
 			rxr->rx_packets++;
@@ -2918,7 +2915,7 @@ ixgbe_rxeof(struct ix_queue *que)
 			ether_input_mbuf(ifp, sendmp);
 		}
 next_desc:
-		rxr->rx_ndescs--;
+		if_rxr_put(&rxr->rx_ring, 1);
 		bus_dmamap_sync(rxr->rxdma.dma_tag, rxr->rxdma.dma_map,
 		    dsize * i, dsize,
 		    BUS_DMASYNC_PREREAD);

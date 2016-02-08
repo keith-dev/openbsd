@@ -1,4 +1,4 @@
-/*	$OpenBSD: in6_pcb.c,v 1.59 2014/01/08 22:38:29 bluhm Exp $	*/
+/*	$OpenBSD: in6_pcb.c,v 1.64 2014/07/22 11:06:10 mpi Exp $	*/
 
 /*
  * Copyright (C) 1995, 1996, 1997, and 1998 WIDE Project.
@@ -101,7 +101,6 @@
 
 #include <sys/param.h>
 #include <sys/systm.h>
-#include <sys/malloc.h>
 #include <sys/mbuf.h>
 #include <sys/domain.h>
 #include <sys/protosw.h>
@@ -114,7 +113,6 @@
 #include <net/route.h>
 
 #include <netinet/in.h>
-#include <netinet/in_systm.h>
 #include <netinet/ip.h>
 #include <netinet/in_pcb.h>
 #include <netinet/ip_var.h>
@@ -429,14 +427,11 @@ in6_pcbconnect(struct inpcb *inp, struct mbuf *nam)
 	 * with the address specified by setsockopt(IPV6_PKTINFO).
 	 * Is it the intended behavior?
 	 */
-	in6a = in6_selectsrc(sin6, inp->inp_outputopts6,
+	error = in6_selectsrc(&in6a, sin6, inp->inp_outputopts6,
 	    inp->inp_moptions6, &inp->inp_route6, &inp->inp_laddr6,
-	    &error, inp->inp_rtableid);
-	if (in6a == 0) {
-		if (error == 0)
-			error = EADDRNOTAVAIL;
+	    inp->inp_rtableid);
+	if (error)
 		return (error);
-	}
 
 	if (inp->inp_route6.ro_rt && inp->inp_route6.ro_rt->rt_flags & RTF_UP)
 		ifp = inp->inp_route6.ro_rt->rt_ifp;
@@ -448,6 +443,9 @@ in6_pcbconnect(struct inpcb *inp, struct mbuf *nam)
 	    inp->inp_lport, INPLOOKUP_IPV6, inp->inp_rtableid)) {
 		return (EADDRINUSE);
 	}
+
+	KASSERT(IN6_IS_ADDR_UNSPECIFIED(&inp->inp_laddr6) || inp->inp_lport);
+
 	if (IN6_IS_ADDR_UNSPECIFIED(&inp->inp_laddr6)) {
 		if (inp->inp_lport == 0)
 			(void)in6_pcbbind(inp, NULL, curproc);

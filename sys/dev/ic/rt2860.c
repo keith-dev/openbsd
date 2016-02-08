@@ -1,4 +1,4 @@
-/*	$OpenBSD: rt2860.c,v 1.71 2013/12/06 21:03:03 deraadt Exp $	*/
+/*	$OpenBSD: rt2860.c,v 1.74 2014/07/22 13:12:12 mpi Exp $	*/
 
 /*-
  * Copyright (c) 2007-2010 Damien Bergamini <damien.bergamini@free.fr>
@@ -49,9 +49,7 @@
 #include <net/if_types.h>
 
 #include <netinet/in.h>
-#include <netinet/in_systm.h>
 #include <netinet/if_ether.h>
-#include <netinet/ip.h>
 
 #include <net80211/ieee80211_var.h>
 #include <net80211/ieee80211_amrr.h>
@@ -399,7 +397,7 @@ rt2860_detach(void *xsc)
 	rt2860_free_tx_pool(sc);
 
 	if (sc->ucode != NULL)
-		free(sc->ucode, M_DEVBUF);
+		free(sc->ucode, M_DEVBUF, 0);
 
 	return 0;
 }
@@ -1758,7 +1756,7 @@ rt2860_start(struct ifnet *ifp)
 		/* send pending management frames first */
 		IF_DEQUEUE(&ic->ic_mgtq, m);
 		if (m != NULL) {
-			ni = (void *)m->m_pkthdr.rcvif;
+			ni = m->m_pkthdr.ph_cookie;
 			goto sendit;
 		}
 		if (ic->ic_state != IEEE80211_S_RUN)
@@ -1767,7 +1765,7 @@ rt2860_start(struct ifnet *ifp)
 		/* send buffered frames for power-save mode */
 		IF_DEQUEUE(&ic->ic_pwrsaveq, m);
 		if (m != NULL) {
-			ni = (void *)m->m_pkthdr.rcvif;
+			ni = m->m_pkthdr.ph_cookie;
 			goto sendit;
 		}
 

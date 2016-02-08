@@ -1,8 +1,7 @@
-/*	$OpenBSD: uvm_io.c,v 1.20 2012/03/09 13:01:29 ariane Exp $	*/
+/*	$OpenBSD: uvm_io.c,v 1.22 2014/07/11 16:35:40 jsg Exp $	*/
 /*	$NetBSD: uvm_io.c,v 1.12 2000/06/27 17:29:23 mrg Exp $	*/
 
 /*
- *
  * Copyright (c) 1997 Charles D. Cranor and Washington University.
  * All rights reserved.
  *
@@ -14,12 +13,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *      This product includes software developed by Charles D. Cranor and
- *      Washington University.
- * 4. The name of the author may not be used to endorse or promote products
- *    derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
@@ -72,7 +65,6 @@ uvm_io(vm_map_t map, struct uio *uio, int flags)
 	 * large chunk size.  if we have trouble finding vm space we will
 	 * reduce it.
 	 */
-
 	if (uio->uio_resid == 0)
 		return(0);
 	togo = uio->uio_resid;
@@ -97,16 +89,9 @@ uvm_io(vm_map_t map, struct uio *uio, int flags)
 	if (flags & UVM_IO_FIXPROT)
 		extractflags |= UVM_EXTRACT_FIXPROT;
 
-	/*
-	 * step 1: main loop...  while we've got data to move
-	 */
-
+	/* step 1: main loop...  while we've got data to move */
 	for (/*null*/; togo > 0 ; pageoffset = 0) {
-
-		/*
-		 * step 2: extract mappings from the map into kernel_map
-		 */
-
+		/* step 2: extract mappings from the map into kernel_map */
 		error = uvm_map_extract(map, baseva, chunksz, &kva,
 		    extractflags);
 		if (error) {
@@ -122,10 +107,7 @@ uvm_io(vm_map_t map, struct uio *uio, int flags)
 			break;
 		}
 
-		/*
-		 * step 3: move a chunk of data
-		 */
-
+		/* step 3: move a chunk of data */
 		sz = chunksz - pageoffset;
 		if (sz > togo)
 			sz = togo;
@@ -133,11 +115,7 @@ uvm_io(vm_map_t map, struct uio *uio, int flags)
 		togo -= sz;
 		baseva += chunksz;
 
-
-		/*
-		 * step 4: unmap the area of kernel memory
-		 */
-
+		/* step 4: unmap the area of kernel memory */
 		vm_map_lock(kernel_map);
 		TAILQ_INIT(&dead_entries);
 		uvm_unmap_remove(kernel_map, kva, kva+chunksz,
@@ -152,10 +130,6 @@ uvm_io(vm_map_t map, struct uio *uio, int flags)
 		if (error)
 			break;
 	}
-
-	/*
-	 * done
-	 */
 
 	return (error);
 }

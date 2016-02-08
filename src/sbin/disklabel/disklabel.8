@@ -1,4 +1,4 @@
-.\"	$OpenBSD: disklabel.8,v 1.108 2013/08/14 08:39:30 jmc Exp $
+.\"	$OpenBSD: disklabel.8,v 1.111 2014/07/16 13:46:30 deraadt Exp $
 .\"	$NetBSD: disklabel.8,v 1.9 1995/03/18 14:54:38 cgd Exp $
 .\"
 .\" Copyright (c) 1987, 1988, 1991, 1993
@@ -33,7 +33,7 @@
 .\"
 .\"	@(#)disklabel.8	8.2 (Berkeley) 4/19/94
 .\"
-.Dd $Mdocdate: August 14 2013 $
+.Dd $Mdocdate: July 16 2014 $
 .Dt DISKLABEL 8
 .Os
 .Sh NAME
@@ -61,6 +61,7 @@
 .Nm disklabel
 .Fl R
 .Op Fl nv
+.Op Fl F Ns | Ns Fl f Ar file
 .Ar disk Ar protofile
 .Pp
 .Nm disklabel
@@ -79,6 +80,7 @@
 .Fl BR
 .Op Fl nv
 .Op Fl b Ar boot1
+.Op Fl F Ns | Ns Fl f Ar file
 .Ar disk Ar protofile
 .Op Ar disktype
 .Sh DESCRIPTION
@@ -160,7 +162,7 @@ The
 flag is only valid when used in conjunction with the
 .Fl E
 or
-.Fl A
+.Fl R
 flags.
 If
 .Ar file
@@ -590,8 +592,6 @@ swap		 5% of disk.   1M \(en 2x max physical memory
 .Ed
 .Sh FILES
 .Bl -tag -width Pa -compact
-.It Pa /etc/disklabels
-Directory for backup labels.
 .It Pa /etc/disktab
 Disk description file.
 .It Pa /usr/mdec/ Ns Em xx Ns boot

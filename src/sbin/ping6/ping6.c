@@ -1,4 +1,4 @@
-/*	$OpenBSD: ping6.c,v 1.88 2014/01/10 21:57:44 florian Exp $	*/
+/*	$OpenBSD: ping6.c,v 1.99 2014/07/11 15:28:27 florian Exp $	*/
 /*	$KAME: ping6.c,v 1.163 2002/10/25 02:19:06 itojun Exp $	*/
 
 /*
@@ -144,9 +144,6 @@ struct tv32 {
 #define F_FQDN		0x1000
 #define F_INTERFACE	0x2000
 #define F_SRCADDR	0x4000
-#ifdef IPV6_REACHCONF
-#define F_REACHCONF	0x8000
-#endif
 #define F_HOSTNAME	0x10000
 #define F_FQDNOLD	0x20000
 #define F_NIGROUP	0x40000
@@ -211,9 +208,7 @@ char *scmsg = 0;
 
 volatile sig_atomic_t seenalrm;
 volatile sig_atomic_t seenint;
-#ifdef SIGINFO
 volatile sig_atomic_t seeninfo;
-#endif
 
 int	 main(int, char *[]);
 void	 fill(char *, char *);
@@ -250,20 +245,15 @@ main(int argc, char *argv[])
 {
 	struct itimerval itimer;
 	struct sockaddr_in6 from;
-	int timeout;
 	struct addrinfo hints;
-	struct pollfd fdmaskp[1];
-	int cc, i;
-	int ch, hold, packlen, preload, optval, ret_ga;
+	int ch, i, packlen, preload, optval, ret_ga;
 	u_char *datap, *packet;
 	char *e, *target, *ifname = NULL, *gateway = NULL;
 	const char *errstr;
 	int ip6optlen = 0;
 	struct cmsghdr *scmsgp = NULL;
-#if defined(SO_SNDBUF) && defined(SO_RCVBUF)
 	u_long lsockbufsize;
 	int sockbufsize = 0;
-#endif
 	int usepktinfo = 0;
 	struct in6_pktinfo *pktinfo = NULL;
 	struct ip6_rthdr *rthdr = NULL;
@@ -288,7 +278,7 @@ main(int argc, char *argv[])
 	preload = 0;
 	datap = &outpack[ICMP6ECHOLEN + ICMP6ECHOTMLEN];
 	while ((ch = getopt(argc, argv,
-	    "a:b:c:dEefHg:h:I:i:l:mnNp:qRS:s:tvV:wW")) != -1) {
+	    "a:b:c:dEefHg:h:I:i:l:mnNp:qS:s:tvV:wW")) != -1) {
 		switch (ch) {
 		case 'a':
 		{
@@ -318,14 +308,8 @@ main(int argc, char *argv[])
 					naflags |= NI_NODEADDR_FLAG_GLOBAL;
 					break;
 				case 'A': /* experimental. not in the spec */
-#ifdef NI_NODEADDR_FLAG_ANYCAST
 					naflags |= NI_NODEADDR_FLAG_ANYCAST;
 					break;
-#else
-					errx(1,
-"-a A is not supported on the platform");
-					/*NOTREACHED*/
-#endif
 				default:
 					usage();
 					/*NOTREACHED*/
@@ -334,7 +318,6 @@ main(int argc, char *argv[])
 			break;
 		}
 		case 'b':
-#if defined(SO_SNDBUF) && defined(SO_RCVBUF)
 			errno = 0;
 			e = NULL;
 			lsockbufsize = strtoul(optarg, &e, 10);
@@ -342,10 +325,6 @@ main(int argc, char *argv[])
 			if (errno || !*optarg || *e ||
 			    sockbufsize != lsockbufsize)
 				errx(1, "invalid socket buffer size");
-#else
-			errx(1,
-"-b option ignored: SO_SNDBUF/SO_RCVBUF socket options not supported");
-#endif
 			break;
 		case 'c':
 			npackets = (unsigned long)strtonum(optarg, 0,
@@ -436,13 +415,6 @@ main(int argc, char *argv[])
 		case 'q':
 			options |= F_QUIET;
 			break;
-		case 'R':
-#ifdef IPV6_REACHCONF
-			options |= F_REACHCONF;
-			break;
-#else
-			errx(1, "-R is not supported in this configuration");
-#endif
 		case 'S':
 			memset(&hints, 0, sizeof(struct addrinfo));
 			hints.ai_flags = AI_NUMERICHOST; /* allow hostname? */
@@ -634,11 +606,11 @@ main(int argc, char *argv[])
 	for (i = 0; i < sizeof(nonce); i += sizeof(u_int32_t))
 		*((u_int32_t *)&nonce[i]) = arc4random();
 
-	hold = 1;
+	optval = 1;
 
 	if (options & F_SO_DEBUG)
-		(void)setsockopt(s, SOL_SOCKET, SO_DEBUG, &hold,
-		    (socklen_t)sizeof(hold));
+		(void)setsockopt(s, SOL_SOCKET, SO_DEBUG, &optval,
+		    (socklen_t)sizeof(optval));
 	optval = IPV6_DEFHLIM;
 	if (IN6_IS_ADDR_MULTICAST(&dst.sin6_addr))
 		if (setsockopt(s, IPPROTO_IPV6, IPV6_MULTICAST_HOPS,
@@ -658,7 +630,6 @@ main(int argc, char *argv[])
 	}
 
 
-#ifdef ICMP6_FILTER
     {
 	struct icmp6_filter filt;
 	if (!(options & F_VERBOSE)) {
@@ -675,7 +646,6 @@ main(int argc, char *argv[])
 	    (socklen_t)sizeof(filt)) < 0)
 		err(1, "setsockopt(ICMP6_FILTER)");
     }
-#endif /*ICMP6_FILTER*/
 
 	/* let the kernel pass extension headers of incoming packets */
 	if ((options & F_VERBOSE) != 0) {
@@ -686,14 +656,6 @@ main(int argc, char *argv[])
 			err(1, "setsockopt(IPV6_RECVRTHDR)");
 	}
 
-/*
-	optval = 1;
-	if (IN6_IS_ADDR_MULTICAST(&dst.sin6_addr))
-		if (setsockopt(s, IPPROTO_IPV6, IPV6_MULTICAST_LOOP,
-		    &optval, sizeof(optval)) == -1)
-			err(1, "IPV6_MULTICAST_LOOP");
-*/
-
 	/* Specify the outgoing interface and/or the source address */
 	if (usepktinfo)
 		ip6optlen += CMSG_SPACE(sizeof(struct in6_pktinfo));
@@ -701,10 +663,6 @@ main(int argc, char *argv[])
 	if (hoplimit != -1)
 		ip6optlen += CMSG_SPACE(sizeof(int));
 
-#ifdef IPV6_REACHCONF
-	if (options & F_REACHCONF)
-		ip6optlen += CMSG_SPACE(0);
-#endif
 
 	/* set IP6 packet options */
 	if (ip6optlen) {
@@ -737,15 +695,6 @@ main(int argc, char *argv[])
 
 		scmsgp = CMSG_NXTHDR(&smsghdr, scmsgp);
 	}
-#ifdef IPV6_REACHCONF
-	if (options & F_REACHCONF) {
-		scmsgp->cmsg_len = CMSG_LEN(0);
-		scmsgp->cmsg_level = IPPROTO_IPV6;
-		scmsgp->cmsg_type = IPV6_REACHCONF;
-
-		scmsgp = CMSG_NXTHDR(&smsghdr, scmsgp);
-	}
-#endif
 
 	if (argc > 1) {	/* some intermediate addrs are specified */
 		int hops, error;
@@ -826,7 +775,6 @@ main(int argc, char *argv[])
 		close(dummy);
 	}
 
-#if defined(SO_SNDBUF) && defined(SO_RCVBUF)
 	if (sockbufsize) {
 		if (datalen > sockbufsize)
 			warnx("you need -b to increase socket buffer size");
@@ -845,11 +793,10 @@ main(int argc, char *argv[])
 		 * to stress the ethernet, or just want to fill the arp cache
 		 * to get some stuff for /etc/ethers.
 		 */
-		hold = 48 * 1024;
-		setsockopt(s, SOL_SOCKET, SO_RCVBUF, &hold,
-		    (socklen_t)sizeof(hold));
+		optval = 48 * 1024;
+		setsockopt(s, SOL_SOCKET, SO_RCVBUF, &optval,
+		    (socklen_t)sizeof(optval));
 	}
-#endif
 
 	optval = 1;
 	if (setsockopt(s, IPPROTO_IPV6, IPV6_RECVPKTINFO, &optval,
@@ -868,9 +815,7 @@ main(int argc, char *argv[])
 		(void)pinger();
 
 	(void)signal(SIGINT, onsignal);
-#ifdef SIGINFO
 	(void)signal(SIGINFO, onsignal);
-#endif
 
 	if ((options & F_FLOOD) == 0) {
 		(void)signal(SIGALRM, onsignal);
@@ -882,17 +827,18 @@ main(int argc, char *argv[])
 	}
 
 	seenalrm = seenint = 0;
-#ifdef SIGINFO
 	seeninfo = 0;
-#endif
 
 	for (;;) {
-		struct msghdr m;
+		struct msghdr	m;
 		union {
 			struct cmsghdr hdr;
 			u_char buf[CMSG_SPACE(1024)];
-		} cmsgbuf;
-		struct iovec iov[2];
+		}		cmsgbuf;
+		struct iovec	iov[2];
+		struct pollfd	pfd;
+		ssize_t		cc;
+		int		timeout;
 
 		/* signal handling */
 		if (seenalrm) {
@@ -905,29 +851,22 @@ main(int argc, char *argv[])
 			seenint = 0;
 			continue;
 		}
-#ifdef SIGINFO
 		if (seeninfo) {
 			summary(0);
 			seeninfo = 0;
 			continue;
 		}
-#endif
 
 		if (options & F_FLOOD) {
 			(void)pinger();
 			timeout = 10;
 		} else
 			timeout = INFTIM;
-		fdmaskp[0].fd = s;
-		fdmaskp[0].events = POLLIN;
-		cc = poll(fdmaskp, 1, timeout);
-		if (cc < 0) {
-			if (errno != EINTR) {
-				warn("poll");
-				sleep(1);
-			}
-			continue;
-		} else if (cc == 0)
+
+		pfd.fd = s;
+		pfd.events = POLLIN;
+
+		if (poll(&pfd, 1, timeout) <= 0)
 			continue;
 
 		m.msg_name = &from;
@@ -992,11 +931,9 @@ onsignal(int sig)
 	case SIGINT:
 		seenint++;
 		break;
-#ifdef SIGINFO
 	case SIGINFO:
 		seeninfo++;
 		break;
-#endif
 	}
 }
 
@@ -1147,11 +1084,6 @@ pinger(void)
 		}
 		cc = ICMP6ECHOLEN + datalen;
 	}
-
-#ifdef DIAGNOSTIC
-	if (pingerlen() != cc)
-		errx(1, "internal error; length mismatch");
-#endif
 
 	smsghdr.msg_name = &dst;
 	smsghdr.msg_namelen = sizeof(dst);
@@ -1807,18 +1739,16 @@ pr_nodeaddr(struct icmp6_nodeinfo *ni, int nilen)
 	 */
 	if (nilen % (sizeof(u_int32_t) + sizeof(struct in6_addr)) == 0)
 		withttl = 1;
-	while (nilen > 0) {
-		u_int32_t ttl;
+	while (nilen >= sizeof(struct in6_addr)) {
+		u_int32_t ttl = (u_int32_t)ntohl(*(u_int32_t *)cp);
 
 		if (withttl) {
-			/* XXX: alignment? */
-			ttl = (u_int32_t)ntohl(*(u_int32_t *)cp);
 			cp += sizeof(u_int32_t);
 			nilen -= sizeof(u_int32_t);
 		}
 
-		if (inet_ntop(AF_INET6, cp, ntop_buf, sizeof(ntop_buf)) ==
-		    NULL)
+		if (nilen < sizeof(struct in6_addr) || inet_ntop(AF_INET6,
+		    cp, ntop_buf, sizeof(ntop_buf)) == NULL)
 			strncpy(ntop_buf, "?", sizeof(ntop_buf));
 		printf("  %s", ntop_buf);
 		if (withttl) {
@@ -2468,9 +2398,6 @@ usage(void)
 	    "usage: ping6 [-dEefH"
 	    "m"
 	    "NnqtvWw"
-#ifdef IPV6_REACHCONF
-	    "R"
-#endif
 	    "] [-a addrtype] [-b bufsiz] [-c count] [-g gateway]\n\t"
 	    "[-h hoplimit] [-I interface] [-i wait] [-l preload] [-p pattern]"
 	    "\n\t[-S sourceaddr] [-s packetsize] [-V rtable] [hops ...]"

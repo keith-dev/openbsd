@@ -1,4 +1,4 @@
-/*	$OpenBSD: softraid.c,v 1.6 2013/12/28 02:40:41 jsing Exp $	*/
+/*	$OpenBSD: softraid.c,v 1.8 2014/07/12 20:58:31 tedu Exp $	*/
 
 /*
  * Copyright (c) 2012 Joel Sing <jsing@openbsd.org>

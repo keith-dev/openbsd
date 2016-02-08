@@ -1,4 +1,4 @@
-/* $OpenBSD: agp.c,v 1.38 2013/08/06 09:45:32 jsg Exp $ */
+/* $OpenBSD: agp.c,v 1.45 2014/07/13 23:10:23 deraadt Exp $ */
 /*-
  * Copyright (c) 2000 Doug Rabson
  * All rights reserved.
@@ -28,12 +28,11 @@
  */
 
 #include <sys/param.h>
+#include <sys/systm.h>
 #include <sys/malloc.h>
-#include <sys/agpio.h>
-#include <sys/fcntl.h>
-#include <sys/ioctl.h>
+#include <sys/rwlock.h>
 
-#include <uvm/uvm.h>
+#include <uvm/uvm_extern.h>
 
 #include <dev/pci/pcivar.h>
 #include <dev/pci/pcidevs.h>
@@ -59,23 +58,11 @@ struct agp_memory *
 int	agp_generic_free_memory(struct agp_softc *, struct agp_memory *);
 void	agp_attach(struct device *, struct device *, void *);
 int	agp_probe(struct device *, void *, void *);
-int	agpbusprint(void *, const char *);
-paddr_t	agpmmap(dev_t, off_t, int);
-int	agpioctl(dev_t, u_long, caddr_t, int, struct proc *);
-int	agpopen(dev_t, int, int, struct proc *);
-int	agpclose(dev_t, int, int , struct proc *);
 
 struct agp_memory *agp_find_memory(struct agp_softc *, int);
 struct agp_memory *agp_lookup_memory(struct agp_softc *, off_t);
 
-/* userland ioctl functions */
 int	agpvga_match(struct pci_attach_args *);
-int	agp_info_user(void *, agp_info *);
-int	agp_setup_user(void *, agp_setup *);
-int	agp_allocate_user(void *, agp_allocate *);
-int	agp_deallocate_user(void *, int);
-int	agp_bind_user(void *, agp_bind *);
-int	agp_unbind_user(void *, agp_unbind *);
 int	agp_acquire_helper(void *dev, enum agp_acquire_state state);
 int	agp_release_helper(void *dev, enum agp_acquire_state state);
 
@@ -208,101 +195,6 @@ struct cfdriver agp_cd = {
 	NULL, "agp", DV_DULL
 };
 
-paddr_t
-agpmmap(dev_t dev, off_t off, int prot)
-{
-	struct agp_softc *sc = agp_find_device(AGPUNIT(dev));
-
-	if (sc == NULL)
-		return (-1);
-
-	return agp_mmap(sc, off, prot);
-}
-int
-agpopen(dev_t dev, int oflags, int devtype, struct proc *p)
-{
-        struct agp_softc *sc = agp_find_device(AGPUNIT(dev));
-
-        if (sc == NULL || sc->sc_chipc == NULL)
-                return (ENXIO);
-
-        if (!sc->sc_opened)
-                sc->sc_opened = 1;
-        else
-                return (EBUSY);
-
-        return (0);
-}
-
-
-int
-agpioctl(dev_t dev, u_long cmd, caddr_t addr, int flag, struct proc *pb)
-{
-	struct agp_softc *sc = agp_find_device(AGPUNIT(dev));
-
-	if (sc == NULL)
-		return (ENODEV);
-
-	if (sc->sc_methods == NULL || sc->sc_chipc == NULL)
-		return (ENXIO);
-	
-	if (cmd != AGPIOC_INFO && !(flag & FWRITE))
-		return (EPERM);
-
-	switch(cmd) {
-	case AGPIOC_INFO:
-		return (agp_info_user(sc, (agp_info *)addr));
-
-	case AGPIOC_ACQUIRE:
-		return (agp_acquire_helper(sc, AGP_ACQUIRE_USER));
-
-	case AGPIOC_RELEASE:
-		return (agp_release_helper(sc, AGP_ACQUIRE_USER));
-
-	case AGPIOC_SETUP:
-		return (agp_setup_user(sc, (agp_setup *)addr));
-
-	case AGPIOC_ALLOCATE:
-		return (agp_allocate_user(sc, (agp_allocate *)addr));
-
-	case AGPIOC_DEALLOCATE:
-		return (agp_deallocate_user(sc, *(int *)addr));
-
-	case AGPIOC_BIND:
-		return (agp_bind_user(sc, (agp_bind *)addr));
-
-	case AGPIOC_UNBIND:
-		return (agp_unbind_user(sc, (agp_unbind *)addr));
-
-	default:
-		return (ENOTTY);
-	}
-
-}
-
-int
-agpclose(dev_t dev, int flags, int devtype, struct proc *p)
-{
-	struct agp_softc *sc = agp_find_device(AGPUNIT(dev));
-	struct agp_memory *mem;
-
-	/*
-         * Clear the GATT and force release on last close
-         */
-	if (sc->sc_state == AGP_ACQUIRE_USER) {
-		while ((mem = TAILQ_FIRST(&sc->sc_memory)) != 0) {
-			if (mem->am_is_bound) {
-				agp_unbind_memory(sc, mem);
-			}
-			agp_free_memory(sc, mem);
-		}
-                agp_release_helper(sc, AGP_ACQUIRE_USER);
-	}
-        sc->sc_opened = 0;
-
-	return (0);
-}
-
 struct agp_memory *
 agp_find_memory(struct agp_softc *sc, int id)
 {
@@ -347,13 +239,16 @@ agp_alloc_gatt(bus_dma_tag_t dmat, u_int32_t apsize)
 	gatt->ag_size = entries * sizeof(u_int32_t);
 
 	if (agp_alloc_dmamem(dmat, gatt->ag_size, &gatt->ag_dmamap,
-	    &gatt->ag_physical, &gatt->ag_dmaseg) != 0)
+	    &gatt->ag_physical, &gatt->ag_dmaseg) != 0) {
+		free(gatt, M_AGP, 0);
 		return (NULL);
+	}
 
 	if (bus_dmamem_map(dmat, &gatt->ag_dmaseg, 1, gatt->ag_size,
 	    (caddr_t *)&gatt->ag_virtual, BUS_DMA_NOWAIT) != 0) {
 		agp_free_dmamem(dmat, gatt->ag_size, gatt->ag_dmamap,
 		    &gatt->ag_dmaseg);
+		free(gatt, M_AGP, 0);
 		return (NULL);
 	}
 
@@ -367,7 +262,7 @@ agp_free_gatt(bus_dma_tag_t dmat, struct agp_gatt *gatt)
 {
 	bus_dmamem_unmap(dmat, (caddr_t)gatt->ag_virtual, gatt->ag_size);
 	agp_free_dmamem(dmat, gatt->ag_size, gatt->ag_dmamap, &gatt->ag_dmaseg);
-	free(gatt, M_AGP);
+	free(gatt, M_AGP, 0);
 }
 
 int
@@ -445,7 +340,7 @@ agp_generic_alloc_memory(struct agp_softc *sc, int type, vsize_t size)
 
 	if (bus_dmamap_create(sc->sc_dmat, size, size / PAGE_SIZE + 1,
 	    size, 0, BUS_DMA_NOWAIT, &mem->am_dmamap) != 0) {
-		free(mem, M_AGP);
+		free(mem, M_AGP, 0);
 		return (NULL);
 	}
 
@@ -466,7 +361,7 @@ agp_generic_free_memory(struct agp_softc *sc, struct agp_memory *mem)
 	sc->sc_allocated -= mem->am_size;
 	TAILQ_REMOVE(&sc->sc_memory, mem, am_link);
 	bus_dmamap_destroy(sc->sc_dmat, mem->am_dmamap);
-	free(mem, M_AGP);
+	free(mem, M_AGP, 0);
 	return (0);
 }
 
@@ -503,10 +398,10 @@ agp_generic_bind_memory(struct agp_softc *sc, struct agp_memory *mem,
 	 */
 
 	nseg = (mem->am_size + PAGE_SIZE - 1) / PAGE_SIZE;
-	segs = malloc(nseg * sizeof *segs, M_AGP, M_WAITOK);
+	segs = mallocarray(nseg, sizeof *segs, M_AGP, M_WAITOK);
 	if ((error = bus_dmamem_alloc(sc->sc_dmat, mem->am_size, PAGE_SIZE, 0,
 	    segs, nseg, &mem->am_nseg, BUS_DMA_ZERO | BUS_DMA_WAITOK)) != 0) {
-		free(segs, M_AGP);
+		free(segs, M_AGP, 0);
 		rw_exit_write(&sc->sc_lock);
 		AGP_DPF("bus_dmamem_alloc failed %d\n", error);
 		return (error);
@@ -514,7 +409,7 @@ agp_generic_bind_memory(struct agp_softc *sc, struct agp_memory *mem,
 	if ((error = bus_dmamap_load_raw(sc->sc_dmat, mem->am_dmamap, segs,
 	    mem->am_nseg, mem->am_size, BUS_DMA_WAITOK)) != 0) {
 		bus_dmamem_free(sc->sc_dmat, segs, mem->am_nseg);
-		free(segs, M_AGP);
+		free(segs, M_AGP, 0);
 		rw_exit_write(&sc->sc_lock);
 		AGP_DPF("bus_dmamap_load failed %d\n", error);
 		return (error);
@@ -593,7 +488,7 @@ agp_generic_unbind_memory(struct agp_softc *sc, struct agp_memory *mem)
 	bus_dmamap_unload(sc->sc_dmat, mem->am_dmamap);
 	bus_dmamem_free(sc->sc_dmat, mem->am_dmaseg, mem->am_nseg);
 
-	free(mem->am_dmaseg, M_AGP);
+	free(mem->am_dmaseg, M_AGP, 0);
 
 	mem->am_offset = 0;
 	mem->am_is_bound = 0;
@@ -695,96 +590,6 @@ agp_release_helper(void *dev, enum agp_acquire_state state)
 	}
 	sc->sc_state = AGP_ACQUIRE_FREE;
 	return (0);
-}
-
-/* Implementation of the userland ioctl API */
-
-int
-agp_info_user(void *dev, agp_info *info)
-{
-	struct agp_softc *sc = (struct agp_softc *) dev;
-
-	if (!sc->sc_chipc)
-		return (ENXIO);
-
-	bzero(info, sizeof *info);
-	info->bridge_id = sc->sc_id;
-	if (sc->sc_capoff != 0)
-		info->agp_mode = pci_conf_read(sc->sc_pc, sc->sc_pcitag,
-		    AGP_STATUS + sc->sc_capoff);
-	else
-		info->agp_mode = 0; /* i810 doesn't have real AGP */
-	info->aper_base = sc->sc_apaddr;
-	info->aper_size = sc->sc_apsize >> 20;
-	info->pg_total =
-	info->pg_system = sc->sc_maxmem >> AGP_PAGE_SHIFT;
-	info->pg_used = sc->sc_allocated >> AGP_PAGE_SHIFT;
-
-	return (0);
-}
-
-int
-agp_setup_user(void *dev, agp_setup *setup)
-{
-	struct agp_softc	*sc = dev;
-
-	return (agp_enable(sc, setup->agp_mode));
-}
-
-int
-agp_allocate_user(void *dev, agp_allocate *alloc)
-{
-	struct agp_softc	*sc = dev;
-	struct agp_memory	*mem; 
-	size_t			 size = alloc->pg_count << AGP_PAGE_SHIFT;
-
-	if (sc->sc_allocated + size > sc->sc_maxmem)
-		return (EINVAL);
-
-	mem = agp_alloc_memory(sc, alloc->type, size);
-	if (mem) {
-		alloc->key = mem->am_id;
-		alloc->physical = mem->am_physical;
-		return (0);
-	} else
-		return (ENOMEM);
-}
-
-int
-agp_deallocate_user(void *dev, int id)
-{
-	struct agp_softc	*sc = dev;
-	struct agp_memory	*mem;
-
-	if ((mem = agp_find_memory(sc, id)) != NULL) {
-		agp_free_memory(sc, mem);
-		return (0);
-	} else
-		return (ENOENT);
-}
-
-int
-agp_bind_user(void *dev, agp_bind *bind)
-{
-	struct agp_softc	*sc = dev;
-	struct agp_memory	*mem;
-
-	if ((mem = agp_find_memory(sc, bind->key)) == NULL)
-		return (ENOENT);
-	return (agp_bind_memory(sc, mem, bind->pg_start << AGP_PAGE_SHIFT));
-}
-
-
-int
-agp_unbind_user(void *dev, agp_unbind *unbind)
-{
-	struct agp_softc	*sc = dev;
-	struct agp_memory	*mem;
-
-	if ((mem = agp_find_memory(sc, unbind->key)) == NULL)
-		return (ENOENT);
-
-	return (agp_unbind_memory(sc, mem));
 }
 
 /* Implementation of the kernel api */

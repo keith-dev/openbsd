@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_proc.c,v 1.55 2014/01/20 21:19:28 guenther Exp $	*/
+/*	$OpenBSD: kern_proc.c,v 1.60 2014/07/12 18:43:32 tedu Exp $	*/
 /*	$NetBSD: kern_proc.c,v 1.14 1996/02/09 18:59:41 christos Exp $	*/
 
 /*
@@ -70,7 +70,6 @@ struct pool rusage_pool;
 struct pool ucred_pool;
 struct pool pgrp_pool;
 struct pool session_pool;
-struct pool pcred_pool;
 
 static void orphanpg(struct pgrp *);
 #ifdef DEBUG
@@ -106,8 +105,6 @@ procinit(void)
 	    &pool_allocator_nointr);
 	pool_init(&session_pool, sizeof(struct session), 0, 0, 0, "sessionpl",
 	    &pool_allocator_nointr);
-	pool_init(&pcred_pool, sizeof(struct pcred), 0, 0, 0, "pcredpl",
-	    &pool_allocator_nointr);
 }
 
 struct uidinfo *
@@ -127,7 +124,7 @@ uid_find(uid_t uid)
 		if (uip->ui_uid == uid)
 			break;
 	if (uip) {
-		free(nuip, M_PROC);
+		free(nuip, M_PROC, 0);
 		return (uip);
 	}
 	nuip->ui_uid = uid;
@@ -351,7 +348,7 @@ fixjobc(struct process *pr, struct pgrp *pgrp, int entering)
 	LIST_FOREACH(pr, &pr->ps_children, ps_sibling)
 		if ((hispgrp = pr->ps_pgrp) != pgrp &&
 		    hispgrp->pg_session == mysession &&
-		    P_ZOMBIE(pr->ps_mainproc) == 0) {
+		    (pr->ps_flags & PS_ZOMBIE) == 0) {
 			if (entering)
 				hispgrp->pg_jobc++;
 			else if (--hispgrp->pg_jobc == 0)
@@ -406,9 +403,8 @@ proc_printit(struct proc *p, const char *modif,
 	    TAILQ_NEXT(p, p_runq), p->p_list.le_next, p->p_list.le_prev);
 	(*pr)("    process=%p user=%p, vmspace=%p\n",
 	    p->p_p, p->p_addr, p->p_vmspace);
-	(*pr)("    estcpu=%u, cpticks=%d, pctcpu=%u.%u, swtime=%u\n",
-	    p->p_estcpu, p->p_cpticks, p->p_pctcpu / 100, p->p_pctcpu % 100,
-	    p->p_swtime);
+	(*pr)("    estcpu=%u, cpticks=%d, pctcpu=%u.%u\n",
+	    p->p_estcpu, p->p_cpticks, p->p_pctcpu / 100, p->p_pctcpu % 100);
 	(*pr)("    user=%u, sys=%u, intr=%u\n",
 	    p->p_uticks, p->p_sticks, p->p_iticks);
 }
@@ -477,7 +473,7 @@ db_show_all_procs(db_expr_t addr, int haddr, db_expr_t count, char *modif)
 					    "%-12.12s  %-16s\n",
 					    ppr ? ppr->ps_pid : -1,
 					    pr->ps_pgrp ? pr->ps_pgrp->pg_id : -1,
-					    pr->ps_cred->p_ruid, p->p_stat,
+					    pr->ps_ucred->cr_ruid, p->p_stat,
 					    p->p_flag | pr->ps_flags,
 					    (p->p_wchan && p->p_wmesg) ?
 						p->p_wmesg : "", p->p_comm);
@@ -485,7 +481,7 @@ db_show_all_procs(db_expr_t addr, int haddr, db_expr_t count, char *modif)
 
 				case 'w':
 					db_printf("%-16s  %-8s  %18p  %s\n", p->p_comm,
-					    p->p_emul->e_name, p->p_wchan,
+					    pr->ps_emul->e_name, p->p_wchan,
 					    (p->p_wchan && p->p_wmesg) ? 
 						p->p_wmesg : "");
 					break;

@@ -1,4 +1,4 @@
-/*      $OpenBSD: ip_divert.c,v 1.16 2014/01/09 06:29:06 tedu Exp $ */
+/*      $OpenBSD: ip_divert.c,v 1.27 2014/07/22 11:06:10 mpi Exp $ */
 
 /*
  * Copyright (c) 2009 Michele Marchetto <michele@openbsd.org>
@@ -30,7 +30,6 @@
 #include <net/pfvar.h>
 
 #include <netinet/in.h>
-#include <netinet/in_systm.h>
 #include <netinet/in_var.h>
 #include <netinet/ip.h>
 #include <netinet/ip_var.h>
@@ -62,8 +61,9 @@ int divbhashsize = DIVERTHASHSIZE;
 
 static struct sockaddr_in ipaddr = { sizeof(ipaddr), AF_INET };
 
-void divert_detach(struct inpcb *);
-
+void	divert_detach(struct inpcb *);
+int	divert_output(struct inpcb *, struct mbuf *, struct mbuf *,
+	    struct mbuf *);
 void
 divert_init()
 {
@@ -77,30 +77,20 @@ divert_input(struct mbuf *m, ...)
 }
 
 int
-divert_output(struct mbuf *m, ...)
+divert_output(struct inpcb *inp, struct mbuf *m, struct mbuf *nam,
+    struct mbuf *control)
 {
-	struct inpcb *inp;
 	struct ifqueue *inq;
-	struct mbuf *nam, *control;
 	struct sockaddr_in *sin;
 	struct socket *so;
 	struct ifaddr *ifa;
-	int s, error = 0, p_hdrlen = 0;
-	va_list ap;
+	int s, error = 0, p_hdrlen = 0, dir;
 	struct ip *ip;
-	u_int16_t off, csum = 0;
-	u_int8_t nxt;
-	size_t p_off = 0;
-
-	va_start(ap, m);
-	inp = va_arg(ap, struct inpcb *);
-	nam = va_arg(ap, struct mbuf *);
-	control = va_arg(ap, struct mbuf *);
-	va_end(ap);
+	u_int16_t off;
 
 	m->m_pkthdr.rcvif = NULL;
 	m->m_nextpkt = NULL;
-	m->m_pkthdr.rdomain = inp->inp_rtableid;
+	m->m_pkthdr.ph_rtableid = inp->inp_rtableid;
 
 	if (control)
 		m_freem(control);
@@ -124,49 +114,33 @@ divert_output(struct mbuf *m, ...)
 	    m->m_pkthdr.len < ntohs(ip->ip_len))
 		goto fail;
 
-	/*
-	 * Recalculate IP and protocol checksums since the userspace application
-	 * may have modified the packet prior to reinjection.
-	 */
-	ip->ip_sum = 0;
-	ip->ip_sum = in_cksum(m, off);
-	nxt = ip->ip_p;
+	dir = (sin->sin_addr.s_addr == INADDR_ANY ? PF_OUT : PF_IN);
+
 	switch (ip->ip_p) {
 	case IPPROTO_TCP:
 		p_hdrlen = sizeof(struct tcphdr);
-		p_off = offsetof(struct tcphdr, th_sum);
+		m->m_pkthdr.csum_flags |= M_TCP_CSUM_OUT;
 		break;
 	case IPPROTO_UDP:
 		p_hdrlen = sizeof(struct udphdr);
-		p_off = offsetof(struct udphdr, uh_sum);
+		m->m_pkthdr.csum_flags |= M_UDP_CSUM_OUT;
 		break;
 	case IPPROTO_ICMP:
 		p_hdrlen = sizeof(struct icmp);
-		p_off = offsetof(struct icmp, icmp_cksum);
-		nxt = 0;
+		m->m_pkthdr.csum_flags |= M_ICMP_CSUM_OUT;
 		break;
 	default:
 		/* nothing */
 		break;
 	}
-	if (p_hdrlen) {
-		if (m->m_pkthdr.len < off + p_hdrlen)
-			goto fail;
-
-		if ((error = m_copyback(m, off + p_off, sizeof(csum), &csum, M_NOWAIT)))
-			goto fail;
-		csum = in4_cksum(m, nxt, off, m->m_pkthdr.len - off);
-		if (ip->ip_p == IPPROTO_UDP && csum == 0)
-			csum = 0xffff;
-		if ((error = m_copyback(m, off + p_off, sizeof(csum), &csum, M_NOWAIT)))
-			goto fail;
-	}
+	if (p_hdrlen && m->m_pkthdr.len < off + p_hdrlen)
+		goto fail;
 
 	m->m_pkthdr.pf.flags |= PF_TAG_DIVERTED_PACKET;
 
-	if (sin->sin_addr.s_addr != INADDR_ANY) {
+	if (dir == PF_IN) {
 		ipaddr.sin_addr = sin->sin_addr;
-		ifa = ifa_ifwithaddr(sintosa(&ipaddr), m->m_pkthdr.rdomain);
+		ifa = ifa_ifwithaddr(sintosa(&ipaddr), m->m_pkthdr.ph_rtableid);
 		if (ifa == NULL) {
 			error = EADDRNOTAVAIL;
 			goto fail;
@@ -175,15 +149,22 @@ divert_output(struct mbuf *m, ...)
 
 		inq = &ipintrq;
 
+		/*
+		 * Recalculate IP and protocol checksums for the inbound packet
+		 * since the userspace application may have modified the packet
+		 * prior to reinjection.
+		 */
+		ip->ip_sum = 0;
+		ip->ip_sum = in_cksum(m, off);
+		in_proto_cksum_out(m, NULL);
+
 		s = splnet();
 		IF_INPUT_ENQUEUE(inq, m);
 		schednetisr(NETISR_IP);
 		splx(s);
 	} else {
-		error = ip_output(m, (void *)NULL, &inp->inp_route,
-		    ((so->so_options & SO_DONTROUTE) ? IP_ROUTETOIF : 0)
-		    | IP_ALLOWBROADCAST | IP_RAWOUTPUT, (void *)NULL,
-		    (void *)NULL);
+		error = ip_output(m, NULL, &inp->inp_route,
+		    IP_ALLOWBROADCAST | IP_RAWOUTPUT, NULL, NULL, 0);
 		if (error == EACCES)	/* translate pf(4) error for userland */
 			error = EHOSTUNREACH;
 	}
@@ -198,12 +179,11 @@ fail:
 }
 
 int
-divert_packet(struct mbuf *m, int dir)
+divert_packet(struct mbuf *m, int dir, u_int16_t divert_port)
 {
 	struct inpcb *inp;
 	struct socket *sa = NULL;
 	struct sockaddr_in addr;
-	struct pf_divert *divert;
 
 	inp = NULL;
 	divstat.divs_ipackets++;
@@ -214,15 +194,8 @@ divert_packet(struct mbuf *m, int dir)
 		return (0);
 	}
 
-	divert = pf_find_divert(m);
-	if (divert == NULL) {
-		divstat.divs_errors++;
-		m_freem(m);
-		return (0);
-	}
-
 	TAILQ_FOREACH(inp, &divbtable.inpt_queue, inp_queue) {
-		if (inp->inp_lport != divert->port)
+		if (inp->inp_lport != divert_port)
 			continue;
 		if (inp->inp_divertfl == 0)
 			break;
@@ -250,9 +223,6 @@ divert_packet(struct mbuf *m, int dir)
 			break;
 		}
 	}
-	/* force checksum calculation */
-	if (dir == PF_OUT)
-		in_proto_cksum_out(m, NULL);
 
 	if (inp) {
 		sa = inp->inp_socket;
@@ -327,7 +297,7 @@ divert_usrreq(struct socket *so, int req, struct mbuf *m, struct mbuf *addr,
 		break;
 
 	case PRU_SEND:
-		return (divert_output(m, inp, addr, control));
+		return (divert_output(inp, m, addr, control));
 
 	case PRU_ABORT:
 		soisdisconnected(so);

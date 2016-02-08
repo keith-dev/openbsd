@@ -1,4 +1,4 @@
-/*	$OpenBSD: nd6.c,v 1.111 2014/02/17 21:36:05 kettenis Exp $	*/
+/*	$OpenBSD: nd6.c,v 1.120 2014/07/12 18:44:23 tedu Exp $	*/
 /*	$KAME: nd6.c,v 1.280 2002/06/08 19:52:07 itojun Exp $	*/
 
 /*
@@ -72,7 +72,6 @@ int	nd6_prune	= 1;	/* walk list every 1 seconds */
 int	nd6_delay	= 5;	/* delay first probe time 5 second */
 int	nd6_umaxtries	= 3;	/* maximum unicast query */
 int	nd6_mmaxtries	= 3;	/* maximum multicast query */
-int	nd6_useloopback = 1;	/* use loopback interface for local traffic */
 int	nd6_gctimer	= (60 * 60 * 24); /* 1 day: garbage collection timer */
 
 /* preventing too many loops in ND option parsing */
@@ -153,11 +152,7 @@ nd6_ifattach(struct ifnet *ifp)
 	nd->basereachable = REACHABLE_TIME;
 	nd->reachable = ND_COMPUTE_RTIME(nd->basereachable);
 	nd->retrans = RETRANS_TIMER;
-	/*
-	 * Note that the default value of ip6_accept_rtadv is 0, which means
-	 * we won't accept RAs by default even if we set ND6_IFF_ACCEPT_RTADV
-	 * here.
-	 */
+	/* per-interface IFXF_AUTOCONF6 needs to be set too to accept RAs */
 	nd->flags = (ND6_IFF_PERFORMNUD | ND6_IFF_ACCEPT_RTADV);
 
 	/* XXX: we cannot call nd6_setmtu since ifp is not fully initialized */
@@ -170,7 +165,7 @@ void
 nd6_ifdetach(struct nd_ifinfo *nd)
 {
 
-	free(nd, M_IP6NDP);
+	free(nd, M_IP6NDP, 0);
 }
 
 void
@@ -612,7 +607,8 @@ nd6_purge(struct ifnet *ifp)
 		}
 	}
 
-	if (!ip6_forwarding && ip6_accept_rtadv) { /* XXX: too restrictive? */
+	/* XXX: too restrictive? */
+	if (!ip6_forwarding && (ifp->if_xflags & IFXF_AUTOCONF6)) {
 		/* refresh default router list */
 		defrouter_select();
 	}
@@ -689,8 +685,7 @@ nd6_lookup(struct in6_addr *addr6, int create, struct ifnet *ifp,
 			 * called in rtrequest1 via ifa->ifa_rtrequest.
 			 */
 			bzero(&info, sizeof(info));
-			info.rti_flags = (ifa->ifa_flags | RTF_HOST |
-			    RTF_LLINFO) & ~RTF_CLONING;
+			info.rti_flags = RTF_UP | RTF_HOST | RTF_LLINFO;
 			info.rti_info[RTAX_DST] = sin6tosa(&sin6);
 			info.rti_info[RTAX_GATEWAY] = ifa->ifa_addr;
 			if ((e = rtrequest1(RTM_ADD, &info, RTP_CONNECTED,
@@ -971,7 +966,7 @@ nd6_rtrequest(int req, struct rtentry *rt)
 		if (dr)
 			dr->installed = 0;
 	}
-	
+
 	if ((rt->rt_flags & RTF_GATEWAY) != 0)
 		return;
 
@@ -1022,9 +1017,8 @@ nd6_rtrequest(int req, struct rtentry *rt)
 			 * treated as on-link but is currently not
 			 * (RTF_LLINFO && !ln case).
 			 */
-			rt_setgate(rt, rt_key(rt),
-			    (struct sockaddr *)&null_sdl,
-			    rt->rt_ifp->if_rdomain);
+			rt_setgate(rt, rt_key(rt), (struct sockaddr *)&null_sdl,
+			    ifp->if_rdomain);
 			gate = rt->rt_gateway;
 			SDL(gate)->sdl_type = ifp->if_type;
 			SDL(gate)->sdl_index = ifp->if_index;
@@ -1062,21 +1056,14 @@ nd6_rtrequest(int req, struct rtentry *rt)
 #endif
 		/* FALLTHROUGH */
 	case RTM_RESOLVE:
-		if ((ifp->if_flags & (IFF_POINTOPOINT | IFF_LOOPBACK)) == 0) {
-			/*
-			 * Address resolution isn't necessary for a point to
-			 * point link, so we can skip this test for a p2p link.
-			 */
-			if (gate->sa_family != AF_LINK ||
-			    gate->sa_len < sizeof(null_sdl)) {
-				log(LOG_DEBUG,
-				    "nd6_rtrequest: bad gateway value: %s\n",
-				    ifp->if_xname);
-				break;
-			}
-			SDL(gate)->sdl_type = ifp->if_type;
-			SDL(gate)->sdl_index = ifp->if_index;
+		if (gate->sa_family != AF_LINK ||
+		    gate->sa_len < sizeof(null_sdl)) {
+			log(LOG_DEBUG, "%s: bad gateway value: %s\n",
+			    __func__, ifp->if_xname);
+			break;
 		}
+		SDL(gate)->sdl_type = ifp->if_type;
+		SDL(gate)->sdl_index = ifp->if_index;
 		if (ln != NULL)
 			break;	/* This happens on a route change */
 		/*
@@ -1086,7 +1073,7 @@ nd6_rtrequest(int req, struct rtentry *rt)
 		ln = malloc(sizeof(*ln), M_RTABLE, M_NOWAIT | M_ZERO);
 		rt->rt_llinfo = (caddr_t)ln;
 		if (!ln) {
-			log(LOG_DEBUG, "nd6_rtrequest: malloc failed\n");
+			log(LOG_DEBUG, "%s: malloc failed\n", __func__);
 			break;
 		}
 		nd6_inuse++;
@@ -1149,7 +1136,7 @@ nd6_rtrequest(int req, struct rtentry *rt)
 		 * check if rt_key(rt) is one of my address assigned
 		 * to the interface.
 		 */
-		ifa = &in6ifa_ifpwithaddr(rt->rt_ifp,
+		ifa = &in6ifa_ifpwithaddr(ifp,
 		    &satosin6(rt_key(rt))->sin6_addr)->ia_ifa;
 		if (ifa) {
 			caddr_t macp = nd6_ifptomac(ifp);
@@ -1160,21 +1147,26 @@ nd6_rtrequest(int req, struct rtentry *rt)
 				memcpy(LLADDR(SDL(gate)), macp, ifp->if_addrlen);
 				SDL(gate)->sdl_alen = ifp->if_addrlen;
 			}
-			if (nd6_useloopback) {
-				rt->rt_ifp = lo0ifp;	/*XXX*/
-				/*
-				 * Make sure rt_ifa be equal to the ifaddr
-				 * corresponding to the address.
-				 * We need this because when we refer
-				 * rt_ifa->ia6_flags in ip6_input, we assume
-				 * that the rt_ifa points to the address instead
-				 * of the loopback address.
-				 */
-				if (ifa != rt->rt_ifa) {
-					ifafree(rt->rt_ifa);
-					ifa->ifa_refcnt++;
-					rt->rt_ifa = ifa;
-				}
+
+			/*
+			 * XXX Since lo0 is in the default rdomain we
+			 * should not (ab)use it for any route related
+			 * to an interface of a different rdomain.
+			 */
+			rt->rt_ifp = lo0ifp;
+
+			/*
+			 * Make sure rt_ifa be equal to the ifaddr
+			 * corresponding to the address.
+			 * We need this because when we refer
+			 * rt_ifa->ia6_flags in ip6_input, we assume
+			 * that the rt_ifa points to the address instead
+			 * of the loopback address.
+			 */
+			if (ifa != rt->rt_ifa) {
+				ifafree(rt->rt_ifa);
+				ifa->ifa_refcnt++;
+				rt->rt_ifa = ifa;
 			}
 		} else if (rt->rt_flags & RTF_ANNOUNCE) {
 			nd6_llinfo_settimer(ln, -1);
@@ -1234,7 +1226,7 @@ nd6_rtrequest(int req, struct rtentry *rt)
 		rt->rt_flags &= ~RTF_LLINFO;
 		if (ln->ln_hold)
 			m_freem(ln->ln_hold);
-		free(ln, M_RTABLE);
+		free(ln, M_RTABLE, 0);
 	}
 }
 
@@ -1582,7 +1574,8 @@ fail:
 	 * for those are not autoconfigured hosts, we explicitly avoid such
 	 * cases for safety.
 	 */
-	if (do_update && ln->ln_router && !ip6_forwarding && ip6_accept_rtadv)
+	if (do_update && ln->ln_router && !ip6_forwarding &&
+	    (ifp->if_xflags & IFXF_AUTOCONF6))
 		defrouter_select();
 
 	return rt;
@@ -1640,7 +1633,7 @@ nd6_output(struct ifnet *ifp, struct ifnet *origifp, struct mbuf *m0,
 	if (rt) {
 		if ((rt->rt_flags & RTF_UP) == 0) {
 			if ((rt0 = rt = rtalloc1(sin6tosa(dst),
-			    RT_REPORT, m->m_pkthdr.rdomain)) != NULL)
+			    RT_REPORT, m->m_pkthdr.ph_rtableid)) != NULL)
 			{
 				rt->rt_refcnt--;
 				if (rt->rt_ifp != ifp)
@@ -1679,7 +1672,7 @@ nd6_output(struct ifnet *ifp, struct ifnet *origifp, struct mbuf *m0,
 				rtfree(rt); rt = rt0;
 			lookup:
 				rt->rt_gwroute = rtalloc1(rt->rt_gateway,
-				    RT_REPORT, m->m_pkthdr.rdomain);
+				    RT_REPORT, m->m_pkthdr.ph_rtableid);
 				if ((rt = rt->rt_gwroute) == 0)
 					senderr(EHOSTUNREACH);
 			}
@@ -1829,7 +1822,6 @@ nd6_need_cache(struct ifnet *ifp)
 	case IFT_ETHER:
 	case IFT_IEEE1394:
 	case IFT_PROPVIRTUAL:
-	case IFT_L2VLAN:
 	case IFT_IEEE80211:
 	case IFT_CARP:
 	case IFT_GIF:		/* XXX need more cases? */
@@ -1928,7 +1920,7 @@ nd6_sysctl(int name, void *oldp, size_t *oldlenp, void *newp, size_t newlen)
 		break;
 	}
 	if (p)
-		free(p, M_TEMP);
+		free(p, M_TEMP, 0);
 
 	return (error);
 }

@@ -1,4 +1,4 @@
-/*	$OpenBSD: boot.c,v 1.17 2013/08/12 13:44:13 rapha Exp $	*/
+/*	$OpenBSD: boot.c,v 1.22 2014/07/10 17:12:05 tobias Exp $	*/
 /*	$NetBSD: boot.c,v 1.5 1997/10/17 11:19:23 ws Exp $	*/
 
 /*
@@ -13,13 +13,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by Martin Husemann
- *	and Wolfgang Solfrank.
- * 4. Neither the name of the University nor the names of its contributors
- *    may be used to endorse or promote products derived from this software
- *    without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHORS ``AS IS'' AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
@@ -47,37 +40,37 @@
 int
 readboot(int dosfs, struct bootblock *boot)
 {
-	u_char *block;
-	u_char *fsinfo;
-	u_char *backup;
+	u_char *block = NULL;
+	u_char *fsinfo = NULL;
+	u_char *backup = NULL;
 	int ret = FSOK, secsize = lab.d_secsize, fsinfosz;
 	off_t o;
 	ssize_t n;
 
 	if (secsize < DOSBOOTBLOCKSIZE) {
 		xperror("sector size < DOSBOOTBLOCKSIZE");
-		return (FSFATAL);
+		goto fail;
 	}
 	if (DOSBOOTBLOCKSIZE != DEV_BSIZE) {
 		xperror("DOSBOOTBLOCKSIZE != DEV_BSIZE");
-		return (FSFATAL);
+		goto fail;
 	}
 
 	block = malloc(secsize);
 	if (block == NULL) {
 		xperror("could not malloc boot block");
-		return FSFATAL;
+		goto fail;
 	}
 
 	if ((o = lseek(dosfs, 0, SEEK_SET)) == -1) {
 		xperror("could not seek boot block");
-		return FSFATAL;
+		goto fail;
 	}
 
 	n = read(dosfs, block, secsize);
 	if (n == -1 || n != secsize) {
 		xperror("could not read boot block");
-		return (FSFATAL);
+		goto fail;
 	}
 
 	if (block[510] != 0x55 || block[511] != 0xaa) {
@@ -92,15 +85,19 @@ readboot(int dosfs, struct bootblock *boot)
 	boot->BytesPerSec = block[11] + (block[12] << 8);
 	if (boot->BytesPerSec == 0 || boot->BytesPerSec != secsize) {
 		pfatal("Invalid sector size: %u\n", boot->BytesPerSec);
-		return (FSFATAL);
+		goto fail;
 	}
 	boot->SecPerClust = block[13];
-	if (boot->SecPerClust == 0) {
+	if (boot->SecPerClust == 0 || !powerof2(boot->SecPerClust)) {
 		pfatal("Invalid cluster size: %u\n", boot->SecPerClust);
-		return (FSFATAL);
+		goto fail;
 	}
 	boot->ResSectors = block[14] + (block[15] << 8);
 	boot->FATs = block[16];
+	if (boot->FATs == 0) {
+		pfatal("Invalid number of FATs: %u\n", boot->FATs);
+		goto fail;
+	}
 	boot->RootDirEnts = block[17] + (block[18] << 8);
 	boot->Sectors = block[19] + (block[20] << 8);
 	boot->Media = block[21];
@@ -124,7 +121,7 @@ readboot(int dosfs, struct bootblock *boot)
 			/* Correct?				XXX */
 			pfatal("Unknown filesystem version: %x.%x\n",
 			       block[43], block[42]);
-			return FSFATAL;
+			goto fail;
 		}
 		boot->RootCl = block[44] + (block[45] << 8)
 			       + (block[46] << 16) + (block[47] << 24);
@@ -134,7 +131,7 @@ readboot(int dosfs, struct bootblock *boot)
 		o = lseek(dosfs, boot->FSInfo * secsize, SEEK_SET);
 		if (o == -1 || o != boot->FSInfo * secsize) {
 			xperror("could not seek fsinfo block");
-			return FSFATAL;
+			goto fail;
 		}
 
 		if ((2 * DOSBOOTBLOCKSIZE) < secsize)
@@ -144,12 +141,12 @@ readboot(int dosfs, struct bootblock *boot)
 		fsinfo = malloc(fsinfosz);
 		if (fsinfo == NULL) {
 			xperror("could not malloc fsinfo");
-			return FSFATAL;
+			goto fail;
 		}
 		n = read(dosfs, fsinfo, fsinfosz);
 		if (n == -1 || n != fsinfosz) {
 			xperror("could not read fsinfo block");
-			return FSFATAL;
+			goto fail;
 		}
 
 		if (memcmp(fsinfo, "RRaA", 4)
@@ -177,12 +174,12 @@ readboot(int dosfs, struct bootblock *boot)
 				    SEEK_SET);
 				if (o == -1 || o != boot->FSInfo * secsize) {
 					xperror("Unable to seek FSInfo");
-					return FSFATAL;
+					goto fail;
 				}
-				n = write(dosfs, block, fsinfosz);
+				n = write(dosfs, fsinfo, fsinfosz);
 				if (n == -1 || n != fsinfosz) {
 					xperror("Unable to write FSInfo");
-					return FSFATAL;
+					goto fail;
 				}
 				ret = FSBOOTMOD;
 			} else
@@ -200,17 +197,17 @@ readboot(int dosfs, struct bootblock *boot)
 		o = lseek(dosfs, boot->Backup * secsize, SEEK_SET);
 		if (o == -1 || o != boot->Backup * secsize) {
 			xperror("could not seek backup bootblock");
-			return (FSFATAL);
+			goto fail;
 		}
 		backup = malloc(2 * secsize); /* In case we check fsinfo. */
 		if (backup == NULL) {
 			xperror("could not malloc backup boot block");
-			return FSFATAL;
+			goto fail;
 		}
 		n = read(dosfs, backup, secsize);
 		if (n == -1 || n != secsize) {
 			xperror("could not read backup bootblock");
-			return FSFATAL;
+			goto fail;
 		}
 
 		/*
@@ -229,9 +226,14 @@ readboot(int dosfs, struct bootblock *boot)
 		}
 		if (memcmp(block + 11, backup + 11, 79)) {
 			pfatal("backup doesn't compare to primary bootblock\n");
-			return FSFATAL;
+			goto fail;
 		}
 		/* Check backup FSInfo?					XXX */
+	}
+
+	if (boot->FATsecs == 0) {
+		pfatal("Invalid number of FAT sectors: %u\n", boot->FATsecs);
+		goto fail;
 	}
 
 	boot->ClusterOffset = (boot->RootDirEnts * 32 + secsize - 1)
@@ -245,6 +247,12 @@ readboot(int dosfs, struct bootblock *boot)
 		boot->NumSectors = boot->Sectors;
 	} else
 		boot->NumSectors = boot->HugeSectors;
+
+	if (boot->ClusterOffset > boot->NumSectors) {
+		pfatal("Cluster offset too large (%u clusters)\n",
+		    boot->ClusterOffset);
+		goto fail;
+	}
 	boot->NumClusters = (boot->NumSectors - boot->ClusterOffset) / boot->SecPerClust;
 
 	if (boot->flags&FAT32)
@@ -256,7 +264,7 @@ readboot(int dosfs, struct bootblock *boot)
 	else {
 		pfatal("Filesystem too big (%u clusters) for non-FAT32 partition\n",
 		       boot->NumClusters);
-		return FSFATAL;
+		goto fail;
 	}
 
 	switch (boot->ClustMask) {
@@ -274,20 +282,28 @@ readboot(int dosfs, struct bootblock *boot)
 	if (boot->NumFatEntries < boot->NumClusters) {
 		pfatal("FAT size too small, %u entries won't fit into %u sectors\n",
 		       boot->NumClusters, boot->FATsecs);
-		return (FSFATAL);
+		goto fail;
 	}
 	boot->ClusterSize = boot->SecPerClust * secsize;
 
 	boot->NumFiles = 1;
 	boot->NumFree = 0;
 
+	free(backup);
+	free(block);
+	free(fsinfo);
 	return ret;
+fail:
+	free(backup);
+	free(block);
+	free(fsinfo);
+	return FSFATAL;
 }
 
 int
 writefsinfo(int dosfs, struct bootblock *boot)
 {
-	u_char *fsinfo;
+	u_char *fsinfo = NULL;
 	int secsize = lab.d_secsize, fsinfosz;
 	off_t o;
 	ssize_t n;
@@ -300,19 +316,19 @@ writefsinfo(int dosfs, struct bootblock *boot)
 	fsinfo = malloc(fsinfosz);
 	if (fsinfo == NULL) {
 		xperror("could not malloc fsinfo block");
-		return FSFATAL;
+		goto fail;
 	}
 
 	o = lseek(dosfs, boot->FSInfo * secsize, SEEK_SET);
 	if (o == -1 || o != boot->FSInfo * secsize) {
 		xperror("could not seek fsinfo block");
-		return FSFATAL;
+		goto fail;
 	}
 
 	n = read(dosfs, fsinfo, fsinfosz);
 	if (n == -1 || n != fsinfosz) {
 		xperror("could not read fsinfo block");
-		return FSFATAL;
+		goto fail;
 	}
 
 	fsinfo[0x1e8] = (u_char)boot->FSFree;
@@ -327,13 +343,15 @@ writefsinfo(int dosfs, struct bootblock *boot)
 	o = lseek(dosfs, o, SEEK_SET);
 	if (o == -1 || o != boot->FSInfo * boot->BytesPerSec) {
 		xperror("Unable to seek FSInfo");
-		return FSFATAL;
+		goto fail;
 	}
 	n = write(dosfs, fsinfo, fsinfosz);
 	if (n == -1 || n != fsinfosz) {
 		xperror("Unable to write FSInfo");
-		return FSFATAL;
+		goto fail;
 	}
+
+	free(fsinfo);
 
 	/*
 	 * Technically, we should return FSBOOTMOD here.
@@ -347,4 +365,7 @@ writefsinfo(int dosfs, struct bootblock *boot)
 	 * fact that it was incorrect.
 	 */
 	return 0;
+fail:
+	free(fsinfo);
+	return FSFATAL;
 }

@@ -1,4 +1,4 @@
-/*	$OpenBSD: ipifuncs.c,v 1.22 2014/01/21 09:40:54 kettenis Exp $	*/
+/*	$OpenBSD: ipifuncs.c,v 1.25 2014/07/11 10:56:52 mlarkin Exp $	*/
 /*	$NetBSD: ipifuncs.c,v 1.1 2003/04/26 18:39:28 fvdl Exp $ */
 
 /*-
@@ -50,6 +50,7 @@
 #include <machine/i82489reg.h>
 #include <machine/i82489var.h>
 #include <machine/fpu.h>
+#include <machine/mplock.h>
 
 #include <ddb/db_output.h>
 #include <machine/db_machdep.h>
@@ -85,11 +86,6 @@ void (*ipifunc[X86_NIPI])(struct cpu_info *) =
 #else
 	NULL,
 #endif
-#ifdef HIBERNATE
-	x86_64_ipi_halt_realmode,
-#else
-	NULL,
-#endif /* HIBERNATE */
 };
 
 void
@@ -101,6 +97,8 @@ void
 x86_64_ipi_halt(struct cpu_info *ci)
 {
 	SCHED_ASSERT_UNLOCKED();
+	KASSERT(!__mp_lock_held(&kernel_lock));
+	
 	fpusave_cpu(ci, 1);
 	disable_intr();
 	lapic_disable();
@@ -109,7 +107,7 @@ x86_64_ipi_halt(struct cpu_info *ci)
 	wbinvd();
 
 	for(;;) {
-		__asm __volatile("hlt");
+		__asm volatile("hlt");
 	}
 }
 
@@ -135,19 +133,3 @@ x86_64_ipi_reload_mtrr(struct cpu_info *ci)
 		mem_range_softc.mr_op->reload(&mem_range_softc);
 }
 #endif
-
-#ifdef HIBERNATE
-void
-x86_64_ipi_halt_realmode(struct cpu_info *ci)
-{
-	/* Halt CPUs and park in real mode */
-
-	fpusave_cpu(ci, 1);
-	disable_intr();
-	wbinvd();
-	ci->ci_flags &= ~CPUF_RUNNING;
-	wbinvd();
-
-	hibernate_drop_to_real_mode();
-}
-#endif /* HIBERNATE */

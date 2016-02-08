@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip30_machdep.c,v 1.58 2014/01/06 21:41:15 miod Exp $	*/
+/*	$OpenBSD: ip30_machdep.c,v 1.62 2014/07/12 22:37:03 uebayasi Exp $	*/
 
 /*
  * Copyright (c) 2008, 2009 Miodrag Vallat.
@@ -24,7 +24,6 @@
 #include <sys/systm.h>
 #include <sys/proc.h>
 #include <sys/device.h>
-#include <sys/reboot.h>
 #include <sys/tty.h>
 
 #include <mips64/arcbios.h>
@@ -36,7 +35,7 @@
 #include <mips64/mips_cpu.h>
 #include <machine/memconf.h>
 
-#include <uvm/uvm.h>
+#include <uvm/uvm_extern.h>
 
 #include <sgi/sgi/ip30.h>
 #include <sgi/xbow/widget.h>
@@ -482,8 +481,8 @@ ip30_nmi_handler()
 	kdb_trap(-1, fr0);
 
 	splx(s);
-	printf("Resetting system...\n");
-	boot(RB_USERREQ);
+	panic("NMI");
+	/* NOTREACHED */
 }
 #endif
 
@@ -606,24 +605,5 @@ void
 hw_ipi_intr_clear(u_long cpuid)
 {
 	xheart_intr_clear(HEART_ISR_IPI(cpuid));
-}
-
-void
-hw_cpu_init_secondary(struct cpu_info *ci)
-{
-	/*
-	 * When attaching secondary processors, cache information is not
-	 * available yet.  But since the MP-capable systems we run on
-	 * currently all have R10k-style caches, we can quickly compute
-	 * the needed values.
-	 */
-	ci->ci_cacheways = 2;
-	ci->ci_l1instcachesize = 32 * 1024;
-	ci->ci_l1instcacheline = 64;
-	ci->ci_l1datacachesize = 32 * 1024;
-	ci->ci_l1datacacheline = 32;
-	ci->ci_l2size = ci->ci_hw.l2size;
-	ci->ci_l2line = 64;			/* safe default */
-	ci->ci_l3size = 0;
 }
 #endif

@@ -1,4 +1,4 @@
-/* $OpenBSD: acpitz.c,v 1.44 2012/10/31 16:35:36 deraadt Exp $ */
+/* $OpenBSD: acpitz.c,v 1.47 2014/07/12 02:44:49 mlarkin Exp $ */
 /*
  * Copyright (c) 2006 Can Erkin Acar <canacar@openbsd.org>
  * Copyright (c) 2005 Marco Peereboom <marco@openbsd.org>
@@ -65,9 +65,11 @@ struct acpitz_softc {
 
 int	acpitz_match(struct device *, void *, void *);
 void	acpitz_attach(struct device *, struct device *, void *);
+int	acpitz_activate(struct device *, int);
 
 struct cfattach acpitz_ca = {
-	sizeof(struct acpitz_softc), acpitz_match, acpitz_attach
+	sizeof(struct acpitz_softc), acpitz_match, acpitz_attach,
+	NULL, acpitz_activate
 };
 
 struct cfdriver acpitz_cd = {
@@ -184,9 +186,10 @@ acpitz_match(struct device *parent, void *match, void *aux)
 void
 acpitz_attach(struct device *parent, struct device *self, void *aux)
 {
-	struct acpitz_softc	*sc = (struct acpitz_softc *)self;
+	struct acpitz_softc *sc = (struct acpitz_softc *)self;
 	struct acpi_attach_args	*aa = aux;
-	int			i;
+	int i;
+	char name[5];
 
 	sc->sc_acpi = (struct acpi_softc *)parent;
 	sc->sc_devnode = aa->aaa_node;
@@ -194,6 +197,19 @@ acpitz_attach(struct device *parent, struct device *self, void *aux)
 	TAILQ_INIT(&sc->sc_psl);
 	for (i = 0; i < ACPITZ_MAX_AC; i++)
 		TAILQ_INIT(&sc->sc_alx[i]);
+
+	/*
+	 * Preread the trip points (discard/ignore values read here as we will
+	 * re-read them later)
+	 */
+	acpitz_gettempreading(sc, "_CRT");
+	acpitz_gettempreading(sc, "_HOT");
+	acpitz_gettempreading(sc, "_PSV");
+	for (i = 0; i < ACPITZ_MAX_AC; i++) {
+		snprintf(name, sizeof(name), "_AC%d", i);
+		acpitz_getreading(sc, name);
+	}
+	acpitz_gettempreading(sc, "_TMP");
 
 	sc->sc_lasttmp = -1;
 	if ((sc->sc_tmp = acpitz_gettempreading(sc, "_TMP")) == -1) {
@@ -234,6 +250,19 @@ acpitz_attach(struct device *parent, struct device *self, void *aux)
 	 * fully attached
 	 */
 	kthread_create_deferred(acpitz_init_perf, sc);
+}
+
+int
+acpitz_activate(struct device *self, int act)
+{
+	struct acpitz_softc	*sc = (struct acpitz_softc *)self;
+
+	switch (act) {
+	case DVACT_WAKEUP:
+		acpitz_init(sc, ACPITZ_INIT);
+		break;
+	}
+	return 0;
 }
 
 int
@@ -329,7 +358,7 @@ acpitz_refresh(void *arg)
 		/* do critical shutdown */
 		printf("%s: critical temperature exceeded %dC, shutting "
 		    "down\n", DEVNAME(sc), KTOC(sc->sc_tmp));
-		psignal(initproc, SIGUSR2);
+		prsignal(initprocess, SIGUSR2);
 	}
 	if (sc->sc_hot != -1 && sc->sc_hot <= sc->sc_tmp) {
 		printf("%s: _HOT temperature\n", DEVNAME(sc));
@@ -422,7 +451,7 @@ acpitz_gettempreading(struct acpitz_softc *sc, char *name)
 		tmp = acpitz_getreading(sc, name);
 		if (tmp == -1)
 			goto out;
-		if (KTOC(tmp) > 0) {
+		if (KTOC(tmp) >= 0) {
 			rv = tmp;
 			break;
 		} else {

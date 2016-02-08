@@ -27,13 +27,8 @@
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/malloc.h>
-#include <sys/kernel.h>
-#include <sys/proc.h>
-#include <sys/conf.h>
 #include <sys/device.h>
-#include <sys/agpio.h>
-
-#include <uvm/uvm_extern.h>
+#include <sys/rwlock.h>
 
 #include <dev/pci/pcivar.h>
 #include <dev/pci/pcireg.h>

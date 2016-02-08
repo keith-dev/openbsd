@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.1 2011/09/16 18:12:09 shadchin Exp $
+#	$OpenBSD: Makefile,v 1.4 2014/05/10 16:45:23 schwarze Exp $
 
 PROG=	less
 SRCS=	main.c screen.c brac.c ch.c charset.c cmdbuf.c command.c cvt.c \
@@ -10,19 +10,22 @@ SRCS=	main.c screen.c brac.c ch.c charset.c cmdbuf.c command.c cvt.c \
 LDADD=	-lcurses
 DPADD=	${LIBCURSES}
 
-LINKS=	${BINDIR}/less ${BINDIR}/more ${BINDIR}/less ${BINDIR}/page
+LINKS=	${BINDIR}/less ${BINDIR}/more
 
-MAN=	less.1
-MLINKS=	less.1 more.1 less.1 page.1
+MAN=	less.1 more.1
 
-HELPFILE=${SHAREDIR}/misc/more.help
+HELPDIR=${SHAREDIR}/misc
 
-CFLAGS+=-DBINDIR=\"${BINDIR}\" -DSYSDIR=\"/etc\" -DHELPFILE=\"${HELPFILE}\"
+CFLAGS+=-DBINDIR=\"${BINDIR}\" -DSYSDIR=\"/etc\" -DHELPDIR=\"${HELPDIR}\"
 
 CDIAGFLAGS+=-Wall -W
 
 beforeinstall:
 	${INSTALL} ${INSTALL_COPY} -o ${SHAREOWN} -g ${SHAREGRP} \
-	    -m ${SHAREMODE} ${.CURDIR}/../less.hlp ${DESTDIR}${HELPFILE}
+	    -m ${SHAREMODE} ${.CURDIR}/../less.hlp \
+	    ${DESTDIR}${HELPDIR}/less.help
+	${INSTALL} ${INSTALL_COPY} -o ${SHAREOWN} -g ${SHAREGRP} \
+	    -m ${SHAREMODE} ${.CURDIR}/../more.hlp \
+	    ${DESTDIR}${HELPDIR}/more.help
 
 .include <bsd.prog.mk>

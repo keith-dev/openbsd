@@ -24,8 +24,11 @@
 
 #include <dev/pci/pcireg.h>
 #include <dev/pci/pcivar.h>
+#include <dev/pci/pcidevs.h>
 #include <dev/pci/vga_pcivar.h>
 
+#include <dev/pci/drm/i915/i915_devlist.h>
+#include <dev/pci/drm/radeon/radeon_devlist.h>
 
 #if NDRM > 0
 int
@@ -73,7 +76,7 @@ vga_pci_bar_init(struct vga_pci_softc *dev, struct pci_attach_args *pa)
 		if (pci_mapreg_info(pa->pa_pc, pa->pa_tag, addr,
 		    dev->bars[i]->maptype, &dev->bars[i]->base,
 		    &dev->bars[i]->maxsize, &dev->bars[i]->flags) != 0) {
-			free(dev->bars[i], M_DEVBUF);
+			free(dev->bars[i], M_DEVBUF, 0);
 			dev->bars[i] = NULL;
 		}
 
@@ -150,3 +153,40 @@ vga_pci_bar_unmap(struct vga_pci_bar *bar)
 			bus_space_unmap(bar->bst, bar->bsh, bar->size);
 	}
 }
+
+#ifdef RAMDISK_HOOKS
+static const struct pci_matchid aperture_blacklist[] = {
+	/* server adapters found in mga200 drm driver */
+	{ PCI_VENDOR_MATROX,	PCI_PRODUCT_MATROX_G200E_SE },
+	{ PCI_VENDOR_MATROX,	PCI_PRODUCT_MATROX_G200E_SE_B },
+	{ PCI_VENDOR_MATROX,	PCI_PRODUCT_MATROX_G200EH },
+	{ PCI_VENDOR_MATROX,	PCI_PRODUCT_MATROX_G200ER },
+	{ PCI_VENDOR_MATROX,	PCI_PRODUCT_MATROX_G200EV },
+	{ PCI_VENDOR_MATROX,	PCI_PRODUCT_MATROX_G200EW },
+
+	/* server adapters found in ast drm driver */
+	{ PCI_VENDOR_ASPEED,	PCI_PRODUCT_ASPEED_AST2000 },
+	{ PCI_VENDOR_ASPEED,	PCI_PRODUCT_ASPEED_AST2100 },
+
+	/* ati adapters found in servers */
+	{ PCI_VENDOR_ATI,		PCI_PRODUCT_ATI_RAGEXL },
+	{ PCI_VENDOR_ATI,		PCI_PRODUCT_ATI_ES1000 },
+
+	/* xgi found in some poweredges/supermicros/tyans */
+	{ PCI_VENDOR_XGI,		PCI_PRODUCT_XGI_VOLARI_Z7 },
+	{ PCI_VENDOR_XGI,		PCI_PRODUCT_XGI_VOLARI_Z9 },
+};
+
+int
+vga_aperture_needed(struct pci_attach_args *pa)
+{
+#if defined(__i386__) || defined(__amd64__) || \
+    defined(__sparc64__) || defined(__macppc__)
+	if (pci_matchbyid(pa, i915_devices, nitems(i915_devices)) ||
+	    pci_matchbyid(pa, radeon_devices, nitems(radeon_devices)) ||
+	    pci_matchbyid(pa, aperture_blacklist, nitems(aperture_blacklist)))
+		return (0);
+#endif
+	return (1);
+}
+#endif /* RAMDISK_HOOKS */

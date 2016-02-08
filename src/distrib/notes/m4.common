@@ -1,5 +1,5 @@
 dnl
-dnl	$OpenBSD: m4.common,v 1.107 2014/02/27 20:11:25 tedu Exp $
+dnl	$OpenBSD: m4.common,v 1.110 2014/08/06 02:34:23 doug Exp $
 dnl
 dnl Copyright (c) 2004 Todd T. Fries <todd@OpenBSD.org>
 dnl
@@ -133,7 +133,7 @@ define({:-OpenBSDetc-:},
 		 system from scratch, but should NOT be used if you are
 		 upgrading.  (If you are upgrading, it's recommended that
 		 you get a copy of this set and CAREFULLY upgrade your
-		 configuration files by hand; see the section named 
+		 configuration files by hand; see the section named
 		 "Upgrading a previously-installed OpenBSD System" below.)-:},.)showsize($1,$2)-:})dnl
 dnl
 dnl
@@ -246,6 +246,11 @@ define({:-OpenBSDminiroot-:},
 {:-	miniroot{:--:}OSrev.fs	A miniroot filesystem image to be used if you
 			for some reason can't or don't want to use the
 			ramdisk installation method.-:})dnl
+dnl
+define({:-OpenBSDinstallfs-:},
+{:-	install{:--:}OSrev.fs	A boot and installation image which contains
+			the base and X sets.  An install or upgrade can be
+			done with a USB key without network connectivity.-:})dnl
 dnl
 dnl
 dnl ========== Various Install Instructions
@@ -600,36 +605,6 @@ define({:-OpenBSDURLInstall-:},
 		Then refer to the section named "installation set selection"
 		below.-:})dnl
 dnl
-dnl For arches where you can create a boot tape, $1 can be set as the
-dnl file index of the first set, after the boot files.
-define({:-OpenBSDTAPEInstall-:},
-{:-	To install from tape:
-		Unlike all other installation methods, there is no way
-		to know the names of the files on tape.  Because of this,
-		it is impossible to check that the files on tape match
-		the machine architecture and release of OpenBSD/MACHINE.
-
-		Moreover, since tape filenames are not known, the file
-		checksums can not be verified.  Use this installation
-		method only if there is no better option.
-
-		In order to install from tape, the distribution sets to be
-		installed must have been written to tape previously, either
-		in tar format or gzip-compressed tar format.
-
-		You will also have to identify the tape device where the
-		distribution sets are to be extracted from.  This will
-		typically be "nrst0" (no-rewind, raw interface).
-
-		Next you will have to specify how many files have to be
-		skipped on the tape.  This number is usually zero{:--:}ifelse(X$1,X,,{:-, unless
-		you have created a bootable tape, in which case the number
-		will be $1-:}).
-
-		The install program will not automatically detect whether
-		an image has been compressed, so it will ask for that
-		information before starting the extraction of each file.-:})dnl
-dnl
 define({:-OpenBSDCDROMInstall-:},
 {:-	To install from CD-ROM:
 		When installing from a CD-ROM, you will be asked which
@@ -735,7 +710,7 @@ define({:-OpenBSDInstallWrapup-:},
 	If there have been errors extracting the sets from the previous
 	location, or if some sets have been missing, this allows you to
 	select a better source.
-		
+
 	Also, if the installation program complains that the distribution
 	sets you have been using do not match their recorded checksums, you
 	might want to check your installation source (although this can
@@ -834,10 +809,10 @@ user that is created during the installation.
            Password for root = ${:--:}2a${:--:}14${:--:}Z4xRMg8vDpgYH...GVot3ySoj8yby
            Setup a user = puffy
            Password for user = *************
-           Public ssh key for user = ssh-rsa AAAAB3...RVtZJL puffy@ai
+           Public ssh key for user = ssh-ed25519 AAAAC3NzaC1...g3Aqre puffy@ai
            What timezone are you in = Europe/Stockholm
            Location of sets = http
-           Server = ftp.eu.openbsd.org
+           HTTP Server = ftp.eu.openbsd.org
 
 The "System hostname" key above matches the following full question
 asked during an interactive installation:
@@ -942,7 +917,7 @@ define({:-OpenBSDXferCDROM-:},
 	OpenBSD users should be able to do this with the cdio command.
 	"cdio tao install{:--:}OSrev.iso"
 
-	Users of other operating systems should consult the 
+	Users of other operating systems should consult the
 	appropriate documentation.-:})dnl
 dnl
 define({:-OpenBSDXferFloppyFromDOS-:},
@@ -956,7 +931,7 @@ define({:-OpenBSDXferFloppyFromDOS-:},
 	browser.  In either case, take care to do "binary" transfers, since
 	these are images files and any DOS cr/lf translations or Control-z
 	EOF interpretations will result in corrupted transfers.
-	
+
 	You will also need to go to the "tools" directory and grab a copy of
 	the ntrw.exe utility.  Run it with the correct arguments like this
 	"ntrw <image> <drive>:"
@@ -967,7 +942,7 @@ dnl
 define({:-OpenBSDXferFloppyFromUNIX-:},
 {:-Creating a bootable floppy disk using a Un*x-like system:
 
-	First, you will need obtain a local copy of the bootable filesystem
+	First, you will need to obtain a local copy of the bootable filesystem
 	image as described above.  You should use the signify(1) and sha256(1)
 	commands to verify the integrity of the images with the SHA256.sig file
 	on the mirror site.
@@ -994,111 +969,40 @@ define({:-OpenBSDXferFloppyFromUNIX-:},
 	Note that, when installing, the boot floppy can be write-protected
 	(i.e. read-only).-:})dnl
 dnl
-dnl Tape preparation instructions.
+define({:-OpenBSDXferUSBFromUNIX-:},
+{:-Creating a bootable USB key using a Un*x-like system:
+
+	Some older systems may not be able to boot from USB keys or require
+	changing boot priority.  Check your BIOS settings if you run into
+	problems.
+
+	First, you will need to obtain a local copy of the bootable filesystem
+	image miniroot{:--:}OSrev.fs or install{:--:}OSrev.fs as described above.
+	You should use the signify(1) and sha256(1) commands to verify
+	the integrity of the images with the SHA256.sig file on the mirror site.
+
+	Next, use the dd(1) utility to copy the file to the USB storage device.
+	The command would likely be, under OpenBSD:
+		dd if=miniroot{:--:}OSrev.fs of=/dev/rsdNc bs=1m
+
+	where N is the device number.  You can find the correct device number
+	by checking dmesg(8) when inserting the media.
+
+	If you are using another operating system, you may have to adapt
+	this to conform to local naming conventions for the USB key and
+	options suitable for copying to a "raw" disk image.  The key
+	issue is that the device name used for the USB key *must* be one
+	that refers to the correct block device, not a partition or
+	compatibility mode, and the copy command needs to be compatible
+	with the requirement that writes to a raw device must be in
+	multiples of 512-byte blocks.  The variations are endless and
+	beyond the scope of this document.
+
+	If you're doing this on the system you intend to boot the USB key on,
+	copying the image back to a file and doing a compare or checksum
+	is a good way to verify that the USB key is readable and free of
+	read/write errors.-:})dnl
 dnl
-dnl OpenBSDXferBareTape describes how to set up a non-bootable distribution
-dnl tape, and takes as an optional argument, the list of X11 sets which
-dnl may be put on the tape.
-define({:-OpenBSDXferBareTape-:},
-{:-Creating an installation tape:
-
-	While you won't be able to boot OpenBSD from a tape, you can use
-	one to provide the installation sets.  To do so, you need to make
-	a tape that contains the distribution set files, each in "tar"
-	format or in "gzipped tar format".  First you will need to
-	transfer the distribution sets to your local system, using ftp or
-	by mounting the CD-ROM containing the release.  Then you need to
-	make a tape containing the files.
-
-	If you're making the tape on a UN*X-like system, the easiest way
-	to do so is make a shell script along the following lines, call it
-	"/tmp/maketape".
-
-	#! /bin/sh
-	TAPE=${TAPE:-/dev/nrst0}
-	mt -f ${TAPE} rewind
-	for file in base etc comp game man $1
-	do
-		dd if=${file}OSrev.tgz of=${TAPE} obs=8k conv=osync
-	done
-	tar cf ${TAPE} bsd
-	mt -f ${TAPE} offline
-	# end of script
-
-	And then:
-
-	cd .../OSREV/MACHINE
-	sh -x /tmp/maketape
-
-	If you're using a system other than OpenBSD, the tape
-	name and other requirements may change.  You can override the
-	default device name (/dev/nrst0) with the TAPE environment
-	variable.  For example, under Solaris, you would probably run:
-
-	TAPE=/dev/rmt/0n sh -x /tmp/maketape
-
-	Note that, when installing, the tape can be write-protected
-	(i.e. read-only).-:})dnl
-dnl OpenBSDXferBootTape describes how to set up a non-bootable distribution
-dnl tape, and takes as first argument, the list of X11 sets which may be put
-dnl on the tape.  Then at least one, and up to three arguments list the first
-dnl files to be put on the tape to make it bootable.  Each filename can be
-dnl followed by dd(1) arguments (such as conv=osync).
-define({:-OpenBSDXferBootTape-:},
-{:-Creating an (optionally bootable) installation tape:
-
-	To install OpenBSD from a tape, you need to make a tape that
-	contains the distribution set files, each in "tar" format or in
-	"gzipped tar format".  First you will need to transfer the
-	distribution sets to your local system, using ftp or by
-	mounting the CD-ROM containing the release.  Then you need to
-	make a tape containing the files.
-
-	If you're making the tape on a UN*X-like system, the easiest way
-	to do so is make a shell script along the following lines, call it
-	"/tmp/maketape".
-
-	#! /bin/sh
-	TAPE=${TAPE:-/dev/nrst0}
-	mt -f ${TAPE} rewind
-	if test {:-$-:}# -lt 1
-	then
-		dd of=${TAPE} if=$2
-ifelse(X$3,X,,{:-		dd of=${TAPE} if=$3
--:})dnl
-ifelse(X$4,X,,{:-		dd of=${TAPE} if=$4
--:})dnl
-	fi
-	for file in base etc comp game man $1
-	do
-		dd if=${file}OSrev.tgz of=${TAPE} obs=8k conv=osync
-	done
-	tar cf ${TAPE} bsd
-	mt -f ${TAPE} offline
-	# end of script
-
-	And then:
-
-	cd .../OSREV/MACHINE
-	sh -x /tmp/maketape
-
-        Note that, by default, this script creates a bootable tape.  If
-	you only want to fetch the OpenBSD files from tape, but want to
-	boot from another device, you can save time and space creating
-	the tape this way:
-
-        cd .../OSREV/MACHINE
-        sh -x /tmp/maketape noboot
-
-	If you're using a system other than OpenBSD, the tape
-	name and other requirements may change.  You can override the
-	default device name (/dev/nrst0) with the TAPE environment
-	variable.  For example, under Solaris, you would probably run:
-
-	TAPE=/dev/rmt/0n sh -x /tmp/maketape
-
-	Note that, when installing, the tape can be write-protected
-	(i.e. read-only).-:})dnl
 dnl OpenBSDXferNFS [(noupgrade)]
 define({:-OpenBSDXferNFS-:},
 {:-To install OpenBSD using a remote partition, mounted via

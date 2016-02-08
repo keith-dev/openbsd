@@ -1,4 +1,4 @@
-/*	$OpenBSD: procmap.c,v 1.52 2014/02/13 21:17:13 tedu Exp $ */
+/*	$OpenBSD: procmap.c,v 1.55 2014/07/08 17:19:26 deraadt Exp $ */
 /*	$NetBSD: pmap.c,v 1.1 2002/09/01 20:32:44 atatat Exp $ */
 
 /*
@@ -39,6 +39,9 @@
 #include <sys/mount.h>
 #include <sys/uio.h>
 #include <sys/sysctl.h>
+
+/* XXX until uvm gets cleaned up */
+typedef int boolean_t;
 
 #include <uvm/uvm.h>
 #include <uvm/uvm_device.h>
@@ -309,8 +312,7 @@ main(int argc, char *argv[])
 			kproc = kvm_getprocs(kd, KERN_PROC_PID, pid,
 			    sizeof(struct kinfo_proc), &rc);
 			if (kproc == NULL || rc == 0) {
-				errno = ESRCH;
-				warn("%d", pid);
+				warnc(ESRCH, "%d", pid);
 				pid = -1;
 				continue;
 			}
@@ -867,9 +869,6 @@ findname(kvm_t *kd, struct kbit *vmspace,
 	    (D(vmspace, vmspace)->vm_maxsaddr + (size_t)maxssiz) >=
 	    (caddr_t)vme->end) {
 		name = "  [ stack ]";
-	} else if (D(vmspace, vmspace)->vm_daddr <= (caddr_t)vme->start &&
-	    D(vmspace, vmspace)->vm_daddr + BRKSIZ >= (caddr_t)vme->end) {
-		name = "  [ heap ]";
 	} else if (UVM_ET_ISHOLE(vme))
 		name = "  [ hole ]";
 	else

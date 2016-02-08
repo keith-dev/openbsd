@@ -1,4 +1,4 @@
-/*	$OpenBSD: extract.c,v 1.1 2007/10/04 17:46:09 mglocker Exp $ */
+/*	$OpenBSD: extract.c,v 1.3 2014/07/12 19:01:49 tedu Exp $ */
 
 /*
  * Copyright (c) 2006 Marcus Glocker <mglocker@openbsd.org>

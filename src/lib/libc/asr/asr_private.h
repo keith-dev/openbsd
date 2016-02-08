@@ -1,4 +1,4 @@
-/*	$OpenBSD: asr_private.h,v 1.23 2013/07/12 14:36:21 eric Exp $	*/
+/*	$OpenBSD: asr_private.h,v 1.26 2014/04/17 15:28:26 guenther Exp $	*/
 /*
  * Copyright (c) 2012 Eric Faurot <eric@openbsd.org>
  *
@@ -17,10 +17,6 @@
 
 #include <stdio.h>
 
-#ifndef ASRNODEBUG
-#define DEBUG
-#endif
-
 #define QR_MASK		(0x1 << 15)
 #define OPCODE_MASK	(0xf << 11)
 #define AA_MASK		(0x1 << 10)
@@ -34,21 +30,21 @@
 #define RCODE(v)	((v) & RCODE_MASK)
 
 
-struct pack {
+struct asr_pack {
 	char		*buf;
 	size_t		 len;
 	size_t		 offset;
 	const char	*err;
 };
 
-struct unpack {
+struct asr_unpack {
 	const char	*buf;
 	size_t		 len;
 	size_t		 offset;
 	const char	*err;
 };
 
-struct header {
+struct asr_dns_header {
 	uint16_t	id;
 	uint16_t	flags;
 	uint16_t	qdcount;
@@ -57,13 +53,13 @@ struct header {
 	uint16_t	arcount;
 };
 
-struct query {
+struct asr_dns_query {
 	char		q_dname[MAXDNAME];
 	uint16_t	q_type;
 	uint16_t	q_class;
 };
 
-struct rr {
+struct asr_dns_rr {
 	char		rr_dname[MAXDNAME];
 	uint16_t	rr_type;
 	uint16_t	rr_class;
@@ -152,6 +148,8 @@ struct asr {
 	struct asr_ctx	*a_ctx;
 };
 
+#define ASYNC_COND		0
+#define ASYNC_DONE		1
 
 #define	ASYNC_DOM_FQDN		0x00000001
 #define	ASYNC_DOM_NDOTS		0x00000002
@@ -164,8 +162,8 @@ struct asr {
 #define	ASYNC_EXTOBUF		0x00002000
 
 
-struct async {
-	int		(*as_run)(struct async *, struct async_res *);
+struct asr_query {
+	int		(*as_run)(struct asr_query *, struct asr_result *);
 	struct asr_ctx	*as_ctx;
 	int		 as_type;
 	int		 as_state;
@@ -212,7 +210,7 @@ struct async {
 			int		 class;
 			int		 type;
 			char		*name;
-			struct async	*subq;
+			struct asr_query	*subq;
 			int		 saved_h_errno;
 		} search;
 
@@ -221,13 +219,13 @@ struct async {
 			int		 class;
 			int		 type;
 			char		*name;
-			struct async	*subq;
+			struct asr_query	*subq;
 		} rrset;
 
 		struct {
 			char		*name;
 			int		 family;
-			struct async	*subq;
+			struct asr_query	*subq;
 			char		 addr[16];
 			int		 addrlen;
 			int		 subq_h_errno;
@@ -236,7 +234,7 @@ struct async {
 		struct {
 			char		*name;
 			int		 family;
-			struct async	*subq;
+			struct asr_query	*subq;
 			in_addr_t	 addr;
 		} netnamadr;
 
@@ -255,7 +253,7 @@ struct async {
 			char		*fqdn;
 			struct addrinfo	*aifirst;
 			struct addrinfo	*ailast;
-			struct async	*subq;
+			struct asr_query	*subq;
 			int		 flags;
 		} ai;
 
@@ -270,7 +268,7 @@ struct async {
 				struct sockaddr_in6	sain6;
 			}		 sa;
 			int		 flags;
-			struct async	*subq;
+			struct asr_query	*subq;
 		} ni;
 #define MAXTOKEN 10
 	} as;
@@ -299,32 +297,34 @@ enum asr_state {
 
 
 /* asr_utils.c */
-void	asr_pack_init(struct pack *, char *, size_t);
-int	asr_pack_header(struct pack *, const struct header *);
-int	asr_pack_query(struct pack *, uint16_t, uint16_t, const char *);
-void	asr_unpack_init(struct unpack *, const char *, size_t);
-int	asr_unpack_header(struct unpack *, struct header *);
-int	asr_unpack_query(struct unpack *, struct query *);
-int	asr_unpack_rr(struct unpack *, struct rr *);
-int	asr_sockaddr_from_str(struct sockaddr *, int, const char *);
+void asr_pack_init(struct asr_pack *, char *, size_t);
+int asr_pack_header(struct asr_pack *, const struct asr_dns_header *);
+int asr_pack_query(struct asr_pack *, uint16_t, uint16_t, const char *);
+void asr_unpack_init(struct asr_unpack *, const char *, size_t);
+int asr_unpack_header(struct asr_unpack *, struct asr_dns_header *);
+int asr_unpack_query(struct asr_unpack *, struct asr_dns_query *);
+int asr_unpack_rr(struct asr_unpack *, struct asr_dns_rr *);
+int asr_sockaddr_from_str(struct sockaddr *, int, const char *);
 ssize_t asr_dname_from_fqdn(const char *, char *, size_t);
 ssize_t asr_addr_as_fqdn(const char *, int, char *, size_t);
 
 /* asr.c */
-struct asr_ctx *asr_use_resolver(struct asr *);
+void *asr_resolver(const char *);
+void asr_resolver_done(void *);
+struct asr_ctx *asr_use_resolver(void *);
 void asr_ctx_unref(struct asr_ctx *);
-struct async *asr_async_new(struct asr_ctx *, int);
-void asr_async_free(struct async *);
+struct asr_query *asr_async_new(struct asr_ctx *, int);
+void asr_async_free(struct asr_query *);
 size_t asr_make_fqdn(const char *, const char *, char *, size_t);
 char *asr_strdname(const char *, char *, size_t);
-int asr_iter_db(struct async *);
+int asr_iter_db(struct asr_query *);
 int asr_parse_namedb_line(FILE *, char **, int);
 char *asr_hostalias(struct asr_ctx *, const char *, char *, size_t);
 
-/* <*>_async.h */
-struct async *res_query_async_ctx(const char *, int, int, struct asr_ctx *);
-struct async *res_search_async_ctx(const char *, int, int, struct asr_ctx *);
-struct async *gethostbyaddr_async_ctx(const void *, socklen_t, int,
+/* *_async.c */
+struct asr_query *res_query_async_ctx(const char *, int, int, struct asr_ctx *);
+struct asr_query *res_search_async_ctx(const char *, int, int, struct asr_ctx *);
+struct asr_query *gethostbyaddr_async_ctx(const void *, socklen_t, int,
     struct asr_ctx *);
 
 #ifdef DEBUG

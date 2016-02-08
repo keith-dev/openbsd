@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip22_machdep.c,v 1.14 2012/09/29 21:46:02 miod Exp $	*/
+/*	$OpenBSD: ip22_machdep.c,v 1.20 2014/07/17 19:51:58 miod Exp $	*/
 
 /*
  * Copyright (c) 2012 Miodrag Vallat.
@@ -27,7 +27,7 @@
 #include <sys/buf.h>
 #include <sys/mount.h>
 
-#include <uvm/uvm.h>
+#include <uvm/uvm_extern.h>
 
 #include <machine/autoconf.h>
 #include <machine/bus.h>
@@ -62,9 +62,12 @@ int	hpc_old = 0;
 int	bios_year;
 int	ip22_ecc = 0;
 
+void	(*ip22_extsync)(struct cpu_info *, paddr_t, size_t, int);
+
 void	ip22_arcbios_walk(void);
 int	ip22_arcbios_walk_component(arc_config_t *);
 void	ip22_cache_halt(int);
+void	ip22_cache_sync(struct cpu_info *, paddr_t, size_t, int);
 void	ip22_ecc_halt(int);
 void	ip22_ecc_init(int);
 void	ip22_memory_setup(void);
@@ -115,8 +118,10 @@ ip22_arcbios_walk_component(arc_config_t *cf)
 		 * SS is Log2(cache size in 4KB units)
 		 *   (should be between 0007 and 0009)
 		 */
-		ci->ci_l2size = (1 << 12) << (key & 0x0000ffff);
-		ci->ci_l2line = 1 << ((key >> 16) & 0xff);
+		ci->ci_l2.size = (1 << 12) << (key & 0x0000ffff);
+		ci->ci_l2.linesize = 1 << ((key >> 16) & 0xff);
+		ci->ci_l2.sets = (key >> 24) & 0xff;
+		ci->ci_l2.setsize = ci->ci_l2.size / ci->ci_l2.sets;
 
 		ip22_arcwalk_results |= IP22_HAS_L2;
 	}
@@ -350,7 +355,7 @@ ip22_video_setup()
 	else
 		return;
 
-	if (fbphys < GIO_ADDR_GFX || fbphys >= GIO_ADDR_END)
+	if (!IS_GIO_ADDRESS(fbphys))
 		return;
 
 	/*
@@ -360,7 +365,7 @@ ip22_video_setup()
 	 * Verified addresses:
 	 * grtwo	slot + 0x00000000
 	 * impact	slot + 0x00000000
-	 * light	?
+	 * light	slot + 0x003f0000 (LIGHT_ADDR_0)
 	 * newport	slot + 0x000f0000 (NEWPORT_REX3_OFFSET)
 	 */
 
@@ -752,7 +757,7 @@ ip22_cache_halt(int howto)
 void
 ip22_ConfigCache(struct cpu_info *ci)
 {
-	uint l2line, l2size;
+	struct cache_info l2;
 
 	/*
 	 * Note that we are relying upon machdep.c only invoking us if we
@@ -763,12 +768,11 @@ ip22_ConfigCache(struct cpu_info *ci)
 		return;
 	}
 
-	l2line = ci->ci_l2line;
-	l2size = ci->ci_l2size;
+	l2 = ci->ci_l2;
 
 	Mips5k_ConfigCache(ci);
 
-	if (l2line != IP22_L2_LINE) {
+	if (l2.linesize != IP22_L2_LINE || l2.sets != 1) {
 		/*
 		 * This should not happen. Better not try and tame an
 		 * unknown beast.
@@ -776,11 +780,10 @@ ip22_ConfigCache(struct cpu_info *ci)
 		return;
 	}
 
-	ci->ci_l2line = l2line;
-	ci->ci_l2size = l2size;
+	ci->ci_l2 = l2;
 
 	ci->ci_SyncCache = ip22_SyncCache;
-	ci->ci_IOSyncDCache = ip22_IOSyncDCache;
+	ip22_extsync = ip22_cache_sync;
 
 	md_halt = ip22_cache_halt;
 	ip22_l2_enable();
@@ -794,7 +797,7 @@ ip22_SyncCache(struct cpu_info *ci)
 	Mips5k_SyncCache(ci);
 
 	sva = PHYS_TO_XKPHYS(IP22_CACHE_TAG_ADDRESS, CCA_NC);
-	eva = sva + ci->ci_l2size;
+	eva = sva + ci->ci_l2.size;
 
 	while (sva < eva) {
 		*(volatile uint32_t *)sva = 0;
@@ -803,14 +806,10 @@ ip22_SyncCache(struct cpu_info *ci)
 }
 
 void
-ip22_IOSyncDCache(struct cpu_info *ci, vaddr_t _va, size_t _sz, int how)
+ip22_cache_sync(struct cpu_info *ci, paddr_t _pa, size_t _sz, int how)
 {
-	vaddr_t va;
 	size_t sz;
-	paddr_t pa;
-
-	/* do whatever L1 work is necessary */
-	Mips5k_IOSyncDCache(ci, _va, _sz, how);
+	paddr_t pa, tagbase;
 
 	switch (how) {
 	default:
@@ -819,33 +818,20 @@ ip22_IOSyncDCache(struct cpu_info *ci, vaddr_t _va, size_t _sz, int how)
 	case CACHE_SYNC_X:
 	case CACHE_SYNC_R:
 		/* extend the range to integral cache lines */
-		va = _va & ~(IP22_L2_LINE - 1);
-		sz = ((_va + _sz + IP22_L2_LINE - 1) & ~(IP22_L2_LINE - 1)) -
-		    va;
+		pa = _pa & ~(IP22_L2_LINE - 1);
+		sz = ((_pa + _sz + IP22_L2_LINE - 1) & ~(IP22_L2_LINE - 1)) -
+		    pa;
+
+		pa &= ci->ci_l2.size - 1;
+		tagbase = PHYS_TO_XKPHYS(IP22_CACHE_TAG_ADDRESS, CCA_NC);
 
 		while (sz != 0) {
-			/* get the proper physical address */
-			if (pmap_extract(pmap_kernel(), va, &pa) == 0) {
-#ifdef DIAGNOSTIC
-				panic("%s: invalid va %p", __func__, va);
-#else
-				/* should not happen */
-#endif
-			}
+			/* word write: invalidate line */
+			*(volatile uint32_t *)(tagbase | pa) = 0;
 
-			pa &= ci->ci_l2size - 1;
-			pa |= PHYS_TO_XKPHYS(IP22_CACHE_TAG_ADDRESS, CCA_NC);
-
-			while (sz != 0) {
-				/* word write: invalidate line */
-				*(volatile uint32_t *)pa = 0;
-
-				pa += IP22_L2_LINE;
-				va += IP22_L2_LINE;
-				sz -= IP22_L2_LINE;
-				if ((va & PAGE_MASK) == 0)
-					break;	/* need pmap_extract() */
-			}
+			pa += IP22_L2_LINE;
+			pa &= ci->ci_l2.size - 1;
+			sz -= IP22_L2_LINE;
 		}
 		break;
 	}

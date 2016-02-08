@@ -1,4 +1,4 @@
-/*	$OpenBSD: ktrace.c,v 1.27 2013/11/06 17:26:55 sobrado Exp $	*/
+/*	$OpenBSD: ktrace.c,v 1.30 2014/05/24 17:04:16 deraadt Exp $	*/
 /*	$NetBSD: ktrace.c,v 1.4 1995/08/31 23:01:44 jtc Exp $	*/
 
 /*-
@@ -74,7 +74,7 @@ main(int argc, char *argv[])
 	tracespec = NULL;
 
 	if (is_ltrace) {
-		while ((ch = getopt(argc, argv, "af:iu:")) != -1)
+		while ((ch = getopt(argc, argv, "af:it:u:")) != -1)
 			switch ((char)ch) {
 			case 'a':
 				append = 1;
@@ -84,6 +84,13 @@ main(int argc, char *argv[])
 				break;
 			case 'i':
 				inherit = 1;
+				break;
+			case 't':
+				trpoints = getpoints(optarg);
+				if (trpoints < 0) {
+					warnx("unknown facility in %s", optarg);
+					usage();
+				}
 				break;
 			case 'u':
 				tracespec = optarg;
@@ -154,8 +161,11 @@ main(int argc, char *argv[])
 		} else
 			ops |= pid ? KTROP_CLEAR : KTROP_CLEARFILE;
 
-		if (ktrace(tracefile, ops, trpoints, pid) < 0)
+		if (ktrace(tracefile, ops, trpoints, pid) < 0) {
+			if (errno == ESRCH)
+				err(1, "%d", pid);
 			err(1, "%s", tracefile);
+		}
 		exit(0);
 	}
 
@@ -189,8 +199,11 @@ main(int argc, char *argv[])
 		execvp(argv[0], &argv[0]);
 		err(1, "exec of '%s' failed", argv[0]);
 	}
-	else if (ktrace(tracefile, ops, trpoints, pid) < 0)
+	else if (ktrace(tracefile, ops, trpoints, pid) < 0) {
+		if (errno == ESRCH)
+			err(1, "%d", pid);
 		err(1, "%s", tracefile);
+	}
 	exit(0);
 }
 
@@ -214,8 +227,8 @@ static void
 usage(void)
 {
 	if (is_ltrace)
-		fprintf(stderr, "usage: %s [-ai] [-f trfile] [-u trspec]"
-		    " command\n",
+		fprintf(stderr, "usage: %s [-ai] [-f trfile] [-t trstr]"
+		    " [-u trspec] command\n",
 		    __progname);
 	else
 		fprintf(stderr, "usage: %s [-aBCcdi] [-f trfile] [-g pgid]"

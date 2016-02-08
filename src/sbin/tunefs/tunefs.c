@@ -1,4 +1,4 @@
-/*	$OpenBSD: tunefs.c,v 1.32 2013/06/11 16:42:05 deraadt Exp $	*/
+/*	$OpenBSD: tunefs.c,v 1.34 2014/05/20 21:11:16 krw Exp $	*/
 /*	$NetBSD: tunefs.c,v 1.33 2005/01/19 20:46:16 xtraeme Exp $	*/
 
 /*
@@ -61,7 +61,6 @@ union {
 char buf[MAXBSIZE];
 
 int	fi;
-long	dev_bsize = 512;
 int	is_ufs2 = 0;
 off_t	sblockloc;
 
@@ -269,7 +268,7 @@ getsb(struct fs *fs, const char *file)
 	for (i = 0; ; i++) {
 		if (sblock_try[i] == -1)
 			errx(5, "cannot find filesystem superblock");
-		bread(sblock_try[i] / dev_bsize, (char *)fs, SBLOCKSIZE, file);
+		bread(sblock_try[i] / DEV_BSIZE, (char *)fs, SBLOCKSIZE, file);
 		switch(fs->fs_magic) {
 		case FS_UFS2_MAGIC:
 			is_ufs2 = 1;
@@ -287,33 +286,23 @@ getsb(struct fs *fs, const char *file)
 		break;
 	}
 
-	dev_bsize = fs->fs_fsize / fsbtodb(fs, 1);
-	sblockloc = sblock_try[i] / dev_bsize;
+	sblockloc = sblock_try[i] / DEV_BSIZE;
 }
 
 static void
 bwrite(daddr_t blk, char *buffer, int size, const char *file)
 {
-	off_t	offset;
-
-	offset = (off_t)blk * dev_bsize;
-	if (lseek(fi, offset, SEEK_SET) == -1)
-		err(6, "%s: seeking to %lld", file, (long long)offset);
-	if (write(fi, buffer, size) != size)
-		err(7, "%s: writing %d bytes", file, size);
+	if (pwrite(fi, buffer, size, blk * DEV_BSIZE) != size)
+		err(7, "%s: writing %d bytes @ %lld", file, size,
+		    (long long)(blk * DEV_BSIZE));
 }
 
 static void
 bread(daddr_t blk, char *buffer, int cnt, const char *file)
 {
-	off_t	offset;
-	int	i;
-
-	offset = (off_t)blk * dev_bsize;
-	if (lseek(fi, offset, SEEK_SET) == -1)
-		err(4, "%s: seeking to %lld", file, (long long)offset);
-	if ((i = read(fi, buffer, cnt)) != cnt)
-		errx(5, "%s: short read", file);
+	if ((pread(fi, buffer, cnt, (off_t)blk * DEV_BSIZE)) != cnt)
+		errx(5, "%s: reading %d bytes @ %lld", file, cnt,
+		    (long long)(blk * DEV_BSIZE));
 }
 
 static int

@@ -1,4 +1,4 @@
-/*	$OpenBSD: ipmi.c,v 1.69 2013/07/03 15:10:57 bluhm Exp $ */
+/*	$OpenBSD: ipmi.c,v 1.72 2014/07/12 18:48:17 tedu Exp $ */
 
 /*
  * Copyright (c) 2005 Jordan Hargrave
@@ -45,8 +45,6 @@
 #include <dev/isa/isavar.h>
 
 #include <dev/ipmivar.h>
-
-#include <uvm/uvm_extern.h>
 
 struct ipmi_sensor {
 	u_int8_t	*i_sdr;
@@ -1028,7 +1026,7 @@ ipmi_sendcmd(struct ipmi_softc *sc, int rssa, int rslun, int netfn, int cmd,
 		goto done;
 	}
 	rc = sc->sc_if->sendmsg(sc, txlen, buf);
-	free(buf, M_DEVBUF);
+	free(buf, M_DEVBUF, 0);
 
 	ipmi_delay(sc, 5); /* give bmc chance to digest command */
 
@@ -1068,7 +1066,7 @@ ipmi_recvcmd(struct ipmi_softc *sc, int maxlen, int *rxlen, void *data)
 	    *rxlen);
 	dbg_dump(10, " recv", *rxlen, data);
 
-	free(buf, M_DEVBUF);
+	free(buf, M_DEVBUF, 0);
 
 	ipmi_delay(sc, 5); /* give bmc chance to digest command */
 
@@ -1158,14 +1156,14 @@ get_sdr(struct ipmi_softc *sc, u_int16_t recid, u_int16_t *nxtrec)
 		    psdr + offset, NULL)) {
 			printf("%s: get chunk: %d,%d fails\n", DEVNAME(sc),
 			    offset, len);
-			free(psdr, M_DEVBUF);
+			free(psdr, M_DEVBUF, 0);
 			return (1);
 		}
 	}
 
 	/* Add SDR to sensor list, if not wanted, free buffer */
 	if (add_sdr_sensor(sc, psdr) == 0)
-		free(psdr, M_DEVBUF);
+		free(psdr, M_DEVBUF, 0);
 
 	return (0);
 }
@@ -1578,9 +1576,9 @@ ipmi_map_regs(struct ipmi_softc *sc, struct ipmi_attach_args *ia)
 	if (bus_space_map(sc->sc_iot, ia->iaa_if_iobase,
 	    sc->sc_if->nregs * sc->sc_if_iospacing,
 	    0, &sc->sc_ioh)) {
-		printf("%s: bus_space_map(%x %x %x 0 %p) failed\n",
+		printf("%s: bus_space_map(%lx %x %x 0 %p) failed\n",
 		    DEVNAME(sc),
-		    sc->sc_iot, ia->iaa_if_iobase,
+		    (unsigned long)sc->sc_iot, ia->iaa_if_iobase,
 		    sc->sc_if->nregs * sc->sc_if_iospacing, &sc->sc_ioh);
 		return (-1);
 	}

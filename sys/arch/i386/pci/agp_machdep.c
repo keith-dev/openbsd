@@ -1,4 +1,4 @@
-/*	$OpenBSD: agp_machdep.c,v 1.15 2013/12/09 19:52:11 kettenis Exp $	*/
+/*	$OpenBSD: agp_machdep.c,v 1.18 2014/07/12 18:44:42 tedu Exp $	*/
 
 /*
  * Copyright (c) 2008 - 2009 Owain G. Ainsworth <oga@openbsd.org>
@@ -43,18 +43,19 @@
 
 #include <sys/param.h>
 #include <sys/systm.h>
-#include <sys/device.h>
 #include <sys/malloc.h>
+#include <sys/rwlock.h>
 
 #include <dev/pci/pcivar.h>
 #include <dev/pci/pcireg.h>
 #include <dev/pci/pcidevs.h>
 #include <dev/pci/agpvar.h>
 
+#include <uvm/uvm_extern.h>
+
 #include <machine/cpufunc.h>
 #include <machine/bus.h>
-
-#include <uvm/uvm.h>
+#include <machine/pmap.h>
 
 void
 agp_flush_cache(void)
@@ -143,7 +144,7 @@ agp_destroy_map(struct agp_map *map)
 	if (extent_free(ex, map->addr, map->size,
 	    EX_NOWAIT | EX_MALLOCOK ))
 		printf("agp_destroy_map: can't free region\n");
-	free(map, M_AGP);
+	free(map, M_AGP, 0);
 }
 
 

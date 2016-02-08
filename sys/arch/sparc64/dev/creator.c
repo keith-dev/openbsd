@@ -1,4 +1,4 @@
-/*	$OpenBSD: creator.c,v 1.46 2013/10/20 20:07:27 miod Exp $	*/
+/*	$OpenBSD: creator.c,v 1.48 2014/07/12 18:44:43 tedu Exp $	*/
 
 /*
  * Copyright (c) 2002 Jason L. Wright (jason@thought.net)
@@ -762,7 +762,7 @@ creator_load_firmware(void *vsc)
 	if (sizeof(*fw) > buflen ||
 	    fw->fw_size * sizeof(u_int32_t) > (buflen - sizeof(*fw))) {
 		printf("%s: corrupt firmware\n", sc->sc_sunfb.sf_dev.dv_xname);
-		free(buf, M_DEVBUF);
+		free(buf, M_DEVBUF, 0);
 		return;
 	}
 
@@ -795,7 +795,7 @@ creator_load_firmware(void *vsc)
 
 	creator_ras_wait(sc);
 
-	free(buf, M_DEVBUF);
+	free(buf, M_DEVBUF, 0);
 }
 #endif /* SMALL_KERNEL */
 
@@ -826,7 +826,7 @@ creator_load_sram(struct creator_softc *sc, u_int32_t *ucode, u_int32_t size)
 	while (size > 0) {
 		creator_ras_fifo_wait(sc, 16);
 
-		__asm__ __volatile__("ld	[%0 + 0x00], %%f1\n\t"
+		__asm__ volatile("ld	[%0 + 0x00], %%f1\n\t"
 				     "ld	[%0 + 0x04], %%f0\n\t"
 				     "ld	[%0 + 0x08], %%f3\n\t"
 				     "ld	[%0 + 0x0c], %%f2\n\t"

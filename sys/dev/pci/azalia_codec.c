@@ -1,4 +1,4 @@
-/*	$OpenBSD: azalia_codec.c,v 1.159 2014/01/06 06:54:15 brad Exp $	*/
+/*	$OpenBSD: azalia_codec.c,v 1.163 2014/07/13 23:10:23 deraadt Exp $	*/
 /*	$NetBSD: azalia_codec.c,v 1.8 2006/05/10 11:17:27 kent Exp $	*/
 
 /*-
@@ -34,7 +34,6 @@
 #include <sys/device.h>
 #include <sys/malloc.h>
 #include <sys/systm.h>
-#include <uvm/uvm_param.h>
 #include <dev/pci/azalia.h>
 
 #define XNAME(co)	(((struct device *)co->az)->dv_xname)
@@ -659,7 +658,7 @@ azalia_mixer_init(codec_t *this)
 
 	this->maxmixers = 10;
 	this->nmixers = 0;
-	this->mixers = malloc(sizeof(mixer_item_t) * this->maxmixers,
+	this->mixers = mallocarray(this->maxmixers, sizeof(mixer_item_t),
 	    M_DEVBUF, M_NOWAIT | M_ZERO);
 	if (this->mixers == NULL) {
 		printf("%s: out of memory in %s\n", XNAME(this), __func__);
@@ -1253,13 +1252,14 @@ azalia_mixer_ensure_capacity(codec_t *this, size_t newsize)
 	newmax = this->maxmixers + 10;
 	if (newmax < newsize)
 		newmax = newsize;
-	newbuf = malloc(sizeof(mixer_item_t) * newmax, M_DEVBUF, M_NOWAIT | M_ZERO);
+	newbuf = mallocarray(newmax, sizeof(mixer_item_t), M_DEVBUF,
+	    M_NOWAIT | M_ZERO);
 	if (newbuf == NULL) {
 		printf("%s: out of memory in %s\n", XNAME(this), __func__);
 		return ENOMEM;
 	}
 	bcopy(this->mixers, newbuf, this->maxmixers * sizeof(mixer_item_t));
-	free(this->mixers, M_DEVBUF);
+	free(this->mixers, M_DEVBUF, 0);
 	this->mixers = newbuf;
 	this->maxmixers = newmax;
 	return 0;
@@ -1485,7 +1485,7 @@ int
 azalia_mixer_delete(codec_t *this)
 {
 	if (this->mixers != NULL) {
-		free(this->mixers, M_DEVBUF);
+		free(this->mixers, M_DEVBUF, 0);
 		this->mixers = NULL;
 	}
 	return 0;
@@ -1677,7 +1677,7 @@ azalia_mixer_get(const codec_t *this, nid_t nid, int target,
 		const widget_t *w;
 
 		if (!azalia_widget_enabled(this, nid)) {
-			DPRINTF(("%s: invalid muteset nid\n"));
+			DPRINTF(("%s: invalid muteset nid\n", XNAME(this)));
 			return EINVAL;
 		}
 		w = &this->w[nid];
@@ -1700,7 +1700,7 @@ azalia_mixer_get(const codec_t *this, nid_t nid, int target,
 		const widget_t *w;
 
 		if (!azalia_widget_enabled(this, nid)) {
-			DPRINTF(("%s: invalid mixerset nid\n"));
+			DPRINTF(("%s: invalid mixerset nid\n", XNAME(this)));
 			return EINVAL;
 		}
 		w = &this->w[nid];
@@ -1717,7 +1717,7 @@ azalia_mixer_get(const codec_t *this, nid_t nid, int target,
 		if (nid == this->speaker) {
 			mc->un.mask = this->spkr_muters;
 		} else {
-			DPRINTF(("%s: invalid senseset nid\n"));
+			DPRINTF(("%s: invalid senseset nid\n", XNAME(this)));
 			return EINVAL;
 		}
 	}
@@ -1736,7 +1736,8 @@ azalia_mixer_get(const codec_t *this, nid_t nid, int target,
 			mc->un.mask = this->playvols.cur;
 
 		} else {
-			DPRINTF(("%s: invalid outmaster mixer type\n"));
+			DPRINTF(("%s: invalid outmaster mixer type\n",
+				XNAME(this)));
 			return EINVAL;
 		}
 	}
@@ -1755,7 +1756,8 @@ azalia_mixer_get(const codec_t *this, nid_t nid, int target,
 			mc->un.mask = this->recvols.cur;
 
 		} else {
-			DPRINTF(("%s: invalid inmaster mixer type\n"));
+			DPRINTF(("%s: invalid inmaster mixer type\n",
+				XNAME(this)));
 			return EINVAL;
 		}
 	}
@@ -2074,7 +2076,7 @@ azalia_mixer_set(codec_t *this, nid_t nid, int target, const mixer_ctrl_t *mc)
 		const widget_t *w;
 
 		if (!azalia_widget_enabled(this, nid)) {
-			DPRINTF(("%s: invalid muteset nid\n"));
+			DPRINTF(("%s: invalid muteset nid\n", XNAME(this)));
 			return EINVAL;
 		}
 		w = &this->w[nid];
@@ -2132,7 +2134,7 @@ azalia_mixer_set(codec_t *this, nid_t nid, int target, const mixer_ctrl_t *mc)
 			this->spkr_muters = mc->un.mask;
 			azalia_unsol_event(this, AZ_TAG_SPKR);
 		} else {
-			DPRINTF(("%s: invalid senseset nid\n"));
+			DPRINTF(("%s: invalid senseset nid\n", XNAME(this)));
 			return EINVAL;
 		}
 	}
@@ -2210,7 +2212,8 @@ azalia_mixer_set(codec_t *this, nid_t nid, int target, const mixer_ctrl_t *mc)
 			    (mc->un.mask & this->playvols.mask);
 
 		} else {
-			DPRINTF(("%s: invalid output master mixer type\n"));
+			DPRINTF(("%s: invalid output master mixer type\n",
+				XNAME(this)));
 			return EINVAL;
 		}
 	}
@@ -2284,7 +2287,8 @@ azalia_mixer_set(codec_t *this, nid_t nid, int target, const mixer_ctrl_t *mc)
 			this->recvols.cur = (mc->un.mask & this->recvols.mask);
 
 		} else {
-			DPRINTF(("%s: invalid input master mixer type\n"));
+			DPRINTF(("%s: invalid input master mixer type\n",
+				XNAME(this)));
 			return EINVAL;
 		}
 	}

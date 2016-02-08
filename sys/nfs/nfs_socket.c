@@ -1,4 +1,4 @@
-/*	$OpenBSD: nfs_socket.c,v 1.103 2014/01/19 03:04:54 claudio Exp $	*/
+/*	$OpenBSD: nfs_socket.c,v 1.105 2014/04/18 13:35:31 kettenis Exp $	*/
 /*	$NetBSD: nfs_socket.c,v 1.27 1996/04/15 20:20:00 thorpej Exp $	*/
 
 /*
@@ -1234,8 +1234,8 @@ nfs_sigintr(struct nfsmount *nmp, struct nfsreq *rep, struct proc *p)
 	if (!(nmp->nm_flag & NFSMNT_INT))
 		return (0);
 	if (p && p->p_siglist &&
-	    (((p->p_siglist & ~p->p_sigmask) & ~p->p_sigacts->ps_sigignore) &
-	    NFSINT_SIGMASK))
+	    (((p->p_siglist & ~p->p_sigmask) &
+	    ~p->p_p->ps_sigacts->ps_sigignore) & NFSINT_SIGMASK))
 		return (EINTR);
 	return (0);
 }
@@ -1681,7 +1681,7 @@ nfsrv_getstream(struct nfssvc_sock *slp, int waitflag)
 	u_int32_t recmark;
 
 	if (slp->ns_flag & SLP_GETSTREAM)
-		panic("nfs getstream");
+		return (0);
 	slp->ns_flag |= SLP_GETSTREAM;
 	for (;;) {
 	    if (slp->ns_reclen == 0) {

@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.147 2013/09/28 12:40:32 miod Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.164 2014/07/21 17:25:47 uebayasi Exp $	*/
 /*	$NetBSD: machdep.c,v 1.85 1997/09/12 08:55:02 pk Exp $ */
 
 /*
@@ -108,7 +108,7 @@ struct uvm_constraint_range *uvm_md_constraints[] = { NULL };
 int	physmem;
 
 /* sysctl settable */
-int	sparc_led_blink = 0;
+int	sparc_led_blink = 1;
 
 /*
  * safepri is a safe priority for sleep to set for a spin-wait
@@ -175,7 +175,7 @@ cpu_startup()
 	 */
 	printf(version);
 	/*identifycpu();*/
-	printf("real mem = %u (%uMB)\n", ptoa(physmem),
+	printf("real mem = %lu (%luMB)\n", ptoa(physmem),
 	    ptoa(physmem)/1024/1024);
 
 	/*
@@ -264,7 +264,7 @@ setregs(p, pack, stack, retval)
 			savefpstate(fs);
 			cpuinfo.fpproc = NULL;
 		}
-		free((void *)fs, M_SUBPROC);
+		free((void *)fs, M_SUBPROC, 0);
 		p->p_md.md_fpstate = NULL;
 	}
 	bzero((caddr_t)tf, sizeof *tf);
@@ -370,7 +370,7 @@ sendsig(catcher, sig, mask, code, type, val)
 	union sigval val;
 {
 	struct proc *p = curproc;
-	struct sigacts *psp = p->p_sigacts;
+	struct sigacts *psp = p->p_p->ps_sigacts;
 	struct sigframe *fp;
 	struct trapframe *tf;
 	int caddr, oldsp, newsp;
@@ -456,7 +456,7 @@ sendsig(catcher, sig, mask, code, type, val)
 	 * Arrange to continue execution at the code copied out in exec().
 	 * It needs the function to call in %g1, and a new stack pointer.
 	 */
-	caddr = p->p_sigcode;
+	caddr = p->p_p->ps_sigcode;
 	tf->tf_global[1] = (int)catcher;
 	tf->tf_pc = caddr;
 	tf->tf_npc = caddr + 4;
@@ -522,16 +522,14 @@ sys_sigreturn(p, v, retval)
 
 int	waittime = -1;
 
-void
-boot(howto)
-	int howto;
+__dead void
+boot(int howto)
 {
 	int i;
 	static char str[4];	/* room for "-sd\0" */
+	struct device *mainbus;
 
-	/* If system is cold, just halt. */
 	if (cold) {
-		/* (Unless the user explicitly asked for reboot.) */
 		if ((howto & RB_USERREQ) == 0)
 			howto |= RB_HALT;
 		goto haltsys;
@@ -540,19 +538,9 @@ boot(howto)
 	fb_unblank();
 	boothowto = howto;
 	if ((howto & RB_NOSYNC) == 0 && waittime < 0) {
-		extern struct proc proc0;
-
-		/* make sure there's a process to charge for I/O in sync() */
-		if (curproc == NULL)
-			curproc = &proc0;
 		waittime = 0;
 		vfs_shutdown();
 
-		/*
-		 * If we've been adjusting the clock, the todr
-		 * will be out of synch; adjust it now unless
-		 * the system was sitting in ddb.
-		 */
 		if ((howto & RB_TIMEBAD) == 0) {
 			resettodr();
 		} else {
@@ -562,19 +550,21 @@ boot(howto)
 	if_downall();
 
 	uvm_shutdown();
-	(void) splhigh();		/* ??? */
+	splhigh();
+	cold = 1;
 
-	if (howto & RB_DUMP)
+	if ((howto & RB_DUMP) != 0)
 		dumpsys();
 
 haltsys:
 	doshutdownhooks();
-	if (!TAILQ_EMPTY(&alldevs))
-		config_suspend(TAILQ_FIRST(&alldevs), DVACT_POWERDOWN);
+	mainbus = device_mainbus();
+	if (mainbus != NULL)
+		config_suspend(mainbus, DVACT_POWERDOWN);
 
-	if ((howto & RB_HALT) || (howto & RB_POWERDOWN)) {
+	if ((howto & RB_HALT) != 0 || (howto & RB_POWERDOWN) != 0) {
 #if defined(SUN4M)
-		if (howto & RB_POWERDOWN) {
+		if ((howto & RB_POWERDOWN) != 0) {
 			printf("attempting to power down...\n");
 #if NTCTRL > 0
 			tadpole_powerdown();
@@ -592,9 +582,9 @@ haltsys:
 
 	printf("rebooting\n\n");
 	i = 1;
-	if (howto & RB_SINGLE)
+	if ((howto & RB_SINGLE) != 0)
 		str[i++] = 's';
-	if (howto & RB_KDB)
+	if ((howto & RB_KDB) != 0)
 		str[i++] = 'd';
 	if (i > 1) {
 		str[0] = '-';
@@ -602,7 +592,8 @@ haltsys:
 	} else
 		str[0] = 0;
 	romboot(str);
-	/*NOTREACHED*/
+	for (;;) ;
+	/* NOTREACHED */
 }
 
 /* XXX - dumpmag not eplicitly used, savecore may search for it to get here */
@@ -979,7 +970,7 @@ _bus_dmamap_create(bus_dma_tag_t t, bus_size_t size, int nsegments,
 void
 _bus_dmamap_destroy(bus_dma_tag_t t, bus_dmamap_t map)
 {
-	free(map, M_DEVBUF);
+	free(map, M_DEVBUF, 0);
 }
 
 /*
@@ -1093,7 +1084,7 @@ _bus_dmamem_free(bus_dma_tag_t t, bus_dma_segment_t *segs, int nsegs)
 	 * Return the list of pages back to the VM system.
 	 */
 	uvm_pglistfree(segs[0]._ds_mlist);
-	free(segs[0]._ds_mlist, M_DEVBUF);
+	free(segs[0]._ds_mlist, M_DEVBUF, 0);
 }
 
 /*
@@ -1109,8 +1100,7 @@ _bus_dmamem_unmap(bus_dma_tag_t t, void *kva, size_t size)
 		panic("_bus_dmamem_unmap");
 #endif
 
-	size = round_page(size);
-	uvm_km_free(kernel_map, (vaddr_t)kva, (vaddr_t)size + size);
+	km_free(kva, round_page(size), &kv_any, &kp_none);
 }
 
 /*

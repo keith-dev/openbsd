@@ -1,4 +1,4 @@
-/*	$OpenBSD: ext2fs_bmap.c,v 1.21 2013/06/11 16:42:18 deraadt Exp $	*/
+/*	$OpenBSD: ext2fs_bmap.c,v 1.25 2014/07/14 08:54:13 pelikan Exp $	*/
 /*	$NetBSD: ext2fs_bmap.c,v 1.5 2000/03/30 12:41:11 augustss Exp $	*/
 
 /*
@@ -53,10 +53,13 @@
 #include <ufs/ufs/ufsmount.h>
 #include <ufs/ufs/ufs_extern.h>
 #include <ufs/ext2fs/ext2fs.h>
+#include <ufs/ext2fs/ext2fs_extents.h>
 #include <ufs/ext2fs/ext2fs_extern.h>
 
-static int ext2fs_bmaparray(struct vnode *, int32_t, daddr_t *,
-    struct indir *, int *, int *);
+static int	ext4_bmapext(struct vnode *, daddr_t, daddr_t *, struct indir *,
+    int *, int *);
+static int	ext2fs_bmaparray(struct vnode *, daddr_t, daddr_t *, struct indir *,
+    int *, int *);
 
 /*
  * Bmap converts a the logical block number of a file to its physical block
@@ -67,6 +70,7 @@ int
 ext2fs_bmap(void *v)
 {
 	struct vop_bmap_args *ap = v;
+
 	/*
 	 * Check for underlying vnode requests and ensure that logical
 	 * to physical mapping is requested.
@@ -76,8 +80,42 @@ ext2fs_bmap(void *v)
 	if (ap->a_bnp == NULL)
 		return (0);
 
+	if (VTOI(ap->a_vp)->i_e2din->e2di_flags & EXT4_EXTENTS) {
+		return (ext4_bmapext(ap->a_vp, ap->a_bn, ap->a_bnp, NULL, NULL,
+		    ap->a_runp));
+	}
 	return (ext2fs_bmaparray(ap->a_vp, ap->a_bn, ap->a_bnp, NULL, NULL,
 		ap->a_runp));
+}
+
+/*
+ * Logical block number of a file -> physical block number on disk within ext4 extents.
+ */
+int
+ext4_bmapext(struct vnode *vp, daddr_t bn, daddr_t *bnp, struct indir *ap, int *nump, int *runp)
+{
+	struct inode *ip;
+	struct m_ext2fs *fs;
+	struct ext4_extent *ep;
+	struct ext4_extent_path path;
+	daddr_t pos;
+
+	ip = VTOI(vp);
+	fs = ip->i_e2fs;
+
+	if (runp != NULL)
+		*runp = 0;
+	if (nump != NULL)
+		*nump = 0;
+
+	ext4_ext_find_extent(fs, ip, bn, &path);
+	if ((ep = path.ep_ext) == NULL)
+		return (EIO);
+
+	pos = bn - ep->e_blk + (((daddr_t)ep->e_start_hi << 32) | ep->e_start_lo);
+	if ((*bnp = fsbtodb(fs, pos)) == 0)
+		*bnp = -1;
+	return (0);
 }
 
 /*
@@ -95,7 +133,7 @@ ext2fs_bmap(void *v)
  */
 
 int
-ext2fs_bmaparray(struct vnode *vp, int32_t bn, daddr_t *bnp,
+ext2fs_bmaparray(struct vnode *vp, daddr_t bn, daddr_t *bnp,
     struct indir *ap, int *nump, int *runp)
 {
 	struct inode *ip;
@@ -135,20 +173,22 @@ ext2fs_bmaparray(struct vnode *vp, int32_t bn, daddr_t *bnp,
 
 	num = *nump;
 	if (num == 0) {
-		*bnp = blkptrtodb(ump, fs2h32(ip->i_e2fs_blocks[bn]));
+		*bnp = blkptrtodb(ump, letoh32(ip->i_e2fs_blocks[bn]));
 		if (*bnp == 0)
 			*bnp = -1;
 		else if (runp)
 			for (++bn; bn < NDADDR && *runp < maxrun &&
-				is_sequential(ump, fs2h32(ip->i_e2fs_blocks[bn - 1]),
-							  fs2h32(ip->i_e2fs_blocks[bn]));
-				++bn, ++*runp);
+			    is_sequential(ump,
+			    letoh32(ip->i_e2fs_blocks[bn - 1]),
+			    letoh32(ip->i_e2fs_blocks[bn]));
+			    ++bn, ++*runp)
+				/* nothing */;
 		return (0);
 	}
 
 
 	/* Get disk address out of indirect block array */
-	daddr = fs2h32(ip->i_e2fs_blocks[NDADDR + xap->in_off]);
+	daddr = letoh32(ip->i_e2fs_blocks[NDADDR + xap->in_off]);
 
 	devvp = VFSTOUFS(vp->v_mount)->um_devvp;
 
@@ -159,7 +199,7 @@ ext2fs_bmaparray(struct vnode *vp, int32_t bn, daddr_t *bnp,
 	}
 #endif
 	for (bp = NULL, ++xap; --num; ++xap) {
-		/* 
+		/*
 		 * Exit the loop if there is no disk address assigned yet and
 		 * the indirect block isn't in the cache, or if we were
 		 * looking for an indirect block and we've found it.
@@ -196,13 +236,14 @@ ext2fs_bmaparray(struct vnode *vp, int32_t bn, daddr_t *bnp,
 			}
 		}
 
-		daddr = fs2h32(((int32_t *)bp->b_data)[xap->in_off]);
+		daddr = letoh32(((int32_t *)bp->b_data)[xap->in_off]);
 		if (num == 1 && daddr && runp)
 			for (bn = xap->in_off + 1;
-				bn < MNINDIR(ump) && *runp < maxrun &&
-				is_sequential(ump, ((int32_t *)bp->b_data)[bn - 1],
-				((int32_t *)bp->b_data)[bn]);
-				++bn, ++*runp);
+			    bn < MNINDIR(ump) && *runp < maxrun &&
+			    is_sequential(ump, ((u_int32_t *)bp->b_data)[bn - 1],
+			    ((u_int32_t *)bp->b_data)[bn]);
+			    ++bn, ++*runp)
+				/* nothing */;
 	}
 	if (bp)
 		brelse(bp);

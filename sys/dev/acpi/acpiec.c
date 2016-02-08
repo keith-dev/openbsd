@@ -1,4 +1,4 @@
-/* $OpenBSD: acpiec.c,v 1.48 2013/07/02 18:37:47 kettenis Exp $ */
+/* $OpenBSD: acpiec.c,v 1.50 2014/06/25 07:46:14 kettenis Exp $ */
 /*
  * Copyright (c) 2006 Can Erkin Acar <canacar@openbsd.org>
  *
@@ -142,8 +142,9 @@ acpiec_read_data(struct acpiec_softc *sc)
 	u_int8_t		val;
 
 	acpiec_wait(sc, EC_STAT_OBF, EC_STAT_OBF);
-	dnprintf(40, "acpiec: read_data\n", (int)val);
 	val = bus_space_read_1(sc->sc_data_bt, sc->sc_data_bh, 0);
+
+	dnprintf(40, "acpiec: read_data %d\n", (int)val);
 
 	return (val);
 }
@@ -272,9 +273,17 @@ acpiec_attach(struct device *parent, struct device *self, void *aux)
 	struct acpiec_softc	*sc = (struct acpiec_softc *)self;
 	struct acpi_attach_args *aa = aux;
 	struct aml_value res;
+	int64_t st;
 
 	sc->sc_acpi = (struct acpi_softc *)parent;
 	sc->sc_devnode = aa->aaa_node;
+
+	if (aml_evalinteger(sc->sc_acpi, sc->sc_devnode, "_STA", 0, NULL, &st))
+		st = STA_PRESENT | STA_ENABLED | STA_DEV_OK;
+	if ((st & STA_PRESENT) == 0) {
+		printf(": not present\n");
+		return;
+	}
 
 	if (acpiec_getcrs(sc, aa)) {
 		printf(": Failed to read resource settings\n");
@@ -482,7 +491,7 @@ acpiec_getcrs(struct acpiec_softc *sc, struct acpi_attach_args *aa)
 	/* XXX: todo - validate _CRS checksum? */
 ecdtdone:
 
-	dnprintf(10, "%s: Data: 0x%x, S/C: 0x%x\n",
+	dnprintf(10, "%s: Data: 0x%lx, S/C: 0x%lx\n",
 	    DEVNAME(sc), ec_data, ec_sc);
 
 	if (ctype == GAS_SYSTEM_IOSPACE)

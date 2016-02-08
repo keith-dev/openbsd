@@ -1,4 +1,4 @@
-/*	$OpenBSD: bonito.c,v 1.24 2013/08/25 08:18:05 miod Exp $	*/
+/*	$OpenBSD: bonito.c,v 1.27 2014/07/12 18:44:42 tedu Exp $	*/
 /*	$NetBSD: bonito_mainbus.c,v 1.11 2008/04/28 20:23:10 martin Exp $	*/
 /*	$NetBSD: bonito_pci.c,v 1.5 2008/04/28 20:23:28 martin Exp $	*/
 
@@ -173,7 +173,8 @@ struct mips_bus_space bonito_pci_io_space_tag = {
 	._space_map = bonito_io_map,
 	._space_unmap = generic_space_unmap,
 	._space_subregion = generic_space_region,
-	._space_vaddr = generic_space_vaddr
+	._space_vaddr = generic_space_vaddr,
+	._space_mmap = generic_space_mmap
 };
 
 struct mips_bus_space bonito_pci_mem_space_tag = {
@@ -195,13 +196,17 @@ struct mips_bus_space bonito_pci_mem_space_tag = {
 	._space_map = bonito_mem_map,
 	._space_unmap = generic_space_unmap,
 	._space_subregion = generic_space_region,
-	._space_vaddr = generic_space_vaddr
+	._space_vaddr = generic_space_vaddr,
+	._space_mmap = generic_space_mmap
 };
 
 int
 bonito_match(struct device *parent, void *vcf, void *aux)
 {
 	struct mainbus_attach_args *maa = aux;
+
+	if (loongson_ver >= 0x3a)
+		return (0);
 
 	if (strcmp(maa->maa_name, bonito_cd.cd_name) == 0)
 		return (1);
@@ -463,7 +468,7 @@ bonito_intr_disestablish(void *vih)
 
 	splx(s);
 
-	free(ih, M_DEVBUF);
+	free(ih, M_DEVBUF, 0);
 }
 
 /*
@@ -1199,7 +1204,7 @@ bonito_get_resource_extent(pci_chipset_tag_t pc, int io)
 
 out:
 	if (exname != NULL)
-		free(exname, M_DEVBUF);
+		free(exname, M_DEVBUF, 0);
 
 	return ex;
 }
@@ -1208,14 +1213,27 @@ out:
  * Functions used during early system configuration (before bonito attaches).
  */
 
+pcitag_t bonito_make_tag_early(int, int, int);
+pcireg_t bonito_conf_read_early(pcitag_t, int);
+
 pcitag_t
-pci_make_tag_early(int b, int d, int f)
+bonito_make_tag_early(int b, int d, int f)
 {
 	return bonito_make_tag(NULL, b, d, f);
 }
 
 pcireg_t
-pci_conf_read_early(pcitag_t tag, int reg)
+bonito_conf_read_early(pcitag_t tag, int reg)
 {
 	return bonito_conf_read_internal(sys_platform->bonito_config, tag, reg);
+}
+
+void
+bonito_early_setup()
+{
+	pci_make_tag_early = bonito_make_tag_early;
+	pci_conf_read_early = bonito_conf_read_early;
+
+	early_mem_t = &bonito_pci_mem_space_tag;
+	early_io_t = &bonito_pci_io_space_tag;
 }

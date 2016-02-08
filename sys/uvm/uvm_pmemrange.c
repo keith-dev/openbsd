@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvm_pmemrange.c,v 1.37 2014/02/06 16:40:40 tedu Exp $	*/
+/*	$OpenBSD: uvm_pmemrange.c,v 1.40 2014/04/13 23:14:15 tedu Exp $	*/
 
 /*
  * Copyright (c) 2009, 2010 Ariane van der Steldt <ariane@stack.nl>
@@ -68,8 +68,7 @@
  * this check in pages which are freed.
  */
 #define VALID_FLAGS(pg_flags)						\
-	(((pg_flags) & ~(PQ_FREE|PG_ZERO|				\
-	    PG_PMAP0|PG_PMAP1|PG_PMAP2|PG_PMAP3)) == 0x0)
+	(((pg_flags) & ~(PQ_FREE|PG_ZERO|PG_PMAPMASK)) == 0x0)
 
 /* Tree comparators. */
 int	uvm_pmemrange_addr_cmp(struct uvm_pmemrange *, struct uvm_pmemrange *);
@@ -941,9 +940,7 @@ drain_found:
 			}
 		}
 
-		/*
-		 * Try a smaller search now.
-		 */
+		/* Try a smaller search now. */
 		if (++try < nitems(search))
 			goto rescan;
 
@@ -1006,10 +1003,7 @@ drain_found:
 	}
 
 fail:
-	/*
-	 * Allocation failed.
-	 */
-
+	/* Allocation failed. */
 	/* XXX: claim from memory reserve here */
 
 	while (!TAILQ_EMPTY(result))
@@ -1027,11 +1021,7 @@ fail:
 	return ENOMEM;
 
 out:
-
-	/*
-	 * Allocation succesful.
-	 */
-
+	/* Allocation succesful. */
 	uvmexp.free -= fcount;
 
 	uvm_unlock_fpageq();
@@ -1043,8 +1033,7 @@ out:
 	diag_prev = NULL;
 #endif /* DIAGNOSTIC */
 	TAILQ_FOREACH(found, result, pageq) {
-		atomic_clearbits_int(&found->pg_flags,
-		    PG_PMAP0|PG_PMAP1|PG_PMAP2|PG_PMAP3);
+		atomic_clearbits_int(&found->pg_flags, PG_PMAPMASK);
 
 		if (found->pg_flags & PG_ZERO) {
 			uvmexp.zeropages--;
@@ -1402,9 +1391,7 @@ uvm_pmr_split(paddr_t pageno)
 		uvm_pmr_insert(drain, prev + before, 1);
 	}
 
-	/*
-	 * Move free chunks that no longer fall in the range.
-	 */
+	/* Move free chunks that no longer fall in the range. */
 	for (; rebuild != NULL; rebuild = next) {
 		next = RB_NEXT(uvm_pmr_addr, &pmr->addr, rebuild);
 
@@ -1593,9 +1580,7 @@ uvm_pmr_rootupdate(struct uvm_pmemrange *pmr, struct vm_page *init_root,
 	KDASSERT(pmr != NULL && init_root != NULL);
 	root = init_root;
 
-	/*
-	 * Which direction to use for searching.
-	 */
+	/* Which direction to use for searching. */
 	if (start != 0 && atop(VM_PAGE_TO_PHYS(root)) + root->fpgsz <= start)
 		direction =  1;
 	else if (end != 0 && atop(VM_PAGE_TO_PHYS(root)) >= end)
@@ -1603,9 +1588,7 @@ uvm_pmr_rootupdate(struct uvm_pmemrange *pmr, struct vm_page *init_root,
 	else /* nothing to do */
 		return root;
 
-	/*
-	 * First, update root to fall within the chosen range.
-	 */
+	/* First, update root to fall within the chosen range. */
 	while (root && !PMR_INTERSECTS_WITH(
 	    atop(VM_PAGE_TO_PHYS(root)),
 	    atop(VM_PAGE_TO_PHYS(root)) + root->fpgsz,
@@ -1647,7 +1630,7 @@ uvm_pmr_rootupdate(struct uvm_pmemrange *pmr, struct vm_page *init_root,
 	 * Cache the lower page, so we can page-walk later.
 	 */
 	low = root;
-	low_next = RB_RIGHT(low, objt);
+	low_next = RB_LEFT(low, objt);
 	while (low_next != NULL && PMR_INTERSECTS_WITH(
 	    atop(VM_PAGE_TO_PHYS(low_next)),
 	    atop(VM_PAGE_TO_PHYS(low_next)) + low_next->fpgsz,
@@ -1655,12 +1638,13 @@ uvm_pmr_rootupdate(struct uvm_pmemrange *pmr, struct vm_page *init_root,
 		low = low_next;
 		if (uvm_pmr_pg_to_memtype(low) == memtype)
 			return low;
-		low_next = RB_RIGHT(low, objt);
+		low_next = RB_LEFT(low, objt);
 	}
 
-	/*
-	 * Ack, no hits. Walk the address tree until to find something usable.
-	 */
+	if (low == high)
+		return NULL;
+
+	/* No hits. Walk the address tree until we find something usable. */
 	for (low = RB_NEXT(uvm_pmr_addr, &pmr->addr, low);
 	    low != high;
 	    low = RB_NEXT(uvm_pmr_addr, &pmr->addr, low)) {
@@ -1671,9 +1655,7 @@ uvm_pmr_rootupdate(struct uvm_pmemrange *pmr, struct vm_page *init_root,
 			return low;
 	}
 
-	/*
-	 * Nothing found.
-	 */
+	/* Nothing found. */
 	return NULL;
 }
 
@@ -1945,9 +1927,7 @@ uvm_wakeup_pla(paddr_t low, psize_t len)
 
 	high = low + len;
 
-	/*
-	 * Wake specific allocations waiting for this memory.
-	 */
+	/* Wake specific allocations waiting for this memory. */
 	for (pma = TAILQ_FIRST(&uvm.pmr_control.allocs); pma != NULL;
 	    pma = pma_next) {
 		pma_next = TAILQ_NEXT(pma, pmq);

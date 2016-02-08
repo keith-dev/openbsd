@@ -1,4 +1,4 @@
-/*	$OpenBSD: via.c,v 1.14 2013/06/02 16:38:05 guenther Exp $	*/
+/*	$OpenBSD: via.c,v 1.16 2014/07/12 18:44:41 tedu Exp $	*/
 /*	$NetBSD: machdep.c,v 1.214 1996/11/10 03:16:17 thorpej Exp $	*/
 
 /*-
@@ -118,7 +118,7 @@ viac3_crypto_setup(void)
 
 	vc3_sc->sc_cid = crypto_get_driverid(0);
 	if (vc3_sc->sc_cid < 0) {
-		free(vc3_sc, M_DEVBUF);
+		free(vc3_sc, M_DEVBUF, 0);
 		return;		/* YYY bitch? */
 	}
 
@@ -162,7 +162,7 @@ viac3_crypto_newsession(u_int32_t *sidp, struct cryptoini *cri)
 				return (ENOMEM);
 			bcopy(sc->sc_sessions, ses, sesn * sizeof(*ses));
 			explicit_bzero(sc->sc_sessions, sesn * sizeof(*ses));
-			free(sc->sc_sessions, M_DEVBUF);
+			free(sc->sc_sessions, M_DEVBUF, 0);
 			sc->sc_sessions = ses;
 			ses = &sc->sc_sessions[sesn];
 			sc->sc_nsessions++;
@@ -302,13 +302,13 @@ viac3_crypto_freesession(u_int64_t tid)
 
 		if (swd->sw_ictx) {
 			explicit_bzero(swd->sw_ictx, axf->ctxsize);
-			free(swd->sw_ictx, M_CRYPTO_DATA);
+			free(swd->sw_ictx, M_CRYPTO_DATA, 0);
 		}
 		if (swd->sw_octx) {
 			explicit_bzero(swd->sw_octx, axf->ctxsize);
-			free(swd->sw_octx, M_CRYPTO_DATA);
+			free(swd->sw_octx, M_CRYPTO_DATA, 0);
 		}
-		free(swd, M_CRYPTO_DATA);
+		free(swd, M_CRYPTO_DATA, 0);
 	}
 
 	explicit_bzero(&sc->sc_sessions[sesn], sizeof(sc->sc_sessions[sesn]));
@@ -325,8 +325,8 @@ viac3_cbc(void *cw, void *src, void *dst, void *key, int rep,
 	lcr0(creg0 & ~(CR0_EM|CR0_TS));
 
 	/* Do the deed */
-	__asm __volatile("pushfq; popfq");
-	__asm __volatile("rep xcryptcbc" :
+	__asm volatile("pushfq; popfq");
+	__asm volatile("rep xcryptcbc" :
 	    : "b" (key), "a" (iv), "c" (rep), "d" (cw), "S" (src), "D" (dst)
 	    : "memory", "cc");
 
@@ -429,7 +429,7 @@ viac3_crypto_encdec(struct cryptop *crp, struct cryptodesc *crd,
 
 	if (sc->op_buf != NULL) {
 		explicit_bzero(sc->op_buf, crd->crd_len);
-		free(sc->op_buf, M_DEVBUF);
+		free(sc->op_buf, M_DEVBUF, 0);
 		sc->op_buf = NULL;
 	}
 
@@ -533,7 +533,7 @@ viac3_rnd(void *v)
 	 * sure that we turn on maximum whitening (%edx[0,1] == "11"), so
 	 * that we get the best random data possible.
 	 */
-	__asm __volatile("rep xstorerng"
+	__asm volatile("rep xstorerng"
 	    : "=a" (rv) : "d" (3), "D" (buffer), "c" (len*sizeof(int))
 	    : "memory", "cc");
 

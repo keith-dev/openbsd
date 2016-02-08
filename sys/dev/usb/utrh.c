@@ -1,4 +1,4 @@
-/*	$OpenBSD: utrh.c,v 1.11 2013/08/17 08:34:45 sthen Exp $   */
+/*	$OpenBSD: utrh.c,v 1.16 2014/07/12 18:48:53 tedu Exp $   */
 
 /*
  * Copyright (c) 2009 Yojiro UO <yuo@nui.org>
@@ -33,10 +33,6 @@
 #include <dev/usb/usbdevs.h>
 #include <dev/usb/uhidev.h>
 #include <dev/usb/hid.h>
-
-#ifdef USB_DEBUG
-#define UTRH_DEBUG
-#endif
 
 #ifdef UTRH_DEBUG
 #define DPRINTF(x)	do { printf x; } while (0)
@@ -96,8 +92,10 @@ const struct cfattach utrh_ca = {
 int
 utrh_match(struct device *parent, void *match, void *aux)
 {
-	struct usb_attach_arg *uaa = aux;
-	struct uhidev_attach_arg *uha = (struct uhidev_attach_arg *)uaa;
+	struct uhidev_attach_arg *uha = aux;
+
+	if (uha->reportid == UHIDEV_CLAIM_ALLREPORTID)
+		return (UMATCH_NONE);
 
 	return (usb_lookup(utrh_devs, uha->uaa->vendor, uha->uaa->product) != NULL ?
 	    UMATCH_VENDOR_PRODUCT : UMATCH_NONE);
@@ -177,8 +175,11 @@ utrh_detach(struct device *self, int flags)
 			sensor_task_unregister(sc->sc_sensortask);
 	}
 
+	if (sc->sc_hdev.sc_state & UHIDEV_OPEN)
+		uhidev_close(&sc->sc_hdev);
+
 	if (sc->sc_ibuf != NULL) {
-		free(sc->sc_ibuf, M_USBDEV);
+		free(sc->sc_ibuf, M_USBDEV, 0);
 		sc->sc_ibuf = NULL;
 	}
 
@@ -211,13 +212,13 @@ utrh_refresh(void *arg)
 	ledbuf[0] = 0x3;
 	ledbuf[1] = 0x1;
 	if (uhidev_set_report(&sc->sc_hdev, UHID_FEATURE_REPORT,
-	    ledbuf, sc->sc_flen))
+	    sc->sc_hdev.sc_report_id, ledbuf, sc->sc_flen))
 		printf("LED request failed\n");
 
 	/* issue query */
 	uint8_t cmdbuf[] = {0x31, 0x15, 0x00, 0x00, 0x00, 0x00, 0x00};
 	if (uhidev_set_report(&sc->sc_hdev, UHID_OUTPUT_REPORT,
-	    cmdbuf, sc->sc_olen))
+	    sc->sc_hdev.sc_report_id, cmdbuf, sc->sc_olen))
 		return;
 
 	/* wait till sensor data are updated, 1s will be enough */
@@ -226,7 +227,7 @@ utrh_refresh(void *arg)
 	/* turn off LED 1 */
 	ledbuf[1] = 0x0;
 	if (uhidev_set_report(&sc->sc_hdev, UHID_FEATURE_REPORT,
-	    ledbuf, sc->sc_flen))
+	    sc->sc_hdev.sc_report_id, ledbuf, sc->sc_flen))
 		printf("LED request failed\n");
 
 	temp_tick = (sc->sc_ibuf[2] * 256 + sc->sc_ibuf[3]) & 0x3fff;

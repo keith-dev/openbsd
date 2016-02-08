@@ -1,4 +1,4 @@
-/*	$OpenBSD: ufs_vnops.c,v 1.112 2014/01/25 23:31:13 guenther Exp $	*/
+/*	$OpenBSD: ufs_vnops.c,v 1.115 2014/07/12 18:44:01 tedu Exp $	*/
 /*	$NetBSD: ufs_vnops.c,v 1.18 1996/05/11 18:28:04 mycroft Exp $	*/
 
 /*
@@ -56,8 +56,6 @@
 #include <sys/event.h>
 #include <sys/poll.h>
 #include <sys/specdev.h>
-
-#include <uvm/uvm_extern.h>
 
 #include <miscfs/fifofs/fifo.h>
 
@@ -131,7 +129,10 @@ ufs_itimes(struct vnode *vp)
 	}
 #endif
 
-	ip->i_flag |= IN_MODIFIED;
+	if ((vp->v_type == VBLK || vp->v_type == VCHR) && !DOINGSOFTDEP(vp))
+		ip->i_flag |= IN_LAZYMOD;
+	else
+		ip->i_flag |= IN_MODIFIED;
 
 	getnanotime(&ts);
 	if (ip->i_flag & IN_ACCESS) {
@@ -1513,7 +1514,7 @@ ufs_readdir(void *v)
 	if ((char *)dp + offsetof(struct direct, d_name) < edp &&
 	    dp->d_reclen <= offsetof(struct direct, d_name))
 		error = EIO;
-	free(diskbuf, M_TEMP);
+	free(diskbuf, M_TEMP, 0);
 
 	uio->uio_offset = off;
 	*ap->a_eofflag = DIP(VTOI(ap->a_vp), size) <= off;

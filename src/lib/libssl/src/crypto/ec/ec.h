@@ -1,4 +1,4 @@
-/* crypto/ec/ec.h */
+/* $OpenBSD: ec.h,v 1.9 2014/06/12 15:49:29 deraadt Exp $ */
 /*
  * Originally written by Bodo Moeller for the OpenSSL project.
  */
@@ -83,7 +83,6 @@
 #endif
 
 #include <openssl/asn1.h>
-#include <openssl/symhacks.h>
 #ifndef OPENSSL_NO_DEPRECATED
 #include <openssl/bn.h>
 #endif
@@ -274,10 +273,10 @@ int EC_GROUP_get_curve_name(const EC_GROUP *group);
 void EC_GROUP_set_asn1_flag(EC_GROUP *group, int flag);
 int EC_GROUP_get_asn1_flag(const EC_GROUP *group);
 
-void EC_GROUP_set_point_conversion_form(EC_GROUP *, point_conversion_form_t);
+void EC_GROUP_set_point_conversion_form(EC_GROUP *group, point_conversion_form_t form);
 point_conversion_form_t EC_GROUP_get_point_conversion_form(const EC_GROUP *);
 
-unsigned char *EC_GROUP_get0_seed(const EC_GROUP *);
+unsigned char *EC_GROUP_get0_seed(const EC_GROUP *x);
 size_t EC_GROUP_get_seed_len(const EC_GROUP *);
 size_t EC_GROUP_set_seed(EC_GROUP *, const unsigned char *, size_t len);
 
@@ -626,8 +625,8 @@ int EC_POINT_is_on_curve(const EC_GROUP *group, const EC_POINT *point, BN_CTX *c
  */
 int EC_POINT_cmp(const EC_GROUP *group, const EC_POINT *a, const EC_POINT *b, BN_CTX *ctx);
 
-int EC_POINT_make_affine(const EC_GROUP *, EC_POINT *, BN_CTX *);
-int EC_POINTs_make_affine(const EC_GROUP *, size_t num, EC_POINT *[], BN_CTX *);
+int EC_POINT_make_affine(const EC_GROUP *group, EC_POINT *point, BN_CTX *ctx);
+int EC_POINTs_make_affine(const EC_GROUP *group, size_t num, EC_POINT *points[], BN_CTX *ctx);
 
 /** Computes r = generator * n sum_{i=0}^num p[i] * m[i]
  *  \param  group  underlying EC_GROUP object
@@ -696,9 +695,7 @@ int i2d_ECPKParameters(const EC_GROUP *, unsigned char **out);
 #ifndef OPENSSL_NO_BIO
 int     ECPKParameters_print(BIO *bp, const EC_GROUP *x, int off);
 #endif
-#ifndef OPENSSL_NO_FP_API
 int     ECPKParameters_print_fp(FILE *fp, const EC_GROUP *x, int off);
-#endif
 
 
 /********************************************************************/
@@ -800,16 +797,24 @@ const EC_POINT *EC_KEY_get0_public_key(const EC_KEY *key);
 int EC_KEY_set_public_key(EC_KEY *key, const EC_POINT *pub);
 
 unsigned EC_KEY_get_enc_flags(const EC_KEY *key);
-void EC_KEY_set_enc_flags(EC_KEY *, unsigned int);
-point_conversion_form_t EC_KEY_get_conv_form(const EC_KEY *);
-void EC_KEY_set_conv_form(EC_KEY *, point_conversion_form_t);
+void EC_KEY_set_enc_flags(EC_KEY *eckey, unsigned int flags);
+point_conversion_form_t EC_KEY_get_conv_form(const EC_KEY *key);
+void EC_KEY_set_conv_form(EC_KEY *eckey, point_conversion_form_t cform);
 /* functions to set/get method specific data  */
-void *EC_KEY_get_key_method_data(EC_KEY *, 
+void *EC_KEY_get_key_method_data(EC_KEY *key, 
 	void *(*dup_func)(void *), void (*free_func)(void *), void (*clear_free_func)(void *));
-void EC_KEY_insert_key_method_data(EC_KEY *, void *data,
+/** Sets the key method data of an EC_KEY object, if none has yet been set.
+ *  \param  key              EC_KEY object
+ *  \param  data             opaque data to install.
+ *  \param  dup_func         a function that duplicates |data|.
+ *  \param  free_func        a function that frees |data|.
+ *  \param  clear_free_func  a function that wipes and frees |data|.
+ *  \return the previously set data pointer, or NULL if |data| was inserted.
+ */
+void *EC_KEY_insert_key_method_data(EC_KEY *key, void *data,
 	void *(*dup_func)(void *), void (*free_func)(void *), void (*clear_free_func)(void *));
 /* wrapper functions for the underlying EC_GROUP object */
-void EC_KEY_set_asn1_flag(EC_KEY *, int);
+void EC_KEY_set_asn1_flag(EC_KEY *eckey, int asn1_flag);
 
 /** Creates a table of pre-computed multiples of the generator to 
  *  accelerate further EC_KEY operations.
@@ -923,7 +928,6 @@ int	ECParameters_print(BIO *bp, const EC_KEY *key);
 int	EC_KEY_print(BIO *bp, const EC_KEY *key, int off);
 
 #endif
-#ifndef OPENSSL_NO_FP_API
 /** Prints out the ec parameters on human readable form.
  *  \param  fp   file descriptor to which the information is printed
  *  \param  key  EC_KEY object
@@ -939,7 +943,6 @@ int	ECParameters_print_fp(FILE *fp, const EC_KEY *key);
  */
 int	EC_KEY_print_fp(FILE *fp, const EC_KEY *key, int off);
 
-#endif
 
 #define ECParameters_dup(x) ASN1_dup_of(EC_KEY,i2d_ECParameters,d2i_ECParameters,x)
 

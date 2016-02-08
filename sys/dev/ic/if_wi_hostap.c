@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_wi_hostap.c,v 1.42 2013/08/07 01:06:30 bluhm Exp $	*/
+/*	$OpenBSD: if_wi_hostap.c,v 1.44 2014/07/22 13:12:12 mpi Exp $	*/
 
 /*
  * Copyright (c) 2002
@@ -63,8 +63,6 @@
 #include <net/if_types.h>
 
 #include <netinet/in.h>
-#include <netinet/in_systm.h>
-#include <netinet/ip.h>
 #include <netinet/if_ether.h>
 
 #include <net80211/ieee80211_var.h>
@@ -296,8 +294,8 @@ wihap_shutdown(struct wi_softc *sc)
 			printf("wihap_shutdown: free(sta=%p)\n", sta);
 		next = TAILQ_NEXT(sta, list);
 		if (sta->challenge)
-			free(sta->challenge, M_TEMP);
-		free(sta, M_DEVBUF);
+			free(sta->challenge, M_TEMP, 0);
+		free(sta, M_DEVBUF, 0);
 	}
 	TAILQ_INIT(&whi->sta_list);
 
@@ -442,8 +440,8 @@ wihap_sta_delete(struct wihap_sta_info *sta)
 	TAILQ_REMOVE(&whi->sta_list, sta, list);
 	LIST_REMOVE(sta, hash);
 	if (sta->challenge)
-		free(sta->challenge, M_TEMP);
-	free(sta, M_DEVBUF);
+		free(sta->challenge, M_TEMP, 0);
+	free(sta, M_DEVBUF, 0);
 	whi->n_stations--;
 }
 
@@ -669,7 +667,7 @@ wihap_auth_req(struct wi_softc *sc, struct wi_frame *rxfrm,
 				}
 
 			sta->flags |= WI_SIFLAGS_AUTHEN;
-			free(sta->challenge, M_TEMP);
+			free(sta->challenge, M_TEMP, 0);
 			sta->challenge = NULL;
 			challenge_len = 0;
 			break;

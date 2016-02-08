@@ -1,4 +1,4 @@
-/*	$OpenBSD: ypldap.c,v 1.12 2012/03/15 01:44:22 jmatthew Exp $ */
+/*	$OpenBSD: ypldap.c,v 1.14 2014/07/13 15:38:09 krw Exp $ */
 
 /*
  * Copyright (c) 2008 Pierre-Yves Ritschard <pyr@openbsd.org>
@@ -27,6 +27,7 @@
 #include <arpa/inet.h>
 
 #include <err.h>
+#include <errno.h>
 #include <event.h>
 #include <fcntl.h>
 #include <unistd.h>
@@ -345,7 +346,7 @@ make_uids:
 }
 
 void
-main_dispatch_client(int fd, short event, void *p)
+main_dispatch_client(int fd, short events, void *p)
 {
 	int		 n;
 	int		 shut = 0;
@@ -355,20 +356,21 @@ main_dispatch_client(int fd, short event, void *p)
 	struct idm_req	 ir;
 	struct imsg	 imsg;
 
-	switch (event) {
-	case EV_READ:
+	if ((events & (EV_READ | EV_WRITE)) == 0)
+		fatalx("unknown event");
+
+	if (events & EV_READ) {
 		if ((n = imsg_read(ibuf)) == -1)
 			fatal("imsg_read error");
 		if (n == 0)
 			shut = 1;
-		break;
-	case EV_WRITE:
-		if (msgbuf_write(&ibuf->w) == -1)
+	}
+	if (events & EV_WRITE) {
+		if ((n = msgbuf_write(&ibuf->w)) == -1 && errno != EAGAIN)
 			fatal("msgbuf_write");
-		imsg_event_add(iev);
-		return;
-	default:
-		fatalx("unknown event");
+		if (n == 0)
+			shut = 1;
+		goto done;
 	}
 
 	for (;;) {
@@ -447,6 +449,8 @@ main_dispatch_client(int fd, short event, void *p)
 		}
 		imsg_free(&imsg);
 	}
+
+done:
 	if (!shut)
 		imsg_event_add(iev);
 	else {
